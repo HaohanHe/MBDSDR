@@ -1,6 +1,6 @@
 # FT8 第②步落地：LDPC(174,91) + CRC14 + log-domain BP + 77-bit unpack
 
-HEAD=6873cef。干净室自写 MIT，不抄 WSJT-X GPL 代码；机制证据见
+HEAD=6873cef。独立实现 MIT，不抄 WSJT-X GPL 代码；机制证据见
 `docs/learn/phase63/ft8-mechanism-study.md` §3-4 与 wsjtx 公开源码 file:line。
 
 ## 1. 机制 → 实现对照
@@ -50,7 +50,7 @@ CSV：`paper/experiments/ft8_step2_msg_decode_vs_snr.csv`（20 trials/点）。
 | 0 | 100% |
 
 **诚实边界**：此门限为合成 AWGN 闭环（无衰落/多径/真实相位噪声/真实时隙
-对齐），与 WSJT-X 真实弱信号链路（~-24 dB  PSD）不直接类比。BP 为干净室
+对齐），与 WSJT-X 真实弱信号链路（~-24 dB  PSD）不直接类比。BP 为独立实现
 自写，未做 min-sum 优化。
 
 ## 5. pytest 计数

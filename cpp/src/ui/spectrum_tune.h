@@ -91,7 +91,7 @@ inline int clampTraceHeight(int traceHpixels, int pool, int minTrace, int minFal
 }
 
 // ============================================================================
-// Wheel cascade / strip-pan / tune-follow (Phase12-E gap L2, clean-room).
+// Wheel cascade / strip-pan / tune-follow (Phase12-E gap L2, independent).
 // ============================================================================
 // Upstream mechanism studied (SDR++ core/src/gui/main_window.cpp:580-597,
 // widgets/waterfall.cpp:411-435, tuner.cpp:22-109 -- GPLv3, mechanism only):

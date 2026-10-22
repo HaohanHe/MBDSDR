@@ -21,36 +21,27 @@ from typing import Tuple, Optional
 # ========================================================================
 
 def rrc_filter(num_taps: int, sps: int, beta: float = 0.35) -> np.ndarray:
-    """
-    根升余弦（RRC）滤波器系数。
+    """根升余弦（RRC）抽头（单一来源：`fir_taps`）。
 
     参数:
-        num_taps: 滤波器抽头数
+        num_taps: 抽头数
         sps: 每符号采样数
         beta: 滚降因子（0.2-0.5）
 
     返回:
-        滤波器系数（归一化）
+        器具系数（归一化到单位能量）
+
+    为何改委托：本函数原为独立的 RRC 实现，与 `fir_taps.
+    root_raised_cosine_taps` 逐点等价（归一化后 maxdiff=0.0）——同一算法两份
+    实现属隐性分叉，改后由 `tests/test_rrc_single_source.py` 钉死等价性。
     """
-    t = np.arange(num_taps) - (num_taps - 1) / 2
-    t = t / sps  # 归一化到符号周期
-
-    h = np.zeros(num_taps)
-    for i, ti in enumerate(t):
-        if ti == 0:
-            h[i] = 1.0 + beta * (4 / np.pi - 1)
-        elif abs(ti) == 1 / (4 * beta):
-            h[i] = (beta / np.sqrt(2)) * (
-                (1 + 2 / np.pi) * np.sin(np.pi / (4 * beta)) +
-                (1 - 2 / np.pi) * np.cos(np.pi / (4 * beta))
-            )
-        else:
-            num = np.sin(np.pi * ti * (1 - beta)) + 4 * beta * ti * np.cos(np.pi * ti * (1 + beta))
-            den = np.pi * ti * (1 - (4 * beta * ti) ** 2)
-            h[i] = num / den
-
-    # 归一化
-    h = h / np.sqrt(np.sum(h ** 2))
+    from .fir_taps import root_raised_cosine_taps
+    h = np.asarray(root_raised_cosine_taps(int(num_taps), float(beta), 1.0,
+                                           float(sps)), dtype=np.float64)
+    # 保持历史契约：归一化到单位能量
+    norm = float(np.sqrt(np.sum(h ** 2)))
+    if norm > 0:
+        h = h / norm
     return h
 
 

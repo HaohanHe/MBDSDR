@@ -4,7 +4,7 @@
 // "a carrier appeared" into an automatic "park on it, decode it, record it".
 //
 // Mechanism contrast (SDR++ scanner + scheduler, GPL -- read for mechanism
-// only, re-implemented clean-room here):
+// only, re-implemented independent here):
 //   * SDR++ scanner walks the band on a timer, retunes the *selected VFO*, waits
 //     a settle time, then measures the FFT peak over the VFO passband. On a
 //     signal it enters a "receiving" (dwell) state and only leaves after the
@@ -28,7 +28,7 @@
 // no device, sleeps on no wall clock and fabricates neither a frequency nor an
 // RSSI. The caller feeds the REAL measured RSSI for the currently tuned channel;
 // a quiet band produces NO activity action. The action callbacks are plain
-// std::function seams (the clean-room stand-in for SDR++'s Action objects) --
+// std::function seams (the independent stand-in for SDR++'s Action objects) --
 // binding them is what production does; the offline unit test binds them to a
 // real VfoManager decoder + a real Recorder.
 #pragma once

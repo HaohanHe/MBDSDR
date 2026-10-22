@@ -1,4 +1,4 @@
-# Phase63 · 干净室机制深化：三候选核实与接收链路四态徽章落地
+# Phase63 · 独立实现机制深化：三候选核实与接收链路四态徽章落地
 
 - 仓库 HEAD：`f14cade`；全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`，
   `LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），未操控 GUI；只接真实数据源、诚实空态、零 mock。

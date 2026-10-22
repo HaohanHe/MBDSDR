@@ -132,10 +132,17 @@ void TestMemoryStore::unsanitizedQueryNeverCrashes() {
 }
 
 void TestMemoryStore::unwritablePathHonestError() {
-    MemoryStore s("/proc/mbdsdr_no_such_dir/memory.db");
+    // 跨平台"不可写路径"：父路径是一个普通文件（不是目录），SQLite 无法在
+    // 其下创建数据库——Linux/Windows 语义一致。此前写死 /proc/... 为 Linux
+    // 专属路径，Windows 上会解析成盘根下可创建的目录，open 误成功、测试误红。
+    QFile blocker(QDir(m_tmp).filePath("memstore_blocker_file"));
+    QVERIFY2(blocker.open(QIODevice::WriteOnly), "temp blocker file must be creatable");
+    blocker.close();
+    MemoryStore s(blocker.fileName() + QStringLiteral("/memory.db"));
     QString err;
     QVERIFY2(!s.open(&err), "opening inside a non-writable path must fail");
     QVERIFY2(!err.isEmpty(), "error message must be honest");
+    QFile::remove(blocker.fileName());
 }
 
 QTEST_MAIN(TestMemoryStore)

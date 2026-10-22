@@ -1,6 +1,6 @@
 # Phase45 块1+2（Python 域）交付报告：CCSDS Viterbi + RS 级联全链
 
-> 范围：仅 Python 域。云内合成、确定性；干净室按公开 CCSDS 标准重写，未复制任何 GPL/Karn 源码。
+> 范围：仅 Python 域。云内合成、确定性；独立实现按公开 CCSDS 标准重写，未复制任何 GPL/Karn 源码。
 > 基线 HEAD 未动（不 commit/push）；只改动 `mbdsdr_ai/`、`mbdsdr_ai/tests/`、本目录。
 
 ## 0. 改动文件清单（file:line）
@@ -87,7 +87,7 @@
 
 ## 5. 红线自查
 
-- 干净室：Viterbi/RS 均按公开 CCSDS 标准（131.0-B / (2,1,7) 171/133）独立实现，头部仅注明"参考机制"，未复制 GPL/Karn 码；MIT。
+- 独立实现：Viterbi/RS 均按公开 CCSDS 标准（131.0-B / (2,1,7) 171/133）独立实现，头部仅注明"参考机制"，未复制 GPL/Karn 码；MIT。
 - 无比赛字样；无活动参数（符号率 4800 仅为通用演示量，注释标明非活动参数）；不预置 TLE。
 - 诚实空态：纯噪声/不可解码输入返回空，不 mock、不伪造。
 - 只写 `mbdsdr_ai/`、`mbdsdr_ai/tests/`、`docs/learn/phase45/`；未碰 `mobile/`、`cpp/`；未 `git add -A`；**未 commit/push**。

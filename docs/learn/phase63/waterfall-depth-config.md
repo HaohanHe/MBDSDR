@@ -1,4 +1,4 @@
-# Waterfall 历史深度可配置（clean-room 机制深化）
+# Waterfall 历史深度可配置（independent 机制深化）
 
 HEAD = `7ad9a8b`。本轮对三候选先侦察核实，落地真缺口 #1（waterfall 历史深度/时间窗可配置）。全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），零 GUI 操控，零 mock，真实数据源 + 诚实空态。
 

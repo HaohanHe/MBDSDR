@@ -44,6 +44,10 @@ public:
 public slots:
     // Queued: run a plan on the worker thread. Guards against overlap.
     void runPlan(const mbdsdr::ai::TaskPlan plan);
+    // Queued: pending-plan 消费入口（断环修复）。从待执行计划槽
+    // （PendingPlanStore）取出 id 对应的计划执行，执行状态真实回写槽内。
+    // id 不存在 / 已被消费 -> 诚实空操作，不发 finished、不编造执行。
+    void runPendingPlan(int planId);
     // Atomic stop, safe from any thread.
     void requestStop();
 
@@ -52,6 +56,9 @@ signals:
     void finished(const QString report);
 
 private:
+    // 执行主体。pendingPlanId > 0 时，执行结束把状态/报告回写计划槽。
+    void runPlanInternal(const mbdsdr::ai::TaskPlan& plan, int pendingPlanId);
+
     dsp::SpectrumEngine* engine_ = nullptr;
     ui::BookmarkManager* bookmarks_ = nullptr;
     QThread thread_;

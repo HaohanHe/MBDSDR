@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Synthetic VOR (ICAO Annex 10) receiver tests.
 //
-// SYNTHETIC FIXTURE -- the encoder below is a test-only, clean-room model of the
+// SYNTHETIC FIXTURE -- the encoder below is a test-only, independent model of the
 // VOR composite baseband (a 30 Hz spatial tone + a 9960 Hz subcarrier frequency-
 // modulated by a reference 30 Hz + a 1020 Hz on/off-keyed Morse ID). It mirrors
 // mbdsdr_ai/vor_decoder.py's encoder; no real radio, no station database, no

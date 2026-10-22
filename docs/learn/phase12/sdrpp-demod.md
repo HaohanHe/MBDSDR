@@ -1,7 +1,7 @@
 # SDR++ 解调链子系统研习笔记（Phase12 / Wave1-C）
 
 > 上游仓库：`repos/sdrpp`（**GPLv3**，Rygeloria / Alex 等）。本笔记只学机制与算法骨架，
-> 所有引用片段均为短摘录并注明 file:line；落地 MBDSDR 时按干净室原则重写，不逐字复制。
+> 所有引用片段均为短摘录并注明 file:line；落地 MBDSDR 时按独立实现原则重写，不逐字复制。
 >
 > 研习范围：
 > - `core/src/dsp/demod/{quadrature,fm,am,ssb,cw,broadcast_fm,psk,gfsk}.h`
@@ -352,7 +352,7 @@ const double cutoff = std::min(bw_/2.0, effOut/2.0 * 0.85);
 
 ## 10. MBDSDR 落地记录（Phase12 / L9·L10·L13）
 
-> 干净室重写，GPLv3 上游仅学机制。未 commit / push。
+> 独立重写，GPLv3 上游仅学机制。未 commit / push。
 
 ### 10.1 链内 AM 载波 AGC（L9）
 

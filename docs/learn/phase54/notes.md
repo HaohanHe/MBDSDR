@@ -1,6 +1,6 @@
 # Phase54 接收链能力包络 + 软判决 Viterbi + 工具化
 
-HEAD=704e035 接手。三任务全部在 Python 链（干净室 MIT，无 GPL 复制）。
+HEAD=704e035 接手。三任务全部在 Python 链（MIT 独立实现，无 GPL 复制）。
 
 ## 块2：软判决 Viterbi LLR
 - `ccsds_rx.py ViterbiDecoder.decode_soft(pairs, final_state)`：实值软符号对，欧氏距离分支度量（期望 bit1→+1/bit0→-1，与 bpsk_modulate_bits 一致）。

@@ -1,6 +1,6 @@
 # Phase36 G2：GNU Radio 采样率转换链深读（gr-filter）
 
-> 精读对象：`repos/gnuradio/gr-filter/`（真读源码，干净室学机制不抄代码）。
+> 精读对象：`repos/gnuradio/gr-filter/`（真读源码，学机制不抄代码）。
 > 我方对照：`cpp/src/dsp/{channelizer.h,.cpp,audio_resampler.h,.cpp,rational_resampler.h}`。
 > 基线 HEAD 677cb4c；只学机制，不复制 GPL。
 

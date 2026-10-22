@@ -484,6 +484,161 @@ def bits_to_bytes(bits: np.ndarray) -> bytes:
 
 
 # ============================================================================
+# FY-4 经典 CCSDS 链路：IQ → CCSDS 帧 → 892B VCDU → FY-4 图
+# ----------------------------------------------------------------------------
+# 把仓内已有的通用件串成一条完整可跑的接收链（不新造协议）：
+#   IQ ──统一调制内核(modulation.py)──> 硬比特
+#     ──CCSDS 接收链(ccsds_rx.py)──> 帧（ASM 同步 → Viterbi → 解扰 → RS）
+#     ──帧前 892B──> VCDU ──decode_fy4_vcdus──> FY-4 段图 ──> PNG
+# 帧内 VCDU 口径与 GK-2A 链一致（vcdu = block[:VCDU_LEN]），便于互相对拍。
+# 边界：真实 FY-4 空口是 DVB-S2（EN 302 307），本仓 DVB-S2 未实现 LDPC/BCH，
+# 故本链只适用于经典 CCSDS 链路（或已解出 CCSDS 帧的场合）。
+# ============================================================================
+
+#: FY-4 链默认 ASM（CCSDS 标准附加同步字）
+FY4_ASM_WORD = 0x1ACFFC1D
+#: FY-4 链默认 VCDU 长度（字节；与仓内 LRIT 传输层口径一致）
+FY4_VCDU_LEN = VCDU_LEN
+
+
+def decode_fy4_iq_to_vcdus(
+        iq: np.ndarray,
+        *,
+        scheme: str = "bpsk",
+        sps: int = 4,
+        shaping: str = "rrc",
+        alpha: float = 0.35,
+        mapping: str = "binary",
+        asm_word: int = FY4_ASM_WORD,
+        frame_bits_after_asm: Optional[int] = None,
+        use_viterbi: bool = True,
+        use_descramble: bool = True,
+        use_rs: bool = False,
+        g1: Optional[int] = None,
+        g2: Optional[int] = None,
+        vcdu_len: int = FY4_VCDU_LEN,
+        conv_tail_bits: int = 6) -> Tuple[List[bytes], Dict]:
+    """IQ → CCSDS 帧 → VCDU 列表（FY-4 经典链路）。
+
+    返回 (vcdus, stats)。帧长按 VCDU 长度推导（信息比特 = VCDU 字节数×8，
+    卷积 r=1/2 再乘 2 并加卷积尾），可用 frame_bits_after_asm 覆盖。
+    """
+    from .ccsds_rx import CcsdsRxConfig, CcsdsReceiveChain
+    from .modulation import demodulate_iq
+
+    x = np.asarray(iq, dtype=np.complex128).ravel()
+    if x.size == 0:
+        raise ValueError("iq 为空")
+    dem = demodulate_iq(x, scheme=scheme, sps=sps, shaping=shaping,
+                         alpha=alpha, mapping=mapping)
+    raw_bits = dem.get("bits")
+    if raw_bits is None:
+        raw_bits = dem.get("hard_bits")
+    if raw_bits is None:
+        raw_bits = []
+    bits = [int(b) & 1 for b in raw_bits]
+    if not bits:
+        raise ValueError("解调未产出比特（符号功率为 0 或长度不足）")
+
+    info_bits = vcdu_len * 8
+    if frame_bits_after_asm is None:
+        frame_bits_after_asm = ((info_bits + conv_tail_bits) * 2
+                                if use_viterbi else info_bits)
+    cfg = CcsdsRxConfig(
+        asm_word=int(asm_word),
+        frame_bits_after_asm=int(frame_bits_after_asm),
+        use_viterbi=bool(use_viterbi),
+        use_descramble=bool(use_descramble),
+        use_rs=bool(use_rs),
+    )
+    if g1 is not None:
+        cfg.g1 = int(g1)
+    if g2 is not None:
+        cfg.g2 = int(g2)
+    chain = CcsdsReceiveChain(cfg)
+    frames = chain.process_bits(bits)
+    vcdus = [bytes(f[:vcdu_len]) for f in frames if len(f) >= vcdu_len]
+    stats = {
+        "n_bits_demodded": len(bits),
+        "n_frames": len(frames),
+        "n_vcdus": len(vcdus),
+        "vcdu_len": vcdu_len,
+        "frame_bits_after_asm": int(frame_bits_after_asm),
+        "config": {
+            "scheme": scheme, "sps": sps, "shaping": shaping,
+            "alpha": alpha, "mapping": mapping,
+            "asm_word": f"{int(asm_word):08X}",
+            "use_viterbi": bool(use_viterbi),
+            "use_descramble": bool(use_descramble),
+            "use_rs": bool(use_rs),
+            "g1": f"{cfg.g1:o}", "g2": f"{cfg.g2:o}",
+        },
+    }
+    return vcdus, stats
+
+
+def decode_fy4_iq_to_image(iq: np.ndarray, out_png: str, **kw) -> Dict:
+    """IQ → FY-4 图像 PNG（经典 CCSDS 链路）。
+
+    返回 dict：success / png_path / width / height / channels / stats；
+    失败时带 error 与 diagnostic（说明卡在哪一步：解调 / 帧同步 / 段重组）。
+    """
+    try:
+        vcdus, stats = decode_fy4_iq_to_vcdus(iq, **kw)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": f"{type(e).__name__}: {e}",
+                "stage": "demod"}
+    if not vcdus:
+        return {
+            "success": False,
+            "stage": "frame_sync",
+            "error": "未从 IQ 中解出完整 CCSDS 帧",
+            "diagnostic": {
+                "n_bits_demodded": stats["n_bits_demodded"],
+                "n_frames": stats["n_frames"],
+                "cause": "ASM 同步未命中或帧长与实际不符",
+                "hint": ("检查 scheme/sps/alpha 是否与实际下行一致；"
+                         "帧长由 VCDU 长度推导，若实际帧长不同请显式传 "
+                         "frame_bits_after_asm"),
+                "config": stats["config"],
+            },
+            "stats": stats,
+        }
+    images = decode_fy4_vcdus(vcdus)
+    if not images:
+        return {
+            "success": False,
+            "stage": "segment_assembly",
+            "error": f"解出 {len(vcdus)} 个 VCDU，但未拼出完整 FY-4 段图",
+            "diagnostic": {
+                "cause": "段不全或段头不匹配",
+                "hint": "需要覆盖整图的段序列；缺段时只到部分图像",
+                "n_vcdus": len(vcdus),
+            },
+            "stats": stats,
+        }
+    img = images[-1]
+    try:
+        from PIL import Image
+        if img.pixels.dtype == np.uint16:
+            Image.frombuffer("I;16", (img.width, img.height),
+                             img.pixels.astype("<u2").tobytes()).save(out_png)
+        else:
+            Image.fromarray(img.pixels.astype(np.uint8), mode="L").save(out_png)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "stage": "save_png",
+                "error": f"{type(e).__name__}: {e}", "stats": stats}
+    return {
+        "success": True,
+        "png_path": out_png,
+        "width": int(img.width),
+        "height": int(img.height),
+        "channels": int(img.channels),
+        "n_images": len(images),
+        "stats": stats,
+    }
+
+# ============================================================================
 # [经典链路-保留，用于测试回退] FY-4 端到端解码入口（工具层）
 #   走 CCSDS VCDU 经典链路；真实 FY-4 走 DVB-S2（见文件末尾 DVB-S2 段）。
 # ============================================================================
@@ -673,6 +828,69 @@ def register_tool_registry(registry) -> None:
                           content=_json.dumps({"images": data}, ensure_ascii=False),
                           data={"images": data})
 
+    def _fy4_iq_handler(args):
+        """handler：读 IQ → CCSDS 帧 → VCDU → FY-4 图 → PNG。
+
+        IQ 两种给法：iq_path（complex64 raw 文件）或 iq_base64
+        （float32 交错的复数 IQ，base64 编码）。
+        """
+        import base64
+        import json as _json
+        from .tool_registry import ToolResult
+
+        iq_path = args.get("iq_path")
+        iq_b64 = args.get("iq_base64")
+        if not iq_path and not iq_b64:
+            return ToolResult(
+                success=False,
+                content="需要 iq_path（complex64 raw 文件路径）或 iq_base64"
+                        "（float32 交错复数 IQ 的 base64）——两者都没给，"
+                        "没有信号可解。",
+            )
+        try:
+            if iq_path:
+                iq = np.fromfile(iq_path, dtype=np.complex64)
+            else:
+                raw = base64.b64decode(str(iq_b64))
+                iq = np.frombuffer(raw, dtype=np.complex64)
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(success=False,
+                              content=f"读取 IQ 失败：{type(e).__name__}: {e}")
+        if iq.size == 0:
+            return ToolResult(success=False, content="IQ 为空（无采样可解）")
+
+        out_png = args.get("out_png")
+        if not out_png:
+            return ToolResult(
+                success=False,
+                content="需要 out_png（输出 PNG 路径）——本工具的产出就是那张图，"
+                        "不给路径就只能给中间统计，意义不大。",
+            )
+        kwargs = {}
+        for key in ("scheme", "shaping", "mapping"):
+            if args.get(key):
+                kwargs[key] = str(args[key])
+        for key in ("sps", "vcdu_len", "conv_tail_bits", "asm_word",
+                    "frame_bits_after_asm"):
+            if args.get(key) is not None:
+                kwargs[key] = int(args[key])
+        for key in ("alpha",):
+            if args.get(key) is not None:
+                kwargs[key] = float(args[key])
+        for key in ("use_viterbi", "use_descramble", "use_rs"):
+            if args.get(key) is not None:
+                kwargs[key] = bool(args[key])
+        for key in ("g1", "g2"):
+            if args.get(key) is not None:
+                kwargs[key] = int(args[key])
+
+        res = decode_fy4_iq_to_image(iq, str(out_png), **kwargs)
+        return ToolResult(
+            success=bool(res.get("success")),
+            content=_json.dumps(res, ensure_ascii=False, default=str),
+            data=res,
+        )
+
     def _fy3_handler(args):
         # args: soft_bits (float list) or frames
         bits = np.array(args.get("soft_bits", []), dtype=np.float32)
@@ -733,6 +951,61 @@ def register_tool_registry(registry) -> None:
             "required": ["vcdus"],
         },
         handler=_fy4_handler,
+        category="satellite",
+    )
+
+    registry.register(
+        name="fy4_lrit_decode_iq",
+        description=(
+            "FY-4 经典 CCSDS 链路从 IQ 直接出图：IQ → 统一调制内核解调"
+            "（BPSK/QPSK，QPSK 用 CCSDS 标准二进制映射）→ CCSDS 接收链"
+            "（ASM 0x1ACFFC1D 同步 → Viterbi(K=7,r=1/2) → 解扰 → RS) → "
+            "帧内 892B VCDU → FY-4 段重组 → PNG。"
+            "前置条件：需给 iq_path（complex64 raw）或 iq_base64（float32 交错 "
+            "base64）与 out_png（输出 PNG 路径）；sps/shaping/alpha 须与实际"
+            "下行一致，否则解不出帧。"
+            "失败恢复：返回 error + diagnostic（stage 指明卡在解调/帧同步/段重组，"
+            "hint 给出该改哪个参数），不会返回半截图。"
+            "副作用：只在 out_png 指定路径写一个 PNG 文件，不动设备状态。"
+            "能力边界：只走**经典 CCSDS 链路**（仓内 FY-4 传输层口径）；真实 "
+            "FY-4 空口是 DVB-S2（EN 302 307），本仓 DVB-S2 段只做到 BB 帧解扰、"
+            "未实现 LDPC/BCH，故本工具不适用于 DVB-S2 空口——那种场合先用 "
+            "fy4_dvbs2 相关工具拿到 CCSDS 帧再走本链的 VCDU 之后段。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "iq_path": {"type": "string",
+                            "description": "complex64 IQ raw 文件路径"},
+                "iq_base64": {"type": "string",
+                              "description": "复数 IQ 的 base64（float32 交错）"},
+                "out_png": {"type": "string", "description": "输出 PNG 文件路径"},
+                "scheme": {"type": "string", "enum": ["bpsk", "qpsk"],
+                           "description": "下行调制（默认 bpsk）"},
+                "sps": {"type": "integer",
+                        "description": "每符号采样数（默认 4）"},
+                "shaping": {"type": "string", "enum": ["rect", "rrc"],
+                            "description": "脉冲成形（默认 rrc）"},
+                "alpha": {"type": "number",
+                          "description": "RRC 滚降系数（默认 0.35）"},
+                "asm_word": {"type": "integer",
+                             "description": "ASM 同步字（默认 0x1ACFFC1D）"},
+                "frame_bits_after_asm": {"type": "integer",
+                                         "description": "ASM 之后的编码比特数"
+                                                        "（缺省按 VCDU 长度推导）"},
+                "use_viterbi": {"type": "boolean", "default": True},
+                "use_descramble": {"type": "boolean", "default": True},
+                "use_rs": {"type": "boolean", "default": False},
+                "g1": {"type": "integer", "description": "卷积 G1（八进制值）"},
+                "g2": {"type": "integer", "description": "卷积 G2（八进制值）"},
+                "vcdu_len": {"type": "integer", "default": 892,
+                             "description": "每帧内 VCDU 字节数（默认 892）"},
+                "conv_tail_bits": {"type": "integer", "default": 6,
+                                   "description": "卷积尾比特数（默认 6）"},
+            },
+            "required": ["out_png"],
+        },
+        handler=_fy4_iq_handler,
         category="satellite",
     )
 

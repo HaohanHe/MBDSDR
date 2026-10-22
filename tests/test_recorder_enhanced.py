@@ -14,7 +14,10 @@ from mbdsdr_ai.recorder_enhanced import (
 def test_filename_template():
     p = make_audio_filename(145_000_000, "fm", "/tmp/rec",
                             timestamp=datetime(2026, 9, 27, 12, 30, 15))
-    assert p == "/tmp/rec/145000000_FM_20260927_123015.wav"
+    # 路径分隔符与平台无关（Windows 用 \，POSIX 用 /）
+    expected = os.path.join("/tmp/rec", "145000000_FM_20260927_123015.wav")
+    assert p == expected
+    assert p.endswith("145000000_FM_20260927_123015.wav")
 
 
 def test_level_and_duration(tmp_path):

@@ -10,7 +10,7 @@
 // clients of that same one object). This object only speaks HTTP/1.1 + JSON over
 // a local TCP socket.
 //
-// Clean-room design (own naming/structure; the loopback bind and the request
+// Independent design (own naming/structure; the loopback bind and the request
 // routing are generic, not copied from any GPL server):
 //
 //   * LOOPBACK ONLY. The server binds 127.0.0.1 (QHostAddress::LocalHost) and

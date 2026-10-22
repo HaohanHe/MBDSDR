@@ -28,7 +28,9 @@ int main(int argc, char** argv) {
     // Isolate from the real user layout / bookmarks so the shot is deterministic.
     QString tmpDir = QDir::tempPath() + "/mbdsdr_shot_scanbm";
     QDir().mkpath(tmpDir);
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmpDir);
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmpDir);
+    qputenv("MBDSDR_SETTINGS_DIR", (tmpDir).toUtf8());
     app.setStyleSheet(tokens::buildDarkQss());
 
     MainWindow win;

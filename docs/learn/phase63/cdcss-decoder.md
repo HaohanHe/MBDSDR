@@ -14,7 +14,7 @@
 | `docs/learn/phase63/cdcss-decoder.md` | 本档 |
 | `cpp/CMakeLists.txt` | 把 `src/dsp/cdcss.cpp` 加进 `mbdsdr_core` 源列表（构建系统必要改动，非业务文件） |
 
-## 2. 机制对照（干净室）
+## 2. 机制对照（独立实现）
 
 输入：post-ANR 48 kHz 单音 float 音频块（与 CTCSS 同一条音频路径）。
 
@@ -29,7 +29,7 @@
 
 API：`configure(sr,code12) / setEnabled / reset / process(const float*,int) / codePresent() / lastCode() / configuredCode()`。
 
-## 3. Golay(23,12) 干净室自述
+## 3. Golay(23,12) 独立实现自述
 
 - **机制来源**：公开代数规范。二元 Golay 码 G23 是 [23,12,7] 线性分组码，生成多项式
   `g(x) = x^11 + x^10 + x^6 + x^5 + x^4 + x^2 + 1 = 0xC75`（12 位表示，最高项 x^11）。

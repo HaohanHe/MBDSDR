@@ -1,6 +1,6 @@
 # CDCSS / DCS 数字编码亚音 — 全链收尾落地
 
-本轮（HEAD 自 00e3dc8 起）把上轮纯 DSP 解码器 `CdcssDecoder`（`cpp/src/dsp/cdcss.{h,cpp}`，Golay(23,12) 干净室实现）接进完整链：引擎、三通道工具、mobile catalog、UI 面、持久化、确定性测试与快照。
+本轮（HEAD 自 00e3dc8 起）把上轮纯 DSP 解码器 `CdcssDecoder`（`cpp/src/dsp/cdcss.{h,cpp}`，Golay(23,12) 独立实现）接进完整链：引擎、三通道工具、mobile catalog、UI 面、持久化、确定性测试与快照。
 
 ## 1. 互斥域设计（诚实定稿）
 
@@ -40,7 +40,7 @@ recorder / WAV 落盘**不门控**（镜像既有 CTCSS 先例：录制永远收
 | UI | ctcssCheck / 音调 spinbox / ctcssGateCheck | cdcssCheck / DCS码 combo / cdcssGateCheck |
 | 持久化键 | rx/ctcssEnabled, rx/ctcssToneHz, rx/ctcssGate | rx/cdcssEnabled, rx/cdcssCode, rx/cdcssGateAudio |
 
-## 3. Golay(23,12) 干净室说明
+## 3. Golay(23,12) 独立实现说明
 
 引用 `docs/learn/phase63/cdcss-decoder.md`：本轮未改 Golay 实现。生成多项式 `g(x)=0xC75`、系统编码 `cw=(data<<11)|(work&0x7FF)`、综合征查表纠正 ≤2 bit 错，全部来自公开代数规范，代码为本仓自写（GPL 中立、MIT）。
 

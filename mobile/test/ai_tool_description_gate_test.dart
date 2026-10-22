@@ -3,13 +3,13 @@
 // 设计来源：与 Python 侧 mbdsdr_ai/tests/test_tool_description_quality.py
 // 同构——模型对工具的全部认知来自 description + parameters，描述缺维 =
 // 移动端 AI 盲飞。桌面 Python 侧 147 工具已有门禁；本文件把同一标准
-// 钉到移动端 buildRadioTools() 的 10 个工具上（两扇门，一个标准）。
+// 钉到移动端 buildRadioTools() 的 14 个工具上（两扇门，一个标准）。
 //
 // 钉死：
 //   * 地板：无空/过短描述（≥100 字符）、参数 schema 形状合法；
 //   * 状态变更型（set_*/start_recording/stop_recording）四维齐全；
-//   * 只读型（get_*/predict_passes）至少两维；
-//   * 关键诚实契约逐条钉死（AGC 耦合、模式边界、不编造、WAV≠IQ）；
+//   * 只读型（get_*/list_*/predict_passes）至少两维；
+//   * 关键诚实契约逐条钉死（AGC 耦合、模式边界、不编造、WAV≠IQ、数据源未注入）；
 //   * 全工具面四维覆盖率棘轮阈值（只升不降）。
 library;
 
@@ -101,8 +101,8 @@ void main() {
     expect(short, isEmpty, reason: '描述不足 $_minDescChars 字的工具: $short');
   });
 
-  test('工具面规模锁定为 10 个（漏注册/误增即红）', () {
-    expect(_tools().length, 10);
+  test('工具面规模锁定为 14 个（漏注册/误增即红）', () {
+    expect(_tools().length, 14);
   });
 
   test('参数 schema 形状合法（type=object + properties 为 Map）', () {
@@ -145,6 +145,10 @@ void main() {
     'get_squelch_status',
     'get_status',
     'predict_passes',
+    'list_bookmarks',
+    'list_recordings',
+    'get_recording_state',
+    'get_scan_status',
   ];
 
   for (final name in readers) {
@@ -179,6 +183,26 @@ void main() {
     expect(byName['start_recording']!.description.contains('不录原始 IQ'), true);
   });
 
+  test('诚实契约钉死：数据源未注入 / 桌面端字段边界（新增只读工具）', () {
+    final Map<String, AiTool> byName = <String, AiTool>{
+      for (final AiTool t in _tools()) t.name: t,
+    };
+    // list_bookmarks / list_recordings：无数据源必须诚实报「未注入」，
+    // 不许回空列表冒充"没有书签/没有录音"。
+    expect(byName['list_bookmarks']!.description.contains('数据源未注入'), true,
+        reason: 'list_bookmarks 必须声明未注入时的诚实错误契约');
+    expect(byName['list_recordings']!.description.contains('数据源未注入'), true,
+        reason: 'list_recordings 必须声明未注入时的诚实错误契约');
+    // get_recording_state：桌面端"值守录制/录制目录"移动端不存在，必须点名边界。
+    expect(byName['get_recording_state']!.description.contains('值守录制'), true,
+        reason: 'get_recording_state 必须声明桌面端字段在本端不存在');
+    // get_scan_status：移动端范围扫描 ≠ 桌面扫描活动链路，必须点名区分。
+    expect(
+        byName['get_scan_status']!.description.contains('get_scan_link_status'),
+        true,
+        reason: 'get_scan_status 必须声明与桌面 get_scan_link_status 不同功能');
+  });
+
   // ---------------------------------------------------------------- 棘轮
 
   test('全工具面四维覆盖率棘轮（只升不降）', () {
@@ -195,12 +219,13 @@ void main() {
       if (b) bound++;
       if (p || r || s || b) anyd++;
     }
-    // 阈值取当前实测约 80%（10 工具：pre 10 / rec 7 / side 6 / bound 7 /
-    // anyd 10）。下一轮目标全维 100%，届时上调。
-    expect(anyd / tools.length, greaterThanOrEqualTo(0.9));
-    expect(pre / tools.length, greaterThanOrEqualTo(0.8));
-    expect(rec / tools.length, greaterThanOrEqualTo(0.6));
-    expect(side / tools.length, greaterThanOrEqualTo(0.5));
-    expect(bound / tools.length, greaterThanOrEqualTo(0.6));
+    // 阈值取当前实测（14 工具：pre 14 / rec 12 / side 9 / bound 14 /
+    // anyd 14）。pre/anyd/bound 已达 100% 钉死；rec/side 较上轮 10 工具口径
+    // 上调，继续向全维 100% 收紧（只升不降）。
+    expect(anyd / tools.length, greaterThanOrEqualTo(1.0));
+    expect(pre / tools.length, greaterThanOrEqualTo(1.0));
+    expect(rec / tools.length, greaterThanOrEqualTo(0.85));
+    expect(side / tools.length, greaterThanOrEqualTo(0.64));
+    expect(bound / tools.length, greaterThanOrEqualTo(1.0));
   });
 }

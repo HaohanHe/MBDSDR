@@ -31,7 +31,7 @@ SPDX-License-Identifier: MIT
 **实现存在性**：真链路，非空壳。
 - `cpp/src/dsp/device_lister.{h,cpp}`：拉取式枚举 seam（`IRtlDeviceEnumerator`），
   `HAVE_RTLSDR` 下 `RtlSdrDeviceEnumerator` 包 `rtlsdr_get_device_count()/get_device_name()`
-  （机制学自 librtlsdr GPLv2 拉取模型，干净室不照抄）。`poll()` 首跑只建 baseline、
+  （机制学自 librtlsdr GPLv2 拉取模型，独立实现不照抄）。`poll()` 首跑只建 baseline、
   之后 diff `devicesAdded/devicesRemoved`（device_lister.h:52-84）。
 - `cpp/src/dsp/device_presence_notifier.{h,cpp}`：把 diff 事件映射成**逐字文案**
   `deviceAddedNotice`="RTL-SDR 已连接：…" / `deviceRemovedNotice`="RTL-SDR 已移除：…"，

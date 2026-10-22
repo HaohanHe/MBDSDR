@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// POCSAG (CCIR Radiopaging Code No.1) pager decoder -- clean-room C++.
+// POCSAG (CCIR Radiopaging Code No.1) pager decoder -- independent C++.
 //
 // Protocol facts below are public standard (CCIR/RCC paging code No.1); the
 // DSP, framing state machine, BCH table derivation and naming here are written
@@ -82,7 +82,7 @@ public:
     /// Build a 32-bit address codeword from a RIC + 2-bit function field.
     static uint32_t buildAddressWord(uint32_t address, int function);
 
-    // ---- Test-only synthesis (clean-room frame builder) -------------------
+    // ---- Test-only synthesis (independent frame builder) -------------------
     /// Build a complete bitstream (preamble + one batch) carrying an address
     /// and its message, MSB-first. Used by unit tests to verify the chain;
     /// not used by the receive path.

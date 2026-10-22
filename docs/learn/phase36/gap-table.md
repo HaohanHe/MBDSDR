@@ -69,7 +69,7 @@
 | FFT 引擎（FFTW MEASURE+Wisdom+多线程+many-plan） | fftwf_plan_many_dft，Wisdom 跨进程文件锁持久化，nffts 批次 | 手写 radix-2 in-place，幂二校验，每次重算 twiddle | **YAGNI（明确）**：FFT 尺寸 2048–8192、~30 fps，手写 radix-2 约 0.1–0.5 ms 不构成热点；引入 FFTW 违反零外部依赖原则 | `gr-fft/lib/fft.cc:138-168,173-227`；我方 `fft.cpp:42-46`、`fft.h:2` 零依赖自注 | 不补；唯一可做小优化=twiddle 按 n 缓存（thread_local），非本轮 |
 | r2c 实数 FFT 模板特化 | c2r/r2c 折进同一模板 | 无（频谱全是复输入） | **YAGNI**：IQ 源本就是复数，实数路径无调用方 | `fft.cc:208-239` | 不补 |
 | 旁瓣衰减文档（枚举自注释） | win_type 每枚举值行尾写旁瓣 dB | Window 三档无注释 | **顺手补（零代码）**：枚举注释补 44/74/93 dB | `gr-fft/include/gnuradio/fft/window.h:30-52`；我方 `power_spectrum.h:22` | 留作顺手项，随 W2 一并 |
-| 渲染层（block-max 抽稀/LUT/tick） | GR 不做渲染层 | spectrum_render 独立 clean-room 完成 | **无对照项**：不涉及差距 | 我方 `spectrum_render.h:82-107,121-140,261-279` | 不补 |
+| 渲染层（block-max 抽稀/LUT/tick） | GR 不做渲染层 | spectrum_render 独立 independent 完成 | **无对照项**：不涉及差距 | 我方 `spectrum_render.h:82-107,121-140,261-279` | 不补 |
 
 ---
 

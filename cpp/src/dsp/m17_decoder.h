@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// M17 digital-voice frame decoder (clean-room, own naming).
+// M17 digital-voice frame decoder (independent, own naming).
 //
 // Protocol facts implemented here are taken from the PUBLIC M17 specification
 // (m17project) and cross-checked against our own MIT reference

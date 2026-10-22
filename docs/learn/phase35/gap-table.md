@@ -3,7 +3,7 @@
 # Phase35 差距裁决表（gap-table）
 
 > 来源：`docs/learn/phase35/{radio-frontend,dsp-core,scheduler-modem,spectrum-render,file-sink}.md`
-> 基线：HEAD b20bfb7；对照我方 `cpp/src/`（干净室学机制，不抄 GPL 代码）。
+> 基线：HEAD b20bfb7；对照我方 `cpp/src/`（学机制，不抄 GPL 代码）。
 > **W2 落地状态：进行中**——本轮只落两项真差距（AGC 块级峰值前瞻防削波、maxHold 逐帧衰减），
 > 其余补齐候选均未立项；本表不动 cpp/ tools/ mobile/。
 > 判定三档：**补齐**（本轮 W2 落地）/ **YAGNI**（理由见列，现在不做）/ **反超**（我方已优于或不同于 SDR++，不补）。
@@ -14,7 +14,7 @@
 
 | SDR++ 机制 | 我方现状 | 差距判定 | 证据 file:line | 本轮动作 |
 |---|---|---|---|---|
-| AGC 削波前瞻：命中削波预测时扫本块剩余样本取峰值、先压包络再放大 | `agc.cpp:38-56` block-based，有 maxGain ceiling（`agc.h:24` DefaultMaxGain=12）但无块内峰值前瞻 | **补齐（W2 进行中）**：O(n) 块级一次 `max_element` 扫描，挡突发强信号瞬态削波；注意按块级扫而非逐样点嵌套（避免上游最坏 O(n²)） | `repos/sdrpp/core/src/dsp/loop/agc.h:91-104`；我方 `cpp/src/dsp/agc.cpp:38-56`、`agc.h:24` | W2 落地，干净室重写 + ctest |
+| AGC 削波前瞻：命中削波预测时扫本块剩余样本取峰值、先压包络再放大 | `agc.cpp:38-56` block-based，有 maxGain ceiling（`agc.h:24` DefaultMaxGain=12）但无块内峰值前瞻 | **补齐（W2 进行中）**：O(n) 块级一次 `max_element` 扫描，挡突发强信号瞬态削波；注意按块级扫而非逐样点嵌套（避免上游最坏 O(n²)） | `repos/sdrpp/core/src/dsp/loop/agc.h:91-104`；我方 `cpp/src/dsp/agc.cpp:38-56`、`agc.h:24` | W2 落地，独立重写 + ctest |
 | 鉴频后 Nuttall-windowed sinc LPF（cutoff=bw/2，trans=bw·0.1，可选开关） | `demod.cpp:93-95,166-170` NuttallLpf 单测通过，但 `firEnabled_=false` live chain 关闭（block-streaming 跟 channelizer 交互有问题，multi_vfo 281→2.64） | **YAGNI（本轮不修）**：不是"选择不做"而是"做了没跑通"的联调 bug；邻道抑制目前靠 VFO 带宽兜底。修 block 流式是独立调试任务，不并进 W2 的 AGC/maxHold 范围 | `repos/sdrpp/decoder_modules/radio/fm.h:110-130`；我方 `cpp/src/dsp/demod.cpp:93-95,166-170` | 记已知项，待单独排期修 live 链路 |
 | 静噪放在 IF 域（解调前），关时整块 IQ 置零，省算力防爆音 | `squelch.cpp:25-44` 在解调后音频域；平滑 RMS + hangover | **YAGNI**：搬 IF 域是算力/爆音优化，但我方 hangover 已解决开合 chatter；搬位置需重构解调链接线，本轮不做 | `repos/sdrpp/decoder_modules/radio/power_squelch.h:43-46`；我方 `cpp/src/dsp/squelch.cpp:25-44` | 不做 |
 | WFM 导频带通 FIR（18.75–19.25 kHz, BW 500 Hz）滤干净再给 PLL | `wfm_stereo.cpp:112-216` NCO 直接混频 → I/Q 低通 → atan2 鉴相 | **YAGNI**：上游带通 FIR 抗噪更好，但我方积分器能把弱信号 PLL 拉回；弱信号专项场景再加 | `repos/sdrpp/decoder_modules/radio/broadcast_fm.h:43`；我方 `cpp/src/dsp/wfm_stereo.cpp:112-216` | 不做 |
@@ -64,7 +64,7 @@
 
 | SDR++ 机制 | 我方现状 | 差距判定 | 证据 file:line | 本轮动作 |
 |---|---|---|---|---|
-| Peak-Hold 逐帧衰减（`max(new, old - fftHoldSpeed)`，包络上沿保持、每帧向下衰减） | `spectrum_display.h:343` `maxHold_` 是 flat max envelope，无逐帧衰减 | **补齐（W2 进行中）**：在 setSpectrum 末尾对 maxHold_ 每 bin 做 `std::max(frame[i], maxHold_[i]-kHoldDecay)`，约 5 行，长信号观察更耐看 | `repos/sdrpp/core/src/gui/waterfall.cpp:935-939`；我方 `cpp/src/ui/spectrum_display.h:343` | W2 落地，干净室重写 + ctest |
+| Peak-Hold 逐帧衰减（`max(new, old - fftHoldSpeed)`，包络上沿保持、每帧向下衰减） | `spectrum_display.h:343` `maxHold_` 是 flat max envelope，无逐帧衰减 | **补齐（W2 进行中）**：在 setSpectrum 末尾对 maxHold_ 每 bin 做 `std::max(frame[i], maxHold_[i]-kHoldDecay)`，约 5 行，长信号观察更耐看 | `repos/sdrpp/core/src/gui/waterfall.cpp:935-939`；我方 `cpp/src/ui/spectrum_display.h:343` | W2 落地，独立重写 + ctest |
 | 1M 项色板 LUT（WATERFALL_RESOLUTION=1000000，uint32 BGRA，4 MB BSS） | `spectrum_render.h:121-140` buildLut256 仅 256 项 | **YAGNI**：显示深度本就 8-bit/通道，256 项足够；上游 1M 项是过度设计 | `repos/sdrpp/core/src/gui/waterfall.h:11`、`waterfall.cpp:944-958`；我方 `cpp/src/ui/spectrum_render.h:121-140` | 不做 |
 | 零拷贝环行写（DSP 线程 acquireFFTBuffer 直接拿环行指针原地写 dB，写完 pushFFT） | `spectrum_display.cpp:208-218` pushHistoryRow 一次拷 dbfs 进 ringDb_ | **YAGNI**：我方 FFT 帧率低（Qt 主线程帧驱动），拷贝开销可忽略；零拷贝会把 DSP/UI 锁耦合更紧 | `repos/sdrpp/core/src/gui/waterfall.cpp:876-901`、`main_window.cpp:230-236`；我方 `cpp/src/ui/spectrum_display.cpp:208-218` | 不做 |
 | trace EMA 平滑（`alpha·latest + beta·smoothingBuf`，volk 向量化） | 无专门 trace EMA，但有 setPersistenceMode 余晖包络（衰减系数 0.78/0.93） | **YAGNI**：余晖残影与瞬时 EMA 平均用途重叠，不加 EMA 开关 | `repos/sdrpp/core/src/gui/waterfall.cpp:914-920,1190-1194`；我方 `cpp/src/ui/spectrum_display.h:95-97`、`tokens.h:121-123` | 不做 |
@@ -82,7 +82,7 @@
 
 | SDR++ 机制 | 我方现状 | 差距判定 | 证据 file:line | 本轮动作 |
 |---|---|---|---|---|
-| 连续 IQ 网络导出（TCP srv / TCP cli / UDP，int8/16/32/f32，Reshaper 定长切片，try_lock 丢包不阻塞 DSP） | 无网络 IQ 导出模块；仅 one-shot `exportIqSegment` 落盘（`spectrum_engine.h:133`） | **YAGNI**：产品形态是本机分析 + MCP 按需 dump，不对外做 IQ 服务器；外部 SDR 客户端接入不在范围。若后续要做 SDR++ 兼容 IQ stream server，按 Reshaper+volk+try_lock 机制干净室重写 | `repos/sdrpp/misc_modules/iq_exporter/main.cpp:487-528,491-498`；我方 `cpp/src/dsp/spectrum_engine.h:125,133` | 不做 |
+| 连续 IQ 网络导出（TCP srv / TCP cli / UDP，int8/16/32/f32，Reshaper 定长切片，try_lock 丢包不阻塞 DSP） | 无网络 IQ 导出模块；仅 one-shot `exportIqSegment` 落盘（`spectrum_engine.h:133`） | **YAGNI**：产品形态是本机分析 + MCP 按需 dump，不对外做 IQ 服务器；外部 SDR 客户端接入不在范围。若后续要做 SDR++ 兼容 IQ stream server，按 Reshaper+volk+try_lock 机制独立重写 | `repos/sdrpp/misc_modules/iq_exporter/main.cpp:487-528,491-498`；我方 `cpp/src/dsp/spectrum_engine.h:125,133` | 不做 |
 | WAV 多比特深（u8/i16/i32/f32 可选） | `wav_writer.cpp:75-83` i16 only | **YAGNI**：i16 WAV 覆盖 99% 回放场景；f32 需求用 SigMF cf32 代替 | `repos/sdrpp/core/src/utils/wav.cpp:160-170`、`recorder/main.cpp:59-62`；我方 `cpp/src/dsp/wav_writer.cpp:75-83` | 不做 |
 | VFO 级 IQ 导出（建指定采样率 VFO 后导出） | 仅 baseband 整段导出（`spectrum_engine.h:126`） | **YAGNI**：VFO 重采样导出等价于 demod 后再采样，与现有 demod 链重叠 | `repos/sdrpp/misc_modules/iq_exporter/main.cpp:433-438`；我方 `cpp/src/dsp/spectrum_engine.h:126` | 不做 |
 | file_source WAV 回放（固定 44 字节头，EOF seekg 回绕循环） | `file_source.cpp:29-60` SigMF cf32 回放 | **YAGNI**：回放自己录的 SigMF 即可；WAV 回放用外部工具，不按上游脆弱实现抄 | `repos/sdrpp/source_modules/file_source/wavreader.h:47,62-76`；我方 `cpp/src/dsp/file_source.cpp:29-60` | 不做 |

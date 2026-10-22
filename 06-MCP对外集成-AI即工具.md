@@ -1,14 +1,13 @@
 # MBDSDR 的 MCP 对外集成：让 SDR 成为 AI 的标准工具
 
-> **实现落点报告（仓库布局勘误）**：本文中 `ai/mcp_stdio_server.py` 与 15 个
-> 桌面工具名为设计期命名。实际落点：`mbdsdr_ai/core/mcp_server.py` 与
-> `mbdsdr_ai_mcp_server.py` 双 MCP server（协议层 NDJSON/JSON-RPC 2.0/inputSchema/
-> isError 与本文一致），工具名为 `sdr_*` 体系；本地 HTTP 桥为设计缺口。
-
-> 模块：`src/desktop/ai/mcp_stdio_server.py`（Python，桥接运行中的桌面端）
-> 配置示例：`src/desktop/ai/mcp_server.example.json`
-> 对称实现：C++ 核心 `src/mcp`（DSP 原语，数量以 toolDefs() 实时口径为准，`mbdsdr mcp`）
-> License: MIT（全仓统一，见根 LICENSE；学上游只学机制、不抄 GPL 代码）
+> **实现落点（路径已按仓库现状就地校正）**：本文各节提到的模块路径均指向真实
+> 文件；早期设计稿里的 `src/desktop/...` 命名已按下列对照改写：
+>   - `src/desktop/ai/mcp_stdio_server.py` → `mbdsdr_ai/core/mcp_server.py`（双 MCP server 之一；外部 IDE 入口见 `mbdsdr_ai_mcp_server.py`）
+>
+> 布局勘误（实测）：`mbdsdr_ai/core/mcp_server.py` 与 `mbdsdr_ai_mcp_server.py`
+> 为双 MCP server（协议层 NDJSON/JSON-RPC 2.0/inputSchema/isError 与本文一致），
+> 工具名为 `sdr_*` 体系；本文早期提到的 `ui_*` 桌面工具名为设计期命名。
+> 本地 HTTP 桥为设计缺口，未实现。
 
 ## 1. 定位：AI 定义无线电的"最后一公里"
 

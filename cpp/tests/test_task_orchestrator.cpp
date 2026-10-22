@@ -226,7 +226,9 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     // Isolate QSettings (bookmark writes) from the user's real config.
     QTemporaryDir tmp;
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmp.path());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+    qputenv("MBDSDR_SETTINGS_DIR", (tmp.path()).toUtf8());
     TestTaskOrchestrator t;
     return QTest::qExec(&t, argc, argv);
 }

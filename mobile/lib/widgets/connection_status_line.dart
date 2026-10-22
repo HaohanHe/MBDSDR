@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
+import '../l10n/gen/app_localizations.dart';
 import '../models/radio_state.dart';
 import '../services/radio_controller.dart';
 
@@ -26,18 +27,19 @@ class ConnectionStatusLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final (String text, Color dotColor) = switch (radio.status) {
       ConnectionStatus.connected => (
-          'rtl_tcp 已连接',
+          l10n.statusConnected,
           AppTokens.success.withValues(alpha: 0.8),
         ),
-      ConnectionStatus.connecting => ('连接中…', AppTokens.textSecondary),
-      ConnectionStatus.reconnecting => ('设备断开，等待重插', AppTokens.textSecondary),
+      ConnectionStatus.connecting => (l10n.statusConnecting, AppTokens.textSecondary),
+      ConnectionStatus.reconnecting => (l10n.statusReconnecting, AppTokens.textSecondary),
       ConnectionStatus.error => (
-          _trimmedError(radio.errorMessage),
+          _trimmedError(l10n, radio.errorMessage),
           AppTokens.warning,
         ),
-      ConnectionStatus.disconnected => ('rtl_tcp 未连接', AppTokens.textAt(AppTokens.textAlphaFaint)),
+      ConnectionStatus.disconnected => (l10n.statusDisconnected, AppTokens.textAt(AppTokens.textAlphaFaint)),
     };
 
     return Row(
@@ -66,8 +68,8 @@ class ConnectionStatusLine extends StatelessWidget {
     );
   }
 
-  String _trimmedError(String? msg) {
-    if (msg == null || msg.isEmpty) return '连接失败';
+  String _trimmedError(AppLocalizations l10n, String? msg) {
+    if (msg == null || msg.isEmpty) return l10n.statusConnectFailed;
     final String oneLine = msg.replaceAll('\n', ' ').trim();
     return oneLine.length > _errorMaxChars
         ? '${oneLine.substring(0, _errorMaxChars)}…'

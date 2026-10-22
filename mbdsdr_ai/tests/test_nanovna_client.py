@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""NanoVNA 干净室客户端确定性测试（replay 自造 fixture）。
+"""NanoVNA 独立实现客户端确定性测试（replay 自造 fixture）。
 
 所有设备响应文本均为本项目按协议自造（见 docs/learn/nanovna/protocol-study.md），
 不取自 nanovna-saver 仓库。replay 传输严格比对命令序列，借此验证：

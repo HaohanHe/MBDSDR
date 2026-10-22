@@ -433,4 +433,62 @@ void main() {
       expect(s.fixedMarksHz, isEmpty);
     });
   });
+
+  group('UI 语言（locale 持久化，默认 zh 源语言）', () {
+    test('空存储下默认 zh，与现行为一致', () async {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      await s.load();
+      expect(s.uiLocaleCode, 'zh');
+    });
+
+    test('en/ja 写入即落盘，新实例 load 往返读回一致', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      final InMemorySecureStore secure = InMemorySecureStore();
+      final SettingsService s = SettingsService(kv: kv, secure: secure);
+      await s.load();
+
+      s.uiLocaleCode = 'en';
+      expect(kv.data['uiLocale'], 'en');
+      final SettingsService s2 = SettingsService(kv: kv, secure: secure);
+      await s2.load();
+      expect(s2.uiLocaleCode, 'en');
+
+      s2.uiLocaleCode = 'ja';
+      expect(kv.data['uiLocale'], 'ja');
+      final SettingsService s3 = SettingsService(kv: kv, secure: secure);
+      await s3.load();
+      expect(s3.uiLocaleCode, 'ja');
+    });
+
+    test('setter 归一：大小写/空白容忍，未知写法回退 zh，不落脏值', () {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      final SettingsService s = SettingsService(
+        kv: kv,
+        secure: InMemorySecureStore(),
+      );
+      s.uiLocaleCode = ' EN ';
+      expect(s.uiLocaleCode, 'en');
+      expect(kv.data['uiLocale'], 'en');
+      s.uiLocaleCode = 'fr';
+      expect(s.uiLocaleCode, 'zh');
+      expect(kv.data['uiLocale'], 'zh');
+    });
+
+    test('load 时 KV 中未知语言代码静默回退 zh，不抛异常', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      kv.data['uiLocale'] = 'klingon';
+      final SettingsService s =
+          SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+      expect(s.uiLocaleCode, 'zh');
+    });
+
+    test('支持列表钉扎：zh/en/ja 三语，zh 打头为源语言', () {
+      expect(kSupportedUiLocales, <String>['zh', 'en', 'ja']);
+      expect(kDefaultUiLocale, 'zh');
+    });
+  });
 }

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: MIT | Phase36 G4: GNU Radio FFT 窗口/频谱机制深读（clean-room，只学不抄） -->
+<!-- SPDX-License-Identifier: MIT | Phase36 G4: GNU Radio FFT 窗口/频谱机制深读（independent，只学不抄） -->
 
 # Phase36 G4：GNU Radio FFT 窗口与频谱处理
 
@@ -93,7 +93,7 @@ gr-fft 只提供"窗系数 + FFT 原语"两步；Window→乘加→FFT→|·|²�
 | FFT 引擎 | FFTW MEASURE + Wisdom + 多线程 + many-plan | 手写 radix-2 in-place，幂二校验，每次重算 twiddle（`fft.cpp:42-46`） | **YAGNI（明确理由）**：我方 FFT 尺寸 2048–8192、帧率 ~30 fps，手写 radix-2 在现代 CPU 上 ~0.1–0.5 ms，不构成热点；引入 FFTW 依赖违反"无外部依赖"（`fft.h:2` 自注）。唯一值得做的小优化：twiddle 因子按 n 缓存（thread_local 即可，`power_spectrum.cpp:32-37` 已有 thread_local 窗缓存范式可复用） |
 | r2c 实数 FFT | 模板特化支持（`fft.cc:208-239`） | 无（频谱全是复输入） | **YAGNI**：IQ 源本就是复数；实数路径无调用方 |
 | 旁瓣衰减文档 | `max_attenuation` 表 + 枚举注释（`window.h:30-52`） | 无 | 顺手补：枚举注释里写 44/93/74 dB 即可，零代码 |
-| spectrum_render.h | — | block-max 抽稀/LUT/JSON 色板/nice tick（`spectrum_render.h:82-107`、`121-140`、`261-279`） | GNU Radio 不做渲染层，无对照项；我方这块已独立 clean-room 完成，**无差距** |
+| spectrum_render.h | — | block-max 抽稀/LUT/JSON 色板/nice tick（`spectrum_render.h:82-107`、`121-140`、`261-279`） | GNU Radio 不做渲染层，无对照项；我方这块已独立 independent 完成，**无差距** |
 
 **电平漂移的定量推导**（为何判"真差距"）：满幅单音 A=1、bin 对齐时，加窗 DFT 峰值 ≈ A/2 · Σw。我方 `scale=4/n²` 是按矩形窗 `(n/2)²·4/n²=1`（0 dBFS）标定的。代入三窗：
 

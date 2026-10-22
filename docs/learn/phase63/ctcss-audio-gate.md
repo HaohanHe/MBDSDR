@@ -48,10 +48,10 @@ const bool gate = squelchGate && ctcssOpen;   // speaker + network tap 放行
 仍然应被值守录制捕获；否则 PL 错误配置会导致静默丢录。若日后判定录制也应门控，
 把 `recGate` / WAV 连续性改回组合 `gate` 即可——当前默认只 speaker。
 
-## 3. 与 SDR++ 门控思路对照（clean-room）
+## 3. 与 SDR++ 门控思路对照（independent）
 
 参考 SDR++ `ctcss_squelch` 的**门控机制概念**：检测到目标亚音才开放音频路径，未检测到
-保持静音。本实现为 clean-room 重写，未抄 GPL 代码；项目保持 MIT。差异：
+保持静音。本实现为 independent 重写，未抄 GPL 代码；项目保持 MIT。差异：
 
 - SDR++ 的门控与检测通常耦合；本实现把「检测使能」与「speaker 门控」拆成两个独立开关，
   允许只检测不静音（观察模式）或两者同开。

@@ -66,7 +66,7 @@ private:
     double decayTauMs_  = DefaultDecayMs;
 };
 
-// ---- Complex carrier AGC (clean-room, mirrors SDR++ am.h:34-35,103-106) ----
+// ---- Complex carrier AGC (independent, mirrors SDR++ am.h:34-35,103-106) ----
 // Runs on the COMPLEX IQ stream BEFORE envelope detection. Tracks the input
 // modulus |x| with independent attack/decay one-poles and scales x so the
 // average envelope settles to setPoint. Pure sample-by-sample state machine ->

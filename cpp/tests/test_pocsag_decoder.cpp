@@ -2,7 +2,7 @@
 //
 // synthetic 仅验证链路 (synthetic fixture: only verifies the chain).
 //
-// These tests synthesize POCSAG bit streams locally (clean-room frame builder
+// These tests synthesize POCSAG bit streams locally (independent frame builder
 // in pocsag_decoder.cpp) and feed them through the real decoder to prove:
 //   * BCH(31,21) encode/decode round-trips and corrects <=2 bit errors;
 //   * a known numeric message decodes back to its address + BCD text;

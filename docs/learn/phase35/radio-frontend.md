@@ -2,7 +2,7 @@
 
 > Source: `repos/sdrpp/decoder_modules/radio/` + `repos/sdrpp/core/src/dsp/`
 > 我方对照: `cpp/src/dsp/` (demod / agc / squelch / wfm_stereo / fsk_demod / digital_demod / anr)
-> 2026-10-05. Clean-room: 只学机制不抄代码.
+> 2026-10-05. Independent: 只学机制不抄代码.
 
 ---
 

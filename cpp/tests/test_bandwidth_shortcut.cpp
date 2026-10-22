@@ -1,6 +1,6 @@
 // RxVFO-style bandwidth short-circuit + transition-band parameterization tests.
 //
-// Clean-room mapping of SDR++ rx_vfo.h (GPLv3, mechanism only):
+// Independent mapping of SDR++ rx_vfo.h (GPLv3, mechanism only):
 //   - filterNeeded = (bandwidth != outSamplerate)  -> whole-band passthrough
 //   - generateTaps low-pass transition width = 0.1 * (bandwidth/2)
 // We test the PURE decision function (planChannelFilter), the Channelizer fast

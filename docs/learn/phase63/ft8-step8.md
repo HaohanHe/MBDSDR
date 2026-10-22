@@ -1,6 +1,6 @@
 # FT8 run-loop 物理接线：vfo channelizer → 12k 抽取 → feedFt8Baseband
 
-HEAD=d173bef。干净室自写 MIT。
+HEAD=d173bef。独立实现 MIT。
 
 ## 1. 接线 file:line
 

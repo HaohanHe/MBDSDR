@@ -1,0 +1,148 @@
+{
+  "@@locale": "zh",
+
+  "navSpectrum": "频谱",
+  "navSky": "天空",
+  "navAi": "AI",
+  "navRecordings": "录音",
+  "navActivity": "活动",
+  "navSettings": "设置",
+  "tooltipHelp": "帮助",
+  "tooltipActivityLog": "活动记录",
+
+  "statusConnected": "rtl_tcp 已连接",
+  "statusConnecting": "连接中…",
+  "statusReconnecting": "设备断开，等待重插",
+  "statusDisconnected": "rtl_tcp 未连接",
+  "statusConnectFailed": "连接失败",
+
+  "guideTitle": "第一次使用？三步上路",
+  "guideStep1": "设置页填 rtl_tcp 接收机的主机地址与端口（同一局域网）",
+  "guideStep2": "回频谱页点连接，瀑布图实时绘制",
+  "guideStep3": "点瀑布选频率，选对解调模式即可收听",
+  "guideDismiss": "知道了",
+  "guideOpenSettings": "去设置",
+
+  "emptyNotConnectedTitle": "未连接 rtl_tcp",
+  "emptyNotConnectedMessage": "请在「设置」中确认接收机主机与端口，并在电脑或树莓派上启动 rtl_tcp。",
+  "emptyConnect": "连接",
+  "emptyNoFixTitle": "暂未定位",
+  "emptyNoFixMessage": "请开启系统定位并授权，或在「设置 → 本站位置」中手动填写坐标。",
+  "emptyRetryLocate": "重试定位",
+  "emptyNoSatellitesTitle": "暂无可用卫星数据",
+  "emptyNoSatellitesMessage": "尚未加载到卫星轨道参数（TLE）。请检查网络后刷新，或先设置本站位置。",
+  "emptyRefresh": "刷新",
+
+  "settingsSectionRtlTcp": "rtl_tcp 接收机",
+  "settingsHostLabel": "主机地址",
+  "settingsHostHint": "如 192.168.1.10",
+  "settingsPortLabel": "端口",
+  "settingsRtlRunHint": "在电脑或树莓派上运行：rtl_tcp -a 0.0.0.0",
+  "settingsSectionControlHub": "桌面 ControlHub（远程解码）",
+  "settingsChHostHint": "默认 127.0.0.1；留空 = 不启用，如 192.168.1.20",
+  "settingsChPortHint": "默认 50732",
+  "settingsChHelp": "仅只读拉取 /status、/pocsag_messages、/m17_calls、/vor_radial；解码在桌面引擎进行，移动端为查看器。",
+  "settingsSectionDeviceInfo": "设备信息",
+  "settingsSectionAudio": "音频",
+  "settingsMute": "静音",
+  "settingsUnmute": "取消静音",
+  "settingsAudioHelp": "音量与静音仅作用于本机播放，不随 rtl_tcp 上送。",
+  "settingsSectionAi": "AI 助手",
+  "settingsApiKeyHint": "输入云端推理 API key",
+  "settingsKeyShow": "显示",
+  "settingsKeyHide": "隐藏",
+  "settingsKeySecurityNote": "仅保存在系统安全存储（Keystore / Keychain），不会写入仓库或上传",
+  "settingsModelLabel": "模型名",
+  "settingsAiTakeover": "AI 接管",
+  "settingsAiTakeoverOn": "AI 接管：AI 的调谐/模式/增益动作会直接生效",
+  "settingsAiManual": "手动模式：AI 可对话，但调谐动作不会真正执行",
+  "settingsSectionStation": "本站位置",
+  "settingsLocate": "自动定位",
+  "settingsLocating": "定位中…",
+  "settingsLatLabel": "纬度（度，-90 ~ 90）",
+  "settingsLonLabel": "经度（度，-180 ~ 180）",
+  "settingsAltLabel": "海拔（米）",
+  "settingsCoordUnset": "未设置坐标 —— 天空页将优先使用手机自动定位",
+  "settingsCoordActive": "当前生效：{lat}，{lon} · 海拔 {alt} m",
+  "@settingsCoordActive": {
+    "description": "本站位置生效摘要；lat/lon 为带方向后缀的格式化坐标，alt 为海拔数值文本",
+    "placeholders": {
+      "lat": { "type": "String" },
+      "lon": { "type": "String" },
+      "alt": { "type": "String" }
+    }
+  },
+  "settingsSectionAppearance": "外观",
+  "settingsThemeDefault": "默认",
+  "settingsSectionLanguage": "语言",
+  "languageNameZh": "简体中文",
+  "languageNameEn": "English",
+  "languageNameJa": "日本語",
+
+  "toastHostSaved": "已保存主机地址",
+  "toastPortInvalid": "端口必须是 1–65535 的整数",
+  "toastPortSaved": "已保存端口",
+  "toastChHostSaved": "已保存桌面 ControlHub 地址",
+  "toastChPortSaved": "已保存 ControlHub 端口",
+  "toastApiKeyCleared": "已清除 API key",
+  "toastApiKeySaved": "已保存 API key（仅写入系统安全存储）",
+  "toastModelSaved": "已保存模型名",
+  "toastCoordCleared": "已清除该坐标",
+  "toastCoordInvalid": "坐标格式无效：{raw}",
+  "@toastCoordInvalid": {
+    "description": "坐标解析失败提示；raw 为用户输入的原始文本",
+    "placeholders": {
+      "raw": { "type": "String" }
+    }
+  },
+  "toastCoordSaved": "已保存坐标",
+  "toastLocationServiceOff": "请先开启系统定位服务",
+  "toastLocationDenied": "定位权限被拒绝，可在系统设置中开启",
+  "toastLocationSaved": "已写入当前定位",
+  "toastLocationFailed": "定位失败：{error}",
+  "@toastLocationFailed": {
+    "description": "定位失败提示；error 为真实异常文本，不伪造原因",
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
+  "toastLanguageSaved": "已切换语言",
+
+  "chatSessionListTooltip": "会话列表",
+  "chatSessionTitleFallback": "新会话",
+  "chatCompactEmpty": "当前会话还没有可压缩的历史",
+  "chatCompactBelow": "上下文未达压缩门槛（约 {used} / 预算 {budget} 字符），暂无需压缩",
+  "@chatCompactBelow": {
+    "description": "压缩上下文按钮禁用原因；used 为当前占用字符估算，budget 为字符预算常量",
+    "placeholders": {
+      "used": { "type": "int" },
+      "budget": { "type": "int" }
+    }
+  },
+  "chatCompactReady": "压缩早期对话为占位（不删除落盘原文）",
+  "chatToolsTooltip": "AI 工具清单",
+  "chatNewSessionTooltip": "新建会话",
+  "chatNewSessionButton": "新建会话",
+  "chatSessionIncomplete": "上次未完成",
+  "chatRenameTooltip": "重命名",
+  "chatDeleteTooltip": "删除会话",
+  "chatRenameTitle": "重命名会话",
+  "chatRenameHint": "输入新会话标题",
+  "chatCancel": "取消",
+  "chatSave": "保存",
+  "chatManualModeStrip": "手动模式：AI 可对话，但调谐等动作不会真正执行",
+  "chatUnconfiguredTitle": "尚未配置 AI API key",
+  "chatUnconfiguredMessage": "配置硅基流动 API key 后即可开始对话。",
+  "chatOpenSettings": "去设置",
+  "chatEmptyTitle": "开始一段对话吧",
+  "chatEmptyMessage": "这是一段空会话。发送第一条消息，或新建另一段会话。",
+  "chatInputHint": "输入消息…",
+  "chatRetry": "重试",
+  "chatFoldMarker": "〔已折叠 {count} 轮早期对话为占位；原文仍可在上下回看，未删除〕",
+  "@chatFoldMarker": {
+    "description": "上下文折叠占位说明；count 为真实被折走的 user 轮次数",
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  }
+}

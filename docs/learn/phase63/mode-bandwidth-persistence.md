@@ -1,4 +1,4 @@
-# 解调模式+带宽持久化 / 余晖 / 瀑布平移 三候选判定（clean-room 机制深化）
+# 解调模式+带宽持久化 / 余晖 / 瀑布平移 三候选判定（independent 机制深化）
 
 HEAD = `e9d4440`。本轮先对三候选逐一侦察核实（file:line），再落地真缺口。全程 CLI/offscreen
 （`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），零 GUI 操控，

@@ -35,6 +35,7 @@
 // desktop or a parallel run. The honest default-port banner text is asserted
 // separately against HttpControlServer::warningBanner.
 #include <QApplication>
+#include "core/app_settings.h"
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -162,8 +163,10 @@ int main(int argc, char** argv) {
         const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_http_e2e_" +
                                QString::number(QCoreApplication::applicationPid());
         QDir().mkpath(cfgDir);
-        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
-        QSettings s("MBDSDR", "MBDSDR");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfgDir);
+        qputenv("MBDSDR_SETTINGS_DIR", (cfgDir).toUtf8());
+        mbdsdr::core::AppSettings s;
         s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
         s.sync();
     }

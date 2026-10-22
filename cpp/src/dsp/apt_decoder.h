@@ -15,7 +15,7 @@ namespace dsp {
 // NOAA APT (Automatic Picture Transmission) line-layout constants.
 //
 // Verified against the reference implementation noaa-apt
-// (GPL-3.0-or-later, repos/noaa-apt/src/decode.rs). Clean-room reimplementation;
+// (GPL-3.0-or-later, repos/noaa-apt/src/decode.rs). Independent reimplementation;
 // no source code copied, only constants/algorithm aligned. The reference works at a fixed "pixel rate" of FINAL_RATE = 4160 Hz
 // (one sample per pixel), i.e. 2080 pixels/row x 2 rows/second.
 //

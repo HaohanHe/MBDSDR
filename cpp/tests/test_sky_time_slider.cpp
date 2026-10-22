@@ -29,9 +29,12 @@ private slots:
 };
 
 void TestSkyTimeSlider::initTestCase() {
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        QDir::tempPath() + "/mbdsdr_skyslider_" +
                            QString::number(QCoreApplication::applicationPid()));
+    qputenv("MBDSDR_SETTINGS_DIR", (QDir::tempPath() + "/mbdsdr_skyslider_" +
+                           QString::number(QCoreApplication::applicationPid())).toUtf8());
 }
 
 void TestSkyTimeSlider::sliderRangeFromTokens() {

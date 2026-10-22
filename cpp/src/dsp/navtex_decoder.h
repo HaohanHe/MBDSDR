@@ -2,7 +2,7 @@
 //
 // NAVTEX / SITOR-B (CCIR 476 / ITU-R M.540) packet-text decoder.
 //
-// Clean-room implementation: protocol mechanism derived from public
+// Independent implementation: protocol mechanism derived from public
 // ITU-R M.540 (message layout) and CCIR 476 / M.476 (SITOR-B FEC interleave)
 // and the ITA-2 / CCITT-2 alphabet. No GPL source copied; no hardcoded RF
 // frequencies (518/490 kHz live in docs only, never here).

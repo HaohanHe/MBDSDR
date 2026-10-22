@@ -1,6 +1,6 @@
 # FT8 SIC 逐帧谱减多信号分离
 
-HEAD=a955242。干净室自写 MIT（wsjtx subtractft8 机制概念参考不抄码）。
+HEAD=a955242。独立实现 MIT（wsjtx subtractft8 机制概念参考不抄码）。
 
 ## 1. 落地 file:line
 

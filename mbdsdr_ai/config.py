@@ -33,6 +33,31 @@ DEFAULT_CONFIG = {
 }
 
 
+#: 配置文件历史键名 → 现行键名（一次性迁移表）。
+#: 桌面端曾写 "api_base"，而 DEFAULT_CONFIG / main_window 读 "base_url"——
+#: 统一为 base_url，读到旧键时兼容回退并迁移，消除同文件键名打架。
+LEGACY_KEY_MAP = {
+    "api_base": "base_url",
+}
+
+
+def normalize_config_keys(data: Dict[str, Any]) -> Dict[str, Any]:
+    """配置键归一（纯函数）：旧键 api_base → base_url。
+
+    - 已有 base_url 时旧键直接丢弃（新键优先，绝不覆盖）；
+    - 幂等：对已归一的字典再跑一遍输出不变。
+    """
+    if not isinstance(data, dict):
+        return {}
+    out = dict(data)
+    for old, new in LEGACY_KEY_MAP.items():
+        if old in out:
+            if not out.get(new):
+                out[new] = out[old]
+            out.pop(old)
+    return out
+
+
 @dataclass
 class AgentConfig:
     """Agent 配置数据类。"""
@@ -92,9 +117,10 @@ class AgentConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AgentConfig":
-        """从字典创建。"""
+        """从字典创建（旧键 api_base 自动归一为 base_url）。"""
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered = {k: v for k, v in data.items() if k in valid_fields}
+        filtered = {k: v for k, v in normalize_config_keys(data).items()
+                    if k in valid_fields}
         return cls(**filtered)
 
     def validate(self) -> list:
@@ -114,14 +140,26 @@ class AgentConfig:
 
 
 def load_config(path: str = "~/.mbdsdr/config.json") -> AgentConfig:
-    """从 JSON 文件加载配置。"""
+    """从 JSON 文件加载配置。
+
+    旧键 api_base 读后一次性迁移：内存里归一为 base_url，并把归一后的原形状
+    字典回写磁盘（只改键名，不动其他字段）。
+    """
     path = os.path.expanduser(path)
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            config = AgentConfig.from_dict(data)
+            normalized = normalize_config_keys(data)
+            config = AgentConfig.from_dict(normalized)
             config._config_path = path
+            if normalized != data:
+                try:
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(normalized, f, indent=2, ensure_ascii=False)
+                    os.chmod(path, 0o600)  # 含 API key，仅所有者可读写
+                except OSError:
+                    pass  # 回写失败不阻断读取；下次读到旧键仍可归一
             return config
         except (json.JSONDecodeError, IOError) as e:
             print(f"警告: 配置文件加载失败 ({e})，使用默认配置")

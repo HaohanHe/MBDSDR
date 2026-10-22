@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "control/control_hub.h"
+#include "core/app_settings.h"
 
 #include "dsp/spectrum_engine.h"
 #include "vna/vna_rf.h"
@@ -14,6 +15,7 @@
 #include "ui/workspace_controller.h"  // P0-b: live three-column workspace seam
 #include "ai/sat_task_planner.h"
 #include "ai/memory_store.h"   // P3 #73: local SQLite FTS5 memory store
+#include "ai/pending_plan_store.h" // 待执行计划槽：run_template 登记 / get_task_history 读面
 #include "ai/checkpoint_writer.h" // P3 #74: background single-writer drain
 #include "core/tokens.h"
 #include "ui/spectrum_render.h"
@@ -2314,6 +2316,11 @@ QJsonObject ControlHub::cmdGetTaskHistory(const QJsonObject& a) {
         }
         o["runs"] = arr;
         o["count"] = arr.size();
+        // 待执行计划槽快照（run_template 登记、执行后状态真实回写），与 Agent
+        // get_task_history 同读面。空槽 plans=[] 诚实空态。
+        const QJsonObject pending = mbdsdr::ai::PendingPlanStore::instance().toJson();
+        o["pending_plans"] = pending.value("plans");
+        o["pending_count"] = pending.value("count");
         if (arr.isEmpty()) o["note"] = QStringLiteral("无任务历史（TaskRunner 尚未完成过任何任务）");
     }
     return o;
@@ -2625,7 +2632,7 @@ QJsonObject ControlHub::cmdSetColorMap(const QJsonObject& a) {
     QString err;
     if (!ui::loadColormapFileForTool(path, &parsed, &err))
         return errResult(err);
-    QSettings(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"))
+    mbdsdr::core::AppSettings()
         .setValue(QLatin1String(tokens::kSettingsKeyColormapFile), path);
     QJsonObject o = okBase();
     o["command"] = "set_color_map";
@@ -2644,7 +2651,7 @@ QJsonObject ControlHub::cmdGetColorMaps(const QJsonObject&) {
     QJsonObject o = okBase();
     o["command"] = "get_color_maps";
     o["builtin"] = builtin;
-    const QString path = QSettings(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"))
+    const QString path = mbdsdr::core::AppSettings()
         .value(QLatin1String(tokens::kSettingsKeyColormapFile)).toString();
     if (path.isEmpty()) {
         o["external"] = QJsonValue::Null;
@@ -2738,6 +2745,9 @@ QJsonObject ControlHub::cmdRunTemplate(const QJsonObject& a) {
         step["arg_keys"] = QJsonArray::fromStringList(s.args.keys());
         steps.append(step);
     }
+    // 真实登记进待执行计划槽（与 Agent run_template 同一张登记表）：回执携带
+    // 真实 pending_plan_id；执行仍需用户确认后经 TaskRunner::runPendingPlan。
+    const int planId = ai::PendingPlanStore::instance().submit(plan, name);
     QJsonObject o = okBase();
     o["command"] = "run_template";
     o["template_name"] = name;
@@ -2745,9 +2755,14 @@ QJsonObject ControlHub::cmdRunTemplate(const QJsonObject& a) {
     o["steps"] = steps;
     o["step_count"] = plan.steps.size();
     o["executed"] = false;
+    o["pending_plan_id"] = planId;
+    o["plan_status"] = QString::fromUtf8("pending");
+    o["consumed"] = false;
     o["note"] = QString::fromUtf8(
-        "计划已构建并登记，未在本调用执行（executed=false）。本通道不做同步调谐/录制；"
-        "生产环境经异步 TaskRunner 逐步执行。");
+        "计划已登记为待执行计划 #%1（PendingPlanStore 真实登记表，状态 pending）。"
+        "本通道不做同步调谐/录制（executed=false）；需用户确认后经 AI 面板「执行待执行计划」"
+        "按钮或 TaskRunner::runPendingPlan(#%1) 异步执行，执行状态真实回写登记表，"
+        "可经 get_task_history 的 pending_plans 查询进度。").arg(planId);
     return o;
 }
 

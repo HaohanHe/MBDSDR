@@ -33,6 +33,10 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# gen-l10n 生成物（l10n.yaml 指定 output-dir=lib/l10n/gen；构建时重建，不入库。
+# 缺失时 flutter gen-l10n 重新生成，见 AGENTS.md 移动端基线注记）
+/lib/l10n/gen/
+
 # Symbolication related
 app.*.symbols
 

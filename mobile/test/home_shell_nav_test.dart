@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/app/home_shell.dart';
+import 'package:mbdsdr_mobile/l10n/gen/app_localizations.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 import 'package:mbdsdr_mobile/services/settings_service.dart';
 import 'package:provider/provider.dart';
@@ -38,8 +39,13 @@ class _MemSecure implements SecureStore {
   Future<void> delete(String k) async {}
 }
 
+/// 测试壳固定源语言 zh（gen-l10n delegates + 显式 locale），
+/// 既有标签断言与源语言真值一致。
 Widget _wrap(SettingsService settings, RadioController radio) => MaterialApp(
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('zh'),
       home: MultiProvider(
         providers: <ChangeNotifierProvider<ChangeNotifier>>[
           ChangeNotifierProvider<SettingsService>.value(value: settings),

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """
-image_enhance.py — SatDump 式气象卫星云图增强管线（干净室 MIT 实现）
+image_enhance.py — SatDump 式气象卫星云图增强管线（MIT 独立实现 实现）
 =====================================================================
 
 本模块为 NOAA APT / 其它单通道气象云图提供轻量、确定性、纯 numpy 的图像增强。

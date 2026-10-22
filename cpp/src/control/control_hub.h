@@ -9,7 +9,7 @@
 // the AI tool loop and (later) a remote/JSON front-end are all just clients of
 // this one object.
 //
-// Design (clean-room; own naming/structure; the read/write split and the gated
+// Design (independent; own naming/structure; the read/write split and the gated
 // refusal are the SAME philosophy as ai/agent_tools.{h,cpp} but are written
 // fresh here):
 //

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Offline RDS decoder tests: reference encoder -> float MPX -> RdsDecoder.
-// The encoder here is a clean-room, test-only implementation of EN 300 401
+// The encoder here is a independent, test-only implementation of EN 300 401
 // (CRC/offset words, biphase NRZ-I, 57 kHz BPSK) used to exercise the decoder.
 #include <QtTest/QtTest>
 

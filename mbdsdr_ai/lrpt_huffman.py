@@ -3,7 +3,7 @@
 
 依据 SatDump meteor MSUMR LRPT 机制（huffman.cpp / segment.cpp / tables.h：
 file:line 证据见 docs/learn/phase63/lrpt-image-decode-eval.md）自述重写。
-典型 clean-room：本文件未复制任何 GPL 代码；file:line 仅作机制注解。
+典型 independent：本文件未复制任何 GPL 代码；file:line 仅作机制注解。
 
 === 设计范围（诚实边界） ==================================================
 本条交付的是标准 baseline JPEG 压缩域解码：DQT/DHT/DRI/SOF0·1/SOS 标记解析、
@@ -113,7 +113,7 @@ _APP_LO, _APP_HI = 0xE0, 0xEF
 # --------------------------------------------------------------------------- #
 # 接收扩展（receive_extend / getValue）：JPEG Annex F 标准符号位数值解码
 #   输入 v 为 SIZE 位宽读出的无符号值；首符号位为 0 时为负值。
-#   这是标准 JPEG 规范的“Extend”（clean-room，不来自 SatDump 源码）。
+#   这是标准 JPEG 规范的“Extend”（independent，不来自 SatDump 源码）。
 # --------------------------------------------------------------------------- #
 def receive_extend(v: int, size: int) -> int:
     """size 位无符号值 v → 有符号差值（首符号位定正负）。"""

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""FT8 8-FSK 调制器 + Costas 粗同步器（干净室自写，第①步）。
+"""FT8 8-FSK 调制器 + Costas 粗同步器（独立实现，第①步）。
 
-本模块依据 ``docs/learn/phase63/ft8-mechanism-study.md``（干净室机制笔记）
+本模块依据 ``docs/learn/phase63/ft8-mechanism-study.md``（独立实现机制笔记）
 自述重写，只依赖 NumPy，可离线逐比特复现。WSJT-X (GPL) 源码仅作机制证据
 （笔记中已记 file:line），本仓未包含其代码文本；下列物理层常量（12000 S/s、
 0.16 s/符号、6.25 Hz 音距、7×7 Costas、格雷表、S7/D29/S7/D29/S7 帧布局）
@@ -148,7 +148,7 @@ class Ft8Modulator:
 
         流程：pack77(from,to,grid) -> 77 bit -> CRC14 -> 91 bit ->
         LDPC(174,91) -> 174 bit -> 每 3 bit 经格雷表选 tone（58 个）。
-        实现见 :mod:`mbdsdr_ai.ft8_codec`（干净室 MIT，自写）。
+        实现见 :mod:`mbdsdr_ai.ft8_codec`（MIT 独立实现，自写）。
 
         参数:
             message_text: 预留（文本解析留后续）；当前用显式 from/to/grid。

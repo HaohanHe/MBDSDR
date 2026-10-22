@@ -6,7 +6,7 @@
 // live inline inside MainWindow lambdas is factored into the inline pure helpers
 // below so it can be unit-tested with no QApplication / no radio hardware.
 //
-// Upstream references (mechanism only, clean-room re-implementation; SDR++ is
+// Upstream references (mechanism only, independent re-implementation; SDR++ is
 // ImGui/Apache-2.0-ish, GQRX is Qt/GPLv3 -- we copy neither code nor strings):
 //   * SDR++ core/src/gui/main_window.cpp:580-597: wheel steps the selected VFO
 //     by snapInterval (Shift x10 / Alt x0.1); no VFO => view zoom.

@@ -24,9 +24,12 @@ using namespace mbdsdr;
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        QDir::tempPath() + "/mbdsdr_shot_ai_" +
                            QString::number(QCoreApplication::applicationPid()));
+    qputenv("MBDSDR_SETTINGS_DIR", (QDir::tempPath() + "/mbdsdr_shot_ai_" +
+                           QString::number(QCoreApplication::applicationPid())).toUtf8());
     // Throwaway session dir so the user's real sessions are never touched.
     const QString sessDir = QString::fromLocal8Bit(qgetenv("MBDSDR_SCRATCH_DIR"))
                                 .append("/ai_sessions");

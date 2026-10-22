@@ -8,7 +8,7 @@ llrs_from_tone_energies -> Ft8Codec.decode() BP -> CRC14 -> 解包消息。
 
 不依赖 wsjtx / 硬件。固定种子、Wilson 95% CI（common/runner.py）。
 CSV 写 paper/experiments/。诚实注明：此为合成闭环门限，与 wsjtx 真实弱信号
-链路不直接类比（无衰落/多径/真实相位噪声；BP 为干净室自写 tanh）。
+链路不直接类比（无衰落/多径/真实相位噪声；BP 为独立实现 tanh）。
 """
 from __future__ import annotations
 

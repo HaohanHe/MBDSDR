@@ -1,6 +1,6 @@
 # FT8 第④步落地：C++ 解码层移植 + 读回接线
 
-HEAD=21cf42d。干净室自写 MIT，规范为 Python `mbdsdr_ai/ft8_codec.py`。
+HEAD=21cf42d。独立实现 MIT，规范为 Python `mbdsdr_ai/ft8_codec.py`。
 
 ## 1. 解码层 file:line
 

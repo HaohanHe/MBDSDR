@@ -2,7 +2,7 @@
 
 > HEAD=0d8728b 起。本批把 NanoVNA 的射频分析能力（阻抗换算 / 谐振 / TDR / 同轴损耗）落到
 > C++ 纯函数层，并新增两个 Agent 工具（`analyze_vna_resonance` / `vna_tdr_cable`）。
-> 干净室 MIT：公式为公开工程公式，机制参考自上游（nanovna-saver RFTools.py、
+> MIT 独立实现：公式为公开工程公式，机制参考自上游（nanovna-saver RFTools.py、
 > NanoVNA-App OneOfEleven Graphs.h、TDR.py），代码独立编写不抄实现。
 
 ## 1. 纯函数层 cpp/src/vna/vna_rf.{h,cpp}
@@ -260,7 +260,7 @@ mobile 64 / phase31 头部 64。无缺口。
 harness 加 MBD_SCROLL=end（所有 QScrollArea 滚到底）。OCR：bandCombo 选中态 hook 生效（无崩溃），但左 rail 是一条长表单（源与连接→频率→静噪/ANR→音频→录制），滚到底落在录制/静噪区，bandCombo（在频率组上部）被滚出框。诚实未拍选中频段 center/模式/带宽行——需定向 scroll 到频率组中值，留后续。真机步骤：手动开「频率」组选 bandCombo 第二项即见选中频段。
 
 ## 等效电路提取（vna_rf equivalentRlc）
-自写串联 RLC 提取：S11→Zin，串联谐振 |Z|min=R(ESR)，半功率点定 BW=fr/Q，L=RQ/(2πfr)，C=1/((2πfr)^2·L)。公开阻抗公式，干净室。
+自写串联 RLC 提取：S11→Zin，串联谐振 |Z|min=R(ESR)，半功率点定 BW=fr/Q，L=RQ/(2πfr)，C=1/((2πfr)^2·L)。公开阻抗公式，独立实现。
 合成 R=10Ω/L=1µH/C=100pF（fr~15.9MHz Q~10）钉扎：resonance 容差 ±1.5MHz、R ±3Ω、Q ±3。
 
 ## 终检（只读）

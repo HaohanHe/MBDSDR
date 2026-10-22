@@ -1,6 +1,6 @@
 # Phase35 L4：SDR++ 频谱/瀑布渲染深读（spectrum / waterfall / fft window / colormap / history）
 
-> 上游：`repos/sdrpp/core/src/gui/`（GPLv3）。本文只学机制，按干净室原则描述思路，不复制代码；所有结论给 `file:line`。
+> 上游：`repos/sdrpp/core/src/gui/`（GPLv3）。本文只学机制，按独立实现原则描述思路，不复制代码；所有结论给 `file:line`。
 > 对照我方：`cpp/src/ui/spectrum_display.{cpp,h}`、`cpp/src/ui/spectrum_render.h`、`cpp/src/dsp/power_spectrum.{cpp,h}`、`cpp/src/dsp/spectrum_engine.{cpp,h}`（MIT）。
 > 前置：`docs/learn/phase12/sdrpp-waterfall.md` 已画过管线总图；本篇补 Phase35 要求的"窗口类型 / 色板切换 / 历史保持与回放"细节，并做差距判定。
 
@@ -89,7 +89,7 @@ for (int i = 0; i < outSize; i++) {
     id += factor;
 }
 ```
-**取块最大，不取平均**——窄带 CW 峰在缩放下不被邻居平均掉。我方 `spectrum_render.h:82-107` `decimateBlockMaxRange` 已干净室重写，且：
+**取块最大，不取平均**——窄带 CW 峰在缩放下不被邻居平均掉。我方 `spectrum_render.h:82-107` `decimateBlockMaxRange` 已独立重写，且：
 - 用 `double scale` 而非上游 `float factor` 累加，避免长图漂移；
 - 非有限值 `std::isfinite` 过滤（`:103`）；
 - 每块至少 1 个源 bin（`:96` `if(b<=a) b=a+1`）。

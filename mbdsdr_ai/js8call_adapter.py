@@ -222,6 +222,20 @@ def register_js8call_tools(registry) -> None:
             return ToolResult(False, f"submodes 失败: {e}")
 
     def _encode(args: Dict[str, Any]) -> ToolResult:
+        # type 归一：schema 声明整数（0=CQ,1=呼叫,2=私聊,3=QRZ），
+        # 但模型/人口语会说 "CQ"/"QRZ" 等名称——两种都接受，
+        # 避免 int('CQ') 这类眯洋错误
+        _type_alias = {0: 0, 1: 1, 2: 2, 3: 3,
+                       "cq": 0, "call": 1, "呼叫": 1, "answer": 1,
+                       "private": 2, "私聊": 2, "qrz": 3, "info": 3}
+        _t_raw = args.get("type", 0)
+        if isinstance(_t_raw, str):
+            _k = _t_raw.strip().lower()
+            if _k not in _type_alias:
+                return ToolResult(False, f"JS8 type 无效: {_t_raw!r}"
+                                    "（可用 0=CQ/1=呼叫/2=私聊/3=QRZ）")
+            args = dict(args)
+            args["type"] = _type_alias[_k]
         try:
             # 纪律：真实呼号/网格只能来自用户输入或配置。下面只是明确虚构的占位值
             # （N0CALL/K1ABC 是 FCC 标准测试呼号段；EM12 是本仓 ft8 已使用的虚构测试网格），

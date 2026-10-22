@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // SSTV pure functions: frequency -> pixel mapping, VIS code decode, and the
-// zero-crossing instantaneous-frequency estimator. Clean-room re-derivation of
+// zero-crossing instantaneous-frequency estimator. Independent re-derivation of
 // the public SSTV waveform conventions (1500 Hz = black, 2300 Hz = white;
 // VIS: 30 ms bits, 1100 Hz = mark/1, 1300 Hz = space/0, even parity).
 // These are the stateless, fully testable core of mbdsdr_ai/sstv_decoder.py;

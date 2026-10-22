@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""FT8 第①步：8-FSK 调制器 + Costas 粗同步器确定性互测（干净室，仅公开协议）。
+"""FT8 第①步：8-FSK 调制器 + Costas 粗同步器确定性互测（独立实现，仅公开协议）。
 
 覆盖（机制证据见 docs/learn/phase63/ft8-mechanism-study.md）：
   - 调制器输出形状/类型/确定性（同 seed 逐样本一致）；

@@ -8,6 +8,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/app/tokens.dart';
+import 'package:mbdsdr_mobile/l10n/gen/app_localizations.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 import 'package:mbdsdr_mobile/widgets/connection_status_line.dart';
@@ -30,8 +31,13 @@ class FakeRadioApi implements RadioApi {
       throw UnimplementedError('${invocation.memberName} 本测试不需要');
 }
 
+/// 测试壳固定源语言 zh（gen-l10n delegates + 显式 locale），
+/// 既有状态行文案断言与源语言真值一致。
 Widget _wrap(Widget child) => MaterialApp(
       theme: ThemeData.dark(useMaterial3: true),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('zh'),
       home: Scaffold(body: Center(child: child)),
     );
 

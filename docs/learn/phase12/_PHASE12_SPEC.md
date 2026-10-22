@@ -4,7 +4,7 @@
 >
 > 用户明确要求：**大量子 agent 深度研究 SDR++，学透后落地到 MBDSDR**。
 >
-> 上游源码：repos/sdrpp（master 8c9f5ee，已克隆）。已定位：渲染/瀑布 `core/src/gui/widgets/waterfall.{cpp,h}` + `colormaps.{cpp,h}`；解调 `core/src/dsp/demod/{am,fm,ssb,broadcast_fm,cw,psk,gfsk,quadrature}.h`；信号处理 `core/src/dsp/correction/{dc_blocker,frequency_xlator,rx_vfo}.h` 与 `channel/`；UI/交互 `core/src/gui/{main_window,tuner,theme_manager,style}.{cpp,h}` + `widgets/`；插件 `root/modules/` + `core/src/module.{cpp,h}`；设备源插件需精读 agent 定位（hint 含线索）。SDR++ 为 **GPLv3**：只学机制/算法思路/交互范式，按干净室原则用自有代码实现，禁逐字复制。
+> 上游源码：repos/sdrpp（master 8c9f5ee，已克隆）。已定位：渲染/瀑布 `core/src/gui/widgets/waterfall.{cpp,h}` + `colormaps.{cpp,h}`；解调 `core/src/dsp/demod/{am,fm,ssb,broadcast_fm,cw,psk,gfsk,quadrature}.h`；信号处理 `core/src/dsp/correction/{dc_blocker,frequency_xlator,rx_vfo}.h` 与 `channel/`；UI/交互 `core/src/gui/{main_window,tuner,theme_manager,style}.{cpp,h}` + `widgets/`；插件 `root/modules/` + `core/src/module.{cpp,h}`；设备源插件需精读 agent 定位（hint 含线索）。SDR++ 为 **GPLv3**：只学机制/算法思路/交互范式，按独立实现原则用自有代码实现，禁逐字复制。
 
 ## 1. Wave1（六个精读 agent，并行）
 
@@ -27,7 +27,7 @@
 - cpp：ctest **95/95 基线不破** + 新增全绿；全量构建 0 错误。
 - Flutter：**305 基线不破** + 新增全绿；analyze 0。
 - Python：pytest 基线 225+7 不破。
-- git：只暂存相关文件（禁 add -A）；无"比赛/competition"、无密钥、无敏感信息、**GPL 干净室**（笔记注明许可、落地代码为自有实现）。
+- git：只暂存相关文件（禁 add -A）；无"比赛/competition"、无密钥、无敏感信息、**GPL 独立实现**（笔记注明许可、落地代码为自有实现）。
 - 推送：云环境无凭据——本地建好提交，推送待用户/外部。
 
 ## 4. 红线（一贯）

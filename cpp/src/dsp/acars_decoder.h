@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// ACARS (ARINC 618) packet-text decoder -- clean-room, public standard only.
+// ACARS (ARINC 618) packet-text decoder -- independent, public standard only.
 //
 // Mechanism (learned from public ARINC 618 description, re-derived):
 //   VHF airband ACARS carries 8-bit characters over MSK at 2400 bit/s with

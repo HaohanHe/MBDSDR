@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""CCSDS 数字接收链（干净室 MIT 独立实现）。
+"""CCSDS 数字接收链（MIT 独立实现 独立实现）。
 
 本模块依据 CCSDS 公开标准（TM 同步与信道编码）与 fsphil SSDV 公开包格式独立实现，
 提供通用的 SSDV over CCSDS/AFSK 数字接收能力。
@@ -114,7 +114,7 @@ def _parity7(x: int) -> int:
 # ===========================================================================
 
 class ConvolutionalEncoder:
-    """CCSDS K=7 r=1/2 系统卷积编码器（干净室实现）。
+    """CCSDS K=7 r=1/2 系统卷积编码器（独立实现）。
 
     约定：6 级移位寄存器 ``reg``（bit5=最近一次输入…bit0=最早）。新输入比特 ``b``
     与 ``reg`` 拼成 7-bit 向量 ``full = (b<<6) | reg``（bit6=当前输入），两支路输出
@@ -156,7 +156,7 @@ class ConvolutionalEncoder:
 # ===========================================================================
 
 class ViterbiDecoder:
-    """K=7 r=1/2 硬判决 Viterbi 解码器（干净室实现）。
+    """K=7 r=1/2 硬判决 Viterbi 解码器（独立实现）。
 
     - 分支度量：接收符号对与期望符号对的汉明距离。
     - ACS：状态打包 ``s'=((s<<1)|u)&63``；对下一状态 ``ns``，信息位 ``u=ns&1``，

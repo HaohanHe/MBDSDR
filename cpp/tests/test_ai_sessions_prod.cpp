@@ -29,6 +29,7 @@
 //        AND sets incomplete=true in index.json;
 //      - settling the reply clears the badge + the on-disk flag.
 #include <QApplication>
+#include "core/app_settings.h"
 #include <QComboBox>
 #include <QPushButton>
 #include <QPlainTextEdit>
@@ -94,8 +95,10 @@ int main(int argc, char** argv) {
         const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_aisess_" +
                                QString::number(QCoreApplication::applicationPid());
         QDir().mkpath(cfgDir);
-        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
-        QSettings s("MBDSDR", "MBDSDR");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfgDir);
+        qputenv("MBDSDR_SETTINGS_DIR", (cfgDir).toUtf8());
+        mbdsdr::core::AppSettings s;
         s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
         s.sync();
     }

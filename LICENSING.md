@@ -77,9 +77,9 @@ WTFPL（Do What The Fuck You Want To Public License，v2）及其同类极宽松
 
 | 组件 | 许可证 | 用途 | 接入方式 | 源码地址 |
 | --- | --- | --- | --- | --- |
-| NanoVNA-App（OneOfEleven） | WTFPL v2 | NanoVNA 文本/V2 协议参考与互操作实现依据 | 协议机制参考、干净室自写实现；学习源 | https://github.com/OneOfEleven/NanoVNA-App |
+| NanoVNA-App（OneOfEleven） | WTFPL v2 | NanoVNA 文本/V2 协议参考与互操作实现依据 | 协议机制参考、独立实现；学习源 | https://github.com/OneOfEleven/NanoVNA-App |
 
-引入原则：即使上游许可是 WTFPL，MBDSDR 核心实现仍保持干净室自写、MIT 发布；"直接引入"指
+引入原则：即使上游许可是 WTFPL，MBDSDR 核心实现仍保持独立实现、MIT 发布；"直接引入"指
 可作为参考与依赖使用其协议事实，**不把上游源码文件整体拷入主代码库**。真需随包分发上游文件
 时，保留其 WTFPL.txt 与归属登记。
 

@@ -64,4 +64,4 @@
 - 零代码改动（仅新增本文件）；未 git add/commit/push。
 - 所有"该补 UI"建议只接真实数据源（engine 现有 getter/signal），禁 mock；活动参数零硬编码（对话框/勾选输入）。
 - 不预置 TLE / 呼号（predict_passes 的 TLE 走 celestrak 在线拉取，本走查未改动）。
-- 全文无竞赛类字样；GPL 机制参考（SDR++ scanner/scheduler/network_sink）仅作 clean-room 对照说明，措辞中立。
+- 全文无竞赛类字样；GPL 机制参考（SDR++ scanner/scheduler/network_sink）仅作 independent 对照说明，措辞中立。

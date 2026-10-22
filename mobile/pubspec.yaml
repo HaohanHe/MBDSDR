@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:      # 官方 gen-l10n 本地化支撑（Material/Widgets 全局 delegate）
+    sdk: flutter
   provider: ^6.1.5            # 状态管理
   fftea: ^1.5.0               # 真实 FFT（rtl_tcp IQ -> 频谱）
   geolocator: ^14.1.1         # 真实 GPS 定位
@@ -17,7 +19,7 @@ dependencies:
   shared_preferences: ^2.5.5  # 设置持久化
   flutter_secure_storage: ^11.2.0  # API key 安全存储（加密、不落仓库）
   path_provider: ^2.1.0       # 应用文档目录（真实录音落盘落点）
-  intl: ^0.20.3
+  intl: any                   # 与 flutter_localizations 锁定的 intl 对齐（官方 i18n 模板做法），锁文件定死具体版本
 
 dev_dependencies:
   flutter_test:
@@ -27,3 +29,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # 官方 gen-l10n：pub get / run / test 时按 l10n.yaml 生成 AppLocalizations
+  # 到 lib/l10n/gen/（生成进源码目录，非 synthetic package）。
+  generate: true

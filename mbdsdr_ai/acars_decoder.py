@@ -573,7 +573,15 @@ def acars_parse_message(body) -> dict:
 
 def acars_decode_iq(audio, sample_rate: float = ACARS_DEFAULT_SAMPLE_RATE,
                     baud_rate: int = ACARS_BAUD_RATE) -> List[dict]:
-    """ACARS 接收解码入口：实数 FM 解调音频 -> 消息列表。"""
-    dec = ACARSDecoder(sample_rate, baud_rate)
-    return [m.to_dict() for m in dec.decode_audio(
-        np.asarray(audio, dtype=np.float64))]
+    """ACARS 接收解码入口：实数 FM 调调音频 -> 消息列表。
+
+    实现说明（诚实标注）：本模块自带的状态机解码路径
+    （ACARSFrameSynchronizer）在同模块自合成信号上**自环不通**（crc_ok=False），
+    而已验证实现（acars_protocol：相位搜索 + 极性对齐 + CRC 校验选择）可正确
+    解出同一帧。本入口因此委托已验证实现，保证对外行为与测试一致。
+    原生状态机路径保留与测试同在本文件内，待对真实采集的时域对齐问题
+    排查后再切回（切回前保留回归测试，避免静默回归）。
+    """
+    from .acars_protocol import acars_decode as _verified_decode
+    return _verified_decode(np.asarray(audio, dtype=np.float64),
+                             sample_rate=sample_rate, baud=baud_rate)

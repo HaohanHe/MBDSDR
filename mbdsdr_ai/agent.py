@@ -295,6 +295,28 @@ class MBDSDRAgent:
         self._register_orbit_tools()
         self._register_pointing_tools()
         self._register_doppler_tools()
+        # 轨道动力学原子积木（多普勒换算/取状态/STM/观测模型/RLS单步/校时/坐标）：
+        # 每块一个独立小工具，模型现场编排，不打包成「定轨工具」大黑盒。
+        from mbdsdr_ai.orbit_tools import register_orbit_brick_tools
+        register_orbit_brick_tools(self.tool_registry)
+        # 同步/调制解调原子积木（FLL锁频/符号同步/GMSK/频率轨迹）：
+        # 同样逐块注册，模型现场编排接收链，不打包成「解调工具」大黑盒。
+        from mbdsdr_ai.sync_tools import register_sync_brick_tools
+        register_sync_brick_tools(self.tool_registry)
+        # 射频前端与指向规划积木（星表/同步轨道指向/天线增益/指向容差/
+        # 链路预算/故障诊断/罐子馈源几何/遥测接收链参数）：
+        # 同样逐块注册，模型现场编排接收前端，不打包成「接收方案」大黑盒。
+        from mbdsdr_ai.acquisition import register_acquisition_tools
+        register_acquisition_tools(self.tool_registry)
+        # 统一调制/解调积木（ASK/BPSK/QPSK/8PSK 调制、匹配滤波解调、星座质量、
+        # 误码实测、RRC 抽头）：收敛全仓重复的调制实现到单一参数化内核。
+        from mbdsdr_ai.modulation import register_modulation_tools
+        register_modulation_tools(self.tool_registry)
+        # CCSDS 通用数字接收链积木（帧构造/比特解码/IQ 解码）：
+        # 此前仓内只有 SSDV 专用入口，像 ASTU-1 这类同为 CCSDS TM 体制的
+        # BPSK 遥测任务没有模型可用入口。
+        from mbdsdr_ai.ccsds_tools import register_ccsds_tools
+        register_ccsds_tools(self.tool_registry)
         self._register_time_sync_tools()
         self._register_constellation_tools()
         self._register_baseband_tools()
@@ -1089,11 +1111,17 @@ class MBDSDRAgent:
             f = AX25Frame.from_bytes(blob)
             if f is None:
                 return ToolResult(False, "帧过短或解析失败")
+            notes = []
+            if not f.digipeaters:
+                notes.append("无 digipeater 中继路径（地址字段只含源/目的呼号）")
+            if not f.fcs_valid:
+                notes.append("FCS(CRC-16/X.25) 校验未通过，帧可能被截断或误码")
             return ToolResult(True, json.dumps({
                 "source": f.source, "destination": f.destination,
                 "digipeaters": [c for c, _, _ in f.digipeaters],
                 "info": f.info.decode("latin-1", "replace"),
                 "fcs_valid": f.fcs_valid,
+                "note": "；".join(notes),
             }, ensure_ascii=False))
         self.tool_registry.register(
             name="ax25_decode",
@@ -1114,10 +1142,16 @@ class MBDSDRAgent:
                 audio = AFSKModem(sample_rate=sr).modulate(f)
             except Exception:  # noqa: BLE001
                 return ToolResult(False, "AFSK 调制失败：参数格式不正确，请检查 source/destination 呼号格式")
+            # payload 进 data（完整音频，可直接回灌给 afsk_demodulate）；
+            # content 只给摘要。之前音频被降采样到 2000 点且只在
+            # content 里，导致“编码→解码”链路无法回灌。
             return ToolResult(True, json.dumps({
                 "sample_rate": sr, "samples": len(audio),
-                "audio": np.round(audio[::max(1, len(audio)//2000)], 4).tolist(),
-            }, ensure_ascii=False))
+                "hint": "完整音频见 data.audio（未降采样），可直接传给 afsk_demodulate",
+            }, ensure_ascii=False), data={
+                "sample_rate": sr, "samples": len(audio),
+                "audio": np.asarray(audio, dtype=float).round(6).tolist(),
+            })
         self.tool_registry.register(
             name="afsk_modulate",
             description="AFSK 1200 Bell 202 调制：把 AX.25 帧调制成 mark=1200Hz/space=2200Hz "
@@ -1138,7 +1172,8 @@ class MBDSDRAgent:
                     "info": f.info.decode("latin-1", "replace"), "fcs_valid": f.fcs_valid}
                    for f in frames]
             return ToolResult(True, json.dumps({"frames": out, "count": len(out)},
-                                               ensure_ascii=False))
+                                               ensure_ascii=False),
+                              data={"frames": out, "count": len(out)})
         self.tool_registry.register(
             name="afsk_demodulate",
             description="AFSK 1200 Bell 202 解调：音频 -> 鉴频 -> 数字 PLL 位同步 -> "

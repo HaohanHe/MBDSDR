@@ -1,7 +1,7 @@
 # 气象卫星数字云图落地路径方案（LRPT 优先，MBDSDR 内部）
 
 > 日期：2026-10-10  作者：MBDSDR 工程轮（phase63）
-> 配套文档：`weather-sat-digital-study.md`（机制学习，干净室）
+> 配套文档：`weather-sat-digital-study.md`（机制学习，独立实现）
 > 约束：本轮**只设计方案，不写 cpp 代码**。下列伪代码仅为接口签名示意，
 > 不进 `cpp/src/` 或 `cpp/tests/`。后续轮在不参考 GPL 源码文本的前提下自写。
 > 目标缺口：补齐 P2 中气象卫星**数字**云图（LRPT 为主，HRPT/LRIT 后续）。
@@ -184,7 +184,7 @@ APT 汇合的天然接缝——数字链路只需负责"把软符号还原成 nd
 
 ## 6. 红线与纪律
 
-- **干净室**：MBDSDR 内所有数字云图代码由后续轮自写，不复制 SatDump/
+- **独立实现**：MBDSDR 内所有数字云图代码由后续轮自写，不复制 SatDump/
   meteor_demod/goestools 的 C/C++ 文本；本方案的 file:line 仅作机制证据。
 - **不预置呼号/电台**：云图无呼号；合成用占位。
 - **不发射**：全是被动接收，不接 PTT，不做 Tx。

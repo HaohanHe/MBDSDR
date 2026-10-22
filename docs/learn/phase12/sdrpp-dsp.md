@@ -1,6 +1,6 @@
 # SDR++ 信号处理子系统研习（correction / channel / decimation / 平滑）
 
-> 上游：`repos/sdrpp`（master `8c9f5ee`），**GPLv3**。本文只学机制/算法/管线划分，按干净室原则描述思路，
+> 上游：`repos/sdrpp`（master `8c9f5ee`），**GPLv3**。本文只学机制/算法/管线划分，按独立实现原则描述思路，
 > 不复制源码；所有引用均给 `file:line` 与极短示意（注释性引用），落地时以自有实现重写。
 > 对照基线：MBDSDR `cpp/src/dsp/`（MIT）。
 > 范围：`correction/{dc_blocker}.h`、`channel/{frequency_xlator,rx_vfo}.h`、
@@ -266,7 +266,7 @@ lin[i] *= 1.0f/depth;
 
 ## 8. 落地记录（gap L11/L12，phase13）
 
-> 干净室实现，MIT。所有引用仍为 GPLv3 机制说明，未复制上游代码。未 commit/push。
+> 独立实现，MIT。所有引用仍为 GPLv3 机制说明，未复制上游代码。未 commit/push。
 
 ### 8.1 L11：RxVFO 带宽短路 + 过渡带参数化 —— 已落地
 对应 §3 / 差距表 G3。上游 `rx_vfo.h:24` `filterNeeded=(_bandwidth!=_outSamplerate)`、

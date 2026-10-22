@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""LRPT QPSK 解调 + 帧同步确定性互测（干净室，第①步）。
+"""LRPT QPSK 解调 + 帧同步确定性互测（独立实现，第①步）。
 
 镜像 test_ft8_modem.py 风格：固定 seed round-trip + 频偏/时偏/噪声容忍 +
 纯噪声 0 虚警诚实空态。无 ctypes / C 扩展依赖。

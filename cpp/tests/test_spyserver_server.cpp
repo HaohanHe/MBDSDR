@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Offscreen self-connect test for the clean-room SpyServer server:
+// Offscreen self-connect test for the independent SpyServer server:
 //   start server -> a real local TCP client socket speaks the wire protocol
 //   from docs/learn/spyserver.md: HELLO -> DEVICE_INFO+CLIENT_SYNC handshake,
 //   SET_SETTING (IQ_FORMAT / DECIMATION / FREQUENCY / STREAMING_MODE / ENABLED),

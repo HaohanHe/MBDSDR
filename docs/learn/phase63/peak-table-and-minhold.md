@@ -1,10 +1,10 @@
-# Phase63 自动峰值表（核心）+ min-hold 显示模式（次要）干净室落地
+# Phase63 自动峰值表（核心）+ min-hold 显示模式（次要）独立落地地
 
 > 范围：在已有的跨帧峰跟踪（`dsp::detectPeaks` + `SpectrumDisplay::rescanPeaks` +
 > `peaksUpdated`）之上，补齐两块 SDR++ 机制——(1) 面向用户的**自动峰值表**（含
 > 强度 top-N、与调谐点的有符号 Δ、点击行直接调谐）；(2) **min-hold** 显示包络。
 > 全程 offscreen/CLI，未操控 GUI；只接真实帧 / 诚实空态，零 mock；活动参数走具名
-> 常量（token 或本地 `constexpr`），不裸数值；干净室学 SDR++ 机制、不抄其源码。
+> 常量（token 或本地 `constexpr`），不裸数值；学 SDR++ 机制、不抄其源码。
 
 ## 现状复用（动手前已侦察）
 

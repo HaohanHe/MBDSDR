@@ -13,13 +13,23 @@ import sys
 import os
 import time
 import json
+import threading
 import traceback
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from PySide6.QtCore import QObject, QThread, Signal, QTimer, Slot
 
 # 确保能导入上层目录的 mbdsdr_mcp_client
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Qt 无关的编排纯逻辑：端点解析 / schema 归一 / 可配置别名表 / 转发策略
+from mcp_protocol import (
+    MCP_TOOL_ALIASES,
+    annotate_write_gate,
+    firmware_tools_to_mcp_schema,
+    normalize_tool_call,
+    resolve_mcp_endpoint,
+)
 
 try:
     from mbdsdr_mcp_client import MBDSDRClient
@@ -46,15 +56,21 @@ class MCPWorker(QObject):
     error_occurred = Signal(str)        # 错误信息
     log_message = Signal(str)           # 日志
 
-    def __init__(self, host: str = "192.168.4.1", port: int = 81, parent=None):
+    def __init__(self, host: str = "", port: int = 0, parent=None):
         super().__init__(parent)
-        self.host = host
-        self.port = port
+        # 端点：显式参数 > 环境变量(MBDSDR_MCP_HOST/PORT) > tokens.MCP 默认值
+        self.host, self.port = resolve_mcp_endpoint(
+            host or None, port if port else None)
         self.client: Optional[MBDSDRClient] = None
         self.connected = False
         self.running = False
         self.poll_interval_ms = 1000  # 轮询间隔
         self._timer: Optional[QTimer] = None
+        # 客户端调用互斥锁：轮询（worker 线程）与 AI 线程的同步转发共用一个
+        # WebSocket，序列化收发避免响应 id 错位。
+        self._call_lock = threading.Lock()
+        # 设备 list_tools 报告的硬件工具注册名（硬件面事实源；未连接时为空）
+        self._mcp_tool_names: set = set()
         # UI 线程 emit request_tool → worker 线程在 call_tool 槽中执行（跨线程自动排队）
         self.request_tool.connect(self.call_tool)
 
@@ -80,11 +96,13 @@ class MCPWorker(QObject):
             self._timer = None
         if self.client:
             try:
-                self.client.close()
+                with self._call_lock:
+                    self.client.close()
             except Exception:
                 pass
             self.client = None
         self.connected = False
+        self._mcp_tool_names = set()
         self.connection_changed.emit(False, "已断开")
         self.log_message.emit("MCP Worker 已停止")
 
@@ -98,9 +116,10 @@ class MCPWorker(QObject):
 
         try:
             self.client = MBDSDRClient(self.host, self.port, timeout=5)
-            self.client.connect()
-            # 测试连接
-            version = self.client.get_version()
+            with self._call_lock:
+                self.client.connect()
+                # 测试连接
+                version = self.client.get_version()
             self.connected = True
             fw = version.get("firmware", "unknown")
             self.connection_changed.emit(True, f"已连接 {self.host}:{self.port} (固件 {fw})")
@@ -123,13 +142,15 @@ class MCPWorker(QObject):
                 return
 
             try:
-                status = self.client.get_status()
+                with self._call_lock:
+                    status = self.client.get_status()
                 self.status_updated.emit(status)
             except Exception as e:
                 self.log_message.emit(f"get_status 失败: {e}")
 
             try:
-                gps = self.client.get_gps()
+                with self._call_lock:
+                    gps = self.client.get_gps()
                 # 真实硬件：仅在有 fix 时标注 source="real"；
                 # 否则按"未连接"处理，emit 全 None 字典，避免 UI 用旧值/0 伪装。
                 if isinstance(gps, dict) and gps.get("fix"):
@@ -153,7 +174,8 @@ class MCPWorker(QObject):
                 })
 
             try:
-                imu = self.client.get_imu()
+                with self._call_lock:
+                    imu = self.client.get_imu()
                 # 真实硬件：有有效 acc 数据才标注 source="real"；
                 # 否则 emit 全 None 字典。
                 if isinstance(imu, dict) and imu.get("acc") is not None:
@@ -185,7 +207,10 @@ class MCPWorker(QObject):
 
     @Slot(str, dict)
     def call_tool(self, tool_name: str, params: Dict):
-        """调用 MCP 工具。只走真实硬件路径；未连接时返回错误。"""
+        """调用 MCP 工具（异步路径：UI 请求 → worker 线程执行 → tool_result 信号）。
+
+        只走真实硬件路径；未连接时返回错误。软件工具名不二次转发（skipped）。
+        """
         self.log_message.emit(f"调用工具: {tool_name} params={params}")
 
         try:
@@ -199,29 +224,65 @@ class MCPWorker(QObject):
             self.error_occurred.emit(f"工具调用失败: {e}")
             self.tool_result.emit(tool_name, {"error": str(e)})
 
+    def call_tool_sync(self, tool_name: str, params: Dict) -> Dict:
+        """同步调用硬件工具（供 AI 工具环内的 MCP handler 用，任意线程可调）。
+
+        与轮询共用 _call_lock，序列化对同一 WebSocket 的收发；不 emit
+        tool_result（结果由调用方直接拿到，避免与步骤卡重复记账）。
+        """
+        if not (self.client and self.connected):
+            return {"error": "未连接", "success": False}
+        try:
+            with self._call_lock:
+                return self._real_tool(tool_name, params)
+        except Exception as e:
+            return {"error": str(e), "success": False}
+
+    def fetch_mcp_tools(self) -> List[Dict]:
+        """从设备 list_tools 取硬件工具 schema（MCP 标准形状）。
+
+        顺带记录注册名（硬件面事实源）。未连接/失败时返回空列表——
+        不臆造工具 schema；调用方按空态如实提示。
+        """
+        if not (self.client and self.connected):
+            return []
+        try:
+            with self._call_lock:
+                raw = self.client.list_tools()
+        except Exception as e:
+            self.log_message.emit(f"list_tools 失败: {e}（不注册任何工具）")
+            return []
+        tools = annotate_write_gate(
+            firmware_tools_to_mcp_schema(raw if isinstance(raw, list) else []))
+        self._mcp_tool_names = {t["name"] for t in tools}
+        self.log_message.emit(f"设备报告 {len(tools)} 个硬件工具")
+        return tools
+
+    def is_hardware_tool(self, tool_name: str) -> bool:
+        """是否属于硬件面（设备注册名 ∪ 可配置别名表）——转发链的准入判据。"""
+        name = (tool_name or "").strip()
+        return bool(name) and (name in self._mcp_tool_names
+                               or name in MCP_TOOL_ALIASES)
+
     def _real_tool(self, tool_name: str, params: Dict) -> Dict:
-        """调用真实硬件工具。"""
+        """通用 JSON-RPC 转发：只转发硬件面，软件工具不二次转发。
+
+        - 转发目标由 normalize_tool_call 决定（设备注册名或可配置别名表，
+          不再内联写死方法名映射）；
+        - 非硬件面的调用如实返回 skipped（不是失败，不制造「未知工具」噪声）。
+        """
         if not self.client:
             return {"error": "客户端未初始化"}
 
-        method_map = {
-            "tune_fm": lambda p: self.client.tune_fm(p.get("freq_mhz", 98.5)),
-            "tune_am": lambda p: self.client.tune_am(p.get("freq_khz", 980)),
-            "set_volume": lambda p: self.client.set_volume(p.get("volume", 30)),
-            "start_record": lambda p: self.client.start_record(),
-            "stop_record": lambda p: self.client.stop_record(),
-            "get_version": lambda p: self.client.get_version(),
-            "reboot": lambda p: self.client.reboot(),
-            "list_tools": lambda p: self.client.list_tools(),
-            # 通用 JSON-RPC 转发：AI 层注册的 SDR 工具（不直接操作硬件，由远端 MCP 服务路由）
-            "tune_sdr": lambda p: self.client.call("tune_sdr", p).get("result", {}),
-            "sdr_set_frequency": lambda p: self.client.call("sdr_set_frequency", p).get("result", {}),
-        }
+        plan = normalize_tool_call(tool_name, params, self._mcp_tool_names)
+        if plan is None:
+            return {"skipped": True, "success": True,
+                    "reason": f"软件工具 {tool_name} 不二次转发"}
 
-        if tool_name in method_map:
-            return method_map[tool_name](params)
-        else:
-            return {"error": f"未知工具: {tool_name}"}
+        resp = self.client.call(plan["method"], plan["params"])
+        if "error" in resp:
+            return {"error": resp["error"], "success": False}
+        return resp.get("result", {})
 
 
 # ============================================================================
@@ -235,8 +296,9 @@ class MCPWorkerManager:
         self.thread: Optional[QThread] = None
         self.worker: Optional[MCPWorker] = None
 
-    def start(self, host: str = "192.168.4.1", port: int = 81) -> MCPWorker:
-        """启动 Worker 线程。"""
+    def start(self, host: str = "", port: int = 0) -> MCPWorker:
+        """启动 Worker 线程。端点缺省时按 mcp_protocol.resolve_mcp_endpoint
+        解析（环境变量可覆盖 tokens.MCP 默认值）。"""
         self.stop()  # 先停止旧的
 
         self.thread = QThread()
