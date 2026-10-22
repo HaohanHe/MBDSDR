@@ -98,7 +98,7 @@ NAVTEX（`get_navtex_messages`）、POCSAG（`get_pocsag_messages`）、VOR
 本轮对 SatDump / wsjtx / fldigi / multimon / nrsc5 HDC 等 GPL 外部能力的处理：
 - **未实现**，登记为 C 类。仅预留「独立进程编排」方向（stdin/stdout/临时文件协议），
   后续若接入须按 §2 走子进程 + 通用数据格式，不在本进程链接 GPL 库。
-- 本仓所有长尾解码器均为依据公开标准独立编写的 MIT 实现（clean-room），
+- 本仓所有长尾解码器均为依据公开标准独立编写的 MIT 实现（independent），
   未抄 GPL 源码。
 
 ---

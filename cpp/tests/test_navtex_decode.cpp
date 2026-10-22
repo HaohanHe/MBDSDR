@@ -2,7 +2,7 @@
 //
 // NAVTEX / SITOR-B decoder unit tests (QtTest).
 //
-// SYNTHETIC FIXTURE -- the encoder below is a test-only, clean-room model of
+// SYNTHETIC FIXTURE -- the encoder below is a test-only, independent model of
 // SITOR-B over 2-FSK (100 baud, +/-85 Hz). It drives the REAL NavtexDecoder
 // (which owns a real FskDemod through a quadrature discriminator + Mueller-
 // Muller timing recovery) and checks:

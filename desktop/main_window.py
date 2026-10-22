@@ -8,11 +8,14 @@ MBDSDR 桌面端主窗口
 
 import os
 import sys
+import json
 import math
 import time
 import tempfile
 from datetime import datetime
 from typing import Optional
+
+import l10n   # i18n 加载层（Qt Linguist）；同级裸导入，双上下文由 desktop/__init__ 垫片保证
 
 import numpy as np
 
@@ -48,6 +51,7 @@ from mode_registry import (
 from status_panel import StatusPanel
 from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
+from mcp_protocol import is_write_tool
 from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
 from module_panel import ModulePanel
 # CarWith 设计体系：token 单例 / 面板注册表 / Dock 布局管理器
@@ -230,6 +234,10 @@ class _SweepWorker(QThread):
 class MainWindow(QMainWindow):
     """MBDSDR 主窗口。"""
 
+    # AI 工具环内执行完硬件调用后的 UI 同步（MCP handler 跑在 AI 后台线程，
+    # 经 Qt 信号排队回 UI 线程改控件，跨线程安全）
+    _ai_tool_done = Signal(str, dict)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MBDSDR - AI 定义无线电")
@@ -258,6 +266,8 @@ class MainWindow(QMainWindow):
         touch_manager().touch_mode_changed.connect(self._on_touch_mode_changed)
         self._worker_manager = MCPWorkerManager()
         self._worker: Optional[object] = None
+        # AI 工具环内完成的硬件调用 → 回 UI 线程同步控件
+        self._ai_tool_done.connect(self._sync_ui_for_tool)
         self._record_timer: Optional[QTimer] = None
         self._record_seconds = 0
         self._sky_update_timer: Optional[QTimer] = None
@@ -673,13 +683,13 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # 连接按钮（未连接时高亮引导用户点击；连接成功后取消高亮）
-        self.connect_btn = QPushButton("连接")
+        self.connect_btn = QPushButton(self.tr("连接"))
         self.connect_btn.setMinimumHeight(28)
         self.connect_btn.setStyleSheet(self._connect_button_qss())
         self.connect_btn.clicked.connect(self._connect_dialog)
         toolbar.addWidget(self.connect_btn)
 
-        self.disconnect_btn = QPushButton("断开")
+        self.disconnect_btn = QPushButton(self.tr("断开"))
         self.disconnect_btn.setMinimumHeight(28)
         self.disconnect_btn.clicked.connect(self._disconnect)
         self.disconnect_btn.setEnabled(False)
@@ -708,13 +718,24 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # 主题切换
-        toolbar.addWidget(QLabel(" 主题: "))
+        toolbar.addWidget(QLabel(self.tr(" 主题: ")))
         self.theme_combo = QComboBox()
         for name, theme in THEMES.items():
             self.theme_combo.addItem(theme.display_name, name)
         self.theme_combo.setMinimumHeight(28)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_combo_changed)
         toolbar.addWidget(self.theme_combo)
+
+        # UI 语言（i18n）：语言自称不翻译；持久化 ui_language，诚实提示重启生效
+        # （翻译器只在启动时装载——与 C++ 桌面端同一口径，不做假实时切换）。
+        toolbar.addWidget(QLabel(self.tr(" 语言: ")))
+        self.lang_combo = QComboBox()
+        for tag in l10n.SUPPORTED_UI_LANGUAGES:
+            self.lang_combo.addItem(l10n.LANGUAGE_SELF_NAMES[tag], tag)
+        self.lang_combo.setMinimumHeight(28)
+        self.lang_combo.setToolTip(self.tr("更改语言后重启应用生效"))
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_combo_changed)
+        toolbar.addWidget(self.lang_combo)
 
         toolbar.addSeparator()
 
@@ -1475,6 +1496,18 @@ class MainWindow(QMainWindow):
         if theme_name:
             self._apply_theme(theme_name)
 
+    def _on_lang_combo_changed(self, index: int):
+        """UI 语言切换：持久化 ui_language；诚实提示重启生效。"""
+        tag = self.lang_combo.itemData(index)
+        if not tag or getattr(self, "_restoring_settings", False):
+            return
+        self.settings.set("ui_language", l10n.normalize_ui_language(tag))
+        # 翻译器只在启动时装载（与 C++ 桌面端同口径）——不做假实时切换。
+        try:
+            self.statusBar().showMessage(self.tr("更改语言后重启应用生效"), 5000)
+        except Exception:
+            pass
+
     def _on_layout_preset_changed(self, index: int):
         """顶栏布局下拉：切换内置 / 用户自定义布局。"""
         name = self.layout_combo.itemData(index)
@@ -1684,6 +1717,16 @@ class MainWindow(QMainWindow):
             pass
         try:
             self.control_panel.set_agc(bool(s.get("agc_enabled", True)))
+        except Exception:
+            pass
+        # UI 语言下拉回填（blockSignals，不触发落盘回写）
+        try:
+            idx = self.lang_combo.findData(
+                l10n.normalize_ui_language(s.get("ui_language", "zh")))
+            if idx >= 0:
+                self.lang_combo.blockSignals(True)
+                self.lang_combo.setCurrentIndex(idx)
+                self.lang_combo.blockSignals(False)
         except Exception:
             pass
         # 带宽：0/缺省 = 随模式自动（set_mode 已套好该模式默认带宽），非 0 才显式覆盖
@@ -2457,6 +2500,8 @@ class MainWindow(QMainWindow):
             self.conn_label.setText(f"  状态: {message}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(True))
             self.status_conn.setText(message)
+            # 硬件就绪：把设备报告的工具 schema 注册进 AI agent
+            self._sync_ai_mcp_tools()
         else:
             self.conn_label.setText(f"  状态: {message}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(False))
@@ -2828,13 +2873,19 @@ class MainWindow(QMainWindow):
                 pass
 
     def _init_ai_agent_from_config(self):
-        """从 ~/.mbdsdr/config.json 读 API 配置并初始化 AI agent。"""
+        """从 ~/.mbdsdr/config.json 读 API 配置并初始化 AI agent。
+
+        配置读取经 normalize_config_keys（旧键 api_base → base_url 一次性迁移），
+        与 ai_panel 的写入键统一；随后接线 MCP 硬件工具注册。
+        """
         import json as _json, os
         cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
         try:
             if os.path.exists(cfg_path):
                 with open(cfg_path) as f:
                     cfg = _json.load(f)
+                from mbdsdr_ai.config import normalize_config_keys
+                cfg = normalize_config_keys(cfg)
                 if cfg.get("api_key"):
                     self.ai_panel.init_agent(
                         api_key=cfg.get("api_key", ""),
@@ -2842,18 +2893,81 @@ class MainWindow(QMainWindow):
                         model=cfg.get("model", ""),
                     )
         except Exception:
-            pass  # 无配置则保持规则降级，不崩溃
+            pass  # 无配置则不启用 AI，不崩溃
+        # 接线「桌面 AI → 硬件工具」编排：取设备工具 schema 注册进 agent
+        self._sync_ai_mcp_tools()
+
+    def _sync_ai_mcp_tools(self):
+        """把 MCP 硬件工具 schema 注册进 AI agent（编排链路接线点）。
+
+        时机：AI agent 初始化后、硬件连接成功后各调一次。工具 schema 只来自
+        真实设备 list_tools——未连接时如实空态（不注册、不臆造 schema）；
+        agent 尚未创建时 ai_panel 挂起缓存，配好 API Key 自动补注册。
+        """
+        try:
+            worker = self._worker
+            tools = worker.fetch_mcp_tools() if (
+                worker is not None and worker.connected) else []
+            self.ai_panel.register_mcp_tools(tools, self._mcp_call_handler)
+        except Exception:
+            pass  # 接线失败不崩主窗口；下次连接成功时会重试
+
+    def _mcp_call_handler(self, tool_name: str, args: dict) -> dict:
+        """AI 工具环内执行硬件调用（register_mcp_tools 注册的 MCP handler）。
+
+        在 AI 后台线程被调用：经 worker.call_tool_sync 走通用 client.call
+        直接落到硬件（不再"先执行软件工具再事后转发"）；完成后 emit
+        _ai_tool_done 排队回 UI 线程同步频谱/音量控件。返回 dict 由
+        ToolRegistry 包装成 ToolResult，success/content 如实反映硬件结果。
+
+        红线：模型驱动的硬件写操作必走 arm_manual 人工门（AGENTS.md §3）；
+        只读工具不受限。UI 直操（_on_tune_* 等）是用户自己的手，不走此门。
+        """
+        if is_write_tool(tool_name) and (args or {}).get("arm_manual") is not True:
+            return {
+                "success": False,
+                "error": "manual_gate",
+                "content": f"手动模式：未执行 {tool_name}（写操作需显式传 arm_manual=true）",
+                "next_step": "先向用户确认该写操作，确认后以 arm_manual=true 重试；"
+                             "只读查询不受此门限制。",
+            }
+        worker = self._worker
+        if worker is None:
+            return {"success": False, "error": "not_connected",
+                    "content": "硬件未连接：MCP 硬件工具需先连接 ai-sdr Mini"}
+        raw = worker.call_tool_sync(tool_name, args or {})
+        ok = "error" not in raw and not raw.get("skipped")
+        self._ai_tool_done.emit(tool_name, dict(args or {}))
+        result = {"success": ok, "content": json.dumps(raw, ensure_ascii=False)}
+        if not ok:
+            result["error"] = (str(raw.get("error", "") or "")
+                               or str(raw.get("reason", "") or "hardware_error"))
+        return result
+
+    def _sync_ui_for_tool(self, tool_name: str, params: dict):
+        """硬件调用完成后的 UI 同步（频谱中心频 / 音量控件跟随真实调用）。"""
+        if tool_name == "tune_fm":
+            freq = params.get("freq_mhz", tokens().AI["demo_freq_mhz"])
+            self.spectrum.set_center_freq(freq)
+            self.control_panel.set_freq_fm(freq)
+        elif tool_name == "set_volume":
+            self.control_panel.set_volume(params.get("volume", 30))
 
     @Slot(str, dict)
     def _on_ai_tool_call(self, tool_name: str, params: dict):
-        if self._worker:
-            self._worker.request_tool.emit(tool_name, params)
-        # 同步更新 UI
-        if tool_name == "tune_fm":
-            self.spectrum.set_center_freq(params.get("freq_mhz", 98.5))
-            self.control_panel.set_freq_fm(params.get("freq_mhz", 98.5))
-        elif tool_name == "set_volume":
-            self.control_panel.set_volume(params.get("volume", 30))
+        """AI 面板的工具请求（只含"工具环未执行"的 MCP 硬件名）。
+
+        只转发 MCP 注册名（硬件面）；软件工具不过二次转发、不产生 FAIL 噪声。
+        AI 来源的写请求同样过 arm_manual 人工门（红线）；UI 直操不走此链。
+        """
+        self._sync_ui_for_tool(tool_name, params)
+        if not (self._worker and self._worker.is_hardware_tool(tool_name)):
+            return
+        if is_write_tool(tool_name) and (params or {}).get("arm_manual") is not True:
+            self.ai_panel._add_system_message(
+                f"手动模式：未转发 {tool_name}（写操作需显式 arm_manual=true）")
+            return
+        self._worker.request_tool.emit(tool_name, params)
 
     @Slot(float)
     def _on_spectrum_freq_changed(self, freq: float):
@@ -4849,7 +4963,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "关于 MBDSDR",
             "<h3>MBDSDR - AI 定义无线电</h3>"
-            "<p>开源 MIT 许可的软件定义无线电平台（干净室独立实现）</p>"
+            "<p>开源 MIT 许可的软件定义无线电平台（独立实现）</p>"
             "<p>呼号：在「设置」中配置</p>"
             "<p>对标 GNU Radio / SDR++ / SatDump 等开源项目能力，独立实现（未包含其源代码）</p>"
             "<p>支持 MCP 工具调用，任意 AI IDE 可直接控制硬件</p>"
@@ -5333,7 +5447,8 @@ class MainWindow(QMainWindow):
                     "y": self.y(),
                     "maximized": self.isMaximized(),
                 },
-                "current_freq_mhz": getattr(self.control_panel, '_current_freq_fm', 98.5),
+                "current_freq_mhz": getattr(self.control_panel, '_current_freq_fm',
+                                            tokens().AI["demo_freq_mhz"]),
                 "current_mode": getattr(self.control_panel, '_current_mode', 'FM'),
                 "volume": getattr(self.control_panel, 'volume_slider', None).value() if hasattr(self.control_panel, 'volume_slider') else 30,
                 "theme": self._current_theme,

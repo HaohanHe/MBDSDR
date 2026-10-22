@@ -50,7 +50,7 @@ hangover 内必须释放）锁定。
 | 默认频率 | 88.5 Hz | 最常用 PL 码 |
 | 默认状态 | disabled | 未使能时 `ctcssPresent()` 恒 false |
 
-## 4. 与 SDR++ `ctcss_squelch.h` 的机制对照（干净室）
+## 4. 与 SDR++ `ctcss_squelch.h` 的机制对照（独立实现）
 
 SDR++ 的 `core/src/dsp/noise_reduction/ctcss_squelch.h`（GPL）实现了同类
 亚音静噪。本实现只参考其**机制概念**——"在解调音频上对目标频率做窄带

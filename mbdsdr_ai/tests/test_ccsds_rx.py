@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""CCSDS 数字接收链确定性测试（干净室；仅依赖本仓 MIT 模块 + numpy）。
+"""CCSDS 数字接收链确定性测试（独立实现；仅依赖本仓 MIT 模块 + numpy）。
 
 覆盖：
   1. 卷积 K=7 r=1/2 → Viterbi 干净往返

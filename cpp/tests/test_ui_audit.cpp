@@ -9,6 +9,7 @@
 //   3. Mode/bandwidth coverage rule re-check: a manually-set bandwidth is
 //      preserved across a mode switch; an untouched default is adopted.
 #include <QApplication>
+#include "core/app_settings.h"
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QSettings>
@@ -41,8 +42,10 @@ void TestUiAudit::initTestCase() {
     const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_uiaudit_" +
                            QString::number(QCoreApplication::applicationPid());
     QDir().mkpath(cfgDir);
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
-    QSettings s("MBDSDR", "MBDSDR");
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfgDir);
+    qputenv("MBDSDR_SETTINGS_DIR", (cfgDir).toUtf8());
+    mbdsdr::core::AppSettings s;
     s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
     s.sync();
 }

@@ -29,6 +29,7 @@ class QCheckBox;
 class QFrame;
 class QTabWidget;
 class QPlainTextEdit;
+class QTreeWidget;
 class QTableWidget;
 class QLineEdit;
 class QStackedWidget;
@@ -443,6 +444,9 @@ private:
 
     // Left panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;
+    // 快速调谐：人类友好频率输入（"137.62M"/7050k/裸数=MHz），core/freq_input 解析。
+    QLineEdit*      freqQuickEdit_ = nullptr;
+    QLabel*         freqQuickHint_ = nullptr;
     QComboBox*      stepCombo_  = nullptr;
     QComboBox*      tuneHistCombo_ = nullptr;   // "最近" recent-frequency jump list
     int             currentStepHz_ = 10000;   // tuning nudge / spinbox step
@@ -470,12 +474,16 @@ private:
 
     // ---- First-run light onboarding card (Phase 21 honest empty state) ------
     // Shown only when QSettings has no "ui/onboardingDismissed" record (first ever
-    // launch, no hardware yet). Steps: ①连接 RTL-SDR ②调谐频率 ③选解调模式. The
-    // "去连接" entry drives the real connect button; the ✕ "不再提示" writes the
-    // QSettings key permanently. Never blocking / never modal.
+    // launch, no hardware yet). 每步带真动作按钮（仪器民主化：新手 3 分钟出第一
+    // 个结果）：①连接设备/打开捕获文件（真实控件路径）②去调谐（聚焦快速调谐，
+    // 说人话输入）③选解调；✕ "不再提示" 写 QSettings 键永久关闭。Never blocking
+    // / never modal。
     QFrame*         guideCard_ = nullptr;
     QPushButton*    guideDismissBtn_ = nullptr;
     QPushButton*    guideConnectBtn_ = nullptr;
+    QPushButton*    guideFileBtn_ = nullptr;
+    QPushButton*    guideTuneBtn_ = nullptr;
+    QPushButton*    guideDemodBtn_ = nullptr;
     QLabel*         guideStepsLabel_ = nullptr;
     void            buildGuideCard();
     void            dismissGuideCard();
@@ -749,6 +757,9 @@ private:
     // Autonomous multi-step task: process-observable step list + async runner.
     ui::TaskStepsView* aiTaskSteps_ = nullptr;
     QLabel*         aiTaskHint_  = nullptr;
+    // A2UI updateDataModel 渲染出口（断环修复）：AI 写入的 component_data
+    // 数据槽在此实时呈现，不再"写入即消失"。空槽诚实显示空态。
+    QTreeWidget*    aiComponentData_ = nullptr;
     QComboBox*      aiTemplateCombo_ = nullptr;  // which deterministic task to run
     QDoubleSpinBox* aiParamLowHz_ = nullptr;      // sweep band low (Hz)
     QDoubleSpinBox* aiParamHighHz_ = nullptr;     // sweep band high / target (Hz)
@@ -776,6 +787,7 @@ private:
     QString aiCurSessionId_;
 
     void aiRenderChat();              // rebuild aiChat_ from store + notes + transient
+    void refreshComponentDataCard();  // pull workspace component_data -> 数据卡
     void aiRefreshSessionCombo();
     void onAiNewSession();
     void onAiRenameSession();

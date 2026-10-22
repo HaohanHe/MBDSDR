@@ -61,7 +61,7 @@ void rtlSetLibOpsForTesting(const RtlLibOps* ops);
 // by any subsequent rtlSetLibOpsForTesting() call.
 void rtlForceNoLibOpsForTesting();
 
-// Total center-frequency write attempts (first write + retries). Clean-room
+// Total center-frequency write attempts (first write + retries). Independent
 // re-derivation of the SDR++ RTL2832 PLL write-loss defence (upstream retries
 // up to 10: repos/sdrpp/source_modules/rtl_sdr_source/src/main.cpp:344-359).
 // We cap at 5: every attempt is followed by a get_center_freq readback, and an

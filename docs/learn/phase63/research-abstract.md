@@ -1,7 +1,7 @@
 # MBDSDR — English research-facing abstract (off-repo narrative material)
 
 > 用途：对外学术职业口径的英语研究向摘要素材（独立文档，不进入 README；README 保持工程作品形态）。
-> 只整理素材，不写论文正文；干净室 MIT；实证状态诚实标注，不伪造完成。
+> 只整理素材，不写论文正文；MIT 独立实现；实证状态诚实标注，不伪造完成。
 
 **MBDSDR** is an instrument-democratization research platform: it turns
 software-defined-radio (SDR) and vector-network-analyzer (VNA) workflows into
@@ -41,7 +41,7 @@ what the user gets, never about the author.
 
 ## Design stance
 
-- Clean-room **MIT** implementation; GPL upstreams (e.g. dump1090, nanovna-saver,
+- Independent **MIT** implementation; GPL upstreams (e.g. dump1090, nanovna-saver,
   WSJT-X) consulted for output shapes / public formulas only, never copied.
 - Real data only, honest empty states; synthetic injection is test-fixture only.
 - No preset TLE / callsigns / stations in code; activity parameters live in docs.

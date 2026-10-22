@@ -2,8 +2,9 @@
 // 名称 / 一句话说明 / read|write 标记，并诚实标注哪些是移动端当前已接入。
 //
 // 诚实性：本页**不构造 AiTool、不发请求、不执行任何动作**，纯只读展示。
-// 「移动端已接入」仅指与移动端 buildRadioTools() 同名的工具；其余为桌面端能力，
-// 移动端未实现，绝不冒充。无数据时（catalog 为空）走 EmptyState。
+// 「已接入」仅指与移动端 buildRadioTools() 同名的工具；其余条目标注
+// 「桌面端提供 / 移动端未接入」——诚实缺口，绝不冒充。无数据时（catalog 为空）
+// 走 EmptyState。
 library;
 
 import 'package:flutter/material.dart';
@@ -40,8 +41,9 @@ class ToolsCatalogPage extends StatelessWidget {
                   padding: const EdgeInsets.all(AppTokens.spacingM),
                   child: Text(
                     '桌面端共 ${all.length} 个 Agent 工具；本页只读对照。'
-                    '「已接入」表示与移动端 AI 当前注册工具同名；其余为桌面端能力，'
-                    '移动端未实现。read=只读 / write=写动作（手动模式被拦截）。',
+                    '「已接入」表示与移动端 AI 当前注册工具同名；其余标注'
+                    '「桌面端提供 / 移动端未接入」，是诚实缺口而非能力声明。'
+                    'read=只读 / write=写动作（手动模式被拦截）。',
                     style: AppTokens.auxiliary,
                   ),
                 ),
@@ -70,10 +72,41 @@ class _ToolTile extends StatelessWidget {
       ),
       title: Text(entry.name, style: AppTokens.mono),
       subtitle: Text(entry.description, style: AppTokens.auxiliary),
-      trailing: Text(
-        implemented ? '已接入' : (entry.write ? 'write' : 'read'),
-        style: AppTokens.auxiliary.copyWith(
-          color: implemented ? AppTokens.success : AppTokens.textSecondary,
+      // 右侧两层诚实标注：read/write 属性 + 接入状态。
+      // 未接入条目明示「桌面端提供 / 移动端未接入」，绝不只留一个 read/write
+      // 标记让读者误以为移动端也能调。
+      trailing: SizedBox(
+        width: 96,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: <Widget>[
+            Text(
+              entry.write ? 'write' : 'read',
+              style: AppTokens.auxiliary.copyWith(
+                color: entry.write ? AppTokens.warning : AppTokens.success,
+              ),
+            ),
+            if (implemented)
+              Text(
+                '已接入',
+                style: AppTokens.auxiliary.copyWith(color: AppTokens.success),
+              )
+            else ...<Widget>[
+              Text(
+                '桌面端提供',
+                style: AppTokens.auxiliary.copyWith(
+                  color: AppTokens.textSecondary,
+                ),
+              ),
+              Text(
+                '移动端未接入',
+                style: AppTokens.auxiliary.copyWith(
+                  color: AppTokens.textSecondary,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

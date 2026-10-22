@@ -32,8 +32,10 @@ static const QString kOut =
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        QDir::tempPath() + "/mbdsdr_shot_skytime");
+    qputenv("MBDSDR_SETTINGS_DIR", (QDir::tempPath() + "/mbdsdr_shot_skytime").toUtf8());
     app.setStyleSheet(tokens::buildDarkQss());
 
     // ---- 1) Sky preview state + selected trajectory (standalone, full size) --

@@ -82,7 +82,9 @@ def main():
 
     parser = argparse.ArgumentParser(description="MBDSDR - AI 定义无线电桌面端")
     parser.add_argument("--host", type=str, default=None, help="设备 IP 地址")
-    parser.add_argument("--port", type=int, default=81, help="设备端口")
+    parser.add_argument("--port", type=int, default=None,
+                        help="设备端口（缺省用 tokens.MCP 默认值，"
+                             "环境变量 MBDSDR_MCP_PORT 可覆盖）")
     parser.add_argument("--theme", type=str, default=DEFAULT_THEME,
                         choices=["default", "dark", "high_contrast"],
                         help="主题")
@@ -106,6 +108,17 @@ def main():
     theme = get_theme(args.theme)
     theme.apply(app)
 
+    # i18n：按 ui_language 装翻译器（Qt Linguist .qm），必须先于任何窗口构造。
+    # 源语言 zh 或 .qm 缺失时 l10n 内部诚实回退源语言并提示一次；加载异常
+    # 绝不拦启动（仅告警）。
+    try:
+        import l10n as _l10n
+        from settings import DesktopSettings as _DesktopSettings
+        _l10n.install_translator(app, _DesktopSettings.load().get("ui_language"))
+    except Exception as _l10n_ex:  # noqa: BLE001
+        print(f"[mbdsdr] i18n: 加载失败，保持源语言 zh: {_l10n_ex}",
+              file=sys.stderr)
+
     # 创建主窗口
     window = MainWindow()
     window.app = app  # 传递 app 引用给主题切换
@@ -118,10 +131,14 @@ def main():
         app.setWindowIcon(QIcon(icon_path))
         window.setWindowIcon(QIcon(icon_path))
 
-    # 如果指定了 host，延迟连接真实网络硬件
+    # 如果指定了 host，延迟连接真实网络硬件（端点解析：显式参数 >
+    # 环境变量 MBDSDR_MCP_HOST/PORT > tokens.MCP 默认值，不再散落写死）
+    mcp_host, mcp_port = None, None
     if args.host:
         from PySide6.QtCore import QTimer
-        QTimer.singleShot(500, lambda: window._connect_real(args.host, args.port))
+        from mcp_protocol import resolve_mcp_endpoint
+        mcp_host, mcp_port = resolve_mcp_endpoint(args.host, args.port)
+        QTimer.singleShot(500, lambda: window._connect_real(mcp_host, mcp_port))
 
     window.show()
 
@@ -130,7 +147,7 @@ def main():
     print("  版本: 0.1.0 | MIT License")
     print(f"  主题: {theme.display_name}")
     if args.host:
-        print(f"  模式: 网络硬件 {args.host}:{args.port}")
+        print(f"  模式: 网络硬件 {mcp_host}:{mcp_port}")
     print("=" * 60)
     print()
     print("快捷键:")

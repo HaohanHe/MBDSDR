@@ -14,7 +14,7 @@
 //      4160 px/s (pixel period = fs_/4160 s), drift-free, and the A/B video
 //      bands are assembled into a growing grayscale QImage.
 //
-// Clean-room reimplementation from the APT standard + the reference
+// Independent reimplementation from the APT standard + the reference
 // implementation noaa-apt (GPL-3.0-or-later, repos/noaa-apt/src/decode.rs);
 // no source code copied, only constants/algorithm aligned.
 // NOT HARDWARE: all inputs are synthetic.

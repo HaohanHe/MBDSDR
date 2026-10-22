@@ -18,6 +18,7 @@
 //    (c) during a smooth pan drag the waterfall start frequency moves
 //        monotonically, never jumping more than one bin between steps.
 #include <QtTest/QtTest>
+#include "core/app_settings.h"
 #include <QApplication>
 #include <QSettings>
 #include <cmath>
@@ -77,7 +78,7 @@ void TestSpectrumAutoRange::initTestCase() {
         tokens::kSettingsKeyPalette,
         QStringLiteral("rx/peakThresholdDb"),
     };
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     saved_.clear();
     for (const QString& k : keys) {
         SavedKey sk; sk.key = k; sk.had = s.contains(k);
@@ -89,7 +90,7 @@ void TestSpectrumAutoRange::initTestCase() {
 }
 
 void TestSpectrumAutoRange::cleanupTestCase() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     for (const SavedKey& sk : saved_) {
         if (sk.had) s.setValue(sk.key, sk.val);
         else        s.remove(sk.key);

@@ -54,6 +54,20 @@ class TaskStep {
     );
   }
 
+  /// 会话收尾时仍未收到结果（流被打断/进程重启）——诚实落为失败态
+  /// 「未收到结果」，绝不保留 running 让恢复后的 chip 永久旋转假进度。
+  factory TaskStep.interrupted({
+    required String tool,
+    required String argumentsPreview,
+  }) {
+    return TaskStep(
+      tool: tool,
+      argumentsPreview: argumentsPreview,
+      status: TaskStepStatus.failed,
+      summary: '未收到结果（会话中断，不臆造结果）',
+    );
+  }
+
   /// 由 UI 层的工具调用记录（含 done 标记与 result）构造一步。
   factory TaskStep.fromCall({
     required String tool,
@@ -68,6 +82,39 @@ class TaskStep {
       tool: tool,
       argumentsPreview: argumentsPreview,
       result: result,
+    );
+  }
+
+  /// 落盘 JSON（随会话历史持久化，见 chat_session_store 的 steps 字段）。
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'tool': tool,
+        'args': argumentsPreview,
+        'status': status.name,
+        'summary': summary,
+      };
+
+  /// 从落盘 JSON 读回一步；非法/缺字段返回 null，由上层丢弃（不臆造步骤）。
+  static TaskStep? fromJson(Object? raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final Object? tool = raw['tool'];
+    if (tool is! String || tool.isEmpty) return null;
+    final Object? statusRaw = raw['status'];
+    TaskStepStatus status = TaskStepStatus.failed;
+    if (statusRaw is String) {
+      for (final TaskStepStatus s in TaskStepStatus.values) {
+        if (s.name == statusRaw) {
+          status = s;
+          break;
+        }
+      }
+    }
+    final Object? args = raw['args'];
+    final Object? summary = raw['summary'];
+    return TaskStep(
+      tool: tool,
+      argumentsPreview: args is String ? args : '',
+      status: status,
+      summary: summary is String ? summary : '',
     );
   }
 }

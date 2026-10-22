@@ -406,8 +406,15 @@ def decode_adsb(iq: np.ndarray, sample_rate: float, threshold_sigma: float = 4.0
     amp = np.abs(iq).astype(np.float64)
     med = float(np.median(amp))
     mad = float(np.median(np.abs(amp - med)))
-    sigma_n = 1.4826 * mad if mad > 0 else float(np.std(amp))
-    thr = med + threshold_sigma * sigma_n
+    peak = float(np.max(amp)) if amp.size else 0.0
+    if mad > 0:
+        thr = med + threshold_sigma * (1.4826 * mad)
+    else:
+        # MAD=0（无噪合成或极干净信号）：此时 std 会被 OOK 脉冲本身抬高，
+        # 用"med + k·std"会把门限顶到脉冲之上造成漏检（正是本模块 docstring
+        # 想避免的失效模式）。改用中位数与峰值之间的比例门限：
+        #   无噪时 med≈0、peak=脉冲幅度 -> 取中点即经典 OOK 半幅门限。
+        thr = med + (peak - med) * 0.5
 
     frames: List[ADSBFrame] = []
     invalid = 0
@@ -459,6 +466,18 @@ def decode_adsb(iq: np.ndarray, sample_rate: float, threshold_sigma: float = 4.0
         "threshold_amp": round(thr, 5),
         "duration_s": round(len(iq) / sample_rate, 4),
     }
+    if not out["frames"]:
+        out["note"] = (
+            f"未检出有效 Mode-S 帧：前导候选 {out['candidates']} 个、"
+            f"CRC 通过 {out['crc_ok']} 个、失败 {out['crc_failed']} 个；"
+            f"自适应幅度门限 {out['threshold_amp']}、噪声底 {out['noise_floor_amp']}、"
+            f"时长 {out['duration_s']} s"
+            + ("（输入全零或过短，无信号可检）" if peak <= 0.0 or len(iq) < 1000
+               else "（幅度未越门限或前导码不匹配）"))
+    else:
+        out["note"] = (
+            f"检出 {out['crc_ok']} 帧（CRC 通过）、失败 {out['crc_failed']} 帧，"
+            f"涉及 {len(out['aircraft'])} 个 ICAO 地址")
     if return_invalid:
         out["invalid_preambles"] = invalid
     return out

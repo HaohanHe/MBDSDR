@@ -24,7 +24,8 @@
 //   "incomplete": <bool>,
 //   "messages": [
 //     { "role": "user|assistant", "content": "...",
-//       "kind": "chat", "ts": <epochMs 可选> }
+//       "kind": "chat", "ts": <epochMs 可选>,
+//       "steps": [ {"tool","args","status","summary"} 可选 ] }
 //   ]
 // }
 // ```
@@ -35,9 +36,13 @@
 //   * 但**容器不同**：桌面写真实文件（<AppData>/ai_sessions/index.json +
 //     sessions/<id>.json），移动端把同形 JSON 字符串存进 KvStore（SharedPreferences），
 //     移动端不读桌面的磁盘目录，桌面也不读移动端的 SharedPreferences；
-//   * 移动端只持久化 user/assistant 纯文本行（kind="chat"）。流式期间的 tool_call /
-//     tool_result 分片、reasoning_content 属瞬态，不进磁盘——重载后会话恢复为
-//     纯文本气泡，历史 tool chip 不重建（这是与桌面「行内工具事件」的已知差异）。
+//   * 移动端持久化 user/assistant 行（kind="chat"）；AI 一轮里的真实工具步骤
+//     （models/task_step.dart 的 TaskStep 快照）以 **assistant 行上的 steps 数组**
+//     随行落盘，重载后由 ChatPage 重建 TaskProgressView chip（任务步骤不再随
+//     重启丢失）。steps 是移动端扩展键：桌面端读取时忽略未知键、不破坏解析，
+//     但也不会重建 chip——两端互读文本行，工具步骤仅移动端呈现（已知差异）。
+//   * 流式期间的 tool_call / tool_result 分片、reasoning_content 属瞬态中间态，
+//     不进磁盘；只落最终步骤快照（tool/args/status/summary）。
 //
 // 测试用 InMemoryKvStore 注入，不触碰真实 SharedPreferences。
 // ============================================================================
@@ -48,6 +53,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../models/task_step.dart';
 import 'settings_service.dart';
 
 /// 会话列表里的一条轻量索引（不含消息正文）。对齐桌面 SessionInfo。
@@ -92,11 +98,18 @@ class SessionLine {
   /// epoch ms；0 = 未知/旧数据，绝不臆造。
   final int tsMs;
 
+  /// 本行所属 AI 轮次的真实工具步骤快照（assistant 行才有；user 行恒空）。
+  ///
+  /// 移动端扩展键 "steps"：随行落盘、重载后重建 TaskProgressView chip。
+  /// 旧数据/桌面数据缺该键时为空列表，向后兼容。
+  final List<TaskStep> steps;
+
   const SessionLine({
     required this.role,
     required this.content,
     this.kind = 'chat',
     this.tsMs = 0,
+    this.steps = const <TaskStep>[],
   });
 
   Map<String, dynamic> toJson() {
@@ -106,6 +119,11 @@ class SessionLine {
       'kind': kind,
     };
     if (tsMs != 0) out['ts'] = tsMs;
+    if (steps.isNotEmpty) {
+      out['steps'] = steps
+          .map((TaskStep s) => s.toJson())
+          .toList(growable: false);
+    }
     return out;
   }
 
@@ -118,11 +136,21 @@ class SessionLine {
     final String kind =
         kindRaw is String && kindRaw.isNotEmpty ? kindRaw : role;
     final Object? ts = raw['ts'];
+    // steps：缺失/非法静默丢弃为单步级容错（坏一步只丢一步，不丢整行）。
+    final List<TaskStep> steps = <TaskStep>[];
+    final Object? stepsRaw = raw['steps'];
+    if (stepsRaw is List) {
+      for (final Object? s in stepsRaw) {
+        final TaskStep? step = TaskStep.fromJson(s);
+        if (step != null) steps.add(step);
+      }
+    }
     return SessionLine(
       role: role,
       content: content,
       kind: kind,
       tsMs: ts is num ? ts.toInt() : 0,
+      steps: steps,
     );
   }
 }

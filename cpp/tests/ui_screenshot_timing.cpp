@@ -26,8 +26,10 @@ static const QString kOut =
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        QDir::tempPath() + "/mbdsdr_shot_timing");
+    qputenv("MBDSDR_SETTINGS_DIR", (QDir::tempPath() + "/mbdsdr_shot_timing").toUtf8());
     app.setStyleSheet(tokens::buildDarkQss());
 
     MainWindow win;

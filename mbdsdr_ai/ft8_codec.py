@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""FT8 LDPC(174,91) 编解码 + CRC14 + 77-bit unpack（干净室自写，第②步）。
+"""FT8 LDPC(174,91) 编解码 + CRC14 + 77-bit unpack（独立实现，第②步）。
 
 本模块依据 ``docs/learn/phase63/ft8-mechanism-study.md`` §3-4 自述重写，
 只依赖 NumPy。WSJT-X (GPL) 源码仅作机制/常量证据（笔记与本文件记 file:line），

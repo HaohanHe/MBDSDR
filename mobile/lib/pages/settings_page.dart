@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../app/tokens.dart';
+import '../l10n/gen/app_localizations.dart';
 import '../services/radio_controller.dart';
 import '../services/settings_service.dart';
 import '../widgets/device_info_card.dart';
 
 // ============================================================================
-// 设置页：rtl_tcp / AI 助手 / 本站位置 / 外观
+// 设置页：rtl_tcp / 桌面 ControlHub / 设备信息 / 音频 / AI 助手 / 本站位置 /
+//        语言 / 外观
 // 保存即时生效（失焦提交即写回 SettingsService），不硬编码任何坐标或 key。
+// 文案全部走 gen-l10n（AppLocalizations）；语言选择写 uiLocaleCode 即持久化。
 // ============================================================================
 
 class SettingsPage extends StatefulWidget {
@@ -95,44 +98,49 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ------------------------------------------------------------ 各字段保存
   void _saveHost() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     widget.settings.rtlHost = _hostCtrl.text;
-    _toast('已保存主机地址');
+    _toast(l10n.toastHostSaved);
   }
 
   void _savePort() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final int? port = int.tryParse(_portCtrl.text.trim());
     if (port == null) {
-      _toast('端口必须是 1–65535 的整数', error: true);
+      _toast(l10n.toastPortInvalid, error: true);
       return;
     }
     try {
       widget.settings.rtlPort = port;
-      _toast('已保存端口');
+      _toast(l10n.toastPortSaved);
     } on FormatException catch (e) {
       _toast(e.message, error: true);
     }
   }
 
   void _saveControlHubHost() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     widget.settings.controlHubHost = _chHostCtrl.text;
-    _toast('已保存桌面 ControlHub 地址');
+    _toast(l10n.toastChHostSaved);
   }
 
   void _saveControlHubPort() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final int? port = int.tryParse(_chPortCtrl.text.trim());
     if (port == null) {
-      _toast('端口必须是 1–65535 的整数', error: true);
+      _toast(l10n.toastPortInvalid, error: true);
       return;
     }
     try {
       widget.settings.controlHubPort = port;
-      _toast('已保存 ControlHub 端口');
+      _toast(l10n.toastChPortSaved);
     } on FormatException catch (e) {
       _toast(e.message, error: true);
     }
   }
 
   void _saveApiKey() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final String value = _keyMasked ? _apiKey : _keyCtrl.text.trim();
     widget.settings.apiKey = value;
     setState(() {
@@ -140,37 +148,41 @@ class _SettingsPageState extends State<SettingsPage> {
       _obscureKey = true;
       _keyCtrl.text = _masked(value);
     });
-    _toast(value.isEmpty ? '已清除 API key' : '已保存 API key（仅写入系统安全存储）');
+    _toast(value.isEmpty ? l10n.toastApiKeyCleared : l10n.toastApiKeySaved);
   }
 
   void _saveModel() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     widget.settings.apiModel = _modelCtrl.text.trim();
-    _toast('已保存模型名');
+    _toast(l10n.toastModelSaved);
   }
 
   void _saveCoordinate(TextEditingController ctrl, void Function(double?) set) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final String raw = ctrl.text.trim();
     if (raw.isEmpty) {
       set(null);
-      _toast('已清除该坐标');
+      _toast(l10n.toastCoordCleared);
       return;
     }
     final double? v = double.tryParse(raw);
     if (v == null) {
-      _toast('坐标格式无效：$raw', error: true);
+      _toast(l10n.toastCoordInvalid(raw), error: true);
       return;
     }
     set(v);
-    _toast('已保存坐标');
+    _toast(l10n.toastCoordSaved);
   }
 
   // ------------------------------------------------------------ 自动定位
   Future<void> _locate() async {
+    // 文案在异步间隙之前取定（use_build_context_synchronously 口径）。
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     setState(() => _locating = true);
     try {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        _toast('请先开启系统定位服务', error: true);
+        _toast(l10n.toastLocationServiceOff, error: true);
         return;
       }
       LocationPermission permission = await Geolocator.checkPermission();
@@ -179,7 +191,7 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        _toast('定位权限被拒绝，可在系统设置中开启', error: true);
+        _toast(l10n.toastLocationDenied, error: true);
         return;
       }
       final Position pos = await Geolocator.getCurrentPosition();
@@ -190,9 +202,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _latCtrl.text = _d2s(pos.latitude);
       _lonCtrl.text = _d2s(pos.longitude);
       _altCtrl.text = _d2s(pos.altitude);
-      _toast('已写入当前定位');
+      _toast(l10n.toastLocationSaved);
     } catch (e) {
-      _toast('定位失败：$e', error: true);
+      _toast(l10n.toastLocationFailed(e.toString()), error: true);
     } finally {
       if (mounted) setState(() => _locating = false);
     }
@@ -200,12 +212,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ------------------------------------------------------------ 音频
   Widget _audioRow(SettingsService s) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final bool muted = s.muted;
     final double shown = muted ? 0.0 : s.volume;
     return Row(
       children: <Widget>[
         IconButton(
-          tooltip: muted ? '取消静音' : '静音',
+          tooltip: muted ? l10n.settingsUnmute : l10n.settingsMute,
           icon: Icon(
             muted || s.volume == 0
                 ? Icons.volume_off_outlined
@@ -243,10 +256,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _muteSwitch(SettingsService s) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     return Row(
       children: <Widget>[
-        const Expanded(
-          child: Text('静音', style: AppTokens.body),
+        Expanded(
+          child: Text(l10n.settingsMute, style: AppTokens.body),
         ),
         Switch(
           value: s.muted,
@@ -256,17 +270,30 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ------------------------------------------------------------ 外观
-  String get _coordinateText {
+  // ------------------------------------------------- 本站位置摘要 / 语言名
+  /// 本站位置生效摘要（坐标方向后缀在本地拼好，交给文案模板排版）。
+  String _coordinateText(AppLocalizations l10n) {
     final SettingsService s = widget.settings;
     if (!s.hasManualStation) {
-      return '未设置坐标 —— 天空页将优先使用手机自动定位';
+      return l10n.settingsCoordUnset;
     }
     final String latDir = s.stationLat! >= 0 ? 'N' : 'S';
     final String lonDir = s.stationLon! >= 0 ? 'E' : 'W';
-    return '当前生效：${s.stationLat!.abs().toStringAsFixed(4)}°$latDir，'
-        '${s.stationLon!.abs().toStringAsFixed(4)}°$lonDir · '
-        '海拔 ${_trimDouble(s.stationAlt!)} m';
+    return l10n.settingsCoordActive(
+      '${s.stationLat!.abs().toStringAsFixed(4)}°$latDir',
+      '${s.stationLon!.abs().toStringAsFixed(4)}°$lonDir',
+      _trimDouble(s.stationAlt!),
+    );
+  }
+
+  /// 语言名按「各语言自称」显示（简体中文 / English / 日本語），不随 UI 语言翻译。
+  String _languageName(AppLocalizations l10n, String code) {
+    return switch (code) {
+      'zh' => l10n.languageNameZh,
+      'en' => l10n.languageNameEn,
+      'ja' => l10n.languageNameJa,
+      _ => code,
+    };
   }
 
   Widget _section({required String title, required List<Widget> children}) {
@@ -290,19 +317,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: AppTokens.spacingL),
       children: <Widget>[
         // ---------------------------------------------------- rtl_tcp
         _section(
-          title: 'rtl_tcp 接收机',
+          title: l10n.settingsSectionRtlTcp,
           children: <Widget>[
             TextField(
               controller: _hostCtrl,
-              decoration: const InputDecoration(
-                labelText: '主机地址',
-                hintText: '如 192.168.1.10',
-                prefixIcon: Icon(Icons.lan_outlined),
+              decoration: InputDecoration(
+                labelText: l10n.settingsHostLabel,
+                hintText: l10n.settingsHostHint,
+                prefixIcon: const Icon(Icons.lan_outlined),
               ),
               keyboardType: TextInputType.url,
               onEditingComplete: _saveHost,
@@ -311,18 +339,18 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingM),
             TextField(
               controller: _portCtrl,
-              decoration: const InputDecoration(
-                labelText: '端口',
+              decoration: InputDecoration(
+                labelText: l10n.settingsPortLabel,
                 hintText: '1234',
-                prefixIcon: Icon(Icons.numbers),
+                prefixIcon: const Icon(Icons.numbers),
               ),
               keyboardType: TextInputType.number,
               onEditingComplete: _savePort,
               onSubmitted: (_) => _savePort(),
             ),
             const SizedBox(height: AppTokens.spacingS),
-            const Text(
-              '在电脑或树莓派上运行：rtl_tcp -a 0.0.0.0',
+            Text(
+              l10n.settingsRtlRunHint,
               style: AppTokens.auxiliary,
             ),
           ],
@@ -333,14 +361,14 @@ class _SettingsPageState extends State<SettingsPage> {
         // 默认 127.0.0.1:50732（与桌面回环端点一致，本机查看器开箱可达）；
         // 主机留空 = 不启用，频谱页远程解码面板退化为「去设置」空态，不假连。
         _section(
-          title: '桌面 ControlHub（远程解码）',
+          title: l10n.settingsSectionControlHub,
           children: <Widget>[
             TextField(
               controller: _chHostCtrl,
-              decoration: const InputDecoration(
-                labelText: '主机地址',
-                hintText: '默认 127.0.0.1；留空 = 不启用，如 192.168.1.20',
-                prefixIcon: Icon(Icons.dns_outlined),
+              decoration: InputDecoration(
+                labelText: l10n.settingsHostLabel,
+                hintText: l10n.settingsChHostHint,
+                prefixIcon: const Icon(Icons.dns_outlined),
               ),
               keyboardType: TextInputType.url,
               onEditingComplete: _saveControlHubHost,
@@ -349,19 +377,18 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingM),
             TextField(
               controller: _chPortCtrl,
-              decoration: const InputDecoration(
-                labelText: '端口',
-                hintText: '默认 50732',
-                prefixIcon: Icon(Icons.numbers),
+              decoration: InputDecoration(
+                labelText: l10n.settingsPortLabel,
+                hintText: l10n.settingsChPortHint,
+                prefixIcon: const Icon(Icons.numbers),
               ),
               keyboardType: TextInputType.number,
               onEditingComplete: _saveControlHubPort,
               onSubmitted: (_) => _saveControlHubPort(),
             ),
             const SizedBox(height: AppTokens.spacingS),
-            const Text(
-              '仅只读拉取 /status、/pocsag_messages、/m17_calls、/vor_radial；'
-              '解码在桌面引擎进行，移动端为查看器。',
+            Text(
+              l10n.settingsChHelp,
               style: AppTokens.auxiliary,
             ),
           ],
@@ -371,7 +398,7 @@ class _SettingsPageState extends State<SettingsPage> {
         // 与桌面端「设备管理」对称：连接态/后端/采样率/当前频率全部来自 RadioApi，
         // 未连接时诚实空态「—」。监听 RadioController(ChangeNotifier) 实时刷新。
         _section(
-          title: '设备信息',
+          title: l10n.settingsSectionDeviceInfo,
           children: <Widget>[
             ListenableBuilder(
               listenable: widget.radio as Listenable,
@@ -383,14 +410,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
         // ---------------------------------------------------- 音频
         _section(
-          title: '音频',
+          title: l10n.settingsSectionAudio,
           children: <Widget>[
             _audioRow(widget.settings),
             const SizedBox(height: AppTokens.spacingS),
             _muteSwitch(widget.settings),
             const SizedBox(height: AppTokens.spacingS),
-            const Text(
-              '音量与静音仅作用于本机播放，不随 rtl_tcp 上送。',
+            Text(
+              l10n.settingsAudioHelp,
               style: AppTokens.auxiliary,
             ),
           ],
@@ -398,17 +425,17 @@ class _SettingsPageState extends State<SettingsPage> {
 
         // ---------------------------------------------------- AI 助手
         _section(
-          title: 'AI 助手',
+          title: l10n.settingsSectionAi,
           children: <Widget>[
             TextField(
               controller: _keyCtrl,
               obscureText: _obscureKey,
               decoration: InputDecoration(
                 labelText: 'API key',
-                hintText: '输入云端推理 API key',
+                hintText: l10n.settingsApiKeyHint,
                 prefixIcon: const Icon(Icons.key_outlined),
                 suffixIcon: IconButton(
-                  tooltip: _obscureKey ? '显示' : '隐藏',
+                  tooltip: _obscureKey ? l10n.settingsKeyShow : l10n.settingsKeyHide,
                   icon: Icon(
                     _obscureKey ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                   ),
@@ -428,16 +455,16 @@ class _SettingsPageState extends State<SettingsPage> {
               onSubmitted: (_) => _saveApiKey(),
             ),
             const SizedBox(height: AppTokens.spacingS),
-            const Text(
-              '仅保存在系统安全存储（Keystore / Keychain），不会写入仓库或上传',
+            Text(
+              l10n.settingsKeySecurityNote,
               style: AppTokens.auxiliary,
             ),
             const SizedBox(height: AppTokens.spacingM),
             TextField(
               controller: _modelCtrl,
-              decoration: const InputDecoration(
-                labelText: '模型名',
-                prefixIcon: Icon(Icons.psychology_outlined),
+              decoration: InputDecoration(
+                labelText: l10n.settingsModelLabel,
+                prefixIcon: const Icon(Icons.psychology_outlined),
               ),
               keyboardType: TextInputType.text,
               onEditingComplete: _saveModel,
@@ -449,8 +476,8 @@ class _SettingsPageState extends State<SettingsPage> {
             //   * 手动（off）：AI 仍可对话，工具动作仅记录不执行。
             Row(
               children: <Widget>[
-                const Expanded(
-                  child: Text('AI 接管', style: AppTokens.body),
+                Expanded(
+                  child: Text(l10n.settingsAiTakeover, style: AppTokens.body),
                 ),
                 Switch(
                   value: !widget.settings.aiManualMode,
@@ -462,8 +489,8 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingS),
             Text(
               widget.settings.aiManualMode
-                  ? '手动模式：AI 可对话，但调谐动作不会真正执行'
-                  : 'AI 接管：AI 的调谐/模式/增益动作会直接生效',
+                  ? l10n.settingsAiManual
+                  : l10n.settingsAiTakeoverOn,
               style: AppTokens.auxiliary,
             ),
           ],
@@ -471,7 +498,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
         // ---------------------------------------------------- 本站位置
         _section(
-          title: '本站位置',
+          title: l10n.settingsSectionStation,
           children: <Widget>[
             Row(
               children: <Widget>[
@@ -485,14 +512,14 @@ class _SettingsPageState extends State<SettingsPage> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.my_location),
-                  label: Text(_locating ? '定位中…' : '自动定位'),
+                  label: Text(_locating ? l10n.settingsLocating : l10n.settingsLocate),
                 ),
               ],
             ),
             const SizedBox(height: AppTokens.spacingM),
             TextField(
               controller: _latCtrl,
-              decoration: const InputDecoration(labelText: '纬度（度，-90 ~ 90）'),
+              decoration: InputDecoration(labelText: l10n.settingsLatLabel),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               onEditingComplete: () => _saveCoordinate(_latCtrl, (double? v) => widget.settings.stationLat = v),
               onSubmitted: (_) => _saveCoordinate(_latCtrl, (double? v) => widget.settings.stationLat = v),
@@ -500,7 +527,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingM),
             TextField(
               controller: _lonCtrl,
-              decoration: const InputDecoration(labelText: '经度（度，-180 ~ 180）'),
+              decoration: InputDecoration(labelText: l10n.settingsLonLabel),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               onEditingComplete: () => _saveCoordinate(_lonCtrl, (double? v) => widget.settings.stationLon = v),
               onSubmitted: (_) => _saveCoordinate(_lonCtrl, (double? v) => widget.settings.stationLon = v),
@@ -508,26 +535,50 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingM),
             TextField(
               controller: _altCtrl,
-              decoration: const InputDecoration(labelText: '海拔（米）'),
+              decoration: InputDecoration(labelText: l10n.settingsAltLabel),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               onEditingComplete: () => _saveCoordinate(_altCtrl, (double? v) => widget.settings.stationAlt = v),
               onSubmitted: (_) => _saveCoordinate(_altCtrl, (double? v) => widget.settings.stationAlt = v),
             ),
             const SizedBox(height: AppTokens.spacingS),
-            Text(_coordinateText, style: AppTokens.auxiliary),
+            Text(_coordinateText(l10n), style: AppTokens.auxiliary),
+          ],
+        ),
+
+        // ---------------------------------------------------- 语言（gen-l10n，选择即持久化）
+        _section(
+          title: l10n.settingsSectionLanguage,
+          children: <Widget>[
+            Wrap(
+              spacing: AppTokens.spacingM,
+              children: <Widget>[
+                for (final String code in kSupportedUiLocales)
+                  ChoiceChip(
+                    label: Text(_languageName(l10n, code)),
+                    selected: widget.settings.uiLocaleCode == code,
+                    onSelected: (bool selected) {
+                      if (!selected || widget.settings.uiLocaleCode == code) {
+                        return;
+                      }
+                      setState(() => widget.settings.uiLocaleCode = code);
+                      _toast(l10n.toastLanguageSaved);
+                    },
+                  ),
+              ],
+            ),
           ],
         ),
 
         // ---------------------------------------------------- 外观
         _section(
-          title: '外观',
+          title: l10n.settingsSectionAppearance,
           children: <Widget>[
             Wrap(
               spacing: AppTokens.spacingM,
               children: <Widget>[
                 ChoiceChip(
-                  label: const Text('默认'),
-                  selected: widget.settings.themeName == '默认',
+                  label: Text(l10n.settingsThemeDefault),
+                  selected: widget.settings.themeName == kDefaultThemeName,
                   onSelected: (_) {},
                 ),
               ],

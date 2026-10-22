@@ -5,6 +5,7 @@
 // QScrollArea), the center spectrum/waterfall, and the right tab rail must not
 // clip or overlap text. No demo data -- the offline test-signal engine feeds it.
 #include <QApplication>
+#include "core/app_settings.h"
 #include "ui/workspace_controller.h"
 #include <QTimer>
 #include <QJsonObject>
@@ -42,9 +43,12 @@
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     // Throwaway QSettings so real persisted focus-mode state never hides rails.
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        QDir::tempPath() + "/mbdsdr_shot_narrow_" +
                            QString::number(QCoreApplication::applicationPid()));
+    qputenv("MBDSDR_SETTINGS_DIR", (QDir::tempPath() + "/mbdsdr_shot_narrow_" +
+                           QString::number(QCoreApplication::applicationPid())).toUtf8());
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
 
     const QString out = QString::fromLocal8Bit(qgetenv("MBD_OUT"));
@@ -56,7 +60,7 @@ int main(int argc, char** argv) {
     // Pure persisted-state display -- no demo data inside the app itself.
     const QByteArray tuneHist = qgetenv("MBD_TUNEHIST");
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         if (tuneHist == "empty") {
             s.remove(mbdsdr::tokens::kSettingsKeyTuneHistory);
         } else if (tuneHist.size()) {
@@ -73,7 +77,7 @@ int main(int argc, char** argv) {
     // user's data. A value outside the named set honestly resolves to the default.
     const int wfDepth = qEnvironmentVariableIntValue("MBD_WFDEPTH");
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         if (wfDepth > 0)
             s.setValue(mbdsdr::tokens::kSettingsKeyWfDepth, wfDepth);
         s.sync();
@@ -88,7 +92,7 @@ int main(int argc, char** argv) {
     const double mhDecaySeed =
         QString::fromLocal8Bit(qgetenv("MBD_MHDECAY")).toDouble();
     if (mhDecaySeed > 0.0) {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(mbdsdr::tokens::kSettingsKeyMaxHoldDecay, mhDecaySeed);
         s.sync();
     }
@@ -101,7 +105,7 @@ int main(int argc, char** argv) {
     // default (20). Off by default so every other shot is unchanged.
     const int dbGridSeed = qEnvironmentVariableIntValue("MBD_DBGRID");
     if (dbGridSeed > 0) {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(mbdsdr::tokens::kSettingsKeyDbGridStep, dbGridSeed);
         s.sync();
     }
@@ -113,7 +117,7 @@ int main(int argc, char** argv) {
     // above keeps this off the user's data. Off by default so every other shot
     // is unchanged.
     if (qgetenv("MBD_WFPAUSE") == "1") {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(mbdsdr::tokens::kSettingsKeyWfScrollPaused, true);
         s.sync();
     }
@@ -129,7 +133,7 @@ int main(int argc, char** argv) {
     {
         const int fftSeed = qEnvironmentVariableIntValue("MBD_FFTSIZE");
         if (fftSeed == 1024 || fftSeed == 2048 || fftSeed == 4096) {
-            QSettings s("MBDSDR", "MBDSDR");
+            mbdsdr::core::AppSettings s;
             s.setValue("rx/fftSize", fftSeed);
             s.sync();
         }
@@ -145,7 +149,7 @@ int main(int argc, char** argv) {
         const double ctcssSeed =
             QString::fromLocal8Bit(qgetenv("MBD_CTCSS")).toDouble();
         if (ctcssSeed > 0.0) {
-            QSettings s("MBDSDR", "MBDSDR");
+            mbdsdr::core::AppSettings s;
             s.setValue(mbdsdr::tokens::kSettingsKeyCtcssEnabled, true);
             s.setValue(mbdsdr::tokens::kSettingsKeyCtcssToneHz, ctcssSeed);
             // Optional: also arm the speaker-only sub-audio gate
@@ -165,7 +169,7 @@ int main(int argc, char** argv) {
     {
         const QByteArray cdcssSeed = qgetenv("MBD_CDCSS");
         if (!cdcssSeed.isEmpty()) {
-            QSettings s("MBDSDR", "MBDSDR");
+            mbdsdr::core::AppSettings s;
             s.setValue(mbdsdr::tokens::kSettingsKeyCdcssEnabled, true);
             s.setValue(mbdsdr::tokens::kSettingsKeyCdcssCode,
                        QString::fromLocal8Bit(cdcssSeed));
@@ -179,7 +183,7 @@ int main(int argc, char** argv) {
     // BEFORE MainWindow restores it, so the FT8 checkbox comes up armed at the
     // real persisted round-trip. Off by default so other shots unchanged.
     if (qgetenv("MBD_FT8") == "1") {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(mbdsdr::tokens::kSettingsKeyFt8Enabled, true);
         s.sync();
     }
@@ -194,7 +198,7 @@ int main(int argc, char** argv) {
     bool bwOk = false;
     const double bwSeed = qgetenv("MBD_BW").toDouble(&bwOk);
     if (!modeSeed.isEmpty() && bwOk && bwSeed > 0.0) {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue("rx/demodMode", QString::fromUtf8(modeSeed));
         s.setValue("rx/bandwidth", bwSeed);
         s.setValue("vfo/count", 1);

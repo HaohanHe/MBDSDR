@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <QtTest/QtTest>
+#include "core/app_settings.h"
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -164,6 +165,7 @@ void TestAgent::initTestCase() {
     QCoreApplication::setApplicationName("MBDSDR");
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfg);
+    qputenv("MBDSDR_SETTINGS_DIR", (cfg).toUtf8());
     // P3 #73: redirect the memory tool layer to a throwaway db; production
     // default ~/.mbdsdr/memory.db must never be touched by tests.
     qputenv("MBDSDR_MEMORY_DB",
@@ -338,7 +340,7 @@ void TestAgent::testAiTakeoverRunsWriteTool() {
 
 // Manual mode persists through QSettings and is re-read on a fresh Agent.
 void TestAgent::testManualModePersistence() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariant prev = s.value("aiManualMode");  // preserve user value
     s.remove("aiManualMode");
     s.sync();
@@ -348,7 +350,7 @@ void TestAgent::testManualModePersistence() {
         QCOMPARE(a.manualMode(), false);            // default = AI takeover
         a.setManualMode(true);
         QCOMPARE(a.manualMode(), true);
-        QCOMPARE(QSettings("MBDSDR", "MBDSDR").value("aiManualMode").toBool(), true);
+        QCOMPARE(mbdsdr::core::AppSettings().value("aiManualMode").toBool(), true);
     }
     {
         ai::Agent a;
@@ -589,7 +591,7 @@ void TestAgent::applyCorrection_writesSettingAndApplies() {
     QVERIFY2(std::fabs(a.value("applied_ppm").toDouble() - measured) < 1e-6,
              "applied_ppm must echo the measured value");
     // Persisted setting now equals the applied value.
-    QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), measured);
+    QCOMPARE(mbdsdr::core::AppSettings().value("rtl/ppm", 0.0).toDouble(), measured);
     QFile::remove(path);
 
     if (prev.isValid()) s.setValue("rtl/ppm", prev);
@@ -613,7 +615,7 @@ void TestAgent::manualMode_gatesApplyCorrection() {
     QVERIFY2(r.contains(QString::fromUtf8("手动模式：未执行 apply_frequency_correction")),
              qPrintable(r));
     // The setting must be untouched.
-    QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), prev.toDouble());
+    QCOMPARE(mbdsdr::core::AppSettings().value("rtl/ppm", 0.0).toDouble(), prev.toDouble());
 
     if (prev.isValid()) s.setValue("rtl/ppm", prev);
     else s.remove("rtl/ppm");
@@ -782,7 +784,7 @@ void TestAgent::manualMode_gateSpotCheckTenTools() {
     const bool sqEnBefore = engine.squelchEnabled();
     const float sqThBefore = engine.squelchThresholdDb();
     const QString recPathBefore = engine.recordingPath();
-    const double ppmBefore = QSettings().value("rtl/ppm", 0.0).toDouble();
+    const double ppmBefore = mbdsdr::core::AppSettings().value("rtl/ppm", 0.0).toDouble();
 
     auto expectGated = [&](const QString& name, const QJsonObject& args) {
         const QString r = ai::LLMWorker::dispatchToolCall(name, args, &engine,
@@ -809,7 +811,7 @@ void TestAgent::manualMode_gateSpotCheckTenTools() {
     QCOMPARE(engine.squelchEnabled(), sqEnBefore);
     QCOMPARE(engine.squelchThresholdDb(), sqThBefore);
     QCOMPARE(engine.recordingPath(), recPathBefore);
-    QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
+    QCOMPARE(mbdsdr::core::AppSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
 
     // 5 read tools: manual mode must NOT gate them; they run and report ok.
     auto expectRuns = [&](const QString& name) {
@@ -856,8 +858,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     const int fftBefore = engine.fftSize();
     const int winBefore = engine.windowType();
     const int avgBefore = engine.averageMode();
-    const double ppmBefore = QSettings().value("rtl/ppm", 0.0).toDouble();
-    const QVariant cmapBefore = QSettings().value("view/wfColormapFile");
+    const double ppmBefore = mbdsdr::core::AppSettings().value("rtl/ppm", 0.0).toDouble();
+    const QVariant cmapBefore = mbdsdr::core::AppSettings().value("view/wfColormapFile");
 
     // Honest, schema-valid args per write tool. The gate fires before validation,
     // so these also demonstrate "gated" precedes arg checking. Write tools with
@@ -956,8 +958,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     QCOMPARE(engine.fftSize(), fftBefore);
     QCOMPARE(engine.windowType(), winBefore);
     QCOMPARE(engine.averageMode(), avgBefore);
-    QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
-    QCOMPARE(QSettings().value("view/wfColormapFile"), cmapBefore);
+    QCOMPARE(mbdsdr::core::AppSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
+    QCOMPARE(mbdsdr::core::AppSettings().value("view/wfColormapFile"), cmapBefore);
 }
 
 // export_peaks_csv: inject a synthetic spectrum frame, assert CSV header/rows/order.
@@ -1691,7 +1693,7 @@ void TestAgent::readbackLoopHonestRejectsAndAutoLand() {
 // out-of-range index, freq<=0 rejected by the manager, and a null (un-injected)
 // store. No GUI, no mock; QSettings is isolated by initTestCase().
 void TestAgent::bookmarkToolsRealExecutionWithInjectedStore() {
-    QSettings("MBDSDR", "MBDSDR").remove("ui/bookmarks");
+    mbdsdr::core::AppSettings().remove("ui/bookmarks");
 
     dsp::SpectrumEngine engine;
     ui::BookmarkManager bm;
@@ -1792,7 +1794,7 @@ void TestAgent::bookmarkToolsRealExecutionWithInjectedStore() {
     QCOMPARE(bm.count(), 2);
 
     bm.clear();
-    QSettings("MBDSDR", "MBDSDR").remove("ui/bookmarks");
+    mbdsdr::core::AppSettings().remove("ui/bookmarks");
 }
 
 // Phase63 no-engine audit (D2): when executeTool() is handed a null SpectrumEngine
@@ -2591,7 +2593,7 @@ void TestAgent::setColorMap_validJson() {
 }
 
 void TestAgent::setColorMap_badJsonRejected() {
-    QSettings().remove(QStringLiteral("view/wfColormapFile"));   // isolate from earlier cases
+    mbdsdr::core::AppSettings().remove(QStringLiteral("view/wfColormapFile"));   // isolate from earlier cases
     QTemporaryDir dir;
     QFile f(dir.filePath(QStringLiteral("bad.json")));
     QVERIFY(f.open(QIODevice::WriteOnly));
@@ -2605,7 +2607,7 @@ void TestAgent::setColorMap_badJsonRejected() {
     QVERIFY(!o.value("ok").toBool());
     QVERIFY(o.value("error").toString().contains(QStringLiteral("JSON")));
     // The broken file must NOT be persisted as the configured preference.
-    QCOMPARE(QSettings().value(QStringLiteral("view/wfColormapFile")).toString(),
+    QCOMPARE(mbdsdr::core::AppSettings().value(QStringLiteral("view/wfColormapFile")).toString(),
              QString());
 }
 

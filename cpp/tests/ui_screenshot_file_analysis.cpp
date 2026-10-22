@@ -44,7 +44,9 @@ int main(int argc, char** argv) {
     QString tmpDir = QDir::tempPath() + "/mbdsdr_shot_fileana";
     QDir(tmpDir).removeRecursively();
     QDir().mkpath(tmpDir);
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmpDir + "/cfg");
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmpDir + "/cfg");
+    qputenv("MBDSDR_SETTINGS_DIR", (tmpDir + "/cfg").toUtf8());
     app.setStyleSheet(tokens::buildDarkQss());
 
     const QString wav = tmpDir + "/20261001_093000_100.500_NFM.wav";

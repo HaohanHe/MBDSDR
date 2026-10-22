@@ -2,13 +2,13 @@
 
 > 范围：`repos/sdrpp/decoder_modules/{atv_decoder,dab_decoder,falcon9_decoder,kg_sstv_decoder,ryfi_decoder}/src` 全部源码逐文件精读。
 >
-> **版权声明**：SDR++ 为 GPLv3。下列引用仅为机制学习的注释性短片段（≤3 行，锚定 `file:line`），**不复制实现代码进 MBDSDR**；MBDSDR 落地走干净室（自有命名/结构，MIT）。
+> **版权声明**：SDR++ 为 GPLv3。下列引用仅为机制学习的注释性短片段（≤3 行，锚定 `file:line`），**不复制实现代码进 MBDSDR**；MBDSDR 落地走独立实现（自有命名/结构，MIT）。
 >
 > **与 phase16 的关系**：`docs/learn/phase16/sdrpp-special-decoders.md` 已精读 m17/pager/vor + dab **前端概览**。本笔记：
 > - dab 重新深读（phase16 只到 `CyclicSync/FrameFreqSync` 概览，本轮补全 `main.cpp` 链末端、FFO 控制环、DEBUG 自相关诊断、符号计数重置条件等细节，并对照 MBDSDR 已有的 `mbdsdr_ai/dab_plus_lite.py` 元数据层做差距判定）。
 > - atv/falcon9/kg_sstv/ryfi 是 phase16 明确**未读**的 4 个，本轮首读。
 >
-> **一句话结论**：5 个模块里 **dab 是最有公共标准价值的，但 SDR++ 自己只做到 OFDM 同步前端（未 FFT 解数据符号、未解交织、未 Viterbi、未出 ETI）**；MBDSDR 反而已经把"基带后"的 FIC/ETI/业务表解析层用 Python 干净室写完了。其余 4 个：atv 是模拟快扫电视（色道全注释掉，只出灰度），falcon9 是 SpaceX 私有遥测（事件触发+大口径天线），ryfi 是 SDR++ 作者自家 QPSK 私有数据链，kg_sstv 是 4FSK 数字 SSTV 变体（SDR++ 自己只 dump 二进制不画图）。**5 个全部 YAGNI 本轮**，但理由和回补条件各不相同。
+> **一句话结论**：5 个模块里 **dab 是最有公共标准价值的，但 SDR++ 自己只做到 OFDM 同步前端（未 FFT 解数据符号、未解交织、未 Viterbi、未出 ETI）**；MBDSDR 反而已经把"基带后"的 FIC/ETI/业务表解析层用 Python 独立实现写完了。其余 4 个：atv 是模拟快扫电视（色道全注释掉，只出灰度），falcon9 是 SpaceX 私有遥测（事件触发+大口径天线），ryfi 是 SDR++ 作者自家 QPSK 私有数据链，kg_sstv 是 4FSK 数字 SSTV 变体（SDR++ 自己只 dump 二进制不画图）。**5 个全部 YAGNI 本轮**，但理由和回补条件各不相同。
 
 ---
 
@@ -121,14 +121,14 @@ phase16 §1.4 说"只做到同步前端，未真正解码音频/数据"——本
 
 ### 2.5 MBDSDR 已有能力对照（新发现，关键）
 
-- `mbdsdr_ai/dab_plus_lite.py`（575 行，MIT 干净室）**已经实现了基带后的全部元数据层**：
+- `mbdsdr_ai/dab_plus_lite.py`（575 行，MIT 独立实现）**已经实现了基带后的全部元数据层**：
   - `crc16_ccitt()` / `crc_fire_code()`（`:57,:72`）。
   - `DABParams`（`:95`，Mode I 参数：FFT=2048、CP、符号、76 符号/帧、ETI 帧长）。
   - `FICDecoder`（`:178`）：FIB → FIG0/FIG1 → ensemble/service/subchannel 表，EBU 短/长 label 解码（`:353,:364`）。
   - `ETIParser`（`:387`）：ETI 帧同步字搜索 + 帧结构解析。
   - `dab_decode_iq()`（`:558`）——**名不副实**，docstring 自己写"输入假定为已分帧 ETI(NI) 字节；OFDM 解调/Viterbi/解扰由本层之前的信道解码完成"。
   - 即：MBDSDR 缺的是"从 2.048 Msps 复基带 → ETI 字节"这一整段 OFDM 信道解码；SDR++ 的 dab_decoder 只覆盖了这一段的前 2 块（符号定时 + 频偏）。
-- FEC 原语：`mbdsdr_ai/fec.py` 已有 `ReedSolomon` / `Scrambler`；`mbdsdr_ai/ccsds_rx.py` 已有干净室 K=7 r=1/2 Viterbi（Phil Karn 机制）。DAB 用的是 r=1/4 + 删余的不同码率，需要另配，但 Viterbi 引擎可复用。
+- FEC 原语：`mbdsdr_ai/fec.py` 已有 `ReedSolomon` / `Scrambler`；`mbdsdr_ai/ccsds_rx.py` 已有独立实现 K=7 r=1/2 Viterbi（Phil Karn 机制）。DAB 用的是 r=1/4 + 删余的不同码率，需要另配，但 Viterbi 引擎可复用。
 
 ### 2.6 可复用点
 
@@ -194,9 +194,9 @@ VFO 4MHz → FM demod → MM 时钟恢复(1.68 sps) → 二值切片 → 32-bit 
 
 ### 4.4 可复用点 / 与 MBDSDR 重叠
 
-- MBDSDR 已有 `mbdsdr_ai/sstv_decoder.py`（1083 行，Martin M1/Scottie S1/Robot 36 模拟 SSTV）+ `cpp/src/dsp/sstv_vis.{h,cpp}`（VIS 解码 + 过零测频干净室核心）。
+- MBDSDR 已有 `mbdsdr_ai/sstv_decoder.py`（1083 行，Martin M1/Scottie S1/Robot 36 模拟 SSTV）+ `cpp/src/dsp/sstv_vis.{h,cpp}`（VIS 解码 + 过零测频独立实现核心）。
 - KG-SSTV 是**另一种**数字 SSTV 模式（4FSK+Viterbi），与模拟 SSTV 不重叠；但 SDR++ 自己只解出 7 字节/帧落盘，**没有图像重建参考**——落地它等于从 7 字节帧格式 spec 反推图像，工程量不小且上游无参考。
-- Viterbi K=7 r=1/2 MBDSDR 已经有干净室实现（`ccsds_rx.py` 引用 Phil Karn 机制），不缺。
+- Viterbi K=7 r=1/2 MBDSDR 已经有独立实现（`ccsds_rx.py` 引用 Phil Karn 机制），不缺。
 
 ---
 
@@ -231,7 +231,7 @@ VFO 600kHz → QPSK 解调+RRC+载波环 → 星座路 / 位路
 
 ### 5.4 可复用点
 
-- **没有新机制**。QPSK 解调 MBDSDR `digital_demod.h` 已有 Costas NCO；K=7 r=1/2 Viterbi MBDSDR `ccsds_rx.py` 已有干净室；RS(255,223) MBDSDR `fec.py` 已有；同步字+旋转模糊是 QPSK 标配。
+- **没有新机制**。QPSK 解调 MBDSDR `digital_demod.h` 已有 Costas NCO；K=7 r=1/2 Viterbi MBDSDR `ccsds_rx.py` 已有独立实现；RS(255,223) MBDSDR `fec.py` 已有；同步字+旋转模糊是 QPSK 标配。
 - RYFI 是 SDR++ 作者自家做的"实验性点对点数据模式"，没有部署网络、没有标准、没有对端可听。
 
 ---
@@ -242,7 +242,7 @@ VFO 600kHz → QPSK 解调+RRC+载波环 → 星座路 / 位路
 
 ### 6.1 DAB —— **YAGNI 本轮（但机制记档，作为未来 OFDM 前端种子）**
 
-- **决策**：本轮**不落地端到端 DAB**；只把"CP 自相关符号定时 + 相位参考 FFT 频偏环"两个通用 OFDM 同步件的机制记入笔记（即本节 §2.1.2/§2.1.3），未来做任何 OFDM 模式时干净室抽。
+- **决策**：本轮**不落地端到端 DAB**；只把"CP 自相关符号定时 + 相位参考 FFT 频偏环"两个通用 OFDM 同步件的机制记入笔记（即本节 §2.1.2/§2.1.3），未来做任何 OFDM 模式时独立实现抽。
 - **理由**：
   1. **SDR++ 自己没做完**：`dab_decoder` 链末端就是星座图，数据符号路径空着（`dab_dsp.h:257-262`），没有 FFT 解数据符号、解交织、Viterbi、FIC/MSC——它不是一个可参考的完整 DAB 接收机，只参考得到前两块。
   2. **MBDSDR 已经把"基带后"元数据层写完了**：`mbdsdr_ai/dab_plus_lite.py` 575 行 FIC/FIG/ETI/CRC/业务表全部就位（§2.5）。缺的是"2.048 Msps 复基带 → ETI 字节"这段 OFDM 信道解码，SDR++ 没给齐。
@@ -274,14 +274,14 @@ VFO 600kHz → QPSK 解调+RRC+载波环 → 星座路 / 位路
   3. **机制零新增**：FM→MM 时钟恢复→32-bit 同步字→CCSDS RS(255,223)×5→PRBS 解扰→space-packet 抽包，MBDSDR 在 m17/ccsds_rx/pocsag 里已经把这套全做过一遍。
 - **回补条件**：
   - (a) MBDSDR 衍生成固定卫星地面站产品，且有用户要追猎猎鹰 9 / Starship 遥测；
-  - (b) 出现公开的 SpaceX 遥测标准文档（目前都是逆向），否则干净室基础不稳。
+  - (b) 出现公开的 SpaceX 遥测标准文档（目前都是逆向），否则独立实现基础不稳。
 
 ### 6.4 RYFI —— **YAGNI**
 
 - **决策**：不落地。
 - **理由**：
   1. **私有小众模式**：RYFI 是 SDR++ 作者（Ryzerth）自己设计的实验性 QPSK 数据链，不是任何公开标准；没有部署网络、没有对端发射机能听。
-  2. **机制零新增**：QPSK 解调（MBDSDR `digital_demod` Costas 已有）+ 64-bit 同步字 4 旋转模糊（QPSK 标配）+ K=7 r=1/2 Viterbi（MBDSDR `ccsds_rx.py` 已有干净室）+ RS(255,223)×4 交织（MBDSDR `fec.py` 已有）+ PRBS 解扰——全是 MBDSDR 已有的件。
+  2. **机制零新增**：QPSK 解调（MBDSDR `digital_demod` Costas 已有）+ 64-bit 同步字 4 旋转模糊（QPSK 标配）+ K=7 r=1/2 Viterbi（MBDSDR `ccsds_rx.py` 已有独立实现）+ RS(255,223)×4 交织（MBDSDR `fec.py` 已有）+ PRBS 解扰——全是 MBDSDR 已有的件。
   3. **SDR++ 自己也是半成品**：`framing.cpp:127` 帧长 8168 硬编码带 TODO；`main.cpp:88-90` 收到包只 `flog::debug` 打一行日志，没有业务层。
 - **回补条件**：
   - (a) 出现一个公开的 RYFI 网络/中继站（目前没有）；
@@ -333,10 +333,10 @@ VFO 600kHz → QPSK 解调+RRC+载波环 → 星座路 / 位路
 - `ryfi/transmitter.{h,cpp}`（68+176 行，**未读**——是发射侧编码，与接收解码决策无关）
 
 **MBDSDR 对照侧**：
-- `cpp/src/dsp/sstv_vis.h`（头 50 行，确认是干净室 SSTV VIS + 过零测频核心）
+- `cpp/src/dsp/sstv_vis.h`（头 50 行，确认是独立实现 SSTV VIS + 过零测频核心）
 - `mbdsdr_ai/dab_plus_lite.py`（head 40 行 + API grep + `:555-575` 结尾，确认是 ETI/FIC/FIG 元数据层，**未逐行精读每一个 FIG 解码分支**）
 - `mbdsdr_ai/sstv_decoder.py`（head 30 行，确认支持 Martin/Scottie/Robot）
-- `mbdsdr_ai/ccsds_rx.py`（head 25 行，确认已有干净室 K=7 Viterbi + RS 链路）
+- `mbdsdr_ai/ccsds_rx.py`（head 25 行，确认已有独立实现 K=7 Viterbi + RS 链路）
 
 ---
 

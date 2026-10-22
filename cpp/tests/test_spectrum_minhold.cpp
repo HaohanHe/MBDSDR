@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Minimum-hold (minHold) per-frame envelope test for ui::SpectrumDisplay.
 //
-// Acceptance (symmetric to max-hold, clean-room SDR++ "min hold"):
+// Acceptance (symmetric to max-hold, independent SDR++ "min hold"):
 //  hold[i] = min(frame[i], hold[i]) every frame -- NO decay.
 //  (a) The first frame seeds each bin at its fresh value.
 //  (b) A QUIETER frame (lower dBFS) pulls the held bin straight down.

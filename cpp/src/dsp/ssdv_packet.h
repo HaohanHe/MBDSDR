@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // SSDV (Slow Scan Digital Video) byte-layer: 256-byte packet header parser and
-// the CCSDS RS(255,223) encoder. Clean-room: the packet layout and the
+// the CCSDS RS(255,223) encoder. Independent: the packet layout and the
 // Reed-Solomon division algorithm are public standards (SP5WWP SSDV spec;
 // CCSDS TM RS code); only the mechanism was learned, code below is re-derived.
 // No GPL implementation was copied.

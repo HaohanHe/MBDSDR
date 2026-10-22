@@ -3,7 +3,7 @@
 > 日期：2026-10-02。活动窗口剩 6 天（10-08~10 航天七十载通联）。
 > 基线：cpp ctest 101/101（offscreen，改前实测）。
 > 范围：把 `mbdsdr_ai/sstv_decoder.py` 与 P2 在写的 `ssdv_decoder.py` 移植到 `cpp/src/dsp/`。
-> 红线：MIT 干净室；只学公开协议/机制，不抄 GPL；未 commit/push。
+> 红线：MIT 独立实现；只学公开协议/机制，不抄 GPL；未 commit/push。
 
 ## 0. 总结论（先给取舍）
 
@@ -74,7 +74,7 @@
 
 ## 4. 本次落地项（确定性可测、KAT 对拍 Python）
 
-干净室新写（仅 `cpp/src/dsp/`、`cpp/tests/`、`cpp/CMakeLists.txt` 追加）：
+独立实现新写（仅 `cpp/src/dsp/`、`cpp/tests/`、`cpp/CMakeLists.txt` 追加）：
 
 - `cpp/src/dsp/ssdv_packet.h` / `.cpp`
   - `parseSsdvHeader`（256 字节包 6 字节头解析 + 长度/FEC 分支校验）

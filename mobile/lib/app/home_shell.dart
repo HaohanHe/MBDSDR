@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../audio/file_player.dart';
+import '../l10n/gen/app_localizations.dart';
 import '../models/recording.dart';
 import '../models/satellite.dart';
 import '../pages/activity_log_page.dart';
@@ -78,78 +79,98 @@ class _HomeShellState extends State<HomeShell> {
     }
   }
 
-  static const List<NavigationRailDestination> _railDestinations =
-      <NavigationRailDestination>[
-    NavigationRailDestination(
-      icon: Icon(Icons.waterfall_chart_outlined),
-      selectedIcon: Icon(Icons.waterfall_chart),
-      label: Text('频谱'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.public_outlined),
-      selectedIcon: Icon(Icons.public),
-      label: Text('天空'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.chat_bubble_outline),
-      selectedIcon: Icon(Icons.chat_bubble),
-      label: Text('AI'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.fiber_manual_record_outlined),
-      selectedIcon: Icon(Icons.fiber_manual_record),
-      label: Text('录音'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.history_outlined),
-      selectedIcon: Icon(Icons.history),
-      label: Text('活动'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.settings_outlined),
-      selectedIcon: Icon(Icons.settings),
-      label: Text('设置'),
-    ),
-  ];
+  /// 宽屏 NavigationRail 目的地（文案走 AppLocalizations，随 locale 重建）。
+  List<NavigationRailDestination> _railDestinations(AppLocalizations l10n) {
+    return <NavigationRailDestination>[
+      NavigationRailDestination(
+        icon: const Icon(Icons.waterfall_chart_outlined),
+        selectedIcon: const Icon(Icons.waterfall_chart),
+        label: Text(l10n.navSpectrum),
+      ),
+      NavigationRailDestination(
+        icon: const Icon(Icons.public_outlined),
+        selectedIcon: const Icon(Icons.public),
+        label: Text(l10n.navSky),
+      ),
+      NavigationRailDestination(
+        icon: const Icon(Icons.chat_bubble_outline),
+        selectedIcon: const Icon(Icons.chat_bubble),
+        label: Text(l10n.navAi),
+      ),
+      NavigationRailDestination(
+        icon: const Icon(Icons.fiber_manual_record_outlined),
+        selectedIcon: const Icon(Icons.fiber_manual_record),
+        label: Text(l10n.navRecordings),
+      ),
+      NavigationRailDestination(
+        icon: const Icon(Icons.history_outlined),
+        selectedIcon: const Icon(Icons.history),
+        label: Text(l10n.navActivity),
+      ),
+      NavigationRailDestination(
+        icon: const Icon(Icons.settings_outlined),
+        selectedIcon: const Icon(Icons.settings),
+        label: Text(l10n.navSettings),
+      ),
+    ];
+  }
 
   /// 窄屏底栏目的地（≤5，Material 3 建议）。
   /// 宽屏 NavigationRail 保留全部 6 项（Rail 不拥挤）；窄屏把「活动记录」
   /// 收进 AppBar 的历史入口，底栏只放 5 个高频项，避免图标+标签被压窄。
   /// [stackIndex] 指向 IndexedStack 子页下标，底栏位置与页下标解耦。
-  static const List<({BottomNavigationBarItem item, int stackIndex})> _barDestinations =
-      <({BottomNavigationBarItem item, int stackIndex})>[
-    (item: BottomNavigationBarItem(
-      icon: Icon(Icons.waterfall_chart_outlined),
-      activeIcon: Icon(Icons.waterfall_chart),
-      label: '频谱',
-    ), stackIndex: 0),
-    (item: BottomNavigationBarItem(
-      icon: Icon(Icons.public_outlined),
-      activeIcon: Icon(Icons.public),
-      label: '天空',
-    ), stackIndex: 1),
-    (item: BottomNavigationBarItem(
-      icon: Icon(Icons.chat_bubble_outline),
-      activeIcon: Icon(Icons.chat_bubble),
-      label: 'AI',
-    ), stackIndex: 2),
-    (item: BottomNavigationBarItem(
-      icon: Icon(Icons.fiber_manual_record_outlined),
-      activeIcon: Icon(Icons.fiber_manual_record),
-      label: '录音',
-    ), stackIndex: 3),
-    (item: BottomNavigationBarItem(
-      icon: Icon(Icons.settings_outlined),
-      activeIcon: Icon(Icons.settings),
-      label: '设置',
-    ), stackIndex: 5),
-  ];
+  List<({BottomNavigationBarItem item, int stackIndex})> _barDestinations(
+    AppLocalizations l10n,
+  ) {
+    return <({BottomNavigationBarItem item, int stackIndex})>[
+      (
+        item: BottomNavigationBarItem(
+          icon: const Icon(Icons.waterfall_chart_outlined),
+          activeIcon: const Icon(Icons.waterfall_chart),
+          label: l10n.navSpectrum,
+        ),
+        stackIndex: 0
+      ),
+      (
+        item: BottomNavigationBarItem(
+          icon: const Icon(Icons.public_outlined),
+          activeIcon: const Icon(Icons.public),
+          label: l10n.navSky,
+        ),
+        stackIndex: 1
+      ),
+      (
+        item: BottomNavigationBarItem(
+          icon: const Icon(Icons.chat_bubble_outline),
+          activeIcon: const Icon(Icons.chat_bubble),
+          label: l10n.navAi,
+        ),
+        stackIndex: 2
+      ),
+      (
+        item: BottomNavigationBarItem(
+          icon: const Icon(Icons.fiber_manual_record_outlined),
+          activeIcon: const Icon(Icons.fiber_manual_record),
+          label: l10n.navRecordings,
+        ),
+        stackIndex: 3
+      ),
+      (
+        item: BottomNavigationBarItem(
+          icon: const Icon(Icons.settings_outlined),
+          activeIcon: const Icon(Icons.settings),
+          label: l10n.navSettings,
+        ),
+        stackIndex: 5
+      ),
+    ];
+  }
 
   void _openSettings() {
     setState(() => _index = 5);
   }
 
-  AppBar _buildAppBar() {
+  AppBar _buildAppBar(AppLocalizations l10n) {
     return AppBar(
       title: Row(
         children: <Widget>[
@@ -173,7 +194,7 @@ class _HomeShellState extends State<HomeShell> {
         // 解调模式/FAQ/术语速查。随时可查，不占导航位。
         IconButton(
           icon: const Icon(Icons.help_outline),
-          tooltip: '帮助',
+          tooltip: l10n.tooltipHelp,
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute<void>(builder: (_) => const HelpPage()),
           ),
@@ -182,7 +203,7 @@ class _HomeShellState extends State<HomeShell> {
         // （宽屏 Rail 本就有该项，这里作为快捷入口，行为一致）。
         IconButton(
           icon: const Icon(Icons.history),
-          tooltip: '活动记录',
+          tooltip: l10n.tooltipActivityLog,
           onPressed: () => setState(() => _index = 4),
         ),
       ],
@@ -255,6 +276,10 @@ class _HomeShellState extends State<HomeShell> {
                   // 传 null，工具自身回「未配置测站坐标」诚实空态。
                   passesService: _passesService,
                   station: station,
+                  // 书签/录音索引的实时视图：每次发送现取（闭包捕获 settings），
+                  // 保证 list_bookmarks / list_recordings 读到的是当前真值。
+                  bookmarksProvider: () => settings.bookmarks,
+                  recordingsProvider: () => settings.recordings,
                 ),
               ),
               manualMode: settings.aiManualMode,
@@ -315,8 +340,11 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final AppBar appBar = _buildAppBar();
+        final AppLocalizations l10n = AppLocalizations.of(context)!;
+        final AppBar appBar = _buildAppBar(l10n);
         final Widget body = _buildBody();
+        final List<({BottomNavigationBarItem item, int stackIndex})>
+            barDestinations = _barDestinations(l10n);
         if (constraints.maxWidth >= 720) {
           return Scaffold(
             appBar: appBar,
@@ -327,7 +355,7 @@ class _HomeShellState extends State<HomeShell> {
                   selectedIndex: _index,
                   onDestinationSelected: (int i) =>
                       setState(() => _index = i),
-                  destinations: _railDestinations,
+                  destinations: _railDestinations(l10n),
                 ),
                 const VerticalDivider(
                   width: 1,
@@ -346,11 +374,11 @@ class _HomeShellState extends State<HomeShell> {
             // 底栏位置与 IndexedStack 页下标解耦；当前页不在底栏（活动记录）
             // 时 indexWhere 返回 -1，不高亮任何项。
             currentIndex:
-                _barDestinations.indexWhere((d) => d.stackIndex == _index),
+                barDestinations.indexWhere((d) => d.stackIndex == _index),
             onTap: (int i) =>
-                setState(() => _index = _barDestinations[i].stackIndex),
+                setState(() => _index = barDestinations[i].stackIndex),
             items: <BottomNavigationBarItem>[
-              for (final d in _barDestinations) d.item,
+              for (final d in barDestinations) d.item,
             ],
           ),
         );

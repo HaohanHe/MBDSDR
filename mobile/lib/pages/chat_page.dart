@@ -6,7 +6,8 @@
 //   SelectableText 流式渲染、HH:mm 时间戳、错误气泡可重试；
 // * 多会话：顶部会话栏（≡ 抽屉 + 当前标题 + 新建）；抽屉列会话、切、删；
 //   持久化走 ChatSessionStore（与桌面 JSON 同形）；store 未注入时退化为
-//   纯内存单会话（不假接持久化）；
+//   纯内存单会话（不假接持久化）；AI 轮的真实工具步骤随 assistant 行落盘
+//   （steps），重启/切会话后重建 TaskProgressView chip，历史不丢过程；
 // * 流式行：partial 实时显示（▋光标）、完成时固化且只固化一次（去重）、
 //   错误时保留已流式内容不擦除；
 // * 全部弹性布局，横屏可用；只用 AppTokens 常量。
@@ -17,6 +18,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
+import '../l10n/gen/app_localizations.dart';
 import '../models/chat_message.dart';
 import '../models/task_step.dart';
 import '../services/ai_client.dart';
@@ -47,6 +49,10 @@ class _UiMessage {
   bool streaming = false;
   String? error;
   final List<_UiToolCall> toolCalls = <_UiToolCall>[];
+
+  /// 从持久化历史恢复的任务步骤快照（[TaskStep]，仅重载行有；实时行用
+  /// [toolCalls] 现算）。二者择一渲染 TaskProgressView，语义一致。
+  final List<TaskStep> restoredSteps = <TaskStep>[];
 
   /// 折叠占位标记（展示层）：true 时这不是一条气泡，而是一行居中的
   /// 「已折叠 N 轮早期对话」诚实说明——它只说明上送层发生了折叠，不删任何气泡/原文。
@@ -131,8 +137,9 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 把存储里当前会话的已固化行载入 UI 气泡 + LLM 上下文。
   ///
-  /// 只恢复纯文本 user/assistant 行（kind=chat）；历史 tool chip 不重建
-  /// （瞬态事件不进磁盘，见 ChatSessionStore 互操作边界注释）。
+  /// 恢复两层：纯文本 user/assistant 行（kind=chat）进气泡与上送上下文；
+  /// assistant 行携带的 steps 任务步骤快照重建 TaskProgressView chip
+  /// （历史里的工具调用过程不再随重启消失，见 ChatSessionStore 互操作边界注释）。
   void _loadCurrentSession() {
     final ChatSessionStore? store = _store;
     _messages.clear();
@@ -143,7 +150,16 @@ class _ChatPageState extends State<ChatPage> {
       final DateTime time = line.tsMs > 0
           ? DateTime.fromMillisecondsSinceEpoch(line.tsMs)
           : DateTime.fromMillisecondsSinceEpoch(0);
-      _messages.add(_UiMessage(role: role, text: line.content, time: time));
+      final _UiMessage m = _UiMessage(role: role, text: line.content, time: time);
+      // 恢复步骤快照：落盘已是收尾态，running 不会出现在磁盘上；若出现
+      // （异常数据）也不渲染成永久旋转的假进度，诚实转为「未收到结果」。
+      for (final TaskStep s in line.steps) {
+        m.restoredSteps.add(s.status == TaskStepStatus.running
+            ? TaskStep.interrupted(
+                tool: s.tool, argumentsPreview: s.argumentsPreview)
+            : s);
+      }
+      _messages.add(m);
       _history.add(ChatMessage(role: role, content: line.content, time: time));
     }
   }
@@ -203,13 +219,19 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// 按钮 tooltip：禁用时诚实说明原因（无历史 / 未达门槛），启用时说明机制。
-  String _compactTooltip({required bool isEmpty, required bool canCompact}) {
-    if (isEmpty) return '当前会话还没有可压缩的历史';
+  String _compactTooltip(
+    AppLocalizations l10n, {
+    required bool isEmpty,
+    required bool canCompact,
+  }) {
+    if (isEmpty) return l10n.chatCompactEmpty;
     if (!canCompact) {
-      return '上下文未达压缩门槛（约 $_historyCharsUsed / '
-          '预算 ${AppTokens.kAiContextBudgetChars} 字符），暂无需压缩';
+      return l10n.chatCompactBelow(
+        _historyCharsUsed,
+        AppTokens.kAiContextBudgetChars,
+      );
     }
-    return '压缩早期对话为占位（不删除落盘原文）';
+    return l10n.chatCompactReady;
   }
 
   /// 手动压缩：真实调用 compactHistory（G1 规则法折叠，不二次 LLM、不 mock）。
@@ -259,6 +281,7 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _renameSession(BuildContext context, String id) async {
     final ChatSessionStore? store = _store;
     if (store == null || _busy) return;
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     SessionInfo? target;
     for (final SessionInfo s in store.sessions) {
       if (s.id == id) {
@@ -273,14 +296,14 @@ class _ChatPageState extends State<ChatPage> {
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
         backgroundColor: AppTokens.bgBar,
-        title: const Text('重命名会话', style: AppTokens.sectionTitle),
+        title: Text(l10n.chatRenameTitle, style: AppTokens.sectionTitle),
         content: TextField(
           controller: controller,
           autofocus: true,
           style: AppTokens.body,
           cursorColor: AppTokens.accent,
-          decoration: const InputDecoration(
-            hintText: '输入新会话标题',
+          decoration: InputDecoration(
+            hintText: l10n.chatRenameHint,
             isDense: true,
           ),
           onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
@@ -288,12 +311,12 @@ class _ChatPageState extends State<ChatPage> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
+            child: Text(l10n.chatCancel),
           ),
           FilledButton(
             onPressed: () =>
                 Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('保存'),
+            child: Text(l10n.chatSave),
           ),
         ],
       ),
@@ -370,12 +393,18 @@ class _ChatPageState extends State<ChatPage> {
         setState(() {
           assistantMsg.streaming = false;
           // 正常收尾才把 assistant 行固化；且仅一次（onDone 只触发一次）。
-          if (assistantMsg.error == null && assistantMsg.text.isNotEmpty) {
-            _history.add(ChatMessage(
-              role: ChatRole.assistant,
-              content: assistantMsg.text,
-              time: assistantMsg.time,
-            ));
+          // 纯工具轮（有步骤、无正文）也固化——步骤快照不能随重启丢失；
+          // 空正文不进上送上下文（无信息量）。
+          if (assistantMsg.error == null &&
+              (assistantMsg.text.isNotEmpty ||
+                  assistantMsg.toolCalls.isNotEmpty)) {
+            if (assistantMsg.text.isNotEmpty) {
+              _history.add(ChatMessage(
+                role: ChatRole.assistant,
+                content: assistantMsg.text,
+                time: assistantMsg.time,
+              ));
+            }
             _persistAssistantLine(assistantMsg, incomplete: false);
           }
           _busy = false;
@@ -400,6 +429,8 @@ class _ChatPageState extends State<ChatPage> {
       failed.text = '';
       failed.streaming = true;
       failed.toolCalls.clear();
+      // 重跑即重算步骤：旧快照（含恢复行）不残留，避免新旧步骤混排。
+      failed.restoredSteps.clear();
       _messages.add(failed);
       _busy = true;
     });
@@ -425,12 +456,16 @@ class _ChatPageState extends State<ChatPage> {
         if (!mounted) return;
         setState(() {
           failed.streaming = false;
-          if (failed.error == null && failed.text.isNotEmpty) {
-            _history.add(ChatMessage(
-              role: ChatRole.assistant,
-              content: failed.text,
-              time: failed.time,
-            ));
+          // 与 _send.onDone 同规则：正文或工具步骤任一非空即固化。
+          if (failed.error == null &&
+              (failed.text.isNotEmpty || failed.toolCalls.isNotEmpty)) {
+            if (failed.text.isNotEmpty) {
+              _history.add(ChatMessage(
+                role: ChatRole.assistant,
+                content: failed.text,
+                time: failed.time,
+              ));
+            }
             _persistAssistantLine(failed, incomplete: false);
           }
           _busy = false;
@@ -440,6 +475,26 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   // ------------------------------------------------------------- 持久化缝
+  /// 收尾时把 UI 层工具调用记录固化成 TaskStep 快照（随会话历史落盘）。
+  ///
+  /// 诚实边界：收尾时仍未收到结果的调用（流被中断）不落成 running——
+  /// 那会让恢复后的 chip 永久旋转假进度；用 [TaskStep.interrupted] 落为
+  /// 「未收到结果」失败态，绝不臆造执行结果。
+  List<TaskStep> _stepsForPersist(_UiMessage m) {
+    return m.toolCalls.map((_UiToolCall c) {
+      final TaskStep step = TaskStep.fromCall(
+        tool: c.name,
+        argumentsPreview: c.argumentsPreview,
+        done: c.done,
+        result: c.result,
+      );
+      return step.status == TaskStepStatus.running
+          ? TaskStep.interrupted(
+              tool: c.name, argumentsPreview: c.argumentsPreview)
+          : step;
+    }).toList(growable: false);
+  }
+
   /// 落盘一条 user 行，并把当前会话标记为「流式回复进行中」。
   void _persistUserLine(String text, DateTime now) {
     final ChatSessionStore? store = _store;
@@ -456,7 +511,8 @@ class _ChatPageState extends State<ChatPage> {
     store.setIncomplete(store.currentId, true);
   }
 
-  /// 正常收尾：固化 assistant 行，清 incomplete（去重：只在 onDone 调一次）。
+  /// 正常收尾：固化 assistant 行（含任务步骤快照），清 incomplete
+  /// （去重：只在 onDone 调一次）。
   void _persistAssistantLine(_UiMessage m, {required bool incomplete}) {
     final ChatSessionStore? store = _store;
     if (store == null) return;
@@ -467,6 +523,7 @@ class _ChatPageState extends State<ChatPage> {
         content: m.text,
         kind: 'chat',
         tsMs: m.time.millisecondsSinceEpoch,
+        steps: _stepsForPersist(m),
       ),
     );
     store.setIncomplete(store.currentId, incomplete);
@@ -476,7 +533,8 @@ class _ChatPageState extends State<ChatPage> {
   void _finalizeAssistantOnError(_UiMessage m) {
     final ChatSessionStore? store = _store;
     if (store == null) return;
-    if (m.text.isNotEmpty) {
+    final List<TaskStep> steps = _stepsForPersist(m);
+    if (m.text.isNotEmpty || steps.isNotEmpty) {
       store.appendLine(
         store.currentId,
         SessionLine(
@@ -484,6 +542,7 @@ class _ChatPageState extends State<ChatPage> {
           content: m.text,
           kind: 'chat',
           tsMs: m.time.millisecondsSinceEpoch,
+          steps: steps,
         ),
       );
     }
@@ -581,6 +640,7 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 会话栏：≡ 抽屉 / 当前标题 / 压缩上下文 / 新建会话。全部走 touchMin 触控目标。
   Widget _buildSessionBar() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final String title = _store?.current?.title ?? '';
     final ({bool canCompact, ContextCompaction compaction}) plan = _compactPlan;
     final bool historyEmpty = _history.isEmpty;
@@ -598,14 +658,14 @@ class _ChatPageState extends State<ChatPage> {
           Builder(
             builder: (BuildContext inner) => IconButton(
               icon: const Icon(Icons.menu),
-              tooltip: '会话列表',
+              tooltip: l10n.chatSessionListTooltip,
               color: AppTokens.textSecondary,
               onPressed: () => Scaffold.of(inner).openDrawer(),
             ),
           ),
           Expanded(
             child: Text(
-              title.isEmpty ? '新会话' : title,
+              title.isEmpty ? l10n.chatSessionTitleFallback : title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppTokens.sectionTitle,
@@ -615,7 +675,8 @@ class _ChatPageState extends State<ChatPage> {
           // 无历史 / 未达压缩门槛 → 禁用 + 诚实 tooltip（不渲染假动作）。
           IconButton(
             icon: const Icon(Icons.unfold_less_outlined),
-            tooltip: _compactTooltip(isEmpty: historyEmpty, canCompact: plan.canCompact),
+            tooltip: _compactTooltip(l10n,
+                isEmpty: historyEmpty, canCompact: plan.canCompact),
             color: plan.canCompact
                 ? AppTokens.accent
                 : AppTokens.textAt(AppTokens.textAlphaFaint),
@@ -624,7 +685,7 @@ class _ChatPageState extends State<ChatPage> {
           // AI 工具能力清单（只读对照页）入口。
           IconButton(
             icon: const Icon(Icons.build_circle_outlined),
-            tooltip: 'AI 工具清单',
+            tooltip: l10n.chatToolsTooltip,
             color: AppTokens.textSecondary,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -634,7 +695,7 @@ class _ChatPageState extends State<ChatPage> {
           ),
           IconButton(
             icon: const Icon(Icons.add_comment_outlined),
-            tooltip: '新建会话',
+            tooltip: l10n.chatNewSessionTooltip,
             color: AppTokens.accent,
             onPressed: _busy ? null : _newSession,
           ),
@@ -645,6 +706,7 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 会话抽屉：顶部「新建会话」，下列全部会话（含未完成角标 + 删除）。
   Widget _buildSessionDrawer() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     final ChatSessionStore store = _store!;
     final List<SessionInfo> sessions = store.sessions;
     return Drawer(
@@ -659,7 +721,7 @@ class _ChatPageState extends State<ChatPage> {
                 child: FilledButton.icon(
                   onPressed: _busy ? null : _newSession,
                   icon: const Icon(Icons.add),
-                  label: const Text('新建会话'),
+                  label: Text(l10n.chatNewSessionButton),
                 ),
               ),
             ),
@@ -691,7 +753,7 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                     subtitle: s.incomplete
                         ? Text(
-                            '上次未完成',
+                            l10n.chatSessionIncomplete,
                             style: AppTokens.auxiliary.copyWith(
                               fontSize: AppTokens.annotationFontSize,
                               color: AppTokens.warning,
@@ -704,14 +766,14 @@ class _ChatPageState extends State<ChatPage> {
                         // 重命名入口：IconButton 默认 48x48，≥ AppTokens.touchMin(44)。
                         IconButton(
                           icon: const Icon(Icons.drive_file_rename_outline),
-                          tooltip: '重命名',
+                          tooltip: l10n.chatRenameTooltip,
                           color: AppTokens.textAt(AppTokens.textAlphaTertiary),
                           onPressed:
                               _busy ? null : () => _renameSession(context, s.id),
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete_outline),
-                          tooltip: '删除会话',
+                          tooltip: l10n.chatDeleteTooltip,
                           color: AppTokens.textAt(AppTokens.textAlphaTertiary),
                           onPressed: _busy ? null : () => _deleteSession(s.id),
                         ),
@@ -733,6 +795,7 @@ class _ChatPageState extends State<ChatPage> {
 
   /// 手动模式安静标注：一行次要文字，不使用警示色。
   Widget _buildModeStrip() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
@@ -745,7 +808,7 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ),
       child: Text(
-        '手动模式：AI 可对话，但调谐等动作不会真正执行',
+        l10n.chatManualModeStrip,
         style: AppTokens.auxiliary.copyWith(
           fontSize: AppTokens.annotationFontSize,
           color: AppTokens.textAt(AppTokens.textAlphaTertiary),
@@ -755,30 +818,32 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildUnconfigured() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     return EmptyState(
       icon: Icons.key_outlined,
-      title: '尚未配置 AI API key',
-      message: '配置硅基流动 API key 后即可开始对话。',
-      actionLabel: '去设置',
+      title: l10n.chatUnconfiguredTitle,
+      message: l10n.chatUnconfiguredMessage,
+      actionLabel: l10n.chatOpenSettings,
       onAction: widget.onOpenSettings,
     );
   }
 
   Widget _buildList() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     if (_messages.isEmpty) {
       // 有存储时：空会话引导「新建会话」；纯内存模式退化为一行提示。
       if (_store != null) {
         return EmptyState(
           icon: Icons.chat_bubble_outline,
-          title: '开始一段对话吧',
-          message: '这是一段空会话。发送第一条消息，或新建另一段会话。',
-          actionLabel: '新建会话',
+          title: l10n.chatEmptyTitle,
+          message: l10n.chatEmptyMessage,
+          actionLabel: l10n.chatNewSessionButton,
           onAction: _busy ? null : _newSession,
         );
       }
       return Center(
         child: Text(
-          '开始一段对话吧',
+          l10n.chatEmptyTitle,
           style: AppTokens.auxiliary
               .copyWith(color: AppTokens.textAt(AppTokens.textAlphaTertiary)),
         ),
@@ -792,9 +857,27 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  /// 气泡里渲染的步骤列表：实时行用 [toolCalls] 现算，恢复行用
+  /// [restoredSteps] 快照——两者语义一致（tool/args/status/summary），
+  /// 历史恢复的工具步骤随会话落盘后在这里重建 TaskProgressView chip。
+  List<TaskStep> _stepsForDisplay(_UiMessage m) {
+    if (m.toolCalls.isNotEmpty) {
+      return m.toolCalls
+          .map((_UiToolCall c) => TaskStep.fromCall(
+                tool: c.name,
+                argumentsPreview: c.argumentsPreview,
+                done: c.done,
+                result: c.result,
+              ))
+          .toList(growable: false);
+    }
+    return m.restoredSteps;
+  }
+
   Widget _buildBubble(_UiMessage m) {
     // 折叠占位标记：不是气泡，一行居中次要色说明（真实折叠轮次）。
     if (m.isFoldMarker) {
+      final AppLocalizations l10n = AppLocalizations.of(context)!;
       return Padding(
         padding: const EdgeInsets.symmetric(
           vertical: AppTokens.spacingS,
@@ -802,7 +885,7 @@ class _ChatPageState extends State<ChatPage> {
         ),
         child: Center(
           child: Text(
-            '〔已折叠 ${m.foldedTurns} 轮早期对话为占位；原文仍可在上下回看，未删除〕',
+            l10n.chatFoldMarker(m.foldedTurns),
             textAlign: TextAlign.center,
             style: AppTokens.auxiliary.copyWith(
               fontSize: AppTokens.annotationFontSize,
@@ -846,18 +929,8 @@ class _ChatPageState extends State<ChatPage> {
             else if (isUser)
               SelectableText(m.text, style: AppTokens.body)
             else ...<Widget>[
-                if (m.toolCalls.isNotEmpty) ...<Widget>[
-                  TaskProgressView(
-                    steps: m.toolCalls
-                        .map((_UiToolCall c) => TaskStep.fromCall(
-                              tool: c.name,
-                              argumentsPreview: c.argumentsPreview,
-                              done: c.done,
-                              result: c.result,
-                            ))
-                        .toList(),
-                  ),
-                ],
+                if (_stepsForDisplay(m).isNotEmpty)
+                  TaskProgressView(steps: _stepsForDisplay(m)),
                 SelectableText.rich(
                   TextSpan(
                     children: <InlineSpan>[
@@ -886,10 +959,15 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildErrorBody(_UiMessage m) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
+        // 出错也如实展示本轮真实工具步骤（已执行的不因出错而藏起来）。
+        if (_stepsForDisplay(m).isNotEmpty) ...<Widget>[
+          TaskProgressView(steps: _stepsForDisplay(m)),
+        ],
         // 错误气泡保留已流式内容：先展示 partial 正文，再展示错误说明。
         if (m.text.isNotEmpty) ...<Widget>[
           SelectableText(m.text, style: AppTokens.body),
@@ -922,7 +1000,7 @@ class _ChatPageState extends State<ChatPage> {
               minimumSize: const Size(0, 28),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: const Text('重试'),
+            child: Text(l10n.chatRetry),
           ),
         ),
       ],
@@ -930,6 +1008,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildInputBar() {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     return Container(
       padding: const EdgeInsets.all(AppTokens.spacingM),
       decoration: const BoxDecoration(
@@ -961,10 +1040,10 @@ class _ChatPageState extends State<ChatPage> {
                   onChanged: (_) => setState(() {}),
                   style: AppTokens.body,
                   cursorColor: AppTokens.accent,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     border: InputBorder.none,
-                    hintText: '输入消息…',
-                    hintStyle: TextStyle(color: AppTokens.textSecondary),
+                    hintText: l10n.chatInputHint,
+                    hintStyle: const TextStyle(color: AppTokens.textSecondary),
                   ),
                 ),
               ),

@@ -79,6 +79,10 @@ class URHModulator:
         if self.modulation_type == "FSK":
             return [(i + 1) * self.carrier_freq_hz / order for i in range(order)]
         if self.modulation_type == "PSK":
+            if self.bits_per_symbol == 1:
+                # 标准 BPSK：0/180 相位（默认的 step/2 偏移对 BPSK 无法判决，
+                # 该偏移是 QPSK 以上的惯例）
+                return [0.0, 180.0]
             step = 360.0 / order
             return list(np.arange(step / 2, 360, step) - 180)
         # GFSK 同 FSK
@@ -313,6 +317,8 @@ class URHDecoder:
     samples_per_symbol: int = 100
     bits_per_symbol: int = 1
     noise_mag: float = 0.0
+    lock_skip: int = 0          # PSK：Costas 锁定期跳过的符号数（上限 3）
+    symbol_offset: int = 0      # 上次解码因跳过锁定期产生的符号偏移（只读）
 
     def decode(self, iq: np.ndarray) -> np.ndarray:
         """IQ → afp_demod → 中点采样判决 → 比特。
@@ -321,6 +327,10 @@ class URHDecoder:
         （对应 Signal.py 里 digitize 的中点采样），比脉冲长度聚合更稳健。
         grab_pulse_lens 仍保留作为独立实现的脉冲分析工具。
         """
+        if (self.modulation_type == "PSK" and self.bits_per_symbol >= 2):
+            # QPSK/8PSK 的位判决需型座判决（中点采样的有符号分量不足以区分四相/
+            # 八相），这里不给出伪答案；请用星座工具。
+            return np.zeros(0, dtype=np.uint8)
         bb = afp_demod(iq, mod_type=self.modulation_type, noise_mag=self.noise_mag)
         sps = self.samples_per_symbol
         if len(bb) < sps:
@@ -338,19 +348,59 @@ class URHDecoder:
         else:
             threshold = med
 
+        # 判决极性随调制变：ASK/FSK 是幅度量（高电平 = bit1）；
+        # PSK 是有符号量（0° → 正值 → bit0，180° → 负值 → bit1）。
+        # 用 ASK 的极性判 BPSK 会整体反相（实测 77/80 误码）。
+        signed = (self.modulation_type == "PSK")
         bits = np.zeros(n_sym, dtype=np.uint8)
         lo_frac, hi_frac = 0.4, 0.6   # 符号中心 ±10% 窗，抗边沿
         for k in range(n_sym):
             lo = k * sps + int(sps * lo_frac)
             hi = k * sps + int(sps * hi_frac)
             level = float(np.mean(bb[lo:hi])) if hi > lo else float(bb[k * sps])
-            bits[k] = 1 if level > threshold else 0
+            if signed:
+                bits[k] = 0 if level > threshold else 1
+            else:
+                bits[k] = 1 if level > threshold else 0
+        if signed and self.lock_skip > 0:
+            # Costas 环需数个符号锁定：前几个符号的判决窗被瞬态污染，
+            # 直接判定会在头部出现错误（实测前 3 符号误码）。
+            # 跳过锁定期并如实报告偏移，由调用方对齐。
+            self.symbol_offset = int(self.lock_skip)
+            return bits[self.lock_skip:]
         return bits
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # ToolRegistry 注册
 # ═══════════════════════════════════════════════════════════════════════
+# 模调名归一：模型口播的自然说法（BPSK/QPSK/8PSK/ASK...）
+# → 内部类型 + 隐含的 bits_per_symbol。不做这一层时，模型说
+# "BPSK" 会拿到 "暂不支持的调制: BPSK" 这种无法自助的拒绝。
+_URH_MOD_ALIASES = {
+    "BPSK": ("PSK", 1),
+    "QPSK": ("PSK", 2),
+    "8PSK": ("PSK", 3),
+    "PSK": ("PSK", None),
+    "ASK": ("ASK", None),
+    "OOK": ("ASK", None),
+    "FSK": ("FSK", None),
+    "GFSK": ("GFSK", None),
+    "GMSK": ("GFSK", None),
+}
+
+
+def _normalize_urh_modulation(name, bits_per_symbol):
+    """归一调制名：返回 (内部类型, 有效 bits_per_symbol)。"""
+    key = str(name or "ASK").strip().upper()
+    if key in _URH_MOD_ALIASES:
+        typ, implied = _URH_MOD_ALIASES[key]
+        if implied is not None and not bits_per_symbol:
+            bits_per_symbol = implied
+        return typ, bits_per_symbol
+    return key, bits_per_symbol
+
+
 def register_urh_tools(registry) -> None:
     """把 URH 调制/解调/符号判决工具注册进 ToolRegistry。"""
     import json
@@ -362,40 +412,99 @@ def register_urh_tools(registry) -> None:
         if not isinstance(bits, list):
             return ToolResult(False, "bits 必须是 0/1 列表")
         try:
+            _raw_bps = args.get("bits_per_symbol")
+            _bps = int(_raw_bps) if _raw_bps else 0
+            _typ, _bps = _normalize_urh_modulation(args.get("modulation", "ASK"), _bps)
             mod = URHModulator(
-                modulation_type=str(args.get("modulation", "ASK")),
+                modulation_type=_typ,
                 samples_per_symbol=int(args.get("samples_per_symbol", 100)),
                 sample_rate=float(args.get("sample_rate", 1e6)),
-                carrier_freq_hz=float(args.get("carrier_freq_hz", 40e3)),
-                bits_per_symbol=int(args.get("bits_per_symbol", 1)),
+                # 载频默认值随采样率推导：写死 40 kHz 在 48 kSPS 下逼近 Nyquist
+                # 会混叠，位判决不可用（实测 3/80 误码）。
+                carrier_freq_hz=float(args.get("carrier_freq_hz")
+                                     or float(args.get("sample_rate", 1e6)) / 8.0),
+                bits_per_symbol=_bps or 1,
             )
             iq = mod.modulate(bits)
+            # 载荷必须完整：之前只返回第一个采样点的 I/Q，
+            # 下游解调器拿到的是一个点 -> 位判决永远是 0 比特。
+            # 现在返回完整交错 IQ（JSON 安全的实数列表）。
+            inter = np.empty(len(iq) * 2, dtype=float)
+            inter[0::2] = iq.real
+            inter[1::2] = iq.imag
             data = {"num_samples": int(len(iq)),
-                    "complex_iq": [float(iq.real[0]), float(iq.imag[0])],
+                    "complex_iq": inter.tolist(),
+                    "format": "interleaved [i0,q0,i1,q1,...]",
                     "modulation": mod.modulation_type,
+                    "bits_per_symbol": mod.bits_per_symbol,
+                    "samples_per_symbol": mod.samples_per_symbol,
+                    "sample_rate": mod.sample_rate,
                     "source": "urh  __modulate"}
-            return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
+            summary = {"num_samples": int(len(iq)), "modulation": mod.modulation_type,
+                       "format": "interleaved [i0,q0,i1,q1,...]",
+                       "hint": "完整 IQ 见 data.complex_iq，可直接传给 urh_decode_iq"}
+            return ToolResult(True, json.dumps(summary, ensure_ascii=False), data=data)
         except Exception as e:
             return ToolResult(False, f"URH 调制失败: {e}")
 
     def _urh_demodulate(args):
         """复 IQ → URH 正交解调实值基带（位层前一步）。"""
         iq = args.get("iq")
+        if iq is None:
+            iq = args.get("complex_iq")
         if not isinstance(iq, list):
-            return ToolResult(False, "iq 必须是复数采样列表（交错 [i0,q0,i1,q1...]）")
+            return ToolResult(False, "iq 必须是复数采样列表（交错 [i0,q0,i1,q1...]）；"
+                                "也可传 urh_modulate 返回的 complex_iq")
         try:
             arr = np.asarray(iq, dtype=float)
             if arr.size % 2 == 0:
                 c = arr[0::2] + 1j * arr[1::2]
             else:
                 c = arr.astype(complex)
-            bb = afp_demod(c, mod_type=str(args.get("modulation", "ASK")))
+            _typ, _ = _normalize_urh_modulation(args.get("modulation", "ASK"), 0)
+            bb = afp_demod(c, mod_type=_typ)
             data = {"num_samples": int(len(bb)),
                     "first_values": [float(x) for x in bb[:8]],
                     "source": "urh  afp_demod"}
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
             return ToolResult(False, f"URH 解调失败: {e}")
+
+    def _urh_decode_iq(args):
+        """复 IQ -> 比特（URH 风格一键解码：正交解调 -> 中点采样判决）。
+
+        与 urh_demodulate 的差别：后者只出实值基带（位层前一步），
+        本工具直接出比特，把 URH 链路（调制 -> 解调 -> 判决）补完整。
+        """
+        iq = args.get("iq")
+        if iq is None:
+            iq = args.get("complex_iq")
+        if not isinstance(iq, list):
+            return ToolResult(False, "iq 必须是复数采样列表（交错 [i0,q0,i1,q1...]）；"
+                                "也可传 urh_modulate 返回的 complex_iq")
+        try:
+            arr = np.asarray(iq, dtype=float)
+            if arr.size % 2 == 0:
+                c = arr[0::2] + 1j * arr[1::2]
+            else:
+                c = arr.astype(complex)
+            _raw_bps = args.get("bits_per_symbol")
+            _bps = int(_raw_bps) if _raw_bps else 0
+            _typ, _bps = _normalize_urh_modulation(args.get("modulation", "ASK"), _bps)
+            _lock = int(args.get("lock_skip", 3 if _typ == "PSK" else 0))
+            dec = URHDecoder(modulation_type=_typ,
+                             samples_per_symbol=int(args.get("samples_per_symbol", 100)),
+                             bits_per_symbol=_bps or 1,
+                             lock_skip=min(_lock, 3))
+            bits = dec.decode(c)
+            data = {"bits": [int(b) for b in bits], "n_bits": int(len(bits)),
+                    "symbol_offset": int(dec.symbol_offset),
+                    "modulation": _typ,
+                    "samples_per_symbol": int(args.get("samples_per_symbol", 100)),
+                    "source": "urh URHDecoder"}
+            return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
+        except Exception as e:
+            return ToolResult(False, f"URH 位判决失败: {e}")
 
     def _urh_detect_sync(args):
         """比特流中检测同步字位置。"""
@@ -446,6 +555,19 @@ def register_urh_tools(registry) -> None:
         handler=_urh_demodulate,
         category="sdr_protocol",
     )
+    registry.register(
+        name="urh_decode_iq",
+        description=("URH 一键解码：复 IQ -> 正交解调 -> 中点采样判决 -> 比特列表"
+                     "（补全 URH 链路：调制 -> 解调 -> 位判决）。"
+                     "调制名支持 BPSK/QPSK/8PSK/ASK/FSK/GFSK（自动归一）。"),
+        parameters={"type": "object", "properties": {
+            "iq": {"type": "array", "items": {"type": "number"}},
+            "modulation": {"type": "string", "default": "ASK"},
+            "samples_per_symbol": {"type": "integer", "default": 100},
+            "bits_per_symbol": {"type": "integer"},
+        }, "required": ["iq"]},
+        handler=_urh_decode_iq, category="sdr_protocol")
+
     registry.register(
         name="urh_sync_detect",
         description=("URH 同步字相关：在 0/1 比特流里按汉明距离找同步字位置。"),

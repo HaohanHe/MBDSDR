@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // ft8_detector.h -- FT8 检测层（DSP 最小接入）。
 //
-// 干净室自写 C++（MIT），机制镜像 Python mbdsdr_ai/ft8_modem.py 的
+// 独立实现 C++（MIT），机制镜像 Python mbdsdr_ai/ft8_modem.py 的
 // Ft8CostasSync：15 s 窗 FFT 能量 -> 符号谱（4x 时间 / 2x 频率过采样，
 // 3.125 Hz bin）-> S7/D29/S7/D29/S7 二维 Costas 相关峰粗同步 ->
 // 8-tone 能量 -> LLR 提取（逆格雷分组，正=bit0，镜像 ft8_codec.py:335）。

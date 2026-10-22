@@ -29,6 +29,15 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Network Concurrent Test)
 
+# ---- i18n（Qt Linguist）：.ts -> .qm 构建期管线 --------------------------------
+# 源语言 zh_CN（tr() 源文即中文，不产 .qm，也不装翻译器）；en/ja 翻译经
+# lrelease 产出 .qm，复制到可执行文件旁 i18n/（core/l10n.cpp 的搜索口径）。
+# 无 LinguistTools 的机器跳过管线，运行时诚实回退源语言。
+# （管线目标的创建在 mbdsdr 目标定义之后，见下文 MBDSDR_TS_EN 注释块。）
+find_package(Qt6 QUIET COMPONENTS LinguistTools)
+set(MBDSDR_TS_EN ${CMAKE_CURRENT_SOURCE_DIR}/i18n/mbdsdr_en.ts)
+set(MBDSDR_TS_JA ${CMAKE_CURRENT_SOURCE_DIR}/i18n/mbdsdr_ja.ts)
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 find_package(PkgConfig QUIET)
@@ -181,6 +190,10 @@ set(SOURCES
     src/ai/sat_task_planner.cpp
     src/ai/vna_onramp.cpp
     src/ai/memory_store.cpp
+    src/ai/pending_plan_store.cpp
+    src/core/app_settings.cpp
+    src/core/freq_input.cpp
+    src/core/l10n.cpp
     src/ai/checkpoint_writer.cpp
     src/tx/modulator.cpp
     src/tx/loopback_backend.cpp
@@ -203,6 +216,9 @@ set(SOURCES
 
 set(HEADERS
     src/core/tokens.h
+    src/core/app_settings.h
+    src/core/freq_input.h
+    src/core/l10n.h
     src/core/spectrum_frame.h
     src/core/bandwidth_preset.h
     src/ui/main_window.h
@@ -294,6 +310,22 @@ target_link_libraries(mbdsdr_core PUBLIC
 # everything else comes from the core.
 add_executable(mbdsdr src/main.cpp src/heap_probe.cpp)
 target_link_libraries(mbdsdr PRIVATE mbdsdr_core)
+
+# i18n 管线目标（须在 mbdsdr 目标定义之后）：.qm 生成到 ${CMAKE_CURRENT_BINARY_DIR}/i18n，
+# 与 RUNTIME_OUTPUT_DIRECTORY 同位——qmSearchDirs(appDir/i18n) 直接命中，无需拷贝。
+if (Qt6LinguistTools_FOUND)
+    set(MBDSDR_QM_DIR ${CMAKE_CURRENT_BINARY_DIR}/i18n)
+    set(MBDSDR_QM_FILES ${MBDSDR_QM_DIR}/mbdsdr_en.qm ${MBDSDR_QM_DIR}/mbdsdr_ja.qm)
+    add_custom_command(
+        OUTPUT ${MBDSDR_QM_FILES}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${MBDSDR_QM_DIR}
+        COMMAND Qt6::lrelease ${MBDSDR_TS_EN} -qm ${MBDSDR_QM_DIR}/mbdsdr_en.qm
+        COMMAND Qt6::lrelease ${MBDSDR_TS_JA} -qm ${MBDSDR_QM_DIR}/mbdsdr_ja.qm
+        DEPENDS ${MBDSDR_TS_EN} ${MBDSDR_TS_JA}
+        COMMENT "lrelease: i18n .ts -> .qm")
+    add_custom_target(mbdsdr_i18n_qm ALL DEPENDS ${MBDSDR_QM_FILES})
+    add_dependencies(mbdsdr mbdsdr_i18n_qm)
+endif()
 
 # Offscreen screenshot tools (reuse all sources except main.cpp). These are
 # Linux/offscreen developer-only harnesses, are NOT registered with ctest, and
@@ -588,7 +620,7 @@ target_compile_definitions(test_lrpt_cpp PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_
 target_link_libraries(test_lrpt_cpp PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME lrpt_cpp COMMAND test_lrpt_cpp)
 
-# NanoVNA step-2: clean-room client + RF math over a self-made scripted replay.
+# NanoVNA step-2: independent client + RF math over a self-made scripted replay.
 add_executable(test_nanovna_client tests/test_nanovna_client.cpp)
 target_link_libraries(test_nanovna_client PRIVATE mbdsdr_core)
 target_include_directories(test_nanovna_client PRIVATE src)
@@ -645,6 +677,30 @@ target_link_libraries(test_bandwidth_preset PRIVATE mbdsdr_core)
 target_include_directories(test_bandwidth_preset PRIVATE src)
 target_link_libraries(test_bandwidth_preset PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME bandwidth_preset COMMAND test_bandwidth_preset)
+
+# i18n（Qt Linguist）管线契约：语言标签归一、.qm 加载、ui/language 往返。
+add_executable(test_l10n tests/test_l10n.cpp)
+target_link_libraries(test_l10n PRIVATE mbdsdr_core)
+target_include_directories(test_l10n PRIVATE src)
+target_link_libraries(test_l10n PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME l10n COMMAND test_l10n)
+
+# 人类友好频率解析（"137.62M"/7050k/裸数=MHz）——语义与诚实报错钉扎。
+add_executable(test_freq_input tests/test_freq_input.cpp)
+target_link_libraries(test_freq_input PRIVATE mbdsdr_core)
+target_include_directories(test_freq_input PRIVATE src)
+target_link_libraries(test_freq_input PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME freq_input COMMAND test_freq_input)
+
+# 跨语言对拍 golden：与 mbdsdr_ai/tests/test_cross_golden.py 钉同一 JSON
+# （FT8 / ADS-B 双实现自动对拍——任一侧漂移，对应 CI job 即红）。
+add_executable(test_cross_golden tests/test_cross_golden.cpp)
+target_link_libraries(test_cross_golden PRIVATE mbdsdr_core)
+target_include_directories(test_cross_golden PRIVATE src)
+target_link_libraries(test_cross_golden PRIVATE Qt6::Test Qt6::Core)
+target_compile_definitions(test_cross_golden PRIVATE
+    MBDSDR_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/golden")
+add_test(NAME cross_golden COMMAND test_cross_golden)
 
 add_executable(test_decimation tests/test_decimation.cpp)
 target_link_libraries(test_decimation PRIVATE mbdsdr_core)
@@ -1731,7 +1787,7 @@ target_include_directories(test_spectrum_tune PRIVATE src)
 target_link_libraries(test_spectrum_tune PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME spectrum_tune COMMAND test_spectrum_tune)
 
-# ---- Phase12 waterfall render (clean-room SDR++ mechanism, header-only) ------
+# ---- Phase12 waterfall render (independent SDR++ mechanism, header-only) ------
 # doZoom block-max decimation, 256-entry LUT build, dB->LUT range re-map,
 # external colormap JSON parse (valid/invalid/fallback), and nice frequency
 # ticks that follow zoom/pan. No QApplication: pure arithmetic, unit-tested
@@ -1743,7 +1799,7 @@ target_link_libraries(test_spectrum_render PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME spectrum_render COMMAND test_spectrum_render)
 
 # ---- phase12 Wave2: RTL-SDR device-layer robustness (gap-analysis L3 + L4) ---
-# L3: tune retry + get_center_freq readback (clean-room re-derivation of the
+# L3: tune retry + get_center_freq readback (independent re-derivation of the
 #     SDR++ RTL2832 PLL write-loss defence, main.cpp:344-359).
 # L4: start() explicitly asks tuner bandwidth = 0 (driver auto, main.cpp:310).
 # Driven by an injected FAKE librtlsdr ops table -- a test double, NOT a
@@ -1755,7 +1811,7 @@ target_link_libraries(test_rtl_sdr_tune PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME rtl_sdr_tune COMMAND test_rtl_sdr_tune)
 
 # ---- phase12 Wave2: channelizer rational resampling (gap-analysis L1) -------
-# Clean-room two-rate chain: power-of-two pre-decimation (the decimating FIR) +
+# Independent two-rate chain: power-of-two pre-decimation (the decimating FIR) +
 # GCD-reduced polyphase rational residual (rational_resampler.h). Fixes the
 # 2.048MHz->48kHz round(in/out)=43 drift (was 47.62kHz). Integer-exact ratios
 # still take the single-stage integer path. Header-only resampler, so no new
@@ -1780,7 +1836,7 @@ target_link_libraries(test_demod_enhance PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME demod_enhance COMMAND test_demod_enhance)
 
 # ---- phase13: RxVFO bandwidth short-circuit + transition-band parameterization
-# Clean-room mapping of SDR++ rx_vfo.h (GPLv3, mechanism only):
+# Independent mapping of SDR++ rx_vfo.h (GPLv3, mechanism only):
 #   filterNeeded = (bandwidth != outRate); transition width = 0.1*(bw/2).
 # Pure decision (planChannelFilter), Channelizer whole-band passthrough fast
 # path, and NCO retune phase continuity. Links channelizer only (no FFT).

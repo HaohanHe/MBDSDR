@@ -3,7 +3,7 @@
 >
 
 > 基线：HEAD = b20bfb7（已推送），ctest 124/124、flutter 342、pytest 42/42。
-> 学习材料：repos/sdrpp（上游源码 8c9f5ee，gitignore 不入库，只作学习材料；干净室学机制不抄代码）。
+> 学习材料：repos/sdrpp（上游源码 8c9f5ee，gitignore 不入库，只作学习材料；学机制不抄代码）。
 
 ## Wave 1：模块深读（5 子 agent 并行，每篇笔记 docs/learn/phase35/<模块>.md，120-200 行，file:line 留痕）
 | # | 模块 | 精读对象（repos/sdrpp） |
@@ -18,10 +18,10 @@
 
 ## Wave 2：差距表 + 落地
 - 差距表：docs/learn/phase35/gap-table.md 逐项裁决表（模块 | SDR++ 机制 | 我方现状 | 差距判定 | 证据 file:line | 本轮动作）；
-- 高价值点落地（选 1-2 项真差距且有产品价值，干净室机制重写，带 ctest）：候选 NB FM 立体声解调链 / AGC 平滑机制 / 频谱渲染细节；
+- 高价值点落地（选 1-2 项真差距且有产品价值，独立实现机制重写，带 ctest）：候选 NB FM 立体声解调链 / AGC 平滑机制 / 频谱渲染细节；
 - 反例核查汇总（docs/learn/phase35/counterexamples.md）。
 
 ## 质量门 / 红线
-- 干净室不复制 GPL（学机制不抄代码）；通用非专用；无假数据；无比赛字样；活动参数禁入；
+- 不复制 GPL（学机制不抄代码）；通用非专用；无假数据；无比赛字样；活动参数禁入；
 - ctest 124/124 不回归（全量输出）、flutter 342/analyze 0（若动 mobile）、pytest 42 不回归；
 - 只暂存相关文件（禁 add -A）；**不 commit/push**；如实报告 file:line、测试全量输出、YAGNI 裁决与理由、未解决项。

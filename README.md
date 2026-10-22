@@ -19,12 +19,14 @@
 | Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册大量 LLM 可调用工具（数量随版本漂移，实时口径见该 README §1 与运行时 `tool_registry.list_tools()`）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的工具集 |
 | 论文实验管线 | [`experiments/`](experiments/README.md) | 可复现实验（Eb/N0 解码成功率 / 多普勒定轨 / AMR 基线 / LLM 基线），固定种子、逐图标口径 |
 | 真机工具 | [`tools/`](tools/) | 一键只读自检 `hw_selfcheck` + 联调向导 `onboarding` |
+| 重复实现台账 | [`docs/learn/dedup-ledger.md`](docs/learn/dedup-ledger.md) | 同主题多份实现的状态台账（已收敛/有意分层/待收敛）+ 成对工具自洽审计方法与已修缺陷 | 
+| 能力地图 | [`docs/learn/capability-map.md`](docs/learn/capability-map.md) | 任务→积木编排对照表（气象对星接收/多普勒定轨/ASTU-1遥测/前端搭建/链路自测）+ 新积木参数速查 + 诚实边界 |
 | 学习与阶段规格 | [`docs/learn/`](docs/learn/) | 上游真实源码精读（sdrpp/gnuradio/librtlsdr…）+ phase3–6 实现规格与审计 |
 
 许可证：**MIT**（见 [`LICENSE`](LICENSE)、第三方归属 [`NOTICE.md`](NOTICE.md)）。
 
-**工程口径**：全仓 **MIT 干净室自研**（FT8/LRPT/CCSDS 等协议栈未抄任何
-GPL 代码，机制学走、许可证不沾）· LLM 工具三通道（Agent / ControlHub /
+**工程口径**：全仓 **MIT 发布**，第三方上游项目与许可归属见 [`NOTICE.md`](NOTICE.md)；
+协议栈（FT8/LRPT/CCSDS 等）按公开标准与协议事实独立实现 · LLM 工具三通道（Agent / ControlHub /
 HTTP）行为一致且有测试钉住，写动作一律过人工门 · 已对 SDR++、SatDump、
 nanovna-saver、NanoVNA-App、kimi-code、kilocode 六个上游项目做过源码级
 克隆审计（见 [`docs/learn/`](docs/learn/)）。
@@ -114,8 +116,9 @@ python3 experiments/exp_ebno_decode.py --trials 50 --seed 20261001
   真机步骤与回传格式见 [`docs/learn/phase6/P2-hw-report-format.md`](docs/learn/phase6/P2-hw-report-format.md)。
 - 云内可验证的部分（构建 offscreen + 测试信号、离线确定性测试、仿真口径实验）已在各端自测通过；
   真机专项（真实拔插、出声、USB-GNSS）标注为"待真机"，未宣称已验证。
-- 当前云内 offscreen 实测基线（Phase41 验收口径）：**C++ ctest 127 全过**（另 `startup_robustness` 新增 1 项 → 127+1；`e2e_smoke` 因云内无 PulseAudio 诚实 SKIP）、
-  **Flutter `flutter test` 351 全过 + `analyze` 0 issue**、**pytest 42/42 全绿**。换机 / 真机后需重测，不代表真机已验。
+- 三端测试基线与回归锚点见 [`AGENTS.md`](AGENTS.md) §5，随每轮工程实测更新；验证能力以**可复现命令**
+  （见上方命令区）与云端 CI（`.github/workflows/ci.yml`）为准，不设数字标语——数字随时间浮动，
+  写入即过期（AGENTS.md §1）。无硬件环境下的用例以诚实 SKIP 结算，换机 / 真机后需重测，不代表真机已验。
 - 未解决项总账（逐项带阶段溯源）见 [`docs/learn/phase41/open-items.md`](docs/learn/phase41/open-items.md)。
 
 ## LLM 基线（诚实说明）
@@ -132,8 +135,9 @@ transport 层已透传真实 HTTP 状态码（`llm_client.cpp` 读 `HttpStatusCo
 ## 受保护编码器（不内置）
 
 DMR / P25 / C4FM 等涉及专利或许可受限的语音编码器**不内置**本仓库。需要时由用户自行上传合法的外部
-解码器/二进制；系统在检测到外部组件时接线、没有时诚实标注不可用。本仓库为 **MIT 干净室**实现，
-上游 GPL 项目（sdrpp / gnuradio / librtlsdr 等）仅作机制学习、不逐字复制（归属见 [`NOTICE.md`](NOTICE.md)）。
+解码器/二进制；系统在检测到外部组件时接线、没有时诚实标注不可用。本仓库为 **MIT 独立实现**实现，
+上游项目（sdrpp / gnuradio / librtlsdr 等）的协议事实与交互范式是实现依据，
+项目与许可归属见 [`NOTICE.md`](NOTICE.md)。
 
 ---
 

@@ -1,6 +1,6 @@
 # Phase 49 — Real-time Doppler Compensation Engine: Safe Closed Loop
 
-Block 1+2, desktop (cpp) domain. MIT clean-room; no GPL, no contest strings, no
+Block 1+2, desktop (cpp) domain. MIT independent; no GPL, no contest strings, no
 preset TLE. Goal: turn the 1 Hz Doppler retune from "absolute-frequency limiter"
 into a safe, testable **offset** loop with three deterministic behaviours.
 

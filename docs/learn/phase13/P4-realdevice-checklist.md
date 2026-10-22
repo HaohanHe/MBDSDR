@@ -75,7 +75,7 @@
 ## 3. 链内 AGC 听感 — 🟡 在途（P2）
 
 **代码位置**：`src/dsp/agc.h` `ComplexCarrierAgc`（复数基带、包络检波**之前**跑在 AM 链路上）；
-`Agc::setCarrierAgc(bool)` 切换工作点与攻击速度。对齐 SDR++ am.h carrier AGC 机制（干净室）。
+`Agc::setCarrierAgc(bool)` 切换工作点与攻击速度。对齐 SDR++ am.h carrier AGC 机制（独立实现）。
 
 **机制**：对复数 IQ 先做幅度归一化，强载波不压垮包络检波、弱载波从噪声里抬出来，同时不破坏调制包络。
 
@@ -137,7 +137,7 @@
 ## 6. JSON 色板加载与诚实回退 — 🟡 在途（P1）
 
 **代码位置**：`src/ui/spectrum_render.h:171` `parseColormapJson`
-（形状 `{"stops":[[pos,"#rrggbb"], ...]}`，干净室，仅学 SDR++ colormaps.cpp 形状）。
+（形状 `{"stops":[[pos,"#rrggbb"], ...]}`，独立实现，仅学 SDR++ colormaps.cpp 形状）。
 
 **机制**：外部 `.json` 自定义 colormap；解析失败/格式不对时**诚实回退内置默认三档**，不崩。
 

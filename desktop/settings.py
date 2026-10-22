@@ -39,6 +39,9 @@ DEFAULTS: Dict[str, Any] = {
     # 触屏/Surface/平板二合一适配："auto"=自动检测 QTouchDevice，
     # "on"=强制触屏模式（放大触控目标/手势），"off"=强制鼠标模式。
     "touch_mode": "auto",
+    # UI 语言（i18n）：zh/en/ja。源语言 zh（tr() 源文即中文）；en/ja 由
+    # desktop/i18n/*.qm 提供（Qt Linguist 管线），未知值诚实回退 zh。
+    "ui_language": "zh",
 }
 
 #: 数值字段（写盘前做类型归一，防止 JSON 里混入字符串导致下游类型错误）

@@ -2,7 +2,7 @@
 
 > 范围：书签表从平铺列表升级为按 `BookmarkManager.group` 分区渲染。
 > 全程 offscreen/CLI，未操控 GUI；零 mock（数据全部来自真实 BookmarkManager）；
-> 活动参数零硬编码（分区样式走 tokens）；干净室实现，未抄 SDR++ 源码；
+> 活动参数零硬编码（分区样式走 tokens）；独立实现，未抄 SDR++ 源码；
 > 不 git add/commit/push。
 
 ## 为什么做这个

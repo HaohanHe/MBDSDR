@@ -2,7 +2,7 @@
 
 > 用途：完成 2026-10-08 至 10-10「JAMX01（静安梦想星）」「ASRTU-1（阿斯图友谊号）」
 > 两颗卫星下传的 SSTV（模拟慢扫描）与 SSDV（数字慢扫描）共 34 幅图像接收任务。
-> 本文是干净室（MIT）实现的权威规格。参考实现均为 GPL，**只学机制、不复制代码**。
+> 本文是独立实现（MIT）实现的权威规格。参考实现均为 GPL，**只学机制、不复制代码**。
 
 ## 1. 活动参数（微信文章实读，口径：主办方文章）
 
@@ -95,13 +95,13 @@ No-FEC 模式 payload = 256 − 15 − 4 = **237 字节**。
 - C++ 端 `cpp/src/dsp/ssdv_packet.*`：**SP5WWP 变体（6 字节头、JPEG 字节直拼），与 fsphil
   方言不同**，保留但不作为本任务核心。
 
-## 5. 缺口与实现任务（干净室 MIT）
+## 5. 缺口与实现任务（MIT 独立实现）
 
 1. `mbdsdr_ai/ssdv_decoder.py`（新建）：
    - 256 字节包识别（sync 0x55 + type 0x66/0x67）、RS 解码纠错（复用/适配 fec.py，注意 fsphil
      RS 从 byte[1] 起、pad 约定）、CRC32 校验、15 字节头解析。
    - 包收集：按 image id 分组、packet id 排序去重、记录丢包；按 packet_mcu_id/offset 放置 payload。
-   - MCU 重组：用内置标准 JPEG DQT/DHT 表（干净室，JPEG  Annex K 公开表）+ 收集到的 MCU 码流，
+   - MCU 重组：用内置标准 JPEG DQT/DHT 表（独立实现，JPEG  Annex K 公开表）+ 收集到的 MCU 码流，
      重合成完整、可被标准 JPEG 解码器打开的 JPEG；处理 EOI、mcu_mode、灰度/彩色、缺失 MCU。
    - 同时提供编码方向（仅测试需要）：JPEG → MCU → 分包 → CRC → RS，供往返测试。
 2. `mbdsdr_ai/ccsds_rx.py`（新建）：

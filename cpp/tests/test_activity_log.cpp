@@ -27,6 +27,7 @@ private slots:
         QCoreApplication::setApplicationName("MBDSDR");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp->path());
+        qputenv("MBDSDR_SETTINGS_DIR", (tmp->path()).toUtf8());
     }
     void cleanup() { delete tmp; tmp = nullptr; }
     void appendFields();

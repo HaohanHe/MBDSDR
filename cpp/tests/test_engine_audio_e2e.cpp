@@ -169,7 +169,7 @@ CtcssGateCap runCtcssGateScenario(const QString& rawPath, double sr,
 }
 
 // ---- CDCSS/DCS RF-domain synthetic modulator (*** SYNTHETIC -- NOT HARDWARE ***)
-// Clean-room Golay(23,12) encoder (public polynomial 0xC75, re-implemented here
+// independent Golay(23,12) encoder (public polynomial 0xC75, re-implemented here
 // so the product decoder is not exercised by its own test encoder).
 constexpr uint32_t kE2eGolayGen = 0xC75u;
 uint32_t e2eGolayEncode(uint32_t data12) {

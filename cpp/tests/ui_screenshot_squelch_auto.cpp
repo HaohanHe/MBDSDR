@@ -24,8 +24,10 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     // Isolate from the real user layout (which may have focus mode / rails
     // collapsed) so the shot shows a clean default instrument layout.
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        QDir::tempPath() + "/mbdsdr_shot_sqlauto");
+    qputenv("MBDSDR_SETTINGS_DIR", (QDir::tempPath() + "/mbdsdr_shot_sqlauto").toUtf8());
     QDir().mkpath(QDir::tempPath() + "/mbdsdr_shot_sqlauto");
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
 

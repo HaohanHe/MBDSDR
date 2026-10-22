@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "spectrum_display.h"
+#include "core/app_settings.h"
 #include "spectrum_tune.h"
 
 #include "core/tokens.h"
@@ -59,7 +60,7 @@ constexpr int kMaxPeakCount = 12;
 // non-numeric or non-finite value => honest default; otherwise clamped to the
 // legal band. Mirrors the QSettings("MBDSDR","MBDSDR") group used app-wide.
 double loadSpecFraction() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariant v = s.value(tokens::kSettingsKeySpecFraction);
     bool ok = false;
     const double d = v.toDouble(&ok);
@@ -82,7 +83,7 @@ int legalRingDepth(int rows) {
 // non-numeric value, or a value outside the named choice set => honest default
 // (256). Mirrors the QSettings("MBDSDR","MBDSDR") group used app-wide.
 int loadRequestedRingDepth() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariant v = s.value(tokens::kSettingsKeyWfDepth);
     bool ok = false;
     const int rows = v.toInt(&ok);
@@ -107,7 +108,7 @@ float legalMaxHoldDecay(float db) {
 // honest default (1.5 dB/frame). Mirrors the QSettings("MBDSDR","MBDSDR") group
 // used app-wide.
 float loadRequestedMaxHoldDecay() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariant v = s.value(tokens::kSettingsKeyMaxHoldDecay);
     bool ok = false;
     const double d = v.toDouble(&ok);
@@ -130,7 +131,7 @@ int legalDbGridStep(int db) {
 // non-numeric value, or a value outside the named choice set => honest default
 // (20 dB). Mirrors the QSettings("MBDSDR","MBDSDR") group used app-wide.
 int loadRequestedDbGridStep() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariant v = s.value(tokens::kSettingsKeyDbGridStep);
     bool ok = false;
     const int db = v.toInt(&ok);
@@ -144,7 +145,7 @@ int loadRequestedDbGridStep() {
 // must never start the app with a silently-frozen waterfall). Mirrors the
 // QSettings("MBDSDR","MBDSDR") group used app-wide.
 bool loadRequestedScrollPaused() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariant v = s.value(tokens::kSettingsKeyWfScrollPaused);
     if (v.type() == QVariant::Bool) return v.toBool();
     if (v.type() == QVariant::String) {
@@ -1200,7 +1201,7 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
                 // bilinear would average a narrow CW peak into its neighbours and
                 // dim it. Instead block-MAX each stored raw-dB row so the peak
                 // survives the zoom-out (SDR++ doZoom waterfall.cpp:65-90,
-                // clean-room) -- pure decimateBlockMaxRange under the hood.
+                // independent) -- pure decimateBlockMaxRange under the hood.
                 if (fallsPeak_.width() != outW || fallsPeak_.height() != ringDepth_)
                     fallsPeak_ = QImage(outW, ringDepth_, QImage::Format_ARGB32);
                 if (static_cast<int>(decScratch_.size()) < outW)
@@ -1627,7 +1628,7 @@ void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
     } else if (grab_ == Grab::Divider) {
         // Drag settled on release: persist the new trace/waterfall share so the
         // user's layout survives a restart. Pan stays ephemeral.
-        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeySpecFraction,
+        mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeySpecFraction,
                                                traceShare_);
         emit viewChanged();
     } else if (grab_ == Grab::Pan) {

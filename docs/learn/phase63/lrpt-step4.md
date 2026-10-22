@@ -1,6 +1,6 @@
 # LRPT 线 A 第④轮：C++ FEC 解码链移植 + 引擎真实驱动
 
-HEAD=28a7fbb。干净室自写 MIT，规范 `mbdsdr_ai/lrpt_fec.py` + `fec.py`。
+HEAD=28a7fbb。独立实现 MIT，规范 `mbdsdr_ai/lrpt_fec.py` + `fec.py`。
 
 ## 1. 落地 file:line
 

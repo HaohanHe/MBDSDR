@@ -7,7 +7,7 @@
 > - 本地壳文件（已核实为空壳，无正文）：`/path/to/MBDSDR/repos/model-docs/xiaomi-mimo/api_chat_openai-api.html`
 >
 > **精读方式**：web_fetch 在线抓取（pagination 模式 offset=0 一次读完全部，end_offset=3811 ≥ total_length=3811）；disable_cache=true 重试结果一致。主页面"函数调用"标签页内容为 JS 渲染，静态 HTML 未包含，经 general_search 定位到 FAQ 与 passing-back 两页补充。
-> **精读日期**：2026-10-01　**作者**：s_000c4GAYYm6
+> **精读日期**：2026-10-01　**作者**：笔记 agent
 > **覆盖边界**：a) Function calling OpenAI 兼容循环 ✓　c) arguments 不保证合法 JSON ✓　d) tool_choice 后端强制 auto ✓（同时覆盖 b reasoning_content 回传、e thinking+tool 不稳定）
 > **本地壳性质记录**：47 行纯 SPA 引导页（`<div id="root"></div>` + rspack runtime + chunk 加载清单），title="Xiaomi MiMo Home"，与另外两个克隆 HTML md5 相同（c1000a79650eeee0895cb00ca78619b3），正文完全由前端 JS 渲染，本地无任何 API 契约文本。
 

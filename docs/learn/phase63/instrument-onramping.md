@@ -98,7 +98,7 @@
 
 - **ppm**：无协议依据（详见 docs/learn/nanovna/protocol-study.md「参考晶体 ppm 协议核验」）。
   H `freq` 仅设频点（main.c:621），V2 寄存器表无 ref clock/ppm。不落地命令，不硬编字段。
-- **CDCSS/DCS 已闭环**：Golay(23,12) 干净室实现（dsp/cdcss.cpp:34-81，生成多项式 0xC75，
+- **CDCSS/DCS 已闭环**：Golay(23,12) 独立实现（dsp/cdcss.cpp:34-81，生成多项式 0xC75，
   权≤2 纠错表）；104 码 3-of-8 恒权码表（cdcss.cpp:102 `kDcsCodes`）；
   latch 去抖（cdcss.cpp:126-127，kLatchHits=3/kLatchMisses=5，应用于 214-225）；
   确定性合成位流测试在 test_squelch_gate.cpp（cdcssDetectsConfiguredCode/
@@ -170,7 +170,7 @@
 - SDR++ 侦察：无新硬缺口。
 
 ## 20. 第㉑批：维护性深检 + --cal 直显
-- LICENSING/NOTICE 核对：NanoVNA 协议事实 vs 干净室实现边界表述准确（GPL 上游只学机制、
+- LICENSING/NOTICE 核对：NanoVNA 协议事实 vs 独立实现边界表述准确（GPL 上游只学机制、
   WTFPL 参考源、官方 docs 优先），repos/ 仍 .gitignore:91 未入仓。无需修。
 - dump --cal 旗标：stderr 直显校准行（open/short/load/thru）；pytest 6 passed。
 - SDR++ 侦察：无新硬缺口。
@@ -334,7 +334,7 @@
 - 闭环 phase12 两登记项：`sdrpp-demod.md:332`（APRS 1200/2400 FSK 判「未实现」——
   实为 fsk_demod 孤岛无接线，本轮接成 NRZI→HDLC→AX.25 全链路）与 `:402`（AM 音频侧 AGC 判「缺深度」——
   Agc 类本身完备，补骤降自动提升补测）。
-- 新模块 `cpp/src/radio/hdlc.{h,cpp}`（干净室 MIT）：nrziDecode / hdlcDeframe（flag 搜索 + 去填充 +
+- 新模块 `cpp/src/radio/hdlc.{h,cpp}`（MIT 独立实现）：nrziDecode / hdlcDeframe（flag 搜索 + 去填充 +
   CRC-16/X.25 反射校验，closeFrame 丢弃 flag 前导残余位）/ hdlcEncode（测试夹具）。
 - 引擎 `SpectrumEngine::aprsMessages(limit 1..50)`（锁保护、newest-first、空态 {}）、`feedApRsBits`
   （生产路径）、`injectAx25FrameForTest`（测试仅，显式标注）。

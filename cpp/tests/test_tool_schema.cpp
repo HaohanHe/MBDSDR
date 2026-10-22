@@ -135,7 +135,15 @@ void TestToolSchema::noArgToolsHaveEmptyProperties() {
 void TestToolSchema::sevenToolsNameDescriptionMatch() {
     QList<ToolDef> defs = toolDefsFromSpecs(registeredToolSpecs());
     QList<QPair<QString, QString>> expected = {
-        {"tune_frequency", "Tune the receiver to a center frequency in Hz (single/main VFO). For multi-VFO setups use set_vfo_frequency with a vfo_id instead."},
+        {"tune_frequency", QString::fromUtf8(
+            "写入：把接收机中心频率调谐到指定 Hz（单/主 VFO）。属于写动作，手动模式下被拦截。"
+            "前置条件: freq_hz 必须提供且为正的有限数（Hz）；合法范围由 schema 边界"
+            "（tokens::kFreqMinHz..kFreqMaxHz）在参数校验层强制。"
+            "失败恢复: 非正/非有限频率被明确拒绝（不会假报成功也不会静默丢弃）——"
+            "改正数值后重试; 多 VFO 场景请改用 set_vfo_frequency（index 或 id 定位目标 VFO）。"
+            "副作用: 立即改变中心频率（硬件状态），音频与瀑布显示随之变化。"
+            "能力边界: 只调主 VFO 中心频率; 不改模式/带宽，也不读回状态"
+            "（读回用 get_status）。")},
         {"set_mode", "Set demodulation mode."},
         {"start_recording", "Start recording raw IQ to SigMF file."},
         {"stop_recording", "Stop recording."},
@@ -160,27 +168,39 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_pocsag_messages",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 POCSAG 寻呼消息快照"
-            "（地址 RIC/功能位/文本）。无解码结果时诚实返回空列表，不编造消息。")},
+            "（地址 RIC/功能位/文本）。"
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造消息。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 信道选择不改调谐状态。")},
         {"get_m17_calls",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 M17 呼叫/帧快照"
             "（源/目的呼号、类型、CRC 状态、语音帧诚实标注未解码）。"
-            "无解码结果时诚实返回空列表。")},
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 语音帧未解码时显式标注。")},
         {"get_vor_radial",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）VOR 信道最新径向读数"
             "（radialDeg 方位、质量、莫尔斯识别码、锁定态）。"
-            "未锁定时 locked=false，方位不可信并被显式标注，不编造方位。")},
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——未锁定时 locked=false，方位不可信并被显式标注，"
+            "不编造方位。"
+            "能力边界: 只读引擎最新读数; 方位仅锁定后可信。")},
         {"get_acars_packets",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 ACARS 航空报文快照"
             "（方向 air/ground、label、block id、ack、正文、CRC 结果）。"
-            "无解码结果时诚实返回空列表，不编造报文。")},
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造报文。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; CRC 失败帧显式标注。")},
         {"get_navtex_messages",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 NAVTEX 海上安全报文快照"
             "（发台 B1、类型 B2、编号、正文、时间分集/定相状态）。"
-            "无解码结果时诚实返回空列表，不编造报文。")},
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造报文。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 分集/定相失败在条目内显式标注。")},
         {"export_iq_segment",
          QString::fromUtf8(
             "写入（一次性）：立即抓取一段当前中心频率的基带 IQ 复样本并导出为 "
@@ -197,14 +217,23 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_network_audio_status",
          QString::fromUtf8(
             "只读：返回网络音频流状态（是否使能、端口、格式）。"
-            "无状态时诚实返回 enabled=false，不编造端口。")},
+            "无状态时诚实返回 enabled=false，不编造端口。"
+            "前置条件: 无。"
+            "能力边界: 当前 Agent 层无网络音频流读数（后端由 ControlHub 提供），"
+            "enabled=false 是诚实空态而非故障——不要据此声称网络音频损坏。")},
         {"start_scan_link",
          QString::fromUtf8(
             "写入：启动扫描活动链路（扫描→命中→驻留→解码→录制），目标频率 target_freq_hz。"
             "属于写动作，手动模式下被拦截。")},
         {"stop_scan_link",
          QString::fromUtf8(
-            "写入：停止扫描活动链路。属于写动作，手动模式下被拦截。")},
+            "写入：停止扫描活动链路。属于写动作，手动模式下被拦截。"
+            "前置条件: 无（无参数，任意时刻可调）。"
+            "失败恢复: 指令经 ControlHub 路由执行; 链路未运行时停止为空操作，"
+            "返回成功而非报错——不要反复重试。"
+            "副作用: 停止当前进行中的扫描活动链路（若有）。"
+            "能力边界: 只发停止指令; 扫描链路真实运行态在 ControlHub 侧，"
+            "用 get_scan_link_status 读取（Agent 层无链路实例时为空态读数）。")},
         {"get_scan_link_status",
          QString::fromUtf8(
             "只读：返回扫描活动链路状态（scanning/dwelling/hit）。"
@@ -322,35 +351,70 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "无闭式解的拓扑诚实 valid:false，不伪造数值。")},
         {"set_noise_blanker",
          QString::fromUtf8(
-            "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
+            "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。"
+            "前置条件: on 必须提供且为布尔值。"
+            "失败恢复: on 缺失或非布尔时返回明确错误（绝不静默取默认值）——"
+            "补齐布尔值后重试。"
+            "副作用: 立即改变解调链路的噪声抑制状态。"
+            "能力边界: 仅开关，不含门限/强度参数; 状态回读用 get_noise_blanker_status。")},
         {"get_noise_blanker_status",
          QString::fromUtf8(
             "只读：返回噪声抑制器状态（enabled 是否使能）。"
-            "读取引擎真实开关，不编造。")},
+            "读取引擎真实开关，不编造。"
+            "前置条件: 无（未连接设备也可读当前开关配置）。"
+            "能力边界: 只读，不改变任何状态; 开关操作用 set_noise_blanker。")},
         {"list_bookmarks",
          QString::fromUtf8(
-            "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。")},
+            "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。"
+            "前置条件: 无。"
+            "能力边界: Agent 层未注入书签管理器时返回空列表+note（诚实空态），"
+            "真实书签数据在 control 层——空列表不等于没有书签，不要虚构条目。")},
         {"add_bookmark",
          QString::fromUtf8(
             "写入：添加书签（freq_hz/name/mode/bandwidth_hz/group）。属于写动作，手动模式下被拦截。")},
         {"tune_to_bookmark",
          QString::fromUtf8(
-            "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。")},
+            "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。"
+            "前置条件: index 必须是 0 起整数下标，且书签管理器已注入。"
+            "失败恢复: index 越界时错误信息含真实书签总数（如「书签 index 5 越界"
+            "（共 3 条）」）——按总数改下标重试; 管理器未注入时返回明确错误而非假装调谐。"
+            "副作用: 改变当前选中 VFO 的调谐频率（硬件状态）。"
+            "能力边界: 只调谐到书签频率，不改书签本身; 书签列表用 list_bookmarks 读取。")},
         {"delete_bookmark",
          QString::fromUtf8(
-            "写入：删除指定下标书签。属于写动作，手动模式下被拦截。")},
+            "写入：删除指定下标书签。属于写动作，手动模式下被拦截。"
+            "前置条件: index 必须是 0 起整数下标，且书签管理器已注入。"
+            "失败恢复: index 越界时错误信息含真实书签总数——按总数改下标重试。"
+            "副作用: 真删除书签（无回收站/无撤销接口），返回值 remaining 为删除后剩余数。"
+            "能力边界: 只能删已注入管理器的书签; 不确定下标时先用 tune_to_bookmark "
+            "的越界错误探测总数，或让用户确认。")},
         {"list_vfos",
          QString::fromUtf8(
-            "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。")},
+            "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。"
+            "前置条件: 无。"
+            "能力边界: 返回引擎真实 VFO 标记，空列表即当前无 VFO; "
+            "新增/切换/改参分别用 add_vfo / switch_vfo / set_vfo_* 系列。")},
         {"add_vfo",
          QString::fromUtf8(
-            "写入：新增一个 VFO 信道。属于写动作，手动模式下被拦截。")},
+            "写入：新增一个 VFO 信道。属于写动作，手动模式下被拦截。"
+            "前置条件: 无（无参数，任意时刻可调）。"
+            "失败恢复: 无失败路径——新增必定成功并回显新信道 id。"
+            "副作用: 在引擎新增一个 VFO 信道（不自动切换选中，不改变当前调谐）。"
+            "能力边界: 只增不选; 返回 selected_vfo_id 供后续 switch_vfo 参考。")},
         {"switch_vfo",
          QString::fromUtf8(
-            "写入：切换选中的 VFO 信道（index）。属于写动作，手动模式下被拦截。")},
+            "写入：切换选中的 VFO 信道（index）。属于写动作，手动模式下被拦截。"
+            "前置条件: index 必须提供且为数字; 有效下标范围用 list_vfos 读取。"
+            "失败恢复: index 缺失或非数字时返回明确错误——先 list_vfos 拿真实 id 再重试。"
+            "副作用: 切换选中 VFO，解调输出与调谐目标随之改变。"
+            "能力边界: 只切换不新增; 选错信道不会丢数据，再次 switch_vfo 即可。")},
         {"rename_vfo",
          QString::fromUtf8(
-            "写入：重命名指定 VFO 信道（index/name）。属于写动作，手动模式下被拦截。")},
+            "写入：重命名指定 VFO 信道（index/name）。属于写动作，手动模式下被拦截。"
+            "前置条件: index（数字）与 name（字符串）都必须提供。"
+            "失败恢复: 任一缺失或类型不符时返回明确错误——补齐后重试。"
+            "副作用: 重命名经 control 层路由生效; 不影响频率/带宽/模式。"
+            "能力边界: 只改显示名; 频率/模式/带宽用 set_vfo_* 系列。")},
         // Phase59: armed parallel VFO monitoring, in registeredToolSpecs order.
         {"set_vfo_armed",
          QString::fromUtf8(
@@ -360,37 +424,77 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         // Phase61: VFO fine-grained edit tools (must match tool_schema.cpp order).
         {"set_vfo_frequency",
          QString::fromUtf8(
-            "写入：把指定 VFO 调谐到新频率（index 或 id 二选一 + freq_hz）。属于写动作，手动模式下被拦截。")},
+            "写入：把指定 VFO 调谐到新频率（index 或 id 二选一 + freq_hz）。"
+            "前置条件: index（list_vfos 返回的序号）或 id（VFO 直传 id）必须提供其一；"
+            "freq_hz 为目标频率（Hz，必填）。"
+            "失败恢复: 两者都缺或类型不符时返回明确参数错误；index 越界时错误附当前"
+            "VFO 总数——用 list_vfos 重新取序号/id 后重试。"
+            "副作用: 该 VFO 的解调频率立即改变，音频与瀑布显示随之变化；不影响其他 "
+            "VFO，也不改变模式/带宽。"
+            "能力边界: 只调谐已存在的 VFO（不新增信道）；频率合法性由引擎与硬件决定。"
+            "属于写动作，手动模式下被拦截。")},
         {"set_vfo_mode",
          QString::fromUtf8(
-            "写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode，mode 取值见 ControlHub 模式表："
-            "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。")},
+            "写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode）。"
+            "前置条件: index 或 id 必须提供其一；mode 取值见 ControlHub 模式表："
+            "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX（大小写不敏感）。"
+            "失败恢复: 目标缺失/越界或 mode 不在表中时返回明确错误（越界附 VFO 总数）——"
+            "用 list_vfos 核对后重试。"
+            "副作用: 该 VFO 的解调模式立即切换，音频输出随之改变。"
+            "能力边界: 只改已存在 VFO 的模式; 不影响其他 VFO。"
+            "属于写动作，手动模式下被拦截。")},
         {"set_vfo_bandwidth",
          QString::fromUtf8(
-            "写入：设置指定 VFO 的信道带宽（index 或 id 二选一 + bandwidth_hz）。属于写动作，手动模式下被拦截。")},
+            "写入：设置指定 VFO 的信道带宽（index 或 id 二选一 + bandwidth_hz）。"
+            "前置条件: index 或 id 必须提供其一；bandwidth_hz 必须为正数（Hz）。"
+            "失败恢复: 目标缺失/越界或带宽非正时返回明确错误（越界附 VFO 总数）——"
+            "补齐后重试。"
+            "副作用: 该 VFO 的滤波器带宽立即改变，音频随之变化。"
+            "能力边界: 只改已存在 VFO 的带宽; 可用范围由硬件/引擎决定。"
+            "属于写动作，手动模式下被拦截。")},
         {"list_recordings",
          QString::fromUtf8(
-            "只读：扫描录制目录并列出已有录制文件。目录不存在或为空时诚实返回空列表。")},
+            "只读：扫描录制目录并列出已有录制文件。"
+            "前置条件: 无（任意时刻可调；目录路径由引擎配置决定，随结果 dir 字段透传）。"
+            "失败恢复: 无失败路径——目录不存在或为空时诚实返回空列表（count=0），"
+            "不编造文件。"
+            "能力边界: 只列文件不读取内容; 每条含 name/bytes/modified; "
+            "删除/导出分别用 delete_recording / export_recording。")},
         {"delete_recording",
          QString::fromUtf8(
-            "写入：删除录制目录下指定名称的文件（仅限录制目录内）。"
-            "属于写动作，手动模式下被拦截。")},
+            "写入：删除录制目录下指定名称的文件。属于写动作，手动模式下被拦截。"
+            "前置条件: name 必须是录制目录内的纯文件名（不得含 / 或 \\，不得为 . / ..）——"
+            "可用 list_recordings 先取真实文件名。"
+            "失败恢复: name 含路径分隔符时明确拒绝（防目录穿越）；文件不存在时返回"
+            "明确错误——核对 list_recordings 后重试; 删除本身失败也会明确报错。"
+            "副作用: 真删除磁盘文件（无回收站/无撤销接口），不可恢复。"
+            "能力边界: 只能删录制目录内的文件; 导出而非删除用 export_recording。")},
         {"export_recording",
          QString::fromUtf8(
-            "写入：把录制目录下指定文件复制导出到 out_path。"
-            "属于写动作，手动模式下被拦截。")},
+            "写入：把录制目录下指定文件复制导出到 out_path。属于写动作，手动模式下被拦截。"
+            "前置条件: name（录制目录内纯文件名，不得含路径）与 out_path（目标完整路径）"
+            "都必须提供; 文件名可用 list_recordings 核对。"
+            "失败恢复: name 含路径分隔符时明确拒绝; 源文件不存在时返回明确错误; "
+            "目标已存在或不可写时返回「导出失败」——换目标路径后重试。"
+            "副作用: 在 out_path 生成一份副本; 不改动/删除源文件。"
+            "能力边界: 只导出录制目录内的文件; 复制失败不产生半成品承诺（QFile::copy 语义）。")},
         {"set_fft_params",
          QString::fromUtf8(
             "写入：设置频谱 FFT 参数（fft_size/window/average）。"
-            "window/average 接受字符串枚举（推荐）或原始整数 0/1/2。"
-            "属于写动作，手动模式下被拦截。")},
+            "window/average 使用字符串枚举（Hann/Flattop/Blackman、Off/Slow/Fast）。"
+            "属于写动作，手动模式下被拦截。"
+            "能力边界: 模型侧只接受字符串枚举——原始整数 0/1/2 是 ControlHub/HTTP "
+            "内部通道键，经 LLM/MCP 校验路径传入会被类型校验拒绝。")},
         {"set_color_map",
          QString::fromUtf8(
             "写入：保存瀑布图色板文件路径到设置（headless 仅持久化偏好，重绘由 UI 持有）。"
             "属于写动作，手动模式下被拦截。")},
         {"get_spectrum_status",
          QString::fromUtf8(
-            "只读：返回频谱当前参数（fft_size/window/average）真实值。")},
+            "只读：返回频谱当前 FFT 参数真实值（fft_size/window/average）。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——值直接读引擎，不编造; 与预期不符时以本工具读回为准。"
+            "能力边界: 只读不改; 修改 FFT 参数用 set_fft_params。")},
         // Phase55/58: two appended tools (must match tool_schema.cpp on-wire order).
         {"set_doppler_compensation",
          QString::fromUtf8(
@@ -516,7 +620,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "读取：最近解出的 APRS/AX.25 消息（最多 limit 条，1..50，默认 50）。"
             "每条含 time_ms/src/dst/path/info。源为 1200/2400 baud FSK 解调后的 NRZI "
             "位流经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码"
-            "则诚实空态。只读工具。")},
+            "则诚实空态。只读工具。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径; limit 越界诚实 clamp 到 1..50，不报错。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 只返回最近 limit 条。")},
         {"get_color_maps",
          QString::fromUtf8(
             "读取：列出瀑布图可用色板——内置 3 个（经典/单色/Viridis，palette 0/1/2）"

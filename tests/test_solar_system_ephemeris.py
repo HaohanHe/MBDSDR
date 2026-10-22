@@ -27,6 +27,14 @@ sys.path.insert(0, _ROOT)
 
 from mbdsdr_ai import solar_system as s  # noqa: E402
 
+# 环境自适应：astropy 在库 -> 回退后端为 vsop87_astropy；
+# 不在库 -> 文档化的回退值为 "none"（不得伪装有降级后端）
+import importlib.util  # noqa: E402
+
+_HAS_ASTROPY = importlib.util.find_spec("astropy") is not None
+_FALLBACK_KIND = "vsop87_astropy" if _HAS_ASTROPY else "none"
+_FALLBACK_NAME = "vsop87_astropy[回退]" if _HAS_ASTROPY else "none"
+
 
 @pytest.fixture(autouse=True)
 def _isolated_ephemeris_dir(tmp_path, monkeypatch):
@@ -126,15 +134,22 @@ def test_download_failure_fallback(monkeypatch):
 
     # 构造后端：本地无 bsp，下载被 mock 成失败 → astropy 回退
     be = s._EphemerisBackend(auto_download=False)
-    assert be.kind == "vsop87_astropy"
-    assert be.backend_name == "vsop87_astropy[回退]"
-    assert be.available is True
+    assert be.kind == _FALLBACK_KIND
+    assert be.backend_name == _FALLBACK_NAME
+    assert be.available is _HAS_ASTROPY
 
 
 def test_backend_name_in_result(monkeypatch):
     """结果 to_dict() 必须含 backend 字段，且与后端名一致。"""
     be = s._EphemerisBackend(auto_download=False)
     from datetime import datetime, timezone
+    if not _HAS_ASTROPY:
+        # 无 astropy 且无 de421：后端如实为 none，位置返回 None（诚实空态）
+        assert be.kind == "none"
+        pos = s.get_sun_position(datetime(2025, 6, 21, 12, 0, tzinfo=timezone.utc),
+                                 s.SAMPLE_SITE)
+        assert pos is None
+        return
     pos = s.get_sun_position(datetime(2025, 6, 21, 12, 0, tzinfo=timezone.utc),
                              s.SAMPLE_SITE)
     assert pos is not None
@@ -147,7 +162,7 @@ def test_backend_name_in_result(monkeypatch):
 def test_hot_switch(monkeypatch):
     """后台下载完成后 _hot_swap_to_bsp 把后端切到 de421_bsp。"""
     be = s._EphemerisBackend(auto_download=False)
-    assert be.kind == "vsop87_astropy"
+    assert be.kind == _FALLBACK_KIND
 
     # 构造一个 jplephem 引擎句柄（spk 用占位对象，不真正算位置）
     fake_handle = s._EphemerisHandle(engine="jplephem", spk=object())
@@ -178,7 +193,7 @@ def test_background_download_nonblocking(monkeypatch):
     assert elapsed < 1.0
     ready.wait(timeout=2)
     assert be.download_in_progress is True
-    assert be.kind == "vsop87_astropy"   # 下载未完成期间用回退
+    assert be.kind == _FALLBACK_KIND     # 下载未完成期间用回退
     proceed.set()
     # 等待线程结束
     t = be._download_thread

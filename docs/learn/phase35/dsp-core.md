@@ -1,6 +1,6 @@
 # Phase35 L2：SDR++ DSP 管线核心精读
 
-> 精读对象：`repos/sdrpp/core/src/dsp/`（真读源码，干净室学机制不抄代码）
+> 精读对象：`repos/sdrpp/core/src/dsp/`（真读源码，学机制不抄代码）
 > 对照：我方 `cpp/src/dsp/`（channelizer / audio_resampler / fft.h / agc.h / anr.h / rational_resampler.h）
 > 上游基线 8c9f5ee。只学机制，GPL 代码不落地。
 

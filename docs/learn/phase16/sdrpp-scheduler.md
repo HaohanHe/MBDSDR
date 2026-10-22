@@ -3,7 +3,7 @@
 > 范围：`repos/sdrpp/misc_modules/scheduler/` 全部源码（仅 5 个文件、约 486 行）：
 > `src/main.cpp`、`src/sched_task.h`、`src/sched_action.h`、`src/actions/tune_vfo.h`、`src/actions/start_recorder.h`、`CMakeLists.txt`。
 >
-> **版权声明**：SDR++ 为 GPLv3。下列引用仅为**机制学习**的注释性短片段（每处 ≤3 行，锚定 file:line），**不复制任何实现代码进 MBDSDR**；MBDSDR 落地走干净室（自有命名/结构，MIT）。
+> **版权声明**：SDR++ 为 GPLv3。下列引用仅为**机制学习**的注释性短片段（每处 ≤3 行，锚定 file:line），**不复制任何实现代码进 MBDSDR**；MBDSDR 落地走独立实现（自有命名/结构，MIT）。
 >
 > **一句话结论（先读这条）**：SDR++ 的 scheduler **不是一个能用的调度器，而是一个只搭了一半骨架的半成品**。它只实现了「可序列化 Action 对象 + Task=Action 列表」这层概念；**触发条件、时间源、调度引擎、持久化全部没写**——没有定时器线程、没有墙钟、没有过境预测，`Task::trigger()` 在整个仓库里没有任何调用方。本笔记如实记录。
 
@@ -156,7 +156,7 @@
 
 ### 建议（只提通用、可云内确定性验证的）
 
-1. **一个纯逻辑 `Scheduler` 引擎，时钟可注入**（干净室，不抄 SDR++ 骨架）：
+1. **一个纯逻辑 `Scheduler` 引擎，时钟可注入**（独立实现，不抄 SDR++ 骨架）：
    - 输入：已武装任务列表 `{id, trigger{type: wallclock|aos|signal, dueUtc/hours}, plan}` + 注入的 `nowUtc`；
    - 输出：本 tick 到期应 fire 的任务列表。纯函数 + 注入时钟，单测可确定性断言「到 AOS 前 N 分钟武装、到 AOS 触发、过期/取消如何处理」，**不碰硬件**。
    - 复用现有件：过境时刻来自 `predictSatellitePasses`，动作来自 `TaskOrchestrator::run`，信号触发来自 `SignalWatch`。**MBDSDR 只缺这层「到点判定循环」**，积木全在。

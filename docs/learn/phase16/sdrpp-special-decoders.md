@@ -4,7 +4,7 @@
 > `m17_decoder/`、`pager_decoder/`(POCSAG/FLEX)、`vor_receiver/`、`dab_decoder/`。
 > 重点**不是**各协议的业务细节，而是「一个数字协议是怎样被组织成 source→同步→解调→解码的模块」这套通用流式框架。
 >
-> **版权声明**：SDR++ 为 GPLv3。下列引用仅为**机制学习**的注释性短片段（≤3 行，锚定 file:line），**不复制实现代码进 MBDSDR**；MBDSDR 落地走干净室（自有命名/结构，MIT）。
+> **版权声明**：SDR++ 为 GPLv3。下列引用仅为**机制学习**的注释性短片段（≤3 行，锚定 file:line），**不复制实现代码进 MBDSDR**；MBDSDR 落地走独立实现（自有命名/结构，MIT）。
 >
 > **一句话结论**：四个 decoder 共享同一套「**建 VFO → 把 vfo->output 接进一条 DSP 链 → hier_block 拼装同步/解调/FEC/解码 → 回调或 sink 出结果**」骨架。MBDSDR 已用**自己的 pull 式（feed→take）状态类**覆盖了其中大部分；真正通用、可云内确定性验证、值得学的增量只有「接收连续性/超时状态机」和「测量-置信度平均」两样。
 
@@ -129,14 +129,14 @@
 | SDR++ 段 | MBDSDR 对应 | file:line |
 |---|---|---|
 | VFO 切片 | 多 VFO 扇出（宽带给每个 VFO 一份，独立 Channelizer+解调） | `dsp/vfo_manager.h:1-20` |
-| GFSK/正交解调+MM 时钟恢复 | `FskDemod`：鉴频器→Nuttall LPF→MM TED→符号切片（**已干净室注明学自 SDR++ gfsk.h 行号**） | `dsp/fsk_demod.h:8-17,43-45` |
+| GFSK/正交解调+MM 时钟恢复 | `FskDemod`：鉴频器→Nuttall LPF→MM TED→符号切片（**已独立实现注明学自 SDR++ gfsk.h 行号**） | `dsp/fsk_demod.h:8-17,43-45` |
 | Costas/载波恢复 | `DigitalDemod`：AGC→Costas NCO→分数插值→MM→差分解码，输出决策/恢复点/比特队列 | `dsp/digital_demod.h:12-21,84-89` |
 | 同步字搜索状态机 | `ADSBDecoder`：前导码 `checkPreamble` 滑动搜 + PPM 采样 + `processFrame` 校验 | `dsp/adsb_decoder.h:78-85` |
 | 行/帧同步锁相 | `AptDecoder`：滑动归一化互相关锁行 + 分数像素累加器抽帧，`SyncState{Search,Locked}` | `dsp/apt_decoder.h:114-132` |
 | 时长/单位估计解码 | `CWDecoder`：包络→自适应门限→最短 mark 当 1 单位→间隔分词 | `dsp/cw_decoder.h:14-24,65-72` |
 | 元数据出口 | `feed()→takeNewAircraft()/takeText()` 队列 pull | `adsb_decoder.h:57-58` / `cw_decoder.h:31-32` |
 
-**对照判定**：MBDSDR 已经用自己的 pull 风格把「source(VFO)→同步→解调→解码→出口」五段式**全部实现了一遍**，且 `fsk_demod.h`、`apt_decoder.h` 的注释里已经做过干净室机制引用。SDR++ 的 thread-per-block stream 图对 MBDSDR **没有照搬价值**（MBDSDR 刻意用更简单、可单测的 pull 模型，引擎 run 线程统一驱动）。
+**对照判定**：MBDSDR 已经用自己的 pull 风格把「source(VFO)→同步→解调→解码→出口」五段式**全部实现了一遍**，且 `fsk_demod.h`、`apt_decoder.h` 的注释里已经做过独立实现机制引用。SDR++ 的 thread-per-block stream 图对 MBDSDR **没有照搬价值**（MBDSDR 刻意用更简单、可单测的 pull 模型，引擎 run 线程统一驱动）。
 
 ---
 
@@ -146,15 +146,15 @@
 |---|---|---|---|
 | 同步→解调→解码五段式 | ✅ ADSB/APT/CW/FSK/BPSK 各自已有 | — | **已实现**，无需学 |
 | 协议策略可换（unique_ptr decoder） | 各 decoder 已是独立类由引擎选 | 低 | 现阶段不需要统一 Decoder 接口 |
-| **接收连续性/超时状态机** | ⚠️ 各 decoder 自带零散锁标志（`AptDecoder.locked_`、ADSB 前导扫描），无统一「连续帧判定+超时降 idle」件 | **中高** | **可干净室抽一个通用 LinkTracker**：输入「本块是否有连续有效帧」+ 超时阈值，输出 receiving/idle，纯逻辑可单测。m17dsp.h:487-499 是机制原型 |
+| **接收连续性/超时状态机** | ⚠️ 各 decoder 自带零散锁标志（`AptDecoder.locked_`、ADSB 前导扫描），无统一「连续帧判定+超时降 idle」件 | **中高** | **可独立实现抽一个通用 LinkTracker**：输入「本块是否有连续有效帧」+ 超时阈值，输出 receiving/idle，纯逻辑可单测。m17dsp.h:487-499 是机制原型 |
 | **测量-置信度平均** | ⚠️ 有 `SignalWatch` 快攻慢释平滑（`signal_watch.h:34`），但无「标量估计的块平均+离散度→质量分」件 | **中** | 可复用为未来仪器类读数（锁定质量/信号质量）；纯统计、可云内验证。vor_decoder.cpp:38-41 是原型 |
 | OFDM 定时/频偏同步（DAB） | ❌ 无任何 OFDM 接收计划 | 高但**条件触发** | 仅当 MBDSDR 未来做 DAB/DRM/宽带 OFDM 才值得；**本轮不落地**，先记下机制（CP 自相关 + 相位参考 FFT 频偏） |
 | 跨线程 UI 陈旧失效 | MBDSDR 引擎单线程 pull，跨线程需求弱 | 低 | 暂不需要 |
 
 ### 建议（P3 只判定、不强落地）
 
-1. **若后续要做通用数字接收健康度**：干净室写一个 `LinkTracker`（连续有效帧计数 + 可注入时钟的超时判定），替换各 decoder 里 ad-hoc 的 `locked_/receiving` 标志；输入输出纯数值，ctest 可确定性覆盖「连续→保持、断流→超时后降 idle」。机制学自 `m17dsp.h:487-499`。
-2. **若未来要加仪器型读数**（如锁定质量、方位/频偏质量）：干净室加一个「滑动块 mean/stddev → 置信度」小工具，机制学自 `vor_decoder.cpp:38-41`。
+1. **若后续要做通用数字接收健康度**：独立实现写一个 `LinkTracker`（连续有效帧计数 + 可注入时钟的超时判定），替换各 decoder 里 ad-hoc 的 `locked_/receiving` 标志；输入输出纯数值，ctest 可确定性覆盖「连续→保持、断流→超时后降 idle」。机制学自 `m17dsp.h:487-499`。
+2. **若未来要加仪器型读数**（如锁定质量、方位/频偏质量）：独立实现加一个「滑动块 mean/stddev → 置信度」小工具，机制学自 `vor_decoder.cpp:38-41`。
 3. **DAB/OFDM 暂缓**：机制已记（循环前缀自相关找符号峰 + 已知参考 FFT 找频偏），但 MBDSDR 无 OFDM 路线图，硬抄无价值。
 4. 明确**不抄**：thread-per-block 流图、GPL 的具体同步字/交织表/相位参考常量表（这些是协议专有数据，不是通用架构）。
 

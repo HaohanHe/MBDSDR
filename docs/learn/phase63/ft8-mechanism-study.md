@@ -1,4 +1,4 @@
-# FT8 机制学习笔记（干净室）
+# FT8 机制学习笔记（独立实现）
 
 > 日期：2026-10-10  作者：MBDSDR 工程轮
 > HEAD：MBDSDR @ 764866a
@@ -8,9 +8,9 @@
 
 ---
 
-## 0. 干净室声明（Clean-Room Notice）
+## 0. 独立实现声明（Implementation Notice）
 
-WSJT-X 与 JS8Call 均为 GPL 许可项目。本笔记遵循干净室规则：
+WSJT-X 与 JS8Call 均为 GPL 许可项目。本笔记遵循独立实现规则：
 
 - **只读机制，不抄代码**。下列所有 file:line 引用仅作为"机制证据"，用于
   回答"FT8 在物理层/链路层做了什么、为什么这么做"。

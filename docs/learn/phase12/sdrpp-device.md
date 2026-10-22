@@ -1,7 +1,7 @@
 # SDR++ 设备抽象与后端子系统 — 源码精读笔记（Phase12 Wave1-B）
 
 > 上游：`repos/sdrpp/`（GPLv3，见 `license` 目录）。本笔记**只学机制/契约/交互范式**，
-> 不逐字复制代码；落地到 MBDSDR 时一律用自有干净室实现。
+> 不逐字复制代码；落地到 MBDSDR 时一律用自有独立实现。
 > 所有上游引用均为 `repos/sdrpp/<path>:<line>`；MBDSDR 引用均为 `cpp/<path>:<line>`。
 >
 > 范围：源插件模型（`core/src/module.{h,cpp}`、`core/src/signal_path/source.h`、
@@ -155,7 +155,7 @@ SDR++ 并没有一个形如 `class IDevice { virtual open()=0; virtual read()=0;
   生产包 `rtlsdr_get_device_count/name`，测试塞假枚举器；diff 出新增/移除。
 - `cpp/src/dsp/audio_output.h:23-54` — `AudioOutput : IAudioSink`，瘦 facade
   委托给 `QtAudioSink`，带 `audioHealthStatus()` 诚实健康态。
-- `cpp/src/dsp/spyserver_server.h:1-25` — SpyServer **服务端**干净室重写
+- `cpp/src/dsp/spyserver_server.h:1-25` — SpyServer **服务端**独立重写
   （对外推 IQ），`SpyServerTuner` 三个回调桥到 engine。
 
 ---

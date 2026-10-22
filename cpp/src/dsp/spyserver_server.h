@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// SpyServer (Airspy / SDR++ compatible) *server*, clean-room re-implemented
+// SpyServer (Airspy / SDR++ compatible) *server*, independent re-implemented
 // strictly from the wire layout reverse-engineered in
 // docs/learn/spyserver.md (two independent open-source *client* implementations
 // cross-checked). No GPL source was copied; every byte layout below is either

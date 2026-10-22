@@ -38,6 +38,14 @@ OMEGA_E = 7.292115e-5       # rad/s, 地球自转角速度 (WGS-72)
 C_LIGHT = 299792.458          # km/s
 
 
+class TLEUnavailableError(RuntimeError):
+    """TLE 不可得（离线无缓存 / 下载失败）。
+
+    调用方应据诚实空态降级（告知用户缺 TLE、建议联网或导入），
+    不得据此编造轨道数据。
+    """
+
+
 # 内置卫星 -> NORAD CATNR（真实编号，TLE 在线拉取）
 BUILTIN_SATS: Dict[str, int] = {
     "NOAA 15": 25338,
@@ -51,6 +59,50 @@ BUILTIN_SATS: Dict[str, int] = {
 _TLE_CACHE: Dict[str, Tuple[float, Tuple[str, str]]] = {}
 _CACHE_DIR = os.path.join(os.path.expanduser("~"), ".mbdsdr", "tle_cache")
 _CTX = ssl.create_default_context()
+
+# 网络门（杜绝无限阻塞 / 假造 TLE）：
+#   - MBDSDR_OFFLINE=1 时禁网，仅认磁盘缓存，无缓存即诚实抛错。
+#     测试/CI/离线环境应设此变量（与 MBDSDR_SETTINGS_DIR 同属环境隔离一族），
+#     避免 dry-call/全量套件因联网挂死（2026-10-20 实测 CI 全量 pytest 永久卡死）。
+#   - 在线时用 _bounded_urlopen：urllib 的 timeout 不覆盖 getaddrinfo(DNS)，
+#     无网/黑洞网络下 DNS 解析可无限阻塞；线程 join 硬截止覆盖含 DNS 的全链路。
+_OFFLINE_ENV = "MBDSDR_OFFLINE"
+_FETCH_TIMEOUT_S = 15.0          # socket 层（连接/读）软超时
+_FETCH_HARD_DEADLINE_S = 20.0    # 含 DNS 的墙钟硬截止
+
+
+def _network_disabled() -> bool:
+    """是否禁网（MBDSDR_OFFLINE=1/true/yes/on）。"""
+    return os.environ.get(_OFFLINE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _bounded_urlopen(req, timeout_s: float, hard_deadline_s: float):
+    """工作线程内 urlopen，join(hard_deadline) 硬截止（覆盖 DNS 阶段）。
+
+    urllib 的 timeout 不约束 getaddrinfo：无网/被黑洞时 DNS 解析无限阻塞，
+    是 CI 全量 pytest 永久挂死的真凶。线程 daemon 执行 + join 截止，超时抛
+    TimeoutError 交给上层诚实降级（绝不假造 TLE、绝不静默吞掉）。
+    """
+    import threading
+
+    box: Dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            box["r"] = urllib.request.urlopen(req, timeout=timeout_s, context=_CTX)
+        except Exception as e:  # noqa: BLE001 - 原样上抛给调用方
+            box["e"] = e
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(hard_deadline_s)
+    if worker.is_alive():
+        raise TimeoutError(
+            f"TLE 下载超时（>{hard_deadline_s:.0f}s，含 DNS 解析）：{req.full_url}"
+        )
+    if "e" in box:
+        raise box["e"]
+    return box["r"]
 
 
 def _gmst_days(jd_ut1: float) -> float:
@@ -78,22 +130,45 @@ def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> Tuple[flo
 
 
 def fetch_tle(catnr: int, max_age_hours: float = 24.0) -> Tuple[str, str]:
-    """按 CATNR 从 celestrak 拉真实 TLE，内存+磁盘缓存。失败抛异常。"""
+    """按 CATNR 从 celestrak 拉真实 TLE，内存+磁盘缓存。失败抛异常。
+
+    离线（MBDSDR_OFFLINE）或下载失败时：仅认缓存，无可用缓存即抛
+    RuntimeError/TLEUnavailableError——绝不假造 TLE、绝不无限阻塞。
+    """
     key = str(catnr)
     now = time.time()
     if key in _TLE_CACHE and now - _TLE_CACHE[key][0] < max_age_hours * 3600.0:
         return _TLE_CACHE[key][1]
     os.makedirs(_CACHE_DIR, exist_ok=True)
     cf = os.path.join(_CACHE_DIR, f"{catnr}.tle")
-    if os.path.exists(cf) and now - os.path.getmtime(cf) < max_age_hours * 3600.0:
-        lines = open(cf).read().splitlines()
-        if len(lines) >= 3:
-            tle = (lines[1].strip(), lines[2].strip())
-            _TLE_CACHE[key] = (now, tle)
-            return tle
+
+    def _read_cache() -> Optional[Tuple[str, str]]:
+        if os.path.exists(cf) and now - os.path.getmtime(cf) < max_age_hours * 3600.0:
+            lines = open(cf).read().splitlines()
+            if len(lines) >= 3:
+                tle = (lines[1].strip(), lines[2].strip())
+                _TLE_CACHE[key] = (now, tle)
+                return tle
+        return None
+
+    cached = _read_cache()
+    if cached is not None:
+        return cached
+
+    if _network_disabled():
+        raise TLEUnavailableError(
+            f"离线模式（{_OFFLINE_ENV}）且无 {cf} 缓存，无法获取 CATNR {catnr} 的 TLE"
+        )
+
     url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={catnr}&FORMAT=tle"
     req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})
-    data = urllib.request.urlopen(req, timeout=15, context=_CTX).read().decode()
+    try:
+        data = _bounded_urlopen(req, _FETCH_TIMEOUT_S, _FETCH_HARD_DEADLINE_S).read().decode()
+    except Exception as e:  # noqa: BLE001 - 网络/DNS/超时统一降级
+        # 缓存过期但文件仍在：过期即不可信，不冒充实时 TLE，诚实报错
+        raise TLEUnavailableError(
+            f"获取 CATNR {catnr} 的 TLE 失败（{type(e).__name__}: {e}）"
+        ) from e
     lines = [l for l in data.splitlines() if l.strip()]
     if len(lines) < 3 or not lines[1].startswith("1 ") or not lines[2].startswith("2 "):
         raise RuntimeError(f"celestrak 返回异常: {data[:80]!r}")

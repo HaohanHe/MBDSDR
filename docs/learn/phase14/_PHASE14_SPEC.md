@@ -11,7 +11,7 @@
 | 批次 | 范围 | 交付 |
 |---|---|---|
 | **P1 SSTV 真机闭环（高优先、快）** | ①sstv_decoder 加直接吃音频数组入口（`decode_audio(samples, sample_rate)`，复用现有重采样/解码，WAV 路径保持）；②onboard 新增 "sstv" 模式：采集→NFM/WFM 解调得音频（卫星 SSTV 走 FM 语音信道，2m 144.x 为主）→重采样到 sstv_decoder 要求率→解码出 PNG；写 SigMF/旁证，无信号诚实空态；③端到端确定性测试（合成 SSTV 信号→解码出图，至少 Martin M1/Robot36 往返）。**本批独占 onboard.py 编辑**。 | sstv 数组入口 + onboard sstv + 测试 |
-| **P2 SSDV 完整解码器（高优先、中工作量）** | 按公开 SSDV 规范（UKHAS/AMSAT 数字慢扫描，只学协议标准、不抄 GPL 实现代码）干净室实现 `mbdsdr_ai/ssdv_decoder.py`：①包同步/解析（图像ID、包序号、包类型、JPEG 载荷，SSDV 包 256 字节结构）；②调 fec.py ReedSolomon（核对 SSDV nsym=32/fcr=112 参数适配）纠错丢包；③按序号重组 JPEG、输出可解码图像；④物理层 4FSK/GMSK 复用现有 GFSK/数字零件串接（评估后落地可测部分）。**本批不碰 onboard.py**（onboard ssdv 模式待 P1 完成后追加）。确定性测试：构造 SSDV 包→加 RS→模拟丢包纠错→重组 JPEG 往返。 | ssdv_decoder.py + 测试 |
+| **P2 SSDV 完整解码器（高优先、中工作量）** | 按公开 SSDV 规范（UKHAS/AMSAT 数字慢扫描，只学协议标准、不抄 GPL 实现代码）独立实现 `mbdsdr_ai/ssdv_decoder.py`：①包同步/解析（图像ID、包序号、包类型、JPEG 载荷，SSDV 包 256 字节结构）；②调 fec.py ReedSolomon（核对 SSDV nsym=32/fcr=112 参数适配）纠错丢包；③按序号重组 JPEG、输出可解码图像；④物理层 4FSK/GMSK 复用现有 GFSK/数字零件串接（评估后落地可测部分）。**本批不碰 onboard.py**（onboard ssdv 模式待 P1 完成后追加）。确定性测试：构造 SSDV 包→加 RS→模拟丢包纠错→重组 JPEG 往返。 | ssdv_decoder.py + 测试 |
 | **P3 活动专项准备** | docs/learn/phase14/：①活动参数文档（卫星/模式/34 幅/邮件 CASC70@asesspace.com，频率/TLE 录入位留空待官方发布，**不猜测**）；②接收步骤手册（SSTV/SSDV 两路径，从插设备到出图）；③邮件材料清单（姓名/单位/呼号/接收时间/地点/设备/截图）；④过境预测与多普勒补偿对接（低轨 2m/70cm 多普勒，FM SSTV 建议开补偿）——脚本/配置录入位 + 验证。 | 活动文档 + 录入位 |
 | **P4 C++ 端评估** | 评估把 SSTV/SSDV 移植 cpp/ 的工作量（对照 cpp/src/dsp 现有 fsk_demod/channelizer/demod）：产出评估文档（模块拆分/工作量/可复用零件/风险）；时间允许落地能落地项（带确定性测试），时间不够以 Python 端"能收到图"为第一优先，C++ 诚实列入 backlog。 | 评估文档（+可落地项） |
 

@@ -582,6 +582,21 @@ inline constexpr int    kTaskSummaryMaxChars = 160;
 // session must not grow storage unbounded.
 inline constexpr int    kActivityLogMaxEntries = 500;
 
+// 待执行计划槽（ai/pending_plan_store）快照上限：只保留最近 N 条登记记录，
+// 超限时先淘汰"已执行结束"的旧记录；Pending 的计划绝不丢（还没人消费）。
+inline constexpr int kPendingPlanMaxEntries = 64;
+
+// ---- 站点坐标中性默认值 + 自主任务烘焙参数（AGENTS.md §1 身份红线）-------
+// 真实地理位置绝不进 tracked 默认值：站点坐标一律用中性示例值 0.0, 0.0
+// （"示例站点"）。UI 默认值、代码 fallback 与测试期望值全部引用这两个常量，
+// 成对更新，不允许任何调用点再裸写坐标字面量。
+inline constexpr double kStationLatDefaultDeg = 0.0;
+inline constexpr double kStationLonDefaultDeg = 0.0;
+// 自主任务扫频命中的默认书签名：通用词（非呼号/站点名），提为命名常量避免
+// 调用点裸字面量。固定频率录制的回退带宽引用 core/bandwidth_preset.h 的
+// core::kBwFallbackHz（12.5 kHz NFM 信道），不再造第二个 12500 常量。
+inline constexpr const char* kAutoHitBookmarkName = "自动命中";
+
 // Waterfall (spectrogram) widget
 // 5-stop dBFS palette, mapped linearly over [-100, 0] dBFS:
 //   #000033 (noise floor) -> #0000ff -> #00ffff -> #ffff00 -> #ff0000 (0 dBFS)
@@ -747,6 +762,8 @@ inline constexpr int kElevPlotMaxH    = 160;  // elevation-vs-time curve max hei
 inline constexpr int kNavSatTableMaxH = 120;  // visible-satellite table height cap
 inline constexpr int kAiTaskStepsMaxH = 360;  // autonomous task-step list cap
 inline constexpr int kAiActivityMaxH = 140;  // signal-activity log cap
+// AI 组件数据卡（component_data 只读渲染出口）高度上限。
+inline constexpr int kAiDataCardMaxH = 220;
 inline constexpr int kAiSessionComboMinW = 120; // AI session switcher width (unscaled by design)
 // Instrument panel widget minimum sizes (base px, scaled()).
 inline constexpr int kSkyViewMinW    = 220;

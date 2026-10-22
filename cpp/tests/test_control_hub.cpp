@@ -16,6 +16,7 @@
 //   3. unknown commands / bad arguments are honest errors (never a crash, no fake ok);
 //   4. no engine attached, and the no-telemetry empty state, are honest.
 #include <QtTest/QtTest>
+#include "core/app_settings.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -889,7 +890,7 @@ void TestControlHub::bookmarksPersistToQSettings() {
     SpectrumEngine eng;        // execute() requires an attached engine.
     hub.setEngine(&eng);
 
-    QSettings rs(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"));
+    mbdsdr::core::AppSettings rs;
     const int countBefore =
         parseObj(hub.execute("list_bookmarks", {})).value("count").toInt();
 
@@ -1057,7 +1058,7 @@ void TestControlHub::phase26WritesAreGatedAndBadArgsHonest() {
     QJsonObject r = parseObj(hub.execute("set_color_map",
         {{"file_path", cmf.fileName()}}));
     QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
-    QSettings rs(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"));
+    mbdsdr::core::AppSettings rs;
     QCOMPARE(rs.value(QLatin1String(tokens::kSettingsKeyColormapFile)).toString(),
              cmf.fileName());
     rs.remove(QLatin1String(tokens::kSettingsKeyColormapFile));

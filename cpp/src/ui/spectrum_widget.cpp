@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "spectrum_widget.h"
+#include "core/app_settings.h"
 #include "spectrum_display.h"
 
 #include <QVBoxLayout>
@@ -191,7 +192,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     decayCombo->addItem("快", tokens::kMaxHoldDecayFast);     // 3.0 dB/frame
     decayCombo->setToolTip("峰值保持衰减速率：慢=峰值久留，快=峰值快落（dB/帧）");
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         const double persisted = s.value(tokens::kSettingsKeyMaxHoldDecay,
                                         tokens::kMaxHoldDecayDefault).toDouble();
         int idx = 1;   // default 中 (1.5) is the middle entry
@@ -205,7 +206,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     connect(decayCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this, decayCombo](int idx) {
         const double db = decayCombo->itemData(idx).toDouble();
-        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyMaxHoldDecay, db);
+        mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyMaxHoldDecay, db);
         if (canvas_) canvas_->setMaxHoldDecayDb(static_cast<float>(db));
         emit viewChanged();
     });
@@ -230,7 +231,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     connect(persistCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
         if (canvas_) canvas_->setPersistenceMode(idx);
-        QSettings("MBDSDR", "MBDSDR").setValue("view/persistMode", idx);
+        mbdsdr::core::AppSettings().setValue("view/persistMode", idx);
         emit viewChanged();
     });
     topRow->addWidget(persistCombo);
@@ -369,7 +370,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         gridCombo->addItem(QString("%1 dB").arg(step), step);
     gridCombo->setToolTip("dB 参考格线密度：相邻水平格线（及 y 轴刻度）间距（dB）");
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         const int persisted = s.value(tokens::kSettingsKeyDbGridStep,
                                       tokens::kDbGridStepDefault).toInt();
         int idx = 1;   // default 20 dB is the middle entry of {10,20,40}
@@ -383,7 +384,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     connect(gridCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this, gridCombo](int idx) {
         const int step = gridCombo->itemData(idx).toInt();
-        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyDbGridStep, step);
+        mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyDbGridStep, step);
         if (canvas_) canvas_->setDbGridStepDb(step);
         emit viewChanged();
     });
@@ -394,7 +395,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     peakThreshSpin_->setRange(tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
     peakThreshSpin_->setSuffix(" dB");
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         int saved = s.value("rx/peakThresholdDb",
                             static_cast<int>(tokens::kPeakThresholdDefault)).toInt();
         saved = std::clamp(saved, tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
@@ -402,7 +403,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     }
     connect(peakThreshSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this](int v) {
-        QSettings("MBDSDR", "MBDSDR").setValue("rx/peakThresholdDb", v);
+        mbdsdr::core::AppSettings().setValue("rx/peakThresholdDb", v);
         if (canvas_) canvas_->setPeakThresholdDb(static_cast<float>(v));
     });
     topRow->addWidget(peakThreshSpin_);
@@ -422,14 +423,14 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     scrollCombo_ = new QComboBox(this);
     scrollCombo_->addItems({"1x", "2x", "4x"});
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         int spd = s.value(tokens::kSettingsKeyScrollSpeed, 1).toInt();
         scrollCombo_->setCurrentIndex(spd == 1 ? 0 : (spd == 2 ? 1 : 2));
     }
     connect(scrollCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
         const int spd = (idx == 0 ? 1 : (idx == 1 ? 2 : 4));
-        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyScrollSpeed, spd);
+        mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyScrollSpeed, spd);
         if (canvas_) canvas_->setScrollSpeed(spd);
     });
     wfRow->addWidget(scrollCombo_);
@@ -437,14 +438,14 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     paletteCombo_ = new QComboBox(this);
     paletteCombo_->addItems({"经典", "单色", "Viridis"});
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         int pal = s.value(tokens::kSettingsKeyPalette, 0).toInt();
         paletteCombo_->setCurrentIndex(std::clamp(pal, 0, 2));
     }
     connect(paletteCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
         const int pal = std::clamp(idx, 0, 2);
-        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyPalette, pal);
+        mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyPalette, pal);
         if (canvas_) canvas_->setPalette(pal);
     });
     wfRow->addWidget(paletteCombo_);
@@ -460,7 +461,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     for (int d : tokens::kWaterfallDepthChoices)
         depthCombo_->addItem(QString("%1 行").arg(d), d);
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         int depth = s.value(tokens::kSettingsKeyWfDepth,
                             tokens::kWaterfallDepthDefault).toInt();
         int idx = 1;   // default 256 is the middle entry of {128,256,512}
@@ -474,7 +475,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     connect(depthCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
         const int depth = depthCombo_->itemData(idx).toInt();
-        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyWfDepth, depth);
+        mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyWfDepth, depth);
         if (canvas_) canvas_->setRingDepth(depth);
     });
     wfRow->addWidget(depthCombo_);
@@ -495,7 +496,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     wfPauseBtn->setToolTip(
         "暂停瀑布滚动：显示冻结在当前帧（频谱 trace 仍实时更新，真实数据继续入历史缓冲）");
     wfPauseBtn->setChecked(
-        QSettings("MBDSDR", "MBDSDR")
+        mbdsdr::core::AppSettings()
             .value(tokens::kSettingsKeyWfScrollPaused, false).toBool());
     auto paintWfPauseBtn = [wfPauseBtn]() {
         if (wfPauseBtn->isChecked()) {
@@ -509,7 +510,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     };
     paintWfPauseBtn();
     connect(wfPauseBtn, &QToolButton::toggled, this, [this, paintWfPauseBtn](bool on) {
-        QSettings("MBDSDR", "MBDSDR")
+        mbdsdr::core::AppSettings()
             .setValue(tokens::kSettingsKeyWfScrollPaused, on);
         if (canvas_) canvas_->setScrollPaused(on);
         paintWfPauseBtn();
@@ -582,7 +583,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     // Restore persisted fixed markers (default empty) and the last persist mode.
     loadFixedMarkers();
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         const int pm = s.value("view/persistMode", 0).toInt();
         if (auto* c = findChild<QComboBox*>("persistCombo"))
             c->setCurrentIndex(std::clamp(pm, 0, 2));
@@ -591,7 +592,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
 
 void SpectrumWidget::saveFixedMarkers() {
     if (!canvas_) return;
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     QVariantList list;
     for (const auto& m : canvas_->fixedMarkers())
         list.append(QVariantMap{{"freqHz", m.freqHz}, {"name", m.name}});
@@ -600,7 +601,7 @@ void SpectrumWidget::saveFixedMarkers() {
 
 void SpectrumWidget::loadFixedMarkers() {
     if (!canvas_) return;
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariantList list = s.value("view/fixedMarkers").toList();
     QVector<SpectrumDisplay::FixedMarker> out;
     for (const QVariant& v : list) {

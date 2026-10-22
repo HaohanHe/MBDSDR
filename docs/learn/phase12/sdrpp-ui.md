@@ -1,6 +1,6 @@
 # Phase12-E：SDR++ UI/交互子系统研习笔记
 
-> 上游：`repos/sdrpp`（GPLv3）。本笔记**只学机制/交互范式**，所有代码片段仅作机制引注（标注 GPLv3 出处），落地实现为 MBDSDR 自有代码（clean-room），不逐字复制。
+> 上游：`repos/sdrpp`（GPLv3）。本笔记**只学机制/交互范式**，所有代码片段仅作机制引注（标注 GPLv3 出处），落地实现为 MBDSDR 自有代码（independent），不逐字复制。
 > 研习范围：`core/src/gui/{main_window,tuner,theme_manager,style,smgui}.{cpp,h}` + `widgets/{waterfall,frequency_select}.{cpp,h}`。
 > 对照基线：MBDSDR `cpp/src/ui/{spectrum_display,spectrum_tune.h,main_window,shortcuts_catalog.h}` + `cpp/src/core/tokens.h`。
 

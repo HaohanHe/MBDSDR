@@ -2,7 +2,7 @@
 
 > 范围：`repos/sdrpp/core/src/signal_path/{signal_path,source,sink,vfo_manager,iq_frontend}.{h,cpp}`、`core/src/core.cpp`、配套 `dsp/{stream,block,chain}.h`、`dsp/routing/splitter.h`、`dsp/sink/handler_sink.h`、`dsp/buffer/frame_buffer.h`、`dsp/channel/rx_vfo.h`、`core/src/module.{h,cpp}`、`gui/main_window.cpp` 启动段、`server.cpp` 启动段。
 >
-> **版权声明**：SDR++ 为 GPLv3 项目。下列引用仅为**机制学习**的注释性短片段（每处 ≤ 3 行、来自原文 file:line），**不复制任何实现代码进 MBDSDR**；MBDSDR 落地走干净室（自有命名/结构，MIT）。引用目的是把"哪一行做了什么"锚定下来，便于复盘。
+> **版权声明**：SDR++ 为 GPLv3 项目。下列引用仅为**机制学习**的注释性短片段（每处 ≤ 3 行、来自原文 file:line），**不复制任何实现代码进 MBDSDR**；MBDSDR 落地走独立实现（自有命名/结构，MIT）。引用目的是把"哪一行做了什么"锚定下来，便于复盘。
 
 ---
 
@@ -359,15 +359,15 @@ sdrpp_main
 
 | # | 能力 | SDR++ 出处 | MBDSDR 现状 | 评级 | 通用价值 | 云内可验证方案 |
 |---|---|---|---|---|---|---|
-| 1 | 每块一线程 + stream 双缓冲背压 | `dsp/block.h:67-94`, `dsp/stream.h:43-76` | 单 run() 线程 + vector 传 | **C**（架构选择，非缺陷） | 高：扩 N 路解调/录制 tap 时才需要多核 | 不急。若未来要加"第 2 路独立解调同时录音"，再干净室抽 `dsp::stream<T>` 双缓冲做单测（喂合成 IQ，验 swap/flush 背压与 stopReader 退出） |
+| 1 | 每块一线程 + stream 双缓冲背压 | `dsp/block.h:67-94`, `dsp/stream.h:43-76` | 单 run() 线程 + vector 传 | **C**（架构选择，非缺陷） | 高：扩 N 路解调/录制 tap 时才需要多核 | 不急。若未来要加"第 2 路独立解调同时录音"，再独立实现抽 `dsp::stream<T>` 双缓冲做单测（喂合成 IQ，验 swap/flush 背压与 stopReader 退出） |
 | 2 | jitter buffer（32 深环形吸收 USB 抖动） | `dsp/buffer/frame_buffer.h:51-93` | 无 | **B**：rtl_tcp 走 socket 有 TCP 自带缓冲；本地 RTL 未串 SampleFrameBuffer | 中：本地 USB 源在高负载/GC 抖时可能 underrun | ctest：喂一个会"突刺"的假 source（readIQ 偶发延迟），下游 FFT/VFO 不应丢块；目前 MBDSDR 无此注入点 |
 | 3 | 运行中 tempStop/tempStart 重配（引用计数） | `dsp/block.h:46-62`, `iq_frontend.cpp:76-99` | run() 块顶 `needDemodReset_` 标志同步重建（`spectrum_engine.cpp:768`） | **B**：功能在，但粒度是"整个 demod 重建"，不是"单块热改参数" | 高：无头控制层跑起来后，改 BW/增益不能停流 | 已有 rebuildDemod；补 ctest：在 run() 循环间改 BW，断言下一块 channelizer 系数已更新且无死锁/无 stale 样本 |
 | 4 | Splitter fan-out（memcpy 到 N 路，独立背压） | `dsp/routing/splitter.h:46-61` | `vfoManager_.process()` 同步 for 循环（`vfo_manager.cpp:231`） | **A**（功能等价，单线程版） | 中 | 已被现有多 VFO ctest 覆盖（vfoAdd/vfoSetOffset） |
 | 5 | FFT 分支独立线程 + acquire/release buffer 回调给 GUI | `iq_frontend.cpp:248-267` | `powerSpectrum_.process()` 在 run() 里同步算，emit spectrumReady（`spectrum_engine.cpp:864-870`） | **A**（功能等价） | 低：单线程算 FFT 已是瓶颈之外 | 已有频谱 ctest |
 | 6 | SourceManager 注册表 + selectSource 切输入 | `source.cpp:42-60` | `std::unique_ptr<ISource> source_` + tryConnectRtl/disconnectSource/openOfflineFile 走同一 swap 路径 | **A** | 高 | 已有 connectRtlTcp/openOfflineFile 失败回退 test signal 的 ctest |
-| 7 | SinkProvider 注册表 + 运行中换 sink + 多路 bindStream tap | `sink.cpp:88-107, 218-240` | 单一 `IAudioSink*`，setTestAudioSink 可换（`spectrum_engine.h:71`） | **B**：能换 sink，但没有 provider 注册表、没有第三方 tap 点 | 高：无头层要加"录制 tap/网络 sink/远程 audio stream"时需要 | 干净室抽 `AudioSinkProvider` 注册表 + `bindStream(name)`；ctest：注册两个 provider，运行中切换，断言 MemoryAudioSink 仍收到完整块 |
+| 7 | SinkProvider 注册表 + 运行中换 sink + 多路 bindStream tap | `sink.cpp:88-107, 218-240` | 单一 `IAudioSink*`，setTestAudioSink 可换（`spectrum_engine.h:71`） | **B**：能换 sink，但没有 provider 注册表、没有第三方 tap 点 | 高：无头层要加"录制 tap/网络 sink/远程 audio stream"时需要 | 独立实现抽 `AudioSinkProvider` 注册表 + `bindStream(name)`；ctest：注册两个 provider，运行中切换，断言 MemoryAudioSink 仍收到完整块 |
 | 8 | VFO = iqFrontEnd 子节点，业务层 VFOManager 只做包装 | `vfo_manager.cpp:5-18` | VfoChannel 自带 channelizer/demod/resampler（`vfo_manager.h:73-75`），与 engine 平级 | **A**（设计不同但功能等价） | 中 | 已被多 VFO ctest 覆盖 |
-| 9 | dlopen 插件 + 5 符号 + postInit 两阶段 | `module.cpp:34-83`, `main_window.cpp:227` | 编译期组合，无插件 | **C**（当前不需要） | 低：MBDSDR 是单二进制桌面端 | 不做。等真要第三方 decoder 再干净室抄 `_INFO_/_INIT_/_CREATE_INSTANCE_/_DELETE_INSTANCE_/_END_` 五符号契约（本身是通用 dlopen 模式，无 GPL 风险） |
+| 9 | dlopen 插件 + 5 符号 + postInit 两阶段 | `module.cpp:34-83`, `main_window.cpp:227` | 编译期组合，无插件 | **C**（当前不需要） | 低：MBDSDR 是单二进制桌面端 | 不做。等真要第三方 decoder 再独立实现抄 `_INFO_/_INIT_/_CREATE_INSTANCE_/_DELETE_INSTANCE_/_END_` 五符号契约（本身是通用 dlopen 模式，无 GPL 风险） |
 | 10 | server 模式只加载 source 模块、selectSource 后退出初始化 | `server.cpp:101-149` | 无头控制层尚未建（Phase16 Wave2 目标） | **C** | **最高**（Wave2 P1） | 设计：命令 → SpectrumEngine slot（不经 QWidget），读写分离、写 gate；ctest 验：tune/setMode/setBW/setGain/startRecording 后状态可回读，未知命令诚实报错 |
 | 11 | panadapter IF 调谐（硬件本振不动，只移 IF） | `source.cpp:24-27, 87-88` | `vfoSetOffset()` 已实现带 band-edge 回退（`spectrum_engine.h:149-157`） | **A** | 中 | 已有 vfoSetOffset ctest（断言 tuner 是否真重调） |
 | 12 | 配置热恢复 stream/sink 选择/音量 | `sink.cpp:305-325` | recDir/recTemplate 等有缓存，但 sink provider 无注册表 | **B** | 中 | 随 #7 一起做 |

@@ -345,6 +345,18 @@ class ToolRegistry:
                 result = raw_result
                 result.tool_name = tool_name
                 result.args = args
+                # 通用载荷提升：一批工具只把载荷写在 content（JSON 文本），
+                # 模型需自行解析文本才能拿到结果。这里统一提升：
+                # content 是 JSON 对象/数组且 data 为空时，自动填进 data。
+                if not result.data and isinstance(result.content, str):
+                    _txt = result.content.strip()
+                    if _txt[:1] in "{[":
+                        try:
+                            _parsed = json.loads(_txt)
+                        except Exception:
+                            _parsed = None
+                        if isinstance(_parsed, (dict, list)):
+                            result.data = _parsed
             elif isinstance(raw_result, dict):
                 result = ToolResult(
                     success=raw_result.get("success", True),
@@ -356,11 +368,15 @@ class ToolRegistry:
                     next_step=str(raw_result.get("next_step", "") or ""),
                 )
             elif isinstance(raw_result, str):
+                # 契约：handler 以"错误:"开头即为失败信号（仓内 50+ 处统一用此契约）。
+                # 不能包装成 success=True：否则模型（与人）会把失败读成成功。
+                _is_err = raw_result.lstrip().startswith(("\u9519\u8bef:", "\u9519\u8bef\uff1a"))
                 result = ToolResult(
-                    success=True,
+                    success=not _is_err,
                     content=raw_result,
                     tool_name=tool_name,
                     args=args,
+                    error=("handler_error" if _is_err else ""),
                 )
             else:
                 result = ToolResult(
@@ -379,6 +395,19 @@ class ToolRegistry:
                 error=f"exception: {type(e).__name__}",
                 next_step="按报错类型修正参数（单位/范围/类型）后重试；同一参数重试不超过 2 次，仍失败则换方法或向用户说明。",
             )
+
+        # 诚实语义兜底：仓内约定 handler 以"错误:"开头即为失败信号。
+        # 无论 handler 怎么包装（裸字符串 / dict / 显式 ToolResult），统一在此判定，
+        # 避免"失败被读成成功"。
+        _txt = result.content if isinstance(result.content, str) else ""
+        if result.success and _txt.lstrip().startswith(("错误:", "错误：")):
+            result.success = False
+            result.error = result.error or "handler_error"
+
+        # 失败但没有可见文本时，用 error 兜底（模型侧不能只看到空串）
+        if not result.success and not (result.content or "").strip():
+            result.content = (result.error
+                              or f"工具 '{tool_name}' 调用失败（未提供错误详情）")
 
         result.latency_ms = round((time.time() - start_time) * 1000, 1)
 
@@ -746,6 +775,32 @@ class ToolRegistry:
             logger.warning("fengyun_sat 不可用: %s", e)
             return
         FY.register_tool_registry(self)
+        self.register_interferometry_tools()
+        self.register_gps_ca_tools()
+
+    def register_gps_ca_tools(self):
+        """注册 GPS 扩频伪随机序列与码相关捕获工具（材料 learnSDR lesson21-23）。"""
+        try:
+            from . import gps_ca as GCA
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("gps_ca 不可用: %s", e)
+            return
+        GCA.register_tool_registry(self)
+
+    def register_interferometry_tools(self):
+        """注册射电干涉测量工具（双站互相关测向 + 角分辨率/可见度）。
+
+        依据材料《通信对抗材料包》射电干涉讲义：几何时延 τ = D·sinθ/c、
+        双路相关得可见度 I·cos(2πf·D·sinθ/c)、分辨率 θ_res ≈ λ/D。
+        """
+        try:
+            from . import interferometry as IFM
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("interferometry 不可用: %s", e)
+            return
+        IFM.register_tool_registry(self)
 
     def register_ssdv_rx_tools(self):
         """注册 Python 侧 SSDV/CCSDS 接收链健壮性工具（无设备，吃 complex64 IQ 文件）。

@@ -3,7 +3,7 @@
 // declares the stream DEAD once a bounded threshold is reached. Pure state
 // machine -- the source feeds it read results; no hardware, no timers.
 //
-// MECHANISM (learned clean-room from librtlsdr GPLv2 pull model): librtlsdr
+// MECHANISM (learned independent from librtlsdr GPLv2 pull model): librtlsdr
 // itself uses no libusb hotplug callback for the active stream; an honest
 // signal that a device was pulled is consecutive rtlsdr_read_sync failures.
 // This watchdog turns that raw failure stream into a bounded, testable state

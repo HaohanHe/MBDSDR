@@ -8,7 +8,7 @@
 namespace mbdsdr {
 namespace dsp {
 
-// -- ITA-2 / CCITT-2 tables (clean-room, public alphabet) --------------------
+// -- ITA-2 / CCITT-2 tables (independent, public alphabet) --------------------
 // 5-bit code (0..31) -> ASCII.  Shift codes (27 figures / 31 letters) and the
 // null (0) map to 0 (control); the state machine treats them specially.
 char ita2Letters(int code) {

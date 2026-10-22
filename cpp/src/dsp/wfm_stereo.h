@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // WFM (FM broadcast) stereo composite-baseband decoder.
 //
-// Clean-room implementation following the classical FM stereo signal model:
+// Independent implementation following the classical FM stereo signal model:
 //
 //   raw MPX (post quadrature discriminator, BEFORE de-emphasis) =
 //       M(t) + P*cos(2*pi*19kHz*t) + S(t)*cos(2*pi*38kHz*t)

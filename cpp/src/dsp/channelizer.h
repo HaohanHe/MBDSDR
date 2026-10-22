@@ -29,7 +29,7 @@ private:
     float dphi_  = 0.0f;
 };
 
-// ---- Pure channel-filter decision (clean-room RxVFO mechanism) -------------
+// ---- Pure channel-filter decision (independent RxVFO mechanism) -------------
 // Mirrors SDR++ RxVFO (rx_vfo.h, GPLv3, mechanism only):
 //   - filterNeeded = (bandwidth != outSamplerate) -> whole-band passthrough
 //   - generateTaps: lowPass(bandwidth/2, (bandwidth/2)*0.1, outSamplerate),

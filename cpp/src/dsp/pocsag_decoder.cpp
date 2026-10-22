@@ -302,7 +302,7 @@ std::string PocsagDecoder::decodeAlpha(const std::vector<uint8_t>& buf,
 }
 
 // ===========================================================================
-// Test synthesis (clean-room frame builder)
+// Test synthesis (independent frame builder)
 // ===========================================================================
 int PocsagDecoder::detectFunction(const std::string& message) {
     if (message.empty()) return 1;

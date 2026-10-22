@@ -20,6 +20,7 @@
 // hidden by a bigger timeout. The environmental contributor (no audio backend)
 // is documented in docs/learn/phase40; on an audio-equipped box this is stable.
 #include <QApplication>
+#include "core/app_settings.h"
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -167,8 +168,10 @@ int main(int argc, char** argv) {
         const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_deviceui_" +
                                QString::number(QCoreApplication::applicationPid());
         QDir().mkpath(cfgDir);
-        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
-        QSettings s("MBDSDR", "MBDSDR");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfgDir);
+        qputenv("MBDSDR_SETTINGS_DIR", (cfgDir).toUtf8());
+        mbdsdr::core::AppSettings s;
         s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
         s.sync();
     }

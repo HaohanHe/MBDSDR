@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "spectrum_engine.h"
+#include "core/app_settings.h"
 #include "rtl_sdr_source.h"
 #include "rtl_tcp_source.h"
 #include "test_signal.h"
@@ -101,7 +102,7 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     agc_.setMaxGain(tokens::kAgcMaxGainLin);
     // Shared output directory (user-configurable, program-dir "record").
     {
-        QSettings rs("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings rs;
         recDir_ = rs.value("rec/dir", QStringLiteral("record")).toString();
         if (recDir_.isEmpty()) recDir_ = QStringLiteral("record");
         recMaxSegSecs_ = rs.value("rec/max_seg_s",
@@ -969,7 +970,7 @@ bool SpectrumEngine::hasData() const {
 
 void SpectrumEngine::setRecMaxSegmentSeconds(double secs) {
     recMaxSegSecs_ = secs;
-    QSettings("MBDSDR", "MBDSDR").setValue("rec/max_seg_s", secs);
+    mbdsdr::core::AppSettings().setValue("rec/max_seg_s", secs);
 }
 
 bool SpectrumEngine::startRecording() {
@@ -1062,7 +1063,7 @@ void SpectrumEngine::setRecordingDir(const QString& dir) {
     if (d.isEmpty()) d = QStringLiteral("record");
     recDir_ = d;
     gatedRec_.setOutputDir(recDir_);
-    QSettings rs("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings rs;
     rs.setValue("rec/dir", recDir_);
 }
 

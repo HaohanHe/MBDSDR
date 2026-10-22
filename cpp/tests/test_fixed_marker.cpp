@@ -4,6 +4,7 @@
 // step, Delete removes, and the three layers (auto peaks / VFO boxes / fixed
 // markers) stay in separate data structures.
 #include <QtTest>
+#include "core/app_settings.h"
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QSettings>
@@ -58,8 +59,8 @@ void TestFixedMarker::dragChangesFreqAndPersists() {
     // shared QSettings key other tests may leave behind; a non-default value
     // moves the strip band and puts traceY() (height()/3) outside the trace
     // plot, breaking press-hit. Clear it so geometry is deterministic.
-    QSettings("MBDSDR", "MBDSDR").remove("view/fixedMarkers");
-    QSettings("MBDSDR", "MBDSDR").remove("view/specFraction");
+    mbdsdr::core::AppSettings().remove("view/fixedMarkers");
+    mbdsdr::core::AppSettings().remove("view/specFraction");
     ui::SpectrumDisplay cv;
     pump(&cv);
     feedFrame(cv);
@@ -67,7 +68,7 @@ void TestFixedMarker::dragChangesFreqAndPersists() {
     // Mirror the container: on edit, persist to QSettings (as SpectrumWidget does).
     ui::SpectrumDisplay* cvp = &cv;
     cv.connect(cvp, &ui::SpectrumDisplay::fixedMarkersEdited, [cvp]() {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         QVariantList list;
         for (const auto& m : cvp->fixedMarkers())
             list.append(QVariantMap{{"freqHz", m.freqHz}, {"name", m.name}});
@@ -89,7 +90,7 @@ void TestFixedMarker::dragChangesFreqAndPersists() {
              "drag right did not increase marker frequency");
 
     // Persisted to QSettings on release.
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QVariantList list = s.value("view/fixedMarkers").toList();
     QCOMPARE(list.size(), 1);
 }

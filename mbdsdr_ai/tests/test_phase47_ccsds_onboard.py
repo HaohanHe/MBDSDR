@@ -7,7 +7,7 @@
   2. **诚实空态**：纯噪声 IQ → 0 ASM 帧、0 包、空 JPEG（不伪造出图）。
   3. **fsphil 默认路径不回归**：字节流入口仍走 ``iq_to_ssdv_bytes`` 自同步方言。
 
-红线：干净室按公开 CCSDS 标准实现；合成呼号非真实电台；纯噪声诚实返回空，不 mock。
+红线：独立实现按公开 CCSDS 标准实现；合成呼号非真实电台；纯噪声诚实返回空，不 mock。
 """
 from __future__ import annotations
 
