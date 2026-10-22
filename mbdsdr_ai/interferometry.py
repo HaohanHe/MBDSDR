@@ -213,7 +213,7 @@ def tdoa_bearing(sig_a: Sequence[float], sig_b: Sequence[float],
 # ============================================================================
 def register_tool_registry(registry) -> None:
     """注册射电干涉测量积木（互相关测向 + 角分辨率/可见度）。"""
-    from .tool_registry import ToolResult
+    from .tool_registry import ToolResult, clean_exc
     import json as _json
 
     def _tdoa(args):
@@ -246,7 +246,7 @@ def register_tool_registry(registry) -> None:
             )
         except Exception as e:  # noqa: BLE001
             return ToolResult(success=False,
-                              content=f"互相关测向失败：{type(e).__name__}: {e}")
+                              content=f"互相关测向失败：{clean_exc(e)}")
         if res.get("azimuth_deg") is None:
             res["note"] = "未给出方位角（见 reason）"
             return ToolResult(

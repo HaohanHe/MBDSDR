@@ -31,7 +31,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from .tool_registry import ToolResult
+from .tool_registry import ToolResult, clean_exc
 
 # 物理常数
 C_LIGHT = 299_792_458.0
@@ -263,7 +263,7 @@ def rx_acceptance(args) -> Dict[str, Any]:
 def _err(e: Exception) -> ToolResult:
     return ToolResult(
         success=False,
-        content=f"参数/计算错误: {type(e).__name__}: {e}",
+        content=f"参数/计算错误: {clean_exc(e)}",
         data={"error": str(e)},
     )
 

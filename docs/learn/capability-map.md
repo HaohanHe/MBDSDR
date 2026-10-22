@@ -296,6 +296,22 @@ ValueError: ...」，原始英文异常直接泄漏给模型——违反仓内�
 （「参数/计算错误: ValueError: ...」「FFT 失败: Invalid number of FFT
 data points (0) specified.」等），属消息质量而非崩溃，下一轮收敛。
 
+**英文异常消息收敛（phase69 已销账）**：承接上文 OTHER 桶欠账。24 个工具
+的诚实失败消息曾整条泄漏英文原始异常——两类病灶：① 5 个原子工具层
+（sync_tools/orbit_tools/modulation/ccsds_tools/acquisition）共用的
+`_err()` 助手无脑拼「参数/计算错误: {type(e).__name__}: {e}」，消息本体
+已中文时白带「ValueError: 」前缀；② numpy/内置库英文消息（zero-size
+array、matmul 维度、FFT 0 点、除零、Connection refused）整条外泄。
+phase69 在 `tool_registry.py` 新增共享整形助手 `clean_exc()`（KeyError
+点名缺失参数 → 已知英文消息正则映射中文 → 本体已中文原样返回不叠加前缀
+→ 未收录英文用中文类型名 + 原文保留排查细节），5 个 `_err` 与 9 个调用点
+（interferometry/gps_ca/inspectrum/sdrsharp/openwebrx/agent 六处，含
+git_clone_repo 的退出码分支）全部改道；另给 6 个空输入即失败的 handler
+（signal_quality_stats/sdr_squelch_gate/sdr_signal_overview/sdrsharp_fft/
+owrx_fft_average/inspectrum_bandwidth）补空数组预检。smoke 复跑：**英文
+泄漏 24 → 0**（NEED_RESOURCE 51 → 59 为预检归桶，OTHER 60 → 52），OK 161
+不变、CRASH 仍为 0；`tests/test_clean_exc.py` 7 项锁死整形行为。
+
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
 通过**的是：G1/G2 的 m 序列（公开 ICD-GPS-200 多项式，平衡性与循环自相关

@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from .tool_registry import ToolResult
+from .tool_registry import ToolResult, clean_exc
 from . import sync_bricks as sb
 
 
 def _err(e: Exception) -> ToolResult:
     return ToolResult(
         success=False,
-        content=f"参数/计算错误: {type(e).__name__}: {e}",
+        content=f"参数/计算错误: {clean_exc(e)}",
         data={"error": str(e)},
     )
 

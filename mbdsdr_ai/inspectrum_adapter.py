@@ -159,7 +159,7 @@ class InspectrumMeasurer:
 def register_inspectrum_tools(registry) -> None:
     """把 inspectrum 游标测量工具注册进 ToolRegistry。"""
     import json
-    from mbdsdr_ai.tool_registry import ToolResult
+    from mbdsdr_ai.tool_registry import ToolResult, clean_exc
 
     def _measure_bandwidth(args):
         """对一段频谱功率数组测 -3dB 带宽。"""
@@ -169,6 +169,8 @@ def register_inspectrum_tools(registry) -> None:
         fft_size = int(args.get("fft_size", 1024))
         if not isinstance(freqs, list) or not isinstance(powers, list):
             return ToolResult(False, "frequencies 和 powers_db 都必须是列表")
+        if not freqs or not powers:
+            return ToolResult(False, "frequencies 与 powers_db 不能为空数组，请提供至少一个频点/功率值")
         try:
             f = np.asarray(freqs, dtype=float)
             p = np.asarray(powers, dtype=float)
@@ -179,7 +181,7 @@ def register_inspectrum_tools(registry) -> None:
             out["source"] = "inspectrum  / "
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
-            return ToolResult(False, f"带宽测量失败: {e}")
+            return ToolResult(False, f"带宽测量失败: {clean_exc(e)}")
 
     def _measure_period(args):
         """从脉冲起始样本位置测周期。"""

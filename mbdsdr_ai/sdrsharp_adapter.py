@@ -201,7 +201,7 @@ class SdrSharpControl:
 def register_sdrsharp_tools(registry) -> None:
     """把 SDR# 设备枚举 / FFT窗函数 / 插件契约 注册进 ToolRegistry。"""
     import json
-    from mbdsdr_ai.tool_registry import ToolResult
+    from mbdsdr_ai.tool_registry import ToolResult, clean_exc
 
     def _list_devices(args):
         """返回 SDR# Source 下拉框的完整设备枚举表。"""
@@ -239,6 +239,8 @@ def register_sdrsharp_tools(registry) -> None:
         iq = args.get("iq")
         if not isinstance(iq, list):
             return ToolResult(False, "iq 必须是复数采样列表")
+        if not iq:
+            return ToolResult(False, "iq 不能为空数组，请提供至少一个复数采样（FFT 至少需要 1 点）")
         try:
             arr = np.array(iq, dtype=complex)
             win = str(args.get("window", "blackmanharris4"))
@@ -257,7 +259,7 @@ def register_sdrsharp_tools(registry) -> None:
             }
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
-            return ToolResult(False, f"FFT 失败: {e}")
+            return ToolResult(False, f"FFT 失败: {clean_exc(e)}")
 
     def _plugin_contract(args):
         """镜像 SDR# ISharpPlugin/IFrontendController 接口契约并实例化一个前端。"""

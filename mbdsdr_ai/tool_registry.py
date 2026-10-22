@@ -15,6 +15,7 @@ MBDSDR AI 内核 - 工具注册表
 """
 
 import json
+import re
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -56,6 +57,103 @@ def hex_bytes(args: Dict[str, Any], key: str):
     except ValueError:
         return None, (f"参数 {key} 不是合法的十六进制字符串（收到 {raw[:40]!r}），"
                       f"无法解析为字节")
+
+
+# ─────────────────────────────────────────────────────────────
+# 异常消息整形：诚实失败也要说人话（中文、可操作）
+# ─────────────────────────────────────────────────────────────
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+# 未收录英文消息时的中文异常类型名
+_EXC_TYPE_ZH = {
+    "ValueError": "参数值错误",
+    "IndexError": "索引越界",
+    "KeyError": "缺少必需参数",
+    "TypeError": "类型错误",
+    "ZeroDivisionError": "除零错误",
+    "FileNotFoundError": "文件不存在",
+    "NotADirectoryError": "路径不是目录",
+    "IsADirectoryError": "路径是目录",
+    "PermissionError": "没有权限",
+    "TimeoutError": "超时",
+    "ConnectionRefusedError": "连接被拒绝",
+    "ConnectionResetError": "连接被重置",
+    "MemoryError": "内存不足",
+    "OverflowError": "数值溢出",
+    "ArithmeticError": "算术错误",
+    "RuntimeError": "运行时错误",
+    "NotImplementedError": "功能未实现",
+    "UnicodeDecodeError": "编码无法解析",
+}
+
+# numpy / 内置库常见英文异常消息 → 中文说明（{0}/{1} 为正则捕获组）
+_EN_MSG_MAP = [
+    (re.compile(r"not enough values to unpack \(expected (\d+), got (\d+)\)"),
+     "输入数组元素不足：期望 {0} 个、实到 {1} 个（如坐标为 [x, y, z]），请逐项检查参数是否给全"),
+    (re.compile(r"matmul: Input operand \d+ has a mismatch in its core dimension \d+"),
+     "矩阵/向量乘法维度不匹配，请检查两侧数组形状是否对应（向量长度应等于矩阵行/列数）"),
+    (re.compile(r"index -?\d+ is out of bounds for axis \d+ with size 0"),
+     "输入数据为空（长度 0），索引指向了不存在的元素，没有可处理的采样/符号"),
+    (re.compile(r"zero-size array to reduction operation (\w+) which has no identity"),
+     "输入数据为空（长度 0），无法计算统计量，请提供至少一个采样"),
+    (re.compile(r"Invalid number of FFT data points \((\d+)\) specified\.?"),
+     "FFT 输入点数为 {0}（输入数据为空），请提供非空 IQ 采样"),
+    (re.compile(r"integer division or modulo by zero"),
+     "计算中出现除零：通常是输入数据为空（长度 0）或块长/步长参数为 0，请检查后重试"),
+    (re.compile(r"operands could not be broadcast together with shapes ([^\n]+)"),
+     "数组形状不一致、无法广播运算（{0}），请检查各输入数组的长度"),
+    (re.compile(r"could not convert string to float: '([^']*)'"),
+     "无法把 “{0}” 解析为数字，请检查该参数是否为纯数字文本"),
+    (re.compile(r"setting an array element with a sequence"),
+     "数组元素类型不一致（疑似把嵌套列表当作标量传入），请检查输入数据的结构"),
+    (re.compile(r"\[Errno 111\] Connection refused"),
+     "连接被拒绝：对端没有程序在监听该地址端口（检查设备 IP/端口与服务是否已启动）"),
+    (re.compile(r"\[Errno 113\] No route to host"),
+     "网络不可达：找不到到该主机的路由（检查网络连接与设备 IP）"),
+    (re.compile(r"\[Errno 110\] Connection timed out"),
+     "连接超时：对端无响应（检查设备是否在线、防火墙是否放行）"),
+    (re.compile(r"cannot reshape array of size 0 into shape"),
+     "输入数据为空（长度 0），无法整形为期望形状，请提供非空数据"),
+    (re.compile(r"\[Errno 2\] No such file or directory: '([^']+)'"),
+     "文件不存在: {0}（请检查路径是否正确、文件是否已生成）"),
+    (re.compile(r"\[Errno 13\] Permission denied: '([^']+)'"),
+     "没有权限访问: {0}（请检查文件权限或以合适身份运行）"),
+]
+
+
+def clean_exc(e: BaseException) -> str:
+    """把异常整形成中文可操作的诚实失败消息。
+
+    背景：多个原子工具层的失败处理沿用「{前缀}: {type(e).__name__}: {e}」，
+    消息本体已中文时白带「ValueError: 」前缀，numpy 英文消息则整条泄漏
+    （"zero-size array to reduction..."、"Invalid number of FFT data
+    points (0) specified." 等）。模型读不懂英文堆栈，诚实失败就失去意义。
+
+    整形规则（按序命中）：
+    1. ``KeyError`` → 点名缺少的参数名；
+    2. 已知英文消息（numpy/内置库常见）→ 正则映射为中文说明；
+    3. 消息本体已含中文 → 原样返回，不叠加异常类型前缀；
+    4. 未收录的英文消息 → 「{中文类型名}: {原文}」，保留细节便于人工排查。
+    """
+    if isinstance(e, KeyError):
+        key = e.args[0] if e.args else "?"
+        return f"缺少必需参数: {key}（请对照工具参数说明补全）"
+    msg = str(e).strip()
+    for pat, tmpl in _EN_MSG_MAP:
+        m = pat.search(msg)
+        if m:
+            try:
+                return tmpl.format(*m.groups())
+            except (IndexError, KeyError):
+                return tmpl
+    if _CJK_RE.search(msg):
+        return msg
+    zh_type = _EXC_TYPE_ZH.get(type(e).__name__, "计算错误")
+    hint = ("（请检查路径、权限与网络是否就绪）" if isinstance(e, OSError)
+            else "（请检查输入参数的格式与长度）")
+    if msg:
+        return f"{zh_type}: {msg}{hint}"
+    return f"{zh_type}{hint}"
 
 
 @dataclass

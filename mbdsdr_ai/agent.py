@@ -31,7 +31,7 @@ from .context_manager import (
     estimate_tokens,
 )
 from .model_manager import ModelManager
-from .tool_registry import ToolRegistry, ToolResult, hex_bytes
+from .tool_registry import ToolRegistry, ToolResult, hex_bytes, clean_exc
 from .conversation import ConversationStore
 from .memory import MemoryStore
 from .self_evolution import SelfEvolutionEngine
@@ -528,8 +528,12 @@ class MBDSDRAgent:
                 return ToolResult(True, f"已克隆到 {dest}")
             except subprocess.TimeoutExpired:
                 return ToolResult(False, "克隆超时(120s)")
+            except subprocess.CalledProcessError as e:
+                tail = ((e.stderr or "").strip().splitlines() or [""])[-1][:150]
+                hint = f"（{tail}）" if tail else ""
+                return ToolResult(False, f"克隆失败: git 退出码 {e.returncode}{hint}")
             except Exception as e:  # noqa: BLE001
-                return ToolResult(False, f"克隆失败: {e}")
+                return ToolResult(False, f"克隆失败: {clean_exc(e)}")
 
         self.tool_registry.register(
             name="git_clone_repo",
@@ -1388,10 +1392,12 @@ class MBDSDRAgent:
             iq = args.get("iq")
             if not isinstance(iq, list):
                 return ToolResult(False, "iq 必须是复数采样列表")
+            if not iq:
+                return ToolResult(False, "iq 不能为空数组，请提供至少一个复数采样")
             try:
                 res = signal_quality(np.array(iq, dtype=complex))
             except Exception as e:
-                return ToolResult(False, f"信号质量统计失败: {e}")
+                return ToolResult(False, f"信号质量统计失败: {clean_exc(e)}")
             return ToolResult(True, json.dumps(res, ensure_ascii=False))
 
         self.tool_registry.register(
@@ -1525,7 +1531,7 @@ class MBDSDRAgent:
                     return ToolResult(True, f"云台已指向 方位{az:.0f}° 仰角{el:.0f}°")
                 return ToolResult(False, "云台连接失败，检查 rotctld 是否运行")
             except Exception as e:
-                return ToolResult(False, f"云台控制失败: {e}")
+                return ToolResult(False, f"云台控制失败: {clean_exc(e)}")
 
         self.tool_registry.register(
             name="gimbal_move",
@@ -1648,13 +1654,15 @@ class MBDSDRAgent:
             iq = args.get("iq")
             if not isinstance(iq, list):
                 return ToolResult(False, "iq 必须是复数 IQ 采样列表")
+            if not iq:
+                return ToolResult(False, "iq 不能为空数组，请提供至少一个复数采样")
             th = float(args.get("threshold_db", -50.0))
             blk = int(args.get("block", 1024))
             try:
                 r = squelch_gate(np.array(iq, dtype=complex),
                                  threshold_db=th, block=blk)
             except Exception as e:
-                return ToolResult(False, f"静噪门控失败: {e}")
+                return ToolResult(False, f"静噪门控失败: {clean_exc(e)}")
             return ToolResult(True, json.dumps(r, ensure_ascii=False))
 
         self.tool_registry.register(
@@ -1781,6 +1789,8 @@ class MBDSDRAgent:
             iq = args.get("iq")
             if not isinstance(iq, list):
                 return ToolResult(False, "iq 必须是复数 IQ 采样列表")
+            if not iq:
+                return ToolResult(False, "iq 不能为空数组，请提供至少一个复数采样")
             sr = float(args.get("sample_rate", 2.4e6))
             try:
                 from mbdsdr_ai.signal_analysis import identify_modulation
@@ -1792,7 +1802,7 @@ class MBDSDRAgent:
                                             n_peaks=int(args.get("n_peaks", 5)))
                 qual = signal_quality(x)
             except Exception as e:
-                return ToolResult(False, f"信号体检失败: {e}")
+                return ToolResult(False, f"信号体检失败: {clean_exc(e)}")
             return ToolResult(True, json.dumps({
                 "modulation": mod,
                 "peaks": peaks,

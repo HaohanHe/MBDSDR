@@ -203,7 +203,7 @@ def owx_soapy_settings_parse(dstr: str) -> List:
 def register_openwebrx_tools(registry) -> None:
     """把 OpenWebRX 频谱流水线 / waterfall / 设备抽象 注册进 ToolRegistry。"""
     import json
-    from mbdsdr_ai.tool_registry import ToolResult
+    from mbdsdr_ai.tool_registry import ToolResult, clean_exc
 
     def _plan_fft(args):
         samp_rate = float(args.get("samp_rate", 1_920_000))
@@ -236,6 +236,8 @@ def register_openwebrx_tools(registry) -> None:
         iq = args.get("iq")
         if not isinstance(iq, list):
             return ToolResult(False, "iq 必须是复数采样列表")
+        if not iq:
+            return ToolResult(False, "iq 不能为空数组，请提供至少一个复数采样（FFT 平均至少需要 1 点）")
         try:
             arr = np.array(iq, dtype=complex)
             plan = owx_plan_fft(float(args.get("samp_rate", 1_920_000)),
@@ -253,7 +255,7 @@ def register_openwebrx_tools(registry) -> None:
             }
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
-            return ToolResult(False, f"FFT 平均失败: {e}")
+            return ToolResult(False, f"FFT 平均失败: {clean_exc(e)}")
 
     def _device_adapt(args):
         device = str(args.get("device", "rtl_sdr"))
