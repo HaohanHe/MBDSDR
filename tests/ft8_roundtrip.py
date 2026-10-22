@@ -64,5 +64,12 @@ def main() -> int:
     return 0
 
 
+def test_ft8_symbol_roundtrip():
+    """pytest 入口（CI 分组跑这个文件用）：往返断言失败时 main() 抛
+    AssertionError；返回 0 即通过。已知弱点（循环偏移容差）见
+    docs/audit_r2/FINAL_REPORT_R2.md 修复建议，不在本测试职责内。"""
+    assert main() == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

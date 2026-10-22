@@ -329,6 +329,24 @@ ASCII 仅余参数标识符（iq_path、freq_mhz、LDPC、TLE 等）——那是
 19 项锁死本轮全部行为（git 失败分类含 handler 端到端、timed out 映射、
 hdradio/dab/dmr/p25 诊断、分类器归桶）。
 
+**CI 分组漏收测试文件（phase71 已销账）**：`scripts/ci_pytest_groups.py`
+历史上只收 `tests/test_*.py`，`*_test.py`（外部工具封装对拍：kismet/
+satdump/rtklib/bladerf/limesuite 等 15 个）与 `*roundtrip*.py`（协议编解码
+往返，合成向量非硬件，16 个非前缀）两族共 31 个文件**从未进过 CI**——
+本地单跑全绿（445 过 / 1 skip：apt 的 syn_robot36.wav 缺失守卫，`*.wav`
+本就被 gitignore，CI 上恒 skip）。修正：`test_files()` 收件口径改为三种
+命名（`test_` 前缀 / `_test.py` 后缀 / 文件名含 roundtrip），`--check`
+自检保证分组并集=全集，分组数 167 → 200（两组各 100）。另将两个
+`main()` 脚本风格文件 pytest 化（`tests/ft8_roundtrip.py`、
+`tests/adsb_real_roundtrip.py` 各加一个 wrapper 测试，手动运行方式不变）：
+后者是 `cpp/tests/test_adsb_decode.cpp` golden 数字的 Python 参照
+（35 项 dump1090 常量校验），必须随 CI 跑。四个 `main()` 体检脚本
+（tool_selftest/tool_health_check/tool_param_smoke/smoke_live_tools）
+**故意不入组**——它们是产出 JSON 报告的周期性诊断工具，不是单测。
+已知弱点记录在案不扩大范围：`ft8_roundtrip.py` 的循环偏移容差掩盖
++1 音调系统偏移（docs/audit_r2/FINAL_REPORT_R2.md 修复建议）。
+AGENTS.md 的套件文件数同步更正。
+
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验

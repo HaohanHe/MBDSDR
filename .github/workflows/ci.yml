@@ -78,7 +78,8 @@ jobs:
           - root: tools/hw_selfcheck
             timeout: 20
             label: ""
-          # 根 tests/ 是大套件（160 个测试文件）：跨文件的单例 QApplication
+          # 根 tests/ 是大套件（200 个测试文件：test_*.py / *_test.py /
+          # *roundtrip*.py 三种命名，分组脚本自动收件）：跨文件的单例 QApplication
           # 累积是主要耗时，整跑本地约 48 分钟（CI 侧历史实测约 40 分钟），
           # 45 分钟的 job 上限余量太薄。故拆成 A/B 两个并行 job：按文件名
           # 排序交替分组（scripts/ci_pytest_groups.py 自动生成，无需维护
