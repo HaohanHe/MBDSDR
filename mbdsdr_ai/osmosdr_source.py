@@ -505,6 +505,13 @@ class OsmoSDRSource:
             break
 
         if self.driver is None:
+            # 只解析出 _anon（或空）说明设备串里没有任何已知驱动 key——这是
+            # 格式问题，应与「有合法格式但本机无硬件」区分开，给可操作的报错。
+            if device_string and not (set(parsed) - {"_anon"}):
+                raise RuntimeError(
+                    f"无法识别的设备字符串 {device_string!r}："
+                    f"期望 'rtl=0' / 'hackrf=<serial>' / 'bladerf=0' / "
+                    f"'uhd,type=b200' / 'soapy=0,driver=rtlsdr' 等 gr-osmosdr 格式")
             found = DeviceEnumerator.enumerate()
             if found:
                 self.driver = found[0]["driver"]

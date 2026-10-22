@@ -585,7 +585,12 @@ def register_minimodem_tools(registry) -> None:
         )
 
     def _bell103_demodulate(args: Dict[str, Any]) -> "ToolResult":
-        samples = args.get("samples", [])
+        from mbdsdr_ai.tool_registry import ToolResult, numeric_array
+        samples, err = numeric_array(args, "samples")
+        if err:
+            # adapter 侧对非数组 samples raise ValueError；按「错误:即失败」
+            # 契约在此接住，回可操作的参数错误而不是让异常逃逸出 handler。
+            return ToolResult(success=False, content=f"错误: {err}")
         fs = args.get("sample_rate", 48000)
         res = bell103_demodulate_text(samples, sample_rate=fs)
         return ToolResult(

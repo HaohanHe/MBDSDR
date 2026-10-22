@@ -21,6 +21,43 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 
 
+def numeric_array(args: Dict[str, Any], key: str, *, allow_empty: bool = False):
+    """按「数字数组」取参校验，返回 ``(values, err)``。
+
+    弱模型或批量脚本误把标量/字符串喂给 array 型参数时（如 samples=10、
+    taps="TEST"），此前会以 ``TypeError: 'int' object is not iterable`` 或
+    转换异常逃逸出 handler，被 registry 兜底成「调用失败: TypeError: ...」。
+    此处按仓内「错误:即失败」契约，把类型不符转成可操作的参数错误。
+    """
+    raw = args.get(key, [])
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
+        return None, (f"参数 {key} 需为数字数组（如 [0.5, -0.5, ...]），"
+                      f"收到 {type(raw).__name__}")
+    if not raw and not allow_empty:
+        return None, f"参数 {key} 不能为空数组，请提供至少一个采样/系数"
+    try:
+        return [float(v) for v in raw], None
+    except (TypeError, ValueError):
+        return None, f"参数 {key} 需为数字数组，其中含无法转换为数字的项"
+
+
+def hex_bytes(args: Dict[str, Any], key: str):
+    """按「十六进制字符串」取参校验，返回 ``(blob, err)``。
+
+    容忍冒号/空格分隔；类型不符或含非 hex 字符时返回可操作错误，
+    不让 ``bytes.fromhex`` 的 ValueError 逃逸出 handler。
+    """
+    raw = args.get(key, "")
+    if not isinstance(raw, str):
+        return None, f"参数 {key} 需为十六进制字符串，收到 {type(raw).__name__}"
+    cleaned = raw.replace(":", "").replace(" ", "")
+    try:
+        return bytes.fromhex(cleaned), None
+    except ValueError:
+        return None, (f"参数 {key} 不是合法的十六进制字符串（收到 {raw[:40]!r}），"
+                      f"无法解析为字节")
+
+
 @dataclass
 class ToolResult:
     """工具调用结果。"""
@@ -980,8 +1017,11 @@ class ToolRegistry:
 
     def _fsk_demodulate_handler(self, args: Dict[str, Any]) -> "ToolResult":
         from .minimodem_adapter import fsk_demodulate
+        samples, err = numeric_array(args, "samples")
+        if err:
+            return ToolResult(success=False, content=f"错误: {err}")
         res = fsk_demodulate(
-            args.get("samples", []),
+            samples,
             baud=args.get("baud", 300),
             mark_freq=args.get("mark_freq"),
             space_freq=args.get("space_freq"),
@@ -1015,8 +1055,11 @@ class ToolRegistry:
 
     def _minimodem_decode_audio_handler(self, args: Dict[str, Any]) -> "ToolResult":
         from .minimodem_adapter import minimodem_decode_audio
+        samples, err = numeric_array(args, "samples")
+        if err:
+            return ToolResult(success=False, content=f"错误: {err}")
         res = minimodem_decode_audio(
-            args.get("samples", []),
+            samples,
             baud=args.get("baud", 300),
             sample_rate=args.get("sample_rate", 48000),
             codec=args.get("codec", "ascii"),
@@ -1130,17 +1173,7 @@ class ToolRegistry:
                 },
                 "required": ["ch_vis", "ch_swir", "ch_ir", "height", "width"],
             },
-            handler=lambda args: ToolResult(
-                success=True,
-                content="false-color image composed",
-                data={
-                    "shape": list(SA.SatImageProcessor.false_color_ir(
-                        np.asarray(args["ch_vis"], float).reshape(args["height"], args["width"]),
-                        np.asarray(args["ch_swir"], float).reshape(args["height"], args["width"]),
-                        np.asarray(args["ch_ir"], float).reshape(args["height"], args["width"]),
-                    ).shape)
-                },
-            ),
+            handler=lambda args: self._sat_compose_falsecolor_handler(args),
             category="satellite",
         )
 
@@ -1170,6 +1203,41 @@ class ToolRegistry:
             category="satellite",
         )
 
+    def _sat_compose_falsecolor_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        import numpy as np
+        from . import satdump_adapter as SA
+        channels = {}
+        for key in ("ch_vis", "ch_swir", "ch_ir"):
+            values, err = numeric_array(args, key, allow_empty=True)
+            if err:
+                return ToolResult(success=False, content=f"错误: {err}")
+            channels[key] = values
+        try:
+            height = int(args["height"])
+            width = int(args["width"])
+        except (KeyError, TypeError, ValueError):
+            return ToolResult(success=False,
+                              content="错误: 参数 height/width 需为整数（图像行/列数）")
+        if height <= 0 or width <= 0:
+            return ToolResult(success=False,
+                              content=f"错误: 参数 height/width 需为正整数，"
+                                      f"收到 {height}x{width}")
+        for key, values in channels.items():
+            if len(values) != height * width:
+                return ToolResult(
+                    success=False,
+                    content=f"错误: 参数 {key} 长度 {len(values)} 与 "
+                            f"height×width={height}×{width}={height * width} 不匹配，"
+                            f"请按行优先展平通道数据",
+                )
+        shape = list(SA.SatImageProcessor.false_color_ir(
+            np.asarray(channels["ch_vis"], float).reshape(height, width),
+            np.asarray(channels["ch_swir"], float).reshape(height, width),
+            np.asarray(channels["ch_ir"], float).reshape(height, width),
+        ).shape)
+        return ToolResult(success=True, content="false-color image composed",
+                          data={"shape": shape})
+
     def register_gpredict_tools(self):
         """注册卫星轨道预测工具（依据 SGP4/Spacetrack Report #3 公开标准实现）。
 
@@ -1192,6 +1260,19 @@ class ToolRegistry:
                               content=_json.dumps(result, ensure_ascii=False, indent=2),
                               data=result)
 
+        def _g_call(fn, *fn_args, **fn_kwargs):
+            """调 gpredict adapter 并把输入/校验类 ValueError 转诚实失败。
+
+            adapter 对畸形入参（TLE 校验和失败、坐标缺失等）raise ValueError，
+            此前直接逃逸出 handler 被 registry 兜底成「调用失败: ValueError: ...」
+            （原始英文异常泄漏给模型）。此处按仓内「错误:即失败」契约接住。
+            """
+            try:
+                return _g(fn(*fn_args, **fn_kwargs))
+            except ValueError as e:
+                return ToolResult(success=False,
+                                  content=f"错误: {e}。请检查参数格式后重试。")
+
         self.register(
             name="tle_parse",
             description="解析两行根数(TLE)：校验和验证 + 提取倾角/RAAN/偏心率/近地点幅角/平近点角/平均运动/BSTAR。"
@@ -1201,7 +1282,7 @@ class ToolRegistry:
                 "line1": {"type": "string", "description": "TLE 第1行"},
                 "line2": {"type": "string", "description": "TLE 第2行"},
             }, "required": ["name", "line1", "line2"]},
-            handler=lambda a: _g(GAD.tool_tle_parse(a["name"], a["line1"], a["line2"])),
+            handler=lambda a: _g_call(GAD.tool_tle_parse, a["name"], a["line1"], a["line2"]),
             category="satellite",
         )
         self.register(
@@ -1212,7 +1293,7 @@ class ToolRegistry:
                 "name": {"type": "string"}, "line1": {"type": "string"}, "line2": {"type": "string"},
                 "unix_s": {"type": "number", "description": "时刻 unix 秒；默认现在"},
             }, "required": ["name", "line1", "line2"]},
-            handler=lambda a: _g(GAD.tool_sgp4_propagate(a["name"], a["line1"], a["line2"], a.get("unix_s"))),
+            handler=lambda a: _g_call(GAD.tool_sgp4_propagate, a["name"], a["line1"], a["line2"], a.get("unix_s")),
             category="satellite",
         )
         self.register(
@@ -1226,9 +1307,9 @@ class ToolRegistry:
                 "hours": {"type": "number", "default": 24.0},
                 "min_el_deg": {"type": "number", "default": 0.0},
             }, "required": ["name", "line1", "line2", "lat_deg", "lon_deg"]},
-            handler=lambda a: _g(GAD.tool_sat_pass_predict(
+            handler=lambda a: _g_call(GAD.tool_sat_pass_predict,
                 a["name"], a["line1"], a["line2"], a["lat_deg"], a["lon_deg"],
-                a.get("alt_km", 0.0), a.get("hours", 24.0), a.get("min_el_deg", 0.0))),
+                a.get("alt_km", 0.0), a.get("hours", 24.0), a.get("min_el_deg", 0.0)),
             category="satellite",
         )
         self.register(
@@ -1242,9 +1323,9 @@ class ToolRegistry:
                 "freq_hz": {"type": "number", "description": "发射频率 Hz"},
                 "unix_s": {"type": "number"},
             }, "required": ["name", "line1", "line2", "lat_deg", "lon_deg", "freq_hz"]},
-            handler=lambda a: _g(GAD.tool_doppler_calc(
+            handler=lambda a: _g_call(GAD.tool_doppler_calc,
                 a["name"], a["line1"], a["line2"], a["lat_deg"], a["lon_deg"],
-                a.get("alt_km", 0.0), a["freq_hz"], a.get("unix_s"))),
+                a.get("alt_km", 0.0), a["freq_hz"], a.get("unix_s")),
             category="satellite",
         )
 
@@ -1419,6 +1500,37 @@ class ToolRegistry:
         def _hex_to_bytes(s: str) -> bytes:
             return bytes.fromhex(s.replace(":", "").replace(" ", ""))
 
+        def _parse_dot11(args):
+            try:
+                raw = _hex_to_bytes(args["frame_hex"])
+            except (ValueError, TypeError):
+                return ToolResult(
+                    success=False,
+                    content="错误: 参数 frame_hex 需为裸 802.11 帧的十六进制字符串"
+                            "（可含冒号/空格分隔），当前值无法解析。",
+                )
+            f = parser.parse(raw)
+            return ToolResult(
+                success=not f.corrupt,
+                content=json.dumps({
+                    "type": f.type, "subtype": f.subtype,
+                    "to_ds": f.to_ds, "from_ds": f.from_ds,
+                    "bssid": f.bssid, "source": f.source_mac,
+                    "dest": f.dest_mac, "ssid": f.ssid,
+                    "ssid_hidden": f.ssid_hidden, "channel": f.channel,
+                    "beacon_interval_tu": f.beacon_interval_tu,
+                    "rates_mbps": f.rates_mbps,
+                }, ensure_ascii=False, indent=2),
+                data={
+                    "type": f.type, "subtype": f.subtype, "to_ds": f.to_ds,
+                    "from_ds": f.from_ds, "bssid": f.bssid,
+                    "source": f.source_mac, "dest": f.dest_mac,
+                    "ssid": f.ssid, "ssid_hidden": f.ssid_hidden,
+                    "channel": f.channel, "beacon_interval_tu": f.beacon_interval_tu,
+                    "rates_mbps": f.rates_mbps, "corrupt": f.corrupt,
+                },
+            )
+
         self.register(
             name="kismet_parse_dot11",
             description=(
@@ -1431,28 +1543,7 @@ class ToolRegistry:
                 "frame_hex": {"type": "string",
                               "description": "裸 802.11 帧十六进制串（无 radiotap 头）"},
             }, "required": ["frame_hex"]},
-            handler=lambda args: (
-                lambda f: ToolResult(
-                    success=not f.corrupt,
-                    content=json.dumps({
-                        "type": f.type, "subtype": f.subtype,
-                        "to_ds": f.to_ds, "from_ds": f.from_ds,
-                        "bssid": f.bssid, "source": f.source_mac,
-                        "dest": f.dest_mac, "ssid": f.ssid,
-                        "ssid_hidden": f.ssid_hidden, "channel": f.channel,
-                        "beacon_interval_tu": f.beacon_interval_tu,
-                        "rates_mbps": f.rates_mbps,
-                    }, ensure_ascii=False, indent=2),
-                    data={
-                        "type": f.type, "subtype": f.subtype, "to_ds": f.to_ds,
-                        "from_ds": f.from_ds, "bssid": f.bssid,
-                        "source": f.source_mac, "dest": f.dest_mac,
-                        "ssid": f.ssid, "ssid_hidden": f.ssid_hidden,
-                        "channel": f.channel, "beacon_interval_tu": f.beacon_interval_tu,
-                        "rates_mbps": f.rates_mbps, "corrupt": f.corrupt,
-                    },
-                )
-            )(parser.parse(_hex_to_bytes(args["frame_hex"]))),
+            handler=_parse_dot11,
             category="wireless",
         )
 
@@ -1567,7 +1658,9 @@ class ToolRegistry:
     def _fourfsk_demod_handler(self, args):
         from .dsdcc_lite import FourFSKDemod
         import numpy as np
-        samples = list(args.get("samples", []))
+        samples, err = numeric_array(args, "samples")
+        if err:
+            return ToolResult(success=False, content=f"错误: {err}")
         sps = int(args.get("sps", 10))
         demod = FourFSKDemod(sps=sps)
         dibits, values = demod.demodulate(np.asarray(samples, dtype=float))
@@ -1602,7 +1695,9 @@ class ToolRegistry:
 
     def _dsd_decode_iq_handler(self, args):
         from .dsdcc_lite import dsd_decode_iq
-        samples = list(args.get("samples", []))
+        samples, err = numeric_array(args, "samples")
+        if err:
+            return ToolResult(success=False, content=f"错误: {err}")
         mode = args.get("mode", "auto")
         res = dsd_decode_iq(samples, mode=mode)
         return ToolResult(
@@ -1848,7 +1943,18 @@ class ToolRegistry:
         try:
             src = osmo.OsmoSDRSource(ds)
         except RuntimeError as e:
-            return ToolResult(success=False, content=str(e), error=str(e))
+            msg = str(e)
+            if "No supported devices" in msg:
+                return ToolResult(
+                    success=False,
+                    content=f"设备不可用: {msg}。本机未发现可用 SDR 设备——"
+                            f"插好设备并配置 udev 规则后重试，或先用 "
+                            f"osmosdr_list_devices 查看枚举结果。",
+                )
+            return ToolResult(
+                success=False,
+                content=f"错误: {msg}",
+            )
         return ToolResult(
             success=True,
             content=json.dumps(src.summary(), ensure_ascii=False, indent=2),
@@ -2302,7 +2408,9 @@ class ToolRegistry:
             )
 
         def _fft_filter(args):
-            taps = list(args.get("taps", [1.0]))
+            taps, err = numeric_array(args, "taps")
+            if err:
+                return ToolResult(success=False, content=f"错误: {err}")
             n = int(args.get("n", 1024))
             x = np.random.randn(n)
             ff = FFTFilter(taps)

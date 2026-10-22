@@ -359,8 +359,17 @@ def register_satnogs_tools(registry) -> None:
                               content=f"多普勒曲线 {len(data['points'])} 点, "
                                       f"max|fd|={data['max_doppler_hz']} Hz",
                               data=data)
-        except Exception as e:
-            return ToolResult(success=False, content=f"多普勒计算失败: {e}",
+        except ValueError as e:
+            # TLE 校验和失败 / 坐标或频率缺失等参数问题——可操作的输入错误，
+            # 不是运行时崩溃；提示两行根数的完整性（各 69 字符）。
+            return ToolResult(
+                success=False,
+                content=f"错误: 多普勒曲线计算参数无效: {e}。"
+                        f"请检查 TLE 两行根数是否完整（每行 69 字符、未被截断）。",
+            )
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(success=False,
+                              content=f"错误: 多普勒曲线计算失败: {e}",
                               error="doppler_failed")
 
     def _modes(args):

@@ -396,13 +396,18 @@ def register_sdrangel_plugins_tools(registry) -> None:
     from .tool_registry import ToolResult
 
     def _ogn(args):
+        from .tool_registry import hex_bytes
+        blob, err = hex_bytes(args, "frame_hex")
+        if err:
+            return ToolResult(success=False, content=f"错误: {err}")
         try:
-            data = tool_ogn_decode_frame(args)
+            data = tool_ogn_decode_frame({"frame_hex": blob.hex()})
             return ToolResult(success=True,
                               content=f"FLARM 帧解出: {data['report']}",
                               data=data)
-        except Exception as e:
-            return ToolResult(success=False, content=f"OGN 解析失败: {e}",
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(success=False,
+                              content=f"错误: OGN/FLARM 帧解析失败: {e}",
                               error="ogn_decode_failed")
 
     def _fire(args):
@@ -412,6 +417,21 @@ def register_sdrangel_plugins_tools(registry) -> None:
                           data=data)
 
     def _rc(args):
+        cmds = args.get("commands", [])
+        if isinstance(cmds, (str, bytes)) or not isinstance(cmds, (list, tuple)):
+            return ToolResult(
+                success=False,
+                content="错误: 参数 commands 需为对象数组，"
+                        "每项形如 {\"command\": \"...\", \"args\": {...}}，"
+                        f"收到 {type(cmds).__name__}",
+            )
+        for i, c in enumerate(cmds):
+            if not isinstance(c, dict) or "command" not in c:
+                return ToolResult(
+                    success=False,
+                    content=f"错误: 参数 commands[{i}] 需为 {{command, args}} 对象"
+                            f"（command 为命令名字符串），无法解析当前项",
+                )
         data = tool_remotecontrol_roundtrip(args)
         return ToolResult(success=True,
                           content=f"RemoteControl 往返 {len(data['roundtrip'])} 条命令",

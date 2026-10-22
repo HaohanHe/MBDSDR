@@ -278,12 +278,23 @@ ASTU/对抗）共 39 个任务步：每一步都要有可调用工具，且链�
 模型若要"发 PSK"，当前可操作路径是生成波形 + 离线回环验证，或经设备面工具
 走硬件发射。
 
-**畸形入参的两种形态（实测欠账）**：`tests/tool_param_smoke.py` 对全部注册
-工具做参数批量真跑，本轮实测 276 个工具里有 29 个在收到畸形入参时**抛异常**
-（如 `ax25_decode` 收到非 hex 串、`fsk_demodulate` 收到非数组），而不是像
-`sdr_kiss_decode` 那样回一条干净错误。模型侧仍拿到统一错误信封（不影响
-可操作性 ✓），但属代码卫生欠账：仓内约定"错误:即失败"应优先用返回错误而非
-抛异常表达。此项已测出清单，待逐个收敛。
+**畸形入参收敛（phase68 已销账）**：`tests/tool_param_smoke.py` 对全部注册
+工具做参数批量真跑。整合轮实测 276 个工具里有 29 个在收到畸形入参时**抛异常**
+（非 hex 串喂 `ax25_decode`、非数组喂 `fsk_demodulate`、TLE 校验和失败喂
+`tle_parse` 家族等），异常穿过 handler 边界被 registry 兜底成「调用失败:
+ValueError: ...」，原始英文异常直接泄漏给模型——违反仓内「错误:即失败」
+约定。phase68 逐个收敛：**29 个全部改为 handler 输入校验 + 诚实拒绝**
+（hex/数组/结构/枚举逐类校验，消息点名参数并给修复指引）， smoke 复跑
+**CRASH 29 → 0**（OK 147 → 161，NEED_RESOURCE 38 → 51）。
+同时修正体检脚本自身两处口径：① `classify()` 只把 registry 兜底的真逃逸
+（`error` 以 `exception:` 开头或输出含 traceback）计为 CRASH——诚实失败
+（`handler_error` 字符串契约、`tool_not_found`、显式 `ToolResult(False)`）
+不是崩溃，此前被混入 CRASH 口径；② `value_for()` 对「名称启发式与 schema
+类型矛盾」（samples 命中计数规则返回 int、codewords 命中 code 规则返回
+"TEST"）按 schema 纠正——那是脚本侧测试值缺陷，不该记成工具崩溃。
+剩余欠账（OTHER 桶）：约 20 个工具的诚实失败消息仍泄漏英文原始异常
+（「参数/计算错误: ValueError: ...」「FFT 失败: Invalid number of FFT
+data points (0) specified.」等），属消息质量而非崩溃，下一轮收敛。
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
