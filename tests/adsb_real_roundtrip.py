@@ -188,5 +188,14 @@ def main() -> int:
     return 1 if FAIL else 0
 
 
+def test_dump1090_reference_roundtrip():
+    """pytest 入口（CI 分组跑这个文件用）：35 项 dump1090 参照校验任一
+    失败 main() 即返回 1。本文件是 cpp/tests/test_adsb_decode.cpp
+    golden 数字的 Python 参照，必须随 CI 跑。"""
+    global PASS, FAIL
+    PASS = FAIL = 0
+    assert main() == 0, f"{FAIL} 项 dump1090 参照校验失败（详见上方输出）"
+
+
 if __name__ == "__main__":
     sys.exit(main())

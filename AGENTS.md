@@ -65,7 +65,8 @@ IQ 出图 + 七道根套件门禁 + capability-map；测试代码双边一致，
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
 
-根 `tests/`（大套件，167 个测试文件）同样是对拍门禁所在。**它整跑很慢**：
+根 `tests/`（大套件，200 个测试文件：`test_*.py` 167 + `*_test.py` 15 +
+`*roundtrip*.py` 18）同样是对拍门禁所在。**它整跑很慢**：
 单进程跑 160 个文件约 45 分钟——慢在同进程内单例 QApplication 跨文件累积
 （前面的文件留下成百上千个 widget，后续每次新建窗口都要连带做全量样式/
 布局重算，越往后越慢；孤立构造 MainWindow 只需 5.5 s，累积后可要 11 分钟）。
@@ -73,7 +74,10 @@ passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任�
 ① `tests/conftest.py` 的模块级 autouse fixture 在每个模块结束后回收遗留
    顶层 widget（治本，显著降耗）；
 ② **CI 与本地跑测脚本都按 A/B 两组并行跑**（`scripts/ci_pytest_groups.py`
-按文件名排序交替分组，自动生成无需维护清单）——分组后单组只要
+按文件名排序交替分组，自动生成无需维护清单；收件覆盖 `test_*.py` /
+`*_test.py` / `*roundtrip*.py` 三种命名——历史上只收第一种，phase71 修正，
+四个 `main()` 体检脚本 tool_selftest/tool_health_check/tool_param_smoke/
+smoke_live_tools 故意不入组）——分组后单组只要
 约 3–4 分钟（实测 A 组 695 项 3.6 分钟、B 组 807 项 3.1 分钟），
 单进程整跑的累积问题自然消失。
 
