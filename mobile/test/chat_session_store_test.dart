@@ -265,8 +265,7 @@ void main() {
     });
 
     test('空 steps 不写键（JSON 形状与旧版一致，不膨胀）', () {
-      final SessionLine line =
-          const SessionLine(role: 'user', content: '你好');
+      const SessionLine line = SessionLine(role: 'user', content: '你好');
       expect(line.toJson().containsKey('steps'), isFalse);
       // 读回缺 steps 的旧数据 → 空列表，向后兼容。
       final SessionLine back = SessionLine.fromJson(<String, dynamic>{

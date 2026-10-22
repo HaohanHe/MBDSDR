@@ -79,29 +79,36 @@ class _ToolTile extends StatelessWidget {
         width: 96,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: <Widget>[
             Text(
               entry.write ? 'write' : 'read',
               style: AppTokens.auxiliary.copyWith(
+                height: 1.0,
                 color: entry.write ? AppTokens.warning : AppTokens.success,
               ),
             ),
             if (implemented)
               Text(
                 '已接入',
-                style: AppTokens.auxiliary.copyWith(color: AppTokens.success),
+                style: AppTokens.auxiliary.copyWith(
+                  height: 1.0,
+                  color: AppTokens.success,
+                ),
               )
             else ...<Widget>[
               Text(
                 '桌面端提供',
                 style: AppTokens.auxiliary.copyWith(
+                  height: 1.0,
                   color: AppTokens.textSecondary,
                 ),
               ),
               Text(
                 '移动端未接入',
                 style: AppTokens.auxiliary.copyWith(
+                  height: 1.0,
                   color: AppTokens.textSecondary,
                 ),
               ),
