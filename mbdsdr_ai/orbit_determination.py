@@ -1112,20 +1112,20 @@ def register_tool_registry(registry) -> None:
         return float(lat), float(lon)
 
     def _doppler_orbit_determine(args: Dict[str, Any]) -> ToolResult:
-        obs_in = args.get("observations", [])
-        observations = []
-        for o in obs_in:
-            # 同时接受 [t, f] 对与 {t, fd} 字典
-            if isinstance(o, dict):
-                t_v = o.get("t", o.get("timestamp"))
-                f_v = o.get("fd", o.get("f", o.get("frequency")))
-            else:
-                t_v, f_v = o[0], o[1]
-            if t_v is None or f_v is None:
-                raise ValueError("observations 每项需 [t, f] 或 {t, fd}"
-                                 "（含时间与频率/频移）")
-            observations.append((float(t_v), float(f_v)))
         try:
+            obs_in = args.get("observations", [])
+            observations = []
+            for o in obs_in:
+                # 同时接受 [t, f] 对与 {t, fd} 字典
+                if isinstance(o, dict):
+                    t_v = o.get("t", o.get("timestamp"))
+                    f_v = o.get("fd", o.get("f", o.get("frequency")))
+                else:
+                    t_v, f_v = o[0], o[1]
+                if t_v is None or f_v is None:
+                    raise ValueError("observations 每项需 [t, f] 或 {t, fd}"
+                                     "（含时间与频率/频移）")
+                observations.append((float(t_v), float(f_v)))
             _rx_lat, _rx_lon = _latlon(args)
 
             res = doppler_orbit_determine(
@@ -1144,7 +1144,10 @@ def register_tool_registry(registry) -> None:
                 fix_clock=bool(args.get("fix_clock", True)),
             )
         except Exception as e:  # noqa
-            return ToolResult(success=False, content="", error=str(e),
+            # 诚实失败：消息同时进 content（模型可见）与 error（技术细节）。
+            # 典型触发是未配置地面站坐标 / observations 项结构不符——可操作的
+            # 参数与配置问题，不是运行时崩溃，不应以空 content 逃逸分类。
+            return ToolResult(success=False, content=str(e), error=str(e),
                               tool_name="doppler_orbit_determine")
         stats = res["residual_stats"]
         return ToolResult(

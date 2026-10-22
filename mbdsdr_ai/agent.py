@@ -31,7 +31,7 @@ from .context_manager import (
     estimate_tokens,
 )
 from .model_manager import ModelManager
-from .tool_registry import ToolRegistry, ToolResult
+from .tool_registry import ToolRegistry, ToolResult, hex_bytes
 from .conversation import ConversationStore
 from .memory import MemoryStore
 from .self_evolution import SelfEvolutionEngine
@@ -1107,7 +1107,9 @@ class MBDSDRAgent:
             handler=_encode, category="encode")
 
         def _decode(args):
-            blob = bytes.fromhex(args.get("hex", ""))
+            blob, err = hex_bytes(args, "hex")
+            if err:
+                return ToolResult(False, f"错误: {err}")
             f = AX25Frame.from_bytes(blob)
             if f is None:
                 return ToolResult(False, "帧过短或解析失败")
@@ -1185,7 +1187,9 @@ class MBDSDRAgent:
             handler=_demodulate, category="decode")
 
         def _parse(args):
-            blob = bytes.fromhex(args.get("hex", ""))
+            blob, err = hex_bytes(args, "hex")
+            if err:
+                return ToolResult(False, f"错误: {err}")
             f = AX25Frame.from_bytes(blob)
             if f is None:
                 return ToolResult(False, "帧解析失败")
@@ -2047,6 +2051,17 @@ class MBDSDRAgent:
         """注册自进化工具（需启用 enable_self_evolution）。"""
         evo = self.evolution
 
+        def _propose(args):
+            # evo.propose 对未知 target_type 等畸形入参 raise ValueError；
+            # 按「错误:即失败」契约接住，把选项清单直接回给模型。
+            try:
+                r = evo.propose(**args)
+            except ValueError as e:
+                return ToolResult(success=False, content=f"错误: {e}")
+            return ToolResult(
+                success=True,
+                content=f"进化建议已提出: {args.get('target_name')}\nID: {r.id}\n下一步: 调用 evolution_evaluate 评估效果",
+            )
         self.tool_registry.register(
             name="evolution_propose",
             description="提出一个自进化建议（提案记录模式，不自动应用）。可以记录对系统提示词、工具描述、配置参数或代码算法的改进建议。仅把提案写入内存/版本库，不会改写运行时：当前没有 evolution_apply/confirm 工具，提案不会生效到 system_prompt/配置/代码。修改不会直接影响主系统。",
@@ -2061,10 +2076,7 @@ class MBDSDRAgent:
                 },
                 "required": ["target_type", "target_name", "description", "proposed_change"],
             },
-            handler=lambda args: ToolResult(
-                success=True,
-                content=f"进化建议已提出: {args.get('target_name')}\nID: {evo.propose(**args).id}\n下一步: 调用 evolution_evaluate 评估效果",
-            ),
+            handler=_propose,
             category="evolution",
         )
 

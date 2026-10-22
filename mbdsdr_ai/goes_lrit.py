@@ -848,15 +848,52 @@ def register_tool_registry(registry) -> None:
     )
 
 
+def _hex_list(args, key: str):
+    """把 args[key] 按「hex 字符串列表」校验，返回 (blobs, err)。
+
+    GOES LRIT/HRIT 工具的 files/vcdus 参数历史上直接 ``bytes.fromhex(hx)``，
+    模型误传标量/非 hex 串时 ValueError 逃逸出 handler。此处按「错误:即失败」
+    契约先校验，把可操作的参数错误回给模型。
+    """
+    from .tool_registry import ToolResult  # 延迟导入避免循环
+
+    raw = args.get(key, [])
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple)):
+        return None, ToolResult(
+            success=False,
+            content=f"错误: 参数 {key} 需为 hex 字符串数组"
+                    f"（每个元素是一段完整字节的十六进制），收到 {type(raw).__name__}",
+        )
+    blobs = []
+    for i, hx in enumerate(raw):
+        if not isinstance(hx, str):
+            return None, ToolResult(
+                success=False,
+                content=f"错误: 参数 {key}[{i}] 需为 hex 字符串，收到 {type(hx).__name__}",
+            )
+        try:
+            blobs.append(bytes.fromhex(hx))
+        except ValueError:
+            return None, ToolResult(
+                success=False,
+                content=f"错误: 参数 {key}[{i}] 不是合法的十六进制字符串"
+                        f"（收到 {hx[:40]!r}），无法解析为字节",
+            )
+    return blobs, None
+
+
 def ToolResult_goes(args, is_hrit: bool):
     """handler 辅助：解析 VCDU 流并返回文件头摘要。"""
     import json as _json
     from .tool_registry import ToolResult  # 延迟导入避免循环
 
+    blobs, err = _hex_list(args, "vcdus")
+    if err:
+        return err
+
     parser = HRITParser() if is_hrit else LRITParser()
     files = []
-    for hx in args.get("vcdus", []):
-        raw = bytes.fromhex(hx)
+    for raw in blobs:
         for f in parser.feed_vcdu(raw):
             h = parse_lrit_headers(f)
             files.append({
@@ -885,10 +922,14 @@ def ToolResult_extract_image(args):
     import json as _json
     from .tool_registry import ToolResult
 
+    blobs, err = _hex_list(args, "files")
+    if err:
+        return err
+
     dec = GOESImageDecoder()
     images = []
-    for hx in args.get("files", []):
-        img = dec.add_lrit_file(bytes.fromhex(hx))
+    for raw in blobs:
+        img = dec.add_lrit_file(raw)
         if img is not None:
             images.append({
                 "width": img.width,

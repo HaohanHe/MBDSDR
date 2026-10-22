@@ -1846,7 +1846,7 @@ def register_sdr_tools(agent):
             },
             "required": ["ax25_hex", "mycall"],
         },
-        handler=lambda args: ToolResult(success=True, content=_digipeater_process(args)),
+        handler=lambda args: _text_result(_digipeater_process(args)),
         category="sdr_network",
     )
 
@@ -2306,7 +2306,7 @@ def register_sdr_tools(agent):
             },
             "required": ["scpi_command"],
         },
-        handler=lambda args: ToolResult(success=True, content=_instrument_query(args)),
+        handler=lambda args: _text_result(_instrument_query(args)),
         category="hal",
     )
 
@@ -3312,9 +3312,10 @@ def _meteor_viterbi_decode_fn_tool(args) -> "ToolResult":
     """Meteor Viterbi 解码：coded_bits -> decoded info bits。"""
     import json as _json
     from .meteor_sat import meteor_viterbi_decode
-    coded = args.get("coded_bits")
-    if coded is None:
-        return ToolResult(success=False, content="需要 coded_bits 数组")
+    from .tool_registry import numeric_array
+    coded, err = numeric_array(args, "coded_bits")
+    if err:
+        return ToolResult(success=False, content=f"错误: {err}")
     bits = np.asarray(coded, dtype=np.float64)
     dec = meteor_viterbi_decode(bits)
     out = {"decoded_bits": [int(b) for b in dec], "n_decoded": int(len(dec))}
@@ -4683,13 +4684,24 @@ def _analyze_recording(args):
 # AX.25 / APRS 工具实现
 # ═══════════════════════════════════════════════════════
 
+def _text_result(res) -> "ToolResult":
+    """文本契约 -> ToolResult：以「错误:」开头即失败。
+
+    与 tool_registry.call 的诚实语义兜底同判据——handler 层就诚实，
+    不依赖调用方事后翻转 success。
+    """
+    txt = str(res)
+    ok = not txt.lstrip().startswith(("错误:", "错误："))
+    return ToolResult(success=ok, content=txt)
+
+
 def _encode_result(res):
     """编码器返回值 -> ToolResult（dict 契约带载荷；str 契约向后兼容）。"""
     if isinstance(res, dict):
         return ToolResult(success=True,
                           content=str(res.get("content", "")),
                           data=res)
-    return ToolResult(success=True, content=str(res))
+    return _text_result(res)
 
 def _decode_result(res):
     """解码器返回值 -> ToolResult（dict 契约带结构化载荷；str 契约向后兼容）。"""
@@ -4697,7 +4709,7 @@ def _decode_result(res):
         return ToolResult(success=True,
                           content=str(res.get("content", "")),
                           data=res)
-    return ToolResult(success=True, content=str(res))
+    return _text_result(res)
 
 def _encode_ax25(args):
     """编码 AX.25 帧。"""
@@ -5036,8 +5048,9 @@ def _kiss_encode(args):
 
     try:
         ax25_data = bytes.fromhex(ax25_hex)
-    except ValueError as e:
-        return f"错误: 无效的十六进制数据 - {e}"
+    except ValueError:
+        return ("错误: 参数 ax25_hex 需为 AX.25 帧的十六进制字符串"
+                f"（收到 {ax25_hex[:40]!r}），无法解析为字节")
 
     if command == 0:
         kiss_frame = KISSInterface.encode_data_frame(ax25_data, port)
@@ -5068,8 +5081,9 @@ def _kiss_decode(args):
 
     try:
         data = bytes.fromhex(hex_data)
-    except ValueError as e:
-        return f"错误: 无效的十六进制数据 - {e}"
+    except ValueError:
+        return ("错误: 参数 hex_data 需为原始字节的十六进制字符串"
+                f"（收到 {hex_data[:40]!r}），无法解析为字节")
 
     frames = KISSInterface.decode_stream(data)
 
@@ -5113,8 +5127,9 @@ def _digipeater_process(args):
 
     try:
         data = bytes.fromhex(ax25_hex)
-    except ValueError as e:
-        return f"错误: 无效的十六进制数据 - {e}"
+    except ValueError:
+        return ("错误: 参数 ax25_hex 需为 AX.25 帧的十六进制字符串"
+                f"（收到 {ax25_hex[:40]!r}），无法解析为字节")
 
     frame = AX25Frame.from_bytes(data)
     if not frame:

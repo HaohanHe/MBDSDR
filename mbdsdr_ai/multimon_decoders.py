@@ -631,10 +631,21 @@ def register_multimon_tools(registry) -> None:
 
     def _pocsag_decode(args):
         words = args.get("codewords", [])
+        if isinstance(words, (str, bytes)) or not isinstance(words, (list, tuple)):
+            return {"success": False,
+                    "content": "错误: 参数 codewords 需为 32-bit 整数数组"
+                               "（0=sync 同步字，通常 17 个一组），"
+                               f"收到 {type(words).__name__}"}
         if not words:
             return {"success": False, "content": "需要 codewords 数组（32-bit 整数）"}
+        try:
+            cws = [int(w) & 0xFFFFFFFF for w in words]
+        except (TypeError, ValueError):
+            return {"success": False,
+                    "content": "错误: 参数 codewords 需为 32-bit 整数数组，"
+                               "其中含无法转换为整数的项（如字符串 'TEST'）"}
         dec = POCSAGDecoder()
-        msgs = dec.decode_batch([int(w) & 0xFFFFFFFF for w in words])
+        msgs = dec.decode_batch(cws)
         return {
             "success": True,
             "content": f"POCSAG 解码 {len(msgs)} 条消息",
@@ -649,7 +660,14 @@ def register_multimon_tools(registry) -> None:
         }
 
     def _pocsag_bch_correct(args):
-        cw = int(args.get("codeword", 0)) & 0xFFFFFFFF
+        cw_raw = args.get("codeword", 0)
+        try:
+            cw = int(cw_raw) & 0xFFFFFFFF
+        except (TypeError, ValueError):
+            return {"success": False,
+                    "content": "错误: 参数 codeword 需为单个 32-bit 整数"
+                               "（如 305419896 或 0x12345678 的十进制形式），"
+                               f"收到 {cw_raw!r}"}
         fixed, n = bch.correct(cw)
         return {"success": True, "codeword_in": f"0x{cw:08X}",
                 "codeword_out": f"0x{fixed:08X}", "errors_corrected": n}

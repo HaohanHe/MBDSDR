@@ -170,13 +170,52 @@ def value_for(pname, schema):
     return "test"
 
 
+def _array_default(schema):
+    """按 items 类型构造一小段合理数组（供类型矛盾纠正用）。"""
+    items = (schema or {}).get("items", {}) or {}
+    ityp = items.get("type")
+    if ityp == "number":
+        return [0.5 if i % 2 == 0 else -0.5 for i in range(64)]
+    if ityp == "integer":
+        return [0, 1] * 8
+    if ityp == "string":
+        return ["TEST"]
+    if ityp == "object":
+        props = items.get("properties", {}) or {}
+        if props:
+            return [{k: value_for(k, v) for k, v in props.items()}]
+        return [{}]
+    if ityp == "array":
+        return [[0, 1]] * 8
+    return []
+
+
+def _coerce_to_schema(value, schema):
+    """名称启发式与 schema 类型矛盾时按 schema 纠正。
+
+    典型误兜：samples 命中「计数」规则返回 int 10、codewords 命中「code」规则
+    返回 "TEST"、commands 命中「command」规则返回 "help"，而 schema 要求
+    array——这类矛盾是脚本侧测试值缺陷，不应记成工具崩溃（CRASH）。
+    """
+    typ = (schema or {}).get("type", "string")
+    if typ == "array" and not isinstance(value, list):
+        return _array_default(schema)
+    if typ == "object" and not isinstance(value, dict):
+        return {}
+    if typ == "boolean" and not isinstance(value, bool):
+        return True
+    if typ in ("integer", "number") and not isinstance(value, (int, float)):
+        return 1 if typ == "integer" else 1.0
+    return value
+
+
 def build_args(tool):
     schema = tool.get("parameters", {}) or {}
     props = schema.get("properties", {}) or {}
     required = schema.get("required", []) or []
     args = {}
     for p in required:
-        args[p] = value_for(p, props.get(p, {}))
+        args[p] = _coerce_to_schema(value_for(p, props.get(p, {})), props.get(p, {}))
     return args
 
 
@@ -196,14 +235,19 @@ def classify(txt, success, error):
         return "TODO"
     if any(k in low for k in ("未连接", "not connected", "设备未", "硬件未", "no device", "未插", "需先连接",
                               "无法打开", "failed to open", "no sdr", "未找到设备", "permission denied",
-                              "could not open", " unavailable", "不可用", "请先连接", "not available")):
+                              "could not open", " unavailable", "不可用", "请先连接", "not available",
+                              "未发现可用", "未发现仪器", "无可用仪器")):
         return "NEED_HW"
     # 前置资源不存在（子代理/录制/文件/内容段）——工具做了正确的业务校验，不是空壳也不是崩溃
     if any(k in low for k in ("子代理不存在", "录制不存在", "文件不存在", "未找到要替换", "no such",
                               "does not exist", "not found", "不存在", "未找到", "请先创建", "无数据",
                               "无法解析", "格式", "empty", "为空")):
         return "NEED_RESOURCE"
-    if error or "traceback" in low:
+    # CRASH 只保留真逃逸：registry 兜底捕获的 handler 异常（error 以
+    # "exception:" 开头）或输出里带 traceback。诚实失败不是崩溃——字符串契约的
+    # handler_error、tool_not_found/missing_required_params、显式
+    # ToolResult(False) 都是「错误:即失败」的正确实现，不应混入 CRASH 口径。
+    if (error and str(error).startswith("exception")) or "traceback" in low:
         return "CRASH"
     if success and txt.strip():
         return "OK"
