@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .fir_taps import root_raised_cosine_taps
-from .tool_registry import ToolResult
+from .tool_registry import ToolResult, clean_exc
 
 __all__ = [
     "SCHEMES", "symbol_points", "modulate_bits", "demodulate_iq",
@@ -501,7 +501,7 @@ def link_ber_test(scheme: str = "bpsk", n_bits: int = 4000, ebn0_db: float = 6.0
 # ═══════════════════════════════════════════════════════════
 def _err(e: Exception) -> ToolResult:
     return ToolResult(success=False,
-                      content=f"参数/计算错误: {type(e).__name__}: {e}",
+                      content=f"参数/计算错误: {clean_exc(e)}",
                       data={"error": str(e)})
 
 

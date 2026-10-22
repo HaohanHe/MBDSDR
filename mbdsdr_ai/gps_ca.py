@@ -245,7 +245,7 @@ def nav_bits_from_corr(corr_seq: np.ndarray, chip_rate: float = CA_CHIP_RATE,
 def register_tool_registry(registry) -> None:
     """注册 GPS 扩频伪随机序列与码相关捕获工具。"""
     import json as _json
-    from .tool_registry import ToolResult
+    from .tool_registry import ToolResult, clean_exc
 
     def _prn(args):
         """生成 LFSR/m 序列/Gold 族并给自校验结果。"""
@@ -311,7 +311,7 @@ def register_tool_registry(registry) -> None:
                                   data=res)
         except Exception as e:  # noqa: BLE001
             return ToolResult(success=False,
-                              content=f"码相关捕获失败：{type(e).__name__}: {e}")
+                              content=f"码相关捕获失败：{clean_exc(e)}")
         return ToolResult(success=True,
                           content=_json.dumps(res, ensure_ascii=False, default=str),
                           data=res)
