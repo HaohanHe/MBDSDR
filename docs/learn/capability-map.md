@@ -343,9 +343,14 @@ satdump/rtklib/bladerf/limesuite 等 15 个）与 `*roundtrip*.py`（协议编�
 （35 项 dump1090 常量校验），必须随 CI 跑。四个 `main()` 体检脚本
 （tool_selftest/tool_health_check/tool_param_smoke/smoke_live_tools）
 **故意不入组**——它们是产出 JSON 报告的周期性诊断工具，不是单测。
-已知弱点记录在案不扩大范围：`ft8_roundtrip.py` 的循环偏移容差掩盖
-+1 音调系统偏移（docs/audit_r2/FINAL_REPORT_R2.md 修复建议）。
 AGENTS.md 的套件文件数同步更正。
+
+**ft8_roundtrip 弱门禁收紧（同轮销账）**：audit_r2 曾记录该测试的
+循环偏移容差掩盖 +1 音调系统偏移 bug。实测当前 demodulate_8fsk 的
+8 相位假设+裕度选择已修掉该 bug（检出中心 1498Hz 下最优循环偏移
+=0、79/79 精确匹配、裕度 4.75），遂按 audit_r2 修复建议把断言从
+「8 个循环偏移取最佳」收紧为「锚定必须精确（best_d == 0）+ 准确率
+≥0.85」双断言——假设选择一旦退化立刻红，不再被容度吞掉。
 
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程

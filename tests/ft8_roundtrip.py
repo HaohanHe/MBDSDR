@@ -48,8 +48,10 @@ def main() -> int:
 
     exp = symbols.tolist()
     # 8FSK 音调存在循环相位模糊（基准差 ±N 刻度），真实系统靠格雷码+LDPC
-    # 解模糊。这里验证解调的相对序列正确：取 8 个循环偏移中匹配最多的。
-    best_d, best_m = 0, 0
+    # 解模糊。demodulate_8fsk 的 8 相位假设+裕度选择应直接解掉它——
+    # audit_r2 曾记录该容差掩盖 +1 音调系统偏移 bug（已修），故按当时的
+    # 修复建议收紧为精确断言：偏移量仍打印，假设选择一旦退化立刻暴露。
+    best_d, best_m = 0, -1
     for d in range(8):
         m = sum(1 for a, b in zip(got, exp) if a == (b + d) % 8)
         if m > best_m:
@@ -59,6 +61,8 @@ def main() -> int:
           f"匹配={best_m}/{n_sym} ({acc:.2%}), 裕度={dem['avg_margin']}")
     # 6.25Hz 间隔 × 160ms 符号下每符号 1920 样本，Goertzel 分辨率 = 12000/1920 = 6.25Hz，
     # 正好对齐音调间隔；高 SNR 下仍有少量符号抖动属物理极限（真机由 LDPC 纠错）。门限 0.85。
+    assert best_d == 0, (
+        f"音调锚定未解循环模糊（偏移 {best_d}）：got={got[:20]} exp={exp[:20]}")
     assert acc >= 0.85, f"符号往返准确率过低: {acc:.2%}, got={got[:20]} exp={exp[:20]}"
     print("FT8 8FSK 往返通过（相对序列正确，循环相位模糊由 LDPC 在真机处理）。")
     return 0
@@ -66,8 +70,8 @@ def main() -> int:
 
 def test_ft8_symbol_roundtrip():
     """pytest 入口（CI 分组跑这个文件用）：往返断言失败时 main() 抛
-    AssertionError；返回 0 即通过。已知弱点（循环偏移容差）见
-    docs/audit_r2/FINAL_REPORT_R2.md 修复建议，不在本测试职责内。"""
+    AssertionError；返回 0 即通过。已按 audit_r2 修复建议收紧为精确
+    断言（音调锚定必须解掉循环模糊，见 main() 内 best_d == 0）。"""
     assert main() == 0
 
 
