@@ -112,6 +112,12 @@ _EN_MSG_MAP = [
      "网络不可达：找不到到该主机的路由（检查网络连接与设备 IP）"),
     (re.compile(r"\[Errno 110\] Connection timed out"),
      "连接超时：对端无响应（检查设备是否在线、防火墙是否放行）"),
+    # socket.timeout / TimeoutError 的 str(e) 就是裸 "timed out"（无 Errno 前缀），
+    # 云台/rotctld/设备面超时分支都会走到这里，不映射就会泄漏英文。
+    (re.compile(r"^timed out$"),
+     "连接超时：对端无响应（检查设备是否在线、网络/防火墙是否放行）"),
+    (re.compile(r"^The read operation timed out$"),
+     "读取超时：对端发送数据太慢或中途断开（检查设备状态与网络质量）"),
     (re.compile(r"cannot reshape array of size 0 into shape"),
      "输入数据为空（长度 0），无法整形为期望形状，请提供非空数据"),
     (re.compile(r"\[Errno 2\] No such file or directory: '([^']+)'"),
@@ -1773,8 +1779,20 @@ class ToolRegistry:
         from .dsdcc_lite import DMRDecoder
         slot = list(args.get("slot_dibits", []))
         res = DMRDecoder().decode_slot(slot)
+        if not res.ok:
+            if len(slot) < 144:
+                detail = (f"输入只有 {len(slot)} 个 dibit，DMR 单时隙需要 144 个"
+                          f"（288 bit，以同步字段为中心对齐）")
+            else:
+                detail = (f"未匹配到 DMR 同步字（容差内最近偏差 sync_errors={res.sync_errors}）："
+                          f"请确认 dibit 流以同步字段对齐，且制式为 DMR 4FSK (4800 sym/s)")
+            return ToolResult(
+                success=False,
+                content=f"DMR 解码失败：{detail}",
+                data=res.__dict__,
+            )
         return ToolResult(
-            success=res.ok,
+            success=True,
             content=f"DMR: {res.burst} slot{res.slot} CC={res.color_code} "
                     f"voice={res.is_voice} ambe_frames={len(res.ambe_frames)} "
                     f"sync_errs={res.sync_errors}",
@@ -1785,8 +1803,16 @@ class ToolRegistry:
         from .dsdcc_lite import P25Decoder
         nid = list(args.get("nid_dibits", []))
         res = P25Decoder().decode_nid(nid)
+        if not res.ok:
+            detail = (f"输入只有 {len(nid)} 个 dibit，P25 NID 需要 24 个"
+                      f"（NAC 12bit + DUID 4bit + 校验 28bit，取自同步命中处）")
+            return ToolResult(
+                success=False,
+                content=f"P25 NID 解析失败：{detail}",
+                data=res.__dict__,
+            )
         return ToolResult(
-            success=res.ok,
+            success=True,
             content=f"P25 NID: NAC={res.nac:#05x} DUID={res.duid} voice={res.is_voice}",
             data=res.__dict__,
         )
@@ -1862,10 +1888,23 @@ class ToolRegistry:
         from .dab_plus_lite import dab_eti_parse
         frame = bytes(args.get("frame", []))
         res = dab_eti_parse(frame)
+        if not res.get("ok", False):
+            if res.get("fsync") in ("0x0", "0x00", 0):
+                diag = ("未找到 FSYNC 同步字（帧第 2–4 字节应为 0x07 3A B6）："
+                        "请确认输入是完整 6144 字节 ETI(NI) 帧且帧头对齐")
+            else:
+                diag = ("FSYNC 已同步但后续校验失败（ERR 标志/头 CRC/MSC CRC）："
+                        "帧可能损坏，或输入制式不是 DAB Mode I ETI(NI)")
+            return ToolResult(
+                success=False,
+                content=f"ETI 解析失败：{diag}",
+                data=res,
+            )
         return ToolResult(
-            success=res.get("ok", False),
-            content=f"ETI parse: ok={res.get('ok')}, nst={res.get('nst')}, "
-                    f"ficl={res.get('ficl')}, subchannels={res.get('subchannels')}",
+            success=True,
+            content=f"ETI 帧解析成功：nst={res.get('nst')}（子信道数）, "
+                    f"ficl={res.get('ficl')}（FIC 长字数）, "
+                    f"子信道 {len(res.get('subchannels') or {})} 个",
             data=res,
         )
 
@@ -1873,9 +1912,17 @@ class ToolRegistry:
         from .dab_plus_lite import dab_decode_iq
         data = bytes(args.get("data", []))
         res = dab_decode_iq(data)
+        if not res.get("ok", False):
+            return ToolResult(
+                success=False,
+                content="DAB 解码失败：未找到 ETI FSYNC 同步——请确认输入为 ETI(NI) "
+                        "字节流（可含前缀杂质，工具会自动搜索同步），制式为 DAB Mode I",
+                data=res,
+            )
         return ToolResult(
-            success=res.get("ok", False),
-            content=f"DAB decode: ok={res.get('ok')}, sync_offset={res.get('sync_offset')}",
+            success=True,
+            content=f"DAB 解码成功：FSYNC 同步于字节偏移 {res.get('sync_offset')}，"
+                    f"已解析 ETI 帧并解码其中 FIC 服务表",
             data=res,
         )
 
@@ -2719,7 +2766,9 @@ class ToolRegistry:
         from . import nrsc5_lite as N
         iq = self._iq_to_complex(args)
         if iq.size == 0:
-            return ToolResult(success=False, content="空 IQ 输入")
+            return ToolResult(success=False, content=(
+                "空 IQ 输入：请通过 iq 参数提供复数采样（实部/虚部交替的数字数组）。"
+                "HD Radio (NRSC-5) 需 744 kHz 基带 IQ，采样不足一个 OFDM 符号时同样无法解调。"))
         res = N.hdradio_ofdm_demod(iq)
         return ToolResult(
             success=True,
@@ -2743,7 +2792,9 @@ class ToolRegistry:
         from . import nrsc5_lite as N
         iq = self._iq_to_complex(args)
         if iq.size == 0:
-            return ToolResult(success=False, content="空 IQ 输入")
+            return ToolResult(success=False, content=(
+                "空 IQ 输入：请通过 iq 参数提供复数采样（实部/虚部交替的数字数组）。"
+                "HD Radio (NRSC-5) 需 744 kHz 基带 IQ，采样不足一个 OFDM 符号时同样无法解调。"))
         res = N.hdradio_decode_iq(iq)
         return ToolResult(
             success=True,

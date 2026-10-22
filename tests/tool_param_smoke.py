@@ -236,7 +236,10 @@ def classify(txt, success, error):
     if any(k in low for k in ("未连接", "not connected", "设备未", "硬件未", "no device", "未插", "需先连接",
                               "无法打开", "failed to open", "no sdr", "未找到设备", "permission denied",
                               "could not open", " unavailable", "不可用", "请先连接", "not available",
-                              "未发现可用", "未发现仪器", "无可用仪器")):
+                              "未发现可用", "未发现仪器", "无可用仪器",
+                              # sdr_set_* 家族/set_ppm_correction 的诚实空态措辞
+                              # （"当前无连接设备，请先 sdr_connect…"）——属缺设备前置，不是资源缺失
+                              "无连接设备", "无连接仪器")):
         return "NEED_HW"
     # 前置资源不存在（子代理/录制/文件/内容段）——工具做了正确的业务校验，不是空壳也不是崩溃
     if any(k in low for k in ("子代理不存在", "录制不存在", "文件不存在", "未找到要替换", "no such",

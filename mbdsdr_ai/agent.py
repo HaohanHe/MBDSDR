@@ -56,6 +56,42 @@ from .astronomy import Observer, EquatorialCoord, AltAzCoord, AntennaParams, uni
 from .amr import AMRClassifier, AMRResult, ModulationType
 
 
+# git clone 常见失败模式 → 中文可操作诊断（按序首个命中）。
+# git 的 stderr 是英文原句，整条转述给模型等于没诊断；已知模式直接给
+# 排查动作，未收录模式保留退出码与末行原文供人工排查（clean_exc 同款纪律）。
+_GIT_CLONE_FAIL_PATTERNS = (
+    (("could not resolve host", "name or service not known",
+      "temporary failure in name resolution"),
+     "网络故障：无法解析仓库主机名（检查 DNS 与网络连接）"),
+    (("failed to connect", "connection refused", "connection timed out",
+      "couldn't connect", "network is unreachable", "connection reset by peer",
+      "operation timed out"),
+     "网络故障：连不上仓库主机（检查网络/代理/防火墙是否放行）"),
+    (("authentication failed", "permission denied", "could not read username",
+      "terminal prompts disabled"),
+     "认证失败：私有仓库需要凭证（https 用有读权限的 PAT）"),
+    (("repository not found", "404"),
+     "仓库不存在或无权访问：确认 URL 拼写与仓库可见性（私有仓库需凭证）"),
+    (("already exists and is not an empty directory",),
+     "目标目录已存在且非空：换一个 dest 名称，或先清理该目录"),
+    (("remote hung up", "hung up unexpectedly", "early eof", "rpc failed", "packfile"),
+     "传输中断：仓库过大或网络不稳（可重试；--depth 1 已限制拉取深度）"),
+    (("403", "rate limit"),
+     "被拒绝或限流（HTTP 403/rate limit）：稍后重试或更换网络环境"),
+)
+
+
+def _git_clone_failure_zh(returncode: int, stderr: Optional[str]) -> str:
+    """把 git clone 的失败输出整形成中文诊断消息。"""
+    low = (stderr or "").lower()
+    for keys, zh in _GIT_CLONE_FAIL_PATTERNS:
+        if any(k in low for k in keys):
+            return f"克隆失败: {zh}（git 退出码 {returncode}）"
+    tail = ((stderr or "").strip().splitlines() or [""])[-1][:150]
+    hint = f"（{tail}）" if tail else ""
+    return f"克隆失败: git 退出码 {returncode}{hint}——未识别的失败模式，请把该输出人工排查"
+
+
 def _tool_result_to_model_content(result) -> str:
     """工具结果转模型可见文本。
 
@@ -527,11 +563,10 @@ class MBDSDRAgent:
                                check=True, timeout=120, capture_output=True, text=True)
                 return ToolResult(True, f"已克隆到 {dest}")
             except subprocess.TimeoutExpired:
-                return ToolResult(False, "克隆超时(120s)")
+                return ToolResult(False,
+                    "克隆超时(120s)：网络过慢或仓库过大，可重试或改用镜像地址")
             except subprocess.CalledProcessError as e:
-                tail = ((e.stderr or "").strip().splitlines() or [""])[-1][:150]
-                hint = f"（{tail}）" if tail else ""
-                return ToolResult(False, f"克隆失败: git 退出码 {e.returncode}{hint}")
+                return ToolResult(False, _git_clone_failure_zh(e.returncode, e.stderr))
             except Exception as e:  # noqa: BLE001
                 return ToolResult(False, f"克隆失败: {clean_exc(e)}")
 
