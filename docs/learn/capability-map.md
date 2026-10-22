@@ -312,6 +312,24 @@ owrx_fft_average/inspectrum_bandwidth）补空数组预检。smoke 复跑：**�
 泄漏 24 → 0**（NEED_RESOURCE 51 → 59 为预检归桶，OTHER 60 → 52），OK 161
 不变、CRASH 仍为 0；`tests/test_clean_exc.py` 7 项锁死整形行为。
 
+**OTHER 桶最后一公里（phase70 已销账）**：phase69 后 OTHER 余 51 个，
+逐条复验（smoke 全量重跑 + 代码级核对）分三类处置：
+
+| 类别 | 实例 | 处置 |
+| --- | --- | --- |
+| 诚实空态被错桶 | sdr_set_* 家族 10 个 + set_ppm_correction：「当前无连接设备，请先 sdr_connect…」语义是缺设备，classify() 关键词却不认「无连接设备」，沉入 OTHER | 分类器补关键词 → **NEED_HW**（桶数与事实对齐，不改工具消息） |
+| 失败消息仍泄漏英文 | git_clone_repo 把 git stderr 末行原样嵌进消息（"fatal: unable to access … Could not resolve host"）；gimbal_move 超时分支经 clean_exc 漏出裸 "timed out" | git clone 失败按模式分类中文诊断（DNS/连接/认证/仓库不存在/目录已存在/传输中断/限流七类，未收录保留退出码+末行供人工排查）；clean_exc 增 `^timed out$` 与读取超时映射 |
+| 失败消息难懂 | hdradio 两个工具只回「空 IQ 输入」；dmr_decode/p25_decode 失败时甩英文结构化转储（"DMR: unknown slot-1 CC=-1 … sync_errs=99"）；dab_eti_parse/dab_decode_iq 甩 "ok=False, nst=0" 与 "no ETI FSYNC found" | 全部改为中文诊断：点名参数（iq/144-dibit/24-dibit NID）、点名同步字（FSYNC 0x073AB6）、点名帧长（6144 字节）与制式（DMR 4FSK/DAB Mode I），成功消息同步中文化，data 载荷不变 |
+
+复跑结果：**OTHER 51 → 40**（11 个归位 NEED_HW），OK 162 不变、CRASH 仍为
+0、NEED_RESOURCE 58 → 60（dab 两工具失败诊断含「未找到」归桶）。剩余 40
+个 OTHER 逐条核过：全是中文可操作拒绝（点名参数名/协议名/可选值），
+ASCII 仅余参数标识符（iq_path、freq_mhz、LDPC、TLE 等）——那是模型改调用
+所需的正信息，不是异常泄漏。`tests/test_other_bucket_diagnostics.py`
+19 项锁死本轮全部行为（git 失败分类含 handler 端到端、timed out 映射、
+hdradio/dab/dmr/p25 诊断、分类器归桶）。
+
+
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
 通过**的是：G1/G2 的 m 序列（公开 ICD-GPS-200 多项式，平衡性与循环自相关
