@@ -117,8 +117,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(HelpPage), findsOneWidget);
-    // 返回后外壳仍在。
-    await tester.pageBack();
+    // 返回后外壳仍在（zh locale 下 Material 返回按钮 tooltip 为「返回」，
+    // tester.pageBack 找 tooltip 'Back' 会 miss，直接点 BackButton 控件）。
+    await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(find.byType(HomeShell), findsOneWidget);
   });

@@ -46,7 +46,9 @@ class FirstRunGuide extends StatelessWidget {
                 const Icon(Icons.explore_outlined,
                     size: AppTokens.iconSizeInlineLg, color: AppTokens.accent),
                 const SizedBox(width: AppTokens.spacingM),
-                Text(l10n.guideTitle, style: AppTokens.sectionTitle),
+                Flexible(
+                  child: Text(l10n.guideTitle, style: AppTokens.sectionTitle),
+                ),
               ],
             ),
             const SizedBox(height: AppTokens.spacingM),
@@ -54,14 +56,15 @@ class FirstRunGuide extends StatelessWidget {
             _Bullet(text: l10n.guideStep2),
             _Bullet(text: l10n.guideStep3),
             const SizedBox(height: AppTokens.spacingM),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppTokens.spacingS,
               children: <Widget>[
                 TextButton(
                   onPressed: onDismiss,
                   child: Text(l10n.guideDismiss),
                 ),
-                const SizedBox(width: AppTokens.spacingS),
                 FilledButton(
                   onPressed: onOpenSettings,
                   child: Text(l10n.guideOpenSettings),

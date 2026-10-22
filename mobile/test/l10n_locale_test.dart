@@ -222,7 +222,7 @@ void main() {
 
     // 落盘 + 设置生效 + locale 跟随重建（分区标题已换英文）。
     expect(settings.uiLocaleCode, 'en');
-    expect(kv.data['uiLocale'], 'en');
+    expect(kv.d['uiLocale'], 'en');
     expect(find.text('Language'), findsOneWidget);
     expect(find.text('语言'), findsNothing);
   });
