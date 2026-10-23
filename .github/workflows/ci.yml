@@ -234,6 +234,16 @@ jobs:
         # 用 apt 装的 Qt6（/usr/lib）时无需 LD_LIBRARY_PATH；
         # 若按上面 (推荐) 切到 aqtinstall 固定 6.8.2，须在此 env 追加
         #   LD_LIBRARY_PATH: $HOME/Qt/6.8.2/gcc_64/lib
+        # -j 并行：155 个测试串行跑太久；--timeout 防单个测试挂死拖垮整个 job。
+        # 本机 Windows/MinGW/Qt 6.8.2 实测 155/155 全绿，Linux 若红属环境差异，
+        # 靠下面上传的 LastTest.log 定位，不要凭猜测改代码。
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure -j"$(nproc)" --timeout 300
+
+      - name: 上传 ctest 日志（失败时取证）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp-ctest-log
+          path: cpp/build/Testing/Temporary/LastTest.log

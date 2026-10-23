@@ -66,7 +66,9 @@ LLM ツールは三チャネル（Agent / ControlHub / HTTP）で動作一致・
 ```bash
 cd cpp
 cmake -S . -B build && cmake --build build -j"$(nproc)"
-./build/mbdsdr        # 无 RTL-SDR 时自动切"测试信号（非硬件）"，界面明确标注，不造假
+./build/mbdsdr        # 无硬件且未加载离线捕获文件时，显示诚实"未连接"空状态
+                      # 需要合成调试信号时必须显式 --test-source / MBDSDR_TEST_SOURCE=1
+                      # 设计红线：never invent synthetic IQ by default, no fake hardware is ever shown
 ```
 
 依赖（Qt 6.8 / librtlsdr 2.x / CMake 3.16+）、测试与完整功能清单见 [`cpp/README.md`](cpp/README.md)。
