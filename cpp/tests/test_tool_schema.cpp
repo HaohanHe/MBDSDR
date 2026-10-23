@@ -218,13 +218,32 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"predict_passes",
          QString::fromUtf8(
             "只读：用本地新鲜 TLE 缓存预测指定卫星未来的过境（升/降时刻、最高仰角、起止方位）。"
-            "无新鲜 TLE 时诚实返回空态，不使用陈旧内置数据。")},
+            "无新鲜 TLE 时诚实返回空态，不使用陈旧内置数据。"
+            "前置条件: satellite_name 必填（大小写不敏感子串匹配，可用 list_satellites "
+            "核对缓存里的真实星名）; hours_ahead 可选 1..168（默认 24）; "
+            "station_lat_deg/station_lon_deg 可选（缺省用设置里的本站位置）。"
+            "失败恢复: 卫星名缺失或缓存无匹配/无新鲜 TLE 时 ok:false 并附 source 说明——"
+            "先 list_satellites 确认缓存内容，或更新 TLE 后重试; 绝不把 2006 年内置陈旧"
+            "TLE 当真过境返回。"
+            "副作用: 无（只读纯计算，不碰电台/不改调谐状态）。"
+            "能力边界: 只预测不过境控制; 返回 passes[] 每项 name/catalog_number/rise_time/"
+            "rise_az/set_time/set_az/max_el（UTC）; 实际多普勒补偿用 set_doppler_compensation。")},
         {"calibrate_frequency",
          QString::fromUtf8(
             "只读测量：用一段已知精确频率的参考信号估计本机晶振 ppm 误差。"
-            "不修改任何设置。参考源：handheld=手台在已知频点按 PTT 发射；"
-            "gsm_fcch=GSM FCCH 精确纯音；manual=任意已知精确频率。"
-            "未检测到参考载波时诚实返回 detected=false，不编造 ppm。")},
+            "不持久化、不应用——应用测量值是 apply_frequency_correction（写门控）的职责。"
+            "前置条件: reference_freq_hz 必填（Hz，参考信号的已知精确频率）; "
+            "reference_type 必填枚举 handheld/gsm_fcch/manual（gsm_fcch 的参考频率填 ARFCN "
+            "下行中心频率，内部按 FCCH 音频位置折算）; sample_count 可选（默认 32768，"
+            "4 段独立测量; 下限 4096，低于下限按默认值处理）。"
+            "失败恢复: reference_type 无法识别时按 manual 处理（DC 参考）而非报错——"
+            "需要 FCCH 折算时显式传 gsm_fcch; 采集样本不足（源无数据）时 detected=false "
+            "并给 hint，不编造 ppm; 检测不到参考载波时 hint 为真实状态文本，measured_ppm 缺席。"
+            "副作用: 测量期间会把源调谐到参考频率并抓一段 IQ（采集动作，不落盘不持久化）; "
+            "applied 恒为 false——本工具永不修改 ppm 设置。"
+            "能力边界: 只出测量值（measured_ppm/confidence/delta_hz/spread_ppm/snr_db/"
+            "measurements_used）; 测试/离线源的数据被诚实标注为生成 IQ; 写入校正用 "
+            "apply_frequency_correction。")},
         {"apply_frequency_correction",
          QString::fromUtf8(
             "写入：应用频率校正 ppm（通常取 calibrate_frequency 的 measured_ppm），"
@@ -242,6 +261,7 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "（地址 RIC/功能位/文本）。"
             "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
             "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造消息。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读引擎已解出的快照，不触发解调; 信道选择不改调谐状态。")},
         {"get_m17_calls",
          QString::fromUtf8(
@@ -249,21 +269,24 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "（源/目的呼号、类型、CRC 状态、语音帧诚实标注未解码）。"
             "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
             "失败恢复: 无失败路径——无解码结果时诚实返回空列表。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读引擎已解出的快照，不触发解调; 语音帧未解码时显式标注。")},
         {"get_vor_radial",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）VOR 信道最新径向读数"
             "（radialDeg 方位、质量、莫尔斯识别码、锁定态）。"
             "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
-            "失败恢复: 无失败路径——未锁定时 locked=false，方位不可信并被显式标注，"
-            "不编造方位。"
-            "能力边界: 只读引擎最新读数; 方位仅锁定后可信。")},
+            "失败恢复: 无失败路径——未锁定时 locked=false，radial_deg/quality 为 null"
+            "且方位不可信并被显式标注，不编造方位。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读引擎最新读数; 方位仅锁定后可信; morse_id 恒返回（未识别时为空串）。")},
         {"get_acars_packets",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 ACARS 航空报文快照"
             "（方向 air/ground、label、block id、ack、正文、CRC 结果）。"
             "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
             "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造报文。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读引擎已解出的快照，不触发解调; CRC 失败帧显式标注。")},
         {"get_navtex_messages",
          QString::fromUtf8(
@@ -271,6 +294,7 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "（发台 B1、类型 B2、编号、正文、时间分集/定相状态）。"
             "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
             "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造报文。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读引擎已解出的快照，不触发解调; 分集/定相失败在条目内显式标注。")},
         {"export_iq_segment",
          QString::fromUtf8(
@@ -303,8 +327,11 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：返回网络音频流状态（是否使能、端口、格式）。"
             "无状态时诚实返回 enabled=false，不编造端口。"
             "前置条件: 无。"
-            "能力边界: 当前 Agent 层无网络音频流读数（后端由 ControlHub 提供），"
-            "enabled=false 是诚实空态而非故障——不要据此声称网络音频损坏。")},
+            "失败恢复: 无失败路径——当前 Agent 层无网络音频流读数时 enabled=false 是诚实空态"
+            "而非故障，不要据此声称网络音频损坏; 真实流状态以桌面端/ControlHub 为准。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: Agent 层不持有音频流实例（后端由 ControlHub 提供）; "
+            "配置用 set_network_audio_sink。")},
         {"start_scan_link",
          QString::fromUtf8(
             "写入：启动扫描活动链路（扫描→命中→驻留→解码→录制），目标频率 target_freq_hz。"
@@ -329,7 +356,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_scan_link_status",
          QString::fromUtf8(
             "只读：返回扫描活动链路状态（scanning/dwelling/hit）。"
-            "未运行时诚实返回 scanning=false、无命中，不编造。")},
+            "未运行时诚实返回 scanning=false、无命中，不编造。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——链路未启动时 scanning=false 是诚实空态; "
+            "Agent 层无链路实例时读数为空态，不代表链路故障。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读状态不启动/停止链路; 启动用 start_scan_link，停止用 stop_scan_link; "
+            "链路真实运行态在 ControlHub 侧。")},
         {"set_squelch",
          QString::fromUtf8(
             "写入：设置静噪（enabled 开关、threshold_db 门限、auto 自动链路）。"
@@ -344,7 +377,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_squelch_status",
          QString::fromUtf8(
             "只读：返回静噪状态（enabled/threshold_db/auto/当前是否 open）。"
-            "无实时门限读数时诚实标注，不编造。")},
+            "无实时门限读数时诚实标注，不编造。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——值直接读引擎，门限读数缺失时显式标注而非填 0; "
+            "与预期不符时以本工具读回为准（set_squelch 对类型不符字段是静默跳过的）。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读不改; 设置用 set_squelch; CTCSS/CDCSS 亚音状态另有 "
+            "get_ctcss_status / get_cdcss_status。")},
         {"set_ctcss",
          QString::fromUtf8(
             "写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz、"
@@ -361,7 +400,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、"
             "active 是否真实检测到亚音、gate_audio 是否开启亚音门控静音）。"
-            "无信号/未使能时 active 诚实为 false，不编造。")},
+            "无信号/未使能时 active 诚实为 false，不编造。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——未使能或无信号时 active=false，不要把「没检测到」"
+            "当成设备故障; 频率与开关以本读回为准。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读检测层状态; 设置用 set_ctcss; 数字亚音另有 get_cdcss_status。")},
         {"set_cdcss",
          QString::fromUtf8(
             "写入：设置 CDCSS/DCS 数字亚音（enabled 开关、code 三位八进制 DCS 码 "
@@ -379,7 +423,11 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回 CDCSS/DCS 数字亚音状态（enabled 是否使能、code 调谐 DCS 码、"
             "active 是否真实检测到匹配码、gate_audio 是否开启数字亚音门控静音）。"
-            "无信号/未使能时 active 诚实为 false，不编造。")},
+            "无信号/未使能时 active 诚实为 false，不编造。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——未使能或无信号时 active=false; code 以本读回为准。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读检测层状态; 设置用 set_cdcss; 模拟亚音另有 get_ctcss_status。")},
         // Phase63 step3: FT8 detection-layer tools (must match tool_schema.cpp order).
         {"set_ft8",
          QString::fromUtf8(
@@ -395,7 +443,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回 FT8 检测层状态（enabled 是否使能、active 是否真实检出候选帧、"
             "freq_offset_hz 估计频偏、sync_quality 相关峰/次峰比、candidate_count 候选数）。"
-            "无信号/未使能时 active 诚实为 false，不编造。")},
+            "无信号/未使能时 active 诚实为 false，不编造。"
+            "前置条件: 无（任意时刻可调）; 频率已对准 FT8 子带才有候选。"
+            "失败恢复: 无失败路径——开启后无候选不代表故障，先核对频率/模式; "
+            "本工具只反映检测层，不代表解码结果。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读检测层即时状态; 历史用 get_ft8_history，导出用 export_ft8_results，"
+            "开关检测层用 set_ft8。")},
         {"set_lrpt",
          QString::fromUtf8(
             "写入：开关 LRPT 卫星云图接收层（enabled 布尔，必填）。属于写动作，手动模式下被拦截。"
@@ -410,7 +464,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回 LRPT 接收层状态（enabled 是否使能、sync_locked 是否已锁定位同步、"
             "decoded_frames 已解码行数）。C++ 解码器未移植前 sync_locked 诚实为 false、"
-            "decoded_frames 为 0，不编造。")},
+            "decoded_frames 为 0，不编造。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——sync_locked=false/decoded_frames=0 是 C++ 解调/FEC "
+            "未移植（第④轮）的诚实空态，不代表接收失败，不要据此声称卫星信号中断。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读状态控制层读数，不出图像/帧; 开关用 set_lrpt。")},
         {"set_vna_sweep",
          QString::fromUtf8(
             "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start，"
@@ -428,15 +487,30 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回当前扫频测量数据（frequencies、S11/S21 复数对及派生 VSWR/回波损耗/阻抗）。"
             "区别：本工具返回测量曲线数据；get_vna_status 仅返回连接/校准/扫描参数状态。"
-            "无设备/未取数时各数组诚实为空，不编造曲线。")},
+            "前置条件: 无（任意时刻可调）; 已连接 NanoVNA 且执行过 set_vna_sweep 并等扫描完成。"
+            "失败恢复: 无失败路径——未连接时各数组诚实为空并附排查 note（USB/CDC 接线、"
+            "扫频模式、串口路径）；已连接但无数据时提示先 set_vna_sweep; 不编造曲线。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读当前测量窗口; coax_loss_db_per_m 需先用 vna_tdr_cable 测得电缆长度; "
+            "S11=CH0 反射、S21=CH0→CH1 传输（wiring 字段透传）。")},
         {"get_vna_status",
          QString::fromUtf8(
             "只读：返回 NanoVNA 状态（connected 是否已连接、model 型号、version 固件、cal 已置位校准项、"
-            "当前 sweep 范围与点数）。未连接时 connected 诚实为 false，字段为空。")},
+            "当前 sweep 范围与点数）。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——未连接时 connected 诚实为 false、字段为空，不伪造型号/固件; "
+            "已连接时 live 刷新校准状态后才返回。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读连接/校准/扫描参数状态; 曲线数据用 get_vna_data; "
+            "校准操作是 vna_calibration，设备级杂项是 vna_device。")},
         {"analyze_vna_resonance",
          QString::fromUtf8(
             "只读：对当前扫频 S11 做谐振分析（串联谐振 fr、并联谐振 fp、ESR、-3dB 带宽、有载 Q）。"
-            "无设备/点数不足/span=0 时 valid 诚实为 false，不编造。")},
+            "前置条件: 无（任意时刻可调）; 已连接 NanoVNA 且有扫频数据。"
+            "失败恢复: 无失败路径——无设备/点数不足/span=0 时 valid 诚实为 false，不编造。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只分析当前 S11 窗口; 传输特性用 analyze_vna_filter，等效电路用 "
+            "analyze_vna_equivalent; 取数用 get_vna_data。")},
         {"vna_tdr_cable",
          QString::fromUtf8(
             "写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），"
@@ -452,15 +526,30 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"analyze_vna_filter",
          QString::fromUtf8(
             "只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，"
-            "输出 -3dB 截止边、带宽、通带插损、阻带衰减）。无设备/幅度平坦非滤波器形态时 valid 诚实为 false。")},
+            "输出 -3dB 截止边、带宽、通带插损、阻带衰减）。"
+            "前置条件: 无（任意时刻可调）; 已连接 NanoVNA 且有 S21 扫频数据（CH0→CH1）。"
+            "失败恢复: 无失败路径——无设备/幅度平坦非滤波器形态时 valid 诚实为 false，"
+            "不硬套滤波器模型。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只分析当前 S21 幅度; 反射/谐振用 analyze_vna_resonance; 取数用 get_vna_data。")},
         {"analyze_vna_equivalent",
          QString::fromUtf8(
             "只读：由当前扫频 S11 提取串联 RLC 等效电路（ESR=串联谐振点 |Z|，Q=fr/BW，L/C 由谐振关系推出）。"
-            "无设备/点数不足时 valid 诚实为 false。")},
+            "前置条件: 无（任意时刻可调）; 已连接 NanoVNA 且有扫频数据。"
+            "失败恢复: 无失败路径——无设备/点数不足/谐振点病态时 valid 诚实为 false 并附 note，"
+            "不编造元件值。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只给串联 RLC 等效（不含并联支路）; 匹配网络 L/C 建议用 analyze_vna_match。")},
         {"analyze_vna_touchstone",
          QString::fromUtf8(
             "只读：解析 Touchstone s1p/s2p 文件（content 文本 或 path 路径），返回频率表与 S11/S21 实虚部数据集，"
-            "可复用谐振/滤波器分析。仅 R/I 格式；不可解析时 ok:false 诚实拒绝。")},
+            "可复用谐振/滤波器分析。"
+            "前置条件: content 或 path 至少提供其一（path 须可读）。"
+            "失败恢复: 两者皆空时 valid=false 并附 note; 不可解析时 ok:false 诚实拒绝——"
+            "修正文件格式（R/I 实虚部对）后重试; 仅支持 R/I 格式。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只解析不分析; 解出的数据集可交给 analyze_vna_resonance / analyze_vna_filter "
+            "做离线分析（无需连接设备）。")},
         {"export_vna_snapshot",
          QString::fromUtf8(
             "写入：把当前 NanoVNA 扫频的 Smith 圆图轨迹离屏渲染为 PNG 存到 path。"
@@ -506,10 +595,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回匹配网络的 L/C 建议"
             "（Q、串联/并联臂值）（驻波下不来/做匹配/加感）。"
-            "topology 可选：series_shunt（默认，既有 EFHW/反 L 语义）/xps（shunt 并联后 series 串联）"
-            "/xs（series 串联后 shunt 并联）/xpl（shunt-series-shunt 三电抗 Pi）；"
-            "r_comp 可选，串联 R 补偿（≥0，并入负载电阻）。"
-            "无闭式解的拓扑诚实 valid:false，不伪造数值。")},
+            "前置条件: load_r>0 与 f_hz>0 均必填; load_x 可选（默认 0）; "
+            "topology 可选 series_shunt（默认，既有 EFHW/反 L 语义）/xps/xs/xpl; "
+            "r_comp 可选串联 R 补偿（≥0，并入负载电阻）。"
+            "失败恢复: load_r/f_hz 缺失、非正或 r_comp<0 时 valid=false 并说明; "
+            "无闭式解的拓扑诚实 valid:false，不伪造数值; series_shunt 要求 R_load>50Ω"
+            "（EFHW 高阻馈电点）。"
+            "副作用: 无（纯计算只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只给闭式解建议; 实测阻抗用 get_vna_data 的 z_real/z_imag。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。"
@@ -523,13 +616,17 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：返回噪声抑制器状态（enabled 是否使能）。"
             "读取引擎真实开关，不编造。"
             "前置条件: 无（未连接设备也可读当前开关配置）。"
+            "失败恢复: 无失败路径——值直接读引擎，不编造。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读，不改变任何状态; 开关操作用 set_noise_blanker。")},
         {"list_bookmarks",
          QString::fromUtf8(
             "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。"
             "前置条件: 无。"
-            "能力边界: Agent 层未注入书签管理器时返回空列表+note（诚实空态），"
-            "真实书签数据在 control 层——空列表不等于没有书签，不要虚构条目。")},
+            "失败恢复: 无失败路径——Agent 层未注入书签管理器时返回空列表+note（诚实空态），"
+            "真实书签数据在 control 层——空列表不等于没有书签，不要虚构条目。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只列不增删; 增删分别用 add_bookmark / delete_bookmark，调谐用 tune_to_bookmark。")},
         {"add_bookmark",
          QString::fromUtf8(
             "写入：添加书签（freq_hz/name/mode/bandwidth_hz/group）。"
@@ -562,8 +659,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。"
             "前置条件: 无。"
-            "能力边界: 返回引擎真实 VFO 标记，空列表即当前无 VFO; "
-            "新增/切换/改参分别用 add_vfo / switch_vfo / set_vfo_* 系列。")},
+            "失败恢复: 无失败路径——返回引擎真实 VFO 标记，空列表即当前无 VFO; "
+            "越界下标类错误可用本工具先核对真实数量再重试。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读不改; 新增/切换/改参分别用 add_vfo / switch_vfo / set_vfo_* 系列。")},
         {"add_vfo",
          QString::fromUtf8(
             "写入：新增一个 VFO 信道。属于写动作，手动模式下被拦截。"
@@ -635,6 +734,7 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "前置条件: 无（任意时刻可调；目录路径由引擎配置决定，随结果 dir 字段透传）。"
             "失败恢复: 无失败路径——目录不存在或为空时诚实返回空列表（count=0），"
             "不编造文件。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只列文件不读取内容; 每条含 name/bytes/modified; "
             "删除/导出分别用 delete_recording / export_recording。")},
         {"delete_recording",
@@ -683,7 +783,9 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回频谱当前 FFT 参数真实值（fft_size/window/average）。"
             "前置条件: 无（任意时刻可调）。"
-            "失败恢复: 无失败路径——值直接读引擎，不编造; 与预期不符时以本工具读回为准。"
+            "失败恢复: 无失败路径——值直接读引擎，不编造; 与预期不符时以本工具读回为准"
+            "（set_fft_params 对非 1024/2048/4096 的 fft_size 会静默忽略并回显当前值）。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读不改; 修改 FFT 参数用 set_fft_params。")},
         // Phase55/58: two appended tools (must match tool_schema.cpp on-wire order).
         {"set_doppler_compensation",
@@ -714,13 +816,21 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_capabilities",
          QString::fromUtf8(
             "只读：返回当前源的真实能力（设备名、可调谐频率范围、采样率范围、离散增益档 gains_db）。"
-            "未连接或测试信号源时诚实返回 connected=false、空增益档数组与来源说明 provenance，"
-            "不编造调谐范围或增益表。")},
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——未连接或测试信号源时诚实返回 connected=false、"
+            "空增益档数组与来源说明 provenance，不编造调谐范围或增益表; "
+            "provenance 会明确标注「测试信号源（非硬件）」/「未连接」。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读当前活动源快照; 换源（含 rtl_tcp 网络源）用 connect_network_source。")},
         {"get_recording_state",
          QString::fromUtf8(
             "只读：返回录制状态（recording 是否在手动录制中、recording_path 当前路径、"
             "watch_enabled 值守录制是否使能、recording_dir 录制目录）。"
-            "未录制时诚实返回 recording=false、空路径，不伪造。")},
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——未录制时诚实返回 recording=false、空路径，不伪造。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读引擎状态; 开始/停止录制用 start_recording / stop_recording，"
+            "文件操作用 list_recordings / export_recording / delete_recording。")},
         // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
         {"vna_calibration",
          QString::fromUtf8(
@@ -759,18 +869,26 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回最近 N 条 FT8 解码历史（WSJT-X 风格滚动窗口，按时间倒序），"
             "每条字段 time_ms（墙钟毫秒）/freq_hz（绝对 RF Hz）/demod（解调，如 FT8）/"
-            "text（解码文本 FROM TO EXCHANGE）。无历史时 history=[] 诚实空态，不伪造。"
+            "text（解码文本 FROM TO EXCHANGE）。"
+            "前置条件: 无（limit 可选 1..200，默认 50，越界由参数校验拒绝）。"
+            "失败恢复: 无失败路径——无历史时 history=[] 诚实空态，不伪造。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读滚动窗口（上限 200 条，引擎 kFt8HistoryMax）; "
             "区别于 get_ft8_status（当前帧即时状态）与 export_ft8_results（导出文件）。")},
         // P2 #72: ADS-B aircraft snapshot (read-only).
         {"get_adsb_aircraft",
          QString::fromUtf8(
             "只读：返回最近 N 架已解码 ADS-B 飞机（按最后看到时间倒序），"
             "每条字段 icao（24bit hex）/callsign（呼号）/altitude_ft（高度 ft）/"
-            "lat/lon（经纬度，has_position=false 时 NaN）/groundspeed_kt（地速 kt）/"
+            "lat/lon（经纬度，has_position=false 时 null）/groundspeed_kt（地速 kt）/"
             "heading_deg（航向）/vertical_rate_fpm（垂直速率 fpm，has_velocity 标记）/"
             "df（下行格式）/crc_ok（CRC 通过）/last_seen（墙钟毫秒）。"
-            "1090 MHz 无信号或未调谐时 aircraft=[] 诚实空态，不编造飞机。"
-            "区别于 get_ft8_status / get_ft8_history（解码器结果面）。")},
+            "前置条件: 无（limit 可选 1..50，默认 50，越界由参数校验拒绝）; "
+            "1090 MHz 有信号且已调谐到 ADS-B 载波。"
+            "失败恢复: 无失败路径——1090 MHz 无信号或未调谐时 aircraft=[] 诚实空态，"
+            "不编造飞机; 无位置/速度的字段返回 null 而非 0。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读引擎快照，不触发解调; 区别于 get_ft8_status / get_ft8_history（解码器结果面）。")},
         // P3 #73/#74: local memory family + checkpoint writer control plane.
         {"memory_add",
          QString::fromUtf8(
@@ -791,7 +909,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：全文检索本地记忆库（中英文均可）。query 为自然语言词串，"
             "词元经安全转义后走 FTS5 MATCH；可选 scope/scope_id 过滤；limit 1..100 默认 20。"
-            "无命中返回 hits=[] 空数组并附 note，不编造记忆。")},
+            "前置条件: query 必填且不可为空（空白串会被 trim 后判空并报错）; "
+            "~/.mbdsdr/memory.db 可打开。"
+            "失败恢复: query 为空时明确报错; 库不可用（权限/损坏）时 ok:false 并附真实错误"
+            "与排查提示; 无命中返回 hits=[] 空数组并附 note（附检索词），不编造记忆。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只检索已落库条目——刚 memory_add/update 的条目在后台 writer 落库前"
+            "检索不到（先 memory_flush）; 写用 memory_add/memory_update，删用 memory_delete。")},
         {"memory_update",
          QString::fromUtf8(
             "写入：按 (scope,key) upsert 记忆——存在则覆盖 content/scope_id 与时间戳，"
@@ -810,7 +934,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回后台 checkpoint writer 状态——pending_count/queue_depth（待落库条目数）、"
             "last_flush_ms（最近一次落库完成的墙钟毫秒，0=从未落库）。"
-            "主 agent 只读不写；写路径由 memory_add/update 入队后异步落库。")},
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——writer 未启动过时 last_flush_ms=0 是诚实初值，不编造时间。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读队列 introspection; 主 agent 只读不写; 排空落库用 memory_flush。")},
         {"memory_flush",
          QString::fromUtf8(
             "写入：同步排空记忆队列并落库（memory_store.add/update），重写 ~/.mbdsdr/checkpoint.md "
@@ -845,12 +972,22 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回当前工作台布局模型——splitter_sizes[L,M,R]、splitter_stretch[a,b,c]、"
             "visible_tabs（tab:XXX 列表）、current_tab、hidden_panels、placeholders。"
-            "默认三栏 280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见。")},
+            "默认三栏 280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见。"
+            "前置条件: 无（任意时刻可调）; WorkspaceController 已由 MainWindow 注入。"
+            "失败恢复: 控制器未注入时返回 CONTROLLER_NOT_INJECTED 诚实错误，不返回假装布局。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读当前模型; 改布局用 arrange_workspace / reset_workspace; "
+            "组件数据槽经 component_data 字段读回。")},
         {"list_ui_components",
          QString::fromUtf8(
             "只读：返回编译期白名单组件目录——每项 {id,category,capabilities[],min_size}。"
             "共 23 项：splitter/left_rail/center_spectrum/right_tabs/status_bar + 14 个 tab:XXX "
-            "+ 4 个 center:XXX。agent 编排工作台前先查此目录确认可引用的 id。")},
+            "+ 4 个 center:XXX。agent 编排工作台前先查此目录确认可引用的 id。"
+            "前置条件: 无（任意时刻可调）; WorkspaceController 已由 MainWindow 注入。"
+            "失败恢复: 控制器未注入时返回 CONTROLLER_NOT_INJECTED 诚实错误。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读目录; 未知 id 在 arrange_workspace 里进 placeholders 空态而非报错——"
+            "先用本工具核对再下发布局。")},
         {"reset_workspace",
          QString::fromUtf8(
             "写入：把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），"
@@ -883,20 +1020,29 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "位流经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码"
             "则诚实空态。只读工具。"
             "前置条件: 无（任意时刻可调）。"
-            "失败恢复: 无失败路径; limit 越界诚实 clamp 到 1..50，不报错。"
+            "失败恢复: 无失败路径; limit 越界由参数校验拒绝（不静默 clamp）。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读引擎已解出的快照，不触发解调; 只返回最近 limit 条。")},
         {"get_color_maps",
          QString::fromUtf8(
             "读取：列出瀑布图可用色板——内置 3 个（经典/单色/Viridis，palette 0/1/2）"
-            "与当前配置的外部 JSON 色板文件（如有：path/name/stops）。外部文件缺失或"
-            "已损坏时 external 为 null 并附诚实 note，不编造。只读工具。")},
+            "与当前配置的外部 JSON 色板文件（如有：path/name/stops）。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——外部文件缺失或已损坏时 external 为 null 并附诚实 note，"
+            "不编造; 内置 3 项恒定可用。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读色板目录与当前配置; 加载/持久化外部色板用 set_color_map。")},
         {"list_templates",
          QString::fromUtf8(
             "读取：列出内置确定性任务模板目录——每项 {name, description, params[], steps}。"
             "共 3 个：sweep_find_record（扫频找信号并存档，参数 low_hz/high_hz/step_hz/mode/book_name，6 步）、"
             "target_capture（目标频率捕获录制，参数 target_hz/mode，4 步）、"
             "fixed_freq_record（固定频率录制解码，参数 freq_hz/mode/bandwidth_hz，5 步）。"
-            "模板机制来自内部既有实现，不预置场景/呼号/TLE。只读工具，手动模式不拦截。")},
+            "模板机制来自内部既有实现，不预置场景/呼号/TLE。只读工具，手动模式不拦截。"
+            "前置条件: 无。"
+            "失败恢复: 无失败路径——目录恒定返回 3 项，空目录即内部实现异常（不应出现）。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读目录; 构建并登记计划用 run_template。")},
         {"run_template",
          QString::fromUtf8(
             "写入：按 template_name 构建一个确定性任务计划并登记返回其步骤序列。"
@@ -918,10 +1064,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_task_history",
          QString::fromUtf8(
             "只读：查询 TaskRunner 已完成任务的历史（落于本地记忆库 task_runs 表，跨重启保留）。"
-            "列表模式（默认）按完成时间倒序返回最近 limit 条（1..50 默认 10），"
-            "每条含 id/name/state（succeeded/failed/aborted/gated/partial）/finished_ms/step_count/summary；"
-            "传 id 进入详情模式，额外返回逐步 steps 数组（tool/state/summary/elapsed_ms/error）。"
-            "无记录时 runs=[] 并附诚实 note，不编造历史；id 不存在时 ok:false 并给提示。")},
+            "前置条件: 无（任意时刻可调）; ~/.mbdsdr/memory.db 可打开。"
+            "失败恢复: 库不可用时 ok:false 并附真实错误; 无记录时 runs=[] 并附诚实 note，"
+            "不编造历史; 传 id 查详情但 id 不存在时 ok:false 并提示先用列表模式查真实 id。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 列表模式（默认）按完成时间倒序返回最近 limit 条（1..50 默认 10），"
+            "每条含 id/name/state（succeeded/failed/aborted/gated/partial）/finished_ms/"
+            "step_count/summary，并附 pending_plans/pending_count（run_template 登记的待执行计划快照）; "
+            "传 id 进入详情模式，额外返回逐步 steps 数组（tool/state/summary/elapsed_ms/error）。")},
         // G2: memory_delete (gated write) + memory_stats (read-only).
         {"memory_delete",
          QString::fromUtf8(
@@ -940,13 +1090,21 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：本地记忆库统计——total_entries（条目总数）、by_scope（user/agent/session 分布）、"
             "last_updated_ms（最近写入墙钟毫秒，0=空库）、task_runs（已完成任务数，G1 历史）。"
-            "空库全 0 诚实返回，不编造数据。")},
+            "前置条件: 无（任意时刻可调）; ~/.mbdsdr/memory.db 可打开。"
+            "失败恢复: 库不可用时 ok:false 并附真实错误; 空库全 0 诚实返回，不编造数据。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只读统计; 逐条内容检索用 memory_search; 队列状态另有 checkpoint_status。")},
         // Read-only TLE-cache catalog (prerequisite for predict_passes).
         {"list_satellites",
          QString::fromUtf8(
             "只读：列出本地 TLE 缓存中的卫星目录（名、NORAD 编号、TLE 历元、龄期天数、是否新鲜、标称下行频率）。"
             "这是 predict_passes 的前置——先列出可用卫星再选名预测过境。"
-            "无缓存时诚实返回空态（source=none），不使用陈旧内置演示数据，不编造卫星。")},
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——无缓存时诚实返回空态（source=none），"
+            "不使用陈旧内置演示数据，不编造卫星; 缓存存在但无条目时附 note。"
+            "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
+            "能力边界: 只列缓存目录; 每条含 name/catalog_number/epoch_utc/age_days/fresh/downlink_hz; "
+            "预测过境用 predict_passes。")},
 
 
     };
@@ -1077,20 +1235,20 @@ void TestToolSchema::coreToolsHaveFourDimensions() {
     }
 }
 
-// 四维覆盖率棘轮：phase73 实测 50 个工具四维齐全（phase72 为 18/19）——只允许升，
+// 四维覆盖率棘轮：phase74 起全工具面 90/90 四维齐全（phase73 为 50）——只允许升，
 // 不允许降。抬阈值前先真把描述写实（门禁只查「有没有四维」，属实性靠读码实证，
-// 见 phase67 教训：描述必须对着 handler 逐行核对后再写；phase73 已把 31 个写工具
-// 逐个对照 agent_tools.cpp handler 实证后增强，含三处修正既有描述的事实错误：
-// fft_size 引擎实收仅 1024/2048/4096、export_iq_segment 路径自动生成、
-// export_peaks_csv 固定口径 peaks(10,6.0)）。
+// 见 phase67 教训：描述必须对着 handler 逐行核对后再写；phase74 把剩余 40 个
+// 只读工具逐个对照 handler 实证后补齐，并修正 phase73 台账一处事实错误——
+// predict_passes/calibrate_frequency 均为 write=false 只读工具，非写工具）。
 void TestToolSchema::fourDimensionCoverageRatchet() {
     const QList<ToolSchemaSpec> specs = registeredToolSpecs();
     int full = 0;
     for (const ToolSchemaSpec& s : specs)
         if (dimensionHits(s.description) == 4) ++full;
     qInfo("四维齐全工具数: %d / %d", full, int(specs.size()));
-    QVERIFY2(full >= 50,
-             qPrintable(QStringLiteral("四维覆盖率回退: %1 < 50").arg(full)));
+    QVERIFY2(full >= int(specs.size()),
+             qPrintable(QStringLiteral("四维覆盖率回退: %1 < %2")
+                            .arg(full).arg(int(specs.size()))));
 }
 
 QTEST_MAIN(TestToolSchema)

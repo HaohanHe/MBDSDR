@@ -396,10 +396,29 @@ sampleCount 按 [1024, 16Mi] 钳位、tune_hz>=0 会先改中心频率（硬件
 `--continue-on-collection-errors` 1521 passed，25 个失败全部根因
 沙箱无 PySide6（24 个直接 ModuleNotFoundError + test_module_system
 的 importlib 动态加载失败，后者经 stash 干净树复跑确认既有、与本轮
-零关联——本轮仅改两个 C++ 文件）。剩余欠账：**27 个读工具 <2 维**
-（get_vna_data/get_ft8_status/memory_search/get_task_history 等），
-下一轮可按同法增强并抬棘轮；另有 predict_passes/calibrate_frequency
-两个写工具 0/4 维待补。
+零关联——本轮仅改两个 C++ 文件）。（台账勘误：该段原记「predict_passes/
+calibrate_frequency 两个写工具 0/4 维待补」有误——两者 spec 均
+write=false，handler 注释与实现同为只读语义，实际欠账是 **40 个只读
+工具 <4 维**，已于 phase74 全部销账。）
+
+**40 个只读工具四维增强，全工具面 90/90（phase74 已销账）**：phase73
+后剩余 40 个非四维工具经逐个读码实证**全部是只读语义**（含台账误记的
+predict_passes/calibrate_frequency——其 handler 明确「read-only,
+does NOT touch the radio」/「does NOT persist」，applied 恒 false）。
+按同体裁补齐四维，只读工具的「副作用」维如实写「无（只读，不改写任何
+硬件/设置/文件状态）」。读码抓到并写入描述的实证点：calibrate_frequency
+对无法识别的 reference_type 静默回落 manual（DC 参考）且采集期间会调谐
+源抓 IQ（applied 仍恒 false）；predict_passes 的 hours_ahead <1 由参数
+校验层拒绝、无新鲜 TLE 时绝不用 2006 年内置陈旧数据；get_vor_radial
+未锁定时 radial_deg/quality 为 null 不编造方位；get_adsb_aircraft 的
+has_position/has_velocity=false 时位置/速度字段为 null 而非 0；
+memory_search 只检索已落库条目（异步 writer 未 flush 前检索不到刚入
+队的记忆）；get_capabilities 对测试信号源明确标注 provenance。金样 40
+个条目同样脚本程序化同步；四维棘轮改为 full >= specs.size()（全量）。
+验证：make -j2 全量建成；ctest 155/155 过（tool_schema 12 槽全过，
+棘轮实测 90/90；device_ui 一次 -j4 重负载失败经隔离复跑 100% 过，
+系 phase72 已实证的 device-pull 时序 flaky）。剩余欠账：工具描述面
+暂无维度欠账；后续新工具入册时按本门禁天然要求四维。
 
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
