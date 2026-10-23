@@ -227,8 +227,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "未检测到参考载波时诚实返回 detected=false，不编造 ppm。")},
         {"apply_frequency_correction",
          QString::fromUtf8(
-            "写入并应用频率校正 ppm（通常取 calibrate_frequency 的 measured_ppm）。"
-            "会保存到设置并下发给接收机；属于写动作，手动模式下被拦截。")},
+            "写入：应用频率校正 ppm（通常取 calibrate_frequency 的 measured_ppm），"
+            "保存到设置并下发给接收机。属于写动作，手动模式下被拦截。"
+            "前置条件: ppm 必须显式提供且落在参数边界内——执行层对缺失 ppm 按 0 处理"
+            "（会把你已有的校正清零），所以绝不省略; reference_freq_hz 可选，仅记录出处。"
+            "失败恢复: ppm 缺失或越界时参数校验层明确拒绝，补合法数值后重试; "
+            "想确认校正效果请用 calibrate_frequency 重新实测，不要把本工具的预测值当实测。"
+            "副作用: 立即写 QSettings 持久化 ppm 并改变接收机频综校正（硬件状态）。"
+            "能力边界: 只保存并下发 ppm，返回 previous_ppm/applied_ppm 前后对比与 "
+            "predicted_residual_hz=0.0 的设计预测（非实测残差）；读回当前配置用 get_status。")},
         {"get_pocsag_messages",
          QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 POCSAG 寻呼消息快照"
@@ -267,17 +274,30 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "能力边界: 只读引擎已解出的快照，不触发解调; 分集/定相失败在条目内显式标注。")},
         {"export_iq_segment",
          QString::fromUtf8(
-            "写入（一次性）：立即抓取一段当前中心频率的基带 IQ 复样本并导出为 "
-            "cf32_le SigMF 文件（.sigmf-data + .sigmf-meta），返回真实路径与样本数。"
-            "区别于 start_recording 的连续录制：这是按需导出一个有界窗口后即返回。"
-            "无 IQ 数据时诚实报错，不生成空文件。属于写动作，手动模式下被拦截。")},
+            "写入（一次性）：立即抓取一段基带 IQ 复样本，导出为 cf32_le SigMF 文件"
+            "（.sigmf-data + .sigmf-meta）后即返回。区别于 start_recording 的连续录制："
+            "这是按需导出有界窗口。属于写动作，手动模式下被拦截。"
+            "前置条件: 接收机已有可用的 IQ 数据流（源在运行、有硬件或已开离线文件）；"
+            "sample_count 缺省 65536，引擎按 [1024, 16777216] 诚实钳位; "
+            "tune_hz 缺省/负值=保持当前中心频率。"
+            "失败恢复: 无 IQ 数据或源 EOF 时诚实 ok:false 并说明原因，绝不生成空文件; "
+            "tune_hz 非数字时明确拒绝。"
+            "副作用: 在录制目录写 SigMF 文件（路径自动生成 export_<时间戳>_<中心Hz>，"
+            "按秒级消歧不会覆盖既有文件）; tune_hz>=0 时会先把中心频率调过去（硬件状态）; "
+            "不影响进行中的连续录制。"
+            "能力边界: 只导出不连续录制; 源提前 EOF 时返回真实样本数（可能少于请求值）; "
+            "文件位置见返回 path 字段。")},
         // Phase26: 21 new tools, verbatim description pairs (must match
         // tool_schema.cpp registeredToolSpecs() exactly, in on-wire order).
         {"set_network_audio_sink",
          QString::fromUtf8(
-            "写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。"
-            "enable 开关、port 端口、format 协议；可选 host 与 stereo。"
-            "属于写动作，手动模式下被拦截。")},
+            "写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。属于写动作，手动模式下被拦截。"
+            "前置条件: enable（布尔）与 port（数字，1..65535）均必填; format 可选 udp/tcp"
+            "（默认 udp）、host 可选（默认 127.0.0.1）、stereo 可选（默认 false 单声道）。"
+            "失败恢复: enable/port 缺失或类型不符时明确报错（不静默取默认）——补齐后重试; "
+            "指令经 ControlHub 路由执行，链路真实状态用 get_network_audio_status 读取。"
+            "副作用: 改变网络音频流的目标端口/协议/单双声道配置（桌面端持续生效）。"
+            "能力边界: 只下发配置不直接推流; Agent 层不持有音频流实例，回显值经控制层确认。")},
         {"get_network_audio_status",
          QString::fromUtf8(
             "只读：返回网络音频流状态（是否使能、端口、格式）。"
@@ -288,7 +308,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"start_scan_link",
          QString::fromUtf8(
             "写入：启动扫描活动链路（扫描→命中→驻留→解码→录制），目标频率 target_freq_hz。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: target_freq_hz 必填且为数字（Hz），范围由参数边界强制; "
+            "接收机有可用数据流（链路要真实扫描）。"
+            "失败恢复: 参数缺失或非数字时明确报错——补齐合法频率后重试; "
+            "指令经 ControlHub 路由，链路已在运行时重复启动由控制层语义处理。"
+            "副作用: 控制层开始扫描→命中→驻留→解码→录制活动链路（持续消耗接收资源，"
+            "可能自动录制到磁盘）。"
+            "能力边界: 只发启动指令; 链路真实运行态在 ControlHub 侧，用 get_scan_link_status "
+            "读取，停止用 stop_scan_link。")},
         {"stop_scan_link",
          QString::fromUtf8(
             "写入：停止扫描活动链路。属于写动作，手动模式下被拦截。"
@@ -305,7 +333,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_squelch",
          QString::fromUtf8(
             "写入：设置静噪（enabled 开关、threshold_db 门限、auto 自动链路）。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: 三个字段全部可选，至少提供其一才有意义（全缺则不下发任何变更）; "
+            "threshold_db 为 dB 门限数值。"
+            "失败恢复: 类型不符的字段被静默跳过而非报错（如 threshold_db 传了字符串）——"
+            "发现设置未生效时用 get_squelch_status 读回真实值核对，不要反复重试同一入参。"
+            "副作用: 立即改变引擎静噪状态，音频输出（静音/放音）随之变化。"
+            "能力边界: 只改静噪参数，不影响 CTCSS/CDCSS 亚音门控（分别用 set_ctcss/set_cdcss）; "
+            "读回用 get_squelch_status。")},
         {"get_squelch_status",
          QString::fromUtf8(
             "只读：返回静噪状态（enabled/threshold_db/auto/当前是否 open）。"
@@ -313,8 +348,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_ctcss",
          QString::fromUtf8(
             "写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz、"
-            "可选 gate_audio 亚音门控静音开关）。"
-            "属于写动作，手动模式下被拦截；越界频率诚实拒绝，不静默钳位。")},
+            "可选 gate_audio 亚音门控静音开关）。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔; frequency_hz 可选（省略沿用当前值/默认 88.5 Hz），"
+            "取值须落在 [67.0, 254.1]; gate_audio 可选布尔。"
+            "失败恢复: enabled 缺失或非布尔时明确报错（绝不静默切换）; 频率越界时诚实拒绝"
+            "（不静默钳位）——改合法频率后重试。"
+            "副作用: 立即改变 CTCSS 检测状态; gate_audio 开启后仅扬声器被门控（静音至匹配），"
+            "录制不受影响。"
+            "能力边界: 只设亚音参数; 数字亚音用 set_cdcss; 读回（含 active 是否真实检出）"
+            "用 get_ctcss_status。")},
         {"get_ctcss_status",
          QString::fromUtf8(
             "只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、"
@@ -324,7 +366,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：设置 CDCSS/DCS 数字亚音（enabled 开关、code 三位八进制 DCS 码 "
             "\"023\"–\"754\"、可选 gate_audio 数字亚音门控静音开关）。"
-            "属于写动作，手动模式下被拦截；非表内 DCS 码诚实拒绝，不静默接受。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔; code 可选三位八进制字符串（省略沿用当前码），"
+            "且必须落在公开 104 码表内（dsp/cdcss.cpp）; gate_audio 可选布尔。"
+            "失败恢复: enabled 缺失或非布尔时明确报错; code 不在码表内时诚实拒绝"
+            "（不静默调到非法地址）——按码表取值重试。"
+            "副作用: 立即改变 CDCSS 检测状态; gate_audio 开启后仅扬声器被门控（静音至匹配码），"
+            "录制不受影响。"
+            "能力边界: 只设数字亚音参数; 模拟亚音用 set_ctcss; 读回（含 active 是否真实检出）"
+            "用 get_cdcss_status。")},
         {"get_cdcss_status",
          QString::fromUtf8(
             "只读：返回 CDCSS/DCS 数字亚音状态（enabled 是否使能、code 调谐 DCS 码、"
@@ -333,9 +383,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         // Phase63 step3: FT8 detection-layer tools (must match tool_schema.cpp order).
         {"set_ft8",
          QString::fromUtf8(
-            "写入：开关 FT8 数字模式检测层（enabled 布尔，必填）。属于写动作，"
-            "手动模式下被拦截。本轮为检测层（Costas 同步 + 候选帧统计），"
-            "C++ BP 解码留后续，不编造解码消息。")},
+            "写入：开关 FT8 数字模式检测层（enabled 布尔，必填）。属于写动作，手动模式下被拦截。"
+            "本轮为检测层（Costas 同步 + 候选帧统计），C++ BP 解码留后续，不编造解码消息。"
+            "前置条件: enabled 必须提供且为布尔值（缺失/非布尔明确报错，绝不静默切换）。"
+            "失败恢复: 入参类型不符时补齐布尔值重试; 开启后无候选帧不代表故障，"
+            "先确认频率与模式已对准 FT8 子带。"
+            "副作用: 立即改变引擎 FT8 检测层状态（持续占用解调资源）。"
+            "能力边界: 只开关检测层，不出解码消息; 检测层读数用 get_ft8_status，"
+            "解码历史用 get_ft8_history，导出用 export_ft8_results。")},
         {"get_ft8_status",
          QString::fromUtf8(
             "只读：返回 FT8 检测层状态（enabled 是否使能、active 是否真实检出候选帧、"
@@ -343,9 +398,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "无信号/未使能时 active 诚实为 false，不编造。")},
         {"set_lrpt",
          QString::fromUtf8(
-            "写入：开关 LRPT 卫星云图接收层（enabled 布尔，必填）。属于写动作，"
-            "手动模式下被拦截。本轮为状态控制层（C++ 解调/FEC 移植留后续第④轮），"
-            "不编造图像或帧。")},
+            "写入：开关 LRPT 卫星云图接收层（enabled 布尔，必填）。属于写动作，手动模式下被拦截。"
+            "本轮为状态控制层（C++ 解调/FEC 移植留后续第④轮），不编造图像或帧。"
+            "前置条件: enabled 必须提供且为布尔值（缺失/非布尔明确报错）; 卫星在轨且频率对准。"
+            "失败恢复: 入参类型不符时补齐布尔值重试; 开启后 sync_locked 仍为 false 是"
+            "C++ 解码器未移植的诚实空态，不代表接收失败。"
+            "副作用: 立即改变引擎 LRPT 接收层开关状态。"
+            "能力边界: 只置位状态标志，不出图像/帧数据; 读回用 get_lrpt_status"
+            "（sync_locked/decoded_frames 为真实引擎值）。")},
         {"get_lrpt_status",
          QString::fromUtf8(
             "只读：返回 LRPT 接收层状态（enabled 是否使能、sync_locked 是否已锁定位同步、"
@@ -355,8 +415,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start，"
             "points 为正整数）。宽扫建议 ±5~10%，窄扫 ±1%（经验范围）。"
-            "属于写动作，手动模式下被拦截。无设备时参数仍校验，但不下发（applied=false），"
-            "不伪造连接。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: 三个参数都必须提供且为数字; points 为正整数; stop_hz 大于 start_hz。"
+            "失败恢复: 任一缺失/非数字、stop<=start 或 points 非正时明确 ok:false——"
+            "改正后重试; 无设备时参数仍被校验，合法但不下发（applied=false），"
+            "不伪造连接——先接好设备再调。"
+            "副作用: 设备已连接时立即向 NanoVNA 下发新扫频参数（硬件状态），"
+            "当前测量数据随之失效，需重扫后再读。"
+            "能力边界: 只编程扫频参数，不读数据（用 get_vna_data）; 连接/校准状态用 "
+            "get_vna_status。")},
         {"get_vna_data",
          QString::fromUtf8(
             "只读：返回当前扫频测量数据（frequencies、S11/S21 复数对及派生 VSWR/回波损耗/阻抗）。"
@@ -374,7 +441,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），"
             "返回首反射峰距离与电缆长度（馈线好坏/电缆故障/进水/接头虚接）。"
-            "属于写动作，手动模式下被拦截。无设备/无峰时 valid 诚实为 false。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: velocity_factor 必填数字且落在 (0,1]（同轴常用 0.66）; "
+            "NanoVNA 已连接且已完成一次扫频（先 set_vna_sweep）。"
+            "失败恢复: vf 缺失/非数字或越界时明确 ok:false——补合法值重试; "
+            "无设备或未检出反射峰时 valid=false 诚实返回，不编造距离。"
+            "副作用: 只读当前扫频缓存做变换，不向设备发新命令（门禁仍按写动作把守）。"
+            "能力边界: 只用当前 S11 数据; 实测 S 参数曲线用 get_vna_data; "
+            "coax_loss_db_per_m 需先用本工具测得电缆长度。")},
         {"analyze_vna_filter",
          QString::fromUtf8(
             "只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，"
@@ -389,22 +463,45 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "可复用谐振/滤波器分析。仅 R/I 格式；不可解析时 ok:false 诚实拒绝。")},
         {"export_vna_snapshot",
          QString::fromUtf8(
-            "写入：把当前 NanoVNA 扫频（Smith 轨迹）离屏渲染为 PNG 存到 path。属于写动作，手动模式下被拦截。"
-            "未连接/无数据时 ok:false 诚实拒绝。")},
+            "写入：把当前 NanoVNA 扫频的 Smith 圆图轨迹离屏渲染为 PNG 存到 path。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: path 必填（PNG 输出完整路径）; NanoVNA 已连接且已有扫频数据"
+            "（先 set_vna_sweep 并等待扫描完成）。"
+            "失败恢复: path 缺失、未连接或无扫频数据时诚实 ok:false——补齐前置条件后重试; "
+            "路径不可写时 ok:false 并提示。"
+            "副作用: 在 path 写一个 PNG 文件（覆盖同名文件）; 不影响进行中的测量。"
+            "能力边界: 只渲染 Smith 轨迹; 频谱/峰值另有 export_spectrum_snapshot / "
+            "export_peaks_csv; 原始数据用 get_vna_data。")},
         {"export_spectrum_snapshot",
          QString::fromUtf8(
-            "写入：把当前 SDR 频谱面板（频率轴 + 中心频点标记）离屏渲染为 PNG 存到 path。属于写动作，手动模式下被拦截。"
-            "未初始化/路径不可写时 ok:false 诚实拒绝。")},
+            "写入：把当前 SDR 频谱面板（频率轴 + 中心频点标记 + 峰值标注）离屏渲染为 PNG "
+            "存到 path。属于写动作，手动模式下被拦截。"
+            "前置条件: path 必填（PNG 输出完整路径）; 引擎已初始化（FFT 已运行）。"
+            "失败恢复: path 缺失时诚实 ok:false; 路径不可写时 ok:false 并提示——换可写路径重试; "
+            "FFT 为空时画平坦基线（诚实空态）而非伪造曲线。"
+            "副作用: 在 path 写一个 PNG 文件（覆盖同名文件）; 不改动调谐/解调状态。"
+            "能力边界: 只截当前频谱画面; 原始 FFT 数据用 get_spectrum_status; "
+            "数值化峰值导出用 export_peaks_csv。")},
         {"export_peaks_csv",
          QString::fromUtf8(
-            "写入：把当前频谱峰值列表（freq_hz,db）按强度降序写成 CSV 存到 path。属于写动作，手动模式下被拦截。"
-            "无峰值/路径不可写时 ok:false 诚实拒绝。")},
+            "写入：把当前频谱峰值列表（freq_hz,db，按强度降序）写成 CSV 存到 path。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: path 必填（CSV 输出完整路径）; 引擎有运行中的 FFT 数据。"
+            "失败恢复: path 缺失或不可写时诚实 ok:false——换可写路径重试; "
+            "平坦/空 FFT 时 ok:true 但 rows=0 仅写表头（诚实空态，不是错误，不要重试）。"
+            "副作用: 在 path 写 CSV 文件（覆盖同名文件）; 不改动调谐/解调状态。"
+            "能力边界: 固定导出前 10 个峰值、门限 6 dB（引擎 peaks(10,6.0) 口径）; "
+            "整段频谱图用 export_spectrum_snapshot。")},
         {"export_ft8_results",
          QString::fromUtf8(
-            "写入：把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。属于写动作，手动模式下被拦截。"
-            "默认（all_history=false）导出引擎候选列表（freq_hz,crc_ok,costas_score,rejected,reject_reason,iters）；"
-            "all_history=true 时导出解码历史全量（表头 time_ms,freq_hz,demod,text），无历史 rows=0 诚实空态。"
-            "无解码结果时 rows=0 诚实空态，不伪造呼号/经纬度。")},
+            "写入：把当前 FT8 解码结果导出为 CSV 文件存到 path。属于写动作，手动模式下被拦截。"
+            "前置条件: path 必填（输出文件完整路径）; all_history 可选布尔（默认 false）。"
+            "失败恢复: path 缺失或不可写时诚实 ok:false——换可写路径重试; "
+            "无结果时 ok:true 但 rows=0 仅写表头（诚实空态，不伪造呼号/网格）。"
+            "副作用: 在 path 写文件（覆盖同名文件）; 不改动解码器状态。"
+            "能力边界: all_history=false 导出候选列表（freq_hz,crc_ok,costas_score,rejected,"
+            "reject_reason,iters）；true 导出解码历史全量（time_ms,freq_hz,demod,text）; "
+            "在线读取分别用 get_ft8_status / get_ft8_history。")},
         {"analyze_vna_match",
          QString::fromUtf8(
             "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回匹配网络的 L/C 建议"
@@ -435,7 +532,16 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "真实书签数据在 control 层——空列表不等于没有书签，不要虚构条目。")},
         {"add_bookmark",
          QString::fromUtf8(
-            "写入：添加书签（freq_hz/name/mode/bandwidth_hz/group）。属于写动作，手动模式下被拦截。")},
+            "写入：添加书签（freq_hz/name/mode/bandwidth_hz/group）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: freq_hz 必填且为正的有限数（Hz）; name/mode/bandwidth_hz/group 全可选"
+            "（缺省时对应字段留空）; 书签管理器已由桌面端注入。"
+            "失败恢复: freq_hz 缺失/非数字或 <=0 时诚实拒绝（书签不入册）——改正后重试; "
+            "管理器未注入时返回明确错误而非假装写入。"
+            "副作用: 真写入书签存储并按 (group, freq) 自动排序落位（无撤销接口），"
+            "返回 index/count 真实落位。"
+            "能力边界: 只增书签不调谐; 用书签频率调谐是 tune_to_bookmark; "
+            "列书签用 list_bookmarks。")},
         {"tune_to_bookmark",
          QString::fromUtf8(
             "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。"
@@ -484,7 +590,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：开启/关闭某 VFO 的后台并行解调（index/enabled）。开启后即使该 VFO "
             "未被选中，仍会在每个数据块被解调，便于并行监听/录制；关闭则停止以节省 CPU。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: index（list_vfos 返回的标记序号）与 enabled 均必填; "
+            "enabled 接受布尔或数字（非 0 即真）。"
+            "失败恢复: index 缺失/非数字、enabled 缺失或类型不符时明确报错; "
+            "index 越界时错误附当前 VFO 总数——用 list_vfos 重新取序号后重试。"
+            "副作用: 立即改变该 VFO 的后台解调使能（真实 CPU 开销随之增减）。"
+            "能力边界: 只改并行监听开关; 频率/模式/带宽用 set_vfo_* 系列; "
+            "当前各 VFO 状态用 list_vfos 读回。")},
         // Phase61: VFO fine-grained edit tools (must match tool_schema.cpp order).
         {"set_vfo_frequency",
          QString::fromUtf8(
@@ -547,12 +660,25 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：设置频谱 FFT 参数（fft_size/window/average）。"
             "window/average 使用字符串枚举（Hann/Flattop/Blackman、Off/Slow/Fast）。"
             "属于写动作，手动模式下被拦截。"
+            "前置条件: fft_size 必填数字; window/average 可选（省略保持当前值）; "
+            "LLM/MCP 校验路径只接受字符串枚举。"
+            "失败恢复: fft_size 缺失或非数字时明确报错; 注意引擎实收只有 1024/2048/4096 三档——"
+            "传入其他值（如 8192）会被静默忽略且回显当前值而非请求值，发现未生效时以 "
+            "get_spectrum_status 读回为准; window/average 传无法识别的字符串时回落 Hann/Off。"
+            "副作用: 立即改变 FFT 点数/窗函数/平均模式，频谱与瀑布显示随之变化。"
             "能力边界: 模型侧只接受字符串枚举——原始整数 0/1/2 是 ControlHub/HTTP "
-            "内部通道键，经 LLM/MCP 校验路径传入会被类型校验拒绝。")},
+            "内部通道键，经 LLM/MCP 校验路径传入会被类型校验拒绝; 读回用 get_spectrum_status。")},
         {"set_color_map",
          QString::fromUtf8(
-            "写入：保存瀑布图色板文件路径到设置（headless 仅持久化偏好，重绘由 UI 持有）。"
-            "属于写动作，手动模式下被拦截。")},
+            "写入：加载并校验瀑布图色板 JSON 文件，把路径持久化到设置"
+            "（view/wfColormapFile，UI 启动时重应用同一文件）。属于写动作，手动模式下被拦截。"
+            "前置条件: file_path 必填且指向可读的 JSON 色板文件。"
+            "失败恢复: 路径缺失/不可读/解析失败时诚实 ok:false 并说明原因（name/stops 无效"
+            "不落盘）——修正文件后重试; 可用 get_color_maps 先看当前配置与内置色板。"
+            "副作用: 写 QSettings 持久化色板文件路径（headless 仅持久化偏好，"
+            "立即重绘由桌面端 UI 持有）。"
+            "能力边界: 只加载外部文件色板; 内置 3 个色板（经典/单色/Viridis）经 get_color_maps "
+            "读取，不经本工具切换。")},
         {"get_spectrum_status",
          QString::fromUtf8(
             "只读：返回频谱当前 FFT 参数真实值（fft_size/window/average）。"
@@ -564,12 +690,25 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：开关过境实时多普勒自动补偿（1Hz TLE 距离率重调 VFO）。"
             "需已设置本站位置并捕获一个过境，否则保持关闭（诚实拒绝）。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: enable 布尔必填; 桌面端 UI 控制面存在（headless/测试环境不可用，"
+            "返回 available=false）; 已配置本站位置且 TLE 缓存里有目标卫星。"
+            "失败恢复: 无 UI 控制面或未设本站/未捕获过境时诚实 ok:false 并说明原因——"
+            "先在桌面端天空页完成设置; enable 缺省按 false 处理（保持关闭）。"
+            "副作用: 开启后过境期间按 TLE 距离率持续重调 VFO 频率（硬件状态持续变化）。"
+            "能力边界: 只置补偿开关; 过境预测用 predict_passes，卫星目录用 list_satellites。")},
         {"connect_network_source",
          QString::fromUtf8(
             "写入：连接 rtl_tcp 网络接收机（host/port）。"
             "真实 TCP 握手+RTL0 设备头；失败返回真实 socket 原因并回到空态，不伪造 IQ。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: host 必填（服务端主机/IP）; port 可选，缺省 1234; "
+            "对端已运行 rtl_tcp 且网络可达。"
+            "失败恢复: host 缺失时明确报错; 握手/协议失败时 ok:false 并附真实 socket 原因，"
+            "回到空态源（无假 IQ）——核对地址端口与服务端状态后重试。"
+            "副作用: 成功时切换当前 IQ 源到该 rtl_tcp 服务（调谐/录制目标随之改变）; "
+            "失败时保持既有源不变。"
+            "能力边界: 只发起连接; 连接后的源能力（调谐范围/增益档）用 get_capabilities 读取。")},
         // Read-only capability/recording-state snapshot tools (must match
         // tool_schema.cpp on-wire order; appended last).
         {"get_capabilities",
@@ -590,7 +729,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "reset/open/short/load/isolation/thru/done=校准写步骤；"
             "save/load=保存/加载校准集（需 slot 1..4）；scan/pause/resume=扫频控制。"
             "写动作走手动 gate、人在环逐步确认。接标准件到 CH0 / CH0-CH1 THRU 是仪器协议客观事实，"
-            "编排权在调用者（模型），非固定剧本。未连接 ok:false 并给排查清单。")},
+            "编排权在调用者（模型），非固定剧本。未连接 ok:false 并给排查清单。"
+            "前置条件: step 必填且属 13 个合法值之一; save/load 另需 slot（1..4 整数）; "
+            "NanoVNA 已连接。"
+            "失败恢复: step 未知或缺 slot 时明确 ok:false 并列合法值——改正后重试; "
+            "未连接时给接线/串口排查清单，不伪造连接; 每步写完真实读回校准位（steps）。"
+            "副作用: 写步骤真正改变设备校准状态（reset 清空、save 落槽位）; "
+            "scan/pause/resume 控制扫频运行。"
+            "能力边界: 单工具状态机不预置剧本; 校准质量解读（coverage/置信度）随返回 "
+            "cal_interpretation 字段给出; 连接/型号信息用 get_vna_status。")},
         // P1 #70: device-level misc facade state machine (write, gated).
         {"vna_device",
          QString::fromUtf8(
@@ -599,7 +746,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "vbat=读电池电压；freq_offset 无 value=读本振频偏(Hz)、有 value=写频偏；"
             "edelay=写电延迟(ps)；averaging=写平均次数(1..64)。"
             "写动作走手动 gate、人在环确认。读动作客观返回当前值；编排权在调用者，非固定剧本。"
-            "未连接 ok:false 并给排查清单。")},
+            "未连接 ok:false 并给排查清单。"
+            "前置条件: action 必填且属 5 个合法值之一; 写动作（freq_offset/edelay/averaging）"
+            "另需 value 数字（averaging 限定 1..64）; NanoVNA 已连接。"
+            "失败恢复: action 未知或缺 value 时明确 ok:false——补齐后重试; "
+            "averaging 越界 1..64 明确拒绝; 未连接时给接线/串口排查清单。"
+            "副作用: 写动作真正改变设备硬件设置（频偏/电延迟/平均次数）。"
+            "能力边界: status 中 edelay/averaging/freq_offset 三项本会话未读回时诚实给 0+note"
+            "（0 不代表设备真实设置）; 扫频参数用 set_vna_sweep，数据曲线用 get_vna_data。")},
         // P2 #71: FT8 decoded-message rolling history (read-only).
         {"get_ft8_history",
          QString::fromUtf8(
@@ -624,7 +778,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "实际落库由后台 checkpoint writer 异步执行（返回 queued=true，不阻塞主 agent）。"
             "scope 必填枚举 user（用户事实/偏好）/agent（模型经验/踩坑）/session（本次会话现场）；"
             "scope_id 为作用域内实例标识（如台站号、过境 id）；key 在 scope 内唯一。"
-            "submit 不做 DB 级查重；立即落库用 memory_flush。属于写动作，手动模式下被拦截。")},
+            "submit 不做 DB 级查重；立即落库用 memory_flush。属于写动作，手动模式下被拦截。"
+            "前置条件: scope/scope_id/key/content 四项全部必填（任一缺失明确报错）; "
+            "~/.mbdsdr 目录可写。"
+            "失败恢复: 缺参时按项点名报错——补齐后重试; 提交失败（writer 异常）时返回 "
+            "ok:false 与真实错误; 队列积压数量见返回 pending_count。"
+            "副作用: 记忆进入后台写队列（异步落库，不保证立即可检索——需要立即生效先 "
+            "memory_flush 再用 memory_search 验证）。"
+            "能力边界: 只入队不查重（重复 (scope,key) 以 memory_update 的 upsert 语义为准）; "
+            "读用 memory_search，删用 memory_delete，统计用 memory_stats。")},
         {"memory_search",
          QString::fromUtf8(
             "只读：全文检索本地记忆库（中英文均可）。query 为自然语言词串，"
@@ -635,7 +797,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：按 (scope,key) upsert 记忆——存在则覆盖 content/scope_id 与时间戳，"
             "不存在则等价于新增；经后台 checkpoint writer 异步落库（返回 queued=true）。"
             "scope 必填枚举 user/agent/session。立即落库用 memory_flush。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: scope/scope_id/key/content 四项全部必填（任一缺失按项点名报错）; "
+            "~/.mbdsdr 目录可写。"
+            "失败恢复: 缺参时按项点名——补齐后重试; 提交失败时返回 ok:false 与真实错误; "
+            "落库后检索不到先 memory_flush 再 memory_search 验证。"
+            "副作用: 记忆 upsert 进入后台写队列（异步落库）; 同 (scope,key) 旧值被覆盖，"
+            "不可恢复。"
+            "能力边界: 只改记忆内容不碰任务历史; 新增语义用 memory_add，删除用 memory_delete，"
+            "统计用 memory_stats。")},
         {"checkpoint_status",
          QString::fromUtf8(
             "只读：返回后台 checkpoint writer 状态——pending_count/queue_depth（待落库条目数）、"
@@ -645,7 +815,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：同步排空记忆队列并落库（memory_store.add/update），重写 ~/.mbdsdr/checkpoint.md "
             "人类可读快照（时间戳+本次落库条数+key 列表），返回 written 实际落库条数。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: 无参数（任意时刻可调）; ~/.mbdsdr 目录可写; 队列里有待落库条目时才有意义。"
+            "失败恢复: 部分条目落库失败时 ok:false 并附已处理条数与真实错误——修好磁盘/权限"
+            "后重试; 队列为空时 written=0 正常返回（不是错误）。"
+            "副作用: 真正写 SQLite 与 checkpoint.md 快照文件; 落库后 memory_search 立即可检索。"
+            "能力边界: 只 flush 不删除; 队列深度用 checkpoint_status 读取; "
+            "memory_add/update 的异步语义靠本工具兜底立即落库。")},
         // 第 10 域「工作台编排」(AIGUI P0-b): descriptions pinned verbatim.
         {"arrange_workspace",
          QString::fromUtf8(
@@ -656,7 +832,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "id 仅认编译期白名单（splitter/left_rail/center_spectrum/right_tabs/status_bar/"
             "tab:XXX），未知 id 进 placeholders 诚实空态、绝不渲染。"
             "sizes 软下限 120px clamp，默认 280/800/280 stretch 1/3/1。"
-            "只动 splitter 与右侧 tab 可见性，不碰 DSP/音频/硬件。属于写动作，手动模式下被拦截。")},
+            "只动 splitter 与右侧 tab 可见性，不碰 DSP/音频/硬件。属于写动作，手动模式下被拦截。"
+            "前置条件: WorkspaceController 已由 MainWindow 注入（headless 返回 "
+            "CONTROLLER_NOT_INJECTED 诚实错误）; op 可选枚举三项; components 为 A2UI 节点数组。"
+            "失败恢复: 控制器未注入时明确报错（不假装应用）; 未知组件 id 进 placeholders "
+            "空态而非报错——用 list_ui_components 核对合法 id 后重发; 当前布局用 "
+            "get_workspace_layout 读回。"
+            "副作用: 实时改变主界面三栏尺寸与右侧 tab 可见性（用户可见）。"
+            "能力边界: 只改布局不改数据（数据槽用 update_component_data）; "
+            "回默认布局用 reset_workspace; 不碰 DSP/音频/硬件。")},
         {"get_workspace_layout",
          QString::fromUtf8(
             "只读：返回当前工作台布局模型——splitter_sizes[L,M,R]、splitter_stretch[a,b,c]、"
@@ -671,14 +855,27 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），"
             "等价于 deleteSurface。只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: 无参数（任意时刻可调）; WorkspaceController 已由 MainWindow 注入。"
+            "失败恢复: 控制器未注入时返回 CONTROLLER_NOT_INJECTED 诚实错误（不假装重置）——"
+            "在桌面端主界面就绪后重试。"
+            "副作用: 丢弃当前自定义布局（用户可见，无撤销接口），回到默认三栏。"
+            "能力边界: 只重置布局; 自定义布局用 arrange_workspace; 当前布局读回用 "
+            "get_workspace_layout; 不碰 DSP/音频/硬件。")},
         {"update_component_data",
          QString::fromUtf8(
             "写入：A2UI v1.0 updateDataModel 最小子集——给一个编译期白名单组件 id 写入/清空"
             "内存数据槽。data 为 object 时整体替换该组件的数据（upsert）；data 为 null 时清空"
             "（删键）。未知组件 id 诚实报错、不写入。布局层不解释 payload、不做 @path 绑定、"
             "不碰 DSP/音频/硬件；数据可经 get_workspace_layout 的 component_data 字段读回。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: component_id 必填（编译期白名单 id，用 list_ui_components 核对）; "
+            "data 必填且仅接受 object 或 null（键缺失也按缺失报错）; 控制器已注入。"
+            "失败恢复: component_id/data 缺失时明确 ok:false——补齐后重试; "
+            "未知组件 id 诚实报错不写入——用 list_ui_components 取合法 id。"
+            "副作用: 整体替换该组件内存数据槽（旧值不可恢复）; null 清空删键。"
+            "能力边界: 只写数据不改布局; 布局操作用 arrange_workspace/reset_workspace; "
+            "读回用 get_workspace_layout。")},
         {"get_aprs_messages",
          QString::fromUtf8(
             "读取：最近解出的 APRS/AX.25 消息（最多 limit 条，1..50，默认 50）。"
@@ -708,7 +905,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "target_capture 需 target_hz/mode；fixed_freq_record 需 freq_hz/mode/bandwidth_hz。"
             "未知 template_name 或缺参数诚实报错；本调用只构建/登记计划（executed=false），"
             "不在此同步调谐或录制——真实异步执行在生产端经 TaskRunner。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: template_name 必填枚举三项之一; 按所选模板提供其参数槽"
+            "（三类模板参数键不同，缺任一即明确报错点名）。"
+            "失败恢复: 模板名未知时错误附合法清单; 缺参数时按项点名——补齐后重试; "
+            "plan 只登记不执行，取消/重来直接重新提交。"
+            "副作用: 向 PendingPlanStore 真实登记一个待执行计划（返回 pending_plan_id），"
+            "后续经 AI 面板「执行待执行计划」按钮或 TaskRunner 异步执行后才真正调谐/录制。"
+            "能力边界: 不同步执行任何硬件动作（executed=false 是诚实标注）; "
+            "进度用 get_task_history 的 pending_plans 查询; 模板目录用 list_templates。")},
         // G1: task-run history (read-only).
         {"get_task_history",
          QString::fromUtf8(
@@ -723,7 +928,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：按 (scope,key) 删除一条本地记忆——同时删 mem_meta 行与其 FTS 索引行。"
             "scope 必填枚举 user/agent/session；key 必填。同步短连接执行："
             "条目存在返回 deleted=true；不存在返回 deleted=false 并附 note（空操作，不编造已删）。"
-            "属于写动作，手动模式下被拦截。")},
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: scope（枚举三项）与 key 均必填; ~/.mbdsdr 记忆库可打开。"
+            "失败恢复: scope/key 缺失时明确 ok:false——补齐后重试; 库不可用（权限/损坏）时"
+            "ok:false 并附真实错误，提示检查 ~/.mbdsdr; 条目不存在时 ok:true 但 "
+            "deleted=false（空操作，不要当成功删除复述）。"
+            "副作用: 真删 SQLite 行与 FTS 索引（不可恢复）; 同步执行无需 flush。"
+            "能力边界: 只删 (scope,key) 精确匹配的一条; 检索用 memory_search，"
+            "清空全库无此接口（按 key 逐条删）。")},
         {"memory_stats",
          QString::fromUtf8(
             "只读：本地记忆库统计——total_entries（条目总数）、by_scope（user/agent/session 分布）、"
@@ -865,17 +1077,20 @@ void TestToolSchema::coreToolsHaveFourDimensions() {
     }
 }
 
-// 四维覆盖率棘轮：phase72 实测 18 个工具四维齐全——只允许升，不允许降。
-// 抬阈值前先真把描述写实（门禁只查「有没有四维」，属实性靠读码实证，
-// 见 phase67 教训：描述必须对着 handler 逐行核对后再写）。
+// 四维覆盖率棘轮：phase73 实测 50 个工具四维齐全（phase72 为 18/19）——只允许升，
+// 不允许降。抬阈值前先真把描述写实（门禁只查「有没有四维」，属实性靠读码实证，
+// 见 phase67 教训：描述必须对着 handler 逐行核对后再写；phase73 已把 31 个写工具
+// 逐个对照 agent_tools.cpp handler 实证后增强，含三处修正既有描述的事实错误：
+// fft_size 引擎实收仅 1024/2048/4096、export_iq_segment 路径自动生成、
+// export_peaks_csv 固定口径 peaks(10,6.0)）。
 void TestToolSchema::fourDimensionCoverageRatchet() {
     const QList<ToolSchemaSpec> specs = registeredToolSpecs();
     int full = 0;
     for (const ToolSchemaSpec& s : specs)
         if (dimensionHits(s.description) == 4) ++full;
     qInfo("四维齐全工具数: %d / %d", full, int(specs.size()));
-    QVERIFY2(full >= 18,
-             qPrintable(QStringLiteral("四维覆盖率回退: %1 < 18").arg(full)));
+    QVERIFY2(full >= 50,
+             qPrintable(QStringLiteral("四维覆盖率回退: %1 < 50").arg(full)));
 }
 
 QTEST_MAIN(TestToolSchema)
