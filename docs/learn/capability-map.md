@@ -371,9 +371,35 @@ placeholders/tab:XXX 的撞词）、核心 7 工具四维齐全、四维覆盖�
 （当前 19/90，只升不降）。验证：ctest 全量 154/155 过（1 skipped 为
 e2e_smoke 设计性跳过）；两个可疑失败均经 stash 对照实证与本轮无关——
 spectrum_display 在 -j32 重负载下偶发（隔离 5/5 过）、device_ui 的
-device-pull 时序 flaky（干净树与带改动构建各自隔离复跑全过）。剩余欠账：
-**31 个写工具描述仍 0/4 维**（set_squelch/set_ft8/memory_*/workspace 家族
-等，vna/export 系为主），下一轮按 handler 实证逐个增强并抬棘轮。
+device-pull 时序 flaky（干净树与带改动构建各自隔离复跑全过）。
+
+**31 个写工具描述四维增强（phase73 已销账）**：接上轮欠账，把
+`tool_schema.cpp` 中 31 个 0/4 维写工具全部按 tune_frequency 体裁
+（写入/只读 + 前置条件/失败恢复/副作用/能力边界）重写。按 phase67
+教训逐个对照 `agent_tools.cpp` handler 读码实证，抓到并修正的事实：
+①`set_fft_params` 的 fft_size——schema 边界 256..65536 但引擎
+`setFftSize` 实收只有 1024/2048/4096，其他值被**静默忽略且回显当前值**
+（旧描述只说了枚举接受字符串，没说不生效）；②`export_iq_segment`
+路径由引擎自动生成（`export_<时间戳>_<中心Hz>`，秒级消歧）且
+sampleCount 按 [1024, 16Mi] 钳位、tune_hz>=0 会先改中心频率（硬件
+副作用）；③`export_peaks_csv` 固定口径 `engine->peaks(10, 6.0)`
+（前 10 个、门限 6 dB），无峰值时 ok:true 但 rows=0 仅写表头（诚实
+空态不是错误）；④`apply_frequency_correction` 执行层对缺失 ppm 按 0
+处理会清零已有校正，predicted_residual_hz=0.0 是设计预测非实测；
+⑤`set_squelch` 类型不符字段被**静默跳过**而非报错；⑥`memory_add/update`
+是异步入队（queued=true），立即落库须 memory_flush；⑦`arrange_workspace`
+控制器未注入返回 CONTROLLER_NOT_INJECTED 而非假装应用。金样测试
+`sevenToolsNameDescriptionMatch`（实为全量 90 工具钉档）的 31 个条目
+用脚本从 tool_schema.cpp 程序化提取同步，零转写误差；四维棘轮
+18→50（19→50 实测）。验证：`make -j2` 全量建成，ctest 全量 **155/155
+过**（tool_schema 12 槽全过，棘轮实测 50/90）；Python 套件
+`--continue-on-collection-errors` 1521 passed，25 个失败全部根因
+沙箱无 PySide6（24 个直接 ModuleNotFoundError + test_module_system
+的 importlib 动态加载失败，后者经 stash 干净树复跑确认既有、与本轮
+零关联——本轮仅改两个 C++ 文件）。剩余欠账：**27 个读工具 <2 维**
+（get_vna_data/get_ft8_status/memory_search/get_task_history 等），
+下一轮可按同法增强并抬棘轮；另有 predict_passes/calibrate_frequency
+两个写工具 0/4 维待补。
 
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
