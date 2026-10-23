@@ -3,6 +3,16 @@
 // no API key, no hardware -- it only renders the declarative registry to JSON
 // Schema and compares against the named constants in core/tokens.h and
 // core/bandwidth_preset.h.
+//
+// phase72 起兼负「描述质量门禁」（模型体验轴，DSH 四维标准，与 Python 侧
+// mbdsdr_ai/tests/test_tool_description_quality.py 对位）：
+//   - 全工具面语言地板：每个工具/参数描述必须含中文（英文描述模型读不懂，
+//     phase72 前 set_mode 等 6 个核心工具曾整句英文）；
+//   - 无占位符残语（TODO/TBD/待补充/待实现/FIXME）；
+//   - 核心 7 工具（tune_frequency/set_mode/start_recording/stop_recording/
+//     scan_band/set_bandwidth/get_status）四维齐全；
+//   - 四维覆盖率棘轮（只升不降，见 fourDimensionCoverageRatchet）。
+// 描述金样（逐字钉死防漂移）在 sevenToolsNameDescriptionMatch。
 #include <QtTest/QtTest>
 
 #include <QJsonObject>
@@ -29,6 +39,10 @@ private slots:
     void sevenToolsNameDescriptionMatch();
     void scanBandShape();
     void generateToolDocumentationCoversAllTools();
+    // phase72 描述质量门禁（模型体验轴，DSH 四维标准）
+    void descriptionsAreChineseWithoutPlaceholders();
+    void coreToolsHaveFourDimensions();
+    void fourDimensionCoverageRatchet();
 };
 
 static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
@@ -144,13 +158,63 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "副作用: 立即改变中心频率（硬件状态），音频与瀑布显示随之变化。"
             "能力边界: 只调主 VFO 中心频率; 不改模式/带宽，也不读回状态"
             "（读回用 get_status）。")},
-        {"set_mode", "Set demodulation mode."},
-        {"start_recording", "Start recording raw IQ to SigMF file."},
-        {"stop_recording", "Stop recording."},
-        {"scan_band", "Scan a frequency band and return the peak signal."},
-        {"set_bandwidth", "Set channel filter bandwidth in Hz."},
-        {"get_status",
-         "Return current receiver state: frequency, mode, bandwidth, sample rate."},
+        {"set_mode", QString::fromUtf8(
+            "写入：把解调模式切换为指定模式。属于写动作，手动模式下被拦截。"
+            "前置条件: mode 必须提供; schema 枚举列出 6 种常用模式（AM/NFM/WFM/USB/LSB/CW），"
+            "大小写不敏感，内部统一转规范大写名。"
+            "失败恢复: 白名单外的模式名明确拒绝为「未知解调模式」——未识别的模式不会假报生效; "
+            "按 schema 枚举重试; 引擎控制hub白名单另含 POCSAG/m17/VOR/ACARS/NAVTEX/RAW，"
+            "传入这些也会被接受并以规范名回显，但需确认对应解调链路已配置; "
+            "多 VFO 场景改用 set_vfo_mode 定位具体信道。"
+            "副作用: 立即改变解调模式（DSP 状态），音频输出与瀑布显示随之变化。"
+            "能力边界: 只改当前选中信道的解调模式; 不改频率/带宽，也不读回状态（读回用 get_status）。")},
+        {"start_recording", QString::fromUtf8(
+            "写入：开始连续录制（原始 IQ 写 SigMF，或音频写 WAV+sidecar，由录制目标决定），"
+            "直到 stop_recording。属于写动作，手动模式下被拦截。"
+            "前置条件: 无需参数; 信号源必须已有数据（离线测试源同样可录，sidecar 标注测试信号）。"
+            "失败恢复: 启动失败返回 ok:false 与「录制启动失败」——不得当作已开始; "
+            "常见原因是已在录制中或信号源无数据，先 get_recording_state 确认状态、"
+            "确认信号源连接后再重试。"
+            "副作用: 持续写盘直到显式停止; 成功时返回体带 path 可直接读回。"
+            "能力边界: 只启动连续录制; 一次性导出有界窗口用 export_iq_segment; "
+            "本工具不返回录制内容本身。")},
+        {"stop_recording", QString::fromUtf8(
+            "写入：停止进行中的录制并封存文件（SigMF 或 WAV+sidecar）。属于写动作，手动模式下被拦截。"
+            "前置条件: 无（未在录制时调用也返回成功，属幂等停止）。"
+            "失败恢复: 本工具不报失败; 要确认是否真在录制，用 get_recording_state 读真实状态。"
+            "副作用: 结束连续写盘，已录内容落盘可读。"
+            "能力边界: 只停止不删除; 录制文件的管理（列举/导出/删除）用 "
+            "list_recordings/export_recording/delete_recording。")},
+        {"scan_band", QString::fromUtf8(
+            "写入：在 [low_hz, high_hz] 频段内按 step_hz 步进扫频，返回最强峰（频率 + dBFS）。"
+            "属于写动作（扫频过程逐点移动调谐频率），手动模式下被拦截。"
+            "前置条件: low_hz/high_hz 必须提供且在合法频率范围内; step_hz 可缺省"
+            "（默认 200 kHz，下限 1 Hz）; 注意 low_hz > high_hz 时一个点都不扫，"
+            "峰值保持 -200 dBFS 初值。"
+            "失败恢复: 本工具不因无信号报错——hits[0].dbfs 很低（≈-200）即该段无强信号或"
+            "频段方向给反了; 检查频段方向与信号源连接后重扫。"
+            "副作用: 每步约 20 ms 驻留，细步进大频段会很慢; 扫描结束后调谐停在峰值点。"
+            "能力边界: 只报最强单峰; 合成测试信号上峰值为固定基带偏音（返回体 synthetic=true "
+            "已标注），非真实电台命中; 要全段峰清单用 export_peaks_csv。")},
+        {"set_bandwidth", QString::fromUtf8(
+            "写入：把信道滤波器带宽设为指定 Hz。属于写动作，手动模式下被拦截。"
+            "前置条件: bandwidth_hz 必须提供且取 schema 枚举内的具名预设"
+            "（AM 9000 / NFM 12500 / SSB 2400 / CW 500 / DIG 12000 / WFM 200000 / ADS-B 2000000）; "
+            "当前解调模式不能是 RAW。"
+            "失败恢复: RAW 直通模式下明确拒绝（RAW 是信道化窄带 IQ 的 L=I/R=Q 直通，"
+            "无解调滤波器可设）——先 set_mode 切到解调模式再设带宽; "
+            "枚举外的值由参数校验层拒绝。"
+            "副作用: 立即改变信道滤波（DSP 状态），音频带宽与瀑布显示随之变化。"
+            "能力边界: 只设当前选中信道带宽; 其他 VFO 用 set_vfo_bandwidth; "
+            "不读回（读回用 get_status）。")},
+        {"get_status", QString::fromUtf8(
+            "只读：返回接收机当前完整状态——连接状态与信号源名、中心频率、解调模式、带宽、"
+            "Costas 载波/符号锁定与 EVM、多普勒补偿的可用/启用状态。"
+            "前置条件: 无（未连接也可查询，connected=false 如实返回）。"
+            "失败恢复: 本工具不报失败; 未连接时其余字段为引擎当前值，不编造连接。"
+            "副作用: 无（纯读）。"
+            "能力边界: 只读当前状态; 引擎未暴露的字段（如增益/采样率）缺失即不返回，不虚构; "
+            "改状态用对应的 set_* 写入工具。")},
         {"predict_passes",
          QString::fromUtf8(
             "只读：用本地新鲜 TLE 缓存预测指定卫星未来的过境（升/降时刻、最高仰角、起止方位）。"
@@ -734,6 +798,84 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));
     QVERIFY(doc.contains(QStringLiteral("description:")));
+}
+
+// ---- phase72 描述质量门禁（模型体验轴，DSH 四维标准） ------------------
+
+static bool containsCjk(const QString& s) {
+    for (const QChar& c : s) {
+        const ushort u = c.unicode();
+        if (u >= 0x4E00 && u <= 0x9FFF) return true;
+    }
+    return false;
+}
+
+static int dimensionHits(const QString& desc) {
+    int n = 0;
+    const QStringList dims = {
+        QString::fromUtf8("前置条件"), QString::fromUtf8("失败恢复"),
+        QString::fromUtf8("副作用"), QString::fromUtf8("能力边界")};
+    for (const QString& d : dims)
+        if (desc.contains(d)) ++n;
+    return n;
+}
+
+// 全工具面语言地板 + 无占位符：模型读不懂英文描述——phase72 前 set_mode 等
+// 6 个核心工具曾整句英文（"Set demodulation mode." 等），此槽锁死不再回退。
+void TestToolSchema::descriptionsAreChineseWithoutPlaceholders() {
+    const QList<ToolSchemaSpec> specs = registeredToolSpecs();
+    const QStringList stubs = {
+        QStringLiteral("TODO"), QStringLiteral("TBD"),
+        QString::fromUtf8("待补充"), QString::fromUtf8("待实现"),
+        QStringLiteral("FIXME"), QStringLiteral("coming soon")};
+    for (const ToolSchemaSpec& s : specs) {
+        QVERIFY2(containsCjk(s.description),
+                 qPrintable(QStringLiteral("工具描述非中文: %1").arg(s.name)));
+        QVERIFY2(s.description.trimmed().length() >= 50,
+                 qPrintable(QStringLiteral("工具描述过短: %1").arg(s.name)));
+        for (const QString& t : stubs)
+            QVERIFY2(!s.description.contains(t, Qt::CaseInsensitive),
+                     qPrintable(QStringLiteral("工具描述含占位残语 %1: %2")
+                                    .arg(t, s.name)));
+        for (const ToolParamSpec& p : s.params) {
+            if (p.description.trimmed().isEmpty())
+                continue;  // 空描述 => schema 省略该键，是合法设计
+            QVERIFY2(containsCjk(p.description),
+                     qPrintable(QStringLiteral("参数描述非中文: %1.%2")
+                                    .arg(s.name, p.name)));
+        }
+    }
+}
+
+// 核心 7 工具四维齐全：模型对工具的第一屏认知全来自 description，缺维 = 盲飞。
+void TestToolSchema::coreToolsHaveFourDimensions() {
+    const QList<ToolSchemaSpec> specs = registeredToolSpecs();
+    const QStringList core = {
+        QStringLiteral("tune_frequency"), QStringLiteral("set_mode"),
+        QStringLiteral("start_recording"), QStringLiteral("stop_recording"),
+        QStringLiteral("scan_band"), QStringLiteral("set_bandwidth"),
+        QStringLiteral("get_status")};
+    for (const QString& name : core) {
+        const ToolSchemaSpec* s = findSpec(specs, name);
+        QVERIFY2(s != nullptr,
+                 qPrintable(QStringLiteral("核心工具缺失: %1").arg(name)));
+        const int hits = dimensionHits(s->description);
+        QVERIFY2(hits == 4, qPrintable(QStringLiteral("核心工具四维不全(%1/4): %2")
+                                           .arg(hits).arg(name)));
+    }
+}
+
+// 四维覆盖率棘轮：phase72 实测 18 个工具四维齐全——只允许升，不允许降。
+// 抬阈值前先真把描述写实（门禁只查「有没有四维」，属实性靠读码实证，
+// 见 phase67 教训：描述必须对着 handler 逐行核对后再写）。
+void TestToolSchema::fourDimensionCoverageRatchet() {
+    const QList<ToolSchemaSpec> specs = registeredToolSpecs();
+    int full = 0;
+    for (const ToolSchemaSpec& s : specs)
+        if (dimensionHits(s.description) == 4) ++full;
+    qInfo("四维齐全工具数: %d / %d", full, int(specs.size()));
+    QVERIFY2(full >= 18,
+             qPrintable(QStringLiteral("四维覆盖率回退: %1 < 18").arg(full)));
 }
 
 QTEST_MAIN(TestToolSchema)

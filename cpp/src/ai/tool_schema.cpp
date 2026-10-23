@@ -92,7 +92,16 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "set_mode";
-        s.description = "Set demodulation mode.";
+        s.description = QString::fromUtf8(
+            "写入：把解调模式切换为指定模式。属于写动作，手动模式下被拦截。"
+            "前置条件: mode 必须提供; schema 枚举列出 6 种常用模式（AM/NFM/WFM/USB/LSB/CW），"
+            "大小写不敏感，内部统一转规范大写名。"
+            "失败恢复: 白名单外的模式名明确拒绝为「未知解调模式」——未识别的模式不会假报生效; "
+            "按 schema 枚举重试; 引擎控制hub白名单另含 POCSAG/m17/VOR/ACARS/NAVTEX/RAW，"
+            "传入这些也会被接受并以规范名回显，但需确认对应解调链路已配置; "
+            "多 VFO 场景改用 set_vfo_mode 定位具体信道。"
+            "副作用: 立即改变解调模式（DSP 状态），音频输出与瀑布显示随之变化。"
+            "能力边界: 只改当前选中信道的解调模式; 不改频率/带宽，也不读回状态（读回用 get_status）。");
         s.write = true;   // changes demodulation mode
         ToolParamSpec p;
         p.name = "mode";
@@ -107,7 +116,16 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "start_recording";
-        s.description = "Start recording raw IQ to SigMF file.";
+        s.description = QString::fromUtf8(
+            "写入：开始连续录制（原始 IQ 写 SigMF，或音频写 WAV+sidecar，由录制目标决定），"
+            "直到 stop_recording。属于写动作，手动模式下被拦截。"
+            "前置条件: 无需参数; 信号源必须已有数据（离线测试源同样可录，sidecar 标注测试信号）。"
+            "失败恢复: 启动失败返回 ok:false 与「录制启动失败」——不得当作已开始; "
+            "常见原因是已在录制中或信号源无数据，先 get_recording_state 确认状态、"
+            "确认信号源连接后再重试。"
+            "副作用: 持续写盘直到显式停止; 成功时返回体带 path 可直接读回。"
+            "能力边界: 只启动连续录制; 一次性导出有界窗口用 export_iq_segment; "
+            "本工具不返回录制内容本身。");
         s.write = true;   // starts IQ recording
         out.append(s);
     }
@@ -116,7 +134,13 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "stop_recording";
-        s.description = "Stop recording.";
+        s.description = QString::fromUtf8(
+            "写入：停止进行中的录制并封存文件（SigMF 或 WAV+sidecar）。属于写动作，手动模式下被拦截。"
+            "前置条件: 无（未在录制时调用也返回成功，属幂等停止）。"
+            "失败恢复: 本工具不报失败; 要确认是否真在录制，用 get_recording_state 读真实状态。"
+            "副作用: 结束连续写盘，已录内容落盘可读。"
+            "能力边界: 只停止不删除; 录制文件的管理（列举/导出/删除）用 "
+            "list_recordings/export_recording/delete_recording。");
         s.write = true;   // stops IQ recording
         out.append(s);
     }
@@ -125,26 +149,36 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "scan_band";
-        s.description = "Scan a frequency band and return the peak signal.";
+        s.description = QString::fromUtf8(
+            "写入：在 [low_hz, high_hz] 频段内按 step_hz 步进扫频，返回最强峰（频率 + dBFS）。"
+            "属于写动作（扫频过程逐点移动调谐频率），手动模式下被拦截。"
+            "前置条件: low_hz/high_hz 必须提供且在合法频率范围内; step_hz 可缺省"
+            "（默认 200 kHz，下限 1 Hz）; 注意 low_hz > high_hz 时一个点都不扫，"
+            "峰值保持 -200 dBFS 初值。"
+            "失败恢复: 本工具不因无信号报错——hits[0].dbfs 很低（≈-200）即该段无强信号或"
+            "频段方向给反了; 检查频段方向与信号源连接后重扫。"
+            "副作用: 每步约 20 ms 驻留，细步进大频段会很慢; 扫描结束后调谐停在峰值点。"
+            "能力边界: 只报最强单峰; 合成测试信号上峰值为固定基带偏音（返回体 synthetic=true "
+            "已标注），非真实电台命中; 要全段峰清单用 export_peaks_csv。");
         s.write = true;   // sweeps the receiver across a band (mutates freq)
         ToolParamSpec low;
         low.name = "low_hz";
         low.type = "number";
-        low.description = "Start frequency Hz";
+        low.description = QString::fromUtf8("起始频率（Hz）");
         low.hasMin = true; low.min = tokens::kFreqMinHz;
         low.hasMax = true; low.max = tokens::kFreqMaxHz;
         low.required = true;
         ToolParamSpec high;
         high.name = "high_hz";
         high.type = "number";
-        high.description = "End frequency Hz";
+        high.description = QString::fromUtf8("结束频率（Hz）");
         high.hasMin = true; high.min = tokens::kFreqMinHz;
         high.hasMax = true; high.max = tokens::kFreqMaxHz;
         high.required = true;
         ToolParamSpec step;
         step.name = "step_hz";
         step.type = "number";
-        step.description = "Step size Hz (default 200k)";
+        step.description = QString::fromUtf8("步进（Hz，缺省 200000，下限 1）");
         step.hasMin = true; step.min = kScanStepMinHz;
         step.required = false;
         s.params << low << high << step;
@@ -155,12 +189,22 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "set_bandwidth";
-        s.description = "Set channel filter bandwidth in Hz.";
+        s.description = QString::fromUtf8(
+            "写入：把信道滤波器带宽设为指定 Hz。属于写动作，手动模式下被拦截。"
+            "前置条件: bandwidth_hz 必须提供且取 schema 枚举内的具名预设"
+            "（AM 9000 / NFM 12500 / SSB 2400 / CW 500 / DIG 12000 / WFM 200000 / ADS-B 2000000）; "
+            "当前解调模式不能是 RAW。"
+            "失败恢复: RAW 直通模式下明确拒绝（RAW 是信道化窄带 IQ 的 L=I/R=Q 直通，"
+            "无解调滤波器可设）——先 set_mode 切到解调模式再设带宽; "
+            "枚举外的值由参数校验层拒绝。"
+            "副作用: 立即改变信道滤波（DSP 状态），音频带宽与瀑布显示随之变化。"
+            "能力边界: 只设当前选中信道带宽; 其他 VFO 用 set_vfo_bandwidth; "
+            "不读回（读回用 get_status）。");
         s.write = true;   // changes channel filter bandwidth
         ToolParamSpec p;
         p.name = "bandwidth_hz";
         p.type = "number";
-        p.description = "Filter bandwidth in Hz, e.g. 8000 for AM, 12500 for NFM, 200000 for WFM";
+        p.description = QString::fromUtf8("信道带宽（Hz），取 schema 枚举预设：AM 9000 / NFM 12500 / SSB 2400 / CW 500 / DIG 12000 / WFM 200000 / ADS-B 2000000");
         // The full set of named channel presets. kBwFallbackHz is deliberately
         // excluded -- it is just an alias of kBwNfmHz, not a distinct preset.
         p.enumValues = QVariantList{
@@ -176,7 +220,14 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "get_status";
-        s.description = "Return current receiver state: frequency, mode, bandwidth, sample rate.";
+        s.description = QString::fromUtf8(
+            "只读：返回接收机当前完整状态——连接状态与信号源名、中心频率、解调模式、带宽、"
+            "Costas 载波/符号锁定与 EVM、多普勒补偿的可用/启用状态。"
+            "前置条件: 无（未连接也可查询，connected=false 如实返回）。"
+            "失败恢复: 本工具不报失败; 未连接时其余字段为引擎当前值，不编造连接。"
+            "副作用: 无（纯读）。"
+            "能力边界: 只读当前状态; 引擎未暴露的字段（如增益/采样率）缺失即不返回，不虚构; "
+            "改状态用对应的 set_* 写入工具。");
         out.append(s);
     }
 
@@ -1139,7 +1190,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO id");
+        idx.description = QString::fromUtf8("VFO 下标（用 list_vfos 读取真实 id）");
         idx.required = true;
         s.params.append(idx);
         out.append(s);
@@ -1159,7 +1210,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO id");
+        idx.description = QString::fromUtf8("VFO 下标（用 list_vfos 读取真实 id）");
         idx.required = true;
         ToolParamSpec nm;
         nm.name = "name";

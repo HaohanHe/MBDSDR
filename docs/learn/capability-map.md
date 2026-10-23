@@ -352,6 +352,29 @@ AGENTS.md 的套件文件数同步更正。
 「8 个循环偏移取最佳」收紧为「锚定必须精确（best_d == 0）+ 准确率
 ≥0.85」双断言——假设选择一旦退化立刻红，不再被容度吞掉。
 
+**C++ 工具面英文描述收敛 + 描述门禁（phase72 已销账）**：`ai::toolDefs()`
+（cpp/src/ai/tool_schema.cpp，90 个工具的单一事实源，同时供 MCP tools/list
+与 manual-mode 写门）审计发现**恰好 6 个核心工具描述是整句英文**
+（set_mode/start_recording/stop_recording/scan_band/set_bandwidth/get_status）
+——Python 侧 phase67 已做四维增强，C++ 侧这 6 个漏网。按 phase67 教训
+（描述必须对着 handler 逐行核对后再写）先读码实证，抓到三处旧描述与事实
+不符：scanBand 无 low<=high 校验（low>high 时一点不扫、峰值保持 -200
+初值）且每步驻留 20ms；模式白名单（kControlHubModes 12 种）比 schema
+枚举（6 种）宽；旧参数描述 AM=8000 实为 9000（kBwAmHz）。6 个描述全部
+按 tune_frequency 既有体裁（写入/只读 + 前置条件/失败恢复/副作用/能力边界）
+重写为属实中文，同属这些工具的 3 个英文参数描述与 2 处 "VFO id" 一并中文化。
+门禁落在既有 `cpp/tests/test_tool_schema.cpp`（描述金样本就钉在该文件的
+sevenToolsNameDescriptionMatch，不另起炉灶分裂契约）：新增三槽——
+全工具面语言地板（90 工具 + 209 参数描述必须含中文、≥50 字符、无
+TODO/TBD/待补充/待实现/FIXME 残语；占位符标记刻意避开 A2UI 领域词汇
+placeholders/tab:XXX 的撞词）、核心 7 工具四维齐全、四维覆盖率棘轮
+（当前 19/90，只升不降）。验证：ctest 全量 154/155 过（1 skipped 为
+e2e_smoke 设计性跳过）；两个可疑失败均经 stash 对照实证与本轮无关——
+spectrum_display 在 -j32 重负载下偶发（隔离 5/5 过）、device_ui 的
+device-pull 时序 flaky（干净树与带改动构建各自隔离复跑全过）。剩余欠账：
+**31 个写工具描述仍 0/4 维**（set_squelch/set_ft8/memory_*/workspace 家族
+等，vna/export 系为主），下一轮按 handler 实证逐个增强并抬棘轮。
+
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
