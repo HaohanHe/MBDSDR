@@ -535,6 +535,21 @@ NOT registered with ctest，CI 从不跑它们）。
 「图内文字一律英文」是**实验图表侧**的避字体依赖策略，继续保留；产品 UI
 是中文产品，走**字体供给**路线。两者双轨不冲突。
 
+**device_ui drop 停摆首次带现场复现 + 三层诊断就位（phase79）**：
+phase77 插桩后首次隔离单跑即复现（ waited=**18405ms** vs 8000ms 窗口，
+ever 双 0），固证于 docs/learn/phase79/device-ui-drop-stall-repro.md。
+绿画像（`waitFor stats` 行）显示 Phase 3 是 ~70 万次/秒的 pred 紧轮询等
+~1s 断连链路（eventsMs≈0、maxEventsMs=31）——据此 18405ms 的解释收敛为
+三种可自动分类形态（单轮 events 卡 ~10s / pred 末次卡 / 每轮 ~140ms
+累计），下次红运行的 stats(timeout) 行即可定性。三层诊断：失败自证
+（phase77）+ 慢轮告警（>500ms 打 pred/events 拆分）+ 每调用 stats 画像。
+猎杀战果：隔离累计 53 轮仅 1 中；`-j4` 全套套件 8 轮 0 中（历史三见的
+共同现场本轮未复现）；「重建后首轮」定向实验进行中。七個停摆源假设已
+排查排除（harness getter 无锁 / 引擎锁 ≤50ms poll 超时 / reconnect 关闭 /
+caps 快照锁独立 / refreshSpacetimeView 轻量 / QMediaDevices 探测 0ms /
+USB 枚举轻量），余下主嫌疑是系统级停顿（待 gdb 现场）。窗口仍不加宽
+（phase40 决议）。**PAT 轮换仍未办（用户信任面）。**
+
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
