@@ -458,6 +458,24 @@ void SpectrumDisplay::setSecondsPerRowForTest(double s) {
     update();
 }
 
+void SpectrumDisplay::setMeasuredSecPerFrameForTest(double s) {
+    // Test seam for the EWMA state itself (the pin above only overrides the
+    // EFFECTIVE seconds-per-row). Lets the suite drive both time-base states
+    // deterministically -- "no honest base" (clear) and "measured base = X"
+    // (inject) -- instead of hoping the wall clock keeps the tight test loop
+    // inside the sanity band. Under parallel ctest load it does not (real
+    // frames legitimately cross the band), which is what made the tick-label
+    // suite flaky; the production measurement path is untouched.
+    if (s > 0.0) {
+        secPerFrameSmoothed_ = s;
+        haveSecPerFrame_ = true;
+    } else {
+        secPerFrameSmoothed_ = 0.0;
+        haveSecPerFrame_ = false;
+    }
+    update();
+}
+
 QStringList SpectrumDisplay::waterfallTimeTickLabelsForTest() const {
     QStringList labels;
     for (const auto& tick : computeTimeTicks()) labels << tick.second;

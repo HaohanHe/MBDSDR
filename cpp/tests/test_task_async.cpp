@@ -85,6 +85,7 @@ void TestTaskAsync::requestStopHaltsLaterSteps() {
     runner.start();
 
     int stepCount = 0;
+    QSignalSpy stepSpy(&runner, &ai::TaskRunner::stepUpdated);
     connect(&runner, &ai::TaskRunner::stepUpdated,
             this, [&](const ai::StepResult&) { ++stepCount; });
     QSignalSpy finishedSpy(&runner, &ai::TaskRunner::finished);
@@ -94,8 +95,19 @@ void TestTaskAsync::requestStopHaltsLaterSteps() {
     QMetaObject::invokeMethod(&runner, "runPlan", Qt::QueuedConnection,
                               Q_ARG(mbdsdr::ai::TaskPlan, plan));
 
-    // Let the first step start, then stop.
-    QTest::qWait(60);
+    // Wait for the FIRST step to actually start, then stop. The old code used a
+    // fixed QTest::qWait(60) here, which is load-sensitive in the fatal
+    // direction: under a contended parallel ctest the worker thread may not
+    // have entered the plan yet, and TaskOrchestrator::run() CLEARS the stop
+    // flag when it starts (deliberately -- a stale flag from a previous aborted
+    // run must not kill the next one), so an early requestStop is swallowed and
+    // the plan runs to completion (observed FAIL: "got 6/6" under -j32). The
+    // UI cannot hit that window (single-flight disables the stop button until
+    // a run is active), so this is a test-assumption fix, not a product change;
+    // if a "queued run cancelled by an early stop" semantic is ever wanted it
+    // is a feature to design, not a bug to paper over.
+    QVERIFY2(stepSpy.wait(5000),
+             "first step must start (worker thread scheduled) before stopping");
     runner.requestStop();
 
     QVERIFY(finishedSpy.wait(5000));
