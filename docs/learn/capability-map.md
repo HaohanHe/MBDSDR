@@ -420,6 +420,44 @@ memory_search 只检索已落库条目（异步 writer 未 flush 前检索不到
 系 phase72 已实证的 device-pull 时序 flaky）。剩余欠账：工具描述面
 暂无维度欠账；后续新工具入册时按本门禁天然要求四维。
 
+**拉取核查轮（phase75，已逐项销账）**：拉入远端 3 个提交
+（experiments 实测记录、最小 UI 截图工具、README test-source 纠错）并逐项
+读码核查。先说核查为真的部分：fcafa80 的 README 纠错属实（main.cpp 确为
+显式 opt-in）；experiments/nanovna_rh770 数据诚实（含失败记录，且其实测
+证伪了仓内一条注释）。核查中新发现四项，全部处置：
+
+1. **CI 并行度假因（已修）**：fcafa80 注释猜「Linux 红属环境差异」被取证
+   推翻——真实原因是 `-j$(nproc)`。32 核机上两次 -j32 全套分别曝露
+   spectrum_display 瀑布图时间刻度族的两个用例（释放时基后 tick 未清空
+   :881；无时基却画出 tick :904）；机制是两例预设「紧密推帧循环的帧间隔
+   必被判亚毫秒从而拒测时基」，CPU 争抢下前提不成立、EWMA 合理测到时基
+   ——用例与环境的耦合，非产品缺陷。该族隔离单跑 3/3 过、-j4 全套过
+   （实测约 71s，串行约 189s）、-j32 必现失败。CI 固定 -j4，两例处补写
+   时序敏感注释。**剩余欠账：时基可注入化（根治，未做）。**
+2. **ui_screenshot_minimal.cpp 伪取证风险（已修）**：文件头声称构建
+   MBDSDR MainWindow，实际是不链接 mbdsdr_core 的空壳 QMainWindow+QLabel
+   （窗口标题还写着 "MBDSDR UI Test"）——产物若被当作 MBDSDR UI 渲染证据
+   即为伪造取证。已如实改写头部/标题/输出命名，标明只验证 Qt offscreen
+   渲染管线，真正 UI 取证指向注册了 CMake 的 ui_shot_r27（链接
+   mbdsdr::MainWindow）。未注册 CMake 本身符合既有惯例（42 个
+   ui_screenshot_*.cpp 仅 5 个注册），不是问题。
+3. **nanovna_client.py 耗时注释被实测证伪（已修）**：原注释「115200 波特
+   下帧传输约 13.4s」系波特率折算估算；experiments 真机实测 USB CDC 实际
+   不理会 115200，320×240 RGB565 帧约 0.5s 传完。已按实测修正并注明出处，
+   30s 默认超时保留作慢环境余量。
+4. **身份红线门禁被实测数据误报（已修）**：全量 pytest 回归抓出
+   test_identity_redline 红——experiments 数据里 S11 测量值的小数内嵌位
+   （形如 0.148…9825）撞手机号正则。全仓复扫证实仅此一处类误报；正则两侧
+   加小数点边界排除后全仓 0 命中，且正反例边界验证通过（引号/标点/字母
+   相邻的真实号码仍命中，小数内嵌不命中）——是提高精度，不是放松门禁。
+
+验证：身份红线门禁双用例复跑全过（修复过程中还实测了「门禁文件自身不得
+命中自己」的既有约定——文档字符串里写全 11 位号码即自触发，已用省略号断码
+规避）；Python 全量回归除沙箱既有失败（无 PySide6 的收集失败、
+test_module_system importlib 既有失败）外无新增。**剩余欠账：瀑布时间刻度
+族时基可注入化；device-pull 时序 flaky（phase72 起登记在案）；PAT 轮换
+（token 已多次明文暴露，属用户信任面）。**
+
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
