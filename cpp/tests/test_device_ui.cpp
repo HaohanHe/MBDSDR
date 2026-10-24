@@ -210,10 +210,36 @@ int main(int argc, char** argv) {
 
     // Phase 3: pull the device.
     server.stop();
+    // Phase77: failure self-evidence for the intermittent drop timeout (three
+    // observations across phase72/74/76, none reproducible on demand; 11/11
+    // green since). The window is NOT widened (phase40 decision: it matches
+    // the production handshake budget). Instead, on timeout the log carries
+    // which leg failed AND whether each leg was EVER satisfied inside the
+    // window: "never cleared" (engine disconnect chain stalled) vs "cleared
+    // then re-populated" (deferred-refresh ordering inversion) are different
+    // bugs and need different fixes.
+    bool everOptionsEmpty = false;
+    bool everComboDisabled = false;
+    QElapsedTimer dropClock;
+    dropClock.start();
     const bool cleared = waitFor([&]() {
-        return win.harnessSampleRateOptions().isEmpty() && !win.harnessSampleRateEnabled();
+        const bool optsEmpty = win.harnessSampleRateOptions().isEmpty();
+        const bool ctlDisabled = !win.harnessSampleRateEnabled();
+        everOptionsEmpty = everOptionsEmpty || optsEmpty;
+        everComboDisabled = everComboDisabled || ctlDisabled;
+        return optsEmpty && ctlDisabled;
     }, 8000);
-    check(cleared, "drop: combo back to empty + disabled after device pull");
+    if (!cleared) {
+        qInfo("drop-wait detail: optionsEmpty=%d comboDisabled=%d waited=%lld ms "
+              "(window 8000; everOptionsEmpty=%d everComboDisabled=%d; each poll "
+              "processEvents(AllEvents, 60))",
+              win.harnessSampleRateOptions().isEmpty() ? 1 : 0,
+              !win.harnessSampleRateEnabled() ? 1 : 0,
+              static_cast<long long>(dropClock.elapsed()),
+              everOptionsEmpty ? 1 : 0, everComboDisabled ? 1 : 0);
+    }
+    check(cleared, "drop: combo back to empty + disabled after device pull "
+                   "(on failure see the qInfo drop-wait detail line above)");
 
     return failures ? 1 : 0;
 }
