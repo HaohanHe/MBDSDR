@@ -67,6 +67,12 @@ inline void ensureRawStack() {}
 using namespace mbdsdr;
 using mbdsdr::dsp::SpectrumEngine;
 
+// Phase79: drop-wait latency profile threshold. The disconnect chain's
+// theoretical budget is ~0.5s; 3x that (1500ms) is far below the 8000ms
+// assertion window, so this only flags waits that are slow enough to be
+// interesting, never normal jitter. See the Phase 3 block in main().
+constexpr qint64 kSlowDropMs = 1500;
+
 class RawRtlTcp {
 public:
     ~RawRtlTcp() { stop(); }
@@ -140,11 +146,54 @@ private:
 
 static bool waitFor(const std::function<bool()>& pred, int timeoutMs) {
     QElapsedTimer t; t.start();
+    int rounds = 0;
+    qint64 maxEventsMs = 0;
+    qint64 sumEventsMs = 0;
+    bool ok = false;
+    // Phase79: per-call latency profile on EVERY call (one line, cheap). The
+    // first stall observation (18405 ms against an 8000 ms window) has two
+    // competing readings that need this to tell apart: (a) ONE events round
+    // blocked ~10s -- maxEventsMs would be ~10000; (b) EVERY round ran ~140ms
+    // so the window simply processed too few rounds -- maxEventsMs ~140 with
+    // a high round count. Different root causes, different fixes; the line
+    // below is what tells them apart on any future observation. Printed on
+    // the success path too ("early") -- the green profile IS the baseline a
+    // future stall gets compared against.
+    auto stats = [&](const char* tag) {
+        qInfo("waitFor stats(%s): ok=%d rounds=%d maxEventsMs=%lld "
+              "avgEventsMs=%lld windowMs=%d totalMs=%lld",
+              tag, ok ? 1 : 0, rounds, static_cast<long long>(maxEventsMs),
+              rounds > 0 ? static_cast<long long>(sumEventsMs / rounds) : 0,
+              timeoutMs, static_cast<long long>(t.elapsed()));
+    };
     while (t.elapsed() < timeoutMs) {
-        if (pred()) return true;
+        const qint64 before = t.elapsed();
+        ok = pred();
+        if (ok) { stats("early"); return true; }
+        const qint64 afterPred = t.elapsed();
         QCoreApplication::processEvents(QEventLoop::AllEvents, 60);
+        const qint64 afterEvents = t.elapsed();
+        const qint64 eventsMs = afterEvents - afterPred;
+        ++rounds;
+        sumEventsMs += eventsMs;
+        if (eventsMs > maxEventsMs) maxEventsMs = eventsMs;
+        // Phase79: slow-round logging. A round materially slower than its
+        // 60ms budget means the stall is INSIDE this round. The pred/events
+        // split localizes it: pred slow => a lock on the UI-read path (the
+        // harness getters are lock-free, so this would be new information);
+        // events slow => an event handler or queued signal slot is blocking
+        // (the observed ~10s stall lands here -- see docs/learn/phase79).
+        // Only fires on slow rounds; green runs stay silent.
+        if (eventsMs > 500) {
+            qInfo("waitFor slow round: pred=%lld ms events=%lld ms total=%lld ms",
+                  static_cast<long long>(afterPred - before),
+                  static_cast<long long>(eventsMs),
+                  static_cast<long long>(afterEvents));
+        }
     }
-    return pred();
+    ok = pred();
+    stats("timeout");
+    return ok;
 }
 
 int main(int argc, char** argv) {
@@ -218,6 +267,14 @@ int main(int argc, char** argv) {
     // window: "never cleared" (engine disconnect chain stalled) vs "cleared
     // then re-populated" (deferred-refresh ordering inversion) are different
     // bugs and need different fixes.
+    // Phase79: slow-path logging on top of that. The disconnect chain's
+    // theoretical budget is ~0.5s (readIQ EOF -> 20 frames x 20ms ->
+    // dropSourceLocked -> installIdleSourceLocked -> sourceChanged ->
+    // deferred 0-timer refresh). A wait above 3x that budget is NOT a
+    // failure by itself -- but it is the only on-demand signal this flaky
+    // can give, so every slow wait (and every failure) logs its detail.
+    // N green runs then build a latency profile instead of passively
+    // waiting for a timeout to self-document.
     bool everOptionsEmpty = false;
     bool everComboDisabled = false;
     QElapsedTimer dropClock;
@@ -229,13 +286,15 @@ int main(int argc, char** argv) {
         everComboDisabled = everComboDisabled || ctlDisabled;
         return optsEmpty && ctlDisabled;
     }, 8000);
-    if (!cleared) {
+    const qint64 dropElapsedMs = dropClock.elapsed();
+    if (!cleared || dropElapsedMs > kSlowDropMs) {
         qInfo("drop-wait detail: optionsEmpty=%d comboDisabled=%d waited=%lld ms "
-              "(window 8000; everOptionsEmpty=%d everComboDisabled=%d; each poll "
-              "processEvents(AllEvents, 60))",
+              "(window 8000; slowThreshold=%lld; everOptionsEmpty=%d "
+              "everComboDisabled=%d; each poll processEvents(AllEvents, 60))",
               win.harnessSampleRateOptions().isEmpty() ? 1 : 0,
               !win.harnessSampleRateEnabled() ? 1 : 0,
-              static_cast<long long>(dropClock.elapsed()),
+              static_cast<long long>(dropElapsedMs),
+              static_cast<long long>(kSlowDropMs),
               everOptionsEmpty ? 1 : 0, everComboDisabled ? 1 : 0);
     }
     check(cleared, "drop: combo back to empty + disabled after device pull "
