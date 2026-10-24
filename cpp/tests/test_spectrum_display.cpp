@@ -848,17 +848,19 @@ void TestSpectrumDisplay::bookmarkOverlayRefeedsUpdate() {
 // label sequence must read now -> -N.Ns at every kWaterfallTimeTickRows, and the
 // bottom boundary must land on the oldest filled row.
 //
-// TIMING-SENSITIVE (phase75 forensics, do not "fix" by deleting): under a
-// -j32 full-suite load this test and its sibling waterfallTimeTickHonest-
-// EmptyState each failed once (at the release-pin assertion, :881, and at
-// :904 respectively). Mechanism: both assume the tight frame-push loop's
-// inter-frame gaps are rejected as sub-ms so no time base gets measured;
-// under CPU contention that premise breaks, the EWMA legitimately measures a
-// base, and ticks correctly persist after the pin is released. That is a
-// test/environment coupling, not a product defect. Evidence: isolated runs
-// 3/3 pass, -j4 full suite passes, -j32 full suite fails every time. CI is
-// therefore pinned to -j4 (see .github/workflows/ci.yml). Root fix would be
-// an injectable time base (tracked as debt, not done).
+// ROOT-FIXED in phase76 (was TIMING-SENSITIVE, phase75 forensics): this test
+// and its sibling waterfallTimeTickHonestEmptyState each failed once under a
+// -j32 full-suite load -- at the release-pin assertion and at the fed-ring
+// empty assertion respectively. Mechanism: both used to assume the tight
+// frame-push loop's inter-frame gaps are always rejected as sub-ms, so no time
+// base gets measured; under CPU contention that premise breaks (real frames
+// cross the sanity band), the EWMA legitimately measures a base, and ticks
+// correctly persist after the pin is released -- a test/environment coupling,
+// not a product defect. The fix injects/clears the EWMA state explicitly
+// (setMeasuredSecPerFrameForTest) instead of trusting the wall clock, so both
+// time-base states are now driven deterministically. Verification: -j32 full
+// suite, previously fail-every-time, is green (see the phase76 commit and
+// capability-map). Do NOT "simplify" this back to relying on loop speed.
 void TestSpectrumDisplay::waterfallTimeTickLabelsAreRealSeconds() {
     // Deterministic 1:1 trace/waterfall split (a prior divider-drag suite may
     // have persisted a traceShare_ we must not inherit).
@@ -887,20 +889,34 @@ void TestSpectrumDisplay::waterfallTimeTickLabelsAreRealSeconds() {
     QCOMPARE(labels.first(), QStringLiteral("now"));       // top edge = now
     QCOMPARE(labels.last(),  QStringLiteral("-16s"));      // bottom edge = oldest row
 
-    // Releasing the pin returns to the (un-measured in this tight loop) honest
-    // empty state: no fabricated seconds.
-    w.setSecondsPerRowForTest(0.0);
+    // Release the pin with an explicitly CLEARED measured base: the ticks must
+    // drop -- no invented fps. The clear replaces the old "tight loop is always
+    // sub-ms" assumption, which broke under -j32 CPU contention (phase75): real
+    // frames there legitimately crossed the sanity band and the EWMA measured a
+    // base, so the old assertion failed on a perfectly healthy widget.
+    w.setMeasuredSecPerFrameForTest(0.0);   // honest "no measured base" state
+    w.setSecondsPerRowForTest(0.0);         // release the pin
     QVERIFY2(w.waterfallTimeTickLabelsForTest().isEmpty(),
              "releasing the time base must drop the ticks (no invented fps)");
+
+    // Release the pin with an explicitly INJECTED measured base: the effective
+    // value must fall back to the live estimate (same 0.125 s/row here, since
+    // everyNthFrame_=1), proving the release path reads the estimate rather
+    // than a stale copy -- and that the inject seam is not a no-op.
+    w.setMeasuredSecPerFrameForTest(0.125);
+    w.setSecondsPerRowForTest(0.0);
+    QCOMPARE(w.waterfallTimeTickLabelsForTest(), expect);
 }
 
-// Honest empty states: a fresh canvas has no rows; a fed canvas with no measured
-// time base (tight test loop -> every inter-frame gap is rejected as sub-ms) must
-// also paint nothing -- the axis never guesses a frame rate.
-// TIMING-SENSITIVE (see the phase75 note above waterfallTimeTickLabelsAreReal-
-// Seconds): this very "sub-ms" premise is what broke under -j32 load -- gaps
-// exceeded the rejection threshold, the EWMA measured a base, and ticks
-// legitimately appeared (observed FAIL at :904). Not a product defect.
+// Honest empty states: a fresh canvas has no rows; a fed canvas whose measured
+// time base is explicitly cleared must also paint nothing -- the axis never
+// guesses a frame rate. The clear replaces the old "tight loop is always
+// sub-ms" premise, which was load-sensitive (phase75 forensics: under -j32 the
+// inter-frame gaps legitimately crossed the sanity band, the EWMA measured a
+// base, and ticks appeared on a healthy widget -- a test/environment coupling,
+// not a product defect; root-fixed in phase76, see the note above).
+// The third block guards the inject seam itself, so the two empty assertions
+// cannot silently become tautological.
 void TestSpectrumDisplay::waterfallTimeTickHonestEmptyState() {
     // Fresh widget: no frame pushed -> no rows -> no ticks.
     {
@@ -910,7 +926,7 @@ void TestSpectrumDisplay::waterfallTimeTickHonestEmptyState() {
         QVERIFY2(w.waterfallTimeTickLabelsForTest().isEmpty(),
                  "fresh canvas must have no time ticks (empty ring)");
     }
-    // Fed ring but no pinned/measured base: still no ticks.
+    // Fed ring but no measured base (explicitly cleared, not assumed): no ticks.
     {
         ui::SpectrumDisplay w;
         w.resize(1000, 700);
@@ -918,8 +934,21 @@ void TestSpectrumDisplay::waterfallTimeTickHonestEmptyState() {
         for (int i = 0; i < 20; ++i)
             w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
         QCOMPARE(w.waterfallRowCountForTest(), 20);
+        w.setMeasuredSecPerFrameForTest(0.0);
         QVERIFY2(w.waterfallTimeTickLabelsForTest().isEmpty(),
                  "rows without a measured time base must paint no ticks");
+    }
+    // Fed ring WITH an injected measured base: ticks must appear. 20 rows sit
+    // inside one 32-row stride, so the top "now" tick is the only honest one.
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        for (int i = 0; i < 20; ++i)
+            w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+        w.setMeasuredSecPerFrameForTest(0.125);
+        QCOMPARE(w.waterfallTimeTickLabelsForTest(),
+                 QStringList({QStringLiteral("now")}));
     }
 }
 

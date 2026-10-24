@@ -273,11 +273,19 @@ public slots:
 
     // ---- Offscreen-test-only: waterfall vertical time axis -----------------
     // The production time base is the EWMA of REAL inter-frame wall-clock
-    // arrivals (see cpp). These seams pin / read it so the suite can assert the
-    // "-Ns" label sequence deterministically without driving a real clock:
+    // arrivals (see cpp). These seams pin / inject / read it so the suite can
+    // assert the "-Ns" label sequence deterministically without driving a real
+    // clock. The wall-clock EWMA is deliberately load-sensitive: its sanity
+    // band rejects sub-ms offline loops, but a contended parallel ctest run
+    // pushes real frames past the band, so the ESTIMATE becomes
+    // non-deterministic -- which is exactly what made this suite flaky before
+    // phase76 (see the root-fix notes on the two tick-label tests):
     //   setSecondsPerRowForTest(s>0) pins the measured seconds-per-row override;
     //   setSecondsPerRowForTest(s<=0) releases it back to the live estimate.
+    //   setMeasuredSecPerFrameForTest(s>0) injects the EWMA state directly;
+    //   setMeasuredSecPerFrameForTest(s<=0) clears it (honest "no base" state).
     void    setSecondsPerRowForTest(double s);
+    void    setMeasuredSecPerFrameForTest(double s);
     // Row offset (0=newest/top) -> "-Ns" label, top-to-bottom, exactly what
     // paintEvent draws. Empty when there is no honest time base / no rows.
     QStringList waterfallTimeTickLabelsForTest() const;
