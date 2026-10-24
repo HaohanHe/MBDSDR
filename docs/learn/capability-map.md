@@ -499,6 +499,18 @@ device_ui Phase 3（断连检测）超 8s 窗口的偶发失败三见未复现�
   插桩本身不宣称根治——它保证下次失败自带定位数据。**PAT 轮换仍未办
   （用户信任面）。**
 
+**GitHub git 端点认证 scheme 变化（phase77 实测，操作面）**：同一枚 classic
+PAT，`Authorization: token <PAT>` 打 `api.github.com` 与 `git-upload-pack`
+（匿名可读的公开仓）均 200，但打 `git-receive-pack` 返回 **401**；换
+`Authorization: Basic base64(user:PAT)` 后 200，push 成功。即 GitHub 的 git
+智能 HTTP 端点已不再接受 `token` scheme（与 2021 年弃用密码认证的收尾一致），
+**后续推送一律用 Basic 变体**：
+`git -c http.extraHeader="Authorization: Basic $(printf 'user:PAT' | base64 -w0)" push`
+（一次性传参，不落 config/URL/磁盘）。排障时勿被「could not read Username」
+误导成 helper 故障——那是 401 后 git 回落交互提示的表象；先用 curl 分 scheme
+打 receive-pack 端点即可定位。另：本环境偶发 TCP 连不上 github.com（134s
+超时），重试即可，非认证问题。
+
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
