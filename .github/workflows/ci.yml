@@ -234,12 +234,23 @@ jobs:
         # 用 apt 装的 Qt6（/usr/lib）时无需 LD_LIBRARY_PATH；
         # 若按上面 (推荐) 切到 aqtinstall 固定 6.8.2，须在此 env 追加
         #   LD_LIBRARY_PATH: $HOME/Qt/6.8.2/gcc_64/lib
-        # -j 并行：155 个测试串行跑太久；--timeout 防单个测试挂死拖垮整个 job。
-        # 本机 Windows/MinGW/Qt 6.8.2 实测 155/155 全绿，Linux 若红属环境差异，
-        # 靠下面上传的 LastTest.log 定位，不要凭猜测改代码。
+        # 并行度取证（phase75 实测，不猜）：-j$(nproc) 在 32 核机上必现
+        # spectrum_display 瀑布图时间刻度族失败——两次 -j32 全套分别曝露于
+        # waterfallTimeTickLabelsAreRealSeconds（释放时基后 tick 未清空，
+        # test_spectrum_display.cpp:881）与 waterfallTimeTickHonestEmptyState
+        # （无时基却画出 tick，:904）。机制：两例预设「紧密推帧循环的帧间
+        # 间隔必被判为亚毫秒从而拒测时基」，CPU 争抢下该前提不成立，EWMA
+        # 测到时基后 tick 合理出现——用例与环境的耦合，非产品缺陷（两例处
+        # 已写时序敏感注释）。该族隔离单跑 3/3 全过、-j4 全套全过、-j32
+        # 全套必现失败。device_ui 的 device-pull 时序用例同为既有 flaky
+        # （phase72 实证，phase74 还撞过一次 -j4 重负载失败，capability-map
+        # 有登记）。故 CI 固定 -j4：并行收益仍在（实测全套约 71s，串行约
+        # 189s），又不踩时序 flaky。「Linux 红」不是环境差异，是并行度问题；
+        # 根治需把时基改为可注入（未做，登记欠账）。
+        # --timeout 防单个测试挂死拖垮整个 job。
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build --output-on-failure -j"$(nproc)" --timeout 300
+        run: ctest --test-dir build --output-on-failure -j4 --timeout 300
 
       - name: 上传 ctest 日志（失败时取证）
         if: failure()

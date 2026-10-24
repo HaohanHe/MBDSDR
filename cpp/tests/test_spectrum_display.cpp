@@ -847,6 +847,18 @@ void TestSpectrumDisplay::bookmarkOverlayRefeedsUpdate() {
 // count seconds into the past going down. With a pinned honest row period, the
 // label sequence must read now -> -N.Ns at every kWaterfallTimeTickRows, and the
 // bottom boundary must land on the oldest filled row.
+//
+// TIMING-SENSITIVE (phase75 forensics, do not "fix" by deleting): under a
+// -j32 full-suite load this test and its sibling waterfallTimeTickHonest-
+// EmptyState each failed once (at the release-pin assertion, :881, and at
+// :904 respectively). Mechanism: both assume the tight frame-push loop's
+// inter-frame gaps are rejected as sub-ms so no time base gets measured;
+// under CPU contention that premise breaks, the EWMA legitimately measures a
+// base, and ticks correctly persist after the pin is released. That is a
+// test/environment coupling, not a product defect. Evidence: isolated runs
+// 3/3 pass, -j4 full suite passes, -j32 full suite fails every time. CI is
+// therefore pinned to -j4 (see .github/workflows/ci.yml). Root fix would be
+// an injectable time base (tracked as debt, not done).
 void TestSpectrumDisplay::waterfallTimeTickLabelsAreRealSeconds() {
     // Deterministic 1:1 trace/waterfall split (a prior divider-drag suite may
     // have persisted a traceShare_ we must not inherit).
@@ -885,6 +897,10 @@ void TestSpectrumDisplay::waterfallTimeTickLabelsAreRealSeconds() {
 // Honest empty states: a fresh canvas has no rows; a fed canvas with no measured
 // time base (tight test loop -> every inter-frame gap is rejected as sub-ms) must
 // also paint nothing -- the axis never guesses a frame rate.
+// TIMING-SENSITIVE (see the phase75 note above waterfallTimeTickLabelsAreReal-
+// Seconds): this very "sub-ms" premise is what broke under -j32 load -- gaps
+// exceeded the rejection threshold, the EWMA measured a base, and ticks
+// legitimately appeared (observed FAIL at :904). Not a product defect.
 void TestSpectrumDisplay::waterfallTimeTickHonestEmptyState() {
     // Fresh widget: no frame pushed -> no rows -> no ticks.
     {
