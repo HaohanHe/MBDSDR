@@ -511,6 +511,30 @@ PAT，`Authorization: token <PAT>` 打 `api.github.com` 与 `git-upload-pack`
 打 receive-pack 端点即可定位。另：本环境偶发 TCP 连不上 github.com（134s
 超时），重试即可，非认证问题。
 
+**截图中文全是方框（tofu）——根因是渲染环境无 CJK 字体（phase78 已修复）**：
+现象：offscreen 渲染的中文 UI 截图里每个字都是空心方框。根因**不是产品
+缺陷**，而是渲染环境缺中文字体——受控实验（隔离 fontconfig：空 dir + 独立
+cache）铁证：同一程序 families 239→3、hasCJK 1→0、520×60 的标签从正常中文
+变为一字一方框。本开发沙箱装有 Noto CJK（zh 字体 30 条）故本机不复现；
+**CI runner（ubuntu-latest）镜像不带任何 CJK 字体**，是实际受害面。
+
+受影响链路盘点：① CI python job 的 PySide6 offscreen UI 用例留痕；
+② CI cpp job 的 Qt offscreen；③ CI flutter job 的
+`mobile/test/sky_screenshot_test.dart`——它真实导出截图到
+`mobile/scratch/*.png`（非 golden 对比），是最直接的方框产出点；
+④ 开发者 Linux 机上手动编译的 `ui_shot_*` 截图工具（CMake 注释已标明
+NOT registered with ctest，CI 从不跑它们）。
+
+修复（三管齐下）：① 三个 CI job 均装 `fonts-noto-cjk`（apt），
+注释里写清根因与实验出处；② 新增 **`test_font_cjk_guard`**（ctest #156，
+全套 156/156 绿）把「环境缺字体」从隐形质量问题变成显性红灯——判据是
+**字形存在性**（`QFontMetricsF::inFont()`：tofu 方框也有 advance 宽度，
+纯 metrics 判据测不出，必须查字形），失败信息带四平台安装指引；
+双向验证：有字体 Passed（families=239）、空 fontconfig 下 Failed 且报
+`bestCoverage=0/8`。③ 与既有纪律对齐：`experiments/common/plot.py` 的
+「图内文字一律英文」是**实验图表侧**的避字体依赖策略，继续保留；产品 UI
+是中文产品，走**字体供给**路线。两者双轨不冲突。
+
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验

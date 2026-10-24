@@ -108,6 +108,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgl1 libegl1 libxkbcommon0 libdbus-1-3
+          # Phase78: ubuntu-latest 镜像不自带任何 CJK 字体，PySide6 offscreen
+          # 渲染中文会出一字一方框（tofu；根因实验见 test_font_cjk_guard 与
+          # docs/learn/capability-map phase78）。装 Noto CJK 让 UI 用例的
+          # 渲染留痕（截图/日志）可读。cpp/flutter job 同样安装。
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
 
       - name: 安装 Python 依赖
         run: |
@@ -161,6 +166,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Phase78: Flutter Linux 渲染走 fontconfig，runner 无 CJK 字体时
+      # test/sky_screenshot_test.dart 导出的 mobile/scratch/*.png 里中文全是
+      # 方框（该测试真实产出截图，非 golden 对比）。装 Noto CJK 后导出可读。
+      - name: 安装中文字体（截图导出可读）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -216,7 +229,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build \
             qt6-base-dev qt6-multimedia-dev qt6-tools-dev \
-            libgl1-mesa-dev pkg-config
+            libgl1-mesa-dev pkg-config \
+            fonts-noto-cjk
+          # ↑ fonts-noto-cjk（phase78）：ubuntu-latest 无 CJK 字体，Qt offscreen
+          # 渲染中文出方框；装后 UI 测试留痕可读，且 test_font_cjk_guard 护栏
+          # 在此环境为绿（缺字体时该测试会红并给出安装指引）。
 
       - name: CMake 配置
         working-directory: cpp
@@ -241,14 +258,16 @@ jobs:
         # 「紧密推帧循环的帧间隔必被判为亚毫秒从而拒测时基」，CPU 争抢下该
         # 前提不成立、EWMA 合理测到时基——用例与环境的耦合，非产品缺陷。
         # phase76 已根治：新增 setMeasuredSecPerFrameForTest 测试缝注入/
-        # 清除 EWMA 时基状态，两用例改为确定性驱动；-j32 全套复测 155/155
-        # 全绿。task_async 的 requestStop 竞态（run() 开跑清停止标志吞掉
+        # 清除 EWMA 时基状态，两用例改为确定性驱动；-j32 全套复测全绿。
+        # task_async 的 requestStop 竞态（run() 开跑清停止标志吞掉
         # 提前 stop）同轮改为等第一步真实开始再停，-j32 复测全绿。
         # CI 仍固定 -j4：并行收益仍在（实测全套约 71s，串行约 189s），
         # 且 device_ui 的断连检测仍是偶发超时型 flaky（phase72/74/76 共
-        # 四见，未根因定位，capability-map 有登记），-j4 可降低其触发面。
+        # 三见，phase77 已加失败自证插桩待下次现场，capability-map 有登记），
+        # -j4 可降低其触发面。
         # 「Linux 红」从来不是环境差异：phase75 是并行度问题，phase76 起
         # 两类根因均已消除。
+        # phase78 新增 font_cjk_guard（CJK 字体护栏，全套 156 个）。
         # --timeout 防单个测试挂死拖垮整个 job。
         env:
           QT_QPA_PLATFORM: offscreen
