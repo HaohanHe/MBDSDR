@@ -641,8 +641,10 @@ class NanoVNAClient:
         """抓取设备屏幕：返回 RGB565 小端裸帧（320x240，见 CAPTURE_* 常量）。
 
         协议（实测固件 1.2.50）：发 "capture\\r" -> 回显行 -> 153600 字节
-        RGB565 小端裸帧 -> "ch> " 提示符。115200 波特下帧传输约 13.4s，
-        故默认超时 30s。传输层需实现 read_bytes()；超时/缺字节诚实抛
+        RGB565 小端裸帧 -> "ch> " 提示符。USB CDC 实际不理会 115200 波特率，
+        320x240 帧约 0.5s 传完（experiments/nanovna_rh770 真机实测证伪了
+        本注释早前"约 13.4s"的波特率折算估算），默认超时 30s 保留作慢环境
+        余量。传输层需实现 read_bytes()；超时/缺字节诚实抛
         NanoVNADriverError，绝不返回半帧充数。
         """
         if not self._transport.is_open:
