@@ -458,6 +458,34 @@ test_module_system importlib 既有失败）外无新增。**剩余欠账：瀑�
 族时基可注入化；device-pull 时序 flaky（phase72 起登记在案）；PAT 轮换
 （token 已多次明文暴露，属用户信任面）。**
 
+**瀑布图时基可注入化 + task_async 中断确定性化（phase76，两项均销账）**：
+接 phase75 登记的第一项欠账。两项根修，同属「测试假设了墙钟/调度配合」类：
+
+1. **spectrum_display 瀑布图时间刻度族（已根治）**：新增测试缝
+   `setMeasuredSecPerFrameForTest`（注入/清除 EWMA 时基状态，与既有的
+   pin 缝分工：pin 只管生效值，新缝管测量状态），两个用例改为显式驱动
+   「无时基」/「时基=X」两种状态，不再依赖紧密推帧循环恰被拒测为亚毫秒。
+   第三个断言块守住注入缝非空转（注入后 tick 必须出现）。取证：隔离单跑
+   3/3 过；**-j32 全套两轮中 spectrum_display 均全绿**（phase75 时该族
+   必现失败；第二轮挂的是 task_async，见下条，已同轮根治）——CI 保持 -j4
+   （并行收益仍在），但 flaky 已根除，不再靠并行度绕行。
+2. **task_async 中断截断（已根治）**：`requestStopHaltsLaterSteps` 原用固定
+   `qWait(60)` 等「第一步已开跑」，重负载下线程未开跑时
+   `TaskOrchestrator::run()` 开头的 `stop_.store(false)`（防上次中断的陈旧
+   标志杀死下次运行，刻意设计）会把提前的 stop 吞掉，计划 6/6 跑完
+   （-j32 实测 FAIL）。改为 `QSignalSpy` 等第一步 `stepUpdated` 真实发生
+   再 stop——确定性，且不碰产品语义（UI 单飞禁用停止按钮，用户碰不到该
+   窗口；「排队中的运行被提前停止取消」若要做属新功能设计，已在测试注释
+   如实登记）。
+
+**device_ui 仍为偶发欠账（phase76 更新证据）**：phase72/74/76 各一见、
+共三见失败（形态均为 Phase 3 断连检测超 8s 窗口，phase72 日志实证）；
+本轮 24 核占压复现 10/10 未能按需触发（偶发非必现；本轮失败详情因
+LastTest.log 被同序列后续运行覆盖而丢失——教训：flaky 触发当刻就要固证）。
+随后 task_async 修复同 bin 下 -j4 三连全绿、-j32 全套 155/155 全绿
+（device_ui 与 task_async 无共享状态，三连绿不构成因果，只是佐证偶发）。
+待复现后根因定位或加宽窗口，暂维持登记。**PAT 轮换仍未办（用户信任面）。**
+
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
 lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
