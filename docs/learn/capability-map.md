@@ -543,12 +543,15 @@ ever 双 0），固证于 docs/learn/phase79/device-ui-drop-stall-repro.md。
 三种可自动分类形态（单轮 events 卡 ~10s / pred 末次卡 / 每轮 ~140ms
 累计），下次红运行的 stats(timeout) 行即可定性。三层诊断：失败自证
 （phase77）+ 慢轮告警（>500ms 打 pred/events 拆分）+ 每调用 stats 画像。
-猎杀战果：隔离累计 53 轮仅 1 中；`-j4` 全套套件 8 轮 0 中（历史三见的
-共同现场本轮未复现）；「重建后首轮」定向实验进行中。七個停摆源假设已
-排查排除（harness getter 无锁 / 引擎锁 ≤50ms poll 超时 / reconnect 关闭 /
-caps 快照锁独立 / refreshSpacetimeView 轻量 / QMediaDevices 探测 0ms /
-USB 枚举轻量），余下主嫌疑是系统级停顿（待 gdb 现场）。窗口仍不加宽
-（phase40 决议）。**PAT 轮换仍未办（用户信任面）。**
+猎杀战果：隔离累计 160+ 轮仅 1 中（~0.6%）；`-j4` 全套套件 8 轮 0 中
+（历史三见的共同现场本轮未复现）；「重建后首轮」定向 5 轮 0 中（模式
+不成立，上次是巧合）。猎杀渠道归零后收兵：下次任何环境复现都会自带
+stats(timeout) 定性行 + 慢轮拆分 + ever 标志，固证文档
+（docs/learn/phase79/device-ui-drop-stall-repro.md）即现场解读手册。
+七個停摆源假设已排查排除（harness getter 无锁 / 引擎锁 ≤50ms poll
+超时 / reconnect 关闭 / caps 快照锁独立 / refreshSpacetimeView 轻量 /
+QMediaDevices 探测 0ms / USB 枚举轻量），余下主嫌疑是系统级停顿（待
+gdb 现场）。窗口仍不加宽（phase40 决议）。**PAT 轮换仍未办（用户信任面）。**
 
 
 **GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
