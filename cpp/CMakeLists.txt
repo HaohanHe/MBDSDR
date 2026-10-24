@@ -1876,6 +1876,15 @@ target_link_libraries(test_ai_sessions_prod PRIVATE Qt6::Test Qt6::Widgets Qt6::
 add_test(NAME ai_sessions_prod COMMAND test_ai_sessions_prod)
 set_tests_properties(ai_sessions_prod PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+# Phase78: CJK font guard. Offscreen rendering without any CJK font draws every
+# Chinese glyph as a hollow box (root-caused via isolated fontconfig: families
+# 239 -> 3). CI runners ship no CJK font by default, so this turns the silent
+# "screenshots are all tofu" failure into a red test with fix instructions.
+add_executable(test_font_cjk_guard tests/test_font_cjk_guard.cpp)
+target_link_libraries(test_font_cjk_guard PRIVATE Qt6::Test Qt6::Gui)
+add_test(NAME font_cjk_guard COMMAND test_font_cjk_guard)
+set_tests_properties(font_cjk_guard PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # ============================================================================
 # Phase38 · Stage 3 -- test-suite stability: slow / heavy-UI labeling
 # ----------------------------------------------------------------------------
