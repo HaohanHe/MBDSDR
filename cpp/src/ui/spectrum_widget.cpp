@@ -408,6 +408,18 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     });
     topRow->addWidget(peakThreshSpin_);
 
+    // ---- Compact gain control (always visible in toolbar) ----
+    topRow->addWidget(new QLabel(QStringLiteral("增益"), this));
+    auto* gainSpin = new QSpinBox(this);
+    gainSpin->setObjectName("toolbarGainSpin");
+    gainSpin->setRange(static_cast<int>(tokens::kGainMinDb),
+                       static_cast<int>(tokens::kGainMaxDb));
+    gainSpin->setSuffix(" dB");
+    gainSpin->setToolTip(QStringLiteral("接收增益（负值=RF 衰减，SDR++ 风格）"));
+    connect(gainSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int v) { emit gainRequested(static_cast<double>(v)); });
+    topRow->addWidget(gainSpin);
+
     infoLabel_ = new QLabel(this);
     infoLabel_->setObjectName("monoInfo");
     infoLabel_->setText(" ");

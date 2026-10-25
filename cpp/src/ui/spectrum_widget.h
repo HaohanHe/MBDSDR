@@ -71,6 +71,7 @@ signals:
     void fftSizeRequested(int n);
     void windowTypeRequested(int w);
     void averageModeRequested(int a);
+    void gainRequested(double gainDb);
     void frequencyChanged(double newFreqHz);
     void bandwidthChanged(double newBandwidthHz);
     void visibleRangeChanged(double fLoHz, double fHiHz);

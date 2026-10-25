@@ -2810,6 +2810,8 @@ MainWindow::MainWindow(QWidget* parent)
             engine_, &dsp::SpectrumEngine::setWindowType);
     connect(spectrum_, &ui::SpectrumWidget::averageModeRequested,
             engine_, &dsp::SpectrumEngine::setAverageMode);
+    connect(spectrum_, &ui::SpectrumWidget::gainRequested,
+            engine_, &dsp::SpectrumEngine::onSetGain);
     // Zoom/pan lockstep between the trace and the waterfall is now intrinsic:
     // both are drawn by the same canvas from one visible window.
 
