@@ -68,6 +68,19 @@ double loadSpecFraction() {
     return clampd(d, kSpecFracMin, kSpecFracMax);
 }
 
+// SDR++ 风格叠加开关（view/wfOverlay）。缺省/垃圾值 -> 诚实默认开。
+bool loadWfOverlay() {
+    mbdsdr::core::AppSettings s;
+    const QVariant v = s.value(QStringLiteral("view/wfOverlay"));
+    if (v.type() == QVariant::Bool) return v.toBool();
+    if (v.type() == QVariant::String) {
+        const QString t = v.toString().trimmed().toLower();
+        if (t == QLatin1String("true")) return true;
+        if (t == QLatin1String("false")) return false;
+    }
+    return true;    // 默认叠加（SDR++ 形态）
+}
+
 // Resolve a requested waterfall ring depth to a legal choice. Only the named
 // tokens::kWaterfallDepthChoices[] are honoured; a value outside that set
 // (hand-edited config) honestly falls back to tokens::kWaterfallDepthDefault.
@@ -165,6 +178,21 @@ SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     setAutoFillBackground(true);
     // Restore the user's last divider placement (honest default / clamped).
     traceShare_ = loadSpecFraction();
+    // SDR++ 风格叠加（waterfall 铺满 + trace 叠画）。
+    wfOverlay_ = loadWfOverlay();
+    // 启动时重应用持久化的外部色图（set_color_map 写下的 view/wfColormapFile）。
+    // 之前只有运行时命令会加载，重启后静默回退内置色板——用户看到"经典"。
+    // 这里补上；文件缺失/非法则诚实回退内置（不崩、不糊）。
+    {
+        mbdsdr::core::AppSettings s;
+        const QString cmPath = s.value(QStringLiteral("view/wfColormapFile")).toString();
+        if (!cmPath.isEmpty()) {
+            QString cmErr;
+            if (!loadColormapFromFile(cmPath, &cmErr)) {
+                qWarning() << "[mbdsdr] 持久化色图加载失败，回退内置:" << cmErr;
+            }
+        }
+    }
     // Restore the user's last waterfall ring depth (honest default if unset or
     // illegal). The first allocateRing() honours requestedRingDepth_.
     requestedRingDepth_ = loadRequestedRingDepth();
@@ -197,6 +225,20 @@ void SpectrumDisplay::recomputeGeometry() {
     const int fixedV = lay_.stripH + lay_.gapPx + lay_.splitGap;
     int pool = lay_.botPad - lay_.topPad - fixedV;
     if (pool < 0) pool = 0;
+
+    if (wfOverlay_) {
+        // SDR++ 形态：waterfall 铺满整个绘图池，trace 同区叠画（不分上下）。
+        const int traceTop = lay_.topPad;
+        lay_.traceH = pool;
+        lay_.fallsH = pool;
+        lay_.traceRect = QRect(lay_.plotX0, traceTop, lay_.plotW, pool);
+        lay_.stripRect = QRect(lay_.plotX0, traceTop, lay_.plotW, 0);
+        lay_.splitY = traceTop + pool;
+        lay_.fallsRect = QRect(lay_.plotX0, traceTop, lay_.plotW, pool);
+        const int half = scaled(kDividerHitHalfH);
+        lay_.splitZone = QRect(lay_.plotX0, lay_.splitY - half, lay_.plotW, 2 * half);
+        return;
+    }
 
     const int minTrace = scaled(kSpecAreaMinH);
     const int minFalls = scaled(kWfAreaMinH);
@@ -1019,17 +1061,21 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
     const QRect falls = lay_.fallsRect;
 
     // --- trace background + dB grid --------------------------------------
-    p.fillRect(trace, QColor(tokens::kSpectrumBg));
-    QPen gridPen(tokens::rgbaA(tokens::kTextAlphaFaint), 1);
-    p.setPen(gridPen);
-    const float gridStep = static_cast<float>(dbGridStepDb_);
-    for (float db = std::ceil(dbFloorDb_ / gridStep) * gridStep;
-         db <= dbCeilDb_; db += gridStep) {
-        const int y = dbToY(db);
-        p.drawLine(trace.left(), y, trace.right(), y);
-        p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),
-                   y + tokens::scaled(tokens::kDbLabelOffsetY),
-                   QString::number(static_cast<int>(db)));
+    // 叠加模式（SDR++ 形态）下 waterfall 铺满作底，跳过 trace 背景与 dB 网格，
+    // 否则网格线会把瀑布噪底糊花；dB 信息由左侧 gutter 刻度承担。
+    if (!wfOverlay_) {
+        p.fillRect(trace, QColor(tokens::kSpectrumBg));
+        QPen gridPen(tokens::rgbaA(tokens::kTextAlphaFaint), 1);
+        p.setPen(gridPen);
+        const float gridStep = static_cast<float>(dbGridStepDb_);
+        for (float db = std::ceil(dbFloorDb_ / gridStep) * gridStep;
+             db <= dbCeilDb_; db += gridStep) {
+            const int y = dbToY(db);
+            p.drawLine(trace.left(), y, trace.right(), y);
+            p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),
+                       y + tokens::scaled(tokens::kDbLabelOffsetY),
+                       QString::number(static_cast<int>(db)));
+        }
     }
 
     // --- spectrum polyline -------------------------------------------------
@@ -1244,6 +1290,28 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         }
         p.setPen(QPen(tokens::cardEdge(), 1));
         p.drawRect(falls);
+    }
+
+    // --- SDR++ 叠加：waterfall 作底之后，把 trace 叠画上去 -----------------
+    // 白线 + 半透明，压在蓝色噪底上仍清晰；无 waterfall 数据时（如静态帧）
+    // 这条线就是唯一可见的谱，行为与经典模式一致。
+    if (wfOverlay_ && haveFrame_ && bins > 0 && !frame_.dbfs.empty()) {
+        const double bandLoOv = frameF0Hz_ - frameFsHz_ / 2.0;
+        const double binHzOv = frameFsHz_ / bins;
+        QPolygonF line;
+        for (int i = 0; i < bins; ++i) {
+            const double f = bandLoOv + (i + 0.5) * binHzOv;
+            const int x = xForFreq(f, fLo, span);
+            if (x < trace.left() - 2 || x > trace.right() + 2) continue;
+            line << QPointF(x, dbToY(frame_.dbfs[i]));
+        }
+        if (!line.isEmpty()) {
+            // SDR++ 形态：红线压蓝瀑布（白线会被同亮度的噪底吃掉）。
+            QPen tp(QColor(255, 60, 60, 235), 1.3);
+            tp.setCosmetic(true);
+            p.setPen(tp);
+            p.drawPolyline(line);
+        }
     }
 
     // --- waterfall vertical time axis (left gutter, off the data) -----------

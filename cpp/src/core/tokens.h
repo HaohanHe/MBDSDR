@@ -307,11 +307,11 @@ inline constexpr double kPpmMax = 100.0;
 inline constexpr double kPpmStep = 0.1;
 
 // Spectrum dB range (adjustable via spinboxes)
-inline constexpr int    kDbSpinLowerMin = -120;   // lower spinbox allowed min
+inline constexpr int    kDbSpinLowerMin = -140;   // lower spinbox allowed min
 inline constexpr int    kDbSpinLowerMax = -20;    // lower spinbox allowed max
 inline constexpr int    kDbSpinUpperMin = -40;    // upper spinbox allowed min
 inline constexpr int    kDbSpinUpperMax = 20;     // upper spinbox allowed max
-inline constexpr int    kDbLowerDefault = -100;
+inline constexpr int    kDbLowerDefault = -130;
 inline constexpr int    kDbUpperDefault = 0;
 // dB reference gridline spacing (dB between horizontal grid lines + y labels).
 // Selectable from the spectrum toolbar (格线 combo): denser (10 dB) for a finer
@@ -679,8 +679,8 @@ inline constexpr const char* kSettingsKeyColormapFile = "view/wfColormapFile";
 // is exactly what the waterfall row combo offers; anything outside it falls back
 // to the default rather than being clamped mid-way (a ring depth has no sensible
 // continuous band -- only the named powers the ring buffer was tuned for).
-inline constexpr int kWaterfallDepthDefault = 256;
-inline constexpr int kWaterfallDepthChoices[] = { 128, 256, 512 };
+inline constexpr int kWaterfallDepthDefault = 2048;
+inline constexpr int kWaterfallDepthChoices[] = { 128, 256, 512, 1024, 2048, 4096 };
 inline constexpr const char* kSettingsKeyWfDepth = "view/wfDepth";
 
 // Waterfall scroll pause (SDR++ waterfall "scroll pause"). When ON the waterfall

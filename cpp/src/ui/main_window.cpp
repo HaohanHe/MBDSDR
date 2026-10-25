@@ -2700,6 +2700,10 @@ MainWindow::MainWindow(QWidget* parent)
                 // Route through the SAME pure formatter as the telemetry tick so
                 // the spinbox path and the readback path can never drift.
                 sbVfo_->setText(ui::fmtStripVfoFreq(mhz * 1e6));
+                // 与键盘微调路径（retuneNudge）保持一致：调谐后视图跟随。
+                // 否则 VFO 会走出视口——尤其远程 ControlHub tune 时视图钉在
+                // 首帧中心不动，频谱/瀑布画在引擎带宽外的死区，看着像"没数据"。
+                if (spectrum_) spectrum_->followTunedFrequency(mhz * 1e6);
             });
     // Recent-tune jump: a user-picked entry drives the NORMAL spinbox tune path
     // (setValue -> valueChanged -> engine), so the read-back record, the strip
@@ -3756,6 +3760,17 @@ void MainWindow::setupControlHttpServer() {
     // every endpoint dispatches onto the real SpectrumEngine on this home thread.
     controlHub_ = new control::ControlHub(this);
     controlHub_->setEngine(engine_);
+    // 远程 tune（ControlHub/HTTP）与 UI 调谐主路径同步：cmdTune 只动引擎，
+    // 若不同步 freqSpin_，显示中心仍停在旧值——频谱/瀑布画在引擎带宽外的
+    // 死区，看起来像"数据断了/瀑布没了"。这里把引擎回读的中心喂回
+    // freqSpin_ 走主路径（valueChanged handler 自带 read-back 防回环），
+    // 与手输频率行为零分叉。
+    connect(controlHub_, &control::ControlHub::commandExecuted, this,
+            [this](const QString& cmd, bool ok) {
+                if (cmd != QLatin1String("tune") || !ok || !engine_) return;
+                const double hz = engine_->centerFreq();
+                if (hz > 0.0) freqSpin_->setValue(hz / 1e6);
+            });
     // AIGUI P0-b: hand the live workspace controller to the headless/HTTP hub so
     // arrange_workspace / get_workspace_layout / list_ui_components / reset_workspace
     // dispatch to the real three-column widgets (honest not-injected otherwise).

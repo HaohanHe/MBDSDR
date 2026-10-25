@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 VALID_MODES = ("AM", "DSB", "FM", "WFM", "NFM", "USB", "LSB", "CW")
 
 # 支持的解码器类型
-SUPPORTED_DECODERS = ("adsb", "aprs", "noaa_apt", "meteor")
+SUPPORTED_DECODERS = ("adsb", "aprs", "noaa_apt", "meteor",
+                      "rds", "sstv", "ft8", "wspr", "pocsag", "acars")
 
 # 音频输出采样率（解调后送声卡的统一速率）
 AUDIO_FS = 48_000.0
@@ -853,15 +854,24 @@ class SDRController:
 
     @staticmethod
     def _resolve_decode_fn(dt: str) -> Optional[Callable]:
-        """按类型懒加载解码器函数；缺失返回 None（不崩）。"""
+        """按类型懒加载解码器函数；缺失/无流式函数返回 None（不崩，队列空）。
+
+        只有 IQ 流式解码器在这里接；文件级/批处理解码器（ft8/wspr/aprs/
+        noaa_apt/sstv/pocsag/acars…，见 decoders.py）没有流式入口，流式场景
+        诚实空跑——文件级请走 CLI --decode-file（解锁 decode_digital_mode 全家）。
+        """
         try:
             if dt == "adsb":
                 from ..adsb_lite import decode_adsb  # type: ignore
 
                 return decode_adsb
+            if dt == "rds":
+                from ..rds_lite import decode_rds  # type: ignore
+
+                return decode_rds
         except Exception:
             return None
-        return None  # 其余类型按 best-effort：无流式函数时队列保持空
+        return None
 
     def stop_decoder(self, handle: str) -> None:
         """停止解码器并释放句柄。"""
