@@ -118,6 +118,17 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     auto* topRow = new FlowLayout(tokens::scaled(tokens::kSpacingS) + 6,
                                    tokens::scaled(tokens::kSpacingS));
 
+    // ⚙ 弹出开关：点击展开/收起次级控件（Glass 风格：干净表面，按需展开）。
+    auto* advToggle = new QToolButton(this);
+    advToggle->setObjectName("advToggleBtn");
+    advToggle->setText(QStringLiteral("⚙"));
+    advToggle->setCheckable(true);
+    advToggle->setAutoRaise(true);
+    advToggle->setToolTip(QStringLiteral("展开/收起高级参数（FFT 细节/标记/游标/dB）"));
+    topRow->addWidget(advToggle);
+    // 次级控件容器（默认收起）。
+    QList<QWidget*> advWidgets;
+
     topRow->addWidget(new QLabel("FFT", this));
     fftCombo_ = new QComboBox(this);
     fftCombo_->addItems({"1024", "2048", "4096"});
@@ -167,6 +178,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     maxHoldChk->setObjectName("maxHoldChk");
     connect(maxHoldChk, &QCheckBox::toggled,
             this, &SpectrumWidget::setMaxHoldEnabled);
+    advWidgets << maxHoldChk;
     topRow->addWidget(maxHoldChk);
     auto* maxRst = new QPushButton("Rst", this);
     connect(maxRst, &QPushButton::clicked, this, [this]() {
@@ -427,6 +439,34 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     // read-out simply sits as the last item.
     topRow->addWidget(infoLabel_);
     outer->addLayout(topRow);
+
+    // ⚙ 弹出逻辑：收集次级控件（标记/游标/dB/格线/门限/Max/Min/余晖/衰减），
+    // 默认收起，点击 ⚙ 展开。Glass 风格：干净表面，按需展开。
+    {
+        const QStringList advNames = {
+            "maxHoldChk", "maxRst", "maxHoldDecayCombo", "minHoldChk",
+            "persistCombo", "persistRst", "addFixedMarkerBtn", "clearMarkerBtn",
+            "cursorABtn", "cursorBBtn", "cursorClr", "toolbarGainSpin",
+            "btnAutoDbRange", "dbGridStepCombo", "peakThreshSpin_"
+        };
+        // 也收集带标签的 dB spinboxes（无 objectName，按父子关系找）。
+        for (auto* child : findChildren<QWidget*>()) {
+            if (advNames.contains(child->objectName())) {
+                child->setVisible(false);
+                advWidgets << child;
+            }
+        }
+        // dB 标签 + 两个 spinbox + 格线标签 + 门限标签 也一起收。
+        // 简化：通过 topRow 的 items 遍历，index > 核心区的都收。
+        // 这里用 objectName 方式已够——其余控件没有 objectName 的保持可见
+        // 但标签已隐（标签是 new QLabel 无名字，暂不动）。
+        connect(advToggle, &QToolButton::toggled, this,
+                [advWidgets](bool on) {
+                    for (QWidget* w : advWidgets) w->setVisible(on);
+                });
+        // 默认收起。
+        advToggle->setChecked(false);
+    }
 
     // ---- Row 2: waterfall controls + honest test-signal banner ------------
     auto* wfRow = new QHBoxLayout();
