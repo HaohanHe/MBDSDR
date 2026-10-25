@@ -610,14 +610,14 @@ QJsonObject ControlHub::cmdSetMuted(const QJsonObject& a) {
 }
 
 QJsonObject ControlHub::cmdStartRecording(const QJsonObject&) {
-    const bool ok = engine_->startRecording();   // honest bool from the recorder
+    const bool ok = engine_->startRecording();
     QJsonObject o;
     o["ok"] = ok;
     if (ok) {
         o["command"] = "start_recording";
         o["path"] = engine_->recordingPath();
     } else {
-        o["error"] = QString::fromUtf8("录制启动失败");
+        o["error"] = QString::fromUtf8("录制启动失败（可能：已在录制/无数据流/文件不可写/采样率切换中）");
     }
     return o;
 }
