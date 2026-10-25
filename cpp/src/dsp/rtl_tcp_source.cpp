@@ -4,6 +4,7 @@
 #include <QDateTime>
 
 #include <cstring>
+#include <cmath>
 #include <mutex>
 
 #ifdef _WIN32
@@ -325,7 +326,10 @@ void RtlTcpSource::setSampleRate(double rateHz) {
 void RtlTcpSource::setGain(double gainDb) {
     gainDb_ = gainDb;
     sendCmd(0x03, 0);                  // manual gain mode
-    sendCmd(0x04, static_cast<quint32>(gainDb * 10));  // 0.1 dB units
+    // 协议是 0.1 dB 单位的 int32。负增益（衰减）必须先经 qint32 再重解释为
+    // quint32，否则 double→quint32 的负数转换是 UB（曾把 -10 dB 变成 ~4e9）。
+    sendCmd(0x04, static_cast<quint32>(
+                      static_cast<qint32>(std::lround(gainDb * 10))));
 }
 void RtlTcpSource::setRtlAgc(bool on) {
     // rtl_tcp has one gain-mode command (0x03); route the IF AGC to it.

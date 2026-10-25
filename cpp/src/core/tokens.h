@@ -273,7 +273,7 @@ inline constexpr int kPanelPadTop    = 16;
 inline constexpr double kFreqMinHz = 24e6;
 inline constexpr double kFreqMaxHz = 1700e6;
 inline constexpr double kFreqStepHz = 100e3;
-inline constexpr double kGainMinDb = 0.0;
+inline constexpr double kGainMinDb = -90.0;  // SDR++-style: negative = attenuation
 inline constexpr double kGainMaxDb = 49.6;
 inline constexpr double kGainStepDb = 0.6;
 inline const std::initializer_list<double> kSampleRatesHz = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
@@ -782,8 +782,8 @@ inline constexpr int kSMeterH         = 34;   // S-meter widget height
 inline constexpr int kSMeterW         = 220;  // S-meter widget width
 inline constexpr int kRssiTrendW      = 140;  // RSSI trend mini-strip width (base px; height = kSMeterH)
 inline constexpr int kTableMinSectionW = 36;  // data-table header minimum section width
-inline constexpr int kInitWinW        = 1280; // initial main-window width
-inline constexpr int kInitWinH        = 800;  // initial main-window height
+inline constexpr int kInitWinW        = 1180; // initial main-window width  (fits 1280x800 desktop incl. frame)
+inline constexpr int kInitWinH        = 720;  // initial main-window height (status bar must stay visible)
 inline constexpr int kSplitInitL      = 280;  // initial splitter size: left rail
 inline constexpr int kSplitInitM      = 800;  // initial splitter size: middle
 inline constexpr int kSplitInitR      = 280;  // initial splitter size: right rail

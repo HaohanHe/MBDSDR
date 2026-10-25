@@ -743,11 +743,64 @@ def detect_fhss(
 # 6. 通用数字解码框架（FT8/APRS/ADS-B）
 # ═══════════════════════════════════════════════════════
 
+def _read_wav_audio(input_path: str) -> Tuple[Optional[np.ndarray], float, Optional[str]]:
+    """读 .wav 为单声道浮点音频。返回 (audio, sample_rate, error)。"""
+    try:
+        import wave
+        with wave.open(input_path, "rb") as wf:
+            n_frames = wf.getnframes()
+            raw = wf.readframes(n_frames)
+            sw = wf.getsampwidth()
+            ch = wf.getnchannels()
+            sr = float(wf.getframerate())
+        if sw == 2:
+            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float64) / 32767.0
+        elif sw == 1:
+            audio = (np.frombuffer(raw, dtype=np.uint8).astype(np.float64) - 128.0) / 128.0
+        elif sw == 4:
+            audio = np.frombuffer(raw, dtype=np.int32).astype(np.float64) / 2147483647.0
+        else:
+            return None, 0.0, f"不支持的 WAV 采样宽度: {sw} 字节"
+        if ch > 1:
+            audio = audio.reshape(-1, ch).mean(axis=1)
+    except Exception as e:
+        return None, 0.0, f"读取 WAV 失败: {e}"
+    if audio.size == 0:
+        return None, sr, "WAV 中没有音频样本"
+    return audio, sr, None
+
+
+def _demod_iq_to_audio(input_path: str, sample_rate: float,
+                       out_sr: int = 12500) -> Tuple[Optional[np.ndarray], float, Optional[str]]:
+    """把 .cf32/.cfile 复基带做宽带 FM 鉴频并重采样到 out_sr（送音频级解码器用）。
+
+    返回 (audio, out_sr, error)。
+    """
+    try:
+        raw = np.fromfile(input_path, dtype=np.float32)
+        if raw.size < 4:
+            return None, 0.0, "IQ 样本太少"
+        iq = raw[0::2] + 1j * raw[1::2]
+        z = iq - np.mean(iq)
+        from scipy.signal import butter, sosfiltfilt, resample_poly
+        from math import gcd
+        inst = np.angle(z[1:] * np.conj(z[:-1])) * (float(sample_rate) / (2.0 * np.pi))
+        sos = butter(4, min(4500.0, float(sample_rate) / 2.0 - 1.0) / (float(sample_rate) / 2.0),
+                     btype="low", output="sos")
+        inst = sosfiltfilt(sos, inst)
+        g = gcd(int(out_sr), int(sample_rate))
+        audio = resample_poly(inst, out_sr // g, int(sample_rate) // g)
+    except Exception as e:
+        return None, 0.0, f"IQ 鉴频失败: {e}"
+    return np.asarray(audio, dtype=np.float64), float(out_sr), None
+
+
 def decode_digital_mode(
     input_path: str,
     mode: str,
     output_dir: str = None,
     sample_rate: float = 1e6,
+    baud: int = 512,
 ) -> Dict[str, Any]:
     """
     通用数字模式解码框架。
@@ -758,6 +811,13 @@ def decode_digital_mode(
     ft8:  需要 jt9/wsjtx（LDPC(174,91) 标准校验矩阵不可凭空编造），缺失时
           只做符号级频谱分析并诚实说明，不伪造解调结果。
     aprs: 可路由到内置 AX.25/AFSK(Bell202) 解码器；direwolf 为可选增强。
+    pocsag: 路由到内置 pocsag_decoder.pocsag_decode（FSK 1200/2400Hz 音调，
+          baud 支持 512/1200/2400）。.wav 直接解；.cf32 走宽带 FM 鉴频后解。
+    acars: 路由到内置 acars_decoder.ACARSDecoder（MSK 2400Hz/2400baud 带音频，
+          12.5kHz 走带）。.wav 直接解；.cf32 走宽带 FM 鉴频后解。
+    wspr: 完整译码需 wsprd（WSJT-X 套件，(250,50) 前向纠错 + 4-FSK 1.46Hz），
+          仓内无实现，缺失时诚实说明，不伪造呼号/网格。
+    meteor: 路由到内置 meteor_sat.meteor_lrpt_demod（QPSK→DQPSK→Viterbi 骨架）。
     """
     if not os.path.exists(input_path):
         return {"error": f"输入文件不存在: {input_path}"}
@@ -822,15 +882,93 @@ def decode_digital_mode(
         except Exception as e:
             result["analysis_error"] = str(e)
     elif mode == "ft8":
-        result["note"] = (
-            "FT8 完整解码依赖 jt9/wsjtx（LDPC(174,91) 标准稀疏校验矩阵 + 79 符号 "
-            "8-FSK/170Hz/6.25 波特）；当前环境未安装，不伪造解调结果。"
-        )
+        if available_tools:
+            result["note"] = (
+                f"FT8 完整解码依赖 jt9/wsjtx（LDPC(174,91) 标准稀疏校验矩阵 + 79 符号 "
+                f"8-FSK/170Hz/6.25 波特）；检测到外部工具 {available_tools[0]}，"
+                "可用其对 15s 时隙的 1500Hz 基带音频译码。"
+            )
+        else:
+            result["note"] = (
+                "FT8 完整解码依赖 jt9/wsjtx（LDPC(174,91) 标准稀疏校验矩阵 + 79 符号 "
+                "8-FSK/170Hz/6.25 波特）；当前环境未安装，不伪造解调结果。"
+            )
     elif mode == "aprs":
         result["note"] = (
             "APRS 为 1200 波特 AFSK(Bell202) over AX.25；内置 ax25.py 已具备 "
             "FM 鉴频+数字 PLL+CRC-16 能力（见 exp_ax25_performance），direwolf 为可选增强。"
         )
+    elif mode == "pocsag":
+        # 内置真解码：.wav 直接走音频；.cf32/.cfile 宽带 FM 鉴频后走音频
+        baud = int(baud) if baud in (512, 1200, 2400) else 512
+        if ext == ".wav":
+            audio, a_sr, err = _read_wav_audio(input_path)
+        elif ext in (".cf32", ".cfile"):
+            audio, a_sr, err = _demod_iq_to_audio(input_path, sample_rate)
+        else:
+            audio, a_sr, err = None, 0.0, f"POCSAG 需 .wav 音频或 .cf32 IQ，收到 {ext}"
+        if err:
+            result["error"] = err
+        else:
+            try:
+                from .pocsag_decoder import pocsag_decode
+                msgs = pocsag_decode(audio, a_sr, baud)
+                result["messages"] = msgs
+                result["num_messages"] = len(msgs)
+                result["baud"] = baud
+                result["note"] = (
+                    f"内置 multimon-ng 口径 POCSAG 解码（BCH(31,21) 纠错，{baud} baud）；"
+                    f"解出 {len(msgs)} 条消息。"
+                )
+            except Exception as e:
+                result["error"] = f"POCSAG 解码失败: {e}"
+    elif mode == "acars":
+        # 内置真解码：ACARS 为 MSK 2400Hz/2400baud 带音频（12.5kHz 走带）
+        if ext == ".wav":
+            audio, a_sr, err = _read_wav_audio(input_path)
+        elif ext in (".cf32", ".cfile"):
+            audio, a_sr, err = _demod_iq_to_audio(input_path, sample_rate, out_sr=12500)
+        else:
+            audio, a_sr, err = None, 0.0, f"ACARS 需 .wav 音频或 .cf32 IQ，收到 {ext}"
+        if err:
+            result["error"] = err
+        else:
+            try:
+                from .acars_decoder import ACARSDecoder
+                dec = ACARSDecoder(sample_rate=a_sr)
+                msgs = dec.decode_audio(audio)
+                result["messages"] = [m.to_dict() for m in msgs]
+                result["num_messages"] = len(msgs)
+                result["crc_ok_count"] = sum(1 for m in msgs if m.crc_ok)
+                result["note"] = (
+                    f"内置 MSK 解调+帧同步+解析（2400 baud），解出 {len(msgs)} 条 ACARS 消息"
+                    f"（CRC 通过 {sum(1 for m in msgs if m.crc_ok)} 条）。"
+                )
+            except Exception as e:
+                result["error"] = f"ACARS 解码失败: {e}"
+    elif mode == "wspr":
+        result["note"] = (
+            "WSPR 完整译码依赖 wsprd（WSJT-X 套件；(250,50) 前向纠错 + 4-FSK "
+            "1.46 波特/1.5Hz 音调间距）；仓内无实现，不伪造呼号/网格。"
+            "安装 wsjtx 后可用其 wsprd 译码 2 分钟时隙的 1500Hz 基带音频。"
+        )
+    elif mode == "meteor":
+        # Meteor-M2 LRPT：QPSK→差分→去交织→Viterbi 骨架（.cf32 复基带）
+        if ext in (".cf32", ".cfile"):
+            try:
+                raw = np.fromfile(input_path, dtype=np.float32)
+                iq = raw[0::2] + 1j * raw[1::2]
+                from .meteor_sat import meteor_lrpt_demod
+                d = meteor_lrpt_demod(iq, float(sample_rate))
+                result["lrpt"] = {k: d[k] for k in ("symbols", "coded_bits", "decoded_bits", "sps")}
+                result["note"] = (
+                    "内置 Meteor LRPT 解调骨架（QPSK→DQPSK 差分→卷积去交织→Viterbi）；"
+                    "帧解析与图像重组见 meteor_sat 工具面。"
+                )
+            except Exception as e:
+                result["error"] = f"Meteor LRPT 解调失败: {e}"
+        else:
+            result["error"] = f"Meteor LRPT 需 .cf32/.cfile 复基带，收到 {ext}"
 
     if not result.get("note"):
         if available_tools:

@@ -54,6 +54,7 @@
 #include <QAction>
 #include <QCursor>
 #include <QGuiApplication>
+#include <QScreen>
 #include <QClipboard>
 
 #include "dsp/vfo_manager.h"
@@ -602,7 +603,9 @@ MainWindow::MainWindow(QWidget* parent)
     srCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("采样率", srCombo_);
     gainSlider_ = new QSlider(Qt::Horizontal, gRx);
-    gainSlider_->setRange(0, 50);
+    // SDR++-style range: negative gain = RF attenuation (user request).
+    gainSlider_->setRange(static_cast<int>(tokens::kGainMinDb),
+                          static_cast<int>(tokens::kGainMaxDb));
     gainValue_ = new QLabel("0 dB", gRx);
     auto* gainRow = new QHBoxLayout;
     gainRow->addWidget(gainSlider_);
@@ -2576,24 +2579,21 @@ MainWindow::MainWindow(QWidget* parent)
     // first real read; never a fabricated "playing" state on a headless box.
     sbAudio_ = new QLabel("--", this);
     // SDR++-style S-meter: fed by the SAME real engine RSSI as sbRssi_.
+    // Measurement display -- MUST be click-through: a meter whose needle the
+    // user can push is a lie (万用表玻璃不能砸)。mouse-transparent 保证点击
+    // 不会命中它、也不会因命中它触发任何交互路径。
     sMeter_ = new ui::SMeterWidget(this);
-    // Mini RSSI/dBfs trend strip: the recent real-RSSI shape beside the meter.
-    // Fed by the same onRssiLevel value; NaN / link-down clears it honestly.
-    rssiTrend_ = new ui::RssiTrendWidget(this);
+    sMeter_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    sMeter_->setToolTip(QStringLiteral("S 表：真实引擎 RSSI（只读，不可拖动）"));
     for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_,
                       sbScan_, sbRec_, sbRssi_, sbSnr_, sbSquelch_, sbGnss_, sbAudio_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
     statusBar()->addPermanentWidget(sMeter_);
-    // Small breathing gap so the S-meter's S9 end-cap label never crowds the
-    // trend strip's card border regardless of DPI scaling.
-    {
-        auto* gap = new QWidget(this);
-        gap->setFixedWidth(tokens::scaled(6));
-        statusBar()->addPermanentWidget(gap);
-    }
-    statusBar()->addPermanentWidget(rssiTrend_);
+    // 状态栏最小高度：防止中央部件把状态栏挤成 0 高度（S 表直接消失）。
+    statusBar()->setMinimumHeight(tokens::scaled(tokens::kSMeterH) + 6);
+    // RSSI 趋势条（"心律图"）已移除：纯装饰、零决策价值，用户点名删。
     sbMode_->setText(demodCombo_->currentText());
 
     // ---- Engine wiring (engine_ created before UI construction) ----
@@ -4854,7 +4854,32 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
 
 void MainWindow::restoreUiState() {
     mbdsdr::core::AppSettings s;
-    restoreGeometry(s.value("geometry").toByteArray());
+    // 旧几何若超出屏幕可用区，直接丢弃（防止 1293x767 的历史值把状态栏
+    // 挤出屏幕、S 表消失）。在屏内才恢复。
+    const QByteArray savedGeom = s.value("geometry").toByteArray();
+    bool geomOk = false;
+    if (!savedGeom.isEmpty()) {
+        restoreGeometry(savedGeom);
+        const QRect avail = QGuiApplication::primaryScreen()
+                                ? QGuiApplication::primaryScreen()->availableGeometry()
+                                : QRect(0, 0, 1280, 800);
+        // frameGeometry 含 Win10+ 隐形边框，给 16px 容差。
+        const QRect fg = frameGeometry().adjusted(-16, -16, 16, 16);
+        geomOk = avail.contains(fg) && width() <= avail.width()
+                 && height() <= avail.height();
+    }
+    if (!geomOk) {
+        // 回落到 tokens 的初始尺寸，再钳到屏幕内。
+        resize(tokens::scaled(tokens::kInitWinW), tokens::scaled(tokens::kInitWinH));
+        const QRect avail = QGuiApplication::primaryScreen()
+                                ? QGuiApplication::primaryScreen()->availableGeometry()
+                                : QRect(0, 0, 1280, 800);
+        const int fw = frameGeometry().width()  - width();
+        const int fh = frameGeometry().height() - height();
+        resize(qMin(width(), avail.width() - fw - 4),
+               qMin(height(), avail.height() - fh - 4));
+        move(avail.left() + 2, avail.top() + 2);
+    }
 
     // User VFO display names (JSON by engine id); default empty, no presets.
     loadVfoNames();
@@ -5337,6 +5362,32 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
             offAnaTimer_->stop();
             offAnaSeek_->setValue(0);
             offAnaPos_->setText("-- / --");
+        }
+    });
+    // 保险丝：事件循环跑起来后再重应用持久化色板一次。此前构造内的两次
+    // loadColormapFromFile 实测会静默失败（下拉停在"经典"），而运行时
+    // set_color_map 路径生效。QTimer 保证在全部构造/restoreUiState 完成后
+    // 执行，排除任何"加载后被覆盖"的时序窗口。
+    QTimer::singleShot(0, this, [this]() {
+        if (!spectrum_) return;
+        if (ui::SpectrumDisplay* canvas = spectrum_->displayCanvas()) {
+            const QString savedFile = mbdsdr::core::AppSettings()
+                .value(tokens::kSettingsKeyColormapFile).toString();
+            if (!savedFile.isEmpty()) {
+                QString err;
+                if (canvas->loadColormapFromFile(savedFile, &err)) {
+                    // 同步色板下拉到"自定义"（三选一里没有，追加一项）。
+                    if (auto* pal = spectrum_->findChild<QComboBox*>("paletteCombo")) {
+                        if (pal->findText(QStringLiteral("自定义")) < 0)
+                            pal->addItem(QStringLiteral("自定义"));
+                        const int idx = pal->findText(QStringLiteral("自定义"));
+                        const QSignalBlocker block(pal);
+                        pal->setCurrentIndex(idx);
+                    }
+                } else {
+                    qWarning() << "[mbdsdr] 事件循环后色板加载仍失败:" << err;
+                }
+            }
         }
     });
 }

@@ -58,9 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--decode", metavar="TYPE",
                    help="启动流式解码器（adsb/rds 实时；其余模式见 --decode-file）")
     p.add_argument("--decode-file", metavar="PATH",
-                   help="文件级解码，解锁 ft8/wspr/aprs/adsb/noaa_apt/sstv 全家")
+                   help="文件级解码，解锁 ft8/wspr/aprs/adsb/noaa_apt/sstv/pocsag/acars/meteor 全家")
     p.add_argument("--mode", metavar="MODE", default=None,
-                   help="--decode-file 的模式（ft8/wspr/aprs/adsb/noaa_apt/sstv）")
+                   help="--decode-file 的模式（ft8/wspr/aprs/adsb/noaa_apt/sstv/pocsag/acars/meteor）")
+    p.add_argument("--channel", metavar="CH", default=None,
+                   help="--decode-file 的通道选择（noaa_apt: A/B/both，默认 both）")
+    p.add_argument("--baud", type=int, metavar="BAUD", default=None,
+                   help="--decode-file 的波特率（pocsag: 512/1200/2400，默认 512）")
+    p.add_argument("--output-dir", metavar="DIR", default=None,
+                   help="--decode-file 的输出目录（默认 ~/.mbdsdr/<mode>/）")
     p.add_argument("--tool", metavar="NAME",
                    help="调用注册工具（sdr_tools 工具面逃生门，含 60+ MCP 工具）")
     p.add_argument("--args", metavar="JSON", default="{}",
@@ -188,8 +194,10 @@ def run(argv: Optional[Sequence[str]] = None,
                       f"[{s['kind']}]")
 
         if args.decode_file:
-            # 文件级解码：解锁 decoders.py 的全家（ft8/wspr/aprs/adsb/noaa_apt/sstv）。
-            # 流式 --decode 只覆盖 IQ 流式解码器（adsb/rds）；文件级走这里。
+            # 文件级解码：解锁 decoders.py 的全家（ft8/wspr/aprs/adsb/noaa_apt/
+            # sstv/pocsag/acars/meteor）。流式 --decode 只覆盖 IQ 流式解码器
+            # （adsb/rds）；文件级走这里。参数经 --mode/--channel/--baud/
+            # --sample-rate/--output-dir 透传到 decoders.py 三入口。
             import json as _json
             mode = (args.mode or "").lower()
             if not mode:
@@ -197,19 +205,42 @@ def run(argv: Optional[Sequence[str]] = None,
                 if "apt" in low or "noaa" in low: mode = "noaa_apt"
                 elif "sstv" in low: mode = "sstv"
                 elif "ft8" in low: mode = "ft8"
+                elif "wspr" in low: mode = "wspr"
+                elif "pocsag" in low: mode = "pocsag"
+                elif "acars" in low: mode = "acars"
+                elif "meteor" in low or "lrpt" in low: mode = "meteor"
                 elif "aprs" in low: mode = "aprs"
                 elif "adsb" in low: mode = "adsb"
                 else:
-                    print("文件级解码需 --mode（ft8/wspr/aprs/adsb/noaa_apt/sstv）", file=sys.stderr)
+                    print("文件级解码需 --mode（ft8/wspr/aprs/adsb/noaa_apt/sstv/"
+                          "pocsag/acars/meteor）", file=sys.stderr)
                     return 3
+            # 解码采样率：--sample-rate 显式给；没给则按模式取默认
+            # （noaa_apt 20800Hz 音频、数字模式 1MHz 基带）。
+            dec_sr = args.sample_rate
             try:
                 from ..decoders import decode_digital_mode, decode_noaa_apt, decode_sstv
                 if mode == "noaa_apt":
-                    res = decode_noaa_apt(args.decode_file)
+                    kw = {"channel": (args.channel or "both")}
+                    if dec_sr is not None:
+                        kw["sample_rate"] = int(dec_sr)
+                    if args.output_dir:
+                        kw["output_dir"] = args.output_dir
+                    res = decode_noaa_apt(args.decode_file, **kw)
                 elif mode == "sstv":
-                    res = decode_sstv(args.decode_file)
+                    kw = {}
+                    if args.output_dir:
+                        kw["output_dir"] = args.output_dir
+                    res = decode_sstv(args.decode_file, **kw)
                 else:
-                    res = decode_digital_mode(args.decode_file, mode)
+                    kw = {}
+                    if dec_sr is not None:
+                        kw["sample_rate"] = float(dec_sr)
+                    if args.output_dir:
+                        kw["output_dir"] = args.output_dir
+                    if mode == "pocsag" and args.baud:
+                        kw["baud"] = int(args.baud)
+                    res = decode_digital_mode(args.decode_file, mode, **kw)
                 print(_json.dumps(res, ensure_ascii=False, indent=2, default=str))
             except Exception as e:
                 print(f"文件级解码失败: {e}", file=sys.stderr)
@@ -236,7 +267,10 @@ def run(argv: Optional[Sequence[str]] = None,
                         fn = getattr(mod, "register_tool_registry", None)
                         if callable(fn):
                             fn(reg)
-                    except Exception:
+                    except Exception as e:
+                        # 模块导入/注册失败不能无声跳过——否则工具面悄悄缺角
+                        print(f"[warn] 工具注册跳过 mbdsdr_ai.{_m.name}: {e}",
+                              file=sys.stderr)
                         continue
             except Exception as e:
                 print(f"工具自动发现失败: {e}", file=sys.stderr)
@@ -249,8 +283,9 @@ def run(argv: Optional[Sequence[str]] = None,
                 class _FakeAgent:
                     tool_registry = reg
                 register_sdr_tools(_FakeAgent())
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[warn] sdr_tools 收编失败（工具面将缺 sdr_* 工具）: {e}",
+                      file=sys.stderr)
             names = reg.get_tool_names()
             if args.tool not in names:
                 print(f"工具不存在: {args.tool}", file=sys.stderr)

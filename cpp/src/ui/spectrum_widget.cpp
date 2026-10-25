@@ -436,6 +436,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     wfRow->addWidget(scrollCombo_);
 
     paletteCombo_ = new QComboBox(this);
+    paletteCombo_->setObjectName("paletteCombo");
     paletteCombo_->addItems({"经典", "单色", "Viridis"});
     {
         mbdsdr::core::AppSettings s;
