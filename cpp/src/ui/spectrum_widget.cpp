@@ -115,7 +115,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     // FlowLayout: one row when wide (standard/hidpi), wraps to a second row when
     // narrow so the combos/buttons keep their readable size instead of being
     // crushed (Phase42 narrow-window fix).
-    auto* topRow = new FlowLayout(tokens::scaled(tokens::kSpacingS),
+    auto* topRow = new FlowLayout(tokens::scaled(tokens::kSpacingS) + 6,
                                    tokens::scaled(tokens::kSpacingS));
 
     topRow->addWidget(new QLabel("FFT", this));

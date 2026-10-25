@@ -45,6 +45,8 @@
 #include <QScroller>
 #include <QMap>
 #include <QFileDialog>
+#include <QTextStream>
+#include <QPixmap>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QElapsedTimer>
@@ -949,6 +951,73 @@ MainWindow::MainWindow(QWidget* parent)
     levelBar_->setFixedHeight(tokens::scaled(tokens::kLevelBarH));
     gAudLay->addWidget(levelBar_);
     leftLay->addWidget(gAud);
+
+    // ---- 工具：导出 + 数字模式开关（补齐 ControlHub 后端有、前端没的入口）----
+    {
+        auto* gTools = new QGroupBox(QStringLiteral("工具"), leftCard);
+        auto* gToolsLay = new QVBoxLayout(gTools);
+        // 频谱快照：导出当前频谱为 PNG（真实渲染，非占位图）。
+        auto* snapBtn = new QPushButton(QStringLiteral("导出频谱快照"), gTools);
+        snapBtn->setObjectName("exportSnapshotBtn");
+        snapBtn->setToolTip(QStringLiteral("将当前频谱/瀑布渲染为 PNG 图片"));
+        connect(snapBtn, &QPushButton::clicked, this, [this]() {
+            const QString path = QFileDialog::getSaveFileName(
+                this, QStringLiteral("导出频谱快照"),
+                QStringLiteral("spectrum.png"),
+                QStringLiteral("PNG (*.png)"));
+            if (path.isEmpty() || !spectrum_) return;
+            // Grab the real spectrum widget, not a drawn placeholder.
+            const QPixmap px = spectrum_->grab();
+            if (!px.save(path, "PNG"))
+                qWarning() << "[mbdsdr] 频谱快照写入失败:" << path;
+        });
+        gToolsLay->addWidget(snapBtn);
+        // 峰值表 CSV：把当前峰值列表写成 CSV。
+        auto* csvBtn = new QPushButton(QStringLiteral("导出峰值表 CSV"), gTools);
+        csvBtn->setObjectName("exportPeaksCsvBtn");
+        csvBtn->setToolTip(QStringLiteral("将频谱峰值检测表导出为 CSV"));
+        connect(csvBtn, &QPushButton::clicked, this, [this]() {
+            const QString path = QFileDialog::getSaveFileName(
+                this, QStringLiteral("导出峰值表"),
+                QStringLiteral("peaks.csv"),
+                QStringLiteral("CSV (*.csv)"));
+            if (path.isEmpty() || !spectrum_) return;
+            // 读峰值表真实行（peakTable_ 在 SpectrumWidget 里，findChild 取）。
+            auto* table = spectrum_->findChild<QTableWidget*>("peakTable");
+            QFile f(path);
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                qWarning() << "[mbdsdr] 峰值 CSV 写入失败:" << path;
+                return;
+            }
+            QTextStream ts(&f);
+            ts << "index,freq_mhz,strength_dbfs,delta_khz\n";
+            if (table) {
+                for (int r = 0; r < table->rowCount(); ++r) {
+                    const QString idx = table->item(r, 0) ? table->item(r, 0)->text() : QString();
+                    const QString fq  = table->item(r, 1) ? table->item(r, 1)->text() : QString();
+                    const QString db  = table->item(r, 2) ? table->item(r, 2)->text() : QString();
+                    const QString dk  = table->item(r, 3) ? table->item(r, 3)->text() : QString();
+                    ts << idx << ',' << fq << ',' << db << ',' << dk << '\n';
+                }
+            }
+            f.close();
+        });
+        gToolsLay->addWidget(csvBtn);
+        // 数字模式：FT8 / LRPT 开关（引擎直连）。
+        auto* ft8Chk = new QCheckBox(QStringLiteral("FT8 解码"), gTools);
+        ft8Chk->setObjectName("ft8Chk");
+        ft8Chk->setToolTip(QStringLiteral("开启/关闭 FT8 实时解码引擎"));
+        connect(ft8Chk, &QCheckBox::toggled,
+                engine_, &dsp::SpectrumEngine::setFt8Enabled);
+        gToolsLay->addWidget(ft8Chk);
+        auto* lrptChk = new QCheckBox(QStringLiteral("LRPT 解码"), gTools);
+        lrptChk->setObjectName("lrptChk");
+        lrptChk->setToolTip(QStringLiteral("开启/关闭 Meteor-M2 LRPT 实时解码"));
+        connect(lrptChk, &QCheckBox::toggled,
+                engine_, &dsp::SpectrumEngine::setLrptEnabled);
+        gToolsLay->addWidget(lrptChk);
+        leftLay->addWidget(gTools);
+    }
 
     auto* gRec = new QGroupBox("录制", leftCard);
     auto* gRecLay = new QVBoxLayout(gRec);
