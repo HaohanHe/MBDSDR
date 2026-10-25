@@ -809,6 +809,9 @@ target_link_libraries(test_spectrum_display PRIVATE mbdsdr_core)
 target_include_directories(test_spectrum_display PRIVATE src)
 target_link_libraries(test_spectrum_display PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_display COMMAND test_spectrum_display)
+# QT_QPA_PLATFORM=offscreen 供 headless CI。MinGW/Qt DLL 需在 PATH 中
+# （shell 跑通；ctest 子进程 PATH 继承差异见 font_cjk_guard 同类问题）。
+set_tests_properties(spectrum_display PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # dB axis auto-range + drag-tune/waterfall alignment contract (offscreen).
 add_executable(test_spectrum_autorange tests/test_spectrum_autorange.cpp)

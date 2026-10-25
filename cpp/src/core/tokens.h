@@ -245,7 +245,7 @@ inline constexpr int kSpacingXXL = 32;
 // =====================================================================
 // Sizes (base px, multiply by scaled() at runtime)
 // =====================================================================
-inline constexpr int kTopbarH          = 56;
+inline constexpr int kTopbarH          = 40;   // 压扁顶栏（频谱区更高）
 inline constexpr int kSplitterWidth    = 8;
 inline constexpr int kTouchMin         = 44;
 // Main-window floor (base px, scaled at runtime): keeps the 3-column layout
@@ -273,7 +273,7 @@ inline constexpr int kPanelPadTop    = 16;
 inline constexpr double kFreqMinHz = 24e6;
 inline constexpr double kFreqMaxHz = 1700e6;
 inline constexpr double kFreqStepHz = 100e3;
-inline constexpr double kGainMinDb = 0.0;
+inline constexpr double kGainMinDb = -90.0;  // SDR++-style: negative = attenuation
 inline constexpr double kGainMaxDb = 49.6;
 inline constexpr double kGainStepDb = 0.6;
 inline const std::initializer_list<double> kSampleRatesHz = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
@@ -307,11 +307,11 @@ inline constexpr double kPpmMax = 100.0;
 inline constexpr double kPpmStep = 0.1;
 
 // Spectrum dB range (adjustable via spinboxes)
-inline constexpr int    kDbSpinLowerMin = -120;   // lower spinbox allowed min
+inline constexpr int    kDbSpinLowerMin = -140;   // lower spinbox allowed min
 inline constexpr int    kDbSpinLowerMax = -20;    // lower spinbox allowed max
 inline constexpr int    kDbSpinUpperMin = -40;    // upper spinbox allowed min
 inline constexpr int    kDbSpinUpperMax = 20;     // upper spinbox allowed max
-inline constexpr int    kDbLowerDefault = -100;
+inline constexpr int    kDbLowerDefault = -45;   // 噪底 ~-37dBFS 落在色图底部=黑色
 inline constexpr int    kDbUpperDefault = 0;
 // dB reference gridline spacing (dB between horizontal grid lines + y labels).
 // Selectable from the spectrum toolbar (格线 combo): denser (10 dB) for a finer
@@ -653,16 +653,16 @@ inline constexpr WaterfallStop kWaterfallStopsViridis[] = {
 // =====================================================================
 inline constexpr int kDispLeftInset    = 50;   // dB label gutter (base px)
 inline constexpr int kDispRightInset   = 12;
-inline constexpr int kDispTopInset     = 9;
-inline constexpr int kDispBottomInset  = 8;
-inline constexpr int kDispFreqStripH   = 30;   // shared tick + label strip
-inline constexpr int kDispAreaGap      = 1;    // hairline between trace and strip
+inline constexpr int kDispTopInset     = 4;    // 顶部留白压缩（瀑布更高）
+inline constexpr int kDispBottomInset  = 3;    // 底部留白压缩（瀑布更高）
+inline constexpr int kDispFreqStripH   = 22;   // 频率轴条带（压扁给瀑布让高）
+inline constexpr int kDispAreaGap      = 0;    // 瀑布紧贴谱线（零间隙）
 inline constexpr int kDividerHitHalfH  = 4;    // draggable divider hit half-height
 inline constexpr int kSpecAreaMinH     = 120;  // min trace height (base px)
 inline constexpr int kWfAreaMinH       = 60;   // min waterfall height (base px)
 // Default share of the (trace + waterfall) height given to the trace.
 // 0.5 => spectrum and waterfall are roughly equal, both substantial.
-inline constexpr double kDefaultSpecFraction = 0.5;
+inline constexpr double kDefaultSpecFraction = 0.25;  // 25% trace / 75% waterfall (waterfall dominant)
 inline constexpr const char* kSettingsKeySpecFraction = "view/specFraction";
 inline constexpr const char* kSettingsKeyScrollSpeed  = "view/wfScrollSpeed";
 inline constexpr const char* kSettingsKeyPalette      = "view/wfPalette";
@@ -680,7 +680,7 @@ inline constexpr const char* kSettingsKeyColormapFile = "view/wfColormapFile";
 // to the default rather than being clamped mid-way (a ring depth has no sensible
 // continuous band -- only the named powers the ring buffer was tuned for).
 inline constexpr int kWaterfallDepthDefault = 256;
-inline constexpr int kWaterfallDepthChoices[] = { 128, 256, 512 };
+inline constexpr int kWaterfallDepthChoices[] = { 128, 256, 512, 1024, 2048, 4096 };
 inline constexpr const char* kSettingsKeyWfDepth = "view/wfDepth";
 
 // Waterfall scroll pause (SDR++ waterfall "scroll pause"). When ON the waterfall
@@ -782,8 +782,8 @@ inline constexpr int kSMeterH         = 34;   // S-meter widget height
 inline constexpr int kSMeterW         = 220;  // S-meter widget width
 inline constexpr int kRssiTrendW      = 140;  // RSSI trend mini-strip width (base px; height = kSMeterH)
 inline constexpr int kTableMinSectionW = 36;  // data-table header minimum section width
-inline constexpr int kInitWinW        = 1280; // initial main-window width
-inline constexpr int kInitWinH        = 800;  // initial main-window height
+inline constexpr int kInitWinW        = 1180; // initial main-window width  (fits 1280x800 desktop incl. frame)
+inline constexpr int kInitWinH        = 720;  // initial main-window height (status bar must stay visible)
 inline constexpr int kSplitInitL      = 280;  // initial splitter size: left rail
 inline constexpr int kSplitInitM      = 800;  // initial splitter size: middle
 inline constexpr int kSplitInitR      = 280;  // initial splitter size: right rail

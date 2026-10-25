@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 VALID_MODES = ("AM", "DSB", "FM", "WFM", "NFM", "USB", "LSB", "CW")
 
 # 支持的解码器类型
-SUPPORTED_DECODERS = ("adsb", "aprs", "noaa_apt", "meteor")
+SUPPORTED_DECODERS = ("adsb", "aprs", "noaa_apt", "meteor",
+                      "rds", "sstv", "ft8", "wspr", "pocsag", "acars")
 
 # 音频输出采样率（解调后送声卡的统一速率）
 AUDIO_FS = 48_000.0
@@ -576,8 +577,8 @@ class SDRController:
             if callable(bstop):
                 try:
                     bstop()
-                except Exception:
-                    pass
+                except Exception as e:  # pragma: no cover - 清理路径不崩，但要留痕
+                    logger.warning("后端 stop_audio 失败: %s", e)
         self._audio_backend_owned = False
         self._audio_stop.set()
         t = self._audio_thread
@@ -588,8 +589,8 @@ class SDRController:
         if self._player is not None and self._player is not False:
             try:
                 self._player.stop()
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as e:  # pragma: no cover
+                logger.warning("AudioPlayer.stop 失败: %s", e)
 
     def set_volume(self, db: float) -> None:
         """设置播放音量（dB，线性映射到 0..5 增益）。"""
@@ -598,8 +599,8 @@ class SDRController:
         if self._player is not None and self._player is not False:
             try:
                 self._player.set_gain(linear)
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as e:  # pragma: no cover
+                logger.warning("AudioPlayer.set_gain 失败: %s", e)
 
     def set_mute(self, muted: bool) -> None:
         """静音 / 取消静音。"""
@@ -607,8 +608,8 @@ class SDRController:
         if self._player is not None and self._player is not False:
             try:
                 self._player.set_muted(bool(muted))
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as e:  # pragma: no cover
+                logger.warning("AudioPlayer.set_muted 失败: %s", e)
 
     # ==================================================================
     # DSP：频谱 / IQ / 音频
@@ -853,15 +854,24 @@ class SDRController:
 
     @staticmethod
     def _resolve_decode_fn(dt: str) -> Optional[Callable]:
-        """按类型懒加载解码器函数；缺失返回 None（不崩）。"""
+        """按类型懒加载解码器函数；缺失/无流式函数返回 None（不崩，队列空）。
+
+        只有 IQ 流式解码器在这里接；文件级/批处理解码器（ft8/wspr/aprs/
+        noaa_apt/sstv/pocsag/acars…，见 decoders.py）没有流式入口，流式场景
+        诚实空跑——文件级请走 CLI --decode-file（解锁 decode_digital_mode 全家）。
+        """
         try:
             if dt == "adsb":
                 from ..adsb_lite import decode_adsb  # type: ignore
 
                 return decode_adsb
+            if dt == "rds":
+                from ..rds_lite import decode_rds  # type: ignore
+
+                return decode_rds
         except Exception:
             return None
-        return None  # 其余类型按 best-effort：无流式函数时队列保持空
+        return None
 
     def stop_decoder(self, handle: str) -> None:
         """停止解码器并释放句柄。"""
@@ -917,8 +927,8 @@ class SDRController:
             for name, n in SATELLITE_CATNR.items():
                 if int(n) == int(norad):
                     return name
-        except Exception:
-            pass
+        except Exception as e:  # pragma: no cover - 查表失败要留痕，不能假装"不在表中"
+            logger.warning("_norad_to_name 查表失败: %s", e)
         return None
 
     def get_satellite_pass(self, norad: int) -> dict:
@@ -1157,8 +1167,8 @@ class SDRController:
         if self._rc is not None:
             try:
                 self._rc.stop()
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as e:  # pragma: no cover - 清理路径不崩，但要留痕
+                logger.warning("远程控制服务停止失败: %s", e)
             self._rc = None
 
     def start_web_server(self, port: int = 8000) -> dict:
@@ -1179,8 +1189,8 @@ class SDRController:
         if self._web is not None:
             try:
                 self._web.stop()
-            except Exception:  # pragma: no cover
-                pass
+            except Exception as e:  # pragma: no cover - 清理路径不崩，但要留痕
+                logger.warning("Web 服务停止失败: %s", e)
             self._web = None
 
     def get_service_status(self) -> dict:
@@ -1278,8 +1288,8 @@ class SDRController:
 
             cpu = float(psutil.cpu_percent(interval=0.05))
             mem = float(psutil.virtual_memory().percent)
-        except Exception:
-            pass
+        except Exception as e:  # psutil 缺失是常见情况，debug 级留痕即可
+            logger.debug("psutil 不可用，CPU/内存字段留空: %s", e)
         return SystemStatus(
             connected=self._connected,
             device=self._device_name or None,

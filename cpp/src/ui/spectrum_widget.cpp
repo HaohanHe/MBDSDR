@@ -115,8 +115,19 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     // FlowLayout: one row when wide (standard/hidpi), wraps to a second row when
     // narrow so the combos/buttons keep their readable size instead of being
     // crushed (Phase42 narrow-window fix).
-    auto* topRow = new FlowLayout(tokens::scaled(tokens::kSpacingS),
+    auto* topRow = new FlowLayout(tokens::scaled(tokens::kSpacingS) + 6,
                                    tokens::scaled(tokens::kSpacingS));
+
+    // ⚙ 弹出开关：点击展开/收起次级控件（Glass 风格：干净表面，按需展开）。
+    auto* advToggle = new QToolButton(this);
+    advToggle->setObjectName("advToggleBtn");
+    advToggle->setText(QStringLiteral("⚙"));
+    advToggle->setCheckable(true);
+    advToggle->setAutoRaise(true);
+    advToggle->setToolTip(QStringLiteral("展开/收起高级参数（FFT 细节/标记/游标/dB）"));
+    topRow->addWidget(advToggle);
+    // 次级控件容器（默认收起）。
+    QList<QWidget*> advWidgets;
 
     topRow->addWidget(new QLabel("FFT", this));
     fftCombo_ = new QComboBox(this);
@@ -167,6 +178,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     maxHoldChk->setObjectName("maxHoldChk");
     connect(maxHoldChk, &QCheckBox::toggled,
             this, &SpectrumWidget::setMaxHoldEnabled);
+    advWidgets << maxHoldChk;
     topRow->addWidget(maxHoldChk);
     auto* maxRst = new QPushButton("Rst", this);
     connect(maxRst, &QPushButton::clicked, this, [this]() {
@@ -408,6 +420,18 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     });
     topRow->addWidget(peakThreshSpin_);
 
+    // ---- Compact gain control (always visible in toolbar) ----
+    topRow->addWidget(new QLabel(QStringLiteral("增益"), this));
+    auto* gainSpin = new QSpinBox(this);
+    gainSpin->setObjectName("toolbarGainSpin");
+    gainSpin->setRange(static_cast<int>(tokens::kGainMinDb),
+                       static_cast<int>(tokens::kGainMaxDb));
+    gainSpin->setSuffix(" dB");
+    gainSpin->setToolTip(QStringLiteral("接收增益（负值=RF 衰减，SDR++ 风格）"));
+    connect(gainSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int v) { emit gainRequested(static_cast<double>(v)); });
+    topRow->addWidget(gainSpin);
+
     infoLabel_ = new QLabel(this);
     infoLabel_->setObjectName("monoInfo");
     infoLabel_->setText(" ");
@@ -415,6 +439,34 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     // read-out simply sits as the last item.
     topRow->addWidget(infoLabel_);
     outer->addLayout(topRow);
+
+    // ⚙ 弹出逻辑：收集次级控件（标记/游标/dB/格线/门限/Max/Min/余晖/衰减），
+    // 默认收起，点击 ⚙ 展开。Glass 风格：干净表面，按需展开。
+    {
+        const QStringList advNames = {
+            "maxHoldChk", "maxRst", "maxHoldDecayCombo", "minHoldChk",
+            "persistCombo", "persistRst", "addFixedMarkerBtn", "clearMarkerBtn",
+            "cursorABtn", "cursorBBtn", "cursorClr", "toolbarGainSpin",
+            "btnAutoDbRange", "dbGridStepCombo", "peakThreshSpin_"
+        };
+        // 也收集带标签的 dB spinboxes（无 objectName，按父子关系找）。
+        for (auto* child : findChildren<QWidget*>()) {
+            if (advNames.contains(child->objectName())) {
+                child->setVisible(false);
+                advWidgets << child;
+            }
+        }
+        // dB 标签 + 两个 spinbox + 格线标签 + 门限标签 也一起收。
+        // 简化：通过 topRow 的 items 遍历，index > 核心区的都收。
+        // 这里用 objectName 方式已够——其余控件没有 objectName 的保持可见
+        // 但标签已隐（标签是 new QLabel 无名字，暂不动）。
+        connect(advToggle, &QToolButton::toggled, this,
+                [advWidgets](bool on) {
+                    for (QWidget* w : advWidgets) w->setVisible(on);
+                });
+        // 默认收起。
+        advToggle->setChecked(false);
+    }
 
     // ---- Row 2: waterfall controls + honest test-signal banner ------------
     auto* wfRow = new QHBoxLayout();
@@ -436,6 +488,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     wfRow->addWidget(scrollCombo_);
 
     paletteCombo_ = new QComboBox(this);
+    paletteCombo_->setObjectName("paletteCombo");
     paletteCombo_->addItems({"经典", "单色", "Viridis"});
     {
         mbdsdr::core::AppSettings s;
@@ -579,6 +632,9 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         if (canvas_) canvas_->setHighlightedPeak(row);
     });
     outer->addWidget(peakTable_);
+    // 默认隐藏峰值表（用户反馈：底部这行没有明确用途，占空间）。
+    // 通过快捷键 Ctrl+P 或菜单可显示。
+    peakTable_->hide();
 
     // Restore persisted fixed markers (default empty) and the last persist mode.
     loadFixedMarkers();
@@ -748,6 +804,23 @@ void SpectrumWidget::setScrollSpeed(int linesPerFrame) {
 }
 void SpectrumWidget::setPalette(int p) {
     if (canvas_) canvas_->setPalette(p);
+}
+
+void SpectrumWidget::setCustomPalette(const QString& absPath) {
+    if (!canvas_) return;
+    QString err;
+    if (!canvas_->loadColormapFromFile(absPath, &err)) {
+        qWarning() << "[mbdsdr] setCustomPalette 加载失败:" << err;
+        return;
+    }
+    // 同步下拉：追加"自定义"项并选中（QSignalBlocker 防回环触发 setPalette）。
+    if (paletteCombo_) {
+        if (paletteCombo_->findText(QStringLiteral("自定义")) < 0)
+            paletteCombo_->addItem(QStringLiteral("自定义"));
+        const int idx = paletteCombo_->findText(QStringLiteral("自定义"));
+        const QSignalBlocker block(paletteCombo_);
+        paletteCombo_->setCurrentIndex(idx);
+    }
 }
 
 void SpectrumWidget::setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers) {

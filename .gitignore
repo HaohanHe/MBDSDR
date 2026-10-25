@@ -132,3 +132,11 @@ core.*
 # 运行产物（不入库，脚本每次重写）
 tests/tool_param_smoke_result.json
 scratch/
+
+# 本地 CMake 构建目录（实测 627MB：obj/exe/ctest 二进制/临时日志）
+# 此前未被任何规则覆盖，git status 显示为未跟踪，误 add 会塞爆仓库。
+cpp/build-local/
+cpp/build/
+build/
+build_cpp/
+cmake-build-*/

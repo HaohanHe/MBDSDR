@@ -45,6 +45,8 @@
 #include <QScroller>
 #include <QMap>
 #include <QFileDialog>
+#include <QTextStream>
+#include <QPixmap>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QElapsedTimer>
@@ -54,6 +56,7 @@
 #include <QAction>
 #include <QCursor>
 #include <QGuiApplication>
+#include <QScreen>
 #include <QClipboard>
 
 #include "dsp/vfo_manager.h"
@@ -220,6 +223,41 @@ MainWindow::MainWindow(QWidget* parent)
                       "MBDSDR_CONTROL_HTTP_PORT 覆盖。"));
     topLay->addWidget(controlHttpBanner_);
     topLay->addStretch();
+
+    // 大频率数字（SDR++ 标志性 UI）：顶部超大字号显示当前调谐频率。
+    // 格式：000.436.763（MHz 三位小数，千位分隔）。
+    auto* bigFreqLabel = new QLabel(topBar);
+    bigFreqLabel->setObjectName("bigFreqLabel");
+    {
+        QFont bf = bigFreqLabel->font();
+        bf.setPointSizeF(tokens::scaled(28) * 72.0 / 96.0);  // ~28px 逻辑点
+        bf.setBold(true);
+        bigFreqLabel->setFont(bf);
+        bigFreqLabel->setStyleSheet(QStringLiteral(
+            "QLabel#bigFreqLabel { color: %1; letter-spacing: 2px; }")
+            .arg(QString::fromUtf8(tokens::kAccent)));
+        bigFreqLabel->setToolTip(QStringLiteral("当前调谐频率（MHz）"));
+    }
+    bigFreqLabel->setText(QStringLiteral("000.000.000"));
+    topLay->addWidget(bigFreqLabel);
+    // 大频率数字随调谐更新（1 Hz 轮询 engine 读回，不依赖 UI 控件信号）。
+    {
+        auto* freqTimer = new QTimer(this);
+        connect(freqTimer, &QTimer::timeout, this, [this, bigFreqLabel]() {
+            if (!engine_) return;
+            const double hz = engine_->centerFreq();
+            if (hz <= 0.0) return;
+            const double mhz = hz / 1e6;
+            // 格式：000.436.763（整数部分 3 位补零 + 小数 6 位分三组）
+            const int whole = static_cast<int>(mhz);
+            const int frac  = static_cast<int>(std::round((mhz - whole) * 1e6));
+            bigFreqLabel->setText(QStringLiteral("%1.%2.%3")
+                .arg(whole, 3, 10, QLatin1Char('0'))
+                .arg(frac / 1000, 3, 10, QLatin1Char('0'))
+                .arg(frac % 1000, 3, 10, QLatin1Char('0')));
+        });
+        freqTimer->start(500);
+    }
 
     auto* clockLabel = new QLabel(topBar);
     clockLabel->setObjectName("monoInfo");
@@ -602,7 +640,9 @@ MainWindow::MainWindow(QWidget* parent)
     srCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("采样率", srCombo_);
     gainSlider_ = new QSlider(Qt::Horizontal, gRx);
-    gainSlider_->setRange(0, 50);
+    // SDR++-style range: negative gain = RF attenuation (user request).
+    gainSlider_->setRange(static_cast<int>(tokens::kGainMinDb),
+                          static_cast<int>(tokens::kGainMaxDb));
     gainValue_ = new QLabel("0 dB", gRx);
     auto* gainRow = new QHBoxLayout;
     gainRow->addWidget(gainSlider_);
@@ -947,6 +987,88 @@ MainWindow::MainWindow(QWidget* parent)
     gAudLay->addWidget(levelBar_);
     leftLay->addWidget(gAud);
 
+    // ---- 工具：导出 + 数字模式开关（补齐 ControlHub 后端有、前端没的入口）----
+    {
+        auto* gTools = new QGroupBox(QStringLiteral("工具"), leftCard);
+        auto* gToolsLay = new QVBoxLayout(gTools);
+        // 频谱快照：导出当前频谱为 PNG（真实渲染，非占位图）。
+        auto* snapBtn = new QPushButton(QStringLiteral("导出频谱快照"), gTools);
+        snapBtn->setObjectName("exportSnapshotBtn");
+        snapBtn->setToolTip(QStringLiteral("将当前频谱/瀑布渲染为 PNG 图片"));
+        connect(snapBtn, &QPushButton::clicked, this, [this]() {
+            const QString path = QFileDialog::getSaveFileName(
+                this, QStringLiteral("导出频谱快照"),
+                QStringLiteral("spectrum.png"),
+                QStringLiteral("PNG (*.png)"));
+            if (path.isEmpty() || !spectrum_) return;
+            // Grab the real spectrum widget, not a drawn placeholder.
+            const QPixmap px = spectrum_->grab();
+            if (!px.save(path, "PNG"))
+                qWarning() << "[mbdsdr] 频谱快照写入失败:" << path;
+        });
+        gToolsLay->addWidget(snapBtn);
+        // 峰值表 CSV：把当前峰值列表写成 CSV。
+        auto* csvBtn = new QPushButton(QStringLiteral("导出峰值表 CSV"), gTools);
+        csvBtn->setObjectName("exportPeaksCsvBtn");
+        csvBtn->setToolTip(QStringLiteral("将频谱峰值检测表导出为 CSV"));
+        connect(csvBtn, &QPushButton::clicked, this, [this]() {
+            const QString path = QFileDialog::getSaveFileName(
+                this, QStringLiteral("导出峰值表"),
+                QStringLiteral("peaks.csv"),
+                QStringLiteral("CSV (*.csv)"));
+            if (path.isEmpty() || !spectrum_) return;
+            // 读峰值表真实行（peakTable_ 在 SpectrumWidget 里，findChild 取）。
+            auto* table = spectrum_->findChild<QTableWidget*>("peakTable");
+            QFile f(path);
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                qWarning() << "[mbdsdr] 峰值 CSV 写入失败:" << path;
+                return;
+            }
+            QTextStream ts(&f);
+            ts << "index,freq_mhz,strength_dbfs,delta_khz\n";
+            if (table) {
+                for (int r = 0; r < table->rowCount(); ++r) {
+                    const QString idx = table->item(r, 0) ? table->item(r, 0)->text() : QString();
+                    const QString fq  = table->item(r, 1) ? table->item(r, 1)->text() : QString();
+                    const QString db  = table->item(r, 2) ? table->item(r, 2)->text() : QString();
+                    const QString dk  = table->item(r, 3) ? table->item(r, 3)->text() : QString();
+                    ts << idx << ',' << fq << ',' << db << ',' << dk << '\n';
+                }
+            }
+            f.close();
+        });
+        gToolsLay->addWidget(csvBtn);
+        // 数字模式：FT8 / LRPT 开关（引擎直连）。
+        auto* ft8Chk = new QCheckBox(QStringLiteral("FT8 解码"), gTools);
+        ft8Chk->setObjectName("ft8Chk");
+        ft8Chk->setToolTip(QStringLiteral("开启/关闭 FT8 实时解码引擎"));
+        connect(ft8Chk, &QCheckBox::toggled,
+                engine_, &dsp::SpectrumEngine::setFt8Enabled);
+        gToolsLay->addWidget(ft8Chk);
+        auto* lrptChk = new QCheckBox(QStringLiteral("LRPT 解码"), gTools);
+        lrptChk->setObjectName("lrptChk");
+        lrptChk->setToolTip(QStringLiteral("开启/关闭 Meteor-M2 LRPT 实时解码"));
+        connect(lrptChk, &QCheckBox::toggled,
+                engine_, &dsp::SpectrumEngine::setLrptEnabled);
+        gToolsLay->addWidget(lrptChk);
+        // 当前频率加书签。
+        auto* bmBtn = new QPushButton(QStringLiteral("当前频率加书签"), gTools);
+        bmBtn->setObjectName("addBookmarkBtn");
+        bmBtn->setToolTip(QStringLiteral("将当前调谐频率保存为书签"));
+        connect(bmBtn, &QPushButton::clicked, this, [this]() {
+            if (!bookmarkManager_ || !engine_) return;
+            const double hz = engine_->centerFreq();
+            if (hz <= 0.0) return;
+            ui::Bookmark bm;
+            bm.name = QString::number(hz / 1e6, 'f', 4) + " MHz";
+            bm.frequencyHz = hz;
+            bm.mode = demodCombo_ ? demodCombo_->currentText() : QString();
+            bookmarkManager_->add(bm);
+        });
+        gToolsLay->addWidget(bmBtn);
+        leftLay->addWidget(gTools);
+    }
+
     auto* gRec = new QGroupBox("录制", leftCard);
     auto* gRecLay = new QVBoxLayout(gRec);
 
@@ -1095,8 +1217,8 @@ MainWindow::MainWindow(QWidget* parent)
     // frequency strip and the scrolling waterfall with a single geometry, so
     // the frequency axes align by construction. The scroll-speed / palette
     // controls live in the container's tool strip.
-    centerTabs_->addTab(spectrum_, "频谱");
-    centerTabs_->addTab(worldPage, "世界");
+    centerTabs_->addTab(spectrum_, QStringLiteral("频谱 · 实时接收"));
+    centerTabs_->addTab(worldPage, QStringLiteral("地图 · 干扰源/卫星"));
 
     // L8 closed loop: right-click the spectrum/waterfall canvas to load an
     // external colormap JSON (independent SDR++ colormaps). The ring keeps raw-dB
@@ -1150,7 +1272,7 @@ MainWindow::MainWindow(QWidget* parent)
         weatherLay->setContentsMargins(0, 0, 0, 0);
         weatherPanel_ = new ui::WeatherSatPanel(weatherPage);
         weatherLay->addWidget(weatherPanel_);
-        centerTabs_->addTab(weatherPage, "气象");
+        centerTabs_->addTab(weatherPage, QStringLiteral("气象卫星 · NOAA APT"));
     }
 
     // Spacetime (时空视图) tab: a compact 2x2 overview (device / signal / decode /
@@ -1213,7 +1335,7 @@ MainWindow::MainWindow(QWidget* parent)
         spOuter->addWidget(spDopplerLine_);
         spOuter->addStretch();
 
-        centerTabs_->addTab(spPage, "时空视图");
+        centerTabs_->addTab(spPage, QStringLiteral("轨道 · 卫星预测/多普勒"));
     }
 
     // Stretch the central tab bar so tabs fill the container width (eliminates
@@ -2576,24 +2698,21 @@ MainWindow::MainWindow(QWidget* parent)
     // first real read; never a fabricated "playing" state on a headless box.
     sbAudio_ = new QLabel("--", this);
     // SDR++-style S-meter: fed by the SAME real engine RSSI as sbRssi_.
+    // Measurement display -- MUST be click-through: a meter whose needle the
+    // user can push is a lie (万用表玻璃不能砸)。mouse-transparent 保证点击
+    // 不会命中它、也不会因命中它触发任何交互路径。
     sMeter_ = new ui::SMeterWidget(this);
-    // Mini RSSI/dBfs trend strip: the recent real-RSSI shape beside the meter.
-    // Fed by the same onRssiLevel value; NaN / link-down clears it honestly.
-    rssiTrend_ = new ui::RssiTrendWidget(this);
+    sMeter_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    sMeter_->setToolTip(QStringLiteral("S 表：真实引擎 RSSI（只读，不可拖动）"));
     for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_,
                       sbScan_, sbRec_, sbRssi_, sbSnr_, sbSquelch_, sbGnss_, sbAudio_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
     statusBar()->addPermanentWidget(sMeter_);
-    // Small breathing gap so the S-meter's S9 end-cap label never crowds the
-    // trend strip's card border regardless of DPI scaling.
-    {
-        auto* gap = new QWidget(this);
-        gap->setFixedWidth(tokens::scaled(6));
-        statusBar()->addPermanentWidget(gap);
-    }
-    statusBar()->addPermanentWidget(rssiTrend_);
+    // 状态栏最小高度：防止中央部件把状态栏挤成 0 高度（S 表直接消失）。
+    statusBar()->setMinimumHeight(tokens::scaled(tokens::kSMeterH) + 6);
+    // RSSI 趋势条（"心律图"）已移除：纯装饰、零决策价值，用户点名删。
     sbMode_->setText(demodCombo_->currentText());
 
     // ---- Engine wiring (engine_ created before UI construction) ----
@@ -2691,6 +2810,8 @@ MainWindow::MainWindow(QWidget* parent)
             engine_, &dsp::SpectrumEngine::setWindowType);
     connect(spectrum_, &ui::SpectrumWidget::averageModeRequested,
             engine_, &dsp::SpectrumEngine::setAverageMode);
+    connect(spectrum_, &ui::SpectrumWidget::gainRequested,
+            engine_, &dsp::SpectrumEngine::onSetGain);
     // Zoom/pan lockstep between the trace and the waterfall is now intrinsic:
     // both are drawn by the same canvas from one visible window.
 
@@ -2700,6 +2821,10 @@ MainWindow::MainWindow(QWidget* parent)
                 // Route through the SAME pure formatter as the telemetry tick so
                 // the spinbox path and the readback path can never drift.
                 sbVfo_->setText(ui::fmtStripVfoFreq(mhz * 1e6));
+                // 与键盘微调路径（retuneNudge）保持一致：调谐后视图跟随。
+                // 否则 VFO 会走出视口——尤其远程 ControlHub tune 时视图钉在
+                // 首帧中心不动，频谱/瀑布画在引擎带宽外的死区，看着像"没数据"。
+                if (spectrum_) spectrum_->followTunedFrequency(mhz * 1e6);
             });
     // Recent-tune jump: a user-picked entry drives the NORMAL spinbox tune path
     // (setValue -> valueChanged -> engine), so the read-back record, the strip
@@ -3756,6 +3881,17 @@ void MainWindow::setupControlHttpServer() {
     // every endpoint dispatches onto the real SpectrumEngine on this home thread.
     controlHub_ = new control::ControlHub(this);
     controlHub_->setEngine(engine_);
+    // 远程 tune（ControlHub/HTTP）与 UI 调谐主路径同步：cmdTune 只动引擎，
+    // 若不同步 freqSpin_，显示中心仍停在旧值——频谱/瀑布画在引擎带宽外的
+    // 死区，看起来像"数据断了/瀑布没了"。这里把引擎回读的中心喂回
+    // freqSpin_ 走主路径（valueChanged handler 自带 read-back 防回环），
+    // 与手输频率行为零分叉。
+    connect(controlHub_, &control::ControlHub::commandExecuted, this,
+            [this](const QString& cmd, bool ok) {
+                if (cmd != QLatin1String("tune") || !ok || !engine_) return;
+                const double hz = engine_->centerFreq();
+                if (hz > 0.0) freqSpin_->setValue(hz / 1e6);
+            });
     // AIGUI P0-b: hand the live workspace controller to the headless/HTTP hub so
     // arrange_workspace / get_workspace_layout / list_ui_components / reset_workspace
     // dispatch to the real three-column widgets (honest not-injected otherwise).
@@ -4839,7 +4975,32 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
 
 void MainWindow::restoreUiState() {
     mbdsdr::core::AppSettings s;
-    restoreGeometry(s.value("geometry").toByteArray());
+    // 旧几何若超出屏幕可用区，直接丢弃（防止 1293x767 的历史值把状态栏
+    // 挤出屏幕、S 表消失）。在屏内才恢复。
+    const QByteArray savedGeom = s.value("geometry").toByteArray();
+    bool geomOk = false;
+    if (!savedGeom.isEmpty()) {
+        restoreGeometry(savedGeom);
+        const QRect avail = QGuiApplication::primaryScreen()
+                                ? QGuiApplication::primaryScreen()->availableGeometry()
+                                : QRect(0, 0, 1280, 800);
+        // frameGeometry 含 Win10+ 隐形边框，给 16px 容差。
+        const QRect fg = frameGeometry().adjusted(-16, -16, 16, 16);
+        geomOk = avail.contains(fg) && width() <= avail.width()
+                 && height() <= avail.height();
+    }
+    if (!geomOk) {
+        // 回落到 tokens 的初始尺寸，再钳到屏幕内。
+        resize(tokens::scaled(tokens::kInitWinW), tokens::scaled(tokens::kInitWinH));
+        const QRect avail = QGuiApplication::primaryScreen()
+                                ? QGuiApplication::primaryScreen()->availableGeometry()
+                                : QRect(0, 0, 1280, 800);
+        const int fw = frameGeometry().width()  - width();
+        const int fh = frameGeometry().height() - height();
+        resize(qMin(width(), avail.width() - fw - 4),
+               qMin(height(), avail.height() - fh - 4));
+        move(avail.left() + 2, avail.top() + 2);
+    }
 
     // User VFO display names (JSON by engine id); default empty, no presets.
     loadVfoNames();
@@ -5323,6 +5484,17 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
             offAnaSeek_->setValue(0);
             offAnaPos_->setText("-- / --");
         }
+    });
+    // 保险丝：事件循环跑起来后再重应用持久化色板一次。此前构造内的两次
+    // loadColormapFromFile 实测会静默失败（下拉停在"经典"），而运行时
+    // set_color_map 路径生效。QTimer 保证在全部构造/restoreUiState 完成后
+    // 执行，排除任何"加载后被覆盖"的时序窗口。
+    QTimer::singleShot(0, this, [this]() {
+        if (!spectrum_) return;
+        const QString savedFile = mbdsdr::core::AppSettings()
+            .value(tokens::kSettingsKeyColormapFile).toString();
+        if (!savedFile.isEmpty())
+            spectrum_->setCustomPalette(savedFile);
     });
 }
 

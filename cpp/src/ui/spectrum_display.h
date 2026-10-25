@@ -436,7 +436,12 @@ private:
     // Manual bounds (last setDbRange). Auto-range only eases dbCeilDb_ toward a
     // data-driven target; the floor stays pinned to the manual value so the
     // noise-floor reference / grid origin never moves unexpectedly.
-    float  manualFloorDb_ = -100.0f;
+    // Waterfall/trace dB floor. -130 (not the old -100): an 8-bit RTL-SDR
+    // quantisation floor sits near -97 dBFS, which at a -100 floor lands at
+    // 3% of the range -- i.e. black. At -130 it lands at 25%, inside the
+    // visible part of the ramp (SDR++-like). SDR# users with >8-bit hardware
+    // can still raise it via the dB controls.
+    float  manualFloorDb_ = -130.0f;
     float  manualCeilDb_  = 0.0f;
     // ---- dB axis auto-range (real frame.dbfs sliding peak) ----------------
     bool   autoRangeOn_ = true;
@@ -450,6 +455,12 @@ private:
 
     // Divider position: share of the (trace + waterfall) pool handed to the trace.
     double traceShare_ = 0.5;
+
+    // SDR++-style overlay: waterfall fills the whole plot and the trace is
+    // painted ON TOP of it (one canvas, not two stacked halves). When off the
+    // classic split (trace above / waterfall below) is used -- that remains the
+    // DEFAULT (tests pin the classic proportions); users opt in via view/wfOverlay.
+    bool wfOverlay_ = false;
 
     // Peak tracking state.
     QList<mbdsdr::dsp::PeakInfo> peaks_;

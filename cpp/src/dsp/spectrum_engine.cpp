@@ -1528,12 +1528,20 @@ void SpectrumEngine::run() {
         while (specN > 1 && (specN & (specN - 1)) != 0) --specN;
         SpectrumFrame frame;
         if (specN >= 2) {
-            std::vector<std::complex<float>> spec(iq.begin(), iq.begin() + specN);
-            frame.dbfs.resize(specN);
+            // 固定帧宽 = 配置的 FFT size（2 的幂）。块不足零填充、超了取前 N。
+            // frame.dbfs.size() 必须恒定：否则 UI 侧 bins_ 随块大小跳变，
+            // 每帧走 allocateRing() 重分配 waterfall ring、ringCount_ 反复清零，
+            // 瀑布永远只画空行（qRgb(0,0,0)）——"有 RSSI 没瀑布"的根因。
+            const std::size_t target = static_cast<std::size_t>(std::max(64, fftSize_.load()));
+            const std::size_t useN = ((target & (target - 1)) == 0) ? target : specN;
+            std::vector<std::complex<float>> spec(useN, {0.f, 0.f});
+            const std::size_t ncopy = std::min(specN, useN);
+            std::copy(iq.begin(), iq.begin() + ncopy, spec.begin());
+            frame.dbfs.resize(useN);
             powerSpectrum_.process(spec, frame.dbfs);
             frame.centerFreqHz = source_->centerFreq();
             frame.sampleRateHz = srEff;
-            frame.fftSize = static_cast<int>(specN);
+            frame.fftSize = static_cast<int>(useN);
             frame.isTestSignal = !real;
             frame.sourceName = source_->name();
             {

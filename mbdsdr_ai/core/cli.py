@@ -55,7 +55,22 @@ def build_parser() -> argparse.ArgumentParser:
     # 扫描 / 解码 / 录制
     p.add_argument("--scan", type=float, nargs=3, metavar=("START", "STOP", "STEP"),
                    help="步进扫频并打印活动段")
-    p.add_argument("--decode", metavar="TYPE", help="启动解码器（adsb/aprs/noaa_apt/meteor）")
+    p.add_argument("--decode", metavar="TYPE",
+                   help="启动流式解码器（adsb/rds 实时；其余模式见 --decode-file）")
+    p.add_argument("--decode-file", metavar="PATH",
+                   help="文件级解码，解锁 ft8/wspr/aprs/adsb/noaa_apt/sstv/pocsag/acars/meteor 全家")
+    p.add_argument("--mode", metavar="MODE", default=None,
+                   help="--decode-file 的模式（ft8/wspr/aprs/adsb/noaa_apt/sstv/pocsag/acars/meteor）")
+    p.add_argument("--channel", metavar="CH", default=None,
+                   help="--decode-file 的通道选择（noaa_apt: A/B/both，默认 both）")
+    p.add_argument("--baud", type=int, metavar="BAUD", default=None,
+                   help="--decode-file 的波特率（pocsag: 512/1200/2400，默认 512）")
+    p.add_argument("--output-dir", metavar="DIR", default=None,
+                   help="--decode-file 的输出目录（默认 ~/.mbdsdr/<mode>/）")
+    p.add_argument("--tool", metavar="NAME",
+                   help="调用注册工具（sdr_tools 工具面逃生门，含 60+ MCP 工具）")
+    p.add_argument("--args", metavar="JSON", default="{}",
+                   help="--tool 的 JSON 参数")
     p.add_argument("--record", metavar="PATH", help="开始 IQ 录制到 PATH（SigMF）")
 
     # 服务
@@ -177,6 +192,108 @@ def run(argv: Optional[Sequence[str]] = None,
                 print(f"  {s['start_freq']/1e6:.3f}-{s['end_freq']/1e6:.3f} MHz "
                       f"peak={s['peak_freq']/1e6:.3f} MHz {s['peak_db']:.1f} dB "
                       f"[{s['kind']}]")
+
+        if args.decode_file:
+            # 文件级解码：解锁 decoders.py 的全家（ft8/wspr/aprs/adsb/noaa_apt/
+            # sstv/pocsag/acars/meteor）。流式 --decode 只覆盖 IQ 流式解码器
+            # （adsb/rds）；文件级走这里。参数经 --mode/--channel/--baud/
+            # --sample-rate/--output-dir 透传到 decoders.py 三入口。
+            import json as _json
+            mode = (args.mode or "").lower()
+            if not mode:
+                low = args.decode_file.lower()
+                if "apt" in low or "noaa" in low: mode = "noaa_apt"
+                elif "sstv" in low: mode = "sstv"
+                elif "ft8" in low: mode = "ft8"
+                elif "wspr" in low: mode = "wspr"
+                elif "pocsag" in low: mode = "pocsag"
+                elif "acars" in low: mode = "acars"
+                elif "meteor" in low or "lrpt" in low: mode = "meteor"
+                elif "aprs" in low: mode = "aprs"
+                elif "adsb" in low: mode = "adsb"
+                else:
+                    print("文件级解码需 --mode（ft8/wspr/aprs/adsb/noaa_apt/sstv/"
+                          "pocsag/acars/meteor）", file=sys.stderr)
+                    return 3
+            # 解码采样率：--sample-rate 显式给；没给则按模式取默认
+            # （noaa_apt 20800Hz 音频、数字模式 1MHz 基带）。
+            dec_sr = args.sample_rate
+            try:
+                from ..decoders import decode_digital_mode, decode_noaa_apt, decode_sstv
+                if mode == "noaa_apt":
+                    kw = {"channel": (args.channel or "both")}
+                    if dec_sr is not None:
+                        kw["sample_rate"] = int(dec_sr)
+                    if args.output_dir:
+                        kw["output_dir"] = args.output_dir
+                    res = decode_noaa_apt(args.decode_file, **kw)
+                elif mode == "sstv":
+                    kw = {}
+                    if args.output_dir:
+                        kw["output_dir"] = args.output_dir
+                    res = decode_sstv(args.decode_file, **kw)
+                else:
+                    kw = {}
+                    if dec_sr is not None:
+                        kw["sample_rate"] = float(dec_sr)
+                    if args.output_dir:
+                        kw["output_dir"] = args.output_dir
+                    if mode == "pocsag" and args.baud:
+                        kw["baud"] = int(args.baud)
+                    res = decode_digital_mode(args.decode_file, mode, **kw)
+                print(_json.dumps(res, ensure_ascii=False, indent=2, default=str))
+            except Exception as e:
+                print(f"文件级解码失败: {e}", file=sys.stderr)
+                return 5
+
+        if args.tool:
+            # 工具面逃生门：把 sdr_tools / 各模块 register_tool_registry 的
+            # 60+ 工具（含 MCP 工具）从 CLI 直调。没有这个入口之前，
+            # 这些工具只能通过 MCP 或 Agent 会话用——CLI 用户等于瞎子。
+            import json as _json
+            import importlib, pkgutil
+            try:
+                targs = _json.loads(args.args or "{}")
+            except Exception as e:
+                print(f"--args 不是合法 JSON: {e}", file=sys.stderr)
+                return 3
+            from .. import tool_registry as _tr
+            reg = _tr.ToolRegistry()
+            try:
+                import mbdsdr_ai as _pkg
+                for _m in pkgutil.iter_modules(_pkg.__path__):
+                    try:
+                        mod = importlib.import_module(f"mbdsdr_ai.{_m.name}")
+                        fn = getattr(mod, "register_tool_registry", None)
+                        if callable(fn):
+                            fn(reg)
+                    except Exception as e:
+                        # 模块导入/注册失败不能无声跳过——否则工具面悄悄缺角
+                        print(f"[warn] 工具注册跳过 mbdsdr_ai.{_m.name}: {e}",
+                              file=sys.stderr)
+                        continue
+            except Exception as e:
+                print(f"工具自动发现失败: {e}", file=sys.stderr)
+                return 5
+            # sdr_tools 的 60+ 工具挂在 agent.tool_registry——duck-type 假 agent
+            # 收编（register_sdr_tools 只用 tool_registry/sdr_manager/spectrum/
+            # freq_manager/_plans/_todos 这几个属性，不需要 LLM）。
+            try:
+                from ..sdr_tools import register_sdr_tools
+                class _FakeAgent:
+                    tool_registry = reg
+                register_sdr_tools(_FakeAgent())
+            except Exception as e:
+                print(f"[warn] sdr_tools 收编失败（工具面将缺 sdr_* 工具）: {e}",
+                      file=sys.stderr)
+            names = reg.get_tool_names()
+            if args.tool not in names:
+                print(f"工具不存在: {args.tool}", file=sys.stderr)
+                print(f"可用（{len(names)} 个）: {names[:40]}", file=sys.stderr)
+                return 3
+            res = reg.call(args.tool, targs)
+            out = res.to_dict() if hasattr(res, "to_dict") else res
+            print(_json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
         if args.decode:
             handle = ctrl.start_decoder(args.decode)
