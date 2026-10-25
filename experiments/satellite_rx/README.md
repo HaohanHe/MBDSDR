@@ -39,6 +39,25 @@ python sat_catch.py --sat "NOAA 19" --freq 137100000 --demod apt
 python mbdsdr_ctl.py status / tune 137.1 / mode am / record start
 ```
 
+## 仓库主 CLI 逃生门（--tool 163 工具面 / --decode-file）
+
+卫星链工具之外，仓库主 CLI（`python -m mbdsdr_ai`）有两个逃生门
+（2026-10-25 解锁，工具面 15 → 163）：
+
+```bash
+# --tool 逃生门：直调注册工具面（sdr_* 全套 + multimon/pocsag/dtmf/afsk 等
+# 163 个），参数用 --args 传 JSON 对象——CLI 用户不再对着 60+ MCP 工具干瞪眼
+python -m mbdsdr_ai --tool <工具名> --args '{"key": "value"}'
+
+# --decode-file：文件级解码，解锁 ft8/wspr/aprs/adsb/noaa_apt/sstv 全家
+# （--decode 流式只接 adsb/rds，其余模式全走这里）
+python -m mbdsdr_ai --decode-file <PATH> --mode noaa_apt
+```
+
+与本工具链的分工：APT 归本目录 `apt_decode.py`（多普勒口径一致），
+lrpt/nfm/wfm 归 sat_catch/doppler_fm，ft8/wspr/aprs/adsb/sstv 归
+`--decode-file`。想知道 apt_decode 支持什么：`python apt_decode.py --list-modes`。
+
 ## 站址/硬件
 
 - GNSS 实测站址（勿改）：43.774156N, 125.397813E, 230.8m（长春，COM10 CH340 9600）
@@ -46,7 +65,8 @@ python mbdsdr_ctl.py status / tune 137.1 / mode am / record start
 - 采样率固定 **1.024 MS/s**（2.048 会 USB 崩 `Library error -5`）
 - TLE：Celestrak（amateur/cubesat/weather 组，CATNR/NAME/GROUP 查询，
   不支持 SEARCH）；批量拉取后必须校验每行以 `1 `/`2 ` 开头（会混入
-  `Invalid query` 错误行污染文件）
+  `Invalid query` 错误行污染文件）——入库前跑 `python data/check_tles.py`
+  （校验 3 行体结构 + 污染片段，0=干净 1=有问题）
 
 ## 诚实口径
 
