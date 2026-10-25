@@ -5439,25 +5439,10 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
     // 执行，排除任何"加载后被覆盖"的时序窗口。
     QTimer::singleShot(0, this, [this]() {
         if (!spectrum_) return;
-        if (ui::SpectrumDisplay* canvas = spectrum_->displayCanvas()) {
-            const QString savedFile = mbdsdr::core::AppSettings()
-                .value(tokens::kSettingsKeyColormapFile).toString();
-            if (!savedFile.isEmpty()) {
-                QString err;
-                if (canvas->loadColormapFromFile(savedFile, &err)) {
-                    // 同步色板下拉到"自定义"（三选一里没有，追加一项）。
-                    if (auto* pal = spectrum_->findChild<QComboBox*>("paletteCombo")) {
-                        if (pal->findText(QStringLiteral("自定义")) < 0)
-                            pal->addItem(QStringLiteral("自定义"));
-                        const int idx = pal->findText(QStringLiteral("自定义"));
-                        const QSignalBlocker block(pal);
-                        pal->setCurrentIndex(idx);
-                    }
-                } else {
-                    qWarning() << "[mbdsdr] 事件循环后色板加载仍失败:" << err;
-                }
-            }
-        }
+        const QString savedFile = mbdsdr::core::AppSettings()
+            .value(tokens::kSettingsKeyColormapFile).toString();
+        if (!savedFile.isEmpty())
+            spectrum_->setCustomPalette(savedFile);
     });
 }
 

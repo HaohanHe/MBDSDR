@@ -751,6 +751,23 @@ void SpectrumWidget::setPalette(int p) {
     if (canvas_) canvas_->setPalette(p);
 }
 
+void SpectrumWidget::setCustomPalette(const QString& absPath) {
+    if (!canvas_) return;
+    QString err;
+    if (!canvas_->loadColormapFromFile(absPath, &err)) {
+        qWarning() << "[mbdsdr] setCustomPalette 加载失败:" << err;
+        return;
+    }
+    // 同步下拉：追加"自定义"项并选中（QSignalBlocker 防回环触发 setPalette）。
+    if (paletteCombo_) {
+        if (paletteCombo_->findText(QStringLiteral("自定义")) < 0)
+            paletteCombo_->addItem(QStringLiteral("自定义"));
+        const int idx = paletteCombo_->findText(QStringLiteral("自定义"));
+        const QSignalBlocker block(paletteCombo_);
+        paletteCombo_->setCurrentIndex(idx);
+    }
+}
+
 void SpectrumWidget::setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers) {
     if (canvas_) canvas_->setVfoMarkers(markers);
 }

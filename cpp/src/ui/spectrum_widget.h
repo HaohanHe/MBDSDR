@@ -58,6 +58,8 @@ public slots:
     // Waterfall controls (originally the standalone wfBar).
     void setScrollSpeed(int linesPerFrame);
     void setPalette(int p);
+    // 加载外部色板文件并同步下拉为"自定义"（启动重应用/ControlHub 调用）。
+    void setCustomPalette(const QString& absPath);
 
     // Multi-VFO band boxes.
     void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);
