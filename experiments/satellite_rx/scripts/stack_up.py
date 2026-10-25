@@ -53,6 +53,50 @@ def kill(proc):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+STOP_FLAG = os.path.join(HERE, "stack_stop.flag")
+
+
+def stop_requested():
+    """用户是否主动要求停止（存在哨兵文件）。
+
+    存在这个哨兵时，守护循环不得再把 mbdsdr/rtl_tcp 拉起来——否则用户"关掉
+    窗口"会被守护当成"进程意外消失"而复活，永远关不掉（老板实测骂点）。
+    """
+    return os.path.exists(STOP_FLAG)
+
+
+def mark_stop(reason="user"):
+    try:
+        with open(STOP_FLAG, "w", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {reason}\n")
+    except Exception:
+        pass
+
+
+def clear_stop():
+    """显式起栈 = 用户想要它活着 → 清除主动停止意图。"""
+    try:
+        if os.path.exists(STOP_FLAG):
+            os.remove(STOP_FLAG)
+    except Exception:
+        pass
+
+
+def mbdsdr_running():
+    """进程是否还在（与 ControlHub 是否响应是两回事）。
+
+    进程没了 = 用户多半主动关了窗口 → 不许复活；
+    进程还在但端口不响应 = 真卡死 → 才值得重启。
+    """
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq mbdsdr.exe"],
+                             capture_output=True, text=True,
+                             stdout=subprocess.PIPE).stdout or ""
+        return "mbdsdr.exe" in out
+    except Exception:
+        return True      # 探测失败保守处理：按"还在"算，避免误判成用户关机
+
+
 def log(msg):
     """打印 + 落盘 stack_guard.log（守护循环的异常不能吞，要留痕）"""
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
@@ -65,6 +109,7 @@ def log(msg):
 
 
 def start_stack(freq_hz, rate_hz, detached=False):
+    clear_stop()          # 显式起栈 = 用户要它活着，撤销之前的停止意图
     kill("rtl_tcp.exe"); kill("mbdsdr.exe")
     time.sleep(1.5)
     # DETACHED_PROCESS 只用于 --no-guard（父进程会退出，否则子进程被带走）。
@@ -147,14 +192,20 @@ def main():
     ap.add_argument("--rate", default="1024000")
     ap.add_argument("--mode", default="NFM")
     ap.add_argument("--no-guard", action="store_true")
+    ap.add_argument("--no-respawn", action="store_true",
+                    help="巡检但不复活：只报告进程/ControlHub 死亡，不自动拉起")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--stop", action="store_true")
     ap.add_argument("--interval", type=float, default=15.0, help="巡检间隔秒")
     a = ap.parse_args()
 
     if a.stop:
+        # 关键：写哨兵让守护循环自己退出，否则它下一拍就把进程又拉起来了。
+        mark_stop("user --stop")
         kill("mbdsdr.exe"); kill("rtl_tcp.exe")
-        print("[stop] 全停")
+        print("[stop] 已停全部进程，并记住你的停止意图（stack_stop.flag）。")
+        print("[stop] 守护进程看到该标记会自行退出，不会再复活 MBDSDR。")
+        print("[stop] 想重新启动：python stack_up.py --freq ... （会自动清除该标记）")
         return
     if a.check:
         print("[check] ControlHub", "活" if alive() else "死")
@@ -186,10 +237,15 @@ def main():
     if a.no_guard:
         return
 
-    print(f"[guard] 开始巡检（每 {a.interval}s）… Ctrl+C 停")
+    print(f"[guard] 开始巡检（每 {a.interval}s）… Ctrl+C 停"
+          f"{' | 仅监控不复活' if a.no_respawn else ''}")
     fails = 0
     n = 0
     while True:
+        # 用户主动关掉窗口/执行过 --stop：不许复活，守护自行退出。
+        if stop_requested():
+            log("[guard] 检测到用户主动停止标记 → 守护退出（不再拉起 MBDSDR）")
+            return
         time.sleep(a.interval)
         n += 1
         try:
@@ -206,8 +262,21 @@ def main():
             else:
                 fails += 1
             if fails >= 2:
+                if not mbdsdr_running():
+                    # 进程已经没了 = 多半是用户主动关窗口：尊重人的意图，不复活。
+                    log("[guard] MBDSDR 进程已不存在（判断为用户主动关闭）→ 不复活，"
+                        "继续待命；你重新打开后守护会自动恢复巡检。"
+                        "（确需退出交互型：python stack_up.py --stop）")
+                    fails = 0
+                    continue
+                if a.no_respawn:
+                    log(f"[guard] {time.strftime('%H:%M:%S')} "
+                        f"ControlHub 异常（{fails}次）——--no-respawn 模式：只报告不拉起，"
+                        f"请手动重启或 python stack_up.py --stop")
+                    continue
                 s = load_state()
-                print(f"[guard] {time.strftime('%H:%M:%S')} ControlHub 卡死({fails}次) → 重启恢复")
+                log(f"[guard] {time.strftime('%H:%M:%S')} ControlHub 卡死({fails}次) → 重启恢复"
+                    f"（不想被复活请用 --stop 或 Ctrl+C）")
                 res = start_stack(s["freq_hz"], s["rate_hz"])
                 if res.get("ok"):
                     ctl("set_sample_rate", {"rate_hz": int(s["rate_hz"])})
