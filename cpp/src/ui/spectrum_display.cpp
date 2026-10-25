@@ -219,8 +219,9 @@ void SpectrumDisplay::recomputeGeometry() {
     lay_.topPad  = scaled(kDispTopInset);
     lay_.botPad  = height() - scaled(kDispBottomInset);
     lay_.stripH  = scaled(kDispFreqStripH);
-    lay_.gapPx   = scaled(kDispAreaGap);
-    lay_.splitGap= scaled(kDispAreaGap);
+    // 瀑布紧贴谱线：零间隙（用户要求"紧贴"）。
+    lay_.gapPx   = 0;
+    lay_.splitGap= 0;
 
     const int fixedV = lay_.stripH + lay_.gapPx + lay_.splitGap;
     int pool = lay_.botPad - lay_.topPad - fixedV;
@@ -252,13 +253,14 @@ void SpectrumDisplay::recomputeGeometry() {
     lay_.fallsH = fallsH;
 
     const int traceTop = lay_.topPad;
-    const int stripTop = traceTop + traceH + lay_.gapPx;
-    const int splitY   = stripTop + lay_.stripH + lay_.splitGap;
+    // 瀑布紧贴谱线（零间隙），频率轴移到最底（用户要求）。
+    const int splitY   = traceTop + traceH;
+    const int stripTop = splitY + fallsH;
 
     lay_.traceRect = QRect(lay_.plotX0, traceTop, lay_.plotW, traceH);
+    lay_.fallsRect = QRect(lay_.plotX0, splitY, lay_.plotW, fallsH);
     lay_.stripRect = QRect(lay_.plotX0, stripTop, lay_.plotW, lay_.stripH);
     lay_.splitY    = splitY;
-    lay_.fallsRect = QRect(lay_.plotX0, splitY, lay_.plotW, fallsH);
 
     const int half = scaled(kDividerHitHalfH);
     lay_.splitZone = QRect(lay_.plotX0, splitY - half, lay_.plotW, 2 * half);

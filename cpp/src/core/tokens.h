@@ -245,7 +245,7 @@ inline constexpr int kSpacingXXL = 32;
 // =====================================================================
 // Sizes (base px, multiply by scaled() at runtime)
 // =====================================================================
-inline constexpr int kTopbarH          = 56;
+inline constexpr int kTopbarH          = 40;   // 压扁顶栏（频谱区更高）
 inline constexpr int kSplitterWidth    = 8;
 inline constexpr int kTouchMin         = 44;
 // Main-window floor (base px, scaled at runtime): keeps the 3-column layout
@@ -653,16 +653,16 @@ inline constexpr WaterfallStop kWaterfallStopsViridis[] = {
 // =====================================================================
 inline constexpr int kDispLeftInset    = 50;   // dB label gutter (base px)
 inline constexpr int kDispRightInset   = 12;
-inline constexpr int kDispTopInset     = 9;
-inline constexpr int kDispBottomInset  = 8;
-inline constexpr int kDispFreqStripH   = 30;   // shared tick + label strip
-inline constexpr int kDispAreaGap      = 1;    // hairline between trace and strip
+inline constexpr int kDispTopInset     = 4;    // 顶部留白压缩（瀑布更高）
+inline constexpr int kDispBottomInset  = 3;    // 底部留白压缩（瀑布更高）
+inline constexpr int kDispFreqStripH   = 22;   // 频率轴条带（压扁给瀑布让高）
+inline constexpr int kDispAreaGap      = 0;    // 瀑布紧贴谱线（零间隙）
 inline constexpr int kDividerHitHalfH  = 4;    // draggable divider hit half-height
 inline constexpr int kSpecAreaMinH     = 120;  // min trace height (base px)
 inline constexpr int kWfAreaMinH       = 60;   // min waterfall height (base px)
 // Default share of the (trace + waterfall) height given to the trace.
 // 0.5 => spectrum and waterfall are roughly equal, both substantial.
-inline constexpr double kDefaultSpecFraction = 0.3;  // 30% trace / 70% waterfall (waterfall dominant)
+inline constexpr double kDefaultSpecFraction = 0.25;  // 25% trace / 75% waterfall (waterfall dominant)
 inline constexpr const char* kSettingsKeySpecFraction = "view/specFraction";
 inline constexpr const char* kSettingsKeyScrollSpeed  = "view/wfScrollSpeed";
 inline constexpr const char* kSettingsKeyPalette      = "view/wfPalette";
