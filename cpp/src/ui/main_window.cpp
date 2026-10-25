@@ -224,6 +224,41 @@ MainWindow::MainWindow(QWidget* parent)
     topLay->addWidget(controlHttpBanner_);
     topLay->addStretch();
 
+    // 大频率数字（SDR++ 标志性 UI）：顶部超大字号显示当前调谐频率。
+    // 格式：000.436.763（MHz 三位小数，千位分隔）。
+    auto* bigFreqLabel = new QLabel(topBar);
+    bigFreqLabel->setObjectName("bigFreqLabel");
+    {
+        QFont bf = bigFreqLabel->font();
+        bf.setPointSizeF(tokens::scaled(28) * 72.0 / 96.0);  // ~28px 逻辑点
+        bf.setBold(true);
+        bigFreqLabel->setFont(bf);
+        bigFreqLabel->setStyleSheet(QStringLiteral(
+            "QLabel#bigFreqLabel { color: %1; letter-spacing: 2px; }")
+            .arg(QString::fromUtf8(tokens::kAccent)));
+        bigFreqLabel->setToolTip(QStringLiteral("当前调谐频率（MHz）"));
+    }
+    bigFreqLabel->setText(QStringLiteral("000.000.000"));
+    topLay->addWidget(bigFreqLabel);
+    // 大频率数字随调谐更新（1 Hz 轮询 engine 读回，不依赖 UI 控件信号）。
+    {
+        auto* freqTimer = new QTimer(this);
+        connect(freqTimer, &QTimer::timeout, this, [this, bigFreqLabel]() {
+            if (!engine_) return;
+            const double hz = engine_->centerFreq();
+            if (hz <= 0.0) return;
+            const double mhz = hz / 1e6;
+            // 格式：000.436.763（整数部分 3 位补零 + 小数 6 位分三组）
+            const int whole = static_cast<int>(mhz);
+            const int frac  = static_cast<int>(std::round((mhz - whole) * 1e6));
+            bigFreqLabel->setText(QStringLiteral("%1.%2.%3")
+                .arg(whole, 3, 10, QLatin1Char('0'))
+                .arg(frac / 1000, 3, 10, QLatin1Char('0'))
+                .arg(frac % 1000, 3, 10, QLatin1Char('0')));
+        });
+        freqTimer->start(500);
+    }
+
     auto* clockLabel = new QLabel(topBar);
     clockLabel->setObjectName("monoInfo");
     auto* clockTimer = new QTimer(this);
