@@ -53,6 +53,17 @@ def kill(proc):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def log(msg):
+    """打印 + 落盘 stack_guard.log（守护循环的异常不能吞，要留痕）"""
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}"
+    print(line, flush=True)
+    try:
+        with open(os.path.join(HERE, "stack_guard.log"), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
 def start_stack(freq_hz, rate_hz, detached=False):
     kill("rtl_tcp.exe"); kill("mbdsdr.exe")
     time.sleep(1.5)
@@ -85,23 +96,33 @@ def apply_colormap():
 
     UI 的构造/Re-apply 加载持久化色图实测不生效（下拉还显示"经典"），
     运行时 set_color_map 一定生效——这里补上启动路径。
+
+    注册表读取链路（winreg 读 view/wfColormapFile）任何一环失败——
+    非 Windows / 无 winreg / 无键 / 值为空 / 值指向的文件不存在——
+    都回退内置默认 sdrpp_style.json，并把回退原因记进日志。
     """
-    import json as _json
-    st = load_state()
-    p = r"D:\mbdsdr\output\ariss\sdrpp_style.json"
-    try:
-        reg = _json.load(open(r"registry_view.json")) if False else None
-    except Exception:
-        pass
-    # 直接从 Windows 注册表读 view/wfColormapFile（PowerShell 不可用时回退默认）
+    default_p = r"D:\mbdsdr\output\ariss\sdrpp_style.json"
+    p, src = None, "registry view/wfColormapFile"
     try:
         import winreg
         k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                            r"Software\mbdsdr\MBDSDR\view")
-        p = winreg.QueryValueEx(k, "wfColormapFile")[0] or p
-        winreg.CloseKey(k)
-    except Exception:
-        pass
+        try:
+            val, _ = winreg.QueryValueEx(k, "wfColormapFile")
+        finally:
+            winreg.CloseKey(k)
+        if val and os.path.exists(str(val)):
+            p = str(val)
+        else:
+            src = f"registry 值无效({val!r})，回退默认"
+    except Exception as e:
+        src = f"winreg 读失败({e.__class__.__name__}: {e})，回退默认"
+    if p is None:
+        p = default_p
+        log(f"[colormap] {src}")
+    if not os.path.exists(p):
+        log(f"[colormap] 色图文件不存在：{p}（跳过 set_color_map）")
+        return False, p
     r = ctl("set_color_map", {"file_path": p}, timeout=20)
     return r.get("ok", False), p
 
@@ -171,29 +192,35 @@ def main():
     while True:
         time.sleep(a.interval)
         n += 1
-        if alive():
-            fails = 0
-            st = ctl("get_status", {}, timeout=10)
-            if not st.get("ok"):
-                fails += 1
+        try:
+            if alive():
+                fails = 0
+                st = ctl("get_status", {}, timeout=10)
+                if not st.get("ok"):
+                    fails += 1
+                else:
+                    if n % 20 == 0:
+                        print(f"[guard] {time.strftime('%H:%M:%S')} 正常 "
+                              f"freq={st.get('readback_center_hz')}")
+                    continue
             else:
-                if n % 20 == 0:
-                    print(f"[guard] {time.strftime('%H:%M:%S')} 正常 "
-                          f"freq={st.get('readback_center_hz')}")
-                continue
-        else:
+                fails += 1
+            if fails >= 2:
+                s = load_state()
+                print(f"[guard] {time.strftime('%H:%M:%S')} ControlHub 卡死({fails}次) → 重启恢复")
+                res = start_stack(s["freq_hz"], s["rate_hz"])
+                if res.get("ok"):
+                    ctl("set_sample_rate", {"rate_hz": int(s["rate_hz"])})
+                    ctl("tune", {"freq_hz": int(s["freq_hz"])})
+                    ctl("set_mode", {"mode": s["mode"]})
+                    apply_colormap()
+                    print("[guard] 已恢复")
+                fails = 0
+        except Exception as e:
+            # 守护循环的异常不许吞：记录后继续巡检（一次抖动不打死守护）
             fails += 1
-        if fails >= 2:
-            s = load_state()
-            print(f"[guard] {time.strftime('%H:%M:%S')} ControlHub 卡死({fails}次) → 重启恢复")
-            res = start_stack(s["freq_hz"], s["rate_hz"])
-            if res.get("ok"):
-                ctl("set_sample_rate", {"rate_hz": int(s["rate_hz"])})
-                ctl("tune", {"freq_hz": int(s["freq_hz"])})
-                ctl("set_mode", {"mode": s["mode"]})
-                apply_colormap()
-                print("[guard] 已恢复")
-            fails = 0
+            log(f"[guard] {time.strftime('%H:%M:%S')} 巡检异常（已记录，继续）: "
+                f"{e.__class__.__name__}: {e}")
 
 
 if __name__ == "__main__":

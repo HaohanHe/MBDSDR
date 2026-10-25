@@ -18,7 +18,7 @@ sat_catch.py — 收卫星的总入口（大工具形态）
   python sat_catch.py --sat "NOAA 19" --freq 137100000 --now      # 已在过境，立即录
   python sat_catch.py --sat "NOAA 19" --freq 137100000 --dry      # 只看时刻表
 """
-import argparse, subprocess, time, os, sys, json, glob
+import argparse, subprocess, time, os, re, sys, json, glob
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -27,6 +27,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable
 RTL = r"C:\rtl-sdr\bin\rtl_sdr.exe"
 LAT, LON, ALT = 43.774156, 125.397813, 230.8
+# TLE 库按优先级搜：仓库入库目录 data/ → 脚本目录 → 当前工作目录
+TLE_DIRS = [os.path.join(HERE, os.pardir, "data"), HERE, os.getcwd()]
 
 
 def sh(cmd, **kw):
@@ -34,15 +36,37 @@ def sh(cmd, **kw):
 
 
 def load_tles():
-    sats = []
-    for fn in sorted(glob.glob(os.path.join(HERE, "tle_*.txt"))) + [os.path.join(HERE, "iss.tle")]:
-        if not os.path.exists(fn):
-            continue
-        L = [l.rstrip() for l in open(fn, encoding="utf-8", errors="replace") if l.strip()]
-        for i in range(len(L) - 2):
-            if L[i+1].startswith("1 ") and L[i+2].startswith("2 "):
-                sats.append((L[i].strip(), L[i+1], L[i+2], fn))
+    sats, seen = [], set()
+    for d in TLE_DIRS:
+        d = os.path.abspath(d)
+        for fn in sorted(glob.glob(os.path.join(d, "tle_*.txt"))) + \
+                  [os.path.join(d, "iss.tle")]:
+            if not os.path.exists(fn):
+                continue
+            L = [l.rstrip() for l in open(fn, encoding="utf-8", errors="replace") if l.strip()]
+            for i in range(len(L) - 2):
+                if L[i+1].startswith("1 ") and L[i+2].startswith("2 "):
+                    nid = L[i+1][2:7]
+                    if nid in seen:          # 同一颗星多处出现时只留首个
+                        continue
+                    seen.add(nid)
+                    sats.append((L[i].strip(), L[i+1], L[i+2], fn))
     return sats
+
+
+def name_hit(query, name):
+    """卫星名匹配打分：完整名 2 > 词边界子串 1 > 0。
+
+    词边界防子串误伤（"ISS" 不能命中 SWISSCUBE——中间的 ISS 是词内片段）。
+    """
+    q, n = query.strip().lower(), name.strip().lower()
+    if not q:
+        return 0
+    if q == n:
+        return 2
+    if re.search(r"(?<![a-z0-9])" + re.escape(q) + r"(?![a-z0-9])", n):
+        return 1
+    return 0
 
 
 def compute_passes(sat, min_alt, hours=14):
@@ -69,6 +93,9 @@ def compute_passes(sat, min_alt, hours=14):
 
 def record(sat_name, freq, start, stop, rate=1.024e6, prefix="catch"):
     """rtl_sdr 录音到 SigMF（data+meta），返回 (data_path, meta_path, t_start)"""
+    out_dir = os.path.dirname(os.path.join(HERE, prefix))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     data_f = os.path.join(HERE, f"{prefix}.sigmf-data")
     meta_f = os.path.join(HERE, f"{prefix}.sigmf-meta")
     t_start = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -137,21 +164,24 @@ def main():
     ap.add_argument("--hours", type=float, default=14.0)
     ap.add_argument("--now", action="store_true")
     ap.add_argument("--dry", action="store_true")
-    ap.add_argument("--out", default=None)
+    ap.add_argument("--out", default=None,
+                    help="输出前缀（默认 <卫星名>_<频率>k；带目录会自动建）")
     a = ap.parse_args()
 
     from skyfield.api import EarthSatellite
-    sat = None
-    tle_fn = "iss.tle"
+    # 选星：打分挑最贴切的命中（完整名 > 词边界子串），防 SWISSCUBE 抢走 "ISS"
+    best = None
     for name, l1, l2, fn in load_tles():
-        if a.sat.lower() in name.lower():
-            sat = EarthSatellite(l1, l2, name)
-            sat_name = name
-            tle_fn = fn
-            break
-    if sat is None:
-        print(f"[err] TLE 里没有 {a.sat}")
+        s = name_hit(a.sat, name)
+        if s and (best is None or s > best[0]):
+            best = (s, name, l1, l2, fn)
+            if s == 2:
+                break
+    if best is None:
+        print(f"[err] TLE 里没有 {a.sat}（已搜：{'、'.join(TLE_DIRS)}）")
         sys.exit(1)
+    _, sat_name, tle_l1, tle_l2, tle_fn = best   # TLE 行/文件名一次性捕获，lrpt 分支直用
+    sat = EarthSatellite(tle_l1, tle_l2, sat_name)
 
     passes = compute_passes(sat, a.min_alt, a.hours)
     if not passes:
@@ -180,8 +210,10 @@ def main():
         print("[err] 该过境已结束")
         sys.exit(1)
 
+    # --out 清理：用户给 "foo.wav"/"foo.sigmf-data" 时剥掉后缀，避免双后缀产物名
     prefix = a.out or (sat_name.replace(" ", "_").replace("(", "").replace(")", "")
                        + f"_{int(a.freq/1e3)}k")
+    prefix = re.sub(r"\.(sigmf-data|sigmf-meta|iq|bin|wav)$", "", prefix, flags=re.I)
     data_f, meta_f, t_start = record(sat_name, a.freq, start, stop, a.rate, prefix)
 
     # ---- 处理 ----
@@ -195,29 +227,23 @@ def main():
         print("[post] METEOR LRPT QPSK 解调（仓库 meteor_sat.meteor_lrpt_demod）…")
         sys.path.insert(0, "D:/mbdsdr/MBDSDR")
         from mbdsdr_ai.meteor_sat import meteor_lrpt_demod
-        from skyfield.api import load, EarthSatellite, Topos, utc
-        from datetime import timedelta
+        from skyfield.api import load, Topos, utc
         raw = np.fromfile(data_f, dtype=np.uint8)
         n = (len(raw) // 2) * 2
         iq = (raw[:n].astype(np.float32) - 127.5) / 127.5
         c = iq[0::2] + 1j * iq[1::2]
         del raw, iq
-        # 多普勒补偿（同 apt_decode 口径）
+        # 多普勒补偿（同 apt_decode 口径）；TLE 用主流程捕获的 tle_l1/tle_l2
         try:
-            l1 = l2 = None
-            for name, a1, a2, fn in load_tles():
-                if sat_name.lower() in name.lower():
-                    l1, l2 = a1, a2
-                    break
-            sat = EarthSatellite(l1, l2, sat_name)
+            sat_d = EarthSatellite(tle_l1, tle_l2, sat_name)
             ts = load.timescale()
             gs = Topos(latitude_degrees=LAT, longitude_degrees=LON, elevation_m=ALT)
             dur = len(c) / a.rate
             ng = int(dur) + 3
             gt = [t_start + timedelta(seconds=i) for i in range(ng)]
-            d0 = (sat - gs).at(ts.utc([g.replace(tzinfo=utc) for g in gt])).distance().km
-            d1 = (sat - gs).at(ts.utc([(g + timedelta(seconds=1)).replace(tzinfo=utc)
-                                       for g in gt])).distance().km
+            d0 = (sat_d - gs).at(ts.utc([g.replace(tzinfo=utc) for g in gt])).distance().km
+            d1 = (sat_d - gs).at(ts.utc([(g + timedelta(seconds=1)).replace(tzinfo=utc)
+                                         for g in gt])).distance().km
             fd = -(d1 - d0) / 299792.458 * a.freq
             ta = np.arange(len(c)) / a.rate
             fdi = np.interp(ta, np.arange(ng), fd)

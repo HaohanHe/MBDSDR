@@ -15,51 +15,57 @@ sat_radar.py — 机会雷达：未来 N 小时所有可收卫星一览
   python sat_radar.py --hours 12 --min-alt 45
   python sat_radar.py --today           # 只看今天剩余
 """
-import argparse, glob, os, re
-from datetime import datetime, timedelta
+import argparse, glob, os, re, sys
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 from skyfield.api import load, EarthSatellite, Topos
 
 LAT, LON, ALT = 43.774156, 125.397813, 230.8
 HERE = os.path.dirname(os.path.abspath(__file__))
+# TLE 库按优先级搜：仓库入库目录 data/ → 脚本目录 → 当前工作目录
+TLE_DIRS = [os.path.join(HERE, os.pardir, "data"), HERE, os.getcwd()]
 
 # 优先级：常发射=2（随时有信号），排期型=1，老星/未知=0
+# 一律带 \b 词边界：防子串误伤（SWISSCUBE 里含 "ISS" 片段，不能算 ISS）
 PRIORITY = [
-    (r"^NOAA 1[589]$", 2, "137.620/137.9125/137.100", "APT 常发射"),
-    (r"METEOR-M2", 2, "137.100/137.900", "LRPT 常发射"),
-    (r"^ISS", 1, "145.990/437.800", "需 ARISS 排期"),
-    (r"CUTE$", 1, "437.250", "GFSK 遥测"),
-    (r"CUTE-1\.7", 0, "437.475", "老星"),
-    (r"CUTE-1 \(CO-55\)", 0, "436.8375", "2003 老星，疑停用"),
-    (r"SO-50", 1, "436.795", "FM 转发，需上行"),
-    (r"AO-73", 1, "145.935", "遥测"),
-    (r"RS-44", 1, "435.615", "SSB 转发"),
+    (r"^NOAA[\s-]*1[589]\b", 2, "137.620/137.9125/137.100", "APT 常发射"),
+    (r"\bMETEOR-M2\b", 2, "137.100/137.900", "LRPT 常发射"),
+    (r"^ISS\b", 1, "145.990/437.800", "需 ARISS 排期"),
+    (r"\bCUTE-1\.7\b", 0, "437.475", "老星"),
+    (r"\bCUTE-1\s*\(CO-55\)", 0, "436.8375", "2003 老星，疑停用"),
+    (r"^CUTE(?:\s+\d+)?$", 1, "437.250", "GFSK 遥测"),
+    (r"\bSO-50\b", 1, "436.795", "FM 转发，需上行"),
+    (r"\bAO-73\b", 1, "145.935", "遥测"),
+    (r"\bRS-44\b", 1, "435.615", "SSB 转发"),
 ]
 
 
 def load_sats():
     sats = []
     seen = set()
-    for fn in sorted(glob.glob(os.path.join(HERE, "tle_*.txt"))) + \
-              [os.path.join(HERE, "iss.tle")]:
-        if not os.path.exists(fn):
-            continue
-        L = [l.rstrip() for l in open(fn, encoding="utf-8", errors="replace") if l.strip()]
-        for i in range(len(L) - 2):
-            if L[i+1].startswith("1 ") and L[i+2].startswith("2 "):
-                nid = L[i+1][2:7]
-                if nid in seen:
-                    continue
-                seen.add(nid)
-                try:
-                    sats.append((L[i].strip(), EarthSatellite(L[i+1], L[i+2], L[i])))
-                except Exception:
-                    pass
+    for d in TLE_DIRS:
+        d = os.path.abspath(d)
+        for fn in sorted(glob.glob(os.path.join(d, "tle_*.txt"))) + \
+                  [os.path.join(d, "iss.tle")]:
+            if not os.path.exists(fn):
+                continue
+            L = [l.rstrip() for l in open(fn, encoding="utf-8", errors="replace") if l.strip()]
+            for i in range(len(L) - 2):
+                if L[i+1].startswith("1 ") and L[i+2].startswith("2 "):
+                    nid = L[i+1][2:7]
+                    if nid in seen:
+                        continue
+                    seen.add(nid)
+                    try:
+                        sats.append((L[i].strip(), EarthSatellite(L[i+1], L[i+2], L[i])))
+                    except Exception:
+                        pass
     return sats
 
 
 def meta(name):
+    name = (name or "").strip()
     for pat, pri, freq, note in PRIORITY:
         if re.search(pat, name, re.I):
             return pri, freq, note
@@ -68,20 +74,32 @@ def meta(name):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--hours", type=float, default=24)
-    ap.add_argument("--min-alt", type=float, default=30)
-    ap.add_argument("--today", action="store_true")
+    ap.add_argument("--hours", type=float, default=24, help="展望小时数（默认 24）")
+    ap.add_argument("--min-alt", type=float, default=30, help="仰角门限（度）")
+    ap.add_argument("--today", action="store_true",
+                    help="只看本地今天剩余（按 UTC+8 日界算 hours）")
     a = ap.parse_args()
 
     ts = load.timescale()
     gs = Topos(latitude_degrees=LAT, longitude_degrees=LON, elevation_m=ALT)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    hours = (24 - now.hour - now.minute / 60) if a.today else a.hours
+    L8 = timedelta(hours=8)
+    if a.today:
+        # --today = 本地（UTC+8）今天剩余：按本地日界算，别拿 UTC 小时冒充
+        local = now + L8
+        hours = 24 - (local.hour + local.minute / 60 + local.second / 3600)
+        if hours <= 0:
+            print("[err] 本地今天已过完（24:00 后），看 --hours 24 或明天")
+            sys.exit(1)
+    else:
+        hours = a.hours
+    if hours <= 0:
+        print(f"[err] --hours 需为正，收到 {a.hours}")
+        sys.exit(1)
 
-    n = int(hours * 3600 / 30)
+    n = max(int(hours * 3600 / 30), 2)   # 至少 2 个采样点，防日界处 hours≈0 时空网格
     t0 = ts.utc(now.year, now.month, now.day, now.hour, now.minute,
                 [float(i * 30) for i in range(n)])
-    L8 = timedelta(hours=8)
     MAX_KM = 2500          # 只留 LEO（GEO/HEO 一挂几十分钟，不是接收目标）
     rows = []
     for name, sat in load_sats():

@@ -20,6 +20,7 @@ ARISS / ISS 接收：多普勒补偿 + NFM 解调
 代价：不能实时听。实时听需 SDR 支持频率扫描（待补）。
 """
 import argparse
+import os
 import numpy as np
 from datetime import datetime, timedelta, timezone
 
@@ -32,6 +33,8 @@ C = 299792.458  # km/s
 
 
 def load_sat():
+    if not os.path.exists(TLE_FILE):
+        raise SystemExit(f"[err] TLE 文件不存在: {TLE_FILE}（把 iss.tle 放 cwd，或用 --no-dopp）")
     lines = [l.rstrip() for l in open(TLE_FILE, encoding="utf-8") if l.strip()]
     return EarthSatellite(lines[1], lines[2], lines[0])
 
@@ -103,21 +106,37 @@ def main():
     if a.tone_hz:
         c = c * np.exp(1j * 2 * np.pi * a.tone_hz * np.arange(n_samp) / fs)
 
-    # ---- 多级抗混叠抽取：fs -> 48k ----
-    # 目标：保留 DC 附近 ±12.5kHz（NFM 信道带宽）
-    stages = []
-    cur = fs
-    for d in (8, 8, 4):        # 2.048M -> 256k -> 32k
-        if cur / d >= 32000:
-            c = signal.decimate(c, d, ftype="fir", zero_phase=True)
-            cur /= d
-            stages.append(f"{cur/1e3:.0f}k")
-    print(f"[dec] {'->'.join(stages)}")
-    # 32k -> 48k
+    # ---- 多级抗混叠抽取：fs -> ~32k，再 -> 48k ----
+    # 目标：保留 DC 附近 ±12.5kHz（NFM 信道带宽）。
+    # 校验（fs 非默认 2.048e6/1.024e6 时老代码会算错输出率）：
+    #   ① fs 须能承载音频通道；② 抽取后率不得带不动 3.5kHz 音频；
+    #   ③ 最终采样率按实际比值算，不许无条件 cur*3/2（那是 32k 特例的偷懒）。
     out_fs = 48000
-    c = signal.resample_poly(c, 3, 2) if abs(cur - 32000) < 1 else c
-    cur = cur * 3 / 2
-    print(f"[dec] final {cur/1e3:.0f} kHz")
+    if not np.isfinite(fs) or fs <= 0:
+        raise SystemExit(f"[err] --fs 须为正有限值，收到 {a.fs}")
+    if fs < 32000:
+        raise SystemExit(f"[err] --fs {fs:.0f} Hz < 32kHz：承载不了 NFM 音频通道（需 ≥32k）")
+    stages = []
+    cur = float(fs)
+    for d in (8, 8, 4):        # 2.048M->256k->32k；1.024M->128k->32k；其余按需跳过
+        if cur / d < 32000:
+            continue
+        if len(c) < 32 * d:
+            raise SystemExit(f"[err] IQ 太短（{len(c)} 样本），不够做 {d} 倍抽取（需 ≥{32*d}）")
+        c = signal.decimate(c, d, ftype="fir", zero_phase=True)
+        cur /= d
+        stages.append(f"{cur/1e3:.1f}k")
+    print(f"[dec] {'->'.join(stages) if stages else '(无抽取)'}  "
+          f"{fs/1e3:.1f}k -> {cur/1e3:.1f}k")
+    if cur < 16000:
+        raise SystemExit(f"[err] 抽取后 {cur:.0f} S/s 带不动 3.5kHz 音频（需 ≥16k），检查 --fs")
+    # ~32k -> 48k：任意 fs 用有理比重采样（32k 特例=3/2，其余各自算）
+    if abs(cur - out_fs) > 1:
+        from fractions import Fraction
+        ratio = Fraction(int(out_fs), int(round(cur))).limit_denominator(2000)
+        c = signal.resample_poly(c, ratio.numerator, ratio.denominator)
+        cur = cur * ratio.numerator / ratio.denominator
+    print(f"[dec] final {cur/1e3:.2f} kHz")
 
     # ---- FM 鉴频 ----
     d = np.angle(c[1:] * np.conj(c[:-1]))

@@ -2,8 +2,13 @@
 """把 Overpass 查到的周边设施按"距离+真方位角"排出来，画成极坐标方位图。
 
 方位是真北基准 —— 磁罗盘被干扰时，用它对照寻星。
+
+用法：
+  python osm_rfi.py                    # 读 osm_raw.json，出 osm_rfi_polar.png
+  python osm_rfi.py --in q.json --out rfi.png
+  python osm_rfi.py --json             # stdout 纯机器可读 JSON（表格让位）
 """
-import json, math, os
+import argparse, json, math, os, sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -68,7 +73,23 @@ def classify(tags):
 
 
 def main():
-    d = json.load(open("osm_raw.json", encoding="utf-8"))
+    ap = argparse.ArgumentParser(description="OSM 周边干扰源极坐标方位图（真北基准）")
+    ap.add_argument("--in", dest="infile", default="osm_raw.json",
+                    help="Overpass JSON（默认 osm_raw.json）")
+    ap.add_argument("--out", dest="outfile", default="osm_rfi_polar.png",
+                    help="输出图（默认 osm_rfi_polar.png）")
+    ap.add_argument("--json", action="store_true",
+                    help="输出机器可读 JSON（stdout 纯 JSON，无表格；图照常出）")
+    a = ap.parse_args()
+
+    if not os.path.exists(a.infile):
+        raise SystemExit(f"[err] 输入不存在: {a.infile}（Overpass 查询结果 JSON，"
+                         f"用 --in 指定）")
+    try:
+        d = json.load(open(a.infile, encoding="utf-8"))
+    except Exception as e:
+        raise SystemExit(f"[err] {a.infile} 解析不了: {e.__class__.__name__}: {e}")
+
     items = []
     for e in d.get("elements", []):
         lat = e.get("lat") or (e.get("center") or {}).get("lat")
@@ -85,14 +106,23 @@ def main():
                           tags=t))
     items.sort(key=lambda x: x["dm"])
 
-    print("=== 周边设施（按距离，方位=真北基准）===")
-    for it in items[:30]:
-        _, nm, col, sz = KIND[it["k"]]
-        extra = " ".join(f"{k}={v}" for k, v in it["tags"].items()
-                         if k in ("man_made", "tower:type", "power", "landuse",
-                                  "building", "height", "construction"))
-        print(f"  {nm:<10s} {it['dm']:6.0f} m  方位 {it['az']:5.1f}°  "
-              f"{it['name']:<12s} {extra[:44]}")
+    if a.json:
+        out = [dict(kind=KIND[it["k"]][1], kind_key=KIND[it["k"]][0],
+                    dist_m=round(it["dm"], 1), az_deg=round(it["az"], 2),
+                    name=it["name"], tags=it["tags"]) for it in items]
+        json.dump({"me": {"lat": ME[0], "lon": ME[1]},
+                   "count": len(out), "items": out},
+                  sys.stdout, ensure_ascii=False, indent=2)
+        print()
+    else:
+        print("=== 周边设施（按距离，方位=真北基准）===")
+        for it in items[:30]:
+            _, nm, col, sz = KIND[it["k"]]
+            extra = " ".join(f"{k}={v}" for k, v in it["tags"].items()
+                             if k in ("man_made", "tower:type", "power", "landuse",
+                                      "building", "height", "construction"))
+            print(f"  {nm:<10s} {it['dm']:6.0f} m  方位 {it['az']:5.1f}°  "
+                  f"{it['name']:<12s} {extra[:44]}")
 
     fig = plt.figure(figsize=(11, 9))
     ax = plt.subplot(111, polar=True)
@@ -124,8 +154,9 @@ def main():
     ax.legend(handles=leg, loc="upper right", bbox_to_anchor=(1.30, 1.12),
               facecolor="#1a1d26", edgecolor="#3a4050", labelcolor="#e6e8ee", fontsize=9)
     plt.tight_layout()
-    plt.savefig("osm_rfi_polar.png", dpi=125, facecolor="#12141a")
-    print("\n[out] osm_rfi_polar.png")
+    plt.savefig(a.outfile, dpi=125, facecolor="#12141a")
+    if not a.json:
+        print(f"\n[out] {a.outfile}")
 
 
 if __name__ == "__main__":

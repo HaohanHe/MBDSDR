@@ -19,6 +19,9 @@ rtl_sdr 录的裸 u8 IQ 一路处理成 APT 云图：
 
 先自检（验证仓库解码函数可用，再上真数据）：
   python apt_decode.py --selftest
+
+看支持哪些解码模式：
+  python apt_decode.py --list-modes
 """
 import argparse, sys, os
 import numpy as np
@@ -28,6 +31,23 @@ sys.path.insert(0, "D:/mbdsdr/MBDSDR")
 from mbdsdr_ai import noaa_apt_lite as apl
 
 LAT, LON, ALT = 43.774156, 125.397813, 230.8
+
+# 本脚本支持的解码模式（--list-modes 列出；实现状态诚实标注）
+MODES = [
+    ("apt", "NOAA APT 气象云图（AM 音频域 + 行同步双通道）",
+     "本脚本已实现：--polarity 1/-1（图像上下翻时换），任意 fs 内部重采样 48k"),
+]
+
+
+def list_modes():
+    print("apt_decode 支持的解码模式：")
+    for name, desc, how in MODES:
+        print(f"  {name:<6} {desc}")
+        print(f"         └ {how}")
+    print("\n不在本脚本的模式（去对应工具，别在这找）：")
+    print("  lrpt                  sat_catch.py --demod lrpt（METEOR QPSK 解调）")
+    print("  nfm/wfm               doppler_fm.py（多普勒补偿 + FM 解调 → WAV）")
+    print("  ft8/wspr/aprs/adsb/sstv   python -m mbdsdr_ai --decode-file <文件> --mode <模式>")
 
 
 def load_sat(name, tle_files):
@@ -100,13 +120,18 @@ def main():
     ap.add_argument("--out", default="noaa_apt")
     ap.add_argument("--dur", type=float, default=0)
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--list-modes", action="store_true",
+                    help="列出支持的解码模式后退出")
     a = ap.parse_args()
 
+    if a.list_modes:
+        list_modes()
+        return
     if a.selftest:
         selftest()
         return
     if not a.iq or not a.start_utc:
-        ap.error("需要 <iq.bin> <start_utc>，或用 --selftest")
+        ap.error("需要 <iq.bin> <start_utc>，或用 --selftest / --list-modes")
 
     from datetime import datetime
     t_start = datetime.strptime(a.start_utc, "%Y-%m-%d %H:%M:%S")

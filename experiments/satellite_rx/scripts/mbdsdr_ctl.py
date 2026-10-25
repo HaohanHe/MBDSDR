@@ -102,9 +102,19 @@ def main():
         if not r.get("ok"):
             print(f"[fail] {r.get('error')}"); sys.exit(1)
         print(f"connected={r.get('connected')}  freq={r.get('readback_center_hz')} Hz  "
-              f"rate={r.get('readback_sample_rate_hz')} Hz")
-        print(f"source={r.get('source')}  status={r.get('status')}  "
-              f"telemetry={r.get('telemetry_available')}")
+              f"rate={r.get('readback_sample_rate_hz')} Hz  gain={r.get('readback_gain_db')} dB")
+        print(f"source={r.get('source')}  status={r.get('status')}  mode={r.get('mode')}")
+        # telemetry 状态：遥测可用性 + 锁定/EVM 质量（数字模式判决依据）
+        tel = r.get("telemetry_available")
+        dopp = "on" if r.get("doppler_enabled") else "off"
+        if r.get("doppler_available"):
+            dopp += "(可用)"
+        print(f"telemetry={'可用' if tel else '不可用'}  "
+              f"carrier_locked={r.get('carrier_locked')}  "
+              f"symbol_locked={r.get('symbol_locked')}  "
+              f"evm={r.get('evm_percent')}%  doppler={dopp}")
+        if r.get("error_message"):
+            print(f"error_message={r.get('error_message')}")
         return
     if a.cmd == "connect":
         show(post("connect_network_source", {"host": a.host, "port": a.port}))
@@ -139,8 +149,15 @@ def main():
     elif a.cmd == "raw":
         try:
             args = json.loads(a.args)
-        except Exception:
-            print(f"[fail] args 不是合法 JSON: {a.args}"); sys.exit(1)
+        except json.JSONDecodeError as e:
+            print(f"[fail] args 不是合法 JSON: {e}")
+            print(f"      收到: {a.args}")
+            print("       正确姿势: python mbdsdr_ctl.py raw set_anr '{\"enabled\": true}'")
+            print("       （对象用 {} 包起来，外层单引号防 shell 吃掉引号）")
+            sys.exit(1)
+        if not isinstance(args, dict):
+            print(f"[fail] args 须是 JSON 对象（{{\"tool参数\": 值}}），收到 {type(args).__name__}")
+            sys.exit(1)
         show(post(a.tool, args))
 
 

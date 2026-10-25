@@ -25,7 +25,7 @@ python pass_recorder.py --sat "ISS (ZARYA)" --freq 145990000 --now
 # 只看时刻不录（--dry）
 python pass_recorder.py --sat "NOAA 19" --freq 137100000 --dry
 """
-import argparse, subprocess, time, json, os, sys, glob
+import argparse, subprocess, signal, time, json, os, sys, glob
 from datetime import datetime, timedelta, timezone
 
 from skyfield.api import load, EarthSatellite, Topos, utc
@@ -33,10 +33,47 @@ from skyfield.api import load, EarthSatellite, Topos, utc
 LAT, LON, ALT = 43.774156, 125.397813, 230.8      # GNSS 实测站址（长春）
 RTL = r"C:\rtl-sdr\bin\rtl_sdr.exe"
 OUTDIR = "."
+HERE = os.path.dirname(os.path.abspath(__file__))
+# TLE 库按优先级搜：仓库入库目录 data/ → 脚本目录 → 当前工作目录
+TLE_DIRS = [os.path.join(HERE, os.pardir, "data"), HERE, os.getcwd()]
+
+# SIGTERM/SIGBREAK 时走 KeyboardInterrupt 清理路径，保证 meta 落盘。
+# 注意：Windows 下 os.kill(pid, SIGTERM) 是 TerminateProcess，处理器来不及跑；
+# 能救的是 SIGBREAK/CTRL_BREAK/CTRL_CLOSE 与 POSIX 语义的 SIGTERM。
+STOP = {"reason": None}
+
+
+def _on_signal(signum, frame):
+    try:
+        STOP["reason"] = signal.Signals(signum).name
+    except Exception:
+        STOP["reason"] = f"signal {signum}"
+    raise KeyboardInterrupt
+
+
+def name_hit(query, name):
+    """卫星名匹配打分：完整名/归一化名 2 > 词边界子串 1 > 0（防 "ISS" 命中 SWISSCUBE）"""
+    import re
+    q, n = (query or "").strip().lower(), (name or "").strip().lower()
+    nq = re.sub(r"[^a-z0-9]+", "", q)
+    nn = re.sub(r"[^a-z0-9]+", "", n)
+    if not q:
+        return 0
+    if q == n or (nq and nq == nn):
+        return 2
+    if re.search(r"(?<![a-z0-9])" + re.escape(q) + r"(?![a-z0-9])", n):
+        return 1
+    return 0
 
 
 def find_sat(norad=None, name=None, tle_files=None):
-    files = tle_files or sorted(glob.glob("tle_*.txt")) + ["iss.tle"]
+    files = list(tle_files) if tle_files else []
+    if not files:
+        for d in TLE_DIRS:
+            d = os.path.abspath(d)
+            files += sorted(glob.glob(os.path.join(d, "tle_*.txt")))
+            files += [os.path.join(d, "iss.tle")]
+    best = None                      # (score, name, sat, fn)
     for fn in files:
         if not os.path.exists(fn):
             continue
@@ -47,8 +84,14 @@ def find_sat(norad=None, name=None, tle_files=None):
                 continue
             if norad and l1[2:7].strip() == str(norad).strip():
                 return L[i].strip(), EarthSatellite(l1, l2, L[i]), fn
-            if name and name.lower() in L[i].lower():
-                return L[i].strip(), EarthSatellite(l1, l2, L[i]), fn
+            if name:
+                s = name_hit(name, L[i])
+                if s and (best is None or s > best[0]):
+                    best = (s, L[i].strip(), EarthSatellite(l1, l2, L[i]), fn)
+                    if s == 2:
+                        return best[1], best[2], best[3]
+    if best is not None:
+        return best[1], best[2], best[3]
     return None, None, None
 
 
@@ -74,6 +117,50 @@ def compute_pass(sat, ts, gs, min_alt, hours=14, step=10.0):
     return None
 
 
+def write_meta(meta_f, data_f, name, freq, rate, p, t_start, t_end, interrupted=None):
+    """SigMF 元数据落盘——录音中断（SIGTERM/KeyboardInterrupt/异常）也必须写。
+
+    mbdsdr:interrupted 非空 = 录制非正常走完，处理时按部分数据对待。
+    """
+    size = os.path.getsize(data_f) if os.path.exists(data_f) else 0
+    meta = {
+        "global": {
+            "core:datatype": "ci8",
+            "core:sample_rate": rate,
+            "core:version": "1.0.0",
+            "core:num_channels": 1,
+            "core:description": f"MBDSDR pass recording of {name}",
+            "core:recorder": "rtl_sdr (osmocom)",
+            "core:author": "MBDSDR",
+            "core:license": "MIT",
+            "core:hw": "RTL2832U + Fitipower FC0012",
+            "core:frequency": freq,
+            "core:geolocation": {"latitude": LAT, "longitude": LON, "elevation": ALT},
+            "core:extensions": [
+                {"name": "mbdsdr", "version": "1.0.0", "optional": True}
+            ],
+            "mbdsdr:satellite": name,
+            "mbdsdr:pass_aos_utc": p["aos"].isoformat() + "Z",
+            "mbdsdr:pass_los_utc": p["los"].isoformat() + "Z",
+            "mbdsdr:max_elevation_deg": round(p["alt"], 2),
+            "mbdsdr:max_azimuth_deg": round(p["az"], 2),
+            "mbdsdr:slant_range_km": round(p["km"], 1),
+            "mbdsdr:record_start_utc": t_start.isoformat() + "Z",
+            "mbdsdr:record_end_utc": t_end.isoformat() + "Z",
+            "mbdsdr:record_bytes": size,
+            "mbdsdr:interrupted": interrupted or "",
+            "mbdsdr:provenance": "ota-candidate",
+        },
+        "captures": [
+            {"core:sample_start": 0, "core:frequency": freq,
+             "core:datetime": t_start.isoformat() + "Z"}
+        ],
+        "annotations": [],
+    }
+    with open(meta_f, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sat", help="卫星名（模糊匹配）")
@@ -88,6 +175,11 @@ def main():
     ap.add_argument("--dry", action="store_true", help="只算时刻不录")
     ap.add_argument("--out", help="输出前缀")
     a = ap.parse_args()
+
+    # SIGTERM/SIGBREAK 一律走清理路径（录音中断也要写 meta）
+    signal.signal(signal.SIGTERM, _on_signal)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _on_signal)
 
     name, sat, src = find_sat(a.norad, a.sat, [a.tle] if a.tle else None)
     if sat is None:
@@ -138,11 +230,13 @@ def main():
 
     cmd = [RTL, "-f", str(int(a.freq)), "-s", str(int(a.rate)), "-p", "0", data_f]
     print(f"[rec] 启动: {' '.join(cmd)}")
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-
     total = (stop - t_start).total_seconds()
-    t0 = time.time()
+    proc = None
+    interrupted = None
+    t_end = t_start
     try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        t0 = time.time()
         while time.time() - t0 < total:
             left = total - (time.time() - t0)
             el = time.time() - t0
@@ -150,60 +244,33 @@ def main():
             print(f"\r[rec] {el:6.1f}/{total:.0f}s  剩 {left:6.1f}s  {sz:8.1f} MB   ", end="", flush=True)
             if proc.poll() is not None:
                 print("\n[warn] rtl_sdr 提前退出（可能 USB 错误）")
+                interrupted = "rtl_sdr-early-exit"
                 break
             time.sleep(1.0)
     except KeyboardInterrupt:
-        print("\n[stop] 用户中断")
+        interrupted = interrupted or STOP["reason"] or "KeyboardInterrupt"
+        print(f"\n[stop] 录音中断（{interrupted}）——收尾写 meta")
     finally:
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except Exception:
+        # 不管怎么收场（SIGTERM/SIGBREAK→KeyboardInterrupt、USB 错、意外异常），
+        # 都要：杀录音进程 → 写 meta。录到多少写多少，mbdsdr:interrupted 记原因。
+        if proc is not None:
             try:
-                proc.kill()
+                proc.terminate()
+                proc.wait(timeout=5)
             except Exception:
-                pass
-    t_end = datetime.now(timezone.utc).replace(tzinfo=None)
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        t_end = datetime.now(timezone.utc).replace(tzinfo=None)
+        write_meta(meta_f, data_f, name, a.freq, a.rate, p, t_start, t_end, interrupted)
+
     size = os.path.getsize(data_f) if os.path.exists(data_f) else 0
     nsamp = size // 2
     print(f"\n[done] {data_f}  {size/1e6:.1f} MB  {nsamp} samples  "
           f"{nsamp/a.rate:.1f}s")
-
-    meta = {
-        "global": {
-            "core:datatype": "ci8",
-            "core:sample_rate": a.rate,
-            "core:version": "1.0.0",
-            "core:num_channels": 1,
-            "core:description": f"MBDSDR pass recording of {name}",
-            "core:recorder": "rtl_sdr (osmocom)",
-            "core:author": "MBDSDR",
-            "core:license": "MIT",
-            "core:hw": "RTL2832U + Fitipower FC0012",
-            "core:frequency": a.freq,
-            "core:geolocation": {"latitude": LAT, "longitude": LON, "elevation": ALT},
-            "core:extensions": [
-                {"name": "mbdsdr", "version": "1.0.0", "optional": True}
-            ],
-            "mbdsdr:satellite": name,
-            "mbdsdr:pass_aos_utc": p["aos"].isoformat() + "Z",
-            "mbdsdr:pass_los_utc": p["los"].isoformat() + "Z",
-            "mbdsdr:max_elevation_deg": round(p["alt"], 2),
-            "mbdsdr:max_azimuth_deg": round(p["az"], 2),
-            "mbdsdr:slant_range_km": round(p["km"], 1),
-            "mbdsdr:record_start_utc": t_start.isoformat() + "Z",
-            "mbdsdr:record_end_utc": t_end.isoformat() + "Z",
-            "mbdsdr:provenance": "ota-candidate",
-        },
-        "captures": [
-            {"core:sample_start": 0, "core:frequency": a.freq,
-             "core:datetime": t_start.isoformat() + "Z"}
-        ],
-        "annotations": [],
-    }
-    with open(meta_f, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    print(f"[done] {meta_f}  (SigMF 元数据已写入)")
+    print(f"[done] {meta_f}  (SigMF 元数据已写入"
+          + (f"，interrupted={interrupted})" if interrupted else ")"))
     print(f"[hint] 解调: python doppler_fm.py {data_f} \"{t_start.strftime('%Y-%m-%d %H:%M:%S')}\" --fs {int(a.rate)}")
 
 
