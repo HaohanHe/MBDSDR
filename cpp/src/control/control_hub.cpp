@@ -14,6 +14,7 @@
 #include "ui/bookmark_manager.h"
 #include "ui/workspace_controller.h"  // P0-b: live three-column workspace seam
 #include "ai/sat_task_planner.h"
+#include "ai/ai_config.h"    // predict_passes 站点坐标回退
 #include "ai/memory_store.h"   // P3 #73: local SQLite FTS5 memory store
 #include "ai/pending_plan_store.h" // 待执行计划槽：run_template 登记 / get_task_history 读面
 #include "ai/checkpoint_writer.h" // P3 #74: background single-writer drain
@@ -1243,8 +1244,14 @@ QJsonObject ControlHub::cmdPredictPasses(const QJsonObject& a) {
                         a.value(QStringLiteral("station_lat_deg")).isDouble();
     const bool hasLon = a.contains(QStringLiteral("station_lon_deg")) &&
                         a.value(QStringLiteral("station_lon_deg")).isDouble();
-    const double lat = hasLat ? a.value(QStringLiteral("station_lat_deg")).toDouble() : qQNaN();
-    const double lon = hasLon ? a.value(QStringLiteral("station_lon_deg")).toDouble() : qQNaN();
+    double lat = hasLat ? a.value(QStringLiteral("station_lat_deg")).toDouble() : qQNaN();
+    double lon = hasLon ? a.value(QStringLiteral("station_lon_deg")).toDouble() : qQNaN();
+    // 没传参时回退到 AiConfig 的站点坐标（设置对话框保存的）。
+    if (!std::isfinite(lat) || !std::isfinite(lon)) {
+        ai::AiConfig cfg; cfg.load();
+        if (!std::isfinite(lat)) lat = cfg.stationLat;
+        if (!std::isfinite(lon)) lon = cfg.stationLon;
+    }
 
     ai::SatPassListResult r = ai::predictSatellitePasses(
         sat, lat, lon, QDateTime::currentDateTimeUtc(), hours);
