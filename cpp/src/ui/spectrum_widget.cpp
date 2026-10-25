@@ -592,6 +592,9 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         if (canvas_) canvas_->setHighlightedPeak(row);
     });
     outer->addWidget(peakTable_);
+    // 默认隐藏峰值表（用户反馈：底部这行没有明确用途，占空间）。
+    // 通过快捷键 Ctrl+P 或菜单可显示。
+    peakTable_->hide();
 
     // Restore persisted fixed markers (default empty) and the last persist mode.
     loadFixedMarkers();

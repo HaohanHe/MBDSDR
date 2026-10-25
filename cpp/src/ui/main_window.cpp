@@ -1217,8 +1217,8 @@ MainWindow::MainWindow(QWidget* parent)
     // frequency strip and the scrolling waterfall with a single geometry, so
     // the frequency axes align by construction. The scroll-speed / palette
     // controls live in the container's tool strip.
-    centerTabs_->addTab(spectrum_, "频谱");
-    centerTabs_->addTab(worldPage, "世界");
+    centerTabs_->addTab(spectrum_, QStringLiteral("频谱 · 实时接收"));
+    centerTabs_->addTab(worldPage, QStringLiteral("地图 · 干扰源/卫星"));
 
     // L8 closed loop: right-click the spectrum/waterfall canvas to load an
     // external colormap JSON (independent SDR++ colormaps). The ring keeps raw-dB
@@ -1272,7 +1272,7 @@ MainWindow::MainWindow(QWidget* parent)
         weatherLay->setContentsMargins(0, 0, 0, 0);
         weatherPanel_ = new ui::WeatherSatPanel(weatherPage);
         weatherLay->addWidget(weatherPanel_);
-        centerTabs_->addTab(weatherPage, "气象");
+        centerTabs_->addTab(weatherPage, QStringLiteral("气象卫星 · NOAA APT"));
     }
 
     // Spacetime (时空视图) tab: a compact 2x2 overview (device / signal / decode /
@@ -1335,7 +1335,7 @@ MainWindow::MainWindow(QWidget* parent)
         spOuter->addWidget(spDopplerLine_);
         spOuter->addStretch();
 
-        centerTabs_->addTab(spPage, "时空视图");
+        centerTabs_->addTab(spPage, QStringLiteral("轨道 · 卫星预测/多普勒"));
     }
 
     // Stretch the central tab bar so tabs fill the container width (eliminates

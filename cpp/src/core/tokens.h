@@ -662,7 +662,7 @@ inline constexpr int kSpecAreaMinH     = 120;  // min trace height (base px)
 inline constexpr int kWfAreaMinH       = 60;   // min waterfall height (base px)
 // Default share of the (trace + waterfall) height given to the trace.
 // 0.5 => spectrum and waterfall are roughly equal, both substantial.
-inline constexpr double kDefaultSpecFraction = 0.4;  // 40% trace / 60% waterfall (SDR-standard)
+inline constexpr double kDefaultSpecFraction = 0.3;  // 30% trace / 70% waterfall (waterfall dominant)
 inline constexpr const char* kSettingsKeySpecFraction = "view/specFraction";
 inline constexpr const char* kSettingsKeyScrollSpeed  = "view/wfScrollSpeed";
 inline constexpr const char* kSettingsKeyPalette      = "view/wfPalette";
