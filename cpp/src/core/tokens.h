@@ -311,7 +311,7 @@ inline constexpr int    kDbSpinLowerMin = -140;   // lower spinbox allowed min
 inline constexpr int    kDbSpinLowerMax = -20;    // lower spinbox allowed max
 inline constexpr int    kDbSpinUpperMin = -40;    // upper spinbox allowed min
 inline constexpr int    kDbSpinUpperMax = 20;     // upper spinbox allowed max
-inline constexpr int    kDbLowerDefault = -130;
+inline constexpr int    kDbLowerDefault = -45;   // 噪底 ~-37dBFS 落在色图底部=黑色
 inline constexpr int    kDbUpperDefault = 0;
 // dB reference gridline spacing (dB between horizontal grid lines + y labels).
 // Selectable from the spectrum toolbar (格线 combo): denser (10 dB) for a finer
