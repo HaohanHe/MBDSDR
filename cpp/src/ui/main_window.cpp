@@ -1016,6 +1016,21 @@ MainWindow::MainWindow(QWidget* parent)
         connect(lrptChk, &QCheckBox::toggled,
                 engine_, &dsp::SpectrumEngine::setLrptEnabled);
         gToolsLay->addWidget(lrptChk);
+        // 当前频率加书签。
+        auto* bmBtn = new QPushButton(QStringLiteral("当前频率加书签"), gTools);
+        bmBtn->setObjectName("addBookmarkBtn");
+        bmBtn->setToolTip(QStringLiteral("将当前调谐频率保存为书签"));
+        connect(bmBtn, &QPushButton::clicked, this, [this]() {
+            if (!bookmarkManager_ || !engine_) return;
+            const double hz = engine_->centerFreq();
+            if (hz <= 0.0) return;
+            ui::Bookmark bm;
+            bm.name = QString::number(hz / 1e6, 'f', 4) + " MHz";
+            bm.frequencyHz = hz;
+            bm.mode = demodCombo_ ? demodCombo_->currentText() : QString();
+            bookmarkManager_->add(bm);
+        });
+        gToolsLay->addWidget(bmBtn);
         leftLay->addWidget(gTools);
     }
 
