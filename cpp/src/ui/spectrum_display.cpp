@@ -528,6 +528,7 @@ QStringList SpectrumDisplay::waterfallTimeTickLabelsForTest() const {
 // Frame intake
 // ---------------------------------------------------------------------------
 void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
+    const double oldF0 = frameF0Hz_;
     frame_ = frame;
     frameF0Hz_ = frame.centerFreqHz;
     frameFsHz_ = frame.sampleRateHz;
@@ -538,6 +539,13 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
         dialFreqHz_   = frameF0Hz_;
         allocateRing(static_cast<int>(frame.dbfs.size()));
         rebuildColormap();
+    } else if (std::isfinite(oldF0) && oldF0 > 0.0 && frameFsHz_ > 0.0 &&
+               std::abs(frameF0Hz_ - oldF0) > frameFsHz_ * 0.5) {
+        // 引擎调谐跳变（F0 离开原带宽一半以上）：视图必须立刻跟到新 F0。
+        // 否则 viewCenterHz_ 钉在首帧中心，频谱/瀑布画在带宽外死区——
+        // 用户看到的就是"没有数据"（2026-10-25 实锤）。
+        viewCenterHz_ = frameF0Hz_;
+        dialFreqHz_   = frameF0Hz_;
     }
 
     const int bins = static_cast<int>(frame.dbfs.size());
