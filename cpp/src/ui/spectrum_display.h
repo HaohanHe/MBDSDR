@@ -458,8 +458,9 @@ private:
 
     // SDR++-style overlay: waterfall fills the whole plot and the trace is
     // painted ON TOP of it (one canvas, not two stacked halves). When off the
-    // classic split (trace above / waterfall below) is used.
-    bool wfOverlay_ = true;
+    // classic split (trace above / waterfall below) is used -- that remains the
+    // DEFAULT (tests pin the classic proportions); users opt in via view/wfOverlay.
+    bool wfOverlay_ = false;
 
     // Peak tracking state.
     QList<mbdsdr::dsp::PeakInfo> peaks_;

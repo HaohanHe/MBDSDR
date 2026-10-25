@@ -78,7 +78,7 @@ bool loadWfOverlay() {
         if (t == QLatin1String("true")) return true;
         if (t == QLatin1String("false")) return false;
     }
-    return true;    // 默认叠加（SDR++ 形态）
+    return false;   // 默认经典（不改变既有行为；overlay 是显式 opt-in）
 }
 
 // Resolve a requested waterfall ring depth to a legal choice. Only the named

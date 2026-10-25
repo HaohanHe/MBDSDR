@@ -679,7 +679,7 @@ inline constexpr const char* kSettingsKeyColormapFile = "view/wfColormapFile";
 // is exactly what the waterfall row combo offers; anything outside it falls back
 // to the default rather than being clamped mid-way (a ring depth has no sensible
 // continuous band -- only the named powers the ring buffer was tuned for).
-inline constexpr int kWaterfallDepthDefault = 2048;
+inline constexpr int kWaterfallDepthDefault = 256;
 inline constexpr int kWaterfallDepthChoices[] = { 128, 256, 512, 1024, 2048, 4096 };
 inline constexpr const char* kSettingsKeyWfDepth = "view/wfDepth";
 

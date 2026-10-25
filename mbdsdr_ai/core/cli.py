@@ -241,6 +241,16 @@ def run(argv: Optional[Sequence[str]] = None,
             except Exception as e:
                 print(f"工具自动发现失败: {e}", file=sys.stderr)
                 return 5
+            # sdr_tools 的 60+ 工具挂在 agent.tool_registry——duck-type 假 agent
+            # 收编（register_sdr_tools 只用 tool_registry/sdr_manager/spectrum/
+            # freq_manager/_plans/_todos 这几个属性，不需要 LLM）。
+            try:
+                from ..sdr_tools import register_sdr_tools
+                class _FakeAgent:
+                    tool_registry = reg
+                register_sdr_tools(_FakeAgent())
+            except Exception:
+                pass
             names = reg.get_tool_names()
             if args.tool not in names:
                 print(f"工具不存在: {args.tool}", file=sys.stderr)

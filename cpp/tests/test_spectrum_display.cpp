@@ -129,6 +129,12 @@ void TestSpectrumDisplay::initTestCase() {
         tokens::kSettingsKeyDbGridStep,
         tokens::kSettingsKeyWfScrollPaused,
         QStringLiteral("rx/peakThresholdDb"),
+        // 新增设置键（色图文件/叠加模式/dB 范围）也必须清理，
+        // 否则真实注册表的用户状态会污染测试的确定性默认。
+        tokens::kSettingsKeyColormapFile,
+        QStringLiteral("view/wfOverlay"),
+        QStringLiteral("rx/dbMin"),
+        QStringLiteral("rx/dbMax"),
     };
     mbdsdr::core::AppSettings s;
     saved_.clear();
