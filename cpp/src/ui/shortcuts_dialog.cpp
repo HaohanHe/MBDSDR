@@ -18,9 +18,11 @@ ShortcutsDialog::ShortcutsDialog(QWidget* parent) : QDialog(parent) {
     // table can never drift out of sync with the MainWindow wiring again.
     int r = 0;
     for (const auto& row : shortcutCatalog()) {
-        auto* k = new QLabel(QString::fromLatin1(row.sequence), this);
+        // UTF-8, not Latin1: sequences carry ← / → arrows and descriptions are
+        // Chinese. Latin1 mangled both into mojibake ("老烂码子" -- user report).
+        auto* k = new QLabel(QString::fromUtf8(row.sequence), this);
         k->setObjectName("monoInfo");
-        auto* d = new QLabel(QString::fromLatin1(row.description), this);
+        auto* d = new QLabel(QString::fromUtf8(row.description), this);
         lay->addWidget(k, r, 0);
         lay->addWidget(d, r, 1);
         ++r;
