@@ -539,7 +539,11 @@ private:
     int  ringHead_ = 0;              // next physical slot to overwrite
     int  ringCount_ = 0;             // rows written so far (capped at depth)
     int  bins_ = 0;
-    std::array<QRgb, 256> lut_{};
+    // Fine colormap grid: 2048 steps (~0.06 dB over 120 dB) removes the
+    // banding a 256-step ramp shows on smooth noise floors. buildLutN<2048>
+    // fills it; colourForDb indexes it through lutIndexForDb.
+    static constexpr int kLutSize = 2048;
+    std::array<QRgb, kLutSize> lut_{};
     int  everyNthFrame_ = 1;         // push one row every N frames
     int  frameMod_ = 0;
     int  paletteIndex_ = 0;

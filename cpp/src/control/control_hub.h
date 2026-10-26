@@ -181,6 +181,7 @@ private:
     QJsonObject cmdSetSampleRate(const QJsonObject& a);
     QJsonObject cmdSetGain(const QJsonObject& a);
     QJsonObject cmdSetMode(const QJsonObject& a);
+    QJsonObject cmdSetSource(const QJsonObject& a);
     QJsonObject cmdSetBandwidth(const QJsonObject& a);
     QJsonObject cmdSetDopplerCompensation(const QJsonObject& a);
     QJsonObject cmdConnectNetworkSource(const QJsonObject& a);

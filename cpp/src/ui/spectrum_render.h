@@ -113,20 +113,27 @@ inline void decimateBlockMax(const float* src, int srcN, float* dst, int dstN) {
 }
 
 // ---------------------------------------------------------------------------
-// 256-entry LUT build by piecewise-linear interpolation between control stops.
+// N-entry LUT build by piecewise-linear interpolation between control stops.
 // Mirrors spectrum_display's long-standing rebuildColormap() math (segment
 // search on the sorted t grid, linear R/G/B interp), extracted so it can be
 // asserted on known stops without a QWidget. Fewer than two stops yields a
 // black LUT (a degenerate map never invents colours).
+//
+// N is a template parameter so the display can use a fine grid (2048 — one
+// step per ~0.06 dB over a 120 dB span) while tests keep the classic 256
+// shape. A 256-step ramp over 120 dB is one step per 0.47 dB and shows
+// visible banding on smooth noise floors; 2048 removes it.
 // ---------------------------------------------------------------------------
-inline std::array<Rgb8, 256> buildLut256(const ColorStop* stops, int n) {
-    std::array<Rgb8, 256> lut{};
+template <std::size_t N>
+inline std::array<Rgb8, N> buildLutN(const ColorStop* stops, int n) {
+    std::array<Rgb8, N> lut{};
     if (!stops || n < 2) return lut;
     std::vector<ColorStop> s(stops, stops + n);
     std::sort(s.begin(), s.end(),
               [](const ColorStop& a, const ColorStop& b) { return a.t < b.t; });
-    for (int i = 0; i < 256; ++i) {
-        const float t = i / 255.0f;
+    constexpr float kDenom = static_cast<float>(N - 1);
+    for (std::size_t i = 0; i < N; ++i) {
+        const float t = static_cast<float>(i) / kDenom;
         int seg = 0;
         while (seg < static_cast<int>(s.size()) - 2 && t > s[seg + 1].t) ++seg;
         const ColorStop& A = s[seg];
@@ -140,15 +147,25 @@ inline std::array<Rgb8, 256> buildLut256(const ColorStop* stops, int n) {
     return lut;
 }
 
-// dB -> LUT index in [0,255] for the given waterfall dB range. Out-of-range dB
-// clamps to the floor/ceiling colour; a degenerate range collapses to index 0.
-inline int lutIndexForDb(float db, float floorDb, float ceilDb) {
+// Classic 256-entry shape, preserved for the unit tests and any caller that
+// wants the small table.
+inline std::array<Rgb8, 256> buildLut256(const ColorStop* stops, int n) {
+    return buildLutN<256>(stops, n);
+}
+
+// dB -> LUT index in [0, lutSize-1] for the given waterfall dB range.
+// Out-of-range dB clamps to the floor/ceiling colour; a degenerate range
+// collapses to index 0. lutSize defaults to 256 so legacy call sites and the
+// existing unit tests are unchanged.
+inline int lutIndexForDb(float db, float floorDb, float ceilDb,
+                         int lutSize = 256) {
+    if (lutSize < 2) return 0;
     const float span = ceilDb - floorDb;
     if (span <= 0.0f) return 0;
     float t = (db - floorDb) / span;
     t = std::min(std::max(t, 0.0f), 1.0f);
-    const int idx = static_cast<int>(t * 255.0f);
-    return std::min(idx, 255);
+    const int idx = static_cast<int>(t * static_cast<float>(lutSize - 1));
+    return std::min(idx, lutSize - 1);
 }
 
 // ---------------------------------------------------------------------------

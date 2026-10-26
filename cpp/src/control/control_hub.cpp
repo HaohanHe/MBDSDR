@@ -97,6 +97,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_sample_rate",      true,  &ControlHub::cmdSetSampleRate},
         {"set_gain",             true,  &ControlHub::cmdSetGain},
         {"set_mode",             true,  &ControlHub::cmdSetMode},
+        {"set_source",           true,  &ControlHub::cmdSetSource},
         {"set_bandwidth",        true,  &ControlHub::cmdSetBandwidth},
         {"set_squelch_enabled",  true,  &ControlHub::cmdSetSquelchEnabled},
         {"set_squelch_threshold",true,  &ControlHub::cmdSetSquelchThreshold},
@@ -519,6 +520,35 @@ QJsonObject ControlHub::cmdSetMode(const QJsonObject& a) {
     QJsonObject o = okBase();
     o["command"] = "set_mode";
     o["mode"] = m;
+    return o;
+}
+
+// set_source: switch the IQ producer. {"type":"test"} opts into the offline
+// synthetic TestSignalSource (debug/demo only -- the response says so); every
+// other value tears the synthetic source down and returns to the real/honest
+// empty state. Mirrors main_window.cpp's srcTypeCombo_ third item exactly.
+QJsonObject ControlHub::cmdSetSource(const QJsonObject& a) {
+    const QJsonValue v = a.value(QStringLiteral("type"));
+    if (!v.isString()) {
+        return errResult(QString::fromUtf8("缺少源类型参数: type（test / real）"));
+    }
+    const QString t = v.toString().trimmed().toLower();
+    if (t != QLatin1String("test") && t != QLatin1String("real") &&
+        t != QLatin1String("hardware")) {
+        return errResult(QString::fromUtf8(
+            "未知源类型: %1（仅支持 test=离线合成 / real=真实硬件）").arg(v.toString()));
+    }
+    const bool wantTest = (t == QLatin1String("test"));
+    engine_->setTestSourceEnabled(wantTest);
+    QJsonObject o = okBase();
+    o["command"] = "set_source";
+    o["type"] = wantTest ? QStringLiteral("test") : QStringLiteral("real");
+    o["synthetic"] = engine_->isSynthetic();
+    o["has_data"] = engine_->hasData();
+    if (wantTest) {
+        o["note"] = QString::fromUtf8(
+            "测试信号为离线合成 IQ，仅供调试/演示，不是真实接收");
+    }
     return o;
 }
 

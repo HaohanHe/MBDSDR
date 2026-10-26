@@ -413,7 +413,7 @@ void SpectrumDisplay::materialiseHistory() {
 void SpectrumDisplay::rebuildColormap() {
     // Resolve the control stops: an external user ramp overrides the three
     // built-in palettes. The interpolation itself is the pure, unit-tested
-    // buildLut256().
+    // buildLutN<kLutSize>().
     std::vector<ColorStop> stops;
     if (hasCustomStops_) {
         stops = customStops_;
@@ -429,14 +429,14 @@ void SpectrumDisplay::rebuildColormap() {
             stops.push_back(ColorStop{src[i].t, c});
         }
     }
-    const std::array<Rgb8, 256> lut = buildLut256(stops.data(),
-                                                  static_cast<int>(stops.size()));
-    for (int i = 0; i < 256; ++i)
+    const std::array<Rgb8, kLutSize> lut = buildLutN<kLutSize>(
+        stops.data(), static_cast<int>(stops.size()));
+    for (int i = 0; i < kLutSize; ++i)
         lut_[i] = qRgb(lut[i].r, lut[i].g, lut[i].b);
 }
 
 QRgb SpectrumDisplay::colourForDb(float db) const {
-    return lut_[lutIndexForDb(db, dbFloorDb_, dbCeilDb_)];
+    return lut_[lutIndexForDb(db, dbFloorDb_, dbCeilDb_, kLutSize)];
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,10 +1120,26 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
             p.setPen(QPen(ghost, 1.0));
             p.drawPolyline(ghostLine);
         }
-        p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaPrimary), 1.2));
+        // Under-curve fill (SDR++ "cyan line + fill"): translucent vertical
+        // drops under each sample, painted as ONE closed polygon for speed.
+        // Gives the trace a solid waveform shape instead of a floating line.
+        if (line.size() >= 2) {
+            QPolygonF fill = line;
+            const qreal yBase = trace.bottom();
+            fill << QPointF(line.last().x(), yBase)
+                 << QPointF(line.first().x(), yBase);
+            p.setPen(Qt::NoPen);
+            p.setBrush(QColor(QString::fromUtf8(tokens::kTraceFill)));
+            p.drawPolygon(fill);
+            p.setBrush(Qt::NoBrush);
+        }
+        // Main trace: instrument cyan (SDR++ PlotLines), 1.2px.
+        p.setPen(QPen(QColor(QString::fromUtf8(tokens::kAccent)), 1.2));
         if (!line.isEmpty()) p.drawPolyline(line);
+        // Max-hold: warm yellow, hue-split from the cyan live trace so
+        // "history" vs "now" reads at a glance (SDR++ FFTHoldColor).
         if (maxHoldOn_ && !holdLine.isEmpty()) {
-            p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1.0));
+            p.setPen(QPen(QColor(QString::fromUtf8(tokens::kHoldColor)), 1.0));
             p.drawPolyline(holdLine);
         }
         // Min-hold overlay: a faint teal line along the running floor, drawn

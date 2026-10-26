@@ -113,6 +113,14 @@ inline constexpr const char* kFocusRing   = "rgba(145, 156, 172, 0.45)";
 // Disabled control surface (we previously only dimmed disabled text).
 inline constexpr const char* kDisabledFill = "rgba(255, 255, 255, 0.04)";
 
+// ---- Spectrum trace paint (SDR++ "cyan line + fill" instrument look) ----
+// Main trace: the instrument cyan (kAccent). Under-curve fill: same hue at
+// ~16% alpha so the trace reads as a solid waveform shape, not a floating
+// line. Max-hold is deliberately a warm yellow so "history" and "now" split
+// on hue at a glance (SDR++ FFTHoldColor #FFFF00FF convention).
+inline constexpr const char* kTraceFill   = "rgba(124, 196, 255, 0.16)";
+inline constexpr const char* kHoldColor   = "#FFE14D";
+
 // ---- Spectrum persistence (余晖) ----------------------------------------
 // Per-frame retention of the ghost trace: each frame the held envelope decays by
 // (1 - kPersistDecay*) toward the floor, while a fresh rise refreshes it back up.
