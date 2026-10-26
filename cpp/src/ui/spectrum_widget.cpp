@@ -440,26 +440,35 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(infoLabel_);
     outer->addLayout(topRow);
 
-    // ⚙ 弹出逻辑：收集次级控件（标记/游标/dB/格线/门限/Max/Min/余晖/衰减），
-    // 默认收起，点击 ⚙ 展开。Glass 风格：干净表面，按需展开。
+    // ⚙ 弹出逻辑（Glass：干净表面，按需展开）。核心常显 6 件：
+    //   [0]⚙ [1-2]FFT [3-4]窗 [5-6]平均 …… [最后-2]增益 [最后-1]info
+    // 其余（Max/衰减/余晖/标记/游标/dB/格线/门限 及其文字标签）全收进 ⚙。
+    // 按布局索引收集而不是 objectName——标签是匿名 QLabel，靠名字会漏。
     {
-        const QStringList advNames = {
-            "maxHoldChk", "maxRst", "maxHoldDecayCombo", "minHoldChk",
-            "persistCombo", "persistRst", "addFixedMarkerBtn", "clearMarkerBtn",
-            "cursorABtn", "cursorBBtn", "cursorClr", "toolbarGainSpin",
-            "btnAutoDbRange", "dbGridStepCombo", "peakThreshSpin_"
-        };
-        // 也收集带标签的 dB spinboxes（无 objectName，按父子关系找）。
-        for (auto* child : findChildren<QWidget*>()) {
-            if (advNames.contains(child->objectName())) {
-                child->setVisible(false);
-                advWidgets << child;
+        // 核心区结束边界：'平均' combo 之后（index 7 起全是次级）。
+        const int coreHeadEnd = 7;
+        // 核心区开始边界：'增益' 标签（从尾部往前找，与 infoLabel_ 相邻）。
+        int coreTailStart = topRow->count() - 2;  // 增益标签 / gainSpin / info
+        // 兜底：从尾部回找文字为"增益"的 QLabel。
+        for (int i = topRow->count() - 1; i >= 0; --i) {
+            auto* item = topRow->itemAt(i);
+            if (!item || !item->widget()) continue;
+            auto* lab = qobject_cast<QLabel*>(item->widget());
+            if (lab && lab->text() == QLatin1String("增益")) {
+                coreTailStart = i;
+                break;
             }
         }
-        // dB 标签 + 两个 spinbox + 格线标签 + 门限标签 也一起收。
-        // 简化：通过 topRow 的 items 遍历，index > 核心区的都收。
-        // 这里用 objectName 方式已够——其余控件没有 objectName 的保持可见
-        // 但标签已隐（标签是 new QLabel 无名字，暂不动）。
+        for (int i = coreHeadEnd; i < coreTailStart; ++i) {
+            auto* item = topRow->itemAt(i);
+            if (!item) continue;
+            if (auto* w = item->widget()) {
+                w->setVisible(false);
+                advWidgets << w;
+            } else if (auto* sp = item->spacerItem()) {
+                (void)sp;  // spacer 不动
+            }
+        }
         connect(advToggle, &QToolButton::toggled, this,
                 [advWidgets](bool on) {
                     for (QWidget* w : advWidgets) w->setVisible(on);
