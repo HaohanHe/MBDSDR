@@ -2,6 +2,7 @@
 #include "main_window.h"
 #include "core/app_settings.h"
 #include "core/freq_input.h"
+#include "collapsible_group.h"
 #include "spectrum_widget.h"
 
 #include <QVBoxLayout>
@@ -309,7 +310,7 @@ MainWindow::MainWindow(QWidget* parent)
     leftLay->setContentsMargins(tokens::scaled(12), tokens::scaled(12), tokens::scaled(12), tokens::scaled(12));
     leftLay->setSpacing(tokens::scaled(tokens::kSpacingM));
 
-    auto* gSrc = new QGroupBox("源与连接", leftCard);
+    auto* gSrc = new ui::CollapsibleGroup("源与连接", leftCard);
     auto* gSrcLay = new QVBoxLayout(gSrc);
     sourceBanner_ = new QLabel("RTL-SDR 未连接", gSrc);
     sourceBanner_->setObjectName("dockHint");
@@ -407,7 +408,7 @@ MainWindow::MainWindow(QWidget* parent)
     // state when no device. Ranges show "--" until the device actually reports
     // them; nothing is fabricated.
     {
-        auto* gDev = new QGroupBox("设备信息", leftCard);
+        auto* gDev = new ui::CollapsibleGroup("设备信息", leftCard);
         auto* gDevLay = new QFormLayout(gDev);
         devNameLabel_ = new QLabel(QStringLiteral("RTL-SDR 未连接"), gDev);
         devNameLabel_->setObjectName("dockHint");
@@ -432,7 +433,7 @@ MainWindow::MainWindow(QWidget* parent)
     // port is persisted (net/spyPort); the enable state (net/spyEnabled) too,
     // but the server is only (re)started from the checkbox toggle.
     {
-        auto* gSpy = new QGroupBox("SpyServer 远程", leftCard);
+        auto* gSpy = new ui::CollapsibleGroup("SpyServer 远程", leftCard);
         auto* gSpyLay = new QVBoxLayout(gSpy);
         spyserverChk_ = new QCheckBox("开启 SpyServer", gSpy);
         spyserverChk_->setObjectName("spyserverChk");
@@ -504,7 +505,7 @@ MainWindow::MainWindow(QWidget* parent)
     // diverted. Default OFF. start()/stop() run on this (UI) thread per the
     // sink's own threading contract; every status line is a real read-back.
     {
-        auto* gNet = new QGroupBox("网络音频外送", leftCard);
+        auto* gNet = new ui::CollapsibleGroup("网络音频外送", leftCard);
         auto* gNetLay = new QVBoxLayout(gNet);
         gNetLay->setSpacing(tokens::kSpacingS);
 
@@ -574,7 +575,7 @@ MainWindow::MainWindow(QWidget* parent)
                 this, &MainWindow::onNetAudioStop);
     }
 
-    auto* gFreq = new QGroupBox("频率", leftCard);
+    auto* gFreq = new ui::CollapsibleGroup("频率", leftCard);
     auto* gFreqLay = new QFormLayout(gFreq);
     freqSpin_ = new QDoubleSpinBox(gFreq);
     freqSpin_->setObjectName("freqSpin");
@@ -626,7 +627,7 @@ MainWindow::MainWindow(QWidget* parent)
     gFreqLay->addRow("最近", tuneHistCombo_);
     leftLay->addWidget(gFreq);
 
-    auto* gRx = new QGroupBox("接收参数", leftCard);
+    auto* gRx = new ui::CollapsibleGroup("接收参数", leftCard);
     auto* gRxLay = new QFormLayout(gRx);
     srCombo_ = new QComboBox(gRx);
     // Populated dynamically from the connected device's real range by
@@ -880,7 +881,7 @@ MainWindow::MainWindow(QWidget* parent)
     leftLay->addWidget(gRx);
 
     // ---- Multi-VFO panel ---------------------------------------------------
-    auto* gVfo = new QGroupBox("多 VFO", leftCard);
+    auto* gVfo = new ui::CollapsibleGroup("多 VFO", leftCard);
     gVfo->setObjectName("vfoGroup");
     auto* gVfoLay = new QVBoxLayout(gVfo);
     vfoList_ = new QListWidget(gVfo);
@@ -918,7 +919,7 @@ MainWindow::MainWindow(QWidget* parent)
     gVfoLay->addWidget(vfoArmBtn_);
     leftLay->addWidget(gVfo);
 
-    auto* gSql = new QGroupBox("静噪", leftCard);
+    auto* gSql = new ui::CollapsibleGroup("静噪", leftCard);
     gSql->setObjectName("squelchGroup");
     auto* gSqlLay = new QVBoxLayout(gSql);
     squelchCheck_ = new QCheckBox("启用静噪", gSql);
@@ -953,7 +954,7 @@ MainWindow::MainWindow(QWidget* parent)
     leftLay->addWidget(gSql);
 
     // ---- ANR (audio noise reduction) group ----
-    auto* gAnr = new QGroupBox("音频降噪 (ANR)", leftCard);
+    auto* gAnr = new ui::CollapsibleGroup("音频降噪 (ANR)", leftCard);
     auto* gAnrLay = new QVBoxLayout(gAnr);
     anrCheck_ = new QCheckBox("启用 ANR", gAnr);
     anrCheck_->setObjectName("anrCheck");
@@ -969,7 +970,7 @@ MainWindow::MainWindow(QWidget* parent)
     gAnrLay->addLayout(anrRow);
     leftLay->addWidget(gAnr);
 
-    auto* gAud = new QGroupBox("音频", leftCard);
+    auto* gAud = new ui::CollapsibleGroup("音频", leftCard);
     auto* gAudLay = new QVBoxLayout(gAud);
     auto* nbChk = new QCheckBox("噪声抑制 (Noise Blanker)", gAud);
     connect(nbChk, &QCheckBox::toggled,
@@ -984,7 +985,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ---- 工具：导出 + 数字模式开关（补齐 ControlHub 后端有、前端没的入口）----
     {
-        auto* gTools = new QGroupBox(QStringLiteral("工具"), leftCard);
+        auto* gTools = new ui::CollapsibleGroup(QStringLiteral("工具"), leftCard);
         auto* gToolsLay = new QVBoxLayout(gTools);
         // 频谱快照：导出当前频谱为 PNG（真实渲染，非占位图）。
         auto* snapBtn = new QPushButton(QStringLiteral("导出频谱快照"), gTools);
@@ -1064,7 +1065,7 @@ MainWindow::MainWindow(QWidget* parent)
         leftLay->addWidget(gTools);
     }
 
-    auto* gRec = new QGroupBox("录制", leftCard);
+    auto* gRec = new ui::CollapsibleGroup("录制", leftCard);
     auto* gRecLay = new QVBoxLayout(gRec);
 
     // User-configurable output directory (default program dir "record").
@@ -4796,7 +4797,19 @@ void MainWindow::registerLeftPanelGroups() {
                                                                   Qt::FindDirectChildrenOnly);
     for (QGroupBox* g : groups) {
         if (!g) continue;
-        leftPanelGroups_.insert(g->title(), g);
+        // Identity is the BARE title: a CollapsibleGroup's visible title
+        // carries a chevron prefix (▼ / ▶) that must never leak into the map
+        // key the settings dialog matches against (kLeftPanelIds).
+        const QString key = (qobject_cast<ui::CollapsibleGroup*>(g))
+                                ? qobject_cast<ui::CollapsibleGroup*>(g)->bareTitle()
+                                : g->title();
+        leftPanelGroups_.insert(key, g);
+        // Every fold/expand debounces a save so the next launch comes back
+        // with the same folds (saveUiState walks this map).
+        if (auto* cg = qobject_cast<ui::CollapsibleGroup*>(g)) {
+            connect(cg, &ui::CollapsibleGroup::collapsedChanged,
+                    this, [this](bool) { scheduleSave(); });
+        }
     }
 }
 
@@ -4951,6 +4964,16 @@ void MainWindow::saveUiState() {
     }
     // phase82: left-rail groups the user hid via the settings dialog.
     s.setValue(tokens::kSettingsKeyHiddenLeftPanels, currentHiddenLeftPanels());
+    // 活动布局 A1: left-rail groups the user FOLDED (click on the title bar).
+    // Ids are the bare titles (kLeftPanelIds); absent key on load = expand all.
+    {
+        QStringList folded;
+        for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it) {
+            if (auto* cg = qobject_cast<ui::CollapsibleGroup*>(it.value()))
+                if (cg->collapsed()) folded << it.key();
+        }
+        s.setValue(tokens::kSettingsKeyCollapsedGroups, folded);
+    }
     s.setValue("ui/centerTabIndex", centerTabs_->currentIndex());
     if (mainSplitter_) s.setValue("ui/splitterSizes", mainSplitter_->saveState());
     s.setValue(tokens::kSettingsKeyFocusMode, focusMode_);
@@ -5431,6 +5454,18 @@ void MainWindow::restoreUiState() {
         for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it) {
             if (QGroupBox* g = it.value())
                 g->setVisible(!hiddenLeft.contains(it.key()));
+        }
+    }
+    // 活动布局 A1: restore folded groups. Signals are blocked so the bulk
+    // restore does not re-write the very key it is reading.
+    {
+        const QStringList folded =
+            s.value(tokens::kSettingsKeyCollapsedGroups).toStringList();
+        for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it) {
+            if (auto* cg = qobject_cast<ui::CollapsibleGroup*>(it.value())) {
+                const QSignalBlocker blk(cg);
+                cg->setCollapsed(folded.contains(it.key()));
+            }
         }
     }
     rightTabs_->setCurrentIndex(std::clamp(s.value("ui/rightTabIndex", 0).toInt(),

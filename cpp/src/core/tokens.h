@@ -976,6 +976,10 @@ inline constexpr int kLeftPanelCount =
 //  X-button and the settings dialog are one state, not two.)
 inline constexpr const char* kSettingsKeyHiddenRightPanels = "ui/hiddenRightTabs";
 inline constexpr const char* kSettingsKeyHiddenLeftPanels  = "ui/hiddenLeftGroups";
+// Left-rail groups the user FOLDED (活动布局 A1 "折"). Ids match
+// kLeftPanelIds. Absent key = everything expanded (honest default); deleting
+// the key is the one-step "unfold everything" reset.
+inline constexpr const char* kSettingsKeyCollapsedGroups   = "ui/collapsedGroups";
 
 // =====================================================================
 // Settings-dialog "显示参数" panel (phase82): the three independent sliders

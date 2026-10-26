@@ -95,6 +95,7 @@ set(SOURCES
     src/main.cpp
     src/ui/main_window.cpp
     src/ui/freq_display_widget.cpp
+    src/ui/collapsible_group.cpp
     src/ui/spectrum_widget.cpp
     src/ui/spectrum_display.cpp
     src/ui/sky_view.cpp
@@ -224,6 +225,7 @@ set(HEADERS
     src/core/bandwidth_preset.h
     src/ui/main_window.h
     src/ui/freq_display_widget.h
+    src/ui/collapsible_group.h
     src/ui/scan_session.h
     src/ui/spectrum_widget.h
     src/ui/spectrum_display.h
@@ -1303,6 +1305,13 @@ target_include_directories(test_settings_orphans PRIVATE src build/test_settings
 target_link_libraries(test_settings_orphans PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME settings_orphans COMMAND test_settings_orphans)
 set_tests_properties(settings_orphans PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_collapsible_group tests/test_collapsible_group.cpp)
+target_link_libraries(test_collapsible_group PRIVATE mbdsdr_core)
+target_include_directories(test_collapsible_group PRIVATE src build/test_collapsible_group_autogen/include)
+target_link_libraries(test_collapsible_group PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME collapsible_group COMMAND test_collapsible_group)
+set_tests_properties(collapsible_group PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_soak tests/test_soak.cpp)
 target_link_libraries(test_soak PRIVATE mbdsdr_core)
