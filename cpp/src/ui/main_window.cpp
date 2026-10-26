@@ -93,6 +93,7 @@
 #include "ai/sat_task_planner.h"
 #include "ui/task_steps_view.h"
 #include "ui/activity_log.h"
+#include "ui/freq_display_widget.h"
 #include "ui/sky_view.h"
 #include "ui/s_meter.h"
 #include "ui/rssi_trend.h"
@@ -224,37 +225,31 @@ MainWindow::MainWindow(QWidget* parent)
     topLay->addWidget(controlHttpBanner_);
     topLay->addStretch();
 
-    // 大频率数字（SDR++ 标志性 UI）：顶部超大字号显示当前调谐频率。
+    // 大频率数字（SDR++ 标志性 UI）：顶部超大字号显示当前调谐频率，
+    // 逐位可编辑（点击上半+1/下半-1，滚轮按位步进，右键清位）。
     // 格式：000.436.763（MHz 三位小数，千位分隔）。
-    auto* bigFreqLabel = new QLabel(topBar);
-    bigFreqLabel->setObjectName("bigFreqLabel");
-    {
-        QFont bf = bigFreqLabel->font();
-        bf.setPointSizeF(tokens::scaled(28) * 72.0 / 96.0);  // ~28px 逻辑点
-        bf.setBold(true);
-        bigFreqLabel->setFont(bf);
-        bigFreqLabel->setStyleSheet(QStringLiteral(
-            "QLabel#bigFreqLabel { color: %1; letter-spacing: 2px; }")
-            .arg(QString::fromUtf8(tokens::kAccent)));
-        bigFreqLabel->setToolTip(QStringLiteral("当前调谐频率（MHz）"));
-    }
-    bigFreqLabel->setText(QStringLiteral("000.000.000"));
+    auto* bigFreqLabel = new ui::FreqDisplayWidget(topBar);
     topLay->addWidget(bigFreqLabel);
-    // 大频率数字随调谐更新（1 Hz 轮询 engine 读回，不依赖 UI 控件信号）。
+    // 编辑回调：走 VFO offset 路径（与画布拖拽/峰值表点击同一条）。
+    connect(bigFreqLabel, &ui::FreqDisplayWidget::frequencyEdited, this,
+            [this](qint64 hz) {
+        if (!engine_) return;
+        freqSpin_->blockSignals(true);
+        freqSpin_->setValue(hz / 1e6);
+        freqSpin_->blockSignals(false);
+        const int sel = engine_->selectedVfoId();
+        if (sel >= 0) engine_->vfoSetOffset(sel, static_cast<double>(hz));
+        statusBar()->showMessage(
+            QString("调谐: %1 MHz").arg(hz / 1e6, 0, 'f', 6));
+    });
+    // 大频率数字随调谐更新（500ms 轮询 engine 读回，不依赖 UI 控件信号）。
     {
         auto* freqTimer = new QTimer(this);
         connect(freqTimer, &QTimer::timeout, this, [this, bigFreqLabel]() {
             if (!engine_) return;
             const double hz = engine_->centerFreq();
             if (hz <= 0.0) return;
-            const double mhz = hz / 1e6;
-            // 格式：000.436.763（整数部分 3 位补零 + 小数 6 位分三组）
-            const int whole = static_cast<int>(mhz);
-            const int frac  = static_cast<int>(std::round((mhz - whole) * 1e6));
-            bigFreqLabel->setText(QStringLiteral("%1.%2.%3")
-                .arg(whole, 3, 10, QLatin1Char('0'))
-                .arg(frac / 1000, 3, 10, QLatin1Char('0'))
-                .arg(frac % 1000, 3, 10, QLatin1Char('0')));
+            bigFreqLabel->setFrequency(static_cast<qint64>(std::llround(hz)));
         });
         freqTimer->start(500);
     }

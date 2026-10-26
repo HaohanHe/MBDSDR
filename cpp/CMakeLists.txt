@@ -94,6 +94,7 @@ endif()
 set(SOURCES
     src/main.cpp
     src/ui/main_window.cpp
+    src/ui/freq_display_widget.cpp
     src/ui/spectrum_widget.cpp
     src/ui/spectrum_display.cpp
     src/ui/sky_view.cpp
@@ -222,6 +223,7 @@ set(HEADERS
     src/core/spectrum_frame.h
     src/core/bandwidth_preset.h
     src/ui/main_window.h
+    src/ui/freq_display_widget.h
     src/ui/scan_session.h
     src/ui/spectrum_widget.h
     src/ui/spectrum_display.h
