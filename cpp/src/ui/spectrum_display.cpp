@@ -844,6 +844,17 @@ void SpectrumDisplay::setScrollPaused(bool on) {
     update();
 }
 
+// Live SDR++-overlay flip from the canvas context menu. Persists to
+// "view/wfOverlay" so the next launch paints the same way, and re-paints
+// immediately: overlay mode changes what the paintEvent composites (waterfall
+// as ground + trace on top vs. classic side-by-side split).
+void SpectrumDisplay::setWfOverlay(bool on) {
+    if (wfOverlay_ == on) return;
+    wfOverlay_ = on;
+    mbdsdr::core::AppSettings().setValue(QStringLiteral("view/wfOverlay"), on);
+    update();
+}
+
 // Change the waterfall rolling-history depth. Only the named choice set
 // (tokens::kWaterfallDepthChoices, 128/256/512) is honoured; anything else
 // honestly resolves to the default (256) -- no silent mid-band clamp. Once a

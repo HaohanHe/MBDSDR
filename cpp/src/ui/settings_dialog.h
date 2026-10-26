@@ -27,6 +27,10 @@ public:
     void saveToConfig(ai::AiConfig& cfg);
     int volume() const;
     double userScale() const;
+    // Preferred sample rate (Hz) chosen on the RX tab. The main window applies
+    // it through the same onSetSampleRate path its own device-driven combo
+    // uses, so the two controls can never drift apart.
+    double sampleRateHz() const;
 
     // ---- phase82: 界面元素 / 显示参数 ----
     // Panel visibility: which right-rail tabs / left-rail groups the user has

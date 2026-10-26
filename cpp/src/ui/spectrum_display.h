@@ -192,6 +192,13 @@ public slots:
     void setScrollPaused(bool on);
     bool scrollPaused() const { return scrollPaused_; }
 
+    // SDR++ overlay mode (waterfall fills the canvas as the ground, trace is
+    // painted on top). Persisted under "view/wfOverlay"; the ctor reads it so
+    // the very first paint honours the persisted state. setWfOverlay() flips
+    // it live from the canvas context menu and re-paints immediately.
+    void setWfOverlay(bool on);
+    bool wfOverlay() const { return wfOverlay_; }
+
     // External user colormap (independent SDR++ colormaps). Parses a JSON document
     // of {"name":..,"stops":["#rrggbb",..]} / [{"t":..,"c":"#rrggbb"},..] or a
     // bare top-level array of the same; on success it becomes the active ramp and

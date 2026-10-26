@@ -72,7 +72,10 @@ public:
     void setSatellites(QList<SatellitePoint> sat);
     // Incremental TLE hook: upsert by name (name = sky-view sync key).
     void addSatellite(const QString& name, double lat, double lon);
-    void setStation(double lat, double lon);   // NaN to clear the station.
+    // NaN lat/lon clears the station. altMeters is the configured site altitude
+    // (settings "本站海拔" / GNSS MSL); NaN means "unknown" and is honestly
+    // omitted from the station chip instead of printing a fake 0 m.
+    void setStation(double lat, double lon, double altMeters = std::numeric_limits<double>::quiet_NaN());
     // GNSS receiver fix. valid=false => no receiver dot, honest "GNSS 无定位".
     // fixTimeUtc is the real NMEA (GGA/RMC) fix timestamp; an invalid time is
     // shown as "--" (never fabricated).
@@ -153,6 +156,7 @@ private:
     QList<SatellitePoint> satellites_;
     double stationLat_ = std::numeric_limits<double>::quiet_NaN();
     double stationLon_ = std::numeric_limits<double>::quiet_NaN();
+    double stationAltM_ = std::numeric_limits<double>::quiet_NaN();
 
     bool gnssValid_ = false;
     double gnssLat_ = 0.0, gnssLon_ = 0.0;

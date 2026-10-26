@@ -48,9 +48,10 @@ void WorldView::addSatellite(const QString& name, double lat, double lon) {
     update();
 }
 
-void WorldView::setStation(double lat, double lon) {
+void WorldView::setStation(double lat, double lon, double altMeters) {
     stationLat_ = lat;
     stationLon_ = lon;
+    stationAltM_ = altMeters;
     update();
 }
 
@@ -480,10 +481,26 @@ void WorldView::drawStatusChips(QPainter& p) {
                  tokens::rgbaA(tokens::kTextAlphaDisabled));
         y += chipH + tokens::scaled(tokens::kSpacingS);
     }
-    if (std::isnan(stationLat_))
+    if (std::isnan(stationLat_)) {
         chip(tokens::scaled(tokens::kSpacingM), y,
              QString::fromUtf8("未设置本站位置"),
              tokens::rgbaA(tokens::kTextAlphaDisabled));
+    } else {
+        // Station chip: coordinates always, altitude only when actually known
+        // (settings 海拔 or GNSS MSL). A missing altitude is omitted rather
+        // than printed as a fabricated "0 m".
+        QString txt = QString::fromUtf8("本站 %1%2, %3%4")
+                          .arg(std::fabs(stationLat_), 0, 'f', 2)
+                          .arg(stationLat_ >= 0 ? QString::fromUtf8("°N")
+                                                : QString::fromUtf8("°S"))
+                          .arg(std::fabs(stationLon_), 0, 'f', 2)
+                          .arg(stationLon_ >= 0 ? QString::fromUtf8("°E")
+                                                : QString::fromUtf8("°W"));
+        if (!std::isnan(stationAltM_))
+            txt += QString::fromUtf8(" · %1 m").arg(stationAltM_, 0, 'f', 0);
+        chip(tokens::scaled(tokens::kSpacingM), y, txt,
+             QColor(tokens::kSuccess));
+    }
 
     // Synthetic / non-hardware tag: a quiet instrument corner badge, top-right.
     if (synthetic_) {

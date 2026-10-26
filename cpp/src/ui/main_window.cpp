@@ -1095,6 +1095,30 @@ MainWindow::MainWindow(QWidget* parent)
     gRecLay->addWidget(recStereoCheck_);
     recIgnoreSqlChk_ = new QCheckBox("忽略静噪 (持续录制)", gRec);
     gRecLay->addWidget(recIgnoreSqlChk_);
+    // Auto-segmentation ceiling (rec/max_seg_s): continuous/baseband recording
+    // splits into a new file at this duration so no single file is unbounded.
+    // The engine owns the value (ctor reads it, the setter persists it) -- this
+    // spinbox is the previously-missing UI face of that same setting.
+    auto* recSegRow = new QWidget(gRec);
+    auto* recSegLay = new QHBoxLayout(recSegRow);
+    recSegLay->setContentsMargins(0, 0, 0, 0);
+    auto* recSegSpin = new QSpinBox(recSegRow);
+    recSegSpin->setObjectName("recSegSpin");
+    recSegSpin->setRange(30, 3600);
+    recSegSpin->setSuffix(" s");
+    recSegSpin->setSingleStep(30);
+    recSegSpin->setValue(static_cast<int>(
+        engine_ ? engine_->recMaxSegmentSeconds()
+                : tokens::kRecMaxSegmentSecondsDefault));
+    recSegSpin->setToolTip(QStringLiteral(
+        "连续录制自动分段上限：达到该时长即切新文件，避免单文件无限增长。"));
+    connect(recSegSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int v) {
+        if (engine_) engine_->setRecMaxSegmentSeconds(static_cast<double>(v));
+    });
+    recSegLay->addWidget(new QLabel("分段时长上限", recSegRow));
+    recSegLay->addWidget(recSegSpin, 1);
+    gRecLay->addWidget(recSegRow);
     gatedCheck_ = new QCheckBox("触发式分段录制", gRec);
     gRecLay->addWidget(gatedCheck_);
 
@@ -1228,6 +1252,13 @@ MainWindow::MainWindow(QWidget* parent)
             QMenu menu(canvas);
             QAction* loadAct  = menu.addAction(QStringLiteral("加载瀑布色板文件…"));
             QAction* resetAct = menu.addAction(QStringLiteral("恢复内置色板"));
+            menu.addSeparator();
+            // SDR++ overlay opt-in (view/wfOverlay): waterfall fills the canvas
+            // as the ground and the trace is composited on top. Checkable so the
+            // current state is visible before clicking; the canvas persists it.
+            QAction* overlayAct = menu.addAction(QStringLiteral("SDR++ 叠加显示（瀑布铺底）"));
+            overlayAct->setCheckable(true);
+            overlayAct->setChecked(canvas->wfOverlay());
             QAction* chosen = menu.exec(QCursor::pos());
             if (chosen == loadAct) {
                 mbdsdr::core::AppSettings s;
@@ -1246,6 +1277,8 @@ MainWindow::MainWindow(QWidget* parent)
                 canvas->setPalette(0);   // back to built-in classic, drop custom ramp
                 mbdsdr::core::AppSettings()
                     .remove(tokens::kSettingsKeyColormapFile);
+            } else if (chosen == overlayAct) {
+                canvas->setWfOverlay(overlayAct->isChecked());
             }
         });
         // Re-apply a previously chosen colormap file (honest silent fallback).
@@ -3288,7 +3321,11 @@ MainWindow::MainWindow(QWidget* parent)
         if (dlg.exec() == QDialog::Accepted) {
             dlg.saveToConfig(cfg);
             cfg.save();
-            worldView_->setStation(cfg.stationLat, cfg.stationLon);
+            stationLat_ = cfg.stationLat;
+            stationLon_ = cfg.stationLon;
+            stationAltM_ = cfg.stationAlt;
+            stationSet_ = cfg.stationSet;
+            worldView_->setStation(cfg.stationLat, cfg.stationLon, cfg.stationAlt);
             if (adsbTracker_) adsbTracker_->setStation(cfg.stationLat, cfg.stationLon);
             // Hot-update satellite forecast: re-fetch + re-propagate without
             // restarting, whenever the station location changed.
@@ -3343,6 +3380,31 @@ MainWindow::MainWindow(QWidget* parent)
                 gainSlider_->blockSignals(true);
                 gainSlider_->setValue(dlg.displayGainDb());
                 gainSlider_->blockSignals(false);
+            }
+            // Preferred sample rate from the RX tab: same onSetSampleRate path
+            // the device combo handler uses. When a device is connected the
+            // combo is snapped to the nearest supported rate (its own logic);
+            // with no device the preference is remembered in lastSampleRateHz_
+            // and picked up on connect. Either way the dialog and the rail
+            // cannot drift.
+            {
+                const double wantHz = dlg.sampleRateHz();
+                lastSampleRateHz_ = wantHz;
+                if (engine_) engine_->onSetSampleRate(wantHz);
+                if (srCombo_ && srCombo_->count() > 0) {
+                    int best = -1;
+                    double bestDiff = -1.0;
+                    for (int i = 0; i < srCombo_->count(); ++i) {
+                        const double d = std::abs(
+                            srCombo_->itemData(i).toDouble() - wantHz);
+                        if (bestDiff < 0.0 || d < bestDiff) { bestDiff = d; best = i; }
+                    }
+                    if (best >= 0) {
+                        const QSignalBlocker blk(srCombo_);
+                        srCombo_->setCurrentIndex(best);
+                        if (sbSr_) sbSr_->setText(srCombo_->currentText());
+                    }
+                }
             }
             scheduleSave();
         }
@@ -3779,9 +3841,10 @@ MainWindow::MainWindow(QWidget* parent)
         cfg.load();
         stationLat_ = cfg.stationLat;
         stationLon_ = cfg.stationLon;
+        stationAltM_ = cfg.stationAlt;
         stationSet_ = cfg.stationSet;
         // Draw the hand-entered station on the map (NaN => no station marker).
-        worldView_->setStation(stationLat_, stationLon_);
+        worldView_->setStation(stationLat_, stationLon_, stationAltM_);
         if (adsbTracker_) adsbTracker_->setStation(stationLat_, stationLon_);
         refetchTle();
     }
@@ -5182,6 +5245,20 @@ void MainWindow::restoreUiState() {
     // push it straight into the pipeline.
     const double rateHz = s.value("rx/sampleRate", tokens::kDefaultSampleRateHz).toDouble();
     lastSampleRateHz_ = rateHz;
+
+    // Restore frontend decimation (rx/frontendDecimation). The combo is a
+    // plain local with objectName "decimCombo"; the change handler persists
+    // and pushes into the engine, so here we block signals and apply exactly
+    // once. Garbage/absent values honestly fall back to "关" (factor 1).
+    if (auto* decim = findChild<QComboBox*>(QStringLiteral("decimCombo"))) {
+        const int want = std::clamp(
+            s.value("rx/frontendDecimation", 1).toInt(), 1, 8);
+        int idx = decim->findData(want);
+        if (idx < 0) idx = 0;
+        const QSignalBlocker blk(decim);
+        decim->setCurrentIndex(idx);
+        if (engine_) engine_->setFrontendDecimation(decim->currentData().toInt());
+    }
 
     const QString demod = s.value("rx/demodMode", "NFM").toString();
     int dIdx = demodCombo_->findText(demod);
@@ -7341,8 +7418,9 @@ void MainWindow::onNewFix(gnss::GnssFix fix) {
         lastGnssAppliedLon_ = fix.longitude;
         stationLat_ = fix.latitude;
         stationLon_ = fix.longitude;
+        stationAltM_ = fix.altitudeMsl;
         stationSet_ = true;
-        worldView_->setStation(fix.latitude, fix.longitude);
+        worldView_->setStation(fix.latitude, fix.longitude, fix.altitudeMsl);
         if (adsbTracker_) adsbTracker_->setStation(fix.latitude, fix.longitude);
         engine_->setAdsbReferencePosition(fix.latitude, fix.longitude);
         refetchTle();   // cache-first; re-propagate passes for the real station
@@ -7392,8 +7470,9 @@ void MainWindow::onGnssConnectionChanged(bool connected, QString description) {
         // Restore the hand-entered station (if any) as the reference.
         ai::AiConfig cfg; cfg.load();
         stationLat_ = cfg.stationLat; stationLon_ = cfg.stationLon;
+        stationAltM_ = cfg.stationAlt;
         stationSet_ = cfg.stationSet;
-        worldView_->setStation(stationLat_, stationLon_);
+        worldView_->setStation(stationLat_, stationLon_, stationAltM_);
         if (adsbTracker_) adsbTracker_->setStation(stationLat_, stationLon_);
         refetchTle();
     }

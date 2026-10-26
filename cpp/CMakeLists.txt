@@ -1297,6 +1297,13 @@ target_link_libraries(test_ui_audit PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimed
 add_test(NAME ui_audit COMMAND test_ui_audit)
 set_tests_properties(ui_audit PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_settings_orphans tests/test_settings_orphans.cpp)
+target_link_libraries(test_settings_orphans PRIVATE mbdsdr_core)
+target_include_directories(test_settings_orphans PRIVATE src build/test_settings_orphans_autogen/include)
+target_link_libraries(test_settings_orphans PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME settings_orphans COMMAND test_settings_orphans)
+set_tests_properties(settings_orphans PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_soak tests/test_soak.cpp)
 target_link_libraries(test_soak PRIVATE mbdsdr_core)
 target_include_directories(test_soak PRIVATE src build/test_soak_autogen/include)

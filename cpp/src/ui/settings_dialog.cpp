@@ -66,12 +66,26 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     aiForm->addRow("Model", modelEdit_);
     tabs->addTab(aiPage, "AI");
 
-    // RX tab
+    // RX tab: preferred sample rate. ItemData carries the exact Hz value the
+    // engine speaks; the label is display only. The live device combo in the
+    // left rail is capability-driven; this is the *preference* that combo snaps
+    // to (nearest supported) on connect, matching rx/sampleRate.
     auto* rxPage = new QWidget;
     auto* rxForm = new QFormLayout(rxPage);
     srCombo_ = new QComboBox;
-    srCombo_->addItems({"1.024 MS/s", "2.048 MS/s", "2.4 MS/s", "3.2 MS/s"});
-    rxForm->addRow(tr("采样率"), srCombo_);
+    const struct { const char* label; double hz; } kRates[] = {
+        {"1.024 MS/s", 1.024e6},
+        {"2.048 MS/s", 2.048e6},
+        {"2.4 MS/s",   2.4e6},
+        {"3.2 MS/s",   3.2e6},
+    };
+    for (const auto& r : kRates)
+        srCombo_->addItem(QString::fromUtf8(r.label), r.hz);
+    auto* srHint = new QLabel(tr("连接设备后按设备能力取最近值；实际采样率见左栏「源与连接」"));
+    srHint->setObjectName("dockHint");
+    srHint->setWordWrap(true);
+    rxForm->addRow(tr("首选采样率"), srCombo_);
+    rxForm->addRow("", srHint);
     tabs->addTab(rxPage, tr("接收"));
 
     // Audio tab: pick the output device. Index 0 = system default.
@@ -340,6 +354,18 @@ void SettingsDialog::loadFromConfig(const ai::AiConfig& cfg) {
     }
     mbdsdr::core::AppSettings s;
     volumeSlider_->setValue(s.value("rx/volume", 80).toInt());
+    // Preferred sample rate: snap the combo to the nearest stored preference
+    // (Hz). A missing/garbage key falls back to the 2.4 MS/s project default.
+    {
+        const double hz = s.value("rx/sampleRate", 2.4e6).toDouble();
+        int best = 1;   // 2.4 MS/s
+        double bestDiff = -1.0;
+        for (int i = 0; i < srCombo_->count(); ++i) {
+            const double d = std::abs(srCombo_->itemData(i).toDouble() - hz);
+            if (bestDiff < 0.0 || d < bestDiff) { bestDiff = d; best = i; }
+        }
+        srCombo_->setCurrentIndex(best);
+    }
     const double sc = s.value("ui/scaleFactor", 1.0).toDouble();
     const int sidx = sc <= 0.7 ? 0 : sc <= 1.0 ? 1 : sc <= 1.25 ? 2 : 3;
     scaleCombo_->setCurrentIndex(sidx);
@@ -437,6 +463,7 @@ void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
                                  : audioDeviceCombo_->currentText();
     mbdsdr::core::AppSettings s;
     s.setValue("rx/volume", volumeSlider_->value());
+    s.setValue("rx/sampleRate", sampleRateHz());
     s.setValue("ui/scaleFactor", userScale());
     s.setValue("ui/language", languageCombo_->currentData().toString());
 
@@ -512,6 +539,12 @@ int SettingsDialog::displayWfDepth() const {
 }
 
 int SettingsDialog::volume() const { return volumeSlider_->value(); }
+
+double SettingsDialog::sampleRateHz() const {
+    if (!srCombo_) return 2.4e6;
+    const double hz = srCombo_->currentData().toDouble();
+    return hz > 0.0 ? hz : 2.4e6;
+}
 
 double SettingsDialog::userScale() const {
     switch (scaleCombo_->currentIndex()) {

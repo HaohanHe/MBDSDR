@@ -390,6 +390,7 @@ private:
     // settings dialog is accepted.
     double          stationLat_ = std::numeric_limits<double>::quiet_NaN();
     double          stationLon_ = std::numeric_limits<double>::quiet_NaN();
+    double          stationAltM_ = std::numeric_limits<double>::quiet_NaN();
     bool            stationSet_ = false;
     QTimer*         liveTimer_   = nullptr;
     int             liveRow_     = -1;   // selected row tracked live, or -1
