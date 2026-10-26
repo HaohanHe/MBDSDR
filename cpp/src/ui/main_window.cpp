@@ -2650,6 +2650,12 @@ MainWindow::MainWindow(QWidget* parent)
     rightLay->addWidget(rightTabs_);
     splitter->addWidget(rightCard);
 
+    // ---- phase82: build the panel-id registry (right rail tabs + left rail
+    // groups). Both rails are fully laid out by this point (leftCard groups
+    // were added to leftLay before the splitter; rightTabs_ is complete).
+    registerRightPanelIds();
+    registerLeftPanelGroups();
+
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 3);
     splitter->setStretchFactor(2, 1);
@@ -3319,6 +3325,31 @@ MainWindow::MainWindow(QWidget* parent)
                 ? "已配置 API Key — AI 功能接入中"
                 : "AI 助手将在这里接入（需在设置中配置 API Key）");
             if (agent_) agent_->configureFromConfig();
+
+            // ---- phase82: 界面 tab -> live widgets ------------------------
+            // Panel visibility (right rail = phase63 setTabVisible path, left
+            // rail = QGroupBox::setVisible). The settings dialog already
+            // persisted the hidden-id lists in saveToConfig; this pushes them
+            // into the live widgets and re-persists via scheduleSave().
+            applyPanelVisibility(dlg.hiddenRightPanels(), dlg.hiddenLeftPanels());
+            // Display parameters (three independent sliders + combos): same
+            // rx/dbMin, rx/dbMax, view/zoomFactor, rx/fftSize, view/persistMode
+            // keys the spectrum toolbar uses. Apply through the same setters
+            // the toolbar lambdas call so the toolbar and dialog cannot drift.
+            if (spectrum_) {
+                spectrum_->setDbSpinValues(dlg.displayDbMin(), dlg.displayDbMax());
+                spectrum_->setZoomFactor(dlg.displayZoom());
+                spectrum_->setFftSizeValue(dlg.displayFftSize());
+                spectrum_->setPersistMode(dlg.displayPersistMode());
+                spectrum_->setWaterfallDepth(dlg.displayWfDepth());
+            }
+            if (engine_) engine_->onSetGain(static_cast<double>(dlg.displayGainDb()));
+            if (gainSlider_) {
+                gainSlider_->blockSignals(true);
+                gainSlider_->setValue(dlg.displayGainDb());
+                gainSlider_->blockSignals(false);
+            }
+            scheduleSave();
         }
     });
 
@@ -4682,6 +4713,105 @@ void MainWindow::updateRightTabRestoreAffordance() {
     rightTabRestoreBtn_->setVisible(hidden > 0);
 }
 
+// ---- phase82: panel-id registry + settings-dialog application ----------
+// The registry is keyed by the SAME stable id strings the settings dialog
+// writes (tokens::kPanelId*). A missing id is honest: the panel simply is not
+// in this build, so the dialog's checkbox is a no-op rather than a phantom.
+void MainWindow::registerRightPanelIds() {
+    rightPanelIndex_.clear();
+    if (!rightTabs_) return;
+    // Group-header tabs (disabled) are section labels, not panels -- skip them.
+    for (int i = 0; i < rightTabs_->count(); ++i) {
+        if (!rightTabs_->isTabEnabled(i)) continue;
+        rightPanelIndex_.insert(rightTabs_->tabText(i), i);
+    }
+}
+
+void MainWindow::registerLeftPanelGroups() {
+    leftPanelGroups_.clear();
+    // The left rail's groups are QGroupBox children of leftCard (which is
+    // inside leftScroll). Walk the scroll area's widget tree.
+    QScrollArea* scroll = mainSplitter_ ? qobject_cast<QScrollArea*>(mainSplitter_->widget(0))
+                                        : nullptr;
+    if (!scroll || !scroll->widget()) return;
+    const auto groups = scroll->widget()->findChildren<QGroupBox*>(QString(),
+                                                                  Qt::FindDirectChildrenOnly);
+    for (QGroupBox* g : groups) {
+        if (!g) continue;
+        leftPanelGroups_.insert(g->title(), g);
+    }
+}
+
+void MainWindow::applyPanelVisibility(const QStringList& hiddenRight,
+                                      const QStringList& hiddenLeft) {
+    // Right rail: reuse the phase63 setTabVisible mechanism (X button + the
+    // "显示全部面板" affordance keep working against the same state).
+    if (rightTabs_) {
+        for (int i = 0; i < rightTabs_->count(); ++i) {
+            if (!rightTabs_->isTabEnabled(i)) continue;   // group header
+            const bool visible = !hiddenRight.contains(rightTabs_->tabText(i));
+            rightTabs_->setTabVisible(i, visible);
+        }
+        // Never leave the rail with zero visible panels: if the user hid
+        // everything, force the first real tab back (honest empty state).
+        int visibleReal = 0;
+        for (int i = 0; i < rightTabs_->count(); ++i)
+            if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) ++visibleReal;
+        if (visibleReal == 0) {
+            for (int i = 0; i < rightTabs_->count(); ++i) {
+                if (rightTabs_->isTabEnabled(i)) {
+                    rightTabs_->setTabVisible(i, true);
+                    break;
+                }
+            }
+        }
+        // Land the current index on a still-visible page.
+        if (!rightTabs_->isTabVisible(rightTabs_->currentIndex())) {
+            for (int i = 0; i < rightTabs_->count(); ++i) {
+                if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) {
+                    rightTabs_->setCurrentIndex(i);
+                    break;
+                }
+            }
+        }
+        updateRightTabRestoreAffordance();
+    }
+    // Left rail: flip QGroupBox visibility directly.
+    for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it) {
+        if (QGroupBox* g = it.value())
+            g->setVisible(!hiddenLeft.contains(it.key()));
+    }
+    scheduleSave();
+}
+
+QStringList MainWindow::currentHiddenRightPanels() const {
+    QStringList hidden;
+    if (!rightTabs_) return hidden;
+    for (int i = 0; i < rightTabs_->count(); ++i)
+        if (rightTabs_->isTabEnabled(i) && !rightTabs_->isTabVisible(i))
+            hidden << rightTabs_->tabText(i);
+    return hidden;
+}
+
+QStringList MainWindow::currentHiddenLeftPanels() const {
+    QStringList hidden;
+    for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it)
+        if (QGroupBox* g = it.value())
+            if (!g->isVisible()) hidden << it.key();
+    return hidden;
+}
+
+void MainWindow::showAllPanels() {
+    if (rightTabs_) {
+        for (int i = 0; i < rightTabs_->count(); ++i)
+            rightTabs_->setTabVisible(i, true);
+        updateRightTabRestoreAffordance();
+    }
+    for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it)
+        if (QGroupBox* g = it.value()) g->setVisible(true);
+    scheduleSave();
+}
+
 void MainWindow::saveUiState() {
     mbdsdr::core::AppSettings s;
     s.setValue("geometry", saveGeometry());
@@ -4752,6 +4882,8 @@ void MainWindow::saveUiState() {
     // Phase63: which right-rail panel tabs the user closed (by text -- the tab
     // order never changes at runtime, but text survives layout drift between
     // versions). Disabled group-header tabs are never hidden, so they are out.
+    // phase82: this is the SAME key the settings dialog's 界面 tab writes, so
+    // the X-button path and the dialog are one state, not two.
     {
         QStringList hidden;
         for (int i = 0; i < rightTabs_->count(); ++i)
@@ -4759,6 +4891,8 @@ void MainWindow::saveUiState() {
                 hidden << rightTabs_->tabText(i);
         s.setValue("ui/hiddenRightTabs", hidden);
     }
+    // phase82: left-rail groups the user hid via the settings dialog.
+    s.setValue(tokens::kSettingsKeyHiddenLeftPanels, currentHiddenLeftPanels());
     s.setValue("ui/centerTabIndex", centerTabs_->currentIndex());
     if (mainSplitter_) s.setValue("ui/splitterSizes", mainSplitter_->saveState());
     s.setValue(tokens::kSettingsKeyFocusMode, focusMode_);
@@ -5210,11 +5344,21 @@ void MainWindow::restoreUiState() {
     // ---- Layout / tabs / FFT ----
     // Phase63 first: re-apply the user's closed right-rail panel tabs (by text),
     // so the remembered current index below lands on a page that still exists.
+    // phase82: same key the settings dialog writes; a missing key = all visible.
     {
         const QStringList hidden = s.value("ui/hiddenRightTabs").toStringList();
         for (int i = 0; i < rightTabs_->count(); ++i) {
             if (rightTabs_->isTabEnabled(i) && hidden.contains(rightTabs_->tabText(i)))
                 rightTabs_->setTabVisible(i, false);
+        }
+    }
+    // phase82: left-rail groups the user hid via the settings dialog's 界面 tab.
+    {
+        const QStringList hiddenLeft =
+            s.value(tokens::kSettingsKeyHiddenLeftPanels).toStringList();
+        for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it) {
+            if (QGroupBox* g = it.value())
+                g->setVisible(!hiddenLeft.contains(it.key()));
         }
     }
     rightTabs_->setCurrentIndex(std::clamp(s.value("ui/rightTabIndex", 0).toInt(),

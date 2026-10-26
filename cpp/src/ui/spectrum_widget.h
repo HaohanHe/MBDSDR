@@ -60,6 +60,11 @@ public slots:
     void setPalette(int p);
     // 加载外部色板文件并同步下拉为"自定义"（启动重应用/ControlHub 调用）。
     void setCustomPalette(const QString& absPath);
+    // ---- phase82: programmatic mirrors of the toolbar combos (settings
+    // dialog drives the same state the toolbar lambdas do). The values are
+    // pushed into the SAME combos so the toolbar stays the live read-out.
+    void setPersistMode(int idx);        // 0=关 / 1=低 / 2=高
+    void setWaterfallDepth(int rows);    // rows (kWaterfallDepthChoices)
 
     // Multi-VFO band boxes.
     void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);

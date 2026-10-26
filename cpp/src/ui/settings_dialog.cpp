@@ -8,17 +8,23 @@
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QComboBox>
 #include <QLabel>
 #include <QDialogButtonBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGridLayout>
 #include <QSlider>
+#include <QCheckBox>
+#include <QGroupBox>
 #include <QShowEvent>
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
 #include <QSettings>
 #include <limits>
+#include <cmath>
 
 namespace mbdsdr {
 namespace ui {
@@ -113,6 +119,202 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     appearanceForm->addRow("", langHint);
     tabs->addTab(appearancePage, tr("外观"));
 
+    // ---- 界面 tab (phase82): panel visibility + independent display params.
+    // The checkbox list is built from the token arrays so the order is fixed
+    // and a missing/renamed panel id can never produce a phantom row.
+    {
+        auto* uiPage = new QWidget;
+        auto* uiLay = new QVBoxLayout(uiPage);
+        uiLay->setSpacing(tokens::scaled(tokens::kSpacingM));
+
+        // == A. 界面元素：右栏面板 ==
+        auto* rightBox = new QGroupBox(tr("右栏面板"), uiPage);
+        auto* rightLay = new QVBoxLayout(rightBox);
+        rightLay->setSpacing(tokens::scaled(tokens::kSpacingS));
+        showAllRightChk_ = new QCheckBox(tr("全选（显示全部右栏面板）"), rightBox);
+        showAllRightChk_->setToolTip(tr("勾选=显示全部；取消勾选不会自动隐藏任何面板，只是清掉全选标记"));
+        rightLay->addWidget(showAllRightChk_);
+        auto* rightGrid = new QGridLayout;
+        rightGrid->setHorizontalSpacing(tokens::scaled(tokens::kSpacingM));
+        rightGrid->setVerticalSpacing(tokens::scaled(tokens::kSpacingS));
+        for (int i = 0; i < tokens::kRightPanelCount; ++i) {
+            const QString id = QString::fromUtf8(tokens::kRightPanelIds[i]);
+            auto* chk = new QCheckBox(id, rightBox);
+            chk->setChecked(true);   // default: everything visible
+            chk->setToolTip(tr("在右栏显示「%1」面板").arg(id));
+            rightPanelChecks_.insert(id, chk);
+            rightGrid->addWidget(chk, i / 2, i % 2);
+        }
+        rightLay->addLayout(rightGrid);
+        uiLay->addWidget(rightBox);
+
+        // == B. 界面元素：左栏分组 ==
+        auto* leftBox = new QGroupBox(tr("左栏分组"), uiPage);
+        auto* leftLay = new QVBoxLayout(leftBox);
+        leftLay->setSpacing(tokens::scaled(tokens::kSpacingS));
+        showAllLeftChk_ = new QCheckBox(tr("全选（显示全部左栏分组）"), leftBox);
+        showAllLeftChk_->setToolTip(tr("勾选=显示全部；取消勾选不会自动隐藏任何分组，只是清掉全选标记"));
+        leftLay->addWidget(showAllLeftChk_);
+        auto* leftGrid = new QGridLayout;
+        leftGrid->setHorizontalSpacing(tokens::scaled(tokens::kSpacingM));
+        leftGrid->setVerticalSpacing(tokens::scaled(tokens::kSpacingS));
+        for (int i = 0; i < tokens::kLeftPanelCount; ++i) {
+            const QString id = QString::fromUtf8(tokens::kLeftPanelIds[i]);
+            auto* chk = new QCheckBox(id, leftBox);
+            chk->setChecked(true);
+            chk->setToolTip(tr("在左栏显示「%1」分组").arg(id));
+            leftPanelChecks_.insert(id, chk);
+            leftGrid->addWidget(chk, i / 2, i % 2);
+        }
+        leftLay->addLayout(leftGrid);
+        uiLay->addWidget(leftBox);
+
+        // == C. 显示参数：三条独立滑条 + 组合框 ==
+        displayGroup_ = new QGroupBox(tr("显示参数"), uiPage);
+        auto* dispForm = new QFormLayout(displayGroup_);
+        dispForm->setSpacing(tokens::scaled(tokens::kSpacingS));
+
+        // 接收增益 (dB) -- same domain as the left-rail gainSlider_.
+        auto* gainRow = new QWidget(displayGroup_);
+        auto* gainLay = new QHBoxLayout(gainRow);
+        gainLay->setContentsMargins(0, 0, 0, 0);
+        gainSlider_ = new QSlider(Qt::Horizontal, gainRow);
+        gainSlider_->setRange(static_cast<int>(tokens::kGainMinDb),
+                              static_cast<int>(tokens::kGainMaxDb));
+        gainSlider_->setSingleStep(tokens::kGainSliderStep);
+        gainValue_ = new QLabel(QStringLiteral("0 dB"), gainRow);
+        gainValue_->setMinimumWidth(tokens::scaled(64));
+        gainLay->addWidget(gainSlider_, 1);
+        gainLay->addWidget(gainValue_);
+        dispForm->addRow(tr("接收增益"), gainRow);
+
+        // 显示下限 (dB) -- the floor of the spectrum dB axis.
+        auto* dbMinRow = new QWidget(displayGroup_);
+        auto* dbMinLay = new QHBoxLayout(dbMinRow);
+        dbMinLay->setContentsMargins(0, 0, 0, 0);
+        dbMinSlider_ = new QSlider(Qt::Horizontal, dbMinRow);
+        dbMinSlider_->setRange(tokens::kDbSpinLowerMin, tokens::kDbSpinLowerMax);
+        dbMinSlider_->setSingleStep(tokens::kDbSliderStep);
+        dbMinValue_ = new QLabel(QStringLiteral("-45 dB"), dbMinRow);
+        dbMinValue_->setMinimumWidth(tokens::scaled(64));
+        dbMinLay->addWidget(dbMinSlider_, 1);
+        dbMinLay->addWidget(dbMinValue_);
+        dispForm->addRow(tr("显示下限"), dbMinRow);
+
+        // 显示上限 (dB) -- the ceiling of the spectrum dB axis.
+        auto* dbMaxRow = new QWidget(displayGroup_);
+        auto* dbMaxLay = new QHBoxLayout(dbMaxRow);
+        dbMaxLay->setContentsMargins(0, 0, 0, 0);
+        dbMaxSlider_ = new QSlider(Qt::Horizontal, dbMaxRow);
+        dbMaxSlider_->setRange(tokens::kDbSpinUpperMin, tokens::kDbSpinUpperMax);
+        dbMaxSlider_->setSingleStep(tokens::kDbSliderStep);
+        dbMaxValue_ = new QLabel(QStringLiteral("0 dB"), dbMaxRow);
+        dbMaxValue_->setMinimumWidth(tokens::scaled(64));
+        dbMaxLay->addWidget(dbMaxSlider_, 1);
+        dbMaxLay->addWidget(dbMaxValue_);
+        dispForm->addRow(tr("显示上限"), dbMaxRow);
+
+        // 显示缩放 -- same domain as the canvas zoomFactor.
+        auto* zoomRow = new QWidget(displayGroup_);
+        auto* zoomLay = new QHBoxLayout(zoomRow);
+        zoomLay->setContentsMargins(0, 0, 0, 0);
+        zoomSlider_ = new QSlider(Qt::Horizontal, zoomRow);
+        // QSlider is integer; map kZoomMin..kZoomMax to a 0..N tick range with
+        // kZoomSliderStep=0.1 so 1.0..16.0 becomes 0..150 ticks.
+        zoomSlider_->setRange(0, static_cast<int>((tokens::kZoomMax - tokens::kZoomMin) / tokens::kZoomSliderStep));
+        zoomSlider_->setSingleStep(1);
+        zoomValue_ = new QLabel(QStringLiteral("1.0x"), zoomRow);
+        zoomValue_->setMinimumWidth(tokens::scaled(64));
+        zoomLay->addWidget(zoomSlider_, 1);
+        zoomLay->addWidget(zoomValue_);
+        dispForm->addRow(tr("显示缩放"), zoomRow);
+
+        // FFT 点数 -- mirrors the spectrum toolbar fftCombo_ (1024/2048/4096).
+        fftCombo_ = new QComboBox(displayGroup_);
+        fftCombo_->addItems({"1024", "2048", "4096"});
+        fftCombo_->setCurrentIndex(1);   // 2048 default
+        dispForm->addRow(tr("FFT 点数"), fftCombo_);
+
+        // 余晖 -- mirrors the spectrum toolbar persistCombo_ (关/低/高).
+        persistCombo_ = new QComboBox(displayGroup_);
+        persistCombo_->addItems({tr("关"), tr("低"), tr("高")});
+        persistCombo_->setCurrentIndex(0);
+        dispForm->addRow(tr("余晖"), persistCombo_);
+
+        // 瀑布深度 -- mirrors the spectrum toolbar depthCombo_ (rows).
+        wfDepthCombo_ = new QComboBox(displayGroup_);
+        for (int d : tokens::kWaterfallDepthChoices)
+            wfDepthCombo_->addItem(QStringLiteral("%1 行").arg(d), d);
+        wfDepthCombo_->setCurrentIndex(1);   // 256 default
+        dispForm->addRow(tr("瀑布深度"), wfDepthCombo_);
+
+        uiLay->addWidget(displayGroup_);
+        uiLay->addStretch(1);
+
+        // ---- live read-outs on the three sliders (pure UI, no side effect) --
+        auto fmtDb = [](int v) { return QStringLiteral("%1 dB").arg(v); };
+        connect(gainSlider_, &QSlider::valueChanged,
+                this, [this, fmtDb](int v) { gainValue_->setText(fmtDb(v)); });
+        connect(dbMinSlider_, &QSlider::valueChanged,
+                this, [this, fmtDb](int v) { dbMinValue_->setText(fmtDb(v)); });
+        connect(dbMaxSlider_, &QSlider::valueChanged,
+                this, [this, fmtDb](int v) { dbMaxValue_->setText(fmtDb(v)); });
+        connect(zoomSlider_, &QSlider::valueChanged, this, [this](int tick) {
+            const double z = tokens::kZoomMin + tick * tokens::kZoomSliderStep;
+            zoomValue_->setText(QStringLiteral("%1x").arg(z, 0, 'f', 1));
+        });
+        // Guard: never let the two dB sliders cross. If the user drags 下限
+        // above 上限 (or vice versa) the OTHER slider is nudged just enough to
+        // keep a 10 dB minimum window -- the same rule the spectrum spinboxes
+        // already enforce (SpectrumWidget::applyDb lambda).
+        auto keepDbOrder = [this, fmtDb](bool minMoved) {
+            int lo = dbMinSlider_->value();
+            int hi = dbMaxSlider_->value();
+            if (lo < hi) return;
+            const int want = 10;
+            if (minMoved) {
+                hi = std::min(lo + want, tokens::kDbSpinUpperMax);
+                if (hi <= lo) lo = hi - want;   // lo already at its ceiling
+                dbMaxSlider_->blockSignals(true);
+                dbMaxSlider_->setValue(hi);
+                dbMaxSlider_->blockSignals(false);
+                dbMaxValue_->setText(fmtDb(hi));
+            } else {
+                lo = std::max(hi - want, tokens::kDbSpinLowerMin);
+                if (lo >= hi) hi = lo + want;
+                dbMinSlider_->blockSignals(true);
+                dbMinSlider_->setValue(lo);
+                dbMinSlider_->blockSignals(false);
+                dbMinValue_->setText(fmtDb(lo));
+            }
+        };
+        connect(dbMinSlider_, &QSlider::valueChanged,
+                this, [keepDbOrder](int) { keepDbOrder(true); });
+        connect(dbMaxSlider_, &QSlider::valueChanged,
+                this, [keepDbOrder](int) { keepDbOrder(false); });
+
+        // "全选" convenience toggles. They ONLY tick/untick the boxes -- they
+        // never push state to the live widgets (that happens on OK).
+        connect(showAllRightChk_, &QCheckBox::toggled, this,
+                [this](bool on) {
+                    for (auto* c : rightPanelChecks_) {
+                        c->blockSignals(true);
+                        c->setChecked(on);
+                        c->blockSignals(false);
+                    }
+                });
+        connect(showAllLeftChk_, &QCheckBox::toggled, this,
+                [this](bool on) {
+                    for (auto* c : leftPanelChecks_) {
+                        c->blockSignals(true);
+                        c->setChecked(on);
+                        c->blockSignals(false);
+                    }
+                });
+
+        tabs->addTab(uiPage, tr("界面"));
+    }
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -144,6 +346,81 @@ void SettingsDialog::loadFromConfig(const ai::AiConfig& cfg) {
     const QString lang = s.value("ui/language", QStringLiteral("zh_CN")).toString();
     const int li = languageCombo_->findData(lang);
     languageCombo_->setCurrentIndex(li < 0 ? 0 : li);
+
+    // ---- phase82: 界面 tab ----
+    // Right-rail panels: the key holds the ids the user HID. A missing key
+    // means "everything visible" (honest default). Unknown ids in the stored
+    // list are ignored (a renamed panel must not leave a phantom box ticked).
+    {
+        const QStringList hidden = s.value(tokens::kSettingsKeyHiddenRightPanels)
+                                      .toStringList();
+        for (auto it = rightPanelChecks_.begin(); it != rightPanelChecks_.end(); ++it) {
+            const bool visible = !hidden.contains(it.key());
+            it.value()->blockSignals(true);
+            it.value()->setChecked(visible);
+            it.value()->blockSignals(false);
+        }
+        // Reflect the aggregate into the 全选 box without firing its toggle.
+        bool allOn = true;
+        for (auto* c : rightPanelChecks_) if (!c->isChecked()) { allOn = false; break; }
+        showAllRightChk_->blockSignals(true);
+        showAllRightChk_->setChecked(allOn);
+        showAllRightChk_->blockSignals(false);
+    }
+    {
+        const QStringList hidden = s.value(tokens::kSettingsKeyHiddenLeftPanels)
+                                      .toStringList();
+        for (auto it = leftPanelChecks_.begin(); it != leftPanelChecks_.end(); ++it) {
+            const bool visible = !hidden.contains(it.key());
+            it.value()->blockSignals(true);
+            it.value()->setChecked(visible);
+            it.value()->blockSignals(false);
+        }
+        bool allOn = true;
+        for (auto* c : leftPanelChecks_) if (!c->isChecked()) { allOn = false; break; }
+        showAllLeftChk_->blockSignals(true);
+        showAllLeftChk_->setChecked(allOn);
+        showAllLeftChk_->blockSignals(false);
+    }
+
+    // Display parameters: same keys the spectrum toolbar / saveUiState use.
+    gainSlider_->setValue(static_cast<int>(std::round(
+        s.value("rx/gain", 0.0).toDouble())));
+    dbMinSlider_->setValue(static_cast<int>(std::round(
+        s.value(tokens::kSettingsKeyDbMin,
+                static_cast<float>(tokens::kDbLowerDefault)).toFloat())));
+    dbMaxSlider_->setValue(static_cast<int>(std::round(
+        s.value(tokens::kSettingsKeyDbMax,
+                static_cast<float>(tokens::kDbUpperDefault)).toFloat())));
+    {
+        const double z = s.value(tokens::kSettingsKeyZoomFactor, 1.0).toDouble();
+        const int tick = static_cast<int>(std::round(
+            (z - tokens::kZoomMin) / tokens::kZoomSliderStep));
+        zoomSlider_->setValue(std::clamp(tick, 0, zoomSlider_->maximum()));
+        zoomValue_->setText(QStringLiteral("%1x")
+                                .arg(tokens::kZoomMin +
+                                     zoomSlider_->value() * tokens::kZoomSliderStep,
+                                     0, 'f', 1));
+    }
+    {
+        const int fft = s.value(tokens::kSettingsKeyFftSize, 2048).toInt();
+        int idx = 1;
+        if (fft == 1024) idx = 0;
+        else if (fft == 4096) idx = 2;
+        fftCombo_->setCurrentIndex(idx);
+    }
+    persistCombo_->setCurrentIndex(
+        std::clamp(s.value(tokens::kSettingsKeyPersistMode, 0).toInt(), 0, 2));
+    {
+        const int depth = s.value(tokens::kSettingsKeyWfDepth,
+                                  tokens::kWaterfallDepthDefault).toInt();
+        int idx = 1;   // 256 default
+        for (int i = 0; i < int(sizeof(tokens::kWaterfallDepthChoices) /
+                                 sizeof(tokens::kWaterfallDepthChoices[0])); ++i) {
+            if (tokens::kWaterfallDepthChoices[i] == depth) { idx = i; break; }
+        }
+        wfDepthCombo_->setCurrentIndex(idx);
+    }
 }
 
 void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
@@ -162,6 +439,76 @@ void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
     s.setValue("rx/volume", volumeSlider_->value());
     s.setValue("ui/scaleFactor", userScale());
     s.setValue("ui/language", languageCombo_->currentData().toString());
+
+    // ---- phase82: 界面 tab state ----
+    // Persist the panel-visibility selections as "hidden id" lists so the
+    // absent-key default stays "everything visible". Unknown ids cannot leak
+    // in (the maps are built from the token arrays in the ctor).
+    {
+        QStringList hidden;
+        for (auto it = rightPanelChecks_.begin(); it != rightPanelChecks_.end(); ++it)
+            if (!it.value()->isChecked()) hidden << it.key();
+        s.setValue(tokens::kSettingsKeyHiddenRightPanels, hidden);
+    }
+    {
+        QStringList hidden;
+        for (auto it = leftPanelChecks_.begin(); it != leftPanelChecks_.end(); ++it)
+            if (!it.value()->isChecked()) hidden << it.key();
+        s.setValue(tokens::kSettingsKeyHiddenLeftPanels, hidden);
+    }
+    // Display parameters: same keys the spectrum toolbar / saveUiState use.
+    s.setValue("rx/gain", static_cast<double>(gainSlider_->value()));
+    s.setValue(tokens::kSettingsKeyDbMin, static_cast<float>(dbMinSlider_->value()));
+    s.setValue(tokens::kSettingsKeyDbMax, static_cast<float>(dbMaxSlider_->value()));
+    s.setValue(tokens::kSettingsKeyZoomFactor,
+               tokens::kZoomMin + zoomSlider_->value() * tokens::kZoomSliderStep);
+    s.setValue(tokens::kSettingsKeyFftSize, fftCombo_->currentText().toInt());
+    s.setValue(tokens::kSettingsKeyPersistMode, persistCombo_->currentIndex());
+    s.setValue(tokens::kSettingsKeyWfDepth, wfDepthCombo_->currentData().toInt());
+}
+
+QStringList SettingsDialog::hiddenRightPanels() const {
+    QStringList hidden;
+    for (auto it = rightPanelChecks_.begin(); it != rightPanelChecks_.end(); ++it)
+        if (!it.value()->isChecked()) hidden << it.key();
+    return hidden;
+}
+
+QStringList SettingsDialog::hiddenLeftPanels() const {
+    QStringList hidden;
+    for (auto it = leftPanelChecks_.begin(); it != leftPanelChecks_.end(); ++it)
+        if (!it.value()->isChecked()) hidden << it.key();
+    return hidden;
+}
+
+int SettingsDialog::displayGainDb() const {
+    return gainSlider_ ? gainSlider_->value() : 0;
+}
+
+int SettingsDialog::displayDbMin() const {
+    return dbMinSlider_ ? dbMinSlider_->value() : tokens::kDbLowerDefault;
+}
+
+int SettingsDialog::displayDbMax() const {
+    return dbMaxSlider_ ? dbMaxSlider_->value() : tokens::kDbUpperDefault;
+}
+
+double SettingsDialog::displayZoom() const {
+    if (!zoomSlider_) return 1.0;
+    return tokens::kZoomMin + zoomSlider_->value() * tokens::kZoomSliderStep;
+}
+
+int SettingsDialog::displayFftSize() const {
+    return fftCombo_ ? fftCombo_->currentText().toInt() : 2048;
+}
+
+int SettingsDialog::displayPersistMode() const {
+    return persistCombo_ ? persistCombo_->currentIndex() : 0;
+}
+
+int SettingsDialog::displayWfDepth() const {
+    return wfDepthCombo_ ? wfDepthCombo_->currentData().toInt()
+                         : tokens::kWaterfallDepthDefault;
 }
 
 int SettingsDialog::volume() const { return volumeSlider_->value(); }

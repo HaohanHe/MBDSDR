@@ -906,6 +906,89 @@ inline constexpr const char* kSettingsKeyCdcssGate    = "rx/cdcssGateAudio";
 inline constexpr const char* kSettingsKeyFt8Enabled   = "rx/ft8Enabled";
 
 // =====================================================================
+// Settings-dialog "界面元素" panel (phase82). Two faces of the same state:
+//   * 界面元素 tab in SettingsDialog  -- the discoverable master switchboard
+//   * right-rail close button / "显示全部面板"  -- the quick per-tab path
+// Both write the SAME keys, so the two views can never drift. The keys store
+// what the user HID (a QStringList of stable panel ids). Absent key = the
+// honest default "everything visible"; a hand-edited / unknown id is ignored
+// on restore (never fabricated into a phantom panel).
+// =====================================================================
+// Right-rail panel ids (stable across layout/version drift -- matched by
+// QTabWidget::tabText(), which the phase63 close/restore path already uses).
+// Group-header tabs ("解码" / "观测" / "系统") are pure section labels and are
+// intentionally NOT in this list (they can never be hidden).
+inline constexpr const char* kPanelIdCw       = "CW";
+inline constexpr const char* kPanelIdAdsb     = "ADS-B";
+inline constexpr const char* kPanelIdFt8      = "FT8";
+inline constexpr const char* kPanelIdPocsag   = "寻呼";
+inline constexpr const char* kPanelIdData     = "数据";
+inline constexpr const char* kPanelIdM17      = "m17";
+inline constexpr const char* kPanelIdVor      = "VOR";
+inline constexpr const char* kPanelIdConstel  = "星座";
+inline constexpr const char* kPanelIdSky      = "天空";
+inline constexpr const char* kPanelIdScanBm   = "扫描/书签";
+inline constexpr const char* kPanelIdRecLib   = "录制库";
+inline constexpr const char* kPanelIdAi       = "AI 助手";
+inline constexpr const char* kPanelIdRadio    = "电台";
+inline constexpr const char* kPanelIdVna      = "VNA";
+// Left-rail QGroupBox ids (keyed by the group TITLE text, stable across
+// versions; the QGroupBox objectName is only set for a couple of legacy ones).
+inline constexpr const char* kPanelIdSrc      = "源与连接";
+inline constexpr const char* kPanelIdDev      = "设备信息";
+inline constexpr const char* kPanelIdSpy      = "SpyServer 远程";
+inline constexpr const char* kPanelIdNetAudio = "网络音频外送";
+inline constexpr const char* kPanelIdFreq     = "频率";
+inline constexpr const char* kPanelIdRx       = "接收参数";
+inline constexpr const char* kPanelIdVfo      = "多 VFO";
+inline constexpr const char* kPanelIdSql      = "静噪";
+inline constexpr const char* kPanelIdAnr      = "音频降噪 (ANR)";
+inline constexpr const char* kPanelIdAud      = "音频";
+inline constexpr const char* kPanelIdTools    = "工具";
+inline constexpr const char* kPanelIdRec      = "录制";
+// Canonical order for the settings-dialog checkbox list (right rail first,
+// then left rail) -- the dialog renders this exact order so the layout is
+// deterministic and a screenshot diff is meaningful.
+inline constexpr const char* const kRightPanelIds[] = {
+    kPanelIdCw, kPanelIdAdsb, kPanelIdFt8, kPanelIdPocsag, kPanelIdData,
+    kPanelIdM17, kPanelIdVor, kPanelIdConstel, kPanelIdSky,
+    kPanelIdScanBm, kPanelIdRecLib, kPanelIdAi, kPanelIdRadio, kPanelIdVna,
+};
+inline constexpr int kRightPanelCount =
+    int(sizeof(kRightPanelIds) / sizeof(kRightPanelIds[0]));
+inline constexpr const char* const kLeftPanelIds[] = {
+    kPanelIdSrc, kPanelIdDev, kPanelIdSpy, kPanelIdNetAudio, kPanelIdFreq,
+    kPanelIdRx, kPanelIdVfo, kPanelIdSql, kPanelIdAnr, kPanelIdAud,
+    kPanelIdTools, kPanelIdRec,
+};
+inline constexpr int kLeftPanelCount =
+    int(sizeof(kLeftPanelIds) / sizeof(kLeftPanelIds[0]));
+// The two settings keys. Both are QStringList of panel ids the user Hid.
+// (Right-rail ids share the key with the phase63 tab-close path so the quick
+//  X-button and the settings dialog are one state, not two.)
+inline constexpr const char* kSettingsKeyHiddenRightPanels = "ui/hiddenRightTabs";
+inline constexpr const char* kSettingsKeyHiddenLeftPanels  = "ui/hiddenLeftGroups";
+
+// =====================================================================
+// Settings-dialog "显示参数" panel (phase82): the three independent sliders
+// (接收增益 / 显示下限 / 显示上限) + the display combos. These are NOT new
+// state -- they are the SAME rx/dbMin, rx/dbMax, view/zoomFactor, rx/fftSize,
+// view/persistMode keys the spectrum toolbar and saveUiState already use.
+// The slider ranges reuse the existing tokens so a slider can never move the
+// value outside the legal spinbox domain.
+// =====================================================================
+inline constexpr const char* kSettingsKeyDbMin     = "rx/dbMin";
+inline constexpr const char* kSettingsKeyDbMax     = "rx/dbMax";
+inline constexpr const char* kSettingsKeyZoomFactor = "view/zoomFactor";
+inline constexpr const char* kSettingsKeyFftSize    = "rx/fftSize";
+inline constexpr const char* kSettingsKeyPersistMode = "view/persistMode";
+// Slider granularity: 1 dB steps for the dB axis (matches the spinboxes),
+// 0.1x for zoom (kZoomMin..kZoomMax), 1 dB for the gain (matches gainSlider_).
+inline constexpr int kDbSliderStep  = 1;
+inline constexpr double kZoomSliderStep = 0.1;
+inline constexpr int kGainSliderStep = 1;
+
+// =====================================================================
 // Dark QSS generator -- simplified, only what we use.
 // Sizes are scaled at generation time.
 // =====================================================================

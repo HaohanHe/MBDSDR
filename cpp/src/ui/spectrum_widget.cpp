@@ -791,6 +791,35 @@ void SpectrumWidget::setFftSizeValue(int n) {
     if (fftCombo_) fftCombo_->setCurrentIndex(idx);
 }
 
+// ---- phase82: programmatic mirrors of the toolbar combos (settings dialog).
+// Push into the SAME combo the toolbar lambda uses so the toolbar stays the
+// live read-out and the two paths cannot drift.
+void SpectrumWidget::setPersistMode(int idx) {
+    if (auto* c = findChild<QComboBox*>("persistCombo")) {
+        c->blockSignals(true);
+        c->setCurrentIndex(std::clamp(idx, 0, 2));
+        c->blockSignals(false);
+    }
+    if (canvas_) canvas_->setPersistenceMode(std::clamp(idx, 0, 2));
+    mbdsdr::core::AppSettings().setValue("view/persistMode", std::clamp(idx, 0, 2));
+}
+
+void SpectrumWidget::setWaterfallDepth(int rows) {
+    if (depthCombo_) {
+        int idx = -1;
+        for (int i = 0; i < depthCombo_->count(); ++i) {
+            if (depthCombo_->itemData(i).toInt() == rows) { idx = i; break; }
+        }
+        if (idx >= 0) {
+            depthCombo_->blockSignals(true);
+            depthCombo_->setCurrentIndex(idx);
+            depthCombo_->blockSignals(false);
+        }
+    }
+    if (canvas_) canvas_->setRingDepth(rows);
+    mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyWfDepth, rows);
+}
+
 void SpectrumWidget::setMaxHoldEnabled(bool on) {
     if (canvas_) canvas_->setMaxHoldEnabled(on);
 }

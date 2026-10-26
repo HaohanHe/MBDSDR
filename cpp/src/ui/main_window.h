@@ -27,6 +27,7 @@ class QSlider;
 class QPushButton;
 class QCheckBox;
 class QFrame;
+class QGroupBox;
 class QTabWidget;
 class QPlainTextEdit;
 class QTreeWidget;
@@ -692,6 +693,14 @@ private:
     // Right tabs
     QTabWidget*     rightTabs_   = nullptr;
     QSplitter*      mainSplitter_ = nullptr;
+    // ---- phase82: panel-id registry ------------------------------------
+    // Right-rail: panel id (tokens::kPanelId*) -> tab index in rightTabs_.
+    // Built by registerRightPanelIds() after the tabs exist; -1 / absent = the
+    // id does not exist in this build (renamed / removed panel).
+    QMap<QString,int> rightPanelIndex_;
+    // Left-rail: group title (tokens::kPanelId*) -> the QGroupBox widget.
+    // Built by registerLeftPanelGroups() after the groups are laid out.
+    QMap<QString,QGroupBox*> leftPanelGroups_;
     // AIGUI P0-b: live controller binding mainSplitter_ + rightTabs_ to the
     // WorkspaceLayout model. Created after both widgets exist; the observing
     // pointer is also handed to ControlHub so the headless/HTTP channel can
@@ -822,6 +831,28 @@ private:
     // wiring by index is untouched; the last visible panel cannot be closed.
     void onRightTabCloseRequested(int idx);
     void updateRightTabRestoreAffordance();   // restore button iff >=1 tab hidden
+    // ---- phase82: settings-dialog "界面" tab <-> live widgets -----------
+    // The right-rail registry is keyed by the SAME stable panel-id strings
+    // (tokens::kPanelId*) the settings dialog writes; built after the tabs
+    // exist. The left-rail registry maps a group's TITLE text to the QGroupBox
+    // so a title change cannot silently orphan a checkbox.
+    void registerRightPanelIds();   // called once, after rightTabs_ is populated
+    void registerLeftPanelGroups(); // called once, after leftLay groups exist
+    // Apply the settings-dialog's "hidden" id lists to the live widgets. The
+    // right-rail path reuses the phase63 setTabVisible mechanism (so the X
+    // button + "显示全部面板" button keep working on the same state); the
+    // left-rail path flips QGroupBox::setVisible. Both then persist via
+    // scheduleSave(). A "hidden" list that names an unknown id is ignored
+    // (honest -- never fabricates a phantom panel).
+    void applyPanelVisibility(const QStringList& hiddenRight,
+                              const QStringList& hiddenLeft);
+    // Read back the CURRENT live state into "hidden id" lists (used by
+    // saveUiState and by the settings dialog's load path).
+    QStringList currentHiddenRightPanels() const;
+    QStringList currentHiddenLeftPanels() const;
+    // Show every panel (right + left) -- the settings dialog's "全选" button
+    // and the phase63 "显示全部面板" affordance both funnel here.
+    void showAllPanels();
     // Focus mode (CarWith driving-mode analog): collapse the left scroll rail
     // and the right tab rail to width 0 so the spectrum takes the full width.
     // animate=false applies the state instantly (used at startup restore).
