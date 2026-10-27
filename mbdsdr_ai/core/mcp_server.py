@@ -49,6 +49,12 @@ _STR = {"type": "string"}
 _BOOL = {"type": "boolean"}
 _OBJ = {"type": "object"}
 _ARR = {"type": "array", "items": {"type": "number"}}
+
+#: 入参数组长度上限：防调用方一次性塞入超大数组把进程撑爆。
+#: schema 只声明 type、无 maxItems（P1「Python schema 无边界」），这里在
+#: 进 handler 之前补上长度闸。取 1e6 是刻意放宽——正常谱线/扫频远小于此，
+#: 只拦"离谱"的量级，避免误伤合法调用。
+MAX_ARG_ARRAY_LEN = 1_000_000
 _ARR2 = {"type": "array",
          "items": {"type": "array", "items": {"type": "number"}}}
 
@@ -77,6 +83,13 @@ def _validate_args_finite(args: Any, _path: str = "") -> None:
         for k, v in args.items():
             _validate_args_finite(v, f"{_path}.{k}" if _path else str(k))
     elif isinstance(args, (list, tuple)):
+        if len(args) > MAX_ARG_ARRAY_LEN:
+            raise InvalidArgumentError(
+                message=f"参数 {_path or '(根)'} 数组过长：{len(args)} 项"
+                        f"（上限 {MAX_ARG_ARRAY_LEN}）。",
+                suggestion="请分批处理或降低点数；一次性传入超大数组会撑爆进程，"
+                           "本仓库在入口就拦下，而不是让它 OOM。",
+                technical_detail=f"{_path} len={len(args)}")
         for i, v in enumerate(args):
             _validate_args_finite(v, f"{_path}[{i}]")
     elif isinstance(args, bool):
