@@ -12,6 +12,7 @@
 3. 真机在位时枚举结果的字段契约成立（无设备则诚实 skip，不算失败）。
 """
 import ctypes
+import logging
 
 import pytest
 
@@ -62,3 +63,22 @@ def test_real_device_enumeration_shape():
         assert isinstance(dev["index"], int)
         assert isinstance(dev["serial"], str)
         assert isinstance(dev["tuner"], str)
+
+
+def test_warn_once_dedupes_static_environment_warnings(caplog):
+    """环境缺失类告警进程内只报一次。
+
+    实测：一次启动里设备枚举被触发多次，SoapySDR/pyrtlsdr 缺失提示被整刷
+    4 遍共十余行，把真正的硬件信息淹掉。去重只去重复，不去严重性：
+    首次仍完整报出并保留可执行指引。
+    """
+    from mbdsdr_ai.sdr_backend import _WARNED_ONCE, _warn_once
+
+    key = "test_static_env_warning"
+    _WARNED_ONCE.discard(key)          # 保证干净起点
+    with caplog.at_level(logging.WARNING):
+        for _ in range(5):
+            _warn_once(key, "重复环境告警 %d", 7)
+
+    hits = [r for r in caplog.records if "重复环境告警" in r.getMessage()]
+    assert len(hits) == 1, "静态环境告警应只报一次，不刷屏"

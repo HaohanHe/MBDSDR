@@ -49,6 +49,25 @@ from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# 进程内"环境缺失"类告警只报一次用的键集合。
+# 仅用于**进程生命周期内不会变化**的事实（库没装 / CLI 不存在）；
+# 每次调用都可能不同的真实失败不在此列，仍按次如实上报。
+_WARNED_ONCE: set = set()
+
+
+def _warn_once(key: str, msg: str, *args) -> None:
+    """同一进程内只报一次的同质告警。
+
+    实测（2026-10-28）：一次启动里设备枚举被触发 4 次，SoapySDR 缺失的
+    三条提示被整刷 4 遍共 12 行，把真正的硬件信息淹掉。这些是静态环境事实，
+    重复播报纯属噪音。**去重只去重复，不去严重性**：首次仍完整报出，
+    且附带可执行的安装指引，不把"没装库"粉饰成"没插设备"。
+    """
+    if key in _WARNED_ONCE:
+        return
+    _WARNED_ONCE.add(key)
+    logger.warning(msg, *args)
+
 # rtl_tcp 网络源的环境变量登记口（comma-separated host[:port]，默认端口 1234）。
 # 让 MCP server / GUI / CLI 在零代码变化下把同一根（远端或本机）rtl_tcp 棒
 # 纳入枚举：SDRBackendManager._discover() 读取本变量登记 RTLSDRBackend(host=...)。
@@ -1133,7 +1152,9 @@ class RTLSDRBackend(SDRBackend):
             # rtlsdr_set_dithering，pyrtlsdr 的 librtlsdr.py:147 无条件解析该符号
             # → AttributeError，整个包不可用）。这既不是"未安装"也不是"无设备"，
             # 不能和空设备混为一谈：用仓库自有 ctypes 绑定再试一次。
-            logger.warning("pyrtlsdr 不可用（%s），回退仓库自有 ctypes 枚举", e)
+            _warn_once(
+                "pyrtlsdr_unusable",
+                "pyrtlsdr 不可用（%s），回退仓库自有 ctypes 枚举", e)
             return RTLSDRBackend._enumerate_via_ctypes()
 
     @staticmethod
@@ -1171,7 +1192,8 @@ class RTLSDRBackend(SDRBackend):
             except OSError:
                 continue
         if lib is None:
-            logger.warning("未找到 rtlsdr.dll/librtlsdr.dll，无法回退枚举")
+            _warn_once("rtlsdr_dll_missing",
+                       "未找到 rtlsdr.dll/librtlsdr.dll，无法回退枚举")
             return []
 
         try:
@@ -2135,7 +2157,8 @@ class SoapySDRBackend(SDRBackend):
         except ImportError as e:
             SoapySDR = None
             # 红线提示：明确告诉用户怎么装，绝不静默把"没装库"和"没插设备"混为一谈
-            logger.warning(
+            _warn_once(
+                "soapy_no_python_binding",
                 "未安装 SoapySDR Python 绑定：pip install SoapySDR"
                 "（并按需安装 SoapyRTLSDR/SoapyHackRF/SoapyPlutoSDR 等驱动模块）。"
                 "原始导入错误: %s", e)
@@ -2153,13 +2176,15 @@ class SoapySDRBackend(SDRBackend):
         try:
             return cls._enumerate_via_cli()
         except Exception as e:
-            logger.warning(f"SoapySDRUtil CLI 枚举失败: {e}")
+            _warn_once("soapy_cli_failed", "SoapySDRUtil CLI 枚举失败: %s", e)
 
         # 路径 3：都没有 → 优雅报设备未找到（返回 []，绝不抛异常到上层、绝不假设备）
-        logger.warning(
+        _warn_once(
+            "soapy_absent",
             "未发现 SoapySDR：既无 Python 绑定(import SoapySDR)，"
             "也无 SoapySDRUtil CLI。请执行 pip install SoapySDR，"
             "并按需安装对应 Soapy* 驱动模块后再识别硬件。"
+            "（此为本进程内静态环境事实，仅首次报出，不予重复刷屏）"
         )
         return []
 
