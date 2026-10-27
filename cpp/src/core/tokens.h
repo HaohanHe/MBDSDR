@@ -314,6 +314,13 @@ inline constexpr double kPpmMin = -100.0;
 inline constexpr double kPpmMax = 100.0;
 inline constexpr double kPpmStep = 0.1;
 
+// Persisted PPM correction ("rtl/ppm"): written by the calibration wizard /
+// agent tool (dsp::savePpmSetting) and the advanced-panel spinbox, read back
+// by MainWindow::restoreUiState on startup and forwarded to the engine. One
+// constant everywhere so the dialog's promise, the persistence and the
+// engine replay can never drift to different keys.
+inline constexpr const char* kSettingsKeyRtlPpm = "rtl/ppm";
+
 // Spectrum dB range (adjustable via spinboxes)
 inline constexpr int    kDbSpinLowerMin = -140;   // lower spinbox allowed min
 inline constexpr int    kDbSpinLowerMax = -20;    // lower spinbox allowed max

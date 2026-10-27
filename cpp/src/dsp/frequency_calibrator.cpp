@@ -9,13 +9,12 @@
 
 #include "dsp/frequency_calibrator.h"
 
+#include "core/app_settings.h"  // the ONE legal QSettings construction point
 #include "core/tokens.h"   // kPpmMax (search-window bound) / kPeakThreshold*
 
 #include <algorithm>
 #include <cmath>
 #include <numeric>
-
-#include <QSettings>
 
 namespace mbdsdr {
 namespace dsp {
@@ -344,13 +343,13 @@ SpectrumPreview buildSpectrumPreview(
 
 // ---- QSettings persistence (QtCore only; engine forwarding is the caller's) -
 void savePpmSetting(double ppm) {
-    QSettings s;
-    s.setValue(QStringLiteral("rtl/ppm"), ppm);
+    mbdsdr::core::AppSettings s;  // same store the main window restores from
+    s.setValue(QString::fromUtf8(tokens::kSettingsKeyRtlPpm), ppm);
 }
 
 double currentPpmSetting() {
-    QSettings s;
-    return s.value(QStringLiteral("rtl/ppm"), 0.0).toDouble();
+    mbdsdr::core::AppSettings s;
+    return s.value(QString::fromUtf8(tokens::kSettingsKeyRtlPpm), 0.0).toDouble();
 }
 
 double predictedResidualHz(double measuredResidualHz,

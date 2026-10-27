@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "activity_log.h"
+#include "core/app_settings.h"  // the ONE legal QSettings construction point
 #include "core/tokens.h"
 
-#include <QSettings>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -15,7 +15,7 @@ int ActivityLog::maxEntries() { return tokens::kActivityLogMaxEntries; }
 
 void ActivityLog::load() {
     items_.clear();
-    QSettings s;
+    mbdsdr::core::AppSettings s;
     const QJsonDocument doc = QJsonDocument::fromJson(
         s.value("ui/activityLog").toByteArray());
     if (!doc.isArray()) return;
@@ -42,7 +42,7 @@ void ActivityLog::save() const {
         o["source"] = a.source;
         arr.append(o);
     }
-    QSettings s;
+    mbdsdr::core::AppSettings s;
     s.setValue("ui/activityLog", QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 

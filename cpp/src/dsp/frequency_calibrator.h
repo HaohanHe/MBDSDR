@@ -139,8 +139,11 @@ SpectrumPreview buildSpectrumPreview(
 // above stays pure and the DSP test stays light (QtCore only).
 //
 // savePpmSetting writes the SAME QSettings key the main window reads
-// ("rtl/ppm", see main_window.cpp); currentPpmSetting reads it back. The
-// caller (wizard / agent) then forwards the value to engine->setPpm().
+// ("rtl/ppm" = tokens::kSettingsKeyRtlPpm, see main_window.cpp), always
+// through core::AppSettings (a bare QSettings lands in a different store
+// and the write would be silently dropped); currentPpmSetting reads it
+// back. The caller (wizard / agent) then forwards the value to
+// engine->setPpm().
 // predictedResidualHz gives the residual expected AFTER applying: adding a
 // +ppm correction shifts the measured baseband up by centre*ppm/1e6, so with
 // the measured correction this is ~0 (the before/after comparison).

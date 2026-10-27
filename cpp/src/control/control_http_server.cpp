@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "control/control_http_server.h"
 #include "control/control_hub.h"
+#include "core/app_settings.h"  // the ONE legal QSettings construction point
 #include "core/tokens.h"
 
 #include <QTcpServer>
@@ -9,7 +10,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QSettings>
 #include <QByteArray>
 #include <QStringList>
 #include <QUrl>
@@ -99,7 +99,7 @@ bool HttpControlServer::startDefault() {
         if (ok && p > 0 && p < 65536) port = static_cast<quint16>(p);
     } else {
         // 2) QSettings override.
-        QSettings s;
+        mbdsdr::core::AppSettings s;
         const QVariant v = s.value(QString::fromUtf8(tokens::kControlHttpPortSettingsKey));
         if (v.isValid()) {
             bool ok = false;
