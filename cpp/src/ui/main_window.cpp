@@ -2701,6 +2701,14 @@ MainWindow::MainWindow(QWidget* parent)
         connect(rightTabs_, &QTabWidget::tabCloseRequested,
                 this, &MainWindow::onRightTabCloseRequested);
     }
+    // ---- 活动布局 A2 "排": drag the tab bar to reorder the rail ----------
+    // Order is user state ("顺序即使用频率"), so a move goes through the same
+    // debounced persistence as every other layout change. The disabled section
+    // headers move with the flow -- they are labels, not destinations -- and
+    // ensureRightTabSelectable() keeps the current page off them.
+    rightTabs_->tabBar()->setMovable(true);
+    connect(rightTabs_->tabBar(), &QTabBar::tabMoved, this,
+            [this](int, int) { scheduleSave(); });
     // Restore affordance: a flat button that only appears while >=1 panel is
     // hidden (honest empty state -- gone otherwise). Right-clicking the tab bar
     // offers the same action, so restore stays reachable even if every tab but
@@ -4844,6 +4852,7 @@ void MainWindow::onRightTabCloseRequested(int idx) {
         if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) ++visibleReal;
     if (visibleReal <= 1) return;
     rightTabs_->setTabVisible(idx, false);   // hide only; index/widget stay put
+    ensureRightTabSelectable();   // never leave the rail on the hidden page
     updateRightTabRestoreAffordance();
     scheduleSave();
 }
@@ -4912,7 +4921,10 @@ void MainWindow::applyPanelVisibility(const QStringList& hiddenRight,
     if (rightTabs_) {
         for (int i = 0; i < rightTabs_->count(); ++i) {
             if (!rightTabs_->isTabEnabled(i)) continue;   // group header
-            const bool visible = !hiddenRight.contains(rightTabs_->tabText(i));
+            // Match on the canonical panel id -- NEVER on tabText(), which is
+            // translated and silently breaks the dialog <-> rail pairing under
+            // en/ja (same vocabulary as saveUiState / restoreUiState).
+            const bool visible = !hiddenRight.contains(rightTabIdAt(i));
             rightTabs_->setTabVisible(i, visible);
         }
         // Never leave the rail with zero visible panels: if the user hid
@@ -4928,15 +4940,9 @@ void MainWindow::applyPanelVisibility(const QStringList& hiddenRight,
                 }
             }
         }
-        // Land the current index on a still-visible page.
-        if (!rightTabs_->isTabVisible(rightTabs_->currentIndex())) {
-            for (int i = 0; i < rightTabs_->count(); ++i) {
-                if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) {
-                    rightTabs_->setCurrentIndex(i);
-                    break;
-                }
-            }
-        }
+        // Land the current index on a still-visible real panel (never on a
+        // disabled group header, whose page is blank).
+        ensureRightTabSelectable();
         updateRightTabRestoreAffordance();
     }
     // Left rail: flip QGroupBox visibility directly.
@@ -4952,7 +4958,7 @@ QStringList MainWindow::currentHiddenRightPanels() const {
     if (!rightTabs_) return hidden;
     for (int i = 0; i < rightTabs_->count(); ++i)
         if (rightTabs_->isTabEnabled(i) && !rightTabs_->isTabVisible(i))
-            hidden << rightTabs_->tabText(i);
+            hidden << rightTabIdAt(i);   // canonical id, not the translated text
     return hidden;
 }
 
@@ -4981,6 +4987,72 @@ void MainWindow::showAllPanels() {
     for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it)
         if (QGroupBox* g = it.value()) g->setVisible(true);
     scheduleSave();
+}
+
+// ---- 活动布局 A2 "排" -------------------------------------------------
+// The right rail is reorderable by dragging the tab bar (QTabBar::setMovable),
+// so order is user state and must round-trip. Identity is the canonical panel
+// id; the non-switchable section labels ride along as '#' + title.
+QString MainWindow::rightTabIdAt(int idx) const {
+    if (!rightTabs_ || idx < 0 || idx >= rightTabs_->count()) return QString();
+    if (!rightTabs_->isTabEnabled(idx)) return QString();   // group header
+    QWidget* page = rightTabs_->widget(idx);
+    if (!page) return QString();
+    return page->property(tokens::kPanelIdProp).toString();
+}
+
+int MainWindow::rightTabIndexOfEntry(const QString& entry) const {
+    if (entry.isEmpty() || !rightTabs_) return -1;
+    if (entry.startsWith(QChar(tokens::kTabOrderHeaderPrefix))) {
+        const QString title = entry.mid(1);
+        for (int i = 0; i < rightTabs_->count(); ++i)
+            if (!rightTabs_->isTabEnabled(i) && rightTabs_->tabText(i) == title)
+                return i;
+        return -1;
+    }
+    for (int i = 0; i < rightTabs_->count(); ++i)
+        if (rightTabs_->isTabEnabled(i) && rightTabIdAt(i) == entry) return i;
+    return -1;
+}
+
+QStringList MainWindow::currentRightTabOrder() const {
+    QStringList out;
+    if (!rightTabs_) return out;
+    for (int i = 0; i < rightTabs_->count(); ++i) {
+        const QString id = rightTabIdAt(i);
+        out << (id.isEmpty() ? QChar(tokens::kTabOrderHeaderPrefix)
+                                   + rightTabs_->tabText(i)
+                             : id);
+    }
+    return out;
+}
+
+void MainWindow::applyRightTabOrder(const QStringList& order) {
+    if (!rightTabs_ || order.isEmpty()) return;   // absent key = built-in order
+    int target = 0;
+    for (const QString& entry : order) {
+        const int from = rightTabIndexOfEntry(entry);
+        // Stale/unknown id: skipped, never fabricated into a phantom tab.
+        if (from < 0) continue;
+        if (from != target) rightTabs_->tabBar()->moveTab(from, target);
+        ++target;
+    }
+}
+
+// Nothing may park the current page on a group header: those tabs are disabled
+// section labels whose page is an empty QWidget, so landing on one rendered as
+// a blank right rail (the exact symptom of restoring a header index).
+void MainWindow::ensureRightTabSelectable() {
+    if (!rightTabs_) return;
+    const int cur = rightTabs_->currentIndex();
+    if (cur >= 0 && rightTabs_->isTabEnabled(cur)
+        && rightTabs_->isTabVisible(cur)) return;
+    for (int i = 0; i < rightTabs_->count(); ++i) {
+        if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) {
+            rightTabs_->setCurrentIndex(i);
+            return;
+        }
+    }
 }
 
 void MainWindow::saveUiState() {
@@ -5057,6 +5129,13 @@ void MainWindow::saveUiState() {
 
     // ---- Layout / tabs / FFT ----
     s.setValue("ui/rightTabIndex", rightTabs_->currentIndex());
+    // 活动布局 A2 "排": the dragged tab order + WHICH panel is current, both by
+    // canonical id (the positional index alone goes stale after a reorder).
+    s.setValue(tokens::kSettingsKeyRightTabOrder, currentRightTabOrder());
+    {
+        const QString curId = rightTabIdAt(rightTabs_->currentIndex());
+        if (!curId.isEmpty()) s.setValue(tokens::kSettingsKeyRightTabCurrent, curId);
+    }
     // Phase63: which right-rail panel tabs the user closed. Identity is the
     // canonical panel id tagged on each page (kPanelIdProp) -- the SAME ids
     // the settings dialog writes, never the translated tab text (which broke
@@ -5625,18 +5704,24 @@ void MainWindow::restoreUiState() {
             }
         }
     }
-    rightTabs_->setCurrentIndex(std::clamp(s.value("ui/rightTabIndex", 0).toInt(),
-                                           0, rightTabs_->count() - 1));
-    // If the remembered page was closed since last run, land on the first
-    // visible panel (skip disabled group-header tabs, which are not switchable).
-    if (!rightTabs_->isTabVisible(rightTabs_->currentIndex())) {
-        for (int i = 0; i < rightTabs_->count(); ++i) {
-            if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) {
-                rightTabs_->setCurrentIndex(i);
-                break;
-            }
-        }
+    // 活动布局 A2 "排": restore the user's dragged order FIRST, then resolve
+    // the remembered current panel against that order.
+    applyRightTabOrder(s.value(tokens::kSettingsKeyRightTabOrder).toStringList());
+    {
+        // Current panel by canonical id (authoritative since tabs became
+        // reorderable); the positional key is the one-version fallback for a
+        // settings file written before A2 landed.
+        int idx = rightTabIndexOfEntry(s.value(tokens::kSettingsKeyRightTabCurrent)
+                                           .toString());
+        if (idx < 0 || !rightTabs_->isTabVisible(idx))
+            idx = std::clamp(s.value("ui/rightTabIndex", 0).toInt(),
+                             0, rightTabs_->count() - 1);
+        rightTabs_->setCurrentIndex(idx);
     }
+    // If the remembered page was closed since last run -- or was a disabled
+    // group-header tab, whose page is an empty QWidget -- land on the first
+    // visible real panel instead of rendering a blank rail.
+    ensureRightTabSelectable();
     updateRightTabRestoreAffordance();
     centerTabs_->setCurrentIndex(std::clamp(s.value("ui/centerTabIndex", 0).toInt(),
                                             0, centerTabs_->count() - 1));

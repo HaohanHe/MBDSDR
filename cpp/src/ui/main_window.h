@@ -843,6 +843,17 @@ private:
     // wiring by index is untouched; the last visible panel cannot be closed.
     void onRightTabCloseRequested(int idx);
     void updateRightTabRestoreAffordance();   // restore button iff >=1 tab hidden
+    // ---- 活动布局 A2 "排": drag-to-reorder, order + current panel persisted --
+    // Identity is the canonical panel id (kPanelIdProp), never the translated
+    // tabText; group-header tabs (non-switchable section labels) are recorded
+    // as '#' + title so the order round-trips without losing them.
+    QString rightTabIdAt(int idx) const;              // "" for a group header
+    int rightTabIndexOfEntry(const QString& entry) const;   // -1 = unknown/stale
+    QStringList currentRightTabOrder() const;         // live order -> id list
+    void applyRightTabOrder(const QStringList& order); // id list -> live order
+    // The group headers are pure section labels: nothing may ever leave the
+    // current page parked on one (that rendered as a blank right rail).
+    void ensureRightTabSelectable();
     // ---- phase82: settings-dialog "界面" tab <-> live widgets -----------
     // The right-rail registry is keyed by the SAME stable panel-id strings
     // (tokens::kPanelId*) the settings dialog writes; built after the tabs

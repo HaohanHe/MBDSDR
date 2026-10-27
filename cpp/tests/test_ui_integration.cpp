@@ -131,6 +131,15 @@ private slots:
     // 对话框从此同一词汇；漏标/错标（含未来新增 tab 忘打标）在此钉死，
     // 不依赖 tab 顺序。
     void rightTabPanelIdsCoverCanonicalSet();
+    // 活动布局 A2 "排"：右栏页签可拖动重排，顺序经真实 saveUiState() 落盘、
+    // 下次启动按同一顺序恢复（身份是规范面板 id，分组标题以 '#'+标题 同行）。
+    void rightTabReorderPersistsRoundTrip();
+    // 活动布局 A2 "排"：持久化顺序里出现过期/未知 id 时只按认识的排，绝不
+    // 凭空造页签——页签集合与数量必须一字不差。
+    void rightTabOrderStaleEntriesIgnored();
+    // 活动布局 A2 "排"：当前页绝不能停在分组标题页（其 page 是空 QWidget，
+    // 表现就是"右栏一片空白"）。覆盖两条路径：旧的位置索引 / 指到标题的 id。
+    void rightTabCurrentNeverLandsOnGroupHeader();
     // P1-4 持久化：值守录制开关经真实 saveUiState() 落盘、下次启动恢复；
     // 恢复侧屏蔽 checkbox 信号、显式 dispatch 引擎并联动 watchForm_。窗口 1
     // 先把触发门限打到量程最大再武装，保证测试零副作用。
@@ -993,6 +1002,157 @@ void TestUiIntegration::rightTabPanelIdsCoverCanonicalSet() {
     seen.sort();
     canon.sort();
     QCOMPARE(seen, canon);
+}
+
+// 活动布局 A2 "排" 测试辅助：读出右栏当前顺序（规范面板 id；分组标题以
+// '#'+标题 同行），与落盘词汇一致。
+static QStringList rightTabLiveOrder(QTabWidget* tabs) {
+    QStringList out;
+    for (int i = 0; i < tabs->count(); ++i) {
+        const QString id = tabs->isTabEnabled(i)
+            ? tabs->widget(i)->property(tokens::kPanelIdProp).toString()
+            : QString();
+        out << (id.isEmpty() ? QChar(tokens::kTabOrderHeaderPrefix)
+                                   + tabs->tabText(i)
+                             : id);
+    }
+    return out;
+}
+
+// 清空本批用过的三个布局键，避免污染后续用例（每个用例自带清理）。
+static void clearRightTabLayoutKeys() {
+    mbdsdr::core::AppSettings s;
+    s.remove(tokens::kSettingsKeyRightTabOrder);
+    s.remove(tokens::kSettingsKeyRightTabCurrent);
+    s.remove("ui/rightTabIndex");
+    s.sync();
+}
+
+// 活动布局 A2 "排"：拖得动 + 顺序落盘 + 下次启动按同一顺序回来。
+// 身份是规范面板 id（含 '#'+标题 的分组标题），不是译文 tabText。
+void TestUiIntegration::rightTabReorderPersistsRoundTrip() {
+    clearRightTabLayoutKeys();
+    QStringList expected;
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+        QVERIFY(tabs);
+        QVERIFY2(tabs->tabBar()->isMovable(),
+                 "右栏页签必须可拖动重排（活动布局 A2「排」）");
+        int from = -1;
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (tabs->isTabEnabled(i)
+                && tabs->widget(i)->property(tokens::kPanelIdProp).toString()
+                       == QString::fromUtf8(tokens::kPanelIdVna))
+                from = i;
+        }
+        QVERIFY2(from > 1, "VNA 面板页签应存在且原本不在最前");
+        const int countBefore = tabs->count();
+        tabs->tabBar()->moveTab(from, 1);   // 拖到「解码」分组标题之后的第一位
+        QApplication::processEvents();
+        QCOMPARE(tabs->count(), countBefore);   // 重排只换位置，不增删页签
+        expected = rightTabLiveOrder(tabs);
+        QCOMPARE(expected.value(1), QString::fromUtf8(tokens::kPanelIdVna));
+    }
+    {
+        mbdsdr::core::AppSettings s;
+        QCOMPARE(s.value(tokens::kSettingsKeyRightTabOrder).toStringList(), expected);
+    }
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+        QVERIFY(tabs);
+        QCOMPARE(rightTabLiveOrder(tabs), expected);
+    }
+    clearRightTabLayoutKeys();
+}
+
+// 活动布局 A2 "排"：持久化顺序里出现过期/未知 id（含不存在的分组标题）时，
+// 只按认识的排——绝不凭空造页签，页签集合与数量必须一字不差。
+void TestUiIntegration::rightTabOrderStaleEntriesIgnored() {
+    clearRightTabLayoutKeys();
+    {
+        mbdsdr::core::AppSettings s;
+        s.setValue(tokens::kSettingsKeyRightTabOrder,
+                   QStringList{QString::fromUtf8(tokens::kPanelIdVna),
+                               QChar(tokens::kTabOrderHeaderPrefix)
+                                   + QString::fromUtf8("不存在的分组"),
+                               QString::fromUtf8("ghost-panel-9000"),
+                               QString::fromUtf8(tokens::kPanelIdCw)});
+        s.sync();
+    }
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+        QVERIFY(tabs);
+        const QStringList order = rightTabLiveOrder(tabs);
+        QCOMPARE(order.size(), tabs->count());
+        QCOMPARE(order.value(0), QString::fromUtf8(tokens::kPanelIdVna));
+        QCOMPARE(order.value(1), QString::fromUtf8(tokens::kPanelIdCw));
+        // 一个不少：canonical 全集仍在（未知条目被跳过，未被填充为幻影）。
+        QStringList ids;
+        for (const QString& e : order)
+            if (!e.startsWith(QChar(tokens::kTabOrderHeaderPrefix))) ids << e;
+        ids.sort();
+        QStringList canon;
+        for (int i = 0; i < tokens::kRightPanelCount; ++i)
+            canon << QString::fromUtf8(tokens::kRightPanelIds[i]);
+        canon.sort();
+        QCOMPARE(ids, canon);
+    }
+    clearRightTabLayoutKeys();
+}
+
+// 活动布局 A2 "排"：当前页绝不能停在分组标题页——它的 page 是空 QWidget，
+// 表现就是"右栏一片空白"（截图实证）。两条路径都要挡住。
+void TestUiIntegration::rightTabCurrentNeverLandsOnGroupHeader() {
+    auto assertOnRealPanel = [](QTabWidget* tabs) {
+        const int cur = tabs->currentIndex();
+        QVERIFY2(tabs->isTabEnabled(cur),
+                 qPrintable(QString("当前页不能停在分组标题（#%1 %2）")
+                                .arg(cur).arg(tabs->tabText(cur))));
+        QVERIFY2(!tabs->currentWidget()
+                      ->property(tokens::kPanelIdProp).toString().isEmpty(),
+                 "当前页必须是带规范面板 id 的真实面板（空标题页 = 空白右栏）");
+    };
+    // 路径一：A2 之前的位置索引指向 0（分组标题「解码」），且无 current-id 键。
+    {
+        mbdsdr::core::AppSettings s;
+        s.remove(tokens::kSettingsKeyRightTabOrder);
+        s.remove(tokens::kSettingsKeyRightTabCurrent);
+        s.setValue("ui/rightTabIndex", 0);
+        s.sync();
+    }
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+        QVERIFY(tabs);
+        assertOnRealPanel(tabs);
+    }
+    // 路径二：current-id 直接指到分组标题本身。
+    {
+        mbdsdr::core::AppSettings s;
+        s.setValue(tokens::kSettingsKeyRightTabCurrent,
+                   QChar(tokens::kTabOrderHeaderPrefix) + QString::fromUtf8("解码"));
+        s.sync();
+    }
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+        QVERIFY(tabs);
+        assertOnRealPanel(tabs);
+    }
+    clearRightTabLayoutKeys();
 }
 
 // P1-4 持久化：值守录制开关经真实 saveUiState() 落盘、下次启动恢复；恢复

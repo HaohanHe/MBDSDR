@@ -992,6 +992,20 @@ inline constexpr const char* kSettingsKeyHiddenLeftPanels  = "ui/hiddenLeftGroup
 // kLeftPanelIds. Absent key = everything expanded (honest default); deleting
 // the key is the one-step "unfold everything" reset.
 inline constexpr const char* kSettingsKeyCollapsedGroups   = "ui/collapsedGroups";
+// 活动布局 A2 "排": the right-rail tab order the user dragged into place.
+// QStringList of canonical panel ids; the non-switchable group-header tabs
+// ride along with a leading '#' + their title so a round-trip keeps the
+// section labels exactly where the user left them. Stale/unknown ids are
+// skipped on restore (never fabricated into a phantom tab) and any real tab
+// missing from the list keeps its built-in position at the tail -- so adding
+// a panel in a future version never destroys the user's order.
+inline constexpr const char* kSettingsKeyRightTabOrder   = "ui/rightTabOrder";
+// 活动布局 A2 "排": WHICH panel is current, by canonical id. The positional
+// "ui/rightTabIndex" went stale the moment tabs became reorderable, so the id
+// is authoritative and the old positional key stays as a one-version fallback.
+inline constexpr const char* kSettingsKeyRightTabCurrent = "ui/rightTabCurrent";
+// Marker prefix distinguishing a group-header entry from a panel id above.
+inline constexpr char kTabOrderHeaderPrefix = '#';
 
 // =====================================================================
 // Settings-dialog "显示参数" panel (phase82): the three independent sliders

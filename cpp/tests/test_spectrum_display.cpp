@@ -257,7 +257,12 @@ void TestSpectrumDisplay::realFrameDrivesHistory() {
     // (proving the history reflects the latest frame, not a stale image).
     const QRgb row0_col64 = w.history().pixel(64, 0);
     const int lumCol64 = qRed(row0_col64) + qGreen(row0_col64) + qBlue(row0_col64);
-    QVERIFY2(lumCol64 < 50, "top row at the old peak column should be dark now");
+    QVERIFY2(lumCol64 < 50,
+             qPrintable(QString("top row at the old peak column should be dark now"
+                                " (lum=%1 rgb=%2,%3,%4)")
+                            .arg(lumCol64)
+                            .arg(qRed(row0_col64)).arg(qGreen(row0_col64))
+                            .arg(qBlue(row0_col64))));
 }
 
 void TestSpectrumDisplay::zoomAndPanStayAligned() {
