@@ -148,6 +148,16 @@ class FrequencyOutOfRangeError(SDRUserError):
         return "请把频率调到设备覆盖范围内（一般 RTL-SDR 为 24 MHz–1.7 GHz）。"
 
 
+class InvalidArgumentError(SDRUserError):
+    """入参不合法（非有限数值、越界等）——用户可修正的参数错误。
+
+    与内部故障区分开：这类错误应报 ``invalid_argument``，让调用方知道
+    改参数就行，而不是让人以为系统崩了。
+    """
+
+    code = "invalid_argument"
+
+
 class ExportPathOutOfRootError(SDRUserError):
     """导出路径越出允许根（路径遍历防护）。
 

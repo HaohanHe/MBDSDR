@@ -33,7 +33,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .controller import SDRController
-from .errors import ExportPathOutOfRootError, SDRUserError
+from .errors import (ExportPathOutOfRootError, InvalidArgumentError,
+                     SDRUserError)
 from ..questions import QuestionError, QuestionStore
 from ..hooks import Event, EventType, HookManager
 from ..hook_commands import HookCommandRunner
@@ -57,6 +58,36 @@ def np_from_pairs(pairs):
     import numpy as np
     return np.array([complex(float(r), float(i)) for r, i in pairs],
                     dtype=np.complex128)
+
+
+def _validate_args_finite(args: Any, _path: str = "") -> None:
+    """递归校验入参中的数值必须有限（非 NaN / 非 ±Inf）。
+
+    P1「Python schema 无边界」：_NUM / _INT / _ARR 只声明 type，没有任何
+    数值约束。NaN/±Inf 一旦进入谱线或解调运算，会**静默污染整条 DSP 链**
+    —— 结果全变 NaN 且往往不报错，属"畸形入参 → 静默错误"这一类红线问题
+    （对照 phase68「畸形入参 CRASH」收敛口径）。
+
+    在进 handler 之前统一拦下；这是用户可修正的参数错误，报
+    ``invalid_argument``。**绝不静默把 NaN 替换成 0** —— 那才是造假。
+    """
+    import math
+
+    if isinstance(args, dict):
+        for k, v in args.items():
+            _validate_args_finite(v, f"{_path}.{k}" if _path else str(k))
+    elif isinstance(args, (list, tuple)):
+        for i, v in enumerate(args):
+            _validate_args_finite(v, f"{_path}[{i}]")
+    elif isinstance(args, bool):
+        return
+    elif isinstance(args, (int, float)):
+        if math.isnan(args) or math.isinf(args):
+            raise InvalidArgumentError(
+                message=f"参数 {_path or '(根)'} 不是有限数值（收到 {args}）。",
+                suggestion="请改为有限数值。NaN/±Inf 会静默污染整条信号处理链，"
+                           "本仓库选择拒绝接受，而不是替你替换成 0。",
+                technical_detail=f"{_path}={args}")
 
 
 def _schema(props: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -1583,6 +1614,7 @@ class MCPToolSet:
                 if approve_session:
                     self._session_approvals.add(key)
         try:
+            _validate_args_finite(args)
             result = tool["handler"](self.controller, args)
         except SDRUserError as e:
             out = e.to_dict()
