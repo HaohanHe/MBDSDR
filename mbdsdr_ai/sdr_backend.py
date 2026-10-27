@@ -1129,8 +1129,96 @@ class RTLSDRBackend(SDRBackend):
             logger.warning("pyrtlsdr 未安装，无法枚举 RTL-SDR 设备: %s", e)
             return []
         except Exception as e:
-            logger.warning("枚举 RTL-SDR 设备失败: %s", e)
+            # pyrtlsdr 可能在 import 期就炸（本机实测：librtlsdr.dll 未导出
+            # rtlsdr_set_dithering，pyrtlsdr 的 librtlsdr.py:147 无条件解析该符号
+            # → AttributeError，整个包不可用）。这既不是"未安装"也不是"无设备"，
+            # 不能和空设备混为一谈：用仓库自有 ctypes 绑定再试一次。
+            logger.warning("pyrtlsdr 不可用（%s），回退仓库自有 ctypes 枚举", e)
+            return RTLSDRBackend._enumerate_via_ctypes()
+
+    @staticmethod
+    def _enumerate_via_ctypes() -> list:
+        """pyrtlsdr 不可用时的回退枚举：只调用确实存在的 C API 符号。
+
+        背景（本机真机实测，非推测）：pyrtlsdr 的 ``librtlsdr.py:147`` 在 import
+        期无条件解析 ``rtlsdr_set_dithering``；本机所有可用 librtlsdr.dll 构建
+        （``C:\\rtl-sdr\\bin``、源码自编版、rtl-sdr-64bit-20260920 发行版）均
+        未导出该符号，导致 ``import rtlsdr`` 直接抛 AttributeError，pyrtlsdr
+        整个包不可用。此时若沿用旧逻辑直接返回 ``[]``，会把"棒子插着且
+        rtl_test 能认出来"误报成"本机无设备"——属实锤的功能缺口。
+
+        本方法用仓库自有 ctypes 绑定绕开该符号，只依赖确实存在的接口：
+        ``rtlsdr_get_device_count`` / ``rtlsdr_get_device_usb_strings`` /
+        ``rtlsdr_open`` / ``rtlsdr_get_tuner_type`` / ``rtlsdr_close``。
+
+        诚实纪律：拿不到库、读不到设备、探测失败一律如实返回空或 Unknown，
+        绝不伪造条目，也绝不把"枚举失败"粉饰成"无信号"。
+        """
+        import ctypes
+
+        # 先让 os.add_dll_directory 生效（Py3.8+ 不再从 PATH 搜 DLL）
+        try:
+            from .windows_setup import setup_rtlsdr_windows
+            setup_rtlsdr_windows(import_test=False)
+        except Exception:
+            pass
+
+        lib = None
+        for name in ("rtlsdr.dll", "librtlsdr.dll"):
+            try:
+                lib = ctypes.CDLL(name)
+                break
+            except OSError:
+                continue
+        if lib is None:
+            logger.warning("未找到 rtlsdr.dll/librtlsdr.dll，无法回退枚举")
             return []
+
+        try:
+            lib.rtlsdr_get_device_count.restype = ctypes.c_uint32
+            count = int(lib.rtlsdr_get_device_count())
+        except Exception as e:
+            logger.warning("回退枚举：读取设备数失败: %s", e)
+            return []
+        if count <= 0:
+            # 真的没有设备——这是诚实的空态，不是失败
+            return []
+
+        try:
+            lib.rtlsdr_get_device_usb_strings.argtypes = [
+                ctypes.c_uint32, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+            lib.rtlsdr_get_device_usb_strings.restype = ctypes.c_int
+        except Exception:
+            pass
+
+        out = []
+        for i in range(count):
+            serial = ""
+            try:
+                manufact = ctypes.create_string_buffer(256)
+                product = ctypes.create_string_buffer(256)
+                serial_buf = ctypes.create_string_buffer(256)
+                if lib.rtlsdr_get_device_usb_strings(
+                        i, manufact, product, serial_buf) == 0:
+                    serial = serial_buf.value.decode("ascii", "replace").strip()
+            except Exception:
+                serial = ""
+
+            # 开设备读真实调谐器型号（FC0012 等）；打不开就如实 Unknown
+            tuner = "Unknown"
+            try:
+                dev = ctypes.c_void_p()
+                if int(lib.rtlsdr_open(ctypes.byref(dev), int(i))) == 0:
+                    try:
+                        tuner = RTLSDRBackend._TUNER_NAMES.get(
+                            int(lib.rtlsdr_get_tuner_type(dev)), "Unknown")
+                    finally:
+                        lib.rtlsdr_close(dev)
+            except Exception:
+                tuner = "Unknown"
+
+            out.append({"index": i, "serial": serial, "tuner": tuner})
+        return out
 
     def connect(self) -> bool:
         try:
@@ -1148,7 +1236,19 @@ class RTLSDRBackend(SDRBackend):
                     setup_rtlsdr_windows(import_test=False)
                 except Exception:
                     pass
-                from rtlsdr import RtlSdr
+                try:
+                    from rtlsdr import RtlSdr
+                except Exception as e:
+                    # 本机实测（非推测）：librtlsdr.dll 未导出 rtlsdr_set_dithering，
+                    # pyrtlsdr 的 librtlsdr.py:147 在 import 期即失败，本地 USB 直连
+                    # 这条路径在本机不可用。必须如实告知并指明可用的替代路径，
+                    # 不能把裸 AttributeError 甩给用户当"连接失败"。
+                    raise RuntimeError(
+                        "本地 USB 直连不可用：pyrtlsdr 无法导入（%s）。"
+                        "本机 librtlsdr.dll 缺少 rtlsdr_set_dithering 符号，"
+                        "pyrtlsdr 整个包不可用；请改用仓库自研的 rtl_tcp 路径——"
+                        "先启动 rtl_tcp 服务，再设 MBDSDR_RTL_TCP=127.0.0.1:1234 重连。"
+                        % e) from e
                 self._sdr = RtlSdr(self._device_index)
             # 调谐器型号：本地 USB 走 ctypes 句柄探测（AIO 类无 tuner_type）；
             # rtl_tcp 网络模式用握手包带回的 tuner_type（rtl_tcp.c:623），
