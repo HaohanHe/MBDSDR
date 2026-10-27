@@ -126,6 +126,15 @@ private slots:
     // saveUiState() 落盘、下次启动恢复。gated 的恢复屏蔽 checkbox 信号、把恢复
     // 状态显式 dispatch 进引擎——断言引擎状态，而不只是控件。
     void netAudioAndGatedPersistAndRestoreRoundTrip();
+    // P1-5 身份归真：右栏每个真实 tab 的 page 必须携带规范面板 id
+    // （kPanelIdProp），集合与 kRightPanelIds 全集相等——存取两侧与设置
+    // 对话框从此同一词汇；漏标/错标（含未来新增 tab 忘打标）在此钉死，
+    // 不依赖 tab 顺序。
+    void rightTabPanelIdsCoverCanonicalSet();
+    // P1-4 持久化：值守录制开关经真实 saveUiState() 落盘、下次启动恢复；
+    // 恢复侧屏蔽 checkbox 信号、显式 dispatch 引擎并联动 watchForm_。窗口 1
+    // 先把触发门限打到量程最大再武装，保证测试零副作用。
+    void watchEnabledPersistsAndRestoresRoundTrip();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -856,13 +865,16 @@ void TestUiIntegration::rightTabCloseHidesTabKeepsIndexStable() {
 
     auto* tabs = win.findChild<QTabWidget*>("rightTabs");
     QVERIFY(tabs);
-    // Pick a real (enabled) panel tab that sits between others, e.g. 数据.
+    // Pick a real (enabled) panel tab that sits between others, e.g. 数据 --
+    // identified by its canonical panel id, not the translated tab text.
     int idx = -1;
     for (int i = 0; i < tabs->count(); ++i) {
-        if (tabs->tabText(i) == QString::fromUtf8("数据") && tabs->isTabEnabled(i))
+        if (tabs->isTabEnabled(i)
+            && tabs->widget(i)->property(tokens::kPanelIdProp).toString()
+                   == QString::fromUtf8(tokens::kPanelIdData))
             idx = i;
     }
-    QVERIFY2(idx > 0, "the 数据 panel tab must exist and be switchable");
+    QVERIFY2(idx > 0, "the 数据 panel tab (kPanelIdData) must exist and be switchable");
     QWidget* page = tabs->widget(idx);
     QWidget* leftNeighbor = tabs->widget(idx - 1);
     QWidget* rightNeighbor = tabs->widget(idx + 1);
@@ -895,7 +907,7 @@ void TestUiIntegration::rightTabCloseHidesTabKeepsIndexStable() {
 void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
     {
         mbdsdr::core::AppSettings s;
-        s.remove("ui/hiddenRightTabs");
+        s.remove(tokens::kSettingsKeyHiddenRightPanels);
         s.sync();
     }
     // First window: close the 数据 tab. The destructor flushes saveUiState()
@@ -909,7 +921,9 @@ void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
         QVERIFY(tabs);
         int idx = -1;
         for (int i = 0; i < tabs->count(); ++i) {
-            if (tabs->tabText(i) == QString::fromUtf8("数据") && tabs->isTabEnabled(i))
+            if (tabs->isTabEnabled(i)
+                && tabs->widget(i)->property(tokens::kPanelIdProp).toString()
+                       == QString::fromUtf8(tokens::kPanelIdData))
                 idx = i;
         }
         QVERIFY(idx > 0);
@@ -919,12 +933,14 @@ void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
         QApplication::processEvents();
         QVERIFY(!tabs->isTabVisible(idx));
     }
-    // The flush must have recorded the closed tab by text.
+    // The flush must have recorded the closed tab by canonical panel id (the
+    // same ids the settings dialog writes -- one vocabulary, not two).
     {
         mbdsdr::core::AppSettings s;
-        const QStringList hidden = s.value("ui/hiddenRightTabs").toStringList();
-        QVERIFY2(hidden.contains(QString::fromUtf8("数据")),
-                 qPrintable(QString("ui/hiddenRightTabs must record 数据, got: %1")
+        const QStringList hidden =
+            s.value(tokens::kSettingsKeyHiddenRightPanels).toStringList();
+        QVERIFY2(hidden.contains(QString::fromUtf8(tokens::kPanelIdData)),
+                 qPrintable(QString("hiddenRightTabs must record the panel id, got: %1")
                                 .arg(hidden.join(", "))));
     }
     // Second window: the same tab must start out hidden (restored from QSettings).
@@ -936,7 +952,9 @@ void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
         QVERIFY(tabs);
         int idx = -1;
         for (int i = 0; i < tabs->count(); ++i) {
-            if (tabs->tabText(i) == QString::fromUtf8("数据") && tabs->isTabEnabled(i))
+            if (tabs->isTabEnabled(i)
+                && tabs->widget(i)->property(tokens::kPanelIdProp).toString()
+                       == QString::fromUtf8(tokens::kPanelIdData))
                 idx = i;
         }
         QVERIFY(idx > 0);
@@ -944,6 +962,94 @@ void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
                  "restored window must keep the persisted-hidden tab hidden");
         win.showAllRightTabs();   // leaves an empty list for the next suite
         QApplication::processEvents();
+    }
+}
+
+// P1-5 身份归真：右栏每个真实 tab 的 page 必须携带规范面板 id
+// （kPanelIdProp property），且集合与 kRightPanelIds 全集相等——存取两侧
+// 与设置对话框从此同一词汇；漏标/错标（含未来新增 tab 忘打标）在此钉死，
+// 不依赖 tab 顺序。
+void TestUiIntegration::rightTabPanelIdsCoverCanonicalSet() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+    QVERIFY(tabs);
+    QStringList seen;
+    for (int i = 0; i < tabs->count(); ++i) {
+        if (!tabs->isTabEnabled(i))
+            continue;  // group headers deliberately carry no id
+        const QString id =
+            tabs->widget(i)->property(tokens::kPanelIdProp).toString();
+        QVERIFY2(!id.isEmpty(),
+                 qPrintable(QString("enabled tab #%1 (%2) must carry %3")
+                                .arg(i).arg(tabs->tabText(i),
+                                            QString::fromUtf8(tokens::kPanelIdProp))));
+        seen << id;
+    }
+    QStringList canon;
+    for (int i = 0; i < tokens::kRightPanelCount; ++i)
+        canon << QString::fromUtf8(tokens::kRightPanelIds[i]);
+    seen.sort();
+    canon.sort();
+    QCOMPARE(seen, canon);
+}
+
+// P1-4 持久化：值守录制开关经真实 saveUiState() 落盘、下次启动恢复；恢复
+// 侧屏蔽 checkbox 信号、把恢复状态显式 dispatch 进引擎并联动 watchForm_
+// （watchForm_ 初始 disabled——armed 恢复必须重新启用，否则参数区灰着、
+// 引擎却武装着）。窗口 1 先把触发门限打到量程最大再武装：armed 只在
+// RSSI>门限时才真落盘，最大门限保证测试零副作用。两个真实窗口共享
+// 重定向的 QSettings；无 mock、无手工种子键。
+void TestUiIntegration::watchEnabledPersistsAndRestoresRoundTrip() {
+    clearVfoSettings();
+    {
+        mbdsdr::core::AppSettings s;
+        s.remove(tokens::kSettingsKeyWatchEnabled);
+        s.sync();
+    }
+    // Window 1: max out the trigger threshold FIRST, then arm via the real
+    // checkbox (its stateChanged lambda dispatches to the engine live).
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* chk = win.findChild<QCheckBox*>("watchCheck");
+        auto* thr = win.findChild<QSlider*>("watchThrSlider");
+        QVERIFY(eng && chk && thr);
+        thr->setValue(thr->maximum());
+        chk->setChecked(true);
+        QApplication::processEvents();
+        QTRY_VERIFY_WITH_TIMEOUT(eng->watchEnabled(), 2000);
+        // The dependent param form must be live while armed (lambda side).
+        auto* form = win.findChild<QWidget*>("watchForm");
+        QVERIFY(form);
+        QVERIFY(form->isEnabled());
+        // Let the 500 ms debounced save timer arm; the destructor then flushes
+        // saveUiState() to disk (same path the app uses on exit).
+        QTest::qWait(700);
+    }
+    // Fresh QSettings on disk (window 1 already destroyed + flushed).
+    {
+        mbdsdr::core::AppSettings s;
+        s.sync();
+        QCOMPARE(s.value(tokens::kSettingsKeyWatchEnabled).toBool(), true);
+    }
+    // Window 2: a fresh launch must restore the armed state explicitly
+    // (checkbox signals are blocked mid-restore, so the lambda never fires).
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* chk = win.findChild<QCheckBox*>("watchCheck");
+        QVERIFY(eng && chk);
+        QCOMPARE(chk->isChecked(), true);
+        QTRY_VERIFY_WITH_TIMEOUT(eng->watchEnabled(), 2000);
+        auto* form = win.findChild<QWidget*>("watchForm");
+        QVERIFY(form);
+        QVERIFY(form->isEnabled());
     }
 }
 

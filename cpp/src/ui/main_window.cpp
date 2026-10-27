@@ -1146,12 +1146,14 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ---- Unattended signal-triggered watch recording ----
     watchCheck_ = new QCheckBox("值守录制（信号触发）", gRec);
+    watchCheck_->setObjectName("watchCheck");
     watchCheck_->setToolTip(
         "持续监听 RSSI，仅当真实信号超过触发门限时才开始录制（带前滚）；"
         "信号消失并经过结束延时后自动停止并落盘，每段一个文件");
     gRecLay->addWidget(watchCheck_);
 
     watchForm_ = new QWidget(gRec);
+    watchForm_->setObjectName("watchForm");
     auto* watchLay = new QVBoxLayout(watchForm_);
     watchLay->setContentsMargins(0, 0, 0, 0);
     auto* watchFormLay = new QFormLayout;
@@ -1161,6 +1163,7 @@ MainWindow::MainWindow(QWidget* parent)
     watchThrSlider_ = new QSlider(Qt::Horizontal, thrRowW);
     watchThrSlider_->setRange(-100, -20);
     watchThrSlider_->setValue(-50);
+    watchThrSlider_->setObjectName("watchThrSlider");
     watchThrValue_ = new QLabel("-50 dB", thrRowW);
     thrLay->addWidget(watchThrSlider_);
     thrLay->addWidget(watchThrValue_);
@@ -1440,6 +1443,8 @@ MainWindow::MainWindow(QWidget* parent)
     cwLay->addWidget(cwText_);
     addTabGroupHeader(QString::fromUtf8("解码"));
     rightTabs_->addTab(cwPage, "CW");
+    rightTabs_->widget(rightTabs_->count() - 1)
+        ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdCw));
 
     auto* adsbPage = new QWidget;
     auto* adsbLay = new QVBoxLayout(adsbPage);
@@ -1453,6 +1458,8 @@ MainWindow::MainWindow(QWidget* parent)
     adsbTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
+    rightTabs_->widget(rightTabs_->count() - 1)
+        ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdAdsb));
 
     // ---- FT8 decoded-message history table (WSJT-X style rolling window) ----
     // Fed ONLY by engine->ft8History() (real decoded frames). Columns:
@@ -1482,6 +1489,8 @@ MainWindow::MainWindow(QWidget* parent)
         ft8HistoryTable_->setAlternatingRowColors(true);
         ft8Lay->addWidget(ft8HistoryTable_);
         rightTabs_->addTab(ft8Page, "FT8");
+        rightTabs_->widget(rightTabs_->count() - 1)
+            ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdFt8));
     }
 
     // ---- POCSAG pager panel (right rail; fed by engine pocsagMessagesChanged) --
@@ -1495,6 +1504,8 @@ MainWindow::MainWindow(QWidget* parent)
         pocsagPanel_ = new ui::PocsagPanel(pocsagPage);
         pocsagLay->addWidget(pocsagPanel_);
         rightTabs_->addTab(pocsagPage, tr("寻呼"));
+        rightTabs_->widget(rightTabs_->count() - 1)
+            ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdPocsag));
     }
 
     // ---- Data-message panel (ACARS + NAVTEX; fed by engine list signals) ----
@@ -1508,6 +1519,8 @@ MainWindow::MainWindow(QWidget* parent)
         dataTextPanel_ = new ui::DataTextPanel(dataPage);
         dataLay->addWidget(dataTextPanel_);
         rightTabs_->addTab(dataPage, tr("数据"));
+        rightTabs_->widget(rightTabs_->count() - 1)
+            ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdData));
     }
 
     // ---- m17 digital-call panel (fed by engine m17CallsChanged) --------------
@@ -1519,6 +1532,8 @@ MainWindow::MainWindow(QWidget* parent)
         m17Panel_ = new ui::M17Panel(m17Page);
         m17Lay->addWidget(m17Panel_);
         rightTabs_->addTab(m17Page, "m17");
+        rightTabs_->widget(rightTabs_->count() - 1)
+            ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdM17));
     }
 
     // ---- VOR radial instrument panel (fed by engine vorRadialChanged) --------
@@ -1530,6 +1545,8 @@ MainWindow::MainWindow(QWidget* parent)
         vorPanel_ = new ui::VorPanel(vorPage);
         vorLay->addWidget(vorPanel_);
         rightTabs_->addTab(vorPage, "VOR");
+        rightTabs_->widget(rightTabs_->count() - 1)
+            ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdVor));
     }
 
     // 1 s TTL-prune tick: expires silent aircraft and refreshes the table/map.
@@ -1603,6 +1620,8 @@ MainWindow::MainWindow(QWidget* parent)
 
         addTabGroupHeader(QString::fromUtf8("观测"));
         rightTabs_->addTab(cstPage, tr("星座"));
+        rightTabs_->widget(rightTabs_->count() - 1)
+            ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdConstel));
     }
 
     // Sky tab: polar view on top, TLE freshness badge, pass list below.
@@ -1772,6 +1791,8 @@ MainWindow::MainWindow(QWidget* parent)
     passTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     skyLay->addWidget(passTable_, 1);
     rightTabs_->addTab(skyPage, tr("天空"));
+    rightTabs_->widget(rightTabs_->count() - 1)
+        ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdSky));
 
     // ---- Bookmarks / Scanner tab (SDR++-style "扫描/书签" panel) ----
     bookmarkManager_ = new ui::BookmarkManager();
@@ -2257,6 +2278,8 @@ MainWindow::MainWindow(QWidget* parent)
     updateScanStatus();
 
     rightTabs_->addTab(bmPage, tr("扫描/书签"));
+    rightTabs_->widget(rightTabs_->count() - 1)
+        ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdScanBm));
 
     // ===== 录制库 tab: scan the REAL recording directory (rec/dir) =====
     // Lists actual .wav captures + their sidecar .json proof. The directory is
@@ -2357,6 +2380,8 @@ MainWindow::MainWindow(QWidget* parent)
 
         addTabGroupHeader(QString::fromUtf8("系统"));
         rightTabs_->addTab(recPage, tr("录制库"));
+        rightTabs_->widget(rightTabs_->count() - 1)
+            ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdRecLib));
 
         connect(recLibRefreshBtn_, &QPushButton::clicked,
                 this, [this]{ refreshRecLib(); });
@@ -2631,14 +2656,20 @@ MainWindow::MainWindow(QWidget* parent)
             : QString::fromUtf8("未配置模型：对话/LLM 规划不可用，可使用下方确定性自主任务模板"));
     }
     rightTabs_->addTab(aiPage, tr("AI 助手"));
+    rightTabs_->widget(rightTabs_->count() - 1)
+        ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdAi));
 
     // Radio / transmit panel: serial CAT, CW, AX.25/KISS, SoapySDR TX.
     rightTabs_->addTab(new ui::RadioPanel(rightCard), tr("电台"));
+    rightTabs_->widget(rightTabs_->count() - 1)
+        ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdRadio));
 
     // Instrument: external NanoVNA (H/H4) over USB CDC serial. Honest empty
     // state when no device; shares engine_->vnaClient() with the MCP tools.
     auto* vnaPanel = new ui::VnaPanel(engine_, rightCard);
     rightTabs_->addTab(vnaPanel, "VNA");
+    rightTabs_->widget(rightTabs_->count() - 1)
+        ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdVna));
     // Promote the VNA main display (Smith + VSWR/S21) into the center tab so it
     // renders large/readable; the right panel keeps controls + readouts.
     if (QWidget* mv = vnaPanel->mainView()) {
@@ -5017,7 +5048,7 @@ void MainWindow::saveUiState() {
     s.setValue("rec/ignoreSquelch", recIgnoreSqlChk_->isChecked());
     s.setValue("rec/dir", recDirEdit_->text());
     s.setValue(tokens::kSettingsKeyGatedRecording, gatedCheck_->isChecked());
-    s.setValue("watch/enabled", watchCheck_->isChecked());
+    s.setValue(tokens::kSettingsKeyWatchEnabled, watchCheck_->isChecked());
     s.setValue("watch/threshold", static_cast<float>(watchThrSlider_->value()));
     s.setValue("watch/prerollMs", watchPrerollSpin_->value() * 1000.0);
     s.setValue("watch/hangMs", watchHangSpin_->value() * 1000.0);
@@ -5026,16 +5057,25 @@ void MainWindow::saveUiState() {
 
     // ---- Layout / tabs / FFT ----
     s.setValue("ui/rightTabIndex", rightTabs_->currentIndex());
-    // Phase63: which right-rail panel tabs the user closed (by text -- the tab
-    // order never changes at runtime, but text survives layout drift between
-    // versions). Disabled group-header tabs are never hidden, so they are out.
+    // Phase63: which right-rail panel tabs the user closed. Identity is the
+    // canonical panel id tagged on each page (kPanelIdProp) -- the SAME ids
+    // the settings dialog writes, never the translated tab text (which broke
+    // the dialog/quick-close pairing under en/ja). Disabled group-header tabs
+    // are never hidden, so they are out; an untagged page (must not happen --
+    // pinned by rightTabPanelIdsCoverCanonicalSet) is skipped rather than
+    // recorded as an empty id.
     // phase82: this is the SAME key the settings dialog's 界面 tab writes, so
     // the X-button path and the dialog are one state, not two.
     {
         QStringList hidden;
-        for (int i = 0; i < rightTabs_->count(); ++i)
-            if (rightTabs_->isTabEnabled(i) && !rightTabs_->isTabVisible(i))
-                hidden << rightTabs_->tabText(i);
+        for (int i = 0; i < rightTabs_->count(); ++i) {
+            if (!rightTabs_->isTabEnabled(i) || rightTabs_->isTabVisible(i))
+                continue;
+            const QString id =
+                rightTabs_->widget(i)->property(tokens::kPanelIdProp).toString();
+            if (!id.isEmpty())
+                hidden << id;
+        }
         s.setValue(tokens::kSettingsKeyHiddenRightPanels, hidden);
     }
     // phase82: left-rail groups the user hid via the settings dialog.
@@ -5524,7 +5564,20 @@ void MainWindow::restoreUiState() {
         s.value("watch/prerollMs", 400.0).toDouble() / 1000.0);
     watchHangSpin_->setValue(
         s.value("watch/hangMs", 1500.0).toDouble() / 1000.0);
-    watchCheck_->setChecked(s.value("watch/enabled", false).toBool());
+    // Watch arm: restore with checkbox signals BLOCKED so the stateChanged
+    // lambda's scheduleSave() cannot fire mid-restore (startup must never
+    // re-persist a half-restored state), then dispatch the restored state to
+    // the engine and the dependent param form explicitly -- watchForm_ starts
+    // disabled, so an armed restore must re-enable it or the params stay
+    // greyed out while the engine is armed (gated's same pattern).
+    if (watchCheck_) {
+        const bool watchOn =
+            s.value(tokens::kSettingsKeyWatchEnabled, false).toBool();
+        QSignalBlocker blk(watchCheck_);
+        watchCheck_->setChecked(watchOn);
+        engine_->setWatchEnabled(watchOn);
+        watchForm_->setEnabled(watchOn);
+    }
 
     anrCheck_->setChecked(s.value("anr/enabled", false).toBool());
     anrSlider_->setValue(s.value("anr/strength", 50).toInt());
@@ -5534,13 +5587,20 @@ void MainWindow::restoreUiState() {
     recStereoCheck_->setEnabled(recTargetCombo_->currentIndex() == 1);
 
     // ---- Layout / tabs / FFT ----
-    // Phase63 first: re-apply the user's closed right-rail panel tabs (by text),
-    // so the remembered current index below lands on a page that still exists.
+    // Phase63 first: re-apply the user's closed right-rail panel tabs, so the
+    // remembered current index below lands on a page that still exists.
     // phase82: same key the settings dialog writes; a missing key = all visible.
+    // Identity is the canonical panel id tagged on each page (kPanelIdProp),
+    // NOT the translated tab text: entries that match no id (written under
+    // another UI language, or stale legacy text) are honestly ignored and
+    // every tab stays visible -- renaming a panel must not strand a phantom.
     {
         const QStringList hidden = s.value(tokens::kSettingsKeyHiddenRightPanels).toStringList();
         for (int i = 0; i < rightTabs_->count(); ++i) {
-            if (rightTabs_->isTabEnabled(i) && hidden.contains(rightTabs_->tabText(i)))
+            const QString id =
+                rightTabs_->widget(i)->property(tokens::kPanelIdProp).toString();
+            if (rightTabs_->isTabEnabled(i) && !id.isEmpty()
+                && hidden.contains(id))
                 rightTabs_->setTabVisible(i, false);
         }
     }

@@ -971,6 +971,11 @@ inline constexpr const char* const kRightPanelIds[] = {
 };
 inline constexpr int kRightPanelCount =
     int(sizeof(kRightPanelIds) / sizeof(kRightPanelIds[0]));
+// Dynamic-property name tagging each real right-rail tab's page with its
+// canonical id above. Persistence and tests match on this id -- NEVER on the
+// translated tabText (that silently broke under en/ja); group-header tabs
+// carry no such property and are never hidden.
+inline constexpr const char* kPanelIdProp = "mbdsdPanelId";
 inline constexpr const char* const kLeftPanelIds[] = {
     kPanelIdSrc, kPanelIdDev, kPanelIdSpy, kPanelIdNetAudio, kPanelIdFreq,
     kPanelIdRx, kPanelIdVfo, kPanelIdSql, kPanelIdAnr, kPanelIdAud,
@@ -1011,6 +1016,11 @@ inline constexpr const char* kSettingsKeyNetAudioProto = "net/audioProto";
 // restart does not silently drop the armed state (restore dispatches it to the
 // engine explicitly, with checkbox signals blocked mid-restore).
 inline constexpr const char* kSettingsKeyGatedRecording = "rec/gated";
+// Unattended signal-triggered watch-recording arm (watch/enabled): persisted
+// so a restart does not silently drop the armed state; restore dispatches it
+// to the engine and the dependent param form explicitly, with checkbox
+// signals blocked mid-restore (gated's same pattern).
+inline constexpr const char* kSettingsKeyWatchEnabled = "watch/enabled";
 // Slider granularity: 1 dB steps for the dB axis (matches the spinboxes),
 // 0.1x for zoom (kZoomMin..kZoomMax), 1 dB for the gain (matches gainSlider_).
 inline constexpr int kDbSliderStep  = 1;
