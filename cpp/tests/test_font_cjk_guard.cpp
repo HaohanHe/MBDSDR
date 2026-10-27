@@ -18,6 +18,23 @@
 #include <QFontMetricsF>
 #include <QStringList>
 
+#ifdef Q_OS_WIN
+// Windows 上的 offscreen 平台插件用 QBasicFontDatabase：只扫 QT_QPA_FONTDIR
+// 指定目录（缺省指向 Qt 安装树内不存在的 lib/fonts），不枚举系统字体，
+// families 恒为 0 —— 本守卫在 Windows 裸跑（ctest 基线口径）永远红。
+// Linux CI 走 fontconfig 枚举系统字体，不受影响；此处只在 Windows 自举：
+// 首次使用字体库前把目录指到系统字体库（微软雅黑等 CJK 字体在此），
+// 让守卫在 Windows 上测的是真实字形覆盖，而不是平台插件的目录约定。
+// SystemRoot 缺失时不动 env —— 让原有警告原样暴露，不发明目录。
+#include <QtGlobal>
+static void bootstrapWindowsFontDir() {
+    if (!qEnvironmentVariableIsEmpty("QT_QPA_FONTDIR")) return;   // 尊重显式配置
+    const QByteArray root = qgetenv("SystemRoot");
+    if (!root.isEmpty()) qputenv("QT_QPA_FONTDIR", root + "/Fonts");
+}
+Q_CONSTRUCTOR_FUNCTION(bootstrapWindowsFontDir)
+#endif
+
 class TestFontCjkGuard : public QObject {
     Q_OBJECT
 
