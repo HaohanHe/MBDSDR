@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .controller import SDRController
-from .errors import SDRUserError
+from .errors import ExportPathOutOfRootError, SDRUserError
 from ..questions import QuestionError, QuestionStore
 from ..hooks import Event, EventType, HookManager
 from ..hook_commands import HookCommandRunner
@@ -488,6 +488,49 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         _schema({"n": _INT}, ["n"]),
         lambda c, a: _ndarray_to_json(c.read_audio(int(a["n"]))))
 
+    def _confine_export_path(path: str) -> str:
+        """把导出路径收进允许的目录根，防路径遍历。
+
+        背景（缺口分析报告 P1「导出工具路径遍历」）：三个导出写工具原本
+        直接 ``open(a["path"])``，调用方（含经 MCP 的 AI 操作员）可传
+        ``../../Windows/...`` 或任意绝对路径覆盖任意文件。
+
+        允许根（按序判定）：
+          1) ``MBDSDR_EXPORT_ROOT`` 环境变量（显式授权的目录）
+          2) 当前工作目录
+          3) 系统临时目录（pytest 的 tmp_path 也落在这里，
+             必须放行，否则既有用例会回归）
+
+        诚实纪律：越界一律抛 ValueError 并说清原因与放行办法；
+        **绝不静默改写路径**，也绝不因为"差不多"就放行。
+        """
+        import tempfile
+
+        raw = os.path.abspath(os.path.expanduser(str(path)))
+        roots = []
+        env_root = os.environ.get("MBDSDR_EXPORT_ROOT")
+        if env_root:
+            roots.append(os.path.abspath(env_root))
+        roots.append(os.path.abspath(os.getcwd()))
+        roots.append(os.path.abspath(tempfile.gettempdir()))
+
+        for root in roots:
+            rr, rp = os.path.realpath(root), os.path.realpath(raw)
+            try:
+                if os.path.commonpath([rr, rp]) == rr:
+                    return raw
+            except ValueError:
+                # Windows 跨盘符时 commonpath 抛 ValueError —— 视为不在该根下
+                continue
+
+        roots_txt = " / ".join(roots)
+        raise ExportPathOutOfRootError(
+            message=f"导出路径越界，拒绝写入：{raw}。",
+            suggestion="请把路径改到 MBDSDR_EXPORT_ROOT、当前工作目录或系统"
+                       "临时目录下；确需写到其它位置时，先设置 "
+                       f"MBDSDR_EXPORT_ROOT。本次允许根判定：{roots_txt}",
+            technical_detail=raw)
+
     def _export_spectrum_snapshot(c, a):
         """渲染并落盘频谱快照 PNG（spectrum_snapshot 渲染核心）。
 
@@ -499,7 +542,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         from mbdsdr_ai import spectrum_snapshot as _ss
         w, h = int(a.get("width", 640)), int(a.get("height", 400))
         rng = float(a.get("dynamic_range_db", 80.0))
-        path = a["path"]
+        path = _confine_export_path(a["path"])
         if a.get("view", "spectrum") == "waterfall":
             png = _ss.render_waterfall_png(a["db"], a.get("freqs_hz"),
                                            w, h, rng)
@@ -526,7 +569,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         peaks = a["peaks"]
         if not isinstance(peaks, list) or not peaks:
             raise ValueError("peaks 须为非空列表")
-        path = a["path"]
+        path = _confine_export_path(a["path"])
         with open(path, "w", newline="", encoding="utf-8") as fh:
             wr = _csv.writer(fh)
             wr.writerow(["freq_hz", "db", "label"])
@@ -642,7 +685,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         png, meta = render_s11_report(
             a["freqs_hz"], np_from_pairs(a["s11"]),
             width=int(a.get("width", 800)), height=int(a.get("height", 420)))
-        path = a["path"]
+        path = _confine_export_path(a["path"])
         with open(path, "wb") as fh:
             fh.write(png)
         out = {"ok": True, "path": path, "bytes": len(png)}

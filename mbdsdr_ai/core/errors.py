@@ -148,6 +148,21 @@ class FrequencyOutOfRangeError(SDRUserError):
         return "请把频率调到设备覆盖范围内（一般 RTL-SDR 为 24 MHz–1.7 GHz）。"
 
 
+class ExportPathOutOfRootError(SDRUserError):
+    """导出路径越出允许根（路径遍历防护）。
+
+    缺口分析报告 P1「导出工具路径遍历」：三个导出写工具原本直接
+    ``open(调用方给的 path)``，可覆盖任意文件。现已收进
+    MBDSDR_EXPORT_ROOT / 当前工作目录 / 系统临时目录。
+
+    这是**用户可修正**的参数错误，不是内部故障，所以走 SDRUserError
+    体系而非裸 ValueError —— 后者会被 MCP 框架归成 ``internal_error``，
+    把"路径写错"谎报成"内部崩溃"，与仓库的诚实错误消息口径冲突。
+    """
+
+    code = "export_path_out_of_root"
+
+
 class DecoderNotAvailableError(SDRUserError):
     """请求的解码器未注册或缺少依赖。"""
 
