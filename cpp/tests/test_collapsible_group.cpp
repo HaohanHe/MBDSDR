@@ -100,7 +100,7 @@ void TestCollapsibleGroup::foldsPersistAcrossLaunch() {
         w.show();
         QVERIFY(QTest::qWaitForWindowExposed(&w));
         // Fold via the same path a title click takes.
-        auto* groups = w.findChildren<ui::CollapsibleGroup*>();
+        auto groups = w.findChildren<ui::CollapsibleGroup*>();
         QVERIFY(!groups.isEmpty());
         ui::CollapsibleGroup* target = nullptr;
         for (auto* g : groups)

@@ -46,7 +46,7 @@ private slots:
     void cursorReadoutIsRealData();
     void traceWaterfallBinCentreAlign();
     void freqTickDecimalsAdaptive();
-    void defaultShareIsOneToOne();
+    void defaultShareFollowsDesignToken();
     void reRenderHistoryOnPaletteSwitch();
     void loadColormapFileRoundTrip();
     void downscaleUsesBlockMaxDecimation();
@@ -185,11 +185,24 @@ void TestSpectrumDisplay::defaultLayoutProportions() {
              "waterfall must have at least its reserved minimum height");
     QVERIFY2(w.waterfallRect().height() >= 0.35 * H,
              "waterfall must occupy a substantial share of the canvas");
-    QVERIFY2(w.spectrumRect().height() >= 0.30 * H,
+    // Trace must keep enough room to actually read: at least its reserved
+    // minimum, and at least ~90% of what kDefaultSpecFraction promises for this
+    // canvas (the difference is the strip + padding the trace also pays for).
+    // Paired with the token so the intentional waterfall-dominant default
+    // (phase82 research) cannot silently squeeze the trace away.
+    QVERIFY2(w.spectrumRect().height() >= tokens::scaled(tokens::kSpecAreaMinH),
+             "spectrum trace must keep its reserved minimum height");
+    QVERIFY2(w.spectrumRect().height() >=
+                 0.9 * tokens::kDefaultSpecFraction * H,
              "spectrum trace must not be squeezed away");
-    // The strip sits strictly between the trace and the waterfall.
-    QVERIFY(w.freqStripRect().top() > w.spectrumRect().bottom());
-    QVERIFY(w.waterfallRect().top() > w.freqStripRect().bottom());
+    // Layout order per recomputeGeometry(): trace -> waterfall -> frequency
+    // strip at the very BOTTOM. The strip was deliberately moved down so trace
+    // and waterfall sit flush with zero gap (user request), so the strip must
+    // come after the waterfall, not between trace and waterfall.
+    QVERIFY2(w.waterfallRect().top() >= w.spectrumRect().bottom(),
+             "waterfall must sit directly below the trace (zero gap)");
+    QVERIFY2(w.freqStripRect().top() >= w.waterfallRect().bottom(),
+             "frequency strip must sit below the waterfall (bottom of canvas)");
 }
 
 void TestSpectrumDisplay::dividerDragIsClamped() {
@@ -222,12 +235,17 @@ void TestSpectrumDisplay::realFrameDrivesHistory() {
     w.recomputeGeometry();
 
     const int bins = 256;
-    w.setSpectrum(makeFrame(bins, 64, 0.0f, -100.0f));
+    // The noise floor here must SIT ON the display's own manual floor
+    // (spectum_display.h: manualFloorDb_ = -130, which auto-range keeps as the
+    // stable reference and never moves). A "quiet" bins at any warmer level
+    // (e.g. the old -100) still lands mid-ramp and is NOT dark, which would
+    // quietly defeat the "stale row must be dark" assertion below.
+    w.setSpectrum(makeFrame(bins, 64, 0.0f, -130.0f));
     QVERIFY(w.hasFrame());
     QCOMPARE(w.history().width(), bins);
 
     // Second frame moves the peak to a different column; the top row must change.
-    w.setSpectrum(makeFrame(bins, 192, 0.0f, -100.0f));
+    w.setSpectrum(makeFrame(bins, 192, 0.0f, -130.0f));
     const QRgb row0_b = w.history().pixel(192, 0);
     const QRgb row1_old = w.history().pixel(64, 1);   // previous top row scrolled down
 
@@ -550,12 +568,15 @@ void TestSpectrumDisplay::freqTickDecimalsAdaptive() {
     QCOMPARE(ui::SpectrumDisplay::freqTickDecimals(5e5), 2);
 }
 
-// W2a: default traceShare_ = 0.5 -> trace and waterfall split 1:1 (the reported
-// "trace occupies too much" defect is a Flutter-only flex issue; desktop default
-// must stay balanced). Runs with the persisted key ABSENT so it proves the
-// no-key path falls back to tokens::kDefaultSpecFraction (not a leftover value
-// written by an earlier divider-drag test).
-void TestSpectrumDisplay::defaultShareIsOneToOne() {
+// The desktop default split has ONE source of truth: tokens::kDefaultSpecFraction.
+// It is deliberately waterfall-dominant (currently 0.25) per
+// docs/learn/phase82/research/02-sdrpp-gqrx-ui.md, which benchmarks SDR++ at 35%
+// trace. Assert the RATIO against the token itself rather than a hard-coded 1:1,
+// so a future design change moves exactly one place (the token) and this pinning
+// test stays green without lying. Runs with the persisted key ABSENT so it proves
+// the no-key path falls back to the token (not a leftover written by an earlier
+// divider-drag test).
+void TestSpectrumDisplay::defaultShareFollowsDesignToken() {
     mbdsdr::core::AppSettings().remove(tokens::kSettingsKeySpecFraction);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
@@ -564,9 +585,18 @@ void TestSpectrumDisplay::defaultShareIsOneToOne() {
     QCOMPARE(w.traceShareFraction(), tokens::kDefaultSpecFraction);
     const int th = w.spectrumRect().height();
     const int fh = w.waterfallRect().height();
-    QVERIFY2(std::abs(th - fh) <= 2,
-             qPrintable(QString("default 1:1 split: trace=%1 falls=%2")
-                        .arg(th).arg(fh)));
+    QVERIFY2(th + fh > 0, "trace + waterfall must split the whole pool");
+    const double actualFrac = static_cast<double>(th) / (th + fh);
+    QVERIFY2(std::abs(actualFrac - tokens::kDefaultSpecFraction) <= 0.02,
+             qPrintable(QString("split must follow kDefaultSpecFraction:"
+                                " expected %1 got %2 (trace=%3 falls=%4)")
+                        .arg(tokens::kDefaultSpecFraction)
+                        .arg(actualFrac).arg(th).arg(fh)));
+    // The trace must stay a usable plot area even though the waterfall dominates:
+    // never squeezed below its reserved minimum.
+    QVERIFY2(th >= tokens::scaled(tokens::kSpecAreaMinH),
+             qPrintable(QString("trace must keep its minimum height %1, got %2")
+                        .arg(tokens::scaled(tokens::kSpecAreaMinH)).arg(th)));
 }
 
 // G2 (independent SDR++ waterfall): the ring stores RAW dB rows, so swapping the

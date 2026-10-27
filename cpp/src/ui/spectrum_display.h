@@ -350,6 +350,24 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
+    // Pointer-capture helpers. Qt delivers mouseRelease only to the widget that
+    // received the matching press, so a release that happens OUTSIDE the canvas
+    // used to leave grab_/grabCursor_ set forever -- after that, merely moving
+    // the mouse over the canvas kept dragging (retuning the dial or moving a
+    // VFO box) without any button held. captureDrag() is called after every
+    // press that started a drag, releaseDrag() after every release (and as a
+    // leave-event backstop).
+    void captureDrag();
+    void releaseDrag();
+    // Pointer-shape feedback: only writes when the shape actually changes
+    // (setCursor() polishes the widget tree, so calling it on every mouse move
+    // is wasteful).
+    void setCursorShapeOnce(Qt::CursorShape s);
+    Qt::CursorShape cursorShape_ = Qt::ArrowCursor;
+    // The real hit-testing bodies; the public events wrap them to own capture.
+    void mousePressEventImpl(QMouseEvent* event);
+    void mouseReleaseEventImpl(QMouseEvent* event);
+    bool mouseGrabbed_ = false;
     // All painted boxes, derived from one geometry pass. trace/strip/falls share
     // plotX0..plotX0+plotW so the frequency->x mapping is identical everywhere.
     struct CanvasLayout {

@@ -163,9 +163,10 @@ constexpr int    kBwComboPresetCount =
     sizeof(kBwComboPresetsHz) / sizeof(kBwComboPresetsHz[0]);
 // Bandwidth presets indexed by bwCombo_ order.
 // Up/Down keyboard nudge doubles/halves the *current* bandwidth and clamps to
-// [1k, 2M]; we then snap bwCombo_ to the nearest preset.
-constexpr double kBwMinHz = 100.0;
-constexpr double kBwMaxHz = 2000000.0;
+// the SAME legal band as the canvas VFO edge-drag path
+// (tokens::kVfoMinBandwidthHz .. kVfoMaxBandwidthHz) -- one range for every
+// UI surface that produces a bandwidth, per the "single source" note above.
+// We then snap bwCombo_ to the nearest preset.
 // Index of the combo preset nearest to `hz` (used to keep the combo display
 // consistent with the live bandwidth after a mode switch / nudge / VFO drag).
 inline int nearestBwPresetIndex(double hz) {
@@ -1038,8 +1039,27 @@ MainWindow::MainWindow(QWidget* parent)
         auto* ft8Chk = new QCheckBox(QStringLiteral("FT8 解码"), gTools);
         ft8Chk->setObjectName("ft8Chk");
         ft8Chk->setToolTip(QStringLiteral("开启/关闭 FT8 实时解码引擎"));
-        connect(ft8Chk, &QCheckBox::toggled,
-                engine_, &dsp::SpectrumEngine::setFt8Enabled);
+        // Two UI surfaces drive the SAME engine switch (this one and ft8Check_ in
+        // the 接收参数 group). Mirror both ways so neither can contradict the
+        // other, and route through the same save + badge refresh so this entry's
+        // state also persists (it previously did not).
+        connect(ft8Chk, &QCheckBox::toggled, this, [this](bool on) {
+            if (engine_) engine_->setFt8Enabled(on);
+            scheduleSave();
+            updateFt8Badge();
+        });
+        connect(ft8Chk, &QCheckBox::toggled, this, [this](bool on) {
+            if (ft8Check_ && ft8Check_->isChecked() != on) {
+                const QSignalBlocker blk(ft8Check_);
+                ft8Check_->setChecked(on);
+            }
+        });
+        connect(ft8Check_, &QCheckBox::toggled, this, [ft8Chk](bool on) {
+            if (ft8Chk->isChecked() != on) {
+                const QSignalBlocker blk(ft8Chk);
+                ft8Chk->setChecked(on);
+            }
+        });
         gToolsLay->addWidget(ft8Chk);
         auto* lrptChk = new QCheckBox(QStringLiteral("LRPT 解码"), gTools);
         lrptChk->setObjectName("lrptChk");
@@ -3120,7 +3140,15 @@ MainWindow::MainWindow(QWidget* parent)
         engine_->vfoSetOffset(id, hz);
     });
     connect(spectrum_, &ui::SpectrumWidget::vfoMarkerBandwidthChanged,
-            this, [this](int id, double hz) { engine_->vfoSetBandwidth(id, hz); });
+            this, [this](int id, double hz) {
+                // Snap the actual bandwidth to the nearest combo preset, so the
+                // dragged edge lands on a legal channel width instead of an
+                // arbitrary pixel-derived value that the bwCombo_ can only
+                // display as "nearest" without ever matching. This makes a
+                // drag behave exactly like picking the preset in the combo.
+                const double snapped = kBwComboPresetsHz[nearestBwPresetIndex(hz)];
+                engine_->vfoSetBandwidth(id, snapped);
+            });
     // Keep the CURRENT VFO demodulated in the background after the user later
     // selects another one (parallel monitor). Checked state mirrors the selected
     // VFO's armed flag (synced in refreshVfoUi).
@@ -3249,6 +3277,12 @@ MainWindow::MainWindow(QWidget* parent)
         engine_->setTunerAgc(on);
         // Manual gain slider only matters in manual tuner-gain mode.
         gainSlider_->setEnabled(!on);
+        // The AI panel drives the SAME engine switch (aiAgcCheck_). Mirror it so
+        // the two faces cannot contradict each other.
+        if (aiAgcCheck_ && aiAgcCheck_->isChecked() != on) {
+            const QSignalBlocker blk(aiAgcCheck_);
+            aiAgcCheck_->setChecked(on);
+        }
     });
     connect(biasTeeChk_, &QCheckBox::toggled,
             this, [this](bool on) { engine_->setBiasTee(on); });
@@ -3491,6 +3525,13 @@ MainWindow::MainWindow(QWidget* parent)
     }
     connect(aiAgcCheck_, &QCheckBox::toggled, this, [this](bool on) {
         if (engine_) engine_->setTunerAgc(on);
+        // Same single engine switch as the 高级 RTL 前端 entry: keep that face,
+        // the gain-slider enable state and this one in agreement.
+        if (gainSlider_) gainSlider_->setEnabled(!on);
+        if (tunerAgcChk_ && tunerAgcChk_->isChecked() != on) {
+            const QSignalBlocker blk(tunerAgcChk_);
+            tunerAgcChk_->setChecked(on);
+        }
     });
 
     // Activity log: export (real file dialog -> real write) + clear (honest
@@ -3610,11 +3651,14 @@ MainWindow::MainWindow(QWidget* parent)
     new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Left), this, this, [this, retuneNudge]() {
         retuneNudge(-currentStepHz_ / 10.0);
     });
-    // Up/Down: widen/narrow the IF bandwidth (×2 / ÷2, clamped to [1k, 200k]).
-    // The bwCombo_ is then snapped to the nearest preset for display.
+    // Up/Down: widen/narrow the IF bandwidth (×2 / ÷2). Clamped to the same
+    // legal band as the canvas VFO edge-drag (tokens::kVfoMin/MaxBandwidthHz),
+    // so a keyboard nudge and a mouse drag can never disagree about what is a
+    // legal channel. The bwCombo_ is then snapped to the nearest preset for display.
     auto nudgeBandwidth = [this](double factor) {
         double newBw = currentBwHz_ * factor;
-        newBw = std::clamp(newBw, kBwMinHz, kBwMaxHz);
+        newBw = std::clamp(newBw, double(tokens::kVfoMinBandwidthHz),
+                           double(tokens::kVfoMaxBandwidthHz));
         currentBwHz_ = newBw;
         engine_->setBandwidth(newBw);
         bwCombo_->blockSignals(true);
@@ -3625,11 +3669,10 @@ MainWindow::MainWindow(QWidget* parent)
     new QShortcut(QKeySequence(Qt::Key_Up), this, this, [nudgeBandwidth]() { nudgeBandwidth(2.0); });
     new QShortcut(QKeySequence(Qt::Key_Down), this, this, [nudgeBandwidth]() { nudgeBandwidth(0.5); });
     new QShortcut(QKeySequence("Ctrl+R"), this, this, [this]() { recordBtn_->click(); });
-    static bool muted = false;
     new QShortcut(QKeySequence(Qt::Key_Space), this, this, [this]() {
-        muted = !muted;
-        engine_->setMuted(muted);
-        statusBar()->showMessage(muted ? "已静音" : "");
+        muted_ = !muted_;
+        engine_->setMuted(muted_);
+        statusBar()->showMessage(muted_ ? QStringLiteral("已静音") : QString());
     });
 
     // ---- Multi-VFO quick switch (SDR++-style) ----------------------------
@@ -3962,6 +4005,12 @@ MainWindow::~MainWindow() {
     if (scanLinkTimer_) scanLinkTimer_->stop();
     delete scanLink_; scanLink_ = nullptr;
     delete scanLinkTickClock_; scanLinkTickClock_ = nullptr;
+    // These two are plain parentless objects built in the ctor (no QWidget, no
+    // QObject parent), but unlike scanner_ / scanLink_ they were missing here --
+    // every MainWindow leaked them. Guarded: neither exists if the ctor bailed
+    // out before reaching its own construction line.
+    delete bookmarkManager_; bookmarkManager_ = nullptr;
+    delete activityLog_;     activityLog_ = nullptr;
 }
 
 // ---- Phase27: loopback control-HTTP production wiring -----------------------
@@ -4628,13 +4677,21 @@ void MainWindow::refreshVfoUi() {
         sbVfo_->setText(QString("%1  %2 MHz").arg(sel->name).arg(sel->freqHz / 1e6, 0, 'f', 3));
 
         // Constellation panel: follow the selected VFO's digital mode.
-        if (constellationView_) {
-            if (sel->mode == "QPSK") {
-                constellationView_->setMode(dsp::DigMode::QPSK);
-                rightTabs_->setCurrentWidget(constellationView_->parentWidget());
-            } else if (sel->mode == "BPSK") {
-                constellationView_->setMode(dsp::DigMode::BPSK);
-                rightTabs_->setCurrentWidget(constellationView_->parentWidget());
+        // The tab is only revealed when the SELECTED VFO actually changes.
+        // vfoListChanged also fires on add/remove/rename and on bandwidth or
+        // mode tweaks of the *same* VFO; unconditionally stealing rightTabs_ on
+        // those used to yank away whatever panel the user was reading (sky view,
+        // AI chat, scan table) the moment any QPSK/BPSK row was touched.
+        // Selecting a different QPSK/BPSK VFO is an explicit user action, so the
+        // reveal behaviour is kept intact from the user's point of view.
+        if (constellationView_ &&
+            (sel->mode == "QPSK" || sel->mode == "BPSK")) {
+            constellationView_->setMode(sel->mode == "QPSK" ? dsp::DigMode::QPSK
+                                                            : dsp::DigMode::BPSK);
+            if (sel->id != lastConstelVfoId_) {
+                lastConstelVfoId_ = sel->id;
+                if (QWidget* page = constellationView_->parentWidget())
+                    rightTabs_->setCurrentWidget(page);
             }
         }
     }
@@ -4866,6 +4923,14 @@ QStringList MainWindow::currentHiddenRightPanels() const {
 
 QStringList MainWindow::currentHiddenLeftPanels() const {
     QStringList hidden;
+    // ONLY trust isVisible() once this window is actually on screen. Before a
+    // show() (during construction/restore, or for a window that is never
+    // shown), EVERY child reports isVisible() == false simply because its
+    // parent is not visible yet -- so saveUiState() would faithfully persist
+    // "the user hid every single panel", and the next launch would come back
+    // with the whole left rail missing. An empty list means "nothing was
+    // intentionally hidden", which is the safe reading.
+    if (!window()->isVisible()) return hidden;
     for (auto it = leftPanelGroups_.begin(); it != leftPanelGroups_.end(); ++it)
         if (QGroupBox* g = it.value())
             if (!g->isVisible()) hidden << it.key();
@@ -5378,6 +5443,13 @@ void MainWindow::restoreUiState() {
         ft8Check_->blockSignals(false);
         if (engine_) engine_->setFt8Enabled(ft8On);
         updateFt8Badge();
+        // Keep the second FT8 entry (工具 group) honest: it drives the same
+        // engine switch but has no persistence of its own, so it must adopt the
+        // restored state instead of sitting at "off" and contradicting this one.
+        if (QCheckBox* toolsFt8 = findChild<QCheckBox*>(QStringLiteral("ft8Chk"))) {
+            const QSignalBlocker blk(toolsFt8);
+            toolsFt8->setChecked(ft8On);
+        }
     }
 
     const float dbMin = s.value("rx/dbMin", static_cast<float>(tokens::kDbLowerDefault)).toFloat();
@@ -5555,7 +5627,13 @@ void MainWindow::restoreUiState() {
 
     // ---- Multi-VFO set restore (engine starts with one default VFO) -------
     {
-        const int vfoCount = s.value("vfo/count", 1).toInt();
+        // Clamp like every other numeric restore key in this function: unclamped,
+        // a hand-edited or corrupted "vfo/count" spun an unbounded vfoAdd() loop
+        // (the engine has no VFO ceiling of its own). 16 also comfortably covers
+        // the Ctrl+1..9 VFO quick-switch surface.
+        constexpr int kVfoRestoreMaxCount = 16;
+        const int vfoCount =
+            std::clamp(s.value("vfo/count", 1).toInt(), 1, kVfoRestoreMaxCount);
         if (vfoCount >= 1) {
             QVector<int> ids;
             ids.push_back(engine_->selectedVfoId());   // existing default VFO
@@ -6683,7 +6761,13 @@ void MainWindow::fillPassTable() {
     QList<ui::PassArc> arcs;
     QDateTime now = QDateTime::currentDateTimeUtc();
 
-    QSettings s;
+    // core/app_settings.h: product code reads and writes through
+    // mbdsdr::core::AppSettings only. A bare QSettings lands in a DIFFERENT
+    // organisation (the app sets no organisationName), so the "remember the
+    // selected satellite" read here silently never matched what the writers
+    // (AppSettings) persisted -- the selection was lost on every restart.
+    // It also skipped the MBDSDR_SETTINGS_DIR test isolation.
+    mbdsdr::core::AppSettings s;
     QString wanted = s.value("ui/selectedSatellite").toString();
     int wantedRow = -1, firstActive = -1;
 

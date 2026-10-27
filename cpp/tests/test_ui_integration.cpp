@@ -1321,6 +1321,19 @@ void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
 }
 
 void TestUiIntegration::quickTuneHumanFrequencyWiresTunePath() {
+    // Test hygiene: an earlier slot can persist a HIDDEN or FOLDED left-rail
+    // group, and that state leaks into this window through restoreUiState().
+    // QWidget::isVisible() is false for ANY widget with a hidden ancestor, so a
+    // 频率 group left hidden/folded silently invalidates the hint assertion
+    // below -- the slot would be asserting leftovers from another test instead
+    // of its own behaviour. Clear both keys so this slot owns its scenario.
+    // (restoreUiState writes to them again on save, which is fine.)
+    {
+        mbdsdr::core::AppSettings s;
+        s.remove(tokens::kSettingsKeyCollapsedGroups);
+        s.remove(tokens::kSettingsKeyHiddenLeftPanels);
+        s.sync();
+    }
     MainWindow win;
     win.show();
     QApplication::processEvents();

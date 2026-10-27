@@ -108,7 +108,11 @@ void TestSpectrumAutoRange::defaultCeilingStaysAtFullScale() {
     for (int i = 0; i < 30; ++i)
         w.setSpectrum(makeFrame(kBins, 256, 0.0f, -100.0f));
     QCOMPARE(w.currentDbCeil(), 0.0f);
-    QCOMPARE(w.currentDbFloor(), -100.0f);
+    // Auto-range moves ONLY the ceiling; the floor stays pinned to the widget's
+    // stable manual reference (spectrum_display.h: manualFloorDb_ = -130), so
+    // the displayed floor is -130 -- NOT the frame's own noise floor (-100
+    // here). Assert the documented invariant, not the frame data.
+    QCOMPARE(w.currentDbFloor(), -130.0f);
 }
 
 // A sustained -30 dBFS peak (on a -100..0 scale that sits mid-plot) must pull
@@ -194,7 +198,7 @@ void TestSpectrumAutoRange::freezeThenStrongFrameDoesNotMoveCeiling() {
     for (int i = 0; i < 30; ++i)
         w.setSpectrum(makeFrame(kBins, 200, -10.0f, -100.0f));
     QCOMPARE(w.currentDbCeil(), frozenCeil);
-    QCOMPARE(w.currentDbFloor(), -100.0f);
+    QCOMPARE(w.currentDbFloor(), -130.0f);   // see defaultCeilingStaysAtFullScale
 }
 
 // After freezing at a high ceiling, weaker frames must NOT pull it down.

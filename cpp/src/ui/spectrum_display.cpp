@@ -326,11 +326,22 @@ QString SpectrumDisplay::cursorReadoutText(const QPoint& pos) const {    if (!ha
     const double f = freqForX(pos.x(), fLo, span);
     const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
     const double binHz = (bins_ > 0) ? frameFsHz_ / bins_ : 0.0;
-    int idx = (binHz > 0.0) ? static_cast<int>((f - bandLo) / binHz) : 0;
-    idx = std::clamp(idx, 0, bins_ - 1);
-    const float db = frame_.dbfs[idx];
     QString s = QString("%1 MHz").arg(f / 1e6, 0, 'f', 3);
     s += QLatin1Char('\n');
+    // HONESTY: if the hovered frequency lies OUTSIDE the captured band there is
+    // no sample for it at all. Report the frequency with an explicit marker and
+    // NO level / SNR. The old code clamped the index to the nearest EDGE bin,
+    // which attached a real measured number (the edge bin's dBFS) to a
+    // frequency that was never acquired -- data-shaped output for nothing, and
+    // exactly what this repo's no-fabrication rule forbids. Same reasoning as
+    // the "outside the plot -> empty" contract above.
+    const double rawIdx = (binHz > 0.0) ? (f - bandLo) / binHz : 0.0;
+    if (rawIdx < 0.0 || rawIdx > static_cast<double>(bins_ - 1)) {
+        s += QStringLiteral("带外（未采集）");
+        return s;
+    }
+    const int idx = std::clamp(static_cast<int>(rawIdx), 0, bins_ - 1);
+    const float db = frame_.dbfs[idx];
     s += QString("%1 dBFS").arg(db, 0, 'f', 1);
     if (std::isfinite(noiseFloorDb_))
         s += QString("   SNR %1 dB").arg(db - noiseFloorDb_, 0, 'f', 1);
@@ -1542,7 +1553,44 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
 // ---------------------------------------------------------------------------
 // Pointer interaction
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Pointer capture: keep receiving move/release even if the pointer leaves the
+// canvas mid-drag, and ALWAYS end the drag state when the button comes up --
+// wherever it comes up. Without this the widget would stay "stuck" in drag mode
+// (see the note in spectrum_display.h) and plain hovering would keep retuning.
+// ---------------------------------------------------------------------------
+void SpectrumDisplay::captureDrag() {
+    if (mouseGrabbed_) return;
+    grabMouse();
+    mouseGrabbed_ = true;
+}
+
+void SpectrumDisplay::releaseDrag() {
+    if (!mouseGrabbed_) return;
+    releaseMouse();
+    mouseGrabbed_ = false;
+}
+
+void SpectrumDisplay::setCursorShapeOnce(Qt::CursorShape s) {
+    if (cursorShape_ == s) return;
+    cursorShape_ = s;
+    setCursor(QCursor(s));
+}
+
 void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
+    mousePressEventImpl(e);
+    // A drag began -> own the pointer until it is released.
+    if (grab_ != Grab::None || grabCursor_ > 0) captureDrag();
+}
+
+void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
+    mouseReleaseEventImpl(e);
+    // The body clears grab_/grabCursor_; drop the capture whenever nothing is
+    // being dragged any more.
+    if (grab_ == Grab::None && grabCursor_ == 0) releaseDrag();
+}
+
+void SpectrumDisplay::mousePressEventImpl(QMouseEvent* e) {
     if (e->button() != Qt::LeftButton) return;
     const QPoint pos = e->pos();
     double fLo, fHi, span;
@@ -1638,9 +1686,19 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
     if (grabCursor_ > 0) {
         const double f = freqForX(pos.x(), fLo, span);
         if (grabCursor_ == 1) cursorA_Hz_ = f; else cursorB_Hz_ = f;
+        setCursorShapeOnce(Qt::SplitHCursor);
         update();
         return;
     }
+
+    // While dragging, keep a cursor that DESCRIBES what the drag is doing.
+    if (grab_ == Grab::Divider)                    setCursorShapeOnce(Qt::SplitVCursor);
+    else if (grab_ == Grab::Pan)                   setCursorShapeOnce(Qt::ClosedHandCursor);
+    else if (grab_ == Grab::Tune ||
+             grab_ == Grab::VfoBody)               setCursorShapeOnce(Qt::ClosedHandCursor);
+    else if (grab_ == Grab::VfoEdgeL ||
+             grab_ == Grab::VfoEdgeR)              setCursorShapeOnce(Qt::SizeHorCursor);
+    else if (grab_ == Grab::FixedMarker)           setCursorShapeOnce(Qt::SizeHorCursor);
 
     dividerHot_ = lay_.splitZone.contains(pos);
 
@@ -1711,12 +1769,32 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         cursorActive_ = inPlot;
         cursorPos_ = pos;
         if (inPlot != was || inPlot) update();
+        // Hover shape tells the user what a press here will do: grab the
+        // trace/falls divider vertically, pan on the frequency strip, resize a
+        // VFO band box horizontally, else measure with a crosshair.
+        Qt::CursorShape want = Qt::ArrowCursor;
+        if (lay_.splitZone.contains(pos))       want = Qt::SplitVCursor;
+        else if (lay_.stripRect.contains(pos))  want = Qt::OpenHandCursor;
+        else if (inPlot) {
+            want = Qt::CrossCursor;
+            const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
+            for (const dsp::VfoMarker& m : markers_) {
+                int bx0 = 0, bx1 = 0, vx = 0;
+                markerBox(m, fLo, span, bx0, bx1, vx);
+                if (std::abs(pos.x() - bx0) <= tol ||
+                    std::abs(pos.x() - bx1) <= tol) {
+                    want = Qt::SizeHorCursor;
+                    break;
+                }
+            }
+        }
+        setCursorShapeOnce(want);
         break;
     }
     }
 }
 
-void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
+void SpectrumDisplay::mouseReleaseEventImpl(QMouseEvent* e) {
     if (grabCursor_ > 0) { grabCursor_ = 0; update(); return; }
     if (grab_ == Grab::FixedMarker) {
         if (dragFixedIdx_ >= 0) {
@@ -1843,6 +1921,11 @@ void SpectrumDisplay::wheelEvent(QWheelEvent* e) {
 }
 
 void SpectrumDisplay::leaveEvent(QEvent*) {
+    // Backstop: never leave a drag armed while the pointer is away.
+    releaseDrag();
+    grab_ = Grab::None;
+    grabVfoId_ = -1;
+    grabCursor_ = 0;
     dividerHot_ = false;
     cursorActive_ = false;
     QToolTip::hideText();

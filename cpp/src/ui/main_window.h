@@ -818,6 +818,17 @@ private:
     // Offscreen seam: skip the modal delete confirm (see the public setter).
     bool aiAutoConfirmDelete_ = false;
 
+    // Mute toggle state. MUST be a per-instance member: this used to be a
+    // function-local `static bool` inside the constructor, which every
+    // MainWindow in the process shared -- the second window then toggled it in
+    // the WRONG direction (pressing Space un-muted an already-audible window)
+    // because it read a flag flipped by window #1. Per-instance is correct.
+    bool muted_ = false;
+
+    // Last VFO id whose constellation the right rail was revealed for; see
+    // refreshVfoUi(). Keeps the reveal from firing on every list churn.
+    int lastConstelVfoId_ = -1;
+
     // hw = a real hardware device (RTL-SDR / rtl_tcp) is live -> gate tuner /
     // sample-rate / gain / advanced front-end controls. hasData = ANY live IQ
     // producer (real HW, the explicitly-opted-in synthetic test source, or an
