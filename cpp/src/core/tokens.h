@@ -1001,6 +1001,16 @@ inline constexpr const char* kSettingsKeyDbMax     = "rx/dbMax";
 inline constexpr const char* kSettingsKeyZoomFactor = "view/zoomFactor";
 inline constexpr const char* kSettingsKeyFftSize    = "rx/fftSize";
 inline constexpr const char* kSettingsKeyPersistMode = "view/persistMode";
+// ---- Network-audio streaming panel: host / port / transport of the demodulated
+// 48 kHz PCM stream. Persisted by saveUiState; the edit / spin / combo keep
+// their built-in defaults (127.0.0.1 / 49100 / UDP) when the keys are absent.
+inline constexpr const char* kSettingsKeyNetAudioHost  = "net/audioHost";
+inline constexpr const char* kSettingsKeyNetAudioPort  = "net/audioPort";
+inline constexpr const char* kSettingsKeyNetAudioProto = "net/audioProto";
+// Triggered (gate) recording toggle in the recording panel: persisted so a
+// restart does not silently drop the armed state (restore dispatches it to the
+// engine explicitly, with checkbox signals blocked mid-restore).
+inline constexpr const char* kSettingsKeyGatedRecording = "rec/gated";
 // Slider granularity: 1 dB steps for the dB axis (matches the spinboxes),
 // 0.1x for zoom (kZoomMin..kZoomMax), 1 dB for the gain (matches gainSlider_).
 inline constexpr int kDbSliderStep  = 1;

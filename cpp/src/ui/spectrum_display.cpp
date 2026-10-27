@@ -180,6 +180,18 @@ SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     traceShare_ = loadSpecFraction();
     // SDR++ 风格叠加（waterfall 铺满 + trace 叠画）。
     wfOverlay_ = loadWfOverlay();
+    // Restore the user's waterfall palette + scroll speed BEFORE the colormap-
+    // file block below: setPalette() drops the custom ramp (hasCustomStops_ =
+    // false), so a persisted custom colormap file must be the LAST writer to
+    // win. Without these readbacks the toolbar combos LIED -- they showed the
+    // persisted choice while the canvas kept the built-in classic ramp and the
+    // default speed until the user touched the combo.
+    {
+        mbdsdr::core::AppSettings s;
+        const int pal = s.value(tokens::kSettingsKeyPalette, 0).toInt();
+        if (pal > 0) setPalette(std::clamp(pal, 0, 2));
+        setScrollSpeed(s.value(tokens::kSettingsKeyScrollSpeed, 1).toInt());
+    }
     // 启动时重应用持久化的外部色图（set_color_map 写下的 view/wfColormapFile）。
     // 之前只有运行时命令会加载，重启后静默回退内置色板——用户看到"经典"。
     // 这里补上；文件缺失/非法则诚实回退内置（不崩、不糊）。

@@ -1141,6 +1141,7 @@ MainWindow::MainWindow(QWidget* parent)
     recSegLay->addWidget(recSegSpin, 1);
     gRecLay->addWidget(recSegRow);
     gatedCheck_ = new QCheckBox("触发式分段录制", gRec);
+    gatedCheck_->setObjectName("gatedCheck");
     gRecLay->addWidget(gatedCheck_);
 
     // ---- Unattended signal-triggered watch recording ----
@@ -3033,6 +3034,7 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(gatedCheck_, &QCheckBox::stateChanged, this, [this](int st) {
         engine_->setGatedRecordingEnabled(st != Qt::Unchecked);
+        scheduleSave();
     });
 
     // ---- Watch mode controls ----
@@ -3840,8 +3842,10 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](double, double) { scheduleSave(); });
 
     // Focus-mode toggle: collapse/restore the side rails with a 220ms OutCubic.
+    // scheduleSave: the button is the only writer of view/focusMode at toggle
+    // time; without it the state persisted only when some OTHER control saved.
     connect(focusBtn_, &QPushButton::toggled, this,
-            [this](bool on) { setFocusMode(on, true); });
+            [this](bool on) { setFocusMode(on, true); scheduleSave(); });
 
     // Double-click a splitter handle to reset the 0.22/0.56/0.22 proportions
     // (CarWith mini-map-card "drag to resize, double-click to reset"). Handles
@@ -4986,11 +4990,11 @@ void MainWindow::saveUiState() {
         s.setValue(tokens::kSettingsKeyCdcssGate, cdcssGateCheck_->isChecked());
     if (ft8Check_)
         s.setValue(tokens::kSettingsKeyFt8Enabled, ft8Check_->isChecked());
-    s.setValue("rx/dbMin", static_cast<float>(spectrum_->dbMinValue()));
-    s.setValue("rx/dbMax", static_cast<float>(spectrum_->dbMaxValue()));
+    s.setValue(tokens::kSettingsKeyDbMin, static_cast<float>(spectrum_->dbMinValue()));
+    s.setValue(tokens::kSettingsKeyDbMax, static_cast<float>(spectrum_->dbMaxValue()));
 
     // ---- RTL front-end ----
-    s.setValue("rtl/ppm", ppmSpin_->value());
+    s.setValue(tokens::kSettingsKeyRtlPpm, ppmSpin_->value());
     s.setValue("rtl/directSampling", dsCombo_->currentIndex());
     s.setValue("rtl/rtlAgc", rtlAgcChk_->isChecked());
     s.setValue("rtl/tunerAgc", tunerAgcChk_->isChecked());
@@ -4998,7 +5002,13 @@ void MainWindow::saveUiState() {
     s.setValue("rtl/biasTee", biasTeeChk_->isChecked());   // default false
 
     // ---- View ----
-    s.setValue("view/zoomFactor", spectrum_->zoomFactor());
+    s.setValue(tokens::kSettingsKeyZoomFactor, spectrum_->zoomFactor());
+
+    // ---- Network-audio panel: persist the connection config (not the
+    // streaming state) so a restart brings back host / port / transport.
+    s.setValue(tokens::kSettingsKeyNetAudioHost, netAudioHostEdit_->text());
+    s.setValue(tokens::kSettingsKeyNetAudioPort, netAudioPortSpin_->value());
+    s.setValue(tokens::kSettingsKeyNetAudioProto, netAudioProtoCombo_->currentText());
 
     // ---- Recording options ----
     s.setValue("rec/target", recTargetCombo_->currentIndex());
@@ -5006,6 +5016,7 @@ void MainWindow::saveUiState() {
     s.setValue("rec/stereo", recStereoCheck_->isChecked());
     s.setValue("rec/ignoreSquelch", recIgnoreSqlChk_->isChecked());
     s.setValue("rec/dir", recDirEdit_->text());
+    s.setValue(tokens::kSettingsKeyGatedRecording, gatedCheck_->isChecked());
     s.setValue("watch/enabled", watchCheck_->isChecked());
     s.setValue("watch/threshold", static_cast<float>(watchThrSlider_->value()));
     s.setValue("watch/prerollMs", watchPrerollSpin_->value() * 1000.0);
@@ -5025,7 +5036,7 @@ void MainWindow::saveUiState() {
         for (int i = 0; i < rightTabs_->count(); ++i)
             if (rightTabs_->isTabEnabled(i) && !rightTabs_->isTabVisible(i))
                 hidden << rightTabs_->tabText(i);
-        s.setValue("ui/hiddenRightTabs", hidden);
+        s.setValue(tokens::kSettingsKeyHiddenRightPanels, hidden);
     }
     // phase82: left-rail groups the user hid via the settings dialog.
     s.setValue(tokens::kSettingsKeyHiddenLeftPanels, currentHiddenLeftPanels());
@@ -5042,7 +5053,7 @@ void MainWindow::saveUiState() {
     s.setValue("ui/centerTabIndex", centerTabs_->currentIndex());
     if (mainSplitter_) s.setValue("ui/splitterSizes", mainSplitter_->saveState());
     s.setValue(tokens::kSettingsKeyFocusMode, focusMode_);
-    s.setValue("rx/fftSize", spectrum_->fftSizeValue());
+    s.setValue(tokens::kSettingsKeyFftSize, spectrum_->fftSizeValue());
 
     // ---- Multi-VFO set (count + per-channel params + selection) ----
     s.setValue("vfo/count", vfoMarkers_.size());
@@ -5452,13 +5463,13 @@ void MainWindow::restoreUiState() {
         }
     }
 
-    const float dbMin = s.value("rx/dbMin", static_cast<float>(tokens::kDbLowerDefault)).toFloat();
-    const float dbMax = s.value("rx/dbMax", static_cast<float>(tokens::kDbUpperDefault)).toFloat();
+    const float dbMin = s.value(tokens::kSettingsKeyDbMin, static_cast<float>(tokens::kDbLowerDefault)).toFloat();
+    const float dbMax = s.value(tokens::kSettingsKeyDbMax, static_cast<float>(tokens::kDbUpperDefault)).toFloat();
     spectrum_->setDbSpinValues(static_cast<int>(std::round(dbMin)),
                                static_cast<int>(std::round(dbMax)));
 
     // ---- RTL ----
-    const double ppm = s.value("rtl/ppm", 0.0).toDouble();
+    const double ppm = s.value(tokens::kSettingsKeyRtlPpm, 0.0).toDouble();
     ppmSpin_->setValue(ppm);
     const int ds = s.value("rtl/directSampling", 0).toInt();
     dsCombo_->setCurrentIndex(std::clamp(ds, 0, 2));
@@ -5472,6 +5483,9 @@ void MainWindow::restoreUiState() {
     spyserverChk_->blockSignals(true);
     spyserverPortSpin_->setValue(s.value("net/spyPort", 5555).toInt());
     spyserverChk_->setChecked(s.value("net/spyEnabled", false).toBool());
+    netAudioHostEdit_->setText(s.value(tokens::kSettingsKeyNetAudioHost, QStringLiteral("127.0.0.1")).toString());
+    netAudioPortSpin_->setValue(s.value(tokens::kSettingsKeyNetAudioPort, 49100).toInt());
+    netAudioProtoCombo_->setCurrentText(s.value(tokens::kSettingsKeyNetAudioProto, QStringLiteral("UDP")).toString());
     spyserverPortSpin_->blockSignals(false);
     spyserverChk_->blockSignals(false);
     // If it was left on, actually (re)start the listener now that the port is set.
@@ -5479,7 +5493,7 @@ void MainWindow::restoreUiState() {
     else updateSpyServerStatus();
 
     // ---- View ----
-    const double zoom = s.value("view/zoomFactor", 1.0).toDouble();
+    const double zoom = s.value(tokens::kSettingsKeyZoomFactor, 1.0).toDouble();
     spectrum_->setZoomFactor(zoom);
 
     // ---- Recording options ----
@@ -5488,6 +5502,17 @@ void MainWindow::restoreUiState() {
     recTemplateEdit_->setText(s.value("rec/template", "{time}_{freq}_{mode}").toString());
     recStereoCheck_->setChecked(s.value("rec/stereo", false).toBool());
     recIgnoreSqlChk_->setChecked(s.value("rec/ignoreSquelch", false).toBool());
+    // Triggered recording: restore with checkbox signals BLOCKED so the
+    // stateChanged lambda's scheduleSave() cannot fire mid-restore (startup
+    // must never re-persist a half-restored state), then dispatch the restored
+    // state to the engine explicitly -- blocked UI still has to reach the
+    // engine, same pattern as the focus button below.
+    if (gatedCheck_) {
+        const bool gatedOn = s.value(tokens::kSettingsKeyGatedRecording, false).toBool();
+        QSignalBlocker blk(gatedCheck_);
+        gatedCheck_->setChecked(gatedOn);
+        engine_->setGatedRecordingEnabled(gatedOn);
+    }
 
     // ---- Watch + directory restore (params before arming) ----
     recDirEdit_->setText(s.value("rec/dir", QStringLiteral("record")).toString());
@@ -5513,7 +5538,7 @@ void MainWindow::restoreUiState() {
     // so the remembered current index below lands on a page that still exists.
     // phase82: same key the settings dialog writes; a missing key = all visible.
     {
-        const QStringList hidden = s.value("ui/hiddenRightTabs").toStringList();
+        const QStringList hidden = s.value(tokens::kSettingsKeyHiddenRightPanels).toStringList();
         for (int i = 0; i < rightTabs_->count(); ++i) {
             if (rightTabs_->isTabEnabled(i) && hidden.contains(rightTabs_->tabText(i)))
                 rightTabs_->setTabVisible(i, false);
@@ -5557,7 +5582,7 @@ void MainWindow::restoreUiState() {
                                             0, centerTabs_->count() - 1));
     const QByteArray splitterState = s.value("ui/splitterSizes").toByteArray();
     if (mainSplitter_ && !splitterState.isEmpty()) mainSplitter_->restoreState(splitterState);
-    spectrum_->setFftSizeValue(s.value("rx/fftSize", 2048).toInt());
+    spectrum_->setFftSizeValue(s.value(tokens::kSettingsKeyFftSize, 2048).toInt());
 
     // Restore focus mode last (no animation): collapse the rails instantly.
     // Block the button's toggled signal so we don't double-toggle.

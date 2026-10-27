@@ -390,6 +390,7 @@ public slots:
     // to take sourceMutex_ against the read loop.
     std::vector<double> availableGainsDb() const;
     void setGatedRecordingEnabled(bool e);
+    bool gatedRecordingEnabled() const { return gatedEnabled_; }
     // ---- Unattended signal-triggered watch recording ----
     // Arm/disarm the watch (does not touch playback: listening is never
     // interrupted). While armed, real RSSI above the threshold starts a

@@ -36,6 +36,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTimer>
@@ -121,6 +122,10 @@ private slots:
     // 首启向导卡的三步按钮必须驱动真实控件路径（点下去是真动作）：②去调谐真聚焦
     // 快速调谐输入；✕ 真落盘永久关闭。①打开捕获文件是模态对话框，测试不点（会阻塞）。
     void guideCardButtonsDriveRealControls();
+    // P1 持久化：网络音频面板（host / 端口 / 传输）与触发式录制开关经真实
+    // saveUiState() 落盘、下次启动恢复。gated 的恢复屏蔽 checkbox 信号、把恢复
+    // 状态显式 dispatch 进引擎——断言引擎状态，而不只是控件。
+    void netAudioAndGatedPersistAndRestoreRoundTrip();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -1063,6 +1068,73 @@ void TestUiIntegration::receiveLinkBadgeFourStatesDrivenByRealSignals() {
     QVERIFY2(badge->text().contains(QStringLiteral("空闲")),
              qPrintable(QString("synthetic source must keep the link badge idle, got: %1")
                             .arg(badge->text())));
+}
+
+// P1 持久化：网络音频面板（host / 端口 / 传输）与触发式录制开关经真实
+// saveUiState() 落盘、下次启动恢复。gated 的恢复屏蔽 checkbox 信号、把恢复
+// 状态显式 dispatch 进引擎——断言引擎状态，而不只是控件。两个真实窗口共享
+// 重定向的 QSettings 目录；无 mock、无手工种子键。
+void TestUiIntegration::netAudioAndGatedPersistAndRestoreRoundTrip() {
+    clearVfoSettings();
+    const QString targetHost = QStringLiteral("192.0.2.55");   // RFC 5737 doc range
+    const int targetPort = 51234;
+    const QString targetProto = QStringLiteral("TCP");
+
+    // Window 1: drive the real widgets end-to-end.
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* host = win.findChild<QLineEdit*>("netAudioHostEdit");
+        auto* port = win.findChild<QSpinBox*>("netAudioPortSpin");
+        auto* proto = win.findChild<QComboBox*>("netAudioProtoCombo");
+        auto* gated = win.findChild<QCheckBox*>("gatedCheck");
+        QVERIFY(eng && host && port && proto && gated);
+
+        host->setText(targetHost);
+        port->setValue(targetPort);
+        proto->setCurrentText(targetProto);
+        gated->setChecked(true);
+        QApplication::processEvents();
+        // The stateChanged lambda dispatches to the engine live:
+        QTRY_VERIFY_WITH_TIMEOUT(eng->gatedRecordingEnabled(), 2000);
+
+        // Let the 500 ms debounced save timer arm; the destructor then flushes
+        // saveUiState() to disk (same path the app uses on exit).
+        QTest::qWait(700);
+    }
+
+    // Fresh QSettings on disk (window 1 already destroyed + flushed).
+    {
+        mbdsdr::core::AppSettings s;
+        s.sync();
+        QCOMPARE(s.value(tokens::kSettingsKeyNetAudioHost).toString(), targetHost);
+        QCOMPARE(s.value(tokens::kSettingsKeyNetAudioPort).toInt(), targetPort);
+        QCOMPARE(s.value(tokens::kSettingsKeyNetAudioProto).toString(), targetProto);
+        QCOMPARE(s.value(tokens::kSettingsKeyGatedRecording).toBool(), true);
+    }
+
+    // Window 2: a fresh launch must restore all four, and the gated restore
+    // must reach the engine explicitly (checkbox signals are blocked there,
+    // so the stateChanged lambda never fires).
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* host = win.findChild<QLineEdit*>("netAudioHostEdit");
+        auto* port = win.findChild<QSpinBox*>("netAudioPortSpin");
+        auto* proto = win.findChild<QComboBox*>("netAudioProtoCombo");
+        auto* gated = win.findChild<QCheckBox*>("gatedCheck");
+        QVERIFY(eng && host && port && proto && gated);
+
+        QCOMPARE(host->text(), targetHost);
+        QCOMPARE(port->value(), targetPort);
+        QCOMPARE(proto->currentText(), targetProto);
+        QCOMPARE(gated->isChecked(), true);
+        QTRY_VERIFY_WITH_TIMEOUT(eng->gatedRecordingEnabled(), 2000);
+    }
 }
 
 // Phase63: the Rx demod-mode combo and bandwidth combo persist through the real
