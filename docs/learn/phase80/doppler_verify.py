@@ -13,7 +13,7 @@ from mbdsdr_ai.doppler_compensation import remove_doppler_shift, apply_doppler_s
 from mbdsdr_ai.sat_passes import GroundStation, predict_passes, compute_doppler_curve
 
 # ---- 场景参数 -------------------------------------------------------------
-QTH = GroundStation(43.8267, 125.4189, 220.0)   # 吉林农业大学
+QTH = GroundStation(43.8267, 125.4189, 220.0)   # 校园站点（站点名按公开仓库红线中性化）
 F0 = 145.800e6                                   # ARISS 下行
 VOICE_BW = 2500.0                                # FM 语音通带 ±2.5 kHz
 FS = 48000.0                                     # 基带 IQ 采样率
