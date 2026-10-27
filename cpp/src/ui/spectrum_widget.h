@@ -3,12 +3,14 @@
 
 #include <QWidget>
 #include <QList>
+#include "core/tokens.h"
 #include "core/spectrum_frame.h"
 #include "dsp/peak_detector.h"
 #include "dsp/vfo_manager.h"
 
 class QComboBox;
 class QLabel;
+class QSlider;
 class QSpinBox;
 class QTableWidget;
 
@@ -54,6 +56,14 @@ public slots:
     void setMaxHoldEnabled(bool on);
     // Forward: arm/disarm the running minimum (min-hold) overlay envelope.
     void setMinHoldEnabled(bool on);
+
+    // ---- 阶段 B1: canvas right-edge vertical rail (Zoom / Max / Min) ------
+    // Three sliders pinned to the right edge of the canvas, SDR++ style. They
+    // hold no state of their own: each one drives the same canvas API (and the
+    // same toolbar spinbox) the settings dialog and saveUiState already use.
+    // Hidden by request ("UI elements I can switch off"): ui/edgeRailVisible.
+    void setEdgeRailVisible(bool on);
+    bool edgeRailVisible() const;
 
     // Waterfall controls (originally the standalone wfBar).
     void setScrollSpeed(int linesPerFrame);
@@ -103,6 +113,18 @@ private:
     QComboBox* scrollCombo_ = nullptr;
     QComboBox* paletteCombo_ = nullptr;
     QComboBox* depthCombo_ = nullptr;   // waterfall history depth (rows)
+    // 阶段 B1: right-edge rail + its three sliders / read-outs.
+    QWidget*   edgeRail_     = nullptr;
+    bool       edgeRailOn_   = tokens::kEdgeRailDefaultVisible;
+    QSlider*   zoomSlider_   = nullptr;
+    QSlider*   dbMaxSlider_  = nullptr;
+    QSlider*   dbMinSlider_  = nullptr;
+    QLabel*    zoomValue_    = nullptr;
+    QLabel*    dbMaxValue_   = nullptr;
+    QLabel*    dbMinValue_   = nullptr;
+    // Keep the rail sliders in step when the value is changed elsewhere
+    // (settings dialog, restore, ControlHub) -- one truth, many handles.
+    void syncEdgeRail();
     QLabel*    testLabel_  = nullptr;
     QLabel*    infoLabel_   = nullptr;
     QTableWidget* peakTable_ = nullptr;

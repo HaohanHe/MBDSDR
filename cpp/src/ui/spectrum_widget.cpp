@@ -16,6 +16,7 @@
 #include <QTableWidgetItem>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QSlider>
 #include <QToolButton>
 #include <QSettings>
 #include <algorithm>
@@ -297,10 +298,12 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
 
     topRow->addWidget(new QLabel("dB", this));
     dbMinSpin_ = new QSpinBox(this);
+    dbMinSpin_->setObjectName("dbMinSpin");
     dbMinSpin_->setRange(tokens::kDbSpinLowerMin, tokens::kDbSpinLowerMax);
     dbMinSpin_->setValue(tokens::kDbLowerDefault);
     topRow->addWidget(dbMinSpin_);
     dbMaxSpin_ = new QSpinBox(this);
+    dbMaxSpin_->setObjectName("dbMaxSpin");
     dbMaxSpin_->setRange(tokens::kDbSpinUpperMin, tokens::kDbSpinUpperMax);
     dbMaxSpin_->setValue(tokens::kDbUpperDefault);
     topRow->addWidget(dbMaxSpin_);
@@ -589,7 +592,96 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
 
     // ---- Embedded unified canvas (takes the stretch) ----------------------
     canvas_ = new SpectrumDisplay(this);
-    outer->addWidget(canvas_, 1);
+    // ---- 阶段 B1: right-edge vertical rail (缩放 / 上限 / 下限) ------------
+    // SDR++ pins the three highest-frequency display controls to the right edge
+    // of the canvas as vertical sliders: "广度"(span/zoom) and the dB window
+    // "高度"(上下限). They own NO state of their own -- each drives the same
+    // canvas API / toolbar spinbox the settings dialog and saveUiState use, so
+    // one value keeps exactly one truth. The rail can be switched off in
+    // 设置 → 界面 (ui/edgeRailVisible).
+    {
+        auto* canvasRow = new QHBoxLayout();
+        canvasRow->setContentsMargins(0, 0, 0, 0);
+        canvasRow->setSpacing(tokens::scaled(tokens::kSpacingS));
+        canvasRow->addWidget(canvas_, 1);
+
+        edgeRail_ = new QWidget(this);
+        edgeRail_->setObjectName("spectrumEdgeRail");
+        edgeRail_->setFixedWidth(tokens::scaled(tokens::kEdgeRailW));
+        auto* railLay = new QVBoxLayout(edgeRail_);
+        railLay->setContentsMargins(0, 0, 0, 0);
+        railLay->setSpacing(tokens::scaled(tokens::kSpacingS));
+
+        auto addRailSlider = [this, railLay](const QString& objectName,
+                                             const QString& caption,
+                                             const QString& tip,
+                                             QSlider*& slider, QLabel*& value,
+                                             int lo, int hi, int val) {
+            auto* cap = new QLabel(caption, edgeRail_);
+            cap->setAlignment(Qt::AlignCenter);
+            cap->setToolTip(tip);
+            slider = new QSlider(Qt::Vertical, edgeRail_);
+            slider->setObjectName(objectName);
+            slider->setRange(lo, hi);
+            slider->setValue(std::clamp(val, lo, hi));
+            slider->setToolTip(tip);
+            slider->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+            value = new QLabel(edgeRail_);
+            value->setObjectName(objectName + QStringLiteral("Value"));
+            value->setAlignment(Qt::AlignCenter);
+            value->setToolTip(tip);
+            railLay->addWidget(cap);
+            railLay->addWidget(slider, 1);
+            railLay->addWidget(value);
+        };
+        const int zoomSteps = int(std::lround((tokens::kZoomMax - tokens::kZoomMin)
+                                              / tokens::kZoomSliderStep));
+        addRailSlider(QStringLiteral("edgeRailZoom"), QString::fromUtf8("缩放"),
+                      QString::fromUtf8("可视广度：上=放大（窄 span），下=缩小（宽 span）"),
+                      zoomSlider_, zoomValue_, 0, zoomSteps, 0);
+        addRailSlider(QStringLiteral("edgeRailDbMax"), QString::fromUtf8("上限"),
+                      QString::fromUtf8("显示上限 dB：谱线顶到哪（信号高度上端）"),
+                      dbMaxSlider_, dbMaxValue_, tokens::kDbSpinUpperMin,
+                      tokens::kDbSpinUpperMax, tokens::kDbUpperDefault);
+        addRailSlider(QStringLiteral("edgeRailDbMin"), QString::fromUtf8("下限"),
+                      QString::fromUtf8("显示下限 dB：噪底落在哪（信号高度下端）"),
+                      dbMinSlider_, dbMinValue_, tokens::kDbSpinLowerMin,
+                      tokens::kDbSpinLowerMax, tokens::kDbLowerDefault);
+        canvasRow->addWidget(edgeRail_);
+        outer->addLayout(canvasRow, 1);
+
+        // Wiring: every rail slider drives the ONE canonical handle (the canvas
+        // for zoom, the toolbar spinbox for the dB window) -- never a private
+        // copy of the value. The spinbox path in turn applies the range to the
+        // canvas and emits viewChanged, so persistence stays single-sourced.
+        connect(zoomSlider_, &QSlider::valueChanged, this, [this](int v) {
+            const double z = tokens::kZoomMin
+                             + static_cast<double>(v) * tokens::kZoomSliderStep;
+            if (canvas_) canvas_->setZoomFactor(z);
+            if (zoomValue_)
+                zoomValue_->setText(QStringLiteral("%1x").arg(z, 0, 'f', 1));
+            emit viewChanged();
+        });
+        connect(dbMaxSlider_, &QSlider::valueChanged, this, [this](int v) {
+            if (dbMaxSpin_) dbMaxSpin_->setValue(v);
+        });
+        connect(dbMinSlider_, &QSlider::valueChanged, this, [this](int v) {
+            if (dbMinSpin_) dbMinSpin_->setValue(v);
+        });
+        // Reverse direction: the rail follows whenever the value is moved from
+        // anywhere else (settings dialog / restore / ControlHub).
+        connect(dbMinSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
+                this, [this](int) { syncEdgeRail(); });
+        connect(dbMaxSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
+                this, [this](int) { syncEdgeRail(); });
+        syncEdgeRail();
+        // Visibility: read at construction so the very first paint honours it
+        // (the settings dialog 界面 tab and setEdgeRailVisible write the key).
+        setEdgeRailVisible(
+            mbdsdr::core::AppSettings()
+                .value(tokens::kSettingsKeyEdgeRailVisible,
+                       tokens::kEdgeRailDefaultVisible).toBool());
+    }
 
     // Canvas -> container signal forwarding.
     connect(canvas_, &SpectrumDisplay::frequencyChanged,
@@ -770,6 +862,7 @@ void SpectrumWidget::followTunedFrequency(double hz) {
 }
 void SpectrumWidget::setZoomFactor(double z) {
     if (canvas_) canvas_->setZoomFactor(z);
+    syncEdgeRail();   // the rail is a handle on the same value, not a second copy
 }
 double SpectrumWidget::zoomFactor() const {
     return canvas_ ? canvas_->zoomFactor() : 1.0;
@@ -786,6 +879,50 @@ void SpectrumWidget::setDbSpinValues(int lo, int hi) {
     if (dbMaxSpin_) dbMaxSpin_->setValue(hi);
     if (hi <= lo) hi = lo + 10;
     if (canvas_) canvas_->setDbRange(static_cast<float>(lo), static_cast<float>(hi));
+    syncEdgeRail();
+}
+
+// ---- 阶段 B1: right-edge rail --------------------------------------------
+void SpectrumWidget::setEdgeRailVisible(bool on) {
+    edgeRailOn_ = on;
+    if (edgeRail_) edgeRail_->setVisible(on);
+    // Written straight through so hiding the rail survives a restart even if
+    // the settings dialog is never opened (same key the dialog uses).
+    mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyEdgeRailVisible, on);
+}
+bool SpectrumWidget::edgeRailVisible() const {
+    return edgeRailOn_;
+}
+
+// Pull the rail handles back in line with the canonical values (zoom factor +
+// the two dB spinboxes). Signals are blocked so this can never re-enter the
+// sliders' own handlers.
+void SpectrumWidget::syncEdgeRail() {
+    if (!edgeRail_) return;
+    if (zoomSlider_) {
+        const double z = canvas_ ? canvas_->zoomFactor() : tokens::kZoomMin;
+        const int v = std::clamp(
+            int(std::lround((z - tokens::kZoomMin) / tokens::kZoomSliderStep)),
+            zoomSlider_->minimum(), zoomSlider_->maximum());
+        const QSignalBlocker blk(zoomSlider_);
+        zoomSlider_->setValue(v);
+        if (zoomValue_)
+            zoomValue_->setText(QStringLiteral("%1x").arg(z, 0, 'f', 1));
+    }
+    if (dbMinSlider_ && dbMinSpin_) {
+        const QSignalBlocker blk(dbMinSlider_);
+        dbMinSlider_->setValue(std::clamp(dbMinSpin_->value(),
+                                          dbMinSlider_->minimum(),
+                                          dbMinSlider_->maximum()));
+        if (dbMinValue_) dbMinValue_->setText(QString::number(dbMinSpin_->value()));
+    }
+    if (dbMaxSlider_ && dbMaxSpin_) {
+        const QSignalBlocker blk(dbMaxSlider_);
+        dbMaxSlider_->setValue(std::clamp(dbMaxSpin_->value(),
+                                          dbMaxSlider_->minimum(),
+                                          dbMaxSlider_->maximum()));
+        if (dbMaxValue_) dbMaxValue_->setText(QString::number(dbMaxSpin_->value()));
+    }
 }
 
 int SpectrumWidget::fftSizeValue() const {

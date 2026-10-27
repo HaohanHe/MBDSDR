@@ -1020,6 +1020,19 @@ inline constexpr const char* kSettingsKeyDbMax     = "rx/dbMax";
 inline constexpr const char* kSettingsKeyZoomFactor = "view/zoomFactor";
 inline constexpr const char* kSettingsKeyFftSize    = "rx/fftSize";
 inline constexpr const char* kSettingsKeyPersistMode = "view/persistMode";
+// =====================================================================
+// 阶段 B1: the canvas right-edge vertical rail (SDR++ "Zoom / Max / Min"
+// gesture) -- three always-reachable sliders pinned to the right edge of the
+// spectrum canvas. They own NO new state: they drive the SAME
+// view/zoomFactor / rx/dbMin / rx/dbMax the toolbar spinboxes, the settings
+// dialog sliders and saveUiState already read and write, so there is exactly
+// one truth per value and no orphan key.
+// The rail itself can be switched off (user asked for "UI elements I can turn
+// off"), under its own key; objectNames are pinned by the UI tests.
+// =====================================================================
+inline constexpr const char* kSettingsKeyEdgeRailVisible = "ui/edgeRailVisible";
+inline constexpr bool kEdgeRailDefaultVisible = true;
+inline constexpr int  kEdgeRailW = 56;          // px, width only (height = canvas)
 // ---- Network-audio streaming panel: host / port / transport of the demodulated
 // 48 kHz PCM stream. Persisted by saveUiState; the edit / spin / combo keep
 // their built-in defaults (127.0.0.1 / 49100 / UDP) when the keys are absent.

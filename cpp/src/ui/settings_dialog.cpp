@@ -262,6 +262,16 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         wfDepthCombo_->setCurrentIndex(1);   // 256 default
         dispForm->addRow(tr("瀑布深度"), wfDepthCombo_);
 
+        // 画布右缘滑条（缩放/上限/下限）-- 阶段 B1。只管"这条竖排控件在不在"，
+        // 三个值本身仍是 displayGroup_ 里那三条滑条 / 工具栏 spinbox 的同一份。
+        edgeRailChk_ = new QCheckBox(tr("画布右缘滑条（缩放 / 上限 / 下限）"),
+                                     displayGroup_);
+        edgeRailChk_->setObjectName("edgeRailChk");
+        edgeRailChk_->setChecked(tokens::kEdgeRailDefaultVisible);
+        edgeRailChk_->setToolTip(
+            tr("频谱画布右缘竖排三滑条：缩放（广度）、显示上限、显示下限（高度）"));
+        dispForm->addRow(tr("画布元素"), edgeRailChk_);
+
         uiLay->addWidget(displayGroup_);
         uiLay->addStretch(1);
 
@@ -447,6 +457,13 @@ void SettingsDialog::loadFromConfig(const ai::AiConfig& cfg) {
         }
         wfDepthCombo_->setCurrentIndex(idx);
     }
+    // 阶段 B1: canvas right-edge rail visibility (same key the widget reads on
+    // construction, so the dialog and the live widget are one state).
+    if (edgeRailChk_) {
+        edgeRailChk_->setChecked(
+            s.value(tokens::kSettingsKeyEdgeRailVisible,
+                    tokens::kEdgeRailDefaultVisible).toBool());
+    }
 }
 
 void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
@@ -492,6 +509,10 @@ void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
     s.setValue(tokens::kSettingsKeyFftSize, fftCombo_->currentText().toInt());
     s.setValue(tokens::kSettingsKeyPersistMode, persistCombo_->currentIndex());
     s.setValue(tokens::kSettingsKeyWfDepth, wfDepthCombo_->currentData().toInt());
+    // 阶段 B1: the rail switch -- written here AND by SpectrumWidget so hiding
+    // it from either place lands on the same key.
+    if (edgeRailChk_)
+        s.setValue(tokens::kSettingsKeyEdgeRailVisible, edgeRailChk_->isChecked());
 }
 
 QStringList SettingsDialog::hiddenRightPanels() const {
@@ -536,6 +557,11 @@ int SettingsDialog::displayPersistMode() const {
 int SettingsDialog::displayWfDepth() const {
     return wfDepthCombo_ ? wfDepthCombo_->currentData().toInt()
                          : tokens::kWaterfallDepthDefault;
+}
+
+bool SettingsDialog::edgeRailVisible() const {
+    return edgeRailChk_ ? edgeRailChk_->isChecked()
+                        : tokens::kEdgeRailDefaultVisible;
 }
 
 int SettingsDialog::volume() const { return volumeSlider_->value(); }

@@ -39,6 +39,7 @@
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QToolButton>
 #include <QTimer>
 
 #include <cmath>
@@ -46,6 +47,7 @@
 #include "core/tokens.h"
 #include "ui/main_window.h"
 #include "ui/spectrum_widget.h"
+#include "ui/spectrum_display.h"
 #include "ui/bookmark_manager.h"
 #include "ai/agent.h"
 #include "ai/ai_session_store.h"
@@ -137,6 +139,12 @@ private slots:
     // 活动布局 A2 "排"：持久化顺序里出现过期/未知 id 时只按认识的排，绝不
     // 凭空造页签——页签集合与数量必须一字不差。
     void rightTabOrderStaleEntriesIgnored();
+    // 阶段 B1：画布右缘竖排三滑条（缩放/上限/下限）——断言它驱动的是同一份
+    // 状态（画布 zoomFactor、dB 下限），不是另起一份私有值。
+    void edgeRailSlidersDriveTheSameState();
+    // 阶段 B1：右缘滑条属于"可以禁掉的 UI 元素"——ui/edgeRailVisible 落盘、
+    // 下次启动真的不显示；默认（键缺失）为显示。
+    void edgeRailVisibilityPersistsRoundTrip();
     // 活动布局 A2 "排"：当前页绝不能停在分组标题页（其 page 是空 QWidget，
     // 表现就是"右栏一片空白"）。覆盖两条路径：旧的位置索引 / 指到标题的 id。
     void rightTabCurrentNeverLandsOnGroupHeader();
@@ -1153,6 +1161,93 @@ void TestUiIntegration::rightTabCurrentNeverLandsOnGroupHeader() {
         assertOnRealPanel(tabs);
     }
     clearRightTabLayoutKeys();
+}
+
+// 阶段 B1：画布右缘竖排三滑条。三条滑条不持有自己的状态——缩放走画布
+// zoomFactor，下限走工具栏 spinbox（进而 setDbRange），所以断言落在"真实
+// 生效处"，而不是滑条自己的 value。
+void TestUiIntegration::edgeRailSlidersDriveTheSameState() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* rail = win.findChild<QWidget*>("spectrumEdgeRail");
+    auto* zoom = win.findChild<QSlider*>("edgeRailZoom");
+    auto* dbMin = win.findChild<QSlider*>("edgeRailDbMin");
+    auto* canvas = win.findChild<ui::SpectrumDisplay*>();
+    QVERIFY(rail);
+    QVERIFY(zoom);
+    QVERIFY(dbMin);
+    QVERIFY(canvas);
+    // isHidden() (not isVisible()): 右缘滑条在频谱页里，若前一个用例把中栏
+    // 切到别的页签，isVisible() 会因祖先页未显示而假阴性——这里问的是
+    // "用户有没有禁掉它"，不是"此刻屏幕上能不能看见"。
+    QVERIFY2(!rail->isHidden(),
+             qPrintable(QString("右缘滑条默认应显示 (key=%1 win=%2 rail=%3)")
+                            .arg(mbdsdr::core::AppSettings()
+                                     .value(tokens::kSettingsKeyEdgeRailVisible)
+                                     .toString())
+                            .arg(win.isVisible())
+                            .arg(rail->isVisible())));
+
+    // 缩放：滑条第 30 格 = 1.0 + 30*0.1 = 4.0x（kZoomSliderStep 是 0.1）。
+    zoom->setValue(30);
+    QApplication::processEvents();
+    QVERIFY2(qAbs(canvas->zoomFactor() - 4.0) < 1e-6,
+             qPrintable(QString("右缘缩放滑条必须驱动画布 zoomFactor，实测 %1")
+                            .arg(canvas->zoomFactor())));
+
+    // 下限：滑条 -> 工具栏 spinbox -> 画布 floor（同一份值，三次传递）。
+    // 先关掉 dB 自动量程（自动档下 floor 由每帧真实峰值缓动决定，不会立即
+    // 反映手动下限）：关档即"锁定当前量程"，手动值立刻生效。
+    auto* autoDb = win.findChild<QToolButton*>("btnAutoDbRange");
+    QVERIFY(autoDb);
+    if (autoDb->isChecked()) autoDb->click();
+    QApplication::processEvents();
+    QVERIFY(!autoDb->isChecked());
+    dbMin->setValue(-60);
+    QApplication::processEvents();
+    auto* dbMinSpin = win.findChild<QSpinBox*>("dbMinSpin");
+    QVERIFY(dbMinSpin);
+    QCOMPARE(dbMinSpin->value(), -60);
+    QVERIFY2(qAbs(canvas->currentDbFloor() - (-60.0f)) < 0.51f,
+             qPrintable(QString("右缘下限滑条必须驱动画布 dB 下限，实测 %1")
+                            .arg(canvas->currentDbFloor())));
+}
+
+// 阶段 B1：右缘滑条可禁——键缺失=显示（诚实默认）；写 false 后新建窗口
+// 真的不显示。
+void TestUiIntegration::edgeRailVisibilityPersistsRoundTrip() {
+    {
+        mbdsdr::core::AppSettings s;
+        s.remove(tokens::kSettingsKeyEdgeRailVisible);
+        s.sync();
+    }
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* rail = win.findChild<QWidget*>("spectrumEdgeRail");
+        QVERIFY(rail);
+        QVERIFY2(!rail->isHidden(), "键缺失时右缘滑条必须显示（诚实默认）");
+    }
+    {
+        mbdsdr::core::AppSettings s;
+        s.setValue(tokens::kSettingsKeyEdgeRailVisible, false);
+        s.sync();
+    }
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* rail = win.findChild<QWidget*>("spectrumEdgeRail");
+        QVERIFY(rail);
+        QVERIFY2(rail->isHidden(), "持久化关闭后右缘滑条不得显示");
+    }
+    {
+        mbdsdr::core::AppSettings s;
+        s.remove(tokens::kSettingsKeyEdgeRailVisible);
+        s.sync();
+    }
 }
 
 // P1-4 持久化：值守录制开关经真实 saveUiState() 落盘、下次启动恢复；恢复

@@ -47,6 +47,8 @@ public:
     int    displayFftSize() const;  // FFT 点数 (1024/2048/4096)
     int    displayPersistMode() const;  // 余晖 0=关 / 1=低 / 2=高
     int    displayWfDepth() const;      // 瀑布深度 (rows, kWaterfallDepthChoices)
+    // 阶段 B1: whether the canvas right-edge rail (缩放/上限/下限) is shown.
+    bool   edgeRailVisible() const;
 
 protected:
     void showEvent(QShowEvent* e) override;
@@ -87,6 +89,8 @@ private:
     QComboBox* persistCombo_ = nullptr;
     QComboBox* wfDepthCombo_ = nullptr;
     QGroupBox* displayGroup_ = nullptr;
+    // 阶段 B1: canvas right-edge rail (Zoom/Max/Min) on-off switch.
+    QCheckBox* edgeRailChk_ = nullptr;
 
     void buildUiTab();   // ctor helper: fills the 界面 tab
 };

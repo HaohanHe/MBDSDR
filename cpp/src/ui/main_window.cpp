@@ -3450,6 +3450,9 @@ MainWindow::MainWindow(QWidget* parent)
                 spectrum_->setFftSizeValue(dlg.displayFftSize());
                 spectrum_->setPersistMode(dlg.displayPersistMode());
                 spectrum_->setWaterfallDepth(dlg.displayWfDepth());
+                // 阶段 B1: the right-edge rail is a UI element the user can
+                // switch off (设置 → 界面 → 画布元素).
+                spectrum_->setEdgeRailVisible(dlg.edgeRailVisible());
             }
             if (engine_) engine_->onSetGain(static_cast<double>(dlg.displayGainDb()));
             if (gainSlider_) {
