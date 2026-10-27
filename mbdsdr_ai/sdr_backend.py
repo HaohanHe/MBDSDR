@@ -1117,6 +1117,9 @@ class RTLSDRBackend(SDRBackend):
         # 来源: librtlsdr src/librtlsdr.c:959-969 —— 真实离散增益表在
         # mbdsdr_ai/rtlsdr_params.py，连上探测到调谐器型号后填充。
         self._gain_table_db: list = []
+        # 本地 USB 直连不可用时，自动拉起的 rtl_tcp 子进程句柄（disconnect 时回收，
+        # 绝不留下野进程占着棒子——rtl_tcp 单客户端，占着别人就枚举不到）。
+        self._rtl_tcp_proc = None
 
     @staticmethod
     def list_devices() -> list:
@@ -1242,6 +1245,101 @@ class RTLSDRBackend(SDRBackend):
             out.append({"index": i, "serial": serial, "tuner": tuner})
         return out
 
+    @staticmethod
+    def _find_rtl_tcp_exe():
+        """定位 rtl_tcp 可执行文件；找不到返回 None。
+
+        安全红线：只做本地搜索，**绝不自动下载**二进制（供应链风险，
+        与 windows_setup.py 的口径一致）。
+        """
+        import shutil
+
+        p = shutil.which("rtl_tcp") or shutil.which("rtl_tcp.exe")
+        if p:
+            return p
+        cands = [os.path.join(r"C:\rtl-sdr", "bin", "rtl_tcp.exe")]
+        try:
+            from .windows_setup import default_candidate_dirs
+            for d in default_candidate_dirs():
+                cands.append(os.path.join(d, "rtl_tcp.exe"))
+        except Exception:
+            pass
+        for c in cands:
+            if os.path.isfile(c):
+                return c
+        return None
+
+    def _try_start_local_rtl_tcp(self) -> bool:
+        """本地 USB 直连不可用时，拉起 rtl_tcp 并改走仓库自研的 TCP 客户端。
+
+        触发前提：本机 pyrtlsdr 不可用（librtlsdr.dll 缺 rtlsdr_set_dithering，
+        见 _enumerate_via_ctypes 注释）。此时唯一能真实拿到 IQ 的路径就是
+        rtl_tcp + 本仓 MIT 的 RtlTcpClient —— 也正是 runbook §3.4–3.5
+        记载的受支持接法。
+
+        诚实纪律：
+        - 找不到二进制 / 起不来 / 连不上，一律回收子进程并返回 False，
+          **绝不伪造连接成功**；
+        - 进程句柄存 self._rtl_tcp_proc，由 disconnect() 回收；
+        - 端口动态选取，避免撞上用户已在跑的 rtl_tcp(1234)。
+        """
+        import socket
+        import subprocess
+
+        exe = self._find_rtl_tcp_exe()
+        if not exe:
+            return False
+
+        try:
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            port = int(probe.getsockname()[1])
+            probe.close()
+        except Exception:
+            port = 1234
+
+        try:
+            proc = subprocess.Popen(
+                [exe, "-a", "127.0.0.1", "-p", str(port)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            logger.warning(f"拉起 rtl_tcp 失败: {e}")
+            return False
+
+        # 注意（真机踩坑，非推测）：**不能**用试探性 socket 连接做就绪探测。
+        # rtl_tcp 是单客户端协议，探测那一次会吃掉唯一的客户端名额，随后真实
+        # 连接直接被对端关闭（实测报"设备信息读取不完整（连接被对端关闭）"）。
+        # 所以这里不做探测，直接重试**真实的**适配器连接。
+        from .rtltcp_client import RtlTcpDeviceAdapter
+
+        adapter = None
+        last_err = None
+        for _attempt in range(6):
+            if proc.poll() is not None:
+                break
+            try:
+                adapter = RtlTcpDeviceAdapter(
+                    host="127.0.0.1", port=port, ppm=self._ppm)
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(0.5)
+        if adapter is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            logger.warning("rtl_tcp 兜底连接失败（%s），已回收子进程", last_err)
+            return False
+        self._sdr = adapter
+
+        self._rtl_tcp_proc = proc
+        self._host, self._port = "127.0.0.1", port
+        logger.warning(
+            "本地 USB 直连不可用，已自动拉起 rtl_tcp(127.0.0.1:%d) 并改走仓库"
+            "自研 TCP 客户端；disconnect 时回收该进程。", port)
+        return True
+
     def connect(self) -> bool:
         try:
             if self._host is not None:
@@ -1265,13 +1363,17 @@ class RTLSDRBackend(SDRBackend):
                     # pyrtlsdr 的 librtlsdr.py:147 在 import 期即失败，本地 USB 直连
                     # 这条路径在本机不可用。必须如实告知并指明可用的替代路径，
                     # 不能把裸 AttributeError 甩给用户当"连接失败"。
-                    raise RuntimeError(
-                        "本地 USB 直连不可用：pyrtlsdr 无法导入（%s）。"
-                        "本机 librtlsdr.dll 缺少 rtlsdr_set_dithering 符号，"
-                        "pyrtlsdr 整个包不可用；请改用仓库自研的 rtl_tcp 路径——"
-                        "先启动 rtl_tcp 服务，再设 MBDSDR_RTL_TCP=127.0.0.1:1234 重连。"
-                        % e) from e
-                self._sdr = RtlSdr(self._device_index)
+                    # 先试着自动拉起本地 rtl_tcp 走仓库自研 TCP 客户端兜底；
+                    # 兜底也失败，才把可执行指引抛给用户（绝不裸抛 AttributeError）。
+                    if not self._try_start_local_rtl_tcp():
+                        raise RuntimeError(
+                            "本地 USB 直连不可用：pyrtlsdr 无法导入（%s）。"
+                            "本机 librtlsdr.dll 缺少 rtlsdr_set_dithering 符号，"
+                            "pyrtlsdr 整个包不可用；且未能自动拉起 rtl_tcp 兜底。"
+                            "请手动启动 rtl_tcp 服务，再设 "
+                            "MBDSDR_RTL_TCP=127.0.0.1:1234 重连。" % e) from e
+                else:
+                    self._sdr = RtlSdr(self._device_index)
             # 调谐器型号：本地 USB 走 ctypes 句柄探测（AIO 类无 tuner_type）；
             # rtl_tcp 网络模式用握手包带回的 tuner_type（rtl_tcp.c:623），
             # 不再去 ctypes 打开本地 USB 棒。
@@ -1399,6 +1501,23 @@ class RTLSDRBackend(SDRBackend):
             except Exception:
                 pass
             self._sdr = None
+        # 回收自动拉起的 rtl_tcp。rtl_tcp 是单客户端且独占 USB 设备，
+        # 留着会把棒子锁死——其它程序（含本应用下次枚举）都再也看不到设备。
+        if self._rtl_tcp_proc is not None:
+            try:
+                self._rtl_tcp_proc.terminate()
+            except Exception:
+                pass
+            try:
+                self._rtl_tcp_proc.wait(timeout=3)
+            except Exception:
+                try:
+                    self._rtl_tcp_proc.kill()
+                except Exception:
+                    pass
+            self._rtl_tcp_proc = None
+            # 恢复成"本地 USB"语义：下次 connect 重新走直连→兜底判定
+            self._host, self._port = None, 1234
         super().disconnect()
 
     def _apply_frequency(self, freq_hz: float) -> bool:

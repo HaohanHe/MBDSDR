@@ -65,6 +65,47 @@ def test_real_device_enumeration_shape():
         assert isinstance(dev["tuner"], str)
 
 
+def test_find_rtl_tcp_exe_never_raises():
+    """定位 rtl_tcp 二进制：找得到返回路径，找不到返回 None —— 绝不抛、绝不下载。"""
+    exe = RTLSDRBackend._find_rtl_tcp_exe()
+    assert exe is None or isinstance(exe, str)
+
+
+def test_disconnect_recycles_spawned_rtl_tcp():
+    """disconnect 必须回收自动拉起的 rtl_tcp 进程。
+
+    rtl_tcp 单客户端且独占 USB：留着会把棒子锁死，导致其它程序
+    （含本应用下次枚举）再也看不到设备。这条纪律必须用测试钉死。
+    """
+    class _FakeProc:
+        def __init__(self):
+            self.terminated = False
+            self.waited = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            self.waited = True
+            return 0
+
+        def kill(self):
+            pass
+
+    backend = RTLSDRBackend()
+    fake = _FakeProc()
+    backend._rtl_tcp_proc = fake
+    backend._sdr = None
+    backend._host, backend._port = "127.0.0.1", 63362
+
+    backend.disconnect()
+
+    assert fake.terminated, "disconnect 必须 terminate 掉拉起的 rtl_tcp"
+    assert backend._rtl_tcp_proc is None, "进程句柄必须清空"
+    # 恢复成本地 USB 语义，下次 connect 重新走直连→兜底判定
+    assert backend._host is None
+
+
 def test_warn_once_dedupes_static_environment_warnings(caplog):
     """环境缺失类告警进程内只报一次。
 
