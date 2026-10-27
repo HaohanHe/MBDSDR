@@ -2258,17 +2258,59 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_transmit_cw",
-        description="发射连续波（CW）信号。仅支持TX-capable设备（HackRF/PlutoSDR/BladeRF/LimeSDR/USRP）。指定频率、幅度和持续时间。用于设备测试、干扰源定位、信号校准。注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。",
+        description=(
+            "发射连续波（CW）信号，用于设备测试、干扰源定位、信号校准。"
+            "前置条件：先调用 sdr_connect_hardware 连接一台 TX-capable 设备"
+            "（仅支持 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP；RTL-SDR 等只收设备不支持）。"
+            "副作用：实际发射射频信号，有真实 RF 后果，故设 arm_manual 人工门，"
+            "未显式武装时只返回 gated 信封、绝不发射。失败恢复：未连接/不支持 TX/"
+            "发射失败时如实报错（报错即未发射），修正后重试，不要虚构发射成功。"
+            "注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。"
+        ),
         parameters={
             "type": "object",
             "properties": {
                 "frequency_hz": {"type": "number", "description": "发射中心频率（Hz）"},
                 "amplitude": {"type": "number", "description": "幅度（0.0-1.0）", "default": 0.1},
                 "duration_sec": {"type": "number", "description": "持续时间（秒）", "default": 1.0},
+                "arm_manual": {"type": "boolean",
+                               "description": "人工门：实际发射前须显式传 true"
+                                              "（无人值守调用保持缺省=false）"},
             },
-            "required": ["frequency_hz"],
+            "required": ["frequency_hz", "arm_manual"],
         },
-        handler=lambda args: ToolResult(success=True, content=_sdr_transmit_cw(args)),
+        handler=_sdr_transmit_cw,
+        category="hal",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_transmit_iq",
+        description=(
+            "发射任意 IQ 波形（float32 交错复基带）。前置条件：先调用"
+            " sdr_connect_hardware 连接 TX-capable 设备（仅支持 HackRF/PlutoSDR/"
+            "BladeRF/LimeSDR/USRP）；波形本身由 modulate_symbols 等积木生成，"
+            "本工具只负责把现成波形发给设备，不在内部合成信号。副作用：实际发射"
+            "射频信号，有真实 RF 后果，arm_manual 人工门为强制项，未显式武装只返回"
+            " gated 信封。失败恢复：未连接/不支持 TX/幅度越界/IQ 为空或不成对时"
+            "如实报错（报错即未发射），修正后重试，不要虚构发射成功、不要截断波形。"
+            "注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "frequency_hz": {"type": "number", "description": "发射中心频率（Hz）"},
+                "iq_b64": {"type": "string",
+                           "description": "float32 交错复基带 [re,im,re,im,...] 的 base64"
+                                          "（与 iq 二选一，大载荷推荐用这个）"},
+                "iq": {"type": "array",
+                       "description": "float 交错 [re,im,...] 或 [[re,im],...]（与 iq_b64 二选一）"},
+                "amplitude": {"type": "number", "description": "幅度 (0,1]", "default": 0.1},
+                "arm_manual": {"type": "boolean",
+                               "description": "人工门：实际发射前须显式传 true"},
+            },
+            "required": ["frequency_hz", "arm_manual"],
+        },
+        handler=_sdr_transmit_iq,
         category="hal",
     )
 
@@ -5677,7 +5719,16 @@ def _sdr_connect_hardware(args):
 
 
 def _sdr_transmit_cw(args):
-    """发射CW信号。"""
+    """发射CW信号（写工具：arm_manual 人工门 + 如实信封）。"""
+    # 手动门（与 _set_ppm_correction / core.mcp_server 写工具 gate 同语义）：
+    # RF 发射属高危写操作，未显式武装不执行；返回 gated 信封而非假装成功。
+    if args.get("arm_manual", False) is not True:
+        return ToolResult(
+            success=False,
+            content="手动模式：未执行 CW 发射（写操作需显式传 arm_manual=true）",
+            data={"gated": True},
+        )
+
     try:
         from mbdsdr_ai.hal import HardwareManager
     except ImportError:
@@ -5691,10 +5742,14 @@ def _sdr_transmit_cw(args):
     backend = mgr.get_active_backend()
 
     if not backend:
-        return "错误: 未连接任何SDR设备，请先调用 sdr_connect_hardware"
+        return ToolResult(
+            success=False,
+            content="错误: 未连接任何SDR设备，请先调用 sdr_connect_hardware")
 
     if not backend.supports_tx():
-        return f"错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP 等TX-capable设备支持。"
+        return ToolResult(
+            success=False,
+            content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP 等TX-capable设备支持。")
 
     ok = mgr.transmit_cw(freq, amp, dur)
 
@@ -5706,7 +5761,96 @@ def _sdr_transmit_cw(args):
     lines.append("")
     lines.append("注意: 发射需遵守当地无线电法规，未经许可不得在禁发频段发射。")
 
-    return '\n'.join(lines)
+    return ToolResult(success=bool(ok), content='\n'.join(lines))
+
+
+def _sdr_transmit_iq(args):
+    """发射任意 IQ 波形（写工具：arm_manual 强制门；本工具不合成信号）。"""
+    # 手动门：RF 发射属高危写操作，未显式武装不执行；返回 gated 信封而非假装成功。
+    if args.get("arm_manual", False) is not True:
+        return ToolResult(
+            success=False,
+            content="手动模式：未执行 IQ 发射（写操作需显式传 arm_manual=true）",
+            data={"gated": True},
+        )
+
+    import base64
+
+    try:
+        from mbdsdr_ai.hal import HardwareManager
+    except ImportError:
+        from hal import HardwareManager
+
+    try:
+        iq_b64 = args.get("iq_b64")
+        if iq_b64:
+            raw = base64.b64decode(iq_b64, validate=True)
+            f32 = np.frombuffer(raw, dtype=np.float32)
+        else:
+            iq = args.get("iq")
+            if iq is None:
+                return ToolResult(
+                    success=False,
+                    content="参数 iq / iq_b64 至少提供一个"
+                            "（float32 交错复基带 [re,im,re,im,...]）")
+            a = np.asarray(iq, dtype=float)
+            if a.ndim == 2 and a.shape[1] == 2:
+                a = a.reshape(-1)
+            f32 = a.astype(np.float32)
+
+        if f32.size == 0:
+            return ToolResult(success=False, content="IQ 为空（诚实空态：不发射空波形）")
+        if f32.size % 2 != 0:
+            return ToolResult(
+                success=False,
+                content=f"IQ 元素个数 {f32.size} 为奇数（float32 交错的 re/im 必须成对）；"
+                        "如实拒绝，不截断发射")
+        samples = f32.view(np.complex64)
+
+        amp = args.get("amplitude", 0.1)
+        try:
+            amp = float(amp)
+        except (TypeError, ValueError):
+            return ToolResult(success=False,
+                              content=f"amplitude 无效: {amp!r}（应为 (0,1] 数值）")
+        if not (0.0 < amp <= 1.0):
+            return ToolResult(
+                success=False,
+                content=f"amplitude={amp} 超出 (0,1]：如实拒绝，不静默钳制")
+
+        freq = args.get("frequency_hz")
+        try:
+            freq = float(freq)
+        except (TypeError, ValueError):
+            return ToolResult(success=False,
+                              content=f"frequency_hz 无效: {freq!r}（应为数值 Hz）")
+
+        mgr = HardwareManager()
+        backend = mgr.get_active_backend()
+
+        if not backend:
+            return ToolResult(
+                success=False,
+                content="错误: 未连接任何SDR设备，请先调用 sdr_connect_hardware")
+        if not backend.supports_tx():
+            return ToolResult(
+                success=False,
+                content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/"
+                        "LimeSDR/USRP 等TX-capable设备支持。")
+
+        ok = mgr.transmit_modulated(freq, samples, amp)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(success=False, content=f"参数/计算错误: {e}", error=str(e))
+
+    lines = ["=== IQ 发射 ==="]
+    lines.append(f"频率: {freq/1e6:.3f} MHz")
+    lines.append(f"幅度: {amp:.2f}")
+    lines.append(f"样本数: {samples.size}（float32 交错复基带）")
+    lines.append(f"状态: {'发射成功' if ok else '发射失败'}")
+    lines.append("")
+    lines.append("注意: 发射需遵守当地无线电法规，未经许可不得在禁发频段发射。")
+
+    return ToolResult(success=bool(ok), content='\n'.join(lines))
 
 
 def _platform_info(args):

@@ -137,6 +137,46 @@ def _iq_freq_track(args):
 
 
 # ─────────────────────────────────────────────────────────────
+# 载波：Costas 环（PSK 相干载波恢复，通信对抗 L19）
+# ─────────────────────────────────────────────────────────────
+def _costas_track(args):
+    try:
+        from . import coarse_sync as csync
+
+        iq = _as_iq(args["iq"])
+        if len(iq) < 64:
+            raise ValueError(
+                f"IQ 过短（{len(iq)} 样本）：Costas 环至少需要 64 样本"
+                "（诚实空态：不伪造锁定结果）")
+        loop = csync.CostasLoop(
+            loop_bw=float(args.get("loop_bw", 0.05)),
+            psk_order=int(args.get("psk_order", 4)),
+        )
+        out = loop.feed(iq)
+        off = float(loop.carrier_offset)
+        sr = args.get("sample_rate_hz")
+        off_hz = off * float(sr) if sr else None
+        content = (
+            f"Costas 载波恢复（PSK 阶数 {loop.psk_order}）："
+            f"频偏估计 {off:.6f} rad/sample"
+            + (f"（{off_hz:.1f} Hz @ {float(sr):.0f} Sa/s）" if off_hz else "")
+            + f"，已校正 {len(out)} 样本。提示：相干锁定后的相位模糊"
+              "（n×π 镜像）用 diff_decode 积木消除。"
+        )
+        data = {
+            "corrected_iq": _iq_in(out),
+            "carrier_offset_rad_per_sample": off,
+            "psk_order": int(loop.psk_order),
+            "count": int(len(out)),
+        }
+        if off_hz is not None:
+            data["carrier_offset_hz"] = float(off_hz)
+        return ToolResult(success=True, content=content, data=data)
+    except Exception as e:  # noqa: BLE001
+        return _err(e)
+
+
+# ─────────────────────────────────────────────────────────────
 # 注册：每块积木一个独立小工具
 # ─────────────────────────────────────────────────────────────
 def register_sync_brick_tools(tool_registry):
@@ -194,3 +234,29 @@ def register_sync_brick_tools(tool_registry):
         }, "required": ["iq", "sample_rate"]},
         handler=_iq_freq_track, category="dsp",
     )
+    R(
+        name="costas_track",
+        description="Costas 载波恢复：PSK 信号的二阶 Costas 环（SDRangel 同构实现），"
+                    "对复基带做相干载波锁定，返回频偏估计 + 校正后 IQ。"
+                    "与 fll_track 互补：FLL 面向调频/FSK 粗锁频，Costas 面向 PSK 相干解调；"
+                    "锁定后的相位模糊（n×π 镜像）由 diff_decode 积木消除。原子积木。",
+        parameters={"type": "object", "properties": {
+            "iq": {"type": "array", "description": "复基带 [[re,im],...] 或交错 [re,im,...]"},
+            "loop_bw": {"type": "number",
+                        "description": "归一化环路带宽 rad/sample，默认 0.05，典型 0.01~0.1"},
+            "psk_order": {"type": "integer", "enum": [2, 4, 8],
+                          "description": "PSK 阶数，默认 4"},
+            "sample_rate_hz": {"type": "number",
+                               "description": "可选；给了才把频偏换算成 Hz 展示"},
+        }, "required": ["iq"]},
+        handler=_costas_track, category="sync",
+    )
+
+
+def register_tool_registry(registry) -> None:
+    """模块级注册入口：CLI 面（core/cli.py 的 pkgutil 发现机制）自动调用。
+
+    此前本模块只有适配层入口（agent.py 显式调用 register_sync_brick_tools），
+    CLI --tool 面调不到 fll_track 等积木——补模块级入口消除这处静默缺角。
+    """
+    register_sync_brick_tools(registry)

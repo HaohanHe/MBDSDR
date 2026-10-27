@@ -119,6 +119,8 @@ _STATE_MUTATORS = [
     "sdr_record_start", "sdr_record_stop",
     "vfo_add", "vfo_remove", "vfo_select",
     "radio_set_mode", "radio_set_frequency", "radio_ptt",
+    # RF 发射面（真实射频副作用，AGENTS.md §3 人工门）。
+    "sdr_transmit_cw", "sdr_transmit_iq",
 ]
 
 

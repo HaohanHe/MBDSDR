@@ -364,8 +364,8 @@ class DifferentialEncoder:
     用法::
 
         enc = DifferentialEncoder(order=4)
-        tx = enc.encode_bits(bits)          # 编码（追加参考比特）
-        rx_bits = enc.decode_bits(rx_symbols)
+        tx = enc.encode_bits(bits)   # 编码：输出与输入等长（参考符号 0 仅作异或种子，不追加）
+        rx = enc.decode_bits(tx)     # 解码：decode(encode(x)) == x
     """
 
     def __init__(self, order: int = 2):
@@ -420,3 +420,75 @@ __all__ = [
     "Scrambler",
     "DifferentialEncoder",
 ]
+
+
+# ===========================================================================
+# 差分编解码工具面（薄包装：agent 面 + CLI 面一次通吃）
+# ===========================================================================
+
+def register_tool_registry(registry) -> None:
+    """把差分编码/解码注册为两个独立原子工具。
+
+    能力依据：Costas/PSK 相干解调后的相位模糊（n×π 镜像）标准解法就是
+    差分编码（通信对抗材料 L20），与 costas_track 构成配对积木。
+    """
+    from .tool_registry import ToolResult, clean_exc
+
+    def _bits_in(v, name):
+        arr = np.asarray(v, dtype=float).flatten()
+        if arr.size == 0:
+            raise ValueError(f"{name} 为空（诚实空态：不伪造编解码结果）")
+        if not np.all((arr == 0) | (arr == 1)):
+            raise ValueError(f"{name} 只接受 0/1 比特数组")
+        return arr.astype(np.int8)
+
+    def _make_handler(name):
+        def handler(args):
+            try:
+                enc = DifferentialEncoder(order=int(args.get("order", 2)))
+                bits = _bits_in(args["bits"], "bits")
+                out = (enc.encode_bits(bits) if name == "diff_encode"
+                       else enc.decode_bits(bits))
+                verb = "差分编码" if name == "diff_encode" else "差分解码"
+                return ToolResult(
+                    success=True,
+                    content=f"{verb}（order={enc.order}）：{len(out)} 比特",
+                    tool_name=name,
+                    data={"bits": [int(b) for b in out],
+                          "order": int(enc.order), "count": int(len(out))},
+                )
+            except Exception as e:  # noqa: BLE001
+                return ToolResult(
+                    success=False,
+                    content=f"参数/计算错误: {clean_exc(e)}",
+                    tool_name=name, error=str(e),
+                )
+        return handler
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "bits": {"type": "array", "items": {"type": "integer"},
+                     "description": "0/1 比特数组（长度须为每符号比特数的倍数："
+                                    "order=2 时任意长度，order=4 时须为偶数）"},
+            "order": {"type": "integer", "enum": [2, 4],
+                      "description": "2=BPSK(DBPSK)，4=QPSK(DQPSK)，默认 2"},
+        },
+        "required": ["bits"],
+    }
+    registry.register(
+        name="diff_encode",
+        description="差分编码：DBPSK/DQPSK 相对调相的比特级预编码（输出与输入等长，"
+                    "参考符号 0 仅作异或种子）。发射端预编码，接收端配合 diff_decode "
+                    "解相位模糊。原子积木。",
+        parameters=schema,
+        handler=_make_handler("diff_encode"), category="dsp",
+    )
+    registry.register(
+        name="diff_decode",
+        description="差分解码：对差分编码比特做累积异或还原（decode(encode(x))==x）。"
+                    "也用于 Costas/PSK 相干锁定后的 n×π 相位模糊消除——"
+                    "四种模糊相位解出的序列经差分解码后收敛为同一明文。原子积木。",
+        parameters=schema,
+        handler=_make_handler("diff_decode"), category="dsp",
+    )

@@ -1089,7 +1089,7 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
 
 def register_tool_registry(registry) -> None:
     """把多普勒定轨 / LRO 跟踪工具注册到 MBDSDR ToolRegistry。"""
-    from .tool_registry import ToolResult
+    from .tool_registry import ToolResult, clean_exc
 
     def _latlon(args: Dict[str, Any]):
         """地面站坐标：优先用 args 显式传入；否则从 ~/.mbdsdr/config.json 读；
@@ -1273,5 +1273,156 @@ def register_tool_registry(registry) -> None:
             "required": [],
         },
         handler=_lro_track,
+        category="orbit",
+    )
+
+    def _orbit_sky_plot(args: Dict[str, Any]) -> ToolResult:
+        """方位/仰角天空图 PNG（写工具：arm_manual 人工门）。"""
+        if args.get("arm_manual", False) is not True:
+            return ToolResult(
+                success=False,
+                content=("手动模式：未执行 orbit_sky_plot"
+                         "（PNG 落盘属写操作，需显式传 arm_manual=true）"),
+                data={"gated": True},
+            )
+        try:
+            import matplotlib  # noqa: F401  可选依赖：缺失时诚实报错，不伪造图片
+        except ImportError:
+            return ToolResult(
+                success=False,
+                content="本工具需要 matplotlib（可选依赖，当前环境未安装）；"
+                        "不伪造图片，请安装 matplotlib 后重试",
+                error="matplotlib not installed",
+            )
+        az = np.asarray(args.get("az_deg", []), dtype=float)
+        el = np.asarray(args.get("el_deg", []), dtype=float)
+        if az.size == 0 or el.size == 0 or az.shape != el.shape:
+            return ToolResult(
+                success=False,
+                content=(f"观测数据为空或 az/el 长度不一致（az={az.size}, el={el.size}）；"
+                         "诚实空态：不凭空画天空图，请先跑 doppler_orbit_determine /"
+                         " 过境预报拿到数据"),
+                error="empty observations",
+            )
+        # abspath+expanduser：裸文件名的 dirname 是 ""，函数内 makedirs("") 会崩。
+        save = os.path.abspath(os.path.expanduser(str(args["save_path"])))
+        title = str(args.get("title", "Sky Plot"))
+        try:
+            sky_plot(az, el, save_path=save, title=title)
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(success=False, content=f"出图失败: {clean_exc(e)}",
+                              error=str(e))
+        return ToolResult(
+            success=True,
+            content=f"天空图已保存: {save}（{int(az.size)} 个观测点）",
+            data={"png_path": save, "bytes": int(os.path.getsize(save)),
+                  "n_points": int(az.size)},
+        )
+
+    def _orbit_error_plot(args: Dict[str, Any]) -> ToolResult:
+        """定轨收敛/残差曲线 PNG（写工具：arm_manual 人工门）。"""
+        if args.get("arm_manual", False) is not True:
+            return ToolResult(
+                success=False,
+                content=("手动模式：未执行 orbit_error_plot"
+                         "（PNG 落盘属写操作，需显式传 arm_manual=true）"),
+                data={"gated": True},
+            )
+        try:
+            import matplotlib  # noqa: F401  可选依赖：缺失时诚实报错，不伪造图片
+        except ImportError:
+            return ToolResult(
+                success=False,
+                content="本工具需要 matplotlib（可选依赖，当前环境未安装）；"
+                        "不伪造图片，请安装 matplotlib 后重试",
+                error="matplotlib not installed",
+            )
+        t = np.asarray(args.get("t", []), dtype=float)
+        rls = np.asarray(args.get("pos_err_rls_km", []), dtype=float)
+        ekf = np.asarray(args.get("pos_err_ekf_km", []), dtype=float)
+        res = np.asarray(args.get("residuals_km_s", []), dtype=float)
+        if t.size == 0 or rls.size == 0 or ekf.size == 0 or res.size == 0:
+            return ToolResult(
+                success=False,
+                content=("输入序列为空（诚实空态：不凭空画收敛曲线），"
+                         "请先跑 doppler_orbit_determine 拿到误差/残差序列"),
+                error="empty observations",
+            )
+        if not (t.shape == rls.shape == ekf.shape == res.shape):
+            return ToolResult(
+                success=False,
+                content=(f"序列长度不一致 t={t.size} rls={rls.size} "
+                         f"ekf={ekf.size} res={res.size}；如实拒绝"),
+                error="length mismatch",
+            )
+        save = os.path.abspath(os.path.expanduser(str(args["save_path"])))
+        f0 = float(args.get("f0_hz", F0_DEFAULT_HZ))
+        try:
+            plot_convergence_curve(t, rls, ekf, res, save_path=save, f0=f0)
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(success=False, content=f"出图失败: {clean_exc(e)}",
+                              error=str(e))
+        return ToolResult(
+            success=True,
+            content=f"收敛/残差曲线已保存: {save}（{int(t.size)} 个时刻）",
+            data={"png_path": save, "bytes": int(os.path.getsize(save)),
+                  "n_points": int(t.size)},
+        )
+
+    registry.register(
+        name="orbit_sky_plot",
+        description=(
+            "定轨天空图：把方位/仰角观测序列画成极坐标天空图并保存 PNG"
+            "（北在上、顺时针）。写工具：PNG 落盘需显式传 arm_manual=true，"
+            "否则返回 gated 信封；观测为空或 az/el 长度不齐时诚实报错，"
+            "不凭空画图。需要 matplotlib（可选依赖，缺失时报错不伪造）。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "az_deg": {"type": "array", "items": {"type": "number"},
+                           "description": "方位角序列（度，0=北）"},
+                "el_deg": {"type": "array", "items": {"type": "number"},
+                           "description": "仰角序列（度）"},
+                "save_path": {"type": "string", "description": "PNG 保存路径"},
+                "title": {"type": "string", "description": "图标题，默认 Sky Plot"},
+                "arm_manual": {"type": "boolean",
+                               "description": "人工门：PNG 落盘前须显式传 true"},
+            },
+            "required": ["az_deg", "el_deg", "save_path", "arm_manual"],
+        },
+        handler=_orbit_sky_plot,
+        category="orbit",
+    )
+
+    registry.register(
+        name="orbit_error_plot",
+        description=(
+            "定轨收敛图：RLS/EKF 三维位置误差收敛曲线（对数轴，1 km 参考线）"
+            "+ EKF 伪距率残差（频偏等效）双联图，保存 PNG。写工具：PNG 落盘需"
+            "显式传 arm_manual=true；序列为空或长度不齐时诚实报错，不凭空画图。"
+            "需要 matplotlib（可选依赖，缺失时报错不伪造）。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "t": {"type": "array", "items": {"type": "number"},
+                      "description": "时间序列（unix 秒）"},
+                "pos_err_rls_km": {"type": "array", "items": {"type": "number"},
+                                   "description": "RLS 三维位置误差（km）"},
+                "pos_err_ekf_km": {"type": "array", "items": {"type": "number"},
+                                   "description": "EKF 三维位置误差（km）"},
+                "residuals_km_s": {"type": "array", "items": {"type": "number"},
+                                   "description": "EKF 伪距率残差（km/s）"},
+                "save_path": {"type": "string", "description": "PNG 保存路径"},
+                "f0_hz": {"type": "number",
+                          "description": "载频 Hz（残差换算回 Hz 用），默认 F0_DEFAULT_HZ"},
+                "arm_manual": {"type": "boolean",
+                               "description": "人工门：PNG 落盘前须显式传 true"},
+            },
+            "required": ["t", "pos_err_rls_km", "pos_err_ekf_km",
+                         "residuals_km_s", "save_path", "arm_manual"],
+        },
+        handler=_orbit_error_plot,
         category="orbit",
     )

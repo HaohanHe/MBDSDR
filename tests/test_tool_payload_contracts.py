@@ -52,6 +52,7 @@ CASES = [
     ("pat_b2f_encode", {"fromcall": "BI4MIB", "tocall": "BA1234"},
      ["bytes_b64"]),
     ("xastir_encode_object", {"lat": 45.0, "lon": 120.0}, ["packet"]),
+    ("diff_encode", {"bits": [1, 0] * 20}, ["bits"]),
 ]
 
 

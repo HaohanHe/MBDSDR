@@ -868,6 +868,26 @@ class ToolRegistry:
         # ── SSDV/CCSDS 接收链健壮性工具（AFC/PLL/notch/resync，Python 独有，无设备）──
         self.register_ssdv_rx_tools()
 
+        # ── 差分编解码积木（DBPSK/DQPSK 预编码与相位模糊消除）──
+        # 实际实现见 mbdsdr_ai/fec.py
+        self.register_fec_tools()
+
+    def register_fec_tools(self):
+        """注册差分编解码积木工具（fec.DifferentialEncoder 的薄包装）。
+
+        仅注册：DSP 实现全在 fec.py（实现级往返测试在根 tests/test_fec.py），
+        本方法不复制任何数学。与 sync_tools 的 costas_track 构成配对积木
+        （PSK 相干锁定的 n×π 相位模糊用差分解码消除）。
+        """
+        try:
+            from . import fec
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("fec 不可用: %s", e)
+            return
+
+        fec.register_tool_registry(self)
+
     def register_goeslrit_tools(self):
         """注册 GOES LRIT/HRIT 帧解析工具（依据 GOES HRIT/LRIT 公开标准独立实现）。
 

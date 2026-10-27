@@ -31,7 +31,7 @@
 | 深空/LEO 多普勒定轨（LRO / Iridium 类） | `doppler_from_frequency` → `pseudorange_rate_model` → `tle_state_ecef` → `propagate_state_stm` → `rls_update` → `calibrate_time_offset` → `coord_*` | 观测方程 ρ = −c·Δf/f₀；状态 7 维（含钟差） | 状态矢量 + 协方差 + 残差统计 |
 | ASTU-1 遥测接收 | `sat_rx_profile` → `telemetry_rx_chain` → `doppler_to_frequency` → `doppler_tune_frequency` → 设备面 → `ccsds_decode_iq` | 预置频率 = 真实下行 − 10 kHz | 逐块接收链参数 + 调谐频率 + 帧字节 |
 | 前端搭建与故障排查 | `dish_gain` → `cantenna_design` → `fe_link_budget` → `fe_diagnose` | 见上；罐子探针偏差 > 5 mm 恶化驻波 | 几何/预算/诊断三件套 |
-| 通信对抗与链路自测 | `modulate_symbols` → `pulse_shape_taps` → `demodulate_symbols` → `constellation_metrics` → `measure_ber` → `link_ber_test` / `interferometry_tdoa` / `interferometry_resolution` / `gps_prn_sequence` / `gps_code_acquire`；**射电干涉测向**（双站互相关 TDOA、角分辨率、可见度） | | Eb/N0 口径见 `link_ber_test` 说明 | 实测 BER + 星座质量 + 理论对照 |
+| 通信对抗与链路自测 | `modulate_symbols` → `pulse_shape_taps` → `demodulate_symbols` → `costas_track`（PSK 相干载波锁定）→ `diff_decode`（相位模糊消除）→ `constellation_metrics` → `measure_ber` → `link_ber_test` / `interferometry_tdoa` / `interferometry_resolution` / `gps_prn_sequence` / `gps_code_acquire`；**射电干涉测向**（双站互相关 TDOA、角分辨率、可见度） | | Eb/N0 口径见 `link_ber_test` 说明 | 实测 BER + 星座质量 + 理论对照 |
 | 轨道与过境预报 | `sat_pass_predict` → `sgp4_propagate` → `coord_enu_to_az_el` | — | 过境窗口（方位/仰角/距离/多普勒） |
 
 ---
@@ -50,7 +50,7 @@
 | **赛前培训-定轨**（PPT） | 轨道力学与观测模型原理、坐标变换、估计器原理 | 同上 + `coord_ecef_to_eci` / `coord_eci_to_ecef` / `coord_ecef_to_enu` / `coord_enu_to_az_el` / `coord_ecef_to_geodetic` / `coord_geodetic_to_ecef` / `pseudorange_rate_model` | `tests/test_orbit_dynamics.py`（雅可比有限差分自洽）+ `tests/test_orbit_determination.py` |
 | **阿斯图友谊号遥测教程**（ASTU-1，SDR 收卫星遥测） | 卫星接收剖面；比特级接收链参数；多普勒调谐余量；CCSDS 帧构造/同步/解扰/维特比译码 | `sat_rx_profile` / `telemetry_rx_chain` / `doppler_tune_frequency` / `ccsds_encode_frame` / `ccsds_decode_bits` / `ccsds_decode_iq` / **`astu_telemetry_decode`** | `tests/test_ccsds_tools.py`（7 项自环：ASM+Viterbi+解扰+IQ 通路）+ `tests/test_tool_pair_chains.py` |
 | **气象卫星图片接收赛前培训**（PPT） | 同步轨道指向；抛物面增益与波束；指向容差；前端链路预算与判据；**赛训验收口径可执行化**（指向/SNR/前端指标/解码成功率逐项判定）；罐子馈源几何；症状→环节诊断；LRIT/HRIT/HRPT 图像解码（**IQ 直达 PNG**：GK-2A 与 FY-4 两条链都有 IQ 入口） | `geo_pointing` / `dish_gain` / `pointing_tolerance` / `fe_link_budget` / `fe_diagnose` / `rx_acceptance` / `cantenna_design` / `gk2a_lrit_decode` / `fy4_lrit_decode` / **`fy4_lrit_decode_iq`** / `meteor_lrpt_demod` / **`meteor_lrpt_decode_iq`** | `mbdsdr_ai/tests/test_acquisition.py`（25 项，含罐子馈源几何与材料数值对照）+ 各协议自带测试 |
-| **通信对抗材料包**（learnSDR 教学包：ASK/BPSK/QPSK、FLL/载波同步、RC 成形、星座与眼图；另含射电干涉讲义） | 统一调制/解调内核；星座质量；眼图与抖动；误码实测与理论对照；成形抽头；**射电干涉测向**（双站互相关 TDOA、角分辨率 λ/D、可见度函数） | `modulate_symbols` / `demodulate_symbols` / `constellation_metrics` / `eye_diagram` / `measure_ber` / `link_ber_test` / `pulse_shape_taps` / `interferometry_tdoa` / `interferometry_resolution` | `mbdsdr_ai/tests/test_modulation.py`（32 项：往返零误码、BER 与理论对照、Gray 映射等价）+ `tests/test_eye_diagram.py`（7 项：噪声单调退化）+ `tests/test_tool_pair_chains.py` + `tests/test_interferometry.py`（7 项：TDOA 测向与讲义分辨率对照表） |
+| **通信对抗材料包**（learnSDR 教学包：ASK/BPSK/QPSK、FLL/载波同步、RC 成形、星座与眼图；另含射电干涉讲义） | 统一调制/解调内核；星座质量；眼图与抖动；误码实测与理论对照；成形抽头；Costas 载波锁定与差分相位模糊消除；**射电干涉测向**（双站互相关 TDOA、角分辨率 λ/D、可见度函数） | `modulate_symbols` / `demodulate_symbols` / `constellation_metrics` / `eye_diagram` / `measure_ber` / `link_ber_test` / `pulse_shape_taps` / `costas_track` / `diff_encode` / `diff_decode` / `interferometry_tdoa` / `interferometry_resolution` | `mbdsdr_ai/tests/test_modulation.py`（32 项：往返零误码、BER 与理论对照、Gray 映射等价）+ `tests/test_eye_diagram.py`（7 项：噪声单调退化）+ `tests/test_tool_pair_chains.py` + `tests/test_interferometry.py`（7 项：TDOA 测向与讲义分辨率对照表）+ `tests/test_costas_track_tool.py` + `tests/test_diff_codec_tools.py` |
 
 > **框架级协议（帧同步/CRC/解扰/卷积/交织）不猜参数**：材料未给的任务级参数
 > （如 ASTU-1 的帧长与是否启用卷积）一律作为具名参数由调用方给出；
@@ -223,6 +223,9 @@
 | `ccsds_decode_bits` | `bits` | `asm_word`, `asm_max_hamming`, `frame_bits_after_asm`, `use_viterbi`, `use_descramble`, `use_rs`, `rs_nsym` | 同步帧数 + 每帧 hex/ASCII 预览 |
 | `ccsds_decode_iq` | `iq` | `scheme`, `sps`, `shaping`, `alpha` + 上述 CCSDS 参数 | IQ 直达帧（ASTU-1 走 bpsk+rrc） |
 | `rx_acceptance` | —（可给子集） | `pointing_error_deg`, `snr_db`, `decode_attempts/successes`, `lna_nf_db`, `feedline_m`, `system_nf_db`, `dish_offset_cm` + 各门限覆盖项 | 逐项判定 + 总判定 + 处置建议（门限标注来源：材料口径 / 材料未给→工程常规） |
+| `costas_track` | `iq` | `loop_bw`, `psk_order`(2/4/8), `sample_rate_hz` | 频偏估计（rad/sample，给采样率则换算 Hz）+ 载波校正后 IQ；<64 样本诚实拒绝 |
+| `diff_encode` | `bits` | `order`(2/4) | 与输入等长的差分码（参考符号 0 仅作异或种子，不追加） |
+| `diff_decode` | `bits` | `order`(2/4) | 累积异或还原；decode(encode(x))==x；亦解 Costas n×π 相位模糊 |
 
 ---
 
@@ -271,12 +274,15 @@ ASTU/对抗）共 39 个任务步：每一步都要有可调用工具，且链�
 收发""PSK 信号收发"。仓内可操作的对应能力是——
 · 离线等价（模型完全可做）：`modulate_symbols` 生成波形 → 落盘 →
   `demodulate_symbols` 解回（往返零误码已有门禁）；
-· 硬件发射面：Python 侧只有 `sdr_transmit_cw`（连续波）；**任意 IQ 缓冲的
-  发射未暴露给模型**——C++ 侧其实有完整 TX 链（`tx/tx_controller`、
-  `soapy_tx_backend`、AX.25/KISS 发射面板，以及可在无硬件下验证的
-  `loopback_backend`），但那属 C++/面板面，不在本仓 Python 工具面内。
-模型若要"发 PSK"，当前可操作路径是生成波形 + 离线回环验证，或经设备面工具
-走硬件发射。
+· 硬件发射面：Python 侧有 `sdr_transmit_cw`（连续波）与 `sdr_transmit_iq`
+  （任意 float32 交错 IQ 波形）；两者都是**真实射频写操作，一律过 arm_manual
+  人工门**——未显式武装只返回 gated 信封，绝不发射；无连接/设备不支持 TX 时
+  如实报错。发射的波形本身由 `modulate_symbols` 等积木生成，工具不合成信号。
+· C++ 侧另有完整 TX 链（`tx/tx_controller`、`soapy_tx_backend`、AX.25/KISS
+  发射面板，以及可在无硬件下验证的 `loopback_backend`），属 C++/面板面，
+  不在本仓 Python 工具面内。
+模型若要"发 PSK"，可操作路径是：`diff_encode` 预编码 → `modulate_symbols`
+生成波形 → 离线回环验证，或经 `sdr_transmit_iq`（人工门后）走硬件发射。
 
 **畸形入参收敛（phase68 已销账）**：`tests/tool_param_smoke.py` 对全部注册
 工具做参数批量真跑。整合轮实测 276 个工具里有 29 个在收到畸形入参时**抛异常**

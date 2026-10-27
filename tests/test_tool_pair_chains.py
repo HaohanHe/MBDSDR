@@ -142,3 +142,22 @@ def test_urh_bpsk_alias_works(reg):
     assert n > 0
     err = sum(1 for i in range(n) if int(got[i]) != int(exp[i]))
     assert err == 0, f"误码 {err}/{n}"
+
+
+def test_diff_encode_to_decode_round_trip(reg):
+    """差分编解码：decode(encode(x)) == x（BPSK 与 DQPSK 两变体）。
+
+    同时钉住等长契约：参考符号 0 仅作异或种子，输出不得比输入长
+    （docstring 曾谎称"追加参考比特"，实现在此对拍）。
+    """
+    bits = [1, 0, 1, 1, 0, 0, 1, 0] * 4   # 长度 32，是 1 与 2 的倍数
+    for order in (2, 4):
+        enc = reg.call("diff_encode", {"bits": bits, "order": order})
+        assert enc.success is True, f"order={order}: {enc.content[:120]}"
+        assert enc.data.get("bits"), "差分编码载荷必须在 data.bits"
+        assert len(enc.data["bits"]) == len(bits), \
+            "差分编码输出必须与输入等长（不得追加参考比特）"
+        dec = reg.call("diff_decode", {"bits": enc.data["bits"], "order": order})
+        assert dec.success is True, f"order={order}: {dec.content[:120]}"
+        assert dec.data.get("bits") == list(bits), \
+            f"order={order}: decode(encode(x)) 必须还原原序列"
