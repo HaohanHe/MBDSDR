@@ -813,7 +813,11 @@ class MainWindow(QMainWindow):
         self.record_btn.toggled.connect(self._toggle_record)
         toolbar.addWidget(self.record_btn)
 
-        # 回放按钮（占位：选择 .iq 录音文件，baseband_io 支持时才真正回放）
+        # 回放按钮：选 .iq/.cf32/.cs16/.wav 录音文件做离线回放。
+        # 已完整实现（见 _replay_recording）：真实读文件 IQ、按原始采样率分块
+        # 推给频谱；baseband_io 不可用 / 读取失败 / 样本太少均由处理函数如实
+        # 弹窗，绝不静默、绝不造数据。旧注释写的"占位"已与实现不符，按文档
+        # 漂移处理（AGENTS.md §2：文档与实现掰腕子算 bug）。
         self.replay_btn = QPushButton("回放")
         self.replay_btn.setMinimumHeight(28)
         self.replay_btn.setToolTip("选择已录制的 .iq 文件进行离线回放")

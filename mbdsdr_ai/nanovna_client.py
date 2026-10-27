@@ -536,7 +536,8 @@ class NanoVNAClient:
 
     def segmented_sweep(self, start_hz: int, stop_hz: int,
                         points_total: int,
-                        seg_points: int = MAX_SWEEP_POINTS) -> dict:
+                        seg_points: int = MAX_SWEEP_POINTS,
+                        timeout_s: float = 120.0) -> dict:
         """分段扫描拼接：突破设备单 sweep 点数上限。
 
         机制对齐官方 NanoVNASaver/NanoVNA-App：host 侧把总点数切成
@@ -548,7 +549,11 @@ class NanoVNAClient:
           屏幕小写 c0-c4）——非校准段数据精度以首段为准，高精度需求
           应先在整个目标范围做 open/short/load 校准；
         - 每段一次完整 sweep，总耗时随段数线性增长；
-        - 段表随结果返回，坏段可定位。
+        - 段表随结果返回，坏段可定位；
+        - **总耗时有硬上限 timeout_s（默认 120s）**：分段扫描耗时随段数线性
+          增长，本函数早期没有整体截止，多段扫描会长时间无响应（缺口报告
+          记为 ~204s 静默挂起）。超时抛 NanoVNADriverError 并如实说明已完成
+          段数，**绝不返回半截曲线**、也绝不静默继续。
 
         返回 {segmented, segment_count, segments, frequencies_hz,
         S11, S21, cal_caveat}。任一段取数长度不一致即抛
@@ -565,6 +570,10 @@ class NanoVNAClient:
                 f"seg_points 必须 ∈ [2,{MAX_SWEEP_POINTS_H4}]，"
                 f"收到 {seg_points}（H 固件用 101，H4 可用 401）")
 
+        if timeout_s <= 0:
+            raise NanoVNADriverError(f"timeout_s 必须 >0，收到 {timeout_s}")
+        t0 = time.time()
+
         df = (stop_hz - start_hz) / (points_total - 1)
         freqs_all: List[int] = []
         s11_all: List[complex] = []
@@ -572,6 +581,15 @@ class NanoVNAClient:
         segments: List[dict] = []
         idx = 0
         while idx < points_total - 1:
+            # 整体截止：防分段扫描长时间无响应（缺口报告 ~204s 静默挂起）。
+            # 超时如实抛错并报已完成段数，不返回半截曲线。
+            elapsed = time.time() - t0
+            if elapsed > timeout_s:
+                raise NanoVNADriverError(
+                    f"分段扫描超时：已耗时 {elapsed:.1f}s > 上限 "
+                    f"{timeout_s}s，完成 {len(segments)} 段后中止。"
+                    f"不返回半截曲线；请减少总点数（当前 {points_total}）"
+                    f"或放宽 timeout_s。")
             # 已覆盖 0..idx（共 idx+1 点）；一段 m 点把覆盖推进 m-1。
             # m 不超过剩余需求 + 1，绝不出 1 点退化段（由下面的数值保护兜底）。
             m = min(seg_points, points_total - idx)
