@@ -21,6 +21,7 @@ from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
 # 本目录（desktop/）下的兄弟模块（tokens / mode_registry 等）在以包方式从
 # 仓库根 import（如 import desktop.control_panel）时不在 sys.path 上，
 # 这里把脚本所在目录补进 sys.path，与 main.py / main_window.py 的引导方式一致。
+import math
 import os as _os
 import sys as _sys
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
@@ -596,8 +597,17 @@ class ControlPanel(QWidget):
         return val  # hz
 
     def _set_freq_hz(self, freq_hz: float):
-        """统一设置频率真值并更新显示、发射调谐信号。"""
-        freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, float(freq_hz)))
+        """统一设置频率真值并更新显示、发射调谐信号。
+
+        NaN/±Inf 一律视为"没有频率"：既不改内部真值，也不向硬件下发调谐。
+        历史实现走 max(FREQ_MIN, min(FREQ_MAX, nan))——NaN 比较恒为 False，
+        结果被静默夹到 FREQ_MAX（6 GHz）并真调谐过去，等于把无效输入伪装成
+        一个真实的 6 GHz 中心频率。
+        """
+        freq_hz = float(freq_hz)
+        if not math.isfinite(freq_hz):
+            return
+        freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, freq_hz))
         self._freq_hz = freq_hz
         self._update_freq_display()
         self._emit_tune(freq_hz)
@@ -903,7 +913,9 @@ class ControlPanel(QWidget):
     def update_signal_level(self, dbfs):
         """由主窗口从 IQ 功率估计后调用，更新 S-meter。真实数据驱动，绝不造假。
 
-        传入 None 或不可解析值时显示 "--" 并把进度条归零（空）。
+        传入 None / 不可解析值 / 非有限值（NaN、±Inf）时显示 "--" 并把进度条
+        归零（空）。NaN 必须走空态：max(-120, min(0, nan)) 会静默夹成 0 dBFS
+        （= 满刻度），等于把"没测出电平"伪装成"信号爆表"。
         """
         if dbfs is None:
             self.smeter_label.setText("--")
@@ -912,6 +924,10 @@ class ControlPanel(QWidget):
         try:
             v = float(dbfs)
         except (TypeError, ValueError):
+            self.smeter_label.setText("--")
+            self.smeter_bar.setValue(self.smeter_bar.minimum())
+            return
+        if not math.isfinite(v):
             self.smeter_label.setText("--")
             self.smeter_bar.setValue(self.smeter_bar.minimum())
             return
@@ -943,8 +959,14 @@ class ControlPanel(QWidget):
 
         断连时只存内部真值、不刷新 freq_display（保持 "-- MHz"），
         避免持久化频率被误当成正在接收的频率；连接后由 set_sdr_connected(True) 恢复显示。
+
+        NaN/±Inf 视为"没有频率"，保持原值不变（绝不夹成 FREQ_MAX 6 GHz，
+        理由同 _set_freq_hz）。
         """
-        freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, float(freq_hz)))
+        freq_hz = float(freq_hz)
+        if not math.isfinite(freq_hz):
+            return
+        freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, freq_hz))
         self._freq_hz = freq_hz
         if self._sdr_connected:
             self._update_freq_display()
@@ -971,8 +993,16 @@ class ControlPanel(QWidget):
         self.vfo_bw_combo.blockSignals(False)
 
     def set_gain(self, db: float):
-        """从外部恢复 LNA 增益 (dB)，不发射 gain_changed。"""
-        db = int(max(0, min(49, float(db))))
+        """从外部恢复 LNA 增益 (dB)，不发射 gain_changed。
+
+        NaN/±Inf 视为"没有增益值"，保持原值不变：历史实现走
+        int(max(0, min(49, nan)))，NaN 比较恒为 False，结果静默夹到满增益
+        49 dB 并显示出来——把"读不到增益"伪装成"增益拉满"。
+        """
+        db = float(db)
+        if not math.isfinite(db):
+            return
+        db = int(max(0, min(49, db)))
         self.gain_slider.blockSignals(True)
         self.gain_slider.setValue(db)
         self.gain_slider.blockSignals(False)

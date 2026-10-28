@@ -441,20 +441,27 @@ class MainWindow(QMainWindow):
         # 放在 _panels_set_sdr_connected(False) 之后，避免恢复出的频率显示被清成 "--"。
         self._apply_restored_settings()
 
-        # 加载 GUI 配置（窗口大小、频率、主题等）
-        QTimer.singleShot(100, self._load_gui_config)
-
-        # 启动自动选源：枚举到 RTL-SDR 就直接连接，无需用户手选。
-        # 延迟到事件循环就绪后执行；无设备时状态栏明确提示，绝不静默走假后端。
-        QTimer.singleShot(200, self._auto_enumerate_and_connect)
+        # 延迟启动项一律挂成 self 的子定时器（不用 QTimer.singleShot 静态版）：
+        # 静态 singleShot 造出的定时器无 QObject parent，关窗时扫不到、停不掉，
+        # 会在窗口关闭之后才打进来（_auto_enumerate_and_connect 甚至会去连真实
+        # 硬件、往已关窗口的状态栏写提示）。挂成子对象后由
+        # _release_runtime_resources 统一停掉。
+        self._startup_timers: list = []
+        for _ms, _fn in ((100, self._load_gui_config),
+                         (200, self._auto_enumerate_and_connect),
+                         (1200, self._update_sky_satellites)):
+            _t = QTimer(self)
+            _t.setSingleShot(True)
+            _t.setInterval(_ms)
+            _t.timeout.connect(_fn)
+            _t.start()
+            self._startup_timers.append(_t)
 
         # 天空图实时更新定时器（每 5 秒刷新卫星位置 + 授时）
         self._sky_update_timer = QTimer(self)
         self._sky_update_timer.setInterval(5000)
         self._sky_update_timer.timeout.connect(self._update_sky_satellites)
         self._sky_update_timer.start()
-        # 立即先刷一次
-        QTimer.singleShot(1200, self._update_sky_satellites)
 
         # (A) 真实 IQ 轮询定时器：连接 SDR 后才 start；无 SDR 时保持"未连接"。
         # 一次 tick 读一块 IQ，分发给频谱 / baseband 录制 / FM 解调声卡。
@@ -5444,6 +5451,66 @@ class MainWindow(QMainWindow):
                 5000,
             )
 
+    def _release_runtime_resources(self) -> None:
+        """关闭窗口时回收本实例的全部运行期资源（定时器 / 全局钩子）。
+
+        三件事，缺一件就会留下"关了还在跑"的残留：
+
+        1. 停掉所有窗口级 QTimer。QTimer 不随 close() 停——只有 C++ 对象销毁才停。
+           关窗不销毁对象（无 WA_DeleteOnClose）时，_sky_update_timer / _utc_timer
+           / _sat_track_timer 等会继续按周期回调本窗口，白烧事件循环；
+           跨文件测试里每构造一个 MainWindow 就多一组常驻定时器。
+        2. 摘掉应用级事件过滤器（__init__ 里 app.installEventFilter(self) 装的
+           Ctrl+C 焦点感知）。QApplication 的过滤链不随窗口关闭而清理，
+           已关窗口会永久留在链上，之后每个事件都要过一遍它。
+        3. 断开全局触屏单例信号。touch_manager 是进程级单例，不 disconnect 的话
+           模式一切换就会调用已关窗口的 _on_touch_mode_changed（该槽里还有
+           app.setStyleSheet 全量重抛光，见 _apply_touch_stylesheet 的说明）。
+
+        全部 RuntimeError 兜底：C++ 侧已销毁时不再重复清理。
+        """
+        for attr in ("_sky_update_timer", "_utc_timer", "_sat_track_timer",
+                     "_gnss_timer", "_iq_poll_timer", "_record_timer",
+                     "_replay_timer", "_repaint_timer"):
+            t = getattr(self, attr, None)
+            if t is None:
+                continue
+            try:
+                t.stop()
+            except RuntimeError:
+                pass
+        # 面板自备的定时器（status_panel 的 UTC 钟、device_panel 的 2s 热插拔
+        # 枚举、rf_sky_view / spectrum 的重绘钟…）同样是本窗口的子对象，关窗后
+        # 一样会继续跑——热插拔那条还会周期性去枚举真实 USB 硬件。一并停掉。
+        try:
+            for t in self.findChildren(QTimer):
+                try:
+                    t.stop()
+                except RuntimeError:
+                    pass
+        except RuntimeError:
+            pass
+        # QStatusBar 的 showMessage(text, timeout) 会挂一个 C++ 内部的自动清消息
+        # 定时器（parent 是 QStatusBar，findChildren(QTimer) 能扫到）。关窗后它
+        # 照跑，clearMessage() 即停；顺带也让状态栏不再挂着过期提示。
+        try:
+            sb = self.statusBar()
+            if sb is not None:
+                sb.clearMessage()
+        except RuntimeError:
+            pass
+        try:
+            _app = QApplication.instance()
+            if _app is not None:
+                _app.removeEventFilter(self)
+        except RuntimeError:
+            pass
+        try:
+            touch_manager().touch_mode_changed.disconnect(
+                self._on_touch_mode_changed)
+        except (RuntimeError, TypeError):
+            pass
+
     def closeEvent(self, event):
         """关闭时断开连接并保存配置。"""
         # 先停掉远程控制 / Web 服务（daemon 线程，避免端口残留）
@@ -5463,14 +5530,17 @@ class MainWindow(QMainWindow):
             self.settings.flush()
         except Exception:
             pass
-        self._save_gui_config()
-        self._disconnect()
-        # 停止真实串口 GNSS 轮询定时器与后台串口读线程
         try:
-            if self._gnss_timer is not None:
-                self._gnss_timer.stop()
+            self._save_gui_config()
         except Exception:
             pass
+        try:
+            self._disconnect()
+        except Exception:
+            pass
+        # 关闭即回收：断连路径抛异常也要跑到（上面已吞），否则定时器/全局钩子残留
+        self._release_runtime_resources()
+        # 停止真实串口 GNSS 后台读线程（定时器已在上面统一停掉）
         try:
             if self._gnss is not None:
                 self._gnss.stop()

@@ -10,6 +10,7 @@ SDR 设备信息、UTC 时钟。
 """
 
 import datetime
+import math
 
 from PySide6.QtCore import Qt, Signal, Slot, QTimer
 from PySide6.QtWidgets import (
@@ -79,12 +80,19 @@ def _fmt_bw(hz):
 
 
 def _dbfs_to_smeter(dbfs):
-    """把 dBFS 映射到 S 表字符串。无值返回 '--'。"""
+    """把 dBFS 映射到 S 表字符串。无值/非有限值（NaN/Inf）返回 '--'。
+
+    NaN/Inf 必须走空态：int(round(nan)) 会抛 ValueError（"cannot convert float
+    NaN to integer"），把 S-meter 整条刷新路径打断；静默夹到 0 又会显示满刻度
+    S9+xx，等于把"没测出电平"伪装成"信号爆表"。两者都违反诚实红线。
+    """
     if dbfs is None:
         return "--"
     try:
         dbfs = float(dbfs)
     except (TypeError, ValueError):
+        return "--"
+    if not math.isfinite(dbfs):
         return "--"
     if dbfs >= _S9_DBFS:
         extra = dbfs - _S9_DBFS
@@ -572,6 +580,14 @@ class StatusPanel(QWidget):
         try:
             dbfs = float(dbfs)
         except (TypeError, ValueError):
+            self.rssi_value.setText("--")
+            self.smeter_value.setText("--")
+            self.level_bar.setValue(0)
+            self._set_level_bar_color(tokens().COLORS["gray_300"])
+            return
+        if not math.isfinite(dbfs):
+            # NaN/Inf = 没测出电平：显式空态，绝不夹成满刻度（会把空值伪装成
+            # 强信号），也绝不抛 ValueError 打断刷新链。
             self.rssi_value.setText("--")
             self.smeter_value.setText("--")
             self.level_bar.setValue(0)
