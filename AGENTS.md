@@ -38,7 +38,14 @@ tracked 文件（含 commit message）中：
   进程内 hook → policy deny → arm_manual；
 - 新工具必须登记 `_TOOL_DOMAIN`（否则分组视图静默丢工具，有钉扎测试防这个）；
 - 跨语言一致性（mobile catalog / C++ 注册表 / 域集合）用钉扎测试锁死，
-  不许靠口头约定。
+  不许靠口头约定；
+- **窄带/高阶 IIR 一律 `butter(..., output="sos")` + `sosfilt`，禁用 ba
+  系数 `lfilter`**：2026-10-28 真实 FM 样本解出 `wfm_stereo_lite` 的
+  `pilot_snr_db=nan`——5 阶 butter 在 1.024MHz 采样率 / 19k±800Hz
+  （归一化带宽 1.5e-3）下 ba 系数数值爆炸，`pilot_band**2` 溢出成 inf。
+  合成 fixture 幅度小，**永远测不到**，只有真实大动态信号能咬出来；
+- 真实/大动态样本是合成 fixture 测不出的数值稳定性与量纲类缺陷的唯一
+  探针：样本入仓后必须立刻接进解码链跑一遍，不能只当资产摆着。
 
 ## 4. Windows/PowerShell 施工纪律（本仓主要开发环境）
 
