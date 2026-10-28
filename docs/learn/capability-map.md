@@ -655,9 +655,25 @@ lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已�
 顺序，再把日志里去掉 `[xx%]` 标记的进度字符序列拼起来按索引对齐，即可
 反推 F 落在哪个用例，**不必重跑全量**。
 
-结论：根 tests 的门禁判读必须以 `scripts/ci_pytest_groups.py --group N
---total 2` 分组并行为准（脚本不收 `--basetemp`），单进程整跑不可作为
-判据。污染根因（跨文件状态泄漏）未根治，登记为在账欠账。
+**挂死点已定位到文件（同轮追加，A/B 归因非本轮引入）**：分组跑到 89% 同样
+停滞，用"收集顺序 + 进度字符序列"对齐算出正卡在
+`tests/test_user_layouts.py::TestLayoutComboDynamic::test_combo_starts_with_builtins`；
+单独跑该文件（`timeout 150`）同样挂死 → **不是"慢"，是挂死**。
+A/B 归因：`git checkout ccd9b7b^ -- desktop/mcp_worker.py`（还原本轮
+mcp_worker 锁修复）后**仍然挂死**，故非本轮改动引入，是既有 UI 测试累积
+挂死。单独跑时在跑完 4 个用例后卡住——每个用例都 new 一个 MainWindow，
+第 N 次后 Qt 侧累积到临界点即挂（探针证明孤立构造 MainWindow **能成功**
+并 trace 完整 26 万行，故卡在 Qt 原生层、不释放 GIL，faulthandler 也
+转储不出栈）。
+
+顺带修掉一处真实缺陷：`MainWindow._auto_enumerate_and_connect` 不认
+`MBDSDR_OFFLINE`，离线测试环境下启动 200ms 后仍去枚举真实 USB（本机
+RTL-SDR 状态异常时即原生层阻塞）。已加离线守卫（跳过自动枚举 + 状态栏
+如实提示）。验证：test_main_window / test_gui_real_hardware /
+test_startup_sequence 共 41 项全绿，未误伤。
+
+**在账欠账**：根 tests 的跨文件状态污染（QApplication 累积导致 UI 用例
+挂死）未根治，`test_user_layouts.py` 是首个被定位到的触发点。
 
 ## 外部依赖销账表（运行时网络依赖）
 

@@ -1844,6 +1844,13 @@ class MainWindow(QMainWindow):
         """
         if self._active_sdr_backend is not None:
             return
+        # 离线模式（conftest/CI 默认 MBDSDR_OFFLINE=1）：不碰真实硬件。
+        # 否则启动 200ms 后就去枚举 USB —— 在测试进程里会同步阻塞（本机
+        # RTL-SDR 处于异常态时阻塞发生在原生层、不释放 GIL，整个会话挂死，
+        # 连 faulthandler 都转储不出栈）。离线就不该有硬件副作用。
+        if os.environ.get("MBDSDR_OFFLINE") == "1":
+            self._show_no_rtl_hint("离线模式：跳过启动自动枚举")
+            return
         try:
             from mbdsdr_ai.sdr_backend import (
                 enumerate_all_sdr_devices, build_backend_for_device)
