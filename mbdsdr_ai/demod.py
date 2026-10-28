@@ -396,10 +396,11 @@ class ViterbiDecoder:
 
     def decode(self, bits: np.ndarray) -> np.ndarray:
         """
-        解码比特流（向量化版本）。
+        解码比特流（向量化距离 + 前驱回溯）。
 
         参数:
-            bits: 接收比特流（软判决为0-1间浮点数）
+            bits: 接收比特流（软判决为0-1间浮点数；每 2 位 (G1,G2) 对应
+                  1 个信息位，与 _build_transitions 的输出约定一致）
 
         返回:
             解码后信息比特
@@ -415,7 +416,7 @@ class ViterbiDecoder:
         # 预计算输出期望（float类型）
         output_float = self.output.astype(float)  # (n, 2, 2)
 
-        # 幸存路径（每个时间步，每个状态的决策位）
+        # 幸存路径（每个时间步，每个 next_state 的前驱状态）
         survivors = np.zeros((n_symbols, self.n), dtype=int)
 
         # 批量处理所有符号
@@ -433,35 +434,31 @@ class ViterbiDecoder:
             # pm: (n,), distances: (n, 2)
             total = pm[:, None] + distances  # (n, 2)
 
-            # 对每个next_state，找到最小的total
-            # next_state: (n, 2) - 每个state和input对应的next_state
+            # 对每个 next_state 选最小总度量的分支，记录前驱状态。
+            # 两个 (state, input) 可映射到同一 next_state，必须按度量取真
+            # argmin；平局取先到者（state 小/输入位 0 优先）保证确定性。
+            # （旧实现只在「严格小于已记录最小值」时写决策位，而 np.minimum.at
+            # 之后该条件恒为假，决策表全 0，解码永远输出全 0——真缺陷。）
             new_pm = np.full(self.n, np.inf)
-            decisions = np.zeros(self.n, dtype=int)
-
-            # 向量化：对每个next_state找最小值
-            for input_bit in [0, 1]:
-                ns = self.next_state[:, input_bit]  # (n,)
-                t = total[:, input_bit]  # (n,)
-
-                # 用np.minimum.at做分散最小值更新
-                np.minimum.at(new_pm, ns, t)
-                # 记录决策
-                # 注意：这里需要更复杂的处理，因为多个state可能映射到同一个next_state
-                # 简化：先记录，后面比较
-                mask = (t < new_pm[ns])
-                decisions[ns[mask]] = input_bit
-
+            pred = np.zeros(self.n, dtype=int)
+            for s in range(self.n):
+                for input_bit in (0, 1):
+                    ns = int(self.next_state[s, input_bit])
+                    tv = float(total[s, input_bit])
+                    if tv < new_pm[ns]:
+                        new_pm[ns] = tv
+                        pred[ns] = s
             pm = new_pm
-            survivors[sym_idx] = decisions
+            survivors[sym_idx] = pred
 
-        # 回溯
+        # 回溯：next_state = (prev>>1)|(bit<<(K-2))，故当前状态最高位
+        # 就是该步的信息位，前驱由幸存表逐级取回
         decoded = np.zeros(n_symbols, dtype=np.uint8)
-        state = np.argmin(pm)
-
+        state = int(np.argmin(pm))
+        top = self.K - 2
         for i in range(n_symbols - 1, -1, -1):
-            bit = survivors[i, state]
-            decoded[i] = bit
-            state = self.next_state[state, bit]
+            decoded[i] = (state >> top) & 1
+            state = int(survivors[i, state])
 
         return decoded
 

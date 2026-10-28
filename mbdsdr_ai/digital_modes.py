@@ -3,8 +3,9 @@
 FT8/FT4 数字模式参数与结果解析工具
 ==================================
 
-FT8: 15秒周期，8FSK，79Hz频偏，~15W（公开协议参数）
-FT4: 7.5秒周期，8FSK，~3W
+FT8: 15秒周期，8FSK（8 音，6.25 Hz 音隔，50 Hz 带宽），~15W（公开协议参数）
+FT4: 7.5秒周期，4FSK（4 音，20.83 Hz 音隔，~90 Hz 带宽），~3W
+两者同用 LDPC(174,91)（77 消息位 + 14 位 CRC，见 ft8_ldpc.py / crc.py）。
 
 工具化：调用本仓编码器/解码器，解析结果。
 """
@@ -24,27 +25,27 @@ FT8_PARAMS = {
     "period_s": 15,
     "modulation": "8FSK",
     "tone_spacing_hz": 6.25,
-    "symbol_duration_ms": 256,
-    "bandwidth_hz": 79,
+    "symbol_duration_ms": 160,
+    "bandwidth_hz": 50,
     "min_wpm": 5,
     "typical_wpm": 12,
     "power_w": 15,
-    "coding": "LDPC (K=79, N=174)",
-    "crc": "12-bit",
+    "coding": "LDPC (K=91, N=174)",
+    "crc": "14-bit",
 }
 
 FT4_PARAMS = {
     "mode": "FT4",
     "period_s": 7.5,
-    "modulation": "8FSK",
-    "tone_spacing_hz": 6.25,
+    "modulation": "4FSK",
+    "tone_spacing_hz": 20.83,
     "symbol_duration_ms": 48,
-    "bandwidth_hz": 79,
+    "bandwidth_hz": 90,
     "min_wpm": 12,
     "typical_wpm": 18,
     "power_w": 3,
-    "coding": "LDPC (K=79, N=170)",
-    "crc": "12-bit",
+    "coding": "LDPC (K=91, N=174)",
+    "crc": "14-bit",
 }
 
 # 常用频率
@@ -76,11 +77,13 @@ def list_ft_frequencies() -> List[Dict]:
 
 
 def get_ft_params(mode: str = "FT8") -> Dict:
-    """获取FT8/FT4参数。"""
-    if mode.upper() == "FT8":
+    """获取FT8/FT4参数。未知模式抛 ValueError（不静默返回别的模式参数）。"""
+    m = str(mode).upper()
+    if m == "FT8":
         return FT8_PARAMS
-    else:
+    if m == "FT4":
         return FT4_PARAMS
+    raise ValueError(f"未知模式 {mode!r}，仅支持 FT8/FT4")
 
 
 # ========================================================================
@@ -123,7 +126,9 @@ class WSJTInterface:
                         msg = {
                             "time": parts[0],
                             "snr": parts[1] if parts[1].lstrip('-').isdigit() else None,
-                            "dt": parts[2] if parts[2].replace('.', '').isdigit() else None,
+                            # dt 可为负（WSJT-X 日志有 -0.3 这类值），与 snr
+                            # 同样允许前导负号，否则有效行会被静默丢字段
+                            "dt": parts[2] if parts[2].lstrip('-').replace('.', '').isdigit() else None,
                             "freq": parts[3] if parts[3].replace('.', '').isdigit() else None,
                             "message": ' '.join(parts[4:]),
                         }

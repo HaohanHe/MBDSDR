@@ -614,16 +614,21 @@ def qpsk_demodulate(iq: np.ndarray, sps: int) -> np.ndarray:
     return demod.demodulate(iq)
 
 
-def viterbi_decode_demo(bits: np.ndarray, rate: float = 0.5, K: int = 7) -> np.ndarray:
+def viterbi_decode_demo(bits: np.ndarray, rate: float = 0.5, K: int = 7,
+                        G1: int = METEOR_VIT_G1,
+                        G2: int = METEOR_VIT_G2) -> np.ndarray:
     """
     Viterbi 解码（真实实现，委托给 demod.ViterbiDecoder）。
 
-    使用标准 K=7, rate=1/2, G1=171, G2=133 卷积码（CCSDS 气象卫星标准）。
+    默认生成多项式与 :func:`viterbi_encode` 严格一致（METEOR_VIT_G1/G2，
+    0x79/0x5F = 八进制 171/137，Meteor-M2 口径）——此前这里硬编码 171/133
+    （十进制位掩码，与编码器不是同一组多项式），自编自解必然解不回来。
 
     参数:
         bits: 接收的编码比特流（软判决 0-1 浮点或硬判决 0/1）
         rate: 码率（保留参数，目前仅支持 1/2）
         K: 约束长度
+        G1/G2: 生成多项式位掩码（默认与编码器一致）
 
     返回:
         解码后的信息比特
@@ -632,7 +637,7 @@ def viterbi_decode_demo(bits: np.ndarray, rate: float = 0.5, K: int = 7) -> np.n
         raise RuntimeError("demod.py 不可用，无法进行 Viterbi 解码")
     if abs(rate - 0.5) > 1e-6:
         raise NotImplementedError(f"目前仅实现 rate=1/2 Viterbi，收到 rate={rate}")
-    dec = ViterbiDecoder(K=K, G1=171, G2=133)
+    dec = ViterbiDecoder(K=K, G1=G1, G2=G2)
     return dec.decode(bits)
 
 

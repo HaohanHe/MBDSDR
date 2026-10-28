@@ -30,9 +30,11 @@ def simulation_clock_offset() -> Dict:
     对应 Stellarium StelCore::getJD() 与系统 JD 的差。
     """
     try:
-        from new_spacetime import get_time_engine
-    except ImportError:
+        # 包内相对导入优先：绝对导入在 sys.path 含 mbdsdr_ai/ 目录时会把
+        # new_spacetime 再加载成顶层模块，造出第二个 TimeEngine 单例
         from .new_spacetime import get_time_engine
+    except ImportError:  # 独立脚本运行
+        from new_spacetime import get_time_engine
     eng = get_time_engine()
     sim_unix = eng.now_unix()
     real_unix = time.time()
@@ -59,12 +61,15 @@ def ntp_offset(server: str = "ntp.aliyun.com", port: int = 123, timeout: float =
     except Exception as e:
         return {"ntp_server": server, "reachable": False, "error": str(e)}
 
-    # NTP 传输时间在字节 40-47
-    recv_ts = struct.unpack("!12I", data)[8]
-    recv_frac = struct.unpack("!12I", data)[9]
+    # NTP 传输时间戳（Transmit Timestamp）在字节 40-47 = 32bit 字 #10/#11。
+    # 注意：#8/#9 是服务器接收时刻（Receive Timestamp），不是发送时刻，
+    # 用它会把服务器处理时延算进偏差。
+    if len(data) < 48:
+        return {"ntp_server": server, "reachable": False,
+                "error": f"NTP 响应长度异常: {len(data)} 字节（应为 48 字节）"}
+    recv_ts = struct.unpack("!12I", data)[10]
+    recv_frac = struct.unpack("!12I", data)[11]
     ntp_sec = recv_ts - _NTP_DELTA + recv_frac / 2 ** 32
-    # 单程延迟
-    delay = (t1 - t0) / 2.0
     local_now = (t0 + t1) / 2.0
     offset = ntp_sec - local_now
     return {

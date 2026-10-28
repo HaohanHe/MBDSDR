@@ -11,8 +11,10 @@ from typing import Dict
 
 
 def signal_quality(iq: np.ndarray) -> Dict:
-    """对一段复 IQ 做信号质量统计。"""
+    """对一段复 IQ 做信号质量统计。空输入抛 ValueError（统计量无定义）。"""
     x = np.asarray(iq, dtype=np.complex128)
+    if len(x) == 0:
+        raise ValueError("IQ 为空：信号质量统计无定义")
     I = np.real(x)
     Q = np.imag(x)
     rms_i = float(np.sqrt(np.mean(I ** 2)))
@@ -42,9 +44,14 @@ def squelch_gate(iq: np.ndarray, threshold_db: float = -50.0,
     """静噪门控：按块算 RSSI(dBFS)，判断信号是否超过门控并给占空比。
 
     dBFS 以满量程 1.0 为参考（IQ 归一化后 |x|<=1）。
+    空输入或 block<=0 抛 ValueError（0//0 会崩，属入参边界）。
     """
     x = np.asarray(iq, dtype=np.complex128)
     n = len(x)
+    if n == 0:
+        raise ValueError("IQ 为空：静噪门控无定义")
+    if block <= 0:
+        raise ValueError("block 必须为正整数")
     if n < block:
         block = n
     blocks = n // block

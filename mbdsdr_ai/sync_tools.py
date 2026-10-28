@@ -159,7 +159,9 @@ def _costas_track(args):
         content = (
             f"Costas 载波恢复（PSK 阶数 {loop.psk_order}）："
             f"频偏估计 {off:.6f} rad/sample"
-            + (f"（{off_hz:.1f} Hz @ {float(sr):.0f} Sa/s）" if off_hz else "")
+            # 注意 is not None：频偏恰为 0.0 时也要展示 Hz 换算
+            + (f"（{off_hz:.1f} Hz @ {float(sr):.0f} Sa/s）"
+               if off_hz is not None else "")
             + f"，已校正 {len(out)} 样本。提示：相干锁定后的相位模糊"
               "（n×π 镜像）用 diff_decode 积木消除。"
         )

@@ -11,8 +11,13 @@ from typing import Dict
 
 
 def evm_qpsk(symbols: np.ndarray) -> Dict:
-    """对一段 QPSK 软符号算 EVM。理想点 (±1±j)/sqrt(2)。"""
+    """对一段 QPSK 软符号算 EVM。理想点 (±1±j)/sqrt(2)。
+
+    空输入抛 ValueError（EVM 无定义，返回 NaN 属静默吞错）。
+    """
     x = np.asarray(symbols, dtype=np.complex128)
+    if len(x) == 0:
+        raise ValueError("符号序列为空：EVM 无定义")
     # 归一化功率
     p = np.mean(np.abs(x) ** 2)
     xn = x / (np.sqrt(p) + 1e-9)
@@ -23,8 +28,6 @@ def evm_qpsk(symbols: np.ndarray) -> Dict:
     nearest = np.argmin(dist, axis=1)
     err = xn - ideal[nearest]
     evm_rms = float(np.sqrt(np.mean(np.abs(err) ** 2)))
-    # 误判率（理想点归一化后，越限算错）
-    hard = np.sign(np.stack([xn.real, xn.imag], axis=1))
     return {
         "evm_rms_pct": round(evm_rms * 100, 2),
         "evm_db": round(20 * np.log10(evm_rms + 1e-9), 1),
