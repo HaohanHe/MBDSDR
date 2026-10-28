@@ -58,6 +58,35 @@ MAX_ARG_ARRAY_LEN = 1_000_000
 _ARR2 = {"type": "array",
          "items": {"type": "array", "items": {"type": "number"}}}
 
+#: 物理量入参合法区间（键名 → (min, max)）。P1「Python schema 无边界」续：
+#: NaN/Inf 与数组长度已拦，这里补数值区间上下界。越界是用户可修正的参数
+#: 错误（invalid_argument），绝不静默钳位——钳位等于替用户改数据。
+#: 区间取"物理上讲得通"的宽界，只拦离谱值，不误伤合法调用。
+_ARG_RANGES = {
+    "hz": (0.0, 10e9),               # 频率 Hz
+    "freq_hz": (0.0, 10e9),
+    "freqs_hz": (0.0, 10e9),
+    "db": (-300.0, 300.0),           # 增益/电平 dB
+    "nfft": (8, 1 << 24),            # FFT 点数
+    "sample_rate_hz": (1.0, 1e9),
+    "bandwidth_hz": (0.0, 1e9),
+    "ppm": (-10_000.0, 10_000.0),
+}
+
+
+def _check_arg_range(key: str, value: float, path: str) -> None:
+    """把数值按注册表区间校验；越界抛 invalid_argument。"""
+    rng = _ARG_RANGES.get(key)
+    if rng is None:
+        return
+    lo, hi = rng
+    if not (lo <= value <= hi):
+        raise InvalidArgumentError(
+            message=f"参数 {path}={value} 超出合法区间 [{lo}, {hi}]。",
+            suggestion=f"请改为区间内的值。本仓库拒绝越界参数，"
+                       f"也不做静默钳位（钳位等于替你改数据）。",
+            technical_detail=f"{path}={value} not in [{lo}, {hi}]")
+
 
 def np_from_pairs(pairs):
     """[[re, im], ...] -> complex128 数组（工具参数入参统一入口）。"""
@@ -81,7 +110,15 @@ def _validate_args_finite(args: Any, _path: str = "") -> None:
 
     if isinstance(args, dict):
         for k, v in args.items():
-            _validate_args_finite(v, f"{_path}.{k}" if _path else str(k))
+            child = f"{_path}.{k}" if _path else str(k)
+            # 数组：按注册表区间逐元素校验
+            if isinstance(v, (list, tuple)) and k in _ARG_RANGES:
+                for i, item in enumerate(v):
+                    if isinstance(item, (int, float)) and not isinstance(item, bool):
+                        _check_arg_range(k, item, f"{child}[{i}]")
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                _check_arg_range(k, v, child)
+            _validate_args_finite(v, child)
     elif isinstance(args, (list, tuple)):
         if len(args) > MAX_ARG_ARRAY_LEN:
             raise InvalidArgumentError(
