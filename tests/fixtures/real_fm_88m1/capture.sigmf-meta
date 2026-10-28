@@ -1,0 +1,30 @@
+{
+  "global": {
+    "core:datatype": "cu8",
+    "core:version": "1.0.0",
+    "core:sample_rate": 1024000,
+    "core:frequency": 88100000,
+    "core:hw": "RTL-SDR RTL2832U + Fitipower FC0012 (SN 77771111153705700)",
+    "core:author": "MBDSDR hardware-in-loop capture",
+    "core:description": "Real over-the-air FM broadcast band capture. Provenance: physical RTL-SDR stick on this host, rtl_sdr CLI, gain 17.9 dB, 2026-10-28. Station identity unknown (no RDS decode attempted) - do not invent one. NOT synthetic. Duration 0.512 s (2^19 complex samples).",
+    "mbdsdr:provenance": "real_ota",
+    "mbdsdr:capture_tool": "rtl_sdr (librtlsdr) direct USB capture",
+    "mbdsdr:gain_db": 17.9,
+    "mbdsdr:antenna": "unknown"
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:datetime": "2026-10-28T08:55:58Z",
+      "mbdsdr:time_source": "system"
+    }
+  ],
+  "annotations": [],
+  "mbdsdr:validation": {
+    "samples": 524288,
+    "peak_over_noise_dB": 21.6,
+    "audio_band_energy_frac": 0.68,
+    "note": "measured at capture time; test re-derives from data",
+    "duration_s": 0.512
+  }
+}
