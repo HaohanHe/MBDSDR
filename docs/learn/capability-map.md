@@ -226,6 +226,7 @@
 | `costas_track` | `iq` | `loop_bw`, `psk_order`(2/4/8), `sample_rate_hz` | 频偏估计（rad/sample，给采样率则换算 Hz）+ 载波校正后 IQ；<64 样本诚实拒绝 |
 | `diff_encode` | `bits` | `order`(2/4) | 与输入等长的差分码（参考符号 0 仅作异或种子，不追加） |
 | `diff_decode` | `bits` | `order`(2/4) | 累积异或还原；decode(encode(x))==x；亦解 Costas n×π 相位模糊 |
+| `compose_visible_image`（`mbdsdr_ai.meteor_sat`，库函数非工具） | `cadu_data`（LRPT 帧列表，`lrpc_build_frame` 布局；0/1 位流或字节均可） | `sync`, `header_len`, `target_apid`, `as_bits`, `quant_tables`, `max_frames` | RFC 2435 段重组 + K.3 熵解码 → (H,W)/(H,W,3) uint8；段不全/坏数据→None（不出半幅图） |
 
 ---
 
