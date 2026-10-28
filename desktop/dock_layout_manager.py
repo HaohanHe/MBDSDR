@@ -428,20 +428,31 @@ class DockLayoutManager:
             pass
         self.apply_preset(BUILTIN_LAYOUTS[0])
 
-    def _raise_center_tab(self, keyword: str) -> None:
-        """把中央 Tab 切到标题含 keyword 的页。"""
+    def _raise_center_tab(self, panel_id: str) -> None:
+        """把中央 Tab 切到稳定身份为 panel_id 的页。
+
+        身份判定与 _tab_key 同口径（panel id 取代译文，红线见 _tab_key）：
+        优先 _tab_key 精确匹配（含无 id 页回退 tabText 的情形）；
+        仅作兼容再试译文子串匹配。绝不把译文当主身份。
+        """
         tab = self.left_tab
         if tab is None:
             return
         for i in range(tab.count()):
-            if keyword in tab.tabText(i):
+            if DockLayoutManager._tab_key(tab, i) == panel_id:
+                tab.setCurrentIndex(i)
+                return
+        # 兼容回退：子串匹配（不区分大小写），服务旧调用习惯
+        low = panel_id.lower()
+        for i in range(tab.count()):
+            if low in tab.tabText(i).lower():
                 tab.setCurrentIndex(i)
                 return
 
     def _preset_focus(self) -> None:
         """专注：全屏频谱 + 右侧 36px 图标窄条。"""
         self._move_sky_to_tab()
-        self._raise_center_tab("频谱")
+        self._raise_center_tab("spectrum")
         # 右侧三个 Dock 默认折叠（隐藏），只留窄条图标
         for pid, dock in self.docks.items():
             dock.setVisible(False)
@@ -454,7 +465,7 @@ class DockLayoutManager:
 
     def _preset_analysis(self) -> None:
         """分析：中央频谱 + 右侧射频天空 + 底部控制条。"""
-        self._raise_center_tab("频谱")
+        self._raise_center_tab("spectrum")
         self._move_sky_to_right()
         # 控制/状态/AI 移到底部横向条（仅对真实 QDockWidget 生效；
         # 新三栏布局下它们是右栏 QScrollArea 页签，只切可见性）
@@ -473,7 +484,7 @@ class DockLayoutManager:
 
     def _preset_grid(self) -> None:
         """网格：频谱 / 射频天空 / 控制 / 状态 多区分栏。"""
-        self._raise_center_tab("频谱")
+        self._raise_center_tab("spectrum")
         self._move_sky_to_right()
         sky = self._ensure_sky_dock()
         sky.setVisible(True)

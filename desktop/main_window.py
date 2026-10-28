@@ -9,11 +9,34 @@ MBDSDR 桌面端主窗口
 import os
 import sys
 import json
+import logging
 import math
 import time
 import tempfile
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+def _focus_widget():
+    """当前焦点控件（便于单测打桩）。"""
+    from PySide6.QtWidgets import QApplication
+    return QApplication.focusWidget()
+
+
+def _is_text_entry_widget(w) -> bool:
+    """是否为文本输入类控件（Ctrl+C 应走标准复制语义）。"""
+    if w is None:
+        return False
+    from PySide6.QtWidgets import (
+        QAbstractSpinBox, QComboBox, QLineEdit, QPlainTextEdit, QTextEdit,
+    )
+    if isinstance(w, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox)):
+        return True
+    if isinstance(w, QComboBox) and w.isEditable():
+        return True
+    return False
 
 import l10n   # i18n 加载层（Qt Linguist）；同级裸导入，双上下文由 desktop/__init__ 垫片保证
 
@@ -396,6 +419,11 @@ class MainWindow(QMainWindow):
 
         # 构建 UI
         self._build_menu_bar()
+        # 应用级事件过滤：Ctrl+C 焦点感知（文本框内放行复制，见 eventFilter）
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self._build_tool_bar()
         self._build_central_widget()
         self._build_status_bar()
@@ -1167,11 +1195,25 @@ class MainWindow(QMainWindow):
         bar.move((parent.width() - bar.width()) // 2, 16)
         bar.raise_()
 
+    def _handle_shortcut_override(self, event) -> bool:
+        """Ctrl+C 焦点感知：文本输入控件上放行标准复制，返回 True 表示已接管。
+
+        操作逻辑红线：全局快捷键不得劫持系统惯例。
+        """
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_C:
+            if _is_text_entry_widget(_focus_widget()):
+                event.accept()
+                return True
+        return False
+
     def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)
         from PySide6.QtCore import QEvent
         if obj is getattr(self, "_ai_cmd_parent", None) \
                 and event.type() == QEvent.Resize:
             self._position_ai_cmd_bar()
+        if event.type() == QEvent.ShortcutOverride:
+            if self._handle_shortcut_override(event):
+                return True
         return super().eventFilter(obj, event)
 
     def _on_cmd_submit(self) -> None:
@@ -5446,7 +5488,11 @@ class MainWindow(QMainWindow):
         return None
 
     def _save_gui_config(self):
-        """保存 GUI 配置到 ~/.mbdsdr/gui_config.json。"""
+        """保存 GUI 配置到 ~/.mbdsdr/gui_config.json。
+
+        诚实红线：只落真实状态。取不到的字段直接不写键，
+        绝不用演示值（tokens().AI["demo_freq_mhz"] 等）冒充真实频率/音量。
+        """
         import json
         config_dir = os.path.expanduser("~/.mbdsdr")
         config_file = os.path.join(config_dir, "gui_config.json")
@@ -5460,25 +5506,36 @@ class MainWindow(QMainWindow):
                     "y": self.y(),
                     "maximized": self.isMaximized(),
                 },
-                "current_freq_mhz": getattr(self.control_panel, '_current_freq_fm',
-                                            tokens().AI["demo_freq_mhz"]),
-                "current_mode": getattr(self.control_panel, '_current_mode', 'FM'),
-                "volume": getattr(self.control_panel, 'volume_slider', None).value() if hasattr(self.control_panel, 'volume_slider') else 30,
                 "theme": self._current_theme,
-                "show_waterfall": getattr(self.spectrum, '_show_waterfall', True),
                 "observer_lat": self._observer_lat,
                 "observer_lon": self._observer_lon,
                 "gnss_port": self._gnss_port,
                 "gnss_baudrate": self._gnss_baudrate,
             }
+            cp = getattr(self, "control_panel", None)
+            if cp is not None:
+                freq_hz = getattr(cp, "_freq_hz", None)
+                if freq_hz is not None:
+                    config["current_freq_mhz"] = float(freq_hz) / 1e6
+                mode = getattr(cp, "_current_mode", None)
+                if mode is not None:
+                    config["current_mode"] = mode
+                vs = getattr(cp, "volume_slider", None)
+                if vs is not None:
+                    config["volume"] = int(vs.value())
+            spectrum = getattr(self, "spectrum", None)
+            if spectrum is not None:
+                st = getattr(spectrum, "_state", None)
+                if st is not None and hasattr(st, "show_waterfall"):
+                    config["show_waterfall"] = bool(st.show_waterfall)
             # NTRIP 配置：对话框已打开则取当前表单值；否则保留磁盘上的旧值。
             # 密码本地明文保存（不打印日志），未配置时写空串。
             ntrip_dlg = getattr(self, "_ntrip_dialog", None)
             if ntrip_dlg is not None:
                 try:
                     config["ntrip"] = ntrip_dlg.get_config()
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("读取 NTRIP 表单配置失败，本段不落盘: %s", e)
             else:
                 # 对话框未打开：尽量保留已存在的 ntrip 段，避免 _load 后丢配置
                 old = self._read_ntrip_from_disk()
@@ -5488,8 +5545,8 @@ class MainWindow(QMainWindow):
                 }
             with open(config_file, 'w') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.warning("保存 GUI 配置失败: %s", e)
 
     def _load_gui_config(self):
         """从 ~/.mbdsdr/gui_config.json 加载 GUI 配置。"""
@@ -5526,12 +5583,40 @@ class MainWindow(QMainWindow):
             theme = config.get("theme", "default")
             if theme != self._current_theme:
                 self._apply_theme(theme)
+            # 恢复频率/模式/音量/瀑布：只回填真实键，缺键不编造。
+            # 走 control_panel 的启动恢复 setter（blockSignals，不触发后端下发）。
+            cp = getattr(self, "control_panel", None)
+            if cp is not None:
+                if "current_freq_mhz" in config:
+                    try:
+                        cp.set_frequency_hz(float(config["current_freq_mhz"]) * 1e6)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("恢复频率失败（值非法，已忽略）: %s", e)
+                if "current_mode" in config:
+                    try:
+                        cp.set_mode(str(config["current_mode"]))
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("恢复解调模式失败（值非法，已忽略）: %s", e)
+                if "volume" in config:
+                    try:
+                        cp.set_volume(int(config["volume"]))
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("恢复音量失败（值非法，已忽略）: %s", e)
+            spectrum = getattr(self, "spectrum", None)
+            if spectrum is not None and "show_waterfall" in config:
+                st = getattr(spectrum, "_state", None)
+                has_wf = bool(getattr(st, "show_waterfall", True)) if st is not None else True
+                if bool(config["show_waterfall"]) != has_wf:
+                    try:
+                        spectrum.toggle_waterfall()
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("恢复瀑布可见性失败: %s", e)
             # NTRIP 配置：对话框已创建则回填；未创建则等 _open_ntrip_dialog 时再读盘。
             ntrip_dlg = getattr(self, "_ntrip_dialog", None)
             if ntrip_dlg is not None:
                 try:
                     ntrip_dlg.apply_config(config.get("ntrip"))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("回填 NTRIP 配置失败: %s", e)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("加载 GUI 配置失败: %s", e)

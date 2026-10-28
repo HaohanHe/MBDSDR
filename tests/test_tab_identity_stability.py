@@ -114,3 +114,56 @@ def test_capture_uses_stable_ids(qapp):
     assert captured == ["spectrum", "rf_sky", "doppler"], \
         f"落盘必须写 id，实际: {captured}"
     assert "频谱" not in captured, "译文绝不能进落盘键"
+
+
+def test_raise_center_tab_survives_language_switch(qapp):
+    """_raise_center_tab 必须按稳定 id 切页，语言切换后仍有效。
+
+    回归钉扎：此前 _preset_focus/_preset_analysis/_preset_grid 传中文
+    \"频谱\" 并按 tabText 子串匹配，英文界面下专注/分析/网格预设全部失明。
+    """
+    from types import SimpleNamespace
+
+    from dock_layout_manager import DockLayoutManager as D
+
+    tab = QTabWidget()
+    _build(tab, [zh for _pid, zh, _en in PANELS])
+    tab.setCurrentIndex(1)  # 先切走，制造可观察状态
+
+    # 语言切换：译文变英文（id 不变）
+    for i, (_pid, _zh, en) in enumerate(PANELS):
+        tab.setTabText(i, en)
+
+    D._raise_center_tab(SimpleNamespace(left_tab=tab), "spectrum")
+    assert tab.currentIndex() == 0, \
+        f"英文译文下按 id 必须仍能切到 spectrum，实际 index={tab.currentIndex()}"
+
+
+def test_raise_center_tab_legacy_text_fallback(qapp):
+    """无 id 的旧页：传译文本身仍能精确命中（_tab_key 回退 tabText）。"""
+    from types import SimpleNamespace
+
+    from dock_layout_manager import DockLayoutManager as D
+
+    tab = QTabWidget()
+    tab.addTab(QWidget(), "射频天空")
+    tab.addTab(QWidget(), "频谱")   # 无 tabData
+    tab.setCurrentIndex(0)
+
+    D._raise_center_tab(SimpleNamespace(left_tab=tab), "频谱")
+    assert tab.currentIndex() == 1, "无 id 时传译文应能定位（兼容）"
+
+
+def test_raise_center_tab_substring_fallback(qapp):
+    """子串回退不区分大小写（旧调用习惯）。"""
+    from types import SimpleNamespace
+
+    from dock_layout_manager import DockLayoutManager as D
+
+    tab = QTabWidget()
+    tab.addTab(QWidget(), "RF Sky")
+    tab.addTab(QWidget(), "Spectrum")   # 无 tabData
+    tab.setCurrentIndex(0)
+
+    D._raise_center_tab(SimpleNamespace(left_tab=tab), "spectrum")
+    assert tab.currentIndex() == 1, "子串回退应不区分大小写"
