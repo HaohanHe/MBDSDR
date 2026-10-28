@@ -270,10 +270,21 @@ class TestListToolsHonesty:
         c = _client_with(fake)
         assert c.list_tools() == tools
 
-    def test_non_list_result_coerced_to_empty(self):
+    def test_tools_key_variant_is_unwrapped_not_swallowed(self):
+        # 固件常见 {"tools": [...]} 变体：必须解出工具，不许静默变 []。
+        # 静默空列表会把"解析不出工具"伪装成"设备没有工具"——正是本文件
+        # 顶部注释与 list_tools docstring 明令禁止的形态。
+        tools = [{"name": "tune_fm", "desc": "调谐FM", "params": {}}]
+        fake = FakeWS(frames=[_resp(1, result={"tools": tools})])
+        c = _client_with(fake)
+        assert c.list_tools() == tools
+
+    def test_unknown_result_shape_raises_instead_of_empty(self):
+        # 未知形态（既非 list 也无 tools 键）必须报错，绝不冒充空工具列表
         fake = FakeWS(frames=[_resp(1, result={"not": "a list"})])
         c = _client_with(fake)
-        assert c.list_tools() == []
+        with pytest.raises(RuntimeError, match="形态不可识别"):
+            c.list_tools()
 
 
 # ============================================================================
@@ -442,3 +453,68 @@ class TestCliMapping:
         assert fake.sent == []
         assert c.find_strongest_fm(108.0, 87.5, 0.1) == {}
         assert fake.sent == []
+
+    def test_nonpositive_step_rejected_not_infinite_loop(self):
+        # step<=0 时 freq 永不前进 -> while 死循环（与 gimbal.sweep 同款）
+        c = _client_with(FakeWS(frames=[]))
+        with pytest.raises(ValueError, match="step 必须 > 0"):
+            c.scan_fm(87.5, 108.0, 0)
+        with pytest.raises(ValueError, match="step 必须 > 0"):
+            c.scan_fm(87.5, 108.0, -0.1)
+
+
+class TestResponseUnwrapContract:
+    """_unwrap：工具封装的返回契约（标注 Dict 就不许返回 None）。"""
+
+    def test_none_result_becomes_empty_dict(self):
+        # result=None 时下游 .get() 会 AttributeError；这里归一成 {}
+        assert mbdsdr_mcp_client._unwrap({"result": None}) == {}
+
+    def test_missing_result_becomes_empty_dict(self):
+        assert mbdsdr_mcp_client._unwrap({"id": 1}) == {}
+
+    def test_scalar_result_preserved(self):
+        # stop_record 返回采样数：不许为对齐类型标注把真实数据换成 {}
+        assert mbdsdr_mcp_client._unwrap({"result": 12345}) == 12345
+
+    def test_error_envelope_returned_as_is(self):
+        err = {"code": -32000, "message": "忙"}
+        assert mbdsdr_mcp_client._unwrap({"error": err}) == err
+
+    def test_wrapper_never_returns_none(self):
+        fake = FakeWS(frames=[_resp(1, result=None)])
+        c = _client_with(fake)
+        assert c.get_status() == {}
+
+    def test_tools_call_normalizes_string_response(self):
+        # 桥接路径可能回 JSON 字符串：不做归一会让 "error" in resp 变成
+        # 子串判断 + resp.get() AttributeError 被吞成泛化错误
+        srv = StdioMCPServer(host="203.0.113.7")
+        srv.client = StubClient(connect_ok=True, responses={
+            "get_status": _resp(1, result={"rssi": -60}),
+        })
+        resp = srv._handle_tools_call(
+            {"id": 11, "method": "tools/call",
+             "params": {"name": "get_status", "arguments": {}}})
+        assert resp["result"]["isError"] is False
+        assert json.loads(resp["result"]["content"][0]["text"]) == {"rssi": -60}
+
+    def test_tools_call_rejects_non_json_string(self):
+        srv = StdioMCPServer(host="203.0.113.7")
+        srv.client = StubClient(connect_ok=True,
+                                responses={"get_status": "not-json{{"})
+        resp = srv._handle_tools_call(
+            {"id": 12, "method": "tools/call",
+             "params": {"name": "get_status", "arguments": {}}})
+        assert resp["result"]["isError"] is True
+        assert "不是合法 JSON" in resp["result"]["content"][0]["text"]
+
+    def test_tools_list_survives_null_params(self):
+        # 固件给 params=null 时不得让整个 tools/list 抛穿
+        srv = StdioMCPServer(host="203.0.113.7")
+        srv.client = StubClient(connect_ok=True, list_result=[
+            {"name": "get_status", "desc": "状态", "params": None},
+        ])
+        resp = srv._handle_tools_list({"id": 13, "method": "tools/list"})
+        assert "result" in resp
+        assert resp["result"]["tools"][0]["inputSchema"]["properties"] == {}

@@ -56,6 +56,26 @@ except ImportError:
 # MBDSDRClient: WebSocket JSON-RPC 2.0 客户端
 # ============================================================================
 
+def _unwrap(resp: Dict):
+    """统一拆解 JSON-RPC 响应（契约「错误:即失败」）。
+
+    - error 键存在就交给调用方当错误处理，不吞；
+    - result 缺失或为 None 时返回 {} 而不是 None——本文件这些封装标注
+      返回 Dict，返回 None 会让下游 `.get()` 直接 AttributeError；
+    - result 是标量/列表（如 stop_record 的采样数）原样返回，绝不为了
+      对齐类型标注把真实数据换成空字典。
+    """
+    if not isinstance(resp, dict):
+        return {}
+    if "error" in resp:
+        err = resp["error"]
+        return err if isinstance(err, dict) else {"message": str(err)}
+    if "result" not in resp:
+        return {}
+    result = resp["result"]
+    return {} if result is None else result
+
+
 class MBDSDRClient:
     """ai-sdr Mini WebSocket MCP 客户端。
 
@@ -197,7 +217,16 @@ class MBDSDRClient:
         if "error" in resp:
             raise RuntimeError(f"list_tools 失败: {resp['error']}")
         result = resp.get("result", [])
-        return result if isinstance(result, list) else []
+        if isinstance(result, list):
+            return result
+        # 固件常见变体：{"tools": [...]}。不允许静默降级成 []——那会把
+        # "解析不出工具"伪装成"设备没有工具"（本文件注释明令禁止）。
+        if isinstance(result, dict) and isinstance(result.get("tools"), list):
+            return result["tools"]
+        raise RuntimeError(
+            f"list_tools 返回形态不可识别：{type(result).__name__} "
+            f"（期望 list 或 {{tools: list}}）；不冒充空工具列表"
+        )
 
     def tune_fm(self, freq_mhz: float) -> Dict:
         """调谐 FM 广播。
@@ -206,7 +235,7 @@ class MBDSDRClient:
             freq_mhz: 频率 MHz (64-108)
         """
         resp = self.call("tune_fm", {"freq_mhz": freq_mhz})
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def tune_am(self, freq_khz: int) -> Dict:
         """调谐 AM/MW 广播。
@@ -215,63 +244,63 @@ class MBDSDRClient:
             freq_khz: 频率 kHz (531-1710)
         """
         resp = self.call("tune_am", {"freq_khz": freq_khz})
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def set_volume(self, volume: int) -> Dict:
         """设置音量 0-63。"""
         resp = self.call("set_volume", {"volume": volume})
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def get_status(self) -> Dict:
         """获取当前 SDR 状态 (mode/freq/rssi/snr)。"""
         resp = self.call("get_status")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def get_gps(self) -> Dict:
         """获取 GPS/北斗定位 (fix/lat/lon/alt/sats/hdop)。"""
         resp = self.call("get_gps")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def get_imu(self) -> Dict:
         """获取 9 轴姿态 (acc/gyr/mag/temp)。"""
         resp = self.call("get_imu")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def start_record(self) -> Dict:
         """开始 I2S 基带录音 (WAV 头通过 WebSocket 推送)。"""
         resp = self.call("start_record")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def stop_record(self) -> Dict:
         """停止录音，返回采样数。"""
         resp = self.call("stop_record")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def get_version(self) -> Dict:
         """获取固件/硬件/MCU/SDR 芯片信息。"""
         resp = self.call("get_version")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def check_update(self) -> Dict:
         """检查固件更新 (返回当前版本/GitHub release/OTA 地址)。"""
         resp = self.call("check_update")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def trigger_ota(self) -> Dict:
         """触发 OTA 升级 (返回 Web OTA 地址和 espota 命令)。"""
         resp = self.call("trigger_ota")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def web_ota_url(self) -> Dict:
         """获取 Web OTA 升级页面 URL。"""
         resp = self.call("web_ota_url")
-        return resp.get("result", resp.get("error", {}))
+        return _unwrap(resp)
 
     def reboot(self) -> Dict:
         """重启 ESP32 (调用后连接会断开)。"""
         try:
             resp = self.call("reboot")
-            return resp.get("result", resp.get("error", {}))
+            return _unwrap(resp)
         finally:
             self.close()
 
@@ -294,6 +323,10 @@ class MBDSDRClient:
         Returns:
             列表 [{freq, rssi, snr}, ...]
         """
+        # step<=0 会让 freq 永不前进 -> while 死循环（与 gimbal.sweep_azimuth
+        # 同款）。start>end 不算错：循环自然不进、返回空列表（既有契约）。
+        if step <= 0:
+            raise ValueError(f"scan_fm: step 必须 > 0，收到 {step}")
         results = []
         freq = start
         while freq <= end:
@@ -443,6 +476,9 @@ class StdioMCPServer:
             name = tool.get("name", "")
             desc = tool.get("desc", "")
             params = tool.get("params", {})
+            if not isinstance(params, dict):
+                # 固件可能给 null/列表；不防御会让 tools/list 整体抛穿
+                params = {}
 
             # 构建 JSON Schema properties
             properties = {}
@@ -495,6 +531,35 @@ class StdioMCPServer:
 
         try:
             resp = self.client.call(name, arguments)
+            # 契约是 dict；但固件/桥接路径也可能给回 JSON 字符串（或字节帧）。
+            # 不做这层归一的话 `"error" in resp` 会退化成子串判断、
+            # 后续 resp.get() 再抛 AttributeError 被下面 except 吞成泛化错误，
+            # 把"响应形态不对"伪装成"工具调用异常"。
+            if isinstance(resp, (bytes, bytearray)):
+                resp = resp.decode("utf-8", errors="replace")
+            if isinstance(resp, str):
+                try:
+                    resp = json.loads(resp)
+                except ValueError:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "result": {
+                            "content": [{"type": "text",
+                                         "text": "错误: 固件响应不是合法 JSON"}],
+                            "isError": True,
+                        },
+                    }
+            if not isinstance(resp, dict):
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "result": {
+                        "content": [{"type": "text",
+                                     "text": f"错误: 固件响应形态异常 ({type(resp).__name__})"}],
+                        "isError": True,
+                    },
+                }
             if "error" in resp:
                 error_msg = resp["error"].get("message", str(resp["error"]))
                 return {
