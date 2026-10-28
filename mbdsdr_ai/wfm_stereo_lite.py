@@ -21,7 +21,7 @@
 """
 from __future__ import annotations
 import numpy as np
-from scipy.signal import butter, sosfiltfilt, hilbert, resample_poly, lfilter
+from scipy.signal import butter, sosfilt, sosfiltfilt, hilbert, resample_poly, lfilter
 from math import gcd
 
 PILOT_HZ = 19000.0
@@ -91,23 +91,31 @@ def decode_stereo(
     nyq = sample_rate / 2.0
 
     # 2) 窄带提取 19kHz pilot
-    b19 = butter(5, [(PILOT_HZ - 800) / nyq, (PILOT_HZ + 800) / nyq], btype="band")
-    pilot_band = lfilter(b19[0], b19[1], mpx)
-    p_rms = float(np.sqrt(np.mean(pilot_band ** 2)))
-    m_rms = float(np.sqrt(np.mean(mpx ** 2))) + 1e-9
+    # 用 sos（二阶级联）而非 ba 系数：19k±800Hz 在 1MHz 采样率下归一化带宽
+    # 仅 1.5e-3，5 阶 butter 的 ba 系数数值条件极差，真实大动态信号上
+    # lfilter 会溢出（pilot_band**2 → inf → rms=nan → 立体声判定失效）。
+    b19 = butter(5, [(PILOT_HZ - 800) / nyq, (PILOT_HZ + 800) / nyq],
+                 btype="band", output="sos")
+    pilot_band = sosfilt(b19, mpx)
+    p_rms = float(np.sqrt(np.mean(np.square(pilot_band))))
+    m_rms = float(np.sqrt(np.mean(np.square(mpx)))) + 1e-9
+    if not (np.isfinite(p_rms) and np.isfinite(m_rms)):
+        # 诚实降级：数值不可用时按单声道处理，不伪造 pilot_snr
+        return {"l": np.zeros(0), "r": np.zeros(0), "sample_rate": out_sr,
+                "stereo": False, "pilot_snr_db": None, "duration_s": 0.0}
     pilot_snr_db = 20.0 * np.log10(p_rms / m_rms + 1e-9)
     is_stereo = p_rms > 0.02 * m_rms
 
-    # 3) 和信号 (L+R)：低通 15kHz
-    low = butter(5, AF_CUTOFF / nyq, btype="low")
-    S = lfilter(low[0], low[1], mpx)
+    # 3) 和信号 (L+R)：低通 15kHz（同样走 sos，避免真实信号下数值劣化）
+    low = butter(5, AF_CUTOFF / nyq, btype="low", output="sos")
+    S = sosfilt(low, mpx)
 
     if is_stereo:
         # 4) pilot 解析信号相位 θ，二倍频 38kHz 载波
         z = hilbert(pilot_band)
         theta = np.angle(z)
         car = np.cos(2.0 * theta)  # 与合成时 cos(2π38kt) 同相
-        D = lfilter(low[0], low[1], 2.0 * mpx * car)  # (L-R)/2；2× 补偿 cos² 检波 ½ 衰减，否则差信号幅度只有和信号一半，L/R 串扰
+        D = sosfilt(low, 2.0 * mpx * car)  # (L-R)/2；2× 补偿 cos² 检波 ½ 衰减，否则差信号幅度只有和信号一半，L/R 串扰
         Lraw = 0.5 * (S + D)
         Rraw = 0.5 * (S - D)
     else:
