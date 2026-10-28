@@ -69,18 +69,27 @@ def main():
     n = len(reg.list_tools())
     check(f"工具数 >= 190 (实际 {n})", n >= 190, f"{n} tools")
 
-    # 4) 频谱分析真实计算（先连模拟后端）
+    # 4) 频谱分析真实计算（连接真实枚举设备；无硬件时验证诚实空态）
     print("\n[4] 频谱 / 扫频 / 缩放")
-    reg.call("sdr_connect", {"device_id": "mock"})
+    conn = reg.call("sdr_connect", {})
     spec = reg.call("sdr_spectrum_analyze", {"fft_size": 1024, "num_samples": 8192})
     spec_txt = spec.content if hasattr(spec, "content") else str(spec)
-    check("spectrum_analyze 出峰值", ("peak" in spec_txt) or ("峰值" in spec_txt) or ("MHz" in spec_txt),
-          spec_txt[:80])
-    sw = reg.call("sdr_ai_sweep", {"freq_start_hz": 88e6, "freq_end_hz": 108e6,
-                                   "step_hz": 200e3, "dwell_ms": 5})
-    check("ai_sweep 扫出点", bool(sw))
-    z = reg.call("sdr_spectrum_zoom", {"factor": 4.0})
-    check("spectrum_zoom 生效", "4.0" in str(z) or "99.7" in str(z))
+    if getattr(conn, "success", False):
+        check("spectrum_analyze 出峰值", ("peak" in spec_txt) or ("峰值" in spec_txt) or ("MHz" in spec_txt),
+              spec_txt[:80])
+        sw = reg.call("sdr_ai_sweep", {"freq_start_hz": 88e6, "freq_end_hz": 108e6,
+                                       "step_hz": 200e3, "dwell_ms": 5})
+        check("ai_sweep 扫出点", bool(sw))
+        z = reg.call("sdr_spectrum_zoom", {"factor": 4.0})
+        check("spectrum_zoom 生效", "4.0" in str(z) or "99.7" in str(z))
+    else:
+        # 无硬件环境（裸 CI）：链路必须显式报「未连接」，绝不虚构峰值
+        check("无硬件: connect 诚实失败", not conn.success, "未枚举到真实设备")
+        check("无硬件: 频谱诚实空态", "未连接" in spec_txt, spec_txt[:60])
+        sw = reg.call("sdr_ai_sweep", {"freq_start_hz": 88e6, "freq_end_hz": 108e6,
+                                       "step_hz": 200e3, "dwell_ms": 5})
+        sw_txt = sw.content if hasattr(sw, "content") else str(sw)
+        check("无硬件: sweep 诚实空态", "未连接" in sw_txt, sw_txt[:60])
 
     # 5) 干扰检测
     print("\n[5] 干扰检测")

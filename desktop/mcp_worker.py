@@ -55,6 +55,7 @@ class MCPWorker(QObject):
     request_tool = Signal(str, dict)    # UI 请求调用工具 (tool_name, params)，worker 线程执行
     error_occurred = Signal(str)        # 错误信息
     log_message = Signal(str)           # 日志
+    finished = Signal()                 # Worker 生命周期结束（stop 完成）→ 线程退出
 
     def __init__(self, host: str = "", port: int = 0, parent=None):
         super().__init__(parent)
@@ -105,6 +106,7 @@ class MCPWorker(QObject):
         self._mcp_tool_names = set()
         self.connection_changed.emit(False, "已断开")
         self.log_message.emit("MCP Worker 已停止")
+        self.finished.emit()
 
     def _connect(self):
         """连接 ai-sdr Mini。失败时显式未连接，绝不回退模拟数据。"""
@@ -117,9 +119,14 @@ class MCPWorker(QObject):
         try:
             self.client = MBDSDRClient(self.host, self.port, timeout=5)
             with self._call_lock:
-                self.client.connect()
-                # 测试连接
-                version = self.client.get_version()
+                if not self.client.connect():
+                    raise ConnectionError("WebSocket 连接失败")
+                # 测试连接：必须拿到成功结果。「错误:即失败」——get_version 回
+                # 错误信封时绝不能报"已连接 (固件 unknown)"伪装成功。
+                resp = self.client.call("get_version")
+            if "error" in resp:
+                raise ConnectionError(f"get_version 返回错误: {resp['error']}")
+            version = resp.get("result") or {}
             self.connected = True
             fw = version.get("firmware", "unknown")
             self.connection_changed.emit(True, f"已连接 {self.host}:{self.port} (固件 {fw})")
@@ -143,8 +150,13 @@ class MCPWorker(QObject):
 
             try:
                 with self._call_lock:
-                    status = self.client.get_status()
-                self.status_updated.emit(status)
+                    resp = self.client.call("get_status")
+                if "error" in resp:
+                    # 「错误:即失败」：错误信封不得冒充状态数据下发，
+                    # 否则下游会把 {"code","message"} 当状态字典消费。
+                    self.log_message.emit(f"get_status 失败: {resp['error']}")
+                else:
+                    self.status_updated.emit(resp.get("result") or {})
             except Exception as e:
                 self.log_message.emit(f"get_status 失败: {e}")
 
@@ -306,7 +318,9 @@ class MCPWorkerManager:
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.start)
-        self.worker.finished = self.thread.quit  # 自定义信号
+        # 自定义信号 finished（stop 完成时发出）→ 线程退出；必须 connect，
+        # 不能 `worker.finished = thread.quit` 赋值个 bound method 冒充信号。
+        self.worker.finished.connect(self.thread.quit)
         self.thread.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
 

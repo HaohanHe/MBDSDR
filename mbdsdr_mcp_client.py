@@ -40,9 +40,16 @@ from typing import Any, Dict, List, Optional, Callable
 try:
     import websocket
 except ImportError:
-    print("错误: 缺少 websocket-client 库，请运行: pip install websocket-client",
-          file=sys.stderr)
-    sys.exit(1)
+    _MISSING_WS_MSG = ("错误: 缺少 websocket-client 库，"
+                       "请运行: pip install websocket-client")
+    if __name__ == "__main__":
+        # CLI 直调缺依赖：明确报错并以退出码 1 结束。
+        print(_MISSING_WS_MSG, file=sys.stderr)
+        sys.exit(1)
+    # 作为库导入（用法 3 / desktop.mcp_worker）：必须抛可捕获的 ImportError，
+    # 让调用方按自己的空态降级。绝不能 sys.exit 杀掉宿主进程——那会把
+    # desktop/mcp_worker 里的 `except ImportError` 诚实降级路径变成死代码。
+    raise ImportError(_MISSING_WS_MSG) from None
 
 
 # ============================================================================
@@ -144,7 +151,7 @@ class MBDSDRClient:
             self._connected = False
             raise ConnectionError(f"发送失败: {e}")
 
-        # 接收响应 (匹配 id)
+        # 接收响应 (匹配 id；其余帧跳过)
         deadline = time.time() + self.timeout
         while time.time() < deadline:
             try:
@@ -152,18 +159,27 @@ class MBDSDRClient:
                 raw = self.ws.recv()
                 if not raw:
                     continue
-                response = json.loads(raw)
-                if self.verbose:
-                    print(f"[MBDSDR] <- {json.dumps(response, ensure_ascii=False)}",
-                          file=sys.stderr)
-                # 匹配响应 id (固件可能推送其他消息，跳过)
-                if response.get("id") == req_id:
-                    return response
             except websocket.WebSocketTimeoutException:
                 continue
             except Exception as e:
                 self._connected = False
                 raise ConnectionError(f"接收失败: {e}")
+
+            # 解析失败/非对象帧不是断连：固件会推送非 JSON-RPC 帧
+            # （如 start_record 的 WAV 头二进制、进度文本），按"其他消息"跳过，
+            # 等待真正的响应；一律当致命错误会把正常推送误判成链路故障。
+            try:
+                response = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(response, dict):
+                continue
+            if self.verbose:
+                print(f"[MBDSDR] <- {json.dumps(response, ensure_ascii=False)}",
+                      file=sys.stderr)
+            # 匹配响应 id (固件可能推送其他消息，跳过)
+            if response.get("id") == req_id:
+                return response
 
         raise TimeoutError(f"调用 {method} 超时 ({self.timeout}s)")
 
@@ -172,9 +188,16 @@ class MBDSDRClient:
     # ------------------------------------------------------------------
 
     def list_tools(self) -> List[Dict]:
-        """MCP 工具发现: 获取全部可用工具列表。"""
+        """MCP 工具发现: 获取全部可用工具列表。
+
+        按「错误:即失败」契约：设备回错误信封时抛 RuntimeError，
+        绝不吞成空列表冒充"设备没有工具"。
+        """
         resp = self.call("list_tools")
-        return resp.get("result", [])
+        if "error" in resp:
+            raise RuntimeError(f"list_tools 失败: {resp['error']}")
+        result = resp.get("result", [])
+        return result if isinstance(result, list) else []
 
     def tune_fm(self, freq_mhz: float) -> Dict:
         """调谐 FM 广播。
@@ -329,21 +352,43 @@ class StdioMCPServer:
             print(f"[MCP-stdio] {msg}", file=sys.stderr)
 
     def _read_message(self) -> Optional[Dict]:
-        """从 stdin 读取一条 JSON-RPC 消息 (按行读取)。"""
-        try:
-            line = sys.stdin.readline()
-            if not line:
+        """从 stdin 读取一条 JSON-RPC 消息 (按行读取)。
+
+        仅真正的 EOF 返回 None（主循环退出）。空行跳过、畸形 JSON 回
+        -32700 Parse error、非对象 JSON 回 -32600 Invalid Request 后继续
+        服务——单条坏帧绝不能杀掉整个 MCP 会话（JSON-RPC 2.0 要求
+        对解析失败回错误响应并继续处理后续消息）。
+        """
+        while True:
+            try:
+                line = sys.stdin.readline()
+            except Exception as e:
+                self._log(f"读取错误: {e}")
                 return None
+            if not line:
+                return None  # 真 EOF
             line = line.strip()
             if not line:
-                return None
-            return json.loads(line)
-        except json.JSONDecodeError as e:
-            self._log(f"JSON 解析错误: {e}")
-            return None
-        except Exception as e:
-            self._log(f"读取错误: {e}")
-            return None
+                continue  # 空行不是 EOF，跳过
+            try:
+                msg = json.loads(line)
+            except ValueError as e:
+                self._log(f"JSON 解析错误: {e}")
+                self._write_message({
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32700, "message": f"Parse error: {e}"},
+                })
+                continue
+            if not isinstance(msg, dict):
+                self._log(f"非对象 JSON: {type(msg).__name__}")
+                self._write_message({
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {"code": -32600, "message": "Invalid Request"},
+                })
+                continue
+            return msg
 
     def _write_message(self, msg: Dict):
         """向 stdout 写入一条 JSON-RPC 消息。"""
@@ -493,16 +538,19 @@ class StdioMCPServer:
             method = request.get("method", "")
             self._log(f"收到请求: {method} (id={request.get('id')})")
 
+            # JSON-RPC 2.0：无 id 的消息是通知（含 notifications/initialized、
+            # notifications/cancelled 等），服务端不得回复——绝不能回
+            # -32601 之类错误信封去回话通知。
+            if "id" not in request:
+                self._log(f"通知 {method}，不回复")
+                continue
+
             if method == "initialize":
                 response = self._handle_initialize(request)
             elif method == "tools/list":
                 response = self._handle_tools_list(request)
             elif method == "tools/call":
                 response = self._handle_tools_call(request)
-            elif method == "notifications/initialized":
-                # MCP 初始化完成通知，无需响应
-                self._log("MCP 客户端初始化完成")
-                continue
             elif method == "ping":
                 response = {"jsonrpc": "2.0", "id": request.get("id"), "result": {}}
             else:
@@ -699,7 +747,7 @@ def main():
             print(f"未知命令: {cmd}", file=sys.stderr)
             sys.exit(1)
 
-    except (ConnectionError, TimeoutError) as e:
+    except (ConnectionError, TimeoutError, RuntimeError) as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
     except KeyboardInterrupt:
