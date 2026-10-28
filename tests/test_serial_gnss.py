@@ -283,24 +283,40 @@ def test_malformed_sentences():
     assert p.parse(mk("XXGGA,072545.00,4352.00,N,12519.00,E,1,9,0.9,150.0,M,,,").decode()) is None
 
 
-def test_gll_gst_optional_support():
-    """若 serial_gnss 已增强支持 GLL/GST 则断言字段；否则 skip。"""
+def test_gll_gst_support():
+    """GLL/GST 解析是既定能力（a639ac7 起落地）——硬断言，不留 skip 退路。
+
+    旧版"若支持则断言否则 skip"的礼貌兜底已过期；能力存在就必须钉住，
+    回归了就该红。
+    """
     p = NMEAParser()
     # $GNGLL,llll.ll,a,yyyyy.yy,a,hhmmss.ss,A
     gll_body = "GNGLL,4352.0000,N,12519.0000,E,072545.00,A"
     gll = p.parse(mk(gll_body).decode("ascii"))
-    if gll is None:
-        pytest.skip("GLL 未在当前 serial_gnss.py 实现（可后续增强）")
+    assert gll is not None, "GLL 必须能解析（能力已存在，不许退化）"
     assert gll["sentence"] == "GLL"
+    assert gll["talker"] == "GN"
     assert gll.get("status") == "A"
+    assert gll.get("valid") is True
     assert abs(gll["latitude"] - EXPECT_LAT) < 1e-4
+    assert abs(gll["longitude"] - EXPECT_LON) < 1e-4
+    assert gll["utc_time"] == "072545.00"
+
+    # GLL 无效状态（V）必须如实标记
+    gll_v = p.parse(mk("GNGLL,4352.0000,N,12519.0000,E,072545.00,V").decode("ascii"))
+    assert gll_v is not None
+    assert gll_v["valid"] is False
+    assert gll_v["status"] == "V"
 
     # $GNGST,rms,ellipse,lat_err,lon_err,alt_err
     gst_body = "GNGST,072545.00,1.0,,,2.0,3.0,4.0"
     gst = p.parse(mk(gst_body).decode("ascii"))
-    if gst is None:
-        pytest.skip("GST 未在当前 serial_gnss.py 实现")
+    assert gst is not None, "GST 必须能解析"
     assert gst["sentence"] == "GST"
+    assert gst["rms_std"] == 1.0
+    assert gst["lat_sigma"] == 3.0
+    assert gst["lon_sigma"] == 4.0
+    assert gst["major_sigma"] is None, "空字段必须是 None，不得编造 0"
 
 
 # ============================================================
