@@ -852,6 +852,7 @@ class MainWindow(QMainWindow):
         if hasattr(self.sky_view, "object_clicked"):
             self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
         left_tab.addTab(self.sky_view, "射频天空")
+        left_tab.tabBar().setTabData(left_tab.count() - 1, "rf_sky")
 
         # Tab: 多普勒定轨
         self.doppler_panel = DopplerPanel()
@@ -860,10 +861,12 @@ class MainWindow(QMainWindow):
         self.doppler_panel.progress.connect(self._on_doppler_progress)
         self.doppler_panel.failed.connect(self._on_doppler_failed)
         left_tab.addTab(self.doppler_panel, "多普勒定轨")
+        left_tab.tabBar().setTabData(left_tab.count() - 1, "doppler")
 
         # Tab: 卫星闭环自动跟踪
         self.sat_track_panel = SatTrackPanel()
         left_tab.addTab(self.sat_track_panel, "卫星跟踪")
+        left_tab.tabBar().setTabData(left_tab.count() - 1, "sat_track")
         self.sat_track_panel.track_requested.connect(self._start_satellite_tracking)
         self.sat_track_panel.stop_requested.connect(self._stop_satellite_tracking)
         self.sat_track_panel.update_tle_requested.connect(self._on_update_sat_tle)
@@ -915,6 +918,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Tab"), self, self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
         left_tab.addTab(spectrum_widget, "频谱")
+        left_tab.tabBar().setTabData(left_tab.count() - 1, "spectrum")
 
         self.left_tab = left_tab
 
@@ -1105,6 +1109,11 @@ class MainWindow(QMainWindow):
         self.right_tab.addTab(scroll, title)
         if attr_name:
             setattr(self, attr_name, scroll)
+            # 稳定身份：从 attr_name 推导 panel id（"control_dock" -> "control"）。
+            # 落盘/恢复一律按 id 走，绝不按译文 —— 语言切换后译文会变，
+            # 用译文当身份会让布局静默丢失（见 DockLayoutManager._tab_key）。
+            pid = attr_name[:-5] if attr_name.endswith("_dock") else attr_name
+            self.right_tab.tabBar().setTabData(self.right_tab.count() - 1, pid)
         return scroll
 
     # ------------------------------------------------------------------

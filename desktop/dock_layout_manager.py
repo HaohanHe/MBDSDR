@@ -166,7 +166,7 @@ class DockLayoutManager:
         tab = self.left_tab
         if tab is not None:
             for i in range(tab.count()):
-                if tab.tabText(i).startswith("射频天空"):
+                if self._tab_key(tab, i) == "rf_sky":
                     tab.removeTab(i)
                     break
         dock = self._ensure_sky_dock()
@@ -191,6 +191,8 @@ class DockLayoutManager:
             # 插入到"频谱"之后
             idx = 1 if tab.count() > 0 else 0
             tab.insertTab(idx, sky, "射频天空")
+            # 稳定身份，别用译文（tabData 在 QTabBar 上，不在 QTabWidget）
+            tab.tabBar().setTabData(idx, "rf_sky")
         if self._sky_dock is not None:
             self._sky_dock.setVisible(False)
         self._sky_in_dock = False
@@ -262,7 +264,8 @@ class DockLayoutManager:
         # 左栏 Tab（顺序 + 当前索引）
         lt = self.left_tab
         if isinstance(lt, QTabWidget):
-            out["left_tab_order"] = [lt.tabText(i) for i in range(lt.count())]
+            out["left_tab_order"] = [self._tab_key(lt, i)
+                                     for i in range(lt.count())]
             out["left_tab_index"] = lt.currentIndex()
             out["left_panel_visible"] = self._capture_tab_visible(lt)
         else:
@@ -272,7 +275,8 @@ class DockLayoutManager:
         # 右栏 Tab
         rt = getattr(self.mw, "right_tab", None)
         if isinstance(rt, QTabWidget):
-            out["right_tab_order"] = [rt.tabText(i) for i in range(rt.count())]
+            out["right_tab_order"] = [self._tab_key(rt, i)
+                                      for i in range(rt.count())]
             out["right_tab_index"] = rt.currentIndex()
             out["right_panel_visible"] = self._capture_tab_visible(rt)
         else:
@@ -282,14 +286,29 @@ class DockLayoutManager:
         return out
 
     @staticmethod
+    def _tab_key(tab: QTabWidget, i: int) -> str:
+        """页签的稳定身份：优先 tabData 里的 panel id，回退 tabText。
+
+        红线（沿用 commit 7d3fa3f 的口径：panel id 取代译文 tabText）：
+        身份绝不能用译文。语言一切换译文就变，按译文存下的顺序/可见性
+        再也对不上，布局恢复就会悄悄丢页签。保留 tabText 回退只为兼容
+        旧版落盘文件（它们的 order 里存的是译文）。
+        """
+        data = tab.tabBar().tabData(i)
+        if isinstance(data, str) and data:
+            return data
+        return tab.tabText(i)
+
+    @staticmethod
     def _capture_tab_visible(tab: QTabWidget) -> Dict[str, bool]:
         # 左 / 右栏 Tab 页签可见性（QTabWidget.isTabVisible: True=可见）
         vis: Dict[str, bool] = {}
         for i in range(tab.count()):
+            key = DockLayoutManager._tab_key(tab, i)
             try:
-                vis[tab.tabText(i)] = bool(tab.isTabVisible(i))
+                vis[key] = bool(tab.isTabVisible(i))
             except Exception:  # noqa: BLE001
-                vis[tab.tabText(i)] = True
+                vis[key] = True
         return vis
 
     def apply_layout_data(self, data: Dict) -> None:
@@ -335,23 +354,40 @@ class DockLayoutManager:
         if not isinstance(tab, QTabWidget) or not order:
             return
         try:
-            pages = [(tab.tabText(i), tab.widget(i)) for i in range(tab.count())]
-            by_text = dict(pages)
+            items = [(DockLayoutManager._tab_key(tab, i), tab.tabText(i),
+                      tab.widget(i)) for i in range(tab.count())]
+            # 同时按稳定 id 与译文建索引：新版落盘存 id，旧版存译文，
+            # 两种都要能恢复（否则老用户升级后布局静默丢失）。
+            by_key: Dict[str, tuple] = {}
+            id_of: Dict[int, str] = {}
+            for k, t, w in items:
+                by_key.setdefault(k, (t, w))
+                by_key.setdefault(t, (t, w))   # 译文别名，兼容旧版落盘
+                id_of[id(w)] = k               # widget -> 稳定 id，用于归一
             while tab.count():
                 tab.removeTab(0)
-            for text in order:
-                if text in by_text:
-                    tab.addTab(by_text[text], text)
-            for text, w in pages:
-                if text not in order:
-                    tab.addTab(w, text)
-            # 可见性恢复
+            used: set = set()
+            for key in order:
+                hit = by_key.get(key)
+                if hit is not None:
+                    title, w = hit
+                    tab.addTab(w, title)
+                    # 归一成稳定 id 写回 tabData：即便落盘里存的是译文，
+                    # 恢复后下一次落盘也仍是 id，不会再退化回译文。
+                    pid = id_of.get(id(w), key)
+                    tab.tabBar().setTabData(tab.count() - 1, pid)
+                    used.add(pid)
+            for k, t, w in items:
+                if k not in used:
+                    tab.addTab(w, t)
+                    tab.tabBar().setTabData(tab.count() - 1, k)
+            # 可见性恢复（键同样走稳定 id）
             if isinstance(visible, dict):
                 for i in range(tab.count()):
-                    t = tab.tabText(i)
-                    if t in visible:
+                    k = DockLayoutManager._tab_key(tab, i)
+                    if k in visible:
                         try:
-                            tab.setTabVisible(i, bool(visible[t]))
+                            tab.setTabVisible(i, bool(visible[k]))
                         except Exception:  # noqa: BLE001
                             pass
             if isinstance(current_index, int) and 0 <= current_index < tab.count():
