@@ -262,13 +262,19 @@ class WorkflowRecorder:
     def _parameterize(
         self, parameters: Dict[str, Any], parameter_map: Dict[str, str]
     ) -> Dict[str, Any]:
-        """将参数中的具体值替换为 {{param_name}}。"""
+        """将参数中的具体值替换为 {{param_name}}。
+
+        匹配口径：str(值) == 参数描述（简化设计）。注意必须对任意标量
+        类型做 str() 后比较——只匹配 str 实例会让数值参数（频率/增益等
+        SDR 最常见的入参）永远参数化不了，模板声称有参数、回放却从不替换，
+        属静默死参数（2026-10-28 修为全类型匹配）。
+        """
         result = {}
         for key, value in parameters.items():
-            if isinstance(value, str):
+            if isinstance(value, (str, int, float, bool)) and not isinstance(value, dict):
                 # 检查是否匹配某个参数值
                 for param_name, param_desc in parameter_map.items():
-                    if str(value) == param_desc:  # 用描述作为匹配值（简化）
+                    if str(value) == str(param_desc):
                         result[key] = f"{{{{{param_name}}}}}"
                         break
                 else:
@@ -321,10 +327,25 @@ class WorkflowRecorder:
     def _substitute_parameters(
         self, parameters: Dict[str, Any], values: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """将 {{param_name}} 替换为实际值。"""
+        """将 {{param_name}} 替换为实际值。
+
+        占位符**独占整个值**时保留参数原始类型（数值回传仍是数值）；
+        嵌在更长字符串里时才做字符串插值。否则回放给工具的频率/增益
+        会变成字符串，下游类型校验直接拒。
+        """
         result = {}
         for key, value in parameters.items():
             if isinstance(value, str):
+                # 整值占位符：原样（含类型）替换
+                matched = False
+                for param_name, param_value in values.items():
+                    if value == f"{{{{{param_name}}}}}":
+                        result[key] = param_value
+                        matched = True
+                        break
+                if matched:
+                    continue
+                # 嵌入式占位符：字符串插值
                 for param_name, param_value in values.items():
                     value = value.replace(f"{{{{{param_name}}}}}", str(param_value))
                 result[key] = value
