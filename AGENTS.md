@@ -65,6 +65,15 @@ IQ 出图 + 七道根套件门禁 + capability-map；测试代码双边一致，
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
 
+（2026-10-28 深夜工程轮实测：**1246 passed / 4 skipped / 0 failed**。
+自 1168 起净增 78，来源：RTL-SDR 枚举回退与 rtl_tcp 兜底、导出路径收拢、
+入参 NaN/Inf+数组+区间三闸、MCP 回环绕代理、tab 身份稳定化、GUI 配置
+诚实落盘、Ctrl+C 焦点感知、滚轮 tooltip、CRC 内核双重钉扎、QPSK 解调链
+三处真缺陷修复、ModelManager 4xx 重试、会话批准 TTL、workflow_recorder
+参数化、FT8 Costas 同步、接收流水线冒烟。唯一曾经的红用例
+test_http_unreachable_server_envelope 已证实为真 bug（回环被代理劫持）
+并修复销账，不是环境问题。）
+
 根 `tests/`（大套件，200 个测试文件：`test_*.py` 167 + `*_test.py` 15 +
 `*roundtrip*.py` 18）同样是对拍门禁所在。**它整跑很慢**：
 单进程跑 160 个文件约 45 分钟——慢在同进程内单例 QApplication 跨文件累积

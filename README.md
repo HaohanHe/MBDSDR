@@ -14,7 +14,7 @@
 
 | 组件 | 位置 | 是什么 |
 |---|---|---|
-| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面实测 **90 个**（`cpp/src/ai/tool_schema.cpp`，read/write 双态、写动作在手动模式被门拦截），并内置 ControlHub HTTP 控制通道 |
+| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面（read/write 双态、写动作在手动模式被门拦截；**数量随版本漂移，实时口径以 `cpp/src/ai/tool_schema.cpp` 注册表为准**），并内置 ControlHub HTTP 控制通道 |
 | 手机端 | [`mobile/`](mobile/README.md) | Flutter 一套代码（Android/iOS），手机作 AI 的"眼睛和手臂"：定位+罗盘指向+rtl_tcp 直连外置 SDR；经 ControlHub HTTP 只读对接桌面引擎 |
 | Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册大量 LLM 可调用工具（数量随版本漂移，实时口径见该 README §1 与运行时 `tool_registry.list_tools()`）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的工具集 |
 | 论文实验管线 | [`experiments/`](experiments/README.md) | 可复现实验（Eb/N0 解码成功率 / 多普勒定轨 / AMR 基线 / LLM 基线），固定种子、逐图标口径 |
