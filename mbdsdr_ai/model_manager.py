@@ -284,6 +284,10 @@ class ModelManager:
                     if attempt < self.max_retries:
                         time.sleep(1 * (attempt + 1))
                         continue
+                else:
+                    # 4xx 等不可重试错误：立即放弃，不烧剩余重试次数
+                    # （否则一次 400 会白打 max_retries+1 个请求）
+                    break
             except requests.exceptions.Timeout:
                 last_error = f"请求超时 ({self.timeout}s)"
                 if attempt < self.max_retries:
