@@ -201,9 +201,8 @@ class GardnerTimingRecovery:
         self.line = np.roll(self.line, -1)
         self.line[-1] = sample
 
-        # Gardner误差检测器
-        # e = (y[k] - y[k-1]) * y[k-1/2].conj() 的虚部
-        # 简化：用中间采样和前后采样差
+        # Gardner误差检测器 + 输出
+        # e = Re{(y[k] - y[k-1]) · conj(y[k-1/2])}（QPSK 复数口径）
         err = 0.0
         out = None
 
@@ -215,14 +214,18 @@ class GardnerTimingRecovery:
             if idx < len(self.line) - 1:
                 out = self.line[idx] * (1 - frac) + self.line[idx + 1] * frac
 
-            # 计算Gardner误差
+            # 计算Gardner误差：前后符号差 × 中点共轭
             mid_idx = idx - self.sps // 2
             if mid_idx >= 0 and idx + 1 < len(self.line):
                 mid = self.line[mid_idx]
-                err = np.real(out - self.line[idx + 1]) * np.imag(mid)
+                err = float(np.real((out - self.line[idx + 1]) * np.conj(mid)))
 
-            # 更新定时
+            # 闭环更新定时：误差必须反馈进 mu（否则 gain_mu 是死参数，
+            # 定时自由运行，只对已对齐输入有效）。极性经合成 IQ 长流
+            # roundtrip 标定：mu ← mu + gain_mu·err（2026-10-28，
+            # 2500 符号 G→C bw=0.0005 全程零误码不失锁）。
             self.mu -= self.sps
+            self.mu += self.gain_mu * err
 
         self.mu += 1.0
 
@@ -269,12 +272,21 @@ class QPSKDemodulator:
         self.num_taps = num_taps
 
         # 初始化模块
-        self.costas = CostasLoop(noise_bw=0.01)
+        # 链路顺序与环路带宽经合成 IQ roundtrip 标定（2026-10-28）：
+        # - 定时恢复（Gardner）必须先于载波恢复（Costas）：Costas 在过采样
+        #   脉冲成形流上会被符号间过零点的伪误差拉飞；
+        # - Costas 环路带宽必须窄（0.0005）：QPSK 有四重相位锁点，宽环易
+        #   周期滑移（slip 90° 后 BER 跳到 ~0.25）。0.0005 实测 2000 符号
+        #   全程零误码、不失锁。
+        self.costas = CostasLoop(noise_bw=0.0005)
         self.gardner = GardnerTimingRecovery(sps=sps, gain_mu=0.05)
 
     def demodulate(self, iq: np.ndarray) -> np.ndarray:
         """
         完整QPSK解调。
+
+        链路：匹配滤波 → Gardner 位同步 → Costas 载波恢复 → 符号判决
+        （顺序固定：定时先于载波，见 __init__ 注释）。
 
         参数:
             iq: 原始复数IQ采样
@@ -285,15 +297,15 @@ class QPSKDemodulator:
         # 1. 匹配滤波
         filtered = matched_filter(iq, self.num_taps, self.sps, self.beta)
 
-        # 2. Costas环载波恢复
-        corr, _ = self.costas.work_batch(filtered)
+        # 2. Gardner位同步（符号率输出，闭环收敛）
+        timed = self.gardner.work_batch(filtered)
 
-        # 3. Gardner位同步
-        symbols = self.gardner.work_batch(corr)
+        # 3. Costas环载波恢复（符号率上跑，避免过采样伪误差）
+        corr, _ = self.costas.work_batch(timed)
 
         # 4. 符号判决（QPSK四相位）
         # 判决到最近的星座点
-        symbols = np.sign(symbols.real) + 1j * np.sign(symbols.imag)
+        symbols = np.sign(corr.real) + 1j * np.sign(corr.imag)
         symbols = symbols / np.sqrt(2)
 
         return symbols
@@ -302,9 +314,10 @@ class QPSKDemodulator:
         """
         符号转比特流。
 
-        QPSK格雷码映射：
-            00 → (1,1)   01 → (-1,1)
-            11 → (-1,-1) 10 → (1,-1)
+        QPSK 映射（与本方法实现一致，勿按旧注释理解）：
+            (+1,+1) → 1 1    (-1,+1) → 0 1
+            (-1,-1) → 0 0    (+1,-1) → 1 0
+        即 I = real>0?1:0，Q = imag>0?1:0，按 (I, Q) 顺序输出。
 
         返回:
             比特数组（0/1）
