@@ -97,6 +97,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import deque
 from enum import Enum
@@ -424,6 +425,26 @@ class StdioTransport(MCPTransport):
 # ======================================================================
 # streamable_http transport：urllib POST JSON-RPC
 # ======================================================================
+def _opener_for(url: str):
+    """为一次 MCP HTTP 请求构造 opener：**回环地址一律不走代理**。
+
+    真机实测（非推测）：本机设了 HTTPS_PROXY，urllib 默认 ProxyHandler
+    会把 ``127.0.0.1`` 的本地 MCP 请求也发给代理，代理对 localhost 回
+    502 —— 于是 `test_http_unreachable_server_envelope` 长期拿到
+    ``http_error`` 而非真实的 ``transport``，把真 bug 藏成了"环境问题"。
+
+    回环是本机进程，走代理既无意义又有害：它把"连不上"伪装成"服务端 502"。
+    所以回环**永远**绕过代理；非回环仍照常尊重系统/环境代理设置。
+    """
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    is_loopback = (host in ("localhost", "::1") or
+                   host.startswith("127."))
+    if is_loopback:
+        # ProxyHandler({}) = 显式空代理表，覆盖环境里的代理设置
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener()
+
+
 class StreamableHttpTransport(MCPTransport):
     """MCP streamable HTTP 客户端（2024-11-05 传输约定子集，纯标准库）。
 
@@ -473,7 +494,7 @@ class StreamableHttpTransport(MCPTransport):
         req = urllib.request.Request(url, data=body, headers=self._headers(),
                                      method="POST")
         try:
-            resp = urllib.request.urlopen(req, timeout=self.timeout)
+            resp = _opener_for(url).open(req, timeout=self.timeout)
         except urllib.error.HTTPError as e:
             detail = ""
             try:
