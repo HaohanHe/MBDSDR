@@ -578,6 +578,40 @@ lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已�
 文件，命中个人信息或就业意向措辞即红（规则字面量拼接构造，门禁自身不命中
 自己）；仓库里的账号式标识已统一中性化。
 
+**零测试模块 20 个补齐 + 26+ 组真缺陷（2026-10-28 六轮销账）**：勘察报告
+（28 个零测试模块）里 DSP/扫描感知/轨道杂项三批 19 个模块全部落地行为测试
+（合成 IQ/已知向量/roundtrip/tmp_path 口径，225+ 项）；MCP 旧壳安全面同轮
+收口（`ToolCallGate` 单一来源，旧 `mbdsdr_ai_mcp_server.py` 与 `MCPToolSet`
+共用；17 项钉扎）。挖出并修复 26+ 组真缺陷，最重的几个：
+
+1. **`demod.ViterbiDecoder` ACS 恒输出全 0**（决策表严格小于恒假 + 回溯走
+   next_state 前进而非前驱回推；`digital_modes.decode_viterbi`、`meteor_sat`
+   委托面一并断链；meteor_sat demo 另有 171/133 vs 0x79/0x5F 多项式不同步）。
+2. **`version_store` 三处伪造级**：同毫秒撞 ID 静默丢历史、对象缺失空串冒充
+   空文件、diff 指向不存在版本伪造全 deleted——历史系统最恶性的失真形态。
+3. **`gimbal` 假成功族**：rotctld `RPRT 20` 被 `"0" in ln` 判成功、无回读
+   (0,0) 占位假报已对准、stop() 负哨兵被改写成移动指令。
+4. **`wfm_stereo_lite` 38k 混频缺 2× 增益补偿** → L/R 串扰 0.31、分离度
+   9.5 dB；修复后串扰 <0.01。
+5. **`cw_decoder` 5 处**（包络反相、词间空格错位、中位数估 unit 乱码、wpm
+   死参数、空态缺键）与 **`time_sync` NTP 时间戳错位**（读接收戳非传输戳）。
+
+零测试模块剩余未覆盖（诚实登记）：`fm_scan`/`sweep`/`spectrum_sensing` 等
+已覆盖但 `mbdsdr_mcp_client.py`（stdio 桥）、`desktop/mcp_worker.py`、
+`desktop/constants.py` 与 `wfm_stereo_lite` 之外个别小模块的深度边界仍可加
+强；`tests/test_real_fm_sample.py` 的真实样本门禁只认 fixtures 内这一份，
+新增真实样本须同步补 provenance 测试。
+
+**首份真实 OTA 样本入仓（2026-10-28，缺口 P1 销账）**：
+`tests/fixtures/real_fm_88m1/`——本机 RTL-SDR（RTL2832U+FC0012，SN
+77771111153705700）rtl_sdr 实采 88.1 MHz 广播频段，2^19 复样本 cu8
+（0.512 s @ 1.024 MS/s）+ SigMF meta 成对入仓。meta 诚实标注
+`provenance=real_ota`、台号未解（不编造）、`time_source=system`（无 GNSS）。
+`tests/test_real_fm_sample.py` 12 项双向钉死：provenance 与文件实体互钉
+（防合成覆盖冒充）、真实射频特征现算（非零非恒、非单音、宽带占用、鉴频
+音频带能量、ADC 量化层铺满、无尾部补零）。注意：这是**录制**不是**解码**
+——「真实 OTA 解码记录」仍为零，LRPT/ADS-B 等协议级真实样本仍缺。
+
 ## 外部依赖销账表（运行时网络依赖）
 
 仓库运行时真正会联网的地方只有下列几处，其余 URL 均在源码致谢注释里

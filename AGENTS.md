@@ -74,6 +74,15 @@ passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任�
 test_http_unreachable_server_envelope 已证实为真 bug（回环被代理劫持）
 并修复销账，不是环境问题。）
 
+（2026-10-28 工程轮（六轮）实测：**1535 passed / 4 skipped / 0 failed**。
+自 1246 起净增 289，来源：MCP 旧壳安全面收口（ToolCallGate 共用 + 读工具 n
+上界）、零测试模块 20 个补齐行为测试（DSP/扫描感知/轨道杂项三批，合成信号
+口径）、真缺陷修复 26+ 组（Viterbi ACS 恒输出全 0、version_store 撞 ID 丢
+历史与空串冒充、gimbal RPRT 20 假成功、wfm_stereo_lite 串扰、cw_decoder
+5 处、time_sync NTP 时间戳错位、ft8_callsign 28 位环回等）、首份真实 OTA
+FM 样本入仓（tests/fixtures/real_fm_88m1，2^19 样本 cu8+SigMF，12 项
+真实性验证）。）
+
 根 `tests/`（大套件，200 个测试文件：`test_*.py` 167 + `*_test.py` 15 +
 `*roundtrip*.py` 18）同样是对拍门禁所在。**它整跑很慢**：
 单进程跑 160 个文件约 45 分钟——慢在同进程内单例 QApplication 跨文件累积
