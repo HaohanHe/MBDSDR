@@ -142,16 +142,31 @@ class RotctldClient:
         el = float(lines[1])
         return GimbalPose(azimuth=az % 360.0, elevation=clamp_angle(el, -90, 90))
 
+    @staticmethod
+    def _reply_ok(lines: List[str]) -> bool:
+        """严格解析 rotctld 应答：仅 'RPRT 0' 为成功。
+
+        旧实现 any("0" in ln) 会把 "RPRT 20"/"RPRT 10" 等错误码也判成成功
+        （含字符 "0"），属假成功；必须按协议解析错误码。
+        """
+        for ln in lines:
+            if ln.startswith("RPRT"):
+                try:
+                    return int(ln.split()[1]) == 0
+                except (IndexError, ValueError):
+                    return False
+        return False
+
     def set_position(self, az: float, el: float) -> bool:
         az = az % 360.0
         el = clamp_angle(el, 0, 90)
         lines = self._command(f"P {az:.2f} {el:.2f}", n_lines=1)
         # rotctld 成功返回 RPRT 0
-        return any("0" in ln for ln in lines)
+        return self._reply_ok(lines)
 
     def stop(self) -> bool:
         lines = self._command("S", n_lines=1)
-        return any("0" in ln for ln in lines)
+        return self._reply_ok(lines)
 
     def ping(self) -> bool:
         try:
@@ -184,6 +199,10 @@ class BoardGimbalClient:
     def set_position(self, az: float, el: float) -> dict:
         if self._send is None:
             return {"ok": False, "error": "未连接板子（无发送通道）"}
+        # 固件约定负值=停：负值原样透传，不能做 %360/clamp
+        # （否则 -1/-1 被归一化成 az=359,el=0，停机指令变移动指令）
+        if az < 0 or el < 0:
+            return self._send("gimbal_set", {"az": float(az), "el": float(el)})
         return self._send("gimbal_set", {"az": az % 360.0, "el": clamp_angle(el, 0, 90)})
 
     def get_position(self) -> Optional[GimbalPose]:
@@ -210,6 +229,8 @@ class GimbalController:
         self._pose_provider: Optional[Callable[[], GimbalPose]] = None
         # RSSI 回读源（SDR 后端注入，返回当前信号强度 dBm）
         self._rssi_provider: Optional[Callable[[], float]] = None
+        # 是否拿到过真实姿态回读；没有则 (0,0) 只是占位，不能当"已对准"依据
+        self._pose_valid = False
 
     # ---- 后端管理 ----
     def use_manual(self) -> GimbalStatus:
@@ -252,6 +273,7 @@ class GimbalController:
             try:
                 pose = self._pose_provider()
                 self.status.current = pose
+                self._pose_valid = True
                 return pose
             except Exception:
                 pass
@@ -259,6 +281,7 @@ class GimbalController:
             try:
                 pose = self.rotctld.get_position()
                 self.status.current = pose
+                self._pose_valid = True
                 return pose
             except Exception:
                 pass
@@ -296,8 +319,13 @@ class GimbalController:
         result["current_el"] = round(cur.elevation, 1)
         result["az_error_deg"] = round(az_err, 1)
         result["el_error_deg"] = round(el_err, 1)
-        result["aligned"] = cur.aligned(target)
-        result["guidance"] = self._guidance_text(az_err, el_err)
+        # 没有真实姿态回读时 (0,0) 只是占位：绝不能报"已对准"（假成功）
+        result["pose_valid"] = self._pose_valid
+        result["aligned"] = bool(cur.aligned(target)) if self._pose_valid else False
+        if self._pose_valid:
+            result["guidance"] = self._guidance_text(az_err, el_err)
+        else:
+            result["guidance"] = "无姿态回读（IMU/旋转器均未提供），无法判定对准与否"
         self.status.moving = not result["aligned"]
         return result
 
@@ -307,10 +335,12 @@ class GimbalController:
         r = self.point_to(sat_az, sat_el)
         tol = max(2.0, beamwidth_deg / 2.0)
         cur = self.read_pose()
-        r["aligned"] = cur.aligned(
-            GimbalPose(azimuth=sat_az, elevation=sat_el),
-            az_tolerance=tol, el_tolerance=tol,
-        )
+        if r.get("pose_valid"):
+            r["aligned"] = cur.aligned(
+                GimbalPose(azimuth=sat_az, elevation=sat_el),
+                az_tolerance=tol, el_tolerance=tol,
+            )
+        # 无姿态回读时保持 aligned=False（point_to 已置），不得用零位姿假判对准
         r["beamwidth_deg"] = beamwidth_deg
         return r
 
@@ -328,6 +358,9 @@ class GimbalController:
         RSSI 单位 dBm，值越大（越接近0）信号越强。
         """
         provider = rssi_provider or self._rssi_provider
+        if not (step > 0):
+            # step<=0 会让 while 死循环（0=不动、负=反向永远到不了终点）
+            raise ValueError(f"step 必须为正数，实得 {step}")
         angles: List[float] = []
         a = az_start
         while a < az_end - 1e-6:

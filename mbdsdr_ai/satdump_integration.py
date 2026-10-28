@@ -30,7 +30,8 @@ SATDUMP_PATHS = [
 
 
 def find_satdump() -> Optional[str]:
-    """查找 SatDump 可执行文件。"""
+    """查找 SatDump 可执行文件。找不到/不可执行一律返回 None（诚实空态），
+    不允许把 PermissionError / 无效可执行体（WinError 193）等抛给调用方。"""
     for path in SATDUMP_PATHS:
         try:
             result = subprocess.run(
@@ -40,7 +41,8 @@ def find_satdump() -> Optional[str]:
             )
             if result.returncode == 0 or b"satdump" in result.stderr.lower():
                 return path
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired):
+            # OSError 覆盖 FileNotFoundError / PermissionError / 无效可执行体
             continue
     return None
 

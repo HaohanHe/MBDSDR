@@ -43,7 +43,7 @@ def _doppler_from_frequency(args):
         rr = od.observed_pseudorange_rate(f, fc)
         dop = od.range_rate_to_doppler_hz(rr, fc)
         return ToolResult(success=True, content=(
-            f"观测频率 {f:.3f} Hz -> 伪距率 {rr:.3f} m/s，多普勒频移 {dop:.3f} Hz"
+            f"观测频率 {f:.3f} Hz -> 伪距率 {rr:.3f} km/s，多普勒频移 {dop:.3f} Hz"
         ), data={"range_rate_mps": rr, "doppler_hz": dop})
     except Exception as e:  # noqa: BLE001
         return _err(e)
@@ -56,7 +56,7 @@ def _doppler_to_frequency(args):
         dop = od.range_rate_to_doppler_hz(rr, fc)
         f = fc + dop
         return ToolResult(success=True, content=(
-            f"伪距率 {rr:.3f} m/s -> 接收频率 {f:.3f} Hz（多普勒 {dop:.3f} Hz）"
+            f"伪距率 {rr:.3f} km/s -> 接收频率 {f:.3f} Hz（多普勒 {dop:.3f} Hz）"
         ), data={"frequency_hz": f, "doppler_hz": dop})
     except Exception as e:  # noqa: BLE001
         return _err(e)
@@ -69,8 +69,8 @@ def _tle_state(args):
     try:
         st = od.tle_state_ecef(args["tle_line1"], args["tle_line2"], float(args["timestamp"]))
         return ToolResult(success=True, content=(
-            f"ECEF 状态: r=({st[0]:.1f},{st[1]:.1f},{st[2]:.1f}) m, "
-            f"v=({st[3]:.3f},{st[4]:.3f},{st[5]:.3f}) m/s"
+            f"ECEF 状态: r=({st[0]:.1f},{st[1]:.1f},{st[2]:.1f}) km, "
+            f"v=({st[3]:.3f},{st[4]:.3f},{st[5]:.3f}) km/s"
         ), data={"state_ecef": _arr(st)})
     except Exception as e:  # noqa: BLE001
         return _err(e)
@@ -86,7 +86,7 @@ def _propagate_state_stm(args):
         t_to = float(args["t_to"])
         out, stm = od.propagate_state_and_stm(st, t_from, t_to)
         return ToolResult(success=True, content=(
-            f"传播 {t_to - t_from:.3f}s -> 末态 r=({out[0]:.1f},{out[1]:.1f},{out[2]:.1f}) m"
+            f"传播 {t_to - t_from:.3f}s -> 末态 r=({out[0]:.1f},{out[1]:.1f},{out[2]:.1f}) km"
         ), data={"state_ecef": _arr(out), "stm": _arr(stm)})
     except Exception as e:  # noqa: BLE001
         return _err(e)
@@ -101,7 +101,7 @@ def _pseudorange_rate_model(args):
         rec = np.asarray(args["receiver_ecef"], dtype=float)
         rate, jac = od.pseudorange_rate_and_jacobian(st, rec)
         return ToolResult(success=True, content=(
-            f"预测伪距率 {rate:.3f} m/s（雅可比 7 维已返回）"
+            f"预测伪距率 {rate:.3f} km/s（雅可比 7 维已返回）"
         ), data={"range_rate_mps": rate, "jacobian": _arr(jac)})
     except Exception as e:  # noqa: BLE001
         return _err(e)
@@ -121,8 +121,8 @@ def _rls_update(args):
             float(args["observation"]), rec, float(args["observation_sigma"]),
         )
         return ToolResult(success=True, content=(
-            f"RLS 单步: 新息 {out['innovation']:.3f}, "
-            f"后验残差 {out['postfit_residual']:.3f}, "
+            f"RLS 单步: 新息 {out['innovation']:.3f} km/s, "
+            f"后验残差 {out['postfit_residual']:.3f} km/s, "
             f"归一新息 {out['normalized_innovation']:.3f}"
         ), data={
             "ref_state": _arr(out["ref_state"]),
@@ -232,7 +232,7 @@ def register_orbit_brick_tools(tool_registry):
 
     R(
         name="doppler_from_frequency",
-        description="多普勒换算：观测接收频率 -> 伪距率(m/s) + 多普勒频移(Hz)。原子积木，供模型组合多普勒/定轨流程。",
+        description="多普勒换算：观测接收频率 -> 伪距率(km/s) + 多普勒频移(Hz)。原子积木，供模型组合多普勒/定轨流程。",
         parameters={"type": "object", "properties": {
             "frequency_hz": {"type": "number", "description": "观测到的接收频率 Hz"},
             "center_frequency_hz": {"type": "number", "description": "标称载频 Hz"},
@@ -241,9 +241,9 @@ def register_orbit_brick_tools(tool_registry):
     )
     R(
         name="doppler_to_frequency",
-        description="多普勒换算：伪距率(m/s) -> 接收频率 + 多普勒频移(Hz)。doppler_from_frequency 的逆。",
+        description="多普勒换算：伪距率(km/s) -> 接收频率 + 多普勒频移(Hz)。doppler_from_frequency 的逆。",
         parameters={"type": "object", "properties": {
-            "range_rate_mps": {"type": "number", "description": "伪距率 m/s（远离为正）"},
+            "range_rate_mps": {"type": "number", "description": "伪距率 km/s（远离为正；键名 mps 为历史遗留，实际 km/s）"},
             "center_frequency_hz": {"type": "number", "description": "标称载频 Hz"},
         }, "required": ["range_rate_mps", "center_frequency_hz"]},
         handler=_doppler_to_frequency, category="doppler",
@@ -260,9 +260,9 @@ def register_orbit_brick_tools(tool_registry):
     )
     R(
         name="propagate_state_stm",
-        description="动力学传播：ECEF 7 维状态 [x,y,z,vx,vy,vz,clock_drift] 从 t_from 到 t_to，返回末状态 + 6x6 状态转移矩阵(STM)。二体 + 变分方程。原子积木。",
+        description="动力学传播：ECEF 7 维状态 [x,y,z,vx,vy,vz,clock_drift]（km/km/s）从 t_from 到 t_to，返回末状态 + 6x6 状态转移矩阵(STM)。二体 + 变分方程。原子积木。",
         parameters={"type": "object", "properties": {
-            "state_ecef": {"type": "array", "items": {"type": "number"}, "description": "7 维 ECEF 状态 [x,y,z,vx,vy,vz,clock_drift]，SI"},
+            "state_ecef": {"type": "array", "items": {"type": "number"}, "description": "7 维 ECEF 状态 [x,y,z,vx,vy,vz,clock_drift]，单位 km/km/s（与 tle_state_ecef 输出同口径）"},
             "t_from": {"type": "number", "description": "起始 unix 时间戳 s"},
             "t_to": {"type": "number", "description": "终止 unix 时间戳 s"},
         }, "required": ["state_ecef", "t_from", "t_to"]},
@@ -270,7 +270,7 @@ def register_orbit_brick_tools(tool_registry):
     )
     R(
         name="pseudorange_rate_model",
-        description="观测模型：卫星 ECEF 状态 + 接收机 ECEF 位置 -> 预测伪距率(m/s) + 对 7 维状态的雅可比。原子积木。",
+        description="观测模型：卫星 ECEF 状态 + 接收机 ECEF 位置 -> 预测伪距率(km/s) + 对 7 维状态的雅可比。原子积木。",
         parameters={"type": "object", "properties": {
             "sat_state_ecef": {"type": "array", "items": {"type": "number"}, "description": "卫星 7 维 ECEF 状态"},
             "receiver_ecef": {"type": "array", "items": {"type": "number"}, "description": "接收机 3 维 ECEF 位置"},
@@ -285,9 +285,9 @@ def register_orbit_brick_tools(tool_registry):
             "ref_cov": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "参考历元 7x7 先验协方差"},
             "ref_timestamp": {"type": "number", "description": "参考历元 unix 时间戳 s"},
             "obs_timestamp": {"type": "number", "description": "观测历元 unix 时间戳 s"},
-            "observation": {"type": "number", "description": "伪距率观测值 m/s"},
+            "observation": {"type": "number", "description": "伪距率观测值 km/s"},
             "receiver_ecef": {"type": "array", "items": {"type": "number"}, "description": "接收机 3 维 ECEF"},
-            "observation_sigma": {"type": "number", "description": "观测噪声标准差 m/s"},
+            "observation_sigma": {"type": "number", "description": "观测噪声标准差 km/s"},
         }, "required": ["ref_state", "ref_cov", "ref_timestamp", "obs_timestamp",
                         "observation", "receiver_ecef", "observation_sigma"]},
         handler=_rls_update, category="orbit",

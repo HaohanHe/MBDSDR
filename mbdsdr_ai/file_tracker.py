@@ -204,6 +204,15 @@ class FileChangeTracker:
         file_history = self.file_changes.get(change.file_path, [])
         target_content = change.content_before
 
+        # 诚实红线：修改前内容不可用（超上限被丢弃，或重启后只载元数据）时
+        # 必须报错，绝不能跳过写盘又返回"回滚成功"记录——那是伪造结果。
+        # hash_before 非空而 content_before 为空 = 内容曾存在但现在不可得。
+        if change.hash_before and not target_content:
+            raise ValueError(
+                f"变更 {change_id} 的修改前内容未随记录保存"
+                f"（超过 max_content_size 或重启后未加载完整内容），无法物理回滚"
+            )
+
         # 标记为已回滚
         change.reverted = True
 
@@ -218,9 +227,12 @@ class FileChangeTracker:
             metadata={"reverted_from": change_id},
         )
         change.reverted_to = revert_change.change_id
+        # 标志变更必须落盘：否则重启后 reverted/reverted_to 全部丢失，
+        # 审计台账显示"从未回滚"（半截持久化）
+        self._save_change(change)
 
-        # 实际写入文件
-        if file_writer and target_content:
+        # 实际写入文件（before 为空也要写：CREATE 的回滚=清空文件）
+        if file_writer is not None:
             file_writer(change.file_path, target_content)
 
         return revert_change
@@ -332,5 +344,6 @@ class FileChangeTracker:
                         self.file_changes[change.file_path] = []
                     self.file_changes[change.file_path].append(change.change_id)
                     self._counter = max(self._counter, int(change.change_id.split('_')[-1]))
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    # 单条损坏不能拖垮全部加载，但绝不能无声消失（审计链要有痕迹）
+                    print(f"警告: 变更记录加载失败，已跳过 {path}: {e}")

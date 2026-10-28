@@ -70,13 +70,16 @@ class VersionStore:
     # ── 持久化 ──────────────────────────────────────────
 
     def _load(self):
-        """加载版本数据。"""
+        """加载版本数据（原子：任一条目损坏则整体不载入，避免半截状态）。"""
         if os.path.exists(self.versions_file):
             try:
                 with open(self.versions_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                loaded: Dict[str, Version] = {}
                 for v in data.get("versions", []):
-                    self._versions[v["id"]] = Version(**v)
+                    loaded[v["id"]] = Version(**v)
+                # 全部解析成功才提交：中途失败不留半截（部分版本 + head=None）
+                self._versions = loaded
                 self._head = data.get("head")
             except Exception as e:
                 print(f"警告: 版本存储加载失败: {e}")
@@ -130,6 +133,14 @@ class VersionStore:
             file_hashes[filename] = h
 
         version_id = f"v_{int(time.time()*1000)}_{hashlib.md5(message.encode()).hexdigest()[:8]}"
+        # 同毫秒 + 同 message 会撞 ID：必须消歧，否则后写覆盖前写、静默丢历史
+        n = 0
+        while version_id in self._versions:
+            n += 1
+            version_id = (
+                f"v_{int(time.time()*1000)}_"
+                f"{hashlib.md5(message.encode()).hexdigest()[:8]}_{n}"
+            )
         version = Version(
             id=version_id,
             timestamp=time.time(),
@@ -158,13 +169,20 @@ class VersionStore:
         return self._get_object(version.files[filename])
 
     def get_all_files(self, version_id: str = None) -> Dict[str, str]:
-        """获取指定版本的所有文件。"""
+        """获取指定版本的所有文件。
+
+        对象库缺块时抛 ValueError——不返回空串冒充"文件为空"，
+        否则回滚/比对会把丢失内容当成真空内容写出去（伪造结果）。
+        """
         version = self.get_version(version_id)
         if not version:
             return {}
         result = {}
         for filename, h in version.files.items():
-            result[filename] = self._get_object(h) or ""
+            content = self._get_object(h)
+            if content is None:
+                raise ValueError(f"对象缺失: {filename} (hash {h})，拒绝用空内容冒充")
+            result[filename] = content
         return result
 
     # ── 回滚 ────────────────────────────────────────────
@@ -180,7 +198,11 @@ class VersionStore:
         if not version:
             return False, f"版本 {version_id} 不存在"
 
-        files = self.get_all_files(version_id)
+        try:
+            files = self.get_all_files(version_id)
+        except ValueError as e:
+            # 对象库缺块：回滚必须失败，绝不能把空内容写成"已回滚"
+            return False, f"无法回滚到 {version_id}: {e}"
         new_version = self.snapshot(
             message=f"回滚到 {version_id}: {version.message}",
             files=files,
@@ -215,6 +237,9 @@ class VersionStore:
 
         if not v1:
             return {"error": f"版本 {version_id1} 不存在"}
+        if version_id2 is not None and not v2:
+            # 显式指定的 v2 缺失必须报错：静默当空集会把全部文件报成 deleted
+            return {"error": f"版本 {version_id2} 不存在"}
 
         files1 = set(v1.files.keys())
         files2 = set(v2.files.keys()) if v2 else set()
