@@ -20,11 +20,11 @@ from constants import DEFAULT_SAMPLE_RATE_HZ
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QImage,
-    QPainterPath, QPolygonF,
+    QPainterPath, QPolygonF, QCursor,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
-    QDoubleSpinBox, QSlider, QFrame, QMenu, QSplitter,
+    QDoubleSpinBox, QSlider, QFrame, QMenu, QSplitter, QToolTip,
 )
 
 try:
@@ -1402,6 +1402,16 @@ class _TuningPlotMixin:
         self.state.panel._refresh_status_labels()
 
     # ------------------------------------------------------------------ 滚轮
+    def _show_tune_tip(self, text: str) -> None:
+        """瞬时 tooltip（phase83-A6）：滚轮/键盘调谐时给可见反馈。
+
+        短驻留（800ms），不抢焦点、不入布局；只回答"我一步动了多少/动到哪"。
+        """
+        try:
+            QToolTip.showText(QCursor.pos(), text, self, self.rect(), 800)
+        except Exception:  # noqa: BLE001 —— 提示是辅助，失败绝不影响调谐
+            pass
+
     def wheelEvent(self, event):
         # main_window.cpp:579-609：有 VFO 时滚轮=调谐；否则缩放。
         # 这里：Ctrl=以光标所在频率为锚点缩放 span（缩放后光标处频率不变），
@@ -1425,6 +1435,8 @@ class _TuningPlotMixin:
             # view_offset 保持不变，反解出真调谐中心
             gen.center_freq_hz = new_view_center - self.state.view_offset_hz
             self._emit_tuned(gen.center_freq_hz)
+            self._show_tune_tip(
+                f"缩放 {new_span / 1e6:.3f} MHz")
         else:
             # 光标悬停在某个 VFO 的左右边沿上 → 滚轮改带宽（而非调谐中心）。
             # 命中 body / 未命中 VFO 时退回普通步进调谐。
@@ -1440,6 +1452,9 @@ class _TuningPlotMixin:
                 vfo.bw_hz = new_bw
                 self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
                 self.update()
+                self._show_tune_tip(
+                    f"VFO 带宽 {new_bw / 1e3:.1f} kHz"
+                    f"（步进 {bw_step / 1e3:g} kHz）")
                 return
 
             wheel = 1 if dy > 0 else -1     # 上滚=加频，下滚=减频
@@ -1453,6 +1468,8 @@ class _TuningPlotMixin:
             nfreq = round(nfreq / interval) * interval
             gen.center_freq_hz = nfreq
             self._emit_tuned(nfreq)
+            self._show_tune_tip(
+                f"{nfreq / 1e6:.4f} MHz（步进 {interval / 1e3:g} kHz）")
         self.update()
 
     # ------------------------------------------------------------------ 键盘
@@ -1479,6 +1496,8 @@ class _TuningPlotMixin:
             nfreq = round(nfreq / interval) * interval
             gen.center_freq_hz = nfreq
             self._emit_tuned(nfreq)
+            self._show_tune_tip(
+                f"{nfreq / 1e6:.4f} MHz（步进 {interval / 1e3:g} kHz）")
             self.update()
         else:
             super().keyPressEvent(event)
