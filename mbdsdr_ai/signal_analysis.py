@@ -162,9 +162,11 @@ def estimate_ber(constellation: np.ndarray, ref_points: np.ndarray) -> float:
         constellation: 接收星座点
         ref_points: 参考星座点（如QPSK的4个点）
 
-    返回:
+        返回：
         估计BER（0-1）
     """
+    if len(constellation) == 0 or len(ref_points) == 0:
+        raise ValueError("星座点或参考点为空，无法估计 BER")
     # 计算每个接收点到最近参考点的距离
     errors = 0
     for point in constellation:

@@ -200,13 +200,17 @@ def _extract_activities(freqs: np.ndarray, power_db: np.ndarray,
     activities: List[Activity] = []
     i = 0
     n = len(freqs)
+    if n == 0:
+        return activities
+    # 单 bin 网格没有可参照的 bin 宽度，按 1 个 bin 的间隙处理（不再访问 freqs[1]）
+    bin_w = float(freqs[1] - freqs[0]) if n > 1 else 1.0
+    gap_bins = max(1, int(merge_gap_hz / max(1.0, bin_w)))
     while i < n:
         if not above[i]:
             i += 1
             continue
         j = i
         # 允许小于 merge_gap 的凹陷把相邻段合并
-        gap_bins = max(1, int(merge_gap_hz / max(1.0, freqs[1] - freqs[0])))
         gap_count = 0
         k = i
         while k < n:

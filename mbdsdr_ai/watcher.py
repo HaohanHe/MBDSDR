@@ -127,8 +127,8 @@ def watch_capture(
 
     while waited_blocks < max_wait_blocks:
         x = np.asarray(acquire(block_n), dtype=np.complex128)
+        waited_blocks += 1  # 每个采集块计一次（含触发/终止块），waited_s 反映真实等待时长
         if len(x) == 0:
-            waited_blocks += 1
             continue
         ring.append(x)
         pdb = band_power_db(x)
@@ -136,11 +136,12 @@ def watch_capture(
 
         if state == "IDLE":
             candidate = candidate + 1 if active else 0
-            waited_blocks += 1
             if candidate >= min_act_blocks:
                 state = "REC"
                 hang = 0
-                rec_blocks = list(ring)  # 含触发前 pre-roll
+                # ring 末元素即当前块 x（上面刚 append）。rec_blocks 只收触发前 pre-roll，
+                # 当前块由下方 REC 分支统一追加，避免触发块重复进入录制缓冲。
+                rec_blocks = list(ring)[:-1]
             else:
                 continue
 
@@ -164,7 +165,6 @@ def watch_capture(
                     "waited_s": waited_blocks * block_s,
                     "reason": "活动结束" if hang >= hang_blocks else "达到最长录制时长",
                 }
-            waited_blocks += 1
 
     return {
         "status": "timeout",

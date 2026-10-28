@@ -13,7 +13,7 @@
   1. 鉴频得 mpx；
   2. 窄带带通 19kHz + Hilbert 解析信号取 pilot 相位 θ；
   3. 二倍频得 38kHz 相干载波 cos(2θ)；
-  4. mpx·cos(2θ) 低通 15kHz 得差信号 (L-R)；
+  4. 2·mpx·cos(2θ) 低通 15kHz 得差信号 (L-R)/2（2× 混频增益补偿 cos² 检波的 ½）；
   5. (L+R) 低通 15kHz 得和信号；
   6. L=(和+差)/2，R=(和-差)/2；去加重、降采样、归一化。
 
@@ -107,7 +107,7 @@ def decode_stereo(
         z = hilbert(pilot_band)
         theta = np.angle(z)
         car = np.cos(2.0 * theta)  # 与合成时 cos(2π38kt) 同相
-        D = lfilter(low[0], low[1], mpx * car)  # 差信号 (L-R)
+        D = lfilter(low[0], low[1], 2.0 * mpx * car)  # (L-R)/2；2× 补偿 cos² 检波 ½ 衰减，否则差信号幅度只有和信号一半，L/R 串扰
         Lraw = 0.5 * (S + D)
         Rraw = 0.5 * (S - D)
     else:
