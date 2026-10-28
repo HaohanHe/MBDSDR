@@ -58,6 +58,11 @@ MAX_ARG_ARRAY_LEN = 1_000_000
 _ARR2 = {"type": "array",
          "items": {"type": "array", "items": {"type": "number"}}}
 
+#: 会话批准 TTL（秒）：approve_session 的免问授权只在该窗口内有效。
+#: 一次性授权不等于永久授权——进程活得越久，忘掉的批准越危险。
+#: 30 分钟：够一轮连续操作，过期重批的成本可接受。
+SESSION_APPROVAL_TTL_S = 30 * 60
+
 #: 物理量入参合法区间（键名 → (min, max)）。P1「Python schema 无边界」续：
 #: NaN/Inf 与数组长度已拦，这里补数值区间上下界。越界是用户可修正的参数
 #: 错误（invalid_argument），绝不静默钳位——钳位等于替用户改数据。
@@ -1505,9 +1510,11 @@ class MCPToolSet:
         self.hook_commands = (hook_commands if hook_commands is not None
                               else HookCommandRunner())
         # 工具权限规则集（默认写 ask/读 allow = 既有 arm_manual 语义不变）；
-        # 会话批准缓存：approve_session=true 的 (工具, 参数) 本进程免问。
+        # 会话批准缓存：approve_session=true 的 (工具, 参数) 免问，但带 TTL
+        # （P1「approve_session 无 TTL」：永久免问等于把一次性授权变成
+        # 永久授权，进程越久越危险）。过期后需重新批准。
         self.policy = policy if policy is not None else ToolPolicy.load()
-        self._session_approvals: set = set()
+        self._session_approvals: Dict[tuple, float] = {}  # key -> 过期时刻
         # 外部 MCP 客户端管理器（mbdsdr_ai/mcp_client.py）：agent 侧消费
         # 外部 MCP server 的入口。构造即从 ~/.mbdsdr/mcp_servers.json 注册
         # （文件缺失/坏 JSON = 诚实空态/跳过，不抛不崩）；不在构造期连接
@@ -1648,7 +1655,7 @@ class MCPToolSet:
                         "denied": True, "gated": True,
                         "outcome": "denied"}
             key = normalize_key(name, args)
-            session_cached = key in self._session_approvals
+            session_cached = self._is_session_approved(key)
             if action == "ask" and not session_cached:
                 if not armed:
                     gated_env = {"ok": False,
@@ -1662,7 +1669,7 @@ class MCPToolSet:
                     self._emit_result_event(name, gated_env)
                     return gated_env
                 if approve_session:
-                    self._session_approvals.add(key)
+                    self._remember_session_approval(key)
         try:
             _validate_args_finite(args)
             result = tool["handler"](self.controller, args)
@@ -1684,6 +1691,25 @@ class MCPToolSet:
             name, result,
             extra={"approval": "session"} if session_cached else None,
             hooks=self.hooks)
+
+    # ------------------------------------------------------------------
+    # 会话批准缓存（带 TTL，见 SESSION_APPROVAL_TTL_S）
+    # ------------------------------------------------------------------
+    def _is_session_approved(self, key: tuple) -> bool:
+        """批准是否仍然有效；过期条目顺手清除（不留僵尸授权）。"""
+        expiry = self._session_approvals.get(key)
+        if expiry is None:
+            return False
+        import time as _time
+        if _time.time() >= expiry:
+            del self._session_approvals[key]
+            return False
+        return True
+
+    def _remember_session_approval(self, key: tuple) -> None:
+        """记录一条带过期时间的会话批准。"""
+        import time as _time
+        self._session_approvals[key] = _time.time() + SESSION_APPROVAL_TTL_S
 
     def _emit_result_event(self, name: str, result: Any) -> None:
         """结果出口的 PostToolUse 观测事件（异常不冒泡，见 _emit_tool_result）。"""

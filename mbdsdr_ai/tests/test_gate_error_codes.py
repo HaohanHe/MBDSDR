@@ -36,7 +36,7 @@ def test_deny_is_monotonic_against_arm_and_session_approval():
     srv.policy.rules = _deny_rule()
     # 先伪造一个已批准的同参缓存——仍必须拒（单调性核心断言）
     key = normalize_key("set_frequency", {"hz": 145500000})
-    srv._session_approvals.add(key)
+    srv._remember_session_approval(key)
     out = srv.call_tool("set_frequency", {"hz": 145500000,
                                           "arm_manual": True,
                                           "approve_session": True})
