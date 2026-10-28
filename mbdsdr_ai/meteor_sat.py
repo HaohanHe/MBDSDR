@@ -747,19 +747,159 @@ def extract_cadu(bits: np.ndarray, cadu_length: int = 1024) -> List[np.ndarray]:
 # 图像合成
 # ========================================================================
 
-def compose_visible_image(cadu_data: List[np.ndarray]) -> Optional[np.ndarray]:
-    """
-    从 CADU 数据合成可见光云图。
+#: LRPT_FRAME_SYNC（0x1DFCDC）的字节形态，与 lrpc_build_frame 帧布局一致
+_LRPT_FRAME_SYNC_BYTES = bytes([(LRPT_SYNC_WORD >> 16) & 0xFF,
+                                (LRPT_SYNC_WORD >> 8) & 0xFF,
+                                LRPT_SYNC_WORD & 0xFF])
 
-    TODO: 尚未实现真实图像合成。需要：
-      1. 按 CCSDS 虚拟信道数据单元（VCDU）拆解 CADU，提取图像层；
-      2. 按卫星相机行格式（Meteor-M2 每帧 4 通道交错）重组行；
-      3. 去同步字、去字节填充、按行拼成灰度/RGB 图像。
-    目前不再返回伪造的径向渐变"假云图"，避免上层误以为解码成功。
+
+def _cadu_item_to_bytes(item, as_bits: Optional[bool] = None) -> bytes:
+    """CADU 条目归一化为字节流。
+
+    - bytes/bytearray/memoryview → 原样；
+    - 数值数组：全取值 ∈ [0,1] 且长度为 8 的倍数 → 视为 0/1 位流，
+      按 MSB-first 打包（extract_cadu 的产出即此形态）；
+    - uint8 数组 → 逐字节。
+    ``as_bits`` 可显式覆盖自动判定（全 0/1 的真实字节帧属病态输入，
+    调用方比启发式更了解自己的数据）。
     """
-    # TODO: 接 satdump_integration 或自实现 VCDU→图像重组
-    logger.warning("compose_visible_image 尚未实现真实图像合成，返回 None")
-    return None
+    if isinstance(item, (bytes, bytearray, memoryview)):
+        return bytes(item)
+    arr = np.asarray(item)
+    if arr.size == 0:
+        return b""
+    flat = arr.ravel()
+    if as_bits is None:
+        as_bits = (np.issubdtype(flat.dtype, np.number)
+                   and flat.size % 8 == 0 and flat.size >= 8
+                   and float(np.max(flat)) <= 1.0
+                   and float(np.min(flat)) >= 0.0)
+    if as_bits:
+        return np.packbits((flat > 0).astype(np.uint8), bitorder="big").tobytes()
+    if np.issubdtype(flat.dtype, np.uint8):
+        return flat.tobytes()
+    raise ValueError(f"无法归一化的 CADU 条目类型: dtype={flat.dtype}")
+
+
+def compose_visible_image(
+    cadu_data: List[np.ndarray],
+    *,
+    sync: bytes = _LRPT_FRAME_SYNC_BYTES,
+    header_len: int = 3,
+    target_apid: Optional[int] = None,
+    as_bits: Optional[bool] = None,
+    quant_tables: Optional[Dict[int, np.ndarray]] = None,
+    max_frames: int = 4096,
+) -> Optional[np.ndarray]:
+    """从 LRPT 帧合成可见光云图（真实熵解码，完整才出图）。
+
+    帧布局与 :func:`lrpc_build_frame` 一致::
+
+        [同步字 sync][VCID 1B][APID 2B][RFC 2435 图像段载荷]
+
+    处理链（各环节均复用仓内既有、已被测试钉住的组件）：
+      1. 条目归一化（0/1 位流按 MSB-first 打包，字节型原样）；
+      2. 去同步字与 vcid/apid 头，按 APID 归组（LRPT 每通道一个 APID，
+         见 lrpt_render.APID_TO_CHANNEL）；
+      3. 段载荷交 :func:`lrpt_vcdu.reassemble_meteor_scan` 按
+         fragment_offset 重组（RFC 2435 口径）；
+      4. 交 :func:`lrpt_huffman.decode_meteor_scan` 做 K.3 表熵解码 + IDCT，
+         返回 (H,W) 灰度或 (H,W,3) 彩色 uint8 数组。
+
+    参数（上游位级口径不一，全部具名可覆盖）：
+      sync       : 帧首同步字。默认 LRPT_FRAME_SYNC（0x1DFCDC）。
+                   传 b"" 表示条目已是去同步字的裸载荷。
+      header_len : 同步字后、图像段前的头部字节数。默认 3（vcid 1B + apid 2B，
+                   lrpc_build_frame 口径）；传 0 表示无头。
+      target_apid: 只重组该 APID 的段。None = 取段数最多的 APID。
+      as_bits    : 强制按位流/字节解释条目；None = 自动判定。
+      quant_tables: 显式量化表 {0:luma,1:chroma}（zigzag 序）；None = 按
+                   首段 Q 字段走 IJG 公式。
+
+    诚实空态：无输入 / 无同步 / 段不全（有洞或缺首段）/ 熵解码失败 →
+    返回 None 并记录原因。**绝不返回半幅图或伪造图**。
+    """
+    from .lrpt_huffman import decode_meteor_scan
+    from .lrpt_vcdu import reassemble_meteor_scan
+
+    if not cadu_data:
+        logger.warning("compose_visible_image: 无 CADU 输入，返回 None")
+        return None
+
+    by_apid: Dict[int, List[bytes]] = {}
+    headless: List[bytes] = []
+    n_empty = n_no_sync = n_short = 0
+
+    for item in list(cadu_data)[:max_frames]:
+        raw = _cadu_item_to_bytes(item, as_bits=as_bits)
+        if not raw:
+            n_empty += 1
+            continue
+        if sync:
+            if not raw.startswith(sync):
+                n_no_sync += 1
+                continue
+            body = raw[len(sync):]
+        else:
+            body = raw
+        if header_len:
+            if len(body) <= header_len:
+                n_short += 1
+                continue
+            if header_len >= 3:
+                apid = (int(body[1]) << 8) | int(body[2])
+                by_apid.setdefault(apid, []).append(body[header_len:])
+            else:
+                headless.append(body[header_len:])
+        else:
+            headless.append(body)
+
+    if not by_apid and not headless:
+        logger.warning(
+            "compose_visible_image: 无可解析帧（空 %d / 无同步 %d / 过短 %d，共 %d）→ None",
+            n_empty, n_no_sync, n_short, len(cadu_data))
+        return None
+
+    # 选流：显式 target_apid 优先；否则取段数最多的 APID（多通道各自是
+    # 独立 JPEG 流，混流必然重组失败——宁可明确选一条也不搅混）。
+    if by_apid:
+        if target_apid is not None:
+            segs = by_apid.get(target_apid)
+            if not segs:
+                logger.warning(
+                    "compose_visible_image: 目标 APID %d 无段（实际 APID: %s）→ None",
+                    target_apid, sorted(by_apid))
+                return None
+        else:
+            target_apid = max(by_apid, key=lambda a: len(by_apid[a]))
+            segs = by_apid[target_apid]
+    else:
+        segs = headless
+
+    scan = reassemble_meteor_scan(segs)
+    if not getattr(scan, "complete", False):
+        logger.warning(
+            "compose_visible_image: 段重组不完整（%s；段 %d，空洞 %d）→ None，"
+            "不出半幅图", getattr(scan, "reason", ""), len(segs),
+            int(getattr(scan, "num_gaps", 0) or 0))
+        return None
+
+    try:
+        img = decode_meteor_scan(scan, quant_tables)
+    except Exception as e:  # noqa: BLE001（LrptJpegError 家族 + 尾部残缺）
+        logger.warning("compose_visible_image: 熵解码失败 %s: %s → None",
+                       type(e).__name__, e)
+        return None
+
+    arr = getattr(img, "image", None)
+    if arr is None:
+        logger.warning("compose_visible_image: 解码器未给出像素数组 → None")
+        return None
+    arr = np.asarray(arr)
+    if arr.size == 0:
+        logger.warning("compose_visible_image: 解码产物为空数组 → None")
+        return None
+    return arr
 
 
 # ========================================================================

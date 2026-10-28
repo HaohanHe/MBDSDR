@@ -20,7 +20,8 @@ MBDSDR 桌面端 - 气象卫星云图面板 (WeatherPanel)
                  喂 goes_lrit.HRITParser().feed_vcdu() → GOESImageDecoder().add_lrit_file()
       NOAA   : noaa_apt_lite.decode_apt() (AM 包络→行同步→A/B 通道) → save_apt_png
       Meteor : meteor_sat.demodulate_lrpt() (QPSK→去交织→Viterbi→CCDB 解扰→CADU)
-                 可见光重组 compose_visible_image 上游未实现 → 如实报帧数，不出假图
+                 → compose_visible_image（RFC 2435 段重组 + K.3 熵解码）→ PNG；
+                 段不全/解码失败如实报帧数与原因，不出假图
       FY-4/3 : fengyun_sat 真实模块（DVB-S2 PL 同步 / HRPT 帧同步）；面板对 raw IQ
                  的端到端出图未接通时如实标注，绝不补假云图
   - 图像处理（可选后处理）：sat_image_processing.sat_image_enhance
@@ -304,10 +305,27 @@ class DecodeWorker(QObject):
             return
         self.progress.emit("QPSK→去交织→Viterbi→CCDB 解扰→CADU 提取 ...")
         cadus = ms.demodulate_lrpt(iq, fs, params)
-        self._emit(ok=False, frames=len(cadus),
-                   error=(f"已真实解出 {len(cadus)} 个 LRPT CADU 帧；"
-                          "可见光通道重组 compose_visible_image 上游未实现，"
-                          "本面板不出合成图"))
+        if not cadus:
+            self._emit(ok=False, frames=0,
+                       error="未解出任何 LRPT CADU 帧（信号弱/参数不符），无图可合成")
+            return
+        self.progress.emit(f"已解出 {len(cadus)} 帧 → RFC 2435 段重组 + 熵解码 ...")
+        img = ms.compose_visible_image(cadus)
+        if img is None:
+            self._emit(ok=False, frames=len(cadus),
+                       error=(f"已真实解出 {len(cadus)} 个 LRPT CADU 帧；"
+                              "但段重组/熵解码未得到完整图像"
+                              "（段不全或数据损坏，详见日志），不出半幅图"))
+            return
+        import numpy as _np
+        from PIL import Image
+        arr = _np.asarray(img)
+        out_png = self._p.get("out_png") or os.path.join(
+            os.path.dirname(self._p["iq_file"]), "meteor_composed.png")
+        Image.fromarray(arr).save(out_png)
+        self._emit(ok=True, png=out_png, width=arr.shape[1], height=arr.shape[0],
+                   annotation=f"LRPT 合成 {arr.shape[1]}x{arr.shape[0]}",
+                   channel="Meteor-M2 LRPT", frames=len(cadus))
 
     # ---- FY-4 / FY-3：调用真实模块，raw IQ 端到端出图未接通则如实报告 ----
     def _run_fengyun(self):
