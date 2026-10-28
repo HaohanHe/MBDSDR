@@ -639,6 +639,26 @@ lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已�
 `tests/test_mcp_client_bridge.py`（21→33 项）、
 `tests/test_mcp_worker_behavior.py`（43 项）、`tests/test_desktop_constants.py`（12 项）。
 
+**根 tests 全量累积污染（2026-10-28 七轮实测，未根治，如实登记）**：
+单进程整跑 `pytest tests` 到 89%（约 1665 个标记）后**停住不再前进**
+（57 分钟无进展，非"慢"而是挂住），日志留 4 个 F。按收集顺序反推定位
+（`--collect-only` 序列 + 进度字符序列对齐）到：
+`test_gps_prn.py::test_gold_family_has_three_valued_correlation`、
+`test_mcp_worker_behavior.py::TestDegradedWithoutClientLib::test_degraded_alias_table_still_local`、
+`test_protocol_parser.py::test_parse_sync_length_data_crc`、
+`test_sdr_pipeline.py::TestBackendReadIQ::test_get_sample_rate_exists`。
+**四项隔离单跑全部 PASSED** —— 属测试间状态污染（QApplication 单例跨文件
+累积 + 模块级全局状态泄漏），与历史 device_ui 同族 flaky，**不是本轮改动
+引入的回归**。
+
+定位手法值得复用：全量跑不完时，用 `pytest --collect-only -q` 拿 node id
+顺序，再把日志里去掉 `[xx%]` 标记的进度字符序列拼起来按索引对齐，即可
+反推 F 落在哪个用例，**不必重跑全量**。
+
+结论：根 tests 的门禁判读必须以 `scripts/ci_pytest_groups.py --group N
+--total 2` 分组并行为准（脚本不收 `--basetemp`），单进程整跑不可作为
+判据。污染根因（跨文件状态泄漏）未根治，登记为在账欠账。
+
 ## 外部依赖销账表（运行时网络依赖）
 
 仓库运行时真正会联网的地方只有下列几处，其余 URL 均在源码致谢注释里
