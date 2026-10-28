@@ -73,6 +73,11 @@ _ARG_RANGES = {
     "freqs_hz": (0.0, 10e9),
     "db": (-300.0, 300.0),           # 增益/电平 dB
     "nfft": (8, 1 << 24),            # FFT 点数
+    # 读样本数/测试信号长度（缺口 P2「读工具 n 参数无上界」收口，2026-10-28）：
+    # read_iq/read_audio 与旧壳注册面 fft_filter 等工具的 n 此前无上界，
+    # 巨额 n 会把进程 JSON 序列化/内存直接撑爆。下界取 0（空读合法、如实
+    # 返回空数组），上界与 nfft 同宽界；越界报 invalid_argument，不钳位。
+    "n": (0, 1 << 24),
     "sample_rate_hz": (1.0, 1e9),
     "bandwidth_hz": (0.0, 1e9),
     "ppm": (-10_000.0, 10_000.0),
@@ -1373,15 +1378,17 @@ def _finalize_tool_result(name: str, result: Any,
     return out
 
 
-def _emit_tool_result(hooks: "HookManager", name: str, result: Any) -> None:
+def _emit_tool_result(hooks: "HookManager", name: str, result: Any,
+                      source: str = "mcp_toolset") -> None:
     """冒泡 AGENT_TOOL_RESULT（PostToolUse）观测事件；钩子异常不冒泡。
 
     事件只携带结果信封的摘要（ok/outcome/spilled），不携带完整负载
     （长结果已在 spill 路径上，摘要够观测用）；钩子只读不改写。
+    source 标注事件来源（旧壳走 "legacy_mcp_shell"），审计账本可区分面。
     """
     try:
         ev = Event(event_type=EventType.AGENT_TOOL_RESULT,
-                   data=_result_summary(name, result), source="mcp_toolset")
+                   data=_result_summary(name, result), source=source)
         hooks.trigger(ev)
     except Exception as e:  # pragma: no cover - 观测面不得影响主流程
         print("[mcp] tool_result 钩子故障（忽略）: %s" % e, file=sys.stderr)
@@ -1470,10 +1477,207 @@ class AuditLog:
 
 
 # ======================================================================
+# ToolCallGate：工具调用共享安全门
+#
+# 把 MCPToolSet.call_tool 的门阶段抽成可复用单元（2026-10-28 旧壳安全面
+# 收口）：旧壳 mbdsdr_ai_mcp_server.py 此前直调 tool_registry.call，四道
+# 闸（command hook → 进程内 hook → policy deny → arm_manual）全缺。现在
+# 两个面共用本类，门语义只此一份，不允许复制粘贴第二份。
+#
+# check() 顺序与既有 MCPToolSet 行为逐字对齐：
+#   1. PreToolUse 钩子（进程内 + 外部命令双闸，任一 deny 即 vetoed）；
+#   2. write 门：policy deny（单调，armed 翻不动）→ 会话批准缓存 →
+#      ask 且未 armed 拦下（manual_gate_required）；
+#   3. 入参有限性/区间校验（invalid_argument，绝不钳位）。
+# 拒绝信封与 MCPToolSet.call_tool 同构；vetoed/denied 不冒泡 result 事件
+# （既有行为），gated/入参错误冒泡（审计可见"结果如何"）。
+# ======================================================================
+class ToolCallGate:
+    """工具调用共享安全门（MCPToolSet 基类 / 旧壳组合复用）。
+
+    Parameters
+    ----------
+    policy :
+        工具权限规则集；未传则 :meth:`ToolPolicy.load`（默认写 ask 读 allow）。
+    hook_commands :
+        外部命令 hooks 执行器；未传则默认 :class:`HookCommandRunner`
+        （配置缺失时空转）。
+    audit_log :
+        持久审计账本（JSONL，opt-in）。显式注入优先；未传则按
+        ``MBDSDR_AUDIT_LOG`` 开启，未设 = 关闭（库内构造无副作用）。
+    source :
+        事件来源标注（审计账本可见）；正规面 "mcp_toolset"，旧壳
+        "legacy_mcp_shell"。
+    """
+
+    def __init__(self, policy: Optional[ToolPolicy] = None,
+                 hook_commands: Optional[HookCommandRunner] = None,
+                 audit_log: Optional[AuditLog] = None,
+                 source: str = "mcp_toolset") -> None:
+        # 事件钩子（AGENT_PRE_TOOL_USE 可否决；本进程独立实例）
+        self.hooks = HookManager()
+        # 持久审计账本：显式注入 > MBDSDR_AUDIT_LOG 环境变量 > 关闭。
+        # 通配符钩子只读观测，钩子异常已被 Hook.trigger 兜底。
+        self.audit_log = audit_log if audit_log is not None else AuditLog.from_env()
+        if self.audit_log is not None:
+            self.hooks.register("*", self.audit_log.record,
+                                description="JSONL 持久审计账本（只读观测）")
+        # 外部命令 hooks（配置驱动；无注入时默认构造，配置缺失则空转）
+        self.hook_commands = (hook_commands if hook_commands is not None
+                              else HookCommandRunner())
+        # 工具权限规则集（默认写 ask/读 allow = 既有 arm_manual 语义不变）；
+        # 会话批准缓存：approve_session=true 的 (工具, 参数) 免问，带 TTL
+        # （P1「approve_session 无 TTL」：永久免问等于把一次性授权变成
+        # 永久授权，进程越久越危险）。过期后需重新批准。
+        self.policy = policy if policy is not None else ToolPolicy.load()
+        self._session_approvals: Dict[tuple, float] = {}  # key -> 过期时刻
+        self.source = source
+
+    # ------------------------------------------------------------------
+    def check(self, name: str, args: Dict[str, Any], is_write: bool,
+              domain: str = "", consume_arm_flags: bool = True):
+        """执行安全门。返回 ``(rejection, session_cached)``。
+
+        rejection 为 None 表示放行（args 就地就绪）；否则为拒绝信封 dict
+        （vetoed / denied / gated / invalid_argument / internal_error）。
+
+        consume_arm_flags=True（正规面）：arm_manual/approve_session 在门内
+        消费、绝不漏进 handler。False（旧壳）：arm_manual 留在 args——旧壳
+        工具把它当 schema 参数 + handler 自检（required 预校验依赖它），
+        门只读取判定；approve_session 仍由门消费。会话缓存键一律剔除门
+        参数，armed/unarmed 命中同一份批准。
+        """
+        session_cached = False
+        # PreToolUse hook（可否否决）：在规则门与分发之前触发。veto 压过
+        # arm_manual 与 policy allow——与 deny 规则同级的运行时安全闸（外部
+        # 编排方/测试可在 self.hooks 上注册 pre_tool_use 钩子拦截调用）。
+        veto = self._pre_tool_veto(name, args, is_write)
+        if veto is not None:
+            return {"ok": False,
+                    "error": "hook_vetoed：%s"
+                             % (veto.get("reason") or "denied"),
+                    "gated": True,
+                    "outcome": "vetoed",
+                    "veto_reason": veto.get("reason") or "hook_denied"}, False
+        # Write-tool gate: ruleset (allow/ask/deny) + explicit once-approval
+        # (arm_manual) + optional session-level approval cache
+        # (approve_session). Semantics aligned with the C++ llm_worker gate:
+        # real execution only when policy allows or the caller explicitly arms;
+        # the arm flags are consumed here and never leak to the handler.
+        if is_write:
+            approve_session = args.pop("approve_session", False) is True
+            if consume_arm_flags:
+                armed = args.pop("arm_manual", False) is True
+            else:
+                armed = args.get("arm_manual", False) is True
+            # 域级规则第三级：名规则未命中时按 domain:<域名> 判定
+            action = self.policy.action_for(name, True, domain)
+            if action == "deny":
+                # hard veto: even an explicitly armed call does not execute
+                # (aligned with kilocode hard-ruleset veto).
+                # deny 单调性（dsh ToolGuard 借鉴，2026-10-15）：任何后续
+                # 门/缓存都不得把 deny 翻回 allow——此处只返回 deny 结果，
+                # armed/approve_session 分支在 deny 之后不可达。
+                return {"ok": False,
+                        "error": "denied_by_policy：规则集拒绝执行 %s" % name,
+                        "code": "denied_by_policy",
+                        "denied": True, "gated": True,
+                        "outcome": "denied"}, False
+            gate_flags = ("arm_manual", "approve_session")
+            key = normalize_key(name, {k: v for k, v in args.items()
+                                       if k not in gate_flags})
+            session_cached = self._is_session_approved(key)
+            if action == "ask" and not session_cached:
+                if not armed:
+                    gated_env = {"ok": False,
+                                 "error": "手动模式：未执行 %s" % name,
+                                 "code": "manual_gate_required",
+                                 "gated": True,
+                                 "policy": action,
+                                 "outcome": "gated",
+                                 "hint": "带 arm_manual=true 执行；"
+                                         "approve_session=true 则本会话免问"}
+                    self._emit_result_event(name, gated_env)
+                    return gated_env, False
+                if approve_session:
+                    self._remember_session_approval(key)
+        try:
+            _validate_args_finite(args)
+        except SDRUserError as e:
+            out = e.to_dict()
+            out["outcome"] = "error"
+            self._emit_result_event(name, out)
+            return out, False
+        except Exception as e:  # pragma: no cover - 防御
+            out = {"error": "internal_error", "code": "internal_error",
+                   "technical_detail": str(e),
+                   "outcome": "error"}
+            self._emit_result_event(name, out)
+            return out, False
+        return None, session_cached
+
+    # ------------------------------------------------------------------
+    # 会话批准缓存（带 TTL，见 SESSION_APPROVAL_TTL_S）
+    # ------------------------------------------------------------------
+    def _is_session_approved(self, key: tuple) -> bool:
+        """批准是否仍然有效；过期条目顺手清除（不留僵尸授权）。"""
+        expiry = self._session_approvals.get(key)
+        if expiry is None:
+            return False
+        import time as _time
+        if _time.time() >= expiry:
+            del self._session_approvals[key]
+            return False
+        return True
+
+    def _remember_session_approval(self, key: tuple) -> None:
+        """记录一条带过期时间的会话批准。"""
+        import time as _time
+        self._session_approvals[key] = _time.time() + SESSION_APPROVAL_TTL_S
+
+    def _emit_result_event(self, name: str, result: Any) -> None:
+        """结果出口的 PostToolUse 观测事件（异常不冒泡，见 _emit_tool_result）。"""
+        _emit_tool_result(self.hooks, name, result, source=self.source)
+
+    def _pre_tool_veto(self, name: str, args: Dict[str, Any],
+                       is_write: bool) -> Optional[Dict[str, Any]]:
+        """触发 AGENT_PRE_TOOL_USE 钩子并提取否决（进程内 + 外部命令双闸）。
+
+        进程内钩子（HookManager）判完后，再跑配置驱动的外部命令 hooks
+        （HookCommandRunner，~/.mbdsdr/hooks.json）：任一闸否决即拦。
+
+        钩子异常绝不影响主流程（Hook.trigger 已兜底为 None；这里再兜一层
+        防御——钩子整体故障时记 stderr 并放行，绝不让观测面变成单点；
+        HookCommandRunner.decide 自身同样 fail-open + stderr 留痕）。
+        """
+        try:
+            ev = Event(event_type=EventType.AGENT_PRE_TOOL_USE,
+                       data={"tool": name, "arguments": dict(args),
+                             "write": is_write},
+                       source=self.source)
+            inner = self.hooks.veto_for(ev)
+            if inner is not None:
+                return inner
+            # 外部命令 hooks（kimi-code externalHooks 子集）：exit 2 或
+            # stdout JSON deny 即否决；超时/启动失败/其他退出码一律放行。
+            cmd_veto = self.hook_commands.decide(ev)
+            if cmd_veto is not None:
+                return cmd_veto
+            return None
+        except Exception as e:  # pragma: no cover - 防御
+            print(f"[mcp] pre_tool_use 钩子故障（放行）: {e}", file=sys.stderr)
+            return None
+
+
+# ======================================================================
 # MCPToolSet
 # ======================================================================
-class MCPToolSet:
+class MCPToolSet(ToolCallGate):
     """把 SDRController 方法暴露成 MCP 工具集。
+
+    安全门（PreToolUse veto / write 门 / arm_manual / 审计 / 入参校验）
+    继承自 :class:`ToolCallGate`——与旧壳 mbdsdr_ai_mcp_server.py 共用同一
+    份门逻辑；本类只负责工具表与分发。
 
     Parameters
     ----------
@@ -1495,26 +1699,11 @@ class MCPToolSet:
                  policy: Optional[ToolPolicy] = None,
                  hook_commands: Optional[HookCommandRunner] = None,
                  audit_log: Optional[AuditLog] = None) -> None:
+        super().__init__(policy=policy, hook_commands=hook_commands,
+                         audit_log=audit_log)
         self.controller = controller if controller is not None else SDRController()
         # 人机问答 store（会话内存态；stdout 请求-响应，提问不阻塞）
         self.questions = QuestionStore()
-        # 事件钩子（AGENT_PRE_TOOL_USE 可否决；无注入时本进程独立实例）
-        self.hooks = HookManager()
-        # 持久审计账本：显式注入 > MBDSDR_AUDIT_LOG 环境变量 > 关闭。
-        # 通配符钩子只读观测，钩子异常已被 Hook.trigger 兜底。
-        self.audit_log = audit_log if audit_log is not None else AuditLog.from_env()
-        if self.audit_log is not None:
-            self.hooks.register("*", self.audit_log.record,
-                                description="JSONL 持久审计账本（只读观测）")
-        # 外部命令 hooks（配置驱动；无注入时默认构造，配置缺失则空转）
-        self.hook_commands = (hook_commands if hook_commands is not None
-                              else HookCommandRunner())
-        # 工具权限规则集（默认写 ask/读 allow = 既有 arm_manual 语义不变）；
-        # 会话批准缓存：approve_session=true 的 (工具, 参数) 免问，但带 TTL
-        # （P1「approve_session 无 TTL」：永久免问等于把一次性授权变成
-        # 永久授权，进程越久越危险）。过期后需重新批准。
-        self.policy = policy if policy is not None else ToolPolicy.load()
-        self._session_approvals: Dict[tuple, float] = {}  # key -> 过期时刻
         # 外部 MCP 客户端管理器（mbdsdr_ai/mcp_client.py）：agent 侧消费
         # 外部 MCP server 的入口。构造即从 ~/.mbdsdr/mcp_servers.json 注册
         # （文件缺失/坏 JSON = 诚实空态/跳过，不抛不崩）；不在构造期连接
@@ -1609,6 +1798,10 @@ class MCPToolSet:
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         """按名调用工具。无后端时安全降级，绝不抛异常。
 
+        安全路径（继承自 :class:`ToolCallGate`，与旧壳共用）：PreToolUse
+        钩子 veto → write 门（policy allow/ask/deny + arm_manual）→ 入参
+        有限性/区间校验，然后才分发 handler。
+
         结果出口（outcome 分类，2026-10-14 上游审计第二落点）：正常执行且
         结果超长 -> spill 落盘信封（outcome="executed"，见
         :func:`_finalize_tool_result`）；未超长 -> 原样返回（零行为变化）。
@@ -1620,58 +1813,12 @@ class MCPToolSet:
                     "outcome": "error",
                     "suggestion": "用 tools/list 查看可用工具。"}
         args = dict(arguments or {})
-        # PreToolUse hook（可否否决）：在规则门与分发之前触发。veto 压过
-        # arm_manual 与 policy allow——与 deny 规则同级的运行时安全闸（外部
-        # 编排方/测试可在 self.hooks 上注册 pre_tool_use 钩子拦截调用）。
-        veto = self._pre_tool_veto(name, args, bool(tool.get("write")))
-        if veto is not None:
-            return {"ok": False,
-                    "error": "hook_vetoed：%s"
-                             % (veto.get("reason") or "denied"),
-                    "gated": True,
-                    "outcome": "vetoed",
-                    "veto_reason": veto.get("reason") or "hook_denied"}
-        # Write-tool gate: ruleset (allow/ask/deny) + explicit once-approval
-        # (arm_manual) + optional session-level approval cache
-        # (approve_session). Semantics aligned with the C++ llm_worker gate:
-        # real execution only when policy allows or the caller explicitly arms;
-        # the arm flags are consumed here and never leak to the handler.
-        session_cached = False
-        if tool.get("write"):
-            approve_session = args.pop("approve_session", False) is True
-            armed = args.pop("arm_manual", False) is True
-            # 域级规则第三级：名规则未命中时按 domain:<域名> 判定
-            action = self.policy.action_for(
-                name, True, _TOOL_DOMAIN.get(name, ""))
-            if action == "deny":
-                # hard veto: even an explicitly armed call does not execute
-                # (aligned with kilocode hard-ruleset veto).
-                # deny 单调性（dsh ToolGuard 借鉴，2026-10-15）：任何后续
-                # 门/缓存都不得把 deny 翻回 allow——此处只返回 deny 结果，
-                # armed/approve_session 分支在 deny 之后不可达。
-                return {"ok": False,
-                        "error": "denied_by_policy：规则集拒绝执行 %s" % name,
-                        "code": "denied_by_policy",
-                        "denied": True, "gated": True,
-                        "outcome": "denied"}
-            key = normalize_key(name, args)
-            session_cached = self._is_session_approved(key)
-            if action == "ask" and not session_cached:
-                if not armed:
-                    gated_env = {"ok": False,
-                                 "error": "手动模式：未执行 %s" % name,
-                                 "code": "manual_gate_required",
-                                 "gated": True,
-                                 "policy": action,
-                                 "outcome": "gated",
-                                 "hint": "带 arm_manual=true 执行；"
-                                         "approve_session=true 则本会话免问"}
-                    self._emit_result_event(name, gated_env)
-                    return gated_env
-                if approve_session:
-                    self._remember_session_approval(key)
+        rejection, session_cached = self.check(
+            name, args, is_write=bool(tool.get("write")),
+            domain=_TOOL_DOMAIN.get(name, ""))
+        if rejection is not None:
+            return rejection
         try:
-            _validate_args_finite(args)
             result = tool["handler"](self.controller, args)
         except SDRUserError as e:
             out = e.to_dict()
@@ -1691,58 +1838,6 @@ class MCPToolSet:
             name, result,
             extra={"approval": "session"} if session_cached else None,
             hooks=self.hooks)
-
-    # ------------------------------------------------------------------
-    # 会话批准缓存（带 TTL，见 SESSION_APPROVAL_TTL_S）
-    # ------------------------------------------------------------------
-    def _is_session_approved(self, key: tuple) -> bool:
-        """批准是否仍然有效；过期条目顺手清除（不留僵尸授权）。"""
-        expiry = self._session_approvals.get(key)
-        if expiry is None:
-            return False
-        import time as _time
-        if _time.time() >= expiry:
-            del self._session_approvals[key]
-            return False
-        return True
-
-    def _remember_session_approval(self, key: tuple) -> None:
-        """记录一条带过期时间的会话批准。"""
-        import time as _time
-        self._session_approvals[key] = _time.time() + SESSION_APPROVAL_TTL_S
-
-    def _emit_result_event(self, name: str, result: Any) -> None:
-        """结果出口的 PostToolUse 观测事件（异常不冒泡，见 _emit_tool_result）。"""
-        _emit_tool_result(self.hooks, name, result)
-
-    def _pre_tool_veto(self, name: str, args: Dict[str, Any],
-                       is_write: bool) -> Optional[Dict[str, Any]]:
-        """触发 AGENT_PRE_TOOL_USE 钩子并提取否决（进程内 + 外部命令双闸）。
-
-        进程内钩子（HookManager）判完后，再跑配置驱动的外部命令 hooks
-        （HookCommandRunner，~/.mbdsdr/hooks.json）：任一闸否决即拦。
-
-        钩子异常绝不影响主流程（Hook.trigger 已兜底为 None；这里再兜一层
-        防御——钩子整体故障时记 stderr 并放行，绝不让观测面变成单点；
-        HookCommandRunner.decide 自身同样 fail-open + stderr 留痕）。
-        """
-        try:
-            ev = Event(event_type=EventType.AGENT_PRE_TOOL_USE,
-                       data={"tool": name, "arguments": dict(args),
-                             "write": is_write},
-                       source="mcp_toolset")
-            inner = self.hooks.veto_for(ev)
-            if inner is not None:
-                return inner
-            # 外部命令 hooks（kimi-code externalHooks 子集）：exit 2 或
-            # stdout JSON deny 即否决；超时/启动失败/其他退出码一律放行。
-            cmd_veto = self.hook_commands.decide(ev)
-            if cmd_veto is not None:
-                return cmd_veto
-            return None
-        except Exception as e:  # pragma: no cover - 防御
-            print(f"[mcp] pre_tool_use 钩子故障（放行）: {e}", file=sys.stderr)
-            return None
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 分发（纯函数，便于测试）

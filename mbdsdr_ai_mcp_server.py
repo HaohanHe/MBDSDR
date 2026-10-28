@@ -15,20 +15,31 @@ MBDSDR AI 内核 - MCP stdio 服务器
 
   2. 命令行直接调用 (测试用):
      python3 mbdsdr_ai_mcp_server.py --cli list_tools
-     python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000}'
+     python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000, "arm_manual": true}'
      python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_spectrum_analyze '{"fft_size": 512}'
 
   3. 作为 Python 库:
      from mbdsdr_ai_mcp_server import MBSDRAIMCPServer
      server = MBSDRAIMCPServer()
      tools = server.list_tools()
-     result = server.call_tool("sdr_set_frequency", {"frequency_hz": 98500000})
+     result = server.call_tool("sdr_set_frequency",
+                               {"frequency_hz": 98500000, "arm_manual": True})
 
 MCP 协议 (JSON-RPC 2.0 over stdio):
   - initialize: 初始化握手
   - tools/list: 列出全部工具
   - tools/call: 调用工具
   - notifications/initialized: 初始化完成通知
+
+安全面（2026-10-28 收口，与 mbdsdr_ai/core/mcp_server.py 的 MCPToolSet
+共用同一份 ToolCallGate）：
+  - PreToolUse 钩子（进程内 + 外部命令）可否决一切调用；
+  - 写工具走 arm_manual 人工门 + tool_policy.json 的 allow/ask/deny 规则
+    （deny 单调，arm_manual 翻不动）；未武装的写工具在触达工具实现之前
+    即被拦下；
+  - 入参 NaN/Inf、超长数组、越界物理量报 invalid_argument，绝不钳位；
+  - 审计账本默认关闭，设 MBDSDR_AUDIT_LOG=<jsonl 路径> 开启（opt-in，
+    与正规面一致；显式 off 可关）。
 
 配置:
   - API Key: 环境变量 MBDSDR_API_KEY 或 --api-key 参数
@@ -53,6 +64,7 @@ from typing import Any, Dict, List, Optional, Callable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mbdsdr_ai import MBDSDRAgent, AgentConfig
+from mbdsdr_ai.core.mcp_server import ToolCallGate
 
 
 # ============================================================================
@@ -74,6 +86,8 @@ class MBSDRAIMCPServer:
         model: str = "Qwen/Qwen3.6-35B-A3B",
         api_base: str = "https://api.siliconflow.cn/v1",
         verbose: bool = False,
+        agent: Any = None,
+        gate: ToolCallGate = None,
     ):
         """
         初始化 MCP 服务器。
@@ -83,18 +97,29 @@ class MBSDRAIMCPServer:
             model: 默认模型
             api_base: API 基础 URL
             verbose: 是否输出调试信息到 stderr
+            agent: 注入已有 MBDSDRAgent（测试用；默认自建）
+            gate: 注入安全门（测试用；默认自建 ToolCallGate，审计 opt-in）
         """
         self.verbose = verbose
         self._log("初始化 MBDSDR AI 内核...")
 
         # 初始化 Agent (即使没有 API Key 也能调用工具，只是不能做 LLM 对话)
-        config = AgentConfig(
-            api_key=api_key or "sk-mcp-server-no-key",
-            model=model,
-            base_url=api_base,
-        )
-        self.agent = MBDSDRAgent(config)
+        if agent is None:
+            config = AgentConfig(
+                api_key=api_key or "sk-mcp-server-no-key",
+                model=model,
+                base_url=api_base,
+            )
+            agent = MBDSDRAgent(config)
+        self.agent = agent
         self.tool_registry = self.agent.tool_registry
+
+        # 安全门（与正规面 MCPToolSet 共用同一份 ToolCallGate 实现）：
+        # PreToolUse 钩子 veto → write 门（allow/ask/deny + arm_manual）→
+        # 入参有限性/区间校验。审计账本 opt-in：未设 MBDSDR_AUDIT_LOG 且
+        # 未显式注入时默认关闭，与正规面库内构造语义一致。
+        self.gate = gate if gate is not None else ToolCallGate(
+            source="legacy_mcp_shell")
 
         # 获取工具列表
         self._tools = self.tool_registry.list_tools()
@@ -142,16 +167,50 @@ class MBSDRAIMCPServer:
 
     # ── 工具调用 ──────────────────────────────────────────
 
+    @staticmethod
+    def _gate_envelope(verdict: Dict[str, Any]) -> Dict[str, Any]:
+        """把安全门拒绝信封包成旧壳 MCP 信封。
+
+        既有键 {content, isError} 一个不变（错误信封不换构），只增
+        outcome / code 等新键；正文是拒绝信封的 JSON（与正规面
+        tools/call 把结果 JSON 塞进 text 的约定一致）。
+        """
+        env = {
+            "content": [{
+                "type": "text",
+                "text": json.dumps(verdict, ensure_ascii=False),
+            }],
+            "isError": True,
+        }
+        for key in ("outcome", "code"):
+            if key in verdict:
+                env[key] = verdict[key]
+        return env
+
+    def _emit_result(self, name: str, ok: bool, outcome: str,
+                     truncated: bool = False) -> None:
+        """AGENT_TOOL_RESULT 观测事件（审计账本可见"结果如何"）。"""
+        self.gate._emit_result_event(
+            name, {"ok": ok, "outcome": outcome, "truncated": truncated})
+
     def call_tool(self, name: str, arguments: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         调用一个工具。
+
+        安全路径（与 mbdsdr_ai/core/mcp_server.py 的 MCPToolSet 共用
+        ToolCallGate，2026-10-28 收口）：PreToolUse 钩子 veto → write 门
+        （policy allow/ask/deny + arm_manual，deny 单调）→ 入参有限性/
+        区间校验，通过后才触达 tool_registry.call。未武装的写工具在
+        tool_registry.call 之前即被拦下。未知工具不过门，保持既有
+        tool_not_found 错误信封形状。
 
         参数:
             name: 工具名称
             arguments: 工具参数
 
         返回:
-            MCP tools/call 响应 (含 content 数组)
+            MCP tools/call 响应 (含 content 数组；既有键不变，门拒绝只增
+            outcome/code 新键)
         """
         if arguments is None:
             arguments = {}
@@ -159,11 +218,22 @@ class MBSDRAIMCPServer:
         self._log(f"调用工具: {name}({json.dumps(arguments, ensure_ascii=False)[:100]})")
 
         try:
-            result = self.tool_registry.call(name, arguments)
+            args = dict(arguments)
+            resolved = self.tool_registry.resolve_tool_name(name)
+            if resolved in self.tool_registry.tools:
+                is_write = self.tool_registry.is_write_tool(resolved)
+                rejection, _ = self.gate.check(
+                    resolved, args, is_write=is_write, consume_arm_flags=False)
+                if rejection is not None:
+                    return self._gate_envelope(rejection)
+
+            result = self.tool_registry.call(name, args)
 
             if result.success:
                 # 成功: 返回文本内容
                 content_text = result.content if isinstance(result.content, str) else json.dumps(result.content, ensure_ascii=False, indent=2)
+                self._emit_result(resolved, True, "executed",
+                                  truncated=result.truncated)
                 return {
                     "content": [
                         {
@@ -175,6 +245,8 @@ class MBSDRAIMCPServer:
                 }
             else:
                 # 失败: 返回错误信息
+                self._emit_result(resolved, False, "error",
+                                  truncated=result.truncated)
                 return {
                     "content": [
                         {
@@ -356,8 +428,8 @@ def main():
   # 命令行测试: 列出工具
   python3 mbdsdr_ai_mcp_server.py --cli list_tools
 
-  # 命令行测试: 调用工具
-  python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000}'
+  # 命令行测试: 调用工具（写工具需 arm_manual=true 才过人工门）
+  python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000, "arm_manual": true}'
   python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_spectrum_analyze '{"fft_size": 512}'
 
   # 带 API Key (启用 LLM 对话能力)

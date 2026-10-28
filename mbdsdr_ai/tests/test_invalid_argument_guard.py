@@ -100,3 +100,26 @@ def test_unregistered_key_not_range_checked():
     """未注册的键不参与区间校验（不误伤未知参数）。"""
     import mbdsdr_ai.core.mcp_server as ms
     ms._check_arg_range("some_unknown_key", 1e30, "some_unknown_key")  # 不抛
+
+
+# ---------------------------------------------------------------------------
+# 读工具 n 参数上界（缺口 P2「读工具 n 参数无上界」收口，2026-10-28）
+# ---------------------------------------------------------------------------
+def test_read_n_range_pinned():
+    """n 区间常量成对钉死：[0, 1<<24]，端点放行、越界报 invalid_argument。"""
+    import mbdsdr_ai.core.mcp_server as ms
+    assert ms._ARG_RANGES["n"] == (0, 1 << 24)
+    ms._check_arg_range("n", 0, "n")
+    ms._check_arg_range("n", 1 << 24, "n")
+    for bad in (-1, (1 << 24) + 1, 1e30):
+        with pytest.raises(ms.InvalidArgumentError):
+            ms._check_arg_range("n", bad, "n")
+
+
+def test_read_iq_oversized_n_rejected():
+    """read_iq 的 n 越界必须报 invalid_argument（不钳位、不带病执行）。"""
+    ts = MCPToolSet()
+    out = ts.call_tool("read_iq", {"n": 2 ** 30})
+    assert out.get("error") == "invalid_argument", f"实际: {out}"
+    out2 = ts.call_tool("read_audio", {"n": -5})
+    assert out2.get("error") == "invalid_argument", f"实际: {out2}"

@@ -14,6 +14,7 @@ MBDSDR AI 内核 - 工具注册表
 - 内置工具（上下文查询、模型切换、配置管理等）
 """
 
+import fnmatch
 import json
 import re
 import time
@@ -204,6 +205,62 @@ class ToolCallLog:
     content_preview: str = ""
 
 
+#: 旧壳工具面写工具名字模式（安全面收口 2026-10-28）。写工具 = 会变更
+#: 持久状态 / 动硬件 / 落盘 / 发起对外连接的工具，走 arm_manual 人工门
+#: （AGENTS.md §3「写工具一律走 arm_manual 人工门」）。判定信号有两个：
+#:   1) schema 显式声明 arm_manual 参数（既有写工具契约，如
+#:      code_modify_file / sdr_transmit_cw / set_ppm_correction）；
+#:   2) 名字命中本表（fnmatch 通配）。
+#: 只向"写"收紧：拿不准的一律按读处理（不给只读路径加门、不改既有行为）。
+#: 边界约定：出站查询类（web_fetch_url、time_ntp_sync 等只读网络查询）与
+#: 验证类执行（code_run_tests）按读处理；混读写工具（sdr_fm_preset 的
+#: list/save）按写处理。
+WRITE_TOOL_NAME_PATTERNS = (
+    # ── SDR 调谐/连接/录制/播放/发射/落盘 ──
+    "sdr_set_*", "sdr_connect*", "sdr_disconnect", "sdr_switch_*",
+    "sdr_open_*", "sdr_record_*", "sdr_bookmark_add", "sdr_bookmark_goto",
+    "sdr_play_*", "sdr_spill_save", "sdr_transmit_*", "sdr_aprs_send_*",
+    "sdr_ai_sweep", "sdr_sweep_scan", "sdr_fm_scan", "sdr_fm_preset",
+    "sdr_listen_fm", "sdr_watch_capture", "sdr_spectrum_screenshot",
+    "sdr_wfm_stereo",
+    # ── 电台 CAT / 云台 / VFO ──
+    "radio_connect", "radio_ptt", "radio_send_*", "radio_set_*",
+    "gimbal_connect", "gimbal_move", "gimbal_point", "gimbal_stop",
+    "gimbal_track_*", "gimbal_rssi_sweep",
+    "vfo_add", "vfo_remove", "vfo_select",
+    # ── 状态/参数写入 ──
+    "astro_set_observer", "pose_update_*", "pnt_update_source",
+    "amr_add_sample", "memory_write", "switch_model", "learning_record",
+    "judge_evaluate",
+    # ── 子代理/工作流/调度 ──
+    "subagent_create", "subagent_execute",
+    "workflow_execute", "workflow_record_*", "workflow_template_create",
+    "scheduler_add", "scheduler_enable", "scheduler_disable", "scheduler_tick",
+    # ── 文件/版本/演进 ──
+    "baseband_save", "code_modify_*", "code_git_commit", "code_rollback",
+    "code_hot_reload", "file_change_track", "file_change_revert",
+    "guardian_rollback", "evolution_commit", "evolution_propose",
+    "evolution_rollback", "git_clone_repo",
+    # ── 出图/图像合成落盘 ──
+    "orbit_error_plot", "orbit_sky_plot", "sat_image_enhance",
+    "satdump_compose_image", "satdump_process", "satdump_live",
+    # ── 设备参数下发/对外连接 ──
+    "bladerf_set_params", "hackrf_set_params", "limesdr_set_params",
+    "rtlsdr_set_params", "set_ppm_correction", "doppler_tune_frequency",
+    "ntrip_connect", "r2cloud_schedule",
+    # ── 外部程序/GUI 副作用 ──
+    "sdrsharp_make_window", "sdrangel_remotecontrol", "cubicsdr_drag_tune",
+)
+
+
+def _auto_write(name: str, parameters: Any) -> bool:
+    """写工具自动判定：arm_manual schema 契约 或 名字命中写模式。"""
+    props = (parameters or {}).get("properties") or {}
+    if "arm_manual" in props:
+        return True
+    return any(fnmatch.fnmatchcase(name, p) for p in WRITE_TOOL_NAME_PATTERNS)
+
+
 class ToolRegistry:
     """
     工具注册表。
@@ -231,8 +288,14 @@ class ToolRegistry:
         handler: Callable,
         category: str = "general",
         available: bool = True,
+        write: Optional[bool] = None,
     ):
-        """注册一个工具。"""
+        """注册一个工具。
+
+        write：写工具标记（走 arm_manual 人工门）。None = 自动判定
+        （schema 声明 arm_manual 参数，或名字命中
+        :data:`WRITE_TOOL_NAME_PATTERNS`）；显式 True/False 覆盖判定。
+        """
         definition = {
             "type": "function",
             "function": {
@@ -241,12 +304,20 @@ class ToolRegistry:
                 "parameters": parameters,
             },
         }
+        if write is None:
+            write = _auto_write(name, parameters)
         self.tools[name] = {
             "definition": definition,
             "handler": handler,
             "available": available,
             "category": category,
+            "write": bool(write),
         }
+
+    def is_write_tool(self, name: str) -> bool:
+        """该注册名是否写工具（未注册返回 False）。"""
+        tool = self.tools.get(name)
+        return bool(tool.get("write")) if tool else False
 
     def register_mcp_tools(self, mcp_tools: List[Dict[str, Any]], mcp_call_handler: Callable):
         """
@@ -324,6 +395,10 @@ class ToolRegistry:
         """检查工具是否存在且可用。"""
         resolved = name if name in self.tools else self._resolve_tool_name(name)
         return resolved in self.tools and self.tools[resolved]["available"]
+
+    def resolve_tool_name(self, tool_name: str) -> str:
+        """解析工具名到注册名（公开入口，供安全门按真名判定 write/规则）。"""
+        return self._resolve_tool_name(tool_name)
 
     def _resolve_tool_name(self, tool_name: str) -> str:
         """工具名自动解析：兼容短名（spectrum_analyze）和全名（sdr_spectrum_analyze）。
