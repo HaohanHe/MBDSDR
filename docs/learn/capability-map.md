@@ -612,6 +612,33 @@ lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已�
 音频带能量、ADC 量化层铺满、无尾部补零）。注意：这是**录制**不是**解码**
 ——「真实 OTA 解码记录」仍为零，LRPT/ADS-B 等协议级真实样本仍缺。
 
+**真实样本反哺出的三处缺陷（2026-10-28 七轮）**：真实 OTA 样本入仓后立刻
+接进解码链，三处合成信号永远测不到的缺陷当场暴露——这正是"真实样本进仓"
+的意义，不是摆设：
+
+1. **`wfm_stereo_lite` 19kHz pilot 检测溢出**：5 阶 `butter` 的 **ba 系数**
+   在 1.024MHz 采样率 / 19k±800Hz（归一化带宽 1.5e-3）下数值条件极差，
+   真实大动态信号上 `pilot_band**2` 溢出成 inf → rms=nan →
+   `pilot_snr_db=nan`、立体声判定恒 False。合成信号幅度小，触发不到。
+   修法：三处窄带滤波改 **sos**（`butter(output="sos")` + `sosfilt`），
+   rms 加有限性守卫（数值不可用时诚实降级单声道，不伪造 pilot_snr）。
+   修复后真实样本测得 pilot_snr=-19.5 dB（导频占 mpx 约 10%，合广播
+   8-10% 注入量级），该台确为立体声台。
+   教训：**窄带高阶 IIR 一律用 sos，别用 ba 系数**；合成 fixture 幅度小，
+   掩盖数值稳定性问题，靠真实/大动态样本才咬得出来。
+2. **`mbdsdr_mcp_client` 四处**（桥接层）：`list_tools` 遇 `{"tools":[...]}`
+   静默变 []（把"解析不出"伪装成"设备没工具"，违反它自己 docstring）、
+   `scan_fm(step<=0)` 死循环、工具封装 result=None 返回 None 与 `-> Dict`
+   不符、`_handle_tools_call` 遇字符串响应时 `"error" in resp` 退化成子串
+   判断后被 except 吞成泛化错误。
+3. **`desktop/mcp_worker` 异步转发丢锁**：`call_tool` 的 UI 异步路径不持
+   `_call_lock` 就进客户端，而轮询/AI 同步/UI 异步三条路径共用同一条
+   WebSocket（文档明示须序列化以免响应 id 错位）。实测并发 max_in_flight=2。
+
+登记位置：`tests/test_real_fm_decode.py`（11 项）、
+`tests/test_mcp_client_bridge.py`（21→33 项）、
+`tests/test_mcp_worker_behavior.py`（43 项）、`tests/test_desktop_constants.py`（12 项）。
+
 ## 外部依赖销账表（运行时网络依赖）
 
 仓库运行时真正会联网的地方只有下列几处，其余 URL 均在源码致谢注释里
