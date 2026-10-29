@@ -15,6 +15,7 @@ from mbdsdr_ai.aigui_messages import (
     COMPONENT_CATALOG,
     arrange_to_envelope,
     catalog_entries,
+    collect_component_ids,
     is_registered,
     message_create_surface,
     message_delete_surface,
@@ -203,3 +204,54 @@ def test_unknown_component_ids_dedupe_and_order():
          "children": ["tab:不存在", "tab:VNA"]},
     ]
     assert unknown_component_ids(comps) == ["tab:不存在"]
+
+
+# ---------------------------------------------------------------------------
+# 追加覆盖：props.current 引用槽 + 畸形 components 不伪造 ok
+# ---------------------------------------------------------------------------
+
+def test_unknown_current_tab_reference_is_reported():
+    """right_tabs.props.current 是 renderer 认的引用槽：未注册必须显形。
+
+    C++ workspace_layout.cpp 在该 id 未注册时 markPlaceholder；agent 侧校
+    验必须同步把它列进 unknown_ids，否则 validate_components 会说 ok=True
+    而 renderer 端照样出一个占位块（引用历史上一层直接放过）。
+    """
+    comps = [
+        {"id": "right_tabs", "component": "tab_container",
+         "props": {"current": "tab:幽灵"},
+         "children": ["tab:VNA"]},
+    ]
+    assert unknown_component_ids(comps) == ["tab:幽灵"]
+    r = validate_components(comps)
+    assert r["ok"] is False and r["unknown_ids"] == ["tab:幽灵"]
+    assert r["child_refs"] == 2          # children + current 都算引用
+
+
+def test_known_current_tab_reference_is_clean():
+    comps = [{"id": "right_tabs", "component": "tab_container",
+              "props": {"current": "tab:VNA"}, "children": ["tab:CW"]}]
+    r = validate_components(comps)
+    assert r["ok"] is True and r["unknown_ids"] == []
+
+
+def test_malformed_current_shape_is_ignored_not_crashed():
+    """current 不是字符串（agent 侧错填）时按未声明处理，不抛、不误报。"""
+    for bad in (None, 7, ["tab:VNA"], {"id": "tab:VNA"}):
+        comps = [{"id": "right_tabs", "component": "tab_container",
+                  "props": {"current": bad}}]
+        assert validate_components(comps)["ok"] is True
+
+
+def test_nodes_missing_id_or_non_dict_are_counted_honestly():
+    comps = [{"component": "tab"}, None, "junk", {"id": "tab:VNA"}]
+    ids, kids = collect_component_ids(comps)
+    assert ids == ["tab:VNA"]           # 无 id / 非对象节点不冒充注册项
+    assert kids == []
+    assert validate_components(comps)["unknown_ids"] == []
+
+
+def test_collect_component_ids_rejects_non_list():
+    for bad in (None, "components", {"components": []}, 7):
+        assert collect_component_ids(bad) == ([], [])
+        assert unknown_component_ids(bad) == []

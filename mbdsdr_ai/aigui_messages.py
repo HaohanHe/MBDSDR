@@ -109,7 +109,14 @@ def collect_component_ids(components: Any) -> Tuple[List[str], List[str]]:
     for node in components:
         if not isinstance(node, dict):
             continue
-        _mark(seen, node.get("id"))
+        nid = node.get("id")
+        _mark(seen, nid)
+        props = node.get("props") if isinstance(node.get("props"), dict) else {}
+        # right_tabs.props.current 是 renderer 认的第三个引用槽（除 id 与
+        # children 之外）：cpp/src/ui/workspace_layout.cpp 在该 id 未注册时
+        # 与 children 引用一样 markPlaceholder，故此处同样要显形。
+        if nid == "right_tabs" and isinstance(props.get("current"), str):
+            _mark(kids, props.get("current"))
         children = node.get("children")
         if isinstance(children, list):
             for c in children:

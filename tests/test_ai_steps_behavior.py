@@ -224,3 +224,87 @@ class TestChatProjectionEdges:
     def test_args_preview_of_none_and_list(self):
         assert ai_steps.args_preview(None) == ""
         assert json.loads(ai_steps.args_preview([1, 2])) == [1, 2]
+
+
+class TestSubagentToolsShapeHonesty:
+    """子代理只回传工具名列表——任何非数组形态都不得被展开成步骤卡。"""
+
+    def test_bare_string_tools_used_does_not_fabricate_per_char_cards(self):
+        """tools_used 是裸字符串时，按字符迭代会造出一堆不存在的成功卡。"""
+        cards = ai_steps.steps_from_subagent(
+            {"success": True, "status": "ok", "tools_used": "sdr_status"})
+        assert cards == [], "非数组的 tools_used 不得展开: %r" % [
+            c.tool for c in cards]
+
+    def test_non_list_tools_used_shapes_yield_no_cards(self):
+        for bad in (None, 7, {"a": 1}, True):
+            cards = ai_steps.steps_from_subagent(
+                {"success": True, "status": "ok", "tools_used": bad})
+            assert cards == []
+
+    def test_real_list_still_projects_one_card_per_tool(self):
+        cards = ai_steps.steps_from_subagent(
+            {"success": True, "status": "ok",
+             "tools_used": ["sdr_status", "vfo_list"]})
+        assert [c.tool for c in cards] == ["sdr_status", "vfo_list"]
+
+    def test_success_true_with_non_ok_status_is_failed(self):
+        """整体 status 与 success 打架时按 status（更严的一方）判失败。"""
+        cards = ai_steps.steps_from_subagent(
+            {"success": True, "status": "error", "tools_used": ["sdr_status"]})
+        assert cards[0].status == ai_steps.STATUS_FAILED
+        assert "整体结果失败" in cards[0].summary
+
+
+class TestWorkflowNamingAndReasons:
+    def test_tool_name_falls_back_to_tool_name_key_then_unknown(self):
+        payload = {"step_results": [
+            {"step_id": 1, "tool_name": "sdr_tune", "success": False,
+             "error": "忙"},
+            {"step_id": 2, "success": False, "error": "缺工具名"},
+        ]}
+        kids = ai_steps.steps_from_workflow(payload)
+        assert [k.tool for k in kids] == ["sdr_tune", "unknown"]
+
+    def test_skipped_without_reason_states_default_reason(self):
+        payload = {"step_results": [{"step_id": 1, "tool": "sdr_ptt",
+                                     "skipped": True}]}
+        kid = ai_steps.steps_from_workflow(payload)[0]
+        assert kid.status == ai_steps.STATUS_SKIPPED
+        assert kid.summary == "条件不满足，未执行"
+
+    def test_failed_step_without_error_text_says_step_failed(self):
+        payload = {"step_results": [{"step_id": 1, "tool": "sdr_gain"}]}
+        kid = ai_steps.steps_from_workflow(payload)[0]
+        assert kid.status == ai_steps.STATUS_FAILED
+        assert kid.summary == "步骤失败"
+
+
+class TestTextToolEdges:
+    def test_truncate_text_respects_disabled_limits(self):
+        s = "abc" * 10
+        assert ai_steps.truncate_text(s, 0) == s
+        assert ai_steps.truncate_text(s, -1) == s
+        assert ai_steps.truncate_text(None, 5) == ""
+
+    def test_summary_takes_first_error_or_message_key_in_text_order(self):
+        """摘要取文本里首个命中的 error/message 键（re.search，不看键优先级）。"""
+        assert ai_steps.summarize_result(
+            '{"message": "先出现", "error": "后出现"}') == "先出现"
+        assert ai_steps.summarize_result(
+            '{"error": "先出现", "message": "后出现"}') == "先出现"
+
+    def test_args_preview_of_unserializable_object_falls_back_to_repr(self):
+        class Weird:
+            def __repr__(self):
+                return "Weird()"
+
+        preview = ai_steps.args_preview({"x": Weird()})
+        assert preview, "不可序列化的参数不得退化成空预览"
+        assert "x" in preview and "Weird" in preview
+
+    def test_is_failure_result_ignores_whitespace_only_and_ok_true(self):
+        assert not ai_steps.is_failure_result("   ")
+        assert not ai_steps.is_failure_result('{"ok" : true}')
+        assert ai_steps.is_failure_result("Error: timeout")
+        assert ai_steps.is_failure_result('{"ok"  :  false}')

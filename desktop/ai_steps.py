@@ -261,6 +261,11 @@ def steps_from_subagent(payload: Dict[str, Any]) -> List[StepRecord]:
     """
     out: List[StepRecord] = []
     tools = payload.get("tools_used") or payload.get("tools_called") or []
+    if not isinstance(tools, (list, tuple)):
+        # 非数组（常见的是裸字符串工具名）绝不按字符展开——那会为不存在
+        # 的工具造出逐字母的"成功"步骤卡。宁可无卡，也不臆造步骤
+        # （与 steps_from_workflow 跳过非 dict 条目同一口径）。
+        return []
     overall_ok = bool(payload.get("success", False)) and (
         payload.get("status", "ok") == "ok")
     status = STATUS_SUCCESS if overall_ok else STATUS_FAILED

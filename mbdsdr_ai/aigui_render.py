@@ -17,7 +17,10 @@
 - 未知 id -> 占位块（"未知组件"诚实标注，绝不编造内容）；
 - props：sizes=[L,M,R] 施加到三栏 CSS grid，非有限值退回默认列宽；min-width
   下限统一 kMinPanel=120（与 C++ workspace_layout.cpp clampSize 逐字对齐；
-  中间列按 1fr 铺满，不用 X 高度 px）；current 决定右侧 tab 选中项；
+  中间列按 1fr 铺满，不用 X 高度 px）；right_tabs.props.current 决定右侧 tab
+  选中项（未注册的 id 走"未知组件"占位，与 C++ 同处 markPlaceholder 对齐）；
+- visible：与 C++ 同口径，顶层 ``{"visible": false}`` 与 ``props.visible``
+  都认（顶层优先），缺省则视为未声明、按可见渲染。
 - updateDataModel 的 value 渲染为只读 JSON 面板（无线索伪造读数；不可序列化
   的值如实标注"无法序列化"，不抛穿、不伪造一个空 JSON）。
 """
@@ -87,7 +90,23 @@ def _sizes_css(sizes: Any) -> str:
     return "grid-template-columns: %s 1fr %s;" % (out[0], out[2])
 
 
-def _node_html(node: Dict[str, Any]) -> str:
+def _visible_flag(node: Dict[str, Any], accept_flat: bool = True) -> Any:
+    """取节点的 visible 标记（顺序与范围都对齐 C++ 事实源）。
+
+    cpp/src/ui/workspace_layout.cpp 同时接受扁平 A2UI 形状
+    ``{"id": "tab:数据", "visible": false}`` 和规范形状 ``props.visible``，
+    但扁平形状只在 ``id.startsWith("tab:")`` 分支里被读取（其它容器在
+    该子集里不带 per-node 布局载荷）——Python 投影必须与它同口径，否则
+    同一条信封两侧渲染不一致。两者都没有 -> None（未声明，按可见处理）。
+    """
+    flat = node.get("visible")
+    if accept_flat and isinstance(flat, bool):
+        return flat
+    props = node.get("props") if isinstance(node.get("props"), dict) else {}
+    return props.get("visible")
+
+
+def _node_html(node: Dict[str, Any], current_tab: str = "") -> str:
     cid = node.get("id", "")
     if cid not in COMPONENT_CATALOG:
         return _placeholder(cid)
@@ -110,7 +129,11 @@ def _node_html(node: Dict[str, Any]) -> str:
         return f'<div class="status" data-id="{_esc(cid)}">状态栏</div>'
     if cat == "tab":
         label = cid.split(":", 1)[1]
-        on = props.get("selected") is True
+        # 选中态两路来源，均不可信输入 -> 只用于加 class，不进 HTML 文本：
+        #   1) props.selected === true（显式单卡选中）；
+        #   2) 与 right_tabs.props.current 同 id（C++ current_tab 语义）。
+        on = props.get("selected") is True or (bool(current_tab)
+                                               and cid == current_tab)
         return (f'<div class="tab{" on" if on else ""}" '
                 f'data-id="{_esc(cid)}">{_esc(label)}</div>')
     if cat == "view":  # center:世界/气象/时空视图
@@ -131,6 +154,9 @@ def render_component_list(components: Any, current_tab: str = "",
     ``state`` 为合并后的节点表：children 引用同样受其 props 节制
     （visible=false 收起、selected 标记选中态）——与 updateComponents 的
     合并语义一致。
+    ``current_tab`` 是 right_tabs.props.current 解析出的选中 id（C++
+    workspace_layout.cpp 的 ``current_tab``），命中的 tab 渲染为选中态；
+    空串表示 agent 未指定，不做任何选中。
     """
     left: List[str] = []
     mid: List[str] = []
@@ -149,7 +175,7 @@ def render_component_list(components: Any, current_tab: str = "",
         elif cat == "tab_container":
             right.append(_node_html(n))
         elif cat == "tab":
-            right.append(_node_html(n))
+            right.append(_node_html(n, current_tab=current_tab))
         elif cat == "status":
             pass
         else:
@@ -166,7 +192,7 @@ def render_component_list(components: Any, current_tab: str = "",
             entry = (state or {}).get(ref) or {}
             props = entry.get("props") if isinstance(entry.get("props"),
                                                      dict) else {}
-            if props.get("visible") is False:
+            if _visible_flag(entry) is False:
                 continue  # updateComponents 收起：连 children 引用也不渲染
             if ref in COMPONENT_CATALOG:
                 node = {"id": ref, "component": COMPONENT_CATALOG[ref][0]}
@@ -174,7 +200,7 @@ def render_component_list(components: Any, current_tab: str = "",
                     node["props"] = dict(props)
                 cat = COMPONENT_CATALOG[ref][0]
                 if cat == "tab":
-                    right.append(_node_html(node))
+                    right.append(_node_html(node, current_tab=current_tab))
                 else:
                     mid.append(_node_html(node))
             else:
@@ -246,15 +272,29 @@ def render(aigui_messages: Iterable[Dict[str, Any]],
         elif "deleteSurface" in msg:
             nodes = {n["id"]: n for n in _default_workspace()}
 
-    visible = [n for n in nodes.values()
-               if not (isinstance(n.get("props"), dict)
-                       and n["props"].get("visible") is False)]
-    parts = render_component_list(visible, state=nodes)
+    # right_tabs.props.current -> 选中 tab（C++ workspace_layout.cpp 的
+    # current_tab；未注册的 id 在同一处被 markPlaceholder，这里同样诚实占位）。
+    current_tab = ""
+    rt = nodes.get("right_tabs")
+    if isinstance(rt, dict):
+        rt_props = rt.get("props") if isinstance(rt.get("props"), dict) else {}
+        cur = rt_props.get("current")
+        if isinstance(cur, str) and cur:
+            current_tab = cur
+
+    visible = []
+    for n in nodes.values():
+        cid = str(n.get("id", ""))
+        if _visible_flag(n, accept_flat=cid.startswith("tab:")) is False:
+            continue
+        visible.append(n)
+    parts = render_component_list(visible, current_tab=current_tab, state=nodes)
+    if current_tab and current_tab not in COMPONENT_CATALOG:
+        parts["right"] += _placeholder(current_tab)  # 未知 current：占位不编造
     body = _wrap(parts)
     return ("<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'>"
             f"<title>{_esc(title)}</title><style>{_CSS}</style></head>"
-            f"<body><div class='aigui'>" + body.replace("class='mid'",
-                                                        "class='mid'", 1)
+            f"<body><div class='aigui'>" + body
             + "".join(data_panels) + "</div></body></html>")
 
 

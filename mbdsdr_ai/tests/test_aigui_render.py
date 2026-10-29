@@ -11,7 +11,7 @@ from mbdsdr_ai.aigui_demo import demo_messages
 from mbdsdr_ai.aigui_messages import (arrange_to_envelope,
                                       message_create_surface,
                                       message_update_data_model)
-from mbdsdr_ai.aigui_render import render
+from mbdsdr_ai.aigui_render import render, render_component_list
 from mbdsdr_ai.core.mcp_server import MCPToolSet
 
 
@@ -182,9 +182,15 @@ def test_data_model_self_reference_is_stated_not_thrown():
 
 
 def test_data_model_panels_keep_envelope_order():
+    """面板按信封顺序追加。
+
+    注：面板内容走 _esc（与 _esc 的 XSS 断言同源），故 JSON 里的双引号在
+    HTML 源码里是 &quot;——浏览器里正常显示，断言针取转义后的形态。
+    """
     page = render([message_update_data_model({"n": 1}),
                    message_update_data_model({"n": 2})])
-    assert page.index('"n": 1') < page.index('"n": 2')
+    assert page.count("<h3>updateDataModel</h3>") == 2
+    assert page.index("&quot;n&quot;: 1") < page.index("&quot;n&quot;: 2")
 
 
 def test_sizes_floor_is_kminpanel_for_every_column():
@@ -267,3 +273,142 @@ def test_deeply_nested_data_model_does_not_raise():
     deep = json.loads("[" * 300 + "]" * 300)
     page = render([message_update_data_model(deep)])
     assert "</html>" in page
+
+
+# ---------------------------------------------------------------------------
+# A2UI 补测：renderer 契约的可疑点（props.current / visible 形状 / 新注入槽）
+# ---------------------------------------------------------------------------
+
+def test_right_tabs_props_current_selects_that_tab():
+    """props.current 是 C++ current_tab（workspace_layout.cpp）——必须生效。"""
+    page = render([])                      # 默认工作台：current = tab:FT8
+    assert 'tab on" data-id="tab:FT8"' in page, "current 未命中任何 tab"
+    assert 'tab on" data-id="tab:CW"' not in page
+    assert 'tab on" data-id="tab:VNA"' not in page
+
+
+def test_current_from_update_components_moves_selection():
+    msgs = [
+        message_create_surface(components=_full_ws()),
+        arrange_to_envelope("updateComponents", [
+            {"id": "right_tabs", "component": "tab_container",
+             "props": {"current": "tab:VNA"}}]),
+    ]
+    page = render(msgs)
+    assert 'tab on" data-id="tab:VNA"' in page
+    assert 'tab on" data-id="tab:CW"' not in page
+
+
+def test_current_unknown_id_is_honest_placeholder_not_selection():
+    """未注册的 current：与 C++ markPlaceholder 对齐，占位且不标选中。"""
+    page = render([arrange_to_envelope("updateComponents", [
+        {"id": "right_tabs", "component": "tab_container",
+         "props": {"current": "tab:幽灵"}}])])
+    assert "未知组件" in page and "tab:幽灵" in page
+    assert "tab on" not in page, "未知 id 不得被画成选中态"
+
+
+def test_current_pointing_at_registered_non_tab_selects_nothing():
+    """current 指向已注册但非 tab 的组件：C++ 无 tab index 可命中 -> 不选中。"""
+    page = render([arrange_to_envelope("updateComponents", [
+        {"id": "right_tabs", "component": "tab_container",
+         "props": {"current": "center:频谱"}}])])
+    assert "tab on" not in page
+    assert "未知组件" not in page, "已注册 id 不该被当成未知占位"
+
+
+def test_unknown_current_value_is_escaped_in_placeholder():
+    """current 是新引入的用户可控槽：占位里必须彻底转义（属性位/文本位）。"""
+    nasty = 'tab:' + _ATTR + _XSS
+    page = render([arrange_to_envelope("updateComponents", [
+        {"id": "right_tabs", "component": "tab_container",
+         "props": {"current": nasty}}])])
+    for raw in ("<script", 'onerror="', "alert(1)" + "</script>"):
+        assert raw not in page, "current 未转义就进了 HTML: %r" % raw
+    assert "&lt;script&gt;" in page
+
+
+def test_top_level_visible_is_out_of_scope_for_non_tab_containers():
+    """扁平 visible 只在 tab: 分支生效，范围对齐 C++ id.startsWith("tab:")。"""
+    flat = render([arrange_to_envelope("updateComponents", [
+        {"id": "left_rail", "component": "rail", "visible": False}])])
+    assert "<h3>左轨</h3>" in flat, "非 tab 容器不认扁平 visible（照渲）"
+    nested = render([arrange_to_envelope("updateComponents", [
+        {"id": "left_rail", "component": "rail",
+         "props": {"visible": False}}])])
+    assert "（无左轨节点）" in nested, "props.visible 照旧收起（既有语义）"
+
+
+def test_render_component_list_current_tab_argument_is_live():
+    """render_component_list 的 current_tab 形参不得是死参数。"""
+    nodes = [{"id": "tab:CW", "component": "tab", "children": []},
+             {"id": "tab:VNA", "component": "tab"}]
+    picked = render_component_list(nodes, current_tab="tab:VNA")["right"]
+    assert 'tab on" data-id="tab:VNA"' in picked
+    assert 'tab on" data-id="tab:CW"' not in picked
+    none = render_component_list(nodes, current_tab="")["right"]
+    assert "tab on" not in none
+
+
+def test_visible_false_at_top_level_hides_tab_like_cpp():
+    """顶层 {"visible": false} 与 props.visible 同口径（C++ 两种形状都认）。"""
+    flat = render([arrange_to_envelope("updateComponents", [
+        {"id": "tab:CW", "component": "tab", "visible": False}])])
+    assert "tab:CW" not in flat, "顶层 visible:false 必须收起，不能照渲"
+    nested = render([arrange_to_envelope("updateComponents", [
+        {"id": "tab:CW", "component": "tab",
+         "props": {"visible": False}}])])
+    assert "tab:CW" not in nested
+    back = render([arrange_to_envelope("updateComponents", [
+        {"id": "tab:CW", "component": "tab", "visible": True}])])
+    assert "tab:CW" in back
+
+
+def test_children_ref_respects_top_level_visible_from_state():
+    """children 引用也受 state 里节点的顶层 visible 节制（与 props 同口径）。"""
+    msgs = [
+        message_create_surface(components=_full_ws()),
+        arrange_to_envelope("updateComponents",
+                            [{"id": "tab:CW", "component": "tab",
+                              "visible": False}]),
+    ]
+    page = render(msgs)
+    assert "tab:CW" not in page
+    assert "tab:FT8" in page               # 其余 children 不受牵连
+
+
+def test_visible_flag_top_level_precedes_props_like_cpp():
+    """顶层与 props 同时给出且冲突时，按 C++ 取值顺序（顶层优先）。"""
+    page = render([arrange_to_envelope("updateComponents", [
+        {"id": "tab:CW", "component": "tab", "visible": True,
+         "props": {"visible": False}}])])
+    assert "tab:CW" in page
+
+
+def test_selected_and_current_are_both_honored():
+    """两路选中来源并存时不互相抹掉。"""
+    msgs = [
+        message_create_surface(components=_full_ws()),
+        arrange_to_envelope("updateComponents", [
+            {"id": "tab:CW", "component": "tab", "props": {"selected": True}},
+            {"id": "right_tabs", "component": "tab_container",
+             "props": {"current": "tab:VNA"}}]),
+    ]
+    page = render(msgs)
+    assert page.count("tab on") == 2
+    assert 'tab on" data-id="tab:CW"' in page
+    assert 'tab on" data-id="tab:VNA"' in page
+
+
+def test_malformed_visible_and_current_values_never_raise():
+    """visible/current 是不可信输入：错类型一律按未声明处理，不抛穿。"""
+    junk = [
+        {"id": "tab:CW", "component": "tab", "visible": "false"},
+        {"id": "tab:FT8", "component": "tab", "visible": 0},
+        {"id": "right_tabs", "component": "tab_container",
+         "props": {"current": ["tab:VNA"]}},
+        {"id": "left_rail", "component": "rail", "props": {"visible": {}}},
+    ]
+    page = render([arrange_to_envelope("createSurface", junk)])
+    assert page.startswith("<!doctype html>")
+    assert "tab:CW" in page and "tab on" not in page

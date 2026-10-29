@@ -14,6 +14,7 @@
 
 跑法：QT_QPA_PLATFORM=offscreen python -m pytest tests/test_ai_panel_behavior.py
 """
+import json
 import os
 import sys
 import time
@@ -536,3 +537,114 @@ class TestConversationAndConfig:
             assert panel.toggle_log_btn.text() == "显示执行步骤"
         finally:
             panel.hide()
+
+
+class TestForwardedToolCallArguments:
+    """转发给硬件的参数不许被静默吞掉（吞了就用空参数打真硬件）。"""
+
+    def _emit(self, panel, arguments):
+        panel.register_mcp_tools([{"name": "sdr_set_frequency"}],
+                                 lambda n, p: None)
+        emitted = []
+        panel.tool_call_requested.connect(lambda n, p: emitted.append((n, p)))
+        panel._on_ai_finished({
+            "content": "", "latency_ms": 0, "compacted": False,
+            "tool_calls": [{"name": "sdr_set_frequency",
+                            "arguments": arguments}],
+            "tool_results": [],
+        })
+        return emitted
+
+    def test_dict_arguments_are_forwarded_intact(self, panel):
+        """arguments 已是对象时（部分兼容端点/本地推理栈直接给 dict）照原样带。"""
+        emitted = self._emit(panel, {"freq_mhz": 435.0, "bw_hz": 200000})
+        assert emitted == [("sdr_set_frequency",
+                            {"freq_mhz": 435.0, "bw_hz": 200000})]
+
+    def test_json_string_arguments_are_parsed(self, panel):
+        emitted = self._emit(panel, '{"freq_mhz": 435.0}')
+        assert emitted == [("sdr_set_frequency", {"freq_mhz": 435.0})]
+
+    def test_unparseable_arguments_fall_back_to_empty_params(self, panel):
+        """真解析不了才给空参数（不猜、不伪造默认值）——弹药必须显式。"""
+        assert self._emit(panel, "{not json") == [("sdr_set_frequency", {})]
+
+    def test_list_or_number_arguments_fall_back_to_empty_params(self, panel):
+        for bad in ([1, 2], 435.0, None, True):
+            assert self._emit(panel, bad) == [("sdr_set_frequency", {})]
+
+    def test_missing_arguments_key_is_empty_params(self, panel):
+        emitted = []
+        panel.register_mcp_tools([{"name": "sdr_set_frequency"}],
+                                 lambda n, p: None)
+        panel.tool_call_requested.connect(lambda n, p: emitted.append((n, p)))
+        panel._on_ai_finished({
+            "content": "", "latency_ms": 0, "compacted": False,
+            "tool_calls": [{"name": "sdr_set_frequency"}],
+            "tool_results": [],
+        })
+        assert emitted == [("sdr_set_frequency", {})]
+
+
+class TestStepCardRendering:
+    @staticmethod
+    def _card(panel, idx):
+        item = panel.step_list_layout.itemAt(idx)
+        return item.widget() if item is not None else None
+
+    def test_status_labels_cover_every_known_state(self, panel):
+        for status, label in ((ai_steps.STATUS_SUCCESS, "OK"),
+                              (ai_steps.STATUS_FAILED, "FAIL"),
+                              (ai_steps.STATUS_RUNNING, "运行中"),
+                              (ai_steps.STATUS_SKIPPED, "跳过")):
+            panel._append_step_card(ai_steps.StepRecord(
+                tool="t_" + status, status=status, summary="s", elapsed_ms=1.0))
+            assert label in "".join(_card_labels(panel))
+
+    def test_unknown_status_shows_raw_state_not_a_pass(self, panel):
+        """未知状态原样显示，绝不落成 OK/FAIL 之类的假标签。"""
+        panel._append_step_card(ai_steps.StepRecord(
+            tool="t_weird", status="weird", summary="", elapsed_ms=0.0))
+        html = "".join(_card_labels(panel))
+        assert "weird" in html and "OK" not in html and "FAIL" not in html
+
+    def test_elapsed_ms_is_printed_from_step(self, panel):
+        panel._append_step_card(ai_steps.StepRecord(
+            tool="t", status=ai_steps.STATUS_SUCCESS, elapsed_ms=137.6))
+        assert "138ms" in "".join(_card_labels(panel))
+
+    def test_child_step_card_is_indented(self, panel):
+        panel._append_step_card(ai_steps.StepRecord(
+            tool="parent", status=ai_steps.STATUS_SUCCESS))
+        panel._append_step_card(ai_steps.StepRecord(
+            tool="child", status=ai_steps.STATUS_SUCCESS, depth=1))
+        assert self._card(panel, 0).layout().contentsMargins().left() == 6
+        assert self._card(panel, 1).layout().contentsMargins().left() == 20
+
+    def test_error_line_is_suppressed_when_already_in_summary(self, panel):
+        """错误摘要已展示同一句时不重复贴一条（去重，不是删除信息）。"""
+        panel._append_step_card(ai_steps.StepRecord(
+            tool="t", status=ai_steps.STATUS_FAILED,
+            summary="设备未连接", error="设备未连接"))
+        html = "".join(_card_labels(panel))
+        assert html.count("设备未连接") == 1
+
+    def test_sub_step_from_workflow_is_rendered_as_child_card(self, panel):
+        """_on_ai_finished 会把 workflow_execute 的多步结果展开成缩进子卡。"""
+        payload = {"workflow_name": "wf", "success": False, "step_results": [
+            {"step_id": 1, "tool": "sdr_ai_sweep", "success": True,
+             "result": '{"peaks": 3}'},
+            {"step_id": 2, "tool": "sdr_set_frequency", "success": False,
+             "error": "未连接"},
+        ]}
+        panel._on_ai_finished({
+            "content": "", "latency_ms": 0, "compacted": False,
+            "tool_calls": [{"name": "workflow_execute", "arguments": "{}"}],
+            "tool_results": [_chat_result(json.dumps(payload))],
+        })
+        assert [s.tool for s in panel._tool_log] == [
+            "workflow_execute", "sdr_ai_sweep", "sdr_set_frequency"]
+        assert panel._tool_log[1].status == ai_steps.STATUS_SUCCESS
+        assert panel._tool_log[2].status == ai_steps.STATUS_FAILED
+        html = "".join(_card_labels(panel))
+        assert "OK" in html and "FAIL" in html and "未连接" in html

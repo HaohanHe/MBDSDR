@@ -706,11 +706,17 @@ class AIPanel(QWidget):
                     continue
                 name = tc.get("name", "")
                 if name in self._mcp_tool_names:
+                    raw_args = tc.get("arguments", {})
                     args = {}
-                    try:
-                        args = json.loads(tc.get("arguments", "{}"))
-                    except Exception:
-                        pass
+                    if isinstance(raw_args, dict):
+                        args = raw_args          # 已是对象：原样带参数转发
+                    elif isinstance(raw_args, str):
+                        try:
+                            args = json.loads(raw_args)
+                        except Exception:
+                            pass
+                    if not isinstance(args, dict):
+                        args = {}                # 其它类型一律不做猜测
                     self.tool_call_requested.emit(name, args)
 
         if compacted:
