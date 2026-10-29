@@ -841,8 +841,34 @@ class ControlPanel(QWidget):
         if idx is None or not isinstance(idx, int):
             return
         if 0 <= idx < len(self._bookmarks):
+            _hz, name, _mode = self._bookmarks[idx]
             del self._bookmarks[idx]
             self._refresh_bookmarks()
+            # 删除必须落盘：只删内存列表时 FrequencyManager 里的记录还在，
+            # 下次启动 load_bookmarks_from_list 会把删掉的书签原样读回来。
+            self._remove_bookmark_persisted(name)
+
+    def set_bookmark_store(self, mgr) -> None:
+        """注入书签持久化仓库（mbdsdr_ai.frequency_manager.FrequencyManager）。
+
+        未注入时删除操作懒加载默认仓库（与 main_window 同一份
+        ~/.mbdsdr/bookmarks.json），保证面板单独使用也删得掉。
+        """
+        self._bookmark_store = mgr
+
+    def _remove_bookmark_persisted(self, name: str) -> None:
+        """把一次删除真正写到磁盘。仓库不可用/删不到时静默跳过，不打断 UI。"""
+        store = getattr(self, "_bookmark_store", None)
+        if store is None:
+            try:
+                from mbdsdr_ai.frequency_manager import FrequencyManager
+                store = FrequencyManager()
+            except Exception:
+                return
+        try:
+            store.remove(str(name))
+        except Exception:
+            pass
 
     @Slot(int)
     def _on_bookmark_selected(self, index: int):

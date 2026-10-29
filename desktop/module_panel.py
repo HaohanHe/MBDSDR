@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 
 from tokens import tokens as _tok
 from mode_registry import get as _get_mode
+from constants import DEFAULT_SAMPLE_RATE_HZ
 
 _t = _tok()
 
@@ -269,7 +270,11 @@ class ModulePanel(QWidget):
         form.addRow("增益", gw)
 
         self.sr_combo = QComboBox()
-        self.sr_combo.addItems(["1.024 MHz", "1.44 MHz", "2.048 MHz", "2.4 MHz", "3.2 MHz"])
+        # 文本沿用原档位；同时挂 Hz 数值到 itemData，供连接时下发（避免解析文本）
+        for _txt, _hz in (("1.024 MHz", 1_024_000.0), ("1.44 MHz", 1_440_000.0),
+                          ("2.048 MHz", 2_048_000.0), ("2.4 MHz", 2_400_000.0),
+                          ("3.2 MHz", 3_200_000.0)):
+            self.sr_combo.addItem(_txt, _hz)
         form.addRow("采样率", self.sr_combo)
 
         self.bw_spin = QDoubleSpinBox()
@@ -328,11 +333,32 @@ class ModulePanel(QWidget):
                 f"频率 {d0.get('freq_range','?')}\n"
                 f"采样率 {d0.get('sample_rate_range','?')}")
 
+    def selected_sample_rate_hz(self) -> float:
+        """当前采样率下拉档位（Hz）。
+
+        供连接时下发 + 测试断言。itemData 缺失/异常时回退项目基准采样率，
+        绝不返回 0 之类会让后端崩掉的假值。
+        """
+        try:
+            hz = float(self.sr_combo.currentData())
+        except (TypeError, ValueError):
+            return float(DEFAULT_SAMPLE_RATE_HZ)
+        return hz if hz > 0 else float(DEFAULT_SAMPLE_RATE_HZ)
+
+    def selected_gain_db(self) -> float:
+        """当前增益滑块值（dB），语义与 device_panel.gain_edit 一致。"""
+        return float(self.gain_slider.value())
+
     def _on_connect(self):
         idx = self.device_combo.currentIndex()
         if not self._devices or idx >= len(self._devices):
             return
-        dev = self._devices[idx]
+        # 面板参数随设备一起下发：沿用 device_panel 的 dev["_sample_rate"] /
+        # dev["_gain"] 协议（main_window._on_panel_device_connect 读取这两个键）。
+        # 此前这两个控件改了不下发，连接永远走默认 2.048 MHz / 20 dB。
+        dev = dict(self._devices[idx])
+        dev["_sample_rate"] = self.selected_sample_rate_hz()
+        dev["_gain"] = self.selected_gain_db()
         self.device_selected.emit(dev)
         QMessageBox.information(self, "已选择设备",
                                 f"{dev.get('label')}\n（真实连接由后端完成）")
