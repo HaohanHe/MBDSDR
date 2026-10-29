@@ -1856,7 +1856,11 @@ class MainWindow(QMainWindow):
         # RTL-SDR 处于异常态时阻塞发生在原生层、不释放 GIL，整个会话挂死，
         # 连 faulthandler 都转储不出栈）。离线就不该有硬件副作用。
         if os.environ.get("MBDSDR_OFFLINE") == "1":
-            self._show_no_rtl_hint("离线模式：跳过启动自动枚举")
+            # 不枚举硬件，但状态栏提示必须与"无设备"口径一致（含排查关键词）：
+            # 离线态同样没有连上后端，用户需要知道怎么排查，不能只说"跳过"。
+            self._show_no_rtl_hint(
+                "离线模式（未枚举硬件）：未连接 RTL-SDR——检查 Zadig WinUSB 驱动，"
+                "或装 SoapySDR(SoapyRTLSDR)；远端棒用 rtl_tcp。pyrtlsdr 为可选自装")
             return
         try:
             from mbdsdr_ai.sdr_backend import (
