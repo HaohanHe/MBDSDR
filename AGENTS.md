@@ -90,6 +90,14 @@ test_http_unreachable_server_envelope 已证实为真 bug（回环被代理劫�
 FM 样本入仓（tests/fixtures/real_fm_88m1，2^19 样本 cu8+SigMF，12 项
 真实性验证）。）
 
+（2026-10-29 工程轮（八轮）实测：**1565 passed / 5 skipped / 0 failed**。
+自 1535 起净增 30，来源：A2UI 信封栈补测（render/messages 共 +17）、AI 步骤
+与 AI 面板行为测试、以及四处真缺陷修复——其中 `ai_panel._on_ai_finished`
+静默吞 dict 形 arguments 后**以空参数向真硬件发调用**（AI 操作员执行层
+最危险形态：门过了参数却是空的）。桌面 UI 稳定性六处（关窗定时器/事件
+过滤器/touch 信号不回收、NaN 被夹成满增益与最高频并真下发调谐）与真实
+样本反哺的 wfm sos 溢出修复同轮入账。）
+
 根 `tests/`（大套件，200 个测试文件：`test_*.py` 167 + `*_test.py` 15 +
 `*roundtrip*.py` 18）同样是对拍门禁所在。**它整跑很慢**：
 单进程跑 160 个文件约 45 分钟——慢在同进程内单例 QApplication 跨文件累积

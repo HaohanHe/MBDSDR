@@ -675,6 +675,42 @@ test_startup_sequence 共 41 项全绿，未误伤。
 **在账欠账**：根 tests 的跨文件状态污染（QApplication 累积导致 UI 用例
 挂死）未根治，`test_user_layouts.py` 是首个被定位到的触发点。
 
+**AI UI 面（A2UI 信封栈 + AI 面板）四处真缺陷（2026-10-29 销账）**：
+
+1. **`ai_panel._on_ai_finished` 静默吞参数 → 以空参数向真硬件发调用**（安全级，
+   本轮最重）：只 `json.loads(arguments)`，而 `ai_steps._parse_args` 明确
+   支持的 **dict 形 arguments** 会抛错，被 `except: pass` 吞掉后照发——
+   实测 `sdr_set_frequency` 以 `{}` 下发（没有 `freq_mhz`）。属于"AI 操作员"
+   执行层最危险的形态：门都过了，参数却是空的。
+2. **`ai_steps.steps_from_subagent` 造假步骤卡**：裸字符串 `tools_used
+   ="sdr_status"` 按**字符迭代**造出 10 张不存在的"成功"卡；整数形态直接
+   `TypeError` 抛穿 UI 槽。改为非数组不展开（与 `steps_from_workflow`
+   跳过非 dict 条目同口径）。
+3. **`aigui_render` 与 C++ 事实源不同步（两处）**：`props.current` 从未被
+   读取（`render_component_list` 的 `current_tab` 是死参数，C++
+   `workspace_layout.cpp:87-91/343-351` 用它决定 tab 选中）；`visible`
+   只认 props，C++ `:119-130` 的 `tab:` 分支同时收顶层 `{"visible": false}`
+   与 `props.visible`（顶层优先）——扁平信封里的隐藏 tab 会被渲出来。
+4. **`aigui_messages.collect_component_ids` 漏 `props.current` 引用槽**：
+   未注册 id 让 `validate_components` 报 `ok=True`，渲染端却仍出占位块，
+   违背"未知 id 构造期即显形"。
+
+已核实**不是**缺陷的：HTML 注入面（逐槽构造 `<script>` / `" onerror=` /
+超长中文 / 控制字符，`html.escape` 覆盖彻底，属性位无逃逸）、畸形信封
+（缺字段/错类型/超深嵌套/重复 createSurface/delete 后 update 均不抛穿）。
+既有红用例 `test_data_model_panels_keep_envelope_order` 是**针取未转义
+字面量**与同文件 XSS 断言互斥所致，顺序属性本体成立，改取转义后形态
+（`&quot;n&quot;: 1`）+ 补计数断言，未删断言。
+
+**桌面 UI 稳定性六处（2026-10-29 销账，commit 72815a0）**：关窗只停
+`_gnss_timer`（实测 14 个定时器中 8 个仍 isActive）、`installEventFilter`
+从不摘除（已关窗口永久留在过滤链）、`touch_manager` 信号从不 disconnect
+（槽内 `setStyleSheet` 正是 O(N²) 挂死点）、`QTimer.singleShot` 无 parent
+（关窗后回调打在已销毁控件上）、`_dbfs_to_smeter(NaN)` 抛 ValueError、
+`set_gain(NaN)`→"49dB" / `set_frequency_hz(NaN)`→6 GHz（min/max 夹取把
+"读不到值"伪造成满增益/最高频并**真下发调谐**）。反向钉扎：`_disconnect()`
+不得停窗口定时器，防清理误做到断连路径。
+
 ## 外部依赖销账表（运行时网络依赖）
 
 仓库运行时真正会联网的地方只有下列几处，其余 URL 均在源码致谢注释里
