@@ -15,9 +15,11 @@
 - 白名单 23 组件（来自 component_registry.cpp，跨语言钉扎见
   test_aigui_messages.py）：5 结构容器 + 14 tab + 4 center 视图；
 - 未知 id -> 占位块（"未知组件"诚实标注，绝不编造内容）；
-- props：sizes=[L,M,R] 施加到三栏 CSS grid，min-width 下限
-  （kMinPanel=120 / center 320）；current 决定右侧 tab 选中项；
-- updateDataModel 的 value 渲染为只读 JSON 面板（无线索伪造读数）。
+- props：sizes=[L,M,R] 施加到三栏 CSS grid，非有限值退回默认列宽；min-width
+  下限统一 kMinPanel=120（与 C++ workspace_layout.cpp clampSize 逐字对齐；
+  中间列按 1fr 铺满，不用 X 高度 px）；current 决定右侧 tab 选中项；
+- updateDataModel 的 value 渲染为只读 JSON 面板（无线索伪造读数；不可序列化
+  的值如实标注"无法序列化"，不抛穿、不伪造一个空 JSON）。
 """
 from __future__ import annotations
 
@@ -65,16 +67,21 @@ def _placeholder(cid: str) -> str:
 
 
 def _sizes_css(sizes: Any) -> str:
-    """把 props.sizes=[L,M,R] 转 CSS grid 列宽（含 kMinPanel 下限钳制）。"""
+    """把 props.sizes=[L,M,R] 转 CSS grid 列宽（含 kMinPanel 下限钳制）。
+
+    下限对齐 C++ 事实源 ``workspace_layout.cpp`` 的 ``clampSize``：三栏统一
+    ``kMinPanel=120``（不按列区别对待——C++ 没有 per-column floor）。
+    props 是不可信输入：非有限值（Infinity/NaN，JSON 里 Python 会解析成 float）
+    一律退回该列默认值，不抛异常。
+    """
     if not isinstance(sizes, (list, tuple)) or len(sizes) != 3:
         return "grid-template-columns: %dpx 1fr %dpx;" % (
             DEFAULT_SPLITTER_SIZES[0], DEFAULT_SPLITTER_SIZES[2])
     out: List[str] = []
     for i, raw in enumerate(sizes):
-        minimum = 120 if i < 2 else 320
         try:
-            px = int(max(minimum, int(raw)))
-        except (TypeError, ValueError):
+            px = max(120, int(raw))  # kMinPanel = 120（与 C++ clampSize 同值）
+        except (TypeError, ValueError, OverflowError):
             px = DEFAULT_SPLITTER_SIZES[i]
         out.append(f"{px}px")
     return "grid-template-columns: %s 1fr %s;" % (out[0], out[2])
@@ -177,6 +184,19 @@ def render_component_list(components: Any, current_tab: str = "",
             "right": "".join(right) or '<div class="ph">（无右侧节点）</div>'}
 
 
+def _json_text(value: Any) -> str:
+    """数据模型 value → 只读 JSON 文本；不可序列化时如实标注（不抛穿、不造假）。
+
+    value 是 agent 侧不可信输入：自引用 dict 会触发 ValueError、datetime/set
+    等会触发 TypeError——两种都按"这份数据模型没法投影成 JSON"如实写出，
+    绝不退化成一个空 {} 冒充"成功渲染"。
+    """
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except (TypeError, ValueError) as e:
+        return "（数据模型无法序列化为 JSON：%s: %s）" % (type(e).__name__, e)
+
+
 def _default_workspace() -> List[Dict[str, Any]]:
     """默认三栏工作台（与 C++ 默认 280/800/280、stretch 1/3/1 对齐的投影）。"""
     return [
@@ -222,8 +242,7 @@ def render(aigui_messages: Iterable[Dict[str, Any]],
             body = msg["updateDataModel"] or {}
             data_panels.append(
                 "<h3>updateDataModel</h3><pre>%s</pre>"
-                % _esc(json.dumps(body.get("value"), ensure_ascii=False,
-                                  indent=2)))
+                % _esc(_json_text(body.get("value"))))
         elif "deleteSurface" in msg:
             nodes = {n["id"]: n for n in _default_workspace()}
 

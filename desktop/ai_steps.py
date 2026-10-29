@@ -188,7 +188,10 @@ def steps_from_tool_result(tool_name: str, result: Dict[str, Any]) -> StepRecord
     """把一次异步工具调用结果（UI→worker 转发链）投影成单张步骤卡。"""
     result = result if isinstance(result, dict) else {"result": str(result)}
     text = json.dumps(result, ensure_ascii=False)
-    failed = "error" in result or is_failure_result(text)
+    # 只有"真有错误内容"才算失败：`{"error": None}` / `{"error": ""}` 的空错误键
+    # 不应判失败——那会给明明成功的结果画一张 FAIL 卡（steps_from_chat 同口径：
+    # 只按 error 取真值）。
+    failed = bool(result.get("error")) or is_failure_result(text)
     if result.get("skipped"):
         # 软件工具不二次转发：不是一次硬件执行，不进步骤卡
         return StepRecord(tool=str(tool_name), status=STATUS_SKIPPED,
@@ -208,6 +211,11 @@ def steps_from_tool_result(tool_name: str, result: Dict[str, Any]) -> StepRecord
 def steps_from_workflow(payload: Dict[str, Any]) -> List[StepRecord]:
     """WorkflowResult.to_dict() → 子步骤卡（parent=workflow_execute）。
 
+    `success: true` 但 bool(step.result) 文本自己说失败（{"ok": false} / "Error..."）
+    时按失败渲染——与 steps_from_chat 同一口径：执行器不抛异常不等于工具成功
+    （workflow_engine 只看 tool_executor 有没有抛异常，ToolResult.success=False
+    的失败结果会带着 success:true 落到 step_results）。
+
     step_results 条目（见 mbdsdr_ai/workflow_engine.py）：
       * {"step_id", "tool", "success": true, "result"}          → success
       * {"step_id", "tool", "success": false, "error", ...}     → failed
@@ -223,9 +231,15 @@ def steps_from_workflow(payload: Dict[str, Any]) -> List[StepRecord]:
             status, summary, err = (STATUS_SKIPPED,
                                     str(entry.get("reason", "") or "条件不满足，未执行"), "")
         elif entry.get("success"):
-            status = STATUS_SUCCESS
-            summary = summarize_result(str(entry.get("result", "") or ""))
-            err = ""
+            step_text = str(entry.get("result", "") or "")
+            if is_failure_result(step_text):
+                status = STATUS_FAILED
+                summary = summarize_result(step_text)
+                err = ""
+            else:
+                status = STATUS_SUCCESS
+                summary = summarize_result(step_text)
+                err = ""
         else:
             status = STATUS_FAILED
             err = str(entry.get("error", "") or "")

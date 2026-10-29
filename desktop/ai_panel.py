@@ -91,6 +91,9 @@ class AIPanel(QWidget):
         self._worker_thread: Optional[QThread] = None
         self._worker: Optional[AIWorker] = None
         self._is_processing = False
+        # 流式状态默认位：finished 槽可能先于（或压根没有）_call_ai 被触发，
+        # 没有默认位会在 _on_ai_finished 里 AttributeError 撞死。
+        self._streamed_any = False
         # MCP 硬件工具挂起区：agent 可能稍后才创建（配置 API Key 后），
         # 已取到的硬件工具 schema + 调用 handler 缓存起来，重建 agent 时补注册。
         self._pending_mcp: Optional[tuple] = None
@@ -482,16 +485,18 @@ class AIPanel(QWidget):
     def _add_user_message(self, text: str):
         self._conversation.append({"role": "user", "content": text, "time": datetime.now()})
         _t = _tok().COLORS
+        # 用户原话原文入视图：<&> 等字符必须先转义，否则被 rich text 当标签吞掉
+        # （实测 "a < b" 只剩 "a "、"<script>..." 整句消失），显示与原文不符。
         self._append_to_view(
             f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_user_bubble"]};'
             f' border-radius: 6px; border-left: 3px solid {_t["accent_warm"]};'
             f'"><span style="color: {_t["light_user_label"]}; font-size: 8pt;">你</span><br>'
-            f'<span style="color: {_t["light_text_strong"]};">{text}</span></div>')
+            f'<span style="color: {_t["light_text_strong"]};">{_esc(text)}</span></div>')
 
     def _add_ai_message(self, text: str):
         self._conversation.append({"role": "assistant", "content": text, "time": datetime.now()})
-        # 简单的换行处理
-        safe_text = text.replace("\n", "<br>")
+        # 简单的换行处理（同样先转义，模型/工具文本里的 <> 不得被当标签吞掉）
+        safe_text = _esc(text).replace("\n", "<br>")
         _t = _tok().COLORS
         self._append_to_view(
             f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_log_bg"]};'
@@ -503,7 +508,8 @@ class AIPanel(QWidget):
         _t = _tok().COLORS
         self._append_to_view(
             f'<div style="margin: 4px 0; padding: 4px 8px; background: {_t["light_system_bg"]};'
-            f' border-radius: 4px; font-size: 8pt; color: {_t["accent_warm"]};">{text}</div>')
+            f' border-radius: 4px; font-size: 8pt; color: {_t["accent_warm"]};'
+            f'">{_esc(text)}</div>')
 
     # ── 执行步骤卡（字段语义对齐 cpp StepResult / mobile TaskStep）─────
 

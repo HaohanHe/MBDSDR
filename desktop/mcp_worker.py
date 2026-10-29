@@ -227,7 +227,10 @@ class MCPWorker(QObject):
 
         try:
             if self.client and self.connected:
-                result = self._real_tool(tool_name, params)
+                # 与轮询、AI 线程同步转发共用同一把锁：三条路径都走同一条
+                # WebSocket，不串行会把响应 id 配错到别的调用上。
+                with self._call_lock:
+                    result = self._real_tool(tool_name, params)
             else:
                 result = {"error": "未连接"}
 
