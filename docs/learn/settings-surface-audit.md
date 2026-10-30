@@ -40,10 +40,18 @@
 
 1. **C++ 侧工具面 ↔ UI 全量对拍未做完**。已提取 16 个 `set_*` 工具（`set_bandwidth`/`set_cdcss`/`set_color_map`/`set_ctcss`/`set_doppler_compensation`/`set_fft_params`/`set_lrpt`/`set_mode`/`set_network_audio_sink`/`set_noise_blanker`/`set_squelch`/`set_vfo_armed`/`set_vfo_bandwidth`/`set_vfo_frequency`/`set_vfo_mode`/`set_vna_sweep`）并逐个在 `cpp/src/ui/` 核对，本轮抽查的项均找到入口（见上表）；但**反向**（UI 有控件、工具面无对应）与**语义反人类**（范围/默认值/单位与硬件能力不一致）的全量清单未完成。
 2. **本机无 Qt6/CMake 工具链，C++ 侧改动无法编译验证**。本轮未改 C++ 源码；上表 C++ 证据均为只读审计结论。
-3. **两套带宽语义并存**：`settings.bandwidth_hz`（VFO 带宽，0=随模式自动）与 `module_panel.bw_spin`（硬件带宽，100–250000 Hz，不含 0）语义不同、UI 上无区分说明——用户看到两个"带宽"会困惑。属于"设置不符合人类"的残留项，待统一命名或补说明。
-4. **三套配置**（`desktop_settings.json` / `~/.mbdsdr/gui_config.json` / C++ QSettings）键集合仍有漂移：`current_freq_mhz`/`current_mode`/音量/瀑布等仍在 gui_config，与 `frequency_hz`/`demod_mode` 语义重叠但不同名。本轮只收敛了 theme/gnss 三键，其余待做一次性键迁移。
+3. **两套带宽语义并存**：`settings.bandwidth_hz`（VFO 带宽，0=随模式自动）与 `module_panel.bw_spin`（硬件带宽，100–250000 Hz，不含 0）语义不同、UI 上无区分说明——用户看到两个"带宽"会困惑。**已销账**（`4cd0881`）：两处命名区分为「硬件带宽 / VFO 带宽」+ 互指 tooltip；硬件带宽 0=自动改为显式「自动」档。
+4. **三套配置键漂移**：`current_freq_mhz`/`current_mode`/音量/瀑布在 gui_config 与 settings 双写双读（gui_config 启动 100ms 后恢复会覆盖 settings 值）。**已销账**（`d12910e`）：四键单源化到 settings（`current_freq_mhz` 是 MHz，迁移时 ×1e6 转 Hz），gui_config 不再写，旧值一次性迁移回写（幂等），音量/瀑布补 settings.set 写路径。另修卫星跟踪调谐的控制面板显示死路径（写不存在的 `freq_spin` 被 except pass 吞掉，改走 `set_frequency_hz`）。
 
-## 四、结论
+## 四、第二轮（同日续，三路并行；下列五~八为 desktop 语义线详账）
+
+| 线 | 产出 | 提交 |
+|---|---|---|
+| C++ 反向对拍（UI 有控件 → 工具面无对应） | **D1 有 UI 无工具 45 条**（增益/采样率工具面为零、解调模式三层错位 15/12/6 致 BPSK/QPSK/ADS-B 工具不可达、fft_size 假成功、AI 连不上 VNA、发射类零确认）、D2 语义不一致 9 条、D3 反人类 8 条。全量清单见 `docs/learn/cpp-tool-ui-reverse-audit.md` | `81f8d4d` |
+| desktop 语义反人类（E1 魔法值 / E2 单位 / E3 范围 / E4 文案 / E5 失败提示） | 23 处已修（含新坐实：枚举错误被"未发现设备"空态覆盖、卫星下行频率上限卡死仓库自己的 LRO 2271 MHz）；10 文件 32 处 `{e}`/traceback 泄漏走 clean_exc；只报未修 5 条（含增益范围硬编码需设备动态档位） | `4cd0881` |
+| 配置键漂移收敛 + 死路径 | 四键单源化（`d12910e`，见上文第 4 条） | `d12910e` |
+
+诚实性纪律执行情况：三路均带"核实不成立"分账（合计 10 条），未把做对的说成缺陷；断言随修复更新（`test_gui_config_honesty` 两条契约变更）而非放宽换绿。
 
 用户指出的三类问题全部坐实且已有实修：反人类的"改了不落盘"两处、"有后端没前端"一处、"有前端没后端"两处（含一处我自己犯的死槽）。C++ 端抽查项多为做对的（增益档位、色图/FFT/噪声消除入口），**不能因"要找问题"而把做对的说成缺陷**。剩余缺口如实列在第三节，未闭环的不声称已闭环。
 
