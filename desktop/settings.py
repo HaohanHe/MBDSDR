@@ -39,6 +39,13 @@ DEFAULTS: Dict[str, Any] = {
     # 触屏/Surface/平板二合一适配："auto"=自动检测 QTouchDevice，
     # "on"=强制触屏模式（放大触控目标/手势），"off"=强制鼠标模式。
     "touch_mode": "auto",
+    # 服务开关（远程控制 TCP / Web 服务）。默认全关：监听端口属于对外暴露面，
+    # 必须由用户显式勾选才开启。持久化"上次是否启用"，重启后按用户上次的
+    # 显式意图恢复——改了重启就丢属于反人类，与"默认关闭"并不冲突。
+    "rc_enabled": False,            # 远程控制 TCP（GQRX/hamlib 风格）开关
+    "rc_port": 7356,                # 远程控制监听端口
+    "web_enabled": False,           # Web 服务（HTTP + WebSocket）开关
+    "web_port": 8080,               # Web 服务监听端口
     # UI 语言（i18n）：zh/en/ja。源语言 zh（tr() 源文即中文）；en/ja 由
     # desktop/i18n/*.qm 提供（Qt Linguist 管线），未知值诚实回退 zh。
     "ui_language": "zh",
@@ -46,8 +53,9 @@ DEFAULTS: Dict[str, Any] = {
 
 #: 数值字段（写盘前做类型归一，防止 JSON 里混入字符串导致下游类型错误）
 _FLOAT_KEYS = ("frequency_hz", "gain_db", "bandwidth_hz", "sample_rate_hz")
-_INT_KEYS = ("gnss_baudrate",)
-_BOOL_KEYS = ("agc_enabled",)
+#: 端口等整数字段：不登记会被 _coerce 落成字符串，下游 int() 再炸一次
+_INT_KEYS = ("gnss_baudrate", "rc_port", "web_port")
+_BOOL_KEYS = ("agc_enabled", "rc_enabled", "web_enabled")
 
 
 def default_config_path() -> str:

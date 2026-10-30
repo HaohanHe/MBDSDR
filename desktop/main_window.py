@@ -45,7 +45,7 @@ import numpy as np
 from PySide6.QtCore import (
     Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
 )
-from PySide6.QtGui import QAction, QKeySequence, QFont, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QFont, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QStatusBar, QToolBar, QMenuBar, QMenu, QLabel,
@@ -589,6 +589,17 @@ class MainWindow(QMainWindow):
         """
         self._apply_touch_adaptation()
 
+    def _set_touch_mode(self, mode: str) -> None:
+        """触屏模式显式切换入口（视图→触屏模式）：落 settings 并重新适配。
+
+        这是"设置面板/菜单的显式选择"那个此前缺失的入口；自动检测结果
+        变化不走这里，不会覆盖用户的 auto 偏好。
+        """
+        if mode not in ("auto", "on", "off"):
+            return
+        self.settings.set("touch_mode", mode)
+        touch_manager().set_from_settings(mode)
+
     # ========================================================================
     # UI 构建
     # ========================================================================
@@ -628,6 +639,22 @@ class MainWindow(QMainWindow):
                 action.setChecked(True)
             action.triggered.connect(lambda checked, name=theme_name: self._apply_theme(name))
             theme_menu.addAction(action)
+
+        # 触屏模式（auto/on/off）：补上此前缺失的切换入口。设计上 _on_touch_mode_
+        # changed 早已预留重新适配路径，但一直没有 UI，用户只能手改 JSON 文件。
+        touch_menu = view_menu.addMenu("触屏模式")
+        touch_group = QActionGroup(self)
+        touch_group.setExclusive(True)
+        current_tm = str(self.settings.get("touch_mode", "auto") or "auto")
+        for mode_key, label in (("auto", "自动检测"), ("on", "强制触屏"),
+                                ("off", "强制鼠标")):
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setChecked(current_tm == mode_key)
+            act.triggered.connect(
+                lambda _c, m=mode_key: self._set_touch_mode(m))
+            touch_group.addAction(act)
+            touch_menu.addAction(act)
 
         view_menu.addSeparator()
 
@@ -4176,10 +4203,14 @@ class MainWindow(QMainWindow):
                 self.bookmark_panel = None
         if ServiceSettingsPanel is not None:
             try:
-                self.service_settings_panel = ServiceSettingsPanel()
+                self.service_settings_panel = ServiceSettingsPanel(
+                    settings=self.settings)
                 self.service_settings_dock = self._add_right_tab(
                     "服务设置", self.service_settings_panel,
                     "service_settings_dock")
+                # UI 就绪后再按上次持久化的显式意图恢复服务（默认全关不变；
+                # 只恢复用户上次自己勾过的，避免"勾了重启又关"反人类行为）。
+                self.service_settings_panel.restore_enabled_services()
             except Exception:  # noqa: BLE001
                 self.service_settings_panel = None
 
@@ -5300,6 +5331,9 @@ class MainWindow(QMainWindow):
         baud = int(baud_combo.currentData())
         self._gnss_port = port
         self._gnss_baudrate = baud
+        # 权威持久化源是 settings（desktop_settings.json）；gui_config 不再写
+        self.settings.set("gnss_port", port)
+        self.settings.set("gnss_baudrate", int(baud))
         # 若已连着旧口，先干净断开再按新参数重开（reader 内部自带热插拔重连）
         try:
             self._gnss.stop()
@@ -5587,12 +5621,13 @@ class MainWindow(QMainWindow):
                     "y": self.y(),
                     "maximized": self.isMaximized(),
                 },
-                "theme": self._current_theme,
                 "observer_lat": self._observer_lat,
                 "observer_lon": self._observer_lon,
-                "gnss_port": self._gnss_port,
-                "gnss_baudrate": self._gnss_baudrate,
             }
+            # theme / gnss_port / gnss_baudrate 的权威源是 settings
+            # （desktop_settings.json），此处不再写——双写会让读写不对称
+            # （改了重启读到旧值）。旧 gui_config 里的残留值由 _load_gui_config
+            # 一次性迁移进 settings 并回写。
             cp = getattr(self, "control_panel", None)
             if cp is not None:
                 freq_hz = getattr(cp, "_freq_hz", None)
@@ -5650,18 +5685,34 @@ class MainWindow(QMainWindow):
             # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标
             self._observer_lat = config.get("observer_lat")
             self._observer_lon = config.get("observer_lon")
-            # 恢复 GNSS 串口配置（port="" 留空 → 连接时 auto_detect）
+            # 恢复 GNSS 串口配置（port="" 留空 → 连接时 auto_detect）。
+            # 权威源是 settings；gui_config 里的 gnss_* 是旧双写残留，仅在
+            # settings 仍为默认时一次性迁移并回写（读旧键→迁→回写，幂等）。
             try:
-                gp = config.get("gnss_port", "")
-                self._gnss_port = str(gp) if gp else ""
-                gb = config.get("gnss_baudrate", 9600)
-                self._gnss_baudrate = int(gb)
+                s_port = str(self.settings.get("gnss_port", "") or "")
+                s_baud = int(self.settings.get("gnss_baudrate", 9600))
+                legacy_port = config.get("gnss_port", "")
+                legacy_baud = config.get("gnss_baudrate", None)
+                if not s_port and legacy_port:
+                    s_port = str(legacy_port)
+                    self.settings.set("gnss_port", s_port)
+                if legacy_baud is not None and s_baud == 9600 \
+                        and int(legacy_baud) != 9600:
+                    s_baud = int(legacy_baud)
+                    self.settings.set("gnss_baudrate", s_baud)
+                self._gnss_port = s_port
+                self._gnss_baudrate = s_baud
             except Exception:
                 pass
             # 坐标就位后同步 SatelliteTracker 与天空图空状态/角标
             self._apply_observer_location()
-            # 恢复主题
-            theme = config.get("theme", "default")
+            # 恢复主题：权威源是 settings；gui_config 旧 theme 仅在 settings
+            # 仍为默认时迁移（避免双写导致改了重启回退）。
+            theme = str(self.settings.get("theme", "default") or "default")
+            legacy_theme = config.get("theme", "default")
+            if theme == "default" and legacy_theme and legacy_theme != "default":
+                theme = legacy_theme
+                self.settings.set("theme", theme)
             if theme != self._current_theme:
                 self._apply_theme(theme)
             # 恢复频率/模式/音量/瀑布：只回填真实键，缺键不编造。

@@ -237,8 +237,6 @@ ALLOWED_UNCONNECTED = {
     "weather_panel.py:self.freq_edit": "开始解码读 text()",
     "weather_panel.py:self.sym_edit": "开始解码读 text()",
     "weather_panel.py:self.sr_edit": "开始解码读 text()",
-    "settings_panel.py:self.rc_port": "启动远程控制读 value()（端口不落盘另列 C 类台账）",
-    "settings_panel.py:self.web_port": "启动 Web 服务读 value()（端口不落盘另列 C 类台账）",
     "main_window.py:left_tab": "QTabWidget 页签容器，不做业务接线",
     "main_window.py:right_tab": "QTabWidget 页签容器，不做业务接线",
     "main_window.py:sr_combo": "连接对话框：Accepted 后统一读 currentData()",
