@@ -69,6 +69,12 @@ public:
         std::lock_guard<std::mutex> lk(frameMu_);
         return latestFrame_.centerFreqHz;
     }
+    // Latest frame's sample rate (Hz). Honest 0 when no frame has ever arrived.
+    // Used by export_iq_segment's seconds -> sample_count conversion (D2-7).
+    double latestSampleRateHz() const {
+        std::lock_guard<std::mutex> lk(frameMu_);
+        return latestFrame_.sampleRateHz;
+    }
     // Local-maxima peaks over the latest FFT, sorted by strength desc.
     // Each entry: {freq_hz, dbfs}. Honest empty when no frame / flat noise.
     struct Peak { double freq_hz; float dbfs; };

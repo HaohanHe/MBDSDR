@@ -56,7 +56,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 90);
+    QCOMPARE(specs.size(), 109);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -93,7 +93,8 @@ void TestToolSchema::tuneFrequencyBounds() {
     QCOMPARE(req.at(0).toString(), QString("freq_hz"));
 }
 
-// set_mode: enum is the exact 6-mode set, mode required.
+// set_mode: enum is the exact 12-mode ControlHub token set (single source,
+// D2-1), mode required.
 void TestToolSchema::setModeEnum() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
     const ToolSchemaSpec* s = findSpec(specs, "set_mode");
@@ -104,7 +105,8 @@ void TestToolSchema::setModeEnum() {
     QCOMPARE(m.value("type").toString(), QString("string"));
     QSet<QString> got;
     for (const QJsonValue& v : m.value("enum").toArray()) got.insert(v.toString());
-    QCOMPARE(got, QSet<QString>({"AM", "NFM", "WFM", "USB", "LSB", "CW"}));
+    QCOMPARE(got, QSet<QString>({"AM", "NFM", "WFM", "USB", "LSB", "CW",
+                                 "POCSAG", "m17", "VOR", "ACARS", "NAVTEX", "RAW"}));
     QCOMPARE(buildToolSchema(*s).value("required").toArray().at(0).toString(),
              QString("mode"));
 }
@@ -160,12 +162,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "（读回用 get_status）。")},
         {"set_mode", QString::fromUtf8(
             "写入：把解调模式切换为指定模式。属于写动作，手动模式下被拦截。"
-            "前置条件: mode 必须提供; schema 枚举列出 6 种常用模式（AM/NFM/WFM/USB/LSB/CW），"
-            "大小写不敏感，内部统一转规范大写名。"
-            "失败恢复: 白名单外的模式名明确拒绝为「未知解调模式」——未识别的模式不会假报生效; "
-            "按 schema 枚举重试; 引擎控制hub白名单另含 POCSAG/m17/VOR/ACARS/NAVTEX/RAW，"
-            "传入这些也会被接受并以规范名回显，但需确认对应解调链路已配置; "
-            "多 VFO 场景改用 set_vfo_mode 定位具体信道。"
+            "前置条件: mode 必须提供; schema 枚举与 ControlHub 白名单同源（12 种："
+            "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX/RAW），"
+            "按枚举原样取值（注意 m17 是小写）——参数校验层按枚举精确匹配。"
+            "失败恢复: 枚举外的模式名被参数校验层拒绝; 执行层另有大小写不敏感匹配并"
+            "回显规范名，但不要依赖它绕过枚举——未识别的模式不会假报生效; "
+            "UI 另有 BPSK/QPSK/ADS-B 本地模式，任何工具面均不可达（引擎白名单不含），"
+            "需要时只能在桌面端点选; 多 VFO 场景改用 set_vfo_mode 定位具体信道。"
             "副作用: 立即改变解调模式（DSP 状态），音频输出与瀑布显示随之变化。"
             "能力边界: 只改当前选中信道的解调模式; 不改频率/带宽，也不读回状态（读回用 get_status）。")},
         {"start_recording", QString::fromUtf8(
@@ -193,7 +196,8 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "峰值保持 -200 dBFS 初值。"
             "失败恢复: 本工具不因无信号报错——hits[0].dbfs 很低（≈-200）即该段无强信号或"
             "频段方向给反了; 检查频段方向与信号源连接后重扫。"
-            "副作用: 每步约 20 ms 驻留，细步进大频段会很慢; 扫描结束后调谐停在峰值点。"
+            "副作用: 每步约 20 ms 固定驻留（不同于扫描面板的可调驻留 100..2000 ms，"
+            "两个「扫频」口径不同）; 细步进大频段会很慢; 扫描结束后调谐停在峰值点。"
             "能力边界: 只报最强单峰; 合成测试信号上峰值为固定基带偏音（返回体 synthetic=true "
             "已标注），非真实电台命中; 要全段峰清单用 export_peaks_csv。")},
         {"set_bandwidth", QString::fromUtf8(
@@ -302,7 +306,9 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "（.sigmf-data + .sigmf-meta）后即返回。区别于 start_recording 的连续录制："
             "这是按需导出有界窗口。属于写动作，手动模式下被拦截。"
             "前置条件: 接收机已有可用的 IQ 数据流（源在运行、有硬件或已开离线文件）；"
-            "sample_count 缺省 65536，引擎按 [1024, 16777216] 诚实钳位; "
+            "长度二选一：sample_count（复样本数，缺省 65536，引擎按 [1024, 16777216] 诚实钳位）"
+            "或 seconds（时长秒，0.1..30，与 UI 导出对话框同一口径，按 当前采样率×秒 折算样本数，"
+            "两者同给时 sample_count 优先）; "
             "tune_hz 缺省/负值=保持当前中心频率。"
             "失败恢复: 无 IQ 数据或源 EOF 时诚实 ok:false 并说明原因，绝不生成空文件; "
             "tune_hz 非数字时明确拒绝。"
@@ -368,8 +374,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：设置静噪（enabled 开关、threshold_db 门限、auto 自动链路）。"
             "属于写动作，手动模式下被拦截。"
             "前置条件: 三个字段全部可选，至少提供其一才有意义（全缺则不下发任何变更）; "
-            "threshold_db 为 dB 门限数值。"
-            "失败恢复: 类型不符的字段被静默跳过而非报错（如 threshold_db 传了字符串）——"
+            "threshold_db 是 48 kHz 音频块 RMS dBFS 域门限，范围 [-100, -20]"
+            "（与 UI 滑杆同域同界），越负越灵敏。"
+            "失败恢复: threshold_db 超出 [-100, -20] 由参数校验层明确拒绝（不静默夹值）; "
+            "其余类型不符的字段被静默跳过而非报错（如 enabled 传了字符串）——"
             "发现设置未生效时用 get_squelch_status 读回真实值核对，不要反复重试同一入参。"
             "副作用: 立即改变引擎静噪状态，音频输出（静音/放音）随之变化。"
             "能力边界: 只改静噪参数，不影响 CTCSS/CDCSS 亚音门控（分别用 set_ctcss/set_cdcss）; "
@@ -472,11 +480,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "能力边界: 只读状态控制层读数，不出图像/帧; 开关用 set_lrpt。")},
         {"set_vna_sweep",
          QString::fromUtf8(
-            "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start，"
-            "points 为正整数）。宽扫建议 ±5~10%，窄扫 ±1%（经验范围）。"
+            "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start）。"
+            "宽扫建议 ±5~10%，窄扫 ±1%（经验范围）。"
             "属于写动作，手动模式下被拦截。"
-            "前置条件: 三个参数都必须提供且为数字; points 为正整数; stop_hz 大于 start_hz。"
-            "失败恢复: 任一缺失/非数字、stop<=start 或 points 非正时明确 ok:false——"
+            "前置条件: 三个参数都必须提供且为数字; 频率范围 50 kHz..999.999999 MHz"
+            "（仪器实际工作域，0 Hz 无物理意义）; points 为 1..401 整数（面板硬上限）; "
+            "stop_hz 大于 start_hz。"
+            "失败恢复: 任一缺失/非数字、越界、stop<=start 或 points 越界时明确 ok:false——"
             "改正后重试; 无设备时参数仍被校验，合法但不下发（applied=false），"
             "不伪造连接——先接好设备再调。"
             "副作用: 设备已连接时立即向 NanoVNA 下发新扫频参数（硬件状态），"
@@ -649,12 +659,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "能力边界: 只调谐到书签频率，不改书签本身; 书签列表用 list_bookmarks 读取。")},
         {"delete_bookmark",
          QString::fromUtf8(
-            "写入：删除指定下标书签。属于写动作，手动模式下被拦截。"
-            "前置条件: index 必须是 0 起整数下标，且书签管理器已注入。"
-            "失败恢复: index 越界时错误信息含真实书签总数——按总数改下标重试。"
+            "写入：删除指定下标书签（需显式确认）。属于写动作，手动模式下被拦截。"
+            "前置条件: index 必须是 0 起整数下标，且书签管理器已注入; "
+            "confirm 必须显式传 true——书签删除无撤销，插队移位也容易误删，"
+            "所以不接受默许式删除。"
+            "失败恢复: confirm 非 true 时明确拒绝（书签不动）; index 越界时错误信息含"
+            "真实书签总数——按总数改下标重试。"
             "副作用: 真删除书签（无回收站/无撤销接口），返回值 remaining 为删除后剩余数。"
-            "能力边界: 只能删已注入管理器的书签; 不确定下标时先用 tune_to_bookmark "
-            "的越界错误探测总数，或让用户确认。")},
+            "能力边界: 只能删已注入管理器的书签; 不确定下标时先用 list_bookmarks 核对。")},
         {"list_vfos",
          QString::fromUtf8(
             "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。"
@@ -712,9 +724,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_vfo_mode",
          QString::fromUtf8(
             "写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode）。"
-            "前置条件: index 或 id 必须提供其一；mode 取值见 ControlHub 模式表："
-            "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX（大小写不敏感）。"
-            "失败恢复: 目标缺失/越界或 mode 不在表中时返回明确错误（越界附 VFO 总数）——"
+            "前置条件: index 或 id 必须提供其一；mode 取值与 set_mode 同源"
+            "（12 种：AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX/RAW），"
+            "按枚举原样取值（注意 m17 是小写）——参数校验层按枚举精确匹配。"
+            "失败恢复: 目标缺失/越界或 mode 不在枚举中时返回明确错误（越界附 VFO 总数）——"
             "用 list_vfos 核对后重试。"
             "副作用: 该 VFO 的解调模式立即切换，音频输出随之改变。"
             "能力边界: 只改已存在 VFO 的模式; 不影响其他 VFO。"
@@ -722,11 +735,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_vfo_bandwidth",
          QString::fromUtf8(
             "写入：设置指定 VFO 的信道带宽（index 或 id 二选一 + bandwidth_hz）。"
-            "前置条件: index 或 id 必须提供其一；bandwidth_hz 必须为正数（Hz）。"
-            "失败恢复: 目标缺失/越界或带宽非正时返回明确错误（越界附 VFO 总数）——"
-            "补齐后重试。"
+            "前置条件: index 或 id 必须提供其一；bandwidth_hz 在 100..2000000 Hz 之间"
+            "（与 UI 拖边/微调/预设同一合法域，含 ADS-B 2 MHz 预设）。"
+            "失败恢复: 目标缺失/越界或带宽越出 [100, 2000000] 时返回明确错误"
+            "（越界附 VFO 总数）——补齐后重试。"
             "副作用: 该 VFO 的滤波器带宽立即改变，音频随之变化。"
-            "能力边界: 只改已存在 VFO 的带宽; 可用范围由硬件/引擎决定。"
+            "能力边界: 只改已存在 VFO 的带宽; 具体滤波形态由引擎决定。"
             "属于写动作，手动模式下被拦截。")},
         {"list_recordings",
          QString::fromUtf8(
@@ -758,13 +772,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_fft_params",
          QString::fromUtf8(
             "写入：设置频谱 FFT 参数（fft_size/window/average）。"
-            "window/average 使用字符串枚举（Hann/Flattop/Blackman、Off/Slow/Fast）。"
+            "window/average 使用字符串枚举（Hann/FlatTop/Blackman、Off/Slow/Fast）。"
             "属于写动作，手动模式下被拦截。"
-            "前置条件: fft_size 必填数字; window/average 可选（省略保持当前值）; "
-            "LLM/MCP 校验路径只接受字符串枚举。"
-            "失败恢复: fft_size 缺失或非数字时明确报错; 注意引擎实收只有 1024/2048/4096 三档——"
-            "传入其他值（如 8192）会被静默忽略且回显当前值而非请求值，发现未生效时以 "
-            "get_spectrum_status 读回为准; window/average 传无法识别的字符串时回落 Hann/Off。"
+            "前置条件: fft_size 必填，且只接受 1024/2048/4096 三档（引擎实收集合）; "
+            "window/average 可选（省略保持当前值）; LLM/MCP 校验路径只接受字符串枚举。"
+            "失败恢复: fft_size 缺失/非数字/不在三档内时明确报错（不静默忽略、"
+            "不回显当前值冒充生效）——按 1024/2048/4096 重试; "
+            "window/average 传无法识别的字符串时回落 Hann/Off"
+            "（执行层对 window 大小写不敏感，旧拼写 Flattop 也识别）。"
             "副作用: 立即改变 FFT 点数/窗函数/平均模式，频谱与瀑布显示随之变化。"
             "能力边界: 模型侧只接受字符串枚举——原始整数 0/1/2 是 ControlHub/HTTP "
             "内部通道键，经 LLM/MCP 校验路径传入会被类型校验拒绝; 读回用 get_spectrum_status。")},
@@ -784,7 +799,7 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：返回频谱当前 FFT 参数真实值（fft_size/window/average）。"
             "前置条件: 无（任意时刻可调）。"
             "失败恢复: 无失败路径——值直接读引擎，不编造; 与预期不符时以本工具读回为准"
-            "（set_fft_params 对非 1024/2048/4096 的 fft_size 会静默忽略并回显当前值）。"
+            "（set_fft_params 对非 1024/2048/4096 的 fft_size 现在明确报错拒绝，不再静默忽略）。"
             "副作用: 无（只读，不改写任何硬件/设置/文件状态）。"
             "能力边界: 只读不改; 修改 FFT 参数用 set_fft_params。")},
         // Phase55/58: two appended tools (must match tool_schema.cpp on-wire order).
@@ -1107,6 +1122,166 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "预测过境用 predict_passes。")},
 
 
+
+
+        // D1 tool-gap fill (2026-10-30 reverse audit): verbatim pairs for the
+        // 19 new gated writes (extracted from tool_schema.cpp to stay byte-identical).
+        {"set_gain",
+         QString::fromUtf8(
+            "写入：设置接收链增益（dB）。属于写动作，手动模式下被拦截。"
+            "前置条件: gain_db 必填，范围 -90.0..49.6（负值=RF 衰减，与 UI 滑杆同一语义）。"
+            "失败恢复: 越界由参数校验层明确拒绝（不静默夹值）——改到范围内重试。"
+            "副作用: 立即下发硬件增益（请求值会被硬件就近取整到实际档位，"
+            "可用 get_capabilities 的 gains_db 看实测档表）。"
+            "能力边界: 只设增益; AGC 开启时手动档可能被覆盖（用 set_agc 关 AGC）; "
+            "读回用 get_status（未暴露增益字段时以硬件为准）。")},
+        {"set_sample_rate",
+         QString::fromUtf8(
+            "写入：设置 IQ 采样率（Hz）。属于写动作，手动模式下被拦截。"
+            "前置条件: sample_rate_hz 必填，只接受枚举四档"
+            "（1024000 / 2048000 / 2400000 / 3200000，与 UI 下拉同一能力表）。"
+            "失败恢复: 枚举外的采样率被参数校验层明确拒绝（不静默改写）——"
+            "按枚举取值重试。"
+            "副作用: 立即重配硬件采样率与抽取链，频谱/音频显示随之变化。"
+            "能力边界: 只设采样率; 抽取系数另用 set_decimation; "
+            "读回用 get_status（未暴露采样率字段时以硬件为准）。")},
+        {"set_decimation",
+         QString::fromUtf8(
+            "写入：设置前端抽取系数（抗混叠抽取，关=1）。属于写动作，手动模式下被拦截。"
+            "前置条件: factor 必填，取 1/2/4/8（与 UI 下拉 关/×2/×4/×8 一致）。"
+            "失败恢复: 枚举外的系数被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变前端抽取链，等效基带带宽随系数收窄。"
+            "能力边界: 只设抽取; 采样率另用 set_sample_rate。")},
+        {"set_direct_sampling",
+         QString::fromUtf8(
+            "写入：设置 RTL-SDR 直采模式（绕过调谐器）。属于写动作，手动模式下被拦截。"
+            "前置条件: mode 必填，取 off/i/q（与 UI 下拉 关/I/Q 一致）。"
+            "失败恢复: 枚举外的模式被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即切换硬件采样路径，频率语义与常规调谐不同（直采无调谐器增益）。"
+            "能力边界: 只设直采开关; 天线接 BNC/I/Q 输入由用户自理。")},
+        {"set_offset_tuning",
+         QString::fromUtf8(
+            "写入：开启/关闭偏移调谐（避开本振泄漏）。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即改变调谐策略，中心频率显示语义随之偏移（状态仍以 get_status 为准）。"
+            "能力边界: 只设偏移调谐开关。")},
+        {"set_agc",
+         QString::fromUtf8(
+            "写入：设置 RTL AGC / Tuner AGC 开关（与 UI 两个复选框同一状态）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: rtl_agc 与 tuner_agc 至少提供其一（全缺则不下发任何变更）。"
+            "失败恢复: 非布尔字段被静默跳过——用 get_status/硬件读回核对; "
+            "全缺入参视为无操作。"
+            "副作用: 立即改变 AGC 状态; Tuner AGC 开启时手动增益档可能被覆盖。"
+            "能力边界: 只设 AGC 开关; 增益档另用 set_gain。")},
+        {"set_bias_tee",
+         QString::fromUtf8(
+            "写入：开启/关闭 Bias-T 天线馈电（硬件供电）。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即向天线口输出/切断馈电（约 5 V）——为不接受馈电的设备"
+            "（天线/滤波器/其他接收机）上电可能损坏，确认线路后再开。"
+            "能力边界: 只设 Bias-T 开关; 发射类操作不在本工具面。")},
+        {"set_force_mono",
+         QString::fromUtf8(
+            "写入：开启/关闭强制单声道（WFM 立体声混合置 0）。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即改变音频混合（立体声→单声道），音频输出随之变化。"
+            "能力边界: 只设单声道开关; 不改解调模式。")},
+        {"set_anr",
+         QString::fromUtf8(
+            "写入：设置 ANR 音频降噪（开关+强度）。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔; strength_pct 可选（0..100，与 UI 滑杆同刻度，"
+            "引擎内部折算 0..1，100=最强抑制）。"
+            "失败恢复: strength_pct 越界由参数校验层明确拒绝（不静默夹值）——"
+            "改到 0..100 重试; enabled 非布尔同样被校验层拒绝。"
+            "副作用: 立即改变音频降噪状态/强度，音频输出随之变化。"
+            "能力边界: 只设 ANR; 不改静噪/亚音门控。")},
+        {"set_recording_target",
+         QString::fromUtf8(
+            "写入：设置录制对象（IQ SigMF 或音频 WAV）。属于写动作，手动模式下被拦截。"
+            "前置条件: target 必填，取 iq_sigmf/audio_wav。"
+            "失败恢复: 枚举外的目标被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变 start_recording 的落盘形态（下一段录制生效）。"
+            "能力边界: 只设录制对象; 目录/模板/立体声分别用 "
+            "set_recording_dir/set_recording_template/set_recording_stereo。")},
+        {"set_recording_dir",
+         QString::fromUtf8(
+            "写入：设置录制目录。属于写动作，手动模式下被拦截。"
+            "前置条件: dir 必填非空字符串（绝对/相对路径均可，目录须可写）。"
+            "失败恢复: 空串被明确拒绝——改正后重试; 写入失败在录制时诚实报错，"
+            "不会假装落盘。"
+            "副作用: 下一段录制写入新目录; 进行中的录制不受影响。"
+            "能力边界: 只设目录; 读回用 get_recording_state。")},
+        {"set_recording_template",
+         QString::fromUtf8(
+            "写入：设置录制文件名模板。属于写动作，手动模式下被拦截。"
+            "前置条件: template 必填非空字符串。"
+            "失败恢复: 空串被明确拒绝——改正后重试。"
+            "副作用: 下一段录制按新模板命名; 进行中的录制不受影响。"
+            "能力边界: 只设文件名模板; 目录另用 set_recording_dir。")},
+        {"set_recording_stereo",
+         QString::fromUtf8(
+            "写入：开启/关闭录制立体声。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即改变音频录制声道形态（下一段录制生效）。"
+            "能力边界: 只设立体声开关; 录制对象另用 set_recording_target。")},
+        {"set_recording_ignore_squelch",
+         QString::fromUtf8(
+            "写入：设置录制是否忽略静噪（静噪关断时也继续录）。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即改变录制对静噪状态的响应。"
+            "能力边界: 只设该开关; 静噪本身用 set_squelch。")},
+        {"set_recording_max_segment",
+         QString::fromUtf8(
+            "写入：设置录制分段上限（秒）。属于写动作，手动模式下被拦截。"
+            "前置条件: seconds 必填，范围 5..3600（引擎实界；UI 面板取 30..3600）。"
+            "失败恢复: 越界由参数校验层明确拒绝（不静默夹值）——改到范围内重试。"
+            "副作用: 录制到达上限自动分段换文件。"
+            "能力边界: 只设分段上限; 触发式分段用 set_gated_recording。")},
+        {"set_gated_recording",
+         QString::fromUtf8(
+            "写入：开启/关闭触发式分段录制（按信号门控）。属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即改变录制分段策略（门控开=按信号分段）。"
+            "能力边界: 只设触发式分段开关; 值守录制（信号触发起停）用 set_watch_recording。")},
+        {"set_watch_recording",
+         QString::fromUtf8(
+            "写入：设置值守录制（信号触发录制）开关/触发门限/前滚/结束延时。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: enabled/threshold_db/preroll_ms/hang_ms 至少提供其一"
+            "（全缺则不下发任何变更）; threshold_db 为 RSSI 触发门限（dBFS，-100..-20）; "
+            "preroll_ms 前滚 100..2000; hang_ms 结束延时 300..10000。"
+            "失败恢复: 任一越界由参数校验层明确拒绝（不静默夹值）——改到范围内重试; "
+            "类型不符的字段被静默跳过。"
+            "副作用: 立即改变值守录制行为（门控起停、带前滚落盘）。"
+            "能力边界: 只设值守录制; 连续录制用 start_recording; 读回用 get_recording_state。")},
+        {"set_station_position",
+         QString::fromUtf8(
+            "写入：设置本站位置（经纬度/海拔）并持久化（AiConfig）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: lat_deg（-90..90）与 lon_deg（-180..180）必填; "
+            "alt_m 可选（-500..9000 米）。"
+            "失败恢复: 越界由参数校验层明确拒绝（不静默夹值）; 持久化失败诚实 ok:false。"
+            "副作用: 写入 AiConfig 并同步 ADS-B 参考点; predict_passes 的缺省站点随之更新"
+            "（单次调用仍可用 per-call 参数覆盖）。"
+            "能力边界: 只设本站位置; 卫星多普勒补偿还依赖过境捕获"
+            "（set_doppler_compensation 的 available 回读为准），不是设了位置就自动可用。")},
+        {"vna_connect",
+         QString::fromUtf8(
+            "写入：连接/断开 NanoVNA 串口（此前只能人在 UI 点「连接」，AI 够不着）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: action=connect（缺省）时 port 必填非空"
+            "（如 /dev/ttyACM0 或 COM3）; action=disconnect 不需要 port。"
+            "失败恢复: 连接失败（端口不存在/被占用/握手失败）时 ok:false 并带错误串，"
+            "绝不假装已连; 用 get_vna_status 复核 connected。"
+            "副作用: 打开/关闭串口并跑版本握手（硬件状态）。"
+            "能力边界: 只管连接; 扫频参数用 set_vna_sweep，校准用 vna_calibration。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {

@@ -748,7 +748,11 @@ inline constexpr int    kVfoBoxLabelH            = 12;    // base px, scaled()
 inline constexpr double kVfoBoxLineWidth         = 1.2;   // edge/center line
 inline constexpr double kVfoBoxSelLineWidth      = 1.8;   // selected line
 inline constexpr int    kVfoMinBandwidthHz       = 100;
-inline constexpr int    kVfoMaxBandwidthHz       = 500000;
+// 2 MHz: the same ceiling as the widest named preset (kBwAdsbHz, ADS-B channel).
+// Was 500 kHz while the preset table allowed 2 MHz -- the "one range for every
+// UI surface" contract was self-contradictory (D2-6/D3-6). Raised so the drag /
+// nudge / VFO-tool band matches what the presets can actually select.
+inline constexpr int    kVfoMaxBandwidthHz       = 2000000;
 
 // Settings dialog
 inline constexpr int kSettingsMinW = 420;

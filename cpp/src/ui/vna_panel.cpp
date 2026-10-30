@@ -217,9 +217,11 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     // rail: let the field grow instead of squeezing the label column.
     sweepForm->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
     sweepForm->setHorizontalSpacing(tokens::scaled(6));
-    startSpin_ = new QSpinBox(this); startSpin_->setRange(0, 999999999);
+    // D3-5: 0 Hz has no physical meaning -- floor at the instrument's real
+    // lower bound (50 kHz), same domain as the set_vna_sweep tool bounds.
+    startSpin_ = new QSpinBox(this); startSpin_->setRange(50000, 999999999);
     startSpin_->setSingleStep(1000000); startSpin_->setValue(1000000);
-    stopSpin_ = new QSpinBox(this);  stopSpin_->setRange(0, 999999999);
+    stopSpin_ = new QSpinBox(this);  stopSpin_->setRange(50000, 999999999);
     stopSpin_->setSingleStep(10000000); stopSpin_->setValue(100000000);
     pointsSpin_ = new QSpinBox(this); pointsSpin_->setRange(1, 401);
     pointsSpin_->setValue(101);

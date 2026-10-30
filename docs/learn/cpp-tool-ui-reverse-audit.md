@@ -22,9 +22,12 @@
 
 ## 1. D1 有 UI 无工具（45 条，可执行清单）
 
+> 2026-10-30 第二轮已落地 19 条（A 全组/B1/C 全组/H1/I1），销账记录见 §7；
+> 其余 26 条仍是缺口。本表保持审计快照原貌，行数口径不变。
 建议工具名均为**新工具**（或显式扩参），照此清单即可逐条补工具。
-钉扎测试 `tests/test_cpp_tool_ui_reverse_audit.py` 断言这 45 个名字当前
-**不在** `tool_schema.cpp` 的 `s.name` 集合里；补工具后须同步更新清单与测试。
+钉扎测试 `tests/test_cpp_tool_ui_reverse_audit.py` 现行契约（§7 后已改为双账）：
+落地的 19 个名字必须在 `tool_schema.cpp` 的 `s.name` 集合与
+`agent_tools.cpp` dispatchTable 双侧在场，余 26 个必须仍缺席。
 
 ### A. 接收链硬件参数（RTL-SDR 源选项，8 条）
 
@@ -186,6 +189,72 @@ README 默认值口径：grep 未发现 README 对增益/静噪/音量等默认�
 
 - 防漂移测试：`tests/test_cpp_tool_ui_reverse_audit.py`（offscreen、纯文本解析、不碰硬件）——
   ①控件实例化点计数=143 与本清单口径一致；②D1/D2/D3 条数=45/9/8 与本清单一致；
-  ③D1 的 45 个建议工具名当前均不在 `tool_schema.cpp` 的 `s.name` 集合（补工具后须同步改清单+测试）。
-- 本清单为**静态审计结论**：本机无 Qt6/CMake 工具链，未编译未运行，不声称"已修复/已验证"；
-  未改任何 C++ 源码。所有行号以 2026-10-30 工作区为准。
+  ③D1 双账同步（§7 后）：落地 19 个名字在 `tool_schema.cpp` 与 `agent_tools.cpp`
+  双侧必须在场，余 26 个必须仍缺席。
+- 本清单 §1–§5 为**静态审计结论**（2026-10-30 上午快照）：未编译未运行。
+  所有行号以 2026-10-30 工作区为准。
+
+## 7. 销账（2026-10-30 第二轮执行）
+
+### D1：19 落地 / 26 余缺
+
+**已落地 19 条**——每条 = `tool_schema.cpp` 声明 + `agent_tools.cpp` 真执行器
+（接 `engine->` 真 setter / AiConfig 真持久化）+ dispatchTable 行 + C++ 金样三处同步
+（`test_tool_registry.cpp` kAllCxxTools/kExpectedWriteTools/109 计数、
+`test_tool_schema.cpp` 描述金样、`test_agent.cpp` 门烟测入参）：
+
+- **A 接收链硬件参数（8/8）**：`set_gain`（onSetGain，-90..49.6 dB，负=衰减）、
+  `set_sample_rate`（onSetSampleRate，枚举四档同 tokens）、`set_decimation`（1/2/4/8）、
+  `set_direct_sampling`（off/i/q→0/1/2）、`set_offset_tuning`、`set_agc`（rtl/tuner 双开关）、
+  `set_bias_tee`（描述带馈电风险警告）、`set_force_mono`
+- **B 音频（1/2）**：`set_anr`（enabled + strength_pct 0..100→引擎 0..1）
+- **C 录制参数（8/8）**：`set_recording_target`（iq_sigmf/audio_wav）、`set_recording_dir`、
+  `set_recording_template`、`set_recording_stereo`、`set_recording_ignore_squelch`、
+  `set_recording_max_segment`（5..3600 s）、`set_gated_recording`、
+  `set_watch_recording`（enabled/threshold_db/preroll_ms/hang_ms）
+- **H（1/3）**：`set_station_position`——写 AiConfig（同设置对话框持久化路径）+
+  ADS-B 参考点同步，闭合「set_doppler_compensation 要求已设本站却无工具能设」断环；
+  描述诚实注明多普勒仍需捕获过境才 available
+- **I（1/2）**：`vna_connect`（connectSerial/close，失败带 errorString，不假装已连）
+
+**仍缺口 26 条**（照原清单）：set_audio_output、set_scan_params、频谱/显示 10 条、
+set_source_type、set_spyserver、connect_gnss、set_map_layers、set_sat_pass_template、
+set_tune_step、analyze_vna_permeability、TX 四条（set_cat_control/send_cw/
+send_ax25_beacon/soapy_transmit——按 D3-2 前置要求须先有确认门再补工具）、
+set_ui_scale、set_language、set_left_groups。
+
+### D2：9/9 修复
+
+| # | 修法 |
+|---|---|
+| #D2-1 | set_mode 枚举扩为 tokens::kControlHubModes 12 种（与 CH 同源构造，不再各写各的）；描述删掉"传入也会被接受"的失实表述，如实标注 BPSK/QPSK/ADS-B 仅 UI 可达；set_vfo_mode 补同一枚举。**执行时另坐实一个潜伏 bug**：execSetMode/execSetVfoMode 用 toUpper() 匹配白名单，"m17"→"M17" 永远匹配不上（引擎解码键是精确大小写）——改为大小写不敏感匹配 + 回显 token 原拼写 |
+| #D2-2 | fft_size 从 [256,65536] 边界改为枚举 {1024,2048,4096}；执行器越档明确 ok:false，不再"静默忽略且回显当前值"假成功 |
+| #D2-3 | 窗函数：schema 枚举改 UI 拼写 "FlatTop"，mapWindowString 改大小写不敏感（旧拼写 Flattop 仍识别，test_agent 金样不断） |
+| #D2-4 | set_squelch threshold_db 补 [-100,-20] 边界（tokens 同源）+ 描述写明 48 kHz 音频块 RMS dBFS 域；执行器同步域拒（-10.0 等越域金样随修复改为 -30.0，并新增越域拒绝断言） |
+| #D2-5 | set_vna_sweep：start/stop 补 50 kHz..999999999 边界、points 补 1..401（面板硬上限），描述写明 0 Hz 无物理意义 |
+| #D2-6 | tokens::kVfoMaxBandwidthHz 500k→2M（对齐 ADS-B 预设，"one range" 注释自相矛盾消除）；set_vfo_bandwidth 补 [100,2M] 边界；拖边/微调/画布随 token 自动同界 |
+| #D2-7 | export_iq_segment 增可选 seconds（0.1..30，UI 对话框同口径），按 latestSampleRateHz() 折算样本数（sample_count 优先）；引擎补 latestSampleRateHz() 只读口 |
+| #D2-8 | scan_band 描述明写"每步约 20 ms 固定驻留，不同于扫描面板可调驻留" |
+| #D2-9 | 书签对话框 freqMhz setRange 对齐 tokens 24..1700 MHz |
+
+### D3：8/8 修复
+
+| # | 修法 |
+|---|---|
+| #D3-1 | 扫描起止（24..1700 MHz）、AI 任务参数（24e6..1700e6 Hz）三处 setRange 对齐 tokens 域 |
+| #D3-2 | radio_panel 发射前确认框：CW（WPM+文本+法规提示）、信标（呼号/路径/内容）、Soapy **在"打开设备"时确认**（PTT 是按住即发，pressed() 弹模态有卡键风险——确认点前移到进入发射就绪，返回体如实注明设计取舍） |
+| #D3-3/3-4 | 值守门限标签 "-50 dB"→"-50 dBFS"（含动态刷新两处 + 电平行"门限 %2 dBFS"）；扫描门限后缀改 " dBFS(频谱)" 区分域 |
+| #D3-5 | VNA 起/止 setRange 下限 0→50000 Hz |
+| #D3-6 | 同 D2-6（2 MHz 上限统一） |
+| #D3-7 | delete_bookmark 增必填 confirm:=true（仅真 JSON true 放行），金样四处同步（test_agent 烟测/真实删除/null store、test_control_hub），并新增"无 confirm 必拒"断言 |
+| #D3-8 | 同 D2-2 |
+
+### 声明（不虚报）
+
+- 本机无 Qt6/CMake 工具链，**上述 C++ 改动未编译未运行**。正确性由三层静态钉住：
+  Python 防漂移双账（`tests/test_cpp_tool_ui_reverse_audit.py`）、C++ 金样
+  （`test_tool_registry`/`test_tool_schema`/`test_agent`/`test_control_hub` 随修复同步）、
+  schema↔executor 双表一致性（109 = 90+19，68 写/41 读）。**待 CI 编译首验**。
+- test_agent 金样更新记录（断言随修复更新，非放宽换绿）：set_squelch 越域值
+  -10.0→-30.0 并新增越域拒绝用例；delete_bookmark 全部调用点补 confirm=true
+  并新增无确认拒绝用例；工具计数 90→109、写/读 49/41→68/41。

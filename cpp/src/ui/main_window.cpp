@@ -1164,7 +1164,7 @@ MainWindow::MainWindow(QWidget* parent)
     watchThrSlider_->setRange(-100, -20);
     watchThrSlider_->setValue(-50);
     watchThrSlider_->setObjectName("watchThrSlider");
-    watchThrValue_ = new QLabel("-50 dB", thrRowW);
+    watchThrValue_ = new QLabel("-50 dBFS", thrRowW);
     thrLay->addWidget(watchThrSlider_);
     thrLay->addWidget(watchThrValue_);
     watchFormLay->addRow("触发门限", thrRowW);
@@ -1819,7 +1819,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     scanStartSpin_ = new QDoubleSpinBox(scanBox);
     scanStartSpin_->setObjectName("scanStartSpin");
-    scanStartSpin_->setRange(0.1, 2200);
+    // D3-1: clamp to the real tuner domain (tokens::kFreqMinHz..kFreqMaxHz in
+    // MHz) instead of the old 0.1..2200 -- out-of-domain values could never
+    // tune and the input never said so.
+    scanStartSpin_->setRange(tokens::kFreqMinHz / 1e6, tokens::kFreqMaxHz / 1e6);
     scanStartSpin_->setDecimals(3);
     scanStartSpin_->setValue(88);
     scanStartSpin_->setSuffix(" MHz");
@@ -1827,7 +1830,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     scanStopSpin_ = new QDoubleSpinBox(scanBox);
     scanStopSpin_->setObjectName("scanStopSpin");
-    scanStopSpin_->setRange(0.1, 2200);
+    scanStopSpin_->setRange(tokens::kFreqMinHz / 1e6, tokens::kFreqMaxHz / 1e6);
     scanStopSpin_->setDecimals(3);
     scanStopSpin_->setValue(108);
     scanStopSpin_->setSuffix(" MHz");
@@ -1850,8 +1853,8 @@ MainWindow::MainWindow(QWidget* parent)
     scanThrSpin_->setObjectName("scanThrSpin");
     scanThrSpin_->setRange(-120, 0);
     scanThrSpin_->setSingleStep(1);
-    scanThrSpin_->setValue(-50);         // 默认门限 -50 dBFS
-    scanThrSpin_->setSuffix(" dBFS");
+    scanThrSpin_->setValue(-50);         // 默认门限 -50 dBFS（频谱/IQ 域）
+    scanThrSpin_->setSuffix(" dBFS(频谱)");
     scanForm->addRow("门限", scanThrSpin_);
 
     scanDirCombo_ = new QComboBox(scanBox);
@@ -2029,7 +2032,10 @@ MainWindow::MainWindow(QWidget* parent)
                                                         : freqSpin_->value() * 1e6;
         nameEdit->setPlaceholderText(QString("%1 MHz").arg(hintHz / 1e6, 0, 'f', 3));
         QDoubleSpinBox* freqMhz = new QDoubleSpinBox(&dlg);
-        freqMhz->setRange(0.1, 2200);
+        // D2-9/D3-1: same 24..1700 MHz domain as add_bookmark / tune_to_bookmark
+        // (tokens::kFreqMinHz..kFreqMaxHz) -- the old 0.1..2200 let the dialog
+        // store frequencies the tool surface would then reject.
+        freqMhz->setRange(tokens::kFreqMinHz / 1e6, tokens::kFreqMaxHz / 1e6);
         freqMhz->setDecimals(3);
         freqMhz->setSuffix(" MHz");
         freqMhz->setValue(prefill.frequencyHz > 0.0
@@ -2530,13 +2536,14 @@ MainWindow::MainWindow(QWidget* parent)
     auto* paramRow = new QHBoxLayout;
     aiParamLowHz_ = new QDoubleSpinBox(aiPage);
     aiParamLowHz_->setObjectName("aiParamLowHz");
-    aiParamLowHz_->setRange(100e3, 2000e6);
+    // D3-1: clamp to the tuner domain (was 100 kHz..2 GHz, past both edges).
+    aiParamLowHz_->setRange(tokens::kFreqMinHz, tokens::kFreqMaxHz);
     aiParamLowHz_->setDecimals(0);
     aiParamLowHz_->setSuffix(QString::fromUtf8(" Hz"));
     aiParamLowHz_->setValue(100e6);
     aiParamHighHz_ = new QDoubleSpinBox(aiPage);
     aiParamHighHz_->setObjectName("aiParamHighHz");
-    aiParamHighHz_->setRange(100e3, 2000e6);
+    aiParamHighHz_->setRange(tokens::kFreqMinHz, tokens::kFreqMaxHz);
     aiParamHighHz_->setDecimals(0);
     aiParamHighHz_->setSuffix(QString::fromUtf8(" Hz"));
     aiParamHighHz_->setValue(100.3e6);
@@ -3084,7 +3091,7 @@ MainWindow::MainWindow(QWidget* parent)
         scheduleSave();
     });
     connect(watchThrSlider_, &QSlider::valueChanged, this, [this](int v) {
-        watchThrValue_->setText(QString("%1 dB").arg(v));
+        watchThrValue_->setText(QString("%1 dBFS").arg(v));
         engine_->setWatchThresholdDb(static_cast<float>(v));
         scheduleSave();
     });
@@ -5641,7 +5648,7 @@ void MainWindow::restoreUiState() {
     engine_->setRecordingDir(recDirEdit_->text());
     watchThrSlider_->setValue(static_cast<int>(std::round(
         s.value("watch/threshold", -50.0f).toFloat())));
-    watchThrValue_->setText(QString("%1 dB").arg(watchThrSlider_->value()));
+    watchThrValue_->setText(QString("%1 dBFS").arg(watchThrSlider_->value()));
     watchPrerollSpin_->setValue(
         s.value("watch/prerollMs", 400.0).toDouble() / 1000.0);
     watchHangSpin_->setValue(
@@ -6059,7 +6066,7 @@ void MainWindow::onRssiLevel(float dbfs) {
                             .arg(dbfs, 0, 'f', 1).arg(lastSnr_, 0, 'f', 1));
     // Watch threshold meter: live RSSI against the configured threshold.
     if (watchLevel_)
-        watchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
+        watchLevel_->setText(QString("电平 %1 dBFS · 门限 %2 dBFS")
                              .arg(dbfs, 0, 'f', 1)
                              .arg(watchThrSlider_ ? watchThrSlider_->value() : -50));
     // B5: one-line RSSI readout (real engine value, not a guess).
@@ -6074,7 +6081,7 @@ void MainWindow::onRssiLevel(float dbfs) {
     if (rssiTrend_) rssiTrend_->pushDbfs(dbfs);
     // Recording-library panel watch meter (same real RSSI + threshold).
     if (recLibWatchLevel_)
-        recLibWatchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
+        recLibWatchLevel_->setText(QString("电平 %1 dBFS · 门限 %2 dBFS")
                              .arg(dbfs, 0, 'f', 1)
                              .arg(watchThrSlider_ ? watchThrSlider_->value() : -50));
     // 时空信号格：缓存这次真实遥测读数（NaN->有值即"等待遥测"->有读数）。

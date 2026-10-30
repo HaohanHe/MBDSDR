@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
@@ -163,6 +164,18 @@ RadioPanel::RadioPanel(QWidget* parent) : QWidget(parent) {
         if (!link_ || !keyer_) { setStatus(QStringLiteral("请先连接电台")); return; }
         const QString text = cwText_->text().trimmed();
         if (text.isEmpty()) { setStatus(QStringLiteral("请填写 CW 文本")); return; }
+        // D3-2: TX is regulatorily sensitive -- one explicit confirmation with
+        // the payload self-reported before any key-down (was zero-confirm).
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("确认发射 CW"),
+            QStringLiteral("即将经 CAT 电台发射 CW：%1 WPM，文本「%2」。\n"
+                           "发射受无线电管理条例约束，请确认频率/呼号/许可无误。")
+                .arg(cwWpm_->value()).arg(text),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            setStatus(QStringLiteral("CW 发射已取消"));
+            return;
+        }
         keyer_->setWpm(cwWpm_->value());
         const auto sched = keyer_->buildSchedule(text);
         joinCw();
@@ -190,6 +203,17 @@ RadioPanel::RadioPanel(QWidget* parent) : QWidget(parent) {
             if (parseAx25Addr(part.trimmed(), a)) fr.path.push_back(a);
         }
         fr.info = msgEdit_->text().toUtf8();
+        // D3-2: TX confirm with the frame self-reported before it goes on air.
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("确认发射信标"),
+            QStringLiteral("即将经 TNC 发送 AX.25 信标：%1 -> APZMBD，路径「%2」，内容「%3」。\n"
+                           "发射受无线电管理条例约束，请确认呼号/频率/许可无误。")
+                .arg(callEdit_->text().trimmed(), pathEdit_->text(), msgEdit_->text()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            setStatus(QStringLiteral("信标发送已取消"));
+            return;
+        }
         const QByteArray raw = encodeAx25(fr);
         if (raw.isEmpty()) { setStatus(QStringLiteral("AX.25 编码失败")); return; }
         const QByteArray wrapped = kissWrap(raw);
@@ -200,6 +224,18 @@ RadioPanel::RadioPanel(QWidget* parent) : QWidget(parent) {
     connect(soapyOpenBtn_, &QPushButton::clicked, this, [this] {
         const QString drv = driverEdit_->text().trimmed();
         if (drv.isEmpty()) { setStatus(QStringLiteral("请填写 Soapy 驱动参数")); return; }
+        // D3-2: opening the TX chain is the stable confirm point for a
+        // press-and-hold PTT (a modal on pressed() could strand the key-down).
+        const auto answer = QMessageBox::question(
+            this, QStringLiteral("确认进入发射就绪"),
+            QStringLiteral("即将打开 Soapy 发射设备（驱动 %1，频率 %2 MHz）。\n"
+                           "PTT 按下即发射载波；发射受无线电管理条例约束，请确认许可无误。")
+                .arg(drv).arg(soapyFreq_->value()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            setStatus(QStringLiteral("Soapy 打开已取消"));
+            return;
+        }
         stopSoapyTone();
         soapy_ = std::make_unique<SoapyTxBackend>(drv);
         soapy_->setSampleRate(2000000.0);

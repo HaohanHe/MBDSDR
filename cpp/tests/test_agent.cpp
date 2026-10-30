@@ -175,7 +175,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 90);
+    QCOMPARE(tools.size(), 109);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -801,7 +801,7 @@ void TestAgent::manualMode_gateSpotCheckTenTools() {
     expectGated("start_recording", QJsonObject{});
     QJsonObject ppm; ppm["ppm"] = 42.5;
     expectGated("apply_frequency_correction", ppm);
-    QJsonObject sq; sq["enabled"] = true; sq["threshold_db"] = -10.0;
+    QJsonObject sq; sq["enabled"] = true; sq["threshold_db"] = -30.0;
     expectGated("set_squelch", sq);
     QJsonObject del; del["name"] = QString::fromUtf8("phase62_audit_nonexistent.sigmf-data");
     expectGated("delete_recording", del);
@@ -874,14 +874,14 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         else if (name == "export_iq_segment") a["sample_count"] = 4096.0;
         else if (name == "set_network_audio_sink") { a["enable"] = true; a["port"] = 12345; a["format"] = "s16le"; }
         else if (name == "start_scan_link") a["target_freq_hz"] = 100e6;
-        else if (name == "set_squelch") { a["enabled"] = true; a["threshold_db"] = -10.0; }
+        else if (name == "set_squelch") { a["enabled"] = true; a["threshold_db"] = -30.0; }
         else if (name == "set_ctcss") { a["enabled"] = true; a["frequency_hz"] = 88.5; }
         else if (name == "set_cdcss") { a["enabled"] = true; a["code"] = "023"; }
         else if (name == "set_ft8") a["enabled"] = true;
         else if (name == "set_noise_blanker") a["on"] = true;
         else if (name == "add_bookmark") { a["freq_hz"] = 100e6; a["name"] = "gate_probe"; a["mode"] = "NFM"; }
         else if (name == "tune_to_bookmark") a["index"] = 0;
-        else if (name == "delete_bookmark") a["index"] = 0;
+        else if (name == "delete_bookmark") { a["index"] = 0; a["confirm"] = true; }
         else if (name == "switch_vfo") a["index"] = 0;
         else if (name == "rename_vfo") { a["index"] = 0; a["name"] = "gate_probe"; }
         else if (name == "set_vfo_armed") { a["index"] = 0; a["enabled"] = true; }
@@ -895,6 +895,26 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         else if (name == "set_doppler_compensation") a["enable"] = true;
         else if (name == "connect_network_source") { a["host"] = "127.0.0.1"; a["port"] = 1234; }
         else if (name == "memory_search") a["query"] = "probe";
+        // D1 tool-gap fill (2026-10-30): schema-valid args for the 19 new writes.
+        else if (name == "set_gain") a["gain_db"] = 20.0;
+        else if (name == "set_sample_rate") a["sample_rate_hz"] = 2048000.0;
+        else if (name == "set_decimation") a["factor"] = 2.0;
+        else if (name == "set_direct_sampling") a["mode"] = "off";
+        else if (name == "set_offset_tuning") a["enabled"] = true;
+        else if (name == "set_agc") a["tuner_agc"] = true;
+        else if (name == "set_bias_tee") a["enabled"] = false;
+        else if (name == "set_force_mono") a["enabled"] = true;
+        else if (name == "set_anr") { a["enabled"] = true; a["strength_pct"] = 50.0; }
+        else if (name == "set_recording_target") a["target"] = "iq_sigmf";
+        else if (name == "set_recording_dir") a["dir"] = "record";
+        else if (name == "set_recording_template") a["template"] = "gate_probe";
+        else if (name == "set_recording_stereo") a["enabled"] = true;
+        else if (name == "set_recording_ignore_squelch") a["enabled"] = true;
+        else if (name == "set_recording_max_segment") a["seconds"] = 60.0;
+        else if (name == "set_gated_recording") a["enabled"] = true;
+        else if (name == "set_watch_recording") { a["enabled"] = true; a["threshold_db"] = -50.0; }
+        else if (name == "set_station_position") { a["lat_deg"] = 0.0; a["lon_deg"] = 0.0; }
+        else if (name == "vna_connect") { a["action"] = "connect"; a["port"] = "COM99"; }
         return a;
     };
 
@@ -932,11 +952,11 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 49 writes / 41 reads (90 tools; workspace domain three
+    // The frozen split: 68 writes / 41 reads (109 tools; workspace domain three
     // gated writes + APRS/colormap reads + the template runner gated write;
     // G1 get_task_history read, G2 memory_delete gated write + memory_stats read;
-    // list_satellites read-only TLE cache catalog).
-    QCOMPARE(writes, 49);
+    // list_satellites read-only TLE cache catalog; D1 tool-gap fill +19 writes).
+    QCOMPARE(writes, 68);
     QCOMPARE(reads, 41);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
@@ -1373,7 +1393,9 @@ void TestAgent::squelchStatusRealReadback() {
              "stale 'engine has no squelch readback' note must be removed");
 
     // Flip the engine through the write tool; the read tool follows for real.
-    QJsonObject on; on["enabled"] = true; on["threshold_db"] = -10.0;
+    // threshold_db is in the honest [-100, -20] dBFS domain (D2-4): out-of-domain
+    // values are now REJECTED instead of applied.
+    QJsonObject on; on["enabled"] = true; on["threshold_db"] = -30.0;
     QString w = ai::LLMWorker::dispatchToolCall("set_squelch", on, &engine,
                                                 /*manualMode=*/false);
     QVERIFY2(!w.contains("\"gated\":true"), qPrintable(w));
@@ -1384,7 +1406,13 @@ void TestAgent::squelchStatusRealReadback() {
     QCOMPARE(r2.value("enabled").toBool(), true);
     QCOMPARE(r2.value("threshold_db").toDouble(),
              static_cast<double>(engine.squelchThresholdDb()));
-    QCOMPARE(r2.value("threshold_db").toDouble(), -10.0);
+    QCOMPARE(r2.value("threshold_db").toDouble(), -30.0);
+
+    // D2-4: an out-of-domain threshold is an honest error, never silent.
+    QJsonObject bad; bad["enabled"] = true; bad["threshold_db"] = -10.0;
+    QString wb = ai::LLMWorker::dispatchToolCall("set_squelch", bad, &engine,
+                                                 /*manualMode=*/false);
+    QVERIFY2(wb.contains("\"ok\":false"), qPrintable(wb));
 }
 
 // Phase63 CTCSS three-channel tool: fresh engine reads honest defaults
@@ -1769,14 +1797,20 @@ void TestAgent::bookmarkToolsRealExecutionWithInjectedStore() {
         ai::executeTool("tune_to_bookmark", t0, &engine, nullptr).toUtf8()).object();
     QVERIFY2(!nullT.value("ok").toBool(), qPrintable(nullT.value("error").toString()));
 
-    // --- delete_bookmark: real removal + remaining count ---------------------
-    QJsonObject d0; d0["index"] = 0;
+    // --- delete_bookmark: real removal + remaining count (confirm=true, D3-7) --
+    QJsonObject d0; d0["index"] = 0; d0["confirm"] = true;
     QJsonObject rd = run("delete_bookmark", d0);
     QVERIFY2(rd.value("ok").toBool(), qPrintable(QString::fromUtf8(
         QJsonDocument(rd).toJson(QJsonDocument::Compact))));
     QCOMPARE(rd.value("remaining").toInt(), 1);
     QCOMPARE(bm.count(), 1);
     QCOMPARE(bm.list()[0].frequencyHz, 145.05e6);
+
+    // D3-7: no confirm -> honest refusal, nothing deleted.
+    QJsonObject noConf; noConf["index"] = 0;
+    QJsonObject rdNo = run("delete_bookmark", noConf);
+    QVERIFY2(!rdNo.value("ok").toBool(), "delete without confirm must be refused");
+    QCOMPARE(bm.count(), 1);
 
     QJsonObject rd2 = run("delete_bookmark", oob);
     QVERIFY2(!rd2.value("ok").toBool(), "out-of-range delete must be an error");

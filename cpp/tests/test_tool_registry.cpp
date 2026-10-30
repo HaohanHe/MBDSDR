@@ -89,6 +89,14 @@ const QSet<QString> kAllCxxTools = {
     "get_task_history", "memory_delete", "memory_stats",
     // Read-only TLE-cache catalog (prerequisite for predict_passes).
     "list_satellites",
+    // D1 tool-gap fill (2026-10-30 reverse audit): 19 new gated writes.
+    "set_gain", "set_sample_rate", "set_decimation", "set_direct_sampling",
+    "set_offset_tuning", "set_agc", "set_bias_tee", "set_force_mono",
+    "set_anr",
+    "set_recording_target", "set_recording_dir", "set_recording_template",
+    "set_recording_stereo", "set_recording_ignore_squelch",
+    "set_recording_max_segment", "set_gated_recording", "set_watch_recording",
+    "set_station_position", "vna_connect",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -128,6 +136,14 @@ const QSet<QString> kExpectedWriteTools = {
     "run_template",
     // G2: delete one memory by (scope,key) (gated write).
     "memory_delete",
+    // D1 tool-gap fill (2026-10-30 reverse audit): 19 new gated writes.
+    "set_gain", "set_sample_rate", "set_decimation", "set_direct_sampling",
+    "set_offset_tuning", "set_agc", "set_bias_tee", "set_force_mono",
+    "set_anr",
+    "set_recording_target", "set_recording_dir", "set_recording_template",
+    "set_recording_stereo", "set_recording_ignore_squelch",
+    "set_recording_max_segment", "set_gated_recording", "set_watch_recording",
+    "set_station_position", "vna_connect",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -201,7 +217,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 90, qPrintable(QString("expected 90 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 109, qPrintable(QString("expected 109 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -326,15 +342,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (81 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (109 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 90);
+    QCOMPARE(defs.size(), 109);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("list_satellites"));
+    QCOMPARE(defs.last().name, QString("vna_connect"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

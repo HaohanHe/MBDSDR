@@ -918,8 +918,8 @@ void TestControlHub::bookmarksPersistToQSettings() {
     QCOMPARE(parseObj(hub.execute("get_frequency", {})).value("frequency_hz").toDouble(),
              144.5e6);
 
-    // delete_bookmark removes it.
-    r = parseObj(hub.execute("delete_bookmark", {{"index", idx}}));
+    // delete_bookmark removes it (explicit confirm=true required since D3-7).
+    r = parseObj(hub.execute("delete_bookmark", {{"index", idx}, {"confirm", true}}));
     QVERIFY(r.value("ok").toBool());
     QCOMPARE(parseObj(hub.execute("list_bookmarks", {})).value("count").toInt(),
              countBefore);
