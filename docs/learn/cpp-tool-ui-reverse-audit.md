@@ -217,11 +217,12 @@ README 默认值口径：grep 未发现 README 对增益/静噪/音量等默认�
 - **H（1/3）**：`set_station_position`——写 AiConfig（同设置对话框持久化路径）+
   ADS-B 参考点同步，闭合「set_doppler_compensation 要求已设本站却无工具能设」断环；
   描述诚实注明多普勒仍需捕获过境才 available
-- **I（1/2）**：`vna_connect`（connectSerial/close，失败带 errorString，不假装已连）
+- **I（1/2）**：`vna_connect`（connectSerial/close，失败带错误文案并列出失败模式，不假装已连）
 
 **第三轮落地 26 条**（行标带 `#` 前缀，防撞 §1 快照行计数正则）——同上四件套 +
 C++ 金样三处 + 双账同步；UI 面经 `dsp::UiControlSurface` 抽象接缝（35 纯虚，
-`ui_control_surface.h` 依赖最小头文件；MainWindow 多继承实现并注册进 engine）驱动
+`control_surface.h` 依赖最小头文件（刻意不用 `ui_` 前缀——那是 uic 生成头的保留
+命名，会触发 CMake AUTOUIC 去找 .ui 文件）；MainWindow 多继承实现并注册进 engine）驱动
 **真控件**（setValue/setCurrentIndex/setChecked 触发既有 handler 落 AppSettings+生效，
 不复制业务逻辑），headless 指针为空→诚实报「无 UI 控制面（该参数由桌面端控件持有，
 headless 不可用）」；B2/H2/K1/K2 为引擎/配置直连不走 surface：

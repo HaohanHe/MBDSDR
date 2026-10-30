@@ -7,7 +7,9 @@
 #include "core/tokens.h"
 #include "ui/spectrum_render.h"
 #include "dsp/spectrum_engine.h"
-#include "dsp/ui_control_surface.h"  // UiControlSurface seam (D1 round 3 tools)
+#include "dsp/control_surface.h"  // UiControlSurface seam (D1 round 3 tools)
+// (file named control_surface.h, NOT ui_*.h: the ui_ prefix is reserved for
+//  uic-generated headers and trips CMake AUTOUIC into hunting a .ui file)
 #include "vna/vna_rf.h"
 #include "dsp/device_capabilities.h"
 #include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting

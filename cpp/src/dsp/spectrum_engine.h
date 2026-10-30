@@ -40,7 +40,7 @@
 #include "dsp/adsb_decoder.h"
 #include "dsp/apt_decoder.h"
 #include "dsp/doppler_control_surface.h"
-#include "dsp/ui_control_surface.h"
+#include "dsp/control_surface.h"
 
 namespace mbdsdr {
 namespace vna { class NanoVnaClient; }

@@ -45,7 +45,7 @@ class QLineEdit;
 class QSpinBox;
 
 #include "dsp/doppler_control_surface.h"
-#include "dsp/ui_control_surface.h"
+#include "dsp/control_surface.h"
 
 // AIGUI P0-b: the workspace model lives in the GLOBAL aigui namespace (the P0-a
 // component_registry/workspace_layout layer), not under mbdsdr.
