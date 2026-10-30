@@ -749,3 +749,33 @@ test_startup_sequence 共 41 项全绿，未误伤。
 判据：网络失败必须**显式报错或显式降级并标明降级后端**，不得用默认值或
 空值冒充真实数据。上表"本次修复"三行对应的回归由
 `tests/test_external_api_honesty.py`（6 项，桩替换 `requests.get`，不打网络）钉住。
+
+## C++ 工具面 ↔ UI 反向对拍（2026-10-30 登记，静态审计未闭环修）
+
+**「UI 有控件、工具面无对应」反向全量清单**：`cpp/src/ui/` 143 处可调控件
+实例化点（40 combo/35 checkbox/21 lineedit/19 doublespin/16 spin/12 slider）
+逐一对照 `cpp/src/ai/tool_schema.cpp` 90 个工具，产出
+`docs/learn/cpp-tool-ui-reverse-audit.md`：
+
+- **D1 有 UI 无工具 45 条**（核心产出，含每条建议工具名，可照单补）：
+  最硬的缺口是接收链硬件参数整组缺失（增益/采样率/抽取/直采/偏移调谐/
+  AGC/Bias-T——`get_status` 明说增益采样率不返回 `tool_schema.cpp:229`）、
+  录制参数面（start_recording 无参、值守录制只有只读）、VNA 串口连接
+  （`vna_device` 动作枚举无 connect，AI 连不上仪器）、本站位置
+  （`set_doppler_compensation` 要求"已设置本站位置"却无工具可设）。
+  增益/采样率两条**不与上轮翻案**：上轮核实的是 UI 语义做对（负增益=RF
+  衰减+离散档位），本轮是工具侧写入口为零，属反向新问题。
+- **D2 语义不一致 9 条**：解调模式三层集合错位（UI 15 / hub 12 /
+  schema 枚举 6 + 校验器严格 enum，BPSK/QPSK/ADS-B 工具不可达）、
+  fft_size schema 256..65536 但引擎只收三档且静默丢弃+回显当前值（假成功）、
+  窗函数 "FlatTop"/"Flattop" 拼写错位（照抄 UI 被降级 Hann）、
+  静噪门限无边界无单位、VNA 点数 UI≤401 工具无上限、带宽三面不一致等。
+- **D3 反人类 8 条**：扫描/书签/AI 参数三处频率域越过 tokens 24..1700 MHz、
+  radio_panel 发射类（CW/信标/SoapySDR）零确认、"dBFS" 三种域混标等。
+- 另 12 项可调控件**不计入**缺口（AI 凭据、手动模式安全门、瞬态交互等），
+  已在清单 §5 如实记账。
+
+钉扎：`tests/test_cpp_tool_ui_reverse_audit.py`（纯文本、offscreen）断言
+控件计数 143、D1/D2/D3 条数 45/9/8、45 个建议工具名当前均不在
+`s.name` 集合（补工具后同步更新清单+测试）。纪律：只读 C++，未改源码，
+无工具链不声称已修复/已验证。
