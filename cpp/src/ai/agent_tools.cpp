@@ -3716,8 +3716,9 @@ QString execSetStationPosition(const QJsonObject& args, dsp::SpectrumEngine* eng
     return compact(o);
 }
 
-// D1-I1 vna_connect: engine.vnaClient().connectSerial / close. Honest failure
-// via errorString(); never fakes a connection.
+// D1-I1 vna_connect: engine.vnaClient().connectSerial / close. Honest failure:
+// NanoVnaClient exposes no error string (only its private transport does), so
+// we list the possible failure modes without fabricating a specific cause.
 QString execVnaConnect(const QJsonObject& args, dsp::SpectrumEngine* engine,
                        const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
@@ -3744,7 +3745,9 @@ QString execVnaConnect(const QJsonObject& args, dsp::SpectrumEngine* engine,
         QJsonObject o;
         o["ok"] = false;
         o["connected"] = false;
-        o["error"] = QString::fromUtf8("NanoVNA 连接失败（%1）").arg(vna.errorString());
+        o["error"] = QString::fromUtf8(
+            "NanoVNA 连接失败（串口打不开或设备握手无响应——核对串口路径、"
+            "115200 8N1、设备供电后重试）");
         addSourceFields(o, src);
         return compact(o);
     }

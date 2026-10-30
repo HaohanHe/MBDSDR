@@ -96,7 +96,7 @@ public:
     // surface -> the tool layer reports an honest "not available".
     // E: 频谱/瀑布显示面（转发 spectrum_ 的既有槽 + phase82/D1 镜像）
     void uiSetPersistence(int mode) override;              // 0=关 1=低 2=高
-    void uiSetWaterfallDepth(int rows) override;           // 128/256/512 精确值
+    void uiSetWaterfallDepth(int rows) override;           // kWaterfallDepthChoices 六档精确值
     void uiSetWaterfallSpeed(int linesPerFrame) override;  // 1/2/4
     void uiSetBuiltinPalette(int index) override;          // 0=经典 1=单色 2=Viridis
     void uiSetDbRange(float minDb, float maxDb) override;

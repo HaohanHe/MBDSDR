@@ -10,7 +10,14 @@ segfault（exit 139/134；"QObject: shared QObject was deleted directly"）。
 上游 c6217d9 干净树同样中招；裸脚本正常，pytest 模块级 app 模式触发。
 
 规避：terminal summary 打印完毕、所有测试结论产出后，按 session 真实
-结果（testsfailed）主动硬退出，跳过 Py_FinalizeEx 的 PySide 强拆。
+退出码（exitstatus）主动硬退出，跳过 Py_FinalizeEx 的 PySide 强拆。
+
+硬退出时机（2026-10-30 CI 实测修正）：必须放在 pytest_unconfigure 而非
+pytest_sessionfinish——terminal reporter 的收尾汇总（含 FAILURES 详情与
+"N passed" 行）由其 sessionfinish 钩子包裹器的 yield 之后打印，普通
+sessionfinish 钩子被硬退出抢跑会把汇总与失败详情整批吞掉（CI 日志只有
+进度点、无失败名，即此症）。pytest_unconfigure 在 wrap_session 完全收尾
+（汇总已打印）之后、Py_FinalizeEx 之前执行，两头兼顾。
 
 平台差异（2026-10-20 Windows 实测补充）：POSIX 的 os._exit 跳过 atexit 即可
 规避；但 Windows 的 os._exit 仍走 DLL_PROCESS_DETACH——Qt DLL 的 detach
@@ -30,12 +37,21 @@ import pytest
 # 或回退"无可见卫星"），绝不假造数据。调用方可预设 MBDSDR_OFFLINE=0 放行。
 os.environ.setdefault("MBDSDR_OFFLINE", "1")
 
+# session 真实退出码暂存：sessionfinish 记账，unconfigure 硬退出时取用。
+# 直通 pytest 退出码（1=测试失败 2=中断 4=用法错 5=无收集）——早先只按
+# testsfailed 映射 0/1，会把收集错误/中断静默映射成 0，CI 误判绿。
+_RESULT = {"exitstatus": 0}
+
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
+    _RESULT["exitstatus"] = int(exitstatus)
+
+
+def pytest_unconfigure(config):
     sys.stdout.flush()
     sys.stderr.flush()
-    code = 1 if session.testsfailed else 0
+    code = _RESULT["exitstatus"]
     if sys.platform == "win32":
         kernel32 = ctypes.windll.kernel32
         # 必须声明 argtypes/restype：不声明时 ctypes 按 32 位 int 传句柄，
