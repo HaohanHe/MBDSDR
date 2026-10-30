@@ -213,3 +213,45 @@ def test_panel_has_no_dead_slots():
         assert f"def {slot}" in _SETTINGS_PANEL_SRC
         assert f"connect(self.{slot})" in _SETTINGS_PANEL_SRC, \
             f"{slot} 是死槽（定义了但没 connect）"
+
+
+# ---------------------------------------------------------------- 配置键漂移收敛
+def test_volume_and_waterfall_registered():
+    """音量/瀑布可见性必须进 settings（此前只有 gui_config 键，双源漂移）。"""
+    assert "volume" in DEFAULTS
+    assert "show_waterfall" in DEFAULTS
+    assert isinstance(_coerce("volume", "21"), int)
+    assert isinstance(_coerce("show_waterfall", 0), bool)
+
+
+def test_gui_config_no_longer_writes_drifting_keys():
+    """current_freq_mhz（MHz！）/current_mode/volume/show_waterfall 不再双写。"""
+    save_block = _MAIN_WINDOW_SRC.split("def _save_gui_config", 1)[1] \
+        .split("def _load_gui_config", 1)[0]
+    for key in ("current_freq_mhz", "current_mode", "volume", "show_waterfall"):
+        assert f'config["{key}"]' not in save_block, \
+            f"_save_gui_config 双写 {key}：gui_config 恢复会覆盖 settings 值"
+
+
+def test_drifting_keys_migrate_into_settings_once():
+    """旧 gui_config 残留键迁移进 settings（含 MHz→Hz 单位转换）。"""
+    load_block = _MAIN_WINDOW_SRC.split("def _load_gui_config", 1)[1]
+    assert 'settings.set("frequency_hz"' in load_block
+    assert "* 1e6" in load_block, "current_freq_mhz 是 MHz，必须换算成 Hz"
+    assert 'settings.set("demod_mode"' in load_block
+    assert 'settings.set("volume"' in load_block
+    assert 'settings.set("show_waterfall"' in load_block
+
+
+def test_volume_and_waterfall_now_persist_through_settings():
+    """音量/瀑布改动必须写 settings（只写内存=改了重启丢）。"""
+    assert 'settings.set("volume"' in _MAIN_WINDOW_SRC
+    assert 'settings.set("show_waterfall"' in _MAIN_WINDOW_SRC
+
+
+def test_satellite_tune_updates_control_panel():
+    """卫星跟踪调谐必须真的更新控制面板频率（修前写 freq_spin——属性不存在，
+    异常被 pass 吞掉 = 联动显示永不更新的死路径）。"""
+    assert "freq_spin.setValue" not in _MAIN_WINDOW_SRC, \
+        "freq_spin 不存在（真实控件是 freq_input），不许再调用它"
+    assert "self.control_panel.set_frequency_hz(float(obj.frequency_hz))" in _MAIN_WINDOW_SRC

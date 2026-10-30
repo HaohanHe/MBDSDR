@@ -35,6 +35,8 @@ DEFAULTS: Dict[str, Any] = {
     "gnss_port": "",                # GNSS 串口设备路径；空 = 自动探测
     "gnss_baudrate": 9600,          # GNSS 串口波特率
     "agc_enabled": True,            # 自动增益开关
+    "volume": 20,                   # 音量 0–63（与控制面板滑杆同量纲）
+    "show_waterfall": True,         # 瀑布图可见性
     "theme": "default",             # 主题名
     # 触屏/Surface/平板二合一适配："auto"=自动检测 QTouchDevice，
     # "on"=强制触屏模式（放大触控目标/手势），"off"=强制鼠标模式。
@@ -54,8 +56,8 @@ DEFAULTS: Dict[str, Any] = {
 #: 数值字段（写盘前做类型归一，防止 JSON 里混入字符串导致下游类型错误）
 _FLOAT_KEYS = ("frequency_hz", "gain_db", "bandwidth_hz", "sample_rate_hz")
 #: 端口等整数字段：不登记会被 _coerce 落成字符串，下游 int() 再炸一次
-_INT_KEYS = ("gnss_baudrate", "rc_port", "web_port")
-_BOOL_KEYS = ("agc_enabled", "rc_enabled", "web_enabled")
+_INT_KEYS = ("gnss_baudrate", "rc_port", "web_port", "volume")
+_BOOL_KEYS = ("agc_enabled", "rc_enabled", "web_enabled", "show_waterfall")
 
 
 def default_config_path() -> str:

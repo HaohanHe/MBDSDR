@@ -2761,6 +2761,13 @@ class MainWindow(QMainWindow):
                 self._audio_player.set_gain(volume / 63.0 * 2.0)
             except Exception:
                 pass
+        # 音量持久化（权威源 settings；此前只有 gui_config 的 volume 键，
+        # 双写导致读写不对称）。启动恢复期不回写，避免默认值覆盖已存值。
+        if not getattr(self, "_restoring_settings", False):
+            try:
+                self.settings.set("volume", int(volume))
+            except Exception:
+                pass
 
     @Slot(bool)
     def _on_record_toggled(self, recording: bool):
@@ -4134,6 +4141,15 @@ class MainWindow(QMainWindow):
 
     def _toggle_waterfall(self):
         self.spectrum.toggle_waterfall()
+        # 瀑布可见性持久化（权威源 settings；此前只有 gui_config 的键）。
+        # 启动恢复期不回写。
+        if not getattr(self, "_restoring_settings", False):
+            try:
+                st = getattr(self.spectrum, "_state", None)
+                if st is not None and hasattr(st, "show_waterfall"):
+                    self.settings.set("show_waterfall", bool(st.show_waterfall))
+            except Exception:
+                pass
 
     def _toggle_fullscreen(self):
         if self.isFullScreen():
@@ -5478,10 +5494,14 @@ class MainWindow(QMainWindow):
                     except Exception:
                         pass
 
-                # 同时更新控制面板的频率显示
+                # 同时更新控制面板的频率显示。
+                # 此前写的是 control_panel.freq_spin（该属性不存在，真实控件是
+                # freq_input，QLineEdit），异常被 except pass 吞掉，联动后控制面板
+                # 频率显示永不更新（死路径）。正确入口是 set_frequency_hz
+                # （专用恢复 setter，自己处理单位与显示）。
                 if hasattr(self, 'control_panel'):
                     try:
-                        self.control_panel.freq_spin.setValue(freq_mhz)
+                        self.control_panel.set_frequency_hz(float(obj.frequency_hz))
                     except Exception:
                         pass
 
@@ -5636,22 +5656,10 @@ class MainWindow(QMainWindow):
             # （desktop_settings.json），此处不再写——双写会让读写不对称
             # （改了重启读到旧值）。旧 gui_config 里的残留值由 _load_gui_config
             # 一次性迁移进 settings 并回写。
-            cp = getattr(self, "control_panel", None)
-            if cp is not None:
-                freq_hz = getattr(cp, "_freq_hz", None)
-                if freq_hz is not None:
-                    config["current_freq_mhz"] = float(freq_hz) / 1e6
-                mode = getattr(cp, "_current_mode", None)
-                if mode is not None:
-                    config["current_mode"] = mode
-                vs = getattr(cp, "volume_slider", None)
-                if vs is not None:
-                    config["volume"] = int(vs.value())
-            spectrum = getattr(self, "spectrum", None)
-            if spectrum is not None:
-                st = getattr(spectrum, "_state", None)
-                if st is not None and hasattr(st, "show_waterfall"):
-                    config["show_waterfall"] = bool(st.show_waterfall)
+            # current_freq_mhz / current_mode / volume / show_waterfall 的权威源
+            # 是 settings（desktop_settings.json），此处不再写——双写会让读写
+            # 不对称（gui_config 100ms 后恢复会覆盖 settings 值，改了重启回退）。
+            # 旧残留值由 _load_gui_config 一次性迁移进 settings 并回写。
             # NTRIP 配置：对话框已打开则取当前表单值；否则保留磁盘上的旧值。
             # 密码本地明文保存（不打印日志），未配置时写空串。
             ntrip_dlg = getattr(self, "_ntrip_dialog", None)
@@ -5723,30 +5731,51 @@ class MainWindow(QMainWindow):
                 self.settings.set("theme", theme)
             if theme != self._current_theme:
                 self._apply_theme(theme)
-            # 恢复频率/模式/音量/瀑布：只回填真实键，缺键不编造。
-            # 走 control_panel 的启动恢复 setter（blockSignals，不触发后端下发）。
+            # 频率/模式/音量/瀑布：权威源是 settings。gui_config 里的
+            # current_freq_mhz（注意单位 MHz）/current_mode/volume/show_waterfall
+            # 是旧双写残留，仅在 settings 仍为默认时一次性迁移并回写
+            # （读旧键→迁→回写，幂等）。取舍：用"settings 值==默认值"作为
+            # "用户未设置过"的代理；用户恰好设成默认值时旧值会覆盖一次，
+            # 一次性迁移后即以 settings 为准。
+            try:
+                if "current_freq_mhz" in config and \
+                        abs(float(self.settings.get("frequency_hz", 0.0)) - 98_000_000.0) < 1.0:
+                    self.settings.set("frequency_hz",
+                                      float(config["current_freq_mhz"]) * 1e6)
+                if "current_mode" in config and \
+                        str(self.settings.get("demod_mode", "FM")) == "FM":
+                    self.settings.set("demod_mode", str(config["current_mode"]))
+                if "volume" in config and \
+                        int(self.settings.get("volume", 20)) == 20:
+                    self.settings.set("volume", int(config["volume"]))
+                if "show_waterfall" in config and \
+                        bool(self.settings.get("show_waterfall", True)) is True:
+                    self.settings.set("show_waterfall",
+                                      bool(config["show_waterfall"]))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("旧配置键迁移失败（已忽略，不影响启动）: %s", e)
+            # 按 settings 单源恢复（迁移可能刚刚回写新值，在此一并生效）。
+            # 走专用恢复 setter（blockSignals，不触发后端下发）。
             cp = getattr(self, "control_panel", None)
             if cp is not None:
-                if "current_freq_mhz" in config:
-                    try:
-                        cp.set_frequency_hz(float(config["current_freq_mhz"]) * 1e6)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("恢复频率失败（值非法，已忽略）: %s", e)
-                if "current_mode" in config:
-                    try:
-                        cp.set_mode(str(config["current_mode"]))
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("恢复解调模式失败（值非法，已忽略）: %s", e)
-                if "volume" in config:
-                    try:
-                        cp.set_volume(int(config["volume"]))
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("恢复音量失败（值非法，已忽略）: %s", e)
+                try:
+                    cp.set_frequency_hz(float(self.settings.get("frequency_hz", 98e6)))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("恢复频率失败（值非法，已忽略）: %s", e)
+                try:
+                    cp.set_mode(str(self.settings.get("demod_mode", "FM")))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("恢复解调模式失败（值非法，已忽略）: %s", e)
+                try:
+                    cp.set_volume(int(self.settings.get("volume", 20)))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("恢复音量失败（值非法，已忽略）: %s", e)
             spectrum = getattr(self, "spectrum", None)
-            if spectrum is not None and "show_waterfall" in config:
+            if spectrum is not None:
                 st = getattr(spectrum, "_state", None)
                 has_wf = bool(getattr(st, "show_waterfall", True)) if st is not None else True
-                if bool(config["show_waterfall"]) != has_wf:
+                want_wf = bool(self.settings.get("show_waterfall", True))
+                if want_wf != has_wf:
                     try:
                         spectrum.toggle_waterfall()
                     except Exception as e:  # noqa: BLE001

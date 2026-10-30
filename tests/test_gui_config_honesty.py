@@ -68,14 +68,19 @@ def _save_and_read(stub, tmp_path, monkeypatch):
 
 
 def test_real_freq_written_from_real_attribute(qapp, tmp_path, monkeypatch):
-    """真实 _freq_hz 必须换算成 MHz 落盘。"""
+    """频率/模式/音量不再落盘 gui_config（权威源是 settings）。
+
+    2026-10-30 收敛：这三键曾在 gui_config 与 settings 双写双读，gui_config
+    恢复（启动 100ms 后）会覆盖 settings 值 → 改了重启读回旧值。现单源化，
+    本条随修复更新为钉住"不再写"（防双写回退）。真实值的诚实性（写的是真实
+    _freq_hz 而非演示值）由 settings.set 调用路径与 test_settings_convergence
+    的往返测试承担，此处不再重复。"""
     cp = SimpleNamespace(_freq_hz=101.7e6, _current_mode="FM",
                          volume_slider=SimpleNamespace(value=lambda: 42))
     out = _save_and_read(_fake_self(tmp_path, cp=cp), tmp_path, monkeypatch)
-    assert out.get("current_freq_mhz") == pytest.approx(101.7), \
-        f"必须写真实频率 101.7，实际: {out.get('current_freq_mhz')}"
-    assert out.get("current_mode") == "FM"
-    assert out.get("volume") == 42
+    for key in ("current_freq_mhz", "current_mode", "volume"):
+        assert key not in out, \
+            f"{key} 已单源化到 settings，gui_config 不许再写（防双写回退）"
 
 
 def test_demo_freq_never_written(qapp, tmp_path, monkeypatch):
@@ -101,8 +106,12 @@ def test_freq_none_omits_key(qapp, tmp_path, monkeypatch):
 
 
 def test_waterfall_reads_real_state(qapp, tmp_path, monkeypatch):
-    """瀑布可见性必须从 _state.show_waterfall 真实读取。"""
+    """瀑布可见性不再落盘 gui_config（权威源是 settings）。
+
+    2026-10-30 收敛：随频率/音量一同单源化到 settings。本条随修复更新为钉住
+    "不再写"（防双写回退）；真实状态的读取与持久化由
+    test_settings_convergence 的往返测试钉住。"""
     spectrum = SimpleNamespace(_state=SimpleNamespace(show_waterfall=False))
     out = _save_and_read(_fake_self(tmp_path, spectrum=spectrum), tmp_path, monkeypatch)
-    assert out.get("show_waterfall") is False, \
-        f"必须写真实瀑布状态 False，实际: {out.get('show_waterfall')}"
+    assert "show_waterfall" not in out, \
+        "show_waterfall 已单源化到 settings，gui_config 不许再写（防双写回退）"
