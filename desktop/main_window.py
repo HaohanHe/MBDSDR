@@ -1968,7 +1968,8 @@ class MainWindow(QMainWindow):
 
     def _connect_backend(self, backend, sample_rate: float = float(DEFAULT_SAMPLE_RATE_HZ),
                          gain: float = 20.0, ppm: int = 0,
-                         agc: bool = True, offset_tuning: bool = False) -> bool:
+                         agc: bool = True, offset_tuning: bool = False,
+                         bandwidth: float = 0.0) -> bool:
         """通用后端连接流程：connect → 成功则切状态 + 下发参数 + 启动 IQ 流。
 
         被 _connect_dialog（用户手动选设备）和 _auto_enumerate_and_connect
@@ -2029,6 +2030,12 @@ class MainWindow(QMainWindow):
             backend.set_sample_rate(float(sample_rate))
         except Exception as e:
             self.statusBar().showMessage(f"采样率应用失败: {e}", 4000)
+        # 带宽：0=自动（与后端 bandwidth_hz 语义一致）。此前面板设的带宽
+        # 被静默丢弃——只下发了采样率/增益，用户调了也没用。
+        try:
+            backend.set_bandwidth(float(bandwidth))
+        except Exception as e:
+            self.statusBar().showMessage(f"带宽应用失败: {e}", 4000)
         # 连接后立即下发默认中心频率（从控制面板读回，否则 98.5MHz）
         default_freq = 98_500_000.0
         try:
@@ -4569,6 +4576,7 @@ class MainWindow(QMainWindow):
             gain=float(dev.get("_gain", 20.0)),
             ppm=int(dev.get("_ppm", 0)),
             agc=False,
+            bandwidth=float(dev.get("_bandwidth", 0.0)),
         )
         if ok:
             try:

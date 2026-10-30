@@ -251,11 +251,10 @@ ALLOWED_UNCONNECTED = {
     "main_window.py:port_edit": "GNSS 对话框：Accepted 后统一读 text()",
     "main_window.py:baud_combo": "GNSS 对话框：Accepted 后统一读 currentData()",
     "spectrum_widget.py:menu": "右键菜单：exec() 返回值直接判定，无需 connect",
-    # 本轮审计确认的**真**死控件（未修，需后端/主窗口配合，见审计报告）
-    "module_panel.py:self.bw_spin": (
-        "【已知未修 A 类】带宽无 connect 且无人读取：连接协议 dev 里根本没有 "
-        "带宽字段，main_window._connect_backend 也不接受 bandwidth；需主窗口侧 "
-        "补下发链后再接，本轮只报不改"),
+    # 2026-10-30 已修（C 类"改了不下发"）：带宽进 dev["_bandwidth"] 载荷，
+    # main_window._connect_backend 增加 bandwidth 参数并下发 backend.set_bandwidth。
+    # 旋钮本身仍走"Accepted 后统一读 value()"（与 sr_combo/gain_spin 同款），故留本条。
+    "module_panel.py:self.bw_spin": "连接对话框：Accepted 后统一读 value() → dev[\"_bandwidth\"]（已下发）",
 }
 
 
@@ -361,20 +360,41 @@ def test_allowlist_entries_still_unconnected():
 # ===========================================================================
 # 4. 台账哨兵：本轮"只报未修"的项（改修后请同步更新断言与理由）
 # ===========================================================================
-def test_known_unfixed_module_bandwidth_is_documented():
-    """module_panel 带宽旋钮（bw_spin）本轮未修：它是真的没接线，
-    且连接协议里没有带宽字段。修它时请同步删除 ALLOWED_UNCONNECTED 里
-    那条 '【已知未修 A 类】' 登记（AGENTS.md：不许删断言，只许随修复更新）。"""
+def test_module_bandwidth_now_reaches_backend():
+    """带宽旋钮（bw_spin）必须真的进连接载荷并被下发到后端 set_bandwidth。
+
+    2026-10-30 修复前（C 类"改了不下发"）：dev 载荷只有 _sample_rate/_gain，
+    main_window._connect_backend 也不接受 bandwidth —— 用户调带宽被静默丢弃，
+    连接永远走后端默认（0=自动）。本条由"已知未修"哨兵随修复更新而来
+    （AGENTS.md：不许删断言，只许随修复更新）。"""
     from module_panel import ModulePanel
     p = ModulePanel()
     assert p.bw_spin is not None
-    assert "【已知未修 A 类】" in ALLOWED_UNCONNECTED["module_panel.py:self.bw_spin"]
+    mod_src = open(os.path.join(_ROOT, "desktop", "module_panel.py"),
+                   encoding="utf-8").read()
+    mw_src = open(os.path.join(_ROOT, "desktop", "main_window.py"),
+                  encoding="utf-8").read()
+    assert 'dev["_bandwidth"] = float(self.bw_spin.value())' in mod_src, \
+        "带宽没进连接载荷（用户设了白设）"
+    assert "bandwidth: float = 0.0" in mw_src, \
+        "_connect_backend 必须接受 bandwidth 参数"
+    assert "backend.set_bandwidth(float(bandwidth))" in mw_src, \
+        "带宽必须下发到后端 set_bandwidth"
+    assert 'dev.get("_bandwidth"' in mw_src, \
+        "_on_panel_device_connect 必须把 _bandwidth 传下去"
 
 
-def test_anr_strength_slot_empty_is_reported_not_silently_fixed():
-    """main_window._on_anr_strength 是 `pass`（ANR 强度滑杆改了完全没反应）。
-    main_window 本轮禁用改动，故只登记不断言修复；这里钉住'槽确实存在'，
-    等解禁修好后本条应改为断言真实下发。"""
+def test_anr_strength_applies_through_panel_internal_write():
+    """ANR 强度滑杆实际是生效的，不是死控件（更正审计误判）。
+
+    AnrPanel._on_strength_changed 内部直接写 `self._anr.cfg.alpha = alpha`；
+    main_window._on_anr_strength 的 pass 只是冗余通知槽，不影响生效。
+    2026-10-30 更正：原记"改了完全没反应"只看了主窗口槽为 pass，没看面板
+    内部已写 cfg.alpha —— 属误判。这里钉住真实生效路径不许回退。"""
+    anr_src = open(os.path.join(_ROOT, "desktop", "anr_panel.py"),
+                   encoding="utf-8").read()
+    assert "self._anr.cfg.alpha = alpha" in anr_src, \
+        "ANR 强度生效路径（面板写 cfg.alpha）不许回退"
     src = open(os.path.join(_ROOT, "desktop", "main_window.py"),
                encoding="utf-8").read()
     assert "def _on_anr_strength" in src, "ANR 强度槽消失请核对台账"

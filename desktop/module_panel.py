@@ -359,6 +359,11 @@ class ModulePanel(QWidget):
         dev = dict(self._devices[idx])
         dev["_sample_rate"] = self.selected_sample_rate_hz()
         dev["_gain"] = self.selected_gain_db()
+        # 带宽也进载荷（此前只有采样率/增益下发，用户设的带宽被静默丢弃）
+        try:
+            dev["_bandwidth"] = float(self.bw_spin.value())
+        except Exception:  # noqa: BLE001
+            dev["_bandwidth"] = 0.0  # 0=自动（与后端 bandwidth_hz 语义一致）
         self.device_selected.emit(dev)
         QMessageBox.information(self, "已选择设备",
                                 f"{dev.get('label')}\n（真实连接由后端完成）")
