@@ -56,7 +56,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 109);
+    QCOMPARE(specs.size(), 135);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -1282,6 +1282,243 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "绝不假装已连; 用 get_vna_status 复核 connected。"
             "副作用: 打开/关闭串口并跑版本握手（硬件状态）。"
             "能力边界: 只管连接; 扫频参数用 set_vna_sweep，校准用 vna_calibration。")},
+        {"set_audio_output", QString::fromUtf8(
+            "写入：设置音频输出音量与/或输出设备（与 UI 音量滑杆/输出设备选择同一状态）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: volume（0..100）与 device 至少提供其一（全缺则不下发任何变更）; "
+            "device=\"default\"=系统默认输出，否则为 QMediaDevices 输出设备 "
+            "description 精确串。"
+            "失败恢复: 越界音量/未知设备被明确拒绝（不静默夹值）——设备匹配不到时 "
+            "ok:false 并列出可用 description; 成功后持久化（rx/volume、AiConfig.audioDevice），"
+            "重启后保持。"
+            "副作用: 立即改变音量或热切换输出设备，听感随之变化。"
+            "能力边界: 只管音频输出; 解调/静噪另用 set_mode/set_squelch。")},
+        {"set_scan_params", QString::fromUtf8(
+            "写入：设置扫描面板参数（驻留/门限/方向/命中停留/消失延时/固定停留/只扫书签）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: dwell_ms（100..2000）/threshold_db（-120..0 dBFS）/"
+            "direction（up/down/pingpong）/hold_mode（until_signal_gone/fixed_ms）/"
+            "linger_ms（0..60000）/hold_ms（0..60000）/bookmarks_only 至少提供其一"
+            "（全缺则不下发任何变更）。"
+            "失败恢复: 任一越界/枚举外取值被参数校验层明确拒绝（不静默夹值）——"
+            "改到范围内重试; 类型不符的字段被静默跳过。"
+            "副作用: 已写入扫描面板，下一次『开始扫描』生效（值在启动时读入扫描器）"
+            "——进行中的扫描不受影响。"
+            "能力边界: 只设扫描参数; 起停扫描不在本工具面; 走桌面 UI 控制面，"
+            "headless（无 UI 控制面）诚实报错不可用。")},
+        {"set_persistence", QString::fromUtf8(
+            "写入：设置频谱余辉模式（0=关/1=低/2=高）。属于写动作，手动模式下被拦截。"
+            "前置条件: mode 必填，取 off/low/high。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变余辉叠加显示，频谱观感随之变化。"
+            "能力边界: 只设余辉模式; 瀑布深度/速度另用 "
+            "set_waterfall_depth/set_waterfall_speed; 走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_waterfall_depth", QString::fromUtf8(
+            "写入：设置瀑布图深度（行数）。属于写动作，手动模式下被拦截。"
+            "前置条件: rows 必填，取 tokens::kWaterfallDepthChoices 六档精确值之一"
+            "（128/256/512/1024/2048/4096）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝（不近似取整）——按枚举取值重试。"
+            "副作用: 立即调整瀑布环形缓冲深度，保留的历史行数随之变化。"
+            "能力边界: 只设深度档位; 滚动速度另用 set_waterfall_speed; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_waterfall_speed", QString::fromUtf8(
+            "写入：设置瀑布滚动速度（行/帧）。属于写动作，手动模式下被拦截。"
+            "前置条件: speed 必填，取 1/2/4。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变瀑布下滚速度。"
+            "能力边界: 只设滚动速度; 深度另用 set_waterfall_depth; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_builtin_palette", QString::fromUtf8(
+            "写入：设置瀑布/频谱内置色图。属于写动作，手动模式下被拦截。"
+            "前置条件: palette 必填，取 classic/monochrome/viridis"
+            "（UI 词：经典/单色/Viridis）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变显示配色。"
+            "能力边界: 只设内置色图; 自定义色图不在本工具面; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_spectrum_db_range", QString::fromUtf8(
+            "写入：设置频谱 dB 显示窗（下限/上限）。属于写动作，手动模式下被拦截。"
+            "前置条件: min_db 与 max_db 必填; min_db 取 -140..-20（下限旋钮同域），"
+            "max_db 取 -40..20（上限旋钮同域）; 且 min_db<max_db。"
+            "失败恢复: 越界或 min_db>=max_db 被明确拒绝（不静默夹值）——"
+            "改到范围内且下限低于上限后重试。"
+            "副作用: 立即改变频谱纵向显示窗（噪底/谱线落位随之变化）。"
+            "能力边界: 只设显示窗; 不改实际增益/衰减; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_spectrum_zoom", QString::fromUtf8(
+            "写入：设置频谱缩放因子。属于写动作，手动模式下被拦截。"
+            "前置条件: zoom 必填且为有限数，取 1.0..16.0（tokens::kZoomMin..kZoomMax）——"
+            "1.0=默认最宽 span，越大越放大（可视 span 越窄），右缘滑条 0.1 步进同域"
+            "（spectrum_widget.cpp:657-663 zoomSlider_ 映射）。"
+            "失败恢复: 越界/非有限值被明确拒绝（画布端 setZoomFactor 会 clamp 到 1..16，"
+            "为避免静默夹值工具面直接拒绝）——改到范围内重试。"
+            "副作用: 立即改变可视频率跨度。"
+            "能力边界: 只设缩放; 中心频率另用 tune_frequency; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_db_grid_step", QString::fromUtf8(
+            "写入：设置 dB 参考格线间距。属于写动作，手动模式下被拦截。"
+            "前置条件: step_db 必填，取 10/20/40 精确值（tokens::kDbGridStepChoices）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变 y 轴格线密度/标注。"
+            "能力边界: 只设格线间距; dB 显示窗另用 set_spectrum_db_range; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_peak_threshold", QString::fromUtf8(
+            "写入：设置峰值检测门限（高于噪底/中值的 dB 数）。属于写动作，手动模式下被拦截。"
+            "前置条件: threshold_db 必填整数，5..40"
+            "（tokens::kPeakThresholdMin..kPeakThresholdMax）。"
+            "失败恢复: 越界/非整数被参数校验层明确拒绝（不静默夹值）——改到范围内重试。"
+            "副作用: 立即改变峰值标记的检出门限。"
+            "能力边界: 只设峰值门限; 峰值保持另用 set_peak_hold; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_peak_hold", QString::fromUtf8(
+            "写入：设置最大/最小保持曲线开关与衰减速度。属于写动作，手动模式下被拦截。"
+            "前置条件: max_hold/min_hold/decay（slow/medium/fast=0.5/1.5/3.0 dB/帧，"
+            "tokens::kMaxHoldDecaySlow/Medium/Fast）至少提供其一（全缺则不下发任何变更）。"
+            "失败恢复: 枚举外 decay 被参数校验层明确拒绝; 类型不符的字段被静默跳过——"
+            "改正后重试。"
+            "副作用: 立即改变保持曲线的开关/衰减显示。"
+            "能力边界: 只设峰值保持; 检出门限另用 set_peak_threshold; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_edge_rail_visibility", QString::fromUtf8(
+            "写入：显示/隐藏频谱右缘控制条（缩放/dB 上下限滑条）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: visible 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即改变右缘控制条显隐并持久化（与设置对话框『界面』页同一开关）。"
+            "能力边界: 只设右缘控制条显隐; 滑条的值另用 "
+            "set_spectrum_zoom/set_spectrum_db_range; 走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_source_type", QString::fromUtf8(
+            "写入：切换信号源类型（本地 rtl-sdr / rtl_tcp 远程 / 测试信号）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: source_type 必填，取 local_rtlsdr/rtl_tcp/test_signal。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试; "
+            "切换失败由 UI 状态回显，不假报已切换。"
+            "副作用: 立即切换信号源; test_signal=合成 IQ 非真实接收（切走即丢弃）; "
+            "切回真实源会拆除合成源。"
+            "能力边界: 只切源类型; rtl_tcp 只是切到远程模式，真正建链用 "
+            "connect_network_source; 走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_spyserver", QString::fromUtf8(
+            "写入：开启/关闭 SpyServer 服务端监听（把本机频谱外送远程）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔; port 可选 1024..65535（缺省保持当前端口）。"
+            "失败恢复: 越界端口被参数校验层明确拒绝; 绑定失败（端口被占？）→ok:false "
+            "诚实报『监听失败』，绝不谎报监听中。"
+            "副作用: 开启/停止本机监听线程，端口设置随之持久化。"
+            "能力边界: 只管监听开关/端口; 远程客户端连接管理不在本工具面; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"connect_gnss", QString::fromUtf8(
+            "写入：连接/断开 GNSS（NMEA 0183 串口）定位源。属于写动作，手动模式下被拦截。"
+            "前置条件: action=connect（缺省）时 device 必填非空（如 /dev/ttyUSB0）; "
+            "baud 可选 9600/38400/115200（缺省 9600）; action=disconnect 不需要 device。"
+            "失败恢复: 端口打开/启动失败→ok:false 并带错误串，绝不假装已连接; "
+            "用 uiGnssRunning() 回读复核。"
+            "副作用: 打开/关闭串口并异步启停接收线程; start() 是异步的——"
+            "『已发起连接』不等于『已定位』。"
+            "能力边界: 只管 GNSS 连接; 地图图层显隐另用 set_map_layers; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_map_layers", QString::fromUtf8(
+            "写入：显示/隐藏地图图层（GNSS 轨迹 / ADS-B 航迹 / 卫星）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: gnss/adsb/sat 至少提供其一（全缺则不下发任何变更）。"
+            "失败恢复: 非布尔字段被静默跳过——改正后重试。"
+            "副作用: 立即改变地图图层显隐。"
+            "能力边界: 只设图层显隐; 图层数据来源另用 connect_gnss 等; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_sat_pass_template", QString::fromUtf8(
+            "写入：按卫星过境生成捕获计划并登记为待执行计划（sat_pass_capture 模板）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: sat_name 必填非空; lat_deg（-90..90）/lon_deg（-180..180）可选"
+            "（缺省回退 AiConfig 本站位置，须已 set_station_position）; "
+            "hours_ahead 1..24（缺省 12）。"
+            "失败恢复: 未提供坐标且未设置本站位置→明确报错（先 set_station_position）; "
+            "计划生成失败或 demo 计划→ok:false 并带原因，绝不让 demo 计划驱动真实捕获。"
+            "副作用: 登记待执行计划（executed=false）——需用户确认后经『执行待执行计划』"
+            "或 TaskRunner::runPendingPlan 执行，不自动开录。"
+            "能力边界: 只生成并登记计划; 返回 sat_name/AOS/max_el_deg/capture_freq_hz/"
+            "template_name=\"sat_pass_capture\"; 过境预报精度受 TLE 时效限制。")},
+        {"set_tune_step", QString::fromUtf8(
+            "写入：设置调谐步进（Hz）。属于写动作，手动模式下被拦截。"
+            "前置条件: step_hz 必填，取 1/10/100/1000/10000/100000/1000000"
+            "（kStepValuesHz 档位）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变步进旋钮/快捷调谐的步长并持久化。"
+            "能力边界: 只设步进; 频率本身另用 tune_frequency; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"analyze_vna_permeability", QString::fromUtf8(
+            "读取：用当前 NanoVNA 扫频数据（S11/S21）按 NRW 短路夹具法计算复数磁导率 μr。"
+            "前置条件: thickness_mm 必填正数（mm，与 VNA 面板『夹具厚』输入同单位）; "
+            "VNA 已连接且已有扫频点（≥3）。"
+            "失败恢复: 未连接/扫频点不足/推导病态→ok:false 并带原因（valid=false），"
+            "绝不伪造 μr 数值。"
+            "副作用: 无（纯计算，不改任何状态，不拦截手动模式）。"
+            "能力边界: 只做 vna::permeabilityNRW 两口近似; 返回 valid、mu_real（μr' 逐频点）、"
+            "mu_imag（μr'' 逐频点）、note（病态/不足说明）; 精度受校准/夹具限制; "
+            "扫频/校准另用 set_vna_sweep/vna_calibration。")},
+        {"set_cat_control", QString::fromUtf8(
+            "写入：连接 CAT 串口控制电台（CI-V / Kenwood），打通后续发射链路。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: device 必填非空串口路径; baud 可选 "
+            "9600/19200/57600/115200（缺省 19200）; protocol 可选 civ/kenwood（缺省 civ）; "
+            "confirm 必填且必须为 true——发射链路操作需 confirm=true 显式确认"
+            "（发射受无线电管理条例约束）。"
+            "失败恢复: confirm 非 true→明确拒绝不执行; 连接失败→ok:false 并带电台面板"
+            "状态文案，绝不假装已连接。"
+            "副作用: 打开串口并按协议握手（硬件状态）。"
+            "能力边界: 只管 CAT 连接; 实际发射另用 send_cw/send_ax25_beacon/soapy_transmit"
+            "（各带 confirm 确认门与法规提示）; 走桌面 UI 控制面，headless 诚实报错。")},
+        {"send_cw", QString::fromUtf8(
+            "写入：经 CAT 电台发射 CW 电报。属于写动作，手动模式下被拦截。"
+            "confirm 必填且必须为 true 显式确认（发射受无线电管理条例约束）。"
+            "前置条件: text 必填非空; wpm 可选 5..60（缺省 20）; confirm 必填 true。"
+            "失败恢复: confirm 非 true→明确拒绝不发射; 发射失败→ok:false 并带电台面板"
+            "状态文案（如『请先连接电台』），绝不假报已发射。"
+            "副作用: 真实射频发射（占用频率、触发 PTT），旁人可收听。"
+            "能力边界: 只经 CAT 电台发 CW; 须先 set_cat_control 连接电台; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
+        {"send_ax25_beacon", QString::fromUtf8(
+            "写入：经电台发射 AX.25 信标（呼号/路径/消息）。属于写动作，手动模式下被拦截。"
+            "confirm 必填且必须为 true 显式确认（发射受无线电管理条例约束）。"
+            "前置条件: call 必填呼号; message 必填非空; path 可选"
+            "（缺省空=无中继路径）; confirm 必填 true。"
+            "失败恢复: confirm 非 true→明确拒绝不发射; 呼号无效/发射失败→ok:false "
+            "并带电台面板状态文案，绝不假报已发射。"
+            "副作用: 真实射频发射信标（占用频率），旁人可收听。"
+            "能力边界: 只发 AX.25 信标; 走桌面 UI 控制面，headless 诚实报错。")},
+        {"soapy_transmit", QString::fromUtf8(
+            "写入：打开 Soapy 发射设备并设到指定频率。属于写动作，手动模式下被拦截。"
+            "confirm 必填且必须为 true 显式确认（发射受无线电管理条例约束）。"
+            "前置条件: driver 必填非空（Soapy 驱动名，如 driver=plutosdr）; "
+            "freq_mhz 必填且 >0（0..100000 MHz）; confirm 必填 true。"
+            "失败恢复: confirm 非 true→明确拒绝不执行; 打开失败→ok:false 并带电台面板"
+            "状态文案，绝不假装已打开发射设备。"
+            "副作用: 打开发射硬件到指定频率。"
+            "能力边界: 只做『打开 Soapy 发射设备』一步——PTT/载波保持人工按住，"
+            "工具不做键控/持续发射; 走桌面 UI 控制面，headless 诚实报错。")},
+        {"set_ui_scale", QString::fromUtf8(
+            "写入：设置 UI 缩放并即时生效（与设置对话框『外观』页同一路径）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: scale 必填，取 0.7/1.0/1.25/1.5（设置对话框 UI 缩放档位同域）。"
+            "失败恢复: 档位外取值被参数校验层明确拒绝——按档位取值重试。"
+            "副作用: 写入 ui/scaleFactor 并立即重刷样式"
+            "（tokens::setUserScale + buildDarkQss），界面尺寸即时变化并持久化。"
+            "能力边界: 只设 UI 缩放; 主题只读（默认暗色）; 与设置对话框同路径即时生效，"
+            "无需重启。")},
+        {"set_language", QString::fromUtf8(
+            "写入：设置 UI 语言标签并持久化。属于写动作，手动模式下被拦截。"
+            "前置条件: language 必填，取 zh_CN/en/ja（存储写全量标签，l10n.h 值域; "
+            "归一规则 zh*→zh_CN、en*→en、ja*→ja、其余→zh_CN）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 已持久化（ui/language），需重启生效"
+            "（启动时 main.cpp:96-101 才装翻译器）——不做假实时切换。"
+            "能力边界: 只设语言标签; 翻译缺失时诚实回退源语言（简体中文）。")},
+        {"set_left_groups", QString::fromUtf8(
+            "写入：显示/隐藏左侧栏一个分组面板。属于写动作，手动模式下被拦截。"
+            "前置条件: group 必填，取 tokens::kLeftPanelIds 的 12 个面板 id 之一; "
+            "visible 必填布尔。单组单调（原子积木，批量=多次调用）。"
+            "失败恢复: 枚举外 id/非布尔被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 该组显隐立即生效并持久化（ui/hiddenLeftGroups）。"
+            "能力边界: 只管左栏分组显隐; 右栏面板/折叠另不在本工具面; "
+            "走桌面 UI 控制面，headless 诚实报错。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -1323,7 +1560,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
     const QString doc = generateToolDocumentation();
     QVERIFY(!doc.isEmpty());
 
-    // Every one of the 38 tools appears as its own "## <name>" block.
+    // Every one of the 135 tools appears as its own "## <name>" block.
     int headerCount = 0;
     for (const ToolSchemaSpec& s : specs) {
         QVERIFY2(doc.contains(QString("## %1 ").arg(s.name)), qPrintable(s.name));
@@ -1338,7 +1575,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 90);
+    QCOMPARE(headerCount, 135);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

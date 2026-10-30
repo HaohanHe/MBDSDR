@@ -175,7 +175,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 109);
+    QCOMPARE(tools.size(), 135);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -915,6 +915,35 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         else if (name == "set_watch_recording") { a["enabled"] = true; a["threshold_db"] = -50.0; }
         else if (name == "set_station_position") { a["lat_deg"] = 0.0; a["lon_deg"] = 0.0; }
         else if (name == "vna_connect") { a["action"] = "connect"; a["port"] = "COM99"; }
+        // D1 tool-gap fill round 3 (2026-10-30): schema-valid args for the 25
+        // new writes (the TX four carry confirm=true -- the gate fires first
+        // anyway, these stay honest) and the one new read.
+        else if (name == "set_audio_output") a["volume"] = 50.0;
+        else if (name == "set_scan_params") { a["dwell_ms"] = 500.0; a["threshold_db"] = -60.0; a["direction"] = "up"; }
+        else if (name == "set_persistence") a["mode"] = "low";
+        else if (name == "set_waterfall_depth") a["rows"] = 512.0;
+        else if (name == "set_waterfall_speed") a["speed"] = 2.0;
+        else if (name == "set_builtin_palette") a["palette"] = "classic";
+        else if (name == "set_spectrum_db_range") { a["min_db"] = -120.0; a["max_db"] = 0.0; }
+        else if (name == "set_spectrum_zoom") a["zoom"] = 2.0;
+        else if (name == "set_db_grid_step") a["step_db"] = 10.0;
+        else if (name == "set_peak_threshold") a["threshold_db"] = 20.0;
+        else if (name == "set_peak_hold") { a["max_hold"] = true; a["decay"] = "medium"; }
+        else if (name == "set_edge_rail_visibility") a["visible"] = true;
+        else if (name == "set_source_type") a["source_type"] = "test_signal";
+        else if (name == "set_spyserver") { a["enabled"] = true; a["port"] = 5555.0; }
+        else if (name == "connect_gnss") { a["action"] = "connect"; a["device"] = "COM99"; a["baud"] = 9600.0; }
+        else if (name == "set_map_layers") a["gnss"] = true;
+        else if (name == "set_sat_pass_template") { a["sat_name"] = "ISS"; a["hours_ahead"] = 12.0; }
+        else if (name == "set_tune_step") a["step_hz"] = 1000.0;
+        else if (name == "analyze_vna_permeability") a["thickness_mm"] = 10.0;
+        else if (name == "set_cat_control") { a["device"] = "COM99"; a["confirm"] = true; }
+        else if (name == "send_cw") { a["text"] = "TEST"; a["confirm"] = true; }
+        else if (name == "send_ax25_beacon") { a["call"] = "BG1AAA"; a["message"] = "gate_probe"; a["confirm"] = true; }
+        else if (name == "soapy_transmit") { a["driver"] = "driver=plutosdr"; a["freq_mhz"] = 435.0; a["confirm"] = true; }
+        else if (name == "set_ui_scale") a["scale"] = 1.0;
+        else if (name == "set_language") a["language"] = "zh_CN";
+        else if (name == "set_left_groups") { a["group"] = "源与连接"; a["visible"] = true; }
         return a;
     };
 
@@ -942,22 +971,26 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
             // reads also honestly return ok:false here: this headless gate test
             // does not inject a WorkspaceController, so they report "工作台控制器未注入".
             // That is an honest not-injected empty state, not a gate block.
+            // analyze_vna_permeability likewise honestly returns ok:false with no
+            // NanoVNA connected ("未连接 NanoVNA：无扫频数据可分析").
             if (s.name != QLatin1String("predict_passes")
                 && s.name != QLatin1String("list_satellites")
                 && s.name != QLatin1String("get_workspace_layout")
-                && s.name != QLatin1String("list_ui_components")) {
+                && s.name != QLatin1String("list_ui_components")
+                && s.name != QLatin1String("analyze_vna_permeability")) {
                 QVERIFY2(r.contains("\"ok\":true"),
                          qPrintable(s.name + " (read) must execute ok:true: " + r));
             }
         }
     }
 
-    // The frozen split: 68 writes / 41 reads (109 tools; workspace domain three
+    // The frozen split: 93 writes / 42 reads (135 tools; workspace domain three
     // gated writes + APRS/colormap reads + the template runner gated write;
     // G1 get_task_history read, G2 memory_delete gated write + memory_stats read;
-    // list_satellites read-only TLE cache catalog; D1 tool-gap fill +19 writes).
-    QCOMPARE(writes, 68);
-    QCOMPARE(reads, 41);
+    // list_satellites read-only TLE cache catalog; D1 tool-gap fill +19 writes;
+    // D1 round 3 +25 writes + analyze_vna_permeability read).
+    QCOMPARE(writes, 93);
+    QCOMPARE(reads, 42);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/

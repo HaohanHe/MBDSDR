@@ -966,6 +966,39 @@ void SpectrumWidget::setWaterfallDepth(int rows) {
     mbdsdr::core::AppSettings().setValue(tokens::kSettingsKeyWfDepth, rows);
 }
 
+// ---- D1 reverse-audit: mirrors in the SAME phase82 paradigm. Each one pushes
+// into the SAME toolbar control the user touches, WITHOUT blocking signals: the
+// existing change handler persists the key and applies to the canvas, so the
+// control stays the single source of truth. A value with no matching item is an
+// honest no-op (never snap to a different tier).
+void SpectrumWidget::setDbGridStepDb(int stepDb) {
+    if (auto* c = findChild<QComboBox*>("dbGridStepCombo")) {
+        for (int i = 0; i < c->count(); ++i) {
+            if (c->itemData(i).toInt() == stepDb) {
+                c->setCurrentIndex(i);   // fires the existing handler
+                return;
+            }
+        }
+    }
+}
+
+void SpectrumWidget::setPeakThresholdDb(int db) {
+    // Member spinbox: setValue fires the valueChanged handler (key + canvas);
+    // the widget's own 5..40 range clamps out-of-band values as always.
+    if (peakThreshSpin_) peakThreshSpin_->setValue(db);
+}
+
+void SpectrumWidget::setMaxHoldDecayDb(double dbPerFrame) {
+    if (auto* c = findChild<QComboBox*>("maxHoldDecayCombo")) {
+        for (int i = 0; i < c->count(); ++i) {
+            if (std::abs(c->itemData(i).toDouble() - dbPerFrame) < 1e-6) {
+                c->setCurrentIndex(i);   // fires the existing handler
+                return;
+            }
+        }
+    }
+}
+
 void SpectrumWidget::setMaxHoldEnabled(bool on) {
     if (canvas_) canvas_->setMaxHoldEnabled(on);
 }

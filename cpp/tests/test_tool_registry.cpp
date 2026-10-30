@@ -97,6 +97,18 @@ const QSet<QString> kAllCxxTools = {
     "set_recording_stereo", "set_recording_ignore_squelch",
     "set_recording_max_segment", "set_gated_recording", "set_watch_recording",
     "set_station_position", "vna_connect",
+    // D1 tool-gap fill round 3 (2026-10-30 reverse audit): 26 new tools in
+    // SPEC order (25 writes + analyze_vna_permeability read), 109 -> 135.
+    "set_audio_output", "set_scan_params",
+    "set_persistence", "set_waterfall_depth", "set_waterfall_speed",
+    "set_builtin_palette", "set_spectrum_db_range", "set_spectrum_zoom",
+    "set_db_grid_step", "set_peak_threshold", "set_peak_hold",
+    "set_edge_rail_visibility",
+    "set_source_type", "set_spyserver", "connect_gnss",
+    "set_map_layers", "set_sat_pass_template", "set_tune_step",
+    "analyze_vna_permeability",
+    "set_cat_control", "send_cw", "send_ax25_beacon", "soapy_transmit",
+    "set_ui_scale", "set_language", "set_left_groups",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -144,6 +156,17 @@ const QSet<QString> kExpectedWriteTools = {
     "set_recording_stereo", "set_recording_ignore_squelch",
     "set_recording_max_segment", "set_gated_recording", "set_watch_recording",
     "set_station_position", "vna_connect",
+    // D1 tool-gap fill round 3 (2026-10-30 reverse audit): 25 new gated
+    // writes (the 26th, analyze_vna_permeability, is read-only).
+    "set_audio_output", "set_scan_params",
+    "set_persistence", "set_waterfall_depth", "set_waterfall_speed",
+    "set_builtin_palette", "set_spectrum_db_range", "set_spectrum_zoom",
+    "set_db_grid_step", "set_peak_threshold", "set_peak_hold",
+    "set_edge_rail_visibility",
+    "set_source_type", "set_spyserver", "connect_gnss",
+    "set_map_layers", "set_sat_pass_template", "set_tune_step",
+    "set_cat_control", "send_cw", "send_ax25_beacon", "soapy_transmit",
+    "set_ui_scale", "set_language", "set_left_groups",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -192,6 +215,8 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "get_task_history", "memory_stats",
     // Read-only TLE-cache catalog (desktop-only read; prerequisite for predict_passes).
     "list_satellites",
+    // D1 round 3: NRW permeability analysis off the live VNA sweep (read-only).
+    "analyze_vna_permeability",
 };
 } // namespace
 
@@ -217,7 +242,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 109, qPrintable(QString("expected 109 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 135, qPrintable(QString("expected 135 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -239,7 +264,7 @@ void TestToolRegistry::completeness_noOrphanExecutor() {
 }
 
 // The write/read gate is read from the registry (ToolSchemaSpec::write). It must
-// match the frozen 6-write / 2-read contract.
+// match the frozen 93-write / 42-read contract (135 tools).
 void TestToolRegistry::writeReadSplit_registryMatchesContract() {
     QSet<QString> actualWrite;
     for (const ToolSchemaSpec& s : registeredToolSpecs())
@@ -342,15 +367,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (109 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (135 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 109);
+    QCOMPARE(defs.size(), 135);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("vna_connect"));
+    QCOMPARE(defs.last().name, QString("set_left_groups"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

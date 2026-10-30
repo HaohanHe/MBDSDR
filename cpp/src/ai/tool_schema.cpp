@@ -2913,6 +2913,831 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // D1 tool-gap fill round 3 (2026-10-30 reverse audit): B2/D/E/F/G/H/I2/J/K/L
+    // set_audio_output (write -- gated; D1-B2) -----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_audio_output";
+        s.description = QString::fromUtf8(
+            "写入：设置音频输出音量与/或输出设备（与 UI 音量滑杆/输出设备选择同一状态）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: volume（0..100）与 device 至少提供其一（全缺则不下发任何变更）; "
+            "device=\"default\"=系统默认输出，否则为 QMediaDevices 输出设备 "
+            "description 精确串。"
+            "失败恢复: 越界音量/未知设备被明确拒绝（不静默夹值）——设备匹配不到时 "
+            "ok:false 并列出可用 description; 成功后持久化（rx/volume、AiConfig.audioDevice），"
+            "重启后保持。"
+            "副作用: 立即改变音量或热切换输出设备，听感随之变化。"
+            "能力边界: 只管音频输出; 解调/静噪另用 set_mode/set_squelch。");
+        s.write = true;
+        ToolParamSpec v;
+        v.name = "volume";
+        v.type = "number";
+        v.description = QString::fromUtf8("音量（0..100，可选，缺省保持当前）");
+        // 0..100 与设置对话框音量滑杆同域（settings_dialog.cpp:107 volumeSlider_）。
+        v.hasMin = true; v.min = 0.0;
+        v.hasMax = true; v.max = 100.0;
+        v.required = false;
+        ToolParamSpec d;
+        d.name = "device";
+        d.type = "string";
+        d.description = QString::fromUtf8(
+            "输出设备（可选）：\"default\"=系统默认，否则为输出设备 description 精确串");
+        d.required = false;
+        s.params << v << d;
+        out.append(s);
+    }
+
+    // set_scan_params (write -- gated; D1-D1) -----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_scan_params";
+        s.description = QString::fromUtf8(
+            "写入：设置扫描面板参数（驻留/门限/方向/命中停留/消失延时/固定停留/只扫书签）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: dwell_ms（100..2000）/threshold_db（-120..0 dBFS）/"
+            "direction（up/down/pingpong）/hold_mode（until_signal_gone/fixed_ms）/"
+            "linger_ms（0..60000）/hold_ms（0..60000）/bookmarks_only 至少提供其一"
+            "（全缺则不下发任何变更）。"
+            "失败恢复: 任一越界/枚举外取值被参数校验层明确拒绝（不静默夹值）——"
+            "改到范围内重试; 类型不符的字段被静默跳过。"
+            "副作用: 已写入扫描面板，下一次『开始扫描』生效（值在启动时读入扫描器）"
+            "——进行中的扫描不受影响。"
+            "能力边界: 只设扫描参数; 起停扫描不在本工具面; 走桌面 UI 控制面，"
+            "headless（无 UI 控制面）诚实报错不可用。");
+        s.write = true;
+        ToolParamSpec dw;
+        dw.name = "dwell_ms";
+        dw.type = "number";
+        dw.description = QString::fromUtf8("驻留（ms，100..2000，可选，缺省保持当前）");
+        // 边界逐字取 scanDwellSpin_ setRange（main_window.cpp:1846）。
+        dw.hasMin = true; dw.min = 100.0;
+        dw.hasMax = true; dw.max = 2000.0;
+        dw.required = false;
+        ToolParamSpec th;
+        th.name = "threshold_db";
+        th.type = "number";
+        th.description = QString::fromUtf8("命中门限（dBFS 频谱域，-120..0，可选）");
+        // 边界逐字取 scanThrSpin_ setRange（main_window.cpp:1854）。
+        th.hasMin = true; th.min = -120.0;
+        th.hasMax = true; th.max = 0.0;
+        th.required = false;
+        ToolParamSpec di;
+        di.name = "direction";
+        di.type = "string";
+        di.description = QString::fromUtf8("扫描方向（up=向上/down=向下/pingpong=来回，可选）");
+        di.enumValues = QVariantList{"up", "down", "pingpong"};
+        di.required = false;
+        ToolParamSpec hm;
+        hm.name = "hold_mode";
+        hm.type = "string";
+        hm.description = QString::fromUtf8(
+            "命中停留（until_signal_gone=直到信号消失/fixed_ms=固定时长，可选）");
+        hm.enumValues = QVariantList{"until_signal_gone", "fixed_ms"};
+        hm.required = false;
+        ToolParamSpec lg;
+        lg.name = "linger_ms";
+        lg.type = "number";
+        lg.description = QString::fromUtf8(
+            "消失延时（ms，0..60000，until_signal_gone 时用，可选）");
+        // 边界逐字取 scanLingerSpin_ setRange（main_window.cpp:1869）。
+        lg.hasMin = true; lg.min = 0.0;
+        lg.hasMax = true; lg.max = 60000.0;
+        lg.required = false;
+        ToolParamSpec hg;
+        hg.name = "hold_ms";
+        hg.type = "number";
+        hg.description = QString::fromUtf8("固定停留（ms，0..60000，fixed_ms 时用，可选）");
+        // 边界逐字取 scanHoldMsSpin_ setRange（main_window.cpp:1875）。
+        hg.hasMin = true; hg.min = 0.0;
+        hg.hasMax = true; hg.max = 60000.0;
+        hg.required = false;
+        ToolParamSpec bo;
+        bo.name = "bookmarks_only";
+        bo.type = "boolean";
+        bo.description = QString::fromUtf8("只扫书签（可选）");
+        bo.required = false;
+        s.params << dw << th << di << hm << lg << hg << bo;
+        out.append(s);
+    }
+
+    // set_persistence (write -- gated; D1-E1) -----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_persistence";
+        s.description = QString::fromUtf8(
+            "写入：设置频谱余辉模式（0=关/1=低/2=高）。属于写动作，手动模式下被拦截。"
+            "前置条件: mode 必填，取 off/low/high。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变余辉叠加显示，频谱观感随之变化。"
+            "能力边界: 只设余辉模式; 瀑布深度/速度另用 "
+            "set_waterfall_depth/set_waterfall_speed; 走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "mode";
+        p.type = "string";
+        p.description = QString::fromUtf8("余辉模式（off=关/low=低/high=高）");
+        p.enumValues = QVariantList{"off", "low", "high"};
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // set_waterfall_depth (write -- gated; D1-E2) -------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_waterfall_depth";
+        s.description = QString::fromUtf8(
+            "写入：设置瀑布图深度（行数）。属于写动作，手动模式下被拦截。"
+            "前置条件: rows 必填，取 tokens::kWaterfallDepthChoices 六档精确值之一"
+            "（128/256/512/1024/2048/4096）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝（不近似取整）——按枚举取值重试。"
+            "副作用: 立即调整瀑布环形缓冲深度，保留的历史行数随之变化。"
+            "能力边界: 只设深度档位; 滚动速度另用 set_waterfall_speed; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec r;
+        r.name = "rows";
+        r.type = "number";
+        r.description = QString::fromUtf8(
+            "瀑布深度（行，128/256/512/1024/2048/4096 精确值，与 UI 下拉同档位）");
+        // 全档放行 = tokens::kWaterfallDepthChoices 原样（UI depthCombo_ 同一数组，
+        // 能力对拍不缩水：UI 能选的工具面必须都能设）。
+        for (int d : tokens::kWaterfallDepthChoices)
+            r.enumValues.append(d);
+        r.required = true;
+        s.params.append(r);
+        out.append(s);
+    }
+
+    // set_waterfall_speed (write -- gated; D1-E3) -------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_waterfall_speed";
+        s.description = QString::fromUtf8(
+            "写入：设置瀑布滚动速度（行/帧）。属于写动作，手动模式下被拦截。"
+            "前置条件: speed 必填，取 1/2/4。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变瀑布下滚速度。"
+            "能力边界: 只设滚动速度; 深度另用 set_waterfall_depth; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "speed";
+        p.type = "number";
+        p.description = QString::fromUtf8("瀑布滚动速度（行/帧，1/2/4）");
+        p.enumValues = QVariantList{1, 2, 4};
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // set_builtin_palette (write -- gated; D1-E4) -------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_builtin_palette";
+        s.description = QString::fromUtf8(
+            "写入：设置瀑布/频谱内置色图。属于写动作，手动模式下被拦截。"
+            "前置条件: palette 必填，取 classic/monochrome/viridis"
+            "（UI 词：经典/单色/Viridis）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变显示配色。"
+            "能力边界: 只设内置色图; 自定义色图不在本工具面; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "palette";
+        p.type = "string";
+        p.description = QString::fromUtf8("内置色图（classic=经典/monochrome=单色/viridis=Viridis）");
+        p.enumValues = QVariantList{"classic", "monochrome", "viridis"};
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // set_spectrum_db_range (write -- gated; D1-E5) -----------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_spectrum_db_range";
+        s.description = QString::fromUtf8(
+            "写入：设置频谱 dB 显示窗（下限/上限）。属于写动作，手动模式下被拦截。"
+            "前置条件: min_db 与 max_db 必填; min_db 取 -140..-20（下限旋钮同域），"
+            "max_db 取 -40..20（上限旋钮同域）; 且 min_db<max_db。"
+            "失败恢复: 越界或 min_db>=max_db 被明确拒绝（不静默夹值）——"
+            "改到范围内且下限低于上限后重试。"
+            "副作用: 立即改变频谱纵向显示窗（噪底/谱线落位随之变化）。"
+            "能力边界: 只设显示窗; 不改实际增益/衰减; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec lo;
+        lo.name = "min_db";
+        lo.type = "number";
+        lo.description = QString::fromUtf8("显示下限（dB，-140..-20）");
+        // 边界逐字取 dbMinSpin_ setRange（spectrum_widget.cpp:300-303）。
+        lo.hasMin = true; lo.min = tokens::kDbSpinLowerMin;
+        lo.hasMax = true; lo.max = tokens::kDbSpinLowerMax;
+        lo.required = true;
+        ToolParamSpec hi;
+        hi.name = "max_db";
+        hi.type = "number";
+        hi.description = QString::fromUtf8("显示上限（dB，-40..20，须大于 min_db）");
+        // 边界逐字取 dbMaxSpin_ setRange（spectrum_widget.cpp:305-308）。
+        hi.hasMin = true; hi.min = tokens::kDbSpinUpperMin;
+        hi.hasMax = true; hi.max = tokens::kDbSpinUpperMax;
+        hi.required = true;
+        s.params << lo << hi;
+        out.append(s);
+    }
+
+    // set_spectrum_zoom (write -- gated; D1-E6) --------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_spectrum_zoom";
+        s.description = QString::fromUtf8(
+            "写入：设置频谱缩放因子。属于写动作，手动模式下被拦截。"
+            "前置条件: zoom 必填且为有限数，取 1.0..16.0（tokens::kZoomMin..kZoomMax）——"
+            "1.0=默认最宽 span，越大越放大（可视 span 越窄），右缘滑条 0.1 步进同域"
+            "（spectrum_widget.cpp:657-663 zoomSlider_ 映射）。"
+            "失败恢复: 越界/非有限值被明确拒绝（画布端 setZoomFactor 会 clamp 到 1..16，"
+            "为避免静默夹值工具面直接拒绝）——改到范围内重试。"
+            "副作用: 立即改变可视频率跨度。"
+            "能力边界: 只设缩放; 中心频率另用 tune_frequency; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec z;
+        z.name = "zoom";
+        z.type = "number";
+        z.description = QString::fromUtf8("缩放因子（1.0..16.0，1.0=最宽 span，越大越放大）");
+        z.hasMin = true; z.min = tokens::kZoomMin;
+        z.hasMax = true; z.max = tokens::kZoomMax;
+        z.required = true;
+        s.params.append(z);
+        out.append(s);
+    }
+
+    // set_db_grid_step (write -- gated; D1-E7) ---------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_db_grid_step";
+        s.description = QString::fromUtf8(
+            "写入：设置 dB 参考格线间距。属于写动作，手动模式下被拦截。"
+            "前置条件: step_db 必填，取 10/20/40 精确值（tokens::kDbGridStepChoices）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变 y 轴格线密度/标注。"
+            "能力边界: 只设格线间距; dB 显示窗另用 set_spectrum_db_range; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec st;
+        st.name = "step_db";
+        st.type = "number";
+        st.description = QString::fromUtf8("格线间距（dB，10/20/40 精确值）");
+        for (int v : tokens::kDbGridStepChoices)
+            st.enumValues.append(v);
+        st.required = true;
+        s.params.append(st);
+        out.append(s);
+    }
+
+    // set_peak_threshold (write -- gated; D1-E8) -------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_peak_threshold";
+        s.description = QString::fromUtf8(
+            "写入：设置峰值检测门限（高于噪底/中值的 dB 数）。属于写动作，手动模式下被拦截。"
+            "前置条件: threshold_db 必填整数，5..40"
+            "（tokens::kPeakThresholdMin..kPeakThresholdMax）。"
+            "失败恢复: 越界/非整数被参数校验层明确拒绝（不静默夹值）——改到范围内重试。"
+            "副作用: 立即改变峰值标记的检出门限。"
+            "能力边界: 只设峰值门限; 峰值保持另用 set_peak_hold; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec t;
+        t.name = "threshold_db";
+        t.type = "number";
+        t.description = QString::fromUtf8("峰值门限（dB 相对噪底，5..40 整数）");
+        t.hasMin = true; t.min = tokens::kPeakThresholdMin;
+        t.hasMax = true; t.max = tokens::kPeakThresholdMax;
+        t.required = true;
+        s.params.append(t);
+        out.append(s);
+    }
+
+    // set_peak_hold (write -- gated; D1-E9) ------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_peak_hold";
+        s.description = QString::fromUtf8(
+            "写入：设置最大/最小保持曲线开关与衰减速度。属于写动作，手动模式下被拦截。"
+            "前置条件: max_hold/min_hold/decay（slow/medium/fast=0.5/1.5/3.0 dB/帧，"
+            "tokens::kMaxHoldDecaySlow/Medium/Fast）至少提供其一（全缺则不下发任何变更）。"
+            "失败恢复: 枚举外 decay 被参数校验层明确拒绝; 类型不符的字段被静默跳过——"
+            "改正后重试。"
+            "副作用: 立即改变保持曲线的开关/衰减显示。"
+            "能力边界: 只设峰值保持; 检出门限另用 set_peak_threshold; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec ma;
+        ma.name = "max_hold";
+        ma.type = "boolean";
+        ma.description = QString::fromUtf8("最大保持曲线开关（可选）");
+        ma.required = false;
+        ToolParamSpec mi;
+        mi.name = "min_hold";
+        mi.type = "boolean";
+        mi.description = QString::fromUtf8("最小保持曲线开关（可选）");
+        mi.required = false;
+        ToolParamSpec de;
+        de.name = "decay";
+        de.type = "string";
+        de.description = QString::fromUtf8("保持衰减速度（slow=0.5/medium=1.5/fast=3.0 dB/帧，可选）");
+        de.enumValues = QVariantList{"slow", "medium", "fast"};
+        de.required = false;
+        s.params << ma << mi << de;
+        out.append(s);
+    }
+
+    // set_edge_rail_visibility (write -- gated; D1-E10) ------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_edge_rail_visibility";
+        s.description = QString::fromUtf8(
+            "写入：显示/隐藏频谱右缘控制条（缩放/dB 上下限滑条）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: visible 必填布尔。"
+            "失败恢复: 非布尔被参数校验层明确拒绝——改正后重试。"
+            "副作用: 立即改变右缘控制条显隐并持久化（与设置对话框『界面』页同一开关）。"
+            "能力边界: 只设右缘控制条显隐; 滑条的值另用 "
+            "set_spectrum_zoom/set_spectrum_db_range; 走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "visible";
+        p.type = "boolean";
+        p.description = QString::fromUtf8("是否显示右缘控制条");
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // set_source_type (write -- gated; D1-F1) ----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_source_type";
+        s.description = QString::fromUtf8(
+            "写入：切换信号源类型（本地 rtl-sdr / rtl_tcp 远程 / 测试信号）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: source_type 必填，取 local_rtlsdr/rtl_tcp/test_signal。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试; "
+            "切换失败由 UI 状态回显，不假报已切换。"
+            "副作用: 立即切换信号源; test_signal=合成 IQ 非真实接收（切走即丢弃）; "
+            "切回真实源会拆除合成源。"
+            "能力边界: 只切源类型; rtl_tcp 只是切到远程模式，真正建链用 "
+            "connect_network_source; 走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "source_type";
+        p.type = "string";
+        p.description = QString::fromUtf8(
+            "信号源类型（local_rtlsdr=本地/rtl_tcp=远程/test_signal=测试信号）");
+        p.enumValues = QVariantList{"local_rtlsdr", "rtl_tcp", "test_signal"};
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // set_spyserver (write -- gated; D1-F2) ------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_spyserver";
+        s.description = QString::fromUtf8(
+            "写入：开启/关闭 SpyServer 服务端监听（把本机频谱外送远程）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: enabled 必填布尔; port 可选 1024..65535（缺省保持当前端口）。"
+            "失败恢复: 越界端口被参数校验层明确拒绝; 绑定失败（端口被占？）→ok:false "
+            "诚实报『监听失败』，绝不谎报监听中。"
+            "副作用: 开启/停止本机监听线程，端口设置随之持久化。"
+            "能力边界: 只管监听开关/端口; 远程客户端连接管理不在本工具面; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec e;
+        e.name = "enabled";
+        e.type = "boolean";
+        e.description = QString::fromUtf8("是否开启 SpyServer 监听");
+        e.required = true;
+        ToolParamSpec po;
+        po.name = "port";
+        po.type = "number";
+        po.description = QString::fromUtf8("监听端口（1024..65535，可选，缺省保持当前）");
+        // 边界逐字取 spyserverPortSpin_ setRange（main_window.cpp:447）。
+        po.hasMin = true; po.min = 1024.0;
+        po.hasMax = true; po.max = 65535.0;
+        po.required = false;
+        s.params << e << po;
+        out.append(s);
+    }
+
+    // connect_gnss (write -- gated; D1-G1) -------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "connect_gnss";
+        s.description = QString::fromUtf8(
+            "写入：连接/断开 GNSS（NMEA 0183 串口）定位源。属于写动作，手动模式下被拦截。"
+            "前置条件: action=connect（缺省）时 device 必填非空（如 /dev/ttyUSB0）; "
+            "baud 可选 9600/38400/115200（缺省 9600）; action=disconnect 不需要 device。"
+            "失败恢复: 端口打开/启动失败→ok:false 并带错误串，绝不假装已连接; "
+            "用 uiGnssRunning() 回读复核。"
+            "副作用: 打开/关闭串口并异步启停接收线程; start() 是异步的——"
+            "『已发起连接』不等于『已定位』。"
+            "能力边界: 只管 GNSS 连接; 地图图层显隐另用 set_map_layers; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec a;
+        a.name = "action";
+        a.type = "string";
+        a.description = QString::fromUtf8("动作（connect 缺省 / disconnect）");
+        a.enumValues = QVariantList{"connect", "disconnect"};
+        a.required = false;
+        ToolParamSpec dv;
+        dv.name = "device";
+        dv.type = "string";
+        dv.description = QString::fromUtf8("NMEA 串口设备路径（connect 时必填，如 /dev/ttyUSB0）");
+        dv.required = false;
+        ToolParamSpec bd;
+        bd.name = "baud";
+        bd.type = "number";
+        bd.description = QString::fromUtf8("串口波特率（9600/38400/115200，可选，缺省 9600）");
+        // 档位逐字取 gnssBaudCombo_ addItems（main_window.cpp:1238）。
+        bd.enumValues = QVariantList{9600, 38400, 115200};
+        bd.required = false;
+        s.params << a << dv << bd;
+        out.append(s);
+    }
+
+    // set_map_layers (write -- gated; D1-G2) -----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_map_layers";
+        s.description = QString::fromUtf8(
+            "写入：显示/隐藏地图图层（GNSS 轨迹 / ADS-B 航迹 / 卫星）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: gnss/adsb/sat 至少提供其一（全缺则不下发任何变更）。"
+            "失败恢复: 非布尔字段被静默跳过——改正后重试。"
+            "副作用: 立即改变地图图层显隐。"
+            "能力边界: 只设图层显隐; 图层数据来源另用 connect_gnss 等; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec g;
+        g.name = "gnss";
+        g.type = "boolean";
+        g.description = QString::fromUtf8("GNSS 轨迹图层开关（可选）");
+        g.required = false;
+        ToolParamSpec ad;
+        ad.name = "adsb";
+        ad.type = "boolean";
+        ad.description = QString::fromUtf8("ADS-B 航迹图层开关（可选）");
+        ad.required = false;
+        ToolParamSpec st;
+        st.name = "sat";
+        st.type = "boolean";
+        st.description = QString::fromUtf8("卫星图层开关（可选）");
+        st.required = false;
+        s.params << g << ad << st;
+        out.append(s);
+    }
+
+    // set_sat_pass_template (write -- gated; D1-H2) ----------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_sat_pass_template";
+        s.description = QString::fromUtf8(
+            "写入：按卫星过境生成捕获计划并登记为待执行计划（sat_pass_capture 模板）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: sat_name 必填非空; lat_deg（-90..90）/lon_deg（-180..180）可选"
+            "（缺省回退 AiConfig 本站位置，须已 set_station_position）; "
+            "hours_ahead 1..24（缺省 12）。"
+            "失败恢复: 未提供坐标且未设置本站位置→明确报错（先 set_station_position）; "
+            "计划生成失败或 demo 计划→ok:false 并带原因，绝不让 demo 计划驱动真实捕获。"
+            "副作用: 登记待执行计划（executed=false）——需用户确认后经『执行待执行计划』"
+            "或 TaskRunner::runPendingPlan 执行，不自动开录。"
+            "能力边界: 只生成并登记计划; 返回 sat_name/AOS/max_el_deg/capture_freq_hz/"
+            "template_name=\"sat_pass_capture\"; 过境预报精度受 TLE 时效限制。");
+        s.write = true;
+        ToolParamSpec sn;
+        sn.name = "sat_name";
+        sn.type = "string";
+        sn.description = QString::fromUtf8("卫星名（非空）");
+        sn.required = true;
+        ToolParamSpec la;
+        la.name = "lat_deg";
+        la.type = "number";
+        la.description = QString::fromUtf8("地面站纬度（度，-90..90，可选，缺省用本站位置）");
+        la.hasMin = true; la.min = -90.0;
+        la.hasMax = true; la.max = 90.0;
+        la.required = false;
+        ToolParamSpec lo;
+        lo.name = "lon_deg";
+        lo.type = "number";
+        lo.description = QString::fromUtf8("地面站经度（度，-180..180，可选，缺省用本站位置）");
+        lo.hasMin = true; lo.min = -180.0;
+        lo.hasMax = true; lo.max = 180.0;
+        lo.required = false;
+        ToolParamSpec ha;
+        ha.name = "hours_ahead";
+        ha.type = "number";
+        ha.description = QString::fromUtf8("预报时窗（小时，1..24，可选，缺省 12）");
+        ha.hasMin = true; ha.min = 1.0;
+        ha.hasMax = true; ha.max = 24.0;
+        ha.required = false;
+        s.params << sn << la << lo << ha;
+        out.append(s);
+    }
+
+    // set_tune_step (write -- gated; D1-H3) ------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_tune_step";
+        s.description = QString::fromUtf8(
+            "写入：设置调谐步进（Hz）。属于写动作，手动模式下被拦截。"
+            "前置条件: step_hz 必填，取 1/10/100/1000/10000/100000/1000000"
+            "（kStepValuesHz 档位）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 立即改变步进旋钮/快捷调谐的步长并持久化。"
+            "能力边界: 只设步进; 频率本身另用 tune_frequency; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "step_hz";
+        p.type = "number";
+        p.description = QString::fromUtf8("调谐步进（Hz，1/10/100/1000/10000/100000/1000000）");
+        // 档位逐字取 kStepValuesHz（main_window.cpp:150）。
+        p.enumValues = QVariantList{1, 10, 100, 1000, 10000, 100000, 1000000};
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // analyze_vna_permeability (read; D1-I2) -----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "analyze_vna_permeability";
+        s.description = QString::fromUtf8(
+            "读取：用当前 NanoVNA 扫频数据（S11/S21）按 NRW 短路夹具法计算复数磁导率 μr。"
+            "前置条件: thickness_mm 必填正数（mm，与 VNA 面板『夹具厚』输入同单位）; "
+            "VNA 已连接且已有扫频点（≥3）。"
+            "失败恢复: 未连接/扫频点不足/推导病态→ok:false 并带原因（valid=false），"
+            "绝不伪造 μr 数值。"
+            "副作用: 无（纯计算，不改任何状态，不拦截手动模式）。"
+            "能力边界: 只做 vna::permeabilityNRW 两口近似; 返回 valid、mu_real（μr' 逐频点）、"
+            "mu_imag（μr'' 逐频点）、note（病态/不足说明）; 精度受校准/夹具限制; "
+            "扫频/校准另用 set_vna_sweep/vna_calibration。");
+        s.write = false;   // read-only computation over the current sweep
+        ToolParamSpec t;
+        t.name = "thickness_mm";
+        t.type = "number";
+        t.description = QString::fromUtf8(
+            "夹具厚/材料片厚度（mm，与 VNA 面板『夹具厚』同单位，须 >0）");
+        // UI 是自由输入行（vna_panel.cpp:231-232 thickEdit_，无 setRange），
+        // 有效性=正数（vna_panel.cpp:359-360），故不设数值边界。
+        t.required = true;
+        s.params.append(t);
+        out.append(s);
+    }
+
+    // set_cat_control (write -- gated; D1-J1, TX confirm gate) -----------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_cat_control";
+        s.description = QString::fromUtf8(
+            "写入：连接 CAT 串口控制电台（CI-V / Kenwood），打通后续发射链路。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: device 必填非空串口路径; baud 可选 "
+            "9600/19200/57600/115200（缺省 19200）; protocol 可选 civ/kenwood（缺省 civ）; "
+            "confirm 必填且必须为 true——发射链路操作需 confirm=true 显式确认"
+            "（发射受无线电管理条例约束）。"
+            "失败恢复: confirm 非 true→明确拒绝不执行; 连接失败→ok:false 并带电台面板"
+            "状态文案，绝不假装已连接。"
+            "副作用: 打开串口并按协议握手（硬件状态）。"
+            "能力边界: 只管 CAT 连接; 实际发射另用 send_cw/send_ax25_beacon/soapy_transmit"
+            "（各带 confirm 确认门与法规提示）; 走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec dv;
+        dv.name = "device";
+        dv.type = "string";
+        dv.description = QString::fromUtf8("电台串口路径（必填，如 /dev/ttyUSB0 或 COM3）");
+        dv.required = true;
+        ToolParamSpec bd;
+        bd.name = "baud";
+        bd.type = "number";
+        bd.description = QString::fromUtf8("CAT 波特率（9600/19200/57600/115200，可选，缺省 19200）");
+        // 档位/缺省逐字取 baudCombo_（radio_panel.cpp:46-48）。
+        bd.enumValues = QVariantList{9600, 19200, 57600, 115200};
+        bd.required = false;
+        ToolParamSpec pr;
+        pr.name = "protocol";
+        pr.type = "string";
+        pr.description = QString::fromUtf8("CAT 协议（civ=CI-V/kenwood=Kenwood，可选，缺省 civ）");
+        // 档位逐字取 protoCombo_（radio_panel.cpp:49-50）。
+        pr.enumValues = QVariantList{"civ", "kenwood"};
+        pr.required = false;
+        ToolParamSpec cf;
+        cf.name = "confirm";
+        cf.type = "boolean";
+        cf.description = QString::fromUtf8(
+            "发射链路确认（必须为 true; 发射受无线电管理条例约束）");
+        cf.required = true;
+        s.params << dv << bd << pr << cf;
+        out.append(s);
+    }
+
+    // send_cw (write -- gated; D1-J2, TX confirm gate) -------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "send_cw";
+        s.description = QString::fromUtf8(
+            "写入：经 CAT 电台发射 CW 电报。属于写动作，手动模式下被拦截。"
+            "confirm 必填且必须为 true 显式确认（发射受无线电管理条例约束）。"
+            "前置条件: text 必填非空; wpm 可选 5..60（缺省 20）; confirm 必填 true。"
+            "失败恢复: confirm 非 true→明确拒绝不发射; 发射失败→ok:false 并带电台面板"
+            "状态文案（如『请先连接电台』），绝不假报已发射。"
+            "副作用: 真实射频发射（占用频率、触发 PTT），旁人可收听。"
+            "能力边界: 只经 CAT 电台发 CW; 须先 set_cat_control 连接电台; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec tx;
+        tx.name = "text";
+        tx.type = "string";
+        tx.description = QString::fromUtf8("CW 电文（非空）");
+        tx.required = true;
+        ToolParamSpec wp;
+        wp.name = "wpm";
+        wp.type = "number";
+        wp.description = QString::fromUtf8("键速（WPM，5..60，可选，缺省 20）");
+        wp.hasMin = true; wp.min = 5.0;
+        wp.hasMax = true; wp.max = 60.0;
+        wp.required = false;
+        ToolParamSpec cf;
+        cf.name = "confirm";
+        cf.type = "boolean";
+        cf.description = QString::fromUtf8(
+            "发射确认（必须为 true; 发射受无线电管理条例约束）");
+        cf.required = true;
+        s.params << tx << wp << cf;
+        out.append(s);
+    }
+
+    // send_ax25_beacon (write -- gated; D1-J3, TX confirm gate) ----------
+    {
+        ToolSchemaSpec s;
+        s.name = "send_ax25_beacon";
+        s.description = QString::fromUtf8(
+            "写入：经电台发射 AX.25 信标（呼号/路径/消息）。属于写动作，手动模式下被拦截。"
+            "confirm 必填且必须为 true 显式确认（发射受无线电管理条例约束）。"
+            "前置条件: call 必填呼号; message 必填非空; path 可选"
+            "（缺省空=无中继路径）; confirm 必填 true。"
+            "失败恢复: confirm 非 true→明确拒绝不发射; 呼号无效/发射失败→ok:false "
+            "并带电台面板状态文案，绝不假报已发射。"
+            "副作用: 真实射频发射信标（占用频率），旁人可收听。"
+            "能力边界: 只发 AX.25 信标; 走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec cl;
+        cl.name = "call";
+        cl.type = "string";
+        cl.description = QString::fromUtf8("发射呼号（必填）");
+        cl.required = true;
+        ToolParamSpec ms;
+        ms.name = "message";
+        ms.type = "string";
+        ms.description = QString::fromUtf8("信标消息（非空）");
+        ms.required = true;
+        ToolParamSpec pa;
+        pa.name = "path";
+        pa.type = "string";
+        pa.description = QString::fromUtf8("中继路径（可选，缺省空=无中继）");
+        pa.required = false;
+        ToolParamSpec cf;
+        cf.name = "confirm";
+        cf.type = "boolean";
+        cf.description = QString::fromUtf8(
+            "发射确认（必须为 true; 发射受无线电管理条例约束）");
+        cf.required = true;
+        s.params << cl << ms << pa << cf;
+        out.append(s);
+    }
+
+    // soapy_transmit (write -- gated; D1-J4, TX confirm gate) ------------
+    {
+        ToolSchemaSpec s;
+        s.name = "soapy_transmit";
+        s.description = QString::fromUtf8(
+            "写入：打开 Soapy 发射设备并设到指定频率。属于写动作，手动模式下被拦截。"
+            "confirm 必填且必须为 true 显式确认（发射受无线电管理条例约束）。"
+            "前置条件: driver 必填非空（Soapy 驱动名，如 driver=plutosdr）; "
+            "freq_mhz 必填且 >0（0..100000 MHz）; confirm 必填 true。"
+            "失败恢复: confirm 非 true→明确拒绝不执行; 打开失败→ok:false 并带电台面板"
+            "状态文案，绝不假装已打开发射设备。"
+            "副作用: 打开发射硬件到指定频率。"
+            "能力边界: 只做『打开 Soapy 发射设备』一步——PTT/载波保持人工按住，"
+            "工具不做键控/持续发射; 走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec dr;
+        dr.name = "driver";
+        dr.type = "string";
+        dr.description = QString::fromUtf8("Soapy 驱动名（必填，如 plutosdr）");
+        dr.required = true;
+        ToolParamSpec fq;
+        fq.name = "freq_mhz";
+        fq.type = "number";
+        fq.description = QString::fromUtf8("发射频率（MHz，0..100000，必须 >0）");
+        // 契约域 0..100000 MHz（Soapy 发射面，宽于接收 tokens::kFreqMinHz..kFreqMaxHz）。
+        fq.hasMin = true; fq.min = 0.0;
+        fq.hasMax = true; fq.max = 100000.0;
+        fq.required = true;
+        ToolParamSpec cf;
+        cf.name = "confirm";
+        cf.type = "boolean";
+        cf.description = QString::fromUtf8(
+            "发射确认（必须为 true; 发射受无线电管理条例约束）");
+        cf.required = true;
+        s.params << dr << fq << cf;
+        out.append(s);
+    }
+
+    // set_ui_scale (write -- gated; D1-K1) -------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_ui_scale";
+        s.description = QString::fromUtf8(
+            "写入：设置 UI 缩放并即时生效（与设置对话框『外观』页同一路径）。"
+            "属于写动作，手动模式下被拦截。"
+            "前置条件: scale 必填，取 0.7/1.0/1.25/1.5（设置对话框 UI 缩放档位同域）。"
+            "失败恢复: 档位外取值被参数校验层明确拒绝——按档位取值重试。"
+            "副作用: 写入 ui/scaleFactor 并立即重刷样式"
+            "（tokens::setUserScale + buildDarkQss），界面尺寸即时变化并持久化。"
+            "能力边界: 只设 UI 缩放; 主题只读（默认暗色）; 与设置对话框同路径即时生效，"
+            "无需重启。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "scale";
+        p.type = "number";
+        p.description = QString::fromUtf8("UI 缩放（0.7/1.0/1.25/1.5 档位）");
+        // 档位逐字取 scaleCombo_/userScale()（settings_dialog.cpp:118-119、575-580）。
+        p.enumValues = QVariantList{0.7, 1.0, 1.25, 1.5};
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // set_language (write -- gated; D1-K2) -------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_language";
+        s.description = QString::fromUtf8(
+            "写入：设置 UI 语言标签并持久化。属于写动作，手动模式下被拦截。"
+            "前置条件: language 必填，取 zh_CN/en/ja（存储写全量标签，l10n.h 值域; "
+            "归一规则 zh*→zh_CN、en*→en、ja*→ja、其余→zh_CN）。"
+            "失败恢复: 枚举外取值被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 已持久化（ui/language），需重启生效"
+            "（启动时 main.cpp:96-101 才装翻译器）——不做假实时切换。"
+            "能力边界: 只设语言标签; 翻译缺失时诚实回退源语言（简体中文）。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "language";
+        p.type = "string";
+        p.description = QString::fromUtf8("语言标签（zh_CN=简体中文/en=English/ja=日本語）");
+        p.enumValues = QVariantList{"zh_CN", "en", "ja"};
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // set_left_groups (write -- gated; D1-L1) ----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_left_groups";
+        s.description = QString::fromUtf8(
+            "写入：显示/隐藏左侧栏一个分组面板。属于写动作，手动模式下被拦截。"
+            "前置条件: group 必填，取 tokens::kLeftPanelIds 的 12 个面板 id 之一; "
+            "visible 必填布尔。单组单调（原子积木，批量=多次调用）。"
+            "失败恢复: 枚举外 id/非布尔被参数校验层明确拒绝——按枚举取值重试。"
+            "副作用: 该组显隐立即生效并持久化（ui/hiddenLeftGroups）。"
+            "能力边界: 只管左栏分组显隐; 右栏面板/折叠另不在本工具面; "
+            "走桌面 UI 控制面，headless 诚实报错。");
+        s.write = true;
+        ToolParamSpec g;
+        g.name = "group";
+        g.type = "string";
+        g.description = QString::fromUtf8("左栏分组面板 id（tokens::kLeftPanelIds 之一）");
+        for (const char* id : tokens::kLeftPanelIds)
+            g.enumValues.append(QString::fromUtf8(id));
+        g.required = true;
+        ToolParamSpec v;
+        v.name = "visible";
+        v.type = "boolean";
+        v.description = QString::fromUtf8("该组是否显示");
+        v.required = true;
+        s.params << g << v;
+        out.append(s);
+    }
+
     return out;
 }
 

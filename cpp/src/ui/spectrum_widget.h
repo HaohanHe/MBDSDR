@@ -75,6 +75,12 @@ public slots:
     // pushed into the SAME combos so the toolbar stays the live read-out.
     void setPersistMode(int idx);        // 0=关 / 1=低 / 2=高
     void setWaterfallDepth(int rows);    // rows (kWaterfallDepthChoices)
+    // ---- D1 reverse-audit: more programmatic mirrors in the SAME paradigm --
+    // Push into the SAME toolbar controls the user touches; the existing
+    // change handlers persist the key and apply to the canvas (single source).
+    void setDbGridStepDb(int stepDb);          // kDbGridStepChoices (10/20/40)
+    void setPeakThresholdDb(int db);           // kPeakThresholdMin..Max
+    void setMaxHoldDecayDb(double dbPerFrame); // kMaxHoldDecay* tiers
 
     // Multi-VFO band boxes.
     void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);

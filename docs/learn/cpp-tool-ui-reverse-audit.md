@@ -18,16 +18,17 @@
 共 **143 处实例化点**（40 combo / 35 checkbox / 21 lineedit / 19 doublespin / 16 spin / 12 slider，
 与任务口径一致）；settings_dialog 的左右栏面板复选框循环（`settings_dialog.cpp:156`/`:177`）
 与频谱右缘三滑条辅助函数（`spectrum_widget.cpp:623`）展开后运行时约 **169 个具象控件**。
-工具面：`registeredToolSpecs()` 共 **90 个工具**（`tool_schema.cpp:63-2409`）。
+工具面：`registeredToolSpecs()` 共 **90 个工具**（`tool_schema.cpp:63-2409`，快照时点；
+销账后 135，见 §7）。
 
 ## 1. D1 有 UI 无工具（45 条，可执行清单）
 
-> 2026-10-30 第二轮已落地 19 条（A 全组/B1/C 全组/H1/I1），销账记录见 §7；
-> 其余 26 条仍是缺口。本表保持审计快照原貌，行数口径不变。
+> 2026-10-30 第二轮落地 19 条（A 全组/B1/C 全组/H1/I1）、第三轮落地余 26 条，
+> **45/45 全部落地**，销账记录见 §7。本表保持审计快照原貌，行数口径不变。
 建议工具名均为**新工具**（或显式扩参），照此清单即可逐条补工具。
 钉扎测试 `tests/test_cpp_tool_ui_reverse_audit.py` 现行契约（§7 后已改为双账）：
-落地的 19 个名字必须在 `tool_schema.cpp` 的 `s.name` 集合与
-`agent_tools.cpp` dispatchTable 双侧在场，余 26 个必须仍缺席。
+45 个建议工具名必须在 `tool_schema.cpp` 的 `s.name` 集合与
+`agent_tools.cpp` dispatchTable 双侧全在场，一个都不能少。
 
 ### A. 接收链硬件参数（RTL-SDR 源选项，8 条）
 
@@ -189,16 +190,17 @@ README 默认值口径：grep 未发现 README 对增益/静噪/音量等默认�
 
 - 防漂移测试：`tests/test_cpp_tool_ui_reverse_audit.py`（offscreen、纯文本解析、不碰硬件）——
   ①控件实例化点计数=143 与本清单口径一致；②D1/D2/D3 条数=45/9/8 与本清单一致；
-  ③D1 双账同步（§7 后）：落地 19 个名字在 `tool_schema.cpp` 与 `agent_tools.cpp`
-  双侧必须在场，余 26 个必须仍缺席。
+  ③D1 双账同步（§7 后）：45 个建议工具名在 `tool_schema.cpp` 的 `s.name` 集合与
+  `agent_tools.cpp` 的 dispatchTable 行**双侧必须全在场**（第二轮 19 + 第三轮 26，
+  一个都不能少——任何一侧漂移即红）。
 - 本清单 §1–§5 为**静态审计结论**（2026-10-30 上午快照）：未编译未运行。
   所有行号以 2026-10-30 工作区为准。
 
-## 7. 销账（2026-10-30 第二轮执行）
+## 7. 销账（2026-10-30 第二、三轮执行）
 
-### D1：19 落地 / 26 余缺
+### D1：45/45 全部落地（第二轮 19 + 第三轮 26）
 
-**已落地 19 条**——每条 = `tool_schema.cpp` 声明 + `agent_tools.cpp` 真执行器
+**第二轮已落地 19 条**——每条 = `tool_schema.cpp` 声明 + `agent_tools.cpp` 真执行器
 （接 `engine->` 真 setter / AiConfig 真持久化）+ dispatchTable 行 + C++ 金样三处同步
 （`test_tool_registry.cpp` kAllCxxTools/kExpectedWriteTools/109 计数、
 `test_tool_schema.cpp` 描述金样、`test_agent.cpp` 门烟测入参）：
@@ -217,11 +219,45 @@ README 默认值口径：grep 未发现 README 对增益/静噪/音量等默认�
   描述诚实注明多普勒仍需捕获过境才 available
 - **I（1/2）**：`vna_connect`（connectSerial/close，失败带 errorString，不假装已连）
 
-**仍缺口 26 条**（照原清单）：set_audio_output、set_scan_params、频谱/显示 10 条、
-set_source_type、set_spyserver、connect_gnss、set_map_layers、set_sat_pass_template、
-set_tune_step、analyze_vna_permeability、TX 四条（set_cat_control/send_cw/
-send_ax25_beacon/soapy_transmit——按 D3-2 前置要求须先有确认门再补工具）、
-set_ui_scale、set_language、set_left_groups。
+**第三轮落地 26 条**（行标带 `#` 前缀，防撞 §1 快照行计数正则）——同上四件套 +
+C++ 金样三处 + 双账同步；UI 面经 `dsp::UiControlSurface` 抽象接缝（35 纯虚，
+`ui_control_surface.h` 依赖最小头文件；MainWindow 多继承实现并注册进 engine）驱动
+**真控件**（setValue/setCurrentIndex/setChecked 触发既有 handler 落 AppSettings+生效，
+不复制业务逻辑），headless 指针为空→诚实报「无 UI 控制面（该参数由桌面端控件持有，
+headless 不可用）」；B2/H2/K1/K2 为引擎/配置直连不走 surface：
+
+| # | 落地 |
+|---|---|
+| #D1-B2 | `set_audio_output`——volume 0..100→引擎 0..1 + rx/volume 持久化；device 精确匹配 description（"default"=系统默认），匹配失败带 available_devices 诚实拒绝 |
+| #D1-D1 | `set_scan_params`——7 参数域逐字取控件 setRange（dwell 100..2000/thr -120..0/linger+hold 0..60000），下一次『开始扫描』生效（描述如实注明进行中扫描不受影响） |
+| #D1-E1 | `set_persistence`（off/low/high） |
+| #D1-E2 | `set_waterfall_depth`——**能力对拍不缩水**：kWaterfallDepthChoices 六档全放行（128..4096，UI depthCombo_ 同一数组；施工契约曾误写三档，落地时修为全档） |
+| #D1-E3 | `set_waterfall_speed`（1/2/4 行/帧） |
+| #D1-E4 | `set_builtin_palette`（classic/monochrome/viridis），闭「内置色板切不了」 |
+| #D1-E5 | `set_spectrum_db_range`（min -140..-20 / max -40..20，min<max 校验，tokens 同源） |
+| #D1-E6 | `set_spectrum_zoom`（1.0..16.0，kZoomMin/Max 同源） |
+| #D1-E7 | `set_db_grid_step`（10/20/40） |
+| #D1-E8 | `set_peak_threshold`（5..40 dB） |
+| #D1-E9 | `set_peak_hold`（max/min 开关 + decay slow/medium/fast=0.5/1.5/3.0 dB/帧） |
+| #D1-E10 | `set_edge_rail_visibility` |
+| #D1-F1 | `set_source_type`（local_rtlsdr/rtl_tcp/test_signal；描述如实注明 test_signal=合成 IQ 非真实接收、rtl_tcp 只切模式建链另用 connect_network_source） |
+| #D1-F2 | `set_spyserver`——绑定失败（端口被占）诚实 ok:false，绝不谎报监听中 |
+| #D1-G1 | `connect_gnss`——start() 异步，「已发起连接≠已定位」如实回显，失败带错误串 |
+| #D1-G2 | `set_map_layers`（gnss/adsb/sat 三开关） |
+| #D1-H2 | `set_sat_pass_template`——planSatelliteCapture + PendingPlanStore 登记（executed=false 待用户确认），闭「UI 第 4 模板 AI 发起不了」断环；**demo/stale TLE 一律 ok:false 绝不登记**（镜像 UI 诚实分支） |
+| #D1-H3 | `set_tune_step`（1..1000000 七档，kStepValuesHz 同源） |
+| #D1-I2 | `analyze_vna_permeability`（26 条里唯一读工具 s.write=false）——permeabilityNRW 真算 μr（厚度 mm 同面板夹具厚 ×1e-3）；未连接/无扫频诚实 ok:false，病态 ok:true+valid:false+note，μr 非有限→JSON null |
+| #D1-J1 | `set_cat_control`——TX 链 confirm=true 显式确认门（缺失/false/非布尔一律拒），失败回显 uiRadioStatus() 原文 |
+| #D1-J2 | `send_cw`——confirm 门 + 法规提示；空文本拒绝；WPM 5..60 |
+| #D1-J3 | `send_ax25_beacon`——confirm 门 + 法规提示 |
+| #D1-J4 | `soapy_transmit`——confirm 门 + 法规提示；**只打开发射设备一步，PTT/载波保持人工按住**（D3-2 取舍，绝不自动键控） |
+| #D1-K1 | `set_ui_scale`（0.7/1.0/1.25/1.5 与设置对话框 scaleCombo_ 同档，越档拒绝防下次启动静默跳档） |
+| #D1-K2 | `set_language`（zh_CN/en/ja 严格枚举不归一）；描述如实注明翻译器仅启动时装载、重启生效 |
+| #D1-L1 | `set_left_groups`——单组单调（kLeftPanelIds 12 组枚举 + visible 布尔，原子积木不打包），显隐持久化 ui/hiddenLeftGroups 同设置对话框路径 |
+
+架构落法（原子积木红线）：26 条=26 个独立小工具让模型逐个调用，未打包成专用大工具；
+TX 四条确认门放**工具层**（RadioPanel 裸路径跳过 QMessageBox，避开按住 PTT 弹模态
+卡键坑），门文案统一「发射链路操作需 confirm=true 显式确认（发射受无线电管理条例约束）」。
 
 ### D2：9/9 修复
 
@@ -254,7 +290,13 @@ set_ui_scale、set_language、set_left_groups。
 - 本机无 Qt6/CMake 工具链，**上述 C++ 改动未编译未运行**。正确性由三层静态钉住：
   Python 防漂移双账（`tests/test_cpp_tool_ui_reverse_audit.py`）、C++ 金样
   （`test_tool_registry`/`test_tool_schema`/`test_agent`/`test_control_hub` 随修复同步）、
-  schema↔executor 双表一致性（109 = 90+19，68 写/41 读）。**待 CI 编译首验**。
+  schema↔executor 双表一致性（135 = 90+19+26，93 写/42 读）。**待 CI 编译首验**。
 - test_agent 金样更新记录（断言随修复更新，非放宽换绿）：set_squelch 越域值
   -10.0→-30.0 并新增越域拒绝用例；delete_bookmark 全部调用点补 confirm=true
   并新增无确认拒绝用例；工具计数 90→109、写/读 49/41→68/41。
+- 第三轮金样更新记录：工具计数 109→135、写/读 68/41→93/42；
+  `test_tool_registry` 名单 +26/+25/+1（写/读）并修正存量硬计数
+  （notARegression 109→135、末名 vna_connect→set_left_groups）；
+  `test_tool_schema` 描述金样 +26（脚本逐字抽取保字节一致）+ 存量硬计数
+  （specs 109→135、文档头计数 90→135）；`test_agent` 门烟测入参 +25 组
+  （TX 四条带 confirm=true）+ 诚实空态例外名单 +analyze_vna_permeability。

@@ -35,6 +35,18 @@ public:
     explicit RadioPanel(QWidget* parent = nullptr);
     ~RadioPanel() override;
 
+    // ---- D1 reverse-audit: bare paths for the UiControlSurface J-group ------
+    // Same code the button lambdas run, but driven by parameters and WITHOUT
+    // any QMessageBox confirmation -- the TX confirm gate lives in the AI tool
+    // layer (these methods must never open a modal). Each returns real success
+    // and reports the outcome on status_ (read back via statusText()).
+    bool connectCat(const QString& dev, int baud, const QString& proto); // "civ"/"kenwood"
+    bool catConnected() const;
+    bool sendCw(int wpm, const QString& text);
+    bool sendBeacon(const QString& call, const QString& path, const QString& msg);
+    bool openSoapy(const QString& driver, double freqMhz);
+    QString statusText() const;
+
 private:
     void setStatus(const QString& s);
     bool ensureCat();

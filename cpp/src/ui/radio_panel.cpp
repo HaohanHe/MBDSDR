@@ -278,6 +278,94 @@ bool RadioPanel::ensureCat() {
     return false;
 }
 
+// ---- D1 reverse-audit: bare paths for the UiControlSurface J-group ----------
+// The button lambdas above stay the UI entry points; these run the SAME code
+// driven by parameters and WITHOUT the QMessageBox confirmation -- the TX
+// confirm gate lives in the AI tool layer (these must never open a modal).
+bool RadioPanel::connectCat(const QString& dev, int baud, const QString& proto) {
+    const QString d = dev.trimmed();
+    if (d.isEmpty()) { setStatus(QStringLiteral("请填写串口设备")); return false; }
+    link_ = createSerialRadioLink(d, baud);
+    if (!link_) { setStatus(QStringLiteral("当前平台不支持串口后端")); return false; }
+    const auto p = proto.compare(QStringLiteral("kenwood"), Qt::CaseInsensitive) == 0
+                       ? CatClient::Protocol::Kenwood
+                       : CatClient::Protocol::CIV;
+    cat_ = std::make_unique<CatClient>(*link_, p);
+    if (!cat_->open()) {
+        setStatus(QStringLiteral("连接失败: ") + cat_->lastError());
+        cat_.reset();
+        link_.reset();
+        return false;
+    }
+    keyer_ = std::make_unique<CwKeyer>(20);
+    catStatus_->setText(QStringLiteral("已连接"));
+    setStatus(QStringLiteral("已连接电台"));
+    return true;
+}
+
+bool RadioPanel::catConnected() const {
+    return cat_ != nullptr;
+}
+
+bool RadioPanel::sendCw(int wpm, const QString& text) {
+    if (!link_ || !keyer_) { setStatus(QStringLiteral("请先连接电台")); return false; }
+    const QString t = text.trimmed();
+    if (t.isEmpty()) { setStatus(QStringLiteral("请填写 CW 文本")); return false; }
+    keyer_->setWpm(wpm);
+    const auto sched = keyer_->buildSchedule(t);
+    joinCw();
+    IRadioLink* l = link_.get();
+    CwKeyer* k = keyer_.get();
+    cwThread_ = std::thread([l, k, sched] {
+        LinkCwKey key(*l);
+        k->play(key, sched);
+    });
+    setStatus(QStringLiteral("CW 发送中…"));
+    return true;
+}
+
+bool RadioPanel::sendBeacon(const QString& call, const QString& path, const QString& msg) {
+    if (!link_) { setStatus(QStringLiteral("请先连接串口 TNC")); return false; }
+    Ax25Frame fr;
+    if (!parseAx25Addr(call.trimmed(), fr.src)) {
+        setStatus(QStringLiteral("本站呼号无效")); return false;
+    }
+    if (!parseAx25Addr("APZMBD", fr.dst)) {
+        setStatus(QStringLiteral("目的地址无效")); return false;
+    }
+    for (const QString& part : path.split(',', Qt::SkipEmptyParts)) {
+        Ax25Addr a;
+        if (parseAx25Addr(part.trimmed(), a)) fr.path.push_back(a);
+    }
+    fr.info = msg.toUtf8();
+    const QByteArray raw = encodeAx25(fr);
+    if (raw.isEmpty()) { setStatus(QStringLiteral("AX.25 编码失败")); return false; }
+    const QByteArray wrapped = kissWrap(raw);
+    const int n = link_->write(wrapped);
+    setStatus(QStringLiteral("已发送 KISS 信标: %1 字节").arg(n));
+    return true;
+}
+
+bool RadioPanel::openSoapy(const QString& driver, double freqMhz) {
+    const QString drv = driver.trimmed();
+    if (drv.isEmpty()) { setStatus(QStringLiteral("请填写 Soapy 驱动参数")); return false; }
+    stopSoapyTone();
+    soapy_ = std::make_unique<SoapyTxBackend>(drv);
+    soapy_->setSampleRate(2000000.0);
+    soapy_->setFrequencyHz(freqMhz * 1e6);
+    if (!soapy_->open()) {
+        setStatus(QStringLiteral("Soapy 打开失败: ") + soapy_->errorString());
+        soapy_.reset();
+        return false;
+    }
+    setStatus(QStringLiteral("Soapy 设备已就绪"));
+    return true;
+}
+
+QString RadioPanel::statusText() const {
+    return status_ ? status_->text() : QString();
+}
+
 void RadioPanel::joinCw() {
     if (cwThread_.joinable()) cwThread_.join();
 }

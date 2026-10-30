@@ -40,6 +40,7 @@
 #include "dsp/adsb_decoder.h"
 #include "dsp/apt_decoder.h"
 #include "dsp/doppler_control_surface.h"
+#include "dsp/ui_control_surface.h"
 
 namespace mbdsdr {
 namespace vna { class NanoVnaClient; }
@@ -496,6 +497,12 @@ public:
     void setDopplerControlSurface(DopplerControlSurface* s) { dopplerSurface_ = s; }
     DopplerControlSurface* dopplerControlSurface() const { return dopplerSurface_; }
 
+    // D1 reverse-audit: register the UI-only control surface (MainWindow).
+    // Null until a UI registers; the tool layer gets an honest "not available"
+    // instead of faking a widget write.
+    void setUiControlSurface(UiControlSurface* s) { uiSurface_ = s; }
+    UiControlSurface* uiControlSurface() const { return uiSurface_; }
+
     // ---- ANR (audio noise reduction on the selected VFO's audio) -------
     void setAnrEnabled(bool on);
     void setAnrStrength(float s);
@@ -761,6 +768,9 @@ private:
     // Phase55 block3: optional live Doppler control surface (set by MainWindow).
     // Null in headless/test runs -> honest "not available" from the tool layer.
     DopplerControlSurface* dopplerSurface_ = nullptr;
+    // D1 reverse-audit: optional UI control surface (set by MainWindow). Null in
+    // headless/test runs -> honest "not available" from the tool layer.
+    UiControlSurface* uiSurface_ = nullptr;
     Squelch squelch_;
     Agc agc_;
     // CTCSS tone detector fed the selected VFO's post-ANR 48 kHz mono audio

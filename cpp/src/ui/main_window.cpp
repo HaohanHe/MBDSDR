@@ -198,6 +198,11 @@ MainWindow::MainWindow(QWidget* parent)
     // on MainWindow). The checkbox does not exist yet at this point, but the
     // interface methods null-check it, so registration is safe here.
     engine_->setDopplerControlSurface(this);
+    // D1 reverse-audit: expose the UI-only settings to the tool layer through
+    // the abstract surface (the engine depends on the interface, not on
+    // MainWindow). Widgets do not exist yet at this point, but every interface
+    // method null-checks its control, so registration is safe here.
+    engine_->setUiControlSurface(this);
 
     // ---- Top bar (real elements only) ----
     auto* topBar = new QFrame;
@@ -2667,7 +2672,10 @@ MainWindow::MainWindow(QWidget* parent)
         ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdAi));
 
     // Radio / transmit panel: serial CAT, CW, AX.25/KISS, SoapySDR TX.
-    rightTabs_->addTab(new ui::RadioPanel(rightCard), tr("电台"));
+    // D1 reverse-audit: keep a handle so the UiControlSurface J-group can
+    // forward to its bare paths (no QMessageBox there).
+    radioPanel_ = new ui::RadioPanel(rightCard);
+    rightTabs_->addTab(radioPanel_, tr("电台"));
     rightTabs_->widget(rightTabs_->count() - 1)
         ->setProperty(tokens::kPanelIdProp, QString::fromUtf8(tokens::kPanelIdRadio));
 
@@ -7234,6 +7242,181 @@ bool MainWindow::isDopplerCompensationEnabled() const {
 
 bool MainWindow::isDopplerCompensationAvailable() const {
     return stationSet_ && capturedIdx_ >= 0;
+}
+
+// D1 reverse-audit: UiControlSurface bridge. Programmatic mirrors of the
+// UI-only settings for the AI tool layer. Every method drives the REAL widget
+// the user touches (setValue / setCurrentIndex / setChecked), so the existing
+// handlers -- persistence keys + live apply -- do the work and the UI control
+// stays the single source of truth; no business logic is copied here. The
+// J-group TX calls forward to RadioPanel's bare paths (NO QMessageBox: the
+// confirm gate lives in the tool layer). No widget = honest no-op / false.
+// ---- E: 频谱/瀑布显示面（转发 SpectrumWidget 的既有槽 + 镜像） ----
+void MainWindow::uiSetPersistence(int mode) {
+    if (spectrum_) spectrum_->setPersistMode(mode);
+}
+void MainWindow::uiSetWaterfallDepth(int rows) {
+    if (spectrum_) spectrum_->setWaterfallDepth(rows);
+}
+void MainWindow::uiSetWaterfallSpeed(int linesPerFrame) {
+    if (spectrum_) spectrum_->setScrollSpeed(linesPerFrame);
+}
+void MainWindow::uiSetBuiltinPalette(int index) {
+    if (spectrum_) spectrum_->setPalette(index);
+}
+void MainWindow::uiSetDbRange(float minDb, float maxDb) {
+    if (spectrum_) spectrum_->setDbRange(minDb, maxDb);
+}
+void MainWindow::uiSetZoomFactor(double z) {
+    if (spectrum_) spectrum_->setZoomFactor(z);
+}
+void MainWindow::uiSetDbGridStep(int stepDb) {
+    if (spectrum_) spectrum_->setDbGridStepDb(stepDb);
+}
+void MainWindow::uiSetPeakThresholdDb(int db) {
+    if (spectrum_) spectrum_->setPeakThresholdDb(db);
+}
+void MainWindow::uiSetMaxHold(bool on) {
+    if (spectrum_) spectrum_->setMaxHoldEnabled(on);
+}
+void MainWindow::uiSetMinHold(bool on) {
+    if (spectrum_) spectrum_->setMinHoldEnabled(on);
+}
+void MainWindow::uiSetHoldDecayDb(double dbPerFrame) {
+    if (spectrum_) spectrum_->setMaxHoldDecayDb(dbPerFrame);
+}
+void MainWindow::uiSetEdgeRailVisible(bool on) {
+    if (spectrum_) spectrum_->setEdgeRailVisible(on);
+}
+
+// ---- F: 源面 ----
+void MainWindow::uiSetSourceType(int index) {
+    // currentIndexChanged lambda IS the handler (tcp field visibility + the
+    // synthetic-source opt-in/teardown). Out-of-range index = honest no-op.
+    if (!srcTypeCombo_ || index < 0 || index >= srcTypeCombo_->count()) return;
+    srcTypeCombo_->setCurrentIndex(index);
+}
+
+bool MainWindow::uiSetSpyServer(bool on, int port) {
+    if (!spyServer_ || !spyserverChk_ || !spyserverPortSpin_) return false;
+    if (port > 0) spyserverPortSpin_->setValue(port);   // <=0 = keep current port
+    if (spyserverChk_->isChecked() != on) {
+        spyserverChk_->setChecked(on);   // toggled -> onSpyServerToggled
+    } else {
+        onSpyServerToggled(on);          // same state: re-run (rebind on new port)
+    }
+    // Honest terminal state: never claim listening when the bind failed.
+    return on ? spyServer_->isListening() : !spyServer_->isListening();
+}
+
+// ---- G: GNSS 面（镜像 onGnssConnectClicked：先填真控件再调同一 handler） ----
+bool MainWindow::uiConnectGnss(const QString& device, int baud) {
+    if (!gnssDeviceEdit_ || !gnssBaudCombo_ || !gnssRx_) return false;
+    gnssDeviceEdit_->setText(device);
+    const int idx = gnssBaudCombo_->findText(QString::number(baud));
+    if (idx >= 0) gnssBaudCombo_->setCurrentIndex(idx);
+    // The button handler is a TOGGLE: while a receiver is running it stops
+    // instead of (re)connecting. Walk the same two UI presses (stop first) so
+    // the net effect is "connect to the requested device".
+    if (gnssRx_->isRunning()) gnssRx_->stop();
+    onGnssConnectClicked();   // the real handler: persist + setDevice + start()
+    // start() is async: true means "initiated", not "already fixed".
+    return gnssRx_->isRunning();
+}
+void MainWindow::uiDisconnectGnss() {
+    if (!gnssRx_ || !gnssRx_->isRunning()) return;
+    onGnssConnectClicked();   // running -> the same toggle stops the receiver
+}
+bool MainWindow::uiGnssRunning() const {
+    return gnssRx_ && gnssRx_->isRunning();
+}
+
+// ---- G: 图层面（toggled lambda -> WorldView + 持久化） ----
+void MainWindow::uiSetMapLayerGnss(bool on) {
+    if (layerGnssChk_) layerGnssChk_->setChecked(on);
+}
+void MainWindow::uiSetMapLayerAdsb(bool on) {
+    if (layerAdsbChk_) layerAdsbChk_->setChecked(on);
+}
+void MainWindow::uiSetMapLayerSat(bool on) {
+    if (layerSatChk_) layerSatChk_->setChecked(on);
+}
+
+// ---- D: 扫描面板（写入真控件；下一次「开始扫描」启动时读入扫描器） ----
+void MainWindow::uiSetScanDwellMs(int ms) {
+    if (scanDwellSpin_) scanDwellSpin_->setValue(ms);
+}
+void MainWindow::uiSetScanThresholdDb(double db) {
+    if (scanThrSpin_) scanThrSpin_->setValue(db);
+}
+void MainWindow::uiSetScanDirection(int index) {
+    if (!scanDirCombo_ || index < 0 || index >= scanDirCombo_->count()) return;
+    scanDirCombo_->setCurrentIndex(index);
+}
+void MainWindow::uiSetScanHoldMode(int index) {
+    // currentIndexChanged also re-syncs the linger/hold spin enabledness.
+    if (!scanHoldCombo_ || index < 0 || index >= scanHoldCombo_->count()) return;
+    scanHoldCombo_->setCurrentIndex(index);
+}
+void MainWindow::uiSetScanLingerMs(int ms) {
+    if (scanLingerSpin_) scanLingerSpin_->setValue(ms);
+}
+void MainWindow::uiSetScanHoldMs(int ms) {
+    if (scanHoldMsSpin_) scanHoldMsSpin_->setValue(ms);
+}
+void MainWindow::uiSetScanBookmarksOnly(bool on) {
+    if (scanBmOnlyChk_) scanBmOnlyChk_->setChecked(on);
+}
+
+// ---- H: 步进面（setCurrentIndex -> applyStep + scheduleSave） ----
+void MainWindow::uiSetTuneStepHz(int stepHz) {
+    if (!stepCombo_) return;
+    for (int i = 0; i < kStepCount; ++i) {
+        if (kStepValuesHz[i] == stepHz) {
+            stepCombo_->setCurrentIndex(i);
+            return;
+        }
+    }
+    // Unknown step: honest no-op (never snap to a different step).
+}
+
+// ---- L: 左栏分组显隐（复用 leftPanelGroups_ 的 id→控件映射） ----
+void MainWindow::uiSetLeftGroupVisible(const QString& panelId, bool visible) {
+    auto it = leftPanelGroups_.find(panelId);
+    if (it == leftPanelGroups_.end() || !it.value()) return;   // unknown id: no-op
+    it.value()->setVisible(visible);
+    // Persist on the SAME key saveUiState()/restoreUiState() and the settings
+    // dialog share. Read-modify-write keeps other hidden groups intact and is
+    // honest even before the window is first shown (a from-widget walk cannot
+    // tell "intentionally hidden" from "not shown yet" there).
+    mbdsdr::core::AppSettings s;
+    QStringList hidden = s.value(tokens::kSettingsKeyHiddenLeftPanels).toStringList();
+    if (visible) {
+        hidden.removeAll(panelId);
+    } else if (!hidden.contains(panelId)) {
+        hidden << panelId;
+    }
+    s.setValue(tokens::kSettingsKeyHiddenLeftPanels, hidden);
+}
+
+// ---- J: 电台/TX 面（转发 RadioPanel 裸路径；确认门在工具层） ----
+bool MainWindow::uiCatConnect(const QString& device, int baud, const QString& protocol) {
+    return radioPanel_ && radioPanel_->connectCat(device, baud, protocol);
+}
+bool MainWindow::uiCatConnected() const {
+    return radioPanel_ && radioPanel_->catConnected();
+}
+bool MainWindow::uiSendCw(int wpm, const QString& text) {
+    return radioPanel_ && radioPanel_->sendCw(wpm, text);
+}
+bool MainWindow::uiSendAx25Beacon(const QString& call, const QString& path, const QString& msg) {
+    return radioPanel_ && radioPanel_->sendBeacon(call, path, msg);
+}
+bool MainWindow::uiOpenSoapy(const QString& driver, double freqMhz) {
+    return radioPanel_ && radioPanel_->openSoapy(driver, freqMhz);
+}
+QString MainWindow::uiRadioStatus() const {
+    return radioPanel_ ? radioPanel_->statusText() : QStringLiteral("无电台面板");
 }
 
 void MainWindow::updateCaptureControls() {

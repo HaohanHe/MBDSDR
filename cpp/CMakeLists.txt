@@ -239,6 +239,7 @@ set(HEADERS
     src/dsp/rtl_sdr_source.h
     src/dsp/spyserver_server.h
     src/dsp/spectrum_engine.h
+    src/dsp/ui_control_surface.h
     src/control/control_hub.h
     src/control/control_http_server.h   # Phase27: AUTOMOC needs the Q_OBJECT front-end header
     src/dsp/iq_frontend.h

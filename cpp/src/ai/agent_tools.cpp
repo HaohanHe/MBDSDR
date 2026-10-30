@@ -7,6 +7,7 @@
 #include "core/tokens.h"
 #include "ui/spectrum_render.h"
 #include "dsp/spectrum_engine.h"
+#include "dsp/ui_control_surface.h"  // UiControlSurface seam (D1 round 3 tools)
 #include "vna/vna_rf.h"
 #include "dsp/device_capabilities.h"
 #include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting
@@ -30,6 +31,10 @@
 #include <QPainter>
 #include <QPen>
 #include <QPolygonF>
+#include <QApplication>   // set_ui_scale: qApp->setStyleSheet (mirror main_window.cpp:3435)
+#include <QAudioDevice>   // set_audio_output: QAudioDevice() = system default
+#include <QDateTime>      // set_sat_pass_template: currentDateTimeUtc
+#include <QMediaDevices>  // set_audio_output: audioOutputs() description match
 #include <cmath>
 #include <limits>
 
@@ -3753,6 +3758,1057 @@ QString execVnaConnect(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// ===== D1 tool-gap fill round 3 (2026-10-30): 26 executors B2/D/E/F/G/H/I2/J/K/L =====
+// UiControlSurface-driven tools share the one honest headless guard: no surface
+// -> ok:false ("无 UI 控制面"), never a fake "applied" echo. TX tools (J group)
+// additionally require an EXPLICIT confirm=true before touching the transmit
+// chain (radio regulations; the same gate the QMessageBox confirm covers on the
+// UI path). Engine-direct tools (B2/H2/K) skip the surface entirely.
+
+namespace {
+// Single wording for the headless case of every surface tool.
+QString noUiSurface() {
+    return errResult(QString::fromUtf8("无 UI 控制面（该参数由桌面端控件持有，headless 不可用）"));
+}
+// Integer-valued params sit behind int spinboxes; a fractional value would be
+// silently truncated by the control behind the surface -- reject instead of
+// clamping (绝不静默夹值).
+bool isIntValued(double d) {
+    return std::isfinite(d) && d == std::floor(d)
+        && d >= static_cast<double>(std::numeric_limits<int>::min())
+        && d <= static_cast<double>(std::numeric_limits<int>::max());
+}
+// TX confirm gate shared by set_cat_control / send_cw / send_ax25_beacon /
+// soapy_transmit: confirm must be explicitly true (missing/false/non-bool all
+// land here) before anything reaches the transmit chain.
+QString txGateError() {
+    return errResult(QString::fromUtf8("发射链路操作需 confirm=true 显式确认（发射受无线电管理条例约束）"));
+}
+} // namespace
+
+// D1-B2 set_audio_output: engine AudioOutput volume/device (engine-direct, not a
+// surface tool). volume mirrors main_window.cpp:2824 (rx/volume 0..100 -> 0..1);
+// device mirrors the settings hot-restart path (main_window.cpp:3417-3428) and
+// the startup path (:3918): "default" = null QAudioDevice, otherwise an exact
+// description match. Unmatched -> ok:false with the real device list; never a
+// silent no-op.
+QString execSetAudioOutput(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                           const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    const bool hasVol = args.contains(QStringLiteral("volume"));
+    const bool hasDev = args.contains(QStringLiteral("device"));
+    if (!hasVol && !hasDev)
+        return errResult(QString::fromUtf8("volume/device 至少提供其一（全缺=无操作）"));
+    dsp::AudioOutput* audio = engine->audioOutput();
+    if (!audio)
+        return errResult(QString::fromUtf8("无音频输出（headless 不可用）"));
+    QJsonObject o;
+    o["ok"] = true;
+    if (hasVol) {
+        double v = 0.0;
+        if (!needNum(args, "volume", v))
+            return errResult(QString::fromUtf8("参数 volume 不是数字——未生效"));
+        if (!(v >= 0.0 && v <= 100.0))
+            return errResult(QString::fromUtf8(
+                "音量越界：必须在 0..100，收到 %1——未生效").arg(v));
+        audio->setVolume(v / 100.0);
+        mbdsdr::core::AppSettings().setValue(QStringLiteral("rx/volume"), v);
+        o["volume"] = v;
+    }
+    if (hasDev) {
+        QString dev;
+        if (!needStr(args, "device", dev))
+            return errResult(QString::fromUtf8("参数 device 不是字符串——未生效"));
+        if (dev == QLatin1String("default")) {
+            audio->setDevice(QAudioDevice());   // null device = system default
+        } else {
+            const auto devs = QMediaDevices::audioOutputs();
+            bool matched = false;
+            for (const auto& d : devs) {
+                if (d.description() == dev) {
+                    audio->setDevice(d);
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                QJsonObject e;
+                e["ok"] = false;
+                e["error"] = QString::fromUtf8(
+                    "找不到音频输出设备（description 需精确匹配）：%1").arg(dev);
+                QJsonArray avail;
+                for (const auto& d : devs) avail.append(d.description());
+                e["available_devices"] = avail;
+                return compact(e);
+            }
+        }
+        AiConfig cfg;
+        cfg.load();   // keep whatever else is configured (apiKey etc.)
+        cfg.audioDevice = dev;
+        if (!cfg.save())
+            return errResult(QString::fromUtf8("音频设备持久化失败（AiConfig 写入错误）"));
+        o["device"] = dev;
+    }
+    o["message"] = QString::fromUtf8("音频输出已更新（音量即时生效；设备已切换并持久化，重启沿用）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-D1 set_scan_params: write the scan-panel controls. Bounds copied verbatim
+// from the main_window scan widgets: scanDwellSpin_ 100..2000 ms, scanThrSpin_
+// -120..0 dBFS, scanLingerSpin_/scanHoldMsSpin_ 0..60000 ms. The scanner reads
+// these at scan start, so the effect is honest-but-deferred (message says so).
+QString execSetScanParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QJsonObject o;
+    o["ok"] = true;
+    if (args.contains(QStringLiteral("dwell_ms"))) {
+        double v = 0.0;
+        if (!needNum(args, "dwell_ms", v))
+            return errResult(QString::fromUtf8("参数 dwell_ms 不是数字——未生效"));
+        if (!isIntValued(v) || !(v >= 100.0 && v <= 2000.0))
+            return errResult(QString::fromUtf8(
+                "驻留越界：必须在 100..2000 ms 整数，收到 %1——未生效").arg(v));
+        ui->uiSetScanDwellMs(static_cast<int>(v));
+        o["dwell_ms"] = v;
+    }
+    if (args.contains(QStringLiteral("threshold_db"))) {
+        double v = 0.0;
+        if (!needNum(args, "threshold_db", v))
+            return errResult(QString::fromUtf8("参数 threshold_db 不是数字——未生效"));
+        if (!(v >= -120.0 && v <= 0.0))
+            return errResult(QString::fromUtf8(
+                "门限越界：必须在 -120..0 dBFS，收到 %1——未生效").arg(v));
+        ui->uiSetScanThresholdDb(v);
+        o["threshold_db"] = v;
+    }
+    if (args.contains(QStringLiteral("direction"))) {
+        QString s;
+        if (!needStr(args, "direction", s))
+            return errResult(QString::fromUtf8("参数 direction 不是字符串——未生效"));
+        int idx = -1;
+        if (s == QLatin1String("up")) idx = 0;
+        else if (s == QLatin1String("down")) idx = 1;
+        else if (s == QLatin1String("pingpong")) idx = 2;
+        else return errResult(QString::fromUtf8(
+            "direction 只接受 up/down/pingpong，收到 %1——未生效").arg(s));
+        ui->uiSetScanDirection(idx);
+        o["direction"] = s;
+    }
+    if (args.contains(QStringLiteral("hold_mode"))) {
+        QString s;
+        if (!needStr(args, "hold_mode", s))
+            return errResult(QString::fromUtf8("参数 hold_mode 不是字符串——未生效"));
+        int idx = -1;
+        if (s == QLatin1String("until_signal_gone")) idx = 0;
+        else if (s == QLatin1String("fixed_ms")) idx = 1;
+        else return errResult(QString::fromUtf8(
+            "hold_mode 只接受 until_signal_gone/fixed_ms，收到 %1——未生效").arg(s));
+        ui->uiSetScanHoldMode(idx);
+        o["hold_mode"] = s;
+    }
+    if (args.contains(QStringLiteral("linger_ms"))) {
+        double v = 0.0;
+        if (!needNum(args, "linger_ms", v))
+            return errResult(QString::fromUtf8("参数 linger_ms 不是数字——未生效"));
+        if (!isIntValued(v) || !(v >= 0.0 && v <= 60000.0))
+            return errResult(QString::fromUtf8(
+                "消失延时越界：必须在 0..60000 ms 整数，收到 %1——未生效").arg(v));
+        ui->uiSetScanLingerMs(static_cast<int>(v));
+        o["linger_ms"] = v;
+    }
+    if (args.contains(QStringLiteral("hold_ms"))) {
+        double v = 0.0;
+        if (!needNum(args, "hold_ms", v))
+            return errResult(QString::fromUtf8("参数 hold_ms 不是数字——未生效"));
+        if (!isIntValued(v) || !(v >= 0.0 && v <= 60000.0))
+            return errResult(QString::fromUtf8(
+                "固定停留越界：必须在 0..60000 ms 整数，收到 %1——未生效").arg(v));
+        ui->uiSetScanHoldMs(static_cast<int>(v));
+        o["hold_ms"] = v;
+    }
+    if (args.contains(QStringLiteral("bookmarks_only"))) {
+        if (!args.value(QStringLiteral("bookmarks_only")).isBool())
+            return errResult(QString::fromUtf8("参数 bookmarks_only 不是布尔值——未生效"));
+        const bool v = args.value(QStringLiteral("bookmarks_only")).toBool();
+        ui->uiSetScanBookmarksOnly(v);
+        o["bookmarks_only"] = v;
+    }
+    if (!o.contains(QStringLiteral("dwell_ms")) && !o.contains(QStringLiteral("threshold_db"))
+        && !o.contains(QStringLiteral("direction")) && !o.contains(QStringLiteral("hold_mode"))
+        && !o.contains(QStringLiteral("linger_ms")) && !o.contains(QStringLiteral("hold_ms"))
+        && !o.contains(QStringLiteral("bookmarks_only")))
+        return errResult(QString::fromUtf8(
+            "dwell_ms/threshold_db/direction/hold_mode/linger_ms/hold_ms/bookmarks_only "
+            "至少提供其一（全缺=无操作）"));
+    o["message"] = QString::fromUtf8("已写入扫描面板，下一次『开始扫描』生效（值在启动时读入扫描器）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E1 set_persistence: spectrum-widget persist mode (UI 词 关/低/高).
+QString execSetPersistence(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                           const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString mode;
+    if (!needStr(args, "mode", mode))
+        return errResult(QString::fromUtf8("参数 mode 缺失或不是字符串（off/low/high）"));
+    int idx = -1;
+    if (mode == QLatin1String("off")) idx = 0;
+    else if (mode == QLatin1String("low")) idx = 1;
+    else if (mode == QLatin1String("high")) idx = 2;
+    else return errResult(QString::fromUtf8(
+        "mode 只接受 off/low/high，收到 %1——未生效").arg(mode));
+    ui->uiSetPersistence(idx);
+    QJsonObject o;
+    o["ok"] = true;
+    o["mode"] = mode;
+    o["message"] = QString::fromUtf8("余辉模式已写入频谱显示面");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E2 set_waterfall_depth: ring depth, exact tiers only
+// (tokens::kWaterfallDepthChoices 全档 = UI depthCombo_ 同一数组，能力对拍不缩水).
+QString execSetWaterfallDepth(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    double rows = 0.0;
+    if (!needNum(args, "rows", rows))
+        return errResult(QString::fromUtf8(
+            "参数 rows 缺失或不是数字（128/256/512/1024/2048/4096）"));
+    const int r = static_cast<int>(rows);
+    bool exactTier = (rows == static_cast<double>(r));
+    if (exactTier) {
+        exactTier = false;
+        for (int d : tokens::kWaterfallDepthChoices)
+            if (d == r) { exactTier = true; break; }
+    }
+    if (!exactTier)
+        return errResult(QString::fromUtf8(
+            "rows 只接受 kWaterfallDepthChoices 精确值（128/256/512/1024/2048/4096），"
+            "收到 %1——未生效").arg(rows));
+    ui->uiSetWaterfallDepth(r);
+    QJsonObject o;
+    o["ok"] = true;
+    o["rows"] = r;
+    o["message"] = QString::fromUtf8("瀑布深度已写入频谱显示面（%1 行）").arg(r);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E3 set_waterfall_speed: waterfall scroll speed (1/2/4 lines per frame).
+QString execSetWaterfallSpeed(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    double speed = 0.0;
+    if (!needNum(args, "speed", speed))
+        return errResult(QString::fromUtf8("参数 speed 缺失或不是数字（1/2/4）"));
+    const int s = static_cast<int>(speed);
+    if (speed != static_cast<double>(s) || (s != 1 && s != 2 && s != 4))
+        return errResult(QString::fromUtf8(
+            "speed 只接受 1/2/4 精确值，收到 %1——未生效").arg(speed));
+    ui->uiSetWaterfallSpeed(s);
+    QJsonObject o;
+    o["ok"] = true;
+    o["speed"] = s;
+    o["message"] = QString::fromUtf8("瀑布滚速已写入频谱显示面（%1 行/帧）").arg(s);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E4 set_builtin_palette: builtin colormap (UI 词 经典/单色/Viridis).
+QString execSetBuiltinPalette(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString pal;
+    if (!needStr(args, "palette", pal))
+        return errResult(QString::fromUtf8("参数 palette 缺失或不是字符串（classic/monochrome/viridis）"));
+    int idx = -1;
+    if (pal == QLatin1String("classic")) idx = 0;
+    else if (pal == QLatin1String("monochrome")) idx = 1;
+    else if (pal == QLatin1String("viridis")) idx = 2;
+    else return errResult(QString::fromUtf8(
+        "palette 只接受 classic/monochrome/viridis，收到 %1——未生效").arg(pal));
+    ui->uiSetBuiltinPalette(idx);
+    QJsonObject o;
+    o["ok"] = true;
+    o["palette"] = pal;
+    o["message"] = QString::fromUtf8("内置色图已写入频谱显示面");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E5 set_spectrum_db_range: dB display window. Bounds copied verbatim from
+// dbMinSpin_/dbMaxSpin_ setRange (spectrum_widget.cpp:300-310): lower spin
+// kDbSpinLowerMin..kDbSpinLowerMax, upper spin kDbSpinUpperMin..kDbSpinUpperMax;
+// min_db < max_db enforced at runtime (no silent re-pairing like the UI applyDb).
+QString execSetSpectrumDbRange(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                               const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    double lo = 0.0, hi = 0.0;
+    if (!needNum(args, "min_db", lo))
+        return errResult(QString::fromUtf8("参数 min_db 缺失或不是数字"));
+    if (!needNum(args, "max_db", hi))
+        return errResult(QString::fromUtf8("参数 max_db 缺失或不是数字"));
+    if (!(lo >= tokens::kDbSpinLowerMin && lo <= tokens::kDbSpinLowerMax))
+        return errResult(QString::fromUtf8(
+            "min_db 越界：必须在 %1..%2 dB，收到 %3——未生效")
+            .arg(tokens::kDbSpinLowerMin).arg(tokens::kDbSpinLowerMax).arg(lo));
+    if (!(hi >= tokens::kDbSpinUpperMin && hi <= tokens::kDbSpinUpperMax))
+        return errResult(QString::fromUtf8(
+            "max_db 越界：必须在 %1..%2 dB，收到 %3——未生效")
+            .arg(tokens::kDbSpinUpperMin).arg(tokens::kDbSpinUpperMax).arg(hi));
+    if (!(lo < hi))
+        return errResult(QString::fromUtf8(
+            "min_db 必须小于 max_db（收到 %1 >= %2）——未生效").arg(lo).arg(hi));
+    ui->uiSetDbRange(static_cast<float>(lo), static_cast<float>(hi));
+    QJsonObject o;
+    o["ok"] = true;
+    o["min_db"] = lo;
+    o["max_db"] = hi;
+    o["message"] = QString::fromUtf8("频谱 dB 显示范围已写入（%1..%2 dB）").arg(lo).arg(hi);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E6 set_spectrum_zoom: display-only horizontal zoom (canvas
+// setZoomFactor). Honest bound = positive finite; the display window itself
+// converges to tokens::kZoomMin..kZoomMax (1.0..16.0, spectrum_display.cpp:767),
+// which the message reports instead of pretending an unbounded zoom.
+QString execSetSpectrumZoom(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    double z = 0.0;
+    if (!needNum(args, "zoom", z))
+        return errResult(QString::fromUtf8("参数 zoom 缺失或不是数字"));
+    if (!std::isfinite(z) || !(z > 0.0))
+        return errResult(QString::fromUtf8(
+            "zoom 必须为正的有限数，收到 %1——未生效").arg(z));
+    ui->uiSetZoomFactor(z);
+    QJsonObject o;
+    o["ok"] = true;
+    o["zoom"] = z;
+    o["message"] = QString::fromUtf8(
+        "显示缩放已写入（zoom=%1）；显示窗口按 1.0..16.0 收敛").arg(z);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E7 set_db_grid_step: y-ruler density tiers (tokens::kDbGridStepChoices).
+QString execSetDbGridStep(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    double step = 0.0;
+    if (!needNum(args, "step_db", step))
+        return errResult(QString::fromUtf8("参数 step_db 缺失或不是数字（10/20/40）"));
+    const int s = static_cast<int>(step);
+    if (step != static_cast<double>(s) || (s != 10 && s != 20 && s != 40))
+        return errResult(QString::fromUtf8(
+            "step_db 只接受 10/20/40 精确值，收到 %1——未生效").arg(step));
+    ui->uiSetDbGridStep(s);
+    QJsonObject o;
+    o["ok"] = true;
+    o["step_db"] = s;
+    o["message"] = QString::fromUtf8("dB 栅格步进已写入（%1 dB）").arg(s);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E8 set_peak_threshold: peak-detection threshold above the spectral median,
+// integer kPeakThresholdMin..kPeakThresholdMax (5..40 dB).
+QString execSetPeakThreshold(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                             const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    double db = 0.0;
+    if (!needNum(args, "threshold_db", db))
+        return errResult(QString::fromUtf8("参数 threshold_db 缺失或不是数字"));
+    if (!isIntValued(db) || !(db >= tokens::kPeakThresholdMin && db <= tokens::kPeakThresholdMax))
+        return errResult(QString::fromUtf8(
+            "峰值门限越界：必须在 %1..%2 dB 整数，收到 %3——未生效")
+            .arg(tokens::kPeakThresholdMin).arg(tokens::kPeakThresholdMax).arg(db));
+    ui->uiSetPeakThresholdDb(static_cast<int>(db));
+    QJsonObject o;
+    o["ok"] = true;
+    o["threshold_db"] = static_cast<int>(db);
+    o["message"] = QString::fromUtf8("峰值检测门限已写入（%1 dB，相对谱中位数）").arg((int)db);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E9 set_peak_hold: max/min hold toggles + decay tier (tokens::
+// kMaxHoldDecaySlow/Medium/Fast = 0.5/1.5/3.0 dB per frame); at least one field.
+QString execSetPeakHold(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QJsonObject o;
+    o["ok"] = true;
+    if (args.contains(QStringLiteral("max_hold"))) {
+        if (!args.value(QStringLiteral("max_hold")).isBool())
+            return errResult(QString::fromUtf8("参数 max_hold 不是布尔值——未生效"));
+        const bool v = args.value(QStringLiteral("max_hold")).toBool();
+        ui->uiSetMaxHold(v);
+        o["max_hold"] = v;
+    }
+    if (args.contains(QStringLiteral("min_hold"))) {
+        if (!args.value(QStringLiteral("min_hold")).isBool())
+            return errResult(QString::fromUtf8("参数 min_hold 不是布尔值——未生效"));
+        const bool v = args.value(QStringLiteral("min_hold")).toBool();
+        ui->uiSetMinHold(v);
+        o["min_hold"] = v;
+    }
+    if (args.contains(QStringLiteral("decay"))) {
+        QString s;
+        if (!needStr(args, "decay", s))
+            return errResult(QString::fromUtf8("参数 decay 不是字符串——未生效"));
+        double dbPerFrame = 0.0;
+        if (s == QLatin1String("slow")) dbPerFrame = tokens::kMaxHoldDecaySlow;
+        else if (s == QLatin1String("medium")) dbPerFrame = tokens::kMaxHoldDecayMedium;
+        else if (s == QLatin1String("fast")) dbPerFrame = tokens::kMaxHoldDecayFast;
+        else return errResult(QString::fromUtf8(
+            "decay 只接受 slow/medium/fast，收到 %1——未生效").arg(s));
+        ui->uiSetHoldDecayDb(dbPerFrame);
+        o["decay"] = s;
+        o["decay_db_per_frame"] = dbPerFrame;
+    }
+    if (!o.contains(QStringLiteral("max_hold")) && !o.contains(QStringLiteral("min_hold"))
+        && !o.contains(QStringLiteral("decay")))
+        return errResult(QString::fromUtf8(
+            "max_hold/min_hold/decay 至少提供其一（全缺=无操作）"));
+    o["message"] = QString::fromUtf8("峰值保持参数已写入频谱显示面");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-E10 set_edge_rail_visibility: right-edge rail visibility (the control path
+// also persists kSettingsKeyEdgeRailVisible -- see SpectrumWidget::
+// setEdgeRailVisible, spectrum_widget.cpp:886-892).
+QString execSetEdgeRailVisibility(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                                  const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    if (!args.value(QStringLiteral("visible")).isBool())
+        return errResult(QString::fromUtf8("参数 visible 缺失或不是布尔值"));
+    const bool v = args.value(QStringLiteral("visible")).toBool();
+    ui->uiSetEdgeRailVisible(v);
+    QJsonObject o;
+    o["ok"] = true;
+    o["visible"] = v;
+    o["message"] = QString::fromUtf8("右缘快捷轨显隐已生效并持久化");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-F1 set_source_type: source selector (srcTypeCombo_ index order).
+// Honest semantics: test_signal = 合成 IQ 非真实接收; rtl_tcp only switches to
+// remote mode (the real link is connect_network_source); switching back to a
+// real source tears the synthetic source down.
+QString execSetSourceType(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString s;
+    if (!needStr(args, "source_type", s))
+        return errResult(QString::fromUtf8("参数 source_type 缺失或不是字符串（local_rtlsdr/rtl_tcp/test_signal）"));
+    int idx = -1;
+    if (s == QLatin1String("local_rtlsdr")) idx = 0;
+    else if (s == QLatin1String("rtl_tcp")) idx = 1;
+    else if (s == QLatin1String("test_signal")) idx = 2;
+    else return errResult(QString::fromUtf8(
+        "source_type 只接受 local_rtlsdr/rtl_tcp/test_signal，收到 %1——未生效").arg(s));
+    ui->uiSetSourceType(idx);
+    QJsonObject o;
+    o["ok"] = true;
+    o["source_type"] = s;
+    o["message"] = QString::fromUtf8(
+        "源类型已切换（%1）：test_signal=合成 IQ 非真实接收；rtl_tcp 只是切到远程模式，"
+        "真正建链用 connect_network_source；切回真实源会拆除合成源").arg(s);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-F2 set_spyserver: SpyServer listener toggle + port. The port spin is
+// persisted under net/spyPort (main_window.cpp:498/5613), so a missing port
+// honestly means "keep the current one". uiSetSpyServer returns the real end
+// state; false (bind failed) -> ok:false, never "listening" over a dead socket.
+QString execSetSpyServer(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                         const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    if (!args.value(QStringLiteral("enabled")).isBool())
+        return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
+    const bool on = args.value(QStringLiteral("enabled")).toBool();
+    int port = mbdsdr::core::AppSettings().value(QStringLiteral("net/spyPort"), 5555).toInt();
+    if (args.contains(QStringLiteral("port"))) {
+        double p = 0.0;
+        if (!needNum(args, "port", p))
+            return errResult(QString::fromUtf8("参数 port 不是数字——未生效"));
+        if (!isIntValued(p) || !(p >= 1024.0 && p <= 65535.0))
+            return errResult(QString::fromUtf8(
+                "port 越界：必须在 1024..65535 整数，收到 %1——未生效").arg(p));
+        port = static_cast<int>(p);
+    }
+    if (!ui->uiSetSpyServer(on, port)) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("监听失败（端口被占？）");
+        o["enabled"] = on;
+        o["port"] = port;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = on;
+    o["port"] = port;
+    o["message"] = on ? QString::fromUtf8("SpyServer 已开始监听（端口 %1）").arg(port)
+                      : QString::fromUtf8("SpyServer 已停止监听");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-G1 connect_gnss: GNSS serial connect/disconnect via the GNSS panel path.
+// Honest wording: the underlying start() is asynchronous -- "已发起连接" is NOT
+// "已定位"; the readback only reports the running flag (uiGnssRunning()).
+QString execConnectGnss(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    const QString action =
+        args.value(QStringLiteral("action")).toString(QStringLiteral("connect"));
+    if (action == QLatin1String("disconnect")) {
+        ui->uiDisconnectGnss();
+        QJsonObject o;
+        o["ok"] = true;
+        o["action"] = "disconnect";
+        o["gnss_running"] = ui->uiGnssRunning();
+        o["message"] = QString::fromUtf8("GNSS 已断开");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    if (action != QLatin1String("connect"))
+        return errResult(QString::fromUtf8(
+            "action 只接受 connect/disconnect，收到 %1——未生效").arg(action));
+    QString device;
+    if (!needStr(args, "device", device))
+        return errResult(QString::fromUtf8("参数 device 缺失或不是字符串（connect 需要串口设备）"));
+    if (device.trimmed().isEmpty())
+        return errResult(QString::fromUtf8("串口设备不能为空"));
+    double baud = 9600.0;
+    if (args.contains(QStringLiteral("baud"))) {
+        if (!needNum(args, "baud", baud))
+            return errResult(QString::fromUtf8("参数 baud 不是数字——未生效"));
+        const int b = static_cast<int>(baud);
+        if (baud != static_cast<double>(b) || (b != 9600 && b != 38400 && b != 115200))
+            return errResult(QString::fromUtf8(
+                "baud 只接受 9600/38400/115200，收到 %1——未生效").arg(baud));
+        baud = b;
+    }
+    if (!ui->uiConnectGnss(device, static_cast<int>(baud))) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("GNSS 串口打开失败：%1").arg(device);
+        o["gnss_running"] = ui->uiGnssRunning();
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["action"] = "connect";
+    o["device"] = device;
+    o["baud"] = static_cast<int>(baud);
+    o["gnss_running"] = ui->uiGnssRunning();
+    o["message"] = QString::fromUtf8(
+        "已发起 GNSS 连接（start() 异步：已发起连接≠已定位，需等待解算）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-G2 set_map_layers: world-map layer visibility (gnss/adsb/sat), at least one.
+QString execSetMapLayers(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                         const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QJsonObject o;
+    o["ok"] = true;
+    if (args.contains(QStringLiteral("gnss"))) {
+        if (!args.value(QStringLiteral("gnss")).isBool())
+            return errResult(QString::fromUtf8("参数 gnss 不是布尔值——未生效"));
+        const bool v = args.value(QStringLiteral("gnss")).toBool();
+        ui->uiSetMapLayerGnss(v);
+        o["gnss"] = v;
+    }
+    if (args.contains(QStringLiteral("adsb"))) {
+        if (!args.value(QStringLiteral("adsb")).isBool())
+            return errResult(QString::fromUtf8("参数 adsb 不是布尔值——未生效"));
+        const bool v = args.value(QStringLiteral("adsb")).toBool();
+        ui->uiSetMapLayerAdsb(v);
+        o["adsb"] = v;
+    }
+    if (args.contains(QStringLiteral("sat"))) {
+        if (!args.value(QStringLiteral("sat")).isBool())
+            return errResult(QString::fromUtf8("参数 sat 不是布尔值——未生效"));
+        const bool v = args.value(QStringLiteral("sat")).toBool();
+        ui->uiSetMapLayerSat(v);
+        o["sat"] = v;
+    }
+    if (!o.contains(QStringLiteral("gnss")) && !o.contains(QStringLiteral("adsb"))
+        && !o.contains(QStringLiteral("sat")))
+        return errResult(QString::fromUtf8("gnss/adsb/sat 至少提供其一（全缺=无操作）"));
+    o["message"] = QString::fromUtf8("地图图层显隐已写入");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-H2 set_sat_pass_template (engine-direct): plan a satellite capture via the
+// pure ai::planSatelliteCapture and REGISTER it as a pending plan -- never
+// execute. lat/lon fall back to the persisted station (AiConfig, only when
+// stationSet). Demo/stale-TLE results are rejected outright: a demo plan must
+// never drive a real capture (mirror main_window.cpp:8103-8119 honest branch).
+QString execSetSatPassTemplate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                               const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    QString satName;
+    if (!needStr(args, "sat_name", satName))
+        return errResult(QString::fromUtf8("参数 sat_name 缺失或不是字符串"));
+    if (satName.trimmed().isEmpty())
+        return errResult(QString::fromUtf8("sat_name 不能为空"));
+    double lat = 0.0, lon = 0.0;
+    bool haveLat = false, haveLon = false;
+    if (args.contains(QStringLiteral("lat_deg"))) {
+        if (!needNum(args, "lat_deg", lat))
+            return errResult(QString::fromUtf8("参数 lat_deg 不是数字"));
+        if (!(lat >= -90.0 && lat <= 90.0))
+            return errResult(QString::fromUtf8("纬度越界：必须在 -90..90，收到 %1").arg(lat));
+        haveLat = true;
+    }
+    if (args.contains(QStringLiteral("lon_deg"))) {
+        if (!needNum(args, "lon_deg", lon))
+            return errResult(QString::fromUtf8("参数 lon_deg 不是数字"));
+        if (!(lon >= -180.0 && lon <= 180.0))
+            return errResult(QString::fromUtf8("经度越界：必须在 -180..180，收到 %1").arg(lon));
+        haveLon = true;
+    }
+    double hours = 12.0;
+    if (args.contains(QStringLiteral("hours_ahead"))) {
+        if (!needNum(args, "hours_ahead", hours))
+            return errResult(QString::fromUtf8("参数 hours_ahead 不是数字"));
+        if (!isIntValued(hours) || !(hours >= 1.0 && hours <= 24.0))
+            return errResult(QString::fromUtf8(
+                "hours_ahead 越界：必须在 1..24 整数，收到 %1——未生效").arg(hours));
+    }
+    // Missing coordinate -> the persisted station, only when explicitly set.
+    AiConfig cfg;
+    cfg.load();
+    if (!haveLat && cfg.stationSet && std::isfinite(cfg.stationLat)) {
+        lat = cfg.stationLat;
+        haveLat = true;
+    }
+    if (!haveLon && cfg.stationSet && std::isfinite(cfg.stationLon)) {
+        lon = cfg.stationLon;
+        haveLon = true;
+    }
+    if (!haveLat || !haveLon)
+        return errResult(QString::fromUtf8(
+            "未提供 lat_deg/lon_deg 且未设置本站位置（先 set_station_position）"));
+    const SatTaskResult sr = planSatelliteCapture(
+        satName.trimmed(), lat, lon, QDateTime::currentDateTimeUtc(),
+        static_cast<int>(hours));
+    if (!sr.ok || sr.demo) {
+        // demo==true means the numbers came from the stale builtin TLE (epoch
+        // 2006): surface WHY (sr.warning) and refuse to register the plan.
+        const QString reason = (sr.demo && !sr.warning.isEmpty()) ? sr.warning : sr.error;
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("卫星选频失败：%1").arg(reason);
+        o["demo"] = sr.demo;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    const int planId =
+        PendingPlanStore::instance().submit(sr.plan, QStringLiteral("sat_pass_capture"));
+    QJsonObject o = planToRegisteredJson(sr.plan, planId);
+    o["template_name"] = QStringLiteral("sat_pass_capture");
+    o["sat_name"] = sr.satName;
+    o["aos_utc"] = sr.aosUtc.toUTC().toString(Qt::ISODate);
+    o["max_el_deg"] = sr.maxElDeg;
+    o["capture_freq_hz"] = sr.captureFreqHz;
+    o["message"] = QString::fromUtf8(
+        "已登记待执行计划（executed=false），需用户确认后经『执行待执行计划』"
+        "或 TaskRunner::runPendingPlan 执行");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-H3 set_tune_step: tuning-step combo (main_window.cpp:150 kStepValuesHz).
+QString execSetTuneStep(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    double v = 0.0;
+    if (!needNum(args, "step_hz", v))
+        return errResult(QString::fromUtf8("参数 step_hz 缺失或不是数字"));
+    constexpr int kSteps[] = {1, 10, 100, 1000, 10000, 100000, 1000000};
+    const int st = static_cast<int>(v);
+    bool ok = isIntValued(v);
+    if (ok) {
+        ok = false;
+        for (int cand : kSteps)
+            if (st == cand) { ok = true; break; }
+    }
+    if (!ok)
+        return errResult(QString::fromUtf8(
+            "step_hz 只接受 1/10/100/1000/10000/100000/1000000，收到 %1——未生效").arg(v));
+    ui->uiSetTuneStepHz(st);
+    QJsonObject o;
+    o["ok"] = true;
+    o["step_hz"] = st;
+    o["message"] = QString::fromUtf8("调谐步进已写入（%1 Hz）").arg(st);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-I2 analyze_vna_permeability (READ, s.write=false): NRW permeability from
+// the live sweep. thickness unit = mm -- the SAME unit as the VnaPanel 夹具厚
+// field (vna_panel.cpp:232 "mm（磁导率夹具）"), converted to metres for
+// vna::permeabilityNRW exactly like vna_panel.cpp:364. Sweep fetch mirrors
+// vna_panel.cpp:383-385. Unconnected / no sweep -> ok:false, never invented μr.
+QString execAnalyzeVnaPermeability(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                                   const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    double thickMm = 0.0;
+    if (!needNum(args, "thickness_mm", thickMm))
+        return errResult(QString::fromUtf8("参数 thickness_mm 缺失或不是数字（单位 mm，同面板「夹具厚」）"));
+    if (!std::isfinite(thickMm) || !(thickMm > 0.0))
+        return errResult(QString::fromUtf8(
+            "thickness_mm 必须为正的有限数（mm），收到 %1").arg(thickMm));
+    QJsonObject o;
+    auto& vna = engine->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) {
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("未连接 NanoVNA：无扫频数据可分析");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    auto f = vna.readFrequencies();
+    auto s11 = vna.readData(0);
+    auto s21 = vna.readData(1);
+    if (f.size() < 3 || s11.empty() || s21.empty()) {
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("无扫频数据（点数不足 3 或缺 S11/S21）：先 set_vna_sweep 并测量");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    const std::vector<double> fHz(f.begin(), f.end());
+    const vna::PermeabilityResult pr = vna::permeabilityNRW(fHz, s11, s21, thickMm * 1e-3);
+    o["ok"] = true;
+    o["thickness_mm"] = thickMm;
+    o["valid"] = pr.valid;
+    QJsonArray muRe, muIm;
+    for (double v : pr.mu_real)
+        muRe.append(std::isfinite(v) ? QJsonValue(v) : QJsonValue(QJsonValue::Null));
+    for (double v : pr.mu_imag)
+        muIm.append(std::isfinite(v) ? QJsonValue(v) : QJsonValue(QJsonValue::Null));
+    o["mu_real"] = muRe;
+    o["mu_imag"] = muIm;
+    // Midpoint readback, same spot VnaPanel reports (μr'/μr'' at the middle bin).
+    if (pr.valid && !pr.mu_real.empty()) {
+        const size_t mid = pr.mu_real.size() / 2;
+        if (std::isfinite(pr.mu_real[mid])) o["mu_real_mid"] = pr.mu_real[mid];
+        if (mid < pr.mu_imag.size() && std::isfinite(pr.mu_imag[mid]))
+            o["mu_imag_mid"] = pr.mu_imag[mid];
+    }
+    if (!pr.valid)
+        o["note"] = QString::fromUtf8("数据不足/病态，无法计算（%1）")
+                        .arg(QString::fromStdString(pr.note));
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-J1 set_cat_control: CAT radio connect (TX chain; confirm gate). Failure
+// echoes uiRadioStatus() verbatim -- never "connected" over a dead link.
+QString execSetCatControl(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    if (!args.value(QStringLiteral("confirm")).toBool())
+        return txGateError();
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString device;
+    if (!needStr(args, "device", device))
+        return errResult(QString::fromUtf8("参数 device 缺失或不是字符串（串口设备）"));
+    if (device.trimmed().isEmpty())
+        return errResult(QString::fromUtf8("串口设备不能为空"));
+    double baud = 19200.0;
+    if (args.contains(QStringLiteral("baud"))) {
+        if (!needNum(args, "baud", baud))
+            return errResult(QString::fromUtf8("参数 baud 不是数字——未生效"));
+        const int b = static_cast<int>(baud);
+        if (baud != static_cast<double>(b) || (b != 9600 && b != 19200 && b != 57600 && b != 115200))
+            return errResult(QString::fromUtf8(
+                "baud 只接受 9600/19200/57600/115200，收到 %1——未生效").arg(baud));
+        baud = b;
+    }
+    QString proto = QStringLiteral("civ");
+    if (args.contains(QStringLiteral("protocol"))) {
+        if (!needStr(args, "protocol", proto))
+            return errResult(QString::fromUtf8("参数 protocol 不是字符串——未生效"));
+        if (proto != QLatin1String("civ") && proto != QLatin1String("kenwood"))
+            return errResult(QString::fromUtf8(
+                "protocol 只接受 civ/kenwood，收到 %1——未生效").arg(proto));
+    }
+    if (!ui->uiCatConnect(device, static_cast<int>(baud), proto)) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("CAT 连接失败：%1").arg(ui->uiRadioStatus());
+        o["radio_status"] = ui->uiRadioStatus();
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["device"] = device;
+    o["baud"] = static_cast<int>(baud);
+    o["protocol"] = proto;
+    o["radio_status"] = ui->uiRadioStatus();
+    o["message"] = QString::fromUtf8("CAT 电台已连接（%1，%2 baud）")
+                       .arg(proto).arg((int)baud);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-J2 send_cw: key CW through the CAT radio (TX; confirm gate). Mirrors the
+// radio_panel CW lambda bare path (empty text rejected; keyer schedule built).
+QString execSendCw(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                   const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    if (!args.value(QStringLiteral("confirm")).toBool())
+        return txGateError();
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString text;
+    if (!needStr(args, "text", text))
+        return errResult(QString::fromUtf8("参数 text 缺失或不是字符串"));
+    if (text.trimmed().isEmpty())
+        return errResult(QString::fromUtf8("CW 文本不能为空"));
+    double wpm = 20.0;
+    if (args.contains(QStringLiteral("wpm"))) {
+        if (!needNum(args, "wpm", wpm))
+            return errResult(QString::fromUtf8("参数 wpm 不是数字——未生效"));
+        if (!isIntValued(wpm) || !(wpm >= 5.0 && wpm <= 60.0))
+            return errResult(QString::fromUtf8(
+                "wpm 越界：必须在 5..60 整数，收到 %1——未生效").arg(wpm));
+    }
+    if (!ui->uiSendCw(static_cast<int>(wpm), text)) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("CW 发射未发起：%1").arg(ui->uiRadioStatus());
+        o["radio_status"] = ui->uiRadioStatus();
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["text"] = text;
+    o["wpm"] = static_cast<int>(wpm);
+    o["radio_status"] = ui->uiRadioStatus();
+    o["message"] = QString::fromUtf8(
+        "CW 发射已发起（%1 WPM，%2 字符）；发射受无线电管理条例约束")
+        .arg((int)wpm).arg(text.size());
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-J3 send_ax25_beacon: KISS AX.25 beacon via the TNC (TX; confirm gate).
+// Mirrors the radio_panel beacon lambda bare path (call validated by the TNC
+// path; empty path = no digipeaters).
+QString execSendAx25Beacon(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                           const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    if (!args.value(QStringLiteral("confirm")).toBool())
+        return txGateError();
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString call, msg;
+    if (!needStr(args, "call", call))
+        return errResult(QString::fromUtf8("参数 call 缺失或不是字符串"));
+    if (call.trimmed().isEmpty())
+        return errResult(QString::fromUtf8("呼号不能为空"));
+    if (!needStr(args, "message", msg))
+        return errResult(QString::fromUtf8("参数 message 缺失或不是字符串"));
+    QString path;
+    if (args.contains(QStringLiteral("path"))) {
+        if (!needStr(args, "path", path))
+            return errResult(QString::fromUtf8("参数 path 不是字符串——未生效"));
+    }
+    if (!ui->uiSendAx25Beacon(call.trimmed(), path, msg)) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("AX.25 信标未发送：%1").arg(ui->uiRadioStatus());
+        o["radio_status"] = ui->uiRadioStatus();
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["call"] = call.trimmed();
+    o["path"] = path;
+    o["message_len"] = msg.size();
+    o["radio_status"] = ui->uiRadioStatus();
+    o["message"] = QString::fromUtf8(
+        "AX.25 信标已交 TNC 发送；发射受无线电管理条例约束");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-J4 soapy_transmit: OPEN the Soapy TX device only (D3-2 confirm point) --
+// PTT/codeword stays press-and-hold MANUAL, this tool never keys the carrier.
+QString execSoapyTransmit(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    if (!args.value(QStringLiteral("confirm")).toBool())
+        return txGateError();
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString driver;
+    if (!needStr(args, "driver", driver))
+        return errResult(QString::fromUtf8("参数 driver 缺失或不是字符串（Soapy 驱动参数，如 driver=plutosdr）"));
+    if (driver.trimmed().isEmpty())
+        return errResult(QString::fromUtf8("Soapy 驱动参数不能为空"));
+    double freqMhz = 0.0;
+    if (!needNum(args, "freq_mhz", freqMhz))
+        return errResult(QString::fromUtf8("参数 freq_mhz 缺失或不是数字"));
+    if (!(freqMhz > 0.0 && freqMhz <= 100000.0))
+        return errResult(QString::fromUtf8(
+            "freq_mhz 越界：必须在 (0..100000]，收到 %1——未生效").arg(freqMhz));
+    if (!ui->uiOpenSoapy(driver.trimmed(), freqMhz)) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("Soapy 发射设备打开失败：%1").arg(ui->uiRadioStatus());
+        o["radio_status"] = ui->uiRadioStatus();
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["driver"] = driver.trimmed();
+    o["freq_mhz"] = freqMhz;
+    o["radio_status"] = ui->uiRadioStatus();
+    o["message"] = QString::fromUtf8(
+        "Soapy 发射设备已打开（驱动 %1，%2 MHz）；仅打开设备一步，PTT/载波保持人工按住；"
+        "发射受无线电管理条例约束").arg(driver.trimmed()).arg(freqMhz);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-K1 set_ui_scale (engine-direct): persist ui/scaleFactor and apply live via
+// the exact settings-dialog path (main_window.cpp:3433-3435: re-tokenize + restyle).
+// Tiers mirror scaleCombo_ (settings_dialog.cpp:119): 0.7/1.0/1.25/1.5 -- a value
+// outside the tiers would silently snap in the dialog on next load, so reject.
+QString execSetUiScale(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                       const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    double v = 0.0;
+    if (!needNum(args, "scale", v))
+        return errResult(QString::fromUtf8("参数 scale 缺失或不是数字"));
+    if (v != 0.7 && v != 1.0 && v != 1.25 && v != 1.5)
+        return errResult(QString::fromUtf8(
+            "scale 只接受 0.7/1.0/1.25/1.5（与设置对话框同档位），收到 %1——未生效").arg(v));
+    mbdsdr::core::AppSettings().setValue(QStringLiteral("ui/scaleFactor"), v);
+    tokens::setUserScale(v);
+    static_cast<QApplication*>(qApp)->setStyleSheet(tokens::buildDarkQss());
+    QJsonObject o;
+    o["ok"] = true;
+    o["scale"] = v;
+    o["message"] = QString::fromUtf8("UI 缩放已持久化并即时生效（与设置对话框同路径：重新标记 QSS）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-K2 set_language (engine-direct): persist ui/language (full BCP-47 label,
+// l10n.h 值域 zh_CN/en/ja). Honest: the translator is installed at startup only
+// (main.cpp:96-101), so this takes effect on restart -- never a fake live switch.
+QString execSetLanguage(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    QString lang;
+    if (!needStr(args, "language", lang))
+        return errResult(QString::fromUtf8("参数 language 缺失或不是字符串（zh_CN/en/ja）"));
+    if (lang != QLatin1String("zh_CN") && lang != QLatin1String("en") && lang != QLatin1String("ja"))
+        return errResult(QString::fromUtf8(
+            "language 只接受 zh_CN/en/ja（存储写全量标签），收到 %1——未生效").arg(lang));
+    mbdsdr::core::AppSettings().setValue(QStringLiteral("ui/language"), lang);
+    QJsonObject o;
+    o["ok"] = true;
+    o["language"] = lang;
+    o["message"] = QString::fromUtf8("已持久化，需重启生效（启动时装载翻译器）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// D1-L1 set_left_groups: single left-rail group visibility (atomic; batch =
+// repeated calls). Ids are tokens::kLeftPanelIds; the control path persists the
+// hidden set under kSettingsKeyHiddenLeftPanels (ui/hiddenLeftGroups).
+QString execSetLeftGroups(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    dsp::UiControlSurface* ui = engine->uiControlSurface();
+    if (!ui) return noUiSurface();
+    QString group;
+    if (!needStr(args, "group", group))
+        return errResult(QString::fromUtf8("参数 group 缺失或不是字符串"));
+    bool known = false;
+    QStringList ids;
+    for (int i = 0; i < tokens::kLeftPanelCount; ++i) {
+        const QString id = QString::fromUtf8(tokens::kLeftPanelIds[i]);
+        ids << id;
+        if (group == id) known = true;
+    }
+    if (!known)
+        return errResult(QString::fromUtf8(
+            "group 不是左栏组 id（合法: %1）——未生效").arg(ids.join(QLatin1String("/"))));
+    if (!args.value(QStringLiteral("visible")).isBool())
+        return errResult(QString::fromUtf8("参数 visible 缺失或不是布尔值"));
+    const bool vis = args.value(QStringLiteral("visible")).toBool();
+    ui->uiSetLeftGroupVisible(group, vis);
+    QJsonObject o;
+    o["ok"] = true;
+    o["group"] = group;
+    o["visible"] = vis;
+    o["message"] = QString::fromUtf8("面板组「%1」显隐已生效并持久化（%2）")
+                       .arg(group, QString::fromUtf8(tokens::kSettingsKeyHiddenLeftPanels));
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Independent reimplementation; no GPL code copied.
 // Every name here MUST equal a ToolSchemaSpec name (see test_tool_registry);
@@ -3894,6 +4950,33 @@ const QList<ToolDispatch>& dispatchTable() {
         {"set_watch_recording", &execSetWatchRecording},
         {"set_station_position", &execSetStationPosition},
         {"vna_connect", &execVnaConnect},
+        // D1 tool-gap fill round 3 (2026-10-30 reverse audit): B2/D/E/F/G/H/I2/J/K/L
+        {"set_audio_output", &execSetAudioOutput},
+        {"set_scan_params", &execSetScanParams},
+        {"set_persistence", &execSetPersistence},
+        {"set_waterfall_depth", &execSetWaterfallDepth},
+        {"set_waterfall_speed", &execSetWaterfallSpeed},
+        {"set_builtin_palette", &execSetBuiltinPalette},
+        {"set_spectrum_db_range", &execSetSpectrumDbRange},
+        {"set_spectrum_zoom", &execSetSpectrumZoom},
+        {"set_db_grid_step", &execSetDbGridStep},
+        {"set_peak_threshold", &execSetPeakThreshold},
+        {"set_peak_hold", &execSetPeakHold},
+        {"set_edge_rail_visibility", &execSetEdgeRailVisibility},
+        {"set_source_type", &execSetSourceType},
+        {"set_spyserver", &execSetSpyServer},
+        {"connect_gnss", &execConnectGnss},
+        {"set_map_layers", &execSetMapLayers},
+        {"set_sat_pass_template", &execSetSatPassTemplate},
+        {"set_tune_step", &execSetTuneStep},
+        {"analyze_vna_permeability", &execAnalyzeVnaPermeability},
+        {"set_cat_control", &execSetCatControl},
+        {"send_cw", &execSendCw},
+        {"send_ax25_beacon", &execSendAx25Beacon},
+        {"soapy_transmit", &execSoapyTransmit},
+        {"set_ui_scale", &execSetUiScale},
+        {"set_language", &execSetLanguage},
+        {"set_left_groups", &execSetLeftGroups},
     };
     return kTable;
 }

@@ -45,6 +45,7 @@ class QLineEdit;
 class QSpinBox;
 
 #include "dsp/doppler_control_surface.h"
+#include "dsp/ui_control_surface.h"
 
 // AIGUI P0-b: the workspace model lives in the GLOBAL aigui namespace (the P0-a
 // component_registry/workspace_layout layer), not under mbdsdr.
@@ -62,7 +63,7 @@ namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class Con
                  class RssiTrendWidget;
                  class WeatherSatPanel; class TaskStepsView;
                  class PocsagPanel; class M17Panel; class VorPanel;
-                 class DataTextPanel; }
+                 class DataTextPanel; class RadioPanel; }
 namespace ai   { class Agent; class AiSessionStore; class TaskRunner; struct StepResult; struct TaskPlan; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 // Phase27: headless control layer + its loopback-only HTTP front-end. Both live
@@ -70,7 +71,8 @@ namespace gnss { class GnssReceiver; struct GnssFix; }
 // dispatches engine calls directly (same invariant the rest of the UI uses).
 namespace control { class ControlHub; class HttpControlServer; }
 
-class MainWindow : public QMainWindow, public dsp::DopplerControlSurface {
+class MainWindow : public QMainWindow, public dsp::DopplerControlSurface,
+                   public dsp::UiControlSurface {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
@@ -84,6 +86,52 @@ public:
     void setDopplerCompensationEnabled(bool on) override;
     bool isDopplerCompensationEnabled() const override;
     bool isDopplerCompensationAvailable() const override;
+    // D1 reverse-audit: UiControlSurface implementation -- programmatic mirrors
+    // of the UI-only settings for the AI tool layer. Every method drives the
+    // REAL widget the user touches (setValue / setCurrentIndex / setChecked),
+    // so the existing handlers (persist + live apply) do the work and the UI
+    // control stays the single source of truth -- no business logic is copied
+    // here. J-group TX calls forward to RadioPanel's bare paths (no QMessageBox:
+    // the confirm gate lives in the tool layer). Headless runs register no
+    // surface -> the tool layer reports an honest "not available".
+    // E: 频谱/瀑布显示面（转发 spectrum_ 的既有槽 + phase82/D1 镜像）
+    void uiSetPersistence(int mode) override;              // 0=关 1=低 2=高
+    void uiSetWaterfallDepth(int rows) override;           // 128/256/512 精确值
+    void uiSetWaterfallSpeed(int linesPerFrame) override;  // 1/2/4
+    void uiSetBuiltinPalette(int index) override;          // 0=经典 1=单色 2=Viridis
+    void uiSetDbRange(float minDb, float maxDb) override;
+    void uiSetZoomFactor(double z) override;
+    void uiSetDbGridStep(int stepDb) override;             // 10/20/40 精确值
+    void uiSetPeakThresholdDb(int db) override;            // 5..40（tokens::kPeakThreshold*）
+    void uiSetMaxHold(bool on) override;
+    void uiSetMinHold(bool on) override;
+    void uiSetHoldDecayDb(double dbPerFrame) override;     // 0.5/1.5/3.0（tokens::kMaxHoldDecay*）
+    void uiSetEdgeRailVisible(bool on) override;
+    // F/G/H/D：源/扫描/GNSS/图层/步进面（真控件 → 既有 handler）
+    void uiSetSourceType(int index) override;              // 0=本地 1=rtl_tcp 2=测试信号
+    bool uiSetSpyServer(bool on, int port) override;       // true=终态符合请求（监听/已停）
+    bool uiConnectGnss(const QString& device, int baud) override;
+    void uiDisconnectGnss() override;
+    bool uiGnssRunning() const override;
+    void uiSetMapLayerGnss(bool on) override;
+    void uiSetMapLayerAdsb(bool on) override;
+    void uiSetMapLayerSat(bool on) override;
+    void uiSetScanDwellMs(int ms) override;
+    void uiSetScanThresholdDb(double db) override;
+    void uiSetScanDirection(int index) override;           // 0=up 1=down 2=pingpong
+    void uiSetScanHoldMode(int index) override;            // 0=信号消失即离 1=固定停留
+    void uiSetScanLingerMs(int ms) override;
+    void uiSetScanHoldMs(int ms) override;
+    void uiSetScanBookmarksOnly(bool on) override;
+    void uiSetTuneStepHz(int stepHz) override;             // 1/10/100/1000/10000/100000/1000000
+    void uiSetLeftGroupVisible(const QString& panelId, bool visible) override;
+    // J：电台/TX 面（转发 RadioPanel 裸路径；确认门在工具层）
+    bool uiCatConnect(const QString& device, int baud, const QString& protocol) override; // "civ"/"kenwood"
+    bool uiCatConnected() const override;
+    bool uiSendCw(int wpm, const QString& text) override;
+    bool uiSendAx25Beacon(const QString& call, const QString& path, const QString& msg) override;
+    bool uiOpenSoapy(const QString& driver, double freqMhz) override;
+    QString uiRadioStatus() const override;                // RadioPanel status_ 当前文案（错误回显用）
     // Programmatic entry point (CLI / screenshot harness / embedding): the
     // engine behind the UI. GUI remains optional for every action.
     dsp::SpectrumEngine* engine() { return engine_; }
@@ -263,6 +311,10 @@ private:
     ui::M17Panel*    m17Panel_    = nullptr;
     ui::VorPanel*    vorPanel_    = nullptr;
     ui::DataTextPanel* dataTextPanel_ = nullptr;
+    // D1 reverse-audit: the right-rail 电台 tab's RadioPanel, kept as a handle
+    // so the UiControlSurface J-group can forward to its bare paths (no
+    // QMessageBox). Null only if the tab was never built.
+    ui::RadioPanel* radioPanel_ = nullptr;
 
     // ---- GNSS serial receiver + compact toolbar (world tab) ----
     gnss::GnssReceiver* gnssRx_      = nullptr;
