@@ -46,3 +46,114 @@
 ## 四、结论
 
 用户指出的三类问题全部坐实且已有实修：反人类的"改了不落盘"两处、"有后端没前端"一处、"有前端没后端"两处（含一处我自己犯的死槽）。C++ 端抽查项多为做对的（增益档位、色图/FFT/噪声消除入口），**不能因"要找问题"而把做对的说成缺陷**。剩余缺口如实列在第三节，未闭环的不声称已闭环。
+
+---
+
+# 第二轮：「设置语义反人类」批量排查（E1–E5，2026-10-30）
+
+范围：`desktop/*.py`（禁改 settings.py / settings_panel.py / main_window.py /
+test_settings_convergence.py）。方法：逐面板读码，按五病分类取证（文件:行），
+修后用 `tests/test_settings_semantics.py`（21 项，offscreen）钉住。
+纪律同前：不编造缺陷；核实不成立如实记账；高风险只报不改。
+本轮新增一处**排查中坐实的真缺陷**（E3-d，见下）。
+
+## 五、已修（三账之一：已修）
+
+### E1 魔法值无说明（3 条）
+
+| # | 证据 | 问题 | 修复 |
+|---|---|---|---|
+| E1-a | `module_panel.py:280`（修前） | `bw_spin` 值域 100–250000，后端"0=自动"语义（`module_panel.py:366` 注释、`bandwidth_hz` 约定）在 UI 无法表达，也没人告诉用户 0 是什么 | 值域含 0 + `setSpecialValueText("自动")`（0 档显式显示「自动」）+ tooltip 写明"0=自动"并区分 VFO 带宽 |
+| E1-b | `control_panel.py:289`（修前） | `freq_input` 裸数字语义（FM/WFM/未选→MHz、AM→kHz、>10000→Hz，`control_panel.py:583-590`）只活在代码里 | 占位符改示例「98.5M / 145.5MHz / 7050k」+ tooltip 写清解析规则与可调范围 |
+| E1-c | `control_panel.py:385`、`anr_panel.py:92`（修前） | 音量 0–63 刻度（下游 `volume/63×2.0`，main_window）与 ANR 强度 0–100→α0–10（`anr_panel.py:143-145`）无说明，标签裸显 "2.0" | 两处 tooltip 写明映射；强度标签改「α 2.0」 |
+
+### E2 单位/量纲缺失（2 条）
+
+| # | 证据 | 问题 | 修复 |
+|---|---|---|---|
+| E2-a | `vfo_panel.py:52-55`（修前） | `_fmt_bw_hz` 裸显 "12.5k"/"500"，同文件频率列却带 MHz/kHz/Hz | 统一带单位「12.5 kHz」「500 Hz」 |
+| E2-b | `control_panel.py:523,775`（修前） | 静噪值裸显 "-80"（信号语义 dBFS 见 `:119`） | 显示改「-80 dB」 |
+
+### E3 范围与能力不符（4 条，含 1 条排查中新坐实）
+
+| # | 证据 | 问题 | 修复 |
+|---|---|---|---|
+| E3-a | `device_panel.py:254-266`（修前） | 采样率/增益/PPM 解析失败**静默改写**成默认值（2.048M/30/0）照连不误——用户以为连的是自己填的参数 | 解析失败/非正采样率/超出所选设备 `sample_rate_range`/`gain_range`（枚举能力，`sdr_backend.py:2269`）一律拒绝连接并弹诚实提示（含范围数字），**不改写用户值** |
+| E3-b | `sat_track_panel.py:83`（修前） | 下行频率 100–2000 MHz 卡死合法值：仓库自己的 LRO 目标 2271 MHz（`doppler_panel.py:365`）、AO-40 S 波段 2401 MHz 都进不去 | 放宽到 0.01–6000 MHz（对齐 scanner_panel 同参数）+ tooltip 声明实际以设备为准 |
+| E3-c | `module_panel.py:252`（修前） | 频率上限 7.2 GHz 是 SoapySDR 无范围兜底值（`sdr_backend.py:2201`），超过所有在列后端 | 对齐项目范围 10 kHz–6 GHz，常量收口 `constants.py`（`FREQ_MIN_HZ/FREQ_MAX_HZ`，control_panel 继续 re-export）+ tooltip |
+| E3-d（新） | `module_panel.py:305-316`（修前） | 枚举异常先 `setText(错误)`，随后又被"未发现SDR设备"空态文案**覆盖**——失败被吞，"枚举坏了"与"没插设备"混为一谈 | 错误态与空态分开显示：「设备枚举失败: …（这不等于没插设备）」，且错误文本经 clean_exc 整形 |
+
+### E4 命名/文案反直觉（4 条）
+
+| # | 证据 | 问题 | 修复 |
+|---|---|---|---|
+| E4-a | `module_panel.py:284` / `control_panel.py:438`（修前） | 两套「带宽」同名不同义（硬件射频带宽 vs VFO 信道带宽），即上轮残留项 3 | 分别改「硬件带宽」「VFO 带宽」，tooltip 互相点名区分 |
+| E4-b | `control_panel.py:527`（修前） | 静噪自动开关英文「Auto」 | 「自动」+ tooltip |
+| E4-c | `control_panel.py:496`（修前） | 「Offset 调谐」混排翻译腔 | 「偏移调谐」+ tooltip（写明 Offset Tuning 是什么） |
+| E4-d | `ntrip_panel.py:150-161`（修前） | 行标「Caster Host:/Port:/Mountpoint:」裸英文 | 「Caster 主机:/端口:/挂载点:」+ 术语 tooltip（Caster=差分数据服务器、Mountpoint=数据流名） |
+
+### E5 失败提示不说人话（10 文件 32 处）
+
+统一走 `mbdsdr_ai.tool_registry.clean_exc`（phase69 战役先例）整形；
+中文消息原样透传（既有测试钉住的「工具调用失败: 炸了」等格式不受影响）。
+traceback 堆栈一律不再进 UI（ai_panel/weather_panel/doppler_panel/mcp_worker）。
+
+| 文件 | 修前位置（修前行号） | 泄漏形态 |
+|---|---|---|
+| `module_panel.py` | 316 | `枚举异常: {e}`（并被空态覆盖，见 E3-d） |
+| `scanner_panel.py` | 142 | `扫频失败: {e}` |
+| `ntrip_panel.py` | 268, 270 | `网络错误: {e}` / `未知错误: {e}` |
+| `bookmark_panel.py` | 144, 254, 268, 283, 327, 344 | `str(e)` 直进弹窗/状态行 |
+| `doppler_panel.py` | 85, 485, 651 | traceback 全文 / `{e}` |
+| `modulation_panel.py` | 79, 89 | `读取 IQ 失败: {e}` / `识别失败: {e}` |
+| `satellite_image_panel.py` | 188, 205 | `解码失败: {e}` / `保存 PNG 失败: {e}` |
+| `ai_panel.py` | 71 | `{type}: {e}\n{traceback[:500]}` 堆栈进对话区 |
+| `weather_panel.py` | 218, 707 | traceback / `后处理失败: {e}` |
+| `mcp_worker.py` | 137-139, 161, 180, 205, 213-214, 239-240, 254, 268 | `{e}` / `traceback.format_exc()` 进日志与错误信号 |
+
+测试锚点：`tests/test_settings_semantics.py`（21 项：tooltip/占位、单位后缀、
+越界拒绝且提示、命名区分、失败消息无英文/无堆栈）；既有
+`test_ui_wiring_audit`/`test_ui_vfo_constellation`/`test_ntrip_panel`/
+`test_mcp_worker_behavior`/`test_settings_convergence`/`test_clean_exc`/
+`test_desktop_ui_responsiveness`/`test_ui_stability_resources`/
+`test_orphan_connection` 等全量回归绿（不跑 test_user_layouts.py，已知 Qt 挂死）。
+
+## 六、核实**不成立**的项（三账之二：不成立）
+
+| 曾疑缺口 | 核实结果 | 证据 |
+|---|---|---|
+| device_panel 采样率/增益/PPM 缺单位说明（E2） | **不成立**：label 与 tooltip 均带单位 | `device_panel.py:110-120`（"采样率(Hz)"+"采样率 Hz" 等） |
+| scanner_panel 四个旋钮缺单位（E2） | **不成立**：全部有 suffix | `scanner_panel.py:186-205`（MHz/MHz/MHz/dB） |
+| control_panel 增益标签 "20dB" 缺空格（E2） | **不成立**（单位在，格式被测试钉住不动） | `test_ui_stability_resources.py:305` 精确断言 `"20dB"` |
+| spectrum 峰值阈值旋钮缺单位（E2） | **不成立**：同行标签「阈值dB:」带单位 | `spectrum_widget.py:1074-1080` |
+| freq_input 解析失败变红无提示（E5） | **不成立**：变红+回退是既有钉住行为，语义已由 tooltip/占位说明（E1-b 修复）覆盖 | `test_desktop_ui_responsiveness.py:84-86` |
+
+## 七、只报未修 / 未闭环（三账之三）
+
+1. **增益范围硬编码**（`module_panel.py` 滑杆 0–50、`control_panel.py` 滑杆 0–49
+   注释"RTL-SDR 典型"）：真修要按所连设备动态取档位（`gain_panel.py` 已示范
+   从 GainStager 查范围），但接线在 main_window（本轮禁改）。已补 tooltip
+   诚实声明"实际档位以设备为准，后端钳位"。**只报**。
+2. **音量刻度 0–63 本身反直觉**（为何 63 不是 100？）：重映射波及 gui_config
+   `volume` 键、工具栏 0–100→0–63 映射（main_window，禁改）与 MCP `set_volume`
+   工具契约。已补 tooltip 说明刻度与增益换算。**只报**。
+3. **module_panel 频率旋钮用 Hz 显示大数字**（7 位数不友好）：改 MHz 会改变
+   `tune_requested` 信号量纲，消费方在 main_window（禁改）。**只报**。
+4. **main_window.py:5484** `self.control_panel.freq_spin.setValue(freq_mhz)`
+   引用不存在的控件（control_panel 只有 `freq_input`），被 try/except pass 吞掉
+   ——天空/卫星点击→控制面板频率显示这步从未生效（A 类死路径）。main_window
+   禁改，**只报**。
+5. **clean_exc 对 Windows 错误串无映射**：`[WinError 10061]/URLError` 包裹串
+   不命中 `_EN_MSG_MAP` 的 `[Errno 111] Connection refused` 模式，Windows 上
+   网络类失败会显示「计算错误: <urlopen error …>」而非「连接被拒绝」。属内核
+   映射表扩展（`tool_registry.py`），本轮测试用确定性超时串（`^timed out$` 有
+   映射）钉住行为。**未闭环**。
+6. 三套配置键漂移（上轮残留 4）、C++ 侧工具面对拍（上轮残留 1/2）：本轮范围外，
+   维持未闭环。
+
+## 八、第二轮结论
+
+"设置不符合人类"的语义五病在 Python 桌面端全部过了一遍筛：E1 三条、E2 两条、
+E3 四条（含排查中新坐实的"失败被空态覆盖"一条）、E4 四条已修并钉住；E5 的
+英文异常/堆栈泄漏 10 文件 32 处统一收口到 clean_exc。核实不成立的五条如实记账，
+**不为凑数把做对的说成缺陷**；六条只报/未闭环均给出原因与证据，不声称已修。

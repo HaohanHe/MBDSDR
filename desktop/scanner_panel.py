@@ -45,6 +45,12 @@ except Exception as _e:  # noqa: BLE001
     _KERNEL_AVAILABLE = False
     _KERNEL_IMPORT_ERR = str(_e)
 
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
+
 
 # 估计信号类型 -> 解调模式建议（与 control_panel 模式枚举对齐）
 _KIND_TO_MODE = {
@@ -139,7 +145,7 @@ class _ScanWorker(QThread):
             scanner.psd_provider = psd_provider
             segments = scanner.sweep()
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(f"扫频失败: {e}")
+            self.failed.emit(f"扫频失败: {_clean_exc(e)}")
             return
         if self._cancel:
             self.done.emit([])

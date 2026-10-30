@@ -30,7 +30,7 @@ if _HERE not in _sys.path:
 
 from tokens import tokens
 
-from constants import DEFAULT_SAMPLE_RATE_HZ
+from constants import DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ
 
 # 解调模式元数据（默认带宽/显示名/解调函数）已收口到 mode_registry。
 # 这里只取查询函数；旧字典 MODE_VFO_BANDWIDTH 作为向后兼容别名在下方导出。
@@ -100,9 +100,9 @@ MODE_VFO_BANDWIDTH = to_bandwidth_dict()
 # 用注册表过滤：仅展示已注册的模式，未注册的自动剔除。
 _PANEL_MODE_ORDER = ["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"]
 
-# 合法频率范围：10 kHz ~ 6 GHz（SDR 全频段，不再硬编码 FM/AM 广播段）
-FREQ_MIN_HZ = 10_000.0
-FREQ_MAX_HZ = 6.0e9
+# 合法频率范围：10 kHz ~ 6 GHz（SDR 全频段，不再硬编码 FM/AM 广播段）。
+# 常量收口到 constants.py（module_panel 同用），这里 re-export 保持旧导入可用。
+# _set_freq_hz 对越界输入做钳位并在 freq_input tooltip 里事先声明钳位行为。
 
 
 class ControlPanel(QWidget):
@@ -287,7 +287,12 @@ class ControlPanel(QWidget):
         mode_freq_row.addWidget(self.mode_combo)
 
         self.freq_input = QLineEdit("")
-        self.freq_input.setPlaceholderText("输入频率")
+        self.freq_input.setPlaceholderText("如 98.5M / 145.5MHz / 7050k")
+        self.freq_input.setToolTip(
+            "输入频率：支持 M/MHz/k/kHz/G/GHz/Hz 后缀；纯数字按模式解析"
+            "（FM/WFM/未选模式 = MHz，AM/其它 = kHz，绝对值 >10000 = Hz）。"
+            f"可调范围 {FREQ_MIN_HZ/1e3:.0f} kHz – {FREQ_MAX_HZ/1e9:.0f} GHz，"
+            "超出将限制到边界（实际范围以设备为准）")
         self.freq_input.setMinimumHeight(28)
         self.freq_input.returnPressed.connect(self._on_freq_input)
         mode_freq_row.addWidget(self.freq_input)
@@ -385,6 +390,8 @@ class ControlPanel(QWidget):
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 63)
         self.volume_slider.setValue(30)
+        self.volume_slider.setToolTip(
+            "音量 0–63 级（63 最大；对应音频增益 0–2.0 倍）")
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         vol_row.addWidget(self.volume_slider)
 
@@ -435,12 +442,15 @@ class ControlPanel(QWidget):
 
         # VFO 带宽选择（采样率下方一行）
         bw_row = QHBoxLayout()
-        self.vfo_bw_label = QLabel("带宽")
+        self.vfo_bw_label = QLabel("VFO 带宽")
         self.vfo_bw_label.setObjectName("statusValue")
         self.vfo_bw_label.setMinimumWidth(30)
         self.vfo_bw_label.setMaximumWidth(100)
         bw_row.addWidget(self.vfo_bw_label)
         self.vfo_bw_combo = QComboBox()
+        self.vfo_bw_combo.setToolTip(
+            "解调信道带宽（滤波器宽度），随模式自动套默认。"
+            "注意与模块面板的「硬件带宽」（设备射频带宽）不同")
         # 档位与 MODE_VFO_BANDWIDTH 对齐：2.4 kHz(SSB) / 12.5 kHz(NBFM) 必须在列，
         # 避免切到 USB/LSB/NFM 时 findData 落空、回退到错误带宽。
         for txt, hz in [("500Hz (CW)", 500.0), ("2.4kHz (SSB)", 2_400.0),
@@ -463,6 +473,9 @@ class ControlPanel(QWidget):
         self.gain_slider = QSlider(Qt.Horizontal)
         self.gain_slider.setRange(0, 49)      # RTL-SDR 典型 LNA 增益上限 ~49dB
         self.gain_slider.setValue(0)
+        self.gain_slider.setToolTip(
+            "LNA 增益 0–49 dB（RTL-SDR 典型上限；实际档位以设备为准，"
+            "部分设备会在后端钳位）")
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
         gain_row.addWidget(self.gain_slider)
         self.gain_val = QLabel("0dB")
@@ -487,13 +500,19 @@ class ControlPanel(QWidget):
         self.ppm_spin.setRange(-1000, 1000)
         self.ppm_spin.setSingleStep(1)
         self.ppm_spin.setValue(0)
+        self.ppm_spin.setToolTip(
+            "晶振频偏校正（PPM = 百万分率）。廉价棒典型偏差 20~50 ppm，"
+            "对照频率计数器修正")
         self.ppm_spin.valueChanged.connect(self._on_ppm_changed)
         ppm_row.addWidget(self.ppm_spin)
         ppm_row.addStretch(1)
         rx_layout.addLayout(ppm_row)
 
         # Offset 调谐开关（PPM 下方）
-        self.offset_check = QCheckBox("Offset 调谐")
+        self.offset_check = QCheckBox("偏移调谐")
+        self.offset_check.setToolTip(
+            "Offset Tuning：把本振偏移半个信道，避开零中频的 DC 尖峰，"
+            "改善强台附近的接收")
         self.offset_check.toggled.connect(self._on_offset_tuning_changed)
         rx_layout.addWidget(self.offset_check)
 
@@ -518,13 +537,18 @@ class ControlPanel(QWidget):
         self.squelch_slider = QSlider(Qt.Horizontal)
         self.squelch_slider.setRange(-120, 0)
         self.squelch_slider.setValue(-80)
+        self.squelch_slider.setToolTip(
+            "静噪门限（dBFS）：信号低于此电平即静音。-120 ≈ 几乎常开，"
+            "越接近 0 越难开噪（只放行强信号）。「自动」勾选时此项置灰")
         self.squelch_slider.valueChanged.connect(self._on_squelch_changed)
         sq_row.addWidget(self.squelch_slider)
-        self.squelch_val = QLabel("-80")
+        self.squelch_val = QLabel("-80 dB")
         self.squelch_val.setMinimumWidth(36)
         self.squelch_val.setMaximumWidth(80)
         sq_row.addWidget(self.squelch_val)
-        self.auto_squelch_check = QCheckBox("Auto")
+        self.auto_squelch_check = QCheckBox("自动")
+        self.auto_squelch_check.setToolTip(
+            "自动跟踪噪声底设置门限；关闭时手动拖动静噪滑杆")
         self.auto_squelch_check.setChecked(True)
         self.auto_squelch_check.toggled.connect(self._on_auto_squelch_toggled)
         sq_row.addWidget(self.auto_squelch_check)
@@ -772,7 +796,7 @@ class ControlPanel(QWidget):
             self.vfo_bandwidth_changed.emit(bw)
 
     def _on_squelch_changed(self, dbfs: int):
-        self.squelch_val.setText(str(dbfs))
+        self.squelch_val.setText(f"{dbfs} dB")
         self.squelch_changed.emit(float(dbfs))
 
     def _on_auto_squelch_toggled(self, on: bool):

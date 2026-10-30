@@ -15,3 +15,10 @@ try:
 except Exception:  # noqa: BLE001 - mbdsdr_ai 不可用时的安全回退
     # 与 mbdsdr_ai.sdr_backend 模块级 DEFAULT_SAMPLE_RATE_HZ 保持一致。
     DEFAULT_SAMPLE_RATE_HZ = 2_048_000
+
+# 项目级可调频率范围（Hz）：10 kHz ~ 6 GHz（SDR 全频段）。
+# 原先只在 control_panel 定义，module_panel 又写 1 kHz~7.2 GHz（后者是
+# SoapySDR 无范围信息时的兜底值，超过所有在列后端能力），两个面板对
+# "能调多少"说法不一。收口到此，各面板共用；实际可调范围仍以设备为准。
+FREQ_MIN_HZ = 10_000.0
+FREQ_MAX_HZ = 6.0e9

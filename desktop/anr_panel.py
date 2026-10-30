@@ -92,8 +92,10 @@ class AnrPanel(QWidget):
         self.strength_slider = QSlider(Qt.Horizontal)
         self.strength_slider.setRange(0, 100)
         self.strength_slider.setValue(20)  # 默认 α=2.0
+        self.strength_slider.setToolTip(
+            "降噪强度：0–100 映射到 α 0–10（越大降噪越强，过强会伤语音）")
         self.strength_slider.valueChanged.connect(self._on_strength_changed)
-        self.strength_label = QLabel("2.0")
+        self.strength_label = QLabel("α 2.0")
         strength_row.addWidget(self.strength_slider, stretch=1)
         strength_row.addWidget(self.strength_label)
         form.addRow("强度", strength_row)
@@ -140,7 +142,7 @@ class AnrPanel(QWidget):
     def _on_strength_changed(self, val: int):
         # 滑块 0..100 → α 0..10
         alpha = val / 10.0
-        self.strength_label.setText(f"{alpha:.1f}")
+        self.strength_label.setText(f"α {alpha:.1f}")
         self.strength_changed.emit(alpha)
         if self._anr is not None:
             self._anr.cfg.alpha = alpha

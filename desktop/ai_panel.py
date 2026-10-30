@@ -9,7 +9,6 @@ AI 是技能触发入口（用户对模型说才触发），不是功能按钮�
 """
 
 import json
-import traceback
 from datetime import datetime
 from html import escape as _esc
 from typing import Optional, List, Dict, Any
@@ -30,6 +29,12 @@ try:
 except ImportError:
     AI_CORE_AVAILABLE = False
     normalize_config_keys = None
+
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
 
 import ai_steps  # noqa: E402  # 步骤卡投影（Qt 无关）
 from tokens import tokens as _tok  # noqa: E402
@@ -68,7 +73,8 @@ class AIWorker(QObject):
             )
             self.finished.emit(result)
         except Exception as e:
-            self.error.emit(f"{type(e).__name__}: {e}\n{traceback.format_exc()[:500]}")
+            # 只给可读失败原因，不把英文堆栈漏进对话区（clean_exc 战役先例）
+            self.error.emit(_clean_exc(e))
 
 
 class AIPanel(QWidget):

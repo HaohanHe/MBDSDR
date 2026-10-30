@@ -21,7 +21,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-import traceback
 from collections import deque
 from typing import Deque, Dict, List, Optional, Tuple
 
@@ -44,6 +43,12 @@ from matplotlib.figure import Figure  # noqa: E402
 from themes import get_theme, DEFAULT_THEME
 
 from constants import DEFAULT_SAMPLE_RATE_HZ
+
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
 
 
 def _theme_colors() -> Dict[str, str]:
@@ -82,7 +87,7 @@ class OrbitWorker(QObject):
             elif self._action == "lro":
                 self._run_lro()
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=2)}")
+            self.failed.emit(_clean_exc(e))
 
     def _run_determine(self):
         """用真实多普勒观测序列运行 EKF/RLS/LS。观测已在面板侧校验非空。"""
@@ -482,7 +487,7 @@ class DopplerPanel(QWidget):
         try:
             iq, fs_actual = od.load_iq_file(path, sample_rate=fs)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "IQ 文件", f"加载失败: {e}")
+            QMessageBox.warning(self, "IQ 文件", f"加载失败: {_clean_exc(e)}")
             return
         self._iq_path = path
         self._iq_loaded_fs = fs_actual
@@ -648,7 +653,7 @@ class DopplerPanel(QWidget):
         try:
             init_state = self._initial_state(self._observations[0][0])
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "先验初值", f"无法从 TLE 生成初值: {e}")
+            QMessageBox.warning(self, "先验初值", f"无法从 TLE 生成初值: {_clean_exc(e)}")
             return
         self._start_worker("determine", {
             "rx_lat": gs[0], "rx_lon": gs[1], "rx_alt": gs[2],

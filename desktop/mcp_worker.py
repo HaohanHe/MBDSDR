@@ -14,7 +14,6 @@ import os
 import time
 import json
 import threading
-import traceback
 from typing import Optional, Dict, Any, List
 
 from PySide6.QtCore import QObject, QThread, Signal, QTimer, Slot
@@ -37,6 +36,12 @@ try:
 except ImportError:
     HAS_MCP_CLIENT = False
     print("警告: 无法导入 mbdsdr_mcp_client，硬件将处于未连接状态", file=sys.stderr)
+
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
 
 
 # ============================================================================
@@ -134,9 +139,9 @@ class MCPWorker(QObject):
         except Exception as e:
             self.connected = False
             self.client = None
-            self.error_occurred.emit(f"连接失败: {e}")
-            self.log_message.emit(f"连接失败: {e}（不回退模拟数据）")
-            self.connection_changed.emit(False, f"连接失败：{e}")
+            self.error_occurred.emit(f"连接失败: {_clean_exc(e)}")
+            self.log_message.emit(f"连接失败: {_clean_exc(e)}（不回退模拟数据）")
+            self.connection_changed.emit(False, f"连接失败：{_clean_exc(e)}")
 
     def _poll(self):
         """定时轮询状态。仅在真实硬件已连接时轮询；未连接时不产生任何数据。"""
@@ -158,7 +163,7 @@ class MCPWorker(QObject):
                 else:
                     self.status_updated.emit(resp.get("result") or {})
             except Exception as e:
-                self.log_message.emit(f"get_status 失败: {e}")
+                self.log_message.emit(f"get_status 失败: {_clean_exc(e)}")
 
             try:
                 with self._call_lock:
@@ -177,7 +182,7 @@ class MCPWorker(QObject):
                         "timestamp": time.time(),
                     })
             except Exception as e:
-                self.log_message.emit(f"get_gps 失败: {e}")
+                self.log_message.emit(f"get_gps 失败: {_clean_exc(e)}")
                 self.gps_updated.emit({
                     "fix": False, "source": "none",
                     "lat": None, "lon": None, "alt": None,
@@ -202,7 +207,7 @@ class MCPWorker(QObject):
                         "timestamp": time.time(),
                     })
             except Exception as e:
-                self.log_message.emit(f"get_imu 失败: {e}")
+                self.log_message.emit(f"get_imu 失败: {_clean_exc(e)}")
                 self.imu_updated.emit({
                     "source": "none",
                     "acc": None, "gyr": None,
@@ -210,8 +215,8 @@ class MCPWorker(QObject):
                     "timestamp": time.time(),
                 })
         except Exception as e:
-            self.error_occurred.emit(f"轮询异常: {e}")
-            self.log_message.emit(f"轮询异常: {traceback.format_exc()}")
+            self.error_occurred.emit(f"轮询异常: {_clean_exc(e)}")
+            self.log_message.emit(f"轮询异常: {_clean_exc(e)}")
 
     # ========================================================================
     # 工具调用（从 UI 线程调用，通过信号返回结果）
@@ -236,8 +241,8 @@ class MCPWorker(QObject):
 
             self.tool_result.emit(tool_name, result)
         except Exception as e:
-            self.error_occurred.emit(f"工具调用失败: {e}")
-            self.tool_result.emit(tool_name, {"error": str(e)})
+            self.error_occurred.emit(f"工具调用失败: {_clean_exc(e)}")
+            self.tool_result.emit(tool_name, {"error": _clean_exc(e)})
 
     def call_tool_sync(self, tool_name: str, params: Dict) -> Dict:
         """同步调用硬件工具（供 AI 工具环内的 MCP handler 用，任意线程可调）。
@@ -251,7 +256,7 @@ class MCPWorker(QObject):
             with self._call_lock:
                 return self._real_tool(tool_name, params)
         except Exception as e:
-            return {"error": str(e), "success": False}
+            return {"error": _clean_exc(e), "success": False}
 
     def fetch_mcp_tools(self) -> List[Dict]:
         """从设备 list_tools 取硬件工具 schema（MCP 标准形状）。
@@ -265,7 +270,7 @@ class MCPWorker(QObject):
             with self._call_lock:
                 raw = self.client.list_tools()
         except Exception as e:
-            self.log_message.emit(f"list_tools 失败: {e}（不注册任何工具）")
+            self.log_message.emit(f"list_tools 失败: {_clean_exc(e)}（不注册任何工具）")
             return []
         tools = annotate_write_gate(
             firmware_tools_to_mcp_schema(raw if isinstance(raw, list) else []))

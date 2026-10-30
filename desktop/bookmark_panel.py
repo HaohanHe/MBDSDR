@@ -37,6 +37,12 @@ except Exception as _e:  # noqa: BLE001
     _KERNEL_AVAILABLE = False
     _KERNEL_IMPORT_ERR = str(_e)
 
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
+
 
 # 分组树：只建空壳，不带任何频点（红线）
 GROUPS = [
@@ -141,7 +147,7 @@ class BookmarkPanel(QWidget):
                 if self._config_dir is not None else BookmarkManager()
         except Exception as e:  # noqa: BLE001
             self._mgr = None
-            self.status_label.setText(f"书签初始化失败: {e}")
+            self.status_label.setText(f"书签初始化失败: {_clean_exc(e)}")
             self._set_ops_enabled(False)
             return
         self.refresh_list()
@@ -251,7 +257,7 @@ class BookmarkPanel(QWidget):
         try:
             self._mgr.add(bm)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "添加失败", str(e))
+            QMessageBox.warning(self, "添加失败", _clean_exc(e))
         self.refresh_list()
 
     def _on_edit(self):
@@ -265,7 +271,7 @@ class BookmarkPanel(QWidget):
         try:
             self._mgr.update(sel["frequency_hz"], name=name)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "编辑失败", str(e))
+            QMessageBox.warning(self, "编辑失败", _clean_exc(e))
         self.refresh_list()
 
     def _on_delete(self):
@@ -280,7 +286,7 @@ class BookmarkPanel(QWidget):
         try:
             self._mgr.remove(sel["frequency_hz"], sel["name"])
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "删除失败", str(e))
+            QMessageBox.warning(self, "删除失败", _clean_exc(e))
         self.refresh_list()
 
     def _on_nearest(self):
@@ -324,7 +330,7 @@ class BookmarkPanel(QWidget):
                 text = f.read()
             n = self._mgr.import_csv_text(text)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "导入失败", str(e))
+            QMessageBox.warning(self, "导入失败", _clean_exc(e))
             return
         self.refresh_list()
         QMessageBox.information(self, "导入完成", f"导入 {n} 条书签。")
@@ -341,7 +347,7 @@ class BookmarkPanel(QWidget):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "导出失败", str(e))
+            QMessageBox.warning(self, "导出失败", _clean_exc(e))
             return
         QMessageBox.information(self, "导出完成", f"已写出 {path}")
 

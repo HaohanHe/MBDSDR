@@ -39,6 +39,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from mbdsdr_ai.rtklib_adapter import NTRIPManager, NTRIP_DEFAULT_PORT  # noqa: E402
+from mbdsdr_ai.tool_registry import clean_exc as _clean_exc  # noqa: E402
 from tokens import tokens
 
 # 默认低饱和主题里的指示灯颜色（从 tokens.py 语义化取色）
@@ -147,18 +148,24 @@ class NtripConfigDialog(QDialog):
 
         self.host_edit = QLineEdit()
         self.host_edit.setPlaceholderText("ntrip.example.com")
-        form.addRow("Caster Host:", self.host_edit)
+        self.host_edit.setToolTip(
+            "Caster = NTRIP 差分数据服务器的主机名或 IP")
+        form.addRow("Caster 主机:", self.host_edit)
 
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(NTRIP_DEFAULT_PORT)  # 默认 2101
-        form.addRow("Port:", self.port_spin)
+        self.port_spin.setToolTip("Caster 端口（NTRIP 标准端口 2101）")
+        form.addRow("端口:", self.port_spin)
 
         # mountpoint 下拉（可编辑，允许手输）
         self.mount_combo = QComboBox()
         self.mount_combo.setEditable(True)
         self.mount_combo.setMinimumWidth(220)
-        form.addRow("Mountpoint:", self.mount_combo)
+        self.mount_combo.setToolTip(
+            "挂载点（Mountpoint）：caster 上的数据流名称，"
+            "可点「拉取挂载点列表」选取")
+        form.addRow("挂载点:", self.mount_combo)
 
         self.user_edit = QLineEdit()
         self.user_edit.setPlaceholderText("anonymous")
@@ -265,9 +272,9 @@ class NtripConfigDialog(QDialog):
         except urllib.error.HTTPError as e:
             err = f"HTTP {e.code} {e.reason}"
         except (urllib.error.URLError, OSError, TimeoutError) as e:
-            err = f"网络错误: {e}"
+            err = f"网络错误: {_clean_exc(e)}"
         except Exception as e:  # 兜底：拉取失败绝不崩
-            err = f"未知错误: {e}"
+            err = f"未知错误: {_clean_exc(e)}"
 
         # 回主线程更新 UI
         def _apply():

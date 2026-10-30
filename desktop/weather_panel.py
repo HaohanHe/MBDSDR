@@ -40,7 +40,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-import traceback
 import wave
 from typing import Dict, List, Optional
 
@@ -48,6 +47,12 @@ from typing import Dict, List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np  # noqa: E402
+
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
 
 from PySide6.QtCore import Qt, QThread, Signal, QObject  # noqa: E402
 from PySide6.QtGui import QPixmap, QFont  # noqa: E402
@@ -215,7 +220,7 @@ class DecodeWorker(QObject):
             else:
                 self.finished.emit({"ok": False, "error": f"未知解码族: {fam}"})
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=2)}")
+            self.failed.emit(_clean_exc(e))
 
     # ------------------------------------------------------------------
     def _emit(self, **kw):
@@ -704,7 +709,7 @@ class WeatherPanel(QWidget):
                 self._current_png = out_png
                 self._show_image(out_png)
         except Exception as e:  # noqa: BLE001
-            self._update_status(extra=f"后处理失败: {e}")
+            self._update_status(extra=f"后处理失败: {_clean_exc(e)}")
 
     # ------------------------------------------------------------------
     def _update_status(self, extra: str = ""):

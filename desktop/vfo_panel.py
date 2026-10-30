@@ -50,9 +50,10 @@ def _fmt_freq_hz(hz: float) -> str:
 
 
 def _fmt_bw_hz(hz: float) -> str:
+    """Hz → 带宽可读字符串（单位与 _fmt_freq_hz 一致，不裸显 k）。"""
     if abs(hz) >= 1e3:
-        return f"{hz/1e3:.1f}k"
-    return f"{hz:.0f}"
+        return f"{hz/1e3:.1f} kHz"
+    return f"{hz:.0f} Hz"
 
 
 class VfoPanel(QWidget):

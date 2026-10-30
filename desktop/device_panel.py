@@ -116,7 +116,8 @@ class DevicePanel(QWidget):
         form.addRow("增益(dB)", self.gain_edit)
 
         self.ppm_edit = QLineEdit("0")
-        self.ppm_edit.setToolTip("频率校正 PPM")
+        self.ppm_edit.setToolTip(
+            "频率校正（PPM = 百万分率）：晶振频偏校正，典型 20~50，可为负")
         form.addRow("PPM", self.ppm_edit)
 
         # 连接按钮
@@ -251,19 +252,60 @@ class DevicePanel(QWidget):
             QMessageBox.information(self, "提示", "未选择 SDR 设备")
             return
         dev = dict(self._devices[idx])
-        # 把面板上的参数塞进 dev，供主窗口连接时读取
+        # 把面板上的参数塞进 dev，供主窗口连接时读取。
+        # 不合法输入一律拒绝并提示，绝不静默改写成默认值（用户以为连的是
+        # 自己填的参数，实际拿到默认值 = 撒谎）。
+        text = self.sr_edit.text().strip()
         try:
-            dev["_sample_rate"] = float(self.sr_edit.text())
-        except Exception:
-            dev["_sample_rate"] = float(DEFAULT_SAMPLE_RATE_HZ)
+            sr = float(text)
+        except (TypeError, ValueError):
+            QMessageBox.warning(
+                self, "采样率无效",
+                f"“{text}”不是数字。请填写采样率（Hz），如 2048000。")
+            return
+        if sr <= 0:
+            QMessageBox.warning(
+                self, "采样率无效", f"采样率必须为正数（Hz），收到 {sr}。")
+            return
+        rng = dev.get("sample_rate_range")
+        if isinstance(rng, (tuple, list)) and len(rng) == 2:
+            lo, hi = float(rng[0]), float(rng[1])
+            if not (lo <= sr <= hi):
+                QMessageBox.warning(
+                    self, "采样率超出设备能力",
+                    f"采样率 {sr:.0f} Hz 超出该设备范围 "
+                    f"{lo:.0f}–{hi:.0f} Hz。请改值后重试。")
+                return
+        dev["_sample_rate"] = sr
+
+        text = self.gain_edit.text().strip()
         try:
-            dev["_gain"] = float(self.gain_edit.text())
-        except Exception:
-            dev["_gain"] = 30.0
+            gain = float(text)
+        except (TypeError, ValueError):
+            QMessageBox.warning(
+                self, "增益无效",
+                f"“{text}”不是数字。请填写总增益（dB），如 30。")
+            return
+        rng = dev.get("gain_range")
+        if isinstance(rng, (tuple, list)) and len(rng) == 2:
+            lo, hi = float(rng[0]), float(rng[1])
+            if not (lo <= gain <= hi):
+                QMessageBox.warning(
+                    self, "增益超出设备能力",
+                    f"增益 {gain:g} dB 超出该设备范围 "
+                    f"{lo:g}–{hi:g} dB。请改值后重试。")
+                return
+        dev["_gain"] = gain
+
+        text = self.ppm_edit.text().strip()
         try:
-            dev["_ppm"] = int(self.ppm_edit.text())
-        except Exception:
-            dev["_ppm"] = 0
+            dev["_ppm"] = int(text)
+        except (TypeError, ValueError):
+            QMessageBox.warning(
+                self, "PPM 无效",
+                f"“{text}”不是整数。PPM 是晶振频偏校正（百万分率），"
+                "典型值 20~50，可为负。")
+            return
         self.connect_requested.emit(dev)
 
     def _on_audio_changed(self, _idx: int):

@@ -35,6 +35,12 @@ except Exception as _e:  # noqa: BLE001
     _KERNEL_AVAILABLE = False
     _KERNEL_IMPORT_ERR = str(_e)
 
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
+
 
 # 内核调制名 -> 桌面解调模式 + 默认带宽建议
 _MOD_TO_MODE = {
@@ -76,7 +82,7 @@ class _IdentifyWorker(QThread):
         try:
             iq = be.read_samples(self._n)
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(f"读取 IQ 失败: {e}")
+            self.failed.emit(f"读取 IQ 失败: {_clean_exc(e)}")
             return
         if iq is None or len(iq) < 64:
             self.failed.emit("读取到空 IQ")
@@ -86,7 +92,7 @@ class _IdentifyWorker(QThread):
             clf = ModulationClassifier()
             result = clf.classify(iq, sr)
         except Exception as e:  # noqa: BLE001
-            self.failed.emit(f"识别失败: {e}")
+            self.failed.emit(f"识别失败: {_clean_exc(e)}")
             return
         self.done.emit(result)
 

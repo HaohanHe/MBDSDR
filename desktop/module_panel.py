@@ -41,7 +41,13 @@ from PySide6.QtWidgets import (
 
 from tokens import tokens as _tok
 from mode_registry import get as _get_mode
-from constants import DEFAULT_SAMPLE_RATE_HZ
+from constants import DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ
+
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
 
 _t = _tok()
 
@@ -249,10 +255,13 @@ class ModulePanel(QWidget):
         right = QGroupBox("参数")
         form = QFormLayout(right)
         self.freq_spin = QDoubleSpinBox()
-        self.freq_spin.setRange(1e3, 7.2e9)
+        self.freq_spin.setRange(FREQ_MIN_HZ, FREQ_MAX_HZ)
         self.freq_spin.setValue(100.0e6)
         self.freq_spin.setSuffix(" Hz")
         self.freq_spin.setDecimals(0)
+        self.freq_spin.setToolTip(
+            "中心频率（Hz）。项目可调范围 10 kHz – 6 GHz，"
+            "实际以设备能力为准（见左侧设备信息）")
         self.freq_spin.valueChanged.connect(
             lambda v: self.tune_requested.emit(v))
         form.addRow("频率", self.freq_spin)
@@ -260,6 +269,9 @@ class ModulePanel(QWidget):
         self.gain_slider = QSlider(Qt.Horizontal)
         self.gain_slider.setRange(0, 50)
         self.gain_slider.setValue(20)
+        self.gain_slider.setToolTip(
+            "增益 0–50 dB（通用范围；实际档位以设备为准，"
+            "设备不支持的值由后端钳位）")
         self.gain_val = QLabel("20 dB")
         self.gain_slider.valueChanged.connect(
             lambda v: self.gain_val.setText(f"{v} dB"))
@@ -278,10 +290,14 @@ class ModulePanel(QWidget):
         form.addRow("采样率", self.sr_combo)
 
         self.bw_spin = QDoubleSpinBox()
-        self.bw_spin.setRange(100, 250000)
+        self.bw_spin.setRange(0, 250000)
+        self.bw_spin.setSpecialValueText("自动")
         self.bw_spin.setValue(150000)
         self.bw_spin.setSuffix(" Hz")
-        form.addRow("带宽", self.bw_spin)
+        self.bw_spin.setToolTip(
+            "设备射频带宽（硬件滤波），0 = 自动（跟随后端默认）。"
+            "注意与 VFO 信道带宽（控制面板「VFO 带宽」）不同")
+        form.addRow("硬件带宽", self.bw_spin)
         row.addWidget(right, 2)
 
         # ===== 底：sink 选择（跨整行）=====
@@ -311,16 +327,23 @@ class ModulePanel(QWidget):
         try:
             from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
             self._devices = enumerate_all_sdr_devices()
+            enum_err = None
         except Exception as e:
             self._devices = []
-            self.device_info.setText(f"枚举异常: {e}")
+            enum_err = _clean_exc(e)
 
         self.device_combo.clear()
         if not self._devices:
             # 红线：无设备不造假，如实显示
             self.device_combo.addItem("未发现SDR设备")
-            self.device_info.setText(
-                "未发现SDR设备\n插上 RTL-SDR/HackRF 后点刷新。")
+            if enum_err is not None:
+                # 枚举失败 ≠ 没插设备：错误信息不得被空态文案覆盖
+                # （旧实现先 setText(异常) 再被"未发现SDR设备"盖掉，失败被吞）
+                self.device_info.setText(
+                    f"设备枚举失败: {enum_err}\n（这不等于没插设备）")
+            else:
+                self.device_info.setText(
+                    "未发现SDR设备\n插上 RTL-SDR/HackRF 后点刷新。")
             self.connect_btn.setEnabled(False)
         else:
             self.connect_btn.setEnabled(True)

@@ -42,6 +42,12 @@ except Exception:  # pragma: no cover
     _apt = None
     _HAS_APT = False
 
+try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
+    from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
+except Exception:  # noqa: BLE001
+    def _clean_exc(e):  # type: ignore[misc]
+        return str(e)
+
 from tokens import tokens as _tok  # noqa: E402
 
 # 空态文案（测试据此断言面板进入“无数据”状态）。
@@ -185,7 +191,7 @@ class SatelliteImagePanel(QWidget):
         try:
             result = _apt.decode_apt(audio, self._audio_sr)
         except Exception as e:
-            self.stats_label.setText(f"解码失败: {e}")
+            self.stats_label.setText(f"解码失败: {_clean_exc(e)}")
             return
         if not result.get("apt_present"):
             self.stats_label.setText(
@@ -202,7 +208,7 @@ class SatelliteImagePanel(QWidget):
         try:
             paths = _apt.save_apt_png(result, prefix)
         except Exception as e:
-            self.stats_label.setText(f"保存 PNG 失败: {e}")
+            self.stats_label.setText(f"保存 PNG 失败: {_clean_exc(e)}")
             return
         combo = paths.get("combo")
         self._current_png = combo
