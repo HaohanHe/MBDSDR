@@ -165,3 +165,25 @@ traceback 堆栈一律不再进 UI（ai_panel/weather_panel/doppler_panel/mcp_wo
 E3 四条（含排查中新坐实的"失败被空态覆盖"一条）、E4 四条已修并钉住；E5 的
 英文异常/堆栈泄漏 10 文件 32 处统一收口到 clean_exc。核实不成立的五条如实记账，
 **不为凑数把做对的说成缺陷**；六条只报/未闭环均给出原因与证据，不声称已修。
+
+## 九、销账补记（2026-10-30 第三轮）
+
+七章"只报/未闭环"中的 1、2 两条本轮已修并钉住：
+
+1. **增益范围硬编码** → 已修：`control_panel`/`module_panel` 增益滑杆补
+   `set_gain_range(lo, hi)`，`_connect_backend` 连接成功后按
+   `backend.device.max_gain` 动态收放（失败仅警告，滑杆退回硬编码兜底）。
+   钉扎：`test_settings_semantics.test_gain_range_dynamic_resize`、
+   `test_settings_convergence.test_gain_dynamic_range_wired_on_connect`。
+2. **音量刻度 0–63 反直觉** → 已修：UI/持久化统一 **0–100 人类量纲**
+   （control_panel 滑杆、工具栏 1:1、settings "volume"、gui_config 迁移换算），
+   0–63 硬件寄存器量纲只在下发边界换算——换算式收敛为
+   `settings.volume_pct_to_hw` / `volume_hw_to_pct` 两个纯函数，UI 不再散写公式。
+   旧 desktop_settings.json（无 volume_scale_v2 标记）一次性迁移、幂等。
+   钉扎：`test_settings_convergence` 音量量纲四连 + 
+   `test_settings_semantics.test_volume_scale_documents_0_100`；
+   `test_sdr_pipeline.test_volume_changes_do_not_crash` 的满档断言随修复更新
+   （63→100 映射 2.0 增益）。
+
+其余 3/4/5/6 条状态不变（4 的 freq_spin 死路径已在 d12910e 修复销账；
+5 clean_exc Windows 映射、3 module_panel Hz 显示仍只报/未闭环）。

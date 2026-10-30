@@ -150,7 +150,7 @@ try:
 except Exception:  # pragma: no cover
     LoopSatTracker = None  # type: ignore
 # 运行参数持久化（频率/增益/模式/带宽/采样率/呼号/AGC/主题 落 JSON，退出不丢）
-from settings import DesktopSettings
+from settings import DesktopSettings, volume_pct_to_hw, volume_hw_to_pct
 # 触屏/Surface/平板二合一适配：单例管理器 + 触控目标/手势辅助。
 from touch_manager import touch_manager
 from touch_helpers import (enable_touch_events, apply_touch_target,
@@ -2025,6 +2025,20 @@ class MainWindow(QMainWindow):
             pass
         self.statusBar().showMessage(f"已连接 {backend.device.name}", 4000)
 
+        # 增益动态范围：按所连设备能力收放面板滑杆（此前 0-49/0-50 硬编码
+        # 是"RTL-SDR 典型"占位，接到别的设备也不动）。失败仅忽略——滑杆
+        # 退回硬编码兜底范围，不影响连接。
+        try:
+            max_gain = float(getattr(backend.device, "max_gain", 0.0) or 0.0)
+            if max_gain > 0:
+                for _pname in ("control_panel", "module_panel"):
+                    _panel = getattr(self, _pname, None)
+                    _fn = getattr(_panel, "set_gain_range", None)
+                    if callable(_fn):
+                        _fn(0.0, max_gain)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("增益范围动态收放失败（已忽略，滑杆保持兜底范围）: %s", e)
+
         # 下发设备参数（失败仅 warning，不阻断连接）
         try:
             backend.set_sample_rate(float(sample_rate))
@@ -2753,16 +2767,19 @@ class MainWindow(QMainWindow):
             self._demod_cfg.auto_squelch = bool(on)
 
     def _on_volume_changed(self, volume: int):
+        # volume 是 0–100 人类量纲（控制面板/工具栏统一）；0–63 硬件寄存器
+        # 量纲只在下发边界换算，不再倒灌 UI（换算式收敛在 settings 两个纯函数）。
         if self._worker:
-            self._worker.request_tool.emit("set_volume", {"volume": volume})
-        # (C) 真实声卡音量：0-63 → 0.0-2.0 增益
+            self._worker.request_tool.emit(
+                "set_volume", {"volume": volume_pct_to_hw(volume)})
+        # (C) 真实声卡音量：0-100 → 0.0-2.0 增益
         if self._audio_player is not None:
             try:
-                self._audio_player.set_gain(volume / 63.0 * 2.0)
+                self._audio_player.set_gain(volume / 100.0 * 2.0)
             except Exception:
                 pass
-        # 音量持久化（权威源 settings；此前只有 gui_config 的 volume 键，
-        # 双写导致读写不对称）。启动恢复期不回写，避免默认值覆盖已存值。
+        # 音量持久化（权威源 settings，0-100 人类量纲）。
+        # 启动恢复期不回写，避免默认值覆盖已存值。
         if not getattr(self, "_restoring_settings", False):
             try:
                 self.settings.set("volume", int(volume))
@@ -3065,7 +3082,12 @@ class MainWindow(QMainWindow):
             self.spectrum.set_center_freq(freq)
             self.control_panel.set_freq_fm(freq)
         elif tool_name == "set_volume":
-            self.control_panel.set_volume(params.get("volume", 30))
+            # 硬件面 set_volume 是 0–63 寄存器量纲，UI 是 0–100 人类量纲。
+            try:
+                v63 = int(params.get("volume", 30))
+            except (TypeError, ValueError):
+                v63 = 30
+            self.control_panel.set_volume(volume_hw_to_pct(v63))
 
     @Slot(str, dict)
     def _on_ai_tool_call(self, tool_name: str, params: dict):
@@ -4712,11 +4734,11 @@ class MainWindow(QMainWindow):
             cp.mode_combo.setCurrentText(target)
 
     def _on_toolbar_volume_changed(self, value: int):
-        """工具栏音量(0-100) → 映射到控制面板 volume_slider(0-63)，走既有音量链。"""
+        """工具栏音量(0-100) → 控制面板 volume_slider(0-100)，同一人类量纲 1:1。"""
         cp = getattr(self, "control_panel", None)
         if cp is None or not hasattr(cp, "volume_slider"):
             return
-        target = int(round(max(0, min(100, value)) * 63 / 100.0))
+        target = int(max(0, min(100, value)))
         if cp.volume_slider.value() != target:
             cp.volume_slider.setValue(target)
 
@@ -5746,8 +5768,13 @@ class MainWindow(QMainWindow):
                         str(self.settings.get("demod_mode", "FM")) == "FM":
                     self.settings.set("demod_mode", str(config["current_mode"]))
                 if "volume" in config and \
-                        int(self.settings.get("volume", 20)) == 20:
-                    self.settings.set("volume", int(config["volume"]))
+                        int(self.settings.get("volume", 48)) == 48:
+                    # gui_config 旧 volume 是 0–63 硬件量纲 → 换算成 0–100 人类量纲。
+                    try:
+                        v63 = int(config["volume"])
+                    except (TypeError, ValueError):
+                        v63 = 48
+                    self.settings.set("volume", volume_hw_to_pct(v63))
                 if "show_waterfall" in config and \
                         bool(self.settings.get("show_waterfall", True)) is True:
                     self.settings.set("show_waterfall",
@@ -5767,7 +5794,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:  # noqa: BLE001
                     logger.warning("恢复解调模式失败（值非法，已忽略）: %s", e)
                 try:
-                    cp.set_volume(int(self.settings.get("volume", 20)))
+                    cp.set_volume(int(self.settings.get("volume", 48)))
                 except Exception as e:  # noqa: BLE001
                     logger.warning("恢复音量失败（值非法，已忽略）: %s", e)
             spectrum = getattr(self, "spectrum", None)

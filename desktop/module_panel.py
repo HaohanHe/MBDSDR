@@ -267,11 +267,12 @@ class ModulePanel(QWidget):
         form.addRow("频率", self.freq_spin)
 
         self.gain_slider = QSlider(Qt.Horizontal)
+        # 未连接时的兜底范围；连接后 main_window 调 set_gain_range() 按设备能力收放。
         self.gain_slider.setRange(0, 50)
         self.gain_slider.setValue(20)
         self.gain_slider.setToolTip(
-            "增益 0–50 dB（通用范围；实际档位以设备为准，"
-            "设备不支持的值由后端钳位）")
+            "增益（dB）。未连接时按通用 0–50 显示；连接后随所连设备能力"
+            "动态收放，实际档位以设备为准（设备不支持的值由后端钳位）")
         self.gain_val = QLabel("20 dB")
         self.gain_slider.valueChanged.connect(
             lambda v: self.gain_val.setText(f"{v} dB"))
@@ -371,6 +372,24 @@ class ModulePanel(QWidget):
     def selected_gain_db(self) -> float:
         """当前增益滑块值（dB），语义与 device_panel.gain_edit 一致。"""
         return float(self.gain_slider.value())
+
+    def set_gain_range(self, lo_db: float, hi_db: float):
+        """按所连设备能力动态收放增益滑杆范围（连接后由 main_window 调用）。
+
+        非法/退化范围（hi<=lo）如实拒绝不动，保留当前范围。
+        """
+        try:
+            lo, hi = int(round(lo_db)), int(round(hi_db))
+        except (TypeError, ValueError):
+            return
+        if hi <= lo:
+            return
+        self.gain_slider.setRange(lo, hi)
+        if self.gain_slider.value() > hi:
+            self.gain_slider.setValue(hi)
+        self.gain_slider.setToolTip(
+            f"增益 {lo}–{hi} dB（按所连设备能力动态收放；"
+            "实际档位以设备为准，设备不支持的值由后端钳位）")
 
     def _on_connect(self):
         idx = self.device_combo.currentIndex()

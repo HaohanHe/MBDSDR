@@ -119,13 +119,31 @@ class TestE1MagicValuesExplained:
         assert ph and ph != "输入频率", \
             f"占位文本必须给出输入示例（旧占位'输入频率'无示例），实际 {ph!r}"
 
-    def test_volume_scale_documents_0_63(self):
-        """音量 0–63 刻度（下游 volume/63×2.0）必须在 UI 说明。"""
+    def test_volume_scale_documents_0_100(self):
+        """音量 0–100 人类量纲必须在 UI 说明（0–63 硬件量纲只在下发边界换算）。"""
         _app()
         from control_panel import ControlPanel
         cp = ControlPanel()
         tip = cp.volume_slider.toolTip()
-        assert "63" in tip, f"音量 tooltip 必须写明 0–63 刻度，实际 {tip!r}"
+        assert "100" in tip, f"音量 tooltip 必须写明 0–100 量纲，实际 {tip!r}"
+        assert cp.volume_slider.maximum() == 100, \
+            f"音量滑杆必须是 0–100 人类量纲，实际 max={cp.volume_slider.maximum()}"
+
+    def test_gain_range_dynamic_resize(self):
+        """增益滑杆必须支持按设备能力动态收放（不再一辈子顶着硬编码范围）。"""
+        _app()
+        from control_panel import ControlPanel
+        from module_panel import ModulePanel
+        for cls in (ControlPanel, ModulePanel):
+            p = cls()
+            assert hasattr(p, "set_gain_range"), f"{cls.__name__} 缺 set_gain_range"
+            p.set_gain_range(0.0, 33.0)
+            assert p.gain_slider.maximum() == 33, \
+                f"{cls.__name__}.set_gain_range 未生效：max={p.gain_slider.maximum()}"
+            # 退化范围如实拒绝，不动当前范围
+            p.set_gain_range(10.0, 10.0)
+            assert p.gain_slider.maximum() == 33, \
+                f"{cls.__name__} 对退化范围必须拒绝不改"
 
     def test_anr_strength_documents_alpha_mapping(self):
         """ANR 强度 0–100 → α 0–10 映射必须写明；标签不许裸显 2.0。"""

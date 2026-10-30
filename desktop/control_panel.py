@@ -112,7 +112,7 @@ class ControlPanel(QWidget):
     tune_fm_requested = Signal(float)    # 请求调谐 FM (MHz)
     tune_am_requested = Signal(int)      # 请求调谐 AM (kHz)
     tune_sdr_requested = Signal(float, str)  # 请求调谐 SDR (Hz, 模式)
-    volume_changed = Signal(int)          # 音量改变 (0-63)
+    volume_changed = Signal(int)          # 音量改变 (0-100 人类量纲)
     record_toggled = Signal(bool)         # 录音开关
     mode_changed = Signal(str)            # 模式改变
     gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
@@ -148,7 +148,7 @@ class ControlPanel(QWidget):
         self._current_mode = None
         self._freq_hz = None
         self._step_hz = 10_000.0   # 默认步进 10 kHz
-        self._volume = 30
+        self._volume = 48
         self._recording = False
         self._record_seconds = 0
         # 收藏列表：内存中，初始为空，不预存任何地区性电台
@@ -381,17 +381,18 @@ class ControlPanel(QWidget):
         volume_layout = QVBoxLayout(volume_group)
 
         vol_row = QHBoxLayout()
-        self.volume_label = QLabel("30")
+        self.volume_label = QLabel("48")
         self.volume_label.setObjectName("statusValue")
         self.volume_label.setMinimumWidth(30)
         self.volume_label.setMaximumWidth(100)
         vol_row.addWidget(self.volume_label)
 
         self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setRange(0, 63)
-        self.volume_slider.setValue(30)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(48)
         self.volume_slider.setToolTip(
-            "音量 0–63 级（63 最大；对应音频增益 0–2.0 倍）")
+            "音量 0–100（人类量纲；对应音频增益 0–2.0 倍，"
+            "下发硬件 0–63 寄存器量纲时在 main_window 边界换算）")
         self.volume_slider.valueChanged.connect(self._on_volume_changed)
         vol_row.addWidget(self.volume_slider)
 
@@ -471,11 +472,14 @@ class ControlPanel(QWidget):
         self.gain_label.setMaximumWidth(100)
         gain_row.addWidget(self.gain_label)
         self.gain_slider = QSlider(Qt.Horizontal)
-        self.gain_slider.setRange(0, 49)      # RTL-SDR 典型 LNA 增益上限 ~49dB
+        # 默认范围是 RTL-SDR 典型值（未连接时的兜底）；连接后 main_window 调
+        # set_gain_range() 按所连设备能力（backend.device.max_gain）动态收放，
+        # 不再一辈子顶着硬编码 0–49。
+        self.gain_slider.setRange(0, 49)
         self.gain_slider.setValue(0)
         self.gain_slider.setToolTip(
-            "LNA 增益 0–49 dB（RTL-SDR 典型上限；实际档位以设备为准，"
-            "部分设备会在后端钳位）")
+            "LNA 增益（dB）。未连接时按 RTL-SDR 典型 0–49 显示；"
+            "连接后随所连设备能力动态收放，实际档位以设备为准（后端钳位）")
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
         gain_row.addWidget(self.gain_slider)
         self.gain_val = QLabel("0dB")
@@ -993,8 +997,26 @@ class ControlPanel(QWidget):
             self.record_status.setText(f"录音中... {m:02d}:{s:02d}")
 
     def set_volume(self, volume: int):
-        """从外部设置音量。"""
+        """从外部设置音量（0–100 人类量纲）。"""
         self.volume_slider.setValue(volume)
+
+    def set_gain_range(self, lo_db: float, hi_db: float):
+        """按所连设备能力动态收放增益滑杆范围（连接后由 main_window 调用）。
+
+        非法/退化范围（hi<=lo）如实拒绝不动，保留当前范围。
+        """
+        try:
+            lo, hi = int(round(lo_db)), int(round(hi_db))
+        except (TypeError, ValueError):
+            return
+        if hi <= lo:
+            return
+        self.gain_slider.setRange(lo, hi)
+        if self.gain_slider.value() > hi:
+            self.gain_slider.setValue(hi)
+        self.gain_slider.setToolTip(
+            f"LNA 增益 {lo}–{hi} dB（按所连设备能力动态收放；"
+            "实际档位以设备为准，后端钳位）")
 
     # ========================================================================
     # 启动恢复用 setter（持久化参数回填）

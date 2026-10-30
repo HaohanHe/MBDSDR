@@ -255,3 +255,43 @@ def test_satellite_tune_updates_control_panel():
     assert "freq_spin.setValue" not in _MAIN_WINDOW_SRC, \
         "freq_spin 不存在（真实控件是 freq_input），不许再调用它"
     assert "self.control_panel.set_frequency_hz(float(obj.frequency_hz))" in _MAIN_WINDOW_SRC
+
+
+# ------------------------------------------- 音量量纲收敛（0-100 人类量纲，2026-10-30）
+def test_volume_scale_helpers_roundtrip():
+    """0-100 ↔ 0-63 换算只在 settings 两个纯函数里；越界输入夹进量纲，不炸。"""
+    from settings import volume_pct_to_hw, volume_hw_to_pct
+    assert volume_pct_to_hw(100) == 63
+    assert volume_pct_to_hw(0) == 0
+    assert volume_hw_to_pct(63) == 100
+    assert volume_hw_to_pct(0) == 0
+    assert volume_pct_to_hw(150) == 63
+    assert volume_hw_to_pct(99) == 100
+
+
+def test_volume_legacy_scale_migrates_once(tmp_path):
+    """旧 desktop_settings.json（0-63 量纲、无 volume_scale_v2 标记）一次性换算且幂等。"""
+    _app()
+    from settings import DesktopSettings
+    p = tmp_path / "desktop_settings.json"
+    p.write_text(json.dumps({"volume": 42}), encoding="utf-8")
+    s = DesktopSettings.load(path=str(p))
+    assert s.get("volume") == 67, f"42(0-63) 应迁移到 67(0-100)，实际 {s.get(volume)}"
+    s.flush()
+    s2 = DesktopSettings.load(path=str(p))
+    assert s2.get("volume") == 67, "迁移必须幂等（二次加载不许再换算）"
+
+
+def test_volume_wire_conversion_isolated_at_boundary():
+    """main_window 不许再散写 63/100 公式——换算走 settings 纯函数。"""
+    assert "volume_pct_to_hw" in _MAIN_WINDOW_SRC
+    assert "volume_hw_to_pct" in _MAIN_WINDOW_SRC
+    assert "volume / 63.0" not in _MAIN_WINDOW_SRC, \
+        "音频增益换算已改 0-100 基准（volume/100*2.0），不得回退 0-63 公式"
+
+
+def test_gain_dynamic_range_wired_on_connect():
+    """增益滑杆范围必须在连接成功后按设备能力收放（不再是死硬编码）。"""
+    assert "set_gain_range" in _MAIN_WINDOW_SRC, \
+        "_connect_backend 必须调 set_gain_range 按 backend.device.max_gain 收放"
+    assert "max_gain" in _MAIN_WINDOW_SRC

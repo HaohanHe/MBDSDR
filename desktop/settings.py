@@ -35,7 +35,12 @@ DEFAULTS: Dict[str, Any] = {
     "gnss_port": "",                # GNSS 串口设备路径；空 = 自动探测
     "gnss_baudrate": 9600,          # GNSS 串口波特率
     "agc_enabled": True,            # 自动增益开关
-    "volume": 20,                   # 音量 0–63（与控制面板滑杆同量纲）
+    "volume": 48,                   # 音量 0–100（人类量纲；下发 0–63 硬件量纲在 main_window 边界换算）
+    # 音量量纲迁移标记：新文件/新装默认 True。旧 desktop_settings.json 有
+    # "volume"（0–63 硬件量纲）但没有本标记 → load() 一次性换算成 0–100
+    # 并随下次落盘写入标记（幂等）。用「原始文件里键是否存在」判旧新，
+    # 不靠数值猜量纲（48 在两个量纲下都合法）。
+    "volume_scale_v2": True,
     "show_waterfall": True,         # 瀑布图可见性
     "theme": "default",             # 主题名
     # 触屏/Surface/平板二合一适配："auto"=自动检测 QTouchDevice，
@@ -57,7 +62,23 @@ DEFAULTS: Dict[str, Any] = {
 _FLOAT_KEYS = ("frequency_hz", "gain_db", "bandwidth_hz", "sample_rate_hz")
 #: 端口等整数字段：不登记会被 _coerce 落成字符串，下游 int() 再炸一次
 _INT_KEYS = ("gnss_baudrate", "rc_port", "web_port", "volume")
-_BOOL_KEYS = ("agc_enabled", "rc_enabled", "web_enabled", "show_waterfall")
+_BOOL_KEYS = ("agc_enabled", "rc_enabled", "web_enabled", "show_waterfall",
+              "volume_scale_v2")
+
+
+# ----------------------------------------------------------------------
+# 音量量纲换算（唯一换算点）：UI/持久化统一 0–100 人类量纲；硬件面
+# （AISDR Mini 的 SI4732 音量寄存器 / 旧 set_volume {"volume"} 协议）是
+# 0–63 寄存器量纲。换算只发生在这两个纯函数里，UI 层不许再散写公式。
+# ----------------------------------------------------------------------
+def volume_pct_to_hw(pct: float) -> int:
+    """0–100 人类量纲 → 0–63 硬件寄存器量纲（下发边界用）。"""
+    return int(round(max(0, min(100, float(pct))) * 63 / 100.0))
+
+
+def volume_hw_to_pct(hw: float) -> int:
+    """0–63 硬件寄存器量纲 → 0–100 人类量纲（读回/迁移用）。"""
+    return int(round(max(0, min(63, float(hw))) * 100 / 63.0))
 
 
 def default_config_path() -> str:
@@ -129,6 +150,17 @@ class DesktopSettings:
                     for k, v in raw.items():
                         if k in DEFAULTS:
                             inst._data[k] = _coerce(k, v)
+                    # 音量量纲一次性迁移（0–63 硬件量纲 → 0–100 人类量纲）：
+                    # 旧文件有 volume 但没有 volume_scale_v2 标记。判据是
+                    # 「原始文件里的键」，不靠数值猜量纲——48 在两套量纲下
+                    # 都合法。迁移后随下次落盘写入标记，幂等。
+                    if "volume" in raw and "volume_scale_v2" not in raw:
+                        try:
+                            old = int(raw.get("volume", 30))
+                        except (TypeError, ValueError):
+                            old = 30
+                        inst._data["volume"] = volume_hw_to_pct(old)
+                        inst._data["volume_scale_v2"] = True
         except Exception:
             # 文件损坏/不可读：静默回退全默认，绝不让配置文件搞挂 GUI
             inst._data = dict(DEFAULTS)

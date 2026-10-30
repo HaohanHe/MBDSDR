@@ -306,7 +306,8 @@ class TestMainWindowRecordingFlow:
 
     def test_volume_changes_do_not_crash(self, qtapp):
         w = self._make_window()
-        for v in (0, 15, 30, 63):
+        # 0-100 人类量纲（2026-10-30 量纲收敛后）；满档 100 → 增益 2.0
+        for v in (0, 25, 50, 100):
             w._on_volume_changed(v)
         if w._audio_player is not None:
             assert abs(w._audio_player.gain - 2.0) < 1e-6
