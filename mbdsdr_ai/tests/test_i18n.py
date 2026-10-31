@@ -60,6 +60,25 @@ def test_catalog_stats_reports_loaded():
     assert stats["en"]["keys"] >= 3
 
 
+_P0_WAVE_TOOLS = (
+    "sat_profile_list", "sat_profile_load", "frame_layout_list",
+    "frame_layout_load", "gps_nav_decode", "gps_ephemeris_satpos",
+    "gps_pvt_solve", "array_correlator_df", "multistation_tdoa_fix",
+    "tc_build_frame", "tc_frame_parse", "pcm_psk_pm_modulate",
+    "tc_uplink_transmit", "verify_decode_chain", "bch_generator",
+    "bch_encode", "bch_decode",
+)
+
+
+def test_p0_wave_tools_have_en_catalog_entry():
+    """P0 波 17 工具（配置面/GPS/测向定位/TC 上行/验收链/BCH）同样有
+    en 译文锚点——赛项关键面不接受漏译。"""
+    i18n._cache.clear()
+    catalog = i18n.load_catalog("en")
+    missing = [n for n in _P0_WAVE_TOOLS if f"tool.{n}.description" not in catalog]
+    assert not missing, f"P0 波工具缺 en 目录条目: {missing}"
+
+
 def test_all_p1_tools_have_en_catalog_entry():
     """覆盖锚点：P1 能力面每个注册工具在 en 目录都有译文——
     新增 P1 工具不补译文会被这里立刻抓到（不静默漏国际化）。"""
