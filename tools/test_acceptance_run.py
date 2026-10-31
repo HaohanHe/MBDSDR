@@ -32,6 +32,17 @@ sys.path.insert(0, str(_HERE))
 import acceptance_lib as A      # noqa: E402
 
 
+def _bash() -> str:
+    """定位可用 bash。Windows 上 PATH 里的 bash 可能是无发行版的 WSL，
+    会输出 GBK 错误并 exit 1，优先用 Git Bash。"""
+    if os.name == "nt":
+        git_bash = (Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+                    / "Git" / "bin" / "bash.exe")
+        if git_bash.exists():
+            return str(git_bash)
+    return "bash"
+
+
 # ---------------------------------------------------------------------------
 # Fixture：selfcheck --json 报告（与 test_paste_block.py 同形状）
 # ---------------------------------------------------------------------------
@@ -391,9 +402,9 @@ class TestShellNoHardware:
     def test_script_no_hardware_exit2_and_outputs_checklist(self, tmp_path):
         out = tmp_path / "accept_out.json"
         r = subprocess.run(
-            ["bash", str(_HERE / "acceptance_run.sh"),
+            [_bash(), str(_HERE / "acceptance_run.sh"),
              "--out", str(out)],
-            capture_output=True, text=True, timeout=120, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False,
             cwd=str(_HERE.parent))
         # 云内无硬件 -> 退出码 2（诚实空态，不是错误）
         assert r.returncode == A.EXIT_NO_HW, (
@@ -508,10 +519,10 @@ class TestShellEventMode:
         """--event 带频率、云内无设备 -> exit 2，onboard_sstv/ssdv 诚实 SKIP。"""
         out = tmp_path / "ev.json"
         r = subprocess.run(
-            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+            [_bash(), str(_HERE / "acceptance_run.sh"), "--event",
              "--freq-sstv", "435e6", "--freq-ssdv", "436e6",
              "--out", str(out)],
-            capture_output=True, text=True, timeout=120, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False,
             cwd=str(_HERE.parent))
         assert r.returncode == A.EXIT_NO_HW, (
             f"rc={r.returncode}\nstdout={r.stdout[-1500:]}\nstderr={r.stderr[-1500:]}")
@@ -530,11 +541,11 @@ class TestShellEventMode:
     def test_event_single_mode_sstv(self, tmp_path):
         out = tmp_path / "ev.json"
         r = subprocess.run(
-            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+            [_bash(), str(_HERE / "acceptance_run.sh"), "--event",
              "--event-modes", "sstv",
              "--freq-sstv", "435e6",
              "--out", str(out)],
-            capture_output=True, text=True, timeout=120, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, check=False,
             cwd=str(_HERE.parent))
         assert r.returncode == A.EXIT_NO_HW, (
             f"rc={r.returncode}\nstdout={r.stdout[-1200:]}\nstderr={r.stderr[-1200:]}")
@@ -546,9 +557,9 @@ class TestShellEventMode:
         """--event 缺 --freq-* -> exit 3，并提示去 P3-event-params.md 查。"""
         out = tmp_path / "ev.json"
         r = subprocess.run(
-            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+            [_bash(), str(_HERE / "acceptance_run.sh"), "--event",
              "--out", str(out)],
-            capture_output=True, text=True, timeout=60, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, check=False,
             cwd=str(_HERE.parent))
         assert r.returncode == A.EXIT_USAGE, (
             f"rc={r.returncode}\nstdout={r.stdout[-800:]}\nstderr={r.stderr[-800:]}")
@@ -560,11 +571,11 @@ class TestShellEventMode:
     def test_event_bad_mode_exit_usage(self, tmp_path):
         out = tmp_path / "ev.json"
         r = subprocess.run(
-            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+            [_bash(), str(_HERE / "acceptance_run.sh"), "--event",
              "--event-modes", "bogus",
              "--freq-sstv", "435e6",
              "--out", str(out)],
-            capture_output=True, text=True, timeout=60, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, check=False,
             cwd=str(_HERE.parent))
         assert r.returncode == A.EXIT_USAGE, (
             f"rc={r.returncode}\nstdout={r.stdout[-800:]}\nstderr={r.stderr[-800:]}")

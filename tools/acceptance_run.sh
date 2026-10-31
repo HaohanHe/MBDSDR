@@ -49,7 +49,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
 cd "$ROOT"
 
-PY="${PYTHON:-python3}"
+# 解析 Python 解释器：Windows Git Bash 的 python3 常是 Microsoft Store 存根
+# （静默 exit 49、零输出，会把 raw.jsonl 全部咬空）。优先 PYTHON 显式指定，
+# 否则探测 python3/python 哪个真能 import。
+if [ -n "${PYTHON:-}" ]; then
+  PY="$PYTHON"
+elif python3 -c 'import sys' >/dev/null 2>&1; then
+  PY=python3
+else
+  PY=python
+fi
 OUT="$ROOT/tools/acceptance_out.json"
 KEEP_LOGS=0
 MODES_IN="adsb,apt,cw"
@@ -217,9 +226,11 @@ run_onboard() {
   fi
   local rc=$?
 
-  # 从 onboard --json 里抽 record 步落盘的 SigMF 目录（供 ota 回填）
+  # 从 onboard --json 里抽 record 步落盘的 SigMF 目录（供 ota 回填）。
+  # 注意：不用 <<'PYEOF' heredoc 嵌在 $( ) 里——bash（含 5.3.9-cygwin）会误解析
+  # （"unterminated here-document" 警告且把收尾的 ) 咬进捕获值），用单引号多行 -c。
   local rec_dir
-  rec_dir="$("$PY" - "$oj" <<'PYEOF' 2>/dev/null || echo "")
+  rec_dir="$("$PY" -c '
 import json,sys,os
 try:
     d=json.load(open(sys.argv[1],encoding="utf-8"))
@@ -229,8 +240,7 @@ try:
             if p: print(os.path.dirname(p)); break
 except Exception:
     pass
-PYEOF
-"
+' "$oj" 2>/dev/null || echo "")"
   [ -z "$FIRST_REC_DIR" ] && [ -n "$rec_dir" ] && FIRST_REC_DIR="$rec_dir"
 
   append_raw "$(printf '{"id":"onboard_%s","title":"onboard 真机采集/录制/解码 (%s)","rc":%d,"onboard_json":%s,"recordings_dir":%s}' \

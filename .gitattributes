@@ -1,0 +1,2 @@
+# shell 脚本必须 LF：CRLF 会咬断 bash here-doc（acceptance_run.sh 检查表组装失败实证）
+*.sh text eol=lf
