@@ -132,8 +132,11 @@ def test_connect_wrong_port_rejected():
 
 def test_dynamic_load():
     reg = ModuleRegistry()
-    # 动态加载并注册一个具体子类
-    cls = reg.dynamic_load("tests.test_module_system:GainBlock")
+    # 动态加载并注册一个具体子类。点路径用本模块真实模块名（__name__），
+    # 不硬编码 "tests.test_module_system"：tests/ 根是命名空间包，一旦别的
+    # 测试把内含 tests/ 常规包的目录塞进 sys.path，`import tests` 会解析到
+    # 那个常规包，硬编码点路径即断（2026-10-31 CI A 组实锤）。
+    cls = reg.dynamic_load(f"{__name__}:GainBlock")
     assert cls.MODULE_NAME == "gain"
     assert reg.get("gain").MODULE_NAME == "gain"
 

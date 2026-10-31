@@ -94,7 +94,6 @@ def test_lpc_spectral_envelope():
 
     assert corr > 0.8, f"Spectral envelope correlation too low: {corr:.4f}"
     print("  ✓ PASS: LPC↔LSP roundtrip preserves spectral envelope\n")
-    return True
 
 
 def test_codec2_1600_roundtrip():
@@ -150,7 +149,6 @@ def test_codec2_1600_roundtrip():
     # Check output is non-trivial (not silence)
     assert rms_out > 0.001, f"Decoded signal too quiet: {rms_out}"
     print("  ✓ PASS: Codec2 1600 roundtrip produces output audio\n")
-    return True
 
 
 def test_freedv_700d_ofdm():
@@ -191,7 +189,6 @@ def test_freedv_700d_ofdm():
 
     assert ber < 0.01, f"BER too high: {ber:.4f}"
     print("  ✓ PASS: 700D OFDM BER < 1% at 10dB SNR\n")
-    return True
 
 
 def test_freedv_1600_dbpsk():
@@ -225,7 +222,6 @@ def test_freedv_1600_dbpsk():
     # With no noise, DBPSK should be near-perfect
     assert ber < 0.02, f"DBPSK BER too high on clean channel: {ber:.4f}"
     print("  ✓ PASS: 1600 DBPSK roundtrip matches\n")
-    return True
 
 
 def test_pitch_detector():
@@ -248,7 +244,6 @@ def test_pitch_detector():
     assert 0.5 * f0_true < f0_est < 2.0 * f0_true, \
         f"Pitch estimate off: {f0_est:.1f} vs {f0_true:.1f}"
     print("  ✓ PASS: Pitch detector finds approximate F0\n")
-    return True
 
 
 def main():

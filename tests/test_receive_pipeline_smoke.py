@@ -22,7 +22,10 @@ import pytest  # noqa: E402
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
-sys.path.insert(0, os.path.join(_ROOT, "mbdsdr_ai"))
+# 注意：不要把 mbdsdr_ai/ 裸目录塞进 sys.path——它内含带 __init__.py 的 tests/
+# 常规包，`import tests` 会解析到 mbdsdr_ai/tests（常规包盖过根 tests 命名空间
+# 包），全进程的 tests.* 点路径全断（2026-10-31 CI A 组实锤）。本文件只需
+# desktop/（receive_pipeline、mode_registry）与 repo root（mbdsdr_ai.* 包）。
 
 
 @pytest.fixture(scope="module")

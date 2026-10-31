@@ -133,7 +133,7 @@ void TestMcpServer::toolsListGroupedBranches() {
                        "\"params\":{\"domain\":\"VNA 测量\"}}"), &engine);
     QJsonArray vna = byDom.value(QStringLiteral("result")).toObject()
                          .value(QStringLiteral("tools")).toArray();
-    QCOMPARE(vna.size(), 4);   // set_vna_sweep / get_vna_data / get_vna_status / vna_device
+    QCOMPARE(vna.size(), 5);   // set_vna_sweep / get_vna_data / get_vna_status / vna_device / vna_connect
     QStringList vnaNames;
     for (const QJsonValue& t : vna) {
         QJsonObject o = t.toObject();
@@ -146,7 +146,8 @@ void TestMcpServer::toolsListGroupedBranches() {
     vnaNames.sort();
     QStringList expectVna;
     expectVna << QStringLiteral("get_vna_data") << QStringLiteral("get_vna_status")
-              << QStringLiteral("set_vna_sweep") << QStringLiteral("vna_device");
+              << QStringLiteral("set_vna_sweep") << QStringLiteral("vna_connect")
+              << QStringLiteral("vna_device");
     QCOMPARE(vnaNames, expectVna);
 
     // Fuzzy match (lowercase) resolves to the same domain.
@@ -154,7 +155,7 @@ void TestMcpServer::toolsListGroupedBranches() {
         QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/list\","
                        "\"params\":{\"domain\":\"vna 测量\"}}"), &engine);
     QCOMPARE(fuzzy.value(QStringLiteral("result")).toObject()
-                 .value(QStringLiteral("tools")).toArray().size(), 4);
+                 .value(QStringLiteral("tools")).toArray().size(), 5);
 
     // -- unknown domain -> honest JSON-RPC error listing legal domain names.
     QJsonObject bad = post(

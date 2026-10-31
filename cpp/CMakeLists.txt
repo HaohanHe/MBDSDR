@@ -1401,6 +1401,11 @@ target_link_libraries(test_constellation_view PRIVATE mbdsdr_core)
 target_include_directories(test_constellation_view PRIVATE src)
 target_link_libraries(test_constellation_view PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui)
 add_test(NAME constellation_view COMMAND test_constellation_view)
+# 与其余 UI 测试同样强制 offscreen：本机（非 CI）不设 QT_QPA_PLATFORM 时
+# QApplication 在非交互会话起不来，秒退零输出（2026-10-31 本机全量 ctest
+# 实测 exit 2）。CI 不红只因 ci.yml 全局设了 offscreen；属性写在测试上才
+# 对本机和 CI 一视同仁。见 tests/test_constellation_view.cpp 头注释。
+set_tests_properties(constellation_view PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Weather-satellite (NOAA APT) panel: empty state / setImage / clear round-trip
 # (QtTest + offscreen). The QImage fed here is a hand-built test pattern,
@@ -1966,3 +1971,15 @@ set(MBDSDR_SLOW_DSP_TESTS
 
 set_tests_properties(${MBDSDR_MAINWINDOW_TESTS} PROPERTIES LABELS "mainwindow;slow")
 set_tests_properties(${MBDSDR_SLOW_DSP_TESTS} PROPERTIES LABELS "slow")
+
+# ── ctest 全目标统一“无声卡”注入 ──────────────────────────────────────────
+# MBDSDR_NULL_AUDIO=1 是 SpectrumEngine 构造函数里的既有门（spectrum_engine.cpp）：
+# 渲染端点走 NullAudioSink 丢弃，绝不打开真声卡。未带 QT_QPA_PLATFORM=offscreen
+# 的目标（e2e_smoke / soak 等）此前在有声卡的机器上把解调音频写进默认输出设备
+# （2026-10-31 本机全量 ctest 实测每秒一咔）。统一注入后本机行为与 headless CI
+# 一致：NullAudioSink 诚实报告 isAvailable()==false，测试结论不依赖有无声卡。
+# APPEND 保留各目标已有的 ENVIRONMENT（如 QT_QPA_PLATFORM=offscreen）。
+get_property(MBDSDR_ALL_CTESTS DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY TESTS)
+if(MBDSDR_ALL_CTESTS)
+  set_property(TEST ${MBDSDR_ALL_CTESTS} APPEND PROPERTY ENVIRONMENT "MBDSDR_NULL_AUDIO=1")
+endif()

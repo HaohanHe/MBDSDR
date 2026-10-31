@@ -347,3 +347,14 @@ class FileChangeTracker:
                 except Exception as e:  # noqa: BLE001
                     # 单条损坏不能拖垮全部加载，但绝不能无声消失（审计链要有痕迹）
                     print(f"警告: 变更记录加载失败，已跳过 {path}: {e}")
+
+        # os.listdir 顺序由文件系统决定（Windows 近似有序、Linux 哈希序），
+        # 不保证时间顺序。历史列表是 get_file_history "最新在前"的依据，
+        # 加载后必须按 (timestamp, 计数器) 确定性排序，否则重启后历史乱序。
+        def _order_key(cid: str):
+            c = self.changes[cid]
+            tail = cid.rsplit('_', 1)[-1]
+            return (c.timestamp, int(tail) if tail.isdigit() else 0)
+
+        for ids in self.file_changes.values():
+            ids.sort(key=_order_key)

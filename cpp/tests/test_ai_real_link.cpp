@@ -367,60 +367,13 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QSet<QString> registered;
     for (const ai::ToolSchemaSpec& s : specs) registered.insert(s.name);
 
-    // The exact set executeTool() dispatches on (agent_tools.cpp).
-    const QSet<QString> supported = {
-        "tune_frequency", "set_mode", "start_recording", "stop_recording",
-        "scan_band", "set_bandwidth", "get_status", "predict_passes",
-        "calibrate_frequency", "apply_frequency_correction",
-        "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
-        // Phase60 packet-text snapshot tools.
-        "get_acars_packets", "get_navtex_messages",
-        "export_iq_segment",
-        // Phase26: 21 new tools.
-        "set_network_audio_sink", "get_network_audio_status",
-        "start_scan_link", "stop_scan_link", "get_scan_link_status",
-        "set_squelch", "get_squelch_status",
-        "set_ctcss", "get_ctcss_status",
-        "set_cdcss", "get_cdcss_status",
-        "set_ft8", "get_ft8_status", "get_ft8_history", "get_adsb_aircraft",
-        "get_aprs_messages",
-        "get_color_maps",
-        "get_aprs_messages",
-        "set_lrpt", "get_lrpt_status",
-        "set_vna_sweep", "get_vna_data", "get_vna_status",
-        "analyze_vna_resonance", "vna_tdr_cable", "analyze_vna_filter", "analyze_vna_equivalent", "analyze_vna_touchstone", "export_vna_snapshot", "export_spectrum_snapshot", "export_peaks_csv", "export_ft8_results", "analyze_vna_match",
-        "set_noise_blanker", "get_noise_blanker_status",
-        "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
-        "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
-        "list_recordings", "delete_recording", "export_recording",
-        "set_fft_params", "set_color_map", "get_spectrum_status",
-        // Phase55/58 appended tools.
-        "set_doppler_compensation", "connect_network_source",
-        // Phase59 armed parallel VFO monitoring.
-        "set_vfo_armed",
-        // Phase61 VFO fine-grained edit tools.
-        "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
-        // Read-only capability/recording-state snapshots.
-        "get_capabilities", "get_recording_state",
-        // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
-        "vna_calibration",
-        // P1 #70: device-level misc facade state machine (write, gated).
-        "vna_device",
-        // P3 #73/#74: local memory family + checkpoint writer control plane.
-        "memory_add", "memory_search", "memory_update",
-        "checkpoint_status", "memory_flush",
-        // 第 10 域「工作台编排」(AIGUI P0-b).
-        "arrange_workspace", "get_workspace_layout",
-        "list_ui_components", "reset_workspace",
-        // A2UI v1.0 updateDataModel minimal subset (gated write).
-        "update_component_data",
-        // Deterministic task templates: list (read) / run (gated write).
-        "list_templates", "run_template",
-        // G1: task-run history (read). G2: memory delete (gated write) + stats (read).
-        "get_task_history", "memory_delete", "memory_stats",
-        // Read-only TLE-cache catalog (prerequisite for predict_passes).
-        "list_satellites",
-    };
+    // The exact set executeTool() dispatches on (agent_tools.cpp) -- derived
+    // from dispatchTable() via executorToolNames() single-source. The old
+    // third hardcoded copy of the name list (90) drifted from the registry
+    // (135) and went red on 2026-10-31; registry vs dispatch is the real
+    // invariant and both sides stay hand-maintained independently.
+    const QStringList execNames = ai::executorToolNames();
+    const QSet<QString> supported(execNames.begin(), execNames.end());
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
 

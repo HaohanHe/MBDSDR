@@ -118,8 +118,10 @@ class TestSoapySDREnumerate(unittest.TestCase):
 
     def test_no_library_returns_empty(self):
         """路径3：无 Python 绑定、无 CLI → 返回 [] 不崩溃。"""
-        # sys.modules 里没有 SoapySDR；mock subprocess.run 抛 FileNotFoundError
-        with mock.patch("subprocess.run", side_effect=FileNotFoundError):
+        # 显式拦截 import（sys.modules 置 None → import 必抛 ImportError），
+        # 不依赖"本机恰好没装 SoapySDR"；再让 CLI 降级也不可用。
+        with mock.patch.dict(sys.modules, {"SoapySDR": None}), \
+                mock.patch("subprocess.run", side_effect=FileNotFoundError):
             from mbdsdr_ai.sdr_backend import SoapySDRBackend
             devs = SoapySDRBackend.list_devices()
         self.assertEqual(devs, [])
@@ -127,10 +129,14 @@ class TestSoapySDREnumerate(unittest.TestCase):
     def test_import_error_returns_empty_and_logs_pip_hint(self):
         """红线：import SoapySDR 抛 ImportError 时，enumerate 返回 []，绝不抛异常到上层，
         且日志明确提示 pip install SoapySDR（而不是静默把"没装库"当成"没插设备"）。"""
-        # setUp 已把 SoapySDR 从 sys.modules 摘掉 → import 必抛 ImportError；
-        # 再让 CLI 降级也不可用，强制走到"都没有"分支。
-        self.assertNotIn("SoapySDR", sys.modules)
-        with mock.patch("subprocess.run", side_effect=FileNotFoundError), \
+        # 显式拦截 import：sys.modules 置 None 让 import SoapySDR 必抛 ImportError，
+        # 装了 SoapySDR 的环境也测同一条路径（测试不许靠"恰好没装"成立）。
+        # 同时隔离 _WARNED_ONCE 进程级去重态：同进程先跑的测试可能已消耗告警键，
+        # 而本测试验的正是首次缺失告警的文案契约。
+        from mbdsdr_ai import sdr_backend
+        with mock.patch.dict(sys.modules, {"SoapySDR": None}), \
+                mock.patch.object(sdr_backend, "_WARNED_ONCE", set()), \
+                mock.patch("subprocess.run", side_effect=FileNotFoundError), \
                 self.assertLogs("mbdsdr_ai.sdr_backend", level="WARNING") as cm:
             from mbdsdr_ai.sdr_backend import SoapySDRBackend
             devs = SoapySDRBackend.list_devices()
@@ -159,10 +165,12 @@ class TestSoapySDREnumerate(unittest.TestCase):
 
     def test_connect_without_library_fails_honestly(self):
         """红线：无库时 connect() 返回 False，绝不假装成功。"""
-        from mbdsdr_ai.sdr_backend import SoapySDRBackend
-        be = SoapySDRBackend(device_args="driver=rtlsdr",
-                             device_info={"label": "t", "serial": "s"})
-        self.assertFalse(be.connect())
+        # 同样显式拦截 import，不依赖环境"恰好没装"。
+        with mock.patch.dict(sys.modules, {"SoapySDR": None}):
+            from mbdsdr_ai.sdr_backend import SoapySDRBackend
+            be = SoapySDRBackend(device_args="driver=rtlsdr",
+                                 device_info={"label": "t", "serial": "s"})
+            self.assertFalse(be.connect())
         self.assertFalse(be.status.connected)
         self.assertTrue(be.status.error)  # error 字段记录真实错误
         # read_samples 未连接应返回 None
