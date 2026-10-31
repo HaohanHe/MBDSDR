@@ -46,6 +46,9 @@ test = ["pytest"]
 [project.urls]
 Repository = "https://github.com/mbdsdr/mbdsdr"
 
+[project.scripts]
+mbdsdr-ai = "mbdsdr_ai.core.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["mbdsdr_ai*"]
 exclude = ["mbdsdr_ai.tests*"]
