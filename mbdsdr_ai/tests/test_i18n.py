@@ -141,6 +141,44 @@ def test_get_tool_definitions_language_does_not_mutate():
     assert r.tools["t"]["definition"]["function"]["description"] == "原文"
 
 
+def test_agent_language_wires_into_tool_discovery():
+    """config.language（既有字段）真正驱动工具描述语言：zh-CN → zh（回退
+    原文，与接线前一致）；en-US → en（目录译文）。"""
+    from mbdsdr_ai.agent import MBDSDRAgent
+    from mbdsdr_ai.config import AgentConfig
+
+    reg = ToolRegistry()
+    reg_gbs(reg)
+
+    cfg_zh = AgentConfig(api_key="sk-test", language="zh-CN")
+    agent_zh = MBDSDRAgent.__new__(MBDSDRAgent)  # 免网络/模型初始化
+    agent_zh.config = cfg_zh
+    agent_zh.tool_registry = reg
+    assert agent_zh._tool_language() == "zh"
+    defs_zh = reg.get_tool_definitions(language=agent_zh._tool_language())
+    assert defs_zh[0]["function"]["description"] == \
+        reg.tools[defs_zh[0]["function"]["name"]]["definition"]["function"]["description"]
+
+    agent_en = MBDSDRAgent.__new__(MBDSDRAgent)
+    agent_en.config = AgentConfig(api_key="sk-test", language="en-US")
+    agent_en.tool_registry = reg
+    assert agent_en._tool_language() == "en"
+    names = [d["function"]["name"] for d in
+             reg.get_tool_definitions(language=agent_en._tool_language())]
+    descs = {d["function"]["name"]: d["function"]["description"]
+             for d in reg.get_tool_definitions(language="en")}
+    assert "nav_bit_sync" in names
+    assert "bit synchronization" in descs["nav_bit_sync"]
+
+
+def test_normalize_lang_edge_cases():
+    assert i18n.normalize_lang("zh-CN") == "zh"
+    assert i18n.normalize_lang("en_US") == "en"
+    assert i18n.normalize_lang("FR") == "fr"
+    assert i18n.normalize_lang("") == ""
+    assert i18n.normalize_lang(None) == ""
+
+
 def test_gps_bit_sync_tools_translated_via_catalog():
     """首接线：locale/en.json 数据驱动，注册代码零改动。"""
     r = ToolRegistry()

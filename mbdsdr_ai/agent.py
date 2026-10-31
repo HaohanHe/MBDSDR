@@ -425,6 +425,14 @@ class MBDSDRAgent:
 
     # ── 工具注册 ────────────────────────────────────────
 
+    def _tool_language(self) -> Optional[str]:
+        """config.language 归一化为目录语言码（zh-CN → zh）。
+
+        默认 zh 目录缺失即回退原文描述，与未接线前行为一致。
+        """
+        from .i18n import normalize_lang
+        return normalize_lang(getattr(self.config, "language", None) or "zh")
+
     def register_mcp_tools(self, mcp_tools: List[Dict[str, Any]], mcp_call_handler: Callable):
         """
         注册 MCP 硬件工具。
@@ -433,9 +441,10 @@ class MBDSDRAgent:
         mcp_call_handler: 调用 MCP 工具的函数 (tool_name, args) -> result
         """
         self.tool_registry.register_mcp_tools(mcp_tools, mcp_call_handler)
-        # 更新上下文管理器的工具定义
+        # 更新上下文管理器的工具定义（描述语言跟随 config.language）
         self.context_manager.set_tool_definitions(
-            self.tool_registry.get_tool_definitions()
+            self.tool_registry.get_tool_definitions(
+                language=self._tool_language())
         )
 
     def set_mcp_client(self, client):
@@ -3159,7 +3168,9 @@ class MBDSDRAgent:
 
             # 构建 API 消息
             messages = self.context_manager.build_api_messages()
-            tools = self.tool_registry.get_tool_definitions() if self.config.enable_tool_calling else None
+            tools = (self.tool_registry.get_tool_definitions(
+                         language=self._tool_language())
+                     if self.config.enable_tool_calling else None)
 
             # 调用 LLM（流式，on_delta 回调实时吐字）
             response = {"success": True, "content": "", "tool_calls": [],

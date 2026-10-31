@@ -31,6 +31,15 @@ def get_language() -> str:
     return os.environ.get(_ENV_VAR, _DEFAULT_LANG)
 
 
+def normalize_lang(tag: str) -> str:
+    """BCP-47 风格语言码 → 目录主子标签（'zh-CN'/'zh_CN' → 'zh'）。
+
+    目录按主子标签组织（en/zh）；未知标签原样返回——load_catalog
+    对缺失文件返回空表，tr/描述解析诚实回退原文。
+    """
+    return (tag or "").strip().replace("_", "-").split("-")[0].lower()
+
+
 def set_language(lang: str) -> None:
     """设置当前语言（进程内；等价于设置 MBDSDR_LANG）。"""
     if not lang or not lang.replace("-", "").replace("_", "").isalnum():
