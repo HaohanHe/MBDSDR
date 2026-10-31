@@ -57,7 +57,28 @@ def test_format_kwargs_and_failure_fallback():
 def test_catalog_stats_reports_loaded():
     i18n.load_catalog("en")
     stats = i18n.catalog_stats()
-    assert stats["en"]["keys"] == 3
+    assert stats["en"]["keys"] >= 3
+
+
+def test_all_p1_tools_have_en_catalog_entry():
+    """覆盖锚点：P1 能力面每个注册工具在 en 目录都有译文——
+    新增 P1 工具不补译文会被这里立刻抓到（不静默漏国际化）。"""
+    r = ToolRegistry()
+    r.register_p1_capability_tools()
+    i18n._cache.clear()
+    catalog = i18n.load_catalog("en")
+    names = [t["name"] for t in r.list_tools()]
+    assert len(names) >= 18
+    missing = [n for n in names if f"tool.{n}.description" not in catalog]
+    assert not missing, f"P1 工具缺 en 目录条目: {missing}"
+    en = {t["name"]: t["description"]
+          for t in r.list_tools(language="en")}
+    zh = {t["name"]: t["description"]
+          for t in r.list_tools(language="zh")}
+    for n in names:
+        assert en[n] != zh[n], f"{n} 的 en 描述与原文相同（译文缺失？）"
+        assert not any("\u4e00" <= c <= "\u9fff" for c in en[n]), \
+            f"{n} 的 en 描述含 CJK（译文未落地？）"
 
 
 def _dummy(name: str = "t"):
