@@ -171,6 +171,23 @@ def test_agent_language_wires_into_tool_discovery():
     assert "bit synchronization" in descs["nav_bit_sync"]
 
 
+def test_list_tools_tool_exposes_language_param():
+    """LLM 面 list_tools 工具可选 language 参数：缺省原文，传 en 出译文。"""
+    r = ToolRegistry()
+    reg_gbs(r)
+    r.register_builtin_tools()  # 挂 list_tools 本体
+    h = r.tools["list_tools"]["handler"]
+    res_default = h({})
+    res_en = h({"language": "en"})
+    import json as _json
+    d_default = {t["name"]: t["description"]
+                 for t in _json.loads(res_default.content)}
+    d_en = {t["name"]: t["description"]
+            for t in _json.loads(res_en.content)}
+    assert d_en["nav_bit_sync"] != d_default["nav_bit_sync"]
+    assert "bit synchronization" in d_en["nav_bit_sync"]
+
+
 def test_normalize_lang_edge_cases():
     assert i18n.normalize_lang("zh-CN") == "zh"
     assert i18n.normalize_lang("en_US") == "en"

@@ -780,15 +780,27 @@ class ToolRegistry:
         注册内置 AI 工具（上下文查询、模型管理、配置管理等）。
         agent_ref: Agent 引用（用于访问 context_manager, model_manager 等）。
         """
-        # list_tools: 工具发现
+        # list_tools: 工具发现（可选 language 参数控制描述语言）
         self.register(
             name="list_tools",
             description="列出所有可用工具。AI 连接后应先调用此工具发现可用能力。",
-            parameters={"type": "object", "properties": {}, "required": []},
+            parameters={
+                "type": "object",
+                "properties": {
+                    "language": {
+                        "type": "string",
+                        "description": "可选描述语言码（如 en）；缺省原文。",
+                    },
+                },
+                "required": [],
+            },
             handler=lambda args: ToolResult(
                 success=True,
-                content=json.dumps(self.list_tools(), ensure_ascii=False, indent=2),
-                data={"tools": self.list_tools()},
+                content=json.dumps(
+                    self.list_tools(language=args.get("language") or None),
+                    ensure_ascii=False, indent=2),
+                data={"tools": self.list_tools(
+                    language=args.get("language") or None)},
             ),
             category="meta",
         )
