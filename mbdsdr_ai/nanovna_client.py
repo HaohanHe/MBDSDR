@@ -424,19 +424,33 @@ class NanoVNAClient:
         """尽力排空输入缓冲（对齐上游 drain 节奏）。"""
         self._transport.reset_input_buffer()
 
-    def _exec(self, command: str, read_timeout: float = 0.05) -> List[str]:
+    def _exec(self, command: str, read_timeout: float = 0.05,
+              deadline_s: float = 10.0) -> List[str]:
         """发一条命令，收行直到提示符 'ch>'，剔除回显行。
 
         返回去掉提示符后的响应行列表（已 strip）。
+
+        **总 deadline（缺口报告 P1：静默设备 ~204s 死等）**：宽松行数上限
+        只防死循环、不防挂钟——设备完全静默时 4096×0.05s ≈ 204s 才放弃。
+        现以 ``time.monotonic()`` 总时钟兜底（默认 10s）：超时如实抛错并
+        报已收行数，绝不把半截响应当成功返回、绝不静默空转。
         """
         if not self._transport.is_open:
             raise NanoVNADriverError("未连接 NanoVNA")
+        if deadline_s <= 0:
+            raise NanoVNADriverError(f"deadline_s 必须 >0，收到 {deadline_s}")
         self._drain()
         self._transport.write((command + "\r").encode("ascii"))
         lines: List[str] = []
         idle = 0
-        # 宽松上限 + 空闲计数，防止异常固件不回提示符导致死循环。
+        t0 = time.monotonic()
+        # 宽松行数上限 + 空闲计数 + 总 deadline：防异常固件不回提示符。
         for _ in range(4096):
+            if time.monotonic() - t0 > deadline_s:
+                raise NanoVNADriverError(
+                    f"命令 {command!r} 超时：{deadline_s}s 内未收到提示符"
+                    f"（已收 {len(lines)} 行）。设备无响应或固件异常，"
+                    f"请检查连接/供电；如确需更久可放宽 deadline_s。")
             time.sleep(read_timeout)
             raw = self._transport.readline()
             if not raw:
