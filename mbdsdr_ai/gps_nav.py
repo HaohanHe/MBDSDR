@@ -406,12 +406,19 @@ def pvt_solve(observations: Sequence[Dict[str, Any]],
               b0: float = 0.0,
               max_iter: int = 12,
               conv_m: float = 1e-6,
+              resid_floor_m: float = 1e-6,
               ) -> Dict[str, Any]:
     """多星伪距 → PVT 迭代最小二乘（收敛判据显式，残差如实输出）。
 
     observations 每项：{"pr_m": 伪距, "sat_pos_ecef_m": [x,y,z]}。
     未知量 (x, y, z, b_rcv·c)：Δρ = H·Δx，H = [单位视线向量, 1]。
     不足 4 星如实报错（4 星定三维+钟差）；不收敛报迭代过程不产出位置。
+
+    收敛判据（双条件，任一成立即收敛）：
+    - 位置步长 < conv_m（默认 1e-6 m）；
+    - 残差 RMS < resid_floor_m（默认 1e-6 m）——自洽数据迭代到
+      机器精度后步长只在浮点噪声平台抖动（Linux/Windows 噪声
+      幅度不同，2026-11-01 CI 实测），残差地板是更本质的判据。
     """
     if len(observations) < 4:
         raise ValueError(
@@ -441,28 +448,37 @@ def pvt_solve(observations: Sequence[Dict[str, Any]],
         x = x + dx[:3]
         b = b + float(dx[3])
         step_m = float(np.linalg.norm(dx[:3]))
+        resid_rms = float(np.sqrt(np.mean(resid ** 2)))
         history.append({"iter": it, "step_m": step_m,
-                        "resid_rms_m": float(np.sqrt(np.mean(resid ** 2)))})
+                        "resid_rms_m": resid_rms})
         if step_m < float(conv_m):
-            los = sats - x[None, :]
-            rng = np.linalg.norm(los, axis=1)
-            final_resid = pr - (rng + b)
-            return {
-                "pos_ecef_m": [float(v) for v in x],
-                "clock_bias_m": float(b),
-                "clock_bias_s": float(b) / C_LIGHT,
-                "converged": True,
-                "iterations": it,
-                "residual_m": [float(v) for v in final_resid],
-                "residual_rms_m": float(np.sqrt(np.mean(final_resid ** 2))),
-                "gdop": float(np.sqrt(np.trace(
-                    np.linalg.inv(h_mat.T @ h_mat)))),
-                "history": history,
-                "conv_criteria": f"位置步长 < {conv_m} m",
-            }
+            criteria = f"位置步长 < {conv_m} m"
+        elif resid_rms < float(resid_floor_m):
+            criteria = (f"残差 RMS {resid_rms:.3e} m < {resid_floor_m} m 地板"
+                        "（自洽数据到机器精度，步长只剩浮点噪声抖动）")
+        else:
+            continue
+        los = sats - x[None, :]
+        rng = np.linalg.norm(los, axis=1)
+        final_resid = pr - (rng + b)
+        return {
+            "pos_ecef_m": [float(v) for v in x],
+            "clock_bias_m": float(b),
+            "clock_bias_s": float(b) / C_LIGHT,
+            "converged": True,
+            "iterations": it,
+            "residual_m": [float(v) for v in final_resid],
+            "residual_rms_m": float(np.sqrt(np.mean(final_resid ** 2))),
+            "gdop": float(np.sqrt(np.trace(
+                np.linalg.inv(h_mat.T @ h_mat)))),
+            "history": history,
+            "conv_criteria": criteria,
+        }
     raise ValueError(
         f"{max_iter} 次迭代未收敛（末步长 {history[-1]['step_m']:.3e} m ≥ "
-        f"{conv_m} m）——伪距/卫星位置可能不一致，不产出位置。history={history}")
+        f"{conv_m} m 且末残差 RMS {history[-1]['resid_rms_m']:.3e} m ≥ "
+        f"{resid_floor_m} m）——伪距/卫星位置可能不一致，不产出位置。"
+        f"history={history}")
 
 
 # ═══════════════════════════════════════════════════════════

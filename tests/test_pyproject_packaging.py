@@ -30,6 +30,7 @@ _IMPORT2DIST = {
     "rtlsdr": "pyrtlsdr",
     "serial": "pyserial",
     "websocket": "websocket-client",
+    "yaml": "pyyaml",
 }
 
 # 系统级硬件绑定：不走 PyPI（apt / 厂商渠道安装），诚实豁免而非假声明。

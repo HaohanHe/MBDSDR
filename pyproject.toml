@@ -41,6 +41,7 @@ viz = ["matplotlib", "Pillow", "psutil"]
 desktop = ["PySide6"]
 llm = ["tiktoken"]
 net = ["websocket-client", "websockets", "zstandard"]
+configs = ["PyYAML"]  # frame_layout_tool 布局表 YAML 面（可选，缺失显式报错）
 test = ["pytest"]
 
 [project.urls]
