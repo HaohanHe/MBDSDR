@@ -49,3 +49,6 @@ Repository = "https://github.com/mbdsdr/mbdsdr"
 [tool.setuptools.packages.find]
 include = ["mbdsdr_ai*"]
 exclude = ["mbdsdr_ai.tests*"]
+
+[tool.setuptools.package-data]
+mbdsdr_ai = ["locale/*.json"]

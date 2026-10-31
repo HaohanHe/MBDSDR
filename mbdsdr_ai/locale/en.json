@@ -1,0 +1,5 @@
+{
+  "tool.nav_bit_sync.description": "GPS 50 bps bit synchronization: locate bit boundaries by coherent accumulation and decide bits. Returns in_sync=False with an honest reason when the sync evidence is insufficient (low SNR or non-nav stream) — never fabricates synchronization.",
+  "tool.subframe_assemble.description": "Bit stream to 300-bit subframe sequence with explicit TLM/HOW/parity-chain validation per subframe; trailing partial segments are counted and reported honestly, never silently swallowed.",
+  "tool.how_validate.description": "Per-field TLM/HOW subframe validation: 0x8B preamble, parity chain, SFID range; reports TOW, alert flag and anti-spoof flag."
+}

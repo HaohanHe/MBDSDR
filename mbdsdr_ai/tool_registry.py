@@ -289,12 +289,15 @@ class ToolRegistry:
         category: str = "general",
         available: bool = True,
         write: Optional[bool] = None,
+        description_i18n: Optional[Dict[str, str]] = None,
     ):
         """注册一个工具。
 
         write：写工具标记（走 arm_manual 人工门）。None = 自动判定
         （schema 声明 arm_manual 参数，或名字命中
         :data:`WRITE_TOOL_NAME_PATTERNS`）；显式 True/False 覆盖判定。
+        description_i18n：可选 {语言码: 译文} 内联目录；``list_tools``
+        /``get_tool_definitions`` 传 language 时优先于 description。
         """
         definition = {
             "type": "function",
@@ -312,6 +315,7 @@ class ToolRegistry:
             "available": available,
             "category": category,
             "write": bool(write),
+            "description_i18n": dict(description_i18n) if description_i18n else {},
         }
 
     def is_write_tool(self, name: str) -> bool:
@@ -358,9 +362,27 @@ class ToolRegistry:
 
     # ── 工具发现 ────────────────────────────────────────
 
-    def list_tools(self, include_unavailable: bool = False) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _description_for(name: str, tool: Dict[str, Any],
+                         language: Optional[str]) -> str:
+        """解析工具描述语言：文件目录 > 内联 description_i18n > 原文。"""
+        base = tool["definition"]["function"]["description"]
+        if not language:
+            return base
+        from .i18n import load_catalog
+        catalog = load_catalog(language)
+        key = f"tool.{name}.description"
+        if key in catalog:
+            return catalog[key]
+        return tool.get("description_i18n", {}).get(language, base)
+
+    def list_tools(self, include_unavailable: bool = False,
+                   language: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         列出所有可用工具（用于 list_tools 工具和模型工具发现）。
+
+        language：传入语言码（如 "en"）时按目录/内联译文覆盖描述；
+        None 保持原行为。
         """
         result = []
         for name, tool in self.tools.items():
@@ -369,7 +391,7 @@ class ToolRegistry:
             fn = tool["definition"]["function"]
             result.append({
                 "name": name,
-                "description": fn["description"],
+                "description": self._description_for(name, tool, language),
                 "parameters": fn.get("parameters", {
                     "type": "object", "properties": {},
                 }),
@@ -378,13 +400,30 @@ class ToolRegistry:
             })
         return result
 
-    def get_tool_definitions(self, include_unavailable: bool = False) -> List[Dict[str, Any]]:
-        """获取 OpenAI function calling 格式的工具定义列表。"""
+    def get_tool_definitions(self, include_unavailable: bool = False,
+                             language: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取 OpenAI function calling 格式的工具定义列表。
+
+        language：覆盖描述（浅拷贝 definition，不改注册态）；None 原样返回。
+        """
         definitions = []
         for name, tool in self.tools.items():
             if not tool["available"] and not include_unavailable:
                 continue
-            definitions.append(tool["definition"])
+            if not language:
+                definitions.append(tool["definition"])
+                continue
+            fn = tool["definition"]["function"]
+            definitions.append({
+                "type": "function",
+                "function": {
+                    "name": fn["name"],
+                    "description": self._description_for(name, tool, language),
+                    "parameters": fn.get("parameters", {
+                        "type": "object", "properties": {},
+                    }),
+                },
+            })
         return definitions
 
     def get_tool_names(self) -> List[str]:
