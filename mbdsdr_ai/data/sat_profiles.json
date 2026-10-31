@@ -1,0 +1,70 @@
+{
+  "_schema": "mbdsdr sat_profile v1 —— 卫星参数库（算法进工具、皮进配置）",
+  "_note": "全部数值来自公开材料/公开标准：ASRTU-1 教程、GK-2A/FY-4 公开 LRIT/HRIT 格式、材料清单。代码不硬编码任何本表数值；换星换体制只换本表。",
+  "astu_1": {
+    "display_name": "ASRTU-1 阿斯图友谊号",
+    "source": "材料《教程：使用 SDR 解码阿斯图友谊号卫星遥测 Ver 0.0.3》",
+    "downlink": {
+      "freq_hz": 435400000.0,
+      "aux_freq_hz": 435390000.0,
+      "aux_note": "Orbitron 里设低 10 kHz 以保持带宽内",
+      "modulation": "bpsk",
+      "baud": 9600,
+      "rrc_alpha": 0.35,
+      "sps_at_48k": 5,
+      "resample_l_over_m": [24, 125],
+      "resample_in_hz": 250000,
+      "resample_out_hz": 48000,
+      "fll_loop_bw": 0.01,
+      "pfb_loop_bw": 0.05,
+      "rf_gain_db": 45.0,
+      "coding": {
+        "asm_word_hex": "1ACFFC1D",
+        "viterbi": {"k": 7, "rate": "1/2", "g1_oct": "133", "g2_oct": "171"},
+        "scrambler": "CCSDS PN 255B"
+      }
+    }
+  },
+  "inmarsat_std_c": {
+    "display_name": "Inmarsat STD-C (材料 A4 实收链)",
+    "source": "材料 learnSDR L20-21",
+    "downlink": {"freq_hz": 1541450000.0, "baud": 1200, "modulation": "bpsk"}
+  },
+  "gk2a_lrit": {
+    "display_name": "GK-2A LRIT",
+    "source": "GK-2A LRIT 公开格式（fengyun/gk2a 模块既有基线）",
+    "downlink": {"freq_hz": 1692140000.0, "modulation": "bpsk",
+                  "sym_rate": 128000, "rrc_alpha": 0.5,
+                  "sample_rate_hz": 1000000,
+                  "segment_header": "GK-2A 专用",
+                  "coding": {
+                    "asm_word_hex": "1ACFFC1D",
+                    "viterbi": {"k": 7, "rate": "1/2", "g1_oct": "133",
+                                "g2_oct": "171"},
+                    "scrambler": "CCSDS PN 255B"
+                  }}
+  },
+  "fy4_a_lrit": {
+    "display_name": "FY-4A LRIT",
+    "source": "FY-4 公开格式（FengYun-4.json 基线：90k sym/s, modcod=3）",
+    "downlink": {"freq_hz": 1697000000.0, "modulation": "dvbs2_qpsk",
+                  "sym_rate": 90000, "modcod": 3, "rrc_alpha": 0.25}
+  },
+  "fy4_b_lrit": {
+    "display_name": "FY-4B LRIT",
+    "source": "FY-4 公开格式（FengYun-4.json 基线：120k sym/s, modcod=10）",
+    "downlink": {"freq_hz": 1697000000.0, "modulation": "dvbs2_qpsk",
+                  "sym_rate": 120000, "modcod": 10, "rrc_alpha": 0.25}
+  },
+  "fy4_a_hrit23": {
+    "display_name": "FY-4A HRIT (1679 MHz / 1M sym/s)",
+    "source": "FY-4 公开格式（FengYun-4.json 基线）",
+    "downlink": {"freq_hz": 1679000000.0, "modulation": "dvbs2_qpsk",
+                  "sym_rate": 1000000, "modcod": 9, "rrc_alpha": 0.25}
+  },
+  "iridium_107": {
+    "display_name": "IRIDIUM 107（材料 A2/A11 定轨基线）",
+    "source": "材料定轨 demo（多普勒定轨基线星）",
+    "downlink": {"freq_hz": 1626270833.0, "modulation": "qpsk"}
+  }
+}

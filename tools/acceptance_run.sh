@@ -16,6 +16,8 @@
 #        - --event：sstv/ssdv（活动图像通联，下行频率由 --freq-sstv/--freq-ssdv
 #          从 docs/learn/phase14/P3-event-params.md 查得后传入；脚本不硬编码）
 #   ④ exp_ota_run --recordings-dir 回填 recorded 口径
+#   ③.5 协议级解码验证链：golden 合成回归（任何环境真跑）+ 可选 OTA 样本
+#        （--ota-iq 传入真实录制件才真跑，缺了诚实 SKIP；频率/布局不入脚本）
 #   ⑤ 桌面"时空视图"人工核对提示（脚本只提示，不自动验证）
 #
 # 红线：
@@ -40,6 +42,9 @@
 #        # （单位 Hz，如 435e6 仅为格式示例，脚本不内置任何活动频率）
 #   bash tools/acceptance_run.sh --event --event-modes sstv
 #        # 只跑 SSTV 一路
+#   bash tools/acceptance_run.sh --ota-iq /path/to/recording.c64 \
+#        --ota-layout astu_1_tm_example --ota-profile astu_1
+#        # 协议验证链真跑真实 OTA 录制件（缺省 golden 合成回归照跑）
 
 set -u
 set -o pipefail
@@ -74,6 +79,12 @@ CAL_REF_HZ=""    # 已知参考信号频率 Hz（校准用；空=跳过频率校
 CAL_REF_DBFS=""  # 已知参考电平 dBFS（空=跳过电平校准）
 CAL_JSON=""      # 校准结果 JSON 输出（空=用日志目录内默认）
 
+# 协议级解码验证链（③.5）的可选真实 OTA 录制件；全空 = ota 步诚实 SKIP
+OTA_IQ=""         # complex64 raw IQ 路径（空=SKIP）
+OTA_LAYOUT=""     # 帧布局名（空=protocol_verify_step 默认 astu_1_tm_example）
+OTA_PROFILE=""    # 卫星剖面名（空=无剖面透传）
+OTA_ASSERTIONS="" # JSON 字符串断言列表（空=只抽取不判定）
+
 # 模式参数（核对自 tools/onboarding/onboard.py 的 MODES 默认值）
 MODE_FREQ_adsb="1090e6";    MODE_N_adsb=""
 MODE_FREQ_apt="137.5e6";    MODE_N_apt="4800000"
@@ -95,6 +106,10 @@ while [ $# -gt 0 ]; do
     --cal-ref-hz) CAL_REF_HZ="$2"; shift 2 ;;
     --cal-ref-dbfs) CAL_REF_DBFS="$2"; shift 2 ;;
     --cal-json) CAL_JSON="$2"; shift 2 ;;
+    --ota-iq) OTA_IQ="$2"; shift 2 ;;
+    --ota-layout) OTA_LAYOUT="$2"; shift 2 ;;
+    --ota-profile) OTA_PROFILE="$2"; shift 2 ;;
+    --ota-assertions) OTA_ASSERTIONS="$2"; shift 2 ;;
     -h|--help)
       grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -261,6 +276,31 @@ else
   warn "未检测到设备 -> 三类 onboard 全部 SKIP（无硬件诚实空态）"
   for m in $RUN_MODES; do skip_onboard "$m"; done
 fi
+
+# ---------------------------------------------------------------------------
+# ③.5 协议级解码验证链（P0-6 验收脊柱）
+#   golden 步：合成 ASTU-1 golden 全链回归——纯软件、无硬件依赖，任何环境
+#             都真跑（FAIL 即真 FAIL，不 SKIP）；
+#   ota 步  ：有 --ota-iq 真实录制件就真跑同一条链；没有就 SKIP + 原因
+#             （绝不假采集）。两步都通过 tools/protocol_verify_step.py，
+#             频率/布局不入脚本硬编码。
+# ---------------------------------------------------------------------------
+info "③.5 协议级解码验证链（golden 回归 + 可选 OTA 样本）"
+PV_LOG="$LOG_DIR/protocol_verify.txt"
+{
+  "$PY" tools/protocol_verify_step.py golden
+  if [ -n "${OTA_IQ:-}" ]; then
+    "$PY" tools/protocol_verify_step.py ota --iq "$OTA_IQ" \
+      ${OTA_LAYOUT:+--layout "$OTA_LAYOUT"} \
+      ${OTA_PROFILE:+--profile "$OTA_PROFILE"} \
+      ${OTA_ASSERTIONS:+--assertions "$OTA_ASSERTIONS"}
+  else
+    "$PY" tools/protocol_verify_step.py ota
+  fi
+} > "$PV_LOG" 2>&1
+while IFS= read -r line; do
+  append_raw "$line"
+done < "$PV_LOG"
 
 # ---------------------------------------------------------------------------
 # ④ exp_ota_run 回填 recorded 口径

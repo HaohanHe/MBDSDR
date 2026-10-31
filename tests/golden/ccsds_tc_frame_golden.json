@@ -1,0 +1,23 @@
+{
+ "_provenance": "CCSDS TC 帧 golden：由 mbdsdr_ai.tc_uplink.tc_build_frame 生成（编码侧单源，无手抄）；解析侧逐字段 + CRC 断言钉扎实现，任一侧漂移本文件对拍即红。头布局为 CCSDS 232.0-B 公开标准（本仓 6 字节口径：5 字节主头 + 1 字节保留，见 frame_layouts.json ccsds_tc_classic）。",
+ "icd_reference": "CCSDS 232.0-B TC 传输帧（公开标准）",
+ "input": {
+  "data_hex": "DEADBEEF0102030405060708090A0B0C0D",
+  "spacecraft_id": 341,
+  "virtual_channel_id": 3,
+  "bypass": 0,
+  "ctrl_cmd": 1,
+  "frame_seq": 42
+ },
+ "frame_hex": "11550C182A00DEADBEEF0102030405060708090A0B0C0DCA35",
+ "expected_fields": {
+  "tfvn": 0,
+  "bypass": 0,
+  "ctrl_cmd": 1,
+  "spacecraft_id": 341,
+  "virtual_channel_id": 3,
+  "frame_length_field": 24,
+  "frame_seq": 42
+ },
+ "n_bytes": 25
+}

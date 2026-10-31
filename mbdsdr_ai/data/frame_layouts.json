@@ -1,0 +1,31 @@
+{
+  "_schema": "mbdsdr frame_layout_spec v1 —— 帧布局库（同步字/字段布局/CRC 一律配置注入）",
+  "_note": "字段定义支持：name/offset(字节)/len(字节)/type(uint8..uint64/int8..int64_be|_le/hex/ascii)/scale/offset_val/unit/bit_offset/bit_len(可选位级)。CRC 由 crc 字段指名（名字必须能在 mbdsdr_ai.crc 预设表里找到）。",
+  "astu_1_tm_example": {
+    "profile": "astu_1",
+    "honesty": "ASRTU-1 教程只给到 CCSDS TM 体制（ASM+卷积+扰码），未公开帧内字段布局——本布局是示例布局，用于验证字段抽取引擎，不是该星真实遥测格式",
+    "sync": {"type": "asm", "hex": "1ACFFC1D"},
+    "crc": {"name": "crc16_ccitt_false", "cover": "payload"},
+    "fields": [
+      {"name": "battery_mv", "offset": 0, "len": 2, "type": "uint16_be", "scale": 1.0, "unit": "mV"},
+      {"name": "temp_dc", "offset": 2, "len": 2, "type": "int16_be", "scale": 0.1, "unit": "degC"},
+      {"name": "mode", "offset": 4, "len": 1, "type": "uint8", "scale": 1.0, "unit": ""},
+      {"name": "seq", "offset": 5, "len": 4, "type": "uint32_be", "scale": 1.0, "unit": ""},
+      {"name": "callsign", "offset": 9, "len": 6, "type": "ascii"},
+      {"name": "spare_hex", "offset": 15, "len": 4, "type": "hex"}
+    ]
+  },
+  "ccsds_tc_classic": {
+    "honesty": "CCSDS TC 经典帧（公开标准 CCSDS 232.0-B）：6 字节帧头 + 数据域 + 16bit CRC（CRC-16/CCSDS，poly 0x1021，初值 0xFFFF，MSB 先行，无反射无终异或）",
+    "sync": {"type": "cltu_start", "hex": "EB90"},
+    "crc": {"name": "crc16_ccsds", "cover": "header_and_data"},
+    "header": {
+      "version": 0, "bypass": 0, "ctrl_cmd": 0, "spare": 0,
+      "spacecraft_id": 0, "virtual_channel_id": 0, "frame_length_note": "帧长字段 = 总字节数 - 1"
+    },
+    "fields": [
+      {"name": "frame_header_hex", "offset": 0, "len": 6, "type": "hex"},
+      {"name": "data", "offset": 6, "len": -1, "type": "hex"}
+    ]
+  }
+}

@@ -181,6 +181,9 @@ def crc_residue_ok(data_with_crc: BytesLike, p: CrcParams) -> bool:
 # ─────────────────────────────────────────────────────────────
 CRC16_X25 = CrcParams(16, 0x1021, 0xFFFF, True, True, 0xFFFF, "crc16_x25")
 CRC16_CCITT_FALSE = CrcParams(16, 0x1021, 0xFFFF, False, False, 0x0000, "crc16_ccitt_false")
+#: CCSDS TC 帧校验（CCSDS 232.0-B：G(x)=x^16+x^12+x^5+1，初值全 1，
+#: MSB 先行，无反射无终异或——与 CCITT-FALSE 同参数，别名单列以名实相符）
+CRC16_CCSDS = CrcParams(16, 0x1021, 0xFFFF, False, False, 0x0000, "crc16_ccsds")
 CRC16_CCITT_DAB = CrcParams(16, 0x1021, 0xFFFF, False, False, 0xFFFF, "crc16_ccitt_dab")
 CRC16_ACARS = CrcParams(16, 0x1021, 0x0000, True, True, 0x0000, "crc16_acars")
 CRC16_M17 = CrcParams(16, 0x5935, 0xFFFF, False, False, 0x0000, "crc16_m17",
@@ -195,6 +198,7 @@ def _preset(name: str) -> CrcParams:
     table = {
         "crc16_x25": CRC16_X25,
         "crc16_ccitt_false": CRC16_CCITT_FALSE,
+        "crc16_ccsds": CRC16_CCSDS,
         "crc16_ccitt_dab": CRC16_CCITT_DAB,
         "crc16_acars": CRC16_ACARS,
         "crc16_m17": CRC16_M17,

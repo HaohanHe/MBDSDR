@@ -947,6 +947,59 @@ class ToolRegistry:
         # 实际实现见 mbdsdr_ai/fec.py
         self.register_fec_tools()
 
+        # ── P0 能力面：卫星参数库/帧布局配置 + GPS 导航电文/PVT ──
+        # 实际实现见 mbdsdr_ai/sat_profile.py、mbdsdr_ai/gps_nav.py
+        self.register_p0_capability_tools()
+
+    def register_p0_capability_tools(self):
+        """注册 P0 能力积木（算法进工具、皮进配置）。
+
+        sat_profile：卫星参数库（freq/symrate/coding 全在 data/*.json，
+        代码零硬编码卫星数值）；gps_nav：GPS LNAV 电文解码/星历解算/PVT。
+        """
+        try:
+            from . import sat_profile as SP
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("sat_profile 不可用: %s", e)
+            return
+        SP.register_tool_registry(self)
+        try:
+            from . import gps_nav as GN
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("gps_nav 不可用: %s", e)
+            return
+        GN.register_tool_registry(self)
+        try:
+            from . import df_position as DF
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("df_position 不可用: %s", e)
+            return
+        DF.register_tool_registry(self)
+        try:
+            from . import tc_uplink as TC
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("tc_uplink 不可用: %s", e)
+            return
+        TC.register_tool_registry(self)
+        try:
+            from . import verify_chain as VC
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("verify_chain 不可用: %s", e)
+            return
+        VC.register_tool_registry(self)
+        try:
+            from . import bch_codecs as BCH
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("bch_codecs 不可用: %s", e)
+            return
+        BCH.register_tool_registry(self)
+
     def register_fec_tools(self):
         """注册差分编解码积木工具（fec.DifferentialEncoder 的薄包装）。
 

@@ -320,6 +320,19 @@ def _step_from_raw(raw: dict) -> dict:
         item["key_output"] = _tail(log)
         item["recordings_dir"] = str(raw.get("recordings_dir", ""))
 
+    elif sid in ("protocol_golden", "protocol_ota"):
+        # P0-6 协议级解码验证链：raw 行由 tools/protocol_verify_step.py 直给
+        # status/reason/detail（该 CLI 自身跑验证链，shell 不做二次解释）
+        st = str(raw.get("status", "FAIL"))
+        item["status"] = st if st in ALLOWED_STATUS else "FAIL"
+        if item["status"] == "SKIP":
+            item["skip_reason"] = str(raw.get("reason", ""))
+        item["key_output"] = str(raw.get("detail") or raw.get("reason") or "")
+        if raw.get("n_pass") is not None:
+            item["key_output"] += f"（断言 PASS {raw['n_pass']} 条）"
+        if raw.get("provenance"):
+            item["key_output"] += f"[{raw['provenance']}]"
+
     else:
         # 未知步：按 shell 给的 rc 推断，绝不静默吞掉
         item["status"] = "PASS" if raw.get("rc") == 0 else "FAIL"
