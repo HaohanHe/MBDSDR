@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+# MBDSDR Python 打包元数据（缺口台账 P1「Python 无 lock/元数据」的元数据侧）。
+# 口径：可 pip 安装的是 mbdsdr_ai 智能体内核包；仓库根的 mbdsdr_ai_mcp_server.py
+# 等独立入口脚本与 tests/ 不进包。硬依赖只列主包导入链必需（numpy/scipy/
+# requests），其余第三方按功能面进 optional-dependencies 分组，
+# 依赖对账由 tests/test_pyproject_packaging.py 双向钉住。
+# 版本与 cpp/CMakeLists.txt 的 project(mbdsdr VERSION x.y.z) 对齐，
+# tests/test_pyproject_packaging.py 钉住一致性与依赖对账。
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mbdsdr-ai"
+version = "0.2.0"
+description = "MBDSDR AI 智能体内核：LLM 工具面 / 工作流引擎 / 协议解码（AI-defined SDR）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "MBDSDR contributors" }]
+keywords = ["SDR", "MCP", "LLM", "radio", "DSP"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "requests",
+]
+
+# 懒加载/可选功能面：缺了不影响 mbdsdr_ai 主包导入，缺哪个只废哪条功能路径。
+# 分组按功能面；系统级硬件绑定（SoapySDR / hackrf / uhd）不走 PyPI，靠
+# apt/厂商渠道安装，见 tests/test_pyproject_packaging.py 的诚实豁免清单。
+[project.optional-dependencies]
+hardware = ["pyserial", "pyrtlsdr", "pylibiio", "pyvisa", "sounddevice"]
+satellite = ["sgp4", "skyfield", "jplephem", "astropy"]
+viz = ["matplotlib", "Pillow", "psutil"]
+desktop = ["PySide6"]
+llm = ["tiktoken"]
+net = ["websocket-client", "websockets", "zstandard"]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/mbdsdr/mbdsdr"
+
+[tool.setuptools.packages.find]
+include = ["mbdsdr_ai*"]
+exclude = ["mbdsdr_ai.tests*"]

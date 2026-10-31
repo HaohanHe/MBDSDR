@@ -62,7 +62,12 @@ endif()
 # P3 #73: local memory store links the system SQLite C library (FTS5 built in
 # on distro builds). find_library keeps it portable; hard failure only if the
 # system truly lacks libsqlite3.
-find_library(SQLite3_LIBRARY NAMES sqlite3)
+# HINTS：Windows/MinGW 上 find_library 默认不搜编译器的隐式链接目录，而
+# MinGW 工具链自带 libsqlite3.a 就在 <toolchain>/lib（2026-10-31 从零
+# configure 实测 NOTFOUND）；补上隐式链接目录与 $MINGW_PREFIX/lib 后，
+# Linux 系统库路径不受影响、Windows 免手工 -DSQLite3_LIBRARY。
+find_library(SQLite3_LIBRARY NAMES sqlite3
+    HINTS ${CMAKE_CXX_IMPLICIT_LINK_DIRECTORIES} $ENV{MINGW_PREFIX}/lib)
 if(NOT SQLite3_LIBRARY)
     message(FATAL_ERROR "system libsqlite3 (with FTS5) is required for the memory store")
 endif()
@@ -1983,3 +1988,26 @@ get_property(MBDSDR_ALL_CTESTS DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY 
 if(MBDSDR_ALL_CTESTS)
   set_property(TEST ${MBDSDR_ALL_CTESTS} APPEND PROPERTY ENVIRONMENT "MBDSDR_NULL_AUDIO=1")
 endif()
+
+# ── install() / CPack：产品交付面（缺口台账 P0「零安装/打包」）─────────────
+# 只装两个交付可执行文件（mbdsdr 桌面 / mbdsdr_mcp headless）+ i18n + 许可证
+# 文档；数百个测试目标与截图工具不进安装树。Qt 运行库随平台自理：
+#   Windows：windeployqt 收 DLL（scripts/package_windows.ps1 一键打包）；
+#   Linux：发行版 Qt 运行库（libqt6* 由包管理器安装）。
+install(TARGETS mbdsdr mbdsdr_mcp RUNTIME DESTINATION bin)
+if(Qt6LinguistTools_FOUND)
+  # 与运行时 qmSearchDirs(appDir/i18n) 同口径（core/l10n.cpp）
+  install(FILES ${MBDSDR_QM_FILES} DESTINATION bin/i18n)
+endif()
+install(FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../NOTICE.md
+  DESTINATION share/doc/mbdsdr)
+
+set(CPACK_PACKAGE_NAME "mbdsdr")
+set(CPACK_PACKAGE_VENDOR "MBDSDR")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MBDSDR - AI-defined SDR desktop receiver (C++/Qt)")
+set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE)
+set(CPACK_GENERATOR "ZIP;TGZ")
+include(CPack)

@@ -110,12 +110,33 @@ sudo apt-get install -y qt6-base-dev qt6-base-dev-tools qt6-multimedia-dev \
 
 ```bash
 cd cpp
-cmake -S . -B build
+cmake -S . -B build        # 也支持 CMakePresets：cmake --preset default
 cmake --build build -j$(nproc)
 ./build/mbdsdr
 ```
 
 没有 RTL-SDR 设备时自动切到测试信号（界面标注"测试信号（非硬件）"）。
+
+### Windows 从零构建与打包（MinGW）
+
+```powershell
+# 依赖：Qt 6.8（mingw_64）+ MinGW 工具链 + CMake 3.16+，在 PATH 或显式前缀
+cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/mingw_64
+cmake --build build -j
+.\build\mbdsdr.exe
+```
+
+一键打便携包（构建 + `cmake --install` + `windeployqt` 收 Qt DLL + 压 zip）：
+
+```powershell
+# 仓库根目录
+.\scripts\package_windows.ps1 -QtBin C:\Qt\6.8.2\mingw_64\bin
+# 产物：cpp/build/dist/mbdsdr-<版本>-win64-portable.zip（解压即用，无需装 Qt）
+```
+
+`cmake --install build --prefix <dir>` 与 `cpack -G ZIP`（在 build 目录内）同样可用：
+安装树只含交付物（`bin/mbdsdr`、`bin/mbdsdr_mcp`、`bin/i18n/*.qm`、许可证文档），
+数百个测试目标不进安装树；Qt 运行库由 windeployqt（Windows）或系统包（Linux）自理。
 
 ## 测试
 
@@ -124,7 +145,7 @@ LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib:/home/user/.local/lib \
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
 
-ctest 全量 **155 个测试目标**（2026-10-20 实测 155/155 全绿）：dsp 域（fft /
+ctest 全量 **158 个测试目标**（2026-10-31 实测 158/158 全绿）：dsp 域（fft /
 peak_detector / channelizer / chain / demod / demod_e2e / noise_blanker /
 adsb_cpr …）、ai 域（agent / tool_schema / cross_golden / l10n / freq_input …）、
 control/engine 域（control_hub / control_http_e2e / engine_* …）、UI 域
