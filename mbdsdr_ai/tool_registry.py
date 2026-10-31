@@ -971,6 +971,13 @@ class ToolRegistry:
             logger.warning("cma_equalizer 不可用: %s", e)
             return
         CMA.register_tool_registry(self)
+        try:
+            from . import gps_bit_sync as GBS
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("gps_bit_sync 不可用: %s", e)
+            return
+        GBS.register_tool_registry(self)
 
     def register_p0_capability_tools(self):
         """注册 P0 能力积木（算法进工具、皮进配置）。
