@@ -999,6 +999,13 @@ class ToolRegistry:
             logger.warning("golden_regression 不可用: %s", e)
             return
         GR.register_tool_registry(self)
+        try:
+            from . import df_amplitude as DFA
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("df_amplitude 不可用: %s", e)
+            return
+        DFA.register_tool_registry(self)
 
     def register_p0_capability_tools(self):
         """注册 P0 能力积木（算法进工具、皮进配置）。
