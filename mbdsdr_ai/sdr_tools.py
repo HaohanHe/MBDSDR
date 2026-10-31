@@ -120,6 +120,10 @@ def register_sdr_tools(agent):
     # 来源: multimon-ng pocsag.c/bch.c/demod_afsk12.c/demod_dtmf.c/demod_zvei1.c
     register_multimon_tools(agent.tool_registry)
 
+    # NanoVNA 天线测量面（2026-10-23 真机 SOLT 战役验证的后端注册暴露）
+    from .vna_tools import register_vna_tools
+    register_vna_tools(agent.tool_registry)
+
     agent.tool_registry.register(
         name="sdr_plan",
         description="把一个多步任务拆成步骤计划，先写下来再动手。长任务/多工具任务前先调用本工具列步骤，防止执行中途漂移。步骤用短字符串数组传入。",
