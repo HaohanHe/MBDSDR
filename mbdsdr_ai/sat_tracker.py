@@ -30,7 +30,15 @@ from __future__ import annotations
 import os
 from typing import Optional, List, Dict, Sequence
 
-from skyfield.api import EarthSatellite, Time
+try:
+    from skyfield.api import EarthSatellite, Time
+    _HAS_SKYFIELD = True
+except ImportError:  # skyfield 属 satellite 可选依赖组；缺它模块仍可导入
+    EarthSatellite = None  # type: ignore[assignment,misc]
+    Time = None  # type: ignore[assignment,misc]
+    _HAS_SKYFIELD = False
+
+from .sat_passes import _require_skyfield  # noqa: E402  (统一的诚实报错口径)
 
 # 复用 sat_passes 已经过验证的核心：地面站数据类、过境预测、TLE 解析、
 # 站心方位/仰角/斜距/径向速度计算、光速常量。本模块不重写坐标数学。

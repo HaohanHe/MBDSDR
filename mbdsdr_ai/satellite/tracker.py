@@ -22,7 +22,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from sgp4.api import Satrec
+try:
+    from sgp4.api import Satrec
+    _HAS_SGP4 = True
+except ImportError:  # sgp4 属 satellite 可选依赖组；缺它模块仍可导入
+    Satrec = None  # type: ignore[assignment,misc]
+    _HAS_SGP4 = False
 
 # 复用上级包 orbit.py 的坐标链（SGP4/GMST 标准实现）
 from .. import orbit  # mbdsdr_ai.orbit
@@ -76,6 +81,7 @@ class SatelliteTracker:
 
     def __init__(self, name: str, line1: str, line2: str,
                  norad: int = 0):
+        orbit._require_sgp4()  # sgp4 缺失时诚实报错（复用上级包统一口径）
         self.name = name
         self.line1 = line1
         self.line2 = line2

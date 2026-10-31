@@ -30,7 +30,20 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple
 
-from sgp4.api import Satrec, jday
+try:
+    from sgp4.api import Satrec, jday
+    _HAS_SGP4 = True
+except ImportError:  # sgp4 属 satellite 可选依赖组；缺失时用到才诚实报错
+    Satrec = None  # type: ignore[assignment,misc]
+    jday = None  # type: ignore[assignment]
+    _HAS_SGP4 = False
+
+
+def _require_sgp4() -> None:
+    if not _HAS_SGP4:
+        raise ImportError(
+            "sgp4 未安装：过境时间线需要它（pip install sgp4，"
+            "或 pip install 'mbdsdr_ai[satellite]'）")
 
 # 复用 new_spacetime 里已经写好的授时 / GNSS 解析能力（解耦：不依赖 TLE 模块）
 try:
@@ -219,6 +232,7 @@ class TimelineEngine:
         frequencies : dict, optional
             ``{name: 下行频率 Hz}``，用于多普勒计算。
         """
+        _require_sgp4()
         frequencies = frequencies or {}
         obs_ecef = _observer_ecef(observer_lat, observer_lon, observer_alt)
         now = datetime.now(timezone.utc)

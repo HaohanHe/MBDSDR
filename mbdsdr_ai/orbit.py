@@ -25,7 +25,21 @@ import urllib.request
 import ssl
 from typing import Dict, List, Any, Optional, Tuple
 
-from sgp4.api import Satrec, jday
+try:
+    from sgp4.api import Satrec, jday
+    _HAS_SGP4 = True
+except ImportError:  # sgp4 属 satellite 可选依赖组；主链（sdr_tools→orbit）须可无它导入
+    Satrec = None  # type: ignore[assignment,misc]
+    jday = None  # type: ignore[assignment]
+    _HAS_SGP4 = False
+
+
+def _require_sgp4() -> None:
+    """sgp4 缺失时给出可操作的诚实报错（而非 AttributeError: NoneType）。"""
+    if not _HAS_SGP4:
+        raise ImportError(
+            "sgp4 未安装：TLE 传播需要它（pip install 'mbdsdr_ai[satellite]'"
+            " 或 pip install sgp4）")
 
 # WGS-72 椭球参数（SGP4/SDP4 标准，Spacetrack Report #3）。
 # SGP4 内核全程 WGS-72，站心椭球必须一致，否则 ECEF 站位置与卫星
@@ -193,6 +207,7 @@ def _state_from_satrec(
     路线 (a)：把卫星 TEME 转到 ECEF（与把地面站转到 TEME 互为逆，数学等价）。
     GMST 折叠式见 _gmst_days。
     """
+    _require_sgp4()
     jd = int(jd_utc)
     fr = jd_utc - jd
     e, r_teme, v_teme = sat.sgp4(jd, fr)
@@ -255,6 +270,7 @@ def compute_satellite_state(
 
     when: unix 秒；默认 now。
     """
+    _require_sgp4()
     catnr = BUILTIN_SATS.get(satellite_name)
     if catnr is None:
         return None
@@ -280,6 +296,7 @@ def doppler_correction(
     observer_alt: float = 0.0,
 ) -> Dict[str, Any]:
     """真视线速度多普勒：f_rx = f_tx * (1 - v_los/c)（远离为正）。"""
+    _require_sgp4()
     st = compute_satellite_state(satellite_name, observer_lat, observer_lon, observer_alt)
     if st is None:
         return {"error": f"无法计算卫星 {satellite_name} 位置（TLE 不可用或不在内置列表）"}
@@ -369,6 +386,7 @@ def predict_passes(
          原固定 30s 步长的 ±15s / ~7° 误差）；
       c) 上升沿 = AOS，下降沿 = LOS；pass 内 2s 细采样找最大仰角与多普勒范围。
     """
+    _require_sgp4()
     coarse_step = 60.0   # 粗扫量级（~0.5min）
     fine_step = 2.0      # pass 内采样步长，找中天/多普勒极值
     t0 = time.time()

@@ -19,7 +19,12 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from PIL import Image
+try:
+    from PIL import Image
+    _HAS_PIL = True
+except ImportError:  # Pillow 属 viz 可选依赖组；缺它模块仍可导入
+    Image = None  # type: ignore[assignment]
+    _HAS_PIL = False
 
 __all__ = [
     "LRPT_SEGMENT_COLS",
@@ -163,6 +168,10 @@ def save_png(img: np.ndarray, path: str, width: Optional[int] = None) -> str:
     """
     if img.size == 0:
         raise ValueError("空图像不能保存 PNG（诚实空态）")
+    if not _HAS_PIL:
+        raise ImportError(
+            "Pillow 未安装：PNG 渲染需要它（pip install 'mbdsdr_ai[viz]'"
+            " 或 pip install Pillow）")
     pil_img = Image.fromarray(img, mode="L")
     if width is not None and width != img.shape[1]:
         ratio = width / img.shape[1]

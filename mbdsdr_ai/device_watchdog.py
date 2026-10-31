@@ -21,7 +21,21 @@ import logging
 import time
 from typing import Any, Callable, Optional
 
-from PySide6.QtCore import QThread, Signal
+try:
+    from PySide6.QtCore import QThread, Signal
+    _HAS_QT = True
+except ImportError:  # PySide6 属 desktop 可选依赖组；缺它模块仍可导入，实例化时报错
+    _HAS_QT = False
+
+    class QThread:  # type: ignore[no-redef]
+        """占位基类：仅保证类定义可求值，不模拟任何 Qt 行为。"""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    def Signal(*args: Any, **kwargs: Any) -> None:  # type: ignore[no-redef]
+        """占位信号工厂：返回 None，仅保证类体可求值。"""
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +82,10 @@ class DeviceWatchdog(QThread):
             ping_fn: 可选的自定义探测函数 ``ping_fn(backend) -> bool``；
                 不传则使用默认的 ``backend.get_status().connected`` 探测。
         """
+        if not _HAS_QT:
+            raise ImportError(
+                "PySide6 未安装：DeviceWatchdog 是 Qt 看门狗线程，需要它"
+                "（pip install 'mbdsdr_ai[desktop]' 或 pip install PySide6）")
         super().__init__(parent)
         self._backend = backend
         self._ping_ms = max(1, int(ping_interval_ms))

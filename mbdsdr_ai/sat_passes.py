@@ -39,7 +39,23 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence, Tuple
 
-from skyfield.api import EarthSatellite, Topos, Time, load as _sky_load
+try:
+    from skyfield.api import EarthSatellite, Topos, Time, load as _sky_load
+    _HAS_SKYFIELD = True
+except ImportError:  # skyfield 属 satellite 可选依赖组；缺它模块仍可导入
+    EarthSatellite = None  # type: ignore[assignment,misc]
+    Topos = None  # type: ignore[assignment,misc]
+    Time = None  # type: ignore[assignment,misc]
+    _sky_load = None  # type: ignore[assignment]
+    _HAS_SKYFIELD = False
+
+
+def _require_skyfield() -> None:
+    """skyfield 缺失时给出可操作的诚实报错（而非 AttributeError: NoneType）。"""
+    if not _HAS_SKYFIELD:
+        raise ImportError(
+            "skyfield 未安装：过境预报/多普勒曲线需要它"
+            "（pip install 'mbdsdr_ai[satellite]' 或 pip install skyfield）")
 
 __all__ = [
     "GroundStation",
@@ -70,6 +86,7 @@ _BISECT_TOL_S = 0.5       # 二分收敛容差（秒），LEO 仰角变化 ~0.5�
 def make_timescale():
     """返回 skyfield 时间系统（缓存，避免重复加载 ephemeris/UT1 表）。"""
     if not hasattr(make_timescale, "_ts"):
+        _require_skyfield()
         make_timescale._ts = _sky_load.timescale()
     return make_timescale._ts
 
