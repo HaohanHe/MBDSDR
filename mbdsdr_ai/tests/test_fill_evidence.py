@@ -118,9 +118,18 @@ def test_cli_input_evidence(tmp_path):
 def test_cli_bad_field(tmp_path):
     import json, subprocess, sys, os
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    # cwd 钉死到包父目录（与 test_cli_input_evidence 同因）；断言要求
+    # 诚实空态文案而非裸退出码——否则子进程 import 失败也会"通过"。
+    cwd = str(Path(__file__).resolve().parents[2])
     (tmp_path / "bad.json").write_text(json.dumps({"frequencies_hz": [], "S11": []}),
                                        encoding="utf-8")
     r = subprocess.run([sys.executable, "-m", "mbdsdr_ai.fill_evidence_example",
                         "--input", str(tmp_path / "bad.json")],
-                       capture_output=True, text=True, encoding="utf-8", env=env)
-    assert r.returncode == 1 or "空" in (r.stdout + r.stderr)
+                       capture_output=True, text=True, encoding="utf-8", env=env,
+                       cwd=cwd)
+    assert r.returncode == 1
+    # 该输入（缺 S21）走"缺字段"诚实拒绝路径（fill_evidence_example
+    # SystemExit 文案）；文案断言同时防裸退出码假阳性（子进程 import
+    # 失败也会退出码 1 但不带此文案）。
+    assert "缺字段" in (r.stdout + r.stderr), \
+        f"未见诚实错误文案（子进程可能未真正跑到 CLI）: {r.stderr[-500:]}"

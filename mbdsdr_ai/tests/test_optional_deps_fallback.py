@@ -91,10 +91,14 @@ print(json.dumps({"failures": failures, "honesty": honesty}))
 
 
 def _run_runner(blocked: list) -> dict:
+    import os
+    # 钉 UTF-8：子进程 import 全包时模块可能往 stdout 打 CJK 日志，
+    # text 模式按 locale(GBK) 解码会 UnicodeDecodeError（假失败）。
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     proc = subprocess.run(
         [sys.executable, "-c", _RUNNER, json.dumps(blocked)],
-        capture_output=True, text=True, timeout=600,
-        cwd=str(_PKG_ROOT.parent),
+        capture_output=True, text=True, encoding="utf-8", timeout=600,
+        cwd=str(_PKG_ROOT.parent), env=env,
     )
     if proc.returncode != 0:
         pytest.fail(
