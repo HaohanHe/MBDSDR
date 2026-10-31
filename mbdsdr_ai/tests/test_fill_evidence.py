@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 import math
+from pathlib import Path
 
 from mbdsdr_ai.fill_evidence_example import analyze_resonance_py
 
@@ -95,13 +96,18 @@ def test_cli_input_evidence(tmp_path):
     # capture_output(text=True) 的读取线程崩 UnicodeDecodeError——
     # 2026-10-15 踩过，此处钉死消除隐式耦合。
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    # 子进程 cwd 钉死到包父目录：-m 依赖 sys.path[0]=cwd 找到 mbdsdr_ai，
+    # 从包目录内启动 pytest（cwd=mbdsdr_ai）会让子进程 import 失败——
+    # 2026-10-31 踩过，与父进程启动目录解耦。
+    cwd = str(Path(__file__).resolve().parents[2])
     sw = tmp_path / "sw.json"
     subprocess.run([sys.executable, "-m", "mbdsdr_ai.nanovna_dump", "--selftest",
-                    "--out", str(sw)], check=True, capture_output=True, env=env)
+                    "--out", str(sw)], check=True, capture_output=True, env=env,
+                   cwd=cwd)
     out = subprocess.run([sys.executable, "-m", "mbdsdr_ai.fill_evidence_example",
                           "--input", str(sw), "--format", "json"],
                          check=True, capture_output=True, text=True,
-                         encoding="utf-8", env=env)
+                         encoding="utf-8", env=env, cwd=cwd)
     row = json.loads(out.stdout)
     for k in ("VSWR", "回波损耗_dB", "谐振_fr_MHz", "谐振_ESR_ohm",
               "电缆长度_m", "L_nH", "C_pF", "滤波器形态"):
