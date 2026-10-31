@@ -6,6 +6,27 @@
 
 ## 1. 这是什么
 
+### 安装与启动
+
+```bash
+# 硬依赖只有 numpy / scipy / requests；其余按功能面可选（缺失时相应功能
+# 诚实报错，主包照常导入——锚点见 tests/test_optional_deps_fallback.py）
+pip install -e .                                  # 核心
+pip install -e '.[satellite]'                     # sgp4/skyfield/jplephem/astropy：过境预报与 TLE 传播
+pip install -e '.[hardware]'                      # pyserial/pyrtlsdr/pylibiio/pyvisa/sounddevice：真机
+pip install -e '.[viz]'                           # matplotlib/Pillow/psutil：图像渲染
+pip install -e '.[desktop]'                       # PySide6：Qt 看门狗线程等桌面件
+
+# 启动（pip 安装后生成 mbdsdr-ai 命令；未安装也可用 python -m mbdsdr_ai）
+mbdsdr-ai --help
+```
+
+工具描述国际化：环境变量 `MBDSDR_LANG`（默认 `zh`）选择目录语言，
+目录为 `locale/<lang>.json` 扁平 JSON；缺键一律回退原文，不编造译文。
+`ToolRegistry.list_tools(language=...)` / `get_tool_definitions(language=...)`
+按 文件目录 > 注册时内联 `description_i18n` > 原文 的优先级覆盖工具描述
+（不传 `language` 时行为与未接线前一致）。
+
 `MBDSDRAgent` 是一个把全部 SDR 能力封装成 LLM 可调用工具（function calling）的 Python 原型内核。
 LLM 通过 `tool_registry` 调用全部注册工具（agent.py + sdr_tools.py + tool_registry 内置三处注册，
 确切规模以运行时 `tool_registry` 注册表计数为准——数字随版本浮动，不写死入文，见 AGENTS.md §1），
