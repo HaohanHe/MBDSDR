@@ -1013,6 +1013,13 @@ class ToolRegistry:
             logger.warning("interference_eval 不可用: %s", e)
             return
         IE.register_tool_registry(self)
+        try:
+            from . import fhss_dehop as FH
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("fhss_dehop 不可用: %s", e)
+            return
+        FH.register_tool_registry(self)
 
     def register_p0_capability_tools(self):
         """注册 P0 能力积木（算法进工具、皮进配置）。
