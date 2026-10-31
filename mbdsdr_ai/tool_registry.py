@@ -951,6 +951,20 @@ class ToolRegistry:
         # 实际实现见 mbdsdr_ai/sat_profile.py、mbdsdr_ai/gps_nav.py
         self.register_p0_capability_tools()
 
+        # ── P1 能力面：盲参数估计（调制识别/符号率/滚降系数）──
+        # 实际实现见 mbdsdr_ai/blind_param_est.py
+        self.register_p1_capability_tools()
+
+    def register_p1_capability_tools(self):
+        """注册 P1 能力积木（盲参数估计：调制识别/符号率/滚降系数）。"""
+        try:
+            from . import blind_param_est as BPE
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("blind_param_est 不可用: %s", e)
+            return
+        BPE.register_tool_registry(self)
+
     def register_p0_capability_tools(self):
         """注册 P0 能力积木（算法进工具、皮进配置）。
 
