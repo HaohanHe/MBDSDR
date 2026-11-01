@@ -1541,11 +1541,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             pos = self._sky_to_screen(az, alt)
             if not self._on_screen(pos):
                 continue
-            r, bright = _stars.star_draw(s.vmag, self._bortle)
+            r, bright, bloom = _stars.star_draw(s.vmag, self._bortle)
             if r <= 0:
                 continue
             cr, cg, cb = _stars.bv_to_rgb(s.bv)
             alpha = int(255 * (0.35 + 0.65 * bright))
+            # 亮星辉光（bloom）：同心圆递减 alpha，由内向外晕开
+            # （star_draw 按压缩后半径给 0..1 强度，只有最亮的星才有）。
+            if bloom > 0.0:
+                for ring in range(3):
+                    rr = r * (1.7 + 0.9 * ring)
+                    glow_a = int(70 * bloom * (0.5 ** ring))
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QBrush(QColor(cr, cg, cb, glow_a)))
+                    painter.drawEllipse(pos, rr, rr)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
             painter.drawEllipse(pos, r, r)

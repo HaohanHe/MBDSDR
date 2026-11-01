@@ -86,6 +86,59 @@ class TestHandlerWiring(unittest.TestCase):
         assert abs(v.view_state.fov_deg - 120.0) < 1e-3
 
 
+class TestHorizonViewOrientation(unittest.TestCase):
+    """地平线视图（center_alt=20°）上下方向回归钉扎。
+
+    历史 build_view_rotation = Ry(calt-90°)@Rz(caz) 只保证视中心落轴，
+    x_v 却指向仰角**减小**方向：非天顶视图整个天空颠倒（越高越画越下），
+    星/星座/地景全部上下倒置。修复后：仰角增大 → 屏幕 y 减小（上移），
+    方位东 → 屏幕右，且正反投影往返一致。
+    """
+
+    def test_altitude_increases_upward(self):
+        v = _new_view()
+        v.enter_horizon_view(0.0)          # 朝北，视中心 alt=20°
+        y0 = v._sky_to_screen(0.0, 0.0).y()
+        y10 = v._sky_to_screen(0.0, 10.0).y()
+        y40 = v._sky_to_screen(0.0, 40.0).y()
+        assert y40 < y10 < y0, \
+            f"仰角增大必须上移: alt0={y0}, alt10={y10}, alt40={y40}"
+
+    def test_horizon_below_view_center(self):
+        # 朝北仰看 20°：地平线必须落在视中心**下方**（真实构图）
+        v = _new_view()
+        v.enter_horizon_view(0.0)
+        horizon_y = v._sky_to_screen(0.0, 0.0).y()
+        _cx, cy = v._sky_center()
+        assert horizon_y > cy, f"地平线应在视中心下方: {horizon_y} <= {cy}"
+
+    def test_east_is_right_at_horizon_view(self):
+        v = _new_view()
+        v.enter_horizon_view(0.0)
+        x_w = v._sky_to_screen(270.0, 20.0).x()   # 西（同仰角）
+        x_e = v._sky_to_screen(90.0, 20.0).x()    # 东（同仰角）
+        cx, _ = v._sky_center()
+        assert x_e > cx > x_w, f"东右西左: e={x_e}, w={x_w}, cx={cx}"
+
+    def test_roundtrip_at_horizon_view(self):
+        v = _new_view()
+        v.enter_horizon_view(30.0)
+        # 取视中心（az=30, alt=20）±60° 内的点（透视 FOV=120 半视场）
+        for az, alt in [(30, 5), (60, 30), (0, 50), (350, 15)]:
+            s = v._sky_to_screen(float(az), float(alt))
+            az2, alt2 = v._screen_to_sky(s.x(), s.y())
+            assert abs(alt2 - alt) < 1.0, f"alt 往返 {alt}->{alt2}"
+            daz = abs((az2 - az + 180) % 360 - 180)
+            assert daz < 2.0, f"az 往返 {az}->{az2}"
+
+    def test_zenith_view_north_up_unchanged(self):
+        # 天顶默认视图保持北-up（旧锁定语义不因修复漂移）
+        v = _new_view()
+        cx, cy = v._sky_center()
+        pn = v._sky_to_screen(0.0, 30.0)
+        assert abs(pn.x() - cx) < 2.0 and pn.y() < cy
+
+
 class TestClickPick(unittest.TestCase):
     def test_click_object_emits_signal(self):
         v = _new_view()

@@ -99,22 +99,44 @@ def mag_to_lux(vmag: float) -> float:
     return 10.7646e4 / (R2AS * R2AS) * 10.0 ** (-0.4 * vmag)
 
 
-def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float]:
-    """返回 (屏幕半径 px, 亮度 0..1)。太暗的星 (vmag>6.5) 半径压到 0。
+# Stellarium StelSkyDrawer.cpp:420 同款小星补偿常数：半径 <1.2px 的星点
+# 按面积比 r³/1.728 补亮度（1.2³ = 1.728），否则亚像素星能量不足、
+# "亮星突兀暗星全灭"。大星则走平方根压缩，避免织女星糊屏。
+_SMALL_STAR_R = 1.2
+_SMALL_STAR_R3 = _SMALL_STAR_R ** 3      # 1.728
+# 辉光（bloom）：压缩后半径 ≥ _BLOOM_MIN_R 的亮星给 0..1 强度，由调用方
+# 画径向渐光晕；_BLOOM_MAX_R 对应强度 1 的参考半径。
+_BLOOM_MIN_R = 2.0
+_BLOOM_MAX_R = 8.0
 
-    屏幕半径按极限星等与全天最亮星等做幂律映射：
-        r = r_min + (r_max-r_min) * ((6.5-vmag)/8)^(s_relative/2)
-    映射: 极限星等 6.5 -> 0.6px, 全天最亮 (mag -1.5) -> ~2.6px。
-    bortle 越大 (光污染越重) 整体越小越暗。
+
+def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float, float]:
+    """返回 (屏幕半径 px, 亮度 0..1, 辉光强度 0..1)。不可见星全 0。
+
+    - 可见 clamp：vmag 超过光害极限星等 6.5-0.35*(bortle-3) 不画
+      （Bortle 9 裸眼极限 ~4.4 等，Stellarium 同语义）；
+    - 半径：幂律映射（原逻辑）+ 大星平方根压缩（r>1.2 后每 +1px
+      实际只增 √，StelSkyDrawer computeRCMag 同款）；
+    - 亮度：小星按 r³/1.728 补偿（StelSkyDrawer.cpp:420）；
+    - 辉光：压缩后半径 ≥2px 的亮星按半径线性给强度。
     """
-    if vmag > 6.5:
-        return 0.0, 0.0
+    limit = 6.5 - 0.35 * max(0, int(bortle) - 3)
+    if vmag > limit:
+        return 0.0, 0.0, 0.0
     s_relative = 1.1
     dim = 1.0 - 0.06 * (bortle - 3)
     frac = max(0.0, min(1.0, (6.5 - vmag) / 8.0))
     r = (0.6 + 2.0 * frac ** (s_relative / 2.0)) * dim
+    if r > _SMALL_STAR_R:
+        r = _SMALL_STAR_R + (r - _SMALL_STAR_R) ** 0.5
     brightness = max(0.0, min(1.0, frac))
-    return max(0.5, r), brightness
+    if r < _SMALL_STAR_R:
+        brightness = min(1.0, brightness * (r ** 3) / _SMALL_STAR_R3)
+    bloom = 0.0
+    if r >= _BLOOM_MIN_R:
+        bloom = min(1.0,
+                    0.4 + (r - _BLOOM_MIN_R) / (_BLOOM_MAX_R - _BLOOM_MIN_R))
+    return max(0.5, r), brightness, bloom
 
 
 def bv_to_rgb(bv: float) -> tuple[int, int, int]:

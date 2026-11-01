@@ -114,11 +114,43 @@ class TestPerspectiveProjection(unittest.TestCase):
 class TestStarsAndSatMeta(unittest.TestCase):
     def test_star_draw_monotonic(self):
         from mbdsdr_ai.skyengine.stars import star_draw
-        r_bright, b_bright = star_draw(-1.46)
-        r_faint, b_faint = star_draw(4.0)
+        r_bright, b_bright, _ = star_draw(-1.46)
+        r_faint, b_faint, _ = star_draw(4.0)
         self.assertGreater(r_bright, r_faint)
         self.assertGreater(b_bright, b_faint)
-        self.assertEqual(star_draw(8.0), (0.0, 0.0))
+        self.assertEqual(star_draw(8.0), (0.0, 0.0, 0.0))
+
+    def test_star_draw_small_star_r3_compensation(self):
+        # StelSkyDrawer.cpp:420：r<1.2 的小星亮度按 r³/1.728 补偿。
+        # 6 等星 r≈0.6px，无补偿时亮度 ≈0.06，补偿后仍可见（>0.01），
+        # 且严格小于 1 等星亮度（单调性不被补偿打破）。
+        from mbdsdr_ai.skyengine.stars import star_draw
+        _r6, b6, _ = star_draw(6.0)
+        _r1, b1, _ = star_draw(1.0)
+        self.assertGreater(b6, 0.005)
+        self.assertGreater(b1, b6)
+
+    def test_star_draw_sqrt_compression(self):
+        # 大星平方根压缩：未压缩映射 2.6px → 压缩后 1.2+√1.4 ≈ 2.38，
+        # 必须严格小于未压缩值（不会糊屏），且仍大于 3 等星。
+        from mbdsdr_ai.skyengine.stars import star_draw
+        r_bright, _, _ = star_draw(-1.46)
+        r_mid, _, _ = star_draw(3.0)
+        self.assertLess(r_bright, 2.45)
+        self.assertGreater(r_bright, r_mid)
+
+    def test_star_draw_bloom_only_bright(self):
+        from mbdsdr_ai.skyengine.stars import star_draw
+        _r, _b, bloom_sirius = star_draw(-1.46)
+        _r, _b, bloom_faint = star_draw(4.0)
+        self.assertGreater(bloom_sirius, 0.0)
+        self.assertEqual(bloom_faint, 0.0)
+
+    def test_star_draw_bortle_clamps_limit(self):
+        # 光害极限星等 clamp：Bortle 9 下 5 等星（>4.4 极限）不可见。
+        from mbdsdr_ai.skyengine.stars import star_draw
+        self.assertEqual(star_draw(5.0, bortle=9), (0.0, 0.0, 0.0))
+        self.assertGreater(star_draw(4.0, bortle=9)[0], 0.0)
 
     def test_cospar_parse(self):
         from mbdsdr_ai.skyengine.satellites import cospar_from_tle

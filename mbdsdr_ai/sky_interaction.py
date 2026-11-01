@@ -221,23 +221,49 @@ class ViewState:
 # ---------------------------------------------------------------------------
 # 视图旋转矩阵: 把 (center_az, center_alt) 方向旋转到屏幕中心 (天顶方向)。
 #
-# 视图旋转把 (center_az, center_alt) 方向映射到屏幕中心。
-#
 # 地平系约定 (celestial_geometry.vec_from_azalt):
-#   v = (cos(alt)cos(az), cos(alt)sin(az), -sin(alt)), 屏幕中心 = (0,0,-1)
+#   v = (cos(alt)cos(az), cos(alt)sin(az), -sin(alt)), +x=北, +y=东, +z=天底。
+# 投影约定 (celestial_geometry): 相机沿视图系 -z 看, x_n = 屏幕上轴,
+#   y_n = 屏幕右轴。
 #
-# 我们构造 R_view = rot_y(calt-90°) @ rot_z(caz), 使得:
-#   R_view @ vec_from_azalt(caz, calt) = (0,0,-1)
-# 推导:
-#   rot_z(caz) 把方位角转到相对方位 0:  vc -> (cos(calt), 0, -sin(calt))
-#   rot_y(calt-90°) 把仰角转到 -90°(屏幕中心): -> (0,0,-1)
+# 因此视图系三基（R 的行，v_view = R @ v_altaz）必须为：
+#   x_v = 仰角增大方向（屏幕"上"）
+#   y_v = x_v × z_v（屏幕"右"：面向视中心时右手方向）
+#   z_v = -vec(center_az, center_alt)（使视中心落在 (0,0,-1)）
+#
+# 历史实现 R = Ry(calt-90°) @ Rz(caz) 只保证视中心落轴，x_v 却指向
+# 仰角**减小**方向：center_alt<90° 时整个天空上下颠倒（越高越画越下），
+# 只有 center_alt=90°（Ry 退化为单位阵）碰巧正确。星/星座/地景全受影响。
+# 天顶是退化点（"仰角增大方向"不唯一），该处沿用旧 Rz(caz) 约定保持
+# test_perspective_mapping 的天顶北-up 语义不漂移。
 # ---------------------------------------------------------------------------
 def build_view_rotation(view: ViewState) -> np.ndarray:
     """返回 3x3 旋转矩阵 R_view, v_view = R_view @ v_altaz。"""
     caz = deg2rad(view.center_az)
     calt = deg2rad(view.center_alt)
-    # R_view = Ry(calt-90°) @ Rz(caz)
-    return rot_y(calt - math.pi / 2.0) @ rot_z(caz)
+    if abs(math.cos(calt)) < 1e-3:
+        # 天顶邻域（±0.06°）：zenith 投影方向失去意义（与天顶夹角 <0.06°，
+        # 屏幕上方向由整体姿态决定而非重力）。沿用旧 Rz(caz) 约定（屏幕上方 =
+        # 视中心方位角方向的地平方位，北 = 上 when caz=0），与
+        # test_perspective_mapping 的天顶北-up 语义一致。ViewState 把
+        # center_alt 夹到 90-1e-4°，默认天顶视图必走本分支。
+        x_v = np.array([math.cos(caz), math.sin(caz), 0.0])
+        y_v = np.array([-math.sin(caz), math.cos(caz), 0.0])
+        z_v = np.array([0.0, 0.0, 1.0])
+    else:
+        s_alt, c_alt = math.sin(calt), math.cos(calt)
+        # x_v = 天顶在垂直视中心方向上的投影（= 仰角增大方向）：
+        # 面向视中心时"抬头"的方向，含正确的南/北回倾分量。
+        x_v = np.array([-s_alt * math.cos(caz),
+                        -s_alt * math.sin(caz),
+                        -c_alt])
+        # z_v = -视中心向量：视中心映射到 (0,0,-1)（相机前方）
+        z_v = np.array([-c_alt * math.cos(caz),
+                        -c_alt * math.sin(caz),
+                        s_alt])
+        # y_v = x_v × z_v：面向视中心时的右手方向
+        y_v = np.cross(x_v, z_v)
+    return np.array([x_v, y_v, z_v])
 
 
 # ---------------------------------------------------------------------------
