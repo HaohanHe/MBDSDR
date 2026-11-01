@@ -24,7 +24,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
-    QDoubleSpinBox, QSlider, QFrame, QMenu, QSplitter, QToolTip,
+    QDoubleSpinBox, QSlider, QFrame, QMenu, QSplitter, QToolTip, QPushButton,
 )
 
 try:
@@ -560,6 +560,10 @@ class _PlotState:
         self.vfo_offset_hz = 0.0                        # VFO 中心相对调谐中心偏移
         # ---- 视图平移偏移（Ctrl 拖动 RF shift：只移视图不调谐）----
         self.view_offset_hz = 0.0
+        # ---- 调谐模式（对标 SDR++ 调谐模式按钮）----
+        # center=点击/双击重调硬件中心频率（默认）；normal=点击只移当前 VFO，
+        # 画面不动，瀑布保留多信号轨迹。
+        self.tune_mode = "center"
         # ---- Shift 拖拽新建 VFO 的橡皮筋临时矩形（频率 Hz 二元组）----
         # None = 不显示；否则 (freq_start, freq_cur) 在谱面画半透明蓝灰带。
         self.vfo_create_band: Optional[Tuple[float, float]] = None
@@ -1080,6 +1084,16 @@ class SpectrumPanel(QWidget):
             lambda v: setattr(self._state, "peak_rel_db", float(v)))
         bar.addWidget(self._peak_spin)
 
+        # 调谐模式（SDR++ 调谐模式按钮同原语；gqrx 中键 / SDR# Center 亦是）
+        self._tune_mode_btn = QPushButton("调谐:中心")
+        self._tune_mode_btn.setCheckable(True)
+        self._tune_mode_btn.setChecked(True)
+        self._tune_mode_btn.setToolTip(
+            "中心模式：点击谱面重调硬件中心频率（画面跟过去）\n"
+            "VFO 模式：点击只移动当前 VFO，画面不动（瀑布保留多信号轨迹）")
+        self._tune_mode_btn.toggled.connect(self._on_tune_mode_toggled)
+        bar.addWidget(self._tune_mode_btn)
+
         bar.addStretch(1)
 
         # 只读状态显示：当前中心频率 / span（无数据时显 --）
@@ -1154,8 +1168,12 @@ class SpectrumPanel(QWidget):
     def _set_controls_enabled(self, on: bool):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
                    self._perf_combo, self._palette_combo, self._wf_smooth_chk,
-                   self._peak_chk, self._peak_spin):
+                   self._peak_chk, self._peak_spin, self._tune_mode_btn):
             w_.setEnabled(on)
+
+    def _on_tune_mode_toggled(self, checked: bool):
+        self._state.tune_mode = "center" if checked else "normal"
+        self._tune_mode_btn.setText("调谐:中心" if checked else "调谐:VFO")
 
     # ------------------------------------------------------------------ 性能模式
     # level 0=高 / 1=均衡 / 2=低：FFT 点数、谱线数、刷新间隔三档联动。
@@ -1676,6 +1694,31 @@ class _TuningPlotMixin:
             self._press_anchor_x = event.position().x()
         self.update()
 
+    def _tune_click(self, ratio: float):
+        """单击/双击调谐（SDR++ 调谐模式语义）。
+
+        center（默认）：重调硬件中心频率，画面跟过去；
+        normal：只把当前主听 VFO 移到点击频率（按 snap 对齐），画面不动，
+        瀑布保留多信号轨迹。无主听 VFO 时退回 center 行为。
+        """
+        gen = self.state.panel.generator
+        freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+                + ratio * gen.sample_rate_hz)
+        if self.state.tune_mode == "normal":
+            mgr = self.state.panel.vfo_manager
+            vfo = mgr.current if mgr is not None else None
+            if vfo is not None:
+                interval = self.state.snap_interval
+                freq = round(freq / interval) * interval
+                vfo.center_hz = freq
+                self.state.panel.vfo_moved.emit(vfo.vfo_id, float(freq))
+                self.update()
+                return
+            # 无 VFO 可移：退回中心模式
+        gen.center_freq_hz = freq
+        snapped = self._snap_center()
+        self._emit_tuned(snapped)
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             # 橡皮筋新建 VFO 结束：按 rubber-band 区间 center/bw 创建
@@ -1732,15 +1775,10 @@ class _TuningPlotMixin:
             else:
                 y = event.position().y()
                 # 单击谱面空白处（未命中 VFO / 非 Shift 新建模式，已在 press 阶段分流）
-                # → 直接跳频到点击位置，行为与 mouseDoubleClickEvent 一致。
+                # → 调谐到点击位置（center/VFO 模式语义见 _tune_click）。
                 # 瀑布区（y > 谱面高度）不响应。
                 if y <= self._spectrum_height():
-                    gen = self.state.panel.generator
-                    freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
-                            + self._x_ratio(event) * gen.sample_rate_hz)
-                    gen.center_freq_hz = freq
-                    snapped = self._snap_center()
-                    self._emit_tuned(snapped)
+                    self._tune_click(self._x_ratio(event))
             self.update()
         elif event.button() == Qt.RightButton:
             # 右键命中 VFO → 删除菜单（contextMenuEvent）；
@@ -1755,13 +1793,9 @@ class _TuningPlotMixin:
             self.update()
 
     def mouseDoubleClickEvent(self, event):
-        # 双击直接调谐到鼠标处频率（SDR++ waterfall 行为），并对齐 snap 网格
-        gen = self.state.panel.generator
-        freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
-                + self._x_ratio(event) * gen.sample_rate_hz)
-        gen.center_freq_hz = freq
-        snapped = self._snap_center()
-        self._emit_tuned(snapped)
+        # 双击直接调谐到鼠标处频率（SDR++ waterfall 行为），
+        # center/VFO 模式语义与单击一致（_tune_click）
+        self._tune_click(self._x_ratio(event))
         self.update()
 
 
