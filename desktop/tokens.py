@@ -74,6 +74,9 @@ class DesignTokens:
             "accent":       "#919cac",   # 强调蓝灰
             "success":      "#6BA89A",
             "danger":       "#B85C5C",
+            # 频谱 Max/Min hold 线（SDR++ 双保持签名：暖橙=max 包络，冷蓝=min 包络）
+            "spectrum_max_hold": "#C87F5A",
+            "spectrum_min_hold": "#6C8EBF",
             # 浅色（default）方向：保留既有米白/蓝灰/橙
             "light_bg":       "#F5F3EF",
             "light_bg_alt":   "#FAF8F5",

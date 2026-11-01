@@ -88,6 +88,8 @@ PAL_GRID = _c["gray_400"]     # 网格/文字
 PAL_LINE = _c["accent"]       # 谱线/游标（冷蓝灰）
 PAL_PEAK = _c["success"]      # 峰值标注
 PAL_OFFLINE = _c["danger"]    # 未连接提示
+PAL_MAXHOLD = _c["spectrum_max_hold"]   # Max hold 包络线（SDR++ 同款语义）
+PAL_MINHOLD = _c["spectrum_min_hold"]   # Min hold 包络线
 
 # 瀑布图色带（低饱和，从冷到暖）
 WATERFALL_COLORS = [
@@ -150,6 +152,40 @@ class SpectrumDataGenerator:
         # 只影响瀑布显示，不影响频谱曲线；prev 存最近一次写入的瀑布行。
         self.wf_smooth = False
         self._prev_wf_row: Optional[np.ndarray] = None
+        # ---- Max/Min hold（SDR++ maxHold/minHold 复选框签名）----
+        # 开启后逐帧对 spectrum 做逐 bin 运行 max/min 包络；关闭即丢包络，
+        # 再开从头攒。None = 当前无包络（未开启或刚清空）。
+        self.show_max_hold = False
+        self.show_min_hold = False
+        self.max_hold: Optional[np.ndarray] = None
+        self.min_hold: Optional[np.ndarray] = None
+
+    # ------------------------------------------------------------------ hold
+    def set_max_hold(self, on: bool):
+        """开关 Max hold；关闭即丢包络，重开从头攒。"""
+        self.show_max_hold = bool(on)
+        if not self.show_max_hold:
+            self.max_hold = None
+
+    def set_min_hold(self, on: bool):
+        """开关 Min hold；关闭即丢包络，重开从头攒。"""
+        self.show_min_hold = bool(on)
+        if not self.show_min_hold:
+            self.min_hold = None
+
+    def _update_hold(self):
+        """把当前 spectrum 并入运行 max/min 包络（尺寸不符则重建）。"""
+        spec = self.spectrum
+        if self.show_max_hold:
+            if self.max_hold is None or len(self.max_hold) != self.num_bins:
+                self.max_hold = spec.copy()
+            else:
+                np.maximum(self.max_hold, spec, out=self.max_hold)
+        if self.show_min_hold:
+            if self.min_hold is None or len(self.min_hold) != self.num_bins:
+                self.min_hold = spec.copy()
+            else:
+                np.minimum(self.min_hold, spec, out=self.min_hold)
 
     # ------------------------------------------------------------------ 瀑布行缓冲
     def wf_row_count(self) -> int:
@@ -211,6 +247,8 @@ class SpectrumDataGenerator:
         self._wf_count = 0
         self.wf_rows_written = 0
         self._prev_wf_row = None
+        self.max_hold = None
+        self.min_hold = None
         self._reset_average()
 
     # ------------------------------------------------------------------ 状态
@@ -226,6 +264,8 @@ class SpectrumDataGenerator:
         self._wf_count = 0
         self.wf_rows_written = 0
         self._prev_wf_row = None
+        self.max_hold = None
+        self.min_hold = None
         self._reset_average()
 
     # ------------------------------------------------------------------ 窗函数
@@ -311,6 +351,7 @@ class SpectrumDataGenerator:
         # 重采样到 num_bins（max 抽取，窄脉冲不被平均抹平）
         self.spectrum = self._resample_max(power_db)
         self._has_real_data = True
+        self._update_hold()
 
         # 瀑布行：可选 IIR 时间平滑（只影响瀑布，不影响上面的频谱曲线）
         if self.wf_smooth and self._prev_wf_row is not None \
@@ -649,6 +690,7 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
         # VFO 带宽矩形（先画在谱线下方；无数据时不画，保持"未连接"干净）
         _draw_vfo_band(painter, state, spec_rect)
         _draw_spectrum(painter, state, spec_rect, line)
+        _draw_hold_lines(painter, state, spec_rect)
         _draw_peaks(painter, state, spec_rect, QColor(PAL_PEAK))
     else:
         # 无数据：空白谱面 + 红色两行提示（不画任何谱线/瀑布/峰值/VFO）
@@ -749,6 +791,40 @@ def _draw_spectrum(painter, state, rect, line_color):
     painter.drawPolygon(fillpoly)
     painter.setPen(QPen(line_color, 2))
     painter.drawPolyline(poly)
+
+
+def _draw_hold_lines(painter, state, rect):
+    """Max/Min hold 包络线（SDR++ maxHold/minHold 签名）。
+
+    各画一根 1px 实线，只画线不填充：max 包络暖橙悬在谱线上方，
+    min 包络冷蓝压在噪声底下沿。包络由 generator 逐帧维护。
+    """
+    gen = state.panel.generator
+
+    def _line(hold: np.ndarray, color: QColor):
+        n = len(hold)
+        if n == 0:
+            return
+        view_center = _view_center_hz(state)
+        span = gen.sample_rate_hz
+        f_left = view_center - span / 2.0
+        ii = np.arange(n, dtype=np.float64)
+        freq = (gen.center_freq_hz - span / 2.0
+                + span * (ii + 0.5) / n)
+        db = np.where(np.isfinite(hold), hold, state.db_min)
+        x = rect.x() + (freq - f_left) / span * rect.width()
+        ratio = np.clip((db - state.db_min) / (state.db_max - state.db_min),
+                        0.0, 1.0)
+        y = rect.y() + rect.height() - ratio * rect.height() * 0.92
+        poly = QPolygonF([QPointF(float(a), float(b))
+                          for a, b in zip(x, y)])
+        painter.setPen(QPen(color, 1))
+        painter.drawPolyline(poly)
+
+    if gen.show_max_hold and gen.max_hold is not None:
+        _line(gen.max_hold, QColor(PAL_MAXHOLD))
+    if gen.show_min_hold and gen.min_hold is not None:
+        _line(gen.min_hold, QColor(PAL_MINHOLD))
 
 
 def _draw_center_cursor(painter, rect, color):
@@ -1094,6 +1170,18 @@ class SpectrumPanel(QWidget):
             lambda on: setattr(self._state, "show_peaks", bool(on)))
         bar.addWidget(self._peak_chk)
 
+        # Max/Min hold 包络（SDR++ maxHold/minHold 复选框签名）
+        self._maxhold_chk = QCheckBox("Max保持")
+        self._maxhold_chk.setToolTip(
+            "Max hold：逐 bin 保留历史最高电平包络（抓瞬时 burst/峰值轮廓）")
+        self._maxhold_chk.toggled.connect(self.generator.set_max_hold)
+        bar.addWidget(self._maxhold_chk)
+        self._minhold_chk = QCheckBox("Min保持")
+        self._minhold_chk.setToolTip(
+            "Min hold：逐 bin 保留历史最低电平包络（看噪声底下沿/底噪漂移）")
+        self._minhold_chk.toggled.connect(self.generator.set_min_hold)
+        bar.addWidget(self._minhold_chk)
+
         bar.addWidget(QLabel("阈值dB:"))
         self._peak_spin = QDoubleSpinBox()
         self._peak_spin.setRange(1.0, 30.0)
@@ -1115,16 +1203,20 @@ class SpectrumPanel(QWidget):
 
         bar.addStretch(1)
 
-        # 只读状态显示：当前中心频率 / span（无数据时显 --）
+        # 只读状态显示：当前中心频率 / span / SNR（无数据时显 --）
         # 对标 SDR++ main_window.cpp 顶部频率读数；这里只读展示，由 _refresh_status_labels 刷新。
         self._freq_label = QLabel("--")
         self._span_label = QLabel("--")
+        self._snr_label = QLabel("SNR --")
         _lbl_color = _c["gray_200"]
         self._freq_label.setStyleSheet(f"color:{_lbl_color};")
         self._span_label.setStyleSheet(f"color:{_lbl_color};")
+        self._snr_label.setStyleSheet(f"color:{_c['spectrum_max_hold']};")
         bar.addWidget(self._freq_label)
         bar.addSpacing(12)
         bar.addWidget(self._span_label)
+        bar.addSpacing(12)
+        bar.addWidget(self._snr_label)
         return bar
 
     # ------------------------------------------------------------------ dB 滑杆
@@ -1187,7 +1279,8 @@ class SpectrumPanel(QWidget):
     def _set_controls_enabled(self, on: bool):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
                    self._perf_combo, self._palette_combo, self._wf_smooth_chk,
-                   self._peak_chk, self._peak_spin, self._tune_mode_btn):
+                   self._peak_chk, self._peak_spin, self._tune_mode_btn,
+                   self._maxhold_chk, self._minhold_chk):
             w_.setEnabled(on)
 
     def _on_tune_mode_toggled(self, checked: bool):
@@ -1333,14 +1426,55 @@ class SpectrumPanel(QWidget):
         self._redraw()
 
     # ------------------------------------------------------------------ 状态读数
+    def compute_snr_db(self) -> Optional[float]:
+        """当前 SNR (dB)：VFO 带内峰值 − 带外中位噪声底。
+
+        SDR++ 语义：有主听 VFO 时只在收听带宽内找信号峰、带宽外估底噪；
+        无 VFO 时退回全谱峰 − 中位数。无数据/有效 bin 太少返回 None
+        （顶栏显 "--"，绝不造假读数）。
+        """
+        gen = self.generator
+        if not gen.has_data():
+            return None
+        spec = gen.spectrum
+        n = len(spec)
+        if n < 16 or not np.isfinite(spec).any():
+            return None
+        vfo = _effective_vfo(self._state)
+        if vfo is not None:
+            center_hz, bw_hz = vfo
+            f0 = gen.center_freq_hz - gen.sample_rate_hz / 2.0
+            span = gen.sample_rate_hz
+            i0 = int((center_hz - bw_hz / 2.0 - f0) / span * n)
+            i1 = int((center_hz + bw_hz / 2.0 - f0) / span * n)
+            i0, i1 = max(0, i0), min(n, i1)
+            if i1 - i0 >= 2:
+                mask = np.ones(n, dtype=bool)
+                mask[i0:i1] = False
+                in_band = spec[i0:i1]
+                out_band = spec[mask]
+                in_band = in_band[np.isfinite(in_band)]
+                out_band = out_band[np.isfinite(out_band)]
+                if in_band.size and out_band.size:
+                    return float(in_band.max() - np.median(out_band))
+                return None
+        vals = spec[np.isfinite(spec)]
+        if vals.size < 8:
+            return None
+        return float(vals.max() - np.median(vals))
+
     def _refresh_status_labels(self):
-        """刷新顶部中心频率/span 只读读数并触发重绘。无数据时显 --。"""
+        """刷新顶部中心频率/span/SNR 只读读数并触发重绘。无数据时显 --。"""
         if self.generator.has_data():
             self._freq_label.setText(f"{self.generator.center_freq_hz/1e6:.3f} MHz")
             self._span_label.setText(f"{self.generator.sample_rate_hz/1e6:.3f} MHz")
+            snr = self.compute_snr_db()
+            self._snr_label.setText(
+                f"SNR {snr:.1f} dB" if snr is not None else "SNR --")
         else:
             self._freq_label.setText("--")
             self._span_label.setText("--")
+            self._snr_label.setText("SNR --")
         self._redraw()
 
     # ------------------------------------------------------------------ 交互转发
