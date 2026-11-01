@@ -38,64 +38,68 @@ class BrightStar:
     dec_deg: float    # J2000 赤纬 (度)
     vmag: float       # 目视星等
     bv: float         # B-V 色指数
+    dist_ly: float = 0.0   # 距离 (光年); 0.0 = 未知, 信息卡如实显 "—"
+    spect: str = ""        # 光谱型 (HYG); 空串 = 未知
 
 
-# Hipparcos 亮星子集 (真实 J2000 数据)。(name, ra_deg, dec_deg, vmag, bv)
+# Hipparcos 亮星子集 (J2000 视位置; 坐标/星等/色指数/距离经 HYG v4.1
+# (CC BY-SA 4.0, astronexus) proper 名与 Bayer 名双路对拍吸附,
+# 光谱型注记 = HYG spect)。
 BRIGHT_STARS: list[BrightStar] = [
-    BrightStar("Sirius",      101.287,  -16.716, -1.46,  0.00),
-    BrightStar("Canopus",      95.987,  -52.696, -0.74,  0.15),
-    BrightStar("Arcturus",    213.915,   19.182, -0.05,  1.23),
-    BrightStar("Vega",        279.234,   38.784,  0.03,  0.00),
-    BrightStar("Capella",      79.172,   45.998,  0.08,  0.80),
-    BrightStar("Rigel",        78.634,   -8.202,  0.13, -0.03),
-    BrightStar("Procyon",     114.825,    5.225,  0.34,  0.42),
-    BrightStar("Betelgeuse",   88.793,    7.407,  0.42,  1.85),
-    BrightStar("Achernar",     24.428,  -57.237,  0.46, -0.16),
-    BrightStar("Hadar",       210.958,  -60.373,  0.61, -0.23),
-    BrightStar("Altair",      297.696,    8.868,  0.76,  0.22),
-    BrightStar("Acrux",       186.650,  -63.099,  0.77, -0.24),
-    BrightStar("Aldebaran",    68.980,   16.509,  0.86,  1.54),
-    BrightStar("Antares",     247.352,  -26.432,  0.96,  1.83),
-    BrightStar("Spica",       201.365,  -11.161,  0.98, -0.23),
-    BrightStar("Pollux",      116.329,   28.026,  1.14,  1.00),
-    BrightStar("Fomalhaut",   344.413,  -29.622,  1.16,  0.09),
-    BrightStar("Deneb",       310.358,   45.280,  1.25,  0.09),
-    BrightStar("Mimosa",      191.930,  -59.689,  1.25, -0.23),
-    BrightStar("Regulus",     152.093,   11.967,  1.35, -0.11),
-    BrightStar("Adhara",      187.106,  -28.972,  1.50, -0.20),
-    BrightStar("Castor",      113.650,   31.888,  1.58,  0.03),
-    BrightStar("Shaula",      263.402,  -37.104,  1.62, -0.22),
-    BrightStar("Gacrux",      187.706,  -57.113,  1.63,  1.59),
-    BrightStar("Bellatrix",    81.283,    6.350,  1.64, -0.22),
-    BrightStar("Elnath",       81.570,   28.608,  1.65, -0.13),
-    BrightStar("Miaplacidus", 138.304,  -69.717,  1.67,  0.04),
-    BrightStar("Alnilam",      84.053,   -1.202,  1.69, -0.18),
-    BrightStar("Alnair",       34.851,  -46.961,  1.74,  0.02),
-    BrightStar("Regor",       196.705,  -56.723,  1.75, -0.14),
-    BrightStar("Alioth",      193.507,   55.960,  1.76, -0.02),
-    BrightStar("Alnitak",      85.190,   -1.943,  1.77, -0.21),
-    BrightStar("Dubhe",       165.932,   61.751,  1.79,  1.07),
-    BrightStar("Mirfak",       55.956,   49.861,  1.79,  0.48),
-    BrightStar("Wezen",        96.797,   -2.246,  1.83,  0.68),
-    BrightStar("Kaus Australis", 279.535, -34.385, 1.85, -0.03),
-    BrightStar("Alkaid",      206.885,   49.313,  1.86, -0.19),
-    BrightStar("Avior",       155.299,  -59.510,  1.86,  1.21),
-    BrightStar("Sargas",       271.429,  -42.998,  1.86,  1.22),
-    BrightStar("Menkalinan",   88.806,   44.947,  1.90,  0.08),
-    BrightStar("Alhena",       96.429,   16.399,  1.93,  0.00),
-    BrightStar("Peacock",     306.412,  -56.733,  1.94, -0.20),
-    BrightStar("Alphard",     141.890,   -8.659,  1.98,  1.44),
-    BrightStar("Polaris",      37.954,   89.264,  1.98,  0.60),
-    BrightStar("Hamal",        31.793,   23.462,  2.00,  1.15),
-    BrightStar("Diphda",       13.020,  -17.987,  2.04, -0.03),
-    BrightStar("Alpheratz",     2.097,   29.091,  2.06, -0.05),
-    BrightStar("Mirach",       16.028,   35.618,  2.07,  1.58),
-    BrightStar("Algieba",     154.945,   19.842,  2.08,  1.25),
-    BrightStar("Denebola",    177.266,   14.572,  2.11,  0.09),
-    BrightStar("Algol",        47.042,   40.956,  2.12, -0.05),
-    BrightStar("Mizar",       200.981,   54.925,  2.23,  0.02),
-    BrightStar("Naos",        126.574,  -40.003,  2.25, -0.27),
-    BrightStar("Ankaa",        21.479,  -42.306,  2.40,  1.17),
+    BrightStar("Sirius",   101.2872,   -16.7161, -1.44,  0.01,      8.6, "A0m..."),  # A0m... CMa
+    BrightStar("Canopus",    95.9879,   -52.6957, -0.62,  0.16,    309.2, "F0Ib"),  # F0Ib Car
+    BrightStar("Arcturus",   213.9154,   +19.1824, -0.05,  1.24,     36.7, "K2IIIp"),  # K2IIIp Boo
+    BrightStar("Vega",   279.2346,   +38.7837,  0.03, -0.00,     25.0, "A0Vvar"),  # A0Vvar Lyr
+    BrightStar("Capella",    79.1723,   +45.9980,  0.08,  0.80,     42.8, "M1: comp"),  # M1: comp Aur
+    BrightStar("Rigel",    78.6345,    -8.2016,  0.18, -0.03,    862.8, "B8Ia"),  # B8Ia Ori
+    BrightStar("Procyon",   114.8255,    +5.2250,  0.40,  0.43,     11.5, "F5IV-V"),  # F5IV-V CMi
+    BrightStar("Betelgeuse",    88.7929,    +7.4071,  0.45,  1.50,    497.9, "M2Ib"),  # M2Ib Ori
+    BrightStar("Achernar",    24.4283,   -57.2368,  0.45, -0.16,    139.4, "B3Vp"),  # B3Vp Eri
+    BrightStar("Hadar",   210.9559,   -60.3730,  0.61, -0.23,    392.0, "B1III"),  # B1III Cen
+    BrightStar("Altair",   297.6958,    +8.8683,  0.76,  0.22,     16.7, "A7IV-V"),  # A7IV-V Aql
+    BrightStar("Acrux",   186.6497,   -63.0991,  0.77, -0.24,    322.0, "B0.5IV"),  # B0.5IV Cru
+    BrightStar("Aldebaran",    68.9802,   +16.5093,  0.87,  1.54,     66.6, "K5III"),  # K5III Tau
+    BrightStar("Antares",   247.3519,   -26.4320,  1.06,  1.86,    553.7, "M1Ib + B2.5V"),  # M1Ib + B2.5V Sco
+    BrightStar("Spica",   201.2982,   -11.1613,  0.98, -0.23,    249.7, "B1V"),  # B1V  Vir
+    BrightStar("Pollux",   116.3292,   +28.0262,  1.16,  0.99,     33.8, "K0IIIvar"),  # K0IIIvar Gem
+    BrightStar("Fomalhaut",   344.4126,   -29.6222,  1.17,  0.14,     25.1, "A3V"),  # A3V  PsA
+    BrightStar("Deneb",   310.3580,   +45.2803,  1.25,  0.09,   1411.9, "A2Ia"),  # A2Ia Cyg
+    BrightStar("Mimosa",   191.9304,   -59.6888,  1.25, -0.24,    278.5, "B0.5III"),  # B0.5III Cru
+    BrightStar("Regulus",   152.0930,   +11.9672,  1.36, -0.09,     79.3, "B7V"),  # B7V  Leo
+    BrightStar("Adhara",   104.6565,   -28.9721,  1.50, -0.21,    405.2, "B2II"),  # B2II CMa
+    BrightStar("Castor",   113.6495,   +31.8883,  1.58,  0.03,     50.9, "A2Vm"),  # A2Vm Gem
+    BrightStar("Shaula",   263.4022,   -37.1038,  1.62, -0.23,    571.2, "B1.5IV+..."),  # B1.5IV+... Sco
+    BrightStar("Gacrux",   187.7914,   -57.1132,  1.59,  1.60,     88.6, "M4III"),  # M4III Cru
+    BrightStar("Bellatrix",    81.2828,    +6.3497,  1.64, -0.22,    252.4, "B2III"),  # B2III Ori
+    BrightStar("Elnath",    81.5730,   +28.6075,  1.65, -0.13,    133.9, "B7III"),  # B7III Tau
+    BrightStar("Miaplacidus",   138.3006,   -69.7172,  1.67,  0.07,    113.2, "A2IV"),  # A2IV Car
+    BrightStar("Alnilam",    84.0534,    -1.2019,  1.69, -0.18,   1976.7, "B0Ia"),  # B0Ia Ori
+    BrightStar("Alnair",   332.0581,   -46.9610,  1.73, -0.07,    101.0, "B7IV"),  # B7IV Gru
+    BrightStar("Regor",   122.3831,   -47.3366,  1.75, -0.14,   1117.0, "WC8 + O9I"),  # WC8 + O9I Vel
+    BrightStar("Alioth",   193.5071,   +55.9598,  1.76, -0.02,     82.6, "A0p"),  # A0p  UMa
+    BrightStar("Alnitak",    85.1897,    -1.9426,  1.74, -0.20,    736.2, "O9.5Ib SB"),  # O9.5Ib SB Ori
+    BrightStar("Dubhe",   165.9323,   +61.7510,  1.81,  1.06,    122.9, "F7V comp"),  # F7V comp UMa
+    BrightStar("Mirfak",    51.0807,   +49.8612,  1.79,  0.48,    506.5, "F5Ib"),  # F5Ib Per
+    BrightStar("Wezen",   107.0979,   -26.3932,  1.83,  0.67,   1606.7, "F8Ia"),  # F8Ia CMa
+    BrightStar("Kaus Australis",   276.0430,   -34.3846,  1.79, -0.03,    143.3, "B9.5III"),  # B9.5III Sgr
+    BrightStar("Alkaid",   206.8853,   +49.3133,  1.85, -0.10,    103.9, "B3V SB"),  # B3V SB UMa
+    BrightStar("Avior",   125.6285,   -59.5095,  1.86,  1.20,    605.1, "K3III+B2V"),  # K3III+B2V Car
+    BrightStar("Sargas",   264.3297,   -42.9978,  1.86,  0.41,    300.3, "F1II"),  # F1II Sco
+    BrightStar("Menkalinan",    89.8822,   +44.9474,  1.90,  0.08,     81.1, "A2V"),  # A2V  Aur
+    BrightStar("Alhena",    99.4279,   +16.3993,  1.93,  0.00,    109.3, "A0IV"),  # A0IV Gem
+    BrightStar("Peacock",   306.4119,   -56.7351,  1.94, -0.12,    178.8, "B2IV"),  # B2IV Pav
+    BrightStar("Alphard",   141.8969,    -8.6586,  1.99,  1.44,    180.3, "K3III"),  # K3III Hya
+    BrightStar("Polaris",    37.9462,   +89.2641,  1.97,  0.64,    432.6, "F7:Ib-IIv SB"),  # F7:Ib-IIv SB UMi
+    BrightStar("Hamal",    31.7933,   +23.4624,  2.01,  1.15,     65.8, "K2III"),  # K2III Ari
+    BrightStar("Diphda",    10.8973,   -17.9866,  2.04,  1.02,     96.3, "K0III"),  # K0III Cet
+    BrightStar("Alpheratz",     2.0969,   +29.0904,  2.07, -0.04,     97.0, "B9p"),  # B9p  And
+    BrightStar("Mirach",    17.4329,   +35.6206,  2.07,  1.58,    197.4, "M0IIIvar"),  # M0IIIvar And
+    BrightStar("Algieba",   154.9931,   +19.8415,  2.01,  1.13,    130.1, "K0III"),  # K0III Leo
+    BrightStar("Denebola",   177.2649,   +14.5721,  2.14,  0.09,     35.9, "A3Vvar"),  # A3Vvar Leo
+    BrightStar("Algol",    47.0422,   +40.9556,  2.09, -0.00,     89.9, "B8V"),  # B8V  Per
+    BrightStar("Mizar",   200.9812,   +54.9254,  2.23,  0.06,     85.8, "A2V"),  # A2V  UMa
+    BrightStar("Naos",   120.8961,   -40.0031,  2.21, -0.27,   1083.6, "O5IAf"),  # O5IAf Pup
+    BrightStar("Ankaa",     6.5708,   -42.3060,  2.40,  1.08,     84.7, "K0III..."),  # K0III... Phe
 ]
 
 

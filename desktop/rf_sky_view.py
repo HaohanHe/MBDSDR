@@ -67,6 +67,7 @@ MBDSDR Project - AI定义无线电 - MIT License（独立实现）
 
 import math
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Tuple, Set
@@ -92,11 +93,13 @@ from mbdsdr_ai.celestial_geometry import (
 from mbdsdr_ai.sky_interaction import (
     ViewState,
     SkyInteractionHandler,
+    pick_object,
     sky_to_screen,
     screen_to_sky,
 )
 from mbdsdr_ai import skyengine
 from mbdsdr_ai.skyengine import stars as _stars
+from mbdsdr_ai.skyengine import constellations as _constel
 from mbdsdr_ai.skyengine import satellites as _sats
 from mbdsdr_ai.skyengine import jtime as _jtime
 
@@ -160,6 +163,23 @@ def _traj_alpha(i: int, n: int, base: int = 110,
 # ============================================================================
 # 数据类型
 # ============================================================================
+
+
+# ============================================================================
+# 行星层 (Stellarium 首屏玩法: 火/木/金等行星标记+标签)
+# ============================================================================
+# 位置计算复用 mbdsdr_ai/astronomy/planets.py (Meeus 低精度历表, 已入库
+# 并对拍 de440s)。样式色值为公开天文常识级配色, 非上游代码。
+# zh 为文化对位层主标签; en 进信息卡 aliases。
+_PLANET_STYLE: Dict[str, Dict[str, object]] = {
+    "mercury": {"zh": "水星", "color": (158, 158, 164)},
+    "venus":   {"zh": "金星", "color": (244, 238, 214)},
+    "mars":    {"zh": "火星", "color": (221, 112,  80)},
+    "jupiter": {"zh": "木星", "color": (235, 215, 178)},
+    "saturn":  {"zh": "土星", "color": (240, 226, 158)},
+    "uranus":  {"zh": "天王星", "color": (159, 219, 229)},
+    "neptune": {"zh": "海王星", "color": (122, 152, 240)},
+}
 
 
 class SkyObject:
@@ -537,6 +557,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._sat_catalog: Dict[str, Dict[str, object]] = {}
         # 当前选中天体的完整信息 (信息卡用)
         self._selected_info: Optional[Dict[str, object]] = None
+        # 行星/恒星/深空天体选中态 (与 _hovered_object 互斥; 恒星/DSO 批
+        # 逐步开放, 批 1 先行星)。body 为 {"kind","key","ra_deg","dec_deg",...}
+        self._picked_body: Optional[Dict[str, object]] = None
+        self._body_info: Optional[Dict[str, object]] = None
         # 信号出现点亮的卫星名集合（跟踪闭环下半场：频带里听到它，星就亮）
         self._signal_sats: set = set()
         # HUD 命中区 (绘制时刷新; None = 该控件当前不可点)
@@ -773,6 +797,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         from PySide6.QtWidgets import QLineEdit, QListWidget, QListWidgetItem
         self._QLineEdit = QLineEdit
         self._QListWidget = QListWidget
+        self._QListWidgetItem = QListWidgetItem
         self._search_edit = QLineEdit(self)
         self._search_edit.setPlaceholderText("搜索天体: ISS / Vega / NOAA…")
         self._search_edit.setMinimumHeight(22)
@@ -1107,19 +1132,47 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     "label": name, "sub": info["kind_label"],
                     "az": None, "alt": None, "obj_name": name,
                 })
-        # 2) 恒星: 亮星星表按名匹配
+        # 2) 恒星: 亮星星表按名匹配 (西名 + 中国星名双匹配, 读懂层)
         for s in _stars.BRIGHT_STARS:
-            if text in s.name.lower():
+            zh = ""
+            c = _stars.star_culture(s.name)
+            if c:
+                zh = c.get("zh", "")
+            if text in s.name.lower() or (zh and text in zh.lower()):
                 self._search_results.append({
-                    "kind": "star", "kind_label": "Long-Period Variable Star",
-                    "label": s.name, "sub": "Variable / Long-Period Variable Star",
+                    "kind": "star", "kind_label": "Star",
+                    "label": zh if zh else s.name,
+                    "sub": f"Star · {s.name}" if zh else "Star",
                     "ra": s.ra_deg, "dec": s.dec_deg, "vmag": s.vmag,
+                    "name": s.name,
                 })
+        # 3) 行星: 西名 + 中文名双匹配 (文化对位层)
+        for en, style in _PLANET_STYLE.items():
+            zh = str(style["zh"])
+            if text in en or text in zh.lower():
+                self._search_results.append({
+                    "kind": "planet", "kind_label": "Planet",
+                    "label": f"{zh} {en.capitalize()}", "sub": "Planet",
+                    "key": en, "zh": zh,
+                })
+        # 4) 梅西耶天体: M 编号匹配 (深空搜索)
+        if re.match(r"^m\s*\d{1,3}$", text):
+            from mbdsdr_ai.astronomy import dso as _dso
+            for e in _dso.BUILTIN_CATALOG:
+                if text.replace(" ", "") == e.name.lower():
+                    self._search_results.append({
+                        "kind": "dso", "kind_label": "Deep Sky Object",
+                        "label": e.name,
+                        "sub": f"{e.dso_type.replace('_', ' ').title()}",
+                        "key": e.name, "dso_type": e.dso_type,
+                        "con": e.constellation,
+                    })
         # 填充下拉
         self._search_popup.clear()
         for r in self._search_results[:40]:
             icon = {"space_station": "🛰", "satellite": "●",
-                    "weather": "◉", "star": "✦"}.get(r["kind"], "•")
+                    "weather": "◉", "star": "✦", "planet": "◐",
+                    "dso": "◎"}.get(r["kind"], "•")
             item = self._QListWidgetItem(f"{icon}  {r['label']}   —   {r['sub']}")
             self._search_popup.addItem(item)
         if self._search_results:
@@ -1144,14 +1197,44 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     self._build_selected_info(obj)
                     self.goto_animated(obj.azimuth_deg, obj.elevation_deg)
                     return
-        # 恒星 -> 居中到该星 (无需选中信息卡)
+        # 恒星 -> 居中 + 选中出卡 (点星即读)
         if r["kind"] == "star" and self._ground_station() is not None:
+            self.on_body_picked({"kind": "star", "key": r["name"]})
             jd = self._current_jd()
             gs = self._ground_station()
             v = j2000_to_altaz(vec_from_radec(r["ra"], r["dec"]), gs, jd)
             from mbdsdr_ai.celestial_geometry import azalt_from_vec
             az, alt = azalt_from_vec(v)
             self.goto_animated(az, alt)
+        # 行星 -> 居中 + 选中出信息卡 (Stellarium 搜索行星同款交互)
+        if r["kind"] == "planet" and self._ground_station() is not None:
+            self.on_body_picked({"kind": "planet", "key": r["key"],
+                                 "zh": r["zh"]})
+            jd = self._current_jd()
+            gs = self._ground_station()
+            pos = self._planet_positions(jd).get(r["key"])
+            if pos is not None:
+                from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                az, alt = azalt_from_vec(
+                    j2000_to_altaz(vec_from_radec(pos.ra_deg, pos.dec_deg),
+                                   gs, jd))
+                self.goto_animated(az, alt)
+        # 梅西耶天体 -> 居中 + 选中出卡 (标记环+角大小)
+        if r["kind"] == "dso" and self._ground_station() is not None:
+            body = {"kind": "dso", "key": r["key"],
+                    "dso_type": r.get("dso_type"), "con": r.get("con")}
+            e = self._dso_entry(r["key"])
+            if e is not None:
+                body["ra_deg"], body["dec_deg"] = e.ra_deg, e.dec_deg
+            self.on_body_picked(body)
+            if e is not None:
+                jd = self._current_jd()
+                gs = self._ground_station()
+                from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                az, alt = azalt_from_vec(
+                    j2000_to_altaz(vec_from_radec(e.ra_deg, e.dec_deg),
+                                   gs, jd))
+                self.goto_animated(az, alt)
 
     # ------------------------------------------------------------------ #
     # 选中信息卡 (Stellarium 规格 10.4)
@@ -1470,6 +1553,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return QPointF(cx, cy)
         return QPointF(px, py)
 
+    def _sky_to_screen_finite(self, azimuth_deg: float,
+                              elevation_deg: float) -> Optional[QPointF]:
+        """同 _sky_to_screen, 但视界外/相机背后返回 None。
+
+        拾取专用: _sky_to_screen 对非有限投影兜底回屏中心, 拾取若不查有限性,
+        视界外天体会在屏中心变成"幽灵命中"。
+        """
+        px, py = sky_to_screen(azimuth_deg, elevation_deg,
+                               self.view_state, self.projection,
+                               self._widget_size_tuple())
+        if not (math.isfinite(px) and math.isfinite(py)):
+            return None
+        return QPointF(px, py)
+
     def _screen_to_sky(self, screen_x: float, screen_y: float) -> Tuple[float, float]:
         """屏幕像素 -> (az, alt)。委托 sky_interaction.screen_to_sky。"""
         az, alt = screen_to_sky(screen_x, screen_y,
@@ -1526,8 +1623,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._paint_sky_background(painter)
 
         if self._observer is not None:
-            # 2) 恒星 (分级星点 + 亮星标签)
+            # 2) 恒星 (分级星点 + 亮星标签) + 星座连线/座名
             self._draw_stars(painter)
+            self._draw_constellations(painter)
             # 3) 地景剪影
             if self._show_landscape:
                 self._draw_landscape(painter)
@@ -1541,6 +1639,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # 5) 天体/卫星层
             self._draw_antenna_beam(painter)
             self._draw_celestial_bodies(painter)
+            self._draw_planets(painter)
             self._draw_objects(painter)
             self._draw_antenna_pointer(painter)
             self._draw_gnss_satellites(painter)
@@ -1548,6 +1647,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 self._draw_compass(painter)
             if self._hovered_object:
                 self._draw_picked_info(painter)
+            elif self._picked_body:
+                self._draw_body_info(painter)
 
         # 6) 常驻叠加: FOV 显示 / 信息卡 / 过境 / GNSS / 空状态
         self._draw_fov(painter)
@@ -1590,7 +1691,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 az, alt = azalt_from_vec(v)
             except Exception:
                 continue
-            if alt < -1.0:
+            if alt < 0.0:
                 continue
             pos = self._sky_to_screen(az, alt)
             if not self._on_screen(pos):
@@ -1621,6 +1722,55 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.setPen(QColor(210, 220, 235, int(200 * bright + 40)))
                 painter.drawText(QPointF(pos.x() + r + 2, pos.y() - r),
                                  _stars.culture_label(s.name))
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
+    # 星座连线层 (Stellarium 宽 FOV 玩法): 骨架线 + 中文/Latin 名标签
+    # ------------------------------------------------------------------ #
+    def _draw_constellations(self, painter: QPainter):
+        """传统星座骨架线 + 座名标签。线恒画; 标签 FOV>=55° 才出现
+        (Stellarium 同款: 拉近看星, 拉远看座)。数据为常识级骨架示意。"""
+        gs = self._ground_station()
+        if gs is None:
+            return
+        jd = self._current_jd()
+        from mbdsdr_ai.celestial_geometry import azalt_from_vec
+        night = self._sky_brightness < 0.5
+        line_col = QColor(112, 142, 190, 95 if night else 55)
+        label_col = QColor(150, 170, 205, 165 if night else 105)
+
+        def _to_screen(star):
+            try:
+                v = j2000_to_altaz(vec_from_radec(star.ra_deg, star.dec_deg),
+                                   gs, jd)
+                az, alt = azalt_from_vec(v)
+            except Exception:
+                return None
+            if alt < -6.0:
+                return None
+            return self._sky_to_screen_finite(az, max(alt, -2.0))
+
+        painter.save()
+        painter.setPen(QPen(line_col, 1))
+        for abbr, segs in _constel.constellation_segments().items():
+            for sa, sb in segs:
+                pa = _to_screen(sa)
+                pb = _to_screen(sb)
+                if pa is None or pb is None:
+                    continue
+                painter.drawLine(pa, pb)
+        if self.view_state.fov_deg >= 55.0:
+            painter.setFont(self._gnss_label_font)
+            painter.setPen(QPen(label_col, 1))
+            for abbr in _constel.CONSTELLATION_LINES:
+                anchor = _constel.constellation_anchor(abbr)
+                if anchor is None:
+                    continue
+                pos = _to_screen(anchor)
+                if pos is None or not self._on_screen(pos):
+                    continue
+                painter.drawText(QPointF(pos.x() + 8, pos.y() - 8),
+                                 _constel.constellation_label(abbr))
         painter.restore()
 
     def _on_screen(self, pos: QPointF, margin: float = 4.0) -> bool:
@@ -2111,6 +2261,396 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 ty += row_h
         painter.restore()
 
+    # ------------------------------------------------------------------ #
+    # 行星层: 标记 + 标签 + 拾取 + 信息卡 (Stellarium 首屏玩法)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _planet_positions(jd: float):
+        """当前时刻全部行星 J2000 视位置 (Meeus 低精度历表, 库内已验证)。"""
+        from mbdsdr_ai.astronomy import planets as _planets
+        return _planets.compute_all(jd)
+
+    def _draw_planets(self, painter: QPainter):
+        """行星标记 (实心圆点 + 中文名标签), 位置随时间引擎流动。
+
+        快转时间时行星沿黄道漂移 —— "历"叙事的一部分。低于地平 -1° 不画。
+        """
+        gs = self._ground_station()
+        if gs is None:
+            return
+        jd = self._current_jd()
+        from mbdsdr_ai.celestial_geometry import azalt_from_vec
+        painter.save()
+        painter.setFont(self._font)
+        try:
+            positions = self._planet_positions(jd)
+        except Exception:
+            positions = {}
+        for key, style in _PLANET_STYLE.items():
+            pos_eph = positions.get(key)
+            if pos_eph is None:
+                continue
+            try:
+                v = j2000_to_altaz(vec_from_radec(pos_eph.ra_deg,
+                                                  pos_eph.dec_deg), gs, jd)
+                az, alt = azalt_from_vec(v)
+            except Exception:
+                continue
+            if alt < -1.0:
+                continue
+            scr = self._sky_to_screen(az, alt)
+            if not self._on_screen(scr):
+                continue
+            cr, cg, cb = style["color"]  # type: ignore[misc]
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(cr, cg, cb)))
+            painter.drawEllipse(scr, 4.0, 4.0)
+            painter.setPen(QColor(210, 220, 235, 215))
+            painter.drawText(QPointF(scr.x() + 8, scr.y() - 6),
+                             str(style["zh"]))
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
+    # 行星/恒星/DSO 拾取 (cleverFind 同款双键评分: 像素角距 + 亮度优先)
+    # ------------------------------------------------------------------ #
+    def _find_body_at(self, x: float, y: float,
+                      tolerance: float = 14.0) -> Optional[Dict[str, object]]:
+        """在像素 (x,y) 附近找行星/恒星/已选 DSO (cleverFind 双键评分)。
+
+        恒星与行星混合候选, 亮度归一 = clamp((4.5-mag)/9): 亮者近者优先。
+        未命中返回 None。
+        """
+        gs = self._ground_station()
+        if gs is None:
+            return None
+        jd = self._current_jd()
+        from mbdsdr_ai.celestial_geometry import azalt_from_vec
+
+        candidates: List[Tuple[str, str, float, float, float]] = []
+        # (kind, key, ra, dec, mag) — 位置统一在这里算一次
+        try:
+            for key_p, eph in self._planet_positions(jd).items():
+                candidates.append(("planet", key_p, eph.ra_deg, eph.dec_deg,
+                                   eph.magnitude))
+        except Exception:
+            pass
+        try:
+            for name, star in _constel.merged_star_index().items():
+                if star.vmag > 4.5:
+                    continue
+                candidates.append(("star", name, star.ra_deg, star.dec_deg,
+                                   star.vmag))
+        except Exception:
+            pass
+        # 已选 DSO 有标记环, 可再点中
+        pb = self._picked_body
+        if pb and pb.get("kind") == "dso":
+            ra_d, de_d = pb.get("ra_deg"), pb.get("dec_deg")
+            if ra_d is not None:
+                candidates.append(("dso", str(pb.get("key")), float(ra_d),
+                                   float(de_d), 4.0))
+
+        best: Optional[Dict[str, object]] = None
+        best_score = float(tolerance)
+        for kind, key_b, ra_b, dec_b, mag in candidates:
+            try:
+                v = j2000_to_altaz(vec_from_radec(ra_b, dec_b), gs, jd)
+                az, alt = azalt_from_vec(v)
+            except Exception:
+                continue
+            if alt < -1.0:
+                continue
+            scr = self._sky_to_screen_finite(az, alt)
+            if scr is None:
+                continue
+            dist = math.hypot(scr.x() - x, scr.y() - y)
+            if dist >= tolerance:
+                continue
+            norm = max(0.0, min(1.0, (4.5 - mag) / 9.0))
+            score = dist * (1.0 - 0.3 * norm)
+            if score < best_score:
+                best_score = score
+                body: Dict[str, object] = {"kind": kind, "key": key_b}
+                if kind == "planet":
+                    body["zh"] = _PLANET_STYLE.get(key_b, {}).get("zh", key_b)
+                if kind == "dso":
+                    body["ra_deg"], body["dec_deg"] = ra_b, dec_b
+                best = body
+        return best
+
+    def on_body_picked(self, body: Optional[Dict[str, object]]) -> None:
+        """选中行星/恒星/DSO: 高亮环 + 信息卡。None = 反选。
+
+        与卫星选中态互斥; 不发 object_clicked (那是卫星调谐信号)。
+        """
+        if body is None:
+            self._picked_body = None
+            self._body_info = None
+            self.update()
+            return
+        self._hovered_object = None
+        self._selected_info = None
+        # 选中体不可调谐: 隐藏卫星三件套, 不残留假状态
+        self._tune_sat_name = None
+        self._stop_track_ui()
+        self._track_btn.hide()
+        self._stop_gimbal_ui()
+        self._gimbal_btn.hide()
+        self._tune_btn.hide()
+        self._doppler_label.hide()
+        self._tune_refresh_timer.stop()
+        self._picked_body = dict(body)
+        self._build_body_info(self._picked_body)
+        self.update()
+
+    def _body_rise_set(self, ra_deg: float, dec_deg: float, jd_now: float,
+                       hours: float = 24.0, step_min: float = 10.0) \
+            -> Dict[str, Optional[float]]:
+        """恒星/行星的升降: 24h 高度扫描 (与卫星 next_rise_set 同思路)。
+
+        用与绘制完全相同的坐标链 (j2000_to_altaz), 不引入第二套公式。
+        拱极/24h 不升落 -> 对应项 None, 卡片如实显示。
+        """
+        gs = self._ground_station()
+        out: Dict[str, Optional[float]] = {"rise_jd": None, "set_jd": None}
+        if gs is None:
+            return out
+        v = vec_from_radec(ra_deg, dec_deg)
+        n = int(hours * 60.0 / step_min)
+        prev_above: Optional[bool] = None
+        for i in range(n + 1):
+            jd = jd_now + (i * step_min * 60.0) / 86400.0
+            try:
+                from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                az, alt = azalt_from_vec(j2000_to_altaz(v, gs, jd))
+            except Exception:
+                continue
+            above = alt > 0.0
+            if prev_above is False and above and out["rise_jd"] is None:
+                out["rise_jd"] = jd
+            if prev_above is True and not above and out["set_jd"] is None:
+                out["set_jd"] = jd
+            prev_above = above
+            if out["rise_jd"] is not None and out["set_jd"] is not None:
+                break
+        return out
+
+    def _build_body_info(self, body: Dict[str, object]) -> None:
+        """构建行星信息卡字段 (Stellarium 规格同款行: Mag/Dist/RaDec/AzAlt/
+        Visibility)。无值给占位, 不编造。"""
+        info: Dict[str, object] = {
+            "kind": body.get("kind"), "title": "", "kind_label": "",
+            "aliases": [], "mag": None, "dist_text": "—",
+            "ra": None, "dec": None, "rise": None, "set": None,
+            "desc": "",
+        }
+        kind = body.get("kind")
+        if kind == "planet":
+            key = str(body.get("key"))
+            zh = str(body.get("zh") or _PLANET_STYLE.get(key, {}).get("zh", key))
+            jd = self._current_jd()
+            pos = self._planet_positions(jd).get(key)
+            info["title"] = zh
+            info["kind_label"] = "Planet"
+            info["aliases"] = [key.capitalize()]
+            if pos is not None:
+                info["mag"] = float(pos.magnitude)
+                info["ra"] = float(pos.ra_deg)
+                info["dec"] = float(pos.dec_deg)
+                info["dist_text"] = (f"{pos.distance_au:.3f} AU · "
+                                     f"{pos.distance_au * 149597870.7 / 1e6:,.1f} M km")
+                info["desc"] = (f"视直径 {pos.angular_diameter_arcsec:.1f}″ · "
+                                f"相位角 {pos.phase_angle_deg:.1f}° · "
+                                f"Meeus 低精度历表 (J2000 视位置)")
+                rs = self._body_rise_set(pos.ra_deg, pos.dec_deg, jd)
+                info["rise"] = rs["rise_jd"]
+                info["set"] = rs["set_jd"]
+        elif kind == "star":
+            name = str(body.get("key"))
+            star = _constel.merged_star_index().get(name)
+            if star is not None:
+                c = _stars.star_culture(name)
+                info["title"] = c["zh"] if c else name
+                info["kind_label"] = "Star"
+                info["aliases"] = [name]
+                info["mag"] = float(star.vmag)
+                info["ra"] = float(star.ra_deg)
+                info["dec"] = float(star.dec_deg)
+                info["dist_text"] = (f"{star.dist_ly:.0f} ly"
+                                     if star.dist_ly > 0 else "—")
+                jd = self._current_jd()
+                rs = self._body_rise_set(star.ra_deg, star.dec_deg, jd)
+                info["rise"] = rs["rise_jd"]
+                info["set"] = rs["set_jd"]
+                desc_bits = []
+                if star.spect:
+                    desc_bits.append(f"光谱型 {star.spect}")
+                if c and c.get("note"):
+                    desc_bits.append(c["note"])
+                if desc_bits:
+                    info["desc"] = " · ".join(desc_bits)
+        elif kind == "dso":
+            name = str(body.get("key"))
+            entry = self._dso_entry(name)
+            info["title"] = name
+            info["kind_label"] = str(body.get("dso_type") or "Deep Sky Object") \
+                .replace("_", " ").title()
+            con_full = _constel.CONSTELLATION_NAMES.get(
+                str(body.get("con") or ""), "")
+            info["aliases"] = [con_full] if con_full else []
+            if entry is not None:
+                info["mag"] = float(entry.magnitude)
+                info["ra"] = float(entry.ra_deg)
+                info["dec"] = float(entry.dec_deg)
+                info["desc"] = f"角大小 {entry.size_arcmin:.0f}′ · " \
+                               f"Messier/NGC 公开星表数据"
+                jd = self._current_jd()
+                rs = self._body_rise_set(entry.ra_deg, entry.dec_deg, jd)
+                info["rise"] = rs["rise_jd"]
+                info["set"] = rs["set_jd"]
+        self._body_info = info
+
+    @staticmethod
+    def _dso_entry(name: str):
+        from mbdsdr_ai.astronomy import dso as _dso
+        for e in _dso.BUILTIN_CATALOG:
+            if e.name == name:
+                return e
+        return None
+
+    def _draw_body_info(self, painter: QPainter):
+        """行星/恒星/DSO 信息卡: 与卫星卡同骨架 (Stellarium 规格)。"""
+        body = self._picked_body
+        info = self._body_info or {}
+        if not body or not info:
+            self._info_card_rect = None
+            self._info_close_rect = None
+            return
+        # 高亮环: 实时位置重算 (快转时跟着走)
+        gs = self._ground_station()
+        if gs is not None and info.get("ra") is not None:
+            try:
+                from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                v = j2000_to_altaz(vec_from_radec(info["ra"], info["dec"]),
+                                   gs, self._current_jd())
+                az, alt = azalt_from_vec(v)
+                pos = self._sky_to_screen(az, max(alt, -2.0))
+                painter.save()
+                painter.setPen(QPen(self._colors["accent"], 2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(pos, 12, 12)
+                painter.drawEllipse(pos, 16, 16)
+                painter.restore()
+            except Exception:
+                pass
+
+        _t = tokens()
+
+        def _dms(deg: float, signed: bool = True) -> str:
+            sign = "-" if deg < 0 else ("+" if signed else "")
+            a = abs(deg)
+            d = int(a)
+            m = int((a - d) * 60.0)
+            s = ((a - d) * 60.0 - m) * 60.0
+            return f"{sign}{d:3d}°{m:02d}'{s:04.1f}\""
+
+        def _hms(ra_deg: float) -> str:
+            h = ra_deg / 15.0
+            hh = int(h); mm = int((h - hh) * 60); ss = ((h - hh) * 60 - mm) * 60
+            return f"{hh:02d}h {mm:02d}m {ss:04.1f}s"
+
+        def _hm(jd):
+            if jd is None:
+                return "..:.."
+            return datetime.fromtimestamp(_jtime.jd_to_unix(jd),
+                                          tz=timezone.utc).strftime("%H:%M")
+
+        rise = info.get("rise"); sset = info.get("set")
+        if rise is None and sset is None:
+            vis = "24h 内无升降 (拱极或不可见)"
+        else:
+            vis = f"Rise {_hm(rise)}   Set {_hm(sset)}"
+        kv = [
+            ("Magnitude", "—" if info.get("mag") is None
+             else f"{info['mag']:.2f}"),
+            ("Distance", str(info.get("dist_text") or "—")),
+            ("Ra/Dec", f"{_hms(info['ra'])}  {_dms(info['dec'])}"
+                       if info.get("ra") is not None else "—"),
+            ("Az/Alt", "—"),   # 实时值在绘制循环尾部刷新
+            ("Visibility", vis),
+        ]
+
+        painter.save()
+        painter.setFont(self._font)
+        fm = QFontMetrics(self._font)
+        pad = 12.0
+        close_reserve = 26.0
+        key_col_w = max(fm.horizontalAdvance(k) for k, _ in kv)
+
+        head = [str(info.get("title") or ""), str(info.get("kind_label") or ""),
+                "Also known as: " + " · ".join(info.get("aliases") or ["—"])]
+        widths = [fm.horizontalAdvance(t) for t in head]
+        widths += [key_col_w + 10 + fm.horizontalAdvance(v) for _, v in kv]
+        raw_desc = str(info.get("desc") or "")
+        body_w = max(widths + [fm.horizontalAdvance(raw_desc)])
+        box_w = body_w + pad * 2 + close_reserve
+
+        row_h = 17.0
+        n_rows = 3 + len(kv) + (1 if raw_desc else 0)
+        box_h = n_rows * row_h + 18
+        box_x, box_y = 14.0, 40.0
+        bg = QColor(_t.COLORS["card_1"])
+        bg.setAlpha(235)
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(self._colors["accent"], 1))
+        painter.drawRoundedRect(QRectF(box_x, box_y, box_w, box_h), 6, 6)
+        self._info_card_rect = QRectF(box_x, box_y, box_w, box_h)
+
+        self._info_close_rect = QRectF(box_x + box_w - close_reserve,
+                                       box_y + 3, 20, 20)
+        painter.setPen(QPen(QColor(_t.COLORS["gray_300"]), 1))
+        painter.drawText(self._info_close_rect, Qt.AlignCenter, "×")
+
+        ty = box_y + 18
+        f = QFont(self._font); f.setBold(True)
+        painter.setFont(f)
+        painter.setPen(QColor(_t.COLORS["accent"]))
+        painter.drawText(QPointF(box_x + pad, ty), head[0])
+        ty += row_h
+        painter.setFont(self._font)
+        painter.setPen(QColor(_t.COLORS["gray_300"]))
+        painter.drawText(QPointF(box_x + pad, ty), head[1])
+        ty += row_h
+        painter.drawText(QPointF(box_x + pad, ty), head[2])
+        ty += row_h
+
+        key_pen = QColor(_t.COLORS["gray_300"])
+        val_pen = QColor(_t.COLORS["text_primary"])
+        for idx, (k, v) in enumerate(kv):
+            if k == "Az/Alt":
+                # 实时坐标: 与行星标记同一坐标链现算
+                v = "—"
+                if gs is not None and info.get("ra") is not None:
+                    try:
+                        from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                        vv = j2000_to_altaz(vec_from_radec(info["ra"],
+                                                           info["dec"]),
+                                            gs, self._current_jd())
+                        az, alt = azalt_from_vec(vv)
+                        v = f"{_dms(az, signed=False)}  {_dms(alt)}"
+                    except Exception:
+                        v = "—"
+            painter.setPen(key_pen)
+            painter.drawText(QPointF(box_x + pad, ty), k)
+            painter.setPen(val_pen)
+            painter.drawText(QPointF(box_x + pad + key_col_w + 10, ty), v)
+            ty += row_h
+
+        if raw_desc:
+            painter.setPen(key_pen)
+            painter.drawText(QPointF(box_x + pad, ty), raw_desc)
+        painter.restore()
+
     @staticmethod
     def _parse_distance_km(obj: SkyObject) -> float:
         import re
@@ -2563,7 +3103,32 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         SkyInteractionHandler.mouseMoveEvent(self, event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        SkyInteractionHandler.mouseReleaseEvent(self, event)
+        """左键释放: 未拖拽 = 点击拾取。优先级: SkyObject(卫星) ->
+        像素容差补拾取 -> 行星/恒星/DSO -> 反选。
+
+        不重委派 SkyInteractionHandler.mouseReleaseEvent: 它找不到 SkyObject
+        时会直接 on_object_picked(None) 反选, 行星就没有选中机会了。
+        拖拽收尾逻辑与其保持一致。
+        """
+        was_dragging = self._dragging
+        px, py = self._event_xy(event)
+        if was_dragging:
+            self._dragging = False
+            self.on_drag_state_changed(False)
+        elif self._press_px is not None:
+            size = (float(self.width()), float(self.height()))
+            az, alt = screen_to_sky(px, py, self.view_state,
+                                    self.projection, size)
+            obj = pick_object(az, alt, self.sky_objects)
+            if obj is None:
+                obj = self._find_object_at(px, py)
+            if obj is not None:
+                self.on_object_picked(obj)
+            else:
+                self.on_body_picked(self._find_body_at(px, py))
+        self._drag_origin_px = None
+        self._drag_last_px = None
+        self._press_px = None
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         """双击 goto：Stellarium 式缓动飞行（替代旧瞬移 look_at）。"""
@@ -2627,6 +3192,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._selected_info = None
             self._info_card_rect = None
             self._info_close_rect = None
+            # 卫星/行星选中态互斥清理
+            self._picked_body = None
+            self._body_info = None
             # 取消选中：隐藏调谐按钮 + 停跟踪（发信号让主窗口停环）
             self._tune_sat_name = None
             self._stop_track_ui()
@@ -2639,6 +3207,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self.update()
             return
         self._hovered_object = obj
+        # 卫星/行星选中态互斥: 选中卫星清掉行星卡
+        self._picked_body = None
+        self._body_info = None
         self._build_selected_info(obj)
         self.object_clicked.emit(obj)
         # 点星即"唰"：缓动飞到选中星（已在视野内时是短行程，仍有反馈）
@@ -2662,7 +3233,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         for obj in self._objects:
             if not obj.visible or not obj.is_above_horizon():
                 continue
-            pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
+            pos = self._sky_to_screen_finite(obj.azimuth_deg,
+                                             obj.elevation_deg)
+            if pos is None:
+                continue
             dist = math.hypot(pos.x() - x, pos.y() - y)
             if dist >= tolerance:
                 continue

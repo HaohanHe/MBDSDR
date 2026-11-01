@@ -57,4 +57,4 @@ include = ["mbdsdr_ai*"]
 exclude = ["mbdsdr_ai.tests*"]
 
 [tool.setuptools.package-data]
-mbdsdr_ai = ["locale/*.json"]
+mbdsdr_ai = ["locale/*.json", "data/*.json"]
