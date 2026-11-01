@@ -1541,7 +1541,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             pos = self._sky_to_screen(az, alt)
             if not self._on_screen(pos):
                 continue
-            r, bright, bloom = _stars.star_draw(s.vmag, self._bortle)
+            # 大气消光（Stellarium RefractionExtinction 机制）：有效星等
+            # = 视星等 + k/sin(alt)，地平附近星系统性变暗变小。
+            r, bright, bloom = _stars.star_draw(
+                s.vmag + _stars.extinction_delta_mag(alt), self._bortle)
             if r <= 0:
                 continue
             cr, cg, cb = _stars.bv_to_rgb(s.bv)

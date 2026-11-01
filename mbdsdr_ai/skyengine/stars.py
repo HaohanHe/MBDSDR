@@ -11,6 +11,8 @@ mbdsdr_ai/skyengine/stars.py — 亮星星表子集与星等渲染
     其中 R2AS = 180/pi*3600 ~ 206265 角秒/弧度 (Pogson 星等-照度定律, 等差 2.512x)。
   - 点大小/亮度：按星等做 gamma 近似映射到屏幕半径与亮度（人眼适应的简化近似）。
   - 颜色：B-V 色指数分段线性插值定色温（常用的黑体色温近似）。
+  - 大气消光：等厚大气 Δm = k/sin(alt)（Stellarium RefractionExtinction
+    同款机制），地平附近星系统性变暗。
 
 坐标: 恒星位置是 ICRF/J2000 赤道坐标, 经 celestial_geometry 坐标链
 (J2000 -> 岁差章动 -> 当前赤道 -> 地平) 投影到屏幕。
@@ -137,6 +139,26 @@ def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float, float]:
         bloom = min(1.0,
                     0.4 + (r - _BLOOM_MIN_R) / (_BLOOM_MAX_R - _BLOOM_MIN_R))
     return max(0.5, r), brightness, bloom
+
+
+# 消光参数：k=0.2 对应晴朗海平面大气（Stellarium 默认数量级）。
+EXTINCTION_K = 0.2
+_EXTINCTION_MAX_DM = 3.5      # Δm 上限：再多就是地平线雾霾，不给无穷
+_EXTINCTION_MIN_ALT = 0.5     # 仰角下限（度）：防 sin(alt)→0 奇异
+
+
+def extinction_delta_mag(alt_deg: float, k: float = EXTINCTION_K) -> float:
+    """大气消光星等增量 Δm = k/sin(alt)（等厚大气近似）。
+
+    alt 越高消光越小（天顶 Δm=k）；地平附近星系统性变暗——Stellarium
+    截图里地平线星更暗就是此机制。alt ≤ 0.5° 夹到 0.5° 防奇异，
+    返回值夹到 3.5 等。
+    """
+    alt = max(_EXTINCTION_MIN_ALT, min(90.0, float(alt_deg)))
+    s = math.sin(math.radians(alt))
+    if s <= 1e-9:
+        return _EXTINCTION_MAX_DM
+    return min(_EXTINCTION_MAX_DM, k / s)
 
 
 def bv_to_rgb(bv: float) -> tuple[int, int, int]:

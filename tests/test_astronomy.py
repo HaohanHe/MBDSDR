@@ -152,6 +152,37 @@ class TestStarsAndSatMeta(unittest.TestCase):
         self.assertEqual(star_draw(5.0, bortle=9), (0.0, 0.0, 0.0))
         self.assertGreater(star_draw(4.0, bortle=9)[0], 0.0)
 
+    def test_extinction_delta_mag_law(self):
+        # 等厚大气 Δm = k/sin(alt)：天顶 = k，alt=30° = 2k，单调随高度角减小。
+        from mbdsdr_ai.skyengine.stars import extinction_delta_mag, EXTINCTION_K
+        self.assertAlmostEqual(extinction_delta_mag(90.0), EXTINCTION_K,
+                               places=6)
+        self.assertAlmostEqual(extinction_delta_mag(30.0), 2 * EXTINCTION_K,
+                               places=6)
+        self.assertGreater(extinction_delta_mag(10.0),
+                           extinction_delta_mag(30.0))
+        self.assertGreater(extinction_delta_mag(5.0),
+                           extinction_delta_mag(10.0))
+
+    def test_extinction_delta_mag_clamped(self):
+        # 奇异防护：alt<=0 不炸、Δm 上限 3.5。
+        from mbdsdr_ai.skyengine.stars import (
+            extinction_delta_mag, _EXTINCTION_MAX_DM)
+        self.assertLessEqual(extinction_delta_mag(0.0), _EXTINCTION_MAX_DM)
+        self.assertLessEqual(extinction_delta_mag(-10.0), _EXTINCTION_MAX_DM)
+        self.assertGreater(extinction_delta_mag(0.0),
+                           extinction_delta_mag(30.0))
+
+    def test_extinction_makes_horizon_star_dimmer(self):
+        # 端到端语义：同一颗星，贴地平的有效渲染必须比天顶暗/小。
+        from mbdsdr_ai.skyengine.stars import (
+            star_draw, extinction_delta_mag)
+        vmag = 1.0
+        r_top, b_top, _ = star_draw(vmag + extinction_delta_mag(80.0))
+        r_hor, b_hor, _ = star_draw(vmag + extinction_delta_mag(5.0))
+        self.assertGreater(r_top, r_hor)
+        self.assertGreater(b_top, b_hor)
+
     def test_cospar_parse(self):
         from mbdsdr_ai.skyengine.satellites import cospar_from_tle
         self.assertEqual(

@@ -327,7 +327,11 @@ class GroundStation:
       - altitude:   海拔, 米
       - timezone:   IANA 时区名 (仅记录, 不参与数学计算)
 
-    关键旋转: matAltAzToEquatorial = Rz((GMST + lon)*DEG) * Ry((90 - lat)*DEG)
+    关键旋转 (θ = 本地恒星时, φ = 纬度, 均为弧度):
+      E(东)   = (-cosθ,        0,      -sinθ)
+      Z(天顶) = ( cosφ·sinθ,  sinφ,  -cosφ·cosθ)
+      N(北)   = Z × E
+      地平->赤道 = [N | E | -Z] (列),  赤道->地平 = 其转置。
     """
 
     def __init__(self, longitude_deg: float, latitude_deg: float,
@@ -342,11 +346,19 @@ class GroundStation:
     def altaz_to_equatorial_matrix(self, jd_ut1: float) -> np.ndarray:
         """地平系 -> 当前赤道系 旋转矩阵。
 
-          Rz((GMST + longitude)*DEG) * Ry((90-latitude)*DEG)
+        地平系基 (x=北, y=东, z=天底) 在当前赤道系 (y=NCP) 中的表达:
+          E = (-cosθ, 0, -sinθ),  Z = (cosφ·sinθ, sinφ, -cosφ·cosθ),
+          N = Z×E,  矩阵列 = [N, E, -Z]。
+        校验: 北天极 (0,1,0) 经转置后到 (cosφ, 0, -sinφ) = alt=φ 正北。
         """
-        lst = gmst(jd_ut1) + self.longitude       # 本地恒星时 (度)
-        R = rot_z(deg2rad(lst)) @ rot_y(deg2rad(90.0 - self.latitude))
-        return R
+        theta = deg2rad(gmst(jd_ut1) + self.longitude)   # 本地恒星时 (弧度)
+        phi = deg2rad(self.latitude)
+        east = np.array([-math.cos(theta), 0.0, -math.sin(theta)])
+        zenith = np.array([math.cos(phi) * math.sin(theta),
+                           math.sin(phi),
+                           -math.cos(phi) * math.cos(theta)])
+        north = np.cross(zenith, east)
+        return np.column_stack([north, east, -zenith])
 
     def equatorial_to_altaz_matrix(self, jd_ut1: float) -> np.ndarray:
         """当前赤道系 -> 地平系 旋转矩阵 (上式的转置)。

@@ -177,6 +177,46 @@ class TestProjection:
             assert daz < 2.0, f"az 往返 {az}->{az2}"
 
 
+class TestStarExtinctionWiring:
+    """_draw_stars 必须把大气消光灌进 star_draw（有效星等 = 视星等 + Δm(alt)）。"""
+
+    def test_effective_vmag_includes_extinction(self, monkeypatch):
+        from desktop.rf_sky_view import RFSkyView
+        from mbdsdr_ai.skyengine import stars as _stars
+
+        captured = []
+        real_star_draw = _stars.star_draw
+
+        def _spy(vmag, bortle=3):
+            captured.append(float(vmag))
+            return real_star_draw(vmag, bortle)
+
+        # 北极星：纬度 40° 处 alt≈40°、vmag=1.98，必在星表内
+        polaris = next(s for s in _stars.BRIGHT_STARS if s.name == "Polaris")
+        monkeypatch.setattr(_stars, "star_draw", _spy)
+        monkeypatch.setattr(_stars, "BRIGHT_STARS", [polaris])
+
+        v = RFSkyView()
+        v.set_observer(40.0, 116.0, 0.0)
+        v.resize(600, 600)
+        v._sky_brightness = 0.0
+        from PySide6.QtGui import QPixmap, QPainter
+        pm = QPixmap(600, 600)
+        pm.fill()
+        painter = QPainter(pm)
+        try:
+            v._draw_stars(painter)
+        finally:
+            painter.end()
+
+        assert captured, "star_draw 未被调用（星不在屏/未绘制）"
+        expected = polaris.vmag + _stars.extinction_delta_mag(40.0)
+        assert abs(captured[0] - expected) < 0.35, \
+            f"有效星等 {captured[0]} ≠ vmag+Δm(40°)≈{expected}"
+        # 消光确实加了正增量（不是裸 vmag）
+        assert captured[0] > polaris.vmag + 0.2
+
+
 # ----------------------------------------------------------------------
 class TestPaintingRobust:
     def test_paint_without_data(self):
