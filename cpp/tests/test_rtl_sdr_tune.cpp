@@ -72,9 +72,26 @@ struct FakeRtl {
     static int resetBuf(void*) { return 0; }
     static void cancelAsync(void*) {}
     static int readSync(void*, unsigned char*, uint32_t, uint32_t*) { return -1; }
+    static int getTunerType(void*) { return 5; }   // R820T on the wire enum
 };
 
 const RtlLibOps g_fakeOps{
+    &FakeRtl::open,             &FakeRtl::close,
+    &FakeRtl::setCF,            &FakeRtl::getCF,
+    &FakeRtl::setSR,            &FakeRtl::setBW,
+    &FakeRtl::setGainMode,      &FakeRtl::setGain,
+    &FakeRtl::getGains,        &FakeRtl::getGain,
+    &FakeRtl::setAgc,           &FakeRtl::setDS,
+    &FakeRtl::setOffT,          &FakeRtl::setBias,
+    &FakeRtl::setPpm,           &FakeRtl::resetBuf,
+    &FakeRtl::cancelAsync,      &FakeRtl::readSync,
+    &FakeRtl::getTunerType
+};
+
+// Same fake minus the appended getTunerType entry: an older positional init
+// compiles with the tail zero-filled, and the source must degrade to the
+// honest "未知调谐器" instead of crashing or inventing an identity.
+const RtlLibOps g_fakeOpsNoTunerType{
     &FakeRtl::open,             &FakeRtl::close,
     &FakeRtl::setCF,            &FakeRtl::getCF,
     &FakeRtl::setSR,            &FakeRtl::setBW,
@@ -105,6 +122,9 @@ private slots:
     void startSetsBandwidthAuto();
     void openFailureIsHonest();
     void noOpsMeansStubStartFails();
+    void capabilitiesReportRealIdentity();
+    void capabilitiesWithoutTunerTypeQueryAreHonest();
+    void capabilitiesNoDeviceIsEmpty();
 };
 
 // L3: the first two runtime writes are lost (rc ok, but the PLL parks 1 kHz
@@ -173,6 +193,48 @@ void TestRtlSdrTune::noOpsMeansStubStartFails() {
     QVERIFY(!src.start());
     QVERIFY(!src.isConnected());
     QCOMPARE(src.name(), QStringLiteral("RTL-SDR (unsupported)"));
+}
+
+// The UI device-info panel reads capabilities(); while a device streams the
+// source must report the tuner identity the driver returned plus the real
+// driver-known ranges -- never the base-class "no device" empty state.
+void TestRtlSdrTune::capabilitiesReportRealIdentity() {
+    RtlSdrSource src;
+    QVERIFY(!src.capabilities().connected);   // honest empty before start
+    QVERIFY(src.start());
+    const DeviceCapabilities c = src.capabilities();
+    QVERIFY(c.connected);
+    QVERIFY(c.deviceName.contains("R820T"));  // fake getTunerType returns 5
+    QCOMPARE(c.tunableMinHz, 24.0e6);
+    QCOMPARE(c.tunableMaxHz, 1766.0e6);
+    QVERIFY(c.provenance.contains(QStringLiteral("本机 librtlsdr 驱动查询")));
+    src.stop();
+    QVERIFY(!src.capabilities().connected);   // honest empty after stop
+}
+
+// An ops table without the getTunerType entry (older positional test init):
+// capabilities stay connected but the tuner is honestly Unknown -- no crash,
+// no fabricated identity, no guessed range (0 = 未知).
+void TestRtlSdrTune::capabilitiesWithoutTunerTypeQueryAreHonest() {
+    rtlSetLibOpsForTesting(&g_fakeOpsNoTunerType);
+    RtlSdrSource src;
+    QVERIFY(src.start());
+    const DeviceCapabilities c = src.capabilities();
+    QVERIFY(c.connected);
+    QVERIFY(c.deviceName.contains(QStringLiteral("未知调谐器")));
+    QVERIFY(c.tunableMinHz == 0.0);
+    QVERIFY(c.tunableMaxHz == 0.0);
+    src.stop();
+}
+
+// start() that never opened a device leaves the honest empty state untouched.
+void TestRtlSdrTune::capabilitiesNoDeviceIsEmpty() {
+    FakeRtl::inst().openSucceeds = false;
+    RtlSdrSource src;
+    QVERIFY(!src.start());
+    QVERIFY(!src.capabilities().connected);
+    QVERIFY(src.capabilities().deviceName.isEmpty()
+           || src.capabilities().deviceName.contains(QStringLiteral("未连接")));
 }
 
 QTEST_MAIN(TestRtlSdrTune)

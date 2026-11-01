@@ -253,8 +253,12 @@ MainWindow::MainWindow(QWidget* parent)
     {
         auto* freqTimer = new QTimer(this);
         connect(freqTimer, &QTimer::timeout, this, [this, bigFreqLabel]() {
+            static int hb = 0;
+            const bool logHb = qEnvironmentVariableIsSet("MBDSDR_LOG_FILE");
+            if (logHb) qInfo("[hb] freq-timer enter #%d", ++hb);   // before engine call
             if (!engine_) return;
             const double hz = engine_->centerFreq();
+            if (logHb) qInfo("[hb] freq-timer f0=%.0f #%d", hz, hb);  // after engine call
             if (hz <= 0.0) return;
             bigFreqLabel->setFrequency(static_cast<qint64>(std::llround(hz)));
         });
@@ -1398,6 +1402,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     // Stretch the central tab bar so tabs fill the container width (eliminates
     // the ~400px black empty rectangle to the right of 频谱/世界/气象/时空视图).
+    // Overflow must stay REACHABLE: at narrow windows the five tabs' natural
+    // width exceeds the bar and the tail (VNA) was clipped to "V" with no way
+    // to select it -- scroll buttons kick in exactly when expanding can't fit.
+    centerTabs_->setUsesScrollButtons(true);
+    centerTabs_->setElideMode(Qt::ElideRight);
     if (auto* tb = centerTabs_->tabBar()) {
         tb->setExpanding(true);
         tb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);

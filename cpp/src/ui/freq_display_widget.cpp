@@ -21,6 +21,31 @@ inline int digitIndexForChar(int charIndex) {
     if (charIndex == 3 || charIndex == 7) return -1;  // separator dots
     return charIndex - (charIndex / 4);               // 0,1,2, 4,5,6, 8,9,10 -> 0..8
 }
+
+// Measured geometry of the 11-char display string. The digit advance and the
+// dot advance can DIFFER (the style-hinted font is not guaranteed monospace),
+// so painting, sizing and hit-testing all walk this one shared layout --
+// assuming one advance for every char overflows the widget by ~2 digits.
+struct FreqTextLayout {
+    int x[11];        // x offset of each char, relative to the text origin
+    int advance[11];  // width reserved for each char
+    int width;        // total content width
+};
+FreqTextLayout freqTextLayout(const QFontMetrics& fm) {
+    const int chW  = fm.horizontalAdvance(QLatin1Char('0'));
+    const int dotW = fm.horizontalAdvance(QLatin1Char('.'));
+    FreqTextLayout L;
+    int x = 0;
+    for (int i = 0; i < 11; ++i) {
+        const bool isDot = (i == 3 || i == 7);
+        L.x[i] = x;
+        L.advance[i] = isDot ? dotW : chW;
+        x += L.advance[i];
+    }
+    L.width = x;
+    return L;
+}
+constexpr int kTextOriginX = 8;   // left padding before the first digit
 }  // namespace
 
 FreqDisplayWidget::FreqDisplayWidget(QWidget* parent) : QWidget(parent) {
@@ -33,9 +58,10 @@ FreqDisplayWidget::FreqDisplayWidget(QWidget* parent) : QWidget(parent) {
     digitFont_.setBold(true);
     digitFont_.setStyleHint(QFont::Monospace);
     setFont(digitFont_);
-    setMinimumWidth(QFontMetrics(digitFont_).horizontalAdvance(
-                        QStringLiteral("000.000.000"))
-                    + 16);
+    // Width must cover the PAINTED extent (9 digits + 2 dots, each at its real
+    // advance), not the advance of the string -- on a non-monospace font the
+    // per-char sum is wider and the last digit painted past the widget edge.
+    setMinimumWidth(freqTextLayout(QFontMetrics(digitFont_)).width + 2 * kTextOriginX);
     setMinimumHeight(QFontMetrics(digitFont_).height() + 8);
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     setCursor(Qt::PointingHandCursor);
@@ -51,7 +77,6 @@ void FreqDisplayWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setFont(digitFont_);
     const QFontMetrics fm(digitFont_);
-    const int chW = fm.horizontalAdvance(QLatin1Char('0'));
     const int textY = (height() + fm.ascent() - fm.descent()) / 2;
 
     // Render DDD.DDD.DDD digit-by-digit so leading zeros can dim.
@@ -69,29 +94,33 @@ void FreqDisplayWidget::paintEvent(QPaintEvent*) {
     bool seenSignificant = false;
     const QColor bright(QString::fromUtf8(tokens::kAccent));
     const QColor dim = bright.darker(280);
-    int x = 8;
+    const FreqTextLayout L = freqTextLayout(fm);
+    int charIdx = 0;
     for (int i = 0; i < kDigitCount; ++i) {
         if (digits[i] != 0) seenSignificant = true;
         const bool isLast = (i == kDigitCount - 1);
         p.setPen((seenSignificant || isLast) ? bright : dim);
-        p.drawText(x, textY, QString::number(digits[i]));
-        x += chW;
+        p.drawText(kTextOriginX + L.x[charIdx], textY, QString::number(digits[i]));
+        ++charIdx;
         if (i == 2 || i == 5) {  // group separators after 3rd and 6th digit
             p.setPen(dim);
-            p.drawText(x, textY, QStringLiteral("."));
-            x += chW;
+            p.drawText(kTextOriginX + L.x[charIdx], textY, QStringLiteral("."));
+            ++charIdx;
         }
     }
 }
 
 int FreqDisplayWidget::digitAtX(int x) const {
-    const QFontMetrics fm(digitFont_);
-    const int chW = fm.horizontalAdvance(QLatin1Char('0'));
-    const int x0 = 8;
-    if (x < x0) return -1;
-    const int charIdx = (x - x0) / chW;
-    if (charIdx < 0 || charIdx > 10) return -1;
-    return digitIndexForChar(charIdx);
+    const FreqTextLayout L = freqTextLayout(QFontMetrics(digitFont_));
+    const int pos = x - kTextOriginX;
+    if (pos < 0) return -1;
+    // Walk the shared layout (dots are narrower than digits on non-monospace
+    // fonts, so a uniform-divide hit test lands on the wrong digit).
+    for (int i = 0; i < 11; ++i) {
+        if (pos < L.x[i] + L.advance[i])
+            return digitIndexForChar(i);
+    }
+    return -1;
 }
 
 void FreqDisplayWidget::applyDigitDelta(int digitIndex, int dir) {

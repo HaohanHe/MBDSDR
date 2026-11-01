@@ -72,8 +72,13 @@ DeviceCapabilities noDeviceCapabilities() {
     return c;
 }
 
-DeviceCapabilities rtlCapabilitiesFromHandshake(int tunerTypeRaw, int gainCount,
-                                                const QString& endpoint) {
+// Shared fill: identity from the raw tuner-type enum, ranges from the driver
+// constant table (unknown tuner -> 0 = 未知, never a guessed number). The
+// provenance prefix differs between the rtl_tcp handshake path and the local
+// in-process driver query path -- the numbers are identical, the SOURCE of
+// the identity claim must be stated honestly.
+DeviceCapabilities fillRtlCapabilities(int tunerTypeRaw, int gainCount,
+                                       const QString& provenancePrefix) {
     DeviceCapabilities c;
     c.connected = true;
     const auto tuner = static_cast<RtlTuner>(tunerTypeRaw);
@@ -87,19 +92,32 @@ DeviceCapabilities rtlCapabilitiesFromHandshake(int tunerTypeRaw, int gainCount,
     c.sampleRateMaxHz = kRtlsdrSrMaxHz;
 
     const bool tunerKnown = (range.minHz > 0.0);
-    c.provenance = QStringLiteral(
-        "设备身份来自 rtl_tcp 握手（RTL0，tuner_type=%1%2）；"
-        "调谐范围%3；采样率范围按 RTL2832U 规则（>225k、≤3.2M、避开 300k–900k 死区）")
+    c.provenance = QStringLiteral("%1（tuner_type=%2%3）；"
+        "调谐范围%4；采样率范围按 RTL2832U 规则（>225k、≤3.2M、避开 300k–900k 死区）")
+        .arg(provenancePrefix)
         .arg(tunerTypeRaw)
         .arg(tunerKnown ? QString() : QStringLiteral("（未识别）"))
         .arg(tunerKnown
              ? QStringLiteral("按 librtlsdr 驱动常量表")
              : QStringLiteral("驱动常量表无此型号，标注为未知"));
-    if (!endpoint.isEmpty())
-        c.provenance += QStringLiteral(" · %1").arg(endpoint);
     if (gainCount > 0)
         c.provenance += QStringLiteral(" · 增益档位 %1").arg(gainCount);
     return c;
+}
+
+DeviceCapabilities rtlCapabilitiesFromHandshake(int tunerTypeRaw, int gainCount,
+                                                const QString& endpoint) {
+    DeviceCapabilities c = fillRtlCapabilities(
+        tunerTypeRaw, gainCount, QStringLiteral("设备身份来自 rtl_tcp 握手（RTL0）"));
+    if (!endpoint.isEmpty())
+        c.provenance += QStringLiteral(" · %1").arg(endpoint);
+    return c;
+}
+
+DeviceCapabilities rtlCapabilitiesLocal(int tunerTypeRaw, int gainCount) {
+    return fillRtlCapabilities(
+        tunerTypeRaw, gainCount,
+        QStringLiteral("设备身份来自本机 librtlsdr 驱动查询（rtlsdr_get_tuner_type）"));
 }
 
 QList<double> buildSampleRateOptions(const DeviceCapabilities& caps) {

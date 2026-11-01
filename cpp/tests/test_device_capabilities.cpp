@@ -21,6 +21,8 @@ private slots:
     void handshakeE4000();
     void handshakeFcinian();
     void unknownTunerIsHonest();
+    void localR820T();
+    void localProvenanceNamesDriverQuery();
     void noDeviceIsEmpty();
     void optionsFromRange();
     void optionsFilteredByNarrowRange();
@@ -69,6 +71,30 @@ void TestDeviceCapabilities::unknownTunerIsHonest() {
     QVERIFY(c.tunableMinHz == 0.0);
     QVERIFY(c.tunableMaxHz == 0.0);
     QVERIFY(c.provenance.contains(QStringLiteral("未知")));
+}
+
+void TestDeviceCapabilities::localR820T() {
+    // Locally opened device (rtlsdr_get_tuner_type): same real ranges as the
+    // handshake path, tuner identity in the name, gain steps in the note.
+    DeviceCapabilities c = rtlCapabilitiesLocal(5, 29);
+    QVERIFY(c.connected);
+    QVERIFY(c.deviceName.contains("R820T"));
+    QCOMPARE(c.tunableMinHz, 24.0e6);
+    QCOMPARE(c.tunableMaxHz, 1766.0e6);
+    QCOMPARE(c.sampleRateMinHz, 250000.0);
+    QCOMPARE(c.sampleRateMaxHz, 3200000.0);
+    QVERIFY(c.provenance.contains(QStringLiteral("增益档位 29")));
+}
+
+void TestDeviceCapabilities::localProvenanceNamesDriverQuery() {
+    // The provenance must name the LOCAL driver query -- not the rtl_tcp
+    // handshake -- as the identity source. Same numbers, honest attribution.
+    DeviceCapabilities c = rtlCapabilitiesLocal(2, 0);
+    QVERIFY(c.provenance.contains(QStringLiteral("本机 librtlsdr 驱动查询")));
+    QVERIFY(!c.provenance.contains(QStringLiteral("RTL0")));
+    // FC0012 range table entry carries through the local path too.
+    QCOMPARE(c.tunableMinHz, 22.0e6);
+    QCOMPARE(c.tunableMaxHz, 948.6e6);
 }
 
 void TestDeviceCapabilities::noDeviceIsEmpty() {

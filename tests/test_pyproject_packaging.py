@@ -71,7 +71,8 @@ def _declared() -> set[str]:
     proj = _meta()["project"]
 
     def norm(dep: str) -> str:
-        return dep.split("[")[0].split(">")[0].split("=")[0].strip().lower()
+        # 名字段止于任一版本约束符（"[<>=",如 "pyrtlsdr<0.4" -> "pyrtlsdr"）。
+        return re.split(r"[<>=\[]", dep, maxsplit=1)[0].strip().lower()
 
     out = {norm(d) for d in proj["dependencies"]}
     for group in proj.get("optional-dependencies", {}).values():

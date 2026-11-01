@@ -53,6 +53,12 @@ public:
     QString name() const override;
     bool isConnected() const override;
 
+    /// Real device capabilities for the UI device-info panel / sample-rate
+    /// combo. Honest empty state when no device is streaming; otherwise the
+    /// tuner identity read from the driver plus the gain-step count learned
+    /// at start().
+    DeviceCapabilities capabilities() const override;
+
     /// Human-readable summary of the front-end options, e.g.
     /// "DS=off AGC=off TunerAGC=manual BiasT=off PPM=0.0". Purely diagnostic.
     QString rtlOptionsSummary() const;
@@ -79,6 +85,9 @@ private:
     double fs_ = tokens::kDefaultSampleRateHz;
     double gainDb_ = 20.0;
     bool   running_ = false;
+    // Tuner identity (raw enum rtlsdr_tuner) read from the driver at start();
+    // 0 = Unknown (never queried, or an ops table without getTunerType).
+    int    tunerType_ = 0;
 
     // Discrete gain table (filled from rtlsdr_get_tuner_gains on start under
     // HAVE_RTLSDR; empty in stub/offline builds). setGain() snaps into it.

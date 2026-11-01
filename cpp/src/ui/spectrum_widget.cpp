@@ -840,6 +840,9 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
     QFontMetrics fm(infoLabel_->font());
     infoLabel_->setText(fm.elidedText(info, Qt::ElideRight,
                                       qMax(50, infoLabel_->width())));
+    // The strip elides to the leftover width; the tooltip carries the full
+    // readout so the clipped text stays discoverable.
+    infoLabel_->setToolTip(info);
 }
 
 void SpectrumWidget::setDbRange(float minDb, float maxDb) {

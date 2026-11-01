@@ -762,7 +762,12 @@ private:
     // thread (the reason the mailbox exists).
     void applyIfIdle();
 
-    std::unique_ptr<ISource> source_;
+    // shared_ptr (NOT unique_ptr): the run() loop snapshots this under
+    // sourceMutex_ and then RELEASES the lock across the blocking readIQ, so
+    // the object must stay alive even if the UI thread swaps source_ mid-read
+    // (2026-11-01 freeze fix -- holding sourceMutex_ across the USB read
+    // starved every UI waiter at ~100% lock duty cycle).
+    std::shared_ptr<ISource> source_;
     IQFrontend frontend_;
     VfoManager vfoManager_;
     // Phase55 block3: optional live Doppler control surface (set by MainWindow).
@@ -956,6 +961,16 @@ private:
     // ~1 Hz source telemetry throttle (hardware readback push to the status bar).
     QElapsedTimer telemetryClock_;
     qint64 lastTelemetryMs_ = -1;
+    // Per-iteration wall-time probe for the MBDSDR_LOG_FILE heartbeat: if one
+    // engine pass holds sourceMutex_ for pathological stretches, the UI
+    // starves -- this names the number.
+    QElapsedTimer loopIterTimer_;
+    qint64 loopIterMs_ = 0;
+
+    // Lock-free LO readback for centerFreq(): refreshed by the run loop every
+    // iteration (and on every source swap) so UI callers never touch
+    // sourceMutex_, which is held across the blocking USB read.
+    std::atomic<double> f0SnapshotHz_{0.0};
 
     // Real measured noise floor (total-power domain, dBFS), slowly tracked by an
     // exponential average across frames so strong signals don't lift it. Used to

@@ -21,6 +21,35 @@
 #include "heap_probe.h"
 #include "ui/main_window.h"
 
+#include <QFile>
+#include <QMutex>
+#include <QThread>
+#include <QDateTime>
+
+// Optional file logging (diagnostics in the field): MBDSDR_LOG_FILE=<path>
+// appends every Qt message (all threads) with a timestamp and thread id, so a
+// freeze can be post-mortemed by reading the tail -- the last line before
+// silence names the thread that went quiet last. Off by default; the handler
+// exists only while the process runs.
+namespace {
+QFile* g_logFile = nullptr;
+QMutex g_logMu;
+qint64 g_logT0 = 0;
+void logToFile(QtMsgType type, const QMessageLogContext& ctx, const QString& msg) {
+    QMutexLocker lk(&g_logMu);
+    if (!g_logFile) return;
+    const QString line = QStringLiteral("[%1][t%2][%3] %4")
+        .arg(QDateTime::currentMSecsSinceEpoch() - g_logT0, 8)
+        .arg(QString::number(reinterpret_cast<quintptr>(QThread::currentThreadId())),
+             ctx.category ? QString::fromLatin1(ctx.category) : QString(),
+             msg);
+    g_logFile->write(line.toUtf8());
+    g_logFile->write("\n");
+    g_logFile->flush();
+    (void)type;
+}
+} // namespace
+
 static void printHelp() {
     qInfo().noquote() <<
         "MBDSDR C++ -- native SDR desktop application\n"
@@ -92,6 +121,21 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("mbdsdr");
     QApplication::setApplicationVersion("0.2.0");
+
+    // MBDSDR_LOG_FILE=<path>: timestamped all-thread message log for post-mortem
+    // freeze diagnosis (the tail names the last thread still talking).
+    if (qEnvironmentVariableIsSet("MBDSDR_LOG_FILE")) {
+        g_logFile = new QFile(QString::fromLocal8Bit(qgetenv("MBDSDR_LOG_FILE")));
+        if (g_logFile->open(QIODevice::Append | QIODevice::Text)) {
+            g_logT0 = QDateTime::currentMSecsSinceEpoch();
+            qInstallMessageHandler(logToFile);
+            qInfo("[log] file logging enabled");
+        } else {
+            delete g_logFile;
+            g_logFile = nullptr;
+            qWarning("[mbdsdr] MBDSDR_LOG_FILE set but open failed");
+        }
+    }
 
     // i18n：按 ui/language 装翻译器（Qt Linguist .qm，构建期产出到可执行文件
     // 旁 i18n/）。源语言 zh_CN 不装翻译器（tr() 直接回源文）；找不到 .qm 时

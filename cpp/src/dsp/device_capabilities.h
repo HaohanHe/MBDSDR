@@ -70,6 +70,11 @@ QString rtlTunerName(RtlTuner t);
 DeviceCapabilities rtlCapabilitiesFromHandshake(int tunerTypeRaw, int gainCount,
                                                  const QString& endpoint);
 
+// Same real fill for a LOCALLY opened device (rtlsdr_get_tuner_type in-process
+// instead of the rtl_tcp RTL0 handshake). Identical ranges; the provenance
+// names the local driver query as the identity source.
+DeviceCapabilities rtlCapabilitiesLocal(int tunerTypeRaw, int gainCount);
+
 // Honest empty state (no real device). connected=false, all ranges 0.
 DeviceCapabilities noDeviceCapabilities();
 

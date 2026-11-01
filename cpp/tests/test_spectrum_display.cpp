@@ -73,6 +73,11 @@ private slots:
     // ring at the new width -- old rows are DROPPED (count resets), never resampled
     // or padded from 2048->1024 bins.
     void fftSizeChangeRebuildsWaterfallRingHonestly();
+    // Incremental-waterfall regression (perf rewrite): the baked snapshot must
+    // still show the newest frame at row 0 and age older rows one row per push,
+    // and a manual range change must re-colour the WHOLE stored history.
+    void incrementalHistoryShiftAgesRowsDown();
+    void manualRangeChangeRecoloursWholeHistory();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -1334,6 +1339,66 @@ void TestSpectrumDisplay::fftSizeChangeRebuildsWaterfallRingHonestly() {
     for (int i = 0; i < 29; ++i)
         w.setSpectrum(makeFrame(1024, 512, -20.0f, -100.0f));
     QCOMPARE(w.waterfallRowCountForTest(), 30);
+}
+
+// Performance path changed pushHistoryRow() from a full O(depth*bins)
+// re-materialise to a one-row shift + top-row colour. These cases pin the
+// SEMANTICS so the optimisation can never silently age rows wrong.
+void TestSpectrumDisplay::incrementalHistoryShiftAgesRowsDown() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    // Pin the scale: auto-range easing would legitimately re-colour rows and
+    // blur what this case is trying to pin (row ORDER, not scale tracking).
+    w.setAutoRangeOn(false);
+    w.setDbRange(-100.0f, 0.0f);
+
+    const int bins = 256;
+    const int peakBin = 100;
+
+    // Frame A: quiet floor with one loud carrier at peakBin.
+    w.setSpectrum(makeFrame(bins, peakBin, -10.0f, -80.0f));
+    const QImage& afterA = w.historyForTest();
+    QCOMPARE(afterA.width(), bins);
+    const QRgb aPeak = afterA.pixel(peakBin, 0);
+    const QRgb aFloor = afterA.pixel(peakBin + 50, 0);
+    QVERIFY(aPeak != aFloor);                 // the carrier is really painted
+    QCOMPARE(afterA.pixel(peakBin, 1), qRgb(0, 0, 0));   // ring tail stays black
+
+    // Frame B: different floor, no carrier. Newest row shows B; A's carrier
+    // must age exactly one row down with its colour intact (same scale).
+    w.setSpectrum(makeFrame(bins, -1, 0.0f, -60.0f));
+    const QImage& afterB = w.historyForTest();
+    QCOMPARE(afterB.pixel(peakBin, 0), afterB.pixel(peakBin + 50, 0)); // B floor flat
+    QVERIFY(afterB.pixel(peakBin, 0) != aPeak);          // B floor != A carrier
+    QCOMPARE(afterB.pixel(peakBin, 1), aPeak);           // A aged down one row
+    QCOMPARE(afterB.pixel(peakBin, 2), qRgb(0, 0, 0));   // tail still black
+
+    // Frame C pushes A's carrier to row 2: the shift is per-push, never skips.
+    w.setSpectrum(makeFrame(bins, -1, 0.0f, -70.0f));
+    const QImage& afterC = w.historyForTest();
+    QCOMPARE(afterC.pixel(peakBin, 2), aPeak);
+}
+
+void TestSpectrumDisplay::manualRangeChangeRecoloursWholeHistory() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setAutoRangeOn(false);
+    w.setDbRange(-100.0f, 0.0f);
+
+    const int bins = 256;
+    const int peakBin = 100;
+    for (int i = 0; i < 5; ++i)
+        w.setSpectrum(makeFrame(bins, peakBin, -10.0f, -80.0f));
+    const QRgb before = w.historyForTest().pixel(peakBin, 3);  // an aged row
+
+    // Drag the manual range: EVERY stored row must track the new scale
+    // immediately, not just rows pushed afterwards.
+    w.setDbRange(-100.0f, -40.0f);
+    const QImage& after = w.historyForTest();
+    QVERIFY(after.pixel(peakBin, 3) != before);
+    QVERIFY(after.pixel(peakBin, 0) != after.pixel(peakBin + 50, 0));
 }
 
 QTEST_MAIN(TestSpectrumDisplay)

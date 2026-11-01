@@ -169,14 +169,17 @@ double SpectrumEngine::centerFreq() const {
     // Async tuning (mailbox) means the source LO can lag the commanded value by
     // one engine tick. Report a pending command immediately (the dial/source is
     // driven to exactly this value on the next loop); otherwise read the LO.
+    // The LO value comes from an atomic snapshot refreshed by the run loop --
+    // NEVER take sourceMutex_ here: that mutex is held across the blocking USB
+    // read (~100% duty cycle at real sources), and a UI-thread waiter was
+    // measured starving for ~7 s against it (2026-11-01 real-hardware freeze).
     double pendingHz = 0.0;
     {
         QMutexLocker cl(&const_cast<QMutex&>(ctrlMutex_));
         if (pending_.dCenterFreq) pendingHz = pending_.centerFreqHz;
     }
-    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
-    const double actual = source_ ? source_->centerFreq() : 0.0;
-    return pendingHz > 0.0 ? pendingHz : actual;
+    if (pendingHz > 0.0) return pendingHz;
+    return f0SnapshotHz_.load();
 }
 
 DeviceCapabilities SpectrumEngine::sourceCapabilities() const {
@@ -498,6 +501,7 @@ double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz,
         {
             QMutexLocker lk(&sourceMutex_);
             source_->setCenterFreq(f);
+            f0SnapshotHz_.store(f);   // keep centerFreq()'s lock-free read truthful
             source_->readIQ(iq);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -529,7 +533,10 @@ std::size_t SpectrumEngine::captureForCalibration(
     centreHzOut = 0.0;
     if (!source_) return 0;
 
-    if (tuneHz >= 0.0) source_->setCenterFreq(tuneHz);
+    if (tuneHz >= 0.0) {
+        source_->setCenterFreq(tuneHz);
+        f0SnapshotHz_.store(tuneHz);   // centerFreq() reads this lock-free
+    }
 
     // Chunked pull: readIQ fills exactly out.size() for live sources (blocks
     // until ready) and loops the offline file on EOF, so a short read only
@@ -584,7 +591,10 @@ bool SpectrumEngine::exportIqSegment(int sampleCount, double tuneHz,
             errorOut = QString::fromUtf8("无 IQ 数据可导出：源未运行、无硬件且未打开离线文件");
             return false;
         }
-        if (tuneHz >= 0.0) source_->setCenterFreq(tuneHz);
+        if (tuneHz >= 0.0) {
+        source_->setCenterFreq(tuneHz);
+        f0SnapshotHz_.store(tuneHz);   // centerFreq() reads this lock-free
+    }
 
         constexpr std::size_t kChunk = 8192;
         const std::size_t target = static_cast<std::size_t>(sampleCount);
@@ -655,6 +665,7 @@ bool SpectrumEngine::tryConnectRtl() {
         source_ = std::move(rtl);
         reconnectPending_ = false;   // manual action cancels any retry
         updateCapsSnapshotLocked();
+    f0SnapshotHz_.store(source_ ? source_->centerFreq() : 0.0);
         emit sourceChanged("RTL-SDR", true);
         return true;
     }
@@ -689,6 +700,7 @@ bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
         reconnectPending_ = false;   // manual action cancels any retry
         realSourceActive_ = true;
         updateCapsSnapshotLocked();
+    f0SnapshotHz_.store(source_ ? source_->centerFreq() : 0.0);
         emit sourceChanged(QString("rtl_tcp %1:%2").arg(host).arg(port), true);
         return true;
     }
@@ -751,6 +763,7 @@ bool SpectrumEngine::openOfflineFile(const QString& path, double rawSampleRateHz
         realSourceActive_ = false;     // offline file is NOT hardware
         reconnectPending_ = false;
         updateCapsSnapshotLocked();
+    f0SnapshotHz_.store(source_ ? source_->centerFreq() : 0.0);
         needDemodReset_.store(true);   // reconfigure channelizer/decimator
         emit sourceChanged(source_->name(), false);
         return true;
@@ -868,6 +881,7 @@ void SpectrumEngine::installIdleSourceLocked() {
     realSourceActive_ = false;
     reconnectPending_ = false;
     updateCapsSnapshotLocked();
+    f0SnapshotHz_.store(source_ ? source_->centerFreq() : 0.0);
 }
 
 void SpectrumEngine::setTestSourceEnabled(bool on) {
@@ -885,6 +899,7 @@ void SpectrumEngine::setTestSourceEnabled(bool on) {
         realSourceActive_ = false;
         reconnectPending_ = false;
         updateCapsSnapshotLocked();
+    f0SnapshotHz_.store(source_ ? source_->centerFreq() : 0.0);
         emit sourceChanged(source_->name(), false);
     } else if (!on && dynamic_cast<TestSignalSource*>(source_.get())) {
         source_->stop();
@@ -893,6 +908,7 @@ void SpectrumEngine::setTestSourceEnabled(bool on) {
         realSourceActive_ = false;
         reconnectPending_ = false;
         updateCapsSnapshotLocked();
+    f0SnapshotHz_.store(source_ ? source_->centerFreq() : 0.0);
         emit sourceChanged(source_->name(), false);
     }
 }
@@ -1128,6 +1144,7 @@ bool SpectrumEngine::vfoSetOffset(int id, double targetHz) {
         // offsets (= freqHz - new center) are recomputed continuously by
         // VfoManager::process() on the next run() frame.
         source_->setCenterFreq(targetHz);
+        f0SnapshotHz_.store(targetHz);   // keep centerFreq()'s lock-free read truthful
         retuned = true;
     }
     // In-band move (or just after a retune): only record this VFO's absolute
@@ -1358,6 +1375,10 @@ void SpectrumEngine::applyControlCommandsLocked() {
 
     if (p.dCenterFreq) {
         if (source_) source_->setCenterFreq(p.centerFreqHz);
+        // centerFreq() reads this snapshot once the pending flag is drained;
+        // keep it in step so a set-then-readback never sees a stale/zeroed
+        // value from before the first run() frame.
+        f0SnapshotHz_.store(p.centerFreqHz);
         // Tuning moves the SELECTED VFO with it (kept at offset 0), like the
         // legacy single-channel receiver; other VFOs keep absolute frequencies.
         if (VfoChannel* sel = vfoManager_.selected()) sel->freqHz = p.centerFreqHz;
@@ -1428,34 +1449,54 @@ void SpectrumEngine::run() {
     while (running_.load()) {
         int n = fftSize_.load();
 
-        QMutexLocker lk(&sourceMutex_);
+        // Per-iteration wall time of the PREVIOUS pass (lock hold + sleep), so
+        // the MBDSDR_LOG_FILE heartbeat can prove whether the engine starves
+        // the UI by holding sourceMutex_ for pathological stretches.
+        loopIterMs_ = loopIterTimer_.restart();
 
-        // Apply queued set commands on THIS (engine) thread before touching the
-        // device, so GUI/headless callers never block on USB tuning.
-        applyControlCommandsLocked();
-
-        if (needDemodReset_.load()) { rebuildDemod(); needDemodReset_.store(false); }
-
-        const bool real = source_->isConnected();
-        const double sr = source_->sampleRate();
-        const int D = std::max(1, vfoManager_.maxDecimation());
-
-        // Real sources: blocking reads pace to wall-clock. Synthetic sources have
-        // no hardware clock, but we still read ~25 ms of simulated time per loop
-        // (aligned to a whole number of decimation branches) so the offline
-        // demod chain advances at near wall-clock speed and loops like the
-        // Costas/timing PLL converge within a few seconds instead of needing
-        // tens of seconds of wall-clock for ~1.3 s of simulated audio. The 33 ms
-        // sleep below still paces the loop. The spectrum FFT always uses only
-        // the first n samples (unchanged).
+        // ---- Phase A: SHORT lock. Apply queued set commands on THIS (engine)
+        // thread and snapshot everything the read needs. The blocking read
+        // below must NOT run under sourceMutex_: a real source blocks ~25 ms
+        // per iteration and holding the lock across it starved every UI-thread
+        // waiter (tuning, connect, capabilities, status readback) for seconds
+        // -- the 2026-11-01 "UI freezes / ~20 s refresh" root cause. SDR++ does
+        // the same: the stream thread owns the device and the UI talks to it
+        // via commands, never via a lock held across the read.
+        std::shared_ptr<ISource> src;
+        bool real;
+        double sr;
         std::size_t wantN;
         {
+            QMutexLocker lk(&sourceMutex_);
+            applyControlCommandsLocked();
+            if (needDemodReset_.load()) { rebuildDemod(); needDemodReset_.store(false); }
+            src = source_;   // shared_ptr: survives a UI-side swap during the read
+            real = src->isConnected();
+            sr = src->sampleRate();
+            const int D = std::max(1, vfoManager_.maxDecimation());
+            // Real sources: blocking reads pace to wall-clock. Synthetic sources have
+            // no hardware clock, but we still read ~25 ms of simulated time per loop
+            // (aligned to a whole number of decimation branches) so the offline
+            // demod chain advances at near wall-clock speed and loops like the
+            // Costas/timing PLL converge within a few seconds instead of needing
+            // tens of seconds of wall-clock for ~1.3 s of simulated audio. The 33 ms
+            // sleep below still paces the loop. The spectrum FFT always uses only
+            // the first n samples (unchanged).
             long want = static_cast<long>(std::round(sr * 0.025));
             want = ((want + D - 1) / D) * D;
             wantN = static_cast<std::size_t>(std::max<long>(want, n));
-        }        if (iq.size() != wantN) iq.resize(wantN);
+        }
+        if (iq.size() != wantN) iq.resize(wantN);
 
-        std::size_t got = source_->readIQ(iq);
+        // ---- Phase B: NO lock across the blocking read. A swapped-out device
+        // is stopped before the swap, so readIQ on it returns 0/stale tail;
+        // phase C drops such a block instead of publishing it.
+        const std::size_t got = src->readIQ(iq);
+
+        // ---- Phase C: re-acquire the lock to publish. If the UI swapped the
+        // source mid-read, this block belongs to the old device -- drop it.
+        QMutexLocker lk(&sourceMutex_);
+        if (src.get() != source_.get()) continue;
         if (got == 0) {
             if (real || realSourceActive_) {
                 // A real device that stops delivering IQ for the grace period
@@ -1540,6 +1581,7 @@ void SpectrumEngine::run() {
             frame.dbfs.resize(useN);
             powerSpectrum_.process(spec, frame.dbfs);
             frame.centerFreqHz = source_->centerFreq();
+            f0SnapshotHz_.store(frame.centerFreqHz);
             frame.sampleRateHz = srEff;
             frame.fftSize = static_cast<int>(useN);
             frame.isTestSignal = !real;
@@ -1715,6 +1757,13 @@ void SpectrumEngine::run() {
         const qint64 nowMs = telemetryClock_.elapsed();
         if (lastTelemetryMs_ < 0 || nowMs - lastTelemetryMs_ >= 1000) {
             lastTelemetryMs_ = nowMs;
+            // Engine-thread liveness heartbeat (same 1 Hz cadence) for
+            // MBDSDR_LOG_FILE freeze post-mortems: if this stops while the UI
+            // heartbeat continues, the engine thread is the one that wedged.
+            static int hbCount = 0;
+            if (++hbCount % 5 == 0 && qEnvironmentVariableIsSet("MBDSDR_LOG_FILE"))
+                qInfo("[hb] engine loop alive, readOk frames=%d iterMs=%lld",
+                      zeroReadFrames_, static_cast<long long>(loopIterMs_));
             // Refresh the UI-facing capability snapshot ~1 Hz (we already hold
             // sourceMutex_ here). UI reads capsMutex_, never sourceMutex_.
             updateCapsSnapshotLocked();

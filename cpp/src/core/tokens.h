@@ -1126,7 +1126,10 @@ QTabBar { background-color: %bgBar%; }
 QTabBar::tab {
     background: transparent;
     color: %textSec%;
-    padding: %padMV%px %padLH%px;
+    /* Horizontal = kSpacingM, not kSpacingL: the center bar carries five long
+       CJK titles and the wide button padding pushed the tail tab (VNA) off
+       the bar at 1280px windows. */
+    padding: %padMV%px %padMV%px;
     min-height: %touch%px;
     border: none;
     border-radius: %radSmall%px;

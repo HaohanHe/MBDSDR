@@ -315,6 +315,10 @@ public slots:
     // snapshot with no ring reset.
     bool              scrollPausedForTest() const { return scrollPaused_; }
     const QImage&     pausedHistoryForTest() const { return pausedHistory_; }
+    // Live coloured snapshot (row 0 = newest), so the suite can prove the
+    // incremental shift paints the newest frame at the top and ages older
+    // rows down one row per push -- the perf path must not change semantics.
+    const QImage&     historyForTest() const { return history_; }
     /// Line-spectrum panel rect (offscreen tests aim pointer events at it so
     /// they do not accidentally land on the shared strip's pan region).
     QRect             traceRectForTest() const { return lay_.traceRect; }
@@ -403,6 +407,16 @@ private:
     void materialiseHistory();          // ring -> history_ snapshot (row 0 = newest)
     void rebuildColormap();
     QRgb colourForDb(float db) const;
+
+    // Display-resolution (downscale) waterfall cache, SDR++-style: the paint
+    // path blits fallsPeak_ instead of re-decimating + re-colouring every ring
+    // row on every paint. pushHistoryRow() keeps it current incrementally
+    // (shift down one row + colour the new top row); a full rebuild happens
+    // only when the visible bin window, the widget width, the palette or the
+    // colour scale actually change.
+    void rebuildFallsPeakCache(int outW, int srcBinL, int srcBinR);
+    void updateFallsPeakRow();
+    void invalidateFallsPeak() { fallsKeyOutW_ = -1; }
 
     // ---- Waterfall vertical time axis -------------------------------------
     // Effective seconds per waterfall row: the pinned test override when set,
@@ -554,6 +568,17 @@ private:
     std::vector<std::vector<float>> ringDb_;   // depth raw-dB rows (length = bins_)
     QImage fallsPeak_;               // display-res, peak-held downscale cache
     std::vector<float> decScratch_;  // reused decimation output row
+    // Incremental-waterfall bookkeeping. history_ rows are baked at the scale
+    // (materialisedCeil/FloorDb_); auto-range drift smaller than ONE LUT index
+    // cannot change any baked pixel, so rows are re-coloured only past that.
+    float materialisedCeilDb_  = std::numeric_limits<float>::quiet_NaN();
+    float materialisedFloorDb_ = std::numeric_limits<float>::quiet_NaN();
+    // fallsPeak_ cache key: width + visible bin window. Any change (resize,
+    // zoom, palette, manual range, ring rebuild) invalidates -> full rebuild.
+    int fallsKeyOutW_ = -1;
+    int fallsKeyBinL_ = -2;
+    int fallsKeyBinR_ = -2;
+    int fallsOutW_    = 0;           // last painted falls width (0 = not painted yet)
     int  ringDepth_ = 0;             // active history depth (rows) after allocateRing
     // Honoured by the next allocateRing(). In-class default matches
     // tokens::kWaterfallHistoryLines; the ctor overrides this with the persisted

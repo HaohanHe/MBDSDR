@@ -14,6 +14,7 @@
 #include <QFile>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 namespace mbdsdr {
@@ -408,7 +409,33 @@ void SpectrumDisplay::pushHistoryRow() {
         row[i] = (i < n) ? frame_.dbfs[i] : dbFloorDb_;
     ringHead_ = (ringHead_ + 1) % ringDepth_;
     if (ringCount_ < ringDepth_) ++ringCount_;
-    materialiseHistory();
+
+    // Incremental snapshot (SDR# bitmap-scroll model): shift the baked image
+    // down one row and colour ONLY the new top row -- O(bins) per frame instead
+    // of the old O(depth*bins) full materialise, which at 512x2048 per push
+    // starved the UI thread (multi-second freezes on resize/drag). A full
+    // re-colour still runs when the scale has drifted by >= one LUT index
+    // (sub-index drift cannot change any baked pixel) or the image shape
+    // changed.
+    const float lutStep = (dbCeilDb_ - dbFloorDb_) / static_cast<float>(kLutSize);
+    const bool scaleDrifted =
+        !std::isfinite(materialisedCeilDb_) ||
+        std::fabs(dbCeilDb_ - materialisedCeilDb_) >= lutStep ||
+        std::fabs(dbFloorDb_ - materialisedFloorDb_) >= lutStep;
+    if (scaleDrifted || history_.isNull() ||
+        history_.width() != bins_ || history_.height() != ringDepth_) {
+        materialiseHistory();
+    } else {
+        const int bpl = history_.bytesPerLine();
+        std::memmove(history_.bits() + bpl, history_.bits(),
+                     static_cast<size_t>(bpl) * (ringDepth_ - 1));
+        QRgb* top = reinterpret_cast<QRgb*>(history_.scanLine(0));
+        for (int i = 0; i < bins_; ++i)
+            top[i] = colourForDb((i < n) ? frame_.dbfs[i] : dbFloorDb_);
+    }
+
+    // Keep the display-resolution downscale cache rolling with the same shift.
+    updateFallsPeakRow();
 }
 
 void SpectrumDisplay::materialiseHistory() {
@@ -431,6 +458,65 @@ void SpectrumDisplay::materialiseHistory() {
             for (int i = 0; i < bins_; ++i) line[i] = qRgb(0, 0, 0);
         }
     }
+    // Book-keeping for the incremental path: rows are now baked at the CURRENT
+    // scale, and the display-res cache no longer matches those baked colours.
+    materialisedCeilDb_  = dbCeilDb_;
+    materialisedFloorDb_ = dbFloorDb_;
+    invalidateFallsPeak();
+}
+
+void SpectrumDisplay::rebuildFallsPeakCache(int outW, int srcBinL, int srcBinR) {
+    fallsPeak_ = QImage(outW, ringDepth_, QImage::Format_ARGB32);
+    if (static_cast<int>(decScratch_.size()) < outW)
+        decScratch_.assign(outW, dbFloorDb_);
+    for (int logical = 0; logical < ringDepth_; ++logical) {
+        QRgb* out = reinterpret_cast<QRgb*>(fallsPeak_.scanLine(logical));
+        if (logical >= ringCount_) {
+            for (int x = 0; x < outW; ++x) out[x] = qRgb(0, 0, 0);
+            continue;
+        }
+        const int phys = (ringHead_ - 1 - logical + ringDepth_) % ringDepth_;
+        const std::vector<float>& row = ringDb_[phys];
+        ui::decimateBlockMaxRange(row.data(), srcBinL, srcBinR,
+                                  decScratch_.data(), outW);
+        for (int x = 0; x < outW; ++x)
+            out[x] = colourForDb(decScratch_[x]);
+    }
+    fallsKeyOutW_ = outW;
+    fallsKeyBinL_ = srcBinL;
+    fallsKeyBinR_ = srcBinR;
+}
+
+void SpectrumDisplay::updateFallsPeakRow() {
+    if (scrollPaused_ || fallsOutW_ <= 0 || ringDepth_ <= 0 || bins_ <= 0 ||
+        ringCount_ <= 0 || !haveFrame_ || frameFsHz_ <= 0.0)
+        return;
+    double fLo, fHi, span; visibleWindow(fLo, fHi, span);
+    const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
+    const int srcBinL = std::max(0, static_cast<int>(std::floor(
+        clampd((fLo - bandLo) / frameFsHz_ * bins_, 0.0, static_cast<double>(bins_)))));
+    const int srcBinR = std::min(bins_, static_cast<int>(std::ceil(
+        clampd((fHi - bandLo) / frameFsHz_ * bins_, 0.0, static_cast<double>(bins_)))));
+    const int outW = fallsOutW_;
+    if (fallsKeyOutW_ != outW || fallsKeyBinL_ != srcBinL ||
+        fallsKeyBinR_ != srcBinR || fallsPeak_.height() != ringDepth_) {
+        // First paint after a resize/zoom/palette/scale change: full rebuild
+        // once; every later push only rolls the cache down by one row.
+        rebuildFallsPeakCache(outW, srcBinL, srcBinR);
+        return;
+    }
+    const int bpl = fallsPeak_.bytesPerLine();
+    std::memmove(fallsPeak_.bits() + bpl, fallsPeak_.bits(),
+                 static_cast<size_t>(bpl) * (ringDepth_ - 1));
+    if (static_cast<int>(decScratch_.size()) < outW)
+        decScratch_.assign(outW, dbFloorDb_);
+    const int physNewest = (ringHead_ - 1 + ringDepth_) % ringDepth_;
+    const std::vector<float>& row = ringDb_[physNewest];
+    ui::decimateBlockMaxRange(row.data(), srcBinL, srcBinR,
+                              decScratch_.data(), outW);
+    QRgb* top = reinterpret_cast<QRgb*>(fallsPeak_.scanLine(0));
+    for (int x = 0; x < outW; ++x)
+        top[x] = colourForDb(decScratch_[x]);
 }
 
 void SpectrumDisplay::rebuildColormap() {
@@ -1326,25 +1412,16 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
                 // dim it. Instead block-MAX each stored raw-dB row so the peak
                 // survives the zoom-out (SDR++ doZoom waterfall.cpp:65-90,
                 // independent) -- pure decimateBlockMaxRange under the hood.
-                if (fallsPeak_.width() != outW || fallsPeak_.height() != ringDepth_)
-                    fallsPeak_ = QImage(outW, ringDepth_, QImage::Format_ARGB32);
-                if (static_cast<int>(decScratch_.size()) < outW)
-                    decScratch_.assign(outW, dbFloorDb_);
+                // The per-row decimation + colouring is CACHED (fallsPeak_):
+                // pushHistoryRow() rolls it down one row per new frame, so paint
+                // only blits. A full rebuild runs on the first paint after any
+                // resize / zoom / palette / scale change (cache key mismatch).
                 const int srcBinL = std::max(0, static_cast<int>(std::floor(srcL)));
                 const int srcBinR = std::min(bins_, static_cast<int>(std::ceil(srcR)));
-                for (int logical = 0; logical < ringDepth_; ++logical) {
-                    QRgb* out = reinterpret_cast<QRgb*>(fallsPeak_.scanLine(logical));
-                    if (logical >= ringCount_) {
-                        for (int x = 0; x < outW; ++x) out[x] = qRgb(0, 0, 0);
-                        continue;
-                    }
-                    const int phys = (ringHead_ - 1 - logical + ringDepth_) % ringDepth_;
-                    const std::vector<float>& row = ringDb_[phys];
-                    ui::decimateBlockMaxRange(row.data(), srcBinL, srcBinR,
-                                              decScratch_.data(), outW);
-                    for (int x = 0; x < outW; ++x)
-                        out[x] = colourForDb(decScratch_[x]);
-                }
+                fallsOutW_ = outW;   // eager per-push cache updates need this
+                if (fallsKeyOutW_ != outW || fallsKeyBinL_ != srcBinL ||
+                    fallsKeyBinR_ != srcBinR || fallsPeak_.height() != ringDepth_)
+                    rebuildFallsPeakCache(outW, srcBinL, srcBinR);
                 p.drawImage(falls, fallsPeak_);
             }
         }

@@ -43,6 +43,11 @@ struct RtlLibOps {
     void     (*cancelAsync)(void* dev) = nullptr;
     int      (*readSync)(void* dev, unsigned char* buf, uint32_t len,
                          uint32_t* nRead) = nullptr;
+    // Tuner identity (enum rtlsdr_tuner) for the local-device capabilities
+    // readback. Appended at the END on purpose: test fakes that init the table
+    // positionally keep compiling and simply report "未知调谐器" instead of
+    // crashing -- the honest unknown, not a placeholder.
+    int      (*getTunerType)(void* dev) = nullptr;
 };
 
 // Active ops table: a test-installed fake wins, otherwise the real librtlsdr

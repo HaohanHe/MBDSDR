@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "rtl_sdr_source.h"
 #include "rtl_sdr_ops.h"
+#include "device_capabilities.h"
 
 #include <QDebug>
 #include <cstring>
@@ -187,6 +188,12 @@ int      advReadSync(void* dev, unsigned char* buf, uint32_t len, uint32_t* nRea
     if (nRead) *nRead = static_cast<uint32_t>(n);
     return rc;
 }
+int      advGetTunerType(void* dev) {
+    // Classic osmocom API: returns the enum by value (rtl-sdr.h). The
+    // out-param variant only exists on librtlsdr-ng forks -- do not use it.
+    return static_cast<int>(
+        rtlsdr_get_tuner_type(reinterpret_cast<rtlsdr_dev_t*>(dev)));
+}
 
 const RtlLibOps g_realOps{
     &advOpen,             &advClose,
@@ -197,7 +204,8 @@ const RtlLibOps g_realOps{
     &advSetAgcMode,       &advSetDirectSampling,
     &advSetOffsetTuning,  &advSetBiasTee,
     &advSetFreqCorrection,&advResetBuffer,
-    &advCancelAsync,      &advReadSync
+    &advCancelAsync,      &advReadSync,
+    &advGetTunerType
 };
 #endif  // HAVE_RTLSDR
 
@@ -284,6 +292,11 @@ bool RtlSdrSource::start() {
         return false;
     }
     dev_ = dev;
+
+    // Tuner identity for the capabilities readback (UI device-info panel).
+    // Absent from the ops table (old test doubles) -> stays Unknown: honest.
+    if (ops->getTunerType)
+        tunerType_ = ops->getTunerType(dev_);
 
     // Order matters: center freq / sample rate first, then tuner mode, then
     // the optional front-end features, finally reset the endpoint buffer.
@@ -432,6 +445,14 @@ QString RtlSdrSource::name() const {
 }
 
 bool RtlSdrSource::isConnected() const { return dev_ != nullptr; }
+
+DeviceCapabilities RtlSdrSource::capabilities() const {
+    // Honest empty state when no device is streaming -- the base-class default
+    // IS noDeviceCapabilities(), but spelling the guard here keeps the local
+    // readback contract explicit (and stub builds never reach the fill).
+    if (!dev_ || !running_) return noDeviceCapabilities();
+    return rtlCapabilitiesLocal(tunerType_, gainTable_.size());
+}
 
 } // namespace dsp
 } // namespace mbdsdr

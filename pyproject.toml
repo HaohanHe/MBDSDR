@@ -35,7 +35,9 @@ dependencies = [
 # 分组按功能面；系统级硬件绑定（SoapySDR / hackrf / uhd）不走 PyPI，靠
 # apt/厂商渠道安装，见 tests/test_pyproject_packaging.py 的诚实豁免清单。
 [project.optional-dependencies]
-hardware = ["pyserial", "pyrtlsdr", "pylibiio", "pyvisa", "sounddevice"]
+# pyrtlsdr>=0.4 hard-binds rtlsdr_set_dithering at import time, which the
+# classic osmocom librtlsdr builds lack (AttributeError on RtlSdr()).
+hardware = ["pyserial", "pyrtlsdr<0.4", "pylibiio", "pyvisa", "sounddevice"]
 satellite = ["sgp4", "skyfield", "jplephem", "astropy"]
 viz = ["matplotlib", "Pillow", "psutil"]
 desktop = ["PySide6"]
