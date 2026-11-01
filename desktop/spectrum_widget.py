@@ -1274,6 +1274,12 @@ class SpectrumPanel(QWidget):
         bar.addWidget(self._span_label)
         bar.addSpacing(12)
         bar.addWidget(self._snr_label)
+        # FFT 仪器化读数（gqrx 把瀑布当测量仪器）：RBW = span/FFT 点数，
+        # 瀑布时间跨度 = 环形缓冲行数 × 绘图定时器间隔。
+        self._fft_info_label = QLabel("RBW --")
+        self._fft_info_label.setStyleSheet(f"color:{_lbl_color};")
+        bar.addSpacing(12)
+        bar.addWidget(self._fft_info_label)
         return bar
 
     # ------------------------------------------------------------------ dB 滑杆
@@ -1538,10 +1544,17 @@ class SpectrumPanel(QWidget):
             snr = self.compute_snr_db()
             self._snr_label.setText(
                 f"SNR {snr:.1f} dB" if snr is not None else "SNR --")
+            rbw = self.generator.sample_rate_hz / max(1, self.generator.fft_size)
+            timer = getattr(self._plot, "_timer", None)
+            ms = timer.interval() if timer is not None else 50
+            wf_s = self.generator.max_waterfall_lines * ms / 1000.0
+            self._fft_info_label.setText(
+                f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s")
         else:
             self._freq_label.setText("--")
             self._span_label.setText("--")
             self._snr_label.setText("SNR --")
+            self._fft_info_label.setText("RBW --")
         self._redraw()
 
     # ------------------------------------------------------------------ 交互转发
@@ -1692,7 +1705,13 @@ class _TuningPlotMixin:
         elif mods & Qt.AltModifier:
             step *= 0.1
         vfo, edge_region = self._hit_vfo_at(event.position().x())
-        if mods & Qt.ControlModifier:
+        # 频率轴手势分层（P2-9，gqrx 密度）：悬停底部频率刻度轴上滚轮 =
+        # 以光标为锚缩放 span（与 Ctrl+滚轮同数学）；VFO 正下方不抢手势。
+        on_freq_axis = (event.position().y()
+                        >= self.height() - _SPEC_BOTTOM_PAD)
+        if (mods & Qt.ControlModifier) or (
+                on_freq_axis and vfo is None
+                and not (mods & (Qt.ShiftModifier | Qt.AltModifier))):
             if vfo is not None:
                 # 对称带宽（gqrx Ctrl+滚轮）：中心不动，双边同扩同收
                 new_bw = max(100.0, float(vfo.bw_hz) + step * wheel)
