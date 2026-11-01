@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <QByteArray>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -33,6 +34,7 @@
 #include <QJsonParseError>
 #include <QJsonValue>
 #include <QString>
+#include <QStringList>
 
 namespace mbdsdr {
 namespace ui {
@@ -315,6 +317,33 @@ inline bool loadColormapFileForTool(const QString& absPath, ParsedColormap* out,
         return false;
     }
     return parseColormapJson(f.readAll(), out, errorOut);
+}
+
+// ---------------------------------------------------------------------------
+// Bundled colormaps (B3): res/colormaps/*.json copied next to the executable
+// by the build, same convention as qmSearchDirs(appDir/i18n). Data provenance:
+// colour stops are parameters of the public SDR++ palette set (root/res/
+// colormaps), resampled into this repo's own {"name","stops"} JSON shape --
+// data values only, no SDR++ code is included.
+// ---------------------------------------------------------------------------
+inline QString bundledColormapsDir(const QString& appDir) {
+    if (appDir.isEmpty()) return QString();
+    return appDir + QStringLiteral("/colormaps");
+}
+
+// Sorted absolute paths of every bundled *.json; empty list when the directory
+// is absent (portable / dev runs) -- the menu then simply shows no submenu.
+inline QStringList bundledColormapFiles(const QString& appDir) {
+    const QString dirPath = bundledColormapsDir(appDir);
+    if (dirPath.isEmpty()) return {};
+    const QDir dir(dirPath);
+    if (!dir.exists()) return {};
+    const QStringList files =
+        dir.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+    QStringList out;
+    out.reserve(files.size());
+    for (const QString& f : files) out << dir.absoluteFilePath(f);
+    return out;
 }
 
 } // namespace ui

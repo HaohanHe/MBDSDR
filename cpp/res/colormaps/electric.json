@@ -1,0 +1,9 @@
+{
+  "name": "Electric",
+  "stops": [
+    "#000000",
+    "#0000ff",
+    "#00ffff",
+    "#ffffff"
+  ]
+}

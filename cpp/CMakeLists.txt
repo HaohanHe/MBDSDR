@@ -337,6 +337,18 @@ if (Qt6LinguistTools_FOUND)
     add_dependencies(mbdsdr mbdsdr_i18n_qm)
 endif()
 
+# 内置瀑布色板（res/colormaps/*.json，B3）：构建期复制到可执行文件旁
+# colormaps/，与运行时搜索口径（appDir/colormaps）同位，无需二次拷贝。
+set(MBDSDR_COLORMAP_DIR ${CMAKE_CURRENT_BINARY_DIR}/colormaps)
+add_custom_command(
+    OUTPUT ${MBDSDR_COLORMAP_DIR}/viridis.json
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/res/colormaps ${MBDSDR_COLORMAP_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/res/colormaps/viridis.json
+    COMMENT "bundle: res/colormaps -> build/colormaps")
+add_custom_target(mbdsdr_colormaps ALL DEPENDS ${MBDSDR_COLORMAP_DIR}/viridis.json)
+add_dependencies(mbdsdr mbdsdr_colormaps)
+
 # Offscreen screenshot tools (reuse all sources except main.cpp). These are
 # Linux/offscreen developer-only harnesses, are NOT registered with ctest, and
 # several still drive raw POSIX loopback sockets; they are not built on Windows
@@ -1458,6 +1470,15 @@ target_include_directories(test_colormap_file PRIVATE src)
 target_link_libraries(test_colormap_file PRIVATE mbdsdr_core)
 target_link_libraries(test_colormap_file PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME colormap_file COMMAND test_colormap_file)
+
+# B3 bundled waterfall colormaps: every shipped res/colormaps/*.json must parse.
+add_executable(test_bundled_colormaps tests/test_bundled_colormaps.cpp)
+target_include_directories(test_bundled_colormaps PRIVATE src)
+target_compile_definitions(test_bundled_colormaps
+    PRIVATE MBDSDR_COLORMAP_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/res/colormaps")
+target_link_libraries(test_bundled_colormaps PRIVATE mbdsdr_core)
+target_link_libraries(test_bundled_colormaps PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME bundled_colormaps COMMAND test_bundled_colormaps)
 set_tests_properties(digital_panel_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
@@ -2005,6 +2026,9 @@ if(Qt6LinguistTools_FOUND)
   # 与运行时 qmSearchDirs(appDir/i18n) 同口径（core/l10n.cpp）
   install(FILES ${MBDSDR_QM_FILES} DESTINATION bin/i18n)
 endif()
+# 内置瀑布色板：与运行时 appDir/colormaps 搜索口径同位
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/res/colormaps
+        DESTINATION bin)
 install(FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE
   ${CMAKE_CURRENT_SOURCE_DIR}/../NOTICE.md

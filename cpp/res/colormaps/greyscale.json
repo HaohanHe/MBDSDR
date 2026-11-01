@@ -1,0 +1,7 @@
+{
+  "name": "Grey Scale",
+  "stops": [
+    "#000000",
+    "#ffffff"
+  ]
+}

@@ -1286,6 +1286,25 @@ MainWindow::MainWindow(QWidget* parent)
         QObject::connect(canvas, &QWidget::customContextMenuRequested,
                          this, [this, canvas](const QPoint&) {
             QMenu menu(canvas);
+            // 内置色板（B3）：构建期复制到 exe 旁 colormaps/ 的 JSON 资源，
+            // 走与外部文件完全相同的 loadColormapFromFile 通路 + 同一持久化键。
+            QMenu* builtinMenu = nullptr;
+            QVector<QPair<QString, QString>> builtinMaps;   // (显示名, 绝对路径)
+            const QStringList cmFiles = mbdsdr::ui::bundledColormapFiles(
+                QCoreApplication::applicationDirPath());
+            for (const QString& path : cmFiles) {
+                mbdsdr::ui::ParsedColormap cm;
+                QString cmErr;
+                if (mbdsdr::ui::loadColormapFileForTool(path, &cm, &cmErr))
+                    builtinMaps.append({QString::fromStdString(cm.name), path});
+            }
+            if (!builtinMaps.isEmpty()) {
+                builtinMenu = menu.addMenu(QStringLiteral("内置色板"));
+                for (const auto& [dispName, path] : builtinMaps) {
+                    QAction* a = builtinMenu->addAction(dispName);
+                    a->setData(path);
+                }
+            }
             QAction* loadAct  = menu.addAction(QStringLiteral("加载瀑布色板文件…"));
             QAction* resetAct = menu.addAction(QStringLiteral("恢复内置色板"));
             menu.addSeparator();
@@ -1296,7 +1315,15 @@ MainWindow::MainWindow(QWidget* parent)
             overlayAct->setCheckable(true);
             overlayAct->setChecked(canvas->wfOverlay());
             QAction* chosen = menu.exec(QCursor::pos());
-            if (chosen == loadAct) {
+            if (chosen && chosen->parent() == builtinMenu) {
+                const QString path = chosen->data().toString();
+                QString err;
+                if (canvas->loadColormapFromFile(path, &err))
+                    mbdsdr::core::AppSettings()
+                        .setValue(tokens::kSettingsKeyColormapFile, path);
+                else
+                    QMessageBox::warning(this, QStringLiteral("色板加载失败"), err);
+            } else if (chosen == loadAct) {
                 mbdsdr::core::AppSettings s;
                 const QString startDir =
                     s.value(tokens::kSettingsKeyColormapFile).toString();
