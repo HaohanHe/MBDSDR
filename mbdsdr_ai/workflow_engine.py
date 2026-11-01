@@ -270,6 +270,9 @@ class WorkflowEngine:
             if gs["configured"]
             else "查找当前可见的 NOAA 卫星（地面站坐标未配置，请先配置 ground_station_lat/lon）"
         )
+        # 频点默认值取自链路目录（皮进配置，源码不写字面量）：
+        from .sat_links import load_sat_link
+        noaa19_dl = float(load_sat_link("noaa_19")["links"][0]["freq_hz"])
         return Workflow.from_dict({
             "name": "noaa_apt_receive_decode",
             "description": "NOAA 气象卫星 APT 图像接收与自动解码完整工作流",
@@ -277,13 +280,13 @@ class WorkflowEngine:
             "tags": ["NOAA", "APT", "气象卫星", "图像解码"],
             "steps": [
                 {"step_id": 1, "tool_name": "sdr_satellite_sky_view", "params": {"latitude": "{{ground_station_lat}}", "longitude": "{{ground_station_lon}}"}, "description": sky_view_desc, "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
-                {"step_id": 2, "tool_name": "sdr_satellite_doppler", "params": {"satellite_name": "NOAA 19", "frequency_hz": 137100000, "latitude": "{{ground_station_lat}}", "longitude": "{{ground_station_lon}}"}, "description": "计算多普勒修正频率", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
+                {"step_id": 2, "tool_name": "sdr_satellite_doppler", "params": {"satellite_name": "NOAA 19", "frequency_hz": noaa19_dl, "latitude": "{{ground_station_lat}}", "longitude": "{{ground_station_lon}}"}, "description": "计算多普勒修正频率", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
                 {"step_id": 3, "tool_name": "sdr_set_frequency", "params": {"frequency_hz": "{{doppler_freq}}"}, "description": "设置接收频率（多普勒修正）", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
                 {"step_id": 4, "tool_name": "sdr_record_start", "params": {"duration": 900, "format": "wav"}, "description": "录制卫星过境信号（15分钟）", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
                 {"step_id": 5, "tool_name": "sdr_decode_noaa_apt", "params": {"input_path": "{{recording_path}}"}, "description": "解码 APT 气象图像", "timeout": 60, "retry_on_failure": True, "max_retries": 2, "condition": ""},
             ],
             "parameters": {
-                "doppler_freq": {"default": 137100000, "type": "float", "description": "多普勒修正频率"},
+                "doppler_freq": {"default": noaa19_dl, "type": "float", "description": "多普勒修正频率"},
                 "recording_path": {"default": "", "type": "string", "description": "录制文件路径"},
                 "ground_station_lat": {"default": lat_default, "type": "float", "description": lat_desc},
                 "ground_station_lon": {"default": lon_default, "type": "float", "description": lon_desc},

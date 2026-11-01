@@ -1,0 +1,86 @@
+{
+  "_schema": "mbdsdr sat_links v1 —— 知名卫星下行链路目录（点星即听的数据底座）",
+  "_note": "只收公开常识级下行频点（听星用），不含任何上行：上行涉及发射，一律走 tc_uplink 的 arm_manual 人工门，不在本表。频点取值公开来源（见每条 source）；信道分配历史上会调整（尤其 METEOR 系列），正式依赖前按来源复核。文化注（culture）是一句话的星性注记——本项目把卫星当作当代星官来读。",
+  "noaa_15": {
+    "display_name": "NOAA-15",
+    "norad_name": "NOAA 15",
+    "culture": "民用电台可收的第一代极轨气象图像星：APT 连续线图广播三十年未停。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 137620000.0, "mode": "apt", "baud": null,
+       "note": "APT 模拟图像下传，AM/FM 体制，带宽约 34 kHz"}
+    ],
+    "source": "NOAA KLM/POES User's Guide（公开文档）"
+  },
+  "noaa_18": {
+    "display_name": "NOAA-18",
+    "norad_name": "NOAA 18",
+    "culture": "极轨气象图像三杰之二，与 NOAA-15/19 共守 137 MHz 三频点。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 137912500.0, "mode": "apt", "baud": null,
+       "note": "APT 模拟图像下传，带宽约 34 kHz"}
+    ],
+    "source": "NOAA KLM/POES User's Guide（公开文档）"
+  },
+  "noaa_19": {
+    "display_name": "NOAA-19",
+    "norad_name": "NOAA 19",
+    "culture": "现役主力 APT 图像星，137.1 MHz 是入门听星者的第一个频点。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 137100000.0, "mode": "apt", "baud": null,
+       "note": "APT 模拟图像下传，带宽约 34 kHz"}
+    ],
+    "source": "NOAA KLM/POES User's Guide（公开文档）"
+  },
+  "meteor_m_n2": {
+    "display_name": "Meteor-M N2",
+    "norad_name": "METEOR-M 2",
+    "culture": "数字气象图像星：LRPT 实时数字图，比 APT 更现代也更娇贵。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 137100000.0, "mode": "lrpt", "baud": 72000,
+       "note": "LRPT 数字图像；信道历史上在 137.1/137.9 MHz 间调整过，以俄方当前发布为准"}
+    ],
+    "source": "Roscosmos 公开发布 + 业余接收社区（satnogs）长期记录"
+  },
+  "iss_zarya": {
+    "display_name": "国际空间站",
+    "norad_name": "ISS (ZARYA)",
+    "culture": "天上有人的那颗星：145.8 MHz 上能直接听到乘组的通话。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 145800000.0, "mode": "nfm", "baud": null,
+       "note": "VHF 话音/学校通联；同频点附近另有 145.825 MHz 分组数据信标"},
+      {"direction": "downlink", "freq_hz": 145825000.0, "mode": "packet", "baud": 9600,
+       "note": "VHF 分组交换信标（APRS/Packet）"}
+    ],
+    "source": "NASA/ISS 公开频率计划 + AMSAT 社区数据库"
+  },
+  "funcube_1": {
+    "display_name": "FUNcube-1 (AO-73)",
+    "norad_name": "FUNCUBE-1 (AO-73)",
+    "culture": "教育星鼻祖：中学生众筹的 BPSK 信标星，telemetry 里是学生实验数据。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 145935000.0, "mode": "bpsk", "baud": 1200,
+       "note": "BPSK 遥测信标，FUNcube Dashboard 可解"}
+    ],
+    "source": "AMSAT-UK/Funcube 公开资料"
+  },
+  "ao91_fox1b": {
+    "display_name": "AO-91 (FOX-1B)",
+    "norad_name": "AO-91 (RADFXSAT/FOX-1B)",
+    "culture": "FM 转发器星：火腿对着上行说话，全世界都能在 145.96 听到。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 145960000.0, "mode": "fm", "baud": null,
+       "note": "FM 语音转发器下传（收听侧；上行不在本表）"}
+    ],
+    "source": "AMSAT 公开频率计划"
+  },
+  "so_50": {
+    "display_name": "SO-50",
+    "norad_name": "SO-50 (SAUDISAT 1C)",
+    "culture": "老牌 UHF 转发器星，功率小仰角要求高，收到即是天线功夫的凭证。",
+    "links": [
+      {"direction": "downlink", "freq_hz": 436795000.0, "mode": "fm", "baud": null,
+       "note": "FM 语音转发器下传（收听侧；上行不在本表）"}
+    ],
+    "source": "AMSAT 公开频率计划"
+  }
+}

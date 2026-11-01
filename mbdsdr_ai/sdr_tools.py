@@ -758,7 +758,7 @@ def register_sdr_tools(agent):
         description=(
             "按书签名或频率跳转到指定台站，并自动设置解调模式与带宽。"
             "可传书签名（如 'ISS 国际空间站下行 145.800'、'航空应急频率 121.500'、'ADS-B 1090ES 1090.000'）、"
-            "关键词（如 1090、145.8）或数字频率（98.5 视为 MHz，145800000 视为 Hz）。频段书签跳到其中央并提示用扫频找具体台。"
+            "关键词（如 1090、145.8）或数字频率（98.5 视为 MHz，98100000 视为 Hz）。频段书签跳到其中央并提示用扫频找具体台。"
         ),
         parameters={
             "type": "object",
@@ -1271,7 +1271,7 @@ def register_sdr_tools(agent):
             "type": "object",
             "properties": {
                 "satellite_name": {"type": "string", "description": "卫星名称，如 NOAA 19, ISS, METEOR M2"},
-                "frequency_hz": {"type": "number", "description": "标称下行频率，单位 Hz。如 NOAA APT 137100000"},
+                "frequency_hz": {"type": "number", "description": "标称下行频率，单位 Hz。先用 sat_link_get 查目标卫星下行频点"},
                 "latitude": {"type": "number", "description": "地面站纬度"},
                 "longitude": {"type": "number", "description": "地面站经度"},
             },
@@ -1292,7 +1292,7 @@ def register_sdr_tools(agent):
                 "hours": {"type": "number", "description": "预测未来多少小时，默认 24"},
                 "min_elevation": {"type": "number", "description": "最小仰角阈值（度），默认 10"},
                 "satellite_type": {"type": "string", "description": "weather/amateur/all，默认 all"},
-                "nominal_freq_hz": {"type": "number", "description": "可选，用于估算多普勒范围，如 NOAA APT 137912500"},
+                "nominal_freq_hz": {"type": "number", "description": "可选，用于估算多普勒范围，先查 sat_link_get 的下行频点"},
             },
             "required": ["latitude", "longitude"],
         },
