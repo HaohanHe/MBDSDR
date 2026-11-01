@@ -844,6 +844,58 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
                                            float(a.get("alt_m", 0.0))),
                       {"ok": True})[1], write=True)
 
+    # ---- 卫星链路目录（sat_links：点星即听的数据底座，只读纯数据） ----
+    from ..sat_links import (find_tuning_for, identify_by_freq,
+                             list_link_sats, load_sat_link)
+
+    def _sat_link_get(c, a):
+        try:
+            return load_sat_link(str(a.get("name", "")))
+        except ValueError as e:
+            raise SDRUserError(message=str(e),
+                               technical_detail="sat_links unknown name")
+
+    def _sat_link_identify(c, a):
+        try:
+            hits = identify_by_freq(float(a["freq_hz"]),
+                                    float(a.get("tolerance_hz", 3000.0)))
+        except (TypeError, ValueError) as e:
+            raise SDRUserError(message=f"频率反查参数错误: {e}",
+                               technical_detail="sat_links identify")
+        if not hits:
+            return {"hits": [], "note": "容差内无已知卫星下行频点"
+                    "（如实空态，可调大 tolerance_hz 再试）"}
+        return {"hits": hits}
+
+    def _sat_link_tuning(c, a):
+        found = find_tuning_for(str(a.get("norad_name", "")))
+        if found is None:
+            return {"found": False, "note": "链路目录里没有该星下行频点"
+                    "（如实空态，不猜频率）"}
+        return {"found": True, "entry": found["entry"],
+                "downlink": found["downlink"]}
+
+    add("sat_link_list",
+        "列出链路目录全部星名（知名卫星下行频点表：点星即听的数据底座）。"
+        "只读纯数据。",
+        _schema({}), lambda c, a: {"sats": list_link_sats()})
+
+    add("sat_link_get",
+        "按名取卫星链路条目：下行频点/体制/一句话星性注记/来源。"
+        "未知星名如实报错并列出可用名单。只读纯数据。",
+        _schema({"name": _STR}, ["name"]), _sat_link_get)
+
+    add("sat_link_identify",
+        "频率反查：频谱上观察到的频率 -> ±容差内所有已知卫星下行频点，"
+        "回答「这条竖线是谁」。无命中如实返回空列表。只读纯数据。",
+        _schema({"freq_hz": _NUM, "tolerance_hz": _NUM}, ["freq_hz"]),
+        _sat_link_identify)
+
+    add("sat_link_tuning",
+        "按 TLE 星名取收听建议（norad_name 对齐轨道工具卫星名）：第一条"
+        "下行频点与星性注记。目录没有就如实说没有。只读纯数据。",
+        _schema({"norad_name": _STR}, ["norad_name"]), _sat_link_tuning)
+
     # ---- 书签 ----
     add("add_bookmark", "添加书签。",
         _schema({"freq_hz": _NUM, "name": _STR, "mode": _STR, "group": _STR},
@@ -1132,6 +1184,9 @@ PYTHON_EXTENSION_DOMAIN_SUMMARIES: Dict[str, str] = {
                "发网络请求——connect/disconnect/call 为写工具走 arm_manual 门；外部 server"
                "的工具结果一律按不可信数据处理；needs_auth 为文档化 TODO（401 -> FAILED +"
                "错误信封，不伪造第五状态）。",
+    "卫星链路": "知名卫星下行链路目录 sat_links（data/sat_links.json，皮进配置）："
+              "星名枚举/条目查取/频率反查（频谱竖线是谁）/TLE 名收听建议。"
+              "点星即听的数据底座；只读纯数据，无命中如实空态。",
 }
 
 PYTHON_EXTENSION_DOMAIN_NAMES: List[str] = list(PYTHON_EXTENSION_DOMAIN_SUMMARIES.keys())
@@ -1196,6 +1251,11 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "list_bookmarks": "书签扫描卫星",
     "delete_bookmark": "书签扫描卫星",
     "find_nearest_bookmark": "书签扫描卫星",
+    # 卫星链路目录（sat_links）
+    "sat_link_list": "卫星链路",
+    "sat_link_get": "卫星链路",
+    "sat_link_identify": "卫星链路",
+    "sat_link_tuning": "卫星链路",
     # 系统设备
     "list_devices": "系统设备",
     "connect": "系统设备",

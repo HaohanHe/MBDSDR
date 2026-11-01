@@ -46,7 +46,8 @@ EXPECTED_10_DOMAINS = [
 ]
 
 # Python 面扩展域（P0 #65）——不与 C++ 冻结，仅本 server 追加。
-EXPECTED_EXTENSION_DOMAINS = ["解码器长尾", "人机问答", "外部工具"]
+# 「卫星链路」为 sat_links 目录工具（点星即听数据底座）追加的扩展域。
+EXPECTED_EXTENSION_DOMAINS = ["解码器长尾", "人机问答", "外部工具", "卫星链路"]
 
 # 长尾解码器工具（P0 #65）必须挂入工具表且归属「解码器长尾」。
 EXPECTED_LONGTAIL_TOOLS = [

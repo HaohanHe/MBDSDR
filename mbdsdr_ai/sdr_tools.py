@@ -124,6 +124,11 @@ def register_sdr_tools(agent):
     from .vna_tools import register_vna_tools
     register_vna_tools(agent.tool_registry)
 
+    # 卫星链路目录 sat_links：点星即听的数据底座（只读纯数据四工具，
+    # 此前只有 CLI 逃生门 pkgutil 自动发现能摸到，Agent 工具面缺角）
+    from .sat_links import register_tool_registry as _register_sat_link_tools
+    _register_sat_link_tools(agent.tool_registry)
+
     agent.tool_registry.register(
         name="sdr_plan",
         description="把一个多步任务拆成步骤计划，先写下来再动手。长任务/多工具任务前先调用本工具列步骤，防止执行中途漂移。步骤用短字符串数组传入。",
