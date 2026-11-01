@@ -32,6 +32,10 @@ from tokens import tokens
 
 from constants import DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ
 
+# 大字体频率显示（按位编辑，SDR++/gqrx radio dial 手感）；
+# 契约与 cpp/src/ui/freq_display_widget.h 一致。
+from freq_display import FreqDisplay
+
 # 解调模式元数据（默认带宽/显示名/解调函数）已收口到 mode_registry。
 # 这里只取查询函数；旧字典 MODE_VFO_BANDWIDTH 作为向后兼容别名在下方导出。
 from mode_registry import (
@@ -199,13 +203,14 @@ class ControlPanel(QWidget):
         """无真实 SDR 时禁用调谐/音量/模式/录音等操作控件。
 
         连接成功后由 main_window._panels_set_sdr_connected(True) 统一启用；
-        断开时再置灰。频率只读显示(freq_display)保持可用展示，不置灰。
+        断开时再置灰（freq_display 同置灰——按位编辑无设备不可发调谐）。
         收藏查看/删除始终可用，仅“收藏当前频率”按钮随连接状态禁用。
         """
         self._sdr_connected = bool(connected)
         widgets = [
             getattr(self, "mode_combo", None),
             getattr(self, "freq_input", None),
+            getattr(self, "freq_display", None),
             getattr(self, "tune_button", None),
             getattr(self, "band_combo", None),
             getattr(self, "preset_combo", None),
@@ -237,7 +242,7 @@ class ControlPanel(QWidget):
         """主窗口在连接/断开时调用（hasattr 守卫，方法名固定为 set_connected）。
 
         - connected=False：所有频率输入/模式下拉/增益/音量/静噪等射频控件
-          setEnabled(False)，freq_display 显 "-- MHz"，频率与模式真值清空，
+          setEnabled(False)，freq_display 显占位，频率与模式真值清空，
           绝不残留 98.5/FM 之类的演示状态。
         - connected=True：恢复控件使能；具体真实频率/模式由后端或持久化配置
           通过 set_frequency_hz()/set_mode() 等回填，本方法不编造数值。
@@ -246,7 +251,7 @@ class ControlPanel(QWidget):
         if not connected:
             self._freq_hz = None
             self._current_mode = None
-            self.freq_display.setText("-- MHz")
+            self.freq_display.set_frequency(None)
             self.freq_input.clear()
             self.freq_input.setStyleSheet("")
             # 模式下拉回到"无选择"，避免残留 FM 等假象
@@ -263,11 +268,11 @@ class ControlPanel(QWidget):
         freq_group = QGroupBox("频率")
         freq_layout = QVBoxLayout(freq_group)
 
-        # 大字体频率显示（未连接时显 "-- MHz"，绝不显示 98.500 这类假频率）
-        self.freq_display = QLabel("-- MHz")
-        self.freq_display.setObjectName("freqDisplay")
-        self.freq_display.setAlignment(Qt.AlignCenter)
-        self.freq_display.setMinimumHeight(60)
+        # 大字体频率显示：9 位数字网格按位可编辑（滚轮/点上下半 ±1，右键清零），
+        # 未连接时显占位，绝不显示 98.500 这类假频率
+        self.freq_display = FreqDisplay()
+        self.freq_display.set_bounds(int(FREQ_MIN_HZ), int(FREQ_MAX_HZ))
+        self.freq_display.frequency_edited.connect(self._on_digit_stepped)
         freq_layout.addWidget(self.freq_display)
 
         # 模式选择 + 频率输入
@@ -690,20 +695,17 @@ class ControlPanel(QWidget):
         self._populate_presets(band)
 
     def _update_freq_display(self):
-        """更新频率显示（按数量级自适应 MHz/kHz/Hz）。无真值时显 "-- MHz"。"""
+        """更新频率显示（数字网格恒为 Hz 原值，无真值时显占位）。"""
         hz = self._freq_hz
+        self.freq_display.set_frequency(hz)
         if hz is None:
-            # 未连接 / 未取得真实频率：显 "-- MHz"，输入框留空（占位符提示）
-            self.freq_display.setText("-- MHz")
+            # 未连接 / 未取得真实频率：输入框留空（占位符提示）
             return
         if hz >= 1e6:
-            self.freq_display.setText(f"{hz / 1e6:.3f} MHz")
             self.freq_input.setText(f"{hz / 1e6:g}")
         elif hz >= 1e3:
-            self.freq_display.setText(f"{hz / 1e3:.1f} kHz")
             self.freq_input.setText(f"{hz / 1e3:g}")
         else:
-            self.freq_display.setText(f"{hz:.0f} Hz")
             self.freq_input.setText(f"{hz:g}")
 
     # ========================================================================
@@ -742,6 +744,11 @@ class ControlPanel(QWidget):
     def _restore_freq_input(self):
         self.freq_input.setStyleSheet("")
         self._update_freq_display()
+
+    @Slot(int)
+    def _on_digit_stepped(self, hz: int):
+        """FreqDisplay 按位编辑（滚轮/点击/右键清零）→ 走统一调谐通道。"""
+        self._set_freq_hz(float(hz))
 
     @Slot(int)
     def _on_step_combo_changed(self, index: int):
