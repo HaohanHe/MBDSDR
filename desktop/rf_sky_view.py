@@ -537,6 +537,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._sat_catalog: Dict[str, Dict[str, object]] = {}
         # 当前选中天体的完整信息 (信息卡用)
         self._selected_info: Optional[Dict[str, object]] = None
+        # 信号出现点亮的卫星名集合（跟踪闭环下半场：频带里听到它，星就亮）
+        self._signal_sats: set = set()
         # HUD 命中区 (绘制时刷新; None = 该控件当前不可点)
         self._info_card_rect: Optional[QRectF] = None
         self._info_close_rect: Optional[QRectF] = None
@@ -1017,10 +1019,23 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._gnss_connected = False
         self._gnss_fix_type = 0
         self._hovered_object = None
+        self._signal_sats.clear()
         self._observer = None
         self._data_source = "none"
         self._satellites_connected = False
         self._tle_loaded = False
+        self.update()
+
+    def set_sat_signal(self, name: str, present: bool):
+        """信号出现点亮：跟踪闭环在频带里听到该星时置 True，星标加辉光。
+
+        无数据/信号消失置 False（调用方负责按 SNR 回差判定），不自主猜测。
+        """
+        name = str(name)
+        if present:
+            self._signal_sats.add(name)
+        else:
+            self._signal_sats.discard(name)
         self.update()
 
     def set_show_grid(self, show: bool):
@@ -1878,6 +1893,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
             if obj.obj_type == "satellite":
                 size = 6
+                # 信号点亮：频带里听到它 -> 同心辉光环（由内向外渐淡）
+                if obj.name in self._signal_sats:
+                    for ring, (rr, aa) in enumerate(((size + 5, 90),
+                                                     (size + 11, 45))):
+                        halo = QColor(color.red(), color.green(),
+                                      color.blue(), aa)
+                        painter.setPen(QPen(halo, 2))
+                        painter.setBrush(Qt.NoBrush)
+                        painter.drawEllipse(pos, rr, rr)
                 diamond = QPolygonF([
                     QPointF(pos.x(), pos.y() - size),
                     QPointF(pos.x() + size, pos.y()),

@@ -25,6 +25,21 @@ def _focus_widget():
     return QApplication.focusWidget()
 
 
+def _snr_signal_present(snr_db, was_present: bool,
+                        enter_db: float = 8.0, exit_db: float = 5.0) -> bool:
+    """星点亮 SNR 回差判定：>=8 dB 点亮，<5 dB 熄灭，中间保持原态不抖动。
+
+    无数据（None）不点亮（was_present 不延续——跟踪环里无频谱即无信号）。
+    """
+    if snr_db is None:
+        return False
+    if snr_db >= enter_db:
+        return True
+    if snr_db < exit_db:
+        return False
+    return bool(was_present)
+
+
 def _is_text_entry_widget(w) -> bool:
     """是否为文本输入类控件（Ctrl+C 应走标准复制语义）。"""
     if w is None:
@@ -308,6 +323,7 @@ class MainWindow(QMainWindow):
         self._sat_track_prev_freq_hz: Optional[float] = None
         self._sat_track_prev_mode: Optional[str] = None
         self._sat_track_mode: str = "FM"
+        self._sat_signal_present: bool = False    # 星点亮 SNR 回差状态
         # ---- 云台跟随（阶段4）：与跟踪环同拍驱动天线指向 ----
         # 复用 sdr_tools 全局 GimbalController 单例（ai-sdr-mini WebSocket
         # 连接成功时 sdr_backend 自动注入板载通道；rotctld/manual 由 AI
@@ -5764,6 +5780,21 @@ class MainWindow(QMainWindow):
             self._on_tune_sdr(corrected, self._sat_track_mode)
         except Exception:
             pass
+        # 星点亮：主听 VFO 带内 SNR 过门限 -> 天空图该星加辉光环
+        # （点星即听闭环下半场："信号出现星点亮"）。
+        try:
+            sat_name = str(getattr(self._loop_sat_tracker,
+                                   "selected_name", "") or "")
+            snr = self.spectrum.compute_snr_db() \
+                if hasattr(self, "spectrum") else None
+            now_present = _snr_signal_present(snr, self._sat_signal_present)
+            if now_present != self._sat_signal_present and sat_name:
+                self._sat_signal_present = now_present
+                sv = getattr(self, "sky_view", None)
+                if sv is not None and hasattr(sv, "set_sat_signal"):
+                    sv.set_sat_signal(sat_name, now_present)
+        except Exception:
+            pass
         # 云台跟随：同一拍内驱动天线指向卫星（调谐与云台天然同步、单点停止）
         if self._gimbal_follow:
             try:
@@ -5802,6 +5833,16 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._sat_track_prev_freq_hz = None
+        # 星点亮复位：停止跟踪即熄灭（不残留假亮）
+        if self._sat_signal_present:
+            self._sat_signal_present = False
+            try:
+                sv = getattr(self, "sky_view", None)
+                name = getattr(self._loop_sat_tracker, "selected_name", "")
+                if sv is not None and name and hasattr(sv, "set_sat_signal"):
+                    sv.set_sat_signal(str(name), False)
+            except Exception:
+                pass
         self.statusBar().showMessage("卫星跟踪已停止", 3000)
 
     def _update_sky_satellites(self):
