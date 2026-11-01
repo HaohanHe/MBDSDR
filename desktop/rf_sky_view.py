@@ -146,6 +146,17 @@ def _twilight_stops(brightness: float):
     return stops
 
 
+def _traj_alpha(i: int, n: int, base: int = 110,
+                fade_frac: float = 0.15) -> int:
+    """轨迹第 i 段（共 n 个可见点，n-1 段）的 alpha：两端 fade_frac
+    比例段数内线性渐入/渐出，中段恒 base。"""
+    if n < 2 or i < 0 or i >= n - 1:
+        return 0
+    fade = max(1, int(round(n * fade_frac)))
+    ramp = min(i + 1, n - 1 - i)
+    return int(base * min(1.0, ramp / float(fade)))
+
+
 # ============================================================================
 # 数据类型
 # ============================================================================
@@ -2152,7 +2163,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.restore()
 
     def _draw_trajectories(self, painter: QPainter):
-        """卫星轨迹（半透明线）。"""
+        """卫星轨迹（半透明虚线，端部淡出）。
+
+        只画地平线以上的可见段（el<=0 断开）；端部 ~15% 段数做
+        alpha 渐入/渐出（Stellarium 轨道线端部淡出同效果），中段满
+         alpha=110。逐段插 alpha，n 段 n-1 条线段。
+        """
         painter.save()
         for name, points in self._trajectories.items():
             if len(points) < 2:
@@ -2162,22 +2178,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if obj.name == name:
                     color = QColor(obj.color) if obj.color else color
                     break
-            c = QColor(color.red(), color.green(), color.blue(), 110)
-            pen = QPen(c, 1, Qt.DashLine)
-            painter.setPen(pen)
-            path = QPainterPath()
-            first = True
+            seg = []
             for az, el in points:
                 if el <= 0:
-                    first = True
                     continue
-                pos = self._sky_to_screen(az, el)
-                if first:
-                    path.moveTo(pos)
-                    first = False
-                else:
-                    path.lineTo(pos)
-            painter.drawPath(path)
+                seg.append(self._sky_to_screen(az, el))
+            if len(seg) < 2:
+                continue
+            n = len(seg)
+            for i in range(n - 1):
+                a = _traj_alpha(i, n)
+                c = QColor(color.red(), color.green(), color.blue(), a)
+                painter.setPen(QPen(c, 1, Qt.DashLine))
+                painter.drawLine(seg[i], seg[i + 1])
         painter.restore()
 
     def _draw_heatmap(self, painter: QPainter):
@@ -2611,14 +2624,29 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _find_object_at(self, x: float, y: float,
                          tolerance: float = 12.0) -> Optional[SkyObject]:
-        """像素拾取（兼容旧接口）。"""
+        """像素拾取（cleverFind 式评分：像素角距 + 亮度优先级双键）。
+
+        候选门 = tolerance px；评分 = dist_px * (1 - 0.5*brightness_norm)，
+        亮度归一 = clamp((signal_db + 60)/60, 0, 1)。等距时亮星优先；
+        距离差拉开时近者优先（StelObjectMgr::cleverFind 双键思想，
+        替代旧的固定容差首中即返）。
+        """
+        best = None
+        best_score = float(tolerance)
         for obj in self._objects:
             if not obj.visible or not obj.is_above_horizon():
                 continue
             pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
-            if math.hypot(pos.x() - x, pos.y() - y) < tolerance:
-                return obj
-        return None
+            dist = math.hypot(pos.x() - x, pos.y() - y)
+            if dist >= tolerance:
+                continue
+            norm = max(0.0, min(1.0,
+                                (obj.signal_strength_db + 60.0) / 60.0))
+            score = dist * (1.0 - 0.5 * norm)
+            if score < best_score:
+                best_score = score
+                best = obj
+        return best
 
     def resizeEvent(self, event: QResizeEvent):
         # 搜索框: 顶部居中 (自包含 UI)
