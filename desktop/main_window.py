@@ -998,6 +998,9 @@ class MainWindow(QMainWindow):
         self.spectrum.vfo_bw_changed.connect(self._on_vfo_bw_changed_ui)
         self.spectrum.vfo_selected.connect(self._on_vfo_selected)
         self.spectrum.vfo_removed.connect(self._on_vfo_removed)
+        # 谱面单键切解调（gqrx 键盘流）：走面板 combo 全链（mode_changed +
+        # 带宽预设 + 后端 set_demod）
+        self.spectrum.mode_hotkey_requested.connect(self._on_mode_hotkey)
         QShortcut(QKeySequence("Ctrl+Tab"), self, self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
         # 星象仪形态退出时瀑布归位用的布局句柄（reparent 往返，对象身份不变）。
@@ -3086,6 +3089,21 @@ class MainWindow(QMainWindow):
         self._apply_recording(recording)
 
     @Slot(str)
+    def _on_mode_hotkey(self, mode: str):
+        """谱面单键切解调（gqrx 键盘流 A/N/F/W/S/C）：走面板 combo 全链。
+
+        setCurrentText 触发 control_panel._on_mode_changed → mode_changed
+        → 本类 _on_mode_changed（后端 set_demod + 带宽预设），与下拉切换
+        完全同路径；已是当前模式时为 no-op。
+        """
+        cp = getattr(self, "control_panel", None)
+        if cp is None or not hasattr(cp, "mode_combo"):
+            return
+        try:
+            cp.mode_combo.setCurrentText(str(mode))
+        except Exception:
+            pass
+
     def _on_mode_changed(self, mode: str):
         """模式切换（WFM/NFM/AM/USB/LSB/CW）：立刻切解调 + 改 VFO 带宽，音频不断。
 

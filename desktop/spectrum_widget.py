@@ -47,6 +47,24 @@ try:
 except Exception:  # pragma: no cover
     _tokens = None  # type: ignore
 
+# 滤波宽窄预设 + 模式查询（键盘 , / . 档位步进 / 单键切解调的数据源，
+# gqrx kbd-shortcuts.txt / filter_preset_table 惯例）
+try:
+    from mode_registry import next_bandwidth_preset, get as _get_demod_mode
+except Exception:  # pragma: no cover
+    next_bandwidth_preset = None  # type: ignore
+    _get_demod_mode = None  # type: ignore
+
+# 单键切解调映射（gqrx kbd-shortcuts：A=AM N=NFM W=WFM S=LSB Shift+S=USB C=CW；
+# F=FM 为 gqrx 所无、按我方惯例补）
+_MODE_HOTKEYS = {
+    Qt.Key_A: "AM",
+    Qt.Key_N: "NFM",
+    Qt.Key_F: "FM",
+    Qt.Key_W: "WFM",
+    Qt.Key_C: "CW",
+}
+
 # 触屏手势：双指捏合缩放 + 单指拖动平移（Surface/平板）。鼠标模式下零旁路。
 try:
     from touch_helpers import PinchZoomMixin
@@ -953,6 +971,7 @@ class SpectrumPanel(QWidget):
     vfo_bw_changed = Signal(str, float)       # vfo_id, bw_hz
     vfo_selected = Signal(str)                # vfo_id（用户点击设为主听）
     vfo_removed = Signal(str)                 # vfo_id（用户右键删除）
+    mode_hotkey_requested = Signal(str)       # 键盘单键切解调（gqrx A/N/W/S/C）
 
     def __init__(self, parent=None, prefer_opengl: bool = False):
         super().__init__(parent)
@@ -1432,12 +1451,34 @@ class _TuningPlotMixin:
 
     def wheelEvent(self, event):
         # main_window.cpp:579-609：有 VFO 时滚轮=调谐；否则缩放。
-        # 这里：Ctrl=以光标所在频率为锚点缩放 span（缩放后光标处频率不变），
-        #       普通/Shift/Alt=按 snap 步进调谐（行为不变）。
+        # 手势分层（Ctrl 锚点缩放照 SDR++ waterfall.cpp processInputs；
+        # VFO 悬停三层照 gqrx）：
+        #   Ctrl+滚轮              = 以光标为锚缩放 span（谱面空白处）
+        #   Ctrl+滚轮 悬停 VFO     = 对称展宽/收窄带宽（gqrx Ctrl+wheel）
+        #   滚轮 悬停 VFO 边沿      = 非对称调带宽（单侧边跟随光标）
+        #   滚轮 悬停 VFO 本体      = 整体搬移通带（gqrx Shift+wheel 语义）
+        #   普通/Shift/Alt+滚轮    = 按 snap 步进调谐（Shift×10 / Alt×0.1）
         gen = self.state.panel.generator
         mods = event.modifiers()
         dy = event.angleDelta().y()
+        wheel = 1 if dy > 0 else -1     # 上滚=加/扩，下滚=减/收
+        step = self.state.snap_interval
+        if mods & Qt.ShiftModifier:
+            step *= 10.0
+        elif mods & Qt.AltModifier:
+            step *= 0.1
+        vfo, edge_region = self._hit_vfo_at(event.position().x())
         if mods & Qt.ControlModifier:
+            if vfo is not None:
+                # 对称带宽（gqrx Ctrl+滚轮）：中心不动，双边同扩同收
+                new_bw = max(100.0, float(vfo.bw_hz) + step * wheel)
+                vfo.bw_hz = new_bw
+                self.state.panel.vfo_bw_changed.emit(
+                    vfo.vfo_id, float(vfo.bw_hz))
+                self.update()
+                self._show_tune_tip(
+                    f"VFO 带宽 {new_bw / 1e3:.1f} kHz（对称）")
+                return
             # Ctrl+滚轮 = 以光标为中心缩放 span（对标 SDR++ waterfall.cpp
             # processInputs 的鼠标锚点缩放：缩放前后光标处绝对频率不变）。
             factor = 1.1 if dy > 0 else 1 / 1.1
@@ -1456,38 +1497,38 @@ class _TuningPlotMixin:
             self._show_tune_tip(
                 f"缩放 {new_span / 1e6:.3f} MHz")
         else:
-            # 光标悬停在某个 VFO 的左右边沿上 → 滚轮改带宽（而非调谐中心）。
-            # 命中 body / 未命中 VFO 时退回普通步进调谐。
-            vfo, edge_region = self._hit_vfo_at(event.position().x())
-            if edge_region in ('left', 'right') and vfo is not None:
-                wheel = 1 if dy > 0 else -1     # 上滚=扩带宽，下滚=收带宽
-                bw_step = self.state.snap_interval
-                if mods & Qt.ShiftModifier:
-                    bw_step *= 10.0
-                elif mods & Qt.AltModifier:
-                    bw_step *= 0.1
-                new_bw = max(100.0, float(vfo.bw_hz) + bw_step * wheel)
-                vfo.bw_hz = new_bw
-                self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
-                self.update()
-                self._show_tune_tip(
-                    f"VFO 带宽 {new_bw / 1e3:.1f} kHz"
-                    f"（步进 {bw_step / 1e3:g} kHz）")
-                return
+            if vfo is not None:
+                if edge_region in ('left', 'right'):
+                    # 非对称调带宽：单侧边跟随光标
+                    new_bw = max(100.0, float(vfo.bw_hz) + step * wheel)
+                    vfo.bw_hz = new_bw
+                    self.state.panel.vfo_bw_changed.emit(
+                        vfo.vfo_id, float(vfo.bw_hz))
+                    self.update()
+                    self._show_tune_tip(
+                        f"VFO 带宽 {new_bw / 1e3:.1f} kHz"
+                        f"（步进 {step / 1e3:g} kHz）")
+                    return
+                if edge_region == 'body':
+                    # 整体搬移通带：VFO 中心按步进挪动，带宽不动
+                    new_center = float(vfo.center_hz) + step * wheel
+                    vfo.center_hz = new_center
+                    self.state.panel.vfo_moved.emit(
+                        vfo.vfo_id, float(new_center))
+                    self.update()
+                    self._show_tune_tip(
+                        f"VFO {new_center / 1e6:.4f} MHz"
+                        f"（搬移 {step / 1e3:g} kHz）")
+                    return
 
-            wheel = 1 if dy > 0 else -1     # 上滚=加频，下滚=减频
-            interval = self.state.snap_interval
-            if mods & Qt.ShiftModifier:
-                interval *= 10.0             # Shift = ×10
-            elif mods & Qt.AltModifier:
-                interval *= 0.1              # Alt   = ×0.1
-            nfreq = gen.center_freq_hz + interval * wheel
+            # 未命中 VFO：按 snap 步进调谐（SDR++ 语义）
+            nfreq = gen.center_freq_hz + step * wheel
             # main_window.cpp:596  roundl(nfreq/interval)*interval
-            nfreq = round(nfreq / interval) * interval
+            nfreq = round(nfreq / step) * step
             gen.center_freq_hz = nfreq
             self._emit_tuned(nfreq)
             self._show_tune_tip(
-                f"{nfreq / 1e6:.4f} MHz（步进 {interval / 1e3:g} kHz）")
+                f"{nfreq / 1e6:.4f} MHz（步进 {step / 1e3:g} kHz）")
         self.update()
 
     # ------------------------------------------------------------------ 键盘
@@ -1496,9 +1537,9 @@ class _TuningPlotMixin:
         # 上下箭头 = 细调（snap_interval*0.1，对标 SDR++ 步进微调）；
         # Shift ×10 / Alt ×0.1 修饰同样生效。
         key = event.key()
+        mods = event.modifiers()
         if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
             gen = self.state.panel.generator
-            mods = event.modifiers()
             if key in (Qt.Key_Left, Qt.Key_Right):
                 interval = self.state.snap_interval          # 左右 = 整格步进
                 direction = -1.0 if key == Qt.Key_Left else 1.0
@@ -1517,8 +1558,37 @@ class _TuningPlotMixin:
             self._show_tune_tip(
                 f"{nfreq / 1e6:.4f} MHz（步进 {interval / 1e3:g} kHz）")
             self.update()
-        else:
-            super().keyPressEvent(event)
+            return
+        # 单键切解调（gqrx 键盘流）；S=LSB，Shift+S=USB
+        mode = None
+        if key == Qt.Key_S:
+            mode = "USB" if (mods & Qt.ShiftModifier) else "LSB"
+        elif key in _MODE_HOTKEYS:
+            mode = _MODE_HOTKEYS[key]
+        if mode is not None:
+            if _get_demod_mode is not None and _get_demod_mode(mode) is None:
+                self._show_tune_tip(f"模式 {mode} 未注册")
+                return
+            self.state.panel.mode_hotkey_requested.emit(mode)
+            self._show_tune_tip(f"模式 {mode}")
+            self.update()
+            return
+        # 滤波宽窄档（, 窄 / . 宽，gqrx </./> 惯例；按模式预设表步进）
+        if key in (Qt.Key_Comma, Qt.Key_Period):
+            mgr = self.state.panel.vfo_manager
+            vfo = mgr.current if mgr is not None else None
+            direction = -1 if key == Qt.Key_Comma else 1
+            if vfo is None or next_bandwidth_preset is None:
+                self._show_tune_tip("无主听 VFO：滤波档未生效")
+                return
+            new_bw = next_bandwidth_preset(
+                getattr(vfo, "mode", "") or "", float(vfo.bw_hz), direction)
+            vfo.bw_hz = new_bw
+            self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(new_bw))
+            self._show_tune_tip(f"滤波 {new_bw / 1e3:g} kHz")
+            self.update()
+            return
+        super().keyPressEvent(event)
 
     # ------------------------------------------------------------------ 鼠标
     def _begin_vfo_drag(self, x_px: float, vfo, region: str, event):

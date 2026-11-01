@@ -213,6 +213,45 @@ def default_bandwidth(mode: str) -> float:
     return 12_500.0
 
 
+# 滤波宽窄预设三元组 (窄, 正常, 宽)（gqrx filter_preset_table 惯例，
+# 键盘 , / . 步进档位的数据源；未列出的模式按默认值 ±50% 派生）。
+_BANDWIDTH_PRESETS = {
+    "WFM": (120_000.0, 180_000.0, 250_000.0),
+    "NFM": (7_500.0, 12_500.0, 25_000.0),
+    "FM":  (12_500.0, 25_000.0, 50_000.0),
+    "AM":  (4_000.0, 6_000.0, 10_000.0),
+    "USB": (1_800.0, 2_400.0, 3_000.0),
+    "LSB": (1_800.0, 2_400.0, 3_000.0),
+    "CW":  (300.0, 500.0, 1_000.0),
+}
+
+
+def bandwidth_presets(mode: str) -> Tuple[float, float, float]:
+    """模式的 (窄, 正常, 宽) 滤波带宽预设；未知模式按默认值派生。"""
+    key = (mode or "").upper()
+    if key in _BANDWIDTH_PRESETS:
+        return _BANDWIDTH_PRESETS[key]
+    d = default_bandwidth(mode)
+    return (d * 0.5, d, d * 2.0)
+
+
+def next_bandwidth_preset(mode: str, current_hz: float, direction: int) -> float:
+    """在当前预设档位表中按 direction(+1/-1) 步进一档并回绕。
+
+    当前带宽不在表内时，先吸附到最近档再步进。返回新带宽 (Hz)。
+    """
+    narrow, _normal, wide = bandwidth_presets(mode)
+    table = [narrow, _normal, wide]
+    cur = float(current_hz)
+    # 最近档索引
+    idx = min(range(3), key=lambda i: abs(table[i] - cur))
+    if abs(table[idx] - cur) > 1e-9:
+        # 不在档上：先吸附（gqrx 手感：按一下到最近档）
+        return table[idx]
+    idx = (idx + (1 if direction > 0 else -1)) % 3
+    return table[idx]
+
+
 def audio_cutoff(mode: str) -> float:
     """获取模式的音频截止频率，未知模式回退 4kHz。"""
     m = get(mode)
