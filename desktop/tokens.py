@@ -77,6 +77,8 @@ class DesignTokens:
             # 频谱 Max/Min hold 线（SDR++ 双保持签名：暖橙=max 包络，冷蓝=min 包络）
             "spectrum_max_hold": "#C87F5A",
             "spectrum_min_hold": "#6C8EBF",
+            # 频谱书签标签（gqrx 书签竖旗签名：暗金药丸 + 虚线）
+            "spectrum_bookmark": "#A8924F",
             # 浅色（default）方向：保留既有米白/蓝灰/橙
             "light_bg":       "#F5F3EF",
             "light_bg_alt":   "#FAF8F5",

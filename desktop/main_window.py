@@ -1001,6 +1001,9 @@ class MainWindow(QMainWindow):
         # 谱面单键切解调（gqrx 键盘流）：走面板 combo 全链（mode_changed +
         # 带宽预设 + 后端 set_demod）
         self.spectrum.mode_hotkey_requested.connect(self._on_mode_hotkey)
+        if hasattr(self.spectrum, "bookmark_activated"):
+            self.spectrum.bookmark_activated.connect(
+                self._on_bookmark_activated)
         QShortcut(QKeySequence("Ctrl+Tab"), self, self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
         # 星象仪形态退出时瀑布归位用的布局句柄（reparent 往返，对象身份不变）。
@@ -1071,6 +1074,9 @@ class MainWindow(QMainWindow):
                 bm_list = [(b.freq_hz, b.name, b.mode)
                            for b in self._freq_mgr.list() if b.freq_hz > 0]
                 self.control_panel.load_bookmarks_from_list(bm_list)
+                # 同一批收藏同时灌进内存表（频谱书签标签的数据源）
+                self._bookmarks.extend(bm_list)
+                self._sync_spectrum_bookmarks()
         except Exception:
             pass
         self._add_right_tab("控制", self.control_panel, "control_dock")
@@ -3295,7 +3301,7 @@ class MainWindow(QMainWindow):
 
     @Slot(float, str, str)
     def _on_bookmark_added(self, freq_hz: float, name: str, mode: str):
-        """控制面板书签按钮 → 内存保存 + FrequencyManager 持久化。"""
+        """控制面板书签按钮 → 内存保存 + FrequencyManager 持久化 + 频谱标签。"""
         try:
             self._bookmarks.append((float(freq_hz), str(name), str(mode)))
             if self._freq_mgr is not None:
@@ -3305,10 +3311,36 @@ class MainWindow(QMainWindow):
                         category="自定义")
                 except Exception:
                     pass
+            self._sync_spectrum_bookmarks()
             self.statusBar().showMessage(
                 f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}", 3000)
         except Exception:
             pass
+
+    def _sync_spectrum_bookmarks(self):
+        """内存书签表 → 频谱书签竖旗（[(freq_hz, name), ...]）。"""
+        try:
+            if hasattr(self.spectrum, "set_bookmarks"):
+                self.spectrum.set_bookmarks(
+                    [(float(hz), str(name)) for hz, name, _m in self._bookmarks])
+        except Exception:
+            pass
+
+    @Slot(float)
+    def _on_bookmark_activated(self, freq_hz: float):
+        """点频谱书签竖旗 → 调到该书签频率（gqrx 书签点击调谐）。
+
+        书签带模式则一并切过去；否则保持当前解调模式。
+        """
+        mode = None
+        for hz, _name, m in self._bookmarks:
+            if abs(float(hz) - float(freq_hz)) < 1.0:
+                mode = str(m) if m else None
+                break
+        if not mode:
+            mode = (self._demod_cfg.mode if self._demod_cfg is not None
+                    else "FM")
+        self._on_tune_sdr(float(freq_hz), mode)
 
     @Slot(bool)
     def _on_dc_removal_changed(self, enabled: bool):

@@ -90,6 +90,10 @@ PAL_PEAK = _c["success"]      # 峰值标注
 PAL_OFFLINE = _c["danger"]    # 未连接提示
 PAL_MAXHOLD = _c["spectrum_max_hold"]   # Max hold 包络线（SDR++ 同款语义）
 PAL_MINHOLD = _c["spectrum_min_hold"]   # Min hold 包络线
+PAL_BOOKMARK = _c["spectrum_bookmark"]  # 书签标签（gqrx 书签竖旗）
+
+# 书签药丸高度（像素）：谱面顶部这一条带内点击 = 激活书签（不进调谐/拖拽）。
+_BM_TAG_H = 16.0
 
 # 瀑布图色带（低饱和，从冷到暖）
 WATERFALL_COLORS = [
@@ -605,6 +609,11 @@ class _PlotState:
         self.mouse_x_ratio: Optional[float] = None     # 鼠标悬停 x 比例
         self.mouse_in_spectrum = False
         self.markers: List[float] = []                 # 固定 marker 频率 Hz
+        # ---- 书签标签（gqrx 书签竖旗；[(freq_hz, name), ...]）----
+        # 与固定 marker 是两套系统：marker 是扫频结果的瞬时标注，
+        # 书签是用户收藏的持久频点，点击药丸直接调谐。
+        self.bookmarks: List[Tuple[float, str]] = []
+        self.show_bookmarks = True
         self.show_peaks = True
         self.peak_rel_db = 6.0
         # ---- 瀑布调色板 / 时间平滑 ----
@@ -712,10 +721,11 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
     # 中心频率游标
     _draw_center_cursor(painter, spec_rect, QColor(PAL_LINE))
 
-    # 悬停读数 + 固定 marker（都读真实数组）
+    # 悬停读数 + 固定 marker + 书签竖旗（都读真实数组/真实收藏）
     if has_data:
         _draw_hover_readout(painter, state, spec_rect, text, line)
         _draw_fixed_markers(painter, state, spec_rect, line)
+    _draw_bookmark_tags(painter, state, spec_rect)
 
     # 频率轴（画在谱面底部预留区）+ dB 轴
     _draw_freq_scale(painter, spec_rect, view_center, span, text)
@@ -825,6 +835,42 @@ def _draw_hold_lines(painter, state, rect):
         _line(gen.max_hold, QColor(PAL_MAXHOLD))
     if gen.show_min_hold and gen.min_hold is not None:
         _line(gen.min_hold, QColor(PAL_MINHOLD))
+
+
+def _draw_bookmark_tags(painter, state, rect):
+    """书签竖旗（gqrx 书签签名）：谱面顶部暗金药丸 + 贯顶虚线。
+
+    药丸夹紧在谱面横向范围内（视口边缘的书签仍可见可点）；
+    点击命中由 _TuningPlotMixin._bookmark_tag_at 用同一几何反算。
+    """
+    if not state.show_bookmarks or not state.bookmarks:
+        return
+    gen = state.panel.generator
+    view_center = _view_center_hz(state)
+    span = gen.sample_rate_hz
+    f_left = view_center - span / 2.0
+    color = QColor(PAL_BOOKMARK)
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+    fm = painter.fontMetrics()
+    painter.setBrush(QBrush(color))
+    for freq_hz, name in state.bookmarks:
+        x = rect.x() + (float(freq_hz) - f_left) / span * rect.width()
+        if x < rect.x() or x > rect.x() + rect.width():
+            continue
+        painter.setPen(QPen(color, 1, Qt.DashLine))
+        painter.drawLine(QPointF(x, rect.y() + _BM_TAG_H),
+                         QPointF(x, rect.y() + rect.height()))
+        text = str(name)
+        pw = fm.horizontalAdvance(text) + 10
+        x0 = min(max(rect.x(), x - pw / 2.0),
+                 rect.x() + rect.width() - pw)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(QRectF(x0, rect.y() + 1.0, pw, _BM_TAG_H - 2.0),
+                                3.0, 3.0)
+        painter.setPen(QPen(QColor(PAL_BG), 1))
+        painter.drawText(QPointF(x0 + 5.0, rect.y() + 1.0 + fm.ascent()), text)
 
 
 def _draw_center_cursor(painter, rect, color):
@@ -1048,6 +1094,7 @@ class SpectrumPanel(QWidget):
     vfo_selected = Signal(str)                # vfo_id（用户点击设为主听）
     vfo_removed = Signal(str)                 # vfo_id（用户右键删除）
     mode_hotkey_requested = Signal(str)       # 键盘单键切解调（gqrx A/N/W/S/C）
+    bookmark_activated = Signal(float)        # 点击书签竖旗 (freq_hz) → 主窗口调谐
 
     def __init__(self, parent=None, prefer_opengl: bool = False):
         super().__init__(parent)
@@ -1182,6 +1229,16 @@ class SpectrumPanel(QWidget):
         self._minhold_chk.toggled.connect(self.generator.set_min_hold)
         bar.addWidget(self._minhold_chk)
 
+        # 书签竖旗开关（gqrx 书签标签；标签本体由主窗口 set_bookmarks 灌入）
+        self._bookmark_chk = QCheckBox("书签")
+        self._bookmark_chk.setChecked(True)
+        self._bookmark_chk.setToolTip(
+            "在谱面顶部显示书签竖旗；点击药丸直接调到该书签频率")
+        self._bookmark_chk.toggled.connect(
+            lambda on: (setattr(self._state, "show_bookmarks", bool(on)),
+                        self._redraw()))
+        bar.addWidget(self._bookmark_chk)
+
         bar.addWidget(QLabel("阈值dB:"))
         self._peak_spin = QDoubleSpinBox()
         self._peak_spin.setRange(1.0, 30.0)
@@ -1280,7 +1337,7 @@ class SpectrumPanel(QWidget):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
                    self._perf_combo, self._palette_combo, self._wf_smooth_chk,
                    self._peak_chk, self._peak_spin, self._tune_mode_btn,
-                   self._maxhold_chk, self._minhold_chk):
+                   self._maxhold_chk, self._minhold_chk, self._bookmark_chk):
             w_.setEnabled(on)
 
     def _on_tune_mode_toggled(self, checked: bool):
@@ -1370,6 +1427,16 @@ class SpectrumPanel(QWidget):
         可见，超出 span 的频点不绘制（_draw_fixed_markers 自然裁剪）。
         """
         self._state.markers = [float(f) for f in (freqs_hz or [])]
+        self._redraw()
+
+    def set_bookmarks(self, bookmarks):
+        """外部批量设置书签标签 [(freq_hz, name), ...]；空列表/None 清空。
+
+        与 marker 两套系统：书签是用户收藏的持久频点，点击药丸发
+        bookmark_activated 调谐；marker 是扫频瞬时标注。
+        """
+        self._state.bookmarks = [
+            (float(hz), str(name)) for hz, name in (bookmarks or [])]
         self._redraw()
 
     def clear_markers(self):
@@ -1559,6 +1626,29 @@ class _TuningPlotMixin:
             if x0 <= x_px <= x1:
                 return vfo, 'body'
         return None, None
+
+    def _bookmark_tag_at(self, x_px: float):
+        """命中谱面顶部书签药丸 → 返回其 freq_hz；未命中 None。
+
+        与 _draw_bookmark_tags 同一几何：±30px 容差，视口外不算。
+        """
+        state = self.state
+        if not getattr(state, "show_bookmarks", False) or not state.bookmarks:
+            return None
+        gen = state.panel.generator
+        view_center = _view_center_hz(state)
+        span = gen.sample_rate_hz
+        w = max(1, self.width())
+        f_left = view_center - span / 2.0
+        best = None
+        best_d = 30.0
+        for freq_hz, _name in state.bookmarks:
+            x = (float(freq_hz) - f_left) / span * w
+            d = abs(x - x_px)
+            if d <= best_d:
+                best_d = d
+                best = float(freq_hz)
+        return best
 
     def _snap_center(self) -> float:
         """把当前中心频率对齐到 snap_interval 网格（SDR++ roundl 语义）。"""
@@ -1792,6 +1882,15 @@ class _TuningPlotMixin:
             y = event.position().y()
             in_spectrum = y <= self._spectrum_height()
             if in_spectrum:
+                # 顶部书签药丸带优先：命中 → 调谐该书签（gqrx 书签点击语义），
+                # 不进 VFO 拖拽 / 橡皮筋 / 平移。
+                if y <= _BM_TAG_H and not (
+                        event.modifiers() & Qt.ShiftModifier):
+                    bm_freq = self._bookmark_tag_at(x)
+                    if bm_freq is not None:
+                        self.state.panel.bookmark_activated.emit(bm_freq)
+                        self._show_tune_tip(f"书签 {bm_freq / 1e6:.4f} MHz")
+                        return
                 vfo, region = self._hit_vfo_at(x)
                 if vfo is not None:
                     self._begin_vfo_drag(x, vfo, region, event)
