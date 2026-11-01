@@ -218,6 +218,53 @@ class TestStarExtinctionWiring:
 
 
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+class TestTwilightGradient:
+    """S4 暮光渐变 hex 表：多段 stops、夜/昼混合、画出来下亮上暗。"""
+
+    def test_stops_cover_unit_interval(self):
+        from desktop.rf_sky_view import _twilight_stops
+        stops = _twilight_stops(0.0)
+        assert stops[0][0] == 0.0
+        assert stops[-1][0] == 1.0
+        pos = [p for p, _ in stops]
+        assert pos == sorted(pos)
+        assert len(stops) >= 5            # 多于旧 3-stop 直通 lerp
+
+    def test_night_and_day_endpoints(self):
+        from desktop.rf_sky_view import _twilight_stops
+        night_top = _twilight_stops(0.0)[0][1]
+        day_top = _twilight_stops(1.0)[0][1]
+        assert (night_top.red(), night_top.green(), night_top.blue()) == (0x05, 0x08, 0x0F)
+        assert (day_top.red(), day_top.green(), day_top.blue()) == (0x3F, 0x6E, 0x9E)
+
+    def test_brightness_mixes_linearly(self):
+        from desktop.rf_sky_view import _twilight_stops
+        lo = _twilight_stops(0.0)
+        hi = _twilight_stops(1.0)
+        mid = _twilight_stops(0.5)
+        for (_, c0), (_, c1), (_, cm) in zip(lo, hi, mid):
+            assert abs(cm.red() - (c0.red() + c1.red()) / 2) <= 1
+            assert abs(cm.blue() - (c0.blue() + c1.blue()) / 2) <= 1
+
+    def test_brightness_clamped(self):
+        from desktop.rf_sky_view import _twilight_stops
+        a = _twilight_stops(0.0)[0][1]
+        b = _twilight_stops(-5.0)[0][1]
+        assert (a.red(), a.green(), a.blue()) == (b.red(), b.green(), b.blue())
+
+    def test_painted_night_sky_brighter_at_horizon(self):
+        from desktop.rf_sky_view import RFSkyView
+        v = RFSkyView()
+        v.resize(300, 300)
+        v._sky_brightness = 0.0
+        img = v.grab().toImage()
+        top = img.pixelColor(150, 5)
+        bottom = img.pixelColor(150, 295)
+        lum = lambda c: 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+        assert lum(bottom) > lum(top), "夜空应上暗下亮（地平线微亮）"
+
+
 class TestPaintingRobust:
     def test_paint_without_data(self):
         from desktop.rf_sky_view import RFSkyView

@@ -110,6 +110,43 @@ except Exception:  # pragma: no cover
 
 
 # ============================================================================
+# 暮光渐变 hex 表 (S4): 天顶 -> 地平多段 stops
+# ============================================================================
+# 夜/昼两张等长 stop 表, 按太阳高度驱动的 _sky_brightness b in [0,1]
+# 逐 stop 混合。密度高于旧 3-stop 直通 lerp: 低空段更缓, 地平收口更亮,
+# 视觉上接近 Stellarium 大气渐变的层次 (机制自研, 色值为公开天光常识)。
+_TWILIGHT_NIGHT = [
+    (0.00, "#05080F"),
+    (0.35, "#0A1220"),
+    (0.60, "#122031"),
+    (0.80, "#1B2E42"),
+    (0.93, "#24384C"),
+    (1.00, "#2E4254"),
+]
+_TWILIGHT_DAY = [
+    (0.00, "#3F6E9E"),
+    (0.35, "#5E8FB8"),
+    (0.60, "#82ACCB"),
+    (0.80, "#A5C4DA"),
+    (0.93, "#C6D9E6"),
+    (1.00, "#DCE7EC"),
+]
+
+
+def _twilight_stops(brightness: float):
+    """b=0 纯夜 -> b=1 纯昼 的暮光渐变 stops [(pos, QColor), ...]。"""
+    b = max(0.0, min(1.0, float(brightness)))
+    stops = []
+    for (t1, c1), (_, c2) in zip(_TWILIGHT_NIGHT, _TWILIGHT_DAY):
+        q1, q2 = QColor(c1), QColor(c2)
+        stops.append((t1, QColor(
+            int(q1.red() * (1 - b) + q2.red() * b),
+            int(q1.green() * (1 - b) + q2.green() * b),
+            int(q1.blue() * (1 - b) + q2.blue() * b))))
+    return stops
+
+
+# ============================================================================
 # 数据类型
 # ============================================================================
 
@@ -1500,27 +1537,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 天空背景: 透视窗口全屏, 近地平线大气散射渐变 (Preetham 简化)
     # ------------------------------------------------------------------ #
     def _paint_sky_background(self, painter: QPainter):
-        b = self._sky_brightness
-
-        def mix(c1: QColor, c2: QColor, t: float) -> QColor:
-            return QColor(
-                int(c1.red() * (1 - t) + c2.red() * t),
-                int(c1.green() * (1 - t) + c2.green() * t),
-                int(c1.blue() * (1 - t) + c2.blue() * t),
-            )
-
-        # 夜: 天顶深蓝 -> 地平线微亮; 昼: 浅蓝 -> 米白
-        _t = tokens()
-        zenith = mix(QColor(_t.COLORS["sky_night_zenith_deep"]),
-                     QColor(_t.COLORS["sky_day_horizon_glow"]), b)
-        horizon = mix(QColor(_t.COLORS["sky_night_horizon_deep"]),
-                      QColor(_t.COLORS["sky_day_zenith"]), b)
+        # 暮光渐变 hex 表 (S4): 多段 stops, 夜/昼按太阳高度混合
         painter.save()
         painter.setPen(Qt.NoPen)
         grad = QLinearGradient(0, 0, 0, self.height())
-        grad.setColorAt(0.0, zenith)
-        grad.setColorAt(0.62, mix(zenith, horizon, 0.5))
-        grad.setColorAt(1.0, horizon)
+        for pos, color in _twilight_stops(self._sky_brightness):
+            grad.setColorAt(pos, color)
         painter.setBrush(QBrush(grad))
         painter.drawRect(self.rect())
         painter.restore()
