@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
     QFrame, QSizePolicy, QDialog, QDialogButtonBox, QLineEdit,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
     QDoubleSpinBox, QProgressDialog, QDockWidget, QScrollArea,
+    QStackedWidget,
 )
 
 # 确保能导入同目录模块
@@ -669,6 +670,20 @@ class MainWindow(QMainWindow):
         fullscreen_action.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
 
+        # 星象仪模式：顶层第二形态（全屏天空）。checkable 与当前形态同步。
+        planetarium_action = QAction("星象仪模式", self)
+        planetarium_action.setCheckable(True)
+        planetarium_action.setToolTip(
+            "切换到星象仪形态：整个天空铺满屏幕，点星即看/即听")
+        planetarium_action.triggered.connect(self._toggle_planetarium_mode)
+        view_menu.addAction(planetarium_action)
+        self._planetarium_action = planetarium_action
+        # Esc 仅星象仪形态下生效（退出回 IDE）；IDE 形态不劫持 Esc。
+        self._planetarium_esc = QShortcut(QKeySequence("Esc"), self)
+        self._planetarium_esc.activated.connect(
+            lambda: self.set_app_mode("ide"))
+        self._planetarium_esc.setEnabled(False)
+
         # 工具菜单
         tools_menu = menubar.addMenu("工具(&T)")
 
@@ -1144,6 +1159,131 @@ class MainWindow(QMainWindow):
         # ---- 用户自定义布局：面板菜单 + 动态下拉 + 启动恢复上次 active 布局 ----
         self._build_panel_menu()
         self._restore_user_layout()
+
+        # ---- 双形态壳层：IDE / 星象仪 顶层模式栈（页0=IDE root，页1=星象仪页）----
+        self._build_mode_shell()
+        self._restore_app_mode()
+
+    # ------------------------------------------------------------------
+    # 双形态壳层：IDE 形态 / 星象仪形态
+    #
+    # 切换 = QStackedWidget 换页 + sky_view 换父。对象身份不变、信号零重接。
+    # 不用第二窗口（状态双份、焦点分裂）；不用自由浮窗（用户已否决，见
+    # dock_layout_manager 弃用史）。与 DockLayoutManager 的"布局预设"正交：
+    # 预设管栏内面板编排，形态管顶层 IDE↔星象仪。
+    # ------------------------------------------------------------------
+    def _build_mode_shell(self) -> None:
+        """把已构建的 IDE root 包进顶层形态栈，并建空星象仪容器页。"""
+        root = self.centralWidget()
+        self._mode_stack = QStackedWidget()
+        self._mode_stack.addWidget(root)
+        self._planetarium_page = self._build_planetarium_page()
+        self._mode_stack.addWidget(self._planetarium_page)
+        self.setCentralWidget(self._mode_stack)
+        self._app_mode = "ide"
+        self._sky_restore_info: Optional[dict] = None
+
+    def _build_planetarium_page(self) -> QWidget:
+        """星象仪容器页：天空铺满整个屏幕（阶段1 在此追加底部瀑布与 AI 覆盖条）。"""
+        page = QWidget()
+        page.setObjectName("planetariumPage")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self._planetarium_sky_slot = QWidget()
+        self._planetarium_sky_slot.setObjectName("planetariumSkySlot")
+        slot_lay = QVBoxLayout(self._planetarium_sky_slot)
+        slot_lay.setContentsMargins(0, 0, 0, 0)
+        slot_lay.setSpacing(0)
+        self._planetarium_sky_layout = slot_lay
+        lay.addWidget(self._planetarium_sky_slot, stretch=1)
+        return page
+
+    def _capture_sky_location(self) -> dict:
+        """记录 sky_view 当前所在容器，供退出星象仪归位。
+
+        布局预设可能把天空搬到右侧 Dock（DockLayoutManager._move_sky_to_right），
+        所以归位目标不能写死 left_tab——进形态前在哪里，出来回哪里。
+        """
+        sky = self.sky_view
+        lt = getattr(self, "left_tab", None)
+        if lt is not None and lt.indexOf(sky) >= 0:
+            return {"kind": "tab", "index": lt.indexOf(sky)}
+        p = sky.parentWidget()
+        while p is not None:
+            if isinstance(p, QDockWidget):
+                return {"kind": "dock", "dock": p}
+            p = p.parentWidget()
+        return {"kind": "widget", "parent": sky.parentWidget()}
+
+    def _restore_sky_location(self, info: Optional[dict]) -> None:
+        sky = self.sky_view
+        info = info or {}
+        kind = info.get("kind")
+        lt = getattr(self, "left_tab", None)
+        if kind == "tab" and lt is not None:
+            idx = max(0, min(int(info.get("index", 0)), lt.count()))
+            lt.insertTab(idx, sky, "射频天空")
+            lt.tabBar().setTabData(idx, "rf_sky")
+        elif kind == "dock" and info.get("dock") is not None:
+            info["dock"].setWidget(sky)
+        elif info.get("parent") is not None:
+            sky.setParent(info["parent"])
+            sky.show()
+
+    def _enter_planetarium(self) -> None:
+        if getattr(self, "_app_mode", "ide") == "planetarium":
+            return
+        self._sky_restore_info = self._capture_sky_location()
+        self._planetarium_sky_layout.addWidget(self.sky_view)
+        self._mode_stack.setCurrentWidget(self._planetarium_page)
+        self._app_mode = "planetarium"
+        self.settings.set("app_mode", "planetarium")
+        self._sync_mode_action()
+        # 窗口已显示才联动全屏；启动恢复阶段窗口未 show，交给正常 show 流程。
+        if self.isVisible() and not self.isFullScreen():
+            self.showFullScreen()
+
+    def _exit_planetarium(self) -> None:
+        if getattr(self, "_app_mode", "ide") != "planetarium":
+            return
+        self._planetarium_sky_layout.removeWidget(self.sky_view)
+        self._restore_sky_location(self._sky_restore_info)
+        self._sky_restore_info = None
+        self._mode_stack.setCurrentIndex(0)
+        self._app_mode = "ide"
+        self.settings.set("app_mode", "ide")
+        self._sync_mode_action()
+        if self.isFullScreen():
+            self.showNormal()
+
+    def set_app_mode(self, mode: str) -> None:
+        """顶层形态切换入口（IDE / 星象仪）。"""
+        if mode == "planetarium":
+            self._enter_planetarium()
+        else:
+            self._exit_planetarium()
+
+    def _toggle_planetarium_mode(self, checked: bool = False) -> None:
+        self.set_app_mode(
+            "ide" if self._app_mode == "planetarium" else "planetarium")
+
+    def _sync_mode_action(self) -> None:
+        act = getattr(self, "_planetarium_action", None)
+        if act is not None:
+            act.setChecked(self._app_mode == "planetarium")
+        esc = getattr(self, "_planetarium_esc", None)
+        if esc is not None:
+            esc.setEnabled(self._app_mode == "planetarium")
+
+    def _restore_app_mode(self) -> None:
+        """启动恢复上次顶层形态（settings 权威源；读不到/异常回退 IDE）。"""
+        try:
+            mode = str(self.settings.get("app_mode", "ide") or "ide")
+        except Exception:
+            mode = "ide"
+        if mode == "planetarium":
+            self._enter_planetarium()
 
     def _restore_user_layout(self) -> None:
         """启动时：填充布局下拉、恢复上次 active 布局的页签顺序/比例/可见性。"""

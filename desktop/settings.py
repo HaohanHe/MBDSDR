@@ -56,6 +56,9 @@ DEFAULTS: Dict[str, Any] = {
     # UI 语言（i18n）：zh/en/ja。源语言 zh（tr() 源文即中文）；en/ja 由
     # desktop/i18n/*.qm 提供（Qt Linguist 管线），未知值诚实回退 zh。
     "ui_language": "zh",
+    # 顶层形态：ide = 传统 SDR 工作台；planetarium = 星象仪形态（全屏天空）。
+    # 重启按上次形态恢复；未知值由 main_window 回退 ide。
+    "app_mode": "ide",
 }
 
 #: 数值字段（写盘前做类型归一，防止 JSON 里混入字符串导致下游类型错误）
