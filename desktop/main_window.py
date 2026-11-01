@@ -4538,6 +4538,8 @@ class MainWindow(QMainWindow):
             if sv is not None and hasattr(sv, "tune_satellite_requested"):
                 sv.tune_satellite_requested.connect(
                     self._on_sky_tune_satellite)
+            if sv is not None and hasattr(sv, "track_toggled"):
+                sv.track_toggled.connect(self._on_sky_track_toggled)
         except Exception:
             pass
 
@@ -4990,6 +4992,38 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"已调谐 {info.get('name','卫星')}：{freq/1e6:.4f} MHz "
             f"(多普勒 {dop:+.0f} Hz)", 5000)
+
+    def _on_sky_track_toggled(self, on: bool, sat_name: str,
+                              downlink_hz: float):
+        """天空图「跟踪」开关 → 接线既有卫星闭环（_sat_track_timer 500ms 环）。
+
+        on=True  进入闭环：每 500ms 按实时多普勒自动调谐，仰角<5° 自停；
+        on=False 停环并恢复用户之前的接收频率。
+        启动失败（无观测站/选星失败）由 _start_satellite_tracking 状态栏
+        诚实提示，并复位天空图开关（按钮不残留假状态）。
+        """
+        if on:
+            if not sat_name or downlink_hz <= 0.0:
+                self.statusBar().showMessage("跟踪失败：缺少卫星名或下行频点", 4000)
+                self._sync_sky_track_btn(False)
+                return
+            before = self._sat_track_timer is not None and \
+                self._sat_track_timer.isActive()
+            self._start_satellite_tracking(sat_name, downlink_hz)
+            after = self._sat_track_timer is not None and \
+                self._sat_track_timer.isActive()
+            if not after:
+                # 启动被拒（无观测站/选星失败/缺依赖）：复位开关
+                self._sync_sky_track_btn(False)
+            elif not before:
+                pass  # 正常启动，按钮保持 checked
+        else:
+            self._stop_satellite_tracking()
+
+    def _sync_sky_track_btn(self, on: bool) -> None:
+        sv = getattr(self, "sky_view", None)
+        if sv is not None and hasattr(sv, "set_tracking_checked"):
+            sv.set_tracking_checked(on)
 
 
     def _on_toolbar_mode_selected(self, mode: str):
@@ -5572,6 +5606,7 @@ class MainWindow(QMainWindow):
         if self._sat_track_timer is not None:
             self._sat_track_timer.stop()
         self.sat_track_panel.set_tracking_state(False)
+        self._sync_sky_track_btn(False)  # 自动停（过境结束）也复位天空图开关
         if self._sat_track_prev_freq_hz is not None:
             mode = self._sat_track_prev_mode or "FM"
             try:

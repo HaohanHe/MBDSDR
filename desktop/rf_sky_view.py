@@ -388,6 +388,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 选中卫星后点「调到该星」：携带实时多普勒校正后的调谐参数。
     # dict: {name, tuned_freq_hz, doppler_shift_hz, base_freq_hz, mode}
     tune_satellite_requested = Signal(dict)
+    # 「跟踪」开关：checked 开始 / unchecked 停止卫星闭环跟踪。
+    # (on, sat_name, downlink_hz)——downlink_hz 用目录基准下行频点，
+    # 多普勒校正是主窗口跟踪环（_sat_track_timer）的职责，这里不越权。
+    track_toggled = Signal(bool, str, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -493,8 +497,28 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             + _t.text("disabled") + "; }")
         self._tune_btn.hide()
         self._doppler_label.hide()
+        # 「跟踪」开关：checkable。按下后主窗口 500ms 闭环接管调谐
+        # （多普勒自动校正 + 仰角<5° 自动停 + 过境后恢复频率）。
+        self._track_btn = QPushButton("🎯 跟踪", self)
+        self._track_btn.setCheckable(True)
+        self._track_btn.setEnabled(False)
+        self._track_btn.setToolTip(
+            "闭环跟踪：每 500ms 按实时多普勒自动调谐，过境结束自动停止")
+        self._track_btn.setStyleSheet(
+            "QPushButton { background: " + _t.COLORS["card_2"] + "; color: "
+            + _t.text("primary") + ";"
+            " border:none; padding:4px 10px; border-radius:3px; }"
+            "QPushButton:hover { background: " + _t.COLORS["card_hover"] + "; }"
+            "QPushButton:checked { background: " + _t.COLORS["success"]
+            + "; color: " + _t.COLORS["bg_dark"] + "; }"
+            "QPushButton:disabled { background: " + _t.COLORS["card_1"] + "; color: "
+            + _t.text("disabled") + "; }")
+        self._track_btn.toggled.connect(self._on_track_toggled)
+        self._track_btn.hide()
         # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
         self._tune_sat_name: Optional[str] = None
+        # 跟踪环目标星名（跟踪中防止换星残留假状态）
+        self._track_target_name: Optional[str] = None
         self._tune_refresh_timer = QTimer(self)
         self._tune_refresh_timer.setInterval(2000)
         self._tune_refresh_timer.timeout.connect(self._refresh_tune_doppler)
@@ -1065,20 +1089,68 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         meta = self._selected_sat_tle()
         gs_ready = self._observer is not None
         if meta is None or not gs_ready:
+            self._stop_track_ui()  # 选中失效：跟踪同步停，不残留假状态
             self._tune_sat_name = None
             self._tune_btn.hide()
             self._doppler_label.hide()
             self._tune_refresh_timer.stop()
             return
         name = (self._selected_info or {}).get("title")
+        # 换星：若正在跟踪别的星，先停（停跟踪是主窗口环的职责，发信号）
+        if self._track_btn.isChecked() and name != self._track_target_name:
+            self._stop_track_ui()
         self._tune_sat_name = name
         self._tune_btn.show()
+        self._track_btn.show()
         self._doppler_label.show()
         # 下行频点解析不了（目录外卫星）→ 置灰，诚实空态不画饼
-        self._tune_btn.setEnabled(self._compute_tune() is not None)
+        tunable = self._compute_tune() is not None
+        self._tune_btn.setEnabled(tunable)
+        # 跟踪中不随瞬时解析失败抖动禁用（环内多普勒已经接管）
+        if not self._track_btn.isChecked():
+            self._track_btn.setEnabled(tunable)
         self._refresh_tune_doppler()
         self._tune_refresh_timer.start()
         self._position_tune_overlay()
+
+    def _stop_track_ui(self) -> None:
+        """跟踪按钮回到未跟踪态；若在跟踪则发停止信号（供主窗口停环）。"""
+        if self._track_btn.isChecked():
+            self._track_btn.blockSignals(True)
+            self._track_btn.setChecked(False)
+            self._track_btn.blockSignals(False)
+            self.track_toggled.emit(False, self._track_target_name or "", 0.0)
+        self._track_target_name = None
+        self._track_btn.setEnabled(self._compute_tune() is not None)
+
+    def set_tracking_checked(self, on: bool) -> None:
+        """主窗口反向同步（过境自动停/启动失败时复位按钮），不发射信号。"""
+        self._track_btn.blockSignals(True)
+        self._track_btn.setChecked(on)
+        self._track_btn.blockSignals(False)
+        if on:
+            self._track_btn.setEnabled(True)
+            self._track_btn.show()
+            self._position_tune_overlay()
+        else:
+            self._track_target_name = None
+
+    def _on_track_toggled(self, checked: bool):
+        """跟踪开关：check 时校验目录频点后发信号；uncheck 发停止。"""
+        if not checked:
+            self.track_toggled.emit(False, self._track_target_name or "", 0.0)
+            self._track_target_name = None
+            return
+        res = self._compute_tune()
+        if res is None:
+            # 目录外卫星/无观测站：诚实拒绝，按钮弹回
+            self._track_btn.blockSignals(True)
+            self._track_btn.setChecked(False)
+            self._track_btn.blockSignals(False)
+            return
+        name = str(res.get("satellite") or self._tune_sat_name or "")
+        self._track_target_name = name
+        self.track_toggled.emit(True, name, float(res.get("base_freq_hz", 0.0)))
 
     def _build_tune_tracker(self, meta: Dict[str, object]):
         """用目录里的 TLE 构建卫星追踪器；缺依赖/失败返回 None。"""
@@ -1160,15 +1232,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         })
 
     def _position_tune_overlay(self):
-        """把调谐按钮+多普勒标签放到左下角。"""
+        """把调谐按钮+跟踪按钮+多普勒标签放到左下角。"""
         try:
             bw = max(self._tune_btn.sizeHint().width(), 110)
+            tw = max(self._track_btn.sizeHint().width(), 70) \
+                if self._track_btn.isVisible() else 0
             dw = self._doppler_label.sizeHint().width()
             h = 26
             x = 12
             y = self.height() - h - 12
             self._tune_btn.setGeometry(x, y, bw, h)
-            self._doppler_label.setGeometry(x + bw + 6, y, max(dw, 90), h)
+            tx = x + bw + 6
+            self._track_btn.setGeometry(tx, y, tw, h)
+            self._doppler_label.setGeometry(tx + tw + 6, y, max(dw, 90), h)
         except Exception:
             pass
 
@@ -2188,8 +2264,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if obj is None:
             self._hovered_object = None
             self._selected_info = None
-            # 取消选中：隐藏调谐按钮
+            # 取消选中：隐藏调谐按钮 + 停跟踪（发信号让主窗口停环）
             self._tune_sat_name = None
+            self._stop_track_ui()
+            self._track_btn.hide()
             self._tune_btn.hide()
             self._doppler_label.hide()
             self._tune_refresh_timer.stop()
