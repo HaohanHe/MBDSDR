@@ -574,8 +574,48 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 自动刷新
         self._refresh_timer = QTimer(self)
-        self._refresh_timer.timeout.connect(self.update)
+        self._refresh_timer.timeout.connect(self._on_refresh_tick)
         self._refresh_timer.start(33)
+
+        # goto 缓动动画（Stellarium 式 moveToAltAzi）：33ms tick 内步进，
+        # 墙钟驱动与帧率解耦。None = 无进行中的飞行。
+        self._goto_anim = None
+        self._goto_start_ms = 0.0
+        self._goto_clock = lambda: time.monotonic() * 1000.0
+
+    def _on_refresh_tick(self):
+        """33ms 节拍：先步进 goto 动画（若有），再触发重绘。"""
+        self._step_goto_anim()
+        self.update()
+
+    def goto_animated(self, az_deg: float, alt_deg: float,
+                      fov_deg: Optional[float] = None,
+                      duration_ms: float = 200.0) -> None:
+        """Stellarium 式 goto：带 OutCubic 缓动的居中飞行。
+
+        与帧率解耦（真实墙钟毫秒推进）：帧率波动下终点一致。
+        新飞行自然替换旧飞行；拖拽/滚轮/触屏手势会打断（见各事件处理）。
+        """
+        from mbdsdr_ai.sky_interaction import GotoAnimation
+        self._goto_anim = GotoAnimation(self.view_state.copy(),
+                                        az_deg, alt_deg, fov_deg,
+                                        duration_ms)
+        self._goto_start_ms = self._goto_clock()
+        self.update()
+
+    def _cancel_goto_anim(self) -> None:
+        """打断进行中的 goto 飞行（用户主动接管视角时）。"""
+        self._goto_anim = None
+
+    def _step_goto_anim(self) -> None:
+        anim = self._goto_anim
+        if anim is None:
+            return
+        vs, done = anim.step(self._goto_clock() - self._goto_start_ms)
+        self.view_state = vs
+        if done:
+            self._goto_anim = None
+        self.update()
 
     # ========================================================================
     # 自包含 UI: 搜索框 / 信息卡 / FOV 显示 (Stellarium 顶栏)
@@ -933,8 +973,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if obj.name == r["obj_name"]:
                     self._hovered_object = obj
                     self._build_selected_info(obj)
-                    self.view_state.look_at(obj.azimuth_deg, obj.elevation_deg)
-                    self.update()
+                    self.goto_animated(obj.azimuth_deg, obj.elevation_deg)
                     return
         # 恒星 -> 居中到该星 (无需选中信息卡)
         if r["kind"] == "star" and self._ground_station() is not None:
@@ -943,8 +982,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             v = j2000_to_altaz(vec_from_radec(r["ra"], r["dec"]), gs, jd)
             from mbdsdr_ai.celestial_geometry import azalt_from_vec
             az, alt = azalt_from_vec(v)
-            self.view_state.look_at(az, alt)
-            self.update()
+            self.goto_animated(az, alt)
 
     # ------------------------------------------------------------------ #
     # 选中信息卡 (Stellarium 规格 10.4)
@@ -2081,6 +2119,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # ========================================================================
 
     def mousePressEvent(self, event: QMouseEvent):
+        self._cancel_goto_anim()  # 用户接管视角：打断进行中的 goto 飞行
         SkyInteractionHandler.mousePressEvent(self, event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -2090,9 +2129,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         SkyInteractionHandler.mouseReleaseEvent(self, event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        SkyInteractionHandler.mouseDoubleClickEvent(self, event)
+        """双击 goto：Stellarium 式缓动飞行（替代旧瞬移 look_at）。"""
+        px, py = self._event_xy(event)
+        size = (float(self.width()), float(self.height()))
+        az, alt = screen_to_sky(px, py, self.view_state,
+                                self.projection, size)
+        self.goto_animated(az, alt)
 
     def wheelEvent(self, event: QWheelEvent):
+        self._cancel_goto_anim()  # 滚轮缩放打断飞行
         SkyInteractionHandler.wheelEvent(self, event)
 
     # ------------------------------------------------------------------ 触屏手势
@@ -2101,6 +2146,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         scale_factor>1 = 双指张开 = 放大（FOV 变小）→ num_steps>0。
         """
+        self._cancel_goto_anim()  # 触屏接管视角：打断飞行
         try:
             num_steps = math.log(max(0.2, min(5.0, scale_factor))) * 2.0
             self.view_state.zoom(num_steps)
@@ -2110,6 +2156,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _on_touch_pan(self, dx: float, dy: float) -> None:
         """单指拖动平移：复用 SkyInteractionHandler 的 screen_to_sky 反投影平移。"""
+        self._cancel_goto_anim()  # 触屏接管视角：打断飞行
         try:
             last = getattr(self, "_pan_last_pos", None)
             if last is None:
@@ -2151,6 +2198,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._hovered_object = obj
         self._build_selected_info(obj)
         self.object_clicked.emit(obj)
+        # 点星即"唰"：缓动飞到选中星（已在视野内时是短行程，仍有反馈）
+        self.goto_animated(obj.azimuth_deg, obj.elevation_deg)
         self.update()
 
     def on_drag_state_changed(self, dragging: bool) -> None:

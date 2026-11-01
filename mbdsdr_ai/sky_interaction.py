@@ -49,6 +49,7 @@ from .celestial_geometry import (
 
 __all__ = [
     "ViewState",
+    "GotoAnimation",
     "SkyInteractionHandler",
     "screen_to_sky",
     "sky_to_screen",
@@ -58,6 +59,7 @@ __all__ = [
     "DEFAULT_MIN_FOV_DEG",
     "DEFAULT_MAX_FOV_DEG",
     "DEFAULT_PICK_RADIUS_DEG",
+    "DEFAULT_GOTO_DURATION_MS",
 ]
 
 # ---------------------------------------------------------------------------
@@ -68,6 +70,74 @@ DEFAULT_MIN_FOV_DEG: float = 30.0
 DEFAULT_MAX_FOV_DEG: float = 180.0
 # 点选搜索半径：按角距（度）给出，避免依赖像素缩放。
 DEFAULT_PICK_RADIUS_DEG: float = 2.0
+#: goto 飞行时长（毫秒）。Stellarium 交互规格：缓动 0.2s，墙钟驱动与帧率解耦。
+DEFAULT_GOTO_DURATION_MS: float = 200.0
+
+
+# ---------------------------------------------------------------------------
+# goto 缓动动画（纯值对象，可注入假时钟测试）
+#
+# Stellarium 语义（机制独立重实现，未包含其源代码）：
+#   - moveToAltAzi 带 ~0.2s ease-out 缓动；
+#   - 动画由真实墙钟毫秒推进，与渲染帧率解耦——帧率波动下终点一致；
+#   - 方位角沿最短弧插值（±180° 回绕），不绕远路。
+# 驱动方（rf_sky_view 的 33ms tick）每帧调用 step(elapsed_ms)，
+# elapsed_ms 由调用方从时钟算出，本类不碰时钟，天然可测。
+# ---------------------------------------------------------------------------
+@dataclass
+class GotoAnimation:
+    """一次 goto 飞行的插值状态。
+
+    Attributes:
+        start:      起点的 ViewState 快照（copy()，不被外部改动污染）。
+        target_az:  目标方位角（度）。
+        target_alt: 目标仰角（度）。
+        target_fov: 目标视场（度）；None = 保持起点 FOV 不变。
+        duration_ms: 飞行时长（毫秒）；<=0 视为瞬移。
+    """
+
+    start: "ViewState"
+    target_az: float
+    target_alt: float
+    target_fov: Optional[float] = None
+    duration_ms: float = DEFAULT_GOTO_DURATION_MS
+
+    def __post_init__(self) -> None:
+        if self.target_fov is None:
+            self.target_fov = self.start.fov_deg
+        # 方位角最短弧：把目标归一到起点 ±180° 区间，不绕远路。
+        taz = self.target_az % 360.0
+        saz = self.start.center_az % 360.0
+        delta = (taz - saz + 180.0) % 360.0 - 180.0
+        self._az_from = self.start.center_az
+        self._az_delta = delta
+        self._alt_from = self.start.center_alt
+        self._alt_delta = float(self.target_alt) - self.start.center_alt
+        self._fov_from = self.start.fov_deg
+        self._fov_delta = float(self.target_fov) - self.start.fov_deg
+
+    @staticmethod
+    def ease_out_cubic(t: float) -> float:
+        """OutCubic 缓动：1-(1-t)³，t 夹取到 [0,1]。"""
+        tc = max(0.0, min(1.0, t))
+        return 1.0 - (1.0 - tc) ** 3
+
+    def step(self, elapsed_ms: float) -> Tuple["ViewState", bool]:
+        """推进动画，返回 (视图状态快照, 是否完成)。
+
+        纯函数：不改自身插值状态，同一 elapsed 多次调用结果一致，天然可测。
+        """
+        if self.duration_ms <= 0:
+            e = 1.0
+        else:
+            e = self.ease_out_cubic(elapsed_ms / self.duration_ms)
+        vs = self.start.copy()
+        vs.center_az = self._az_from + self._az_delta * e
+        vs.center_alt = self._alt_from + self._alt_delta * e
+        vs.fov_deg = self._fov_from + self._fov_delta * e
+        vs._clamp()
+        done = self.duration_ms <= 0 or elapsed_ms >= self.duration_ms
+        return vs, done
 
 
 # ---------------------------------------------------------------------------

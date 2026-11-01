@@ -136,14 +136,25 @@ class TestWheelZoom(unittest.TestCase):
         assert v.view_state.min_fov <= fov2 <= v.view_state.max_fov
 
 
+def _complete_goto(v):
+    """把进行中的 goto 动画飞到终点（假时钟拨过时长 + 步进，不绑墙钟）。"""
+    if v._goto_anim is None:
+        return
+    v._goto_clock = lambda: 1e9  # 远超 200ms 时长
+    v._step_goto_anim()
+    assert v._goto_anim is None
+
+
 class TestDragPan(unittest.TestCase):
     def test_drag_changes_center(self):
         v = _new_view()
         v.set_objects([])
         # 天顶是方位角极点（az 奇异），先双击把视角中心移离极点，再拖拽。
+        # 双击是缓动飞行（Stellarium 式 goto）：先飞到终点再拖拽。
         v.mouseDoubleClickEvent(QMouseEvent(
             QMouseEvent.Type.MouseButtonDblClick, QPointF(250, 250),
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+        _complete_goto(v)
         az0, alt0 = v.view_state.center_az, v.view_state.center_alt
         # 从屏幕中心水平拖拽
         cx, cy = v.width() / 2.0, v.height() / 2.0
@@ -157,10 +168,11 @@ class TestDragPan(unittest.TestCase):
 class TestResetView(unittest.TestCase):
     def test_reset_view_returns_to_zenith(self):
         v = _new_view()
-        # 先双击移走 + 滚轮缩放，再 reset
+        # 先双击移走（缓动飞行，先飞到终点）+ 滚轮缩放，再 reset
         v.mouseDoubleClickEvent(QMouseEvent(
             QMouseEvent.Type.MouseButtonDblClick, QPointF(200, 200),
             Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+        _complete_goto(v)
         v.wheelEvent(240)
         self.assertNotAlmostEqual(v.view_state.fov_deg, 120.0, places=1)
         self.assertGreater(abs(v.view_state.center_alt - 90.0), 1.0)
