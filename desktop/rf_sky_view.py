@@ -362,6 +362,52 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
 
 
 # ============================================================================
+# 地景剪影：确定性值噪声多层轮廓（远山地平线 -> 树 -> 平顶房屋）
+# ============================================================================
+
+# (seed, base_alt_deg, amp_alt_deg, lattice_deg, octaves, quant_deg)
+# 量化步进 >0 的层出平顶（房屋）；0 为自然曲线（山/树）。
+_LANDSCAPE_LAYERS = (
+    (11, 1.5, 6.0, 45.0, 3, 0.0),    # 远山：低频大起伏
+    (37, 0.4, 3.4, 11.0, 3, 0.0),    # 树：中频密起伏
+    (53, 0.0, 2.2, 23.0, 2, 0.35),   # 房屋：量化平顶
+)
+
+
+def _hash01(n: int) -> float:
+    """整数 -> [0,1) 确定性散列（跨平台稳定，不依赖 hash() 随机化）。"""
+    n = (n * 2654435761) % 4294967296
+    n = ((n ^ (n >> 15)) * 2246822519) % 4294967296
+    n = ((n ^ (n >> 13)) * 3266489917) % 4294967296
+    n = n ^ (n >> 16)
+    return (n % 1000000) / 1000000.0
+
+
+def _landscape_layer_profile(az_deg: float, *, seed: int, base_alt: float,
+                             amp_alt: float, lattice_deg: float,
+                             octaves: int = 3, quant_deg: float = 0.0) -> float:
+    """某方位上该层剪影的仰角（度）。值噪声多倍频叠加，输出 ∈ [base, base+amp]。"""
+    total = 0.0
+    amp = 1.0
+    lat = lattice_deg
+    for o in range(octaves):
+        x = az_deg / lat
+        i = math.floor(x)
+        f = x - i
+        t = f * f * (3.0 - 2.0 * f)      # smoothstep 插值，格点处一阶连续
+        h0 = _hash01(seed * 4096 + o * 131 + i * 101)
+        h1 = _hash01(seed * 4096 + o * 131 + (i + 1) * 101)
+        total += amp * (h0 + (h1 - h0) * t)
+        amp *= 0.5
+        lat *= 0.5
+    amp_sum = 2.0 - 0.5 ** octaves       # 1 + 0.5 + ... 归一化
+    alt = base_alt + amp_alt * total / amp_sum
+    if quant_deg > 0.0:
+        alt = quant_deg * round(alt / quant_deg)
+    return min(alt, 89.0)
+
+
+# ============================================================================
 # 射频天空视图主组件
 # ============================================================================
 
@@ -947,6 +993,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._rotation = 0.0
         self.update()
 
+    def enter_horizon_view(self, az_deg: float = 0.0):
+        """星象仪模式入口视角：朝地平（与 Stellarium 默认构图一致——
+        地景剪影与辉光带入画；天顶俯视留给 RF 全域工具）。"""
+        self._cancel_goto_anim()
+        self.view_state.look_at(float(az_deg) % 360.0, 20.0)
+        self.view_state.zoom_to(120.0)
+        self.update()
+
     # ========================================================================
     # 时间 / 坐标辅助 (Stellarium observer.tt 儒略日内核)
     # ========================================================================
@@ -1506,39 +1560,66 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 and -margin <= pos.y() <= self.height() + margin)
 
     # ------------------------------------------------------------------ #
-    # 地景剪影 (底部地平线山峦轮廓, 可开关)
+    # 地景：暮光辉光带 + 三层剪影（远山/树/平顶房屋，由远及近涂黑）
     # ------------------------------------------------------------------ #
     def _draw_landscape(self, painter: QPainter):
-        # 采样地平线 (alt=0) 各方位, 连成剪影轮廓; 低于地平线涂黑。
+        # 地平线基准（alt=0 采样中位 y）：辉光带与剪影轮廓都以它为锚。
         pts = []
         for az in range(0, 361, 6):
             pos = self._sky_to_screen(float(az), 0.0)
             pts.append(pos)
-        if not pts:
-            return
-        painter.save()
-        painter.setPen(Qt.NoPen)
-        _t = tokens()
-        col = (QColor(_t.COLORS["ground_shadow_night"])
-               if self._sky_brightness < 0.5
-               else QColor(_t.COLORS["ground_shadow_day"]))
-        painter.setBrush(QBrush(col))
-        path = QPainterPath()
-        # 取地平线附近 y 的代表位置做轮廓 (透视下地平线在画面中下部)
         on = [p for p in pts if self._on_screen(p)]
         if not on:
-            painter.restore()
             return
         ys = sorted(p.y() for p in on)
         horizon_y = ys[len(ys) // 2]
-        path.moveTo(0.0, self.height())
-        path.lineTo(0.0, horizon_y)
-        for p in pts:
-            if self._on_screen(p):
+
+        _t = tokens()
+        night = self._sky_brightness < 0.5
+
+        painter.save()
+
+        # 暮光辉光带：剪影后方暖灰渐变，向上渐隐（仅夜；昼由天空渐变自带亮度）
+        if night:
+            glow_h = int(self.height() * 0.14)
+            glow = QLinearGradient(0, horizon_y - glow_h, 0, horizon_y)
+            gc = QColor(_t.COLORS["sky_night_glow"])
+            glow.setColorAt(0.0, QColor(gc.red(), gc.green(), gc.blue(), 0))
+            glow.setColorAt(1.0, QColor(gc.red(), gc.green(), gc.blue(), 170))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(glow))
+            painter.drawRect(0, int(horizon_y - glow_h), self.width(), glow_h)
+
+        layer_cols = ((None if not night else "ground_far_night"),
+                      (None if not night else "ground_mid_night"),
+                      (None if not night else "ground_near_night"))
+        painter.setPen(Qt.NoPen)
+        for idx, (seed, base, amp, lat, octaves, quant) in enumerate(_LANDSCAPE_LAYERS):
+            key = layer_cols[idx]
+            col = (QColor(_t.COLORS["ground_shadow_day"]) if key is None
+                   else QColor(_t.COLORS[key]))
+            painter.setBrush(QBrush(col))
+            path = QPainterPath()
+            edge: List[QPointF] = []
+            for az in range(0, 361, 3):
+                alt = _landscape_layer_profile(
+                    float(az), seed=seed, base_alt=base, amp_alt=amp,
+                    lattice_deg=lat, octaves=octaves, quant_deg=quant)
+                p = self._sky_to_screen(float(az), alt)
+                if self._on_screen(p):
+                    edge.append(p)
+            if not edge:
+                continue
+            # 从屏缘起笔/收笔，避免闭合边斜穿画面；断段（视界外的方位）
+            # 以等高弦相连——恰落在地平线上。
+            path.moveTo(0.0, edge[0].y())
+            for p in edge:
                 path.lineTo(p.x(), p.y())
-        path.lineTo(self.width(), self.height())
-        path.closeSubpath()
-        painter.drawPath(path)
+            path.lineTo(self.width(), edge[-1].y())
+            path.lineTo(self.width(), self.height())
+            path.lineTo(0.0, self.height())
+            path.closeSubpath()
+            painter.drawPath(path)
         painter.restore()
 
     # ------------------------------------------------------------------ #

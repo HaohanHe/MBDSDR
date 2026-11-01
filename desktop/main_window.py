@@ -1355,6 +1355,9 @@ class MainWindow(QMainWindow):
             self._position_ai_cmd_bar()
         self._mode_stack.setCurrentWidget(self._planetarium_page)
         self._app_mode = "planetarium"
+        # 星象仪构图：朝地平看（地景剪影+辉光带入画），天顶俯视留给 IDE 形态
+        if hasattr(self.sky_view, "enter_horizon_view"):
+            self.sky_view.enter_horizon_view()
         self.settings.set("app_mode", "planetarium")
         self._sync_mode_action()
         # 窗口已显示才联动全屏；启动恢复阶段窗口未 show，交给正常 show 流程。

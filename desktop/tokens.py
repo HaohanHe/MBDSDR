@@ -125,8 +125,12 @@ class DesignTokens:
             "sky_night_zenith_deep":"#070D18",   # 夜晚天顶最深
             "sky_day_horizon_glow": "#7FA8C8",   # 白天地平线亮蓝
             "sky_night_horizon_deep":"#16233A",  # 夜晚地平线深
-            "ground_shadow_night":  "#0A0F18",   # 夜天地剪影
+            "ground_shadow_night":  "#0A0F18",   # 夜天地剪影（单层旧色，昼/夜各层见下）
             "ground_shadow_day":    "#3A4A5A",   # 昼天地剪影
+            "sky_night_glow":       "#6B5B48",   # 夜剪影后暮光辉光带（暖灰）
+            "ground_far_night":     "#0C1320",   # 夜远山（退晕最亮）
+            "ground_mid_night":     "#070C15",   # 夜树层
+            "ground_near_night":    "#03060C",   # 夜房屋近景（最黑）
             "celestial_sun":        "#D9A441",   # 太阳
             "celestial_moon":       "#9AA7B4",   # 月亮
             "heatmap_low":          "#3E5A4A",   # 热力图低
