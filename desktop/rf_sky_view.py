@@ -489,6 +489,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._sat_catalog: Dict[str, Dict[str, object]] = {}
         # 当前选中天体的完整信息 (信息卡用)
         self._selected_info: Optional[Dict[str, object]] = None
+        # HUD 命中区 (绘制时刷新; None = 该控件当前不可点)
+        self._info_card_rect: Optional[QRectF] = None
+        self._info_close_rect: Optional[QRectF] = None
+        self._fov_minus_rect: Optional[QRectF] = None
+        self._fov_plus_rect: Optional[QRectF] = None
 
         # 数据来源状态
         # "none" = 无观测站位置; "real" = 真实GNSS或手动配置
@@ -1483,6 +1488,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 6) 常驻叠加: FOV 显示 / 信息卡 / 过境 / GNSS / 空状态
         self._draw_fov(painter)
+        self._draw_fov_control(painter)
         self._draw_info_overlay(painter)
         self._draw_passes_panel(painter)
         self._draw_gnss_overlay(painter)
@@ -1741,6 +1747,44 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                          f"FOV {self.view_state.fov_deg:4.1f}°")
         painter.restore()
 
+    def _draw_fov_control(self, painter: QPainter):
+        """右下角 ⊖ ⊕ FOV 步进控件 (Stellarium 底部 FOV 条的精简版)。
+
+        与滚轮同一缩放律 (view_state.zoom ±1 步)，夹在 min_fov..max_fov。
+        命中区暴露给 mousePressEvent 的 _hud_hit。
+        """
+        painter.save()
+        _t = tokens()
+        btn = 26.0
+        gap = 6.0
+        label_w = 64.0
+        total = btn * 2 + gap * 2 + label_w
+        x0 = float(self.width()) - total - 12.0
+        y0 = float(self.height()) - btn - 12.0
+        bg = QColor(_t.COLORS["card_2"])
+        bg.setAlpha(220)
+        border = QColor(_t.COLORS["gray_400"])
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(border, 1))
+
+        self._fov_minus_rect = QRectF(x0, y0, btn, btn)
+        self._fov_plus_rect = QRectF(x0 + btn + gap * 2 + label_w, y0, btn, btn)
+        for r in (self._fov_minus_rect, self._fov_plus_rect):
+            painter.drawRoundedRect(r, 4, 4)
+
+        f = QFont(self._font)
+        f.setBold(True)
+        painter.setFont(f)
+        painter.setPen(QColor(_t.COLORS["gray_100"]))
+        painter.drawText(self._fov_minus_rect, Qt.AlignCenter, "⊖")
+        painter.drawText(self._fov_plus_rect, Qt.AlignCenter, "⊕")
+
+        painter.setFont(self._mono_font)
+        label = QRectF(x0 + btn + gap, y0, label_w, btn)
+        painter.drawText(label, Qt.AlignCenter,
+                         f"{self.view_state.fov_deg:.0f}°")
+        painter.restore()
+
     def _draw_grid(self, painter: QPainter):
         """兼容旧接口: 方位网格已由 _draw_az_grid (透视) 实现。"""
         self._draw_az_grid(painter)
@@ -1865,6 +1909,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """选中天体信息卡 (Stellarium 规格 10.4)。"""
         obj = self._hovered_object
         if not obj:
+            self._info_card_rect = None
+            self._info_close_rect = None
             return
         pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
 
@@ -1903,48 +1949,107 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return datetime.fromtimestamp(_jtime.jd_to_unix(jd),
                                           tz=timezone.utc).strftime("%H:%M")
 
-        lines = [
-            (title, True),
-            (kind_label, False),
-            ("Also known as: " + " · ".join(info.get("aliases", [obj.name]))
-             + (f" · COSPAR {info['cospar']}" if info.get("cospar") else ""), False),
-            (f"Magnitude  {'—' if info.get('mag') is None else info['mag']}", False),
-            (f"Distance   {info.get('dist_km', 0.0):.2f} km", False),
-            ("Ra/Dec    " + (f"{_hms(info['ra'])}  {_dms(info['dec'])}"
-                            if info.get("ra") is not None else "—"), False),
-            (f"Az/Alt    {_dms(obj.azimuth_deg)}  {_dms(obj.elevation_deg)}", False),
-            (f"Visibility  Rise {_hm(rise)}   Set {_hm(sset)}", False),
+        kv = [
+            ("Magnitude", "—" if info.get("mag") is None else str(info["mag"])),
+            ("Distance", f"{info.get('dist_km', 0.0):.2f} km"),
+            ("Ra/Dec", f"{_hms(info['ra'])}  {_dms(info['dec'])}"
+                       if info.get("ra") is not None else "—"),
+            ("Az/Alt", f"{_dms(obj.azimuth_deg)}  {_dms(obj.elevation_deg)}"),
+            ("Visibility", f"Rise {_hm(rise)}   Set {_hm(sset)}"),
         ]
-        # 点星即听：该把收音机拧到哪 + 一句话星性注记（无则缺省行不画）
+        # 点星即听：该把收音机拧到哪（无则缺省行不画）
         if info.get("downlink_mhz"):
-            dl_txt = f"Downlink  {info['downlink_mhz']:.4f} MHz"
+            dl = f"{info['downlink_mhz']:.4f} MHz"
             if info.get("downlink_mode"):
-                dl_txt += f" ({info['downlink_mode']})"
-            lines.append((dl_txt, False))
-        if info.get("culture"):
-            lines.append((f"星性 {info['culture']}", False))
+                dl += f" ({info['downlink_mode']})"
+            kv.append(("Downlink", dl))
 
         painter.save()
         painter.setFont(self._font)
         fm = QFontMetrics(self._font)
-        box_w = max(fm.horizontalAdvance(t) for t, _ in lines) + 28
-        box_h = len(lines) * 17 + 18
-        box_x = 14
-        box_y = 40
+        pad = 12.0
+        close_reserve = 26.0          # 右上角 × 按钮占位
+        key_col_w = max(fm.horizontalAdvance(k) for k, _ in kv)
+
+        head = [title, kind_label,
+                "Also known as: " + " · ".join(info.get("aliases", [obj.name]))
+                + (f" · COSPAR {info['cospar']}" if info.get("cospar") else "")]
+        widths = [fm.horizontalAdvance(t) for t in head]
+        widths += [key_col_w + 10 + fm.horizontalAdvance(v) for _, v in kv]
+        if info.get("culture"):
+            widths.append(fm.horizontalAdvance(f"星性 {info['culture']}"))
+        body_w = max(widths)
+        box_w = body_w + pad * 2 + close_reserve
+        text_w = box_w - pad * 2 - close_reserve   # 描述换行用的正文宽度
+
+        desc_lines: List[str] = []
+        raw_desc = (obj.description or "").strip()
+        if raw_desc:
+            cur = ""
+            for ch in raw_desc:
+                if ch == "\n":
+                    desc_lines.append(cur); cur = ""; continue
+                if fm.horizontalAdvance(cur + ch) > text_w and cur:
+                    desc_lines.append(cur); cur = ch
+                else:
+                    cur += ch
+            if cur:
+                desc_lines.append(cur)
+            if len(desc_lines) > 6:               # 封顶 6 行，超出截断
+                desc_lines = desc_lines[:6]
+                desc_lines[-1] = desc_lines[-1].rstrip("。，,;； ") + " …"
+
+        row_h = 17.0
+        n_rows = 3 + len(kv) + (1 if info.get("culture") else 0) \
+            + (len(desc_lines) + 1 if desc_lines else 0)
+        box_h = n_rows * row_h + 18
+        box_x, box_y = 14.0, 40.0
         bg = QColor(_t.COLORS["card_1"])
         bg.setAlpha(235)
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(self._colors["accent"], 1))
-        painter.drawRoundedRect(box_x, box_y, box_w, box_h, 6, 6)
+        painter.drawRoundedRect(QRectF(box_x, box_y, box_w, box_h), 6, 6)
+        self._info_card_rect = QRectF(box_x, box_y, box_w, box_h)
+
+        # × 关闭按钮（命中区暴露给 mousePressEvent）
+        self._info_close_rect = QRectF(box_x + box_w - close_reserve,
+                                       box_y + 3, 20, 20)
+        painter.setPen(QPen(QColor(_t.COLORS["gray_300"]), 1))
+        painter.drawText(self._info_close_rect, Qt.AlignCenter, "×")
+
         ty = box_y + 18
-        for text, bold in lines:
-            f = QFont(self._font)
-            f.setBold(bold)
-            painter.setFont(f)
-            painter.setPen(QColor(_t.COLORS["text_primary"]) if not bold
-                           else QColor(_t.COLORS["accent"]))
-            painter.drawText(box_x + 12, ty, text)
-            ty += 17
+        f = QFont(self._font); f.setBold(True)
+        painter.setFont(f)
+        painter.setPen(QColor(_t.COLORS["accent"]))
+        painter.drawText(QPointF(box_x + pad, ty), title)
+        ty += row_h
+        painter.setFont(self._font)
+        painter.setPen(QColor(_t.COLORS["gray_300"]))
+        painter.drawText(QPointF(box_x + pad, ty), head[1])
+        ty += row_h
+        painter.drawText(QPointF(box_x + pad, ty), head[2])
+        ty += row_h
+
+        key_pen = QColor(_t.COLORS["gray_300"])
+        val_pen = QColor(_t.COLORS["text_primary"])
+        for k, v in kv:
+            painter.setPen(key_pen)
+            painter.drawText(QPointF(box_x + pad, ty), k)
+            painter.setPen(val_pen)
+            painter.drawText(QPointF(box_x + pad + key_col_w + 10, ty), v)
+            ty += row_h
+
+        if info.get("culture"):
+            painter.setPen(key_pen)
+            painter.drawText(QPointF(box_x + pad, ty), f"星性 {info['culture']}")
+            ty += row_h
+
+        if desc_lines:
+            ty += row_h - 8              # 描述段前空一行
+            painter.setPen(QColor(_t.COLORS["gray_300"]))
+            for dl in desc_lines:
+                painter.drawText(QPointF(box_x + pad, ty), dl)
+                ty += row_h
         painter.restore()
 
     @staticmethod
@@ -2366,7 +2471,32 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def mousePressEvent(self, event: QMouseEvent):
         self._cancel_goto_anim()  # 用户接管视角：打断进行中的 goto 飞行
+        px, py = self._event_xy(event)
+        if self._hud_hit(px, py):
+            return
         SkyInteractionHandler.mousePressEvent(self, event)
+
+    def _hud_hit(self, px: float, py: float) -> bool:
+        """HUD 控件命中测试：信息卡 × / FOV ⊖⊕。命中则消费事件并返回 True。"""
+        r = self._info_close_rect
+        if r is not None and r.contains(px, py):
+            self.on_object_picked(None)
+            return True
+        # 卡身任意处点击只消费事件：点的是面板不是天空，不应反选天体
+        r = self._info_card_rect
+        if r is not None and r.contains(px, py):
+            return True
+        r = self._fov_minus_rect
+        if r is not None and r.contains(px, py):
+            self.view_state.zoom(1.0)     # 放大：FOV 变小
+            self.on_view_changed()
+            return True
+        r = self._fov_plus_rect
+        if r is not None and r.contains(px, py):
+            self.view_state.zoom(-1.0)    # 缩小：FOV 变大
+            self.on_view_changed()
+            return True
+        return False
 
     def mouseMoveEvent(self, event: QMouseEvent):
         SkyInteractionHandler.mouseMoveEvent(self, event)
@@ -2434,6 +2564,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if obj is None:
             self._hovered_object = None
             self._selected_info = None
+            self._info_card_rect = None
+            self._info_close_rect = None
             # 取消选中：隐藏调谐按钮 + 停跟踪（发信号让主窗口停环）
             self._tune_sat_name = None
             self._stop_track_ui()
