@@ -2710,12 +2710,29 @@ class RFSkyViewPanel(QFrame):
             b = QPushButton(label)
             b.clicked.connect(cb)
             bar.addWidget(b)
+        # 时间流速档（StelCore::setTimeRate UX 化）：快转看过境是
+        # 星象仪叙事主轴"历"。倍率由 new_spacetime 时间引擎执行，
+        # 视图 _current_jd 每帧 tick，天空/卫星轨道随之流动。
+        self._rate_buttons: Dict[str, QPushButton] = {}
+        for label, rate in (("⏸", 0.0), ("▶", 1.0),
+                            ("×60", 60.0), ("×300", 300.0),
+                            ("×1800", 1800.0)):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.clicked.connect(lambda _c=False, r=rate: self._set_rate(r))
+            bar.addWidget(b)
+            self._rate_buttons[label] = b
+        self._rate_buttons["▶"].setChecked(True)
         bar.addSpacing(16)
         b = QPushButton("重置视图")
         b.clicked.connect(self.reset_view)
         bar.addWidget(b)
         self.layout().addWidget(control_bar)
         self._offset = 0.0
+        # 快转时 UTC 标签随模拟时钟滚动（500ms 刷新足够读出秒级流动）
+        self._time_ui_timer = QTimer(self)
+        self._time_ui_timer.timeout.connect(self._update_label)
+        self._time_ui_timer.start(500)
 
     def _adjust(self, seconds: float):
         self._offset += seconds
@@ -2732,15 +2749,45 @@ class RFSkyViewPanel(QFrame):
         try:
             from mbdsdr_ai.new_spacetime import get_time_engine
             get_time_engine().set_time_now()
+            self._set_rate(1.0)          # "实时" = 回墙钟 + 恢复 1x
         except Exception:
             pass
+        self._update_label()
+
+    def _set_rate(self, rate: float):
+        """设置时间流速倍率（0=暂停 1=实时 N=Nx）。按钮组单选互斥。"""
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            eng = get_time_engine()
+            if rate == 0.0:
+                eng.pause()
+            elif rate == 1.0:
+                eng.resume(1.0)
+            else:
+                # 快进档位：若引擎还钉在墙钟（未跳时），先钉当前时刻再加速，
+                # 否则 rate 对 _sim_jd=None 不生效（tick 早退）。
+                if eng._sim_jd is None:
+                    eng.set_unix(eng.now_unix())
+                eng.set_rate(float(rate))
+        except Exception:
+            pass
+        for label, btn in self._rate_buttons.items():
+            want = {"⏸": 0.0, "▶": 1.0}.get(label)
+            if want is not None:
+                btn.setChecked(want == rate)
+            else:
+                btn.setChecked(float(label[1:]) == rate)
         self._update_label()
 
     def _update_label(self):
         try:
             from mbdsdr_ai.new_spacetime import get_time_engine
-            t = get_time_engine().now_utc()
-            self.time_label.setText(t.strftime("%Y-%m-%d %H:%M UTC"))
+            eng = get_time_engine()
+            t = eng.now_utc()
+            rate = eng.get_rate()
+            suffix = "" if rate == 1.0 else (" ⏸" if rate == 0.0
+                                             else f" ×{rate:g}")
+            self.time_label.setText(t.strftime("%Y-%m-%d %H:%M UTC") + suffix)
         except Exception:
             self.time_label.setText("实时")
 
