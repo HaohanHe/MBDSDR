@@ -155,6 +155,72 @@ class TestExitRestore:
         assert isinstance(mw.left_tab, QTabWidget)
 
 
+class TestPlanetariumAssembly:
+    """阶段1：星象仪页组装——瀑布/AI 命令栏 reparent，AI 回复覆盖卡。"""
+
+    def test_waterfall_moves_and_restores(self, mw):
+        assert mw._spectrum_page_layout.indexOf(mw.spectrum) >= 0
+        mw.set_app_mode("planetarium")
+        try:
+            assert mw._spectrum_page_layout.indexOf(mw.spectrum) < 0
+            assert mw._planetarium_waterfall_layout.indexOf(mw.spectrum) >= 0
+            assert mw.spectrum.parentWidget() is mw._planetarium_waterfall_slot
+            assert mw._planetarium_waterfall_slot.isVisibleTo(mw)
+        finally:
+            mw.set_app_mode("ide")
+        assert mw._spectrum_page_layout.indexOf(mw.spectrum) >= 0
+        assert mw._planetarium_waterfall_layout.indexOf(mw.spectrum) < 0
+        assert not mw._planetarium_waterfall_slot.isVisibleTo(mw)
+
+    def test_ai_command_bar_moves_and_restores(self, mw):
+        ide_parent = mw._ai_cmd_bar.parentWidget()
+        mw.set_app_mode("planetarium")
+        try:
+            assert mw._ai_cmd_bar.parentWidget() is mw._planetarium_sky_slot
+            assert mw._ai_cmd_parent is mw._planetarium_sky_slot
+        finally:
+            mw.set_app_mode("ide")
+        assert mw._ai_cmd_bar.parentWidget() is ide_parent
+        assert mw._ai_cmd_parent is ide_parent
+
+    def test_ai_command_reaches_handler_in_planetarium(self, mw, monkeypatch):
+        from unittest.mock import MagicMock
+        fake_call = MagicMock()
+        monkeypatch.setattr(mw.ai_panel, "_call_ai", fake_call)
+        mw.set_app_mode("planetarium")
+        try:
+            mw.cmd_input.setText("今晚 NOAA-19 过境吗")
+            mw._on_cmd_submit()
+            fake_call.assert_called_once_with("今晚 NOAA-19 过境吗")
+        finally:
+            mw.set_app_mode("ide")
+            monkeypatch.undo()
+
+    def test_ai_reply_card_shows_text(self, mw):
+        mw.set_app_mode("planetarium")
+        try:
+            mw._on_planetarium_ai_reply("NOAA-19 22:14 升起")
+            assert mw._planetarium_ai_card.isVisibleTo(mw)
+            assert mw._planetarium_ai_card_text.text() == "NOAA-19 22:14 升起"
+        finally:
+            mw.set_app_mode("ide")
+
+    def test_ai_reply_card_empty_honest_placeholder(self, mw):
+        mw.set_app_mode("planetarium")
+        try:
+            mw._on_planetarium_ai_reply("")
+            assert "未返回文本" in mw._planetarium_ai_card_text.text()
+        finally:
+            mw.set_app_mode("ide")
+
+    def test_ai_reply_card_hides_on_exit(self, mw):
+        mw.set_app_mode("planetarium")
+        mw._on_planetarium_ai_reply("回复")
+        assert mw._planetarium_ai_card.isVisibleTo(mw)
+        mw.set_app_mode("ide")
+        assert not mw._planetarium_ai_card.isVisibleTo(mw)
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main(verbosity=2)

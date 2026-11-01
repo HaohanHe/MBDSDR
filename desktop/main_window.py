@@ -994,6 +994,8 @@ class MainWindow(QMainWindow):
         self.spectrum.vfo_removed.connect(self._on_vfo_removed)
         QShortcut(QKeySequence("Ctrl+Tab"), self, self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
+        # 星象仪形态退出时瀑布归位用的布局句柄（reparent 往返，对象身份不变）。
+        self._spectrum_page_layout = spectrum_layout
         left_tab.addTab(spectrum_widget, "频谱")
         left_tab.tabBar().setTabData(left_tab.count() - 1, "spectrum")
 
@@ -1069,6 +1071,8 @@ class MainWindow(QMainWindow):
         self.ai_panel = AIPanel()
         self.ai_panel.tool_call_requested.connect(self._on_ai_tool_call)
         self.ai_panel.command_submitted.connect(self._on_ai_command)
+        # 星象仪覆盖卡：AI 回复跨形态镜像（只读，历史以面板为准）
+        self.ai_panel.reply_received.connect(self._on_planetarium_ai_reply)
         self._init_ai_agent_from_config()
         self._add_right_tab("AI 助手", self.ai_panel, "ai_dock")
 
@@ -1184,20 +1188,114 @@ class MainWindow(QMainWindow):
         self._sky_restore_info: Optional[dict] = None
 
     def _build_planetarium_page(self) -> QWidget:
-        """星象仪容器页：天空铺满整个屏幕（阶段1 在此追加底部瀑布与 AI 覆盖条）。"""
+        """星象仪容器页：天空铺满 + 底部瀑布 + 右侧 36px 形态窄条。
+
+        AI 命令栏（IDE 中栏已有那颗胶囊）进形态时 reparent 到天空槽上，
+        回复经 ai_panel.reply_received 打到 _planetarium_ai_card 覆盖卡。
+        全程复用既有部件与同一 agent 实例——对话历史跨形态连续。
+        """
         page = QWidget()
         page.setObjectName("planetariumPage")
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(0)
+        hbox = QHBoxLayout(page)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(0)
+
+        # 左列：天空（铺满）+ 瀑布（底部，进形态后 reparent self.spectrum）
+        left_col = QWidget()
+        col_lay = QVBoxLayout(left_col)
+        col_lay.setContentsMargins(0, 0, 0, 0)
+        col_lay.setSpacing(0)
         self._planetarium_sky_slot = QWidget()
         self._planetarium_sky_slot.setObjectName("planetariumSkySlot")
         slot_lay = QVBoxLayout(self._planetarium_sky_slot)
         slot_lay.setContentsMargins(0, 0, 0, 0)
         slot_lay.setSpacing(0)
         self._planetarium_sky_layout = slot_lay
-        lay.addWidget(self._planetarium_sky_slot, stretch=1)
+        col_lay.addWidget(self._planetarium_sky_slot, stretch=1)
+
+        self._planetarium_waterfall_slot = QWidget()
+        self._planetarium_waterfall_slot.setObjectName(
+            "planetariumWaterfallSlot")
+        wf_lay = QVBoxLayout(self._planetarium_waterfall_slot)
+        wf_lay.setContentsMargins(0, 0, 0, 0)
+        wf_lay.setSpacing(0)
+        self._planetarium_waterfall_layout = wf_lay
+        self._planetarium_waterfall_slot.setFixedHeight(180)
+        self._planetarium_waterfall_slot.hide()
+        col_lay.addWidget(self._planetarium_waterfall_slot)
+
+        hbox.addWidget(left_col, stretch=1)
+
+        # 右侧 36px 形态窄条（折叠窄条先例 dock_layout_manager.build_collapse_strip）
+        strip = QFrame(page)
+        strip.setObjectName("planetariumStrip")
+        strip.setFixedWidth(tokens().SIZE["collapse_strip"])
+        strip_lay = QVBoxLayout(strip)
+        strip_lay.setContentsMargins(0, 8, 0, 8)
+        strip_lay.setSpacing(4)
+        exit_btn = QPushButton("IDE")
+        exit_btn.setObjectName("stripIcon")
+        exit_btn.setToolTip("切回 IDE 形态 (Esc)")
+        exit_btn.clicked.connect(lambda: self.set_app_mode("ide"))
+        strip_lay.addWidget(exit_btn, 0, Qt.AlignHCenter)
+        strip_lay.addStretch(1)
+        self._planetarium_strip = strip
+        hbox.addWidget(strip)
+
+        # AI 回复覆盖卡（天空槽上的半透明卡片；隐藏=无回复，诚实空态不编造）
+        card = QFrame(self._planetarium_sky_slot)
+        card.setObjectName("planetariumAiCard")
+        card.setStyleSheet(
+            "QFrame#planetariumAiCard {"
+            " background-color: rgba(18,19,22,0.82);"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            f" border-radius: {tokens().RADIUS['card'] if 'card' in tokens().RADIUS else 8}px;"
+            " }"
+            "QLabel#planetariumAiCardText {"
+            " background: transparent; color: rgba(255,255,255,0.92);"
+            " padding: 8px 12px; }"
+        )
+        card_lay = QVBoxLayout(card)
+        card_lay.setContentsMargins(4, 4, 4, 4)
+        card_text = QLabel(card)
+        card_text.setObjectName("planetariumAiCardText")
+        card_text.setWordWrap(True)
+        card_text.setTextFormat(Qt.PlainText)
+        card_text.setMaximumWidth(520)
+        card_lay.addWidget(card_text)
+        card.setVisible(False)
+        self._planetarium_ai_card = card
+        self._planetarium_ai_card_text = card_text
+        self._planetarium_sky_slot.installEventFilter(self)
         return page
+
+    def _position_planetarium_ai_card(self) -> None:
+        """AI 回复卡定位：天空槽底部居中，叠在瀑布上方。"""
+        card = getattr(self, "_planetarium_ai_card", None)
+        slot = getattr(self, "_planetarium_sky_slot", None)
+        if card is None or slot is None:
+            return
+        card.adjustSize()
+        margin = 16
+        x = max(margin, (slot.width() - card.width()) // 2)
+        wf = self._planetarium_waterfall_slot
+        bottom = wf.y() if wf.isVisibleTo(slot) else slot.height()
+        y = max(margin, bottom - card.height() - 12)
+        card.move(x, y)
+        card.raise_()
+
+    @Slot(str)
+    def _on_planetarium_ai_reply(self, text: str):
+        """AI 回复 → 星象仪覆盖卡。空内容诚实显示占位，绝不编造。"""
+        card = getattr(self, "_planetarium_ai_card", None)
+        if card is None:
+            return
+        shown = text.strip() if text else ""
+        if not shown:
+            shown = "（AI 未返回文本内容，可能只执行了工具调用）"
+        self._planetarium_ai_card_text.setText(shown)
+        card.setVisible(True)
+        self._position_planetarium_ai_card()
 
     def _capture_sky_location(self) -> dict:
         """记录 sky_view 当前所在容器，供退出星象仪归位。
@@ -1236,6 +1334,19 @@ class MainWindow(QMainWindow):
             return
         self._sky_restore_info = self._capture_sky_location()
         self._planetarium_sky_layout.addWidget(self.sky_view)
+        # 底部瀑布 reparent（对象身份不变；频谱页签里只剩头部/提示，退出归位）
+        wf_slot = self._planetarium_waterfall_slot
+        if getattr(self, "spectrum", None) is not None:
+            self._planetarium_waterfall_layout.addWidget(self.spectrum)
+            wf_slot.setVisible(True)
+        # AI 胶囊命令栏 reparent 到天空槽（同一颗胶囊、同一路由 _on_ai_command，
+        # 对话历史跨形态连续）；记下原父，退出归位。
+        bar = getattr(self, "_ai_cmd_bar", None)
+        if bar is not None:
+            self._ai_bar_restore_parent = bar.parentWidget()
+            bar.setParent(self._planetarium_sky_slot)
+            self._ai_cmd_parent = self._planetarium_sky_slot
+            self._position_ai_cmd_bar()
         self._mode_stack.setCurrentWidget(self._planetarium_page)
         self._app_mode = "planetarium"
         self.settings.set("app_mode", "planetarium")
@@ -1250,6 +1361,25 @@ class MainWindow(QMainWindow):
         self._planetarium_sky_layout.removeWidget(self.sky_view)
         self._restore_sky_location(self._sky_restore_info)
         self._sky_restore_info = None
+        # 瀑布归位频谱页签
+        if getattr(self, "spectrum", None) is not None:
+            self._planetarium_waterfall_layout.removeWidget(self.spectrum)
+            lay = getattr(self, "_spectrum_page_layout", None)
+            if lay is not None:
+                lay.addWidget(self.spectrum, stretch=1)
+        self._planetarium_waterfall_slot.setVisible(False)
+        # AI 命令栏归位 IDE 中栏
+        bar = getattr(self, "_ai_cmd_bar", None)
+        if bar is not None:
+            old_parent = getattr(self, "_ai_bar_restore_parent", None)
+            if old_parent is not None:
+                bar.setParent(old_parent)
+                self._ai_cmd_parent = old_parent
+                self._position_ai_cmd_bar()
+        # 回复覆盖卡随形态退出隐藏（不销毁文本；历史在 AI 面板里）
+        card = getattr(self, "_planetarium_ai_card", None)
+        if card is not None:
+            card.setVisible(False)
         self._mode_stack.setCurrentIndex(0)
         self._app_mode = "ide"
         self.settings.set("app_mode", "ide")
@@ -1385,6 +1515,9 @@ class MainWindow(QMainWindow):
         if obj is getattr(self, "_ai_cmd_parent", None) \
                 and event.type() == QEvent.Resize:
             self._position_ai_cmd_bar()
+        if obj is getattr(self, "_planetarium_sky_slot", None) \
+                and event.type() == QEvent.Resize:
+            self._position_planetarium_ai_card()
         if event.type() == QEvent.ShortcutOverride:
             if self._handle_shortcut_override(event):
                 return True

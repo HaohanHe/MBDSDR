@@ -88,6 +88,9 @@ class AIPanel(QWidget):
     tool_call_requested = Signal(str, dict)  # (tool_name, params)
     # 信号：自然语言指令
     command_submitted = Signal(str)
+    # 信号：一轮 AI 回复的最终文本（流式内容的完整版；星象仪形态覆盖卡用）。
+    # 与对话区解耦：覆盖卡只读不复写面板，历史仍以面板为准。
+    reply_received = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -741,6 +744,7 @@ class AIPanel(QWidget):
             self._add_ai_message("（AI 未返回文本内容，可能只执行了工具调用）")
 
         self._add_system_message(f"耗时 {latency:.0f}ms，调用 {len(tool_calls)} 个工具")
+        self.reply_received.emit(content or "")
 
     @Slot(str)
     def _on_ai_error(self, error: str):
@@ -749,6 +753,7 @@ class AIPanel(QWidget):
         self.send_btn.setEnabled(True)
         self.send_btn.setText("发送")
         self._add_ai_message(f"AI 调用出错: {error}")
+        self.reply_received.emit(f"[错误] {error}")
 
     def _toggle_log(self):
         visible = self.tool_log_group.isVisible()
