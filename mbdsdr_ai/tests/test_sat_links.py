@@ -97,6 +97,25 @@ def test_find_tuning_for_by_norad_name():
     assert SL.find_tuning_for("NO SUCH SAT") is None
 
 
+def test_decoders_freq_table_derives_from_catalog():
+    """decoders.SATELLITE_FREQUENCIES 皮进自目录：同值、键经 tle_aliases 桥接。"""
+    from mbdsdr_ai.decoders import SATELLITE_FREQUENCIES
+    expect: dict = {}
+    for name in SL.list_link_sats():
+        entry = SL.load_sat_link(name)
+        links = [l for l in entry["links"] if l["direction"] == "downlink"]
+        mhz = float(links[0]["freq_hz"]) / 1e6
+        for tle_name in [entry["norad_name"]] + entry.get("tle_aliases", []):
+            expect[tle_name] = mhz
+    assert SATELLITE_FREQUENCIES == expect
+    # TLE 拼法桥（BUILTIN_TLE 用 "METEOR M2"）必须命中。
+    assert SATELLITE_FREQUENCIES["METEOR M2"] == \
+        expect["METEOR-M 2"]
+    # FENGYUN 3D 是诚实缺口：其 AHRPT 在 1698–1710 MHz L 波段，不在目录
+    # 收听面内；旧源码硬记的 137.100 系讹误，迁移后不得复活。
+    assert "FENGYUN 3D" not in SATELLITE_FREQUENCIES
+
+
 def test_tool_registry_smoke():
     from mbdsdr_ai.tool_registry import ToolRegistry
     reg = ToolRegistry()

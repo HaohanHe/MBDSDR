@@ -34,6 +34,7 @@
   "meteor_m_n2": {
     "display_name": "Meteor-M N2",
     "norad_name": "METEOR-M 2",
+    "tle_aliases": ["METEOR M2"],
     "culture": "数字气象图像星：LRPT 实时数字图，比 APT 更现代也更娇贵。",
     "links": [
       {"direction": "downlink", "freq_hz": 137100000.0, "mode": "lrpt", "baud": 72000,

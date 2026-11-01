@@ -986,6 +986,15 @@ class SDRController:
             )
 
             nominal = float(SATELLITE_FREQUENCIES.get(name, 0.0)) * 1e6
+            if nominal <= 0.0:
+                # 链路目录没有这颗星的下行频点（如 FENGYUN 3D：AHRPT 在
+                # 1698–1710 MHz L 波段，不在收听面内）——如实拒绝，绝不调 0。
+                return {
+                    "error": "no_downlink_known",
+                    "satellite": name,
+                    "suggestion": "链路目录 sat_links 没有该星下行频点，"
+                                  "先 sat_link_get 查证再手动调谐。",
+                }
             res = compute_doppler_correction(
                 name, nominal, self._gs_lat, self._gs_lon, self._gs_alt
             )

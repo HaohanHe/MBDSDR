@@ -102,15 +102,39 @@ def _resolve_tle(satellite_name: str):
             return (*tle, "celestrak")
     return (*BUILTIN_TLE[satellite_name], "builtin-fallback")
 
-# 卫星下行频率（MHz）
-SATELLITE_FREQUENCIES = {
-    "NOAA 15": 137.620,
-    "NOAA 18": 137.9125,
-    "NOAA 19": 137.100,
-    "METEOR M2": 137.100,
-    "FENGYUN 3D": 137.100,
-    "ISS (ZARYA)": 145.800,  # APRS 下行
-}
+def _load_satellite_frequencies() -> Dict[str, float]:
+    """卫星下行频点表（MHz）：皮进加载自链路目录 sat_links.json，源码零字面量。
+
+    键是 TLE 名拼法（BUILTIN_TLE 的键）：目录 norad_name 与可选
+    tle_aliases 都桥接进来。目录查不到的卫星不进表，消费方
+    ``.get(name, 0.0)`` 软降级——FENGYUN 3D 即此类：其 AHRPT 下行在
+    1698–1710 MHz L 波段（NSMC 公开资料），不在本目录 137/145 MHz
+    收听面内，旧表硬记的 137.100 系讹误，已随迁移移除。
+    """
+    table: Dict[str, float] = {}
+    try:
+        from .sat_links import list_link_sats, load_sat_link
+    except Exception:
+        return table
+    for key in list_link_sats():
+        try:
+            entry = load_sat_link(key)
+        except Exception:
+            continue
+        links = [l for l in entry.get("links", [])
+                 if l.get("direction") == "downlink"]
+        if not links:
+            continue
+        mhz = float(links[0]["freq_hz"]) / 1e6
+        names = [entry.get("norad_name", "")]
+        names.extend(entry.get("tle_aliases", []))
+        for tle_name in names:
+            if tle_name:
+                table[str(tle_name)] = mhz
+    return table
+
+
+SATELLITE_FREQUENCIES = _load_satellite_frequencies()
 
 
 # ═══════════════════════════════════════════════════════
