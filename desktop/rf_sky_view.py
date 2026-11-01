@@ -341,11 +341,21 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
         except Exception:
             # Celestrak 不可用或缓存过期：跳过此卫星，不造假
             continue
+        # 下行频点优先取链路目录 sat_links（皮进配置，源码表只留兜底）；
+        # 目录没有的星才用表里默认值。
+        freq_mhz = float(meta["freq_mhz"])
+        try:
+            from mbdsdr_ai.sat_links import find_tuning_for
+            found = find_tuning_for(name)
+            if found is not None:
+                freq_mhz = float(found["downlink"]["freq_hz"]) / 1e6
+        except Exception:
+            pass
         catalog.append({
             "name": name,
             "line1": line1,
             "line2": line2,
-            "freq_mhz": float(meta["freq_mhz"]),
+            "freq_mhz": freq_mhz,
             "kind": str(meta["kind"]),
         })
     return catalog
@@ -949,6 +959,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             "az": obj.azimuth_deg, "alt": obj.elevation_deg,
             "ra": None, "dec": None, "mag": None,
             "rise": None, "set": None,
+            "downlink_mhz": None, "downlink_mode": "",
+            "culture": "",
         }
         meta = self._sat_catalog.get(obj.name)
         if meta:
@@ -956,6 +968,18 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             info["cospar"] = meta["cospar"]
             info["aliases"] = meta["aliases"]
             info["kind_label"] = meta["kind_label"]
+        # 链路目录 sat_links：下行频点/体制 + 一句话星性注记（点星即听
+        # 的文化层；目录没有的星如实缺省，不编造）。
+        try:
+            from mbdsdr_ai.sat_links import find_tuning_for
+            link = find_tuning_for(obj.name)
+        except Exception:
+            link = None
+        if link is not None:
+            dl = link["downlink"]
+            info["downlink_mhz"] = float(dl["freq_hz"]) / 1e6
+            info["downlink_mode"] = dl.get("mode", "")
+            info["culture"] = link["entry"].get("culture", "")
         # Ra/Dec: 地平 -> 当前赤道 -> J2000
         gs = self._ground_station()
         if gs is not None:
@@ -1012,7 +1036,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._tune_sat_name = name
         self._tune_btn.show()
         self._doppler_label.show()
-        self._tune_btn.setEnabled(True)
+        # 下行频点解析不了（目录外卫星）→ 置灰，诚实空态不画饼
+        self._tune_btn.setEnabled(self._compute_tune() is not None)
         self._refresh_tune_doppler()
         self._tune_refresh_timer.start()
         self._position_tune_overlay()
@@ -1051,9 +1076,23 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return None
         if not res or "error" in res:
             return None
-        # 下行频率已知的卫星给一个默认模式（NOAA APT=WFM 式接收）
-        f_down = res.get("base_freq_hz", 0.0)
-        mode = "WFM" if f_down and f_down < 200e6 else "NFM"
+        # 解调模式：优先按链路目录的体制给（apt/lrpt=宽带图像 WFM），
+        # 目录没有的星回落到频率启发式。
+        mode = ""
+        try:
+            from mbdsdr_ai.sat_links import find_tuning_for
+            link = find_tuning_for(str(res.get("satellite")
+                                       or self._tune_sat_name or ""))
+            if link is not None:
+                mode = {"apt": "WFM", "lrpt": "WFM", "nfm": "NFM",
+                        "fm": "NFM", "packet": "NFM",
+                        "bpsk": "NFM"}.get(
+                            str(link["downlink"].get("mode", "")).lower(), "")
+        except Exception:
+            pass
+        if not mode:
+            f_down = res.get("base_freq_hz", 0.0)
+            mode = "WFM" if f_down and f_down < 200e6 else "NFM"
         res["mode"] = mode
         return res
 
@@ -1592,6 +1631,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             (f"Az/Alt    {_dms(obj.azimuth_deg)}  {_dms(obj.elevation_deg)}", False),
             (f"Visibility  Rise {_hm(rise)}   Set {_hm(sset)}", False),
         ]
+        # 点星即听：该把收音机拧到哪 + 一句话星性注记（无则缺省行不画）
+        if info.get("downlink_mhz"):
+            dl_txt = f"Downlink  {info['downlink_mhz']:.4f} MHz"
+            if info.get("downlink_mode"):
+                dl_txt += f" ({info['downlink_mode']})"
+            lines.append((dl_txt, False))
+        if info.get("culture"):
+            lines.append((f"星性 {info['culture']}", False))
 
         painter.save()
         painter.setFont(self._font)

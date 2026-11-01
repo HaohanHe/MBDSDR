@@ -281,12 +281,29 @@ def auto_detect_satellite(freq_hz: float, tol_hz: float = 15e3) -> Optional[Dict
     return None
 
 
+def _resolve_downlink_hz(sat_name: str) -> Optional[float]:
+    """下行频点解析顺序：sat_links 目录（皮进配置）→ 本表兜底。
+
+    天空视图手里的 TLE 名与两表的键拼法都不保证一致（"NOAA 19" vs
+    "NOAA-19"），sat_links.find_tuning_for 已做归一化匹配。目录查不到
+    的（如 METOP 系 L 波段 HRPT）回落到本表；都没有如实 None。
+    """
+    try:
+        from ..sat_links import find_tuning_for
+        found = find_tuning_for(sat_name)
+        if found is not None:
+            return float(found["downlink"]["freq_hz"])
+    except Exception:
+        pass
+    return DOWNLINK_FREQUENCIES.get(sat_name)
+
+
 def tune_command(tracker: SatelliteTracker, gs: GroundStation,
                  t_unix: Optional[float] = None) -> Dict[str, Any]:
     """与 rf_sky_view 联动：选中卫星 → 返回应调谐频率（含实时多普勒）。"""
     if t_unix is None:
         t_unix = time.time()
-    f_down = DOWNLINK_FREQUENCIES.get(tracker.name)
+    f_down = _resolve_downlink_hz(tracker.name)
     if f_down is None:
         return {"error": f"未知卫星 {tracker.name} 的下行频率"}
     d = tracker.doppler_at(t_unix, gs, f_down)

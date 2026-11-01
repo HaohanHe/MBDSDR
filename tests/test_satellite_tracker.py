@@ -131,3 +131,18 @@ def test_tune_command(tracker):
     out = tune_command(tracker, BEIJING, t_unix=T_TEST)
     assert out["base_freq_hz"] == DOWNLINK_FREQUENCIES["NOAA-19"]
     assert abs(out["tuned_freq_hz"] - out["base_freq_hz"]) < 5000
+
+
+def test_tune_command_tle_spelling_resolves_via_catalog():
+    """天空视图目录名（"NOAA 19" 带空格）此前在两表里都查不到 → 调到该星失效。
+
+    现在 sat_links 目录归一化匹配先行，同星异拼必须解析成功且频点正确。
+    """
+    tr_space = SatelliteTracker("NOAA 19", TLE_L1, TLE_L2)
+    out = tune_command(tr_space, BEIJING, t_unix=T_TEST)
+    assert "error" not in out
+    assert out["base_freq_hz"] == pytest.approx(137.1e6)
+    # 未知星仍如实报错（不猜频率）
+    tr_unknown = SatelliteTracker("NOT A SAT", TLE_L1, TLE_L2)
+    out_unknown = tune_command(tr_unknown, BEIJING, t_unix=T_TEST)
+    assert "error" in out_unknown

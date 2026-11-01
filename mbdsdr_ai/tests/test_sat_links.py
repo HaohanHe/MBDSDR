@@ -97,6 +97,21 @@ def test_find_tuning_for_by_norad_name():
     assert SL.find_tuning_for("NO SUCH SAT") is None
 
 
+def test_find_tuning_for_alias_and_spelling():
+    """TLE 拼法差异都要命中：tle_aliases 与空白/连字符归一。"""
+    # 目录 norad_name 是 "METEOR-M 2"，轨道工具手里的 TLE 名是 "METEOR M2"。
+    via_alias = SL.find_tuning_for("METEOR M2")
+    assert via_alias is not None
+    assert via_alias["entry"]["norad_name"] == "METEOR-M 2"
+    # 连字符/大小写归一："NOAA-19"、"noaa19" 都应命中 NOAA 19。
+    a = SL.find_tuning_for("NOAA-19")
+    b = SL.find_tuning_for("noaa19")
+    assert a is not None and b is not None
+    assert a["entry"]["_link_name"] == b["entry"]["_link_name"] == "noaa_19"
+    # 空白名归一：ISS 带不带空格都中。
+    assert SL.find_tuning_for("ISS(ZARYA)") is not None
+
+
 def test_decoders_freq_table_derives_from_catalog():
     """decoders.SATELLITE_FREQUENCIES 皮进自目录：同值、键经 tle_aliases 桥接。"""
     from mbdsdr_ai.decoders import SATELLITE_FREQUENCIES

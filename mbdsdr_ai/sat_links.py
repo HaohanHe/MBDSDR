@@ -80,16 +80,27 @@ def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[
     return hits
 
 
-def find_tuning_for(sat_name: str) -> Optional[Dict[str, Any]]:
-    """按 TLE 名（norad_name）找收听建议：返回 (条目, 第一条 downlink)。
+def _norm_name(s: str) -> str:
+    """名称归一：大写 + 空白/连字符折叠，对齐各种 TLE 拼法。"""
+    return "".join(ch for ch in str(s).upper()
+                   if ch not in " -_")
 
-    轨道工具（sat_passes）手里是 TLE 名，本表用 norad_name 对齐两边；
-    找不到返回 None（诚实空态，不猜）。
+
+def find_tuning_for(sat_name: str) -> Optional[Dict[str, Any]]:
+    """按 TLE 名找收听建议：返回 (条目, 第一条 downlink)。
+
+    匹配面 = norad_name + tle_aliases，归一化后对齐（"NOAA-19" /
+    "NOAA 19"、"METEOR M2" / "METEOR-M 2" 都能命中）。找不到返回 None
+    （诚实空态，不猜）。
     """
-    needle = str(sat_name).strip().upper()
+    needle = _norm_name(sat_name)
+    if not needle:
+        return None
     for name in list_link_sats():
         entry = load_sat_link(name)
-        if str(entry.get("norad_name", "")).upper() == needle:
+        candidates = [entry.get("norad_name", "")]
+        candidates.extend(entry.get("tle_aliases", []))
+        if any(_norm_name(c) == needle for c in candidates if c):
             links = [l for l in entry.get("links", [])
                      if l.get("direction") == "downlink"]
             if links:
