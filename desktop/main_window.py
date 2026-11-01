@@ -1044,6 +1044,9 @@ class MainWindow(QMainWindow):
         self.control_panel.sample_rate_changed.connect(self._on_sample_rate_changed)
         if hasattr(self.control_panel, "agc_changed"):
             self.control_panel.agc_changed.connect(self._on_agc_changed)
+        if hasattr(self.control_panel, "agc_speed_changed"):
+            self.control_panel.agc_speed_changed.connect(
+                self._on_agc_speed_changed)
         if hasattr(self.control_panel, "ppm_changed"):
             self.control_panel.ppm_changed.connect(self._on_ppm_changed)
         if hasattr(self.control_panel, "offset_tuning_changed"):
@@ -2091,6 +2094,18 @@ class MainWindow(QMainWindow):
             pass
         try:
             self.control_panel.set_agc(bool(s.get("agc_enabled", True)))
+        except Exception:
+            pass
+        try:
+            self.control_panel.set_agc_speed(str(s.get("agc_speed", "medium")))
+        except Exception:
+            pass
+        try:
+            if self._demod_cfg is not None:
+                speed = str(s.get("agc_speed", "medium")).lower()
+                self._demod_cfg.agc_speed = (
+                    speed if speed in ("off", "fast", "medium", "slow")
+                    else "medium")
         except Exception:
             pass
         # UI 语言下拉回填（blockSignals，不触发落盘回写）
@@ -3194,6 +3209,19 @@ class MainWindow(QMainWindow):
             self._active_sdr_backend.set_agc(bool(enabled))
         except Exception as e:
             self.statusBar().showMessage(f"AGC 设置失败: {e}", 4000)
+
+    @Slot(str)
+    def _on_agc_speed_changed(self, speed: str):
+        """音频 AGC 档位 → 解调 worker 共享配置（gqrx Fast/Medium/Slow）。"""
+        key = str(speed or "medium").lower()
+        if key not in ("off", "fast", "medium", "slow"):
+            key = "medium"
+        try:
+            self.settings.set("agc_speed", key)
+        except Exception:
+            pass
+        if self._demod_cfg is not None:
+            self._demod_cfg.agc_speed = key
 
     @Slot(int)
     def _on_ppm_changed(self, ppm: int):

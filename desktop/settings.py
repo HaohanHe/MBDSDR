@@ -35,6 +35,7 @@ DEFAULTS: Dict[str, Any] = {
     "gnss_port": "",                # GNSS 串口设备路径；空 = 自动探测
     "gnss_baudrate": 9600,          # GNSS 串口波特率
     "agc_enabled": True,            # 自动增益开关
+    "agc_speed": "medium",          # 音频 AGC 档位：off/fast/medium/slow
     "volume": 48,                   # 音量 0–100（人类量纲；下发 0–63 硬件量纲在 main_window 边界换算）
     # 音量量纲迁移标记：新文件/新装默认 True。旧 desktop_settings.json 有
     # "volume"（0–63 硬件量纲）但没有本标记 → load() 一次性换算成 0–100

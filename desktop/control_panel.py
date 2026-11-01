@@ -128,6 +128,7 @@ class ControlPanel(QWidget):
     step_changed = Signal(float)               # 频率步进改变 (Hz)
     vfo_bandwidth_changed = Signal(float)      # VFO 带宽改变 (Hz)
     agc_changed = Signal(bool)                 # AGC 自动增益开关
+    agc_speed_changed = Signal(str)            # 音频 AGC 档位 (off/fast/medium/slow)
     ppm_changed = Signal(int)                  # PPM 频偏校正
     offset_tuning_changed = Signal(bool)       # Offset 调谐开关
     dc_removal_changed = Signal(bool)          # DC 偏移去除开关（默认开）
@@ -221,6 +222,7 @@ class ControlPanel(QWidget):
             getattr(self, "step_combo", None),
             getattr(self, "vfo_bw_combo", None),
             getattr(self, "agc_check", None),
+            getattr(self, "agc_speed_combo", None),
             getattr(self, "ppm_spin", None),
             getattr(self, "offset_check", None),
             getattr(self, "dc_removal_check", None),
@@ -495,8 +497,29 @@ class ControlPanel(QWidget):
 
         # AGC 自动增益开关（增益滑杆下方）
         self.agc_check = QCheckBox("AGC 自动增益")
+        self.agc_check.setToolTip("硬件 AGC：交给射频前端的自动增益")
         self.agc_check.toggled.connect(self._on_agc_changed)
         rx_layout.addWidget(self.agc_check)
+
+        # 解调后音频 AGC 档位（gqrx 式 Fast/Medium/Slow + 关）
+        agc_speed_row = QHBoxLayout()
+        self.agc_speed_label = QLabel("音频 AGC")
+        self.agc_speed_label.setObjectName("statusValue")
+        agc_speed_row.addWidget(self.agc_speed_label)
+        self.agc_speed_combo = QComboBox()
+        for key, label in (("off", "关"), ("fast", "快"),
+                           ("medium", "中"), ("slow", "慢")):
+            self.agc_speed_combo.addItem(label, key)
+        self.agc_speed_combo.setCurrentIndex(
+            self.agc_speed_combo.findData("medium"))
+        self.agc_speed_combo.setToolTip(
+            "解调后音频 AGC 档位（gqrx Fast/Medium/Slow）：快档紧跟信号"
+            "起伏，慢档增益稳定；「关」直通原声")
+        self.agc_speed_combo.currentIndexChanged.connect(
+            self._on_agc_speed_changed)
+        agc_speed_row.addWidget(self.agc_speed_combo)
+        agc_speed_row.addStretch(1)
+        rx_layout.addLayout(agc_speed_row)
 
         # PPM 频偏校正（AGC 下方）
         ppm_row = QHBoxLayout()
@@ -820,6 +843,11 @@ class ControlPanel(QWidget):
         self.agc_changed.emit(checked)
 
     @Slot(int)
+    def _on_agc_speed_changed(self, _idx: int):
+        self.agc_speed_changed.emit(
+            str(self.agc_speed_combo.currentData()))
+
+    @Slot(int)
     def _on_ppm_changed(self, ppm: int):
         self.ppm_changed.emit(int(ppm))
 
@@ -1122,3 +1150,14 @@ class ControlPanel(QWidget):
         self.agc_check.blockSignals(True)
         self.agc_check.setChecked(bool(enabled))
         self.agc_check.blockSignals(False)
+
+    def set_agc_speed(self, speed: str):
+        """从外部恢复音频 AGC 档位，不发射 agc_speed_changed。"""
+        key = str(speed or "medium").lower()
+        if key not in ("off", "fast", "medium", "slow"):
+            key = "medium"
+        self.agc_speed_combo.blockSignals(True)
+        idx = self.agc_speed_combo.findData(key)
+        if idx >= 0:
+            self.agc_speed_combo.setCurrentIndex(idx)
+        self.agc_speed_combo.blockSignals(False)

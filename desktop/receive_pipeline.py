@@ -28,14 +28,14 @@ VFO 解调 → 声卡）重构为 SDR++ 风格的多线程流水线：
 
 import logging
 import threading
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 import numpy as np
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from mbdsdr_ai.dsp_stream import PingPongStream
-from mbdsdr_ai.dsp import StreamSplitter
+from mbdsdr_ai.dsp import StreamSplitter, AGC
 from mbdsdr_ai.squelch import AutoSquelch, NoiseSquelch
 from mode_registry import get as get_mode, demodulate
 
@@ -54,11 +54,13 @@ class SharedDemodConfig:
     """
 
     def __init__(self, mode: str = "FM", squelch_db: float = -80.0,
-                 auto_squelch: bool = True):
+                 auto_squelch: bool = True, agc_speed: str = "medium"):
         self.mode: str = str(mode).upper()
         self.squelch_db: float = float(squelch_db)
         # 自动静噪：相对实测噪声底门控，无载波时静音；False 时用固定 squelch_db。
         self.auto_squelch: bool = bool(auto_squelch)
+        # 解调后音频 AGC 档位：fast / medium / slow / off（gqrx 式三档+关）。
+        self.agc_speed: str = str(agc_speed).lower()
 
 
 # ======================================================================
@@ -214,6 +216,36 @@ class DemodWorker(QThread):
                                      sample_rate=self._sr)
         # WFM 连续载波改用解调后噪声静噪（输入为 48k 单声道音频）
         self._noise_wfm = NoiseSquelch(sample_rate=48000.0)
+        # 解调后音频 AGC（gqrx 式三档+关）：每档一个实例，档位各自保留
+        # 增益状态，来回切换不跳变；off 直通。
+        self._audio_agc: Dict[str, AGC] = {}
+
+    # 档位 → (attack, release)：attack 控制增益上爬（信号变强时快速回落），
+    # release 控制增益下放（信号变弱时缓慢拉升）。数值为一阶平滑系数。
+    _AGC_SPEED_PARAMS = {
+        "fast": (0.10, 0.01),
+        "medium": (0.02, 0.002),
+        "slow": (0.005, 0.0005),
+    }
+
+    def _apply_audio_agc(self, audio: np.ndarray) -> np.ndarray:
+        """按当前档位对解调后音频施加 AGC；off/未知档直通。"""
+        speed = str(self._cfg.agc_speed).lower()
+        if speed in ("off", "", "none"):
+            return audio
+        if speed not in self._AGC_SPEED_PARAMS:
+            speed = "medium"
+        agc = self._audio_agc.get(speed)
+        if agc is None:
+            attack, release = self._AGC_SPEED_PARAMS[speed]
+            agc = AGC(target_level=0.5, attack=attack, release=release,
+                      max_gain=60.0)
+            self._audio_agc[speed] = agc
+        if audio.ndim == 2:
+            # WFM 立体声：各声道共用同一 AGC 实例顺序处理（增益状态连续）
+            return np.stack([agc.process(audio[:, c])
+                             for c in range(audio.shape[1])], axis=1)
+        return agc.process(audio)
 
     def _gate_open(self, auto, power_db: float, n: int) -> bool:
         """按当前配置返回静噪门是否打开：auto 走 AutoSquelch，否则固定门限。"""
@@ -305,6 +337,7 @@ class DemodWorker(QThread):
                 except Exception:
                     pass
                 try:
+                    audio = self._apply_audio_agc(audio)
                     player.write(audio)
                 except Exception:
                     pass
@@ -344,6 +377,7 @@ class DemodWorker(QThread):
             try:
                 audio = self._demod_48k(_dsp, mode, vfo_out)
                 if audio is not None and audio.size > 0:
+                    audio = self._apply_audio_agc(audio)
                     player.write(audio)
             except Exception:
                 pass
