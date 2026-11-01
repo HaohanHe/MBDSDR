@@ -1600,10 +1600,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
             painter.drawEllipse(pos, r, r)
-            # 亮星 (V<2.0) 文字标签
+            # 亮星 (V<2.0) 文字标签：有中国星官名优先中文（文化对位层），
+            # 目录外如实回退西方名。
             if s.vmag <= 2.0:
                 painter.setPen(QColor(210, 220, 235, int(200 * bright + 40)))
-                painter.drawText(QPointF(pos.x() + r + 2, pos.y() - r), s.name)
+                painter.drawText(QPointF(pos.x() + r + 2, pos.y() - r),
+                                 _stars.culture_label(s.name))
         painter.restore()
 
     def _on_screen(self, pos: QPointF, margin: float = 4.0) -> bool:

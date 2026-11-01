@@ -247,5 +247,40 @@ class TestRFSkyViewPerspective(unittest.TestCase):
         self.assertEqual(v.view_state.max_fov, 120.0)
 
 
+class TestStarCulture(unittest.TestCase):
+    """中国星名/星官对照（文化对位层，"读懂"冲刺）。"""
+
+    def test_known_star_zh_name(self):
+        from mbdsdr_ai.skyengine import stars as _stars
+        c = _stars.star_culture("Vega")
+        self.assertIsNotNone(c)
+        self.assertEqual(c["zh"], "织女一")
+        self.assertIn("note", c)
+
+    def test_unknown_star_returns_none(self):
+        from mbdsdr_ai.skyengine import stars as _stars
+        self.assertIsNone(_stars.star_culture("NoSuchStarXYZ"))
+
+    def test_culture_label_fallback(self):
+        from mbdsdr_ai.skyengine import stars as _stars
+        self.assertEqual(_stars.culture_label("Vega"), "织女一")
+        self.assertEqual(_stars.culture_label("NoSuchStarXYZ"), "NoSuchStarXYZ")
+
+    def test_all_labeled_stars_have_culture_entry(self):
+        """亮星标签层（V<=2.0）每颗都必须有中文星官名，防文化层漏星。"""
+        from mbdsdr_ai.skyengine import stars as _stars
+        missing = [s.name for s in _stars.BRIGHT_STARS
+                   if s.vmag <= 2.0 and _stars.star_culture(s.name) is None]
+        self.assertEqual(missing, [])
+
+    def test_culture_file_keys_are_real_stars(self):
+        """对照表不许收编表外星（防皮配置漂进假名）。"""
+        from mbdsdr_ai.skyengine import stars as _stars
+        table = _stars._load_culture()
+        names = {s.name for s in _stars.BRIGHT_STARS}
+        stray = [k for k in table if k not in names]
+        self.assertEqual(stray, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

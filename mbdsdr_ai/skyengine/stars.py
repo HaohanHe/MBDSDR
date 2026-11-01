@@ -22,8 +22,11 @@ Stellarium / Stellarium Web Engine 仅作为技术参考与致谢，本模块未
 
 from __future__ import annotations
 
+import json
 import math
+import os
 from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 R2AS: float = 180.0 / math.pi * 3600.0   # 弧度 -> 角秒 ~ 206265
 
@@ -99,6 +102,40 @@ BRIGHT_STARS: list[BrightStar] = [
 def mag_to_lux(vmag: float) -> float:
     """照度 E(lux) = 10.7646e4/R2AS^2 * 10^(-0.4*vmag)（Pogson 定律）。"""
     return 10.7646e4 / (R2AS * R2AS) * 10.0 ** (-0.4 * vmag)
+
+
+# ---------------------------------------------------------------------------
+# 中国星名/星官对照（文化对位层，"读懂"冲刺）
+# ---------------------------------------------------------------------------
+# 数据在 data/star_culture.json（皮进配置，源码零中文名字面量在此之外）；
+# 三垣四象二十八宿星官制，公开天文常识级对照，非标准文本摘录。
+_CULTURE_CACHE: Optional[Dict[str, Dict[str, str]]] = None
+
+
+def _load_culture() -> Dict[str, Dict[str, str]]:
+    global _CULTURE_CACHE
+    if _CULTURE_CACHE is None:
+        path = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "data", "star_culture.json")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw: Dict[str, Any] = json.load(fh)
+            _CULTURE_CACHE = {k: v for k, v in raw.items()
+                              if not k.startswith("_")}
+        except (OSError, ValueError):
+            _CULTURE_CACHE = {}
+    return _CULTURE_CACHE
+
+
+def star_culture(name: str) -> Optional[Dict[str, str]]:
+    """按 BRIGHT_STARS 的西方名取中国星名/星官注记；无收录返回 None（不编造）。"""
+    return _load_culture().get(str(name))
+
+
+def culture_label(name: str) -> str:
+    """星标签显示名：有中文星官用中文（文化对位），否则回退原名。"""
+    c = star_culture(name)
+    return c["zh"] if c else str(name)
 
 
 # Stellarium StelSkyDrawer.cpp:420 同款小星补偿常数：半径 <1.2px 的星点
