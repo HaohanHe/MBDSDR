@@ -18,6 +18,7 @@
 #include "dsp/source.h"
 #include "dsp/power_spectrum.h"
 #include "dsp/noise_blanker.h"
+#include "dsp/dc_blocker.h"
 #include "dsp/iq_frontend.h"
 #include "dsp/ft8_detector.h"
 #include "dsp/ft8_codec.h"
@@ -549,6 +550,8 @@ public:
     // enable/disable state of the gain slider based on setTunerAgc.
     void setDirectSampling(int mode);
     void setOffsetTuning(bool on);
+    void setDcRemoval(bool on) { dcRemoval_.store(on); }
+    bool dcRemoval() const { return dcRemoval_.load(); }
     void setRtlAgc(bool on);
     void setTunerAgc(bool on);
     // Readback of the cached requested AGC state (what we last commanded).
@@ -854,6 +857,11 @@ private:
     WavWriter wavWriter_;
     PowerSpectrum powerSpectrum_;
     NoiseBlanker noiseBlanker_;
+    // Software DC blocker (SDR++ dc_blocker.h algorithm), applied on the engine
+    // thread right after read/sanitize. Pure signal processing -- no device
+    // interaction -- so it is a plain atomic flag, not a control-mailbox entry.
+    dsp::DcBlocker dcBlocker_;
+    std::atomic<bool> dcRemoval_{true};
     // Frontend software decimator (real decimating low-pass, NCO offset 0).
     Channelizer frontendDecim_;
     std::atomic<int> frontendDecimation_{1};

@@ -394,6 +394,8 @@ MainWindow::MainWindow(QWidget* parent)
     advLay->addRow("直采", dsCombo_);
     offsetChk_ = new QCheckBox("偏移调谐", advPanel_);
     advLay->addRow(offsetChk_);
+    dcChk_ = new QCheckBox("DC 抑制", advPanel_);
+    advLay->addRow(dcChk_);
     rtlAgcChk_ = new QCheckBox("RTL AGC", advPanel_);
     advLay->addRow(rtlAgcChk_);
     tunerAgcChk_ = new QCheckBox("Tuner AGC", advPanel_);
@@ -3336,6 +3338,8 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](int idx) { engine_->setDirectSampling(idx); });
     connect(offsetChk_, &QCheckBox::toggled,
             this, [this](bool on) { engine_->setOffsetTuning(on); });
+    connect(dcChk_, &QCheckBox::toggled,
+            this, [this](bool on) { engine_->setDcRemoval(on); });
     connect(rtlAgcChk_, &QCheckBox::toggled,
             this, [this](bool on) { engine_->setRtlAgc(on); });
     connect(tunerAgcChk_, &QCheckBox::toggled, this, [this](bool on) {
@@ -3873,6 +3877,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(dsCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::scheduleSave);
     connect(offsetChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
+    connect(dcChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
     connect(rtlAgcChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
     connect(tunerAgcChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
     connect(biasTeeChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
@@ -5129,6 +5134,7 @@ void MainWindow::saveUiState() {
     s.setValue("rtl/rtlAgc", rtlAgcChk_->isChecked());
     s.setValue("rtl/tunerAgc", tunerAgcChk_->isChecked());
     s.setValue("rtl/offsetTuning", offsetChk_->isChecked());
+    s.setValue("rtl/dcRemoval", dcChk_->isChecked());
     s.setValue("rtl/biasTee", biasTeeChk_->isChecked());   // default false
 
     // ---- View ----
@@ -5454,6 +5460,7 @@ void MainWindow::restoreUiState() {
     squelchCheck_->blockSignals(true);
     dsCombo_->blockSignals(true);
     offsetChk_->blockSignals(true);
+    dcChk_->blockSignals(true);
     rtlAgcChk_->blockSignals(true);
     tunerAgcChk_->blockSignals(true);
     biasTeeChk_->blockSignals(true);
@@ -5622,6 +5629,7 @@ void MainWindow::restoreUiState() {
     rtlAgcChk_->setChecked(s.value("rtl/rtlAgc", false).toBool());
     tunerAgcChk_->setChecked(s.value("rtl/tunerAgc", false).toBool());
     offsetChk_->setChecked(s.value("rtl/offsetTuning", false).toBool());
+    dcChk_->setChecked(s.value("rtl/dcRemoval", true).toBool());   // default ON
     biasTeeChk_->setChecked(s.value("rtl/biasTee", false).toBool());   // default false
 
     // ---- SpyServer (default OFF; only binds when the box is checked) ----
@@ -5787,6 +5795,7 @@ void MainWindow::restoreUiState() {
     squelchCheck_->blockSignals(false);
     dsCombo_->blockSignals(false);
     offsetChk_->blockSignals(false);
+    dcChk_->blockSignals(false);
     rtlAgcChk_->blockSignals(false);
     tunerAgcChk_->blockSignals(false);
     biasTeeChk_->blockSignals(false);
@@ -5809,6 +5818,7 @@ void MainWindow::restoreUiState() {
 
     engine_->setDirectSampling(dsCombo_->currentIndex());
     engine_->setOffsetTuning(offsetChk_->isChecked());
+    engine_->setDcRemoval(dcChk_->isChecked());
     engine_->setRtlAgc(rtlAgcChk_->isChecked());
     engine_->setTunerAgc(tunerAgcChk_->isChecked());
     engine_->setBiasTee(biasTeeChk_->isChecked());

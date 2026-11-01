@@ -606,6 +606,7 @@ private:
     QWidget*        advPanel_    = nullptr;
     QComboBox*      dsCombo_     = nullptr;
     QCheckBox*      offsetChk_   = nullptr;
+    QCheckBox*      dcChk_       = nullptr;
     QCheckBox*      rtlAgcChk_   = nullptr;
     QCheckBox*      tunerAgcChk_ = nullptr;
     QCheckBox*      biasTeeChk_  = nullptr;

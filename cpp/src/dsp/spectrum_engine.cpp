@@ -1528,6 +1528,17 @@ void SpectrumEngine::run() {
                 c = std::complex<float>(0.0f, 0.0f);
         }
 
+        // Software DC removal (SDR++-style exponential blocker): the RTL-SDR
+        // zero-IF LO leakage parks a huge fake peak at the tuned center
+        // frequency. Subtracting the tracked offset before the spectrum FFT
+        // removes the spike from the display/demod chain. Runs before the
+        // recorder tap so recordings carry the corrected samples too.
+        if (dcRemoval_.load()) {
+            dcBlocker_.process(iq);
+        } else {
+            dcBlocker_.reset();   // don't hold a stale offset while bypassed
+        }
+
         noiseBlanker_.process(iq);
         frontend_.process(iq);
 
@@ -1586,6 +1597,23 @@ void SpectrumEngine::run() {
             frame.fftSize = static_cast<int>(useN);
             frame.isTestSignal = !real;
             frame.sourceName = source_->name();
+            // DC-spike diagnostic (env-gated): log how hot the center bins of
+            // the PUBLISHED frame actually are, and whether removal is on.
+            // Settles "is the green column data or display" from the live log.
+            if (qEnvironmentVariableIsSet("MBDSDR_LOG_FILE")) {
+                static int dcHb = 0;
+                if (++dcHb % 200 == 0) {
+                    std::vector<float> s = frame.dbfs;
+                    std::sort(s.begin(), s.end());
+                    const float med = s[s.size() / 2];
+                    const std::size_t c = frame.dbfs.size() / 2;
+                    float cmax = -200.0f;
+                    for (std::size_t k = c >= 3 ? c - 3 : 0; k <= c + 3 && k < frame.dbfs.size(); ++k)
+                        cmax = std::max(cmax, frame.dbfs[k]);
+                    qInfo("[dcprobe] center(+/-3bin)=%.1f dB median=%.1f dB dcRemoval=%d",
+                          cmax, med, dcRemoval_.load() ? 1 : 0);
+                }
+            }
             {
                 std::lock_guard<std::mutex> lk(frameMu_);
                 latestFrame_ = frame;
