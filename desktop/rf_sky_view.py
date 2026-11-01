@@ -392,6 +392,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # (on, sat_name, downlink_hz)——downlink_hz 用目录基准下行频点，
     # 多普勒校正是主窗口跟踪环（_sat_track_timer）的职责，这里不越权。
     track_toggled = Signal(bool, str, float)
+    # 「云台跟随」开关：checked 后主窗口在同一 500ms 拍内驱动云台指向卫星。
+    # 需要先有可用云台后端（ai-sdr-mini 板载 / rotctld），否则按钮置灰。
+    gimbal_follow_toggled = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -515,10 +518,30 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             + _t.text("disabled") + "; }")
         self._track_btn.toggled.connect(self._on_track_toggled)
         self._track_btn.hide()
+        # 「云台跟随」开关：checkable。未配置后端时置灰 + 诚实 tooltip。
+        self._gimbal_btn = QPushButton("🛰 云台", self)
+        self._gimbal_btn.setCheckable(True)
+        self._gimbal_btn.setEnabled(False)
+        self._gimbal_btn.setToolTip(
+            "云台跟随：跟踪时同步驱动天线指向（无可用云台后端："
+            "连接 ai-sdr-mini 或在 AI 对话里配置 rotctld）")
+        self._gimbal_btn.setStyleSheet(
+            "QPushButton { background: " + _t.COLORS["card_2"] + "; color: "
+            + _t.text("primary") + ";"
+            " border:none; padding:4px 10px; border-radius:3px; }"
+            "QPushButton:hover { background: " + _t.COLORS["card_hover"] + "; }"
+            "QPushButton:checked { background: " + _t.COLORS["light_accent"]
+            + "; color: " + _t.COLORS["bg_dark"] + "; }"
+            "QPushButton:disabled { background: " + _t.COLORS["card_1"] + "; color: "
+            + _t.text("disabled") + "; }")
+        self._gimbal_btn.toggled.connect(self._on_gimbal_toggled)
+        self._gimbal_btn.hide()
         # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
         self._tune_sat_name: Optional[str] = None
         # 跟踪环目标星名（跟踪中防止换星残留假状态）
         self._track_target_name: Optional[str] = None
+        # 云台后端是否可用（由主窗口 set_gimbal_available 注入）
+        self._gimbal_available = False
         self._tune_refresh_timer = QTimer(self)
         self._tune_refresh_timer.setInterval(2000)
         self._tune_refresh_timer.timeout.connect(self._refresh_tune_doppler)
@@ -1090,8 +1113,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         gs_ready = self._observer is not None
         if meta is None or not gs_ready:
             self._stop_track_ui()  # 选中失效：跟踪同步停，不残留假状态
+            self._stop_gimbal_ui()  # 云台跟随随跟踪一起停
             self._tune_sat_name = None
             self._tune_btn.hide()
+            self._track_btn.hide()
+            self._gimbal_btn.hide()
             self._doppler_label.hide()
             self._tune_refresh_timer.stop()
             return
@@ -1099,9 +1125,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 换星：若正在跟踪别的星，先停（停跟踪是主窗口环的职责，发信号）
         if self._track_btn.isChecked() and name != self._track_target_name:
             self._stop_track_ui()
+            self._stop_gimbal_ui()
         self._tune_sat_name = name
         self._tune_btn.show()
         self._track_btn.show()
+        self._gimbal_btn.show()
+        self._gimbal_btn.setEnabled(self._gimbal_available)
         self._doppler_label.show()
         # 下行频点解析不了（目录外卫星）→ 置灰，诚实空态不画饼
         tunable = self._compute_tune() is not None
@@ -1151,6 +1180,50 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         name = str(res.get("satellite") or self._tune_sat_name or "")
         self._track_target_name = name
         self.track_toggled.emit(True, name, float(res.get("base_freq_hz", 0.0)))
+
+    # ------------------------------------------------------------------ #
+    # 「云台跟随」开关：跟随主窗口跟踪环同拍驱动天线
+    # ------------------------------------------------------------------ #
+    def set_gimbal_available(self, available: bool) -> None:
+        """主窗口注入云台后端可用性；不可用置灰 + 诚实 tooltip。"""
+        self._gimbal_available = bool(available)
+        if not available and self._gimbal_btn.isChecked():
+            self._stop_gimbal_ui()
+        self._gimbal_btn.setEnabled(bool(available) and
+                                    self._track_btn.isVisibleTo(self))
+        if available:
+            self._gimbal_btn.setToolTip(
+                "云台跟随：跟踪时同步驱动天线指向卫星（每 500ms 一拍）")
+        else:
+            self._gimbal_btn.setToolTip(
+                "云台跟随：跟踪时同步驱动天线指向（无可用云台后端："
+                "连接 ai-sdr-mini 或在 AI 对话里配置 rotctld）")
+
+    def _stop_gimbal_ui(self) -> None:
+        """云台按钮回到未跟随态；若在跟随则发停止信号。"""
+        if self._gimbal_btn.isChecked():
+            self._gimbal_btn.blockSignals(True)
+            self._gimbal_btn.setChecked(False)
+            self._gimbal_btn.blockSignals(False)
+            self.gimbal_follow_toggled.emit(False)
+
+    def set_gimbal_follow_checked(self, on: bool) -> None:
+        """主窗口反向同步（跟踪停/后端掉线时复位），不发射信号。"""
+        self._gimbal_btn.blockSignals(True)
+        self._gimbal_btn.setChecked(on)
+        self._gimbal_btn.blockSignals(False)
+
+    def _on_gimbal_toggled(self, checked: bool):
+        if not checked:
+            self.gimbal_follow_toggled.emit(False)
+            return
+        if not self._gimbal_available:
+            # 不可用却收到 check（不应发生）：诚实弹回
+            self._gimbal_btn.blockSignals(True)
+            self._gimbal_btn.setChecked(False)
+            self._gimbal_btn.blockSignals(False)
+            return
+        self.gimbal_follow_toggled.emit(True)
 
     def _build_tune_tracker(self, meta: Dict[str, object]):
         """用目录里的 TLE 构建卫星追踪器；缺依赖/失败返回 None。"""
@@ -1232,11 +1305,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         })
 
     def _position_tune_overlay(self):
-        """把调谐按钮+跟踪按钮+多普勒标签放到左下角。"""
+        """把调谐按钮+跟踪按钮+云台按钮+多普勒标签放到左下角。"""
         try:
             bw = max(self._tune_btn.sizeHint().width(), 110)
             tw = max(self._track_btn.sizeHint().width(), 70) \
-                if self._track_btn.isVisible() else 0
+                if self._track_btn.isVisibleTo(self) else 0
+            gw = max(self._gimbal_btn.sizeHint().width(), 64) \
+                if self._gimbal_btn.isVisibleTo(self) else 0
             dw = self._doppler_label.sizeHint().width()
             h = 26
             x = 12
@@ -1244,7 +1319,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._tune_btn.setGeometry(x, y, bw, h)
             tx = x + bw + 6
             self._track_btn.setGeometry(tx, y, tw, h)
-            self._doppler_label.setGeometry(tx + tw + 6, y, max(dw, 90), h)
+            gx = tx + tw + 6
+            self._gimbal_btn.setGeometry(gx, y, gw, h)
+            self._doppler_label.setGeometry(gx + gw + 6, y, max(dw, 90), h)
         except Exception:
             pass
 
@@ -2268,6 +2345,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._tune_sat_name = None
             self._stop_track_ui()
             self._track_btn.hide()
+            self._stop_gimbal_ui()
+            self._gimbal_btn.hide()
             self._tune_btn.hide()
             self._doppler_label.hide()
             self._tune_refresh_timer.stop()

@@ -308,6 +308,12 @@ class MainWindow(QMainWindow):
         self._sat_track_prev_freq_hz: Optional[float] = None
         self._sat_track_prev_mode: Optional[str] = None
         self._sat_track_mode: str = "FM"
+        # ---- 云台跟随（阶段4）：与跟踪环同拍驱动天线指向 ----
+        # 复用 sdr_tools 全局 GimbalController 单例（ai-sdr-mini WebSocket
+        # 连接成功时 sdr_backend 自动注入板载通道；rotctld/manual 由 AI
+        # 工具配置）。_gimbal_follow=True 时 _poll_satellite_track 每拍
+        # 下发卫星 az/el；停跟踪单点停止。
+        self._gimbal_follow = False
         # 真实串口 GNSS 监测：插上 GNSS 模块后由用户在「工具 → 连接 GNSS」里选口/波特率
         # 启动，驱动状态面板 GPS 组与天空图观测站坐标。找不到设备/缺依赖时降级为 none，
         # 绝不崩、绝不造假坐标。不在启动时自动开串口（用户可能根本没接 GNSS）。
@@ -4540,6 +4546,12 @@ class MainWindow(QMainWindow):
                     self._on_sky_tune_satellite)
             if sv is not None and hasattr(sv, "track_toggled"):
                 sv.track_toggled.connect(self._on_sky_track_toggled)
+            if sv is not None and hasattr(sv, "gimbal_follow_toggled"):
+                sv.gimbal_follow_toggled.connect(
+                    self._on_sky_gimbal_follow_toggled)
+                # 初始可用性（后端可能 200ms 后才连上，5s 周期任务会再刷）
+                if hasattr(sv, "set_gimbal_available"):
+                    sv.set_gimbal_available(self._gimbal_available())
         except Exception:
             pass
 
@@ -5024,6 +5036,80 @@ class MainWindow(QMainWindow):
         sv = getattr(self, "sky_view", None)
         if sv is not None and hasattr(sv, "set_tracking_checked"):
             sv.set_tracking_checked(on)
+
+    # ------------------------------------------------------------------ #
+    # 云台跟随（阶段4）：与卫星跟踪环同拍驱动天线
+    # ------------------------------------------------------------------ #
+    def _gimbal_controller(self):
+        """sdr_tools 全局云台控制器单例；缺依赖/异常返回 None（诚实）。"""
+        try:
+            from mbdsdr_ai.sdr_tools import _get_gimbal_controller
+            return _get_gimbal_controller()
+        except Exception:
+            return None
+
+    def _gimbal_available(self) -> bool:
+        """云台后端可用性：board 通道已注入 / rotctld 连通 / manual。"""
+        gc = self._gimbal_controller()
+        if gc is None:
+            return False
+        mode = gc.status.mode.value
+        if mode == "board_pwm":
+            return gc.status.connected or \
+                getattr(gc.board, "_send", None) is not None
+        if mode == "rotctld":
+            return bool(gc.status.connected)
+        if mode == "manual":
+            return True
+        # OFFLINE 但 ai-sdr-mini WebSocket 已把板载通道注入进来 → 可激活
+        return getattr(gc.board, "_send", None) is not None
+
+    def _activate_gimbal_if_needed(self):
+        """确保有可下发后端；OFFLINE 且板载通道在 → 激活 board_pwm。
+
+        返回 None 表示无可用后端（调用方应诚实关闭跟随，不造假动作）。
+        """
+        gc = self._gimbal_controller()
+        if gc is None or not self._gimbal_available():
+            return None
+        if gc.status.mode.value == "offline":
+            try:
+                gc.use_board()  # send_callable 已由 sdr_backend 注入
+            except Exception:
+                return None
+        return gc
+
+    def _sync_sky_gimbal_btn(self, on: bool) -> None:
+        sv = getattr(self, "sky_view", None)
+        if sv is not None and hasattr(sv, "set_gimbal_follow_checked"):
+            sv.set_gimbal_follow_checked(on)
+
+    def _refresh_gimbal_availability(self) -> None:
+        sv = getattr(self, "sky_view", None)
+        if sv is not None and hasattr(sv, "set_gimbal_available"):
+            sv.set_gimbal_available(self._gimbal_available())
+
+    def _on_sky_gimbal_follow_toggled(self, on: bool):
+        """天空图「云台跟随」开关：确认后端可用后随跟踪环同拍驱动。"""
+        if not on:
+            self._gimbal_follow = False
+            return
+        if not (self._sat_track_timer is not None
+                and self._sat_track_timer.isActive()):
+            self.statusBar().showMessage(
+                "先按「🎯 跟踪」开始闭环跟踪，再开云台跟随", 4000)
+            self._sync_sky_gimbal_btn(False)
+            return
+        gc = self._activate_gimbal_if_needed()
+        if gc is None:
+            self.statusBar().showMessage(
+                "无可用云台后端：连接 ai-sdr-mini 或在 AI 对话里配置 rotctld",
+                5000)
+            self._sync_sky_gimbal_btn(False)
+            return
+        self._gimbal_follow = True
+        self.statusBar().showMessage(
+            f"云台跟随已开启（{gc.status.backend_info}）", 4000)
 
 
     def _on_toolbar_mode_selected(self, mode: str):
@@ -5600,6 +5686,20 @@ class MainWindow(QMainWindow):
             self._on_tune_sdr(corrected, self._sat_track_mode)
         except Exception:
             pass
+        # 云台跟随：同一拍内驱动天线指向卫星（调谐与云台天然同步、单点停止）
+        if self._gimbal_follow:
+            try:
+                gc = self._activate_gimbal_if_needed()
+                if gc is None:
+                    # 后端中途掉线：诚实关闭跟随，不造假动作
+                    self._gimbal_follow = False
+                    self._sync_sky_gimbal_btn(False)
+                    self.statusBar().showMessage("云台后端已离线，跟随关闭", 4000)
+                else:
+                    az = float(pos.get("azimuth") or 0.0)
+                    gc.point_to_satellite(az, el)
+            except Exception:
+                pass
 
     def _stop_satellite_tracking(self):
         """停止闭环跟踪，恢复用户之前的接收频率。"""
@@ -5607,6 +5707,16 @@ class MainWindow(QMainWindow):
             self._sat_track_timer.stop()
         self.sat_track_panel.set_tracking_state(False)
         self._sync_sky_track_btn(False)  # 自动停（过境结束）也复位天空图开关
+        if self._gimbal_follow:
+            # 云台跟随随跟踪单点停止：复位开关 + 下发停机（固件负值=释放）
+            self._gimbal_follow = False
+            self._sync_sky_gimbal_btn(False)
+            try:
+                gc = self._gimbal_controller()
+                if gc is not None:
+                    gc.stop()
+            except Exception:
+                pass
         if self._sat_track_prev_freq_hz is not None:
             mode = self._sat_track_prev_mode or "FM"
             try:
@@ -5625,6 +5735,8 @@ class MainWindow(QMainWindow):
         """
         # 新时空：更新授时信息（每30秒NTP同步一次，其余用系统时间）
         self._update_time_info()
+        # 云台后端可用性可能随 ai-sdr-mini 连接状态变化，周期刷新按钮态
+        self._refresh_gimbal_availability()
 
     def _update_time_info(self):
         """更新新时空授时信息到天空图。"""
