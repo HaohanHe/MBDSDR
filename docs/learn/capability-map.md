@@ -750,6 +750,11 @@ CRC-24 语义（DF11 纯校验 / DF4⊕ICAO）。`tests/test_adsb_dump1090_golde
 四层钉扎（真值帧地板 + CRC 关系 + 独特帧 ratchet）。口径更新：「真实
 解码验证」已非零（FT8 外采真值 + ADS-B 外采真值双双背书）；**本机自采
 OTA 解码记录仍为零**。not_verified：dump1090 全量解码清单对拍、覆盖率。
+后续对拍修正（45ceac1）：教科书余数 F(x) mod G = crc24(数据段)⊕AP——
+全帧 LFSR 是 ICAO·x^24 mod G 不能当地址（真值帧实证 1eb2b4 ≠ 4d2023）；
+C++ checkParity 与 Python decode_frame 双侧修正（DF4/5 ICAO 还原、
+DF20/21/24 合法帧误拒），孪生钉扎 `cpp/tests/test_adsb_parity_cross.cpp`
++ `tests/test_adsb_cross_impl_parity.py`。
 
 ## 外部依赖销账表（运行时网络依赖）
 
