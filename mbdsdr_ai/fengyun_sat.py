@@ -12,8 +12,9 @@ MBDSDR AI 内核 - 风云系列气象卫星接收管道
       - fengyun4_a_lrit : 1697.0 MHz, 90,000 sym/s, DVB-S2 QPSK modcod=3, RRC α=0.25
       - fengyun4_b_lrit : 1697.0 MHz, 120,000 sym/s, DVB-S2 QPSK modcod=10, RRC α=0.25
       - fengyun4_a_hrit23: 1679.0 MHz, 1,000,000 sym/s, DVB-S2 QPSK modcod=9
-    本模块走经典 CCSDS 链路（VCDU→TP_PDU→SessionPDU），与 GOES LRIT/HRIT 共用
-    传输层（mbdsdr_ai/goes_lrit.py），仅在文件头处替换为 FY-4 专用结构。
+    已取得真实 VCDU 后可走经典 CCSDS 链路（VCDU→TP_PDU→SessionPDU），与
+    GOES 共用传输层并替换 FY-4 文件头。DVB-S2 目前支持已同步 PL 符号的 QPSK
+    →LDPC/BCH→BBHEADER/DATAFIELD；raw IQ 同步及 DATAFIELD→VCDU 尚未接通。
   * FY-4 专用文件头（依据 FY-4 xRIT 公开格式）：
       - ImageInformationRecord (type=1)：卫星名/仪器名/位深/列行/段号/压缩信息
       - ImageNavigationRecord   (type=2)：投影名 + 4 个 float 缩放/偏移
@@ -491,8 +492,8 @@ def bits_to_bytes(bits: np.ndarray) -> bytes:
 #     ──CCSDS 接收链(ccsds_rx.py)──> 帧（ASM 同步 → Viterbi → 解扰 → RS）
 #     ──帧前 892B──> VCDU ──decode_fy4_vcdus──> FY-4 段图 ──> PNG
 # 帧内 VCDU 口径与 GK-2A 链一致（vcdu = block[:VCDU_LEN]），便于互相对拍。
-# 边界：真实 FY-4 空口是 DVB-S2（EN 302 307），本仓 DVB-S2 未实现 LDPC/BCH，
-# 故本链只适用于经典 CCSDS 链路（或已解出 CCSDS 帧的场合）。
+# 边界：真实 FY-4 空口是 DVB-S2；符号级 QPSK 虽已接至 LDPC/BCH 与 BBHEADER，
+# 但 raw IQ 同步、DATAFIELD→VCDU 未实现，故本经典链不适用于真实 FY-4 空口。
 # ============================================================================
 
 #: FY-4 链默认 ASM（CCSDS 标准附加同步字）
@@ -968,9 +969,9 @@ def register_tool_registry(registry) -> None:
             "hint 给出该改哪个参数），不会返回半截图。"
             "副作用：只在 out_png 指定路径写一个 PNG 文件，不动设备状态。"
             "能力边界：只走**经典 CCSDS 链路**（仓内 FY-4 传输层口径）；真实 "
-            "FY-4 空口是 DVB-S2（EN 302 307），本仓 DVB-S2 段只做到 BB 帧解扰、"
-            "未实现 LDPC/BCH，故本工具不适用于 DVB-S2 空口——那种场合先用 "
-            "fy4_dvbs2 相关工具拿到 CCSDS 帧再走本链的 VCDU 之后段。"
+            "FY-4 空口是 DVB-S2，故本工具不适用于该空口。DVB-S2 符号级 QPSK "
+            "虽已接至 LDPC/BCH、BB 解扰与 BBHEADER，raw IQ 同步及 DATAFIELD"
+            "→VCDU 映射仍未实现，不能把 BBFRAME 当成 CCSDS 帧。"
         ),
         parameters={
             "type": "object",
@@ -1046,227 +1047,242 @@ def register_tool_registry(registry) -> None:
 
 
 # ============================================================================
-# DVB-S2 物理层同步 / 解扰（依据 ETSI EN 302 307 独立实现）
+# FY-4 DVB-S2 符号级接收
 # ----------------------------------------------------------------------------
-# 依据标准：
-#   - SOF / PLS 定义      : DVB-S2 物理层帧头标准
-#   - 帧长常量            : DVB-S2 FECFRAME 长度标准
-#   - MODCOD→码率映射     : DVB-S2 MODCOD 表
-#   - BB 帧解扰 PRBS      : DVB-S2 标准 BB 帧加扰序列
-#   - FY-4 用 QPSK DVB-S2 : FY-4 LRIT 公开下行参数
-# 说明：DVB-S2 标准 SOF 为 26-bit 0x18D2E82，
-#       PLHEADER = SOF(26) + PLS code(64) = 90 bits。
+# 输入必须是已经定时、载波和相位同步的一符号一采样复数 PLFRAME 流；raw IQ
+# 同步不在本模块能力内。PL 布局与 PLHEADER 只使用 dvbs2_pl 的单一实现。
+# 已接通：QPSK PL 解扰→软 LLR→LDPC→BCH→BB 解扰→BBHEADER/DATAFIELD。
+# 未接通：高阶调制软解映射/解交织，以及 DATAFIELD 到 VCDU 的封装映射。
 # ============================================================================
 
-#: DVB-S2 SOF 26-bit 起始字段值（EN 302 307，0x18d2e82）
-DVBS2_SOF_VALUE = 0x18D2E82
-#: SOF 比特长度（26）
-DVBS2_SOF_LEN = 26
-#: SOF 掩码（26-bit）
-DVBS2_SOF_MASK = 0x3FFFFFF
-#: PLS code 比特长度（64）
-DVBS2_PLS_LEN = 64
-#: PLHEADER 总长度 = SOF(26) + PLS(64)
-DVBS2_PLHEADER_LEN = DVBS2_SOF_LEN + DVBS2_PLS_LEN
-#: 普通帧 FECFRAME 数据比特数（DVB-S2 标准 64800）
-DVBS2_FRAME_NORMAL_BITS = 64800
-#: 短帧 FECFRAME 数据比特数（DVB-S2 标准 16200）
-DVBS2_FRAME_SHORT_BITS = 16200
-#: PLS code 加扰掩码（DVB-S2 标准 0x719d83c953422dfa）
-DVBS2_PLS_SCRAMBLING = 0x719D83C953422DFA
+from .dvbs2_bch import decode_dvbs2_fec
+from .dvbs2_pl import (
+    FECFRAME_BITS,
+    PLHEADER_SYMBOLS,
+    PLS_SYMBOLS,
+    SOF_BITS,
+    SOF_SYMBOLS,
+    SOF_VALUE,
+    decode_pls,
+    modulate_plheader,
+    parse_plframe,
+    plframe_layout,
+)
 
-#: QPSK MODCOD 表（DVB-S2 标准）：modcod编号 -> 码率字符串
-DVBS2_QPSK_MODCOD_TABLE = {
-    1: "1/4", 2: "1/3", 3: "2/5", 4: "1/2", 5: "3/5",
-    6: "2/3", 7: "3/4", 8: "4/5", 9: "5/6", 10: "8/9", 11: "9/10",
-}
+# 兼容旧常量名；数值均来自 PL 模块，不再维护第二份 MODCOD/PLS 表。
+DVBS2_SOF_VALUE = SOF_VALUE
+DVBS2_SOF_LEN = SOF_SYMBOLS
+DVBS2_PLS_LEN = PLS_SYMBOLS
+DVBS2_PLHEADER_LEN = PLHEADER_SYMBOLS
+DVBS2_FRAME_NORMAL_BITS = FECFRAME_BITS["normal"]
+DVBS2_FRAME_SHORT_BITS = FECFRAME_BITS["short"]
+DVBS2_BBHEADER_BITS = 80
 
 
-def _dvbs2_build_pls_codewords() -> List[int]:
-    """预生成 128 个 PLS codeword（DVB-S2 PL 加扰编码标准）。
+def _dvbs2_symbols(symbols: np.ndarray) -> np.ndarray:
+    """拒绝把硬比特或实数采样冒充为已同步的复数 PL 符号。"""
+    array = np.asarray(symbols)
+    if array.ndim != 1 or not np.issubdtype(array.dtype, np.complexfloating):
+        raise TypeError("PLFRAME 输入必须是一维复数符号序列，不是硬比特或 raw IQ")
+    array = array.astype(np.complex128, copy=False)
+    if not np.all(np.isfinite(array)):
+        raise ValueError("PLFRAME 符号含 NaN/Inf")
+    return array
 
-    index 7-bit 格式 = MODCOD[4:0] | SHORTFRAME | PILOTS。
+
+def detect_sof(symbols: np.ndarray) -> List[int]:
+    """在复数 PL 符号流中硬匹配 26 个 π/2-BPSK SOF 符号。
+
+    返回候选的符号下标，不执行 raw IQ 的定时或载波同步。
     """
-    G = [0x55555555, 0x33333333, 0x0F0F0F0F,
-         0x00FF00FF, 0x0000FFFF, 0xFFFFFFFF]
-    codewords: List[int] = []
-    for index in range(128):
-        y = 0
-        for row in range(6):
-            if (index >> (6 - row)) & 1:
-                y ^= G[row]
-        code = 0
-        for bit in range(31, -1, -1):
-            yi = (y >> bit) & 1
-            if index & 1:   # odd index
-                code = (code << 2) | (yi << 1) | (yi ^ 1)
-            else:           # even index
-                code = (code << 2) | (yi << 1) | yi
-        code ^= DVBS2_PLS_SCRAMBLING
-        codewords.append(code & 0xFFFFFFFFFFFFFFFF)
-    return codewords
-
-
-#: 预计算 PLS codeword 表
-_DVBS2_PLS_CODEWORDS = _dvbs2_build_pls_codewords()
-
-
-def detect_sof(bits: np.ndarray) -> List[int]:
-    """在硬判决比特流中硬匹配 DVB-S2 SOF（26-bit 0x18D2E82）。
-
-    PL 同步：按发送顺序（MSB first）
-    滑窗 26 bit，与 SOF_VALUE 全等即命中。返回所有命中的起始比特位置。
-    """
-    bits = np.asarray(bits, dtype=np.uint8)
-    n = len(bits)
-    if n < DVBS2_SOF_LEN:
+    array = _dvbs2_symbols(symbols)
+    if len(array) < SOF_SYMBOLS:
         return []
-    # 用整数位加权快速滑窗
-    weights = np.array([1 << (DVBS2_SOF_LEN - 1 - i) for i in range(DVBS2_SOF_LEN)],
-                       dtype=np.uint64)
-    hits: List[int] = []
-    for i in range(n - DVBS2_SOF_LEN + 1):
-        window = bits[i:i + DVBS2_SOF_LEN].astype(np.uint64)
-        val = int(np.dot(window, weights))
-        if val == DVBS2_SOF_VALUE:
-            hits.append(i)
-    return hits
+    # SOF 偶数位 bit=1 时实部为负，奇数位 bit=0 时实部为负。
+    # 该模板相对每个候选 SOF 起点成立，与候选在整流中的奇偶下标无关。
+    expected_negative = SOF_BITS ^ (np.arange(SOF_SYMBOLS) % 2).astype(np.uint8)
+    observed_sign = np.where(array.real < 0, -1, 1).astype(np.int16)
+    expected_sign = 1 - 2 * expected_negative.astype(np.int16)
+    correlations = np.correlate(observed_sign, expected_sign, "valid")
+    return np.flatnonzero(correlations == SOF_SYMBOLS).astype(int).tolist()
 
 
-def extract_plframe(bits: np.ndarray, sof_pos: int,
-                    frame_type: str = "normal") -> np.ndarray:
-    """从 sof_pos 起提取完整 PLFRAME（SOF + PLS + 数据字段）。
+def extract_plframe(
+        symbols: np.ndarray,
+        sof_pos: int,
+        frame_type: str = "normal",
+        *,
+        modcod: int = 4,
+        pilots: bool = False) -> np.ndarray:
+    """按 MODCOD、帧类型和导频布局切出完整复数 PLFRAME 符号。
 
-    frame_type: "normal" -> 90 + 64800 = 64890 bits
-                "short"  -> 90 + 16200 = 16290 bits
-    （DVB-S2 FECFRAME 标准帧长）
+    QPSK normal/short 无导频分别为 32490/8190 符号，而不是 64890/16290。
+    FECFRAME 的比特数与 PLFRAME 的符号数不能混用。
     """
-    data_bits = (DVBS2_FRAME_NORMAL_BITS if frame_type == "normal"
-                 else DVBS2_FRAME_SHORT_BITS)
-    total = DVBS2_PLHEADER_LEN + data_bits
-    frame = np.asarray(bits, dtype=np.uint8)[sof_pos:sof_pos + total]
-    if len(frame) < total:
+    array = _dvbs2_symbols(symbols)
+    if isinstance(sof_pos, (bool, np.bool_)) or not isinstance(sof_pos, (int, np.integer)):
+        raise TypeError("sof_pos 必须是整数符号下标")
+    if sof_pos < 0:
+        raise ValueError("sof_pos 不能为负数")
+    layout = plframe_layout(modcod, frame_type, pilots)
+    frame = array[sof_pos:sof_pos + layout.plframe_symbols]
+    if len(frame) != layout.plframe_symbols:
         raise ValueError(
-            f"比特流不足：从 {sof_pos} 起需 {total} bit，仅剩 {len(frame)}")
+            f"符号流不足：从 {sof_pos} 起需 {layout.plframe_symbols} 个符号，"
+            f"仅剩 {len(frame)}")
     return frame
 
 
-def decode_pls(pls_bits: np.ndarray) -> Dict:
-    """解析 64-bit PLS code（DVB-S2 PL 解扰逆过程）。
+def demap_qpsk_soft(symbols: np.ndarray, frame_type: str) -> np.ndarray:
+    """将已 PL 解扰、去导频的 QPSK XFECFRAME 映射为软 LLR。
 
-    返回 dict：modcod(1-11 为 QPSK)、constellation、short_frame、pilots、index。
-    做法：把 64 bit 按 MSB first 打包成 uint64，与 128 个预计算 codeword 全等匹配。
+    I/Q 分别对应 MSB/LSB；正值倾向 0，负值倾向 1。sqrt(2) 使理想
+    星座点产生 ±1 LLR。QPSK 无 §5.3.3 比特交织，不能在这里添加解交织。
     """
-    pls_bits = np.asarray(pls_bits, dtype=np.uint8)
-    if len(pls_bits) < DVBS2_PLS_LEN:
-        raise ValueError("PLS 至少需要 64 bit")
-    code = 0
-    for i in range(DVBS2_PLS_LEN):
-        code = (code << 1) | int(pls_bits[i])
-    code &= 0xFFFFFFFFFFFFFFFF
-
-    index = -1
-    for i, cw in enumerate(_DVBS2_PLS_CODEWORDS):
-        if cw == code:
-            index = i
-            break
-    if index < 0:
-        # 容错：汉明距离最近
-        best_d, best_i = 65, -1
-        for i, cw in enumerate(_DVBS2_PLS_CODEWORDS):
-            d = bin(cw ^ code).count("1")
-            if d < best_d:
-                best_d, best_i = d, i
-        index = best_i
-
-    modcod = (index >> 2) & 0x1F
-    short_frame = bool((index >> 1) & 1)
-    pilots = bool(index & 1)
-    if 1 <= modcod <= 11:
-        constellation = "QPSK"
-        rate = DVBS2_QPSK_MODCOD_TABLE.get(modcod, "?")
-    else:
-        constellation = "?"
-        rate = "?"
-    return {
-        "index": index,
-        "modcod": modcod,
-        "coderate": rate,
-        "constellation": constellation,
-        "short_frame": short_frame,
-        "pilots": pilots,
-    }
+    array = _dvbs2_symbols(symbols)
+    expected = FECFRAME_BITS[frame_type] // 2
+    if len(array) != expected:
+        raise ValueError(
+            f"{frame_type} XFECFRAME 需 {expected} 个 QPSK 符号，实收 {len(array)}")
+    llr = np.empty((len(array), 2), dtype=np.float64)
+    llr[:, 0] = np.sqrt(2.0) * array.real
+    llr[:, 1] = np.sqrt(2.0) * array.imag
+    return llr.reshape(-1)
 
 
 def _dvbs2_bb_prbs(num_bits: int) -> np.ndarray:
-    """生成 DVB-S2 BB 帧解扰 PRBS 序列（EN 302 307 BB 加扰多项式）。
-
-    LFSR 初值 sr=0x4A80，反馈多项式 1+x^14+x^15：
-        b = (sr ^ (sr>>1)) & 1;  sr = (sr>>1) | (b<<15)
-    按 MSB-first 输出 num_bits 个比特。
-    """
+    """生成 DVB-S2 BBFRAME 扰码（1+x^14+x^15，初值 0x4A80）。"""
     sr = 0x4A80
     out = np.zeros(num_bits, dtype=np.uint8)
     for i in range(num_bits):
         b = (sr ^ (sr >> 1)) & 1
         out[i] = b
-        sr = sr >> 1
-        if b:
-            sr |= 0x4000
+        sr = (sr >> 1) | (b << 14)
     return out
 
 
 def descramble_dvbs2(data_bits: np.ndarray) -> np.ndarray:
-    """DVB-S2 BB 帧解扰（PRBS 异或，自逆操作）。
+    """对完整 BBFRAME 做自逆 BB 解扰；必须在 LDPC/BCH 成功后调用。"""
+    bits = np.asarray(data_bits)
+    if bits.ndim != 1 or not np.all((bits == 0) | (bits == 1)):
+        raise ValueError("BBFRAME 必须是一维 0/1 比特序列")
+    bits = bits.astype(np.uint8, copy=False)
+    return (bits ^ _dvbs2_bb_prbs(len(bits))).astype(np.uint8)
 
-    DVB-S2 BB 加扰 PRBS；解扰与加扰同一序列，往返互逆。
+
+def dvbs2_bb_crc8(data: bytes) -> int:
+    """§5.1.4 的 CRC-8：初值 0，非反射 MSB-first，多项式 0xD5。"""
+    crc = 0
+    for byte in bytes(data):
+        crc ^= byte
+        for _ in range(8):
+            crc = ((crc << 1) ^ (0xD5 if crc & 0x80 else 0)) & 0xFF
+    return crc
+
+
+def parse_bbheader(bbframe_bits: np.ndarray) -> Dict:
+    """解析并校验 BBHEADER，同时检查 DFL 不超过实际 BBFRAME 容量。
+
+    字段按 §5.1.6 的 MSB-first 顺序：MATYPE(2B)、UPL(2B)、DFL(2B)、
+    SYNC(1B)、SYNCD(2B)、CRC-8(1B)。DFL/SYNCD/UPL 单位均为比特。
     """
-    data_bits = np.asarray(data_bits, dtype=np.uint8)
-    prbs = _dvbs2_bb_prbs(len(data_bits))
-    return (data_bits ^ prbs).astype(np.uint8)
+    bits = np.asarray(bbframe_bits)
+    if bits.ndim != 1 or len(bits) < DVBS2_BBHEADER_BITS:
+        raise ValueError("BBFRAME 至少需要 80 bit BBHEADER")
+    if not np.all((bits == 0) | (bits == 1)):
+        raise ValueError("BBFRAME 只能含 0/1")
+    header = bits_to_bytes(bits[:DVBS2_BBHEADER_BITS].astype(np.uint8))
+    if dvbs2_bb_crc8(header[:9]) != header[9]:
+        raise ValueError("BBHEADER CRC-8 校验失败")
+    matype1 = header[0]
+    sis_mis = (matype1 >> 5) & 1
+    dfl = int.from_bytes(header[4:6], "big")
+    if dfl > len(bits) - DVBS2_BBHEADER_BITS:
+        raise ValueError(
+            f"BBHEADER DFL={dfl} bit 超过 BBFRAME 容量 {len(bits) - 80} bit")
+    return {
+        "matype": header[:2],
+        "ts_gs": (matype1 >> 6) & 0x3,
+        "sis_mis": sis_mis,
+        "ccm_acm": (matype1 >> 4) & 1,
+        "issyi": (matype1 >> 3) & 1,
+        "npd": (matype1 >> 2) & 1,
+        "roll_off": matype1 & 0x3,
+        "input_stream_identifier": header[1] if sis_mis else None,
+        "upl_bits": int.from_bytes(header[2:4], "big"),
+        "dfl_bits": dfl,
+        "sync": header[6],
+        "syncd_bits": int.from_bytes(header[7:9], "big"),
+        "crc8": header[9],
+        "crc8_valid": True,
+    }
 
 
-def fy4_dvbs2_sync(bits: np.ndarray) -> List[Dict]:
-    """FY-4 DVB-S2 物理层完整同步流程。
+def fy4_dvbs2_sync(
+        symbols: np.ndarray,
+        *,
+        scrambling_code: int = 0,
+        max_pls_distance: int = 8,
+        max_iterations: int = 50,
+        alpha: float = 0.8) -> List[Dict]:
+    """从已同步复数 PLFRAME 符号流解出 QPSK BBFRAME 与 DATAFIELD。
 
-    流程：SOF 检测 -> PLFRAME 提取 -> PLS 解析 -> 数据字段解扰。
-    返回帧列表，每帧 dict：pos / frame_type / pls / descrambled_bits。
+    有效 PLS 的帧均返回诊断。success=False 时不含猜测的 BBHEADER；FEC 失败
+    不会执行 BB 解扰。CRC 错误保留已恢复 BBFRAME 并标记 stage=bbheader。
+    高阶 MODCOD 在进入 FEC 前显式拒绝。输入不是 raw IQ，也不宣称出图。
     """
-    bits = np.asarray(bits, dtype=np.uint8)
+    array = _dvbs2_symbols(symbols)
     frames: List[Dict] = []
-    # 先用 normal 帧长尝试；若命中的 SOF 距离暗示短帧，由 PLS 结果纠正。
-    for pos in detect_sof(bits):
-        # 默认按 normal 提取（PLS 里会带 short_frame 标志）
+    next_candidate = 0
+    for pos in detect_sof(array):
+        if pos < next_candidate:
+            continue
         try:
-            plframe = extract_plframe(bits, pos, "normal")
+            parsed = parse_plframe(
+                array[pos:], scrambling_code=scrambling_code,
+                max_pls_distance=max_pls_distance, allow_trailing=True)
         except ValueError:
-            try:
-                plframe = extract_plframe(bits, pos, "short")
-            except ValueError:
-                continue
-        pls_bits = plframe[DVBS2_SOF_LEN:DVBS2_PLHEADER_LEN]
-        pls = decode_pls(pls_bits)
-        # 按 PLS 报告的帧类型重新确定数据长度
-        frame_type = "short" if pls["short_frame"] else "normal"
-        data_len = (DVBS2_FRAME_SHORT_BITS if pls["short_frame"]
-                    else DVBS2_FRAME_NORMAL_BITS)
-        # 若初提为 normal 但 PLS 说 short，重新切片
-        data = plframe[DVBS2_PLHEADER_LEN:DVBS2_PLHEADER_LEN + data_len]
-        if len(data) < data_len:
-            # 重新按正确帧类型取
-            try:
-                plframe = extract_plframe(bits, pos, frame_type)
-                data = plframe[DVBS2_PLHEADER_LEN:]
-            except ValueError:
-                continue
-        descrambled = descramble_dvbs2(data)
-        frames.append({
+            # SOF 命中可能只是数据中的伪命中，PLS/截断不合格则不能成帧。
+            continue
+        layout = parsed.layout
+        frame: Dict = {
             "pos": pos,
-            "frame_type": frame_type,
-            "pls": pls,
-            "raw_data_bits": data,
-            "descrambled_bits": descrambled,
-        })
+            "frame_type": layout.frame_type,
+            "pilots": layout.pilots,
+            "pls": parsed.pls,
+            "layout": layout,
+            "scrambling_code": scrambling_code,
+            "success": False,
+        }
+        frames.append(frame)
+        next_candidate = pos + parsed.consumed_symbols
+        mode = layout.mode
+        if mode.modulation != "QPSK":
+            raise NotImplementedError(
+                f"{mode.modulation} 软解映射与 §5.3.3 解交织尚未接通，拒绝进入 FEC")
+        llr = demap_qpsk_soft(parsed.xfecframe_symbols, layout.frame_type)
+        fec = decode_dvbs2_fec(
+            llr, layout.frame_type, mode.code_rate,
+            max_iterations=max_iterations, alpha=alpha)
+        frame["fec"] = fec
+        if not fec["success"]:
+            frame["stage"] = "fec"
+            frame["error"] = fec["reason"]
+            continue
+        bbframe = descramble_dvbs2(fec["bbframe"])
+        frame["bbframe"] = bbframe
+        try:
+            header = parse_bbheader(bbframe)
+        except ValueError as exc:
+            frame["stage"] = "bbheader"
+            frame["error"] = str(exc)
+            continue
+        frame["bbheader"] = header
+        frame["datafield"] = bbframe[
+            DVBS2_BBHEADER_BITS:DVBS2_BBHEADER_BITS + header["dfl_bits"]
+        ].copy()
+        frame["success"] = True
+        frame["stage"] = "bbframe"
     return frames
 
 

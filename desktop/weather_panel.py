@@ -336,18 +336,22 @@ class DecodeWorker(QObject):
     def _run_fengyun(self):
         from mbdsdr_ai import fengyun_sat as fy
         path = self._p["iq_file"]
-        self.progress.emit(f"读取录制 {os.path.basename(path)} ...")
-        raw = open(path, "rb").read()
         fam = self._p["family"]
         if fam == "fy4":
-            # DVB-S2 PL 同步（SOF 26-bit 0x18D2E82）— 真实模块
-            bits = np.unpackbits(np.frombuffer(raw[:len(raw)//2], dtype=np.uint8))
-            hits = fy.fy4_dvbs2_sync(bits.astype(np.uint8))
-            self._emit(ok=False, frames=len(hits),
-                       error=(f"FY-4 DVB-S2 PL 同步命中 {len(hits)} 帧；"
-                              "LDPC/BB 解扰后 VCDU 重组出图链路在本面板未接通，"
-                              "请用 SatDump FengYun-4.json 流水线"))
-        else:
+            # 此输入是 raw complex64 IQ，不是库层要求的已同步 PLFRAME 符号。
+            # 不解包字节、不伪造命中数；时钟/载波恢复与 DATAFIELD 出图均未接通。
+            self.progress.emit("FY-4 raw IQ 缺少定时/载波/PL 符号同步，无法解码")
+            self._emit(
+                ok=False, frames=0, stage="iq_sync", error_code="unsupported_raw_iq",
+                error=("FY-4 DVB-S2 raw complex64 IQ 尚不能解码（可用帧 0）："
+                       "定时、载波和 PL 符号同步未实现。库层符号级 QPSK→FEC→"
+                       "BBHEADER 不等于 raw IQ 接收，DATAFIELD→VCDU/出图也未接通。"),
+                meta={"raw_iq_supported": False, "required_input": "已同步 PLFRAME 复数符号"})
+            return
+        self.progress.emit(f"读取录制 {os.path.basename(path)} ...")
+        with open(path, "rb") as stream:
+            raw = stream.read()
+        if fam == "fy3":
             # FY-3 HRPT：60-bit 帧同步真实模块
             frames = fy.fy3_ahrpt_sync(raw)
             self._emit(ok=False, frames=len(frames),

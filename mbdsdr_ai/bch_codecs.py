@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
-"""P0-2（半收敛）：BCH 干净室编解码（GF(2^m) 全推导，零标准表依赖）。
+"""通用窄义 BCH 干净室编解码（GF(2^m) 全推导，零标准表依赖）。
 
-DVB-S2 的 FEC 是 BCH + LDPC 级联。LDPC 的 H 矩阵地址表是 ETSI EN 302 307
-的大张标准常数，**离线环境没有标准文本可对照，硬编会违反"无伪造"红线**——
-本仓显式不实现 DVB-S2 LDPC（见 module 尾注与任务清单的 deferred 标注）。
+本模块只提供通用 BCH 数学内核，不是 DVB-S2 专用 BCH 的实现或完成声明。
+DVB-S2 LDPC 已按取得的 ETSI EN 302 307-1 文本在 ``dvbs2_ldpc.py`` 独立实现；
+其地址表、码率组合与独立第三方实现输出向量的验证由该模块及直接测试负责。
+DVB-S2 专用 BCH 与完整 BCH+LDPC 级联不在本模块的能力边界内。
 
-但 BCH 是**纯数学可推导**的：GF(2^m) 由本原多项式生成，生成多项式 =
+通用 BCH 是**纯数学可推导**的：GF(2^m) 由本原多项式生成，生成多项式 =
 α^1..α^{2t} 极小多项式的最小公倍（二元域上即不同极小多项式之积），
 纠错能力 = 设计距离 2t+1 保证的 ⌊(d-1)/2⌋。全部从本原多项式现算，
 不需要任何标准表；能力用"随机错 ≤t 必纠回、>t 诚实报不可纠"钉扎。
@@ -14,8 +15,7 @@ DVB-S2 的 FEC 是 BCH + LDPC 级联。LDPC 的 H 矩阵地址表是 ETSI EN 302
   * 错 >t：BM 后 discrepancy 超限或 Chien 根数 ≠ 错数 → 如实报
     "uncorrectable"，绝不输出"看起来正常"的码字；
   * 本原多项式是具名参数（默认 0x11D = x^8+x^4+x^3+x^2+1，教科书常用）；
-  * DVB-S2 具体帧格式（64800/16200、各 t 与生成多项式系数表）待标准
-    文本到位后作"皮"注入（sat_profiles.json 路线），本模块是"算法"层。
+  * 默认 m=8、t=8 推导为 BCH(255,191)，不是其他 t 值的参数组合。
 """
 from __future__ import annotations
 
@@ -269,9 +269,8 @@ def bch_decode(received: List[int], gen: Dict[str, Any],
             "uncorrectable": False}
 
 
-#: 附注：DVB-S2 LDPC（ETSI EN 302 307）的 H 矩阵信息位地址表是大张标准
-#: 常数，离线环境无标准文本可对照，按"无伪造"红线显式不实现；标准文本
-#: 到位后走 sat_profiles.json 配置注入路线补"皮"。
+#: 附注：DVB-S2 LDPC 的 ETSI 地址表实现与独立向量验证见 dvbs2_ldpc.py；
+#: 本模块仍只承担通用窄义 BCH，不包含 DVB-S2 专用 BCH 或完整级联链。
 
 
 # ═══════════════════════════════════════════════════════════
@@ -343,8 +342,9 @@ def register_tool_registry(registry) -> None:
         description=(
             "BCH 生成多项式推导（干净室）：GF(2^m) 由本原多项式现算，"
             "g(x)=α^1..α^{2t} 极小多项式之积，零标准表依赖。"
-            "返回 n/k/t/设计距离。默认 m=8, t=8（BCH(255,223) 教科书参数）。"
-            "能力边界：窄义 BCH；DVB-S2 专用帧格式表待标准文本后走配置注入。"
+            "返回 n/k/t/设计距离。默认 m=8, t=8，实际推导为 BCH(255,191)。"
+            "能力边界：通用窄义 BCH，不是 DVB-S2 专用 BCH；"
+            "DVB-S2 LDPC 见独立的 dvbs2_ldpc.py。"
         ),
         parameters={"type": "object", "properties": {
             "m": {"type": "integer", "default": 8},

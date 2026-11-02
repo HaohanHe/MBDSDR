@@ -8,8 +8,8 @@
     前 k 位=信息；
   * 非本原多项式 → 推导报错（不自洽参数不静默）。
 
-DVB-S2 LDPC 显式不在本文件范围（标准地址表离线不可得，见
-bch_codecs 模块尾注——不伪造）。
+DVB-S2 LDPC 的独立实现与第三方输出向量对拍见 test_dvbs2_ldpc.py；
+本文件只钉扎通用窄义 BCH 数学内核，不声明 DVB-S2 专用 BCH 已完成。
 """
 import random
 
@@ -162,6 +162,10 @@ def test_tools_registered():
     names = {t["name"] for t in r.list_tools()}
     for want in ("bch_generator", "bch_encode", "bch_decode"):
         assert want in names
+    description = r.tools["bch_generator"]["definition"]["function"]["description"]
+    assert "BCH(255,191)" in description
+    assert "BCH(255,223)" not in description
+    assert "不是 DVB-S2 专用 BCH" in description
 
 
 def test_tool_handlers_end_to_end():

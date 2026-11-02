@@ -117,6 +117,25 @@ def test_frame_layout_load_fields():
     assert "battery_mv" in names and "callsign" in names
 
 
+def test_ccsds_tc_layout_matches_official_annex_f_example():
+    """TC 布局按官方样例钉住 5 字节主头、数据偏移和 FECF 边界。"""
+    layout = SP.load_frame_layout("ccsds_tc_classic")
+    fields = {field["name"]: field for field in layout["fields"]}
+    header = fields["frame_header_hex"]
+    data = fields["data"]
+    assert (header["offset"], header["len"]) == (0, 5)
+    assert data["offset"] == 5
+    assert "5 字节主头" in layout["honesty"]
+    assert "Annex F Example 10" in layout["honesty"]
+    assert "不代表真实 OTA 或上星验证" in layout["honesty"]
+
+    frame = bytes.fromhex("001B000E06010203040506070814BB")
+    header_hex = frame[header["offset"]:header["offset"] + header["len"]].hex()
+    assert header_hex.upper() == "001B000E06"
+    assert frame[data["offset"]:-2].hex().upper() == "0102030405060708"
+    assert frame[-2:].hex().upper() == "14BB"
+
+
 def test_crc16_ccsds_registered():
     """crc16_ccsds 预置已挂进 CRC 内核注册面（TC 帧构建的依赖）。"""
     from mbdsdr_ai.crc import CRC16_CCSDS, CrcParams, _preset

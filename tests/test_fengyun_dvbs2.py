@@ -1,41 +1,35 @@
 # SPDX-License-Identifier: MIT
-"""
-FY-4 DVB-S2 物理层 + FY-3 X 波段 AHRPT 测试（合成向量，非硬件 / NOT HARDWARE）
-=============================================
+"""FY-4 DVB-S2 符号级链接与 FY-3 AHRPT 测试（合成向量，非硬件）。
 
-覆盖（依据 ETSI EN 302 307 与 CCSDS 标准）：
-  1. DVB-S2 SOF 26-bit 硬匹配检测
-  2. PLFRAME 定界（normal=64890 bit / short=16290 bit）
-  3. PLS code 编解码往返（modcod / short / pilots）
-  4. DVB-S2 BB 解扰 PRBS 往返（自逆）
-  5. fy4_dvbs2_sync 端到端：SOF→PLS→解扰
-  6. FY-3 AHRPT ASM(0x1ACFFC1D) 帧同步
-  7. FY-3 CCSDS 解扰往返
-  8. FY-3 AVHRR 通道提取 shape
+FY-4 测试构造 BBFRAME→BB 加扰→BCH/LDPC→QPSK PLFRAME，再验证真实接收
+顺序 PL 解扰→软 LLR→LDPC/BCH→BB 解扰→BBHEADER。这里没有 raw IQ 同步、
+DATAFIELD→VCDU 或真实 OTA 验收。
 
-运行: python3 -m pytest tests/test_fengyun_dvbs2.py -v
+运行: py -3.14 -m pytest tests/test_fengyun_dvbs2.py -q
 """
 
 import os
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from mbdsdr_ai import fengyun_sat as fy  # noqa: E402
+from mbdsdr_ai.dvbs2_bch import bch_parameters, encode_dvbs2_fec  # noqa: E402
+from mbdsdr_ai.dvbs2_pl import (  # noqa: E402
+    PLHEADER_SYMBOLS,
+    SOF_BITS,
+    build_plframe,
+    encode_qpsk_plframe,
+    map_qpsk_fecframe,
+    modulate_plheader,
+    plframe_layout,
+)
 from mbdsdr_ai.fengyun_sat import (  # noqa: E402
-    DVBS2_SOF_VALUE,
-    DVBS2_SOF_LEN,
-    DVBS2_PLHEADER_LEN,
-    DVBS2_FRAME_NORMAL_BITS,
-    DVBS2_FRAME_SHORT_BITS,
-    _DVBS2_PLS_CODEWORDS,
-    detect_sof,
-    extract_plframe,
-    decode_pls,
-    descramble_dvbs2,
-    fy4_dvbs2_sync,
     FY3_AHRPT_ASM,
     FY3_AHRPT_CADU_LEN,
     fy3_ahrpt_sync,
@@ -44,93 +38,194 @@ from mbdsdr_ai.fengyun_sat import (  # noqa: E402
 )
 
 
-def _sof_bits() -> np.ndarray:
-    """把 26-bit SOF_VALUE 按 MSB-first 转成比特数组。"""
-    return np.array([(DVBS2_SOF_VALUE >> (DVBS2_SOF_LEN - 1 - i)) & 1
-                     for i in range(DVBS2_SOF_LEN)], dtype=np.uint8)
+def _bbframe(frame_type: str, rate: str, dfl: int = 104) -> np.ndarray:
+    parameters = bch_parameters(frame_type, rate)
+    bits = np.random.default_rng(420).integers(
+        0, 2, parameters["K_bch"], dtype=np.uint8)
+    header = bytearray(10)
+    header[0] = 0x40  # TS/GS=01、SIS、CCM、ISSYI/NPD=0、RO=00
+    header[1] = 0
+    header[2:4] = (188 * 8).to_bytes(2, "big")
+    header[4:6] = dfl.to_bytes(2, "big")
+    header[6] = 0x47
+    header[7:9] = (0).to_bytes(2, "big")
+    header[9] = fy.dvbs2_bb_crc8(header[:9])
+    bits[:80] = np.unpackbits(np.frombuffer(header, dtype=np.uint8))
+    bits[80:80 + dfl] = (np.arange(dfl) % 3 == 0).astype(np.uint8)
+    return bits
 
 
-def _codeword_bits(index: int) -> np.ndarray:
-    """把 64-bit PLS codeword 按 MSB-first 转成比特数组。"""
-    cw = _DVBS2_PLS_CODEWORDS[index]
-    return np.array([(cw >> (63 - i)) & 1 for i in range(64)], dtype=np.uint8)
+def _pl_symbols(bbframe: np.ndarray, frame_type: str, rate: str,
+                pilots: bool = False, scrambling_code: int = 0) -> np.ndarray:
+    modcod = 4 if rate == "1/2" else 1
+    fecframe = encode_dvbs2_fec(fy.descramble_dvbs2(bbframe), frame_type, rate)
+    return encode_qpsk_plframe(
+        fecframe, modcod, frame_type, pilots, scrambling_code).symbols
 
 
-class TestDvbS2Sync(unittest.TestCase):
-    def test_sof_detection(self):
-        """构造含 SOF 的比特流，验证检测到正确位置。"""
-        rng = np.random.default_rng(0)
-        preamble = rng.integers(0, 2, size=53).astype(np.uint8)
-        sof = _sof_bits()
-        tail = rng.integers(0, 2, size=200).astype(np.uint8)
-        stream = np.concatenate([preamble, sof, tail])
-        hits = detect_sof(stream)
-        self.assertIn(len(preamble), hits, f"未检测到 SOF，hits={hits}")
+class TestDvbS2SymbolReceiver:
+    @pytest.mark.parametrize(
+        "frame_type,pilots,expected",
+        [("normal", False, 32490), ("normal", True, 33282),
+         ("short", False, 8190), ("short", True, 8370)],
+    )
+    def test_plframe_extraction_uses_symbol_layout(self, frame_type, pilots, expected):
+        modcod = 4 if frame_type == "normal" else 1
+        frame = encode_qpsk_plframe(
+            np.zeros(64800 if frame_type == "normal" else 16200, dtype=np.uint8),
+            modcod, frame_type, pilots)
+        stream = np.concatenate((np.ones(7, dtype=np.complex64) * (1 + 1j), frame.symbols))
+        extracted = fy.extract_plframe(stream, 7, frame_type, modcod=modcod, pilots=pilots)
+        assert frame.layout.plframe_symbols == expected
+        assert len(extracted) == expected
+        assert extracted.dtype == np.complex128
+        np.testing.assert_array_equal(extracted, frame.symbols)
+        with pytest.raises(ValueError, match="符号流不足"):
+            fy.extract_plframe(extracted[:-1], 0, frame_type, modcod=modcod, pilots=pilots)
 
-    def test_plframe_extraction(self):
-        """从已知位置提取 PLFRAME，验证长度。"""
-        rng = np.random.default_rng(1)
-        sof = _sof_bits()
-        body = rng.integers(0, 2, size=DVBS2_FRAME_NORMAL_BITS).astype(np.uint8)
-        header = np.concatenate([sof, np.zeros(64, dtype=np.uint8)])
-        stream = np.concatenate([np.zeros(10, dtype=np.uint8), header, body])
-        frame = extract_plframe(stream, 10, "normal")
-        self.assertEqual(len(frame), DVBS2_PLHEADER_LEN + DVBS2_FRAME_NORMAL_BITS)
-        short_frame = extract_plframe(
-            np.concatenate([np.zeros(5, dtype=np.uint8), header,
-                            rng.integers(0, 2, size=DVBS2_FRAME_SHORT_BITS)
-                            .astype(np.uint8)]),
-            5, "short")
-        self.assertEqual(len(short_frame),
-                         DVBS2_PLHEADER_LEN + DVBS2_FRAME_SHORT_BITS)
+    def test_qpsk_soft_llr_order_and_scale(self):
+        bits = np.tile(np.array([0, 0, 0, 1, 1, 0, 1, 1], dtype=np.uint8), 2025)
+        assert len(bits) == 16200
+        symbols = map_qpsk_fecframe(bits, "short")
+        llr = fy.demap_qpsk_soft(symbols, "short")
+        assert llr.shape == (16200,)
+        np.testing.assert_allclose(llr, 1.0 - 2.0 * bits)
+        np.testing.assert_array_equal((llr < 0).astype(np.uint8), bits)
+        with pytest.raises(ValueError, match="需 8100"):
+            fy.demap_qpsk_soft(symbols[:-1], "short")
 
-    def test_pls_roundtrip(self):
-        """选一个 PLS index，编码成 64 bit，decode_pls 应还原 modcod/short/pilots。"""
-        # modcod=4 (QPSK 1/2), normal, no pilots -> index = 4<<2 = 16
-        index = 16
-        pls_bits = _codeword_bits(index)
-        out = decode_pls(pls_bits)
-        self.assertEqual(out["modcod"], 4)
-        self.assertEqual(out["coderate"], "1/2")
-        self.assertEqual(out["constellation"], "QPSK")
-        self.assertFalse(out["short_frame"])
-        self.assertFalse(out["pilots"])
-        # modcod=3 (QPSK 2/5), short, pilots -> index = (3<<2)|1|1 = 15
-        pls_bits2 = _codeword_bits(15)
-        out2 = decode_pls(pls_bits2)
-        self.assertEqual(out2["modcod"], 3)
-        self.assertTrue(out2["short_frame"])
-        self.assertTrue(out2["pilots"])
+    def test_bbheader_crc8_and_fields(self):
+        # CRC-8/DVB-S2 标准检查向量：poly=0xD5、init=x00、无反射、xorout=x00。
+        assert fy.dvbs2_bb_crc8(b"123456789") == 0xBC
+        bbframe = _bbframe("short", "1/4", dfl=104)
+        header = fy.parse_bbheader(fy.descramble_dvbs2(fy.descramble_dvbs2(bbframe)))
+        assert header["matype"] == b"\x40\x00"
+        assert header["ts_gs"] == 1
+        assert header["sis_mis"] == 0
+        assert header["input_stream_identifier"] is None
+        assert header["upl_bits"] == 188 * 8
+        assert header["dfl_bits"] == 104
+        assert header["sync"] == 0x47
+        assert header["syncd_bits"] == 0
+        assert header["crc8_valid"] is True
+        damaged = bbframe.copy()
+        damaged[79] ^= 1
+        with pytest.raises(ValueError, match="CRC-8"):
+            fy.parse_bbheader(damaged)
 
-    def test_dvbs2_descramble(self):
-        """解扰往返：先扰再解扰应还原（PRBS 自逆）。"""
-        rng = np.random.default_rng(2)
-        data = rng.integers(0, 2, size=DVBS2_FRAME_NORMAL_BITS).astype(np.uint8)
-        scrambled = descramble_dvbs2(data)
-        self.assertFalse(np.array_equal(scrambled, data))
-        recovered = descramble_dvbs2(scrambled)
-        np.testing.assert_array_equal(recovered, data)
+    @pytest.mark.parametrize("frame_type,rate,pilots", [
+        ("normal", "1/2", False), ("normal", "1/2", True),
+        ("short", "1/4", False), ("short", "1/4", True),
+    ])
+    def test_real_symbol_to_bbframe_roundtrip(self, frame_type, rate, pilots):
+        bbframe = _bbframe(frame_type, rate)
+        code = 0x123 if pilots else 0
+        symbols = _pl_symbols(bbframe, frame_type, rate, pilots, code)
+        prefix = np.arange(11, dtype=np.float64) * (0.01 + 0.02j) + 0.1 + 0.1j
+        stream = np.concatenate((prefix.astype(np.complex64), symbols,
+                                 np.array([0.2 - 0.1j, 0.1 + 0.3j])))
+        frames = fy.fy4_dvbs2_sync(stream, scrambling_code=code)
+        assert len(frames) == 1
+        result = frames[0]
+        assert result["success"] is True
+        assert result["pos"] == len(prefix)
+        assert result["frame_type"] == frame_type
+        assert result["pilots"] is pilots
+        assert result["pls"].mode.modulation == "QPSK"
+        assert result["layout"].plframe_symbols == len(symbols)
+        assert result["fec"]["ldpc"]["iterations"] == 0
+        np.testing.assert_array_equal(result["bbframe"], bbframe)
+        assert result["bbheader"]["crc8_valid"] is True
+        np.testing.assert_array_equal(result["datafield"], bbframe[80:184])
 
-    def test_fy4_dvbs2_sync_e2e(self):
-        """端到端：构造 SOF+PLS+数据 的 PLFRAME，fy4_dvbs2_sync 应解出。"""
-        rng = np.random.default_rng(3)
-        sof = _sof_bits()
-        # modcod=4 QPSK 1/2, normal, no pilots
-        pls = _codeword_bits(16)
-        payload = rng.integers(0, 2, size=DVBS2_FRAME_NORMAL_BITS).astype(np.uint8)
-        scrambled_payload = descramble_dvbs2(payload)
-        stream = np.concatenate([
-            np.zeros(7, dtype=np.uint8),
-            sof, pls, scrambled_payload,
-            np.zeros(50, dtype=np.uint8),
-        ])
-        frames = fy4_dvbs2_sync(stream)
-        self.assertGreaterEqual(len(frames), 1)
-        f0 = frames[0]
-        self.assertEqual(f0["pos"], 7)
-        self.assertEqual(f0["frame_type"], "normal")
-        self.assertEqual(f0["pls"]["modcod"], 4)
-        np.testing.assert_array_equal(f0["descrambled_bits"], payload)
+    def test_real_call_order_and_stream_consumption(self):
+        bbframe = _bbframe("short", "1/4")
+        symbols = _pl_symbols(bbframe, "short", "1/4")
+        stream = np.concatenate((np.array([0.2 + 0.3j]), symbols, symbols))
+        events = []
+        names = ("parse_plframe", "demap_qpsk_soft", "decode_dvbs2_fec",
+                 "descramble_dvbs2", "parse_bbheader")
+        originals = {name: getattr(fy, name) for name in names}
+
+        def observed(name):
+            def wrapper(*args, **kwargs):
+                events.append(name)
+                return originals[name](*args, **kwargs)
+            return wrapper
+
+        patchers = [mock.patch.object(fy, name, side_effect=observed(name)) for name in names]
+        for patcher in patchers:
+            patcher.start()
+        try:
+            frames = fy.fy4_dvbs2_sync(stream)
+        finally:
+            for patcher in patchers:
+                patcher.stop()
+        assert len(frames) == 2
+        assert [frame["pos"] for frame in frames] == [1, 1 + len(symbols)]
+        assert events == list(names) * 2
+        for frame in frames:
+            np.testing.assert_array_equal(frame["bbframe"], bbframe)
+
+    def test_fec_failure_never_descrambles_or_guesses_header(self):
+        # 非合法 FECFRAME 的交替比特产生已知的 LDPC 不收敛诊断，不用 mock 成功。
+        fecframe = (np.arange(16200) % 2).astype(np.uint8)
+        symbols = encode_qpsk_plframe(fecframe, 1, "short").symbols
+        with mock.patch.object(fy, "descramble_dvbs2", wraps=fy.descramble_dvbs2) as descramble:
+            frames = fy.fy4_dvbs2_sync(symbols, max_iterations=1)
+        assert len(frames) == 1
+        result = frames[0]
+        assert result["success"] is False
+        assert result["stage"] == "fec"
+        assert result["fec"]["reason"] == "ldpc_max_iterations"
+        assert "bbframe" not in result
+        assert "bbheader" not in result
+        assert "datafield" not in result
+        descramble.assert_not_called()
+
+    def test_bad_bbheader_crc_is_not_a_successful_datafield(self):
+        bbframe = _bbframe("short", "1/4")
+        bbframe[79] ^= 1
+        symbols = _pl_symbols(bbframe, "short", "1/4")
+        result = fy.fy4_dvbs2_sync(symbols)[0]
+        assert result["success"] is False
+        assert result["stage"] == "bbheader"
+        assert "CRC-8" in result["error"]
+        np.testing.assert_array_equal(result["bbframe"], bbframe)
+        assert "bbheader" not in result
+        assert "datafield" not in result
+
+    def test_higher_modulation_rejected_before_soft_mapping_or_fec(self):
+        layout = plframe_layout(12, "normal", False)
+        rng = np.random.default_rng(123)
+        xfecframe = rng.normal(size=layout.xfecframe_symbols) + 1j * rng.normal(
+            size=layout.xfecframe_symbols)
+        symbols = build_plframe(xfecframe, 12, "normal").symbols
+        with mock.patch.object(fy, "demap_qpsk_soft") as demap, \
+                mock.patch.object(fy, "decode_dvbs2_fec") as fec:
+            with pytest.raises(NotImplementedError, match="8PSK.*解交织"):
+                fy.fy4_dvbs2_sync(symbols)
+        demap.assert_not_called()
+        fec.assert_not_called()
+
+    @pytest.mark.parametrize("bad_input", [
+        np.zeros(8190, dtype=np.uint8),
+        np.zeros(8190, dtype=np.float64),
+        np.zeros((2, 4), dtype=np.complex64),
+        np.array([1 + 0j, np.nan + 0j]),
+        np.array([1 + 0j, np.inf + 0j]),
+    ])
+    def test_rejects_bits_real_samples_bad_dimensions_and_nonfinite(self, bad_input):
+        with pytest.raises((TypeError, ValueError)):
+            fy.fy4_dvbs2_sync(bad_input)
+
+    def test_false_sof_or_truncated_frame_returns_no_frames(self):
+        rng = np.random.default_rng(932)
+        bad_header = np.concatenate((SOF_BITS, rng.integers(0, 2, 64, dtype=np.uint8)))
+        assert fy.fy4_dvbs2_sync(modulate_plheader(bad_header)) == []
+        valid = _pl_symbols(_bbframe("short", "1/4"), "short", "1/4")
+        assert fy.fy4_dvbs2_sync(valid[:-1]) == []
+        assert PLHEADER_SYMBOLS == 90
 
 
 class TestFy3AHRPT(unittest.TestCase):
@@ -158,13 +253,11 @@ class TestFy3AHRPT(unittest.TestCase):
 
     def test_fy3_channel_extraction(self):
         """构造模拟 CADU，验证通道提取 shape 与 VCID。"""
-        # 期望的解扰后内容：6B VCDU 头（vcid=5）+ 1014B 载荷（共 1020B 数据区）
         derand = bytearray(1020)
         derand[0] = 0x00
-        derand[1] = 0x05            # VCID = 5 (低6位)
+        derand[1] = 0x05
         payload = np.arange(1014, dtype=np.uint8).tobytes()
         derand[6:] = payload
-        # 传输时要先解扰（自逆）→ 还原成发送端已扰码的数据区
         tx_data = fy3_descramble(bytes(derand))
         cadu = FY3_AHRPT_ASM.to_bytes(4, "big") + tx_data
         self.assertEqual(len(cadu), FY3_AHRPT_CADU_LEN)

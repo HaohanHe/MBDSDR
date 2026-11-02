@@ -56,11 +56,38 @@
 
 - **pyrtlsdr**（GPL-3.0）：可选的 RTL-SDR 原生绑定，用户自装、不随包分发。
 
-## 三、技术参考 / 标准致谢（仅参考 / 致谢，未包含其代码）
+## 三、技术参考 / 标准与向量来源
 
-下列公开标准、协议、算法与数据集仅作为**技术参考或致谢**，本仓库依据其公开规范
-**独立实现**，**未包含其源代码**，也未随产品分发其源码或二进制原件。标准中的协议
-常量、命令编号、位段布局、多项式系数与几何/数据流思路属于不受版权保护的事实与思想。
+本节登记实现和测试实际使用的标准、协议资料、协议常量及输出向量。除明确说明外，
+相关上游实现的源代码不随本仓库分发；各资料的权利与许可按原出处条款处理。本说明只
+记录来源与协议事实，不对任何资料的版权状态或许可合规作绝对法律保证。
+
+- **CCSDS 232.0-B-4 / CCSDS 230.1-G-3 Annex F**：TC 主头为 5 字节；Example 10
+  样例 `001B000E06010203040506070814BB` 用于 `tc_uplink.py` 与帧布局的逐字节对拍。
+- **ETSI EN 302 307-1 V1.4.1 (2014-11)**：DVB-S2 专用 BCH 参数来源，对应
+  `dvbs2_bch.py` 与 `data/dvbs2_bch.json`；其 Annexes B/C 为 normal/short LDPC
+  地址表来源，对应 `dvbs2_ldpc.py` 与 `data/dvbs2_ldpc_tables.json`。
+- **drmpeg/gr-dvbs2**（提交 `99a2ac5592fa41e9c0f8f757995f3451ab8184a6`，
+  GPL-3.0-or-later）：仓外运行未修改的上游编码器，生成独立 LDPC-only FECFRAME
+  参考输出及 DVB 专用 BCH 编码 KAT。**drmpeg/gr-dvbs2rx**（提交
+  `74df1dadbd20b02ce0cdfd3244f9c97022981235`，GPL-3.0-or-later）：仓外运行未修改的
+  上游解码器，为 BCH KAT 提供独立译码参照。21 组 BCH 模式向量覆盖编码、无错译码和
+  固定 5 错译码，向量 SHA-256 为
+  `d7764e85634bdacfc77c2ef9a4c00b3c8ad03dba888d92ee3153a3a4b313e03e`。
+  LDPC-only 输出与 BCH KAT 均不是 ETSI 官方向量，BCH/LDPC 级联自洽不等于完整
+  空口互操作；上游源码和驱动保留在仓库外的参考目录，不复制进主代码库。
+- **2020 年 QEX《FT4 and FT8 Protocols》及 ARRL 附件校验材料**：FT4/FT8
+  共用 LDPC(174,91)；FT4 白化、Gray 映射、同步序列与 GFSK 参数的协议事实来源。
+- **WSJT-X 官方仓库**（提交 `967c85a6119110788b0df3782cf796485b2cee14`）的
+  `samples/FT4/000000_000002.wav`（SHA-256
+  `d9e91fa04ba138a7b9f41b4103823c77ca1c3a9775101f6b14d60935bcd3813b`）：用于
+  FT4 统一入口的官方 WAV 解码验证。该样本没有可比的官方逐条文本真值，不能将有效
+  载荷恢复写成逐条文本对拍，也不是 OTA 证据。
+- **WSJT 官方仓库**（提交 `b4f9a431bcf6449df8f37b56de79d48b665b044c`）的
+  WSPR 手册、协议常量及未修改 `wsprsim` 编码输出：经典 WSPR Type 1 采用 50 bit
+  消息、卷积码、交织和 162 个 4FSK 符号，不是 LDPC；统一入口已用官方 `wsprsim`
+  独立合成音频在受限时频网格复验，仍不是 OTA、宽带盲捕或弱信号门限证据。上游
+  GPL 源码仅用于仓外协议核对与参考输出生成，未复制进主代码库。
 
 - **ETSI EN 300 401**（Radio Data System, RDS）：对应 FM RDS 数据链路解码模块。
 - **ICAO Annex 10 第 IV 卷**（Mode S / 1090 ES / ADS-B）：对应 1090 MHz 民航
