@@ -90,8 +90,11 @@ def unpack77(bits77: list[int]) -> dict:
             if isnr > 50:
                 isnr -= 101
             s = f"{isnr:+03d}"
-            sep = " R" if ir == 1 else ""
-            text = f"{call1}{sep} {call2} {s}".strip()
+            # WSJT-X 官方用户手册标准消息形态：R 挂在报告上（第三字段）
+            # "K1ABC G0XYZ R-22"，不是夹在两个呼号之间（2026-11-02 对拍修正）。
+            if ir == 1:
+                s = "R" + s
+            text = f"{call1} {call2} {s}".strip()
         else:
             text = None
         return {"type": "report", "text": text, "call1": call1,

@@ -143,12 +143,14 @@ def test_message_formats():
         "BI1AAA K1ABC RRR",     # RRR
         "BI1AAA K1ABC RR73",    # RR73
         "BI1AAA K1ABC -17",     # 信号报告
-        "BI1AAA K1ABC R-07",    # R+报告；解码显示为 'BI1AAA R K1ABC -07'
+        "BI1AAA K1ABC R-07",    # R+报告（WSJT-X 标准文本形态：R 挂报告上）
         "CQ W9KXY FN42",        # 另一个 CQ 网格（5 字符标准呼号）
     ]
-    expect_overrides = {
-        "BI1AAA K1ABC R-07": "BI1AAA R K1ABC -07",
-    }
+    # 2026-11-02 对拍修正：unpack77 曾把 R 夹在两个呼号间渲染成
+    # 'BI1AAA R K1ABC -07'（自洽但违背 WSJT-X 官方用户手册的
+    # "K1ABC G0XYZ R-22" 标准形态，且该文本过不了 encode_ft8_text 回编）。
+    # 已修，期望回归恒等映射——原 quirk 映射删除。
+    expect_overrides = {}
     for m in cases:
         tones = encode_ft8_text(m)
         txt = decode_ft8_text(tones_to_ft8_energies(tones))

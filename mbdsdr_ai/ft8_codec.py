@@ -105,13 +105,17 @@ assert len(MN_CHECKS) == LDPC_N
 def crc14_bits(msg77: Sequence[int]) -> List[int]:
     """对 77-bit 消息计算 14-bit CRC（返回 14 个 0/1）。
 
-    机制：消息后补 14 个零位，按 CRC14 多项式做 15 位移位寄存器，
-    最终寄存器前 14 位即 CRC。与 get_crc14.f90:14-23 同构。
+    WSJT-X 约定：CRC 在 **96 bit 块**上求余——77 消息 + 5 bit 零填充 +
+    14 bit CRC 零位（get_crc14.f90: mc(78:82)=0 即 5 bit 填充）。
+    2026-11-02 跨实现对拍修正：此前漏掉 5 bit 零填充、按 91 bit 流求值，
+    与真实 WSJT-X 信号（cpp/tests/ft8_wsjtx_llr.txt 前 5 行官方样本，
+    5/5 实测）全部不符；ft8_decode.crc14 / ft8_encode.add_crc14 /
+    C++ checkCrc14 一直是 96 bit 口径，本函数曾与三家不一致。
     """
-    mc = [int(b) & 1 for b in msg77] + [0] * 14
+    mc = [int(b) & 1 for b in msg77] + [0] * 5 + [0] * 14
     p = CRC14_POLY
     r = mc[0:15]
-    for i in range(77):
+    for i in range(len(mc) - 14):
         r[14] = mc[i + 14]
         fb = r[0]
         if fb:
@@ -324,7 +328,32 @@ def unpack77(bits77: Sequence[int]) -> Optional[Dict[str, object]]:
     to_call = unpack28_callsign(n28b)
     if "???" in (from_call, to_call):
         return None
-    exch = unpack_grid4(igrid) if igrid <= 32400 else f"R{igrid - 32400}"
+    # 报告/收尾字段（WSJT-X 官方用户手册标准消息语义，2026-11-02 对拍修正）：
+    #   igrid<=32400 → 4 字符网格；否则 irpt=igrid-32400：
+    #     1=仅两呼号（exchange=""） 2=RRR 3=RR73 4=73
+    #     ≥5: isnr=irpt-35（>50 则 -=101 回绕），报告数 ±nn；
+    #     exchange = (R 标志 ? "R" : "") + "%+03d"，即 "R-07"/"-07"/"+05"。
+    # 此前实现 `f"R{igrid-32400}"` 把 irpt 原值当报告数（"R27" 而非 "-08"）
+    # 且 RRR/RR73/73/空全没做——grid 用例一路绿灯从未测过报告类。
+    if igrid <= 32400:
+        exch = unpack_grid4(igrid)
+    else:
+        irpt = igrid - 32400
+        if irpt == 1:
+            exch = ""
+        elif irpt == 2:
+            exch = "RRR"
+        elif irpt == 3:
+            exch = "RR73"
+        elif irpt == 4:
+            exch = "73"
+        elif irpt >= 5:
+            isnr = irpt - 35
+            if isnr > 50:
+                isnr -= 101
+            exch = ("R" if ir else "") + f"{isnr:+03d}"
+        else:
+            return None
     return {"from": from_call, "to": to_call, "exchange": exch,
             "report": bool(ir), "type": i3}
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// ft8_codec.h -- FT8 C++ 解码层：CRC14 + LDPC(174,91) tanh BP + 77-bit unpack。
+// ft8_codec.h -- FT8 C++ 解码层：CRC14 + LDPC(174,91) 归一化 min-sum BP + 77-bit unpack。
 //
 // 独立实现 MIT，规范为 Python mbdsdr_ai/ft8_codec.py（不抄 wsjtx GPL）。
 // 输入：174 个 LLR（正=bit0，由检测层 8-tone 能量导出）；输出解码字段或
@@ -19,7 +19,7 @@ struct Ft8Decoded {
     bool        ok = false;
     std::string from;
     std::string to;
-    std::string exchange;   // 4-char grid 或 R+n
+    std::string exchange;   // 4 字符网格 / 报告("-08","R-07") / RRR / RR73 / 73 / 空
     bool        report = false;
 };
 

@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: MIT
-// ft8_codec.cc -- FT8 C++ 解码层实现（CRC14 + LDPC tanh BP + 77-bit unpack）。
+// ft8_codec.cc -- FT8 C++ 解码层实现（CRC14 + LDPC 归一化 min-sum BP + 77-bit unpack）。
+// LDPC 消息更新与 Python mbdsdr_ai/ft8_ldpc.ldpc_bp_decode 同源：归一化
+// min-sum（因子 0.75）、flooding 并行调度、同款早停。此前用精确 tanh-BP，
+// 在环图弱信号上锁进非码字不动点（WSJT-X 官方样本 -14/-15dB 三行实测
+// ncheck 卡死 31/3/36，400 轮不收敛——迭代上限无关）；0.75 归一化即阻尼，
+// 三行 1~6 轮收敛。跨实现对拍的意义是同一算法双侧一致，见
+// tests/test_ft8_wsjtx_cross.cpp 与 tests/test_ft8_cross_impl_fixture.py。
 #include "ft8_codec.h"
 
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace mbdsdr {
@@ -69,17 +76,23 @@ Ft8Codec::Ft8Codec() {
 
 bool Ft8Codec::checkCrc14(const int* bits91, int n) {
     if (n != kK) return false;
+    // WSJT-X CRC14 在 96 bit 块上求余：77 bit 消息 + 5 bit 零填充 + 14 bit CRC。
+    // 与 Python ft8_decode.check_crc14 同构；不得只把 77 bit 消息直接送进寄存器。
+    int mc[96];
+    for (int i = 0; i < 77; ++i) mc[i] = bits91[i] & 1;
+    for (int i = 77; i < 82; ++i) mc[i] = 0;
+    for (int i = 82; i < 96; ++i) mc[i] = bits91[77 + i - 82] & 1;
     int reg[15];
-    for (int i = 0; i < 15; ++i) reg[i] = bits91[i];
-    for (int i = 0; i < 77; ++i) {
-        reg[14] = (i + 14 < 77) ? bits91[i + 14] : 0;
+    for (int i = 0; i < 15; ++i) reg[i] = mc[i];
+    for (int i = 0; i < 82; ++i) {
+        reg[14] = mc[i + 14];
         int fb = reg[0];
         if (fb) for (int j = 0; j < 15; ++j) reg[j] ^= kPoly[j];
         for (int j = 0; j < 14; ++j) reg[j] = reg[j + 1];
         reg[14] = fb;
     }
     for (int i = 0; i < 14; ++i)
-        if (reg[i] != bits91[77 + i]) return false;
+        if (reg[i] != 0) return false;
     return true;
 }
 
@@ -89,9 +102,35 @@ std::optional<Ft8Decoded> Ft8Codec::decode(const double* llr, std::size_t n,
     std::vector<std::vector<double>> r(kM);   // check j -> var ei 的消息
     for (int j = 0; j < kM; ++j) r[j].assign(checkVars_[j].size(), 0.0);
     std::vector<double> tov(kN, 0.0);         // = Σ_j r[j][v]
-    std::vector<int> cw(kN);
-    int nclast = 0, ncnt = 0;
-    for (int it = 0; it <= maxIter; ++it) {
+    std::vector<int> cw(kN, 0);
+    // 早停判据与 Python ft8_ldpc 同款：连续 5 轮未下降、已迭代 >=10 轮且
+    // 残差仍 >15 则提前退出（只省无效迭代，不改变收敛路径）。
+    int nclast = -1, ncnt = 0;
+    for (int it = 0; it < maxIter; ++it) {
+        // check -> var：归一化 min-sum（因子 0.75，flooding 并行调度）
+        std::vector<double> newTov(kN, 0.0);
+        for (int j = 0; j < kM; ++j) {
+            const int m = (int)checkVars_[j].size();
+            std::vector<double> q(m), aq(m);
+            for (int ei = 0; ei < m; ++ei) {
+                // 变量->校验置信（排除本消息）：llr + Σ其他校验消息
+                q[ei] = llr[checkVars_[j][ei]] + tov[checkVars_[j][ei]] - r[j][ei];
+                aq[ei] = std::fabs(q[ei]);
+            }
+            for (int ei = 0; ei < m; ++ei) {
+                double sign = 1.0, mn = 1e30;
+                for (int k = 0; k < m; ++k) {
+                    if (k == ei) continue;
+                    if (q[k] < 0) sign = -sign;
+                    if (aq[k] < mn) mn = aq[k];
+                }
+                double nr = sign * mn * 0.75;
+                r[j][ei] = nr;
+                newTov[checkVars_[j][ei]] += nr;
+            }
+        }
+        tov = std::move(newTov);
+        // 变量后验硬判决 + 全校验
         for (int v = 0; v < kN; ++v) cw[v] = (llr[v] + tov[v] < 0) ? 1 : 0;
         int ncheck = 0;
         for (int j = 0; j < kM; ++j) {
@@ -114,35 +153,41 @@ std::optional<Ft8Decoded> Ft8Codec::decode(const double* llr, std::size_t n,
                 d.exchange = std::string(1, (char)('A' + j1)) + (char)('A' + j2)
                            + std::to_string(j3) + std::to_string(j4);
             } else {
-                d.exchange = "R" + std::to_string(igrid - 32400);
+                // 报告/收尾字段（WSJT-X 官方用户手册标准消息语义，2026-11-02
+                // 跨实现对拍修正，与 Python ft8_codec.unpack77 同源）：
+                //   irpt=1 仅两呼号（exchange=""）；2=RRR；3=RR73；4=73；
+                //   >=5: isnr=irpt-35（>50 回绕 -=101），报告数；
+                //   exchange = (R 标志 ? "R" : "") + "%+03d"（"-07"/"R-07"/"+05"）。
+                // 此前 `std::to_string(igrid-32400)` 把 irpt 原值当报告数
+                // （"R27" 而非 "-08"）且 RRR/RR73/73/空全没做——grid 用例
+                // 一路绿灯从未测过报告类。
+                long long irpt = (long long)igrid - 32400;
+                if (irpt == 1) {
+                    d.exchange = "";
+                } else if (irpt == 2) {
+                    d.exchange = "RRR";
+                } else if (irpt == 3) {
+                    d.exchange = "RR73";
+                } else if (irpt == 4) {
+                    d.exchange = "73";
+                } else if (irpt >= 5) {
+                    long long isnr = irpt - 35;
+                    if (isnr > 50) isnr -= 101;
+                    char buf[8];
+                    std::snprintf(buf, sizeof buf, "%+03lld", isnr);
+                    d.exchange = (d.report ? "R" : "") + std::string(buf);
+                } else {
+                    return std::nullopt;
+                }
             }
             return d;
         }
-        if (it > 0) {
+        if (nclast >= 0) {
             int nd = ncheck - nclast;
             ncnt = (nd < 0) ? 0 : ncnt + 1;
             if (ncnt >= 5 && it >= 10 && ncheck > 15) return std::nullopt;
         }
         nclast = ncheck;
-        std::vector<double> newTov(kN, 0.0);
-        for (int j = 0; j < kM; ++j) {
-            int m = (int)checkVars_[j].size();
-            std::vector<double> t(m);
-            for (int ei = 0; ei < m; ++ei) {
-                int v = checkVars_[j][ei];
-                double q = llr[v] + tov[v] - r[j][ei];
-                t[ei] = std::tanh(std::max(-20.0, std::min(20.0, q / 2.0)));
-            }
-            for (int ei = 0; ei < m; ++ei) {
-                double prod = 1.0;
-                for (int k = 0; k < m; ++k) if (k != ei) prod *= t[k];
-                double at = std::max(-0.999999, std::min(0.999999, prod));
-                double nr = 2.0 * std::atanh(at);
-                r[j][ei] = nr;
-                newTov[checkVars_[j][ei]] += nr;
-            }
-        }
-        tov = std::move(newTov);
     }
     return std::nullopt;
 }

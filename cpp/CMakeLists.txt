@@ -641,6 +641,13 @@ target_compile_definitions(test_ft8_e2e PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_D
 target_link_libraries(test_ft8_e2e PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME ft8_e2e COMMAND test_ft8_e2e)
 
+add_executable(test_ft8_wsjtx_cross tests/test_ft8_wsjtx_cross.cpp)
+target_link_libraries(test_ft8_wsjtx_cross PRIVATE mbdsdr_core)
+target_include_directories(test_ft8_wsjtx_cross PRIVATE src)
+target_compile_definitions(test_ft8_wsjtx_cross PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+target_link_libraries(test_ft8_wsjtx_cross PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME ft8_wsjtx_cross COMMAND test_ft8_wsjtx_cross)
+
 add_executable(test_lrpt_cpp tests/test_lrpt_cpp.cpp)
 target_link_libraries(test_lrpt_cpp PRIVATE mbdsdr_core)
 target_include_directories(test_lrpt_cpp PRIVATE src)

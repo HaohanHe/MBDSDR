@@ -151,6 +151,40 @@ def test_pack77_unpack77_roundtrip():
     assert parsed["exchange"] == "EM12"
 
 
+def test_unpack77_report_family_matches_wsjtx_truth():
+    """报告/收尾字段映射钉 WSJT-X 真值（2026-11-02 跨实现对拍修正）。
+
+    此前 exchange 对报告类输出 f"R{igrid-32400}"（"R27" 而非 "-08"），
+    RRR/RR73/73/空全没做——grid 用例一路绿灯从未测过报告类。
+    打包走 ft8_encode.pack77_standard（info 第三字段），解包走本模块
+    unpack77——两 Python 模块互为对拍。真值依据：WSJT-X 官方用户手册
+    标准消息 "K1ABC G0XYZ R-22" / "-19" / RRR / 73。
+    """
+    from mbdsdr_ai.ft8_encode import pack77_standard
+
+    cases = [
+        # (call1, call2, info, 期望 exchange, 期望 report 标志)
+        ("BI1AAA", "K1ABC", "R-07", "R-07", True),
+        ("BI1AAA", "K1ABC", "-17", "-17", False),
+        ("BI1AAA", "K1ABC", "+05", "+05", False),
+        ("BI1AAA", "K1ABC", "-35", "-35", False),   # 回绕区间（-50..-31）
+        ("BI1AAA", "K1ABC", "R+05", "R+05", True),
+        ("BI1AAA", "K1ABC", "RRR", "RRR", False),
+        ("BI1AAA", "K1ABC", "RR73", "RR73", False),
+        ("BI1AAA", "K1ABC", "73", "73", False),
+        ("BI1AAA", "K1ABC", None, "", False),       # 仅两呼号
+    ]
+    for call1, call2, info, want_exch, want_rep in cases:
+        bits = pack77_standard(call1, call2, info)
+        parsed = unpack77(bits)
+        assert parsed is not None, f"{info!r} 解包失败"
+        assert parsed["from"] == call1 and parsed["to"] == call2
+        assert parsed["exchange"] == want_exch, \
+            f"info={info!r}: exchange 得 {parsed['exchange']!r}，期望 {want_exch!r}"
+        assert bool(parsed["report"]) == want_rep, \
+            f"info={info!r}: report 标志得 {parsed['report']}，期望 {want_rep}"
+
+
 def test_unpack77_rejects_nonstandard():
     bad = [0] * 77
     bad[74:77] = [1, 0, 1]   # i3=5 非标准
