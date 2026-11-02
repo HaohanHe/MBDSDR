@@ -5649,6 +5649,7 @@ class MainWindow(QMainWindow):
             # 未设置观测站位置（GNSS 未连接或未手动配置）
             if self.sat_tracker is not None:
                 self.sat_tracker.set_location(None, None)
+            self.sky_view.set_observer(None, None)
             self.sky_view.set_data_source("none")
             return
 
@@ -5656,6 +5657,10 @@ class MainWindow(QMainWindow):
             self.sat_tracker = SatelliteTracker(self.sky_view, lat, lon)
         else:
             self.sat_tracker.set_location(lat, lon)
+        # 观测站坐标进天空视图本体：恒星/行星/星座层、信息卡升降时刻、
+        # 搜索选中、拾取与调谐按钮都依赖它（此前只标 real 未真正注入，
+        # 手动站址下整条"点星即听"链被静默阻断）。
+        self.sky_view.set_observer(lat, lon)
         # 坐标来源只能是真实 GNSS 或 gui_config.json 手动配置，恒为 real
         self.sky_view.set_data_source("real")
 

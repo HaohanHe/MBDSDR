@@ -1189,13 +1189,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         r = self._search_results[row]
         self._search_popup.hide()
-        # 卫星 -> 在 objects 里找并选中居中
+        # 卫星 -> 统一选中入口（清 body/发 object_clicked/居中, 不绕过）
         if r["kind"] in ("space_station", "satellite", "weather", "amateur"):
             for obj in self._objects:
                 if obj.name == r["obj_name"]:
-                    self._hovered_object = obj
-                    self._build_selected_info(obj)
-                    self.goto_animated(obj.azimuth_deg, obj.elevation_deg)
+                    self.on_object_picked(obj)
                     return
         # 恒星 -> 居中 + 选中出卡 (点星即读)
         if r["kind"] == "star" and self._ground_station() is not None:
@@ -1684,7 +1682,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         jd = self._current_jd()
         painter.save()
         painter.setFont(self._font)
-        for s in _stars.BRIGHT_STARS:
+        for s in _constel.merged_star_index().values():
             try:
                 v = j2000_to_altaz(vec_from_radec(s.ra_deg, s.dec_deg), gs, jd)
                 from mbdsdr_ai.celestial_geometry import azalt_from_vec
@@ -3146,7 +3144,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if obj is not None:
                 self.on_object_picked(obj)
             else:
-                self.on_body_picked(self._find_body_at(px, py))
+                body = self._find_body_at(px, py)
+                if body is not None:
+                    self.on_body_picked(body)
+                else:
+                    # 两处都没选中 = 真空白: 统一反选, 清掉卫星卡/环与 body
+                    self.on_object_picked(None)
         self._drag_origin_px = None
         self._drag_last_px = None
         self._press_px = None
