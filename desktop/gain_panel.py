@@ -165,8 +165,11 @@ class GainPanel(QWidget):
         if backend is None:
             self._apply_connected_state()
             return
-        # 尝试从后端设备构造 GainStager（duck-type：listGains/getGainRange）
-        dev = getattr(backend, "device", None) or backend
+        # 尝试从后端设备构造 GainStager（duck-type：listGains/getGainRange）。
+        # 优先原生设备句柄（_sdr）：backend.device 是 SDRDevice 信息类，
+        # 没有 listGains/getGainRange，传它会让三档增益被误判为全不支持。
+        dev = (getattr(backend, "_sdr", None)
+               or getattr(backend, "device", None) or backend)
         if _GAIN_OK and GainStager is not None:
             try:
                 self._stager = GainStager(dev, direction=0, channel=0)
