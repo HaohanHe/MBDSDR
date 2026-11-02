@@ -249,10 +249,20 @@ int ADSBDecoder::ac12Altitude(uint16_t ac12, bool& ok) {
 //  - DF11:    low 7 bits of syndrome = IID; accept spontaneous squitter IID==0.
 //  - others:  address parity, syndrome == 24-bit address; DF20/21 plaintext AA
 //             must equal the recovered address.
+//
+// 数学语义（2026-11-02 跨实现对拍实证钉死）：教科书余数 F(x) mod G =
+// crc24(数据段) ⊕ AP 三字节。crc24() 本身是 CRC 惯例（F·x^24 mod G），
+// 全帧输入得到 ICAO·x^24 mod G 而不是 ICAO——真值帧 20000f1f684a6c
+// （dump1090 官方样本 DF4，ICAO 4D2023）全帧 LFSR = 1eb2b4 ≠ 4d2023。
+// 此前直接把全帧 LFSR 当地址/当零判据：DF4/5 还原出垃圾 ICAO、
+// DF20/21/24 合法帧因 syndrome≠aa 全数误拒（0 映 0，纯校验帧恰好无恙）。
 bool ADSBDecoder::checkParity(int df, const uint8_t* frame, int nbytes,
                               uint32_t& icaoOut) {
-    uint32_t syndrome = crc24(frame, nbytes);
-    uint32_t aa = ((uint32_t)frame[1] << 16) | ((uint32_t)frame[2] << 8) | frame[3];
+    if (nbytes != 7 && nbytes != 14) return false;
+    const uint32_t ap = ((uint32_t)frame[nbytes - 3] << 16)
+                      | ((uint32_t)frame[nbytes - 2] << 8) | frame[nbytes - 1];
+    const uint32_t syndrome = crc24(frame, nbytes - 3) ^ ap;   // F(x) mod G
+    const uint32_t aa = ((uint32_t)frame[1] << 16) | ((uint32_t)frame[2] << 8) | frame[3];
     icaoOut = 0;
     if (df == 17 || df == 18) {
         if (syndrome != 0) return false;

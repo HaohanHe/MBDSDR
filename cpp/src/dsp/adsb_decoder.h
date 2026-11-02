@@ -63,6 +63,11 @@ public:
     }
 
     static uint32_t crc24(const uint8_t* data, int len);
+    /// Apply the Mode-S parity/address table; returns true when the frame is
+    /// accepted and fills icaoOut (24-bit). Public for cross-impl truth tests
+    /// （与 Python decode_frame 奇偶语义对拍，见 tests/test_adsb_cross_impl_parity.py）。
+    static bool checkParity(int df, const uint8_t* frame, int nbytes,
+                            uint32_t& icaoOut);
 
 private:
     double sr_ = 2000000.0;
@@ -86,10 +91,6 @@ private:
 
     static QString decodeCallsign(const uint8_t* me);
     static int  ac12Altitude(uint16_t ac12, bool& ok);
-    /// Apply the Mode-S parity/address table; returns true when the frame is
-    /// accepted and fills icaoOut (24-bit, uppercased hex string set by caller).
-    static bool checkParity(int df, const uint8_t* frame, int nbytes,
-                            uint32_t& icaoOut);
 
     QHash<QString, CprPair> cprByIcao_;   // per-aircraft CPR even/odd state
     double refLat_ = 0, refLon_ = 0;

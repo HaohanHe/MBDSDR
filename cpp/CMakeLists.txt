@@ -1005,6 +1005,13 @@ target_include_directories(test_adsb_decode PRIVATE src)
 target_link_libraries(test_adsb_decode PRIVATE Qt6::Core)
 add_test(NAME adsb_decode COMMAND test_adsb_decode)
 
+add_executable(test_adsb_parity_cross tests/test_adsb_parity_cross.cpp)
+target_link_libraries(test_adsb_parity_cross PRIVATE mbdsdr_core)
+set_target_properties(test_adsb_parity_cross PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_include_directories(test_adsb_parity_cross PRIVATE src)
+target_link_libraries(test_adsb_parity_cross PRIVATE Qt6::Core)
+add_test(NAME adsb_parity_cross COMMAND test_adsb_parity_cross)
+
 # SSDV byte layer (packet header parse + RS(255,223) CCSDS encoder)
 # and SSTV pure functions (VIS decode, zero-crossing inst freq). No Qt deps.
 add_executable(test_ssdv_packet tests/test_ssdv_packet.cpp src/dsp/ssdv_packet.cpp)

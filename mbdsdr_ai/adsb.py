@@ -414,23 +414,45 @@ def _msg_type_for_tc(tc: int) -> str:
 def decode_frame(raw: bytes) -> Optional[ADSBFrame]:
     """解析一个已采样的 Mode-S 字节帧（14B 长 / 7B 短）。
 
-    仅对 CRC 通过的 DF17/DF18 长帧做 ME 细分解码；其余返回基本头信息。
+    奇偶语义（教科书余数 F(x) mod G = crc24(数据段) ⊕ AP，2026-11-02 跨实现
+    对拍修正）：
+      - DF17/18 纯校验：余数 0；ICAO 在明文 AA 域 bit8-32
+      - DF11：低 7 位为 IID，只收 IID==0 自发 squitter；ICAO 明文 AA
+      - DF20/21/24 长帧地址奇偶：余数应等于明文 AA（此前全帧 LFSR 当零判据，
+        合法 Comm-B 全被误判 crc_ok=False）
+      - 其余（DF4/5 等）地址奇偶：余数即还原的 ICAO（此前取明文 AA 域——
+        对 DF4/5 那是数据段，纯属瞎取）
+    仅对 CRC 通过的 DF17/DF18 长帧做 ME 细分解码（Comm-B 的 MB 布局不同，
+    不得按 ADS-B ME 误读）；其余返回基本头信息。
     """
     nbits = len(raw) * 8
     if nbits not in (56, 112):
         return None
     bits = bytes_to_bits(raw)
-    syndrome = mode_s_crc24(bits)
-    # —— DF17/18 ICAO 在明文 AA 域 bit8-32
     df = int("".join(str(b) for b in bits[0:5]), 2)
     ca = int("".join(str(b) for b in bits[5:8]), 2)
-    crc_ok = (syndrome == 0)
-    icao = int("".join(str(b) for b in bits[8:32]), 2)
+    aa = int("".join(str(b) for b in bits[8:32]), 2)
+    ap = int("".join(str(b) for b in bits[-24:]), 2)
+    # 教科书余数。注意 mode_s_crc24 是 CRC 惯例（F·x^24 mod G），全帧输入
+    # 对地址奇偶帧给 ICAO·x^24 mod G 而不是 ICAO，不能直接当地址/零判据。
+    syndrome = mode_s_crc24(bits[:-24]) ^ ap
+    if df in (17, 18):
+        crc_ok = (syndrome == 0)
+        icao = aa
+    elif df == 11:
+        crc_ok = (syndrome & 0x7F) == 0          # 只收 IID==0
+        icao = aa
+    elif nbits == 112 and df in (20, 21, 24):
+        crc_ok = (syndrome == aa) and aa != 0
+        icao = aa
+    else:
+        crc_ok = (syndrome != 0)                  # 地址 0 无意义，拒
+        icao = syndrome
     frame = ADSBFrame(df=df, ca=ca, icao_hex=f"{icao:06X}", nbits=nbits,
                       crc_ok=crc_ok, raw_hex=raw.hex().upper())
     if not crc_ok:
         return frame
-    if nbits == 112:
+    if df in (17, 18) and nbits == 112:
         me = raw[4:11]
         me_bits = bytes_to_bits(me)
         tc = int("".join(str(b) for b in me_bits[0:5]), 2)
