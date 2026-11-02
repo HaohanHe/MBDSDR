@@ -194,6 +194,16 @@ def ccsds_decode_bits(args) -> Dict[str, Any]:
     return out
 
 
+def _astu_profile_args(args: Dict[str, Any]) -> Dict[str, Any]:
+    """ASTU-1 工具的剖面默认合并：sat_profiles.json 是唯一事实源，
+    显式参数覆盖剖面。缺省 sps=5@48k / 卷积 K7 r1/2（此前默认 4/关是错口径）。
+    """
+    from .sat_profile import load_sat_profile, profile_to_rx_chain_args
+    merged = profile_to_rx_chain_args(load_sat_profile("astu_1"))
+    merged.update(args or {})
+    return merged
+
+
 # ── 解码侧：IQ → 帧（接统一调制内核）───────────────────────────────
 def ccsds_decode_iq(args) -> Dict[str, Any]:
     """复 IQ → CCSDS 帧（先用统一调制内核解出比特，再走 CCSDS 链）。
@@ -330,6 +340,7 @@ def register_ccsds_tools(registry) -> None:
         import base64 as _b64
         import json as _json
         try:
+            args = _astu_profile_args(args)
             iq = args.get("iq")
             if iq is None:
                 path = args.get("iq_path")
