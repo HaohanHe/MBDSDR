@@ -289,7 +289,11 @@ class TestMainWindowRecordingFlow:
 
         for _ in range(5):
             w._poll_sdr_iq()
-        assert len(w._record_iq_buffer) >= 1
+        # 流式落盘契约（3ecf298）：数据边收边写磁盘，内存数组故意不攒
+        # （长录制内存安全）——旧钉点 _record_iq_buffer >=1 是攒数组旧语义。
+        assert len(w._record_iq_buffer) == 0, "流式录制不得攒内存数组"
+        assert w._record_samples_total >= 1, "流式样本计数应增长（数据已进文件）"
+        assert os.path.getsize(w._record_file_path) >= 8, "文件里至少一个 complex64 样本"
 
         w._apply_recording(False)
         assert w._recording is False

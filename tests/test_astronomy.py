@@ -274,10 +274,17 @@ class TestStarCulture(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_culture_file_keys_are_real_stars(self):
-        """对照表不许收编表外星（防皮配置漂进假名）。"""
+        """对照表不许收编表外星（防皮配置漂进假名）。
+
+        「真星」宇宙 = merged_star_index（BRIGHT_STARS 亮星 + 星座扩员
+        EXTENSION_STARS）。2026-11-02 修口径：此前只查 BRIGHT_STARS，
+        星座连线层的扩员星（Merak/Phecda/Megrez 等 70 颗）被误判成"假名"
+        ——文化表是为连线层扩的，星表却没并进测试真值，集成缝。
+        """
         from mbdsdr_ai.skyengine import stars as _stars
+        from mbdsdr_ai.skyengine.constellations import merged_star_index
         table = _stars._load_culture()
-        names = {s.name for s in _stars.BRIGHT_STARS}
+        names = set(merged_star_index())
         stray = [k for k in table if k not in names]
         self.assertEqual(stray, [])
 

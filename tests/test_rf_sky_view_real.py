@@ -183,6 +183,7 @@ class TestStarExtinctionWiring:
     def test_effective_vmag_includes_extinction(self, monkeypatch):
         from desktop.rf_sky_view import RFSkyView
         from mbdsdr_ai.skyengine import stars as _stars
+        from mbdsdr_ai.skyengine import constellations as _constel
 
         captured = []
         real_star_draw = _stars.star_draw
@@ -194,7 +195,12 @@ class TestStarExtinctionWiring:
         # 北极星：纬度 40° 处 alt≈40°、vmag=1.98，必在星表内
         polaris = next(s for s in _stars.BRIGHT_STARS if s.name == "Polaris")
         monkeypatch.setattr(_stars, "star_draw", _spy)
-        monkeypatch.setattr(_stars, "BRIGHT_STARS", [polaris])
+        # 2026-11-02 修缝：_draw_stars 遍历的是 constellations.merged_star_index()
+        # （亮星 + 星座扩员），不是 _stars.BRIGHT_STARS；constellations 对后者是
+        # import 值绑定，patch _stars.BRIGHT_STARS 传不进去——captured[0] 曾是
+        # 天狼星当下的低空消光值（随时间漂 0.01+）。按真实接缝钉死单星。
+        monkeypatch.setattr(
+            _constel, "merged_star_index", lambda: {"Polaris": polaris})
 
         v = RFSkyView()
         v.set_observer(40.0, 116.0, 0.0)
