@@ -125,15 +125,16 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/mingw_64
 cmake --build build -j
 ```
 
-**裸构建目录不部署 DLL**：`build\*.exe` 链接的是 Qt6/MinGW 动态运行库
-（`Qt6Core.dll`、`libstdc++-6.dll`、`libgcc_s_seh-1.dll`…），它们不在系统
-PATH。**测试一律经 `ctest` 跑**——`cpp/CMakeLists.txt` 已把 PATH 前插
-（Qt bin / MinGW bin / 构建输出目录 / RTL-SDR 库目录）、`QT_PLUGIN_PATH`、
-`QT_QPA_PLATFORM=offscreen`、`MBDSDR_NULL_AUDIO=1` 统一注入到每个测试的
-ENVIRONMENT 属性上，干净 shell 直接 `ctest --test-dir build` 即可，零弹窗。
-要**直跑**某个 exe（如调试 `mbdsdr.exe`），自行把 Qt bin 与 MinGW bin 加进
-当前 shell 的 PATH，否则 Windows loader 弹「找不到 DLL」模态框（CUI 程序
-同样弹，2026-11-02 实测钉死）。
+**构建自动部署运行库（直跑/双击零弹窗）**：`deploy_win_runtime` 目标随每次
+构建把 Qt6*.dll 与 MinGW 三件套（RTL-SDR 真库树另含 librtlsdr.dll）布到
+构建输出目录——Windows loader 第一搜索位是 exe 目录，裸跑/双击/脚本直调
+任一 exe 不再弹「找不到 Qt6Widgets.dll」模态框（2026-11-02 用户实测直跑
+全弹窗即此缺口，此前只有 ctest 一条路有 PATH 注入）。
+**测试仍一律经 `ctest` 跑**——`cpp/CMakeLists.txt` 把 PATH 前插（Qt bin /
+MinGW bin / 构建输出目录 / RTL-SDR 库目录）、`QT_PLUGIN_PATH`、
+`QT_QPA_PLATFORM=offscreen`、`MBDSDR_NULL_AUDIO=1`、`MBDSDR_NO_HW=1`
+统一注入到每个测试的 ENVIRONMENT 属性上，干净 shell 直接
+`ctest --test-dir build` 即可，零弹窗零挂死。
 
 一键打便携包（构建 + `cmake --install` + `windeployqt` 收 Qt DLL +
 librtlsdr.dll（CMakeCache 推导）+ 干净 PATH 冒烟 + 压 zip）：

@@ -2123,6 +2123,41 @@ if(MBDSDR_ALL_CTESTS)
   endif()
 endif()
 
+# ── 运行库布防（直跑/双击零弹窗）─────────────────────────────────────────
+# Windows loader 第一搜索位是 exe 目录：把 Qt6*.dll 与 MinGW 运行三件套布到
+# ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}，裸跑/双击/脚本直调任一 exe 不再弹
+# 「找不到 Qt6Widgets.dll」模态框。ctest 注入（上方）只保 ctest 一条路；
+# 2026-11-02 用户实测直跑 163 个 exe 全弹窗即此缺口。copy_if_different
+# 首次部署后近零成本，Qt 升级/换 kit 随下次构建自愈。RTL-SDR 真库树
+# （build-local）一并布 librtlsdr.dll。
+if(WIN32 AND MBDSDR_QT_BIN)
+  file(GLOB MBDSDR_WIN_RUNTIME_DLLS "${MBDSDR_QT_BIN}/Qt6*.dll")
+  foreach(_mingw_dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll)
+    list(APPEND MBDSDR_WIN_RUNTIME_DLLS "${MBDSDR_TC_BIN}/${_mingw_dll}")
+  endforeach()
+  if(RTLSDR_FOUND AND RTLSDR_LIBRARY_DIRS)
+    foreach(_rtl_dir IN LISTS RTLSDR_LIBRARY_DIRS)
+      file(GLOB _rtl_dlls "${_rtl_dir}/*.dll")
+      list(APPEND MBDSDR_WIN_RUNTIME_DLLS ${_rtl_dlls})
+    endforeach()
+  endif()
+  add_custom_target(deploy_win_runtime ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${MBDSDR_WIN_RUNTIME_DLLS} "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/"
+    # Qt 平台插件直跑部署：loader 弹窗的另一面（2026-11-03 用户截图实测）——
+    # DLL 全在、但 exe 旁无 platforms\qwindows.dll 时 Qt 弹「no Qt platform
+    # plugin could be initialized」并以 0xC0000142 退出。ctest 注入的
+    # QT_PLUGIN_PATH 只保 ctest 一条路；直跑/双击需插件落 exe 旁 platforms/。
+    # qwindows（GUI）与 qoffscreen（无头）都布：offscreen 下 Qt 找到哪个用哪个。
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/platforms"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${MBDSDR_QT_PLUGINS}/platforms/qwindows.dll"
+            "${MBDSDR_QT_PLUGINS}/platforms/qoffscreen.dll"
+            "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/platforms/"
+    COMMENT "部署 Windows 运行库到 exe 旁（Qt6* + MinGW 三件套 + platforms 插件 [+ librtlsdr]，直跑零弹窗）")
+endif()
+
 # ── install() / CPack：产品交付面（缺口台账 P0「零安装/打包」）─────────────
 # 只装两个交付可执行文件（mbdsdr 桌面 / mbdsdr_mcp headless）+ i18n + 许可证
 # 文档；数百个测试目标与截图工具不进安装树。Qt 运行库随平台自理：
