@@ -235,6 +235,44 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | calibrate_frequency / apply_frequency_correction / predict_passes / list_satellites | 读 |
 | set_fft_params / set_color_map / set_doppler_compensation / get_capabilities | 写/读 |
 
+### 接收链硬件参数
+| 工具 | 写/读 |
+|---|---|
+| set_gain / set_sample_rate / set_decimation / set_direct_sampling / set_offset_tuning / set_agc / set_bias_tee（馈电风险）/ set_force_mono / set_anr | 写 |
+| set_audio_output / set_tune_step | 写 |
+
+### 录制参数
+| 工具 | 写/读 |
+|---|---|
+| set_recording_target / set_recording_dir / set_recording_template / set_recording_stereo / set_recording_ignore_squelch / set_recording_max_segment / set_gated_recording / set_watch_recording | 写 |
+
+### 扫描 / 显示 / 频谱外观
+| 工具 | 写/读 |
+|---|---|
+| set_scan_params | 写 |
+| set_persistence / set_waterfall_depth / set_waterfall_speed / set_builtin_palette / set_spectrum_db_range / set_spectrum_zoom / set_db_grid_step / set_peak_threshold / set_peak_hold / set_edge_rail_visibility | 写 |
+
+### 源 / 网络 / GNSS / 图层
+| 工具 | 写/读 |
+|---|---|
+| set_source_type / set_spyserver / connect_gnss / set_map_layers / set_station_position / set_sat_pass_template | 写 |
+
+### VNA 连接与渗透分析
+| 工具 | 写/读 |
+|---|---|
+| vna_connect | 写 |
+| analyze_vna_permeability | 读 |
+
+### 外设电台（TX，写动作均需 confirm 确认）
+| 工具 | 写/读 |
+|---|---|
+| set_cat_control / send_cw / send_ax25_beacon / soapy_transmit | 写 |
+
+### 外观 / 布局
+| 工具 | 写/读 |
+|---|---|
+| set_ui_scale / set_language / set_left_groups | 写 |
+
 ### 记忆编排（SQLite FTS5，~/.mbdsdr/memory.db）
 | 工具 | 写/读 |
 |---|---|
