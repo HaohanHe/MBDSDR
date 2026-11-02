@@ -2592,11 +2592,29 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         widths = [fm.horizontalAdvance(t) for t in head]
         widths += [key_col_w + 10 + fm.horizontalAdvance(v) for _, v in kv]
         raw_desc = str(info.get("desc") or "")
-        body_w = max(widths + [fm.horizontalAdvance(raw_desc)])
+        body_w = max(widths)   # 卡宽由键值行决定; 描述换行适配, 不撑宽
         box_w = body_w + pad * 2 + close_reserve
+        text_w = box_w - pad * 2 - close_reserve
+
+        # 描述换行（与卫星卡同款）：长口径注记不再把卡撑出屏
+        desc_lines: List[str] = []
+        if raw_desc:
+            cur = ""
+            for ch in raw_desc:
+                if ch == "\n":
+                    desc_lines.append(cur); cur = ""; continue
+                if fm.horizontalAdvance(cur + ch) > text_w and cur:
+                    desc_lines.append(cur); cur = ch
+                else:
+                    cur += ch
+            if cur:
+                desc_lines.append(cur)
+            if len(desc_lines) > 6:
+                desc_lines = desc_lines[:6]
+                desc_lines[-1] = desc_lines[-1].rstrip("。，,;； ") + " …"
 
         row_h = 17.0
-        n_rows = 3 + len(kv) + (1 if raw_desc else 0)
+        n_rows = 3 + len(kv) + (len(desc_lines) + 1 if desc_lines else 0)
         box_h = n_rows * row_h + 18
         box_x, box_y = 14.0, 40.0
         bg = QColor(_t.COLORS["card_1"])
@@ -2646,9 +2664,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawText(QPointF(box_x + pad + key_col_w + 10, ty), v)
             ty += row_h
 
-        if raw_desc:
+        if desc_lines:
+            ty += row_h - 8
             painter.setPen(key_pen)
-            painter.drawText(QPointF(box_x + pad, ty), raw_desc)
+            for dl in desc_lines:
+                painter.drawText(QPointF(box_x + pad, ty), dl)
+                ty += row_h
         painter.restore()
 
     @staticmethod
