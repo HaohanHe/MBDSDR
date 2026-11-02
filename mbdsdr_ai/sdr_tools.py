@@ -2617,7 +2617,7 @@ def register_sdr_tools(agent):
             },
             "required": ["satellite", "frequency_hz", "output_dir"],
         },
-        handler=lambda args: ToolResult(success=True, content=_satdump_live(args)),
+        handler=lambda args: _satdump_result(args, _satdump_live),
         category="satellite",
     )
 
@@ -2633,7 +2633,7 @@ def register_sdr_tools(agent):
             },
             "required": ["input_file", "satellite", "output_dir"],
         },
-        handler=lambda args: ToolResult(success=True, content=_satdump_process(args)),
+        handler=lambda args: _satdump_result(args, _satdump_process),
         category="satellite",
     )
 
@@ -6387,6 +6387,15 @@ def _satdump_list_sats(args):
     return '\n'.join(lines)
 
 
+def _satdump_result(args, fn):
+    """统一 SatDump 工具出口：success 严格跟随内层执行结果，不谎报。
+
+    fn 为 _satdump_live/_satdump_process，返回 (text, ok)。
+    """
+    text, ok = fn(args)
+    return ToolResult(success=bool(ok), content=text)
+
+
 def _satdump_live(args):
     """SatDump 实时接收。"""
     from mbdsdr_ai.satdump_integration import satdump_live
@@ -6415,7 +6424,7 @@ def _satdump_live(args):
     if result.get('command'):
         lines.append(f"命令: {result['command']}")
 
-    return '\n'.join(lines)
+    return '\n'.join(lines), bool(result.get('success'))
 
 
 def _satdump_process(args):
@@ -6440,7 +6449,7 @@ def _satdump_process(args):
     if result.get('stdout'):
         lines.append(f"输出: {result['stdout'][:200]}")
 
-    return '\n'.join(lines)
+    return '\n'.join(lines), bool(result.get('success'))
 
 
 def _satdump_compose_image(args):

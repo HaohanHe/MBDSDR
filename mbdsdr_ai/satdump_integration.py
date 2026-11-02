@@ -89,10 +89,11 @@ def satdump_live(satellite: str, frequency: float, output_dir: str,
     cmd = [
         satdump_path, "live",
         satellite,
-        str(frequency),
         output_dir,
-        "-s", str(samplerate),
-        "-g", str(gain),
+        "--source", "rtlsdr",
+        "--samplerate", str(samplerate),
+        "--frequency", str(int(frequency)),
+        "--gain", str(gain),
     ]
 
     try:
