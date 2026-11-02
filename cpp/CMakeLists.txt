@@ -2131,44 +2131,41 @@ endif()
 # 首次部署后近零成本，Qt 升级/换 kit 随下次构建自愈。RTL-SDR 真库树
 # （build-local）一并布 librtlsdr.dll。
 if(WIN32 AND MBDSDR_QT_BIN)
-  # Qt6*.dll 全量（含 Qt6Test——windeployqt 只按已链接模块收，测试 exe 链接
-  # Qt6::Test 但 windeployqt 不显式收它，故不能只靠 windeployqt）。
-  file(GLOB MBDSDR_WIN_RUNTIME_DLLS "${MBDSDR_QT_BIN}/Qt6*.dll")
-  # Qt 的多媒体/OpenGL 辅助运行库（avcodec/avformat/avutil/swresample/swscale/
-  # D3Dcompiler_47/opengl32sw 等）：Qt6Multimedia/Widgets 的可选依赖，loader
-  # 按需在运行时解析。windeployqt 会带，本部署与便携包同口径一并收——
-  # 防止直跑 Multimedia 相关测试时弹「找不到 avcodec-61.dll」。
-  file(GLOB MBDSDR_QT_AUX_DLLS "${MBDSDR_QT_BIN}/*.dll")
-  foreach(_aux IN LISTS MBDSDR_QT_AUX_DLLS)
-    get_filename_component(_aux_name "${_aux}" NAME)
-    if(NOT _aux_name MATCHES "^Qt6")
-      list(APPEND MBDSDR_WIN_RUNTIME_DLLS "${_aux}")
+  if(RTLSDR_FOUND AND RTLSDR_LIBRARY_DIRS)
+    set(MBDSDR_DEPLOY_RTLSDR_DIRS "${RTLSDR_LIBRARY_DIRS}")
+  else()
+    set(MBDSDR_DEPLOY_RTLSDR_DIRS "")
+  endif()
+  # 独立部署目标（手动/CI 用）：调 deploy_runtime.cmake 完成整目录部署。
+  add_custom_target(deploy_win_runtime
+    COMMAND ${CMAKE_COMMAND}
+      -DRUNTIME_OUTPUT_DIRECTORY=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+      -DQT_BIN=${MBDSDR_QT_BIN}
+      -DTC_BIN=${MBDSDR_TC_BIN}
+      -DQT_PLUGINS=${MBDSDR_QT_PLUGINS}
+      -DRTLSDR_DIRS=${MBDSDR_DEPLOY_RTLSDR_DIRS}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/deploy_runtime.cmake
+    COMMENT "部署 Windows 运行库到 exe 旁（Qt6* + 辅助库 + MinGW 三件套 + platforms 插件 [+ librtlsdr]，直跑零弹窗）")
+  # 自动部署：对每个 ALL 可执行目标挂 POST_BUILD——任何一次构建（含只构建
+  # 单个测试）后 exe 旁即完整，不再依赖开发者记得跑 deploy_win_runtime
+  # （2026-11-03 用户第三次截图根因：cpp\build 树只构建过测试、从未跑部署
+  # 目标，0 DLL 半部署状态）。脚本内部逐文件 copy_if_different 幂等增量。
+  get_property(MBDSDR_ALL_TARGETS DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+               PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(_tgt IN LISTS MBDSDR_ALL_TARGETS)
+    get_target_property(_type "${_tgt}" TYPE)
+    if(_type STREQUAL "EXECUTABLE")
+      add_custom_command(TARGET "${_tgt}" POST_BUILD
+        COMMAND ${CMAKE_COMMAND}
+          -DRUNTIME_OUTPUT_DIRECTORY=$<TARGET_FILE_DIR:${_tgt}>
+          -DQT_BIN=${MBDSDR_QT_BIN}
+          -DTC_BIN=${MBDSDR_TC_BIN}
+          -DQT_PLUGINS=${MBDSDR_QT_PLUGINS}
+          -DRTLSDR_DIRS=${MBDSDR_DEPLOY_RTLSDR_DIRS}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/deploy_runtime.cmake
+        VERBATIM)
     endif()
   endforeach()
-  foreach(_mingw_dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll)
-    list(APPEND MBDSDR_WIN_RUNTIME_DLLS "${MBDSDR_TC_BIN}/${_mingw_dll}")
-  endforeach()
-  if(RTLSDR_FOUND AND RTLSDR_LIBRARY_DIRS)
-    foreach(_rtl_dir IN LISTS RTLSDR_LIBRARY_DIRS)
-      file(GLOB _rtl_dlls "${_rtl_dir}/*.dll")
-      list(APPEND MBDSDR_WIN_RUNTIME_DLLS ${_rtl_dlls})
-    endforeach()
-  endif()
-  add_custom_target(deploy_win_runtime ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${MBDSDR_WIN_RUNTIME_DLLS} "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/"
-    # Qt 平台插件直跑部署：loader 弹窗的另一面（2026-11-03 用户截图实测）——
-    # DLL 全在、但 exe 旁无 platforms\qwindows.dll 时 Qt 弹「no Qt platform
-    # plugin could be initialized」并以 0xC0000142 退出。ctest 注入的
-    # QT_PLUGIN_PATH 只保 ctest 一条路；直跑/双击需插件落 exe 旁 platforms/。
-    # qwindows（GUI）与 qoffscreen（无头）都布：offscreen 下 Qt 找到哪个用哪个。
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/platforms"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${MBDSDR_QT_PLUGINS}/platforms/qwindows.dll"
-            "${MBDSDR_QT_PLUGINS}/platforms/qoffscreen.dll"
-            "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/platforms/"
-    COMMENT "部署 Windows 运行库到 exe 旁（Qt6* + MinGW 三件套 + platforms 插件 [+ librtlsdr]，直跑零弹窗）")
 endif()
 
 # ── install() / CPack：产品交付面（缺口台账 P0「零安装/打包」）─────────────
