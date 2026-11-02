@@ -164,8 +164,10 @@ def test_device_manager_open_rtl_tcp_live():
 def _stub_manager(monkeypatch):
     """真管理器 + 诚实测试桩后端（实现 manager 所需最小接口，不冒充真实硬件）。
 
-    先 delenv 再构造：裸口径运行（登记 == 测试桩一家的确定性世界），防止
-    开发机 env 泄漏出 USB/rtl_tcp 后端混进 backends 首位。
+    同时把 ``_discover`` 钉成 no-op：开发机可能真插着 USB RTL-SDR（本机实测
+    FC0012 在位时 RTLSDRBackend 会被登记进 backends 首位，connect() 自动连的
+    就是真机而不是桩），delenv 只挡得住 rtl_tcp、挡不住 USB 发现。钉死后
+    backends == {测试桩} 是唯一确定性世界。
     """
     from mbdsdr_ai.sdr_backend import SDRDevice, SDRStatus
 
@@ -191,6 +193,9 @@ def _stub_manager(monkeypatch):
             return None
 
     monkeypatch.delenv(RTL_TCP_ENV, raising=False)
+    monkeypatch.setattr(
+        SDRBackendManager, "_discover",
+        lambda self: None, raising=True)
     mgr = SDRBackendManager()
     stub = _HonestStubBackend()
     mgr.backends[stub.device.device_id] = stub
@@ -223,6 +228,11 @@ def test_connect_without_device_id_keeps_auto_connect_first(monkeypatch):
 def test_connect_unknown_id_empty_backends_honest(monkeypatch):
     """裸环境（无后端）：不传 id 也必须诚实失败，绝不虚构连接。"""
     monkeypatch.delenv(RTL_TCP_ENV, raising=False)
+    # 钉死 _discover 为 no-op：真插着 RTL-SDR 的开发机上发现会登记真后端，
+    # connect() 自动连真机返回 True，与「无后端」的测试意图不符（环境假设）。
+    monkeypatch.setattr(
+        SDRBackendManager, "_discover",
+        lambda self: None, raising=True)
     mgr = SDRBackendManager()
     assert mgr.connect() is False
     assert mgr.connect("anything") is False

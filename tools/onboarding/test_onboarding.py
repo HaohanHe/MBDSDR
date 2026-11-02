@@ -39,6 +39,7 @@ from onboard import (  # noqa: E402
     step_record,
     MODES,
 )
+import onboard  # noqa: E402  (monkeypatch 目标：模块级 find_rtl_sdr)
 
 
 # ---------------------------------------------------------------------------
@@ -171,8 +172,53 @@ class TestDecodeDeterministic:
         assert dec2.status == "PASS"
         assert dec1.detail["n_frames"] == dec2.detail["n_frames"], \
             "同一输入两次解码帧数应一致（确定性）"
-        # 至少解出 1 帧
+        # 至少解出 1 个 CRC 有效 DF17 帧；未提供真值时只声明检测，不声明字段验证。
         assert dec1.detail["n_frames"] >= 1
+        assert dec1.detail["verification_status"] == "decode_detected"
+
+    def test_adsb_crc_valid_non_df17_is_not_accepted(self, tmp_path):
+        """CRC 有效的 DF18 也不能冒充 ADS-B DF17 验收证据。"""
+        from mbdsdr_ai import adsb
+        fs = 2.4e6
+        frame = adsb.build_long_frame(0x90, 0xAABBCC, bytes(7))  # DF18 + 有效 CRC
+        sig = adsb.modulate_baseband(frame, fs=fs, lead_us=20)
+        iq = np.zeros(200_000, dtype=np.complex64)
+        iq[20_000:20_000 + len(sig)] = sig.astype(np.complex64)
+        data_path = tmp_path / "df18.sigmf-data"
+        iq.tofile(data_path)
+
+        dec = step_decode(str(data_path), "adsb", fs, 1090e6)
+        assert dec.status == "FAIL"
+        assert dec.detail["n_frames"] == 0
+
+    def test_adsb_zero_frames_is_fail(self, tmp_path):
+        data_path = tmp_path / "no_adsb.sigmf-data"
+        np.zeros(20_000, dtype=np.complex64).tofile(data_path)
+        dec = step_decode(str(data_path), "adsb", 2.4e6, 1090e6)
+        assert dec.status == "FAIL"
+        assert dec.detail["n_frames"] == 0
+
+    def test_adsb_expected_fields_strictly_match(
+            self, tmp_out_dir, adsb_synthetic_iq_uint8):
+        raw, fs, _ = adsb_synthetic_iq_uint8
+        raw_path = os.path.join(tmp_out_dir, "capture.bin")
+        raw.tofile(raw_path)
+        rec = step_record(raw_path, tmp_out_dir, 1090e6, fs, 24.0, "adsb")
+        dec = step_decode(rec.detail["sigmf_data"], "adsb", fs, 1090e6,
+                          expected_icao="AABBCC", expected_callsign="CSN1234")
+        assert dec.status == "PASS", dec.message
+        assert dec.detail["verification_status"] == "fields_verified"
+
+    def test_adsb_expected_field_mismatch_is_fail(
+            self, tmp_out_dir, adsb_synthetic_iq_uint8):
+        raw, fs, _ = adsb_synthetic_iq_uint8
+        raw_path = os.path.join(tmp_out_dir, "capture.bin")
+        raw.tofile(raw_path)
+        rec = step_record(raw_path, tmp_out_dir, 1090e6, fs, 24.0, "adsb")
+        dec = step_decode(rec.detail["sigmf_data"], "adsb", fs, 1090e6,
+                          expected_icao="010203")
+        assert dec.status == "FAIL"
+        assert dec.detail["verification_status"] == "field_mismatch"
 
     def test_decode_fails_without_sigmf(self):
         """不存在的 SigMF 文件 → 明确 FAIL。"""
@@ -224,6 +270,7 @@ class TestOutputArtifacts:
         assert m["params"]["n_samples"] == n_samples
         assert "timestamp_utc" in m
         assert m["license"] == "MIT"
+        assert m["decode_summary"]["verification_status"] == "decode_detected"
 
     def test_output_rejects_bad_origin(self, tmp_out_dir):
         dec = type("FakeDec", (), {"status": "PASS", "message": "",
@@ -238,18 +285,21 @@ class TestOutputArtifacts:
 # 5. capture 步：无 rtl_sdr 时明确失败
 # ---------------------------------------------------------------------------
 class TestCaptureNoRTLSDR:
-    def test_capture_fails_without_rtl_sdr_binary(self):
+    def test_capture_fails_without_rtl_sdr_binary(self, monkeypatch):
         """如果 PATH 里没有 rtl_sdr，capture 必须 FAIL（不能假装成功）。"""
+        # 开发机可能真装着 rtl_sdr 且接着真 dongle（capture 会真成功 1000 样本），
+        # 本用例钉的是「二进制不存在」分支：强制发现结果为 None，环境无关
+        # （与 C++ 侧 MBDSDR_NO_HW 接缝同理——确定性测试不依赖宿主机硬件状态）。
+        monkeypatch.setattr(onboard, "find_rtl_sdr", lambda: None)
         r = step_capture(
             freq_hz=1090e6,
             sample_rate_hz=2.4e6,
             n_samples=1000,
             out_raw_path="/tmp/onboard_test_capture.bin",
         )
-        # 在云 VM 上 rtl_sdr 可能在 ~/.local/bin，也可能不在
-        # 如果有 rtl_sdr 但没设备，会因为写空文件 FAIL；两种情况都应该 FAIL
         assert r.status in ("FAIL",), \
-            f"无硬件环境 capture 应 FAIL，实际 {r.status}: {r.message}"
+            f"无 rtl_sdr 环境 capture 应 FAIL，实际 {r.status}: {r.message}"
+        assert "未找到 rtl_sdr" in r.message
 
     def test_capture_rejects_bad_sample_rate(self):
         r = step_capture(1090e6, 100e6, 1000, "/tmp/x.bin")

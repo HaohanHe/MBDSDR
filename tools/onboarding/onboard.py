@@ -167,7 +167,8 @@ def step_detect(timeout: float = 30.0) -> StepResult:
     try:
         proc = subprocess.run(
             [sys.executable, str(selfcheck_path), "--json"],
-            capture_output=True, text=True, timeout=timeout, check=False,
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
         r.message = f"hw_selfcheck 超时（{timeout}s）"
@@ -280,6 +281,7 @@ def step_capture(
 
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
+                             encoding="utf-8", errors="replace",
                              timeout=hard_timeout, check=False)
     except subprocess.TimeoutExpired:
         r.message = f"rtl_sdr 超时（>{hard_timeout:.1f}s）"
@@ -763,6 +765,8 @@ def step_decode(
     ssdv_pll: bool = False,
     ssdv_soft: bool = False,
     ssdv_asm_tol: int = 0,
+    expected_icao: Optional[str] = None,
+    expected_callsign: Optional[str] = None,
 ) -> StepResult:
     """加载 SigMF IQ，按模式调用真实解码器。
 
@@ -770,6 +774,9 @@ def step_decode(
     ``ssdv_input``="iq"（输入为 complex64 IQ，走带内下变频+BPSK 物理层 → 字节）。
     ``ssdv_mode``="fsphil"（默认，256B 自同步方言）/ "ccsds"（级联：IQ→ASM→
     Viterbi→解扰→RS→DSLWP 218B→JPEG，需 --ssdv-frame-bits）。
+
+    ADS-B 专用：``expected_icao`` / ``expected_callsign`` 为可选外部真值；
+    未提供时仅标 ``decode_detected``，提供后须在同一 DF17 帧匹配全部真值。
     """
     r = StepResult(step="decode", status="FAIL")
 
@@ -811,25 +818,59 @@ def step_decode(
         if mode == "adsb":
             from mbdsdr_ai import adsb
             results = adsb.decode_baseband(iq, sample_rate_hz)
-            # decode_baseband 返回 dict 或 list[dict]
-            frames = []
-            if isinstance(results, dict):
-                if results.get("crc_ok"):
-                    frames.append(results)
-            elif isinstance(results, list):
-                frames = [f for f in results if f.get("crc_ok")]
+            # ADS-B 验收只认 CRC 有效的 DF17；其他 Mode-S 下行格式不能凑数。
+            candidates = [results] if isinstance(results, dict) else results
+            if not isinstance(candidates, list):
+                candidates = []
+            crc_frames = [
+                f for f in candidates
+                if isinstance(f, dict) and f.get("crc_ok") is True
+            ]
+            frames = [f for f in crc_frames if f.get("df") == 17]
             r.detail["decoded_frames"] = frames
             r.detail["n_frames"] = len(frames)
-            r.add_evidence(f"ADS-B 解码：{len(frames)} 帧 CRC 校验通过")
+            r.detail["n_crc_ok_frames"] = len(crc_frames)
+            r.add_evidence(f"ADS-B 解码：{len(frames)} 帧 CRC 校验通过且 DF=17")
             for i, f in enumerate(frames[:5]):
                 r.add_evidence(f"  帧[{i}] icao={f.get('icao','?')} "
                                f"callsign={f.get('callsign','?')} "
                                f"altitude={f.get('altitude','?')}m "
                                f"speed={f.get('speed','?')}kt")
-            r.status = "PASS" if frames else "FAIL"
-            r.message = f"ADS-B 解码完成，{len(frames)} 有效帧"
+
+            expected: dict[str, str] = {}
+            if expected_icao is not None:
+                expected["icao"] = expected_icao.strip().upper()
+            if expected_callsign is not None:
+                expected["callsign"] = expected_callsign.strip().upper()
+            r.detail["expected_fields"] = expected
+
             if not frames:
+                r.status = "FAIL"
+                r.detail["verification_status"] = "not_detected"
+                r.message = "ADS-B 解码失败：0 个 CRC 有效 DF17 帧"
                 r.add_fix("确认 1090 MHz 附近有飞机飞过；换天线位置/调高增益")
+            elif not expected:
+                # 没有外部真值时，只能声明检测到了有效 DF17，不能声称字段已验证。
+                r.status = "PASS"
+                r.detail["verification_status"] = "decode_detected"
+                r.message = (f"ADS-B 解码检测：{len(frames)} 个 CRC 有效 DF17 帧；"
+                             "未提供字段真值")
+            else:
+                def _matches_expected(frame: dict) -> bool:
+                    return all(
+                        str(frame.get(name, "")).strip().upper() == value
+                        for name, value in expected.items()
+                    )
+
+                matched = next((f for f in frames if _matches_expected(f)), None)
+                if matched is None:
+                    r.status = "FAIL"
+                    r.detail["verification_status"] = "field_mismatch"
+                    r.message = f"ADS-B 字段真值不匹配：期望 {expected}"
+                else:
+                    r.status = "PASS"
+                    r.detail["verification_status"] = "fields_verified"
+                    r.message = f"ADS-B 字段验证通过：{expected}"
 
         elif mode == "ax25":
             from mbdsdr_ai.ax25 import AFSKModem
@@ -1163,6 +1204,9 @@ def step_output(
             "n_frames": decode_result.detail.get("n_frames", 0),
         },
     }
+    if mode == "adsb":
+        manifest["decode_summary"]["verification_status"] = \
+            decode_result.detail.get("verification_status")
     try:
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
@@ -1241,6 +1285,10 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"增益 dB（默认 {DEFAULT_GAIN_DB}）")
     ap.add_argument("--mode", default="adsb", choices=list(MODES.keys()),
                     help="解码模式（默认 adsb）")
+    ap.add_argument("--expected-icao", default=None,
+                    help="可选 ADS-B ICAO 真值；提供后须在同一 CRC 有效 DF17 帧严格匹配")
+    ap.add_argument("--expected-callsign", default=None,
+                    help="可选 ADS-B callsign 真值；提供后须在同一 CRC 有效 DF17 帧严格匹配")
     ap.add_argument("--out-dir", default="",
                     help="产物输出目录（默认 paper/experiments/onboarding_<mode>_<timestamp>）")
     ap.add_argument("--raw-path", default="",
@@ -1413,6 +1461,8 @@ def main(argv: list[str] | None = None) -> int:
                     ssdv_pll=args.ssdv_pll,
                     ssdv_soft=args.ssdv_soft,
                     ssdv_asm_tol=args.ssdv_asm_tolerance,
+                    expected_icao=args.expected_icao,
+                    expected_callsign=args.expected_callsign,
                 )
                 dec.detail["sigmf_data"] = sigmf_data_path
                 results.append(dec)

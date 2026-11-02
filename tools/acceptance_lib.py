@@ -15,9 +15,9 @@ MBDSDR 真机端到端演练 · 纯逻辑库（checklist 组装 / 分类 / 校�
   * 纯 Python 标准库：与 diag_wizard/parse_hw_report 一致，云侧不一定有 numpy。
 
 退出码约定（与 selfcheck/diag_wizard/onboard 既有口径对齐）：
-  0  演练全绿：设备在场，且无任何演练步 FAIL（onboard decode 出 0 帧属诚实结果，
-     不判 FAIL——通过口径是 capture/record PASS + SigMF 落盘，见 phase10 手册）。
-  1  设备在场但至少一个演练步 FAIL（真机环境真有问题，需按提示修复）。
+  0  演练全绿：设备在场，且无任何演练步 FAIL；onboard 须同时满足采集/录制
+     通过、SigMF 落盘和解码验收通过，0 帧不能由 record PASS 代偿。
+  1  设备在场但至少一个演练步 FAIL（含 decode FAIL / 0 帧，需按提示修复）。
   2  未检测到 RTL-SDR 设备：下游全部 SKIP，诚实空态（云 VM / 未插机器）。
   3  用法 / 输入错误（raw JSONL 损坏、引用的报告文件缺失等）。
 
@@ -130,12 +130,9 @@ def resolve_event_modes(requested: list[str],
 def onboard_outcome(onboard_report: dict) -> dict:
     """把 onboard.py --json 的 steps 列表翻译成演练步结论。
 
-    通过口径（phase10/P1-acceptance-runbook.md 步骤②）：
-      * detect FAIL            -> 演练步 FAIL（设备没被认到 / 工具缺失）
-      * capture FAIL           -> 演练步 FAIL（空文件 / 占用 / 越界参数）
-      * record PASS 落盘 SigMF -> 演练步 PASS（decode 是否解出 0 帧是诚实信号
-                                  结果，不判环境故障；仅记入 key_output）
-      * 其余                   -> 演练步 FAIL
+    采集、录制与解码是独立验收层：record PASS + SigMF 只证明产物落盘，
+    不能替代 decode PASS。带 ``n_frames`` 的解码结果必须大于 0；ADS-B
+    还必须在解码证据中包含至少一个 CRC 有效的 DF17 帧。
     """
     steps_raw = onboard_report.get("steps") if isinstance(onboard_report, dict) else None
     steps: dict[str, dict] = {}
@@ -155,17 +152,30 @@ def onboard_outcome(onboard_report: dict) -> dict:
 
     rd = record.get("detail") if isinstance(record.get("detail"), dict) else {}
     sigmf_data = str(rd.get("sigmf_data", "")) if isinstance(rd, dict) else ""
+    dec_detail = decode.get("detail") if isinstance(decode.get("detail"), dict) else {}
 
-    if _st("record") == "PASS" and sigmf_data:
+    decode_ok = _st("decode") == "PASS"
+    if "n_frames" in dec_detail:
+        try:
+            decode_ok = decode_ok and int(dec_detail["n_frames"]) > 0
+        except (TypeError, ValueError):
+            decode_ok = False
+
+    mode = str(onboard_report.get("mode", "")).lower() if isinstance(onboard_report, dict) else ""
+    if mode == "adsb":
+        frames = dec_detail.get("decoded_frames")
+        decode_ok = decode_ok and isinstance(frames, list) and any(
+            isinstance(f, dict) and f.get("crc_ok") is True and f.get("df") == 17
+            for f in frames
+        )
+
+    if _st("detect") == "FAIL" or _st("capture") == "FAIL":
+        status = "FAIL"
+    elif _st("record") == "PASS" and sigmf_data and decode_ok:
         status = "PASS"
-    elif _st("detect") == "FAIL":
-        status = "FAIL"
-    elif _st("capture") == "FAIL":
-        status = "FAIL"
     else:
         status = "FAIL"
 
-    dec_detail = decode.get("detail") if isinstance(decode.get("detail"), dict) else {}
     return {
         "status": status,
         "detect": _st("detect"),
@@ -173,7 +183,7 @@ def onboard_outcome(onboard_report: dict) -> dict:
         "record": _st("record"),
         "decode": _st("decode"),
         "decode_message": str(decode.get("message", "")),
-        "n_frames": dec_detail.get("n_frames", 0) if isinstance(dec_detail, dict) else 0,
+        "n_frames": dec_detail.get("n_frames", 0),
         "sigmf_data": sigmf_data,
         "sigmf_dir": os.path.dirname(sigmf_data) if sigmf_data else "",
         "detect_message": str(detect.get("message", "")),
@@ -307,9 +317,6 @@ def _step_from_raw(raw: dict) -> dict:
         )
         if oc["sigmf_data"]:
             item["artifact"] = oc["sigmf_data"]
-        if oc["status"] == "PASS" and oc["decode"] in ("FAIL", "SKIP"):
-            # 诚实：capture/record 过了但没解出东西——不是环境故障
-            item["key_output"] += "（decode 空属信号侧诚实结果，不判环境 FAIL）"
 
     elif sid == "ota_backfill":
         log = _read_text(str(raw.get("log", "")))

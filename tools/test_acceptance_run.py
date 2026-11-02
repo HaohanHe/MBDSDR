@@ -141,8 +141,8 @@ def _record_ok(sigmf: str = "/tmp/onb/xxx.sigmf-data") -> dict:
 
 
 class TestOnboardOutcome:
-    def test_record_pass_even_if_decode_empty_is_pass(self):
-        """capture/record 过了、decode 0 帧 -> 演练步仍 PASS（诚实信号结果）。"""
+    def test_record_pass_with_decode_fail_is_fail(self):
+        """采集/录制通过不能替代解码通过。"""
         rep = _onboard_report([
             _detect_ok(),
             {"step": "capture", "status": "PASS", "message": "",
@@ -152,10 +152,64 @@ class TestOnboardOutcome:
              "evidence": [], "fixes": [], "detail": {"n_frames": 0}},
         ])
         oc = A.onboard_outcome(rep)
-        assert oc["status"] == "PASS"
+        assert oc["status"] == "FAIL"
         assert oc["record"] == "PASS"
         assert oc["n_frames"] == 0
         assert oc["sigmf_dir"] == "/tmp/onb"
+
+    def test_decode_pass_with_zero_frames_is_fail(self):
+        rep = _onboard_report([
+            _detect_ok(),
+            {"step": "capture", "status": "PASS", "message": "",
+             "evidence": [], "fixes": [], "detail": {}},
+            _record_ok(),
+            {"step": "decode", "status": "PASS", "message": "0 帧",
+             "evidence": [], "fixes": [], "detail": {"n_frames": 0}},
+        ])
+        assert A.onboard_outcome(rep)["status"] == "FAIL"
+
+    def test_adsb_crc_ok_non_df17_is_fail(self):
+        rep = _onboard_report([
+            _detect_ok(),
+            {"step": "capture", "status": "PASS", "message": "",
+             "evidence": [], "fixes": [], "detail": {}},
+            _record_ok(),
+            {"step": "decode", "status": "PASS", "message": "1 个 CRC 有效帧",
+             "evidence": [], "fixes": [], "detail": {
+                 "n_frames": 1,
+                 "decoded_frames": [{"df": 18, "crc_ok": True, "icao": "AABBCC"}],
+             }},
+        ])
+        assert A.onboard_outcome(rep)["status"] == "FAIL"
+
+    def test_decode_pass_with_valid_df17_is_pass(self):
+        rep = _onboard_report([
+            _detect_ok(),
+            {"step": "capture", "status": "PASS", "message": "",
+             "evidence": [], "fixes": [], "detail": {}},
+            _record_ok(),
+            {"step": "decode", "status": "PASS", "message": "1 个 CRC 有效 DF17 帧",
+             "evidence": [], "fixes": [], "detail": {
+                 "n_frames": 1,
+                 "decoded_frames": [{"df": 17, "crc_ok": True, "icao": "AABBCC"}],
+                 "verification_status": "decode_detected",
+             }},
+        ])
+        oc = A.onboard_outcome(rep)
+        assert oc["status"] == "PASS"
+        assert oc["n_frames"] == 1
+
+    def test_non_frame_mode_decode_pass_remains_compatible(self):
+        rep = _onboard_report([
+            _detect_ok(),
+            {"step": "capture", "status": "PASS", "message": "",
+             "evidence": [], "fixes": [], "detail": {}},
+            _record_ok(),
+            {"step": "decode", "status": "PASS", "message": "CW 解码完成",
+             "evidence": [], "fixes": [], "detail": {"decoded_text": "TEST"}},
+        ])
+        rep["mode"] = "cw"
+        assert A.onboard_outcome(rep)["status"] == "PASS"
 
     def test_detect_fail_is_fail(self):
         rep = _onboard_report([
@@ -240,16 +294,31 @@ class TestAssemble:
         assert statuses["diag_wizard_paste"] == "PASS"
         assert not A.validate_checklist(ck)
 
+    def test_no_hardware_keeps_onboard_skip_without_decode(self, tmp_path):
+        lines = _raw_lines_with_selfcheck(tmp_path, _no_device_selfcheck(), [
+            {"id": "onboard_adsb", "title": "onb", "skipped": True,
+             "skip_reason": "未检测到设备"},
+        ])
+        ck = A.assemble(lines)
+        assert ck["overall"] == "NO_HARDWARE"
+        assert ck["exit_code"] == A.EXIT_NO_HW
+        assert ck["steps"][1]["status"] == "SKIP"
+        assert ck["failed_steps"] == []
+
     def test_green_device_path(self, tmp_path):
-        # onboard adsb json：record PASS、decode 0 帧（诚实）
+        # 正常路径：采集/录制通过，且解码证据含 CRC 有效 DF17。
         onb_path = tmp_path / "onboard_adsb.json"
         _write_json(onb_path, _onboard_report([
             _detect_ok(),
             {"step": "capture", "status": "PASS", "message": "",
              "evidence": [], "fixes": [], "detail": {}},
             _record_ok(str(tmp_path / "rec" / "x.sigmf-data")),
-            {"step": "decode", "status": "FAIL", "message": "0 帧",
-             "evidence": [], "fixes": [], "detail": {"n_frames": 0}},
+            {"step": "decode", "status": "PASS", "message": "1 个 CRC 有效 DF17 帧",
+             "evidence": [], "fixes": [], "detail": {
+                 "n_frames": 1,
+                 "decoded_frames": [{"df": 17, "crc_ok": True, "icao": "AABBCC"}],
+                 "verification_status": "decode_detected",
+             }},
         ]))
         ota_log = tmp_path / "ota.txt"
         ota_log.write_text("[写] ota_recorded_metrics.csv（1 行，口径=recorded）",
@@ -268,7 +337,6 @@ class TestAssemble:
         assert ck["overall"] == "PASS"
         assert ck["exit_code"] == A.EXIT_OK
         statuses = {s["id"]: s["status"] for s in ck["steps"]}
-        # record PASS + decode 0 帧 -> onboard 步仍 PASS
         assert statuses["onboard_adsb"] == "PASS"
         assert statuses["ota_backfill"] == "PASS"
         assert not A.validate_checklist(ck)
@@ -294,6 +362,32 @@ class TestAssemble:
         assert ck["overall"] == "FAIL"
         assert ck["exit_code"] == A.EXIT_HW_FAIL
         assert "onboard_adsb" in ck["failed_steps"]
+
+    @pytest.mark.parametrize("decode_status,n_frames", [("FAIL", 1), ("PASS", 0)])
+    def test_device_present_but_decode_not_accepted_fails_overall(
+            self, tmp_path, decode_status, n_frames):
+        onb_path = tmp_path / "onboard_adsb.json"
+        _write_json(onb_path, _onboard_report([
+            _detect_ok(),
+            {"step": "capture", "status": "PASS", "message": "",
+             "evidence": [], "fixes": [], "detail": {}},
+            _record_ok(str(tmp_path / "rec" / "x.sigmf-data")),
+            {"step": "decode", "status": decode_status, "message": "解码未验收",
+             "evidence": [], "fixes": [], "detail": {
+                 "n_frames": n_frames,
+                 "decoded_frames": [{"df": 17, "crc_ok": True, "icao": "AABBCC"}],
+             }},
+        ]))
+        lines = _raw_lines_with_selfcheck(tmp_path, _green_selfcheck(), [
+            {"id": "onboard_adsb", "title": "onb", "rc": 1,
+             "onboard_json": str(onb_path)},
+        ])
+        ck = A.assemble(lines)
+        statuses = {s["id"]: s["status"] for s in ck["steps"]}
+        assert statuses["onboard_adsb"] == "FAIL"
+        assert ck["overall"] == "FAIL"
+        assert ck["exit_code"] == A.EXIT_HW_FAIL
+        assert ck["failed_steps"] == ["onboard_adsb"]
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +433,7 @@ class TestCLI:
         _write_json(p, _green_selfcheck())
         r = subprocess.run([sys.executable, str(_HERE / "acceptance_lib.py"),
                             "device-present", str(p)],
-                           capture_output=True, text=True, check=False)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert r.returncode == 0
         assert r.stdout.strip() == "true"
 
@@ -347,7 +441,7 @@ class TestCLI:
         _write_json(p2, _no_device_selfcheck())
         r2 = subprocess.run([sys.executable, str(_HERE / "acceptance_lib.py"),
                              "device-present", str(p2)],
-                            capture_output=True, text=True, check=False)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert r2.stdout.strip() == "false"
 
     def test_assemble_cli_writes_valid_checklist(self, tmp_path):
@@ -365,7 +459,7 @@ class TestCLI:
         out = tmp_path / "ck.json"
         r = subprocess.run([sys.executable, str(_HERE / "acceptance_lib.py"),
                             "assemble", "--raw", str(raw), "--out", str(out)],
-                           capture_output=True, text=True, check=False)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         # 无设备路径 -> 退出码 2
         assert r.returncode == A.EXIT_NO_HW, r.stderr
         ck = json.loads(out.read_text(encoding="utf-8"))
@@ -373,7 +467,7 @@ class TestCLI:
         # 再用 validate 子命令复核
         rv = subprocess.run([sys.executable, str(_HERE / "acceptance_lib.py"),
                              "validate", str(out)],
-                            capture_output=True, text=True, check=False)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert rv.returncode == 0, rv.stdout
 
     def test_assemble_bad_jsonl_returns_usage(self, tmp_path):
@@ -382,7 +476,7 @@ class TestCLI:
         out = tmp_path / "ck.json"
         r = subprocess.run([sys.executable, str(_HERE / "acceptance_lib.py"),
                             "assemble", "--raw", str(raw), "--out", str(out)],
-                           capture_output=True, text=True, check=False)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert r.returncode == A.EXIT_USAGE
 
     def test_assemble_empty_raw_returns_usage(self, tmp_path):
@@ -391,7 +485,7 @@ class TestCLI:
         out = tmp_path / "ck.json"
         r = subprocess.run([sys.executable, str(_HERE / "acceptance_lib.py"),
                              "assemble", "--raw", str(raw), "--out", str(out)],
-                            capture_output=True, text=True, check=False)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert r.returncode == A.EXIT_USAGE
 
 
@@ -487,7 +581,7 @@ class TestResolveEventCLI:
             [sys.executable, str(_HERE / "acceptance_lib.py"),
              "resolve-event", "--modes", "sstv,ssdv",
              "--freq-sstv", "435e6", "--freq-ssdv", "436e6"],
-            capture_output=True, text=True, check=False)
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert r.returncode == 0, r.stderr
         out = json.loads(r.stdout.strip().splitlines()[-1])
         assert out["modes"] == ["sstv", "ssdv"]
@@ -498,7 +592,7 @@ class TestResolveEventCLI:
             [sys.executable, str(_HERE / "acceptance_lib.py"),
              "resolve-event", "--modes", "sstv,ssdv",
              "--freq-sstv", "435e6"],  # 缺 ssdv
-            capture_output=True, text=True, check=False)
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert r.returncode == A.EXIT_USAGE
         assert "P3-event-params" in r.stderr or "freq-ssdv" in r.stderr
 
@@ -506,7 +600,7 @@ class TestResolveEventCLI:
         r = subprocess.run(
             [sys.executable, str(_HERE / "acceptance_lib.py"),
              "resolve-event", "--modes", "adsb", "--freq-sstv", "x"],
-            capture_output=True, text=True, check=False)
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         assert r.returncode == A.EXIT_USAGE
         assert "非法活动模式" in r.stderr
 
