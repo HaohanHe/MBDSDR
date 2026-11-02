@@ -278,6 +278,11 @@ class SyncResult:
     symbols: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int8))
     sync_quality: float = 0.0       # 相关峰 / 次峰比
     n_time_bins: int = 0             # 搜索窗内时间 bin 数（诊断用）
+    # 79×8 逐音匹配滤波软能量（软判决 LDPC 输入；硬符号=argmax(e)）。
+    # synced=False 时为空 (0,8) 数组。2026-11-02：外部真值对拍用，弱信号
+    # 软解比硬判决多出数 dB 编码增益。
+    energies: np.ndarray = field(
+        default_factory=lambda: np.empty((0, N_TONES), dtype=np.float64))
 
 
 class Ft8CostasSync:
@@ -435,10 +440,12 @@ class Ft8CostasSync:
                 best_E, best_b = E, b
         time_offset_samples = int(best_b)
 
-        # 精边界处提取 79 个符号（8 音匹配能量 argmax）
+        # 精边界处提取 79 个符号（8 音匹配能量 argmax）+ 逐音软能量
         symbols = np.empty(N_SYMBOLS, dtype=np.int8)
+        energies = np.empty((N_SYMBOLS, N_TONES), dtype=np.float64)
         for k in range(N_SYMBOLS):
             e = _block_energy(time_offset_samples + k * self.nsps)
+            energies[k] = e if e.size else 0.0
             symbols[k] = int(np.argmax(e))
 
         return SyncResult(
@@ -448,4 +455,5 @@ class Ft8CostasSync:
             symbols=symbols,
             sync_quality=quality,
             n_time_bins=n_win,
+            energies=energies,
         )
