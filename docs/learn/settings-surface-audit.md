@@ -187,3 +187,23 @@ E3 四条（含排查中新坐实的"失败被空态覆盖"一条）、E4 四条
 
 其余 3/4/5/6 条状态不变（4 的 freq_spin 死路径已在 d12910e 修复销账；
 5 clean_exc Windows 映射、3 module_panel Hz 显示仍只报/未闭环）。
+
+
+## 十、销账补记（2026-11-02）
+
+七章“只报/未闭环”中的 3、5 两条已修并钉住（451073e）：
+
+3. **module_panel 频率旋钮 Hz 七位数反人类** → 已修：旋钮改 **MHz 人类量纲**
+   （decimals=4，100 Hz 步进），`tune_requested` 信号仍发 Hz——量纲换算只在
+   控件边界（emit `round(v*1e6)`），消费方（main_window `_on_module_tune`）
+   不动。钉扎：suffix/bounds 断言随语义修复更新 +
+   `test_module_freq_spin_emits_hz_across_boundary` 钉死边界换算。
+5. **clean_exc 对 Windows 错误串无映射** → 已修：`_EN_MSG_MAP` 补
+   `[WinError 10061/10060/10065/10054]` 四条（与 Linux errno 三条语义对齐）。
+   Windows 网络类失败不再泄漏 `<urlopen error …>` 英文包裹串、不再被打成
+   「计算错误: …（请检查输入参数）」。钉扎：`test_clean_exc` 新增五断言用例
+   （含 urllib 包裹真实形态）。
+
+至此七章账面：1/2/4 已在前轮修（增益动态范围、音量 0-100、freq_spin 死路径），
+3/5 本轮修，仅剩 6（配置键漂移残留 4 + C++ 对拍残留 1/2——后者随 C++ 工具面
+CI 首验通过已在 cpp-tool-ui-reverse-audit.md 销账，配置键漂移残留待核）。
