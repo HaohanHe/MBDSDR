@@ -8,17 +8,18 @@
 均为 FT8 公开标准规定的协议事实，不构成 GPL 代码表达。
 
 能力边界（诚实声明）：
-  - 本轮只做 **物理层符号合成 + Costas 粗同步**：
+  - 提供 **物理层符号合成 + 消息数据段编码 + Costas 粗同步**：
       * :class:`Ft8Modulator`：连续相位 8-FSK 复基带 IQ 合成（12 kS/s），
         可注入频偏 / 时偏 / AWGN（固定种子可复现）；
       * :class:`Ft8CostasSync`：4× 时间过采样 / 2× 频率过采样的符号谱上做
         频偏×时偏二维 Costas 相关峰搜索，输出频偏、时偏、79 个符号与
-        峰/次峰比 sync_quality。
-  - **不做** LDPC(174,91) 编码 / 解交织 / BP 解码 / 77-bit 消息 unpack
-    （留第②步）。:meth:`Ft8Modulator.encode_message` 仅留接口签名，调用即
-    :class:`NotImplementedError`；本轮数据段由
-    :meth:`Ft8Modulator.placeholder_data_symbols` 注入**确定性伪随机符号**
-    （固定 seed，非真实编码）。
+        峰/次峰比 sync_quality；
+      * :meth:`Ft8Modulator.encode_message`：委托 ``ft8_codec`` 完成 pack77、
+        CRC14 与 LDPC(174,91) 编码，输出 58 个数据 tone；``message_text``
+        仍预留，当前消息由 from/to/grid/report 参数指定。
+  - 本模块不负责 LDPC BP 解码 / 77-bit 消息 unpack；
+    :meth:`Ft8Modulator.placeholder_data_symbols` 仍只生成明确标注的
+    **确定性伪随机符号**（固定 seed，非真实编码）。
   - 无信号 / 纯噪声时返回**诚实空态**：``synced=False``、符号数组为空，
     不编造呼号 / 网格 / 同步结果。
 

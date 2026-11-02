@@ -3,7 +3,7 @@
 
 合成一个已知符号序列的 FT8 8FSK 音频（79 符号 × 160ms，8 音调间隔 6.25Hz），
 再用 ft8_lite 解调，比对解出的音调索引与原序列一致——验证解调不是空壳。
-（LDPC 译码还原呼号仍需 jt9/wsjtx，这里只验证符号层往返。）
+（完整消息解码由 ft8_lite.decode_ft8_audio 提供；这里只验证符号层往返。）
 """
 from __future__ import annotations
 

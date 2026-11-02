@@ -138,7 +138,7 @@ def demodulate_8fsk(samples: List[float], sample_rate: float,
         "num_symbols": len(idxs),
         "center_hz": round(center, 2),
         "avg_margin": round(avg_margin, 2),
-        "note": "原始音调序列；LDPC 译码还原呼号需 jt9/wsjtx",
+        "note": "原始音调序列；LDPC/CRC 消息解码见 decode_ft8_audio",
     }
 
 

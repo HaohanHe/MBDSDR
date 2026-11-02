@@ -304,10 +304,10 @@ class FrequencyManager:
 
 # ---- 数字模式默认参数表（依据 FT8/FT4 等公开协议标准；wsjtx 仅作技术参考）----
 MODE_PARAMS = {
-    "FT8": {"tr_period_s": 15.0, "nsps": 6912, "ftol_hz": 50,
+    "FT8": {"tr_period_s": 15.0, "nsps": 1920, "ftol_hz": 50,
             "tone_spacing_hz": 6.25, "sample_rate": 12000},
-    "FT4": {"tr_period_s": 7.5, "nsps": 2304, "ftol_hz": 50,
-            "tone_spacing_hz": 18.75, "sample_rate": 12000},
+    "FT4": {"tr_period_s": 7.5, "nsps": 576, "ftol_hz": 50,
+            "tone_spacing_hz": 1 / 0.048, "sample_rate": 12000},
     "FST4": {"tr_period_s": 15.0, "nsps": 6912, "ftol_hz": 50,
              "tone_spacing_hz": 6.25, "sample_rate": 12000},
     "WSPR": {"tr_period_s": 120.0, "nsps": 16384, "ftol_hz": 100,

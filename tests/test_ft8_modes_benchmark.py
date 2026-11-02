@@ -84,13 +84,18 @@ def test_mode_params_table():
     ft8 = fm.get_mode_params("FT8")
     assert ft8["tr_period_s"] == 15.0
     assert ft8["ftol_hz"] == 50
-    assert ft8["nsps"] == 6912
+    assert ft8["nsps"] == 1920
     assert ft8["tone_spacing_hz"] == 6.25
+    assert ft8["sample_rate"] == 12000
 
     # 大小写不敏感
     assert fm.get_mode_params("ft8")["tr_period_s"] == 15.0
-    # FT4 周期 7.5s
-    assert fm.get_mode_params("FT4")["tr_period_s"] == 7.5
+    # FT4：48ms @ 12kHz = 576 样本/符号，音距 = 1/0.048Hz
+    ft4 = fm.get_mode_params("FT4")
+    assert ft4["tr_period_s"] == 7.5
+    assert ft4["nsps"] == 576
+    assert ft4["tone_spacing_hz"] == 1 / 0.048
+    assert ft4["sample_rate"] == 12000
     # 未知模式返回空 dict
     assert fm.get_mode_params("NONEXISTENT") == {}
 

@@ -9,7 +9,7 @@ Decoders：各种数字模式的解码器。
 2. NOAA APT 气象卫星图像解码
 3. SSTV 慢扫描电视解码（简化版）
 4. 跳频信号检测（FHSS）
-5. FT8/APRS/ADS-B 框架（调用外部工具或简化实现）
+5. FT4/FT8/WSPR/APRS/ADS-B（按各入口实际能力路由）
 """
 
 import os
@@ -17,7 +17,7 @@ import time
 
 import math
 import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Sequence, Tuple
 from dataclasses import dataclass
 
 # sgp4 卫星轨道计算
@@ -764,7 +764,7 @@ def detect_fhss(
 
 
 # ═══════════════════════════════════════════════════════
-# 6. 通用数字解码框架（FT8/APRS/ADS-B）
+# 6. 通用数字解码框架（FT4/FT8/WSPR/APRS/ADS-B）
 # ═══════════════════════════════════════════════════════
 
 def _read_wav_audio(input_path: str) -> Tuple[Optional[np.ndarray], float, Optional[str]]:
@@ -819,12 +819,357 @@ def _demod_iq_to_audio(input_path: str, sample_rate: float,
     return np.asarray(audio, dtype=np.float64), float(out_sr), None
 
 
+def _resample_audio(audio: np.ndarray, source_rate: float,
+                    target_rate: float) -> np.ndarray:
+    """用多相滤波保持窄带音频时长；支持 WSPR 下变频后的复序列。"""
+    source = int(round(source_rate))
+    target = int(round(target_rate))
+    if source <= 0 or target <= 0 or source != source_rate or target != target_rate:
+        raise ValueError("音频采样率必须是正整数")
+    if source == target:
+        return np.asarray(audio)
+    from math import gcd
+    from scipy.signal import resample_poly
+    divisor = gcd(source, target)
+    converted = resample_poly(audio, target // divisor, source // divisor)
+    dtype = np.complex128 if np.iscomplexobj(audio) else np.float64
+    return np.asarray(converted, dtype=dtype)
+
+
+def _narrowband_reject(result: Dict[str, Any], mode: str,
+                       reason: str, error: str) -> Dict[str, Any]:
+    """非法输入或解码器异常；与有效捕获但零帧的 empty 区分。"""
+    check_value = False if mode == "ft4" else None
+    result.update({
+        "ok": False,
+        "status": "rejected",
+        "rejected": True,
+        "found": False,
+        "messages": [],
+        "num_messages": 0,
+        "num_frames": 0,
+        "reject_reason": reason,
+        "parity_ok": check_value,
+        "crc_ok": check_value,
+        "error": error,
+    })
+    return result
+
+
+def _narrowband_empty(result: Dict[str, Any], mode: str,
+                      reason: str) -> Dict[str, Any]:
+    """输入有效但未产出消息，不把空结果包装成异常或解码成功。"""
+    check_value = False if mode == "ft4" else None
+    result.update({
+        "ok": False,
+        "status": "empty",
+        "rejected": False,
+        "found": False,
+        "messages": [],
+        "num_messages": 0,
+        "num_frames": 0,
+        "reject_reason": reason,
+        "parity_ok": check_value,
+        "crc_ok": check_value,
+    })
+    return result
+
+
+def _ft4_sync_info(sync) -> Dict[str, Any]:
+    """把 Ft4SyncResult 的诊断字段转成可序列化字典，不带软能量大数组。"""
+    return {
+        key: getattr(sync, key)
+        for key in (
+            "synced", "base_freq_hz", "time_offset_samples", "sync_score",
+            "sync_ratio", "sync_contrast", "reason", "n_time_bins", "n_freq_bins",
+        )
+    }
+
+
+def _ft4_message(decoded: Dict[str, Any], candidate: Optional[Dict[str, Any]],
+                 sample_rate: float) -> Dict[str, Any]:
+    """保留已验证 77 bit 载荷；未知消息类型的 text 可以继续为 None。"""
+    sync = decoded["sync"]
+    message = {
+        "text": decoded["text"],
+        "data_bits": decoded["data_bits"],
+        "unpacked": decoded["unpacked"],
+        "parity_ok": decoded["parity_ok"],
+        "crc_ok": decoded["crc_ok"],
+        "frequency_hz": float(sync.base_freq_hz),
+        "time_offset_seconds": float(sync.time_offset_samples / sample_rate),
+        "sync": _ft4_sync_info(sync),
+    }
+    if candidate is not None:
+        message["coarse_candidate"] = candidate
+    return message
+
+
+def _decode_ft4_wav(input_path: str, ext: str, result: Dict[str, Any],
+                    center_frequency_hz: float,
+                    frequency_search_hz: Optional[Tuple[float, float]],
+                    ) -> Dict[str, Any]:
+    """FT4 WAV 多峰候选经现有同步/FEC 解码，按 77 bit 有效载荷去重。"""
+    result["note"] = (
+        "内置 FT4 GFSK 非相干解调、Costas 时频同步、LDPC(174,91) 与 CRC14；"
+        "逐个解码粗同步候选并按 77 bit 载荷去重，num_frames 不是重复候选数。"
+        "候选上限与掩蔽半径是实现策略，不据此声明 OTA 或弱信号灵敏度已验收。"
+    )
+    if ext != ".wav":
+        return _narrowband_reject(
+            result, "ft4", "unsupported_format",
+            f"FT4 窄带入口仅支持 .wav 实音频，收到 {ext or '无扩展名'}；"
+            "不支持把原始 IQ 或宽带 FM 鉴频当作已验证的 FT4 输入。",
+        )
+    audio, audio_rate, error = _read_wav_audio(input_path)
+    if error:
+        return _narrowband_reject(result, "ft4", "invalid_wav", error)
+    result["audio_sample_rate_hz"] = float(audio_rate)
+
+    try:
+        center = float(center_frequency_hz)
+        if not math.isfinite(center):
+            raise ValueError("center_frequency_hz 必须是有限数值")
+        search = frequency_search_hz
+        if search is None:
+            # 默认工作点对应常见 1500 Hz 音频附近；不是 FT4 协议常量。
+            search = (center - 80.0, center + 80.0)
+        from .ft4_modem import FS_HZ, NSPS, Ft4Receiver
+        working = _resample_audio(audio, audio_rate, FS_HZ)
+        receiver = Ft4Receiver(
+            fs=FS_HZ, nsps=NSPS, freq_search_hz=search,
+        )
+
+        rows = []
+        candidate_count = 0
+        max_start = int(working.size - receiver.frame_samples)
+        if max_start >= 0 and bool((np.abs(working) > 0.0).any()):
+            starts = np.arange(
+                0, max_start + 1, receiver.coarse_time_step, dtype=np.int64,
+            )
+            if starts[-1] != max_start:
+                starts = np.append(starts, max_start)
+            frequencies = np.arange(
+                receiver.freq_lo,
+                receiver.freq_hi + receiver.coarse_freq_step * 0.5,
+                receiver.coarse_freq_step,
+                dtype=np.float64,
+            )
+            frequencies = frequencies[frequencies <= receiver.freq_hi]
+            if frequencies[-1] < receiver.freq_hi:
+                frequencies = np.append(frequencies, receiver.freq_hi)
+
+            # 类接口只返回单个最佳峰；入口复用同一相关面选取多个粗候选，
+            # 但每个候选仍由公开 sync/decode 与 LDPC/CRC 门独立验证。
+            plane = receiver._score_plane(working, frequencies, starts)
+            masked = plane.copy()
+            candidates = []
+            freq_radius = int(math.ceil(72.0 / receiver.coarse_freq_step))
+            time_radius = int(math.ceil(
+                receiver.nsps / receiver.coarse_time_step
+            ))
+            for _ in range(40):  # 捕获扫描预算，不是协议常量。
+                f_index, t_index = np.unravel_index(
+                    int(np.argmax(masked)), masked.shape,
+                )
+                score = float(masked[f_index, t_index])
+                if not math.isfinite(score) or score <= 0.0:
+                    break
+                candidates.append({
+                    "approx_base_hz": float(frequencies[f_index]),
+                    "approx_start": int(starts[t_index]),
+                    "coarse_score": score,
+                })
+                f0 = max(0, f_index - freq_radius)
+                f1 = min(masked.shape[0], f_index + freq_radius + 1)
+                t0 = max(0, t_index - time_radius)
+                t1 = min(masked.shape[1], t_index + time_radius + 1)
+                masked[f0:f1, t0:t1] = -np.inf
+
+            candidate_count = len(candidates)
+            for candidate in candidates:
+                approximate = candidate["approx_base_hz"]
+                lo = max(receiver.freq_lo, approximate - 6.0)
+                hi = min(receiver.freq_hi, approximate + 6.0)
+                local = Ft4Receiver(
+                    fs=FS_HZ,
+                    nsps=NSPS,
+                    freq_search_hz=(lo, hi),
+                    coarse_freq_step_hz=receiver.coarse_freq_step,
+                    coarse_time_step_samples=receiver.coarse_time_step,
+                    sync_ratio_threshold=receiver.ratio_threshold,
+                    sync_contrast_threshold=receiver.contrast_threshold,
+                )
+                rows.append((candidate, local.decode(working)))
+        if not rows:
+            # 静音、短捕获或零相关面仍保留真实诊断；候选计数保持为零。
+            rows.append((None, receiver.decode(working)))
+    except ValueError as exc:
+        return _narrowband_reject(
+            result, "ft4", "invalid_input", f"FT4 输入/参数错误: {exc}",
+        )
+    except Exception as exc:
+        return _narrowband_reject(
+            result, "ft4", "decode_error", f"FT4 解码失败: {exc}",
+        )
+
+    valid_rows = [row for row in rows if row[1]["ok"]]
+    unique_rows = []
+    seen_payloads = set()
+    for row in valid_rows:
+        payload = tuple(row[1]["data_bits"])
+        if payload not in seen_payloads:
+            seen_payloads.add(payload)
+            unique_rows.append(row)
+
+    best = (unique_rows[0] if unique_rows else rows[0])[1]
+    sync = best["sync"]
+    for key, value in best.items():
+        if key != "sync":
+            result[key] = value
+    messages = [
+        _ft4_message(decoded, candidate, FS_HZ)
+        for candidate, decoded in unique_rows
+    ]
+    result.update({
+        "ok": bool(unique_rows),
+        "status": "decoded" if unique_rows else (
+            "rejected" if any(row[1]["sync"].synced for row in rows) else "empty"
+        ),
+        "rejected": False if unique_rows else any(
+            row[1]["sync"].synced for row in rows
+        ),
+        "found": bool(unique_rows),
+        "messages": messages,
+        "num_messages": len(messages),
+        "num_frames": len(messages),
+        "candidate_count": candidate_count,
+        "accepted_candidate_count": len(valid_rows),
+        "duplicate_payload_count": len(valid_rows) - len(unique_rows),
+        "reject_reason": "" if unique_rows else best["reject_reason"],
+        "sync": _ft4_sync_info(sync),
+        "decode_sample_rate_hz": float(FS_HZ),
+        "frequency_hz": float(sync.base_freq_hz) if sync.synced else None,
+        "time_offset_seconds": (
+            float(sync.time_offset_samples / FS_HZ) if sync.synced else None
+        ),
+    })
+    return result
+
+
+def _decode_wspr_wav(input_path: str, ext: str, result: Dict[str, Any],
+                     center_frequency_hz: float,
+                     frequency_offsets_hz: Optional[Sequence[float]],
+                     time_offsets_seconds: Optional[Sequence[float]],
+                     ) -> Dict[str, Any]:
+    """经典 WSPR Type 1 WAV → 下变频 → 调用者时频网格搜索译码。"""
+    result["note"] = (
+        "内置经典 WSPR Type 1：50 bit 消息、K=32/r=1/2 卷积码、162 信道符号、"
+        "4FSK；先下变频到 375 Hz，再仅在指定候选时频网格内搜索。"
+        "不含宽带盲捕获、频率漂移、多信号相消或 OTA/弱信号灵敏度验收。"
+    )
+    if ext != ".wav":
+        return _narrowband_reject(
+            result, "wspr", "unsupported_format",
+            f"WSPR 窄带入口仅支持 .wav 实音频，收到 {ext or '无扩展名'}；"
+            "不支持把原始 IQ 或宽带 FM 鉴频当作已验证的 WSPR 输入。",
+        )
+    audio, audio_rate, error = _read_wav_audio(input_path)
+    if error:
+        return _narrowband_reject(result, "wspr", "invalid_wav", error)
+    result["audio_sample_rate_hz"] = float(audio_rate)
+
+    try:
+        from .wspr_modem import (
+            REFERENCE_SAMPLE_RATE_HZ,
+            REFERENCE_SAMPLES_PER_SYMBOL,
+            WSPR_SYMBOL_COUNT,
+            WSPR_TONE_SPACING_HZ,
+            search_and_decode,
+        )
+        nominal = float(center_frequency_hz)
+        if not math.isfinite(nominal):
+            raise ValueError("center_frequency_hz 必须是有限数值")
+        if (nominal - 1.5 * WSPR_TONE_SPACING_HZ < 0.0
+                or nominal + 1.5 * WSPR_TONE_SPACING_HZ >= audio_rate / 2.0):
+            raise ValueError("WSPR 标称四音中心必须位于实音频 Nyquist 区间内")
+        # 只作复数下变频和抗混叠重采样，不进行宽带 FM 鉴频。
+        times = np.arange(audio.size, dtype=np.float64) / audio_rate
+        baseband = audio * np.exp(-2j * np.pi * nominal * times)
+        baseband = _resample_audio(
+            baseband, audio_rate, REFERENCE_SAMPLE_RATE_HZ,
+        )
+        decoded = search_and_decode(
+            baseband,
+            REFERENCE_SAMPLE_RATE_HZ,
+            nominal_center_frequency_hz=0.0,
+            frequency_offsets_hz=(
+                (0.0,) if frequency_offsets_hz is None else frequency_offsets_hz
+            ),
+            time_offsets_seconds=(
+                (0.0,) if time_offsets_seconds is None else time_offsets_seconds
+            ),
+        )
+    except ValueError as exc:
+        return _narrowband_reject(
+            result, "wspr", "invalid_input", f"WSPR 输入/参数错误: {exc}",
+        )
+    except Exception as exc:
+        return _narrowband_reject(
+            result, "wspr", "decode_error", f"WSPR 解码失败: {exc}",
+        )
+
+    result["decode_sample_rate_hz"] = float(REFERENCE_SAMPLE_RATE_HZ)
+    if decoded is None:
+        if not bool((np.abs(audio) > 0.0).any()):
+            reason = "no_signal"
+        elif baseband.size < WSPR_SYMBOL_COUNT * REFERENCE_SAMPLES_PER_SYMBOL:
+            reason = "short_capture"
+        else:
+            # 底层 Optional API 不区分同步门限、FEC 预算和字段拒绝。
+            reason = "no_valid_candidate"
+        return _narrowband_empty(result, "wspr", reason)
+
+    absolute_frequency = nominal + decoded.frequency_hz
+    message = {
+        "callsign": decoded.message.callsign,
+        "grid4": decoded.message.grid4,
+        "power_dbm": decoded.message.power_dbm,
+        "bits": list(decoded.bits),
+        "frequency_hz": float(absolute_frequency),
+        "start_sample": decoded.start_sample,
+        "time_offset_seconds": decoded.time_offset_seconds,
+        "sync_metric": decoded.sync_metric,
+    }
+    result.update({
+        "ok": True,
+        "status": "decoded",
+        "rejected": False,
+        "found": True,
+        "messages": [message],
+        "num_messages": 1,
+        "num_frames": 1,
+        "reject_reason": "",
+        # 经典 WSPR 这条链没有 FT4/FT8 的 LDPC 奇偶校验或 CRC 字段。
+        "parity_ok": None,
+        "crc_ok": None,
+        "frequency_hz": float(absolute_frequency),
+        "time_offset_seconds": decoded.time_offset_seconds,
+        "sync_metric": decoded.sync_metric,
+    })
+    return result
+
+
 def decode_digital_mode(
     input_path: str,
     mode: str,
     output_dir: str = None,
     sample_rate: float = 1e6,
     baud: int = 512,
+    center_frequency_hz: float = 1500.0,
+    frequency_search_hz: Optional[Tuple[float, float]] = None,
+    frequency_offsets_hz: Optional[Sequence[float]] = None,
+    time_offsets_seconds: Optional[Sequence[float]] = None,
 ) -> Dict[str, Any]:
     """
     通用数字模式解码框架。
@@ -832,15 +1177,19 @@ def decode_digital_mode(
     adsb: 内置纯 numpy Mode-S DF17 解码器（CRC-24 MSB-first、8us 前导模板，
           已与 pyModeS 交叉验证），直接读 .cf32 复基带；仅支持 fs 为 1MHz
           整数倍（Mode-S 符号率 1Mbit/s）。dump1090 为可选外部增强。
-    ft8:  需要 jt9/wsjtx（LDPC(174,91) 标准校验矩阵不可凭空编造），缺失时
-          只做符号级频谱分析并诚实说明，不伪造解调结果。
+    ft4:  .wav 实音频路由到内置 GFSK/Costas 同步及 LDPC(174,91)/CRC14。
+          center_frequency_hz 是默认 tone-0 搜索中心；frequency_search_hz
+          可显式指定实际音频 tone-0 搜索范围。
+    ft8:  仓内已有 Costas 同步、LDPC(174,91)、CRC14 与消息编解码实现；
+          ft8_lite.decode_ft8_audio 是独立音频 API，本通用入口尚未接线，
+          jt9/wsjtx 仅为可选外部工具，不在这里虚构 WAV 解码结果。
     aprs: 可路由到内置 AX.25/AFSK(Bell202) 解码器；direwolf 为可选增强。
     pocsag: 路由到内置 pocsag_decoder.pocsag_decode（FSK 1200/2400Hz 音调，
           baud 支持 512/1200/2400）。.wav 直接解；.cf32 走宽带 FM 鉴频后解。
     acars: 路由到内置 acars_decoder.ACARSDecoder（MSK 2400Hz/2400baud 带音频，
           12.5kHz 走带）。.wav 直接解；.cf32 走宽带 FM 鉴频后解。
-    wspr: 完整译码需 wsprd（WSJT-X 套件，(250,50) 前向纠错 + 4-FSK 1.46Hz），
-          仓内无实现，缺失时诚实说明，不伪造呼号/网格。
+    wspr: .wav 实音频路由到仓内经典 Type 1 解码；center_frequency_hz 是标称
+          四音中心，frequency_offsets_hz/time_offsets_seconds 指定候选网格。
     meteor: 路由到内置 meteor_sat.meteor_lrpt_demod（QPSK→DQPSK→Viterbi 骨架）。
     """
     if not os.path.exists(input_path):
@@ -905,18 +1254,18 @@ def decode_digital_mode(
                 result["note"] = "内置纯 numpy Mode-S DF17 解码器（已与 pyModeS 交叉验证）"
         except Exception as e:
             result["analysis_error"] = str(e)
+    elif mode == "ft4":
+        return _decode_ft4_wav(
+            input_path, ext, result, center_frequency_hz, frequency_search_hz,
+        )
     elif mode == "ft8":
+        result["note"] = (
+            "仓内已有 FT8 Costas 同步、LDPC(174,91)、CRC14 与 77 位消息编解码；"
+            "ft8_lite.decode_ft8_audio 是独立音频 API，本通用入口尚未接线，"
+            "因此不在这里宣称已完成 FT8 WAV 解码。"
+        )
         if available_tools:
-            result["note"] = (
-                f"FT8 完整解码依赖 jt9/wsjtx（LDPC(174,91) 标准稀疏校验矩阵 + 79 符号 "
-                f"8-FSK/170Hz/6.25 波特）；检测到外部工具 {available_tools[0]}，"
-                "可用其对 15s 时隙的 1500Hz 基带音频译码。"
-            )
-        else:
-            result["note"] = (
-                "FT8 完整解码依赖 jt9/wsjtx（LDPC(174,91) 标准稀疏校验矩阵 + 79 符号 "
-                "8-FSK/170Hz/6.25 波特）；当前环境未安装，不伪造解调结果。"
-            )
+            result["note"] += f" 检测到可选外部工具 {available_tools[0]}。"
     elif mode == "aprs":
         result["note"] = (
             "APRS 为 1200 波特 AFSK(Bell202) over AX.25；内置 ax25.py 已具备 "
@@ -971,10 +1320,9 @@ def decode_digital_mode(
             except Exception as e:
                 result["error"] = f"ACARS 解码失败: {e}"
     elif mode == "wspr":
-        result["note"] = (
-            "WSPR 完整译码依赖 wsprd（WSJT-X 套件；(250,50) 前向纠错 + 4-FSK "
-            "1.46 波特/1.5Hz 音调间距）；仓内无实现，不伪造呼号/网格。"
-            "安装 wsjtx 后可用其 wsprd 译码 2 分钟时隙的 1500Hz 基带音频。"
+        return _decode_wspr_wav(
+            input_path, ext, result, center_frequency_hz,
+            frequency_offsets_hz, time_offsets_seconds,
         )
     elif mode == "meteor":
         # Meteor-M2 LRPT：QPSK→差分→去交织→Viterbi 骨架（.cf32 复基带）
