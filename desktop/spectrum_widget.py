@@ -787,6 +787,7 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
         painter.drawText(QPointF((w - tw2) / 2.0, y1 + 20), msg2)
 
     # 中心频率游标
+    _draw_bandplan(painter, state, spec_rect, overlay=True)
     _draw_center_cursor(painter, spec_rect, QColor(PAL_LINE))
 
     # 悬停读数 + 固定 marker + 书签竖旗（都读真实数组/真实收藏）
@@ -905,11 +906,12 @@ def _draw_hold_lines(painter, state, rect):
         _line(gen.min_hold, QColor(PAL_MINHOLD))
 
 
-def _draw_bandplan(painter, state, rect):
-    """频段彩带（SDR++ bandplan 仿妆）：谱面淡色填充 + 底部 4px 色条 + 带内标签。
+def _draw_bandplan(painter, state, rect, overlay=False):
+    """频段彩带（SDR++ bandplan 仿妆），两遍绘制防被谱线渐变填充盖住。
 
-    画在网格之后、谱线之下（色带垫底不遮信号）；标签只在带足够宽
-    (>70px) 时绘制。与书签竖旗/固定 marker 互不干扰（不同 y 带）。
+    overlay=False —— 网格之后、谱线之下：淡色填充垫底；
+    overlay=True  —— 谱线/包络/峰值之后：底部 4px 色条 + 带内标签。
+    标签只在带足够宽 (>70px) 时绘制。与书签竖旗/固定 marker 不同 y 带。
     """
     if not state.show_bandplan or not state.bandplan:
         return
@@ -926,11 +928,13 @@ def _draw_bandplan(painter, state, rect):
             continue
         x0, x1 = rng
         color = QColor(BANDPLAN_CATEGORY_COLORS[str(b["category"])])
-        fill = QColor(color)
-        fill.setAlpha(26)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(fill))
-        painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+        if not overlay:
+            fill = QColor(color)
+            fill.setAlpha(26)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(fill))
+            painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+            continue
         strip = QColor(color)
         strip.setAlpha(130)
         painter.setBrush(QBrush(strip))

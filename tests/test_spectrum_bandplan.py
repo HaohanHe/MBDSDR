@@ -75,6 +75,34 @@ class TestGeometry:
         assert _band_x_range(self.RECT, 100e6, 2.4e6, 103.0e6, 108.0e6) is None
 
 
+class TestOverlayOrder:
+    def test_strip_above_spectrum_fill(self):
+        """彩带色条/标签必须在谱线渐变填充之上（防被盖住的回归）。"""
+        import numpy as np
+        panel = SpectrumPanel()
+        panel.resize(800, 300)
+        panel.generator.center_freq_hz = 137.5e6
+        panel.generator.sample_rate_hz = 4.0e6
+        rng = np.random.default_rng(0)
+        iq = (rng.standard_normal(8192)
+              + 1j * rng.standard_normal(8192)).astype(np.complex64)
+        panel.generator.push_iq(iq, center_freq_hz=137.5e6,
+                                sample_rate_hz=4.0e6)
+        panel.show()
+        app.processEvents()
+        panel.repaint()
+        img = panel.grab().toImage()
+        # 全图找航空绿带色条像素（g 显著大于 r/b, 且非青色 accent）
+        green = 0
+        for y in range(0, img.height(), 2):
+            for x in range(0, img.width() // 2, 2):
+                c = img.pixelColor(x, y)
+                if (c.green() > c.red() + 25 and c.green() > c.blue() + 25
+                        and c.green() < 140 and c.alpha() > 100):
+                    green += 1
+        assert green > 20, "航空绿带色条被谱线填充盖住（z-order 回归）"
+
+
 class TestPanelIntegration:
     def test_panel_has_bandplan_and_renders(self):
         panel = SpectrumPanel()

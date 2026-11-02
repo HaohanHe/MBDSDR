@@ -41,10 +41,12 @@ def _to_complex(iq) -> np.ndarray:
 
 
 def _format_from_path(path: str) -> str:
-    """按扩展名判定录制格式：.wav -> wav；其余（.cf32/.iq/无扩展名）-> cf32。"""
+    """按扩展名判定录制格式：.wav -> wav；.cs16 -> cs16；其余（.cf32/.iq/无扩展名）-> cf32。"""
     ext = os.path.splitext(path)[1].lower()
     if ext == ".wav":
         return "wav"
+    if ext == ".cs16":
+        return "cs16"
     return "cf32"
 
 
@@ -186,6 +188,11 @@ def load_iq(path: str, sample_rate: float = None) -> Dict:
         iq = stereo[0::2] + 1j * stereo[1::2]
         scale = float(meta.get("wav_scale", 1.0))
         iq = iq * scale
+    elif fmt == "cs16":
+        # complex signed 16-bit I/Q 交错；之前被当 float32 读=误码。
+        # 归一化到 [-1,1]（32768 满幅），与 cf32 分支同量纲。
+        raw = np.fromfile(path, dtype=np.int16).astype(np.float64)
+        iq = (raw[0::2] + 1j * raw[1::2]) / 32768.0
     else:
         raw = np.fromfile(path, dtype=np.float32).astype(np.float64)
         iq = raw[0::2] + 1j * raw[1::2]
