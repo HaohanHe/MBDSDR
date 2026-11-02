@@ -92,6 +92,16 @@ PAL_MAXHOLD = _c["spectrum_max_hold"]   # Max hold 包络线（SDR++ 同款语�
 PAL_MINHOLD = _c["spectrum_min_hold"]   # Min hold 包络线
 PAL_BOOKMARK = _c["spectrum_bookmark"]  # 书签标签（gqrx 书签竖旗）
 
+# 频段彩带分类色（SDR++ bandplan 仿妆: 截图同款语义——
+# 航空绿 / 低轨卫星灰 / 广播蓝 / 40m 业余红, 短波广播青）
+BANDPLAN_CATEGORY_COLORS = {
+    "broadcast": "#3E6FA3",
+    "aviation": "#3F9142",
+    "amateur": "#B5495C",
+    "satellite": "#8A8F98",
+    "shortwave": "#2E7D8C",
+}
+
 # 书签药丸高度（像素）：谱面顶部这一条带内点击 = 激活书签（不进调谐/拖拽）。
 _BM_TAG_H = 16.0
 
@@ -598,6 +608,59 @@ def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
         painter.drawRect(QRectF(xa, rect.y(), xb - xa, rect.height()))
 
 
+# ---------------------------------------------------------------------------
+# 频段彩带（SDR++ bandplan 仿妆）: 皮进配置 desktop/bandplan.json
+# ---------------------------------------------------------------------------
+_BANDPLAN_CACHE: Optional[List[Dict[str, object]]] = None
+
+
+def _load_bandplan() -> List[Dict[str, object]]:
+    """加载频段彩带配置; 缺文件/坏 JSON/坏条目一律跳过该条, 绝不造假。
+
+    每条目: {"label", "start_hz", "stop_hz", "category"}; category
+    必须在 BANDPLAN_CATEGORY_COLORS 内。缓存模块级, 首次绘制时载入。
+    """
+    global _BANDPLAN_CACHE
+    if _BANDPLAN_CACHE is not None:
+        return _BANDPLAN_CACHE
+    import json
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "bandplan.json")
+    out: List[Dict[str, object]] = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        for b in raw.get("bands", []):
+            try:
+                label = str(b.get("label", "")).strip()
+                f0 = float(b["start_hz"])
+                f1 = float(b["stop_hz"])
+                cat = str(b.get("category", "")).strip()
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not label or not (0 < f0 < f1) or cat not in \
+                    BANDPLAN_CATEGORY_COLORS:
+                continue
+            out.append({"label": label, "start_hz": f0, "stop_hz": f1,
+                        "category": cat})
+    except (OSError, ValueError):
+        out = []
+    _BANDPLAN_CACHE = out
+    return out
+
+
+def _band_x_range(rect: QRectF, view_center_hz: float, span_hz: float,
+                  f0: float, f1: float) -> Optional[Tuple[float, float]]:
+    """频段 [f0,f1] 在谱面上的夹紧 x 区间; 完全在视口外返回 None。"""
+    f_left = view_center_hz - span_hz / 2.0
+    x0 = rect.x() + (f0 - f_left) / span_hz * rect.width()
+    x1 = rect.x() + (f1 - f_left) / span_hz * rect.width()
+    if x1 < rect.x() or x0 > rect.x() + rect.width():
+        return None
+    return (max(rect.x(), x0), min(rect.x() + rect.width(), x1))
+
+
 class _PlotState:
     """两个渲染路径共享的交互状态。"""
 
@@ -614,6 +677,9 @@ class _PlotState:
         # 书签是用户收藏的持久频点，点击药丸直接调谐。
         self.bookmarks: List[Tuple[float, str]] = []
         self.show_bookmarks = True
+        # ---- 频段彩带（SDR++ bandplan 仿妆；皮进 bandplan.json）----
+        self.bandplan: List[Dict[str, object]] = _load_bandplan()
+        self.show_bandplan = True
         self.show_peaks = True
         self.peak_rel_db = 6.0
         # ---- 瀑布调色板 / 时间平滑 ----
@@ -693,6 +759,8 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
     span = gen.sample_rate_hz
 
     _draw_grid(painter, spec_rect, grid)
+    # 频段彩带垫底（SDR++ bandplan 仿妆）: 网格之上、谱线之下
+    _draw_bandplan(painter, state, spec_rect)
 
     # ---- 频谱曲线：仅在有真 IQ 数据时绘制 ----
     if has_data:
@@ -835,6 +903,50 @@ def _draw_hold_lines(painter, state, rect):
         _line(gen.max_hold, QColor(PAL_MAXHOLD))
     if gen.show_min_hold and gen.min_hold is not None:
         _line(gen.min_hold, QColor(PAL_MINHOLD))
+
+
+def _draw_bandplan(painter, state, rect):
+    """频段彩带（SDR++ bandplan 仿妆）：谱面淡色填充 + 底部 4px 色条 + 带内标签。
+
+    画在网格之后、谱线之下（色带垫底不遮信号）；标签只在带足够宽
+    (>70px) 时绘制。与书签竖旗/固定 marker 互不干扰（不同 y 带）。
+    """
+    if not state.show_bandplan or not state.bandplan:
+        return
+    view_center = _view_center_hz(state)
+    span = state.panel.generator.sample_rate_hz
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+    fm = painter.fontMetrics()
+    for b in state.bandplan:
+        rng = _band_x_range(rect, view_center, span,
+                            float(b["start_hz"]), float(b["stop_hz"]))
+        if rng is None:
+            continue
+        x0, x1 = rng
+        color = QColor(BANDPLAN_CATEGORY_COLORS[str(b["category"])])
+        fill = QColor(color)
+        fill.setAlpha(26)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(fill))
+        painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+        strip = QColor(color)
+        strip.setAlpha(130)
+        painter.setBrush(QBrush(strip))
+        painter.drawRect(QRectF(x0, rect.y() + rect.height() - 4.0,
+                                x1 - x0, 4.0))
+        if x1 - x0 > 70.0:
+            label = str(b["label"])
+            tw = fm.horizontalAdvance(label)
+            tx = max(rect.x() + 2.0,
+                     min(x0 + (x1 - x0 - tw) / 2.0,
+                         rect.x() + rect.width() - tw - 2.0))
+            lc = QColor(color)
+            lc.setAlpha(215)
+            painter.setPen(QPen(lc, 1))
+            painter.drawText(
+                QPointF(tx, rect.y() + rect.height() - 8.0), label)
 
 
 def _draw_bookmark_tags(painter, state, rect):
@@ -1239,6 +1351,17 @@ class SpectrumPanel(QWidget):
                         self._redraw()))
         bar.addWidget(self._bookmark_chk)
 
+        # 频段彩带开关（SDR++ bandplan 仿妆；条目在 desktop/bandplan.json）
+        self._bandplan_chk = QCheckBox("频段")
+        self._bandplan_chk.setChecked(True)
+        self._bandplan_chk.setToolTip(
+            "在谱面上显示频段彩带（短波/广播/航空/业余/卫星）与名称；"
+            "条目可在 bandplan.json 配置")
+        self._bandplan_chk.toggled.connect(
+            lambda on: (setattr(self._state, "show_bandplan", bool(on)),
+                        self._redraw()))
+        bar.addWidget(self._bandplan_chk)
+
         bar.addWidget(QLabel("阈值dB:"))
         self._peak_spin = QDoubleSpinBox()
         self._peak_spin.setRange(1.0, 30.0)
@@ -1343,7 +1466,8 @@ class SpectrumPanel(QWidget):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
                    self._perf_combo, self._palette_combo, self._wf_smooth_chk,
                    self._peak_chk, self._peak_spin, self._tune_mode_btn,
-                   self._maxhold_chk, self._minhold_chk, self._bookmark_chk):
+                   self._maxhold_chk, self._minhold_chk, self._bookmark_chk,
+                   self._bandplan_chk):
             w_.setEnabled(on)
 
     def _on_tune_mode_toggled(self, checked: bool):

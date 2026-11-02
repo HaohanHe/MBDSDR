@@ -1,0 +1,25 @@
+{
+  "_schema": "mbdsdr bandplan v1 —— 频段彩带（SDR++ bandplan 仿妆, 谱面+瀑布色带）",
+  "_note": "数值为公开频段规划常识级事实（ITU/业余分区惯例）。category 决定颜色: broadcast=蓝 aviation=绿 amateur=红 satellite=灰 shortwave=青。频段可重叠（如 40m 业余与短波广播邻接），绘制按数组顺序叠半透明。",
+  "bands": [
+    {"label": "短波广播", "start_hz":  5950000, "stop_hz":  6200000, "category": "shortwave"},
+    {"label": "40m 业余", "start_hz":  7000000, "stop_hz":  7300000, "category": "amateur"},
+    {"label": "短波广播", "start_hz":  7300000, "stop_hz":  7950000, "category": "shortwave"},
+    {"label": "短波广播", "start_hz":  9400000, "stop_hz":  9900000, "category": "shortwave"},
+    {"label": "短波广播", "start_hz": 11650000, "stop_hz": 12050000, "category": "shortwave"},
+    {"label": "短波广播", "start_hz": 13600000, "stop_hz": 13800000, "category": "shortwave"},
+    {"label": "短波广播", "start_hz": 15010000, "stop_hz": 15600000, "category": "shortwave"},
+    {"label": "短波广播", "start_hz": 17550000, "stop_hz": 17900000, "category": "shortwave"},
+    {"label": "20m 业余", "start_hz": 14000000, "stop_hz": 14350000, "category": "amateur"},
+    {"label": "短波广播", "start_hz": 21450000, "stop_hz": 21850000, "category": "shortwave"},
+    {"label": "15m 业余", "start_hz": 21000000, "stop_hz": 21450000, "category": "amateur"},
+    {"label": "10m 业余", "start_hz": 28000000, "stop_hz": 29700000, "category": "amateur"},
+    {"label": "FM 广播",  "start_hz":  87500000, "stop_hz": 108000000, "category": "broadcast"},
+    {"label": "航空语音", "start_hz": 118000000, "stop_hz": 137000000, "category": "aviation"},
+    {"label": "低轨卫星下行", "start_hz": 137000000, "stop_hz": 138000000, "category": "satellite"},
+    {"label": "2m 业余",  "start_hz": 144000000, "stop_hz": 148000000, "category": "amateur"},
+    {"label": "业余卫星上行", "start_hz": 145800000, "stop_hz": 146000000, "category": "satellite"},
+    {"label": "70cm 业余", "start_hz": 430000000, "stop_hz": 440000000, "category": "amateur"},
+    {"label": "业余卫星下行", "start_hz": 435000000, "stop_hz": 438000000, "category": "satellite"}
+  ]
+}
