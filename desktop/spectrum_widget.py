@@ -13,7 +13,7 @@ MBDSDR 频谱显示组件
 
 import numpy as np
 import time
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
 from constants import DEFAULT_SAMPLE_RATE_HZ
 

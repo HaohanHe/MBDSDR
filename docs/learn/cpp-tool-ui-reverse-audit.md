@@ -288,10 +288,16 @@ TX 四条确认门放**工具层**（RadioPanel 裸路径跳过 QMessageBox，�
 
 ### 声明（不虚报）
 
-- 本机无 Qt6/CMake 工具链，**上述 C++ 改动未编译未运行**。正确性由三层静态钉住：
+- 本机无 Qt6/CMake 工具链，上述 C++ 改动无法本地编译。正确性由三层静态钉住：
   Python 防漂移双账（`tests/test_cpp_tool_ui_reverse_audit.py`）、C++ 金样
   （`test_tool_registry`/`test_tool_schema`/`test_agent`/`test_control_hub` 随修复同步）、
-  schema↔executor 双表一致性（135 = 90+19+26，93 写/42 读）。**待 CI 编译首验**。
+  schema↔executor 双表一致性（135 = 90+19+26，93 写/42 读）。
+- **CI 编译首验已过（2026-11-02 销账）**：GitHub Actions run 41380925983 的
+  `cpp` job（ubuntu-latest + apt Qt6 + CMake/Ninja Release 构建 + ctest
+  offscreen 全套）**completed success**——135 工具面（tool_schema/agent_tools/
+  dispatchTable 三件套）通过真实编译与全部 ctest 用例，"待 CI 编译首验"就此销账。
+  同 run 的 flutter/mbdsdr_ai/experiments/onboarding/hw_selfcheck 五 job 亦绿；
+  tests/(A)(B) 两组红与 C++ 无关（见下条）。
 - test_agent 金样更新记录（断言随修复更新，非放宽换绿）：set_squelch 越域值
   -10.0→-30.0 并新增越域拒绝用例；delete_bookmark 全部调用点补 confirm=true
   并新增无确认拒绝用例；工具计数 90→109、写/读 49/41→68/41。
