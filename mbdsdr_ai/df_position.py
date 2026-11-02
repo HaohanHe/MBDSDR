@@ -143,26 +143,101 @@ def array_correlator_df(snapshots: Sequence[Sequence[complex]],
     }
 
 
+def _tdoa_residual_and_jacobian(x: np.ndarray, s: np.ndarray,
+                                obs: np.ndarray, others: List[int],
+                                ref: int) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """在指定位置重算 TDOA 残差和雅可比；站点的奇异位置不可评估。"""
+    offsets = x - s
+    distances = np.linalg.norm(offsets, axis=1)
+    used = others + [ref]
+    if (not np.all(np.isfinite(distances))
+            or np.any(distances[used] < 1.0e-9)):
+        return None
+    los = offsets / distances[:, None]
+    # tau[i] 已经是 station_i - station_ref；参考槽自身不得再次相减。
+    residuals = obs[others] - (distances[others] - distances[ref])
+    jacobian = los[others] - los[ref]
+    if not np.all(np.isfinite(residuals)) or not np.all(np.isfinite(jacobian)):
+        return None
+    return residuals, jacobian
+
+
+def _tdoa_refine(start: np.ndarray, s: np.ndarray, obs: np.ndarray,
+                 others: List[int], ref: int, max_iter: int,
+                 conv_m: float) -> Optional[Dict[str, Any]]:
+    """从一个几何起点做 Gauss-Newton 细化，失败只淘汰该起点。"""
+    x = np.asarray(start, dtype=float).copy()
+    history: List[float] = []
+    with np.errstate(all="ignore"):
+        for iteration in range(1, max_iter + 1):
+            evaluated = _tdoa_residual_and_jacobian(x, s, obs, others, ref)
+            if evaluated is None:
+                return None
+            residuals, jacobian = evaluated
+            try:
+                delta, *_ = np.linalg.lstsq(jacobian, residuals, rcond=None)
+            except np.linalg.LinAlgError:
+                return None
+            if not np.all(np.isfinite(delta)):
+                return None
+            x = x + delta
+            step = float(np.linalg.norm(delta))
+            if not math.isfinite(step):
+                return None
+            history.append(step)
+            if step < conv_m:
+                evaluated = _tdoa_residual_and_jacobian(x, s, obs, others, ref)
+                if evaluated is None:
+                    return None
+                residuals, jacobian = evaluated
+                residual_list = [float(v) for v in residuals]
+                residual_rms = float(np.sqrt(np.mean(residuals ** 2)))
+                if (np.linalg.matrix_rank(jacobian) < 2):
+                    gdop = float("inf")
+                else:
+                    try:
+                        gdop = float(np.sqrt(np.trace(
+                            np.linalg.inv(jacobian.T @ jacobian))))
+                    except np.linalg.LinAlgError:
+                        gdop = float("inf")
+                return {
+                    "pos_m": [float(v) for v in x],
+                    "gdop": gdop,
+                    "residuals_m": residual_list,
+                    "residual_rms_m": residual_rms,
+                    "converged": True,
+                    "iterations": iteration,
+                    "history": history,
+                }
+    return None
+
+
 def multistation_tdoa_fix(stations_m: Sequence[Sequence[float]],
                           tdoa_s: Sequence[float],
                           reference_idx: int = 0,
                           max_iter: int = 20,
                           conv_m: float = 1e-6,
                           max_resid_m: float = 1.0,
+                          *, initial_pos_m: Optional[Sequence[float]] = None,
                           ) -> Dict[str, Any]:
     """多站 TDOA 定位（双曲线最小二乘，≥3 站）。
 
     stations_m   : 各站坐标（米，同一本地平面，2D [x,y]）；
     tdoa_s       : 各站相对参考站的时延差（秒，长度 = 站数；参考站项忽略）；
-    reference_idx: 参考站下标。
+    reference_idx: 参考站下标；
+    initial_pos_m: 可选的确定性附加起点（仅限关键字参数，不用于掩盖多解）。
 
     未知量 (x, y)：观测 h_i = |x - s_i| - |x - s_ref| = c·τ_i。
-    返回：pos_m / gdop / residuals_m / converged；<3 站、不收敛、
-    残差超门限如实报错（不产出位置）。
+    几何多起点收敛结果去重后，逐候选重算残差/GDOP。唯一解保留原有
+    pos_m / gdop / residuals_m / converged 等字段；多解时 pos_m=None、
+    ambiguity=True，完整结果在 candidates 中，不静默按初值或残差排序挑解。
+    <3 站、所有起点不收敛、所有候选残差超门限均如实报错。
     """
     s = np.asarray(stations_m, dtype=float)
     if s.ndim != 2 or s.shape[1] != 2:
         raise ValueError("stations_m 须为 M×2 平面坐标（米）")
+    if not np.all(np.isfinite(s)):
+        raise ValueError("stations_m 必须全部为有限数值")
     m = s.shape[0]
     if m < 3:
         raise ValueError(
@@ -174,67 +249,88 @@ def multistation_tdoa_fix(stations_m: Sequence[Sequence[float]],
     ref = int(reference_idx)
     if not 0 <= ref < m:
         raise ValueError("reference_idx 越界")
-    c = C_M_S
-    obs = c * tau  # 距离差（米）
+    max_iter = int(max_iter)
+    conv_m = float(conv_m)
+    max_resid_m = float(max_resid_m)
+    if max_iter < 1:
+        raise ValueError("max_iter 必须为正整数")
+    if not math.isfinite(conv_m) or conv_m <= 0:
+        raise ValueError("conv_m 必须为正的有限数值")
+    if not math.isfinite(max_resid_m) or max_resid_m < 0:
+        raise ValueError("max_resid_m 必须为非负有限数值")
 
     others = [i for i in range(m) if i != ref]
-    x = s[ref].astype(float) + np.array([1.0e3, 0.0])  # 初值：参考站旁
-    history: List[float] = []
-    for it in range(1, int(max_iter) + 1):
-        d_ref = math.hypot(x[0] - s[ref][0], x[1] - s[ref][1])
-        if d_ref < 1.0:
-            raise ValueError("迭代落到参考站上（奇异），不产出位置")
-        los_ref = (x - s[ref]) / d_ref
-        h_rows = []
-        resid = []
-        for i in others:
-            d_i = math.hypot(x[0] - s[i][0], x[1] - s[i][1])
-            los_i = (x - s[i]) / max(d_i, 1.0)
-            pred = d_i - d_ref
-            resid.append(obs[i] - obs[ref] - pred)
-            h_rows.append(los_i - los_ref)
-        h_mat = np.asarray(h_rows, dtype=float)
-        r_vec = np.asarray(resid, dtype=float)
-        try:
-            delta, *_ = np.linalg.lstsq(h_mat, r_vec, rcond=None)
-        except np.linalg.LinAlgError:
-            raise ValueError("双曲线方程组奇异（站共线或几何病态），不产出位置")
-        x = x + delta
-        step = float(np.linalg.norm(delta))
-        history.append(step)
-        if step < conv_m:
-            break
-    d_ref = math.hypot(x[0] - s[ref][0], x[1] - s[ref][1])
-    los_ref = (x - s[ref]) / d_ref
-    residuals = []
-    for i in others:
-        d_i = math.hypot(x[0] - s[i][0], x[1] - s[i][1])
-        pred = d_i - d_ref
-        residuals.append(float(obs[i] - obs[ref] - pred))
-    resid_m = float(np.sqrt(np.mean(np.asarray(residuals) ** 2)))
-    try:
-        gdop = float(np.sqrt(np.trace(np.linalg.inv(h_mat.T @ h_mat))))
-    except np.linalg.LinAlgError:
-        gdop = float("inf")
-    converged = history and history[-1] < conv_m
-    if not converged:
+    # 参考槽只是占位，允许任意值（包括 NaN）；其余观测必须有效。
+    if not np.all(np.isfinite(tau[others])):
+        raise ValueError("非参考站的 tdoa_s 必须全部为有限数值")
+    obs = C_M_S * tau
+
+    center = np.mean(s, axis=0)
+    centered = s - center
+    scale = max(1.0, float(np.max(np.linalg.norm(centered, axis=1))) * 2.0)
+    starts: List[np.ndarray] = [
+        s[ref].astype(float) + np.array([1.0e3, 0.0]),  # 兼容旧起点
+        center.copy(),
+    ]
+    # 站阵列质心、孔径和环绕方向共同决定起点，不依赖随机采样。
+    for radius_factor in (1.0, 4.0):
+        for angle in np.linspace(0.0, 2.0 * math.pi, 8, endpoint=False):
+            starts.append(center + radius_factor * scale * np.array(
+                [math.cos(angle), math.sin(angle)]))
+    if initial_pos_m is not None:
+        initial = np.asarray(initial_pos_m, dtype=float)
+        if initial.shape != (2,) or not np.all(np.isfinite(initial)):
+            raise ValueError("initial_pos_m 须为两个有限坐标 [x, y]")
+        starts.append(initial.copy())
+
+    candidates: List[Dict[str, Any]] = []
+    dedup_tol_m = max(1.0e-3, conv_m * 100.0, scale * 1.0e-9)
+    for start in starts:
+        candidate = _tdoa_refine(start, s, obs, others, ref, max_iter, conv_m)
+        if candidate is None:
+            continue
+        position = candidate["pos_m"]
+        if any(math.hypot(position[0] - old["pos_m"][0],
+                          position[1] - old["pos_m"][1]) <= dedup_tol_m
+               for old in candidates):
+            continue
+        candidates.append(candidate)
+
+    if not candidates:
         raise ValueError(
-            f"{max_iter} 次迭代未收敛（末步长 {history[-1]:.3e} m）"
+            f"所有几何起点在 {max_iter} 次迭代内均未收敛或落到站点奇异位置"
             "——TDOA 与站几何可能不一致，不产出位置")
-    if resid_m > max_resid_m:
+
+    # 粗差拒绝仍基于原始全部站点；只让通过既有门限的候选参与消歧。
+    valid = [c for c in candidates if c["residual_rms_m"] <= max_resid_m]
+    if not valid:
+        best_rms = min(c["residual_rms_m"] for c in candidates)
         raise ValueError(
-            f"定位残差 RMS {resid_m:.3f} m 超门限 {max_resid_m} m——"
+            f"定位残差 RMS {best_rms:.3f} m 超门限 {max_resid_m} m——"
             "观测含粗差或站坐标有误，不产出位置（粗差剔除后重试）")
-    return {
-        "pos_m": [float(v) for v in x],
-        "gdop": gdop,
-        "residuals_m": residuals,
-        "residual_rms_m": resid_m,
-        "converged": True,
-        "iterations": it,
-        "history": history,
+    valid.sort(key=lambda c: (c["residual_rms_m"], c["pos_m"][0], c["pos_m"][1]))
+    if len(valid) > 1:
+        return {
+            "pos_m": None,
+            "gdop": None,
+            "residuals_m": None,
+            "residual_rms_m": None,
+            "converged": True,
+            "iterations": max(c["iterations"] for c in valid),
+            "history": [],
+            "n_stations": m,
+            "candidates": valid,
+            "ambiguity": True,
+            "reason": "TDOA 观测存在多个通过残差门限的位置解，不静默选解",
+        }
+
+    result = dict(valid[0])
+    result.update({
         "n_stations": m,
-    }
+        "candidates": valid,
+        "ambiguity": False,
+    })
+    return result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -285,12 +381,13 @@ def register_tool_registry(registry) -> None:
                 reference_idx=int(args.get("reference_idx", 0)),
                 max_iter=int(args.get("max_iter", 20)),
                 max_resid_m=float(args.get("max_resid_m", 1.0)),
+                initial_pos_m=args.get("initial_pos_m"),
             )
         except Exception as e:  # noqa: BLE001
             return ToolResult(success=False,
                               content=f"TDOA 定位失败: {clean_exc(e)}")
         return ToolResult(
-            success=True,
+            success=not res["ambiguity"],
             content=_json.dumps(res, ensure_ascii=False, default=str),
             data=res)
 
@@ -321,8 +418,9 @@ def register_tool_registry(registry) -> None:
         name="multistation_tdoa_fix",
         description=(
             "多站 TDOA 定位：≥3 站坐标 + 各站相对参考站的时延差 → "
-            "双曲线最小二乘 → 发射源平面位置（带 GDOP/残差）。"
-            "<3 站、不收敛、残差超门限如实报错不产出位置。"
+            "几何多起点双曲线最小二乘 → 发射源平面候选（各带 GDOP/残差）。"
+            "多个有效候选时返回 ambiguity=true、pos_m=null 和完整 candidates，"
+            "工具失败且不静默选解；<3 站、不收敛、残差超门限如实报错。"
             "前置条件：stations_m（M×2 米）、tdoa_s（秒，长度=站数）。"
             "副作用：纯计算。"
             "能力边界：2D 平面定位；3D 需站间高程差或仰角观测（不在本工具）。"
@@ -333,6 +431,8 @@ def register_tool_registry(registry) -> None:
             "reference_idx": {"type": "integer", "default": 0},
             "max_iter": {"type": "integer", "default": 20},
             "max_resid_m": {"type": "number", "default": 1.0},
+            "initial_pos_m": {"type": "array",
+                              "description": "可选附加几何起点 [x, y]（米）"},
         }, "required": ["stations_m", "tdoa_s"]},
         handler=_tdoa_fix, category="satellite",
     )

@@ -191,3 +191,99 @@ def test_tool_handler_end_to_end():
                       res.data["pos_m"][1] - emitter[1]) < 1.0
     bad = h({"stations_m": stations[:2], "tdoa_s": [0.0, 1e-6]})
     assert not bad.success
+
+
+def test_tdoa_far_field_multiple_solutions_not_silently_selected():
+    """远场三站观测的两个零残差解必须全部保留，不能按初值挑一个。"""
+    stations = [[0.0, 0.0], [3000.0, 0.0], [0.0, 4000.0]]
+    emitter = [-10000.0, -10000.0]
+    other_solution = [264.86353258361976, 436.63044543957864]
+    res = multistation_tdoa_fix(stations, _tdoa_for(emitter, stations))
+    assert res["ambiguity"]
+    assert res["pos_m"] is None
+    assert len(res["candidates"]) == 2
+    for candidate in res["candidates"]:
+        assert candidate["residual_rms_m"] < 1e-6
+        assert len(candidate["residuals_m"]) == 2
+        assert math.isfinite(candidate["gdop"])
+    assert any(np.allclose(c["pos_m"], emitter, atol=1e-3)
+               for c in res["candidates"])
+    assert any(np.allclose(c["pos_m"], other_solution, atol=1e-3)
+               for c in res["candidates"])
+
+
+def test_tdoa_collinear_stations_expose_mirror_solutions():
+    """共线站上下半平面镜像不可区分，两个解均应显式返回。"""
+    stations = [[-1000.0, 0.0], [0.0, 0.0], [1000.0, 0.0]]
+    emitter = [2000.0, 3000.0]
+    mirror = [2000.0, -3000.0]
+    res = multistation_tdoa_fix(stations, _tdoa_for(emitter, stations))
+    assert res["ambiguity"]
+    assert res["pos_m"] is None
+    assert len(res["candidates"]) == 2
+    assert any(np.allclose(c["pos_m"], emitter, atol=1e-3)
+               for c in res["candidates"])
+    assert any(np.allclose(c["pos_m"], mirror, atol=1e-3)
+               for c in res["candidates"])
+
+
+@pytest.mark.parametrize("reference_idx", [0, 1, 2, 3])
+def test_tdoa_reference_slot_is_ignored_for_every_reference(reference_idx):
+    """观测已是各站减参考站，参考槽自身值不得再次参与残差。"""
+    stations = [[0.0, 0.0], [3000.0, 0.0],
+                [3000.0, 3000.0], [0.0, 3000.0]]
+    emitter = [1400.0, 1600.0]
+    tdoa = _tdoa_for(emitter, stations, ref=reference_idx)
+    tdoa[reference_idx] = float("nan")  # 占位项应真正忽略，包括非有限值
+    res = multistation_tdoa_fix(stations, tdoa, reference_idx=reference_idx)
+    assert not res["ambiguity"]
+    assert np.allclose(res["pos_m"], emitter, atol=1e-3)
+    assert res["residual_rms_m"] < 1e-6
+
+
+def test_tdoa_unique_solution_keeps_legacy_fields_and_one_candidate():
+    stations = [[0.0, 0.0], [3000.0, 0.0], [0.0, 4000.0]]
+    emitter = [1200.0, 1500.0]
+    res = multistation_tdoa_fix(stations, _tdoa_for(emitter, stations))
+    legacy_fields = {
+        "pos_m", "gdop", "residuals_m", "residual_rms_m", "converged",
+        "iterations", "history", "n_stations",
+    }
+    assert legacy_fields <= res.keys()
+    assert not res["ambiguity"]
+    assert len(res["candidates"]) == 1
+    assert res["candidates"][0]["pos_m"] == res["pos_m"]
+    assert np.allclose(res["pos_m"], emitter, atol=1e-3)
+
+
+def test_tdoa_tool_returns_failure_with_full_ambiguous_candidates():
+    from mbdsdr_ai.tool_registry import ToolRegistry
+    r = ToolRegistry()
+    r.register_builtin_tools()
+    stations = [[0.0, 0.0], [3000.0, 0.0], [0.0, 4000.0]]
+    emitter = [-10000.0, -10000.0]
+    h = r.tools["multistation_tdoa_fix"]["handler"]
+    res = h({"stations_m": stations, "tdoa_s": _tdoa_for(emitter, stations)})
+    assert not res.success
+    assert res.data["ambiguity"]
+    assert res.data["pos_m"] is None
+    assert len(res.data["candidates"]) == 2
+    assert all("residual_rms_m" in c and "gdop" in c
+               for c in res.data["candidates"])
+
+
+def test_tdoa_pure_noise_and_non_finite_inputs_rejected():
+    stations = [[0.0, 0.0], [3000.0, 0.0],
+                [3000.0, 3000.0], [0.0, 3000.0]]
+    rng = np.random.default_rng(20261102)
+    with pytest.raises(ValueError):
+        multistation_tdoa_fix(stations, rng.normal(0.0, 1e-5, 4))
+    tdoa = _tdoa_for([1400.0, 1600.0], stations)
+    tdoa[2] = float("nan")
+    with pytest.raises(ValueError, match="有限"):
+        multistation_tdoa_fix(stations, tdoa)
+    bad_stations = np.asarray(stations, dtype=float)
+    bad_stations[1, 0] = float("inf")
+    with pytest.raises(ValueError, match="有限"):
+        multistation_tdoa_fix(bad_stations,
+                              _tdoa_for([1400.0, 1600.0], stations))
