@@ -2131,7 +2131,20 @@ endif()
 # 首次部署后近零成本，Qt 升级/换 kit 随下次构建自愈。RTL-SDR 真库树
 # （build-local）一并布 librtlsdr.dll。
 if(WIN32 AND MBDSDR_QT_BIN)
+  # Qt6*.dll 全量（含 Qt6Test——windeployqt 只按已链接模块收，测试 exe 链接
+  # Qt6::Test 但 windeployqt 不显式收它，故不能只靠 windeployqt）。
   file(GLOB MBDSDR_WIN_RUNTIME_DLLS "${MBDSDR_QT_BIN}/Qt6*.dll")
+  # Qt 的多媒体/OpenGL 辅助运行库（avcodec/avformat/avutil/swresample/swscale/
+  # D3Dcompiler_47/opengl32sw 等）：Qt6Multimedia/Widgets 的可选依赖，loader
+  # 按需在运行时解析。windeployqt 会带，本部署与便携包同口径一并收——
+  # 防止直跑 Multimedia 相关测试时弹「找不到 avcodec-61.dll」。
+  file(GLOB MBDSDR_QT_AUX_DLLS "${MBDSDR_QT_BIN}/*.dll")
+  foreach(_aux IN LISTS MBDSDR_QT_AUX_DLLS)
+    get_filename_component(_aux_name "${_aux}" NAME)
+    if(NOT _aux_name MATCHES "^Qt6")
+      list(APPEND MBDSDR_WIN_RUNTIME_DLLS "${_aux}")
+    endif()
+  endforeach()
   foreach(_mingw_dll libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll)
     list(APPEND MBDSDR_WIN_RUNTIME_DLLS "${MBDSDR_TC_BIN}/${_mingw_dll}")
   endforeach()
