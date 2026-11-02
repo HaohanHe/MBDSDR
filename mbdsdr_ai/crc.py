@@ -237,11 +237,16 @@ def crc_bits_msb(bits: Sequence[int], poly_bits: Sequence[int]) -> List[int]:
 
 
 def crc14_ft8(msg77: Sequence[int]) -> List[int]:
-    """FT8 CRC14：77 消息位 + 补 14 零 -> 14 位 CRC。"""
+    """FT8 CRC14：96 bit 块（77 消息 + 5 零填充 + 14 零位）长除求余。
+
+    2026-11-02 修正：此前按 91 bit 流（漏 5 bit 零填充）求值，与真实
+    WSJT-X 信号不符（cpp/tests/ft8_wsjtx_llr.txt 官方样本 5/5 实测口径
+    为 96 bit 块）；与 ft8_codec.crc14_bits / ft8_decode.crc14 同步收敛。
+    """
     if len(msg77) != 77:
         raise ValueError("FT8 CRC14 需 77 位消息")
     poly = [1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1]  # 0x6757
-    work = [int(x) & 1 for x in msg77] + [0] * 14
+    work = [int(x) & 1 for x in msg77] + [0] * 19
     return crc_bits_msb(work, poly)
 
 
