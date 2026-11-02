@@ -3655,6 +3655,11 @@ class MainWindow(QMainWindow):
         pipe.frame_ready.connect(self._on_pipeline_frame_ready)
         pipe.start()
         self._pipeline = pipe
+        # 主听路走统一音频后处理（ANR 降噪 + tap 分发），此前绕过 _tap_demod_audio
+        try:
+            pipe._demod1.audio_tap = self._tap_demod_audio
+        except Exception:
+            pass
         # 登记 vfo_id → demod worker（主听切换时切换哪一路写声卡）
         self._vfo_workers = {
             self._main_vfo_id: pipe._demod1,
@@ -4958,11 +4963,16 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_audio_output_changed(self, dev_index: int):
-        """设备面板选音频输出设备 → 切 AudioPlayer 输出设备。"""
+        """设备面板选音频输出设备 → 真传 sounddevice device 并热切换重启流。"""
         try:
             if hasattr(self, "_audio_player") and self._audio_player is not None:
-                # AudioPlayer 不支持运行时切设备则需重启流；这里只记录偏好
                 self._audio_output_device = dev_index
+                player = self._audio_player
+                player.preferred_device = dev_index
+                # 已在播放：重启流让新设备生效（start 幂等，stop 后重开）
+                if getattr(player, "_stream", None) is not None:
+                    player.stop()
+                    player.start()
         except Exception:
             pass
 

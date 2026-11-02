@@ -69,6 +69,10 @@ class AudioPlayer:
         #: sounddevice 是否可用（False 时所有方法安全降级）
         self.available = _SD_AVAILABLE
 
+        #: 用户偏好的输出设备（sounddevice device 参数；None=系统默认）。
+        #: 由设备面板选择注入，start() 时真传给 OutputStream。
+        self.preferred_device = None
+
         self._stream: Optional["sd.OutputStream"] = None
         self._lock = threading.Lock()
         # 待播放的 float32 块队列（每个元素是一维 float32 数组）
@@ -165,6 +169,8 @@ class AudioPlayer:
                     dtype="float32",
                     callback=self._callback,
                     blocksize=max(1, int(self.sample_rate / 60)),
+                    **({"device": self.preferred_device}
+                       if self.preferred_device is not None else {}),
                 )
                 self._stream.start()
                 return True

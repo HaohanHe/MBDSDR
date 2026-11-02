@@ -205,6 +205,8 @@ class DemodWorker(QThread):
         self._sr = float(sr)
         self._audio_enabled = bool(audio_enabled)
         self._running = False
+        # 主窗口统一音频后处理缝（ANR 降噪/tap 分发）；None=不处理后直接写声卡
+        self.audio_tap = None
         # 记录本次实际用的解调模式（调试/测试断言）
         self.last_demod_mode: str = "FM"
         # 有状态 WFM 接收器（WFM 模式下懒创建一次）
@@ -338,6 +340,8 @@ class DemodWorker(QThread):
                     pass
                 try:
                     audio = self._apply_audio_agc(audio)
+                    if self.audio_tap is not None:
+                        audio = self.audio_tap(audio)
                     player.write(audio)
                 except Exception:
                     pass
@@ -378,6 +382,8 @@ class DemodWorker(QThread):
                 audio = self._demod_48k(_dsp, mode, vfo_out)
                 if audio is not None and audio.size > 0:
                     audio = self._apply_audio_agc(audio)
+                    if self.audio_tap is not None:
+                        audio = self.audio_tap(audio)
                     player.write(audio)
             except Exception:
                 pass
