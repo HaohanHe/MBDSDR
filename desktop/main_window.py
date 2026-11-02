@@ -3203,6 +3203,15 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         # 更新录制采样率（下一次开始录制时生效）
+        # 录制中变率：记录变更点写进 sidecar（不再只留最终采样率致混样失真）
+        if self._recording:
+            try:
+                self._record_rate_changes.append({
+                    "time_s": getattr(self, "_record_seconds", 0),
+                    "sample_rate": float(rate_hz),
+                })
+            except Exception:
+                pass
         self._record_sr = float(rate_hz)
         # VFO 输入采样率变了 → 拆旧流水线重建（新 VFO 的 in_sr/重采样系数正确）
         self._stop_iq_streams()
@@ -3877,11 +3886,27 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _record_write_chunk(self, iq: np.ndarray) -> None:
+        """录制写一块：有流句柄就直写磁盘（内存不累积），否则退回内存缓冲。"""
+        if not self._recording:
+            return
+        fh = getattr(self, "_record_stream_fh", None)
+        if fh is not None:
+            try:
+                np.asarray(iq, dtype=np.complex64).tofile(fh)
+                self._record_samples_total = \
+                    getattr(self, "_record_samples_total", 0) + int(len(iq))
+                return
+            except Exception:
+                pass
+        if self._record_iq_buffer is not None:
+            self._record_iq_buffer.append(iq)
+
     def _on_pipeline_record_iq(self, iq: np.ndarray):
         """录制 tap：RecordTap 线程把每帧 IQ（已是独立副本）交给 UI 累积。"""
         if self._recording and self._record_iq_buffer is not None:
             try:
-                self._record_iq_buffer.append(iq)
+                self._record_write_chunk(iq)
             except Exception:
                 pass
 
@@ -4070,10 +4095,10 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # (B) 录制中：累积到 buffer
+        # (B) 录制中：流式直写磁盘（不再攒数组）
         if self._recording and self._record_iq_buffer is not None:
             try:
-                self._record_iq_buffer.append(iq.copy())
+                self._record_write_chunk(iq.copy())
             except Exception:
                 pass
 
@@ -4462,6 +4487,15 @@ class MainWindow(QMainWindow):
         self._record_sr = sr
         self._record_center_hz = center_hz
         self._recording = True
+        # 流式落盘：边收边写，不再全程攒数组（长录制内存安全）
+        self._record_stream_fh = None
+        self._record_samples_total = 0
+        self._record_rate_changes = []
+        try:
+            self._record_stream_fh = open(path, "wb")
+        except Exception as e:
+            self.statusBar().showMessage(f"录制流打开失败（退回内存缓冲）: {e}", 4000)
+            self._record_stream_fh = None
 
         # 1s 计时 UI（沿用原有 _record_timer）
         self._record_seconds = 0
@@ -4493,26 +4527,58 @@ class MainWindow(QMainWindow):
             self._record_timer = None
 
         info = None
-        try:
-            if self._record_iq_buffer:
-                iq = np.concatenate(self._record_iq_buffer)
-            else:
-                iq = np.zeros(0, dtype=np.complex64)
-            if iq.size > 0 and self._record_file_path and _save_iq is not None:
-                info = _save_iq(
-                    iq, self._record_file_path,
-                    sample_rate=self._record_sr,
-                    center_freq_hz=self._record_center_hz,
-                    start_time=self._record_start_time or None,
-                    gain_db=self._record_gain_db,
-                    device=self._record_device,
-                    driver=self._record_driver,
-                    note="MBDSDR baseband recording (float32 interleaved I/Q)")
-        except Exception as e:
-            self.statusBar().showMessage(f"录制存盘失败: {e}", 5000)
-            info = None
-        finally:
-            self._record_iq_buffer = []
+        fh = getattr(self, "_record_stream_fh", None)
+        if fh is not None:
+            # 流式录制：数据早已在盘上，只需关流 + 写 sidecar
+            try:
+                fh.close()
+            except Exception:
+                pass
+            self._record_stream_fh = None
+            try:
+                from mbdsdr_ai.baseband_io import write_sidecar
+                n = int(getattr(self, "_record_samples_total", 0))
+                secs_d = (n / self._record_sr) if self._record_sr else 0.0
+                meta = {
+                    "sample_rate": self._record_sr,
+                    "center_freq_hz": self._record_center_hz,
+                    "start_time": self._record_start_time,
+                    "samples": n,
+                    "duration_s": round(secs_d, 3),
+                    "gain_db": self._record_gain_db,
+                    "device": self._record_device,
+                    "driver": self._record_driver,
+                    "format": "cf32",
+                    "note": "MBDSDR baseband recording (float32 interleaved I/Q, streamed)",
+                }
+                if getattr(self, "_record_rate_changes", None):
+                    meta["sample_rate_changes"] = self._record_rate_changes
+                sidecar = write_sidecar(self._record_file_path, meta)
+                info = {"path": self._record_file_path, "samples": n,
+                        "size_bytes": n * 8, "sidecar": sidecar}
+            except Exception as e:
+                self.statusBar().showMessage(f"录制 sidecar 写盘失败: {e}", 5000)
+                info = None
+        else:
+            try:
+                if self._record_iq_buffer:
+                    iq = np.concatenate(self._record_iq_buffer)
+                else:
+                    iq = np.zeros(0, dtype=np.complex64)
+                if iq.size > 0 and self._record_file_path and _save_iq is not None:
+                    info = _save_iq(
+                        iq, self._record_file_path,
+                        sample_rate=self._record_sr,
+                        center_freq_hz=self._record_center_hz,
+                        start_time=self._record_start_time or None,
+                        gain_db=self._record_gain_db,
+                        device=self._record_device,
+                        driver=self._record_driver,
+                        note="MBDSDR baseband recording (float32 interleaved I/Q)")
+            except Exception as e:
+                self.statusBar().showMessage(f"录制存盘失败: {e}", 5000)
+                info = None
+        self._record_iq_buffer = []
 
         # UI 恢复
         self.record_btn.setText("录音")
