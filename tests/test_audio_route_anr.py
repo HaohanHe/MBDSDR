@@ -10,6 +10,7 @@ tests/test_audio_route_anr.py
 """
 import os
 import sys
+import types
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -37,7 +38,7 @@ class _FakeStream:
 
 
 def test_preferred_device_forwarded(monkeypatch):
-    monkeypatch.setattr(ao.sd, "OutputStream", _FakeStream)
+    monkeypatch.setattr(ao, "sd", types.SimpleNamespace(OutputStream=_FakeStream))
     monkeypatch.setattr(ao, "_SD_AVAILABLE", True)
     p = ao.AudioPlayer(sample_rate=48000)
     p.preferred_device = 3
@@ -48,7 +49,7 @@ def test_preferred_device_forwarded(monkeypatch):
 
 def test_default_device_not_forced(monkeypatch):
     _FakeStream.kwargs_seen.clear()
-    monkeypatch.setattr(ao.sd, "OutputStream", _FakeStream)
+    monkeypatch.setattr(ao, "sd", types.SimpleNamespace(OutputStream=_FakeStream))
     monkeypatch.setattr(ao, "_SD_AVAILABLE", True)
     p = ao.AudioPlayer(sample_rate=48000)
     assert p.start() is True
