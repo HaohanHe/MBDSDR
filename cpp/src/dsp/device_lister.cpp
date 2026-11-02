@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "device_lister.h"
 
+#include <QtGlobal>
+
 #include <algorithm>
 
 #ifdef HAVE_RTLSDR
@@ -12,6 +14,11 @@ namespace dsp {
 
 #ifdef HAVE_RTLSDR
 std::vector<RtlDeviceInfo> RtlSdrDeviceEnumerator::enumerate() {
+    // MBDSDR_NO_HW=1: deterministic-hardware test seam (see rtlLibOps() in
+    // rtl_sdr_source.cpp for the full rationale). Report no devices so UI
+    // tests on a machine with a real dongle attached see the exact same
+    // honest empty state as the CI box, instead of racing device 0.
+    if (qgetenv("MBDSDR_NO_HW") == "1") return {};
     std::vector<RtlDeviceInfo> out;
     const int count = rtlsdr_get_device_count();
     for (uint32_t i = 0; i < static_cast<uint32_t>(count); ++i) {

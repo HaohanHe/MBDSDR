@@ -844,8 +844,9 @@ target_link_libraries(test_spectrum_display PRIVATE mbdsdr_core)
 target_include_directories(test_spectrum_display PRIVATE src)
 target_link_libraries(test_spectrum_display PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_display COMMAND test_spectrum_display)
-# QT_QPA_PLATFORM=offscreen 供 headless CI。MinGW/Qt DLL 需在 PATH 中
-# （shell 跑通；ctest 子进程 PATH 继承差异见 font_cjk_guard 同类问题）。
+# QT_QPA_PLATFORM=offscreen 供 headless CI。MinGW/Qt DLL 路径已由文件尾的
+# 「ctest 全目标统一运行时环境注入」统一前插进 PATH，不再依赖开发者 shell
+# （此前干净 shell 下缺 DLL 弹模态框挂死 ctest，2026-11-02 根治）。
 set_tests_properties(spectrum_display PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # dB axis auto-range + drag-tune/waterfall alignment contract (offscreen).
@@ -2018,16 +2019,108 @@ set(MBDSDR_SLOW_DSP_TESTS
 set_tests_properties(${MBDSDR_MAINWINDOW_TESTS} PROPERTIES LABELS "mainwindow;slow")
 set_tests_properties(${MBDSDR_SLOW_DSP_TESTS} PROPERTIES LABELS "slow")
 
-# ── ctest 全目标统一“无声卡”注入 ──────────────────────────────────────────
-# MBDSDR_NULL_AUDIO=1 是 SpectrumEngine 构造函数里的既有门（spectrum_engine.cpp）：
-# 渲染端点走 NullAudioSink 丢弃，绝不打开真声卡。未带 QT_QPA_PLATFORM=offscreen
-# 的目标（e2e_smoke / soak 等）此前在有声卡的机器上把解调音频写进默认输出设备
-# （2026-10-31 本机全量 ctest 实测每秒一咔）。统一注入后本机行为与 headless CI
-# 一致：NullAudioSink 诚实报告 isAvailable()==false，测试结论不依赖有无声卡。
-# APPEND 保留各目标已有的 ENVIRONMENT（如 QT_QPA_PLATFORM=offscreen）。
+# ── ctest 全目标统一运行时环境注入（无声卡 + offscreen + Windows DLL/插件路径）──
+# 工程铁律：测试所需环境必须落在测试属性上，不依赖开发者 shell 或 CI 全局 env
+# （先例：下方 NULL_AUDIO 注入、startup_robustness/spectrum_display 逐目标
+# offscreen）。本块把三件事统一成对所有 ctest 目标生效的开关：
+#
+# 1) MBDSDR_NULL_AUDIO=1 —— SpectrumEngine 构造函数里的既有门
+#    （spectrum_engine.cpp）：渲染端点走 NullAudioSink 丢弃，绝不打开真声卡。
+#    未带此门的目标（e2e_smoke / soak 等）此前在有声卡的机器上把解调音频写进
+#    默认输出设备（2026-10-31 本机全量 ctest 实测每秒一咔）。统一注入后本机
+#    行为与 headless CI 一致：NullAudioSink 诚实报告 isAvailable()==false，
+#    测试结论不依赖有无声卡。
+#
+# 2) QT_QPA_PLATFORM=offscreen —— 全部目标（此前仅 31/162 逐目标钉，缺省
+#    目标在有显示环境的机器上会尝试创建真窗口）。与既有逐目标 ENVIRONMENT
+#    同值：APPEND 产生的重复项等值，ctest 按序应用无漂移。
+#
+# 3) Windows DLL/Qt 插件路径 —— 测试可执行文件链接 Qt6/MinGW 运行库，DLL
+#    不在系统 PATH。开发者 shell 手动 export PATH 只对当前会话有效；干净
+#    shell 下 ctest 子进程缺 DLL 时 Windows 弹模态错误框、ctest 挂死等不到
+#    退出码（2026-11-02 实测）。统一通过 CTest 的 ENVIRONMENT_MODIFICATION
+#    属性向 PATH 前插：Qt bin（Qt6*.dll）、编译器 bin（libstdc++-6.dll /
+#    libgcc_s_seh-1.dll / libwinpthread-1.dll）、构建输出目录（第三方 DLL
+#    落点，如 librtlsdr.dll——当前 RTL-SDR 走软件 stub、sqlite3 静态链接，
+#    目录恒备着以兼容未来动态依赖）、RTLSDR 库目录（若启用真 RTL）。
+#    path_list_prepend 只前插不覆盖，System32 等既有 PATH 完整保留。
+#    另设 QT_PLUGIN_PATH 指向 Qt 插件目录（platforms/qoffscreen.dll、
+#    imageformats 等），与 Qt 自身安装布局探测双保险。
+#    目录探测失败一律 FATAL_ERROR——宁可配置期红，不许静默退化回弹框环境。
+#    ENVIRONMENT_MODIFICATION 需 CMake >= 3.22（本地 4.1 / CI ubuntu-latest
+#    均满足）；旧版 CMake 在 Windows 上直接拒绝配置，不静默跳过注入。
 get_property(MBDSDR_ALL_CTESTS DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTY TESTS)
+
+set(MBDSDR_TEST_PATH_PREPEND "")
+if(WIN32)
+  if(CMAKE_VERSION VERSION_LESS 3.22)
+    message(FATAL_ERROR
+        "ctest ENVIRONMENT_MODIFICATION 注入需要 CMake >= 3.22（当前 ${CMAKE_VERSION}）。"
+        "请升级 CMake——否则 Windows 测试子进程缺 DLL 会弹模态框挂死 ctest。")
+  endif()
+
+  # Qt bin：Qt6::Core 导入目标的 DLL 所在目录
+  get_target_property(MBDSDR_QT_CORE_LOC Qt6::Core LOCATION)
+  if(NOT MBDSDR_QT_CORE_LOC)
+    message(FATAL_ERROR "Qt6::Core 位置探测失败：无法为 ctest 注入 Qt DLL 路径")
+  endif()
+  get_filename_component(MBDSDR_QT_BIN "${MBDSDR_QT_CORE_LOC}" DIRECTORY)
+  if(NOT EXISTS "${MBDSDR_QT_BIN}/Qt6Core.dll")
+    message(FATAL_ERROR "Qt bin 目录缺失 Qt6Core.dll: ${MBDSDR_QT_BIN}")
+  endif()
+  list(APPEND MBDSDR_TEST_PATH_PREPEND "${MBDSDR_QT_BIN}")
+
+  # 编译器 bin：MinGW 运行库（libstdc++-6.dll / libgcc_s_seh-1.dll / libwinpthread-1.dll）
+  get_filename_component(MBDSDR_TC_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  if(NOT EXISTS "${MBDSDR_TC_BIN}")
+    message(FATAL_ERROR "编译器 bin 目录不存在: ${MBDSDR_TC_BIN}")
+  endif()
+  list(APPEND MBDSDR_TEST_PATH_PREPEND "${MBDSDR_TC_BIN}")
+
+  # 构建输出目录：第三方 DLL 落点（RUNTIME_OUTPUT_DIRECTORY，见文件头）
+  if(NOT IS_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    message(FATAL_ERROR "构建输出目录不存在: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+  endif()
+  list(APPEND MBDSDR_TEST_PATH_PREPEND "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+
+  # RTL-SDR 真库启用时：其 DLL/导入库所在目录一并前插
+  if(RTLSDR_FOUND AND RTLSDR_LIBRARY_DIRS)
+    list(APPEND MBDSDR_TEST_PATH_PREPEND ${RTLSDR_LIBRARY_DIRS})
+  endif()
+
+  # Qt 插件目录：优先用 Qt6 自报的安装前缀/相对路径，缺省回退到 Qt6_DIR 布局推导
+  if(DEFINED QT6_INSTALL_PREFIX AND DEFINED QT6_INSTALL_PLUGINS)
+    set(MBDSDR_QT_PLUGINS "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_PLUGINS}")
+  else()
+    # Qt6_DIR = <prefix>/lib/cmake/Qt6 → 三级上溯到 <prefix>
+    get_filename_component(MBDSDR_QT_PLUGINS "${Qt6_DIR}" DIRECTORY)
+    get_filename_component(MBDSDR_QT_PLUGINS "${MBDSDR_QT_PLUGINS}" DIRECTORY)
+    get_filename_component(MBDSDR_QT_PLUGINS "${MBDSDR_QT_PLUGINS}" DIRECTORY)
+    string(APPEND MBDSDR_QT_PLUGINS "/plugins")
+  endif()
+  if(NOT EXISTS "${MBDSDR_QT_PLUGINS}/platforms/qoffscreen.dll")
+    message(FATAL_ERROR
+        "Qt 插件目录缺失 platforms/qoffscreen.dll: ${MBDSDR_QT_PLUGINS}")
+  endif()
+endif()
+
 if(MBDSDR_ALL_CTESTS)
+  # APPEND 保留各目标已有的 ENVIRONMENT（如逐目标 QT_QPA_PLATFORM=offscreen）。
+  # MBDSDR_NO_HW=1：确定性硬件接缝（与 MBDSDR_NULL_AUDIO 同族）——真机在位的
+  # 开发机上，每个 MainWindow 都会抢开 device 0（并发窗口 usb_open error -3），
+  # 空态类测试随之漂移。该开关让本进程与 CI（有库无设备）行为完全一致；
+  # rtlSetLibOpsForTesting() 安装的测试替身不受影响（rtlLibOps() 里替身优先）。
   set_property(TEST ${MBDSDR_ALL_CTESTS} APPEND PROPERTY ENVIRONMENT "MBDSDR_NULL_AUDIO=1")
+  set_property(TEST ${MBDSDR_ALL_CTESTS} APPEND PROPERTY ENVIRONMENT "MBDSDR_NO_HW=1")
+  set_property(TEST ${MBDSDR_ALL_CTESTS} APPEND PROPERTY ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+  if(WIN32 AND MBDSDR_TEST_PATH_PREPEND)
+    foreach(_d IN LISTS MBDSDR_TEST_PATH_PREPEND)
+      set_property(TEST ${MBDSDR_ALL_CTESTS} APPEND PROPERTY
+          ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_d}")
+    endforeach()
+    set_property(TEST ${MBDSDR_ALL_CTESTS} APPEND PROPERTY
+        ENVIRONMENT_MODIFICATION "QT_PLUGIN_PATH=set:${MBDSDR_QT_PLUGINS}")
+  endif()
 endif()
 
 # ── install() / CPack：产品交付面（缺口台账 P0「零安装/打包」）─────────────
@@ -2048,6 +2141,12 @@ install(FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/../NOTICE.md
   DESTINATION share/doc/mbdsdr)
 
+# CPack ZIP/TGZ 只装上面的 install() 树（exe + i18n + 色板 + 文档）——
+# **不含任何运行库**（Qt/MinGW/librtlsdr DLL 一概没有），解压后直接运行
+# 必弹「找不到 DLL」。这是刻意的：可分发产物只有 scripts/package_windows.ps1
+# 走 windeployqt + RTL DLL + 冒烟的便携包一条路；CPack 归档仅供 CI 里
+# 检查安装树布局，禁止直发给最终用户。要删本段先删这条注释（诚实口径：
+# 2026-11-02 弹窗根因收口时钉死，防止"包能解压"被误读成"包能跑"）。
 set(CPACK_PACKAGE_NAME "mbdsdr")
 set(CPACK_PACKAGE_VENDOR "MBDSDR")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})

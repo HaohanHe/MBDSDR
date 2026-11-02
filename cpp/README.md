@@ -120,23 +120,36 @@ cmake --build build -j$(nproc)
 ### Windows 从零构建与打包（MinGW）
 
 ```powershell
-# 依赖：Qt 6.8（mingw_64）+ MinGW 工具链 + CMake 3.16+，在 PATH 或显式前缀
+# 依赖：Qt 6.8（mingw_64）+ MinGW 工具链 + CMake 3.22+，在 PATH 或显式前缀
 cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.8.2/mingw_64
 cmake --build build -j
-.\build\mbdsdr.exe
 ```
 
-一键打便携包（构建 + `cmake --install` + `windeployqt` 收 Qt DLL + 压 zip）：
+**裸构建目录不部署 DLL**：`build\*.exe` 链接的是 Qt6/MinGW 动态运行库
+（`Qt6Core.dll`、`libstdc++-6.dll`、`libgcc_s_seh-1.dll`…），它们不在系统
+PATH。**测试一律经 `ctest` 跑**——`cpp/CMakeLists.txt` 已把 PATH 前插
+（Qt bin / MinGW bin / 构建输出目录 / RTL-SDR 库目录）、`QT_PLUGIN_PATH`、
+`QT_QPA_PLATFORM=offscreen`、`MBDSDR_NULL_AUDIO=1` 统一注入到每个测试的
+ENVIRONMENT 属性上，干净 shell 直接 `ctest --test-dir build` 即可，零弹窗。
+要**直跑**某个 exe（如调试 `mbdsdr.exe`），自行把 Qt bin 与 MinGW bin 加进
+当前 shell 的 PATH，否则 Windows loader 弹「找不到 DLL」模态框（CUI 程序
+同样弹，2026-11-02 实测钉死）。
+
+一键打便携包（构建 + `cmake --install` + `windeployqt` 收 Qt DLL +
+librtlsdr.dll（CMakeCache 推导）+ 干净 PATH 冒烟 + 压 zip）：
 
 ```powershell
-# 仓库根目录
-.\scripts\package_windows.ps1 -QtBin C:\Qt\6.8.2\mingw_64\bin
-# 产物：cpp/build/dist/mbdsdr-<版本>-win64-portable.zip（解压即用，无需装 Qt）
+# 仓库根目录（默认用 cpp/build-local——本机唯一 RTLSDR=FOUND 的树，
+# stub 树会被脚本显式拒绝）
+.\scripts\package_windows.ps1
+# 产物：cpp/build-local/dist/mbdsdr-<版本>-win64-portable.zip
+# （解压即用、无需装 Qt；换机器干净 PATH 双击可起——冒烟在压包前把关）
 ```
 
-`cmake --install build --prefix <dir>` 与 `cpack -G ZIP`（在 build 目录内）同样可用：
-安装树只含交付物（`bin/mbdsdr`、`bin/mbdsdr_mcp`、`bin/i18n/*.qm`、许可证文档），
-数百个测试目标不进安装树；Qt 运行库由 windeployqt（Windows）或系统包（Linux）自理。
+`cmake --install build --prefix <dir>` 同样可用，但**产物不含任何运行库**
+（Qt/MinGW/librtlsdr DLL 一概没有），只适合检查安装树布局，不可直发；
+`cpack -G ZIP/TGZ` 同理（见 CMakeLists 尾部注释）。可分发的只有上面
+`package_windows.ps1` 打出的便携包一条路。
 
 ## 测试
 

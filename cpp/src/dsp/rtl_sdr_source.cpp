@@ -226,6 +226,17 @@ const RtlLibOps* rtlLibOps() {
     if (g_testOps) return g_testOps;              // installed test double wins
     if (g_testOpsForcedNull) return nullptr;      // forced stub simulation
 #ifdef HAVE_RTLSDR
+    // MBDSDR_NO_HW=1: deterministic-hardware test seam (same family as
+    // MBDSDR_NULL_AUDIO / MBDSDR_TEST_SOURCE). On a dev machine with a real
+    // dongle attached, UI/agent tests that assume the honest no-hardware
+    // empty state would otherwise race the device (each MainWindow grabs
+    // device 0; concurrent windows hit usb_open error -3). Setting this env
+    // makes THIS PROCESS behave exactly like the CI box: librtlsdr is linked
+    // but no device is reachable, so start() falls back to NullSource and
+    // the UI honestly reports "未连接". Test doubles installed via
+    // rtlSetLibOpsForTesting() are unaffected (they win above). Production
+    // launches never set it.
+    if (qgetenv("MBDSDR_NO_HW") == "1") return nullptr;
     return &g_realOps;
 #else
     return nullptr;                    // no librtlsdr: graceful stub
