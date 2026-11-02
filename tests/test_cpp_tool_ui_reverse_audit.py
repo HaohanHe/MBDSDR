@@ -13,9 +13,10 @@ registeredToolSpecs() 逐一对照，产出：
 
 本文件是纯文本钉扎（防漂移），不编译 C++、不碰硬件、offscreen 无关：
 
-  1. 控件实例化点计数：cpp/src/ui/*.cpp 六类控件 new 计数 == 143，
-     与审计清单口径（40 combo/35 checkbox/21 lineedit/19 doublespin/
+  1. 控件实例化点计数：cpp/src/ui/*.cpp 六类控件 new 计数 == 144，
+     与审计清单口径（40 combo/36 checkbox/21 lineedit/19 doublespin/
      16 spin/12 slider）一致；漂移即红，提醒同步更新审计文档。
+     （2026-11-02 快照 143→144：40f2b87 新增 DC 抑制开关 dcChk_，合法增量。）
   2. 清单条数：审计文档里 D1/D2/D3 表格行数 == 45/9/8（审计快照口径不变）。
   3. D1 双账（2026-10-30 第三轮销账完毕）：45 条缺口全部落地——每个都必须
      在 tool_schema.cpp 的 s.name 集合里且在 agent_tools.cpp dispatchTable
@@ -35,10 +36,10 @@ AUDIT_DOC = REPO / "docs" / "learn" / "cpp-tool-ui-reverse-audit.md"
 # 审计口径：六类可调控件 new 实例化点总数（含 new QDoubleSpinBox; 无括号形态）
 CTRL_PATTERN = re.compile(
     r"new\s+Q(DoubleSpinBox|ComboBox|CheckBox|SpinBox|Slider|LineEdit)\b")
-EXPECTED_CTRL_TOTAL = 143
+EXPECTED_CTRL_TOTAL = 144
 EXPECTED_BY_TYPE = {
     "QComboBox": 40,
-    "QCheckBox": 35,
+    "QCheckBox": 36,
     "QLineEdit": 21,
     "QDoubleSpinBox": 19,
     "QSpinBox": 16,
@@ -94,7 +95,7 @@ def _read(path):
 
 
 def test_control_inventory_matches_audit():
-    """六类控件 new 计数与审计口径 143（分类型）一致。"""
+    """六类控件 new 计数与审计口径 144（分类型）一致。"""
     per_type = {k: 0 for k in EXPECTED_BY_TYPE}
     for f in sorted(UI_DIR.glob("*.cpp")):
         for m in CTRL_PATTERN.finditer(_read(f)):

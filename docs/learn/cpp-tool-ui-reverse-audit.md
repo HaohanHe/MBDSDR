@@ -15,9 +15,10 @@
 | 不计入缺口（有意不暴露/瞬态交互） | 12 | 见 §5，如实记账不算 D1 |
 
 盘点口径：`cpp/src/ui/*.cpp` 中 `new QComboBox/QCheckBox/QDoubleSpinBox/QSpinBox/QSlider/QLineEdit`
-共 **143 处实例化点**（40 combo / 35 checkbox / 21 lineedit / 19 doublespin / 16 spin / 12 slider，
-与任务口径一致）；settings_dialog 的左右栏面板复选框循环（`settings_dialog.cpp:156`/`:177`）
-与频谱右缘三滑条辅助函数（`spectrum_widget.cpp:623`）展开后运行时约 **169 个具象控件**。
+共 **144 处实例化点**（40 combo / 36 checkbox / 21 lineedit / 19 doublespin / 16 spin / 12 slider，
+与任务口径一致；2026-11-02 快照 143→144：40f2b87 新增 DC 抑制开关 dcChk_，合法增量）；
+settings_dialog 的左右栏面板复选框循环（`settings_dialog.cpp:156`/`:177`）
+与频谱右缘三滑条辅助函数（`spectrum_widget.cpp:623`）展开后运行时约 **170 个具象控件**。
 工具面：`registeredToolSpecs()` 共 **90 个工具**（`tool_schema.cpp:63-2409`，快照时点；
 销账后 135，见 §7）。
 
@@ -189,7 +190,7 @@ README 默认值口径：grep 未发现 README 对增益/静噪/音量等默认�
 ## 6. 钉扎与声明
 
 - 防漂移测试：`tests/test_cpp_tool_ui_reverse_audit.py`（offscreen、纯文本解析、不碰硬件）——
-  ①控件实例化点计数=143 与本清单口径一致；②D1/D2/D3 条数=45/9/8 与本清单一致；
+  ①控件实例化点计数=144 与本清单口径一致；②D1/D2/D3 条数=45/9/8 与本清单一致；
   ③D1 双账同步（§7 后）：45 个建议工具名在 `tool_schema.cpp` 的 `s.name` 集合与
   `agent_tools.cpp` 的 dispatchTable 行**双侧必须全在场**（第二轮 19 + 第三轮 26，
   一个都不能少——任何一侧漂移即红）。
