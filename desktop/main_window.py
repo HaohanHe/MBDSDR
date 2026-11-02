@@ -5478,9 +5478,10 @@ class MainWindow(QMainWindow):
         sr = float(rec.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ))
         center_hz = float(rec.get("center_freq_hz", 0.0))
 
-        # 停止实时轮询（回放期间独占频谱）；结束后按当时连接状态恢复
-        self._replay_resume_poll = self._iq_poll_timer is not None and \
-            self._iq_poll_timer.isActive()
+        # 停止实时轮询（回放期间独占频谱）；结束后按当时连接状态恢复。
+        # 恢复条件 = 实时后端是否连着，而不是旧 UI 线程 _iq_poll_timer
+        # 的活动态（后台流水线时代该定时器不再启动，用它会永远不恢复）。
+        self._replay_resume_poll = self._active_sdr_backend is not None
         self._stop_iq_streams()
         # _stop_iq_streams 会关掉声卡；回放本身要出声，这里重新拉起声卡
         # （AudioPlayer.start 幂等：已启动直接返回 True）。回放结束 _stop_replay
