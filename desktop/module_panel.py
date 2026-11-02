@@ -255,15 +255,17 @@ class ModulePanel(QWidget):
         right = QGroupBox("参数")
         form = QFormLayout(right)
         self.freq_spin = QDoubleSpinBox()
-        self.freq_spin.setRange(FREQ_MIN_HZ, FREQ_MAX_HZ)
-        self.freq_spin.setValue(100.0e6)
-        self.freq_spin.setSuffix(" Hz")
-        self.freq_spin.setDecimals(0)
+        # MHz 人类量纲显示（七位数 Hz 不友好，settings-audit 七-3 销账）；
+        # tune_requested 信号仍是 Hz——量纲换算只在控件边界做，消费方不动。
+        self.freq_spin.setRange(FREQ_MIN_HZ / 1e6, FREQ_MAX_HZ / 1e6)
+        self.freq_spin.setValue(100.0)
+        self.freq_spin.setSuffix(" MHz")
+        self.freq_spin.setDecimals(4)   # 0.0001 MHz = 100 Hz 步进
         self.freq_spin.setToolTip(
-            "中心频率（Hz）。项目可调范围 10 kHz – 6 GHz，"
+            "中心频率（MHz 显示，下发仍为 Hz）。项目可调范围 10 kHz – 6 GHz，"
             "实际以设备能力为准（见左侧设备信息）")
         self.freq_spin.valueChanged.connect(
-            lambda v: self.tune_requested.emit(v))
+            lambda v: self.tune_requested.emit(round(v * 1e6)))
         form.addRow("频率", self.freq_spin)
 
         self.gain_slider = QSlider(Qt.Horizontal)

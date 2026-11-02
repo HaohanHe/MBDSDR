@@ -47,6 +47,38 @@ def test_division_and_connection_messages():
         ConnectionRefusedError(111, "Connection refused"))
 
 
+def test_windows_network_errors_mapped_not_computation_error():
+    """Windows 网络错误（[WinError NNNN]）映射为中文连接类说明。
+
+    2026-11-02 销账 settings-audit 七-5：此前 WinError 串不命中 _EN_MSG_MAP，
+    英文包裹串（<urlopen error …>）泄漏或被打成「计算错误」——明明是连接问题
+    却提示查输入参数。WinError 10061/10060/10065/10054 与 Linux errno 三条对齐。
+    """
+    out = clean_exc(ConnectionRefusedError(
+        10061, "No connection could be made because the target machine actively refused it"))
+    assert "连接被拒绝" in out
+    assert "WinError" not in out
+    assert "计算错误" not in out
+
+    # urllib 包裹形态（Windows 上拉 HTTP 时 str(e) 的真实样子）
+    out2 = clean_exc(OSError(
+        "<urlopen error [WinError 10061] 由于目标计算机积极拒绝，无法连接。>"))
+    assert "连接被拒绝" in out2
+    assert "urlopen" not in out2
+    assert "计算错误" not in out2
+
+    out3 = clean_exc(TimeoutError("[WinError 10060] 由于连接方在一段时间后没有正确答复或连接的主机没有反应，连接尝试失败。"))
+    assert "连接超时" in out3
+    assert "计算错误" not in out3
+
+    out4 = clean_exc(OSError(
+        "[WinError 10065] A socket operation was attempted to an unreachable host."))
+    assert "网络不可达" in out4
+
+    out5 = clean_exc(OSError("[WinError 10054] 远程主机强迫关闭了一个现有的连接。"))
+    assert "连接被对端重置" in out5
+
+
 def test_key_error_names_the_parameter():
     """KeyError 点名缺少的参数名。"""
     assert "frequency_hz" in clean_exc(KeyError("frequency_hz"))

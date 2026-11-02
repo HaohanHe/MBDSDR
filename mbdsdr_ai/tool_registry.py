@@ -113,6 +113,18 @@ _EN_MSG_MAP = [
      "网络不可达：找不到到该主机的路由（检查网络连接与设备 IP）"),
     (re.compile(r"\[Errno 110\] Connection timed out"),
      "连接超时：对端无响应（检查设备是否在线、防火墙是否放行）"),
+    # Windows 网络错误不走 Errno 前缀，str(e) 是 [WinError NNNN] 形式，
+    # URLError 包裹后成 "<urlopen error [WinError 10061] ...>"。不映射就会
+    # 泄漏英文包裹串或被打成「计算错误」——补 WinError 10061/10060/10065/10054
+    # 与上面三条 Linux errno 语义对齐（2026-11-02，settings-audit 七-5 销账）。
+    (re.compile(r"\[WinError 10061\]"),
+     "连接被拒绝：对端没有程序在监听该地址端口（检查设备 IP/端口与服务是否已启动）"),
+    (re.compile(r"\[WinError 10060\]"),
+     "连接超时：对端无响应（检查设备是否在线、防火墙是否放行）"),
+    (re.compile(r"\[WinError 10065\]"),
+     "网络不可达：找不到到该主机的路由（检查网络连接与设备 IP）"),
+    (re.compile(r"\[WinError 10054\]"),
+     "连接被对端重置或断开（检查设备状态与网络质量）"),
     # socket.timeout / TimeoutError 的 str(e) 就是裸 "timed out"（无 Errno 前缀），
     # 云台/rotctld/设备面超时分支都会走到这里，不映射就会泄漏英文。
     (re.compile(r"^timed out$"),

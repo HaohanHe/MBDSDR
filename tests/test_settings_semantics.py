@@ -179,12 +179,16 @@ class TestE2UnitsPresent:
             f"静噪值必须带 dB 单位，实际 {cp.squelch_val.text()!r}"
 
     def test_module_and_control_unit_suffixes(self):
-        """既有单位后缀不许回退（Hz / dB / MHz 档位文本）。"""
+        """既有单位后缀不许回退（MHz / dB / MHz 档位文本）。
+
+        module_panel 频率 2026-11-02 起为 MHz 人类量纲显示（七位数 Hz 反人类，
+        settings-audit 七-3 销账）；下发量纲仍是 Hz（见 signal 边界测试）。
+        """
         _app()
         from module_panel import ModulePanel
         from control_panel import ControlPanel
         m = ModulePanel()
-        assert m.freq_spin.suffix().strip() == "Hz"
+        assert m.freq_spin.suffix().strip() == "MHz"
         assert m.bw_spin.suffix().strip() == "Hz"
         c = ControlPanel()
         assert "dB" in c.gain_val.text()
@@ -307,13 +311,30 @@ class TestE3RangeMatchesCapability:
             "tooltip 必须声明实际可调范围以设备为准"
 
     def test_module_freq_spin_matches_project_bounds(self):
-        """module_panel 频率值域对齐项目可调范围（旧 7.2 GHz 是 Soapy 兜底值）。"""
+        """module_panel 频率值域对齐项目可调范围（旧 7.2 GHz 是 Soapy 兜底值）。
+
+        2026-11-02 起旋钮是 MHz 人类量纲——值域断言随修复换算到 MHz 量纲，
+        语义不变：最小=10 kHz、最大=项目 6 GHz。
+        """
         _app()
         from module_panel import ModulePanel
         p = ModulePanel()
-        assert p.freq_spin.minimum() == FREQ_MIN_HZ
-        assert p.freq_spin.maximum() == FREQ_MAX_HZ, \
+        assert p.freq_spin.minimum() == FREQ_MIN_HZ / 1e6
+        assert p.freq_spin.maximum() == FREQ_MAX_HZ / 1e6, \
             "上限必须是项目 6 GHz，而不是 Soapy 无范围兜底的 7.2 GHz"
+
+    def test_module_freq_spin_emits_hz_across_boundary(self):
+        """旋钮显示 MHz，tune_requested 信号必须仍发 Hz（量纲只在控件边界换算）。"""
+        _app()
+        from module_panel import ModulePanel
+        p = ModulePanel()
+        got = []
+        p.tune_requested.connect(lambda hz: got.append(hz))
+        p.freq_spin.setValue(145.5)
+        assert got and got[-1] == 145.5e6, \
+            f"信号必须发 Hz，实际 {got[-1]!r}"
+        p.freq_spin.setValue(100.0)
+        assert got[-1] == 100.0e6, f"信号必须发 Hz，实际 {got[-1]!r}"
 
 
 # ======================================================================
