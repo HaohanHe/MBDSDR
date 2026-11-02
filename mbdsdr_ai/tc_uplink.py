@@ -4,7 +4,7 @@
 能力拆解（218 条）P0-5 的原子能力：遥控上行帧构建与调制。下行接收链仓内
 已厚（ccsds_tools），上行此前完全没有。本模块补齐（全部纯软件，可 golden）：
 
-  * ``tc_build_frame``   数据 → CCSDS TC 传输帧（6 字节头 + 数据 + CRC16-CCSDS）
+  * ``tc_build_frame``   数据 → CCSDS TC 传输帧（5 字节主头 + 数据 + CRC16-CCSDS）
   * ``tc_frame_parse``   帧字节 → 头字段 + 数据 + CRC 校验（对拍/验收侧）
   * ``pcm_psk_pm_modulate`` 比特 → NRZ-L → PSK 副载波 → PM 载波（复基带）
   * ``tc_uplink_transmit`` **发射工具**：arm_manual 人工门 + 无设备诚实 NEED_HW
@@ -13,10 +13,11 @@
   * 发射工具未显式 ``arm_manual=true`` 一律拒绝（gated 信封，不假装成功）；
   * 已武装但环境无可用发射设备 → 如实 NEED_HW，绝不伪造"已发射"；
   * 频点/帧布局不硬编码：布局从 frame_layouts.json 注入，频点调用方给；
-  * TC 帧头各字段位宽按 CCSDS 232.0-B 公开标准，golden 自编码器单源生成。
+  * TC 主头按 CCSDS 232.0-B-4 图 4-1/4-2，真值取自 CCSDS 230.1-G-3 Annex F。
 """
 from __future__ import annotations
 
+from numbers import Integral
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -29,10 +30,43 @@ __all__ = [
     "tc_uplink_transmit", "register_tool_registry",
 ]
 
-#: TC 帧固定头长（本仓布局口径：5 字节标准主头 + 1 字节保留）
-_TC_HEADER_LEN = 6
+#: CCSDS 232.0-B-4 §4.1.1/图 4-2：TC 主头固定为 5 字节，无第六个保留字节。
+_TC_HEADER_LEN = 5
 #: FECF（帧差错控制域）长度
 _TC_FECF_LEN = 2
+#: 10 位 Frame Length 字段决定的总帧长上限（含主头和 FECF）。
+_TC_MAX_FRAME_LEN = 1 << 10
+
+
+def _coerce_octets(value: Any, *, name: str) -> bytes:
+    """验证并转换字节串；拒绝标量、非整数及越界值，不做掩码截断。"""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    if isinstance(value, (str, bytes, int)):
+        raise ValueError(f"{name} 须为字节串或 0..255 整数序列")
+    try:
+        items = iter(value)
+    except TypeError as exc:
+        raise ValueError(f"{name} 须为字节串或 0..255 整数序列") from exc
+    out = bytearray()
+    for index, item in enumerate(items):
+        if isinstance(item, bool) or not isinstance(item, Integral):
+            raise ValueError(f"{name}[{index}] 须为 0..255 整数，收到 {item!r}")
+        number = int(item)
+        if not 0 <= number <= 0xFF:
+            raise ValueError(f"{name}[{index}]={number} 越界，须为 0..255")
+        out.append(number)
+    return bytes(out)
+
+
+def _uint_field(name: str, value: Any, bits: int) -> int:
+    """返回经过位宽验证的整数字段，拒绝浮点/字符串等隐式转换。"""
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{name} 须为 0..{(1 << bits) - 1} 的整数（{bits} bit）")
+    value = int(value)
+    if not 0 <= value < (1 << bits):
+        raise ValueError(f"{name} 须 0..{(1 << bits) - 1}（{bits} bit）")
+    return value
 
 
 def tc_build_frame(data: bytes, *,
@@ -43,40 +77,42 @@ def tc_build_frame(data: bytes, *,
                    frame_seq: int = 0,
                    layout_name: str = "ccsds_tc_classic",
                    ) -> Dict[str, Any]:
-    """数据字节 → CCSDS TC 传输帧（头 + 数据 + CRC16-CCSDS）。
+    """数据字节 → CCSDS TC 传输帧（5 字节主头 + 数据 + CRC16-CCSDS）。
 
-    头布局（CCSDS 232.0-B，6 字节口径见 frame_layouts.json）：
-      byte0  : TFVN(2b)=0 | bypass(1b) | ctrl_cmd(1b) | spare(2b) | SCID 高 2 位
+    主头布局（CCSDS 232.0-B-4 §4.1.2/图 4-2）：
+      byte0  : TFVN(2b)=0 | bypass(1b) | ctrl_cmd(1b) | spare(2b)=0 | SCID 高 2 位
       byte1  : SCID 低 8 位（共 10 位）
       byte2  : VCID(6b) | 帧长字段高 2 位
-      byte3  : 帧长字段低 8 位（= 头+数据+CRC 总字节数 − 1）
+      byte3  : 帧长字段低 8 位（= 主头+数据+CRC 总字节数 − 1）
       byte4  : 帧序列号（8b）
-      byte5  : 保留（0）
-    字段取值域越界即报错（不静默截断）；CRC 覆盖 头+数据。
+    字段取值域越界即报错（不静默截断）；CRC 覆盖主头+数据。
+    Table 4-1 的保留组合 bypass=0/ctrl_cmd=1 不可构建；Type-B 序列号为 0。
     """
     layout = load_frame_layout(layout_name)
     if layout.get("crc", {}).get("name") != "crc16_ccsds":
         raise ValueError(f"布局 {layout_name} 的 CRC 不是 crc16_ccsds，"
                          "本构建器只按 CCSDS TC 口径工作")
-    if not 0 <= spacecraft_id < (1 << 10):
-        raise ValueError("spacecraft_id 须 0..1023（10 bit）")
-    if not 0 <= virtual_channel_id < (1 << 6):
-        raise ValueError("virtual_channel_id 须 0..63（6 bit）")
-    for name, val, bits in (("bypass", bypass, 1), ("ctrl_cmd", ctrl_cmd, 1),
-                            ("frame_seq", frame_seq, 8)):
-        if not 0 <= val < (1 << bits):
-            raise ValueError(f"{name} 须 0..{(1 << bits) - 1}（{bits} bit）")
-    payload = bytes(data)
+    spacecraft_id = _uint_field("spacecraft_id", spacecraft_id, 10)
+    virtual_channel_id = _uint_field("virtual_channel_id", virtual_channel_id, 6)
+    bypass = _uint_field("bypass", bypass, 1)
+    ctrl_cmd = _uint_field("ctrl_cmd", ctrl_cmd, 1)
+    frame_seq = _uint_field("frame_seq", frame_seq, 8)
+    if bypass == 0 and ctrl_cmd == 1:
+        raise ValueError("bypass=0 且 ctrl_cmd=1 是 Table 4-1 保留组合，拒绝构建")
+    if bypass == 1 and frame_seq != 0:
+        raise ValueError("Type-B TC 帧的 frame_seq 须为 0（CCSDS 232.0-B-4 §4.1.2.8）")
+    payload = _coerce_octets(data, name="data")
     total = _TC_HEADER_LEN + len(payload) + _TC_FECF_LEN
+    if total > _TC_MAX_FRAME_LEN:
+        raise ValueError(
+            f"总帧长 {total} 超过 CCSDS TC 上限 1024 字节；含 FECF 时数据最多 1017 字节")
     length_field = total - 1
     header = bytes([
-        (0 << 6) | ((bypass & 1) << 5) | ((ctrl_cmd & 1) << 4)
-        | ((spacecraft_id >> 8) & 0b11),
+        (bypass << 5) | (ctrl_cmd << 4) | (spacecraft_id >> 8),
         spacecraft_id & 0xFF,
-        ((virtual_channel_id & 0x3F) << 2) | ((length_field >> 8) & 0b11),
+        (virtual_channel_id << 2) | (length_field >> 8),
         length_field & 0xFF,
-        frame_seq & 0xFF,
-        0,
+        frame_seq,
     ])
     body = header + payload
     fecf = crc_generic(body, CRC16_CCSDS).to_bytes(_TC_FECF_LEN, "big")
@@ -101,17 +137,19 @@ def tc_build_frame(data: bytes, *,
 def tc_frame_parse(frame: bytes, *,
                    layout_name: str = "ccsds_tc_classic",
                    ) -> Dict[str, Any]:
-    """TC 帧字节 → 头字段 + 数据 + CRC 校验结果。
+    """TC 帧字节 → 5 字节主头字段 + 数据 + CRC 校验结果。
 
     CRC 不过如实报 crc_ok=False 并在 reason 说明（坏帧不产出"看似正常"的
     字段集）；头/总长不自洽（帧长字段 ≠ 总字节 −1）同理拒绝。
     """
     layout = load_frame_layout(layout_name)
-    b = bytes(frame)
+    b = _coerce_octets(frame, name="frame")
     if len(b) < _TC_HEADER_LEN + _TC_FECF_LEN:
         raise ValueError(
             f"帧长 {len(b)} < 头{_TC_HEADER_LEN}+CRC{_TC_FECF_LEN}——"
             "不是完整 TC 帧")
+    if len(b) > _TC_MAX_FRAME_LEN:
+        raise ValueError(f"总帧长 {len(b)} 超过 CCSDS TC 上限 1024 字节，拒绝解析")
     h = b[:_TC_HEADER_LEN]
     length_field = ((h[2] & 0b11) << 8) | h[3]
     total = length_field + 1
@@ -131,7 +169,6 @@ def tc_frame_parse(frame: bytes, *,
         "virtual_channel_id": (h[2] >> 2) & 0x3F,
         "frame_length_field": length_field,
         "frame_seq": h[4],
-        "reserved": h[5],
     }
     out = {
         "fields": fields,
@@ -273,17 +310,15 @@ def register_tool_registry(registry) -> None:
             data = args.get("data")
             if data is None:
                 raise ValueError("data 必须提供（hex 字符串或字节列表）")
-            if isinstance(data, str):
-                payload = bytes.fromhex(data.replace(" ", ""))
-            else:
-                payload = bytes(int(b) & 0xFF for b in data)
+            payload = (bytes.fromhex(data.replace(" ", ""))
+                       if isinstance(data, str) else data)
             r = tc_build_frame(
                 payload,
-                spacecraft_id=int(args.get("spacecraft_id", 0)),
-                virtual_channel_id=int(args.get("virtual_channel_id", 0)),
-                bypass=int(args.get("bypass", 0)),
-                ctrl_cmd=int(args.get("ctrl_cmd", 0)),
-                frame_seq=int(args.get("frame_seq", 0)),
+                spacecraft_id=args.get("spacecraft_id", 0),
+                virtual_channel_id=args.get("virtual_channel_id", 0),
+                bypass=args.get("bypass", 0),
+                ctrl_cmd=args.get("ctrl_cmd", 0),
+                frame_seq=args.get("frame_seq", 0),
                 layout_name=str(args.get("layout_name",
                                          "ccsds_tc_classic")),
             )
@@ -301,10 +336,8 @@ def register_tool_registry(registry) -> None:
             frame = args.get("frame")
             if frame is None:
                 raise ValueError("frame 必须提供（hex 字符串或字节列表）")
-            if isinstance(frame, str):
-                raw = bytes.fromhex(frame.replace(" ", ""))
-            else:
-                raw = bytes(int(b) & 0xFF for b in frame)
+            raw = (bytes.fromhex(frame.replace(" ", ""))
+                   if isinstance(frame, str) else frame)
             r = tc_frame_parse(raw,
                                layout_name=str(args.get(
                                    "layout_name", "ccsds_tc_classic")))
@@ -358,7 +391,7 @@ def register_tool_registry(registry) -> None:
     registry.register(
         name="tc_build_frame",
         description=(
-            "构建 CCSDS TC 遥控帧：数据 + 6 字节头（SCID/VCID/帧长/序列号）"
+            "构建 CCSDS TC 遥控帧：数据 + 5 字节主头（SCID/VCID/帧长/序列号）"
             "+ CRC16-CCSDS。布局从 frame_layouts.json 注入（默认 ccsds_tc_classic）。"
             "字段取值域越界报错不静默截断。纯计算无副作用；产物供 tc_frame_parse "
             "对拍与上行链路使用。"

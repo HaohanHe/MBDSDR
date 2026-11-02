@@ -1,15 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""P0-5 TT&C 上行链路测试（TC 帧 golden 对拍 + 调制 + 发射人工门）。
+"""P0-5 TT&C 上行链路测试（TC 帧官方 golden 对拍 + 调制 + 发射人工门）。
 
-golden 对拍：``tests/golden/ccsds_tc_frame_golden.json`` 由
-``mbdsdr_ai.tc_uplink.tc_build_frame`` 生成（编码侧单源）。解析侧逐字段
-+ CRC 断言钉扎；任一侧漂移即红。
+golden 逐字节转录 CCSDS 230.1-G-3 Annex F Example 10，独立于本仓编码器；
+主头、长度及 CRC 规则按 CCSDS 232.0-B-4 原文核对。任一侧漂移即红。
 
 红线（本任务最硬的一条）：**无有效人工审批令牌的发射调用被明确拒绝**——
 无 arm_manual → GATED；已武装无设备 → NEED_HW；绝不谎报发射成功。
 """
 import json
-import math
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +19,8 @@ from mbdsdr_ai.tc_uplink import (
 
 GOLDEN = (Path(__file__).resolve().parents[2] / "tests" / "golden" /
           "ccsds_tc_frame_golden.json")
+OFFICIAL_ANNEX_F_EXAMPLE_10 = "001B000E06010203040506070814BB"
+OFFICIAL_ANNEX_F_EXAMPLE_2 = "301B000900820000F6F0"
 
 
 @pytest.fixture(scope="module")
@@ -29,27 +29,44 @@ def golden():
     return json.loads(GOLDEN.read_text(encoding="utf-8"))
 
 
-# ── golden 对拍 ────────────────────────────────────────────────
+# ── 独立官方 golden 对拍 ───────────────────────────────────────
 def test_golden_frame_parse_fields_exact(golden):
-    """golden 帧 → 逐字段严格相等 + CRC OK + 数据回环。"""
+    """Annex F 帧 → 5 字节主头逐字段严格相等 + CRC OK + 数据回环。"""
+    assert golden["frame_hex"] == OFFICIAL_ANNEX_F_EXAMPLE_10
     r = tc_frame_parse(bytes.fromhex(golden["frame_hex"]))
     assert r["crc_ok"]
     for k, v in golden["expected_fields"].items():
         assert r["fields"][k] == v, f"{k}: {r['fields'][k]} != {v}"
     assert r["data_hex"] == golden["input"]["data_hex"]
+    assert "reserved" not in r["fields"]
 
 
 def test_golden_encoder_regenerates_byte_exact(golden):
-    """构建器对 golden 输入再生成，帧字节逐字节相等。"""
+    """构建器对官方 Example 10 输入再生成，15 字节逐字节相等。"""
     r = tc_build_frame(bytes.fromhex(golden["input"]["data_hex"]),
                        **{k: golden["input"][k] for k in
                           ("spacecraft_id", "virtual_channel_id",
                            "bypass", "ctrl_cmd", "frame_seq")})
-    assert r["frame_hex"] == golden["frame_hex"]
-    assert r["n_bytes"] == golden["n_bytes"]
+    assert r["frame_hex"] == OFFICIAL_ANNEX_F_EXAMPLE_10
+    assert r["header_hex"] == "001B000E06"
+    assert r["fecf_hex"] == "14BB"
+    assert r["n_bytes"] == golden["n_bytes"] == 15
 
 
-# ── 诚实失败路径 ──────────────────────────────────────────────
+def test_official_type_bc_control_frame_byte_exact():
+    """Annex F Example 2：Bypass/Control=11，Type-B 序列号为 0。"""
+    r = tc_build_frame(b"\x82\x00\x00", spacecraft_id=0x1B,
+                       bypass=1, ctrl_cmd=1, frame_seq=0)
+    assert r["frame_hex"] == OFFICIAL_ANNEX_F_EXAMPLE_2
+    parsed = tc_frame_parse(bytes.fromhex(OFFICIAL_ANNEX_F_EXAMPLE_2))
+    assert parsed["crc_ok"]
+    assert parsed["fields"]["bypass"] == 1
+    assert parsed["fields"]["ctrl_cmd"] == 1
+    assert parsed["fields"]["frame_seq"] == 0
+    assert parsed["data_hex"] == "820000"
+
+
+# ── 诚实失败路径与协议边界 ─────────────────────────────────────
 def test_crc_corruption_flagged(golden):
     """CRC 区翻 1 bit → crc_ok=False + reason，不产出伪正常帧。"""
     raw = bytearray.fromhex(golden["frame_hex"])
@@ -66,19 +83,84 @@ def test_length_field_mismatch_rejected(golden):
         tc_frame_parse(raw)
 
 
-def test_field_range_validation():
-    """字段越界报错，不静默截断。"""
-    with pytest.raises(ValueError, match="spacecraft_id"):
-        tc_build_frame(b"\x00", spacecraft_id=1024)
-    with pytest.raises(ValueError, match="virtual_channel_id"):
-        tc_build_frame(b"\x00", virtual_channel_id=64)
-    with pytest.raises(ValueError, match="frame_seq"):
-        tc_build_frame(b"\x00", frame_seq=256)
+def test_length_boundaries():
+    """含 FECF 的最小 7 字节/最大 1024 字节帧均可正反解析。"""
+    smallest = tc_build_frame(b"", spacecraft_id=0x1B)
+    assert smallest["n_bytes"] == 7
+    assert smallest["fields"]["frame_length_field"] == 6
+    parsed = tc_frame_parse(bytes.fromhex(smallest["frame_hex"]))
+    assert parsed["crc_ok"] and parsed["data"] == []
+
+    largest = tc_build_frame(bytes(1017), spacecraft_id=0x3FF,
+                             virtual_channel_id=0x3F, frame_seq=0xFF)
+    assert largest["n_bytes"] == 1024
+    assert largest["fields"]["frame_length_field"] == 1023
+    parsed = tc_frame_parse(bytes.fromhex(largest["frame_hex"]))
+    assert parsed["crc_ok"] and len(parsed["data"]) == 1017
 
 
-def test_empty_data_rejected():
-    with pytest.raises(ValueError):
-        tc_frame_parse(b"\x00" * 7)  # 太短
+def test_oversize_frame_and_length_overflow_rejected():
+    with pytest.raises(ValueError, match="1024|1017"):
+        tc_build_frame(bytes(1018))
+    largest = tc_build_frame(bytes(1017))
+    with pytest.raises(ValueError, match="1024"):
+        tc_frame_parse(bytes.fromhex(largest["frame_hex"]) + b"\x00")
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("spacecraft_id", -1), ("spacecraft_id", 1024),
+    ("virtual_channel_id", -1), ("virtual_channel_id", 64),
+    ("frame_seq", -1), ("frame_seq", 256),
+    ("bypass", -1), ("bypass", 2),
+    ("ctrl_cmd", -1), ("ctrl_cmd", 2),
+])
+def test_field_range_validation(field, value):
+    """SCID/VCID/序列号及控制位越界均报错，不静默截断。"""
+    with pytest.raises(ValueError, match=field):
+        tc_build_frame(b"\x00", **{field: value})
+
+
+@pytest.mark.parametrize("field", ["spacecraft_id", "virtual_channel_id",
+                                   "frame_seq", "bypass", "ctrl_cmd"])
+def test_non_integer_fields_rejected(field):
+    with pytest.raises(ValueError, match=field):
+        tc_build_frame(b"\x00", **{field: 1.5})
+
+
+def test_reserved_control_combination_and_type_b_seq_rejected():
+    with pytest.raises(ValueError, match="保留组合"):
+        tc_build_frame(b"\x00", bypass=0, ctrl_cmd=1)
+    with pytest.raises(ValueError, match="Type-B"):
+        tc_build_frame(b"\x00", bypass=1, frame_seq=1)
+
+
+@pytest.mark.parametrize("value", [-1, 256, 1.5, "1", True])
+def test_non_octet_input_rejected_without_masking(value):
+    with pytest.raises(ValueError, match="0..255"):
+        tc_build_frame([0, value])
+    with pytest.raises(ValueError, match="0..255"):
+        tc_frame_parse([0, value])
+
+
+def test_scalar_data_is_not_implicitly_expanded():
+    with pytest.raises(ValueError, match="data"):
+        tc_build_frame(8)
+
+
+def test_tool_handlers_reject_non_octet_input_without_masking():
+    from mbdsdr_ai.tool_registry import ToolRegistry
+    registry = ToolRegistry()
+    registry.register_builtin_tools()
+    built = registry.tools["tc_build_frame"]["handler"]({"data": [0, 256]})
+    assert not built.success and "0..255" in built.content
+    parsed = registry.tools["tc_frame_parse"]["handler"](
+        {"frame": [0, 0, 0, 0, 0, 256, 0]})
+    assert not parsed.success and "0..255" in parsed.content
+
+
+def test_frame_too_short_rejected():
+    with pytest.raises(ValueError, match="不是完整 TC 帧"):
+        tc_frame_parse(b"\x00" * 6)
 
 
 # ── PCM/PSK/PM 调制 ──────────────────────────────────────────

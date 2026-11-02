@@ -16,7 +16,7 @@
     ]
   },
   "ccsds_tc_classic": {
-    "honesty": "CCSDS TC 经典帧（公开标准 CCSDS 232.0-B）：6 字节帧头 + 数据域 + 16bit CRC（CRC-16/CCSDS，poly 0x1021，初值 0xFFFF，MSB 先行，无反射无终异或）",
+    "honesty": "CCSDS TC 经典帧（CCSDS 232.0-B-4）：5 字节主头 + 数据域 + 16bit FECF（CRC-16/CCSDS，poly 0x1021，初值 0xFFFF，MSB 先行，无反射无终异或）；CCSDS 230.1-G-3 Annex F Example 10 样例 001B000E06010203040506070814BB 已逐字节对拍，不代表真实 OTA 或上星验证",
     "sync": {"type": "cltu_start", "hex": "EB90"},
     "crc": {"name": "crc16_ccsds", "cover": "header_and_data"},
     "header": {
@@ -24,8 +24,8 @@
       "spacecraft_id": 0, "virtual_channel_id": 0, "frame_length_note": "帧长字段 = 总字节数 - 1"
     },
     "fields": [
-      {"name": "frame_header_hex", "offset": 0, "len": 6, "type": "hex"},
-      {"name": "data", "offset": 6, "len": -1, "type": "hex"}
+      {"name": "frame_header_hex", "offset": 0, "len": 5, "type": "hex"},
+      {"name": "data", "offset": 5, "len": -1, "type": "hex"}
     ]
   }
 }
