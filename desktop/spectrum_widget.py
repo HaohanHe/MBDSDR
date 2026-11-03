@@ -93,13 +93,15 @@ PAL_MINHOLD = _c["spectrum_min_hold"]   # Min hold 包络线
 PAL_BOOKMARK = _c["spectrum_bookmark"]  # 书签标签（gqrx 书签竖旗）
 
 # 频段彩带分类色（SDR++ bandplan 仿妆: 截图同款语义——
-# 航空绿 / 低轨卫星灰 / 广播蓝 / 40m 业余红, 短波广播青）
+# 航空绿 / 低轨卫星灰 / 广播蓝 / 40m 业余红, 短波广播青, 海事紫灰, 对讲机琥珀）
 BANDPLAN_CATEGORY_COLORS = {
     "broadcast": "#3E6FA3",
     "aviation": "#3F9142",
     "amateur": "#B5495C",
     "satellite": "#8A8F98",
     "shortwave": "#2E7D8C",
+    "maritime": "#7A6FA0",
+    "pmr": "#A0794A",
 }
 
 # 书签药丸高度（像素）：谱面顶部这一条带内点击 = 激活书签（不进调谐/拖拽）。
@@ -614,39 +616,105 @@ def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
 _BANDPLAN_CACHE: Optional[List[Dict[str, object]]] = None
 
 
-def _load_bandplan() -> List[Dict[str, object]]:
+def _parse_band_entry(b: Dict[str, object]) -> Optional[Dict[str, object]]:
+    """单条频段条目校验/归一; 坏条目返回 None（跳过，绝不造假）。
+
+    必需: label 非空 / 0<start_hz<stop_hz / category 在分类色表内。
+    可选: desc / modulation（悬停提示文案）, priority（high|low, 缺省 low）,
+    color（Qt 颜色串, 覆盖 category 色）。
+    """
+    try:
+        label = str(b.get("label", "")).strip()
+        f0 = float(b["start_hz"])
+        f1 = float(b["stop_hz"])
+        cat = str(b.get("category", "")).strip()
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not label or not (0 < f0 < f1) or cat not in BANDPLAN_CATEGORY_COLORS:
+        return None
+    out: Dict[str, object] = {"label": label, "start_hz": f0, "stop_hz": f1,
+                              "category": cat}
+    desc = str(b.get("desc", "")).strip()
+    if desc:
+        out["desc"] = desc
+    mod = str(b.get("modulation", "")).strip()
+    if mod:
+        out["modulation"] = mod
+    prio = str(b.get("priority", "")).strip().lower()
+    out["priority"] = prio if prio in ("high", "low") else "low"
+    color = str(b.get("color", "")).strip()
+    if color and QColor(color).isValid():
+        out["color"] = color
+    return out
+
+
+def _load_bandplan(path: Optional[str] = None) -> List[Dict[str, object]]:
     """加载频段彩带配置; 缺文件/坏 JSON/坏条目一律跳过该条, 绝不造假。
 
-    每条目: {"label", "start_hz", "stop_hz", "category"}; category
-    必须在 BANDPLAN_CATEGORY_COLORS 内。缓存模块级, 首次绘制时载入。
+    path=None 用模块旁 bandplan.json 并走模块级缓存（首次绘制时载入）;
+    显式 path 不缓存（测试/外部数据用）。
     """
     global _BANDPLAN_CACHE
-    if _BANDPLAN_CACHE is not None:
+    if path is None and _BANDPLAN_CACHE is not None:
         return _BANDPLAN_CACHE
     import json
     import os
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "bandplan.json")
+    p = path or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "bandplan.json")
     out: List[Dict[str, object]] = []
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(p, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
-        for b in raw.get("bands", []):
-            try:
-                label = str(b.get("label", "")).strip()
-                f0 = float(b["start_hz"])
-                f1 = float(b["stop_hz"])
-                cat = str(b.get("category", "")).strip()
-            except (KeyError, TypeError, ValueError):
+        bands = raw.get("bands", []) if isinstance(raw, dict) else []
+        for b in bands:
+            if not isinstance(b, dict):
                 continue
-            if not label or not (0 < f0 < f1) or cat not in \
-                    BANDPLAN_CATEGORY_COLORS:
-                continue
-            out.append({"label": label, "start_hz": f0, "stop_hz": f1,
-                        "category": cat})
+            e = _parse_band_entry(b)
+            if e is not None:
+                out.append(e)
     except (OSError, ValueError):
         out = []
-    _BANDPLAN_CACHE = out
+    if path is None:
+        _BANDPLAN_CACHE = out
+    return out
+
+
+def _band_color(b: Dict[str, object]) -> QColor:
+    """单条 color 覆盖优先, 否则按 category 取色。"""
+    c = str(b.get("color", ""))
+    return QColor(c) if c else QColor(BANDPLAN_CATEGORY_COLORS[str(b["category"])])
+
+
+def _bandplan_label_placements(
+        items: List[Tuple[float, float, str, str, bool]],
+        measure, rect_x: float, rect_w: float) -> Dict[int, float]:
+    """频段标签放置（重要性分级 + 碰撞剔除），纯函数便于无头测试。
+
+    items: [(x0, x1, label, priority, forced)]; 返回 {item_index: text_x}。
+      1. forced（悬停/选中）最优先，其次 priority=high，再次 low；同级按 x0 升序；
+      2. 非 forced 条目带内宽度 < 文本宽 + 8px 不画（带太窄塞不下）；
+      3. 标签在带内居中并夹紧在视口内；
+      4. 与已放置标签（两侧各留 3px）冲突则跳过——缩放变窄时低优先级先消失，
+         标签不糊成一团。
+    """
+    order = sorted(range(len(items)),
+                   key=lambda i: (not items[i][4],
+                                  0 if items[i][3] == "high" else 1,
+                                  items[i][0]))
+    placed: List[Tuple[float, float]] = []
+    out: Dict[int, float] = {}
+    for i in order:
+        x0, x1, label, _prio, forced = items[i]
+        tw = float(measure(label))
+        if not forced and x1 - x0 < tw + 8.0:
+            continue
+        tx = x0 + (x1 - x0 - tw) / 2.0
+        tx = max(rect_x + 2.0, min(tx, rect_x + rect_w - tw - 2.0))
+        lx0, lx1 = tx - 3.0, tx + tw + 3.0
+        if any(lx0 < p1 and lx1 > p0 for p0, p1 in placed):
+            continue
+        placed.append((lx0, lx1))
+        out[i] = tx
     return out
 
 
@@ -680,6 +748,8 @@ class _PlotState:
         # ---- 频段彩带（SDR++ bandplan 仿妆；皮进 bandplan.json）----
         self.bandplan: List[Dict[str, object]] = _load_bandplan()
         self.show_bandplan = True
+        self.bandplan_hover: Optional[int] = None      # 悬停频段索引（提亮+气泡）
+        self.bandplan_selected: Optional[int] = None   # 点击选中频段（常驻描边）
         self.show_peaks = True
         self.peak_rel_db = 6.0
         # ---- 瀑布调色板 / 时间平滑 ----
@@ -910,47 +980,69 @@ def _draw_bandplan(painter, state, rect, overlay=False):
     """频段彩带（SDR++ bandplan 仿妆），两遍绘制防被谱线渐变填充盖住。
 
     overlay=False —— 网格之后、谱线之下：淡色填充垫底；
-    overlay=True  —— 谱线/包络/峰值之后：底部 4px 色条 + 带内标签。
-    标签只在带足够宽 (>70px) 时绘制。与书签竖旗/固定 marker 不同 y 带。
+    overlay=True  —— 谱线/包络/峰值之后：底部 4px 色条 + 重要性分级标签。
+    悬停带提亮+描边，点击选中带常驻描边；标签由 _bandplan_label_placements
+    按 priority 分级放置，缩放变窄时低优先级先消失，不糊成一团。
+    随频率缩放/平移联动（view_center/span 与谱线同源）。与书签竖旗/固定
+    marker 不同 y 带。
     """
     if not state.show_bandplan or not state.bandplan:
         return
     view_center = _view_center_hz(state)
     span = state.panel.generator.sample_rate_hz
+    hover = getattr(state, "bandplan_hover", None)
+    selected = getattr(state, "bandplan_selected", None)
+    if not overlay:
+        painter.setPen(Qt.NoPen)
+        for i, b in enumerate(state.bandplan):
+            rng = _band_x_range(rect, view_center, span,
+                                float(b["start_hz"]), float(b["stop_hz"]))
+            if rng is None:
+                continue
+            x0, x1 = rng
+            fill = QColor(_band_color(b))
+            fill.setAlpha(46 if i == hover else (38 if i == selected else 26))
+            painter.setBrush(QBrush(fill))
+            painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+        return
+    # ---- overlay 遍: 色条 + 分级标签 ----
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
     fm = painter.fontMetrics()
-    for b in state.bandplan:
+    visible: List[Tuple[int, float, float, Dict[str, object]]] = []
+    for i, b in enumerate(state.bandplan):
         rng = _band_x_range(rect, view_center, span,
                             float(b["start_hz"]), float(b["stop_hz"]))
         if rng is None:
             continue
-        x0, x1 = rng
-        color = QColor(BANDPLAN_CATEGORY_COLORS[str(b["category"])])
-        if not overlay:
-            fill = QColor(color)
-            fill.setAlpha(26)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(fill))
-            painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
-            continue
+        visible.append((i, rng[0], rng[1], b))
+    items = [(x0, x1, str(b["label"]), str(b.get("priority", "low")),
+              i == hover or i == selected)
+             for i, x0, x1, b in visible]
+    tx_map = _bandplan_label_placements(items, fm.horizontalAdvance,
+                                        rect.x(), rect.width())
+    for k, (i, x0, x1, b) in enumerate(visible):
+        color = _band_color(b)
         strip = QColor(color)
-        strip.setAlpha(130)
+        strip.setAlpha(210 if i == hover else (180 if i == selected else 130))
+        painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(strip))
         painter.drawRect(QRectF(x0, rect.y() + rect.height() - 4.0,
                                 x1 - x0, 4.0))
-        if x1 - x0 > 70.0:
-            label = str(b["label"])
-            tw = fm.horizontalAdvance(label)
-            tx = max(rect.x() + 2.0,
-                     min(x0 + (x1 - x0 - tw) / 2.0,
-                         rect.x() + rect.width() - tw - 2.0))
+        if i == hover or i == selected:
+            edge = QColor(color)
+            edge.setAlpha(230)
+            painter.setPen(QPen(edge, 1))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(QRectF(x0 + 0.5, rect.y() + 0.5,
+                                    x1 - x0 - 1.0, rect.height() - 1.0))
+        if k in tx_map:
             lc = QColor(color)
             lc.setAlpha(215)
             painter.setPen(QPen(lc, 1))
-            painter.drawText(
-                QPointF(tx, rect.y() + rect.height() - 8.0), label)
+            painter.drawText(QPointF(tx_map[k], rect.y() + rect.height() - 8.0),
+                             str(b["label"]))
 
 
 def _draw_bookmark_tags(painter, state, rect):
@@ -1359,8 +1451,8 @@ class SpectrumPanel(QWidget):
         self._bandplan_chk = QCheckBox("频段")
         self._bandplan_chk.setChecked(True)
         self._bandplan_chk.setToolTip(
-            "在谱面上显示频段彩带（短波/广播/航空/业余/卫星）与名称；"
-            "条目可在 bandplan.json 配置")
+            "在谱面上显示频段彩带（短波/广播/航空/业余/卫星/海事）与名称；"
+            "悬停提亮看详情、点击常驻描边；条目可在 bandplan.json 配置")
         self._bandplan_chk.toggled.connect(
             lambda on: (setattr(self._state, "show_bandplan", bool(on)),
                         self._redraw()))
@@ -1791,6 +1883,33 @@ class _TuningPlotMixin:
                 best = float(freq_hz)
         return best
 
+    def _band_at(self, x_px: float) -> Optional[int]:
+        """命中频段彩带：返回最窄包含光标频率的频段索引（子带比母带更具体，
+        重叠时窄者优先，如 业余卫星上行 盖 2m 业余）；未命中返回 None。"""
+        state = self.state
+        if not state.show_bandplan or not state.bandplan:
+            return None
+        f = self._freq_at_x(x_px)
+        best: Optional[int] = None
+        best_w = 0.0
+        for i, b in enumerate(state.bandplan):
+            f0, f1 = float(b["start_hz"]), float(b["stop_hz"])
+            if f0 <= f <= f1 and (best is None or f1 - f0 < best_w):
+                best, best_w = i, f1 - f0
+        return best
+
+    @staticmethod
+    def _band_tip_text(b: Dict[str, object]) -> str:
+        """频段气泡/提示文案：名称 · 频率范围 · 调制 · 描述（缺省字段不编造）。"""
+        parts = [str(b["label"]),
+                 f"{float(b['start_hz']) / 1e6:.4f}–"
+                 f"{float(b['stop_hz']) / 1e6:.4f} MHz"]
+        if b.get("modulation"):
+            parts.append(str(b["modulation"]))
+        if b.get("desc"):
+            parts.append(str(b["desc"]))
+        return " · ".join(parts)
+
     def _snap_center(self) -> float:
         """把当前中心频率对齐到 snap_interval 网格（SDR++ roundl 语义）。"""
         gen = self.state.panel.generator
@@ -2126,6 +2245,26 @@ class _TuningPlotMixin:
         else:
             self.unsetCursor()
 
+        # 频段彩带悬停（SDR++ bandplan 仿妆）：命中变化时提亮 + 气泡提示；
+        # 拖拽/平移中不刷气泡，避免噪声。提示失败绝不影响交互。
+        if not self._is_panning and self._vfo_drag_mode is None \
+                and not self._vfo_create_mode:
+            y = event.position().y()
+            idx = self._band_at(event.position().x()) \
+                if y <= self._spectrum_height() else None
+            if idx != self.state.bandplan_hover:
+                self.state.bandplan_hover = idx
+                try:
+                    if idx is not None:
+                        QToolTip.showText(
+                            QCursor.pos(),
+                            self._band_tip_text(self.state.bandplan[idx]),
+                            self)
+                    else:
+                        QToolTip.hideText()
+                except Exception:  # noqa: BLE001 —— 气泡是辅助，失败静默
+                    pass
+
         if self._is_panning:
             dx = event.position().x() - self._press_anchor_x
             gen = self.state.panel.generator
@@ -2228,7 +2367,17 @@ class _TuningPlotMixin:
                 # → 调谐到点击位置（center/VFO 模式语义见 _tune_click）。
                 # 瀑布区（y > 谱面高度）不响应。
                 if y <= self._spectrum_height():
+                    # 频段彩带点击反馈：先按点击时视图命中（center 模式调谐后
+                    # 画面跟过去，同 x 已对应别的频率），再调谐；选中 → 常驻
+                    # 描边 + 摘要提示，点在空白频率 → 清除。不改变调谐语义。
+                    sel = self._band_at(event.position().x())
                     self._tune_click(self._x_ratio(event))
+                    if sel != self.state.bandplan_selected:
+                        self.state.bandplan_selected = sel
+                        if sel is not None:
+                            self._show_tune_tip(
+                                "频段 "
+                                + self._band_tip_text(self.state.bandplan[sel]))
             self.update()
         elif event.button() == Qt.RightButton:
             # 右键命中 VFO → 删除菜单（contextMenuEvent）；
@@ -2247,6 +2396,17 @@ class _TuningPlotMixin:
         # center/VFO 模式语义与单击一致（_tune_click）
         self._tune_click(self._x_ratio(event))
         self.update()
+
+    def leaveEvent(self, event):
+        # 鼠标离开谱面：清频段悬停态，提亮/气泡不残留
+        if getattr(self.state, "bandplan_hover", None) is not None:
+            self.state.bandplan_hover = None
+            try:
+                QToolTip.hideText()
+            except Exception:  # noqa: BLE001 —— 气泡是辅助，失败静默
+                pass
+            self.update()
+        super().leaveEvent(event)
 
 
 # ============================================================================
