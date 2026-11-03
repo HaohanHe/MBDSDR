@@ -655,6 +655,17 @@ target_compile_definitions(test_lrpt_cpp PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_
 target_link_libraries(test_lrpt_cpp PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME lrpt_cpp COMMAND test_lrpt_cpp)
 
+# LRPT 真录软位流跨实现对拍（Python 孪生 tests/test_lrpt_cross_impl_fixture.py）
+add_executable(test_lrpt_real_cross tests/test_lrpt_real_cross.cpp)
+target_link_libraries(test_lrpt_real_cross PRIVATE mbdsdr_core)
+set_target_properties(test_lrpt_real_cross PROPERTIES AUTOMOC ON AUTOUIC OFF AUTORCC OFF)
+target_include_directories(test_lrpt_real_cross PRIVATE src)
+target_compile_definitions(test_lrpt_real_cross PRIVATE
+    SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    GOLDENDIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/golden")
+target_link_libraries(test_lrpt_real_cross PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME lrpt_real_cross COMMAND test_lrpt_real_cross)
+
 # NanoVNA step-2: independent client + RF math over a self-made scripted replay.
 add_executable(test_nanovna_client tests/test_nanovna_client.cpp)
 target_link_libraries(test_nanovna_client PRIVATE mbdsdr_core)

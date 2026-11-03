@@ -66,13 +66,25 @@
 - **收工状态**：全量 pytest 六面全绿（数字见提交说明）；彩带 v2 补强
   待推送（本文件提交后随第二提交 fast-forward）；真机肉眼验收未做
 
+### 真机七环验收会话（本窗口，2026-11-03 19:00 登记）
+- **在途**：接真实 RTL-SDR（FC0012，序列 77771111153705700）做端到端七环验收
+- **所有物**：`scripts/real_hw_acceptance.py`（新）、`docs/real_hw_acceptance_20261103.md`（新）
+- **禁区（对方在途，绝不碰）**：同星象仪会话禁区 + 彩带三文件；不改
+  `scripts/smoke_exe_no_popup.ps1` / `scripts/package_windows.ps1` /
+  `cpp/CMakeLists.txt` / `cpp/cmake/*`，只运行既有构建产物
+- **硬件纪律**：设备独占顺序使用；全程静音（不开 sounddevice、C++ 侧
+  MBDSDR_NULL_AUDIO=1）；QT_QPA_PLATFORM=offscreen，不弹窗
+
 ### 悬账备忘（不属于任何人，认领者标注）
-- dump1090 全量解码清单对拍、覆盖率统计（capability-map not_verified）
+- ~~dump1090 全量解码清单对拍~~ **已闭环（9d3efea）**：dump1090 本尊编译当
+  裁判，10/10 参考帧 + 全帧 CRC 语义钉死
 - 本机自采 OTA 解码记录仍为零（负证据不撤销，对外表述按 capability-map 口径）
 - 便携包需验证「真 USB 直连构建」打出的包（非 stub）
 - bch 独立 KAT（dvbs2_bch_vectors.json）仍 workspace-only，CI 上 21 模式
   golden 诚实跳过——是否同款入库留给 DVB-S2 线定（ldpc 的先例在
   tests/golden/dvbs2_ldpc_vectors.json）
+- LRPT 图像段重组真录链（VCDU→M_PDU→空间包→JPEG 段）——被连帧能力阻塞
+  （残余 CFO→帧网格滑动，需 Costas 闭环接入 process()）
 
 ---
 
@@ -81,14 +93,16 @@
 1. **[TRAE]** `scripts/smoke_exe_no_popup.ps1` 收口提交
 2. **[TRAE]** 便携包线收口：package_windows.ps1 验真机构建打包，旧 stub zip
    问题闭环
-3. **[我]** dump1090 全量解码清单对拍（外部真值线续，参照 FT8/ADS-B golden
-   姿势：SHA 钉真值、按需下载、离线诚实 skip）
-4. ~~CI 观察项：d1efe19 mbdsdr_ai 红~~ **已销（49dc00d）**：红因是
-   test_dvbs2_ldpc 收集期硬读仓库外金样（FileNotFoundError → 整包
-   mbdsdr_ai 中断）。金样 105 条已入库 tests/golden/，ft4 同款雷一并拆。
-   观察 49dc00d 的 run：mbdsdr_ai 应转绿。
+3. ~~[我] dump1090 全量解码清单对拍~~ **已闭环（9d3efea）**
+4. ~~CI 观察项：d1efe19 mbdsdr_ai 红~~ **已销（49dc00d）**
 5. **[两边]** 共有文件再冲突时按 hunk 拆分提交（脚本先例：
    extract_hunk 姿势，见 2026-11-02 会话记录）
+6. **[我]** LRPT 协议栈真录破零已落（594b769：2 条 RS 全纠正 VCDU +
+   比特约定裁决 pair-swap）；下一步 C++ LRPT 双实现对拍（cpp 侧已有
+   lrpt_demod/lrpt_fec，参照 FT8/ADS-B cross_impl 姿势共享 fixture）
+7. **[认领]** P2 前端缺口（gaplist 第三批）：频率轴滚轮缩放、FFT 仪器化
+   （RBW/瀑布时间跨度）——文件在 spectrum_widget.py，星象仪/彩带会话
+   若要做手势线请认领，否则协议真值线下一轮接手
 
 ---
 
