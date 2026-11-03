@@ -12,7 +12,10 @@ SOF 协议锚点（防「凭记忆」漂移）：ETSI EN 302 307-1 V1.4.1 §5.5.
 in binary notation, the left-side bit being the MSB of the PLHEADER)."
 
 真样本缺口（P3.1 口径，诚实写明）：
-  1. DATAFIELD → VCDU/TS 重组未实现（BBFRAME datafield 到上层）；
+  1. ~~DATAFIELD → VCDU/TS 重组未实现（BBFRAME datafield 到上层）~~
+     **P5.1 已收口**：`mbdsdr_ai/dvbs2_datafield.py`
+     （BBHEADER CRC-8 → DFL 截取 → SYNCD 定位 → VCDU 帧 + 完整性统计），
+     钉扎见 `tests/test_dvbs2_datafield_vcdu.py`；
   2. 风云对星真实 OTA IQ 样本未获得——本文件全部为合成链自洽金样。
   最小可复现采样条件：FY-3/FY-4 下行频点（如 FY-4A L 波段 HRIT
   或 FY-3 X 波段）+ 符号率级复基带 .cf32，时长 ≥ 3 个 PLFRAME
