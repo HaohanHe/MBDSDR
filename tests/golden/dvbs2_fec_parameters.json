@@ -1,0 +1,2045 @@
+{
+  "schema": "dvb-s2.fec-parameters.v1",
+  "standard": {
+    "designation": "ETSI EN 302 307-1",
+    "version": "V1.4.1",
+    "date": "2014-11"
+  },
+  "scope": {
+    "content": "Table 5a/5b、6a/6b、7a/7b 的 FEC 参数",
+    "not_a_bch_or_ldpc_encoder": true,
+    "missing_value_policy": "标准中的 NA 或未给出的根信息保持 null，不推算、不补值"
+  },
+  "units": {
+    "K_bch": "bit",
+    "N_bch": "bit",
+    "k_ldpc": "bit",
+    "n_ldpc": "bit",
+    "bch_parity_bits": "bit",
+    "ldpc_parity_bits": "bit",
+    "bch_t": "error correction capability",
+    "bch_m": "GF(2^m) degree inferred mechanically from every listed g polynomial degree",
+    "q": "LDPC parity accumulator group parameter"
+  },
+  "polynomial_encoding": {
+    "coefficients_ascending": "索引即 x 的指数，值 0/1；包含常数项至最高次项",
+    "exponents": "表达式中系数为 1 的 x 指数；常数项记为 0",
+    "bitmask": "sum(1 << exponent)，与 coefficients_ascending 等价",
+    "roots": "Table 6 未给出扩张域根或根指数，故为 null"
+  },
+  "source": {
+    "pdf": {
+      "file": "en_30230701v010401p.pdf",
+      "pages": 80,
+      "sha256": "19077f80420eb17519fcf6f83e2847d7a877940b134c5306814b8c6f60d8475d",
+      "archived_record_sha256": "19077f80420eb17519fcf6f83e2847d7a877940b134c5306814b8c6f60d8475d"
+    },
+    "plain_text": {
+      "file": "ETSI_EN_302_307-1_V1.4.1_2014-11.txt",
+      "sha256": "3022cdd9677a2316461981c63724b00eaa65cf00ce063e9ae73ecf5fda672b74"
+    },
+    "layout_text": {
+      "file": "ETSI_EN_302_307-1_V1.4.1_2014-11_layout.txt",
+      "sha256": "373dd8e6f701ffdc4628d832b3b392a17f2de0d92847d0ca90e5806c3e65ad99"
+    },
+    "archived_verification": {
+      "file": "verification.json",
+      "sha256": "7b220d20d4b2399e0fc03df46cdf2ed2dea880e046f7ace005259d17160d8860"
+    }
+  },
+  "frame_families": {
+    "normal": {
+      "frame_type": "normal FECFRAME",
+      "n_ldpc": 64800,
+      "code_count": 11,
+      "parameter_table": "5a",
+      "polynomial_table": "6a",
+      "q_table": "7a",
+      "bch_m": 16,
+      "bch_m_derivation": "Table 6 全部 g1..g12 的共同次数；用于机械核对 Nbch-Kbch=t*m",
+      "generator_selection": "按 clause 5.3.1 选取前 t 个多项式 g1..gt",
+      "codes": [
+        {
+          "rate": "1/4",
+          "K_bch": 16008,
+          "N_bch": 16200,
+          "k_ldpc": 16200,
+          "n_ldpc": 64800,
+          "bch_t": 12,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 192,
+          "ldpc_parity_bits": 48600,
+          "q": 135,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1191,
+              "text": "1/4 16 008 16 200 12 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1386,
+              "text": "1/4 135"
+            }
+          }
+        },
+        {
+          "rate": "1/3",
+          "K_bch": 21408,
+          "N_bch": 21600,
+          "k_ldpc": 21600,
+          "n_ldpc": 64800,
+          "bch_t": 12,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 192,
+          "ldpc_parity_bits": 43200,
+          "q": 120,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1192,
+              "text": "1/3 21 408 21 600 12 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1387,
+              "text": "1/3 120"
+            }
+          }
+        },
+        {
+          "rate": "2/5",
+          "K_bch": 25728,
+          "N_bch": 25920,
+          "k_ldpc": 25920,
+          "n_ldpc": 64800,
+          "bch_t": 12,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 192,
+          "ldpc_parity_bits": 38880,
+          "q": 108,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1193,
+              "text": "2/5 25 728 25 920 12 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1388,
+              "text": "2/5 108"
+            }
+          }
+        },
+        {
+          "rate": "1/2",
+          "K_bch": 32208,
+          "N_bch": 32400,
+          "k_ldpc": 32400,
+          "n_ldpc": 64800,
+          "bch_t": 12,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 192,
+          "ldpc_parity_bits": 32400,
+          "q": 90,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1194,
+              "text": "1/2 32 208 32 400 12 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1389,
+              "text": "1/2 90"
+            }
+          }
+        },
+        {
+          "rate": "3/5",
+          "K_bch": 38688,
+          "N_bch": 38880,
+          "k_ldpc": 38880,
+          "n_ldpc": 64800,
+          "bch_t": 12,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 192,
+          "ldpc_parity_bits": 25920,
+          "q": 72,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1195,
+              "text": "3/5 38 688 38 880 12 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1390,
+              "text": "3/5 72"
+            }
+          }
+        },
+        {
+          "rate": "2/3",
+          "K_bch": 43040,
+          "N_bch": 43200,
+          "k_ldpc": 43200,
+          "n_ldpc": 64800,
+          "bch_t": 10,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 160,
+          "ldpc_parity_bits": 21600,
+          "q": 60,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1196,
+              "text": "2/3 43 040 43 200 10 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1391,
+              "text": "2/3 60"
+            }
+          }
+        },
+        {
+          "rate": "3/4",
+          "K_bch": 48408,
+          "N_bch": 48600,
+          "k_ldpc": 48600,
+          "n_ldpc": 64800,
+          "bch_t": 12,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 192,
+          "ldpc_parity_bits": 16200,
+          "q": 45,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1197,
+              "text": "3/4 48 408 48 600 12 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1392,
+              "text": "3/4 45"
+            }
+          }
+        },
+        {
+          "rate": "4/5",
+          "K_bch": 51648,
+          "N_bch": 51840,
+          "k_ldpc": 51840,
+          "n_ldpc": 64800,
+          "bch_t": 12,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 192,
+          "ldpc_parity_bits": 12960,
+          "q": 36,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1198,
+              "text": "4/5 51 648 51 840 12 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1393,
+              "text": "4/5 36"
+            }
+          }
+        },
+        {
+          "rate": "5/6",
+          "K_bch": 53840,
+          "N_bch": 54000,
+          "k_ldpc": 54000,
+          "n_ldpc": 64800,
+          "bch_t": 10,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 160,
+          "ldpc_parity_bits": 10800,
+          "q": 30,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1199,
+              "text": "5/6 53 840 54 000 10 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1394,
+              "text": "5/6 30"
+            }
+          }
+        },
+        {
+          "rate": "8/9",
+          "K_bch": 57472,
+          "N_bch": 57600,
+          "k_ldpc": 57600,
+          "n_ldpc": 64800,
+          "bch_t": 8,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 128,
+          "ldpc_parity_bits": 7200,
+          "q": 20,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1200,
+              "text": "8/9 57 472 57 600 8 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1395,
+              "text": "8/9 20"
+            }
+          }
+        },
+        {
+          "rate": "9/10",
+          "K_bch": 58192,
+          "N_bch": 58320,
+          "k_ldpc": 58320,
+          "n_ldpc": 64800,
+          "bch_t": 8,
+          "bch_m": 16,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": 128,
+          "ldpc_parity_bits": 6480,
+          "q": 18,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8"
+          ],
+          "source": {
+            "frame": {
+              "table": "5a",
+              "pdf_page": 22,
+              "plain_line": 1201,
+              "text": "9/10 58 192 58 320 8 64 800"
+            },
+            "q": {
+              "table": "7a",
+              "pdf_page": 25,
+              "plain_line": 1396,
+              "text": "9/10 18"
+            }
+          }
+        }
+      ],
+      "bch_polynomials": [
+        {
+          "id": "g1",
+          "index": 1,
+          "expression": "1+x2+x3+x5+x16",
+          "exponents": [
+            0,
+            2,
+            3,
+            5,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 65581,
+          "bitmask_hex": "0x1002d",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1378,
+            "text": "g1(x)   1+x2+x3+x5+x16"
+          }
+        },
+        {
+          "id": "g2",
+          "index": 2,
+          "expression": "1+x+x4+x5+x6+x8+x16",
+          "exponents": [
+            0,
+            1,
+            4,
+            5,
+            6,
+            8,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 65907,
+          "bitmask_hex": "0x10173",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1379,
+            "text": "g2(x)   1+x+x4+x5+x6+x8+x16"
+          }
+        },
+        {
+          "id": "g3",
+          "index": 3,
+          "expression": "1+x2+x3+x4+x5+x7+x8+x9+x10+x11+x16",
+          "exponents": [
+            0,
+            2,
+            3,
+            4,
+            5,
+            7,
+            8,
+            9,
+            10,
+            11,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            1,
+            1,
+            1,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 69565,
+          "bitmask_hex": "0x10fbd",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1380,
+            "text": "g3(x)   1+x2+x3+x4+x5+x7+x8+x9+x10+x11+x16"
+          }
+        },
+        {
+          "id": "g4",
+          "index": 4,
+          "expression": "1+x2+x4+x6+x9+x11+x12+x14+x16",
+          "exponents": [
+            0,
+            2,
+            4,
+            6,
+            9,
+            11,
+            12,
+            14,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
+            1,
+            0,
+            1,
+            0,
+            1
+          ],
+          "bitmask": 88661,
+          "bitmask_hex": "0x15a55",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1381,
+            "text": "g4(x)   1+x2+x4+x6+x9+x11+x12+x14+x16"
+          }
+        },
+        {
+          "id": "g5",
+          "index": 5,
+          "expression": "1+x+x2+x3+x5+x8+x9+x10+x11+x12+x16",
+          "exponents": [
+            0,
+            1,
+            2,
+            3,
+            5,
+            8,
+            9,
+            10,
+            11,
+            12,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            1,
+            1,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 73519,
+          "bitmask_hex": "0x11f2f",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1382,
+            "text": "g5(x)   1+x+x2+x3+x5+x8+x9+x10+x11+x12+x16"
+          }
+        },
+        {
+          "id": "g6",
+          "index": 6,
+          "expression": "1+x2+x4+x5+x7+x8+x9+x10+x12+x13+x14+x15+x16",
+          "exponents": [
+            0,
+            2,
+            4,
+            5,
+            7,
+            8,
+            9,
+            10,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            0,
+            1,
+            1,
+            0,
+            1,
+            1,
+            1,
+            1,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "bitmask": 128949,
+          "bitmask_hex": "0x1f7b5",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1383,
+            "text": "g6(x)   1+x2+x4+x5+x7+x8+x9+x10+x12+x13+x14+x15+x16"
+          }
+        },
+        {
+          "id": "g7",
+          "index": 7,
+          "expression": "1+x2+x5+x6+x8+x9+x10+x11+x13+x15+x16",
+          "exponents": [
+            0,
+            2,
+            5,
+            6,
+            8,
+            9,
+            10,
+            11,
+            13,
+            15,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            1,
+            1,
+            1,
+            1,
+            0,
+            1,
+            0,
+            1,
+            1
+          ],
+          "bitmask": 110437,
+          "bitmask_hex": "0x1af65",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1384,
+            "text": "g7(x)   1+x2+x5+x6+x8+x9+x10+x11+x13+x15+x16"
+          }
+        },
+        {
+          "id": "g8",
+          "index": 8,
+          "expression": "1+x+x2+x5+x6+x8+x9+x12+x13+x14+x16",
+          "exponents": [
+            0,
+            1,
+            2,
+            5,
+            6,
+            8,
+            9,
+            12,
+            13,
+            14,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+            1
+          ],
+          "bitmask": 95079,
+          "bitmask_hex": "0x17367",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1385,
+            "text": "g8(x)   1+x+x2+x5+x6+x8+x9+x12+x13+x14+x16"
+          }
+        },
+        {
+          "id": "g9",
+          "index": 9,
+          "expression": "1+x5+x7+x9+x10+x11+x16",
+          "exponents": [
+            0,
+            5,
+            7,
+            9,
+            10,
+            11,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 69281,
+          "bitmask_hex": "0x10ea1",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1386,
+            "text": "g9(x)   1+x5+x7+x9+x10+x11+x16"
+          }
+        },
+        {
+          "id": "g10",
+          "index": 10,
+          "expression": "1+x+x2+x5+x7+x8+x10+x12+x13+x14+x16",
+          "exponents": [
+            0,
+            1,
+            2,
+            5,
+            7,
+            8,
+            10,
+            12,
+            13,
+            14,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            1,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
+            1,
+            0,
+            1,
+            0,
+            1,
+            1,
+            1,
+            0,
+            1
+          ],
+          "bitmask": 95655,
+          "bitmask_hex": "0x175a7",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1387,
+            "text": "g10(x)  1+x+x2+x5+x7+x8+x10+x12+x13+x14+x16"
+          }
+        },
+        {
+          "id": "g11",
+          "index": 11,
+          "expression": "1+x2+x3+x5+x9+x11+x12+x13+x16",
+          "exponents": [
+            0,
+            2,
+            3,
+            5,
+            9,
+            11,
+            12,
+            13,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            1,
+            1,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 80429,
+          "bitmask_hex": "0x13a2d",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1388,
+            "text": "g11(x)  1+x2+x3+x5+x9+x11+x12+x13+x16"
+          }
+        },
+        {
+          "id": "g12",
+          "index": 12,
+          "expression": "1+x+x5+x6+x7+x9+x11+x12+x16",
+          "exponents": [
+            0,
+            1,
+            5,
+            6,
+            7,
+            9,
+            11,
+            12,
+            16
+          ],
+          "degree": 16,
+          "coefficients_ascending": [
+            1,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+            1,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 72419,
+          "bitmask_hex": "0x11ae3",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6a",
+            "pdf_page": 23,
+            "layout_line": 1389,
+            "text": "g12(x)  1+x+x5+x6+x7+x9+x11+x12+x16"
+          }
+        }
+      ],
+      "unavailable": []
+    },
+    "short": {
+      "frame_type": "short FECFRAME",
+      "n_ldpc": 16200,
+      "code_count": 10,
+      "parameter_table": "5b",
+      "polynomial_table": "6b",
+      "q_table": "7b",
+      "bch_m": 14,
+      "bch_m_derivation": "Table 6 全部 g1..g12 的共同次数；用于机械核对 Nbch-Kbch=t*m",
+      "generator_selection": "按 clause 5.3.1 选取前 t 个多项式 g1..gt",
+      "codes": [
+        {
+          "rate": "1/4",
+          "K_bch": 3072,
+          "N_bch": 3240,
+          "k_ldpc": 3240,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "1/5",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 12960,
+          "q": 36,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1213,
+              "text": "1/4 3 072 3 240 12 1/5 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1403,
+              "text": "1/4 36"
+            }
+          }
+        },
+        {
+          "rate": "1/3",
+          "K_bch": 5232,
+          "N_bch": 5400,
+          "k_ldpc": 5400,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "1/3",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 10800,
+          "q": 30,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1214,
+              "text": "1/3 5 232 5 400 12 1/3 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1404,
+              "text": "1/3 30"
+            }
+          }
+        },
+        {
+          "rate": "2/5",
+          "K_bch": 6312,
+          "N_bch": 6480,
+          "k_ldpc": 6480,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "2/5",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 9720,
+          "q": 27,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1215,
+              "text": "2/5 6 312 6 480 12 2/5 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1405,
+              "text": "2/5 27"
+            }
+          }
+        },
+        {
+          "rate": "1/2",
+          "K_bch": 7032,
+          "N_bch": 7200,
+          "k_ldpc": 7200,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "4/9",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 9000,
+          "q": 25,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1216,
+              "text": "1/2 7 032 7 200 12 4/9 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1406,
+              "text": "1/2 25"
+            }
+          }
+        },
+        {
+          "rate": "3/5",
+          "K_bch": 9552,
+          "N_bch": 9720,
+          "k_ldpc": 9720,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "3/5",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 6480,
+          "q": 18,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1217,
+              "text": "3/5 9 552 9 720 12 3/5 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1407,
+              "text": "3/5 18"
+            }
+          }
+        },
+        {
+          "rate": "2/3",
+          "K_bch": 10632,
+          "N_bch": 10800,
+          "k_ldpc": 10800,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "2/3",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 5400,
+          "q": 15,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1218,
+              "text": "2/3 10 632 10 800 12 2/3 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1408,
+              "text": "2/3 15"
+            }
+          }
+        },
+        {
+          "rate": "3/4",
+          "K_bch": 11712,
+          "N_bch": 11880,
+          "k_ldpc": 11880,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "11/15",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 4320,
+          "q": 12,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1219,
+              "text": "3/4 11 712 11 880 12 11/15 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1409,
+              "text": "3/4 12"
+            }
+          }
+        },
+        {
+          "rate": "4/5",
+          "K_bch": 12432,
+          "N_bch": 12600,
+          "k_ldpc": 12600,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "7/9",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 3600,
+          "q": 10,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1220,
+              "text": "4/5 12 432 12 600 12 7/9 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1410,
+              "text": "4/5 10"
+            }
+          }
+        },
+        {
+          "rate": "5/6",
+          "K_bch": 13152,
+          "N_bch": 13320,
+          "k_ldpc": 13320,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "37/45",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 2880,
+          "q": 8,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1221,
+              "text": "5/6 13 152 13 320 12 37/45 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1411,
+              "text": "5/6 8"
+            }
+          }
+        },
+        {
+          "rate": "8/9",
+          "K_bch": 14232,
+          "N_bch": 14400,
+          "k_ldpc": 14400,
+          "n_ldpc": 16200,
+          "bch_t": 12,
+          "bch_m": 14,
+          "effective_ldpc_rate": "8/9",
+          "bch_parity_bits": 168,
+          "ldpc_parity_bits": 1800,
+          "q": 5,
+          "generator_polynomial_ids": [
+            "g1",
+            "g2",
+            "g3",
+            "g4",
+            "g5",
+            "g6",
+            "g7",
+            "g8",
+            "g9",
+            "g10",
+            "g11",
+            "g12"
+          ],
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1222,
+              "text": "8/9 14 232 14 400 12 8/9 16 200"
+            },
+            "q": {
+              "table": "7b",
+              "pdf_page": 25,
+              "plain_line": 1412,
+              "text": "8/9 5"
+            }
+          }
+        }
+      ],
+      "bch_polynomials": [
+        {
+          "id": "g1",
+          "index": 1,
+          "expression": "1+x+x3+x5+x14",
+          "exponents": [
+            0,
+            1,
+            3,
+            5,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            1,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 16427,
+          "bitmask_hex": "0x402b",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1393,
+            "text": "g1(x)   1+x+x3+x5+x14"
+          }
+        },
+        {
+          "id": "g2",
+          "index": 2,
+          "expression": "1+x6+x8+x11+x14",
+          "exponents": [
+            0,
+            6,
+            8,
+            11,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 18753,
+          "bitmask_hex": "0x4941",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1394,
+            "text": "g2(x)   1+x6+x8+x11+x14"
+          }
+        },
+        {
+          "id": "g3",
+          "index": 3,
+          "expression": "1+x+x2+x6+x9+x10+x14",
+          "exponents": [
+            0,
+            1,
+            2,
+            6,
+            9,
+            10,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 17991,
+          "bitmask_hex": "0x4647",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1395,
+            "text": "g3(x)   1+x+x2+x6+x9+x10+x14"
+          }
+        },
+        {
+          "id": "g4",
+          "index": 4,
+          "expression": "1+x4+x7+x8+x10+x12+x14",
+          "exponents": [
+            0,
+            4,
+            7,
+            8,
+            10,
+            12,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            1,
+            0,
+            1,
+            0,
+            1
+          ],
+          "bitmask": 21905,
+          "bitmask_hex": "0x5591",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1396,
+            "text": "g4(x)   1+x4+x7+x8+x10+x12+x14"
+          }
+        },
+        {
+          "id": "g5",
+          "index": 5,
+          "expression": "1+x2+x4+x6+x8+x9+x11+x13+x14",
+          "exponents": [
+            0,
+            2,
+            4,
+            6,
+            8,
+            9,
+            11,
+            13,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            0,
+            1,
+            0,
+            1,
+            0,
+            1,
+            1,
+            0,
+            1,
+            0,
+            1,
+            1
+          ],
+          "bitmask": 27477,
+          "bitmask_hex": "0x6b55",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1397,
+            "text": "g5(x)   1+x2+x4+x6+x8+x9+x11+x13+x14"
+          }
+        },
+        {
+          "id": "g6",
+          "index": 6,
+          "expression": "1+x3+x7+x8+x9+x13+x14",
+          "exponents": [
+            0,
+            3,
+            7,
+            8,
+            9,
+            13,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            1,
+            1
+          ],
+          "bitmask": 25481,
+          "bitmask_hex": "0x6389",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1398,
+            "text": "g6(x)   1+x3+x7+x8+x9+x13+x14"
+          }
+        },
+        {
+          "id": "g7",
+          "index": 7,
+          "expression": "1+x2+x5+x6+x7+x10+x11+x13+x14",
+          "exponents": [
+            0,
+            2,
+            5,
+            6,
+            7,
+            10,
+            11,
+            13,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+            0,
+            1,
+            1,
+            0,
+            1,
+            1
+          ],
+          "bitmask": 27877,
+          "bitmask_hex": "0x6ce5",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1399,
+            "text": "g7(x)   1+x2+x5+x6+x7+x10+x11+x13+x14"
+          }
+        },
+        {
+          "id": "g8",
+          "index": 8,
+          "expression": "1+x5+x8+x9+x10+x11+x14",
+          "exponents": [
+            0,
+            5,
+            8,
+            9,
+            10,
+            11,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 20257,
+          "bitmask_hex": "0x4f21",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1400,
+            "text": "g8(x)   1+x5+x8+x9+x10+x11+x14"
+          }
+        },
+        {
+          "id": "g9",
+          "index": 9,
+          "expression": "1+x+x2+x3+x9+x10+x14",
+          "exponents": [
+            0,
+            1,
+            2,
+            3,
+            9,
+            10,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            1
+          ],
+          "bitmask": 17935,
+          "bitmask_hex": "0x460f",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1401,
+            "text": "g9(x)   1+x+x2+x3+x9+x10+x14"
+          }
+        },
+        {
+          "id": "g10",
+          "index": 10,
+          "expression": "1+x3+x6+x9+x11+x12+x14",
+          "exponents": [
+            0,
+            3,
+            6,
+            9,
+            11,
+            12,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
+            1,
+            0,
+            1
+          ],
+          "bitmask": 23113,
+          "bitmask_hex": "0x5a49",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1402,
+            "text": "g10(x)  1+x3+x6+x9+x11+x12+x14"
+          }
+        },
+        {
+          "id": "g11",
+          "index": 11,
+          "expression": "1+x4+x11+x12+x14",
+          "exponents": [
+            0,
+            4,
+            11,
+            12,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            1
+          ],
+          "bitmask": 22545,
+          "bitmask_hex": "0x5811",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1403,
+            "text": "g11(x)  1+x4+x11+x12+x14"
+          }
+        },
+        {
+          "id": "g12",
+          "index": 12,
+          "expression": "1+x+x2+x3+x5+x6+x7+x8+x10+x13+x14",
+          "exponents": [
+            0,
+            1,
+            2,
+            3,
+            5,
+            6,
+            7,
+            8,
+            10,
+            13,
+            14
+          ],
+          "degree": 14,
+          "coefficients_ascending": [
+            1,
+            1,
+            1,
+            1,
+            0,
+            1,
+            1,
+            1,
+            1,
+            0,
+            1,
+            0,
+            0,
+            1,
+            1
+          ],
+          "bitmask": 26095,
+          "bitmask_hex": "0x65ef",
+          "roots": null,
+          "roots_status": "not_specified_in_table_6",
+          "source": {
+            "table": "6b",
+            "pdf_page": 23,
+            "layout_line": 1404,
+            "text": "g12(x)  1+x+x2+x3+x5+x6+x7+x8+x10+x13+x14"
+          }
+        }
+      ],
+      "unavailable": [
+        {
+          "rate": "9/10",
+          "K_bch": null,
+          "N_bch": null,
+          "k_ldpc": null,
+          "n_ldpc": null,
+          "bch_t": null,
+          "bch_m": null,
+          "effective_ldpc_rate": null,
+          "bch_parity_bits": null,
+          "ldpc_parity_bits": null,
+          "q": null,
+          "generator_polynomial_ids": null,
+          "source": {
+            "frame": {
+              "table": "5b",
+              "pdf_page": 23,
+              "plain_line": 1223,
+              "text": "9/10 NA NA NA NA NA"
+            }
+          },
+          "reason": "表 5b 此行的全部参数列均为 NA，且表 7b 无对应短帧 q 条目"
+        }
+      ]
+    }
+  },
+  "extraction_notes": [
+    {
+      "topic": "Table 5b layout",
+      "handling": "保留版面文本存在列关联错位；帧参数按普通文本及 PDF 默认阅读顺序提取，并逐行回溯"
+    },
+    {
+      "topic": "roots",
+      "handling": "Table 6a/6b 只列多项式，未列根信息；所有 roots 保持 null"
+    }
+  ],
+  "source_anomalies": [
+    {
+      "type": "source_cross_reference",
+      "clause": "5.3.1",
+      "pdf_page": 23,
+      "layout_lines": [
+        1373,
+        1374
+      ],
+      "observed_text": "The generator polynomial of the t error correcting BCH encoder is obtained by multiplying the first t polynomials in table 6a for nldpc = 64 800 and in table 5b for nldpc = 16 200.",
+      "ambiguity": "短帧多项式引用写为 table 5b，但表 5b 是参数表，Table 6b 才以 BCH polynomials 为标题",
+      "handling": "按明确标题从 Table 6b 提取短帧多项式；不修改原文，不据此补任何值"
+    }
+  ]
+}

@@ -23,13 +23,25 @@ from mbdsdr_ai.dvbs2_bch import (
 from mbdsdr_ai.dvbs2_ldpc import ldpc_parameters
 
 _RUNTIME_PATH = Path(__file__).resolve().parents[1] / "data" / "dvbs2_bch.json"
-_EXTRACT_PATH = (
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_WORKSPACE_STANDARDS = (
     Path(__file__).resolve().parents[3]
     / "standards"
     / "etsi-en-302-307-1"
-    / "dvbs2_fec_parameters.json"
 )
-_KAT_PATH = _EXTRACT_PATH.with_name("dvbs2_bch_vectors.json")
+# Golden search order: repo copy first (what CI sees), workspace standards
+# copy as fallback. Both are SHA-pinned; absent both → honest skip.
+_EXTRACT_CANDIDATES = (
+    _PROJECT_ROOT / "tests" / "golden" / "dvbs2_fec_parameters.json",
+    _WORKSPACE_STANDARDS / "dvbs2_fec_parameters.json",
+)
+_EXTRACT_PATH = next((p for p in _EXTRACT_CANDIDATES if p.is_file()),
+                     _EXTRACT_CANDIDATES[0])
+_KAT_CANDIDATES = (
+    _PROJECT_ROOT / "tests" / "golden" / "dvbs2_bch_vectors.json",
+    _WORKSPACE_STANDARDS / "dvbs2_bch_vectors.json",
+)
+_KAT_PATH = next((p for p in _KAT_CANDIDATES if p.is_file()), _KAT_CANDIDATES[0])
 _KAT_SHA256 = "d7764e85634bdacfc77c2ef9a4c00b3c8ad03dba888d92ee3153a3a4b313e03e"
 
 
