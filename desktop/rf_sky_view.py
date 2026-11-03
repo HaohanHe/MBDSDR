@@ -382,6 +382,51 @@ def _load_user_tle_catalog() -> List[Dict[str, object]]:
     return catalog
 
 
+# ---------------------------------------------------------------------------
+# 目录名 ↔ CATNR 一致性校验（44016/54234 错配事故的通用防线）
+# ---------------------------------------------------------------------------
+def _norm_sat_name(name: str) -> str:
+    """卫星名归一化：大写 + 去分隔符（空格/连字符/点/括号）。
+
+    'METEOR-M 2' / 'METEOR M2' / 'METEOR-M2' -> 'METEORM2'。
+    """
+    return "".join(ch for ch in str(name).upper() if ch.isalnum())
+
+
+def satellite_name_matches(declared: str, tle_line0: str) -> bool:
+    """目录声明名与 TLE line0 语义匹配判定。
+
+    归一化后要求**完全相等**——防止串号：
+    'METEOR M2'(METEORM2) 只允许匹配 line0 'METEOR-M 2'，
+    不匹配 'METEOR-M2 2'(METEORM22) —— 那是另一颗星（44387）。
+    """
+    a = _norm_sat_name(declared)
+    b = _norm_sat_name(tle_line0)
+    return bool(a) and a == b
+
+
+def satellite_catalog_mismatches(meta_table, resolve_line0):
+    """扫描目录表，返回 (mismatches, no_data) 两类问题清单（全量，不只第一个）。
+
+    meta_table: {name: {"catnr": int, ...}}
+    resolve_line0: callable(catnr) -> str|None  （返回 None = 该编号无数据）
+    返回:
+      mismatches: [(name, catnr, line0)] —— 有数据但语义不匹配（错配）
+      no_data:    [(name, catnr)]        —— 缓存缺该编号（单独归类，不算错配）
+    """
+    mismatches = []
+    no_data = []
+    for name, meta in meta_table.items():
+        catnr = int(meta["catnr"])
+        line0 = resolve_line0(catnr)
+        if line0 is None:
+            no_data.append((name, catnr))
+            continue
+        if not satellite_name_matches(name, line0):
+            mismatches.append((name, catnr, str(line0).strip()))
+    return mismatches, no_data
+
+
 def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
     """从 orbit.BUILTIN_SATS 目录 + Celestrak 缓存/在线获取 TLE。
 
@@ -397,13 +442,17 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
 
     # 已知卫星元数据（名称 -> CATNR / 默认频率 / 类型）
     # 注意：这里只存目录索引，不存 TLE 元素本身。
+    # CATNR 与名称的一致性由 tests/test_satellite_catnr_identity.py 用
+    # 真实 TLE line0 双向钉扎（44016/54234 错配事故的回归锁）：
+    #   METEOR M2 = 40069（不是 44016 箭体碎片 ATLAS 5 CENTAUR DEB）；
+    #   FENGYUN 3D = 43010（不是 54234 NOAA 21 JPSS-2）。
     SATELLITE_META: Dict[str, Dict[str, object]] = {
         "NOAA 15":      {"catnr": 25338, "freq_mhz": 137.620, "kind": "weather"},
         "NOAA 18":      {"catnr": 28654, "freq_mhz": 137.9125, "kind": "weather"},
         "NOAA 19":      {"catnr": 33591, "freq_mhz": 137.100, "kind": "weather"},
         "ISS (ZARYA)":  {"catnr": 25544, "freq_mhz": 145.800, "kind": "amateur"},
-        "METEOR M2":    {"catnr": 44016, "freq_mhz": 137.900, "kind": "weather"},
-        "FENGYUN 3D":   {"catnr": 54234, "freq_mhz": 136.900, "kind": "weather"},
+        "METEOR M2":    {"catnr": 40069, "freq_mhz": 137.900, "kind": "weather"},
+        "FENGYUN 3D":   {"catnr": 43010, "freq_mhz": 136.900, "kind": "weather"},
     }
 
     for name, meta in SATELLITE_META.items():
