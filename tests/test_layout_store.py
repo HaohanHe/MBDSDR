@@ -42,7 +42,7 @@ def test_list_presets_returns_builtins(store):
 
 def test_save_and_load_user_preset(store):
     data = {"splitter_sizes": [300, 540, 360],
-            "left_tab_order": ["射频天空", "频谱"],
+            "left_tab_order": ["天空模式", "频谱"],
             "left_tab_index": 1}
     assert store.save_preset("我的布局", data) is True
     names = store.list_presets()

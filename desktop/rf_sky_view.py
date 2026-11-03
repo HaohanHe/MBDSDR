@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """
-MBDSDR 射频天空视图 (RF Sky View) — 对照 Stellarium 真实坐标数学
+MBDSDR 天空模式视图 (RF Sky View) — 对照 Stellarium 真实坐标数学
 =====================================================================
 方位角等距投影 (azimuthal equidistant) 显示卫星实时位置、太阳/月亮、
 天线指向、未来过境列表与昼夜背景。
@@ -476,13 +476,13 @@ def _landscape_layer_profile(az_deg: float, *, seed: int, base_alt: float,
 
 
 # ============================================================================
-# 射频天空视图主组件
+# 天空模式视图主组件
 # ============================================================================
 
 
 class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     """
-    射频天空视图：方位角等距投影的天空图（天顶居中，地平线为边缘圆）。
+    天空模式视图：方位角等距投影的天空图（天顶居中，地平线为边缘圆）。
 
     交互由混入类 SkyInteractionHandler 接管（Stellarium 视角模型）：
       - 左键拖拽：反投影平移视角（center_az/center_alt）
@@ -3291,7 +3291,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
 
 class RFSkyViewPanel(QFrame):
-    """射频天空视图面板：包含标题栏、控制按钮和 RFSkyView。"""
+    """天空模式视图面板：包含标题栏、控制按钮和 RFSkyView。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)

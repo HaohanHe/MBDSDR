@@ -7,7 +7,7 @@ MainWindow 三栏「平行视界」布局 offscreen 测试
 守护路A 桌面 UI 的新交付点（替代旧 QDockWidget 三坞断言）：
   1. 中央 = QSplitter(Horizontal) 三栏：左(天空) / 中(地图) / 右(App 页签)；
   2. handle 厚度 = tokens(4px)，三栏可 setSizes 拖宽；
-  3. 左栏 QTabWidget 含：射频天空 / 多普勒定轨 / 卫星跟踪 / 频谱；
+  3. 左栏 QTabWidget 含：天空模式 / 多普勒定轨 / 卫星跟踪 / 频谱；
   4. 右栏 QTabWidget 含：控制 / 状态 / AI 助手 / 扫频 / 调制识别 / 设备 / 增益 ...；
   5. 中栏全出血 AdsbMapPanel + 悬浮胶囊 AI 命令栏（输入框 + 麦克风按钮）；
   6. 顶部细状态栏（连接/频率/采样率/GPS/UTC）+ 底部坞（Home/模式块/Now Bar）；
@@ -84,7 +84,7 @@ class TestThreeColumnSplitter:
     def test_left_tab_has_sky_tabs(self, main_window):
         texts = [main_window.left_tab.tabText(i)
                  for i in range(main_window.left_tab.count())]
-        for expected in ("射频天空", "多普勒定轨", "卫星跟踪", "频谱"):
+        for expected in ("天空模式", "多普勒定轨", "卫星跟踪", "频谱"):
             assert expected in texts, f"左栏缺页签 {expected}: {texts}"
 
     def test_right_tab_has_core_apps(self, main_window):

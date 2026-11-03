@@ -70,7 +70,7 @@ class PanelRegistry:
             PanelSpec("spectrum",   "频谱",       "≡", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       ratio_hint=t.RATIO["splitter_center"]),
-            PanelSpec("rf_sky",     "射频天空",   "◎", AREA_CENTER,
+            PanelSpec("rf_sky",     "天空模式",   "◎", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       ratio_hint=t.RATIO["splitter_center"]),
             PanelSpec("weather",    "气象云图",   "☁", AREA_CENTER,

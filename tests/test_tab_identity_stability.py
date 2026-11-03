@@ -38,7 +38,7 @@ def qapp():
 
 PANELS = (
     ("spectrum", "频谱", "Spectrum"),
-    ("rf_sky", "射频天空", "RF Sky"),
+    ("rf_sky", "天空模式", "RF Sky"),
     ("doppler", "多普勒定轨", "Doppler"),
 )
 
@@ -60,11 +60,11 @@ def test_tab_key_prefers_stable_id(qapp):
 
     tab = QTabWidget()
     tab.addTab(QWidget(), "频谱")
-    tab.addTab(QWidget(), "射频天空")
+    tab.addTab(QWidget(), "天空模式")
     tab.tabBar().setTabData(0, "spectrum")
 
     assert D._tab_key(tab, 0) == "spectrum", "有 tabData 时必须用稳定 id"
-    assert D._tab_key(tab, 1) == "射频天空", "无 id 时才回退译文（兼容旧数据）"
+    assert D._tab_key(tab, 1) == "天空模式", "无 id 时才回退译文（兼容旧数据）"
 
 
 def test_layout_survives_language_switch(qapp):
@@ -96,11 +96,12 @@ def test_legacy_layout_still_restores(qapp):
     tab = QTabWidget()
     _build(tab, [zh for _pid, zh, _en in PANELS])
 
-    # 旧格式：存的是中文译文
+    # 旧格式：存的是中文译文（含 2026-11-03 改名前的旧译文「射频天空」——
+    # _LEGACY_KEY_ALIAS 必须把它映射回 rf_sky，否则老布局丢页签）
     legacy = ["多普勒定轨", "频谱", "射频天空"]
     D._restore_tab_order(tab, legacy, 0, {})
     assert _keys(tab) == ["doppler", "spectrum", "rf_sky"], \
-        f"旧版译文落盘必须仍可恢复，实际: {_keys(tab)}"
+        f"旧版译文落盘必须仍可恢复（含旧译文别名），实际: {_keys(tab)}"
 
 
 def test_capture_uses_stable_ids(qapp):
@@ -146,7 +147,7 @@ def test_raise_center_tab_legacy_text_fallback(qapp):
     from dock_layout_manager import DockLayoutManager as D
 
     tab = QTabWidget()
-    tab.addTab(QWidget(), "射频天空")
+    tab.addTab(QWidget(), "天空模式")
     tab.addTab(QWidget(), "频谱")   # 无 tabData
     tab.setCurrentIndex(0)
 

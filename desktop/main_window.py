@@ -929,7 +929,7 @@ class MainWindow(QMainWindow):
         布局（行：顶栏 / 三栏 / 底坞）：
           * 顶栏：细状态栏（连接/频率/采样率/GPS/UTC），见 _build_top_bar；
           * 左栏（~300px）：沉浸天空/轨道极坐标——QTabWidget 页签
-            （射频天空 / 多普勒定轨 / 卫星跟踪 / 频谱）；
+            （天空模式 / 多普勒定轨 / 卫星跟踪 / 频谱）；
           * 中栏（flex）：暗色地图世界铺满（AdsbMapPanel 全出血），上方悬浮
             胶囊形 AI 命令栏（半透明毛玻璃，输入框 + 麦克风，路由到 ai_panel）；
           * 右栏（~360px）：当前 App——QTabWidget 页签
@@ -946,11 +946,11 @@ class MainWindow(QMainWindow):
         left_tab.setTabPosition(QTabWidget.North)
         left_tab.setMinimumWidth(260)  # 左栏沉浸天空最小宽（tokens 无此键，弹性下限）
 
-        # Tab: 射频天空（主）
+        # Tab: 天空模式（主）
         self.sky_view = self._create_sky_widget()
         if hasattr(self.sky_view, "object_clicked"):
             self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
-        left_tab.addTab(self.sky_view, "射频天空")
+        left_tab.addTab(self.sky_view, "天空模式")
         left_tab.tabBar().setTabData(left_tab.count() - 1, "rf_sky")
 
         # Tab: 多普勒定轨
@@ -1355,7 +1355,7 @@ class MainWindow(QMainWindow):
         lt = getattr(self, "left_tab", None)
         if kind == "tab" and lt is not None:
             idx = max(0, min(int(info.get("index", 0)), lt.count()))
-            lt.insertTab(idx, sky, "射频天空")
+            lt.insertTab(idx, sky, "天空模式")
             lt.tabBar().setTabData(idx, "rf_sky")
         elif kind == "dock" and info.get("dock") is not None:
             info["dock"].setWidget(sky)
@@ -1607,7 +1607,7 @@ class MainWindow(QMainWindow):
         self.callsign_edit.setMinimumWidth(80)
         self.callsign_edit.setMaximumWidth(200)
         self.callsign_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在射频天空图）")
+        self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在天空模式图）")
         self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
         lay.addWidget(self.callsign_edit)
         lay.addWidget(self._vsep())
@@ -1724,7 +1724,7 @@ class MainWindow(QMainWindow):
         return "font-weight: 600;"
 
     def _create_sky_widget(self):
-        """创建射频天空 widget：路B工厂 create_sky_widget() 优先，回退 RFSkyView。
+        """创建天空模式 widget：路B工厂 create_sky_widget() 优先，回退 RFSkyView。
 
         路B（星空组，负责 rf_sky_view.py）会产出自包含天空 widget 并在模块里
         暴露 ``create_sky_widget()`` 工厂。这里用 hasattr/try 守卫：
@@ -5681,11 +5681,11 @@ class MainWindow(QMainWindow):
             "<p>呼号：在「设置」中配置</p>"
             "<p>对标 GNU Radio / SDR++ / SatDump 等开源项目能力，独立实现（未包含其源代码）</p>"
             "<p>支持 MCP 工具调用，任意 AI IDE 可直接控制硬件</p>"
-            "<p>射频天空视图借鉴 Stellarium 设计理念</p>"
+            "<p>天空模式视图借鉴 Stellarium 设计理念</p>"
         )
 
     # ========================================================================
-    # 射频天空视图
+    # 天空模式视图
     # ========================================================================
 
     def _init_sky_view(self):

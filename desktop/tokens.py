@@ -121,7 +121,7 @@ class DesignTokens:
             "image_placeholder_bg": "#1b1b1b",   # 图像占位底（近黑卡片）
             # ---- ADS-B 接收站标记 ----
             "station_blue":         "#4F7CAC",   # 接收站标记蓝
-            # ---- 射频天空（天文/星座/热力图功能性配色）----
+            # ---- 天空模式（天文/星座/热力图功能性配色）----
             "constellation_galileo":"#8C6B5B",   # Galileo 星座标识紫棕
             "sky_day_zenith":       "#DCE7EC",   # 白天天顶浅蓝
             "sky_day_ink":          "#3A4550",   # 白天前景文字/网格
@@ -219,7 +219,7 @@ class DesignTokens:
             "card_min_w":        200.0, # 卡片最小宽（再窄就换行/折叠）
             "card_max_w":        560.0, # 卡片最大宽（超宽时居中不拉伸到无穷）
             "analysis_left":     0.60,  # analysis 预设：左频谱占比
-            "analysis_right":    0.40,   # analysis 预设：右射频天空占比
+            "analysis_right":    0.40,   # analysis 预设：右天空模式占比
             "focus_side":        0.28,  # focus 预设：右侧控制条占比
             "grid_cell":         0.5,   # grid 四宫格单元格占比
             "spectrum_fft":     0.60,  # 频谱 Splitter：上 FFT 曲线占比

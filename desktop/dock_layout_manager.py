@@ -16,8 +16,8 @@ MBDSDR 桌面端 Dock 布局管理器
 
 三个布局预设：
   * focus    —— 全屏频谱 + 右侧 36px 图标窄条（控制/状态/AI 点图标展开）
-  * analysis —— 中央频谱 + 右侧射频天空(弹性比例) + 底部控制条
-  * grid     —— 频谱 / 射频天空 / 控制 / 状态 多区分栏
+  * analysis —— 中央频谱 + 右侧天空模式(弹性比例) + 底部控制条
+  * grid     —— 频谱 / 天空模式 / 控制 / 状态 多区分栏
 
 红线：不造数据；布局只动几何与可见性，不改任何业务信号。
 """
@@ -79,7 +79,7 @@ class DockLayoutManager:
         self._reset_filter = _SplitterResetFilter(self)
         # 布局持久化仓库（可注入，便于 offscreen 测试）
         self.store: LayoutStore = store or layout_store()
-        # 运行态：射频天空面板按需从中央 Tab 移到右侧 Dock（可移回）
+        # 运行态：天空模式面板按需从中央 Tab 移到右侧 Dock（可移回）
         self._sky_dock: Optional[QDockWidget] = None
         self._sky_in_dock: bool = False
         # 当前布局显示名（持久化到 layout_store + QSettings）
@@ -143,14 +143,14 @@ class DockLayoutManager:
             dock.raise_()
 
     # ------------------------------------------------------------------
-    # 射频天空在 Tab / 右侧 Dock 之间搬运（流体侧栏用）
+    # 天空模式在 Tab / 右侧 Dock 之间搬运（流体侧栏用）
     # ------------------------------------------------------------------
     def _ensure_sky_dock(self) -> QDockWidget:
         """把 self.mw.sky_view 包进一个 QDockWidget（懒创建，可重复调用）。"""
         if self._sky_dock is not None:
             return self._sky_dock
         sky = getattr(self.mw, "sky_view", None)
-        dock = QDockWidget("射频天空", self.mw)
+        dock = QDockWidget("天空模式", self.mw)
         dock.setObjectName("skyDock")
         dock.setWidget(sky)
         dock.setFeatures(QDockWidget.DockWidgetMovable
@@ -190,7 +190,7 @@ class DockLayoutManager:
         if tab is not None and sky is not None:
             # 插入到"频谱"之后
             idx = 1 if tab.count() > 0 else 0
-            tab.insertTab(idx, sky, "射频天空")
+            tab.insertTab(idx, sky, "天空模式")
             # 稳定身份，别用译文（tabData 在 QTabBar 上，不在 QTabWidget）
             tab.tabBar().setTabData(idx, "rf_sky")
         if self._sky_dock is not None:
@@ -348,6 +348,10 @@ class DockLayoutManager:
                                data.get("right_tab_index", 0),
                                data.get("right_panel_visible", {}))
 
+    # 旧译文别名（改名兼容）：2026-11-03「射频天空」→「天空模式」。
+    # 老用户落盘的 order/visible 里存的是旧译文，恢复时必须仍能对上稳定 id。
+    _LEGACY_KEY_ALIAS = {"射频天空": "rf_sky"}
+
     @staticmethod
     def _restore_tab_order(tab: Optional[QTabWidget], order, current_index,
                            visible: Dict) -> None:
@@ -368,6 +372,7 @@ class DockLayoutManager:
                 tab.removeTab(0)
             used: set = set()
             for key in order:
+                key = DockLayoutManager._LEGACY_KEY_ALIAS.get(key, key)
                 hit = by_key.get(key)
                 if hit is not None:
                     title, w = hit
@@ -381,13 +386,17 @@ class DockLayoutManager:
                 if k not in used:
                     tab.addTab(w, t)
                     tab.tabBar().setTabData(tab.count() - 1, k)
-            # 可见性恢复（键同样走稳定 id）
+            # 可见性恢复（键同样走稳定 id；旧译文键先归一）
             if isinstance(visible, dict):
+                vis_norm = {
+                    DockLayoutManager._LEGACY_KEY_ALIAS.get(k, k): v
+                    for k, v in visible.items()
+                }
                 for i in range(tab.count()):
                     k = DockLayoutManager._tab_key(tab, i)
-                    if k in visible:
+                    if k in vis_norm:
                         try:
-                            tab.setTabVisible(i, bool(visible[k]))
+                            tab.setTabVisible(i, bool(vis_norm[k]))
                         except Exception:  # noqa: BLE001
                             pass
             if isinstance(current_index, int) and 0 <= current_index < tab.count():
@@ -464,7 +473,7 @@ class DockLayoutManager:
             self.mw.addDockWidget(Qt.RightDockWidgetArea, self._wrap_in_dock(strip, "面板"))
 
     def _preset_analysis(self) -> None:
-        """分析：中央频谱 + 右侧射频天空 + 底部控制条。"""
+        """分析：中央频谱 + 右侧天空模式 + 底部控制条。"""
         self._raise_center_tab("spectrum")
         self._move_sky_to_right()
         # 控制/状态/AI 移到底部横向条（仅对真实 QDockWidget 生效；
@@ -483,7 +492,7 @@ class DockLayoutManager:
         sky.setVisible(True)
 
     def _preset_grid(self) -> None:
-        """网格：频谱 / 射频天空 / 控制 / 状态 多区分栏。"""
+        """网格：频谱 / 天空模式 / 控制 / 状态 多区分栏。"""
         self._raise_center_tab("spectrum")
         self._move_sky_to_right()
         sky = self._ensure_sky_dock()
