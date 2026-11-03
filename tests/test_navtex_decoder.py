@@ -1,6 +1,22 @@
 # SPDX-License-Identifier: MIT
 """tests/test_navtex_decoder.py — NAVTEX/SITOR-B（CCIR 476）编解码钉扎。
 
+**真样本状态（P2 口径）**：缺真实 OTA 样本——本文件全部钉扎为
+「编码→FSK 音频→解码」自洽往返 + 码表封闭性数学金样 + 公开锚点
+bit 串（维基 SITOR），不含真录对拍。验收口径已就位：
+`TestDigitalModeRouting.test_navtex_route_wav` 吃 `.wav` 音频全链
+解码——真录样本落位后只需换输入文件、钉 B1/B2/B3B4 与正文关键词，
+链路本身零改动。
+
+最小可复现采样条件（拿到即钉真样本）：
+  * 频点：518 kHz（国际 NAVTEX）或 490 kHz（本地/中文）；
+  * 解调：USB 上边带，调谐偏 1 kHz（如 517 kHz）→ 音频中心 1 kHz
+    （mark 1085 Hz / space 915 Hz）；带宽 0.3–3 kHz；
+  * 采样率：≥8 kHz（本实现 12 kHz 验证）；时长 ≥5 min
+    （一条完整报文：定相 ≥2 s + ZCZC + 头 + 正文 + NNNN）；
+  * 时间窗：岸台按 4 h 排班（518 kHz 各大区台滚动发射），选本地
+    强台发射时段；格式 .wav（16-bit PCM 单声道）。
+
 钉扎层级：
   * CCIR 476 码表封闭性（数学性质金样）：全表 35 码点恰为所有「7 bit
     含 4 个 mark」的组合（C(7,4)=35），且与公开锚点 bit 串逐一相等
