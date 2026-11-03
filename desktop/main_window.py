@@ -98,10 +98,9 @@ from tokens import tokens
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
 from constants import DEFAULT_SAMPLE_RATE_HZ
-# 气象云图 / 多普勒定轨面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
-# 在用户首次点解码/定轨时才创建，避免拖慢启动）。
+# 气象云图面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
+# 在用户首次点解码时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
-from doppler_panel import DopplerPanel
 from sat_track_panel import SatTrackPanel
 from new_spacetime_panel import NewSpacetimePanel
 from adsb_map_panel import AdsbMapPanel
@@ -953,15 +952,6 @@ class MainWindow(QMainWindow):
         left_tab.addTab(self.sky_view, "天空模式")
         left_tab.tabBar().setTabData(left_tab.count() - 1, "rf_sky")
 
-        # Tab: 多普勒定轨
-        self.doppler_panel = DopplerPanel()
-        # —— 孤儿接通：定轨 finished/progress/failed → 状态栏回显 ——
-        self.doppler_panel.finished.connect(self._on_doppler_finished)
-        self.doppler_panel.progress.connect(self._on_doppler_progress)
-        self.doppler_panel.failed.connect(self._on_doppler_failed)
-        left_tab.addTab(self.doppler_panel, "多普勒定轨")
-        left_tab.tabBar().setTabData(left_tab.count() - 1, "doppler")
-
         # Tab: 卫星闭环自动跟踪
         self.sat_track_panel = SatTrackPanel()
         left_tab.addTab(self.sat_track_panel, "卫星跟踪")
@@ -1182,7 +1172,6 @@ class MainWindow(QMainWindow):
         reg.attach_widget("spectrum", self.spectrum)
         reg.attach_widget("rf_sky", self.sky_view)
         reg.attach_widget("weather", self.weather_panel)
-        reg.attach_widget("doppler", self.doppler_panel)
         reg.attach_widget("module", self.module_panel)
         reg.attach_widget("sat_track", self.sat_track_panel)
         reg.attach_widget("new_spacetime", self.new_spacetime_panel)
@@ -1201,6 +1190,79 @@ class MainWindow(QMainWindow):
         # ---- 双形态壳层：IDE / 星象仪 顶层模式栈（页0=IDE root，页1=星象仪页）----
         self._build_mode_shell()
         self._restore_app_mode()
+
+        # ---- 动态 UI 动作总线挂载（模型 → 界面）：本窗口为执行器，
+        # UI 线程 150ms 排水（AIWorker 后台线程不直接碰控件）----
+        self._init_ui_action_bus()
+
+    # ------------------------------------------------------------------
+    # 动态 UI（模型 → 界面动作执行器 + 排水）
+    # ------------------------------------------------------------------
+    def _init_ui_action_bus(self):
+        from mbdsdr_ai.ui_actions import get_ui_bus
+        bus = get_ui_bus()
+        bus.executor = self._execute_ui_action
+        self._ui_bus = bus
+        self._ui_bus_timer = QTimer(self)
+        self._ui_bus_timer.setInterval(150)
+        self._ui_bus_timer.timeout.connect(bus.drain)
+        self._ui_bus_timer.start()
+
+    def _execute_ui_action(self, action: dict) -> dict:
+        """执行一条界面动作并返回结果（含逆操作，供撤销栈）。
+
+        动词：show_panel/hide_panel（面板 id → 面板菜单勾选）、
+        select_tab/focus_panel（面板 id → 左栏页签切前）、
+        set_layout_ratio（"左:中:右" → 三栏 splitter 按比分配）。
+        未知目标 → 诚实 ERROR（不假装界面变了）。
+        """
+        verb = str(action.get("verb", ""))
+        target = str(action.get("target", ""))
+        if verb in ("show_panel", "hide_panel"):
+            act = (self._panel_actions or {}).get(target)
+            if act is None:
+                return {"ok": False, "status": "ERROR",
+                        "reason": f"未知面板 id {target!r}（见 panel_registry）"}
+            want = verb == "show_panel"
+            if act.isChecked() == want:
+                return {"ok": True, "status": "NOOP",
+                        "inverse": {"verb": "hide_panel" if want else "show_panel",
+                                    "target": target}}
+            act.setChecked(want)   # 经 _toggle_panel 同路径（不删控件）
+            return {"ok": True, "status": "DONE",
+                    "inverse": {"verb": "hide_panel" if want else "show_panel",
+                                "target": target}}
+        if verb in ("select_tab", "focus_panel"):
+            tab = getattr(self, "left_tab", None)
+            if tab is None:
+                return {"ok": False, "status": "ERROR", "reason": "无左栏页签"}
+            prev = tab.currentIndex()
+            for i in range(tab.count()):
+                if tab.tabBar().tabData(i) == target:
+                    tab.setCurrentIndex(i)
+                    return {"ok": True, "status": "DONE",
+                            "inverse": {"verb": "select_tab",
+                                        "target": tab.tabBar().tabData(prev)
+                                        if prev >= 0 else target}}
+            return {"ok": False, "status": "ERROR",
+                    "reason": f"页签不含面板 id {target!r}"}
+        if verb == "set_layout_ratio":
+            sp = getattr(self, "_main_splitter", None)
+            if sp is None:
+                return {"ok": False, "status": "ERROR",
+                        "reason": "三栏 splitter 未就绪"}
+            parts = [int(p) for p in str(action.get("value", "")).split(":")]
+            total_parts = sum(parts)
+            old_sizes = list(sp.sizes())
+            total = max(1, sum(old_sizes))
+            sp.setSizes([total * p // total_parts for p in parts])
+            inv_total = max(1, sum(old_sizes))
+            return {"ok": True, "status": "DONE",
+                    "inverse": {"verb": "set_layout_ratio",
+                                "value": ":".join(str(s) for s in old_sizes),
+                                "_abs_sizes": True}}
+        return {"ok": False, "status": "ERROR",
+                "reason": f"执行器不支持动词 {verb!r}"}
 
     # ------------------------------------------------------------------
     # 双形态壳层：IDE 形态 / 星象仪形态
@@ -2765,12 +2827,11 @@ class MainWindow(QMainWindow):
 
     def _panels_set_sdr_connected(self, connected: bool):
         """把真实 SDR 连接状态同步到各操作控件。
-        未连接时：气象云图 / 多普勒定轨面板的实时 SDR 按钮置灰；
+        未连接时：气象云图面板的实时 SDR 按钮置灰；
         控制面板的调谐/音量/模式/预设控件与录音按钮一并禁用，绝不暴露假可控状态；
         频率显示显 "-- MHz"（避免误导用户以为正在接收 98.5）；
         频谱上方显示引导横幅，连接按钮恢复高亮。"""
-        for panel in (getattr(self, "weather_panel", None),
-                      getattr(self, "doppler_panel", None)):
+        for panel in (getattr(self, "weather_panel", None),):
             if panel is not None:
                 try:
                     panel.set_sdr_connected(connected)
@@ -3828,14 +3889,6 @@ class MainWindow(QMainWindow):
             pass
         self._ensure_repaint_timer()
 
-        # 多普勒定轨面板 tap：feed_iq 碰 Qt 控件（定时器/刷新门），必须在 UI 线程
-        try:
-            dp = getattr(self, "doppler_panel", None)
-            if dp is not None and hasattr(dp, "feed_iq"):
-                dp.feed_iq(iq, sr)
-        except Exception:
-            pass
-
         # 星座图面板 tap：喂入复基带 IQ（节流 ~10fps，取尾部 512 点）
         try:
             cp = getattr(self, "constellation_panel", None)
@@ -4058,16 +4111,6 @@ class MainWindow(QMainWindow):
         # (A) 喂频谱（真 FFT：Nuttall 窗 + 复 FFT + fftshift + dBFS + IIR）
         try:
             self.spectrum.set_iq_data(iq, sr)
-        except Exception:
-            pass
-
-        # 多普勒定轨面板：tap 同一块 IQ（不另起 read_samples，避免抢环形缓冲）。
-        # 面板内部自行缓冲 ~2s 并按 1s 周期做窄带 FFT 提取频偏观测；未选实时
-        # 模式/未连接时 feed_iq 内部直接丢弃，零开销。
-        try:
-            dp = getattr(self, "doppler_panel", None)
-            if dp is not None and hasattr(dp, "feed_iq"):
-                dp.feed_iq(iq, sr)
         except Exception:
             pass
 
@@ -4858,37 +4901,6 @@ class MainWindow(QMainWindow):
             return bool(panel.isVisible())
         except Exception:
             return False
-
-    # —— 1. 多普勒定轨 finished/progress/failed ——
-    def _on_doppler_finished(self, result: dict):
-        """定轨完成：状态栏回显残差/收敛（面板自身已绘曲线）。"""
-        if not self._panel_active(getattr(self, "doppler_panel", None)):
-            return
-        try:
-            rms = result.get("fd_rms_hz")
-            conv = result.get("converged")
-            msg = f"定轨完成 {result.get('estimator','?')} N={result.get('n_obs',0)}"
-            if rms is not None:
-                msg += f" 残差RMS {rms:.1f} Hz"
-            if conv is True:
-                msg += "（已收敛）"
-            self.statusBar().showMessage(msg, 5000)
-        except Exception:
-            pass
-
-    def _on_doppler_progress(self, text: str):
-        if not self._panel_active(getattr(self, "doppler_panel", None)):
-            return
-        try:
-            self.statusBar().showMessage(text, 2000)
-        except Exception:
-            pass
-
-    def _on_doppler_failed(self, text: str):
-        try:
-            self.statusBar().showMessage(f"定轨失败: {text.splitlines()[0]}", 6000)
-        except Exception:
-            pass
 
     # —— 2. 自动调制识别 done/failed ——
     def _on_modulation_done(self, result):

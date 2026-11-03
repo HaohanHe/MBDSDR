@@ -255,6 +255,9 @@ class MBDSDRAgent:
         # 注册工作流工具
         self._register_workflow_tools()
 
+        # 注册动态 UI 工具（模型 → 界面；小动词面，可撤销）
+        self._register_ui_action_tools()
+
         # 注册调度器工具
         self._register_scheduler_tools()
 
@@ -2033,6 +2036,71 @@ class MBDSDRAgent:
             },
             handler=lambda args: ToolResult(success=True, content=json.dumps(wf.execute(args["workflow_name"], args.get("parameters", {})).to_dict(), ensure_ascii=False, indent=2)),
             category="workflow",
+        )
+
+    def _register_ui_action_tools(self):
+        """注册动态 UI 工具（模型 → 界面的最小真闭环）。
+
+        模型调用 ui_layout_control 发出界面动作（显示/隐藏面板、切换/聚焦
+        页签、调整三栏比例），动作经 ui_actions.UiActionBus 校验入队，
+        由 desktop 主窗口在 UI 线程排水执行；非桌面环境诚实 UNAVAILABLE。
+        界面动作不走 arm_manual（不动硬件/文件），但全部可撤销
+        （ui_layout_undo 弹逆栈）。不做 23 组件铺满，先三个动词族做真。
+        """
+        from .ui_actions import get_ui_bus
+        bus = get_ui_bus()
+
+        def _control(args):
+            action = {"verb": args.get("verb", ""),
+                      "target": args.get("target", ""),
+                      "value": args.get("value", "")}
+            r = bus.enqueue(action)
+            return ToolResult(success=bool(r.get("ok")),
+                              content=json.dumps(r, ensure_ascii=False),
+                              data=r)
+
+        self.tool_registry.register(
+            name="ui_layout_control",
+            description=(
+                "动态界面控制：让主界面按你的指令变化。动词："
+                "show_panel/hide_panel（显示/隐藏面板，target=面板 id）、"
+                "select_tab/focus_panel（切换/聚焦页签，target=面板 id）、"
+                "set_layout_ratio（调整三栏比例，value='左:中:右' 如 '2:2:1'）。"
+                "动作可撤销（ui_layout_undo）。未知动词/目标/比例如实拒绝；"
+                "非桌面环境诚实报 UNAVAILABLE，不假装界面已变。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "verb": {"type": "string",
+                             "description": "show_panel/hide_panel/select_tab/"
+                                            "focus_panel/set_layout_ratio"},
+                    "target": {"type": "string",
+                               "description": "面板 id（前四个动词必填）"},
+                    "value": {"type": "string",
+                              "description": "set_layout_ratio 用，如 '2:2:1'"},
+                },
+                "required": ["verb"],
+            },
+            handler=_control,
+            category="ui",
+        )
+
+        def _undo(_args):
+            r = bus.undo()
+            return ToolResult(success=bool(r.get("ok")),
+                              content=json.dumps(r, ensure_ascii=False),
+                              data=r)
+
+        self.tool_registry.register(
+            name="ui_layout_undo",
+            description=(
+                "撤销最近一次 ui_layout_control 界面动作（弹出逆操作栈）。"
+                "空栈诚实 EMPTY，不假装撤销成功。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=_undo,
+            category="ui",
         )
 
     def _register_scheduler_tools(self):
