@@ -36,7 +36,7 @@ from mbdsdr_ai.doppler_link import (  # noqa: E402
     get_compensator,
 )
 
-# 长春（用户所在地，真实坐标作为测试夹具）
+# 测试锚点站址（SGP4 地面站夹具坐标，不代表任何个人位置）
 LAT, LON = 43.9, 125.3
 ISS = "ISS (ZARYA)"
 ISS_DOWNLINK_HZ = 145.8e6

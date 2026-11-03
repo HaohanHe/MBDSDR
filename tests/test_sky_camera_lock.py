@@ -41,7 +41,7 @@ from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
 from mbdsdr_ai import orbit  # noqa: E402
 
-# 长春（用户所在地，真实坐标作为测试夹具）
+# 测试锚点站址（SGP4 地面站夹具坐标，不代表任何个人位置）
 LAT, LON = 43.9, 125.3
 ISS = "ISS (ZARYA)"
 NOAA19 = "NOAA 19"
