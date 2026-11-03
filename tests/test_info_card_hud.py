@@ -29,7 +29,9 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
-from desktop.rf_sky_view import RFSkyView, SkyObject  # noqa: E402
+from desktop.rf_sky_view import (  # noqa: E402
+    RFSkyView, SkyObject, format_observer_chip,
+)
 
 
 def _new_view(size: int = 600) -> RFSkyView:
@@ -172,3 +174,47 @@ class TestFovControl:
         c = v._fov_minus_rect.center()
         _click(v, c.x(), c.y())
         assert v._hovered_object is not None   # 选中未被 HUD 点击破坏
+
+
+# ----------------------------------------------------------------------
+class TestObserverChip:
+    """左下角观测站读数（Stellarium location chip 同位）：诚实空状态。"""
+
+    def test_none_observer_is_unset(self):
+        assert format_observer_chip(None) == "未设置"
+        assert format_observer_chip({}) == "未设置"
+
+    def test_bad_coords_is_unset(self):
+        assert format_observer_chip({"lat": "x", "lon": None}) == "未设置"
+
+    def test_north_east_with_alt(self):
+        txt = format_observer_chip({"lat": 40.0, "lon": 116.0, "alt_m": 50.0})
+        assert txt == "40.00°N 116.00°E 50m"
+
+    def test_south_west_hemisphere_signs(self):
+        txt = format_observer_chip({"lat": -33.5, "lon": -70.25, "alt_m": 0.0})
+        assert txt == "33.50°S 70.25°W 0m", txt
+
+    def test_alt_optional(self):
+        txt = format_observer_chip({"lat": 0.0, "lon": 0.0})
+        assert txt == "0.00°N 0.00°E", txt   # 无 alt 不编造，赤道本初如实 0
+
+    def test_card_paints_with_and_without_observer(self):
+        # 有观测站
+        v = _new_view()
+        v.grab()                      # 触发 _draw_info_overlay，不崩
+        # 无观测站（诚实空状态）
+        v2 = RFSkyView()
+        v2.resize(600, 600)
+        v2._observer = None
+        v2.grab()                     # 画「未设置」，不崩
+
+    def test_overlay_wires_formatter(self):
+        src = open(os.path.join(_ROOT, "desktop", "rf_sky_view.py"),
+                   encoding="utf-8").read()
+        i = src.index("def _draw_info_overlay")
+        j = src.index("def ", i + 10)
+        body = src[i:j]
+        assert "format_observer_chip(self._observer)" in body, \
+            "信息卡必须真调 format_observer_chip 读观测站"
+        assert "观测站" in body, "信息卡应有「观测站」行标签"

@@ -186,6 +186,30 @@ def breathing_ring_radius(t: float, base_radius: float = 16.0,
         2.0 * math.pi * float(t) / float(period))
 
 
+def format_observer_chip(observer: Optional[Dict[str, float]]) -> str:
+    """左下角观测站读数：有坐标给「40.00°N 116.00°E 50m」，未设置给「未设置」。
+
+    诚实空状态——绝不编造城市/坐标（红线：不写死站址）。纯函数便于确定性断言。
+    """
+    if not observer:
+        return "未设置"
+    try:
+        lat = float(observer.get("lat"))
+        lon = float(observer.get("lon"))
+    except (TypeError, ValueError):
+        return "未设置"
+    ns = "N" if lat >= 0.0 else "S"
+    ew = "E" if lon >= 0.0 else "W"
+    txt = f"{abs(lat):.2f}°{ns} {abs(lon):.2f}°{ew}"
+    alt = observer.get("alt_m")
+    if alt is not None:
+        try:
+            txt += f" {float(alt):.0f}m"
+        except (TypeError, ValueError):
+            pass
+    return txt
+
+
 # ============================================================================
 # 数据类型
 # ============================================================================
@@ -3107,7 +3131,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """左下角信息卡片。"""
         painter.save()
         _t = tokens()
-        card_w, card_h = 240, 150
+        card_w, card_h = 240, 168
         card_x, card_y = 12, self.height() - card_h - 12
         bg = QColor(_t.COLORS["card_2"])
         bg.setAlpha(220)
@@ -3170,6 +3194,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(ink)
         painter.drawText(card_x + 52, y,
                          self._callsign if self._callsign else "未设置")
+
+        # 观测站读数（Stellarium 左下角 location chip 同位）：有坐标给经纬度，
+        # 未设置给「未设置」——诚实空状态，绝不编造城市/坐标。
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "观测站")
+        painter.setFont(self._mono_font)
+        obs_txt = format_observer_chip(self._observer)
+        painter.setPen(ink if obs_txt != "未设置" else dim)
+        painter.drawText(card_x + 64, y, obs_txt)
 
         y += 18
         painter.setFont(self._font)
