@@ -76,7 +76,7 @@ from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetrics,
     QPainterPath, QPolygonF,
-    QLinearGradient,
+    QLinearGradient, QRadialGradient,
     QMouseEvent, QWheelEvent, QResizeEvent,
 )
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
@@ -147,6 +147,23 @@ def _twilight_stops(brightness: float):
             int(q1.green() * (1 - b) + q2.green() * b),
             int(q1.blue() * (1 - b) + q2.blue() * b))))
     return stops
+
+
+def sun_glow_strength(sun_alt_deg: float) -> float:
+    """日出/日落暖辉强度 0..1（SWE §4「日落方位暖红」的强度包络）。
+
+    梯形帽：太阳贴近地平（alt∈[-6°,+3°]）最强——正是晨昏 reddening  peak；
+    向夜侧 (-18° 天文夜) 与昼侧 (+15° 高日) 线性收 0。高日全天空已亮、
+    深夜无散射，故两端无暖辉。纯函数，不读墙钟/不依赖 widget，便于断言。
+    """
+    a = float(sun_alt_deg)
+    if a <= -18.0 or a >= 15.0:
+        return 0.0
+    if a < -6.0:
+        return (a + 18.0) / 12.0        # -18→0, -6→1（晨昏渐强）
+    if a <= 3.0:
+        return 1.0                       # 地平峰区 [-6,+3]
+    return 1.0 - (a - 3.0) / 12.0        # +3→1, +15→0（日升渐弱）
 
 
 def _traj_alpha(i: int, n: int, base: int = 110,
@@ -578,6 +595,32 @@ def _landscape_layer_profile(az_deg: float, *, seed: int, base_alt: float,
     if quant_deg > 0.0:
         alt = quant_deg * round(alt / quant_deg)
     return min(alt, 89.0)
+
+
+def _smoothstep(edge0: float, edge1: float, x: float) -> float:
+    """标准 smoothstep：x≤edge0→0，x≥edge1→1，之间三次 Hermite 平滑。
+
+    edge0 可 > edge1（反向衰减）。基础数学，独立实现（非任何 AGPL 源码）。
+    """
+    if edge0 == edge1:
+        return 0.0 if x < edge0 else 1.0
+    t = (float(x) - edge0) / (edge1 - edge0)
+    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _landscape_alpha(fov_deg: float, center_alt_deg: float) -> float:
+    """地景整体不透明度 = alpha_fov × alpha_down（SWE §1 透明度规则）。
+
+    alpha_fov  = smoothstep(1°,20°,fov)：放大到 ~1° 内地景淡出防糊
+                 （剪影是粗值噪声，紧 fov 下会糊成黑团），≥20° 全显。
+    alpha_down = 0.5 + 0.5·smoothstep(-45°,0°,视线alt)：俯视地下时渐隐到
+                 一半（无穷远剪影模型在地平下失效，柔和退化而非硬切）。
+    返回 ∈ [0,1]；≤~0 时调用方应整层跳过。
+    """
+    a_fov = _smoothstep(1.0, 20.0, float(fov_deg))
+    a_down = 0.5 + 0.5 * _smoothstep(-45.0, 0.0, float(center_alt_deg))
+    return max(0.0, min(1.0, a_fov * a_down))
 
 
 # ============================================================================
@@ -1902,6 +1945,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # 2) 恒星 (分级星点 + 亮星标签) + 星座连线/座名
             self._draw_stars(painter)
             self._draw_constellations(painter)
+            # 2.5) 大气加法辉光：日落/日出方位暖红，加法叠在星空之上
+            #      （SWE §4「加法混合 (ONE,ONE) 画在星空后」）——洗淡近辉光
+            #      的星、给地平抹上暖色；地景随后盖在其上（山影遮地平辉光）。
+            if self._show_atmosphere:
+                self._draw_atmosphere_glow(painter)
             # 3) 地景剪影
             if self._show_landscape:
                 self._draw_landscape(painter)
@@ -1947,6 +1995,45 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         grad = QLinearGradient(0, 0, 0, self.height())
         for pos, color in _twilight_stops(self._sky_brightness):
             grad.setColorAt(pos, color)
+        painter.setBrush(QBrush(grad))
+        painter.drawRect(self.rect())
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
+    # 大气加法辉光: 日落/日出方位暖红 (SWE §4 加法混合, 画在星空后)
+    # ------------------------------------------------------------------ #
+    def _draw_atmosphere_glow(self, painter: QPainter):
+        """晨昏暖辉：加法混合的径向暖光，锚在太阳方位的地平处。
+
+        SWE §4「加法混合 (ONE,ONE) 画在星空后」+「日落方位暖红」的 QPainter
+        等价实现：强度由 sun_glow_strength(太阳高度) 给（贴近地平最强，晨昏
+        之外为 0）；用 CompositionMode_Plus 把暖色 *加* 到已画好的星空上，故
+        辉光处的星被洗淡、地平抹暖——不是盖一层不透明色。太阳低于地平时也
+        贴地平（alt 夹到 0）发光，正是曙暮辉光。strength≤0.01 直接跳过。
+        """
+        sun = self._sun
+        if not sun:
+            return
+        az, alt = sun.get("az"), sun.get("alt")
+        if az is None or alt is None:
+            return
+        strength = sun_glow_strength(float(alt))
+        if strength <= 0.01:
+            return
+        center = self._sky_to_screen(float(az), max(0.0, float(alt)))
+        radius = max(self.width(), self.height()) * 0.55
+        if radius <= 1.0:
+            return
+        warm = QColor(255, 122, 48)              # 晨昏暖橙（公开天光常识色）
+        peak = int(round(120.0 * strength))
+        grad = QRadialGradient(center, radius)
+        grad.setColorAt(0.00, QColor(warm.red(), warm.green(), warm.blue(), peak))
+        grad.setColorAt(0.45, QColor(warm.red(), warm.green(), warm.blue(),
+                                     int(round(peak * 0.34))))
+        grad.setColorAt(1.00, QColor(warm.red(), warm.green(), warm.blue(), 0))
+        painter.save()
+        painter.setCompositionMode(QPainter.CompositionMode_Plus)
+        painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(grad))
         painter.drawRect(self.rect())
         painter.restore()
@@ -2058,6 +2145,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 地景：暮光辉光带 + 三层剪影（远山/树/平顶房屋，由远及近涂黑）
     # ------------------------------------------------------------------ #
     def _draw_landscape(self, painter: QPainter):
+        # 地景整体不透明度：紧 fov 淡出防糊 + 俯视地下渐隐一半（SWE §1）。
+        # ≤~0 直接整层跳过，省掉轮廓计算。
+        alpha = _landscape_alpha(self.view_state.fov_deg,
+                                 self.view_state.center_alt)
+        if alpha <= 0.003:
+            return
         # 地平线基准（alt=0 采样中位 y）：辉光带与剪影轮廓都以它为锚。
         pts = []
         for az in range(0, 361, 6):
@@ -2073,6 +2166,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         night = self._sky_brightness < 0.5
 
         painter.save()
+        painter.setOpacity(alpha)
 
         # 暮光辉光带：剪影后方暖灰渐变，向上渐隐（仅夜；昼由天空渐变自带亮度）
         if night:
