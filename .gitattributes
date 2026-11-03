@@ -1,2 +1,8 @@
 # shell 脚本必须 LF：CRLF 会咬断 bash here-doc（acceptance_run.sh 检查表组装失败实证）
 *.sh text eol=lf
+
+# golden 金样字节冻结：SHA 钉子以文件字节为准，autocrlf 的 CRLF 转换会让
+# Windows 工作副本与 Linux CI checkout 的 SHA 悄悄分叉（2026-11-03 实证：
+# dvbs2_bch_vectors.json 钉 CRLF 工作副本 SHA，CI LF checkout 收集期炸红）。
+# 含 .f32 等二进制——二进制里 0x0D0A 是数据不是行尾，一律不许转换。
+tests/golden/** -text

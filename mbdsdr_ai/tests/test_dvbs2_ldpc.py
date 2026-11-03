@@ -35,9 +35,11 @@ VECTOR_SHA256 = "d614c3572136938c556cac458f78873658c753073686c0e95b0b94cdb30c637
 def _vectors():
     if not VECTOR_PATH.is_file():
         return None
-    if hashlib.sha256(VECTOR_PATH.read_bytes()).hexdigest() != VECTOR_SHA256:
+    # LF 归一化哈希（金样身份跨平台恒等；详见 test_dvbs2_bch 同款注释）
+    raw = VECTOR_PATH.read_bytes()
+    if hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest() != VECTOR_SHA256:
         raise ValueError("independent DVB-S2 vector identity changed")
-    return json.loads(VECTOR_PATH.read_text(encoding="utf-8"))["vectors"]
+    return json.loads(raw.decode("utf-8"))["vectors"]
 
 
 VECTORS = _vectors()

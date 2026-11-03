@@ -42,14 +42,21 @@ _KAT_CANDIDATES = (
     _WORKSPACE_STANDARDS / "dvbs2_bch_vectors.json",
 )
 _KAT_PATH = next((p for p in _KAT_CANDIDATES if p.is_file()), _KAT_CANDIDATES[0])
-_KAT_SHA256 = "d7764e85634bdacfc77c2ef9a4c00b3c8ad03dba888d92ee3153a3a4b313e03e"
+# LF 归一化 SHA（git blob 字节）——Windows autocrlf 工作副本是 CRLF，裸哈希
+# 会与 Linux CI checkout 分叉（2026-11-03 CI 红实证）；一律哈希 LF 归一后字节。
+_KAT_SHA256 = "803bbb3b78c0c4c08fd64d5aab0a520874d77e3772300bc9311c9e664ea1ad6a"
+
+
+def _lf_sha256(raw: bytes) -> str:
+    """LF 归一化后字节的 SHA-256（跨平台恒等的金样身份）。"""
+    return hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()
 
 
 def _load_independent_kat() -> dict | None:
     if not _KAT_PATH.is_file():
         return None
     raw = _KAT_PATH.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != _KAT_SHA256:
+    if _lf_sha256(raw) != _KAT_SHA256:
         raise ValueError("independent DVB-S2 BCH KAT identity changed")
     document = json.loads(raw)
     if document.get("schema") != "dvbs2-bch-independent-kat-v1":
@@ -188,12 +195,12 @@ def test_runtime_data_matches_verified_extract() -> None:
         pytest.skip("verified standard-parameter extract is not available")
     raw = _EXTRACT_PATH.read_bytes()
     extract = json.loads(raw)
-    assert hashlib.sha256(raw).hexdigest() == "982b26f3166ccf35237d6a4bbfbda00a932b6a99d155095ddbb8071c62011330"
+    assert _lf_sha256(raw) == "982b26f3166ccf35237d6a4bbfbda00a932b6a99d155095ddbb8071c62011330"
     standard = _RUNTIME["standard"]
     assert standard["source_pdf"] == extract["source"]["pdf"]
     assert standard["parameter_extract"] == {
         "file": _EXTRACT_PATH.name,
-        "sha256": hashlib.sha256(raw).hexdigest(),
+        "sha256": _lf_sha256(raw),
     }
     assert _RUNTIME["polynomial_encoding"] == extract["polynomial_encoding"]
     for frame, source_family in extract["frame_families"].items():
