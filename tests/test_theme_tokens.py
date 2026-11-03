@@ -36,7 +36,6 @@ app = QApplication.instance() or QApplication(sys.argv)
     ("adsb_map_panel", "AdsbMapPanel", {}),
     ("control_panel", "ControlPanel", {}),
     ("status_panel", "StatusPanel", {}),
-    ("doppler_panel", "DopplerPanel", {}),
     ("ai_panel", "AIPanel", {}),
     ("adsb_panel", "AdsbPanel", {}),
     ("satellite_image_panel", "SatelliteImagePanel", {}),

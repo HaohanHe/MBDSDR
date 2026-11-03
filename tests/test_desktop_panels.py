@@ -3,7 +3,7 @@
 桌面端新面板冒烟测试
 ====================
 
-验证 desktop/weather_panel.py 与 desktop/doppler_panel.py（单一真实数据源架构）：
+验证 desktop/weather_panel.py（单一真实数据源架构）：
   1. 两个面板类可实例化（offscreen 平台）；
   2. 关键控件存在（卫星/目标下拉、来源下拉、开始/停止按钮、图像/画布）；
   3. 不存在任何“模拟演示”按钮（demo_btn 已随模拟模式一并移除）；
@@ -82,54 +82,12 @@ class TestWeatherPanel:
 
 
 # ----------------------------------------------------------------------
-class TestDopplerPanel:
-    def test_instantiate(self):
-        from doppler_panel import DopplerPanel
-        d = DopplerPanel()
-        assert d is not None
-        items = [d.target_combo.itemText(i) for i in range(d.target_combo.count())]
-        assert "LRO (月球轨道)" in items
-        assert "Iridium-107" in items
-        assert "自定义 TLE" in items
-
-    def test_controls_exist(self):
-        from doppler_panel import DopplerPanel
-        d = DopplerPanel()
-        assert d.ekf_radio.isChecked() is True or d.rls_radio.isChecked()
-        # 不硬编码城市坐标：默认空（"未设置"），由用户配置或 GNSS 注入
-        assert d.lat_edit.text() == ""
-        assert d.lon_edit.text() == ""
-        assert "开始定轨" in d.start_btn.text()
-        # 模拟演示按钮必须不存在
-        assert not hasattr(d, "demo_btn")
-        # matplotlib 画布存在
-        assert d.canvas is not None
-
-    def test_no_hardware_shows_disconnected(self):
-        from doppler_panel import DopplerPanel
-        d = DopplerPanel()
-        assert d._sdr_connected is False
-        d.mode_combo.setCurrentIndex(d.mode_combo.findText("实时 SDR"))
-        assert d.start_btn.isEnabled() is False
-        assert "未连接" in d.status_label.text()
-
-    def test_estimator_switch(self):
-        from doppler_panel import DopplerPanel
-        d = DopplerPanel()
-        d.rls_radio.setChecked(True)
-        assert d._estimator() == "rls"
-        d.ekf_radio.setChecked(True)
-        assert d._estimator() == "ekf"
-
-
-# ----------------------------------------------------------------------
 class TestMainWindowIntegration:
     def test_main_window_imports_panels(self):
-        """main_window 模块可导入，且确实 import 了两个新面板。"""
+        """main_window 模块可导入，且确实 import 了气象云图面板。"""
         import desktop.main_window as mw  # noqa: F402,F401
         import main_window as mw2  # noqa: E402
         assert hasattr(mw2, "WeatherPanel")
-        assert hasattr(mw2, "DopplerPanel")
 
     def test_main_window_class_has_panels(self):
         from main_window import MainWindow

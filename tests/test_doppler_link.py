@@ -274,39 +274,5 @@ class TestTcUplinkPrecomp:
         assert r["freq_hz"] == 435.0e6           # 未预偏，不静默偏移
 
 
-# ---------------------------------------------------------------------------
-# 合成占位 TLE 移除（真实数据原则）
-# ---------------------------------------------------------------------------
-class TestNoSyntheticPriorTle:
-    def test_synthetic_constant_removed(self):
-        import doppler_panel
-        assert not hasattr(doppler_panel, "_PRIOR_IRIDIUM_TLE")
-        src = open(doppler_panel.__file__, encoding="utf-8").read()
-        assert "99999U" not in src
-
-    def test_targets_json_has_no_iridium_without_real_tle(self):
-        import json
-        with open(os.path.join(_ROOTDesktop(), "doppler_targets.json"),
-                  encoding="utf-8") as fh:
-            targets = json.load(fh)["targets"]
-        labels = [t["label"] for t in targets]
-        assert not any("Iridium" in l for l in labels), \
-            "无真实 TLE 的 Iridium-107 不应再给目标"
-
-    def test_standard_path_without_prior_tle_errors_honest(self):
-        from doppler_panel import DopplerPanel
-        from PySide6.QtWidgets import QApplication
-        app = QApplication.instance() or QApplication(sys.argv)
-        panel = DopplerPanel()
-        # 配置里加一个无 prior_tle 的标准目标，直接调 _initial_state 应诚实报错
-        panel._targets = [{"label": "假目标", "f0_hz": 0.0, "special": ""}]
-        panel.target_combo.clear()
-        panel.target_combo.addItem("假目标", "")
-        import pytest as _pt
-        with _pt.raises(ValueError, match="真实先验 TLE"):
-            panel._initial_state(0.0)
-        panel.deleteLater()
-
-
 def _ROOTDesktop() -> str:
     return os.path.join(_ROOT, "desktop")

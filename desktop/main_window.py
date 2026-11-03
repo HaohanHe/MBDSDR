@@ -928,7 +928,7 @@ class MainWindow(QMainWindow):
         布局（行：顶栏 / 三栏 / 底坞）：
           * 顶栏：细状态栏（连接/频率/采样率/GPS/UTC），见 _build_top_bar；
           * 左栏（~300px）：沉浸天空/轨道极坐标——QTabWidget 页签
-            （天空模式 / 多普勒定轨 / 卫星跟踪 / 频谱）；
+            （天空模式 / 卫星跟踪 / 频谱）；
           * 中栏（flex）：暗色地图世界铺满（AdsbMapPanel 全出血），上方悬浮
             胶囊形 AI 命令栏（半透明毛玻璃，输入框 + 麦克风，路由到 ai_panel）；
           * 右栏（~360px）：当前 App——QTabWidget 页签

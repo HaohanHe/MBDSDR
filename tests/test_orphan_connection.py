@@ -283,29 +283,7 @@ class _StatusSpy:
 
 
 class TestNewOrphanWiring:
-    """逐个验证新接通的 8 个信号真的连到了 handler。"""
-
-    def test_doppler_finished(self, mw):
-        spy = _StatusSpy(mw)
-        try:
-            mw.doppler_panel.isVisible = lambda: True
-            mw.doppler_panel.finished.emit({
-                "estimator": "EKF", "n_obs": 20,
-                "fd_rms_hz": 5.0, "converged": True})
-            assert any("定轨完成" in m for m in spy.messages), spy.messages
-        finally:
-            spy.release()
-
-    def test_doppler_progress_and_failed(self, mw):
-        spy = _StatusSpy(mw)
-        try:
-            mw.doppler_panel.isVisible = lambda: True
-            mw.doppler_panel.progress.emit("运行 EKF ...")
-            assert any("EKF" in m for m in spy.messages)
-            mw.doppler_panel.failed.emit("Boom: 观测不足")
-            assert any("定轨失败" in m for m in spy.messages)
-        finally:
-            spy.release()
+    """逐个验证新接通的信号真的连到了 handler。"""
 
     def test_modulation_done(self, mw):
         class R:

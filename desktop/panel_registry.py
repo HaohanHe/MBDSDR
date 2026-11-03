@@ -75,8 +75,6 @@ class PanelRegistry:
                       ratio_hint=t.RATIO["splitter_center"]),
             PanelSpec("weather",    "气象云图",   "☁", AREA_CENTER,
                       collapsible=False, min_w=center_min),
-            PanelSpec("doppler",    "多普勒定轨", "⌖", AREA_CENTER,
-                      collapsible=False, min_w=center_min),
             PanelSpec("module",      "模块/信号流","▤", AREA_CENTER,
                       collapsible=False, min_w=center_min),
             PanelSpec("sat_track",   "卫星跟踪",   "◍", AREA_CENTER,

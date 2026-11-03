@@ -39,7 +39,7 @@ def qapp():
 PANELS = (
     ("spectrum", "频谱", "Spectrum"),
     ("rf_sky", "天空模式", "RF Sky"),
-    ("doppler", "多普勒定轨", "Doppler"),
+    ("weather", "气象云图", "Weather"),
 )
 
 
@@ -73,10 +73,10 @@ def test_layout_survives_language_switch(qapp):
 
     tab = QTabWidget()
     _build(tab, [zh for _pid, zh, _en in PANELS])
-    assert _keys(tab) == ["spectrum", "rf_sky", "doppler"]
+    assert _keys(tab) == ["spectrum", "rf_sky", "weather"]
 
     # 存的是稳定 id（新格式）
-    saved = ["doppler", "spectrum", "rf_sky"]
+    saved = ["weather", "spectrum", "rf_sky"]
 
     # 语言切换：译文全变成英文
     for i, (_pid, _zh, en) in enumerate(PANELS):
@@ -98,9 +98,9 @@ def test_legacy_layout_still_restores(qapp):
 
     # 旧格式：存的是中文译文（含 2026-11-03 改名前的旧译文「射频天空」——
     # _LEGACY_KEY_ALIAS 必须把它映射回 rf_sky，否则老布局丢页签）
-    legacy = ["多普勒定轨", "频谱", "射频天空"]
+    legacy = ["气象云图", "频谱", "射频天空"]
     D._restore_tab_order(tab, legacy, 0, {})
-    assert _keys(tab) == ["doppler", "spectrum", "rf_sky"], \
+    assert _keys(tab) == ["weather", "spectrum", "rf_sky"], \
         f"旧版译文落盘必须仍可恢复（含旧译文别名），实际: {_keys(tab)}"
 
 
@@ -112,7 +112,7 @@ def test_capture_uses_stable_ids(qapp):
     _build(tab, [zh for _pid, zh, _en in PANELS])
 
     captured = [D._tab_key(tab, i) for i in range(tab.count())]
-    assert captured == ["spectrum", "rf_sky", "doppler"], \
+    assert captured == ["spectrum", "rf_sky", "weather"], \
         f"落盘必须写 id，实际: {captured}"
     assert "频谱" not in captured, "译文绝不能进落盘键"
 

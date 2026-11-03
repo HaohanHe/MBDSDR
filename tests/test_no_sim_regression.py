@@ -63,7 +63,7 @@ FORBIDDEN_FLOAT_COORDS = (
 )
 # 禁止在运行时数据生成里使用 np.random 的面板
 RANDOM_FORBIDDEN_PANELS = (
-    "spectrum_widget.py", "doppler_panel.py", "weather_panel.py",
+    "spectrum_widget.py", "weather_panel.py",
 )
 
 
@@ -326,10 +326,9 @@ def test_offscreen_no_hardware_zero_fake(qapp, monkeypatch, tmp_path):
     # 3.6 工具栏不存在"模拟模式"按钮
     assert not hasattr(w, "sim_btn"), "不应存在 sim_btn 模拟模式按钮"
 
-    # 3.7 多普勒面板：未连接 / 无观测数据
-    dtxt = w.doppler_panel.status_label.text()
-    assert ("未连接" in dtxt) or ("无观测" in dtxt), \
-        f"多普勒面板应未连接，实际: {dtxt!r}"
+    # 3.7 定轨去功能化铁律（2026-11-03）：UI 上不存在任何定轨面板/入口，
+    # 定轨唯一入口是用户与模型对话（mbdsdr_ai 原子工具）。
+    assert not hasattr(w, "doppler_panel"), "定轨不得作为 UI 功能存在"
 
     # 3.8 气象面板：未连接 / 无数据
     wtxt = w.weather_panel.image_label.text()

@@ -305,7 +305,7 @@ class TestE3RangeMatchesCapability:
         from sat_track_panel import SatTrackPanel
         p = SatTrackPanel()
         assert p.freq_spin.minimum() <= 2271.0 <= p.freq_spin.maximum(), \
-            "LRO 2271 MHz（doppler_panel 默认目标）必须可输"
+            "LRO 2271 MHz（仓库真实目标）必须可输"
         assert p.freq_spin.maximum() >= 2401.0, "AO-40 S 波段 2401 MHz 必须可输"
         assert "设备" in p.freq_spin.toolTip(), \
             "tooltip 必须声明实际可调范围以设备为准"
