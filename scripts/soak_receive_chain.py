@@ -241,23 +241,33 @@ def main() -> int:
 
     # ---- 判定 ----
     rss = [s["rss"] for s in samples if s["rss"] > 0]
-    # 线程/句柄稳定性按 t≥60s 稳态段判定：Qt 启动期的临时线程
-    # （QThreadPool 按需线程，空闲超时回收）会在前几十秒一次性回落，
-    # 属正常热身而非泄漏；泄漏定义是持续增长。
+    # 线程/句柄稳定性按 t≥60s 稳态段判定：Qt 启动期临时线程
+    # （QThreadPool 按需线程，空闲超时回收）在前几十秒一次性回落，
+    # 且运行期按需线程池有 ±3 正常波动——泄漏定义是「单调增长趋势」，
+    # 不是「max-min 不波动」。判法：末 60s 均值相对首 60s 均值的趋势
+    # 哨戒（≤+2），外加全局防爆检查（max-min ≤4）。
     steady = [s for s in samples if s["t"] >= 60.0]
-    threads = [s["threads"] for s in steady if s["threads"] > 0]
-    handles = [s["handles"] for s in steady if s["handles"] > 0]
+    if len(steady) < 2:
+        steady = list(samples)        # 短跑降级：用全部样本同口径判定
+    t_ser = [s["threads"] for s in steady if s["threads"] > 0]
+    h_ser = [s["handles"] for s in steady if s["handles"] > 0]
     head = rss[:6] if len(rss) >= 6 else rss[:1]
     tail = rss[-6:] if len(rss) >= 6 else rss[-1:]
     rss_growth = (sum(tail) / len(tail) - sum(head) / len(head)) if head and tail else 0
+    t_head = t_ser[:6] if len(t_ser) >= 6 else t_ser[:1]
+    t_tail = t_ser[-6:] if len(t_ser) >= 6 else t_ser[-1:]
+    threads_trend = (sum(t_tail) / len(t_tail)
+                     - sum(t_head) / len(t_head)) if t_head and t_tail else 0
+    threads_span = (max(t_ser) - min(t_ser)) if t_ser else 0
     # 落盘期望带（实时限速源）：时长(秒) × 采样率 × 8B/样本，±25%
     expect_bytes = int(args.minutes * 60.0 * args.sr * 8)
     got_bytes = recorder.bytes
     verdicts = {
         "rss_growth_mb_lt_32": (rss_growth / 1e6) < 32.0 if len(rss) >= 2 else None,
-        "threads_stable": (max(threads) - min(threads) <= 2) if threads else None,
-        "handle_growth_lt_64": ((handles[-1] - handles[0]) < 64)
-        if len(handles) >= 2 else None,
+        "threads_no_growth_trend": threads_trend <= 2 if t_ser else None,
+        "threads_span_le_4": threads_span <= 4 if t_ser else None,
+        "handle_growth_lt_64": ((h_ser[-1] - h_ser[0]) < 64)
+        if len(h_ser) >= 2 else None,
         "record_bytes_in_band": abs(got_bytes - expect_bytes) <= 0.25 * expect_bytes,
         "no_data_hole_lt_5s": max_gap < 5.0,
         "no_lingering_threads": not lingering,
@@ -267,10 +277,11 @@ def main() -> int:
         "event": "verdict", "ok": ok, "verdicts": verdicts,
         "duration_s": round(time.monotonic() - t0, 1),
         "rss_growth_mb": round(rss_growth / 1e6, 2),
-        "threads_range": [min(threads) if threads else -1,
-                          max(threads) if threads else -1],
-        "handles_range": [handles[0] if handles else -1,
-                          handles[-1] if handles else -1],
+        "threads_range": [min(t_ser) if t_ser else -1,
+                          max(t_ser) if t_ser else -1],
+        "threads_trend": round(threads_trend, 2),
+        "handles_range": [h_ser[0] if h_ser else -1,
+                          h_ser[-1] if h_ser else -1],
         "record_bytes": got_bytes,
         "record_expect_bytes": expect_bytes,
         "audio_blocks": player.blocks,
