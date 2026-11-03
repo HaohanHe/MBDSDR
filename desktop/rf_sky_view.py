@@ -160,6 +160,32 @@ def _traj_alpha(i: int, n: int, base: int = 110,
     return int(base * min(1.0, ramp / float(fade)))
 
 
+def selection_crosshair_geometry(t: float, base_radius: float = 14.0,
+                                 amp: float = 1.6, period: float = 2.0,
+                                 dash_sweep: float = 30.0
+                                 ) -> Dict[str, object]:
+    """选中十字标记的纯几何：4 段 90° 等分圆弧 + 2s 呼吸半径（SWE 同形）。
+
+    时间 t（秒）由调用方注入，不读墙钟——断言可复现（见
+    tests/test_selection_crosshair.py）。角度用 Qt drawArc 约定：0°=3 点钟、
+    逆时针为正，4 段中心落在 0/90/180/270。返回
+    {"radius": 呼吸后半径, "period": 周期, "dashes": [(起始角°, 跨度°)]}。
+    """
+    r = float(base_radius) + float(amp) * math.sin(
+        2.0 * math.pi * float(t) / float(period))
+    half = float(dash_sweep) / 2.0
+    dashes = [(c - half, float(dash_sweep)) for c in (0.0, 90.0, 180.0, 270.0)]
+    return {"radius": r, "period": float(period), "dashes": dashes}
+
+
+def breathing_ring_radius(t: float, base_radius: float = 16.0,
+                          amp: float = 1.6, period: float = 2.0) -> float:
+    """月/行星选中标记的呼吸环半径（SWE 同形，2s 一吸一呼）。纯函数、
+    时间注入不读墙钟，便于确定性断言。"""
+    return float(base_radius) + float(amp) * math.sin(
+        2.0 * math.pi * float(t) / float(period))
+
+
 # ============================================================================
 # 数据类型
 # ============================================================================
@@ -833,6 +859,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._goto_anim = None
         self._goto_start_ms = 0.0
         self._goto_clock = lambda: time.monotonic() * 1000.0
+        # 选中标记呼吸时钟（monotonic 秒）；_refresh_timer 30fps 重绘驱动
+        # 呼吸动画。留成缝以便测试注入固定时间（不绑墙钟）。
+        self._breath_clock = lambda: time.monotonic()
 
     def _on_refresh_tick(self):
         """33ms 节拍：步进 goto 动画 + 摄像机锁定跟随，再触发重绘。"""
@@ -2273,6 +2302,26 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawText(QPointF(pos.x() + 10, pos.y() - 6), "月亮")
         painter.restore()
 
+    def _draw_selection_crosshair(self, painter: QPainter, pos: QPointF,
+                                  base_radius: float, color: QColor) -> None:
+        """选中标记：4 段圆弧十字 + 2s 呼吸（SWE 选中标记同形）。
+
+        时间取自 self._breath_clock()（monotonic 秒），_refresh_timer 30fps
+        重绘驱动呼吸；纯几何走 selection_crosshair_geometry 以便确定性测试。
+        圆头粗线（.figma 设计语言）。"""
+        geo = selection_crosshair_geometry(self._breath_clock(), base_radius)
+        r = max(1.0, float(geo["radius"]))
+        rect = QRectF(pos.x() - r, pos.y() - r, 2.0 * r, 2.0 * r)
+        pen = QPen(color, 2)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.save()
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for start_deg, sweep_deg in geo["dashes"]:
+            painter.drawArc(rect, int(round(float(start_deg) * 16)),
+                            int(round(float(sweep_deg) * 16)))
+        painter.restore()
+
     def _draw_objects(self, painter: QPainter):
         """绘制天空对象（卫星/信号源/干扰源）。"""
         painter.save()
@@ -2344,16 +2393,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.setFont(self._font)
                 painter.drawText(QPointF(pos.x() + 10, pos.y() + 4), obj.name)
 
-        # 选中对象：橙色圆环高亮
+        # 选中对象：4 段圆弧十字 + 2s 呼吸（SWE 选中标记同形）
         if self._hovered_object is not None and self._hovered_object.visible \
                 and self._hovered_object.is_above_horizon():
             hp = self._sky_to_screen(self._hovered_object.azimuth_deg,
                                      self._hovered_object.elevation_deg)
-            ring_pen = QPen(self._colors["accent"], 2)
-            painter.setPen(ring_pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(hp, 12, 12)
-            painter.drawEllipse(hp, 16, 16)
+            self._draw_selection_crosshair(
+                painter, hp, 14.0, self._colors["accent"])
         painter.restore()
 
     def _draw_picked_info(self, painter: QPainter):
@@ -2365,13 +2411,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
 
-        # 选中标记环
-        painter.save()
-        painter.setPen(QPen(self._colors["accent"], 2))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(pos, 12, 12)
-        painter.drawEllipse(pos, 16, 16)
-        painter.restore()
+        # 选中标记（4 段圆弧十字 + 2s 呼吸）由 _draw_objects 统一绘制，
+        # 此处不再重复画环，避免双标记。
 
         info = self._selected_info or {}
         _t = tokens()
@@ -2785,11 +2826,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                    gs, self._current_jd())
                 az, alt = azalt_from_vec(v)
                 pos = self._sky_to_screen(az, max(alt, -2.0))
+                # 选中呼吸环（SWE 月/行星标记同形：2s 一吸一呼的虚线环）；
+                # 卫星用 4 段十字（_draw_selection_crosshair），天体用呼吸环区分。
+                rr = max(1.0, breathing_ring_radius(self._breath_clock(), 16.0))
+                pen = QPen(self._colors["accent"], 2, Qt.DashLine)
+                pen.setCapStyle(Qt.RoundCap)
                 painter.save()
-                painter.setPen(QPen(self._colors["accent"], 2))
+                painter.setPen(pen)
                 painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(pos, 12, 12)
-                painter.drawEllipse(pos, 16, 16)
+                painter.drawEllipse(pos, rr, rr)
                 painter.restore()
             except Exception:
                 pass
