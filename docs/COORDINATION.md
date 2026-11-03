@@ -34,36 +34,38 @@
 
 ---
 
-## 二、当前在途（2026-11-03 00:20 更新）
+## 二、当前在途（2026-11-03 10:30 更新）
 
 ### 我这边
-- （空）——FT8/ADS-B 真值对拍、CI 全绿（run 41466118148 八 job）、
-  DLL 布防三棵树均已收口推送
+- （空）——DVB-S2 LDPC 金样入库 + 仓库外金样收集期炸裂根治（49dc00d）
+  已推，等 CI 裁决
 
 ### TRAE 那边（观察到的在途，未打扰）
-- `cpp/CMakeLists.txt`（M）+ `cpp/cmake/deploy_runtime.cmake`（??）
-  —— CMake 布防块模块化拆分进行中
+- `scripts/smoke_exe_no_popup.ps1`（??）——弹窗冒烟脚本在途
+- CMake 布防模块化（deploy_runtime.cmake）已落（1b675e7）
 - 便携包线待收（windeployqt / package_windows.ps1）
 
 ### 悬账备忘（不属于任何人，认领者标注）
 - dump1090 全量解码清单对拍、覆盖率统计（capability-map not_verified）
 - 本机自采 OTA 解码记录仍为零（负证据不撤销，对外表述按 capability-map 口径）
 - 便携包需验证「真 USB 直连构建」打出的包（非 stub）
+- bch 独立 KAT（dvbs2_bch_vectors.json）仍 workspace-only，CI 上 21 模式
+  golden 诚实跳过——是否同款入库留给 DVB-S2 线定（ldpc 的先例在
+  tests/golden/dvbs2_ldpc_vectors.json）
 
 ---
 
 ## 三、接下来要办啥（队列）
 
-1. **[TRAE]** 完成 `deploy_runtime.cmake` 拆分并提交（语义须与
-   `deploy_win_runtime` 现行为一致：Qt6 全套 + MinGW 三件套 + platforms
-   插件，随构建自愈）
+1. **[TRAE]** `scripts/smoke_exe_no_popup.ps1` 收口提交
 2. **[TRAE]** 便携包线收口：package_windows.ps1 验真机构建打包，旧 stub zip
    问题闭环
 3. **[我]** dump1090 全量解码清单对拍（外部真值线续，参照 FT8/ADS-B golden
    姿势：SHA 钉真值、按需下载、离线诚实 skip）
-4. **[认领]** CI 观察项：d1efe19 那把 run 的 mbdsdr_ai 红（其余 job 绿，
-   b9a78b5 进行中 run 待裁决）——出结论后拉日志按测试名归因，钉点分类处置
-   （quirk 钉点随真值迁 / 接缝钉点跟真实接缝 / 旧语义钉点换新契约）
+4. ~~CI 观察项：d1efe19 mbdsdr_ai 红~~ **已销（49dc00d）**：红因是
+   test_dvbs2_ldpc 收集期硬读仓库外金样（FileNotFoundError → 整包
+   mbdsdr_ai 中断）。金样 105 条已入库 tests/golden/，ft4 同款雷一并拆。
+   观察 49dc00d 的 run：mbdsdr_ai 应转绿。
 5. **[两边]** 共有文件再冲突时按 hunk 拆分提交（脚本先例：
    extract_hunk 姿势，见 2026-11-02 会话记录）
 
@@ -78,6 +80,8 @@
    只把属于自己的 hunk `git apply --cached` 进暂存区。
 4. **代码与金样必须同一提交走**：改编解码语义时 fixture 重生成物（JSON/LLR/
    IQ raw/期望向量）随代码一起交，否则 CI 拿旧金样打新代码必红（一天 5 起）。
+   测试引用的金样**要么入库（tests/golden/），要么缺席必须诚实 skip**——
+   收集期硬读仓库外路径是 CI 整包团灭的固定姿势（2026-11-03 又中一回）。
 5. **push 会取消在跑的 CI run**：需要裁决就等结论再推；连续推会让裁决永远出不来。
 6. **HELLO 脏提交**（另一会话周期性 `git add -A; git commit -m HELLO`）：
    动手前后核对 HEAD 与作者；未推送的 HELLO 按先例弃置重提。
@@ -92,3 +96,5 @@
 
 - 2026-11-03 00:20 初建（WorkBuddy）。背景：FT8/ADS-B 真值对拍 + CI 全绿 +
   DLL 布防收口后，用户要求多会话并行工作模式下立协调台账。
+- 2026-11-03 10:30（WorkBuddy）：销 mbdsdr_ai 红（49dc00d，DVB-S2 LDPC
+  金样入库 + 仓库外金样收集期炸裂根治）；队列/TRAE 在途刷新。
