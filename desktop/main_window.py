@@ -1438,13 +1438,12 @@ class MainWindow(QMainWindow):
             self._sync_sky_track_btn(active)
             if not active:
                 self.statusBar().showMessage(
-                    "AI 判断本轮未进入跟踪（硬件现实或目标条件不足，详见对话）",
-                    6000)
+                    "AI 本轮尚未执行跟踪（可能在确认硬件，详见对话）", 6000)
         elif action == "gimbal_follow":
             self._sync_sky_gimbal_btn(self._gimbal_follow)
             if not self._gimbal_follow:
                 self.statusBar().showMessage(
-                    "AI 判断本轮未启动云台跟随（缺云台或未在跟踪，详见对话）",
+                    "AI 本轮尚未启动云台跟随（可能在确认硬件，详见对话）",
                     6000)
 
     # ------------------------------------------------------------------
@@ -5413,7 +5412,8 @@ class MainWindow(QMainWindow):
                 # 启动被拒（无观测站/选星失败/缺依赖）：复位开关
                 self._sync_sky_track_btn(False)
             elif not before:
-                pass  # 正常启动，按钮保持 checked
+                # 模型协商后真正启动：把按钮勾选与真实跟踪状态对齐
+                self._sync_sky_track_btn(True)
         else:
             self._stop_satellite_tracking()
 
@@ -5508,6 +5508,7 @@ class MainWindow(QMainWindow):
         limiter = getattr(self, "_gimbal_limiter", None)
         if limiter is not None:
             limiter.reset()  # 新会话首拍给完整指向，不做插值
+        self._sync_sky_gimbal_btn(True)
         self.statusBar().showMessage(
             f"云台跟随已开启（{gc.status.backend_info}）", 4000)
 
