@@ -45,6 +45,27 @@
 - CMake 布防模块化（deploy_runtime.cmake）已落（1b675e7）
 - 便携包线待收（windeployqt / package_windows.ps1）
 
+### 星象仪/彩带会话（本窗口，2026-11-03 登记）
+- **在途**：SDR++ 频段彩带补强批——`desktop/bandplan.json` 扩可选字段
+  （desc/modulation/priority/color）+ 边界按 ITU Region 3/中国口径对拍修正、
+  `desktop/spectrum_widget.py` 悬停/点击反馈 + 标签重要性分级、
+  `tests/test_spectrum_bandplan.py` 扩测 + 三档缩放无头截图验收
+- **所有物**：上述三个文件 + `desktop/rf_sky_view.py`（天空线，本批不动）
+- **禁区（对方在途，绝不碰）**：`cpp/CMakeLists.txt`、`scripts/package_windows.ps1`、
+  `cpp/cmake/*`、`scripts/smoke_exe_no_popup.ps1`、`docs/WINDOWS_POPUP_PLAYBOOK.md`、
+  `.github/workflows/ci_windows.yml.disabled`、各 build 树、批量 exe 冒烟；
+  不起全量回归（只跑定向子集），不跑有声/弹窗的东西
+- **观察到的 CI 红（65eea2d，均非本会话引入）**：
+  1. ~~cpp/ctest `engine_integration`（slow）~~ **已销账（fbbe5c8）**——
+     本地单跑 3 次全过、全量 ctest 162/162 绿，判定 CI runner 环境特有
+     flaky，非代码真错；
+  2. ~~tests/(B) `test_identity_redline` 误伤~~ **已修（fe43c74，WorkBuddy）**——
+     49dc00d 入库的金样 `tests/golden/dvbs2_ldpc_vectors.json` 里 SHA-256
+     摘要十六进制串内嵌 11 位号码形态（摘要巧合，非 PII）；扫描器学会忽略
+     长 hex/base64 token 内的数字巧合（散文里的真号照咬，双向钉扎）
+- **收工状态**：全量 pytest 六面全绿（数字见提交说明）；彩带 v2 补强
+  待推送（本文件提交后随第二提交 fast-forward）；真机肉眼验收未做
+
 ### 悬账备忘（不属于任何人，认领者标注）
 - dump1090 全量解码清单对拍、覆盖率统计（capability-map not_verified）
 - 本机自采 OTA 解码记录仍为零（负证据不撤销，对外表述按 capability-map 口径）
