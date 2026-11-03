@@ -15,7 +15,7 @@ import math
 from PySide6.QtCore import Qt, Signal, Slot, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QGroupBox, QGridLayout, QSizePolicy, QProgressBar
+    QGroupBox, QGridLayout, QSizePolicy, QProgressBar, QTextEdit
 )
 from PySide6.QtGui import QFont
 
@@ -103,12 +103,124 @@ def _dbfs_to_smeter(dbfs):
     return f"S{int(round(s))}"
 
 
+# ===========================================================================
+# 解码结果可视（P5.3）
+#
+# 解码输出（文本 / 报文 / 帧）原来只落在日志与工具返回值里，界面上看不见；
+# 这里把 MCP Worker 已经送到本面板的 tool_result 接住：解码类工具的结果在
+# 「解码结果」卡片里落地显示摘要 + 详情 + 诚实错误态，不新增页签、不改布局。
+#
+# 红线：只显示解码器真实给的东西。0 条就显示 0 条并给出原因码，绝不用
+# 占位内容或「看起来成功」的状态伪装一次空解码。
+# ===========================================================================
+DECODE_TOOL_PREFIXES = ("sdr_decode_", "decode_")
+
+# 错误码 → 人话（与 mbdsdr_ai.decode_router 的错误码一一对应）
+DECODE_ERROR_LABELS = {
+    "": "完成",
+    "unknown_mode": "未知模式（能力表未登记）",
+    "missing_dependency": "缺依赖（内置实现模块不可导入）",
+    "missing_sample": "缺样本（输入捕获不存在）",
+    "unsupported_format": "格式不支持",
+    "decode_error": "解码失败",
+    "not_implemented": "未接线（能力存在，通用入口未接）",
+}
+
+# 证据等级 → 人话（与 P2 真样本盘点口径一致）
+DECODE_EVIDENCE_LABELS = {
+    "real": "真实（真录/真值对拍）",
+    "partial": "部分（合成链自洽，无 OTA 实绩）",
+    "no_sample": "缺样本（无真录，仅协议性质钉扎）",
+}
+
+
+def is_decode_tool(tool_name: str) -> bool:
+    """工具名是否属于解码类（sdr_decode_xxx / decode_xxx）。"""
+    name = str(tool_name or "").lower()
+    return any(name.startswith(p) for p in DECODE_TOOL_PREFIXES)
+
+
+def _mode_from_tool(tool_name: str) -> str:
+    name = str(tool_name or "").lower()
+    for p in DECODE_TOOL_PREFIXES:
+        if name.startswith(p):
+            return name[len(p):].replace("_", " ")
+    return name
+
+
+def _render_message(m) -> str:
+    """把一条解码报文压成一行（只取标量字段，不碰原始比特/内部键）。"""
+    if isinstance(m, str):
+        return m
+    if not isinstance(m, dict):
+        return str(m)
+    parts = []
+    for k, v in m.items():
+        if str(k).startswith("_") or k in ("raw", "raw_bytes"):
+            continue
+        if isinstance(v, bool):
+            parts.append(f"{k}={v}")
+        elif isinstance(v, (int, float, str)) and str(v):
+            parts.append(f"{k}={v}")
+    return ", ".join(parts) if parts else "(空报文)"
+
+
+def format_decode_result(tool_name: str, result) -> dict:
+    """纯函数：解码结果 dict → 面板可显示的 (摘要, 详情)。
+
+    返回 {"mode","ok","error_code","summary","detail"}；不依赖 Qt，
+    便于离线单测（不启动界面也能验证诚实错误态与报文落地）。
+    """
+    res = dict(result or {})
+    mode = str(res.get("mode") or _mode_from_tool(tool_name))
+    code = str(res.get("error_code") or "")
+    ok = bool(res.get("ok", not code and "error" not in res))
+    label = DECODE_ERROR_LABELS.get(code, code or "完成")
+
+    summary = f"{mode} · {label}"
+    ev = res.get("evidence_level")
+    if ev:
+        summary += f" · 真实度: {DECODE_EVIDENCE_LABELS.get(ev, ev)}"
+
+    msgs = res.get("messages")
+    n = res.get("num_messages")
+    if not isinstance(n, int):
+        n = len(msgs) if isinstance(msgs, list) else 0
+    kind = res.get("output_kind")
+    if ok:
+        unit = {"messages": "条报文", "frames": "帧", "image": "幅图像",
+                "text": "段文本", "note": "条说明"}.get(kind, "条输出")
+        summary += f" · {n} {unit}" if kind in ("messages", "frames") else ""
+
+    lines = []
+    if code and res.get("error"):
+        lines.append(f"错误码 {code}: {res['error']}")
+    elif res.get("error"):
+        lines.append(f"错误: {res['error']}")
+    if isinstance(msgs, list):
+        lines.extend(_render_message(m) for m in msgs[:50])
+        if len(msgs) > 50:
+            lines.append(f"…… 其余 {len(msgs) - 50} 条略")
+    if res.get("icao_hex") or res.get("callsign"):
+        lines.append(
+            f"ICAO {res.get('icao_hex') or '--'} / 呼号 {res.get('callsign') or '--'}")
+    if res.get("found") is False and not lines:
+        lines.append("本段未检出可解帧")
+    if res.get("note"):
+        lines.append(f"说明: {res['note']}")
+    if not lines:
+        lines.append("本次解码无输出")
+    return {"mode": mode, "ok": ok, "error_code": code,
+            "summary": summary, "detail": "\n".join(lines)}
+
+
 class StatusPanel(QWidget):
     """设备状态面板。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._sdr_connected = False
+        self.decode_last = None          # 最近一次解码结果的显示快照（测试可查）
         self._build_ui()
         self._start_utc_clock()
         # 初始即未连接：SDR 相关卡片整组置灰，绝不错误呈现"有数据"
@@ -415,6 +527,22 @@ class StatusPanel(QWidget):
         info_layout.addWidget(self.uptime, 5, 3)
 
         layout.addWidget(self.info_group)
+
+        # ---- 解码结果（P5.3：文本/报文/错误态在既有面板内落地，不新增页签）----
+        self.decode_group = QGroupBox("解码结果")
+        dec_layout = QVBoxLayout(self.decode_group)
+        dec_layout.setSpacing(4)
+        self.decode_summary = QLabel("尚无解码结果（解码类工具调用后在此显示）")
+        self.decode_summary.setObjectName("statusValue")
+        self.decode_summary.setWordWrap(True)
+        dec_layout.addWidget(self.decode_summary)
+        self.decode_detail = QTextEdit()
+        self.decode_detail.setReadOnly(True)
+        self.decode_detail.setPlaceholderText("解码输出的文本/报文会显示在这里…")
+        self.decode_detail.setMaximumHeight(140)
+        self.decode_detail.setVisible(False)
+        dec_layout.addWidget(self.decode_detail)
+        layout.addWidget(self.decode_group)
 
         layout.addStretch()
 
@@ -945,8 +1073,23 @@ class StatusPanel(QWidget):
 
     @Slot(str, dict)
     def on_tool_result(self, tool_name: str, result: dict):
-        """工具调用结果（用于更新设备信息等）。"""
+        """工具调用结果（设备信息 + 解码输出落地）。"""
+        if is_decode_tool(tool_name):
+            self.render_decode_result(tool_name, result)
         if tool_name == "get_version":
             self.fw_version.setText(result.get("firmware", "--"))
             self.sdr_chip.setText(result.get("sdr", "--"))
             self.mcu_chip.setText(result.get("mcu", "--"))
+
+    def render_decode_result(self, tool_name: str, result: dict) -> None:
+        """解码类工具结果 → 「解码结果」卡片（摘要 + 详情 + 诚实错误态）。
+
+        只搬运解码器真实返回的内容：0 条报文就写 0 条并给出原因码，
+        不补占位报文，也不把 error 结果显示成“成功”。
+        """
+        view = format_decode_result(tool_name, result)
+        self.decode_last = view
+        self.decode_summary.setText(view["summary"])
+        self.decode_detail.setPlainText(view["detail"])
+        self.decode_detail.setVisible(True)
+
