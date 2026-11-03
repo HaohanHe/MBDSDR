@@ -1872,11 +1872,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             ctx["pass_set_utc"] = set_
         if info.get("tle_epoch"):
             ctx["tle_epoch"] = str(info["tle_epoch"])
-        if self._observer:
-            ctx["observer"] = (f"{self._observer.get('lat'):.4f},"
-                               f"{self._observer.get('lon'):.4f}"
-                               if self._observer.get("lat") is not None
-                               and self._observer.get("lon") is not None else "")
+        obs = self._observer or {}
+        try:
+            if obs.get("lat") is not None and obs.get("lon") is not None:
+                ctx["observer"] = (f"{float(obs['lat']):.4f},"
+                                   f"{float(obs['lon']):.4f}")
+        except (TypeError, ValueError):
+            pass
         return ctx
 
     def _position_tune_overlay(self):
