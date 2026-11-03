@@ -92,7 +92,12 @@ class FreqDisplay(QWidget):
 
     # ------------------------------------------------------------ 命中/布局
     def _cells(self) -> List[Tuple[str, QRectF, bool, int]]:
-        """字符格布局：[(字符, rect, 是否数字, 数字位号)]。"""
+        """字符格布局：[(字符, rect, 是否数字, 数字位号)]。
+
+        整体缩放适配（窄栏不修边距糊）：title_lg 基准字号放不下整行时
+        逐级缩字号（下限 8px），极端窄再按比例压格宽——整行永远完整、
+        居中、单排，绝不溢出裁切、绝不按字符换行（1 5 6 - 5 2 裁尾事故）。
+        """
         _t = tokens()
         text = (digits_of(self._hz) if self._hz is not None
                 else "-" * self.DIGIT_COUNT)
@@ -102,13 +107,24 @@ class FreqDisplay(QWidget):
             if i in (2, 5):
                 grouped.append(".")
         font = QFont("JetBrains Mono, Fira Code, Consolas, monospace")
-        font.setPixelSize(int(_t.FONT["title_lg"].removesuffix("px")))
         font.setWeight(QFont.Weight(max(1, min(99, round(
             _t.FONT_WEIGHT["title_lg"] / 10)))))
-        fm = QFontMetricsF(font)
-        cell_w = fm.horizontalAdvance("0") * 1.18
-        dot_w = cell_w * 0.5
-        total = cell_w * self.DIGIT_COUNT + dot_w * 2
+        base_pt = int(_t.FONT["title_lg"].removesuffix("px"))
+        avail = max(1.0, float(self.width()) - 4.0)
+        fm = cell_w = dot_w = total = None
+        for pt in range(base_pt, 7, -1):
+            font.setPixelSize(pt)
+            fm = QFontMetricsF(font)
+            cell_w = fm.horizontalAdvance("0") * 1.18
+            dot_w = cell_w * 0.5
+            total = cell_w * self.DIGIT_COUNT + dot_w * 2
+            if total <= avail:
+                break
+        if total > avail:
+            scale = avail / total
+            cell_w *= scale
+            dot_w *= scale
+            total = avail
         x = (self.width() - total) / 2.0
         y = (self.height() - fm.height()) / 2.0
         cells: List[Tuple[str, QRectF, bool, int]] = []

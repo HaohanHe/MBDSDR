@@ -1095,6 +1095,39 @@ def _draw_center_cursor(painter, rect, color):
     ]))
 
 
+def _peak_label_placements(peaks_xy, measure, x_min: float, x_max: float,
+                           row_h: float, max_rows: int = 4, gap: float = 4.0):
+    """峰值标注碰撞剔除（与频段彩带 placement 同款贪心，纯函数可测）。
+
+    peaks_xy: [(x, y, label)] 按 x 升序；measure(label) -> 文本宽。
+    返回 [(x, y, label, row)]：row 0 = 点上方最近行。
+
+    标注锚定自己的峰（tx = x + 6），绝不水平漂移——漂移超过峰距就会把
+    标签挂到相邻峰上（误归属）。与本行已占区间冲突时沿纵向往下一行错开
+    （最多 max_rows 行），全部放不下或锚点出界则诚实丢弃：不互相压字、
+    不越界、不漂走。
+    """
+    placed_rows: list = []           # row -> 已占右缘 x
+    out = []
+    for x, y, label in peaks_xy:
+        w = float(measure(label))
+        tx = x + 6.0
+        if tx < x_min or tx + w > x_max:
+            continue                  # 锚点出界：每行位置相同，诚实丢弃
+        done = False
+        for row in range(max_rows):
+            while len(placed_rows) <= row:
+                placed_rows.append(x_min - 1.0)
+            if tx >= placed_rows[row] + gap:
+                placed_rows[row] = tx + w
+                out.append((tx, y - 6.0 - row * row_h, label, row))
+                done = True
+                break
+        if not done:
+            continue                  # 行满：丢弃，不叠字
+    return out
+
+
 def _draw_peaks(painter, state, rect, color):
     gen = state.panel.generator
     peaks = gen.find_peaks(state.peak_rel_db) if state.show_peaks else []
@@ -1105,14 +1138,22 @@ def _draw_peaks(painter, state, rect, color):
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
+    fm = painter.fontMetrics()
     view_center = _view_center_hz(state)
     span = gen.sample_rate_hz
+    pts = []
     for freq_hz, db in peaks:
         x = _freq_to_x(rect, view_center, span, freq_hz)
         y = _db_to_y(rect, db, state.db_min, state.db_max)
         painter.drawEllipse(QPointF(x, y), 3, 3)
-        label = f"{freq_hz/1e6:.3f}MHz {db:.1f}dB"
-        painter.drawText(QPointF(x + 6, y - 6), label)
+        pts.append((x, y, f"{freq_hz/1e6:.3f}MHz {db:.1f}dB"))
+    # 碰撞剔除（截图叠字事故）：邻近峰标签分行错开，放不下诚实丢弃
+    pts.sort(key=lambda p: p[0])
+    row_h = fm.height() + 2.0
+    for tx, ty, label, _row in _peak_label_placements(
+            pts, fm.horizontalAdvance, rect.x() + 2.0,
+            rect.x() + rect.width() - 2.0, row_h):
+        painter.drawText(QPointF(tx, ty), label)
 
 
 def _draw_hover_readout(painter, state, rect, text_color, line_color):
@@ -1518,17 +1559,26 @@ class SpectrumPanel(QWidget):
         self._db_max_slider = QSlider(Qt.Vertical)
         # Qt 垂直滑杆：minimum 在底部、maximum 在顶部。
         # 我们用 dB 整数值：-160（底）.. 0（顶）。
+        # 方向（用户裁决）：向上推 = 显示增益增大（图形上移）——
+        # invertedAppearance 让滑块顶=最小值、底=最大值，
+        # Max 上推 → db_max 减小 → 信号在纵轴被放大靠上。
+        self._db_max_slider.setInvertedAppearance(True)
         self._db_max_slider.setRange(-160, 0)
         self._db_max_slider.setValue(int(self._state.db_max))
         self._db_max_slider.setMinimumHeight(150)
+        self._db_max_slider.setToolTip(
+            "Max：上推=图形上移（显示增益增大），下拉=压缩量程")
         self._db_max_slider.valueChanged.connect(self._on_db_max_changed)
         col.addWidget(self._db_max_slider, stretch=1)
 
         col.addWidget(QLabel("Min", alignment=Qt.AlignHCenter))
         self._db_min_slider = QSlider(Qt.Vertical)
+        self._db_min_slider.setInvertedAppearance(True)
         self._db_min_slider.setRange(-160, 0)
         self._db_min_slider.setValue(int(self._state.db_min))
         self._db_min_slider.setMinimumHeight(150)
+        self._db_min_slider.setToolTip(
+            "Min：上推=弱信号也被放大（底噪抬高），下拉=隐藏弱信号")
         self._db_min_slider.valueChanged.connect(self._on_db_min_changed)
         col.addWidget(self._db_min_slider, stretch=1)
 

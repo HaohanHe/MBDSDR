@@ -286,7 +286,9 @@ class MainWindow(QMainWindow):
         if os.path.exists(_icon_path):
             from PySide6.QtGui import QIcon
             self.setWindowIcon(QIcon(_icon_path))
-        self.setMinimumSize(1200, 800)
+        # 最小窗口 1000×600：用户明确要求该档可用（不叠字、无死黑）；
+        # splitter minSizeHint ≈ 982 < 1000，可容纳。
+        self.setMinimumSize(1000, 600)
         self.resize(1400, 900)
 
         # 状态
@@ -1128,11 +1130,16 @@ class MainWindow(QMainWindow):
         self._main_splitter.addWidget(left_tab)
         self._main_splitter.addWidget(center_widget)
         self._main_splitter.addWidget(right_tab)
-        self._main_splitter.setStretchFactor(0, 0)
-        self._main_splitter.setStretchFactor(1, 1)
+        # 权重来源（截图三栏均分死黑事故）：弹性给左栏（天空/频谱工作面），
+        # 中栏 ADS-B 空态时不许吞主区——stretch=0 固定基线，最小宽见面板；
+        # 右栏控制台同样固定。窗口变宽时全部增量进左栏。
+        self._main_splitter.setStretchFactor(0, 1)
+        self._main_splitter.setStretchFactor(1, 0)
         self._main_splitter.setStretchFactor(2, 0)
-        # 初始比例：左 300 / 中 flex / 右 360（可拖，用户拖动后持久化）
-        self._main_splitter.setSizes([300, 540, 360])
+        # 初始比例：左 392 / 中 300 / 右 300（= 最小窗口 1000 - 2×4px 手柄，
+        # 恰好放得下不触发压缩缩放；窗口更宽时全部增量由 stretch 进左栏，
+        # 用户拖动后持久化）
+        self._main_splitter.setSizes([392, 300, 300])
 
         # ------------------------------------------------------------------
         # root：顶栏 + 三栏 + 底坞
@@ -5350,12 +5357,22 @@ class MainWindow(QMainWindow):
         # 不再 restoreState / apply_preset（否则旧 preset 会把天空页签搬进已
         # 弃用的浮窗 dock）。仅恢复窗口几何。
         # splitter 比例也持久化一份（供下次启动复位初始比例）。
+        # 版本门（均分死黑事故）：旧权重时代（stretch 0/1/0，中栏吃弹性）
+        # 持久化的比例会把新默认盖回去——非当前版本标记的存量一律弃用，
+        # 回退到新权重默认 [392,300,300]；用户在本版本下拖动后才再持久化。
         sizes = s.value("three_column_sizes")
-        if sizes is not None and getattr(self, "_main_splitter", None) is not None:
+        try:
+            ver = int(s.value("three_column_layout_version", 0) or 0)
+        except (TypeError, ValueError):
+            ver = 0
+        if sizes is not None and ver >= self._THREE_COLUMN_LAYOUT_VERSION \
+                and getattr(self, "_main_splitter", None) is not None:
             try:
                 self._main_splitter.restoreState(sizes)
             except Exception:
                 pass
+
+    _THREE_COLUMN_LAYOUT_VERSION = 3
 
     def _save_window_state(self):
         s = QSettings("MBDSDR", "Desktop")
@@ -5365,6 +5382,8 @@ class MainWindow(QMainWindow):
             try:
                 s.setValue("three_column_sizes",
                            self._main_splitter.saveState())
+                s.setValue("three_column_layout_version",
+                           self._THREE_COLUMN_LAYOUT_VERSION)
             except Exception:
                 pass
 

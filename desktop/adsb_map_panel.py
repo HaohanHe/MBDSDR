@@ -86,7 +86,9 @@ class _MapCanvas(PinchZoomMixin, QWidget):
     def __init__(self, tracker: AircraftTracker, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._tracker = tracker
-        self.setMinimumSize(360, 240)
+        # 空态面板不占主区（截图死黑事故）：最小宽 240 让 splitter 能把它
+        # 压下去，弹性在左栏工作面；有真实飞机数据时用户可手动拖宽。
+        self.setMinimumSize(240, 180)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # 触屏缩放/平移状态（QPainter 变换：以画布中心为锚点 scale + translate）
         self._map_zoom: float = 1.0
@@ -130,12 +132,13 @@ class _MapCanvas(PinchZoomMixin, QWidget):
 
         acs = self._displayed()
         if not acs:
-            # 空态：居中提示，不画任何假点（不施加缩放变换）。
+            # 空态：顶部居中小字提示，不画任何假点（不施加缩放变换）；
+            # 面板主体留空即可，提示不撑满画布做视觉主体。
             p.setPen(QPen(_TEXT))
             f = QFont()
-            f.setPointSize(12)
+            f.setPointSize(10)
             p.setFont(f)
-            p.drawText(QRectF(self.rect()), Qt.AlignCenter, ADSB_EMPTY_TEXT)
+            p.drawText(QRectF(0, 12, w, 28), Qt.AlignHCenter, ADSB_EMPTY_TEXT)
             p.end()
             return
 
@@ -226,6 +229,11 @@ class AdsbMapPanel(QWidget):
         hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         layout.addWidget(self.table, 0)
+
+        # 面板整体最小宽锚定画布最小宽（240）：列表在窄档可被压窄，
+        # 不让空态表格把 splitter 中栏地板撑到 414（240+160+间距，
+        # 死黑事故的另一半根源）。
+        self.setMinimumSize(240, 180)
 
     # ------------------------------------------------------------------ #
     def update_aircraft(self, frames: List[dict]) -> None:
