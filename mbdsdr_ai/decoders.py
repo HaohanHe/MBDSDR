@@ -568,7 +568,7 @@ def decode_noaa_apt(
 
 
 # ═══════════════════════════════════════════════════════
-# 4. SSTV 慢扫描电视解码（简化版）
+# 4. SSTV 慢扫描电视解码（委托 sstv_decoder 真实实现）
 # ═══════════════════════════════════════════════════════
 
 def decode_sstv(
@@ -577,15 +577,12 @@ def decode_sstv(
     mode: str = "auto",
 ) -> Dict[str, Any]:
     """
-    解码 SSTV 慢扫描电视图像（简化版）。
+    解码 SSTV 慢扫描电视图像。
 
-    支持的模式：
-    - Martin M1: 320x256, 114 秒, 1200Hz 同步, 1500Hz 黑色, 2300Hz 白色
-    - Martin M2: 320x256, 58 秒
-    - Scottie S1: 320x256, 110 秒
-    - Robot 36: 320x240, 36 秒
-
-    简化实现：检测同步脉冲，提取亮度信号，生成灰度图像。
+    委托 sstv_decoder 的真实实现（VIS 头检测 + Martin M1/Scottie S1/
+    Robot 36/72/PD 制式识别 + 逐行频率解调）。本入口保留兼容签名
+    （output_dir 落盘 PNG）；解码失败如实返回 {"error": ...}，
+    绝不生成包络示意图像（原「简化版」壳已退役）。
     """
     if not os.path.exists(input_path):
         return {"error": f"输入文件不存在: {input_path}"}
@@ -594,65 +591,14 @@ def decode_sstv(
         output_dir = os.path.expanduser("~/.mbdsdr/sstv")
     os.makedirs(output_dir, exist_ok=True)
 
-    # 读取音频
-    try:
-        import wave
-        with wave.open(input_path, 'rb') as wf:
-            n_frames = wf.getnframes()
-            raw = wf.readframes(n_frames)
-            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32767.0
-            if wf.getnchannels() == 2:
-                audio = audio[0::2]
-            sample_rate = wf.getframerate()
-    except Exception as e:
-        return {"error": f"读取文件失败: {e}"}
-
-    if len(audio) == 0:
-        return {"error": "文件中没有音频数据"}
-
-    # SSTV 参数（Martin M1 简化）
-    sync_freq = 1200  # Hz，同步脉冲
-    black_freq = 1500  # Hz，黑色
-    white_freq = 2300  # Hz，白色
-    width = 320
-    height = 256
-
-    # 简化：将音频的幅度映射为亮度（实际 SSTV 是频率调制，需要解调）
-    # 这里用简化的包络检测作为演示
-    # 实际实现需要：1. 检测 1200Hz 同步  2. 频率解调（FM）  3. 映射频率到亮度
-
-    # 简化：取音频包络，重采样到 320x256
-    envelope = np.abs(audio)
-    # 重采样到图像尺寸
-    total_pixels = width * height
-    if len(envelope) > total_pixels:
-        indices = np.linspace(0, len(envelope) - 1, total_pixels).astype(int)
-        image_data = envelope[indices].reshape(height, width)
-    else:
-        image_data = np.zeros((height, width), dtype=np.float32)
-
-    # 归一化到 0-255
-    img_min, img_max = np.min(image_data), np.max(image_data)
-    if img_max > img_min:
-        image_data = ((image_data - img_min) / (img_max - img_min) * 255).astype(np.uint8)
-    else:
-        image_data = np.zeros_like(image_data, dtype=np.uint8)
-
-    # 保存图像
-    timestamp = int(time.time())
-    result = {"mode": mode, "width": width, "height": height, "note": "简化版 SSTV 解码（包络检测），完整实现需要 FM 解调+同步检测"}
-
-    try:
-        from PIL import Image
-        im = Image.fromarray(image_data, mode='L')
-        path = os.path.join(output_dir, f"SSTV_{timestamp}.png")
-        im.save(path)
-        result["output_path"] = path
-    except ImportError:
-        np.save(os.path.join(output_dir, f"SSTV_{timestamp}.npy"), image_data)
-        result["note"] += "，PIL 不可用，保存为 npy"
-
-    return result
+    from .sstv_decoder import decode_sstv as _decode_sstv_real
+    out_path = os.path.join(output_dir, f"SSTV_{int(time.time())}.png")
+    res = _decode_sstv_real(input_path, output_path=out_path, mode=mode)
+    res.pop("image", None)
+    if not res.get("success"):
+        return {"error": res.get("error", "SSTV 解码失败"),
+                "detail": {k: v for k, v in res.items() if k != "success"}}
+    return res
 
 
 # ═══════════════════════════════════════════════════════
@@ -1190,6 +1136,10 @@ def decode_digital_mode(
           12.5kHz 走带）。.wav 直接解；.cf32 走宽带 FM 鉴频后解。
     wspr: .wav 实音频路由到仓内经典 Type 1 解码；center_frequency_hz 是标称
           四音中心，frequency_offsets_hz/time_offsets_seconds 指定候选网格。
+    ais:  .cf32/.cfile 信道化复基带路由到内置 GMSK 9600bd + HDLC + M.1371
+          报文解析（Type 1/2/3/5/18/24A），FCS 坏帧丢弃并计数。
+    navtex: .wav 音频（SSB 解调后 100bd FSK，中心 1kHz）路由到内置
+          SITOR-B/CCIR 476 恒比码 + 时间分集纠错 + ZCZC 帧解析。
     meteor: 路由到内置 meteor_sat.meteor_lrpt_demod（QPSK→DQPSK→Viterbi 骨架）。
     """
     if not os.path.exists(input_path):
@@ -1324,6 +1274,55 @@ def decode_digital_mode(
             input_path, ext, result, center_frequency_hz,
             frequency_offsets_hz, time_offsets_seconds,
         )
+    elif mode == "ais":
+        # 内置真解码：GMSK 9600bd + HDLC（NRZI/stuffing/FCS-16）+ M.1371
+        # 报文字段解析（Type 1/2/3/5/18/24A），吃 .cf32 信道化复基带
+        if ext in (".cf32", ".cfile"):
+            try:
+                raw = np.fromfile(input_path, dtype=np.float32)
+                iq = raw[0::2] + 1j * raw[1::2]
+                from .ais_decoder import ais_decode_iq
+                d = ais_decode_iq(iq, float(sample_rate))
+                result["messages"] = d["messages"]
+                result["num_messages"] = d["num_messages"]
+                result["dropped_frames"] = d["dropped_frames"]
+                result["note"] = (
+                    "内置 AIS 解码（GMSK 9600bd + HDLC + ITU-R M.1371 "
+                    "Type 1/2/3/5/18/24A 字段解析，FCS 校验失败帧丢弃并计数"
+                    f" {d['dropped_frames']}）；解出 {d['num_messages']} 条。"
+                )
+            except Exception as e:
+                result["error"] = f"AIS 解码失败: {e}"
+        else:
+            result["error"] = (
+                f"AIS 需 .cf32/.cfile 复基带（9600bd GMSK，fs 为 9600 整数倍），"
+                f"收到 {ext}")
+    elif mode == "navtex":
+        # 内置真解码：SITOR-B/CCIR 476 恒比码 + 时间分集 + ZCZC 帧解析
+        if ext == ".wav":
+            audio, a_sr, err = _read_wav_audio(input_path)
+            if err:
+                result["error"] = err
+            else:
+                try:
+                    from .navtex_decoder import navtex_decode_audio
+                    d = navtex_decode_audio(audio, a_sr)
+                    result["messages"] = d["messages"]
+                    result["num_messages"] = d["num_messages"]
+                    result["phasing_ok"] = d["phasing_ok"]
+                    result["fec_corrected"] = d["fec_corrected"]
+                    result["fec_lost"] = d["fec_lost"]
+                    result["note"] = (
+                        "内置 NAVTEX 解码（SITOR-B 100bd FSK + CCIR 476 恒比检错"
+                        f"+ 时间分集纠错 {d['fec_corrected']} 字符）；"
+                        f"解出 {d['num_messages']} 条报文。"
+                    )
+                except Exception as e:
+                    result["error"] = f"NAVTEX 解码失败: {e}"
+        else:
+            result["error"] = (
+                f"NAVTEX 需 .wav 音频（SSB 解调后 100bd FSK，中心 1kHz），"
+                f"收到 {ext}")
     elif mode == "meteor":
         # Meteor-M2 LRPT：QPSK→差分→去交织→Viterbi 骨架（.cf32 复基带）
         if ext in (".cf32", ".cfile"):

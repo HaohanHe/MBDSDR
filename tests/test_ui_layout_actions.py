@@ -92,7 +92,42 @@ def qapp():
 @pytest.fixture(scope="module")
 def mw(qapp):
     from main_window import MainWindow
+    # 隔离持久化状态（QSettings 几何/分栏、gui_config window 键、
+    # desktop_settings 的 app_mode）：否则用户真机/其他测试落盘的状态
+    # 决定 left_tab 结构（app_mode=planetarium 时 rf_sky 页签被
+    # reparent 走，select_tab/undo 断言随之非确定性失败）。
+    import json as _json
+    from PySide6.QtCore import QSettings
+    qs = QSettings("MBDSDR", "Desktop")
+    keys = ("window_geometry", "three_column_sizes",
+            "three_column_layout_version")
+    backup = {k: qs.value(k) for k in keys}
+    for k in keys:
+        qs.remove(k)
+    qs.sync()
+    gui_cfg = os.path.expanduser("~/.mbdsdr/gui_config.json")
+    cfg_backup = None
+    if os.path.exists(gui_cfg):
+        with open(gui_cfg, "r", encoding="utf-8") as f:
+            cfg_backup = f.read()
+        try:
+            data = _json.loads(cfg_backup)
+            if "window" in data:
+                data.pop("window")
+                with open(gui_cfg, "w", encoding="utf-8") as f:
+                    _json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    from settings import DesktopSettings
+    ds = DesktopSettings.load()
+    old_mode = ds.get("app_mode", "ide")
+    ds.set("app_mode", "ide")
     w = MainWindow()
+    for _t in getattr(w, "_startup_timers", []):
+        try:
+            _t.stop()
+        except Exception:
+            pass
     w.show()
     yield w
     try:
@@ -100,6 +135,17 @@ def mw(qapp):
     except Exception:
         pass
     w.close()
+    for k, v in backup.items():
+        if v is None:
+            qs.remove(k)
+        else:
+            qs.setValue(k, v)
+    qs.sync()
+    if cfg_backup is not None:
+        with open(gui_cfg, "w", encoding="utf-8") as f:
+            f.write(cfg_backup)
+    ds2 = DesktopSettings.load()
+    ds2.set("app_mode", old_mode)
 
 
 def _drain(mw):
