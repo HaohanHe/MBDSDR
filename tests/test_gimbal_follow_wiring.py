@@ -165,7 +165,10 @@ class TestMainWindowGimbalLoop:
                 "valid": True, "elevation": 30.0, "azimuth": 123.0,
                 "doppler_hz": 3500.0, "corrected_freq_hz": 137.1e6,
                 "range_km": 1050.0,
-            }))
+            },
+            # 多普勒补偿关闭时主循环回退到标称下行（monkeypatch 纪律：
+            # 替身必须复刻真 tracker 的这一接口，97683ab 之后主循环会调）。
+            downlink_freq_hz=lambda: 137.1e6 - 3500.0))
         return fake
 
     def test_follow_refused_without_tracking(self, mw, monkeypatch):
