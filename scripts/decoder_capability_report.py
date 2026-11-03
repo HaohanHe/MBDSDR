@@ -96,6 +96,18 @@ EVIDENCE = {
     ),
 }
 
+# 合成 AWGN 灵敏度基线快照（scripts/decode_sensitivity.py 的实测结果）。
+# 只用于「同实现内相对比较」，不是法规/接收机门限；换机器/换 numpy 版本会
+# 有 ±1 档抖动，故 tests/test_decode_sensitivity.py 只校验快照与实跑结果相差
+# 不超过 2 dB，并把「以实跑为准、快照过期要刷新」写进文档正文。
+SENSITIVITY_SNAPSHOT_DATE = "2026-11-04"
+SENSITIVITY_SEED = 20261104
+SENSITIVITY_TRIALS = 20
+SENSITIVITY_SNAPSHOT = {
+    "ais": {"threshold_snr_db": 8.0, "threshold_100pct_snr_db": 10.0},
+    "adsb": {"threshold_snr_db": 6.0, "threshold_100pct_snr_db": 8.0},
+}
+
 # 不走 decode_router 能力表的独立解码链（同一张矩阵里一并交代）
 EXTRA_CHAINS = [
     {
@@ -210,6 +222,35 @@ def render() -> str:
     out.append("```bash")
     out.append("export MBDSDR_NULL_AUDIO=1 MBDSDR_NO_HW=1 QT_QPA_PLATFORM=offscreen")
     out.append("```")
+    out.append("")
+    out.append("## 灵敏度基线（合成 AWGN，仅供相对比较）")
+    out.append("")
+    out.append("上表回答「是不是真的」；这张小表回答「同一实现里谁更耐噪」。"
+               "口径是**复基带突发内平均每样本 SNR**，信号由仓内编码器合成、"
+               "注入白噪声后交给本仓解码器，成功 = CRC/FCS 通过且字段与合成真值一致。")
+    out.append("")
+    out.append("| 模式 | 90% 成功率所需 SNR | 首次 100% 的 SNR | 采样条件 |")
+    out.append("|---|---|---|---|")
+    out.append(
+        f"| `ais` | {SENSITIVITY_SNAPSHOT['ais']['threshold_snr_db']:g} dB | "
+        f"{SENSITIVITY_SNAPSHOT['ais']['threshold_100pct_snr_db']:g} dB | "
+        "GMSK 9600 bit/s，fs=48000（9600×5），单帧 Type 1 |")
+    out.append(
+        f"| `adsb` | {SENSITIVITY_SNAPSHOT['adsb']['threshold_snr_db']:g} dB | "
+        f"{SENSITIVITY_SNAPSHOT['adsb']['threshold_100pct_snr_db']:g} dB | "
+        "1090ES PPM 1 Mbit/s，fs=4e6（4 样本/bit），DF17 识别帧 |")
+    out.append("")
+    out.append(f"快照日期 {SENSITIVITY_SNAPSHOT_DATE}，种子 {SENSITIVITY_SEED}，"
+               f"每档 {SENSITIVITY_TRIALS} 次。**以实跑为准**，过期就重新生成：")
+    out.append("")
+    out.append("```bash")
+    out.append("python scripts/decode_sensitivity.py --modes ais,adsb \\")
+    out.append("    --snr -10:16:2 --trials 20 --seed 20261104 --md sensitivity.md")
+    out.append("```")
+    out.append("")
+    out.append("三条必须一起读的限定：合成波形无多径/无频偏/无采样时钟误差；"
+               "该 SNR 不是天线口面 SNR，也不是任何法规门限；"
+               "它只证明「本实现相对本实现的耐噪性」，不能证明「能在天上收到」。")
     out.append("")
     out.append("## 离线批处理与结构化审计")
     out.append("")
