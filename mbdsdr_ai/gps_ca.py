@@ -1,19 +1,24 @@
 # -*- coding: utf-8 -*-
-"""重写 mbdsdr_ai/gps_ca.py：只实现**可自验证**的部分。
+"""GPS C/A：LFSR/Gold 机制 + IS-GPS-200 标准 PRN 码（全验证链）。
 
-保留（机制自写 + 自校验通过）：
+机制自写 + 自校验：
 · 10 级 LFSR 序列生成（公开 ICD-GPS-200 的 G1/G2 多项式）；
 · m 序列（最大长度序列）及其平衡性/自相关性质（自校验）；
-· Gold 码族（G1、G2 及两者的相对移位异或）及其三值自相关（自校验）；
+· Gold 码族（G1、G2 及两者的相对移位异或）及其三值相关（自校验）；
 · 码相关捕获（FFT 循环相关）：给任意码集 → 每码的相关峰（码相位/相关值）
   与 20ms 积分出的导航比特（50 bps）。
 
-**不实现** GPS C/A 码的 PRN 分配表（IS-GPS-200 Table 3-I 的"码相位选择"）：
-该表是标准数据，仓内没有；本机也无从直连 PDF 取到权威原文，而材料自带的
-`GPScacodes.py` 经自相关指纹核验**并非标准 C/A 码**（非零 lag 自相关高达
-78–92，且在 lag 32/64/127/256 出现周期性峰；标准 C/A 码应恒为 −1/1023），
-故它不能充当校验源。宁可标注边界，也不发一个"看起来能用但没验证"的实现。
-码相关捕获本身对码集无假设——调用方自带码（公开标准数据）即可使用。
+标准数据（2026-11-04 补真值）：C/A 码 PRN 相位分配表（IS-GPS-200
+Table 3-I）已内置，见 ``_GPS_CA_PHASE_ASSIGNMENTS`` 头注的来源与三方互核
+记录；`ca_code(prn)` 输出与 IS-GPS-200E octal 列全 37 行一致、与
+gps-sdr-sim 比特级一致（PRN 1-32）的标准 C/A 码。PRN 34/37 同码是标准
+明文规定（Table 3-I 脚注 **）。
+
+材料 `GPScacodes.py` 复核更正（2026-11-04 实测）：32 组码与标准 C/A
+**逐比特互为反相**（±1 极性约定相反），其自相关 {|ac|} ⊆ {65, 1, 63}
+完全落在 Gold 三值内——是标准码的反极性版本而非"非标准码"。此前
+"三值自相关故非标准"的判词有误：Gold 码两两相关本就三值 {−65,−1,+63}，
+恒 −1 是 m 序列性质，不是 C/A 的。
 """
 import io
 import math
@@ -31,6 +36,95 @@ CA_CHIP_RATE = 1.023e6
 #: 导航电文速率与每比特 chip 数
 NAV_BIT_RATE = 50.0
 CHIPS_PER_NAV_BIT = int(round(CA_CHIP_RATE / NAV_BIT_RATE))   # 20460
+
+# ── 标准参考数据（Standard Reference Data）─────────────────────────────
+# 名称：GPS L1 C/A 码相位分配（Code Phase Assignments）
+# 权威出处：IS-GPS-200E (01 Jul 2009) §3.3.2.3 Table 3-I，
+#   官方存档 https://archive.gps.gov/technical/icwg/meetings/2010/03/10/AFD-100302-042.pdf
+#   （该表 PRN 1-32 分配自 ICD-GPS-200C 起冻结，跨版本不变；
+#     gps.gov《L1 C/A PRN CODE ASSIGNMENTS》Jan 2026 版对 PRN 1-63 亦仅回引 IS-GPS-200）
+# 提取方式：脚本从官方 PDF 文本层提取（.tmp-tool-results/gps_stage3/），非手抄。
+# 交叉验证（verify_and_gold.py，全过）：
+#   · G2 delay 列与 gps-sdr-sim gpssim.c codegen() 内表 32/32 一致；
+#   · 本仓生成全码与 gps-sdr-sim 比特级一致（PRN 1-32）；
+#   · first-10-chips octal 与 IS-GPS-200E 一致（PRN 1-37）；
+#   · 两级抽头形式 ≡ 延迟形式（37/37）；
+#   · Gold 指纹：自相关 ⊆ {−65,−1,63}，互相关 |max| = 65（标准界）。
+# 结构：prn -> ((tap_a, tap_b), g2_delay_chips)；PRN 34 与 37 同码是标准规定。
+_GPS_CA_PHASE_ASSIGNMENTS: Dict[int, Tuple[Tuple[int, int], int]] = {
+    1: ((2, 6), 5), 2: ((3, 7), 6), 3: ((4, 8), 7), 4: ((5, 9), 8),
+    5: ((1, 9), 17), 6: ((2, 10), 18), 7: ((1, 8), 139), 8: ((2, 9), 140),
+    9: ((3, 10), 141), 10: ((2, 3), 251), 11: ((3, 4), 252), 12: ((5, 6), 254),
+    13: ((6, 7), 255), 14: ((7, 8), 256), 15: ((8, 9), 257), 16: ((9, 10), 258),
+    17: ((1, 4), 469), 18: ((2, 5), 470), 19: ((3, 6), 471), 20: ((4, 7), 472),
+    21: ((5, 8), 473), 22: ((6, 9), 474), 23: ((1, 3), 509), 24: ((4, 6), 512),
+    25: ((5, 7), 513), 26: ((6, 8), 514), 27: ((7, 9), 515), 28: ((8, 10), 516),
+    29: ((1, 6), 859), 30: ((2, 7), 860), 31: ((3, 8), 861), 32: ((4, 9), 862),
+    33: ((5, 10), 863), 34: ((4, 10), 950), 35: ((1, 7), 947), 36: ((2, 8), 948),
+    37: ((4, 10), 950),
+}
+
+#: 仓内 LFSR 输出约定（out=reg[0]，反馈入 reg[0]）领先 ICD 寄存器输出约定
+#: （输出取第 10 级）9 个 chip——与 gps-sdr-sim 序列实测校准所得常数。
+_CA_PHASE_OFFSET = 9
+
+_ALIGNED_CACHE: Dict[str, np.ndarray] = {}
+
+
+def _aligned_g1_g2() -> Tuple[np.ndarray, np.ndarray]:
+    """G1/G2 对齐到 ICD 相位基准（chip 0 = X1 历元起点）。"""
+    if "g1" not in _ALIGNED_CACHE:
+        _ALIGNED_CACHE["g1"] = np.roll(g1_sequence(), _CA_PHASE_OFFSET)
+        _ALIGNED_CACHE["g2"] = np.roll(g2_sequence(), _CA_PHASE_OFFSET)
+    return _ALIGNED_CACHE["g1"], _ALIGNED_CACHE["g2"]
+
+
+def prn_assignment(prn: int) -> Tuple[Tuple[int, int], int]:
+    """查标准表：prn -> ((G2 抽头 a, b), G2 延迟 chip)。非法 PRN 抛 ValueError。"""
+    entry = _GPS_CA_PHASE_ASSIGNMENTS.get(int(prn))
+    if entry is None:
+        raise ValueError(
+            f"PRN {prn!r} 不在 IS-GPS-200 Table 3-I（1..37）内——不给编造分配")
+    return entry
+
+
+def ca_code(prn: int) -> np.ndarray:
+    """标准 C/A 码（0/1 uint8, 1023 chip, ICD 相位基准）。
+
+    构造：C/A = G1 ⊕ G2 延迟 d chip（IS-GPS-200 §3.3.2.3 的延迟形式）。
+    与 IS-GPS-200E Table 3-I 的 first-10-chips octal 列全 37 行一致；
+    与 gps-sdr-sim 比特级一致（PRN 1-32）。
+    """
+    _taps, delay = prn_assignment(prn)
+    g1, g2 = _aligned_g1_g2()
+    idx = (np.arange(MSEQ_LEN) - delay) % MSEQ_LEN
+    return (g1 ^ g2[idx]).astype(np.uint8)
+
+
+def ca_code_taps(prn: int) -> np.ndarray:
+    """标准 C/A 码的两级抽头形式（IS-GPS-200 Figure 3-10 的实现形式）。
+
+    G2i = 同一运行 G2 寄存器第 a 级 ⊕ 第 b 级输出；与 ca_code() 的延迟形式
+    逐比特互等（37/37 已钉入测试）。主要用于对照硬件式实现与教学演示。
+    """
+    (a, b), _delay = prn_assignment(prn)
+    reg = [1] * 10
+    hist = np.empty((MSEQ_LEN, 10), dtype=np.uint8)
+    for i in range(MSEQ_LEN):
+        hist[i] = reg
+        fb = 0
+        for t in G2_TAPS:
+            fb ^= reg[t - 1]
+        reg = [fb] + reg[:9]
+    g1, _g2 = _aligned_g1_g2()
+    return (hist[:, a - 1] ^ hist[:, b - 1] ^ g1).astype(np.uint8)
+
+
+def standard_ca_codes(prns: Optional[Sequence[int]] = None) -> Dict[str, np.ndarray]:
+    """标准 C/A 码集（±1 float），键为 "PRN<n>"——可直接喂码相关捕获。"""
+    if prns is None:
+        prns = range(1, 33)
+    return {f"PRN{p}": to_pm1(ca_code(p)) for p in prns}
 
 
 def lfsr_sequence(taps: Sequence[int], n: int = MSEQ_LEN,
@@ -248,7 +342,7 @@ def register_tool_registry(registry) -> None:
     from .tool_registry import ToolResult, clean_exc
 
     def _prn(args):
-        """生成 LFSR/m 序列/Gold 族并给自校验结果。"""
+        """生成 LFSR/m 序列/Gold 族/标准 C/A 码并给自校验结果。"""
         try:
             kind = str(args.get("kind", "g1")).lower()
             n = int(args.get("length", MSEQ_LEN))
@@ -260,9 +354,38 @@ def register_tool_registry(registry) -> None:
                 fam = gold_family(n)
                 k = int(args.get("index", 0))
                 seq = fam[k % len(fam)]
+            elif kind in ("ca", "c/a"):
+                prn = int(args.get("prn", 1))
+                seq = ca_code(prn)
+                (ta, tb), delay = prn_assignment(prn)
+                pm1 = to_pm1(seq)
+                fx = np.fft.fft(pm1)
+                ac = np.fft.ifft(fx * np.conj(fx)).real
+                ac_vals = sorted({int(round(v)) for v in ac[1:]})
+                out: Dict[str, Any] = {
+                    "kind": "ca",
+                    "prn": prn,
+                    "g2_taps": [ta, tb],
+                    "g2_delay_chips": delay,
+                    "source": "IS-GPS-200E Table 3-I（官方存档 PDF 脚本提取，"
+                              "与 gps-sdr-sim 比特级互核）",
+                    "length": int(seq.size),
+                    "gold_checks": {
+                        "ones": int(seq.sum()),
+                        "autocorr_values": ac_vals,
+                        "autocorr_within_gold_three_values":
+                            set(ac_vals) <= {-65, -1, 63},
+                    },
+                }
+                if args.get("return_bits"):
+                    out["bits"] = [int(b) for b in seq[:int(args.get("head", 64))]]
+                out["pm1_head"] = [int(v) for v in to_pm1(seq[:int(args.get("head", 32))])]
+                return ToolResult(success=True,
+                                  content=_json.dumps(out, ensure_ascii=False, default=str),
+                                  data=out)
             else:
-                raise ValueError(f"未知 kind {kind!r}，可选 g1/g2/gold")
-            out: Dict[str, Any] = {
+                raise ValueError(f"未知 kind {kind!r}，可选 g1/g2/gold/ca")
+            out = {
                 "kind": kind,
                 "length": int(seq.size),
                 "msequence_checks": msequence_checks(seq),
@@ -272,10 +395,9 @@ def register_tool_registry(registry) -> None:
             if args.get("return_bits"):
                 out["bits"] = [int(b) for b in seq[:int(args.get("head", 64))]]
             out["pm1_head"] = [int(v) for v in to_pm1(seq[:int(args.get("head", 32))])]
-            out["note"] = ("G1/G2 采用公开 ICD-GPS-200 的多项式；C/A 的 PRN 相位"
-                           "分配（IS-GPS-200 Table 3-I）未内置——标准数据不在仓内，"
-                           "且材料自带的码表经核验并非标准 C/A 码（循环自相关为三值，"
-                           "而 C/A 码应恒为 −1），故不内置以免给出未经验证的码。")
+            out["note"] = ("G1/G2 采用公开 ICD-GPS-200 的多项式；标准 C/A 码"
+                           "（IS-GPS-200 Table 3-I 的 PRN 相位分配）已内置，"
+                           "用 kind=ca 加 prn 取用。")
         except Exception as e:  # noqa: BLE001
             return ToolResult(success=False,
                               content=f"伪随机序列生成失败：{type(e).__name__}: {e}")
@@ -290,8 +412,10 @@ def register_tool_registry(registry) -> None:
             codes = {}
             for name, arr in (args.get("codes") or {}).items():
                 codes[str(name)] = np.asarray(arr, dtype=np.float64)
+            codes_source = "caller"
             if not codes:
-                raise ValueError("需要 codes：{名称: ±1 码序列}（如公开标准的 C/A 码）")
+                codes = standard_ca_codes()
+                codes_source = "is-gps-200e-table-3I"
             iq = args.get("iq")
             if iq is None:
                 path = args.get("iq_path")
@@ -302,6 +426,7 @@ def register_tool_registry(registry) -> None:
                                   float(args.get("sample_rate", CA_CHIP_RATE)),
                                   codes,
                                   chip_rate=float(args.get("chip_rate", CA_CHIP_RATE)))
+            res["codes_source"] = codes_source
             if not res.get("detected"):
                 res["note"] = ("未出现显著相关峰（无明显码信号、码集不匹配、"
                                "或采样率与码率不符）——不给卫星判定")
@@ -320,23 +445,24 @@ def register_tool_registry(registry) -> None:
         name="gps_prn_sequence",
         description=(
             "GPS 扩频伪随机序列：按公开 ICD-GPS-200 的多项式生成 G1/G2 的 "
-            "m 序列（1023 chip，平衡性与循环自相关自校验）或 Gold 码族"
-            "（G1、G2 及两者的相对移位异或；族内两两相关的三值结构自校验）。"
+            "m 序列（1023 chip，平衡性与循环自相关自校验）、Gold 码族"
+            "（G1、G2 及两者的相对移位异或；族内两两相关的三值结构自校验），"
+            "或标准 C/A 码（kind=ca：IS-GPS-200 Table 3-I 的 PRN 相位分配已"
+            "内置为标准参考数据，与官方标准原文 octal 列全 37 行一致、与 "
+            "gps-sdr-sim 比特级互核通过；返回 Gold 三值相关自校验）。"
             "依据：材料《通信对抗材料包》learnSDR 课程 lesson21（LFSR/伪随机）"
             "与 lesson22（Gold 码/扩频/CDMA）的机制部分。"
             "前置条件：无（纯计算）。失败恢复：参数非法即报错。"
             "副作用：纯计算，不写文件。"
-            "能力边界：**不含 C/A 的 PRN 相位分配**（IS-GPS-200 Table 3-I 的"
-            "码相位选择属标准数据，仓内没有；材料自带的码表经核验并非标准 C/A 码"
-            "——其循环自相关为三值，而 C/A 码应恒为 −1）。要解真实 GPS，"
-            "请用公开标准码表配合 gps_code_acquire。"
         ),
         parameters={
             "type": "object",
             "properties": {
-                "kind": {"type": "string", "enum": ["g1", "g2", "gold"],
+                "kind": {"type": "string", "enum": ["g1", "g2", "gold", "ca"],
                          "default": "g1",
-                         "description": "序列种类：G1 / G2 / Gold 族"},
+                         "description": "序列种类：G1 / G2 / Gold 族 / 标准 C/A 码"},
+                "prn": {"type": "integer", "default": 1,
+                        "description": "PRN 编号 1..37（kind=ca 时有效）"},
                 "length": {"type": "integer", "default": 1023,
                            "description": "长度（chip）"},
                 "index": {"type": "integer", "default": 0,
@@ -355,12 +481,13 @@ def register_tool_registry(registry) -> None:
     registry.register(
         name="gps_code_acquire",
         description=(
-            "码相关捕获（扩频/CDMA 的捕获环节）：接收 IQ × 给定码集 → "
+            "码相关捕获（扩频/CDMA 的捕获环节）：接收 IQ × 码集 → "
             "FFT 循环相关 → 每码的峰值与码相位、最优码与相关强度。"
             "依据材料 learnSDR 课程 lesson23（GPS 相关与解调）的机制部分。"
-            "前置条件：需给 codes（{名称: ±1 码序列}，如公开标准的 C/A 码）"
-            "与 iq（或 iq_path，complex64 raw）；sample_rate/chip_rate 须与"
-            "码率一致（默认 1.023e6 chip/s）。"
+            "前置条件：iq（或 iq_path，complex64 raw）；sample_rate/chip_rate"
+            " 须与码率一致（默认 1.023e6 chip/s）。codes 可不给——缺省用仓内"
+            "标准 C/A 码族（IS-GPS-200 Table 3-I，PRN 1-32），结果里的 "
+            "codes_source 标明码集出处（caller / is-gps-200e-table-3I）。"
             "失败恢复：无显著相关峰时 success=False 并给出 note（无码信号/"
             "码集不匹配/采样率不符）——不报卫星判定。"
             "副作用：纯计算，不写文件。"
@@ -375,13 +502,14 @@ def register_tool_registry(registry) -> None:
                 "iq_path": {"type": "string",
                             "description": "complex64 IQ raw 文件路径"},
                 "codes": {"type": "object",
-                          "description": "{名称: ±1 码序列}（数组）"},
+                          "description": "{名称: ±1 码序列}（数组）；缺省用标准 "
+                                         "C/A 码族（IS-GPS-200 Table 3-I）"},
                 "sample_rate": {"type": "number", "default": 1023000.0,
                                 "description": "IQ 采样率 Hz"},
                 "chip_rate": {"type": "number", "default": 1023000.0,
                               "description": "码速率（chip/s）"},
             },
-            "required": ["codes"],
+            "required": [],
         },
         handler=_acquire,
         category="satellite",

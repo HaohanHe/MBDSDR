@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""GPS 扩频伪随机序列与码相关捕获的门禁。
+"""GPS 扩频伪随机序列、标准 C/A 码与码相关捕获的门禁。
 
 对应材料《通信对抗材料包》learnSDR 课程 lesson21（LFSR/伪随机）、lesson22
 （Gold 码/扩频/CDMA）、lesson23（GPS 相关与解调）的**机制部分**。
@@ -7,14 +7,17 @@
 覆盖：
 · m 序列的自校验（平衡性 + 循环自相关恒 −1）；
 · Gold 族的两两相关呈三值结构（含 −1）；
+· 标准 C/A 码（IS-GPS-200 Table 3-I）的钉扎：金样比特级、octal 列、
+  taps 形式 ≡ delay 形式、Gold 指纹、PRN34/37 同码为标准规定；
 · 码相关捕获的往返：合成"载波×码"的 IQ → 捕获 → 命中正确的码与码相位；
 · 无信号时诚实失败（不报卫星判定）。
 
-边界（写进测试断言）：C/A 的 PRN 相位分配不内置——依据是 IS-GPS-200
-Table 3-I 的标准数据（仓内没有），且材料自带的码表经核验并非标准 C/A 码
-（其循环自相关为三值，而 C/A 码应恒为 −1）。故仓内只提供通用伪随机序列
-与"码集可传入"的捕获器。
+标准数据来源与互核链记录在 mbdsdr_ai/gps_ca.py 的
+``_GPS_CA_PHASE_ASSIGNMENTS`` 头注；金样 tests/golden/gps_ca_prn_vectors.json
+由 .tmp-tool-results/gps_stage3/verify_and_gold.py 脚本生成。
 """
+import hashlib
+import json
 import os
 import sys
 
@@ -28,15 +31,23 @@ if _ROOT not in sys.path:
 from mbdsdr_ai.agent import MBDSDRAgent  # noqa: E402
 from mbdsdr_ai.gps_ca import (  # noqa: E402
     CA_CHIP_RATE,
+    MSEQ_LEN,
+    _GPS_CA_PHASE_ASSIGNMENTS,
     autocorrelation,
+    ca_code,
+    ca_code_taps,
     correlate_codes,
     g1_sequence,
     g2_sequence,
     gold_family,
     gold_family_checks,
     msequence_checks,
+    prn_assignment,
+    standard_ca_codes,
     to_pm1,
 )
+
+GOLDEN_PATH = os.path.join(_ROOT, "tests", "golden", "gps_ca_prn_vectors.json")
 
 
 @pytest.fixture(scope="module")
@@ -147,7 +158,140 @@ def test_tool_acquire_end_to_end(reg, tmp_path):
 
 
 def test_tool_acquire_without_codes_is_explicit_error(reg):
-    """没给码集 → 明确报错（不静默返回空结果）。"""
+    """没给码集 → 缺省启用标准 C/A 码族，并标明出处（不静默、不报错）。"""
     r = reg.call("gps_code_acquire", {"sample_rate": 1e6})
+    # 无 IQ 输入仍会失败，但失败点必须在 IQ，不在 codes
     assert r.success is False
-    assert "codes" in (r.content or "").lower()
+    assert "iq" in (r.content or "").lower()
+
+
+# ============================================================================
+# 标准 C/A 码（IS-GPS-200 Table 3-I）钉扎
+# ============================================================================
+@pytest.fixture(scope="module")
+def golden():
+    with open(GOLDEN_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_prn_assignment_table_is_complete_and_sane():
+    """标准表覆盖 PRN 1..37，抽头/延迟取值合法；除 PRN34/37 标准同码外互不相同。"""
+    assert set(_GPS_CA_PHASE_ASSIGNMENTS) == set(range(1, 38))
+    seen = {}
+    for prn, (taps, delay) in _GPS_CA_PHASE_ASSIGNMENTS.items():
+        a, b = taps
+        assert 1 <= a <= 10 and 1 <= b <= 10 and a != b, (prn, taps)
+        assert 1 <= delay <= 1022, (prn, delay)
+        key = (taps, delay)
+        if key in seen:
+            assert {seen[key], prn} == {34, 37}, \
+                f"PRN{seen[key]} 与 PRN{prn} 同码——标准只允许 34/37 此一例"
+        else:
+            seen[key] = prn
+
+
+def test_ca_code_invalid_prn_raises():
+    """表外 PRN 必须明确报错（不给编造分配）。"""
+    for bad in (0, 38, 120, -1):
+        with pytest.raises(ValueError):
+            ca_code(bad)
+
+
+def test_ca_code_matches_golden_vectors(golden):
+    """全 37 PRN：前 32 chip 与全码 SHA-256 逐一对上金样（比特级钉扎）。"""
+    assert golden["_schema"] == "gps_ca_prn_vectors/v1"
+    assert "IS-GPS-200" in golden["_source"]["standard"]
+    for prn in range(1, 38):
+        g = golden["prn"][str(prn)]
+        c = ca_code(prn)
+        assert c.shape == (MSEQ_LEN,) and set(np.unique(c)) <= {0, 1}
+        assert [int(x) for x in c[:32]] == g["first32_chips"], f"PRN{prn} first32"
+        assert hashlib.sha256(c.tobytes()).hexdigest() == g["sha256_1023bits"], \
+            f"PRN{prn} sha256"
+        assert g["taps"] == list(_GPS_CA_PHASE_ASSIGNMENTS[prn][0])
+        assert g["g2_delay_chips"] == _GPS_CA_PHASE_ASSIGNMENTS[prn][1]
+
+
+def test_ca_code_first10_octal_matches_icd(golden):
+    """first-10-chips octal 与 IS-GPS-200E Table 3-I 全 37 行一致。"""
+    for prn in range(1, 38):
+        b = "".join(str(int(x)) for x in ca_code(prn)[:10])
+        octal = b[0] + "".join(str(int(b[i:i + 3], 2)) for i in range(1, 10, 3))
+        assert octal == golden["prn"][str(prn)]["first10_octal"], f"PRN{prn}"
+
+
+def test_ca_code_taps_form_equals_delay_form():
+    """ICD Figure 3-10 两级抽头实现 ≡ §3.3.2.3 延迟实现（37/37 逐比特）。"""
+    for prn in range(1, 38):
+        assert np.array_equal(ca_code(prn), ca_code_taps(prn)), f"PRN{prn}"
+
+
+def test_ca_code_gold_fingerprint():
+    """Gold 指纹：每 PRN 循环自相关取值 ⊆ {−65, −1, +63}（三值是 C/A 的标准性质）。"""
+    for prn in range(1, 38):
+        x = to_pm1(ca_code(prn))
+        ac = np.fft.ifft(np.fft.fft(x) * np.conj(np.fft.fft(x))).real
+        vals = {int(round(v)) for v in ac[1:]}
+        assert vals <= {-65, -1, 63}, f"PRN{prn} 自相关越界: {sorted(vals)[:6]}"
+
+
+def test_ca_code_cross_correlation_within_gold_bound():
+    """互相关绝对值 ≤ 65（Gold 界）；PRN34/37 标准同码跳过恒等比较。"""
+    xs = {p: to_pm1(ca_code(p)) for p in range(1, 38)}
+    keys = sorted(xs)
+    ffts = {p: np.fft.fft(xs[p]) for p in keys}
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            if {keys[i], keys[j]} == {34, 37}:
+                continue
+            cc = np.fft.ifft(ffts[keys[i]] * np.conj(ffts[keys[j]])).real
+            assert abs(cc).max() <= 65.5, (keys[i], keys[j], abs(cc).max())
+
+
+def test_prn34_prn37_share_code_by_standard():
+    """PRN 34 与 37 同码是 IS-GPS-200 Table 3-I 脚注 ** 的明文规定。"""
+    assert _GPS_CA_PHASE_ASSIGNMENTS[34] == _GPS_CA_PHASE_ASSIGNMENTS[37]
+    assert np.array_equal(ca_code(34), ca_code(37))
+
+
+def test_standard_ca_codes_helper():
+    codes = standard_ca_codes()
+    assert len(codes) == 32 and "PRN1" in codes and "PRN32" in codes
+    assert set(np.unique(codes["PRN7"])) <= {-1.0, 1.0}
+    sub = standard_ca_codes([3, 5])
+    assert set(sub) == {"PRN3", "PRN5"}
+
+
+def test_tool_prn_sequence_standard_ca(reg):
+    """工具层：kind=ca 返回标准 C/A 码与 Gold 自校验，来源注明。"""
+    r = reg.call("gps_prn_sequence", {"kind": "ca", "prn": 7, "head": 10})
+    assert r.success, (r.content or "")[:300]
+    d = r.data
+    assert d["prn"] == 7 and d["g2_taps"] == [1, 8] and d["g2_delay_chips"] == 139
+    assert "IS-GPS-200" in d["source"]
+    assert d["gold_checks"]["autocorr_within_gold_three_values"] is True
+    # 与库函数逐比特一致
+    assert d["pm1_head"] == [int(v) for v in to_pm1(ca_code(7))[:10]]
+
+
+def test_tool_prn_sequence_standard_ca_bad_prn(reg):
+    r = reg.call("gps_prn_sequence", {"kind": "ca", "prn": 99})
+    assert r.success is False
+
+
+def test_tool_acquire_uses_standard_family_by_default(reg, tmp_path):
+    """工具层：不给 codes → 缺省标准 C/A 码族；合成 PRN7 信号应命中 PRN7。"""
+    code = to_pm1(ca_code(7))
+    sps = 2
+    t = np.arange(code.size * sps) / (CA_CHIP_RATE * sps)
+    iq = np.repeat(code, sps) * np.exp(2j * np.pi * 1200.0 * t)
+    p = str(tmp_path / "gps_prn7.iq")
+    iq.astype(np.complex64).tofile(p)
+    r = reg.call("gps_code_acquire", {
+        "iq_path": p,
+        "sample_rate": CA_CHIP_RATE * sps,
+        "chip_rate": CA_CHIP_RATE,
+    })
+    assert r.success, (r.content or "")[:300]
+    assert r.data["codes_source"] == "is-gps-200e-table-3I"
+    assert r.data["best"] == "PRN7", r.data.get("best")
