@@ -228,8 +228,8 @@ class TestPlanetariumSkyVisibility:
 
     def test_enter_from_non_sky_tab_clears_hidden(self, main_window, qapp):
         lt = main_window.left_tab
-        sky_idx = next(i for i in range(lt.count())
-                       if lt.tabText(i) == "天空模式")
+        sky_idx = lt.indexOf(main_window.sky_view)
+        assert sky_idx >= 0
         other = next(i for i in range(lt.count()) if i != sky_idx)
         lt.setCurrentIndex(other)
         _pump(qapp, 50)
@@ -246,6 +246,29 @@ class TestPlanetariumSkyVisibility:
             main_window.show()
             _pump(qapp, 50)
         assert lt.indexOf(main_window.sky_view) >= 0, "退出后天空应归位左栏"
+
+    def test_planetarium_sky_paints_not_black_void(self, main_window, qapp):
+        """像素级守卫：星象仪天空必须真画出夜空渐变，而非纯黑空槽。"""
+        lt = main_window.left_tab
+        sky_idx = lt.indexOf(main_window.sky_view)
+        other = next(i for i in range(lt.count()) if i != sky_idx)
+        lt.setCurrentIndex(other)
+        _pump(qapp, 50)
+        try:
+            main_window.set_app_mode("planetarium")
+            _pump(qapp, 50)
+            img = main_window.sky_view.grab().toImage()
+            assert img.width() > 50 and img.height() > 50
+            top = img.pixelColor(img.width() // 2, 4)
+            bot = img.pixelColor(img.width() // 2, img.height() - 4)
+            # 夜空渐变本质：地平方向比天顶亮；纯黑空槽两者相等且为 0。
+            assert bot.lightness() > top.lightness(), \
+                f"星象仪天空疑似黑空槽: top={top.getRgb()} bot={bot.getRgb()}"
+        finally:
+            main_window.set_app_mode("ide")
+            main_window.showNormal()
+            main_window.show()
+            _pump(qapp, 50)
 
 
 if __name__ == "__main__":
