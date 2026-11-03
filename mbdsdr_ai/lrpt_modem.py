@@ -58,6 +58,31 @@ SYNC_BITS: int = 64
 SYNC_SYMBOLS: int = SYNC_BITS // 2    # QPSK 每符号 2 bit → 32 符号
 
 
+def _root_raised_cosine(alpha: float, sps: int, span: int = 10) -> np.ndarray:
+    """RRC 成型/匹配滤波器抽头（单位能量，span 符号对称 FIR）。
+
+    公式为公开标准（3GPP TS 25.104 / CCSDS 414.0 同型）；Meteor-M2 LRPT
+    下行 RRC α=0.6（机制笔记 §2.2）。真录必须匹配滤波——无匹配滤波时
+    定时漂移直接把采样点推出符号中心（ISI → 同步汉明超标，2026-11-03 实测）。
+    """
+    n_taps = span * sps + 1
+    t = (np.arange(n_taps) - (n_taps - 1) / 2.0) / float(sps)
+    taps = np.zeros(n_taps, dtype=np.float64)
+    for i, ti in enumerate(t):
+        if abs(ti) < 1e-12:
+            taps[i] = 1.0 - alpha + 4.0 * alpha / math.pi
+        elif alpha > 0 and abs(abs(ti) - 1.0 / (4.0 * alpha)) < 1e-9:
+            taps[i] = (alpha / math.sqrt(2.0)) * (
+                (1.0 + 2.0 / math.pi) * math.sin(math.pi / (4.0 * alpha))
+                + (1.0 - 2.0 / math.pi) * math.cos(math.pi / (4.0 * alpha)))
+        else:
+            num = (math.sin(math.pi * ti * (1.0 - alpha))
+                   + 4.0 * alpha * ti * math.cos(math.pi * ti * (1.0 + alpha)))
+            den = math.pi * ti * (1.0 - (4.0 * alpha * ti) ** 2)
+            taps[i] = num / den
+    return taps / math.sqrt(float(np.sum(taps ** 2)))
+
+
 def iq_to_interleaved(iq: np.ndarray) -> np.ndarray:
     """复基带 IQ -> interleaved float32 ``[I0,Q0,I1,Q1,...]``（SigMF/C++ 消费）。"""
     iq = np.asarray(iq)
@@ -245,17 +270,28 @@ class LrptDemodulator:
         costas_bw:       Costas 环归一化带宽（rad/sample）。
         gardner_alpha:   Gardner 环路增益。
         max_hamming:     同步字最大汉明距离（默认 4，容 64 位中 4 bit 错）。
+        rrc_alpha:       RRC 匹配滤波器滚降系数；None 关闭（合成矩形脉冲链
+                         不需要；真录 Meteor-M2 用 0.6）。
+        use_gardner:     True 时用 Gardner TED 闭环定时（真录推荐）；
+                         False 用前馈 sps 偏移扫描（合成链兼容）。
     """
 
     def __init__(self, fs: int = FS_HZ, sym_rate: int = SYM_RATE,
                  costas_bw: float = 0.01, gardner_gain: float = 0.3,
-                 max_hamming: int = 4) -> None:
+                 max_hamming: int = 4,
+                 rrc_alpha: Optional[float] = None,
+                 use_gardner: bool = False) -> None:
         self.fs = int(fs)
         self.sym_rate = int(sym_rate)
         self.sps = self.fs // self.sym_rate
         self.costas_bw = float(costas_bw)
         self.gardner_gain = float(gardner_gain)
         self.max_hamming = int(max_hamming)
+        self.rrc_alpha = None if rrc_alpha is None else float(rrc_alpha)
+        self.use_gardner = bool(use_gardner)
+        self._rrc_taps: Optional[np.ndarray] = None
+        if self.rrc_alpha is not None:
+            self._rrc_taps = _root_raised_cosine(self.rrc_alpha, self.sps)
 
         # Costas 二阶环系数（阻尼 ζ=0.707）
         zeta = 0.70710678
@@ -399,42 +435,90 @@ class LrptDemodulator:
         bits[1::2] = (np.imag(symbols) > 0).astype(np.uint8)
         return bits
 
-    # -- 帧同步：64-bit 滑窗汉明相关 ----------------------------------------- #
-    def _find_frames(self, bits: np.ndarray) -> List[FrameCandidate]:
-        """在位串上滑窗找同步字，返回所有候选（按汉明距离排序）。"""
-        candidates = []
-        n = bits.size
+    # -- 帧同步：64-bit 滑窗汉明相关（分块 FFT 向量化） --------------------- #
+    @staticmethod
+    def _fft_corr(x: np.ndarray, h: np.ndarray) -> np.ndarray:
+        """线性相关 corr[i] = Σ_k x[i+k]·h[k]（分块 FFT，常数内存）。
+
+        全流 15M 位约 2s/hypothesis——旧逐位 Python 滑窗全录约 225s，
+        流扫描（连帧）跑不动，这里是向量化的动机。
+        """
+        n = x.size
+        L = h.size
+        npos = n - L + 1
+        out = np.empty(npos, dtype=np.float64)
+        chunk = 1 << 20
+        fft_size = 1
+        want = min(chunk, npos) + L
+        while fft_size < want:
+            fft_size <<= 1
+        hr = np.fft.rfft(h[::-1], fft_size)
+        pos = 0
+        while pos < npos:
+            take = min(chunk, npos - pos)
+            seg = x[pos:pos + take + L - 1]
+            conv = np.fft.irfft(np.fft.rfft(seg, fft_size) * hr, fft_size)
+            out[pos:pos + take] = conv[L - 1:L - 1 + take]
+            pos += take
+        return out
+
+    def _find_frames(self, bits: np.ndarray,
+                     max_hamming: Optional[int] = None) -> List[FrameCandidate]:
+        """在位串上滑窗找同步字，返回所有候选（按汉明距离排序）。
+
+        机制不变（64-bit 窗 × 8 假设汉明相关）；实现为 numpy FFT 相关。
+        同起点多假设命中时取**汉明最小**假设（原实现 break 在首个 ≤max 假设，
+        是遍历序而非最优——这里对齐「同一起点只报最佳假设」注释的语义）。
+        候选起点集合与旧实现一致（∃hyp ham≤max）。
+
+        max_hamming 覆盖：松阈值捕获（如 12）+ 下游 Viterbi/ASM 验证是
+        真解码器的标准姿势——硬判决同步丢卷积编码增益，ham≤4 会漏掉
+        Viterbi 仍可纠的帧（2026-11-03 连帧实测）。松阈值的假接受由
+        ASM（0x1ACFFC1D）验证归零。
+        """
+        limit = self.max_hamming if max_hamming is None else int(max_hamming)
+        n = int(bits.size)
         if n < SYNC_BITS:
-            return candidates
-        for start in range(0, n - SYNC_BITS + 1):
-            window = bits[start:start + SYNC_BITS]
-            for hyp_bits, phase, swap in self._sync_hypotheses:
-                hamming = int(np.count_nonzero(window != hyp_bits))
-                if hamming <= self.max_hamming:
-                    # 取同步字后的 payload 位（最多再取 2048 bit）
-                    tail = bits[start + SYNC_BITS: start + SYNC_BITS + 2048]
-                    candidates.append(FrameCandidate(
-                        sync_symbol_index=start // 2,
-                        hamming=hamming,
-                        phase=phase,
-                        swapped=swap,
-                        frame_bits=tail,
-                        frame_bytes=_bits_to_bytes(tail),
-                    ))
-                    break  # 同一起点只报最佳假设
-        # 按汉明距离排序
+            return []
+        x = bits.astype(np.float64) * 2.0 - 1.0
+        npos = n - SYNC_BITS + 1
+        best_h = np.full(npos, 999, dtype=np.int32)
+        best_j = np.zeros(npos, dtype=np.int8)
+        for j, (hb, _phase, _swap) in enumerate(self._sync_hypotheses):
+            h = hb.astype(np.float64) * 2.0 - 1.0
+            corr = self._fft_corr(x, h)
+            ham = np.rint((SYNC_BITS - corr) * 0.5).astype(np.int32)
+            better = ham < best_h
+            best_h = np.where(better, ham, best_h)
+            best_j = np.where(better, j, best_j)
+        candidates: List[FrameCandidate] = []
+        for start in np.nonzero(best_h <= limit)[0]:
+            i = int(start)
+            _hb, phase, swap = self._sync_hypotheses[int(best_j[i])]
+            tail = bits[i + SYNC_BITS: i + SYNC_BITS + 2048]
+            candidates.append(FrameCandidate(
+                sync_symbol_index=i // 2,
+                hamming=int(best_h[i]),
+                phase=phase,
+                swapped=swap,
+                frame_bits=tail,
+                frame_bytes=_bits_to_bytes(tail),
+            ))
         candidates.sort(key=lambda c: c.hamming)
         return candidates
 
-    # -- 定时恢复：试所有 sps 偏移，选同步匹配最佳者（前馈，矩形脉冲鲁棒） -- #
-    def _recover_symbols(self, iq: np.ndarray) -> Tuple[np.ndarray, int]:
-        """前馈定时恢复：试 0..sps-1 个采样偏移，选同步相关最佳者。
+    def _recover_soft_symbols(self, iq: np.ndarray) -> Tuple[np.ndarray, int]:
+        """前馈定时恢复：试 0..sps-1 个采样偏移，返回 (复符号, 偏移)。
 
         原型用矩形脉冲（零阶保持），任何符号内采样点都等价；真实 LRPT 用
         RRC alpha=0.6，生产环境改用闭环 Gardner TED（机制见 _gardner_sample）。
+
+        偏移评分用**多探点**（流头 + 1/4 + 1/2 + 3/4 处 64-bit 同步窗）：
+        长流开头可能是静默/噪声，单看流头会选错定时（2026-11-03 连帧实测）。
+        短流（<4 同步窗）退回单流头探点，与旧行为一致。
         """
-        best_bits = None
-        best_hamming = 999
+        best_syms = None
+        best_score = 1 << 30
         best_offset = 0
         for off in range(self.sps):
             s = iq[off::self.sps]
@@ -443,36 +527,55 @@ class LrptDemodulator:
             bits = self._symbols_to_bits(s)
             if bits.size < SYNC_BITS:
                 continue
-            window = bits[:SYNC_BITS]
-            min_h = min(
-                int(np.count_nonzero(window != hb))
-                for hb, _, _ in self._sync_hypotheses
-            )
-            if min_h < best_hamming:
-                best_hamming = min_h
-                best_bits = bits
+            positions = [0]
+            if bits.size >= 4 * SYNC_BITS:
+                for frac in (0.25, 0.5, 0.75):
+                    positions.append(int((bits.size - SYNC_BITS) * frac))
+            score = 0
+            for p0 in positions:
+                window = bits[p0:p0 + SYNC_BITS]
+                score += min(
+                    int(np.count_nonzero(window != hb))
+                    for hb, _, _ in self._sync_hypotheses
+                )
+            if score < best_score:
+                best_score = score
+                best_syms = s
                 best_offset = off
-        if best_bits is None:
-            return np.empty(0, dtype=np.uint8), 0
-        return best_bits, best_offset
+        if best_syms is None:
+            return np.empty(0, dtype=np.complex128), 0
+        return best_syms, best_offset
+
+    # -- 定时恢复：试所有 sps 偏移，选同步匹配最佳者（前馈，矩形脉冲鲁棒） -- #
+    def _recover_symbols(self, iq: np.ndarray) -> Tuple[np.ndarray, int]:
+        """前馈定时恢复（硬判决位流包装，兼容旧接口）。"""
+        syms, off = self._recover_soft_symbols(iq)
+        return self._symbols_to_bits(syms), off
 
     # -- 主流程 --------------------------------------------------------------- #
-    def process(self, iq: np.ndarray) -> List[FrameCandidate]:
-        """对一段复基带 IQ 做完整 QPSK 解调 + 帧同步。
+    def demodulate_soft(self, iq: np.ndarray,
+                        max_hamming: Optional[int] = None
+                        ) -> Tuple[np.ndarray, List[FrameCandidate]]:
+        """全流软判决解调：AGC → 粗 CFO → [RRC 匹配滤波] → 定时 → **Costas 闭环**
+        → 软位流 + 帧候选。
 
-        流程（机制见学习笔记 §2.1/§2.2）：
-          1. AGC（RMS 归一化）
-          2. FFT 粗频偏估计 + 校正
-          3. 前馈定时恢复（试所有 sps 偏移）
-          4. Costas 符号速率环精跟踪
-          5. 硬判决 → 64-bit 滑窗汉明相关帧同步
+        与 :meth:`process` 同链，但返回**软位流**（符号幅度，Viterbi/RS
+        纠错边际所在），且 Costas 环在全流符号上连续跟踪——残余 CFO 不再
+        让星座朝向逐帧漂移、帧网格滑动，**连续 VCDU 流（连帧）由此可解**
+        （2026-11-03 连帧破层的机制修复；闭环全流只需跑一遍，不再逐锚点重扫）。
+
+        构造参数 ``rrc_alpha`` / ``use_gardner`` 决定是否启用匹配滤波与
+        Gardner 定时闭环（真录链推荐 0.6/False+前馈；合成矩形脉冲链保持
+        None/False）。``max_hamming`` 覆盖同步捕获阈值（松阈值 + ASM 验证
+        是连帧扫描的标准姿势，见 :meth:`_find_frames`）。
 
         返回:
-            FrameCandidate 列表（按汉明距离排序）；无信号时空列表（诚实空态）。
+            (soft_bits, candidates)。soft_bits 为 float64 位串（2N,），
+            顺序 I,Q,I,Q…，正负即硬判决、幅度即置信度；无信号时 ([], [])。
         """
         iq = np.asarray(iq, dtype=np.complex128)
         if iq.size < self.sps * SYNC_SYMBOLS:
-            return []
+            return np.empty(0, dtype=np.float64), []
 
         # 1. AGC
         iq = self._agc(iq)
@@ -483,15 +586,41 @@ class LrptDemodulator:
             t = np.arange(iq.size, dtype=np.float64) / self.fs
             iq = iq * np.exp(-1j * 2.0 * math.pi * cfo_hz * t)
 
-        # 3. 前馈定时恢复 + 符号抽取
-        bits, _offset = self._recover_symbols(iq)
-        if bits.size < SYNC_BITS:
-            return []
+        # 3. RRC 匹配滤波（真录脉冲成型；合成矩形脉冲链默认关闭）
+        src = iq
+        if self._rrc_taps is not None:
+            src = np.convolve(iq, self._rrc_taps, mode="same")
 
-        # 4. Costas 符号速率精跟踪（在符号上跑）
-        #    （这里 bits 已经是硬判决，Costas 主要在复符号域跑；
-        #     为保持简单，粗同步已在 _recover_symbols 完成，Costas 留作
-        #     后续细化；本轮前馈定时 + FFT CFO 已足够闭环。）
+        # 4. 定时恢复：Gardner 闭环（实验）或前馈 sps 偏移扫描（默认）
+        if self.use_gardner:
+            syms = self._gardner_sample(src)
+        else:
+            syms, _offset = self._recover_soft_symbols(src)
+        if syms.size < SYNC_SYMBOLS:
+            return np.empty(0, dtype=np.float64), []
 
-        # 5. 帧同步
-        return self._find_frames(bits)
+        # 5. Costas 符号速率载波跟踪（闭环，全流连续）
+        syms = self._costas_track_symbols(syms)
+
+        # 6. 软位流（I/Q 幅度）+ 硬判决 → 帧同步
+        soft = np.empty(syms.size * 2, dtype=np.float64)
+        soft[0::2] = np.real(syms)
+        soft[1::2] = np.imag(syms)
+        bits = (soft > 0.0).astype(np.uint8)
+        return soft, self._find_frames(bits, max_hamming=max_hamming)
+
+    def process(self, iq: np.ndarray) -> List[FrameCandidate]:
+        """对一段复基带 IQ 做完整 QPSK 解调 + 帧同步。
+
+        流程（机制见学习笔记 §2.1/§2.2）：
+          1. AGC（RMS 归一化）
+          2. FFT 粗频偏估计 + 校正
+          3. 前馈定时恢复（多探点评分选 sps 偏移）
+          4. Costas 符号速率环精跟踪（闭环，全流连续）
+          5. 硬判决 → 64-bit 滑窗汉明相关帧同步
+
+        返回:
+            FrameCandidate 列表（按汉明距离排序）；无信号时空列表（诚实空态）。
+        """
+        _soft, cands = self.demodulate_soft(iq)
+        return cands

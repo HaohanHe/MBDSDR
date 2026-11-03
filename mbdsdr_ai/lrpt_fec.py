@@ -141,11 +141,17 @@ def _build_transitions(poly1: int = CCSDS_POLY1,
 
 _NEXT_STATE, _OUTPUT = _build_transitions()
 
+# 向量化 ACS 预计算：分支度量符号表 + 前驱对索引。
+# ns = ((s<<1)|b) & 63 → ns=2k+b 的前驱恰是 s=k 与 s=k+32（同 b）。
+_BRANCH_SIGN0 = (2.0 * _OUTPUT[:, :, 0].astype(np.float64) - 1.0)  # (64,2)
+_BRANCH_SIGN1 = (2.0 * _OUTPUT[:, :, 1].astype(np.float64) - 1.0)  # (64,2)
+_K_IDX = np.arange(32, dtype=np.int32)                             # k = 0..31
+
 
 def viterbi_decode(soft_bits: np.ndarray,
                    poly1: int = CCSDS_POLY1,
                    poly2: int = CCSDS_POLY2) -> np.ndarray:
-    """Viterbi K=7 r=1/2 软判决译码（ACS + 全帧回溯）。
+    """Viterbi K=7 r=1/2 软判决译码（向量化 ACS + 全帧回溯）。
 
     参数:
         soft_bits: 软判决位串，形状 (2N,)，顺序 c0,c1,c0,c1,...。
@@ -160,6 +166,12 @@ def viterbi_decode(soft_bits: np.ndarray,
     K-1 个符号（viterbi27.cpp:40 的 cc_decoder_in.work），对带尾比特的
     CCSDS 流可忽略。译码输出剥除末尾 K-1=6 个尾比特。
 
+    实现（2026-11-03 向量化）：ACS 内层 64 状态 × 2 分支的 Python 双层
+    循环改为 numpy 前驱对比较——ns=2k+b 的两个前驱 s=k/k+32 一次
+    np.where 完成取最大 + tie-break（并列取小 s，与旧实现「严格大于才
+    替换、s 升序遍历」的幸存者一致，逐位输出不变）。单帧 1.4s → 0.3s 量级，
+    连帧扫描几百帧才有预算。
+
     返回:
         译码后信息位 (0/1)，形状 (N,)（不含尾比特）。
     """
@@ -169,10 +181,6 @@ def viterbi_decode(soft_bits: np.ndarray,
     n_pairs = soft.size // 2
     nstates = NUM_STATES
 
-    # 转移表（用默认多项式预计算）
-    next_st = _NEXT_STATE
-    out_tab = _OUTPUT
-
     # 初始化路径度量：全 ∞，state 0 = 0
     path_metric = np.full(nstates, -1e18, dtype=np.float64)
     path_metric[0] = 0.0
@@ -180,28 +188,36 @@ def viterbi_decode(soft_bits: np.ndarray,
     # 幸存路径历史：history[t, s] = 从哪来的状态（用于回溯）
     history = np.zeros((n_pairs, nstates), dtype=np.int32)
 
+    # 预取符号表列（b=0 / b=1），内循环不再触表
+    sgn0_b0 = _BRANCH_SIGN0[:, 0]
+    sgn1_b0 = _BRANCH_SIGN1[:, 0]
+    sgn0_b1 = _BRANCH_SIGN0[:, 1]
+    sgn1_b1 = _BRANCH_SIGN1[:, 1]
+
     for t in range(n_pairs):
         s0 = soft[2 * t]       # c0 的软值
         s1 = soft[2 * t + 1]   # c1 的软值
-        new_metric = np.full(nstates, -1e18, dtype=np.float64)
-
-        for s in range(nstates):
-            if path_metric[s] < -1e17:
-                continue
-            for b in (0, 1):
-                ns = next_st[s, b]
-                # 分支度量：期望 c0=out_tab[s,b,0], c1=out_tab[s,b,1]
-                # reward = (2*c0-1)*s0 + (2*c1-1)*s1
-                # （期望 c=1 时 reward=+s0；期望 c=0 时 reward=-s0）
-                # 注意：out_tab 是 uint8，必须先转 int 避免 0-1 下溢成 255
-                c0 = int(out_tab[s, b, 0])
-                c1 = int(out_tab[s, b, 1])
-                reward = (2 * c0 - 1) * s0 + (2 * c1 - 1) * s1
-                total = path_metric[s] + reward
-                if total > new_metric[ns]:
-                    new_metric[ns] = total
-                    history[t, ns] = s  # 记录前驱状态
-
+        # 128 分支度量一次算出（b=0/b=1 两个 (64,) 向量）
+        t0 = path_metric + sgn0_b0 * s0 + sgn1_b0 * s1
+        t1 = path_metric + sgn0_b1 * s0 + sgn1_b1 * s1
+        lo0, hi0 = t0[:32], t0[32:]
+        lo1, hi1 = t1[:32], t1[32:]
+        take0 = lo0 >= hi0    # 并列取小 s（=旧实现先到先得）
+        take1 = lo1 >= hi1
+        new_metric = np.empty(nstates, dtype=np.float64)
+        new_metric[0::2] = np.where(take0, lo0, hi0)
+        new_metric[1::2] = np.where(take1, lo1, hi1)
+        hist_row = np.empty(nstates, dtype=np.int32)
+        hist_row[0::2] = np.where(take0, _K_IDX, _K_IDX + 32)
+        hist_row[1::2] = np.where(take1, _K_IDX, _K_IDX + 32)
+        # 旧实现对「两前驱都不可达」的 ns 保持 -1e18 / history=0（从不更新）
+        both_bad = (path_metric[:32] < -1e17) & (path_metric[32:] < -1e17)
+        if both_bad.any():
+            new_metric[0::2] = np.where(both_bad, -1e18, new_metric[0::2])
+            new_metric[1::2] = np.where(both_bad, -1e18, new_metric[1::2])
+            hist_row[0::2] = np.where(both_bad, 0, hist_row[0::2])
+            hist_row[1::2] = np.where(both_bad, 0, hist_row[1::2])
+        history[t] = hist_row
         path_metric = new_metric
 
     # 回溯：从最终度量最大的状态开始

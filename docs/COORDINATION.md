@@ -34,11 +34,19 @@
 
 ---
 
-## 二、当前在途（2026-11-03 10:30 更新）
+## 二、当前在途（2026-11-03 19:50 更新）
 
 ### 我这边
-- （空）——DVB-S2 LDPC 金样入库 + 仓库外金样收集期炸裂根治（49dc00d）
-  已推，等 CI 裁决
+- **LRPT 连帧破层批**（代码+金样已完成本地验证，待提交推送）：
+  Costas 闭环接入 `demodulate_soft()/process()`、`_find_frames` FFT
+  向量化（全录 225s→<5s）、Viterbi ACS 向量化（1.4s→0.12s/帧，44 例
+  A/B 位级零失配）、松阈值（ham≤8）捕获 + ASM 验证、帧头钉子改 8 朝向
+  轨道。实测 40-80s 宽窗 **16 条 RS 全纠正 VCDU**（旧天花板 2 条）、
+  ASM 91、候选 269。文件：`mbdsdr_ai/lrpt_modem.py`、`mbdsdr_ai/lrpt_fec.py`、
+  `tests/test_lrpt_meteor_real_golden.py`（连帧金样 4 项）、
+  `docs/learn/capability-map.md`。**全绿面**：真录金样 12/12 +
+  合成链/跨实现/satdump 21/21。注意：lrpt 真录金样文件现在跑一轮
+  ~3.5 min（连帧 fixture 重）。
 
 ### TRAE 那边（观察到的在途，未打扰）
 - `scripts/smoke_exe_no_popup.ps1`（??）——弹窗冒烟脚本在途
@@ -81,11 +89,14 @@
   裁判，10/10 参考帧 + 全帧 CRC 语义钉死
 - 本机自采 OTA 解码记录仍为零（负证据不撤销，对外表述按 capability-map 口径）
 - 便携包需验证「真 USB 直连构建」打出的包（非 stub）
-- bch 独立 KAT（dvbs2_bch_vectors.json）仍 workspace-only，CI 上 21 模式
-  golden 诚实跳过——是否同款入库留给 DVB-S2 线定（ldpc 的先例在
-  tests/golden/dvbs2_ldpc_vectors.json）
-- LRPT 图像段重组真录链（VCDU→M_PDU→空间包→JPEG 段）——被连帧能力阻塞
-  （残余 CFO→帧网格滑动，需 Costas 闭环接入 process()）
+- ~~bch 独立 KAT（dvbs2_bch_vectors.json）仍 workspace-only~~ **已销
+  （347d09f）**：BCH 独立 KAT + 标准参数摘录入库
+- ~~LRPT 图像段重组真录链——被连帧能力阻塞~~ **阻塞已解除（本批）**：
+  16 条 VCDU/宽窗素材已足（全过境约 2-3 倍）；重组器
+  （VCDU→M_PDU→空间包→JPEG 段）待认领/下一轮
+- LRPT 连帧的两个诚实未启用件：RRC 匹配滤波（sps=2 前馈下反而降 VCDU）、
+  Gardner 定时环（原型 τ 发散）——留档 lrpt_modem.py 开关默认关，若做
+  4+ sps 重采样 + 修好的 Gardner 可再战（预期再抬 VCDU 上限）
 
 ---
 
@@ -98,12 +109,15 @@
 4. ~~CI 观察项：d1efe19 mbdsdr_ai 红~~ **已销（49dc00d）**
 5. **[两边]** 共有文件再冲突时按 hunk 拆分提交（脚本先例：
    extract_hunk 姿势，见 2026-11-02 会话记录）
-6. **[我]** LRPT 协议栈真录破零已落（594b769：2 条 RS 全纠正 VCDU +
-   比特约定裁决 pair-swap）；下一步 C++ LRPT 双实现对拍（cpp 侧已有
-   lrpt_demod/lrpt_fec，参照 FT8/ADS-B cross_impl 姿势共享 fixture）
+6. ~~[我] C++ LRPT 双实现对拍~~ **已闭环（8b66410）**
 7. **[认领]** P2 前端缺口（gaplist 第三批）：频率轴滚轮缩放、FFT 仪器化
    （RBW/瀑布时间跨度）——文件在 spectrum_widget.py，星象仪/彩带会话
    若要做手势线请认领，否则协议真值线下一轮接手
+8. **[我，下一轮首选]** LRPT 图像段重组真录链：VCDU→M_PDU→空间包→
+   JPEG 段，宽窗 16 条 VCDU 素材已足——**能出真录图像就是"可证"级
+   硬通货**（用户战略：可一键复现的真实链路 > 奖状）
+9. **[认领]** LRPT 连帧上限再抬：4+ sps 重采样 + 修 Gardner 环（τ 发散
+   现象在 capability-map）+ RRC 匹配滤波复测——预期把 26% 帧可解率再推高
 
 ---
 
@@ -142,3 +156,8 @@
   **硬规矩追加：任何批量直跑测试 exe 的脚本必须强制 `MBDSDR_NULL_AUDIO=1`
   （可同时保持 PATH 干净做 DLL 审计）**，改脚本后必须等旧 run 结束/掐掉
   再起新 run，否则用户机器上双鬼拍门。
+- 2026-11-03 19:50（WorkBuddy）：LRPT 连帧破层批完成本地验证
+  （Costas 闭环 + FFT 帧同步 + Viterbi 向量化 + 松阈值/ASM 验证，
+  宽窗 16 条 VCDU 对旧 2 条）；悬账销 2 项（BCH KAT 入库 347d09f、
+  C++ LRPT 对拍 8b66410）；队列加图像段重组（可证级硬通货）与
+  连帧上限再抬两条。

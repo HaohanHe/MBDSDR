@@ -16,7 +16,8 @@ bab41fadd584e0296df0cdf8 钉真值；79MB 第三方字节不入库，按需下�
 
 钉扎口径（2026-11-03 协议栈真录破零后）：
 - **同步层**（QPSK 解调 + 64-bit 同步字相关）在真实 OTA 上验证：ham=0
-  帧存在 + 帧头前缀逐字命中 + 候选数下限 ratchet。
+  帧存在 + 帧头命中真值朝向轨道（8 朝向之一；接收机星座朝向合法变动）+
+  候选数下限 ratchet。
 - **解码层**（Viterbi/解扰/RS/VCDU）同日破零：真录软判决位流过完整协议栈
   解出 **2 条 RS 全纠正 VCDU**（4 块全可纠，892B 载荷），ASM 0x1ACFFC1D
   逐字复原。钉扎：VCDU 数地板 + 两条载荷头 32B 逐字 + ASM 约定裁决。
@@ -26,6 +27,11 @@ bab41fadd584e0296df0cdf8 钉真值；79MB 第三方字节不入库，按需下�
 （c0/c1 互换 ≡ poly1↔poly2）后才能过 Viterbi；合成链自洽（不 swap），
 两套约定此前悬而未决（lrpt_fec.py 注释），现由真录裁决。真软判决（符号
 幅度）是 RS 纠错边际的关键——硬 ±1 判决下同样帧 RS 直接不可纠。
+
+**连帧破层（2026-11-03 续）**：Costas 闭环接入 + 帧同步 FFT 向量化 +
+松阈值（ham≤8）捕获与 ASM 验证后，40-80s 宽窗 **16 条 RS 全纠正 VCDU**
+（旧锚点窗 2 条）、ASM 命中 91、帧候选 269（≈77% 帧同步可辨）。详见
+文件末「连帧破层」段与 capability-map。
 """
 from __future__ import annotations
 
@@ -53,7 +59,14 @@ SRC_SR = 187_500
 RESAMP_SR = 144_000     # 2 sps @ 72 ksym/s
 SYM_RATE = 72_000
 WINDOW = (52.0, 62.0)   # 过境中段（实测同步锁住的窗口）
-HEAD_PREFIX = "050bd1af"   # ham=0 帧头前 4 字节（同步层真值）
+HEAD_PREFIX = "050bd1af"   # ham=0 帧头前 4 字节（同步层真值，基准朝向）
+#: 帧头的 8 朝向轨道（4 相位 × I/Q swap）。帧头原始字节随接收机星座
+#: 朝向（Costas 锁相点 / I/Q 定义）在轨道内变动——钉轨道而非单点，
+#: 语义级真值由协议栈侧 VCDU 载荷头逐字钉背书（PIN_VCDU_HEADS）。
+HEAD_ORBIT = (
+    "050bd1af", "0a07e25f", "a0ad48f5", "afa17b05",
+    "faf42e50", "f5f81da0", "5f52b70a", "505e84fa",
+)
 
 
 def _cache_path() -> str:
@@ -112,12 +125,17 @@ def test_real_recording_syncs_with_hamming_zero(cands):
 
 
 def test_real_recording_frame_head_matches_truth(cands):
-    """ham=0 帧头前缀逐字命中（同步层真值，防解调回归）。"""
+    """ham=0 帧头前缀命中真值朝向轨道（同步层真值，防解调回归）。
+
+    帧头字节随接收机星座朝向在 8 朝向轨道内变动（Costas 锁相点不同、
+    I/Q 定义不同都合法）；轨道外即回归。轨道 8 个值由 4 相位 × swap
+    作用于基准 050bd1af 生成（2026-11-03 实测枚举）。
+    """
     best = [c for c in cands if c.hamming == 0]
     assert best, "无 ham=0 帧"
     head = best[0].frame_bytes[:4].hex()
-    assert head == HEAD_PREFIX, \
-        f"真录帧头漂移：期望 {HEAD_PREFIX}，实际 {head}"
+    assert head in HEAD_ORBIT, \
+        f"真录帧头漂移：{head} 不在真值朝向轨道 {HEAD_ORBIT}"
 
 
 def test_real_recording_candidate_floor(cands):
@@ -264,3 +282,134 @@ def test_pair_swap_convention_adjudicated(stack):
     valid, asm_hits = stack
     assert asm_hits >= 2, "约定裁决失守：pair-swap 路径无 ASM"
     assert len(valid) >= 2, "约定裁决失守：pair-swap 路径无全纠正 VCDU"
+
+
+# --------------------------------------------------------------------------- #
+# 连帧破层（2026-11-03 续）：Costas 闭环 + 松阈值捕获 + ASM 验证
+# --------------------------------------------------------------------------- #
+#
+# 旧边界：锚点 ±0.11s 步进仅邻近 2 帧可解（前馈解调残余 CFO → 星座朝向
+# 逐帧漂移）。破层机制（本批）：
+#   1. Costas 环接入全流（process/demodulate_soft）——载波相位连续跟踪；
+#   2. `_find_frames` FFT 向量化——全录逐位滑窗 ~225s 跑不动，向量化后
+#      流扫描成为可能；
+#   3. **松阈值捕获（ham≤8）+ ASM 验证**——硬判决同步丢卷积编码增益，
+#      ham≤4 漏掉 Viterbi 仍可纠的帧；ASM（0x1ACFFC1D）是完美验证器，
+#      松阈值假接受（期望 ~0.002/窗）被它归零。
+# 实测（40-80s 宽窗）：候选 269（≈77% 帧同步可辨）→ ASM 91 → RS 全纠正
+# VCDU **16 条**（旧 10s 窗天花板 2 条）。ham≤10/12 不再增益——天花板
+# 是信道软判决质量，不是捕获阈值。RRC 匹配滤波在 sps=2 前馈采样下反而
+# 降低 VCDU（10 vs 16），Gardner 原型环 τ 发散（gain 任意符号都漂），
+# 二者均诚实留档 lrpt_modem.py/机制笔记，未启用。
+
+CONSEC_WINDOW = (40.0, 80.0)   # 连帧扫描宽窗（过境主体）
+
+#: 连帧 VCDU 载荷头 32B 钉子（按位置前 3 条，均 VCDU version=1）。
+#: 另有 1 条 head=f376… version=3 疑为 RS 误纠（RS 偶发 miscorrect），
+#: 不入钉子；16 条中 14 条 version=1 + 1 条 638e… version=1 + 1 条误纠。
+PIN_CONSEC_VCDU_HEADS = (
+    "40e300632acee0f446311926e82e4b1d2ad280909f96b7809261e9b956ca819c",
+    "40e60141ece73de2c2094720e34ccb48ef1d5faddb9c0d779153afe69aa26482",
+    "40f200f9fb643844a55bcf9ecb6f04764ac14f6c02d30e053f7b2442ec2ac0fa",
+)
+
+
+def _suppress_ghosts(cands, radius: int = 32):
+    """NMS：±radius 符号内只留汉明最优（滑窗 ±1 位鬼影保险）。
+
+    本地实测 269→269 无鬼影（假接受期望 ~0.002，算术一致）；保留为
+    跨平台保险，代价可忽略。真帧间隔 8198 符号，radius=32 绝不误伤。
+    """
+    kept = []
+    for c in sorted(cands, key=lambda c: c.hamming):
+        if all(abs(c.sync_symbol_index - k.sync_symbol_index) > radius
+               for k in kept):
+            kept.append(c)
+    return kept
+
+
+@pytest.fixture(scope="module")
+def consecutive():
+    """连帧全栈解码（模块级缓存）。
+
+    链：宽窗 IQ → demodulate_soft（AGC→粗 CFO→前馈定时→**Costas 闭环**
+    →软位流）→ ham≤8 松阈值帧同步 → NMS → pair-swap± → Viterbi →
+    解扰 → RS(255,223)×4。
+
+    返回: (valid, asm_hits, n_cands) —— valid 为 RS 全纠正 892B 载荷列表。
+    """
+    from scipy.io import wavfile
+    from scipy.signal import resample_poly
+
+    sr, data = wavfile.read(_ensure_wav())
+    iq = (data[:, 0].astype(np.float64)
+          + 1j * data[:, 1].astype(np.float64)) / 32768.0
+    iq = resample_poly(iq, 96, 125)
+    t0, t1 = CONSEC_WINDOW
+    win = iq[int(t0 * RESAMP_SR):int(t1 * RESAMP_SR)].astype(np.complex128)
+
+    dem = LrptDemodulator(fs=RESAMP_SR, sym_rate=SYM_RATE, costas_bw=0.01)
+    soft, cands = dem.demodulate_soft(win, max_hamming=8)
+    kept = _suppress_ghosts(cands)
+
+    decoder = LrptCaduDecoder()
+    valid = []
+    asm_hits = 0
+    for c in kept:
+        start = c.sync_symbol_index * 2
+        end = min(start + NEED_CODED_BITS, soft.size)
+        if end - start < NEED_CODED_BITS - 64:
+            continue
+        sl = soft[start:end]
+        for s in (_pair_swap(sl), -_pair_swap(sl)):
+            try:
+                info = viterbi_decode(s)
+            except Exception:  # noqa: BLE001
+                continue
+            nbytes = (info.size + 7) // 8
+            padded = np.zeros(nbytes * 8, dtype=np.uint8)
+            padded[:info.size] = info
+            raw = np.packbits(padded).tobytes()
+            if raw[:4] != ASM:
+                continue
+            asm_hits += 1
+            try:
+                payload, errs = decoder.decode_cadu(raw[:CADU_SIZE])
+            except Exception:  # noqa: BLE001
+                continue
+            if all(e >= 0 for e in errs) and len(payload) == 892:
+                valid.append(payload)
+            break
+    return valid, asm_hits, len(kept)
+
+
+def test_real_recording_consecutive_vcdu_floor(consecutive):
+    """连帧地板：至少 12 条 RS 全纠正 VCDU（实测 16，留跨平台浮点余量）。
+
+    对照旧天花板：10s 锚点窗 2 条。连帧 = 宽窗连续 VCDU 流。
+    """
+    valid, _, _ = consecutive
+    assert len(valid) >= 12, f"连帧 VCDU 数回退：{len(valid)} < 12（实测 16）"
+
+
+def test_real_recording_consecutive_asm_floor(consecutive):
+    """连帧 ASM 命中地板：≥80（实测 91）——Viterbi 后 0x1ACFFC1D 逐字复原。"""
+    _, asm_hits, _ = consecutive
+    assert asm_hits >= 80, f"连帧 ASM 命中回退：{asm_hits} < 80（实测 91）"
+
+
+def test_real_recording_consecutive_frame_density(consecutive):
+    """连帧密度地板：宽窗候选 ≥200（实测 269，≈77% 帧同步可辨）。
+
+    钉住「帧被连续找到」而非锚点邻近几帧——连帧能力的直接证据。
+    """
+    _, _, n_cands = consecutive
+    assert n_cands >= 200, f"连帧候选密度回退：{n_cands} < 200（实测 269）"
+
+
+def test_real_recording_consecutive_heads_pinned(consecutive):
+    """连帧 VCDU 载荷头 32B 逐字钉死（按位置前 3 条，防解码链语义漂移）。"""
+    valid, _, _ = consecutive
+    heads = {p[:32].hex() for p in valid}
+    for pin in PIN_CONSEC_VCDU_HEADS:
+        assert pin in heads, f"连帧 VCDU 载荷头漂移：{pin} 不在 {heads}"
