@@ -875,13 +875,17 @@ def _render_wf_only(painter: QPainter, state: _PlotState, w: int, h: int):
     """下方瀑布图 widget 的完整绘制（整个 widget 即瀑布画布）。
 
     复用持久增量画布 _draw_waterfall；无数据时画布为空白背景，不画假噪声。
+    顶缘画频段彩带条（与谱面同几何同色，schema"谱面+瀑布色带"的瀑布半边）。
     """
     panel = state.panel
     bg = QColor(panel.color_bg)
     painter.fillRect(0, 0, w, h, bg)
-    if state.show_waterfall and h > 0:
+    if h > 0:
         wf_rect = QRectF(0, 0, w, h)
-        _draw_waterfall(painter, wf_rect, state)
+        if state.show_waterfall:
+            _draw_waterfall(painter, wf_rect, state)
+        # 顶缘频段彩带是视口装饰不是数据，瀑布关着也画（频率锚不丢）
+        _draw_bandplan_wf_strip(painter, state, wf_rect)
 
 
 def _draw_grid(painter, rect, grid):
@@ -1043,6 +1047,32 @@ def _draw_bandplan(painter, state, rect, overlay=False):
             painter.setPen(QPen(lc, 1))
             painter.drawText(QPointF(tx_map[k], rect.y() + rect.height() - 8.0),
                              str(b["label"]))
+
+
+def _draw_bandplan_wf_strip(painter, state, rect):
+    """频段彩带瀑布顶缘条（bandplan.json schema 承诺的"瀑布色带"半边）。
+
+    与谱面 overlay 色条同几何（_band_x_range 同视口）同色（_band_color）
+    同强调语义（悬停/选中提亮，状态由共享 _PlotState 自动同步）；
+    瀑布向下滚动，顶缘条是它唯一的频段锚。
+    """
+    if not state.show_bandplan or not state.bandplan:
+        return
+    view_center = _view_center_hz(state)
+    span = state.panel.generator.sample_rate_hz
+    hover = getattr(state, "bandplan_hover", None)
+    selected = getattr(state, "bandplan_selected", None)
+    painter.setPen(Qt.NoPen)
+    for i, b in enumerate(state.bandplan):
+        rng = _band_x_range(rect, view_center, span,
+                            float(b["start_hz"]), float(b["stop_hz"]))
+        if rng is None:
+            continue
+        x0, x1 = rng
+        strip = QColor(_band_color(b))
+        strip.setAlpha(210 if i == hover else (180 if i == selected else 130))
+        painter.setBrush(QBrush(strip))
+        painter.drawRect(QRectF(x0, rect.y(), x1 - x0, 4.0))
 
 
 def _draw_bookmark_tags(painter, state, rect):

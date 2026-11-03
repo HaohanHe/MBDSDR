@@ -16,7 +16,9 @@ tests/test_spectrum_bandplan.py
      优先 (子带盖母带)、leaveEvent 清态; 单击选中常驻描边、点空白清除、
      调谐语义不变;
   5. 面板集成/视觉: SpectrumPanel offscreen 三档缩放渲染, 色条像素落在
-     预期分类色上 (z-order 回归), PNG 存证 .tmp-tool-results/bandplan_shots/。
+     预期分类色上 (z-order 回归), PNG 存证 .tmp-tool-results/bandplan_shots/;
+  6. 瀑布顶缘色条: schema "谱面+瀑布色带" 的瀑布半边——顶缘 4px 条带内
+     分类色/带外干净/开关语义/瀑布画布关闭时照画 (频率锚)。
 
 运行:
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_spectrum_bandplan.py -v
@@ -518,3 +520,77 @@ class TestVisualZoomLevels:
                       if (c.green() > c.red() + 25 and c.green() > c.blue() + 25)
                       or (c.red() > c.green() + 25 and c.red() > c.blue() + 25))
         assert colored <= len(out) * 0.1, "带外不应残留彩带色条"
+
+
+# ---------------------------------------------------------------------------
+# 瀑布顶缘频段色条（bandplan.json schema "谱面+瀑布色带" 的瀑布半边）
+# ---------------------------------------------------------------------------
+class TestWaterfallStrip:
+    """瀑布顶缘 4px 彩带条与谱面 overlay 同几何/同色/同开关语义。
+
+    视口取低轨下行档（135.99-138.99 MHz）：带内有航空绿 136.3-136.9，
+    带外 138.5-138.9 应干净；不推 IQ——顶缘条是视口装饰不依赖数据。
+    """
+
+    CENTER, SPAN = 137.4875e6, 3.0e6
+
+    def _render(self, name):
+        panel = SpectrumPanel()
+        panel.resize(960, 320)
+        panel.generator.center_freq_hz = self.CENTER
+        panel.generator.sample_rate_hz = self.SPAN
+        panel.show()
+        app.processEvents()
+        panel.repaint()
+        wf = panel._wf_plot
+        img = wf.grab().toImage()
+        os.makedirs(_SHOT_DIR, exist_ok=True)
+        img.save(os.path.join(_SHOT_DIR, name))
+        return panel, wf, img
+
+    def _samples(self, img, wf, f0, f1):
+        w = wf.width()
+        f_left = self.CENTER - self.SPAN / 2.0
+        x0 = int((f0 - f_left) / self.SPAN * w)
+        x1 = int((f1 - f_left) / self.SPAN * w)
+        return [img.pixelColor(x, 1)
+                for x in range(max(0, x0 + 2), min(w, x1 - 2), 2)]
+
+    @staticmethod
+    def _colored(c):
+        return ((c.green() > c.red() + 25 and c.green() > c.blue() + 25)
+                or (c.red() > c.green() + 25 and c.red() > c.blue() + 25)
+                or (c.blue() > c.red() + 25 and c.blue() > c.green() + 25))
+
+    def test_top_strip_band_hue_and_clean_outside(self):
+        _panel, wf, img = self._render("wf_strip_leo.png")
+        green = self._samples(img, wf, 136.3e6, 136.9e6)
+        assert green, "航空绿带内采样为空（应落在视口内）"
+        hits = sum(1 for c in green
+                   if c.green() > c.red() + 25 and c.green() > c.blue() + 25)
+        assert hits > len(green) * 0.5, "瀑布顶缘缺航空绿色条"
+        out = self._samples(img, wf, 138.5e6, 138.9e6)
+        colored = sum(1 for c in out if self._colored(c))
+        assert colored <= max(1, len(out) * 0.1), "瀑布顶缘带外渗出彩带"
+
+    def test_toggle_off_clears_strip(self):
+        panel, wf, _img = self._render("wf_strip_off.png")
+        panel._state.show_bandplan = False
+        panel.repaint()
+        app.processEvents()
+        img = wf.grab().toImage()
+        green = self._samples(img, wf, 136.3e6, 136.9e6)
+        colored = sum(1 for c in green if self._colored(c))
+        assert colored <= max(1, len(green) * 0.1), "关开关后瀑布顶缘仍有色条"
+
+    def test_strip_survives_waterfall_off(self):
+        """瀑布画布关掉时顶缘条照画——它是频率锚不是数据。"""
+        panel, wf, _img = self._render("wf_strip_nocanvas.png")
+        panel._state.show_waterfall = False
+        panel.repaint()
+        app.processEvents()
+        img = wf.grab().toImage()
+        green = self._samples(img, wf, 136.3e6, 136.9e6)
+        hits = sum(1 for c in green
+                   if c.green() > c.red() + 25 and c.green() > c.blue() + 25)
+        assert hits > len(green) * 0.5, "瀑布关闭时顶缘频段锚丢失"
