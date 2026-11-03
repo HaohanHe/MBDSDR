@@ -1333,6 +1333,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._show_trajectories = show
         self.update()
 
+    def set_show_eqgrid(self, show: bool):
+        """赤道网格（RA 时圈 + 赤纬圈）开关。"""
+        self._show_eqgrid = bool(show)
+        self.update()
+
     def reset_view(self):
         """重置摄像机：回到天顶居中 + FOV=120°，并解除摄像机锁定。
 
@@ -3697,6 +3702,24 @@ class RFSkyViewPanel(QFrame):
         b.setToolTip("重置摄像机：回到天顶居中 + FOV=120°，并解除摄像机锁定")
         b.clicked.connect(self.reset_view)
         bar.addWidget(b)
+        bar.addSpacing(16)
+        # 图层开关（Stellarium 右缘 layer toggles 同职能；顺着本视图既有底部
+        # 控制条 seam 落，不另起右缘轨）。热力图由数据驱动，不在此手控。
+        self._layer_buttons: Dict[str, QPushButton] = {}
+        for label, attr, setter in (
+                ("方位网格", "_show_grid", self.sky_view.set_show_grid),
+                ("赤道网格", "_show_eqgrid", self.sky_view.set_show_eqgrid),
+                ("罗盘", "_show_compass", self.sky_view.set_show_compass),
+                ("轨迹", "_show_trajectories",
+                 self.sky_view.set_show_trajectories)):
+            lb = QPushButton(label)
+            lb.setCheckable(True)
+            lb.setChecked(bool(getattr(self.sky_view, attr)))
+            lb.setToolTip(f"显示/隐藏{label}图层")
+            lb.clicked.connect(
+                lambda _c=False, s=setter, btn=lb: s(btn.isChecked()))
+            bar.addWidget(lb)
+            self._layer_buttons[label] = lb
         self.layout().addWidget(control_bar)
         self._offset = 0.0
         # 快转时 UTC 标签随模拟时钟滚动（500ms 刷新足够读出秒级流动）
