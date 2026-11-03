@@ -6,7 +6,9 @@
 #include "dsp/lrpt_fec.h"
 #include <QtTest/QtTest>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
+#include <optional>
 #include <vector>
 
 using namespace mbdsdr;
