@@ -2,8 +2,14 @@
 """FY-4 DVB-S2 符号级链接与 FY-3 AHRPT 测试（合成向量，非硬件）。
 
 FY-4 测试构造 BBFRAME→BB 加扰→BCH/LDPC→QPSK PLFRAME，再验证真实接收
-顺序 PL 解扰→软 LLR→LDPC/BCH→BB 解扰→BBHEADER。这里没有 raw IQ 同步、
-DATAFIELD→VCDU 或真实 OTA 验收。
+顺序 PL 解扰→软 LLR→LDPC/BCH→BB 解扰→BBHEADER。
+
+缺口状态（2026-11-04 P3.1 更新）：
+  * ~~raw IQ 同步~~ —— 已补：dvbs2_pl.find_sof_candidates（非相干滑动
+    相关 + NMS，ETSI §5.5.2.1 原文核对 SOF=18D2E82），端到端钉扎见
+    tests/test_dvbs2_sof_sync.py（raw 流→SOF→解帧→FECFRAME 逐位一致）；
+  * DATAFIELD→VCDU 重组仍未实现；
+  * 真实 OTA IQ 样本未获得（最小采样条件见 test_dvbs2_sof_sync.py 头）。
 
 运行: py -3.14 -m pytest tests/test_fengyun_dvbs2.py -q
 """

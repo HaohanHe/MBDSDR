@@ -643,6 +643,58 @@ def decode_qpsk_plframe(
     )
 
 
+# ---------------------------------------------------------------------------
+# SOF 搜索层（raw 符号流 → PLFRAME 起点候选）
+# ---------------------------------------------------------------------------
+def sof_reference_symbols() -> np.ndarray:
+    """SOF 26 个 π/2BPSK 参考符号（ETSI §5.5.2 调制规则，与 PLHEADER 同源）。"""
+    bits = np.zeros(PLHEADER_SYMBOLS, dtype=np.uint8)
+    bits[:SOF_SYMBOLS] = SOF_BITS
+    return modulate_plheader(bits)[:SOF_SYMBOLS]
+
+
+def find_sof_candidates(
+    symbols: np.ndarray,
+    *,
+    metric_threshold: float = 0.8,
+    nms_radius: int = SOF_SYMBOLS,
+) -> list:
+    """raw 符号流中搜索 SOF（Start of Frame，26 符号）起点候选。
+
+    非相干滑动相关：``metric[k] = |Σ s[k+i]·conj(ref[i])| / 26``——
+    对任意恒定相位旋转不变（Costas 锁相点未定也能锁帧），对慢变 CFO
+    （26 符号内相位斜坡 ≪ 1 rad）稳健。候选按 metric 降序做 NMS
+    （±nms_radius 内只留峰）。返回 ``[(start_index, metric)]`` 按起点
+    升序；找不到返回空列表（诚实空态，不凑候选）。
+
+    门限口径：加扰 QPSK 数据区上 metric 近似瑞利，P(metric>t) ≈
+    exp(−26t²)——t=0.65 时每帧期望假阳性 ~0.5 个（实测撞见），
+    t=0.8 时 ~6e-8·帧长，百万帧一遇；真帧无噪 metric=1.0，
+    CFO 0.001 rad/符号时 ≥0.999，门限对真帧宽松、对假帧苛刻。
+    找帧后仍应由 ``parse_plframe`` 的 SOF 汉明距离与 PLS 解码兜底
+    验证（本函数只做候选，不做判决）。
+    """
+    s = _symbols_array(symbols, "symbols")
+    if len(s) < SOF_SYMBOLS:
+        return []
+    ref = sof_reference_symbols()
+    n = len(s) - SOF_SYMBOLS + 1
+    # 向量化滑动相关：对每个起点做 26 符号共轭内积
+    windows = np.lib.stride_tricks.sliding_window_view(s, SOF_SYMBOLS)
+    metrics = np.abs(windows @ ref.conj()) / SOF_SYMBOLS
+    hits = np.flatnonzero(metrics >= metric_threshold)
+    if hits.size == 0:
+        return []
+    # NMS：按 metric 降序吞噬半径内的次峰
+    order = hits[np.argsort(-metrics[hits])]
+    kept: list = []
+    for idx in order:
+        if all(abs(int(idx) - k[0]) > nms_radius for k in kept):
+            kept.append((int(idx), float(metrics[idx])))
+    kept.sort(key=lambda item: item[0])
+    return kept
+
+
 __all__ = [
     "DUMMY_MODCOD", "DecodedQPSKPLFrame", "FECFRAME_BITS", "LayoutSegment",
     "MODCOD_TABLE", "ModcodInfo", "PILOT_INTERVAL_SLOTS", "PILOT_SYMBOLS",
@@ -653,7 +705,8 @@ __all__ = [
     "SLOT_SYMBOLS", "SOF_BITS", "SOF_SYMBOLS", "SOF_VALUE", "build_plframe",
     "build_plheader_bits", "decode_pls", "decode_qpsk_plframe",
     "demap_qpsk_xfecframe", "demodulate_plheader", "encode_pls",
-    "encode_qpsk_plframe", "fecframe_symbol_count", "get_modcod",
-    "map_qpsk_fecframe", "modulate_plheader", "parse_plframe",
+    "encode_qpsk_plframe", "fecframe_symbol_count", "find_sof_candidates",
+    "get_modcod", "map_qpsk_fecframe", "modulate_plheader", "parse_plframe",
     "pl_scrambling_sequence", "plframe_layout", "plframe_symbol_count",
+    "sof_reference_symbols",
 ]
