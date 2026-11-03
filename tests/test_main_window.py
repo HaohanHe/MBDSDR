@@ -222,6 +222,32 @@ class TestPersistence:
         assert s.value("three_column_sizes") is not None
 
 
+# ---------------------------------------------------------------------------
+class TestPlanetariumSkyVisibility:
+    """星象仪形态：从非当前页签进形态，天空不得整片黑（hidden 标记须清）。"""
+
+    def test_enter_from_non_sky_tab_clears_hidden(self, main_window, qapp):
+        lt = main_window.left_tab
+        sky_idx = next(i for i in range(lt.count())
+                       if lt.tabText(i) == "天空模式")
+        other = next(i for i in range(lt.count()) if i != sky_idx)
+        lt.setCurrentIndex(other)
+        _pump(qapp, 50)
+        assert main_window.sky_view.isHidden(), "非当前页签的天空应 hidden"
+        try:
+            main_window.set_app_mode("planetarium")
+            assert not main_window.sky_view.isHidden(), \
+                "进星象仪后天空仍 hidden → 用户看到整片天黑"
+            assert main_window.sky_view.parentWidget() is \
+                main_window._planetarium_sky_slot
+        finally:
+            main_window.set_app_mode("ide")
+            main_window.showNormal()
+            main_window.show()
+            _pump(qapp, 50)
+        assert lt.indexOf(main_window.sky_view) >= 0, "退出后天空应归位左栏"
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main(verbosity=2)

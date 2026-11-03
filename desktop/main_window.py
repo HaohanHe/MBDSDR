@@ -1437,6 +1437,9 @@ class MainWindow(QMainWindow):
             return
         self._sky_restore_info = self._capture_sky_location()
         self._planetarium_sky_layout.addWidget(self.sky_view)
+        # 天空可能从"非当前页签/隐藏 Dock"进来，自带 hidden 标记；reparent 不清它，
+        # 不显式 show 则星象仪整片天黑（只有槽底色）。show 只清自身标记，尺寸归布局。
+        self.sky_view.show()
         # 底部瀑布 reparent（对象身份不变；频谱页签里只剩头部/提示，退出归位）
         wf_slot = self._planetarium_waterfall_slot
         if getattr(self, "spectrum", None) is not None:
