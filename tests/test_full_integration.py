@@ -584,13 +584,14 @@ def test_workflow_module(result: TestResult, agent: MBDSDRAgent):
     try:
         we = WorkflowEngine()
 
-        # 列出现有工作流
+        # 引擎不内置任何固定流程（preset/触发短语已按 A3 删除）：
+        # 全新引擎的工作流表必须为空，且不再有 match_trigger API
         workflows = we.list_workflows()
-        names = [w.get("name") for w in workflows]
-        result.record("列出工作流 >= 3", len(workflows) >= 3, f"实际 {len(workflows)}")
-
-        # 干扰源定位工作流存在
-        result.record("干扰源定位工作流", "interference_localization" in names)
+        result.record("引擎无内置工作流", len(workflows) == 0,
+                      f"实际 {len(workflows)}")
+        result.record("无触发短语 API",
+                      not hasattr(we, "match_trigger")
+                      and not hasattr(we, "_load_presets"))
 
         # 统计
         stats = we.get_stats()

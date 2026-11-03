@@ -111,7 +111,7 @@ class TestSummarySemantics:
 class TestWorkflowProjection:
     def test_step_results_become_child_cards(self):
         payload = {
-            "workflow_name": "ai_sweep_find_stations",
+            "workflow_name": "user_sweep_demo",
             "success": False,
             "step_results": [
                 {"step_id": 1, "tool": "sdr_ai_sweep", "success": True,

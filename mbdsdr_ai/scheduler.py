@@ -81,11 +81,11 @@ class Scheduler:
     使用方式：
         scheduler = Scheduler()
 
-        # 添加定时任务（每小时执行一次 NOAA 卫星接收工作流）
+        # 添加定时任务（目标须为已存在的用户/AI 自定义工作流；引擎无内置流程）
         scheduler.add_task(
-            name="NOAA卫星定时接收",
+            name="自定义工作流定时执行",
             task_type="workflow",
-            target="noaa_apt_receive_decode",
+            target="my_user_workflow",
             schedule_type="interval",
             interval_seconds=3600,
         )

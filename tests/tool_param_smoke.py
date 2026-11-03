@@ -43,7 +43,9 @@ def value_for(pname, schema):
 
     # --- 精确业务字段（优先，避免被通用规则误兜成 test）---
     if n == "workflow_name":
-        return "interference_localization"
+        # 引擎无内置流程（preset 已删）：给一个必然不存在的名字，
+        # 验证「未知名称 → 诚实报错」归 NEED_RESOURCE，而非假装有可跑流程
+        return "__nonexistent_workflow__"
     if n == "satellite":
         return "noaa19_apt"
     if n == "label":  # amr_add_sample 的调制标签，须是合法 ModulationType

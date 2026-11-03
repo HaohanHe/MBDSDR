@@ -54,15 +54,20 @@
 - 便携包线待收（windeployqt / package_windows.ps1）
 
 ### 星象仪/彩带会话（本窗口，2026-11-03 登记）
-- **在途**：SDR++ 频段彩带补强批——`desktop/bandplan.json` 扩可选字段
-  （desc/modulation/priority/color）+ 边界按 ITU Region 3/中国口径对拍修正、
-  `desktop/spectrum_widget.py` 悬停/点击反馈 + 标签重要性分级、
-  `tests/test_spectrum_bandplan.py` 扩测 + 三档缩放无头截图验收
-- **所有物**：上述三个文件 + `desktop/rf_sky_view.py`（天空线，本批不动）
+- **在途**：A1 摄像机概念与「卫星锁定」坐标系（参照本机 Stellarium 源码）
+  + B2（TLE source/epoch 透出：信息卡 + get_satellite_pass/PassInfo）
+- **已收工**：SDR++ 频段彩带 v2 补强（`dc62be0`，已推）；
+  A3 删除预制工作流与触发短语（本提交）——`_preset_*` ×6 与
+  `match_trigger`/`workflow_trigger_match` 全清，引擎只服务用户/AI 自定义
+  JSON，回归锁 `tests/test_workflow_engine_no_presets.py`
+- **所有物**：`desktop/bandplan.json`、`desktop/spectrum_widget.py`、
+  `tests/test_spectrum_bandplan.py`、`desktop/rf_sky_view.py`、
+  `mbdsdr_ai/workflow_engine.py`、`mbdsdr_ai/agent.py`（工作流注册段）、
+  `mbdsdr_ai/scheduler.py`（文档串）、`mbdsdr_ai/core/controller.py`（B2）
 - **禁区（对方在途，绝不碰）**：`cpp/CMakeLists.txt`、`scripts/package_windows.ps1`、
   `cpp/cmake/*`、`scripts/smoke_exe_no_popup.ps1`、`docs/WINDOWS_POPUP_PLAYBOOK.md`、
   `.github/workflows/ci_windows.yml.disabled`、各 build 树、批量 exe 冒烟；
-  不起全量回归（只跑定向子集），不跑有声/弹窗的东西
+  不跑有声/弹窗的东西
 - **观察到的 CI 红（65eea2d，均非本会话引入）**：
   1. ~~cpp/ctest `engine_integration`（slow）~~ **已销账（fbbe5c8）**——
      本地单跑 3 次全过、全量 ctest 162/162 绿，判定 CI runner 环境特有

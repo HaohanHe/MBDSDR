@@ -2015,30 +2015,23 @@ class MBDSDRAgent:
         wf = self.workflow_engine
         self.tool_registry.register(
             name="workflow_list",
-            description="列出所有可用工作流（干扰源定位、NOAA卫星解码、SSTV解码、APRS监控、AI扫频找台、基带录制等）。工作流是预设的多步骤工具调用序列，说触发短语可自动执行。",
+            description="列出当前可用的用户/AI 自定义工作流（引擎不内置任何固定流程；多步编排通常应由你按任务即时组合工具完成，工作流仅作可选素材）。",
             parameters={"type": "object", "properties": {"category": {"type": "string", "description": "按类别过滤"}}, "required": []},
             handler=lambda args: ToolResult(success=True, content=json.dumps(wf.list_workflows(category=args.get("category")), ensure_ascii=False, indent=2)),
             category="workflow",
         )
         self.tool_registry.register(
             name="workflow_execute",
-            description="执行一个工作流。工作流会自动按步骤调用工具，例如 'noaa_apt_receive_decode' 会自动找卫星→计算多普勒→调谐→录制→解码。",
+            description="按名称执行一个用户/AI 自定义工作流（会按步骤调用工具）。多数任务应由你即时编排工具完成；仅当用户明确要求运行某个已定义工作流时使用。",
             parameters={
                 "type": "object",
                 "properties": {
-                    "workflow_name": {"type": "string", "description": "工作流名称，如 interference_localization, noaa_apt_receive_decode, sstv_receive_decode, aprs_monitor, ai_sweep_find_stations, baseband_record"},
+                    "workflow_name": {"type": "string", "description": "工作流名称（workflow_list 可查；引擎无内置流程，未知名称返回诚实错误）"},
                     "parameters": {"type": "object", "description": "工作流参数（覆盖默认值）"},
                 },
                 "required": ["workflow_name"],
             },
             handler=lambda args: ToolResult(success=True, content=json.dumps(wf.execute(args["workflow_name"], args.get("parameters", {})).to_dict(), ensure_ascii=False, indent=2)),
-            category="workflow",
-        )
-        self.tool_registry.register(
-            name="workflow_trigger_match",
-            description="检查用户输入是否匹配某个工作流的触发短语。例如用户说'找干扰源'会匹配到 interference_localization 工作流。",
-            parameters={"type": "object", "properties": {"text": {"type": "string", "description": "用户输入文本"}}, "required": ["text"]},
-            handler=lambda args: ToolResult(success=True, content=f"匹配到工作流: {wf.match_trigger(args['text']).name}" if wf.match_trigger(args["text"]) else "未匹配到任何工作流"),
             category="workflow",
         )
 
@@ -2061,7 +2054,7 @@ class MBDSDRAgent:
         )
         self.tool_registry.register(
             name="scheduler_add",
-            description="添加定时任务。可以定时执行工作流（如每小时接收NOAA卫星）或工具调用。",
+            description="添加定时任务。可以定时执行用户/AI 自定义工作流或工具调用（引擎无内置流程，目标须先存在）。",
             parameters={
                 "type": "object",
                 "properties": {

@@ -482,13 +482,13 @@ def test_workflow_module(result, agent):
         with tempfile.TemporaryDirectory() as tmpdir:
             we = WorkflowEngine(workflows_dir=tmpdir)
 
-            # 方法是 list_workflows 不是 list_presets
+            # 引擎不内置任何固定流程（preset/触发短语已按 A3 删除）
             workflows = we.list_workflows()
-            result.record("列出工作流", len(workflows) >= 3)
-
-            # 获取工作流（key 是 interference_localization）
-            wf = we.workflows.get("interference_localization")
-            result.record("获取干扰源定位工作流", wf is not None)
+            result.record("引擎无内置工作流", len(workflows) == 0,
+                          f"实际 {len(workflows)}")
+            result.record("无触发短语 API",
+                          not hasattr(we, "match_trigger")
+                          and not hasattr(we, "_load_presets"))
 
             stats = we.get_stats()
             result.record("工作流统计", "total_workflows" in stats or "total_presets" in stats)
