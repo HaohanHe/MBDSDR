@@ -22,17 +22,30 @@ from mbdsdr_ai.dvbs2_ldpc import (  # noqa: E402
     ldpc_syndrome,
 )
 
-VECTOR_PATH = WORKSPACE_ROOT / "standards" / "etsi-en-302-307-1" / "dvbs2_ldpc_vectors.json"
+# Golden search order: repo copy first (what CI sees), workspace standards
+# copy as fallback, honest module-level skip when neither is provisioned.
+_VECTOR_CANDIDATES = (
+    PROJECT_ROOT / "tests" / "golden" / "dvbs2_ldpc_vectors.json",
+    WORKSPACE_ROOT / "standards" / "etsi-en-302-307-1" / "dvbs2_ldpc_vectors.json",
+)
+VECTOR_PATH = next((p for p in _VECTOR_CANDIDATES if p.is_file()), _VECTOR_CANDIDATES[0])
 VECTOR_SHA256 = "d614c3572136938c556cac458f78873658c753073686c0e95b0b94cdb30c637f"
 
 
 def _vectors():
+    if not VECTOR_PATH.is_file():
+        return None
     if hashlib.sha256(VECTOR_PATH.read_bytes()).hexdigest() != VECTOR_SHA256:
         raise ValueError("independent DVB-S2 vector identity changed")
     return json.loads(VECTOR_PATH.read_text(encoding="utf-8"))["vectors"]
 
 
 VECTORS = _vectors()
+if VECTORS is None:
+    pytest.skip(
+        "independent DVB-S2 LDPC vectors are not provisioned",
+        allow_module_level=True,
+    )
 
 
 def _bits(payload: str) -> np.ndarray:
