@@ -3511,15 +3511,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     # ------------------------------------------------------------------ 触屏手势
     def _on_touch_pinch_zoom(self, scale_factor: float, center_pos: QPointF) -> None:
-        """双指捏合缩放 FOV：复用 view_state.zoom 的指数缩放（与滚轮同手感）。
+        """双指捏合缩放 FOV：锚在两指中点（zoom-to-cursor 同款，与滚轮一致）。
 
         scale_factor>1 = 双指张开 = 放大（FOV 变小）→ num_steps>0。
         """
         self._cancel_goto_anim()  # 触屏接管视角：打断飞行
         try:
             num_steps = math.log(max(0.2, min(5.0, scale_factor))) * 2.0
-            self.view_state.zoom(num_steps)
-            self.on_view_changed()
+            cursor = ((float(center_pos.x()), float(center_pos.y()))
+                      if center_pos is not None else None)
+            self.zoom_at_cursor(num_steps, cursor)
         except Exception:
             pass
 

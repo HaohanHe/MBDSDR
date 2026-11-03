@@ -576,18 +576,63 @@ class SkyInteractionHandler:
         self._drag_last_px = None
         self._press_px = None
 
-    def wheelEvent(self, event) -> None:
-        """滚轮缩放 FOV。
+    def zoom_at_cursor(self, num_steps: float,
+                       cursor_px: Optional[Tuple[float, float]]) -> None:
+        """缩放并把锚点钉在光标下（SWE §2 zoom-to-cursor 反补 yaw/pitch）。
 
-          numSteps = angleDelta / 120
-          zoomFactor = exp(-zoomSpeed * numSteps / 60)
-          fov *= zoomFactor
+        机制：缩放前记下光标下的天空方向 (az0,alt0)；改 fov；缩放后同一像素
+        落到别处；平移视心把 (az0,alt0) 拉回光标下——你指着哪颗星放大，它就
+        钉在指下不漂走。pan 是对视心的一阶平移，投影在大 fov/大偏移下非线性，
+        故单次反补在大幅缩放（尤其缩小）时留下可见残差；这里做有界迭代反补，
+        每轮只在能缩小角残差时才接受修正（防振荡/发散），把锚点钉到亚度级。
+        cursor_px 为 None（纯数值桩）时退化为绕中心缩放。
         """
-        # QWheelEvent: angleDelta().y() 上下滚; 纯桩给 (delta,) 元组
+        size = self._widget_size()
+        if cursor_px is None:
+            self.view_state.zoom(num_steps)
+            self.on_view_changed()
+            return
+
+        cx, cy = float(cursor_px[0]), float(cursor_px[1])
+        az0, alt0 = screen_to_sky(cx, cy, self.view_state,
+                                  self.projection, size)
+        self.view_state.zoom(num_steps)
+
+        def _residual() -> float:
+            az, alt = screen_to_sky(cx, cy, self.view_state,
+                                    self.projection, size)
+            return angular_distance_deg(az0, alt0, az, alt)
+
+        best = _residual()
+        for _ in range(6):
+            if best < 1e-3:
+                break
+            az1, alt1 = screen_to_sky(cx, cy, self.view_state,
+                                      self.projection, size)
+            daz = az1 - az0
+            if daz > 180.0:
+                daz -= 360.0
+            elif daz < -180.0:
+                daz += 360.0
+            saved = (self.view_state.center_az, self.view_state.center_alt)
+            self.view_state.pan(daz, alt0 - alt1)
+            now = _residual()
+            if now < best:
+                best = now
+            else:
+                self.view_state.center_az, self.view_state.center_alt = saved
+                break
+        self.on_view_changed()
+
+    def wheelEvent(self, event) -> None:
+        """滚轮缩放 FOV + zoom-to-cursor（缩放锚在光标，见 zoom_at_cursor）。
+
+          numSteps = angleDelta / 120;  fov *= exp(-zoomSpeed * numSteps / 60)
+        """
+        # QWheelEvent: angleDelta().y() 上下滚; 纯桩给数值/元组
         delta = self._event_wheel_delta(event)
         num_steps = delta / 120.0
-        self.view_state.zoom(num_steps)
-        self.on_view_changed()
+        self.zoom_at_cursor(num_steps, self._event_cursor_px(event))
 
     def mouseDoubleClickEvent(self, event) -> None:
         """双击: 居中到点击位置 (goto)。
@@ -615,6 +660,21 @@ class SkyInteractionHandler:
         if isinstance(event, dict):
             return float(event["x"]), float(event["y"])
         raise TypeError(f"无法从 {type(event)} 取坐标")
+
+    @staticmethod
+    def _event_cursor_px(event) -> Optional[Tuple[float, float]]:
+        """取事件的光标像素；纯数值/无位置桩 -> None（退化为绕中心缩放）。
+
+        与 _event_xy 不同：本方法永不抛异常，供 zoom-to-cursor 判断有没有
+        锚点可用。QWheelEvent/QMouseEvent 有 position()；dict 带 x/y。
+        """
+        pos = getattr(event, "position", None)
+        if callable(pos):
+            p = pos()
+            return float(p.x()), float(p.y())
+        if isinstance(event, dict) and "x" in event and "y" in event:
+            return float(event["x"]), float(event["y"])
+        return None
 
     @staticmethod
     def _event_wheel_delta(event) -> float:
