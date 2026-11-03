@@ -42,7 +42,8 @@ _COMPETITION_WORDS = ("赛项", "比赛", "答辩", "挑战赛", "hackathon", "H
 class TestDopplerTargetsConfig:
     def test_loader_reads_real_config(self):
         targets = _load_doppler_targets()
-        assert len(targets) == 3
+        # 真实数据原则：无真实 TLE 的 Iridium-107 已移除，只剩带真数据的目标
+        assert len(targets) == 2
         assert targets[0]["special"] == "lro"
         assert targets[0]["f0_hz"] == 2271000000.0
         assert targets[-1]["special"] == "custom"
@@ -70,9 +71,9 @@ class TestDopplerTargetsConfig:
     def test_panel_uses_config_data_not_strings(self):
         """面板下拉数据项带 special 标记（分支走 currentData，不走文案匹配）。"""
         panel = DopplerPanel()
-        assert panel.target_combo.count() == 3
+        assert panel.target_combo.count() == 2
         assert panel.target_combo.itemData(0) == "lro"
-        assert panel.target_combo.itemData(2) == "custom"
+        assert panel.target_combo.itemData(1) == "custom"
         # f0 默认来自目标配置（LRO 2271 MHz），不再是代码字面量
         assert panel.f0_edit.text() == str(2271000000.0)
         panel.deleteLater()

@@ -262,14 +262,21 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
                        freq_hz: Optional[float] = None,
                        device: Optional[str] = None,
                        gain_db: float = 0.0,
+                       doppler_precomp: bool = False,
                        ) -> Dict[str, Any]:
-    """TC 上行发射（人工门 + 无设备诚实 NEED_HW）。
+    """TC 上行发射（人工门 + 无设备诚实 NEED_HW + 可选多普勒预偏）。
 
     门语义（AGENTS §3，四道串联的最后一道）：
       * arm_manual 不是 True → gated 拒绝（不发射、不假装）；
       * 已武装但无可用发射设备 → NEED_HW 诚实空态；
       * 频点缺省 → 参数错误（频点是安全关键参数，不猜）。
     本函数不内置任何设备驱动；有设备时由各设备适配层在门通过后接管。
+
+    多普勒预偏（doppler_precomp=True）：上行频率按**发射时刻**的预测
+    多普勒反向预偏（目标接近→压低，远离→抬高），来源是进程级唯一真相源
+    mbdsdr_ai.doppler_link（与 RX 调谐补偿同一预测）。无目标/预测失效/
+    后端补偿活动 → 结果带 doppler 说明字段如实标注「未预偏」及原因，
+    绝不静默沿用过期偏移。
     """
     if arm_manual is not True:
         return {
@@ -284,11 +291,38 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
         }
     if iq is None:
         return {"status": "PARAM_ERROR", "reason": "iq 未提供（复基带采样）"}
+
+    # ---- 多普勒预偏（发射时刻预测；唯一真相源，防双补偿）----
+    nominal_hz = float(freq_hz)
+    tx_hz = nominal_hz
+    doppler_note: Dict[str, Any] = {"requested": bool(doppler_precomp)}
+    if doppler_precomp:
+        from .doppler_link import get_compensator
+        comp = get_compensator()
+        comp.refresh()
+        pre = comp.tx_freq(nominal_hz)
+        if pre is not None:
+            tx_hz = pre
+            doppler_note.update({
+                "applied": True,
+                "target": comp.state.target_name,
+                "nominal_hz": nominal_hz,
+                "precompensated_hz": tx_hz,
+                "delta_hz": tx_hz - nominal_hz,
+            })
+        else:
+            doppler_note.update({
+                "applied": False,
+                "reason": comp.state.reason or "无有效卫星目标/补偿未开启",
+            })
+
     # 纯软件环境：无任何发射设备适配层声明可用 → 诚实 NEED_HW
     return {
         "status": "NEED_HW",
         "armed": True,
-        "freq_hz": float(freq_hz),
+        "freq_hz": tx_hz,
+        "nominal_freq_hz": nominal_hz,
+        "doppler": doppler_note,
         "n_samples": int(len(iq)),
         "device": device,
         "reason": ("已武装，但当前环境无可用发射设备适配层"
@@ -381,6 +415,7 @@ def register_tool_registry(registry) -> None:
             freq_hz=args.get("freq_hz"),
             device=args.get("device"),
             gain_db=float(args.get("gain_db", 0.0)),
+            doppler_precomp=bool(args.get("doppler_precomp", False)),
         )
         ok = r["status"] not in ("GATED", "PARAM_ERROR", "NEED_HW")
         return ToolResult(
@@ -444,6 +479,8 @@ def register_tool_registry(registry) -> None:
             "TC 上行发射（**写/动设备工具，arm_manual 人工门**）："
             "未显式 arm_manual=true 一律 GATED 拒绝；已武装但无可用发射设备"
             "诚实 NEED_HW；频点缺失 PARAM_ERROR（安全关键参数不猜）。"
+            "可选 doppler_precomp=true 时按发射时刻预测多普勒反向预偏上行频点"
+            "（与 RX 调谐补偿同一真相源 doppler_link；无目标/失效如实标注未预偏）。"
             "绝不在未过门或未接设备时谎报发射成功。"
         ),
         parameters={"type": "object", "properties": {
@@ -454,6 +491,8 @@ def register_tool_registry(registry) -> None:
             "freq_hz": {"type": "number", "description": "上行频点（Hz）"},
             "device": {"type": "string", "description": "发射设备标识"},
             "gain_db": {"type": "number", "default": 0.0},
+            "doppler_precomp": {"type": "boolean", "default": False,
+                                "description": "按发射时刻预测多普勒反向预偏上行频点"},
         }, "required": ["arm_manual"]},
         handler=_tx, category="satellite",
     )

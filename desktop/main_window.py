@@ -68,7 +68,7 @@ from PySide6.QtWidgets import (
     QFrame, QSizePolicy, QDialog, QDialogButtonBox, QLineEdit,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
     QDoubleSpinBox, QProgressDialog, QDockWidget, QScrollArea,
-    QStackedWidget,
+    QStackedWidget, QToolButton,
 )
 
 # 确保能导入同目录模块
@@ -1597,6 +1597,18 @@ class MainWindow(QMainWindow):
         self.status_gps = QLabel("GNSS: 未连接")
         self.status_gps.setObjectName("statusValue")
         lay.addWidget(self.status_gps)
+        lay.addWidget(self._vsep())
+        # 多普勒链路补偿芯片（标称/实际/Δ + 开关；不新增页面——链路指示而非功能页）
+        self.doppler_chip = QToolButton()
+        self.doppler_chip.setObjectName("statusValue")
+        self.doppler_chip.setCheckable(True)
+        self.doppler_chip.setChecked(False)
+        self.doppler_chip.setText("多普勒 --")
+        self.doppler_chip.setToolTip(
+            "多普勒链路补偿：存在卫星目标时调谐中心 = 标称频率 + 预测 Δ，"
+            "发射上行反向预偏；点击开关补偿（目标失效自动关闭并提示）")
+        self.doppler_chip.toggled.connect(self._on_doppler_chip_toggled)
+        lay.addWidget(self.doppler_chip)
         lay.addStretch(1)
 
         # 呼号（全局可编辑，持久化）
@@ -5822,6 +5834,13 @@ class MainWindow(QMainWindow):
             return
         self._loop_sat_tracker.set_downlink_freq(downlink_freq_hz)
 
+        # 多普勒链路补偿：与跟踪环同一 tracker/目标，唯一真相源
+        # （RX 调谐预偏 + TX 发射预偏共用；不锁定则补偿关闭）。
+        from mbdsdr_ai.doppler_link import get_compensator
+        comp = get_compensator()
+        comp.tracker = self._loop_sat_tracker
+        comp.arm_target(sat_name, downlink_freq_hz)
+
         # 记录调谐前频率/模式，过境结束后恢复
         self._sat_track_prev_freq_hz = self._vfo_center_hz
         self._sat_track_prev_mode = getattr(self.control_panel, "_current_mode", "FM")
@@ -5847,6 +5866,11 @@ class MainWindow(QMainWindow):
             return
         pos = self._loop_sat_tracker.current_position()
         self.sat_track_panel.update_position(pos)
+        # 链路补偿状态（唯一真相源；失效自动关闭 + 原因上芯片）
+        from mbdsdr_ai.doppler_link import get_compensator
+        comp = get_compensator()
+        comp.refresh(pos)
+        self._update_doppler_chip(comp)
         if not pos.get("valid"):
             return
         el = float(pos["elevation"])
@@ -5856,10 +5880,13 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"卫星过境结束（仰角 {el:.1f}° < 5°）", 6000)
             return
-        # 核心：调谐频率 = 下行频率 + 多普勒偏移（含多普勒校正）
-        corrected = float(pos["corrected_freq_hz"])
+        # 核心：调谐频率 = 下行频率 + 多普勒偏移（补偿开启时）；
+        # 用户关闭补偿 → 调谐标称下行（诚实不补偿，不沿用过期偏移）。
+        tune_hz = comp.rx_freq()
+        if tune_hz is None:
+            tune_hz = float(self._loop_sat_tracker.downlink_freq_hz())
         try:
-            self._on_tune_sdr(corrected, self._sat_track_mode)
+            self._on_tune_sdr(float(tune_hz), self._sat_track_mode)
         except Exception:
             pass
         # 星点亮：主听 VFO 带内 SNR 过门限 -> 天空图该星加辉光环
@@ -5892,10 +5919,61 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _update_doppler_chip(self, comp) -> None:
+        """把链路补偿状态写进顶栏芯片（标称/实际/Δ + 开关 + 失效原因）。"""
+        st = comp.state
+        if st.target_name and st.valid and st.doppler_hz is not None:
+            nominal = st.downlink_hz / 1e6
+            actual = (st.corrected_freq_hz or 0.0) / 1e6
+            self.doppler_chip.setText(
+                f"Δ {st.doppler_hz:+,.0f} Hz · {nominal:.4f}→{actual:.4f}")
+            if self.doppler_chip.isChecked() != st.enabled:
+                self.doppler_chip.blockSignals(True)
+                self.doppler_chip.setChecked(st.enabled)
+                self.doppler_chip.blockSignals(False)
+            self.doppler_chip.setToolTip(
+                f"多普勒补偿（{st.target_name}）：调谐中心 = 标称 + Δ；"
+                "点击关闭补偿（调谐回标称）")
+        else:
+            if self.doppler_chip.isChecked():
+                self.doppler_chip.blockSignals(True)
+                self.doppler_chip.setChecked(False)
+                self.doppler_chip.blockSignals(False)
+            self.doppler_chip.setText("多普勒 --")
+            if st.reason:
+                self.doppler_chip.setToolTip(f"补偿已关闭：{st.reason}")
+
+    def _on_doppler_chip_toggled(self, checked: bool):
+        """芯片开关：关补偿 → 调谐回标称下行（不沿用过期偏移）。"""
+        from mbdsdr_ai.doppler_link import get_compensator
+        comp = get_compensator()
+        ok = comp.set_enabled(bool(checked))
+        if not ok:
+            # 后端补偿活动 → 复位开关并提示冲突原因（防双补偿）
+            self.doppler_chip.blockSignals(True)
+            self.doppler_chip.setChecked(False)
+            self.doppler_chip.blockSignals(False)
+            self.statusBar().showMessage(comp.state.reason, 5000)
+            return
+        if not checked and self._loop_sat_tracker is not None:
+            try:
+                self._on_tune_sdr(
+                    float(self._loop_sat_tracker.downlink_freq_hz()),
+                    self._sat_track_mode)
+            except Exception:
+                pass
+
     def _stop_satellite_tracking(self):
         """停止闭环跟踪，恢复用户之前的接收频率。"""
         if self._sat_track_timer is not None:
             self._sat_track_timer.stop()
+        # 链路补偿随跟踪一起诚实关闭（不锁定 → 无补偿，不残留过期偏移）
+        try:
+            from mbdsdr_ai.doppler_link import get_compensator
+            get_compensator().clear("跟踪停止")
+            self._update_doppler_chip(get_compensator())
+        except Exception:
+            pass
         self.sat_track_panel.set_tracking_state(False)
         self._sync_sky_track_btn(False)  # 自动停（过境结束）也复位天空图开关
         if self._gimbal_follow:

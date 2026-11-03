@@ -55,12 +55,10 @@ def _theme_colors() -> Dict[str, str]:
     return get_theme(DEFAULT_THEME).colors
 
 
-# 先验轨道（仅用于 EKF 初值，不是观测数据）：Iridium 风格 LEO。
-# TLE 会过期，仅作 EKF/RLS 的初始猜测；真实轨道由多普勒观测修正。
-_PRIOR_IRIDIUM_TLE = (
-    "1 99999U 24001A   24278.00000000  .00000000  00000-0  00000-0 0  9999",
-    "2 99999  86.4000 160.0000 0001000 320.0000 320.0000 14.34000000    00",
-)
+# 真实数据原则（用户反复强调）：不再有 _PRIOR_IRIDIUM_TLE 合成占位 TLE
+# （norad 99999 假轨道）。先验初值只能来自：目标配置的真实 TLE
+# （doppler_targets.json 的 prior_tle）或用户「自定义 TLE」输入的真实两行。
+# 没有真实先验就不给目标、如实空态报错，不把估计器建立在假轨道上。
 
 MIN_OBS = 2                     # EKF/RLS 至少需要的真实观测点数
 RT_WINDOW_S = 0.5               # 实时 FFT 窗长
@@ -652,7 +650,11 @@ class DopplerPanel(QWidget):
             self.set_iq_file(path)
 
     def _initial_state(self, t_unix: float):
-        """由先验 TLE 计算 ECEF 初值 (7 维)。"""
+        """由先验 TLE 计算 ECEF 初值 (7 维)。
+
+        真实数据原则：目标没有配置真实先验 TLE 就**不给初值**（诚实报错），
+        不用合成占位 TLE 当 EKF 种子（假轨道会把估计器带进沟里）。
+        """
         from mbdsdr_ai import orbit_determination as od
         special = self.target_combo.currentData()
         if special == "lro":
@@ -664,7 +666,15 @@ class DopplerPanel(QWidget):
                 raise ValueError("自定义 TLE 需要两行数据")
             l1, l2 = lines[0], lines[1]
         else:
-            l1, l2 = _PRIOR_IRIDIUM_TLE
+            idx = self.target_combo.currentIndex()
+            prior = (self._targets[idx].get("prior_tle")
+                     if 0 <= idx < len(self._targets) else None)
+            if not prior or len(prior) < 2:
+                raise ValueError(
+                    "该目标未配置真实先验 TLE——不提供合成占位初值。"
+                    "请在 doppler_targets.json 给目标配 prior_tle 两行，"
+                    "或改用「自定义 TLE」输入真实数据。")
+            l1, l2 = prior[0], prior[1]
         r, v = od.leosat_state_from_tle(l1, l2, t_unix)
         return np.concatenate([r, v, [0.0]])
 
