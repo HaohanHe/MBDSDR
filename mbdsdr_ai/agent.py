@@ -2179,7 +2179,8 @@ class MBDSDRAgent:
             payload["accepted"] = ok_count
             payload["rejected"] = rejected
             payload["decisions_recorded"] = dec_count
-            success = ok_count > 0 or dec_count > 0 or not items
+            success = ((ok_count > 0 or dec_count > 0)
+                       if (items or decisions) else True)
             return ToolResult(
                 success=success,
                 content=_json.dumps(payload, ensure_ascii=False, indent=2),
