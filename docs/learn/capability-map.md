@@ -658,10 +658,28 @@ process()`（全流符号连续跟踪，残余 CFO 不再让星座朝向逐帧�
 对照实测：RRC 匹配滤波（α=0.6）在 sps=2 前馈采样下反而降 VCDU
 （16→10），Gardner 原型环 τ 发散（gain 任意符号均漂 136 万样本）
 ——两者诚实留档 `lrpt_modem.py`（rrc_alpha/use_gardner 开关，默认关），
-未启用。not_verified：图像段重组真录链（VCDU→M_PDU→空间包→JPEG 段，
-素材已足：16 条 VCDU/宽窗，全过境约 2-3 倍，待重组器）、全过境 VCDU
-计数/覆盖率。C++ 侧 LRPT 双实现对拍已闭环（8b66410，共享 fixture
-双端解出同一 VCDU），此项销账。
+未启用。
+
+**LRPT 图像段重组真录链破层（2026-11-03 深夜续）**：VCDU→M_PDU→
+空间包→MCU→RGB 全链落地（`mbdsdr_ai/lrpt_image.py`），**真录图像出图**
+（40-80s 窗 38 图像包/13 扫描行/386 块；全过境 49 包/17 行/551 块，
+产物 `D:/mbdsdr/output/real_ota/meteor_m2_lrpt_{40-80s,full_pass}.png`）。
+结构真值 = TU Berlin lar-tech/satellite-decoder（同录音第三方解码器）
+extraction.m/jpegdecoding.m/getconfig.m 逐行核对（8B VCDU 头 + 2B M_PDU
+FHP + 6B CCSDS 包头 sec_hdr=1 + 次头日毫秒 + MCU 计数 + FFF0 + Q +
+Annex K.3 luma 熵、DC 差分每包重置、K.1×IJG-F(Q) 反量化、aligned 放置、
+RGB=(64,65,255−68)）。**比特约定第二处分叉（实证裁决）**：真录 VCDU
+892B 重组必须 **woven**（CCSDS 131.0 往返切分；TU reedsolomon.m:48-51
+回织）——concat 序（本仓合成链口径，`decode_cadu(order="concat")`）
+下 M_PDU 解析 0 包/FHP 全越界，woven 序下 vcduId 恒 0x4005、计数器
+单调、FHP 全域、包判据逐字命中。金样 6 项（图像包地板 30/结构自检/
+几何/块地板 300/首包字段+MCU 头逐字/首块 DC=257 整数域钉）。
+覆盖率诚实稀疏（valid_frac 3-8%，缺块填 128+valid 掩码）——
+可辨云图需更强 VCDU 回收（见连帧上限再抬项）。not_verified：
+全过境 VCDU 计数/覆盖率上限、图像内容级真值（云图形态对照第三方
+产物逐像素对拍）、部分-RS 帧的包级利用、70 号 APID 语义、合成链与
+真录的约定统一（woven 全面接管）。C++ 侧 LRPT 双实现对拍已闭环
+（8b66410，共享 fixture 双端解出同一 VCDU），此项销账。
 
 **真实样本反哺出的三处缺陷（2026-10-28 七轮）**：真实 OTA 样本入仓后立刻
 接进解码链，三处合成信号永远测不到的缺陷当场暴露——这正是"真实样本进仓"

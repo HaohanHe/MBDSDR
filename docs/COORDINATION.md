@@ -34,24 +34,23 @@
 
 ---
 
-## 二、当前在途（2026-11-03 19:50 更新）
+## 二、当前在途（2026-11-03 22:40 更新）
 
 ### 我这边
-- **LRPT 连帧破层批**（代码+金样已完成本地验证，待提交推送）：
-  Costas 闭环接入 `demodulate_soft()/process()`、`_find_frames` FFT
-  向量化（全录 225s→<5s）、Viterbi ACS 向量化（1.4s→0.12s/帧，44 例
-  A/B 位级零失配）、松阈值（ham≤8）捕获 + ASM 验证、帧头钉子改 8 朝向
-  轨道。实测 40-80s 宽窗 **16 条 RS 全纠正 VCDU**（旧天花板 2 条）、
-  ASM 91、候选 269。文件：`mbdsdr_ai/lrpt_modem.py`、`mbdsdr_ai/lrpt_fec.py`、
-  `tests/test_lrpt_meteor_real_golden.py`（连帧金样 4 项）、
-  `docs/learn/capability-map.md`。**全绿面**：真录金样 12/12 +
-  合成链/跨实现/satdump 21/21。注意：lrpt 真录金样文件现在跑一轮
-  ~3.5 min（连帧 fixture 重）。
+- **LRPT 图像链破层批**（本地全绿，待提交推送）：`mbdsdr_ai/lrpt_image.py`
+  新模块（VCDU→M_PDU→空间包→MCU→RGB，结构真值=TU Berlin 同录音
+  第三方解码器逐行核对）+ **比特约定第二处分叉裁决**（真录 VCDU 重组
+  必须 woven/CCSDS 往返切分，`decode_cadu(order=...)` 参数化）+
+  图像金样 6 项。真录图像已出图（40-80s：38 包/13 行；全过境：49 包/
+  17 行/551 块，产物在 D:/mbdsdr/output/real_ota/）。真录金样文件
+  现 18 项 ~3.5 min/轮。**注意**：远端 71881a0/27b8b69 是天空模式会话
+  的提交，本批需变基后再推。
 
 ### TRAE 那边（观察到的在途，未打扰）
 - `scripts/smoke_exe_no_popup.ps1`（??）——弹窗冒烟脚本在途
 - CMake 布防模块化（deploy_runtime.cmake）已落（1b675e7）
 - 便携包线待收（windeployqt / package_windows.ps1）
+- 天空模式会话：71881a0 摄像机概念/卫星锁定坐标系 + 27b8b69 工作流重构
 
 ### 星象仪/彩带会话（本窗口，2026-11-03 登记）
 - **已收工**（按时序）：
@@ -127,11 +126,16 @@
 7. **[认领]** P2 前端缺口（gaplist 第三批）：频率轴滚轮缩放、FFT 仪器化
    （RBW/瀑布时间跨度）——文件在 spectrum_widget.py，星象仪/彩带会话
    若要做手势线请认领，否则协议真值线下一轮接手
-8. **[我，下一轮首选]** LRPT 图像段重组真录链：VCDU→M_PDU→空间包→
-   JPEG 段，宽窗 16 条 VCDU 素材已足——**能出真录图像就是"可证"级
-   硬通货**（用户战略：可一键复现的真实链路 > 奖状）
+8. ~~[我] LRPT 图像段重组真录链~~ **已闭环（本批）**：真录图像出图
+   （40-80s 38 包/13 行 + 全过境 49 包/17 行/551 块），结构真值与
+   woven 约定裁决见 capability-map
 9. **[认领]** LRPT 连帧上限再抬：4+ sps 重采样 + 修 Gardner 环（τ 发散
-   现象在 capability-map）+ RRC 匹配滤波复测——预期把 26% 帧可解率再推高
+   现象在 capability-map）+ RRC 匹配滤波复测——预期把 26% 帧可解率再推
+   高、图像覆盖率从 3-8% 抬向可辨云图
+10. **[认领]** 图像链收尾件：部分-RS 帧的包级利用（形状判据过滤）、
+    合成链约定统一到 woven（改 lrpt_pipeline.build_cadu 往返切分 +
+    decode_cadu 默认翻转 + C++ lrptDecodeCadu 同迁 + 全部 concat 钉
+    随迁）、图像内容级真值对拍（对照第三方产物）
 
 ---
 
@@ -175,3 +179,7 @@
   宽窗 16 条 VCDU 对旧 2 条）；悬账销 2 项（BCH KAT 入库 347d09f、
   C++ LRPT 对拍 8b66410）；队列加图像段重组（可证级硬通货）与
   连帧上限再抬两条。
+- 2026-11-03 22:40（WorkBuddy）：LRPT 图像链破层批——lrpt_image.py
+  全链 + **woven 约定裁决**（decode_cadu order 参数化，concat=合成链
+  口径/woven=真录真值序）+ 真录图像出图 + 图像金样 6 项。CI 9dd272d
+  全绿（行尾根治生效）。队列 #8 销账，收尾件拆出 #10。

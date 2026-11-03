@@ -336,7 +336,10 @@ def consecutive():
     →软位流）→ ham≤8 松阈值帧同步 → NMS → pair-swap± → Viterbi →
     解扰 → RS(255,223)×4。
 
-    返回: (valid, asm_hits, n_cands) —— valid 为 RS 全纠正 892B 载荷列表。
+    返回: (valid, asm_hits, n_cands, raws) —— valid 为 RS 全纠正 892B
+    载荷列表（ham 序，**concat 重组序**——合成链口径回归钉，见段末注），
+    raws 为 (sym_idx, raw_cadu) 流序元组（含 4B ASM 的 Viterbi 原始
+    CADU，图像链以 order="woven" 真值序重解，RS 解码毫秒级）。
     """
     from scipy.io import wavfile
     from scipy.signal import resample_poly
@@ -354,6 +357,7 @@ def consecutive():
 
     decoder = LrptCaduDecoder()
     valid = []
+    raws = []
     asm_hits = 0
     for c in kept:
         start = c.sync_symbol_index * 2
@@ -379,8 +383,10 @@ def consecutive():
                 continue
             if all(e >= 0 for e in errs) and len(payload) == 892:
                 valid.append(payload)
+                raws.append((c.sync_symbol_index, raw[:CADU_SIZE]))
             break
-    return valid, asm_hits, len(kept)
+    raws.sort(key=lambda r: r[0])
+    return valid, asm_hits, len(kept), raws
 
 
 def test_real_recording_consecutive_vcdu_floor(consecutive):
@@ -388,13 +394,13 @@ def test_real_recording_consecutive_vcdu_floor(consecutive):
 
     对照旧天花板：10s 锚点窗 2 条。连帧 = 宽窗连续 VCDU 流。
     """
-    valid, _, _ = consecutive
+    valid, _, _, _ = consecutive
     assert len(valid) >= 12, f"连帧 VCDU 数回退：{len(valid)} < 12（实测 16）"
 
 
 def test_real_recording_consecutive_asm_floor(consecutive):
     """连帧 ASM 命中地板：≥80（实测 91）——Viterbi 后 0x1ACFFC1D 逐字复原。"""
-    _, asm_hits, _ = consecutive
+    _, asm_hits, _, _ = consecutive
     assert asm_hits >= 80, f"连帧 ASM 命中回退：{asm_hits} < 80（实测 91）"
 
 
@@ -403,13 +409,118 @@ def test_real_recording_consecutive_frame_density(consecutive):
 
     钉住「帧被连续找到」而非锚点邻近几帧——连帧能力的直接证据。
     """
-    _, _, n_cands = consecutive
+    _, _, n_cands, _ = consecutive
     assert n_cands >= 200, f"连帧候选密度回退：{n_cands} < 200（实测 269）"
 
 
 def test_real_recording_consecutive_heads_pinned(consecutive):
     """连帧 VCDU 载荷头 32B 逐字钉死（按位置前 3 条，防解码链语义漂移）。"""
-    valid, _, _ = consecutive
+    valid, _, _, _ = consecutive
     heads = {p[:32].hex() for p in valid}
     for pin in PIN_CONSEC_VCDU_HEADS:
         assert pin in heads, f"连帧 VCDU 载荷头漂移：{pin} 不在 {heads}"
+
+
+# --------------------------------------------------------------------------- #
+# 图像段重组真录链（2026-11-03 深夜破层）：VCDU → M_PDU → 空间包 → MCU → RGB
+# --------------------------------------------------------------------------- #
+#
+# 结构真值：TU Berlin lar-tech/satellite-decoder（同录音第三方解码器）
+# extraction.m / jpegdecoding.m / getconfig.m 逐行核对，详见 lrpt_image.py
+# 模块 docstring。**比特约定第二处分叉（实证裁决）**：真录 VCDU 重组必须
+# decode_cadu(order="woven")（CCSDS 往返切分；TU reedsolomon.m:48-51
+# 回织口径）——concat 序下 M_PDU 解析 0 包/FHP 越界，woven 序下 vcduId
+# 恒 0x4005、FHP 全域、包结构逐字命中 extraction.m 判据（08-APID-序列-
+# 长度-日毫秒-MCU-FFF0-Q）。
+#
+# 实测（40-80s 宽窗，16 条 RS 全纠正 VCDU）：38 图像包（APID 64/65/68）、
+# 13 个扫描时刻、386 个 8×8 块、RGB (104,1568,3)。覆盖率诚实稀疏
+# （3-7%），缺块填 128 + valid 掩码。
+
+PIN_FIRST_IMAGE_PKT = (
+    "08413fcf0133000002962b5c00007e0000fff05ffd01f84fa3369966a6445923"
+)  # 首图像包头 32B（APID=65 seq=16335 日=0 ms=43395932 MCU=126 Q=95）
+PIN_FIRST_BLOCK_DC = 257   # 首包首块 DC 系数（整数域，2026-11-03 实测）
+
+
+@pytest.fixture(scope="module")
+def image_chain(consecutive):
+    """图像链全栈（复用连帧 fixture 的流序 raw，零额外解调）。
+
+    VCDU 重组以 **order="woven"**（真录/CCSDS 往返切分真值序）——
+    连帧 fixture 的 valid 载荷是 concat 序（合成链口径回归钉），两者
+    口径不同是有意的双钉（约定分叉见 lrpt_fec.decode_cadu docstring）。
+
+    返回: (rgb, channels, istats, pstats, img_pkts)。
+    """
+    from mbdsdr_ai.lrpt_fec import LrptCaduDecoder
+    from mbdsdr_ai.lrpt_image import (
+        lrpt_packets_to_rgb, parse_image_packet, reassemble_space_packets,
+    )
+
+    _, _, _, raws = consecutive
+    decoder = LrptCaduDecoder()
+    payloads = []
+    for _, raw in raws:
+        p, errs = decoder.decode_cadu(raw, order="woven")
+        if p and all(e >= 0 for e in errs):
+            payloads.append(p)
+    pkts, pstats = reassemble_space_packets(payloads)
+    img_pkts = [ip for p in pkts if (ip := parse_image_packet(p)) is not None]
+    rgb, channels, istats = lrpt_packets_to_rgb(img_pkts)
+    return rgb, channels, istats, pstats, img_pkts
+
+
+def test_real_recording_image_packet_floor(image_chain):
+    """图像包地板：≥30（实测 38）——M_PDU/空间包重组在真录上出包。"""
+    _, _, istats, _, _ = image_chain
+    assert istats["n_packets"] >= 30, \
+        f"图像包回退：{istats['n_packets']} < 30（实测 38）"
+
+
+def test_real_recording_image_mpdu_structure_sane(image_chain):
+    """M_PDU 结构自检：FHP 全域、零误包（woven 重组的结构正确性锚）。"""
+    _, _, _, pstats, _ = image_chain
+    assert pstats["n_fhp_out_of_range"] == 0, \
+        f"FHP 越界 {pstats['n_fhp_out_of_range']} 帧——woven 重组口径漂移"
+    assert pstats["n_skipped"] == 0, \
+        f"非图像包 {pstats['n_skipped']} 个——包行走/判据漂移"
+
+
+def test_real_recording_image_geometry(image_chain):
+    """图像几何：宽 1568 钉死，高 ≥96（实测 104=13 扫描行×8）。"""
+    rgb, _, istats, _, _ = image_chain
+    assert istats["width"] == 1568
+    assert rgb.shape == (istats["height"], 1568, 3)
+    assert istats["height"] >= 96, \
+        f"图像高回退：{istats['height']} < 96（实测 104）"
+
+
+def test_real_recording_image_blocks_floor(image_chain):
+    """MCU 块地板：三通道合计 ≥300（实测 386）——K.3 熵解码在真录出块。"""
+    _, channels, _, _, _ = image_chain
+    total = sum(c.n_blocks for c in channels.values())
+    assert total >= 300, f"MCU 块回退：{total} < 300（实测 386）"
+
+
+def test_real_recording_image_first_packet_pinned(image_chain):
+    """首图像包字段钉死（包结构真值，防 M_PDU/判据漂移）。"""
+    _, _, _, _, img_pkts = image_chain
+    assert img_pkts, "无图像包"
+    p = img_pkts[0]
+    got = (p.apid, p.sequence, p.day, p.ms, p.mcu_index, p.quality)
+    assert got == (65, 16335, 0, 43395932, 126, 95), \
+        f"首图像包字段漂移：{got}"
+    assert p.mcu_bytes[:12].hex() == PIN_FIRST_IMAGE_PKT[40:], \
+        f"首包 MCU 数据头漂移：{p.mcu_bytes[:12].hex()}"
+
+
+def test_real_recording_image_first_block_dc_pinned(image_chain):
+    """首包首块 DC 系数钉死（整数域，逐位可复现）。"""
+    from mbdsdr_ai.lrpt_image import decode_mcu_packet
+    _, _, _, _, img_pkts = image_chain
+    blocks = decode_mcu_packet(img_pkts[0].mcu_bytes)
+    assert blocks and blocks[0] is not None, "首块未解出"
+    dc = int(blocks[0][0])
+    assert dc == PIN_FIRST_BLOCK_DC, \
+        f"首块 DC 漂移：{dc} != {PIN_FIRST_BLOCK_DC}"

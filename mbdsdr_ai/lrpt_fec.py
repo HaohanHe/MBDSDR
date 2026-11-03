@@ -295,17 +295,33 @@ class LrptCaduDecoder:
                 out.append(blocks[ii][pos])
         return bytes(out)
 
-    def decode_cadu(self, viterbi_bytes: bytes) -> Tuple[bytes, List[int]]:
+    def decode_cadu(self, viterbi_bytes: bytes,
+                    order: str = "concat") -> Tuple[bytes, List[int]]:
         """对 Viterbi 译码后的完整 CADU 字节流做解扰 + RS 解码。
 
         输入格式：viterbi_bytes 应包含 4 字节 ASM + 1020 字节数据。
         本函数跳过前 4 字节 ASM，对 1020 字节解扰 + RS。
+
+        参数:
+            order: 892B 数据区重组口径（**比特约定分叉，2026-11-03 裁决**）：
+              - ``"woven"`` —— 真实 Meteor-M2 / CCSDS 131.0 标准口径：
+                TX 按**往返**把数据位分入 4 个码字（data[j] → 块 j%4），
+                交织区前 892 字节与数据同序；RX 就近回织
+                （payload[j] = 块[j%4].data[j//4]）。TU Berlin 同录音解码器
+                reedsolomon.m:48-51（corrected(j:I:end)=decoded）实证，
+                真录 VCDU→M_PDU→空间包按此序才解析得出（探针 0 包 vs N 包）。
+              - ``"concat"`` —— 本仓合成链口径（块=连续 223B 切分，
+                RX 顺序拼接），lrpt_pipeline.build_cadu 自洽；非 CCSDS
+                标准，仅合成环使用。统一约定时（改合成链跟真录对齐）
+                此参数随之退役。
 
         返回:
             (decoded_data, rs_errors)
             decoded_data: 223×4 = 892 字节纠正后数据（全 4 块可纠时）
             rs_errors:    每块纠错字节数（-1 = 不可纠）
         """
+        if order not in ("concat", "woven"):
+            raise ValueError(f"order 须 'concat' 或 'woven'，收到 {order!r}")
         if len(viterbi_bytes) < CADU_SIZE:
             raise ValueError(f"CADU 需要 {CADU_SIZE} 字节，收到 {len(viterbi_bytes)}")
 
@@ -330,7 +346,12 @@ class LrptCaduDecoder:
 
         # 全 4 块可纠才算有效
         if all(e >= 0 for e in errors):
-            decoded = b"".join(r.data for r in results)
+            if order == "woven":
+                # 回织（CCSDS 往返切分的逆）：payload[j] = 块[j%4].data[j//4]
+                datas = [r.data for r in results]
+                decoded = bytes(datas[j % 4][j // 4] for j in range(892))
+            else:
+                decoded = b"".join(r.data for r in results)
             return decoded, errors
         else:
             return b"", errors
