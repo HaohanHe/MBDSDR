@@ -184,8 +184,25 @@ class TestMainWindowGimbalLoop:
         assert mw._gimbal_follow is True
         mw._poll_satellite_track()
         assert fake.pointed == [(123.0, 30.0)]
+        # 同一目标 + 间隔未到（整形器最小间隔/死区）→ 不再下发，
+        # 避免 500ms 环变成云台指令风暴；到位即停。
         mw._poll_satellite_track()
-        assert fake.pointed == [(123.0, 30.0), (123.0, 30.0)]
+        assert fake.pointed == [(123.0, 30.0)]
+        monkeypatch.undo()
+
+    def test_target_lost_unlocks_gimbal(self, mw, monkeypatch):
+        """目标位置失效 → 云台跟随诚实解锁并停机，不向过期方位下发。"""
+        fake = self._fake_active_tracking(mw, monkeypatch)
+        mw._loop_sat_tracker = SimpleNamespace(
+            current_position=lambda: {"valid": False, "elevation": 0.0,
+                                      "azimuth": 0.0},
+            downlink_freq_hz=lambda: 137.1e6)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        assert mw._gimbal_follow is False
+        assert fake.pointed == []
+        assert fake.stopped >= 1
+        assert not mw.sky_view._gimbal_btn.isChecked()
         monkeypatch.undo()
 
     def test_stop_tracking_stops_gimbal(self, mw, monkeypatch):

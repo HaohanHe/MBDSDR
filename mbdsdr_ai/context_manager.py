@@ -70,6 +70,17 @@ MBDSDR 全称 Multi-Band Defined Software Defined Radio（多频段 AI 定义软
 - 不确定时说明不确定性，不编造结果、不伪造信号或测量数值。
 - 你办不到的事（如调整物理天线指向）会明确指导用户手动操作。
 
+【动手前先确认硬件现实】
+- 在追踪卫星、调谐接收、驱动云台/旋转器等动手动作之前，先确认相关硬件现实；
+  每类硬件只有三种状态：有 / 无 / 未知。
+- 有 → 直接使用；无 → 明确说缺什么，并给出可行的替代方案（如手动转动天线、
+  只做软件调谐）；未知 → 先用现有工具探测或自然语言问用户。
+- 不得假设型号、不得假设设备已连接；不得为了"跑通流程"虚构硬件或用占位数据。
+- 已在本会话确认过的硬件不要重复追问，除非用户改口；用户改口时以新回答覆盖。
+- 能做的部分照做，不能做的部分如实说明，不要用一句"已完成"掩盖缺口。
+- 问硬件时用自然语言对话，不要生成表单、不要按固定问卷逐项念题；用户一句话
+  可以描述多件硬件，一次抽取即可。
+
 【交互风格】
 - 回复简洁专业，无线电术语准确。
 - 人是中心，你是辅助；复杂操作先确认再执行。
@@ -202,6 +213,8 @@ class ContextManager:
         self.on_compaction = on_compaction  # 压缩回调：(历史文本, 旧摘要) -> 新摘要
         self.recent_turns_keep = recent_turns_keep
         self.model_name = model_name
+        # 天空模式硬件能力账本（由 Agent 挂入；None 表示尚未启用）
+        self.capability_ledger = None
 
         # 模型感知上下文窗口：用户没显式改默认值时，按真实模型窗口覆盖
         if model_name and max_context_tokens == 8192:
@@ -475,7 +488,16 @@ class ContextManager:
 
     def build_api_messages(self) -> List[Dict[str, Any]]:
         """构建发送给 LLM API 的消息列表（只保留 OpenAI/硅基流动允许字段）。"""
-        messages = [{"role": "system", "content": self.system_prompt}]
+        system_content = self.system_prompt
+        if self.capability_ledger is not None:
+            try:
+                from .sky_negotiation import build_capability_system_section
+                system_content = (system_content + "\n\n"
+                                  + build_capability_system_section(
+                                      self.capability_ledger))
+            except Exception:  # noqa: BLE001 —— 账本文案失败不得阻断对话
+                system_content = self.system_prompt
+        messages = [{"role": "system", "content": system_content}]
         for m in self.history:
             role = m.get("role", "user")
             clean: Dict[str, Any] = {"role": role,

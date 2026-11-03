@@ -1201,6 +1201,8 @@ class MainWindow(QMainWindow):
         # ---- 动态 UI 动作总线挂载（模型 → 界面）：本窗口为执行器，
         # UI 线程 150ms 排水（AIWorker 后台线程不直接碰控件）----
         self._init_ui_action_bus()
+        # 天空动作执行总线（模型协商后 → 主窗口 UI 线程落地，150ms 排水）
+        self._init_sky_action_bus()
 
     # ------------------------------------------------------------------
     # 动态 UI（模型 → 界面动作执行器 + 排水）
@@ -1270,6 +1272,180 @@ class MainWindow(QMainWindow):
                                 "_abs_sizes": True}}
         return {"ok": False, "status": "ERROR",
                 "reason": f"执行器不支持动词 {verb!r}"}
+
+    # ------------------------------------------------------------------
+    # 天空动作总线：模型协商结束后 → UI 线程落地
+    # ------------------------------------------------------------------
+    def _init_sky_action_bus(self):
+        from mbdsdr_ai.gimbal_follow import GimbalFollowLimiter
+        from mbdsdr_ai.sky_actions import get_sky_bus
+        bus = get_sky_bus()
+        bus.executor = self._execute_sky_action
+        self._sky_bus = bus
+        self._sky_bus_timer = QTimer(self)
+        self._sky_bus_timer.setInterval(150)
+        self._sky_bus_timer.timeout.connect(bus.drain)
+        self._sky_bus_timer.start()
+        # 云台跟随整形器：死区 + 最小间隔 + 速率上限，避免指令风暴
+        self._gimbal_limiter = GimbalFollowLimiter()
+
+    def _sky_selected_name(self) -> str:
+        sv = getattr(self, "sky_view", None)
+        info = getattr(sv, "_selected_info", None) if sv is not None else None
+        return str((info or {}).get("title") or "")
+
+    def _sky_action_context(self, action: str):
+        """取天空视图的真实目标上下文（拿不到的字段如实留空）。"""
+        sv = getattr(self, "sky_view", None)
+        if sv is None or not hasattr(sv, "sky_action_context"):
+            return None
+        try:
+            return sv.sky_action_context(action)
+        except Exception:
+            return None
+
+    def _execute_sky_action(self, action: dict) -> dict:
+        """执行模型协商后提交的天空动作（目标必须与当前选中一致）。"""
+        kind = str(action.get("action", ""))
+        satellite = str(action.get("satellite", "")).strip()
+        current = self._sky_selected_name()
+        if not current:
+            return {"ok": False, "status": "UNAVAILABLE",
+                    "reason": "天空视图当前没有选中卫星，动作未执行"}
+        if satellite and satellite != current:
+            return {"ok": False, "status": "TARGET_MISMATCH",
+                    "reason": f"当前选中的是 {current}，不是 {satellite}；"
+                              "请重新选择目标后再发起"}
+        sv = getattr(self, "sky_view", None)
+        res = None
+        if sv is not None and hasattr(sv, "_compute_tune"):
+            try:
+                res = sv._compute_tune()
+            except Exception:
+                res = None
+
+        if kind == "tune":
+            if res is None:
+                return {"ok": False, "status": "UNAVAILABLE",
+                        "reason": "缺少实时轨道/链路数据，无法计算多普勒调谐"}
+            self._on_sky_tune_satellite({
+                "name": str(res.get("satellite") or current),
+                "tuned_freq_hz": float(res.get("tuned_freq_hz", 0.0)),
+                "doppler_shift_hz": float(res.get("doppler_shift_hz", 0.0)),
+                "mode": res.get("mode", "NFM"),
+            })
+            return {"ok": True, "status": "DONE", "satellite": current}
+
+        if kind == "track":
+            on = bool(action.get("on", True))
+            if on:
+                base_hz = float(action.get("frequency_hz") or 0.0)
+                if base_hz <= 0 and res is not None:
+                    base_hz = float(res.get("base_freq_hz", 0.0))
+                if base_hz <= 0:
+                    return {"ok": False, "status": "UNAVAILABLE",
+                            "reason": "未知下行频点，无法进入闭环跟踪"}
+            else:
+                base_hz = 0.0
+            self._on_sky_track_toggled(on, current, base_hz)
+            active = (self._sat_track_timer is not None
+                      and self._sat_track_timer.isActive())
+            if on and not active:
+                return {"ok": False, "status": "REFUSED",
+                        "reason": "跟踪未能启动（缺观测站/选星失败/缺依赖），"
+                                  "按钮已复位"}
+            return {"ok": True, "status": "DONE", "satellite": current}
+
+        if kind == "gimbal_follow":
+            on = bool(action.get("on", True))
+            self._on_sky_gimbal_follow_toggled(on)
+            if on and not self._gimbal_follow:
+                return {"ok": False, "status": "REFUSED",
+                        "reason": "云台跟随未启动（无可用后端或未先开始跟踪）"}
+            return {"ok": True, "status": "DONE", "satellite": current}
+
+        return {"ok": False, "status": "ERROR",
+                "reason": f"执行器不支持天空动作 {kind!r}"}
+
+    # ------------------------------------------------------------------
+    # 天空按钮 → agent 能力协商（按钮不再直连硬件）
+    # ------------------------------------------------------------------
+    def _on_sky_tune_requested(self, info: dict):
+        """「调到该星」→ 交给 agent 协商后执行，AI 不可用则诚实拒绝。"""
+        ctx = self._sky_action_context("tune")
+        if ctx is None:
+            self.statusBar().showMessage(
+                "无法发起调谐：缺少卫星/观测站/链路数据", 4000)
+            return
+        self._request_sky_action("tune", ctx)
+
+    def _on_sky_track_requested(self, on: bool, sat_name: str,
+                                downlink_hz: float):
+        """「跟踪」→ 开始先协商；停止直接停环（停止不需要问硬件）。"""
+        if not on:
+            self._on_sky_track_toggled(False, sat_name, 0.0)
+            return
+        ctx = self._sky_action_context("track")
+        if ctx is None:
+            self.statusBar().showMessage(
+                "无法发起跟踪：缺少卫星/观测站/链路数据", 4000)
+            self._sync_sky_track_btn(False)
+            return
+        self._request_sky_action("track", ctx)
+
+    def _on_sky_gimbal_follow_requested(self, on: bool):
+        """「云台跟随」→ 开始先协商；解锁直接停（无需问硬件）。"""
+        if not on:
+            self._on_sky_gimbal_follow_toggled(False)
+            return
+        ctx = self._sky_action_context("gimbal_follow")
+        if ctx is None:
+            self.statusBar().showMessage(
+                "无法发起云台跟随：缺少卫星/观测站数据", 4000)
+            self._sync_sky_gimbal_btn(False)
+            return
+        self._request_sky_action("gimbal_follow", ctx)
+
+    def _request_sky_action(self, action: str, context: dict) -> bool:
+        """把动作上下文交给 AI 会话（模型据此决定探测/询问/执行）。"""
+        panel = getattr(self, "ai_panel", None)
+        if panel is None or not hasattr(panel, "request_sky_action"):
+            self.statusBar().showMessage(
+                "AI 对话面板不可用，天空动作未执行（不退回直连硬件）", 5000)
+            self._reset_sky_pending_ui(action)
+            return False
+        ok = bool(panel.request_sky_action(context))
+        if not ok:
+            self._reset_sky_pending_ui(action)
+        return ok
+
+    def _reset_sky_pending_ui(self, action: str) -> None:
+        """协商未执行时把按钮回弹到真实状态（不残留假勾选）。"""
+        if action == "track":
+            if not (self._sat_track_timer is not None
+                    and self._sat_track_timer.isActive()):
+                self._sync_sky_track_btn(False)
+        elif action == "gimbal_follow":
+            if not self._gimbal_follow:
+                self._sync_sky_gimbal_btn(False)
+
+    def _on_sky_action_resolved(self, action: str, satellite: str,
+                                requested: bool) -> None:
+        """一轮协商结束：按钮勾选与真实硬件状态对齐。"""
+        if action == "track":
+            active = (self._sat_track_timer is not None
+                      and self._sat_track_timer.isActive())
+            self._sync_sky_track_btn(active)
+            if not active:
+                self.statusBar().showMessage(
+                    "AI 判断本轮未进入跟踪（硬件现实或目标条件不足，详见对话）",
+                    6000)
+        elif action == "gimbal_follow":
+            self._sync_sky_gimbal_btn(self._gimbal_follow)
+            if not self._gimbal_follow:
+                self.statusBar().showMessage(
+                    "AI 判断本轮未启动云台跟随（缺云台或未在跟踪，详见对话）",
+                    6000)
 
     # ------------------------------------------------------------------
     # 双形态壳层：IDE 形态 / 星象仪形态
@@ -4768,20 +4944,25 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 self.service_settings_panel = None
 
-        # 天空视图「调到该星」信号（rf_sky_view 自包含，hasattr 守卫）
+        # 天空视图「调到该星 / 跟踪 / 云台跟随」→ 先走 agent 能力协商，
+        # 不再由按钮直连硬件（按钮只表达意图，执行由模型决定后经动作总线落地）
         try:
             sv = getattr(self, "sky_view", None)
             if sv is not None and hasattr(sv, "tune_satellite_requested"):
                 sv.tune_satellite_requested.connect(
-                    self._on_sky_tune_satellite)
+                    self._on_sky_tune_requested)
             if sv is not None and hasattr(sv, "track_toggled"):
-                sv.track_toggled.connect(self._on_sky_track_toggled)
+                sv.track_toggled.connect(self._on_sky_track_requested)
             if sv is not None and hasattr(sv, "gimbal_follow_toggled"):
                 sv.gimbal_follow_toggled.connect(
-                    self._on_sky_gimbal_follow_toggled)
+                    self._on_sky_gimbal_follow_requested)
                 # 初始可用性（后端可能 200ms 后才连上，5s 周期任务会再刷）
                 if hasattr(sv, "set_gimbal_available"):
                     sv.set_gimbal_available(self._gimbal_available())
+            if self.ai_panel is not None and hasattr(
+                    self.ai_panel, "sky_action_resolved"):
+                self.ai_panel.sky_action_resolved.connect(
+                    self._on_sky_action_resolved)
         except Exception:
             pass
 
@@ -5296,7 +5477,19 @@ class MainWindow(QMainWindow):
     def _on_sky_gimbal_follow_toggled(self, on: bool):
         """天空图「云台跟随」开关：确认后端可用后随跟踪环同拍驱动。"""
         if not on:
+            was_on = self._gimbal_follow
             self._gimbal_follow = False
+            limiter = getattr(self, "_gimbal_limiter", None)
+            if limiter is not None:
+                limiter.reset()
+            if was_on:
+                # 用户主动解锁：下发停机（固件负值=释放），不留持续指令
+                try:
+                    gc = self._gimbal_controller()
+                    if gc is not None:
+                        gc.stop()
+                except Exception:
+                    pass
             return
         if not (self._sat_track_timer is not None
                 and self._sat_track_timer.isActive()):
@@ -5312,6 +5505,9 @@ class MainWindow(QMainWindow):
             self._sync_sky_gimbal_btn(False)
             return
         self._gimbal_follow = True
+        limiter = getattr(self, "_gimbal_limiter", None)
+        if limiter is not None:
+            limiter.reset()  # 新会话首拍给完整指向，不做插值
         self.statusBar().showMessage(
             f"云台跟随已开启（{gc.status.backend_info}）", 4000)
 
@@ -5906,6 +6102,21 @@ class MainWindow(QMainWindow):
         comp.refresh(pos)
         self._update_doppler_chip(comp)
         if not pos.get("valid"):
+            # 目标位置失效：云台跟随不能对着过期方位继续下发，诚实解锁并提示
+            if self._gimbal_follow:
+                self._gimbal_follow = False
+                limiter = getattr(self, "_gimbal_limiter", None)
+                if limiter is not None:
+                    limiter.reset()
+                self._sync_sky_gimbal_btn(False)
+                try:
+                    gc = self._gimbal_controller()
+                    if gc is not None:
+                        gc.stop()
+                except Exception:
+                    pass
+                self.statusBar().showMessage(
+                    "目标位置失效，云台跟随已停止并解锁（保持最后指向）", 5000)
             return
         el = float(pos["elevation"])
         # 仰角 < 5°：过境结束，停止闭环
@@ -5938,18 +6149,26 @@ class MainWindow(QMainWindow):
                     sv.set_sat_signal(sat_name, now_present)
         except Exception:
             pass
-        # 云台跟随：同一拍内驱动天线指向卫星（调谐与云台天然同步、单点停止）
+        # 云台跟随：同一拍内驱动天线指向卫星（调谐与云台天然同步、单点停止）。
+        # 经整形器：死区 + 最小间隔 + 速率上限，目标到位后不再重复下发。
         if self._gimbal_follow:
             try:
                 gc = self._activate_gimbal_if_needed()
                 if gc is None:
                     # 后端中途掉线：诚实关闭跟随，不造假动作
                     self._gimbal_follow = False
+                    limiter = getattr(self, "_gimbal_limiter", None)
+                    if limiter is not None:
+                        limiter.reset()
                     self._sync_sky_gimbal_btn(False)
                     self.statusBar().showMessage("云台后端已离线，跟随关闭", 4000)
                 else:
                     az = float(pos.get("azimuth") or 0.0)
-                    gc.point_to_satellite(az, el)
+                    limiter = getattr(self, "_gimbal_limiter", None)
+                    cmd = (limiter.plan(az, el) if limiter is not None
+                           else (az, el))
+                    if cmd is not None:
+                        gc.point_to_satellite(cmd[0], cmd[1])
             except Exception:
                 pass
 
@@ -6013,6 +6232,9 @@ class MainWindow(QMainWindow):
         if self._gimbal_follow:
             # 云台跟随随跟踪单点停止：复位开关 + 下发停机（固件负值=释放）
             self._gimbal_follow = False
+            limiter = getattr(self, "_gimbal_limiter", None)
+            if limiter is not None:
+                limiter.reset()
             self._sync_sky_gimbal_btn(False)
             try:
                 gc = self._gimbal_controller()

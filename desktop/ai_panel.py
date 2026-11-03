@@ -91,6 +91,9 @@ class AIPanel(QWidget):
     # 信号：一轮 AI 回复的最终文本（流式内容的完整版；星象仪形态覆盖卡用）。
     # 与对话区解耦：覆盖卡只读不复写面板，历史仍以面板为准。
     reply_received = Signal(str)
+    # 信号：天空动作请求的一轮协商结束（action, satellite, tool_requested）。
+    # 主窗口据此把「意图」与「真实状态」对齐（模型判定不执行时要把按钮回弹）。
+    sky_action_resolved = Signal(str, str, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -107,6 +110,8 @@ class AIPanel(QWidget):
         # 已取到的硬件工具 schema + 调用 handler 缓存起来，重建 agent 时补注册。
         self._pending_mcp: Optional[tuple] = None
         self._mcp_tool_names: set = set()
+        # 天空动作请求的待结算状态（按钮触发的协商轮次）
+        self._pending_sky: Optional[Dict[str, str]] = None
         self._saved_config = self._load_config()
         self._build_ui()
         self._add_welcome_message()
@@ -404,10 +409,19 @@ class AIPanel(QWidget):
 
             # 重新初始化 agent
             config = AgentConfig(api_key=api_key, base_url=base_url, model=model)
-            self.agent = MBDSDRAgent(config)
+            self.agent = self._create_agent(config)
             self._apply_pending_mcp_tools()
             self._update_ai_status()
             self._add_system_message(f"AI 已配置并保存: {model}（配置文件: ~/.mbdsdr/config.json）")
+
+    def _create_agent(self, config):
+        """创建 agent，并沿用旧会话的天空硬件能力账本（不重新追问）。"""
+        old_ledger = getattr(self.agent, "sky_ledger", None) if self.agent else None
+        agent = MBDSDRAgent(config)
+        if old_ledger is not None:
+            agent.sky_ledger = old_ledger
+            agent.context_manager.capability_ledger = old_ledger
+        return agent
 
     def init_agent(self, api_key: str = "", base_url: str = "", model: str = ""):
         """初始化 AI Agent（由外部调用）。
@@ -446,7 +460,7 @@ class AIPanel(QWidget):
             return
 
         config = AgentConfig(api_key=final_api_key, base_url=final_base_url, model=final_model)
-        self.agent = MBDSDRAgent(config)
+        self.agent = self._create_agent(config)
         self._apply_pending_mcp_tools()
         self._update_ai_status()
         source = "参数" if api_key else ("配置文件" if self._saved_config.get("api_key") else ("环境变量" if os.environ.get("MBDSDR_API_KEY") else "默认"))
@@ -674,6 +688,64 @@ class AIPanel(QWidget):
 
         self._worker_thread.start()
 
+    # ── 天空动作 → 能力协商（按钮不得直连硬件）──────────────────
+
+    def request_sky_action(self, context: Dict[str, Any]) -> bool:
+        """把一次天空动作交给 agent 会话（携带真实目标上下文）。
+
+        这不是问卷：只发一条上下文，模型据此自行判断要不要探测/询问，
+        以及本轮能执行哪些工具。AI 不可用时诚实拒绝，不退回直连硬件。
+        """
+        action = str(context.get("action", ""))
+        satellite = str(context.get("satellite_name")
+                        or context.get("satellite") or "")
+        if self._is_processing:
+            self._add_system_message("AI 正在处理上一条请求，天空动作未提交，请稍后再试")
+            return False
+        if not AI_CORE_AVAILABLE or not self.agent:
+            self._add_system_message(
+                "AI 未配置，无法就硬件能力进行协商；天空动作未执行。"
+                "请先配置 API Key，或改用控制面板手动操作。")
+            return False
+
+        try:
+            from mbdsdr_ai.sky_negotiation import (SatelliteActionContext,
+                                                  action_label,
+                                                  build_action_prompt)
+            ctx = SatelliteActionContext.from_mapping(context)
+            ledger = getattr(self.agent, "sky_ledger", None)
+            prompt = build_action_prompt(ctx, ledger)
+            label = action_label(action)
+        except Exception as e:  # noqa: BLE001 —— 上下文构造失败诚实拒绝
+            self._add_system_message(f"天空动作上下文构造失败：{_clean_exc(e)}")
+            return False
+
+        self._pending_sky = {"action": action, "satellite": satellite}
+        self._add_system_message(
+            f"天空动作已交由 AI 协商硬件现实：{label}｜{satellite or '未选择卫星'}")
+        self._call_ai(prompt)
+        return True
+
+    _SKY_ACTION_TOOLS = {
+        "track": "sky_track_satellite",
+        "tune": "sky_tune_satellite",
+        "gimbal_follow": "sky_gimbal_follow",
+    }
+
+    def _resolve_pending_sky(self, tool_calls: List[Dict]) -> None:
+        """一轮协商结束：告知主窗口模型是否提交了对应动作工具。"""
+        pending = self._pending_sky
+        if not pending:
+            return
+        self._pending_sky = None
+        action = pending.get("action", "")
+        satellite = pending.get("satellite", "")
+        expected = self._SKY_ACTION_TOOLS.get(action, "")
+        requested = any(
+            str(tc.get("name", "")) == expected for tc in (tool_calls or [])
+        ) if expected else False
+        self.sky_action_resolved.emit(action, satellite, requested)
+
     @Slot(str)
     def _on_stream_delta(self, piece: str):
         """流式增量实时打字到 AI 消息末尾。"""
@@ -744,6 +816,7 @@ class AIPanel(QWidget):
             self._add_ai_message("（AI 未返回文本内容，可能只执行了工具调用）")
 
         self._add_system_message(f"耗时 {latency:.0f}ms，调用 {len(tool_calls)} 个工具")
+        self._resolve_pending_sky(tool_calls)
         self.reply_received.emit(content or "")
 
     @Slot(str)
@@ -753,6 +826,8 @@ class AIPanel(QWidget):
         self.send_btn.setEnabled(True)
         self.send_btn.setText("发送")
         self._add_ai_message(f"AI 调用出错: {error}")
+        # 协商轮次失败：主窗口必须把按钮回弹，不留下「假装已执行」的勾选
+        self._resolve_pending_sky([])
         self.reply_received.emit(f"[错误] {error}")
 
     def _toggle_log(self):

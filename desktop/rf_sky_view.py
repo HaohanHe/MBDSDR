@@ -1824,6 +1824,61 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             "mode": res.get("mode", "NFM"),
         })
 
+    def sky_action_context(self, action: str) -> Optional[Dict[str, object]]:
+        """为一次天空动作收集真实目标上下文（按钮 → agent 能力协商）。
+
+        数据来自实时轨道/链路计算；拿不到的字段如实留空，不编造。
+        """
+        info = self._selected_info or {}
+        name = str(info.get("title") or self._tune_sat_name or "")
+        if not name:
+            return None
+        res = self._compute_tune()
+        meta = self._selected_sat_tle() or {}
+        try:
+            from mbdsdr_ai.sky_negotiation import jd_to_utc_iso
+        except Exception:
+            jd_to_utc_iso = lambda _jd: ""  # noqa: E731
+        ctx: Dict[str, object] = {
+            "action": str(action),
+            "satellite_name": name,
+            "norad_id": meta.get("norad") or info.get("norad"),
+        }
+        if res:
+            ctx.update({
+                "azimuth_deg": res.get("azimuth_deg"),
+                "elevation_deg": res.get("elevation_deg"),
+                "nominal_freq_hz": res.get("base_freq_hz"),
+                "tuned_freq_hz": res.get("tuned_freq_hz"),
+                "doppler_hz": res.get("doppler_shift_hz"),
+                "mode": res.get("mode", ""),
+            })
+        else:
+            ctx.update({
+                "azimuth_deg": info.get("az"),
+                "elevation_deg": info.get("alt"),
+            })
+            if info.get("downlink_mhz") is not None:
+                try:
+                    ctx["nominal_freq_hz"] = float(info["downlink_mhz"]) * 1e6
+                except (TypeError, ValueError):
+                    pass
+            ctx["mode"] = str(info.get("downlink_mode") or "")
+        rise = jd_to_utc_iso(info.get("rise"))
+        set_ = jd_to_utc_iso(info.get("set"))
+        if rise:
+            ctx["pass_rise_utc"] = rise
+        if set_:
+            ctx["pass_set_utc"] = set_
+        if info.get("tle_epoch"):
+            ctx["tle_epoch"] = str(info["tle_epoch"])
+        if self._observer:
+            ctx["observer"] = (f"{self._observer.get('lat'):.4f},"
+                               f"{self._observer.get('lon'):.4f}"
+                               if self._observer.get("lat") is not None
+                               and self._observer.get("lon") is not None else "")
+        return ctx
+
     def _position_tune_overlay(self):
         """把调谐/跟踪/云台/摄像机按钮+多普勒标签放到左下角。"""
         try:

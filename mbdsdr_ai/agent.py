@@ -258,6 +258,9 @@ class MBDSDRAgent:
         # 注册动态 UI 工具（模型 → 界面；小动词面，可撤销）
         self._register_ui_action_tools()
 
+        # 注册天空模式硬件能力协商工具（会话级账本 + 动作执行总线）
+        self._register_sky_negotiation_tools()
+
         # 注册调度器工具
         self._register_scheduler_tools()
 
@@ -2101,6 +2104,235 @@ class MBDSDRAgent:
             parameters={"type": "object", "properties": {}, "required": []},
             handler=_undo,
             category="ui",
+        )
+
+    def _register_sky_negotiation_tools(self):
+        """注册天空模式硬件能力协商工具（会话状态 + 动作执行，原子化）。
+
+        背景（审计）：天空视图的「追踪 / 调到该星 / 云台跟随」按钮曾直连主
+        窗口驱动硬件，完全绕过 agent，也没有「动手前先探明硬件」的指令。
+        现在这三类动作改为：目标上下文进入会话 → 模型用现有工具自己探测
+        或自然语言询问 → 模型决定执行。本方法提供三块原子能力：
+
+        - ``sky_capability_state``  读取本次会话已确认的硬件现实（只读）；
+        - ``sky_capability_report`` 模型把「有/无/未知」与拍板结果写回会话
+          （不碰硬件、不走 arm_manual；用户改口时覆盖）；
+        - ``sky_tune_satellite`` / ``sky_track_satellite`` /
+          ``sky_gimbal_follow`` 把执行意图交给天空动作总线，由桌面主窗口
+          在 UI 线程落地；非桌面环境诚实 UNAVAILABLE。
+
+        注意：这里不预置任何问答脚本，问什么、要不要问由模型依据上下文判断。
+        """
+        import json as _json
+
+        from .sky_actions import get_sky_bus
+        from .sky_negotiation import (CAPABILITY_SLOTS, CAPABILITY_STATES,
+                                      CapabilityLedger)
+
+        self.sky_ledger = getattr(self, "sky_ledger", None) or CapabilityLedger()
+        # 会话上下文每次请求都会带上账本快照，模型不必重复追问已确认项
+        self.context_manager.capability_ledger = self.sky_ledger
+        bus = get_sky_bus()
+
+        def _snapshot() -> Dict[str, Any]:
+            ledger: CapabilityLedger = self.sky_ledger
+            return {
+                "slots": {
+                    slot: {"label": label, "state": ledger.state(slot),
+                           "evidence": ledger.evidence.get(slot, "")}
+                    for slot, label in CAPABILITY_SLOTS.items()
+                },
+                "unknown": ledger.unknown_slots(),
+                "decisions": dict(ledger.decisions),
+            }
+
+        def _state(_args):
+            payload = _snapshot()
+            payload["note"] = ("只反映本会话已确认的结论；未确认项为 unknown，"
+                               "需要时先用工具探测或问用户，不要假设型号")
+            return ToolResult(success=True,
+                              content=_json.dumps(payload, ensure_ascii=False,
+                                                  indent=2),
+                              data=payload)
+
+        def _report(args):
+            ledger: CapabilityLedger = self.sky_ledger
+            items = args.get("items") or []
+            if not isinstance(items, list):
+                return ToolResult(success=False,
+                                  content="items 必须是数组",
+                                  error="items 必须是数组")
+            ok_count, rejected = ledger.update_many(items)
+            decisions = args.get("decisions") or []
+            dec_count = 0
+            if isinstance(decisions, list):
+                for decision in decisions:
+                    if not isinstance(decision, dict):
+                        continue
+                    action = str(decision.get("action", ""))
+                    satellite = str(decision.get("satellite", ""))
+                    text = str(decision.get("decision", ""))
+                    if action in ("track", "tune", "gimbal_follow") and satellite:
+                        ledger.record_decision(action, satellite, text)
+                        dec_count += 1
+            payload = _snapshot()
+            payload["accepted"] = ok_count
+            payload["rejected"] = rejected
+            payload["decisions_recorded"] = dec_count
+            success = ok_count > 0 or dec_count > 0 or not items
+            return ToolResult(
+                success=success,
+                content=_json.dumps(payload, ensure_ascii=False, indent=2),
+                data=payload,
+                error=("；".join(rejected) if rejected and not success else ""),
+            )
+
+        self.tool_registry.register(
+            name="sky_capability_state",
+            description=(
+                "读取本次会话已确认的天空动作硬件现实（SDR/云台/GNSS/IMU/定向天线），"
+                "状态为 available/missing/unknown。只读，不探测硬件；未确认项为 "
+                "unknown，不要假设型号。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=_state,
+            category="sky",
+        )
+
+        self.tool_registry.register(
+            name="sky_capability_report",
+            description=(
+                "把本轮关于天空硬件的结论与拍板结果写回本次会话（不碰硬件）。"
+                "items 支持一次多条（用户一句话描述多件硬件时一次记全）；"
+                "state 只接受 available/missing/unknown。用户改口时用新结论覆盖，"
+                "后续动作会直接复用，不必重复追问。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "description": "硬件结论列表（可一次多件）",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "slot": {"type": "string",
+                                         "enum": list(CAPABILITY_SLOTS.keys())},
+                                "state": {"type": "string",
+                                          "enum": list(CAPABILITY_STATES)},
+                                "evidence": {"type": "string",
+                                             "description": "依据（用户原话/工具探测结果）"},
+                            },
+                            "required": ["slot", "state"],
+                        },
+                    },
+                    "decisions": {
+                        "type": "array",
+                        "description": "本轮对动作的拍板结论（可选）",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string",
+                                           "enum": ["track", "tune",
+                                                    "gimbal_follow"]},
+                                "satellite": {"type": "string"},
+                                "decision": {"type": "string"},
+                            },
+                            "required": ["action", "satellite", "decision"],
+                        },
+                    },
+                },
+                "required": ["items"],
+            },
+            handler=_report,
+            category="sky",
+        )
+
+        def _enqueue(action: Dict[str, Any]):
+            r = bus.enqueue(action)
+            reason = str(r.get("reason") or "")
+            return ToolResult(success=bool(r.get("ok")),
+                              content=_json.dumps(r, ensure_ascii=False),
+                              data=r,
+                              error="" if r.get("ok") else reason)
+
+        _target_note = ("只在该动作的硬件现实已确认可执行后才调用；"
+                        "缺硬件时不要调用，改用自然语言说明缺什么并给替代方案。")
+
+        self.tool_registry.register(
+            name="sky_tune_satellite",
+            description=(
+                "把接收机调到天空视图当前选中的目标卫星（含实时多普勒修正）。"
+                + _target_note
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "satellite_name": {"type": "string",
+                                       "description": "目标卫星名（需与当前选中一致）"},
+                    "frequency_hz": {"type": "number",
+                                     "description": "可选：期望的下行中心频率（Hz）"},
+                },
+                "required": ["satellite_name"],
+            },
+            handler=lambda args: _enqueue({
+                "action": "tune",
+                "satellite": args.get("satellite_name", ""),
+                "frequency_hz": args.get("frequency_hz"),
+            }),
+            category="sky",
+        )
+
+        self.tool_registry.register(
+            name="sky_track_satellite",
+            description=(
+                "对天空视图当前选中的目标卫星开始/停止闭环跟踪（频率随多普勒修正）。"
+                + _target_note
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "satellite_name": {"type": "string",
+                                       "description": "目标卫星名（需与当前选中一致）"},
+                    "on": {"type": "boolean", "description": "true=开始，false=停止",
+                           "default": True},
+                    "downlink_hz": {"type": "number",
+                                    "description": "可选：标称下行频率（Hz）"},
+                },
+                "required": ["satellite_name"],
+            },
+            handler=lambda args: _enqueue({
+                "action": "track",
+                "satellite": args.get("satellite_name", ""),
+                "on": bool(args.get("on", True)),
+                "frequency_hz": args.get("downlink_hz"),
+            }),
+            category="sky",
+        )
+
+        self.tool_registry.register(
+            name="sky_gimbal_follow",
+            description=(
+                "让云台/旋转器跟随天空视图当前选中的目标卫星（按 az/el 驱动，"
+                "带速率上限与死区，目标丢失自动停止）。"
+                + _target_note
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "satellite_name": {"type": "string",
+                                       "description": "目标卫星名（需与当前选中一致）"},
+                    "on": {"type": "boolean", "description": "true=跟随，false=解锁",
+                           "default": True},
+                },
+                "required": ["satellite_name"],
+            },
+            handler=lambda args: _enqueue({
+                "action": "gimbal_follow",
+                "satellite": args.get("satellite_name", ""),
+                "on": bool(args.get("on", True)),
+            }),
+            category="sky",
         )
 
     def _register_scheduler_tools(self):
