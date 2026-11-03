@@ -640,8 +640,12 @@ satellite-decoder 示例实录 `meteor_m2_72k.wav`（Meteor-M2 72k 过境，
 必须 c0/c1 pair-swap（≡ poly1↔poly2）；此裁决终结 lrpt_fec.py 悬置的
 「u0 哪端先进寄存器」问题（详见该文件注释与 golden 测试钉点）。
 金样钉扎 8 项（协议栈 VCDU 地板 + ASM + 载荷头 32B 逐字 + version +
-约定裁决）。not_verified：图像段重组真录链（VCDU→M_PDU→空间包→JPEG
-段）、全过境 VCDU 计数/覆盖率、C++ 侧 LRPT 双实现对拍。
+约定裁决）。**连帧扫描实测边界（2026-11-03）**：锚点 ±0.11s 步进中仅
+锚点邻近 2 帧可解——前馈解调（无 Costas 闭环）的残余 CFO 使星座朝向
+逐帧漂移、帧网格滑动，连续 VCDU 流需要载波相位跟踪（`_costas_track_symbols`
+已有壳，process() 未接入）。not_verified：图像段重组真录链
+（VCDU→M_PDU→空间包→JPEG 段，被连帧能力阻塞）、全过境 VCDU 计数/
+覆盖率、C++ 侧 LRPT 双实现对拍。
 
 **真实样本反哺出的三处缺陷（2026-10-28 七轮）**：真实 OTA 样本入仓后立刻
 接进解码链，三处合成信号永远测不到的缺陷当场暴露——这正是"真实样本进仓"
