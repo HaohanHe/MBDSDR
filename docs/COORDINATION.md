@@ -67,13 +67,14 @@
   待推送（本文件提交后随第二提交 fast-forward）；真机肉眼验收未做
 
 ### 真机七环验收会话（本窗口，2026-11-03 19:00 登记）
-- **在途**：接真实 RTL-SDR（FC0012，序列 77771111153705700）做端到端七环验收
-- **所有物**：`scripts/real_hw_acceptance.py`（新）、`docs/real_hw_acceptance_20261103.md`（新）
-- **禁区（对方在途，绝不碰）**：同星象仪会话禁区 + 彩带三文件；不改
-  `scripts/smoke_exe_no_popup.ps1` / `scripts/package_windows.ps1` /
-  `cpp/CMakeLists.txt` / `cpp/cmake/*`，只运行既有构建产物
-- **硬件纪律**：设备独占顺序使用；全程静音（不开 sounddevice、C++ 侧
-  MBDSDR_NULL_AUDIO=1）；QT_QPA_PLATFORM=offscreen，不弹窗
+- **收工**：**6 环 PASS + 1 环 UNVERIFIABLE**，无阻断缺陷。报告
+  `docs/real_hw_acceptance_20261103.md`，可复跑脚本 `scripts/real_hw_acceptance.py`
+- 环 6（数字模式 OTA）不可验原因：FC0012 上限 948.6 MHz（ADS-B 物理不可达）+
+  会话窗内无 APRS 台活动/无卫星过境；`--ring 6` 可在有过境时复跑
+- 登记待办（一般）：`get_satellite_pass` 不透出 TLE source/epoch，建议补字段
+- **观察到未触碰**：`cpp/CMakeLists.txt`（M）、`cpp/tests/test_lrpt_real_cross.cpp`
+  （??）在途，归属待认领者登记
+- **禁区**：同星象仪会话禁区 + 彩带三文件；未改任何公共构建/冒烟脚本
 
 ### 悬账备忘（不属于任何人，认领者标注）
 - ~~dump1090 全量解码清单对拍~~ **已闭环（9d3efea）**：dump1090 本尊编译当
