@@ -117,7 +117,8 @@ EXTRA_CHAINS = [
     {
         "mode": "dvbs2-sof（DVB-S2 SOF 同步层）",
         "truth": "partial",
-        "truth_label": "部分",        "evidence": (
+        "truth_label": "部分",
+        "evidence": (
             "tests/test_dvbs2_sof_sync.py（ETSI EN 302 307-1 §5.1.2 同步字/π 旋转，"
             "合成链 + 标准原文口径）"
         ),
@@ -128,7 +129,8 @@ EXTRA_CHAINS = [
     {
         "mode": "dvbs2-vcdu（DATAFIELD→VCDU 重组）",
         "truth": "partial",
-        "truth_label": "部分",        "evidence": (
+        "truth_label": "部分",
+        "evidence": (
             "tests/test_dvbs2_datafield_vcdu.py（BBHEADER CRC-8/DFL/SYNCD + VCDU 主头，"
             "合成链自洽 + 编码侧互逆对拍）"
         ),
@@ -208,6 +210,21 @@ def render() -> str:
     out.append("```bash")
     out.append("export MBDSDR_NULL_AUDIO=1 MBDSDR_NO_HW=1 QT_QPA_PLATFORM=offscreen")
     out.append("```")
+    out.append("")
+    out.append("## 离线批处理与结构化审计")
+    out.append("")
+    out.append("要把一段/一目录捕获按这张表批量跑一遍，用批处理入口（同样离线、不碰硬件）：")
+    out.append("")
+    out.append("```bash")
+    out.append("python scripts/decode_captures.py --mode ais --file cap.cf32 --fs 192000 --out report.json")
+    out.append("python scripts/decode_captures.py --mode all --dir captures/ --out report.json")
+    out.append("```")
+    out.append("")
+    out.append("- 报告逐文件给出 `ok` / `status` / `error_code` / `num_messages` 与 SHA-256；"
+               "**零报文是合法结果**，不折叠成成功或失败。")
+    out.append("- 退出码只表示「报告是否生成成功」，不表示「解出东西没有」。")
+    out.append("- 另设 `MBDSDR_DECODE_AUDIT_DIR=logs/` 后，每次解码追加一行 "
+               "`decode_audit.jsonl`（只记元数据与输入指纹，**不抄报文正文**）。")
     out.append("")
     out.append("## 诚实边界")
     out.append("")

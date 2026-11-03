@@ -44,6 +44,19 @@ python scripts/decoder_capability_report.py --verify
 export MBDSDR_NULL_AUDIO=1 MBDSDR_NO_HW=1 QT_QPA_PLATFORM=offscreen
 ```
 
+## 离线批处理与结构化审计
+
+要把一段/一目录捕获按这张表批量跑一遍，用批处理入口（同样离线、不碰硬件）：
+
+```bash
+python scripts/decode_captures.py --mode ais --file cap.cf32 --fs 192000 --out report.json
+python scripts/decode_captures.py --mode all --dir captures/ --out report.json
+```
+
+- 报告逐文件给出 `ok` / `status` / `error_code` / `num_messages` 与 SHA-256；**零报文是合法结果**，不折叠成成功或失败。
+- 退出码只表示「报告是否生成成功」，不表示「解出东西没有」。
+- 另设 `MBDSDR_DECODE_AUDIT_DIR=logs/` 后，每次解码追加一行 `decode_audit.jsonl`（只记元数据与输入指纹，**不抄报文正文**）。
+
 ## 诚实边界
 
 - 「真实」不等于「现在能在你的设备上收到」：外部真值证明解码链正确，能否收到还取决于天线、增益、过境时间与多普勒补偿。

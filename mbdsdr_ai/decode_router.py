@@ -22,6 +22,10 @@
 一致性守卫：`tests/test_digital_modes_capability.py` 校验表 ↔ handler 注册
 双向齐全、依赖模块可导入、实现文件存在，并与 `core.controller` 的解码器
 注册清单对齐（防以后加解码器漏登记）。
+
+审计：`run_digital_mode` 是对外唯一入口，返回前经 `decode_audit.maybe_audit`
+按 `MBDSDR_DECODE_AUDIT_DIR` 开关写一行 JSONL 元数据（含前置校验失败），
+审计故障不影响解码结果。
 """
 
 from __future__ import annotations
@@ -521,6 +525,30 @@ def _error_result(cap: Optional[DigitalModeCapability], mode: str,
 # 路由（原先的 if/elif 链收敛到这里：查表 → 前置校验 → handler）
 # =========================================================================
 def run_digital_mode(
+    input_path: str,
+    mode: str,
+    output_dir: str = None,
+    sample_rate: float = 1e6,
+    baud: int = 512,
+    center_frequency_hz: float = 1500.0,
+    frequency_search_hz: Optional[Tuple[float, float]] = None,
+    frequency_offsets_hz: Optional[Sequence[float]] = None,
+    time_offsets_seconds: Optional[Sequence[float]] = None,
+) -> Dict[str, Any]:
+    """对外唯一入口：跑一遍路由，写审计，返回结果（审计不改结果）。"""
+    result = _run_digital_mode(
+        input_path, mode, output_dir=output_dir, sample_rate=sample_rate,
+        baud=baud, center_frequency_hz=center_frequency_hz,
+        frequency_search_hz=frequency_search_hz,
+        frequency_offsets_hz=frequency_offsets_hz,
+        time_offsets_seconds=time_offsets_seconds,
+    )
+    from .decode_audit import maybe_audit
+    maybe_audit("decode_digital_mode", result, input_path)
+    return result
+
+
+def _run_digital_mode(
     input_path: str,
     mode: str,
     output_dir: str = None,
