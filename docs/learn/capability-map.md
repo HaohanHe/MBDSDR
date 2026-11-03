@@ -749,7 +749,12 @@ SHA-256 钉真值按需下载）上验证——dump1090 README 对该文件的�
 CRC-24 语义（DF11 纯校验 / DF4⊕ICAO）。`tests/test_adsb_dump1090_golden.py`
 四层钉扎（真值帧地板 + CRC 关系 + 独特帧 ratchet）。口径更新：「真实
 解码验证」已非零（FT8 外采真值 + ADS-B 外采真值双双背书）；**本机自采
-OTA 解码记录仍为零**。not_verified：dump1090 全量解码清单对拍、覆盖率。
+OTA 解码记录仍为零**。**全量清单对拍已闭环（2026-11-03）**：dump1090
+本尊（antirez master 本地编译 --ifile）全解码清单 15 报文 / 10 独特帧
+（ICAO 4d2023 / AMC421）全量入钉（PCTS 含 84 分位带——第 10 帧藏在那，
+4 档配方会漏），全帧 CRC 语义恒等式一并钉死；参考输出原文留档
+tests/golden/dump1090_modes1_reference.txt。not_verified 仅剩：门限内
+覆盖率对比（我方 5 档拉网是 dump1090 单档的超集，无害）。
 后续对拍修正（45ceac1）：教科书余数 F(x) mod G = crc24(数据段)⊕AP——
 全帧 LFSR 是 ICAO·x^24 mod G 不能当地址（真值帧实证 1eb2b4 ≠ 4d2023）；
 C++ checkParity 与 Python decode_frame 双侧修正（DF4/5 ICAO 还原、
