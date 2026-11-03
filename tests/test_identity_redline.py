@@ -91,6 +91,24 @@ def _tracked_files():
     return acc
 
 
+def _embedded_in_data_blob(text: str, start: int, end: int) -> bool:
+    """命中是否嵌在长 hex/base64 数据 token 里（摘要/金样字节的数字巧合）。
+
+    2026-11-03 实测假警报：SHA-256 摘要十六进制串内嵌 11 位号码形态
+    （摘要片段形似大陆手机号），被手机号规则咬中。真实手机号出现在
+    散文里（被中文/标点/空白/短前缀包围），不会嵌进 16+ 字符的连续
+    [A-Za-z0-9+/=_-] token。
+    """
+    token_re = re.compile(r"[A-Za-z0-9+/=_-]")
+    ls = start
+    while ls > 0 and token_re.match(text[ls - 1]):
+        ls -= 1
+    le = end
+    while le < len(text) and token_re.match(text[le]):
+        le += 1
+    return (le - ls) >= 16
+
+
 def test_no_personal_info_in_tracked_files():
     hits = []
     for rel in _tracked_files():
@@ -110,8 +128,27 @@ def test_no_personal_info_in_tracked_files():
                         continue
                     if m.group(0).lower() in ALLOWED_EMAIL_EXACT:
                         continue
+                if label == "手机号" and _embedded_in_data_blob(
+                        text, m.start(), m.end()):
+                    continue
                 hits.append(f"{rel}: {label} -> {m.group(0)[:40]}")
     assert not hits, "身份红线命中（AGENTS.md 第 1 条）:\n" + "\n".join(hits[:30])
+
+
+def test_phone_rule_ignores_hashes_but_flags_prose():
+    """手机号规则双向钉扎：摘要/金样里的数字巧合不咬，散文里的真号照咬。"""
+    fake = 'sha256: 90714f9531aa4a1f43464c29905756df77f7eb3ea556466e0c17004199546a72'
+    # 拼接构造，避免门禁自咬（同 _JOB 姿势）
+    real = "请联系 " + "138" + "1234" + "5678" + " 咨询"
+    phone = dict(RULES)["手机号"]
+    assert phone.search(fake), "锚点自检：哈希里的号码形态要能被正则找到"
+    assert _embedded_in_data_blob(fake, phone.search(fake).start(),
+                                  phone.search(fake).end()), \
+        "哈希内嵌号码必须被识别为数据巧合"
+    m = phone.search(real)
+    assert m and m.group(0) == "138" + "1234" + "5678", "散文里的真手机号必须命中"
+    assert not _embedded_in_data_blob(real, m.start(), m.end()), \
+        "散文手机号不得被误判为数据巧合"
 
 
 def test_redline_gate_is_not_self_triggering():
@@ -127,4 +164,7 @@ def test_redline_gate_is_not_self_triggering():
                     continue
                 if m.group(0).lower() in ALLOWED_EMAIL_EXACT:
                     continue
+            if label == "手机号" and _embedded_in_data_blob(
+                    text, m.start(), m.end()):
+                continue
             raise AssertionError(f"门禁自身命中 {label}: {m.group(0)[:40]}")
