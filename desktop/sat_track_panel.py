@@ -80,9 +80,8 @@ class SatTrackPanel(QFrame):
         form.addRow("卫星:", self.sat_combo)
 
         self.freq_spin = QDoubleSpinBox()
-        # 范围与 scanner_panel 一致（0.01–6000 MHz）：旧 100–2000 MHz 卡掉了
-        # 合法下行频率——仓库自己的 LRO 目标 2271 MHz（doppler_panel 默认）
-        # 与 AO-40 S 波段 2401 MHz 都进不去。
+        # 范围与 scanner_panel 一致（0.01–6000 MHz）：合法下行频率全段覆盖，
+        # S 波段（如 2271/2401 MHz）也可输入，不被旧 100–2000 MHz 限卡住。
         self.freq_spin.setRange(0.01, 6000.0)      # MHz
         self.freq_spin.setDecimals(4)
         self.freq_spin.setSingleStep(0.0025)

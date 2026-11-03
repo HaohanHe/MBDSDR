@@ -47,7 +47,7 @@ WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
 # 月球常数（LRO 参考轨道用）
 GM_MOON = 4902.8005                # km^3/s^2
 MOON_RADIUS = 1737.4               # km
-LRO_ORBIT_ALT = 50.0               # km（任务书 ~50km）
+LRO_ORBIT_ALT = 50.0               # km（LRO 标称绕月高度 ~50km）
 LRO_PERIOD_S = 113.0 * 60.0        # ~113 min
 
 ARTIFACT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")

@@ -1,0 +1,9 @@
+{
+  "_schema": "mbdsdr doppler_targets v1 —— 多普勒定轨先验目标配置（皮进配置）",
+  "_note": "定轨面板的「目标」下拉从本文件加载，代码不写死任何具体目标。字段：label=显示名；f0_hz=默认下行中心频率（选中时参考）；special=特殊路径标记（lro=月球星历参考路径、custom=自定义 TLE、空串=标准 TLE 初值路径）。目标是真实航天器（LRO=NASA 月球勘测轨道器），可按任务自由增删改。",
+  "targets": [
+    {"label": "LRO (月球轨道)", "f0_hz": 2271000000.0, "special": "lro"},
+    {"label": "Iridium-107", "f0_hz": 0.0, "special": ""},
+    {"label": "自定义 TLE", "f0_hz": 0.0, "special": "custom"}
+  ]
+}

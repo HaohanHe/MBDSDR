@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """P0-1/P0-6 协议级解码验证链（样本 → 帧同步 → CRC → 字段抽取 → 断言）。
 
-能力拆解（218 条）的验收脊柱：说"会解码某星"不算数，**样本 → 逐字段断言
+真值钉扎原则：说"会解码某星"不算数，**样本 → 逐字段断言
 → golden 回归 PASS** 才算数。本模块把这条链做成可编排工具：
 
   ``verify_sample``  位流 →（布局表同步字）帧同步 →（布局表 CRC）校验
@@ -221,7 +221,7 @@ def verify_sample(bits: Sequence[int], *,
 # 工具层
 # ═══════════════════════════════════════════════════════════
 def register_tool_registry(registry) -> None:
-    """注册协议级解码验证链工具（验收脊柱的可编排形态）。"""
+    """注册协议级解码验证链工具（真值钉扎链的可编排形态）。"""
     from .tool_registry import ToolResult, clean_exc
     import json as _json
 
@@ -254,7 +254,7 @@ def register_tool_registry(registry) -> None:
         name="verify_decode_chain",
         description=(
             "协议级解码验证链：位流 → 布局表同步字切帧 → 布局表 CRC 校验 → "
-            "逐字段抽取 → 断言列表逐条判定（验收脊柱）。任一步失败如实报错"
+            "逐字段抽取 → 断言列表逐条判定（真值钉扎）。任一步失败如实报错"
             "不产出半截结论；布局 honesty 标注透传。换星换布局只换 "
             "frame_layouts.json / sat_profiles.json，本工具零硬编码。"
             "前置条件：bits（解调后位流）、layout_name。"

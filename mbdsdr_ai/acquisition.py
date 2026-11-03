@@ -173,17 +173,17 @@ RX_PROFILES: Dict[str, RxProfile] = {
 
 
 def rx_acceptance(args) -> Dict[str, Any]:
-    """接收验收判据：逐项判定 + 总判定（材料口径的可执行版）。
+    """接收指标自检：逐项判定 + 总判定（门限均为具名参数）。
 
     输入（可按需给子集，缺项记为"未提供"不参与判定）：
-        pointing_error_deg : 指向偏差（度）        门限 pointing_tol_deg（默认 2.0，材料口径）
-        snr_db             : 实测信噪比（dB）      门限 min_snr_db（默认 5.0，材料口径）
+        pointing_error_deg : 指向偏差（度）        门限 pointing_tol_deg（默认 2.0，工程口径）
+        snr_db             : 实测信噪比（dB）      门限 min_snr_db（默认 5.0，工程口径）
         decode_attempts    : 解码尝试次数
-        decode_successes   : 解码成功次数            门限 min_decode_rate（默认 0.9，材料未给→工程常规）
-        lna_nf_db          : LNA 噪声系数（dB）      门限 max_lna_nf_db（默认 1.0，材料口径）
-        feedline_m         : 馈线长度（m）           门限 max_feedline_m（默认 5.0，材料口径）
-        system_nf_db       : 前端系统噪声系数（dB）  门限 max_system_nf_db（默认 2.5，材料未给→工程常规）
-        dish_offset_cm     : 馈源离焦（cm）          门限 max_focus_offset_cm（默认 3.0，材料口径）
+        decode_successes   : 解码成功次数            门限 min_decode_rate（默认 0.9，工程常规）
+        lna_nf_db          : LNA 噪声系数（dB）      门限 max_lna_nf_db（默认 1.0，工程口径）
+        feedline_m         : 馈线长度（m）           门限 max_feedline_m（默认 5.0，工程口径）
+        system_nf_db       : 前端系统噪声系数（dB）  门限 max_system_nf_db（默认 2.5，工程常规）
+        dish_offset_cm     : 馈源离焦（cm）          门限 max_focus_offset_cm（默认 3.0，工程口径）
     """
     def num(key):
         v = args.get(key)
@@ -255,8 +255,8 @@ def rx_acceptance(args) -> Dict[str, Any]:
         "checks": checks,
         "failed_items": [c["item"] for c in failed],
         "next_steps": [c["advice"] for c in failed if c["advice"]],
-        "note": ("门限默认值标注了来源：材料口径=材料给出的验收值；"
-                 "材料未给→工程常规=可按任务指标覆盖的常规取值"),
+        "note": ("门限默认值标注了来源：工程口径=当前任务指标给出的门限值；"
+                 "未给→工程常规=可按任务指标覆盖的常规取值"),
     }
 
 
@@ -949,9 +949,9 @@ def register_acquisition_tools(registry) -> None:
     )
     R(
         name="rx_acceptance",
-        description="接收验收判据：把材料的验收口径（指向偏差/SNR/前端指标/解码成功率）"
+        description="接收指标自检：把接收链的门限（指向偏差/SNR/前端指标/解码成功率）"
                     "变成可执行逐项判定 + 总判定 + 处置建议。门限均为具名参数，"
-                    "默认值标注来源（材料口径 / 材料未给→工程常规）。原子积木。",
+                    "默认值标注来源（工程口径 / 工程常规）。原子积木。",
         parameters={"type": "object", "properties": {
             "pointing_error_deg": {"type": "number"},
             "snr_db": {"type": "number"},

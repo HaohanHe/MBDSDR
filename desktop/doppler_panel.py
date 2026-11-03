@@ -309,6 +309,36 @@ class OrbitCanvas(FigureCanvasQTAgg):
 # ======================================================================
 # 面板主体
 # ======================================================================
+# ---------------------------------------------------------------------------
+# 定轨先验目标：皮进配置（desktop/doppler_targets.json），代码不写死目标
+# ---------------------------------------------------------------------------
+def _load_doppler_targets() -> list:
+    """加载定轨先验目标配置。缺文件/坏 JSON/坏条目 → 只剩「自定义 TLE」
+    （诚实降级：不把任何具体目标硬编码进代码）。"""
+    import json
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "doppler_targets.json")
+    fallback = [{"label": "自定义 TLE", "f0_hz": 0.0, "special": "custom"}]
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        out = []
+        for t in raw.get("targets", []):
+            try:
+                label = str(t["label"]).strip()
+                f0 = float(t.get("f0_hz", 0.0))
+                special = str(t.get("special", "")).strip().lower()
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not label or special not in ("", "lro", "custom"):
+                continue
+            out.append({"label": label, "f0_hz": f0, "special": special})
+        return out or fallback
+    except (OSError, ValueError):
+        return fallback
+
+
 class DopplerPanel(QWidget):
     # 向上层（主窗口）re-emit 定轨结果，供状态栏/AI 日志回显；面板内部仍自绘曲线。
     finished = Signal(dict)   # 定轨完成（结果字典）
@@ -354,9 +384,15 @@ class DopplerPanel(QWidget):
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.target_combo = QComboBox()
-        self.target_combo.setToolTip("先验轨道目标（TLE 仅作初值，真实轨道由观测修正）")
-        self.target_combo.addItems(["LRO (月球轨道)", "Iridium-107", "自定义 TLE"])
+        self.target_combo.setToolTip("先验轨道目标（TLE 仅作初值，真实轨道由观测修正；"
+                                     "目标表在 doppler_targets.json 配置）")
+        # 目标表皮进配置：special 标记驱动路径分支，不做字符串硬匹配
+        self._targets = _load_doppler_targets()
+        for _t in self._targets:
+            self.target_combo.addItem(_t["label"], _t["special"])
         self.target_combo.currentIndexChanged.connect(self._refresh_gate)
+        self.target_combo.currentIndexChanged.connect(
+            lambda _i: self._apply_target_f0())
         form.addRow("目标", self.target_combo)
 
         self.mode_combo = QComboBox()
@@ -367,8 +403,9 @@ class DopplerPanel(QWidget):
 
         # 中心频率 / 采样率
         freq_row = QHBoxLayout()
-        self.f0_edit = QLineEdit(str(2271.0e6))
-        self.f0_edit.setToolTip("下行中心频率 (Hz)")
+        self.f0_edit = QLineEdit()
+        self.f0_edit.setToolTip("下行中心频率 (Hz)；随目标配置自动填入，可手改")
+        self._apply_target_f0()
         self.fs_edit = QLineEdit(str(DEFAULT_SAMPLE_RATE_HZ))
         self.fs_edit.setToolTip("采样率 (Hz)；裸 IQ 文件需与此一致")
         freq_row.addWidget(QLabel("中心Hz")); freq_row.addWidget(self.f0_edit)
@@ -532,14 +569,20 @@ class DopplerPanel(QWidget):
             return None
         return lat, lon, alt
 
+    def _apply_target_f0(self):
+        """按选中目标的配置 f0 填入中心频率（无配置值时保持现状，不编造）。"""
+        idx = self.target_combo.currentIndex()
+        if 0 <= idx < len(self._targets):
+            f0 = float(self._targets[idx].get("f0_hz", 0.0))
+            if f0 > 0:
+                self.f0_edit.setText(str(f0))
+
     def _refresh_gate(self):
         """根据 连接/文件/观测 状态决定控件可用性与提示文案。"""
         busy = self._is_busy()
         realtime = self._is_realtime()
-        target = self.target_combo.currentText()
-
         # LRO 是天空预测，不需要多普勒观测；其余目标需要真实观测
-        need_obs = not target.startswith("LRO")
+        need_obs = self.target_combo.currentData() != "lro"
 
         if realtime and not self._sdr_connected:
             self.start_btn.setEnabled(False)
@@ -611,10 +654,10 @@ class DopplerPanel(QWidget):
     def _initial_state(self, t_unix: float):
         """由先验 TLE 计算 ECEF 初值 (7 维)。"""
         from mbdsdr_ai import orbit_determination as od
-        target = self.target_combo.currentText()
-        if target.startswith("LRO"):
+        special = self.target_combo.currentData()
+        if special == "lro":
             return None
-        if target.startswith("自定义"):
+        if special == "custom":
             lines = [l.strip() for l in self.tle_edit.toPlainText().splitlines()
                      if l.strip()]
             if len(lines) < 2:
@@ -632,9 +675,8 @@ class DopplerPanel(QWidget):
         if gs is None:
             QMessageBox.warning(self, "参数错误", "地面站坐标需为数字。")
             return
-        target = self.target_combo.currentText()
 
-        if target.startswith("LRO"):
+        if self.target_combo.currentData() == "lro":
             self._start_worker("lro", {"rx_lat": gs[0], "rx_lon": gs[1]})
             return
 
