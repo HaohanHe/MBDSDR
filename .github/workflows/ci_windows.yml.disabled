@@ -1,0 +1,58 @@
+# =============================================================================
+# MBDSDR Windows 部署面 CI（草案 —— 当前未启用）
+# -----------------------------------------------------------------------------
+# 状态：草案，待 runner 验证。Windows 部署面（构建树 DLL 部署 / 直跑零弹窗）
+# 此前从未被 CI 验证——2026-11-02/03 四轮弹窗（Qt6Widgets / Qt6Test /
+# platforms 插件 / libgcc）全在 ubuntu-latest CI 覆盖之外。本文件把该面钉成
+# 可落地的硬门禁。
+#
+# 为何当前不启用（诚实口径）：
+#   1) 需要 windows-latest runner + Qt 6.8.2 MinGW 缓存/安装（约 2GB），
+#      首次配置未实测；
+#   2) librtlsdr 需额外 provision（stub 树可先跑通部署门禁，真 RTL 树
+#      需预编译库）；
+#   3) 冒烟脚本 Start-Process 在 Session 0（无桌面）下行为需验证
+#      （SEM_FAILCRITICALERRORS 抑制弹窗已在交互会话实测，Session 0 下
+#      loader 直接返回非零退出码，理论上更稳，但未实测）。
+# 启用路径：本文件改名 ci_windows.yml 去掉 .disabled 后缀即启用；先把
+# stub 树（cpp/build 口径，RTLSDR=NOTFOUND）跑通再补真 RTL 树。
+# =============================================================================
+name: CI-Windows-Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  deploy-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Qt 6.8.2 MinGW（与本地 cpp/build 口径一致）。install 慢，接 runner 时
+      # 换成缓存（actions/cache key 钉 Qt 版本 + 工具链哈希）。
+      - name: Install Qt 6.8.2 MinGW
+        run: |
+          # TODO(runner)：aqtinstall 或 jurplel/install-qt-action 装
+          # qt 6.8.2 win64_mingw + mingw1310_64 工具链。首次实测后钉死命令。
+          echo "TODO(runner): Qt 安装命令待实测"
+
+      - name: Configure + build (stub 树口径)
+        run: |
+          cmake -S cpp -B build -G "MinGW Makefiles" `
+            -DCMAKE_PREFIX_PATH="${{ env.QT_ROOT }}/lib/cmake"
+          cmake --build build -j 4
+        # POST_BUILD 自动部署在此发生——构建成功但部署缺文件会构建期红
+        # （deploy_runtime.cmake 逐一 Test-Path + FATAL_ERROR）。
+
+      - name: 直跑零弹窗冒烟（硬门禁）
+        run: |
+          powershell -NoProfile -File scripts/smoke_exe_no_popup.ps1 `
+            -BuildDir build
+        # 任一 exe 干净 PATH 非零退出/弹框即红；输出缺失 DLL 名清单。
+
+      - name: ctest 全量（offscreen + NULL_AUDIO + NO_HW 注入）
+        run: |
+          ctest --test-dir build --output-on-failure
