@@ -629,9 +629,19 @@ satellite-decoder 示例实录 `meteor_m2_72k.wav`（Meteor-M2 72k 过境，
 关键机制发现：真实样本率 2.604 sps 非整数，整数 sps 假设的原型解调器
 直接失锁——重采样 144 kS/s（整 2 sps）后过境中段 ham=0 完美同步命中
 （帧头 050bd1af…，8 候选）。`tests/test_lrpt_meteor_real_golden.py`
-三层钉扎（ham=0 地板 + 帧头真值 + 候选 ratchet）。**同步层**（QPSK+
-帧同步）真实验证已立；**解码层**（Viterbi/解扰/RS/VCDU 真录有效性）
-仍 not_verified——协议栈真录对拍是下一锤（参照 dump1090 全量清单姿势）。
+三层钉扎（ham=0 地板 + 帧头真值 + 候选 ratchet）。
+
+**LRPT 协议栈真录破零（2026-11-03 同日续）**：真录软判决位流（符号幅度，
+硬 ±1 会丢 RS 边际——实测钉死）过完整协议栈 **pair-swap → Viterbi K7 r1/2
+→ CCSDS 解扰 → RS(255,223)×4 交织**，解出 **2 条 RS 全纠正 VCDU**（4 块
+全可纠，892B 载荷），ASM 0x1ACFFC1D 逐字复原、VCDU 主头 version=1。
+同窗口另有 2 帧 ASM 命中但 RS 部分不可纠（弱信号，诚实不计）。
+**比特约定裁决**：真实 Meteor-M2 卷积位→IQ 映射与本仓合成链相反，解真录
+必须 c0/c1 pair-swap（≡ poly1↔poly2）；此裁决终结 lrpt_fec.py 悬置的
+「u0 哪端先进寄存器」问题（详见该文件注释与 golden 测试钉点）。
+金样钉扎 8 项（协议栈 VCDU 地板 + ASM + 载荷头 32B 逐字 + version +
+约定裁决）。not_verified：图像段重组真录链（VCDU→M_PDU→空间包→JPEG
+段）、全过境 VCDU 计数/覆盖率、C++ 侧 LRPT 双实现对拍。
 
 **真实样本反哺出的三处缺陷（2026-10-28 七轮）**：真实 OTA 样本入仓后立刻
 接进解码链，三处合成信号永远测不到的缺陷当场暴露——这正是"真实样本进仓"

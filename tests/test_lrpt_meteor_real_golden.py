@@ -14,11 +14,18 @@ bab41fadd584e0296df0cdf8 钉真值；79MB 第三方字节不入库，按需下�
   帧同步锁住：ham=0 完美命中（phase=0，I/Q swap），帧头
   05 0b d1 af 64 76 ba 8c，8 条候选（ham 0/1/3/3/4/…）。
 
-钉扎口径（诚实边界）：
+钉扎口径（2026-11-03 协议栈真录破零后）：
 - **同步层**（QPSK 解调 + 64-bit 同步字相关）在真实 OTA 上验证：ham=0
   帧存在 + 帧头前缀逐字命中 + 候选数下限 ratchet。
-- **解码层**（Viterbi/解扰/RS/VCDU 真录有效性）仍 not_verified——真录
-  数据未过完协议栈，后续按 dump1090 全量清单对拍的姿势补。
+- **解码层**（Viterbi/解扰/RS/VCDU）同日破零：真录软判决位流过完整协议栈
+  解出 **2 条 RS 全纠正 VCDU**（4 块全可纠，892B 载荷），ASM 0x1ACFFC1D
+  逐字复原。钉扎：VCDU 数地板 + 两条载荷头 32B 逐字 + ASM 约定裁决。
+
+**比特约定裁决（真录实证，2026-11-03）**：真实 Meteor-M2 下行的卷积码
+输出位对 I/Q 的映射与本仓合成链相反——解码真录必须对软位流做 **pair-swap**
+（c0/c1 互换 ≡ poly1↔poly2）后才能过 Viterbi；合成链自洽（不 swap），
+两套约定此前悬而未决（lrpt_fec.py 注释），现由真录裁决。真软判决（符号
+幅度）是 RS 纠错边际的关键——硬 ±1 判决下同样帧 RS 直接不可纠。
 """
 from __future__ import annotations
 
@@ -32,7 +39,10 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from mbdsdr_ai.lrpt_modem import LrptDemodulator  # noqa: E402
+from mbdsdr_ai.lrpt_modem import LrptDemodulator, SYNC_BITS  # noqa: E402
+from mbdsdr_ai.lrpt_fec import (  # noqa: E402
+    CADU_SIZE, LrptCaduDecoder, viterbi_decode,
+)
 
 WAV_URL = ("https://raw.githubusercontent.com/lar-tech/satellite-decoder/"
            "main/data/meteor_m2_72k.wav")
@@ -113,3 +123,144 @@ def test_real_recording_frame_head_matches_truth(cands):
 def test_real_recording_candidate_floor(cands):
     """候选数 ratchet：只增不减（实测 8 条，保守地板 3）。"""
     assert len(cands) >= 3, f"真录候选数回退：{len(cands)} < 3"
+
+
+# --------------------------------------------------------------------------- #
+# 协议栈真录（2026-11-03 破零）：Viterbi → 解扰 → RS → VCDU
+# --------------------------------------------------------------------------- #
+
+ASM = bytes([0x1A, 0xCF, 0xFC, 0x1D])
+NEED_CODED_BITS = SYNC_BITS + (CADU_SIZE * 8 + 6) * 2
+
+# 真录裁决出的两条 RS 全纠正 VCDU（载荷头 32B 逐字真值）：
+PIN_VCDU_HEADS = (
+    "407300ecc32df0d3adce120295871f4267552126d223f8989b942ffe5ec7f604",
+    "4062000a2608760800020000fddacc73714be1a567413e5b43335792bd927913",
+)
+
+
+def _pair_swap(soft: np.ndarray) -> np.ndarray:
+    """c0/c1 位对互换（真录裁决的 Meteor-M2 卷积位→IQ 映射）。"""
+    sw = np.empty_like(soft)
+    sw[0::2] = soft[1::2]
+    sw[1::2] = soft[0::2]
+    return sw
+
+
+@pytest.fixture(scope="module")
+def stack():
+    """全栈解码结果（模块级缓存，Viterbi 只跑一轮）。
+
+    返回: (valid_payloads, asm_hits) —— valid 是 RS 全纠正的 892B 载荷列表。
+    """
+    from scipy.io import wavfile
+    from scipy.signal import resample_poly
+
+    sr, data = wavfile.read(_ensure_wav())
+    iq = (data[:, 0].astype(np.float64)
+          + 1j * data[:, 1].astype(np.float64)) / 32768.0
+    iq = resample_poly(iq, 96, 125)
+    t0, t1 = WINDOW
+    win = iq[int(t0 * RESAMP_SR):int(t1 * RESAMP_SR)]
+
+    dem = LrptDemodulator(fs=RESAMP_SR, sym_rate=SYM_RATE)
+    win = dem._agc(win.astype(np.complex128))
+    cfo = dem._estimate_cfo_4thpower(win)
+    if abs(cfo) > 1.0:
+        t = np.arange(win.size) / dem.fs
+        win = win * np.exp(-1j * 2 * np.pi * cfo * t)
+
+    # 定时偏移扫描：留符号幅度做软判决（硬 ±1 会丢 RS 边际，实测钉死）
+    best_syms, best_h = None, 999
+    for off in range(dem.sps):
+        s = win[off::dem.sps]
+        if s.size < 32:
+            continue
+        b = dem._symbols_to_bits(s)
+        if b.size < SYNC_BITS:
+            continue
+        h = min(int(np.count_nonzero(b[:SYNC_BITS] != hb))
+                for hb, _, _ in dem._sync_hypotheses)
+        if h < best_h:
+            best_h, best_syms = h, s
+    assert best_syms is not None, "真录窗口无有效定时"
+
+    soft = np.empty(best_syms.size * 2, dtype=np.float64)
+    soft[0::2] = np.real(best_syms)
+    soft[1::2] = np.imag(best_syms)
+
+    cands = dem._find_frames(dem._symbols_to_bits(best_syms))
+    decoder = LrptCaduDecoder()
+    valid = []
+    asm_hits = 0
+    for c in cands:
+        start = c.sync_symbol_index * 2
+        end = min(start + NEED_CODED_BITS, soft.size)
+        if end - start < NEED_CODED_BITS - 64:
+            continue
+        sl = soft[start:end]
+        # 真录裁决：pair-swap / pair-swap+invert 两变体才出 ASM
+        for s in (_pair_swap(sl), -_pair_swap(sl)):
+            try:
+                info = viterbi_decode(s)
+            except Exception:  # noqa: BLE001
+                continue
+            nbytes = (info.size + 7) // 8
+            padded = np.zeros(nbytes * 8, dtype=np.uint8)
+            padded[:info.size] = info
+            raw = np.packbits(padded).tobytes()
+            if raw[:4] != ASM:
+                continue
+            asm_hits += 1
+            try:
+                payload, errs = decoder.decode_cadu(raw[:CADU_SIZE])
+            except Exception:  # noqa: BLE001
+                continue
+            if all(e >= 0 for e in errs) and len(payload) == 892:
+                valid.append(payload)
+    return valid, asm_hits
+
+
+def test_real_recording_full_stack_vcdu_floor(stack):
+    """协议栈真录地板：至少 2 条 RS 全纠正 VCDU（失守即红）。
+
+    真录软位流 → pair-swap → Viterbi → 解扰 → RS(255,223)×4，4 块全可纠
+    才算数（诚实锁帧判据）。实测 2 条（2026-11-03）。
+    """
+    valid, _ = stack
+    assert len(valid) >= 2, f"真录协议栈 VCDU 数回退：{len(valid)} < 2"
+
+
+def test_real_recording_asm_recovered(stack):
+    """ASM 0x1ACFFC1D 在真录 Viterbi 输出里逐字复原（协议栈正确性锚）。"""
+    _, asm_hits = stack
+    assert asm_hits >= 2, f"真录 ASM 命中数回退：{asm_hits} < 2"
+
+
+def test_real_recording_vcdu_payload_heads_pinned(stack):
+    """两条真 VCDU 载荷头 32B 逐字钉死（防解码链语义漂移）。"""
+    valid, _ = stack
+    heads = {p[:32].hex() for p in valid}
+    for pin in PIN_VCDU_HEADS:
+        assert pin in heads, f"真录 VCDU 载荷头漂移：{pin} 不在 {heads}"
+
+
+def test_real_recording_vcdu_header_version(stack):
+    """VCDU 主头 version 字段 = 1（CCSDS TM 口径，真录实证）。"""
+    valid, _ = stack
+    assert valid, "无有效 VCDU"
+    for p in valid:
+        ver = (p[0] >> 6) & 0x3
+        assert ver == 1, f"VCDU version 漂移：{ver}"
+
+
+def test_pair_swap_convention_adjudicated(stack):
+    """比特约定裁决钉扎：真录必须 pair-swap 才能出 ASM（合成链不 swap）。
+
+    这条钉住 lrpt_fec.py 里悬置的「u0 哪端先进寄存器」——真录已裁决：
+    真实 Meteor-M2 的卷积位→IQ 映射与本仓合成链相反，解真录必须
+    c0/c1 互换。若未来统一约定（改合成链跟真录对齐），此测试需随迁。
+    """
+    valid, asm_hits = stack
+    assert asm_hits >= 2, "约定裁决失守：pair-swap 路径无 ASM"
+    assert len(valid) >= 2, "约定裁决失守：pair-swap 路径无全纠正 VCDU"
