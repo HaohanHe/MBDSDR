@@ -78,3 +78,31 @@ enumerate()` 返回空表。CTest 已对全部 162 目标统一注入；直跑�
   loader/插件层）。提交前/CI 固定环节。
 - **CI Windows 面**：见 `.github/workflows/ci_windows.yml`（部署面硬门禁
   job 草案）。
+
+## CI 红用例裁决方法（真失败 / 环境特有 / flaky）
+
+CI 上报某测试红，本地按此顺序取证，别急着改代码：
+
+1. **拿 CI 提交建干净 worktree**：`git worktree add <tmp> <ci_sha>` +
+   全新 configure/build（不碰现有构建树，防陈旧产物污染）；
+2. **单跑 3 次**：`ctest --test-dir <tmp>/build -R "^<name>$" --output-on-failure`，
+   全过且耗时应与 CI 基线一致（如 engine_integration ≈13s）——若本地单跑
+   全过、CI 红，先怀疑环境特有/flaky，不是真逻辑错；
+3. **并发负载下跑 1 次**（后台起 4 个编译任务制造 CPU/IO 负载）——若负载
+   下挂而空载过，是 flaky（时序/资源敏感）；若负载下也过，flaky 证据弱；
+4. **全量 ctest 跑 1 次**（CI 真实场景：该用例在 slow 组，与全部 162 个
+   一起跑）——全绿则 CI 红为该 runner 环境特有（无声卡/无显示/无硬件/
+   并发负载），非代码真错；
+5. **判定后处置**：
+   - 真失败（本地稳定复现）：定位根因修被测逻辑，不放宽断言、不 skip；
+   - 环境特有：CI 侧固定环境变量（`MBDSDR_NULL_AUDIO=1` /
+     `QT_QPA_PLATFORM=offscreen` / `MBDSDR_NO_HW=1`——CTest 已对全部
+     目标统一注入，CI 无需额外加）；若 runner 无显示/声卡，确认注入
+     生效即可，不加重试（重试掩盖真错）；
+   - flaky（负载下偶发）：串行化该用例（`ctest -j1` 或加 RESOURCE_LOCK
+     属性）或定位时序敏感点修逻辑，不靠重试掩盖。
+6. **实例（2026-11-03 engine_integration）**：CI run 65eea2d 红，本地
+   worktree 单跑 3 次全过（13.2s 一致）、并发负载下 1 次过、全量 ctest
+   162/162 全绿——判定 **CI runner 环境特有**（ubuntu-latest 无显示/
+   声卡/硬件，注入已覆盖），非代码真错，不加 CI 侧处理（注入已够）。
+
