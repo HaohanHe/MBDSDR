@@ -54,16 +54,25 @@
 - 便携包线待收（windeployqt / package_windows.ps1）
 
 ### 星象仪/彩带会话（本窗口，2026-11-03 登记）
-- **在途**：A1 摄像机概念与「卫星锁定」坐标系（参照本机 Stellarium 源码）
-  + B2（TLE source/epoch 透出：信息卡 + get_satellite_pass/PassInfo）
-- **已收工**：SDR++ 频段彩带 v2 补强（`dc62be0`，已推）；
-  A3 删除预制工作流与触发短语（本提交）——`_preset_*` ×6 与
-  `match_trigger`/`workflow_trigger_match` 全清，引擎只服务用户/AI 自定义
-  JSON，回归锁 `tests/test_workflow_engine_no_presets.py`
+- **已收工**（按时序）：
+  1. SDR++ 频段彩带 v2 补强（`dc62be0`，已推）；
+  2. A3 删除预制工作流与触发短语（`27b8b69`，已推）——`_preset_*` ×6 与
+     `match_trigger`/`workflow_trigger_match` 全清，引擎只服务用户/AI 自定义
+     JSON，回归锁 `tests/test_workflow_engine_no_presets.py`；
+  3. A1 摄像机概念与「卫星锁定」坐标系（本提交）——`rf_sky_view` 新增
+     `_camera_lock`（Stellarium StelMovementMgr::flagTracking 语义：每 33ms
+     tick 真 TLE+sgp4 重算目标 az/el，k=0.25 指数趋近贴视图中心；拖拽/
+     双击/触屏/重置/反选/落地/数据失效全路径解锁），「📷 摄像机」按钮 +
+     锁定 HUD + 术语统一（重置视角→重置摄像机）；
+     B2 TLE 可追溯：目录条目带 tle_source/tle_epoch 进信息卡，
+     `get_satellite_pass`/`PassInfo` 加同名字段，`orbit.tle_epoch_iso` 单一
+     来源；回归锁 `tests/test_sky_camera_lock.py`（21 项）。
 - **所有物**：`desktop/bandplan.json`、`desktop/spectrum_widget.py`、
   `tests/test_spectrum_bandplan.py`、`desktop/rf_sky_view.py`、
   `mbdsdr_ai/workflow_engine.py`、`mbdsdr_ai/agent.py`（工作流注册段）、
-  `mbdsdr_ai/scheduler.py`（文档串）、`mbdsdr_ai/core/controller.py`（B2）
+  `mbdsdr_ai/scheduler.py`（文档串）、`mbdsdr_ai/core/controller.py`、
+  `mbdsdr_ai/orbit.py`、`tests/test_workflow_engine_no_presets.py`、
+  `tests/test_sky_camera_lock.py`
 - **禁区（对方在途，绝不碰）**：`cpp/CMakeLists.txt`、`scripts/package_windows.ps1`、
   `cpp/cmake/*`、`scripts/smoke_exe_no_popup.ps1`、`docs/WINDOWS_POPUP_PLAYBOOK.md`、
   `.github/workflows/ci_windows.yml.disabled`、各 build 树、批量 exe 冒烟；

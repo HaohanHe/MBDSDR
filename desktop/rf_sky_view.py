@@ -366,12 +366,16 @@ def _load_user_tle_catalog() -> List[Dict[str, object]]:
                                flags=re.IGNORECASE).strip()
             if not clean_name:
                 clean_name = os.path.splitext(fn)[0]
+            # TLE 可追溯（真实数据原则）：来源 + 历元（解析失败如实空串）
+            from mbdsdr_ai.orbit import tle_epoch_iso as _tle_epoch_iso
             catalog.append({
                 "name": clean_name,
                 "line1": line1,
                 "line2": line2,
                 "freq_mhz": freq_mhz,
                 "kind": kind,
+                "tle_source": f"用户 TLE 文件（~/.mbdsdr/tle/{fn}）",
+                "tle_epoch": _tle_epoch_iso(line1),
             })
         except Exception:
             continue
@@ -425,6 +429,8 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
             "line2": line2,
             "freq_mhz": freq_mhz,
             "kind": str(meta["kind"]),
+            "tle_source": f"Celestrak CATNR {catnr}（在线/缓存 ~/.mbdsdr/tle_cache/）",
+            "tle_epoch": orbit.tle_epoch_iso(line1),
         })
     return catalog
 
@@ -661,6 +667,30 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             + _t.text("disabled") + "; }")
         self._gimbal_btn.toggled.connect(self._on_gimbal_toggled)
         self._gimbal_btn.hide()
+        # 「摄像机锁定」开关：checkable。开启后视图中心每帧贴住选中卫星
+        # （Stellarium StelMovementMgr::flagTracking 语义——摄像机跟星走，
+        # 星空反向流动；与「跟踪」按钮的多普勒调谐闭环是两套东西）。
+        self._camera_btn = QPushButton("📷 摄像机", self)
+        self._camera_btn.setCheckable(True)
+        self._camera_btn.setEnabled(False)
+        self._camera_btn.setToolTip(
+            "摄像机锁定：视图始终对准该卫星，星空随时间反向流动；"
+            "拖拽/双击接管摄像机自动解锁")
+        self._camera_btn.setStyleSheet(
+            "QPushButton { background: " + _t.COLORS["card_2"] + "; color: "
+            + _t.text("primary") + ";"
+            " border:none; padding:4px 10px; border-radius:3px; }"
+            "QPushButton:hover { background: " + _t.COLORS["card_hover"] + "; }"
+            "QPushButton:checked { background: " + _t.COLORS["accent"]
+            + "; color: " + _t.COLORS["bg_dark"] + "; }"
+            "QPushButton:disabled { background: " + _t.COLORS["card_1"] + "; color: "
+            + _t.text("disabled") + "; }")
+        self._camera_btn.toggled.connect(self._on_camera_toggled)
+        self._camera_btn.hide()
+        # 摄像机锁定状态：目标星名（None=自由摄像机）+ 诚实退出通知
+        self._camera_lock: Optional[str] = None
+        self._camera_notice: str = ""
+        self._camera_notice_until: float = 0.0
         # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
         self._tune_sat_name: Optional[str] = None
         # 跟踪环目标星名（跟踪中防止换星残留假状态）
@@ -756,9 +786,128 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._goto_clock = lambda: time.monotonic() * 1000.0
 
     def _on_refresh_tick(self):
-        """33ms 节拍：先步进 goto 动画（若有），再触发重绘。"""
+        """33ms 节拍：步进 goto 动画 + 摄像机锁定跟随，再触发重绘。"""
         self._step_goto_anim()
+        self._apply_camera_lock()
         self.update()
+
+    # ------------------------------------------------------------------ #
+    # 摄像机锁定（Stellarium StelMovementMgr::flagTracking 同款语义）
+    # ----------------------------------------------------------------------------
+    # Stellarium 的做法（reference/stellarium/src/core/StelMovementMgr.cpp）：
+    #   - setFlagTracking(true) 要求有选中对象，先 moveToObject 缓动飞入；
+    #   - updateMotion 每帧取选中对象的【当前】地平坐标，直接把视图方向
+    #     重瞄到它（setViewDirection）——目标静止、星空反向流动；
+    #   - 任何用户手动运动（panView/dragView/smoothPan）立即
+    #     setFlagTracking(false)：用户永远接管，跟踪不与输入打架。
+    # 我们的对应（坐标链与卫星绘制一致：TLE + sgp4，真实数据）：
+    #   - _camera_lock 存目标星名；每 33ms tick 用当前时刻重算目标 az/el，
+    #     指数趋近把 view_state 中心贴上去（平滑策略见 _apply_camera_lock）；
+    #   - 拖拽/触屏平移/双击 goto/重置摄像机 → 立即解锁；
+    #   - 目标落地/数据失效 → 诚实解锁并提示，画面不停在无意义角度假跟踪。
+    # ------------------------------------------------------------------------
+    @property
+    def camera_lock_target(self) -> Optional[str]:
+        """当前摄像机锁定目标星名；None = 自由摄像机。"""
+        return self._camera_lock
+
+    def set_camera_lock(self, name: Optional[str]) -> bool:
+        """设定/解除摄像机锁定。成功锁定返回 True；目标不可解算返回 False。"""
+        if name is None:
+            self._unlock_camera("")
+            return True
+        if self._lock_target_azalt(name) is None:
+            return False
+        self._camera_lock = str(name)
+        self._sync_camera_btn()
+        self.update()
+        return True
+
+    def _on_camera_toggled(self, on: bool):
+        """按钮开关 → 锁定当前选中卫星 / 解锁。"""
+        if on:
+            name = self._tune_sat_name or (
+                self._hovered_object.name if self._hovered_object else None)
+            if not name or not self.set_camera_lock(name):
+                # 无选中或目标不可解算：复位开关，不残留假状态
+                self._camera_notice = "无法锁定：未选中卫星或轨道数据不可用"
+                self._camera_notice_until = time.time() + 3.0
+                self._camera_lock = None
+                self._sync_camera_btn()
+        else:
+            self._unlock_camera("")
+
+    def _unlock_camera(self, notice: str):
+        """解除锁定；notice 非空时显示诚实退出原因（3s 淡出）。"""
+        was = self._camera_lock
+        self._camera_lock = None
+        if notice and was:
+            self._camera_notice = notice
+            self._camera_notice_until = time.time() + 3.0
+        self._sync_camera_btn()
+        self.update()
+
+    def _sync_camera_btn(self):
+        """按钮状态与 _camera_lock 对齐（不递归触发 toggled）。"""
+        locked = self._camera_lock is not None
+        if self._camera_btn.isChecked() != locked:
+            self._camera_btn.blockSignals(True)
+            self._camera_btn.setChecked(locked)
+            self._camera_btn.blockSignals(False)
+
+    def _lock_target_azalt(self, name: str):
+        """目标星当前 az/el（与卫星绘制同一坐标链：TLE + sgp4 现算）。
+
+        返回 (az, el)；观测站未设置/TLE 缺失/解算失败返回 None（诚实）。
+        """
+        meta = self._sat_catalog.get(name)
+        obs = self._observer
+        if meta is None or obs is None:
+            return None
+        line1, line2 = meta.get("line1"), meta.get("line2")
+        if not line1 or not line2:
+            return None
+        try:
+            from sgp4.api import Satrec
+            from mbdsdr_ai import orbit
+            sat = Satrec.twoline2rv(line1, line2)
+            st = orbit._state_from_satrec(
+                sat, name, self._current_jd(),
+                obs["lat"], obs["lon"], obs.get("alt_m", 0.0) / 1000.0)
+        except Exception:
+            return None
+        if st is None:
+            return None
+        return float(st["azimuth"]), float(st["elevation"])
+
+    def _apply_camera_lock(self):
+        """33ms tick：把视图中心贴到锁定目标的当前 az/el。
+
+        平滑策略：指数趋近 center += delta * 0.25（时间常数约 4 tick ≈ 0.13s），
+        无稳态误差；目标角速度（LEO 视运动 ~0.05-0.1°/s）下滞后 <0.02°，
+        远小于最小 FOV 5° 的像素当量。方位角按最短路径（±180° 折叠）。
+        目标落地（el<0）/数据失效 → 诚实解锁并提示。
+        """
+        if self._camera_lock is None:
+            return
+        res = self._lock_target_azalt(self._camera_lock)
+        if res is None:
+            self._unlock_camera(
+                f"摄像机已解锁：{self._camera_lock} 轨道数据失效")
+            return
+        az, el = res
+        if el < 0.0:
+            self._unlock_camera(
+                f"摄像机已解锁：{self._camera_lock} 落入地平线下")
+            return
+        vs = self.view_state
+        d_az = ((az - vs.center_az + 540.0) % 360.0) - 180.0
+        d_alt = el - vs.center_alt
+        if abs(d_az) < 1e-6 and abs(d_alt) < 1e-6:
+            return
+        k = 0.25
+        vs.center_az = (vs.center_az + d_az * k) % 360.0
+        vs.center_alt = max(-89.9999, min(89.9999, vs.center_alt + d_alt * k))
 
     def goto_animated(self, az_deg: float, alt_deg: float,
                       fov_deg: Optional[float] = None,
@@ -828,6 +977,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 "line1": line1,
                 "line2": str(e.get("line2", "")),
                 "freq_mhz": float(e.get("freq_mhz", 0.0)),
+                # TLE 可追溯（B2）：来源/历元透传（缺省空串，不编造）
+                "tle_source": str(e.get("tle_source", "")),
+                "tle_epoch": str(e.get("tle_epoch", "")),
             }
         self.update()
 
@@ -1080,7 +1232,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.update()
 
     def reset_view(self):
-        """重置视角：回到天顶居中 + FOV=120°。"""
+        """重置摄像机：回到天顶居中 + FOV=120°，并解除摄像机锁定。
+
+        （「摄像机」 = 用户可见的视图/视角概念；内部标识仍叫 view_state，
+        见 _camera_lock 区块的术语映射注释。）
+        """
+        self._unlock_camera("")
         self.view_state.look_at(0.0, 90.0)
         self.view_state.zoom_to(120.0)
         self._rotation = 0.0
@@ -1256,6 +1413,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             info["cospar"] = meta["cospar"]
             info["aliases"] = meta["aliases"]
             info["kind_label"] = meta["kind_label"]
+            # TLE 可追溯（B2）：来源 + 历元进信息卡；缺省空串如实缺省
+            info["tle_source"] = str(meta.get("tle_source") or "")
+            info["tle_epoch"] = str(meta.get("tle_epoch") or "")
         # 链路目录 sat_links：下行频点/体制 + 一句话星性注记（点星即听
         # 的文化层；目录没有的星如实缺省，不编造）。
         try:
@@ -1321,6 +1481,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._tune_btn.hide()
             self._track_btn.hide()
             self._gimbal_btn.hide()
+            self._camera_btn.hide()
             self._doppler_label.hide()
             self._tune_refresh_timer.stop()
             return
@@ -1329,10 +1490,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if self._track_btn.isChecked() and name != self._track_target_name:
             self._stop_track_ui()
             self._stop_gimbal_ui()
+        # 换星：摄像机锁跟着选中走（Stellarium 语义：跟踪绑定选中对象）
+        if self._camera_lock is not None and name != self._camera_lock:
+            if not self.set_camera_lock(name):
+                self._unlock_camera("摄像机已解锁：新选中目标轨道数据不可用")
         self._tune_sat_name = name
         self._tune_btn.show()
         self._track_btn.show()
         self._gimbal_btn.show()
+        self._camera_btn.show()
+        self._camera_btn.setEnabled(True)
         self._gimbal_btn.setEnabled(self._gimbal_available)
         self._doppler_label.show()
         # 下行频点解析不了（目录外卫星）→ 置灰，诚实空态不画饼
@@ -1508,13 +1675,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         })
 
     def _position_tune_overlay(self):
-        """把调谐按钮+跟踪按钮+云台按钮+多普勒标签放到左下角。"""
+        """把调谐/跟踪/云台/摄像机按钮+多普勒标签放到左下角。"""
         try:
             bw = max(self._tune_btn.sizeHint().width(), 110)
             tw = max(self._track_btn.sizeHint().width(), 70) \
                 if self._track_btn.isVisibleTo(self) else 0
             gw = max(self._gimbal_btn.sizeHint().width(), 64) \
                 if self._gimbal_btn.isVisibleTo(self) else 0
+            cw = max(self._camera_btn.sizeHint().width(), 84) \
+                if self._camera_btn.isVisibleTo(self) else 0
             dw = self._doppler_label.sizeHint().width()
             h = 26
             x = 12
@@ -1524,7 +1693,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._track_btn.setGeometry(tx, y, tw, h)
             gx = tx + tw + 6
             self._gimbal_btn.setGeometry(gx, y, gw, h)
-            self._doppler_label.setGeometry(gx + gw + 6, y, max(dw, 90), h)
+            cx = gx + gw + 6
+            self._camera_btn.setGeometry(cx, y, cw, h)
+            self._doppler_label.setGeometry(cx + cw + 6, y, max(dw, 90), h)
         except Exception:
             pass
 
@@ -1648,8 +1819,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             elif self._picked_body:
                 self._draw_body_info(painter)
 
-        # 6) 常驻叠加: FOV 显示 / 信息卡 / 过境 / GNSS / 空状态
+        # 6) 常驻叠加: FOV 显示 / 摄像机锁定 / 信息卡 / 过境 / GNSS / 空状态
         self._draw_fov(painter)
+        self._draw_camera_hud(painter)
         self._draw_fov_control(painter)
         self._draw_info_overlay(painter)
         self._draw_passes_panel(painter)
@@ -1945,6 +2117,29 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                          f"FOV {self.view_state.fov_deg:4.1f}°")
         painter.restore()
 
+    def _draw_camera_hud(self, painter: QPainter):
+        """摄像机锁定 HUD：锁定目标指示（常驻）+ 诚实退出通知（3s 淡出）。"""
+        locked = self._camera_lock is not None
+        notice_live = self._camera_notice and \
+            time.time() < self._camera_notice_until
+        if not locked and not notice_live:
+            return
+        painter.save()
+        _t = tokens()
+        f = QFont(self._font)
+        f.setPointSize(9)
+        painter.setFont(f)
+        y = 40.0
+        if locked:
+            painter.setPen(QColor(_t.COLORS["accent"]))
+            painter.drawText(QPointF(14.0, y),
+                             f"📷 摄像机锁定: {self._camera_lock}")
+            y += 18.0
+        if notice_live:
+            painter.setPen(QColor(_t.COLORS["warning"]))
+            painter.drawText(QPointF(14.0, y), str(self._camera_notice))
+        painter.restore()
+
     def _draw_fov_control(self, painter: QPainter):
         """右下角 ⊖ ⊕ FOV 步进控件 (Stellarium 底部 FOV 条的精简版)。
 
@@ -2170,6 +2365,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if info.get("downlink_mode"):
                 dl += f" ({info['downlink_mode']})"
             kv.append(("Downlink", dl))
+        # TLE 可追溯（B2）：来源 + 历元（有则画，无则如实缺省不画）
+        if info.get("tle_epoch"):
+            kv.append(("TLE 历元", str(info["tle_epoch"])))
+        if info.get("tle_source"):
+            kv.append(("TLE 来源", str(info["tle_source"])))
 
         painter.save()
         painter.setFont(self._font)
@@ -2394,6 +2594,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._track_btn.hide()
         self._stop_gimbal_ui()
         self._gimbal_btn.hide()
+        self._camera_btn.hide()
+        # 选中体非卫星：摄像机锁定无目标可绑，解锁（诚实）
+        self._unlock_camera("")
         self._tune_btn.hide()
         self._doppler_label.hide()
         self._tune_refresh_timer.stop()
@@ -2877,7 +3080,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         y += 18
         painter.setFont(self._font)
         painter.setPen(dim)
-        painter.drawText(card_x + 12, y, "滚轮缩放 | 拖拽旋转 | 双击居中")
+        painter.drawText(card_x + 12, y,
+                         "滚轮缩放 | 拖拽转动摄像机 | 双击居中")
         painter.restore()
 
     def _draw_passes_panel(self, painter: QPainter):
@@ -3155,7 +3359,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._press_px = None
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """双击 goto：Stellarium 式缓动飞行（替代旧瞬移 look_at）。"""
+        """双击 goto：Stellarium 式缓动飞行（替代旧瞬移 look_at）。
+
+        双击 = 用户给摄像机新指向：解除摄像机锁定（Stellarium 手动运动
+        解除 flagTracking 同款语义）。
+        """
+        self._unlock_camera("")
         px, py = self._event_xy(event)
         size = (float(self.width()), float(self.height()))
         az, alt = screen_to_sky(px, py, self.view_state,
@@ -3183,6 +3392,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _on_touch_pan(self, dx: float, dy: float) -> None:
         """单指拖动平移：复用 SkyInteractionHandler 的 screen_to_sky 反投影平移。"""
         self._cancel_goto_anim()  # 触屏接管视角：打断飞行
+        self._unlock_camera("")   # 触屏接管摄像机：解除锁定
         try:
             last = getattr(self, "_pan_last_pos", None)
             if last is None:
@@ -3225,6 +3435,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._track_btn.hide()
             self._stop_gimbal_ui()
             self._gimbal_btn.hide()
+            self._camera_btn.hide()
+            # 反选 = 选中对象消失：摄像机解锁（不停在无目标角度假跟踪）
+            self._unlock_camera("")
             self._tune_btn.hide()
             self._doppler_label.hide()
             self._tune_refresh_timer.stop()
@@ -3241,6 +3454,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.update()
 
     def on_drag_state_changed(self, dragging: bool) -> None:
+        # 用户拖拽接管摄像机（Stellarium dragView→setFlagTracking(false) 同款）
+        if dragging and self._camera_lock is not None:
+            self._unlock_camera("")
         self._dragging = dragging
 
     def _find_object_at(self, x: float, y: float,
@@ -3348,7 +3564,8 @@ class RFSkyViewPanel(QFrame):
             self._rate_buttons[label] = b
         self._rate_buttons["▶"].setChecked(True)
         bar.addSpacing(16)
-        b = QPushButton("重置视图")
+        b = QPushButton("重置摄像机")
+        b.setToolTip("重置摄像机：回到天顶居中 + FOV=120°，并解除摄像机锁定")
         b.clicked.connect(self.reset_view)
         bar.addWidget(b)
         self.layout().addWidget(control_bar)

@@ -105,6 +105,9 @@ class PassInfo:
     duration_s: float
     rise_az_deg: float
     set_az_deg: float
+    # TLE 可追溯（真实数据原则）：历元 + 来源；缺省空串 = 未知，不编造
+    tle_epoch: str = ""
+    tle_source: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -953,6 +956,7 @@ class SDRController:
             if not passes:
                 return {"error": "no_pass", "suggestion": "未来 24h 内无高于 10° 的过境。"}
             p = passes[0]
+            from ..orbit import tle_epoch_iso
             info = PassInfo(
                 name=p.sat_name or name,
                 rise_utc=p.rise_time.utc_datetime().isoformat(),
@@ -962,6 +966,8 @@ class SDRController:
                 duration_s=float(p.duration),
                 rise_az_deg=float(p.rise_az),
                 set_az_deg=float(p.set_az),
+                tle_epoch=tle_epoch_iso(line1),
+                tle_source="builtin_table（内置 TLE 回退表，decoders.BUILTIN_TLE）",
             )
             return info.to_dict()
         except Exception as e:

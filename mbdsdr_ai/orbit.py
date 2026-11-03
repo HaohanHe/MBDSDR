@@ -23,6 +23,7 @@ import os
 import time
 import urllib.request
 import ssl
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
 try:
@@ -141,6 +142,25 @@ def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> Tuple[flo
     y = (n + alt_km) * cos_lat * math.sin(lon)
     z = (n * (1.0 - WGS72_E2) + alt_km) * sin_lat
     return x, y, z
+
+
+def tle_epoch_iso(line1: str) -> str:
+    """TLE line1 历元（列 19-32，YYDDD.DDDDDDDD）→ ISO UTC 字符串。
+
+    例: "26250.50000000" -> "2026-09-06 12:00:00 UTC"。
+    年份按 TLE 惯例折叠（YY<57 -> 20YY，否则 19YY）。
+    解析失败返回 ""（调用方如实缺省，不编造历元）。
+    """
+    try:
+        raw = line1[18:32].strip()
+        yy = int(raw[:2])
+        doy = float(raw[2:])
+        year = 2000 + yy if yy < 57 else 1900 + yy
+        base = datetime(year, 1, 1, tzinfo=timezone.utc)
+        dt = base + timedelta(days=doy - 1.0)
+        return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    except (ValueError, IndexError, OverflowError):
+        return ""
 
 
 def fetch_tle(catnr: int, max_age_hours: float = 24.0) -> Tuple[str, str]:
