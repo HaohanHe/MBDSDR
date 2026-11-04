@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""录音库（P9-1）：索引与磁盘双向核对，修复留痕、不删用户数据。
+"""录音库（P9-1/2）：索引与磁盘双向核对、中断元数据恢复不造假。
 
 全部使用临时目录里的真实小文件，不依赖硬件。
 """
+import json
 import os
 import sys
 
@@ -15,6 +16,7 @@ if _ROOT not in sys.path:
 
 from mbdsdr_ai.recorder import IQRecorder  # noqa: E402
 from mbdsdr_ai.recording_library import RecordingLibrary  # noqa: E402
+from mbdsdr_ai.recording_meta import read_sigmf_meta, sigmf_meta_path  # noqa: E402
 
 
 def make_recording(root, name, *, n=32, sr=1.0e6, freq=100.0e6, device=""):
@@ -33,6 +35,21 @@ def write_orphan_iq(root, name, *, n=16):
     with open(path, "wb") as f:
         f.write(np.zeros(n, dtype=np.complex64).tobytes())
     return path
+
+
+def corrupt_meta(data_path):
+    with open(sigmf_meta_path(data_path), "w", encoding="utf-8") as f:
+        f.write("{ this is not json")
+
+
+def rewrite_meta(data_path, *, declared_samples, complete):
+    meta_path = sigmf_meta_path(data_path)
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    meta["global"]["core:total_num_samples"] = declared_samples
+    meta["global"]["mbdsdr:complete"] = complete
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False)
 
 
 # ── P9-1 索引与磁盘一致 ────────────────────────────────────────────────
@@ -146,3 +163,116 @@ def test_reconcile_never_deletes_files(tmp_path):
     assert lib.journal().ok
 
 
+# ── P9-2 元数据可靠性 ─────────────────────────────────────────────────
+def test_orphan_data_unknown_fields_stay_unknown(tmp_path):
+    data = write_orphan_iq(tmp_path, "lost_meta", n=16)
+    lib = RecordingLibrary(str(tmp_path))
+    res = lib.add_recording(data)
+    assert res.ok
+    entry = res.data["entry"]
+    assert entry["integrity"] == "missing-meta"
+    assert entry["state"] == "incomplete"
+    assert entry["sample_rate_hz"] is None
+    assert entry["center_freq_hz"] is None
+    assert entry["duration_s"] is None
+    assert set(entry["unknown_fields"]) == {
+        "sample_rate_hz", "center_freq_hz", "start_time", "duration_s", "device"}
+
+    rec = lib.recover_metadata(entry_id=entry["entry_id"])
+    assert rec.ok and rec.code == "recovered"
+    meta = read_sigmf_meta(data)
+    assert meta is not None
+    g = meta["global"]
+    assert g["mbdsdr:complete"] is False
+    assert g["mbdsdr:recovered"] is True
+    assert g["mbdsdr:sample_rate_unknown"] is True
+    assert g["core:sample_rate"] == 0.0
+    assert set(g["mbdsdr:unknown_fields"]) == {
+        "sample_rate_hz", "center_freq_hz", "start_time", "device"}
+    # 恢复后条目仍然不猜数值
+    refreshed = lib.load().data["entries"][0]
+    assert refreshed["sample_rate_hz"] is None
+    assert refreshed["duration_s"] is None
+    assert "sample_rate_hz" in refreshed["unknown_fields"]
+
+
+def test_corrupt_meta_recovers_only_known_values(tmp_path):
+    data = make_recording(tmp_path, "bad_meta", n=32)
+    corrupt_meta(data)
+    lib = RecordingLibrary(str(tmp_path))
+    entry_id = lib.add_recording(data).data["entry_id"]
+    assert lib.load().data["entries"][0]["state"] == "corrupt"
+
+    rec = lib.recover_metadata(entry_id, sample_rate_hz=2.5e6,
+                               center_freq_hz=433.0e6, device="HackRF")
+    assert rec.ok and rec.code == "recovered"
+    meta = read_sigmf_meta(data)
+    g = meta["global"]
+    assert g["core:sample_rate"] == pytest.approx(2.5e6)
+    assert g["core:frequency"] == pytest.approx(433.0e6)
+    assert g["mbdsdr:device"] == "HackRF"
+    assert g["mbdsdr:complete"] is False
+    assert g["mbdsdr:sample_rate_unknown"] is False
+    assert g["mbdsdr:unknown_fields"] == ["start_time"]
+    assert rec.data["sources"]["sample_rate_hz"] == "explicit"
+
+    refreshed = lib.load().data["entries"][0]
+    assert refreshed["sample_rate_hz"] == pytest.approx(2.5e6)
+    assert refreshed["duration_s"] == pytest.approx(32 / 2.5e6)
+    assert refreshed["device"] == "HackRF"
+    assert refreshed["unknown_fields"] == ["start_time"]
+
+
+def test_recovery_uses_index_values_when_meta_lost(tmp_path):
+    data = write_orphan_iq(tmp_path, "index_hint", n=8)
+    lib = RecordingLibrary(str(tmp_path))
+    res = lib.add_recording(data, metadata={
+        "sample_rate_hz": 1.0e6, "center_freq_hz": 145.0e6, "device": "PlutoSDR",
+    })
+    entry_id = res.data["entry_id"]
+    rec = lib.recover_metadata(entry_id)
+    assert rec.ok and rec.code == "recovered"
+    assert rec.data["sources"]["sample_rate_hz"] == "index"
+    meta = read_sigmf_meta(data)["global"]
+    assert meta["core:sample_rate"] == pytest.approx(1.0e6)
+    assert meta["core:frequency"] == pytest.approx(145.0e6)
+    assert meta["mbdsdr:device"] == "PlutoSDR"
+    assert meta["mbdsdr:unknown_fields"] == ["start_time"]
+
+
+def test_truncated_recording_duration_is_from_disk_truth(tmp_path):
+    data = make_recording(tmp_path, "trunc", n=32, device="RTL-SDR")
+    rewrite_meta(data, declared_samples=64, complete=True)
+    lib = RecordingLibrary(str(tmp_path))
+    res = lib.add_recording(data)
+    entry = res.data["entry"]
+    assert entry["integrity"] == "truncated"
+    assert entry["state"] == "truncated"
+    assert entry["num_samples"] == 32          # 磁盘实际样本，不采信虚报的 64
+    assert entry["duration_s"] == pytest.approx(32 / 1e6)
+    assert entry["unknown_fields"] == []
+
+
+def test_corrupt_data_refuses_to_invent_metadata(tmp_path):
+    data = make_recording(tmp_path, "broken", n=16)
+    with open(data, "wb") as f:
+        f.write(b"\x00" * 9)                   # 非 8 字节整数倍
+    lib = RecordingLibrary(str(tmp_path))
+    entry_id = lib.add_recording(data).data["entry_id"]
+    meta_before = os.path.splitext(data)[0] + ".sigmf-meta"
+    with open(meta_before, "r", encoding="utf-8") as f:
+        before = f.read()
+    rec = lib.recover_metadata(entry_id)
+    assert not rec.ok
+    assert rec.code == "unrecoverable"
+    with open(meta_before, "r", encoding="utf-8") as f:
+        assert f.read() == before              # 未改写、未编造
+
+
+def test_missing_file_recovery_reports_file_missing(tmp_path):
+    data = make_recording(tmp_path, "gone2", n=8)
+    lib = RecordingLibrary(str(tmp_path))
+    entry_id = lib.add_recording(data).data["entry_id"]
+    os.remove(data)
+    rec = lib.recover_metadata(entry_id)
+    assert not rec.ok and rec.code == "file_missing"

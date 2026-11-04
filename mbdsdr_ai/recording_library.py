@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .recorder import inspect_recording
+from .recorder import inspect_recording, recover_recording_meta
 from .recording_meta import metadata_for_display, read_sigmf_meta, sigmf_meta_path
 
 logger = logging.getLogger(__name__)
@@ -902,4 +902,154 @@ class RecordingLibrary:
             logger.error("录音库核对失败: %s", exc)
             return LibraryResult(False, "io_error", f"核对/落盘失败: {exc}")
 
-    
+    # ── 元数据恢复（中断写入 / 断电式损坏）─────────────────────────────
+    def recover_metadata(self, entry_id: str, *,
+                         sample_rate_hz: Optional[float] = None,
+                         center_freq_hz: Optional[float] = None,
+                         device: Optional[str] = None) -> LibraryResult:
+        """为 meta 缺失/损坏的 IQ 录制补写诚实元数据。
+
+        数值来源优先级：显式参数 > 索引里已有的旧值 > 未知。
+        未知字段写进 ``mbdsdr:unknown_fields`` 且不编造数值。
+        """
+        try:
+            with self._lock():
+                doc, code, message = self._read_unlocked()
+                if doc is None:
+                    return LibraryResult(False, code, message)
+                entries = self._entries_of(doc)
+                entry = next((e for e in entries if e.entry_id == entry_id), None)
+                if entry is None:
+                    return LibraryResult(False, "entry_not_found",
+                                         f"索引中没有条目 {entry_id}")
+                abs_path = self._resolve_path(entry.path)
+                if entry.kind != "iq" or not abs_path.lower().endswith(_IQ_SUFFIXES):
+                    return LibraryResult(False, "unsupported_kind",
+                                         "只有 SigMF IQ 录制支持元数据恢复")
+                if not os.path.exists(abs_path):
+                    return LibraryResult(False, "file_missing",
+                                         f"录音文件不存在: {abs_path}")
+                info = inspect_recording(abs_path)
+                integrity = str(info.get("integrity") or "unknown")
+                if integrity in ("corrupt", "empty", "io_error"):
+                    return LibraryResult(
+                        False, "unrecoverable",
+                        f"数据本身已损坏（完整性={integrity}），拒绝编造元数据",
+                        {"integrity": integrity, "data_path": abs_path},
+                    )
+                if integrity not in ("missing-meta", "meta-corrupt"):
+                    return LibraryResult(
+                        True, "not_needed",
+                        f"元数据无需恢复（当前完整性={integrity}）",
+                        {"integrity": integrity},
+                    )
+
+                sources: Dict[str, str] = {}
+                unknown_fields: List[str] = []
+                sr = _numeric(sample_rate_hz)
+                if sr is None:
+                    sr = entry.sample_rate_hz
+                    if sr is not None:
+                        sources["sample_rate_hz"] = "index"
+                elif sr > 0:
+                    sources["sample_rate_hz"] = "explicit"
+                if sr is None or sr <= 0:
+                    sr = None
+                    unknown_fields.append("sample_rate_hz")
+                cf = _numeric(center_freq_hz)
+                if cf is None:
+                    cf = entry.center_freq_hz
+                    if cf is not None:
+                        sources["center_freq_hz"] = "index"
+                else:
+                    sources["center_freq_hz"] = "explicit"
+                if cf is None:
+                    unknown_fields.append("center_freq_hz")
+                dev = device or entry.device
+                if device:
+                    sources["device"] = "explicit"
+                elif entry.device:
+                    sources["device"] = "index"
+                if not dev:
+                    unknown_fields.append("device")
+                start = entry.start_time
+                if start:
+                    sources["start_time"] = "index"
+                else:
+                    unknown_fields.append("start_time")
+
+                meta_path = recover_recording_meta(
+                    abs_path, sample_rate_hz=float(sr or 0.0),
+                    center_freq_hz=float(cf or 0.0),
+                )
+                if not meta_path:
+                    return LibraryResult(
+                        False, "unrecoverable",
+                        "数据字节不完整（非 8 字节整数倍或为空），拒绝编造元数据",
+                        {"integrity": integrity, "data_path": abs_path},
+                    )
+
+                # 在已写出的诚实 meta 上补齐设备/时间戳/未知字段标注
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                except (OSError, json.JSONDecodeError) as exc:
+                    return LibraryResult(False, "io_error",
+                                         f"恢复后元数据读取失败: {exc}")
+                g = meta.setdefault("global", {})
+                g["mbdsdr:device"] = str(dev or "")
+                g["mbdsdr:recovered_fields"] = sorted(sources.keys())
+                g["mbdsdr:unknown_fields"] = sorted(set(unknown_fields))
+                g["mbdsdr:complete"] = False
+                caps = meta.get("captures") or [{}]
+                if start:
+                    caps[0]["core:datetime"] = start
+                else:
+                    caps[0]["core:datetime"] = ""
+                meta["captures"] = caps
+                self._write_json_atomic(meta_path, meta)
+
+                facts = self._collect_file_facts(abs_path)
+                changes = self._apply_facts(entry, facts)
+                # complete=false 的恢复结果按事实标注为 incomplete
+                if facts["integrity"] == "incomplete" and entry.state != "incomplete":
+                    entry.state = "incomplete"
+                    changes["state"] = {"from": entry.state, "to": "incomplete"}
+                doc["entries"] = [e.to_dict() for e in entries]
+                self._append_journal_unlocked(
+                    "recover_metadata", entry_id=entry.entry_id,
+                    detail={"meta_path": meta_path,
+                            "integrity_before": integrity,
+                            "sources": sources,
+                            "unknown_fields": sorted(set(unknown_fields))},
+                )
+                self._write_doc_unlocked(doc)
+                return LibraryResult(
+                    True, "recovered",
+                    f"已补写诚实元数据（{len(unknown_fields)} 个字段未知）",
+                    {"entry_id": entry.entry_id, "meta_path": meta_path,
+                     "sources": sources,
+                     "unknown_fields": sorted(set(unknown_fields)),
+                     "changes": changes},
+                )
+        except LibraryBusyError as exc:
+            return LibraryResult(False, exc.code, str(exc))
+        except OSError as exc:
+            logger.error("元数据恢复失败: %s", exc)
+            return LibraryResult(False, "io_error", f"元数据恢复失败: {exc}")
+
+    @staticmethod
+    def _write_json_atomic(path: str, obj: Dict[str, Any]) -> None:
+        tmp = f"{path}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
