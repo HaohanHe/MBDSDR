@@ -65,3 +65,19 @@ def test_doc_has_row_per_mode():
         doc = f.read()
     for row in report.build_rows():
         assert f"`{row['mode']}`" in doc
+
+
+def test_verify_covers_every_matrix_row():
+    """`--verify` 必须真的跑整张表：十行 EVIDENCE + 三条 EXTRA_CHAINS。
+
+    守卫点：文档写「只跑全部最小命令」，若 verify 漏掉 LRPT / DVB-S2 两行，
+    这句话就成了假话。同一命令（ft4/wspr 共用）只跑一次。
+    """
+    report = _load_report()
+    covered = {cmd for _mode, cmd in report.verify_commands()}
+    for row in report.build_rows():
+        assert row["rerun"] in covered, \
+            f"{row['mode']} 的复跑命令未被 --verify 覆盖: {row['rerun']}"
+    # 去重生效：同一条命令不得出现两次
+    cmds = [cmd for _mode, cmd in report.verify_commands()]
+    assert len(cmds) == len(set(cmds))

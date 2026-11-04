@@ -288,6 +288,23 @@ def cmd_write() -> int:
     return 0
 
 
+def verify_commands() -> list:
+    """整张表的复跑命令：EVIDENCE 十行 + EXTRA_CHAINS 三条。
+
+    ft4/wspr 共用同一条命令，按命令去重（一条命令覆盖两行），避免白跑。
+    返回 [(模式, 命令)]，顺序与能力表一致。
+    """
+    pairs = [(mode, ev[1]) for mode, ev in EVIDENCE.items()]
+    pairs += [(chain["mode"], chain["rerun"]) for chain in EXTRA_CHAINS]
+    seen, out = set(), []
+    for mode, cmd in pairs:
+        if cmd in seen:
+            continue
+        seen.add(cmd)
+        out.append((mode, cmd))
+    return out
+
+
 def cmd_verify() -> int:
     env = dict(os.environ)
     env.update({
@@ -296,10 +313,9 @@ def cmd_verify() -> int:
         "QT_QPA_PLATFORM": "offscreen",
     })
     failed = []
-    for mode, (_ev, rerun, _verdict) in EVIDENCE.items():
+    for mode, rerun in verify_commands():
         print(f"[{mode}] {rerun}")
-        rc = subprocess.run(rerun.replace("-m pytest", "-m pytest", 1),
-                            cwd=ROOT, shell=True, env=env).returncode
+        rc = subprocess.run(rerun, cwd=ROOT, shell=True, env=env).returncode
         if rc != 0:
             failed.append(mode)
     if failed:
