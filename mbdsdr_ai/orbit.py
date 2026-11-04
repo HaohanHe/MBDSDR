@@ -156,12 +156,11 @@ def tle_epoch_iso(line1: str) -> str:
     解析失败返回 ""（调用方如实缺省，不编造历元）。
     """
     try:
-        raw = line1[18:32].strip()
-        yy = int(raw[:2])
-        doy = float(raw[2:])
-        year = 2000 + yy if yy < 57 else 1900 + yy
-        base = datetime(year, 1, 1, tzinfo=timezone.utc)
-        dt = base + timedelta(days=doy - 1.0)
+        # 统一走 time_basis：两位年份折叠 + 年积日越界拒绝（不静默顺延）
+        from .time_basis import tle_epoch_utc
+        dt = tle_epoch_utc(line1)
+        if dt is None:
+            return ""
         return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
     except (ValueError, IndexError, OverflowError):
         return ""
