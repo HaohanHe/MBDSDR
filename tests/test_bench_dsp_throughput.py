@@ -78,6 +78,17 @@ def test_quick_report_shape_and_json_serializable():
     assert m._conclusion(report)
 
 
+def test_signal_dispatch_overhead_is_measured():
+    """额外项：跨线程 queued 信号成本要可量化（线程切换开销）。"""
+    m = _load()
+    row = m.bench_signal_overhead(count=200)
+    assert row["delivered"] == 200
+    assert row["per_signal_us"] > 0
+    assert row["max_signals_per_s"] > 0
+    assert row["production_worst_signals_per_s"] == 146.5
+    assert row["duty_at_worst_pct"] >= 0
+
+
 def test_hotspots_are_module_function_level_and_sorted():
     """热点归因必须给到模块:函数，并按自身耗时降序。"""
     m = _load()
