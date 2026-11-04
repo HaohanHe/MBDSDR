@@ -4143,7 +4143,7 @@ def _satellite_doppler(args):
 
 
 def _satellite_passes(args):
-    """未来卫星过境预测（sgp4）。"""
+    """未来卫星过境预测（sgp4）。过境面板：TLE 过期/降级如实标注精度风险。"""
     lat = args["latitude"]
     lon = args["longitude"]
     alt = args.get("altitude", 0.0)
@@ -4151,10 +4151,20 @@ def _satellite_passes(args):
     min_elev = args.get("min_elevation", 10.0)
     stype = args.get("satellite_type", "all")
     freq = args.get("nominal_freq_hz")
-    passes = orbit.predict_passes(lat, lon, alt / 1000.0, hours, min_elev, stype, freq)
+    rep = orbit.predict_passes_report(lat, lon, alt / 1000.0, hours, min_elev,
+                                      stype, freq)
+    passes = rep["passes"]
+    out = ""
+    if rep["degraded"]:
+        out += "=== 未参与/不可信条目（如实留痕） ===\n"
+        for d in rep["degraded"]:
+            out += (f"- {d['satellite']} (CATNR {d['catnr']}): {d['reason']}"
+                    f" — {d.get('detail', '')}\n")
+        out += "\n"
     if not passes:
-        return f"未来 {hours}h 内没有仰角 >= {min_elev}° 的卫星过境。"
-    out = f"=== 未来 {hours}h 卫星过境预测 (仰角>={min_elev}°) ===\n共 {len(passes)} 次\n\n"
+        return (out + f"未来 {hours}h 内没有仰角 >= {min_elev}° 的卫星过境"
+                       "（可用的真实 TLE 不足时不会拿错轨道凑数）。")
+    out += f"=== 未来 {hours}h 卫星过境预测 (仰角>={min_elev}°) ===\n共 {len(passes)} 次\n\n"
     for i, p in enumerate(passes):
         out += f"{i+1}. {p['satellite']}\n"
         out += f"   升: {p['rise_time']} (方位 {p['rise_azimuth']}°)\n"
@@ -4162,8 +4172,14 @@ def _satellite_passes(args):
         out += f"   落: {p['set_time']} (方位 {p['set_azimuth']}°)  时长 {p['duration_s']}s\n"
         if p.get("doppler_hz"):
             out += f"   多普勒范围: {p['doppler_hz']['min_hz']:.0f} ~ {p['doppler_hz']['max_hz']:.0f} Hz\n"
+        if p.get("accuracy_risk") and p["accuracy_risk"] != "low":
+            out += (f"   [精度风险 {p['accuracy_risk']}] TLE {p.get('tle_tier', '')}"
+                    f"（{p.get('tle_age_days')} 天）: {p.get('accuracy_note', '')}\n")
+        if p.get("refresh_status") == "not_updated":
+            out += f"   [未更新] {p.get('refresh_error', '')}\n"
         out += "\n"
     return out
+
 
 def _satellite_doppler_track(mgr, args):
     """过境期间分段多普勒补偿 + 流式录 IQ（cf32 + sidecar 轨迹）。"""

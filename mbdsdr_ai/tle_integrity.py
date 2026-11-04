@@ -39,6 +39,7 @@ __all__ = [
     "names_match",
     "verify_identity",
     "freshness",
+    "accuracy",
     "parse_tle_blocks",
     "user_entries",
     "cache_entries",
@@ -237,6 +238,40 @@ def freshness(line1: str, fetched_at: Optional[float] = None,
             if in_future else
             f"TLE 历元 {age:.2f} 天前，分级 {TIER_LABELS[tier]}"
         ),
+    }
+
+
+def accuracy(fresh: Dict[str, Any]) -> Dict[str, Any]:
+    """把新鲜度映射成「过境/跟踪精度风险」的人话结论。
+
+    过期/失效时调用方必须降精度（默认到分钟）并显式告警，不许照常输出
+    精确到秒的时刻——TLE 的历元年龄直接决定传播误差的量级。
+    """
+    tier = str(fresh.get("tier", "unknown"))
+    age = fresh.get("age_days")
+    if tier == "fresh":
+        risk, precision, note = "low", 1, "TLE 新鲜（≤24h），过境时刻按秒级精度给出"
+    elif tier == "usable":
+        risk, precision, note = (
+            "moderate", 1,
+            "TLE 可用（≤7d）：过境时刻可能有数十秒级漂移，临近时建议刷新 TLE")
+    elif tier == "expired":
+        risk, precision, note = (
+            "high", 60,
+            f"TLE 已过期（{age} 天）：传播误差可达数分钟，时刻仅按分钟级给出，"
+            "不可默认用于精确跟踪")
+    else:
+        risk, precision, note = (
+            "unusable", 60,
+            "TLE 失效/未知：轨道已不可信，时刻仅作占位参考，必须刷新后才能跟踪")
+    return {
+        "risk": risk,
+        "time_precision_s": precision,
+        "note": note,
+        "tier": tier,
+        "age_days": age,
+        "epoch_utc": fresh.get("epoch_utc"),
+        "pass_eligible": bool(fresh.get("pass_eligible")),
     }
 
 

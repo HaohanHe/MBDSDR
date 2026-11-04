@@ -33,6 +33,7 @@ from .new_spacetime_tle import (
     tle_freshness,
     TLE_FRESHNESS_MAX_DAYS,
 )
+from .tle_integrity import accuracy as _tle_accuracy, freshness as _tle_tier
 
 __all__ = ["predict_passes_report", "TLE_FRESHNESS_MAX_DAYS"]
 
@@ -89,6 +90,15 @@ def predict_passes_report(
     # 2) TLE 新鲜度（取 line1；解析失败 → none）
     line1 = next((l.strip() for l in tle_lines if str(l).startswith("1 ")), "")
     fresh = tle_freshness(line1, now=start_time.utc_datetime())
+    tier = _tle_tier(line1, now=start_time.utc_datetime())
+    acc = _tle_accuracy(tier)
+    fresh = dict(fresh, **{
+        "tier": tier["tier"],
+        "label": tier["label"],
+        "age_days": tier["age_days"],
+        "pass_eligible": tier["pass_eligible"],
+        "accuracy": acc,
+    })
 
     # 3) 过境预测（坏 TLE → predict_passes 返回 []）
     try:
@@ -97,23 +107,33 @@ def predict_passes_report(
     except Exception:
         passes = []
 
+    # 过期/失效 TLE：时刻降为分钟级（不照常输出精确到秒）
+    precise = acc["time_precision_s"] <= 1
+
+    def _fmt(t) -> str:
+        iso = t.utc_strftime("%Y-%m-%dT%H:%M:%SZ")
+        return iso if precise else iso[:16] + "Z"
+
     pass_rows: List[Dict] = []
     for p in passes:
         pass_rows.append({
-            "rise_utc": p.rise_time.utc_strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "set_utc": p.set_time.utc_strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "max_alt_time_utc": p.max_alt_time.utc_strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "rise_utc": _fmt(p.rise_time),
+            "set_utc": _fmt(p.set_time),
+            "max_alt_time_utc": _fmt(p.max_alt_time),
             "max_alt_deg": round(float(p.max_alt), 2),
             "rise_az_deg": round(float(p.rise_az), 1),
             "set_az_deg": round(float(p.set_az), 1),
             "duration_s": round(float(p.duration), 1),
             "sat_name": p.sat_name,
+            "approximate": not precise,
+            "accuracy_risk": acc["risk"],
         })
 
     return {
         "time_source": time_source,
         "prediction_start_utc": start_time.utc_strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tle": fresh,
+        "accuracy": acc,
         "n_passes": len(pass_rows),
         "passes": pass_rows,
     }

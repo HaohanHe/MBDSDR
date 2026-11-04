@@ -108,6 +108,14 @@ class PassInfo:
     # TLE 可追溯（真实数据原则）：历元 + 来源；缺省空串 = 未知，不编造
     tle_epoch: str = ""
     tle_source: str = ""
+    # P10：真实性/精度风险（身份是否核实、新鲜度分级、时刻精度）
+    tle_verified: bool = False
+    tle_tier: str = ""
+    tle_age_days: Optional[float] = None
+    refresh_status: str = ""
+    accuracy_risk: str = ""
+    accuracy_note: str = ""
+    time_precision_s: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -932,16 +940,30 @@ class SDRController:
                     return name
         except Exception as e:  # pragma: no cover - 查表失败要留痕，不能假装"不在表中"
             logger.warning("_norad_to_name 查表失败: %s", e)
+        # P10：decoders 的旧映射可能含已校正的编号（44016/54234），补上真实编号
+        try:
+            from ..orbit import BUILTIN_SATS
+
+            for name, n in BUILTIN_SATS.items():
+                if int(n) == int(norad):
+                    return name
+        except Exception as e:  # pragma: no cover
+            logger.warning("_norad_to_name 内置表查询失败: %s", e)
         return None
 
     def get_satellite_pass(self, norad: int) -> dict:
         """预报某卫星未来 24h 最近一次过境。
 
+        真实数据优先：先用缓存/在线 TLE（含编号↔名称↔来源校验）；身份不符
+        直接拒绝（绝不拿错轨道算过境）。取新失败时沿用旧缓存并标
+        ``refresh_status="not_updated"``；完全无数据才退回内置表，且明确标注
+        「未核实/合成回退」并把时刻降到分钟级。
+
         Returns
         -------
         dict
             :class:`PassInfo` 序列化；轨道库缺失/无过境时返回
-            ``{"error": "not_available"|"no_pass"}``。
+            ``{"error": "not_available"|"no_pass"|"identity_mismatch"}``。
         """
         name = self._norad_to_name(norad)
         if name is None:
@@ -949,25 +971,81 @@ class SDRController:
         try:
             from ..decoders import BUILTIN_TLE
             from ..sat_passes import GroundStation, predict_passes
+            from ..orbit import fetch_tle_record, tle_epoch_iso
+            from ..tle_integrity import accuracy, freshness, verify_identity
 
-            line1, line2 = BUILTIN_TLE[name]
+            line1 = line2 = ""
+            fetched_at = None
+            refresh_status = "builtin"
+            verified = False
+            tle_source = "builtin_table（内置 TLE 回退表，decoders.BUILTIN_TLE）"
+            fallback_reason = ""
+            try:
+                rec = fetch_tle_record(int(norad))
+                ident = verify_identity(name, rec.get("name") or "")
+                if ident["status"] == "mismatch":
+                    return {
+                        "error": "identity_mismatch",
+                        "satellite": name,
+                        "catnr": int(norad),
+                        "declared_name": name,
+                        "object_name": rec.get("name"),
+                        "suggestion": (
+                            "目录编号与缓存对象名不符（编号指向另一颗/另一类对象），"
+                            "已拒绝用错误轨道算过境；请先修正目录映射或刷新缓存。"),
+                    }
+                line1, line2 = rec["line1"], rec["line2"]
+                fetched_at = rec.get("fetched_at")
+                refresh_status = rec.get("refresh_status", "unknown")
+                verified = ident["status"] == "verified"
+                tle_source = ("tle_cache/celestrak（真实 TLE；内置 builtin 表"
+                              "提供编号↔名称映射）")
+            except Exception as e:  # noqa: BLE001 - 无真实数据 → 诚实回退并标注
+                fallback_reason = str(e)
+            if not line1:
+                line1, line2 = BUILTIN_TLE[name]
+                refresh_status = (f"not_updated（{fallback_reason}）"
+                                  if fallback_reason else "builtin_fallback")
+                tle_source = ("builtin_table（内置合成 TLE 回退，"
+                              "decoders.BUILTIN_TLE；未核实，不可用于跟踪）")
+            fresh = freshness(line1, fetched_at)
+            acc = accuracy(fresh)
+            if not verified:
+                acc = dict(acc, risk="unusable", time_precision_s=60,
+                           note=("TLE 身份未核实（内置合成回退），"
+                                 "过境时刻仅作占位参考"))
+            if refresh_status.startswith("not_updated"):
+                acc = dict(acc, note=acc["note"] + "；TLE 未更新（沿用旧缓存）")
             gs = GroundStation(self._gs_lat, self._gs_lon, self._gs_alt)
-            passes = predict_passes([name, line1, line2], gs, hours=24.0, min_alt=10.0)
+            passes = predict_passes([name, line1, line2], gs, hours=24.0,
+                                    min_alt=10.0)
             if not passes:
                 return {"error": "no_pass", "suggestion": "未来 24h 内无高于 10° 的过境。"}
             p = passes[0]
-            from ..orbit import tle_epoch_iso
+
+            def _fmt(dt) -> str:
+                if acc["time_precision_s"] <= 1:
+                    return dt.isoformat()
+                return dt.strftime("%Y-%m-%dT%H:%M+00:00")
+
             info = PassInfo(
                 name=p.sat_name or name,
-                rise_utc=p.rise_time.utc_datetime().isoformat(),
-                set_utc=p.set_time.utc_datetime().isoformat(),
-                max_alt_time_utc=p.max_alt_time.utc_datetime().isoformat(),
+                rise_utc=_fmt(p.rise_time.utc_datetime()),
+                set_utc=_fmt(p.set_time.utc_datetime()),
+                max_alt_time_utc=_fmt(p.max_alt_time.utc_datetime()),
                 max_alt_deg=float(p.max_alt),
                 duration_s=float(p.duration),
                 rise_az_deg=float(p.rise_az),
                 set_az_deg=float(p.set_az),
                 tle_epoch=tle_epoch_iso(line1),
-                tle_source="builtin_table（内置 TLE 回退表，decoders.BUILTIN_TLE）",
+                tle_source=tle_source,
+                tle_verified=verified,
+                tle_tier=fresh["tier"],
+                tle_age_days=fresh["age_days"],
+                refresh_status=refresh_status,
+                accuracy_risk=acc["risk"],
+                accuracy_note=acc["note"],
+                time_precision_s=acc["time_precision_s"],
             )
             return info.to_dict()
         except Exception as e:

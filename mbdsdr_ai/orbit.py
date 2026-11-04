@@ -501,7 +501,7 @@ def _bisect_threshold(el_fn, t_lo: float, t_hi: float, target: float,
     return 0.5 * (t_lo + t_hi)
 
 
-def predict_passes(
+def _predict_passes_impl(
     observer_lat: float,
     observer_lon: float,
     observer_alt: float = 0.0,
@@ -509,16 +509,16 @@ def predict_passes(
     min_elevation: float = 10.0,
     satellite_type: str = "all",
     nominal_freq_hz: Optional[float] = None,
-) -> List[Dict[str, Any]]:
-    """预测未来 hours 小时内的卫星过境事件。
+    allow_stale: bool = True,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """过境预测内核：返回 ``(passes, degraded)``。
 
-    自适应粗/细扫描：
-      a) 粗扫 60s 步长定位仰角跨越 min_elevation 的区间；
-      b) 细扫：在跨越区间内二分法收敛到 ~0.25s 精度（对应仰角 ~0.1°，远优于
-         原固定 30s 步长的 ±15s / ~7° 误差）；
-      c) 上升沿 = AOS，下降沿 = LOS；pass 内 2s 细采样找最大仰角与多普勒范围。
+    ``degraded`` 逐条说明「这颗星为什么没算/为什么不可信」——身份错配
+    （编号指向另一颗对象）直接跳过；TLE 过期/失效仍出预报但降精度并标注。
     """
     _require_sgp4()
+    from .tle_integrity import accuracy, freshness, verify_identity
+
     coarse_step = 60.0   # 粗扫量级（~0.5min）
     fine_step = 2.0      # pass 内采样步长，找中天/多普勒极值
     t0 = time.time()
@@ -527,13 +527,44 @@ def predict_passes(
              if not (satellite_type == "weather" and not any(
                  k in n for k in ("NOAA", "METEOR", "FENGYUN")))
              and not (satellite_type == "amateur" and "ISS" not in n)]
-    passes = []
+    passes: List[Dict[str, Any]] = []
+    degraded: List[Dict[str, Any]] = []
     for name in names:
         catnr = BUILTIN_SATS[name]
         try:
-            line1, line2 = fetch_tle(catnr)
-        except Exception:
+            rec = fetch_tle_record(catnr)
+        except Exception as e:  # noqa: BLE001 - 无数据如实留痕
+            degraded.append({
+                "satellite": name, "catnr": catnr,
+                "reason": "tle_unavailable", "detail": str(e)})
             continue
+        line1, line2 = rec["line1"], rec["line2"]
+        object_name = str(rec.get("name") or "")
+        identity = verify_identity(name, object_name)
+        if identity["status"] == "mismatch":
+            # 红线：编号指向另一颗/另一类对象，绝不拿错轨道算过境
+            degraded.append({
+                "satellite": name, "catnr": catnr,
+                "reason": "identity_mismatch",
+                "declared_name": name,
+                "object_name": object_name,
+                "detail": identity["reason"],
+            })
+            continue
+        fresh = freshness(line1, rec.get("fetched_at"))
+        acc = accuracy(fresh)
+        if not acc["pass_eligible"] and not allow_stale:
+            degraded.append({
+                "satellite": name, "catnr": catnr,
+                "reason": f"tle_{fresh['tier']}",
+                "tle_tier": fresh["tier"],
+                "detail": acc["note"],
+            })
+            continue
+        if rec.get("refresh_status") == "not_updated":
+            acc = dict(acc, refresh_status="not_updated",
+                       refresh_error=rec.get("refresh_error", ""))
+        tfmt = "%H:%M:%S" if acc["time_precision_s"] <= 1 else "%H:%M"
         sat = Satrec.twoline2rv(line1, line2)
         epoch_str = line1[18:32].strip()
 
@@ -605,16 +636,82 @@ def predict_passes(
                        "max_hz": round(max(shifts), 1)}
             passes.append({
                 "satellite": name,
-                "rise_time": time.strftime("%H:%M:%S", time.localtime(t_rise)),
+                "rise_time": time.strftime(tfmt, time.localtime(t_rise)),
                 "rise_azimuth": round(s_rise["azimuth"], 1),
-                "culmination_time": time.strftime("%H:%M:%S", time.localtime(t_cul)),
+                "culmination_time": time.strftime(tfmt, time.localtime(t_cul)),
                 "max_elevation": round(s_cul["elevation"], 1),
                 "culmination_azimuth": round(s_cul["azimuth"], 1),
-                "set_time": time.strftime("%H:%M:%S", time.localtime(t_set)),
+                "set_time": time.strftime(tfmt, time.localtime(t_set)),
                 "set_azimuth": round(s_set["azimuth"], 1),
                 "duration_s": round(t_set - t_rise),
                 "doppler_hz": dop,
+                # 真实性透出：身份、历元、新鲜度、精度风险
+                "tle_verified": identity["status"] == "verified",
+                "tle_epoch_utc": fresh.get("epoch_utc"),
+                "tle_tier": fresh["tier"],
+                "tle_tier_label": fresh["label"],
+                "tle_age_days": fresh["age_days"],
+                "tle_cache_time_utc": (
+                    datetime.fromtimestamp(float(rec["fetched_at"]),
+                                           tz=timezone.utc)
+                    .strftime("%Y-%m-%dT%H:%M:%SZ")
+                    if rec.get("fetched_at") is not None else None),
+                "refresh_status": rec.get("refresh_status", "unknown"),
+                "refresh_error": rec.get("refresh_error", ""),
+                "accuracy_risk": acc["risk"],
+                "accuracy_note": acc["note"],
+                "time_precision_s": acc["time_precision_s"],
             })
             i = j
     passes.sort(key=lambda p: p["rise_time"])
-    return passes
+    return passes, degraded
+
+
+def predict_passes(
+    observer_lat: float,
+    observer_lon: float,
+    observer_alt: float = 0.0,
+    hours: float = 24.0,
+    min_elevation: float = 10.0,
+    satellite_type: str = "all",
+    nominal_freq_hz: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """预测未来 hours 小时内的卫星过境事件（列表兼容接口）。
+
+    自适应粗/细扫描（60s 粗扫 + 二分收敛 + 2s 中天采样）。每条结果都附带
+    TLE 身份/历元/新鲜度/精度风险字段；过期或失效时时刻自动降到分钟级。
+    """
+    return _predict_passes_impl(
+        observer_lat, observer_lon, observer_alt, hours,
+        min_elevation, satellite_type, nominal_freq_hz)[0]
+
+
+def predict_passes_report(
+    observer_lat: float,
+    observer_lon: float,
+    observer_alt: float = 0.0,
+    hours: float = 24.0,
+    min_elevation: float = 10.0,
+    satellite_type: str = "all",
+    nominal_freq_hz: Optional[float] = None,
+    allow_stale: bool = True,
+) -> Dict[str, Any]:
+    """过境面板用的完整报告：过境列表 + 被跳过/降级的诚实清单。
+
+    ``allow_stale=False`` 时过期/失效 TLE 默认不参与过境（目录默认口径）；
+    无论是否放行，``degraded`` 都会逐条说明原因，调用方不得静默忽略。
+    """
+    passes, degraded = _predict_passes_impl(
+        observer_lat, observer_lon, observer_alt, hours,
+        min_elevation, satellite_type, nominal_freq_hz, allow_stale)
+    return {
+        "n_passes": len(passes),
+        "passes": passes,
+        "degraded": degraded,
+        "tle_policy": {
+            "allow_stale": bool(allow_stale),
+            "fresh_max_hours": 24.0,
+            "usable_max_days": 7.0,
+            "expired_max_days": 30.0,
+        },
+    }

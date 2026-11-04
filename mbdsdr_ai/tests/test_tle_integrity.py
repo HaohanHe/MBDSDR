@@ -336,6 +336,140 @@ class TestMergeSources:
 
 
 # ---------------------------------------------------------------------------
+class TestPassHonesty:
+    """过境面板 / get_satellite_pass 的诚实性：过期/降级必须说明精度风险。"""
+
+    OLD_ISS_L1 = ("1 25544U 98067A   26245.50000000  .00016717  00000-0  "
+                  "10270-3 0  9000")
+    OLD_ISS_L2 = ("2 25544  51.6400 292.0000 0001333  90.0000 270.0000  "
+                  "15.50000000    000")
+
+    def _old_iss_record(self):
+        from datetime import datetime, timezone
+        return {
+            "catnr": 25544, "name": "ISS (ZARYA)",
+            "line1": self.OLD_ISS_L1, "line2": self.OLD_ISS_L2,
+            "source": "cache", "fetched_at": datetime(
+                2024, 10, 2, 12, tzinfo=timezone.utc).timestamp(),
+            "refresh_status": "not_updated",
+            "refresh_error": "离线模式，沿用旧缓存",
+            "cache_path": "",
+        }
+
+    def test_accuracy_mapping(self):
+        from mbdsdr_ai.tle_integrity import accuracy
+        assert accuracy({"tier": "fresh", "age_days": 0.1})["risk"] == "low"
+        assert accuracy({"tier": "usable", "age_days": 3})["time_precision_s"] == 1
+        assert accuracy({"tier": "expired", "age_days": 20})["risk"] == "high"
+        assert accuracy({"tier": "expired", "age_days": 20})["time_precision_s"] == 60
+        assert accuracy({"tier": "dead", "age_days": 60})["risk"] == "unusable"
+        assert accuracy({"tier": "unknown"})["pass_eligible"] is False
+
+    def test_identity_mismatch_is_skipped_not_used(self, monkeypatch):
+        """编号指向另一颗对象时，过境面板必须跳过并留痕。"""
+        import mbdsdr_ai.orbit as orbit
+        monkeypatch.setattr(orbit, "BUILTIN_SATS", {"METEOR M2": 44016})
+        monkeypatch.setattr(orbit, "fetch_tle_record", lambda c: {
+            "catnr": 44016, "name": "ATLAS 5 CENTAUR DEB",
+            "line1": "1 44016U 14055BX  26251.53597745 -.00000086  "
+                     "00000+0  00000+0 0  9994",
+            "line2": "2 44016  19.8252 144.6831 4693919 161.0339 224.8913  "
+                     "1.83868310 52931",
+            "source": "cache", "fetched_at": None,
+            "refresh_status": "cache", "refresh_error": "", "cache_path": "",
+        })
+        rep = orbit.predict_passes_report(0.0, 0.0, 0.0, hours=1.0,
+                                          satellite_type="weather")
+        assert rep["passes"] == []
+        assert rep["degraded"]
+        assert rep["degraded"][0]["reason"] == "identity_mismatch"
+        assert rep["degraded"][0]["object_name"] == "ATLAS 5 CENTAUR DEB"
+
+    def test_stale_tle_times_are_minute_level(self, monkeypatch):
+        import mbdsdr_ai.orbit as orbit
+        monkeypatch.setattr(orbit, "BUILTIN_SATS", {"ISS (ZARYA)": 25544})
+        monkeypatch.setattr(orbit, "fetch_tle_record",
+                            lambda c: self._old_iss_record())
+        rep = orbit.predict_passes_report(31.2, 121.5, 0.0, hours=24.0,
+                                          satellite_type="amateur")
+        if not rep["passes"]:
+            pytest.skip("该历元/站点组合无过境（诚实空态）")
+        p = rep["passes"][0]
+        assert p["tle_tier"] == "dead"
+        assert p["accuracy_risk"] == "unusable"
+        assert p["time_precision_s"] == 60
+        assert p["refresh_status"] == "not_updated"
+        # 过期/失效不得输出精确到秒的时刻
+        assert len(p["rise_time"]) == 5 and p["rise_time"].count(":") == 1
+        assert len(p["set_time"]) == 5
+
+    def test_allow_stale_false_excludes_expired(self, monkeypatch):
+        import mbdsdr_ai.orbit as orbit
+        monkeypatch.setattr(orbit, "BUILTIN_SATS", {"ISS (ZARYA)": 25544})
+        monkeypatch.setattr(orbit, "fetch_tle_record",
+                            lambda c: self._old_iss_record())
+        rep = orbit.predict_passes_report(0.0, 0.0, 0.0, hours=1.0,
+                                          satellite_type="amateur",
+                                          allow_stale=False)
+        assert rep["passes"] == []
+        assert rep["degraded"][0]["reason"] == "tle_dead"
+
+    def test_get_satellite_pass_reports_risk(self, monkeypatch, tmp_path):
+        import types
+        from datetime import datetime, timezone
+        import mbdsdr_ai.orbit as orbit
+        import mbdsdr_ai.sat_passes as sp
+        from mbdsdr_ai.core.controller import SDRController
+
+        class _FakeT:
+            def __init__(self, ts):
+                self._ts = ts
+
+            def utc_datetime(self):
+                return datetime.fromtimestamp(self._ts, tz=timezone.utc)
+
+        fake_pass = types.SimpleNamespace(
+            sat_name="ISS (ZARYA)",
+            rise_time=_FakeT(1793000000), set_time=_FakeT(1793000600),
+            max_alt_time=_FakeT(1793000300),
+            max_alt=42.0, duration=600.0, rise_az=10.0, set_az=180.0,
+        )
+        monkeypatch.setattr(sp, "predict_passes", lambda *a, **k: [fake_pass])
+        monkeypatch.setattr(orbit, "fetch_tle_record",
+                            lambda c: self._old_iss_record())
+        ctrl = SDRController(backend=None, config_dir=str(tmp_path))
+        out = ctrl.get_satellite_pass(25544)
+        assert "error" not in out
+        assert out["time_precision_s"] == 60
+        assert out["accuracy_risk"] == "unusable"
+        assert out["refresh_status"] == "not_updated"
+        assert "未更新" in out["accuracy_note"]
+        # 分钟级：不带秒
+        assert len(out["rise_utc"]) == len("2026-11-04T12:34+00:00")
+
+    def test_get_satellite_pass_refuses_wrong_catnr(self, monkeypatch, tmp_path):
+        """44016 声明为 METEOR M2，缓存对象是 ATLAS 残骸 → 拒绝算过境。"""
+        from datetime import datetime, timezone
+        import mbdsdr_ai.orbit as orbit
+        from mbdsdr_ai.core.controller import SDRController
+        monkeypatch.setattr(orbit, "fetch_tle_record", lambda c: {
+            "catnr": 44016, "name": "ATLAS 5 CENTAUR DEB",
+            "line1": "1 44016U 14055BX  26305.50000000 -.00000086  "
+                     "00000+0  00000+0 0  9990",
+            "line2": "2 44016  19.8252 144.6831 4693919 161.0339 224.8913  "
+                     "1.83868310 52931",
+            "source": "cache",
+            "fetched_at": datetime(2026, 11, 2, tzinfo=timezone.utc).timestamp(),
+            "refresh_status": "cache", "refresh_error": "", "cache_path": "",
+        })
+        ctrl = SDRController(backend=None, config_dir=str(tmp_path))
+        out = ctrl.get_satellite_pass(44016)
+        assert out["error"] == "identity_mismatch"
+        assert out["object_name"] == "ATLAS 5 CENTAUR DEB"
+        assert out["declared_name"] == "METEOR M2"
+
+
+# ---------------------------------------------------------------------------
 class TestBuiltinTables:
     def test_orbit_builtin_ids_are_real(self):
         from mbdsdr_ai.orbit import BUILTIN_SATS
