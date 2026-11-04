@@ -125,11 +125,16 @@ def decode_object_or_item(pkt: bytes) -> Dict[str, Any]:
     if s.startswith(";"):
         name = s[1:10].rstrip()
         flag = s[10]
-        lat_s = s[11:19]
-        stbl = s[19]
-        lon_s = s[20:29]
-        scode = s[29]
-        comment = s[30:]
+        body = s[11:]
+        # 标准 APRS 对象帧在标志位后带 7 位时间戳（如 111111z）；旧解析把
+        # 时间戳当纬度，导致 "could not convert string to float: '1111z'"。
+        if len(body) >= 7 and body[:6].isdigit() and body[6] in ("z", "/", "h", "m", "s"):
+            body = body[7:]
+        lat_s = body[0:8]
+        stbl = body[8]
+        lon_s = body[9:18]
+        scode = body[18]
+        comment = body[19:]
         return {
             "kind": "object", "name": name, "live": flag == '*',
             "lat": decode_latitude(lat_s), "lon": decode_longitude(lon_s),

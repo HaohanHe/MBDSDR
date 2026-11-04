@@ -82,6 +82,20 @@ def nav_bit_sync(stream: Sequence[Any],
         n_bits_list.append(nb)
     order = np.argsort(metrics)[::-1]
     best, second = int(order[0]), int(order[1])
+    if metrics[best] <= 0.0:
+        # 全零或完全交替的硬比特：各偏移能量都为 0，取对数会抛
+        # "expected a positive input"，此处按诚实空态直接给出原因。
+        return {
+            "bit_offset": 0,
+            "bits": [],
+            "metrics": [round(m, 4) for m in metrics],
+            "margin_db": 0.0,
+            "coherence": 0.0,
+            "transition_rate": 0.0,
+            "n_bits": 0,
+            "in_sync": False,
+            "reason": "输入流无能量（全零或完全交替），无法判定位边界",
+        }
     margin_db = 10.0 * math.log10(metrics[best] / (metrics[second] + 1e-30))
 
     n_bits = n_bits_list[best]

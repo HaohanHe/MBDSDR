@@ -1558,7 +1558,7 @@ def register_sdr_tools(agent):
             "properties": {},
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_openapi_iss_position(args)),
+        handler=_openapi_iss_position,
         category="sdr_ai",
     )
 
@@ -1571,7 +1571,7 @@ def register_sdr_tools(agent):
             "properties": {},
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_openapi_people_in_space(args)),
+        handler=_openapi_people_in_space,
         category="sdr_ai",
     )
 
@@ -1586,7 +1586,7 @@ def register_sdr_tools(agent):
             },
             "required": ["latitude", "longitude"],
         },
-        handler=lambda args: ToolResult(success=True, content=_openapi_weather(args)),
+        handler=_openapi_weather,
         category="sdr_ai",
     )
 
@@ -1602,7 +1602,7 @@ def register_sdr_tools(agent):
             },
             "required": ["latitude", "longitude"],
         },
-        handler=lambda args: ToolResult(success=True, content=_openapi_aircraft_nearby(args)),
+        handler=_openapi_aircraft_nearby,
         category="sdr_ai",
     )
 
@@ -1893,7 +1893,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_aprs_send_position",
-        description="发送 APRS 位置报告。这是一个便捷工具，自动编码 APRS 位置帧并调制为 AFSK 音频，通过 SDR 发射（如果已连接发射设备）或保存为 WAV 文件。输入呼号、经纬度、注释即可。默认中继路径 WIDE2-2。",
+        description="生成 APRS 位置报告并调制为 AFSK 音频（本工具不发射：只编码+存 WAV，无送达回执；要真发需 sdr_transmit_iq 或外部电台）。输入呼号、经纬度、注释即可。默认中继路径 WIDE2-2。",
         parameters={
             "type": "object",
             "properties": {
@@ -2274,7 +2274,7 @@ def register_sdr_tools(agent):
         name="gimbal_stop",
         description="停止云台运动（rotctld发送停止命令，板载舵机回中/释放）。人工模式无动作。",
         parameters={"type": "object", "properties": {}, "required": []},
-        handler=lambda args: ToolResult(success=True, content=_gimbal_stop(args)),
+        handler=_gimbal_stop,
         category="gimbal",
     )
 
@@ -2292,7 +2292,7 @@ def register_sdr_tools(agent):
             },
             "required": [],
         },
-        handler=lambda args: _tr_pair(_gimbal_rssi_sweep(args, agent)),
+        handler=lambda args: _gimbal_sweep_result(args, agent),
         category="gimbal",
     )
 
@@ -2566,7 +2566,7 @@ def register_sdr_tools(agent):
             },
             "required": ["text"],
         },
-        handler=lambda args: ToolResult(success=True, content=_radio_send_cw(args)),
+        handler=_radio_send_cw,
         category="radio_control",
     )
 
@@ -2763,7 +2763,7 @@ def register_sdr_tools(agent):
             },
             "required": ["input_dir", "output_file"],
         },
-        handler=lambda args: ToolResult(success=True, content=_satdump_compose_image(args)),
+        handler=_satdump_compose_image,
         category="satellite",
     )
 
@@ -5226,7 +5226,7 @@ def _aprs_send_position(args):
 
     frame = packet.to_ax25_frame()
 
-    result = f"=== APRS 位置发送 ===\n"
+    result = f"=== APRS 位置报文（仅编码，未发射）===\n"
     result += f"呼号: {src_call}-{src_ssid}\n"
     result += f"位置: {latitude:.6f}, {longitude:.6f}\n"
     result += f"频率: {frequency_hz/1e6:.3f} MHz\n"
@@ -5248,6 +5248,9 @@ def _aprs_send_position(args):
             result += f"AFSK 音频已保存: {tmp_path}\n"
 
     result += f"\n提示: 中国 APRS 频率 144.640 MHz，美国 144.390 MHz，欧洲 144.800 MHz\n"
+    result += ("未实际发射：本工具只生成 AX.25 报文与 AFSK 音频，不会调用发射链路，"
+               "也没有任何送达回执；要真发请用 sdr_transmit_iq 或把音频送入电台，"
+               "成功与否取决于外部设备。\n")
 
     return result
 
@@ -6369,11 +6372,15 @@ def _radio_send_cw(args):
     lines.append(f"文本: {text}")
     lines.append(f"速度: {wpm} WPM")
     lines.append(f"Morse: {morse}")
-    lines.append(f"状态: {'已发送' if ok else '失败（需先PTT on）'}")
+    lines.append(f"状态: {'已键控（无送达回执）' if ok else '失败（需先PTT on）'}")
     lines.append("")
     lines.append("提示: 先调用 radio_ptt on 切换到发射，再调用本工具。")
 
-    return '\n'.join(lines)
+    return ToolResult(
+        success=bool(ok),
+        content='\n'.join(lines),
+        error="" if ok else "ptt_not_on",
+    )
 
 
 def _morse_encode(args):
@@ -6777,7 +6784,11 @@ def _satdump_compose_image(args):
     if result.get('size'):
         lines.append(f"图像尺寸: {result['size']}")
 
-    return '\n'.join(lines)
+    return ToolResult(
+        success=bool(result.get('success')),
+        content='\n'.join(lines),
+        error="" if result.get('success') else "compose_failed",
+    )
 
 
 # ========================================================================
@@ -7088,7 +7099,7 @@ def _signal_identify_modulation(args, agent=None):
     if iq is None:
         t = np.linspace(0, 1, 1000)
         iq = np.exp(1j * 2 * np.pi * 1000 * t + 1j * np.random.randn(len(t)) * 0.1)
-        note = "（注：未取到实时 IQ（无硬件或未连接），用合成 FM 信号演示识别逻辑）"
+        note = "（演示数据，非真实观测：无实时 IQ，以下识别结果基于合成 FM 信号）"
 
     result = identify_modulation(np.asarray(iq), sample_rate=args.get("sample_rate", 1e6))
 
@@ -7126,7 +7137,7 @@ def _signal_extract_features(args, agent=None):
         freqs = np.linspace(100e6, 101e6, 1024)
         spectrum = np.random.randn(1024) * 3 + 40
         spectrum[500:520] += 30
-        note = "（注：未取到实时 IQ（无硬件或未连接），用合成频谱演示特征提取）"
+        note = "（演示数据，非真实观测：无实时 IQ，以下特征基于合成频谱）"
 
     features = extract_spectrum_features(spectrum, freqs)
 
@@ -7228,7 +7239,11 @@ def _openapi_iss_position(args):
     else:
         lines.append(f"错误: {result.get('error', '未知错误')}")
 
-    return '\n'.join(lines)
+    return ToolResult(
+        success=bool(result.get('success')),
+        content='\n'.join(lines),
+        error="" if result.get('success') else "offline_or_api_error",
+    )
 
 
 def _openapi_people_in_space(args):
@@ -7248,7 +7263,11 @@ def _openapi_people_in_space(args):
     else:
         lines.append(f"错误: {result.get('error', '未知错误')}")
 
-    return '\n'.join(lines)
+    return ToolResult(
+        success=bool(result.get('success')),
+        content='\n'.join(lines),
+        error="" if result.get('success') else "offline_or_api_error",
+    )
 
 
 def _openapi_weather(args):
@@ -7274,7 +7293,11 @@ def _openapi_weather(args):
     else:
         lines.append(f"错误: {result.get('error', '未知错误')}")
 
-    return '\n'.join(lines)
+    return ToolResult(
+        success=bool(result.get('success')),
+        content='\n'.join(lines),
+        error="" if result.get('success') else "offline_or_api_error",
+    )
 
 
 def _openapi_aircraft_nearby(args):
@@ -7303,7 +7326,11 @@ def _openapi_aircraft_nearby(args):
     else:
         lines.append(f"错误: {result.get('error', '未知错误')}")
 
-    return '\n'.join(lines)
+    return ToolResult(
+        success=bool(result.get('success')),
+        content='\n'.join(lines),
+        error="" if result.get('success') else "offline_or_api_error",
+    )
 
 
 # ========================================================================
@@ -7421,7 +7448,25 @@ def _gimbal_read_pose(args):
 def _gimbal_stop(args):
     gc = _get_gimbal_controller()
     r = gc.stop()
-    return f"云台停止指令已发送（后端 {r.get('backend')}，结果 {r.get('ok')}）。"
+    ok = bool(r.get('ok'))
+    return ToolResult(
+        success=ok,
+        content=(f"云台停止指令{'已执行' if ok else '未执行'}"
+                 f"（后端 {r.get('backend')}）。"),
+        error="" if ok else "gimbal_stop_failed",
+    )
+
+
+def _gimbal_sweep_result(args, agent=None):
+    """自动扫描若一个 RSSI 都没采到，按失败返回（不许把空扫描算成功）。"""
+    content, data = _gimbal_rssi_sweep(args, agent)
+    no_rssi = "未采到 RSSI" in content
+    return ToolResult(
+        success=not no_rssi,
+        content=content,
+        data=data or {},
+        error="no_rssi" if no_rssi else "",
+    )
 
 
 def _gimbal_rssi_sweep(args, agent=None):

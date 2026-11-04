@@ -890,7 +890,11 @@ def register_tool_registry(registry) -> None:
             if args.get(key) is not None:
                 kwargs[key] = int(args[key])
 
-        res = decode_fy4_iq_to_image(iq, str(out_png), **kwargs)
+        try:
+            res = decode_fy4_iq_to_image(iq, str(out_png), **kwargs)
+        except (ValueError, TypeError) as e:
+            # 采样不足/长度不合法：如实失败，不让异常冒到注册表
+            return ToolResult(False, f"FY-4 IQ 解码失败: {e}", error="invalid_vcdu")
         return ToolResult(
             success=bool(res.get("success")),
             content=_json.dumps(res, ensure_ascii=False, default=str),

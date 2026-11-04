@@ -133,10 +133,17 @@ def test_scheduler_enable_missing_task_is_failure(agent):
     assert r.error == "task_not_found"
 
 
-def test_evolution_rollback_without_parent_is_failure(agent):
+def test_evolution_rollback_never_lies(agent):
+    """无父版本时必须失败；有父版本时成功必须落到真实版本 id（不许空成功）。
+
+    版本库在 ~/.mbdsdr/evolution，跨测试会话可能已有历史，所以这里按状态分支断言。
+    """
     r = agent.tool_registry.call("evolution_rollback", {})
-    assert r.success is False
-    assert r.error == "rollback_unavailable"
+    if r.success:
+        assert "v_" in r.content
+    else:
+        assert r.error == "rollback_unavailable"
+        assert "父版本" in r.content
 
 
 def test_acars_empty_result_has_reason(agent):
@@ -153,3 +160,32 @@ def test_sdr_list_devices_never_fabricates(agent):
     r = agent.tool_registry.call("sdr_list_devices", {})
     devices = json.loads(r.content)
     assert devices == []  # MBDSDR_NO_HW 空枚举下不得虚构设备
+
+
+# ── 4. 成功文案里不许藏虚构（P13 复核批） ────────────────────────
+def test_aprs_send_position_says_not_transmitted(agent):
+    """sdr_aprs_send_position 只编码+存 WAV：正文必须明写未实际发射、无回执。"""
+    r = agent.tool_registry.call("sdr_aprs_send_position",
+                                 {"callsign": "BI1AAA", "latitude": 43.8868,
+                                  "longitude": 125.3245})
+    assert r.success is True
+    assert "未实际发射" in r.content
+    assert "回执" in r.content
+    assert "=== APRS 位置发送" not in r.content
+
+
+def test_cw_send_without_ptt_is_failure(agent):
+    """电台未开 PTT 时 CW 没发出去：必须失败，不许 success 里写「失败」。"""
+    r = agent.tool_registry.call("radio_send_cw", {"text": "HELLO"})
+    assert r.success is False
+    assert r.error == "ptt_not_on"
+    assert "无送达回执" not in r.content
+
+
+def test_openapi_offline_is_failure(agent):
+    """离线时联网 API 必须如实失败，不许 success=True 里带「错误:」。"""
+    r = agent.tool_registry.call("openapi_iss_position", {})
+    assert r.success is False
+    assert r.error == "offline_or_api_error"
+    assert "错误:" in r.content and "离线模式" in r.content
+
