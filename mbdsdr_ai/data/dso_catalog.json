@@ -1,0 +1,3040 @@
+{
+  "meta": {
+    "schema": "mbdsdr.dso_catalog.v1",
+    "catalog": "Messier 1-110 + 7 bright NGC",
+    "catalog_version": "3.23 standard",
+    "source": "Stellarium deep-sky object catalog (nebulae/default)",
+    "source_url": "https://github.com/Stellarium/stellarium/tree/master/nebulae/default",
+    "source_license": "GPL-2.0-or-later",
+    "source_license_url": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html",
+    "attribution": "Deep-sky positions, types, magnitudes and sizes from Stellarium nebulae/default/catalog.txt (Catalog Version 3.23 standard); English names from names.dat; Chinese names from Stellarium zh_CN.po translations of names.dat; constellation membership from data/constellations_spans.dat (ADC VI/42, Roman 1987).",
+    "source_files": {
+      "catalog": {
+        "path": "nebulae/default/catalog.txt",
+        "sha256": "1b7b2f1426c649b747377f0dec9d1d0e6574b68810ecac151e36362f02674519"
+      },
+      "names": {
+        "path": "nebulae/default/names.dat",
+        "sha256": "6df97c7ab285ffb0a165033ab81a5e9629b88922eebcdb51e606ab4de3605ba1"
+      },
+      "zh_translations": {
+        "path": "po/stellarium-sky/zh_CN.po",
+        "sha256": "182038bbbc271690a7fba25d335d5d493dfbbb3350849e44c7502a2c5df5bc57"
+      },
+      "constellation_spans": {
+        "path": "data/constellations_spans.dat",
+        "sha256": "21b086ccb9ded1e551941b6ba7d3180271df1a9c1dc11b0e3de3674dc65a6445"
+      }
+    },
+    "constellation_method": "IAU constellation spans lookup (Stellarium getIAUConstellation / ADC VI/42); J2000 coordinates are precessed to B1875 with IAU 1976 precession before lookup. Labels only; positions near boundaries may be approximate.",
+    "name_policy": "English proper names only from names.dat; Chinese names only from zh_CN.po translations containing CJK. Never substitute an English name for a missing Chinese name; never invent names.",
+    "type_mapping": {
+      "G": "galaxy",
+      "GX": "galaxy",
+      "Gx": "galaxy",
+      "AGx": "galaxy",
+      "IG": "galaxy",
+      "QSO": "galaxy",
+      "SA": "galaxy",
+      "SC": "galaxy",
+      "RG": "galaxy",
+      "GC": "cluster",
+      "OC": "cluster",
+      "CL": "cluster",
+      "NB": "nebula",
+      "PN": "nebula",
+      "DN": "nebula",
+      "RN": "nebula",
+      "HA": "nebula",
+      "HII": "nebula",
+      "BN": "nebula",
+      "EN": "nebula",
+      "SNR": "supernova_remnant",
+      "C+N": "cluster_nebula",
+      "*": "double_star"
+    },
+    "counts": {
+      "total": 117,
+      "messier": 110,
+      "extra_ngc": 7,
+      "with_name_en": 74,
+      "without_name_en": 43,
+      "with_zh_name": 74,
+      "without_zh_name": 43,
+      "no_name_designations": [
+        "M2",
+        "M3",
+        "M9",
+        "M10",
+        "M14",
+        "M19",
+        "M23",
+        "M25",
+        "M26",
+        "M28",
+        "M32",
+        "M39",
+        "M46",
+        "M47",
+        "M48",
+        "M49",
+        "M53",
+        "M54",
+        "M56",
+        "M58",
+        "M59",
+        "M60",
+        "M68",
+        "M69",
+        "M70",
+        "M72",
+        "M73",
+        "M75",
+        "M79",
+        "M80",
+        "M85",
+        "M88",
+        "M89",
+        "M90",
+        "M91",
+        "M92",
+        "M95",
+        "M96",
+        "M98",
+        "M103",
+        "M105",
+        "M106",
+        "M110"
+      ],
+      "no_zh_name_designations": [
+        "M2",
+        "M3",
+        "M9",
+        "M10",
+        "M14",
+        "M19",
+        "M23",
+        "M25",
+        "M26",
+        "M28",
+        "M32",
+        "M39",
+        "M46",
+        "M47",
+        "M48",
+        "M49",
+        "M53",
+        "M54",
+        "M56",
+        "M58",
+        "M59",
+        "M60",
+        "M68",
+        "M69",
+        "M70",
+        "M72",
+        "M73",
+        "M75",
+        "M79",
+        "M80",
+        "M85",
+        "M88",
+        "M89",
+        "M90",
+        "M91",
+        "M92",
+        "M95",
+        "M96",
+        "M98",
+        "M103",
+        "M105",
+        "M106",
+        "M110"
+      ],
+      "raw_type_counts": {
+        "*": 1,
+        "AGx": 1,
+        "C+N": 5,
+        "CL": 1,
+        "GC": 30,
+        "Gx": 40,
+        "HII": 4,
+        "OC": 28,
+        "PN": 5,
+        "RN": 1,
+        "SNR": 1
+      },
+      "render_type_counts": {
+        "cluster": 59,
+        "cluster_nebula": 5,
+        "double_star": 1,
+        "galaxy": 41,
+        "nebula": 10,
+        "supernova_remnant": 1
+      }
+    },
+    "notes": [
+      "M40 (Winnecke 4) is a double star in the source catalog (type *), not a nebula/cluster; render type double_star.",
+      "M102 is cross-indexed to NGC 5866 by the source catalog.",
+      "C+N entries are cluster+nebula systems; render type cluster_nebula.",
+      "Entries without a source proper name keep name_en/zh_name empty and are counted; their designation remains the label."
+    ],
+    "generated_at": "2026-11-04T15:08:02+00:00",
+    "generator": "mbdsdr_ai.astronomy.build_dso_catalog",
+    "data_sha256": "50d3ecd51f59a16624736d18fec3931c09197e4566d74582bd32a3a24898f3da"
+  },
+  "objects": [
+    {
+      "name": "M1",
+      "name_en": "Crab Nebula",
+      "zh_name": "蟹状星云",
+      "aliases_en": [
+        "Taurus A"
+      ],
+      "aliases_zh": [
+        "金牛座A"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5169",
+      "catalog_type": "SNR",
+      "dso_type": "supernova_remnant",
+      "ra_deg": 83.63308,
+      "dec_deg": 22.0145,
+      "magnitude": 8.4,
+      "size_arcmin": 8.0,
+      "size_minor_arcmin": 4.0,
+      "constellation": "Tau",
+      "cross_ids": {
+        "ngc": 1952,
+        "ic": null,
+        "m": 1
+      },
+      "source_row": 1917
+    },
+    {
+      "name": "M2",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 323.36258,
+      "dec_deg": -0.82325,
+      "magnitude": 6.6,
+      "size_arcmin": 16.0,
+      "size_minor_arcmin": null,
+      "constellation": "Aqr",
+      "cross_ids": {
+        "ngc": 7089,
+        "ic": null,
+        "m": 2
+      },
+      "source_row": 6635
+    },
+    {
+      "name": "M3",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 205.54842,
+      "dec_deg": 28.37728,
+      "magnitude": 6.3,
+      "size_arcmin": 18.0,
+      "size_minor_arcmin": null,
+      "constellation": "CVn",
+      "cross_ids": {
+        "ngc": 5272,
+        "ic": null,
+        "m": 3
+      },
+      "source_row": 4967
+    },
+    {
+      "name": "M4",
+      "name_en": "Crab Globular Cluster",
+      "zh_name": "蟹状球状星团",
+      "aliases_en": [
+        "Spider Globular Cluster"
+      ],
+      "aliases_zh": [
+        "蜘蛛球状星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6511",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 245.89675,
+      "dec_deg": -26.52575,
+      "magnitude": 5.4,
+      "size_arcmin": 26.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sco",
+      "cross_ids": {
+        "ngc": 6121,
+        "ic": null,
+        "m": 4
+      },
+      "source_row": 5761
+    },
+    {
+      "name": "M5",
+      "name_en": "Rose Cluster",
+      "zh_name": "玫瑰星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6475",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 229.63842,
+      "dec_deg": 2.08103,
+      "magnitude": 5.7,
+      "size_arcmin": 23.0,
+      "size_minor_arcmin": null,
+      "constellation": "Ser",
+      "cross_ids": {
+        "ngc": 5904,
+        "ic": null,
+        "m": 5
+      },
+      "source_row": 5554
+    },
+    {
+      "name": "M6",
+      "name_en": "Butterfly Cluster",
+      "zh_name": "蝴蝶星团",
+      "aliases_en": [
+        "Splendors of the Heavens"
+      ],
+      "aliases_zh": [
+        "天堂之辉"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5593",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 265.083,
+      "dec_deg": -32.253,
+      "magnitude": 4.2,
+      "size_arcmin": 25.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sco",
+      "cross_ids": {
+        "ngc": 6405,
+        "ic": null,
+        "m": 6
+      },
+      "source_row": 6030
+    },
+    {
+      "name": "M7",
+      "name_en": "Ptolemy's Cluster",
+      "zh_name": "托勒密星团",
+      "aliases_en": [
+        "The Scorpion's Tail"
+      ],
+      "aliases_zh": [
+        "蝎尾星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6679",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 268.463,
+      "dec_deg": -34.793,
+      "magnitude": 3.3,
+      "size_arcmin": 80.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sco",
+      "cross_ids": {
+        "ngc": 6475,
+        "ic": null,
+        "m": 7
+      },
+      "source_row": 6088
+    },
+    {
+      "name": "M8",
+      "name_en": "Lagoon Nebula",
+      "zh_name": "礁湖星云",
+      "aliases_en": [
+        "Hourglass Region"
+      ],
+      "aliases_zh": [
+        "沙漏区域"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6703",
+      "catalog_type": "HII",
+      "dso_type": "nebula",
+      "ra_deg": 270.904,
+      "dec_deg": -24.378,
+      "magnitude": 6.0,
+      "size_arcmin": 90.0,
+      "size_minor_arcmin": 40.0,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": null,
+        "ic": null,
+        "m": 8
+      },
+      "source_row": 53
+    },
+    {
+      "name": "M9",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 259.79908,
+      "dec_deg": -18.51625,
+      "magnitude": 7.8,
+      "size_arcmin": 12.0,
+      "size_minor_arcmin": null,
+      "constellation": "Oph",
+      "cross_ids": {
+        "ngc": 6333,
+        "ic": null,
+        "m": 9
+      },
+      "source_row": 5961
+    },
+    {
+      "name": "M10",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 254.28771,
+      "dec_deg": -4.10031,
+      "magnitude": 6.6,
+      "size_arcmin": 20.0,
+      "size_minor_arcmin": null,
+      "constellation": "Oph",
+      "cross_ids": {
+        "ngc": 6254,
+        "ic": null,
+        "m": 10
+      },
+      "source_row": 5885
+    },
+    {
+      "name": "M11",
+      "name_en": "Wild Duck Cluster",
+      "zh_name": "野鸭星团",
+      "aliases_en": [
+        "July Salt-and-Pepper Cluster",
+        "Scutum Salt-and-Pepper Cluster"
+      ],
+      "aliases_zh": [
+        "七月椒盐星团",
+        "盾牌座椒盐星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6827",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 282.771,
+      "dec_deg": -6.27,
+      "magnitude": 5.8,
+      "size_arcmin": 14.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sct",
+      "cross_ids": {
+        "ngc": 6705,
+        "ic": null,
+        "m": 11
+      },
+      "source_row": 6291
+    },
+    {
+      "name": "M12",
+      "name_en": "Gumball Globular Cluster",
+      "zh_name": "口香糖球状星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6559",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 251.80908,
+      "dec_deg": -1.94853,
+      "magnitude": 6.1,
+      "size_arcmin": 16.0,
+      "size_minor_arcmin": null,
+      "constellation": "Oph",
+      "cross_ids": {
+        "ngc": 6218,
+        "ic": null,
+        "m": 12
+      },
+      "source_row": 5852
+    },
+    {
+      "name": "M13",
+      "name_en": "Great Star Cluster in Hercules",
+      "zh_name": "武仙座球状星团",
+      "aliases_en": [
+        "Hercules Globular Cluster",
+        "Great Globular Cluster",
+        "Great Hercules Cluster"
+      ],
+      "aliases_zh": [
+        "武仙座大球状星团",
+        "大球状星团",
+        "武仙座大星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6539",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 250.423475,
+      "dec_deg": 36.461319,
+      "magnitude": 5.8,
+      "size_arcmin": 20.0,
+      "size_minor_arcmin": 7.91,
+      "constellation": "Her",
+      "cross_ids": {
+        "ngc": 6205,
+        "ic": null,
+        "m": 13
+      },
+      "source_row": 5839
+    },
+    {
+      "name": "M14",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 264.40063,
+      "dec_deg": -3.24592,
+      "magnitude": 7.6,
+      "size_arcmin": 11.0,
+      "size_minor_arcmin": null,
+      "constellation": "Oph",
+      "cross_ids": {
+        "ngc": 6402,
+        "ic": null,
+        "m": 14
+      },
+      "source_row": 6027
+    },
+    {
+      "name": "M15",
+      "name_en": "Pegasus Cluster",
+      "zh_name": "飞马座星团",
+      "aliases_en": [
+        "Great Pegasus Cluster"
+      ],
+      "aliases_zh": [
+        "飞马座大星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7193",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 322.49304,
+      "dec_deg": 12.167,
+      "magnitude": 6.3,
+      "size_arcmin": 18.0,
+      "size_minor_arcmin": null,
+      "constellation": "Peg",
+      "cross_ids": {
+        "ngc": 7078,
+        "ic": null,
+        "m": 15
+      },
+      "source_row": 6625
+    },
+    {
+      "name": "M16",
+      "name_en": "Eagle Nebula",
+      "zh_name": "鹰星云",
+      "aliases_en": [
+        "Star Queen Nebula"
+      ],
+      "aliases_zh": [
+        "星后星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6767",
+      "catalog_type": "C+N",
+      "dso_type": "cluster_nebula",
+      "ra_deg": 274.7,
+      "dec_deg": -13.807,
+      "magnitude": 6.0,
+      "size_arcmin": 120.0,
+      "size_minor_arcmin": 25.0,
+      "constellation": "Ser",
+      "cross_ids": {
+        "ngc": 6611,
+        "ic": 4703,
+        "m": 16
+      },
+      "source_row": 6208
+    },
+    {
+      "name": "M17",
+      "name_en": "Omega Nebula",
+      "zh_name": "奥米茄星云",
+      "aliases_en": [
+        "Swan Nebula",
+        "Horseshoe Nebula",
+        "Checkmark Nebula",
+        "Lobster Nebula"
+      ],
+      "aliases_zh": [
+        "天鹅星云",
+        "马蹄星云",
+        "对号星云",
+        "龙虾星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6779",
+      "catalog_type": "C+N",
+      "dso_type": "cluster_nebula",
+      "ra_deg": 275.196,
+      "dec_deg": -16.172,
+      "magnitude": 6.0,
+      "size_arcmin": 40.0,
+      "size_minor_arcmin": 30.0,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6618,
+        "ic": null,
+        "m": 17
+      },
+      "source_row": 6215
+    },
+    {
+      "name": "M18",
+      "name_en": "Black Swan Cluster",
+      "zh_name": "黑天鹅星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6775",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 274.992,
+      "dec_deg": -17.102,
+      "magnitude": 6.9,
+      "size_arcmin": 7.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6613,
+        "ic": null,
+        "m": 18
+      },
+      "source_row": 6210
+    },
+    {
+      "name": "M19",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 255.65704,
+      "dec_deg": -26.26794,
+      "magnitude": 6.8,
+      "size_arcmin": 17.0,
+      "size_minor_arcmin": null,
+      "constellation": "Oph",
+      "cross_ids": {
+        "ngc": 6273,
+        "ic": null,
+        "m": 19
+      },
+      "source_row": 5904
+    },
+    {
+      "name": "M20",
+      "name_en": "Trifid Nebula",
+      "zh_name": "三裂星云",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6691",
+      "catalog_type": "C+N",
+      "dso_type": "cluster_nebula",
+      "ra_deg": 270.675,
+      "dec_deg": -22.972,
+      "magnitude": 8.5,
+      "size_arcmin": 20.0,
+      "size_minor_arcmin": 20.0,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6514,
+        "ic": null,
+        "m": 20
+      },
+      "source_row": 6122
+    },
+    {
+      "name": "M21",
+      "name_en": "Webb's Cross",
+      "zh_name": "韦伯的十字架",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6719",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 271.054,
+      "dec_deg": -22.49,
+      "magnitude": 5.9,
+      "size_arcmin": 16.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6531,
+        "ic": null,
+        "m": 21
+      },
+      "source_row": 6137
+    },
+    {
+      "name": "M22",
+      "name_en": "Great Sagittarius Cluster",
+      "zh_name": "人马座大星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6815",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 279.09975,
+      "dec_deg": -23.90475,
+      "magnitude": 5.2,
+      "size_arcmin": 32.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6656,
+        "ic": null,
+        "m": 22
+      },
+      "source_row": 6251
+    },
+    {
+      "name": "M23",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 269.267,
+      "dec_deg": -18.985,
+      "magnitude": 5.5,
+      "size_arcmin": 25.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6494,
+        "ic": null,
+        "m": 23
+      },
+      "source_row": 6106
+    },
+    {
+      "name": "M24",
+      "name_en": "Small Sagittarius Star Cloud",
+      "zh_name": "人马座小恒星云",
+      "aliases_en": [
+        "Delle Caustiche"
+      ],
+      "aliases_zh": [
+        "散点星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7712",
+      "catalog_type": "CL",
+      "dso_type": "cluster",
+      "ra_deg": 274.2,
+      "dec_deg": -18.55,
+      "magnitude": 4.6,
+      "size_arcmin": 90.0,
+      "size_minor_arcmin": 60.0,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": null,
+        "ic": 4715,
+        "m": 24
+      },
+      "source_row": 10305
+    },
+    {
+      "name": "M25",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 277.946,
+      "dec_deg": -19.117,
+      "magnitude": 4.6,
+      "size_arcmin": 26.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": null,
+        "ic": 4725,
+        "m": 25
+      },
+      "source_row": 10315
+    },
+    {
+      "name": "M26",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 281.325,
+      "dec_deg": -9.383,
+      "magnitude": 8.0,
+      "size_arcmin": 10.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sct",
+      "cross_ids": {
+        "ngc": 6694,
+        "ic": null,
+        "m": 26
+      },
+      "source_row": 6281
+    },
+    {
+      "name": "M27",
+      "name_en": "Dumbbell Nebula",
+      "zh_name": "哑铃星云",
+      "aliases_en": [
+        "Diabolo Nebula",
+        "Apple Core Nebula",
+        "Double-Headed Shot"
+      ],
+      "aliases_zh": [
+        "空竹星云",
+        "苹果核星云",
+        "双头球星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6991",
+      "catalog_type": "PN",
+      "dso_type": "nebula",
+      "ra_deg": 299.901579,
+      "dec_deg": 22.721042,
+      "magnitude": 7.4,
+      "size_arcmin": 8.0,
+      "size_minor_arcmin": 5.6,
+      "constellation": "Vul",
+      "cross_ids": {
+        "ngc": 6853,
+        "ic": null,
+        "m": 27
+      },
+      "source_row": 6424
+    },
+    {
+      "name": "M28",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 276.13704,
+      "dec_deg": -24.86983,
+      "magnitude": 6.9,
+      "size_arcmin": 11.2,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6626,
+        "ic": null,
+        "m": 28
+      },
+      "source_row": 6223
+    },
+    {
+      "name": "M29",
+      "name_en": "Cooling Tower Cluster",
+      "zh_name": "冷却塔星团",
+      "aliases_en": [
+        "Little Sisters"
+      ],
+      "aliases_zh": [
+        "小姐妹星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7063",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 305.983,
+      "dec_deg": 38.523,
+      "magnitude": 6.6,
+      "size_arcmin": 10.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cyg",
+      "cross_ids": {
+        "ngc": 6913,
+        "ic": null,
+        "m": 29
+      },
+      "source_row": 6478
+    },
+    {
+      "name": "M30",
+      "name_en": "Jellyfish Cluster",
+      "zh_name": "海蜇星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7201",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 325.09217,
+      "dec_deg": -23.17986,
+      "magnitude": 6.9,
+      "size_arcmin": 12.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cap",
+      "cross_ids": {
+        "ngc": 7099,
+        "ic": null,
+        "m": 30
+      },
+      "source_row": 6645
+    },
+    {
+      "name": "M31",
+      "name_en": "Andromeda Galaxy",
+      "zh_name": "仙女座星系",
+      "aliases_en": [
+        "Andromeda Nebula",
+        "Great Nebula in Andromeda",
+        "Great Spiral",
+        "Andromeda A"
+      ],
+      "aliases_zh": [
+        "仙女座星云",
+        "仙女座大星云",
+        "大螺旋",
+        "仙女座A"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4619",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 10.684708,
+      "dec_deg": 41.26875,
+      "magnitude": 3.4,
+      "size_arcmin": 189.1,
+      "size_minor_arcmin": 61.7,
+      "constellation": "And",
+      "cross_ids": {
+        "ngc": 224,
+        "ic": null,
+        "m": 31
+      },
+      "source_row": 317
+    },
+    {
+      "name": "M32",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 10.674271,
+      "dec_deg": 40.865169,
+      "magnitude": 8.1,
+      "size_arcmin": 8.5,
+      "size_minor_arcmin": 6.5,
+      "constellation": "And",
+      "cross_ids": {
+        "ngc": 221,
+        "ic": null,
+        "m": 32
+      },
+      "source_row": 314
+    },
+    {
+      "name": "M33",
+      "name_en": "Triangulum Galaxy",
+      "zh_name": "三角座星系",
+      "aliases_en": [
+        "Triangulum Pinwheel",
+        "Pinwheel Galaxy",
+        "Triangulum Nebula",
+        "Maytag Galaxy"
+      ],
+      "aliases_zh": [
+        "三角座风车",
+        "风车星系",
+        "三角座大星云",
+        "美泰克星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4781",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 23.4621,
+      "dec_deg": 30.659942,
+      "magnitude": 5.7,
+      "size_arcmin": 68.7,
+      "size_minor_arcmin": 41.6,
+      "constellation": "Tri",
+      "cross_ids": {
+        "ngc": 598,
+        "ic": null,
+        "m": 33
+      },
+      "source_row": 668
+    },
+    {
+      "name": "M34",
+      "name_en": "Spiral Cluster",
+      "zh_name": "螺旋星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4888",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 40.521,
+      "dec_deg": 42.762,
+      "magnitude": 5.2,
+      "size_arcmin": 25.0,
+      "size_minor_arcmin": null,
+      "constellation": "Per",
+      "cross_ids": {
+        "ngc": 1039,
+        "ic": null,
+        "m": 34
+      },
+      "source_row": 1076
+    },
+    {
+      "name": "M35",
+      "name_en": "Shoe-Buckle Cluster",
+      "zh_name": "鞋扣星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5347",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 92.225,
+      "dec_deg": 24.333,
+      "magnitude": 5.1,
+      "size_arcmin": 25.0,
+      "size_minor_arcmin": null,
+      "constellation": "Gem",
+      "cross_ids": {
+        "ngc": 2168,
+        "ic": null,
+        "m": 35
+      },
+      "source_row": 2121
+    },
+    {
+      "name": "M36",
+      "name_en": "Pinwheel Cluster",
+      "zh_name": "风车星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5177",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 84.075,
+      "dec_deg": 34.14,
+      "magnitude": 6.0,
+      "size_arcmin": 10.0,
+      "size_minor_arcmin": null,
+      "constellation": "Aur",
+      "cross_ids": {
+        "ngc": 1960,
+        "ic": null,
+        "m": 36
+      },
+      "source_row": 1925
+    },
+    {
+      "name": "M37",
+      "name_en": "January Salt-and-Pepper Cluster",
+      "zh_name": "一月椒盐星团",
+      "aliases_en": [
+        "Auriga Salt and Pepper Cluster"
+      ],
+      "aliases_zh": [
+        "御夫座椒盐星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5335",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 88.075,
+      "dec_deg": 32.553,
+      "magnitude": 5.6,
+      "size_arcmin": 15.0,
+      "size_minor_arcmin": null,
+      "constellation": "Aur",
+      "cross_ids": {
+        "ngc": 2099,
+        "ic": null,
+        "m": 37
+      },
+      "source_row": 2056
+    },
+    {
+      "name": "M38",
+      "name_en": "Starfish Cluster",
+      "zh_name": "海星星团",
+      "aliases_en": [
+        "Letter Pi Cluster"
+      ],
+      "aliases_zh": [
+        "字母π星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5156",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 82.179,
+      "dec_deg": 35.855,
+      "magnitude": 6.4,
+      "size_arcmin": 15.0,
+      "size_minor_arcmin": null,
+      "constellation": "Aur",
+      "cross_ids": {
+        "ngc": 1912,
+        "ic": null,
+        "m": 38
+      },
+      "source_row": 1879
+    },
+    {
+      "name": "M39",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 322.95,
+      "dec_deg": 48.433,
+      "magnitude": 4.6,
+      "size_arcmin": 31.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cyg",
+      "cross_ids": {
+        "ngc": 7092,
+        "ic": null,
+        "m": 39
+      },
+      "source_row": 6638
+    },
+    {
+      "name": "M40",
+      "name_en": "Winnecke 4",
+      "zh_name": "温内克4",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7716",
+      "catalog_type": "*",
+      "dso_type": "double_star",
+      "ra_deg": 185.55221,
+      "dec_deg": 58.08294,
+      "magnitude": 9.65,
+      "size_arcmin": 0.0,
+      "size_minor_arcmin": null,
+      "constellation": "UMa",
+      "cross_ids": {
+        "ngc": null,
+        "ic": null,
+        "m": 40
+      },
+      "source_row": 51
+    },
+    {
+      "name": "M41",
+      "name_en": "Little Beehive Cluster",
+      "zh_name": "小蜂巢星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5433",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 101.504,
+      "dec_deg": -20.757,
+      "magnitude": 4.5,
+      "size_arcmin": 39.0,
+      "size_minor_arcmin": null,
+      "constellation": "CMa",
+      "cross_ids": {
+        "ngc": 2287,
+        "ic": null,
+        "m": 41
+      },
+      "source_row": 2226
+    },
+    {
+      "name": "M42",
+      "name_en": "Great Orion Nebula",
+      "zh_name": "猎户座大星云",
+      "aliases_en": [
+        "Orion Nebula",
+        "Orion A"
+      ],
+      "aliases_zh": [
+        "猎户座星云",
+        "猎户座A"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5190",
+      "catalog_type": "HII",
+      "dso_type": "nebula",
+      "ra_deg": 83.8221,
+      "dec_deg": -5.3911,
+      "magnitude": 4.0,
+      "size_arcmin": 90.0,
+      "size_minor_arcmin": 60.0,
+      "constellation": "Ori",
+      "cross_ids": {
+        "ngc": 1976,
+        "ic": null,
+        "m": 42
+      },
+      "source_row": 1941
+    },
+    {
+      "name": "M43",
+      "name_en": "de Mairan's Nebula",
+      "zh_name": "迪马伦星云",
+      "aliases_en": [
+        "Mairan's Nebula"
+      ],
+      "aliases_zh": [
+        "梅朗星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5222",
+      "catalog_type": "HII",
+      "dso_type": "nebula",
+      "ra_deg": 83.879,
+      "dec_deg": -5.27,
+      "magnitude": 6.8,
+      "size_arcmin": 20.0,
+      "size_minor_arcmin": 15.0,
+      "constellation": "Ori",
+      "cross_ids": {
+        "ngc": 1982,
+        "ic": null,
+        "m": 43
+      },
+      "source_row": 1947
+    },
+    {
+      "name": "M44",
+      "name_en": "Beehive Cluster",
+      "zh_name": "蜂巢星团",
+      "aliases_en": [
+        "Praesepe",
+        "Manger"
+      ],
+      "aliases_zh": [
+        "鬼星团",
+        "马槽星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5674",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 130.1,
+      "dec_deg": 19.667,
+      "magnitude": 3.1,
+      "size_arcmin": 70.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cnc",
+      "cross_ids": {
+        "ngc": 2632,
+        "ic": null,
+        "m": 44
+      },
+      "source_row": 2530
+    },
+    {
+      "name": "M45",
+      "name_en": "Pleiades",
+      "zh_name": "昴星团",
+      "aliases_en": [
+        "Seven Sisters",
+        "Subaru"
+      ],
+      "aliases_zh": [
+        "七姐妹星团",
+        "昴宿星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7720",
+      "catalog_type": "C+N",
+      "dso_type": "cluster_nebula",
+      "ra_deg": 56.75,
+      "dec_deg": 24.117,
+      "magnitude": 1.2,
+      "size_arcmin": 110.0,
+      "size_minor_arcmin": 110.0,
+      "constellation": "Tau",
+      "cross_ids": {
+        "ngc": null,
+        "ic": null,
+        "m": 45
+      },
+      "source_row": 52
+    },
+    {
+      "name": "M46",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 115.442,
+      "dec_deg": -14.81,
+      "magnitude": 6.1,
+      "size_arcmin": 20.0,
+      "size_minor_arcmin": null,
+      "constellation": "Pup",
+      "cross_ids": {
+        "ngc": 2437,
+        "ic": null,
+        "m": 46
+      },
+      "source_row": 2353
+    },
+    {
+      "name": "M47",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 114.146,
+      "dec_deg": -14.483,
+      "magnitude": 4.4,
+      "size_arcmin": 25.0,
+      "size_minor_arcmin": null,
+      "constellation": "Pup",
+      "cross_ids": {
+        "ngc": 2422,
+        "ic": null,
+        "m": 47
+      },
+      "source_row": 2339
+    },
+    {
+      "name": "M48",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 123.429,
+      "dec_deg": -5.75,
+      "magnitude": 5.8,
+      "size_arcmin": 30.0,
+      "size_minor_arcmin": null,
+      "constellation": "Hya",
+      "cross_ids": {
+        "ngc": 2548,
+        "ic": null,
+        "m": 48
+      },
+      "source_row": 2451
+    },
+    {
+      "name": "M49",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 187.444992,
+      "dec_deg": 8.000411,
+      "magnitude": 8.4,
+      "size_arcmin": 10.2,
+      "size_minor_arcmin": 8.3,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4472,
+        "ic": null,
+        "m": 49
+      },
+      "source_row": 4213
+    },
+    {
+      "name": "M50",
+      "name_en": "Heart-Shaped Cluster",
+      "zh_name": "心状星团",
+      "aliases_en": [
+        "Coil Cluster"
+      ],
+      "aliases_zh": [
+        "线圈星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5449",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 105.6979,
+      "dec_deg": -8.3378,
+      "magnitude": 5.9,
+      "size_arcmin": 15.0,
+      "size_minor_arcmin": null,
+      "constellation": "Mon",
+      "cross_ids": {
+        "ngc": 2323,
+        "ic": null,
+        "m": 50
+      },
+      "source_row": 2256
+    },
+    {
+      "name": "M51",
+      "name_en": "Whirlpool Galaxy",
+      "zh_name": "涡状星系",
+      "aliases_en": [
+        "Question Mark Galaxy",
+        "Rosse's Galaxy",
+        "Spiral Nebula",
+        "Whirlpool Nebula"
+      ],
+      "aliases_zh": [
+        "问号星系",
+        "罗斯星系",
+        "漩涡星云",
+        "涡状星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6382",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 202.469575,
+      "dec_deg": 47.195258,
+      "magnitude": 8.1,
+      "size_arcmin": 11.2,
+      "size_minor_arcmin": 8.4,
+      "constellation": "CVn",
+      "cross_ids": {
+        "ngc": 5194,
+        "ic": null,
+        "m": 51
+      },
+      "source_row": 4893
+    },
+    {
+      "name": "M52",
+      "name_en": "Cassiopeia Salt-and-Pepper Cluster",
+      "zh_name": "仙后座椒盐星团",
+      "aliases_en": [
+        "October Salt-and-Pepper Cluster",
+        "The Scorpion Cluster"
+      ],
+      "aliases_zh": [
+        "十月椒盐星团",
+        "蝎状星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7318",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 351.2,
+      "dec_deg": 61.593,
+      "magnitude": 6.9,
+      "size_arcmin": 16.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cas",
+      "cross_ids": {
+        "ngc": 7654,
+        "ic": null,
+        "m": 52
+      },
+      "source_row": 7146
+    },
+    {
+      "name": "M53",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 198.23021,
+      "dec_deg": 18.16817,
+      "magnitude": 7.7,
+      "size_arcmin": 13.0,
+      "size_minor_arcmin": null,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 5024,
+        "ic": null,
+        "m": 53
+      },
+      "source_row": 4730
+    },
+    {
+      "name": "M54",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 283.76387,
+      "dec_deg": -30.47986,
+      "magnitude": 7.7,
+      "size_arcmin": 12.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6715,
+        "ic": null,
+        "m": 54
+      },
+      "source_row": 6300
+    },
+    {
+      "name": "M55",
+      "name_en": "The Summer Rose Star",
+      "zh_name": "夏日玫瑰之星",
+      "aliases_en": [
+        "Specter Cluster"
+      ],
+      "aliases_zh": [
+        "幽灵星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6923",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 294.99879,
+      "dec_deg": -30.96475,
+      "magnitude": 6.3,
+      "size_arcmin": 19.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6809,
+        "ic": null,
+        "m": 55
+      },
+      "source_row": 6382
+    },
+    {
+      "name": "M56",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 289.14821,
+      "dec_deg": 30.18347,
+      "magnitude": 8.4,
+      "size_arcmin": 8.8,
+      "size_minor_arcmin": null,
+      "constellation": "Lyr",
+      "cross_ids": {
+        "ngc": 6779,
+        "ic": null,
+        "m": 56
+      },
+      "source_row": 6355
+    },
+    {
+      "name": "M57",
+      "name_en": "Ring Nebula",
+      "zh_name": "指环星云",
+      "aliases_en": [
+        "Annular Nebula"
+      ],
+      "aliases_zh": [
+        "环状星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6843",
+      "catalog_type": "PN",
+      "dso_type": "nebula",
+      "ra_deg": 283.396163,
+      "dec_deg": 33.029175,
+      "magnitude": 8.8,
+      "size_arcmin": 3.8,
+      "size_minor_arcmin": 2.4,
+      "constellation": "Lyr",
+      "cross_ids": {
+        "ngc": 6720,
+        "ic": null,
+        "m": 57
+      },
+      "source_row": 6305
+    },
+    {
+      "name": "M58",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 189.431654,
+      "dec_deg": 11.818089,
+      "magnitude": 9.66,
+      "size_arcmin": 9.7,
+      "size_minor_arcmin": 4.7,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4579,
+        "ic": null,
+        "m": 58
+      },
+      "source_row": 4314
+    },
+    {
+      "name": "M59",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 190.509675,
+      "dec_deg": 11.646931,
+      "magnitude": 9.6,
+      "size_arcmin": 5.4,
+      "size_minor_arcmin": 3.7,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4621,
+        "ic": null,
+        "m": 59
+      },
+      "source_row": 4354
+    },
+    {
+      "name": "M60",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 190.9167,
+      "dec_deg": 11.552611,
+      "magnitude": 8.8,
+      "size_arcmin": 7.4,
+      "size_minor_arcmin": 6.0,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4649,
+        "ic": null,
+        "m": 60
+      },
+      "source_row": 4381
+    },
+    {
+      "name": "M61",
+      "name_en": "Swelling Spiral Galaxy",
+      "zh_name": "膨胀螺旋星系",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6098",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 185.478958,
+      "dec_deg": 4.473589,
+      "magnitude": 9.65,
+      "size_arcmin": 9.7,
+      "size_minor_arcmin": 5.8,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4303,
+        "ic": null,
+        "m": 61
+      },
+      "source_row": 4062
+    },
+    {
+      "name": "M62",
+      "name_en": "Flickering Globular Cluster",
+      "zh_name": "闪球星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6591",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 255.3025,
+      "dec_deg": -30.11236,
+      "magnitude": 6.4,
+      "size_arcmin": 15.0,
+      "size_minor_arcmin": null,
+      "constellation": "Oph",
+      "cross_ids": {
+        "ngc": 6266,
+        "ic": null,
+        "m": 62
+      },
+      "source_row": 5897
+    },
+    {
+      "name": "M63",
+      "name_en": "Sunflower Galaxy",
+      "zh_name": "向日葵星系",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6350",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 198.955537,
+      "dec_deg": 42.029289,
+      "magnitude": 8.6,
+      "size_arcmin": 13.18,
+      "size_minor_arcmin": 7.94,
+      "constellation": "CVn",
+      "cross_ids": {
+        "ngc": 5055,
+        "ic": null,
+        "m": 63
+      },
+      "source_row": 4761
+    },
+    {
+      "name": "M64",
+      "name_en": "Black Eye Galaxy",
+      "zh_name": "黑眼星系",
+      "aliases_en": [
+        "Blackeye Galaxy",
+        "Evil Eye Galaxy",
+        "Sleeping Beauty Galaxy"
+      ],
+      "aliases_zh": [
+        "黑眼圈星系",
+        "邪眼星系",
+        "睡美人星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6314",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 194.182067,
+      "dec_deg": 21.682658,
+      "magnitude": 8.5,
+      "size_arcmin": 9.77,
+      "size_minor_arcmin": 4.9,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 4826,
+        "ic": null,
+        "m": 64
+      },
+      "source_row": 4546
+    },
+    {
+      "name": "M65",
+      "name_en": "Leo Triplet",
+      "zh_name": "狮子座三重星系",
+      "aliases_en": [
+        "Trio in Leo"
+      ],
+      "aliases_zh": [
+        "狮子座三重奏"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5956",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 169.733154,
+      "dec_deg": 13.092211,
+      "magnitude": 9.3,
+      "size_arcmin": 8.709,
+      "size_minor_arcmin": 2.454,
+      "constellation": "Leo",
+      "cross_ids": {
+        "ngc": 3623,
+        "ic": null,
+        "m": 65
+      },
+      "source_row": 3429
+    },
+    {
+      "name": "M66",
+      "name_en": "Leo Triplet",
+      "zh_name": "狮子座三重星系",
+      "aliases_en": [
+        "Trio in Leo"
+      ],
+      "aliases_zh": [
+        "狮子座三重奏"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5956",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 170.062608,
+      "dec_deg": 12.991289,
+      "magnitude": 8.9,
+      "size_arcmin": 9.1,
+      "size_minor_arcmin": 4.2,
+      "constellation": "Leo",
+      "cross_ids": {
+        "ngc": 3627,
+        "ic": null,
+        "m": 66
+      },
+      "source_row": 3432
+    },
+    {
+      "name": "M67",
+      "name_en": "Golden-Eye Cluster",
+      "zh_name": "金眼星团",
+      "aliases_en": [
+        "Pac-Man Cluster",
+        "King Cobra Cluster"
+      ],
+      "aliases_zh": [
+        "吃豆人星团",
+        "眼镜王蛇星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5686",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 132.825,
+      "dec_deg": 11.8,
+      "magnitude": 6.9,
+      "size_arcmin": 25.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cnc",
+      "cross_ids": {
+        "ngc": 2682,
+        "ic": null,
+        "m": 67
+      },
+      "source_row": 2578
+    },
+    {
+      "name": "M68",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 189.86658,
+      "dec_deg": -26.74406,
+      "magnitude": 7.3,
+      "size_arcmin": 11.0,
+      "size_minor_arcmin": null,
+      "constellation": "Hya",
+      "cross_ids": {
+        "ngc": 4590,
+        "ic": null,
+        "m": 68
+      },
+      "source_row": 4324
+    },
+    {
+      "name": "M69",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 277.84625,
+      "dec_deg": -32.34808,
+      "magnitude": 8.3,
+      "size_arcmin": 8.1,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6637,
+        "ic": null,
+        "m": 69
+      },
+      "source_row": 6234
+    },
+    {
+      "name": "M70",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 280.80317,
+      "dec_deg": -32.29211,
+      "magnitude": 7.8,
+      "size_arcmin": 8.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6681,
+        "ic": null,
+        "m": 70
+      },
+      "source_row": 6271
+    },
+    {
+      "name": "M71",
+      "name_en": "Angelfish Cluster",
+      "zh_name": "神仙鱼星团",
+      "aliases_en": [
+        "Arrowhead Cluster"
+      ],
+      "aliases_zh": [
+        "箭矢星团"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6979",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 298.44371,
+      "dec_deg": 18.77919,
+      "magnitude": 8.4,
+      "size_arcmin": 7.2,
+      "size_minor_arcmin": null,
+      "constellation": "Sge",
+      "cross_ids": {
+        "ngc": 6838,
+        "ic": null,
+        "m": 71
+      },
+      "source_row": 6409
+    },
+    {
+      "name": "M72",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 313.36542,
+      "dec_deg": -12.53731,
+      "magnitude": 9.2,
+      "size_arcmin": 6.6,
+      "size_minor_arcmin": null,
+      "constellation": "Aqr",
+      "cross_ids": {
+        "ngc": 6981,
+        "ic": null,
+        "m": 72
+      },
+      "source_row": 6539
+    },
+    {
+      "name": "M73",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 314.75,
+      "dec_deg": -12.63,
+      "magnitude": 8.9,
+      "size_arcmin": 2.8,
+      "size_minor_arcmin": null,
+      "constellation": "Aqr",
+      "cross_ids": {
+        "ngc": 6994,
+        "ic": null,
+        "m": 73
+      },
+      "source_row": 6550
+    },
+    {
+      "name": "M74",
+      "name_en": "Phantom Galaxy",
+      "zh_name": "幻影星系",
+      "aliases_en": [
+        "Perfect Spiral Galaxy"
+      ],
+      "aliases_zh": [
+        "完美螺旋星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4806",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 24.17405,
+      "dec_deg": 15.783461,
+      "magnitude": 9.4,
+      "size_arcmin": 10.5,
+      "size_minor_arcmin": 9.5,
+      "constellation": "Psc",
+      "cross_ids": {
+        "ngc": 628,
+        "ic": null,
+        "m": 74
+      },
+      "source_row": 692
+    },
+    {
+      "name": "M75",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 301.520171,
+      "dec_deg": -21.922261,
+      "magnitude": 8.6,
+      "size_arcmin": 6.8,
+      "size_minor_arcmin": 1.942,
+      "constellation": "Sgr",
+      "cross_ids": {
+        "ngc": 6864,
+        "ic": null,
+        "m": 75
+      },
+      "source_row": 6433
+    },
+    {
+      "name": "M76",
+      "name_en": "Little Dumbbell Nebula",
+      "zh_name": "小哑铃星云",
+      "aliases_en": [
+        "Cork Nebula",
+        "Barbell Nebula",
+        "Butterfly Nebula"
+      ],
+      "aliases_zh": [
+        "软木塞星云",
+        "杠铃星云",
+        "蝴蝶星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4814",
+      "catalog_type": "PN",
+      "dso_type": "nebula",
+      "ra_deg": 25.583117,
+      "dec_deg": 51.575319,
+      "magnitude": 10.1,
+      "size_arcmin": 3.12,
+      "size_minor_arcmin": 2.307,
+      "constellation": "Per",
+      "cross_ids": {
+        "ngc": 650,
+        "ic": null,
+        "m": 76
+      },
+      "source_row": 712
+    },
+    {
+      "name": "M77",
+      "name_en": "Cetus A",
+      "zh_name": "鲸鱼座A",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4912",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 40.669879,
+      "dec_deg": -0.013289,
+      "magnitude": 8.9,
+      "size_arcmin": 7.1,
+      "size_minor_arcmin": 6.0,
+      "constellation": "Cet",
+      "cross_ids": {
+        "ngc": 1068,
+        "ic": null,
+        "m": 77
+      },
+      "source_row": 1103
+    },
+    {
+      "name": "M78",
+      "name_en": "Casper the Friendly Ghost Nebula",
+      "zh_name": "鬼马小精灵星云",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5303",
+      "catalog_type": "RN",
+      "dso_type": "nebula",
+      "ra_deg": 86.6948,
+      "dec_deg": 0.014,
+      "magnitude": 8.0,
+      "size_arcmin": 8.0,
+      "size_minor_arcmin": 6.0,
+      "constellation": "Ori",
+      "cross_ids": {
+        "ngc": 2068,
+        "ic": null,
+        "m": 78
+      },
+      "source_row": 2025
+    },
+    {
+      "name": "M79",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 81.04413,
+      "dec_deg": -24.52425,
+      "magnitude": 7.7,
+      "size_arcmin": 9.6,
+      "size_minor_arcmin": null,
+      "constellation": "Lep",
+      "cross_ids": {
+        "ngc": 1904,
+        "ic": null,
+        "m": 79
+      },
+      "source_row": 1872
+    },
+    {
+      "name": "M80",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 244.26004,
+      "dec_deg": -22.97608,
+      "magnitude": 7.3,
+      "size_arcmin": 10.0,
+      "size_minor_arcmin": null,
+      "constellation": "Sco",
+      "cross_ids": {
+        "ngc": 6093,
+        "ic": null,
+        "m": 80
+      },
+      "source_row": 5733
+    },
+    {
+      "name": "M81",
+      "name_en": "Bode's Galaxy",
+      "zh_name": "波德星系",
+      "aliases_en": [
+        "Bode's Nebula",
+        "The Great Spiral"
+      ],
+      "aliases_zh": [
+        "波德星云",
+        "大漩涡星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5751",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 148.888221,
+      "dec_deg": 69.065295,
+      "magnitude": 6.9,
+      "size_arcmin": 26.9,
+      "size_minor_arcmin": 14.1,
+      "constellation": "UMa",
+      "cross_ids": {
+        "ngc": 3031,
+        "ic": null,
+        "m": 81
+      },
+      "source_row": 2896
+    },
+    {
+      "name": "M82",
+      "name_en": "Cigar Galaxy",
+      "zh_name": "雪茄星系",
+      "aliases_en": [
+        "Ursa Major A",
+        "Bode's Nebula"
+      ],
+      "aliases_zh": [
+        "大熊座A",
+        "波德星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5763",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 148.968458,
+      "dec_deg": 69.679703,
+      "magnitude": 8.4,
+      "size_arcmin": 11.2,
+      "size_minor_arcmin": 4.3,
+      "constellation": "UMa",
+      "cross_ids": {
+        "ngc": 3034,
+        "ic": null,
+        "m": 82
+      },
+      "source_row": 2899
+    },
+    {
+      "name": "M83",
+      "name_en": "Southern Pinwheel Galaxy",
+      "zh_name": "南风车星系",
+      "aliases_en": [
+        "Thousand Rubies Galaxy",
+        "Seashell Galaxy"
+      ],
+      "aliases_zh": [
+        "千红宝石星系",
+        "贝壳星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4708",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 204.253829,
+      "dec_deg": -29.865761,
+      "magnitude": 7.5,
+      "size_arcmin": 12.9,
+      "size_minor_arcmin": 11.5,
+      "constellation": "Hya",
+      "cross_ids": {
+        "ngc": 5236,
+        "ic": null,
+        "m": 83
+      },
+      "source_row": 4934
+    },
+    {
+      "name": "M84",
+      "name_en": "Markarian's Chain",
+      "zh_name": "马卡良星系链",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6118",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 186.265597,
+      "dec_deg": 12.886983,
+      "magnitude": 9.1,
+      "size_arcmin": 6.5,
+      "size_minor_arcmin": 5.6,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4374,
+        "ic": null,
+        "m": 84
+      },
+      "source_row": 4122
+    },
+    {
+      "name": "M85",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 186.350221,
+      "dec_deg": 18.191081,
+      "magnitude": 9.1,
+      "size_arcmin": 7.1,
+      "size_minor_arcmin": 5.5,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 4382,
+        "ic": null,
+        "m": 85
+      },
+      "source_row": 4129
+    },
+    {
+      "name": "M86",
+      "name_en": "Markarian's Chain",
+      "zh_name": "马卡良星系链",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6118",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 186.549225,
+      "dec_deg": 12.945969,
+      "magnitude": 8.9,
+      "size_arcmin": 8.9,
+      "size_minor_arcmin": 5.8,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4406,
+        "ic": null,
+        "m": 86
+      },
+      "source_row": 4152
+    },
+    {
+      "name": "M87",
+      "name_en": "Virgo Galaxy",
+      "zh_name": "室女座星系",
+      "aliases_en": [
+        "Virgo A",
+        "Smoking gun"
+      ],
+      "aliases_zh": [
+        "室女座A",
+        "烟枪星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6141",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 187.705931,
+      "dec_deg": 12.391123,
+      "magnitude": 8.6,
+      "size_arcmin": 7.2,
+      "size_minor_arcmin": 6.8,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4486,
+        "ic": null,
+        "m": 87
+      },
+      "source_row": 4227
+    },
+    {
+      "name": "M88",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 187.996733,
+      "dec_deg": 14.420411,
+      "magnitude": 9.6,
+      "size_arcmin": 6.9,
+      "size_minor_arcmin": 3.7,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 4501,
+        "ic": null,
+        "m": 88
+      },
+      "source_row": 4242
+    },
+    {
+      "name": "M89",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 188.916183,
+      "dec_deg": 12.556039,
+      "magnitude": 9.8,
+      "size_arcmin": 5.1,
+      "size_minor_arcmin": 4.7,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4552,
+        "ic": null,
+        "m": 89
+      },
+      "source_row": 4290
+    },
+    {
+      "name": "M90",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 189.207567,
+      "dec_deg": 13.162869,
+      "magnitude": 9.5,
+      "size_arcmin": 9.5,
+      "size_minor_arcmin": 4.4,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4569,
+        "ic": null,
+        "m": 90
+      },
+      "source_row": 4305
+    },
+    {
+      "name": "M91",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 188.860125,
+      "dec_deg": 14.496319,
+      "magnitude": 10.2,
+      "size_arcmin": 5.4,
+      "size_minor_arcmin": 4.3,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 4548,
+        "ic": null,
+        "m": 91
+      },
+      "source_row": 4286
+    },
+    {
+      "name": "M92",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 259.28079,
+      "dec_deg": 43.13594,
+      "magnitude": 6.5,
+      "size_arcmin": 14.0,
+      "size_minor_arcmin": null,
+      "constellation": "Her",
+      "cross_ids": {
+        "ngc": 6341,
+        "ic": null,
+        "m": 92
+      },
+      "source_row": 5969
+    },
+    {
+      "name": "M93",
+      "name_en": "Butterfly Cluster",
+      "zh_name": "蝴蝶星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5593",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 116.125,
+      "dec_deg": -23.857,
+      "magnitude": 6.2,
+      "size_arcmin": 10.0,
+      "size_minor_arcmin": null,
+      "constellation": "Pup",
+      "cross_ids": {
+        "ngc": 2447,
+        "ic": null,
+        "m": 93
+      },
+      "source_row": 2362
+    },
+    {
+      "name": "M94",
+      "name_en": "Croc's Eye Galaxy",
+      "zh_name": "鳄鱼眼星系",
+      "aliases_en": [
+        "Cat's Eye Galaxy"
+      ],
+      "aliases_zh": [
+        "猫眼星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6278",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 192.72145,
+      "dec_deg": 41.120153,
+      "magnitude": 8.2,
+      "size_arcmin": 11.2,
+      "size_minor_arcmin": 9.1,
+      "constellation": "CVn",
+      "cross_ids": {
+        "ngc": 4736,
+        "ic": null,
+        "m": 94
+      },
+      "source_row": 4465
+    },
+    {
+      "name": "M95",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 160.990554,
+      "dec_deg": 11.703611,
+      "magnitude": 9.7,
+      "size_arcmin": 3.1,
+      "size_minor_arcmin": 2.9,
+      "constellation": "Leo",
+      "cross_ids": {
+        "ngc": 3351,
+        "ic": null,
+        "m": 95
+      },
+      "source_row": 3186
+    },
+    {
+      "name": "M96",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 161.6906,
+      "dec_deg": 11.819939,
+      "magnitude": 9.3,
+      "size_arcmin": 7.6,
+      "size_minor_arcmin": 5.2,
+      "constellation": "Leo",
+      "cross_ids": {
+        "ngc": 3368,
+        "ic": null,
+        "m": 96
+      },
+      "source_row": 3203
+    },
+    {
+      "name": "M97",
+      "name_en": "Owl Nebula",
+      "zh_name": "夜枭星云",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5944",
+      "catalog_type": "PN",
+      "dso_type": "nebula",
+      "ra_deg": 168.698754,
+      "dec_deg": 55.019089,
+      "magnitude": 9.9,
+      "size_arcmin": 3.4,
+      "size_minor_arcmin": 3.3,
+      "constellation": "UMa",
+      "cross_ids": {
+        "ngc": 3587,
+        "ic": null,
+        "m": 97
+      },
+      "source_row": 3395
+    },
+    {
+      "name": "M98",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 183.451217,
+      "dec_deg": 14.900469,
+      "magnitude": 10.1,
+      "size_arcmin": 9.8,
+      "size_minor_arcmin": 2.8,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 4192,
+        "ic": null,
+        "m": 98
+      },
+      "source_row": 3957
+    },
+    {
+      "name": "M99",
+      "name_en": "Virgo Cluster Pinwheel",
+      "zh_name": "室女座星系团风车",
+      "aliases_en": [
+        "Coma Pinwheel Galaxy",
+        "St. Catherine's Wheel",
+        "[St.] Katherine's Wheel",
+        "Pinwheel Galaxy"
+      ],
+      "aliases_zh": [
+        "后发座风车星系",
+        "圣凯瑟琳之轮",
+        "圣凯瑟琳轮",
+        "风车星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6082",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 184.706771,
+      "dec_deg": 14.416489,
+      "magnitude": 9.9,
+      "size_arcmin": 5.4,
+      "size_minor_arcmin": 4.7,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 4254,
+        "ic": null,
+        "m": 99
+      },
+      "source_row": 4015
+    },
+    {
+      "name": "M100",
+      "name_en": "Blowdryer Galaxy",
+      "zh_name": "吹风机星系",
+      "aliases_en": [
+        "Mirror Galaxy"
+      ],
+      "aliases_zh": [
+        "镜子星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6102",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 185.728746,
+      "dec_deg": 15.822381,
+      "magnitude": 9.4,
+      "size_arcmin": 7.4,
+      "size_minor_arcmin": 6.3,
+      "constellation": "Com",
+      "cross_ids": {
+        "ngc": 4321,
+        "ic": null,
+        "m": 100
+      },
+      "source_row": 4076
+    },
+    {
+      "name": "M101",
+      "name_en": "Pinwheel Galaxy",
+      "zh_name": "风车星系",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4789",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 210.802429,
+      "dec_deg": 54.34875,
+      "magnitude": 7.9,
+      "size_arcmin": 28.8,
+      "size_minor_arcmin": 26.9,
+      "constellation": "UMa",
+      "cross_ids": {
+        "ngc": 5457,
+        "ic": null,
+        "m": 101
+      },
+      "source_row": 5141
+    },
+    {
+      "name": "M102",
+      "name_en": "Spindle Galaxy",
+      "zh_name": "纺锤星系",
+      "aliases_en": [
+        "Fool's Gold Galaxy"
+      ],
+      "aliases_zh": [
+        "金钱游戏星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5710",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 226.623171,
+      "dec_deg": 55.763308,
+      "magnitude": 9.9,
+      "size_arcmin": 6.5,
+      "size_minor_arcmin": 3.1,
+      "constellation": "Dra",
+      "cross_ids": {
+        "ngc": 5866,
+        "ic": null,
+        "m": 102
+      },
+      "source_row": 5522
+    },
+    {
+      "name": "M103",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 23.346,
+      "dec_deg": 60.65,
+      "magnitude": 7.4,
+      "size_arcmin": 6.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cas",
+      "cross_ids": {
+        "ngc": 581,
+        "ic": null,
+        "m": 103
+      },
+      "source_row": 651
+    },
+    {
+      "name": "M104",
+      "name_en": "Sombrero Galaxy",
+      "zh_name": "草帽星系",
+      "aliases_en": [
+        "Dark Lane Galaxy"
+      ],
+      "aliases_zh": [
+        "暗带星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6201",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 189.997633,
+      "dec_deg": -11.623054,
+      "magnitude": 8.0,
+      "size_arcmin": 8.7,
+      "size_minor_arcmin": 3.5,
+      "constellation": "Vir",
+      "cross_ids": {
+        "ngc": 4594,
+        "ic": null,
+        "m": 104
+      },
+      "source_row": 4328
+    },
+    {
+      "name": "M105",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 161.956667,
+      "dec_deg": 12.581631,
+      "magnitude": 9.3,
+      "size_arcmin": 5.4,
+      "size_minor_arcmin": 4.8,
+      "constellation": "Leo",
+      "cross_ids": {
+        "ngc": 3379,
+        "ic": null,
+        "m": 105
+      },
+      "source_row": 3213
+    },
+    {
+      "name": "M106",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 184.740083,
+      "dec_deg": 47.303719,
+      "magnitude": 8.4,
+      "size_arcmin": 18.6,
+      "size_minor_arcmin": 7.2,
+      "constellation": "CVn",
+      "cross_ids": {
+        "ngc": 4258,
+        "ic": null,
+        "m": 106
+      },
+      "source_row": 4019
+    },
+    {
+      "name": "M107",
+      "name_en": "The Crucifix Cluster",
+      "zh_name": "十字架星团",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6523",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 248.13275,
+      "dec_deg": -13.05378,
+      "magnitude": 7.8,
+      "size_arcmin": 13.0,
+      "size_minor_arcmin": null,
+      "constellation": "Oph",
+      "cross_ids": {
+        "ngc": 6171,
+        "ic": null,
+        "m": 107
+      },
+      "source_row": 5806
+    },
+    {
+      "name": "M108",
+      "name_en": "Surfboard Galaxy",
+      "zh_name": "冲浪板星系",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5924",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 167.879029,
+      "dec_deg": 55.674122,
+      "magnitude": 10.0,
+      "size_arcmin": 8.7,
+      "size_minor_arcmin": 2.2,
+      "constellation": "UMa",
+      "cross_ids": {
+        "ngc": 3556,
+        "ic": null,
+        "m": 108
+      },
+      "source_row": 3368
+    },
+    {
+      "name": "M109",
+      "name_en": "Vacuum Cleaner Galaxy",
+      "zh_name": "吸尘器星系",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6016",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 179.399933,
+      "dec_deg": 53.374519,
+      "magnitude": 9.8,
+      "size_arcmin": 7.6,
+      "size_minor_arcmin": 4.7,
+      "constellation": "UMa",
+      "cross_ids": {
+        "ngc": 3992,
+        "ic": null,
+        "m": 109
+      },
+      "source_row": 3775
+    },
+    {
+      "name": "M110",
+      "name_en": "",
+      "zh_name": "",
+      "aliases_en": [],
+      "aliases_zh": [],
+      "zh_name_ref": "",
+      "catalog_type": "Gx",
+      "dso_type": "galaxy",
+      "ra_deg": 10.091979,
+      "dec_deg": 41.6853,
+      "magnitude": 8.1,
+      "size_arcmin": 21.9,
+      "size_minor_arcmin": 11.0,
+      "constellation": "And",
+      "cross_ids": {
+        "ngc": 205,
+        "ic": null,
+        "m": 110
+      },
+      "source_row": 299
+    },
+    {
+      "name": "NGC253",
+      "name_en": "Sculptor Galaxy",
+      "zh_name": "玉夫座星系",
+      "aliases_en": [
+        "Silver Coin Galaxy",
+        "Silver Dollar Galaxy"
+      ],
+      "aliases_zh": [
+        "银币星系",
+        "银元星系"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4680",
+      "catalog_type": "AGx",
+      "dso_type": "galaxy",
+      "ra_deg": 11.888058,
+      "dec_deg": -25.2888,
+      "magnitude": 8.0,
+      "size_arcmin": 27.5,
+      "size_minor_arcmin": 6.8,
+      "constellation": "Scl",
+      "cross_ids": {
+        "ngc": 253,
+        "ic": null,
+        "m": null
+      },
+      "source_row": 346
+    },
+    {
+      "name": "NGC869",
+      "name_en": "Double Cluster",
+      "zh_name": "双星团",
+      "aliases_en": [
+        "h Persei",
+        "Sword Handle"
+      ],
+      "aliases_zh": [
+        "英仙座h",
+        "剑柄"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4856",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 34.75,
+      "dec_deg": 57.128,
+      "magnitude": 3.8,
+      "size_arcmin": 30.0,
+      "size_minor_arcmin": null,
+      "constellation": "Per",
+      "cross_ids": {
+        "ngc": 869,
+        "ic": null,
+        "m": null
+      },
+      "source_row": 916
+    },
+    {
+      "name": "NGC884",
+      "name_en": "Double Cluster",
+      "zh_name": "双星团",
+      "aliases_en": [
+        "χ Persei",
+        "Sword Handle"
+      ],
+      "aliases_zh": [
+        "英仙座χ",
+        "剑柄"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:4856",
+      "catalog_type": "OC",
+      "dso_type": "cluster",
+      "ra_deg": 35.596,
+      "dec_deg": 57.125,
+      "magnitude": 3.8,
+      "size_arcmin": 30.0,
+      "size_minor_arcmin": null,
+      "constellation": "Per",
+      "cross_ids": {
+        "ngc": 884,
+        "ic": null,
+        "m": null
+      },
+      "source_row": 930
+    },
+    {
+      "name": "NGC2070",
+      "name_en": "Tarantula Nebula",
+      "zh_name": "狼蛛星云",
+      "aliases_en": [
+        "Great Looped Nebula",
+        "True Lovers' Knot",
+        "30 Dor Cluster",
+        "30 Doradus Cluster",
+        "30 Dor Nebula"
+      ],
+      "aliases_zh": [
+        "大环星云",
+        "同心结星云",
+        "剑鱼座30星团",
+        "剑鱼座30星团",
+        "剑鱼座30星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:5307",
+      "catalog_type": "C+N",
+      "dso_type": "cluster_nebula",
+      "ra_deg": 84.675,
+      "dec_deg": -69.1,
+      "magnitude": 7.25,
+      "size_arcmin": 30.0,
+      "size_minor_arcmin": 20.0,
+      "constellation": "Dor",
+      "cross_ids": {
+        "ngc": 2070,
+        "ic": null,
+        "m": null
+      },
+      "source_row": 2027
+    },
+    {
+      "name": "NGC5139",
+      "name_en": "ω Cen Cluster",
+      "zh_name": "半人马座欧米伽星团",
+      "aliases_en": [
+        "Omega Centauri"
+      ],
+      "aliases_zh": [
+        "半人马座Ω"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:6366",
+      "catalog_type": "GC",
+      "dso_type": "cluster",
+      "ra_deg": 201.697,
+      "dec_deg": -47.47947,
+      "magnitude": 5.33,
+      "size_arcmin": 55.0,
+      "size_minor_arcmin": null,
+      "constellation": "Cen",
+      "cross_ids": {
+        "ngc": 5139,
+        "ic": null,
+        "m": null
+      },
+      "source_row": 4841
+    },
+    {
+      "name": "NGC7000",
+      "name_en": "North America Nebula",
+      "zh_name": "北美洲星云",
+      "aliases_en": [
+        "America Nebula"
+      ],
+      "aliases_zh": [
+        "美国星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7137",
+      "catalog_type": "HII",
+      "dso_type": "nebula",
+      "ra_deg": 314.696,
+      "dec_deg": 44.33,
+      "magnitude": 4.0,
+      "size_arcmin": 120.0,
+      "size_minor_arcmin": 100.0,
+      "constellation": "Cyg",
+      "cross_ids": {
+        "ngc": 7000,
+        "ic": null,
+        "m": null
+      },
+      "source_row": 6556
+    },
+    {
+      "name": "NGC7293",
+      "name_en": "Helix Nebula",
+      "zh_name": "螺旋星云",
+      "aliases_en": [
+        "Helical Nebula",
+        "Sunflower Nebula"
+      ],
+      "aliases_zh": [
+        "上帝之眼",
+        "向日葵星云"
+      ],
+      "zh_name_ref": "po/stellarium-sky/zh_CN.po:7237",
+      "catalog_type": "PN",
+      "dso_type": "nebula",
+      "ra_deg": 337.410588,
+      "dec_deg": -20.837122,
+      "magnitude": 7.6,
+      "size_arcmin": 25.0,
+      "size_minor_arcmin": 13.4,
+      "constellation": "Aqr",
+      "cross_ids": {
+        "ngc": 7293,
+        "ic": null,
+        "m": null
+      },
+      "source_row": 6822
+    }
+  ]
+}

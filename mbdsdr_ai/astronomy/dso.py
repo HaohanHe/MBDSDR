@@ -3,21 +3,66 @@
 mbdsdr_ai/astronomy/dso.py — 深空天体 (DSO) 目录
 ==================================================
 
-依据公开 Messier/NGC 星表数据。
-内置真实数据精简子集：Messier 110 + 著名 NGC，J2000 坐标（RA 小时、Dec 度），
-V 星等，角大小角分。数据来源：Messier Catalog / NGC 公开星表值。
+数据来自 ``data/dso_catalog.json``（由 ``build_dso_catalog.py`` 生成）：
 
-DSO 类型：galaxy / nebula / cluster / supernova_remnant。
+- Messier 1–110 全量 + 7 个常用亮 NGC；
+- 坐标/星等/角径/类型取自 Stellarium ``nebulae/default/catalog.txt``；
+- 英文名取自同目录 ``names.dat``，中文名取自
+  ``po/stellarium-sky/zh_CN.po`` 对 ``names.dat`` 的翻译；
+- 星座归属由 Stellarium ``data/constellations_spans.dat``（ADC VI/42）
+  的 IAU spans 查表得到；
+- 取不到名字的条目留空并计数，不用英文名冒充中文名，不凭记忆补条目。
+
+DSO 渲染类型：``galaxy`` / ``nebula`` / ``cluster`` /
+``supernova_remnant`` / ``cluster_nebula`` / ``double_star``。
+原始目录类型保留在 ``catalog_type``。
+
 我们的增强：:func:`recommend_dso` 按当前时刻/观测者位置推荐亮 DSO。
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import re
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
-__all__ = ["DSOEntry", "DSOCatalog", "BUILTIN_CATALOG", "recommend_dso"]
+__all__ = [
+    "DSOEntry", "DSOCatalog", "BUILTIN_CATALOG", "recommend_dso",
+    "DSOMetadataError", "DSOIntegrityError", "load_dso_catalog",
+    "DEFAULT_DSO_PATH",
+]
+
+DEFAULT_DSO_PATH = Path(
+    Path(__file__).resolve().parent.parent / "data" / "dso_catalog.json")
+
+_REQUIRED_META_KEYS = (
+    "schema", "catalog", "source", "source_url", "source_license",
+    "source_license_url", "attribution", "source_files",
+    "constellation_method", "name_policy", "type_mapping", "counts",
+    "data_sha256",
+)
+_REQUIRED_SOURCE_FILES = ("catalog", "names", "zh_translations",
+                          "constellation_spans")
+_RENDER_TYPES = {
+    "galaxy", "nebula", "cluster", "supernova_remnant",
+    "cluster_nebula", "double_star",
+}
+_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_NAME_RE = re.compile(r"^(M[1-9]\d{0,2}|NGC[1-9]\d*|IC[1-9]\d*)$")
+_CON_RE = re.compile(r"^[A-Z][A-Za-z]{2}$")
+
+
+class DSOMetadataError(ValueError):
+    """DSO 数据 meta 缺字段、URL/SHA 不合法或来源不可追溯。"""
+
+
+class DSOIntegrityError(ValueError):
+    """DSO 数据内容与 meta 不一致（重复编号、越界、缺星等、SHA 篡改）。"""
 
 
 @dataclass(frozen=True)
@@ -29,137 +74,226 @@ class DSOEntry:
     magnitude: float
     size_arcmin: float
     constellation: str = ""
+    name_en: str = ""
+    zh_name: str = ""
+    aliases_en: Tuple[str, ...] = ()
+    aliases_zh: Tuple[str, ...] = ()
+    catalog_type: str = ""
+    size_minor_arcmin: Optional[float] = None
+    cross_ids: Tuple[Tuple[str, int], ...] = ()
+    source_row: int = 0
 
     @property
     def ra_deg(self) -> float:
         return self.ra_hours * 15.0
 
+    @property
+    def display_name(self) -> str:
+        """优先中文名，其次英文名，最后退回编号；空值不拼接。"""
+        return self.zh_name or self.name_en or self.name
 
-_DSO_ROWS: Tuple[Tuple[str, str, float, float, float, float, str], ...] = (
-    ("M1",  "supernova_remnant", 5.5755,  +22.0145, 8.4, 6.0,  "Tau"),
-    ("M2",  "cluster", 21.5505,  -0.8233, 6.5, 16.0,  "Aqr"),
-    ("M3",  "cluster", 13.7280,  +28.3704, 6.2, 18.0,  "CVn"),
-    ("M4",  "cluster", 16.3910,  -26.5218, 5.6, 26.0,  "Sco"),
-    ("M5",  "cluster", 15.1846,  +2.0815, 5.6, 23.0,  "Ser"),
-    ("M6",  "cluster", 17.5728,  -32.2060, 4.2, 20.0,  "Sco"),
-    ("M7",  "cluster", 17.8975,  -34.7967, 3.3, 80.0,  "Sco"),
-    ("M8",  "nebula", 18.0520,  -24.3867, 6.0, 90.0,  "Sgr"),
-    ("M9",  "cluster", 17.5581,  -18.5250, 7.7, 9.3,  "Oph"),
-    ("M10", "cluster", 16.9573,  -4.0900, 6.6, 20.0,  "Oph"),
-    ("M11", "cluster", 18.8663,  -6.2633, 6.3, 14.0,  "Sct"),
-    ("M12", "cluster", 16.6928,  -1.9483, 6.7, 22.0,  "Oph"),
-    ("M13", "cluster", 16.6948,  +36.4613, 5.8, 20.0,  "Her"),
-    ("M14", "cluster", 17.6495,  -3.2472, 7.6, 11.0,  "Oph"),
-    ("M15", "cluster", 21.5075,  +12.1674, 6.2, 18.0,  "Peg"),
-    ("M16", "nebula", 18.3385,  -13.7852, 6.0, 35.0,  "Ser"),
-    ("M17", "nebula", 18.3398,  -16.1710, 6.0, 46.0,  "Sgr"),
-    ("M18", "cluster", 18.3305,  -17.0780, 7.5, 9.8,  "Sgr"),
-    ("M19", "cluster", 17.6789,  -26.2657, 6.8, 17.0,  "Oph"),
-    ("M20", "nebula", 18.0248,  -23.0288, 6.3, 28.0,  "Sgr"),
-    ("M21", "cluster", 18.0314,  -22.5150, 5.9, 13.0,  "Sgr"),
-    ("M22", "cluster", 18.0978,  -23.9047, 5.1, 32.0,  "Sgr"),
-    ("M23", "cluster", 17.9620,  -19.0033, 5.5, 27.0,  "Sgr"),
-    ("M24", "cluster", 18.3270,  -18.4167, 4.6, 90.0,  "Sgr"),
-    ("M25", "cluster", 18.5408,  -19.1500, 4.6, 32.0,  "Sgr"),
-    ("M26", "cluster", 18.7021,  -9.4060, 8.0, 15.0,  "Sct"),
-    ("M27", "nebula", 19.9942,  +22.7210, 7.4, 8.0,  "Vul"),
-    ("M28", "cluster", 18.3961,  -24.8704, 6.9, 11.0,  "Sgr"),
-    ("M29", "cluster", 20.2233,  +38.5217, 6.6, 7.0,  "Cyg"),
-    ("M30", "cluster", 21.5421,  -23.1798, 7.2, 12.0,  "Cap"),
-    ("M31", "galaxy", 0.7123,  +41.2692, 3.4, 178.0, "And"),
-    ("M32", "galaxy", 0.7148,  +40.8652, 8.1, 8.0,  "And"),
-    ("M33", "galaxy", 1.5644,  +30.6602, 5.7, 73.0,  "Tri"),
-    ("M34", "cluster", 2.7960,  +42.7780, 5.5, 35.0,  "Per"),
-    ("M35", "cluster", 6.1680,  +24.3317, 5.1, 28.0,  "Gem"),
-    ("M36", "cluster", 5.5847,  +34.1358, 6.0, 12.0,  "Aur"),
-    ("M37", "cluster", 5.8837,  +32.5483, 6.2, 24.0,  "Aur"),
-    ("M38", "cluster", 5.8367,  +35.8467, 6.4, 20.0,  "Aur"),
-    ("M39", "cluster", 21.5228,  +48.4400, 4.6, 32.0,  "Cyg"),
-    ("M40", "cluster", 12.5475,  +58.0600, 8.4, 0.5,  "UMa"),
-    ("M41", "cluster", 6.7816,  -20.7317, 4.5, 38.0,  "CMa"),
-    ("M42", "nebula", 5.5833,  -5.3911, 4.0, 66.0,  "Ori"),
-    ("M43", "nebula", 5.5596,  -5.2703, 9.0, 20.0,  "Ori"),
-    ("M44", "cluster", 8.0275,  +19.6725, 3.1, 95.0,  "Cnc"),
-    ("M45", "cluster", 3.7992,  +24.1051, 1.6, 110.0, "Tau"),
-    ("M46", "cluster", 7.4883,  -14.8028, 6.0, 30.0,  "Pup"),
-    ("M47", "cluster", 7.6113,  -14.4817, 4.4, 30.0,  "Pup"),
-    ("M48", "cluster", 8.2342,  -5.7433, 5.8, 30.0,  "Hya"),
-    ("M49", "galaxy", 12.8018,  +8.0000, 8.4, 9.0,  "Vir"),
-    ("M50", "cluster", 7.0213,  -8.3361, 5.9, 16.0,  "Mon"),
-    ("M51", "galaxy", 13.4989,  +47.1952, 8.4, 11.0, "CVn"),
-    ("M52", "cluster", 23.4024,  +61.5922, 7.3, 13.0, "Cas"),
-    ("M53", "cluster", 13.2645,  +18.1684, 7.6, 13.0, "Com"),
-    ("M54", "cluster", 18.9158,  -30.4702, 7.6, 9.0,  "Sgr"),
-    ("M55", "cluster", 19.6985,  -30.9625, 6.3, 19.0, "Sgr"),
-    ("M56", "cluster", 19.9931,  +30.9742, 8.3, 8.0,  "Lyr"),
-    ("M57", "nebula", 18.8980,  +33.0289, 8.8, 1.4,  "Lyr"),
-    ("M58", "galaxy", 12.6685,  +11.8236, 9.7, 5.0,  "Vir"),
-    ("M59", "galaxy", 12.7044,  +11.8847, 9.8, 5.0,  "Vir"),
-    ("M60", "galaxy", 12.7092,  +11.5528, 8.8, 7.0,  "Vir"),
-    ("M61", "galaxy", 12.7038,  +4.4012, 9.7, 6.0,  "Vir"),
-    ("M62", "cluster", 17.0111,  -30.1138, 6.5, 15.0, "Oph"),
-    ("M63", "galaxy", 13.0950,  +42.0222, 8.6, 10.0, "CVn"),
-    ("M64", "galaxy", 12.9907,  +21.9835, 8.5, 10.0, "Com"),
-    ("M65", "galaxy", 11.1834,  +13.0922, 9.3, 8.0,  "Leo"),
-    ("M66", "galaxy", 11.2054,  +12.9917, 8.9, 8.0,  "Leo"),
-    ("M67", "cluster", 8.8975,  +11.8069, 6.1, 30.0, "Cnc"),
-    ("M68", "cluster", 12.3985,  -26.7400, 7.8, 10.0, "Hya"),
-    ("M69", "cluster", 18.3103,  -32.2656, 7.6, 7.0,  "Sgr"),
-    ("M70", "cluster", 18.4580,  -32.2914, 7.9, 8.0,  "Sgr"),
-    ("M71", "cluster", 19.7676,  +18.1078, 8.2, 7.0,  "Sge"),
-    ("M72", "cluster", 20.2306,  -12.5372, 9.3, 6.6,  "Aqr"),
-    ("M73", "cluster", 20.7442,  -12.6136, 9.0, 2.8,  "Aqr"),
-    ("M74", "galaxy", 1.5350,  +29.0185, 9.4, 10.0, "Psc"),
-    ("M75", "cluster", 20.0782,  -21.9214, 8.5, 6.0,  "Sgr"),
-    ("M76", "nebula", 1.3225,  +51.5756, 10.1, 2.7,  "Per"),
-    ("M77", "galaxy", 2.7898,  -0.0133, 8.9, 7.0,  "Cet"),
-    ("M78", "nebula", 5.7893,  +0.7967, 8.3, 8.0,  "Ori"),
-    ("M79", "cluster", 5.9487,  -24.2075, 7.7, 9.0,  "Lep"),
-    ("M80", "cluster", 16.6900,  -22.9783, 7.3, 10.0, "Sco"),
-    ("M81", "galaxy", 9.9263,  +69.1042, 6.9, 24.0, "UMa"),
-    ("M82", "galaxy", 9.9330,  +69.6817, 8.4, 11.0, "UMa"),
-    ("M83", "galaxy", 13.6897,  -29.6248, 7.5, 11.0, "Hya"),
-    ("M84", "galaxy", 12.6373,  +12.8867, 9.1, 5.0,  "Vir"),
-    ("M85", "galaxy", 12.6703,  +18.1175, 9.1, 7.0,  "Com"),
-    ("M86", "galaxy", 12.6450,  +12.9567, 8.9, 7.0,  "Vir"),
-    ("M87", "galaxy", 12.6690,  +12.9112, 8.6, 8.0,  "Vir"),
-    ("M88", "galaxy", 12.9825,  +14.4217, 9.6, 7.0,  "Com"),
-    ("M89", "galaxy", 12.5672,  +12.5578, 9.8, 5.0,  "Vir"),
-    ("M90", "galaxy", 12.5725,  +13.1633, 9.5, 7.0,  "Vir"),
-    ("M91", "galaxy", 12.5050,  +14.4900, 10.2, 5.0, "Com"),
-    ("M92", "cluster", 17.1708,  +43.1310, 6.4, 14.0, "Her"),
-    ("M93", "cluster", 7.7490,  -23.8500, 6.0, 22.0, "Pup"),
-    ("M94", "galaxy", 12.8403,  +41.0733, 8.2, 11.0, "CVn"),
-    ("M95", "galaxy", 10.0593,  +11.7017, 9.7, 7.0,  "Leo"),
-    ("M96", "galaxy", 10.1215,  +11.8214, 9.2, 7.0,  "Leo"),
-    ("M97", "nebula", 11.1483,  +55.0183, 9.9, 3.4,  "UMa"),
-    ("M98", "galaxy", 12.1433,  +14.9072, 10.1, 8.0, "Com"),
-    ("M99", "galaxy", 12.3260,  +14.4200, 9.8, 5.0,  "Com"),
-    ("M100", "galaxy", 12.4375, +15.8225, 9.3, 7.0,  "Com"),
-    ("M101", "galaxy", 14.0428, +54.3489, 7.9, 29.0, "UMa"),
-    ("M102", "galaxy", 16.0142, +55.7617, 9.9, 7.0,  "UMa"),
-    ("M103", "cluster", 1.5603, +60.6572, 7.4, 6.0,  "Cas"),
-    ("M104", "galaxy", 12.3995, -11.6231, 8.0, 9.0,  "Vir"),
-    ("M105", "galaxy", 11.3143, +12.5881, 9.3, 6.0,  "Leo"),
-    ("M106", "galaxy", 12.1800, +47.3036, 8.4, 18.0, "CVn"),
-    ("M107", "cluster", 16.7315, -13.0569, 7.9, 10.0, "Oph"),
-    ("M108", "galaxy", 11.9677, +55.9028, 10.0, 8.0, "UMa"),
-    ("M109", "galaxy", 11.9655, +53.3811, 9.8, 8.0,  "UMa"),
-    ("M110", "galaxy", 0.6755, +41.6858, 8.0, 17.0, "And"),
-    ("NGC253",  "galaxy", 0.7683,  -25.2889, 8.0, 18.0, "Scl"),
-    ("NGC869",  "cluster", 2.3383,  +56.5575, 4.3, 18.0, "Cas"),
-    ("NGC884",  "cluster", 2.3600,  +57.1417, 4.4, 18.0, "Cas"),
-    ("NGC2070", "nebula", 5.6283,  -69.1000, 5.1, 36.0, "Dor"),
-    ("NGC5139", "cluster", 13.3948, -47.4783, 3.7, 36.0, "Cen"),
-    ("NGC7000", "nebula", 20.9800, +44.5500, 4.0, 120.0, "Cyg"),
-    ("NGC7293", "nebula", 22.2968, -20.8344, 7.3, 16.0, "Aqr"),
-)
+    @property
+    def label(self) -> str:
+        return self.display_name
+
+
+def _sha256_hex_ok(value: object) -> bool:
+    text = str(value)
+    return len(text) == 64 and all(c in "0123456789abcdef" for c in text)
+
+
+def _payload_sha256(payload: dict) -> str:
+    clone = json.loads(json.dumps(payload, ensure_ascii=False))
+    if isinstance(clone.get("meta"), dict):
+        clone["meta"].pop("data_sha256", None)
+    blob = json.dumps(clone, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def _check_meta(payload: dict) -> dict:
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        raise DSOMetadataError("DSO 数据 meta 不是 JSON 对象")
+    missing = [k for k in _REQUIRED_META_KEYS if not meta.get(k)]
+    if missing:
+        raise DSOMetadataError(f"DSO 数据 meta 缺少必需字段: {missing}")
+    if meta["schema"] != "mbdsdr.dso_catalog.v1":
+        raise DSOMetadataError(f"DSO 数据 schema 不匹配: {meta['schema']!r}")
+    for key in ("source_url", "source_license_url"):
+        if not str(meta[key]).startswith(("https://", "http://")):
+            raise DSOMetadataError(f"meta.{key} 不是有效 URL")
+    sources = meta.get("source_files")
+    if not isinstance(sources, dict):
+        raise DSOMetadataError("meta.source_files 不是对象")
+    missing_sources = [k for k in _REQUIRED_SOURCE_FILES if k not in sources]
+    if missing_sources:
+        raise DSOMetadataError(
+            f"meta.source_files 缺少源文件: {missing_sources}")
+    for key, info in sources.items():
+        if not isinstance(info, dict) or not info.get("path"):
+            raise DSOMetadataError(f"meta.source_files.{key} 缺少 path")
+        if not _sha256_hex_ok(info.get("sha256")):
+            raise DSOMetadataError(
+                f"meta.source_files.{key}.sha256 不是 64 位 SHA-256")
+    if not _sha256_hex_ok(meta.get("data_sha256")):
+        raise DSOMetadataError("meta.data_sha256 不是 64 位 SHA-256")
+    if _payload_sha256(payload) != meta["data_sha256"]:
+        raise DSOIntegrityError(
+            "DSO 数据 SHA-256 与 meta.data_sha256 不一致（疑似手改数据）")
+    return meta
+
+
+def _check_entry(rec: dict, meta: dict) -> None:
+    name = rec.get("name")
+    if not isinstance(name, str) or not _NAME_RE.match(name):
+        raise DSOIntegrityError(f"非法 DSO 编号: {name!r}")
+    ra = float(rec["ra_deg"])
+    dec = float(rec["dec_deg"])
+    if not (0.0 <= ra < 360.0):
+        raise DSOIntegrityError(f"{name} RA 越界: {ra}")
+    if not (-90.0 <= dec <= 90.0):
+        raise DSOIntegrityError(f"{name} Dec 越界: {dec}")
+    try:
+        mag = float(rec["magnitude"])
+    except (TypeError, ValueError) as exc:
+        raise DSOIntegrityError(f"{name} 星等缺失") from exc
+    if not math.isfinite(mag) or not (0.0 < mag < 90.0):
+        # 99 是源目录的缺失哨兵；0/负值同样视为缺失，绝不静默丢条目。
+        raise DSOIntegrityError(f"{name} 星等缺失或非法: {mag}")
+    size = float(rec["size_arcmin"])
+    if not math.isfinite(size) or size < 0.0:
+        raise DSOIntegrityError(f"{name} 视尺寸非法: {size}")
+    minor = rec.get("size_minor_arcmin")
+    if minor is not None and (not math.isfinite(float(minor)) or float(minor) < 0):
+        raise DSOIntegrityError(f"{name} 短轴尺寸非法: {minor}")
+    catalog_type = rec.get("catalog_type")
+    expected_render = (meta.get("type_mapping") or {}).get(catalog_type)
+    if expected_render != rec.get("dso_type") or expected_render not in _RENDER_TYPES:
+        raise DSOIntegrityError(
+            f"{name} 类型映射不一致: {catalog_type!r} -> {rec.get('dso_type')!r}")
+    con = rec.get("constellation")
+    if not isinstance(con, str) or not _CON_RE.match(con):
+        raise DSOIntegrityError(f"{name} 星座缩写非法: {con!r}")
+    name_en = rec.get("name_en") or ""
+    zh_name = rec.get("zh_name") or ""
+    if zh_name and not _CJK_RE.search(zh_name):
+        raise DSOIntegrityError(f"{name} 中文名不含汉字: {zh_name!r}")
+    if zh_name and zh_name == name_en:
+        raise DSOIntegrityError(f"{name} 中文名与英文名相同: {zh_name!r}")
+    for field in ("aliases_en", "aliases_zh"):
+        if not isinstance(rec.get(field), list):
+            raise DSOIntegrityError(f"{name} {field} 不是列表")
+    cross = rec.get("cross_ids")
+    if not isinstance(cross, dict) or set(cross) - {"ngc", "ic", "m"}:
+        raise DSOIntegrityError(f"{name} cross_ids 非法: {cross!r}")
+    for key, value in cross.items():
+        if value is not None and (not isinstance(value, int) or value <= 0):
+            raise DSOIntegrityError(f"{name} cross_ids.{key} 非法: {value!r}")
+    if name.startswith("M") and cross.get("m") != int(name[1:]):
+        raise DSOIntegrityError(f"{name} 与 cross_ids.m 不一致")
+    if name.startswith("NGC") and cross.get("ngc") != int(name[3:]):
+        raise DSOIntegrityError(f"{name} 与 cross_ids.ngc 不一致")
+    if not isinstance(rec.get("source_row"), int) or rec["source_row"] <= 0:
+        raise DSOIntegrityError(f"{name} source_row 非法")
+
+
+def _check_counts(objects: List[dict], meta: dict) -> None:
+    counts = meta.get("counts")
+    if not isinstance(counts, dict):
+        raise DSOMetadataError("meta.counts 不是对象")
+    total = len(objects)
+    messier = [o for o in objects if o["name"].startswith("M")]
+    ngc = [o for o in objects if o["name"].startswith("NGC")]
+    without_en = [o["name"] for o in objects if not o.get("name_en")]
+    without_zh = [o["name"] for o in objects if not o.get("zh_name")]
+    raw: Dict[str, int] = {}
+    render: Dict[str, int] = {}
+    for obj in objects:
+        raw[obj["catalog_type"]] = raw.get(obj["catalog_type"], 0) + 1
+        render[obj["dso_type"]] = render.get(obj["dso_type"], 0) + 1
+    expected = {
+        "total": total,
+        "messier": 110,
+        "extra_ngc": len(ngc),
+        "with_name_en": total - len(without_en),
+        "without_name_en": len(without_en),
+        "with_zh_name": total - len(without_zh),
+        "without_zh_name": len(without_zh),
+        "no_name_designations": without_en,
+        "no_zh_name_designations": without_zh,
+        "raw_type_counts": dict(sorted(raw.items())),
+        "render_type_counts": dict(sorted(render.items())),
+    }
+    for key, value in expected.items():
+        if counts.get(key) != value:
+            raise DSOIntegrityError(
+                f"meta.counts.{key} 与数据不一致: {counts.get(key)!r} != {value!r}")
+    if len(messier) != 110:
+        raise DSOIntegrityError(f"Messier 条数不是 110: {len(messier)}")
+    numbers = sorted(int(o["name"][1:]) for o in messier)
+    if numbers != list(range(1, 111)):
+        raise DSOIntegrityError("Messier 编号缺号或重复")
+    if len({o["source_row"] for o in objects}) != total:
+        raise DSOIntegrityError("DSO source_row 重复，疑似同一条目被复制")
+
+
+def _load_payload(path: Path) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except FileNotFoundError:
+        raise
+    except ValueError as exc:
+        raise DSOMetadataError(f"DSO 数据不是合法 JSON: {path}") from exc
+    meta = _check_meta(payload)
+    objects = payload.get("objects")
+    if not isinstance(objects, list) or not objects:
+        raise DSOIntegrityError("DSO 数据 objects 为空")
+    seen: set = set()
+    for rec in objects:
+        _check_entry(rec, meta)
+        if rec["name"] in seen:
+            raise DSOIntegrityError(f"DSO 编号重复: {rec['name']}")
+        seen.add(rec["name"])
+    _check_counts(objects, meta)
+    return payload
+
+
+def _entry_from_record(rec: dict) -> DSOEntry:
+    cross = tuple((k, v) for k, v in rec["cross_ids"].items() if v is not None)
+    return DSOEntry(
+        name=rec["name"],
+        dso_type=rec["dso_type"],
+        ra_hours=float(rec["ra_deg"]) / 15.0,
+        dec_deg=float(rec["dec_deg"]),
+        magnitude=float(rec["magnitude"]),
+        size_arcmin=float(rec["size_arcmin"]),
+        constellation=rec["constellation"],
+        name_en=rec.get("name_en") or "",
+        zh_name=rec.get("zh_name") or "",
+        aliases_en=tuple(rec.get("aliases_en") or ()),
+        aliases_zh=tuple(rec.get("aliases_zh") or ()),
+        catalog_type=rec.get("catalog_type") or "",
+        size_minor_arcmin=(None if rec.get("size_minor_arcmin") is None
+                           else float(rec["size_minor_arcmin"])),
+        cross_ids=cross,
+        source_row=int(rec.get("source_row") or 0),
+    )
 
 
 class DSOCatalog:
-    def __init__(self, entries: Optional[List[DSOEntry]] = None):
-        self._entries: List[DSOEntry] = entries or []
-        self._by_name: Dict[str, DSOEntry] = {e.name: e for e in self._entries}
+    def __init__(self, entries: Optional[List[DSOEntry]] = None,
+                 meta: Optional[dict] = None, path: Optional[str] = None):
+        self._entries: List[DSOEntry] = list(entries or [])
+        self._by_name: Dict[str, DSOEntry] = {}
+        for entry in self._entries:
+            key = entry.name.upper().replace(" ", "")
+            if key in self._by_name:
+                raise DSOIntegrityError(f"DSO 编号重复: {entry.name}")
+            self._by_name[key] = entry
+        self.meta: Dict = dict(meta or {})
+        self.path: Optional[str] = path
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -168,7 +302,9 @@ class DSOCatalog:
         return iter(self._entries)
 
     def get(self, name: str) -> Optional[DSOEntry]:
-        return self._by_name.get(name.upper())
+        """按编号查询；允许 ``M 31``/``ngc 253``，未知编号返回 None。"""
+        key = str(name).strip().upper().replace(" ", "")
+        return self._by_name.get(key)
 
     def filter_type(self, dso_type: str) -> List[DSOEntry]:
         return [e for e in self._entries if e.dso_type == dso_type]
@@ -184,10 +320,16 @@ class DSOCatalog:
 
     @classmethod
     def builtin(cls) -> "DSOCatalog":
-        entries = [DSOEntry(name=n, dso_type=t, ra_hours=ra, dec_deg=dec,
-                            magnitude=mag, size_arcmin=sz, constellation=c)
-                   for (n, t, ra, dec, mag, sz, c) in _DSO_ROWS]
-        return cls(entries)
+        return load_dso_catalog()
+
+
+@lru_cache(maxsize=1)
+def load_dso_catalog(path: Optional[str] = None) -> DSOCatalog:
+    """加载并校验 DSO 目录；meta/SHA/计数/字段不合法时抛错，不静默降级。"""
+    source = Path(path) if path else DEFAULT_DSO_PATH
+    payload = _load_payload(source)
+    entries = [_entry_from_record(rec) for rec in payload["objects"]]
+    return DSOCatalog(entries, meta=payload["meta"], path=str(source))
 
 
 BUILTIN_CATALOG = DSOCatalog.builtin()
