@@ -472,3 +472,103 @@ class TestSpacetimeReadouts:
         assert "CC BY-SA 4.0" in txt
         assert "Database" not in txt       # 显示短名，不改来源身份
 
+
+# ---------------------------------------------------------------------------
+# 8. 状态卡超高滚动（批 2：卡片只占视口高度，不无限长挡住天空）
+# ---------------------------------------------------------------------------
+class TestStatusCardScroll:
+    """内容 330px 但窗口更矮时，卡片收缩并滚动；滚轮在卡内只滚卡不缩放。"""
+
+    @staticmethod
+    def _render(v):
+        from PySide6.QtGui import QColor, QImage, QPainter
+        img = QImage(v.width(), v.height(), QImage.Format_ARGB32)
+        img.fill(QColor(0, 0, 0))
+        p = QPainter(img)
+        try:
+            v._draw_info_overlay(p)
+        finally:
+            p.end()
+        return img
+
+    def _short_view(self, monkeypatch):
+        # 窗口最小 400px；把内容抬到 600px 才能稳定制造「超高」场景。
+        monkeypatch.setattr(RFSkyView, "INFO_CARD_H", 600)
+        v = RFSkyView()
+        v.resize(900, 400)
+        v.set_observer(LAT, LON, 0.0)
+        self._render(v)
+        return v
+
+    def test_short_window_card_stops_at_viewport_bottom(self, monkeypatch):
+        v = self._short_view(monkeypatch)
+        try:
+            assert v._status_card_rect.bottom() <= v.height() - 12 + 1e-6
+            assert v._status_card_view_h == pytest.approx(v.height() - 24)
+            assert v._status_card_max_scroll() == pytest.approx(
+                RFSkyView.INFO_CARD_H - v._status_card_view_h)
+        finally:
+            v.close()
+
+    def test_tall_window_needs_no_scroll(self):
+        v = RFSkyView()
+        try:
+            v.resize(900, 900)
+            v.set_observer(LAT, LON, 0.0)
+            self._render(v)
+            assert v._status_card_view_h == pytest.approx(RFSkyView.INFO_CARD_H)
+            assert v._status_card_max_scroll() == 0.0
+            assert v._status_card_scroll == 0.0
+        finally:
+            v.close()
+
+    def test_wheel_inside_card_scrolls_without_zooming(self, monkeypatch):
+        v = self._short_view(monkeypatch)
+        try:
+            fov0 = v.view_state.fov_deg
+            c = v._status_card_rect.center()
+            assert v.wheelEvent({"x": c.x(), "y": c.y(), "delta": -120}) is None
+            assert v._status_card_scroll == pytest.approx(36.0)
+            assert v.view_state.fov_deg == pytest.approx(fov0)
+            v.wheelEvent({"x": c.x(), "y": c.y(), "delta": 120})
+            assert v._status_card_scroll == pytest.approx(0.0)
+            assert v.view_state.fov_deg == pytest.approx(fov0)
+        finally:
+            v.close()
+
+    def test_wheel_outside_card_still_zooms(self, monkeypatch):
+        v = self._short_view(monkeypatch)
+        try:
+            fov0 = v.view_state.fov_deg
+            v.wheelEvent({"x": 500, "y": 100, "delta": 120})
+            assert v._status_card_scroll == pytest.approx(0.0)
+            assert v.view_state.fov_deg < fov0
+        finally:
+            v.close()
+
+    def test_scroll_offset_clamped_to_content_range(self, monkeypatch):
+        v = self._short_view(monkeypatch)
+        try:
+            max_scroll = v._status_card_max_scroll()
+            assert max_scroll > 0.0
+            v._scroll_status_card(10 ** 6)
+            assert v._status_card_scroll == pytest.approx(max_scroll)
+            v._scroll_status_card(-10 ** 6)
+            assert v._status_card_scroll == pytest.approx(0.0)
+        finally:
+            v.close()
+
+    def test_scrollbar_drawn_only_when_content_overflows(self):
+        """滚动条受 max_scroll 门控（绘制源单点核查 + 短/高窗口两侧）。"""
+        src = inspect.getsource(RFSkyView._draw_info_overlay)
+        assert "if max_scroll > 0.0:" in src
+        assert "track_x" in src and "thumb_y" in src
+        v = RFSkyView()
+        try:
+            v.resize(900, 900)
+            v.set_observer(LAT, LON, 0.0)
+            self._render(v)
+            assert v._status_card_max_scroll() == 0.0
+        finally:
+            v.close()
+

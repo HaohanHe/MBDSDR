@@ -320,13 +320,14 @@ def test_dso_labels_queue_at_priority_between_constellation_and_star():
     v = _new_view()
     try:
         _render_dso(v)
-        prios = [p for p, _pos, lines, _c in v._label_items
-                 if any(t.startswith("M") or t.startswith("NGC") or
-                        t.startswith("IC") for t, _s, _d in lines)]
+        catalog_labels = {rf_sky_view.dso_label_text(e)
+                          for e in _dso.BUILTIN_CATALOG}
+        hits = [(p, lines) for p, _pos, lines, _c in v._label_items
+                if len(lines) == 1 and lines[0][0] in catalog_labels]
     finally:
         v.close()
-    assert prios, "宽 FOV 下应有深空天体名进避让队列"
-    assert all(p == RFSkyView.DSO_LABEL_PRIORITY for p in prios), prios
+    assert hits, "宽 FOV 下应有深空天体名进避让队列"
+    assert all(p == RFSkyView.DSO_LABEL_PRIORITY for p, _l in hits), hits
     assert 1.0 < RFSkyView.DSO_LABEL_PRIORITY < 2.0
 
 
@@ -451,3 +452,180 @@ def test_clamped_dso_pick_radius_follows_symbol(monkeypatch):
         assert body_star and body_star.get("kind") == "star", body_star
     finally:
         v.close()
+
+
+# --------------------------------------------------------------------------
+# 7. 批 2：cluster_nebula / double_star 两个 glyph（原 else 分支一律画星云）
+# --------------------------------------------------------------------------
+def _glyph_img(v, kind: str, r: float = 10.0) -> QImage:
+    img = QImage(80, 80, QImage.Format_ARGB32)
+    img.fill(QColor(0, 0, 0))
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    try:
+        v._draw_dso_glyph(p, rf_sky_view.QPointF(40, 40), r, kind, 220)
+    finally:
+        p.end()
+    return img
+
+
+def _ink_px(img, x0, x1, y0, y1) -> int:
+    return sum(1 for y in range(y0, y1) for x in range(x0, x1)
+               if sum(img.pixelColor(x, y).getRgb()[:3]) > 90)
+
+
+@pytest.mark.parametrize("kind", ["cluster_nebula", "double_star"])
+def test_new_dso_glyphs_have_ink(kind):
+    v = _new_view(80)
+    try:
+        assert _ink_px(_glyph_img(v, kind), 0, 80, 0, 80) > 0, kind
+    finally:
+        v.close()
+
+
+def test_new_dso_glyphs_differ_from_old_types():
+    """两个新类型不能落回旧 else 的虚线菱形，也不能与星团/星云同形。"""
+    v = _new_view(80)
+    imgs = {}
+    try:
+        for kind in ("cluster_nebula", "double_star", "cluster", "nebula"):
+            imgs[kind] = _glyph_img(v, kind)
+    finally:
+        v.close()
+    for a, b in (("cluster_nebula", "cluster"), ("cluster_nebula", "nebula"),
+                 ("double_star", "cluster"), ("double_star", "nebula"),
+                 ("cluster_nebula", "double_star")):
+        assert imgs[a] != imgs[b], f"{a} 与 {b} 画出来一样（类型不可辨）"
+
+
+def test_double_star_glyph_is_two_dots_with_empty_center():
+    """双星：左右两个实心点、中心留空（与星团点环区分）。"""
+    v = _new_view(80)
+    try:
+        img = _glyph_img(v, "double_star", 10.0)
+    finally:
+        v.close()
+    assert _ink_px(img, 39, 42, 39, 42) == 0, "双星中心必须留空"
+    assert _ink_px(img, 26, 39, 34, 47) > 0, "左星缺失"
+    assert _ink_px(img, 42, 55, 34, 47) > 0, "右星缺失"
+
+
+def test_cluster_nebula_glyph_has_outer_shell_and_inner_cluster():
+    """复合体：外侧虚线(星云) + 内侧点环(星团)，两层都要落笔。"""
+    v = _new_view(80)
+    try:
+        img = _glyph_img(v, "cluster_nebula", 10.0)
+    finally:
+        v.close()
+    assert _ink_px(img, 39, 42, 39, 42) == 0, "中心应留空"
+    inner = _ink_px(img, 32, 48, 32, 48)
+    outer = (_ink_px(img, 24, 32, 24, 56) + _ink_px(img, 48, 56, 24, 56)
+             + _ink_px(img, 32, 48, 24, 32) + _ink_px(img, 32, 48, 48, 56))
+    assert inner > 0 and outer > 0, (inner, outer)
+
+
+# --------------------------------------------------------------------------
+# 8. 批 2：标签来源 display_name/zh_name，缺失退回编号，永不空串
+# --------------------------------------------------------------------------
+def test_dso_label_prefers_display_name_and_falls_back_to_designation():
+    from types import SimpleNamespace
+    named = SimpleNamespace(display_name="仙女座大星系", zh_name="", name="M31")
+    assert rf_sky_view.dso_label_text(named) == "仙女座大星系"
+    numbered = SimpleNamespace(display_name="", zh_name="", name="M40")
+    assert rf_sky_view.dso_label_text(numbered) == "M40"
+    blank = SimpleNamespace(display_name="", zh_name="", name="")
+    assert rf_sky_view.dso_label_text(blank) == "深空天体"
+    assert rf_sky_view.dso_label_text(SimpleNamespace()) == "深空天体"
+    assert rf_sky_view.dso_label_text(blank).strip()
+
+
+def test_catalog_label_matches_entry_display_name():
+    e = _entry("M31")
+    assert rf_sky_view.dso_label_text(e) == e.display_name
+    assert rf_sky_view.dso_label_text(e).strip()
+
+
+# --------------------------------------------------------------------------
+# 9. 批 2：星系椭圆用真实长短轴比；缺小轴标「轴比未知」
+# --------------------------------------------------------------------------
+def test_axis_ratio_uses_catalog_minor_axis():
+    from types import SimpleNamespace
+    assert rf_sky_view.dso_axis_ratio(
+        SimpleNamespace(size_arcmin=10.0, size_minor_arcmin=4.0)
+    ) == pytest.approx(0.4)
+    # 缺小轴 / 0 / 大于长轴 —— 全是「未知」，不拿 0 或 0.55 冒充真值
+    assert rf_sky_view.dso_axis_ratio(
+        SimpleNamespace(size_arcmin=10.0)) is None
+    assert rf_sky_view.dso_axis_ratio(
+        SimpleNamespace(size_arcmin=10.0, size_minor_arcmin=0.0)) is None
+    assert rf_sky_view.dso_axis_ratio(
+        SimpleNamespace(size_arcmin=10.0, size_minor_arcmin=12.0)) is None
+
+
+def test_real_catalog_axis_ratio_matches_fields():
+    with_minor = [e for e in _dso.BUILTIN_CATALOG
+                  if (e.size_minor_arcmin or 0.0) > 0.0]
+    if not with_minor:
+        pytest.skip("当前目录没有可用的短轴数据")
+    e = with_minor[0]
+    assert rf_sky_view.dso_axis_ratio(e) == pytest.approx(
+        e.size_minor_arcmin / e.size_arcmin)
+
+
+# --------------------------------------------------------------------------
+# 10. 批 2：空字段显示「未知」，不拿 0 顶替（OpenNGC 换源口径）
+# --------------------------------------------------------------------------
+def test_empty_magnitude_and_size_are_none_not_zero():
+    from types import SimpleNamespace
+    e = SimpleNamespace(magnitude=None, size_arcmin=0.0)
+    assert rf_sky_view.dso_magnitude(e) is None
+    assert rf_sky_view.dso_size_arcmin(e) is None
+    v = _new_view(200)
+    try:
+        r, clamped = v._dso_symbol_geometry(180.0, 45.0, None)
+    finally:
+        v.close()
+    assert r >= RFSkyView.DSO_MIN_SYMBOL_R_PX     # 最小可辨符号，不是 0
+    assert clamped is False
+
+
+def test_empty_dso_fields_render_unknown_in_body_card(monkeypatch):
+    from types import SimpleNamespace
+    base = _entry("M40")
+    fake = SimpleNamespace(
+        name="M40", display_name="", zh_name="", name_en="",
+        magnitude=None, size_arcmin=0.0, size_minor_arcmin=None,
+        dso_type="double_star", constellation="",
+        ra_deg=base.ra_deg, dec_deg=base.dec_deg)
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: fake))
+        v._build_body_info({"kind": "dso", "key": "M40"})
+        info = v._body_info
+    finally:
+        v.close()
+    assert info["mag"] is None
+    desc = str(info["desc"])
+    assert "星等未知" in desc and "角大小 未知" in desc
+    assert "0.0" not in desc and " 0′" not in desc
+
+
+def test_gap_galaxy_marks_axis_ratio_unknown(monkeypatch):
+    from types import SimpleNamespace
+    base = _entry("M31")
+    fake = SimpleNamespace(
+        name="M31", display_name="", zh_name="", name_en="",
+        magnitude=3.4, size_arcmin=180.0, size_minor_arcmin=None,
+        dso_type="galaxy", constellation="And",
+        ra_deg=base.ra_deg, dec_deg=base.dec_deg)
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: fake))
+        v._build_body_info({"kind": "dso", "key": "M31"})
+        info = v._body_info
+    finally:
+        v.close()
+    assert "轴比未知" in str(info["desc"])
+    assert "轴比 0.55" not in str(info["desc"])

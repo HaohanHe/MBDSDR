@@ -793,6 +793,67 @@ def star_catalog_credit_text() -> str:
     return f"{src} · {lic}"
 
 
+def dso_magnitude(entry) -> Optional[float]:
+    """DSO 星等；缺失/非有限一律返回 None（不拿 0 顶替）。"""
+    try:
+        v = getattr(entry, "magnitude", None)
+        if v is None:
+            return None
+        v = float(v)
+        return v if math.isfinite(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def dso_size_arcmin(entry) -> Optional[float]:
+    """DSO 长轴视大小（角分）；缺失/<=0 返回 None（0 在目录里是未测）。"""
+    try:
+        v = getattr(entry, "size_arcmin", None)
+        if v is None:
+            return None
+        v = float(v)
+        if not math.isfinite(v) or v <= 0.0:
+            return None
+        return v
+    except (TypeError, ValueError):
+        return None
+
+
+def dso_axis_ratio(entry) -> Optional[float]:
+    """星系短轴/长轴真实轴比；缺小轴或数据非法时返回 None。"""
+    size = dso_size_arcmin(entry)
+    if size is None:
+        return None
+    try:
+        minor = getattr(entry, "size_minor_arcmin", None)
+        if minor is None:
+            return None
+        minor = float(minor)
+        if not math.isfinite(minor) or minor <= 0.0:
+            return None
+        ratio = minor / size
+        if ratio <= 0.0 or ratio > 1.0:
+            return None
+        return ratio
+    except (TypeError, ValueError):
+        return None
+
+
+def dso_label_text(entry) -> str:
+    """DSO 标签：中文名/常用名优先，缺失退回编号；永不返回空串。"""
+    for attr in ("display_name", "zh_name", "name"):
+        try:
+            val = getattr(entry, attr, None)
+        except Exception:
+            val = None
+        if val is None:
+            continue
+        txt = str(val).strip()
+        if txt:
+            return txt
+    return "深空天体"
+
+
 def format_distance_km(km: float, digits: int = 2) -> str:
     """站心距离（km）。"""
     return _format_number(km, digits, " km")
@@ -1441,6 +1502,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.view_state = ViewState(center_alt=90.0, fov_deg=120.0,
                                     min_fov=0.5, max_fov=120.0)
         self.projection = PerspectiveProjection()
+        # 状态卡滚动（内容超过可视高度时）：只动绘制偏移，不改任何数据。
+        # 光标在卡内时滚轮滚卡，不在卡内时仍是 FOV 缩放（两套互不抢）。
+        self._status_card_scroll = 0.0
+        self._status_card_rect = QRectF()
+        self._status_card_view_h = float(self.INFO_CARD_H)
         self.sky_objects = self._objects
         SkyInteractionHandler.__init__(self)
 
@@ -3466,15 +3532,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # +54：恒星时/视轴/星表来源三行（时空读数与署名，见 docs/prototype-gap.md 批1）
     INFO_CARD_H = 330
 
-    def _dso_symbol_geometry(self, az: float, alt: float, dia_arcmin: float) \
-            -> Tuple[float, bool]:
+    def _dso_symbol_geometry(self, az: float, alt: float,
+                             dia_arcmin: Optional[float]) -> Tuple[float, bool]:
         """DSO 符号半径 + 是否限幅（绘制与拾取共用这一条事实源）。
 
-        ``r_ang`` 为星表视大小换算的像素半径；只有 ``r_ang > cap`` 才截到
-        ``cap = DSO_CLAMP_VIEW_FRAC * min(视口宽, 视口高)``，未超限的天体仍按
-        真实视大小画——两个模型之间只有「是否超过 cap」这一条判据。
+        ``dia_arcmin=None`` 表示目录缺视大小：按最小可辨符号画，不把 0
+        当成「0 角分」；卡内同时写「角大小 未知」。
         """
-        geom = self._angular_radius_px(az, alt, dia_arcmin / 120.0)
+        dia = 0.0 if dia_arcmin is None else max(0.0, float(dia_arcmin))
+        geom = self._angular_radius_px(az, alt, dia / 120.0)
         r_ang = float(geom[1]) if geom is not None else 0.0
         cap = self.DSO_CLAMP_VIEW_FRAC * float(min(self.width(), self.height()))
         if r_ang > cap:
@@ -3541,13 +3607,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             pos = self._sky_to_screen(az, alt_draw)
             if not self._on_screen(pos):
                 continue
-            r_star, bright, _bloom = _stars.star_draw(
-                e.magnitude + _stars.extinction_delta_mag(alt), self._bortle)
-            if r_star <= 0:
-                continue                # 与恒星同一亮度门（看不清的不画）
-            r, clamped = self._dso_symbol_geometry(az, alt_draw, e.size_arcmin)
+            mag = dso_magnitude(e)
+            if mag is None:
+                # 星等缺失：不伪造亮度，只按最低可辨符号画类型；卡内写「星等未知」。
+                r_star, bright = 1.0, 0.35
+            else:
+                r_star, bright, _bloom = _stars.star_draw(
+                    mag + _stars.extinction_delta_mag(alt), self._bortle)
+                if r_star <= 0:
+                    continue            # 与恒星同一亮度门（看不清的不画）
+            r, clamped = self._dso_symbol_geometry(az, alt_draw, dso_size_arcmin(e))
             alpha = int(round(70.0 + 150.0 * bright))
-            self._draw_dso_glyph(painter, pos, r, e.dso_type, alpha)
+            self._draw_dso_glyph(painter, pos, r, e.dso_type, alpha,
+                                 dso_axis_ratio(e))
             if clamped:
                 self._draw_dso_clamp_marker(painter, pos, r, alpha)
             # 小而不亮的条目（1.6px 符号）不挂名，避免宽 FOV 下满屏缩写；
@@ -3555,18 +3627,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if r >= 2.0 or bright >= 0.5:
                 self._queue_label(self.DSO_LABEL_PRIORITY,
                                   QPointF(pos.x() + r + 3.0, pos.y() - r - 2.0),
-                                  e.name, self._ink(), small=True)
+                                  dso_label_text(e), self._ink(), small=True)
         painter.restore()
 
     def _draw_dso_glyph(self, painter: QPainter, pos: QPointF, r: float,
-                        dso_type: str, alpha: int) -> None:
+                        dso_type: str, alpha: int,
+                        axis_ratio: Optional[float] = None) -> None:
         """按类型画不同符号；r 为星表视大小换算出的像素半径。
 
         形状约定（只用轮廓，不做亮度渐变——本视图没有表面亮度模型）：
-          galaxy              椭圆（长轴 = 视大小，短轴 0.55）
+          galaxy              椭圆（长轴 = 视大小，短轴 = 真实轴比）
           cluster             点状圆环（8 个点围成）
           nebula              虚线菱形
+          cluster_nebula      虚线椭圆 + 内部星点（星团+星云复合体）
+          double_star         两个实心点（双星）
           supernova_remnant   双同心圆
+        星系轴比缺失时退回 0.55（卡内标「轴比未知」），不是真值。
         """
         col = self._ink()
         pen = QPen(QColor(col.red(), col.green(), col.blue(), min(255, alpha)), 1)
@@ -3574,7 +3650,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setBrush(Qt.NoBrush)
         painter.setPen(pen)
         if dso_type == "galaxy":
-            painter.drawEllipse(pos, max(1.0, r), max(0.7, r * 0.55))
+            ratio = axis_ratio if axis_ratio is not None else 0.55
+            painter.drawEllipse(pos, max(1.0, r), max(0.7, r * ratio))
         elif dso_type == "cluster":
             rr = max(1.4, r)
             painter.setPen(Qt.NoPen)
@@ -3585,6 +3662,28 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.drawEllipse(QPointF(pos.x() + rr * math.cos(th),
                                             pos.y() + rr * math.sin(th)),
                                     1.0, 1.0)
+        elif dso_type == "cluster_nebula":
+            # 复合体：外侧虚线椭圆（星云）+ 内侧点状环（星团），两型信息都在。
+            rr = max(1.6, r)
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawEllipse(pos, rr, max(1.0, rr * 0.78))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(col.red(), col.green(), col.blue(),
+                                           min(255, alpha))))
+            for k in range(6):
+                th = math.radians(60.0 * k)
+                painter.drawEllipse(QPointF(pos.x() + rr * 0.55 * math.cos(th),
+                                            pos.y() + rr * 0.55 * math.sin(th)),
+                                    0.9, 0.9)
+        elif dso_type == "double_star":
+            # 双星：两个实心点，中间留空（与星团点环区分）。
+            sep = max(1.4, r * 0.55)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(col.red(), col.green(), col.blue(),
+                                           min(255, alpha))))
+            for dx in (-sep, sep):
+                painter.drawEllipse(QPointF(pos.x() + dx, pos.y()), 1.15, 1.15)
         elif dso_type == "supernova_remnant":
             painter.drawEllipse(pos, max(1.2, r), max(1.2, r))
             if r > 3.0:
@@ -5286,11 +5385,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             con_full = _constel.CONSTELLATION_NAMES.get(str(con_code), "")
             info["aliases"] = [con_full] if con_full else []
             if entry is not None:
-                info["mag"] = float(entry.magnitude)
+                mag = dso_magnitude(entry)
+                if mag is not None:
+                    info["mag"] = mag
                 info["ra"] = float(entry.ra_deg)
                 info["dec"] = float(entry.dec_deg)
-                info["desc"] = f"角大小 {format_arcmin(entry.size_arcmin)} · " \
-                               f"Messier/NGC 公开星表数据"
+                size = dso_size_arcmin(entry)
+                bits = [("角大小 " + format_arcmin(size)) if size is not None
+                        else "角大小 未知"]
+                if str(dso_type) == "galaxy":
+                    ratio = dso_axis_ratio(entry)
+                    bits.append(f"轴比 {ratio:.2f}" if ratio is not None
+                                else "轴比未知")
+                if mag is None:
+                    bits.append("星等未知")
+                bits.append("公开星表数据")
+                info["desc"] = " · ".join(bits)
                 jd = self._current_jd()
                 rs = self._body_rise_set(entry.ra_deg, entry.dec_deg, jd)
                 info["rise"] = rs["rise_jd"]
@@ -5624,11 +5734,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.restore()
 
     def _draw_info_overlay(self, painter: QPainter):
-        """左下角信息卡片。"""
+        """左下角信息卡片。
+
+        内容高度超过视口可用高度时只滚动、不裁掉数据：光标在卡内用滚轮
+        上下滚（卡右侧有滚动条）；卡高最多占视口高度减 24px，不挡天空。
+        """
         painter.save()
         _t = tokens()
-        card_w, card_h = self.INFO_CARD_W, self.INFO_CARD_H
+        card_w = self.INFO_CARD_W
+        avail_h = max(120.0, float(self.height()) - 24.0)
+        card_h = min(float(self.INFO_CARD_H), avail_h)
+        self._status_card_view_h = card_h
+        max_scroll = max(0.0, float(self.INFO_CARD_H) - card_h)
+        self._status_card_scroll = min(max(self._status_card_scroll, 0.0),
+                                       max_scroll)
         card_x, card_y = 12, self.height() - card_h - 12
+        self._status_card_rect = QRectF(card_x, card_y, card_w, card_h)
         bg = QColor(_t.COLORS["card_2"])
         bg.setAlpha(220)
         border = QColor(_t.COLORS["gray_400"])
@@ -5640,6 +5761,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         dim = QColor(_t.COLORS["gray_300"])
         label_col = QColor(_t.COLORS["gray_100"])
 
+        # 内容裁剪 + 滚动偏移：行坐标仍按整卡高度算，只平移绘制。
+        painter.save()
+        painter.setClipRect(QRectF(card_x + 1, card_y + 1,
+                                   card_w - 2, card_h - 2))
+        painter.translate(0.0, -self._status_card_scroll)
         y = card_y + 20
         painter.setPen(label_col)
         painter.setFont(self._font)
@@ -5853,7 +5979,70 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(dim)
         painter.drawText(card_x + 12, y,
                          "滚轮缩放 | 拖拽转动摄像机 | 双击居中")
+        # 结束内容裁剪与滚动偏移；滚动条画在裁剪区外，贴卡片右缘。
         painter.restore()
+
+        if max_scroll > 0.0:
+            track_x = card_x + card_w - 7.0
+            track_y = card_y + 5.0
+            track_h = card_h - 10.0
+            thumb_h = max(20.0, track_h * card_h / float(self.INFO_CARD_H))
+            travel = track_h - thumb_h
+            frac = self._status_card_scroll / max_scroll
+            thumb_y = track_y + travel * frac
+            track = QColor(_t.COLORS["gray_400"])
+            track.setAlpha(70)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(track))
+            painter.drawRoundedRect(QRectF(track_x, track_y, 3.0, track_h),
+                                    1.5, 1.5)
+            thumb = QColor(_t.COLORS["gray_200"])
+            thumb.setAlpha(200)
+            painter.setBrush(QBrush(thumb))
+            painter.drawRoundedRect(QRectF(track_x, thumb_y, 3.0, thumb_h),
+                                    1.5, 1.5)
+        painter.restore()
+
+    # ------------------------------------------------------------------ 状态卡滚动
+    def _status_card_max_scroll(self) -> float:
+        """状态卡可滚动距离 = 内容高 - 可视高；不超高时为 0。"""
+        return max(0.0, float(self.INFO_CARD_H)
+                   - float(self._status_card_view_h))
+
+    def _scroll_status_card(self, dy: float) -> bool:
+        """按像素滚动状态卡；返回是否真的发生位移（越界即不动）。"""
+        max_scroll = self._status_card_max_scroll()
+        if max_scroll <= 0.0:
+            return False
+        before = self._status_card_scroll
+        self._status_card_scroll = min(
+            max(before + float(dy), 0.0), max_scroll)
+        if abs(self._status_card_scroll - before) < 1e-9:
+            return False
+        self.update()
+        return True
+
+    def _wheel_on_status_card(self, event) -> bool:
+        """光标在状态卡内且卡可滚时不缩放天空，只滚卡片。
+
+        返回 True 表示滚轮已被卡片消费（调用方不再透传给 FOV 缩放）。
+        """
+        if self._status_card_max_scroll() <= 0.0:
+            return False
+        pos = SkyInteractionHandler._event_cursor_px(event)
+        if pos is None or not self._status_card_rect.contains(
+                QPointF(pos[0], pos[1])):
+            return False
+        try:
+            delta = SkyInteractionHandler._event_wheel_delta(event)
+        except TypeError:
+            return False
+        # 上滚（delta>0）看更早的行：内容整体下移，滚动偏移减小。
+        self._scroll_status_card(-delta / 120.0 * 36.0)
+        accept = getattr(event, "accept", None)
+        if callable(accept):
+            accept()
+        return True
 
     def _draw_passes_panel(self, painter: QPainter):
         """右侧未来过境列表。"""
@@ -6147,6 +6336,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.goto_animated(az, alt)
 
     def wheelEvent(self, event: QWheelEvent):
+        # 光标在状态卡内且卡内容超高时，滚轮只滚卡片，不改 FOV。
+        if self._wheel_on_status_card(event):
+            return
         self._cancel_goto_anim()  # 滚轮缩放打断飞行
         SkyInteractionHandler.wheelEvent(self, event)
 

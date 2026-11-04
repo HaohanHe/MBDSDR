@@ -145,9 +145,16 @@
 | 批次 | 条目 | 证据 |
 | --- | --- | --- |
 | 批 1（已完成） | B8 视轴读数、B9 恒星时/JD、G3 星表署名 | `pytest tests/test_sky_readouts.py -q` → 26 passed；固定时刻截图 `D:/mbdsdr/output/sky-batch1-readouts.png`（UTC 1790532300 = 2026-09-27 12:05:00，站址 43.9N/125.3E，FOV 90°，视轴 AZ 210°/ALT 35°）。状态卡高度 276→330；银河行下移 36px，受晒行下移 36px，相关行裁剪测试已同步并写明原因。 |
-| 批 2 | A10 DSO 四步（两型 glyph、中文标签、真实轴比、轴比未知） | 逐型像素差异单测 + DSO 卡片断言 + 截图；几何基线走 `--accept-geometry-change` + reason |
+| 批 2（已完成） | A10 DSO 四步（两型 glyph、中文标签、真实轴比、轴比未知）；状态卡超高滚动 | `pytest tests/test_sky_dso_layer.py tests/test_sky_readouts.py -q` → 59 passed（数据侧 OpenNGC v2 未落地前用 HEAD 的 v1 JSON 验证）。A10：`cluster_nebula` 虚线椭圆+内点环、`double_star` 双点中心留空；标签走 `display_name/zh_name`，缺失退回编号，最差「深空天体」；星系椭圆按 `size_minor_arcmin/size_arcmin`；缺小轴/空星等/空尺寸写「轴比未知/星等未知/角大小 未知」，不拿 0 或 0.55 冒充真值。状态卡：卡高 `min(INFO_CARD_H, 视口高-24)`，内容裁剪+平移+右侧滚动条，光标在卡内滚轮只滚卡（卡外仍缩放）。 |
 | 批 3 | D4 卡内锁定语义、D3/F3 跨线入口（需报备 `main_window.py`） | 单测 + 截图；跨线项先报备 |
 | 不动 | A4 地景遮挡（仅登记）、B3 FOV 上限（提案，需跨线测试与投影决策） | 文档登记，无代码 |
+
+**OpenNGC v2 换源口径（数据侧未落地前）**：新 JSON `schema=mbdsdr.dso_catalog.v2`
+已进入工作区，但 `mbdsdr_ai/astronomy/dso.py` 仍只接受 `v1`，`import mbdsdr_ai`
+即抛 `DSOMetadataError`。视图层已按「字段可为空」写好：星等/长轴缺失返回
+`None`，绘制按最低可辨符号与最低亮度，卡片写「未知」，**任何情况下不把 0
+当真实值**。等数据侧加载器接受 v2 后，再跑 DSO 基线并走
+`--accept-geometry-change` + reason 受控更新。
 
 **证据规则**：每项至少一条可复跑命令或一张固定时刻截图；截图必须写明 UTC/站址/FOV。
 「可复算」按 H-6：显示精度半格以内，单位与量纲一致。
