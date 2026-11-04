@@ -125,6 +125,19 @@ def test_timeout_uses_stale_cache_not_updated(tmp_path):
     assert rec["source"] == "cache"
     assert rec["health"]["consecutive_failures"] == 1
     assert rec["health"]["retry_in_s"] >= 59.0
+    assert rec["offline"] is False
+    assert rec["offline_label"] == "缓存回退（未刷新）"
+
+
+def test_unreachable_network_labels_offline_cache(tmp_path):
+    import urllib.error
+    write_cache(tmp_path, age_hours=30.0)
+    f, _, _ = make_fetcher(
+        tmp_path, ScriptedOpener([urllib.error.URLError("dns failed")]))
+    rec = f.fetch_record(CAT)
+    assert rec["failure_kind"] == "network_unreachable"
+    assert rec["offline"] is True
+    assert rec["offline_label"] == "离线·缓存（未刷新）"
 
 
 def test_no_cache_failure_raises_honest_error(tmp_path):

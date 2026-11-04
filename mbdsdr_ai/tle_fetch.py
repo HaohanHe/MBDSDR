@@ -490,8 +490,14 @@ class TleFetcher:
             err = (f"{failure['label']}（{failure['detail']}）；"
                    f"退避 {wait:.0f}s")
             if disk is not None:
+                # 网络不可达（DNS/连接失败）视为事实离线，明示「离线·缓存」；
+                # 超时/5xx 只标「缓存回退」——可能只是暂时抖动，不冒充离线。
+                is_offline = failure["kind"] == "network_unreachable"
+                label = ("离线·缓存（未刷新）" if is_offline
+                         else "缓存回退（未刷新）")
                 return dict(disk, source="cache", refresh_status="not_updated",
-                            refresh_error=err, offline=False, offline_label="",
+                            refresh_error=err, offline=is_offline,
+                            offline_label=label,
                             failure_kind=failure["kind"],
                             failure_label=failure["label"], health=health())
             raise self._error_cls(
