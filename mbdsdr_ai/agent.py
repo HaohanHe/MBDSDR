@@ -116,6 +116,26 @@ _CONCURRENCY_INIT_LOCK = threading.Lock()
 BUSY_ERROR = "agent_busy"
 CANCEL_ERROR = "cancelled"
 
+# 指标环形缓冲：只保留最近 N 个请求，避免长会话把内存越攒越大
+METRICS_HISTORY_LIMIT = 50
+
+_METRICS_INIT_LOCK = threading.Lock()
+
+
+def _percentile(values: List[float], q: float) -> Optional[float]:
+    """线性插值分位数；空列表返回 None（不做假数据）。"""
+    if not values:
+        return None
+    xs = sorted(float(v) for v in values)
+    if len(xs) == 1:
+        return xs[0]
+    pos = (len(xs) - 1) * max(0.0, min(1.0, q))
+    lo = int(pos)
+    hi = min(lo + 1, len(xs) - 1)
+    frac = pos - lo
+    return round(xs[lo] + (xs[hi] - xs[lo]) * frac, 1)
+
+
 
 class MBDSDRAgent:
     """
@@ -430,6 +450,10 @@ class MBDSDRAgent:
         self.last_error = None
         # P7：本轮工具集裁剪报告（None 表示未启用工具调用或选择失败）
         self.last_tool_selection = None
+        # P7.5：延迟/成本观测（真实数据；未发生过请求时 get_ai_metrics 报 no_data）
+        self._metrics_history = []
+        self._busy_rejections = 0
+        self.metrics_history_limit = METRICS_HISTORY_LIMIT
         # repeat-call guard（借鉴 DeepSeek harness repeat-tool-reminder）
         self._repeat_key = None
         self._repeat_count = 0
@@ -3441,6 +3465,110 @@ class MBDSDRAgent:
         ev = getattr(self, "_cancel_event", None)
         return bool(ev is not None and ev.is_set())
 
+    # ── 延迟与成本观测（P7.5）────────────────────────────
+
+    def _ensure_metrics_state(self) -> None:
+        if getattr(self, "_metrics_history", None) is not None:
+            return
+        with _METRICS_INIT_LOCK:
+            if getattr(self, "_metrics_history", None) is None:
+                self._metrics_history = []
+                self._busy_rejections = 0
+            if getattr(self, "metrics_history_limit", None) is None:
+                self.metrics_history_limit = METRICS_HISTORY_LIMIT
+
+    def _record_request_metrics(self, metrics: Dict[str, Any]) -> None:
+        """记录一次请求的观测数据（环形缓冲，超出上限丢最旧）。"""
+        self._ensure_metrics_state()
+        self._metrics_history.append(metrics)
+        limit = int(getattr(self, "metrics_history_limit", METRICS_HISTORY_LIMIT) or 0)
+        if limit > 0 and len(self._metrics_history) > limit:
+            del self._metrics_history[:len(self._metrics_history) - limit]
+
+    def get_ai_metrics(self) -> Dict[str, Any]:
+        """返回可读的延迟/成本观测（真实数据；无数据时明确报 no_data）。
+
+        内容：
+        - ``requests`` / ``busy_rejections`` / ``cancelled_requests`` 等计数
+        - ``totals``：轮次、工具调用数、token（模型 usage 或估算）
+        - ``latency_ms``：请求耗时与模型轮次耗时的 p50/p95/max
+        - ``by_tool``：每个工具的调用次数、失败次数
+        - ``last``：最近一次请求的逐轮明细（含模型/工具耗时）
+        """
+        self._ensure_metrics_state()
+        hist = list(getattr(self, "_metrics_history", []) or [])
+        busy = int(getattr(self, "_busy_rejections", 0) or 0)
+        if not hist:
+            return {
+                "available": False,
+                "note": "no_data：尚无完成的 chat 请求被记录，不提供任何估算值。",
+                "requests": 0,
+                "busy_rejections": busy,
+                "cancelled_requests": 0,
+                "failed_requests": 0,
+                "window": 0,
+            }
+
+        rounds_detail = [r for m in hist for r in (m.get("rounds_detail") or [])]
+        req_latency = [m.get("latency_ms") or 0.0 for m in hist]
+        round_latency = [r.get("model_latency_ms") or 0.0 for r in rounds_detail]
+        tool_latency = [r.get("tool_latency_ms") or 0.0 for r in rounds_detail]
+
+        totals = {
+            "rounds": sum(int(m.get("rounds") or 0) for m in hist),
+            "tool_calls": sum(int(m.get("tool_calls") or 0) for m in hist),
+            "prompt_tokens": sum(int(m.get("prompt_tokens") or 0) for m in hist),
+            "completion_tokens": sum(int(m.get("completion_tokens") or 0) for m in hist),
+            "total_tokens": sum(int(m.get("total_tokens") or 0) for m in hist),
+            "estimated_requests": sum(1 for m in hist if m.get("estimated")),
+        }
+        by_tool: Dict[str, Dict[str, int]] = {}
+        for m in hist:
+            for t in (m.get("tools") or []):
+                name = t.get("name") or ""
+                if not name:
+                    continue
+                e = by_tool.setdefault(name, {"calls": 0, "failures": 0})
+                e["calls"] += 1
+                if not t.get("success"):
+                    e["failures"] += 1
+
+        n = len(hist)
+        return {
+            "available": True,
+            "requests": n,
+            "window": n,
+            "busy_rejections": busy,
+            "cancelled_requests": sum(1 for m in hist if m.get("cancelled")),
+            "failed_requests": sum(1 for m in hist if m.get("error")),
+            "totals": totals,
+            "tokens_per_request": {
+                "avg": round(totals["total_tokens"] / n, 1) if n else None,
+                "max": max((int(m.get("total_tokens") or 0) for m in hist), default=None),
+            },
+            "latency_ms": {
+                "requests": {
+                    "p50": _percentile(req_latency, 0.5),
+                    "p95": _percentile(req_latency, 0.95),
+                    "max": _percentile(req_latency, 1.0),
+                },
+                "model_round": {
+                    "p50": _percentile(round_latency, 0.5),
+                    "p95": _percentile(round_latency, 0.95),
+                    "max": _percentile(round_latency, 1.0),
+                },
+                "tool_round": {
+                    "p50": _percentile(tool_latency, 0.5),
+                    "p95": _percentile(tool_latency, 0.95),
+                    "max": _percentile(tool_latency, 1.0),
+                },
+            },
+            "by_tool": by_tool,
+            "last": hist[-1],
+            "note": ("token 优先取模型返回的 usage；缺失时按字符启发式估算并以 "
+                     "estimated 标记。耗时为本地实测墙钟，不是估算。"),
+        }
+
     def _build_tool_selection(self, request: str):
         """P7：按本轮请求与上下文窗口挑选工具 schema 子集。
 
@@ -3514,6 +3642,13 @@ class MBDSDRAgent:
         """
         self._ensure_concurrency_state()
         if not self._chat_lock.acquire(blocking=False):
+            # 并发被拒也登记一次（真实计数，供 UI/诊断看「忙」的频率）
+            try:
+                self._ensure_metrics_state()
+                self._busy_rejections = int(
+                    getattr(self, "_busy_rejections", 0) or 0) + 1
+            except Exception:
+                pass
             return {
                 "content": "上一条请求仍在处理中，请稍候再试，或先取消当前请求。",
                 "tool_calls": [],
@@ -3616,6 +3751,21 @@ class MBDSDRAgent:
         interrupted = False
         cancelled = False
         last_error = None
+        round_metrics: List[Dict[str, Any]] = []
+
+        def _emit_round(model_latency_ms, usage, n_tools=0, tool_ms=0.0,
+                        cancelled_round=False):
+            """记录一轮的真实观测值（不补零、不造数据）。"""
+            round_metrics.append({
+                "round": len(round_metrics) + 1,
+                "model_latency_ms": round(float(model_latency_ms), 1),
+                "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                "estimated": bool(usage.get("estimated")),
+                "tool_calls": int(n_tools),
+                "tool_latency_ms": round(float(tool_ms), 1),
+                "cancelled": bool(cancelled_round),
+            })
 
         for round_num in range(max_tool_rounds):
             # P7.4：轮次之间检查取消（流未开始/上一批工具已结束）
@@ -3638,6 +3788,7 @@ class MBDSDRAgent:
                         "latency_ms": 0}
             streamed = ""
             stream = None
+            model_start = time.time()
             try:
                 stream = self.model_manager.chat_stream(messages=messages,
                                                         tools=tools,
@@ -3670,9 +3821,17 @@ class MBDSDRAgent:
                     except Exception:
                         pass
 
+            model_latency_ms = (time.time() - model_start) * 1000.0
+
             if cancelled:
                 interrupted = True
                 last_error = CANCEL_ERROR
+                # 取消前已收到的部分输出按真实字符估算 completion，标记 estimated
+                _emit_round(model_latency_ms, {
+                    "prompt_tokens": self.context_manager.get_total_tokens(),
+                    "completion_tokens": estimate_tokens(streamed),
+                    "estimated": True,
+                }, cancelled_round=True)
                 partial = streamed.strip()
                 if partial:
                     final_content = (partial + "\n\n（已按请求取消：以上为取消前收到"
@@ -3710,6 +3869,7 @@ class MBDSDRAgent:
                 total_usage["estimated"] = True
 
             if not response.get("success"):
+                _emit_round(model_latency_ms, usage)
                 last_error = response.get("error", "unknown_error")
                 partial = (response.get("content") or "").strip()
                 if partial:
@@ -3738,6 +3898,7 @@ class MBDSDRAgent:
 
             # 如果没有工具调用，这是最终回复
             if not tool_calls:
+                _emit_round(model_latency_ms, usage)
                 final_content = content
                 # 添加 assistant 消息到上下文
                 self.context_manager.add_assistant_message(content)
@@ -3747,6 +3908,7 @@ class MBDSDRAgent:
             # 先添加 assistant 消息（含 tool_calls）到上下文
             self.context_manager.add_assistant_message(content, tool_calls=tool_calls)
 
+            tool_ms = 0.0
             for i, tc in enumerate(tool_calls):
                 fn = tc.get("function", {})
                 tool_name = fn.get("name", "")
@@ -3764,6 +3926,7 @@ class MBDSDRAgent:
                     cancelled_content = "[已取消] 用户中途取消，该工具未执行。"
                     all_tool_results.append(ToolResult(
                         success=False, content=cancelled_content,
+                        tool_name=tool_name,
                         error=CANCEL_ERROR).to_dict())
                     self.context_manager.add_tool_message(
                         tool_call_id=tc_id, content=cancelled_content,
@@ -3786,6 +3949,7 @@ class MBDSDRAgent:
                              "不存在", "找不到", "不支持")
                 RETRY_OK = ("未连接", "无设备", "没有设备", "暂时", "重试",
                             "timeout", "timed out", "busy", "忙", "不可用", "未就绪")
+                tool_start = time.time()
                 result = _safe_tool_call()
                 for _attempt in range(2):  # 最多再重试 2 次
                     if getattr(result, "success", False):
@@ -3799,6 +3963,7 @@ class MBDSDRAgent:
                     if self._cancel_pending():
                         break
                     result = _safe_tool_call()
+                tool_ms += (time.time() - tool_start) * 1000.0
                 all_tool_results.append(result.to_dict())
 
                 # P7.3：把状态型工具真实生效的参数登记为跨压缩状态
@@ -3831,6 +3996,8 @@ class MBDSDRAgent:
                 )
 
             # 继续循环，让模型看到工具结果后继续
+            _emit_round(model_latency_ms, usage, len(tool_calls), tool_ms,
+                        cancelled_round=cancelled)
             if cancelled:
                 # P7.4：本批工具因取消未全部执行，不再开启下一轮模型调用
                 interrupted = True
@@ -3856,6 +4023,29 @@ class MBDSDRAgent:
 
         latency_ms = round((time.time() - start_time) * 1000, 1)
 
+        # P7.5：登记本轮真实观测（逐轮模型/工具耗时、token 与估算标记）
+        request_metrics = {
+            "timestamp": time.time(),
+            "latency_ms": latency_ms,
+            "rounds": len(round_metrics),
+            "tool_calls": len(all_tool_calls),
+            "prompt_tokens": int(total_usage.get("prompt_tokens", 0) or 0),
+            "completion_tokens": int(total_usage.get("completion_tokens", 0) or 0),
+            "total_tokens": int(total_usage.get("total_tokens", 0) or 0),
+            "estimated": bool(total_usage.get("estimated")),
+            "cancelled": cancelled,
+            "interrupted": interrupted,
+            "error": last_error,
+            "rounds_detail": round_metrics,
+            "tools": [{"name": r.get("tool_name", ""),
+                       "success": bool(r.get("success"))}
+                      for r in all_tool_results if r.get("tool_name")],
+        }
+        try:
+            self._record_request_metrics(request_metrics)
+        except Exception:
+            pass
+
         return {
             "content": final_content,
             "tool_calls": all_tool_calls,
@@ -3868,6 +4058,7 @@ class MBDSDRAgent:
             "cancelled": cancelled,
             "busy": False,
             "rounds": len(all_tool_calls) + (1 if final_content else 0),
+            "metrics": request_metrics,
         }
 
     # ── 压缩回调 ────────────────────────────────────────
