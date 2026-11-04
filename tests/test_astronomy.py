@@ -152,6 +152,54 @@ class TestStarsAndSatMeta(unittest.TestCase):
         self.assertEqual(star_draw(5.0, bortle=9), (0.0, 0.0, 0.0))
         self.assertGreater(star_draw(4.0, bortle=9)[0], 0.0)
 
+    def test_star_draw_monotonic_across_planet_magnitudes(self):
+        # 行星接入同一模型后必须继续单调：旧 frac 的 min(1.0,...) 上限 clamp
+        # 会把所有 vmag<-1.5 的天体压成同大同亮（金星 -4.70 与木星 -1.94
+        # 画出来一模一样）。半径要一路单调；亮度到 1.0 饱和是对的（alpha
+        # 不可能超过满值），差异由半径与辉光承担。
+        from mbdsdr_ai.skyengine.stars import star_draw
+        r_venus, b_venus, bl_venus = star_draw(-4.70)
+        r_jup, b_jup, bl_jup = star_draw(-1.94)
+        r_sat, _b_sat, _bl_sat = star_draw(0.91)
+        self.assertGreater(r_venus, r_jup)
+        self.assertGreater(r_jup, r_sat)
+        self.assertEqual(b_venus, 1.0)
+        self.assertEqual(b_jup, 1.0)               # 亮度到顶饱和（alpha 无余量）
+        self.assertGreaterEqual(bl_venus, bl_jup)  # 差异由半径与辉光承担
+        self.assertGreater(bl_venus, 0.0)
+
+    def test_star_draw_unchanged_inside_star_magnitude_range(self):
+        # 反证/非回归：去掉 frac 上限 clamp 对恒星必须**逐点无影响**——
+        # 两张星表最亮才 -1.44/-1.46，从不触发 clamp。这里把旧公式内联，
+        # 在恒星整个星等域（-1.5..8.0）× 四档 Bortle 上逐点对拍。
+        from mbdsdr_ai.skyengine.stars import star_draw
+
+        def old(vmag, bortle):
+            limit = 6.5 - 0.35 * max(0, int(bortle) - 3)
+            if vmag > limit:
+                return (0.0, 0.0, 0.0)
+            dim = 1.0 - 0.06 * (bortle - 3)
+            frac = max(0.0, min(1.0, (6.5 - vmag) / 8.0))
+            r = (0.6 + 2.0 * frac ** (1.1 / 2.0)) * dim
+            if r > 1.2:
+                r = 1.2 + (r - 1.2) ** 0.5
+            b = max(0.0, min(1.0, frac))
+            if r < 1.2:
+                b = min(1.0, b * (r ** 3) / 1.728)
+            bl = 0.0 if r < 2.0 else min(1.0, 0.4 + (r - 2.0) / 6.0)
+            return (max(0.5, r), b, bl)
+
+        checked = 0
+        for bortle in (1, 3, 5, 9):
+            vmag = -1.5
+            while vmag <= 8.0:
+                for got, exp in zip(star_draw(vmag, bortle), old(vmag, bortle)):
+                    self.assertAlmostEqual(got, exp, places=12,
+                                           msg=f"vmag={vmag} bortle={bortle}")
+                checked += 1
+                vmag = round(vmag + 0.05, 10)
+        self.assertGreater(checked, 700)   # 真跑了扫描，不是空转
+
     def test_extinction_delta_mag_law(self):
         # 等厚大气 Δm = k/sin(alt)：天顶 = k，alt=30° = 2k，单调随高度角减小。
         from mbdsdr_ai.skyengine.stars import extinction_delta_mag, EXTINCTION_K

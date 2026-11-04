@@ -2742,6 +2742,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """行星标记 (实心圆点 + 中文名标签), 位置随时间引擎流动。
 
         快转时间时行星沿黄道漂移 —— "历"叙事的一部分。低于地平 -1° 不画。
+        大小/亮度/辉光走恒星同一条 star_draw(有效星等, Bortle) 模型
+        （SWE core_get_point_for_mag 语义：所有天体共用一套亮度模型），
+        只保留各自的识别色——于是金星(-4.7)明显大于木星(-1.9)大于土星(0.9)，
+        而海王星(7.8)在 Bortle 3 的裸眼极限 6.5 等之外，如实不画。
         """
         gs = self._ground_station()
         if gs is None:
@@ -2769,12 +2773,27 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             scr = self._sky_to_screen(az, alt)
             if not self._on_screen(scr):
                 continue
+            mag = getattr(pos_eph, "magnitude", None)
+            if mag is None:
+                continue        # 历表没给星等就不画，不拿默认值冒充亮度
+            r, bright, bloom = _stars.star_draw(
+                float(mag) + _stars.extinction_delta_mag(alt), self._bortle)
+            if r <= 0:
+                continue        # 裸眼极限外：如实不可见（搜索/信息卡仍可查到）
             cr, cg, cb = style["color"]  # type: ignore[misc]
+            alpha = int(255 * (0.35 + 0.65 * bright))
+            if bloom > 0.0:
+                for ring in range(3):
+                    rr = r * (1.7 + 0.9 * ring)
+                    glow_a = int(70 * bloom * (0.5 ** ring))
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QBrush(QColor(cr, cg, cb, glow_a)))
+                    painter.drawEllipse(scr, rr, rr)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(QColor(cr, cg, cb)))
-            painter.drawEllipse(scr, 4.0, 4.0)
-            painter.setPen(QColor(210, 220, 235, 215))
-            painter.drawText(QPointF(scr.x() + 8, scr.y() - 6),
+            painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
+            painter.drawEllipse(scr, r, r)
+            painter.setPen(QColor(210, 220, 235, int(200 * bright + 40)))
+            painter.drawText(QPointF(scr.x() + r + 4, scr.y() - r - 2),
                              str(style["zh"]))
         painter.restore()
 

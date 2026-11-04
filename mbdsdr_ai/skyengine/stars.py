@@ -168,7 +168,12 @@ def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float, float]:
         return 0.0, 0.0, 0.0
     s_relative = 1.1
     dim = 1.0 - 0.06 * (bortle - 3)
-    frac = max(0.0, min(1.0, (6.5 - vmag) / 8.0))
+    # frac 不设上限 clamp：饱和交给下面 brightness 的 min(1.0, frac)，半径必须
+    # 继续单调。恒星永不触发上限（两张星表最亮 Sirius -1.44/-1.46，未过 -1.5），
+    # 但行星会——金星 -4.7、木星 -1.9、满月 -12.8，clamp 会把它们画成一样大
+    # 一样亮，视觉编码当场说谎（SWE core_get_point_for_mag 要求所有天体共用
+    # 一套单调亮度模型）。
+    frac = max(0.0, (6.5 - vmag) / 8.0)
     r = (0.6 + 2.0 * frac ** (s_relative / 2.0)) * dim
     if r > _SMALL_STAR_R:
         r = _SMALL_STAR_R + (r - _SMALL_STAR_R) ** 0.5
