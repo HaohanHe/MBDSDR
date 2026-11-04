@@ -2805,7 +2805,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """在像素 (x,y) 附近找行星/恒星/已选 DSO (cleverFind 双键评分)。
 
         恒星与行星混合候选, 亮度归一 = clamp((4.5-mag)/9): 亮者近者优先。
-        未命中返回 None。
+        候选门槛与绘制层同一条可见性规则（star_draw + 消光 + 光害极限星等 +
+        各自的地平下限）：画出来的才给点，没画的不给点。未命中返回 None。
         """
         gs = self._ground_station()
         if gs is None:
@@ -2823,8 +2824,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             pass
         try:
             for name, star in _constel.merged_star_index().items():
-                if star.vmag > 4.5:
-                    continue
                 candidates.append(("star", name, star.ra_deg, star.dec_deg,
                                    star.vmag))
         except Exception:
@@ -2845,8 +2844,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 az, alt = azalt_from_vec(v)
             except Exception:
                 continue
-            if alt < -1.0:
-                continue
+            if kind == "dso":
+                # 标记环不看星等（DSO 是用户主动选中的目标，一直画）
+                if alt < -1.0:
+                    continue
+            else:
+                # 与绘制层同一条可见性门：画不出来的不给点。否则点空白天区
+                # 会弹出肉眼看不见的天体信息卡（Bortle 3 的海王星 r<=0 不画），
+                # 而画出来的暗星又点不中（旧的写死 4.5 等砍掉了 4.84 的 Graffias）。
+                if alt < (-1.0 if kind == "planet" else 0.0) or mag is None:
+                    continue
+                r_pick, _, _ = _stars.star_draw(
+                    float(mag) + _stars.extinction_delta_mag(alt), self._bortle)
+                if r_pick <= 0:
+                    continue
             scr = self._sky_to_screen_finite(az, alt)
             if scr is None:
                 continue

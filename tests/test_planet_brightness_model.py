@@ -14,8 +14,13 @@ tests/test_planet_brightness_model.py
     天体被压成同大同亮。恒星从不触发（两张星表最亮 -1.44/-1.46），行星一接
     进来就全触发（金星 -4.70 / 木星 -1.94 / 满月 -12.8）。模型侧的修正与
     非回归对拍钉在 `tests/test_astronomy.py::TestStarsAndSatMeta`。
+  · 拾取层 `_find_body_at` 的可见性门槛与绘制层各说各话：恒星写死
+    `vmag > 4.5` 剔除（绘制层走光害极限星等，默认 6.5——真星表里 Graffias
+    4.84 画得出却点不中），行星完全不设门（Bortle 3 下海王星 7.83 如实不画，
+    点它所在像素却弹出信息卡）。绘制门一旦生效，"看见的才点得中"必须同步，
+    否则点星即听这条主交互在暗星上静默失灵。
 
-断言分两层：
+断言分三层：
   · 源码层——`_draw_planets` 确实走 `star_draw` + `extinction_delta_mag`，
     固定 4px 圆点已绝迹，超极限时如实 continue（同 `test_selection_crosshair.py`
     的源码体钉法）；
@@ -24,6 +29,10 @@ tests/test_planet_brightness_model.py
     净增：金星 25988 > 木星 23131 > 土星 17034 >> 天王星 1664 > 海王星 0
     = 缺星等 0；Bortle 9 下天王星也从 1664 掉到 0（反证：门是随光害变化的
     极限星等，不是渲染路径死了）。
+  · 拾取层——同一取样像素上 `_find_body_at` 与绘制门对拍。探针实测四处行为
+    翻转（旧 f754d8c → 新）：海王星 7.83@B3 planet→None、天王星 5.73@B9
+    planet→None、假星 5.20@B3 None→star、假星 4.84@B3 None→star；对照组
+    （金星@B3、天王星@B3、5.20@B9）新旧两种实现下结果不变。
 
 运行:
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_planet_brightness_model.py -v
@@ -44,11 +53,13 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
+import rf_sky_view  # noqa: E402
 from rf_sky_view import (  # noqa: E402
     RFSkyView, j2000_to_altaz, vec_from_radec,
 )
 from mbdsdr_ai.celestial_geometry import azalt_from_vec  # noqa: E402
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
+from mbdsdr_ai.skyengine.stars import BrightStar  # noqa: E402
 
 LAT, LON = 40.0, 116.0
 # 固定历元（不绑墙钟）下探针实测的一处高仰角、偏心 100..250px 的天区：
@@ -62,6 +73,7 @@ MAG_NEPTUNE = 7.83
 # `_draw_planets` 按 `_PLANET_STYLE` 的键去历表里取项，故假历表必须挂在真键上；
 # 统一用 venus 一个键＝识别色恒定，净增差异只可能来自星等。
 STYLE_KEY = "venus"
+STAR_NAME = "PickProbeStar"   # 假星名：拾取门用，避开真星表里任何一颗
 WIN = 14              # 取样窗半径 px：罩住圆盘 + 3 圈辉光 + 标签
 INVISIBLE_EPS = 200   # "如实没画"的净增上限（实测为 0，留渲染抖动余量）
 VISIBLE_MIN = 1000    # "确实画了"的净增下限（实测最暗的天王星为 1664）
@@ -210,3 +222,99 @@ class TestPixelEvidence:
             v.close()
         assert abs(delta) < INVISIBLE_EPS, \
             f"历表没给星等就不该画（不能拿默认亮度冒充），实测净增 {delta}"
+
+
+def _pick_planet(v, mag, bortle=3):
+    """把假行星挂到取样天区，返回该像素处的拾取结果。"""
+    cx, cy, _alt = _screen_pos(v)
+    v._bortle = bortle
+    v._planet_positions = lambda jd: {STYLE_KEY: _FakeEph(RA, DEC, mag)}
+    return v._find_body_at(float(cx), float(cy))
+
+
+def _pick_star(v, monkeypatch, vmag, bortle=3):
+    """星表只留一颗假星（排除真星干扰），返回取样像素处的拾取结果。"""
+    cx, cy, _alt = _screen_pos(v)
+    v._bortle = bortle
+    v._planet_positions = lambda jd: {}
+    fake = {STAR_NAME: BrightStar(STAR_NAME, RA, DEC, vmag, 0.0)}
+    monkeypatch.setattr(rf_sky_view._constel, "merged_star_index",
+                        lambda: fake)
+    return v._find_body_at(float(cx), float(cy))
+
+
+class TestPickGateMatchesDrawGate:
+    """拾取层：画出来的才点得中，没画的不给点（与绘制层同一条可见性门）。
+
+    修复前 `_find_body_at` 的门槛与绘制层各说各话：恒星写死 vmag>4.5 剔除
+    （绘制层走 Bortle 极限星等，默认 6.5——真星表里 Graffias 4.84 画得出却
+    点不中），行星则完全不设门（Bortle 3 下海王星 7.83 如实不画，但点空白
+    天区照样弹出它的信息卡）。
+    """
+
+    def _body(self):
+        src = open(os.path.join(_ROOT, "desktop", "rf_sky_view.py"),
+                   encoding="utf-8").read()
+        i = src.index("def _find_body_at")
+        j = src.index("\n    def ", i + 10)
+        return src[i:j]
+
+    def test_pick_gate_routes_through_shared_model(self):
+        body = self._body()
+        assert "star_draw(" in body, \
+            "拾取候选必须走绘制层同一条 star_draw 可见性门"
+        assert "star.vmag > 4.5" not in body, \
+            "写死 4.5 等的拾取门槛＝画得出却点不中，必须已绝迹"
+
+    def test_visible_planet_is_pickable(self):
+        v = _new_view()
+        try:
+            res = _pick_planet(v, MAG_VENUS)
+        finally:
+            v.close()
+        assert res is not None and res.get("kind") == "planet", \
+            f"金星(-4.70)在 Bortle 3 画得出，就该点得中，实测 {res}"
+        assert res.get("key") == STYLE_KEY
+
+    def test_invisible_planet_is_not_pickable(self):
+        v = _new_view()
+        try:
+            res = _pick_planet(v, MAG_NEPTUNE)
+        finally:
+            v.close()
+        assert res is None or res.get("kind") != "planet", \
+            (f"海王星(7.83)超 Bortle 3 极限如实不画，点它所在像素不该冒出"
+             f"行星信息卡，实测 {res}")
+
+    def test_planet_pick_gate_follows_bortle(self):
+        """反证：同一颗天王星，暗空点得中、重光害点不中——门随光害变化。"""
+        v = _new_view()
+        try:
+            dark = _pick_planet(v, MAG_URANUS, bortle=3)
+            city = _pick_planet(v, MAG_URANUS, bortle=9)
+        finally:
+            v.close()
+        assert dark is not None and dark.get("kind") == "planet", \
+            f"天王星(5.73) < Bortle 3 极限 6.5，应点得中，实测 {dark}"
+        assert city is None or city.get("kind") != "planet", \
+            (f"天王星(5.73) > Bortle 9 极限 4.4，画不出也就点不中，实测 {city}"
+             "——若这里也点得中，说明拾取门没接上极限星等，上一条绿是巧合")
+
+    def test_faint_star_inside_limit_is_pickable(self, monkeypatch):
+        """4.5 < vmag < 极限的星：画得出（旧写死门槛下点不中，本条即修复）。"""
+        v = _new_view()
+        try:
+            res = _pick_star(v, monkeypatch, 5.2, bortle=3)
+        finally:
+            v.close()
+        assert res is not None and res.get("key") == STAR_NAME, \
+            f"5.2 等 < Bortle 3 极限 6.5，画得出就该点得中，实测 {res}"
+
+    def test_star_beyond_limit_is_not_pickable(self, monkeypatch):
+        v = _new_view()
+        try:
+            res = _pick_star(v, monkeypatch, 5.2, bortle=9)
+        finally:
+            v.close()
+        assert res is None or res.get("key") != STAR_NAME, \
+            f"5.2 等 > Bortle 9 极限 4.4，如实不画也就不给点，实测 {res}"
