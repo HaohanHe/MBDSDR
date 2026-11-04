@@ -113,6 +113,20 @@ def test_tool_default_uses_time_engine_not_wall_clock(same_tle_for_orbit, monkey
     assert NAME in txt
 
 
+def test_satellite_passes_reports_start_time_basis(monkeypatch):
+    """过境工具输出必须标出预测起点（UTC + 本地），时刻口径可见。"""
+    from mbdsdr_ai.sdr_tools import _satellite_passes
+
+    monkeypatch.setattr(orbit, "predict_passes_report",
+                        lambda *a, **k: {"passes": [], "degraded": []})
+    txt = _satellite_passes({"latitude": GS.lat_deg,
+                             "longitude": GS.lon_deg,
+                             "altitude": GS.alt_m,
+                             "hours": 1.0})
+    assert "预测起点:" in txt
+    assert "本地" in txt
+
+
 def test_predict_pass_accepts_explicit_start_unix():
     """同类过境入口（new_spacetime/sdr 工具）也须接受显式时刻。"""
     from mbdsdr_ai.new_spacetime import predict_satellite_pass

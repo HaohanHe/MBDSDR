@@ -129,6 +129,16 @@ def _physics_now(args) -> float:
         return _time.time()
 
 
+def _utc_local(when: float) -> tuple:
+    """返回 (UTC 字符串, 本地带偏移 ISO 字符串)，统一工具输出的时刻显示口径。"""
+    dt = datetime.fromtimestamp(float(when), tz=timezone.utc)
+    try:
+        from mbdsdr_ai.time_basis import format_local
+    except ImportError:
+        from time_basis import format_local
+    return dt.strftime("%Y-%m-%d %H:%M:%SZ"), format_local(dt)
+
+
 def _tle_provenance_lines(names) -> list:
     """给定卫星集合，返回「TLE 不可当精确值」告警行（verified 不出声）。"""
     try:
@@ -4164,12 +4174,7 @@ def _satellite_sky_view(args):
     visible = orbit.visible_satellites(lat, lon, alt / 1000.0, min_elev, sat_type,
                                        when=when)
 
-    at_utc = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(when))
-    try:
-        from mbdsdr_ai.time_basis import format_local
-    except ImportError:
-        from time_basis import format_local
-    at_local = format_local(datetime.fromtimestamp(when, tz=timezone.utc))
+    at_utc, at_local = _utc_local(when)
     if not visible:
         return (f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n"
                 f"时刻: {at_utc}（本地 {at_local}）\n最小仰角: {min_elev}°\n"
@@ -4244,11 +4249,13 @@ def _satellite_passes(args):
     min_elev = args.get("min_elevation", 10.0)
     stype = args.get("satellite_type", "all")
     freq = args.get("nominal_freq_hz")
+    when = _physics_now(args)
     rep = orbit.predict_passes_report(lat, lon, alt / 1000.0, hours, min_elev,
                                       stype, freq, require_trusted_station=True,
-                                      start_unix=_physics_now(args))
+                                      start_unix=when)
     passes = rep["passes"]
-    out = ""
+    at_utc, at_local = _utc_local(when)
+    out = f"预测起点: {at_utc}（本地 {at_local}）\n\n"
     if rep["degraded"]:
         out += "=== 未参与/不可信条目（如实留痕） ===\n"
         for d in rep["degraded"]:
@@ -5676,14 +5683,9 @@ def _sky_view_visible(args):
     when = _physics_now(args)
     result = compute_visible_satellite_count(lat, lon, min_elev, timestamp=when)
 
-    stamp = datetime.fromtimestamp(when, tz=timezone.utc)
-    try:
-        from mbdsdr_ai.time_basis import format_local
-    except ImportError:
-        from time_basis import format_local
+    at_utc, at_local = _utc_local(when)
     lines = [f"=== 天空图可见卫星（仰角 > {min_elev:.0f}°）==="]
-    lines.append(f"时刻: {stamp.strftime('%Y-%m-%d %H:%M:%SZ')}"
-                 f"（本地 {format_local(stamp)}）")
+    lines.append(f"时刻: {at_utc}（本地 {at_local}）")
     lines.append(f"可见数量: {result['total_visible']} 颗")
     lines.append("")
     for sat in result['satellites']:
