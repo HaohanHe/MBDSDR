@@ -88,7 +88,7 @@
 | L36 | **没有真实地景遮挡**：地景是装饰性示意剪影，不是实测地形 | `desktop/rf_sky_view.py::_LANDSCAPE_LAYERS/_landscape_alt_profile/_draw_landscape`；地平基准 `HORIZON_ALT_DEG=0` + `_draw_horizon_line`；`tests/test_sky_landscape_layers.py`、`tests/test_sky_refraction.py::test_horizon_is_exactly_alt_zero` | **现状**：`_LANDSCAPE_LAYERS` 是固定值噪声轮廓（远山基线 1.5° + 起伏、树/房层更高），纯装饰；只在绘制层覆盖像素，**不参与天体可见性、不参与拾取、不来自观测站地形数据**。地平基准严格是 alt=0 的几何地平线（`_draw_horizon_line`，画在地景之前，山脊可盖住它但不移动基准），方位盘 N/E/S/W + 每 30° 数字以该线为基准。地平线下残点仍按视高度门剔除（几何 < 约 -0.57° 不画），不回退 | 若要做真实遮挡：接入观测站地平线剖面（DEM 或用户导入的 `.hr`/高度角表），在**绘制+拾取**同一判据里按方位插值遮挡高度，并明示数据来源与分辨率；在此之前不得把示意剪影写成"地形遮挡"，也不得为它接拾取逻辑 |
 | L37 | DSO 未知字段在拾取路径曾**静默丢尽全部候选** | `desktop/rf_sky_view.py::_find_body_at`（修复前 `float(e.magnitude)` / `float(e.size_arcmin)`）；`tests/test_sky_dso_layer.py` | 换源后 7 条星等为 `null`。旧代码在 `try/except Exception: pass` 内执行 `float(None)`，抛 `TypeError` 后整段 DSO 候选构造被跳过：**所有 DSO 既不画也不可点，且无报错、无日志**。修复改为 `dso_magnitude(e)` / `dso_size_arcmin(e)`，未知值以 `None` 透传（轴比同理由 `dso_axis_ratio` 返回 `None`）。**规则（比事故本身更重要）**：`except Exception: pass` 只允许用于明确的外部边界降级（第三方库/网络/硬件），且必须同时满足 ① 记录降级原因（日志或计数）；② 有测试覆盖降级路径。编程错误（`TypeError`/`AttributeError`/`KeyError` 等）一律不得被 catch-all 吞掉——宁可让测试红，也不许静默丢功能 | 新增目录字段读取必须走 `dso_*` 访问器；`try/except Exception` 出现处必须能回答「降级后用户看到什么、哪里记录、哪条测试覆盖」；缺字段用例（M31 正常 + M22/M40 未知）必须进图层测试 |
 
-## 7. 工具面参数模糊测试（P14 快照，账本 `docs/tool-param-fuzz.md`）
+## 7. 工具面参数模糊测试（P13 快照，账本 `docs/tool-param-fuzz.md`）
 
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
 | --- | --- | --- | --- | --- |
