@@ -75,7 +75,7 @@ from typing import Optional, List, Dict, Tuple, Set
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetrics,
-    QPainterPath, QPolygonF,
+    QPainterPath, QPolygonF, QTransform,
     QLinearGradient, QRadialGradient,
     QMouseEvent, QWheelEvent, QResizeEvent,
 )
@@ -87,6 +87,8 @@ from mbdsdr_ai.celestial_geometry import (
     PerspectiveProjection,
     GroundStation,
     vec_from_radec,
+    vec_from_azalt,
+    azalt_from_vec,
     altaz_to_j2000,
     j2000_to_altaz,
 )
@@ -164,6 +166,181 @@ def sun_glow_strength(sun_alt_deg: float) -> float:
     if a <= 3.0:
         return 1.0                       # 地平峰区 [-6,+3]
     return 1.0 - (a - 3.0) / 12.0        # +3→1, +15→0（日升渐弱）
+
+
+# ---------------------------------------------------------------------------
+# 月球：可见性门、月相几何与亮区路径（纯函数，绘制层与拾取层共用同一事实源）
+# ---------------------------------------------------------------------------
+# 月球在地平线以上才画、才可点。绘制门与拾取门查询同一个常量/函数，
+# 不各自持有阈值（上一轮「绘制门与拾取门同源」的延续）。
+MOON_VISIBLE_MIN_ALT_DEG = 0.0
+
+# 历表缺失视直径时只画最小位置标记（不编造角直径）。
+MOON_UNKNOWN_DIAMETER_RADIUS_PX = 2.0
+
+
+def moon_visible(alt_deg: Optional[float]) -> bool:
+    """月球是否应出现在天空图中（绘制与拾取同一判据）。"""
+    try:
+        return float(alt_deg) > MOON_VISIBLE_MIN_ALT_DEG
+    except (TypeError, ValueError):
+        return False
+
+
+def moon_phase_cos_alpha(illum: Optional[float]) -> Optional[float]:
+    """月相相位角余弦 cos α = 2·illum − 1（illum 为被照亮比例 [0,1]）。
+
+    缺值/非有限返回 None——不拿 0（新月）或 0.5（弦月）冒充缺测。
+    """
+    if illum is None:
+        return None
+    try:
+        k = float(illum)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(k):
+        return None
+    return max(-1.0, min(1.0, 2.0 * k - 1.0))
+
+
+def planet_phase_illumination(phase_angle_deg: Optional[float]
+                              ) -> Optional[float]:
+    """行星被照亮比例 = 0.5·(1 + cos 相位角)。
+
+    与信息卡同一算式（Meeus 相位角定义），不另立模型；缺测返回 None。
+    """
+    if phase_angle_deg is None:
+        return None
+    try:
+        ang = float(phase_angle_deg)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(ang):
+        return None
+    return 0.5 * (1.0 + math.cos(math.radians(ang)))
+
+
+def _tangent_basis(az_deg: float, alt_deg: float,
+                   towards_az_deg: float, towards_alt_deg: float
+                   ) -> Optional[Tuple[tuple, tuple, tuple]]:
+    """在 (az, alt) 处建立指向目标的切向基 (v0, t_towards, t_perp)。
+
+    方向在 **az/alt 空间的大圆切平面** 上计算，不经过屏幕坐标——"屏幕左右"
+    近似只在视图中心成立，月亮跑到别处就会把亮区画反。目标与起点重合或
+    对跖时切向不唯一，返回 None（不编造方向）。
+    """
+    v0 = vec_from_azalt(float(az_deg), float(alt_deg))
+    v1 = vec_from_azalt(float(towards_az_deg), float(towards_alt_deg))
+    dot = float(v0[0] * v1[0] + v0[1] * v1[1] + v0[2] * v1[2])
+    t = (float(v1[0] - dot * v0[0]),
+         float(v1[1] - dot * v0[1]),
+         float(v1[2] - dot * v0[2]))
+    norm = math.sqrt(t[0] ** 2 + t[1] ** 2 + t[2] ** 2)
+    if norm < 1e-9:
+        return None
+    t = (t[0] / norm, t[1] / norm, t[2] / norm)
+    # t_perp = v0 × t_towards
+    p = (float(v0[1] * t[2] - v0[2] * t[1]),
+         float(v0[2] * t[0] - v0[0] * t[2]),
+         float(v0[0] * t[1] - v0[1] * t[0]))
+    return (tuple(float(x) for x in v0), t, p)
+
+
+def great_circle_offset_point(az_deg: float, alt_deg: float,
+                              towards_az_deg: float, towards_alt_deg: float,
+                              step_deg: float
+                              ) -> Optional[Tuple[float, float]]:
+    """从 (az, alt) 沿大圆朝目标方向走 step_deg 后的地平坐标。
+
+    切向不唯一（重合/对跖）时返回 None。
+    """
+    basis = _tangent_basis(az_deg, alt_deg, towards_az_deg, towards_alt_deg)
+    if basis is None:
+        return None
+    v0, t, _p = basis
+    s = math.radians(float(step_deg))
+    c, sn = math.cos(s), math.sin(s)
+    v = (c * v0[0] + sn * t[0],
+         c * v0[1] + sn * t[1],
+         c * v0[2] + sn * t[2])
+    return azalt_from_vec(v)
+
+
+def great_circle_perpendicular_point(az_deg: float, alt_deg: float,
+                                     towards_az_deg: float,
+                                     towards_alt_deg: float,
+                                     step_deg: float
+                                     ) -> Optional[Tuple[float, float]]:
+    """从 (az, alt) 沿大圆朝 **垂直于目标方向** 走 step_deg 后的地平坐标。
+
+    用于测量月面在切向正交方向上的投影像素尺度（不同投影径向/切向缩放
+    可能不同）。切向不唯一时返回 None。
+    """
+    basis = _tangent_basis(az_deg, alt_deg, towards_az_deg, towards_alt_deg)
+    if basis is None:
+        return None
+    v0, _t, p = basis
+    s = math.radians(float(step_deg))
+    c, sn = math.cos(s), math.sin(s)
+    v = (c * v0[0] + sn * p[0],
+         c * v0[1] + sn * p[1],
+         c * v0[2] + sn * p[2])
+    return azalt_from_vec(v)
+
+
+def angular_separation_deg(az1_deg: float, alt1_deg: float,
+                           az2_deg: float, alt2_deg: float) -> float:
+    """两天体在地平坐标下的大圆角距（度）。口径与历表无关，纯几何。"""
+    v1 = vec_from_azalt(float(az1_deg), float(alt1_deg))
+    v2 = vec_from_azalt(float(az2_deg), float(alt2_deg))
+    dot = float(v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2])
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
+
+
+def moon_lit_path(cos_alpha: float) -> QPainterPath:
+    """单位半径月面亮区路径（局部坐标系: +x 指向太阳, +y 屏幕向下）。
+
+    亮区 = 亮缘半圆 (+x 侧) ∪ 晨昏线半椭圆。晨昏线是月面大圆在视线上的
+    投影，半短轴 = |cos α|、长轴 = 1；亮区面积比例恰为 (1+cos α)/2，
+    即历表照度 illum——月牙/弦月/凸月/满月四态由同一条几何自动给出。
+    """
+    c = max(-1.0, min(1.0, float(cos_alpha)))
+    path = QPainterPath()
+    full = QRectF(-1.0, -1.0, 2.0, 2.0)
+    # 亮缘半圆: 从 (0,-1) 经 (+1,0) 到 (0,+1)（+x = 朝向太阳）
+    path.arcMoveTo(full, 90.0)
+    path.arcTo(full, 90.0, -180.0)
+    semi = abs(c)
+    if semi < 1e-9:
+        path.lineTo(0.0, -1.0)          # 弦月: 晨昏线是过月心的直线
+    else:
+        term = QRectF(-semi, -1.0, 2.0 * semi, 2.0)
+        # 凸月 (c>0) 晨昏线向背阳侧凹；月牙 (c<0) 向向阳侧凸
+        path.arcTo(term, 270.0, -180.0 if c >= 0.0 else 180.0)
+    path.closeSubpath()
+    return path
+
+
+def label_boxes_keep(items: List[Tuple[float, float, float, float, float]],
+                     pad: float = 2.0) -> List[int]:
+    """二维标签碰撞剔除（纯函数，便于无头断言）。
+
+    items: [(priority, x0, y0, x1, y1)]，priority 越小越优先；返回保留的下标。
+    按优先级（同级按传入顺序）逐个放置，与已放置框（四周各留 pad）相交即剔除。
+    星名/座名/行星标签因此在密集天区不互相压字，缩放变密时低优先级先消失。
+    """
+    order = sorted(range(len(items)), key=lambda i: (items[i][0], i))
+    placed: List[Tuple[float, float, float, float]] = []
+    keep: List[int] = []
+    for i in order:
+        _prio, x0, y0, x1, y1 = items[i]
+        if any(x0 < px1 + pad and x1 > px0 - pad
+               and y0 < py1 + pad and y1 > py0 - pad
+               for px0, py0, px1, py1 in placed):
+            continue
+        placed.append((x0, y0, x1, y1))
+        keep.append(i)
+    return sorted(keep)
 
 
 def _traj_alpha(i: int, n: int, base: int = 110,
@@ -703,6 +880,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 卫星目录索引 (SatelliteTracker 每帧喂入, 供信息卡/搜索)
         self._sat_catalog: Dict[str, Dict[str, object]] = {}
+        # 本帧天体标签队列（(优先级, 位置, 文本, 颜色, 小字号)）：各层先登记，
+        # 等全部层画完再统一避让，星名/座名/行星名不互相压字。
+        self._label_items: List[Tuple[float, QPointF, str, QColor, bool]] = []
         # 当前选中天体的完整信息 (信息卡用)
         self._selected_info: Optional[Dict[str, object]] = None
         # 行星/恒星/深空天体选中态 (与 _hovered_object 互斥; 恒星/DSO 批
@@ -2000,6 +2180,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         if self._observer is not None:
             # 2) 恒星 (分级星点 + 亮星标签) + 星座连线/座名
+            self._label_items = []          # 本帧标签队列（末尾统一避让绘制）
             self._draw_stars(painter)
             self._draw_constellations(painter)
             # 2.5) 大气加法辉光：日落/日出方位暖红，加法叠在星空之上
@@ -2021,6 +2202,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._draw_antenna_beam(painter)
             self._draw_celestial_bodies(painter)
             self._draw_planets(painter)
+            # 天体标签（月亮/行星/座名/亮星）统一避让后画在星空层之上，
+            # 密集天区不互相压字；卫星标签仍由 _draw_objects 自己负责。
+            self._flush_labels(painter)
             self._draw_objects(painter)
             self._draw_antenna_pointer(painter)
             self._draw_gnss_satellites(painter)
@@ -2138,11 +2322,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
             painter.drawEllipse(pos, r, r)
             # 亮星 (V<2.0) 文字标签：有中国星官名优先中文（文化对位层），
-            # 目录外如实回退西方名。
+            # 目录外如实回退西方名。登记到标签队列，末尾与座名/行星名避让。
             if s.vmag <= 2.0:
-                painter.setPen(QColor(210, 220, 235, int(200 * bright + 40)))
-                painter.drawText(QPointF(pos.x() + r + 2, pos.y() - r),
-                                 _stars.culture_label(s.name))
+                self._queue_label(2.0 + float(s.vmag),
+                                  QPointF(pos.x() + r + 2, pos.y() - r),
+                                  _stars.culture_label(s.name),
+                                  QColor(210, 220, 235, int(200 * bright + 40)))
         painter.restore()
 
     # ------------------------------------------------------------------ #
@@ -2181,8 +2366,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     continue
                 painter.drawLine(pa, pb)
         if self.view_state.fov_deg >= 55.0:
-            painter.setFont(self._gnss_label_font)
-            painter.setPen(QPen(label_col, 1))
             for abbr in _constel.CONSTELLATION_LINES:
                 anchor = _constel.constellation_anchor(abbr)
                 if anchor is None:
@@ -2190,13 +2373,47 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 pos = _to_screen(anchor)
                 if pos is None or not self._on_screen(pos):
                     continue
-                painter.drawText(QPointF(pos.x() + 8, pos.y() - 8),
-                                 _constel.constellation_label(abbr))
+                # 座名比星名优先占位（宽 FOV 下座名是导航骨架）。
+                self._queue_label(1.0, QPointF(pos.x() + 8, pos.y() - 8),
+                                  _constel.constellation_label(abbr),
+                                  label_col, small=True)
         painter.restore()
 
     def _on_screen(self, pos: QPointF, margin: float = 4.0) -> bool:
         return (-margin <= pos.x() <= self.width() + margin
                 and -margin <= pos.y() <= self.height() + margin)
+
+    def _queue_label(self, priority: float, pos: QPointF, text: str,
+                     color: QColor, small: bool = False) -> None:
+        """登记一条天体标签（本帧末尾统一避让后绘制）。
+
+        priority 越小越优先：行星/月亮 0、座名 1、星名 2+星等（亮星先占位）。
+        """
+        self._label_items.append((float(priority), QPointF(pos), str(text),
+                                  QColor(color), bool(small)))
+
+    def _flush_labels(self, painter: QPainter) -> None:
+        """本帧标签统一绘制：按优先级做二维碰撞剔除（label_boxes_keep）。"""
+        items = self._label_items
+        self._label_items = []
+        if not items:
+            return
+        fonts = {False: self._font, True: self._gnss_label_font}
+        metrics = {k: QFontMetrics(f) for k, f in fonts.items()}
+        boxes: List[Tuple[float, float, float, float, float]] = []
+        for prio, pos, text, _color, small in items:
+            fm = metrics[small]
+            boxes.append((prio, pos.x(), float(pos.y() - fm.ascent()),
+                          float(pos.x() + fm.horizontalAdvance(text)),
+                          float(pos.y() + fm.descent())))
+        painter.save()
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        for i in label_boxes_keep(boxes):
+            _prio, pos, text, color, small = items[i]
+            painter.setFont(fonts[small])
+            painter.setPen(color)
+            painter.drawText(pos, text)
+        painter.restore()
 
     # ------------------------------------------------------------------ #
     # 地景：暮光辉光带 + 三层剪影（远山/树/平顶房屋，由远及近涂黑）
@@ -2460,7 +2677,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.restore()
 
     def _draw_celestial_bodies(self, painter: QPainter):
-        """绘制真实太阳/月亮标记（在地平线上方才画）。"""
+        """绘制真实太阳/月亮标记（在地平线上方才画）。
+
+        月亮的可见性判据与拾取层共用 moon_visible()，不各自持有阈值。
+        """
         painter.save()
         if self._sun and self._sun.get("alt", -99) > -1:
             pos = self._sky_to_screen(self._sun["az"], max(0.0, self._sun["alt"]))
@@ -2472,14 +2692,144 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawEllipse(pos, 7, 7)
             painter.setPen(self._ink())
             painter.drawText(QPointF(pos.x() + 12, pos.y() - 8), "太阳")
-        if self._moon and self._moon.get("alt", -99) > 0:
-            pos = self._sky_to_screen(self._moon["az"], self._moon["alt"])
-            col = self._colors["moon"]
-            painter.setPen(QPen(col, 1))
+        frame = self._moon_screen_frame()
+        if frame is not None:
+            self._draw_moon_marker(painter, frame)
+        painter.restore()
+
+    def _moon_screen_frame(self) -> Optional[Dict[str, object]]:
+        """月球亮区的屏幕几何（绘制层与拾取层同一事实源）。
+
+        返回: center / radius_u_px / radius_v_px / radius_px(拾取用) /
+        ux,uy(屏幕单位向量, 月心→太阳) / illum / cos_alpha。
+
+        地平线下、视界外、或历表未喂入时返回 None——不画也不可点。
+        亮缘朝向由 **az/alt 大圆切向** 决定（月心→太阳），再经投影换算到
+        屏幕；不是"屏幕左右"近似。视直径从历表角直径换算成像素，随投影
+        与 FOV 真实缩放。
+        """
+        m = self._moon
+        if not m:
+            return None
+        try:
+            az = float(m["az"])
+            alt = float(m["alt"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not (math.isfinite(az) and math.isfinite(alt)):
+            return None
+        if not moon_visible(alt):
+            return None
+        center = self._sky_to_screen_finite(az, alt)
+        if center is None:
+            return None
+
+        illum_raw = m.get("illum")
+        try:
+            illum: Optional[float] = (float(illum_raw)
+                                      if illum_raw is not None else None)
+        except (TypeError, ValueError):
+            illum = None
+        if illum is not None and not math.isfinite(illum):
+            illum = None
+        cos_alpha = moon_phase_cos_alpha(illum)
+
+        try:
+            dia_deg = float(m["diameter_deg"])
+        except (KeyError, TypeError, ValueError):
+            dia_deg = None
+        if dia_deg is not None and (not math.isfinite(dia_deg) or dia_deg <= 0.0):
+            dia_deg = None
+
+        ru = rv = MOON_UNKNOWN_DIAMETER_RADIUS_PX
+        ux = uy = None
+        sun = self._sun
+        sun_ok = bool(sun) and sun.get("az") is not None and sun.get("alt") is not None
+        if dia_deg is not None:
+            step = dia_deg / 2.0          # 角半径（度）
+            p_on = p_perp = None
+            if sun_ok:
+                p_on = great_circle_offset_point(
+                    az, alt, float(sun["az"]), float(sun["alt"]), step)
+                p_perp = great_circle_perpendicular_point(
+                    az, alt, float(sun["az"]), float(sun["alt"]), step)
+            if p_on is None:
+                # 太阳缺测、或太阳与月亮重合/对跖导致切向不唯一：
+                # 只量尺度（沿正上方取角半径处的点），不声称亮缘朝向。
+                p_on = (az, alt + step) if alt + step < 89.999 \
+                    else (az, alt - step)
+                p_perp = None
+            p_on_pt = self._sky_to_screen_finite(*p_on)
+            if p_on_pt is not None:
+                d = math.hypot(p_on_pt.x() - center.x(),
+                               p_on_pt.y() - center.y())
+                if d > 1e-6:
+                    ru = rv = d
+                    if sun_ok:
+                        ux = (p_on_pt.x() - center.x()) / d
+                        uy = (p_on_pt.y() - center.y()) / d
+            if sun_ok and p_perp is not None:
+                p_perp_pt = self._sky_to_screen_finite(*p_perp)
+                if p_perp_pt is not None:
+                    dv = math.hypot(p_perp_pt.x() - center.x(),
+                                    p_perp_pt.y() - center.y())
+                    if dv > 1e-6:
+                        rv = dv
+
+        radius_px = 0.5 * (ru + rv)
+        if not self._on_screen(center, margin=4.0 + radius_px):
+            return None
+        return {
+            "center": center,
+            "radius_u_px": ru,
+            "radius_v_px": rv,
+            "radius_px": radius_px,
+            "ux": ux, "uy": uy,
+            "illum": illum,
+            "cos_alpha": cos_alpha,
+            "az": az, "alt": alt,
+        }
+
+    def _draw_moon_marker(self, painter: QPainter,
+                          frame: Dict[str, object]) -> None:
+        """按真实相位画月面：亮缘半圆 + 晨昏线半椭圆，尺寸随视直径。"""
+        center = frame["center"]
+        assert isinstance(center, QPointF)
+        ru = float(frame["radius_u_px"])       # type: ignore[arg-type]
+        rv = float(frame["radius_v_px"])       # type: ignore[arg-type]
+        ux, uy = frame["ux"], frame["uy"]
+        col = self._colors["moon"]
+
+        orient_known = ux is not None and uy is not None
+        if not orient_known:
+            # 朝向未知（太阳位置缺测）：只给月面边界，不填亮区——不编造方向。
+            vx, vy = 0.0, 1.0
+            ux, uy = 1.0, 0.0
+        else:
+            ux, uy = float(ux), float(uy)      # type: ignore[arg-type]
+            vx, vy = -uy, ux
+        transform = QTransform(ru * ux, ru * uy, rv * vx, rv * vy,
+                               center.x(), center.y())
+
+        painter.save()
+        # 整盘轮廓：暗面不模拟地照（earthshine），只如实给月面边界。
+        painter.setPen(QPen(col, 1))
+        painter.setBrush(Qt.NoBrush)
+        full = QPainterPath()
+        full.addEllipse(QRectF(-1.0, -1.0, 2.0, 2.0))
+        painter.drawPath(transform.map(full))
+
+        cos_alpha = frame["cos_alpha"]
+        if orient_known and cos_alpha is not None:
+            painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(col))
-            painter.drawEllipse(pos, 6, 6)
-            painter.setPen(self._ink())
-            painter.drawText(QPointF(pos.x() + 10, pos.y() - 6), "月亮")
+            painter.drawPath(transform.map(moon_lit_path(float(cos_alpha))))
+
+        r = max(ru, rv)
+        # 标签只登记，本帧末尾与星名/座名统一避让（不压字）。
+        self._queue_label(0.0, QPointF(center.x() + r + 8.0,
+                                       center.y() - r - 4.0),
+                          "月亮", self._ink())
         painter.restore()
 
     def _draw_selection_crosshair(self, painter: QPainter, pos: QPointF,
@@ -2738,6 +3088,66 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         from mbdsdr_ai.astronomy import planets as _planets
         return _planets.compute_all(jd)
 
+    def _planet_screen_disc(self, az: float, alt: float, diameter_deg: float
+                            ) -> Optional[Dict[str, object]]:
+        """行星圆面的屏幕几何：像素半径 + 月心/行心指向太阳的屏幕方向。
+
+        视直径换算成像素走投影采样（与 FOV/离轴位置无关地真实缩放），
+        不是写死像素。太阳位置缺测时 ux/uy=None（不编造相位朝向）。
+        """
+        if diameter_deg is None or diameter_deg <= 0.0:
+            return None
+        center = self._sky_to_screen_finite(az, alt)
+        if center is None:
+            return None
+        step = float(diameter_deg) / 2.0        # 角半径（度）
+        probe = (az, alt + step) if alt + step < 89.999 else (az, alt - step)
+        p = self._sky_to_screen_finite(*probe)
+        if p is None:
+            return None
+        r = math.hypot(p.x() - center.x(), p.y() - center.y())
+        if r <= 0.0:
+            return None
+        ux = uy = None
+        sun = self._sun
+        if sun and sun.get("az") is not None and sun.get("alt") is not None:
+            on = great_circle_offset_point(
+                az, alt, float(sun["az"]), float(sun["alt"]), step)
+            if on is not None:
+                p_on = self._sky_to_screen_finite(*on)
+                if p_on is not None:
+                    dx = p_on.x() - center.x()
+                    dy = p_on.y() - center.y()
+                    n = math.hypot(dx, dy)
+                    if n > 1e-6:
+                        ux, uy = dx / n, dy / n
+        return {"center": center, "r": r, "ux": ux, "uy": uy}
+
+    def _draw_planet_disc(self, painter: QPainter, scr: QPointF,
+                          disc: Dict[str, object], pos_eph: object,
+                          color: tuple, alpha: int) -> None:
+        """已分辨行星：画真实大小圆面 + 历表相位亮区。"""
+        r = float(disc["r"])
+        ux, uy = disc["ux"], disc["uy"]
+        orient_known = ux is not None and uy is not None
+        if not orient_known:
+            ux, uy = 1.0, 0.0
+        else:
+            ux, uy = float(ux), float(uy)      # type: ignore[arg-type]
+        vx, vy = -uy, ux
+        transform = QTransform(r * ux, r * uy, r * vx, r * vy, scr.x(), scr.y())
+        cr, cg, cb = color
+        painter.setPen(QPen(QColor(cr, cg, cb, 90), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(scr, r, r)
+        illum = planet_phase_illumination(
+            getattr(pos_eph, "phase_angle_deg", None))
+        if orient_known and illum is not None:
+            cos_alpha = max(-1.0, min(1.0, 2.0 * illum - 1.0))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
+            painter.drawPath(transform.map(moon_lit_path(cos_alpha)))
+
     def _draw_planets(self, painter: QPainter):
         """行星标记 (实心圆点 + 中文名标签), 位置随时间引擎流动。
 
@@ -2746,6 +3156,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         （SWE core_get_point_for_mag 语义：所有天体共用一套亮度模型），
         只保留各自的识别色——于是金星(-4.7)明显大于木星(-1.9)大于土星(0.9)，
         而海王星(7.8)在 Bortle 3 的裸眼极限 6.5 等之外，如实不画。
+
+        视直径可分辨时（窄 FOV，投影像素半径 >= 2px）改用历表的真实角直径
+        画圆面，并按历表相位角填亮区（水星/金星相位最明显）；不可分辨时仍是
+        点源标记——这是分辨率下限，不是把角直径丢掉。星等/亮度始终来自同一
+        份 compute_all 数据，与信息卡一致。
         """
         gs = self._ground_station()
         if gs is None:
@@ -2789,12 +3204,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     painter.setPen(Qt.NoPen)
                     painter.setBrush(QBrush(QColor(cr, cg, cb, glow_a)))
                     painter.drawEllipse(scr, rr, rr)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
-            painter.drawEllipse(scr, r, r)
-            painter.setPen(QColor(210, 220, 235, int(200 * bright + 40)))
-            painter.drawText(QPointF(scr.x() + r + 4, scr.y() - r - 2),
-                             str(style["zh"]))
+            disc = self._planet_screen_disc(
+                az, alt, float(getattr(pos_eph, "angular_diameter_arcsec", 0.0)) / 3600.0)
+            if disc is not None and float(disc["r"]) >= 2.0:
+                # 视直径已可分辨（窄 FOV）：按真实圆面画，并按历表相位角填亮区。
+                self._draw_planet_disc(painter, scr, disc, pos_eph,
+                                       (cr, cg, cb), alpha)
+                r = max(r, float(disc["r"]))
+            else:
+                # 未分辨（点源）：沿用星等→像素模型。
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
+                painter.drawEllipse(scr, r, r)
+            # 行星名与月名同优先级（本片天空的主角），末尾统一避让。
+            self._queue_label(0.0, QPointF(scr.x() + r + 4, scr.y() - r - 2),
+                              str(style["zh"]),
+                              QColor(210, 220, 235, int(200 * bright + 40)))
         painter.restore()
 
     # ------------------------------------------------------------------ #
@@ -2807,6 +3232,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         恒星与行星混合候选, 亮度归一 = clamp((4.5-mag)/9): 亮者近者优先。
         候选门槛与绘制层同一条可见性规则（star_draw + 消光 + 光害极限星等 +
         各自的地平下限）：画出来的才给点，没画的不给点。未命中返回 None。
+        月球单独走 _moon_screen_frame() —— 与绘制层同一份位置/尺寸/可见性，
+        且拾取半径随画出的月面大小扩张（看得见的月面都能点中）。行星同理：
+        视直径已分辨（半径 >= 2px 的真实圆面）时拾取半径同样扩张到圆面边缘，
+        不再出现"圆面画了 20px、只有中心 14px 能点"的看得到却点不中。
         """
         gs = self._ground_station()
         if gs is None:
@@ -2814,18 +3243,21 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         jd = self._current_jd()
         from mbdsdr_ai.celestial_geometry import azalt_from_vec
 
-        candidates: List[Tuple[str, str, float, float, float]] = []
-        # (kind, key, ra, dec, mag) — 位置统一在这里算一次
+        candidates: List[Tuple[str, str, float, float, float,
+                                Optional[float]]] = []
+        # (kind, key, ra, dec, mag, 角直径°) — 位置/尺寸统一在这里算一次
         try:
             for key_p, eph in self._planet_positions(jd).items():
+                dia = getattr(eph, "angular_diameter_arcsec", None)
                 candidates.append(("planet", key_p, eph.ra_deg, eph.dec_deg,
-                                   eph.magnitude))
+                                   eph.magnitude,
+                                   float(dia) / 3600.0 if dia else None))
         except Exception:
             pass
         try:
             for name, star in _constel.merged_star_index().items():
                 candidates.append(("star", name, star.ra_deg, star.dec_deg,
-                                   star.vmag))
+                                   star.vmag, None))
         except Exception:
             pass
         # 已选 DSO 有标记环, 可再点中
@@ -2834,11 +3266,28 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             ra_d, de_d = pb.get("ra_deg"), pb.get("dec_deg")
             if ra_d is not None:
                 candidates.append(("dso", str(pb.get("key")), float(ra_d),
-                                   float(de_d), 4.0))
+                                   float(de_d), 4.0, None))
 
         best: Optional[Dict[str, object]] = None
-        best_score = float(tolerance)
-        for kind, key_b, ra_b, dec_b, mag in candidates:
+        best_score: Optional[float] = None
+        for kind, key_b, ra_b, dec_b, mag, dia_deg in candidates:
+            if kind == "planet" and key_b == "moon":
+                # 月球：绘制层与拾取层共用同一份屏幕几何。不用 compute_all 的
+                # geocentric RA/Dec 重投影——那是另一份历表/另一套坐标（含月球
+                # 视差），窄 FOV 下会和真实画出的月面错开。
+                frame = self._moon_screen_frame()
+                if frame is None:
+                    continue        # 未绘制（地平下/视界外/历表缺）→ 不可点
+                scr = frame["center"]
+                assert isinstance(scr, QPointF)
+                dist = math.hypot(scr.x() - x, scr.y() - y)
+                limit = max(float(tolerance), float(frame["radius_px"]))
+                if dist >= limit:
+                    continue
+                if best_score is None or dist < best_score:
+                    best_score = dist
+                    best = {"kind": "planet", "key": "moon", "zh": "月亮"}
+                continue
             try:
                 v = j2000_to_altaz(vec_from_radec(ra_b, dec_b), gs, jd)
                 az, alt = azalt_from_vec(v)
@@ -2861,12 +3310,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             scr = self._sky_to_screen_finite(az, alt)
             if scr is None:
                 continue
+            # 拾取半径跟随"画出来的大小"：已分辨的行星圆面用圆面半径，
+            # 与 _draw_planets 里 disc["r"] >= 2.0 走真实圆面同一条判据。
+            limit = float(tolerance)
+            if kind == "planet" and dia_deg is not None and dia_deg > 0.0:
+                disc = self._planet_screen_disc(az, alt, float(dia_deg))
+                if disc is not None and float(disc["r"]) >= 2.0:
+                    limit = max(limit, float(disc["r"]))
             dist = math.hypot(scr.x() - x, scr.y() - y)
-            if dist >= tolerance:
+            if dist >= limit:
                 continue
             norm = max(0.0, min(1.0, (4.5 - mag) / 9.0))
             score = dist * (1.0 - 0.3 * norm)
-            if score < best_score:
+            if best_score is None or score < best_score:
                 best_score = score
                 body: Dict[str, object] = {"kind": kind, "key": key_b}
                 if kind == "planet":
@@ -4128,8 +4584,11 @@ class SatelliteTracker:
             mp = solar_system.get_moon_position(
                 t_unix, (self.lat, self.lon, self.alt_km * 1000.0))
             if mp is not None:
+                # 照度与视直径原样透传：illum 缺测保持 None（不拿 0=新月冒充），
+                # 视直径（度）供绘制层按真实大小缩放。
                 moon = {"az": mp.az_deg, "alt": mp.alt_deg,
-                        "illum": mp.illumination or 0.0}
+                        "illum": mp.illumination,
+                        "diameter_deg": mp.angular_diameter_deg}
         except Exception:
             moon = None
         return sun, moon, brightness
