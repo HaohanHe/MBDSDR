@@ -42,12 +42,18 @@ _UA = "MBDSDR/1.0 (new-spacetime)"
 
 @dataclass
 class TLEEntry:
-    name: str
+    name: str               # 数据侧真实对象名（TLE line0），不得被声明名覆盖
     line1: str
     line2: str
     catnr: int = 0
     source: str = ""        # "celestrak" / "cache" / "user"
     fetched_at: float = 0.0
+    # P10 三方校验留痕（声明名 vs 对象名）
+    declared_name: str = ""
+    identity_status: str = ""   # verified / mismatch / no_data
+    identity_detail: str = ""
+    freshness_tier: str = ""    # fresh / usable / expired / dead / unknown
+    pass_eligible: bool = False
 
 
 class TLEManager:
@@ -114,18 +120,24 @@ class TLEManager:
 
     # ------------------------------------------------------------------ public
     def fetch(self, catnr: int, name: str = "") -> Optional[TLEEntry]:
-        """按 CATNR 从 celestrak 拉取，成功写缓存并返回；网络失败时读本地缓存；都没有返回 None。绝不伪造。"""
+        """按 CATNR 从 celestrak 拉取，成功写缓存并返回；网络失败时读本地缓存；都没有返回 None。绝不伪造。
+
+        ``name`` 是调用方声明的名字（目录名），只用于三方校验，**不会覆盖**
+        TLE line0 的真实对象名；错配会留在 ``identity_status="mismatch"``。
+        """
         now = time.time()
 
         # 1) 内存缓存（未过期）
         ent = self._mem.get(catnr)
         if ent and (now - ent.fetched_at) < _CACHE_TTL:
+            self._annotate(ent, name)
             return ent
 
         # 2) 磁盘缓存（未过期）
         disk = self._read_disk(catnr)
         if disk is not None and (now - disk.fetched_at) < _CACHE_TTL:
             disk.source = "cache"
+            self._annotate(disk, name)
             self._mem[catnr] = disk
             return disk
 
@@ -138,8 +150,8 @@ class TLEManager:
                 if e.catnr == catnr:
                     e.source = "celestrak"
                     e.fetched_at = now
-                    if name:
-                        e.name = name
+                    # 不覆盖 e.name：真实对象名是身份校验的唯一证据
+                    self._annotate(e, name)
                     self._mem[catnr] = e
                     self._write_disk(e)
                     return e
@@ -149,9 +161,26 @@ class TLEManager:
             # 4) 联网失败：回退本地磁盘缓存（即便过期也用，旧数据好过没有）
             if disk is not None:
                 disk.source = "cache"
+                self._annotate(disk, name)
                 self._mem[catnr] = disk
                 return disk
             return None
+
+    @staticmethod
+    def _annotate(entry: TLEEntry, declared_name: str = "") -> None:
+        """给条目附上三方校验与新鲜度信息（无声明名时只算新鲜度）。"""
+        from .tle_integrity import freshness, verify_identity
+        if declared_name:
+            ident = verify_identity(declared_name, entry.name)
+            entry.declared_name = declared_name
+            entry.identity_status = ident["status"]
+            entry.identity_detail = ident["reason"]
+        else:
+            entry.identity_status = "no_data"
+            entry.identity_detail = "调用方未提供声明名，无法做名称核对"
+        fresh = freshness(entry.line1, entry.fetched_at or None)
+        entry.freshness_tier = fresh["tier"]
+        entry.pass_eligible = bool(fresh["pass_eligible"])
 
     def fetch_group(self, url: str) -> List[TLEEntry]:
         """从 celestrak 群组 URL（如 gp.php?GROUP=weather&FORMAT=tle）拉取整组，解析所有 3 行块。失败返回 []。"""

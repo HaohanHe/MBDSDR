@@ -184,3 +184,28 @@ def test_fetch_group_parse(tmp_path, monkeypatch):
     assert mgr.get(28054).line2 == DMSP_L2
     # 且写了磁盘缓存
     assert os.path.exists(os.path.join(str(tmp_path), "25544.tle"))
+
+
+def test_fetch_keeps_true_object_name_and_flags_mismatch(tmp_path, monkeypatch):
+    """P10 回归锁：按 44016 取件、声明名 METEOR M2，但真实对象是 ATLAS 残骸——
+    不得用声明名覆盖 TLE line0，必须留痕 identity_status=mismatch 且不可用时。"""
+    atlas_text = (
+        "ATLAS 5 CENTAUR DEB\n"
+        "1 44016U 14055BX  26251.53597745 -.00000086  00000+0  00000+0 0  9994\n"
+        "2 44016  19.8252 144.6831 4693919 161.0339 224.8913  1.83868310 52931\n")
+
+    def _fake_urlopen(req, *args, **kwargs):
+        return _FakeResponse(atlas_text.encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    mgr = _make_manager(tmp_path)
+    entry = mgr.fetch(44016, name="METEOR M2")
+    assert entry is not None
+    assert entry.name == "ATLAS 5 CENTAUR DEB"     # 真实对象名不被覆盖
+    assert entry.declared_name == "METEOR M2"
+    assert entry.identity_status == "mismatch"
+    assert entry.pass_eligible is False
+    # 缓存文件也保存真实对象名（下次离线读取仍可核对）
+    with open(os.path.join(str(tmp_path), "44016.tle"), encoding="utf-8") as f:
+        assert f.readline().strip() == "ATLAS 5 CENTAUR DEB"
+
