@@ -176,6 +176,12 @@ def main_window(request):
         except Exception:
             pass
     _clear_user_bookmarks(win)
+    # 主题显式钉住：基线只认产品默认主题，不认跑它的人上次存的什么。
+    # 隔离目录已读不到 DesktopSettings，这里再兜一道（隔离被绕过时扳回来）。
+    from themes import DEFAULT_THEME
+    if getattr(win, "_current_theme", None) != DEFAULT_THEME:
+        win._apply_theme(DEFAULT_THEME)
+        _pump(80)
     win.setProperty("_audit_requested", f"{width}x{height}")
     win.resize(width, height)
     win.show()
