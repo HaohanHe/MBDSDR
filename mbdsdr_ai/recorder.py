@@ -33,6 +33,7 @@
 """
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -48,6 +49,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 文件名/路径约定
 # ---------------------------------------------------------------------------
+def _classify_os_error(e: OSError) -> str:
+    """把磁盘/权限错误归类，供上层显示可操作原因（不吞成"写失败"）。"""
+    if getattr(e, "errno", None) == errno.ENOSPC:
+        return "disk_full"
+    if getattr(e, "errno", None) in (errno.EACCES, errno.EPERM, errno.EROFS):
+        return "not_writable"
+    return "io"
+
+
 def _sigmf_paths(data_path: str) -> Dict[str, str]:
     """给定数据文件路径，返回 {data, meta} 两个 SigMF 文件路径。
 
@@ -110,22 +120,32 @@ class IQRecorder:
         self._n_samples: int = 0   # 已写 complex 样本数
         self._start_time: Optional[str] = None
         self.closed = True
+        # 写入状态：closed/recording/failed；失败原因与错误码如实暴露
+        self.state: str = "closed"
+        self.last_error: str = ""
+        self.error_code: str = ""
 
     # ------------------------------------------------------------------
     def open(self) -> bool:
         """打开数据文件准备写。已打开则幂等返回 True。"""
         if self._fp is not None:
             return True
-        os.makedirs(os.path.dirname(self.data_path) or ".", exist_ok=True)
         try:
+            os.makedirs(os.path.dirname(self.data_path) or ".", exist_ok=True)
             self._fp = open(self.data_path, "wb")
         except OSError as e:
             logger.error("IQRecorder 打开 %s 失败: %s", self.data_path, e)
             self._fp = None
+            self.state = "failed"
+            self.error_code = _classify_os_error(e)
+            self.last_error = f"无法创建录制文件: {e}"
             return False
         self._start_time = datetime.now(timezone.utc).isoformat()
         self._n_samples = 0
         self.closed = False
+        self.state = "recording"
+        self.last_error = ""
+        self.error_code = ""
         logger.info("IQRecorder 开始录制: %s (%.3f MSps, %.3f MHz)",
                     self.data_path, self.sample_rate / 1e6,
                     self.center_freq_hz / 1e6)
@@ -138,7 +158,7 @@ class IQRecorder:
         自动把任意 complex 数组归一为 complex64 裸交织 I/Q 写出。
         未 open() 时返回 0（不崩）。
         """
-        if self._fp is None:
+        if self._fp is None or self.state == "failed":
             return 0
         arr = np.asarray(iq)
         if not np.iscomplexobj(arr):
@@ -148,12 +168,27 @@ class IQRecorder:
                 return 0
             arr = flat[0::2] + 1j * flat[1::2]
         arr64 = arr.astype(np.complex64, copy=False)
+        blob = arr64.tobytes()
         try:
-            self._fp.write(arr64.tobytes())
+            written = self._fp.write(blob)
+            if written != len(blob):
+                raise OSError(errno.ENOSPC, "写入字节数不足（疑似磁盘写满）")
             self._n_samples += int(arr64.size)
             return int(arr64.size)
         except OSError as e:
-            logger.error("IQRecorder 写失败: %s", e)
+            # 失败即停：truncate 回最后一个完整样本边界，保证文件里没有
+            # "半截样本"冒充正常数据；后续 write 一律返回 0。
+            self.state = "failed"
+            self.error_code = _classify_os_error(e)
+            self.last_error = f"IQ 写入失败: {e}"
+            logger.error("IQRecorder 写失败: %s（已截断到 %d 样本）",
+                         e, self._n_samples)
+            try:
+                self._fp.flush()
+                os.ftruncate(self._fp.fileno(),
+                             self._n_samples * 8)
+            except OSError:
+                pass
             return 0
 
     # ------------------------------------------------------------------
@@ -163,12 +198,17 @@ class IQRecorder:
             try:
                 self._fp.flush()
                 os.fsync(self._fp.fileno())
-            except OSError:
-                pass
+            except OSError as e:
+                self.state = "failed"
+                self.error_code = _classify_os_error(e)
+                self.last_error = f"落盘 fsync 失败: {e}"
+                logger.error("IQRecorder fsync 失败: %s", e)
             try:
                 self._fp.close()
-            except OSError:
-                pass
+            except OSError as e:
+                self.state = "failed"
+                self.error_code = _classify_os_error(e)
+                self.last_error = f"关闭文件失败: {e}"
             self._fp = None
         if self.closed:
             return None
@@ -186,6 +226,9 @@ class IQRecorder:
                 "mbdsdr:gain_db": self.gain_db,
                 "mbdsdr:device": self.device,
                 "mbdsdr:driver": self.driver,
+                # 只有无写入错误时才算完整；断电/磁盘满留下的文件不会冒充完整
+                "mbdsdr:complete": self.state != "failed",
+                "mbdsdr:error": self.last_error,
             },
             "captures": [
                 {
@@ -202,8 +245,13 @@ class IQRecorder:
             os.replace(tmp, self.meta_path)
             logger.info("IQRecorder 结束: %d samples, meta=%s",
                         self._n_samples, self.meta_path)
+            if self.state != "failed":
+                self.state = "closed"
             return self.meta_path
         except OSError as e:
+            self.state = "failed"
+            self.error_code = _classify_os_error(e)
+            self.last_error = f"写 SigMF meta 失败: {e}"
             logger.error("IQRecorder 写 meta 失败: %s", e)
             return None
 
@@ -222,6 +270,103 @@ class IQRecorder:
     @property
     def duration_s(self) -> float:
         return self._n_samples / max(self.sample_rate, 1e-9)
+
+
+def inspect_recording(data_path: str) -> Dict[str, Any]:
+    """检查录制文件完整性，返回可判定的 integrity 状态（不做修复）。"""
+    paths = _sigmf_paths(data_path)
+    data, meta = paths["data"], paths["meta"]
+    out: Dict[str, Any] = {
+        "data_path": data, "meta_path": meta,
+        "data_exists": os.path.exists(data),
+        "meta_exists": os.path.exists(meta),
+        "integrity": "missing", "error": "", "reason": "",
+        "samples_on_disk": 0, "declared_samples": 0,
+        "complete_flag": None,
+    }
+    if not out["data_exists"]:
+        out["reason"] = "数据文件不存在"
+        return out
+    try:
+        size = os.path.getsize(data)
+    except OSError as e:
+        out["integrity"] = "io_error"
+        out["reason"] = str(e)
+        return out
+    if size == 0:
+        out["integrity"] = "empty"
+        out["reason"] = "数据文件为空"
+        return out
+    if size % 8 != 0:
+        out["integrity"] = "corrupt"
+        out["reason"] = f"{size} 字节不是 8 的整数倍（存在半截样本）"
+        return out
+    out["samples_on_disk"] = size // 8
+    if not out["meta_exists"]:
+        out["integrity"] = "missing-meta"
+        out["reason"] = "只有数据文件（录制中断/断电），meta 缺失"
+        return out
+    try:
+        with open(meta, "r", encoding="utf-8") as f:
+            meta_d = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        out["integrity"] = "meta-corrupt"
+        out["reason"] = str(e)
+        return out
+    g = meta_d.get("global", {}) or {}
+    out["declared_samples"] = int(g.get("core:total_num_samples", 0) or 0)
+    out["complete_flag"] = g.get("mbdsdr:complete")
+    if out["declared_samples"] > out["samples_on_disk"]:
+        out["integrity"] = "truncated"
+        out["reason"] = (f"声明 {out['declared_samples']} 样本，"
+                         f"实际 {out['samples_on_disk']}")
+        return out
+    if out["complete_flag"] is False:
+        out["integrity"] = "incomplete"
+        out["reason"] = str(g.get("mbdsdr:error", "") or "录制未完整结束")
+        return out
+    out["integrity"] = "ok"
+    return out
+
+
+def recover_recording_meta(data_path: str, sample_rate_hz: float = 0.0,
+                           center_freq_hz: float = 0.0) -> Optional[str]:
+    """为录制中断留下的孤立数据文件补写诚实的 meta（complete=false）。
+
+    只在数据字节完整（8 的整数倍、非空）时执行；无法判定则返回 None。
+    采样率未知时写 0 并在 meta 中标注 unknown，绝不编造一个速率。
+    """
+    info = inspect_recording(data_path)
+    if info["integrity"] not in ("missing-meta", "meta-corrupt"):
+        return None
+    paths = _sigmf_paths(data_path)
+    n = int(info["samples_on_disk"])
+    meta: Dict[str, Any] = {
+        "global": {
+            "core:datatype": "cf32_le",
+            "core:sample_rate": float(sample_rate_hz),
+            "core:frequency": float(center_freq_hz),
+            "core:author": "MBDSDR",
+            "core:description": "recovered from interrupted recording",
+            "core:total_num_samples": n,
+            "mbdsdr:complete": False,
+            "mbdsdr:recovered": True,
+            "mbdsdr:recovered_from": "orphan-data",
+            "mbdsdr:sample_rate_unknown": bool(sample_rate_hz <= 0),
+            "mbdsdr:error": info.get("reason", ""),
+        },
+        "captures": [{"core:sample_start": 0, "core:datetime": ""}],
+        "annotations": [],
+    }
+    try:
+        tmp = paths["meta"] + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, paths["meta"])
+        return paths["meta"]
+    except OSError as e:
+        logger.error("recover_recording_meta 写 meta 失败: %s", e)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -265,12 +410,15 @@ class AudioRecorder:
         self._wf = None        # wave.Wave_write 句柄
         self._n_frames: int = 0
         self.closed = True
+        self.state: str = "closed"   # closed/recording/failed
+        self.last_error: str = ""
+        self.error_code: str = ""
 
     def open(self) -> bool:
         if self._wf is not None:
             return True
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         try:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             self._wf = _wave.open(self.path, "wb")
             self._wf.setnchannels(self.channels)
             self._wf.setsampwidth(self._BIT_DEPTHS[self.bit_depth])
@@ -278,9 +426,16 @@ class AudioRecorder:
         except (OSError, _wave.Error) as e:
             logger.error("AudioRecorder 打开 %s 失败: %s", self.path, e)
             self._wf = None
+            self.state = "failed"
+            self.error_code = (_classify_os_error(e) if isinstance(e, OSError)
+                               else "wav_error")
+            self.last_error = f"无法创建 WAV: {e}"
             return False
         self._n_frames = 0
         self.closed = False
+        self.state = "recording"
+        self.last_error = ""
+        self.error_code = ""
         return True
 
     def write(self, audio: np.ndarray) -> int:
@@ -314,6 +469,10 @@ class AudioRecorder:
             return int(frames)
         except (OSError, _wave.Error) as e:
             logger.error("AudioRecorder 写失败: %s", e)
+            self.state = "failed"
+            self.error_code = (_classify_os_error(e) if isinstance(e, OSError)
+                               else "wav_error")
+            self.last_error = f"音频写入失败: {e}"
             return 0
 
     @staticmethod
@@ -330,10 +489,14 @@ class AudioRecorder:
         if self._wf is not None:
             try:
                 self._wf.close()
-            except (OSError, _wave.Error):
-                pass
+            except (OSError, _wave.Error) as e:
+                self.state = "failed"
+                self.error_code = "wav_error"
+                self.last_error = f"关闭 WAV 失败: {e}"
             self._wf = None
         self.closed = True
+        if self.state != "failed":
+            self.state = "closed"
 
     def __enter__(self) -> "AudioRecorder":
         self.open()

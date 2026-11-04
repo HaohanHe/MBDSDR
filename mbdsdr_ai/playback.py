@@ -71,15 +71,21 @@ def parse_sigmf_meta(meta_path: str) -> Dict[str, Any]:
         "total_samples": 0,
         "datatype": "cf32_le",
         "raw": {},
+        "meta_present": False,   # meta 文件是否存在
+        "meta_valid": False,     # meta 是否存在且可解析（缺失≠损坏）
+        "meta_error": "",        # 损坏原因；缺失时为空（由调用方按"未知"处理）
     }
     if not meta_path or not os.path.exists(meta_path):
         return out
+    out["meta_present"] = True
     try:
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("SigMF meta 解析失败 %s: %s", meta_path, e)
+        out["meta_error"] = f"meta_corrupt: {e}"
         return out
+    out["meta_valid"] = True
     out["raw"] = meta
     g = meta.get("global", {}) or {}
     out["sample_rate_hz"] = float(g.get("core:sample_rate", 0.0) or 0.0)
@@ -132,6 +138,12 @@ class IQPlayback:
         self._n_samples: int = 0
         self._cursor: int = 0
         self.opened: bool = False
+        # ── 文件完整性/可恢复状态（closed/open/eof/failed/deleted）──
+        self.state: str = "closed"
+        self.last_error: str = ""
+        self.error_code: str = ""   # missing/corrupt/truncated/empty/datatype/deleted
+        self.meta_valid: bool = False
+        self.declared_samples: int = 0
 
     # ------------------------------------------------------------------
     def open(self, filepath: str) -> bool:
@@ -147,8 +159,7 @@ class IQPlayback:
             if os.path.exists(filepath):
                 data_path = filepath
             else:
-                logger.error("IQPlayback 找不到数据文件: %s", data_path)
-                return False
+                return self._fail_open("missing", "找不到数据文件", data_path)
 
         # 解析 SigMF meta（存在则读真实采样率/中心频率，不造假）
         meta = parse_sigmf_meta(meta_path)
@@ -159,13 +170,39 @@ class IQPlayback:
         self.datetime = meta["datetime"]
         self.time_source = meta["time_source"]
         self.meta_raw = meta["raw"]
+        self.meta_valid = bool(meta["meta_valid"])
+        self.declared_samples = int(meta["total_samples"])
+
+        # 非法头：meta 存在但 JSON 坏了，不能按默认值继续（那会造出假时间轴）。
+        if meta["meta_present"] and not meta["meta_valid"]:
+            return self._fail_open("corrupt", "SigMF meta 损坏", data_path)
+        datatype = str(meta.get("datatype", "cf32_le")).lower()
+        if datatype not in ("cf32_le", "cf32", "complex64"):
+            return self._fail_open(
+                "datatype", f"不支持的数据类型 {datatype}（仅 cf32_le）", data_path)
+
+        try:
+            size = int(os.path.getsize(data_path))
+        except OSError as e:
+            return self._fail_open("missing", f"数据文件不可读: {e}", data_path)
+        if size == 0:
+            return self._fail_open("empty", "数据文件为空", data_path)
+        if size % self._BYTES_PER_SAMPLE != 0:
+            return self._fail_open(
+                "truncated",
+                f"数据长度 {size} 字节不是 {self._BYTES_PER_SAMPLE} 的整数倍",
+                data_path)
+        actual_samples = size // self._BYTES_PER_SAMPLE
+        if self.declared_samples > 0 and actual_samples < self.declared_samples:
+            return self._fail_open(
+                "truncated",
+                f"文件已截断：实际 {actual_samples} 样本 < meta 声明 "
+                f"{self.declared_samples}", data_path)
 
         try:
             self._mmap = np.memmap(data_path, dtype=np.complex64, mode="r")
         except (OSError, ValueError) as e:
-            logger.error("IQPlayback mmap 失败 %s: %s", data_path, e)
-            self._mmap = None
-            return False
+            return self._fail_open("corrupt", f"mmap 失败: {e}", data_path)
 
         self._n_samples = int(self._mmap.size)
         # 若 meta 没给采样率，用 0 标记未知（绝不编造一个采样率）
@@ -174,10 +211,23 @@ class IQPlayback:
                            "采样率未知（=0）。文件=%s", data_path)
         self._cursor = 0
         self.opened = True
+        self.state = "open"
+        self.last_error = ""
+        self.error_code = ""
         logger.info("IQPlayback 打开: %s (%d samples, %.3f MSps, %.3f MHz)",
                     data_path, self._n_samples,
                     self.sample_rate / 1e6, self.center_freq_hz / 1e6)
         return True
+
+    def _fail_open(self, code: str, reason: str, data_path: str) -> bool:
+        """打开失败时如实落状态，绝不返回"打开成功但零样本"。"""
+        self.opened = False
+        self._mmap = None
+        self.state = "failed"
+        self.error_code = code
+        self.last_error = reason
+        logger.error("IQPlayback 打开失败(%s) %s: %s", code, data_path, reason)
+        return False
 
     # ------------------------------------------------------------------
     def close(self) -> None:
@@ -204,6 +254,19 @@ class IQPlayback:
         - 到 EOF：loop=True 回绕；loop=False 返回剩余样本并停在末尾（再读返回空）。
         """
         if not self.opened or self._mmap is None or n <= 0:
+            return np.empty(0, dtype=np.complex64)
+        # 读到一半被删/被移走：立即暴露 deleted，不继续回放陈旧映射冒充现况。
+        if self.filepath and not os.path.exists(self.filepath):
+            self.state = "deleted"
+            self.error_code = "deleted"
+            self.last_error = "回放文件在读取过程中被删除或移走"
+            self.opened = False
+            try:
+                if self._mmap is not None:
+                    self._mmap._mmap.close()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            self._mmap = None
             return np.empty(0, dtype=np.complex64)
         total = self._n_samples
         if total == 0:
@@ -232,7 +295,15 @@ class IQPlayback:
                 remaining -= used
                 # loop 时下一轮 while 会把 cursor 归 0
         if not out_parts:
+            if not self.loop and self._cursor >= total:
+                self.state = "eof"
+                self.error_code = "eof"
+                self.last_error = "已读到文件末尾（未循环）"
             return np.empty(0, dtype=np.complex64)
+        if not self.loop and self._cursor >= total:
+            self.state = "eof"
+            self.error_code = "eof"
+            self.last_error = "已读到文件末尾（未循环）"
         return np.concatenate(out_parts).astype(np.complex64, copy=False) \
             if len(out_parts) > 1 else out_parts[0]
 
@@ -294,6 +365,8 @@ class PlaybackSource:
         self._gain: float = 0.0
         self._agc: bool = True
         self._samples_read: int = 0
+        self._last_error: str = ""
+        self._error_code: str = ""
 
     # ------------------------------------------------------------------
     def connect(self) -> bool:
@@ -301,8 +374,12 @@ class PlaybackSource:
             self._connected = True
             self._freq = self._pb.center_freq_hz
             self._rate = self._pb.sample_rate
+            self._last_error = ""
+            self._error_code = ""
             return True
         self._connected = False
+        self._last_error = self._pb.last_error or "回放文件打开失败"
+        self._error_code = self._pb.error_code or "open_failed"
         return False
 
     def disconnect(self) -> None:
@@ -315,7 +392,11 @@ class PlaybackSource:
             return None
         out = self._pb.read_samples(n)
         if out.size == 0:
-            return None  # EOF 且未 loop
+            self._last_error = self._pb.last_error or "回放源无更多数据"
+            self._error_code = self._pb.error_code or "no_data"
+            if self._pb.state == "deleted":
+                self._connected = False
+            return None  # EOF / 文件被删 / 未打开
         self._samples_read += int(out.size)
         return out
 
@@ -331,10 +412,20 @@ class PlaybackSource:
         return self._freq
 
     def set_sample_rate(self, rate_hz: float) -> bool:
+        """回放源采样率由录制文件决定，不允许改写（改写=时间轴失真）。"""
         if not self._connected:
             return False
-        self._rate = float(rate_hz)
-        self._pb.sample_rate = float(rate_hz)
+        actual = float(self._pb.sample_rate)
+        if actual <= 0:
+            self._last_error = "录制文件未声明采样率，拒绝猜测改写"
+            self._error_code = "rate_unknown"
+            return False
+        if abs(float(rate_hz) - actual) > 1.0:
+            self._last_error = (f"回放源采样率固定为 {actual:g} Hz，"
+                                f"不能改为 {float(rate_hz):g} Hz")
+            self._error_code = "rate_mismatch"
+            return False
+        self._rate = actual
         return True
 
     def get_sample_rate(self) -> float:
@@ -370,5 +461,11 @@ class PlaybackSource:
             "loop": self._pb.loop,
             "recording_datetime": self._pb.datetime,
             "recording_time_source": self._pb.time_source,
-            "error": "" if self._connected else "未连接",
+            "playback_state": self._pb.state,
+            "error_code": self._error_code,
+            "meta_valid": self._pb.meta_valid,
+            "file_error": self._pb.last_error,
+            "error": (self._last_error
+                      if self._last_error else
+                      ("" if self._connected else "未连接")),
         }
