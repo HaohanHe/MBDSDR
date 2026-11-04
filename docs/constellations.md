@@ -430,6 +430,30 @@ unique_star_hip_count, mapped_count, in_catalog_count, unmapped_count,
 unmapped_hips, unresolved_tokens`；方法 `segments()`（区域级：三垣=墙线，
 宿=宿自身连线）、`all_segments()`（区域级 + 区域内星官级，按 HIP 对去重）。
 
+**锚点（数据层唯一事实源，渲染方不要再自己遍历成员）**：
+
+```python
+from mbdsdr_ai.skyengine import xingguan as x
+
+anchor = x.xingguan_anchor("角宿")      # 也接受 XingguanRegion / Xingguan 对象
+# XingguanAnchor(hip=71683, hyg_id=71456, ra_deg=219.91, dec_deg=-60.83,
+#                vmag=-0.01, con="Cen", zh_name="南门二",
+#                proper="Rigil Kentaurus", bayer="Alp1Cen")
+#   属性 label -> "南门二"，可直接用于标签文本
+x.xingguan_anchor_reason("角宿")        # None = 有锚点；否则见下
+```
+
+| 返回 | 含义 |
+| --- | --- |
+| `XingguanAnchor` | 区域/星官里 **V ≤ 9 且在随仓星表内** 的最亮成员（同星等按 HIP 升序决胜）；字段即上表 `hip/hyg_id/ra_deg/dec_deg/vmag/con/zh_name/proper/bayer` |
+| `None` | 无可用成员，**不静默**；原因用稳定码表达 |
+
+原因码（`xingguan_anchor_reason`）：`no_members`（无成员）、
+`no_mappable_member`（有成员但全部未映射到 HYG）、
+`no_drawable_member`（能映射但全部不在 V ≤ 9 星表内）。
+实测 31/31 区域与 13 个「无连线星官」全部有锚点；含未映射星的
+太微垣/房宿/室宿锚点均落在真实可绘制星上。
+
 **星引用 `ConstellationStar` / `XingguanStar`**：
 
 | 字段 | IAU | 星官 | 说明 |
@@ -457,8 +481,19 @@ unmapped_hips, unresolved_tokens`；方法 `segments()`（区域级：三垣=墙
    `load_iau_constellations()` / `load_xingguan()` 为 `lru_cache(maxsize=1)`。
 
 **缓存口径（实测）**：首次加载 IAU 21.3 ms、星官 122.0 ms（含 JSON 解析与
-SHA 校验），命中缓存后约 0.001 ms。`xingguan_all_segments()` **每次重建**，
-31 区域合计 0.26 ms/次——渲染方应在切换体系时预计算一次并缓存，不要每帧调。
+SHA 校验），命中缓存后约 0.001 ms。
+
+| 操作 | 是否重算 | 依据 |
+| --- | --- | --- |
+| 切 FOV 档位 | **否** | 数据层没有任何 FOV 入参，裁剪由渲染方对已加载 tuple 做 |
+| 开关图层 `overlay_layers()` | **否** | 只做选择/去重，`items is` 原缓存对象 |
+| 切体系（IAU ↔ 星官） | **否** | `lru_cache(maxsize=1)` 只按路径成键，两套各自命中 |
+| 缓存被驱逐 | 是（仅当显式传另一路径，如测试用临时文件） | `maxsize=1`，下一个不同入参会驱逐 |
+| 每帧调 `segments()` / `all_segments()` | **是** | 唯一会重复计算的路径；31 区域 0.26 ms/次 |
+
+结论：切档位/开关图层/切体系**都不会**打穿缓存；唯一要预计算的是
+`all_segments()`（或逐区域 `segments()`），按体系切换时缓存一次即可。
+`cache_info()` 的 miss 计数已由测试钉死：切换循环中 miss 不增加。
 
 ### 9.3 单帧几何量（实测，非估算）
 
@@ -494,12 +529,29 @@ C++/GPU 着色器，可不计入 Python 预算。
 | --- | --- | --- |
 | T0 只画 IAU 88 座 | 148 | **4.65 ms** |
 | T1 IAU + 三垣/28宿区域线 | 211 | **5.59 ms** |
-| T2 全部（IAU + 区域 + 287 星官） | 572 | **7.67–9.66 ms**（两次运行，机器噪声） |
+| T2 全部（IAU + 区域 + 287 星官） | 572 | **6.86–9.66 ms**（多次运行，机器噪声） |
 
-60 fps 预算 16.7 ms：T2 已占约一半，余量留给星点/标签/UI。
-**超过 1080p、开粗笔/阴影或关闭抗锯齿都会改变该数字，需按目标机复测**。
-标签绘制未实测（headless `drawText` 在本机崩溃），不编造毫秒数，只给
-§9.5 的优先级与数量上限。
+**T2 + 标签同开（实测，非外推）**：同一 offscreen 配置，加
+`QGuiApplication` 与 8 pt 系统字体，标签用锚点屏幕位置 `drawText`：
+
+| T2 + N 个标签 | 实测 |
+| --- | --- |
+| 0 | 6.86 ms |
+| 12 | 7.99 ms |
+| 24 | 7.75 ms |
+| 40（§9.5 最大档位限额） | **7.91 ms** |
+| 88（全部 IAU） | 8.25 ms |
+| 406（IAU + 31 区域 + 287 星官全标） | **9.66 ms** |
+
+**最坏情况保守上界**：T2 全开 + 406 个标签实测 9.66 ms，按 ±20%
+余量外推约 **11.6 ms/帧**（**外推，不是实测**）。这把 60 fps 的 16.7 ms
+预算用掉约 70%，余量约 5 ms 给星点/UI；30 fps 预算 33.3 ms 下余量充足。
+注意这是 1280×720、1 px 笔、无阴影的抗锯齿光栅路径；高分屏、粗笔、
+阴影、逐标签背景块都会抬高该值，必须按目标机复测。
+
+> 说明：先前的「标签未实测」结论已作废——用
+> `QT_QPA_PLATFORM=offscreen` + `QGuiApplication` 可稳定测到上表数字；
+> 纯 `QImage` headless 直接 `drawText` 才会崩溃。
 
 ### 9.4 按 FOV 分层的建议阈值
 
@@ -524,13 +576,14 @@ C++/GPU 着色器，可不计入 Python 预算。
 | 优先级 | 对象 | 数量 | 锚点来源 | 备注 |
 | --- | --- | --- | --- | --- |
 | P0 | 体系徽标/图例 | 2 | `layer.tag` | 常驻，不可被避让掉 |
-| P1 | 三垣 | 3 | 区域成员最亮星 | `type == "yuan"` |
+| P1 | 三垣 | 3 | `xingguan_anchor(region)` | `type == "yuan"` |
 | P2 | IAU 88 座 | 88 | `con.anchor()`（最亮连线端点） | 按 `vmag` 升序取前 N |
-| P3 | 二十八宿 | 28 | 区域成员最亮星 | `type == "xiu"` |
-| P4 | 星官 | 287 | 星官成员最亮星（跳过 `in_catalog=False`） | 仅当前宿/垣内 |
+| P3 | 二十八宿 | 28 | `xingguan_anchor(region)` | `type == "xiu"` |
+| P4 | 星官 | 287 | `xingguan_anchor(xingguan)` | 仅当前宿/垣内 |
 
-- 星官没有 `anchor` 字段，锚点须由渲染方从 `stars` 里按
-  「`in_catalog=True` 且 `vmag` 最小」自算；全部不可绘制时**不画标签**。
+- 锚点**一律**走 `xingguan_anchor()`（区域或单个星官都支持），渲染方不要
+  再遍历 `stars` 自算；返回 `None` 时用 `xingguan_anchor_reason()` 取原因码，
+  此时**不画标签**（不要把原因码当标签文本）。
 - 避让顺序严格 P0→P4；同级按 `vmag` 升序、再按屏幕距离取远。
 - 两套体系同开时，P2 与 P3/P4 的标签**必须带体系前缀**（见 §9.6），
   不允许同名合并或省前缀。

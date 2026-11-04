@@ -38,7 +38,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .constellations import (
     SYSTEM_CHINESE,
@@ -56,6 +56,7 @@ __all__ = [
     "Xingguan",
     "XingguanRegion",
     "XingguanSet",
+    "XingguanAnchor",
     "load_xingguan",
     "get_xingguan",
     "xingguan_regions",
@@ -64,6 +65,8 @@ __all__ = [
     "xingguan_all_segments",
     "xingguan_label",
     "xingguan_culture",
+    "xingguan_anchor",
+    "xingguan_anchor_reason",
     "system_info",
     "xingguan_layer",
 ]
@@ -168,6 +171,29 @@ class XingguanRegion:
                         seen.add(key)
                         out.append((a, b))
         return tuple(out)
+
+
+@dataclass(frozen=True)
+class XingguanAnchor:
+    """标签锚点：区域/星官里**最亮且可绘制**（V ≤ 9 且在随仓星表内）的成员星。
+
+    只由数据层给出，避免渲染方自行遍历成员再算一遍（第二份事实源）。
+    无可用成员时 ``xingguan_anchor()`` 返回 ``None``，原因见
+    ``xingguan_anchor_reason()`` 的稳定码。
+    """
+    hip: int
+    hyg_id: Optional[int]
+    ra_deg: float
+    dec_deg: float
+    vmag: float
+    con: str
+    zh_name: str
+    proper: str
+    bayer: str
+
+    @property
+    def label(self) -> str:
+        return self.zh_name or self.proper or self.bayer or f"HIP {self.hip}"
 
 
 class XingguanSet:
@@ -345,6 +371,61 @@ def xingguan_culture(key: str) -> Optional[Dict[str, str]]:
         "group": region.group,
         "type": region.type,
     }
+
+
+_AnchorTarget = Union[str, XingguanRegion, Xingguan]
+
+
+def _anchor_members(target: _AnchorTarget) -> Tuple[XingguanStar, ...]:
+    if isinstance(target, str):
+        return xingguan_region(target).stars
+    return tuple(getattr(target, "stars", ()))
+
+
+def _brightest_drawable(
+        stars: Tuple[XingguanStar, ...]) -> Optional[XingguanStar]:
+    """最亮且可绘制（in_catalog 且坐标/星等齐全）；同星等按 HIP 升序决胜。"""
+    best: Optional[XingguanStar] = None
+    for s in stars:
+        if (not s.in_catalog or s.vmag is None
+                or s.ra_deg is None or s.dec_deg is None):
+            continue
+        if best is None or (s.vmag, s.hip) < (best.vmag, best.hip):
+            best = s
+    return best
+
+
+def xingguan_anchor(target: _AnchorTarget) -> Optional[XingguanAnchor]:
+    """区域或单个星官的标签锚点；无可用成员返回 ``None``（原因见下函数）。
+
+    入参可以是区域键（``"角宿"``）、``XingguanRegion`` 或 ``Xingguan``。
+    """
+    best = _brightest_drawable(_anchor_members(target))
+    if best is None:
+        return None
+    return XingguanAnchor(
+        hip=best.hip, hyg_id=best.hyg_id,
+        ra_deg=float(best.ra_deg), dec_deg=float(best.dec_deg),
+        vmag=float(best.vmag), con=best.con, zh_name=best.zh_name,
+        proper=best.proper, bayer=best.bayer,
+    )
+
+
+def xingguan_anchor_reason(target: _AnchorTarget) -> Optional[str]:
+    """``None`` = 锚点可用；否则返回稳定原因码（不静默空白）。
+
+    - ``no_members``：区域/星官没有任何成员星；
+    - ``no_mappable_member``：有成员但全部未映射到 HYG；
+    - ``no_drawable_member``：能映射，但全部不在随仓 V ≤ 9 星表内。
+    """
+    stars = _anchor_members(target)
+    if not stars:
+        return "no_members"
+    if not any(s.mapped for s in stars):
+        return "no_mappable_member"
+    if _brightest_drawable(stars) is None:
+        return "no_drawable_member"
+    return None
 
 
 def system_info() -> Dict[str, Any]:

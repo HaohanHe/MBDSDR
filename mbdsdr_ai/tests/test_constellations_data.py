@@ -405,3 +405,137 @@ def test_source_files_sha_traceable(iau, xg):
             ("star_names", sky / "star_names.zh_CN.fab"),
             ("description", sky / "description.md")):
         assert sha(rel) == xg.meta["source_files"][name]["sha256"]
+
+
+# ---------------------------------------------------------------------------
+# 星官锚点（数据层唯一事实源，渲染方不再自行遍历成员）
+# ---------------------------------------------------------------------------
+def test_xingguan_anchor_is_brightest_drawable(xg, catalog, star_index):
+    """每个区域的锚点 = 区域成员里 V ≤ 9 且在星表内的最亮星。"""
+    for r in xg.regions:
+        a = x.xingguan_anchor(r)
+        assert a is not None, f"{r.key} 应有可用锚点"
+        assert x.xingguan_anchor_reason(r) is None
+        drawable = [s for s in r.stars
+                    if s.in_catalog and s.vmag is not None
+                    and s.ra_deg is not None and s.dec_deg is not None]
+        assert drawable, f"{r.key} 竟无可绘制成员"
+        best = min(drawable, key=lambda s: (s.vmag, s.hip))
+        assert a.hip == best.hip
+        assert abs(a.vmag - float(best.vmag)) < 1e-9
+        assert 0.0 <= a.ra_deg <= 360.0 and -90.0 <= a.dec_deg <= 90.0
+        _assert_star_in_catalog(a, catalog, star_index)
+
+
+def test_xingguan_anchor_accepts_key_and_object(xg):
+    """同一事实源：传区域键与传对象必须给出同一个锚点。"""
+    for key in ("角宿", "紫微垣", "室宿"):
+        by_key = x.xingguan_anchor(key)
+        by_obj = x.xingguan_anchor(xg[key])
+        assert by_key == by_obj
+        assert x.xingguan_anchor_reason(key) == x.xingguan_anchor_reason(xg[key])
+    with pytest.raises(KeyError):
+        x.xingguan_anchor("不存在的宿")
+
+
+def test_anchors_exist_for_xingguan_without_lines(xg):
+    """13 个源数据无连线的星官也必须有锚点（锚点只看成员，不看连线）。"""
+    empty = [(r, g) for r in xg.regions for g in r.xingguan if not g.lines]
+    assert len(empty) == 13
+    for region, g in empty:
+        a = x.xingguan_anchor(g)
+        assert a is not None, f"{region.key}/{g.name_zh} 无可用锚点"
+        assert x.xingguan_anchor_reason(g) is None
+        assert a.hip in {s.hip for s in g.stars}
+
+
+def test_anchor_never_lands_on_unmapped_star(xg):
+    """含未映射星的区域（太微垣/房宿/室宿）锚点必须是真实可绘制星。"""
+    for key in ("太微垣", "房宿", "室宿"):
+        r = xg[key]
+        assert r.unmapped_hips
+        a = x.xingguan_anchor(r)
+        assert a is not None
+        assert a.hip not in r.unmapped_hips
+        assert a.hyg_id is not None
+        assert a.hip not in XG_UNRESOLVED
+
+
+def test_anchor_reason_codes_for_degenerate_regions(xg):
+    """空成员/全未映射/全不可绘制的区域：返回 None + 稳定原因码。"""
+    import dataclasses
+
+    tm = xg["太微垣"]
+    unmapped = tuple(s for s in tm.stars if not s.mapped)
+    assert len(unmapped) == 1
+
+    shi = xg["室宿"]
+    deep = tuple(s for s in shi.stars
+                 if s.mapped and not s.in_catalog and s.hip == 115481)
+    assert len(deep) == 1
+    assert deep[0].vmag is not None and deep[0].vmag > 9.0
+
+    cases = {
+        "no_members": dataclasses.replace(tm, key="空区域", stars=()),
+        "no_mappable_member": dataclasses.replace(tm, key="全未映射", stars=unmapped),
+        "no_drawable_member": dataclasses.replace(shi, key="全深空", stars=deep),
+    }
+    for reason, region in cases.items():
+        assert x.xingguan_anchor(region) is None
+        assert x.xingguan_anchor_reason(region) == reason
+
+
+# ---------------------------------------------------------------------------
+# 缓存口径：切 FOV 档位 / 开关图层 / 切体系都不得打穿缓存（唯一例外见末条）
+# ---------------------------------------------------------------------------
+def test_cache_survives_system_and_layer_switching(iau, xg):
+    """加载缓存跨体系切换稳定：重复取层不会重新解析 JSON。"""
+    assert c.load_iau_constellations() is iau
+    assert x.load_xingguan() is xg
+
+    before = (c.load_iau_constellations.cache_info(),
+              x.load_xingguan.cache_info())
+
+    for _ in range(5):
+        l_iau = c.constellation_layer(c.SYSTEM_IAU)
+        l_xg = c.constellation_layer("chinese_xingguan")
+        assert l_iau.items is iau.constellations
+        assert l_xg.items is xg.regions
+        single = c.overlay_layers((c.SYSTEM_IAU,))
+        assert len(single) == 1 and single[0].items is iau.constellations
+
+    after = (c.load_iau_constellations.cache_info(),
+             x.load_xingguan.cache_info())
+    # 只允许命中数上涨，不允许新增 miss（新增 miss 即重新加载）。
+    assert after[0].misses == before[0].misses
+    assert after[1].misses == before[1].misses
+    assert after[0].hits > before[0].hits
+    assert after[1].hits > before[1].hits
+
+
+def test_overlay_toggle_does_not_reload(iau, xg):
+    before = (c.load_iau_constellations.cache_info().misses,
+              x.load_xingguan.cache_info().misses)
+    layers = c.overlay_layers()                       # 两套全开
+    assert [l.system_id for l in layers] == [c.SYSTEM_IAU, c.SYSTEM_CHINESE]
+    layers = c.overlay_layers((c.SYSTEM_CHINESE,))    # 只开星官
+    assert len(layers) == 1 and layers[0].system_id == c.SYSTEM_CHINESE
+    layers = c.overlay_layers((c.SYSTEM_IAU,))        # 再切回只开 IAU
+    assert len(layers) == 1 and layers[0].system_id == c.SYSTEM_IAU
+    assert (c.load_iau_constellations.cache_info().misses,
+            x.load_xingguan.cache_info().misses) == before
+
+
+def test_all_segments_is_the_only_rebuild_path(xg):
+    """`all_segments()` 每次调用都重建（0.26 ms/31 区域），渲染方须预计算。
+
+    这是本层唯一会重复计算的接口；`segments()` 同理。数据本身仍被缓存，
+    重建只是把已持有的 tuple 再展平一次。
+    """
+    a = x.xingguan_all_segments("角宿")
+    b = x.xingguan_all_segments("角宿")
+    assert a == b
+    assert a is not b
+    r = xg["角宿"]
+    assert r.all_segments() == a
+    assert r.segments() == x.xingguan_segments("角宿")
