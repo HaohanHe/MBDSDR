@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .new_spacetime_tle import parse_tle_epoch
 
@@ -43,7 +43,9 @@ __all__ = [
     "user_entries",
     "cache_entries",
     "builtin_entries",
+    "merge_sources",
     "scan_catalog",
+    "scan_sources",
     "scan_live",
 ]
 
@@ -107,6 +109,7 @@ class CatalogEntry:
     line1: str = ""
     line2: str = ""
     object_name: str = ""
+    data_source: str = ""
     fetched_at: Optional[float] = None
     origin: str = ""
     refresh_status: str = "unknown"   # memory/cache/network/not_updated
@@ -121,6 +124,7 @@ class CatalogEntry:
             "name": self.name,
             "catnr": int(self.catnr),
             "source": self.source,
+            "data_source": self.data_source,
             "line1": self.line1,
             "line2": self.line2,
             "object_name": self.object_name,
@@ -279,7 +283,7 @@ def parse_tle_blocks(text: str, source: str = "user",
         out.append(CatalogEntry(
             name=name, catnr=catnr, source=source,
             line1=line1, line2=line2, object_name=name,
-            fetched_at=fetched_at, origin=origin,
+            data_source=source, fetched_at=fetched_at, origin=origin,
         ))
         i += 2
     return out
@@ -322,6 +326,7 @@ def cache_entries(cache_dir: Optional[str] = None,
             out.append(CatalogEntry(
                 name=name, catnr=catnr, source="cache",
                 line1=line1, line2=line2, object_name=name,
+                data_source="cache",
                 fetched_at=os.path.getmtime(path), origin=path))
         except OSError:
             continue
@@ -385,7 +390,9 @@ def _data_for(catnr: int,
 
 def scan_catalog(declarations: Sequence[CatalogEntry],
                  data_pool: Optional[Sequence[CatalogEntry]] = None,
-                 now: Optional[Any] = None) -> Dict[str, Any]:
+                 now: Optional[Any] = None,
+                 extra_conflicts: Optional[Sequence[Dict[str, Any]]] = None,
+                 ) -> Dict[str, Any]:
     """全目录扫描：每条声明都做「编号 ↔ 名称 ↔ 来源」三方校验 + 新鲜度分级。
 
     返回 ``{"total", "passed", "degraded", "mismatch", "no_data", "stale",
@@ -395,6 +402,8 @@ def scan_catalog(declarations: Sequence[CatalogEntry],
     """
     pool = list(data_pool or [])
     conflicts = _declaration_conflicts(list(declarations))
+    if extra_conflicts:
+        conflicts = conflicts + list(extra_conflicts)
     rows: List[Dict[str, Any]] = []
     reasons: Dict[str, List[Dict[str, Any]]] = {
         "identity_mismatch": [], "no_data": [], "stale": [],
@@ -423,7 +432,8 @@ def scan_catalog(declarations: Sequence[CatalogEntry],
             "name": decl.name,
             "catnr": int(decl.catnr),
             "declared_source": decl.source,
-            "data_source": (data.source if data is not None else ""),
+            "data_source": (data.data_source or data.source
+                            if data is not None else ""),
             "data_origin": (data.origin if data is not None else ""),
             "object_name": object_name,
             "identity": identity,
@@ -479,9 +489,138 @@ def scan_catalog(declarations: Sequence[CatalogEntry],
     }
 
 
+def merge_sources(groups: Any, now: Optional[Any] = None) -> Dict[str, Any]:
+    """三源合并：用户文件 > Celestrak 缓存/在线 > 内置表。
+
+    ``groups`` 可以是 ``{"user": [...], "cache": [...], "builtin": [...]}``
+    或任意 ``CatalogEntry`` 序列（按 ``entry.source`` 分组）。
+
+    规则：
+      * 同名同号重复声明：高优先级胜出，落选者进 ``shadowed``（不静默丢）；
+      * 同名不同号 / 同号不同名：两种声明都保留（交给三方校验把名字不符者
+        降级），并记入 ``conflicts``；
+      * 同号多份不同 TLE：记录 ``tle_data_conflict``（含历元与来源），
+        采用优先级最高、缓存最新的那份，其余保留为冲突记录。
+
+    返回 ``{"entries", "conflicts", "data_conflicts", "shadowed",
+    "source_priority"}``。
+    """
+    if isinstance(groups, dict):
+        items: List[Tuple[str, CatalogEntry]] = []
+        for src, entries in groups.items():
+            for e in entries:
+                items.append((str(src), e if e.source == src
+                              else replace(e, source=str(src))))
+    else:
+        items = [(e.source, e) for e in groups]
+
+    conflicts = _declaration_conflicts([e for _s, e in items])
+    data_conflicts: List[Dict[str, Any]] = []
+    data_by_catnr: Dict[int, List[Tuple[str, CatalogEntry]]] = {}
+    for src, e in items:
+        if e.has_tle:
+            data_by_catnr.setdefault(int(e.catnr), []).append((src, e))
+
+    for catnr, ds in sorted(data_by_catnr.items()):
+        names = {normalize_name(d.object_name or d.name) for _s, d in ds}
+        if len(names) > 1:
+            data_conflicts.append({
+                "type": "data_name_conflict",
+                "catnr": catnr,
+                "names": [(d.object_name or d.name) for _s, d in ds],
+                "sources": [s for s, _d in ds],
+                "resolution": "各声明保留，名称不符者按三方校验降级",
+            })
+        line1s = {d.line1 for _s, d in ds}
+        if len(line1s) > 1:
+            best_src = sorted(
+                ds, key=lambda se: (SOURCE_PRIORITY.get(se[0], 3),
+                                    -(se[1].fetched_at or 0.0)))[0][0]
+            epochs = []
+            for _s, d in ds:
+                ep = parse_tle_epoch(d.line1)
+                epochs.append({
+                    "source": _s,
+                    "epoch_utc": (ep.strftime("%Y-%m-%dT%H:%M:%SZ")
+                                  if ep is not None else None),
+                    "object_name": d.object_name or d.name,
+                })
+            data_conflicts.append({
+                "type": "tle_data_conflict",
+                "catnr": catnr,
+                "epochs": epochs,
+                "sources": [s for s, _d in ds],
+                "chosen_source": best_src,
+                "chosen_epoch_utc": next(
+                    (x["epoch_utc"] for x in epochs if x["source"] == best_src),
+                    None),
+                "resolution": "取优先级最高且缓存最新的 TLE；其余留存于此冲突记录",
+            })
+
+    grouped: Dict[Tuple[str, int], List[Tuple[str, CatalogEntry]]] = {}
+    for src, e in items:
+        grouped.setdefault((normalize_name(e.name), int(e.catnr)), []).append(
+            (src, e))
+
+    entries: List[CatalogEntry] = []
+    shadowed: List[Dict[str, Any]] = []
+    for key, group in sorted(grouped.items()):
+        ordered = sorted(group, key=lambda se: (
+            SOURCE_PRIORITY.get(se[0], 3), -(se[1].fetched_at or 0.0)))
+        winner_src, winner = ordered[0]
+        for src, e in ordered[1:]:
+            shadowed.append({
+                "name": e.name, "catnr": int(e.catnr), "source": src,
+                "shadowed_by": winner_src,
+                "reason": "同名同号重复声明，按来源优先级取舍",
+            })
+        data = winner if winner.has_tle else None
+        if data is None:
+            pool = sorted(data_by_catnr.get(int(winner.catnr), []),
+                          key=lambda se: (SOURCE_PRIORITY.get(se[0], 3),
+                                          -(se[1].fetched_at or 0.0)))
+            data = pool[0][1] if pool else None
+            data_src = pool[0][0] if pool else ""
+        else:
+            data_src = winner_src
+        if data is None:
+            merged = replace(winner, source=winner_src, data_source="",
+                             object_name="")
+        else:
+            merged = replace(
+                winner, source=winner_src,
+                line1=data.line1, line2=data.line2,
+                object_name=data.object_name or data.name,
+                data_source=data.data_source or data_src,
+                fetched_at=data.fetched_at,
+                origin=data.origin,
+                refresh_status=data.refresh_status,
+                refresh_error=data.refresh_error,
+            )
+        entries.append(merged)
+
+    return {
+        "entries": entries,
+        "conflicts": conflicts + data_conflicts,
+        "data_conflicts": data_conflicts,
+        "shadowed": shadowed,
+        "source_priority": dict(SOURCE_PRIORITY),
+    }
+
+
+def scan_sources(groups: Any, now: Optional[Any] = None) -> Dict[str, Any]:
+    """三源合并 + 全目录扫描：一行内同时给出身份、口径、来源与冲突。"""
+    merged = merge_sources(groups, now=now)
+    rep = scan_catalog(merged["entries"], now=now,
+                       extra_conflicts=merged["data_conflicts"])
+    rep["shadowed"] = merged["shadowed"]
+    rep["source_priority"] = merged["source_priority"]
+    return rep
+
+
 def scan_live(cache_dir: Optional[str] = None,
               sat_map: Optional[Dict[str, int]] = None,
-              now: Optional[float] = None) -> Dict[str, Any]:
+              now: Optional[Any] = None) -> Dict[str, Any]:
     """对「内置声明 + 本机 Celestrak 缓存」做全目录扫描（离线可用）。"""
     decls = builtin_entries(sat_map)
     pool = cache_entries(cache_dir=cache_dir, now=now)

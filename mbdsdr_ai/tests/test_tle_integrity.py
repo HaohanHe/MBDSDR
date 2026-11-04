@@ -267,6 +267,75 @@ class TestFetchRecord:
 
 
 # ---------------------------------------------------------------------------
+class TestMergeSources:
+    """用户文件 > Celestrak 缓存 > 内置表；冲突逐条留痕，不静默择一。"""
+
+    L1_USER = ("1 40069U 14037A   26306.50000000  .00000323  00000+0  "
+               "16680-3 0  9999")
+
+    def _groups(self):
+        user = [CatalogEntry(name="METEOR-M 2", catnr=40069, source="user",
+                             line1=self.L1_USER, line2=L2,
+                             object_name="METEOR-M 2", data_source="user",
+                             fetched_at=NOW.timestamp(), origin="user.tle")]
+        cache = [
+            CatalogEntry(name="METEOR-M 2", catnr=40069, source="cache",
+                         line1=L1, line2=L2, object_name="METEOR-M 2",
+                         data_source="cache", fetched_at=NOW.timestamp() - 86400),
+            CatalogEntry(name="ATLAS 5 CENTAUR DEB", catnr=44016,
+                         source="cache",
+                         line1="1 44016U 14055BX  26251.53597745 -.00000086  "
+                              "00000+0  00000+0 0  9994",
+                         line2="2 44016  19.8252 144.6831 4693919 161.0339 "
+                              "224.8913  1.83868310 52931",
+                         object_name="ATLAS 5 CENTAUR DEB", data_source="cache",
+                         fetched_at=NOW.timestamp() - 86400, origin="44016.tle"),
+        ]
+        builtin = [
+            CatalogEntry(name="METEOR M2", catnr=40069, source="builtin"),
+            CatalogEntry(name="METEOR M2", catnr=44016, source="builtin"),
+        ]
+        return {"user": user, "cache": cache, "builtin": builtin}
+
+    def test_priority_map(self):
+        from mbdsdr_ai.tle_integrity import SOURCE_PRIORITY
+        assert SOURCE_PRIORITY["user"] < SOURCE_PRIORITY["cache"]
+        assert SOURCE_PRIORITY["cache"] < SOURCE_PRIORITY["builtin"]
+
+    def test_user_wins_and_data_conflict_recorded(self):
+        from mbdsdr_ai.tle_integrity import merge_sources
+        m = merge_sources(self._groups())
+        winner = [e for e in m["entries"] if e.catnr == 40069][0]
+        assert winner.source == "user"
+        assert winner.line1 == self.L1_USER
+        assert winner.data_source == "user"
+        types = {c["type"] for c in m["conflicts"]}
+        assert {"name_catnr_conflict", "catnr_name_conflict",
+                "tle_data_conflict"} <= types
+        dc = [c for c in m["conflicts"] if c["type"] == "tle_data_conflict"][0]
+        assert dc["catnr"] == 40069 and dc["chosen_source"] == "user"
+        assert len(dc["epochs"]) == 2
+        # 落选者不静默丢弃：进 shadowed 并注明被谁取代
+        assert m["shadowed"]
+        assert all(s["shadowed_by"] for s in m["shadowed"])
+
+    def test_scan_sources_degrades_wrong_catnr(self):
+        from mbdsdr_ai.tle_integrity import scan_sources
+        rep = scan_sources(self._groups(), now=NOW)
+        # 40069 的用户声明已核实；44016 的 METEOR M2 声明被降级（真实对象是残骸）
+        good = [r for r in rep["rows"] if r["catnr"] == 40069][0]
+        bad = [r for r in rep["rows"]
+               if r["catnr"] == 44016 and r["name"] == "METEOR M2"][0]
+        assert good["identity"]["status"] == "verified"
+        assert good["data_source"] == "user"
+        assert bad["identity"]["status"] == "mismatch"
+        assert bad["degraded"] is True and bad["pass_eligible"] is False
+        assert rep["mismatch"] == 1
+        # 冲突与来源优先级随扫描结果一起给出（不静默）
+        assert rep["conflicts"] and rep["source_priority"]["user"] == 0
+
+
+# ---------------------------------------------------------------------------
 class TestBuiltinTables:
     def test_orbit_builtin_ids_are_real(self):
         from mbdsdr_ai.orbit import BUILTIN_SATS
