@@ -80,10 +80,41 @@ DEFAULT_GOTO_DURATION_MS: float = 200.0
 # Stellarium 语义（机制独立重实现，未包含其源代码）：
 #   - moveToAltAzi 带 ~0.2s ease-out 缓动；
 #   - 动画由真实墙钟毫秒推进，与渲染帧率解耦——帧率波动下终点一致；
-#   - 方位角沿最短弧插值（±180° 回绕），不绕远路。
+#   - 中心指向沿最短大圆（单位向量 SLERP），近天顶/跨 0° 不绕路。
 # 驱动方（rf_sky_view 的 33ms tick）每帧调用 step(elapsed_ms)，
 # elapsed_ms 由调用方从时钟算出，本类不碰时钟，天然可测。
 # ---------------------------------------------------------------------------
+def _unit_vec(v: np.ndarray) -> np.ndarray:
+    """归一化方向向量；零向量退化为天顶方向（不产生 NaN）。"""
+    v = np.asarray(v, dtype=float)
+    n = float(np.linalg.norm(v))
+    if n <= 0.0 or not math.isfinite(n):
+        return np.array([0.0, 0.0, -1.0])
+    return v / n
+
+
+def _slerp_unit(v0: np.ndarray, v1: np.ndarray, e: float) -> np.ndarray:
+    """单位向量球面线性插值（最短大圆路径）。
+
+    对跖点（θ≈180°）大圆不唯一：取一条确定的垂面路径，保证动画仍连续、
+    不出现除零/跳变；正常情形 sin θ 不会为 0。
+    """
+    e = max(0.0, min(1.0, float(e)))
+    dot = float(np.clip(np.dot(v0, v1), -1.0, 1.0))
+    theta = math.acos(dot)
+    if theta < 1e-9:
+        return v1.copy() if e >= 1.0 else v0.copy()
+    if math.pi - theta < 1e-6:
+        axis = (np.array([1.0, 0.0, 0.0])
+                if abs(float(v0[0])) < 0.9 else np.array([0.0, 1.0, 0.0]))
+        u = _unit_vec(np.cross(v0, axis))
+        return _unit_vec(v0 * math.cos(e * math.pi)
+                         + u * math.sin(e * math.pi))
+    s = math.sin(theta)
+    return _unit_vec(v0 * (math.sin((1.0 - e) * theta) / s)
+                     + v1 * (math.sin(e * theta) / s))
+
+
 @dataclass
 class GotoAnimation:
     """一次 goto 飞行的插值状态。
@@ -115,6 +146,10 @@ class GotoAnimation:
         self._alt_delta = float(self.target_alt) - self.start.center_alt
         self._fov_from = self.start.fov_deg
         self._fov_delta = float(self.target_fov) - self.start.fov_deg
+        # 大圆插值用的单位向量（az/alt 只用于端点与缓动进度展示）
+        self._v_from = _unit_vec(vec_from_azalt(
+            self.start.center_az, self.start.center_alt))
+        self._v_to = _unit_vec(vec_from_azalt(taz, self.target_alt))
 
     @staticmethod
     def ease_out_cubic(t: float) -> float:
@@ -125,6 +160,8 @@ class GotoAnimation:
     def step(self, elapsed_ms: float) -> Tuple["ViewState", bool]:
         """推进动画，返回 (视图状态快照, 是否完成)。
 
+        中心指向走**最短大圆**（单位向量 SLERP），不是 az/alt 各自线性：
+        近天顶或方位跨 0°/360° 时不会绕路/抽搐。fov 仍按线性插值。
         纯函数：不改自身插值状态，同一 elapsed 多次调用结果一致，天然可测。
         """
         if self.duration_ms <= 0:
@@ -132,8 +169,16 @@ class GotoAnimation:
         else:
             e = self.ease_out_cubic(elapsed_ms / self.duration_ms)
         vs = self.start.copy()
-        vs.center_az = self._az_from + self._az_delta * e
-        vs.center_alt = self._alt_from + self._alt_delta * e
+        if e >= 1.0:
+            # 终点精确落在目标（不走 SLERP 的浮点尾差）
+            vs.center_az = self.target_az % 360.0
+            vs.center_alt = float(self.target_alt)
+        elif e > 0.0:
+            v = _slerp_unit(self._v_from, self._v_to, e)
+            az, alt = azalt_from_vec(v)
+            vs.center_az = az
+            vs.center_alt = alt
+        # e<=0 保持起点快照
         vs.fov_deg = self._fov_from + self._fov_delta * e
         vs._clamp()
         done = self.duration_ms <= 0 or elapsed_ms >= self.duration_ms

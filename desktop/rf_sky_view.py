@@ -220,6 +220,49 @@ def planet_phase_illumination(phase_angle_deg: Optional[float]
     return 0.5 * (1.0 + math.cos(math.radians(ang)))
 
 
+def sunlit_state_label(sunlit: Optional[bool],
+                       obj_type: str = "satellite",
+                       status: Optional[str] = None) -> str:
+    """受晒状态卡的唯一文案映射（不编造物理状态）。
+
+    优先用后端 ``Illumination.status``（sunlit/umbra/penumbra/unknown）：
+    半影不可二值化成「受晒」，必须如实写「半影（部分受照）」。
+    没有 status 时退回快照的 ``sunlit`` 三态；None 既可能是后端没有太阳
+    数据，也可能是半影——统一显示「未知」，绝不冒充受晒。
+    非卫星对象没有受晒语义，显示占位「—」。
+    """
+    if obj_type != "satellite":
+        return "—"
+    s = (status or "").strip().lower()
+    if s in ("umbra", "eclipse", "shadow"):
+        return "地影"
+    if s in ("penumbra", "partial"):
+        return "半影（部分受照）"
+    if s == "sunlit":
+        return "受晒"
+    if sunlit is True:
+        return "受晒"
+    if sunlit is False:
+        return "地影"
+    return "未知（无受晒数据）"
+
+
+def sunlit_is_eclipsed(sunlit: Optional[bool],
+                       status: Optional[str] = None) -> bool:
+    """是否应画「地影」视觉状态：只有本影（umbra / sunlit=False）才画。
+
+    半影（status=penumbra）与 unknown/None **不画**——避免用假阴影表示
+    「部分受照」或「无数据」。
+    """
+    s = (status or "").strip().lower()
+    if s in ("penumbra", "partial", "unknown"):
+        return False
+    if s in ("umbra", "eclipse", "shadow"):
+        return True
+    return sunlit is False
+
+
+
 def _tangent_basis(az_deg: float, alt_deg: float,
                    towards_az_deg: float, towards_alt_deg: float
                    ) -> Optional[Tuple[tuple, tuple, tuple]]:
@@ -746,6 +789,8 @@ class SkyObject:
         signal_strength_db: float = 0.0,
         description: str = "",
         color: str = "",
+        sunlit: Optional[bool] = None,
+        sunlit_status: Optional[str] = None,
     ):
         self.name = name
         self.azimuth_deg = azimuth_deg  # 方位角 0-360°（北=0，东=90）
@@ -755,6 +800,14 @@ class SkyObject:
         self.signal_strength_db = signal_strength_db
         self.description = description
         self.color = color
+        # 受晒状态：True=受晒 / False=地影 / None=后端未提供（或半影不确定）。
+        # 本视图**不自己算**物理判据，只消费后端快照字段；None 时按「未知」
+        # 显示且不画阴影，绝不把默认值当成受晒。
+        self.sunlit = sunlit
+        # 后端 Illumination.status 原文（sunlit/umbra/penumbra/unknown）。
+        # 有 status 时优先按它显示（半影不可二值化，别压成「受晒」）；
+        # 快照未提供时保持 None，状态卡退回 sunlit 三态口径。
+        self.sunlit_status = sunlit_status
         self.visible = True
 
     def is_above_horizon(self) -> bool:
@@ -1410,6 +1463,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             "horizon_night": QColor(_t.COLORS["gray_200"]),
             "sat_weather": QColor(_t.COLORS["accent"]),
             "sat_amateur": QColor(_t.COLORS["light_accent"]),  # 橙：业余星标识
+            # 地影状态（只消费后端 sunlit 字段，未知不画）：本体压暗 + 暗色虚线描边
+            "sat_eclipse": QColor(_t.COLORS["gray_400"]),
+            "sat_eclipse_ring": QColor(_t.COLORS["gray_300"]),
             "signal": QColor(_t.COLORS["accent"]),
             "interferer": QColor(_t.COLORS["danger"]),
             "custom": QColor(_t.COLORS["success"]),
@@ -2397,6 +2453,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         Magnitude(占位)/Visibility(Rise/Set)。无值给占位, 不编造。"""
         info: Dict[str, object] = {
             "title": obj.name, "kind_label": "Satellite",
+            "obj_type": obj.obj_type,
+            # 受晒状态由后端快照提供；None（无太阳数据/半影）原样保留，
+            # 文案映射见 sunlit_state_label()。sunlit_status 为
+            # Illumination.status 原文（有则优先，半影不被压成受晒）。
+            "sunlit": getattr(obj, "sunlit", None),
+            "sunlit_status": getattr(obj, "sunlit_status", None),
             "norad": None, "cospar": "", "aliases": [],
             "dist_km": self._parse_distance_km(obj),
             "az": obj.azimuth_deg, "alt": obj.elevation_deg,
@@ -3060,7 +3122,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     # 左下信息卡尺寸（绘制与测试的唯一事实源，避免测试写死像素值漂移）
     INFO_CARD_W = 240
-    INFO_CARD_H = 222
+    INFO_CARD_H = 240
 
     def _dso_symbol_geometry(self, az: float, alt: float, dia_arcmin: float) \
             -> Tuple[float, bool]:
@@ -3826,6 +3888,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
             if obj.obj_type == "satellite":
                 size = 6
+                # 受晒状态只消费后端字段：只有本影（umbra / sunlit=False）
+                # 压暗本体 + 暗色虚线描边；受晒/半影/未知都保持原色，
+                # 绝不伪造阴影。
+                eclipsed = sunlit_is_eclipsed(
+                    getattr(obj, "sunlit", None),
+                    getattr(obj, "sunlit_status", None))
+                body_color = (self._colors["sat_eclipse"]
+                              if eclipsed else color)
                 # 信号点亮：频带里听到它 -> 同心辉光环（由内向外渐淡）
                 if obj.name in self._signal_sats:
                     for ring, (rr, aa) in enumerate(((size + 5, 90),
@@ -3841,9 +3911,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     QPointF(pos.x(), pos.y() + size),
                     QPointF(pos.x() - size, pos.y()),
                 ])
-                painter.setPen(QPen(color, 2))
-                painter.setBrush(QBrush(color))
+                painter.setPen(QPen(body_color, 2))
+                painter.setBrush(QBrush(body_color))
                 painter.drawPolygon(diamond)
+                if eclipsed:
+                    pen = QPen(self._colors["sat_eclipse_ring"], 1)
+                    pen.setStyle(Qt.DashLine)
+                    painter.setPen(pen)
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(pos, size + 4, size + 4)
                 # 卫星名 + 仰角方位 + 频率作为一个块进统一避让：
                 # 块内三行同进同退，块与星名/座名冲突时按 0.5 优先级占位
                 # （卫星是操作对象，用户要靠它决定调谐/跟踪）。
@@ -4923,6 +4999,26 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(ink if trk else dim)
         painter.drawText(card_x + 52, y,
                          f"跟踪 {trk}" if trk else "未开启")
+
+        # 受晒/地影：只消费后端快照的 sunlit 字段（本视图不自算物理判据）。
+        # None 显示「未知（无受晒数据）」——既涵盖后端缺太阳数据，也涵盖
+        # 半影（部分受照）；三种状态都不会画成「受晒」冒充。
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "受晒")
+        painter.setFont(self._mono_font)
+        sel = self._selected_info or {}
+        sunlit_txt = sunlit_state_label(sel.get("sunlit"),
+                                        str(sel.get("obj_type", "")),
+                                        sel.get("sunlit_status"))
+        if sunlit_txt == "受晒":
+            painter.setPen(ink)
+        elif sunlit_txt.startswith("未知") or sunlit_txt == "—":
+            painter.setPen(dim)
+        else:                        # 地影 / 半影：警示色
+            painter.setPen(self._colors["warning"])
+        painter.drawText(card_x + 52, y, sunlit_txt)
 
         # 图层诚实空态（复用状态卡既有状态位，不另起浮层）：
         # 本视图没有银河亮度数据，如实说「无数据·不提供」，不画装饰性光带。

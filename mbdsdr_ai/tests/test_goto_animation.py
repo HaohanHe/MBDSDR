@@ -15,11 +15,19 @@ GotoAnimation 纯缓动行为测试 (mbdsdr_ai/tests/test_goto_animation.py)
 """
 import math
 
+from ..celestial_geometry import vec_from_azalt, azalt_from_vec
 from ..sky_interaction import (
     GotoAnimation,
     ViewState,
     DEFAULT_GOTO_DURATION_MS,
 )
+
+
+def _sep(a, b) -> float:
+    """两 (az, alt) 的大圆角距（度）。"""
+    va = vec_from_azalt(a[0], a[1])
+    vb = vec_from_azalt(b[0], b[1])
+    return math.degrees(math.acos(max(-1.0, min(1.0, float(va @ vb)))))
 
 
 def _start() -> ViewState:
@@ -60,8 +68,10 @@ class TestStepTimeline:
     def test_midpoint_progress_0875(self):
         vs, done = _anim().step(DEFAULT_GOTO_DURATION_MS / 2.0)
         assert not done
-        # 线性量（alt）在缓动 0.875 处：30 + 0.875*20 = 47.5
-        assert abs(vs.center_alt - 47.5) < 1e-9
+        # 缓动 e=0.875 → 沿大圆走完 87.5% 的角距（不是 az/alt 各自线性）
+        total = _sep((350.0, 30.0), (10.0, 50.0))
+        walked = _sep((350.0, 30.0), (vs.center_az, vs.center_alt))
+        assert abs(walked - 0.875 * total) < 1e-6
 
     def test_overshoot_clamps_to_target(self):
         vs, done = _anim().step(DEFAULT_GOTO_DURATION_MS * 3.0)
@@ -91,8 +101,51 @@ class TestAzimuthShortestArc:
     def test_midpoint_crossing_north(self):
         anim = _anim()
         vs, _ = anim.step(DEFAULT_GOTO_DURATION_MS / 2.0)
-        # 350 + 0.875*20 = 367.5 -> clamp mod 360 = 7.5
-        assert abs(vs.center_az - 7.5) < 1e-9
+        # 过 0° 走最短弧：中点方位应落在 350°..10° 的窄弧内，而不是 180° 附近
+        assert vs.center_az < 20.0 or vs.center_az > 340.0
+        assert 30.0 < vs.center_alt < 50.0
+        # 剩余角距 = 12.5%·总角距（最短路径，非绕远路）
+        total = _sep((350.0, 30.0), (10.0, 50.0))
+        remain = _sep((vs.center_az, vs.center_alt), (10.0, 50.0))
+        assert abs(remain - 0.125 * total) < 1e-6
+
+
+class TestGreatCirclePath:
+    def test_near_zenith_stays_at_zenith_no_altitude_swoop(self):
+        # 近天顶两点：若按 az/alt 线性会先掉到 45° 再爬回来；大圆应贴天顶走
+        start = ViewState(center_az=0.0, center_alt=89.9, fov_deg=120.0)
+        anim = GotoAnimation(start, target_az=180.0, target_alt=89.9)
+        alts = []
+        for k in range(1, 20):
+            vs, _ = anim.step(DEFAULT_GOTO_DURATION_MS * k / 20.0)
+            alts.append(vs.center_alt)
+        assert min(alts) > 89.5, f"大圆路径不该俯冲低于 89.5°，实测 {min(alts):.2f}°"
+        vs, done = anim.step(DEFAULT_GOTO_DURATION_MS)
+        assert done
+        assert abs(vs.center_az - 180.0) < 1e-9
+        assert abs(vs.center_alt - 89.9) < 1e-9
+
+    def test_crossing_zero_is_continuous(self):
+        # 多次小步采样：相邻帧角距应单调平滑，不出现 >1° 的瞬跳（抽搐）
+        anim = _anim()
+        prev = (350.0, 30.0)
+        max_jump = 0.0
+        for k in range(1, 101):
+            vs, _ = anim.step(DEFAULT_GOTO_DURATION_MS * k / 100.0)
+            max_jump = max(max_jump,
+                           _sep(prev, (vs.center_az, vs.center_alt)))
+            prev = (vs.center_az, vs.center_alt)
+        assert max_jump < 1.0, f"单帧最大跳变 {max_jump:.3f}°"
+
+    def test_antipodal_is_finite_and_lands_exact(self):
+        start = ViewState(center_az=0.0, center_alt=-89.9, fov_deg=120.0)
+        anim = GotoAnimation(start, target_az=180.0, target_alt=89.9)
+        vs, _ = anim.step(DEFAULT_GOTO_DURATION_MS / 2.0)
+        assert math.isfinite(vs.center_az) and math.isfinite(vs.center_alt)
+        vs, done = anim.step(DEFAULT_GOTO_DURATION_MS)
+        assert done
+        assert abs(vs.center_az - 180.0) < 1e-9
+        assert abs(vs.center_alt - 89.9) < 1e-9
 
 
 class TestFovHandling:
