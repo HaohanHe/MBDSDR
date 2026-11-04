@@ -40,6 +40,12 @@ def test_builtin_catalog_loaded():
         l1, l2 = s["tle"]
         assert l1.startswith("1 ") and l2.startswith("2 ")
         assert len(l1) >= 69 and len(l2) >= 69
+        # P10：每条都带身份/新鲜度标记（过期可显示，但标明不可默认跟踪）
+        assert s["identity_status"] in ("verified", "no_data")
+        assert s["tle_tier"] in ("fresh", "usable", "expired", "dead", "unknown")
+        assert s["accuracy_risk"] in ("low", "moderate", "high", "unusable")
+        if s["tle_tier"] in ("expired", "dead", "unknown"):
+            assert s["pass_eligible"] is False
 
 
 def test_select_by_name_and_id():
@@ -147,3 +153,65 @@ def test_tle_date_label():
     t = SatelliteTracker(_beijing_gs())
     assert t.tle_date == BUILTIN_TLE_DATE
     assert t.tle_date.startswith("2026-")
+
+
+# ---------------------------------------------------------------------------
+# P10：刷新失败/身份错配必须留痕，不许静默（编号↔名称↔来源）
+# ---------------------------------------------------------------------------
+_NOAA15_L1 = ("1 25338U 98030A   26268.86268050  .00000085  00000+0  "
+              "52080-4 0  9991")
+_NOAA15_L2 = ("2 25338  98.5049 286.7672 0011219  56.3023 303.9227  "
+              "14.27170971475651")
+
+
+def test_refresh_failure_keeps_old_and_records_error(monkeypatch):
+    t = SatelliteTracker(_beijing_gs())
+    before = {s["name"]: s["tle"] for s in t.list_satellites()}
+
+    class _Req:
+        @staticmethod
+        def get(*a, **k):
+            raise OSError("network unreachable")
+
+    monkeypatch.setitem(sys.modules, "requests", _Req)
+    assert t.update_tle_from_celestrak() == 0
+    assert "联网刷新失败" in t.last_refresh_error       # 不静默
+    after = {s["name"]: s["tle"] for s in t.list_satellites()}
+    assert after == before                              # 旧值保留，不丢
+    assert t.tle_date == BUILTIN_TLE_DATE               # 日期不假称已更新
+
+
+def test_refresh_identity_mismatch_is_not_adopted(monkeypatch):
+    """25338 的目录名是 NOAA 15，但下拉数据里该编号叫 ATLAS 残骸：
+    不采用、不重命名、不覆盖轨道，标 mismatch 并记录冲突。"""
+    t = SatelliteTracker(_beijing_gs())
+    text = f"ATLAS 5 CENTAUR DEB\n{_NOAA15_L1}\n{_NOAA15_L2}\n"
+
+    class _Resp:
+        pass
+
+    _Resp.text = text
+
+    @staticmethod
+    def _raise_status():
+        return None
+
+    _Resp.raise_for_status = _raise_status
+
+    class _Req:
+        @staticmethod
+        def get(*a, **k):
+            return _Resp()
+
+    monkeypatch.setitem(sys.modules, "requests", _Req)
+    assert t.update_tle_from_celestrak() == 0
+    assert t.identity_conflicts and \
+        t.identity_conflicts[0]["object_name"] == "ATLAS 5 CENTAUR DEB"
+    sats = {s["name"]: s for s in t.list_satellites()}
+    assert sats["NOAA 15"]["identity_status"] == "mismatch"
+    assert sats["NOAA 15"]["degraded"] is True
+    assert sats["NOAA 15"]["tle"][0] == _NOAA15_L1      # 旧轨道未被覆盖
+    # 红线：错配条目不得用于跟踪
+    assert t.select_satellite("NOAA 15") is False
+    assert t.select_satellite("25338") is False
+

@@ -39,6 +39,7 @@ except ImportError:  # skyfield 属 satellite 可选依赖组；缺它模块仍�
     _HAS_SKYFIELD = False
 
 from .sat_passes import _require_skyfield  # noqa: E402  (统一的诚实报错口径)
+from .tle_integrity import accuracy, freshness, verify_identity  # noqa: E402
 
 # 复用 sat_passes 已经过验证的核心：地面站数据类、过境预测、TLE 解析、
 # 站心方位/仰角/斜距/径向速度计算、光速常量。本模块不重写坐标数学。
@@ -161,6 +162,9 @@ class SatelliteTracker:
         self._diff = None           # (sat - topo) 的几何对象
         self._downlink_freq_hz: float = 0.0
         self._tle_date: str = BUILTIN_TLE_DATE
+        # P10：刷新结果留痕（取新失败不静默）与身份冲突清单
+        self._last_refresh_error: str = ""
+        self._identity_conflicts: List[Dict[str, object]] = []
 
         # 启动即加载内置真实 TLE（失败不崩：单条无效跳过）。
         for tle in _BUILTIN_TLES:
@@ -189,11 +193,28 @@ class SatelliteTracker:
             "norad_id": norad_id,
             "line1": line1,
             "line2": line2,
+            "identity_status": "no_data" if not name else "verified",
+            "source": "builtin_or_user",
         })
+        self._annotate_entry(self._catalog[-1])
         # 若刷新的是当前选中星，重建传播器
         if self._selected_name == name:
             self._build_satellite(name)
         return True
+
+    @staticmethod
+    def _annotate_entry(entry: Dict[str, object]) -> None:
+        """按 TLE 历元给目录条目打新鲜度/精度标记（显示可，默认跟踪需谨慎）。"""
+        fresh = freshness(str(entry.get("line1", "")),
+                          entry.get("fetched_at") if isinstance(entry.get("fetched_at"), (int, float)) else None)
+        acc = accuracy(fresh)
+        entry["tle_tier"] = fresh["tier"]
+        entry["tle_tier_label"] = fresh["label"]
+        entry["tle_age_days"] = fresh["age_days"]
+        entry["tle_epoch_utc"] = fresh.get("epoch_utc")
+        entry["pass_eligible"] = fresh["pass_eligible"]
+        entry["accuracy_risk"] = acc["risk"]
+        entry["accuracy_note"] = acc["note"]
 
     def load_satellites_from_file(self, path: str) -> int:
         """从文件加载 TLE（单星 3 行 或 多星 block 均可）。返回成功加载条数。"""
@@ -212,11 +233,14 @@ class SatelliteTracker:
         """从 Celestrak active.txt 在线刷新内置目录的 TLE。
 
         只刷新目录里已有 NORAD 编号对应的条目（保持下拉列表规模可控）。
-        网络失败/超时/返回异常时静默保留内置 TLE，返回 0，绝不崩、绝不编造。
+        网络失败/超时/返回异常时保留旧值并记入 ``last_refresh_error``
+        （不静默），返回 0。编号下的对象名与目录声明不符时**不采用**新数据，
+        标记 ``identity_status="mismatch"`` 并记入 ``identity_conflicts``。
         """
         try:
             import requests
         except Exception:
+            self._last_refresh_error = "requests 不可用，未刷新（沿用旧 TLE）"
             return 0
         try:
             resp = requests.get(
@@ -225,7 +249,8 @@ class SatelliteTracker:
             )
             resp.raise_for_status()
             text = resp.text
-        except Exception:
+        except Exception as e:  # noqa: BLE001 - 网络失败如实留痕
+            self._last_refresh_error = f"联网刷新失败（{type(e).__name__}: {e}），沿用旧 TLE"
             return 0
 
         # norad_id -> (name, line1, line2)
@@ -236,14 +261,35 @@ class SatelliteTracker:
             fresh[nid] = [name, l1, l2]
 
         updated = 0
+        self._last_refresh_error = ""
         for entry in self._catalog:
             nid = str(entry["norad_id"])
-            if nid in fresh:
-                name, l1, l2 = fresh[nid]
-                entry["name"] = name
-                entry["line1"] = l1
-                entry["line2"] = l2
-                updated += 1
+            if nid not in fresh:
+                continue
+            name, l1, l2 = fresh[nid]
+            ident = verify_identity(str(entry["name"]), name)
+            if ident["status"] == "mismatch":
+                # 编号实际指向另一颗/另一类对象：保留旧值但降级、留痕，不采用
+                entry["identity_status"] = "mismatch"
+                entry["identity_detail"] = ident["reason"]
+                entry["object_name"] = name
+                self._identity_conflicts.append({
+                    "declared_name": str(entry["name"]),
+                    "object_name": name,
+                    "norad_id": nid,
+                    "reason": ident["reason"],
+                })
+                self._annotate_entry(entry)
+                continue
+            entry["name"] = name
+            entry["line1"] = l1
+            entry["line2"] = l2
+            entry["identity_status"] = "verified"
+            entry["identity_detail"] = ident["reason"]
+            entry["object_name"] = name
+            entry["source"] = "celestrak"
+            self._annotate_entry(entry)
+            updated += 1
         if updated > 0:
             from datetime import datetime, timezone
             self._tle_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -252,14 +298,33 @@ class SatelliteTracker:
                 self._build_satellite(self._selected_name)
         return updated
 
+    @property
+    def last_refresh_error(self) -> str:
+        """最近一次联网刷新的失败原因（空串 = 成功或未尝试）。"""
+        return self._last_refresh_error
+
+    @property
+    def identity_conflicts(self) -> List[Dict[str, object]]:
+        """刷新时发现的编号↔名称不符清单（空列表 = 无冲突）。"""
+        return list(self._identity_conflicts)
+
     # ------------------------------------------------------------- 目录查询
     def list_satellites(self) -> List[Dict[str, object]]:
-        """返回已加载卫星列表：[{name, norad_id, tle: [line1, line2]}]。"""
+        """返回已加载卫星列表（含真实性/新鲜度标记，供面板如实展示）。"""
         return [
             {
                 "name": c["name"],
                 "norad_id": c["norad_id"],
                 "tle": [c["line1"], c["line2"]],
+                "identity_status": c.get("identity_status", "no_data"),
+                "tle_tier": c.get("tle_tier", "unknown"),
+                "tle_tier_label": c.get("tle_tier_label", "未知"),
+                "tle_age_days": c.get("tle_age_days"),
+                "tle_epoch_utc": c.get("tle_epoch_utc"),
+                "pass_eligible": c.get("pass_eligible", False),
+                "accuracy_risk": c.get("accuracy_risk", "unusable"),
+                "accuracy_note": c.get("accuracy_note", ""),
+                "degraded": c.get("identity_status") == "mismatch",
             }
             for c in self._catalog
         ]
@@ -273,6 +338,11 @@ class SatelliteTracker:
         """根据 name 找目录条目，构造 skyfield 传播器与站心几何对象。"""
         entry = next((c for c in self._catalog if c["name"] == name), None)
         if entry is None:
+            return False
+        if entry.get("identity_status") == "mismatch":
+            # 红线：编号指向另一颗对象，拒绝拿错轨道做跟踪
+            self._sat = None
+            self._diff = None
             return False
         try:
             sat = EarthSatellite(entry["line1"], entry["line2"], entry["name"], self._ts)
@@ -343,6 +413,8 @@ class SatelliteTracker:
         if self.ground_station is None or self._diff is None or self._sat is None:
             return empty
 
+        entry = next((c for c in self._catalog
+                      if c["name"] == self._selected_name), {})
         t = self._ts.now()
         r = _range_and_rate(self._diff, t)
         if r is None:
@@ -374,6 +446,13 @@ class SatelliteTracker:
             "doppler_rate_hz_s": float(dop_rate),
             "corrected_freq_hz": float(self._downlink_freq_hz + dop),
             "is_visible": float(el) >= DEFAULT_MIN_ELEVATION_DEG,
+            # P10：新鲜度/精度风险随位置一起透出（过期 TLE 不可盲目跟踪）
+            "tle_tier": entry.get("tle_tier", "unknown"),
+            "tle_age_days": entry.get("tle_age_days"),
+            "accuracy_risk": entry.get("accuracy_risk", "unusable"),
+            "accuracy_note": entry.get("accuracy_note", ""),
+            "pass_eligible": entry.get("pass_eligible", False),
+            "refresh_status": self._last_refresh_error or "ok",
         }
 
     def is_visible(self, min_elevation: float = DEFAULT_MIN_ELEVATION_DEG) -> bool:
