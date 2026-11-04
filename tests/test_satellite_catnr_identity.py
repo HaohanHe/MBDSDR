@@ -184,3 +184,49 @@ class TestLiveCache:
         by_name = {e["name"]: e for e in cat}
         assert by_name["METEOR M2"]["line1"].startswith("1 40069")
         assert by_name["FENGYUN 3D"]["line1"].startswith("1 43010")
+
+
+# ---------------------------------------------------------------------------
+# P10 扩展：编号 ↔ 名称 ↔ 来源 三方校验接入身份红线
+# ---------------------------------------------------------------------------
+class TestCatalogIdentityGate:
+    """编号-名称-来源校验的回归锁：错配必须降级，不得被采用。"""
+
+    _ATLAS_L1 = ("1 44016U 14055BX  26305.50000000 -.00000086  00000+0  "
+                 "00000+0 0  9990")
+    _ATLAS_L2 = ("2 44016  19.8252 144.6831 4693919 161.0339 224.8913  "
+                 "1.83868310 52931")
+
+    def test_python_and_desktop_catalogs_agree_on_real_catnrs(self):
+        """desktop 目录表与 Python 内置表必须指向同一组真实编号。"""
+        from mbdsdr_ai.orbit import BUILTIN_SATS
+        from mbdsdr_ai.new_spacetime_tle import DEFAULT_SATELLITES
+        table = _meta_table()
+        assert table["METEOR M2"]["catnr"] == 40069
+        assert table["FENGYUN 3D"]["catnr"] == 43010
+        assert BUILTIN_SATS["METEOR M2"] == table["METEOR M2"]["catnr"]
+        assert BUILTIN_SATS["FENGYUN 3D"] == table["FENGYUN 3D"]["catnr"]
+        assert dict(DEFAULT_SATELLITES)["METEOR M2"] == 40069
+        assert dict(DEFAULT_SATELLITES)["FENGYUN 3D"] == 43010
+
+    def test_injected_mismatch_is_degraded_not_used(self):
+        """注入事故条目（METEOR M2 → 44016，数据实为 ATLAS 5 CENTAUR DEB）：
+        必须降级、不可选、不可用于过境/跟踪，并给出真实对象名。"""
+        from datetime import datetime, timezone
+        from mbdsdr_ai.tle_integrity import CatalogEntry, scan_catalog
+        decls = [CatalogEntry(name="METEOR M2", catnr=44016, source="builtin")]
+        pool = [CatalogEntry(
+            name="ATLAS 5 CENTAUR DEB", catnr=44016, source="cache",
+            line1=self._ATLAS_L1, line2=self._ATLAS_L2,
+            object_name="ATLAS 5 CENTAUR DEB", data_source="cache",
+            fetched_at=datetime(2026, 11, 2, tzinfo=timezone.utc).timestamp())]
+        rep = scan_catalog(decls, pool,
+                           now=datetime(2026, 11, 2, tzinfo=timezone.utc))
+        row = rep["rows"][0]
+        assert row["identity"]["status"] == "mismatch"
+        assert row["object_name"] == "ATLAS 5 CENTAUR DEB"
+        assert row["degraded"] is True
+        assert row["selectable"] is False
+        assert row["pass_eligible"] is False
+        assert row["tracking_eligible"] is False
+        assert rep["passed"] == 0 and rep["mismatch"] == 1
