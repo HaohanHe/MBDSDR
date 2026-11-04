@@ -262,7 +262,7 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
                        freq_hz: Optional[float] = None,
                        device: Optional[str] = None,
                        gain_db: float = 0.0,
-                       doppler_precomp: bool = False,
+                       doppler_precomp: Optional[bool] = None,
                        tx_token: Optional[str] = None,
                        ) -> Dict[str, Any]:
     """TC 上行发射（人工门 + 无设备诚实 NEED_HW + 可选多普勒预偏）。
@@ -273,8 +273,10 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
       * 频点缺省 → 参数错误（频点是安全关键参数，不猜）。
     本函数不内置任何设备驱动；有设备时由各设备适配层在门通过后接管。
 
-    多普勒预偏（doppler_precomp=True）：上行频率按**发射时刻**的预测
-    多普勒反向预偏（目标接近→压低，远离→抬高），来源是进程级唯一真相源
+    多普勒预偏（``doppler_precomp=None`` 为默认自动）：有跟踪目标时默认
+    按**发射时刻**的预测反向预偏（目标接近→压低，远离→抬高），并在
+    ``doppler.mode="auto"`` 如实标明是自动开的；无目标则不偏并标
+    「无目标，未预偏」；显式 ``False`` 严格按标称。来源是进程级唯一真相源
     mbdsdr_ai.doppler_link（与 RX 调谐补偿同一预测）。无目标/预测失效/
     后端补偿活动 → 结果带 doppler 说明字段如实标注「未预偏」及原因，
     绝不静默沿用过期偏移。
@@ -305,12 +307,20 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
         return {"status": "PARAM_ERROR", "reason": "iq 未提供（复基带采样）"}
 
     # ---- 多普勒预偏（发射时刻预测；唯一真相源，防双补偿）----
+    # doppler_precomp=None 表示未显式指定：有跟踪目标 → 默认预偏（读数标
+    # mode=auto），无目标 → 不偏。显式 False 严格按标称。
+    from .doppler_link import get_compensator
+    comp = get_compensator()
+    auto = doppler_precomp is None
+    want = bool(comp.state.target_name) if auto else bool(doppler_precomp)
     nominal_hz = float(freq_hz)
     tx_hz = nominal_hz
-    doppler_note: Dict[str, Any] = {"requested": bool(doppler_precomp)}
-    if doppler_precomp:
-        from .doppler_link import get_compensator
-        comp = get_compensator()
+    doppler_note: Dict[str, Any] = {
+        "requested": doppler_precomp,
+        "mode": "auto" if auto else ("on" if want else "off"),
+        "applied": False,
+    }
+    if want:
         comp.refresh()
         pre = comp.tx_freq(nominal_hz)
         if pre is not None:
@@ -327,6 +337,10 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
                 "applied": False,
                 "reason": comp.state.reason or "无有效卫星目标/补偿未开启",
             })
+    else:
+        doppler_note["reason"] = (
+            "无目标，未预偏" if auto
+            else "已关闭（doppler_precomp=false，严格按标称）")
 
     # 纯软件环境：无任何发射设备适配层声明可用 → 诚实 NEED_HW
     return {
@@ -426,7 +440,8 @@ def register_tool_registry(registry) -> None:
             freq_hz=args.get("freq_hz"),
             device=args.get("device"),
             gain_db=float(args.get("gain_db", 0.0)),
-            doppler_precomp=bool(args.get("doppler_precomp", False)),
+            # 缺省保持 None（由跟踪状态推导），不要写成 False 把默认发偏锁死
+            doppler_precomp=args.get("doppler_precomp"),
         )
         ok = r["status"] not in ("GATED", "PARAM_ERROR", "NEED_HW")
         return ToolResult(
@@ -491,8 +506,9 @@ def register_tool_registry(registry) -> None:
             "必须由真人经外部确认通道签发一次性 confirm_token；无 token 一律 "
             "GATED 拒绝（模型自报 arm_manual 不算确认）；已授权但无可用发射设备"
             "诚实 NEED_HW；频点缺失 PARAM_ERROR（安全关键参数不猜）。"
-            "可选 doppler_precomp=true 时按发射时刻预测多普勒反向预偏上行频点"
-            "（与 RX 调谐补偿同一真相源 doppler_link；无目标/失效如实标注未预偏）。"
+            "doppler_precomp 缺省由跟踪状态推导：有跟踪目标时自动按发射时刻"
+            "预测反向预偏并在读数标 mode=auto；无目标不偏并标「无目标，未预偏」；"
+            "显式 false 才严格按标称（与 RX 调谐补偿同一真相源 doppler_link）。"
             "绝不在未过门或未接设备时谎报发射成功。"
         ),
         parameters={"type": "object", "properties": {
@@ -501,8 +517,11 @@ def register_tool_registry(registry) -> None:
             "freq_hz": {"type": "number", "description": "上行频点（Hz）"},
             "device": {"type": "string", "description": "发射设备标识"},
             "gain_db": {"type": "number", "default": 0.0},
-            "doppler_precomp": {"type": "boolean", "default": False,
-                                "description": "按发射时刻预测多普勒反向预偏上行频点"},
+            "doppler_precomp": {
+                "type": "boolean",
+                "description": ("按发射时刻预测多普勒反向预偏上行频点；缺省=有跟踪"
+                                "目标时自动预偏（读数标 auto），无目标不偏；传 false "
+                                "严格按标称")},
             "confirm_token": {"type": "string",
                               "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
         }},

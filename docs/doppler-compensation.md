@@ -207,6 +207,22 @@ switch_on = bool(st["enabled"])          # 只由 enabled 驱动
 放在状态栏定时器里。`main_window.py` 的接线由操作逻辑线负责，本批未改动
 该文件。
 
+### 3.7 发射侧（TX）仲裁
+
+发波频点与接收走**同一个** `doppler_link.tx_freq()` 与同一符号约定（接近
+→ 压低、远离 → 抬高），`backend_comp_active` 互斥闸同样生效：
+
+- `sdr_transmit_cw`（真接 HAL 发波）：缺省由状态推导——有跟踪目标自动按
+  发射时刻 `refresh()` 后预偏，读数写「已预偏（自动）」；无目标不偏并写
+  「无目标，未预偏」；`doppler_precomp=false` 严格按标称频点。
+- `tc_uplink_transmit`（TC 上行）：同一规则，`doppler.requested=null` 即
+  自动、`mode` 取 `auto/on/off`，`applied` 与 `delta_hz` 如实给。
+- 工具 `data.doppler` 字段：`requested` / `mode` / `applied` / `nominal_hz`
+  / `freq_hz` / `delta_hz`；未预偏必须带 `reason`，不得用预测值冒充实际。
+- 反证测试 `mbdsdr_ai/tests/test_transmit_doppler.py`：已知频偏下
+  `发波频率 − 标称 == 预测 Δ`；显式关时**严格等于**标称；无目标两种
+  （自动/显式开）都不偏；后端接管时也不追加预偏。
+
 ## 4. 验证（离线、合成 IQ）
 
 测试：`mbdsdr_ai/tests/test_receive_doppler.py`

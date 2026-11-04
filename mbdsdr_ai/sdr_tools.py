@@ -2425,6 +2425,12 @@ def register_sdr_tools(agent):
                 "duration_sec": {"type": "number", "description": "持续时间（秒）", "default": 1.0},
                 "gain_db": {"type": "number",
                             "description": "TX 增益（dB）；越界或能力未知时拒绝，不静默钳制"},
+                "doppler_precomp": {
+                    "type": "boolean",
+                    "description": ("是否按跟踪卫星的预测多普勒反向预偏。缺省=由状态推导："
+                                    "有跟踪目标时自动预偏（读数会标明「已预偏（自动）」），"
+                                    "无目标时不偏并标「无目标，未预偏」；传 false 可强制"
+                                    "严格按标称频点发射")},
                 "confirm_token": {"type": "string",
                                   "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
             },
@@ -6041,6 +6047,51 @@ def _sdr_connect_hardware(args):
     return '\n'.join(lines)
 
 
+def _resolve_tx_doppler(nominal_hz: float,
+                        requested: Optional[bool]) -> tuple:
+    """发射频点仲裁：唯一真相源 ``doppler_link.tx_freq``（与 RX 同符号约定）。
+
+    ``requested=None``（未显式指定）→ 由状态推导：有跟踪目标时默认预偏并在
+    读数里标明 ``mode="auto"``；无目标不偏。显式 ``False`` 严格按标称发射。
+    返回 ``(实际发波频率, 读数 dict)``；绝不返回预测值冒充实际值。
+    """
+    from .doppler_link import get_compensator
+    comp = get_compensator()
+    note: Dict[str, Any] = {
+        "requested": requested,
+        "mode": "auto" if requested is None else ("on" if requested else "off"),
+        "applied": False,
+        "nominal_hz": float(nominal_hz),
+        "freq_hz": float(nominal_hz),
+        "delta_hz": 0.0,
+    }
+    if requested is False:
+        note["reason"] = "已关闭（doppler_precomp=false，严格按标称频点发射）"
+        return float(nominal_hz), note
+    if not comp.state.target_name:
+        note["reason"] = "无目标，未预偏"
+        return float(nominal_hz), note
+
+    comp.refresh()               # 用发射时刻的预测，绝不沿用旧读数
+    pre = comp.tx_freq(nominal_hz)
+    if pre is None:
+        if comp.state.backend_comp_active:
+            note["reason"] = "后端补偿已接管，未预偏（避免双施加）"
+        else:
+            note["reason"] = comp.state.reason or "预测失效/补偿未开启，未预偏"
+        return float(nominal_hz), note
+
+    note.update({
+        "applied": True,
+        "freq_hz": float(pre),
+        "delta_hz": float(pre) - float(nominal_hz),
+        "predicted_hz": comp.state.doppler_hz,
+        "target": comp.state.target_name,
+        "reason": "",
+    })
+    return float(pre), note
+
+
 def _sdr_transmit_cw(args):
     """发射CW信号（写工具：外部确认 token 门 + 如实信封）。"""
     # 门只认外部确认通道签发的一次性 token（或上层已校验的授权上下文）；
@@ -6060,7 +6111,16 @@ def _sdr_transmit_cw(args):
     except ImportError:
         from hal import HardwareManager
 
-    freq = args['frequency_hz']
+    try:
+        nominal_hz = float(args['frequency_hz'])
+    except (KeyError, TypeError, ValueError):
+        return ToolResult(
+            success=False,
+            content=f"frequency_hz 无效: {args.get('frequency_hz')!r}")
+    # 发波频点必须走唯一事实源（与接收同一 doppler_link、同一符号约定）：
+    # 发偏了的信号对方收不到，用户却以为在发射。
+    freq, doppler_note = _resolve_tx_doppler(
+        nominal_hz, args.get('doppler_precomp'))
     amp = args.get('amplitude', 0.1)
     dur = args.get('duration_sec', 1.0)
 
@@ -6130,14 +6190,23 @@ def _sdr_transmit_cw(args):
     ok = True
 
     lines = ["=== CW 发射 ==="]
-    lines.append(f"频率: {freq/1e6:.3f} MHz")
+    lines.append(f"频率: {freq/1e6:.6f} MHz")
+    if doppler_note["applied"]:
+        mode = "自动" if doppler_note["mode"] == "auto" else "显式"
+        lines.append(
+            f"多普勒预偏: 已预偏 {doppler_note['delta_hz']:+.1f} Hz"
+            f"（标称 {nominal_hz/1e6:.6f} MHz，目标 {doppler_note['target']}，{mode}）")
+    else:
+        lines.append(f"多普勒预偏: 未预偏（{doppler_note['reason']}）")
     lines.append(f"幅度: {amp:.2f}")
     lines.append(f"持续时间: {dur:.1f} 秒")
     lines.append(f"状态: {'发射成功' if ok else '发射失败'}")
     lines.append("")
     lines.append("注意: 发射需遵守当地无线电法规，未经许可不得在禁发频段发射。")
 
-    return ToolResult(success=bool(ok), content='\n'.join(lines))
+    return ToolResult(success=bool(ok), content='\n'.join(lines),
+                      data={"freq_hz": freq, "nominal_freq_hz": nominal_hz,
+                            "doppler": doppler_note})
 
 
 def _sdr_transmit_iq(args):
