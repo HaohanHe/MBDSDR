@@ -168,6 +168,7 @@ def test_fetch_disk_cache_fallback(tmp_path, monkeypatch):
 def test_fetch_group_parse(tmp_path, monkeypatch):
     """用预置文本模拟群组响应，验证解析出多颗卫星。"""
     mgr = _make_manager(tmp_path)
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
 
     def _fake_urlopen(req, *args, **kwargs):
         assert "GROUP=" in req.full_url
@@ -186,9 +187,24 @@ def test_fetch_group_parse(tmp_path, monkeypatch):
     assert os.path.exists(os.path.join(str(tmp_path), "25544.tle"))
 
 
+def test_fetch_group_offline_makes_no_request(tmp_path, monkeypatch):
+    """P12：离线模式不发起群组请求，返回诚实空态并留下原因。"""
+    mgr = _make_manager(tmp_path)
+    monkeypatch.setenv("MBDSDR_OFFLINE", "1")
+
+    def _must_not_call(*args, **kwargs):
+        raise AssertionError("离线模式不应发起网络请求")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _must_not_call)
+    entries = mgr.fetch_group(f"{CELESTRAK_BASE}?GROUP=weather&FORMAT=tle")
+    assert entries == []
+    assert "离线模式" in mgr.last_group_error
+
+
 def test_fetch_keeps_true_object_name_and_flags_mismatch(tmp_path, monkeypatch):
     """P10 回归锁：按 44016 取件、声明名 METEOR M2，但真实对象是 ATLAS 残骸——
     不得用声明名覆盖 TLE line0，必须留痕 identity_status=mismatch 且不可用时。"""
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
     atlas_text = (
         "ATLAS 5 CENTAUR DEB\n"
         "1 44016U 14055BX  26251.53597745 -.00000086  00000+0  00000+0 0  9994\n"

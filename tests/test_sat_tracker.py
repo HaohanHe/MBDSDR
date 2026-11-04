@@ -167,6 +167,7 @@ _NOAA15_L2 = ("2 25338  98.5049 286.7672 0011219  56.3023 303.9227  "
 def test_refresh_failure_keeps_old_and_records_error(monkeypatch):
     t = SatelliteTracker(_beijing_gs())
     before = {s["name"]: s["tle"] for s in t.list_satellites()}
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
 
     class _Req:
         @staticmethod
@@ -181,11 +182,31 @@ def test_refresh_failure_keeps_old_and_records_error(monkeypatch):
     assert t.tle_date == BUILTIN_TLE_DATE               # 日期不假称已更新
 
 
+def test_refresh_offline_mode_makes_no_request(monkeypatch):
+    """P12：MBDSDR_OFFLINE=1 时禁止联网——不调 requests、如实报离线。"""
+    t = SatelliteTracker(_beijing_gs())
+    calls = []
+
+    class _Req:
+        @staticmethod
+        def get(*a, **k):
+            calls.append(a)
+            raise AssertionError("离线模式不应发起网络请求")
+
+    monkeypatch.setitem(sys.modules, "requests", _Req)
+    monkeypatch.setenv("MBDSDR_OFFLINE", "1")
+    assert t.update_tle_from_celestrak() == 0
+    assert calls == []
+    assert "离线模式" in t.last_refresh_error
+    assert t.tle_date == BUILTIN_TLE_DATE
+
+
 def test_refresh_identity_mismatch_is_not_adopted(monkeypatch):
     """25338 的目录名是 NOAA 15，但下拉数据里该编号叫 ATLAS 残骸：
     不采用、不重命名、不覆盖轨道，标 mismatch 并记录冲突。"""
     t = SatelliteTracker(_beijing_gs())
     text = f"ATLAS 5 CENTAUR DEB\n{_NOAA15_L1}\n{_NOAA15_L2}\n"
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
 
     class _Resp:
         pass

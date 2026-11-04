@@ -76,6 +76,7 @@ class TLEManager:
         self.timeout = float(timeout)
         self._mem: Dict[int, TLEEntry] = {}
         self._tle_store = None
+        self._last_group_error = ""
         try:
             os.makedirs(self.cache_dir, exist_ok=True)
         except OSError:
@@ -104,6 +105,11 @@ class TLEManager:
     def source_status(self, now: Optional[float] = None) -> Dict[str, Any]:
         """TLE 源健康度（最近成功/失败、退避剩余）——诊断/UI 直接可读。"""
         return self._store().health_report(now=now)
+
+    @property
+    def last_group_error(self) -> str:
+        """最近一次 ``fetch_group`` 的失败原因（空串 = 成功或未尝试）。"""
+        return self._last_group_error
 
     # ------------------------------------------------------------------ HTTP
     def _http_get(self, url: str) -> str:
@@ -215,11 +221,22 @@ class TLEManager:
         entry.pass_eligible = bool(fresh["pass_eligible"])
 
     def fetch_group(self, url: str) -> List[TLEEntry]:
-        """从 celestrak 群组 URL（如 gp.php?GROUP=weather&FORMAT=tle）拉取整组，解析所有 3 行块。失败返回 []。"""
+        """从 celestrak 群组 URL（如 gp.php?GROUP=weather&FORMAT=tle）拉取整组，解析所有 3 行块。失败返回 []。
+
+        P12：``MBDSDR_OFFLINE=1`` 时直接返回 []（不联网、不假装成功），
+        原因记入 ``last_group_error`` 供诊断/UI 读取。
+        """
+        from .orbit import _network_disabled
+        if _network_disabled():
+            self._last_group_error = (
+                "离线模式（MBDSDR_OFFLINE），未发起群组拉取")
+            return []
         try:
             text = self._http_get(url)
-        except Exception:
+        except Exception as e:  # noqa: BLE001 - 失败如实留痕，返回诚实空态
+            self._last_group_error = f"群组拉取失败（{type(e).__name__}: {e}）"
             return []
+        self._last_group_error = ""
         now = time.time()
         entries = self.parse_tle_text(text)
         for e in entries:

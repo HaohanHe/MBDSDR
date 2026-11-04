@@ -236,7 +236,15 @@ class SatelliteTracker:
         网络失败/超时/返回异常时保留旧值并记入 ``last_refresh_error``
         （不静默），返回 0。编号下的对象名与目录声明不符时**不采用**新数据，
         标记 ``identity_status="mismatch"`` 并记入 ``identity_conflicts``。
+
+        P12：``MBDSDR_OFFLINE=1`` 时**不发起任何网络请求**，直接如实报
+        「离线模式，未刷新」——离线语义只免联网，不冒充成功。
         """
+        from .orbit import _network_disabled
+        if _network_disabled():
+            self._last_refresh_error = (
+                "离线模式（MBDSDR_OFFLINE），未联网刷新（沿用旧 TLE）")
+            return 0
         try:
             import requests
         except Exception:
