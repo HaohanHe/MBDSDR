@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -189,6 +190,40 @@ class RecordingEntry:
                         if d.get("trash_path") not in (None, "") else None),
             notes=str(d.get("notes") or ""),
         )
+
+
+@dataclass
+class RetentionPolicy:
+    """容量/保留策略（全部可选，未设置即不启用该项规则）。"""
+
+    max_total_bytes: Optional[int] = None
+    max_age_days: Optional[float] = None
+    max_entries: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "max_total_bytes": self.max_total_bytes,
+            "max_age_days": self.max_age_days,
+            "max_entries": self.max_entries,
+        }
+
+
+def _parse_iso_dt(value: Any) -> Optional[datetime]:
+    """解析 ISO8601 时间；无法解析返回 None（不猜时间）。"""
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 # ── 跨进程文件锁 ─────────────────────────────────────────────────────────
@@ -979,6 +1014,310 @@ class RecordingLibrary:
         except OSError as exc:
             logger.error("录音库核对失败: %s", exc)
             return LibraryResult(False, "io_error", f"核对/落盘失败: {exc}")
+
+    # ── 容量与保留策略 ───────────────────────────────────────────────────
+    def _age_of(self, entry: RecordingEntry,
+                now_dt: datetime) -> Tuple[Optional[float], str]:
+        """条目年龄（天）与依据。拿不到时间就返回 (None, "unknown")。"""
+        start = _parse_iso_dt(entry.start_time)
+        basis = "start_time"
+        if start is None and entry.mtime > 0:
+            # 录制开始时间缺失时才退到文件 mtime，并如实标注依据
+            start = datetime.fromtimestamp(entry.mtime, tz=timezone.utc)
+            basis = "file_mtime"
+        if start is None:
+            return None, "unknown"
+        return max(0.0, (now_dt - start).total_seconds() / 86400.0), basis
+
+    def _build_retention_plan(self, entries: List[RecordingEntry],
+                              policy: RetentionPolicy,
+                              now_dt: datetime) -> Dict[str, Any]:
+        active = [e for e in entries
+                  if e.state not in ("trashed", "duplicate", "missing")]
+        ages: Dict[str, Tuple[float, str]] = {}
+        unavailable: List[Dict[str, Any]] = []
+        for e in active:
+            age, basis = self._age_of(e, now_dt)
+            if age is None:
+                unavailable.append({
+                    "entry_id": e.entry_id,
+                    "path": self._resolve_path(e.path),
+                    "reason": "age_unknown",
+                })
+            else:
+                ages[e.entry_id] = (age, basis)
+        for e in entries:
+            if e.state == "missing":
+                unavailable.append({
+                    "entry_id": e.entry_id,
+                    "path": self._resolve_path(e.path),
+                    "reason": "file_missing",
+                    "size_bytes": int(e.size_bytes),
+                })
+
+        candidates: Dict[str, Dict[str, Any]] = {}
+
+        def add_candidate(entry: RecordingEntry, reason: str) -> None:
+            item = candidates.get(entry.entry_id)
+            if item is None:
+                age, basis = ages.get(entry.entry_id, (None, "unknown"))
+                item = {
+                    "entry_id": entry.entry_id,
+                    "path": self._resolve_path(entry.path),
+                    "size_bytes": int(entry.size_bytes),
+                    "age_days": (round(age, 3) if age is not None else None),
+                    "age_basis": basis,
+                    "reasons": [],
+                }
+                candidates[entry.entry_id] = item
+            if reason not in item["reasons"]:
+                item["reasons"].append(reason)
+
+        if policy.max_age_days is not None:
+            for e in active:
+                a = ages.get(e.entry_id)
+                if a and a[0] > float(policy.max_age_days):
+                    add_candidate(
+                        e,
+                        f"超过保留期限 {policy.max_age_days:g} 天"
+                        f"（实际 {a[0]:.2f} 天，依据 {a[1]}）",
+                    )
+
+        total_bytes = sum(int(e.size_bytes) for e in active)
+        ordered = sorted(
+            active,
+            key=lambda e: (e.entry_id not in ages,
+                           -(ages[e.entry_id][0] if e.entry_id in ages else 0.0)),
+        )
+        if (policy.max_total_bytes is not None
+                and total_bytes > int(policy.max_total_bytes)):
+            remaining = total_bytes
+            for e in ordered:
+                if remaining <= int(policy.max_total_bytes):
+                    break
+                if int(e.size_bytes) <= 0:
+                    continue
+                add_candidate(
+                    e,
+                    f"活动库容量 {total_bytes} 字节超过上限 "
+                    f"{int(policy.max_total_bytes)} 字节，按最旧优先移出",
+                )
+                remaining -= int(e.size_bytes)
+        if (policy.max_entries is not None
+                and len(active) > int(policy.max_entries)):
+            count = len(active)
+            for e in ordered:
+                if count <= int(policy.max_entries):
+                    break
+                add_candidate(
+                    e,
+                    f"条目数 {len(active)} 超过上限 {int(policy.max_entries)}，"
+                    f"按最旧优先移出",
+                )
+                count -= 1
+
+        ordered_candidates = sorted(
+            candidates.values(),
+            key=lambda c: (c["age_days"] is None, -(c["age_days"] or 0.0)),
+        )
+        would_free = sum(int(c["size_bytes"]) for c in ordered_candidates)
+        return {
+            "policy": policy.to_dict(),
+            "now": now_dt.isoformat(),
+            "candidates": ordered_candidates,
+            "unavailable": unavailable,
+            "active_entries": len(active),
+            "active_bytes": total_bytes,
+            "kept_entries": len(active) - len(ordered_candidates),
+            "kept_bytes": total_bytes - would_free,
+            "would_free_bytes": would_free,
+            "action": "move_to_trash",
+            "notes": ("清理动作只把文件移入库内回收站 _trash/，可手动恢复；"
+                      "磁盘空间在清空回收站后才真正释放。"),
+        }
+
+    @staticmethod
+    def _validate_policy(policy: RetentionPolicy) -> Optional[LibraryResult]:
+        for attr in ("max_total_bytes", "max_age_days", "max_entries"):
+            value = getattr(policy, attr, None)
+            if value is None:
+                continue
+            try:
+                if float(value) < 0:
+                    return LibraryResult(
+                        False, "bad_param",
+                        f"保留策略 {attr} 不能为负数: {value!r}")
+            except (TypeError, ValueError):
+                return LibraryResult(
+                    False, "bad_param", f"保留策略 {attr} 非法: {value!r}")
+        return None
+
+    def plan_retention(self, policy: RetentionPolicy, *,
+                       now: Optional[datetime] = None) -> LibraryResult:
+        """预览会移出哪些录音（dry-run；不改索引、不动文件）。"""
+        bad = self._validate_policy(policy)
+        if bad is not None:
+            return bad
+        now_dt = now or datetime.now(timezone.utc)
+        loaded = self.load()
+        if not loaded.ok:
+            return loaded
+        entries = [RecordingEntry.from_dict(d) for d in loaded.data["entries"]]
+        plan = self._build_retention_plan(entries, policy, now_dt)
+        return LibraryResult(
+            True, "dry_run" if plan["candidates"] else "no_action",
+            (f"将移出 {len(plan['candidates'])} 条（约 "
+             f"{plan['would_free_bytes']} 字节，未执行）"
+             if plan["candidates"] else "没有需要清理的录音"),
+            plan,
+        )
+
+    def _unique_trash_dest(self, dirpath: str, name: str,
+                           entry_id: str) -> str:
+        dest = os.path.join(dirpath, name)
+        if not os.path.exists(dest):
+            return dest
+        stem, ext = os.path.splitext(name)
+        for i in range(1, 1000):
+            suffix = f"__{entry_id[:8]}" + (f"_{i}" if i > 1 else "")
+            candidate = os.path.join(dirpath, f"{stem}{suffix}{ext}")
+            if not os.path.exists(candidate):
+                return candidate
+        raise OSError(f"回收站目标文件名冲突无法解决: {name}")
+
+    def apply_retention(self, policy: RetentionPolicy, *,
+                        confirm: bool = False,
+                        plan: Optional[Dict[str, Any]] = None,
+                        now: Optional[datetime] = None,
+                        trash_subdir: Optional[str] = None) -> LibraryResult:
+        """执行清理：必须 ``confirm=True``；计划过期则拒绝；文件只进回收站。"""
+        bad = self._validate_policy(policy)
+        if bad is not None:
+            return bad
+        now_dt = now or datetime.now(timezone.utc)
+        if confirm is not True:
+            preview = self.plan_retention(policy, now=now_dt)
+            if not preview.ok:
+                return preview
+            return LibraryResult(
+                False, "confirmation_required",
+                "清理会把文件移入回收站，必须 confirm=True 显式确认后才执行",
+                {"plan": preview.data},
+            )
+        try:
+            with self._lock():
+                doc, code, message = self._read_unlocked()
+                if doc is None:
+                    return LibraryResult(False, code, message)
+                entries = self._entries_of(doc)
+                fresh = self._build_retention_plan(entries, policy, now_dt)
+                if plan is not None:
+                    prev_ids = sorted(str(c.get("entry_id"))
+                                      for c in (plan.get("candidates") or []))
+                    fresh_ids = sorted(c["entry_id"]
+                                       for c in fresh["candidates"])
+                    if prev_ids != fresh_ids:
+                        return LibraryResult(
+                            False, "plan_stale",
+                            "清理计划已过期（库内容已变化），请重新 dry-run 后再确认",
+                            {"plan": fresh},
+                        )
+                if not fresh["candidates"]:
+                    return LibraryResult(True, "no_action",
+                                         "没有需要清理的录音",
+                                         {"plan": fresh})
+                stamp = now_dt.strftime("%Y%m%dT%H%M%SZ")
+                trash_dir = os.path.join(self.trash_root,
+                                         trash_subdir or stamp)
+                os.makedirs(trash_dir, exist_ok=True)
+                by_id = {e.entry_id: e for e in entries}
+                moved: List[Dict[str, Any]] = []
+                failed: List[Dict[str, Any]] = []
+                rollback: List[Tuple[str, str]] = []
+
+                for c in fresh["candidates"]:
+                    entry = by_id.get(c["entry_id"])
+                    if entry is None:
+                        continue
+                    orig = self._resolve_path(entry.path)
+                    if not os.path.exists(orig):
+                        failed.append({"entry_id": entry.entry_id,
+                                       "path": orig, "reason": "file_missing"})
+                        continue
+                    dest = self._unique_trash_dest(
+                        trash_dir, os.path.basename(orig), entry.entry_id)
+                    try:
+                        shutil.move(orig, dest)
+                    except OSError as exc:
+                        failed.append({"entry_id": entry.entry_id,
+                                       "path": orig, "reason": str(exc)})
+                        continue
+                    rollback.append((dest, orig))
+                    if entry.kind == "iq":
+                        meta_orig = sigmf_meta_path(orig)
+                        meta_dest = os.path.splitext(dest)[0] + ".sigmf-meta"
+                        if os.path.exists(meta_orig):
+                            try:
+                                shutil.move(meta_orig, meta_dest)
+                                rollback.append((meta_dest, meta_orig))
+                            except OSError:
+                                # 数据已移走；meta 留着也不影响（不删用户数据）
+                                pass
+                    entry.state = "trashed"
+                    entry.trash_path = dest
+                    entry.revision += 1
+                    entry.updated_at = _now_iso()
+                    moved.append({"entry_id": entry.entry_id,
+                                  "from": orig, "to": dest,
+                                  "size_bytes": int(c["size_bytes"]),
+                                  "reasons": list(c["reasons"])})
+
+                if moved:
+                    doc["entries"] = [e.to_dict() for e in entries]
+                    doc["last_retention"] = {
+                        "at": _now_iso(), "moved": len(moved),
+                        "failed": len(failed), "trash_dir": trash_dir,
+                    }
+                    try:
+                        self._write_doc_unlocked(doc)
+                    except OSError as exc:
+                        # 索引没落盘成功：把文件搬回原位，避免「文件在回收站、索引不知道」
+                        for dest, orig in reversed(rollback):
+                            try:
+                                shutil.move(dest, orig)
+                            except OSError:
+                                pass
+                        return LibraryResult(False, "io_error",
+                                             f"索引落盘失败，已回滚移动: {exc}")
+                    for item in moved:
+                        self._append_journal_unlocked(
+                            "retention_move", entry_id=item["entry_id"],
+                            detail={"from": item["from"], "to": item["to"],
+                                    "size_bytes": item["size_bytes"],
+                                    "reasons": item["reasons"],
+                                    "trash": True},
+                        )
+                for item in failed:
+                    self._append_journal_unlocked(
+                        "retention_failed", entry_id=item["entry_id"],
+                        detail={"path": item["path"],
+                                "reason": item["reason"]},
+                    )
+                ok = not failed
+                return LibraryResult(
+                    ok, "applied" if ok else "partial_failure",
+                    (f"已移入回收站 {len(moved)} 条"
+                     + (f"；{len(failed)} 条失败" if failed else "")
+                     + "（可从 _trash/ 恢复，未删除）"),
+                    {"moved": moved, "failed": failed, "trash_dir": trash_dir,
+                     "plan": fresh, "journal": self.journal_path,
+                     "notes": fresh["notes"]},
+                )
+        except LibraryBusyError as exc:
+            return LibraryResult(False, exc.code, str(exc))
+        except OSError as exc:
+            logger.error("保留策略执行失败: %s", exc)
+            return LibraryResult(False, "io_error", f"清理执行失败: {exc}")
 
     # ── 元数据恢复（中断写入 / 断电式损坏）─────────────────────────────
     def recover_metadata(self, entry_id: str, *,
