@@ -671,6 +671,21 @@ def format_utc_datetime(when) -> str:
     return "—" if dt is None else dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
+def format_duration_s(seconds: float) -> str:
+    """时间跳转量（带符号）：秒 / 分钟 / 小时，随量级换单位。"""
+    try:
+        v = float(seconds)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    if abs(v) < 60.0:
+        return f"{v:+.0f} 秒"
+    if abs(v) < 3600.0:
+        return f"{v / 60.0:+.1f} 分钟"
+    return f"{v / 3600.0:+.2f} 小时"
+
+
 def format_local_time(when, tz=None, fmt: str = "%H:%M:%S") -> str:
     """本地时刻 + 明确的 UTC 偏移，例 "03:06:07 (UTC+08:00)"。
 
@@ -1342,6 +1357,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._lock_snap_rate: Optional[float] = None
         # 上一次锁定目标 (az, el)：用于区分「逐帧目标位移」与「初始捕获跳转」
         self._lock_prev_target: Optional[Tuple[float, float]] = None
+        # 待处理的一次性时间跳转（面板「±10m / 跳到此刻」后告知视图）：
+        # 下一帧据此决定「目标仍可见→直接贴住并说明」还是「已落地→诚实解锁」
+        self._pending_time_jump: Optional[str] = None
         # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
         self._tune_sat_name: Optional[str] = None
         # 跟踪环目标星名（跟踪中防止换星残留假状态）
@@ -1608,6 +1626,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._camera_lock = str(name)
         self._lock_snap_rate = None
         self._lock_prev_target = None
+        self._pending_time_jump = None
         self._sync_camera_btn()
         self.update()
         return True
@@ -1637,6 +1656,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._camera_lock = None
         self._lock_snap_rate = None
         self._lock_prev_target = None
+        self._pending_time_jump = None
         if notice and was:
             self._camera_notice = notice
             self._camera_notice_until = time.time() + 3.0
@@ -1702,35 +1722,70 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return None
         return float(st["azimuth"]), float(st["elevation"])
 
+    def notify_time_jump(self, label: str) -> None:
+        """一次性时间跳转（面板 ±10m / 跳到此刻）后由面板调用。
+
+        确定语义（下一帧在 ``_apply_camera_lock`` 里执行）：
+          * 目标仍在地平线上 -> 继续锁定，但**直接贴住**新时刻的位置并提示，
+            不做「瞬移后缓慢追上」的假跟踪；
+          * 目标已落地/轨道失效 -> 诚实解锁并说明是跳转所致；
+          * 未锁定时只复位快转直贴提示状态，无其它副作用。
+        """
+        self._pending_time_jump = str(label)
+        self._lock_prev_target = None
+        self._lock_snap_rate = None
+
     def _apply_camera_lock(self):
         """33ms tick：把视图中心贴到锁定目标的当前 az/el。
 
-        平滑策略：指数趋近 center += delta * k（时间常数约 4 tick ≈ 0.13s），
-        1x 稳态滞后 <0.02°，远小于最小 FOV 的像素当量；方位角按最短路径。
+        平滑策略：指数趋近 center += delta * 0.25（每 tick 33ms）。静止目标
+        无稳态误差；运动目标稳态滞后 ≈ 3 倍单帧目标位移（LEO 在 30fps 下
+        约 0.1-0.15°，亚度级）；方位角按最短路径。
         快转（|rate|>1）且单帧目标位移超过 LOCK_SMOOTH_MAX_STEP_DEG 时，
         平滑跟随必然跟不上（×300 一帧模拟 10s，目标可动数度到数十度）→
         改为逐帧直贴（k=1），并一次性诚实提示「跟不上，已直贴」；位移超过
         LOCK_FAST_SLIDE_STEP_DEG 时提示画面只能按帧跳进（不改口、不冒充平滑）。
         目标落地（el<0）/数据失效 → 诚实解锁并提示。
+
+        时间跳转（面板一次性跳时）单独处理：目标仍可见就按新时刻直接贴住
+        并提示；目标已落地则解锁并说明——不把大跨度跳转伪装成平滑跟踪。
         """
         if self._camera_lock is None:
+            self._pending_time_jump = None
             return
-        res = self._lock_target_azalt(self._camera_lock)
+        name = self._camera_lock
+        jump = self._pending_time_jump
+        self._pending_time_jump = None
+        res = self._lock_target_azalt(name)
         if res is None:
             why = self._lock_denied_reason
             if why:
-                self._unlock_camera(
-                    f"摄像机已解锁：站址不可信（{why}），拒绝继续跟踪")
+                msg = f"摄像机已解锁：站址不可信（{why}），拒绝继续跟踪"
             else:
-                self._unlock_camera(
-                    f"摄像机已解锁：{self._camera_lock} 轨道数据失效")
+                msg = f"摄像机已解锁：{name} 轨道数据失效"
+            if jump:
+                msg += f"（时间跳转 {jump} 后）"
+            self._unlock_camera(msg)
             return
         az, el = res
         if el < 0.0:
-            self._unlock_camera(
-                f"摄像机已解锁：{self._camera_lock} 落入地平线下")
+            msg = (f"摄像机已解锁：时间跳转 {jump} 后 {name} 已落入地平线下"
+                   if jump else f"摄像机已解锁：{name} 落入地平线下")
+            self._unlock_camera(msg)
             return
         vs = self.view_state
+        if jump:
+            # 大跨度跳转：锁定语义明确——目标还在天上就继续锁，但直接贴住，
+            # 不缓动（缓动会看起来像「瞬移后假装还在慢慢跟」）。
+            vs.center_az = az % 360.0
+            vs.center_alt = max(-89.9999, min(89.9999, el))
+            self._lock_prev_target = (az, el)
+            self._lock_snap_rate = None
+            self._camera_notice = (
+                f"时间跳转 {jump}：{name} 仍在天空 "
+                f"{format_angle_deg(el)}，已按新时刻直接贴住并继续锁定")
+            self._camera_notice_until = time.time() + 4.0
+            return
         d_az = ((az - vs.center_az + 540.0) % 360.0) - 180.0
         d_alt = el - vs.center_alt
         if abs(d_az) < 1e-6 and abs(d_alt) < 1e-6:
@@ -5233,22 +5288,39 @@ class RFSkyViewPanel(QFrame):
         bar.setSpacing(4)
         self.time_label = QLabel("实时")
         self.time_label.setMinimumWidth(160)
+        self.time_label.setToolTip(
+            "倍率=模拟时间推进速度（1 真实秒 = N 模拟秒），不是画面帧率；"
+            "×1 为实时（模拟时间=真实时间）")
         bar.addWidget(self.time_label)
         bar.addStretch()
-        for label, cb in (("<< -10m", lambda: self._adjust(-600)),
-                          ("实时", self._reset_time),
-                          ("+10m >>", lambda: self._adjust(600))):
+        for label, cb, tip in (
+                ("<< -10m", lambda: self._adjust(-600),
+                 "模拟时间一次性回退 10 分钟；锁定目标若已落地会诚实解锁"),
+                ("跳到此刻", self._reset_time,
+                 "跳到当前真实时间并恢复 1x；跨越大段时间时锁定目标若已落地"
+                 "会诚实解锁，仍在天空则按新时刻直接贴住"),
+                ("+10m >>", lambda: self._adjust(600),
+                 "模拟时间一次性前进 10 分钟；锁定目标若已落地会诚实解锁")):
             b = QPushButton(label)
+            b.setToolTip(tip)
             b.clicked.connect(cb)
             bar.addWidget(b)
         # 时间流速档（StelCore::setTimeRate UX 化）：快转看过境是
         # 星象仪叙事主轴"历"。倍率由 new_spacetime 时间引擎执行，
         # 视图 _current_jd 每帧 tick，天空/卫星轨道随之流动。
         self._rate_buttons: Dict[str, QPushButton] = {}
+        _rate_tips = {
+            "⏸": "暂停模拟时间（模拟时钟冻结；画面帧率不变）",
+            "▶": "实时：1 模拟秒 = 1 真实秒（与画面帧率无关）",
+            "×60": "模拟时间 ×60（1 真实秒 = 60 模拟秒）；与画面帧率无关",
+            "×300": "模拟时间 ×300（1 真实秒 = 300 模拟秒）；与画面帧率无关",
+            "×1800": "模拟时间 ×1800（1 真实秒 = 1800 模拟秒）；与画面帧率无关",
+        }
         for label, rate in (("⏸", 0.0), ("▶", 1.0),
                             ("×60", 60.0), ("×300", 300.0),
                             ("×1800", 1800.0)):
             b = QPushButton(label)
+            b.setToolTip(_rate_tips[label])
             b.setCheckable(True)
             b.clicked.connect(lambda _c=False, r=rate: self._set_rate(r))
             bar.addWidget(b)
@@ -5289,7 +5361,10 @@ class RFSkyViewPanel(QFrame):
         try:
             from mbdsdr_ai.new_spacetime import get_time_engine
             eng = get_time_engine()
+            jump = format_duration_s(seconds)
             eng.set_unix(eng.now_unix() + seconds)
+            # 告知锁定逻辑：这是一次性跳时，不是正常时间推进
+            self.sky_view.notify_time_jump(jump)
         except Exception:
             pass
         self._update_label()
@@ -5298,8 +5373,14 @@ class RFSkyViewPanel(QFrame):
         self._offset = 0.0
         try:
             from mbdsdr_ai.new_spacetime import get_time_engine
-            get_time_engine().set_time_now()
-            self._set_rate(1.0)          # "实时" = 回墙钟 + 恢复 1x
+            eng = get_time_engine()
+            old = eng.now_unix()
+            eng.set_time_now()
+            delta = eng.now_unix() - old
+            self._set_rate(1.0)          # "跳到此刻" = 回墙钟 + 恢复 1x
+            label = ("跳到此刻" if abs(delta) < 1.0
+                     else f"跳到此刻 {format_duration_s(delta)}")
+            self.sky_view.notify_time_jump(label)
         except Exception:
             pass
         self._update_label()
@@ -5310,6 +5391,10 @@ class RFSkyViewPanel(QFrame):
             from mbdsdr_ai.new_spacetime import get_time_engine
             eng = get_time_engine()
             if rate == 0.0:
+                # 跟随墙钟态下 _sim_jd=None，单设 rate=0 不冻结时间；先钉住
+                # 当前时刻再暂停，否则「⏸ 点了没反应」。
+                if eng._sim_jd is None:
+                    eng.set_unix(eng.now_unix())
                 eng.pause()
             elif rate == 1.0:
                 eng.resume(1.0)
@@ -5335,8 +5420,16 @@ class RFSkyViewPanel(QFrame):
             eng = get_time_engine()
             t = eng.now_utc()
             rate = eng.get_rate()
-            suffix = "" if rate == 1.0 else (" ⏸" if rate == 0.0
-                                             else f" ×{rate:g}")
+            # 显示口径：倍率是「模拟时间推进速度」，不是画面帧率；
+            # ×1 必须明确写「实时」，暂停/倒放也要能一眼看出。
+            if rate == 1.0:
+                suffix = " · 实时"
+            elif rate == 0.0:
+                suffix = " ⏸ 暂停"
+            elif rate > 0.0:
+                suffix = f" · ×{rate:g} 模拟时间"
+            else:
+                suffix = f" · 倒放 ×{abs(rate):g} 模拟时间"
             self.time_label.setText(format_utc_datetime(t) + suffix)
         except Exception:
             self.time_label.setText("实时")
