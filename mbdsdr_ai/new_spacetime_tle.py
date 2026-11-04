@@ -285,6 +285,11 @@ class TLEManager:
 TLE_FRESHNESS_MAX_DAYS = 7.0
 
 
+def _is_leap_year(year: int) -> bool:
+    """公历闰年（4 年一闰，百年不闰，四百年再闰）。"""
+    return (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
+
+
 def parse_tle_epoch(line1: str) -> Optional[datetime]:
     """从 TLE 第 1 行解析历元（epoch）为 UTC datetime。
 
@@ -308,6 +313,10 @@ def parse_tle_epoch(line1: str) -> Optional[datetime]:
         return None
     year = (1900 + yy) if yy >= 57 else (2000 + yy)
     if doy <= 0:
+        return None
+    # 年积日越界（如 DDD=367）必须判解析失败，不能顺延到下一年冒充历元。
+    max_doy = 366.0 if _is_leap_year(year) else 365.0
+    if doy >= max_doy + 1.0:
         return None
     # doy=1.0 = 1 月 1 日 00:00；(doy-1) 天后的小数时刻
     base = datetime(year, 1, 1, tzinfo=timezone.utc)
