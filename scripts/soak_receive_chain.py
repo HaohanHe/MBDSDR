@@ -17,15 +17,22 @@ AGC] / RecordTap）→ 音频落盘替身计数 + baseband cf32 连续落盘。
     （无消费卡死造成的数据洞）；
   * shutdown：全部 QThread 在 10s 内退出（无进程残留）。
 
+P6.3 扩展（判据不另立标准）：每 10s 额外采样 GC 跟踪对象数、各代计数与
+累计回收次数；新增 `--speed` 支持等价加速回放（`--minutes 3 --speed 10`
+= 30 分钟音频量，墙钟 3 分钟），RSS/线程/句柄/落盘判据与 P4 完全一致，
+仅追加「对象数趋势 ≤ 5000」一条。
+
 用法：
-    python scripts/soak_receive_chain.py [--minutes 10] [--sr 192000]
+    python scripts/soak_receive_chain.py [--minutes 10] [--speed 1] [--sr 192000]
         [--out output/soak/soak_rx_<时间戳>.jsonl]
+    30 分钟等价加速：--minutes 3 --speed 10
 """
 from __future__ import annotations
 
 import argparse
 import ctypes
 import datetime as dt
+import gc
 import json
 import math
 import os
@@ -42,6 +49,15 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "desktop"))
 
 import numpy as np  # noqa: E402
+
+# ---- P4/P6 共用判据（测试逐项钉住；P6 只加 GC/对象增长，不改旧阈值） ----
+MAX_RSS_GROWTH_MB = 32.0        # 末 60s 均值 − 首 60s 基线
+MAX_THREAD_TREND = 2            # 线程数趋势（末−首，≤+2）
+MAX_THREAD_SPAN = 4             # 全局防爆（max−min）
+MAX_HANDLE_GROWTH = 64          # Win32 句柄增长
+RECORD_BAND = 0.25              # 落盘字节期望带 ±25%
+MAX_DATA_HOLE_S = 5.0           # 最长无落盘块间隔
+MAX_OBJECT_GROWTH = 5000        # P6：稳态段 GC 跟踪对象数趋势（末−首）
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +89,83 @@ def _thread_count() -> int:
         return -1
 
 
+def _gc_metrics() -> dict:
+    """P6.3：GC 跟踪对象数 / 各代计数 / 累计回收次数（10s 一次，成本可忽略）。"""
+    try:
+        return {
+            "gc_objects": len(gc.get_objects()),
+            "gc_counts": list(gc.get_count()),
+            "gc_collections": sum(int(s.get("collections", 0))
+                                  for s in gc.get_stats()),
+        }
+    except Exception:
+        return {"gc_objects": -1, "gc_counts": [], "gc_collections": -1}
+
+
+def evaluate_soak(samples: list, expected_bytes: int, record_bytes: int,
+                  max_gap: float, lingering: list) -> dict:
+    """P4/P6 共用长跑判定（纯函数）。
+
+    趋势哨戒口径与 P4 完全一致：末 60s 均值 − 首 60s 基线；线程按趋势
+    （≤+2）而非 max-min 判泄漏，另加全局防爆（span ≤ 4）。P6 仅新增
+    GC 跟踪对象数趋势与水位峰值，不改旧阈值。
+    """
+    rss = [s["rss"] for s in samples if s["rss"] > 0]
+    steady = [s for s in samples if s["t"] >= 60.0]
+    if len(steady) < 2:
+        steady = list(samples)        # 短跑降级：用全部样本同口径判定
+    t_ser = [s["threads"] for s in steady if s["threads"] > 0]
+    h_ser = [s["handles"] for s in steady if s["handles"] > 0]
+    head = rss[:6] if len(rss) >= 6 else rss[:1]
+    tail = rss[-6:] if len(rss) >= 6 else rss[-1:]
+    rss_growth = (sum(tail) / len(tail) - sum(head) / len(head)) if head and tail else 0
+    t_head = t_ser[:6] if len(t_ser) >= 6 else t_ser[:1]
+    t_tail = t_ser[-6:] if len(t_ser) >= 6 else t_ser[-1:]
+    threads_trend = (sum(t_tail) / len(t_tail)
+                     - sum(t_head) / len(t_head)) if t_head and t_tail else 0
+    threads_span = (max(t_ser) - min(t_ser)) if t_ser else 0
+    o_ser = [s["gc_objects"] for s in steady if s.get("gc_objects", -1) > 0]
+    o_head = o_ser[:6] if len(o_ser) >= 6 else o_ser[:1]
+    o_tail = o_ser[-6:] if len(o_ser) >= 6 else o_ser[-1:]
+    object_growth = (sum(o_tail) / len(o_tail)
+                     - sum(o_head) / len(o_head)) if o_head and o_tail else 0
+    verdicts = {
+        "rss_growth_mb_lt_32": (rss_growth / 1e6) < MAX_RSS_GROWTH_MB
+        if len(rss) >= 2 else None,
+        "threads_no_growth_trend": threads_trend <= MAX_THREAD_TREND
+        if t_ser else None,
+        "threads_span_le_4": threads_span <= MAX_THREAD_SPAN if t_ser else None,
+        "handle_growth_lt_64": ((h_ser[-1] - h_ser[0]) < MAX_HANDLE_GROWTH)
+        if len(h_ser) >= 2 else None,
+        "record_bytes_in_band": abs(record_bytes - expected_bytes)
+        <= RECORD_BAND * expected_bytes,
+        "no_data_hole_lt_5s": max_gap < MAX_DATA_HOLE_S,
+        "no_lingering_threads": not lingering,
+        "object_growth_le_5000": object_growth <= MAX_OBJECT_GROWTH
+        if len(o_ser) >= 2 else None,
+    }
+    gc_objects = [s.get("gc_objects", -1) for s in samples
+                  if s.get("gc_objects", -1) > 0]
+    gc_collections = [s.get("gc_collections", -1) for s in samples
+                      if s.get("gc_collections", -1) >= 0]
+    return {
+        "verdicts": verdicts,
+        "ok": all(v for v in verdicts.values()),
+        "rss_growth_mb": round(rss_growth / 1e6, 2),
+        "rss_peak_mb": round(max(rss) / 1e6, 2) if rss else -1,
+        "rss_p95_mb": round(float(np.percentile(rss, 95)) / 1e6, 2)
+        if rss else -1,
+        "threads_range": [min(t_ser) if t_ser else -1,
+                          max(t_ser) if t_ser else -1],
+        "threads_trend": round(threads_trend, 2),
+        "handles_range": [h_ser[0] if h_ser else -1,
+                          h_ser[-1] if h_ser else -1],
+        "object_growth": round(object_growth, 1),
+        "gc_peak_objects": max(gc_objects) if gc_objects else -1,
+        "gc_collections_total": gc_collections[-1] if gc_collections else -1,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 合成 WFM 载波 IQ 源（输入性质：合成；相位连续，FM 调制 1 kHz 单音）
 # ---------------------------------------------------------------------------
@@ -81,12 +174,17 @@ class SyntheticWfmSource:
 
     def __init__(self, sr: float, noise_level: float = 0.02,
                  tone_hz: float = 1000.0, deviation_hz: float = 75000.0,
-                 realtime: bool = True):
+                 realtime: bool = True, speed: float = 1.0):
         self.sr = float(sr)
         self.noise = float(noise_level)
         self.tone_hz = float(tone_hz)
         self.dev = float(deviation_hz)
         self.realtime = bool(realtime)
+        # P6：加速回放倍数。speed=N 表示 N 分钟音频在 1 分钟墙钟内喂完，
+        # 用于把 30 分钟长跑压到可接受的墙钟时长；资源判据口径不变。
+        self.speed = float(speed)
+        if self.speed <= 0:
+            raise ValueError("speed 必须 > 0")
         self._phase = 0.0
         self._n0 = 0
         self._rng = np.random.default_rng(20261104)
@@ -94,8 +192,8 @@ class SyntheticWfmSource:
 
     def read(self, n: int) -> np.ndarray:
         if self.realtime:
-            # 速率限制：样本时钟对齐墙钟（真实 SDR 的实时节奏）
-            target = self._n0 / self.sr
+            # 速率限制：样本时钟对齐墙钟（真实 SDR 实时节奏；speed>1 即加速回放）
+            target = self._n0 / (self.sr * self.speed)
             lag = target - (time.monotonic() - self._t0)
             if lag > 0:
                 time.sleep(lag)
@@ -158,10 +256,15 @@ class _Cf32Recorder:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--minutes", type=float, default=10.0)
+    ap.add_argument("--minutes", type=float, default=10.0,
+                    help="墙钟时长（分钟）")
+    ap.add_argument("--speed", type=float, default=1.0,
+                    help="加速回放倍数；--minutes 3 --speed 10 = 30 分钟等价")
     ap.add_argument("--sr", type=float, default=192000.0)
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+    if args.speed <= 0:
+        ap.error("--speed 必须 > 0")
 
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import QThread
@@ -169,7 +272,7 @@ def main() -> int:
     from spectrum_widget import SpectrumDataGenerator
 
     app = QApplication.instance() or QApplication(sys.argv)
-    src = SyntheticWfmSource(args.sr)
+    src = SyntheticWfmSource(args.sr, speed=args.speed)
     gen = SpectrumDataGenerator(num_bins=512)
     player = _CountingPlayer()
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -194,9 +297,11 @@ def main() -> int:
         jsonl.flush()
 
     emit({"event": "start", "ts": dt.datetime.now().isoformat(timespec="seconds"),
-          "minutes": args.minutes, "sr": args.sr,
+          "minutes": args.minutes, "speed": args.speed, "sr": args.sr,
+          "simulated_minutes": round(args.minutes * args.speed, 2),
           "input_nature": "synthetic WFM carrier IQ (labeled synthetic)",
-          "block_samples": 16384})
+          "block_samples": 16384,
+          "note": "P6.3：speed>1 为等价加速回放，判据与 P4 同口径"})
 
     pipe.start()
     t0 = time.monotonic()
@@ -221,6 +326,7 @@ def main() -> int:
                 "handles": _handle_count(),
                 "record_bytes": recorder.bytes,
                 "audio_blocks": player.blocks,
+                **_gc_metrics(),
             }
             samples.append(sample)
             emit({"event": "sample", **sample})   # 落盘供事后 flaky 分析
@@ -239,49 +345,26 @@ def main() -> int:
             lingering.append(type(th).__name__)
     recorder.close()
 
-    # ---- 判定 ----
-    rss = [s["rss"] for s in samples if s["rss"] > 0]
-    # 线程/句柄稳定性按 t≥60s 稳态段判定：Qt 启动期临时线程
-    # （QThreadPool 按需线程，空闲超时回收）在前几十秒一次性回落，
-    # 且运行期按需线程池有 ±3 正常波动——泄漏定义是「单调增长趋势」，
-    # 不是「max-min 不波动」。判法：末 60s 均值相对首 60s 均值的趋势
-    # 哨戒（≤+2），外加全局防爆检查（max-min ≤4）。
-    steady = [s for s in samples if s["t"] >= 60.0]
-    if len(steady) < 2:
-        steady = list(samples)        # 短跑降级：用全部样本同口径判定
-    t_ser = [s["threads"] for s in steady if s["threads"] > 0]
-    h_ser = [s["handles"] for s in steady if s["handles"] > 0]
-    head = rss[:6] if len(rss) >= 6 else rss[:1]
-    tail = rss[-6:] if len(rss) >= 6 else rss[-1:]
-    rss_growth = (sum(tail) / len(tail) - sum(head) / len(head)) if head and tail else 0
-    t_head = t_ser[:6] if len(t_ser) >= 6 else t_ser[:1]
-    t_tail = t_ser[-6:] if len(t_ser) >= 6 else t_ser[-1:]
-    threads_trend = (sum(t_tail) / len(t_tail)
-                     - sum(t_head) / len(t_head)) if t_head and t_tail else 0
-    threads_span = (max(t_ser) - min(t_ser)) if t_ser else 0
-    # 落盘期望带（实时限速源）：时长(秒) × 采样率 × 8B/样本，±25%
-    expect_bytes = int(args.minutes * 60.0 * args.sr * 8)
+    # ---- 判定（与 P4 同口径的纯函数；P6 仅新增 GC/对象增长）----
+    # 落盘期望带：墙钟时长 × 加速倍数 × 采样率 × 8B/样本，±25%
+    expect_bytes = int(args.minutes * 60.0 * args.speed * args.sr * 8)
     got_bytes = recorder.bytes
-    verdicts = {
-        "rss_growth_mb_lt_32": (rss_growth / 1e6) < 32.0 if len(rss) >= 2 else None,
-        "threads_no_growth_trend": threads_trend <= 2 if t_ser else None,
-        "threads_span_le_4": threads_span <= 4 if t_ser else None,
-        "handle_growth_lt_64": ((h_ser[-1] - h_ser[0]) < 64)
-        if len(h_ser) >= 2 else None,
-        "record_bytes_in_band": abs(got_bytes - expect_bytes) <= 0.25 * expect_bytes,
-        "no_data_hole_lt_5s": max_gap < 5.0,
-        "no_lingering_threads": not lingering,
-    }
-    ok = all(v for v in verdicts.values())
+    result = evaluate_soak(samples, expect_bytes, got_bytes, max_gap, lingering)
     report = {
-        "event": "verdict", "ok": ok, "verdicts": verdicts,
+        "event": "verdict", "ok": result["ok"],
+        "verdicts": result["verdicts"],
         "duration_s": round(time.monotonic() - t0, 1),
-        "rss_growth_mb": round(rss_growth / 1e6, 2),
-        "threads_range": [min(t_ser) if t_ser else -1,
-                          max(t_ser) if t_ser else -1],
-        "threads_trend": round(threads_trend, 2),
-        "handles_range": [h_ser[0] if h_ser else -1,
-                          h_ser[-1] if h_ser else -1],
+        "speed": args.speed,
+        "simulated_minutes": round(args.minutes * args.speed, 2),
+        "rss_growth_mb": result["rss_growth_mb"],
+        "rss_peak_mb": result["rss_peak_mb"],
+        "rss_p95_mb": result["rss_p95_mb"],
+        "threads_range": result["threads_range"],
+        "threads_trend": result["threads_trend"],
+        "handles_range": result["handles_range"],
+        "object_growth": result["object_growth"],
+        "gc_peak_objects": result["gc_peak_objects"],
+        "gc_collections_total": result["gc_collections_total"],
         "record_bytes": got_bytes,
         "record_expect_bytes": expect_bytes,
         "audio_blocks": player.blocks,
@@ -292,7 +375,7 @@ def main() -> int:
     emit(report)
     jsonl.close()
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    return 0 if ok else 1
+    return 0 if result["ok"] else 1
 
 
 if __name__ == "__main__":
