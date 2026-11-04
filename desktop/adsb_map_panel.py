@@ -221,8 +221,11 @@ class AdsbMapPanel(QWidget):
                 QAbstractItemView.ScrollMode.ScrollPerPixel)
         except Exception:
             pass
-        # 右侧飞机列表：给弹性宽度范围，窗口缩放时跟随
-        self.table.setMinimumWidth(160)
+        # 右侧飞机列表：给弹性宽度范围，窗口缩放时跟随。
+        # 最小宽 40 而非 160：中栏基线 300px 时「画布最小 240 + 列表 160 +
+        # 间距 6 + 边距 8」= 414，布局会把列表挤出父容器（右侧被裁）。
+        # 压到 40 后同一列只需 240+40+6+8=294，300px 内可完整排下。
+        self.table.setMinimumWidth(40)
         self.table.setMaximumWidth(320)
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)

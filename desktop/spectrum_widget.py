@@ -1147,7 +1147,8 @@ def _draw_center_cursor(painter, rect, color):
 
 
 def _peak_label_placements(peaks_xy, measure, x_min: float, x_max: float,
-                           row_h: float, max_rows: int = 4, gap: float = 4.0):
+                           row_h: float, max_rows: int = 4, gap: float = 4.0,
+                           text_ascent=None, text_descent: float = 0.0):
     """峰值标注碰撞剔除（与频段彩带 placement 同款贪心，纯函数可测）。
 
     peaks_xy: [(x, y, label)] 按 x 升序；measure(label) -> 文本宽。
@@ -1158,7 +1159,10 @@ def _peak_label_placements(peaks_xy, measure, x_min: float, x_max: float,
     （最多 max_rows 行），全部放不下或锚点出界则诚实丢弃：不互相压字、
     不越界、不漂走。
     """
-    placed_rows: list = []           # row -> 已占右缘 x
+    if text_ascent is None:
+        text_ascent = max(1.0, row_h - 2.0)   # 与 fm.height() ≈ 行高一致
+    row_right: list = []             # row -> 已占右缘 x（同一行必须横向分开）
+    placed: list = []                # 已放标签的二维文本框 (x0,x1,y0,y1)
     out = []
     for x, y, label in peaks_xy:
         w = float(measure(label))
@@ -1167,11 +1171,24 @@ def _peak_label_placements(peaks_xy, measure, x_min: float, x_max: float,
             continue                  # 锚点出界：每行位置相同，诚实丢弃
         done = False
         for row in range(max_rows):
-            while len(placed_rows) <= row:
-                placed_rows.append(x_min - 1.0)
-            if tx >= placed_rows[row] + gap:
-                placed_rows[row] = tx + w
-                out.append((tx, y - 6.0 - row * row_h, label, row))
+            while len(row_right) <= row:
+                row_right.append(x_min - 1.0)
+            if tx < row_right[row] + gap:
+                continue              # 本行横向已占，换下一行
+            ty = y - 6.0 - row * row_h
+            # 纵向盒用真实字形高度：相邻行的锚点 y 并不相同（峰高不同），
+            # 只比「同行占位 x」会出现上下两行各自错开几 px 仍压字的情况。
+            box = (tx, tx + w, ty - text_ascent, ty + text_descent)
+            hit = False
+            for p in placed:
+                if (box[0] < p[1] + gap and box[1] > p[0] - gap
+                        and box[2] < p[3] and box[3] > p[2]):
+                    hit = True
+                    break
+            if not hit:
+                row_right[row] = tx + w
+                placed.append(box)
+                out.append((tx, ty, label, row))
                 done = True
                 break
         if not done:
@@ -1203,7 +1220,8 @@ def _draw_peaks(painter, state, rect, color):
     row_h = fm.height() + 2.0
     for tx, ty, label, _row in _peak_label_placements(
             pts, fm.horizontalAdvance, rect.x() + 2.0,
-            rect.x() + rect.width() - 2.0, row_h):
+            rect.x() + rect.width() - 2.0, row_h,
+            text_ascent=fm.ascent(), text_descent=fm.descent()):
         painter.drawText(QPointF(tx, ty), label)
 
 
@@ -1359,12 +1377,29 @@ def _draw_freq_scale(painter, rect, view_center_hz: float, span_hz: float,
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
-    for i in range(5):
-        freq = view_center_hz - span_hz / 2.0 + span_hz * i / 4.0
-        x = rect.x() + rect.width() * i / 4.0
-        s = f"{freq/1e6:.2f}"
-        tw = painter.fontMetrics().horizontalAdvance(s)
-        painter.drawText(QPointF(x - tw / 2, rect.y() + rect.height() + 14), s)
+    fm = painter.fontMetrics()
+    # 刻度数量自适应：窄谱面（1000×600 左栏 345px）放 5 个「100.51」会互相
+    # 压字；从 5 递减到 2，首个「等距不交叠」的档位即采用。宽谱面仍是 5。
+    n = 2
+    for cand in (5, 4, 3, 2):
+        labels = [f"{view_center_hz/1e6 - span_hz/2e6 + span_hz/1e6*i/(cand-1):.2f}"
+                  for i in range(cand)]
+        widest = max(fm.horizontalAdvance(s) for s in labels)
+        # 1.5×宽：首尾标签各自被夹回边界时会向中间平移半个字宽，
+        # 只留 1×宽会被端点标签反压到相邻刻度上。
+        if rect.width() / (cand - 1) >= widest * 1.5 + 6.0:
+            n = cand
+            break
+    labels = [f"{view_center_hz/1e6 - span_hz/2e6 + span_hz/1e6*i/(n-1):.2f}"
+              for i in range(n)]
+    for i, s in enumerate(labels):
+        x = rect.x() + rect.width() * i / (n - 1)
+        tw = fm.horizontalAdvance(s)
+        # 端点刻度夹进谱面（原「居中于 x=0/右缘」会让首尾标签各有半截被裁，
+        # 截图里像数字缺位）。中间刻度不受影响。
+        tx = x - tw / 2.0
+        tx = max(rect.x(), min(tx, rect.x() + rect.width() - tw))
+        painter.drawText(QPointF(tx, rect.y() + rect.height() + 14), s)
 
 
 def _draw_db_scale(painter, rect, state, text_color):
@@ -1616,7 +1651,9 @@ class SpectrumPanel(QWidget):
         self._db_max_slider.setInvertedAppearance(True)
         self._db_max_slider.setRange(-160, 0)
         self._db_max_slider.setValue(int(self._state.db_max))
-        self._db_max_slider.setMinimumHeight(150)
+        # 100 而非 150：1000×600 下频谱页扣掉头部只剩 292px，
+        # 两根 150 滑杆 + Max/Min 字条会把滑杆底端顶出面板 36px（被裁）。
+        self._db_max_slider.setMinimumHeight(100)
         self._db_max_slider.setToolTip(
             "Max：上推=图形上移（显示增益增大），下拉=压缩量程")
         self._db_max_slider.valueChanged.connect(self._on_db_max_changed)
@@ -1627,7 +1664,7 @@ class SpectrumPanel(QWidget):
         self._db_min_slider.setInvertedAppearance(True)
         self._db_min_slider.setRange(-160, 0)
         self._db_min_slider.setValue(int(self._state.db_min))
-        self._db_min_slider.setMinimumHeight(150)
+        self._db_min_slider.setMinimumHeight(100)
         self._db_min_slider.setToolTip(
             "Min：上推=弱信号也被放大（底噪抬高），下拉=隐藏弱信号")
         self._db_min_slider.valueChanged.connect(self._on_db_min_changed)

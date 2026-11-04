@@ -89,8 +89,10 @@ reference/
 syn_*.npy
 
 # 例外：NanoVNA 实测实验证据截图（experiments/nanovna_rh770/，真机 recorded 口径）
-# —— 全库唯一 PNG 放行点；其余"只放源代码"的二进制忽略策略不变
 !experiments/nanovna_rh770/data/*.png
+# 例外：UI 布局回归截图基线（tests/baselines/，offscreen 重放可复现，
+# 单个文件 <15KB；宽松比对，抗字体差异）
+!tests/baselines/*.png
 mbdsdr_ai/artifacts/*.npy
 tests/test_report.txt
 repos/
