@@ -557,6 +557,27 @@ def _panel_image(win, name: str) -> QImage:
     raise AssertionError(f"未知面板 {name}")
 
 
+def _axis_label_geometry(win) -> list:
+    """频轴 + dB 轴刻度标签的真实矩形（供基线 sidecar 做几何 diff）。"""
+    import spectrum_widget as sw
+    _select_left(win, "spectrum")
+    plot = win.spectrum._fft_plot
+    rect = QRectF(0, 0, plot.width(),
+                  max(1, plot.height() - sw._SPEC_BOTTOM_PAD))
+    rec_f = _RecordingPainter()
+    sw._draw_freq_scale(rec_f, rect, sw._view_center_hz(plot.state),
+                        plot.state.panel.generator.sample_rate_hz,
+                        QColor("white"))
+    rec_db = _RecordingPainter()
+    sw._draw_db_scale(rec_db, rect, plot.state, QColor("white"))
+    out = []
+    for group, rec in (("freq", rec_f), ("db", rec_db)):
+        for r in _text_rects(rec):
+            out.append({"group": group, "text": r[4], "x0": r[0],
+                        "x1": r[1], "y0": r[2], "y1": r[3]})
+    return out
+
+
 @pytest.mark.parametrize("panel", ["spectrum", "adsb_empty", "freq_readout"])
 def test_panel_screenshot_matches_baseline(main_window, panel):
     """关键面板截图基线：锁尺寸/宽高比/主要色块，不做逐像素死比。"""
@@ -569,8 +590,15 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
     if _UPDATE:
         from ui_baseline import guarded_update
         reason = os.environ.get("MBDSDR_UI_BASELINE_REASON", "").strip()
-        # 受控更新：必须带 --reason，几何漂移即使带 reason 也拒绝
-        summary = guarded_update(path, img, reason)
+        accept_geom = (os.environ.get(
+            "MBDSDR_UI_BASELINE_ACCEPT_GEOMETRY") == "1")
+        # 受控更新：--reason 必填；几何（尺寸/宽高比/刻度标签）变化默认
+        # 拒绝，只有 --accept-geometry-change + 点名声明 token 才放行。
+        labels = _axis_label_geometry(main_window) if panel == "spectrum" \
+            else None
+        summary = guarded_update(path, img, reason,
+                                 accept_geometry_change=accept_geom,
+                                 label_geometry=labels)
         print(f"[baseline] {os.path.basename(path)}: {summary['text']}"
               f"  reason={summary['reason']}", flush=True)
         pytest.skip(f"已更新基线 {os.path.basename(path)}")

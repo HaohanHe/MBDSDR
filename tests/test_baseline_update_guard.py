@@ -87,3 +87,77 @@ def test_missing_baseline_can_be_created_with_reason(tmp_path):
     summary = guarded_update(path, img, "补测新面板基线")
     assert "新建基线" in summary["text"]
     assert os.path.exists(path)
+
+
+# ---------------------------------------------------------------------------
+# 第二条合法通道：--accept-geometry-change（有意几何变更）
+# ---------------------------------------------------------------------------
+def test_geometry_change_refused_without_accept_flag(tmp_path):
+    """带声明 token 的 reason 也不够：没开通道照样拒绝。"""
+    path = str(tmp_path / "panel_1000x600.png")
+    _make(path, 320, 192, "#F5F3EF")
+    wider = _make(str(tmp_path / "new.png"), 336, 192, "#F5F3EF")
+    with pytest.raises(BaselineUpdateRefused, match="几何"):
+        guarded_update(path, wider,
+                       "spectrum-axis-nice-steps: 频轴刻度 1/2/5 阶梯")
+
+
+def test_accept_geometry_without_reason_refused(tmp_path):
+    path = str(tmp_path / "panel_1000x600.png")
+    _make(path, 320, 192, "#F5F3EF")
+    wider = _make(str(tmp_path / "new.png"), 336, 192, "#F5F3EF")
+    with pytest.raises(BaselineUpdateRefused, match="reason"):
+        guarded_update(path, wider, "", accept_geometry_change=True)
+
+
+def test_accept_geometry_with_undeclared_reason_refused(tmp_path):
+    """带了参数但原因没点名当次设计变更：仍红。"""
+    path = str(tmp_path / "panel_1000x600.png")
+    _make(path, 320, 192, "#F5F3EF")
+    wider = _make(str(tmp_path / "new.png"), 336, 192, "#F5F3EF")
+    with pytest.raises(BaselineUpdateRefused, match="设计变更"):
+        guarded_update(path, wider, "只是重建基线",
+                       accept_geometry_change=True)
+
+
+def test_accept_geometry_with_declared_change_passes(tmp_path, capsys):
+    path = str(tmp_path / "panel_1000x600.png")
+    _make(path, 320, 192, "#F5F3EF")
+    wider = _make(str(tmp_path / "new.png"), 336, 192, "#F5F3EF")
+    summary = guarded_update(
+        path, wider,
+        "spectrum-axis-nice-steps: 频轴改 1/2/5 阶梯 + 按量程自动单位",
+        accept_geometry_change=True)
+    # 必须同时打印几何 diff（尺寸/宽高比/变化行带）
+    out = capsys.readouterr().out
+    assert "[baseline][geometry]" in out and "→" in out
+    assert summary["design_change"] == "spectrum-axis-nice-steps"
+    assert summary["geometry"]["size"] == (320, 192, 336, 192)
+    assert summary["geometry"]["text"] and "宽高比" in summary["geometry"]["text"]
+    assert "几何变更已声明" in summary["text"]
+    assert QImage(path).width() == 336, "几何通道放行后应真的写入"
+
+
+def test_label_geometry_change_needs_accept_flag(tmp_path):
+    """尺寸不变但刻度标签位置变了：默认拒绝，声明后放行并打印标签 diff。"""
+    path = str(tmp_path / "panel_1000x600.png")
+    base = _make(str(tmp_path / "base.png"), 320, 192, "#F5F3EF")
+    labels1 = [{"text": "98.0", "x0": 10, "x1": 44, "y0": 170, "y1": 186},
+               {"text": "98.5", "x0": 140, "x1": 174, "y0": 170, "y1": 186}]
+    guarded_update(path, base, "首建基线 + 刻度几何 sidecar",
+                   label_geometry=labels1)
+    same = _make(str(tmp_path / "same.png"), 320, 192, "#F5F3EF")
+    labels2 = [{"text": "98.0", "x0": 20, "x1": 54, "y0": 170, "y1": 186},
+               {"text": "98.50", "x0": 140, "x1": 180, "y0": 170, "y1": 186}]
+    with pytest.raises(BaselineUpdateRefused, match="标签几何"):
+        guarded_update(path, same, "只是重建基线", label_geometry=labels2)
+    with pytest.raises(BaselineUpdateRefused, match="设计变更"):
+        guarded_update(path, same, "只是重建基线",
+                       accept_geometry_change=True, label_geometry=labels2)
+    summary = guarded_update(
+        path, same,
+        "spectrum-axis-nice-steps: 频轴刻度阶梯与自动单位",
+        accept_geometry_change=True, label_geometry=labels2)
+    assert summary["labels"]["moves"], "标签位置变化必须出现在几何 diff 里"
+    assert summary["labels"]["count"] == (2, 2)
+    assert "标签 2→2" in summary["labels"]["text"]

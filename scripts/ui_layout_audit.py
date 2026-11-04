@@ -15,8 +15,15 @@ UI 布局不变式汇总审计入口
 
 用法:
     python scripts/ui_layout_audit.py
-    python scripts/ui_layout_audit.py --update-baselines   # 重建基线后人工复核
+    python scripts/ui_layout_audit.py --update-baselines --reason "..."  # 仅颜色漂移
+    python scripts/ui_layout_audit.py --update-baselines \
+        --accept-geometry-change --reason "spectrum-axis-nice-steps: ..."  # 有意几何变更
     python scripts/ui_layout_audit.py -- -k ratio          # 透传 pytest 参数
+
+``--accept-geometry-change`` 是第二条合法通道：尺寸/宽高比或刻度标签
+几何变化时默认拒绝更新；带该参数后 reason 必须点名
+``scripts/ui_baseline.py`` 的 ``DESIGN_CHANGES`` 声明，否则仍拒绝。
+提交说明里必须同样点名该设计变更，便于追溯。
 
 退出码: 与 pytest 一致（0=全绿，1=有用例失败，2/4=中断/用法错误）。
 可进 CI（本脚本只做入口，不接线；CI 归另一条线）。
@@ -28,6 +35,8 @@ import subprocess
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _SCRIPTS)   # 声明表 DESIGN_CHANGES 与守卫共用同一来源
 _TEST_FILE = os.path.join("tests", "test_ui_layout_locks.py")
 _STATUS = ("PASSED", "FAILED", "SKIPPED", "ERROR", "XFAIL", "XPASS")
 _NODE_RE = re.compile(r"::(?P<rule>[A-Za-z0-9_]+)\[(?P<args>[^\]]*)\]")
@@ -106,6 +115,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="MBDSDR UI 布局不变式审计")
     ap.add_argument("--update-baselines", action="store_true",
                     help="重建 tests/baselines/ 下的截图基线（需人工复核）")
+    ap.add_argument("--accept-geometry-change", action="store_true",
+                    help="允许本次有意的几何变更（尺寸/宽高比/刻度标签位置）；"
+                         "必须配 --reason 且点名 scripts/ui_baseline.py 的 "
+                         "DESIGN_CHANGES 声明，否则仍拒绝")
     ap.add_argument("--reason", default="",
                     help="基线更新的原因（人工确认，--update-baselines 时必填）")
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER,
@@ -121,11 +134,20 @@ def main() -> int:
     # 因此 125/150/200 复用同一套基线，不按 DPI 存多份。
     scales = [("100%", "1.0")] if args.update_baselines else \
         [("125%", "1.25"), ("150%", "1.5"), ("200%", "2.0")]
+    if args.accept_geometry_change and not args.update_baselines:
+        ap.error("--accept-geometry-change 只能与 --update-baselines 同时使用")
     if args.update_baselines:
         if not args.reason.strip():
             ap.error("--update-baselines 必须配 --reason \"<原因>\"（人工确认）")
         env["MBDSDR_UI_BASELINE_UPDATE"] = "1"
         env["MBDSDR_UI_BASELINE_REASON"] = args.reason.strip()
+        if args.accept_geometry_change:
+            import ui_baseline
+            env["MBDSDR_UI_BASELINE_ACCEPT_GEOMETRY"] = "1"
+            print("[ui_layout_audit] 有意几何变更通道：几何 diff 会逐张打印；"
+                  "reason 必须点名以下声明之一，且提交说明同样点名：")
+            for token, desc in ui_baseline.DESIGN_CHANGES.items():
+                print(f"  - {token}：{desc}")
         print("[ui_layout_audit] 基线更新模式（仅 100% DPI）："
               f"reason={args.reason.strip()}")
         print("[ui_layout_audit] 每张图会打印尺寸/色块/像素差异摘要；"
