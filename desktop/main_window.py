@@ -11,6 +11,7 @@ import sys
 import json
 import logging
 import math
+import threading
 import time
 import tempfile
 from datetime import datetime
@@ -91,7 +92,7 @@ from mode_registry import (
 from status_panel import StatusPanel
 from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
-from mcp_protocol import is_write_tool
+from mcp_protocol import GATE_PARAM, is_write_tool
 from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
 from module_panel import ModulePanel
 # CarWith 设计体系：token 单例 / 面板注册表 / Dock 布局管理器
@@ -276,6 +277,9 @@ class MainWindow(QMainWindow):
     # AI 工具环内执行完硬件调用后的 UI 同步（MCP handler 跑在 AI 后台线程，
     # 经 Qt 信号排队回 UI 线程改控件，跨线程安全）
     _ai_tool_done = Signal(str, dict)
+    # AI 后台线程 → UI 线程的人工确认请求（payload dict，含 event/approved）。
+    # 用 queued 信号而不是直接调 QMessageBox：MCP handler 在 AI 线程里跑。
+    _human_approval_requested = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -309,11 +313,24 @@ class MainWindow(QMainWindow):
         self._worker: Optional[object] = None
         # AI 工具环内完成的硬件调用 → 回 UI 线程同步控件
         self._ai_tool_done.connect(self._sync_ui_for_tool)
+        # 人工确认门：AI 后台线程发请求，UI 线程弹窗/显式确认后回填结果。
+        # 模型自带的 arm_manual 一律作废——确认只能来自真人（S13）。
+        self._human_approval_requested.connect(self._on_human_approval_requested)
+        self._approval_handler = None      # 测试注入：可替换弹窗，签名 (tool, args) -> bool
+        self._approval_timeout_s = 180.0   # 无人应答超时＝拒绝
+        self._approval_audit_path = os.path.join(
+            os.path.expanduser("~"), ".mbdsdr", "approval_audit.jsonl")
         self._record_timer: Optional[QTimer] = None
         self._record_seconds = 0
         self._sky_update_timer: Optional[QTimer] = None
+        # 后端掉线处置（读线程空读 + status 核实/持续空读升级）
+        self._backend_lost_handled = False
+        self._read_fail_signals = 0
+        # 损坏配置的处置状态：已备份才允许写回；备份失败则拒绝覆盖原文件
+        self._gui_config_corrupt = False
+        self._gui_config_corrupt_backup = None
+
         # 观测站坐标：默认 None 表示“未配置观测站位置”（不再硬编码示例坐标）。
-        # 由 GNSS 真实定位或 gui_config.json 手动配置后填充；None 时天空图不计算卫星。
         self._observer_lat: Optional[float] = None
         self._observer_lon: Optional[float] = None
         self.sat_tracker: Optional[SatelliteTracker] = None
@@ -2614,6 +2631,12 @@ class MainWindow(QMainWindow):
         （启动自动选 RTL）共用。连接失败返回 False 并写状态栏，不抛异常。
         红线：硬件失败绝不静默切 mock 报 success。
         """
+        # B1：切换设备必须先幂等拆除旧连接（停读线程/释放硬件/清 UI 连接态）。
+        # 不拆旧后端会出现两种坏状态：旧后端继续供数（界面换了、数据还是旧的）；
+        # 同一根棒子被自己占着，新 connect 直接 ACCESS(-3) 失败。
+        previous = self._active_sdr_backend
+        if previous is not None:
+            self._teardown_connection()
         try:
             ok = backend.connect()
         except Exception as e:
@@ -2636,6 +2659,9 @@ class MainWindow(QMainWindow):
                 backend.disconnect()
             except Exception:
                 pass
+            # 切换失败：回滚到拆掉的旧后端，绝不留"未连接"却以为还连着
+            if previous is not None:
+                self._restore_backend_after_failed_switch(previous, friendly)
             return False
 
         # 连接成功：停掉旧 worker，切换到真实后端
@@ -2718,6 +2744,44 @@ class MainWindow(QMainWindow):
         self._update_status_bar()
         # 启动真实 IQ 流：频谱/录制/声卡全部接通
         self._start_iq_streams()
+        return True
+
+    def _restore_backend_after_failed_switch(self, previous, reason: str) -> bool:
+        """设备切换失败后的回滚：重新连回旧后端，连不上就如实停在未连接。
+
+        画面/数据必须和"真连着的设备"一致：能回滚就连回旧设备并重启流水线；
+        回滚也失败时保留明确的"未连接"与失败原因，不做任何假展示。
+        """
+        try:
+            ok = bool(previous.connect())
+        except Exception:
+            ok = False
+        if not ok:
+            self.statusBar().showMessage(
+                f"切换失败（{reason}），原设备也无法重新连接；请检查后手动连接。",
+                10000)
+            return False
+        self._active_sdr_backend = previous
+        self._panels_set_sdr_connected(True)
+        try:
+            name = previous.device.name
+        except Exception:
+            name = "原设备"
+        try:
+            self.conn_label.setText(f"  状态: {name}  ")
+            self.conn_label.setStyleSheet(self._conn_label_qss(True))
+            self.status_conn.setText(name)
+        except Exception:
+            pass
+        try:
+            self.spectrum.set_connected(True)
+        except Exception:
+            pass
+        self.connect_btn.setEnabled(False)
+        self.disconnect_btn.setEnabled(True)
+        self._start_iq_streams()
+        self.statusBar().showMessage(
+            f"切换失败（{reason}），已恢复原设备 {name}", 8000)
         return True
 
     def _connect_dialog(self):
@@ -3190,17 +3254,22 @@ class MainWindow(QMainWindow):
             self._last_dbfs = 0.0
             self._update_status_bar()
 
-    def _disconnect(self):
-        """断开连接。"""
-        if self._active_sdr_backend is None and not self._recording:
-            # 点了没反应是最糟的体验：没连上也说清楚
-            self.statusBar().showMessage("当前未连接 SDR，没有可断开的设备")
-        # 断开真实 SDR 后端（SoapySDR/RTL-SDR/HackRF）
-        # 先停掉回放 / 扫频 / 录制 / IQ 轮询 / 声卡，避免断开后还在读空句柄
+    def _teardown_connection(self, *, stop_tracking: bool = True) -> None:
+        """幂等拆除当前连接：停回放/扫频/录制/流水线/跟踪 → 断开硬件 → UI 置未连接。
+
+        设备切换必须在建新后端前走这里：旧后端不释放，同一根棒子再 connect
+        会失败；旧流水线不拆，"已连接新设备"就只是界面标签（B1）。
+        `_disconnect()` 与 `_connect_backend()` 共用这一条拆除路径，
+        重复调用安全（全程 try/except）。
+        """
+        # 回放：先清 resume 标志，避免 _stop_replay 在拆连接过程中又拉起流水线
+        self._replay_resume_poll = False
         try:
             self._stop_replay()
         except Exception:
             pass
+        # 断开真实 SDR 后端（SoapySDR/RTL-SDR/HackRF）
+        # 先停掉回放 / 扫频 / 录制 / IQ 轮询 / 声卡，避免断开后还在读空句柄
         if self._sweep_worker is not None and self._sweep_worker.isRunning():
             try:
                 self._sweep_worker.cancel()
@@ -3227,6 +3296,13 @@ class MainWindow(QMainWindow):
                 self._apply_recording(False)
             except Exception:
                 self._recording = False
+        if stop_tracking:
+            # 跟踪环会继续 _on_tune_sdr 写频率；断开设备必须同步停掉（S15）。
+            # stop 内部会把旧接收频率写回设置，仍在旧后端连接期完成，顺序正确。
+            try:
+                self._stop_satellite_tracking()
+            except Exception:
+                pass
         if self._active_sdr_backend is not None:
             try:
                 self._active_sdr_backend.disconnect()
@@ -3247,6 +3323,13 @@ class MainWindow(QMainWindow):
         self.status_conn.setText("未连接")
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
+
+    def _disconnect(self):
+        """断开连接（用户点"断开"）：幂等拆除 + 未连接时如实说明。"""
+        if self._active_sdr_backend is None and not self._recording:
+            # 点了没反应是最糟的体验：没连上也说清楚
+            self.statusBar().showMessage("当前未连接 SDR，没有可断开的设备")
+        self._teardown_connection()
 
     # ========================================================================
     # 信号槽：从 Worker 接收数据更新 UI
@@ -3743,6 +3826,79 @@ class MainWindow(QMainWindow):
         except Exception:
             pass  # 接线失败不崩主窗口；下次连接成功时会重试
 
+    # ── 人工确认门（S13 红线）──────────────────────────────────────────
+    # 模型驱动的写/发射/改站址，确认只能来自真人：模型传 arm_manual=true
+    # 一律作废（参数在入口处剥离），必须经过桌面端弹窗或注入的确认控件。
+    @staticmethod
+    def _summarize_args(args: dict) -> str:
+        parts = []
+        for k, v in (args or {}).items():
+            s = repr(v)
+            if len(s) > 60:
+                s = s[:57] + "..."
+            parts.append(f"{k}={s}")
+        return ", ".join(parts) or "（无参数）"
+
+    def _audit_approval(self, tool_name: str, args: dict, approved: bool,
+                        note: str = "") -> None:
+        """把人工确认结果落到 JSONL，便于事后审计（时间戳+动作摘要）。"""
+        rec = {
+            "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "tool": tool_name,
+            "args": self._summarize_args(args),
+            "approved": bool(approved),
+            "note": note,
+        }
+        try:
+            os.makedirs(os.path.dirname(self._approval_audit_path), exist_ok=True)
+            with open(self._approval_audit_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("人工确认审计写入失败: %s", e)
+
+    def _confirm_write_action(self, tool_name: str, args: dict) -> bool:
+        """桌面真人确认（默认弹窗；测试可注入 _approval_handler 替代）。"""
+        handler = self._approval_handler
+        if handler is not None:
+            try:
+                return bool(handler(tool_name, dict(args or {})))
+            except Exception:
+                return False
+        ret = QMessageBox.warning(
+            self, "确认硬件操作",
+            f"AI 请求执行写操作：{tool_name}\n\n"
+            f"{self._summarize_args(args)}\n\n"
+            "该操作会改变设备状态且不可自动撤销，是否允许执行？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return ret == QMessageBox.Yes
+
+    def _request_human_approval(self, tool_name: str, args: dict) -> bool:
+        """写操作放行判定：只认真人确认结果，模型/参数不参与。"""
+        if threading.current_thread() is threading.main_thread():
+            approved = bool(self._confirm_write_action(tool_name, args))
+            self._audit_approval(tool_name, args, approved)
+            return approved
+        # AI 后台线程：投递到 UI 线程弹窗，阻塞等待真人选择（超时＝拒绝）
+        req = {"tool": tool_name, "args": dict(args or {}),
+               "event": threading.Event(), "approved": False}
+        self._human_approval_requested.emit(req)
+        if not req["event"].wait(self._approval_timeout_s):
+            self._audit_approval(tool_name, args, False, note="timeout")
+            return False
+        return bool(req["approved"])
+
+    @Slot(object)
+    def _on_human_approval_requested(self, req) -> None:
+        tool = str((req or {}).get("tool", ""))
+        args = dict((req or {}).get("args") or {})
+        try:
+            approved = bool(self._confirm_write_action(tool, args))
+        except Exception:
+            approved = False
+        req["approved"] = approved
+        self._audit_approval(tool, args, approved)
+        req["event"].set()
+
     def _mcp_call_handler(self, tool_name: str, args: dict) -> dict:
         """AI 工具环内执行硬件调用（register_mcp_tools 注册的 MCP handler）。
 
@@ -3751,24 +3907,28 @@ class MainWindow(QMainWindow):
         _ai_tool_done 排队回 UI 线程同步频谱/音量控件。返回 dict 由
         ToolRegistry 包装成 ToolResult，success/content 如实反映硬件结果。
 
-        红线：模型驱动的硬件写操作必走 arm_manual 人工门（AGENTS.md §3）；
-        只读工具不受限。UI 直操（_on_tune_* 等）是用户自己的手，不走此门。
+        红线：模型驱动的硬件写操作必走真人确认门（S13）；只读工具不受限。
+        模型传 arm_manual=true 不构成确认，入口处直接剥离。
+        UI 直操（_on_tune_* 等）是用户自己的手，不走此门。
         """
-        if is_write_tool(tool_name) and (args or {}).get("arm_manual") is not True:
+        args = dict(args or {})
+        args.pop(GATE_PARAM, None)   # 模型自报"已确认"一律作废
+        if is_write_tool(tool_name) and not self._request_human_approval(tool_name, args):
             return {
                 "success": False,
-                "error": "manual_gate",
-                "content": f"手动模式：未执行 {tool_name}（写操作需显式传 arm_manual=true）",
-                "next_step": "先向用户确认该写操作，确认后以 arm_manual=true 重试；"
-                             "只读查询不受此门限制。",
+                "error": "awaiting_human_approval",
+                "content": f"等待人工确认：未执行 {tool_name}（模型不能自行放行写操作）。",
+                "next_step": "请在桌面端确认该操作后再重试；拒绝或超时都不会下发硬件。",
             }
         worker = self._worker
         if worker is None:
             return {"success": False, "error": "not_connected",
                     "content": "硬件未连接：MCP 硬件工具需先连接 ai-sdr Mini"}
-        raw = worker.call_tool_sync(tool_name, args or {})
+        raw = worker.call_tool_sync(tool_name, args)
         ok = "error" not in raw and not raw.get("skipped")
-        self._ai_tool_done.emit(tool_name, dict(args or {}))
+        if ok:
+            # 只有硬件真执行成功才同步 UI：失败时先跳频的假状态必须避免（S11）
+            self._ai_tool_done.emit(tool_name, dict(args or {}))
         result = {"success": ok, "content": json.dumps(raw, ensure_ascii=False)}
         if not ok:
             result["error"] = (str(raw.get("error", "") or "")
@@ -3778,9 +3938,11 @@ class MainWindow(QMainWindow):
     def _sync_ui_for_tool(self, tool_name: str, params: dict):
         """硬件调用完成后的 UI 同步（频谱中心频 / 音量控件跟随真实调用）。"""
         if tool_name == "tune_fm":
-            freq = params.get("freq_mhz", tokens().AI["demo_freq_mhz"])
-            self.spectrum.set_center_freq(freq)
-            self.control_panel.set_freq_fm(freq)
+            # 没有真实 freq_mhz 就不同步：绝不拿 demo 频率假装"已调谐"（S11）
+            if "freq_mhz" in params:
+                freq = params["freq_mhz"]
+                self.spectrum.set_center_freq(freq)
+                self.control_panel.set_freq_fm(freq)
         elif tool_name == "set_volume":
             # 硬件面 set_volume 是 0–63 寄存器量纲，UI 是 0–100 人类量纲。
             try:
@@ -3794,15 +3956,18 @@ class MainWindow(QMainWindow):
         """AI 面板的工具请求（只含"工具环未执行"的 MCP 硬件名）。
 
         只转发 MCP 注册名（硬件面）；软件工具不过二次转发、不产生 FAIL 噪声。
-        AI 来源的写请求同样过 arm_manual 人工门（红线）；UI 直操不走此链。
+        AI 来源的写请求同样过真人确认门（S13）；UI 直操不走此链。
+        先确认、后同步 UI：拒绝时频谱/按钮不得先跳到目标值（S11）。
         """
-        self._sync_ui_for_tool(tool_name, params)
+        params = dict(params or {})
+        params.pop(GATE_PARAM, None)   # 模型自报"已确认"一律作废
         if not (self._worker and self._worker.is_hardware_tool(tool_name)):
             return
-        if is_write_tool(tool_name) and (params or {}).get("arm_manual") is not True:
+        if is_write_tool(tool_name) and not self._request_human_approval(tool_name, params):
             self.ai_panel._add_system_message(
-                f"手动模式：未转发 {tool_name}（写操作需显式 arm_manual=true）")
+                f"等待人工确认：未转发 {tool_name}（模型不能自行放行写操作）")
             return
+        self._sync_ui_for_tool(tool_name, params)
         self._worker.request_tool.emit(tool_name, params)
 
     @Slot(float)
@@ -3925,7 +4090,13 @@ class MainWindow(QMainWindow):
                 return iq
             read = _iq_frontend_read
         if self._pipeline is not None:
-            return
+            # 已存在流水线不能直接 return：旧 reader 仍指向旧后端/旧采样率，
+            # 新连接会"界面已切换、数据还是旧的"。先干净关停再按当前后端重建。
+            try:
+                self._pipeline.shutdown()
+            except Exception:
+                pass
+            self._pipeline = None
         if ReceivePipeline is None or self._demod_cfg is None:
             return
         be = self._active_sdr_backend
@@ -3936,6 +4107,17 @@ class MainWindow(QMainWindow):
         if self._vfo_center_hz <= 0.0:
             self._vfo_center_hz = self._backend_center_hz
 
+        # 复用已有主 VFO（含用户自建/选为主听的那个），没有才新建：
+        # 重建流水线不得删除用户 VFO 目录（S3）。
+        s1 = None
+        if self._vfo_mgr is not None and self._main_vfo_id is not None:
+            s1 = self._vfo_mgr.get(self._main_vfo_id)
+        if s1 is not None:
+            if self._vfo_center_hz > 0.0:
+                s1.center_hz = float(self._vfo_center_hz)
+            else:
+                self._vfo_center_hz = float(s1.center_hz)
+            self._vfo_bw = float(s1.bw_hz)
         # 建两个 dsp.VFO（DDC：NCO 搬频 → 有理重采样 → Nuttall LPF）
         from mbdsdr_ai.dsp import VFO
         try:
@@ -3952,22 +4134,21 @@ class MainWindow(QMainWindow):
         # vfo_id → DemodWorker 映射：主听切换时按 id 切换哪一路写声卡。
         self._vfo_workers = {}
         if self._vfo_mgr is not None:
-            s1 = self._vfo_mgr.add(self._vfo_center_hz, self._vfo_bw,
-                                   self._demod_cfg.mode)
+            if s1 is None:
+                s1 = self._vfo_mgr.add(self._vfo_center_hz, self._vfo_bw,
+                                       self._demod_cfg.mode)
             self._vfo_mgr.bind_dsp(s1.vfo_id, main_vfo,
                                    output_stream=self._audio_player)
             self._main_vfo_id = s1.vfo_id
             # 第二 VFO 未开放：只登记/绑定主 VFO。
             self._vfo2_id = None
-            # 首建：s1（主 VFO）为默认主听
+            # 主 VFO 恢复为默认主听（重建后焦点指针不能悬空）
             self._vfo_mgr.set_active_context(s1, temporary=False)
 
-        # 同步当前解调模式 / 静噪到 worker 共享配置
+        # 同步静噪到 worker 共享配置；解调模式以用户设置为准——
+        # 后端 status.demod_mode 只读，不覆盖用户选择（S3）。
         try:
             self._demod_cfg.squelch_db = self._squelch_db
-            be_mode = getattr(getattr(be, "status", None), "demod_mode", None)
-            if be_mode:
-                self._demod_cfg.mode = str(be_mode).upper()
         except Exception:
             pass
 
@@ -3980,6 +4161,8 @@ class MainWindow(QMainWindow):
             on_record_iq=self._on_pipeline_record_iq,
         )
         pipe.frame_ready.connect(self._on_pipeline_frame_ready)
+        # 读线程连续空读 ≈1s：查询后端真实 status，设备真掉线就如实断开（S8/S9）
+        pipe.read_failed.connect(self._on_pipeline_read_failed)
         pipe.start()
         self._pipeline = pipe
         # 主听路走统一音频后处理（ANR 降噪 + tap 分发），此前绕过 _tap_demod_audio
@@ -4000,6 +4183,39 @@ class MainWindow(QMainWindow):
             return float(self._active_sdr_backend.get_frequency())
         except Exception:
             return self._backend_center_hz
+
+    @Slot(str)
+    def _on_pipeline_read_failed(self, reason: str) -> None:
+        """读线程持续空读：核实后端 status，真掉线就如实断开并提示（S8/S9）。
+
+        不信任"界面还显示已连接"：status 报错/未连接，或连续三个阈值周期
+        （≈3s）都拿不到数据，就按掉线收尾；短暂空读只做状态栏告警。
+        """
+        backend = self._active_sdr_backend
+        if backend is None or self._pipeline is None:
+            return
+        error = ""
+        connected = True
+        try:
+            st = backend.get_status()
+            error = str(getattr(st, "error", "") or "")
+            connected = bool(getattr(st, "connected", True))
+        except Exception:
+            pass
+        self._read_fail_signals += 1
+        if not error and connected and self._read_fail_signals < 3:
+            self.statusBar().showMessage(f"数据流中断，正在重试：{reason}", 6000)
+            return
+        if self._backend_lost_handled:
+            return
+        self._backend_lost_handled = True
+        msg = error or reason or "设备已断开"
+        logger.warning("后端掉线，按未连接收尾: %s", msg)
+        try:
+            self._teardown_connection()
+        finally:
+            self._backend_lost_handled = False
+        self.statusBar().showMessage(f"设备已断开：{msg}", 15000)
 
     def _update_main_vfo_offset(self):
         """把每个已绑定 DSP 的 VFO 收听频率搬到各自 DDC：offset = vfo_center - backend_center。
@@ -4100,6 +4316,9 @@ class MainWindow(QMainWindow):
         # 更新控制面板频率/模式显示为主听 VFO 的参数
         v = mgr.get(vfo_id) if mgr is not None else None
         if v is not None:
+            # 主听即"重建流水线时要复用的那个 VFO"，id 必须跟随，否则重建后
+            # 声卡又回到旧的 VFO（用户新建/切换的主听丢失）。
+            self._main_vfo_id = vfo_id
             try:
                 self.control_panel.set_freq_fm(v.center_hz / 1e6)
                 self._vfo_center_hz = float(v.center_hz)
@@ -4127,6 +4346,8 @@ class MainWindow(QMainWindow):
 
         重活（窗×FFT×fftshift×dBFS×IIR）已在 FftWorker 线程完成，这里绝不做 FFT。
         """
+        # 收到真实数据 = 链路恢复，清零掉线计数
+        self._read_fail_signals = 0
         # 频谱状态文字（重绘由 30fps 定时器统一驱动，避免逐帧重画）
         try:
             self.spectrum._refresh_status_labels()
@@ -4248,14 +4469,11 @@ class MainWindow(QMainWindow):
             self._pipeline = None
         # 清 vfo_id → worker 映射
         self._vfo_workers = {}
-        # 清 VfoManager 里的运行时绑定（全部 VFO，含用户新建的）
+        # 只解绑运行时 DSP，保留用户 VFO 目录（重建流水线时复用，不删用户自建项）
         if self._vfo_mgr is not None:
-            for v in list(self._vfo_mgr.list_all()):
-                try:
-                    self._vfo_mgr.remove(v.vfo_id)
-                except Exception:
-                    pass
-        self._main_vfo_id = None
+            for v in self._vfo_mgr.list_all():
+                v.dsp_vfo = None
+                v.output_stream = None
         self._vfo2_id = None
         self._vfo = None
         self._vfo_in_sr = 0.0
@@ -4734,6 +4952,10 @@ class MainWindow(QMainWindow):
     def _start_recording(self):
         """开始录制：检查后端 → 建文件名 → 清 buffer → 状态栏提示。
         无 SDR 后端时弹提示且不造假文件（按钮会被调用方弹回）。"""
+        # 回放与录音互斥：回放中按录音＝先停回放再录，语义确定且用户可见
+        if self._replay_timer is not None:
+            self._stop_replay()
+            self.statusBar().showMessage("已停止回放，开始录音", 6000)
         backend = self._active_sdr_backend
         if backend is None or not callable(getattr(backend, "read_samples", None)):
             QMessageBox.warning(
@@ -5860,6 +6082,13 @@ class MainWindow(QMainWindow):
         # 停止实时轮询（回放期间独占频谱）；结束后按当时连接状态恢复。
         # 恢复条件 = 实时后端是否连着，而不是旧 UI 线程 _iq_poll_timer
         # 的活动态（后台流水线时代该定时器不再启动，用它会永远不恢复）。
+        # 录音与回放互斥：先落盘停录（用户数据不丢），再进入回放，
+        # 避免"录音中... 00:00"假状态（S5）。只在文件确认可播后才做，
+        # 用户取消选择时录照常继续。
+        if self._recording:
+            self._apply_recording(False)
+            self.statusBar().showMessage(
+                "已停止当前录音（文件已保存），开始回放", 8000)
         self._replay_resume_poll = self._active_sdr_backend is not None
         self._stop_iq_streams()
         # _stop_iq_streams 会关掉声卡；回放本身要出声，这里重新拉起声卡
@@ -6279,6 +6508,11 @@ class MainWindow(QMainWindow):
 
     def _stop_satellite_tracking(self):
         """停止闭环跟踪，恢复用户之前的接收频率。"""
+        # 没在跟踪（定时器停 + 无云台跟随）时直接返回：断开/退出路径会无条件
+        # 调用本方法，不能因此刷"已停止"或做回写。
+        if not (self._sat_track_timer is not None
+                and self._sat_track_timer.isActive()) and not self._gimbal_follow:
+            return
         if self._sat_track_timer is not None:
             self._sat_track_timer.stop()
         # 链路补偿随跟踪一起诚实关闭（不锁定 → 无补偿，不残留过期偏移）
@@ -6704,6 +6938,11 @@ class MainWindow(QMainWindow):
         import json
         config_dir = os.path.expanduser("~/.mbdsdr")
         config_file = os.path.join(config_dir, "gui_config.json")
+        if getattr(self, "_gui_config_corrupt", False) and \
+                not getattr(self, "_gui_config_corrupt_backup", None):
+            # 原文件损坏且备份失败：宁可本次不保存，也不能覆盖掉唯一证据
+            logger.warning("配置损坏且备份失败，跳过本次保存以免覆盖原文件")
+            return
         try:
             os.makedirs(config_dir, exist_ok=True)
             config = {
@@ -6740,10 +6979,41 @@ class MainWindow(QMainWindow):
                     "host": "", "port": 2101,
                     "mountpoint": "", "username": "", "password": "",
                 }
-            with open(config_file, 'w') as f:
+            # 原子写：先写临时文件再 rename，进程被杀也不会留下半截 JSON
+            tmp_path = config_file + ".tmp"
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+            os.replace(tmp_path, config_file)
         except Exception as e:  # noqa: BLE001
             logger.warning("保存 GUI 配置失败: %s", e)
+
+    def _backup_corrupt_gui_config(self, config_file: str, why: str) -> str | None:
+        """把损坏的 gui_config.json 改名保留，返回备份路径（失败返回 None）。
+
+        绝不静默用默认值覆盖用户原文件：先留证据，再允许后续写入。
+        """
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = f"{config_file}.corrupt-{stamp}"
+        try:
+            os.replace(config_file, backup)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("备份损坏配置失败: %s", e)
+            return None
+        self._gui_config_corrupt = True
+        self._gui_config_corrupt_backup = backup
+        logger.warning("gui_config.json 损坏（%s），已备份到 %s", why, backup)
+        try:
+            self.statusBar().showMessage(
+                f"配置文件损坏（{why}），已备份为 {os.path.basename(backup)}；"
+                "本次按默认值启动，原文件未删除。", 20000)
+        except Exception:
+            pass
+        return backup
 
     def _load_gui_config(self):
         """从 ~/.mbdsdr/gui_config.json 加载 GUI 配置。"""
@@ -6752,8 +7022,16 @@ class MainWindow(QMainWindow):
         if not os.path.exists(config_file):
             return
         try:
-            with open(config_file, 'r') as f:
+            with open(config_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
+        except Exception as e:  # noqa: BLE001
+            # 解析失败不得继续走默认值再把原文件覆盖成默认值
+            self._backup_corrupt_gui_config(config_file, f"JSON 解析失败: {e}")
+            return
+        if not isinstance(config, dict):
+            self._backup_corrupt_gui_config(config_file, "顶层不是 JSON 对象")
+            return
+        try:
             # 恢复窗口大小和位置
             win = config.get("window", {})
             if not win.get("maximized", False):

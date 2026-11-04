@@ -14,9 +14,14 @@ from PySide6.QtCore import Qt, Signal, Slot, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QComboBox, QLineEdit, QFrame, QGroupBox, QSizePolicy,
-    QCheckBox, QSpinBox, QProgressBar, QInputDialog,
+    QCheckBox, QSpinBox, QProgressBar, QInputDialog, QMessageBox,
 )
 from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
+
+#: 书签名长度上限（字符）。依据：常见台名/中继名（呼号+频点+亚音，如
+#: "BG5ABC 439.750 -5 88.5"）约 24 字符；64 留出地名/用途备注的余量，
+#: 同时保证下拉框文本在 240px 内可读。超过即视为异常输入/脏数据。
+BOOKMARK_NAME_MAX_CHARS = 64
 
 # 本目录（desktop/）下的兄弟模块（tokens / mode_registry 等）在以包方式从
 # 仓库根 import（如 import desktop.control_panel）时不在 sys.path 上，
@@ -365,6 +370,13 @@ class ControlPanel(QWidget):
 
         self.bookmark_combo = QComboBox()
         self.bookmark_combo.setMinimumHeight(24)
+        # 尺寸策略：item 文本再长也不得把面板撑开。AdjustToMinimumContentsLength
+        # 让 sizeHint 只按最少字符数算；水平 Ignored 让布局用可用宽度而不是
+        # item 的 minimumSizeHint（100k 字符书签曾把面板撑到 1.3M px）。
+        self.bookmark_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.bookmark_combo.setMinimumContentsLength(16)
+        self.bookmark_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._refresh_bookmarks()
         self.bookmark_combo.currentIndexChanged.connect(self._on_bookmark_selected)
         bookmark_layout.addWidget(self.bookmark_combo)
@@ -866,15 +878,44 @@ class ControlPanel(QWidget):
         self.iq_balance_changed.emit(checked)
 
     # ---- 收藏 ----
+    @staticmethod
+    def _bookmark_display_name(name: str) -> "tuple[str, bool]":
+        """返回 (显示名, 是否超过上限)。超长只截显示，不改原始数据。"""
+        raw = str(name or "")
+        if len(raw) <= BOOKMARK_NAME_MAX_CHARS:
+            return raw, False
+        return raw[:BOOKMARK_NAME_MAX_CHARS] + "…", True
+
+    def _elide_bookmark_text(self, text: str, max_px: int = 240) -> str:
+        """按像素宽度省略：下拉框文本永远不超过 max_px，避免横向撑爆。"""
+        return self.bookmark_combo.fontMetrics().elidedText(
+            text, Qt.ElideRight, max_px)
+
     def _refresh_bookmarks(self):
         self.bookmark_combo.blockSignals(True)
         self.bookmark_combo.clear()
+        abnormal = 0
         if not self._bookmarks:
             self.bookmark_combo.addItem("暂无书签，右键频谱保存当前频率", None)
         else:
             for i, (hz, name, mode) in enumerate(self._bookmarks):
-                self.bookmark_combo.addItem(
-                    f"{name} ({hz / 1e6:.3f}MHz {mode})", i)
+                shown, bad = self._bookmark_display_name(name)
+                abnormal += int(bad)
+                label = self._elide_bookmark_text(
+                    f"{shown} ({hz / 1e6:.3f}MHz {mode})")
+                self.bookmark_combo.addItem(("⚠ " if bad else "") + label, i)
+                if bad:
+                    self.bookmark_combo.setItemData(
+                        self.bookmark_combo.count() - 1,
+                        f"书签名 {len(str(name))} 字符，超过上限 "
+                        f"{BOOKMARK_NAME_MAX_CHARS}，显示已截断；原始数据未改动。",
+                        Qt.ToolTipRole)
+        if abnormal:
+            self.bookmark_combo.setToolTip(
+                f"⚠ {abnormal} 条书签名超过 {BOOKMARK_NAME_MAX_CHARS} 字符，"
+                "显示已截断；原始数据未改动，建议在书签文件中手动清理。")
+        else:
+            self.bookmark_combo.setToolTip("")
         self.bookmark_combo.blockSignals(False)
 
     def load_bookmarks_from_list(self, bookmarks: list):
@@ -893,6 +934,13 @@ class ControlPanel(QWidget):
         if not ok:
             return
         name = name.strip() or default_name
+        # 数据层约束：新输入超长直接拒绝并说明，不静默截断也不写盘。
+        if len(name) > BOOKMARK_NAME_MAX_CHARS:
+            QMessageBox.warning(
+                self, "书签名过长",
+                f"书签名 {len(name)} 字符，超过上限 {BOOKMARK_NAME_MAX_CHARS} 字符，"
+                "未保存。请缩短后重试。")
+            return
         self._bookmarks.append((self._freq_hz, name, self._current_mode))
         self._refresh_bookmarks()
         self.bookmark_combo.setCurrentIndex(self.bookmark_combo.count() - 1)

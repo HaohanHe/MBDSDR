@@ -28,6 +28,7 @@ VFO 解调 → 声卡）重构为 SDR++ 风格的多线程流水线：
 
 import logging
 import threading
+import time
 from typing import Callable, Dict, Optional
 
 import numpy as np
@@ -71,7 +72,15 @@ class IqReaderThread(QThread):
 
     对照 SDR++ source 模块的 read 线程：阻塞读硬件 → 零拷贝 swap 交给 splitter。
     read_samples 抛异常/返回 None 时本帧跳过，不崩；stop() 唤醒后退出。
+    连续失败超过 STALL_TIMEOUT_S 时发 read_failed：上层据此把 UI 如实置为
+    "已断开"（S8/S9）。按时间判定而非固定次数：Windows 上 msleep 粒度约 15ms，
+    按次数会拖到数秒才报。
     """
+
+    #: 连续无数据达到该秒数才报（空读退避在 2ms 量级，1s 足够排除瞬时抖动）
+    STALL_TIMEOUT_S = 1.0
+
+    read_failed = Signal(str)  # 连续无数据超过阈值（设备可能已断开）
 
     def __init__(self, read_fn: Callable[[int], Optional[np.ndarray]],
                  out_stream: PingPongStream, block_size: int = READ_BLOCK_SAMPLES,
@@ -84,14 +93,28 @@ class IqReaderThread(QThread):
 
     def run(self):
         self._running = True
+        last_ok = time.monotonic()
+        last_report = 0.0
+        last_reason = "read_samples 连续无数据"
         while self._running:
             try:
                 iq = self._read_fn(self._block)
-            except Exception:
+            except Exception as e:  # noqa: BLE001
                 iq = None
+                last_reason = str(e) or e.__class__.__name__
             if iq is None:
+                now = time.monotonic()
+                # 每个阈值周期报一次：持续掉线时上层能反复核查并升级处置
+                if now - last_ok >= self.STALL_TIMEOUT_S and \
+                        now - last_report >= self.STALL_TIMEOUT_S:
+                    last_report = now
+                    try:
+                        self.read_failed.emit(last_reason)
+                    except Exception:
+                        pass
                 self.msleep(2)
                 continue
+            last_ok = time.monotonic()
             iq = np.asarray(iq, dtype=np.complex64)
             n = int(iq.size)
             if n < 64:
@@ -462,6 +485,8 @@ class ReceivePipeline(QObject):
     """
 
     frame_ready = Signal(object, float)
+    #: 读线程连续无数据（≈1s）：上层应查询后端 status 并如实更新 UI
+    read_failed = Signal(str)
 
     def __init__(self, read_fn: Callable[[int], Optional[np.ndarray]],
                  sr: float,
@@ -494,6 +519,7 @@ class ReceivePipeline(QObject):
         self._record_stream = PingPongStream(np.complex64, READ_BLOCK_SAMPLES * 4)
 
         self._reader = IqReaderThread(read_fn, self._input, READ_BLOCK_SAMPLES)
+        self._reader.read_failed.connect(self.read_failed)
         self._fft = FftWorker(self._spectrum_stream, gen, self._sr, center_getter)
         self._fft.frame_ready.connect(self._on_fft_frame)
         self._demod1 = DemodWorker(self._vfo1_stream, main_vfo_dsp, player,
