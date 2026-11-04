@@ -708,6 +708,84 @@ class RecordingLibrary:
         except LibraryBusyError as exc:
             return LibraryResult(False, exc.code, str(exc))
 
+    # ── 并发写入：乐观并发控制 ──────────────────────────────────────────
+    _UPDATABLE_FIELDS = (
+        "kind", "size_bytes", "mtime", "fingerprint", "sample_rate_hz",
+        "center_freq_hz", "start_time", "duration_s", "device", "num_samples",
+        "complete", "integrity", "state", "unknown_fields", "notes",
+    )
+
+    def update_entry(self, entry_id: str, *,
+                     expected_revision: Optional[int] = None,
+                     **fields: Any) -> LibraryResult:
+        """更新一条索引记录。
+
+        并发语义：
+        - 传 ``expected_revision``：乐观并发控制，版本不匹配立刻返回
+          ``revision_conflict``（带当前条目内容），绝不覆盖别人的修改。
+        - 不传：显式「最后写入者胜出」，结果码与 ``mode`` 如实标注。
+        - 整个读-改-写过程持库锁，两个写入者不会互相踩踏或丢记录。
+        """
+        unknown = set(fields) - set(self._UPDATABLE_FIELDS)
+        if unknown:
+            return LibraryResult(False, "bad_field",
+                                 f"不允许更新的字段: {sorted(unknown)}")
+        if expected_revision is not None:
+            try:
+                expected = int(expected_revision)
+            except (TypeError, ValueError):
+                return LibraryResult(False, "bad_param",
+                                     f"expected_revision 非法: {expected_revision!r}")
+        else:
+            expected = None
+        try:
+            with self._lock():
+                doc, code, message = self._read_unlocked()
+                if doc is None:
+                    return LibraryResult(False, code, message)
+                entries = self._entries_of(doc)
+                entry = next((e for e in entries if e.entry_id == entry_id), None)
+                if entry is None:
+                    return LibraryResult(False, "entry_not_found",
+                                         f"索引中没有条目 {entry_id}")
+                if expected is not None and expected != entry.revision:
+                    return LibraryResult(
+                        False, "revision_conflict",
+                        (f"条目已被另一方修改（当前 revision={entry.revision}，"
+                         f"本次期望 {expected}），未覆盖"),
+                        {"entry_id": entry_id,
+                         "current_revision": entry.revision,
+                         "expected_revision": expected,
+                         "current": entry.to_dict()},
+                    )
+                changed: Dict[str, Any] = {}
+                for key, value in fields.items():
+                    old = getattr(entry, key)
+                    if old != value:
+                        setattr(entry, key, value)
+                        changed[key] = {"from": old, "to": value}
+                if not changed:
+                    return LibraryResult(
+                        True, "no_change", "字段与当前值一致，无需更新",
+                        {"entry_id": entry_id, "revision": entry.revision,
+                         "mode": "optimistic" if expected is not None
+                         else "last_writer_wins"},
+                    )
+                previous = entry.to_dict()
+                entry.revision += 1
+                entry.updated_at = _now_iso()
+                doc["entries"] = [e.to_dict() for e in entries]
+                self._write_doc_unlocked(doc)
+                return LibraryResult(
+                    True, "ok", f"已更新条目（revision {entry.revision}）",
+                    {"entry_id": entry_id, "revision": entry.revision,
+                     "changed": changed, "previous": previous,
+                     "mode": "optimistic" if expected is not None
+                     else "last_writer_wins"},
+                )
+        except LibraryBusyError as exc:
+            return LibraryResult(False, exc.code, str(exc))
+
     # ── 索引 ↔ 磁盘核对 ─────────────────────────────────────────────────
     def _scan_disk_unlocked(self) -> Dict[str, str]:
         """扫描库根目录下的录音数据文件（跳过回收站；不跟随符号链接）。"""
