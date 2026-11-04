@@ -291,7 +291,8 @@ class TestRFSkyViewPerspective(unittest.TestCase):
     def test_fov_range(self):
         from desktop.rf_sky_view import RFSkyView
         v = RFSkyView()
-        self.assertEqual(v.view_state.min_fov, 5.0)
+        # 0.5° 下限：让内行星（金星最亮 ~60″）在 700px 窗口能分辨（角半径 ~11.7px）
+        self.assertEqual(v.view_state.min_fov, 0.5)
         self.assertEqual(v.view_state.max_fov, 120.0)
 
 

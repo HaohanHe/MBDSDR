@@ -67,6 +67,12 @@
 | L22 | 本轮集成验收红线（哪些红必须清零才合并） | P11 任务书 | 待确认 | 用户对「环境红/真红」的处置口径 |
 | L23 | 两个「天空可见」工具时间基准分叉：`sky_view_visible` 走 TimeEngine，`sdr_satellite_sky_view` 走墙钟 | P12 实测：把 TimeEngine 拨到 NOAA 19 仰角 23.3° 的时刻，前者列出该星、后者不列（`orbit.visible_satellites` 无 `timestamp` 参数）；与别线 P11-6/7/8 的时间基准统一同域 | 口径差，未拍板 | 待时间基准线定口径后，给 `orbit.visible_satellites` 加 `timestamp` 并把 `_satellite_sky_view` 接上 `get_time_engine().now_unix()`；复跑同一拨盘对照两工具 |
 
+## 6. 天空绘制的模型简化（口径已明示，不冒充标准模型）
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L24 | 白天恒星消隐：只有「太阳高度整层开关」，**没有**天空亮度→极限星等模型 | `desktop/rf_sky_view.py` 的 `STAR_DAYLIGHT_SUN_ALT_DEG` / `stars_hidden_by_daylight`；`tests/test_sky_daylight_stars.py` | 保守近似：太阳高度 ≥ -0.833°（日落标准定义 = 34′ 大气折射 + 16′ 日面半径）时恒星整层不画、不可点选，状态卡明示「白天·无恒星」。不做暮光渐变，也不按太阳高度/光害反推白天可见极限星等。因此白天画面**不可**解读为「该时刻肉眼可见的星等下限」 | 若要真模型：接入公开天空亮度模型（Krischunas & Schaefer / Schaefer 1989）换算极限星等，替换整层开关并同步改该测试与状态卡文案；在此之前不得把白天画面当作亮度判据 |
+
 ## 附 A：工具面总账（本轮实测快照）
 
 - 总数：**495**；分类：**75**；`available` 非 True：**0**；`handler` 缺失：**0**；

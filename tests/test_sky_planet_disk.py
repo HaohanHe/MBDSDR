@@ -6,10 +6,11 @@ tests/test_sky_planet_disk.py
 覆盖：
   1. 相位角 -> 照度 = 0.5·(1+cos α)，与信息卡同一算式；
   2. 视直径 -> 投影像素半径随 FOV 真实缩放（5° vs 1°，比例 5）；
-  3. 5° FOV（当前可达最窄）下所有行星仍不可分辨（r < 2px），走点源标记；
-  4. 可分辨时按真实圆面 + 历表相位画亮区（金星 130° 相位 ≈ 17.7% 月牙）；
-  5. 太阳方位缺测时不填亮区（不按"屏幕左右"编造朝向）；
-  6. 信息卡星等 / 视直径 / 相位角与绘制层同源（compute_all）。
+  3. 5° 中档缩放下行星仍不可分辨（r < 2px）走点源；min_fov=0.5° 必须可分辨；
+  4. 滚轮等比缩放走到 0.5° 平滑不跳，光标锚定在极限附近不漂；
+  5. 可分辨时按真实圆面 + 历表相位画亮区（金星 130° 相位 ≈ 17.7% 月牙）；
+  6. 太阳方位缺测时不填亮区（不按"屏幕左右"编造朝向）；
+  7. 信息卡星等 / 视直径 / 相位角与绘制层同源（compute_all）。
 
 反证（同一场景，旧实现必红）：
   - 旧实现行星恒为 star_draw 小圆点：1° FOV 下半径 ~5px 且恒为满亮，
@@ -41,12 +42,15 @@ app = QApplication.instance() or QApplication(sys.argv)
 from rf_sky_view import (  # noqa: E402
     RFSkyView,
     planet_phase_illumination,
+    angular_separation_deg,
 )
 from mbdsdr_ai.astronomy import planets as P  # noqa: E402
 from mbdsdr_ai.celestial_geometry import (  # noqa: E402
     GroundStation, vec_from_radec, j2000_to_altaz, azalt_from_vec,
+    altaz_to_j2000, vec_from_azalt, radec_from_vec,
 )
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
+from mbdsdr_ai.sky_interaction import screen_to_sky  # noqa: E402
 from mbdsdr_ai.skyengine import jtime as _jtime  # noqa: E402
 
 # 金星在 2026-09-28 02:00 UTC 已升起（alt≈23°），相位角≈130°
@@ -137,10 +141,10 @@ def test_planet_disc_radius_scales_with_fov():
 
 
 # --------------------------------------------------------------------------
-# 3. 当前可达最窄 FOV 下行星仍不可分辨 -> 点源标记
+# 3. 缩放分辨率下限：中档 5° 是点源；允许的最窄 min_fov=0.5° 必须可分辨
 # --------------------------------------------------------------------------
-def test_planets_are_unresolved_at_reachable_min_fov():
-    """5° FOV（当前可达最窄）下，被画出的行星仍是点源（r < 2px）。
+def test_planets_are_unresolved_at_mid_zoom():
+    """5° FOV（中档）下被画出的行星仍是点源（r < 2px）——分辨率下限。
 
     逐颗居中：离屏天体在透视投影靠近奇异面处局部尺度会爆炸，那不是
     "画出来的圆面"（_draw_planets 已先过 _on_screen 门），不应混进这条断言。
@@ -153,7 +157,7 @@ def test_planets_are_unresolved_at_reachable_min_fov():
         if key in ("moon", "earth"):
             continue
         az, alt = _planet_altaz(pos)
-        if alt < -1.0:
+        if alt < 0.0:
             continue                    # 地平线下不画（与绘制层同一门）
         v.view_state.look_at(az, alt)
         disc = v._planet_screen_disc(az, alt,
@@ -162,6 +166,121 @@ def test_planets_are_unresolved_at_reachable_min_fov():
         assert float(disc["r"]) < 2.0, (key, float(disc["r"]))
         checked += 1
     assert checked >= 2                 # 至少两颗在地平线上，断言非空壳
+
+
+def _ink_at(img, cx, cy, radius) -> int:
+    n = 0
+    for y in range(max(0, int(cy - radius)), min(img.height(), int(cy + radius)) + 1):
+        for x in range(max(0, int(cx - radius)), min(img.width(), int(cx + radius)) + 1):
+            if (x - cx) ** 2 + (y - cy) ** 2 > radius * radius:
+                continue
+            c = img.pixelColor(x, y)
+            if (c.red() + c.green() + c.blue()) / 3.0 > 90:
+                n += 1
+    return n
+
+
+def test_planet_below_horizon_not_drawn_nor_picked():
+    """地平线下（alt<0）行星既不画也不给点：与恒星/月亮同一条地平门。
+
+    反证：绘制/拾取门旧值 alt<-1.0 时，alt=-0.5° 的金星会落笔（ink>0）
+    且可点中——地平线以下冒出一颗"看不见的行星"，与恒星/月亮口径打架。
+    """
+    v = _new_view(500)
+    gs = GroundStation(LON, LAT, 0.0)
+    jd = v._current_jd()
+    base = P.compute_planet("venus", PLANET_JD)
+    out = {}
+    try:
+        for tag, alt in (("below", -0.5), ("above", 1.0)):
+            ra, dec = radec_from_vec(
+                altaz_to_j2000(vec_from_azalt(90.0, alt), gs, jd))
+            pos = dataclasses.replace(base, ra_deg=ra, dec_deg=dec)
+            v._planet_positions = lambda _jd, _p=pos: {"venus": _p}
+            v.view_state.look_at(90.0, 0.0)
+            v.view_state.fov_deg = 20.0
+            scr = v._sky_to_screen(90.0, alt)
+            out[tag] = (_ink_at(_render_planets(v, 500, 500), scr.x(), scr.y(), 14),
+                        v._find_body_at(scr.x(), scr.y()))
+    finally:
+        v.close()
+    assert out["below"][0] == 0, f"地平线下不应落笔: {out['below']}"
+    assert out["below"][1] is None or out["below"][1].get("kind") != "planet"
+    assert out["above"][0] > 0, f"地平线上必须画: {out['above']}"
+    assert out["above"][1] is not None \
+        and out["above"][1].get("kind") == "planet", out["above"]
+
+
+def test_planets_resolved_at_allowed_min_fov():
+    """UI 缩放能到的 min_fov（0.5°）下，金星必须真的可分辨（r >= 2px）。
+
+    反证：min_fov 旧值 5° 时金星 r≈0.7px，_draw_planets 永远只画点源——
+    真实圆面/相位代码在产品里不可达。
+    """
+    v = _new_view(700)
+    v.view_state.zoom_to(v.view_state.min_fov)
+    assert v.view_state.fov_deg == pytest.approx(0.5)
+    resolved = {}
+    for key, pos in P.compute_all(PLANET_JD).items():
+        if key in ("moon", "earth"):
+            continue
+        az, alt = _planet_altaz(pos)
+        if alt < 0.0:
+            continue
+        v.view_state.look_at(az, alt)
+        disc = v._planet_screen_disc(az, alt,
+                                     pos.angular_diameter_arcsec / 3600.0)
+        assert disc is not None
+        resolved[key] = float(disc["r"])
+    assert resolved.get("venus", 0.0) >= 2.0, resolved
+    assert sum(1 for r in resolved.values() if r >= 2.0) >= 2, resolved
+
+
+def test_wheel_zoom_walks_to_min_fov_smoothly():
+    """滚轮等比缩放：单调、逐步比恒定、到下限精确收住且不抖不跳。"""
+    v = _new_view(700)
+    v.view_state.zoom_to(v.view_state.max_fov)
+    c0 = (v.view_state.center_az, v.view_state.center_alt)
+    fovs = [v.view_state.fov_deg]
+    for _ in range(40):
+        if v.view_state.fov_deg <= v.view_state.min_fov:
+            break
+        v.view_state.zoom(1.0)
+        fovs.append(v.view_state.fov_deg)
+    assert v.view_state.fov_deg == pytest.approx(0.5)
+    assert len(fovs) <= 13, f"120°→0.5° 应约 11 步，实测 {len(fovs) - 1}"
+    step = math.exp(-30.0 / 60.0)          # exp(-zoomSpeed/60)
+    for a, b in zip(fovs, fovs[1:-1]):
+        assert b / a == pytest.approx(step, rel=1e-6)
+    # 末步本会破下限，被精确钳到 min_fov（不越过、不回弹）
+    assert fovs[-2] * step < v.view_state.min_fov
+    assert fovs[-1] == pytest.approx(v.view_state.min_fov)
+    assert (v.view_state.center_az, v.view_state.center_alt) == c0
+    # 反向滚轮能平滑退回（不会卡在下限附近）
+    v.view_state.zoom(-1.0)
+    assert v.view_state.fov_deg > 0.5
+
+
+def test_zoom_at_cursor_stable_at_min_fov():
+    """光标锚定缩放：在 0.5° 极限附近连续放大，锚点仍钉在指下（残差小）。"""
+    v = _new_view(700)
+    pos = P.compute_planet("venus", PLANET_JD)
+    az, alt = _planet_altaz(pos)
+    v.view_state.look_at(az, alt)
+    v.view_state.zoom_to(2.0)
+    cursor = (520.0, 260.0)               # 明显偏心，考验大偏移下的反补
+
+    def sky_at(px, py):
+        return screen_to_sky(px, py, v.view_state, v.projection,
+                             (float(v.width()), float(v.height())))
+
+    az0, alt0 = sky_at(*cursor)
+    for _ in range(6):
+        v.zoom_at_cursor(1.0, cursor)
+    az1, alt1 = sky_at(*cursor)
+    resid = angular_separation_deg(az0, alt0, az1, alt1)
+    assert v.view_state.fov_deg == pytest.approx(0.5)
+    assert resid < 0.05, f"窄 FOV 锚定残差 {resid:.4f}° 过大（会漂/抖）"
 
 
 # --------------------------------------------------------------------------

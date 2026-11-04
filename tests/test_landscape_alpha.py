@@ -162,10 +162,12 @@ class TestDrawLandscapeWiring:
         p.end()
         assert calls["n"] > 0             # 正常渲染：逐方位算剪影轮廓
 
-    def test_reachable_min_fov_still_draws_faded(self):
-        # 真实 min_fov=5° -> alpha≈0.11 > 阈值：不跳过（只是很淡），
-        # 保证用户放到最紧时地景不会硬消失。
+    def test_reachable_min_fov_is_sky_only(self):
+        """min_fov=0.5° 时地景按设计完全淡出（fov<=1° 即 0），不是硬消失退化：
+        上一档可达 5° 仍 >0，用户在最紧缩放看到的是纯天空（透视投影视角）。"""
         v = _new_view()
         v.view_state.zoom_to(v.view_state.min_fov)
+        assert v.view_state.fov_deg == pytest.approx(0.5)
         assert mod._landscape_alpha(v.view_state.fov_deg,
-                                    v.view_state.center_alt) > 0.003
+                                    v.view_state.center_alt) == pytest.approx(0.0)
+        assert mod._landscape_alpha(5.0, v.view_state.center_alt) > 0.003

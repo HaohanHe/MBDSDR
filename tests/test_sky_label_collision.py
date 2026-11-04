@@ -52,11 +52,26 @@ def _new_view(size: int = WIN, fov: float = 120.0) -> RFSkyView:
     return v
 
 
-def _boxes(items, font: QFont):
-    fm = QFontMetrics(font)
-    return [(prio, pos.x(), pos.y() - fm.ascent(),
-             pos.x() + fm.horizontalAdvance(text), pos.y() + fm.descent())
-            for prio, pos, text, _c, _s in items]
+def _one(prio, x, y, text, color, small=False):
+    """单行标签块：(优先级, 锚点, [(文本, 小字号, dy)], 颜色)。"""
+    return (prio, rf_sky_view.QPointF(x, y), [(text, small, 0.0)],
+            QColor(color))
+
+
+def _boxes(items, fonts):
+    """与 _flush_labels 同口径：块的外接框 = 各行并集。"""
+    out = []
+    for prio, pos, lines, _c in items:
+        x0 = y0 = float("inf")
+        x1 = y1 = float("-inf")
+        for text, small, dy in lines:
+            fm = QFontMetrics(fonts[small])
+            x0 = min(x0, pos.x())
+            x1 = max(x1, pos.x() + fm.horizontalAdvance(text))
+            y0 = min(y0, pos.y() + dy - fm.ascent())
+            y1 = max(y1, pos.y() + dy + fm.descent())
+        out.append((prio, x0, y0, x1, y1))
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -111,14 +126,13 @@ def test_real_sky_labels_are_culled_but_not_wiped():
         v.close()
 
     assert len(items) >= 10, f"宽 FOV 下应有星名+座名标签，实测 {len(items)} 条"
-    kinds = {small for small in (it[4] for it in items)}
+    kinds = {small for _p, _pos, lines, _c in items
+             for _t, small, _dy in lines}
     assert kinds == {False, True}, "星名与座名两类都应登记（否则取样天区无效）"
 
-    font = v._font
-    fm = QFontMetrics(font)
+    fonts = {False: v._font, True: v._gnss_label_font}
     keep_all = len(items)
-    kept = label_boxes_keep(_boxes(items, font))
-    # 座名用小字号，但了解框宽差异足以判断同胞重叠；这里只要求整体剔除生效
+    kept = label_boxes_keep(_boxes(items, fonts))
     assert len(kept) < keep_all, \
         f"密集星空旧实现全画（{keep_all} 条）应出现压字被剔除"
     assert len(kept) >= 1, "不能把标签全灭（剔除过头也是坏）"
@@ -127,8 +141,8 @@ def test_real_sky_labels_are_culled_but_not_wiped():
 # --------------------------------------------------------------------------
 # 3. 绘制路径像素级对拍：重叠只留高优先级
 # --------------------------------------------------------------------------
-def _render_flush(v, items) -> QImage:
-    img = QImage(120, 60, QImage.Format_ARGB32)
+def _render_flush(v, items, size=(120, 60)) -> QImage:
+    img = QImage(size[0], size[1], QImage.Format_ARGB32)
     img.fill(QColor(0, 0, 0))
     painter = QPainter(img)
     painter.setRenderHint(QPainter.TextAntialiasing, True)
@@ -143,15 +157,12 @@ def _render_flush(v, items) -> QImage:
 def test_flush_paints_only_higher_priority_of_overlapping_pair():
     v = _new_view()
     try:
-        planet = (0.0, rf_sky_view.QPointF(6, 20), "金星",
-                  QColor(255, 255, 255), False)
-        star = (2.3, rf_sky_view.QPointF(10, 20), "织女一",
-                QColor(200, 210, 230), False)
+        planet = _one(0.0, 6, 20, "金星", "#FFFFFF")
+        star = _one(2.3, 10, 20, "织女一", "#C8D2E6")
         both = _render_flush(v, [planet, star])
         alone = _render_flush(v, [planet])
-        disjoint = _render_flush(v, [planet, (2.3, rf_sky_view.QPointF(40, 40),
-                                            "织女一",
-                                            QColor(200, 210, 230), False)])
+        disjoint = _render_flush(v, [planet,
+                                     _one(2.3, 40, 40, "织女一", "#C8D2E6")])
     finally:
         v.close()
 
@@ -159,18 +170,65 @@ def test_flush_paints_only_higher_priority_of_overlapping_pair():
     assert disjoint != alone, "不重叠的标签必须都画（剔除不能误伤）"
 
 
-@pytest.mark.parametrize("prio", [0.0, 1.0, 2.0])
-def test_flush_keeps_single_label(prio):
+# --------------------------------------------------------------------------
+# 4. 卫星三行标签块：整块同进同退（不会被各自拆掉）
+# --------------------------------------------------------------------------
+def _sat_block(prio, x, y):
+    """模拟 _draw_objects 的卫星块：名称 + 仰角方位 + 频率。"""
+    return (prio, rf_sky_view.QPointF(x, y),
+            [("ISS (ZARYA)", False, -5.0),
+             ("EL 31.7 AZ 204.0", True, 22.0),
+             ("145.8 MHz", True, 36.0)],
+            QColor("#F5F3EF"))
+
+
+def test_satellite_block_survives_overlap_with_star_label():
     v = _new_view()
     try:
-        img = _render_flush(v, [(prio, rf_sky_view.QPointF(6, 20), "测试",
-                                 QColor(255, 255, 255), False)])
+        block = _sat_block(0.5, 6, 8)
+        star = _one(2.3, 8, 30, "织女一", "#C8D2E6")   # 压在卫星块第 2 行上
+        both = _render_flush(v, [block, star])
+        block_only = _render_flush(v, [block])
     finally:
         v.close()
-    ink = 0
+
+    assert both == block_only, "卫星块 0.5 优先级应先占位，星名让位"
+    # 块内三行都必须落笔：只画名称/只画频率都会让像素数明显变少
+    ink_all = _ink(block_only)
+    ink_line1 = _ink(_render_flush(v, [(0.5, rf_sky_view.QPointF(6, 8),
+                                       [block[2][0]], block[3])]))
+    assert ink_all > ink_line1 * 1.6, \
+        f"三行块应整块画出（ink {ink_all} vs 仅首行 {ink_line1}）"
+
+
+def test_star_label_next_to_block_is_kept():
+    """块外（右侧/下方）的星名不被块误伤。"""
+    v = _new_view()
+    try:
+        block = _sat_block(0.5, 6, 8)
+        star = _one(2.3, 6, 95, "织女一", "#C8D2E6")   # 块外下方
+        both = _render_flush(v, [block, star], size=(120, 140))
+        block_only = _render_flush(v, [block], size=(120, 140))
+    finally:
+        v.close()
+    assert both != block_only, "不与块相交的星名必须照样画"
+
+
+def _ink(img) -> int:
+    n = 0
     for y in range(img.height()):
         for x in range(img.width()):
             c = img.pixelColor(x, y)
             if c.red() + c.green() + c.blue() > 90:
-                ink += 1
-    assert ink > 0, "单标签必须真的落笔（基础路径不能空）"
+                n += 1
+    return n
+
+
+@pytest.mark.parametrize("prio", [0.0, 0.5, 1.0, 2.0])
+def test_flush_keeps_single_label(prio):
+    v = _new_view()
+    try:
+        img = _render_flush(v, [_one(prio, 6, 20, "测试", "#FFFFFF")])
+    finally:
+        v.close()
+    assert _ink(img) > 0, "单标签必须真的落笔（基础路径不能空）"

@@ -297,6 +297,33 @@ def angular_separation_deg(az1_deg: float, alt1_deg: float,
     return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
 
 
+# ---------------------------------------------------------------------------
+# 恒星：白天消隐（只按太阳地平阈值整层开关，**不做**天空亮度→极限星等模型）
+# ---------------------------------------------------------------------------
+# -0.833° 是「日落」的标准天文定义：太阳中心低于地平 50′（34′ 大气折射 +
+# 16′ 日面半径）。太阳高于该值按白天处理，恒星整层不画。
+# 这是**保守近似**，不是光度的标准模型：项目里没有公开的天空亮度→极限
+# 星等数据，所以不做暮光渐变、不按 Bortle/太阳高度连续压暗恒星——要么按
+# 夜空的极限星等画，要么整层关掉。留痕见 docs/limitations-register.md L24。
+STAR_DAYLIGHT_SUN_ALT_DEG = -0.833
+
+
+def stars_hidden_by_daylight(sun_alt_deg: Optional[float]) -> bool:
+    """太阳在地平上方（按日落阈值）时恒星整层隐藏（绘制门与拾取门同一判据）。
+
+    太阳高度未知（历表未就绪）返回 False：无法断言是白天，就不假装是。
+    """
+    if sun_alt_deg is None:
+        return False
+    try:
+        alt = float(sun_alt_deg)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(alt):
+        return False
+    return alt >= STAR_DAYLIGHT_SUN_ALT_DEG
+
+
 def moon_lit_path(cos_alpha: float) -> QPainterPath:
     """单位半径月面亮区路径（局部坐标系: +x 指向太阳, +y 屏幕向下）。
 
@@ -855,9 +882,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._trajectories: Dict[str, List[Tuple[float, float]]] = {}
 
         # === SkyInteractionHandler 所需的宿主属性 ===
-        # Stellarium StelProjector 透视投影 (pinhole camera); FOV 5..120°。
+        # Stellarium StelProjector 透视投影 (pinhole camera); FOV 0.5..120°。
+        # 0.5° 下限让内行星圆面真的可分辨：金星最亮时视直径约 60″=0.0167°，
+        # 700px 窗口下角半径 ≈ 11.7px（>= 2px 才会走 _draw_planet_disc），
+        # 月亮视半径 ≈ 363px。滚轮是等比缩放（每步 ×exp(-0.5)），
+        # 120°→0.5° 约 11 步、5°→0.5° 约 5 步，无跳变。
         self.view_state = ViewState(center_alt=90.0, fov_deg=120.0,
-                                    min_fov=5.0, max_fov=120.0)
+                                    min_fov=0.5, max_fov=120.0)
         self.projection = PerspectiveProjection()
         self.sky_objects = self._objects
         SkyInteractionHandler.__init__(self)
@@ -880,9 +911,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 卫星目录索引 (SatelliteTracker 每帧喂入, 供信息卡/搜索)
         self._sat_catalog: Dict[str, Dict[str, object]] = {}
-        # 本帧天体标签队列（(优先级, 位置, 文本, 颜色, 小字号)）：各层先登记，
-        # 等全部层画完再统一避让，星名/座名/行星名不互相压字。
-        self._label_items: List[Tuple[float, QPointF, str, QColor, bool]] = []
+        # 本帧标签队列：((优先级, 锚点, [(行文本, 小字号, dy), ...], 颜色))。
+        # 各层先登记，等全部层画完再统一避让：星名/座名/行星名/卫星块
+        # 都不互相压字，且同一卫星的多行标签作为**一个块**整块取舍。
+        self._label_items: List[Tuple[float, QPointF,
+                                      List[Tuple[str, bool, float]],
+                                      QColor]] = []
         # 当前选中天体的完整信息 (信息卡用)
         self._selected_info: Optional[Dict[str, object]] = None
         # 行星/恒星/深空天体选中态 (与 _hovered_object 互斥; 恒星/DSO 批
@@ -2202,12 +2236,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._draw_antenna_beam(painter)
             self._draw_celestial_bodies(painter)
             self._draw_planets(painter)
-            # 天体标签（月亮/行星/座名/亮星）统一避让后画在星空层之上，
-            # 密集天区不互相压字；卫星标签仍由 _draw_objects 自己负责。
-            self._flush_labels(painter)
             self._draw_objects(painter)
             self._draw_antenna_pointer(painter)
             self._draw_gnss_satellites(painter)
+            # 天体/卫星/GNSS 标签（月亮/行星/卫星块/座名/亮星）统一避让后
+            # 画在最上层，密集天区不互相压字。
+            self._flush_labels(painter)
             if self._show_compass:
                 self._draw_compass(painter)
             if self._hovered_object:
@@ -2285,6 +2319,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _draw_stars(self, painter: QPainter):
         gs = self._ground_station()
         if gs is None:
+            return
+        if self._stars_hidden_by_daylight():
+            # 白天：恒星整层不画（近似口径与限制见 stars_hidden_by_daylight）。
             return
         jd = self._current_jd()
         painter.save()
@@ -2383,17 +2420,51 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return (-margin <= pos.x() <= self.width() + margin
                 and -margin <= pos.y() <= self.height() + margin)
 
+    def _sun_alt_deg(self) -> Optional[float]:
+        """太阳高度（历表未就绪时 None，不拿默认值冒充）。"""
+        sun = self._sun
+        if not sun:
+            return None
+        alt = sun.get("alt")
+        if alt is None:
+            return None
+        try:
+            return float(alt)
+        except (TypeError, ValueError):
+            return None
+
+    def _stars_hidden_by_daylight(self) -> bool:
+        """恒星是否因白天整层隐藏（绘制层与拾取层共用同一条判据）。"""
+        return stars_hidden_by_daylight(self._sun_alt_deg())
+
     def _queue_label(self, priority: float, pos: QPointF, text: str,
                      color: QColor, small: bool = False) -> None:
-        """登记一条天体标签（本帧末尾统一避让后绘制）。
+        """登记单行天体标签（本帧末尾统一避让后绘制）。
 
-        priority 越小越优先：行星/月亮 0、座名 1、星名 2+星等（亮星先占位）。
+        优先级越小越优先（可读性裁决，越"用户正在用的"越靠前）：
+          0.0  月亮/行星 —— 本视图的观测主体，名字丢了最可惜
+          0.5  卫星/信号/干扰/GNSS PRN —— 操作对象，块内含仰角方位或频率
+          1.0  星座名 —— 宽 FOV 下的导航骨架
+          2.0+ 星名（2 + 星等，亮星先占位）
         """
-        self._label_items.append((float(priority), QPointF(pos), str(text),
-                                  QColor(color), bool(small)))
+        self._queue_label_block(priority, pos, [(str(text), bool(small), 0.0)],
+                                color)
+
+    def _queue_label_block(self, priority: float, pos: QPointF,
+                           lines: List[Tuple[str, bool, float]],
+                           color: QColor) -> None:
+        """登记多行标签块（整块一起避让：同一卫星的 3 行不会被各自拆掉）。"""
+        if not lines:
+            return
+        self._label_items.append((float(priority), QPointF(pos),
+                                  [(str(t), bool(s), float(dy))
+                                   for t, s, dy in lines], QColor(color)))
 
     def _flush_labels(self, painter: QPainter) -> None:
-        """本帧标签统一绘制：按优先级做二维碰撞剔除（label_boxes_keep）。"""
+        """本帧标签统一绘制：按优先级做二维碰撞剔除（label_boxes_keep）。
+
+        块的外接框 = 所有行的并集，因此块内各行永远同进同退。
+        """
         items = self._label_items
         self._label_items = []
         if not items:
@@ -2401,18 +2472,24 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         fonts = {False: self._font, True: self._gnss_label_font}
         metrics = {k: QFontMetrics(f) for k, f in fonts.items()}
         boxes: List[Tuple[float, float, float, float, float]] = []
-        for prio, pos, text, _color, small in items:
-            fm = metrics[small]
-            boxes.append((prio, pos.x(), float(pos.y() - fm.ascent()),
-                          float(pos.x() + fm.horizontalAdvance(text)),
-                          float(pos.y() + fm.descent())))
+        for prio, pos, lines, _color in items:
+            x0 = y0 = float("inf")
+            x1 = y1 = float("-inf")
+            for text, small, dy in lines:
+                fm = metrics[small]
+                x0 = min(x0, pos.x())
+                x1 = max(x1, pos.x() + fm.horizontalAdvance(text))
+                y0 = min(y0, pos.y() + dy - fm.ascent())
+                y1 = max(y1, pos.y() + dy + fm.descent())
+            boxes.append((prio, float(x0), float(y0), float(x1), float(y1)))
         painter.save()
         painter.setRenderHint(QPainter.TextAntialiasing, True)
         for i in label_boxes_keep(boxes):
-            _prio, pos, text, color, small = items[i]
-            painter.setFont(fonts[small])
+            _prio, pos, lines, color = items[i]
             painter.setPen(color)
-            painter.drawText(pos, text)
+            for text, small, dy in lines:
+                painter.setFont(fonts[small])
+                painter.drawText(QPointF(pos.x(), pos.y() + dy), text)
         painter.restore()
 
     # ------------------------------------------------------------------ #
@@ -2882,26 +2959,26 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(QBrush(color))
                 painter.drawPolygon(diamond)
-                painter.setPen(self._ink())
-                painter.setFont(self._font)
-                painter.drawText(QPointF(pos.x() + 10, pos.y() - 5), obj.name)
-                painter.setPen(self._ink())
-                painter.setFont(self._mono_font)
-                painter.drawText(
-                    QPointF(pos.x() + 10, pos.y() + 22),
-                    f"EL {obj.elevation_deg:4.1f} AZ {obj.azimuth_deg:5.1f}")
+                # 卫星名 + 仰角方位 + 频率作为一个块进统一避让：
+                # 块内三行同进同退，块与星名/座名冲突时按 0.5 优先级占位
+                # （卫星是操作对象，用户要靠它决定调谐/跟踪）。
+                lines: List[Tuple[str, bool, float]] = [
+                    (obj.name, False, -5.0),
+                    (f"EL {obj.elevation_deg:4.1f} AZ {obj.azimuth_deg:5.1f}",
+                     True, 22.0),
+                ]
                 if obj.frequency_hz > 0:
-                    painter.drawText(
-                        QPointF(pos.x() + 10, pos.y() + 36),
-                        f"{obj.frequency_hz / 1e6:.1f} MHz")
+                    lines.append((f"{obj.frequency_hz / 1e6:.1f} MHz",
+                                  True, 36.0))
+                self._queue_label_block(0.5, QPointF(pos.x() + 10, pos.y()),
+                                        lines, self._ink())
             elif obj.obj_type == "signal":
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(pos, 5, 5)
                 painter.drawEllipse(pos, 9, 9)
-                painter.setPen(self._ink())
-                painter.setFont(self._font)
-                painter.drawText(QPointF(pos.x() + 12, pos.y() + 4), obj.name)
+                self._queue_label(0.5, QPointF(pos.x() + 12, pos.y() + 4),
+                                  obj.name, self._ink())
             elif obj.obj_type == "interferer":
                 size = 7
                 triangle = QPolygonF([
@@ -2912,16 +2989,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(QBrush(color))
                 painter.drawPolygon(triangle)
-                painter.setPen(self._ink())
-                painter.setFont(self._font)
-                painter.drawText(QPointF(pos.x() + 10, pos.y() - 5), obj.name)
+                self._queue_label(0.5, QPointF(pos.x() + 10, pos.y() - 5),
+                                  obj.name, self._ink())
             else:
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(QBrush(color))
                 painter.drawEllipse(pos, 5, 5)
-                painter.setPen(self._ink())
-                painter.setFont(self._font)
-                painter.drawText(QPointF(pos.x() + 10, pos.y() + 4), obj.name)
+                self._queue_label(0.5, QPointF(pos.x() + 10, pos.y() + 4),
+                                  obj.name, self._ink())
 
         # 选中对象：4 段圆弧十字 + 2s 呼吸（SWE 选中标记同形）
         if self._hovered_object is not None and self._hovered_object.visible \
@@ -3151,7 +3226,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _draw_planets(self, painter: QPainter):
         """行星标记 (实心圆点 + 中文名标签), 位置随时间引擎流动。
 
-        快转时间时行星沿黄道漂移 —— "历"叙事的一部分。低于地平 -1° 不画。
+        快转时间时行星沿黄道漂移 —— "历"叙事的一部分。低于地平（alt<0）不画：
+        与恒星/月亮同一条地平门，不引入未标定的折射抬升（本视图不画地平线下
+        天体；太阳是唯一例外，见 _draw_celestial_bodies 的日出日落处理）。
         大小/亮度/辉光走恒星同一条 star_draw(有效星等, Bortle) 模型
         （SWE core_get_point_for_mag 语义：所有天体共用一套亮度模型），
         只保留各自的识别色——于是金星(-4.7)明显大于木星(-1.9)大于土星(0.9)，
@@ -3183,8 +3260,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 az, alt = azalt_from_vec(v)
             except Exception:
                 continue
-            if alt < -1.0:
-                continue
+            if alt < 0.0:
+                continue        # 地平线下不画（与恒星/月亮同一条地平门）
             scr = self._sky_to_screen(az, alt)
             if not self._on_screen(scr):
                 continue
@@ -3254,12 +3331,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                    float(dia) / 3600.0 if dia else None))
         except Exception:
             pass
-        try:
-            for name, star in _constel.merged_star_index().items():
-                candidates.append(("star", name, star.ra_deg, star.dec_deg,
-                                   star.vmag, None))
-        except Exception:
-            pass
+        # 白天恒星整层没画 → 也不给点（与 _draw_stars 同一条判据）。
+        if not self._stars_hidden_by_daylight():
+            try:
+                for name, star in _constel.merged_star_index().items():
+                    candidates.append(("star", name, star.ra_deg,
+                                       star.dec_deg, star.vmag, None))
+            except Exception:
+                pass
         # 已选 DSO 有标记环, 可再点中
         pb = self._picked_body
         if pb and pb.get("kind") == "dso":
@@ -3301,7 +3380,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 # 与绘制层同一条可见性门：画不出来的不给点。否则点空白天区
                 # 会弹出肉眼看不见的天体信息卡（Bortle 3 的海王星 r<=0 不画），
                 # 而画出来的暗星又点不中（旧的写死 4.5 等砍掉了 4.84 的 Graffias）。
-                if alt < (-1.0 if kind == "planet" else 0.0) or mag is None:
+                if alt < 0.0 or mag is None:
                     continue
                 r_pick, _, _ = _stars.star_draw(
                     float(mag) + _stars.extinction_delta_mag(alt), self._bortle)
@@ -3834,6 +3913,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         sun_alt = self._sun["alt"] if self._sun else None
         painter.drawText(card_x + 80, y,
                          f"{sun_alt:5.1f} deg" if sun_alt is not None else "--")
+        if self._stars_hidden_by_daylight():
+            # 明示：白天恒星整层隐藏（近似口径见 stars_hidden_by_daylight）。
+            painter.setFont(self._gnss_label_font)
+            painter.setPen(label_col)
+            painter.drawText(card_x + 150, y, "白天·无恒星")
 
         y += 20
         painter.setFont(self._font)
@@ -3948,9 +4032,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(pos, dot_r, dot_r)
 
-            painter.setPen(self._ink())
-            painter.drawText(QPointF(pos.x() + dot_r + 3, pos.y() - dot_r - 2),
-                             str(sat["prn"]))
+            # PRN 与卫星点同属操作对象（0.5 优先级），并入统一避让。
+            self._queue_label(0.5, QPointF(pos.x() + dot_r + 3,
+                                          pos.y() - dot_r - 2),
+                              str(sat["prn"]), self._ink(), small=True)
         painter.restore()
 
     def _draw_gnss_overlay(self, painter: QPainter):
