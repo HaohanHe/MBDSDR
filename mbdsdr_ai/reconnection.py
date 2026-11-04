@@ -40,6 +40,25 @@ DEFAULT_BASE_DELAY = 1.0
 DEFAULT_MAX_DELAY = 30.0
 DEFAULT_POLL_INTERVAL = 0.5
 
+#: 重连状态机（供 UI / agent 工具展示；绝不出现"假装已连接"的中间态）
+STATE_STOPPED = "stopped"
+STATE_CONNECTED = "connected"
+STATE_DISCONNECTED = "disconnected"
+STATE_RETRYING = "retrying"
+STATE_GAVE_UP = "gave_up"
+
+_GIVE_UP_TIPS = {
+    "usb": (
+        "设备未恢复：请检查 USB 线/接口后重新插入；若仍失败，关闭可能独占设备的"
+        "其它程序（SDR# / GQRX / SDR++ / SDRangel），必要时重启应用后手动重连"
+    ),
+    "network": (
+        "远端未恢复：确认 rtl_tcp/SpyServer 服务仍在运行、地址与端口正确、网络/防火墙"
+        "可达；修正后手动重连，或等待服务恢复"
+    ),
+    "unknown": "重连次数已耗尽：请检查设备/网络后手动重连（应用不会无限重试刷屏）",
+}
+
 
 def compute_backoff(
     attempt: int,
@@ -103,6 +122,7 @@ class ReconnectionManager:
         base_delay: float = DEFAULT_BASE_DELAY,
         max_delay: float = DEFAULT_MAX_DELAY,
         max_attempts: Optional[int] = None,
+        source_kind: str = "unknown",
     ) -> None:
         self.on_disconnected = on_disconnected
         self.on_reconnecting = on_reconnecting
@@ -115,6 +135,7 @@ class ReconnectionManager:
         self._base_delay = float(base_delay)
         self._max_delay = float(max_delay)
         self._max_attempts = max_attempts
+        self._source_kind = source_kind if source_kind in _GIVE_UP_TIPS else "unknown"
 
         self._backend: Any = None
         self._thread: Optional[threading.Thread] = None
@@ -125,6 +146,13 @@ class ReconnectionManager:
         # 状态：上一轮是否认为已连接；是否已 give_up
         self._was_connected = False
         self._gave_up = False
+        # 可观测状态（供 UI / agent 工具查询）
+        self._state = STATE_STOPPED
+        self._attempt = 0              # 当前这轮连续重试到第几次
+        self._attempts_total = 0       # 累计重试次数（跨多轮断线）
+        self._reconnects_total = 0     # 累计成功重连次数
+        self._next_retry_in = 0.0      # 距下一次重试的秒数（0=立即/不在等待）
+        self._last_error = ""
 
     # ------------------------------------------------------------------
     # 后端状态探测（鸭子类型，全部容错）
@@ -180,35 +208,92 @@ class ReconnectionManager:
     # ------------------------------------------------------------------
     # 重连重试循环
     # ------------------------------------------------------------------
+    def _read_backend_error(self) -> str:
+        """从后端 status.error 读取最近一次失败原因（读不到就如实留空）。"""
+        try:
+            status = self._backend.get_status()
+            return str(getattr(status, "error", "") or "")
+        except Exception:
+            return ""
+
     def _retry_loop(self, backend: Any) -> bool:
-        """指数退避重试重连。返回 True=成功重连，False=give_up/被 stop。"""
-        attempt = 0
+        """指数退避重试重连。返回 True=成功重连，False=give_up/被 stop。
+
+        状态机：``retrying``（正在重试，含 attempt 与退避倒计时）→
+        ``connected``（成功）或 ``gave_up``（超过上限）。日志按尝试次数抽样，
+        避免无限重试把日志刷爆；回调仍逐次触发供 UI 更新。
+        """
+        self._attempt = 0
+        self._next_retry_in = 0.0
         while not self._stop.is_set():
-            attempt += 1
-            if self._max_attempts is not None and attempt > self._max_attempts:
+            self._attempt += 1
+            self._attempts_total += 1
+            if self._max_attempts is not None and self._attempt > self._max_attempts:
                 self._gave_up = True
+                self._state = STATE_GAVE_UP
+                self._next_retry_in = 0.0
+                current = self._read_backend_error()
+                if current:
+                    self._last_error = current
+                logger.warning(
+                    "重连放弃：已连续尝试 %d 次（上限 %d）。%s",
+                    self._max_attempts, self._max_attempts,
+                    self.give_up_suggestion(),
+                )
                 _safe_callback(self.on_give_up)
                 return False
 
-            _safe_callback(self.on_reconnecting, attempt)
+            self._state = STATE_RETRYING
+            _safe_callback(self.on_reconnecting, self._attempt)
             ok = False
             try:
                 ok = bool(backend.connect())
             except Exception as exc:
-                logger.warning("第 %d 次重连异常: %s", attempt, exc)
                 ok = False
+                self._last_error = f"{type(exc).__name__}: {exc}"
+            if not ok:
+                current = self._read_backend_error()
+                if current:
+                    self._last_error = current
+                elif not self._last_error:
+                    self._last_error = "后端未返回失败原因"
 
             if ok:
                 self._restore_settings(backend, self._settings_snapshot)
                 _safe_callback(self._start_audio)
                 self._gave_up = False
+                self._state = STATE_CONNECTED
+                self._attempt = 0
+                self._next_retry_in = 0.0
+                self._last_error = ""
+                self._reconnects_total += 1
+                # 后端 status 上也暴露累计重连次数（UI/agent 工具可直接读）
+                try:
+                    status = backend.get_status()
+                    if hasattr(status, "reconnect_count"):
+                        status.reconnect_count = self._reconnects_total
+                    if hasattr(status, "link_state"):
+                        status.link_state = "connected"
+                except Exception:
+                    pass
                 _safe_callback(self.on_reconnected)
                 return True
 
-            # 退避等待（可被 stop 打断）
-            delay = compute_backoff(attempt, self._base_delay, self._max_delay)
+            # 退避等待（可被 stop 打断）。日志只在第 1/2/3 次与每 10 次打印，
+            # 避免"重试 N 次"把终端/日志刷满。
+            delay = compute_backoff(self._attempt, self._base_delay, self._max_delay)
+            if self._attempt <= 3 or self._attempt % 10 == 0:
+                logger.info(
+                    "第 %d 次重连失败（%s）；%.1fs 后重试",
+                    self._attempt,
+                    self._last_error or "后端未返回原因",
+                    delay,
+                )
+            self._next_retry_in = float(delay)
             if self._stop.wait(delay):  # True = 被 stop 唤醒
+                self._next_retry_in = 0.0
                 return False
+            self._next_retry_in = 0.0
         return False
 
     # ------------------------------------------------------------------
@@ -217,12 +302,15 @@ class ReconnectionManager:
     def _run(self) -> None:
         backend = self._backend
         self._was_connected = self._is_connected(backend)
+        self._state = STATE_CONNECTED if self._was_connected else STATE_DISCONNECTED
         while not self._stop.is_set():
             connected = self._is_connected(backend)
 
             if connected:
                 self._was_connected = True
                 self._gave_up = False
+                self._state = STATE_CONNECTED
+                self._attempt = 0
                 if self._stop.wait(self._poll_interval):
                     break
                 continue
@@ -230,9 +318,11 @@ class ReconnectionManager:
             # 当前未连接：若刚刚才从连接态掉下来，先记录断连事件
             if self._was_connected:
                 self._settings_snapshot = self._capture_settings(backend)
+                self._last_error = self._read_backend_error()
                 _safe_callback(self._stop_audio)
                 _safe_callback(self.on_disconnected)
                 self._was_connected = False
+                self._state = STATE_DISCONNECTED
 
             # 进入重连退避循环（阻塞到重连成功 / give_up / stop）
             self._retry_loop(backend)
@@ -256,6 +346,12 @@ class ReconnectionManager:
         self._settings_snapshot = {}
         self._was_connected = self._is_connected(backend)
         self._gave_up = False
+        self._attempt = 0
+        self._attempts_total = 0
+        self._reconnects_total = 0
+        self._next_retry_in = 0.0
+        self._last_error = ""
+        self._state = STATE_CONNECTED if self._was_connected else STATE_DISCONNECTED
         self._thread = threading.Thread(
             target=self._run, name="reconnection-manager", daemon=True
         )
@@ -269,6 +365,9 @@ class ReconnectionManager:
         if t is not None and t.is_alive():
             t.join(timeout=timeout)
         self._thread = None
+        if self._state != STATE_GAVE_UP:
+            self._state = STATE_STOPPED
+        self._next_retry_in = 0.0
 
     # ------------------------------------------------------------------
     # 查询
@@ -281,8 +380,45 @@ class ReconnectionManager:
     def gave_up(self) -> bool:
         return self._gave_up
 
+    @property
+    def state(self) -> str:
+        return self._state
+
+    def give_up_suggestion(self) -> str:
+        """放弃重连时给用户的可操作下一步。"""
+        return _GIVE_UP_TIPS[self._source_kind]
+
+    def snapshot(self) -> Dict[str, Any]:
+        """返回可直接展示/序列化的重连状态（供 UI 与 agent 工具使用）。
+
+        字段与真实行为一致：``state`` 是 stopped/connected/disconnected/retrying/
+        gave_up；``attempt``、``attempts_total``、``reconnects_total``、
+        ``next_retry_in``、``last_error`` 均来自真实重试循环，不做推测。
+        """
+        return {
+            "state": self._state,
+            "attempt": self._attempt,
+            "attempts_total": self._attempts_total,
+            "reconnects_total": self._reconnects_total,
+            "max_attempts": self._max_attempts,
+            "next_retry_in": round(float(self._next_retry_in), 3),
+            "last_error": self._last_error,
+            "gave_up": self._gave_up,
+            "suggestion": self.give_up_suggestion() if self._gave_up else "",
+            "source_kind": self._source_kind,
+        }
+
+    def get_state(self) -> Dict[str, Any]:
+        """``snapshot()`` 的别名（语义更直白的调用入口）。"""
+        return self.snapshot()
+
 
 __all__ = [
     "ReconnectionManager",
     "compute_backoff",
+    "STATE_STOPPED",
+    "STATE_CONNECTED",
+    "STATE_DISCONNECTED",
+    "STATE_RETRYING",
+    "STATE_GAVE_UP",
 ]
