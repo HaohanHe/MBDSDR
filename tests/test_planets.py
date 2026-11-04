@@ -52,6 +52,20 @@ def test_compute_all_returns_eight_plus_moon():
         assert 0 <= p.ra_deg < 360
 
 
+def test_moon_angular_diameter_in_true_arcsec_range():
+    """月球视直径落在真实角秒区间（近地点~2010″ / 远地点~1760″）。
+
+    钉死旧缺陷：compute_moon 曾把月直径的 km 数 3474.8/(dist/384400) 当
+    arcsec 报，平均距离下约 3475″——比真值 1865″ 虚高 1.86×，信息卡「视直径」
+    说谎。扫两年，任何一点越界即回归。
+    """
+    jd = _jd_2026_09_27_12utc()
+    for i in range(0, 730, 3):       # 两年、每三天一点，覆盖近/远地点极值
+        dia = P.compute_moon(jd + i).angular_diameter_arcsec
+        assert 1700.0 < dia < 2100.0, \
+            f"月球视直径 {dia:.1f}″ 越界（真值区间约 1760..2010″）"
+
+
 def test_recommend_targets_returns_list():
     jd = _jd_2026_09_27_12utc()
     recs = P.recommend_targets(jd, observer_lat_deg=39.9, min_alt_deg=10.0)

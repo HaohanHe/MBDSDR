@@ -202,7 +202,11 @@ def compute_moon(jd: float) -> PlanetPos:
 
     ra, dec = _ecliptic_to_equatorial(lon, lat)
     mag = -12.74 + 5.0 * math.log10(dist_au / 0.00257)
-    dia = 3474.8 / (dist_km / 384400.0)
+    # 角直径 = 2 * atan(半径 / 距离)，小角近似下 ≈ 206265 * 直径_km / 距离_km
+    # （arcsec）。旧式 3474.8/(dist_km/384400) 直接把月直径的 km 数当 arcsec
+    # 报，缺 206265 弧度→角秒因子，平均距离下虚高 1.86×（3474.8″ vs 真值
+    # 1865″）——信息卡「视直径」当场说谎。
+    dia = 206265.0 * 3474.8 / dist_km
     sun_lon = _norm360(280.46646 + 36000.76983 * T)
     phase = abs(_norm360(lon - sun_lon))
     if phase > 180.0:
