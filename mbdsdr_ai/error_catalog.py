@@ -86,8 +86,8 @@ _SPECS = (
     _spec("invalid_arguments_type", LAYER_TOOL, False,
           "调用参数不是 JSON 对象",
           "工具 '{tool}' 的调用参数必须是 JSON 对象，收到 {actual}；未执行该工具。",
-          "重新生成键值对形式的 JSON 对象（如 frequency_hz: 145800000）；"
-          "不要传数组、字符串或裸标量。"),
+          "重新生成键值对形式的 JSON 对象（参数名作键、数值作值，"
+          "单位按参数说明）；不要传数组、字符串或裸标量。"),
     _spec("invalid_arguments", LAYER_TOOL, False,
           "参数内容不合法",
           "工具 '{tool}' 参数不合法：{detail}",
@@ -378,6 +378,10 @@ _SPECS = (
           "设置带宽失败",
           "设置带宽失败（{detail}），已回滚到原带宽。",
           "确认带宽被设备支持后重试。"),
+    _spec("doppler_compensation_failed", LAYER_ACCESS, True,
+          "接收链多普勒补偿失败（预测不可用）",
+          "多普勒补偿失败：{detail}。本块音频已跳过，未按 0 补偿。",
+          "检查卫星目标/TLE 是否有效、本站位置是否已设置；修复后重开补偿。"),
     _spec("denied_by_policy", LAYER_ACCESS, False,
           "策略拒绝执行",
           "denied_by_policy：策略拒绝执行 {tool}（规则集不可被 armed 覆盖）。",

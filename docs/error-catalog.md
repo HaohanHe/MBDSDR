@@ -43,7 +43,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `gimbal_stop_failed` | tool | 云台停止失败 | 云台停止指令未执行（{detail}）。 | 确认云台后端可用后重试。 | 是 |
 | `handler_error` | tool | handler 返回失败 | 工具 '{tool}' 执行失败：{detail} | 按报错修正参数或换工具；不要把失败当成已执行。 | 否 |
 | `invalid_arguments` | tool | 参数内容不合法 | 工具 '{tool}' 参数不合法：{detail} | 按参数说明修正后重试；不要原样重发同一组坏参数。 | 否 |
-| `invalid_arguments_type` | tool | 调用参数不是 JSON 对象 | 工具 '{tool}' 的调用参数必须是 JSON 对象，收到 {actual}；未执行该工具。 | 重新生成键值对形式的 JSON 对象（如 frequency_hz: 145800000）；不要传数组、字符串或裸标量。 | 否 |
+| `invalid_arguments_type` | tool | 调用参数不是 JSON 对象 | 工具 '{tool}' 的调用参数必须是 JSON 对象，收到 {actual}；未执行该工具。 | 重新生成键值对形式的 JSON 对象（参数名作键、数值作值，单位按参数说明）；不要传数组、字符串或裸标量。 | 否 |
 | `invalid_json_arguments` | tool | 工具调用参数 JSON 非法 | 工具 '{tool}' 的参数不是合法 JSON，未执行。收到原文（前 200 字符）：{preview} | 重新生成完整、闭合的 JSON 对象参数；不要截断字符串，不要用单引号/尾逗号/Python 字面量。 | 否 |
 | `invalid_rs_shape` | tool | RS 矩阵形状错误 | 参数 '{param}' 的形状不符合要求：{detail} | 按说明传入二维 RS 矩阵后重试。 | 否 |
 | `missing_required_params` | tool | 缺少必填参数 | 工具 '{tool}' 缺少必填参数：{missing}。参数说明：{hints} | 按上面的参数说明补齐必填项后重试；可选参数不确定时省略即可，不要编造取值。 | 否 |
@@ -85,6 +85,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `denied_by_policy` | access | 策略拒绝执行 | denied_by_policy：策略拒绝执行 {tool}（规则集不可被 armed 覆盖）。 | 换用允许的工具或修改策略；不要重复尝试同一个被拒调用。 | 否 |
 | `device_busy` | access | 设备被占用 | 设备被其它进程占用：{detail} | 关闭占用进程后重试；不要并发打开同一设备。 | 是 |
 | `device_not_found` | access | 找不到设备 | 找不到 SDR 设备：{detail} | 检查 USB/驱动后重新枚举。 | 否 |
+| `doppler_compensation_failed` | access | 接收链多普勒补偿失败（预测不可用） | 多普勒补偿失败：{detail}。本块音频已跳过，未按 0 补偿。 | 检查卫星目标/TLE 是否有效、本站位置是否已设置；修复后重开补偿。 | 是 |
 | `driver_not_found` | access | 找不到 SDR 驱动 | 找不到 SDR 驱动：{detail} | 安装驱动/DLL 后重启程序。 | 否 |
 | `export_path_out_of_root` | access | 导出路径越界 | 导出路径越界，拒绝写入：{detail} | 把路径改到允许根目录内，或先设置 MBDSDR_EXPORT_ROOT。 | 否 |
 | `frequency_out_of_range` | access | 频率超出范围 | 频率 {freq} Hz 超出设备范围：{detail} | 改用设备可调范围内的频率。 | 否 |
