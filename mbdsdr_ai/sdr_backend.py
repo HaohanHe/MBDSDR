@@ -579,6 +579,16 @@ class SDRBackend:
                 logger.warning("ReceiveChain 构建失败: %s", e)
                 self._receive_chain = None
                 return None
+            # 部署形态显式声明：只有这里（真建链、真读 IQ）才claim
+            # 「Python 独占本流」；C++ 桌面/远端 WebSocket 形态没有本地
+            # SDRBackend，不会声明，预测源保持保守默认（不补偿）。
+            src = self._doppler_src()
+            claim = getattr(src, "claim_python_stream", None)
+            if callable(claim):
+                try:
+                    claim(True)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("多普勒部署形态声明失败: %s", e)
             # 重建后恢复补偿绑定与开关（重建若丢了补偿，读数会假装关闭）
             self._bind_receive_chain_doppler(self._receive_chain)
         else:
@@ -637,13 +647,32 @@ class SDRBackend:
         """当前补偿量读数：是否生效、applied_hz、目标、预测时刻/星历、原因、错误。"""
         chain = self._receive_chain
         if chain is None:
+            try:
+                st = self._doppler_src().reading()
+            except Exception:  # noqa: BLE001
+                st = {}
+            predicted = None
+            if st.get("valid") and st.get("doppler_hz") is not None:
+                try:
+                    predicted = float(st["doppler_hz"])
+                except (TypeError, ValueError):
+                    predicted = None
+            backend = bool(st.get("backend_comp_active"))
             return {
                 "enabled": self._doppler_comp_enabled,
-                "active": False, "applied_hz": 0.0,
+                "active": False,
+                "predicted_hz": predicted,
+                "applied_hz": None if backend else 0.0,
+                "applied_by": "backend" if backend else "none",
+                "python_applied_hz": 0.0,
                 "target_doppler_hz": None, "settling": False,
-                "target_name": "", "predicted_at_unix": None,
-                "doppler_rate_hz_s": None, "tle_tier": "", "tle_age_days": None,
-                "application": "baseband",
+                "target_name": st.get("target_name", ""),
+                "predicted_at_unix": st.get("predicted_at_unix"),
+                "doppler_rate_hz_s": st.get("doppler_rate_hz_s"),
+                "tle_tier": st.get("tle_tier", ""),
+                "tle_age_days": st.get("tle_age_days"),
+                "application": st.get("application", "baseband"),
+                "python_stream_owner": bool(st.get("python_stream_owner")),
                 "reason": "未连接设备，接收链不存在（无目标，未补偿）",
                 "error": self._doppler_error,
                 "blocks": 0, "samples": 0,

@@ -382,11 +382,13 @@ class ReceiveChain:
         """当前补偿量读数（``applied_hz`` / 目标 / 预测时刻 / 星历 / 原因）。"""
         if self._doppler is None:
             return {
-                "enabled": False, "active": False, "applied_hz": 0.0,
+                "enabled": False, "active": False,
+                "predicted_hz": None, "applied_hz": 0.0,
+                "applied_by": "none", "python_applied_hz": 0.0,
                 "target_doppler_hz": None, "settling": False,
                 "target_name": "", "predicted_at_unix": None,
                 "doppler_rate_hz_s": None, "tle_tier": "", "tle_age_days": None,
-                "application": "baseband",
+                "application": "baseband", "python_stream_owner": False,
                 "reason": "未绑定多普勒补偿源（无目标，未补偿）",
                 "error": "", "blocks": 0, "samples": 0,
             }

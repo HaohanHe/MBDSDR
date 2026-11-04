@@ -31,7 +31,9 @@ class _FakeSource:
     def __init__(self, **state):
         self._st = {"target_name": "", "enabled": False, "valid": False,
                     "doppler_hz": None, "application": "baseband",
-                    "backend_comp_active": False, "reason": "未绑定卫星目标"}
+                    "backend_comp_active": False,
+                    "python_stream_owner": True,
+                    "reason": "未绑定卫星目标"}
         self._st.update(state)
         self.refreshes = 0
 
@@ -149,8 +151,65 @@ def test_backend_side_compensation_blocks_enable():
     assert stage.set_enabled(True) is False
     st = stage.status()
     assert st["enabled"] is False
-    assert st["applied_hz"] == 0.0
+    # 诚实读数：后端在施加时 Python 不知道实际值，不许用预测值冒充
+    assert st["applied_by"] == "backend"
+    assert st["applied_hz"] is None
+    assert st["python_applied_hz"] == 0.0
+    assert st["predicted_hz"] == pytest.approx(500.0)
     assert "双倍偏移" in st["reason"] or "防止" in st["reason"]
+
+
+def test_unclaimed_stream_refuses_baseband_by_default():
+    """默认保守：没有显式声明「Python 独占 IQ 流」时，基带补偿拒绝开启。
+
+    对应 C++ 桌面/远端 WebSocket 形态：本地没有 SDRBackend，因此没有
+    claim；宁可不补偿，也不在可能已被后端补偿的流上再叠一次。
+    """
+    src = _FakeSource(python_stream_owner=False, enabled=True, valid=True,
+                      doppler_hz=500.0)
+    stage = DopplerCompensationStage(src)
+    assert stage.set_enabled(True) is False
+    st = stage.status()
+    assert st["enabled"] is False and st["active"] is False
+    assert st["applied_by"] == "none"
+    assert st["applied_hz"] == 0.0
+    assert "未声明 Python 独占 IQ 流" in st["reason"]
+    # 跑一段也不许偷偷施加
+    y = stage.process(np.ones(1024, dtype=np.complex128), FS)
+    assert np.array_equal(y, np.ones(1024, dtype=np.complex128))
+    assert stage.status()["python_applied_hz"] == 0.0
+
+
+def test_backend_takeover_ramps_python_to_zero_leaving_one_times_offset():
+    """双施加反证：后端接管后 Python 归零，残余只剩后端的 1 倍偏移。
+
+    合成 500 Hz 偏移信号：Python 先按 500 Hz 补偿到 0；后端随后声明已在
+    补偿，Python 侧必须在 ramp 内退回 0（不继续抵消）。最终残余应是
+    **500 Hz（1 倍）**，而不是 1000 Hz（双倍）或 0（Python 仍在抵消）。
+    """
+    src = _FakeSource(target_name="A", enabled=True, valid=True,
+                      doppler_hz=500.0)
+    stage = DopplerCompensationStage(src, ramp_s=0.020)
+    assert stage.set_enabled(True) is True
+
+    block = int(0.1 * FS)
+    x = _tone(block, 500.0)
+    y1 = stage.process(x, FS)
+    # Python 正把 500 Hz 抵消掉：输出近似 DC
+    inst1 = _inst_freq_hz(y1)
+    assert abs(float(np.median(inst1[-1000:]))) < 5.0
+
+    src._st["backend_comp_active"] = True
+    y2 = stage.process(x, FS)   # 后端接管：Python 在 ramp 内退回 0
+    st = stage.status()
+    assert st["applied_by"] == "backend"
+    assert st["applied_hz"] is None
+    assert st["python_applied_hz"] == pytest.approx(0.0, abs=1e-6)
+
+    inst2 = _inst_freq_hz(y2)
+    residual = abs(float(np.median(inst2[-1000:])))
+    assert residual == pytest.approx(500.0, abs=5.0), \
+        f"最终残余应为 1 倍（500 Hz），实测 {residual}"
 
 
 # ---------------------------------------------------------------------------

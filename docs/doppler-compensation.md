@@ -33,9 +33,13 @@ SDRBackend._ensure_receive_chain()
 | 字段 | 含义 |
 | --- | --- |
 | `enabled` | 用户开关是否打开 |
-| `active` | 是否真的在施加非零补偿 |
-| `applied_hz` | 当前实际施加的补偿量（Hz，带符号） |
-| `target_doppler_hz` | 预测源给出的目标 Δ（Hz） |
+| `active` | Python 侧是否真的在施加非零补偿 |
+| `predicted_hz` | 预测源给出的 Δ（Hz）——**只是预测，不代表已施加** |
+| `applied_hz` | 实际施加量（Hz）。`applied_by=python` 时为 NCO 实测累计值；`applied_by=backend` 时为 `null`（Python 不知道对方加了多少）；`applied_by=none` 时为 `0` |
+| `applied_by` | 谁在真正施加：`python` / `backend` / `none` |
+| `python_applied_hz` | Python 侧 NCO 自己的累计量（后端接管后应回 0） |
+| `python_stream_owner` | 是否已显式声明本 IQ 流由 Python 独占（默认 `false`） |
+| `target_doppler_hz` | Python 正在追赶的目标 Δ（Hz） |
 | `settling` | 是否仍在 ramp 渐变中 |
 | `target_name` / `predicted_at_unix` | 目标与预测时刻（溯源） |
 | `tle_tier` / `tle_age_days` | 星历级别与年龄 |
@@ -69,14 +73,66 @@ SDRBackend._ensure_receive_chain()
 | --- | --- | --- |
 | `tuner` | 硬件/VFO 预偏（C++ 1Hz ZOH 或 Python 调谐器路径） | `doppler_link.state.application == "tuner"` 时，接收链补偿 `_target_from_reading` 返回 `None`（不叠加） |
 | `baseband` | 接收链 NCO（本文档主体） | `stage.set_enabled(True)` 显式把 `application` 置为 `baseband`；`sdr_satellite_doppler_track` 反之置 `tuner` 并关闭 NCO |
-| 后端已补偿 | C++/基带自行补偿 | `backend_comp_active=True` → `set_enabled(True)` 直接拒绝，读数给「防止双倍偏移」原因 |
+| 后端已补偿 | C++/基带自行补偿 | `backend_comp_active=True` → `set_enabled(True)` 直接拒绝；**已在运行中的 Python NCO 也在下一块读到后 ramp 回 0**，读数 `applied_by=backend` / `applied_hz=null` |
+| 未声明归属 | 任何形态 | `python_stream_owner=False`（默认）→ 接收链补偿**拒绝开启**；只有 `SDRBackend` 真正建链时才 `claim_python_stream()` 声明 |
 
-关键不变量：**桌面 C++ 模式与 Python headless/MCP 模式不共享同一路设备流**。
-C++ 应用在桌面进程内持有设备并做调谐器预偏；Python `SDRBackend` 只在
-headless/MCP 路径取数。因此不存在「C++ ZOH + Python NCO 同时作用于同一
-IQ 流」的形态。若未来引入桥把两者接到同一设备流，C++ 侧必须先调用
-`set_backend_compensation_active(True)`，否则 Python 侧无法感知（列为
-开放项，不假装已闭环）。
+### 3.4 部署形态默认值：保守（宁可不补偿，也不双倍）
+
+`python_stream_owner` **默认 `False`**，不是 `backend_comp_active` 默认 `False`
+就能放行。两者职责不同：
+
+- `backend_comp_active`：后端明确宣称「我正在补偿」→ Python 拒绝/退回；
+- `python_stream_owner`：Python 明确宣称「这条 IQ 流只有我在读」→ 才允许基带施加。
+
+前者是后端通知，后者是 Python 自己的部署声明。默认两者都是保守值：
+即使 `backend_comp_active=False`，没有 `python_stream_owner=True` 也**不补偿**。
+声明点只有一个：
+
+- `mbdsdr_ai/sdr_backend.py:582-593` `_ensure_receive_chain()` —— 真正创建
+  `ReceiveChain`、准备亲自读 IQ 的路径，才调用
+  `claim_python_stream()`。
+
+桌面 Python 本地硬件与 headless/MCP 都走这条；C++ 桌面 / 远端 WebSocket
+形态没有本地 `SDRBackend`，不会声明，因此保持「不补偿」。
+
+### 3.5 真实路径实走（文件行号）
+
+**A. 桌面 Python 本地硬件形态**
+
+1. 读 IQ：`desktop/receive_pipeline.py:70-101` `IqReaderThread.run()` 循环
+   `self._read_fn(self._block)` → `backend.read_samples`；频谱/瀑布同源。
+2. 调谐器加偏移：`desktop/main_window.py:6622-6663`
+   `_poll_satellite_track()` 调 `comp.rx_freq()`，把 `下行 + Δf` 传入
+   `:3511-3519 _on_tune_sdr()` → `_active_sdr_backend.set_frequency(tune_hz)`。
+   即偏移加在**硬件调谐器**上，应用点 `application="tuner"`。
+3. Python 是否再施加：**没有**。桌面代码没有任何
+   `set_doppler_compensation(...)` 调用；`SDRBackend._doppler_comp_enabled`
+   初始 `False`（`mbdsdr_ai/sdr_backend.py:225`），接收链 NCO 默认关闭。
+   即便有人显式打开，`application="tuner"` 也会让 `_target_from_reading`
+   返回 `None`（`doppler_compensation.py:450-454`）。→ **1 倍，仅调谐器侧**。
+
+**B. 桌面 WebSocket（ai-sdr Mini / C++ 后端）形态**
+
+1. `desktop/main_window.py:3188-3192 _connect_real()` 只启动
+   `self._worker = _worker_manager.start(...)`，不创建本地 `SDRBackend`；
+   断开时 `:3410 _worker=None`，本地后端仍为空。
+2. 调谐/偏移全部通过 `:3512-3514 _worker.request_tool.emit("tune_sdr", ...)`
+   发给远端；IQ 与 DSP 都在远端进程。
+3. Python 侧没有 `ReceiveChain`、没有 `SDRBackend` → **不施加**。
+   即使误调 `sdr_doppler_compensation`，`_ensure_receive_chain` 因无本地
+   连接返回 `None`（`sdr_backend.py:563-565`），无法建链 → 不施加。
+
+**C. C++ 桌面进程（若作为独立部署运行）**
+
+1. 1Hz 循环：`cpp/src/ui/main_window.cpp:7574-7602` 计算
+   `liveFd = dsp::dopplerHz(...)`，经 `dopplerLimiter_.advance(liveFd)` 后
+   `engine_->vfoSetOffset(selVfo, f0 + off)`。这是调谐器侧施加。
+2. 该进程与 Python 桌面/headless 不共享设备流（USB 设备独占；WebSocket
+   形态下 Python 只发工具请求，不拿 IQ）。Python 侧不会参与。
+3. 新的硬闸不依赖这条部署事实：只要 Python 这条流没有
+   `python_stream_owner=True`，基带就拒绝施加；若未来桥真的把同一流接到
+   Python，C++ 侧必须调用 `set_backend_compensation_active(True)`，Python
+   读到后连已运行的 NCO 也会 ramp 回 0（`python_applied_hz` 如实归零）。
 
 ## 4. 验证（离线、合成 IQ）
 
@@ -89,6 +145,9 @@ IQ 流」的形态。若未来引入桥把两者接到同一设备流，C++ 侧�
 | 无目标 | `applied_hz == 0`、`reason` 含「无目标，未补偿」；输出与未接补偿的链**逐点相等** |
 | 目标切换 | 相邻样本瞬时频移连续（边界差 < 1 Hz）；正→负过零约在 ramp 中点（480±80 样本）；单样本相位差不超过 2π·400/fs（无爆音） |
 | 预测失败 | 异常/非有限数 → `DopplerCompensationError`；`SDRBackend` 本块返回 `None`，`status.error` 为 `doppler_compensation_failed` 话术（「未按 0 补偿」） |
+| 未声明归属（默认保守） | `python_stream_owner=False` → `set_enabled(True)` 返回 `False`，`applied_by=none`、`applied_hz=0`；跑 1024 点输出与输入逐点相等，`python_applied_hz` 恒 0 |
+| 后端接管（双施加反证） | 先 Python 把 500 Hz 补到 0；后端声明 `backend_comp_active=True` 后，Python 在 20 ms ramp 内退回 0；最终残余实测 **500 Hz（1 倍，±5 Hz）**，不是 0 也不是 1000 |
+| 读数不混用 | 后端施加时 `applied_by=backend`、`applied_hz=null`、`predicted_hz=500`、`python_applied_hz=0`；Python 施加时三者分别为 `python` / 实测值 / 预测值 |
 
 残余容差依据：CW 解调 BFO 800 Hz、信道带宽 200 Hz，音频峰分辨率由
 FFT 长度决定（≥0.7 Hz/格）；留 ±5 Hz 覆盖滤波器群延迟与 ramp 残留。

@@ -42,6 +42,10 @@ class DopplerLinkState:
     elevation_deg: Optional[float] = None
     reason: str = ""                         # 失效/冲突原因（诚实提示）
     backend_comp_active: bool = False        # 后端（C++/基带）补偿活动标志
+    # ── 部署形态声明（默认保守：未声明就不许基带施加）──
+    # True  = 已显式声明「本 IQ 流由 Python 独占」（SDRBackend 真正建链时声明）；
+    # False = 默认值：宁可不补偿，也绝不在可能已被后端补偿的流上再叠一次。
+    python_stream_owner: bool = False
     # ── 应用点仲裁：同一时刻只允许一处真正施加补偿 ──
     # "tuner"    = 调谐器预偏（desktop 硬件重调 / C++ VFO offset）
     # "baseband" = 接收链基带 NCO（ReceiveChain / DopplerCompensationStage）
@@ -105,8 +109,25 @@ class DopplerLinkCompensator:
         app = str(application).strip().lower()
         if app not in ("tuner", "baseband"):
             raise ValueError(f"未知补偿施加点：{application!r}（只接受 tuner/baseband）")
+        if app == "baseband" and not self.state.python_stream_owner:
+            # 默认保守：没有显式声明 Python 独占本流，就不允许基带再叠一次。
+            self.state.reason = ("未声明 Python 独占 IQ 流，拒绝基带补偿"
+                                 "（默认保守：不补偿，防双倍偏移）")
+            return False
         self.state.application = app
         return True
+
+    def claim_python_stream(self, owner: bool = True) -> bool:
+        """显式声明部署形态：本 IQ 流由 Python（SDRBackend）独占读取。
+
+        只有真正在本地建链、准备亲自跑 DSP 的路径才调用（见
+        ``sdr_backend._ensure_receive_chain``）。C++ 桌面/远端 WebSocket
+        形态下没有本地 SDRBackend，因此不会声明，保持保守默认。
+        """
+        self.state.python_stream_owner = bool(owner)
+        if owner and not self.state.backend_comp_active:
+            self.state.reason = ""
+        return self.state.python_stream_owner
 
     def reading(self) -> dict:
         """预测读数（供接收链补偿级消费；不含第二份数学）。"""
@@ -123,6 +144,7 @@ class DopplerLinkCompensator:
             "tle_age_days": st.tle_age_days,
             "application": st.application,
             "backend_comp_active": st.backend_comp_active,
+            "python_stream_owner": st.python_stream_owner,
             "reason": st.reason,
         }
 
@@ -222,6 +244,10 @@ class DopplerLinkCompensator:
         """基带施加点应去除的 Δ（Hz）；非基带/未开启/失效时 None。"""
         if self.state.application != "baseband":
             return None
+        if not self.state.python_stream_owner:
+            return None          # 未声明本流归属 → 保守不施加
+        if self.state.backend_comp_active:
+            return None          # 后端已接管 → 不叠第二次
         if self.state.enabled and self.state.valid:
             return self.state.doppler_hz
         return None

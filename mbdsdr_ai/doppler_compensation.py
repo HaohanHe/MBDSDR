@@ -188,8 +188,17 @@ class DopplerCompensationStage:
             state = _source_state(src)
             if state.get("backend_comp_active"):
                 self._enabled = False
+                self._last_reading = dict(state)
                 self._reason = ("后端（C++/基带）多普勒补偿已活动，"
                                 "接收链补偿拒绝开启（防止双倍偏移）")
+                return False
+            if not state.get("python_stream_owner", False):
+                # 默认保守：未显式声明本流归属（例如 C++/远端 WebSocket 形态
+                # 根本没有本地 SDRBackend）时，基带宁可不补偿也不叠第二次。
+                self._enabled = False
+                self._last_reading = dict(state)
+                self._reason = ("未声明 Python 独占 IQ 流，接收链补偿拒绝开启"
+                                "（默认保守：不补偿，防双倍偏移）")
                 return False
             self._enabled = True
             # 先声明应用点为基带，再开链路开关，避免调谐器同时预偏（双补偿）
@@ -279,10 +288,27 @@ class DopplerCompensationStage:
         settling = self._ramp_progress < 1.0
         active = bool(self._enabled and self._target is not None
                       and abs(self._applied) > 1e-9)
+        predicted = None
+        if r.get("valid") and r.get("doppler_hz") is not None:
+            try:
+                predicted = float(r["doppler_hz"])
+            except (TypeError, ValueError):
+                predicted = None
+        backend = bool(r.get("backend_comp_active"))
+        if backend:
+            # 后端在施加：Python 不知道对方实际加了多少，绝不用预测值冒充
+            applied_by, applied_hz = "backend", None
+        elif active:
+            applied_by, applied_hz = "python", float(self._applied)
+        else:
+            applied_by, applied_hz = "none", 0.0
         return {
             "enabled": self._enabled,
             "active": active,
-            "applied_hz": float(self._applied),
+            "predicted_hz": predicted,
+            "applied_hz": applied_hz,
+            "applied_by": applied_by,
+            "python_applied_hz": float(self._applied),
             "target_doppler_hz": self._target,
             "settling": settling,
             "target_name": r.get("target_name", ""),
@@ -339,6 +365,9 @@ class DopplerCompensationStage:
         if r.get("backend_comp_active"):
             return ("后端多普勒补偿已接管，接收链补偿未施加"
                     "（防止双倍偏移）")
+        if not r.get("python_stream_owner", False):
+            return ("未声明 Python 独占 IQ 流，接收链补偿未施加"
+                    "（默认保守：不补偿，防双倍偏移）")
         if r.get("application") not in (None, "baseband"):
             return "调谐器侧补偿生效，接收链基带补偿未施加（防止双倍偏移）"
         if not r.get("target_name"):
@@ -387,7 +416,8 @@ def _reading_from_state(state: Any) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for name in ("target_name", "enabled", "valid", "doppler_hz",
                  "doppler_rate_hz_s", "reason", "predicted_at_unix",
-                 "tle_tier", "tle_age_days", "backend_comp_active"):
+                 "tle_tier", "tle_age_days", "backend_comp_active",
+                 "python_stream_owner", "application"):
         if hasattr(state, name):
             out[name] = getattr(state, name)
     return out
@@ -412,6 +442,12 @@ def _target_from_reading(
     if not reading:
         return None
     if not reading.get("enabled"):
+        return None
+    # 双施加硬闸：后端（C++/基带）已接管时，Python 侧立即退回 0。
+    if reading.get("backend_comp_active"):
+        return None
+    # 默认保守：未显式声明「Python 独占本 IQ 流」时不许基带施加。
+    if not reading.get("python_stream_owner", False):
         return None
     # 单一施加点：读数声明应用点不是 baseband（例如调谐器已预偏）时，
     # 基带侧不再叠加，避免双倍补偿。
