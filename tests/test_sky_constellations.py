@@ -394,3 +394,78 @@ class TestLayerWiring:
             v.view_state.zoom_to(fov)
             v.repaint()
 
+
+# --------------------------------------------------------------------------
+# 8. 图层几何缓存（固定开销修复的回归锁）
+# --------------------------------------------------------------------------
+class TestLayerGeometryCache:
+    """单位向量随拓扑缓存：每帧只做 P·N·R 旋转 + 投影，不重算 RA/Dec。
+
+    反证：若有人把 `_layer_points` 改回「每帧从 RA/Dec 重建向量」，
+    `test_layer_points_does_not_rebuild_vectors` 会红。
+    """
+
+    @staticmethod
+    def _refs_and_prepared(v):
+        layer = _constel.constellation_layer(_constel.SYSTEM_IAU)
+        prepared = v._constellation_prepared(layer)
+        refs = {}
+        for con in layer.items:
+            for sa, sb in con.segments():
+                refs[sa.hyg_id] = (sa.ra_deg, sa.dec_deg)
+                refs[sb.hyg_id] = (sb.ra_deg, sb.dec_deg)
+            anchor = con.anchor()
+            if anchor is not None:
+                refs[anchor.hyg_id] = (anchor.ra_deg, anchor.dec_deg)
+        return refs, prepared
+
+    def test_cached_vectors_match_scalar_chain(self):
+        v = _new_view()
+        v.set_all_sky_mode(True)
+        v.view_state.fov_deg = 160.0
+        v.view_state.look_at(180.0, 30.0)
+        refs, prepared = self._refs_and_prepared(v)
+
+        assert set(prepared["keys"]) == set(refs)
+        assert len(prepared["vecs"]) == len(prepared["keys"])
+        assert all(len(row) == 3 for row in prepared["vecs"])
+
+        gs = v._ground_station()
+        jd = v._current_jd()
+        points = v._layer_points(prepared, gs, jd)
+        assert set(points) == set(refs)
+
+        # 独立标量链（不与批量实现共享代码）对拍抽样点
+        for k in list(refs)[::17]:
+            az, alt = azalt_from_vec(j2000_to_altaz(
+                vec_from_radec(*refs[k]), gs, jd))
+            alt_draw = v._display_alt_deg(alt)
+            scr = v._sky_to_screen(az, alt_draw)
+            px, py = scr.x(), scr.y()
+            p = points[k]
+            if not (math.isfinite(px) and math.isfinite(py)) or alt_draw < -6.0:
+                assert p is None, f"{k} 应被判为不可见"
+                continue
+            assert p is not None, f"{k} 漏画"
+            assert abs(p.x() - px) < 1e-6 and abs(p.y() - py) < 1e-6, \
+                f"{k} 批量投影与标量链不一致: {p} vs ({px}, {py})"
+
+    def test_layer_points_does_not_rebuild_vectors(self, monkeypatch):
+        import rf_sky_view
+
+        v = _new_view()
+        _refs, prepared = self._refs_and_prepared(v)
+        assert len(prepared["keys"]) > 0
+
+        calls = {"n": 0}
+        real = rf_sky_view.vec_from_radec
+
+        def counting(ra, dec):
+            calls["n"] += 1
+            return real(ra, dec)
+
+        monkeypatch.setattr(rf_sky_view, "vec_from_radec", counting)
+        v._layer_points(prepared, v._ground_station(), v._current_jd())
+        assert calls["n"] == 0, \
+            f"每帧重建了 {calls['n']} 个单位向量（应复用 prepared['vecs']）"
+

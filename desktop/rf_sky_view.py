@@ -3900,19 +3900,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                               self.CONSTEL_LABEL_FOV[1])
         return detail, label
 
-    def _j2000_altaz_many(self, ra_deg, dec_deg, gs, jd) \
-            -> Tuple[np.ndarray, np.ndarray]:
-        """批量 J2000 -> (az, alt)；直接委托 celestial_geometry 的批量链。
-
-        与 j2000_to_altaz 同一条 P→N→R 链（矩阵每帧只建一次），这里不再
-        维护第二份矩阵乘法/反三角。
-        """
-        vec = np.array([vec_from_radec(float(r), float(d))
-                        for r, d in zip(ra_deg, dec_deg)], dtype=float)
-        altaz = j2000_to_altaz_many(vec, gs, jd)
-        return azalt_from_vec_many(altaz)
-
-    def _constellation_screen_points(self, az, alt, gs, jd) \
+    def _constellation_screen_points(self, az, alt) \
             -> List[Optional[QPointF]]:
         """批量落屏；地平以下（视高度 < -6°）或相机背后返回 None。"""
         alt_draw = np.array([self._display_alt_deg(float(a)) for a in alt],
@@ -3929,17 +3917,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 out.append(QPointF(x, y))
         return out
 
-    def _layer_points(self, refs: Dict[object, Tuple[float, float]],
-                      gs, jd) -> Dict[object, Optional[QPointF]]:
-        """{key: (ra,dec)} -> {key: QPointF|None}（一次批量投影）。"""
-        keys = list(refs.keys())
-        if not keys:
+    def _layer_points(self, prepared: Dict[str, object], gs, jd) \
+            -> Dict[object, Optional[QPointF]]:
+        """预备几何 -> 本帧 {key: QPointF|None}（一次批量投影）。
+
+        单位向量在 `_constellation_prepared` 阶段随拓扑一起缓存：视点与时间
+        每帧在变，但恒星几何不变，不再每帧从 RA/Dec 重算一遍向量
+        （实测这段重建占本层耗时的一半）。
+        """
+        keys = prepared["keys"]
+        if len(keys) == 0:
             return {}
-        ra = [refs[k][0] for k in keys]
-        dec = [refs[k][1] for k in keys]
-        az, alt = self._j2000_altaz_many(ra, dec, gs, jd)
-        pts = self._constellation_screen_points(az, alt, gs, jd)
-        return dict(zip(keys, pts))
+        altaz = j2000_to_altaz_many(prepared["vecs"], gs, jd)
+        az, alt = azalt_from_vec_many(altaz)
+        return dict(zip(keys, self._constellation_screen_points(az, alt)))
 
     def _constellation_prepared(self, layer) -> Dict[str, object]:
         """按体系预计算折线拓扑与标签锚点，缓存后跨帧复用。
@@ -3947,7 +3938,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         缓存口径（硬约束）：只按 ``system_id`` 存，切 FOV、开关图层、切换
         体系都**不重建**；``segments()`` / ``all_segments()``（实测 0.26ms/次）
         只在首次准备时调用。屏幕坐标每帧仍要批量投影（视点/时间在变），
-        但折线元组已就绪，FOV 切换只是对已加载 tuple 做裁剪。
+        但折线元组**与单位向量**都已就绪，FOV 切换只是对已加载 tuple 做裁剪。
 
         标签锚点只用数据层 ``xingguan_anchor()``（IAU 用 ``anchor()``），
         视图层不再遍历成员自己找最亮星（避免第二份事实源）。
@@ -3999,8 +3990,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     refs[anchor.hip] = (anchor.ra_deg, anchor.dec_deg)
                     labels.append((region.key, anchor.hip))
 
+        # RA/Dec 是静态几何：这里一次性转成单位向量，避免每帧重算 N 次。
+        keys = tuple(refs.keys())
+        vecs = np.array([vec_from_radec(float(refs[k][0]), float(refs[k][1]))
+                         for k in keys], dtype=float).reshape(-1, 3)
+
         prepared = {
-            "refs": refs,
+            "keys": keys,
+            "vecs": vecs,
             "region": tuple(region_segs),
             "detail": tuple(detail_segs),
             "labels": tuple(labels),
@@ -4051,7 +4048,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 base_label = QColor(214, 176, 122, 175 if night else 115)
 
             prepared = self._constellation_prepared(layer)
-            points = self._layer_points(prepared["refs"], gs, jd)
+            points = self._layer_points(prepared, gs, jd)
 
             painter.save()
             painter.setPen(QPen(base_line, 1))
