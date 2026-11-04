@@ -2287,6 +2287,8 @@ def register_sdr_tools(agent):
                 "arm_manual": {"type": "boolean",
                                "description": "人工门：实际发射前须显式传 true"
                                               "（无人值守调用保持缺省=false）"},
+                "tx_token": {"type": "string",
+                             "description": "会话级人工门 token（可选；有则校验有效期/撤销）"},
             },
             "required": ["frequency_hz", "arm_manual"],
         },
@@ -2324,6 +2326,8 @@ def register_sdr_tools(agent):
                                  "description": "发射时长（秒）；超出设备/法规上限时拒绝"},
                 "arm_manual": {"type": "boolean",
                                "description": "人工门：实际发射前须显式传 true"},
+                "tx_token": {"type": "string",
+                             "description": "会话级人工门 token（可选；有则校验有效期/撤销）"},
             },
             "required": ["frequency_hz", "arm_manual"],
         },
@@ -5739,11 +5743,17 @@ def _sdr_transmit_cw(args):
     """发射CW信号（写工具：arm_manual 人工门 + 如实信封）。"""
     # 手动门（与 _set_ppm_correction / core.mcp_server 写工具 gate 同语义）：
     # RF 发射属高危写操作，未显式武装不执行；返回 gated 信封而非假装成功。
-    if args.get("arm_manual", False) is not True:
+    # token 路径用于会话级授权：过期/撤销与 arm_manual 一样在这里被拒绝。
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    armed = args.get("arm_manual", False) is True
+    tx_token = args.get("tx_token") or None
+    decision = get_tx_gate().authorize(arm_manual=armed, token=tx_token)
+    if not decision.allowed:
         return ToolResult(
             success=False,
-            content="手动模式：未执行 CW 发射（写操作需显式传 arm_manual=true）",
-            data={"gated": True},
+            content=f"手动模式：未执行 CW 发射（{decision.code}: {decision.reason}）",
+            data={"gated": True, "reason_code": decision.code,
+                  "gate_state": decision.state},
         )
 
     try:
@@ -5806,7 +5816,8 @@ def _sdr_transmit_cw(args):
             remaining -= take
 
     rep = TxSession(backend).transmit(
-        _cw_blocks(), freq_hz=freq, arm_manual=True, caps=caps,
+        _cw_blocks(), freq_hz=freq, arm_manual=armed, tx_token=tx_token,
+        caps=caps,
         regulatory=policy, duration_s=dur, chunk_samples=4096,
         rx_control=backend, rx_active=bool(getattr(backend, "rx_active", False)),
         duplex=caps.duplex)
@@ -5832,11 +5843,16 @@ def _sdr_transmit_cw(args):
 def _sdr_transmit_iq(args):
     """发射任意 IQ 波形（写工具：arm_manual 强制门；本工具不合成信号）。"""
     # 手动门：RF 发射属高危写操作，未显式武装不执行；返回 gated 信封而非假装成功。
-    if args.get("arm_manual", False) is not True:
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    armed = args.get("arm_manual", False) is True
+    tx_token = args.get("tx_token") or None
+    decision = get_tx_gate().authorize(arm_manual=armed, token=tx_token)
+    if not decision.allowed:
         return ToolResult(
             success=False,
-            content="手动模式：未执行 IQ 发射（写操作需显式传 arm_manual=true）",
-            data={"gated": True},
+            content=f"手动模式：未执行 IQ 发射（{decision.code}: {decision.reason}）",
+            data={"gated": True, "reason_code": decision.code,
+                  "gate_state": decision.state},
         )
 
     import base64
@@ -5931,7 +5947,8 @@ def _sdr_transmit_iq(args):
 
         scaled = amp * samples / (float(np.max(np.abs(samples))) + 1e-12)
         rep = TxSession(backend).transmit(
-            scaled, freq_hz=freq, arm_manual=True, caps=caps,
+            scaled, freq_hz=freq, arm_manual=armed, tx_token=tx_token,
+            caps=caps,
             regulatory=policy,
             gain_db=args.get("gain_db"),
             bandwidth_hz=args.get("bandwidth_hz"),

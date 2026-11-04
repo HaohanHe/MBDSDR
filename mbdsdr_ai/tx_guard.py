@@ -336,6 +336,13 @@ _DEVICE_TX_PROFILES: Dict[str, Dict[str, Any]] = {
         "duplex": "unknown",                      # 同通道收发时序由驱动配置决定
         "source": "mbdsdr_ai.limesuite_params（LimeSuite 官方量程）",
     },
+    "plutosdr": {
+        # AD9361 325MHz-3.8GHz（hal.py DRIVER_MAP / 官方 datasheet）
+        "freq": (325_000_000.0, 3_800_000_000.0),
+        # TX 增益是衰减器语义，不能把 RX gain 当 TX 增益——保持未知
+        "duplex": "unknown",                      # TDD/FDD 由固件配置决定
+        "source": "mbdsdr_ai.hal DRIVER_MAP（AD9361 325MHz-3.8GHz）",
+    },
 }
 
 

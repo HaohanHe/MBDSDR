@@ -196,6 +196,21 @@ def test_tool_stops_on_underrun(mgr):
     assert fake.stopped == 1
 
 
+def test_tool_accepts_session_token_and_rejects_expired(mgr):
+    import time as _time
+    _, fake = mgr
+    tok = get_tx_gate().arm(ttl_s=10)
+    assert _tool_iq(fake, arm_manual=False, tx_token=tok).success is True
+    reset_tx_gate()
+    tok = get_tx_gate().arm(ttl_s=0.05)
+    _time.sleep(0.08)
+    r = _tool_iq(fake, arm_manual=False, tx_token=tok)
+    assert r.success is False
+    assert r.data["reason_code"] == "gate_expired"
+    before = fake.writes
+    assert before > 0
+
+
 def test_tool_refuses_unknown_device_capability(mgr):
     manager, fake = mgr
     fake._name = "AI SDR"
