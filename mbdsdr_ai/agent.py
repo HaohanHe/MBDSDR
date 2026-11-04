@@ -33,6 +33,7 @@ from .context_manager import (
 from .model_manager import ModelManager
 from .tool_registry import ToolRegistry, ToolResult, hex_bytes, clean_exc
 from .conversation import ConversationStore
+from .tool_budget import select_tools, tool_budget_tokens
 from .memory import MemoryStore
 from .self_evolution import SelfEvolutionEngine
 from .guardian import Guardian
@@ -417,6 +418,8 @@ class MBDSDRAgent:
         self.conversation_id = f"conv_{int(time.time())}"
         self.total_agent_calls = 0
         self.last_error = None
+        # P7：本轮工具集裁剪报告（None 表示未启用工具调用或选择失败）
+        self.last_tool_selection = None
         # repeat-call guard（借鉴 DeepSeek harness repeat-tool-reminder）
         self._repeat_key = None
         self._repeat_count = 0
@@ -3393,6 +3396,35 @@ class MBDSDRAgent:
 
     # ── 核心对话循环 ────────────────────────────────────
 
+    def _build_tool_selection(self, request: str):
+        """P7：按本轮请求与上下文窗口挑选工具 schema 子集。
+
+        返回 (definitions, ToolSelection)。禁用工具调用时返回 (None, None)；
+        选择器本身出错时退回全量定义并把报告置 None（宁可超预算也不静默失去工具）。
+        """
+        if not self.config.enable_tool_calling:
+            return None, None
+        try:
+            defs = self.tool_registry.get_tool_definitions(language=self._tool_language())
+        except Exception:
+            return None, None
+        if not defs:
+            return [], None
+        try:
+            budget = tool_budget_tokens(self.context_manager.max_context_tokens)
+        except Exception:
+            budget = tool_budget_tokens(32768)
+        try:
+            cats = {name: str((meta or {}).get("category", ""))
+                    for name, meta in self.tool_registry.tools.items()}
+        except Exception:
+            cats = {}
+        try:
+            sel = select_tools(defs, request, budget_tokens=budget, categories=cats)
+        except Exception:
+            return defs, None
+        return sel.definitions, sel
+
     def chat(self, user_input: str, max_tool_rounds: int = 10,
              on_delta=None) -> Dict[str, Any]:
         """
@@ -3439,11 +3471,21 @@ class MBDSDRAgent:
         # 2. 检索相关记忆
         memory_context = self.memory.build_memory_context(user_input)
 
+        # 2.5 工具集预算：按本轮请求裁出候选 schema。
+        # 全量 schema 实测约 9 万 token，远超多数模型窗口；不裁剪会让模型被截断
+        # 或直接 400，工具选择准确率无从谈起。裁剪后 list_tools 仍始终可用。
+        tools, tool_selection = self._build_tool_selection(user_input)
+        self.last_tool_selection = tool_selection
+        if tools:
+            self.context_manager.set_tool_definitions(tools)
+
         # 3. 构建系统提示词（含记忆 + 工具说明）
         system_prompt = SYSTEM_PROMPT
         if memory_context:
             system_prompt += memory_context
         system_prompt += f"\n\n当前可用工具数: {len(self.tool_registry.get_tool_names())}。调用工具前先用 list_tools 确认工具列表。"
+        if tool_selection is not None and tool_selection.trimmed:
+            system_prompt += "\n\n" + tool_selection.note
         self.context_manager.set_system_prompt(system_prompt)
 
         # 4. 工具调用循环
@@ -3462,9 +3504,6 @@ class MBDSDRAgent:
 
             # 构建 API 消息
             messages = self.context_manager.build_api_messages()
-            tools = (self.tool_registry.get_tool_definitions(
-                         language=self._tool_language())
-                     if self.config.enable_tool_calling else None)
 
             # 调用 LLM（流式，on_delta 回调实时吐字）
             response = {"success": True, "content": "", "tool_calls": [],
