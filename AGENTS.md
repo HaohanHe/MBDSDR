@@ -98,21 +98,46 @@ FM 样本入仓（tests/fixtures/real_fm_88m1，2^19 样本 cu8+SigMF，12 项
 过滤器/touch 信号不回收、NaN 被夹成满增益与最高频并真下发调谐）与真实
 样本反哺的 wfm sos 溢出修复同轮入账。）
 
-根 `tests/`（大套件，200 个测试文件：`test_*.py` 167 + `*_test.py` 15 +
-`*roundtrip*.py` 18）同样是对拍门禁所在。**它整跑很慢**：
-单进程跑 160 个文件约 45 分钟——慢在同进程内单例 QApplication 跨文件累积
-（前面的文件留下成百上千个 widget，后续每次新建窗口都要连带做全量样式/
-布局重算，越往后越慢；孤立构造 MainWindow 只需 5.5 s，累积后可要 11 分钟）。
+根 `tests/`（大套件，291 个测试文件，2026-11-04 `--check` 实测）同样是
+对拍门禁所在。**它整跑很慢**：
+慢在同进程内单例 QApplication 跨文件累积——真因已实测定位（`8fae7d5`）：
+`ui_actions/sky_actions` 的 `bus.executor`（窗口绑定方法）与
+`PanelRegistry._widgets`（面板强引用）两条**进程级单例钉子**把已关窗口钉住
+不回收，于是每建一个 MainWindow，`topLevelWidgets` 净增 39 且永不回落
+（0→39→…→234），app 级 `setStyleSheet` 的全量重抛光成本随之线性上涨
+（实测孤立构造 2.8 s，同进程第 6 个窗口 16.6 s；历史极端值可要 11 分钟）。
+热点栈会误导：py-spy 采样常落在 `Theme.apply → app.setStyleSheet`，但样式
+守卫本身无辜（空载实测 0.5 ms）——它只是被累积的存活控件放大成了显性热点。
 对策有两条，都已落地：
 ① `tests/conftest.py` 的模块级 autouse fixture 在每个模块结束后回收遗留
-   顶层 widget（治本，显著降耗）；
+   顶层 widget（治本，显著降耗）。**回收必须用
+   `app.sendPostedEvents(None, QEvent.DeferredDelete)`**：实测
+   `deleteLater()` + `processEvents()` 是空转（顶层控件 39→39 纹丝不动，
+   DeferredDelete 按投递时的事件循环层级延后，processEvents 不保证派发），
+   换成 sendPostedEvents 后同一批窗口 78→0。粒度停在 module 不下沉到
+   function：`test_app_mode` / `test_desktop_ui_responsiveness` 等把
+   MainWindow 做成模块级 fixture 整模块复用，逐测试强拆会删掉还在用的窗口。
+   **护栏本身要有钉扎**：这个 fixture 的实现曾在一次 conftest 改写中整段丢失
+   而本文档仍记"已落地"，连续多轮因此把挂死误归因到别处——护栏要配
+   `tests/test_ui_stability_resources.py` 那种"关窗必须松钉"的断言 + 反证。
 ② **CI 与本地跑测脚本都按 A/B 两组并行跑**（`scripts/ci_pytest_groups.py`
 按文件名排序交替分组，自动生成无需维护清单；收件覆盖 `test_*.py` /
 `*_test.py` / `*roundtrip*.py` 三种命名——历史上只收第一种，phase71 修正，
 四个 `main()` 体检脚本 tool_selftest/tool_health_check/tool_param_smoke/
-smoke_live_tools 故意不入组）——分组后单组只要
-约 3–4 分钟（实测 A 组 695 项 3.6 分钟、B 组 807 项 3.1 分钟），
+smoke_live_tools 故意不入组）——分组后单组十余分钟即跑完
+（2026-11-04 本机实测：A 组 1561 passed / 4 skipped / 0 failed，12:50；
+B 组 1440 passed / 2 skipped / 2 failed，11:05——两条红均为环境性，
+见下；共 291 个文件），
 单进程整跑的累积问题自然消失。
+两条本地跑法坑（都实测踩过）：脚本打印的是 **Windows 反斜杠 + CRLF**
+路径，直接喂 pytest 会得到 exit 4「no tests ran」，必须先
+`tr -d '\r' | tr '\\' '/'`；**真机棒子插着时，大套件里的真机用例会随机
+假红 `LIBUSB_ERROR_ACCESS(-3)`**——ACCESS(-3) 的语义是「设备被占用」而
+非权限不足，任何并发进程持棒即触发。三次实测把归因收窄到这个结论：
+A/B 两组并跑红；B 组单独跑**仍红**（同一时刻另一会话在跑 hw 车道测试）；
+安静环境独占复跑两次全绿（1 passed / 16.30 s、1 passed / 13.75 s）。
+对策：真机用例只在大套件静默时单独验，不要拿大套件的红去改产品代码
+（CI runner 无硬件自然 skip，不受影响）。
 
 根 `tests/` 新增 6 个门禁文件：
 `test_material_task_chains.py`（五份材料 39 个任务步的存在性 + 端到端链路）、
