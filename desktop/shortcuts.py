@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MIT
+"""
+桌面端快捷键登记表（唯一事实源）
+================================
+
+main_window 只从 ``bind(id)`` 取键序列，不在各构建函数里散落字符串；
+``tests/test_shortcuts_guard.py`` 反向核对窗口里实际绑定的 QAction /
+QShortcut 与本表是否一致——新增按钮忘了登记会直接红。
+
+约定：
+  * ``key=None`` 表示该动作**故意不配快捷键**，必须在 ``note`` 里写原因；
+  * ``scope`` 区分生效范围：window=主窗恒生效，planetarium=仅星象仪形态；
+  * id 命名 ``域.动作``，域与菜单/顶栏分区一致。
+"""
+
+from typing import NamedTuple, Optional, Tuple
+
+
+class Shortcut(NamedTuple):
+    id: str
+    key: Optional[str]
+    label: str
+    scope: str = "window"
+    note: str = ""
+
+
+SHORTCUTS: Tuple[Shortcut, ...] = (
+    # ---- 文件菜单 ----
+    Shortcut("file.connect", "Ctrl+C", "连接设备...", note="焦点在文本框时放行复制"),
+    Shortcut("file.disconnect", "Ctrl+D", "断开连接"),
+    Shortcut("file.quit", "Ctrl+Q", "退出"),
+    # ---- 视图菜单 ----
+    Shortcut("view.waterfall", "Ctrl+Shift+W", "显示瀑布图"),
+    Shortcut("view.fullscreen", "F11", "全屏"),
+    Shortcut("view.planetarium", "Ctrl+Shift+P", "星象仪模式"),
+    Shortcut("view.planetarium_exit", "Esc", "星象仪形态退出", scope="planetarium",
+             note="只在该形态启用；先关 AI 回复卡再退出形态"),
+    # ---- 工具菜单 ----
+    Shortcut("tools.sweep", "Ctrl+Shift+F", "FM 扫频找台"),
+    Shortcut("tools.record", "Ctrl+R", "开始/停止录音"),
+    Shortcut("tools.ntrip", "Ctrl+Shift+N", "NTRIP 设置"),
+    Shortcut("tools.gnss_connect", "Ctrl+Shift+G", "连接 GNSS..."),
+    Shortcut("tools.gnss_disconnect", None, "断开 GNSS",
+             note="与连接成对，重复配键会与连接抢同一次按键"),
+    Shortcut("tools.sat_start", None, "开始跟踪选中卫星", note="需先选卫星，低频操作"),
+    Shortcut("tools.sat_stop", None, "停止卫星跟踪", note="与开始跟踪成对"),
+    Shortcut("tools.sat_tle", None, "更新卫星 TLE (Celestrak)",
+             note="联网操作，避免误触"),
+    Shortcut("tools.about", "F1", "关于 MBDSDR"),
+    # ---- 面板菜单 ----
+    Shortcut("panel.reset_layout", None, "恢复出厂布局", note="破坏性操作，要求点击确认"),
+    # ---- 顶栏 ----
+    Shortcut("layout.save", "Ctrl+Shift+S", "保存"),
+    Shortcut("layout.delete", None, "删除", note="破坏性操作，内置布局本就置灰"),
+    Shortcut("vfo.new", "Ctrl+Alt+V", "+ VFO", note="避开输入框里的 Ctrl+Shift+V 粘贴"),
+    Shortcut("vfo.cycle", "Ctrl+Tab", "切换主听"),
+    Shortcut("vfo.mute", "Ctrl+M", "静音"),
+    Shortcut("vfo.replay", "Ctrl+Shift+R", "回放"),
+)
+
+#: id -> Shortcut（构建期按 id 取键）
+BY_ID = {s.id: s for s in SHORTCUTS}
+
+
+def bind(shortcut_id: str) -> Optional[str]:
+    """按登记 id 取键序列；未登记的 id 直接抛 KeyError（构建期就暴露）。"""
+    return BY_ID[shortcut_id].key
+
+
+def registered_keys() -> Tuple[str, ...]:
+    """所有已配置的键序列（不含 key=None 的条目）。"""
+    return tuple(s.key for s in SHORTCUTS if s.key)

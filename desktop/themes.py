@@ -10,6 +10,9 @@ MBDSDR 桌面端主题系统
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
+# 设计令牌单一来源：主题色只从 tokens.THEME_COLORS 取，不在本文件写 hex。
+from tokens import tokens
+
 
 # ============================================================================
 # 字体
@@ -85,7 +88,8 @@ class Theme:
         palette.setColor(QPalette.Button, QColor(c["button"]))
         palette.setColor(QPalette.ButtonText, QColor(c["text"]))
         palette.setColor(QPalette.BrightText, QColor(c["accent"]))
-        palette.setColor(QPalette.Link, QColor(c["primary"]))
+        # Link 是"橙色当文字用"：取压暗档 primary_text（fill 仍用 primary）
+        palette.setColor(QPalette.Link, QColor(c.get("primary_text", c["primary"])))
         palette.setColor(QPalette.Highlight, QColor(c["primary"]))
         palette.setColor(QPalette.HighlightedText, QColor(c["card"]))
 
@@ -195,6 +199,12 @@ class Theme:
         QComboBox:hover {{
             border-color: {c['primary']};
         }}
+        QComboBox:disabled, QLineEdit:disabled, QSpinBox:disabled,
+        QDoubleSpinBox:disabled {{
+            color: {c['text_disabled']};
+            background-color: {c['button_disabled']};
+            border-color: {c['grid']};
+        }}
         QComboBox::drop-down {{
             border: none;
             width: 24px;
@@ -258,7 +268,7 @@ class Theme:
         }}
         QTabBar::tab:selected {{
             background-color: {c['card']};
-            color: {c['primary']};
+            color: {c.get('primary_text', c['primary'])};
             font-weight: 600;
         }}
         QTabBar::tab:hover {{
@@ -405,30 +415,7 @@ class Theme:
 DEFAULT_LIGHT = Theme(
     name="default",
     display_name="默认",
-    colors={
-        # 背景 / 卡片
-        "bg": "#F5F3EF",            # 主背景 米白暖灰
-        "bg_alt": "#FAF8F5",        # 次级背景/状态栏/工具栏
-        "card": "#FFFFFF",           # 卡片/面板
-        # 文字
-        "text": "#5B7B8C",           # 文字主色 蓝灰
-        "text_secondary": "#8A9BA8", # 文字次色 更浅蓝灰
-        "text_disabled": "#A0A0A0", # 禁用文字
-        # 线条
-        "border": "#C8C0B4",        # 边框
-        "grid": "#D8D2C8",          # 网格线/分割线 浅米灰
-        # 语义色
-        "primary": "#C4845C",       # 强调/高亮/选中 橙
-        "accent": "#C4845C",        # 主操作按钮 橙
-        "accent_hover": "#B0754E",
-        "success": "#6BA89A",       # 已连接/成功 绿
-        "danger": "#B85C5C",        # 未连接/警告/错误 红
-        # 按钮态
-        "button": "#FFFFFF",         # 按钮默认背景
-        "button_hover": "#F0EDE8",
-        "button_pressed": "#E8E4DD",
-        "button_disabled": "#D8D2C8",
-    },
+    colors=tokens().theme_colors("default"),
     spectrum_colors=[
         "#5B7B8C",  # 蓝灰
         "#6B8C9A",  # 蓝青
@@ -445,24 +432,7 @@ DEFAULT_LIGHT = Theme(
 DARK = Theme(
     name="dark",
     display_name="深色",
-    colors={
-        "bg": "#1E1E20",
-        "bg_alt": "#252528",
-        "card": "#28282B",
-        "text": "#D0D0D0",
-        "text_secondary": "#888888",
-        "text_disabled": "#555555",
-        "border": "#3A3A3E",
-        "primary": "#7A9CAC",
-        "accent": "#D4956A",
-        "accent_hover": "#C4845C",
-        "danger": "#D47070",
-        "button": "#333336",
-        "button_hover": "#3D3D41",
-        "button_pressed": "#2A2A2D",
-        "button_disabled": "#262629",
-        "grid": "#3A3A3E",
-    },
+    colors=tokens().theme_colors("dark"),
     spectrum_colors=[
         "#5B8C9A",
         "#6BA89A",
@@ -479,24 +449,7 @@ DARK = Theme(
 HIGH_CONTRAST = Theme(
     name="high_contrast",
     display_name="高对比",
-    colors={
-        "bg": "#000000",
-        "bg_alt": "#111111",
-        "card": "#000000",
-        "text": "#FFFFFF",
-        "text_secondary": "#CCCCCC",
-        "text_disabled": "#888888",
-        "border": "#FFFFFF",
-        "primary": "#00BFFF",
-        "accent": "#FF8C00",
-        "accent_hover": "#FFA500",
-        "danger": "#FF4444",
-        "button": "#222222",
-        "button_hover": "#333333",
-        "button_pressed": "#444444",
-        "button_disabled": "#1A1A1A",
-        "grid": "#444444",
-    },
+    colors=tokens().theme_colors("high_contrast"),
     spectrum_colors=[
         "#00BFFF",
         "#00FF7F",
@@ -531,25 +484,7 @@ class CarDarkTheme(Theme):
 DARK_CAR = CarDarkTheme(
     name="dark_car",
     display_name="CarWith 深色",
-    colors={
-        "bg": "#000000",
-        "bg_alt": "#1f1f1f",
-        "card": "#2b2c2f",
-        "text": "#ffffff",
-        "text_secondary": "#c7c7c7",
-        "text_disabled": "#666666",
-        "border": "#585c63",
-        "grid": "#35373c",
-        "primary": "#919cac",
-        "accent": "#919cac",
-        "accent_hover": "#a8b3c2",
-        "success": "#6BA89A",
-        "danger": "#B85C5C",
-        "button": "#35373c",
-        "button_hover": "#3d3f44",
-        "button_pressed": "#36383a",
-        "button_disabled": "#1f1f1f",
-    },
+    colors=tokens().theme_colors("dark_car"),
     spectrum_colors=[
         "#919cac",
         "#7d8a9c",
@@ -562,11 +497,46 @@ DARK_CAR = CarDarkTheme(
     ],
 )
 
+# ============================================================================
+# Figma 原生深色（.figma 导出稿的设计语言落地，QSS 委托 tokens 的 "figma" 模式）
+# ============================================================================
+class FigmaTheme(Theme):
+    """按 .figma/284_1xx…284_6xx 导出稿实现的深色主题。
+
+    与 dark_car 的差别：页底/卡片底取导出稿的 #000000 / #1f1f1f，
+    控件底取 #2c2c2c，描边取 #404040，选中态取占位灰 #d9d9d9。
+    默认不启用（DEFAULT_THEME 仍是 default），只在主题下拉/菜单里可选。
+    """
+
+    def _build_qss(self) -> str:
+        try:
+            return tokens().to_stylesheet("figma")
+        except Exception:
+            return super()._build_qss()
+
+
+FIGMA = FigmaTheme(
+    name="figma",
+    display_name="Figma 深色",
+    colors=tokens().theme_colors("figma"),
+    spectrum_colors=[
+        "#D9D9D9",
+        "#B8B8B8",
+        "#939393",
+        "#6BA89A",
+        "#C4B89A",
+        "#C4A88A",
+        "#B89A8A",
+        "#B85C5C",
+    ],
+)
+
 THEMES = {
     "default": DEFAULT_LIGHT,
     "dark": DARK,
     "high_contrast": HIGH_CONTRAST,
     "dark_car": DARK_CAR,
+    "figma": FIGMA,
 }
 
 # 兼容旧配置里写死的主题 key（未知名一律回退默认主题）

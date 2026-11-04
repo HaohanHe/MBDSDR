@@ -143,6 +143,115 @@ class DesignTokens:
             "heatmap_high":         "#8A4A3A",   # 热力图高
         }
 
+        # ---- 主题语义色映射（单一来源）----
+        # themes.py 的每套主题只从这里取色，不再各自写 hex。键名固定为下面
+        # 17 个语义槽位；新增主题只需在 THEME_COLORS 里加一列。
+        # 2026-11 可读性修正：dark 的 text_secondary 压暗到达标值；default
+        # 的正文/次级正文属于既有缺陷，因牵动截图基线改为登记不改色（见
+        # tests/test_ui_contrast.py 的 REGISTERED_DEVIATIONS）。
+        self.THEME_COLORS: Dict[str, Dict[str, str]] = {
+            # 低饱和浅色（默认主题）
+            "default": {
+                "bg": "#F5F3EF", "bg_alt": "#FAF8F5", "card": "#FFFFFF",
+                # 已知对比度缺陷（4.07 / 2.86:1）：改色会动到 12 张基线，
+                # 登记在 tests/test_ui_contrast.py，待基线评审后统一处理。
+                "text": "#5B7B8C",
+                "text_secondary": "#8A9BA8",
+                "text_disabled": "#A0A0A0",
+                "border": "#C8C0B4", "grid": "#D8D2C8",
+                "primary": "#C4845C", "accent": "#C4845C",
+                "accent_hover": "#B0754E",
+                "success": "#6BA89A", "danger": "#B85C5C",
+                "button": "#FFFFFF", "button_hover": "#F0EDE8",
+                "button_pressed": "#E8E4DD", "button_disabled": "#D8D2C8",
+                # 品牌橙作正文底色不足 4.5:1：文字态另取压暗档（fill 仍是原橙）
+                "primary_text": "#9A5F33",    # 4.67:1 on bg
+            },
+            # 深色
+            "dark": {
+                "bg": "#1E1E20", "bg_alt": "#252528", "card": "#28282B",
+                "text": "#D0D0D0",
+                "text_secondary": "#9A9A9A",  # 原 #888888，4.15 → 5.22:1
+                "text_disabled": "#555555",
+                "border": "#3A3A3E", "grid": "#3A3A3E",
+                "primary": "#7A9CAC", "accent": "#D4956A",
+                "accent_hover": "#C4845C",
+                "success": "#6BA89A", "danger": "#D47070",
+                "button": "#333336", "button_hover": "#3D3D41",
+                "button_pressed": "#2A2A2D", "button_disabled": "#262629",
+                "primary_text": "#7A9CAC",
+            },
+            # 高对比（无障碍）
+            "high_contrast": {
+                "bg": "#000000", "bg_alt": "#111111", "card": "#000000",
+                "text": "#FFFFFF", "text_secondary": "#CCCCCC",
+                "text_disabled": "#888888",
+                "border": "#FFFFFF", "grid": "#444444",
+                "primary": "#00BFFF", "accent": "#FF8C00",
+                "accent_hover": "#FFA500",
+                "success": "#6BA89A", "danger": "#FF4444",
+                "button": "#222222", "button_hover": "#333333",
+                "button_pressed": "#444444", "button_disabled": "#1A1A1A",
+                "primary_text": "#00BFFF",
+            },
+            # CarWith 深色（docs/design_ref/carwith_figma）
+            "dark_car": {
+                "bg": "#000000", "bg_alt": "#1f1f1f", "card": "#2b2c2f",
+                "text": "#ffffff", "text_secondary": "#c7c7c7",
+                "text_disabled": "#666666",
+                "border": "#585c63", "grid": "#35373c",
+                "primary": "#919cac", "accent": "#919cac",
+                "accent_hover": "#a8b3c2",
+                "success": "#6BA89A", "danger": "#B85C5C",
+                "button": "#35373c", "button_hover": "#3d3f44",
+                "button_pressed": "#36383a", "button_disabled": "#1f1f1f",
+                "primary_text": "#919cac",
+            },
+            # Figma 原生深色（.figma/284_1xx…284_6xx 导出稿的取值）
+            "figma": {
+                "bg": "#000000", "bg_alt": "#1f1f1f", "card": "#1f1f1f",
+                "text": "#FFFFFF",
+                # 0.78 白叠在 #1f1f1f 上的等效实色；10.58:1
+                "text_secondary": "#CFCFCF",
+                "text_disabled": "#707070",   # 0.3 白叠卡底（禁用态豁免）
+                "border": "#404040", "grid": "#2C2C2C",
+                "primary": "#D9D9D9",         # 导出稿的占位灰语法
+                "accent": "#D9D9D9",
+                "accent_hover": "#E6E6E6",
+                # 导出稿无状态色：沿用 Qt 既有语义色（文档登记为 Qt 补充）
+                "success": "#6BA89A", "danger": "#B85C5C",
+                "button": "#2C2C2C", "button_hover": "#404040",
+                "button_pressed": "#4F4F4F", "button_disabled": "#1F1F1F",
+                "primary_text": "#D9D9D9",
+            },
+        }
+
+        # 旧面板仍按 light_* 键名取色：这些别名不另存数值，直接引用
+        # THEME_COLORS["default"]，保证同一语义只有一处定义。
+        _light = self.THEME_COLORS["default"]
+        self.COLORS["light_bg"] = _light["bg"]
+        self.COLORS["light_bg_alt"] = _light["bg_alt"]
+        self.COLORS["light_card"] = _light["card"]
+        self.COLORS["light_text"] = _light["text"]
+        self.COLORS["light_border"] = _light["border"]
+        self.COLORS["light_accent"] = _light["accent"]
+
+        # Figma 深色 QSS 的取色别名（与深色 QSS 的键一一对应）
+        self.FIGMA_DARK: Dict[str, str] = {
+            "bg_dark": "#000000",
+            "card_1": "#1F1F1F",
+            "card_2": "#1F1F1F",
+            "card_3": "#2C2C2C",
+            "card_4": "#404040",
+            "card_hover": "#404040",
+            "gray_200": "#939393",
+            "gray_300": "#606060",
+            "gray_400": "#404040",
+            "accent": "#D9D9D9",
+            "success": "#6BA89A",
+            "danger": "#B85C5C",
+        }
+
         # ---- 文字 alpha 层级（叠加在白字上）----
         self.TEXT_ALPHA: Dict[str, float] = {
             "primary":   1.0,
@@ -262,6 +371,11 @@ class DesignTokens:
         a = self.TEXT_ALPHA.get(level, 1.0)
         return f"rgba(255, 255, 255, {a})"
 
+    def theme_colors(self, name: str = "default") -> Dict[str, str]:
+        """取一套主题的语义色（返回副本，主题侧只引用不各自写 hex）。"""
+        base = self.THEME_COLORS.get(name, self.THEME_COLORS["default"])
+        return dict(base)
+
     @staticmethod
     def _px_to_pt(px_str: str) -> float:
         """'39px' -> 29.25pt（QSS font-size 用 pt）。"""
@@ -282,11 +396,14 @@ class DesignTokens:
         """
         if mode == "light":
             return self._build_light_qss()
+        if mode == "figma":
+            # .figma 导出稿的值只换色，结构/圆角/字号沿用同一套深色 QSS
+            return self._build_dark_qss(self.FIGMA_DARK)
         return self._build_dark_qss()
 
     # ---- 深色 QSS ----
-    def _build_dark_qss(self) -> str:
-        c = self.COLORS
+    def _build_dark_qss(self, palette: Dict[str, str] | None = None) -> str:
+        c = palette or self.COLORS
         r = self.RADIUS
         gap = self.SPACING["gutter"]
         return f"""
@@ -382,6 +499,12 @@ QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{
     padding: 6px 12px;
 }}
 QComboBox:focus, QLineEdit:focus {{ border: 1px solid {c['accent']}; }}
+QComboBox:disabled, QLineEdit:disabled, QSpinBox:disabled,
+QDoubleSpinBox:disabled {{
+    color: rgba(255,255,255,{self.TEXT_ALPHA['disabled']});
+    background-color: {c['card_1']};
+}}
+
 QComboBox QAbstractItemView {{
     background-color: {c['card_3']};
     color: rgba(255,255,255,{self.TEXT_ALPHA['secondary']});
@@ -495,8 +618,17 @@ QPushButton {{
     padding: 8px 18px;
     font-size: {self._px_to_pt(self.FONT['body'])}pt;
 }}
-QPushButton:hover {{ background-color: #F0EDE8; }}
-QPushButton:disabled {{ color: #A0A0A0; background-color: #D8D2C8; }}
+QPushButton:hover {{ background-color: {c['light_hover']}; }}
+QPushButton:disabled {{
+    color: {self.THEME_COLORS['default']['text_disabled']};
+    background-color: {c['light_grid']};
+}}
+QComboBox:disabled, QLineEdit:disabled, QSpinBox:disabled,
+QDoubleSpinBox:disabled {{
+    color: {self.THEME_COLORS['default']['text_disabled']};
+    background-color: {c['light_grid']};
+}}
+
 QPushButton#recordButton {{
     background-color: {c['light_accent']};
     color: white; border: none; font-weight: 600;

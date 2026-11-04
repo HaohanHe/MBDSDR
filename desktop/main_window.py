@@ -79,6 +79,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from themes import get_theme, THEMES, DEFAULT_THEME
+from shortcuts import bind as _key
 from spectrum_widget import create_spectrum_widget, HAS_OPENGL
 from control_panel import ControlPanel
 from mode_registry import (
@@ -636,19 +637,19 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("文件(&F)")
 
         connect_action = QAction("连接设备...", self)
-        connect_action.setShortcut(QKeySequence("Ctrl+C"))
+        connect_action.setShortcut(QKeySequence(_key("file.connect")))
         connect_action.triggered.connect(self._connect_dialog)
         file_menu.addAction(connect_action)
 
         disconnect_action = QAction("断开连接", self)
-        disconnect_action.setShortcut(QKeySequence("Ctrl+D"))
+        disconnect_action.setShortcut(QKeySequence(_key("file.disconnect")))
         disconnect_action.triggered.connect(self._disconnect)
         file_menu.addAction(disconnect_action)
 
         file_menu.addSeparator()
 
         exit_action = QAction("退出", self)
-        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        exit_action.setShortcut(QKeySequence(_key("file.quit")))
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
@@ -683,47 +684,52 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
 
         waterfall_action = QAction("显示瀑布图", self)
+        waterfall_action.setShortcut(QKeySequence(_key("view.waterfall")))
         waterfall_action.setCheckable(True)
         waterfall_action.setChecked(True)
         waterfall_action.triggered.connect(self._toggle_waterfall)
         view_menu.addAction(waterfall_action)
 
         fullscreen_action = QAction("全屏", self)
-        fullscreen_action.setShortcut(QKeySequence("F11"))
+        fullscreen_action.setShortcut(QKeySequence(_key("view.fullscreen")))
         fullscreen_action.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
 
         # 星象仪模式：顶层第二形态（全屏天空）。checkable 与当前形态同步。
         planetarium_action = QAction("星象仪模式", self)
+        planetarium_action.setShortcut(QKeySequence(_key("view.planetarium")))
         planetarium_action.setCheckable(True)
         planetarium_action.setToolTip(
             "切换到星象仪形态：整个天空铺满屏幕，点星即看/即听")
         planetarium_action.triggered.connect(self._toggle_planetarium_mode)
         view_menu.addAction(planetarium_action)
         self._planetarium_action = planetarium_action
-        # Esc 仅星象仪形态下生效（退出回 IDE）；IDE 形态不劫持 Esc。
-        self._planetarium_esc = QShortcut(QKeySequence("Esc"), self)
-        self._planetarium_esc.activated.connect(
-            lambda: self.set_app_mode("ide"))
+        # Esc 仅星象仪形态下生效：先关 AI 回复卡（弹层），再退出回 IDE；
+        # IDE 形态不劫持 Esc（留给对话框/输入框的默认取消语义）。
+        self._planetarium_esc = QShortcut(
+            QKeySequence(_key("view.planetarium_exit")), self)
+        self._planetarium_esc.activated.connect(self._on_escape)
         self._planetarium_esc.setEnabled(False)
 
         # 工具菜单
         tools_menu = menubar.addMenu("工具(&T)")
 
         sweep_action = QAction("FM 扫频找台", self)
+        sweep_action.setShortcut(QKeySequence(_key("tools.sweep")))
         sweep_action.triggered.connect(self._start_sweep)
         sweep_action.setEnabled(False)  # 无设备时置灰，连接后启用
         self._sweep_action = sweep_action
         tools_menu.addAction(sweep_action)
 
         record_action = QAction("开始/停止录音", self)
-        record_action.setShortcut(QKeySequence("Ctrl+R"))
+        record_action.setShortcut(QKeySequence(_key("tools.record")))
         record_action.triggered.connect(self._toggle_record)
         tools_menu.addAction(record_action)
 
         tools_menu.addSeparator()
 
         ntrip_action = QAction("NTRIP 设置", self)
+        ntrip_action.setShortcut(QKeySequence(_key("tools.ntrip")))
         ntrip_action.triggered.connect(self._open_ntrip_dialog)
         tools_menu.addAction(ntrip_action)
 
@@ -731,6 +737,7 @@ class MainWindow(QMainWindow):
 
         # 真实串口 GNSS：手动选择串口号/波特率后打开 NMEA 流
         gnss_action = QAction("连接 GNSS...", self)
+        gnss_action.setShortcut(QKeySequence(_key("tools.gnss_connect")))
         gnss_action.triggered.connect(self._open_gnss_dialog)
         tools_menu.addAction(gnss_action)
 
@@ -756,6 +763,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
 
         about_action = QAction("关于 MBDSDR", self)
+        about_action.setShortcut(QKeySequence(_key("tools.about")))
         about_action.triggered.connect(self._show_about)
         tools_menu.addAction(about_action)
 
@@ -851,6 +859,7 @@ class MainWindow(QMainWindow):
         # 保存当前布局为自定义预设
         self.layout_save_btn = QPushButton("保存")
         self.layout_save_btn.setMinimumHeight(28)
+        self.layout_save_btn.setShortcut(QKeySequence(_key("layout.save")))
         self.layout_save_btn.setToolTip("把当前布局（页签顺序/三栏比例/面板可见性）存为自定义预设")
         self.layout_save_btn.clicked.connect(self._on_save_layout)
         toolbar.addWidget(self.layout_save_btn)
@@ -867,6 +876,7 @@ class MainWindow(QMainWindow):
         # 多 VFO：新建 VFO 按钮（在当前频谱中心建一个次听 VFO）
         self.new_vfo_btn = QPushButton("+ VFO")
         self.new_vfo_btn.setMinimumHeight(28)
+        self.new_vfo_btn.setShortcut(QKeySequence(_key("vfo.new")))
         self.new_vfo_btn.setToolTip("在当前频谱中心新建一个 VFO（次听）")
         self.new_vfo_btn.clicked.connect(self._on_new_vfo_button)
         toolbar.addWidget(self.new_vfo_btn)
@@ -897,6 +907,7 @@ class MainWindow(QMainWindow):
         self.toolbar_mute_btn = QPushButton("静音")
         self.toolbar_mute_btn.setMinimumHeight(28)
         self.toolbar_mute_btn.setCheckable(True)
+        self.toolbar_mute_btn.setShortcut(QKeySequence(_key("vfo.mute")))
         self.toolbar_mute_btn.toggled.connect(self._on_toolbar_mute_toggled)
         toolbar.addWidget(self.toolbar_mute_btn)
 
@@ -920,9 +931,28 @@ class MainWindow(QMainWindow):
         # 漂移处理（AGENTS.md §2：文档与实现掰腕子算 bug）。
         self.replay_btn = QPushButton("回放")
         self.replay_btn.setMinimumHeight(28)
+        self.replay_btn.setShortcut(QKeySequence(_key("vfo.replay")))
         self.replay_btn.setToolTip("选择已录制的 .iq 文件进行离线回放")
         self.replay_btn.clicked.connect(self._replay_recording)
         toolbar.addWidget(self.replay_btn)
+
+        self._setup_tab_order()
+
+    def _setup_tab_order(self) -> None:
+        """顶栏 Tab 顺序按视觉从左到右显式串联。
+
+        Qt 的默认焦点链按控件创建次序，中间夹了 QLabel/分隔符后会跳序；
+        显式 setTabOrder 保证键盘用户按屏幕顺序走。链尾进入中央三栏。
+        """
+        chain = [
+            self.toolbar_mode_combo, self.theme_combo, self.lang_combo,
+            self.layout_combo, self.layout_save_btn, self.layout_delete_btn,
+            self.new_vfo_btn, self.cycle_vfo_btn, self.toolbar_volume,
+            self.toolbar_mute_btn, self.record_btn, self.replay_btn,
+        ]
+        self._tab_order = tuple(chain)
+        for first, second in zip(chain, chain[1:]):
+            QWidget.setTabOrder(first, second)
 
     def _build_central_widget(self):
         """构建「平行视界」三栏固定 QSplitter 布局。
@@ -1012,7 +1042,8 @@ class MainWindow(QMainWindow):
         if hasattr(self.spectrum, "bookmark_activated"):
             self.spectrum.bookmark_activated.connect(
                 self._on_bookmark_activated)
-        QShortcut(QKeySequence("Ctrl+Tab"), self, self._on_cycle_vfo)
+        self._cycle_vfo_shortcut = QShortcut(
+            QKeySequence(_key("vfo.cycle")), self, self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
         # 星象仪形态退出时瀑布归位用的布局句柄（reparent 往返，对象身份不变）。
         self._spectrum_page_layout = spectrum_layout
@@ -1701,6 +1732,18 @@ class MainWindow(QMainWindow):
         esc = getattr(self, "_planetarium_esc", None)
         if esc is not None:
             esc.setEnabled(self._app_mode == "planetarium")
+
+    def _on_escape(self) -> None:
+        """Esc 逐层退出当前状态：先关星象仪 AI 回复卡，再退出星象仪形态。
+
+        只处理"看得见却点不到"的覆盖层；QDialog 弹窗由 Qt 自身 Esc→reject。
+        """
+        card = getattr(self, "_planetarium_ai_card", None)
+        if card is not None and card.isVisible():
+            card.setVisible(False)
+            return
+        if getattr(self, "_app_mode", "ide") == "planetarium":
+            self.set_app_mode("ide")
 
     def _restore_app_mode(self) -> None:
         """启动恢复上次顶层形态（settings 权威源；读不到/异常回退 IDE）。"""
