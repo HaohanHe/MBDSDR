@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: MIT
+"""
+工具 schema 一致性守卫（P7 收尾）
+=================================
+
+把 scripts/ai_tool_consistency.py 的扫描做成回归锁：
+
+  1. 真实注册表（约 500 个工具）不得有结构性错误（fatal）。
+  2. 扫描器能抓住人工构造的四类结构问题：
+     空描述 / required 未声明 / minimum>maximum / 非法类型。
+  3. 扫描器能报出 handler 读取未声明参数、声明但未读取（drift 线索）。
+  4. 不误报：`**args` 整体转发、arm_manual 网关参数、`_helper(args)`。
+
+不联网、不调用任何工具。
+"""
+import os
+import sys
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MBDSDR_NO_HW", "1")
+os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "scripts"))
+
+import pytest  # noqa: E402
+
+import ai_tool_consistency as atc  # noqa: E402
+from mbdsdr_ai.config import AgentConfig  # noqa: E402
+from mbdsdr_ai.tool_registry import ToolRegistry  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def real_registry():
+    from mbdsdr_ai.agent import MBDSDRAgent
+    agent = MBDSDRAgent(AgentConfig(api_key="sk-test", model="test-model"))
+    return agent.tool_registry
+
+
+def _register(reg, name, description, properties, handler, required=None,
+              category="test"):
+    reg.register(
+        name=name, description=description,
+        parameters={"type": "object", "properties": properties,
+                    **({"required": required} if required is not None else {})},
+        handler=handler, category=category)
+
+
+def test_real_registry_has_no_structural_errors(real_registry):
+    report = atc.scan_registry(real_registry)
+    assert report["total"] >= 400
+    assert report["fatal_count"] == 0, report["fatal"]
+    assert report["ok"] is True
+    assert report["source_scanned"] >= 400
+
+
+def test_scanner_catches_structural_problems():
+    reg = ToolRegistry()
+    _register(reg, "empty_desc", "", {"x": {"type": "number"}}, lambda a: "ok")
+    _register(reg, "bad_required", "缺 required 声明",
+              {"x": {"type": "number"}}, lambda a: "ok", required=["y"])
+    _register(reg, "bad_range", "最小大于最大",
+              {"x": {"type": "number", "minimum": 10, "maximum": 1}},
+              lambda a: "ok")
+    _register(reg, "bad_type", "非法类型",
+              {"x": {"type": ["number", "wat"]}}, lambda a: "ok")
+
+    report = atc.scan_registry(reg)
+    assert report["ok"] is False
+    issue_tools = {item["tool"] for item in report["fatal"]}
+    assert {"empty_desc", "bad_required", "bad_range", "bad_type"} <= issue_tools
+    # enum 不是数组也算结构问题
+    _register(reg, "bad_enum", "枚举不是数组", {"x": {"type": "string", "enum": "a"}},
+              lambda a: "ok")
+    assert "bad_enum" in {item["tool"] for item in atc.scan_registry(reg)["fatal"]}
+
+
+def test_scanner_reports_undeclared_and_unread_args():
+    reg = ToolRegistry()
+
+    def drifted(args):
+        return str(args.get("bogus"))
+
+    _register(reg, "drifted", "handler 读取未声明参数",
+              {"declared": {"type": "string"}}, drifted)
+    report = atc.scan_registry(reg)
+    issues = " | ".join(item["issue"] for item in report["drift"]
+                        if item["tool"] == "drifted")
+    assert "bogus" in issues
+    assert "declared" in issues
+
+
+def test_scanner_does_not_flag_wholesale_forwarding_or_gate_args():
+    reg = ToolRegistry()
+
+    def forwards(args):
+        # 整体转发 + 网关参数：两者都不应报「声明但未读取」
+        return str(args)
+
+    _register(reg, "forwarder", "整体转发参数",
+              {"a": {"type": "number"}, "arm_manual": {"type": "boolean"}},
+              forwards)
+    report = atc.scan_registry(reg)
+    assert report["drift_count"] == 0
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-v"]))

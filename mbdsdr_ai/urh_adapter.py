@@ -549,12 +549,14 @@ def register_urh_tools(registry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "iq": {"type": "array", "items": {"type": "number"}},
+                "iq": {"type": "array", "items": {"type": "number"},
+                       "description": "交错复采样 [i0,q0,i1,q1,...]；与 complex_iq 任选其一"},
+                "complex_iq": {"type": "array", "items": {"type": "number"},
+                               "description": "urh_modulate 返回的 complex_iq（iq 的别名）"},
                 "modulation": {"type": "string",
                                "enum": sorted(set(_URH_MOD_ALIASES) | set(MODULATION_TYPES)),
                                "default": "ASK"},
             },
-            "required": ["iq"],
         },
         handler=_urh_demodulate,
         category="sdr_protocol",
@@ -565,11 +567,16 @@ def register_urh_tools(registry) -> None:
                      "（补全 URH 链路：调制 -> 解调 -> 位判决）。"
                      "调制名支持 BPSK/QPSK/8PSK/ASK/FSK/GFSK（自动归一）。"),
         parameters={"type": "object", "properties": {
-            "iq": {"type": "array", "items": {"type": "number"}},
+            "iq": {"type": "array", "items": {"type": "number"},
+                   "description": "交错复采样 [i0,q0,i1,q1,...]；与 complex_iq 任选其一"},
+            "complex_iq": {"type": "array", "items": {"type": "number"},
+                           "description": "urh_modulate 返回的 complex_iq（iq 的别名）"},
             "modulation": {"type": "string", "default": "ASK"},
             "samples_per_symbol": {"type": "integer", "default": 100},
             "bits_per_symbol": {"type": "integer"},
-        }, "required": ["iq"]},
+            "lock_skip": {"type": "integer",
+                          "description": "PSK 锁定跳过的符号数（默认 PSK=3，其余 0，上限 3）"},
+        }},
         handler=_urh_decode_iq, category="sdr_protocol")
 
     registry.register(

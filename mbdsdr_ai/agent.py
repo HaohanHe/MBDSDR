@@ -1547,6 +1547,8 @@ class MBDSDRAgent:
                     "hours": {"type": "number", "description": "预测时长小时，默认 24"},
                     "min_elevation": {"type": "number", "description": "最低仰角度，默认 10"},
                     "satellite_type": {"type": "string", "enum": ["all", "weather", "amateur"]},
+                    "frequency_hz": {"type": "number",
+                                     "description": "观测频率 Hz，用于多普勒频移范围计算（不传则用卫星默认频率）"},
                 },
             },
             handler=_passes,

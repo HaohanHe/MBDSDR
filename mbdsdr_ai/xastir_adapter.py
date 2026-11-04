@@ -277,6 +277,7 @@ def register_xastir_tools(registry) -> None:
         parameters={"type": "object", "properties": {
             "center_lat": {"type": "number"}, "center_lon": {"type": "number"},
             "radius_m": {"type": "number"},
+            "name": {"type": "string", "description": "围栏名称（可选）"},
             "points": {"type": "array", "items": {"type": "array"}},
         }, "required": ["center_lat", "center_lon", "radius_m"]},
         handler=_geofence,

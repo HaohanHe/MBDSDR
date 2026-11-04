@@ -1039,6 +1039,7 @@ def register_tool_registry(registry) -> None:
                 "observer_lat": {"type": "number"},
                 "observer_lon": {"type": "number"},
                 "duration_s": {"type": "number"},
+                "t_start": {"type": "number", "description": "起始 unix 秒；不传取当前时间"},
             },
         },
         handler=_pass_handler,
