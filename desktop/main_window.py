@@ -1174,18 +1174,19 @@ class MainWindow(QMainWindow):
         self.digital_sat_image_panel = None
         self._build_digital_decode_panels()
 
-        # ---- CarWith 面板注册表挂载 ----
+        # ---- CarWith 面板注册表挂载（记账挂载表；关窗时
+        # _release_runtime_resources 对称摘除，见 PanelRegistry.detach_widget）----
         reg = registry()
-        reg.attach_widget("spectrum", self.spectrum)
-        reg.attach_widget("rf_sky", self.sky_view)
-        reg.attach_widget("weather", self.weather_panel)
-        reg.attach_widget("module", self.module_panel)
-        reg.attach_widget("sat_track", self.sat_track_panel)
-        reg.attach_widget("new_spacetime", self.new_spacetime_panel)
-        reg.attach_widget("adsb", self.adsb_map_panel)
-        reg.attach_widget("control", self.control_panel)
-        reg.attach_widget("status", self.status_panel)
-        reg.attach_widget("ai", self.ai_panel)
+        self._panel_attachments = [
+            ("spectrum", self.spectrum), ("rf_sky", self.sky_view),
+            ("weather", self.weather_panel), ("module", self.module_panel),
+            ("sat_track", self.sat_track_panel),
+            ("new_spacetime", self.new_spacetime_panel),
+            ("adsb", self.adsb_map_panel), ("control", self.control_panel),
+            ("status", self.status_panel), ("ai", self.ai_panel),
+        ]
+        for pid, wgt in self._panel_attachments:
+            reg.attach_widget(pid, wgt)
 
         # 自由浮窗管理器已弃用（用户否决）；保留类实例避免 import / 预设 combo 崩。
         self.dock_layout = DockLayoutManager(self)
@@ -6496,9 +6497,9 @@ class MainWindow(QMainWindow):
             )
 
     def _release_runtime_resources(self) -> None:
-        """关闭窗口时回收本实例的全部运行期资源（定时器 / 全局钩子）。
+        """关闭窗口时回收本实例的全部运行期资源（定时器 / 全局钩子 / 全局单例引用）。
 
-        三件事，缺一件就会留下"关了还在跑"的残留：
+        五件事，缺一件就会留下"关了还在跑/还被引用"的残留：
 
         1. 停掉所有窗口级 QTimer。QTimer 不随 close() 停——只有 C++ 对象销毁才停。
            关窗不销毁对象（无 WA_DeleteOnClose）时，_sky_update_timer / _utc_timer
@@ -6510,6 +6511,8 @@ class MainWindow(QMainWindow):
         3. 断开全局触屏单例信号。touch_manager 是进程级单例，不 disconnect 的话
            模式一切换就会调用已关窗口的 _on_touch_mode_changed（该槽里还有
            app.setStyleSheet 全量重抛光，见 _apply_touch_stylesheet 的说明）。
+        4. 释放全局动作总线执行器（ui_actions / sky_actions 进程级单例）。
+        5. 摘除面板全局注册表挂载（PanelRegistry 进程级单例的强引用表）。
 
         全部 RuntimeError 兜底：C++ 侧已销毁时不再重复清理。
         """
@@ -6553,6 +6556,31 @@ class MainWindow(QMainWindow):
             touch_manager().touch_mode_changed.disconnect(
                 self._on_touch_mode_changed)
         except (RuntimeError, TypeError):
+            pass
+        # 4. 释放全局动作总线执行器。ui_actions / sky_actions 是进程级单例，
+        #    __init__ 把本窗口绑定方法赋给 bus.executor；不释放则单例永久强引用
+        #    本窗口——窗口连同三十余个子弹出件全部不可回收，长跑回归里窗口
+        #    逐个堆积，setStyleSheet 每次全量重抛光所有存活控件（二次方挂死）。
+        #    executor=None 是总线原生诚实空态（enqueue/drain 报 UNAVAILABLE）。
+        for attr in ("_ui_bus", "_sky_bus"):
+            bus = getattr(self, attr, None)
+            if bus is None:
+                continue
+            try:
+                if getattr(getattr(bus, "executor", None), "__self__",
+                           None) is self:
+                    bus.executor = None
+            except Exception:  # noqa: BLE001
+                pass
+        # 5. 摘除面板全局注册表挂载。单例 _widgets 强引用表握着本窗口十块
+        #    面板（attach_widget 注释说"不拥有生命周期"，强引用表即拥有）；
+        #    不摘则旧窗整棵子树连同 30 余个 Qt 弹件不可回收。条件摘除保证
+        #    新窗已接管的同 id 挂载不被旧窗关窗误摘。
+        try:
+            reg = registry()
+            for pid, wgt in getattr(self, "_panel_attachments", ()):
+                reg.detach_widget(pid, wgt)
+        except Exception:  # noqa: BLE001
             pass
 
     def closeEvent(self, event):

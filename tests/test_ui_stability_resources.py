@@ -203,6 +203,76 @@ class TestCloseReleasesGlobalHooks:
         assert hits["n"] == 0, \
             f"关窗后仍收到 touch_mode_changed {hits['n']} 次（信号未断开）"
 
+    def test_action_bus_executors_released_after_close(self, mw_closed):
+        """关窗后全局动作总线不得再把执行器指向本窗口的绑定方法。
+
+        回归钉扎：ui_actions.get_ui_bus() / sky_actions.get_sky_bus() 是进程级
+        单例，executor 存的是 self._execute_ui_action 这类绑定方法——不摘就是
+        一条从全局单例直通整棵窗口子树的强引用链，窗口永不回收。累积窗口让
+        每次新建窗口的 app 级 setStyleSheet 全量重抛光成本线性上涨，实测同进程
+        第 1 个窗口 2.8s、第 6 个 16.6s（tests/ 大套件整跑挂死的真因之一）。
+        总线原生支持 executor=None（enqueue/drain 诚实回 UNAVAILABLE），
+        所以摘除不会让 AI 侧崩，只会诚实报"界面未改变"。
+        """
+        from mbdsdr_ai.sky_actions import get_sky_bus
+        from mbdsdr_ai.ui_actions import get_ui_bus
+
+        # 反向用例：确认"本来有东西可摘"，否则下面的空态断言是空转
+        assert callable(getattr(mw_closed, "_execute_ui_action", None)), \
+            "窗口应定义 _execute_ui_action（否则本断言无意义）"
+        for name, bus in (("ui_bus", get_ui_bus()), ("sky_bus", get_sky_bus())):
+            ex = getattr(bus, "executor", None)
+            assert getattr(ex, "__self__", None) is not mw_closed, \
+                f"关窗后 {name}.executor 仍绑定本窗口（强引用未摘，窗口不可回收）"
+
+    def test_panel_registry_unmounted_after_close(self, mw_closed):
+        """关窗后面板全局注册表不得再持有本窗口的控件。
+
+        回归钉扎：PanelRegistry 是单例，_widgets 是强引用表；MainWindow 构造期
+        attach_widget 挂 10 个面板却从不摘除，旧窗整棵子树因而常驻。
+        """
+        from panel_registry import registry
+
+        attached = list(getattr(mw_closed, "_panel_attachments", ()))
+        # 反向用例：挂载记录非空，"全部已摘"才是有意义的空态而非空转
+        assert len(attached) >= 10, \
+            f"应记录 10 个面板挂载，实得 {len(attached)}（挂载记账缺失）"
+        reg = registry()
+        for pid, wgt in attached:
+            assert reg.widget(pid) is not wgt, \
+                f"关窗后注册表 {pid} 仍指向本窗口控件（未摘除）"
+
+    def test_detach_widget_only_removes_same_widget(self):
+        """detach_widget 是条件摘除：只摘"正是这个控件"的挂载。
+
+        钉住摘除的边界语义——旧窗口关闭时不得误摘新窗口已挂载的同 id 控件
+        （新旧窗口短暂共存是真实场景：布局恢复/重开窗口期间）。
+        """
+        from panel_registry import registry
+
+        reg = registry()
+        pid = "control"
+        saved = reg.widget(pid)
+        old_w, new_w = QLabel("old"), QLabel("new")
+        try:
+            reg.attach_widget(pid, new_w)      # 新窗口已挂载
+            reg.detach_widget(pid, old_w)      # 旧窗口来摘自己的
+            assert reg.widget(pid) is new_w, \
+                "旧窗口摘除误伤了新窗口的同 id 挂载（应条件摘除）"
+            reg.detach_widget(pid, new_w)      # 新窗口摘自己的
+            assert reg.widget(pid) is None, "自身摘除应生效"
+            # 边界：未挂载 id 传 None 不得抛 KeyError（get 缺失键返回 None，
+            # 只比 is 就会去 del 不存在的键）
+            reg.detach_widget(pid, None)
+            assert reg.widget(pid) is None
+        finally:
+            if saved is None:
+                reg.detach_widget(pid, reg.widget(pid))
+            else:
+                reg.attach_widget(pid, saved)
+            old_w.deleteLater()
+            new_w.deleteLater()
+
 
 # ===========================================================================
 # 3) 无后端 / 极端入参不崩

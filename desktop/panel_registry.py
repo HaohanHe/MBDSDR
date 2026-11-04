@@ -117,6 +117,17 @@ class PanelRegistry:
         if panel_id in self._specs:
             self._widgets[panel_id] = widget
 
+    def detach_widget(self, panel_id: str, widget: object) -> None:
+        """attach_widget 的对称摘除：仅当当前挂载正是该控件时才摘。
+
+        条件摘除防止旧窗口关闭时误摘新窗口已挂载的同 id 控件
+        （单例 _widgets 是强引用表，不摘则旧窗整棵子树不可回收）。
+        先判在不在表里：get 对缺失键返回 None，若只比 is 则
+        detach(未挂载 id, None) 会去 del 不存在的键（KeyError）。
+        """
+        if panel_id in self._widgets and self._widgets[panel_id] is widget:
+            del self._widgets[panel_id]
+
     def widget(self, panel_id: str) -> Optional[object]:
         """取已挂载的控件（未挂载返回 None）。"""
         return self._widgets.get(panel_id)

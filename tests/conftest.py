@@ -26,6 +26,7 @@ sessionfinish 钩子被硬退出抢跑会把汇总与失败详情整批吞掉（
 这是规避不是修复——修复属 PySide6 上游（或桌面端产品退出路径重排）。
 """
 import ctypes
+import gc
 import os
 import sys
 
@@ -41,6 +42,48 @@ os.environ.setdefault("MBDSDR_OFFLINE", "1")
 # 直通 pytest 退出码（1=测试失败 2=中断 4=用法错 5=无收集）——早先只按
 # testsfailed 映射 0/1，会把收集错误/中断静默映射成 0，CI 误判绿。
 _RESULT = {"exitstatus": 0}
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _recycle_top_level_widgets():
+    """每模块结束回收遗留顶层 widget（AGENTS.md 对策①）。
+
+    单例 QApplication 在同进程内累积前序文件留下的 widget，后续每次新建
+    窗口连带全量样式/布局重算（二次方变慢；实测孤立构造 2.8s，第 6 个
+    窗口 16.6s，AGENTS.md 记的极端值 11 分钟）。模块末回收让耗时平坦。
+
+    必须用 sendPostedEvents(DeferredDelete)，不能只 processEvents：
+    2026-11-04 实测三选一对拍——close+deleteLater+processEvents 之后
+    topLevelWidgets 纹丝不动（39→39，回收是空转）；同一批窗口改用
+    sendPostedEvents(None, QEvent.DeferredDelete) 直接清零（78→0）。
+    原因是 processEvents 不保证派发 DeferredDelete（该事件按投递时的
+    事件循环层级延后），deleteLater 因而永远悬着。
+
+    粒度停在 module 不能下沉到 function：test_app_mode.py /
+    test_desktop_ui_responsiveness.py 等把 MainWindow 做成模块级 fixture
+    整模块复用，逐测试强拆会把还在用的窗口删掉（后续测试撞
+    "wrapped C/C++ object deleted"）。autouse 同级 fixture 先建后拆，
+    故本回收跑在同模块其它模块级 fixture 拆除之后，不会抢跑。
+    """
+    yield
+    try:
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QApplication
+    except Exception:  # noqa: BLE001
+        return
+    app = QApplication.instance()
+    if app is None:
+        return
+    for w in list(app.topLevelWidgets()):
+        try:
+            w.close()
+            w.deleteLater()
+        except RuntimeError:
+            pass                            # C++ 侧已删，包装器悬空
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
+    app.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
 
 
 @pytest.hookimpl(trylast=True)
