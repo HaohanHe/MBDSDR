@@ -1364,6 +1364,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._tune_sat_name: Optional[str] = None
         # 跟踪环目标星名（跟踪中防止换星残留假状态）
         self._track_target_name: Optional[str] = None
+        # 调谐环诚实通知（外部拒启/自动停止时说明「只有视角、未在调谐」）
+        self._track_notice: str = ""
+        self._track_notice_until: float = 0.0
         # 云台后端是否可用（由主窗口 set_gimbal_available 注入）
         self._gimbal_available = False
         self._tune_refresh_timer = QTimer(self)
@@ -1608,6 +1611,36 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def camera_lock_target(self) -> Optional[str]:
         """当前摄像机锁定目标星名；None = 自由摄像机。"""
         return self._camera_lock
+
+    @property
+    def track_target_name(self) -> Optional[str]:
+        """当前调谐跟踪目标星名；None = 未在跟踪（与摄像机锁定独立）。"""
+        return self._track_target_name if self._track_btn.isChecked() else None
+
+    def _track_active_name(self) -> Optional[str]:
+        """跟踪环实际目标：勾选态 + 目标名；缺一即视为未跟踪。"""
+        if not self._track_btn.isChecked():
+            return None
+        return self._track_target_name or self._tune_sat_name
+
+    def loop_state_lines(self) -> List[str]:
+        """两个环的并排诚实状态（HUD 与状态卡共用，避免两处口径漂移）。
+
+        摄像机锁定与多普勒调谐语义独立：一个开着、另一个没开时必须明说
+        「仅视角 / 仅调谐」，不许让界面看起来两个都在跑。
+        """
+        cam = self._camera_lock
+        trk = self._track_active_name()
+        lines: List[str] = []
+        if cam:
+            lines.append(f"摄像机锁定: {cam}")
+        elif trk:
+            lines.append("摄像机: 未锁定（仅调谐）")
+        if trk:
+            lines.append(f"调谐跟踪: {trk}")
+        elif cam:
+            lines.append("调谐跟踪: 未开启（仅视角，未在调谐）")
+        return lines
 
     def set_camera_lock(self, name: Optional[str]) -> bool:
         """设定/解除摄像机锁定。成功锁定返回 True；目标不可解算返回 False。"""
@@ -1944,6 +1977,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if lat is None or lon is None:
             self._observer = None
             self.set_data_source("none")
+            self._on_station_lost()
         else:
             self._observer = {
                 "lat": float(lat),
@@ -1953,6 +1987,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if self._data_source == "none":
                 self.set_data_source("real")
         self.update()
+
+    def _on_station_lost(self) -> None:
+        """站址失效：两个环各自收口，不留单边假状态。
+
+        摄像机锁定依赖站址算 az/el；观测站没了就无法继续，必须解锁并说
+        原因。调谐跟踪同理停环（发信号让主窗口停 500ms 轮询与云台）。
+        """
+        if self._camera_lock is not None:
+            self._unlock_camera(
+                "摄像机已解锁：观测站未设置或已失效，无法继续跟踪")
+        self._stop_track_ui()
+        self._stop_gimbal_ui()
+        self._update_tune_button()
 
     def set_gnss_position(self, fix_dict: dict):
         """由真实串口 GNSS fix 驱动观测站坐标与数据来源标注。"""
@@ -1968,6 +2015,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         else:
             self._observer = None
             self.set_data_source("none")
+            self._on_station_lost()
 
     def get_observer(self) -> Optional[Dict[str, float]]:
         return self._observer
@@ -2425,6 +2473,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         meta = self._selected_sat_tle()
         gs_ready = self._observer is not None
         if meta is None or not gs_ready:
+            # 选中失效：两个环各自诚实收口（不把「数据没了」伪装成仍在跟）
+            if self._camera_lock is not None:
+                self._unlock_camera(
+                    "摄像机已解锁：观测站未设置或已失效，无法继续跟踪"
+                    if not gs_ready else
+                    "摄像机已解锁：选中目标轨道数据不可用")
             self._stop_track_ui()  # 选中失效：跟踪同步停，不残留假状态
             self._stop_gimbal_ui()  # 云台跟随随跟踪一起停
             self._tune_sat_name = None
@@ -2436,10 +2490,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._tune_refresh_timer.stop()
             return
         name = (self._selected_info or {}).get("title")
-        # 换星：若正在跟踪别的星，先停（停跟踪是主窗口环的职责，发信号）
+        # 换星：若正在跟踪别的星，先停（停跟踪是主窗口环的职责，发信号）。
+        # 确定语义：换目标不把调谐偷偷改到新星，必须由用户重新开启；
+        # 摄像机锁定则跟随选中（下方重锁），两者互不连带。
         if self._track_btn.isChecked() and name != self._track_target_name:
+            prev_target = self._track_target_name or "上一目标"
             self._stop_track_ui()
             self._stop_gimbal_ui()
+            self._track_notice = (
+                f"调谐跟踪已停止：目标由 {prev_target} 切换到 {name}，"
+                f"需重新开启跟踪")
+            self._track_notice_until = time.time() + 4.0
         # 换星：摄像机锁跟着选中走（Stellarium 语义：跟踪绑定选中对象）
         if self._camera_lock is not None and name != self._camera_lock:
             if not self.set_camera_lock(name):
@@ -2476,22 +2537,43 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._track_btn.setEnabled(self._compute_tune() is not None)
 
     def set_tracking_checked(self, on: bool) -> None:
-        """主窗口反向同步（过境自动停/启动失败时复位按钮），不发射信号。"""
+        """主窗口反向同步（过境自动停/启动失败时复位按钮），不发射信号。
+
+        诚实边界：若按钮原本是勾选态、外部却回写 False（无 SDR/启动被拒/
+        过境结束），说明「调谐环没在跑」；此时若摄像机仍锁定，必须讲清
+        「只有视角在跟，没在调谐」，不能两个环看起来都在跑。
+        """
+        was_checked = self._track_btn.isChecked()
         self._track_btn.blockSignals(True)
         self._track_btn.setChecked(on)
         self._track_btn.blockSignals(False)
         if on:
+            if self._track_target_name is None:
+                self._track_target_name = self._tune_sat_name
+            self._track_notice = ""
+            self._track_notice_until = 0.0
             self._track_btn.setEnabled(True)
             self._track_btn.show()
             self._position_tune_overlay()
         else:
+            target = self._track_target_name or self._tune_sat_name
             self._track_target_name = None
+            if was_checked and target:
+                self._track_notice = (
+                    f"调谐跟踪已停止（或未启动）：{target} 当前未在调谐，"
+                    + ("摄像机锁定仍保持（仅视角跟随，不会自动换频）"
+                       if self._camera_lock else "摄像机也未锁定"))
+                self._track_notice_until = time.time() + 4.0
+            # 跟踪环停了，云台跟随不能再勾着（避免看起来还在跟）
+            self._stop_gimbal_ui()
 
     def _on_track_toggled(self, checked: bool):
         """跟踪开关：check 时校验目录频点后发信号；uncheck 发停止。"""
         if not checked:
             self.track_toggled.emit(False, self._track_target_name or "", 0.0)
             self._track_target_name = None
+            # 云台跟随挂靠跟踪环：跟踪停 → 跟随停（不残留「已在跟」的勾选）
+            self._stop_gimbal_ui()
             return
         res = self._compute_tune()
         if res is None:
@@ -2502,6 +2584,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         name = str(res.get("satellite") or self._tune_sat_name or "")
         self._track_target_name = name
+        self._track_notice = ""
+        self._track_notice_until = 0.0
         self.track_toggled.emit(True, name, float(res.get("base_freq_hz", 0.0)))
 
     # ------------------------------------------------------------------ #
@@ -2976,7 +3060,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     # 左下信息卡尺寸（绘制与测试的唯一事实源，避免测试写死像素值漂移）
     INFO_CARD_W = 240
-    INFO_CARD_H = 186
+    INFO_CARD_H = 222
 
     def _dso_symbol_geometry(self, az: float, alt: float, dia_arcmin: float) \
             -> Tuple[float, bool]:
@@ -3411,11 +3495,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.restore()
 
     def _draw_camera_hud(self, painter: QPainter):
-        """摄像机锁定 HUD：锁定目标指示（常驻）+ 诚实退出通知（3s 淡出）。"""
-        locked = self._camera_lock is not None
-        notice_live = self._camera_notice and \
-            time.time() < self._camera_notice_until
-        if not locked and not notice_live:
+        """两个环的常驻状态 + 诚实通知（3-4s 淡出）。
+
+        摄像机锁定（视角）与调谐跟踪（多普勒/频率）语义独立；只要有一个
+        在跑就成对显示，另一个必须明说「未锁定 / 未开启」，避免看起来
+        两个都在跑。外部停跟踪/快转直贴等事件写进通知行。
+        """
+        lines = self.loop_state_lines()
+        now = time.time()
+        notice_live = self._camera_notice and now < self._camera_notice_until
+        track_notice_live = self._track_notice and now < self._track_notice_until
+        if not lines and not notice_live and not track_notice_live:
             return
         painter.save()
         _t = tokens()
@@ -3423,14 +3513,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         f.setPointSize(9)
         painter.setFont(f)
         y = 40.0
-        if locked:
+        for line in lines:
             painter.setPen(QColor(_t.COLORS["accent"]))
-            painter.drawText(QPointF(14.0, y),
-                             f"📷 摄像机锁定: {self._camera_lock}")
+            painter.drawText(QPointF(14.0, y), line)
             y += 18.0
         if notice_live:
-            painter.setPen(QColor(_t.COLORS["warning"]))
+            painter.setPen(QColor(_t.COLORS["danger"]))
             painter.drawText(QPointF(14.0, y), str(self._camera_notice))
+            y += 18.0
+        if track_notice_live:
+            painter.setPen(QColor(_t.COLORS["danger"]))
+            painter.drawText(QPointF(14.0, y), str(self._track_notice))
         painter.restore()
 
     def _draw_fov_control(self, painter: QPainter):
@@ -4808,6 +4901,29 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(ink if obs_txt != "未设置" else dim)
         painter.drawText(card_x + 64, y, obs_txt)
 
+        # 两个环的状态各占一行（与 HUD 同一事实源 _camera_lock/_track_btn）：
+        # 一个开着另一个没开时必须写出「未锁定 / 未开启」，不合并成一句
+        # 「跟踪中」冒充两个都在跑。
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "视角")
+        painter.setFont(self._mono_font)
+        cam = self._camera_lock
+        painter.setPen(ink if cam else dim)
+        painter.drawText(card_x + 52, y,
+                         f"锁定 {cam}" if cam else "未锁定")
+
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "调谐")
+        painter.setFont(self._mono_font)
+        trk = self._track_active_name()
+        painter.setPen(ink if trk else dim)
+        painter.drawText(card_x + 52, y,
+                         f"跟踪 {trk}" if trk else "未开启")
+
         # 图层诚实空态（复用状态卡既有状态位，不另起浮层）：
         # 本视图没有银河亮度数据，如实说「无数据·不提供」，不画装饰性光带。
         y += 18
@@ -5183,7 +5299,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._gimbal_btn.hide()
             self._camera_btn.hide()
             # 反选 = 选中对象消失：摄像机解锁（不停在无目标角度假跟踪）
-            self._unlock_camera("")
+            self._unlock_camera("摄像机已解锁：选中目标已取消（反选）")
             self._tune_btn.hide()
             self._doppler_label.hide()
             self._tune_refresh_timer.stop()
