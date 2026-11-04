@@ -409,9 +409,25 @@ class SatelliteTracker:
             "doppler_rate_hz_s": None,
             "corrected_freq_hz": None,
             "is_visible": False,
+            "station_untrusted": None,
+            "station_reasons": [],
+            "clock_warning": "",
         }
         if self.ground_station is None or self._diff is None or self._sat is None:
             return empty
+        # P11 红线：站址不可信（0,0/海上/缺失）时不跟踪、不输出方位
+        st = self.station_status()
+        if not st["trusted"]:
+            empty["station_untrusted"] = True
+            empty["station_reasons"] = st["reasons"]
+            return empty
+        try:
+            from .time_basis import get_clock_guard
+            cguard = get_clock_guard().observe()
+        except Exception:
+            cguard = {"type": "ok"}
+        clock_warning = (cguard.get("warning", "")
+                         if cguard.get("type") != "ok" else "")
 
         entry = next((c for c in self._catalog
                       if c["name"] == self._selected_name), {})
@@ -453,7 +469,20 @@ class SatelliteTracker:
             "accuracy_note": entry.get("accuracy_note", ""),
             "pass_eligible": entry.get("pass_eligible", False),
             "refresh_status": self._last_refresh_error or "ok",
+            "station_untrusted": False,
+            "station_reasons": [],
+            "clock_warning": clock_warning,
         }
+
+    def station_status(self) -> Dict[str, object]:
+        """当前观测者站址可信度（来源/海陆/拒绝原因）。"""
+        from .station import StationFix, evaluate_station
+        gs = self.ground_station
+        if gs is None:
+            return evaluate_station(StationFix(source="none"))
+        return evaluate_station(StationFix(
+            lat=gs.lat_deg, lon=gs.lon_deg, alt_m=gs.alt_m, source="user",
+            origin="GroundStation"))
 
     def is_visible(self, min_elevation: float = DEFAULT_MIN_ELEVATION_DEG) -> bool:
         """当前仰角是否 >= 阈值（默认 5°）。"""
@@ -471,6 +500,8 @@ class SatelliteTracker:
         """
         if self.ground_station is None or self._selected_name is None:
             return None
+        if not self.station_status()["trusted"]:
+            return None   # P11：站址不可信（0,0/海上）拒绝算过境
         entry = next((c for c in self._catalog if c["name"] == self._selected_name), None)
         if entry is None:
             return None

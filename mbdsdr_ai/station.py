@@ -43,6 +43,8 @@ SOURCE_PRIORITY: Dict[str, int] = {
 
 # 粗略大陆包围盒 (lat_min, lat_max, lon_min, lon_max)。
 _LAND_BOXES: Tuple[Tuple[float, float, float, float], ...] = (
+    (-90.0, -60.0, -180.0, 180.0), # 南极洲
+    (60.0, 84.0, -73.0, -12.0),    # 格陵兰
     (15.0, 72.0, -168.0, -52.0),   # 北美
     (-56.0, 12.5, -82.0, -34.0),   # 南美
     (36.0, 72.0, -10.0, 40.0),     # 欧洲
