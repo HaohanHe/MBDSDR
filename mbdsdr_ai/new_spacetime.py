@@ -310,7 +310,17 @@ def get_ntp_time(server: str = "ntp.aliyun.com", timeout: float = 3.0) -> Tuple[
     """
     从 NTP 服务器获取时间。
     返回：(UTC时间, 往返延迟ms)
+
+    ``MBDSDR_OFFLINE=1`` 时明确抛 :class:`NTPError`（不联网、不假装成功）；
+    调用方应回退系统时间并如实标注时间源。
     """
+    try:
+        from .orbit import _network_disabled
+    except ImportError:  # 独立脚本运行
+        from orbit import _network_disabled
+    if _network_disabled():
+        raise NTPError("离线模式（MBDSDR_OFFLINE）：NTP 授时需要联网，"
+                       "已拒绝（时间源保持系统时钟）")
     try:
         client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         client.settimeout(timeout)

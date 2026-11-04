@@ -48,7 +48,21 @@ def simulation_clock_offset() -> Dict:
 
 
 def ntp_offset(server: str = "ntp.aliyun.com", port: int = 123, timeout: float = 3.0) -> Dict:
-    """查询 NTP 服务器，返回本地时钟与 NTP 时间的偏差（秒，正=本地慢）。"""
+    """查询 NTP 服务器，返回本地时钟与 NTP 时间的偏差（秒，正=本地慢）。
+
+    ``MBDSDR_OFFLINE=1`` 时不发起任何网络请求，返回诚实错误信封（离线时
+    时间源保持系统时钟，不做假校时）。
+    """
+    try:
+        from .orbit import _network_disabled
+    except ImportError:  # 独立脚本运行
+        from orbit import _network_disabled
+    if _network_disabled():
+        return {
+            "ntp_server": server, "reachable": False, "offline": True,
+            "error": ("离线模式（MBDSDR_OFFLINE）：NTP 授时需要联网，已拒绝；"
+                      "时间源保持系统时钟（未校准）"),
+        }
     pkt = b"\x1b" + 47 * b"\0"
     t0 = time.time()  # 发送前本地时间
     try:

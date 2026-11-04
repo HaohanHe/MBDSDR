@@ -29,6 +29,12 @@ class _FakeResp:
         return self._payload
 
 
+@pytest.fixture(autouse=True)
+def _allow_mocked_network(monkeypatch):
+    """本模块用桩替换 requests.get 验证错误载荷，需绕过 root conftest 的离线门。"""
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+
+
 @pytest.fixture
 def fake_get(monkeypatch):
     import requests

@@ -201,6 +201,59 @@ def test_refresh_offline_mode_makes_no_request(monkeypatch):
     assert t.tle_date == BUILTIN_TLE_DATE
 
 
+def test_refresh_uses_connect_read_timeout_and_hard_deadline(monkeypatch):
+    """缺口②：requests 超时必须传 (connect, read) 元组（覆盖连接/读取）。"""
+    t = SatelliteTracker(_beijing_gs())
+    seen = {}
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+
+    class _Resp:
+        text = ""
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    class _Req:
+        @staticmethod
+        def get(url, timeout=None, **kwargs):
+            seen["timeout"] = timeout
+            return _Resp()
+
+    monkeypatch.setitem(sys.modules, "requests", _Req)
+    assert t.update_tle_from_celestrak(timeout=2.0, hard_deadline_s=3.0) == 0
+    assert seen["timeout"] == (2.0, 2.0)
+
+
+def test_refresh_dns_hang_returns_explicit_timeout_within_deadline(monkeypatch):
+    """缺口②：DNS/getaddrinfo 卡死时，硬截止内返回明确「超时」失败，不挂住。"""
+    import threading
+    import time
+
+    t = SatelliteTracker(_beijing_gs())
+    release = threading.Event()
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+
+    class _Req:
+        @staticmethod
+        def get(*a, **k):
+            release.wait(30.0)          # 模拟 DNS 黑洞：requests timeout 不管用
+            raise OSError("released")
+
+    monkeypatch.setitem(sys.modules, "requests", _Req)
+    t0 = time.monotonic()
+    n = t.update_tle_from_celestrak(timeout=0.2, hard_deadline_s=0.4)
+    elapsed = time.monotonic() - t0
+    release.set()
+
+    assert n == 0
+    assert elapsed < 2.0                # 在上限内返回，不无限阻塞
+    assert "超时" in t.last_refresh_error
+    assert "联网刷新失败" in t.last_refresh_error
+    assert t.tle_date == BUILTIN_TLE_DATE      # 未假装刷新成功
+    assert len(t.list_satellites()) >= 5       # 内置目录保留不丢
+
+
 def test_refresh_identity_mismatch_is_not_adopted(monkeypatch):
     """25338 的目录名是 NOAA 15，但下拉数据里该编号叫 ATLAS 残骸：
     不采用、不重命名、不覆盖轨道，标 mismatch 并记录冲突。"""

@@ -113,10 +113,15 @@ class TLEManager:
 
     # ------------------------------------------------------------------ HTTP
     def _http_get(self, url: str) -> str:
-        """带超时的 GET，User-Agent 标识本应用。任何异常向上抛出。"""
+        """带硬截止的 GET，User-Agent 标识本应用。任何异常向上抛出。
+
+        用 :func:`orbit._bounded_urlopen`（daemon 线程 + join 硬截止），
+        因为 urllib 的 timeout 不约束 getaddrinfo：DNS 黑洞下会无限阻塞。
+        """
+        from .orbit import _bounded_urlopen
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=self.timeout, context=ctx) as resp:
+        resp = _bounded_urlopen(req, self.timeout, self.timeout + 5.0)
+        with resp:
             raw = resp.read()
         return raw.decode("utf-8", errors="replace")
 
@@ -221,29 +226,36 @@ class TLEManager:
         entry.pass_eligible = bool(fresh["pass_eligible"])
 
     def fetch_group(self, url: str) -> List[TLEEntry]:
-        """从 celestrak 群组 URL（如 gp.php?GROUP=weather&FORMAT=tle）拉取整组，解析所有 3 行块。失败返回 []。
+        """从 celestrak 群组 URL（如 gp.php?GROUP=weather&FORMAT=tle）拉取整组。
 
-        P12：``MBDSDR_OFFLINE=1`` 时直接返回 []（不联网、不假装成功），
-        原因记入 ``last_group_error`` 供诊断/UI 读取。
+        取数与限速/退避/健康度统一委托 :mod:`mbdsdr_ai.tle_fetch`（与单星
+        共用同一源账本）：同源最小间隔会排队，失败按指数退避，退避期内不再
+        请求。离线时**明确拒绝**并说明群组无本地缓存；失败原因始终记入
+        ``last_group_error``，不静默返回空。
         """
-        from .orbit import _network_disabled
-        if _network_disabled():
-            self._last_group_error = (
-                "离线模式（MBDSDR_OFFLINE），未发起群组拉取")
+        res = self._store().fetch_group(url)
+        if not res.get("entries"):
+            self._last_group_error = (str(res.get("refresh_error") or "")
+                                      or "群组响应无可解析 TLE")
             return []
-        try:
-            text = self._http_get(url)
-        except Exception as e:  # noqa: BLE001 - 失败如实留痕，返回诚实空态
-            self._last_group_error = f"群组拉取失败（{type(e).__name__}: {e}）"
-            return []
-        self._last_group_error = ""
-        now = time.time()
-        entries = self.parse_tle_text(text)
-        for e in entries:
-            e.source = "celestrak"
-            e.fetched_at = now
+        now = float(res.get("fetched_at") or time.time())
+        entries: List[TLEEntry] = []
+        for row in res["entries"]:
+            e = TLEEntry(
+                name=str(row["name"]), line1=str(row["line1"]),
+                line2=str(row["line2"]), catnr=int(row["catnr"]),
+                source="celestrak", fetched_at=now,
+                refresh_status="network",
+            )
+            if not (self.validate_checksum(e.line1)
+                    and self.validate_checksum(e.line2)):
+                continue
+            self._annotate(e)
             self._mem[e.catnr] = e
             self._write_disk(e)
+            entries.append(e)
+        self._last_group_error = (
+            "" if entries else "群组响应中无通过校验和的 TLE")
         return entries
 
     def get(self, catnr: int) -> Optional[TLEEntry]:

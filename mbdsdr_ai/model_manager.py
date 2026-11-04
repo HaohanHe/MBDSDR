@@ -121,6 +121,14 @@ class ModelManager:
         if not force_refresh and self.available_models and len(self.available_models) > len(BUILTIN_MODELS):
             return self.available_models
 
+        # 离线门：不联网，直接给内置列表并如实标注来源（内置列表是本地的、静态的）
+        from .orbit import _network_disabled
+        if _network_disabled():
+            self._last_error = (
+                "离线模式（MBDSDR_OFFLINE）：未查询模型列表，"
+                "使用内置模型列表（本地静态，无时效问题）")
+            return self.available_models
+
         if not self.api_key:
             self._last_error = "api_key 为空，使用内置模型列表"
             return self.available_models
@@ -225,6 +233,19 @@ class ModelManager:
         """
         start_time = time.time()
         self.stats.total_calls += 1
+
+        # 离线门：模型 API 纯在线，无本地替代；明确拒绝而不是重试到超时
+        from .orbit import _network_disabled
+        if _network_disabled():
+            err = ("离线模式（MBDSDR_OFFLINE）：模型 API 需要联网，"
+                   "已拒绝调用（本地无模型可替代）")
+            self.stats.failed_calls += 1
+            self._last_error = err
+            return {
+                "success": False, "content": "", "tool_calls": [], "usage": {},
+                "model": self.model, "latency_ms": 0.0,
+                "error": err, "offline": True,
+            }
 
         url = f"{self.base_url}/chat/completions"
         headers = {
@@ -333,6 +354,22 @@ class ModelManager:
         """
         start_time = time.time()
         self.stats.total_calls += 1
+
+        # 离线门：与 chat 同一口径，不发起任何请求
+        from .orbit import _network_disabled
+        if _network_disabled():
+            err = ("离线模式（MBDSDR_OFFLINE）：流式模型 API 需要联网，"
+                   "已拒绝调用（本地无模型可替代）")
+            self.stats.failed_calls += 1
+            self._last_error = err
+            yield {
+                "done": True, "success": False, "content": "",
+                "reasoning_content": "", "tool_calls": [], "usage": {},
+                "model": self.model, "latency_ms": 0.0,
+                "error": err, "offline": True,
+            }
+            return
+
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",

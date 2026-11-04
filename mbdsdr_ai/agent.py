@@ -560,6 +560,12 @@ class MBDSDRAgent:
             url = (args.get("url") or "").strip()
             if not url:
                 return ToolResult(False, "url 不能为空")
+            from mbdsdr_ai.orbit import _network_disabled
+            if _network_disabled():
+                return ToolResult(
+                    False,
+                    "离线模式（MBDSDR_OFFLINE）：web_fetch_url 需要联网，已拒绝；"
+                    "本工具无本地缓存可降级（离线请用本地文件/SDR 数据）")
             p = urllib.parse.urlparse(url)
             if p.scheme not in ("http", "https"):
                 return ToolResult(False, f"只允许 http/https，收到 {p.scheme!r}")
@@ -571,12 +577,15 @@ class MBDSDRAgent:
                 return ToolResult(False, f"安全限制：拒绝访问内网/回环地址 {host!r}")
             max_bytes = min(int(args.get("max_bytes", 200000)), 500000)
             try:
+                from mbdsdr_ai.orbit import _bounded_urlopen
                 req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})
-                with urllib.request.urlopen(req, timeout=15) as r:
+                r = _bounded_urlopen(req, 15.0, 20.0)  # 硬截止覆盖 DNS 阶段
+                with r:
+                    status = getattr(r, "status", 0)
                     raw = r.read(max_bytes + 1)
                     truncated = len(raw) > max_bytes
                     text = raw[:max_bytes].decode("utf-8", "replace")
-                return ToolResult(True, f"HTTP {r.status} 取自 {url}\n{text}"
+                return ToolResult(True, f"HTTP {status} 取自 {url}\n{text}"
                                           + ("\n...[截断]" if truncated else ""))
             except Exception as e:  # noqa: BLE001
                 return ToolResult(False, f"fetch 失败: {e}")
@@ -601,6 +610,12 @@ class MBDSDRAgent:
             url = (args.get("url") or "").strip()
             if not url:
                 return ToolResult(False, "url 不能为空")
+            from mbdsdr_ai.orbit import _network_disabled
+            if _network_disabled():
+                return ToolResult(
+                    False,
+                    "离线模式（MBDSDR_OFFLINE）：git clone 需要联网，已拒绝；"
+                    "工作区 repos/ 下已有的仓库仍可直接使用")
             # 安全：只允许 https，拒绝 file://、ext::、ssh scp 等可执行任意命令的 scheme
             if not (url.startswith("https://") or url.startswith("http://")):
                 return ToolResult(False,
@@ -1717,6 +1732,12 @@ class MBDSDRAgent:
                 r = ntp_offset(server, timeout=float(args.get("timeout", 3) or 3))
             except Exception as e:
                 return ToolResult(False, f"NTP 查询失败: {e}")
+            # 不可达/离线时不能报 success=True（那会变成「假装成功」）
+            if not r.get("reachable"):
+                return ToolResult(
+                    False,
+                    f"NTP 查询失败: {r.get('error') or '服务器不可达'}",
+                    data={"ntp": r})
             return ToolResult(True, json.dumps(r, ensure_ascii=False, default=str))
 
         self.tool_registry.register(
@@ -4285,6 +4306,8 @@ class MBDSDRAgent:
             for m in models:
                 weak = " [弱模型]" if m.is_weak else ""
                 lines.append(f"  - {m.id}{weak}")
+            if getattr(self.model_manager, "_last_error", None):
+                lines.append(f"\n注: {self.model_manager._last_error}")
             return "\n".join(lines)
 
         if cmd.startswith("/switch ") or cmd.startswith("/切换 "):

@@ -20,12 +20,33 @@ import requests
 from typing import Dict, List, Optional
 
 
+def _offline() -> bool:
+    """与 TLE 链路同一离线门（MBDSDR_OFFLINE=1/true/yes/on）。"""
+    try:
+        from .orbit import _network_disabled
+    except ImportError:  # 独立脚本运行
+        from orbit import _network_disabled
+    return _network_disabled()
+
+
+def _offline_refusal(feature: str) -> Dict:
+    """离线时的统一诚实拒绝信（明确说缺什么，不返回假数据/空成功）。"""
+    return {
+        "success": False,
+        "offline": True,
+        "error": (f"离线模式（MBDSDR_OFFLINE）：{feature} 需要联网，已拒绝；"
+                  "这些公开 API 无本地缓存可降级"),
+    }
+
+
 # ========================================================================
 # 卫星API
 # ========================================================================
 
 def get_iss_position() -> Dict:
     """获取ISS（国际空间站）当前位置。"""
+    if _offline():
+        return _offline_refusal("ISS 实时位置（open-notify）")
     try:
         resp = requests.get("http://api.open-notify.org/iss-now.json", timeout=5)
         data = resp.json()
@@ -46,6 +67,8 @@ def get_iss_position() -> Dict:
 
 def get_people_in_space() -> Dict:
     """获取当前太空人数。"""
+    if _offline():
+        return _offline_refusal("太空人数（open-notify）")
     try:
         resp = requests.get("http://api.open-notify.org/astros.json", timeout=5)
         data = resp.json()
@@ -73,6 +96,8 @@ def get_people_in_space() -> Dict:
 
 def get_weather(lat: float, lon: float) -> Dict:
     """获取指定位置天气（Open-Meteo免费API）。"""
+    if _offline():
+        return _offline_refusal("实时天气（open-meteo）")
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
         resp = requests.get(url, timeout=5)
@@ -103,6 +128,8 @@ def get_weather(lat: float, lon: float) -> Dict:
 
 def get_aircraft_nearby(lat: float, lon: float, radius_km: float = 50) -> Dict:
     """获取附近飞机位置（OpenSky Network免费API）。"""
+    if _offline():
+        return _offline_refusal("附近飞机（OpenSky ADS-B）")
     try:
         # 计算边界框
         dlat = radius_km / 111.0

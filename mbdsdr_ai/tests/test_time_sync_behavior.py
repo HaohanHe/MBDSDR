@@ -61,6 +61,11 @@ def _ntp_packet(rx_sec: int, tx_sec: int) -> bytes:
 
 
 # ─────────────────────────── ntp_offset ───────────────────────────
+@pytest.fixture(autouse=True)
+def _allow_loopback_ntp(monkeypatch):
+    """本模块用本机 UDP NTP 服务验证校时，需绕过全局 MBDSDR_OFFLINE 门。"""
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+
 
 def test_ntp_uses_transmit_timestamp_not_receive():
     port = _serve_once(_ntp_packet(RX_SEC, TX_SEC))

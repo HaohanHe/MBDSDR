@@ -58,12 +58,17 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 __all__ = [
     "DEFAULT_SOURCE",
     "SCHEDULED_INTERVAL_S",
+    "GROUP_SCOPE_KEY",
     "FAILURE_LABELS",
     "FetchPolicy",
     "SourceHealth",
     "TleFetcher",
     "classify_failure",
 ]
+
+# 群组拉取与单星拉取共用同一「源」限速/退避账本；群组本身没有 CATNR，
+# 用保留键参与对象级退避判定（不会与真实 NORAD 编号冲突）。
+GROUP_SCOPE_KEY = -1
 
 DEFAULT_SOURCE = "celestrak"
 SCHEDULED_INTERVAL_S = 6 * 3600.0
@@ -235,6 +240,48 @@ def _parse_tle_body(body: Any, catnr: int) -> Tuple[Optional[Tuple[str, str, str
     except (ValueError, IndexError):
         return None, classify_failure(body=text)
     return (name or f"NORAD {catnr}", line1, line2), None
+
+
+def _parse_tle_group(body: Any) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """解析多星群组响应 -> ([{catnr,name,line1,line2}], 失败分类)。
+
+    只做结构解析（名称 + "1 "/"2 " 成对且编号一致）；校验和等业务校验由
+    调用方决定。无任何可解析块时给出空响应/解析失败分类，绝不假装成功。
+    """
+    text = body.decode("utf-8", "replace") if isinstance(body, (bytes, bytearray)) else str(body or "")
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return [], classify_failure(body="")
+    entries: List[Dict[str, Any]] = []
+    seen: set = set()
+    i, n = 0, len(lines)
+    while i < n - 1:
+        if lines[i].startswith("1 ") and lines[i + 1].startswith("2 "):
+            try:
+                catnr = int(lines[i + 1][2:7].strip())
+                if int(lines[i][2:7].strip()) != catnr:
+                    raise ValueError("line1/line2 编号不一致")
+            except (ValueError, IndexError):
+                i += 1
+                continue
+            if catnr in seen:
+                i += 2
+                continue
+            seen.add(catnr)
+            name = (lines[i - 1] if i > 0
+                    and not lines[i - 1].startswith(("1 ", "2 ")) else "")
+            entries.append({
+                "catnr": catnr,
+                "name": name or f"NORAD {catnr}",
+                "line1": lines[i],
+                "line2": lines[i + 1],
+            })
+            i += 2
+            continue
+        i += 1
+    if not entries:
+        return [], classify_failure(body=text)
+    return entries, None
 
 
 class TleFetcher:
@@ -517,6 +564,73 @@ class TleFetcher:
             "offline": False, "offline_label": "",
             "failure_kind": "", "failure_label": "",
             "health": health(),
+        }
+
+    # ------------------------------------------------------------- 群组取数
+    def fetch_group(self, url: str,
+                    now: Optional[float] = None) -> Dict[str, Any]:
+        """按群组 URL 拉取整组 TLE，与单星共用限速/退避/健康度账本。
+
+        离线时**明确拒绝**（群组没有本地缓存索引，无法标注时效），不做
+        「静默返回空」；退避期内也不发请求，直接给出剩余秒数。成功返回
+        ``refresh_status="network"`` 与解析出的条目；失败返回
+        ``refresh_status="unavailable"`` + 分类 + 退避秒数。
+        """
+        ref = self._clock() if now is None else float(now)
+        offline = bool(self._offline())
+        health = lambda: self.health.report(ref, self.policy, offline=offline)  # noqa: E731
+
+        if offline:
+            return {
+                "entries": [], "refresh_status": "offline",
+                "refresh_error": ("离线模式（MBDSDR_OFFLINE），未发起群组拉取；"
+                                  "群组无本地缓存，单星数据请走单星缓存路径"),
+                "failure_kind": "offline", "failure_label": "离线",
+                "retry_in_s": 0.0, "offline": True, "health": health(),
+            }
+
+        decision = self.attempt_decision(GROUP_SCOPE_KEY, ref)
+        if not decision["allowed"] and decision["reason"] == "rate_limited":
+            ref = self._wait_for_slot(ref)
+        elif not decision["allowed"]:
+            return {
+                "entries": [], "refresh_status": "unavailable",
+                "refresh_error": (f"群组拉取退避中（{decision['reason']}，还剩 "
+                                  f"{decision['retry_in_s']:.0f}s），不重试"),
+                "failure_kind": decision["reason"], "failure_label": "",
+                "retry_in_s": decision["retry_in_s"], "offline": False,
+                "health": health(),
+            }
+
+        ref = self._wait_for_slot(ref)
+        self.health.last_attempt_at = ref
+        retry_after: Optional[float] = None
+        try:
+            body = self._opener(url, self.policy.request_timeout_s,
+                                self.policy.hard_deadline_s)
+            entries, failure = _parse_tle_group(body)
+        except Exception as e:  # noqa: BLE001 - 网络/DNS/超时统一分类
+            entries, failure = [], classify_failure(exc=e)
+            retry_after = self._retry_after_s(e)
+
+        if failure is not None:
+            wait = self._record_failure(GROUP_SCOPE_KEY, ref, failure, retry_after)
+            return {
+                "entries": [], "refresh_status": "unavailable",
+                "refresh_error": (f"群组拉取失败：{failure['label']}"
+                                  f"（{failure['detail']}）；退避 {wait:.0f}s"),
+                "failure_kind": failure["kind"],
+                "failure_label": failure["label"],
+                "retry_in_s": round(wait, 1), "offline": False,
+                "health": health(),
+            }
+
+        self._record_success(ref)
+        return {
+            "entries": entries, "refresh_status": "network",
+            "refresh_error": "", "failure_kind": "", "failure_label": "",
+            "retry_in_s": 0.0, "offline": False, "fetched_at": ref,
+            "url": url, "health": health(),
         }
 
     # ------------------------------------------------------------- 刷新调度

@@ -39,6 +39,8 @@ _FALLBACK_NAME = "vsop87_astropy[回退]" if _HAS_ASTROPY else "none"
 @pytest.fixture(autouse=True)
 def _isolated_ephemeris_dir(tmp_path, monkeypatch):
     """把星历缓存目录重定向到临时目录，避免污染真实 ~/.mbdsdr。"""
+    # 本模块用假 urlopen 验证下载/热切换逻辑，需绕过 root conftest 的离线门
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
     eph_dir = str(tmp_path / "ephemeris")
     monkeypatch.setattr(s, "EPHEMERIS_DIR", eph_dir)
     monkeypatch.setattr(s, "DE421_PATH", os.path.join(eph_dir, "de421.bsp"))
@@ -69,7 +71,7 @@ def test_ephemeris_dir_creation(monkeypatch):
     assert not os.path.isdir(s.EPHEMERIS_DIR)
     created = {}
 
-    def _fake_urlopen(req, timeout=0):
+    def _fake_urlopen(req, timeout=0, **kwargs):
         created["made"] = os.path.isdir(s.EPHEMERIS_DIR)
         return _FakeResp()
 
@@ -89,7 +91,7 @@ def test_download_with_mock(monkeypatch):
     """mock urlopen 验证下载→校验→原子重命名，返回路径。"""
     calls = {"urls": []}
 
-    def _fake_urlopen(req, timeout=0):
+    def _fake_urlopen(req, timeout=0, **kwargs):
         calls["urls"].append(req.full_url)
         return _FakeResp()
 
@@ -210,7 +212,7 @@ def test_invalid_local_file_triggers_redownload(monkeypatch):
 
     called = {"n": 0}
 
-    def _fake_urlopen(req, timeout=0):
+    def _fake_urlopen(req, timeout=0, **kwargs):
         called["n"] += 1
         return _FakeResp()
 

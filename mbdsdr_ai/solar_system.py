@@ -142,20 +142,35 @@ def _file_valid(path: str) -> bool:
         return False
 
 
+def _network_disabled() -> bool:
+    """与 TLE 链路同一离线门（延迟导入避免模块环）。"""
+    try:
+        from .orbit import _network_disabled as _nd
+    except ImportError:  # 独立脚本运行
+        from orbit import _network_disabled as _nd
+    return _nd()
+
+
 def download_de421(timeout: int = 60) -> Optional[str]:
     """下载（或复用本地缓存）de421.bsp，返回本地路径；失败返回 None，不抛异常。
 
     - 若 ``~/.mbdsdr/ephemeris/de421.bsp`` 已存在且 > 10MB，直接返回路径（不重复下载）。
     - 否则下载到同目录的 ``.part`` 临时文件，成功后原子重命名为 ``de421.bsp``。
     - 主地址失败自动尝试镜像；任意异常都会清理临时文件并返回 None。
-    - ``timeout`` 为单条连接超时（秒），默认 60s。
+    - ``timeout`` 为单条连接超时（秒），默认 60s；DNS/连接阶段另有 5s 墙钟余量。
+
+    ``MBDSDR_OFFLINE=1`` 时：本地缓存仍可直接复用（离线可用）；无缓存则
+    **不发起任何请求**，返回 None——由调用方如实报告「降级到本地近似历表」。
     """
     os.makedirs(EPHEMERIS_DIR, exist_ok=True)
     target = os.path.join(EPHEMERIS_DIR, DE421_FILENAME)
 
-    # 缓存命中：直接返回
+    # 缓存命中：直接返回（离线也成立）
     if _file_valid(target):
         return target
+
+    if _network_disabled():
+        return None
 
     tmp = target + ".part"
     headers = {"User-Agent": "mbdsdr-ephemeris/1.0 (+https://github.com)"}
@@ -164,7 +179,13 @@ def download_de421(timeout: int = 60) -> Optional[str]:
             if os.path.exists(tmp):
                 os.remove(tmp)
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp, open(tmp, "wb") as f:
+            # 硬截止覆盖 DNS 阶段：urllib 的 timeout 不管 getaddrinfo
+            try:
+                from .orbit import _bounded_urlopen
+            except ImportError:  # 独立脚本运行
+                from orbit import _bounded_urlopen
+            resp = _bounded_urlopen(req, float(timeout), float(timeout) + 5.0)
+            with resp, open(tmp, "wb") as f:
                 shutil.copyfileobj(resp, f, length=1024 * 256)
             # 下载完整性校验
             if not _file_valid(tmp):
@@ -266,6 +287,7 @@ class _EphemerisBackend:
         self._astropy = None             # astropy 模块引用
         self._lock = threading.RLock()
         self._download_thread: Optional[threading.Thread] = None
+        self.last_download_error: str = ""   # 下载失败/离线原因（供诊断与 UI）
         self._init()
         if auto_download:
             self._maybe_start_background_download()
@@ -315,11 +337,21 @@ class _EphemerisBackend:
     # -- 后台下载与热切换 ------------------------------------------
 
     def _maybe_start_background_download(self) -> None:
-        """若本地无 de421.bsp，启动 daemon 线程后台下载（不阻塞）。"""
+        """若本地无 de421.bsp，启动 daemon 线程后台下载（不阻塞）。
+
+        离线模式下**不启动线程**：无本地星历就用本地近似历表，并把「缺
+        de421.bsp + 当前精度」写进 ``last_download_error`` 供 UI/诊断展示。
+        """
         with self._lock:
             if self.kind == "de421_bsp":
                 return  # 已有高精度后端，无需下载
             if self._download_thread is not None and self._download_thread.is_alive():
+                return
+            if _network_disabled():
+                if not self.last_download_error:
+                    self.last_download_error = (
+                        "离线模式（MBDSDR_OFFLINE）：本地无 de421.bsp，未发起下载；"
+                        "高精度星历不可用，已用本地近似历表（太阳 ~1″、月球 ~10″）")
                 return
             th = threading.Thread(
                 target=self._download_worker,
@@ -332,9 +364,13 @@ class _EphemerisBackend:
     def _download_worker(self) -> None:
         try:
             path = download_de421()
-        except Exception:
+        except Exception as e:  # noqa: BLE001 - 后台线程绝不炸进程
+            self.last_download_error = f"de421 下载异常（{type(e).__name__}: {e}）"
             path = None
         if not path:
+            if not self.last_download_error:
+                self.last_download_error = (
+                    "de421.bsp 下载失败（网络不可达或校验不通过），沿用本地近似历表")
             return  # 下载失败：保持当前回退后端，不抛异常
         try:
             handle = load_de421_bsp(path)

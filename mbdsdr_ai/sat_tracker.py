@@ -113,6 +113,40 @@ _BUILTIN_TLES: List[List[str]] = [
 # 默认过境结束阈值（仰角，度）。
 DEFAULT_MIN_ELEVATION_DEG = 5.0
 
+# TLE 刷新：请求（DNS+连接+读）墙钟硬截止，覆盖 requests timeout 管不到的
+# getaddrinfo 阶段（黑洞网络下 DNS 可无限阻塞）。
+_TLE_HARD_DEADLINE_MARGIN_S = 5.0
+
+
+def _bounded_requests_get(url: str, timeout_s: float, hard_deadline_s: float):
+    """daemon 线程内 requests.get，join 硬截止；超时抛 TimeoutError。
+
+    ``timeout=(connect, read)`` 只管 socket 阶段，DNS 解析不在其内，故外层
+    再用墙钟硬截止兜底，保证调用方在有限时间内拿到明确的「超时」失败，
+    而不是挂住整个 UI/进程。
+    """
+    import threading
+
+    import requests
+
+    box: Dict[str, object] = {}
+
+    def _run() -> None:
+        try:
+            box["r"] = requests.get(url, timeout=(timeout_s, timeout_s))
+        except Exception as e:  # noqa: BLE001 - 原样上抛给调用方
+            box["e"] = e
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(hard_deadline_s)
+    if worker.is_alive():
+        raise TimeoutError(
+            f"联网刷新超时（>{hard_deadline_s:.1f}s，含 DNS 解析）：{url}")
+    if "e" in box:
+        raise box["e"]  # type: ignore[misc]
+    return box["r"]
+
 
 def _split_tle_blocks(text: str) -> List[List[str]]:
     """把多行 TLE 文本切分成 [(name, line1, line2), ...] 块。
@@ -229,13 +263,18 @@ class SatelliteTracker:
                 count += 1
         return count
 
-    def update_tle_from_celestrak(self, timeout: float = 5.0) -> int:
+    def update_tle_from_celestrak(self, timeout: float = 5.0,
+                                  hard_deadline_s: Optional[float] = None) -> int:
         """从 Celestrak active.txt 在线刷新内置目录的 TLE。
 
         只刷新目录里已有 NORAD 编号对应的条目（保持下拉列表规模可控）。
         网络失败/超时/返回异常时保留旧值并记入 ``last_refresh_error``
         （不静默），返回 0。编号下的对象名与目录声明不符时**不采用**新数据，
         标记 ``identity_status="mismatch"`` 并记入 ``identity_conflicts``。
+
+        超时是三层：连接/读由 requests 的 ``(connect, read)`` 元组管，
+        「整体墙钟」由 ``hard_deadline_s``（默认 timeout+5s）管，覆盖
+        requests 管不到的 DNS 阶段——黑洞网络下也必然在上限内返回明确失败。
 
         P12：``MBDSDR_OFFLINE=1`` 时**不发起任何网络请求**，直接如实报
         「离线模式，未刷新」——离线语义只免联网，不冒充成功。
@@ -246,15 +285,16 @@ class SatelliteTracker:
                 "离线模式（MBDSDR_OFFLINE），未联网刷新（沿用旧 TLE）")
             return 0
         try:
-            import requests
+            import requests  # noqa: F401 - 可用性探测放在真正发起请求前
         except Exception:
             self._last_refresh_error = "requests 不可用，未刷新（沿用旧 TLE）"
             return 0
+        deadline = (float(hard_deadline_s) if hard_deadline_s is not None
+                    else float(timeout) + _TLE_HARD_DEADLINE_MARGIN_S)
         try:
-            resp = requests.get(
+            resp = _bounded_requests_get(
                 "https://celestrak.com/NORAD/elements/active.txt",
-                timeout=timeout,
-            )
+                float(timeout), deadline)
             resp.raise_for_status()
             text = resp.text
         except Exception as e:  # noqa: BLE001 - 网络失败如实留痕

@@ -31,6 +31,12 @@ def reg():
     return MBDSDRAgent().tool_registry
 
 
+@pytest.fixture(autouse=True)
+def _allow_mocked_network(monkeypatch):
+    """本模块用假 subprocess.run 验证 git 失败诊断，需绕过 root conftest 的离线门。"""
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+
+
 # ── git_clone_repo：失败模式 → 中文诊断 ────────────────────────────
 @pytest.mark.parametrize("stderr,expect", [
     ("fatal: unable to access 'https://example.org/x.git/': Could not resolve host: example.org",

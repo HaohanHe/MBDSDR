@@ -340,6 +340,80 @@ def test_tle_manager_reuses_lifecycle_and_labels_offline(tmp_path, monkeypatch):
     assert mgr.source_status()["state"] == "offline"
 
 
+# --------------------------------------------- 群组拉取（缺口①：限速/退避/健康度）
+GROUP_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=tle"
+NOAA18_L1 = "1 28654U 05018A   26268.90422616  .00000041  00000+0  45056-4 0  9991"
+NOAA18_L2 = "2 28654  98.8049 347.0872 0013570 221.3821 138.6324 14.13744708100547"
+GROUP_BODY = f"{NAME}\n{LINE1}\n{LINE2}\nNOAA 18\n{NOAA18_L1}\n{NOAA18_L2}\n"
+
+
+def test_group_fetch_parses_multiple_and_dedupes(tmp_path):
+    body = GROUP_BODY + f"NOAA 19 (dup)\n{LINE1}\n{LINE2}\n"
+    opener = ScriptedOpener([body])
+    f, _, _ = make_fetcher(tmp_path, opener)
+    res = f.fetch_group(GROUP_URL)
+    assert res["refresh_status"] == "network"
+    assert sorted(e["catnr"] for e in res["entries"]) == [28654, 33591]
+    assert len(opener.calls) == 1
+    assert res["health"]["state"] == "healthy"
+
+
+def test_group_fetch_honors_min_interval(tmp_path):
+    opener = ScriptedOpener([GROUP_BODY, GROUP_BODY])
+    f, clock, _ = make_fetcher(tmp_path, opener,
+                               policy=FetchPolicy(min_interval_s=1.0))
+    f.fetch_group(GROUP_URL)
+    f.fetch_group(GROUP_URL)
+    # 同源最小间隔：第二次请求前必须等满 1s，而不是立刻打点
+    assert clock.sleeps == [1.0]
+    assert len(opener.calls) == 2
+
+
+def test_group_failure_exponential_backoff_blocks_retry(tmp_path):
+    opener = ScriptedOpener([TimeoutError("dns blackhole"), GROUP_BODY])
+    f, clock, _ = make_fetcher(tmp_path, opener,
+                               policy=FetchPolicy(min_interval_s=0.0))
+    res1 = f.fetch_group(GROUP_URL)
+    assert res1["refresh_status"] == "unavailable"
+    assert res1["failure_kind"] == "network_timeout"
+    assert res1["retry_in_s"] == 60.0            # backoff_base 起步
+    assert res1["health"]["state"] == "backoff"
+
+    res2 = f.fetch_group(GROUP_URL)              # 退避期内
+    assert res2["refresh_status"] == "unavailable"
+    assert "退避中" in res2["refresh_error"]
+    assert res2["retry_in_s"] > 0
+    assert len(opener.calls) == 1                # 绝不在退避期重试/刷屏
+
+
+def test_group_rate_limit_uses_retry_after(tmp_path):
+    opener = ScriptedOpener([HTTPError(429, {"Retry-After": "120"})])
+    f, _, _ = make_fetcher(tmp_path, opener)
+    res = f.fetch_group(GROUP_URL)
+    assert res["failure_kind"] == "rate_limited"
+    assert res["retry_in_s"] == 120.0
+    assert res["health"]["consecutive_failures"] == 1
+
+
+def test_group_empty_and_bad_body_not_success(tmp_path):
+    f, _, _ = make_fetcher(tmp_path, ScriptedOpener(["   \n\n"]))
+    res = f.fetch_group(GROUP_URL)
+    assert res["refresh_status"] == "unavailable"
+    assert res["failure_kind"] == "empty_response"
+    assert res["entries"] == []
+
+
+def test_group_offline_refuses_explicitly(tmp_path):
+    opener = ScriptedOpener([GROUP_BODY])
+    f, _, _ = make_fetcher(tmp_path, opener, offline=lambda: True)
+    res = f.fetch_group(GROUP_URL)
+    assert res["refresh_status"] == "offline" and res["offline"] is True
+    assert "离线模式" in res["refresh_error"]
+    assert "无本地缓存" in res["refresh_error"]
+    assert opener.calls == []                    # 离线不联网
+    assert res["health"]["state"] == "offline"
+
+
 def test_orbit_status_and_offline_label(tmp_path, monkeypatch):
     from mbdsdr_ai import orbit
 

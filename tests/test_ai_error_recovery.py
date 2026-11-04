@@ -40,6 +40,12 @@ from mbdsdr_ai.tool_registry import ToolRegistry  # noqa: E402
 # ---------------------------------------------------------------------------
 # 工具层：参数错误不执行、不谎报
 # ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _allow_mocked_network(monkeypatch):
+    """本模块用可注入假 session 验证 HTTP 失败恢复，需绕过 root conftest 的离线门。"""
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+
+
 @pytest.fixture
 def reg():
     r = ToolRegistry()
