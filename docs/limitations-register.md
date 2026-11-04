@@ -16,7 +16,7 @@
 | 档位 | 条目 |
 | --- | --- |
 | 真验过 | RTL-SDR（FC0012）七环验收 R1–R5/R7；NanoVNA 真机 SOLT；FT8 外采 WSJT-X 官方样本；ADS-B 外采 dump1090 全量清单；LRPT 外采 TU Berlin 实录；GPS C/A IS-GPS-200E 矢量；DVB-S2 BCH/LDPC KAT |
-| 仅自测 | 全量工具面与 schema 一致性；AI 上下文预算/工具裁剪/并发取消/错误恢复；录音库 P9 全系列；TLE 编号三方校验；发射门/状态机/半双工互斥（假后端）；天空/云台编排 |
+| 仅自测 | 全量工具面与 schema 一致性；AI 上下文预算/工具裁剪/并发取消/错误恢复；录音库 P9 全系列；TLE 编号三方校验；发射门/状态机/半双工互斥（假后端）；天空/云台编排；端到端场景 A/B/C（假模型 + 合成 IQ/音频 + 时间拨盘，跨模块数值自洽） |
 | 未验证 | 真实发射（PlutoSDR）；1090 MHz ADS-B；云台/rotator 闭环；真过境 APRS/NOAA-APT/Meteor OTA；真实 LLM 联调（工具选择/流式取消/token 计数）；celestrak/NTP/open API 实时网络；arm64 Chromebook 真机；听感验收 |
 
 ## 1. 待真机（有代码、无硬件）
@@ -65,6 +65,7 @@
 | L20 | 工具面是否全量暴露给模型（预算裁剪上限） | AI 线 `4da1944`；`tool_budget` 裁剪后 ≤8192 token | 仅自测 | 用户决定保留/隐藏分类；真模型侧看误选率 |
 | L21 | MCP 面范围（控制器面 82 个 vs AI 注册表 495 个） | `mbdsdr_ai/core/mcp_server.py`、`docs/mcp_tools.md`；注册表 meta `mcp` 分类 = 0 | 设计分裂，未拍板 | 用户决定是否把 AI 工具镜像进 MCP；当前只在 Agent 面可用 |
 | L22 | 本轮集成验收红线（哪些红必须清零才合并） | P11 任务书 | 待确认 | 用户对「环境红/真红」的处置口径 |
+| L23 | 两个「天空可见」工具时间基准分叉：`sky_view_visible` 走 TimeEngine，`sdr_satellite_sky_view` 走墙钟 | P12 实测：把 TimeEngine 拨到 NOAA 19 仰角 23.3° 的时刻，前者列出该星、后者不列（`orbit.visible_satellites` 无 `timestamp` 参数）；与别线 P11-6/7/8 的时间基准统一同域 | 口径差，未拍板 | 待时间基准线定口径后，给 `orbit.visible_satellites` 加 `timestamp` 并把 `_satellite_sky_view` 接上 `get_time_engine().now_unix()`；复跑同一拨盘对照两工具 |
 
 ## 附 A：工具面总账（本轮实测快照）
 
