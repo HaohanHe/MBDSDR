@@ -62,6 +62,10 @@
 相关上游实现的源代码不随本仓库分发；各资料的权利与许可按原出处条款处理。本说明只
 记录来源与协议事实，不对任何资料的版权状态或许可合规作绝对法律保证。
 
+- **OpenNGC**（<https://github.com/mattiaverga/OpenNGC>，CC BY-SA 4.0，
+  <https://creativecommons.org/licenses/by-sa/4.0/>）：深空天体目录
+  `mbdsdr_ai/data/dso_catalog.json` 的坐标/星等/角径/类型来源；该派生数据库以
+  CC BY-SA 4.0 同许可分发。中文名取自 Wikidata（CC0 1.0）。
 - **CCSDS 232.0-B-4 / CCSDS 230.1-G-3 Annex F**：TC 主头为 5 字节；Example 10
   样例 `001B000E06010203040506070814BB` 用于 `tc_uplink.py` 与帧布局的逐字节对拍。
 - **ETSI EN 302 307-1 V1.4.1 (2014-11)**：DVB-S2 专用 BCH 参数来源，对应
