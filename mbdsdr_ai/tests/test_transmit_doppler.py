@@ -166,6 +166,53 @@ def test_cw_backend_gate_blocks_precomp(monkeypatch):
     assert "后端" in res.data["doppler"]["reason"]
 
 
+# ── IQ 发射：同一仲裁；回放已知录音必须显式关预偏 ────────────────────────────
+def _transmit_iq(monkeypatch, backend, **extra):
+    monkeypatch.setattr("mbdsdr_ai.hal.HardwareManager",
+                        lambda: SimpleNamespace(get_active_backend=lambda: backend))
+    args = {"frequency_hz": NOMINAL_HZ, "iq": [0.3, 0.0, 0.2, 0.0],
+            "amplitude": 0.1, "duration_sec": 0.05, "gain_db": 0.0}
+    args.update(extra)
+    token = get_tx_gate().arm(ttl_s=10)
+    res = sdr_tools._sdr_transmit_iq({**args, "confirm_token": token})
+    sent = backend.sent_freqs[-1] if backend.sent_freqs else None
+    return res, sent
+
+
+def test_iq_auto_precomp_when_target_armed(monkeypatch):
+    """IQ 发射同样走 tx_freq：有目标自动预偏，差值 == 预测 Δ。"""
+    backend = _FakeTxBackend()
+    comp = get_compensator()
+    _arm_target(comp, rr=-2.0)
+
+    res, sent = _transmit_iq(monkeypatch, backend)
+    assert res.success is True
+    assert sent == pytest.approx(NOMINAL_HZ + _expected_delta(-2.0), abs=1e-6)
+    assert res.data["doppler"]["applied"] is True
+    assert res.data["doppler"]["mode"] == "auto"
+    assert "已预偏" in res.content
+
+
+def test_iq_replay_explicit_off_is_exactly_nominal(monkeypatch):
+    """回放已知录音：显式 doppler_precomp=false → 严格标称，不改录音原频率。"""
+    backend = _FakeTxBackend()
+    comp = get_compensator()
+    _arm_target(comp, rr=-2.0)
+
+    res, sent = _transmit_iq(monkeypatch, backend, doppler_precomp=False)
+    assert res.data["doppler"]["applied"] is False
+    assert sent == NOMINAL_HZ          # 严格相等
+    assert "未预偏" in res.content
+
+
+def test_iq_without_target_is_nominal(monkeypatch):
+    backend = _FakeTxBackend()
+    res, sent = _transmit_iq(monkeypatch, backend)
+    assert sent == NOMINAL_HZ
+    assert res.data["doppler"]["applied"] is False
+    assert "无目标，未预偏" in res.data["doppler"]["reason"]
+
+
 # ── TC 上行：同一个“默认由状态推导”规则 ──────────────────────────────────
 def test_tc_default_precomp_follows_tracked_target():
     comp = get_compensator()

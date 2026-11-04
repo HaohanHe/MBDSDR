@@ -212,16 +212,51 @@ switch_on = bool(st["enabled"])          # 只由 enabled 驱动
 发波频点与接收走**同一个** `doppler_link.tx_freq()` 与同一符号约定（接近
 → 压低、远离 → 抬高），`backend_comp_active` 互斥闸同样生效：
 
-- `sdr_transmit_cw`（真接 HAL 发波）：缺省由状态推导——有跟踪目标自动按
-  发射时刻 `refresh()` 后预偏，读数写「已预偏（自动）」；无目标不偏并写
-  「无目标，未预偏」；`doppler_precomp=false` 严格按标称频点。
+- `sdr_transmit_cw` / `sdr_transmit_iq`（真接 HAL 发波）：缺省由状态推导
+  ——有跟踪目标自动按发射时刻 `refresh()` 后预偏，读数写「已预偏（自动）」；
+  无目标不偏并写「无目标，未预偏」；`doppler_precomp=false` 严格按标称。
+- **回放已知录音必须显式 `doppler_precomp=false`**：IQ 回放要表达的是录音
+  原本的频率，自动预偏会把整段录音搬到另一个频点。工具描述已写明该提示，
+  桌面「回放」入口也必须传 `false`。
 - `tc_uplink_transmit`（TC 上行）：同一规则，`doppler.requested=null` 即
   自动、`mode` 取 `auto/on/off`，`applied` 与 `delta_hz` 如实给。
+- 三个发射工具共用同一公共仲裁 `sdr_tools.resolve_tx_doppler(nominal_hz,
+  requested)`，返回 `(实际发波频率, 读数)`；UI 预览只能调它，不得自己算 Δ。
 - 工具 `data.doppler` 字段：`requested` / `mode` / `applied` / `nominal_hz`
-  / `freq_hz` / `delta_hz`；未预偏必须带 `reason`，不得用预测值冒充实际。
-- 反证测试 `mbdsdr_ai/tests/test_transmit_doppler.py`：已知频偏下
+  / `freq_hz` / `delta_hz` / `target`；未预偏必须带 `reason`，不得用预测值
+  冒充实际。
+- 反证测试 `mbdsdr_ai/tests/test_transmit_doppler.py`：CW/IQ 已知频偏下
   `发波频率 − 标称 == 预测 Δ`；显式关时**严格等于**标称；无目标两种
   （自动/显式开）都不偏；后端接管时也不追加预偏。
+
+### 3.8 发射可见性（桌面 UI 契约，交操作逻辑线接线）
+
+**现状：没有。** `desktop/` 内检索 `sdr_transmit_*` / `TxSession` 零命中，
+桌面形态目前没有发射入口，也没有任何发射频率/预偏读数——发射只能经工具面，
+用户在界面上看不到自己发的是什么频率。以下为接线契约（本线不改
+`desktop/main_window.py`）：
+
+- **数据源**：发射前调用 `sdr_tools.resolve_tx_doppler(nominal_hz, None)`
+  取 `(freq_hz, note)`；真正发波时把同一个 `freq_hz` 传给发射函数；发射后
+  用返回值 `data.doppler` 回填同一控件。禁止 UI 自行用预测值计算。
+- **控件位置**：发射控制区（发射/回放按钮旁）常驻一行「TX 频率」；状态栏
+  TX 段可复用（与 3.6 的多普勒读数并列）。**不能只写在 toast/日志**。
+- **必显三项**：实际发波频率、标称频率、预偏状态。文案：
+
+| 条件（`data.doppler`） | 主读数 | 次行 |
+| --- | --- | --- |
+| `applied=true, mode=auto` | `发波 145.799027 MHz（已预偏 −973.0 Hz，自动）` | `标称 145.800000 MHz，目标 ISS (ZARYA)` |
+| `applied=true, mode=on` | `发波 145.799027 MHz（已预偏 −973.0 Hz，显式）` | 同上 |
+| `applied=false, mode=off` | `发波 145.800000 MHz（未预偏：已关闭）` | — |
+| `applied=false, mode=auto`（无目标） | `发波 145.800000 MHz（未预偏：无目标）` | — |
+| `applied=false`（后端接管） | `发波 145.800000 MHz（未预偏：后端补偿已接管）` | — |
+| 发射失败/未发射 | `未发射（原因）` | 不显示任何「已预偏」 |
+
+- 频率格式：MHz 保留 **6 位小数**（才能看见 1 kHz 级预偏）；Δ 保留 0.1 Hz；
+  `null` 显示「—」，不得渲染成 0。
+- **回放入口**：IQ 回放必须传 `doppler_precomp=false`，控件显示
+  `未预偏（回放，保持原频率）`，并置灰/隐藏自动预偏开关，避免误改录音频率。
+- 预览调用时机：发射频率变化、面板打开、目标切换时，不做每帧轮询。
 
 ## 4. 验证（离线、合成 IQ）
 

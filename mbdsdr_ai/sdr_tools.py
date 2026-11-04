@@ -2451,7 +2451,9 @@ def register_sdr_tools(agent):
             " gated 信封（模型自报 arm_manual 不算确认）。失败恢复：未连接/不支持 TX/"
             "幅度越界/IQ 为空或不成对时"
             "如实报错（报错即未发射），修正后重试，不要虚构发射成功、不要截断波形。"
-            "注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。"
+            "多普勒预偏缺省由跟踪状态推导（有目标自动、无目标不偏）；"
+            "**回放已知录音时应显式传 doppler_precomp=false**，否则自动预偏会改变"
+            "录音本来要表达的频率。注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。"
         ),
         parameters={
             "type": "object",
@@ -2469,6 +2471,11 @@ def register_sdr_tools(agent):
                             "description": "TX 增益（dB）；越界或能力未知时拒绝"},
                 "duration_sec": {"type": "number",
                                  "description": "发射时长（秒）；超出设备/法规上限时拒绝"},
+                "doppler_precomp": {
+                    "type": "boolean",
+                    "description": ("按跟踪目标预测多普勒反向预偏中心频率；缺省=有跟踪"
+                                    "目标时自动预偏（读数标 auto），无目标不偏。"
+                                    "回放已知录音必须显式 false，保持录音原频率")},
                 "confirm_token": {"type": "string",
                                   "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
             },
@@ -6047,8 +6054,8 @@ def _sdr_connect_hardware(args):
     return '\n'.join(lines)
 
 
-def _resolve_tx_doppler(nominal_hz: float,
-                        requested: Optional[bool]) -> tuple:
+def resolve_tx_doppler(nominal_hz: float,
+                       requested: Optional[bool]) -> tuple:
     """发射频点仲裁：唯一真相源 ``doppler_link.tx_freq``（与 RX 同符号约定）。
 
     ``requested=None``（未显式指定）→ 由状态推导：有跟踪目标时默认预偏并在
@@ -6119,7 +6126,7 @@ def _sdr_transmit_cw(args):
             content=f"frequency_hz 无效: {args.get('frequency_hz')!r}")
     # 发波频点必须走唯一事实源（与接收同一 doppler_link、同一符号约定）：
     # 发偏了的信号对方收不到，用户却以为在发射。
-    freq, doppler_note = _resolve_tx_doppler(
+    freq, doppler_note = resolve_tx_doppler(
         nominal_hz, args.get('doppler_precomp'))
     amp = args.get('amplitude', 0.1)
     dur = args.get('duration_sec', 1.0)
@@ -6266,12 +6273,18 @@ def _sdr_transmit_iq(args):
                 success=False,
                 content=f"amplitude={amp} 超出 (0,1]：如实拒绝，不静默钳制")
 
-        freq = args.get("frequency_hz")
+        nominal_hz = args.get("frequency_hz")
         try:
-            freq = float(freq)
+            nominal_hz = float(nominal_hz)
         except (TypeError, ValueError):
-            return ToolResult(success=False,
-                              content=f"frequency_hz 无效: {freq!r}（应为数值 Hz）")
+            return ToolResult(
+                success=False,
+                content=f"frequency_hz 无效: {nominal_hz!r}（应为数值 Hz）")
+
+        # 与 CW 同一仲裁：有目标自动预偏、无目标不偏；回放已知录音必须
+        # 显式 doppler_precomp=false，否则自动预偏会改变录音原频率。
+        freq, doppler_note = resolve_tx_doppler(
+            nominal_hz, args.get("doppler_precomp"))
 
         mgr = HardwareManager()
         backend = mgr.get_active_backend()
@@ -6339,14 +6352,23 @@ def _sdr_transmit_iq(args):
             error=exception_code(e))
 
     lines = ["=== IQ 发射 ==="]
-    lines.append(f"频率: {freq/1e6:.3f} MHz")
+    lines.append(f"频率: {freq/1e6:.6f} MHz")
+    if doppler_note["applied"]:
+        mode = "自动" if doppler_note["mode"] == "auto" else "显式"
+        lines.append(
+            f"多普勒预偏: 已预偏 {doppler_note['delta_hz']:+.1f} Hz"
+            f"（标称 {nominal_hz/1e6:.6f} MHz，目标 {doppler_note['target']}，{mode}）")
+    else:
+        lines.append(f"多普勒预偏: 未预偏（{doppler_note['reason']}）")
     lines.append(f"幅度: {amp:.2f}")
     lines.append(f"样本数: {samples.size}（float32 交错复基带）")
     lines.append(f"状态: {'发射成功' if ok else '发射失败'}")
     lines.append("")
     lines.append("注意: 发射需遵守当地无线电法规，未经许可不得在禁发频段发射。")
 
-    return ToolResult(success=bool(ok), content='\n'.join(lines))
+    return ToolResult(success=bool(ok), content='\n'.join(lines),
+                      data={"freq_hz": freq, "nominal_freq_hz": nominal_hz,
+                            "doppler": doppler_note})
 
 
 def _platform_info(args):
