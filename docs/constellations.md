@@ -280,6 +280,52 @@ con / in_catalog`（J2000，度；`ra_deg` 已由源 CSV 的小时值 ×15）。
 星引用额外字段：`zh_name / alt_names / mapped`；未映射时
 `hyg_id/ra_deg/dec_deg/vmag = null`。
 
+### 4.3 `xingguan_star_names_zh.json`（成员中文星名唯一映射）
+
+```jsonc
+{
+  "meta": {
+    "schema": "mbdsdr.xingguan_star_names.v1",
+    "system_id": "chinese_xingguan", "locale": "zh_CN",
+    "source": "Stellarium skyculture chinese / star_names.zh_CN.fab",
+    "source_license": "CC BY-SA 4.0",
+    "source_file_sha256": "…",            // 与 reference 源文件对拍
+    "source_files": {"star_names": {...}, "members": {...}},
+    "name_policy": "Chinese names come only from star_names.zh_CN.fab …",
+    "member_occurrences": 2911,
+    "total_members": 2910,
+    "duplicate_occurrences_deduped": 1,
+    "with_zh_name": 2910,
+    "without_zh_name": 0,
+    "multi_name_members": 174,
+    "multi_region_members": 1,
+    "unmapped_hips": [55203, 78727, 115125],
+    "no_name_hips": [],
+    "data_sha256": "…"
+  },
+  "stars": {
+    "71683": {
+      "hip": 71683, "hyg_id": 71456, "zh_name": "南门二",
+      "alt_names": [], "xingguan": ["南门"], "regions": ["角宿"],
+      "mapped": true, "in_catalog": true,
+      "proper": "Rigil Kentaurus", "bayer": "Alp1Cen",
+      "vmag": -0.01, "con": "Cen"
+    }
+  }
+}
+```
+
+- **一颗星只有一条记录**（按 HIP 去重）。同一颗星出现在多个星官时
+  `xingguan` 列出全部星官，`regions` 列出全部区域；主名取首次出现，
+  其余名字进 `alt_names`（例：HIP 77660 主名「巴增五」，`alt_names`
+  含「天乳增二」）。
+- 中文名只来自 `star_names.zh_CN.fab`；生成脚本对每个成员校验
+  「主名必须在该 HIP 的源文件名字集合里」，否则直接报错（防漂移）。
+- 缺失中文名的处理：`zh_name` 留空进入 `no_name_hips` 计数，
+  **不写 proper/Bayer 名**，也不用英文名冒充。本数据实测缺失为 0。
+- 未映射星（55203/78727/115125）保留在文件里（`mapped=false`），
+  但查询 API 对它们返回 `None`。
+
 ---
 
 ## 5. 接口
@@ -302,6 +348,13 @@ r.xingguan_count, r.star_count, r.unmapped_hips
 pairs = xingguan.xingguan_segments("角宿")     # 区域级连线
 pairs2 = xingguan.xingguan_all_segments("角宿")# 区域级 + 星官级
 
+# 星官成员中文名（独立映射文件）
+idx = xingguan.load_xingguan_star_names()
+rec = xingguan.xingguan_star_name(71683)        # hip → 南门二 + 星官/区域
+rec2 = xingguan.xingguan_star_name(71456, by="hyg_id")
+xingguan.xingguan_star_name(55203)              # None（未映射）
+xingguan.xingguan_star_name_reason(55203)       # "unmapped"
+
 # 两套体系并列
 layers = iau.overlay_layers()                 # 每层带 system_id/tag
 ```
@@ -323,11 +376,21 @@ python -m mbdsdr_ai.skyengine.build_constellation_data `
 脚本只读本地 Stellarium 参考数据与 HYG CSV，输出两份 JSON 并写入
 来源/许可/源文件 SHA/数据 SHA。源参考数据与 HYG CSV 均**不随仓分发**。
 
+成员中文星名映射（第三个数据文件）单独生成：
+
+```powershell
+python -m mbdsdr_ai.skyengine.build_xingguan_star_names `
+    --stellarium D:/mbdsdr/reference/stellarium
+```
+
+它会逐颗校验「主名必须出现在该 HIP 的 `star_names.zh_CN.fab` 名字集合里」，
+不一致直接报错；同时记录源文件 SHA 与成员/命名/去重计数。
+
 ---
 
 ## 7. 测试
 
-新增 `mbdsdr_ai/tests/test_constellations_data.py`，共 **29 项**，覆盖：
+新增 `mbdsdr_ai/tests/test_constellations_data.py`，共 **47 项**，覆盖：
 
 - IAU 88 座数量、缩写/拉丁名/中文名唯一性；
 - 每座连线端点都在随仓 HYG 星表内，且 HYG id / HIP / ra / dec / vmag 对拍；
@@ -338,12 +401,14 @@ python -m mbdsdr_ai.skyengine.build_constellation_data `
 - 两套体系名称空间不相交、文化注记不串味、并列图层逐层带 tag；
 - 两份数据 meta 来源/许可/SHA；缺失字段/篡改数据被拒绝；
 - 本地 Stellarium 源文件 SHA 与实际文件对拍；
+- 成员中文星名：30 颗抽样对拍、未映射 3 颗返回 None、重复成员只存一份、
+  meta 缺失/篡改/计数不符抛错；
 - 旧版 27 座 / 115 段桌面骨架保持兼容。
 
 运行：
 
 ```powershell
-python -m pytest mbdsdr_ai/tests/test_constellations_data.py -q   # 29 passed
+python -m pytest mbdsdr_ai/tests/test_constellations_data.py -q   # 47 passed
 ```
 
 ---

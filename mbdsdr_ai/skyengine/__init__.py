@@ -31,9 +31,11 @@ from .constellations import (
 )
 from .xingguan import (
     XingguanStar, Xingguan, XingguanRegion, XingguanSet, XingguanAnchor,
+    XingguanStarName, XingguanStarNameIndex,
     load_xingguan, get_xingguan, xingguan_regions, xingguan_region,
     xingguan_segments, xingguan_all_segments, xingguan_label,
     xingguan_culture, xingguan_anchor, xingguan_anchor_reason,
+    load_xingguan_star_names, xingguan_star_name, xingguan_star_name_reason,
     xingguan_layer,
 )
 from .satellites import (SatelliteMeta, SATELLITE_INDEX, cospar_from_tle,
@@ -51,11 +53,12 @@ __all__ = [
     "constellation_layer", "overlay_layers", "payload_sha256",
     "validate_data_payload",
     "XingguanStar", "Xingguan", "XingguanRegion", "XingguanSet",
-    "XingguanAnchor",
+    "XingguanAnchor", "XingguanStarName", "XingguanStarNameIndex",
     "load_xingguan", "get_xingguan", "xingguan_regions", "xingguan_region",
     "xingguan_segments", "xingguan_all_segments", "xingguan_label",
     "xingguan_culture", "xingguan_anchor", "xingguan_anchor_reason",
-    "xingguan_layer",
+    "load_xingguan_star_names", "xingguan_star_name",
+    "xingguan_star_name_reason", "xingguan_layer",
     "SatelliteMeta", "SATELLITE_INDEX", "cospar_from_tle", "norad_from_tle",
     "next_rise_set", "jtime",
 ]

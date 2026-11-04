@@ -30,6 +30,7 @@ from mbdsdr_ai.skyengine import xingguan as x
 DATA_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "data"
 IAU_PATH = DATA_DIR / "constellations_iau.json"
 XG_PATH = DATA_DIR / "xingguan_chinese.json"
+XG_NAMES_PATH = DATA_DIR / "xingguan_star_names_zh.json"
 REFERENCE = Path(r"D:\mbdsdr\reference\stellarium")
 
 IAU_UNRESOLVED = [55203]
@@ -539,3 +540,148 @@ def test_all_segments_is_the_only_rebuild_path(xg):
     r = xg["角宿"]
     assert r.all_segments() == a
     assert r.segments() == x.xingguan_segments("角宿")
+
+
+# ---------------------------------------------------------------------------
+# 星官成员中文星名（独立映射文件 + 查询 API）
+# ---------------------------------------------------------------------------
+SAMPLE_30 = {
+    71683: "南门二", 11767: "勾陈一", 32349: "天狼", 91262: "织女一",
+    27989: "参宿四", 24436: "参宿七", 69673: "大角", 21421: "毕宿五",
+    30438: "老人", 677: "壁宿二", 8068: "天大将军二", 1427: "壁宿增十七",
+    61932: "库楼七", 109427: "危宿二", 17797: "天园八", 100453: "天津一",
+    85927: "尾宿八", 113368: "北落师门", 95947: "辇道增七", 77660: "巴增五",
+    115481: "雷电增六", 102098: "天津四", 54061: "北斗一", 11791: "天囷十",
+    65474: "角宿一", 49669: "轩辕十四", 24608: "五车二", 37279: "南河三",
+    113963: "室宿一", 25336: "参宿五",
+}
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def test_star_names_coverage_and_meta(xg):
+    idx = x.load_xingguan_star_names()
+    meta = idx.meta
+    assert meta["total_members"] == 2910
+    assert meta["with_zh_name"] == 2910
+    assert meta["without_zh_name"] == 0
+    assert meta["duplicate_occurrences_deduped"] == 1
+    assert meta["unmapped_hips"] == XG_UNRESOLVED
+    assert meta["no_name_hips"] == []
+    # 与源文件 SHA 对拍
+    src = REFERENCE / "skycultures" / "chinese" / "star_names.zh_CN.fab"
+    assert meta["source_file_sha256"] == _sha256_file(src)
+    assert meta["source_files"]["star_names"]["sha256"] == _sha256_file(src)
+    # 成员集合与区域数据完全一致（没有多存也没有漏存）
+    members = {s.hip for r in xg.regions for s in r.stars}
+    assert set(idx.by_hip) == members
+    hayg = {s.hyg_id for r in xg.regions for s in r.stars if s.hyg_id}
+    assert set(idx.by_hyg_id) == hayg
+
+
+def test_star_names_thirty_sample(xg):
+    """30 颗人工抽样：主名与源文件一致，且落在成员集合里。"""
+    idx = x.load_xingguan_star_names()
+    fab = _fab_hip_names()
+    for hip, expected in SAMPLE_30.items():
+        rec = idx.by_hip[hip]
+        assert rec.zh_name == expected, f"HIP {hip}"
+        assert expected in fab[hip], f"HIP {hip} 的主名不在源文件"
+        assert rec.xingguan, f"HIP {hip} 缺少所属星官"
+        assert rec.regions, f"HIP {hip} 缺少所属区域"
+
+
+def _fab_hip_names():
+    from mbdsdr_ai.skyengine.build_constellation_data import parse_star_names_fab
+
+    names = {}
+
+    def walk(node):
+        for hip, name, _xg in node["stars"]:
+            names.setdefault(int(hip), []).append(name)
+        for sub in node.get("subs", {}).values():
+            walk(sub)
+
+    fab_path = REFERENCE / "skycultures" / "chinese" / "star_names.zh_CN.fab"
+    for node in parse_star_names_fab(fab_path).values():
+        walk(node)
+    return names
+
+
+def test_star_name_lookup_by_hip_and_hyg(xg):
+    idx = x.load_xingguan_star_names()
+    by_hip = x.xingguan_star_name(71683)
+    assert by_hip.zh_name == "南门二"
+    assert by_hip.xingguan == ("南门",)
+    assert by_hip.regions == ("角宿",)
+    assert x.xingguan_star_name(71456, by="hyg_id").hip == 71683
+    assert x.xingguan_star_name(71456, by="hyg_id").zh_name == "南门二"
+    # 非成员：None + 原因码，不返回空串
+    assert x.xingguan_star_name(7588) is None
+    assert x.xingguan_star_name_reason(7588) == "not_member"
+    assert x.xingguan_star_name(999999999) is None
+    with pytest.raises(ValueError):
+        x.xingguan_star_name(71683, by="ra")
+    with pytest.raises(TypeError):
+        x.xingguan_star_name("71683")
+    # 主名只来自中文源，不拿 proper 名兜底
+    assert by_hip.label == "南门二"
+
+
+def test_unmapped_star_names_return_none():
+    for hip in XG_UNRESOLVED:
+        assert x.xingguan_star_name(hip) is None, hip
+        assert x.xingguan_star_name_reason(hip) == "unmapped"
+    assert x.xingguan_star_name(115481) is not None  # 映射成功但 >9 等仍可取名
+
+
+def test_duplicate_member_stored_once():
+    """HIP 77660 同属天市右垣与天乳：只一条记录，两个名字都在 alt_names。"""
+    idx = x.load_xingguan_star_names()
+    rec = idx.by_hip[77660]
+    assert rec.zh_name == "巴增五"
+    assert rec.xingguan == ("天市右垣", "天乳")
+    assert "天乳增二" in rec.alt_names
+    # 全表没有重复 HIP 记录
+    occurrences = sum(len(r.stars) for r in x.load_xingguan().regions)
+    assert len(idx.by_hip) == occurrences - 1
+
+
+@pytest.mark.parametrize("missing", ["source", "source_license", "data_sha256"])
+def test_star_names_missing_meta_rejected(tmp_path, missing):
+    dst = tmp_path / "bad_names.json"
+
+    def mutate(raw):
+        raw["meta"].pop(missing, None)
+
+    _write_with_meta_change(XG_NAMES_PATH, dst, mutate)
+    with pytest.raises(c.ConstellationMetadataError):
+        x.load_xingguan_star_names(str(dst))
+
+
+def test_star_names_tampered_data_rejected(tmp_path):
+    dst = tmp_path / "tampered_names.json"
+
+    def mutate(raw):
+        raw["stars"]["71683"]["zh_name"] = "南门二（篡改）"
+
+    _write_with_meta_change(XG_NAMES_PATH, dst, mutate)
+    with pytest.raises(c.ConstellationIntegrityError):
+        x.load_xingguan_star_names(str(dst))
+
+
+def test_star_names_count_mismatch_rejected(tmp_path):
+    dst = tmp_path / "count_names.json"
+
+    def mutate(raw):
+        raw["meta"]["with_zh_name"] = 2909
+
+    _write_with_meta_change(XG_NAMES_PATH, dst, mutate)
+    with pytest.raises(c.ConstellationIntegrityError):
+        x.load_xingguan_star_names(str(dst))

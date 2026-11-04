@@ -57,6 +57,8 @@ __all__ = [
     "XingguanRegion",
     "XingguanSet",
     "XingguanAnchor",
+    "XingguanStarName",
+    "XingguanStarNameIndex",
     "load_xingguan",
     "get_xingguan",
     "xingguan_regions",
@@ -67,6 +69,9 @@ __all__ = [
     "xingguan_culture",
     "xingguan_anchor",
     "xingguan_anchor_reason",
+    "load_xingguan_star_names",
+    "xingguan_star_name",
+    "xingguan_star_name_reason",
     "system_info",
     "xingguan_layer",
 ]
@@ -425,6 +430,119 @@ def xingguan_anchor_reason(target: _AnchorTarget) -> Optional[str]:
         return "no_mappable_member"
     if _brightest_drawable(stars) is None:
         return "no_drawable_member"
+    return None
+
+
+_XG_NAMES_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "xingguan_star_names_zh.json")
+
+
+@dataclass(frozen=True)
+class XingguanStarName:
+    """一颗星官成员的中文名与归属（同一 HIP 只有一条记录）。"""
+    hip: int
+    hyg_id: Optional[int]
+    zh_name: str
+    alt_names: Tuple[str, ...]
+    xingguan: Tuple[str, ...]
+    regions: Tuple[str, ...]
+    mapped: bool
+    in_catalog: bool
+
+    @property
+    def label(self) -> str:
+        """只返回中文名；没有就是空串，不用英文 proper 名冒充。"""
+        return self.zh_name
+
+
+@dataclass(frozen=True)
+class XingguanStarNameIndex:
+    meta: Dict[str, Any]
+    by_hip: Dict[int, XingguanStarName]
+    by_hyg_id: Dict[int, XingguanStarName]
+
+
+@lru_cache(maxsize=1)
+def load_xingguan_star_names(
+        path: Optional[str] = None) -> XingguanStarNameIndex:
+    """加载中文星名映射；meta 缺来源/许可/SHA 或数据被改则抛错。"""
+    src = path or _XG_NAMES_PATH
+    payload = _load_json(src, expected_system=SYSTEM_CHINESE)
+    meta = payload["meta"]
+    entries = payload.get("stars")
+    if not isinstance(entries, dict):
+        raise XingguanIntegrityError("stars 不是以 HIP 为键的对象")
+
+    by_hip: Dict[int, XingguanStarName] = {}
+    for key, rec in entries.items():
+        hip = int(key)
+        item = XingguanStarName(
+            hip=hip, hyg_id=rec.get("hyg_id"),
+            zh_name=rec.get("zh_name") or "",
+            alt_names=tuple(rec.get("alt_names") or ()),
+            xingguan=tuple(rec.get("xingguan") or ()),
+            regions=tuple(rec.get("regions") or ()),
+            mapped=bool(rec.get("mapped")),
+            in_catalog=bool(rec.get("in_catalog")))
+        if item.hip != int(rec["hip"]):
+            raise XingguanIntegrityError(f"HIP 键与记录不一致: {key}")
+        by_hip[hip] = item
+
+    by_hyg: Dict[int, XingguanStarName] = {}
+    for item in by_hip.values():
+        if item.hyg_id is None:
+            continue
+        if item.hyg_id in by_hyg:
+            raise XingguanIntegrityError(f"HYG id 重复: {item.hyg_id}")
+        by_hyg[int(item.hyg_id)] = item
+
+    with_name = sum(1 for s in by_hip.values() if s.zh_name)
+    checks = {
+        "total_members": len(by_hip),
+        "with_zh_name": with_name,
+        "without_zh_name": len(by_hip) - with_name,
+        "unmapped_hips": sorted(s.hip for s in by_hip.values() if not s.mapped),
+        "no_name_hips": sorted(s.hip for s in by_hip.values() if not s.zh_name),
+    }
+    for key, value in checks.items():
+        if meta.get(key) != value:
+            raise XingguanIntegrityError(
+                f"meta.{key} 与数据不一致: {meta.get(key)!r} != {value!r}")
+    return XingguanStarNameIndex(meta=meta, by_hip=by_hip, by_hyg_id=by_hyg)
+
+
+def _name_lookup(identifier: int,
+                 by: str) -> Optional[XingguanStarName]:
+    if by not in ("hip", "hyg_id"):
+        raise ValueError(f"by 只能是 'hip' 或 'hyg_id'，收到 {by!r}")
+    if not isinstance(identifier, int) or isinstance(identifier, bool):
+        raise TypeError(f"identifier 必须是 int，收到 {type(identifier).__name__}")
+    idx = load_xingguan_star_names()
+    if by == "hip":
+        return idx.by_hip.get(identifier)
+    return idx.by_hyg_id.get(identifier)
+
+
+def xingguan_star_name(identifier: int,
+                       by: str = "hip") -> Optional[XingguanStarName]:
+    """HIP/HYG id → 中文名 + 所属星官；不可用返回 ``None``（原因见下函数）。"""
+    rec = _name_lookup(identifier, by)
+    if rec is None or not rec.mapped or not rec.zh_name:
+        return None
+    return rec
+
+
+def xingguan_star_name_reason(identifier: int,
+                              by: str = "hip") -> Optional[str]:
+    """``None`` = 可用；否则 ``not_member`` / ``unmapped`` / ``no_zh_name``。"""
+    rec = _name_lookup(identifier, by)
+    if rec is None:
+        return "not_member"
+    if not rec.mapped:
+        return "unmapped"
+    if not rec.zh_name:
+        return "no_zh_name"
     return None
 
 
