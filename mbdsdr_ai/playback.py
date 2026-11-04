@@ -340,6 +340,97 @@ class IQPlayback:
 # ---------------------------------------------------------------------------
 # PlaybackSource：包装成 SDRBackend 兼容接口，作为 UI 调试数据源
 # ---------------------------------------------------------------------------
+def transmit_iq_playback(
+    filepath: str,
+    *,
+    backend: Any,
+    freq_hz: Optional[float] = None,
+    arm_manual: bool = False,
+    tx_token: Optional[str] = None,
+    gain_db: Optional[float] = None,
+    bandwidth_hz: Optional[float] = None,
+    caps: Any = None,
+    regulatory: Any = None,
+    cancel_event: Any = None,
+    chunk_samples: int = 65536,
+) -> Dict[str, Any]:
+    """把录制 IQ 文件经 :class:`TxSession` 受控发射（回放发射路径）。
+
+    红线：
+      * 人工门、越界防护、发射状态机全部复用 :mod:`mbdsdr_ai.tx_guard`，
+        本函数不另写一套；
+      * 回放文件缺失/损坏/截断/读到一半被删时如实拒绝或中止，绝不把坏
+        文件当成"正常波形"发出去；
+      * 未指定频点时使用 SigMF 记录的中心频率；元数据缺失（0）则拒绝，
+        不假设一个频点。
+    """
+    from .tx_guard import TxSession, policy_from_env
+
+    pb = IQPlayback(loop=False)
+    if not pb.open(filepath):
+        return {
+            "state": "rejected",
+            "reason_code": f"playback_{pb.error_code or 'failed'}",
+            "reason": pb.last_error or "回放文件无法打开",
+            "sent_samples": 0,
+            "playback": {"path": filepath, "state": pb.state,
+                         "error_code": pb.error_code},
+        }
+    center = float(freq_hz) if freq_hz and float(freq_hz) > 0 else pb.center_freq_hz
+    if not center or center <= 0:
+        pb.close()
+        return {
+            "state": "rejected",
+            "reason_code": "bad_parameter",
+            "reason": "未指定发射频点，且 SigMF 元数据没有中心频率——不假设频点",
+            "sent_samples": 0,
+            "playback": {"path": filepath, "state": "closed",
+                         "meta_valid": pb.meta_valid},
+        }
+
+    def _blocks() -> Any:
+        try:
+            while True:
+                block = pb.read_samples(chunk_samples)
+                if block is None or int(block.size) == 0:
+                    break
+                yield block
+        finally:
+            pb.close()
+
+    duration = pb.get_duration() if pb.sample_rate > 0 else None
+    session = TxSession(backend, cancel_event=cancel_event)
+    result = session.transmit(
+        _blocks(),
+        freq_hz=center,
+        arm_manual=arm_manual,
+        tx_token=tx_token,
+        gain_db=gain_db,
+        bandwidth_hz=bandwidth_hz,
+        caps=caps,
+        regulatory=regulatory or policy_from_env(),
+        duration_s=duration,
+        chunk_samples=chunk_samples,
+    )
+    # 读到一半文件被删/损坏：read_samples 会返回空并落 deleted/failed，
+    # 此时绝不能把"样本提前结束"报告成正常完成。
+    if pb.state in ("deleted", "failed"):
+        result["state"] = "aborted"
+        result["reason_code"] = ("tx_source_deleted" if pb.state == "deleted"
+                                 else "tx_source_failed")
+        result["reason"] = pb.last_error or "回放源在发射过程中失效"
+    result["playback"] = {
+        "path": filepath,
+        "state": pb.state,
+        "error_code": pb.error_code,
+        "sample_rate_hz": pb.sample_rate,
+        "meta_valid": pb.meta_valid,
+        "total_samples": pb._n_samples,
+    }
+    return result
+
+
+
 class PlaybackSource:
     """把 :class:`IQPlayback` 包装成与 SDRBackend 兼容的只读源。
 

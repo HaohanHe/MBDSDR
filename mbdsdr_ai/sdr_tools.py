@@ -5768,14 +5768,17 @@ def _sdr_transmit_cw(args):
             success=False,
             content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP 等TX-capable设备支持。")
 
-    from mbdsdr_ai.tx_guard import (capabilities_from_hal_backend,
+    from mbdsdr_ai.tx_guard import (TX_COMPLETED, TxSession,
+                                    capabilities_from_hal_backend,
                                     check_tx_request, policy_from_env)
+    caps = capabilities_from_hal_backend(backend)
+    policy = policy_from_env()
     chk = check_tx_request(
-        capabilities_from_hal_backend(backend),
+        caps,
         freq_hz=freq,
         gain_db=args.get("gain_db"),
         duration_s=dur,
-        regulatory=policy_from_env(),
+        regulatory=policy,
     )
     if not chk.ok:
         return ToolResult(
@@ -5783,12 +5786,35 @@ def _sdr_transmit_cw(args):
             content=f"发射被拒绝({chk.code}): {chk.reason}",
             data={"rejected": True, "code": chk.code, "limits": chk.to_dict()})
 
-    ok = mgr.transmit_cw(freq, amp, dur, arm_manual=True)
-    if not ok and getattr(mgr, "last_tx_error", ""):
-        return ToolResult(success=False,
-                          content=f"发射被拒绝({getattr(mgr, 'last_tx_code', '')}): "
-                                  f"{mgr.last_tx_error}",
-                          data={"gated": getattr(mgr, "last_tx_code", "")})
+    rate = float(getattr(backend, "_sample_rate", 0) or 0)
+    if rate <= 0:
+        return ToolResult(
+            success=False,
+            content="发射被拒绝(capability_unknown): 采样率未知，无法生成 CW 时间轴",
+            data={"rejected": True, "code": "capability_unknown"})
+    try:
+        n = int(rate * float(dur))
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content=f"duration_sec 无效: {dur!r}")
+
+    def _cw_blocks():
+        remaining = n
+        step = 4096
+        while remaining > 0:
+            take = min(step, remaining)
+            yield np.full(take, amp, dtype=np.complex64)
+            remaining -= take
+
+    rep = TxSession(backend).transmit(
+        _cw_blocks(), freq_hz=freq, arm_manual=True, caps=caps,
+        regulatory=policy, duration_s=dur, chunk_samples=4096)
+    if rep["state"] != TX_COMPLETED:
+        return ToolResult(
+            success=False,
+            content=f"发射失败({rep['reason_code']}): {rep['reason']}",
+            data={"tx_state": rep["state"], "reason_code": rep["reason_code"],
+                  "sent_samples": rep["sent_samples"]})
+    ok = True
 
     lines = ["=== CW 发射 ==="]
     lines.append(f"频率: {freq/1e6:.3f} MHz")
@@ -5875,8 +5901,11 @@ def _sdr_transmit_iq(args):
                 content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/"
                         "LimeSDR/USRP 等TX-capable设备支持。")
 
-        from mbdsdr_ai.tx_guard import (capabilities_from_hal_backend,
+        from mbdsdr_ai.tx_guard import (TX_COMPLETED, TxSession,
+                                        capabilities_from_hal_backend,
                                         check_tx_request, policy_from_env)
+        caps = capabilities_from_hal_backend(backend)
+        policy = policy_from_env()
         dur = args.get("duration_sec")
         if dur is not None:
             try:
@@ -5885,12 +5914,12 @@ def _sdr_transmit_iq(args):
                 return ToolResult(success=False,
                                   content=f"duration_sec 无效: {dur!r}（应为正数秒）")
         chk = check_tx_request(
-            capabilities_from_hal_backend(backend),
+            caps,
             freq_hz=freq,
             bandwidth_hz=args.get("bandwidth_hz"),
             gain_db=args.get("gain_db"),
             duration_s=dur,
-            regulatory=policy_from_env(),
+            regulatory=policy,
         )
         if not chk.ok:
             return ToolResult(
@@ -5898,13 +5927,21 @@ def _sdr_transmit_iq(args):
                 content=f"发射被拒绝({chk.code}): {chk.reason}",
                 data={"rejected": True, "code": chk.code, "limits": chk.to_dict()})
 
-        ok = mgr.transmit_modulated(freq, samples, amp, arm_manual=True)
-        if not ok and getattr(mgr, "last_tx_error", ""):
+        scaled = amp * samples / (float(np.max(np.abs(samples))) + 1e-12)
+        rep = TxSession(backend).transmit(
+            scaled, freq_hz=freq, arm_manual=True, caps=caps,
+            regulatory=policy,
+            gain_db=args.get("gain_db"),
+            bandwidth_hz=args.get("bandwidth_hz"),
+            duration_s=dur, chunk_samples=4096)
+        if rep["state"] != TX_COMPLETED:
             return ToolResult(
                 success=False,
-                content=f"发射被拒绝({getattr(mgr, 'last_tx_code', '')}): "
-                        f"{mgr.last_tx_error}",
-                data={"gated": getattr(mgr, "last_tx_code", "")})
+                content=f"发射失败({rep['reason_code']}): {rep['reason']}",
+                data={"tx_state": rep["state"],
+                      "reason_code": rep["reason_code"],
+                      "sent_samples": rep["sent_samples"]})
+        ok = True
     except Exception as e:  # noqa: BLE001
         return ToolResult(success=False, content=f"参数/计算错误: {e}", error=str(e))
 

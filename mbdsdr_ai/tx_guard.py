@@ -601,3 +601,223 @@ def _field_code(field_name: str) -> str:
         "regulatory": LIMIT_REGULATORY,
     }.get(field_name, LIMIT_BAD_PARAM)
 
+
+# ═════════════════════════════════════════════════════════════════════════
+# 三、发射状态机：取消 / 设备掉线 / 缓冲欠载 / 门撤销 立即停发
+# ═════════════════════════════════════════════════════════════════════════
+
+TX_IDLE = "idle"
+TX_ARMED = "armed"
+TX_TRANSMITTING = "transmitting"
+TX_STOPPING = "stopping"
+TX_COMPLETED = "completed"
+TX_CANCELLED = "cancelled"
+TX_ABORTED = "aborted"
+TX_REJECTED = "rejected"
+TX_FAILED = "failed"
+
+TX_CANCEL_REQUESTED = "tx_cancel_requested"
+TX_DEVICE_LOST = "tx_device_lost"
+TX_UNDERRUN = "tx_underrun"
+TX_GATE_REVOKED = "tx_gate_revoked"
+TX_GATE_EXPIRED = "tx_gate_expired"
+TX_WRITE_FAILED = "tx_write_failed"
+TX_NO_BACKEND = "tx_no_backend"
+
+
+class TxSession:
+    """一次发射的状态机。
+
+    ``transmit()`` 在每个分块前检查四种中止条件（取消/掉线/欠载/撤门），
+    命中即停写、调用 backend.stop_tx()（若存在）并落如实状态；不会留下
+    持续输出的循环。门在发射中途被撤销同样在下一块前生效。
+    """
+
+    def __init__(self, backend: Any, *, gate: Optional[TxGate] = None,
+                 cancel_event: Optional[threading.Event] = None) -> None:
+        self.backend = backend
+        self.gate = gate or get_tx_gate()
+        self.cancel_event = cancel_event or threading.Event()
+        self.state = TX_IDLE
+        self.reason_code = ""
+        self.reason = ""
+        self.sent_samples = 0
+        self.total_samples = 0
+        self.token = ""
+        self._cancel_reason = "用户取消发射"
+        self._gate_reason = ""
+        self.stop_calls = 0
+
+    # ------------------------------------------------------------------
+    def cancel(self, reason: str = "用户取消发射") -> None:
+        self._cancel_reason = str(reason or "用户取消发射")
+        self.cancel_event.set()
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "state": self.state,
+            "reason_code": self.reason_code,
+            "reason": self.reason,
+            "sent_samples": int(self.sent_samples),
+            "total_samples": int(self.total_samples),
+            "gate": self.gate.snapshot(),
+        }
+
+    # ------------------------------------------------------------------
+    def _stop_backend(self) -> None:
+        try:
+            stop = getattr(self.backend, "stop_tx", None)
+            if callable(stop):
+                stop()
+                self.stop_calls += 1
+        except Exception:  # noqa: BLE001 - 停发失败不掩盖原中止原因
+            logger.warning("TxSession: backend.stop_tx() 调用失败", exc_info=True)
+
+    def _device_alive(self) -> bool:
+        checker = getattr(self.backend, "device_alive", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:  # noqa: BLE001
+                return False
+        status = getattr(self.backend, "status", None)
+        connected = getattr(status, "connected", None)
+        if connected is not None:
+            return bool(connected)
+        return True
+
+    def _underrun(self) -> bool:
+        checker = getattr(self.backend, "is_underrun", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:  # noqa: BLE001
+                return True
+        return bool(getattr(self.backend, "underrun", False))
+
+    def _gate_still_valid(self, decision: GateDecision) -> Optional[str]:
+        snap = self.gate.snapshot()
+        if snap["state"] == "revoked":
+            self._gate_reason = snap.get("revoked_reason", "")
+            return TX_GATE_REVOKED
+        if self.token:
+            d = self.gate.authorize(token=self.token)
+            if not d.allowed:
+                self._gate_reason = d.reason
+                return (TX_GATE_EXPIRED if d.code == GATE_EXPIRED
+                        else TX_GATE_REVOKED)
+        return None
+
+    def _abort(self, state: str, code: str, reason: str) -> Dict[str, Any]:
+        self.state = TX_STOPPING
+        self.reason_code = code
+        self.reason = reason
+        self._stop_backend()
+        self.state = state
+        logger.warning("TxSession %s(%s): %s（已发 %d/%d 样本）",
+                       state, code, reason, self.sent_samples, self.total_samples)
+        return self.status()
+
+    # ------------------------------------------------------------------
+    def transmit(
+        self,
+        iq_blocks: Any,
+        *,
+        freq_hz: Optional[float],
+        arm_manual: bool = False,
+        tx_token: Optional[str] = None,
+        gain_db: Optional[float] = None,
+        bandwidth_hz: Optional[float] = None,
+        caps: Optional[TxCapabilities] = None,
+        regulatory: Optional[RegulatoryPolicy] = None,
+        duration_s: Optional[float] = None,
+        chunk_samples: int = 4096,
+    ) -> Dict[str, Any]:
+        """执行一次受控发射，返回 :meth:`status` 同构的如实报告。"""
+        decision = self.gate.authorize(arm_manual=arm_manual, token=tx_token)
+        if not decision.allowed:
+            self.state = TX_REJECTED
+            self.reason_code = decision.code
+            self.reason = decision.reason
+            return self.status()
+        self.token = tx_token or ""
+        self.state = TX_ARMED
+        self.sent_samples = 0
+
+        if self.backend is None or not callable(
+                getattr(self.backend, "write_tx", None)):
+            return self._abort(TX_REJECTED, TX_NO_BACKEND,
+                               "没有可用的 TX 后端")
+        supports = getattr(self.backend, "supports_tx", None)
+        if callable(supports) and not supports():
+            return self._abort(TX_REJECTED, TX_NO_BACKEND,
+                               "当前后端不支持 TX 发射")
+
+        if caps is None:
+            caps = capabilities_from_hal_backend(self.backend)
+        chk = check_tx_request(caps, freq_hz=freq_hz, bandwidth_hz=bandwidth_hz,
+                               gain_db=gain_db, duration_s=duration_s,
+                               regulatory=regulatory)
+        if not chk.ok:
+            self.state = TX_REJECTED
+            self.reason_code = chk.code
+            self.reason = chk.reason
+            return self.status()
+
+        setter = getattr(self.backend, "set_frequency", None)
+        if callable(setter):
+            setter(float(freq_hz))
+
+        blocks = self._iter_blocks(iq_blocks, chunk_samples)
+        self.state = TX_TRANSMITTING
+        try:
+            for block in blocks:
+                if self.cancel_event.is_set():
+                    return self._abort(TX_CANCELLED, TX_CANCEL_REQUESTED,
+                                       self._cancel_reason)
+                code = self._gate_still_valid(decision)
+                if code:
+                    return self._abort(TX_ABORTED, code,
+                                       f"发射中人工门失效：{self._gate_reason}")
+                if not self._device_alive():
+                    return self._abort(TX_ABORTED, TX_DEVICE_LOST,
+                                       "发射中设备掉线/句柄失效，已立即停发")
+                if self._underrun():
+                    return self._abort(TX_ABORTED, TX_UNDERRUN,
+                                       "发射缓冲欠载，已立即停发")
+                with tx_authorization(decision):
+                    ok = self.backend.write_tx(block)
+                if not ok:
+                    return self._abort(TX_FAILED, TX_WRITE_FAILED,
+                                       "设备 write_tx 返回失败，已停发")
+                self.sent_samples += int(np_size(block))
+        except Exception as e:  # noqa: BLE001 - 驱动异常同样必须停发
+            return self._abort(TX_FAILED, TX_WRITE_FAILED,
+                               f"写波异常，已停发: {e}")
+        self.state = TX_COMPLETED
+        self.reason_code = "ok"
+        self.reason = "发射完成"
+        return self.status()
+
+    @staticmethod
+    def _iter_blocks(iq_blocks: Any, chunk_samples: int) -> Iterator[Any]:
+        if hasattr(iq_blocks, "shape"):
+            n = int(getattr(iq_blocks, "size", 0))
+            step = max(1, int(chunk_samples))
+            for start in range(0, n, step):
+                yield iq_blocks[start:start + step]
+            return
+        for block in iq_blocks:
+            yield block
+
+
+def np_size(block: Any) -> int:
+    size = getattr(block, "size", None)
+    if size is not None:
+        return int(size)
+    try:
+        return len(block)
+    except TypeError:
+        return 0
+
+
