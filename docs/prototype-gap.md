@@ -156,5 +156,22 @@
 当真实值**。等数据侧加载器接受 v2 后，再跑 DSO 基线并走
 `--accept-geometry-change` + reason 受控更新。
 
+**方案③ 第 1+3 步（投影单一事实源 + 可逆性，已完成）**：
+- 唯一换算核 `sky_interaction._to_screen_arrays`：`sky_to_screen`（单点）与
+  `sky_to_screen_many`（批量）都只调它；`rf_sky_view._sky_to_screen_many`
+  只做委托，视图层不再持有第二套透视公式（源码断言在测试里）。
+- 投影两类：专业模式 `PerspectiveProjection`（120° 上限不动）；
+  全天模式 `StereographicProjection`（`ALL_SKY_FOV_DEG=160°`，独立
+  `ViewState`，进入备份/退出恢复，A 切换、Esc 分层退出）。
+- 球极 `screen_scale = min/(4·tan(fov/4))`：160° 边缘正好落在短边一半；
+  fov 夹到 179.999°，tan≈1，无除零。对跖点是球极固有奇点，返回固定的
+  远处有限点，最终统一钳制到 4 个短边边距，不出现 NaN/Inf/1e6 级坐标。
+- 证据：`pytest tests/test_sky_projection_single_source.py -q` → 15 passed；
+  `pytest tests -k sky -q` → 422 passed；`pytest tests/test_astronomy.py -q`
+  → 28 passed（120° 断言未改）。可逆性覆盖画布四角/正中/地平线/近
+  160° 边缘，透视与球极均 <1e-6 px / 1e-6°。
+- 未做（下一步 2/4，按用户指令）：`main_window.py` 入口（需先报备）、
+  160° 星数/单帧/拾取实测与性能预算。
+
 **证据规则**：每项至少一条可复跑命令或一张固定时刻截图；截图必须写明 UTC/站址/FOV。
 「可复算」按 H-6：显示精度半格以内，单位与量纲一致。

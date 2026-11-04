@@ -488,6 +488,19 @@ class _BaseProjection:
     def project_vec(self, v: np.ndarray) -> tuple[float, float]:
         return self._forward(np.asarray(v, dtype=float))
 
+    def project_vec_many(self, vv) -> tuple[np.ndarray, np.ndarray]:
+        """批量正投影。
+
+        默认逐点复用 `_forward`——**不另写一套几何**；有解析批量式的子类
+        （透视/立体）再覆盖，但结果必须与 `_forward` 一致（见可逆性测试）。
+        """
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        xs = np.empty(len(arr), dtype=float)
+        ys = np.empty(len(arr), dtype=float)
+        for i, v in enumerate(arr):
+            xs[i], ys[i] = self._forward(v)
+        return xs, ys
+
     def unproject_vec(self, x: float, y: float) -> np.ndarray:
         return self._backward(x, y)
 
@@ -499,16 +512,19 @@ class StereographicProjection(_BaseProjection):
       backward: lqq = 0.25*(x²+y²); v[2] = lqq-1;  v /= (lqq+1)
 
     从南极点 (v[2]>0 侧) 投影到切平面; 保角但不保面积。最大 FOV 235°。
+    对跖点 (h=0) 是该投影的固有奇点：此处方向未定义，返回固定的远处
+    有限点（不做 0/0），绘制端统一钳制到画布外，绝不产生 NaN/Inf。
     """
 
     name = "stereographic"
     max_fov_deg = 235.0
+    FAR_SENTINEL = 1e6
 
     def _forward(self, v: np.ndarray) -> tuple[float, float]:
         r = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
         h = 0.5 * (r - v[2])
         if h <= 1e-15:
-            return float("inf"), float("inf")
+            return self.FAR_SENTINEL, 0.0
         f = 1.0 / h
         return v[0] * f, v[1] * f
 
@@ -517,6 +533,34 @@ class StereographicProjection(_BaseProjection):
         v = np.array([x, y, lqq - 1.0])
         v /= (lqq + 1.0)
         return v
+
+    def screen_scale(self, min_dim_px: float, fov_deg: float) -> float:
+        """半视场角 -> min_dim/2 像素。
+
+        离轴角 θ 的归一化半径 = 2·tan(θ/2)（中心为视图中心、对跖点发散）。
+        视场边缘 θ=fov/2，故 scale = (min_dim/2) / (2·tan(fov/4))。
+        fov 夹到 179.999°，tan(fov/4)≈1，不会除零；160° 全天模式
+        边缘仍落在 min_dim/2。
+        """
+        if min_dim_px <= 0:
+            return 1.0
+        fov = min(max(float(fov_deg), 1e-6), 179.999)
+        return (min_dim_px * 0.25) / math.tan(deg2rad(fov) * 0.25)
+
+    def project_vec_many(self, vv) -> tuple[np.ndarray, np.ndarray]:
+        """批量球极投影（解析式，与 _forward 同源）。"""
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        r = np.sqrt(np.sum(arr * arr, axis=1))
+        h = 0.5 * (r - arr[:, 2])
+        ok = h > 1e-15
+        xs = np.full(len(arr), np.nan, dtype=float)
+        ys = np.full(len(arr), np.nan, dtype=float)
+        f = 1.0 / h[ok]
+        xs[ok] = arr[ok, 0] * f
+        ys[ok] = arr[ok, 1] * f
+        xs[~ok] = self.FAR_SENTINEL
+        ys[~ok] = 0.0
+        return xs, ys
 
 
 class OrthographicProjection(_BaseProjection):
@@ -617,6 +661,18 @@ class PerspectiveProjection(_BaseProjection):
         if min_dim_px <= 0:
             return 1.0
         return (min_dim_px * 0.5) / math.tan(deg2rad(fov_deg) * 0.5)
+
+    def project_vec_many(self, vv) -> tuple[np.ndarray, np.ndarray]:
+        """批量透视投影（解析式，与 _forward 同源）。"""
+        arr = np.atleast_2d(np.asarray(vv, dtype=float))
+        denom = -arr[:, 2]
+        ok = denom > 1e-12
+        xs = np.full(len(arr), np.nan, dtype=float)
+        ys = np.full(len(arr), np.nan, dtype=float)
+        inv = 1.0 / denom[ok]
+        xs[ok] = arr[ok, 0] * inv
+        ys[ok] = arr[ok, 1] * inv
+        return xs, ys
 
 
 # ---------------------------------------------------------------------------

@@ -91,6 +91,7 @@ from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
 from mbdsdr_ai.celestial_geometry import (
     AzimuthalEquidistantProjection,
     PerspectiveProjection,
+    StereographicProjection,
     GroundStation,
     gmst,
     vec_from_radec,
@@ -104,9 +105,9 @@ from mbdsdr_ai.celestial_geometry import (
 from mbdsdr_ai.sky_interaction import (
     ViewState,
     SkyInteractionHandler,
-    build_view_rotation,
     pick_object,
     sky_to_screen,
+    sky_to_screen_many,
     screen_to_sky,
 )
 from mbdsdr_ai import skyengine
@@ -1462,6 +1463,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 「云台跟随」开关：checked 后主窗口在同一 500ms 拍内驱动云台指向卫星。
     # 需要先有可用云台后端（ai-sdr-mini 板载 / rotctld），否则按钮置灰。
     gimbal_follow_toggled = Signal(bool)
+    # 全天模式开关（立体投影 160°）；主窗口可据此同步按钮文案。
+    all_sky_mode_changed = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1502,6 +1505,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.view_state = ViewState(center_alt=90.0, fov_deg=120.0,
                                     min_fov=0.5, max_fov=120.0)
         self.projection = PerspectiveProjection()
+        # 全天模式：独立 ViewState（隔离专业模式的指向/FOV）+ 立体投影。
+        # 主视场仍是透视 120° 上限，只有该模式内部允许到 160°。
+        self.ALL_SKY_FOV_DEG = 160.0
+        self._all_sky_active = False
+        self._all_sky_state = ViewState(
+            center_alt=90.0, fov_deg=self.ALL_SKY_FOV_DEG,
+            min_fov=0.5, max_fov=self.ALL_SKY_FOV_DEG)
+        self._all_sky_projection = StereographicProjection()
+        self._pro_state_backup = None
+        self._pro_projection_backup = None
+        self.setFocusPolicy(Qt.StrongFocus)
         # 状态卡滚动（内容超过可视高度时）：只动绘制偏移，不改任何数据。
         # 光标在卡内时滚轮滚卡，不在卡内时仍是 FOV 缩放（两套互不抢）。
         self._status_card_scroll = 0.0
@@ -3142,6 +3156,58 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _widget_size_tuple(self) -> Tuple[int, int]:
         return int(self.width()), int(self.height())
 
+    # ------------------------------------------------------------------ 全天模式
+    @property
+    def all_sky_active(self) -> bool:
+        return self._all_sky_active
+
+    def set_all_sky_mode(self, enabled: bool) -> None:
+        """切换全天模式（立体投影，FOV 上限 160°）。
+
+        入口：视图内按 A 切换、Esc 退出（分层退出：先退全天，再交给上层）。
+        专业模式的 ViewState/投影整体备份，退出时原样恢复——两套状态互不
+        污染。主视场仍是透视 120°，本方法不改任何全局常量。
+        """
+        enabled = bool(enabled)
+        if enabled == self._all_sky_active:
+            return
+        if enabled:
+            self._pro_state_backup = self.view_state.copy()
+            self._pro_projection_backup = self.projection
+            st = self._all_sky_state
+            cur = self.view_state
+            st.center_az = cur.center_az
+            st.center_alt = cur.center_alt
+            st.fov_deg = self.ALL_SKY_FOV_DEG
+            st._clamp()
+            self.view_state = st
+            self.projection = self._all_sky_projection
+        else:
+            if self._pro_state_backup is None:
+                self._all_sky_active = False
+                return
+            self.view_state = self._pro_state_backup
+            self.projection = self._pro_projection_backup
+            self._pro_state_backup = None
+            self._pro_projection_backup = None
+        self._all_sky_active = enabled
+        self._proj = self.projection
+        self._cancel_goto_anim()
+        self._status_card_scroll = 0.0
+        self.update()
+        self.all_sky_mode_changed.emit(enabled)
+
+    def keyPressEvent(self, event):  # noqa: N802 (Qt 命名)
+        if event.key() == Qt.Key_Escape and self._all_sky_active:
+            self.set_all_sky_mode(False)
+            event.accept()
+            return
+        if event.key() == Qt.Key_A:
+            self.set_all_sky_mode(not self._all_sky_active)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def _sky_center(self) -> Tuple[float, float]:
         return self.width() / 2.0, self.height() / 2.0
 
@@ -3160,39 +3226,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _sky_to_screen_many(self, az_deg, alt_deg) \
             -> Tuple[np.ndarray, np.ndarray]:
-        """批量正投影（数学与 _sky_to_screen 完全一致，只是不逐星重建矩阵）。
+        """批量正投影：直接委托 sky_interaction.sky_to_screen_many。
 
-        120° 视场 1265 颗星逐点投影实测 ~47ms（每次 sky_to_screen 都重算
-        build_view_rotation），本函数把旋转矩阵算一次、位置批量矩阵乘。
-        非透视投影回退逐点路径，避免维护第二套投影口径。
+        与单点 `_sky_to_screen` 共用 `_to_screen_arrays` 唯一换算核；投影
+        换成球极（全天模式）时同样生效，不再有第二套透视公式。
         """
-        az = np.radians(np.asarray(az_deg, dtype=float))
-        alt = np.radians(np.asarray(alt_deg, dtype=float))
-        if not isinstance(self.projection, PerspectiveProjection):
-            pts = [self._sky_to_screen(float(a), float(b))
-                   for a, b in zip(np.degrees(az), np.degrees(alt))]
-            return (np.array([p.x() for p in pts], dtype=float),
-                    np.array([p.y() for p in pts], dtype=float))
-        ca = np.cos(alt)
-        vec = np.column_stack((ca * np.cos(az), ca * np.sin(az), -np.sin(alt)))
-        vv = vec @ build_view_rotation(self.view_state).T
-        front = -vv[:, 2] > 1e-12
-        inv = np.zeros(len(vv), dtype=float)
-        inv[front] = 1.0 / (-vv[front, 2])
-        x_n = np.where(front, vv[:, 0] * inv, np.nan)
-        y_n = np.where(front, vv[:, 1] * inv, np.nan)
-        w, h = self._widget_size_tuple()
-        ppr = float(self.projection.screen_scale(
-            float(min(w, h)), float(self.view_state.fov_deg)))
-        cx, cy = w / 2.0, h / 2.0
-        px = cx + y_n * ppr
-        py = cy - x_n * ppr
-        if abs(self.view_state.rotation) > 1e-9:
-            ang = math.radians(float(self.view_state.rotation))
-            dx, dy = px - cx, py - cy
-            px = cx + dx * math.cos(ang) - dy * math.sin(ang)
-            py = cy + dx * math.sin(ang) + dy * math.cos(ang)
-        return px, py
+        return sky_to_screen_many(az_deg, alt_deg, self.view_state,
+                                  self.projection, self._widget_size_tuple())
 
     def _sky_to_screen_finite(self, azimuth_deg: float,
                               elevation_deg: float) -> Optional[QPointF]:
@@ -5980,7 +6020,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setFont(self._font)
         painter.setPen(dim)
         painter.drawText(card_x + 12, y,
-                         "滚轮缩放 | 拖拽转动摄像机 | 双击居中")
+                         ("全天 160° · A/Esc 退出 | 滚轮缩放"
+                          if self._all_sky_active else
+                          "滚轮缩放 | 拖拽转动摄像机 | 双击居中 | A 全天"))
         # 结束内容裁剪与滚动偏移；滚动条画在裁剪区外，贴卡片右缘。
         painter.restore()
 

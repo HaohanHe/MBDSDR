@@ -53,6 +53,7 @@ __all__ = [
     "SkyInteractionHandler",
     "screen_to_sky",
     "sky_to_screen",
+    "sky_to_screen_many",
     "pick_object",
     "angular_distance_deg",
     "build_view_rotation",
@@ -333,6 +334,45 @@ def _widget_center(widget_size: Tuple[int, int]) -> Tuple[float, float]:
     return w / 2.0, h / 2.0
 
 
+# 离屏点的坐标钳制边距（单位：画布短边）。只作用于不可见点，保证 160°/
+# 179.9° 边缘附近的归一化坐标不会长成 1e6 像素；可见点的值不受影响。
+SCREEN_OFFSCREEN_CLAMP_FACTOR = 4.0
+
+
+def _to_screen_arrays(v_view: np.ndarray, view: "ViewState",
+                      projection: Any, widget_size: Tuple[int, int]
+                      ) -> Tuple[np.ndarray, np.ndarray]:
+    """视图系单位向量 -> 屏幕像素（**唯一**的天球到屏幕换算核）。
+
+    `sky_to_screen`（单点）与 `sky_to_screen_many`（批量）都只调用这里，
+    绘制、拾取、标签、网格与地平线因此共享同一份投影口径。
+    """
+    x_n, y_n = projection.project_vec_many(v_view)
+
+    ppr = _pixel_per_rad(view, widget_size, projection)
+    cx, cy = _widget_center(widget_size)
+
+    # celestial_geometry: 北(az=0) -> +x_n, 东(az=90) -> +y_n。
+    # 屏幕: 北朝上（py 减小），东朝右（px 增大）。
+    px = cx + y_n * ppr
+    py = cy - x_n * ppr
+
+    if abs(view.rotation) > 1e-9:
+        ang = deg2rad(view.rotation)
+        ca, sa = math.cos(ang), math.sin(ang)
+        dx, dy = px - cx, py - cy
+        px = cx + dx * ca - dy * sa
+        py = cy + dx * sa + dy * ca
+
+    # 非有限值（透视背面/球极对跖点）保持非有限，交给调用方过滤；
+    # 有限但远在画布外的点钳到固定边距，避免极端 FOV 下坐标爆炸。
+    min_dim = float(min(widget_size)) or 1.0
+    lim = SCREEN_OFFSCREEN_CLAMP_FACTOR * min_dim
+    px = np.where(np.isfinite(px), np.clip(px, cx - lim, cx + lim), px)
+    py = np.where(np.isfinite(py), np.clip(py, cy - lim, cy + lim), py)
+    return px, py
+
+
 # ---------------------------------------------------------------------------
 # 正投影: (az, alt) -> 屏幕像素
 #     1. v = vec_from_azalt(az, alt)                      (地平系单位向量)
@@ -360,29 +400,30 @@ def sky_to_screen(az_deg: float, alt_deg: float,
         projection = AzimuthalEquidistantProjection()
 
     v = vec_from_azalt(az_deg, alt_deg)
-    R = build_view_rotation(view)
-    v_view = R @ v
+    v_view = (build_view_rotation(view) @ v)[None, :]
+    px, py = _to_screen_arrays(v_view, view, projection, widget_size)
+    return float(px[0]), float(py[0])
 
-    x_n, y_n = projection.project_vec(v_view)
 
-    ppr = _pixel_per_rad(view, widget_size, projection)
-    cx, cy = _widget_center(widget_size)
+def sky_to_screen_many(az_deg, alt_deg,
+                       view: ViewState,
+                       projection: Optional[Any] = None,
+                       widget_size: Tuple[int, int] = (400, 400)
+                       ) -> Tuple[np.ndarray, np.ndarray]:
+    """批量正投影；与 `sky_to_screen` 共用 `_to_screen_arrays`。
 
-    # 归一化坐标 -> 屏幕像素。
-    # celestial_geometry 中: 北(az=0) -> +x_n, 东(az=90) -> +y_n。
-    # 我们要: 北 -> 屏幕上方 (py 减小), 东 -> 屏幕右方 (px 增大)。
-    #   px = cx + y_n*ppr ; py = cy - x_n*ppr
-    px = cx + y_n * ppr
-    py = cy - x_n * ppr
+    数组语义：可见点有限；透视背面/球极对跖点返回 NaN（调用方按
+    `np.isfinite` 过滤）。绘制层不得再写第二套投影公式。
+    """
+    if projection is None:
+        projection = AzimuthalEquidistantProjection()
 
-    # 整体旋转 (对应 rf_sky_view._rotation): 绕中心旋转屏幕坐标
-    if abs(view.rotation) > 1e-9:
-        ang = deg2rad(view.rotation)
-        dx, dy = px - cx, py - cy
-        px = cx + dx * math.cos(ang) - dy * math.sin(ang)
-        py = cy + dx * math.sin(ang) + dy * math.cos(ang)
-
-    return px, py
+    az = np.radians(np.asarray(az_deg, dtype=float))
+    alt = np.radians(np.asarray(alt_deg, dtype=float))
+    ca = np.cos(alt)
+    vec = np.column_stack((ca * np.cos(az), ca * np.sin(az), -np.sin(alt)))
+    v_view = vec @ build_view_rotation(view).T
+    return _to_screen_arrays(v_view, view, projection, widget_size)
 
 
 # ---------------------------------------------------------------------------
