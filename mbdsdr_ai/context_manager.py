@@ -19,7 +19,7 @@ import os
 import time
 import hashlib
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Iterable
 
 
 # 常见模型的真实上下文窗口（参考各模型官方文档）
@@ -32,6 +32,16 @@ MODEL_CONTEXT_WINDOWS = {
     "gpt-4o": 128000, "gpt-4-turbo": 128000, "gpt-3.5": 16384,
 }
 DEFAULT_CONTEXT_WINDOW = 8192
+
+# 压缩时为摘要消息预留的 token（硬上限里扣掉，避免「保留区刚好占满窗口、
+# 再加一条摘要就出窗」）。实际摘要由模型生成，长度不受控，这里只是常见预留量；
+# 小窗口按 5% 封顶，避免预留把「最近 N 轮」挤出窗口。
+SUMMARY_RESERVE_TOKENS = 200
+
+
+def summary_reserve_tokens(max_context_tokens: int) -> int:
+    """摘要预留量：常见 200 token，小窗口按窗口 5% 收缩。"""
+    return min(SUMMARY_RESERVE_TOKENS, max(0, int(max_context_tokens * 0.05)))
 
 
 def get_model_context_window(model_name: str) -> int:
@@ -228,6 +238,11 @@ class ContextManager:
         self.compaction_count = 0
         self.last_compaction_time = None
         self._system_tokens_cache = None
+        # P7.3：关键会话状态（Agent 在状态型工具成功后登记）。压缩时原样
+        # 保留在摘要里，避免出现「压缩后不记得当前频率/模式却照常作答」。
+        self.state_snapshot: Dict[str, Any] = {}
+        self.state_meta: Dict[str, Dict[str, Any]] = {}
+        self.last_compaction_report: Optional[Dict[str, Any]] = None
 
     # ── 系统上下文 ──────────────────────────────────────
 
@@ -281,7 +296,62 @@ class ContextManager:
     def clear_history(self):
         """清空对话历史（开启新 epoch）。"""
         self.history = []
+        self.state_snapshot = {}
+        self.state_meta = {}
         self.epoch += 1
+
+    # ── 关键状态（P7.3） ────────────────────────────────
+
+    def set_state(self, key: str, value: Any, source: str = "") -> Any:
+        """登记一条跨压缩保留的关键状态（如当前频率/模式/采样率）。
+
+        值必须可 JSON 序列化或 repr 安全；只登记链路/设备真实生效的值，
+        不要拿模型的口头承诺当状态。
+        """
+        key = str(key)
+        prev = self.state_snapshot.get(key)
+        self.state_snapshot[key] = value
+        self.state_meta[key] = {
+            "source": str(source),
+            "updated_at": time.time(),
+            "changed": prev != value,
+        }
+        return value
+
+    def state_section(self) -> str:
+        """把状态快照渲染成可注入摘要的文本（空快照返回空串）。"""
+        if not self.state_snapshot:
+            return ""
+        parts = []
+        for k in sorted(self.state_snapshot):
+            v = self.state_snapshot[k]
+            try:
+                text = json.dumps(v, ensure_ascii=False)
+            except Exception:
+                text = repr(v)
+            if len(text) > 200:
+                text = text[:200] + "…"
+            parts.append(f"{k}={text}")
+        return "[会话状态（跨压缩保留）]\n" + "\n".join(parts)
+
+    def state_health(self, required_keys: Optional[Iterable[str]] = None) -> Dict[str, Any]:
+        """状态自检：哪些关键状态还在、哪些丢了、丢了该怎么重新获取。
+
+        required_keys 省略时用已登记过的键集合。丢失时不假装记得——返回
+        missing 与可直接展示给模型的 reacquire_hint。
+        """
+        required = list(required_keys) if required_keys is not None \
+            else list(self.state_meta.keys())
+        missing = [k for k in required if k not in self.state_snapshot]
+        hint = ""
+        if missing:
+            hint = ("以下关键状态在压缩/故障后丢失：" + "、".join(missing)
+                    + "。回答前必须先用对应工具重新读取真实值，不得凭上下文印象作答。")
+        return {
+            "tracked": sorted(self.state_snapshot),
+            "missing": missing,
+            "reacquire_hint": hint,
+        }
 
     # ── Token 统计 ──────────────────────────────────────
 
@@ -354,18 +424,31 @@ class ContextManager:
             return content[idx + 1:] if idx != -1 else content
         return None
 
-    def _select_recent_messages(self, available_for_history: int):
+    def _select_recent_messages(self, available_for_history: int,
+                                hard_limit_tokens: Optional[int] = None):
         """
         从后往前遍历历史，选出要原样保留的近期消息。
 
-        约束：
-        1. 至少保留 recent_turns_keep 轮（一轮 = 一条 user 消息及其后续 assistant 回复）。
-        2. 不割裂工具调用链：若保留了 role=tool 消息，必须连带保留其前面
-           带 tool_calls 的 assistant 消息。
-        3. 累计 token 尽量不超过 available_for_history（预算）。
+        约束（优先级从高到低）：
+        1. **硬上限**：保留区 token 不得超过 hard_limit_tokens（默认 =
+           窗口 - 系统开销）。这是防「单个用户轮次里连开几十轮工具、保留区
+           越滚越大」的兜底，超了就停，哪怕还没凑够轮数。
+        2. **轮数下限**：至少保留 recent_turns_keep 轮（一轮 = 一条 user
+           消息及其后续 assistant 回复）。软预算内凑不够时，允许越过软预算
+           继续向前，直到凑够或触到硬上限。
+        3. **软预算**：available_for_history（压缩目标）。轮数已够且下一
+           条更旧的消息会超软预算时停。
+        4. 不割裂工具调用链：若保留了 role=tool 消息，必须连带保留其前面
+           带 tool_calls 的 assistant 消息（此修正可能让保留区略超硬上限，
+           最多一条 assistant 消息——链完整性优先，否则请求本身非法）。
 
         返回 (kept, removed) 两个消息列表。
         """
+        if hard_limit_tokens is None:
+            hard_limit_tokens = max(
+                0, self.max_context_tokens - self.get_system_tokens()
+                - summary_reserve_tokens(self.max_context_tokens))
+        min_turns = max(1, int(self.recent_turns_keep))
         kept: List[Dict[str, Any]] = []
         current_tokens = 0
         user_turns_seen = 0
@@ -376,12 +459,12 @@ class ContextManager:
             msg_tokens = estimate_message_tokens(msg)
             is_user = msg.get("role") == "user"
 
-            over_budget = current_tokens + msg_tokens > available_for_history
-            # 还没攒够 recent_turns_keep 轮时，超预算也必须继续保留
-            need_more_turns = user_turns_seen < self.recent_turns_keep
-
-            if over_budget and not need_more_turns and kept:
-                break
+            if kept:
+                if current_tokens + msg_tokens > hard_limit_tokens:
+                    break
+                if (current_tokens + msg_tokens > available_for_history
+                        and user_turns_seen >= min_turns):
+                    break
 
             kept.insert(0, msg)
             current_tokens += msg_tokens
@@ -424,16 +507,22 @@ class ContextManager:
         if not self.needs_compaction() and custom_summary is None:
             return False
 
-        # 目标历史 token 预算
+        # 目标历史 token 预算（软预算）与窗口硬上限
         target_tokens = int(self.max_context_tokens * self.compaction_target_ratio)
         system_tokens = self.get_system_tokens()
         available_for_history = max(0, target_tokens - system_tokens)
+        hard_limit_tokens = max(
+            0, self.max_context_tokens - system_tokens
+            - summary_reserve_tokens(self.max_context_tokens))
 
         # 检测已有摘要（anchored summary：合并而非重写）
         previous_summary = self._find_existing_summary()
 
         # 选保留区间
-        kept, removed = self._select_recent_messages(available_for_history)
+        kept, removed = self._select_recent_messages(
+            available_for_history, hard_limit_tokens=hard_limit_tokens)
+        kept_tokens = sum(estimate_message_tokens(m) for m in kept)
+        recent_turns_kept = sum(1 for m in kept if m.get("role") == "user")
 
         # 生成摘要
         summary = custom_summary
@@ -455,6 +544,11 @@ class ContextManager:
                            f"保留最近 {len(kept)} 条。")
 
         # 重建历史：摘要 + 保留的消息
+        # P7.3：关键状态快照无条件拼进摘要（不依赖摘要模型是否记得），
+        # 这样即使摘要生成失败/失真，频率、模式等状态也不会丢。
+        state_text = self.state_section()
+        if state_text:
+            summary = (f"{summary}\n\n{state_text}" if summary else state_text)
         new_history: List[Dict[str, Any]] = []
         if summary:
             new_history.append({
@@ -467,6 +561,24 @@ class ContextManager:
         self.epoch += 1
         self.compaction_count += 1
         self.last_compaction_time = time.time()
+        self.last_compaction_report = {
+            "epoch": self.epoch - 1,
+            "removed_messages": len(removed),
+            "kept_messages": len(kept),
+            "target_tokens": target_tokens,
+            "available_for_history": available_for_history,
+            "hard_limit_tokens": hard_limit_tokens,
+            "kept_tokens": kept_tokens,
+            "recent_turns_kept": recent_turns_kept,
+            "recent_turns_required": max(1, int(self.recent_turns_keep)),
+            # 软预算被越过（为满足轮数下限）时如实标记，便于诊断解释
+            "kept_over_soft_budget": kept_tokens > available_for_history,
+            "summary_chars": len(summary or ""),
+            "state_preserved": sorted(self.state_snapshot),
+            "state_missing": self.state_health()["missing"],
+            "system_tokens": system_tokens,
+            "history_tokens": self.get_history_tokens(),
+        }
         return True
 
     def _messages_to_text(self, messages: List[Dict[str, Any]]) -> str:

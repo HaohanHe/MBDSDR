@@ -3425,6 +3425,39 @@ class MBDSDRAgent:
             return defs, None
         return sel.definitions, sel
 
+    #: 只登记这些「真实会话状态」参数，值来自工具入参而非模型口头承诺
+    _STATE_ARG_KEYS = ("frequency_hz", "center_freq", "sample_rate",
+                       "bandwidth", "mode", "volume", "squelch_db",
+                       "gain_db", "device_type", "antenna", "ppm")
+
+    def _capture_tool_state(self, tool_name: str, result) -> None:
+        """P7.3：工具成功后把状态型参数登记进 ContextManager（跨压缩保留）。"""
+        try:
+            args = getattr(result, "args", None) or {}
+        except Exception:
+            return
+        if not isinstance(args, dict):
+            return
+        for k in self._STATE_ARG_KEYS:
+            if k in args and args[k] not in (None, "", []):
+                try:
+                    self.context_manager.set_state(k, args[k], source=tool_name)
+                except Exception:
+                    pass
+
+    def _check_state_after_compaction(self) -> None:
+        """P7.3：压缩后自检关键状态；丢了就明确要求重新获取，不许假装记得。"""
+        try:
+            health = self.context_manager.state_health()
+        except Exception:
+            return
+        if health.get("missing"):
+            try:
+                self.context_manager.add_message(
+                    "system", "[状态告警] " + health["reacquire_hint"])
+            except Exception:
+                pass
+
     def chat(self, user_input: str, max_tool_rounds: int = 10,
              on_delta=None) -> Dict[str, Any]:
         """
@@ -3502,8 +3535,7 @@ class MBDSDRAgent:
             if self.context_manager.needs_compaction():
                 self.context_manager.compact()
                 compacted = True
-
-            # 构建 API 消息
+                self._check_state_after_compaction()
             messages = self.context_manager.build_api_messages()
 
             # 调用 LLM（流式，on_delta 回调实时吐字）
@@ -3627,6 +3659,10 @@ class MBDSDRAgent:
                     result = _safe_tool_call()
                 all_tool_results.append(result.to_dict())
 
+                # P7.3：把状态型工具真实生效的参数登记为跨压缩状态
+                if getattr(result, "success", False):
+                    self._capture_tool_state(tool_name, result)
+
                 # repeat-call guard：检测连续相同工具+参数，递增提醒
                 try:
                     canon = json.dumps(fn.get("arguments", ""), sort_keys=True, ensure_ascii=False)
@@ -3664,6 +3700,7 @@ class MBDSDRAgent:
         if self.context_manager.needs_compaction():
             self.context_manager.compact()
             compacted = True
+            self._check_state_after_compaction()
 
         # 6. 遗忘旧记忆（每 10 次调用执行一次）
         if self.total_agent_calls % 10 == 0:
