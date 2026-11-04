@@ -10,7 +10,8 @@
   - 磁盘缓存每个 CATNR 一个 .tle 文件（名称 + line1 + line2 三行）
   - 缓存有效期 24 小时；网络失败时即便缓存过期也尽量回退（旧数据好过没有）
 
-注意：本模块自包含，不依赖 mbdsdr_ai/orbit.py，不做轨道传播。
+注意：不做轨道传播；取数/缓存统一委托 mbdsdr_ai.tle_fetch（P12），离线判定
+复用 orbit._network_disabled（延迟导入，避免模块加载期循环依赖）。
 """
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Any
@@ -40,6 +41,10 @@ _CACHE_TTL = 24 * 3600.0
 _UA = "MBDSDR/1.0 (new-spacetime)"
 
 
+class TLEFetchError(RuntimeError):
+    """TLE 获取失败（本模块内部用；fetch 对外仍以 None 表示诚实空态）。"""
+
+
 @dataclass
 class TLEEntry:
     name: str               # 数据侧真实对象名（TLE line0），不得被声明名覆盖
@@ -54,6 +59,10 @@ class TLEEntry:
     identity_detail: str = ""
     freshness_tier: str = ""    # fresh / usable / expired / dead / unknown
     pass_eligible: bool = False
+    # P12 离线降级留痕（UI/诊断可见）
+    offline: bool = False
+    offline_label: str = ""
+    refresh_status: str = ""    # network / cache / memory / not_updated
 
 
 class TLEManager:
@@ -66,11 +75,35 @@ class TLEManager:
         self.cache_dir = cache_dir
         self.timeout = float(timeout)
         self._mem: Dict[int, TLEEntry] = {}
+        self._tle_store = None
         try:
             os.makedirs(self.cache_dir, exist_ok=True)
         except OSError:
             # 缓存目录不可写时退化为仅内存缓存，不影响联网拉取
             pass
+
+    def _store(self):
+        """P12：TLE 取数统一走 tle_fetch（24h 门槛 + 退避 + 离线标注）。"""
+        if self._tle_store is None:
+            from .tle_fetch import FetchPolicy, TleFetcher
+            from .orbit import _network_disabled
+            self._tle_store = TleFetcher(
+                opener=lambda url, t, d: self._http_get(url),
+                cache_dir_provider=lambda: self.cache_dir,
+                offline_provider=_network_disabled,
+                policy=FetchPolicy(
+                    fresh_max_hours=_CACHE_TTL / 3600.0,
+                    request_timeout_s=self.timeout,
+                    hard_deadline_s=self.timeout + 5.0,
+                ),
+                error_cls=TLEFetchError,
+                source="celestrak",
+            )
+        return self._tle_store
+
+    def source_status(self, now: Optional[float] = None) -> Dict[str, Any]:
+        """TLE 源健康度（最近成功/失败、退避剩余）——诊断/UI 直接可读。"""
+        return self._store().health_report(now=now)
 
     # ------------------------------------------------------------------ HTTP
     def _http_get(self, url: str) -> str:
@@ -126,45 +159,44 @@ class TLEManager:
         TLE line0 的真实对象名；错配会留在 ``identity_status="mismatch"``。
         """
         now = time.time()
+        disk = self._read_disk(catnr)   # 失败/校验不过时的本地回退
 
-        # 1) 内存缓存（未过期）
-        ent = self._mem.get(catnr)
-        if ent and (now - ent.fetched_at) < _CACHE_TTL:
-            self._annotate(ent, name)
-            return ent
-
-        # 2) 磁盘缓存（未过期）
-        disk = self._read_disk(catnr)
-        if disk is not None and (now - disk.fetched_at) < _CACHE_TTL:
-            disk.source = "cache"
-            self._annotate(disk, name)
-            self._mem[catnr] = disk
-            return disk
-
-        # 3) 联网
+        # 1) 取数/缓存统一经 tle_fetch（24h 门槛、退避、离线标注）
         try:
-            url = f"{CELESTRAK_BASE}?CATNR={catnr}&FORMAT=tle"
-            text = self._http_get(url)
-            entries = self.parse_tle_text(text)
-            for e in entries:
-                if e.catnr == catnr:
-                    e.source = "celestrak"
-                    e.fetched_at = now
-                    # 不覆盖 e.name：真实对象名是身份校验的唯一证据
-                    self._annotate(e, name)
-                    self._mem[catnr] = e
-                    self._write_disk(e)
-                    return e
-            # 响应里没解析出目标卫星：不伪造，返回 None
-            return None
-        except Exception:
-            # 4) 联网失败：回退本地磁盘缓存（即便过期也用，旧数据好过没有）
+            rec = self._store().fetch_record(
+                catnr, max_age_hours=_CACHE_TTL / 3600.0)
+        except TLEFetchError:
+            # 4) 取数失败：回退本地磁盘缓存（即便过期也用，旧数据好过没有）
             if disk is not None:
                 disk.source = "cache"
                 self._annotate(disk, name)
                 self._mem[catnr] = disk
                 return disk
             return None
+
+        # 下载/缓存内容仍须过校验和（store 只校验结构，不校验 TLE 校验位）
+        if not (self.validate_checksum(rec["line1"])
+                and self.validate_checksum(rec["line2"])):
+            if disk is not None:
+                disk.source = "cache"
+                self._annotate(disk, name)
+                self._mem[catnr] = disk
+                return disk
+            return None
+
+        e = TLEEntry(
+            name=rec.get("name") or f"NORAD {catnr}",
+            line1=rec["line1"], line2=rec["line2"], catnr=catnr,
+            source="celestrak" if rec["source"] == "celestrak" else "cache",
+            fetched_at=float(rec.get("fetched_at") or now),
+            offline=bool(rec.get("offline")),
+            offline_label=str(rec.get("offline_label") or ""),
+            refresh_status=str(rec.get("refresh_status") or ""),
+        )
+        # 不覆盖 e.name：真实对象名是身份校验的唯一证据
+        self._annotate(e, name)
+        self._mem[catnr] = e
+        return e
 
     @staticmethod
     def _annotate(entry: TLEEntry, declared_name: str = "") -> None:

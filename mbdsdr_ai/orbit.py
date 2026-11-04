@@ -166,80 +166,58 @@ def tle_epoch_iso(line1: str) -> str:
         return ""
 
 
+def _tle_opener(url: str, timeout_s: float, deadline_s: float) -> bytes:
+    """把 urllib 请求包成 tle_fetch 需要的 opener（返回原始字节）。"""
+    req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})
+    return _bounded_urlopen(req, timeout_s, deadline_s).read()
+
+
+_TLE_FETCHER: Optional[Any] = None
+
+
+def _get_fetcher():
+    """单例 TLE 获取器；缓存目录/内存字典用 provider 动态读取。
+
+    provider 形式让测试仍可 monkeypatch ``orbit._CACHE_DIR`` /
+    ``orbit._TLE_CACHE`` 生效（与重构前行为一致）。
+    """
+    global _TLE_FETCHER
+    if _TLE_FETCHER is None:
+        from .tle_fetch import FetchPolicy, TleFetcher
+        _TLE_FETCHER = TleFetcher(
+            opener=_tle_opener,
+            cache_dir_provider=lambda: _CACHE_DIR,
+            memory_provider=lambda: _TLE_CACHE,
+            offline_provider=_network_disabled,
+            clock=time.time,
+            error_cls=TLEUnavailableError,
+            source="celestrak",
+            policy=FetchPolicy(request_timeout_s=_FETCH_TIMEOUT_S,
+                               hard_deadline_s=_FETCH_HARD_DEADLINE_S),
+        )
+    return _TLE_FETCHER
+
+
+def tle_source_status(now: Optional[float] = None) -> Dict[str, Any]:
+    """TLE 源健康度（最近成功/失败、退避剩余、策略）——供诊断与 UI。"""
+    return _get_fetcher().health_report(now=now)
+
+
+def refresh_tle_round(entries, reason: str = "startup",
+                      now: Optional[float] = None) -> Dict[str, Any]:
+    """跑一轮刷新调度：按 24h 门槛去重、退避期间不重试（P12）。"""
+    return _get_fetcher().refresh_round(entries, reason=reason, now=now)
+
+
 def fetch_tle(catnr: int, max_age_hours: float = 24.0) -> Tuple[str, str]:
     """按 CATNR 从 celestrak 拉真实 TLE，内存+磁盘缓存。失败抛异常。
 
     离线（MBDSDR_OFFLINE）或下载失败时：仅认缓存，无可用缓存即抛
-    RuntimeError/TLEUnavailableError——绝不假造 TLE、绝不无限阻塞。
+    TLEUnavailableError——绝不假造 TLE、绝不无限阻塞。刷新门槛、失败
+    退避与限速由 :mod:`mbdsdr_ai.tle_fetch` 统一执行。
     """
-    key = str(catnr)
-    now = time.time()
-    if key in _TLE_CACHE and now - _TLE_CACHE[key][0] < max_age_hours * 3600.0:
-        return _TLE_CACHE[key][1]
-    os.makedirs(_CACHE_DIR, exist_ok=True)
-    cf = os.path.join(_CACHE_DIR, f"{catnr}.tle")
-
-    def _read_cache() -> Optional[Tuple[str, str]]:
-        if os.path.exists(cf) and now - os.path.getmtime(cf) < max_age_hours * 3600.0:
-            lines = open(cf).read().splitlines()
-            if len(lines) >= 3:
-                tle = (lines[1].strip(), lines[2].strip())
-                _TLE_CACHE[key] = (now, tle)
-                return tle
-        return None
-
-    cached = _read_cache()
-    if cached is not None:
-        return cached
-
-    if _network_disabled():
-        raise TLEUnavailableError(
-            f"离线模式（{_OFFLINE_ENV}）且无 {cf} 缓存，无法获取 CATNR {catnr} 的 TLE"
-        )
-
-    url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={catnr}&FORMAT=tle"
-    req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})
-    try:
-        data = _bounded_urlopen(req, _FETCH_TIMEOUT_S, _FETCH_HARD_DEADLINE_S).read().decode()
-    except Exception as e:  # noqa: BLE001 - 网络/DNS/超时统一降级
-        # 缓存过期但文件仍在：过期即不可信，不冒充实时 TLE，诚实报错
-        raise TLEUnavailableError(
-            f"获取 CATNR {catnr} 的 TLE 失败（{type(e).__name__}: {e}）"
-        ) from e
-    lines = [l for l in data.splitlines() if l.strip()]
-    if len(lines) < 3 or not lines[1].startswith("1 ") or not lines[2].startswith("2 "):
-        raise RuntimeError(f"celestrak 返回异常: {data[:80]!r}")
-    tle = (lines[1].strip(), lines[2].strip())
-    with open(cf, "w") as f:
-        f.write("\n".join(lines[:3]))
-    _TLE_CACHE[key] = (now, tle)
-    return tle
-
-
-def _read_cached_tle(catnr: int) -> Optional[Dict[str, Any]]:
-    """读取磁盘缓存（名称 + line1 + line2 + 缓存 mtime）；结构不自洽返回 None。"""
-    cf = os.path.join(_CACHE_DIR, f"{catnr}.tle")
-    if not os.path.isfile(cf):
-        return None
-    try:
-        with open(cf, "r", encoding="utf-8", errors="replace") as fh:
-            lines = [ln.strip() for ln in fh.read().splitlines()]
-        lines = [ln for ln in lines if ln]
-        if len(lines) < 3 or not lines[1].startswith("1 ") \
-                or not lines[2].startswith("2 "):
-            return None
-        if lines[1][2:7].strip() != lines[2][2:7].strip():
-            return None
-        return {
-            "catnr": int(catnr),
-            "name": lines[0],
-            "line1": lines[1],
-            "line2": lines[2],
-            "fetched_at": os.path.getmtime(cf),
-            "cache_path": cf,
-        }
-    except (OSError, ValueError, IndexError):
-        return None
+    rec = _get_fetcher().fetch_record(catnr, max_age_hours=max_age_hours)
+    return rec["line1"], rec["line2"]
 
 
 def fetch_tle_record(catnr: int, max_age_hours: float = 24.0,
@@ -258,70 +236,8 @@ def fetch_tle_record(catnr: int, max_age_hours: float = 24.0,
     ``refresh_status``: ``memory`` / ``cache``（缓存未过期）/ ``network``
     （本次联网成功）/ ``not_updated``（联网失败或离线，沿用旧值）。
     """
-    ref = time.time() if now is None else float(now)
-    key = str(catnr)
-    disk = _read_cached_tle(catnr)
-
-    # 1) 内存缓存（未过期）
-    mem = _TLE_CACHE.get(key)
-    if mem is not None and ref - mem[0] < max_age_hours * 3600.0:
-        return {
-            "catnr": int(catnr),
-            "name": disk["name"] if disk is not None else "",
-            "line1": mem[1][0],
-            "line2": mem[1][1],
-            "source": "memory",
-            "fetched_at": float(mem[0]),
-            "refresh_status": "memory",
-            "refresh_error": "",
-            "cache_path": disk["cache_path"] if disk is not None else "",
-        }
-
-    # 2) 磁盘缓存（未过期）
-    if disk is not None and ref - disk["fetched_at"] < max_age_hours * 3600.0:
-        _TLE_CACHE[key] = (disk["fetched_at"], (disk["line1"], disk["line2"]))
-        return dict(disk, source="cache", refresh_status="cache",
-                    refresh_error="")
-
-    # 3) 联网取新
-    refresh_error = ""
-    if not _network_disabled():
-        url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={catnr}&FORMAT=tle"
-        req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})
-        try:
-            data = _bounded_urlopen(req, _FETCH_TIMEOUT_S,
-                                    _FETCH_HARD_DEADLINE_S).read().decode()
-            lines = [ln for ln in data.splitlines() if ln.strip()]
-            if (len(lines) < 3 or not lines[1].startswith("1 ")
-                    or not lines[2].startswith("2 ")):
-                raise RuntimeError(f"celestrak 返回异常: {data[:80]!r}")
-            line1, line2 = lines[1].strip(), lines[2].strip()
-            name = lines[0].strip()
-            os.makedirs(_CACHE_DIR, exist_ok=True)
-            with open(os.path.join(_CACHE_DIR, f"{catnr}.tle"), "w",
-                      encoding="utf-8") as fh:
-                fh.write("\n".join([name, line1, line2]))
-            _TLE_CACHE[key] = (ref, (line1, line2))
-            return {
-                "catnr": int(catnr), "name": name,
-                "line1": line1, "line2": line2,
-                "source": "celestrak", "fetched_at": ref,
-                "refresh_status": "network", "refresh_error": "",
-                "cache_path": os.path.join(_CACHE_DIR, f"{catnr}.tle"),
-            }
-        except Exception as e:  # noqa: BLE001 - 网络/DNS/超时统一降级
-            refresh_error = f"获取新 TLE 失败（{type(e).__name__}: {e}），沿用旧缓存"
-    else:
-        refresh_error = (f"离线模式（{_OFFLINE_ENV}），未联网刷新，沿用旧缓存")
-
-    # 4) 取新失败：保留旧值，标明未更新（不静默）
-    if disk is not None:
-        return dict(disk, source="cache", refresh_status="not_updated",
-                    refresh_error=refresh_error)
-    raise TLEUnavailableError(
-        f"无 CATNR {catnr} 的 TLE 缓存且{refresh_error or '无法联网'}；"
-        "拒绝编造轨道数据"
-    )
+    return _get_fetcher().fetch_record(catnr, max_age_hours=max_age_hours,
+                                       now=now)
 
 
 def _state_from_satrec(

@@ -23,6 +23,8 @@ __all__ = [
     "analyze_tle_provenance",
     "builtin_provenance_table",
     "trust_label",
+    "SYNTHETIC_TLE_POLICY",
+    "synthetic_tle_policy",
 ]
 
 _TRUST_LABELS = {
@@ -36,6 +38,30 @@ _TRUST_LABELS = {
 
 def trust_label(trust: str) -> str:
     return _TRUST_LABELS.get(trust, _TRUST_LABELS["unverified"])
+
+
+# P12-5 内置合成 TLE 处置策略（选「保留但不可用于精确过境」，不删数据）：
+# - 保留：离线/演示场景仍需有星可看，删掉会让天空图空白；
+# - 限制：trust=synthetic_rounded 的条目 usable_for_tracking=False，
+#   过境/跟踪/天空工具输出必须带「不可当精确值」告警（见 sdr_tools）；
+# - 兜底：精确场景请用 Celestrak 实时 TLE（fetch_tle/refresh_tle_round）
+#   或用户自备 .tle 文件；不存在「把合成值当实时」的路径。
+SYNTHETIC_TLE_POLICY: Dict[str, Any] = {
+    "decision": "keep_but_not_for_precise_passes",
+    "summary": "内置合成/凑整 TLE 保留用于离线演示，但禁止作为精确过境/跟踪数据",
+    "enforced_by": [
+        "trust=synthetic_rounded → usable_for_tracking=False",
+        "sdr_tools 输出附带「不可当精确过境时刻」告警",
+        "orbit/decoders 取数不以内置合成值冒充实时（无缓存即诚实空态）",
+    ],
+    "precise_source": "Celestrak 实时 TLE（缓存 24h 门槛）或用户自备 .tle",
+}
+
+
+def synthetic_tle_policy() -> Dict[str, Any]:
+    """返回内置合成 TLE 处置策略的可读副本（供诊断/UI/文档引用）。"""
+    return dict(SYNTHETIC_TLE_POLICY,
+                enforced_by=list(SYNTHETIC_TLE_POLICY["enforced_by"]))
 
 
 def _epoch_fields(line1: str) -> Dict[str, Any]:
