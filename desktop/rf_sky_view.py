@@ -2217,6 +2217,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._label_items = []          # 本帧标签队列（末尾统一避让绘制）
             self._draw_stars(painter)
             self._draw_constellations(painter)
+            self._draw_dso(painter)
             # 2.5) 大气加法辉光：日落/日出方位暖红，加法叠在星空之上
             #      （SWE §4「加法混合 (ONE,ONE) 画在星空后」）——洗淡近辉光
             #      的星、给地平抹上暖色；地景随后盖在其上（山影遮地平辉光）。
@@ -2368,6 +2369,102 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.restore()
 
     # ------------------------------------------------------------------ #
+    # 深空天体层 (Messier/NGC 子集): 类型符号 + 视大小 + 视星等
+    # ------------------------------------------------------------------ #
+    # 与恒星共用同一套可见性规则（不是第二套阈值）：
+    #   - 地平门：alt < 0 不画，也不给点；
+    #   - 亮度门：star_draw(vmag + 消光, Bortle) 的 r<=0 不画（裸眼极限外）；
+    #   - 白天门：stars_hidden_by_daylight() 为真时整层不画。
+    # 数据全部来自 mbdsdr_ai.astronomy.dso.BUILTIN_CATALOG（Messier 110 +
+    # 著名 NGC，公开星表的 RA/Dec/视星等/视大小），不画任何"像星云"的装饰。
+    # 符号只表达类型（星系/星团/星云/超新星遗迹），不冒充形态还原；
+    # 外形尺寸取星表视大小（角分→像素按投影采样），亮度取视星等。
+    DSO_LABEL_PRIORITY = 1.5      # 座名(1.0)之后、星名(2.0+)之前
+    DSO_MIN_SYMBOL_R_PX = 1.6     # 视大小 < 1.6px 时给小符号，否则不可辨
+
+    def _draw_dso(self, painter: QPainter):
+        gs = self._ground_station()
+        if gs is None:
+            return
+        if self._stars_hidden_by_daylight():
+            return                      # 白天：与恒星同一门，整层不画
+        try:
+            from mbdsdr_ai.astronomy import dso as _dso
+            from mbdsdr_ai.celestial_geometry import azalt_from_vec
+        except Exception:
+            return
+        jd = self._current_jd()
+        painter.save()
+        for e in _dso.BUILTIN_CATALOG:
+            try:
+                v = j2000_to_altaz(vec_from_radec(e.ra_deg, e.dec_deg), gs, jd)
+                az, alt = azalt_from_vec(v)
+            except Exception:
+                continue
+            if alt < 0.0:
+                continue                # 与恒星同一地平门
+            pos = self._sky_to_screen(az, alt)
+            if not self._on_screen(pos):
+                continue
+            r_star, bright, _bloom = _stars.star_draw(
+                e.magnitude + _stars.extinction_delta_mag(alt), self._bortle)
+            if r_star <= 0:
+                continue                # 与恒星同一亮度门（看不清的不画）
+            geom = self._angular_radius_px(az, alt, e.size_arcmin / 120.0)
+            r_ang = float(geom[1]) if geom is not None else 0.0
+            r = max(r_ang, self.DSO_MIN_SYMBOL_R_PX)
+            alpha = int(round(70.0 + 150.0 * bright))
+            self._draw_dso_glyph(painter, pos, r, e.dso_type, alpha)
+            # 小而不亮的条目（1.6px 符号）不挂名，避免宽 FOV 下满屏缩写；
+            # 名字仍然可以在信息卡/检索里看到。
+            if r >= 2.0 or bright >= 0.5:
+                self._queue_label(self.DSO_LABEL_PRIORITY,
+                                  QPointF(pos.x() + r + 3.0, pos.y() - r - 2.0),
+                                  e.name, self._ink(), small=True)
+        painter.restore()
+
+    def _draw_dso_glyph(self, painter: QPainter, pos: QPointF, r: float,
+                        dso_type: str, alpha: int) -> None:
+        """按类型画不同符号；r 为星表视大小换算出的像素半径。
+
+        形状约定（只用轮廓，不做亮度渐变——本视图没有表面亮度模型）：
+          galaxy              椭圆（长轴 = 视大小，短轴 0.55）
+          cluster             点状圆环（8 个点围成）
+          nebula              虚线菱形
+          supernova_remnant   双同心圆
+        """
+        col = self._ink()
+        pen = QPen(QColor(col.red(), col.green(), col.blue(), min(255, alpha)), 1)
+        painter.save()
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(pen)
+        if dso_type == "galaxy":
+            painter.drawEllipse(pos, max(1.0, r), max(0.7, r * 0.55))
+        elif dso_type == "cluster":
+            rr = max(1.4, r)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(col.red(), col.green(), col.blue(),
+                                           min(255, alpha))))
+            for k in range(8):
+                th = math.radians(45.0 * k)
+                painter.drawEllipse(QPointF(pos.x() + rr * math.cos(th),
+                                            pos.y() + rr * math.sin(th)),
+                                    1.0, 1.0)
+        elif dso_type == "supernova_remnant":
+            painter.drawEllipse(pos, max(1.2, r), max(1.2, r))
+            if r > 3.0:
+                painter.drawEllipse(pos, r * 0.5, r * 0.5)
+        else:                               # nebula（及其它类型）→ 虚线菱形
+            pen.setStyle(Qt.DashLine)
+            painter.setPen(pen)
+            rr = max(1.4, r)
+            painter.drawPolygon(QPolygonF([QPointF(pos.x(), pos.y() - rr),
+                                           QPointF(pos.x() + rr, pos.y()),
+                                           QPointF(pos.x(), pos.y() + rr),
+                                           QPointF(pos.x() - rr, pos.y())]))
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
     # 星座连线层 (Stellarium 宽 FOV 玩法): 骨架线 + 中文/Latin 名标签
     # ------------------------------------------------------------------ #
     def _draw_constellations(self, painter: QPainter):
@@ -2445,6 +2542,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
           0.0  月亮/行星 —— 本视图的观测主体，名字丢了最可惜
           0.5  卫星/信号/干扰/GNSS PRN —— 操作对象，块内含仰角方位或频率
           1.0  星座名 —— 宽 FOV 下的导航骨架
+          1.5  深空天体名 —— 比座名更"点状"，但比星名更需要主动找
           2.0+ 星名（2 + 星等，亮星先占位）
         """
         self._queue_label_block(priority, pos, [(str(text), bool(small), 0.0)],
@@ -2753,22 +2851,73 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawText(QPointF(pos.x() - 8, pos.y() + 5), label)
         painter.restore()
 
+    # 太阳点源下限：宽 FOV 下真实视直径（≈0.53°）不足 2px，给下限保证可辨；
+    # 与行星 "投影像素半径 < 2px 走点源" 同一条分辨率判据。
+    SUN_POINT_MIN_R_PX = 2.0
+    # 太阳地平门：alt > -1° 才画。这是日出/日落专用例外（见 _sun_screen_geom）。
+    SUN_ALT_VISIBLE_MIN_DEG = -1.0
+
+    def _sun_screen_geom(self) -> Optional[Dict[str, object]]:
+        """太阳标记的屏幕几何（绘制层与拾取层同一事实源）。
+
+        地平门特例：太阳视半径约 0.27°，标准日落定义是**中心**降到 -0.833°
+        （上缘贴地平）。宽 FOV 下本视图把太阳圆心夹到地平（alt→0）画——正是
+        日出/日落时"太阳坐在山脊上"的样子；窄 FOV 能看到真实圆面时，地平线
+        早已移出视界，这个夹取不再起作用。其余天体一律 alt<0 不画，无此例外。
+
+        尺寸：视直径来自 solar_system.get_sun_position（随日地距离变），
+        经投影采样换算成像素；缺历表给 None（不编造角直径）。
+        """
+        s = self._sun
+        if not s:
+            return None
+        try:
+            az, alt = float(s["az"]), float(s["alt"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not (math.isfinite(az) and math.isfinite(alt)):
+            return None
+        if alt <= self.SUN_ALT_VISIBLE_MIN_DEG:
+            return None
+        alt_draw = max(0.0, alt)
+        r = 0.0
+        try:
+            dia = float(s["diameter_deg"]) if s.get("diameter_deg") else None
+        except (KeyError, TypeError, ValueError):
+            dia = None
+        if dia is not None and math.isfinite(dia) and dia > 0.0:
+            geom = self._angular_radius_px(az, alt_draw, dia / 2.0)
+            if geom is not None:
+                r = float(geom[1])
+        r = max(r, self.SUN_POINT_MIN_R_PX)
+        center = self._sky_to_screen_finite(az, alt_draw)
+        if center is None:
+            return None
+        return {"center": center, "r": r, "az": az, "alt": alt,
+                "alt_draw": alt_draw}
+
     def _draw_celestial_bodies(self, painter: QPainter):
         """绘制真实太阳/月亮标记（在地平线上方才画）。
 
         月亮的可见性判据与拾取层共用 moon_visible()，不各自持有阈值。
+        太阳的可见性/尺寸/位置与拾取层共用 _sun_screen_geom()，同样不各持有阈值。
         """
         painter.save()
-        if self._sun and self._sun.get("alt", -99) > -1:
-            pos = self._sky_to_screen(self._sun["az"], max(0.0, self._sun["alt"]))
+        sun_geom = self._sun_screen_geom()
+        if sun_geom is not None:
+            pos = sun_geom["center"]
+            r = float(sun_geom["r"])
             col = self._colors["sun"]
+            # 光晕随圆面走（下限 10px 让宽 FOV 下还找得到），
+            # 圆面半径 = 真实视直径换算值（下限 2px 点源），不是写死 14/7。
+            halo = max(10.0, r * 1.9)
             painter.setPen(QPen(col, 1))
             painter.setBrush(QBrush(QColor(col.red(), col.green(), col.blue(), 60)))
-            painter.drawEllipse(pos, 14, 14)
+            painter.drawEllipse(pos, halo, halo)
             painter.setBrush(QBrush(col))
-            painter.drawEllipse(pos, 7, 7)
+            painter.drawEllipse(pos, r, r)
             painter.setPen(self._ink())
-            painter.drawText(QPointF(pos.x() + 12, pos.y() - 8), "太阳")
+            painter.drawText(QPointF(pos.x() + halo + 4, pos.y() - 8), "太阳")
         frame = self._moon_screen_frame()
         if frame is not None:
             self._draw_moon_marker(painter, frame)
@@ -3163,6 +3312,28 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         from mbdsdr_ai.astronomy import planets as _planets
         return _planets.compute_all(jd)
 
+    def _angular_radius_px(self, az: float, alt: float, radius_deg: float) \
+            -> Optional[Tuple[QPointF, float]]:
+        """角半径（度）→ (屏幕圆心, 像素半径)。
+
+        走投影采样（与 FOV/离轴位置无关地真实缩放），不是写死像素：
+        行星圆面、深空天体视大小、太阳视直径共用这一条换算。
+        """
+        if radius_deg is None or radius_deg <= 0.0:
+            return None
+        center = self._sky_to_screen_finite(az, alt)
+        if center is None:
+            return None
+        probe = ((az, alt + radius_deg) if alt + radius_deg < 89.999
+                 else (az, alt - radius_deg))
+        p = self._sky_to_screen_finite(*probe)
+        if p is None:
+            return None
+        r = math.hypot(p.x() - center.x(), p.y() - center.y())
+        if r <= 0.0:
+            return None
+        return center, r
+
     def _planet_screen_disc(self, az: float, alt: float, diameter_deg: float
                             ) -> Optional[Dict[str, object]]:
         """行星圆面的屏幕几何：像素半径 + 月心/行心指向太阳的屏幕方向。
@@ -3172,17 +3343,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """
         if diameter_deg is None or diameter_deg <= 0.0:
             return None
-        center = self._sky_to_screen_finite(az, alt)
-        if center is None:
-            return None
         step = float(diameter_deg) / 2.0        # 角半径（度）
-        probe = (az, alt + step) if alt + step < 89.999 else (az, alt - step)
-        p = self._sky_to_screen_finite(*probe)
-        if p is None:
+        geom = self._angular_radius_px(az, alt, step)
+        if geom is None:
             return None
-        r = math.hypot(p.x() - center.x(), p.y() - center.y())
-        if r <= 0.0:
-            return None
+        center, r = geom
         ux = uy = None
         sun = self._sun
         if sun and sun.get("az") is not None and sun.get("alt") is not None:
@@ -3339,16 +3504,39 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                        star.dec_deg, star.vmag, None))
             except Exception:
                 pass
-        # 已选 DSO 有标记环, 可再点中
+        # DSO 图层已画 → 星表里画得出来的都能点（与绘制层同一门：白天/地平/
+        # 星等亮度三条都在下面循环里统一判）。
+        if not self._stars_hidden_by_daylight():
+            try:
+                from mbdsdr_ai.astronomy import dso as _dso
+                for e in _dso.BUILTIN_CATALOG:
+                    candidates.append(("dso", e.name, e.ra_deg, e.dec_deg,
+                                       float(e.magnitude),
+                                       float(e.size_arcmin) / 60.0))
+            except Exception:
+                pass
+        # 已选 DSO 有标记环, 可再点中（星表内条目用真实星等；目录外不给点）
         pb = self._picked_body
         if pb and pb.get("kind") == "dso":
             ra_d, de_d = pb.get("ra_deg"), pb.get("dec_deg")
-            if ra_d is not None:
-                candidates.append(("dso", str(pb.get("key")), float(ra_d),
-                                   float(de_d), 4.0, None))
+            ent = self._dso_entry(str(pb.get("key")))
+            if ra_d is not None and ent is not None:
+                candidates.append(("dso", ent.name, float(ra_d),
+                                   float(de_d), float(ent.magnitude),
+                                   float(ent.size_arcmin) / 60.0))
 
         best: Optional[Dict[str, object]] = None
         best_score: Optional[float] = None
+        # 太阳：绘制层与拾取层共用 _sun_screen_geom()；给最高优先分，
+        # 与行星/恒星重合时太阳先被点中（它是画面上最亮的天体）。
+        sun_geom = self._sun_screen_geom()
+        if sun_geom is not None:
+            scr_s = sun_geom["center"]
+            assert isinstance(scr_s, QPointF)
+            dist_s = math.hypot(scr_s.x() - x, scr_s.y() - y)
+            if dist_s < max(float(tolerance), float(sun_geom["r"])):
+                best_score = dist_s * 0.5
+                best = {"kind": "sun", "key": "sun"}
         for kind, key_b, ra_b, dec_b, mag, dia_deg in candidates:
             if kind == "planet" and key_b == "moon":
                 # 月球：绘制层与拾取层共用同一份屏幕几何。不用 compute_all 的
@@ -3372,30 +3560,30 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 az, alt = azalt_from_vec(v)
             except Exception:
                 continue
-            if kind == "dso":
-                # 标记环不看星等（DSO 是用户主动选中的目标，一直画）
-                if alt < -1.0:
-                    continue
-            else:
-                # 与绘制层同一条可见性门：画不出来的不给点。否则点空白天区
-                # 会弹出肉眼看不见的天体信息卡（Bortle 3 的海王星 r<=0 不画），
-                # 而画出来的暗星又点不中（旧的写死 4.5 等砍掉了 4.84 的 Graffias）。
-                if alt < 0.0 or mag is None:
-                    continue
-                r_pick, _, _ = _stars.star_draw(
-                    float(mag) + _stars.extinction_delta_mag(alt), self._bortle)
-                if r_pick <= 0:
-                    continue
+            # 与绘制层同一条可见性门：画不出来的不给点。否则点空白天区
+            # 会弹出肉眼看不见的天体信息卡（Bortle 3 的海王星 r<=0 不画），
+            # 而画出来的暗星又点不中（旧的写死 4.5 等砍掉了 4.84 的 Graffias）。
+            # DSO 也走这一条（不再有"标记环不看星等"的第二套阈值）。
+            if alt < 0.0 or mag is None:
+                continue
+            r_pick, _, _ = _stars.star_draw(
+                float(mag) + _stars.extinction_delta_mag(alt), self._bortle)
+            if r_pick <= 0:
+                continue
             scr = self._sky_to_screen_finite(az, alt)
             if scr is None:
                 continue
             # 拾取半径跟随"画出来的大小"：已分辨的行星圆面用圆面半径，
             # 与 _draw_planets 里 disc["r"] >= 2.0 走真实圆面同一条判据。
-            limit = float(tolerance)
+            limit = max(float(tolerance), r_pick)
             if kind == "planet" and dia_deg is not None and dia_deg > 0.0:
                 disc = self._planet_screen_disc(az, alt, float(dia_deg))
                 if disc is not None and float(disc["r"]) >= 2.0:
                     limit = max(limit, float(disc["r"]))
+            elif kind == "dso" and dia_deg is not None and dia_deg > 0.0:
+                geom = self._angular_radius_px(az, alt, float(dia_deg) / 2.0)
+                if geom is not None:
+                    limit = max(limit, float(geom[1]))
             dist = math.hypot(scr.x() - x, scr.y() - y)
             if dist >= limit:
                 continue
@@ -3548,10 +3736,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             name = str(body.get("key"))
             entry = self._dso_entry(name)
             info["title"] = name
-            info["kind_label"] = str(body.get("dso_type") or "Deep Sky Object") \
-                .replace("_", " ").title()
-            con_full = _constel.CONSTELLATION_NAMES.get(
-                str(body.get("con") or ""), "")
+            # 星表点选来的 body 只带 kind/key/ra/dec；类型与星座从星表补齐
+            dso_type = (body.get("dso_type")
+                        or (entry.dso_type if entry is not None else None)
+                        or "Deep Sky Object")
+            info["kind_label"] = str(dso_type).replace("_", " ").title()
+            con_code = (body.get("con")
+                        or (entry.constellation if entry is not None else "")
+                        or "")
+            con_full = _constel.CONSTELLATION_NAMES.get(str(con_code), "")
             info["aliases"] = [con_full] if con_full else []
             if entry is not None:
                 info["mag"] = float(entry.magnitude)
@@ -3561,6 +3754,37 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                f"Messier/NGC 公开星表数据"
                 jd = self._current_jd()
                 rs = self._body_rise_set(entry.ra_deg, entry.dec_deg, jd)
+                info["rise"] = rs["rise_jd"]
+                info["set"] = rs["set_jd"]
+        elif kind == "sun":
+            # 太阳走与行星同一张卡骨架：RA/Dec、视直径、距离来自
+            # solar_system.get_sun_position；缺历表如实留占位。
+            s = self._sun or {}
+            info["title"] = "太阳"
+            info["kind_label"] = "Star"
+            info["aliases"] = ["Sol"]
+            info["mag"] = -26.74          # 标准视星等常数（非历表计算）
+            ra_s = s.get("ra_deg")
+            de_s = s.get("dec_deg")
+            if ra_s is not None and de_s is not None:
+                try:
+                    info["ra"], info["dec"] = float(ra_s), float(de_s)
+                except (TypeError, ValueError):
+                    pass
+            dist_au = s.get("distance_au")
+            if dist_au:
+                info["dist_text"] = (f"{float(dist_au):.5f} AU · "
+                                     f"{float(dist_au) * 149597870.7 / 1e6:,.1f} M km")
+            dia = s.get("diameter_deg")
+            if dia:
+                info["desc"] = (f"视直径 {float(dia) * 60.0:.1f}′ · "
+                                f"视星等 -26.74（标准常数） · "
+                                f"solar_system 视位置")
+            else:
+                info["desc"] = "太阳历表缺测：只给方位/高度"
+            if info["ra"] is not None and info["dec"] is not None:
+                jd = self._current_jd()
+                rs = self._body_rise_set(info["ra"], info["dec"], jd)
                 info["rise"] = rs["rise_jd"]
                 info["set"] = rs["set_jd"]
         self._body_info = info
@@ -4662,6 +4886,20 @@ class SatelliteTracker:
             sin_az = -math.cos(dec_r) * math.sin(ha) / cos_alt
             az = (math.degrees(math.atan2(sin_az, cos_az)) + 360.0) % 360.0
             sun = {"az": az, "alt": alt}
+        except Exception:
+            pass
+        try:
+            from mbdsdr_ai import solar_system as _sol
+            sp = _sol.get_sun_position(
+                t_unix, (self.lat, self.lon, self.alt_km * 1000.0))
+            if sp is not None:
+                # 视直径/距离/RA-Dec 走同一套历表（solar_system）；绘制层据此
+                # 按真实视直径缩放，信息卡据此给升落时间。历表缺测则保留上面
+                # 仅 az/alt 的太阳（此时按点源下限 2px 画，不编造角直径）。
+                sun = {"az": sp.az_deg, "alt": sp.alt_deg,
+                       "ra_deg": sp.ra_deg, "dec_deg": sp.dec_deg,
+                       "distance_au": sp.distance_au,
+                       "diameter_deg": sp.angular_diameter_deg}
         except Exception:
             pass
         try:
