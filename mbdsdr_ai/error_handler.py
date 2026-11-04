@@ -38,6 +38,7 @@ __all__ = [
     "FrequencyOutOfRangeError",
     "format_error",
     "classify_connect_failure",
+    "probe_occupant",
 ]
 
 
@@ -256,6 +257,13 @@ _BUSY_KEYWORDS = (
     "errno -1",
     "libusb_error_busy",
     "usb error -5",
+    # librtlsdr 的 "usb_open error -3" 是 libusb LIBUSB_ERROR_ACCESS：
+    # Windows 上通常表示设备已被其它进程独占；Linux 上也可能是 udev 权限。
+    "usb_open error -3",
+    "usb error -3",
+    "unable to open device",
+    "rtlsdr_open failed",
+    "open device failed",
 )
 _NO_DEVICE_KEYWORDS = (
     "no device",
@@ -264,9 +272,59 @@ _NO_DEVICE_KEYWORDS = (
     "cannot open",
     "disconnected",
     "libusb_error_no_device",
-    "usb error -3",
     "errno 19",
 )
+
+#: 常见会独占 SDR 的进程名（小写匹配，仅用于"尽力而为"的占用者提示）
+_KNOWN_SDR_PROCESSES = (
+    "sdrsharp", "sdr#", "sdr++.exe", "sdrpp", "gqrx", "sdrangel",
+    "cubicsdr", "rtl_tcp", "rtl_test", "rtl_sdr", "rtl_433",
+    "dump1090", "gpredicty", "gpredict", "virtualradarserver",
+)
+
+
+def probe_occupant(processes: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    """尽力而为地探测"谁占用了 SDR 设备"。
+
+    Parameters
+    ----------
+    processes : Sequence[str], optional
+        调用方采集到的可见进程名列表。**本函数不主动扫描系统进程**：
+        Windows 的 WinUSB/libusb 不暴露"设备句柄持有者"，主动扫描既慢又不可靠，
+        这里如实返回"探测不到"，而不是编造占用者。
+
+    Returns
+    -------
+    dict
+        ``{"detected": bool, "processes": [...], "reason": str}``。
+        ``detected=False`` 时 reason 明确说明是"未发现"还是"无法探测"。
+    """
+    if processes is None:
+        return {
+            "detected": False,
+            "processes": [],
+            "reason": (
+                "无法探测：RTL-SDR 的 WinUSB/libusb 驱动不暴露设备句柄持有者；"
+                "请手动关闭 SDR# / GQRX / SDR++ / SDRangel 等独占程序后重试"
+            ),
+        }
+    matched = sorted({
+        str(p) for p in processes
+        if str(p) and any(k in str(p).lower() for k in _KNOWN_SDR_PROCESSES)
+    })
+    if matched:
+        return {
+            "detected": True,
+            "processes": matched,
+            "reason": "在可见进程列表中发现可能占用设备的 SDR 程序",
+        }
+    return {
+        "detected": False,
+        "processes": [],
+        "reason": "可见进程列表中未发现常见 SDR 程序；占用者可能是驱动/系统服务或探测被权限限制",
+    }
+
+
 _DRIVER_KEYWORDS = (
     "no module named",
     "importerror",

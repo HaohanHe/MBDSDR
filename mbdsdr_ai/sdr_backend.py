@@ -154,6 +154,17 @@ class SDRStatus:
     samples_read: int = 0
     uptime_seconds: float = 0.0
     error: str = ""  # 最近一次 setter 失败/硬件回读失败的错误描述，空串=正常
+    # ── 接入层可观测性（网络源/热插拔/独占场景；默认值=未知/未接入）──
+    # link_state: connecting / connected / stale / disconnected / failed，空串=未接入观测
+    link_state: str = ""
+    error_category: str = ""       # 与 link_state.py 的错误词表一致（refused/timeout/reset/idle/...）
+    dropped_samples: int = 0       # 环形缓冲覆盖/流速率不足导致的丢样估计
+    buffer_fill: int = 0           # 环形缓冲当前未读样点数（缓冲水位）
+    buffer_capacity: int = 0       # 环形缓冲容量（样点），0=未知/无环形缓冲
+    buffer_level: str = ""         # empty/low/ok/high（见 link_state.classify_buffer_level）
+    underruns: int = 0             # 读侧因缓冲空而等待超时的次数（真实欠读）
+    reconnect_count: int = 0       # 自进程启动以来的重连次数
+    last_data_age_s: Optional[float] = None  # 距最后一次真实数据的时间（None=从未收到）
 
 
 class SDRBackend:
@@ -204,6 +215,7 @@ class SDRBackend:
         except Exception:
             pass
         self.status.connected = False
+        self.status.link_state = "disconnected"
 
     def set_frequency(self, freq_hz: float) -> bool:
         """设置中心频率。失败时回滚 status，不留"已设置"假状态。"""
@@ -369,6 +381,29 @@ class SDRBackend:
         if self.status.connected:
             self.status.uptime_seconds = time.time() - self._start_time
             self.status.samples_read = self._samples_read
+            if not self.status.link_state:
+                self.status.link_state = "connected"
+        else:
+            if not self.status.link_state:
+                self.status.link_state = "disconnected"
+        # 环形缓冲可观测性：真实积压与丢样（有 ring 的本地/网络后端都适用）。
+        rr = getattr(self, "_ring_reader", None)
+        if rr is not None:
+            try:
+                from .link_state import classify_buffer_level
+                self.status.buffer_fill = rr.available()
+                self.status.buffer_capacity = rr.capacity()
+                self.status.underruns = rr.underruns_total()
+                self.status.dropped_samples = rr.dropped_total()
+                level = classify_buffer_level(
+                    self.status.buffer_fill, self.status.buffer_capacity)
+                self.status.buffer_level = level["level"]
+            except Exception:
+                pass
+        # 最后一次真实数据距今时间（有 ring 的后端在生产者成功读到时刷新）。
+        last_ts = getattr(self, "_last_ring_data_time", None)
+        if last_ts is not None:
+            self.status.last_data_age_s = max(0.0, time.time() - last_ts)
         return self.status
 
     # ==================================================================
@@ -833,6 +868,9 @@ class _FanOutSub:
                     return None
                 now = time.time()
                 if now >= deadline:
+                    # 缓冲空直到超时：记一次真实欠读（不是丢包、也不是网络故障）
+                    with r._lock:
+                        r._underruns += 1
                     return None
                 r._cond.wait(timeout=max(0.001, deadline - now))
             R = r._ring_size
@@ -874,6 +912,8 @@ class _ThreadedRingReader:
         # 各 _FanOutSub.dropped 独立记录（见 subscriber_dropped()）。
         self._count = 0
         self._dropped = 0
+        # 读侧因缓冲空而超时返回 None 的次数（真实欠读，监控用）
+        self._underruns = 0
 
     # -------------------------------------------------- 订阅
     def subscribe(self, name: str) -> _FanOutSub:
@@ -965,6 +1005,20 @@ class _ThreadedRingReader:
 
     def producer_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    def dropped_total(self) -> int:
+        """累计因环形缓冲写满而丢掉的样点数（监控用，不清零）。"""
+        with self._lock:
+            return int(self._dropped)
+
+    def underruns_total(self) -> int:
+        """累计读侧"缓冲空、等到超时"的次数（真实欠读，不清零）。"""
+        with self._lock:
+            return int(self._underruns)
+
+    def capacity(self) -> int:
+        """环形缓冲容量（样点）。"""
+        return int(self._ring_size)
 
     def stop(self):
         self._stop = True
@@ -1341,6 +1395,13 @@ class RTLSDRBackend(SDRBackend):
         return True
 
     def connect(self) -> bool:
+        # 重连/热插拔前先干净释放旧句柄与旧生产者线程：绝不带着已失效的
+        # usb 句柄去 open 新设备（否则会出现"重插后连上但收不到数据"的假状态）。
+        if self._ring_reader is not None or self._sdr is not None:
+            try:
+                self.disconnect()
+            except Exception as _e:
+                logger.debug("重连前释放旧句柄失败(忽略): %s", _e)
         try:
             if self._host is not None:
                 # rtl_tcp 网络模式统一走本仓库自研、MIT、无 GPL 的 RtlTcpClient
@@ -1390,6 +1451,10 @@ class RTLSDRBackend(SDRBackend):
             except Exception:
                 self._gain_table_db = []
             self.status.connected = True
+            self.status.link_state = "connected"
+            self.status.error_category = ""
+            self.status.error = ""
+            self.status.last_data_age_s = None
             self._start_time = time.time()
             # 兜底：若子类未显式设采样率，用 2.048M 兜底（见 SDRBackend._FALLBACK_SAMPLE_RATE_HZ）
             if self.status.sample_rate_hz is None:
@@ -1452,7 +1517,7 @@ class RTLSDRBackend(SDRBackend):
             # 替代 QTimer 50ms 只读 4096 样点造成的严重欠读。
             try:
                 self._ring_reader = _ThreadedRingReader(
-                    read_fn=self._sdr.read_samples,
+                    read_fn=self._ring_read,
                     block_size=8192,
                     ring_size=1_000_000,
                 )
@@ -1465,6 +1530,7 @@ class RTLSDRBackend(SDRBackend):
             # 绝不静默吞异常：把真实原因写进 status.error，UI（main_window.py）会读到并展示。
             # 无 pyrtlsdr / USB 权限 / 设备被占用等都要冒到用户，绝不伪造 IQ 假装已连接。
             self.status.connected = False
+            self.status.link_state = "failed"
             msg = str(e)
             low = msg.lower()
             if isinstance(e, ImportError) and ("rtlsdr" in low or "no module named" in low):
@@ -1474,17 +1540,130 @@ class RTLSDRBackend(SDRBackend):
                     "或用 rtl_tcp 网络源（自研客户端，无需本机 librtlsdr）。"
                     "若坚持走 pyrtlsdr：pip install pyrtlsdr（Windows 还需 librtlsdr DLL）"
                 )
-            elif any(k in low for k in (
-                "permission", "busy", "resource", "access denied", "0bda", "2838", "device",
-            )):
-                # USB 权限/设备被占用类：保留原始异常消息，让用户看到 permission denied 等关键字
-                self.status.error = f"RTL-SDR 连接失败: {type(e).__name__}: {msg}"
+                self.status.error_category = "driver"
             else:
-                self.status.error = f"RTL-SDR 连接失败: {type(e).__name__}: {msg}"
+                # 归类：占用/权限（含 librtlsdr "usb_open error -3"）与"设备不在"必须
+                # 给用户不同结论——"被占用"是可操作的，"找不到设备"是另一码事。
+                try:
+                    from .error_handler import (
+                        DeviceBusyError,
+                        DeviceNotFoundError,
+                        classify_connect_failure,
+                        probe_occupant,
+                    )
+                    user_err = classify_connect_failure(e, msg)
+                    self.status.error_category = getattr(user_err, "category", "unknown")
+                    if isinstance(user_err, DeviceBusyError):
+                        occ = probe_occupant()  # 不主动扫进程：探测不到就如实说探测不到
+                        self.status.error = (
+                            f"设备被占用: {msg}；{occ['reason']}"
+                            if not occ.get("detected")
+                            else f"设备被占用: {msg}；疑似占用进程: {', '.join(occ['processes'])}"
+                        )
+                    elif isinstance(user_err, DeviceNotFoundError):
+                        self.status.error = f"未检测到 SDR 设备: {msg}"
+                    else:
+                        self.status.error = f"RTL-SDR 连接失败: {type(e).__name__}: {msg}"
+                except Exception:
+                    self.status.error = f"RTL-SDR 连接失败: {type(e).__name__}: {msg}"
             logger.warning(
                 "RTL-SDR 连接失败: %s: %s", type(e).__name__, e, exc_info=True
             )
+            # 诚实释放：连接流程中任何一步失败都可能已经 open 了设备/拉了 rtl_tcp
+            # 子进程。不清理会留下野句柄，导致"重新插入后仍显示被占用"。
+            try:
+                self.disconnect()
+            except Exception as _ce:
+                logger.debug("连接失败后释放句柄出错(忽略): %s", _ce)
+            self.status.connected = False
+            self.status.link_state = "failed"
             return False
+
+    # ── 生产者读设备：把底层故障如实翻译成链路状态 ──────────────────────
+    def _ring_read(self, num_samples: int) -> Optional[np.ndarray]:
+        """环形缓冲生产者专用读函数。
+
+        与直接暴露 ``self._sdr.read_samples`` 的区别：任何"设备没了/连接断了"
+        都在这里被记账（status.connected / link_state / error / error_category），
+        重连管理器与 UI 才能看到真实状态，而不是永远显示"已连接"。
+        """
+        if self._sdr is None:
+            return None
+        try:
+            out = self._sdr.read_samples(num_samples)
+        except Exception as e:
+            self._mark_link_lost(
+                "disconnected", f"读设备失败: {type(e).__name__}: {e}")
+            return None
+        if out is None or len(out) == 0:
+            # rtl_tcp 适配器能给出更细的状态（stale=连着但无数据 / disconnected=真断）
+            health = None
+            health_fn = getattr(self._sdr, "data_health", None)
+            if callable(health_fn):
+                try:
+                    health = health_fn()
+                except Exception:
+                    health = None
+            if health and health.get("state") == "stale":
+                self.status.link_state = "stale"
+                self.status.error_category = health.get("category", "idle")
+                self.status.error = health.get("message", "")
+                self.status.last_data_age_s = health.get("last_data_age_s")
+                # socket 仍然连着：不翻 connected，只显式降级供 UI 提示
+            else:
+                self._mark_link_lost("disconnected", "读设备失败: 无数据（设备拔出或连接断开）")
+            return None
+        # 真实数据到达：清掉上轮链路错误
+        if self.status.link_state in ("stale", "disconnected", "failed"):
+            self.status.link_state = "connected"
+            self.status.error = ""
+            self.status.error_category = ""
+        self._last_ring_data_time = time.time()
+        self.status.last_data_age_s = 0.0
+        return out
+
+    def _mark_link_lost(self, category: str, message: str) -> None:
+        """设备/链路真实丢失：标记断开并保留可区分类别，绝不继续假装在线。"""
+        self.status.connected = False
+        self.status.link_state = "disconnected"
+        self.status.error_category = category
+        self.status.error = message
+
+    def data_health(self) -> dict:
+        """可序列化的数据流健康度（本地 USB + rtl_tcp 兜底路径统一入口）。"""
+        st = self.get_status()
+        out = {
+            "backend": type(self).__name__,
+            "state": st.link_state or ("connected" if st.connected else "disconnected"),
+            "connected": bool(st.connected),
+            "category": st.error_category,
+            "message": st.error,
+            "samples_total": int(st.samples_read),
+            "dropped_samples": int(st.dropped_samples),
+            "drop_ratio": (
+                st.dropped_samples / max(1, st.samples_read + st.dropped_samples)
+            ),
+            "buffer_fill": int(st.buffer_fill),
+            "buffer_capacity": int(st.buffer_capacity),
+            "buffer_level": st.buffer_level,
+            "underruns": int(st.underruns),
+            "last_data_age_s": st.last_data_age_s,
+            "expected_rate_hz": st.sample_rate_hz,
+        }
+        adapter = self._sdr
+        health_fn = getattr(adapter, "data_health", None)
+        if callable(health_fn):
+            try:
+                extra = health_fn()
+                for k in ("bytes_total", "gap_events", "reconnect_count",
+                          "retune_events", "observed_rate_hz", "rate_ratio",
+                          "suggestion"):
+                    if k in extra:
+                        out[k] = extra[k]
+                out["observer"] = "rtl_tcp"
+            except Exception:
+                pass
+        return out
 
     def disconnect(self):
         # 对照 SDR++ main.cpp:332-342 stop()：先停生产者线程（置标志+notify+join），
@@ -1518,6 +1697,10 @@ class RTLSDRBackend(SDRBackend):
             self._rtl_tcp_proc = None
             # 恢复成"本地 USB"语义：下次 connect 重新走直连→兜底判定
             self._host, self._port = None, 1234
+        # 清掉"最后一次数据"时间戳，避免断开后 last_data_age_s 继续虚长
+        self._last_ring_data_time = None
+        self.status.buffer_fill = 0
+        self.status.buffer_level = ""
         super().disconnect()
 
     def _apply_frequency(self, freq_hz: float) -> bool:
