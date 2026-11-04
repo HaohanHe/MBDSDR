@@ -125,7 +125,14 @@ class SDRBackendBase(ABC):
         pass
 
     def write_tx(self, iq_samples: np.ndarray) -> bool:
-        """写 TX IQ 采样（默认不支持TX）。"""
+        """写 TX IQ 采样（默认不支持TX）。
+
+        底层入口先过 :mod:`mbdsdr_ai.tx_guard` 授权上下文：脚本/驱动直调若
+        没有人工门签发的授权，一律拒绝并记录原因，绝不静默发波。
+        """
+        from .tx_guard import reject_unless_authorized
+        if not reject_unless_authorized(self):
+            return False
         logger.warning(f"{self.__class__.__name__} 不支持TX发射")
         return False
 
@@ -363,7 +370,10 @@ class SoapySDRBackend(SDRBackendBase):
             "请先 connect() 并 setupStream()")
 
     def write_tx(self, iq_samples: np.ndarray) -> bool:
-        """写 TX IQ 采样。"""
+        """写 TX IQ 采样。未经人工门授权的直调一律拒绝。"""
+        from .tx_guard import reject_unless_authorized
+        if not reject_unless_authorized(self):
+            return False
         if not self._device or not self._tx_stream:
             logger.warning("TX 流未初始化")
             return False
@@ -603,6 +613,10 @@ class HardwareManager:
         self._instrument = None
         self._active_backend = None
         self._platform = detect_embedded_platform()
+        # 最近一次发射拒绝/失败的可区分原因（供工具层如实回报，不吞原因）
+        self.last_tx_error = ""
+        self.last_tx_code = ""
+        self.last_tx_gate: Dict[str, Any] = {}
         self._initialized = True
 
     @classmethod
@@ -681,25 +695,74 @@ class HardwareManager:
     def get_active_backend(self) -> Optional[SDRBackendBase]:
         return self._active_backend
 
-    def transmit_cw(self, freq_hz: float, amplitude: float = 0.1, duration_sec: float = 1.0) -> bool:
-        """发射连续波（CW）。"""
+    def transmit_cw(self, freq_hz: float, amplitude: float = 0.1,
+                    duration_sec: float = 1.0, *, arm_manual: bool = False,
+                    tx_token: Optional[str] = None) -> bool:
+        """发射连续波（CW）。
+
+        人工门后置：未显式武装（或门已过期/被撤销）时拒绝，原因写入
+        ``last_tx_error``/``last_tx_code``，绝不把拒绝伪装成"发射失败"。
+        """
+        from .tx_guard import get_tx_gate, tx_authorization
+
+        self.last_tx_error = ""
+        self.last_tx_code = ""
+        gate = get_tx_gate().authorize(arm_manual=arm_manual, token=tx_token)
+        self.last_tx_gate = gate.to_dict()
+        if not gate.allowed:
+            self.last_tx_error = gate.reason
+            self.last_tx_code = gate.code
+            return False
         if not self._active_backend or not self._active_backend.supports_tx():
+            self.last_tx_error = "当前设备不支持 TX 或未连接"
+            self.last_tx_code = "no_tx_backend"
+            return False
+        rate = getattr(self._active_backend, "_sample_rate", 0) or 0
+        if rate <= 0:
+            self.last_tx_error = "采样率未知，无法生成 CW 时间轴"
+            self.last_tx_code = "capability_unknown"
             return False
         self._active_backend.set_frequency(freq_hz)
-        n = int(self._active_backend._sample_rate * duration_sec)
-        t = np.arange(n) / self._active_backend._sample_rate
+        n = int(rate * duration_sec)
+        t = np.arange(n) / rate
         iq = amplitude * np.exp(2j * np.pi * 0 * t)  # 零中频CW
-        return self._active_backend.write_tx(iq.astype(np.complex64))
+        with tx_authorization(gate):
+            ok = self._active_backend.write_tx(iq.astype(np.complex64))
+        if not ok:
+            self.last_tx_error = "设备 write_tx 返回失败"
+            self.last_tx_code = "write_failed"
+        return bool(ok)
 
     def transmit_modulated(
         self,
         freq_hz: float,
         iq_samples: np.ndarray,
         amplitude: float = 0.1,
+        *,
+        arm_manual: bool = False,
+        tx_token: Optional[str] = None,
     ) -> bool:
-        """发射调制信号。"""
+        """发射调制信号（人工门语义与 transmit_cw 完全一致）。"""
+        from .tx_guard import get_tx_gate, tx_authorization
+
+        self.last_tx_error = ""
+        self.last_tx_code = ""
+        gate = get_tx_gate().authorize(arm_manual=arm_manual, token=tx_token)
+        self.last_tx_gate = gate.to_dict()
+        if not gate.allowed:
+            self.last_tx_error = gate.reason
+            self.last_tx_code = gate.code
+            return False
         if not self._active_backend or not self._active_backend.supports_tx():
+            self.last_tx_error = "当前设备不支持 TX 或未连接"
+            self.last_tx_code = "no_tx_backend"
             return False
         self._active_backend.set_frequency(freq_hz)
-        scaled = amplitude * iq_samples / (np.max(np.abs(iq_samples)) + 1e-12)
-        return self._active_backend.write_tx(scaled.astype(np.complex64))
+        peak = float(np.max(np.abs(iq_samples))) + 1e-12
+        scaled = amplitude * iq_samples / peak
+        with tx_authorization(gate):
+            ok = self._active_backend.write_tx(scaled.astype(np.complex64))
+        if not ok:
+            self.last_tx_error = "设备 write_tx 返回失败"
+            self.last_tx_code = "write_failed"
+        return bool(ok)

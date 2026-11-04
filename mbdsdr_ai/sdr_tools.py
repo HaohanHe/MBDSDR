@@ -5760,7 +5760,12 @@ def _sdr_transmit_cw(args):
             success=False,
             content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP 等TX-capable设备支持。")
 
-    ok = mgr.transmit_cw(freq, amp, dur)
+    ok = mgr.transmit_cw(freq, amp, dur, arm_manual=True)
+    if not ok and getattr(mgr, "last_tx_error", ""):
+        return ToolResult(success=False,
+                          content=f"发射被拒绝({getattr(mgr, 'last_tx_code', '')}): "
+                                  f"{mgr.last_tx_error}",
+                          data={"gated": getattr(mgr, "last_tx_code", "")})
 
     lines = ["=== CW 发射 ==="]
     lines.append(f"频率: {freq/1e6:.3f} MHz")
@@ -5847,7 +5852,13 @@ def _sdr_transmit_iq(args):
                 content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/"
                         "LimeSDR/USRP 等TX-capable设备支持。")
 
-        ok = mgr.transmit_modulated(freq, samples, amp)
+        ok = mgr.transmit_modulated(freq, samples, amp, arm_manual=True)
+        if not ok and getattr(mgr, "last_tx_error", ""):
+            return ToolResult(
+                success=False,
+                content=f"发射被拒绝({getattr(mgr, 'last_tx_code', '')}): "
+                        f"{mgr.last_tx_error}",
+                data={"gated": getattr(mgr, "last_tx_code", "")})
     except Exception as e:  # noqa: BLE001
         return ToolResult(success=False, content=f"参数/计算错误: {e}", error=str(e))
 

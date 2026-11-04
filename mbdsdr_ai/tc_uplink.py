@@ -263,11 +263,12 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
                        device: Optional[str] = None,
                        gain_db: float = 0.0,
                        doppler_precomp: bool = False,
+                       tx_token: Optional[str] = None,
                        ) -> Dict[str, Any]:
     """TC 上行发射（人工门 + 无设备诚实 NEED_HW + 可选多普勒预偏）。
 
     门语义（AGENTS §3，四道串联的最后一道）：
-      * arm_manual 不是 True → gated 拒绝（不发射、不假装）；
+      * 人工门未开 / 已过期 / 被撤销 → GATED 拒绝，``reason_code`` 可区分；
       * 已武装但无可用发射设备 → NEED_HW 诚实空态；
       * 频点缺省 → 参数错误（频点是安全关键参数，不猜）。
     本函数不内置任何设备驱动；有设备时由各设备适配层在门通过后接管。
@@ -278,11 +279,17 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
     后端补偿活动 → 结果带 doppler 说明字段如实标注「未预偏」及原因，
     绝不静默沿用过期偏移。
     """
-    if arm_manual is not True:
+    from .tx_guard import get_tx_gate
+
+    gate = get_tx_gate()
+    decision = gate.authorize(arm_manual=arm_manual, token=tx_token)
+    if not decision.allowed:
         return {
             "status": "GATED",
-            "reason": ("未过人工门：arm_manual 不是 true——"
-                       "发射动作被明确拒绝（写工具 arm_manual 契约）"),
+            "code": decision.code,
+            "reason_code": decision.code,
+            "gate_state": decision.state,
+            "reason": f"未过人工门：{decision.reason}",
         }
     if freq_hz is None or float(freq_hz) <= 0:
         return {
@@ -416,6 +423,7 @@ def register_tool_registry(registry) -> None:
             device=args.get("device"),
             gain_db=float(args.get("gain_db", 0.0)),
             doppler_precomp=bool(args.get("doppler_precomp", False)),
+            tx_token=args.get("tx_token"),
         )
         ok = r["status"] not in ("GATED", "PARAM_ERROR", "NEED_HW")
         return ToolResult(
@@ -493,6 +501,8 @@ def register_tool_registry(registry) -> None:
             "gain_db": {"type": "number", "default": 0.0},
             "doppler_precomp": {"type": "boolean", "default": False,
                                 "description": "按发射时刻预测多普勒反向预偏上行频点"},
+            "tx_token": {"type": "string",
+                         "description": "人工门签发的授权 token（可选；有则校验有效期/撤销状态）"},
         }, "required": ["arm_manual"]},
         handler=_tx, category="satellite",
     )
