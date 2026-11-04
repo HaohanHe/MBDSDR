@@ -656,8 +656,13 @@ class AIPanel(QWidget):
                 "当前仅支持手动控制面板操作。"
             )
 
-    def _call_ai(self, text: str):
-        """调用真正的 AI Agent（后台线程）。"""
+    def _call_ai(self, text: str) -> bool:
+        """调用真正的 AI Agent（后台线程）。忙时拒绝并返回 False。"""
+        # S10：星象仪命令栏直接调本方法，绕过 _on_submit 的忙锁会再起一个
+        # AIWorker 覆盖 self._worker/_worker_thread；先结束的那个还会提前解锁。
+        if self._is_processing:
+            self._add_system_message("AI 正在处理上一条请求，本次指令未提交，请稍后再试")
+            return False
         self._is_processing = True
         self.send_btn.setEnabled(False)
         self.send_btn.setText("思考中...")
@@ -687,6 +692,7 @@ class AIPanel(QWidget):
             f'<span style="color: {_t["light_ai_label"]}; font-size: 8pt;">AI</span><br>')
 
         self._worker_thread.start()
+        return True
 
     # ── 天空动作 → 能力协商（按钮不得直连硬件）──────────────────
 

@@ -59,9 +59,11 @@ import l10n   # i18n 加载层（Qt Linguist）；同级裸导入，双上下文
 import numpy as np
 
 from PySide6.QtCore import (
-    Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
+    Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings, QRect,
 )
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QFont, QShortcut
+from PySide6.QtGui import (
+    QAction, QActionGroup, QKeySequence, QFont, QShortcut, QGuiApplication,
+)
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QStatusBar, QToolBar, QMenuBar, QMenu, QLabel,
@@ -714,6 +716,12 @@ class MainWindow(QMainWindow):
         fullscreen_action.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
 
+        # B2：外接屏拔掉后窗口可能落在屏幕外，这里给一个应用内复位入口
+        reset_pos_action = QAction("重置窗口位置", self)
+        reset_pos_action.setToolTip("把主窗口移回主屏中央（窗口跑到屏幕外时用这个）")
+        reset_pos_action.triggered.connect(self._on_reset_window_position)
+        view_menu.addAction(reset_pos_action)
+
         # 星象仪模式：顶层第二形态（全屏天空）。checkable 与当前形态同步。
         planetarium_action = QAction("星象仪模式", self)
         planetarium_action.setShortcut(QKeySequence(_key("view.planetarium")))
@@ -1068,6 +1076,8 @@ class MainWindow(QMainWindow):
         self._spectrum_page_layout = spectrum_layout
         left_tab.addTab(spectrum_widget, "频谱")
         left_tab.tabBar().setTabData(left_tab.count() - 1, "spectrum")
+        # 无设备引导横幅就在这一页；首启提示要能把用户带到它面前（S1）。
+        self._spectrum_page = spectrum_widget
 
         self.left_tab = left_tab
 
@@ -1146,7 +1156,9 @@ class MainWindow(QMainWindow):
         # AI 助手面板
         self.ai_panel = AIPanel()
         self.ai_panel.tool_call_requested.connect(self._on_ai_tool_call)
-        self.ai_panel.command_submitted.connect(self._on_ai_command)
+        # 面板自身的提交已在 _on_submit 里直接调 _call_ai；这里再接
+        # command_submitted 会造成一次提交起两个 AIWorker（S10 的重复派发）。
+        # 星象仪命令栏仍显式走 _on_ai_command（见 _build_ai_command_bar）。
         # 星象仪覆盖卡：AI 回复跨形态镜像（只读，历史以面板为准）
         self.ai_panel.reply_received.connect(self._on_planetarium_ai_reply)
         self._init_ai_agent_from_config()
@@ -2343,6 +2355,45 @@ class MainWindow(QMainWindow):
         self._rebuild_panel_menu_checks()
 
     # ------------------------------------------------------------------
+    # 窗口坐标：恢复时校验屏幕可见性 + 应用内复位入口（B2）
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _sanitize_window_pos(x: int, y: int, w: int, h: int) -> tuple:
+        """把恢复的窗口坐标夹到实际存在的屏幕上。
+
+        外接显示器拔掉后，上次保存的 (5000, 400) 会被原样应用，窗口落在
+        屏幕外且标题栏够不着。判定口径：窗口与任一屏幕可用区至少有
+        96×96 的可见交集才认为可达；否则回落到主屏居中。
+        """
+        try:
+            screens = QGuiApplication.screens()
+            primary = QGuiApplication.primaryScreen()
+        except Exception:
+            return int(x), int(y)
+        if not screens or primary is None:
+            return int(x), int(y)
+        target = QRect(int(x), int(y), max(1, int(w)), max(1, int(h)))
+        for scr in screens:
+            inter = scr.availableGeometry().intersected(target)
+            if inter.width() >= 96 and inter.height() >= 96:
+                return int(x), int(y)
+        g = primary.availableGeometry()
+        return (g.x() + max(0, (g.width() - int(w)) // 2),
+                g.y() + max(0, (g.height() - int(h)) // 2))
+
+    def _on_reset_window_position(self) -> None:
+        """把主窗口移回主屏中央（B2 的应用内复位入口）。"""
+        scr = QGuiApplication.primaryScreen()
+        if scr is None:
+            return
+        if self.isMaximized() and getattr(self, "_app_mode", "ide") != "planetarium":
+            self.showNormal()
+        g = scr.availableGeometry()
+        self.move(g.x() + max(0, (g.width() - self.width()) // 2),
+                  g.y() + max(0, (g.height() - self.height()) // 2))
+        self.statusBar().showMessage("窗口已重置到主屏中央", 4000)
+
+    # ------------------------------------------------------------------
     # 「面板」菜单：列出所有注册面板，checkable 控制页签显示/隐藏
     # ------------------------------------------------------------------
     def _find_panel_tab(self, spec):
@@ -2614,6 +2665,13 @@ class MainWindow(QMainWindow):
             if self._no_device_hint is not None:
                 self._no_device_hint.setText(f"  {message}  ")
                 self._no_device_hint.setVisible(True)
+                # S1：横幅在「频谱」页里，而首启默认页是「天空模式」——不切页
+                # 用户根本看不到（状态栏 8 秒后也消失）。提示出现即把该页带到
+                # 前台；这是"没有设备"的唯一引导，优先级高于保留上次页签。
+                page = getattr(self, "_spectrum_page", None)
+                lt = getattr(self, "left_tab", None)
+                if page is not None and lt is not None:
+                    lt.setCurrentWidget(page)
         except Exception:
             pass
         try:
@@ -3102,7 +3160,9 @@ class MainWindow(QMainWindow):
         self._disconnect()
         self._worker = self._worker_manager.start(host=host, port=port)
         self._connect_worker_signals()
-        self._panels_set_sdr_connected(True)
+        # S9：连接只是"进行中"，硬件还没就绪。控件保持置灰（_disconnect 已置灰），
+        # 等 connection_changed(True) 才启用——否则用户对着未连上的设备调谐/录音
+        # 全是假动作。
         self.conn_label.setText(f"  状态: 连接中 {host}:{port}  ")
         self.conn_label.setStyleSheet(self._conn_label_qss(False, highlighted=True))
         self.status_conn.setText(f"连接中 {host}:{port}")
@@ -3341,12 +3401,26 @@ class MainWindow(QMainWindow):
             self.conn_label.setText(f"  状态: {message}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(True))
             self.status_conn.setText(message)
+            # S9：硬件真正就绪才启用调谐/录音等控件（连接中一直保持置灰）
+            self._panels_set_sdr_connected(True)
             # 硬件就绪：把设备报告的工具 schema 注册进 AI agent
             self._sync_ai_mcp_tools()
         else:
             self.conn_label.setText(f"  状态: {message}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(False))
             self.status_conn.setText(message)
+            # S9：连接失败/掉线必须把控件收回到"未连接"并清空频谱。
+            # 只改标签会让用户继续调谐/录音（全是假动作），旧谱也一直定格。
+            try:
+                self.spectrum.set_connected(False)
+            except Exception:
+                pass
+            self._panels_set_sdr_connected(False)
+            try:
+                self.disconnect_btn.setEnabled(False)
+                self.connect_btn.setEnabled(True)
+            except Exception:
+                pass
 
     @Slot(dict)
     def _on_status_for_ui(self, status: dict):
@@ -3450,7 +3524,10 @@ class MainWindow(QMainWindow):
     def _on_ai_command(self, text: str):
         # AI 面板提交的自然语言指令 -> 转发给 AI worker
         try:
-            self.ai_panel._call_ai(text)
+            # S10：忙锁由 _call_ai 统一把关（命令栏不能绕过）
+            if self.ai_panel._call_ai(text) is False:
+                self.statusBar().showMessage(
+                    "上一条 AI 指令还在执行，本次指令未提交", 4000)
         except Exception:
             pass
 
@@ -6508,10 +6585,15 @@ class MainWindow(QMainWindow):
 
     def _stop_satellite_tracking(self):
         """停止闭环跟踪，恢复用户之前的接收频率。"""
-        # 没在跟踪（定时器停 + 无云台跟随）时直接返回：断开/退出路径会无条件
-        # 调用本方法，不能因此刷"已停止"或做回写。
-        if not (self._sat_track_timer is not None
-                and self._sat_track_timer.isActive()) and not self._gimbal_follow:
+        active = (self._sat_track_timer is not None
+                  and self._sat_track_timer.isActive())
+        # 没在跟踪（定时器停 + 无云台跟随）时不做回写/不刷"已停止"：断开/退出
+        # 路径会无条件调用本方法。但"跟踪中"的可见状态必须无条件复位——
+        # 自动停（过境结束）与手动关开关都走这里，残留勾选就是假状态
+        # （test_auto_stop_resets_sky_button 钉住）。
+        if not active and not self._gimbal_follow:
+            self._sync_sky_track_btn(False)
+            self.sat_track_panel.set_tracking_state(False)
             return
         if self._sat_track_timer is not None:
             self._sat_track_timer.stop()
@@ -7040,6 +7122,8 @@ class MainWindow(QMainWindow):
                 x = win.get("x", 100)
                 y = win.get("y", 100)
                 self.resize(w, h)
+                # B2：外接屏拔掉后旧坐标会落在屏幕外，必须先校验再 move
+                x, y = self._sanitize_window_pos(x, y, w, h)
                 self.move(x, y)
             # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标
             self._observer_lat = config.get("observer_lat")
