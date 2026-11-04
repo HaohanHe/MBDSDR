@@ -53,7 +53,35 @@ Illumination(
   - 圆柱影 ±5 s：半影被压成零宽 + 本影半径用赤道半径（比同高度圆锥本影
     半径大约 30 km），LEO 下折合 4~5 s。
 
-## 4. 边界用例（17 个测试）
+## 4. 卫星状态快照透传（界面/工具统一取这里）
+
+`orbit._state_from_satrec`（及 `compute_satellite_state` 返回的同一字典）
+在原有仰角/方位/距离/多普勒之外，固定带上四个受晒字段。值来自同一份
+`sat_illumination.evaluate_illumination`，**没有第二份地影数学**。
+
+| 字段 | 类型 | 取值 | 语义 / 界面必须遵守 |
+|---|---|---|---|
+| `sunlit` | `bool \| None` | `True` / `False` / `None` | `True`=受晒，`False`=本影，`None`=半影（部分受照，不可二值化）。**`None` 不许画成受晒或本影**，应显示“半影/部分受照”。 |
+| `sunlit_status` | `str` | `sunlit` / `umbra` / `penumbra` | 精确三态。快照路径不会出现 `unknown`（位置与太阳方向都由同一时刻推导）。 |
+| `illumination_model` | `str` | `conical` | 快照固定用圆锥影（gpredict `Sat_Eclipsed` 同构）。要圆柱影请直接调用 `evaluate_illumination(..., model="cylindrical")`。 |
+| `boundary_uncertainty_s` | `float` | `2.0` | 状态切换边界附近不保证的秒数；界面不要把边界 2 s 内的翻转当成异常。 |
+
+- 时间同源：快照的 `jd_utc` 来自 `when`/TimeEngine，受晒判定用同一时刻的
+  TEME 位置算出的 Unix 秒，不另取时钟。
+- 未知语义：直接调用 `sat_illumination` 且没有太阳数据时 `status="unknown"`、
+  `sunlit=None`；快照路径不会走到这里。
+- 一致性：`test_orbit_sunlit_snapshot.py` 整轨 200 点逐点比对快照与直接
+  调用（状态、`sunlit`、模型、不确定度全等）。
+- 过境口径：`sat_passes._is_sunlit_geometric` 已委托同一判据（圆锥影），
+  `require_sunlit` 过滤“可见过境”时只有本影算不亮、半影按照亮；测试在同一
+  位置/时刻比对该函数与直接调用。
+- 性能（本机 Python 3.14 实测）：`evaluate_illumination` ≈ **9.4 µs/次**，
+  完整快照 ≈ **16.4 µs/次**；50 颗 × 30fps（1500 次/秒）≈ 25 ms/s。
+  因此**不加缓存**。若未来要每秒上千颗，可按 `(satnum, 整秒)` 缓存，
+  精度代价是跨秒边界时受晒状态最多滞后 1 s（落在 ±2 s 不确定度内，
+  但需要显式记录 `at_unix`）。
+
+## 5. 边界用例（17 + 4 个测试）
 
 | 用例 | 断言 |
 |---|---|
@@ -68,8 +96,12 @@ Illumination(
 | 时间入口 | `at_unix` 原样记录；无参数走全局 TimeEngine |
 | 渲染契约 | 7 个字段齐全、状态枚举闭合、`to_dict` 可 JSON |
 | TLE 入口 | 显式时刻 + skyfield 传播，状态/依据/半径均有效 |
+| 快照一致性 | 整轨 200 点，快照字段与直接调用逐点全等 |
+| 快照契约 | 四个受晒字段齐全、取值域闭合、半影必为 `None` |
+| 过境口径 | `_is_sunlit_geometric` == `status != umbra`（同一位置/时刻） |
+| 性能预算 | 单次快照 < 0.5 ms，1500 次/秒 < 50 ms/s |
 
-## 5. 与 gpredict 对拍
+## 6. 与 gpredict 对拍
 
 `test_matches_gpredict_sat_eclipsed_over_grid` 在测试内**独立直译**
 `Sat_Eclipsed`（`sd_e`、`sd_s`、`δ`、`depth >= 0`），沿 θ 从 100° 扫到 120°

@@ -26,6 +26,8 @@ import ssl
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple
 
+from .sat_illumination import evaluate_illumination, sun_direction_eci
+
 try:
     from sgp4.api import Satrec, jday
     _HAS_SGP4 = True
@@ -295,6 +297,11 @@ def _state_from_satrec(
     # 视线速度：卫星速度投影到站星方向单位矢量（远离为正）
     los = (rx_s / dist, ry_s / dist, rz_s / dist)
     range_rate = (v_ecef[0] * los[0] + v_ecef[1] * los[1] + v_ecef[2] * los[2])
+    # 受晒/地影：与天空视图、sat_passes 共用 sat_illumination 的唯一口径
+    # （圆锥影，边界 ±2 s）。这里用 sgp4 已算出的 TEME 位置，不再二次传播。
+    at_unix = (jd_utc - 2440587.5) * 86400.0
+    illum = evaluate_illumination(
+        r_teme, sun_direction_eci(at_unix), at_unix=at_unix)
     return {
         "satellite": satellite_name,
         "elevation": elevation,
@@ -303,6 +310,10 @@ def _state_from_satrec(
         "range_rate_kms": range_rate,
         "altitude_km": math.sqrt(r_ecef[0]**2 + r_ecef[1]**2 + r_ecef[2]**2) - WGS72_A,
         "epoch": epoch,
+        "sunlit": illum.sunlit,
+        "sunlit_status": illum.status,
+        "illumination_model": illum.model,
+        "boundary_uncertainty_s": illum.boundary_uncertainty_s,
     }
 
 
