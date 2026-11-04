@@ -3420,11 +3420,34 @@ class MBDSDRAgent:
             category="astronomy",
         )
 
+        def _astro_time_info(args):
+            # 与天空视图/过境预测同一时间源：TimeEngine 优先，标 source，不冒充系统时间
+            try:
+                from mbdsdr_ai.new_spacetime import get_time_engine
+                unix_s = float(get_time_engine().now_unix())
+                source = ("simulation"
+                          if abs(unix_s - time.time()) > 1.0 else "system")
+            except Exception:  # noqa: BLE001 - 引擎不可用时退墙钟并标注
+                unix_s = time.time()
+                source = "system_fallback"
+            jd = unix_to_jd(unix_s)
+            res = {
+                "unix_time": unix_s,
+                "time_source": source,
+                "jd": round(jd, 6),
+                "mjd": round(jd_to_mjd(jd), 6),
+                "gmst_hms": lst_to_hms(jd_to_gmst(jd)),
+                "lst_hms": lst_to_hms(jd_to_lst(jd, obs.longitude_deg)),
+                "observer_lon": obs.longitude_deg,
+            }
+            return ToolResult(success=True,
+                              content=json.dumps(res, ensure_ascii=False, indent=2))
+
         self.tool_registry.register(
             name="astro_time_info",
             description="获取天文时间系统信息（儒略日JD/简化儒略日MJD/格林尼治恒星时GMST/地方恒星时LST）。用于卫星轨道计算和精确时间同步。",
             parameters={"type": "object", "properties": {}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=(lambda jd: json.dumps({"unix_time": time.time(), "jd": round(jd, 6), "mjd": round(jd_to_mjd(jd), 6), "gmst_hms": lst_to_hms(jd_to_gmst(jd)), "lst_hms": lst_to_hms(jd_to_lst(jd, obs.longitude_deg)), "observer_lon": obs.longitude_deg}, ensure_ascii=False, indent=2))(unix_to_jd())),
+            handler=_astro_time_info,
             category="astronomy",
         )
 

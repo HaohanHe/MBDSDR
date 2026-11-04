@@ -57,15 +57,20 @@ class DopplerLinkCompensator:
     state: DopplerLinkState = field(default_factory=DopplerLinkState)
 
     # ------------------------------------------------------------------ 目标
-    def arm_target(self, name: str, downlink_hz: float) -> bool:
-        """绑定补偿目标（选定/锁定卫星）。返回是否绑定成功。"""
+    def arm_target(self, name: str, downlink_hz: float,
+                   at_unix: Optional[float] = None) -> bool:
+        """绑定补偿目标（选定/锁定卫星）。返回是否绑定成功。
+
+        ``at_unix`` 显式钉死预测时刻（测试/回放）；缺省取跟踪器的
+        TimeEngine 时间，与过境/天空视图同一时间源。
+        """
         if self.tracker is None or not name or float(downlink_hz) <= 0:
             self.clear("无跟踪器或目标/频率非法")
             return False
         self.state.target_name = str(name)
         self.state.downlink_hz = float(downlink_hz)
         self.state.enabled = True
-        return self.refresh()
+        return self.refresh(at_unix=at_unix)
 
     def clear(self, reason: str = "") -> None:
         """清除目标并关闭补偿（诚实回落，不保留过期偏移）。"""
@@ -102,11 +107,13 @@ class DopplerLinkCompensator:
                                  "（防止双倍偏移）")
 
     # ------------------------------------------------------------------ 预测
-    def refresh(self, pos: Optional[dict] = None) -> bool:
+    def refresh(self, pos: Optional[dict] = None,
+                at_unix: Optional[float] = None) -> bool:
         """用当前时刻重算预测多普勒。失效→invalid+关补偿+原因。
 
         pos 可选：调用方已算好的 current_position() 结果（跟踪环每拍喂入，
         避免重复 sgp4 传播）；None 时本方法自己向 tracker 现算（TX 发射时刻）。
+        at_unix 仅在没有 pos 时生效，显式钉死预测时刻（测试/回放）。
         """
         st = self.state
         if self.tracker is None or not st.target_name:
@@ -117,7 +124,10 @@ class DopplerLinkCompensator:
             return False
         if pos is None:
             try:
-                pos = self.tracker.current_position()
+                if at_unix is None:
+                    pos = self.tracker.current_position()
+                else:
+                    pos = self.tracker.current_position(at_unix=at_unix)
             except Exception as e:  # noqa: BLE001 —— 失效必须诚实，不抛不穿
                 pos = None
         if not pos or not pos.get("valid"):

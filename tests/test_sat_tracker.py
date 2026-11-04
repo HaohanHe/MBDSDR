@@ -27,6 +27,15 @@ def _beijing_gs() -> GroundStation:
     return GroundStation(lat_deg=39.9, lon_deg=116.4, alt_m=50.0)
 
 
+# 钉死时钟：内置 TLE 历元 2026-09-25 附近，不依赖当前墙钟。
+def _ts_utc(y: int, m: int, d: int) -> float:
+    from datetime import datetime, timezone
+    return datetime(y, m, d, tzinfo=timezone.utc).timestamp()
+
+
+_FIXED_UNIX = _ts_utc(2026, 9, 26)
+
+
 def test_builtin_catalog_loaded():
     """内置真实 TLE 至少 5 颗常用卫星。"""
     t = SatelliteTracker(_beijing_gs())
@@ -64,7 +73,7 @@ def test_current_position_ranges():
     t = SatelliteTracker(_beijing_gs())
     t.select_satellite("NOAA 15")
     t.set_downlink_freq(137.62e6)
-    p = t.current_position()
+    p = t.current_position(at_unix=_FIXED_UNIX)
     assert p["valid"] is True
     assert 0.0 <= p["azimuth"] < 360.0
     assert -90.0 <= p["elevation"] <= 90.0
@@ -83,17 +92,11 @@ def test_doppler_sign_approaching_vs_receding():
     t = SatelliteTracker(_beijing_gs())
     t.select_satellite("NOAA 15")
     t.set_downlink_freq(137.62e6)
-    p = t.next_pass(min_alt=5.0, hours=48.0)
+    p = t.next_pass(min_alt=5.0, hours=48.0, start_unix=_FIXED_UNIX)
     assert p is not None, "北京附近 48h 内应至少有一次 NOAA 15 过境"
 
-    real_now = t._ts.now
-    try:
-        t._ts.now = lambda: p.rise_time
-        pos_aos = t.current_position()
-        t._ts.now = lambda: p.set_time
-        pos_los = t.current_position()
-    finally:
-        t._ts.now = real_now
+    pos_aos = t.current_position(at_unix=p.rise_time.utc_datetime().timestamp())
+    pos_los = t.current_position(at_unix=p.set_time.utc_datetime().timestamp())
 
     # AOS：卫星朝观测者飞来 -> range_rate<0 -> doppler>0（接收频率升高）
     assert pos_aos["range_rate_km_s"] < 0, \
@@ -111,19 +114,14 @@ def test_is_visible_threshold():
     """中天可见；地平线下不可见。"""
     t = SatelliteTracker(_beijing_gs())
     t.select_satellite("NOAA 15")
-    p = t.next_pass(min_alt=5.0, hours=48.0)
+    p = t.next_pass(min_alt=5.0, hours=48.0, start_unix=_FIXED_UNIX)
     assert p is not None
 
-    real_now = t._ts.now
-    try:
-        t._ts.now = lambda: p.max_alt_time
-        assert t.is_visible(5.0) is True, "中天应可见"
-        # 地平线下时刻（中天后很久）应不可见
-        far = t._ts.tt_jd(p.max_alt_time.tt + 0.5)  # +0.5 天
-        t._ts.now = lambda: far
-        assert t.is_visible(5.0) is False, "0.5 天后应已过境/不可见"
-    finally:
-        t._ts.now = real_now
+    mid_unix = p.max_alt_time.utc_datetime().timestamp()
+    assert t.is_visible(5.0, at_unix=mid_unix) is True, "中天应可见"
+    # 地平线下时刻（中天后半天）应不可见
+    assert t.is_visible(5.0, at_unix=mid_unix + 0.5 * 86400.0) is False, \
+        "0.5 天后应已过境/不可见"
 
 
 def test_no_ground_station_no_crash():

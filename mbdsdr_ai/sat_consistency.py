@@ -140,13 +140,18 @@ def check_next_pass_consistency(
     hours: float = 24.0,
     min_alt: float = 5.0,
     tol_deg: float = DEFAULT_TOL_DEG,
+    start_unix: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """预测下一次过境并立即做三路径对拍。无过境时 checked=False。"""
+    """预测下一次过境并立即做三路径对拍。无过境时 checked=False。
+
+    ``start_unix`` 显式钉死预测起点（Unix UTC 秒）；缺省走 TimeEngine。
+    """
     from .sat_passes import predict_passes
 
     anomalies: List[Dict[str, Any]] = []
     passes = predict_passes(tle_lines, ground_station, hours=hours,
-                            min_alt=min_alt, anomalies=anomalies)
+                            min_alt=min_alt, anomalies=anomalies,
+                            start_unix=start_unix)
     if not passes:
         return {"checked": False, "consistent": None,
                 "reason": "未来窗口内无过境", "anomalies": anomalies}

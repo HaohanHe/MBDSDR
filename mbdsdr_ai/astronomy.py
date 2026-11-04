@@ -177,9 +177,14 @@ class AntennaParams:
 # ── 时间系统 ──────────────────────────────────────────
 
 def unix_to_jd(unix_time: float = None) -> float:
-    """Unix 时间戳转儒略日（JD）。"""
+    """Unix 时间戳转儒略日（JD）。缺省取 TimeEngine（模拟时刻优先）。"""
     if unix_time is None:
-        unix_time = time.time()
+        # 与天空视图/过境链同一时间源；引擎不可用才退墙钟
+        try:
+            from .new_spacetime import get_time_engine
+            unix_time = float(get_time_engine().now_unix())
+        except Exception:  # noqa: BLE001
+            unix_time = time.time()
     return unix_time / 86400.0 + 2440587.5
 
 
@@ -555,7 +560,12 @@ def predict_satellite_pass(
         return []
 
     if start_time is None:
-        start_time = time.time()
+        # 缺省与全链路一致：TimeEngine（模拟时刻优先）；显式 start_time 覆盖
+        try:
+            from .new_spacetime import get_time_engine
+            start_time = float(get_time_engine().now_unix())
+        except Exception:  # noqa: BLE001 - 引擎不可用时退系统时钟
+            start_time = time.time()
 
     satellite = Satrec.twoline2rv(tle_line1, tle_line2)
     lat = observer.latitude_deg

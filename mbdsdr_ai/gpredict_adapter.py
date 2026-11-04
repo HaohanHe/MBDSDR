@@ -781,6 +781,15 @@ def doppler_shift(obs: Observation, source_freq_hz: float) -> float:
 # =====================================================================
 # 便捷工具函数（供 ToolRegistry 调用）
 # =====================================================================
+def _engine_unix() -> float:
+    """工具缺省时刻统一取 TimeEngine（模拟时刻优先），引擎不可用才退墙钟。"""
+    try:
+        from .new_spacetime import get_time_engine
+        return float(get_time_engine().now_unix())
+    except Exception:  # noqa: BLE001
+        return time.time()
+
+
 def tool_tle_parse(name: str, line1: str, line2: str) -> Dict[str, Any]:
     """TLE 解析工具入口。"""
     t = TLEParser.parse(name, line1, line2)
@@ -806,7 +815,7 @@ def tool_sgp4_propagate(name: str, line1: str, line2: str,
     t = TLEParser.parse(name, line1, line2)
     prop = SGP4Propagator(t)
     if unix_s is None:
-        unix_s = time.time()
+        unix_s = _engine_unix()
     jd = unix_to_jd(unix_s)
     tsince_min = (jd - t.epoch_jd) * 1440.0
     r, v = prop.propagate(tsince_min)
@@ -827,7 +836,7 @@ def tool_sat_pass_predict(name: str, line1: str, line2: str,
     t = TLEParser.parse(name, line1, line2)
     st = GeoStation(lat_deg, lon_deg, alt_km)
     pred = SatPassPredictor(t, st)
-    t0 = start_unix if start_unix is not None else time.time()
+    t0 = start_unix if start_unix is not None else _engine_unix()
     events = pred.predict_passes(t0, hours, min_el_deg)
     return {
         "satellite": t.sat_name,
@@ -856,7 +865,7 @@ def tool_doppler_calc(name: str, line1: str, line2: str,
     st = GeoStation(lat_deg, lon_deg, alt_km)
     prop = SGP4Propagator(t)
     if unix_s is None:
-        unix_s = time.time()
+        unix_s = _engine_unix()
     jd = unix_to_jd(unix_s)
     tsince_min = (jd - t.epoch_jd) * 1440.0
     r, v = prop.propagate(tsince_min)

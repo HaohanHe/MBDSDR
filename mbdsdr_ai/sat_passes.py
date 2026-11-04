@@ -49,6 +49,8 @@ except ImportError:  # skyfield 属 satellite 可选依赖组；缺它模块仍�
     _sky_load = None  # type: ignore[assignment]
     _HAS_SKYFIELD = False
 
+from datetime import datetime, timezone
+
 
 def _require_skyfield() -> None:
     """skyfield 缺失时给出可操作的诚实报错（而非 AttributeError: NoneType）。"""
@@ -212,6 +214,7 @@ def predict_passes(
     min_alt: float = 10.0,
     require_sunlit: bool = False,
     anomalies: Optional[List[Dict[str, Any]]] = None,
+    start_unix: Optional[float] = None,
 ) -> List[SatellitePass]:
     """预测未来 ``hours`` 小时内卫星从 ``start_time`` 起的过境事件。
 
@@ -222,7 +225,9 @@ def predict_passes(
     ground_station:
         :class:`GroundStation` 观测者位置。
     start_time:
-        skyfield Time（UTC）。None 取当前时刻。
+        skyfield Time（UTC）。None 取 TimeEngine（模拟时刻优先，未穿越即墙钟）。
+    start_unix:
+        UTC 秒，``start_time`` 为 None 时优先于 TimeEngine（测试/回放钉死时钟入口）。
     hours:
         向前预测时长（小时）。
     min_alt:
@@ -242,7 +247,18 @@ def predict_passes(
 
     ts = make_timescale()
     if start_time is None:
-        start_time = ts.now()
+        if start_unix is not None:
+            # 显式 Unix 时刻优先（测试/回放钉死时钟的唯一入口）
+            start_time = ts.utc(datetime.fromtimestamp(float(start_unix),
+                                                       tz=timezone.utc))
+        else:
+            # 缺省与全链路一致：取 TimeEngine（模拟时刻优先，未穿越即系统时钟）
+            try:
+                from .new_spacetime import get_time_engine
+            except ImportError:  # 扁平导入（脚本/测试）
+                from new_spacetime import get_time_engine
+            start_time = ts.utc(datetime.fromtimestamp(
+                get_time_engine().now_unix(), tz=timezone.utc))
 
     # twoline2rv + SGP4 传播器
     try:

@@ -246,7 +246,7 @@ def test_tool_loop_exhaustion_not_silent():
         yield _stream_event(
             content="",
             tool_calls=[{
-                "id": f"call_{int(time.time()*1000)}",
+                "id": "call_test_loop_1",
                 "type": "function",
                 "function": {"name": "get_status", "arguments": "{}"},
             }],

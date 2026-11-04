@@ -306,6 +306,15 @@ def _state_from_satrec(
     }
 
 
+def _engine_now_unix() -> float:
+    """全链路统一缺省时间：TimeEngine 模拟时刻优先，不可用才退系统时钟。"""
+    try:
+        from .new_spacetime import get_time_engine
+        return float(get_time_engine().now_unix())
+    except Exception:  # noqa: BLE001 - 引擎不可用不阻断位置计算
+        return time.time()
+
+
 def compute_satellite_state(
     satellite_name: str,
     observer_lat: float,
@@ -315,7 +324,8 @@ def compute_satellite_state(
 ) -> Optional[Dict[str, Any]]:
     """用 sgp4 真传播，返回站坐标下的仰角/方位/距离/视线速度/多普勒。
 
-    when: unix 秒；默认 now。
+    When:
+        unix 秒；缺省取 TimeEngine（模拟时刻优先，未穿越即墙钟）。
     """
     _require_sgp4()
     catnr = BUILTIN_SATS.get(satellite_name)
@@ -327,7 +337,7 @@ def compute_satellite_state(
         return None
     sat = Satrec.twoline2rv(line1, line2)
     if when is None:
-        when = time.time()
+        when = _engine_now_unix()
     # unix -> UTC 儒略日
     jd_utc = when / 86400.0 + 2440587.5
     return _state_from_satrec(sat, satellite_name, jd_utc,
@@ -452,8 +462,8 @@ def _predict_passes_impl(
 
     coarse_step = 60.0   # 粗扫量级（~0.5min）
     fine_step = 2.0      # pass 内采样步长，找中天/多普勒极值
-    # 显式时刻优先（仿真/测试口径）；缺省才用墙钟当前时刻
-    t0 = time.time() if start_unix is None else float(start_unix)
+    # 显式时刻优先（仿真/测试口径）；缺省取 TimeEngine，与天空视图同一时间源
+    t0 = _engine_now_unix() if start_unix is None else float(start_unix)
     t_end = t0 + hours * 3600.0
     names = [n for n in BUILTIN_SATS
              if not (satellite_type == "weather" and not any(
@@ -623,7 +633,7 @@ def predict_passes(
 ) -> List[Dict[str, Any]]:
     """预测未来 hours 小时内的卫星过境事件（列表兼容接口）。
 
-    ``start_unix`` 显式 UTC 秒；缺省用墙钟当前时刻（仿真环境应传入）。
+    ``start_unix`` 显式 UTC 秒；缺省取 TimeEngine（模拟时刻优先，未穿越即墙钟）。
 
     自适应粗/细扫描（60s 粗扫 + 二分收敛 + 2s 中天采样）。每条结果都附带
     TLE 身份/历元/新鲜度/精度风险字段；过期或失效时时刻自动降到分钟级。

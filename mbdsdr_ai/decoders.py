@@ -173,7 +173,12 @@ def compute_satellite_position(
         return None
 
     if timestamp is None:
-        timestamp = time.time()
+        # 与天空视图/过境链同一时间源：TimeEngine 优先（懒导入避免模块环）
+        try:
+            from .new_spacetime import get_time_engine
+            timestamp = float(get_time_engine().now_unix())
+        except Exception:  # noqa: BLE001
+            timestamp = time.time()
 
     # 转换为 Julian Date
     dt = time.gmtime(timestamp)

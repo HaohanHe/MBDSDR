@@ -615,7 +615,7 @@ def test_scheduler_module(result: TestResult, agent: MBDSDRAgent):
             task = scheduler.add_task(
                 name="测试任务",
                 schedule_type="once",
-                run_at=time.time() + 3600,
+                run_at=time.time() + 3600,  # timeguard: allow 相对未来时刻
             )
             task_id = task.task_id
             result.record("添加一次性任务", task_id is not None)

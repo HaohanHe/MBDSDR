@@ -511,7 +511,7 @@ def test_scheduler_module(result, agent):
             task_id = scheduler.add_task(
                 name="测试任务", task_type="workflow",
                 target="test_workflow", params={},
-                schedule_type="once", run_at=time.time() + 3600,
+                schedule_type="once", run_at=time.time() + 3600,  # timeguard: allow
             )
             result.record("添加一次性任务", task_id is not None)
 

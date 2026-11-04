@@ -80,7 +80,8 @@ def test_trail_sampling():
     """trail 采样：围绕某时刻采一组 az/alt。"""
     ts = make_timescale()
     tle = ISS_TLE_FALLBACK
-    trail = sample_trail(tle, SAMPLE_SITE, ts.now(),
+    fixed_t = ts.utc(2024, 10, 1, 6)     # 钉死时钟，不用 ts.now()
+    trail = sample_trail(tle, SAMPLE_SITE, fixed_t,
                          before_s=300, after_s=300, step_s=30)
     assert len(trail) >= 5, "应采样到一组轨迹点"
     print(f"\n[ok] trail 采样 {len(trail)} 个点，首末 az/alt: "

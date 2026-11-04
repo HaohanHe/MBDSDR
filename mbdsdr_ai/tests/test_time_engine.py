@@ -33,6 +33,9 @@ from new_spacetime import (
     predict_satellite_pass,
 )
 
+# 固定基准时刻（钉死时钟；不依赖 CI 当前日期）
+BASE_DT = datetime(2026, 9, 25, 12, 0, 0, tzinfo=timezone.utc)
+
 
 class TestTimeEngineConversions(unittest.TestCase):
     """UTC <-> JD 往返换算。"""
@@ -60,7 +63,7 @@ class TestTimeEngineDefaultBehavior(unittest.TestCase):
         eng = get_time_engine()
         self.assertTrue(eng.is_following_system())
         # now_unix() 应接近 time.time()
-        self.assertLess(abs(eng.now_unix() - time.time()), 1.0)
+        self.assertLess(abs(eng.now_unix() - time.time()), 1.0)  # timeguard: allow
         self.assertEqual(eng.get_rate(), 1.0)
 
     def test_tick_when_following_system_is_noop(self):
@@ -69,7 +72,7 @@ class TestTimeEngineDefaultBehavior(unittest.TestCase):
         eng.tick(10.0)  # 不应抛错，也不应跳变
         after = eng.now_unix()
         # 跟随系统时间时 tick 不改 sim_jd，仍返回系统时间
-        self.assertLess(abs(after - time.time()), 1.0)
+        self.assertLess(abs(after - time.time()), 1.0)  # timeguard: allow
 
 
 class TestTimeEngineRate(unittest.TestCase):
@@ -126,14 +129,14 @@ class TestTimeTravelAffectsSatellitePositions(unittest.TestCase):
 
         eng = get_time_engine()
 
-        # 1) 取"现在"（系统时间）的卫星位置
-        now_unix = time.time()
+        # 1) 取固定基准时刻的卫星位置（钉死时钟，不随 CI 日期漂移）
+        now_unix = BASE_DT.timestamp()
         pos_now = compute_satellite_position("ISS (ZARYA)", self.lat, self.lon, 0,
                                              timestamp=now_unix)
         self.assertIsNotNone(pos_now)
 
         # 2) 把模拟时间跳到 24 小时后
-        future_dt = datetime.now(timezone.utc) + timedelta(hours=24)
+        future_dt = BASE_DT + timedelta(hours=24)
         eng.set_utc(future_dt)
         future_unix = eng.now_unix()
         self.assertAlmostEqual(future_unix - now_unix, 24 * 3600, delta=5.0)
@@ -152,14 +155,14 @@ class TestTimeTravelAffectsSatellitePositions(unittest.TestCase):
 
     def test_compute_visible_satellite_count_uses_sim_time(self):
         """compute_visible_satellite_count 应从 TimeEngine 取时间。"""
-        eng = get_time_engine()
-
-        # 先在系统时间下取一次
+        # 先在固定基准时刻取一次（钉死时钟）
         reset_time_engine()
+        eng = get_time_engine()
+        eng.set_utc(BASE_DT)
         r1 = compute_visible_satellite_count(self.lat, self.lon, min_elevation=0.0)
 
         # 跳到 6 小时后
-        eng.set_utc(datetime.now(timezone.utc) + timedelta(hours=6))
+        eng.set_utc(BASE_DT + timedelta(hours=6))
         r2 = compute_visible_satellite_count(self.lat, self.lon, min_elevation=0.0)
 
         # 两次结果都应是合法字典

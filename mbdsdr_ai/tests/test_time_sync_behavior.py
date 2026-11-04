@@ -75,7 +75,7 @@ def test_ntp_uses_transmit_timestamp_not_receive():
     assert r["ntp_time"] == time.strftime(
         "%Y-%m-%d %H:%M:%S", time.gmtime(want_ntp_sec))
     # 偏差 = 应答传输时刻 - 本地收发中点（量级由 TX 决定，与 RX 无关）
-    assert abs(r["local_clock_skew_s"] - (want_ntp_sec - time.time())) < 5.0
+    assert abs(r["local_clock_skew_s"] - (want_ntp_sec - time.time())) < 5.0  # timeguard: allow
     assert r["round_trip_s"] >= 0.0
 
 
@@ -114,7 +114,7 @@ def test_simulation_clock_offset_after_time_travel():
     from mbdsdr_ai.new_spacetime import get_time_engine
     eng = get_time_engine()
     try:
-        eng.set_unix(time.time() + 3600.0)  # 穿越到 1 小时后
+        eng.set_unix(time.time() + 3600.0)  # timeguard: allow 穿越到 1 小时后
         r = simulation_clock_offset()
         assert r["following_system"] is False
         assert abs(r["offset_seconds"] - 3600.0) < 2.0

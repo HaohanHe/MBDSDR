@@ -53,7 +53,11 @@ class TestThreePathsAgree:
         assert set(rep["paths"]) == {"sky_view", "doppler"}
 
     def test_wrapper_predicts_and_checks(self):
-        rep = check_next_pass_consistency(LINES, GS, hours=24.0, min_alt=5.0)
+        # 钉死时钟：不许 wrapper 默认取墙钟（当前时刻若正逢过境中段，
+        # 存储的 rise 时刻与实算仰角会随日期随机不一致）
+        rep = check_next_pass_consistency(
+            LINES, GS, hours=24.0, min_alt=5.0,
+            start_unix=START.utc_datetime().timestamp())
         assert rep["checked"] is True
         assert rep["consistent"] is True
         assert rep["satellite"]

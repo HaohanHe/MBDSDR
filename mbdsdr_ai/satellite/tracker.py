@@ -151,6 +151,15 @@ class SatelliteTracker:
 # --------------------------------------------------------------------------- #
 # PassPredictor
 # --------------------------------------------------------------------------- #
+def _engine_unix() -> float:
+    """缺省时刻统一取 TimeEngine（模拟时刻优先），不可用才退墙钟。"""
+    try:
+        from ..new_spacetime import get_time_engine
+        return float(get_time_engine().now_unix())
+    except Exception:  # noqa: BLE001
+        return time.time()
+
+
 class PassPredictor:
     """预测未来 N 小时过境。
 
@@ -174,7 +183,7 @@ class PassPredictor:
         每项: {aos, los, max_el, max_el_t, doppler_at_aos, aos_az, los_az,
                duration_s}（unix 秒 + 度）。
         """
-        t0 = t_start if t_start is not None else time.time()
+        t0 = t_start if t_start is not None else _engine_unix()
         t_end = t0 + hours * 3600.0
         coarse_step = 60.0
         fine_step = 2.0
@@ -245,7 +254,7 @@ class PassPredictor:
     def next_pass_countdown(self, hours: float = 6.0,
                             min_el_deg: float = 0.0) -> Optional[Dict[str, Any]]:
         """下一次过境倒计时（秒）。无过境返回 None。"""
-        now = time.time()
+        now = _engine_unix()
         upcoming = [p for p in self.predict(hours=hours, min_el_deg=min_el_deg)
                     if p["los"] > now]
         if not upcoming:
@@ -302,7 +311,7 @@ def tune_command(tracker: SatelliteTracker, gs: GroundStation,
                  t_unix: Optional[float] = None) -> Dict[str, Any]:
     """与 rf_sky_view 联动：选中卫星 → 返回应调谐频率（含实时多普勒）。"""
     if t_unix is None:
-        t_unix = time.time()
+        t_unix = _engine_unix()
     f_down = _resolve_downlink_hz(tracker.name)
     if f_down is None:
         return {"error": f"未知卫星 {tracker.name} 的下行频率"}

@@ -1065,8 +1065,11 @@ class SDRController:
             if refresh_status.startswith("not_updated"):
                 acc = dict(acc, note=acc["note"] + "；TLE 未更新（沿用旧缓存）")
             gs = GroundStation(self._gs_lat, self._gs_lon, self._gs_alt)
+            # 与天空视图同一时间源：TimeEngine（模拟时刻优先，未穿越即墙钟）
+            from ..new_spacetime import get_time_engine
+            start_unix = get_time_engine().now_unix()
             passes = predict_passes([name, line1, line2], gs, hours=24.0,
-                                    min_alt=10.0)
+                                    min_alt=10.0, start_unix=start_unix)
             if not passes:
                 return {"error": "no_pass", "suggestion": "未来 24h 内无高于 10° 的过境。"}
             p = passes[0]

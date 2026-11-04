@@ -62,19 +62,17 @@ def _tracker_with_iss() -> SatelliteTracker:
 
 
 def _pos_at(tracker, t):
-    """指定时刻的位置（复用 tracker 内部 timescale，不引入第二套公式）。"""
-    real_now = tracker._ts.now
-    tracker._ts.now = lambda: t
-    try:
-        return tracker.current_position()
-    finally:
-        tracker._ts.now = real_now
+    """指定时刻的位置（显式注入 at_unix，不劫持 timescale 的 now）。"""
+    return tracker.current_position(at_unix=t.utc_datetime().timestamp())
 
 
 def _find_moment(tracker, rr_negative: bool):
-    """在 24h 内找一个 range_rate 满足符号且仰角>10°的时刻。"""
+    """在 24h 内找一个 range_rate 满足符号且仰角>10°的时刻。
+
+    时钟钉死在内置 ISS TLE 历元附近（2026-09-26），与墙钟日期无关。
+    """
     ts = make_timescale()
-    t0 = ts.now()
+    t0 = ts.utc(2026, 9, 26)                 # 钉死，不用 ts.now()
     for k in range(0, 24 * 12):              # 5 分钟步进
         t = ts.tt_jd(t0.tt + k * 300.0 / 86400.0)
         pos = _pos_at(tracker, t)
@@ -137,12 +135,8 @@ class TestSignConvention:
         # 预期诚实空态，不是测试目标——用时间锚注入再绑定）
         t_app, pos_app = _find_moment(tr, rr_negative=True)
         t_rec, pos_rec = _find_moment(tr, rr_negative=False)
-        real_now = tr._ts.now
-        tr._ts.now = lambda: t_app
-        try:
-            assert comp.arm_target(ISS, ISS_DOWNLINK_HZ) is True
-        finally:
-            tr._ts.now = real_now
+        assert comp.arm_target(ISS, ISS_DOWNLINK_HZ,
+                               at_unix=t_app.utc_datetime().timestamp()) is True
         # 接近时刻（refresh 用锚定位置，与 _poll_satellite_track 同路径）
         assert comp.refresh(pos_app) is True
         assert comp.state.doppler_hz > 0.0
@@ -160,8 +154,9 @@ class TestSignConvention:
         """LEO 量级约束：|Δ/f| <= 7.8km/s / c（超界即数据/符号错误）。"""
         tr = _tracker_with_iss()
         comp = DopplerLinkCompensator(tr)
-        comp.arm_target(ISS, ISS_DOWNLINK_HZ)
         t, pos = _find_moment(tr, rr_negative=True)
+        comp.arm_target(ISS, ISS_DOWNLINK_HZ,
+                        at_unix=t.utc_datetime().timestamp())
         comp.refresh(pos)
         assert abs(comp.state.doppler_hz) / ISS_DOWNLINK_HZ \
             <= 7.8e3 / C_LIGHT_MPS + 1e-9

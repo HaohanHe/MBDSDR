@@ -28,6 +28,7 @@ TLE 来源（不造假）：
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Sequence
 
 try:
@@ -146,6 +147,21 @@ def _bounded_requests_get(url: str, timeout_s: float, hard_deadline_s: float):
     if "e" in box:
         raise box["e"]  # type: ignore[misc]
     return box["r"]
+
+
+def _engine_now_unix() -> Optional[float]:
+    """全局 TimeEngine 当前 Unix 秒；不可用（扁平导入）时返回 None 走墙钟。"""
+    try:
+        from .new_spacetime import get_time_engine
+    except ImportError:
+        try:
+            from new_spacetime import get_time_engine
+        except ImportError:
+            return None
+    try:
+        return float(get_time_engine().now_unix())
+    except Exception:  # noqa: BLE001 - 时间引擎异常时退墙钟，不让跟踪崩
+        return None
 
 
 def _split_tle_blocks(text: str) -> List[List[str]]:
@@ -441,8 +457,11 @@ class SatelliteTracker:
         return self._downlink_freq_hz
 
     # ------------------------------------------------------------- 实时位置
-    def current_position(self) -> Dict[str, object]:
+    def current_position(self, at_unix: Optional[float] = None) -> Dict[str, object]:
         """计算当前时刻的 az/el/斜距/多普勒/校正后频率。
+
+        ``at_unix`` 显式注入 Unix UTC 秒（测试/回放钉死时钟）；缺省取全局
+        TimeEngine（未做时间穿越时等于系统时钟），与过境预测、天空视图同一时间源。
 
         无观测者位置、未选卫星或传播失败时返回 valid=False（各数值字段为 None），
         调用方据此空转，绝不抛异常、绝不编造。
@@ -479,7 +498,13 @@ class SatelliteTracker:
 
         entry = next((c for c in self._catalog
                       if c["name"] == self._selected_name), {})
-        t = self._ts.now()
+        if at_unix is None:
+            at_unix = _engine_now_unix()
+        if at_unix is None:
+            t = self._ts.now()
+        else:
+            t = self._ts.utc(datetime.fromtimestamp(float(at_unix),
+                                                    tz=timezone.utc))
         r = _range_and_rate(self._diff, t)
         if r is None:
             return empty
@@ -532,19 +557,22 @@ class SatelliteTracker:
             lat=gs.lat_deg, lon=gs.lon_deg, alt_m=gs.alt_m, source="user",
             origin="GroundStation"))
 
-    def is_visible(self, min_elevation: float = DEFAULT_MIN_ELEVATION_DEG) -> bool:
-        """当前仰角是否 >= 阈值（默认 5°）。"""
-        pos = self.current_position()
+    def is_visible(self, min_elevation: float = DEFAULT_MIN_ELEVATION_DEG,
+                   at_unix: Optional[float] = None) -> bool:
+        """当前仰角是否 >= 阈值（默认 5°）。``at_unix`` 可显式钉死时刻。"""
+        pos = self.current_position(at_unix=at_unix)
         if not pos["valid"] or pos["elevation"] is None:
             return False
         return float(pos["elevation"]) >= min_elevation
 
     # ------------------------------------------------------------- 下一次过境
     def next_pass(self, min_alt: float = DEFAULT_MIN_ELEVATION_DEG,
-                  hours: float = 24.0) -> Optional[SatellitePass]:
+                  hours: float = 24.0,
+                  start_unix: Optional[float] = None) -> Optional[SatellitePass]:
         """预测选中卫星未来 ``hours`` 小时内的下一次过境（AOS→中天→LOS）。
 
-        未选卫星/无观测者位置/无过境返回 None。
+        未选卫星/无观测者位置/无过境返回 None。``start_unix`` 显式钉死起点
+        （测试/回放）；缺省取 TimeEngine，与 current_position 同一时间源。
         """
         if self.ground_station is None or self._selected_name is None:
             return None
@@ -559,6 +587,7 @@ class SatelliteTracker:
                 self.ground_station,
                 hours=hours,
                 min_alt=min_alt,
+                start_unix=start_unix,
             )
         except Exception:
             return None
