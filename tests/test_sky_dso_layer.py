@@ -629,3 +629,125 @@ def test_gap_galaxy_marks_axis_ratio_unknown(monkeypatch):
         v.close()
     assert "轴比未知" in str(info["desc"])
     assert "轴比 0.55" not in str(info["desc"])
+
+
+# --------------------------------------------------------------------------
+# 11. 轴比语义收紧：三态 source；unknown 禁用 0.55 实线椭圆
+# --------------------------------------------------------------------------
+def test_axis_ratio_source_three_states():
+    from types import SimpleNamespace as NS
+    src = rf_sky_view.dso_axis_ratio_source
+    assert src(NS(size_arcmin=10.0, size_minor_arcmin=4.0)) == "catalog"
+    assert src(NS(size_arcmin=10.0)) == "unknown"
+    # 数据线直接给 axis_ratio 字段（仅长短轴都在时才非 null）
+    assert src(NS(axis_ratio=0.39)) == "catalog"
+    assert src(NS(axis_ratio=0.39, axis_ratio_source="estimated")) == "estimated"
+    assert src(NS(axis_ratio=0.39, axis_ratio_source="unknown")) == "unknown"
+    assert src(NS(size_arcmin=10.0, size_minor_arcmin=4.0,
+                  axis_ratio_source="estimated")) == "estimated"
+    # 声明 estimated 但没有任何可用值 → 仍未知，不许空值挂估计
+    assert src(NS(size_arcmin=10.0, axis_ratio_source="estimated")) == "unknown"
+
+
+def test_axis_ratio_prefers_data_line_field():
+    from types import SimpleNamespace as NS
+    assert rf_sky_view.dso_axis_ratio(
+        NS(axis_ratio=0.39, size_arcmin=10.0, size_minor_arcmin=9.0)
+    ) == pytest.approx(0.39)
+    assert rf_sky_view.dso_axis_ratio(NS(axis_ratio=None, size_arcmin=10.0,
+                                         size_minor_arcmin=4.0)) \
+        == pytest.approx(0.4)
+
+
+def test_real_m2_missing_minor_axis_is_unknown():
+    """M2（OpenNGC GCl，无 MinAx）：轴比必须是 None / unknown，不拿 0.55。"""
+    e = _entry("M2")
+    assert e.size_minor_arcmin is None
+    assert rf_sky_view.dso_axis_ratio(e) is None
+    assert rf_sky_view.dso_axis_ratio_source(e) == "unknown"
+
+
+def test_catalog_axis_ratio_card_is_labelled_catalog(monkeypatch):
+    e = _entry("M31")
+    expected = e.size_minor_arcmin / e.size_arcmin
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: e))
+        v._build_body_info({"kind": "dso", "key": "M31"})
+        desc = str(v._body_info["desc"])
+    finally:
+        v.close()
+    assert f"轴比 {expected:.2f}（目录）" in desc
+    assert "实测" not in desc
+
+
+def test_estimated_axis_ratio_card_says_estimated(monkeypatch):
+    from types import SimpleNamespace
+    base = _entry("M31")
+    fake = SimpleNamespace(
+        name="NGC9999", display_name="", zh_name="", name_en="",
+        magnitude=8.0, size_arcmin=10.0, size_minor_arcmin=5.5,
+        axis_ratio=0.55, axis_ratio_source="estimated",
+        dso_type="galaxy", constellation="And",
+        ra_deg=base.ra_deg, dec_deg=base.dec_deg)
+    v = _new_view()
+    try:
+        monkeypatch.setattr(RFSkyView, "_dso_entry",
+                            staticmethod(lambda name: fake))
+        v._build_body_info({"kind": "dso", "key": "NGC9999"})
+        desc = str(v._body_info["desc"])
+    finally:
+        v.close()
+    assert "轴比 0.55（估计）" in desc
+
+
+def _galaxy_img(v, ratio=None, source="unknown", r: float = 10.0) -> QImage:
+    img = QImage(80, 80, QImage.Format_ARGB32)
+    img.fill(QColor(0, 0, 0))
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    try:
+        v._draw_dso_glyph(p, rf_sky_view.QPointF(40, 40), r, "galaxy", 220,
+                          ratio, source)
+    finally:
+        p.end()
+    return img
+
+
+def _ink_bbox(img):
+    xs, ys = [], []
+    for y in range(img.height()):
+        for x in range(img.width()):
+            if sum(img.pixelColor(x, y).getRgb()[:3]) > 90:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        return None
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def test_unknown_axis_ratio_glyph_is_circle_not_flat_ellipse():
+    """探针：unknown 分支画圆（bbox 高≈宽），读不到 0.55 的扁椭圆。"""
+    v = _new_view(80)
+    try:
+        img = _galaxy_img(v)                   # 缺省 source=unknown
+        cat = _galaxy_img(v, 0.39, "catalog")
+    finally:
+        v.close()
+    bb = _ink_bbox(img)
+    assert bb is not None
+    w = bb[1] - bb[0] + 1
+    h = bb[3] - bb[2] + 1
+    assert h >= 0.8 * w, (w, h)               # 圆：高不塌成 0.55
+    bb_cat = _ink_bbox(cat)
+    w2 = bb_cat[1] - bb_cat[0] + 1
+    h2 = bb_cat[3] - bb_cat[2] + 1
+    assert h2 <= 0.6 * w2, (w2, h2)           # 目录轴比 0.39 仍是扁椭圆
+
+
+def test_axis_ratio_does_not_affect_pick_or_clamp():
+    """轴比只影响符号外观/文案，不参与拾取、限幅、排序。"""
+    import inspect
+    for fn in (RFSkyView._find_body_at, RFSkyView._dso_symbol_geometry):
+        assert "axis_ratio" not in inspect.getsource(fn), fn.__name__

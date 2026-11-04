@@ -293,6 +293,16 @@ def test_status_text_is_honest_for_truncation_and_empty_states():
     assert star_catalog_status_text(None, error="星表不可用") == "星表不可用"
 
 
+def test_status_text_says_catalog_limit_not_silent_cut():
+    """请求深度超过 V9.0 时如实写「受目录上限」，不静默截断。"""
+    fake_cap = SimpleNamespace(returned=1519, available=1519,
+                               limit_mag=9.0, truncated=False,
+                               beyond_catalog_limit=True)
+    txt = star_catalog_status_text(fake_cap)
+    assert txt == "显示 1519 颗 · 受目录上限 V9.0"
+    assert "受目录上限" in txt
+
+
 def test_max_count_truncates_but_keeps_brightest():
     v = _new_view()
     try:

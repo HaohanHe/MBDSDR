@@ -31,6 +31,7 @@ Stellarium 仅作为技术参考与致谢，本模块未包含其源代码。
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Any
 
@@ -316,6 +317,23 @@ def build_view_rotation(view: ViewState) -> np.ndarray:
 # 像素缩放: 对等距方位投影, 归一化坐标是角距离(弧度), 故:
 #   pixelPerRad = (min_dim/2) / deg2rad(fov/2) = min_dim / deg2rad(fov)
 # ---------------------------------------------------------------------------
+def _cached_view_rotation(center_az: float,
+                          center_alt: float) -> np.ndarray:
+    """R_view 按中心指向缓存：同一帧内网格/地景/地平线共用一次矩阵。
+
+    只依赖 center_az/center_alt（与 FOV/rotation 无关），平移一帧只换一个
+    键；缓存上限 32 帧，旧中心自动淘汰。
+    """
+    key = (float(center_az), float(center_alt))
+    return _view_rotation_cached(*key)
+
+
+@lru_cache(maxsize=32)
+def _view_rotation_cached(center_az: float, center_alt: float) -> np.ndarray:
+    return build_view_rotation(
+        ViewState(center_az=center_az, center_alt=center_alt))
+
+
 def _pixel_per_rad(view: ViewState, widget_size: Tuple[int, int],
                     projection: Optional[Any] = None) -> float:
     w, h = widget_size
@@ -347,7 +365,14 @@ def _to_screen_arrays(v_view: np.ndarray, view: "ViewState",
     `sky_to_screen`（单点）与 `sky_to_screen_many`（批量）都只调用这里，
     绘制、拾取、标签、网格与地平线因此共享同一份投影口径。
     """
-    x_n, y_n = projection.project_vec_many(v_view)
+    # 单点走标量投影：同一 `_forward` 公式，避免为网格/地景的每个顶点
+    # 分配批量数组（1200 次/帧的标量路径曾因此拖慢一帧 100ms+）。
+    if len(v_view) == 1:
+        x0, y0 = projection.project_vec(v_view[0])
+        x_n = np.array([x0], dtype=float)
+        y_n = np.array([y0], dtype=float)
+    else:
+        x_n, y_n = projection.project_vec_many(v_view)
 
     ppr = _pixel_per_rad(view, widget_size, projection)
     cx, cy = _widget_center(widget_size)
@@ -400,7 +425,7 @@ def sky_to_screen(az_deg: float, alt_deg: float,
         projection = AzimuthalEquidistantProjection()
 
     v = vec_from_azalt(az_deg, alt_deg)
-    v_view = (build_view_rotation(view) @ v)[None, :]
+    v_view = (_cached_view_rotation(view.center_az, view.center_alt) @ v)[None, :]
     px, py = _to_screen_arrays(v_view, view, projection, widget_size)
     return float(px[0]), float(py[0])
 
@@ -422,7 +447,7 @@ def sky_to_screen_many(az_deg, alt_deg,
     alt = np.radians(np.asarray(alt_deg, dtype=float))
     ca = np.cos(alt)
     vec = np.column_stack((ca * np.cos(az), ca * np.sin(az), -np.sin(alt)))
-    v_view = vec @ build_view_rotation(view).T
+    v_view = vec @ _cached_view_rotation(view.center_az, view.center_alt).T
     return _to_screen_arrays(v_view, view, projection, widget_size)
 
 
@@ -466,7 +491,7 @@ def screen_to_sky(screen_x: float, screen_y: float,
     v_view = projection.unproject_vec(x_n, y_n)
 
     # 逆视图旋转: v_altaz = R_view^T @ v_view
-    R = build_view_rotation(view)
+    R = _cached_view_rotation(view.center_az, view.center_alt)
     v = R.T @ v_view
 
     az, alt = azalt_from_vec(v)

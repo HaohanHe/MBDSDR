@@ -59,6 +59,34 @@ CORNERS = [(350, 350), (60, 60), (640, 60), (60, 640), (640, 640),
            (350, 60), (350, 640)]
 
 
+def test_batch_altaz_matches_scalar():
+    """批量赤道->地平与单点走同一条链（P·N·R），逐点误差 <= 1e-9°。"""
+    from mbdsdr_ai.celestial_geometry import (
+        GroundStation,
+        azalt_from_vec,
+        azalt_from_vec_many,
+        j2000_to_altaz,
+        j2000_to_altaz_many,
+        vec_from_radec,
+    )
+    gs = GroundStation(116.0, 40.0)
+    jd = 2451545.0 + 4000.0
+    ras = [0.0, 45.0, 130.0, 200.0, 310.0]
+    decs = [0.0, 40.0, -25.0, 70.0, -80.0]
+    vecs = np.array([vec_from_radec(r, d) for r, d in zip(ras, decs)])
+    many = j2000_to_altaz_many(vecs, gs, jd)
+    az_b, alt_b = azalt_from_vec_many(many)
+    for i in range(len(ras)):
+        az1, alt1 = azalt_from_vec(j2000_to_altaz(vecs[i], gs, jd))
+        daz = abs((float(az_b[i]) - az1 + 180.0) % 360.0 - 180.0)
+        assert daz < 1e-9, (i, daz)
+        assert abs(float(alt_b[i]) - alt1) < 1e-9, (i, alt1)
+    # 零向量：按 (0,0)，不产生 NaN
+    az0, alt0 = azalt_from_vec_many(np.array([[0.0, 0.0, 0.0]]))
+    assert np.isfinite(az0).all() and np.isfinite(alt0).all()
+    assert float(az0[0]) == 0.0 and float(alt0[0]) == 0.0
+
+
 def _view(fov: float, alt: float = 45.0, az: float = 180.0,
           projection_max: float = 179.999) -> ViewState:
     return ViewState(center_az=az, center_alt=alt, fov_deg=fov,

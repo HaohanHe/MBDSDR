@@ -145,6 +145,22 @@ def azalt_from_vec(v: np.ndarray) -> tuple[float, float]:
     return az_deg, alt * RAD2DEG
 
 
+def azalt_from_vec_many(vv: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """批量版 azalt_from_vec（N×3 方向向量 -> az/alt 数组）。
+
+    与单点版同一公式（atan2(east,north) / asin(-z)）；零向量按 (0,0)，
+    不产生 NaN。用于星表/DSO/星座一次批量出 az/alt，避免逐点 Python 循环。
+    """
+    arr = np.atleast_2d(np.asarray(vv, dtype=float))
+    r = np.linalg.norm(arr, axis=1)
+    zero = r == 0.0
+    r_safe = np.where(zero, 1.0, r)
+    az = np.degrees(np.arctan2(arr[:, 1], arr[:, 0]))
+    az = np.where(az < 0.0, az + 360.0, az)
+    alt = np.degrees(np.arcsin(np.clip(-arr[:, 2] / r_safe, -1.0, 1.0)))
+    return (np.where(zero, 0.0, az), np.where(zero, 0.0, alt))
+
+
 # ---------------------------------------------------------------------------
 # 旋转矩阵 (列向量约定)
 #   Rx: [[1,0,0],[0,c,s],[0,-s,c]]
@@ -422,6 +438,26 @@ def j2000_to_altaz(v_j2000: np.ndarray, station: GroundStation,
     v_eq = j2000_to_equinox_of_date(v_j2000, jd_tt, apply_nutation)
     v_altaz = equatorial_to_altaz(v_eq, station, jd_ut1)
     return v_altaz
+
+
+def j2000_to_altaz_many(vv_j2000: np.ndarray, station: GroundStation,
+                        jd_ut1: float, jd_tt: float | None = None,
+                        apply_nutation: bool = True) -> np.ndarray:
+    """批量版 j2000_to_altaz（N×3 -> N×3）。
+
+    岁差/章动/地平旋转矩阵每帧只建一次，再一次性左乘整张星表；
+    与单点版同一条链（P·N·R），不另写几何。N=1 时也返回 2D。
+    """
+    if jd_tt is None:
+        jd_tt = jd_ut1
+    vv = np.atleast_2d(np.asarray(vv_j2000, dtype=float))
+    P = precession_matrix(jd_tt)
+    vv = vv @ P.T
+    if apply_nutation:
+        N = nutation_matrix(jd_tt)
+        vv = vv @ N.T
+    R = station.equatorial_to_altaz_matrix(jd_ut1)
+    return vv @ R.T
 
 
 def altaz_to_j2000(v_altaz: np.ndarray, station: GroundStation,

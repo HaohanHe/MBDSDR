@@ -73,6 +73,7 @@ import math
 import os
 import re
 import time
+from functools import lru_cache
 
 import numpy as np
 from datetime import datetime, timedelta, timezone
@@ -97,10 +98,10 @@ from mbdsdr_ai.celestial_geometry import (
     vec_from_radec,
     vec_from_azalt,
     azalt_from_vec,
+    azalt_from_vec_many,
     altaz_to_j2000,
     j2000_to_altaz,
-    precession_matrix,
-    nutation_matrix,
+    j2000_to_altaz_many,
 )
 from mbdsdr_ai.sky_interaction import (
     ViewState,
@@ -329,7 +330,7 @@ def star_catalog_status_text(selection, daylight_hidden: bool = False,
     if bool(getattr(selection, "truncated", False)):
         return f"已按上限显示 {n} / 可用 {avail}"
     if bool(getattr(selection, "beyond_catalog_limit", False)):
-        return f"显示 {n} 颗 · 上限 V{limit:.1f}"
+        return f"显示 {n} 颗 · 受目录上限 V{limit:.1f}"
     return f"显示 {n} 颗 · 极限 V{limit:.1f}"
 
 
@@ -820,8 +821,28 @@ def dso_size_arcmin(entry) -> Optional[float]:
         return None
 
 
+AXIS_RATIO_SOURCE_CATALOG = "catalog"
+AXIS_RATIO_SOURCE_ESTIMATED = "estimated"
+AXIS_RATIO_SOURCE_UNKNOWN = "unknown"
+
+
 def dso_axis_ratio(entry) -> Optional[float]:
-    """星系短轴/长轴真实轴比；缺小轴或数据非法时返回 None。"""
+    """星系短轴/长轴轴比；只有长短轴都有值时才非 None。
+
+    单一事实源：优先读数据线的 ``entry.axis_ratio``（仅长短轴都在时为
+    minor/major，否则 null）；字段不存在时用 ``size_minor_arcmin /
+    size_arcmin`` 推导。任一轴缺失/非法一律 None，不拿 0 或 0.55 冒充。
+    """
+    try:
+        raw = getattr(entry, "axis_ratio", None)
+    except Exception:
+        raw = None
+    if raw is not None:
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return v if math.isfinite(v) and 0.0 < v <= 1.0 else None
     size = dso_size_arcmin(entry)
     if size is None:
         return None
@@ -838,6 +859,27 @@ def dso_axis_ratio(entry) -> Optional[float]:
         return ratio
     except (TypeError, ValueError):
         return None
+
+
+def dso_axis_ratio_source(entry) -> str:
+    """轴比来源三态：catalog / estimated / unknown。
+
+    没有轴比值一定是 unknown（不许估计值冒充目录值）。有值时优先采用
+    数据线声明的 ``entry.axis_ratio_source``；未声明按 catalog 计——只有
+    长短轴都在目录里才推得出轴比。
+    """
+    ratio = dso_axis_ratio(entry)
+    try:
+        declared = str(getattr(entry, "axis_ratio_source", "") or "").strip().lower()
+    except Exception:
+        declared = ""
+    if declared == AXIS_RATIO_SOURCE_UNKNOWN:
+        return AXIS_RATIO_SOURCE_UNKNOWN
+    if declared in (AXIS_RATIO_SOURCE_CATALOG, AXIS_RATIO_SOURCE_ESTIMATED):
+        # 声明了来源却没有可用轴比 → 仍是未知，不允许空值挂 estimated。
+        return declared if ratio is not None else AXIS_RATIO_SOURCE_UNKNOWN
+    return (AXIS_RATIO_SOURCE_CATALOG if ratio is not None
+            else AXIS_RATIO_SOURCE_UNKNOWN)
 
 
 def dso_label_text(entry) -> str:
@@ -1363,10 +1405,15 @@ def _hash01(n: int) -> float:
     return (n % 1000000) / 1000000.0
 
 
+@lru_cache(maxsize=2048)
 def _landscape_layer_profile(az_deg: float, *, seed: int, base_alt: float,
                              amp_alt: float, lattice_deg: float,
                              octaves: int = 3, quant_deg: float = 0.0) -> float:
-    """某方位上该层剪影的仰角（度）。值噪声多倍频叠加，输出 ∈ [base, base+amp]。"""
+    """某方位上该层剪影的仰角（度）。值噪声多倍频叠加，输出 ∈ [base, base+amp]。
+
+    纯函数 + 缓存：地景轮廓固定在屏幕底部/地平系，不随视角转动，同一
+    方位/参数的仰角跨帧恒定，没必要每帧重算 363 次噪声。
+    """
     total = 0.0
     amp = 1.0
     lat = lattice_deg
@@ -3234,6 +3281,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return sky_to_screen_many(az_deg, alt_deg, self.view_state,
                                   self.projection, self._widget_size_tuple())
 
+    def _screen_points_many(self, az_deg, alt_deg) -> List[QPointF]:
+        """批量投影成 QPointF 列表（网格/地景逐点循环的批量替代）。
+
+        与 `_sky_to_screen` 同一条换算核；非有限点保留 NaN，`_on_screen`
+        对 NaN 恒 False，调用方按段跳过。
+        """
+        xs, ys = self._sky_to_screen_many(az_deg, alt_deg)
+        return [QPointF(float(x), float(y)) for x, y in zip(xs, ys)]
+
     def _sky_to_screen_finite(self, azimuth_deg: float,
                               elevation_deg: float) -> Optional[QPointF]:
         """同 _sky_to_screen, 但视界外/相机背后返回 None。
@@ -3627,24 +3683,45 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return                      # 白天：与恒星同一门，整层不画
         try:
             from mbdsdr_ai.astronomy import dso as _dso
-            from mbdsdr_ai.celestial_geometry import azalt_from_vec
         except Exception:
             return
         jd = self._current_jd()
-        painter.save()
+        # 整张 DSO 表一次批量赤道->地平（岁差/章动/地平矩阵每帧只建一次），
+        # 不再逐条重建矩阵（124 条 × 3 个矩阵曾占单帧 ~11ms）。
+        entries: List[object] = []
+        vecs: List[np.ndarray] = []
         for e in _dso.BUILTIN_CATALOG:
             try:
-                v = j2000_to_altaz(vec_from_radec(e.ra_deg, e.dec_deg), gs, jd)
-                az, alt = azalt_from_vec(v)
+                vecs.append(vec_from_radec(e.ra_deg, e.dec_deg))
+                entries.append(e)
             except Exception:
                 continue
-            if alt < -0.6:
-                continue                # 几何高度远在地平下（视高度必 < 0）
-            # 绘制位置用视高度；消光仍按几何高度（光程是几何量）。
-            alt_draw = self._display_alt_deg(alt)
-            if alt_draw < 0.0:
+        if not entries:
+            return
+        altaz = j2000_to_altaz_many(np.array(vecs, dtype=float), gs, jd)
+        az_arr, alt_arr = azalt_from_vec_many(altaz)
+        # 地平/视高度门与落屏也批量做，循环里只剩符号与标签。
+        mask = np.asarray(alt_arr, dtype=float) >= -0.6
+        idx = np.flatnonzero(mask)
+        az_k = np.asarray(az_arr, dtype=float)[idx]
+        alt_k = np.asarray(alt_arr, dtype=float)[idx]
+        alt_draw_k = np.array([self._display_alt_deg(float(a)) for a in alt_k],
+                              dtype=float)
+        keep = alt_draw_k >= 0.0
+        idx = idx[keep]
+        az_k, alt_k = az_k[keep], alt_k[keep]
+        alt_draw_k = alt_draw_k[keep]
+        px_k, py_k = self._sky_to_screen_many(az_k, alt_draw_k)
+        painter.save()
+        for j in range(len(idx)):
+            e = entries[int(idx[j])]
+            az = float(az_k[j])
+            alt = float(alt_k[j])
+            alt_draw = float(alt_draw_k[j])
+            px, py = float(px_k[j]), float(py_k[j])
+            if not (math.isfinite(px) and math.isfinite(py)):
                 continue
-            pos = self._sky_to_screen(az, alt_draw)
+            pos = QPointF(px, py)
             if not self._on_screen(pos):
                 continue
             mag = dso_magnitude(e)
@@ -3659,7 +3736,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             r, clamped = self._dso_symbol_geometry(az, alt_draw, dso_size_arcmin(e))
             alpha = int(round(70.0 + 150.0 * bright))
             self._draw_dso_glyph(painter, pos, r, e.dso_type, alpha,
-                                 dso_axis_ratio(e))
+                                 dso_axis_ratio(e), dso_axis_ratio_source(e))
             if clamped:
                 self._draw_dso_clamp_marker(painter, pos, r, alpha)
             # 小而不亮的条目（1.6px 符号）不挂名，避免宽 FOV 下满屏缩写；
@@ -3672,17 +3749,18 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _draw_dso_glyph(self, painter: QPainter, pos: QPointF, r: float,
                         dso_type: str, alpha: int,
-                        axis_ratio: Optional[float] = None) -> None:
+                        axis_ratio: Optional[float] = None,
+                        axis_ratio_source: str = AXIS_RATIO_SOURCE_UNKNOWN) -> None:
         """按类型画不同符号；r 为星表视大小换算出的像素半径。
 
         形状约定（只用轮廓，不做亮度渐变——本视图没有表面亮度模型）：
-          galaxy              椭圆（长轴 = 视大小，短轴 = 真实轴比）
+          galaxy              椭圆（长轴 = 视大小，短轴 = 真实轴比）；
+                              轴比 unknown 时画中性虚线圆，绝不拿 0.55 冒充
           cluster             点状圆环（8 个点围成）
           nebula              虚线菱形
           cluster_nebula      虚线椭圆 + 内部星点（星团+星云复合体）
           double_star         两个实心点（双星）
           supernova_remnant   双同心圆
-        星系轴比缺失时退回 0.55（卡内标「轴比未知」），不是真值。
         """
         col = self._ink()
         pen = QPen(QColor(col.red(), col.green(), col.blue(), min(255, alpha)), 1)
@@ -3690,8 +3768,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setBrush(Qt.NoBrush)
         painter.setPen(pen)
         if dso_type == "galaxy":
-            ratio = axis_ratio if axis_ratio is not None else 0.55
-            painter.drawEllipse(pos, max(1.0, r), max(0.7, r * ratio))
+            if axis_ratio_source in (AXIS_RATIO_SOURCE_CATALOG,
+                                     AXIS_RATIO_SOURCE_ESTIMATED) \
+                    and axis_ratio is not None:
+                painter.drawEllipse(pos, max(1.0, r), max(0.7, r * float(axis_ratio)))
+            else:
+                # 轴比未知：中性虚线圆（圆率=1），信息卡同时标「轴比未知」。
+                pen.setStyle(Qt.DashLine)
+                painter.setPen(pen)
+                rr = max(1.2, r)
+                painter.drawEllipse(pos, rr, rr)
         elif dso_type == "cluster":
             rr = max(1.4, r)
             painter.setPen(Qt.NoPen)
@@ -3775,21 +3861,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _j2000_altaz_many(self, ra_deg, dec_deg, gs, jd) \
             -> Tuple[np.ndarray, np.ndarray]:
-        """批量 J2000 -> (az, alt)；岁差/章动/地平旋转矩阵只算一次。
+        """批量 J2000 -> (az, alt)；直接委托 celestial_geometry 的批量链。
 
-        与 j2000_to_altaz 同一链（P→N→R_altaz），只是不逐星重建矩阵。
+        与 j2000_to_altaz 同一条 P→N→R 链（矩阵每帧只建一次），这里不再
+        维护第二份矩阵乘法/反三角。
         """
-        ra = np.radians(np.asarray(ra_deg, dtype=float))
-        dec = np.radians(np.asarray(dec_deg, dtype=float))
-        vec = np.column_stack((np.cos(dec) * np.sin(ra),
-                               np.sin(dec),
-                               -np.cos(dec) * np.cos(ra)))
-        m = (gs.equatorial_to_altaz_matrix(jd)
-             @ nutation_matrix(jd) @ precession_matrix(jd))
-        v = vec @ m.T
-        alt = np.degrees(np.arcsin(np.clip(-v[:, 2], -1.0, 1.0)))
-        az = np.degrees(np.arctan2(v[:, 1], v[:, 0])) % 360.0
-        return az, alt
+        vec = np.array([vec_from_radec(float(r), float(d))
+                        for r, d in zip(ra_deg, dec_deg)], dtype=float)
+        altaz = j2000_to_altaz_many(vec, gs, jd)
+        return azalt_from_vec_many(altaz)
 
     def _constellation_screen_points(self, az, alt, gs, jd) \
             -> List[Optional[QPointF]]:
@@ -4134,8 +4214,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(QPen(col, 1))
         path = QPainterPath()
         first = True
-        for az in range(0, 361, 2):
-            pos = self._sky_to_screen(float(az), HORIZON_ALT_DEG)
+        az_seq = np.arange(0, 361, 2, dtype=float)
+        for pos in self._screen_points_many(
+                az_seq, np.full_like(az_seq, HORIZON_ALT_DEG)):
             if not self._on_screen(pos):
                 first = True
                 continue
@@ -4158,10 +4239,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if alpha <= 0.003:
             return
         # 地平线基准（alt=0 采样中位 y）：辉光带与剪影轮廓都以它为锚。
-        pts = []
-        for az in range(0, 361, 6):
-            pos = self._sky_to_screen(float(az), 0.0)
-            pts.append(pos)
+        az_seq = np.arange(0, 361, 6, dtype=float)
+        pts = self._screen_points_many(az_seq, np.zeros_like(az_seq))
         on = [p for p in pts if self._on_screen(p)]
         if not on:
             return
@@ -4196,11 +4275,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.setBrush(QBrush(col))
             path = QPainterPath()
             edge: List[QPointF] = []
-            for az in range(0, 361, 3):
-                alt = _landscape_layer_profile(
+            az_seq = np.arange(0, 361, 3, dtype=float)
+            alt_seq = np.array([
+                _landscape_layer_profile(
                     float(az), seed=seed, base_alt=base, amp_alt=amp,
                     lattice_deg=lat, octaves=octaves, quant_deg=quant)
-                p = self._sky_to_screen(float(az), alt)
+                for az in az_seq], dtype=float)
+            for p in self._screen_points_many(az_seq, alt_seq):
                 if self._on_screen(p):
                     edge.append(p)
             if not edge:
@@ -4225,12 +4306,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         grid_col = QColor(88, 92, 99, 90)  # gray_400 带 alpha
         painter.setPen(QPen(grid_col, 1, Qt.DashLine))
         # 等方位射线 (每 30°), 从地平 alt=0 向天顶 alt=90
-        for az in range(0, 360, 30):
+        n_alt = 21
+        alt_km = np.arange(n_alt, dtype=float) * 4.5
+        ray_az = np.repeat(np.arange(0, 360, 30, dtype=float), n_alt)
+        ray_alt = np.tile(alt_km, 12)
+        ray_pts = self._screen_points_many(ray_az, ray_alt)
+        for i in range(12):
             path = QPainterPath()
             first = True
-            for k in range(0, 21):
-                alt = k * 4.5
-                p = self._sky_to_screen(float(az), alt)
+            for p in ray_pts[i * n_alt:(i + 1) * n_alt]:
                 if not self._on_screen(p):
                     first = True
                     continue
@@ -4240,11 +4324,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     path.lineTo(p)
             painter.drawPath(path)
         # 等高圈 (alt = 0,30,60)
-        for alt in (0.0, 30.0, 60.0):
+        ring_az = np.tile(np.arange(0, 361, 4, dtype=float), 3)
+        ring_alt = np.repeat(np.array([0.0, 30.0, 60.0]), 91)
+        ring_pts = self._screen_points_many(ring_az, ring_alt)
+        for i in range(3):
             path = QPainterPath()
             first = True
-            for az in range(0, 361, 4):
-                p = self._sky_to_screen(float(az), alt)
+            for p in ring_pts[i * 91:(i + 1) * 91]:
                 if not self._on_screen(p):
                     first = True
                     continue
@@ -5437,8 +5523,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                         else "角大小 未知"]
                 if str(dso_type) == "galaxy":
                     ratio = dso_axis_ratio(entry)
-                    bits.append(f"轴比 {ratio:.2f}" if ratio is not None
-                                else "轴比未知")
+                    src = dso_axis_ratio_source(entry)
+                    if ratio is None or src == AXIS_RATIO_SOURCE_UNKNOWN:
+                        bits.append("轴比未知")
+                    else:
+                        tag = ("目录" if src == AXIS_RATIO_SOURCE_CATALOG
+                               else "估计")
+                        bits.append(f"轴比 {ratio:.2f}（{tag}）")
                 if mag is None:
                     bits.append("星等未知")
                 bits.append("公开星表数据")
