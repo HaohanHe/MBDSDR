@@ -326,8 +326,58 @@ def bench_e2e(sr: float, seconds: float = E2E_SECONDS) -> dict:
     }
 
 
+def profile_hotspots(sr: float = 2400000.0, iterations: int = 10,
+                     top: int = 10) -> list:
+    """cProfile 热点归因（模块:函数粒度，按自身耗时 tottime 排序）。
+
+    只做归因，不用它当性能数字：cProfile 本身有插桩开销。
+    """
+    import cProfile
+
+    fd, path = tempfile.mkstemp(suffix=".cf32")
+    os.close(fd)
+    fns, cleanup = _make_stage_fns(sr, BLOCK_SAMPLES, path)
+    pr = cProfile.Profile()
+    try:
+        pr.enable()
+        for _ in range(iterations):
+            for fn in fns.values():
+                fn()
+        pr.disable()
+    finally:
+        cleanup()
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    import pstats
+    rows = []
+    total = 0.0
+    for (_file, _line, func), stat in pstats.Stats(pr).stats.items():
+        # stat = (call_count, primitive_calls, tottime, cumtime, callers)
+        tt = stat[2]
+        rows.append({
+            "module": os.path.basename(_file),
+            "function": func,
+            "tottime_s": tt,
+        })
+        total += tt
+    rows.sort(key=lambda r: r["tottime_s"], reverse=True)
+    out = []
+    for row in rows[:top]:
+        out.append({
+            "module": row["module"],
+            "function": row["function"],
+            "tottime_ms": round(row["tottime_s"] * 1e3, 2),
+            "share_pct": round(100.0 * row["tottime_s"] / total, 1)
+            if total > 0 else 0.0,
+        })
+    return out
+
+
 def build_report(rates=RATES, seconds: float = E2E_SECONDS,
-                 reps: int = MICRO_REPS, quick: bool = False) -> dict:
+                 reps: int = MICRO_REPS, quick: bool = False,
+                 include_hotspots: bool = False) -> dict:
     """跑完整基准并返回机器可读报告（纯数据，不落盘）。"""
     if quick:
         rates = RATES[:1]
@@ -357,6 +407,9 @@ def build_report(rates=RATES, seconds: float = E2E_SECONDS,
         },
         "rates": [],
     }
+    if include_hotspots:
+        # 热点归因跑在最高速率档（峰载下 CPU 分布最有代表性）
+        report["hotspots"] = profile_hotspots(sr=max(rates))
     for sr in rates:
         micro = bench_micro(sr, reps=reps)
         e2e = bench_e2e(sr, seconds=seconds)
@@ -403,10 +456,13 @@ def main(argv=None) -> int:
     ap.add_argument("--reps", type=int, default=MICRO_REPS,
                     help="微基准每环节重复次数")
     ap.add_argument("--out", default=None, help="JSON 输出路径")
+    ap.add_argument("--profile", action="store_true",
+                    help="附带 cProfile 热点归因（模块:函数）")
     args = ap.parse_args(argv)
 
     report = build_report(seconds=args.seconds, reps=args.reps,
-                          quick=args.quick)
+                          quick=args.quick,
+                          include_hotspots=args.profile)
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = os.path.join(ROOT, "output", "bench")
     os.makedirs(out_dir, exist_ok=True)

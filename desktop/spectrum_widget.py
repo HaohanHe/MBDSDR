@@ -286,6 +286,18 @@ class SpectrumDataGenerator:
 
     # ------------------------------------------------------------------ 窗函数
     def _window(self, n: int) -> np.ndarray:
+        # P6 热点修复：窗函数每帧重算（Nuttall 要算 6 次 cos，~0.25ms/帧，
+        # 2.4MS/s 下约 36ms/s CPU）。按 (窗名, 点数) 缓存，只读复用同一数组
+        # （push_iq 只做 x*win，不修改 win）。
+        key = (self.window_name, int(n))
+        if getattr(self, "_win_cache_key", None) == key:
+            return self._win_cache
+        win = self._compute_window(n)
+        self._win_cache_key = key
+        self._win_cache = win
+        return win
+
+    def _compute_window(self, n: int) -> np.ndarray:
         if self.window_name == "Hamming":
             return np.hamming(n).astype(np.float64)
         if self.window_name == "Blackman":
@@ -384,11 +396,20 @@ class SpectrumDataGenerator:
         self.wf_rows_written += 1
 
     def _resample_max(self, spec: np.ndarray) -> np.ndarray:
+        """谱线抽取：每 bin 取区间最大值（窄脉冲不被平均抹平）。
+
+        P6 热点修复：原实现逐 bin Python 循环（512 次 seg.max()，约
+        1.1ms/帧，占 push_iq 八成）。点数可整除时改用 reshape+max 一次
+        向量化（同一 max 语义，输出逐元素相同）；不可整除才退回循环。
+        """
         if len(spec) == self.num_bins:
             return spec.astype(np.float32)
-        edges = np.linspace(0, len(spec), self.num_bins + 1).astype(int)
-        out = np.empty(self.num_bins, dtype=np.float32)
-        for i in range(self.num_bins):
+        nb = self.num_bins
+        if len(spec) >= nb and len(spec) % nb == 0:
+            return spec.reshape(nb, -1).max(axis=1).astype(np.float32)
+        edges = np.linspace(0, len(spec), nb + 1).astype(int)
+        out = np.empty(nb, dtype=np.float32)
+        for i in range(nb):
             lo, hi = edges[i], edges[i + 1]
             seg = spec[lo:hi]
             out[i] = float(seg.max()) if seg.size else -120.0

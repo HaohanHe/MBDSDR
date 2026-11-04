@@ -1046,6 +1046,11 @@ class VFO:
         # before resampling; off by default.
         self._agc = None
         self._agc_enabled = False
+        # P6 热点修复：NCO 旋转子表按 (块长, d_theta) 缓存。原实现每块
+        # 都算 exp(j*d_theta*k)（16384 点约 0.2ms，2.4MS/s 下 ~30ms/s）。
+        # 只缓存与相位无关的 exp 且值完全一致；块长/偏移变化即失效。
+        self._rot_cache_key = None
+        self._rot_cache = None      # (n, d_theta, arange, exp)
 
     # ---------- internal: frequency translation ----------
     def _rebuild_xlator(self):
@@ -1156,8 +1161,17 @@ class VFO:
         # 1) Frequency translation at the input rate.
         #    out[i] = in[i]*phase; phase *= phaseDelta.  Vectorised as
         #    phase_k = phase0 * exp(j*d_theta*k), state carried across frames.
-        k = np.arange(n, dtype=np.float64)
-        mult = self._phase * np.exp(1j * self._d_theta * k)
+        #    旋转子表按 (n, d_theta) 缓存；phase0 每块仍在变，故每块只做
+        #    一次 O(n) 复乘，不再重复 exp（数值与逐块重算逐元素一致）。
+        key = (n, self._d_theta)
+        if self._rot_cache_key == key and self._rot_cache is not None:
+            k, rot = self._rot_cache
+        else:
+            k = np.arange(n, dtype=np.float64)
+            rot = np.exp(1j * self._d_theta * k)
+            self._rot_cache_key = key
+            self._rot_cache = (k, rot)
+        mult = self._phase * rot
         x = x * mult.astype(np.complex128 if x.dtype == np.complex128 else np.complex64)
         # Advance the phase accumulator: phase *= phaseDelta^n.
         self._phase = self._phase * np.exp(1j * self._d_theta * n)

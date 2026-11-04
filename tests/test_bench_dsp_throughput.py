@@ -78,6 +78,22 @@ def test_quick_report_shape_and_json_serializable():
     assert m._conclusion(report)
 
 
+def test_hotspots_are_module_function_level_and_sorted():
+    """热点归因必须给到模块:函数，并按自身耗时降序。"""
+    m = _load()
+    rows = m.profile_hotspots(sr=2400000.0, iterations=2, top=5)
+    assert rows
+    assert len(rows) <= 5
+    for row in rows:
+        assert set(row) == {"module", "function", "tottime_ms", "share_pct"}
+        assert row["module"]
+        assert row["function"]
+        assert row["tottime_ms"] >= 0
+        assert 0 <= row["share_pct"] <= 100
+    times = [r["tottime_ms"] for r in rows]
+    assert times == sorted(times, reverse=True)
+
+
 def test_e2e_verdict_boundaries():
     """反向守卫：超阈值必须判失败，避免「总体 ok」掩盖单项失守。"""
     m = _load()
