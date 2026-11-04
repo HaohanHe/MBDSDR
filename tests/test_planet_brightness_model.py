@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 from datetime import datetime, timezone  # noqa: E402
 
+from PySide6.QtGui import QColor, QImage, QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -57,7 +58,9 @@ import rf_sky_view  # noqa: E402
 from rf_sky_view import (  # noqa: E402
     RFSkyView, j2000_to_altaz, vec_from_radec,
 )
-from mbdsdr_ai.celestial_geometry import azalt_from_vec  # noqa: E402
+from mbdsdr_ai.celestial_geometry import (  # noqa: E402
+    azalt_from_vec, vec_from_azalt, altaz_to_j2000, radec_from_vec,
+)
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
 from mbdsdr_ai.skyengine.stars import BrightStar  # noqa: E402
 
@@ -318,3 +321,89 @@ class TestPickGateMatchesDrawGate:
             v.close()
         assert res is None or res.get("key") != STAR_NAME, \
             f"5.2 等 > Bortle 9 极限 4.4，如实不画也就不给点，实测 {res}"
+
+
+class TestStarExtinctionKeepsDrawAndPickInSync:
+    """消光把星推出极限星等时，绘制与拾取必须同时消失（不是只灭一边）。
+
+    4.84 等 = 星表里真实最暗的 Graffias。alt 5° 处 Δm=k/sin(5°)≈2.29，
+    有效星等 7.13 超出 Bortle 3 的 6.5 极限：绘制层 continue（像素应全黑），
+    拾取层同一表达式 r_pick<=0 也该 continue。反证：消光只要在任一层缺位，
+    这颗星就会"看得见点不中"或"看不见却点得中"，下面两条断言就会分叉。
+    """
+
+    AZ = 30.0
+    FAINT_VMAG = 4.84        # Graffias（星表实测星等，非编造）
+    LOW_ALT, HIGH_ALT = 5.0, 70.0
+
+    def _place(self, v, monkeypatch, alt, vmag):
+        """把一颗假星放到 (AZ, alt)，返回它的屏幕像素。"""
+        v.view_state.look_at(self.AZ, alt)
+        gs, jd = v._ground_station(), v._current_jd()
+        ra, dec = radec_from_vec(altaz_to_j2000(
+            vec_from_azalt(self.AZ, alt), gs, jd))
+        v._bortle = 3
+        v._planet_positions = lambda j: {}
+        fake = {STAR_NAME: BrightStar(STAR_NAME, ra, dec, vmag, 0.0)}
+        monkeypatch.setattr(rf_sky_view._constel, "merged_star_index",
+                            lambda: fake)
+        p = v._sky_to_screen(self.AZ, alt)
+        return int(round(p.x())), int(round(p.y()))
+
+    def _painted(self, v, cx, cy):
+        """_draw_stars 在取样窗内的亮像素数（背景纯黑，净贡献即星点本身）。"""
+        img = QImage(v.width(), v.height(), QImage.Format_ARGB32)
+        img.fill(QColor(0, 0, 0))
+        painter = QPainter(img)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        try:
+            v._draw_stars(painter)
+        finally:
+            painter.end()
+        n = 0
+        for dy in range(-WIN, WIN + 1):
+            for dx in range(-WIN, WIN + 1):
+                if dx * dx + dy * dy > WIN * WIN:
+                    continue
+                c = img.pixelColor(cx + dx, cy + dy)
+                if (c.red() + c.green() + c.blue()) / 3.0 > 40:
+                    n += 1
+        return n
+
+    def test_faint_star_extinguished_near_horizon_draws_nothing(self,
+                                                               monkeypatch):
+        v = _new_view()
+        try:
+            cx, cy = self._place(v, monkeypatch, self.LOW_ALT, self.FAINT_VMAG)
+            assert self._painted(v, cx, cy) == 0, \
+                "4.84 等 + 消光 2.29 = 7.13 等超出 Bortle 3 极限，必须如实不画"
+            res = v._find_body_at(float(cx), float(cy))
+            assert res is None or res.get("key") != STAR_NAME, \
+                f"没画的星不该点得中（否则绘制门/拾取门分叉），实测 {res}"
+        finally:
+            v.close()
+
+    def test_same_star_high_up_draws_and_is_pickable(self, monkeypatch):
+        v = _new_view()
+        try:
+            cx, cy = self._place(v, monkeypatch, self.HIGH_ALT, self.FAINT_VMAG)
+            assert self._painted(v, cx, cy) > 0, \
+                "同一颗星高空消光 Δm≈0.21，有效 5.05 等 < 6.5，应画得出"
+            res = v._find_body_at(float(cx), float(cy))
+            assert res is not None and res.get("key") == STAR_NAME, \
+                f"画得出的星必须点得中，实测 {res}"
+        finally:
+            v.close()
+
+    def test_visible_star_near_horizon_stays_pickable(self, monkeypatch):
+        """消光还没把星推出极限时，拾取门不能抢跑（不过度收紧）。"""
+        v = _new_view()
+        try:
+            cx, cy = self._place(v, monkeypatch, self.LOW_ALT, 3.0)
+            assert self._painted(v, cx, cy) > 0, \
+                "3.0 等 + 消光 2.29 = 5.29 等 < 6.5，地平附近仍应画得出"
+            res = v._find_body_at(float(cx), float(cy))
+            assert res is not None and res.get("key") == STAR_NAME, \
+                f"画得出就该点得中，实测 {res}"
+        finally:
+            v.close()
