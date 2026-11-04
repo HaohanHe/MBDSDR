@@ -20,7 +20,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from .new_spacetime_tle import parse_tle_epoch
+try:
+    from .new_spacetime_tle import parse_tle_epoch
+except ImportError:  # 旧脚本以扁平模块方式 import time_basis
+    from new_spacetime_tle import parse_tle_epoch
 
 __all__ = [
     "UTC",

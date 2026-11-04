@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:
     from skyfield.api import EarthSatellite, Topos, Time, load as _sky_load
@@ -206,6 +206,7 @@ def predict_passes(
     hours: float = 24.0,
     min_alt: float = 10.0,
     require_sunlit: bool = False,
+    anomalies: Optional[List[Dict[str, Any]]] = None,
 ) -> List[SatellitePass]:
     """预测未来 ``hours`` 小时内卫星从 ``start_time`` 起的过境事件。
 
@@ -292,6 +293,18 @@ def predict_passes(
             t_set_s = _bisect_cross(el_at_s, coarse[j - 1][0], coarse[j][0], min_alt)
         else:
             t_set_s = coarse[j - 1][0]
+
+        # P11 守卫：负时长（时钟回跳/输入错乱）绝不当成正常过境输出。
+        if t_set_s < t_rise_s or (t_set_s - t_rise_s) <= 0.0:
+            if anomalies is not None:
+                anomalies.append({
+                    "satellite": name,
+                    "reason": "non_positive_duration",
+                    "detail": (f"rise={t_rise_s:.1f}s set={t_set_s:.1f}s；"
+                               "疑似系统时钟回跳或时间输入错乱，已丢弃该过境"),
+                })
+            i = max(j, i + 1)
+            continue
 
         # c) pass 内 2s 细采样，找最大仰角时刻
         best_sec, best_el = t_rise_s, -999.0

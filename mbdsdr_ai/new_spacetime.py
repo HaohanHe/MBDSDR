@@ -141,15 +141,23 @@ class TimeEngine:
         self._sim_jd: Optional[float] = None
         # 时间倍率：0=暂停, 1=实时, N=N倍速, -N=倒流
         self._rate: float = 1.0
-        # 上次 tick 的墙钟时刻（秒），用于无参 tick() 自动算 real_dt
-        self._last_wall: Optional[float] = None
+        # 无参 tick() 的真实步进参考：单调钟，不受 NTP/用户改时间影响
+        self._last_mono: Optional[float] = time.monotonic()
+        # P11：系统墙钟跳变守卫（与仿真倍率无关，只监测真实时钟）
+        try:
+            from .time_basis import ClockGuard
+        except ImportError:  # 旧脚本以扁平模块方式 import new_spacetime
+            from time_basis import ClockGuard
+        self._clock_guard = ClockGuard()
+        self._clock_guard.observe()
 
     # ---- 时间跳转（对应 StelCore::setJD） -------------------------------
     def set_jd(self, jd: float) -> None:
         """设置模拟儒略日（UT）。立即生效，下一帧所有计算用新 JD。
  对应 StelCore::setJD"""
         self._sim_jd = float(jd)
-        self._last_wall = time.time()
+        self._last_mono = time.monotonic()
+        self._clock_guard.observe()
 
     def set_utc(self, dt: datetime) -> None:
         """设置模拟时间（UTC datetime）。"""
@@ -162,7 +170,8 @@ class TimeEngine:
     def set_time_now(self) -> None:
         """跳回当前真实系统时间。对应 StelCore::setTimeNow()。"""
         self._sim_jd = None
-        self._last_wall = time.time()
+        self._last_mono = time.monotonic()
+        self._clock_guard.observe()
 
     # ---- 时间速率（对应 StelCore::setTimeRate） ------------------------
     def set_rate(self, rate: float) -> None:
@@ -174,7 +183,8 @@ class TimeEngine:
  对应 StelCore::setTimeRate
  注意：Stellarium 内部 timeSpeed 单位是 天/真实秒，这里归一化为倍率"""
         self._rate = float(rate)
-        self._last_wall = time.time()
+        self._last_mono = time.monotonic()
+        self._clock_guard.observe()
 
     def get_rate(self) -> float:
         return self._rate
@@ -191,16 +201,25 @@ class TimeEngine:
  对应 StelCore::updateTime
  JD.first = jdOfLastJDUpdate + real_elapsed_seconds * timeSpeed
  其中 timeSpeed = rate * JD_SECOND（天/真实秒）。
- real_dt: 距上次 tick 的真实秒数；None 则自动用墙钟差值"""
+ real_dt: 距上次 tick 的真实秒数；None 则自动用单调钟差值
+          （不受 NTP 校正/用户改时间影响；墙钟回跳只告警不推进）"""
         if real_dt is None:
-            now = time.time()
-            real_dt = 0.0 if self._last_wall is None else max(0.0, now - self._last_wall)
-            self._last_wall = now
+            # 用单调钟算真实步进：NTP 校正/用户改墙钟不会把仿真推进带跑；
+            # 回跳时 monotonic 差值天然非负，不会产生负时长。
+            self._clock_guard.observe()
+            now_mono = time.monotonic()
+            real_dt = 0.0 if self._last_mono is None else max(0.0, now_mono - self._last_mono)
+            self._last_mono = now_mono
         if self._sim_jd is None:
             # 尚未显式跳时：模拟时间 = 真实时间（向后兼容旧行为）
             return
         # 核心：sim_jd += real_dt * rate * JD_SECOND
         self._sim_jd += real_dt * self._rate * self.JD_SECOND
+
+    def clock_status(self) -> Dict[str, Any]:
+        """系统墙钟跳变状态（NTP 校正/用户改时间）。仅监测真实时钟，
+        与时间倍率/仿真推进无关。"""
+        return self._clock_guard.status()
 
     # ---- 当前模拟时间读取 ----------------------------------------------
     def now_jd(self) -> float:
@@ -228,6 +247,8 @@ class TimeEngine:
             "sim_utc": self.now_utc().strftime("%Y-%m-%d %H:%M:%S UTC"),
             "rate": self._rate,
             "following_system": self.is_following_system(),
+            "clock": self.clock_status(),
+            "rate_semantics": "倍率只推进显示/仿真时刻；轨道物理按显式 UTC 时刻计算",
         }
 
 
