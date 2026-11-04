@@ -624,6 +624,8 @@ class MainWindow(QMainWindow):
             return
         self.settings.set("touch_mode", mode)
         touch_manager().set_from_settings(mode)
+        label = {"auto": "自动检测", "on": "强制触屏", "off": "强制鼠标"}[mode]
+        self.statusBar().showMessage(f"触屏模式：{label}")
 
     # ========================================================================
     # UI 构建
@@ -3190,6 +3192,9 @@ class MainWindow(QMainWindow):
 
     def _disconnect(self):
         """断开连接。"""
+        if self._active_sdr_backend is None and not self._recording:
+            # 点了没反应是最糟的体验：没连上也说清楚
+            self.statusBar().showMessage("当前未连接 SDR，没有可断开的设备")
         # 断开真实 SDR 后端（SoapySDR/RTL-SDR/HackRF）
         # 先停掉回放 / 扫频 / 录制 / IQ 轮询 / 声卡，避免断开后还在读空句柄
         try:

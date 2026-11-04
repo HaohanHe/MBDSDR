@@ -512,6 +512,9 @@ class NewSpacetimePanel(QWidget):
                 sats.append((ent.name, ent.line1, ent.line2))
 
         if not sats:
+            # 诚实说明"为什么没有"：TLE 拉取失败（离线/无网络/被限流）
+            self.passes_hint.setText(
+                "未获取到卫星 TLE（离线或无网络），无法计算过境")
             self._populate_passes([])
             self.chart.set_data([])
             return
@@ -520,6 +523,9 @@ class NewSpacetimePanel(QWidget):
             observer_lat=lat, observer_lon=lon, observer_alt=alt_km,
             satellites=sats, hours_ahead=24.0, min_elevation=5.0, step_sec=60.0,
         )
+        if not passes:
+            # 有 TLE 但确实没有过境：别沿用上一轮"没网络"的旧文案
+            self.passes_hint.setText("24 小时内无过境（仰角 ≥ 5°）")
         self._populate_passes(passes)
 
         # 顺手刷新频率-轨道散点（无频率数据时频率为 0）

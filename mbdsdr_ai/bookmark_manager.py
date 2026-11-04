@@ -59,6 +59,23 @@ class Bookmark:
         return self.frequency_hz < other.frequency_hz
 
 
+def _from_legacy_entry(d: dict) -> "Bookmark":
+    """把 FrequencyManager 的旧条目（freq_hz/mode/category）转成 Bookmark。"""
+    def _num(key: str, default: float = 0.0) -> int:
+        try:
+            return int(float(d.get(key, default) or default))
+        except (TypeError, ValueError):
+            return int(default)
+
+    return Bookmark(
+        frequency_hz=_num("frequency_hz", _num("freq_hz")),
+        name=str(d.get("name", "")),
+        modulation=str(d.get("modulation") or d.get("mode") or "FM"),
+        bandwidth_hz=_num("bandwidth_hz", 12500) or 12500,
+        group=str(d.get("group") or d.get("category") or ""),
+    )
+
+
 class BookmarkManager:
     """书签管理器：增删改查、分组树、标签、搜索、CSV 导入导出、JSON 持久化。"""
 
@@ -154,6 +171,17 @@ class BookmarkManager:
         try:
             data = json.loads(self.bookmarks_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
+            self._bookmarks = []
+            return False
+        if isinstance(data, list):
+            # 兼容 FrequencyManager 写入的旧格式（裸列表，字段名不同）。
+            # 两个组件共用 ~/.mbdsdr/bookmarks.json，读到哪种都得能起床。
+            self._tag_colors = {UNTAGGED: DEFAULT_COLOR}
+            self._bookmarks = [_from_legacy_entry(d) for d in data
+                               if isinstance(d, dict)]
+            self._bookmarks.sort()
+            return True
+        if not isinstance(data, dict):
             self._bookmarks = []
             return False
         self._tag_colors = data.get("tag_colors", {UNTAGGED: DEFAULT_COLOR})

@@ -113,6 +113,24 @@ def test_fm_persist_to_json(tmp_path):
     assert hits[0].note == "persist"
 
 
+def test_fm_reads_bookmark_manager_dict_format(tmp_path):
+    """书签面板用 BookmarkManager 的 dict 格式写同一份文件，FrequencyManager
+    必须能读回（否则两边一存就把对方踢死）。"""
+    path = tmp_path / "bookmarks.json"
+    path.write_text(json.dumps({
+        "tag_colors": {"Untagged": "#888888"},
+        "bookmarks": [{"frequency_hz": 145_000_000, "name": "R1",
+                       "modulation": "NFM", "bandwidth_hz": 12500,
+                       "group": "Ham", "color": "#888888", "tags": []}],
+    }, ensure_ascii=False), encoding="utf-8")
+    fm = FrequencyManager(user_path=str(path))
+    hits = [b for b in fm.list() if b.name == "R1"]
+    assert len(hits) == 1
+    assert hits[0].freq_hz == 145_000_000
+    assert hits[0].mode == "NFM"
+    assert hits[0].category == "Ham"
+
+
 def test_fm_find_by_name():
     fm = FrequencyManager(user_path="/tmp/nonexistent_bookmarks_xyz.json")
     # 内置库应有调频广播

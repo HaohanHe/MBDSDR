@@ -196,14 +196,22 @@ class FrequencyManager:
         try:
             with open(self.user_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if isinstance(data, dict):
+                # BookmarkManager 写的是 {"tag_colors": ..., "bookmarks": [...]}；
+                # 同一个人口文件，两种格式都得能读，否则书签面板一存就互相踢死。
+                data = data.get("bookmarks", [])
             for d in data:
+                if not isinstance(d, dict):
+                    continue
                 self.bookmarks.append(Bookmark(
-                    name=d["name"], freq_hz=d.get("freq_hz", 0.0),
-                    mode=d.get("mode", ""), category=d.get("category", "自定义"),
+                    name=d.get("name", ""),
+                    freq_hz=d.get("freq_hz", d.get("frequency_hz", 0.0)),
+                    mode=d.get("mode", d.get("modulation", "")),
+                    category=d.get("category", d.get("group", "自定义")),
                     bandwidth_hz=d.get("bandwidth_hz", 0.0),
                     start_hz=d.get("start_hz", 0.0), end_hz=d.get("end_hz", 0.0),
                     note=d.get("note", ""), builtin=False))
-        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
             pass
 
     def _save_user(self):

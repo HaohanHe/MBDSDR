@@ -24,6 +24,22 @@ def test_add_and_list(bm):
     assert [b.frequency_hz for b in bookmarks] == [98_500_000, 145_000_000]
 
 
+def test_load_legacy_frequency_manager_list(tmp_path):
+    """~/.mbdsdr/bookmarks.json 是两套组件的人口文件：BookmarkManager 必须
+    能读 FrequencyManager 写的裸列表（否则书签面板初始化就是死的）。"""
+    path = tmp_path / "bookmarks.json"
+    path.write_text(json.dumps([
+        {"name": "R1", "freq_hz": 145_000_000, "mode": "NFM",
+         "category": "Ham", "bandwidth_hz": 12500},
+    ], ensure_ascii=False), encoding="utf-8")
+    mgr = BookmarkManager(config_dir=tmp_path)
+    bms = mgr.all()
+    assert len(bms) == 1
+    assert bms[0].frequency_hz == 145_000_000
+    assert bms[0].modulation == "NFM"
+    assert bms[0].group == "Ham"
+
+
 def test_remove(bm):
     bm.add(Bookmark(frequency_hz=100_000_000, name="X"))
     assert bm.remove(100_000_000) is True

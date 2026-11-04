@@ -30,7 +30,7 @@ from typing import Dict, List, Optional
 # 允许从 desktop/ 直接跑，也允许被 main_window import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
 from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QFontMetricsF, QPainterPath,
     QLinearGradient,
@@ -370,6 +370,12 @@ class ModulePanel(QWidget):
                 f"{d0.get('driver','?')}\n"
                 f"频率 {d0.get('freq_range','?')}\n"
                 f"采样率 {d0.get('sample_rate_range','?')}")
+
+        # 设备列表没变化时界面只会"纹丝不动"；给刷新按钮一个明确的动作反馈，
+        # 避免用户以为按钮坏了（本次交互审计发现的死按钮）。
+        self.refresh_btn.setText("已刷新")
+        QTimer.singleShot(1200, self.refresh_btn,
+                          lambda: self.refresh_btn.setText("刷新"))
 
     def selected_sample_rate_hz(self) -> float:
         """当前采样率下拉档位（Hz）。

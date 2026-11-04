@@ -103,6 +103,7 @@ class BookmarkPanel(QWidget):
         self.tree.setColumnWidth(0, 150)
         self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.tree.itemSelectionChanged.connect(self._sync_selection_actions)
         right.addWidget(self.tree, stretch=1)
 
         # 操作按钮行
@@ -110,8 +111,10 @@ class BookmarkPanel(QWidget):
         self.add_btn = QPushButton("添加当前频率")
         self.add_btn.clicked.connect(self._on_add_current)
         self.edit_btn = QPushButton("编辑")
+        self.edit_btn.setToolTip("先在列表里选中一条书签")
         self.edit_btn.clicked.connect(self._on_edit)
         self.del_btn = QPushButton("删除")
+        self.del_btn.setToolTip("先在列表里选中一条书签")
         self.del_btn.clicked.connect(self._on_delete)
         self.nearest_btn = QPushButton("找最近")
         self.nearest_btn.setToolTip("找当前频率附近的书签")
@@ -153,9 +156,18 @@ class BookmarkPanel(QWidget):
         self.refresh_list()
 
     def _set_ops_enabled(self, en: bool):
+        self._ops_enabled = en
         for b in (self.add_btn, self.edit_btn, self.del_btn,
                   self.nearest_btn, self.import_btn, self.export_btn):
             b.setEnabled(en)
+        self._sync_selection_actions()
+
+    def _sync_selection_actions(self):
+        """编辑/删除只对选中项可用；没选中就置灰并留提示（不许点了没反应）。"""
+        has_sel = self._selected() is not None
+        ops = getattr(self, "_ops_enabled", True)
+        self.edit_btn.setEnabled(ops and has_sel)
+        self.del_btn.setEnabled(ops and has_sel)
 
     # ------------------------------------------------------------ 外部接线
     def set_current_freq_provider(self, fn: Callable[[], float]):
@@ -192,6 +204,7 @@ class BookmarkPanel(QWidget):
             it.setData(0, Qt.UserRole, self._bookmark_to_dict(bm))
             self.tree.addTopLevelItem(it)
         self.status_label.setText(f"{self.tree.topLevelItemCount()} 条书签")
+        self._sync_selection_actions()
 
     @staticmethod
     def _bookmark_to_dict(bm) -> dict:
