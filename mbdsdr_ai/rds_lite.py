@@ -550,7 +550,7 @@ def register_rds_tools(registry) -> None:
                               content=("需要 4 个 16bit 块字（hex，空格分隔）："
                           "每块 1–4 位 hex（左侧补零到 16bit），"
                           "例如 0A1B 2C3D 4E5F 6071"),
-                              error="bad_args")
+                              error="invalid_arguments")
         try:
             blocks = {"A": int(parts[0], 16), "B": int(parts[1], 16),
                       "C": int(parts[2], 16), "D": int(parts[3], 16)}

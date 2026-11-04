@@ -24,6 +24,8 @@ import time
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 
+from .error_catalog import user_message
+
 
 @dataclass
 class WorkflowStep:
@@ -132,6 +134,7 @@ class WorkflowResult:
     completed_steps: int
     failed_step: Optional[int] = None
     error: str = ""
+    error_code: str = ""
     step_results: List[Dict[str, Any]] = field(default_factory=list)
     execution_time_ms: float = 0.0
     outputs: Dict[str, Any] = field(default_factory=dict)
@@ -144,6 +147,7 @@ class WorkflowResult:
             "completed_steps": self.completed_steps,
             "failed_step": self.failed_step,
             "error": self.error,
+            "error_code": self.error_code,
             "step_results": self.step_results,
             "execution_time_ms": round(self.execution_time_ms, 1),
             "outputs": self.outputs,
@@ -291,7 +295,8 @@ class WorkflowEngine:
                 success=False,
                 total_steps=len(workflow.steps),
                 completed_steps=0,
-                error="工具执行器未设置，请先调用 set_tool_executor()",
+                error=user_message("workflow_executor_missing"),
+                error_code="workflow_executor_missing",
             )
 
         # 初始化上下文

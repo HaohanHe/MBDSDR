@@ -750,6 +750,7 @@ class CCSDSDeframer:
 # ============================================================================
 
 # 复用 goes_lrit 中的 CCSDS 传输层实现（同源 CCSDS 标准）
+from .error_catalog import user_message  # noqa: E402
 from .goes_lrit import (  # noqa: E402
     VCDU,
     TransportPDU,
@@ -1022,7 +1023,9 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
         # 1. BPSK 解调 → 软符号
         soft = bpsk_demod(iq, sps, f0_offset=f_offset)
         if len(soft) < CADU_BITS * 2:
-            return GK2ADecodeResult(success=False, error="软符号长度不足")
+            return GK2ADecodeResult(
+                success=False,
+                error=user_message("decode_error", detail="软符号长度不足"))
 
         # 2. Viterbi 译码 → 硬比特
         vit = ViterbiDecoder()
@@ -1031,7 +1034,10 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
         # 3. 帧同步
         sync_off = frame_sync_search(bits)
         if sync_off < 0:
-            return GK2ADecodeResult(success=False, error="未找到同步字 0x1ACFFC1D")
+            return GK2ADecodeResult(
+                success=False,
+                error=user_message("decode_error",
+                                  detail="未找到同步字 0x1ACFFC1D"))
 
         # 4. 按 CADU 切帧
         bits = bits[sync_off:]
@@ -1065,8 +1071,10 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
                     img = got
 
         if img is None:
-            return GK2ADecodeResult(success=False, error="未组装出完整图像",
-                                    n_files=len(reassembler._vcs))
+            return GK2ADecodeResult(
+                success=False,
+                error=user_message("decode_error", detail="未组装出完整图像"),
+                n_files=len(reassembler._vcs))
 
         # 5. 保存 PNG（uint8 → L；uint16 → I;16，保留 10/16-bit 位深）
         # Pillow 13 起 Image.fromarray 不再接受 mode="I;16"（typemap 收紧，
@@ -1087,7 +1095,10 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
                       "dtype": str(img.pixels.dtype)},
         )
     except Exception as e:  # noqa: BLE001
-        return GK2ADecodeResult(success=False, error=f"{type(e).__name__}: {e}")
+        return GK2ADecodeResult(
+            success=False,
+            error=user_message("decode_error",
+                              detail=f"{type(e).__name__}: {e}"))
 
 
 # ============================================================================

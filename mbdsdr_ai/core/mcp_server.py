@@ -38,6 +38,7 @@ from .errors import (ExportPathOutOfRootError, InvalidArgumentError,
 from ..questions import QuestionError, QuestionStore
 from ..hooks import Event, EventType, HookManager
 from ..hook_commands import HookCommandRunner
+from ..error_catalog import suggestion, user_message
 from ..tool_policy import ToolPolicy, normalize_key
 from ..mcp_client import MCPClientManager
 
@@ -185,7 +186,8 @@ def _hex_bytes(name: str, hexstr: str) -> Any:
         return bytes.fromhex(clean), None
     except ValueError as e:
         return None, {"error": "bad_hex", "detail": str(e),
-                      "suggestion": "%s 必须是偶数长度的 hex。" % name}
+                      "message": user_message("bad_hex", detail=str(e)),
+                      "suggestion": suggestion("bad_hex")}
 
 
 def _lt_dab_fic(fic_hex: str) -> Any:
@@ -229,7 +231,9 @@ def _lt_rtl433_decode(device_type: str, message_hex: str) -> Any:
     dec = get_device(device_type)
     if dec is None:
         return {"error": "unknown_device_type",
-                "suggestion": "先用 decoder_rtl433_list 查看支持的 device_type。"}
+                "message": user_message("unknown_device_type",
+                                        device=device_type),
+                "suggestion": suggestion("unknown_device_type")}
     msg = dec.decode_message(data)
     if msg is None:
         return {"decoded": None, "reason": "message_not_matched",
@@ -1639,7 +1643,7 @@ class ToolCallGate:
                 # 门/缓存都不得把 deny 翻回 allow——此处只返回 deny 结果，
                 # armed/approve_session 分支在 deny 之后不可达。
                 return {"ok": False,
-                        "error": "denied_by_policy：规则集拒绝执行 %s" % name,
+                        "error": user_message("denied_by_policy", tool=name),
                         "code": "denied_by_policy",
                         "denied": True, "gated": True,
                         "outcome": "denied"}, False
@@ -1650,7 +1654,8 @@ class ToolCallGate:
             if action == "ask" and not session_cached:
                 if not armed:
                     gated_env = {"ok": False,
-                                 "error": "手动模式：未执行 %s" % name,
+                                 "error": user_message(
+                                     "manual_gate_required", tool=name),
                                  "code": "manual_gate_required",
                                  "gated": True,
                                  "policy": action,

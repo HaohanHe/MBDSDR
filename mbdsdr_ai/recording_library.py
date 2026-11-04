@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from .error_catalog import user_message
 from .recorder import inspect_recording, recover_recording_meta
 from .recording_meta import metadata_for_display, read_sigmf_meta, sigmf_meta_path
 
@@ -701,7 +702,10 @@ class RecordingLibrary:
                     except json.JSONDecodeError:
                         malformed += 1
         except OSError as exc:
-            return LibraryResult(False, "io_error", f"读取修复日志失败: {exc}")
+            return LibraryResult(
+                False, "io_error",
+                user_message("io_error",
+                            detail=f"读取修复日志失败（{type(exc).__name__}: {exc}）"))
         if limit > 0:
             records = records[-limit:]
         return LibraryResult(True, "ok", f"修复记录 {len(records)} 条",
@@ -1058,7 +1062,10 @@ class RecordingLibrary:
             return LibraryResult(False, exc.code, str(exc))
         except OSError as exc:
             logger.error("录音库核对失败: %s", exc)
-            return LibraryResult(False, "io_error", f"核对/落盘失败: {exc}")
+            return LibraryResult(
+                False, "io_error",
+                user_message("io_error",
+                            detail=f"核对/落盘失败（{type(exc).__name__}: {exc}）"))
 
     # ── 容量与保留策略 ───────────────────────────────────────────────────
     def _age_of(self, entry: RecordingEntry,
@@ -1332,8 +1339,12 @@ class RecordingLibrary:
                                 shutil.move(dest, orig)
                             except OSError:
                                 pass
-                        return LibraryResult(False, "io_error",
-                                             f"索引落盘失败，已回滚移动: {exc}")
+                        return LibraryResult(
+                            False, "io_error",
+                            user_message(
+                                "io_error",
+                                detail=f"索引落盘失败，已回滚移动"
+                                       f"（{type(exc).__name__}: {exc}）"))
                     for item in moved:
                         self._append_journal_unlocked(
                             "retention_move", entry_id=item["entry_id"],

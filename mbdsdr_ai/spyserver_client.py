@@ -39,6 +39,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from .error_catalog import user_message
 from .sdr_backend import SDRBackend, SDRDevice, _ThreadedRingReader
 from .link_state import (
     DataHealthTracker,
@@ -469,7 +470,8 @@ class SpyServerBackend(SDRBackend):
             self.status.connected = False
             self.status.link_state = STATE_FAILED
             self.status.error_category = client.error_category
-            msg = str(e) or client.error or "未知错误"
+            msg = (str(e) or client.error
+                   or user_message("missing_error_detail", context="SpyServer"))
             self.status.error = (
                 msg if "连接失败" in msg else f"连接失败: {msg}"
             )

@@ -40,6 +40,7 @@ from typing import Optional
 
 import numpy as np
 
+from .error_catalog import user_message
 from .sdr_backend import (
     SDRBackend,
     SDRDevice,
@@ -583,7 +584,8 @@ class RtlTcpBackend(SDRBackend):
             self.status.link_state = "failed"
             self.status.error_category = client.error_category
             # 确保 error 一定含"连接失败"硬红线关键字
-            msg = client.error or "未知错误"
+            msg = (client.error
+                   or user_message("missing_error_detail", context="RTL-TCP"))
             self.status.error = msg if "连接失败" in msg else f"连接失败: {msg}"
             logger.warning("RtlTcpBackend 连接失败: %s", self.status.error)
             return False

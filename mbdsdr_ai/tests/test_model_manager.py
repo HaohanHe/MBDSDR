@@ -24,6 +24,13 @@ import requests  # noqa: E402
 from mbdsdr_ai.model_manager import ModelManager  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _fake_http_needs_online_gate(monkeypatch):
+    """本文件全程用假 session，不会出网；清掉 MBDSDR_OFFLINE 离线门，
+    否则 chat() 在离线模式下直接拒绝，测不到重试/错误信封语义。"""
+    monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+
+
 # ---------------------------------------------------------------------------
 # 假 HTTP 层
 # ---------------------------------------------------------------------------
@@ -115,13 +122,15 @@ def test_connection_error_reported_honestly():
     assert "连接失败" in out["error"]
 
 
-def test_unknown_error_stops_retrying():
-    """非网络类未知错误直接放弃，不空转重试。"""
+def test_unexpected_error_stops_retrying():
+    """非网络类未预期异常直接放弃，不空转重试；错误码须可追溯。"""
     m = _mgr([ValueError("weird")], max_retries=5)
     out = m.chat([{"role": "user", "content": "hi"}])
     assert out["success"] is False
-    assert "未知错误" in out["error"]
-    assert m._session.calls == 1, f"未知错误不该重试，实际调用 {m._session.calls} 次"
+    assert "模型调用异常" in out["error"]
+    assert out["error_code"] == "llm_unexpected"
+    assert "ValueError" in out["error"], "必须带原始异常类型"
+    assert m._session.calls == 1, f"未预期异常不该重试，实际调用 {m._session.calls} 次"
 
 
 # ---------------------------------------------------------------------------

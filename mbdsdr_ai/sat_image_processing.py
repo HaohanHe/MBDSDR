@@ -29,6 +29,8 @@ from typing import Optional, Tuple, Union, List, Dict, Any
 import numpy as np
 from scipy import ndimage as ndi
 
+from .error_catalog import user_message
+
 logger = logging.getLogger(__name__)
 
 Array = np.ndarray
@@ -735,8 +737,9 @@ def register_tool_registry(registry) -> None:
             if image is None:
                 return ToolResult(
                     success=False,
-                    content="必须提供 image(2D/3D 数组) 或 image_path",
-                    error="no image input")
+                    content=user_message("missing_sample",
+                                         path="image / image_path"),
+                    error="missing_sample")
             img = np.asarray(image, dtype=np.float64)
             steps = args.get("steps", [{"op": "median", "ksize": 3}])
             lut = args.get("lut", "iron")

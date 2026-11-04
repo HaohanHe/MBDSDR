@@ -45,6 +45,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+from .error_catalog import user_message
+
 
 # ---------------------------------------------------------------------------
 # 文件名/路径约定
@@ -138,7 +140,7 @@ class IQRecorder:
             self._fp = None
             self.state = "failed"
             self.error_code = _classify_os_error(e)
-            self.last_error = f"无法创建录制文件: {e}"
+            self.last_error = user_message(self.error_code, detail=str(e))
             return False
         self._start_time = datetime.now(timezone.utc).isoformat()
         self._n_samples = 0
@@ -180,7 +182,7 @@ class IQRecorder:
             # "半截样本"冒充正常数据；后续 write 一律返回 0。
             self.state = "failed"
             self.error_code = _classify_os_error(e)
-            self.last_error = f"IQ 写入失败: {e}"
+            self.last_error = user_message(self.error_code, detail=str(e))
             logger.error("IQRecorder 写失败: %s（已截断到 %d 样本）",
                          e, self._n_samples)
             try:
@@ -201,14 +203,14 @@ class IQRecorder:
             except OSError as e:
                 self.state = "failed"
                 self.error_code = _classify_os_error(e)
-                self.last_error = f"落盘 fsync 失败: {e}"
+                self.last_error = user_message(self.error_code, detail=str(e))
                 logger.error("IQRecorder fsync 失败: %s", e)
             try:
                 self._fp.close()
             except OSError as e:
                 self.state = "failed"
                 self.error_code = _classify_os_error(e)
-                self.last_error = f"关闭文件失败: {e}"
+                self.last_error = user_message(self.error_code, detail=str(e))
             self._fp = None
         if self.closed:
             return None
@@ -251,7 +253,7 @@ class IQRecorder:
         except OSError as e:
             self.state = "failed"
             self.error_code = _classify_os_error(e)
-            self.last_error = f"写 SigMF meta 失败: {e}"
+            self.last_error = user_message(self.error_code, detail=str(e))
             logger.error("IQRecorder 写 meta 失败: %s", e)
             return None
 
@@ -429,7 +431,7 @@ class AudioRecorder:
             self.state = "failed"
             self.error_code = (_classify_os_error(e) if isinstance(e, OSError)
                                else "wav_error")
-            self.last_error = f"无法创建 WAV: {e}"
+            self.last_error = user_message(self.error_code, detail=str(e))
             return False
         self._n_frames = 0
         self.closed = False
@@ -472,7 +474,7 @@ class AudioRecorder:
             self.state = "failed"
             self.error_code = (_classify_os_error(e) if isinstance(e, OSError)
                                else "wav_error")
-            self.last_error = f"音频写入失败: {e}"
+            self.last_error = user_message(self.error_code, detail=str(e))
             return 0
 
     @staticmethod
@@ -492,7 +494,7 @@ class AudioRecorder:
             except (OSError, _wave.Error) as e:
                 self.state = "failed"
                 self.error_code = "wav_error"
-                self.last_error = f"关闭 WAV 失败: {e}"
+                self.last_error = user_message(self.error_code, detail=str(e))
             self._wf = None
         self.closed = True
         if self.state != "failed":

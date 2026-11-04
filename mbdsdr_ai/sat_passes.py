@@ -410,56 +410,30 @@ def sample_trail(
 def _sun_eci_unit(t: Time) -> Tuple[float, float, float]:
     """低精度太阳方向单位矢量（TEME/ECI，无量纲）。
 
-    用 NOAA/球面天文低精度太阳黄经→春分点赤道坐标，误差 ~0.1°，
-    对 LEO 地影边界判定足够。
+    统一委托 :func:`mbdsdr_ai.sat_illumination.sun_direction_eci`，避免
+    地影判定与太阳矢量出现第二份数学源。误差与口径见该模块 docstring。
     """
-    jd = t.tt
-    n = jd - 2451545.0
-    L = (280.460 + 0.9856474 * n) % 360.0
-    g = math.radians((357.528 + 0.9856003 * n) % 360.0)
-    lam = math.radians(L + 1.915 * math.sin(g) + 0.020 * math.sin(2 * g))
-    eps = math.radians(23.439 - 0.0000004 * n)
-    # 太阳方向单位矢量（春分点赤道系）
-    x = math.cos(lam)
-    y = math.cos(eps) * math.sin(lam)
-    z = math.sin(eps) * math.sin(lam)
-    return (x, y, z)
+    from .sat_illumination import sun_direction_eci
+    return sun_direction_eci(float(t.utc_datetime().timestamp()))
 
 
 def _is_sunlit_geometric(sat: EarthSatellite, t: Time) -> bool:
     """几何地影判断：卫星是否被太阳照亮（不在地球本影内）。
 
-    Vallado 锥几何：
-      theta_e = asin(R_earth / r_sat)   地球视半径角
-      theta_s = asin(R_sun  / r_sun)    太阳视半径角
-      theta   = 卫星-地心-太阳 夹角
-    若 theta < theta_e - theta_s → 完全本影(RADAR_NIGHT) → 未被照亮。
-    这里简化：仅判是否在本影锥内（半影近似为照亮），足够 SDR 观测预报。
+    统一委托 :func:`mbdsdr_ai.sat_illumination.evaluate_illumination`
+    （圆锥影，与 gpredict Sat_Eclipsed 同构）。半影按「受晒」处理，保持
+    本函数原有的二值语义（三态结果请直接调用 sat_illumination）。
     """
     try:
-        au = sat.at(t).position.au   # 地心 ECI，长度-3 数组（AU）
+        pos_km = tuple(float(x) for x in sat.at(t).position.km)
     except Exception:
         return True
-    rx, ry, rz = float(au[0]) * 149597870.700, float(au[1]) * 149597870.700, float(au[2]) * 149597870.700  # km
-    r_sat = math.sqrt(rx * rx + ry * ry + rz * rz)
-    if r_sat <= 0:
+    from .sat_illumination import STATUS_UMBRA, evaluate_illumination
+    try:
+        state = evaluate_illumination(pos_km, _sun_eci_unit(t))
+    except ValueError:
         return True
-    sx, sy, sz = _sun_eci_unit(t)
-    # 太阳方向（地心指向太阳）；卫星-太阳矢量 = r_sun - r_sat，方向近似 -sun_unit 反向
-    # 夹角 theta：卫星矢量与“地心→太阳”方向的夹角
-    dot = (rx * sx + ry * sy + rz * sz) / r_sat
-    dot = max(-1.0, min(1.0, dot))
-    theta = math.acos(dot)
-    R_EARTH = 6378.137   # km
-    R_SUN = 696000.0     # km
-    # 日地距离 ~1 AU
-    r_sun = 149597870.700
-    theta_e = math.asin(R_EARTH / r_sat)
-    theta_s = math.asin(R_SUN / r_sun)
-    # 本影：卫星落在地球背阳面且 theta < theta_e - theta_s
-    if theta_e > theta_s and theta < (theta_e - theta_s):
-        return False  # 在本影，未被照亮
-    return True
+    return state.status != STATUS_UMBRA
 
 
 # ===========================================================================

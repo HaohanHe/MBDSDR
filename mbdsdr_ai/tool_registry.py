@@ -16,11 +16,19 @@ MBDSDR AI 内核 - 工具注册表
 
 import fnmatch
 import json
+import math
 import re
 import time
 import traceback
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
+
+from .error_catalog import (
+    exception_code,
+    exception_message,
+    suggestion as error_suggestion,
+    user_message,
+)
 
 
 def numeric_array(args: Dict[str, Any], key: str, *, allow_empty: bool = False):
@@ -217,6 +225,27 @@ class ToolCallLog:
     content_preview: str = ""
 
 
+#: 数值参数的合理上界。物理量（频率/采样率/计数…）超过 1e15 已无意义，
+#: 且 1e300 这类值会直接触发 OverflowError / 巨额分配。时间戳类参数按 1e18 放行
+#: （微秒级 unix 时间 ≈1.7e15，不能被误杀）。
+_NUM_ABS_LIMIT = 1e15
+_NUM_ABS_LIMIT_TIME = 1e18
+_TIME_PARAM_RE = re.compile(r"(time|timestamp|epoch|unix|date)", re.I)
+
+#: 语义不可为负的参数名（offset/doppler/gain/经纬度等允许负值的参数不在其中）。
+_NONNEG_PARAM_RE = re.compile(
+    r"(sample_rate|samplerate|bandwidth|baud|duration|seconds|secs|"
+    r"num_samples|n_samples|samples|points|count|num_|size|length|"
+    r"frequency|freq|center_freq|prn|repeat|trials)", re.I)
+_NEG_EXEMPT_RE = re.compile(
+    r"(offset|shift|doppler|delta|error|gain|power|db|latitude|longitude|"
+    r"lat|lon|azimuth|elevation|az|el)", re.I)
+
+
+def _num_limit(param_name: str) -> float:
+    return _NUM_ABS_LIMIT_TIME if _TIME_PARAM_RE.search(param_name) else _NUM_ABS_LIMIT
+
+
 #: JSON Schema 类型 -> 检查函数；bool 在 Python 里是 int 子类，需先排除。
 def _type_ok(param_type: str, value: Any) -> bool:
     if param_type == "string":
@@ -245,9 +274,10 @@ def validate_arguments(schema: Dict[str, Any],
     problems: List[Dict[str, str]] = []
     if not isinstance(args, dict):
         return [{"param": "", "error": "invalid_arguments_type",
-                 "message": "调用参数必须是 JSON 对象（键值对），收到的是 "
-                            f"{type(args).__name__}；未执行该工具。"}]
+                 "message": user_message("invalid_arguments_type", tool="",
+                                         actual=type(args).__name__)}]
     props: Dict[str, Any] = (schema or {}).get("properties", {}) or {}
+    required = set((schema or {}).get("required", []) or [])
     for name, spec in props.items():
         if name not in args or name.startswith("_"):
             continue
@@ -262,17 +292,61 @@ def validate_arguments(schema: Dict[str, Any],
             except ValueError:
                 problems.append({
                     "param": name, "error": "param_type_mismatch",
-                    "message": f"参数 '{name}' 需要 {ptype}，收到的字符串 '{value}' 无法转成数字；未执行该工具。"})
+                    "message": user_message(
+                        "param_type_mismatch", param=name, expected=ptype,
+                        actual=f"字符串 '{value}'")})
                 continue
         if not _type_ok(ptype, value):
             problems.append({
                 "param": name, "error": "param_type_mismatch",
-                "message": f"参数 '{name}' 需要 {ptype}，收到 {type(value).__name__}；未执行该工具。"})
+                "message": user_message(
+                    "param_type_mismatch", param=name, expected=ptype,
+                    actual=type(value).__name__)})
             continue
+        if ptype in ("number", "integer"):
+            # P14 共享校验：非有限数值（NaN/±Inf）不是合法参数。数值字符串
+            # "NaN"/"inf" 经上面的强转同样会落到这里，一并拦在 handler 之前——
+            # 否则 NaN 频率会被下游当成某个默认值静默执行（"把 NaN 当 100 MHz 调"）。
+            if not math.isfinite(value):
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"{value} 不是有限数值（NaN/Inf 不允许）")})
+                continue
+            # 物理量合理上界：1e300 会让 handler 触发 OverflowError 或巨额分配。
+            limit = _num_limit(name)
+            if abs(value) > limit:
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"{value} 超出合理上界 {limit:g}")})
+                continue
+            # 语义不可为负的参数（采样率/带宽/时长/计数/频率…）统一在此拒绝；
+            # offset/doppler/gain/经纬度等允许负值的参数不在规则内。
+            if (value < 0 and _NONNEG_PARAM_RE.search(name)
+                    and not _NEG_EXEMPT_RE.search(name)):
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"{value} 不能为负")})
+                continue
+            # 采样率为 0 是后续除零/空 IQ 的直接来源，按非法值拒绝。
+            if value == 0 and re.search(r"sample_rate|samplerate", name, re.I):
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail="采样率必须大于 0")})
+                continue
         if ptype == "integer" and isinstance(value, float) and value != int(value):
             problems.append({
                 "param": name, "error": "param_type_mismatch",
-                "message": f"参数 '{name}' 需要整数，收到 {value}；未执行该工具。"})
+                "message": user_message(
+                    "param_type_mismatch", param=name, expected="整数",
+                    actual=str(value))})
             continue
         if ptype in ("number", "integer"):
             lo = (spec or {}).get("minimum")
@@ -280,31 +354,81 @@ def validate_arguments(schema: Dict[str, Any],
             if lo is not None and value < lo:
                 problems.append({
                     "param": name, "error": "param_out_of_range",
-                    "message": f"参数 '{name}' = {value} 小于允许下限 {lo}；未执行该工具。"})
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"{value} 小于允许下限 {lo}")})
                 continue
             if hi is not None and value > hi:
                 problems.append({
                     "param": name, "error": "param_out_of_range",
-                    "message": f"参数 '{name}' = {value} 超出允许上限 {hi}；未执行该工具。"})
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"{value} 超出允许上限 {hi}")})
                 continue
         enum = (spec or {}).get("enum")
         if enum and value not in enum:
             problems.append({
                 "param": name, "error": "param_not_in_enum",
-                "message": f"参数 '{name}' = {value!r} 不在允许取值 {enum} 中；未执行该工具。"})
+                "message": user_message(
+                    "param_not_in_enum", param=name, allowed=str(enum))})
             continue
         if ptype == "array":
+            # P14 共享校验：数字数组是采样/比特/坐标的主要载体，两项硬要求
+            #   ① 必填数字数组不能是空数组（空输入不是"合法的空结果"）；
+            #   ② 元素必须是对应类型且有限（NaN/Inf 会让下游静默产出 NaN 结果）。
+            items = (spec or {}).get("items", {}) or {}
+            itype = items.get("type", "")
+            if itype in ("number", "integer"):
+                if not value and name in required:
+                    problems.append({
+                        "param": name, "error": "param_out_of_range",
+                        "message": user_message(
+                            "param_out_of_range", param=name,
+                            detail="必填数字数组不能为空，请提供至少一项")})
+                    continue
+                bad = ""
+                for i, item in enumerate(value):
+                    # 复数 IQ / 软符号是 Python 侧合法载荷（JSON 无法表达，只有
+                    # 内部调用会出现）。按 number 数组放行，但仍要求实虚部有限。
+                    if itype == "number" and isinstance(item, complex):
+                        if not (math.isfinite(item.real)
+                                and math.isfinite(item.imag)):
+                            bad = (f"第 {i + 1} 项实部/虚部不是有限数值"
+                                   "（NaN/Inf 不允许）")
+                            break
+                        continue
+                    if not _type_ok(itype, item):
+                        bad = f"第 {i + 1} 项类型不是 {itype}（收到 {type(item).__name__}）"
+                        break
+                    # 整数数组不接受浮点项：下游 bytes()/索引运算会直接抛 TypeError。
+                    if itype == "integer" and isinstance(item, float):
+                        bad = f"第 {i + 1} 项不是整数（收到 {item}）"
+                        break
+                    if isinstance(item, float) and not math.isfinite(item):
+                        bad = f"第 {i + 1} 项不是有限数值（NaN/Inf 不允许）"
+                        break
+                if bad:
+                    problems.append({
+                        "param": name, "error": "param_type_mismatch",
+                        "message": user_message(
+                            "param_type_mismatch", param=name,
+                            expected=f"{itype} 数组", actual=bad)})
+                    continue
             min_items = (spec or {}).get("minItems")
             max_items = (spec or {}).get("maxItems")
             if min_items is not None and len(value) < min_items:
                 problems.append({
                     "param": name, "error": "param_out_of_range",
-                    "message": f"参数 '{name}' 至少需要 {min_items} 项，收到 {len(value)} 项；未执行该工具。"})
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"至少需要 {min_items} 项，收到 {len(value)} 项")})
                 continue
             if max_items is not None and len(value) > max_items:
                 problems.append({
                     "param": name, "error": "param_out_of_range",
-                    "message": f"参数 '{name}' 最多允许 {max_items} 项，收到 {len(value)} 项；未执行该工具。"})
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"最多允许 {max_items} 项，收到 {len(value)} 项")})
                 continue
     return problems
 
@@ -620,11 +744,14 @@ class ToolRegistry:
             available = self.get_tool_names()
             result = ToolResult(
                 success=False,
-                content=f"工具 '{tool_name}' 不存在。可用工具: {', '.join(available[:10])}{'...' if len(available) > 10 else ''}",
+                content=user_message(
+                    "tool_not_found", tool=tool_name,
+                    available=", ".join(available[:10])
+                    + ("..." if len(available) > 10 else "")),
                 tool_name=tool_name,
                 args=args,
                 error="tool_not_found",
-                next_step="用 list_tools 查看全部工具名，或按 category 检索；确认名称拼写与前缀（如 sdr_/vna_）后重试。",
+                next_step=error_suggestion("tool_not_found"),
             )
             self._log_call(result)
             return result
@@ -635,11 +762,11 @@ class ToolRegistry:
         if not tool["available"]:
             result = ToolResult(
                 success=False,
-                content=f"工具 '{tool_name}' 当前不可用（设备未连接或功能未启用）。请先连接设备或检查配置。",
+                content=user_message("tool_unavailable", tool=tool_name),
                 tool_name=tool_name,
                 args=args,
                 error="tool_unavailable",
-                next_step="先调用对应的连接/枚举工具（如 sdr_list_devices → sdr_connect，或 vna_connect）；若本机无硬件，改用返回诚实空态的只读工具，不要虚构数据。",
+                next_step=error_suggestion("tool_unavailable"),
             )
             self._log_call(result)
             return result
@@ -648,11 +775,12 @@ class ToolRegistry:
         if not isinstance(args, dict):
             result = ToolResult(
                 success=False,
-                content=f"工具 '{tool_name}' 的调用参数必须是 JSON 对象，收到 {type(args).__name__}；未执行该工具。",
+                content=user_message("invalid_arguments_type", tool=tool_name,
+                                     actual=type(args).__name__),
                 tool_name=tool_name,
                 args={},
                 error="invalid_arguments_type",
-                next_step="重新生成一个 {\"参数名\": 值} 形式的 JSON 对象；不要传数组、字符串或裸标量。",
+                next_step=error_suggestion("invalid_arguments_type"),
             )
             self._log_call(result)
             return result
@@ -698,11 +826,13 @@ class ToolRegistry:
                     hints.append(f"{p}({ptype}){': ' + desc if desc else ''}")
                 result = ToolResult(
                     success=False,
-                    content=f"工具 '{tool_name}' 缺少必填参数: {', '.join(missing)}。参数说明: {'; '.join(hints)}",
+                    content=user_message(
+                        "missing_required_params", tool=tool_name,
+                        missing=", ".join(missing), hints="; ".join(hints)),
                     tool_name=tool_name,
                     args=args,
                     error="missing_required_params",
-                    next_step="按上面的参数说明补齐必填项后重试；可选参数不确定时省略即可，不要编造取值。",
+                    next_step=error_suggestion("missing_required_params"),
                 )
                 self._log_call(result)
                 return result
@@ -713,13 +843,19 @@ class ToolRegistry:
         if problems:
             first = problems[0]
             detail = "\n".join("- " + p["message"] for p in problems[:5])
+            # 空数组是最常见的模型失误；补上工具用途，用户才知道该给什么规模的数据
+            # （例如 HD Radio 需要 744 kHz 基带 IQ，工具描述里写明了）。
+            if (isinstance(args, dict) and args.get(first.get("param")) == []
+                    and tool_def.get("description")):
+                detail += f"\n（该工具：{tool_def['description']}）"
             result = ToolResult(
                 success=False,
-                content=f"工具 '{tool_name}' 参数校验失败：\n{detail}",
+                content=user_message(
+                    "invalid_arguments", tool=tool_name, detail="\n" + detail),
                 tool_name=tool_name,
                 args=args,
                 error=first["error"],
-                next_step="按参数说明修正类型/范围/枚举取值后重试一次；不要原样重发同一组坏参数，也不要编造合规值。",
+                next_step=error_suggestion(first["error"]),
             )
             self._log_call(result)
             return result
@@ -753,7 +889,8 @@ class ToolRegistry:
                     tool_name=tool_name,
                     args=args,
                     data=raw_result,
-                    # handler 可在 dict 里带 next_step 给模型恢复指引（DSH 模式）
+                    # handler 可在 dict 里带 error / next_step 给模型恢复指引（DSH 模式）
+                    error=str(raw_result.get("error", "") or ""),
                     next_step=str(raw_result.get("next_step", "") or ""),
                 )
             elif isinstance(raw_result, str):
@@ -778,11 +915,11 @@ class ToolRegistry:
         except Exception as e:
             result = ToolResult(
                 success=False,
-                content=f"工具 '{tool_name}' 调用失败: {type(e).__name__}: {e}。请检查参数是否正确，或参考工具说明。",
+                content=exception_message(tool_name, e, context="工具调用"),
                 tool_name=tool_name,
                 args=args,
-                error=f"exception: {type(e).__name__}",
-                next_step="按报错类型修正参数（单位/范围/类型）后重试；同一参数重试不超过 2 次，仍失败则换方法或向用户说明。",
+                error=exception_code(e),
+                next_step=error_suggestion("exception"),
             )
 
         # 诚实语义兜底：仓内约定 handler 以"错误:"开头即为失败信号。
@@ -793,21 +930,27 @@ class ToolRegistry:
             result.success = False
             result.error = result.error or "handler_error"
 
+        # P14 共享校验：失败必须结构化。handler 只回了失败正文却没给码时，
+        # 统一补一个稳定码——否则审计/模型只能看到「失败」却无法按码判断原因。
+        if not result.success and not result.error:
+            result.error = "handler_error"
+
         # 失败但没有可见文本时，用 error 兜底（模型侧不能只看到空串）
         if not result.success and not (result.content or "").strip():
-            result.content = (result.error
-                              or f"工具 '{tool_name}' 调用失败（未提供错误详情）")
+            ctx = f"工具 '{tool_name}' 调用"
+            if result.error:
+                ctx += f"（返回码 {result.error}）"
+            result.content = user_message("missing_error_detail", context=ctx)
 
         # P13 回归锁：成功但 content 与 data 全空 = 静默空结果，必须降级为失败并给原因码。
         # 模型看到一个"成功"的空白结果会当成已执行，这是最难排查的一类假绿。
         if result.success and not (result.content or "").strip() and not result.data:
             result.success = False
             result.error = "empty_result_without_reason"
-            result.content = (
-                f"工具 '{tool_name}' 返回了空结果且未提供原因（已按失败处理，"
-                "reason_code=empty_result_without_reason）；请检查输入是否为空/过短，"
-                "或改用能给出诚实空态原因的工具。"
-            )
+            result.content = user_message(
+                "empty_result_without_reason", tool=tool_name)
+            result.content += f"（reason_code={result.error}）"
+            result.next_step = error_suggestion("empty_result_without_reason")
 
         result.latency_ms = round((time.time() - start_time) * 1000, 1)
 
@@ -860,12 +1003,12 @@ class ToolRegistry:
                     preview = str(args_str)[:200]
                     result = ToolResult(
                         success=False,
-                        content=(f"工具 '{name}' 的参数不是合法 JSON，未执行。"
-                                 f"收到的原文（前 200 字符）: {preview}"),
+                        content=user_message(
+                            "invalid_json_arguments", tool=name, preview=preview),
                         tool_name=name,
                         args={},
                         error="invalid_json_arguments",
-                        next_step="重新生成完整、闭合的 JSON 对象参数；不要截断字符串，不要用单引号/尾逗号/Python 字面量。",
+                        next_step=error_suggestion("invalid_json_arguments"),
                     )
                     self._log_call(result)
                     return result
@@ -1106,7 +1249,7 @@ class ToolRegistry:
             )
             self.register(
                 name="hdradio_decode_iq",
-                description="HD Radio 完整 IQ 接收：粗+细同步 → OFDM/QPSK 解调 → 比特流（HDC 音频为骨架）。",
+                description="HD Radio 完整 IQ 接收（744 kHz 基带）：粗+细同步 → OFDM/QPSK 解调 → 比特流（HDC 音频为骨架）。",
                 parameters={"type": "object", "properties": {
                     "iq": {"type": "array", "items": {"type": "number"}, "description": "复 IQ 采样"}
                 }, "required": ["iq"]},
@@ -1965,8 +2108,12 @@ class ToolRegistry:
             rs = args["rs"]
             if not isinstance(rs, list) or not rs or not all(
                     isinstance(r, (list, tuple)) and len(r) == 3 for r in rs):
-                return ToolResult(False, "错误: rs 必须是 [[x,y,z],...] 的卫星 ECEF 列表",
-                                  error="invalid_rs_shape")
+                return ToolResult(
+                    False,
+                    "错误: " + user_message(
+                        "invalid_rs_shape", param="rs",
+                        detail="需要 [[x,y,z],...] 的卫星 ECEF 列表"),
+                    error="invalid_rs_shape")
             loc = ra.spp_locate(rs, args["dts"], args["pr"])
             return ToolResult(True, json.dumps(loc, ensure_ascii=False, indent=2,
                                                default=float), data=loc)
@@ -2979,12 +3126,14 @@ class ToolRegistry:
         def _fir_filter(args):
             taps = list(args.get("taps", [1.0]))
             if not taps:
-                return ToolResult(False, "错误: taps 不能为空（FIR 至少需要 1 个抽头）",
-                                  error="empty_taps")
+                return ToolResult(
+                    False, "错误: " + user_message("empty_taps"),
+                    error="empty_taps")
             sig = list(args.get("signal", []))
             if not sig:
-                return ToolResult(False, "错误: signal 不能为空（FIR 无可滤波样本）",
-                                  error="empty_signal")
+                return ToolResult(
+                    False, "错误: " + user_message("empty_signal"),
+                    error="empty_signal")
             x = np.array(sig, dtype=complex if any(isinstance(v, list) for v in sig) else float)
             y = FIRFilter(taps).filter(np.asarray(sig))
             return ToolResult(

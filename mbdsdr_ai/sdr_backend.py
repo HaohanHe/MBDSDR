@@ -49,6 +49,8 @@ from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+from .error_catalog import user_message
+
 # 进程内"环境缺失"类告警只报一次用的键集合。
 # 仅用于**进程生命周期内不会变化**的事实（库没装 / CLI 不存在）；
 # 每次调用都可能不同的真实失败不在此列，仍按次如实上报。
@@ -241,11 +243,14 @@ class SDRBackend:
             ok = self._apply_frequency(freq_hz)
         except Exception as e:
             ok = False
-            self.status.error = f"set_frequency异常: {e}"
+            self.status.error = user_message(
+                "sdr_set_frequency_failed",
+                detail=f"{type(e).__name__}: {e}")
         if not ok:
             self.status.frequency_hz = old  # 回滚
             if not self.status.error:
-                self.status.error = "set_frequency失败"
+                self.status.error = user_message(
+                    "sdr_set_frequency_failed", detail="底层返回失败")
             logger.warning(f"set_frequency({freq_hz}) 失败，已回滚到 {old}")
             return False
         self.status.frequency_hz = freq_hz
@@ -323,11 +328,14 @@ class SDRBackend:
                 ok = self._apply_sample_rate(rate_hz)
             except Exception as e:
                 ok = False
-                self.status.error = f"set_sample_rate异常: {e}"
+                self.status.error = user_message(
+                    "sdr_set_sample_rate_failed",
+                    detail=f"{type(e).__name__}: {e}")
             if not ok:
                 self.status.sample_rate_hz = old
                 if not self.status.error:
-                    self.status.error = "set_sample_rate失败"
+                    self.status.error = user_message(
+                        "sdr_set_sample_rate_failed", detail="底层返回失败")
                 self._finish_retune(started, False, 0, self.status.error)
                 logger.warning(f"set_sample_rate({rate_hz}) 失败，已回滚到 {old}")
                 return False
@@ -360,11 +368,13 @@ class SDRBackend:
             ok = self._apply_gain(clamped)
         except Exception as e:
             ok = False
-            self.status.error = f"set_gain异常: {e}"
+            self.status.error = user_message(
+                "sdr_set_gain_failed", detail=f"{type(e).__name__}: {e}")
         if not ok:
             self.status.gain_db = old
             if not self.status.error:
-                self.status.error = "set_gain失败"
+                self.status.error = user_message(
+                    "sdr_set_gain_failed", detail="底层返回失败")
             logger.warning(f"set_gain({clamped}) 失败，已回滚到 {old}")
             return False
         self.status.gain_db = clamped
@@ -411,11 +421,14 @@ class SDRBackend:
                 ok = self._apply_bandwidth(bw_hz)
             except Exception as e:
                 ok = False
-                self.status.error = f"set_bandwidth异常: {e}"
+                self.status.error = user_message(
+                    "sdr_set_bandwidth_failed",
+                    detail=f"{type(e).__name__}: {e}")
             if not ok:
                 self.status.bandwidth_hz = old
                 if not self.status.error:
-                    self.status.error = "set_bandwidth失败"
+                    self.status.error = user_message(
+                        "sdr_set_bandwidth_failed", detail="底层返回失败")
                 self._finish_retune(started, False, 0, self.status.error)
                 return False
             self.status.bandwidth_hz = bw_hz

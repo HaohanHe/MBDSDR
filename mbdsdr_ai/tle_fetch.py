@@ -55,6 +55,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+from .error_catalog import ERRORS, retryable as catalog_retryable, user_message
+
 __all__ = [
     "DEFAULT_SOURCE",
     "SCHEDULED_INTERVAL_S",
@@ -76,22 +78,15 @@ DEFAULT_URL_TEMPLATE = (
     "https://celestrak.org/NORAD/elements/gp.php?CATNR={catnr}&FORMAT=tle"
 )
 
-# 失败分类（kind -> 人话标签）。retryable 由 classify_failure 给出。
+# 失败分类（kind -> 人话标签）。标签与可重试性统一取自错误目录，
+# 本模块不再自己维护第二份话术（详见 docs/error-catalog.md）。
+_TLE_FAILURE_KINDS = (
+    "rate_limited", "http_4xx", "http_5xx", "network_timeout",
+    "network_unreachable", "network_other", "parse_failure",
+    "empty_response", "tle_unknown",
+)
 FAILURE_LABELS: Dict[str, str] = {
-    "rate_limited": "429 限流",
-    "http_4xx": "4xx 拒绝",
-    "http_5xx": "5xx 服务端错误",
-    "network_timeout": "网络超时",
-    "network_unreachable": "网络不可达/DNS 失败",
-    "network_other": "其他网络错误",
-    "parse_failure": "返回内容解析失败",
-    "empty_response": "空响应",
-    "unknown": "未知失败",
-}
-
-_RETRYABLE = {
-    "rate_limited", "http_5xx", "network_timeout",
-    "network_unreachable", "network_other",
+    kind: ERRORS[kind].meaning for kind in _TLE_FAILURE_KINDS
 }
 
 
@@ -145,15 +140,17 @@ def classify_failure(exc: Optional[BaseException] = None,
         kind, detail = "network_other", f"{type(exc).__name__}: {exc}"
     elif body is not None:
         if not str(body).strip():
-            kind, detail = "empty_response", "响应体为空"
+            kind, detail = "empty_response", user_message("empty_response")
         else:
-            kind, detail = "parse_failure", "响应体不含合法 TLE"
+            kind, detail = ("parse_failure",
+                            user_message("parse_failure", detail="响应体不含合法 TLE"))
     else:
-        kind, detail = "unknown", "未知失败"
+        # 调用方没给状态码/异常/响应体：如实标注「缺上下文」，不用空话糊弄。
+        kind, detail = "tle_unknown", user_message("tle_unknown")
     return {
         "kind": kind,
         "label": FAILURE_LABELS.get(kind, kind),
-        "retryable": kind in _RETRYABLE,
+        "retryable": catalog_retryable(kind),
         "status": status,
         "detail": detail,
     }

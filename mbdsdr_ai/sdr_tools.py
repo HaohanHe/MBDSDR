@@ -32,6 +32,7 @@ import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
+from .error_catalog import exception_code, user_message
 from .tool_registry import ToolResult
 from . import orbit
 from .sdr_backend import SDRBackendManager, SDRStatus
@@ -518,7 +519,12 @@ def register_sdr_tools(agent):
             return ToolResult(success=False,
                               content="操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
         ok = getattr(b, method_name)(value)
-        return ToolResult(success=bool(ok), content=ok_msg if ok else "操作失败")
+        return ToolResult(
+            success=bool(ok),
+            content=ok_msg if ok else user_message(
+                "handler_error", tool=method_name,
+                detail="后端 setter 返回 False（未提供底层原因）"),
+            error="" if ok else "handler_error")
 
     agent.tool_registry.register(
         name="sdr_set_bandwidth",
@@ -3528,7 +3534,8 @@ def _meteor_lrpt_demod_fn_tool(args) -> "ToolResult":
                f"采样率按此换算 sps（当前 sample_rate={sr}）。"
                f"没有 IQ 就无法解调——本次不返回任何解调结果。")
         out = {"sym_rate": METEOR_SYM_RATE, "sample_rate": sr,
-               "error": "缺少 iq_base64"}
+               "error": "missing_iq",
+               "message": user_message("missing_iq")}
         return ToolResult(success=False, content=msg, data=out)
     raw = np.frombuffer(_b64.b64decode(b64), dtype=np.float32)
     iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
@@ -6153,7 +6160,10 @@ def _sdr_transmit_iq(args):
                       "sent_samples": rep["sent_samples"]})
         ok = True
     except Exception as e:  # noqa: BLE001
-        return ToolResult(success=False, content=f"参数/计算错误: {e}", error=str(e))
+        return ToolResult(
+            success=False,
+            content=f"参数/计算错误（{type(e).__name__}）: {e}",
+            error=exception_code(e))
 
     lines = ["=== IQ 发射 ==="]
     lines.append(f"频率: {freq/1e6:.3f} MHz")
@@ -7237,7 +7247,9 @@ def _openapi_iss_position(args):
         lines.append("")
         lines.append("提示：用于业余卫星接收指向参考")
     else:
-        lines.append(f"错误: {result.get('error', '未知错误')}")
+        lines.append("错误: " + (
+            result.get('error')
+            or user_message("missing_error_detail", context="联网接口")))
 
     return ToolResult(
         success=bool(result.get('success')),
@@ -7261,7 +7273,9 @@ def _openapi_people_in_space(args):
         for i, name in enumerate(result['people'], 1):
             lines.append(f"  {i}. {name}")
     else:
-        lines.append(f"错误: {result.get('error', '未知错误')}")
+        lines.append("错误: " + (
+            result.get('error')
+            or user_message("missing_error_detail", context="联网接口")))
 
     return ToolResult(
         success=bool(result.get('success')),
@@ -7291,7 +7305,9 @@ def _openapi_weather(args):
         lines.append("提示：风速影响天线指向稳定性")
         lines.append("      湿度影响大气衰减")
     else:
-        lines.append(f"错误: {result.get('error', '未知错误')}")
+        lines.append("错误: " + (
+            result.get('error')
+            or user_message("missing_error_detail", context="联网接口")))
 
     return ToolResult(
         success=bool(result.get('success')),
@@ -7324,7 +7340,9 @@ def _openapi_aircraft_nearby(args):
         lines.append("提示：用于ADS-B接收验证")
         lines.append("      1090MHz模式S接收")
     else:
-        lines.append(f"错误: {result.get('error', '未知错误')}")
+        lines.append("错误: " + (
+            result.get('error')
+            or user_message("missing_error_detail", context="联网接口")))
 
     return ToolResult(
         success=bool(result.get('success')),

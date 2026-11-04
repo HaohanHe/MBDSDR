@@ -37,6 +37,7 @@
 | 15 | 超时/硬截止/耗时统计 | **墙钟域**：`time.time()`、`time.monotonic()`、`datetime.now()` | 各函数 `timeout` / `deadline` 参数 | `sat_tracker._bounded_requests_get`、网络/设备层 |
 | 16 | 文件命名 / 记录 ID / 调度 `run_at` | **墙钟域**：`int(time.time())`、`datetime.now(UTC)` | 调用方显式传入 | `decoders.py` 输出名、`scheduler.py` |
 | 17 | 独立天图内核 | `skyengine.jtime.TimeKernel` 默认墙钟（当前未接入计算链） | `jd` 显式赋值 | `mbdsdr_ai/skyengine/jtime.py` |
+| 18 | 卫星受晒/地影判定 | `sat_illumination.evaluate_from_position/from_tle()`：`at_unix=None` → 全局 TimeEngine | `at_unix` / `time_engine` 显式 | `mbdsdr_ai/sat_illumination.py` |
 
 墙钟域（第 13–16 行）是**合法例外**：这些值描述「真实世界已过去多久」或
 「本机文件命名」，与轨道/天象计算无关，不能改用模拟时刻。

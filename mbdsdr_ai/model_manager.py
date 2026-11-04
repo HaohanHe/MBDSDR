@@ -20,6 +20,31 @@ import requests
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
+from .error_catalog import user_message
+
+
+def classify_llm_exception(exc: BaseException, timeout: float) -> Tuple[str, str]:
+    """异常 → (错误码, 用户文案)。码与文案都取自 docs/error-catalog.md。"""
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = exc.response.status_code if exc.response is not None else 0
+        body = (exc.response.text[:200] if exc.response is not None else "")
+        if status == 429:
+            code = "llm_rate_limited"
+        elif status >= 500:
+            code = "llm_http_5xx"
+        else:
+            code = "llm_http_4xx"
+        return code, user_message(code, status=status, detail=body,
+                                  retry_in=60)
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "llm_timeout", user_message("llm_timeout", timeout=timeout)
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "llm_unreachable", user_message(
+            "llm_unreachable", detail=f"{type(exc).__name__}: {exc}")
+    return "llm_unexpected", user_message(
+        "llm_unexpected", exc_type=type(exc).__name__,
+        detail=str(exc) or "（异常无文本描述）")
+
 
 @dataclass
 class ModelInfo:
@@ -110,6 +135,7 @@ class ModelManager:
         self.stats = CallStats()
         self._session = requests.Session()
         self._last_error = None
+        self._last_error_code = ""
 
     # ── 模型列表查询 ────────────────────────────────────
 
@@ -158,7 +184,9 @@ class ModelManager:
             return self.available_models
 
         except Exception as e:
-            self._last_error = f"模型列表查询失败: {e}"
+            code, self._last_error = classify_llm_exception(e, self.timeout)
+            self._last_error_code = code
+            self._last_error = f"模型列表：{self._last_error}"
             return self.available_models
 
     def _is_weak_model(self, model_id: str) -> bool:
@@ -237,14 +265,14 @@ class ModelManager:
         # 离线门：模型 API 纯在线，无本地替代；明确拒绝而不是重试到超时
         from .orbit import _network_disabled
         if _network_disabled():
-            err = ("离线模式（MBDSDR_OFFLINE）：模型 API 需要联网，"
-                   "已拒绝调用（本地无模型可替代）")
+            err = user_message("llm_offline")
             self.stats.failed_calls += 1
             self._last_error = err
+            self._last_error_code = "llm_offline"
             return {
                 "success": False, "content": "", "tool_calls": [], "usage": {},
                 "model": self.model, "latency_ms": 0.0,
-                "error": err, "offline": True,
+                "error": err, "error_code": "llm_offline", "offline": True,
             }
 
         url = f"{self.base_url}/chat/completions"
@@ -268,6 +296,7 @@ class ModelManager:
 
         # 重试循环
         last_error = None
+        last_error_code = ""
         for attempt in range(self.max_retries + 1):
             try:
                 resp = self._session.post(url, headers=headers, json=payload, timeout=self.timeout)
@@ -299,8 +328,9 @@ class ModelManager:
                 return result
 
             except requests.exceptions.HTTPError as e:
-                last_error = f"HTTP {e.response.status_code}: {e.response.text[:200]}"
-                if e.response.status_code in (429, 500, 502, 503, 504):
+                last_error_code, last_error = classify_llm_exception(e, self.timeout)
+                if e.response is not None and e.response.status_code in (
+                        429, 500, 502, 503, 504):
                     # 可重试错误
                     if attempt < self.max_retries:
                         time.sleep(1 * (attempt + 1))
@@ -309,24 +339,30 @@ class ModelManager:
                     # 4xx 等不可重试错误：立即放弃，不烧剩余重试次数
                     # （否则一次 400 会白打 max_retries+1 个请求）
                     break
-            except requests.exceptions.Timeout:
-                last_error = f"请求超时 ({self.timeout}s)"
+            except requests.exceptions.Timeout as e:
+                last_error_code, last_error = classify_llm_exception(e, self.timeout)
                 if attempt < self.max_retries:
                     time.sleep(1)
                     continue
             except requests.exceptions.ConnectionError as e:
-                last_error = f"连接失败: {e}"
+                last_error_code, last_error = classify_llm_exception(e, self.timeout)
                 if attempt < self.max_retries:
                     time.sleep(1)
                     continue
             except Exception as e:
-                last_error = f"未知错误: {type(e).__name__}: {e}"
+                last_error_code, last_error = classify_llm_exception(e, self.timeout)
                 break
 
         # 所有重试失败
         latency_ms = (time.time() - start_time) * 1000
         self.stats.failed_calls += 1
+        if not last_error_code:
+            last_error_code = "llm_unexpected"
+            last_error = user_message(
+                "llm_unexpected", exc_type="（无异常记录）",
+                detail="重试耗尽但未记录具体异常")
         self._last_error = last_error
+        self._last_error_code = last_error_code
         return {
             "success": False,
             "content": "",
@@ -334,7 +370,8 @@ class ModelManager:
             "usage": {},
             "model": self.model,
             "latency_ms": round(latency_ms, 1),
-            "error": last_error or "未知错误",
+            "error": last_error,
+            "error_code": last_error_code,
         }
 
     # ── 工具调用辅助 ────────────────────────────────────
@@ -358,15 +395,15 @@ class ModelManager:
         # 离线门：与 chat 同一口径，不发起任何请求
         from .orbit import _network_disabled
         if _network_disabled():
-            err = ("离线模式（MBDSDR_OFFLINE）：流式模型 API 需要联网，"
-                   "已拒绝调用（本地无模型可替代）")
+            err = user_message("llm_offline")
             self.stats.failed_calls += 1
             self._last_error = err
+            self._last_error_code = "llm_offline"
             yield {
                 "done": True, "success": False, "content": "",
                 "reasoning_content": "", "tool_calls": [], "usage": {},
                 "model": self.model, "latency_ms": 0.0,
-                "error": err, "offline": True,
+                "error": err, "error_code": "llm_offline", "offline": True,
             }
             return
 
@@ -449,10 +486,13 @@ class ModelManager:
         except Exception as e:
             latency_ms = (time.time() - start_time) * 1000
             self.stats.failed_calls += 1
-            self._last_error = str(e)
+            code, err = classify_llm_exception(e, self.timeout)
+            self._last_error = err
+            self._last_error_code = code
             yield {"done": True, "success": False, "content": full_content,
                    "tool_calls": [], "usage": usage, "model": self.model,
-                   "latency_ms": round(latency_ms, 1), "error": str(e),
+                   "latency_ms": round(latency_ms, 1), "error": err,
+                   "error_code": code,
                    # P7.2：流中断不谎报成功，也不丢弃已收到的部分内容；
                    # 半截 tool_calls 一律不返回（参数可能被截断，执行必错）。
                    "interrupted": True, "partial": bool(full_content)}

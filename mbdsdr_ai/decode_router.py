@@ -36,6 +36,8 @@ import shutil
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .error_catalog import user_message
+
 # ---- 诚实错误码 ---------------------------------------------------------
 ERR_UNKNOWN_MODE = "unknown_mode"
 ERR_MISSING_DEPENDENCY = "missing_dependency"
@@ -382,9 +384,10 @@ def _route_ais(ctx: _Ctx) -> Dict[str, Any]:
         except Exception as e:
             result["error"] = f"AIS 解码失败: {e}"
     else:
-        result["error"] = (
-            f"AIS 需 .cf32/.cfile 复基带（9600bd GMSK，fs 为 9600 整数倍），"
-            f"收到 {ctx.ext}")
+        result["error"] = user_message(
+            "unsupported_format", mode="AIS",
+            allowed=".cf32/.cfile 复基带（9600bd GMSK，fs 为 9600 整数倍）",
+            actual=ctx.ext)
         result["error_code"] = ERR_UNSUPPORTED_FORMAT
     return result
 
@@ -414,9 +417,10 @@ def _route_navtex(ctx: _Ctx) -> Dict[str, Any]:
             except Exception as e:
                 result["error"] = f"NAVTEX 解码失败: {e}"
     else:
-        result["error"] = (
-            f"NAVTEX 需 .wav 音频（SSB 解调后 100bd FSK，中心 1kHz），"
-            f"收到 {ctx.ext}")
+        result["error"] = user_message(
+            "unsupported_format", mode="NAVTEX",
+            allowed=".wav 音频（SSB 解调后 100bd FSK，中心 1kHz）",
+            actual=ctx.ext)
         result["error_code"] = ERR_UNSUPPORTED_FORMAT
     return result
 
@@ -441,7 +445,9 @@ def _route_meteor(ctx: _Ctx) -> Dict[str, Any]:
         except Exception as e:
             result["error"] = f"Meteor LRPT 解调失败: {e}"
     else:
-        result["error"] = f"Meteor LRPT 需 .cf32/.cfile 复基带，收到 {ctx.ext}"
+        result["error"] = user_message(
+            "unsupported_format", mode="Meteor LRPT",
+            allowed=".cf32/.cfile 复基带", actual=ctx.ext)
         result["error_code"] = ERR_UNSUPPORTED_FORMAT
     return result
 
@@ -566,20 +572,21 @@ def _run_digital_mode(
     if cap is None:
         return _error_result(
             None, key, ERR_UNKNOWN_MODE,
-            f"未知数字模式 '{mode}'；可用模式: {', '.join(supported_modes())}",
+            user_message("unknown_mode", mode=mode,
+                         available=", ".join(supported_modes())),
             supported_modes=supported_modes(),
         )
     missing = _missing_dependency(cap)
     if missing:
         return _error_result(
             cap, key, ERR_MISSING_DEPENDENCY,
-            f"{key} 缺少内置依赖模块 {missing}（实现文件 {cap.impl} 不可导入）",
+            user_message("missing_dependency", module=missing, impl=cap.impl),
             missing_dependency=missing,
         )
     if not os.path.exists(input_path):
         return _error_result(
             cap, key, ERR_MISSING_SAMPLE,
-            f"输入文件不存在（缺样本，不是解码失败）: {input_path}",
+            user_message("missing_sample", path=input_path),
             input_file=input_path,
         )
     if "*" not in cap.input_formats and not cap.delegate_format_check:
@@ -587,7 +594,9 @@ def _run_digital_mode(
         if ext not in cap.input_formats:
             return _error_result(
                 cap, key, ERR_UNSUPPORTED_FORMAT,
-                f"{key} 需 {'/'.join(cap.input_formats)}，收到 {ext or '无扩展名'}",
+                user_message("unsupported_format", mode=key,
+                             allowed="/".join(cap.input_formats),
+                             actual=ext or "无扩展名"),
                 input_file=input_path, format=ext,
             )
 

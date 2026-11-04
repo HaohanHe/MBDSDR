@@ -35,6 +35,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+from .error_catalog import user_message
+
 
 # ---------------------------------------------------------------------------
 # SigMF meta 解析
@@ -225,7 +227,7 @@ class IQPlayback:
         self._mmap = None
         self.state = "failed"
         self.error_code = code
-        self.last_error = reason
+        self.last_error = user_message(code, detail=reason, path=data_path)
         logger.error("IQPlayback 打开失败(%s) %s: %s", code, data_path, reason)
         return False
 
@@ -259,7 +261,7 @@ class IQPlayback:
         if self.filepath and not os.path.exists(self.filepath):
             self.state = "deleted"
             self.error_code = "deleted"
-            self.last_error = "回放文件在读取过程中被删除或移走"
+            self.last_error = user_message("deleted")
             self.opened = False
             try:
                 if self._mmap is not None:
@@ -298,12 +300,12 @@ class IQPlayback:
             if not self.loop and self._cursor >= total:
                 self.state = "eof"
                 self.error_code = "eof"
-                self.last_error = "已读到文件末尾（未循环）"
+                self.last_error = user_message("eof")
             return np.empty(0, dtype=np.complex64)
         if not self.loop and self._cursor >= total:
             self.state = "eof"
             self.error_code = "eof"
-            self.last_error = "已读到文件末尾（未循环）"
+            self.last_error = user_message("eof")
         return np.concatenate(out_parts).astype(np.complex64, copy=False) \
             if len(out_parts) > 1 else out_parts[0]
 
@@ -373,8 +375,10 @@ def transmit_iq_playback(
     if not pb.open(filepath):
         return {
             "state": "rejected",
-            "reason_code": f"playback_{pb.error_code or 'failed'}",
-            "reason": pb.last_error or "回放文件无法打开",
+            "reason_code": (f"playback_{pb.error_code}"
+                            if pb.error_code else "playback_failed"),
+            "reason": pb.last_error or user_message(
+                "missing_error_detail", context="回放打开"),
             "sent_samples": 0,
             "playback": {"path": filepath, "state": pb.state,
                          "error_code": pb.error_code},
@@ -385,7 +389,10 @@ def transmit_iq_playback(
         return {
             "state": "rejected",
             "reason_code": "bad_parameter",
-            "reason": "未指定发射频点，且 SigMF 元数据没有中心频率——不假设频点",
+            "reason": user_message(
+                "bad_parameter",
+                detail="未指定发射频点，且 SigMF 元数据没有中心频率——"
+                       "不假设频点"),
             "sent_samples": 0,
             "playback": {"path": filepath, "state": "closed",
                          "meta_valid": pb.meta_valid},
@@ -424,7 +431,8 @@ def transmit_iq_playback(
         result["state"] = "aborted"
         result["reason_code"] = ("tx_source_deleted" if pb.state == "deleted"
                                  else "tx_source_failed")
-        result["reason"] = pb.last_error or "回放源在发射过程中失效"
+        result["reason"] = pb.last_error or user_message(
+            "missing_error_detail", context="回放源失效")
     result["playback"] = {
         "path": filepath,
         "state": pb.state,
@@ -475,8 +483,10 @@ class PlaybackSource:
             self._error_code = ""
             return True
         self._connected = False
-        self._last_error = self._pb.last_error or "回放文件打开失败"
         self._error_code = self._pb.error_code or "open_failed"
+        self._last_error = (self._pb.last_error
+                            or user_message("open_failed",
+                                            detail=f"状态 {self._pb.state}"))
         return False
 
     def disconnect(self) -> None:
@@ -489,8 +499,10 @@ class PlaybackSource:
             return None
         out = self._pb.read_samples(n)
         if out.size == 0:
-            self._last_error = self._pb.last_error or "回放源无更多数据"
             self._error_code = self._pb.error_code or "no_data"
+            self._last_error = (self._pb.last_error
+                                or user_message(
+                                    "no_data", detail=f"状态 {self._pb.state}"))
             if self._pb.state == "deleted":
                 self._connected = False
             return None  # EOF / 文件被删 / 未打开
@@ -514,13 +526,14 @@ class PlaybackSource:
             return False
         actual = float(self._pb.sample_rate)
         if actual <= 0:
-            self._last_error = "录制文件未声明采样率，拒绝猜测改写"
             self._error_code = "rate_unknown"
+            self._last_error = user_message("rate_unknown")
             return False
         if abs(float(rate_hz) - actual) > 1.0:
-            self._last_error = (f"回放源采样率固定为 {actual:g} Hz，"
-                                f"不能改为 {float(rate_hz):g} Hz")
             self._error_code = "rate_mismatch"
+            self._last_error = user_message(
+                "rate_mismatch", actual=f"{actual:g}",
+                requested=f"{float(rate_hz):g}")
             return False
         self._rate = actual
         return True

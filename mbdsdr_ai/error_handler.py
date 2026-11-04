@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence, Union
 
+from .error_catalog import spec, suggestion, user_message
+
 __all__ = [
     "SDRUserError",
     "DriverNotFoundError",
@@ -233,16 +235,13 @@ def format_error(error: Any) -> Dict[str, str]:
     """
     if isinstance(error, SDRUserError):
         return error.to_ui()
-    # 非预期异常：技术细节带进 message 的副标题，给一个保守建议
-    name = type(error).__name__
-    detail = str(error)
+    # 非预期异常：必带原始异常类型与最小上下文，不用空话兜底。
     return {
-        "title": "未知错误",
-        "message": f"{name}: {detail}" if detail else name,
-        "suggestion": (
-            "请重试一次；若反复出现，请把日志提交给开发者（见"
-            " technical_detail）"
-        ),
+        "title": spec("unexpected_error").meaning,
+        "message": user_message(
+            "unexpected_error", exc_type=type(error).__name__,
+            detail=str(error) or "（异常无文本描述）"),
+        "suggestion": suggestion("unexpected_error"),
     }
 
 
