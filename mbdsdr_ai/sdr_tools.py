@@ -4383,7 +4383,16 @@ def _doppler_compensation_control(mgr, args):
     lines = [
         f"接收链多普勒补偿：{'已开启' if st['enabled'] else '已关闭'}",
         f"是否生效：{'是' if st['active'] else '否'}",
-        f"当前补偿量：{st['applied_hz']:+.1f} Hz",
+    ]
+    by = st.get("applied_by")
+    if by == "backend":
+        # 后端施加时不拿预测值/0 冒充实际值（applied_hz 为 None）
+        lines.append("当前补偿量：—（由后端施加）")
+    elif st.get("applied_hz") is None:
+        lines.append("当前补偿量：—（未施加）")
+    else:
+        lines.append(f"当前补偿量：{float(st['applied_hz']):+.1f} Hz（Python 基带）")
+    lines += [
         f"目标：{st['target_name'] or '无'}",
     ]
     if st.get("target_doppler_hz") is not None:

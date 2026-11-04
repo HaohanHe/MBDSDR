@@ -317,6 +317,9 @@ class DopplerCompensationStage:
             "tle_tier": r.get("tle_tier", ""),
             "tle_age_days": r.get("tle_age_days"),
             "application": "baseband",
+            # UI 契约字段：读数三方（阶段/接收链/后端）必须同名同义，否则
+            # 界面接线各自猜字段就会出现「开关看得见、归属看不见」的半读。
+            "python_stream_owner": bool(r.get("python_stream_owner", False)),
             "reason": self._reason,
             "error": self._last_error,
             "blocks": self._blocks,

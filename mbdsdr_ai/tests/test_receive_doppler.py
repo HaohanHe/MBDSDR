@@ -17,6 +17,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from mbdsdr_ai import doppler_link, orbit
 from mbdsdr_ai.doppler_compensation import (DopplerCompensationError,
                                             DopplerCompensationStage)
 from mbdsdr_ai.receive_chain import ReceiveChain
@@ -329,3 +330,155 @@ def test_backend_skips_block_and_reports_error_code(monkeypatch):
     assert "多普勒补偿失败" in st["error"]
     assert "多普勒补偿失败" in backend.status.error
     assert "未按 0 补偿" in backend.status.error
+
+
+# ---------------------------------------------------------------------------
+# 5) 真实 TLE 过境全程：多普勒由正扫到负，1 s 步进跑满 10 分钟
+# ---------------------------------------------------------------------------
+# ISS(25544) 真实 TLE（2024-11-20 历元），测试内嵌、离线传播，不联网。
+# 下面这条过境在该 TLE 下是近天顶过境（TCA 仰角 86.3°），10 分钟窗口两端
+# 仰角仍 >1.5°（全程都在过境中），多普勒从 +3358 Hz 扫到 −3361 Hz。
+_ISS_TLE_L1 = ("1 25544U 98067A   24325.51782528  .00011346  00000+0  20438-3"
+               " 0  9998")
+_ISS_TLE_L2 = ("2 25544  51.6395 208.5764 0005070  89.6109  37.8554 "
+               "15.50253765482866")
+_PASS_TCA_UNIX = 1732181540.104192      # 该 TLE 下示例站点 (0,0) 的过境 TCA
+_PASS_SITE = (0.0, 0.0, 0.0)            # 中性示例站点（不内置真实城市坐标）
+_DOWNLINK_HZ = 145_800_000.0            # 业余卫星 2 m 下行标称
+_PASS_FS = 8000.0
+_PASS_WARMUP_S = 5                      # 起始 ramp 瞬态预热（不计入残余峰值）
+_PASS_BLOCKS = 600                      # 10 分钟，1 s / 块
+# 残余峰值阈值 80 Hz。
+# 依据：1 s ZOH 的目标更新间隔 × 该过境窗口内实测最大多普勒斜率
+# 59.3 Hz/s（SGP4 真轨迹，TCA 近天顶处）= 59.3 Hz 一阶滞后误差上界；
+# 20 ms ramp 额外引入 ≤ 斜率×0.02 s ≈ 1.2 Hz；再留 ~30% 余量取整到 80 Hz。
+_RESIDUAL_LIMIT_HZ = 80.0
+
+
+class _OrbitTracker:
+    """``DopplerLinkCompensator`` 的最小 tracker 适配：走 orbit 公共 API 真传播。"""
+
+    def __init__(self, when: float = 0.0) -> None:
+        self.when = float(when)
+
+    def current_position(self, at_unix=None) -> dict:
+        t = self.when if at_unix is None else float(at_unix)
+        st = orbit.compute_satellite_state(
+            "ISS (ZARYA)", _PASS_SITE[0], _PASS_SITE[1], _PASS_SITE[2], when=t)
+        if not st:
+            return {"valid": False}
+        rr = float(st["range_rate_kms"])
+        return {
+            "valid": True,
+            "elevation": float(st["elevation"]),
+            "range_rate_km_s": rr,
+            # 与 doppler_correction / DopplerLinkCompensator 同符号：远离为负
+            "doppler_hz": -_DOWNLINK_HZ * rr / orbit.C_LIGHT,
+        }
+
+
+def test_full_pass_residual_peak_and_no_pop_at_zero_crossing(monkeypatch):
+    """真实 TLE 过境：10 分钟 × 1 s 步进，残余峰值 ≤ 80 Hz，零交叉无跳变/爆音。
+
+    与固定 300/340 Hz 用例的区别：这里预测值每秒变一次（真实 ZOH 工况），
+    覆盖正→负过零、近天顶最大斜率与出射阶段。判据：
+
+      * 稳态残余峰值 ≤ 80 Hz（推导见上方常量注释）；
+      * 逐样本相位差 ≤ 2π·100/fs（无相位断点 = 无爆音）；
+      * 零交叉附近块边界瞬时频移连续（< 5 Hz 跳变）；
+      * 最终 ``applied_by=python``，Python 实际施加量 ≈ 出射阶段预测值。
+    """
+    pytest.importorskip("sgp4")
+    monkeypatch.setattr(
+        orbit, "fetch_tle",
+        lambda catnr, max_age_hours=24.0: (_ISS_TLE_L1, _ISS_TLE_L2))
+
+    # 过境全程在窗口内：窗口两端仰角仍 > 0（否则预测会转 invalid，测试失真）
+    for dt in (-300.0, -150.0, 0.0, 150.0, 300.0):
+        st = orbit.compute_satellite_state(
+            "ISS (ZARYA)", _PASS_SITE[0], _PASS_SITE[1], _PASS_SITE[2],
+            when=_PASS_TCA_UNIX + dt)
+        assert st is not None and st["elevation"] > 0.0, (
+            f"窗口 dt={dt:+.0f}s 仰角 {None if st is None else st['elevation']}，"
+            "应全程在过境中")
+
+    tracker = _OrbitTracker(_PASS_TCA_UNIX - _PASS_WARMUP_S)
+    comp = doppler_link.DopplerLinkCompensator(tracker=tracker)
+    # 真实部署声明 + 基带施加点（与 SDRBackend 建链后的组合一致）
+    assert comp.claim_python_stream(True) is True
+    assert comp.arm_target("ISS (ZARYA)", _DOWNLINK_HZ,
+                           at_unix=tracker.when) is True
+    assert comp.set_application("baseband") is True
+
+    stage = DopplerCompensationStage(comp, ramp_s=0.020)
+    assert stage.set_enabled(True) is True
+
+    fs = _PASS_FS
+    n = int(fs)
+    t0 = _PASS_TCA_UNIX - _PASS_BLOCKS / 2.0
+    phase = 0.0
+    residual_peaks = []
+    boundary_jumps = []
+    applied = []                 # 每块结束时的 Python 实际施加量
+    max_dphi = 0.0
+    prev_last = None
+    crossing = None
+
+    for i in range(-_PASS_WARMUP_S, _PASS_BLOCKS):
+        t = t0 + float(i)
+        tracker.when = t
+        comp.refresh(at_unix=t)
+        pred = comp.state.doppler_hz
+        assert pred is not None, f"t={t} 预测失效（过境窗口不应越界）"
+        nxt = tracker.current_position(at_unix=t + 1.0)["doppler_hz"]
+
+        # 块内线性插值真轨迹，相位跨块连续（物理信号本身不会有断点）
+        freq = np.linspace(pred, nxt, n, endpoint=False)
+        ph = phase + (2.0 * np.pi / fs) * np.cumsum(freq)
+        iq = np.exp(1j * ph)
+        phase = float(ph[-1])
+
+        out = stage.process(iq, fs)
+        # 真实残余 = 真多普勒 − 施加量；_inst_freq_hz 对 +f 输入返回 -f
+        inst = -_inst_freq_hz(out, fs)
+
+        if (pred <= 0.0 < nxt) or (pred >= 0.0 > nxt):
+            assert crossing is None, "过境窗口内应只有一次零交叉"
+            crossing = i
+
+        if i >= 0:
+            # 跳过块首 20 ms ramp（160 样本），量稳态残余
+            residual_peaks.append(float(np.max(np.abs(inst[int(0.020 * fs):]))))
+            applied.append(float(stage.status()["applied_hz"]))
+            dphi = np.abs(np.angle(out[1:] * np.conj(out[:-1])))
+            max_dphi = max(max_dphi, float(dphi.max()))
+            if prev_last is not None:
+                boundary_jumps.append(abs(float(inst[0]) - prev_last))
+            prev_last = float(inst[-1])
+
+    assert crossing is not None and 0 <= crossing < _PASS_BLOCKS, \
+        f"未找到零交叉：{crossing}"
+
+    peak = max(residual_peaks)
+    assert peak <= _RESIDUAL_LIMIT_HZ, (
+        f"过境全程残余峰值 {peak:.1f} Hz 超过阈值 {_RESIDUAL_LIMIT_HZ} Hz；"
+        f"所述 1 s ZOH 斜率上界约 59 Hz")
+
+    # 无爆音：逐样本相位差有界（残余 ≤ 80 Hz 时不可能出现阶跃）
+    assert max_dphi < 2.0 * np.pi * 100.0 / fs, \
+        f"逐样本相位差 {max_dphi:.4f} rad 超界（相位断点/爆音）"
+
+    # 零交叉处施加量连续：目标从 + 扫到 −，块间不得跳变
+    near = [j for j in range(max(0, crossing - 3), min(len(boundary_jumps),
+                                                      crossing + 4))]
+    near_jumps = [boundary_jumps[j] for j in near
+                  if j < len(boundary_jumps)]
+    assert near_jumps and max(near_jumps) < 5.0, \
+        f"零交叉附近块边界频移跳变 {near_jumps}"
+
+    st = stage.status()
+    assert st["applied_by"] == "python"
+    assert st["python_stream_owner"] is True
+    assert st["applied_hz"] == pytest.approx(applied[-1], abs=1e-6)
+    # 出射阶段预测 ≈ −3361 Hz，Python 实际施加量应跟到同一量级
+    assert st["applied_hz"] == pytest.approx(-3361.0, abs=60.0)

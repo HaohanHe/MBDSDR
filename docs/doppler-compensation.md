@@ -134,6 +134,79 @@ SDRBackend._ensure_receive_chain()
    Python，C++ 侧必须调用 `set_backend_compensation_active(True)`，Python
    读到后连已运行的 NCO 也会 ramp 回 0（`python_applied_hz` 如实归零）。
 
+### 3.6 UI 接口契约（交操作逻辑线接线；本线**不改** `desktop/main_window.py`）
+
+界面只需一个读数入口 + 一个开关状态。三者返回**同名同义字段**（字段只增不改）：
+
+| 入口 | 适用 |
+| --- | --- |
+| `SDRBackend.get_doppler_compensation_status()` | 桌面 Python 本地硬件（推荐） |
+| `ReceiveChain.doppler_status()` | 直接持有接收链时 |
+| `DopplerCompensationStage.status()` | 单元/嵌入调试 |
+
+一句话纪律：**数字只取 `applied_hz`，归属只取 `applied_by`，预测只取
+`predicted_hz`；三者不可互相顶替。** `applied_hz` 为 `null` 时界面显示
+「—」，不得渲染成 `0`。
+
+#### 字段与语义
+
+| 字段 | 类型 | 语义 |
+| --- | --- | --- |
+| `enabled` | bool | 用户开关。**按钮状态只映射它**，不要用 `active` 驱动按钮 |
+| `active` | bool | Python 基带此刻是否真的在施加非零补偿 |
+| `applied_by` | `"python"`/`"backend"`/`"none"` | 谁在真正施加 |
+| `applied_hz` | float/null | 实际施加量。`python` 时为 NCO 实测累计值；`backend` 时**必为 `null`**（Python 不知道对方加了多少）；`none` 时为 `0.0` |
+| `predicted_hz` | float/null | 链路预测 Δ，**只是预测**；`backend` 时可作旁注，不可当选读数 |
+| `python_applied_hz` | float | Python 自己 NCO 的累计量（后端接管后应回 0，可用于自证没有双施加） |
+| `python_stream_owner` | bool | 本 IQ 流是否已声明由 Python 独占（诊断行用） |
+| `target_doppler_hz` | float/null | Python 正在追赶的目标 Δ |
+| `settling` | bool | 是否仍在 20 ms ramp 渐变中 |
+| `application` | `"tuner"`/`"baseband"` | 声明的施加点；`tuner` 表示偏移加在调谐器侧 |
+| `target_name` / `predicted_at_unix` / `tle_tier` / `tle_age_days` | — | 溯源（目标、预测时刻、星历级别与年龄） |
+| `reason` | str | 未补偿原因（无目标/未声明归属/后端接管/调谐器生效/已关闭） |
+| `error` | str | 预测或绑定失败原因；非空即本块音频被丢弃，**不得显示为 0 Hz 已补偿** |
+
+#### 显示文案（按顺序判定，先命中先显示）
+
+| 条件 | 补偿读数 | 旁注 |
+| --- | --- | --- |
+| `applied_by == "backend"` | `—（由后端施加）` | 可显示「预测 {predicted_hz:+.1f} Hz」，标明是预测 |
+| `applied_by == "python"` | `{applied_hz:+.1f} Hz（Python 基带）` | `settling` 时前缀「切换中」 |
+| `applied_by == "none"` 且 `application == "tuner"` 且 `enabled` 且 `predicted_hz != null` | `—（由调谐器施加）` | 「预测 {predicted_hz:+.1f} Hz」（调谐器侧不向 Python 回报实际值） |
+| 其余 | `0 Hz（未补偿）` | 显示 `reason` 的短句 |
+| `error` 非空（优先级最高） | `补偿失败` | 显示 `error` 原文，本块无音频 |
+
+开关行：`多普勒补偿：开` / `多普勒补偿：关`（直接取 `enabled`）。
+诊断行（可选）：`IQ 流归属：Python 独占` / `IQ 流归属：未声明（不施加基带补偿）`。
+
+`reason` → 短文案建议：`无目标` → 「未绑定卫星目标」；`未声明 Python 独占
+IQ 流` → 「本部署形态不参与基带补偿」；`后端…已接管` → 「由后端施加」；
+`调谐器侧补偿生效` → 「由调谐器施加」；`补偿关闭` → 「已关闭」。
+
+#### 接线骨架（UI 线照抄即可，字段名以本节为准）
+
+```python
+st = backend.get_doppler_compensation_status()
+if st.get("error"):
+    text, note = "补偿失败", st["error"]
+elif st["applied_by"] == "backend":
+    text = "—（由后端施加）"
+    note = f"预测 {st['predicted_hz']:+.1f} Hz" if st["predicted_hz"] is not None else ""
+elif st["applied_by"] == "python":
+    text = f"{st['applied_hz']:+.1f} Hz（Python 基带）"
+elif (st["application"] == "tuner" and st["enabled"]
+      and st["predicted_hz"] is not None):
+    text = "—（由调谐器施加）"
+    note = f"预测 {st['predicted_hz']:+.1f} Hz"
+else:
+    text, note = "0 Hz（未补偿）", st["reason"]
+switch_on = bool(st["enabled"])          # 只由 enabled 驱动
+```
+
+轮询：≤ 1 Hz（或开关/目标变化时）。读数只读缓存，不做轨道传播，可安全
+放在状态栏定时器里。`main_window.py` 的接线由操作逻辑线负责，本批未改动
+该文件。
+
 ## 4. 验证（离线、合成 IQ）
 
 测试：`mbdsdr_ai/tests/test_receive_doppler.py`
@@ -148,13 +221,23 @@ SDRBackend._ensure_receive_chain()
 | 未声明归属（默认保守） | `python_stream_owner=False` → `set_enabled(True)` 返回 `False`，`applied_by=none`、`applied_hz=0`；跑 1024 点输出与输入逐点相等，`python_applied_hz` 恒 0 |
 | 后端接管（双施加反证） | 先 Python 把 500 Hz 补到 0；后端声明 `backend_comp_active=True` 后，Python 在 20 ms ramp 内退回 0；最终残余实测 **500 Hz（1 倍，±5 Hz）**，不是 0 也不是 1000 |
 | 读数不混用 | 后端施加时 `applied_by=backend`、`applied_hz=null`、`predicted_hz=500`、`python_applied_hz=0`；Python 施加时三者分别为 `python` / 实测值 / 预测值 |
+| 过境全程（真实 TLE） | 内嵌 ISS(25544) 真实 TLE，示例站点 (0,0)，近天顶过境（TCA 仰角 86.3°），1 s / 块跑满 600 s；多普勒 +3358 → −3361 Hz 过零；稳态残余峰值实测 **59.31 Hz ≤ 80 Hz**；逐样本相位差 ≤ 2π·100/fs（无爆音）；零交叉前后块边界频移跳变 < 5 Hz |
 
-残余容差依据：CW 解调 BFO 800 Hz、信道带宽 200 Hz，音频峰分辨率由
-FFT 长度决定（≥0.7 Hz/格）；留 ±5 Hz 覆盖滤波器群延迟与 ramp 残留。
+残余容差依据（固定频偏）：CW 解调 BFO 800 Hz、信道带宽 200 Hz，音频峰
+分辨率由 FFT 长度决定（≥0.7 Hz/格）；留 ±5 Hz 覆盖滤波器群延迟与 ramp 残留。
+
+过境阈值依据（80 Hz）：1 s ZOH 的目标更新间隔 × 该过境窗口内 SGP4 实测
+最大多普勒斜率 **59.3 Hz/s**（近天顶零交叉处）= 59.3 Hz 一阶滞后上界；
+20 ms ramp 额外 ≤ 斜率×0.02 s ≈ 1.2 Hz；再留约 30% 余量取整到 80 Hz。
+实测峰值正好落在斜率上界（59.31 Hz），说明残余由 ZOH 采样间隔而非 NCO
+相位/滤波引入——把更新间隔降到 0.5 s 时该上界同比例减半。
 
 ## 5. 诚实边界
 
-- 上述全部为**合成信号自测**，不是真过境/真硬件验收；
+- 除「过境全程」一条外，其余为固定频偏的**合成信号自测**；
+- 「过境全程」是**真实 TLE + SGP4 真轨迹**（时间、仰角、range-rate 都是真的），
+  但 IQ 仍是按该轨迹合成的，**不是真硬件/真 OTA 录制**；真实接收链路的
+  晶振误差、电离层/对流层延迟未在此背书，见限制总账；
 - TLE 新鲜度、真实 range-rate 预测精度未在本文档背书，见限制总账；
 - 补偿失败时按块丢弃音频并报错，绝不静默按 0 补偿。
 
