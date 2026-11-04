@@ -334,8 +334,10 @@ def _abort_thread(t):
         import ctypes
         ctypes.pythonapi.PyThreadState_SetAsyncExc(
             ctypes.c_ulong(t.ident), ctypes.py_object(_TimeoutAbort))
-    except Exception:
-        pass
+    except (AttributeError, OSError, ValueError):
+        # 线程已退出或当前解释器不暴露 ctypes 能力：注入是尽力而为，
+        # 不影响本次调用的 HANG 判定（判定已在 join 超时处完成）。
+        return
 
 
 def _call_with_timeout(reg, name, args, timeout):
@@ -448,7 +450,9 @@ def run_fuzz(only=None, limit=0, timeout=DEFAULT_TIMEOUT, offset=0):
             if mgr is not None:
                 try:
                     mgr.disconnect()
-                except Exception:
+                except (AttributeError, RuntimeError, OSError):
+                    # 每个工具跑完后的清理：后端可能已处于断开状态，
+                    # 清理失败不影响本次观测，后续工具各自建新 agent。
                     pass
                 mgr.active_backend = None
 
