@@ -58,6 +58,42 @@ class TestRealBuiltin:
         assert prov["epoch_rounded"] is False
 
 
+class TestToolsSurfaceTrust:
+    """工具输出必须把凑整 TLE 的可信度透出，不许当精确值静默使用。"""
+
+    def test_helper_flags_rounded_and_spares_verified(self):
+        from mbdsdr_ai.sdr_tools import _tle_provenance_lines
+        notes = "\n".join(_tle_provenance_lines(["METEOR M2", "NOAA 19"]))
+        assert "METEOR M2" in notes
+        assert "可信度" in notes
+        assert "NOAA 19" not in notes
+
+    def test_predict_all_reports_rounded_even_without_passes(self, monkeypatch):
+        from mbdsdr_ai import new_spacetime as ns
+        from mbdsdr_ai.sdr_tools import _satellite_predict_all
+
+        monkeypatch.setattr(ns, "predict_all_passes", lambda *a, **k: [])
+        txt = _satellite_predict_all({"observer_lat": 45.0,
+                                      "observer_lon": 120.0,
+                                      "hours_ahead": 24.0})
+        assert "METEOR M2" in txt
+        assert "可信度" in txt
+
+    def test_sky_view_visible_flags_rounded_satellite(self, monkeypatch):
+        from mbdsdr_ai import new_spacetime as ns
+        from mbdsdr_ai.sdr_tools import _sky_view_visible
+
+        fake = {"total_visible": 1, "satellites": [{
+            "name": "METEOR M2", "elevation_deg": 30.0, "azimuth_deg": 90.0,
+            "distance_km": 800.0, "doppler_hz": 0.0}]}
+        monkeypatch.setattr(ns, "compute_visible_satellite_count",
+                            lambda *a, **k: fake)
+        txt = _sky_view_visible({"observer_lat": 45.0,
+                                 "observer_lon": 120.0})
+        assert "METEOR M2" in txt
+        assert "可信度" in txt
+
+
 class TestBadChecksum:
     def test_checksum_mismatch_downgrades(self):
         line1, line2 = BUILTIN_TLE["NOAA 15"][:2]

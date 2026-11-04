@@ -129,6 +129,26 @@ def _physics_now(args) -> float:
         return _time.time()
 
 
+def _tle_provenance_lines(names) -> list:
+    """给定卫星集合，返回「TLE 不可当精确值」告警行（verified 不出声）。"""
+    try:
+        from mbdsdr_ai.builtin_tle_meta import builtin_provenance_table, trust_label
+    except ImportError:
+        from builtin_tle_meta import builtin_provenance_table, trust_label
+    try:
+        table = builtin_provenance_table(include_real=True)
+    except Exception:  # noqa: BLE001 - 元数据不可得不阻断主功能
+        return []
+    out = []
+    for name in names:
+        prov = table.get(str(name))
+        if not prov or prov.get("trust") == "verified":
+            continue
+        out.append(f"TLE 可信度: {name} = {trust_label(prov.get('trust'))}"
+                   f"（{prov.get('note', '')}），不可当精确过境时刻")
+    return out
+
+
 def _station_untrusted_text(ev) -> str:
     reasons = "；".join(ev.get("reasons") or ["来源不可信"])
     return (f"错误: 站址不可信（{reasons}）。拒绝用不可信站址计算卫星过境/"
@@ -5583,6 +5603,10 @@ def _satellite_predict_pass(args):
     for i, (az, el) in enumerate(p.trajectory):
         if i % max(1, len(p.trajectory)//10) == 0:
             lines.append(f"  {az:.0f}°, {el:.1f}°")
+    notes = _tle_provenance_lines([name])
+    if notes:
+        lines.append("")
+        lines.extend(notes)
     return '\n'.join(lines)
 
 
@@ -5607,8 +5631,12 @@ def _satellite_predict_all(args):
     passes = predict_all_passes(lat, lon, alt, hours, min_elev,
                                 start_unix=_physics_now(args))
 
+    catalog_notes = _tle_provenance_lines(list(BUILTIN_TLE.keys()))
     if not passes:
-        return f"未来 {hours:.0f} 小时内没有卫星过境（仰角 > {min_elev:.0f}°）"
+        msg = f"未来 {hours:.0f} 小时内没有卫星过境（仰角 > {min_elev:.0f}°）"
+        if catalog_notes:
+            msg += "\n\n" + "\n".join(catalog_notes)
+        return msg
 
     lines = [f"=== 未来 {hours:.0f} 小时卫星过境预测（共 {len(passes)} 次） ==="]
     lines.append("")
@@ -5619,6 +5647,9 @@ def _satellite_predict_all(args):
         freq_str = f"{p.frequency_hz/1e6:.1f}MHz" if p.frequency_hz > 0 else ''
         lines.append(f"{i}. {p.name}: {rise_str}-{set_str} ({dur_str}), "
                      f"最大仰角 {p.max_elevation:.0f}°, 方位 {p.max_azimuth:.0f}° {freq_str}")
+    if catalog_notes:
+        lines.append("")
+        lines.extend(catalog_notes)
     return '\n'.join(lines)
 
 
@@ -5650,6 +5681,10 @@ def _sky_view_visible(args):
                      f"方位 {sat['azimuth_deg']:.0f}°, "
                      f"距离 {sat['distance_km']:.0f}km, "
                      f"多普勒 {sat['doppler_hz']:+.0f}Hz")
+    notes = _tle_provenance_lines([s['name'] for s in result['satellites']])
+    if notes:
+        lines.append("")
+        lines.extend(notes)
     return '\n'.join(lines)
 
 
