@@ -1,0 +1,31 @@
+{
+  "note": "工具选择因果探针的录制表（P12）。记录的是「同一请求在不同候选集/提示词下，规则替身应做出的不同选择」，不是准确率打分基准。flag 是语义特征（是否被预算裁掉、候选里有没有专用工具），不是工具数量。",
+  "request": "帮我看看频谱的峰值在哪里",
+  "cases": [
+    {
+      "id": "wide_candidates_prefer_dedicated_peaks",
+      "budget_tokens": 8192,
+      "expect_trimmed": true,
+      "expect_has_peaks": true,
+      "expect_tool": "sdr_spectrum_peaks",
+      "because": "候选集里出现峰值专用工具，规则替身优先选它"
+    },
+    {
+      "id": "medium_candidates_fall_back_to_find_signals",
+      "budget_tokens": 2048,
+      "expect_trimmed": true,
+      "expect_has_peaks": false,
+      "expect_tool": "sdr_spectrum_find_signals",
+      "because": "峰值工具被预算裁掉，仍有找信号工具可用"
+    },
+    {
+      "id": "narrow_candidates_must_discover",
+      "budget_tokens": 1024,
+      "expect_trimmed": true,
+      "expect_has_peaks": false,
+      "expect_tool": "list_tools",
+      "because": "专用工具全被裁掉，提示词要求先 list_tools 发现工具名",
+      "expect_note": true
+    }
+  ]
+}
