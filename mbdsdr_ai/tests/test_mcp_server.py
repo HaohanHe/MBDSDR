@@ -133,31 +133,37 @@ def test_mcp_client_tools_registered_and_grouped():
 
 
 def test_mcp_client_tools_gate_behaviour():
-    """四件套门行为：mcp_client_list 只读过即回；三个写工具无 arm_manual
-    被 gated、带 arm_manual 才真正执行（此刻以 unknown_server 诚实信封
+    """四件套门行为：mcp_client_list 只读过即回；三个写工具无 token
+    被 gated、带外部确认 token 才真正执行（此刻以 unknown_server 诚实信封
     证明门已放行——未注册的 server 不会假装连上）。"""
+    from mbdsdr_ai.tx_guard import issue_confirmation
+
     ts = _set()
-    # 1) 只读：无 arm_manual 也执行（空注册 = 0 server 的诚实空态）。
+    # 1) 只读：无 token 也执行（空注册 = 0 server 的诚实空态）。
     out = ts.call_tool("mcp_client_list", {})
     assert out["ok"] is True and "servers" in out and "gated" not in out
-    # 2) 写工具无 arm -> gated（既有信封形状，policy/hint 同形）。
+    # 2) 写工具无 token -> gated（既有信封形状，policy/hint 同形）。
     for tool, args in (("mcp_client_connect", {"name": "x"}),
                        ("mcp_client_disconnect", {"name": "x"}),
                        ("mcp_client_call",
                         {"server": "x", "tool": "get_status"})):
         g = ts.call_tool(tool, args)
         assert g["ok"] is False and g["gated"] is True
-        assert g["error"] == "手动模式：未执行 %s" % tool
+        assert g["error"].startswith("未执行 %s" % tool)
         assert g["policy"] == "ask"
-        assert "arm_manual=true" in g["hint"]
-    # 3) 带 arm_manual -> 门放行，落到 manager 的诚实信封（unknown_server）。
-    u = ts.call_tool("mcp_client_connect", {"name": "x", "arm_manual": True})
+        assert "confirm_token" in g["hint"]
+    # 3) 带外部确认 token -> 门放行，落到 manager 的诚实信封（unknown_server）。
+    tok = issue_confirmation("mcp_client_connect", {"name": "x"})
+    u = ts.call_tool("mcp_client_connect", {"name": "x",
+                                            "confirm_token": tok})
     assert "gated" not in u and u["ok"] is False
     assert u["error"] == "unknown_server"
     # 4) 未连接 server 的调用：not_connected（先注册再问，不假装通）。
+    tok = issue_confirmation("mcp_client_call",
+                             {"server": "x", "tool": "t"})
     assert ts.call_tool("mcp_client_call",
                         {"server": "x", "tool": "t",
-                         "arm_manual": True})["error"] == "unknown_server"
+                         "confirm_token": tok})["error"] == "unknown_server"
 
 
 def test_default_grouped_view_loses_nothing():
@@ -357,20 +363,26 @@ def test_longtail_bad_inputs_honest_errors():
 
 
 def test_write_tools_manual_gate_aligns_cpp():
-    """Python MCP 写工具手动 gate：无 arm_manual 拒、有则执行；只读工具不 gate；
+    """Python MCP 写工具门：无外部确认 token 拒、有 token 才执行；只读工具不 gate；
     schema 视图暴露 write 字段（与 C++ 信封对齐）。"""
+    from mbdsdr_ai.tx_guard import issue_confirmation
+
     ts = _set()
-    # 1) 写工具无 arm -> gated 信封（同 C++ gatedToolResult 形状；2026-10-14
-    #    规则集升级后新增 policy/hint 两个引导字段，核心三键不变）。
+    # 1) 写工具无 token -> gated 信封（同 C++ gatedToolResult 形状。
     g = ts.call_tool("set_frequency", {"hz": 100e6})
     assert g["ok"] is False and g["gated"] is True
-    assert g["error"] == "手动模式：未执行 set_frequency"
+    assert g["error"].startswith("未执行 set_frequency")
     assert g["policy"] == "ask"
-    assert "arm_manual=true" in g["hint"] and "approve_session=true" in g["hint"]
-    # 2) arm_manual=true 才执行（无后端仍诚实 not_connected 而非 gate）。
-    r = ts.call_tool("set_frequency", {"hz": 100e6, "arm_manual": True})
+    assert "confirm_token" in g["hint"]
+    # 2) 模型自报 arm_manual=true 但无 token -> 拒绝（S13 反证）。
+    bad = ts.call_tool("set_frequency", {"hz": 100e6, "arm_manual": True})
+    assert bad["ok"] is False and bad["gated"] is True
+    assert bad["reason_code"] == "gate_arm_manual_untrusted"
+    # 3) 外部确认 token 校验通过（无后端仍诚实 not_connected 而非 gate）。
+    tok = issue_confirmation("set_frequency", {"hz": 100e6})
+    r = ts.call_tool("set_frequency", {"hz": 100e6, "confirm_token": tok})
     assert "gated" not in r
-    # 3) arm_manual 不透传（消费后不落在 handler 参数里）：读工具不受 gate 影响。
+    # 4) 读工具不受 gate 影响。
     ro = ts.call_tool("get_frequency", {})
     assert "gated" not in ro
     # 4) schema 视图含 write 标记。

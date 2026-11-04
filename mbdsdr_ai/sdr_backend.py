@@ -116,6 +116,9 @@ except Exception as _e:  # pragma: no cover - 取决于运行环境
     AudioPlayer = None
     logger.warning("ReceiveChain/AudioPlayer 导入失败，实时音频路径将降级: %s", _e)
 
+from .doppler_compensation import DopplerCompensationError
+from . import doppler_link
+
 
 @dataclass
 class SDRDevice:
@@ -217,6 +220,10 @@ class SDRBackend:
         self._audio_max_q_samples = 48000 * 3  # ≈3s 缓冲上限
         # 采样率/带宽切换串行化：同一时刻只允许一次切换，避免新旧流交叉。
         self._retune_lock = threading.Lock()
+        # ── 接收链多普勒补偿（跨重建保留开关；读数见 get_doppler_compensation_status）──
+        self._doppler_source = None            # None=用进程级 doppler_link 单例
+        self._doppler_comp_enabled = False
+        self._doppler_error = ""
 
     def connect(self) -> bool:
         """连接设备。"""
@@ -572,6 +579,8 @@ class SDRBackend:
                 logger.warning("ReceiveChain 构建失败: %s", e)
                 self._receive_chain = None
                 return None
+            # 重建后恢复补偿绑定与开关（重建若丢了补偿，读数会假装关闭）
+            self._bind_receive_chain_doppler(self._receive_chain)
         else:
             # 动态轻量参数直接同步进已有链（不重建滤波器）
             try:
@@ -580,6 +589,69 @@ class SDRBackend:
             except Exception:
                 pass
         return self._receive_chain
+
+    # ---- 接收链多普勒补偿（唯一施加点：基带 NCO） ----
+    def _doppler_src(self):
+        return self._doppler_source if self._doppler_source is not None \
+            else doppler_link.get_compensator()
+
+    def _bind_receive_chain_doppler(self, chain) -> None:
+        """把预测源绑到接收链，并按持久开关恢复启用状态。"""
+        if chain is None:
+            return
+        try:
+            chain.bind_doppler_source(self._doppler_src())
+            if self._doppler_comp_enabled:
+                chain.set_doppler_compensation(True)
+        except Exception as e:  # noqa: BLE001 - 绑定失败要如实出现在读数里
+            self._doppler_error = (f"多普勒补偿绑定失败"
+                                   f"（{type(e).__name__}: {e}）")
+            logger.warning(self._doppler_error)
+
+    def set_doppler_compensation(self, enabled: bool, source=None) -> bool:
+        """显式开关接收链多普勒补偿；返回是否接受（未连接/后端冲突→False）。
+
+        开启时不检查目标是否存在：没有目标就保持 0 并在读数里写
+        「无目标，未补偿」；目标出现后自动开始补偿。
+        """
+        if source is not None:
+            self._doppler_source = source
+        chain = self._ensure_receive_chain()
+        if chain is None:
+            self._doppler_comp_enabled = bool(enabled)
+            self._doppler_error = "未连接设备，接收链不存在，无法接入多普勒补偿"
+            return False
+        self._bind_receive_chain_doppler(chain)
+        try:
+            ok = bool(chain.set_doppler_compensation(bool(enabled)))
+        except Exception as e:  # noqa: BLE001
+            self._doppler_error = (f"多普勒补偿开关失败"
+                                   f"（{type(e).__name__}: {e}）")
+            logger.warning(self._doppler_error)
+            return False
+        self._doppler_comp_enabled = ok and bool(enabled)
+        self._doppler_error = "" if ok else chain.doppler_status().get("reason", "")
+        return ok
+
+    def get_doppler_compensation_status(self) -> dict:
+        """当前补偿量读数：是否生效、applied_hz、目标、预测时刻/星历、原因、错误。"""
+        chain = self._receive_chain
+        if chain is None:
+            return {
+                "enabled": self._doppler_comp_enabled,
+                "active": False, "applied_hz": 0.0,
+                "target_doppler_hz": None, "settling": False,
+                "target_name": "", "predicted_at_unix": None,
+                "doppler_rate_hz_s": None, "tle_tier": "", "tle_age_days": None,
+                "application": "baseband",
+                "reason": "未连接设备，接收链不存在（无目标，未补偿）",
+                "error": self._doppler_error,
+                "blocks": 0, "samples": 0,
+            }
+        st = chain.doppler_status()
+        if self._doppler_error:
+            st["error"] = self._doppler_error
+        return st
 
     def read_audio(self, num_samples: int) -> Optional[np.ndarray]:
         """取 num_samples 个解调音频样本（float32, 48kHz）。
@@ -625,6 +697,13 @@ class SDRBackend:
             return None
         try:
             audio = chain.process(iq)
+        except DopplerCompensationError as e:
+            # 补偿失败必须报错：不静默按 0 出音频，本块丢弃并暴露到读数
+            self._doppler_error = str(e)
+            self.status.error = user_message("doppler_compensation_failed",
+                                             detail=str(e))
+            logger.warning("接收链多普勒补偿失败: %s", e)
+            return None
         except Exception:
             return None
         if audio is None or len(audio) == 0:
@@ -658,6 +737,13 @@ class SDRBackend:
                 continue
             try:
                 audio = chain.process(iq)
+            except DopplerCompensationError as e:
+                # 补偿失败必须报错（读数+日志），本块跳过，不假装补偿过
+                self._doppler_error = str(e)
+                self.status.error = user_message("doppler_compensation_failed",
+                                                 detail=str(e))
+                logger.warning("接收链多普勒补偿失败: %s", e)
+                continue
             except Exception as e:
                 logger.debug("接收链 process 异常: %s", e)
                 continue

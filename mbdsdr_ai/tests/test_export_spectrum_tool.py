@@ -14,6 +14,12 @@ def _set() -> MCPToolSet:
     return MCPToolSet()
 
 
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后不再有 arm_manual 直通）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 def test_tool_registered_and_grouped():
     assert _TOOL_DOMAIN.get("export_spectrum_snapshot") == "导出演制"
     ts = _set()
@@ -39,7 +45,7 @@ def test_export_writes_valid_png(tmp_path):
     p = tmp_path / "snap.png"
     out = ts.call_tool("export_spectrum_snapshot", {
         "freqs_hz": F.tolist(), "db": DB.tolist(), "path": str(p),
-        "arm_manual": True})
+        "confirm_token": _tok()})
     assert out.get("ok") is True
     data = p.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
@@ -50,7 +56,7 @@ def test_bad_data_honest_error(tmp_path):
     ts = _set()
     out = ts.call_tool("export_spectrum_snapshot", {
         "freqs_hz": F.tolist(), "db": [float("nan")] * len(F),
-        "path": str(tmp_path / "x.png"), "arm_manual": True})
+        "path": str(tmp_path / "x.png"), "confirm_token": _tok()})
     assert out.get("ok") is not True
     assert "error" in out
     assert not (tmp_path / "x.png").exists() or \

@@ -20,6 +20,11 @@ from mbdsdr_ai.tx_guard import (  # noqa: E402
 from mbdsdr_ai.hal import DeviceInfo  # noqa: E402
 
 
+def _arm_token(ttl_s=120.0):
+    """外部确认通道（测试）：签发一次性 token；S13 后不再有 arm_manual 直通。"""
+    return get_tx_gate().arm(ttl_s=ttl_s)
+
+
 class FakeHalBackend:
     """假 HAL 后端：模拟真实驱动的授权检查、掉线与停发。"""
 
@@ -117,17 +122,22 @@ def _tool_iq(fake, **extra):
     return _sdr_transmit_iq(args)
 
 
-def _tool_cw(arm_manual=False):
+def _arm_token(ttl_s: float = 120.0) -> str:
+    """测试用外部确认通道：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    return get_tx_gate().arm(ttl_s=ttl_s)
+
+
+def _tool_cw(tx_token=None):
     from mbdsdr_ai.sdr_tools import _sdr_transmit_cw
     return _sdr_transmit_cw({"frequency_hz": 145e6, "duration_sec": 0.01,
-                             "amplitude": 0.1, "arm_manual": arm_manual})
+                             "amplitude": 0.1, "tx_token": tx_token})
 
 
 def test_every_entry_point_denies_without_gate(mgr, recording):
     manager, fake = mgr
     # 1) 工具调用
     assert _tool_iq(fake, arm_manual=False).success is False
-    assert _tool_cw(arm_manual=False).success is False
+    assert _tool_cw().success is False
     # 2) 脚本直调
     assert manager.transmit_modulated(
         145e6, np.ones(8, dtype=np.complex64), 0.1) is False
@@ -147,15 +157,16 @@ def test_every_entry_point_denies_without_gate(mgr, recording):
 
 def test_every_entry_point_works_when_armed(mgr, recording):
     manager, fake = mgr
-    assert _tool_iq(fake, arm_manual=True).success is True
-    assert _tool_cw(arm_manual=True).success is True
+    assert _tool_iq(fake, tx_token=_arm_token()).success is True
+    assert _tool_cw(tx_token=_arm_token()).success is True
     assert manager.transmit_modulated(
-        145e6, np.ones(8, dtype=np.complex64), 0.1, arm_manual=True) is True
-    assert manager.transmit_cw(145e6, 0.1, 0.01, arm_manual=True) is True
-    with tx_authorization(get_tx_gate().authorize(arm_manual=True)):
+        145e6, np.ones(8, dtype=np.complex64), 0.1, tx_token=_arm_token()) is True
+    assert manager.transmit_cw(145e6, 0.1, 0.01, tx_token=_arm_token()) is True
+    tok = _arm_token()
+    with tx_authorization(get_tx_gate().authorize(token=tok)):
         assert fake.write_tx(np.ones(8, dtype=np.complex64)) is True
     from mbdsdr_ai.playback import transmit_iq_playback
-    rep = transmit_iq_playback(recording, backend=fake, arm_manual=True,
+    rep = transmit_iq_playback(recording, backend=fake, tx_token=_arm_token(),
                                chunk_samples=32)
     assert rep["state"] == "completed"
     assert fake.writes >= 1
@@ -164,14 +175,15 @@ def test_every_entry_point_works_when_armed(mgr, recording):
 def test_revoked_gate_blocks_every_entry_point(mgr, recording):
     manager, fake = mgr
     gate = get_tx_gate()
+    tok = _arm_token()
     gate.revoke(reason="紧急撤销")
-    assert _tool_iq(fake, arm_manual=True).success is False
-    assert _tool_cw(arm_manual=True).success is False
-    assert manager.transmit_cw(145e6, 0.1, 0.01, arm_manual=True) is False
+    assert _tool_iq(fake, tx_token=tok).success is False
+    assert _tool_cw(tx_token=tok).success is False
+    assert manager.transmit_cw(145e6, 0.1, 0.01, tx_token=tok) is False
     assert manager.last_tx_code == GATE_REVOKED
     assert fake.write_tx(np.ones(8, dtype=np.complex64)) is False
     from mbdsdr_ai.playback import transmit_iq_playback
-    rep = transmit_iq_playback(recording, backend=fake, arm_manual=True)
+    rep = transmit_iq_playback(recording, backend=fake, tx_token=tok)
     assert rep["state"] == "rejected" and rep["reason_code"] == GATE_REVOKED
     assert fake.writes == 0
 
@@ -179,7 +191,7 @@ def test_revoked_gate_blocks_every_entry_point(mgr, recording):
 def test_tool_stops_on_device_lost(mgr):
     _, fake = mgr
     fake.alive_after = 1        # 写第 1 块后掉线
-    r = _tool_iq(fake, arm_manual=True)
+    r = _tool_iq(fake, tx_token=_arm_token())
     assert r.success is False
     assert r.data["reason_code"] == "tx_device_lost"
     assert fake.writes == 1
@@ -189,7 +201,7 @@ def test_tool_stops_on_device_lost(mgr):
 def test_tool_stops_on_underrun(mgr):
     _, fake = mgr
     fake.underrun_after = 1
-    r = _tool_iq(fake, arm_manual=True)
+    r = _tool_iq(fake, tx_token=_arm_token())
     assert r.success is False
     assert r.data["reason_code"] == "tx_underrun"
     assert fake.writes == 1
@@ -216,7 +228,7 @@ def test_tool_refuses_unknown_device_capability(mgr):
     fake._name = "AI SDR"
     fake._driver = "soapy"
     reset_tx_gate()
-    r = _tool_iq(fake, arm_manual=True)
+    r = _tool_iq(fake, tx_token=_arm_token())
     assert r.success is False
     assert "capability_unknown" in r.content
     assert fake.writes == 0

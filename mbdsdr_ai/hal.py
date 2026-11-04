@@ -700,14 +700,19 @@ class HardwareManager:
                     tx_token: Optional[str] = None) -> bool:
         """发射连续波（CW）。
 
-        人工门后置：未显式武装（或门已过期/被撤销）时拒绝，原因写入
+        门语义（S13）：只认外部确认通道签发的一次性 token 或上层已校验的
+        授权上下文；``arm_manual`` 仅为旧签名保留，不参与放行。拒绝原因写入
         ``last_tx_error``/``last_tx_code``，绝不把拒绝伪装成"发射失败"。
         """
-        from .tx_guard import get_tx_gate, tx_authorization
+        from .tx_guard import current_tx_decision, get_tx_gate, tx_authorization
 
         self.last_tx_error = ""
         self.last_tx_code = ""
-        gate = get_tx_gate().authorize(arm_manual=arm_manual, token=tx_token)
+        ctx = current_tx_decision()
+        if ctx is not None and ctx.allowed:
+            gate = ctx
+        else:
+            gate = get_tx_gate().authorize(arm_manual=False, token=tx_token)
         self.last_tx_gate = gate.to_dict()
         if not gate.allowed:
             self.last_tx_error = gate.reason
@@ -742,12 +747,16 @@ class HardwareManager:
         arm_manual: bool = False,
         tx_token: Optional[str] = None,
     ) -> bool:
-        """发射调制信号（人工门语义与 transmit_cw 完全一致）。"""
-        from .tx_guard import get_tx_gate, tx_authorization
+        """发射调制信号（门语义与 transmit_cw 完全一致：token/上下文，不认 arm_manual）。"""
+        from .tx_guard import current_tx_decision, get_tx_gate, tx_authorization
 
         self.last_tx_error = ""
         self.last_tx_code = ""
-        gate = get_tx_gate().authorize(arm_manual=arm_manual, token=tx_token)
+        ctx = current_tx_decision()
+        if ctx is not None and ctx.allowed:
+            gate = ctx
+        else:
+            gate = get_tx_gate().authorize(arm_manual=False, token=tx_token)
         self.last_tx_gate = gate.to_dict()
         if not gate.allowed:
             self.last_tx_error = gate.reason

@@ -65,6 +65,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mbdsdr_ai import MBDSDRAgent, AgentConfig
 from mbdsdr_ai.core.mcp_server import ToolCallGate
+from mbdsdr_ai.tx_guard import tx_authorization
 
 
 # ============================================================================
@@ -198,10 +199,11 @@ class MBSDRAIMCPServer:
         调用一个工具。
 
         安全路径（与 mbdsdr_ai/core/mcp_server.py 的 MCPToolSet 共用
-        ToolCallGate，2026-10-28 收口）：PreToolUse 钩子 veto → write 门
-        （policy allow/ask/deny + arm_manual，deny 单调）→ 入参有限性/
-        区间校验，通过后才触达 tool_registry.call。未武装的写工具在
-        tool_registry.call 之前即被拦下。未知工具不过门，保持既有
+        ToolCallGate，2026-10-28 收口；S13 起改为外部确认 token）：PreToolUse
+        钩子 veto → write 门（policy allow/ask/deny + 一次性 token，deny 单调）
+        → 入参有限性/区间校验，通过后才触达 tool_registry.call。未持有效
+        token 的写工具在 tool_registry.call 之前即被拦下；模型自报
+        arm_manual=true 不构成确认。未知工具不过门，保持既有
         tool_not_found 错误信封形状。
 
         参数:
@@ -223,11 +225,16 @@ class MBSDRAIMCPServer:
             if resolved in self.tool_registry.tools:
                 is_write = self.tool_registry.is_write_tool(resolved)
                 rejection, _ = self.gate.check(
-                    resolved, args, is_write=is_write, consume_arm_flags=False)
+                    resolved, args, is_write=is_write)
                 if rejection is not None:
                     return self._gate_envelope(rejection)
 
-            result = self.tool_registry.call(name, args)
+            decision = self.gate.last_token_decision
+            if decision is not None and decision.allowed:
+                with tx_authorization(decision):
+                    result = self.tool_registry.call(name, args)
+            else:
+                result = self.tool_registry.call(name, args)
 
             if result.success:
                 # 成功: 返回文本内容

@@ -10,6 +10,12 @@ import pytest
 
 from mbdsdr_ai.core.mcp_server import MCPToolSet
 
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 F = np.linspace(88e6, 108e6, 32)
 DB = -60 + 25 * np.exp(-((F - 98e6) / 2e6) ** 2)
 
@@ -17,7 +23,7 @@ DB = -60 + 25 * np.exp(-((F - 98e6) / 2e6) ** 2)
 def _call(tmp_path, freqs, db, **extra):
     ts = MCPToolSet()
     args = {"freqs_hz": freqs, "db": db,
-            "path": str(tmp_path / "s.png"), "arm_manual": True}
+            "path": str(tmp_path / "s.png"), "confirm_token": _tok()}
     args.update(extra)
     return ts.call_tool("export_spectrum_snapshot", args)
 
@@ -43,7 +49,7 @@ def test_oversized_array_rejected(monkeypatch, tmp_path):
     out = ts.call_tool("export_spectrum_snapshot", {
         "freqs_hz": [1e6 * i for i in range(64)],
         "db": [0.0] * 64,
-        "path": str(tmp_path / "s.png"), "arm_manual": True})
+        "path": str(tmp_path / "s.png"), "confirm_token": _tok()})
     assert out.get("ok") is not True
     assert out.get("error") == "invalid_argument", f"实际: {out}"
     assert "过长" in str(out), f"应说明数组过长，实际: {out}"

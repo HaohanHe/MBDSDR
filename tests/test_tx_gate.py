@@ -14,8 +14,10 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from mbdsdr_ai.tx_guard import (  # noqa: E402
-    GATE_EXPIRED, GATE_NOT_ARMED, GATE_REVOKED, GATE_TOKEN_MISMATCH,
-    GATE_UNKNOWN_TOKEN, get_tx_gate, reset_tx_gate, tx_authorization,
+    GATE_ACTION_MISMATCH, GATE_EXPIRED, GATE_MANUAL_UNTRUSTED,
+    GATE_NOT_ARMED, GATE_REVOKED, GATE_TOKEN_MISMATCH, GATE_TOKEN_USED,
+    GATE_UNKNOWN_TOKEN, action_digest, get_tx_gate, reset_tx_gate,
+    tx_authorization,
 )
 
 
@@ -55,6 +57,38 @@ def test_revoke_blocks_even_explicit_arm_manual_and_token():
     # 重新 arm 才恢复（显式人工动作）
     tok2 = gate.arm(ttl_s=60)
     assert gate.authorize(token=tok2).allowed is True
+
+
+def test_self_reported_arm_manual_is_not_confirmation():
+    """S13 反证：模型自报 arm_manual=true 不构成外部确认，即使无 token 也拒。"""
+    gate = get_tx_gate()
+    d = gate.authorize(arm_manual=True)
+    assert d.allowed is False
+    assert d.code == GATE_MANUAL_UNTRUSTED
+
+
+def test_single_use_token_cannot_be_replayed():
+    """一次性 token 消费后再用 -> gate_token_used（不得幂等放行）。"""
+    gate = get_tx_gate()
+    tok = gate.arm(ttl_s=60)
+    assert gate.authorize(token=tok).allowed is True
+    again = gate.authorize(token=tok)
+    assert again.allowed is False
+    assert again.code == GATE_TOKEN_USED
+    assert gate.snapshot()["used"] is True
+
+
+def test_token_bound_to_other_action_is_rejected():
+    """token 绑定动作摘要：同一 token 拿去调用别的动作 -> gate_action_mismatch。"""
+    gate = get_tx_gate()
+    ok = action_digest("sdr_transmit_cw", {"frequency_hz": 145_000_000})
+    other = action_digest("sdr_transmit_iq", {"frequency_hz": 145_000_000})
+    tok = gate.arm(ttl_s=60, action=ok)
+    assert gate.authorize(token=tok, action=ok).allowed is True
+    tok2 = gate.arm(ttl_s=60, action=ok)
+    bad = gate.authorize(token=tok2, action=other)
+    assert bad.allowed is False
+    assert bad.code == GATE_ACTION_MISMATCH
 
 
 def test_unknown_and_mismatched_tokens_are_distinguishable():
@@ -103,7 +137,8 @@ def test_direct_soapy_write_tx_with_arm_context_writes():
     be._device = object()
     be._tx_stream = _FakeTxStream()
     gate = get_tx_gate()
-    with tx_authorization(gate.authorize(arm_manual=True)):
+    tok = gate.arm(ttl_s=10)
+    with tx_authorization(gate.authorize(token=tok)):
         assert be.write_tx(np.ones(16, dtype=np.complex64)) is True
     assert be._tx_stream.writes == [16]
 
@@ -150,10 +185,11 @@ def test_script_call_through_manager_without_arm_is_rejected(manager):
     assert mgr.last_tx_error
 
 
-def test_script_call_through_manager_with_arm_works(manager):
+def test_script_call_through_manager_with_token_works(manager):
     mgr, fake = manager
+    tok = get_tx_gate().arm(ttl_s=10)
     assert mgr.transmit_modulated(145e6, np.ones(8, dtype=np.complex64),
-                                  0.1, arm_manual=True) is True
+                                  0.1, tx_token=tok) is True
     assert fake.writes == 1
     assert fake.freq == 145e6
 

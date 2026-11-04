@@ -34,8 +34,9 @@ tracked 文件（含 commit message）中：
 
 - 全仓 MIT；学上游只学机制，**不抄 GPL 代码**（对照 NOTICE.md）；
 - 布局模型唯一事实源在 C++ renderer；Python 侧只做 agent 侧构造/校验/投影；
-- 写工具一律走 `arm_manual` 人工门；调用前四道串联：command hook →
-  进程内 hook → policy deny → arm_manual；
+- 写工具一律走外部确认门（一次性 `confirm_token`，绑定动作摘要/有效期/单次消费）；
+  模型自报 `arm_manual=true` 不构成确认；调用前四道串联：command hook →
+  进程内 hook → policy deny → 一次性 token；
 - 新工具必须登记 `_TOOL_DOMAIN`（否则分组视图静默丢工具，有钉扎测试防这个）；
 - 跨语言一致性（mobile catalog / C++ 注册表 / 域集合）用钉扎测试锁死，
   不许靠口头约定；

@@ -140,20 +140,27 @@ def test_gate_default_unchanged_without_arm():
     out = ts.call_tool("set_frequency", {"hz": 98_500_000})
     assert out["ok"] is False and out["gated"] is True
     assert out["policy"] == "ask"
-    assert "arm_manual" in out["hint"]
+    assert "confirm_token" in out["hint"]
 
 
 def test_gate_explicit_arm_executes():
+    from mbdsdr_ai.tx_guard import issue_confirmation
     ts = _set()
-    out = ts.call_tool("set_frequency", {"hz": 98_500_000, "arm_manual": True})
+    args = {"hz": 98_500_000}
+    tok = issue_confirmation("set_frequency", args)
+    out = ts.call_tool("set_frequency", {**args, "confirm_token": tok})
     assert out == {"ok": True}
     assert "approval" not in out  # 显式授权不标 session
 
 
 def test_session_approval_cache():
+    from mbdsdr_ai.tx_guard import issue_confirmation
     ts = _set()
-    args = {"hz": 98_500_000, "arm_manual": True, "approve_session": True}
-    assert ts.call_tool("set_frequency", args) == {"ok": True}
+    args = {"hz": 98_500_000}
+    tok = issue_confirmation("set_frequency", args)
+    assert ts.call_tool(
+        "set_frequency", {**args, "confirm_token": tok,
+                          "approve_session": True}) == {"ok": True}
     # 同工具同参数：第二次免问，且可观测标注
     out = ts.call_tool("set_frequency", {"hz": 98_500_000})
     assert out == {"ok": True, "approval": "session"}

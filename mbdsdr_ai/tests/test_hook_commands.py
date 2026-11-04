@@ -31,6 +31,12 @@ from mbdsdr_ai.hooks import Event, EventType
 _PRE = EventType.AGENT_PRE_TOOL_USE
 
 
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 # ---------------------------------------------------------------------------
 # 助手
 # ---------------------------------------------------------------------------
@@ -227,7 +233,7 @@ def test_mcp_integration_veto_sees_event_json_on_stdin(tmp_path):
     cfg = _write_config(tmp_path, [_rule(code)])
     ts = MCPToolSet(hook_commands=HookCommandRunner(path=cfg))
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out["ok"] is False and out["gated"] is True
     assert out["outcome"] == "vetoed"
 
@@ -247,7 +253,7 @@ def test_mcp_default_toolset_command_hooks_noop_without_config(
     monkeypatch.delenv(HOOKS_ENV, raising=False)
     ts = MCPToolSet()  # 默认 HookCommandRunner()：~/.mbdsdr/hooks.json 缺失
     assert ts.call_tool("set_frequency",
-                        {"hz": 98_500_000, "arm_manual": True}) == {"ok": True}
+                        {"hz": 98_500_000, "confirm_token": _tok()}) == {"ok": True}
 
 
 # ---------------------------------------------------------------------------

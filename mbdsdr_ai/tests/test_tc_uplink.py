@@ -211,27 +211,32 @@ def test_tx_rejected_without_arm():
 
 
 def test_tx_rejected_armed_no_freq():
-    """已武装但频点缺失 → PARAM_ERROR（安全关键参数不猜）。"""
-    r = tc_uplink_transmit(arm_manual=True, iq=np.zeros(16))
+    """已获外部确认但频点缺失 → PARAM_ERROR（安全关键参数不猜）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    tok = get_tx_gate().arm(ttl_s=10)
+    r = tc_uplink_transmit(iq=np.zeros(16), tx_token=tok)
     assert r["status"] == "PARAM_ERROR"
 
 
 def test_tx_armed_no_device_need_hw():
-    """已武装 + 参数齐 + 无设备 → NEED_HW 诚实空态（绝不谎报发射）。"""
-    r = tc_uplink_transmit(arm_manual=True, iq=np.zeros(16, dtype=complex),
-                           freq_hz=435.4e6)
+    """已获外部确认 + 参数齐 + 无设备 → NEED_HW 诚实空态（绝不谎报发射）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    tok = get_tx_gate().arm(ttl_s=10)
+    r = tc_uplink_transmit(iq=np.zeros(16, dtype=complex),
+                           freq_hz=435.4e6, tx_token=tok)
     assert r["status"] == "NEED_HW"
     assert r["armed"] is True
 
 
-def test_tx_schema_requires_arm_manual():
-    """工具 schema 必须显式声明 arm_manual（门禁契约钉扎）。"""
+def test_tx_schema_requires_external_token():
+    """S13 契约钉扎：模型可传参数里不再有 arm_manual；改为一次性 confirm_token。"""
     from mbdsdr_ai.tool_registry import ToolRegistry
     r = ToolRegistry()
     r.register_builtin_tools()
     schema = r.tools["tc_uplink_transmit"]["definition"]["function"]["parameters"]
-    assert "arm_manual" in schema["properties"]
-    assert "arm_manual" in schema["required"]
+    assert "arm_manual" not in schema["properties"]
+    assert "confirm_token" in schema["properties"]
+    assert "arm_manual" not in schema.get("required", [])
 
 
 # ── 工具注册面 ────────────────────────────────────────────────

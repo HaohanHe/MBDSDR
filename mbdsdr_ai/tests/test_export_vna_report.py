@@ -16,6 +16,11 @@ def _set():
     return MCPToolSet()
 
 
+def _tok():
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 def test_registered_write_tool():
     assert _TOOL_DOMAIN.get("export_vna_report") == "导出演制"
     ts = _set()
@@ -41,7 +46,7 @@ def test_report_written_with_metadata(tmp_path):
     p = tmp_path / "rep.png"
     out = ts.call_tool("export_vna_report", {
         "freqs_hz": F.tolist(), "s11": _pairs(s11),
-        "path": str(p), "arm_manual": True})
+        "path": str(p), "confirm_token": _tok()})
     assert out.get("ok") is True
     assert out["clipped_points"] == 1
     assert out["points"] == len(F)
@@ -53,5 +58,5 @@ def test_bad_input_honest(tmp_path):
     out = ts.call_tool("export_vna_report", {
         "freqs_hz": F.tolist(),
         "s11": _pairs(np.full(len(F), np.nan)),
-        "path": str(tmp_path / "x.png"), "arm_manual": True})
+        "path": str(tmp_path / "x.png"), "confirm_token": _tok()})
     assert "error" in out

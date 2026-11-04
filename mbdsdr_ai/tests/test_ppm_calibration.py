@@ -155,6 +155,12 @@ class TestEstimatePpmOffsetTool:
 # ---------------------------------------------------------------------------
 # 写工具 set_ppm_correction：arm_manual 门 / 无设备诚实错误 / 分发路径
 # ---------------------------------------------------------------------------
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 class _StubAdapter:
     """RtlTcpDeviceAdapter 风格句柄：真实 freq_correction 属性 setter（不碰 Socket）。"""
 
@@ -194,12 +200,13 @@ class TestSetPpmCorrectionTool:
         r = _handler(agent, "set_ppm_correction")({"ppm": 25.0})
         assert r.success is False
         assert r.data.get("gated") is True
-        assert "手动模式" in r.content
+        assert "外部确认" in r.content and "token" in r.content
 
     def test_no_device_honest_error(self, agent):
         # armed 但无设备：诚实错误信封，绝不 fake success
         agent.sdr_manager.active_backend = None
-        r = _handler(agent, "set_ppm_correction")({"ppm": 25.0, "arm_manual": True})
+        r = _handler(agent, "set_ppm_correction")({"ppm": 25.0,
+                                                   "confirm_token": _tok()})
         assert r.success is False
         assert "无连接设备" in r.content
         assert r.data.get("gated") is None
@@ -207,14 +214,14 @@ class TestSetPpmCorrectionTool:
     def test_invalid_ppm_value(self, agent):
         agent.sdr_manager.active_backend = None
         r = _handler(agent, "set_ppm_correction")(
-            {"ppm": "abc", "arm_manual": True})
+            {"ppm": "abc", "confirm_token": _tok()})
         assert r.success is False
         assert "无效" in r.content
 
     def test_dispatch_via_backend_set_ppm(self, agent):
         backend = _StubBackend(device_type="rtl_sdr", with_set_ppm=True)
         r = _with_active_backend(agent, backend)(
-            {"ppm": -25.0, "arm_manual": True})
+            {"ppm": -25.0, "confirm_token": _tok()})
         assert r.success is True
         assert backend.calls == [-25]
         assert r.data["ppm_applied"] == -25.0
@@ -225,7 +232,7 @@ class TestSetPpmCorrectionTool:
         adapter = _StubAdapter()
         backend = _StubBackend(device_type="rtl_tcp", adapter=adapter)
         r = _with_active_backend(agent, backend)(
-            {"ppm": -18.5, "arm_manual": True})
+            {"ppm": -18.5, "confirm_token": _tok()})
         assert r.success is True
         assert adapter.freq_correction == -18
         assert "freq_correction" in r.content
@@ -233,7 +240,7 @@ class TestSetPpmCorrectionTool:
     def test_clamped_value_applied_but_flagged(self, agent):
         backend = _StubBackend(device_type="rtl_sdr", with_set_ppm=True)
         r = _with_active_backend(agent, backend)(
-            {"ppm": 437.5, "arm_manual": True})
+            {"ppm": 437.5, "confirm_token": _tok()})
         assert r.success is True
         assert backend.calls == [200]          # 仍按 limit 钳位应用
         assert r.data["clamped"] is True
@@ -243,7 +250,7 @@ class TestSetPpmCorrectionTool:
         # 无射频前端的后端（如回放源）：诚实报"不支持在线 ppm 校正"，不假装成功
         backend = _StubBackend(device_type="file_iq")
         r = _with_active_backend(agent, backend)(
-            {"ppm": 25.0, "arm_manual": True})
+            {"ppm": 25.0, "confirm_token": _tok()})
         assert r.success is False
         assert "不支持在线 ppm 校正" in r.content
         assert "连接时传 ppm" in r.content
@@ -253,7 +260,7 @@ class TestSetPpmCorrectionTool:
         backend = _StubBackend(device_type="rtl_sdr", with_set_ppm=True)
         backend.status = SimpleNamespace(connected=False)
         r = _with_active_backend(agent, backend)(
-            {"ppm": 25.0, "arm_manual": True})
+            {"ppm": 25.0, "confirm_token": _tok()})
         assert r.success is True
         assert "已保存" in r.content
         assert "reconnect" in r.content
@@ -262,7 +269,7 @@ class TestSetPpmCorrectionTool:
         backend = _StubBackend(device_type="rtl_sdr", with_set_ppm=True)
         backend.status = SimpleNamespace(connected=True)
         r = _with_active_backend(agent, backend)(
-            {"ppm": 25.0, "arm_manual": True})
+            {"ppm": 25.0, "confirm_token": _tok()})
         assert r.success is True
         assert "已保存" not in r.content
 

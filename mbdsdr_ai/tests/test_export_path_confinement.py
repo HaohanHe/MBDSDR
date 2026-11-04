@@ -14,6 +14,12 @@ import pytest
 
 from mbdsdr_ai.core.mcp_server import MCPToolSet
 
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 F = np.linspace(88e6, 108e6, 64)
 DB = -60 + 25 * np.exp(-((F - 98e6) / 2e6) ** 2)
 S11 = [[0.2, 0.0]] * len(F)
@@ -48,7 +54,7 @@ def _cleanup():
 def _spectrum(path, **extra):
     ts = MCPToolSet()
     args = {"freqs_hz": F.tolist(), "db": DB.tolist(),
-            "path": path, "arm_manual": True}
+            "path": path, "confirm_token": _tok()}
     args.update(extra)
     return ts.call_tool("export_spectrum_snapshot", args)
 
@@ -106,7 +112,7 @@ def test_other_exports_also_confined(tool, args):
     """另两个导出工具同样受收拢保护。"""
     ts = MCPToolSet()
     payload = {"freqs_hz": F.tolist(), "path": OUTSIDE,
-               "arm_manual": True}
+               "confirm_token": _tok()}
     payload.update(args)
     out = ts.call_tool(tool, payload)
     assert out.get("ok") is not True

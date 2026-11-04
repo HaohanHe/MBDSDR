@@ -32,12 +32,12 @@ def test_orbit_plot_tools_registered(reg):
 
 def test_gate_blocks_unarmed_sky_plot(reg, tmp_path):
     target = tmp_path / "sky.png"
-    # 1) 缺 arm_manual：registry 层 required 校验先拦。
+    # 1) 无外部确认 token：handler 门直接拒绝，不得落盘。
     r = reg.call("orbit_sky_plot", {"az_deg": [10, 20], "el_deg": [30, 40],
                                     "save_path": str(target)})
     assert r.success is False
     assert not target.exists(), "未武装时不得落盘"
-    # 2) 显式 arm_manual=False：到达 handler 人工门，返回 gated 信封。
+    # 2) 模型自报 arm_manual=False 也不构成确认，仍是 gated 信封。
     r2 = reg.call("orbit_sky_plot", {"az_deg": [10, 20], "el_deg": [30, 40],
                                      "save_path": str(target),
                                      "arm_manual": False})
@@ -47,12 +47,14 @@ def test_gate_blocks_unarmed_sky_plot(reg, tmp_path):
 
 
 def test_sky_plot_writes_real_png(reg, tmp_path):
+    from mbdsdr_ai.tx_guard import get_tx_gate
     target = tmp_path / "sky.png"
     az = [10.0 * i for i in range(30)]
     el = [5.0 + 0.5 * i for i in range(30)]
+    tok = get_tx_gate().arm(ttl_s=10)
     r = reg.call("orbit_sky_plot", {"az_deg": az, "el_deg": el,
                                     "save_path": str(target),
-                                    "arm_manual": True})
+                                    "tx_token": tok})
     assert r.success is True, r.content[:160]
     assert os.path.isfile(str(target)), f"PNG 必须真实落盘: {r.data}"
     assert os.path.getsize(str(target)) > 0, "PNG 不得为空文件"
@@ -61,10 +63,12 @@ def test_sky_plot_writes_real_png(reg, tmp_path):
 
 
 def test_sky_plot_empty_observation_is_honest(reg, tmp_path):
+    from mbdsdr_ai.tx_guard import get_tx_gate
     target = tmp_path / "sky.png"
+    tok = get_tx_gate().arm(ttl_s=10)
     r = reg.call("orbit_sky_plot", {"az_deg": [], "el_deg": [],
                                     "save_path": str(target),
-                                    "arm_manual": True})
+                                    "tx_token": tok})
     assert r.success is False
     assert r.content, "空观测必须显式拒绝并说明（诚实空态）"
     assert not target.exists()
@@ -82,17 +86,19 @@ def test_gate_blocks_unarmed_error_plot(reg, tmp_path):
 
 
 def test_error_plot_writes_real_png(reg, tmp_path):
+    from mbdsdr_ai.tx_guard import get_tx_gate
     target = tmp_path / "conv.png"
     n = 20
     t = [float(i) for i in range(n)]
     rls = [10.0 / (1 + i) for i in range(n)]
     ekf = [8.0 / (1 + i) for i in range(n)]
     res = [0.001 * ((-1) ** i) for i in range(n)]
+    tok = get_tx_gate().arm(ttl_s=10)
     r = reg.call("orbit_error_plot", {"t": t, "pos_err_rls_km": rls,
                                        "pos_err_ekf_km": ekf,
                                        "residuals_km_s": res,
                                        "save_path": str(target),
-                                       "arm_manual": True})
+                                       "tx_token": tok})
     assert r.success is True, r.content[:160]
     assert os.path.isfile(str(target)), f"PNG 必须真实落盘: {r.data}"
     assert os.path.getsize(str(target)) > 0
@@ -100,13 +106,15 @@ def test_error_plot_writes_real_png(reg, tmp_path):
 
 
 def test_error_plot_length_mismatch_is_honest(reg, tmp_path):
+    from mbdsdr_ai.tx_guard import get_tx_gate
     target = tmp_path / "conv.png"
+    tok = get_tx_gate().arm(ttl_s=10)
     r = reg.call("orbit_error_plot", {"t": [1.0] * 5,
                                        "pos_err_rls_km": [1.0] * 4,
                                        "pos_err_ekf_km": [1.0] * 5,
                                        "residuals_km_s": [1.0] * 5,
                                        "save_path": str(target),
-                                       "arm_manual": True})
+                                       "tx_token": tok})
     assert r.success is False
     assert "长度不一致" in r.content, r.content[:160]
     assert not target.exists()

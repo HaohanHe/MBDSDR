@@ -279,10 +279,15 @@ def tc_uplink_transmit(*, arm_manual: bool = False,
     后端补偿活动 → 结果带 doppler 说明字段如实标注「未预偏」及原因，
     绝不静默沿用过期偏移。
     """
-    from .tx_guard import get_tx_gate
+    from .tx_guard import current_tx_decision, get_tx_gate, tx_authorization
 
-    gate = get_tx_gate()
-    decision = gate.authorize(arm_manual=arm_manual, token=tx_token)
+    # 门语义（S13）：只认外部确认 token / 上层已校验的一次性授权上下文。
+    # arm_manual 仅为兼容旧签名保留，不参与放行（模型自报不算确认）。
+    ctx = current_tx_decision()
+    if ctx is not None and ctx.allowed:
+        decision = ctx
+    else:
+        decision = get_tx_gate().authorize(arm_manual=False, token=tx_token)
     if not decision.allowed:
         return {
             "status": "GATED",
@@ -417,13 +422,11 @@ def register_tool_registry(registry) -> None:
 
     def _tx(args):
         r = tc_uplink_transmit(
-            arm_manual=args.get("arm_manual", False),
             iq=args.get("iq"),
             freq_hz=args.get("freq_hz"),
             device=args.get("device"),
             gain_db=float(args.get("gain_db", 0.0)),
             doppler_precomp=bool(args.get("doppler_precomp", False)),
-            tx_token=args.get("tx_token"),
         )
         ok = r["status"] not in ("GATED", "PARAM_ERROR", "NEED_HW")
         return ToolResult(
@@ -484,16 +487,15 @@ def register_tool_registry(registry) -> None:
     registry.register(
         name="tc_uplink_transmit",
         description=(
-            "TC 上行发射（**写/动设备工具，arm_manual 人工门**）："
-            "未显式 arm_manual=true 一律 GATED 拒绝；已武装但无可用发射设备"
+            "TC 上行发射（**写/动设备工具，外部确认 token 门**）："
+            "必须由真人经外部确认通道签发一次性 confirm_token；无 token 一律 "
+            "GATED 拒绝（模型自报 arm_manual 不算确认）；已授权但无可用发射设备"
             "诚实 NEED_HW；频点缺失 PARAM_ERROR（安全关键参数不猜）。"
             "可选 doppler_precomp=true 时按发射时刻预测多普勒反向预偏上行频点"
             "（与 RX 调谐补偿同一真相源 doppler_link；无目标/失效如实标注未预偏）。"
             "绝不在未过门或未接设备时谎报发射成功。"
         ),
         parameters={"type": "object", "properties": {
-            "arm_manual": {"type": "boolean",
-                           "description": "人工确认门：发射必须显式 true"},
             "iq": {"type": "array", "items": {"type": "number"},
                    "description": "复基带（实/虚或复数）"},
             "freq_hz": {"type": "number", "description": "上行频点（Hz）"},
@@ -501,8 +503,8 @@ def register_tool_registry(registry) -> None:
             "gain_db": {"type": "number", "default": 0.0},
             "doppler_precomp": {"type": "boolean", "default": False,
                                 "description": "按发射时刻预测多普勒反向预偏上行频点"},
-            "tx_token": {"type": "string",
-                         "description": "人工门签发的授权 token（可选；有则校验有效期/撤销状态）"},
-        }, "required": ["arm_manual"]},
+            "confirm_token": {"type": "string",
+                              "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
+        }},
         handler=_tx, category="satellite",
     )

@@ -35,6 +35,7 @@ from typing import Dict, Any, Optional
 from .error_catalog import exception_code, user_message
 from .tool_registry import ToolResult
 from . import orbit
+from . import doppler_link
 from .sdr_backend import SDRBackendManager, SDRStatus
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
@@ -1433,6 +1434,36 @@ def register_sdr_tools(agent):
         category="sdr_satellite",
     )
 
+    agent.tool_registry.register(
+        name="sdr_doppler_compensation",
+        description=(
+            "开/关接收链基带多普勒补偿（NCO 去偏移），并返回当前补偿量读数。"
+            "这是**唯一真正施加补偿**的 Python 接收链位置（ReceiveChain，抽取前 NCO）；"
+            "补偿量来自 doppler_link 单例的预测，本工具不重复轨道数学。"
+            "可同时绑定卫星目标（satellite_name/frequency_hz + 本站经纬度），"
+            "之后每 0.5 s 采样自动刷新预测；没有目标/目标失效时补偿为 0 并如实标注"
+            "「无目标，未补偿」；预测失败会报错（error 字段），不会静默当 0。"
+            "读数含 applied_hz、目标、预测时刻 predicted_at_unix、星历级别/年龄。"
+            "与调谐器侧补偿（sdr_satellite_doppler_track / C++ 1Hz ZOH）互斥，"
+            "不会同时施加两套补偿。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "enabled": {"type": "boolean", "description": "true=开启补偿；false=关闭（补偿量平滑回 0）"},
+                "satellite_name": {"type": "string", "description": "可选：绑定卫星目标名（如 'NOAA 19'）；不传则沿用已绑定目标或无目标"},
+                "frequency_hz": {"type": "number", "description": "可选：标称下行频率 Hz；绑定目标时必填（或沿用目标已知下行）"},
+                "latitude": {"type": "number", "description": "地面站纬度 (°N)；绑定目标时未传则从配置读取"},
+                "longitude": {"type": "number", "description": "地面站经度 (°E)；绑定目标时未传则从配置读取"},
+                "altitude_m": {"type": "number", "description": "地面站海拔米，默认 0"},
+                "timestamp": {"type": "number", "description": "可选：钉死预测时刻 Unix 秒（测试/回放），不传走 TimeEngine"},
+            },
+            "required": ["enabled"],
+        },
+        handler=lambda args: _doppler_compensation_control(mgr, args),
+        category="sdr_satellite",
+    )
+
     # ═══════════════════════════════════════════════════
     # 9. 定位（2个）
     # ═══════════════════════════════════════════════════
@@ -1679,17 +1710,18 @@ def register_sdr_tools(agent):
     agent.tool_registry.register(
         name="set_ppm_correction",
         description=("把晶振频偏校正值（ppm）经活跃后端的频率校正入口下发到设备。这是频率校准环的"
-                     "最后一步：estimate_ppm_offset 得到 ppm 后用本工具应用。写操作，带 arm_manual "
-                     "手动门（必须显式 arm_manual=true 才真正下发，防误触）。超出 ±200ppm 的钳位值会"
-                     "在结果里标记'可疑'后仍按 limit 应用。后端没有运行时校正入口时诚实报错，"
-                     "绝不假装下发成功。"),
+                     "最后一步：estimate_ppm_offset 得到 ppm 后用本工具应用。写操作，必须由外部"
+                     "确认通道签发一次性 confirm_token（模型自报 arm_manual 不算确认）。超出 ±200ppm "
+                     "的钳位值会在结果里标记'可疑'后仍按 limit 应用。后端没有运行时校正入口时诚实"
+                     "报错，绝不假装下发成功。"),
         parameters={
             "type": "object",
             "properties": {
                 "ppm": {"type": "number", "description": "要下发的 ppm 校正值（estimate_ppm_offset 的建议下发值）"},
-                "arm_manual": {"type": "boolean", "description": "手动确认门：写操作必须显式传 true 才执行"},
+                "confirm_token": {"type": "string",
+                                  "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
             },
-            "required": ["ppm", "arm_manual"],
+            "required": ["ppm"],
         },
         handler=lambda args: _set_ppm_correction(mgr, args),
         category="sdr_frequency",
@@ -2379,9 +2411,10 @@ def register_sdr_tools(agent):
             "发射连续波（CW）信号，用于设备测试、干扰源定位、信号校准。"
             "前置条件：先调用 sdr_connect_hardware 连接一台 TX-capable 设备"
             "（仅支持 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP；RTL-SDR 等只收设备不支持）。"
-            "副作用：实际发射射频信号，有真实 RF 后果，故设 arm_manual 人工门，"
-            "未显式武装时只返回 gated 信封、绝不发射。失败恢复：未连接/不支持 TX/"
-            "发射失败时如实报错（报错即未发射），修正后重试，不要虚构发射成功。"
+            "副作用：实际发射射频信号，有真实 RF 后果，故设外部确认门："
+            "必须由真人经外部确认通道签发一次性 confirm_token，无 token 时只返回"
+            " gated 信封、绝不发射（模型自报 arm_manual 不算确认）。失败恢复：未连接/"
+            "不支持 TX/发射失败时如实报错（报错即未发射），修正后重试，不要虚构发射成功。"
             "注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。"
         ),
         parameters={
@@ -2392,13 +2425,10 @@ def register_sdr_tools(agent):
                 "duration_sec": {"type": "number", "description": "持续时间（秒）", "default": 1.0},
                 "gain_db": {"type": "number",
                             "description": "TX 增益（dB）；越界或能力未知时拒绝，不静默钳制"},
-                "arm_manual": {"type": "boolean",
-                               "description": "人工门：实际发射前须显式传 true"
-                                              "（无人值守调用保持缺省=false）"},
-                "tx_token": {"type": "string",
-                             "description": "会话级人工门 token（可选；有则校验有效期/撤销）"},
+                "confirm_token": {"type": "string",
+                                  "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
             },
-            "required": ["frequency_hz", "arm_manual"],
+            "required": ["frequency_hz"],
         },
         handler=_sdr_transmit_cw,
         category="hal",
@@ -2411,8 +2441,9 @@ def register_sdr_tools(agent):
             " sdr_connect_hardware 连接 TX-capable 设备（仅支持 HackRF/PlutoSDR/"
             "BladeRF/LimeSDR/USRP）；波形本身由 modulate_symbols 等积木生成，"
             "本工具只负责把现成波形发给设备，不在内部合成信号。副作用：实际发射"
-            "射频信号，有真实 RF 后果，arm_manual 人工门为强制项，未显式武装只返回"
-            " gated 信封。失败恢复：未连接/不支持 TX/幅度越界/IQ 为空或不成对时"
+            "射频信号，有真实 RF 后果，外部确认 token 为强制项，无 token 只返回"
+            " gated 信封（模型自报 arm_manual 不算确认）。失败恢复：未连接/不支持 TX/"
+            "幅度越界/IQ 为空或不成对时"
             "如实报错（报错即未发射），修正后重试，不要虚构发射成功、不要截断波形。"
             "注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。"
         ),
@@ -2432,12 +2463,10 @@ def register_sdr_tools(agent):
                             "description": "TX 增益（dB）；越界或能力未知时拒绝"},
                 "duration_sec": {"type": "number",
                                  "description": "发射时长（秒）；超出设备/法规上限时拒绝"},
-                "arm_manual": {"type": "boolean",
-                               "description": "人工门：实际发射前须显式传 true"},
-                "tx_token": {"type": "string",
-                             "description": "会话级人工门 token（可选；有则校验有效期/撤销）"},
+                "confirm_token": {"type": "string",
+                                  "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
             },
-            "required": ["frequency_hz", "arm_manual"],
+            "required": ["frequency_hz"],
         },
         handler=_sdr_transmit_iq,
         category="hal",
@@ -4313,6 +4342,63 @@ def _satellite_passes(args):
     return out
 
 
+def _doppler_compensation_control(mgr, args):
+    """接收链基带多普勒补偿：显式开关 + 目标绑定 + 当前补偿量读数。
+
+    唯一施加点在接收链 NCO（``ReceiveChain``）；预测来自 ``doppler_link``
+    单例，不在此重复轨道数学。开启后无目标保持 0 并标注「无目标，未补偿」。
+    """
+    backend = _get_backend(mgr)
+    if backend is None or not backend.status.connected:
+        return ToolResult(
+            success=False,
+            content=user_message("not_connected", action="接收链多普勒补偿"))
+
+    comp = doppler_link.get_compensator()
+    name = str(args.get("satellite_name") or "").strip()
+    freq = args.get("frequency_hz")
+    if name:
+        fix, ev = _resolve_station_args(args)
+        if not ev["trusted"]:
+            return ToolResult(success=False, content=_station_untrusted_text(ev))
+        from .sat_tracker import SatelliteTracker
+        from .sat_passes import GroundStation
+        tracker = SatelliteTracker(GroundStation(
+            lat_deg=float(fix.lat), lon_deg=float(fix.lon),
+            alt_m=float(fix.alt_m or 0.0)))
+        if not tracker.select_satellite(name):
+            names = "、".join(sorted(c["name"] for c in tracker._catalog))
+            return ToolResult(success=False, content=(
+                f"未找到卫星 '{name}'。内置目标：{names}"))
+        down = float(freq) if freq is not None else float(tracker.downlink_freq_hz or 0.0)
+        if down <= 0:
+            return ToolResult(success=False, content=(
+                f"卫星 '{name}' 需要显式给 frequency_hz（标称下行频率）。"))
+        tracker.set_downlink_freq(down)
+        comp.tracker = tracker
+        comp.arm_target(name, down, at_unix=args.get("timestamp"))
+
+    ok = backend.set_doppler_compensation(bool(args.get("enabled")))
+    st = backend.get_doppler_compensation_status()
+    lines = [
+        f"接收链多普勒补偿：{'已开启' if st['enabled'] else '已关闭'}",
+        f"是否生效：{'是' if st['active'] else '否'}",
+        f"当前补偿量：{st['applied_hz']:+.1f} Hz",
+        f"目标：{st['target_name'] or '无'}",
+    ]
+    if st.get("target_doppler_hz") is not None:
+        lines.append(f"预测Δ：{st['target_doppler_hz']:+.1f} Hz")
+    if st.get("predicted_at_unix") is not None:
+        lines.append(f"预测时刻(Unix)：{st['predicted_at_unix']:.3f}")
+    if st.get("tle_tier"):
+        lines.append(f"星历级别：{st['tle_tier']}，年龄 {st.get('tle_age_days')} 天")
+    lines.append(f"原因：{st['reason'] or '—'}")
+    if st.get("error"):
+        lines.append(f"错误：{st['error']}")
+    lines.append(json.dumps(st, ensure_ascii=False, default=str))
+    return ToolResult(success=bool(ok), content="\n".join(lines), data=st)
+
+
 def _satellite_doppler_track(mgr, args):
     """过境期间分段多普勒补偿 + 流式录 IQ（cf32 + sidecar 轨迹）。"""
     import time as _time
@@ -4333,6 +4419,18 @@ def _satellite_doppler_track(mgr, args):
     backend = _get_backend(mgr)
     if not backend or not backend.status.connected:
         return ToolResult(success=False, content="错误: 设备未连接，无法跟踪录制")
+
+    # 本工具在调谐器侧施加补偿：声明应用点并关掉接收链基带补偿，
+    # 保证任一时刻只有一套补偿真正生效（禁止双倍偏移/相位不同步）。
+    try:
+        doppler_link.get_compensator().set_application("tuner")
+        status_fn = getattr(backend, "get_doppler_compensation_status", None)
+        disable_fn = getattr(backend, "set_doppler_compensation", None)
+        if callable(status_fn) and callable(disable_fn):
+            if status_fn().get("enabled"):
+                disable_fn(False)
+    except Exception as e:  # noqa: BLE001 - 冲突仲裁失败不应阻断录制
+        logger.warning("多普勒应用点仲裁失败: %s", e)
 
     def state_at(when):
         return orbit.compute_satellite_state(sat, lat, lon, alt_km, when=when)
@@ -5935,18 +6033,15 @@ def _sdr_connect_hardware(args):
 
 
 def _sdr_transmit_cw(args):
-    """发射CW信号（写工具：arm_manual 人工门 + 如实信封）。"""
-    # 手动门（与 _set_ppm_correction / core.mcp_server 写工具 gate 同语义）：
-    # RF 发射属高危写操作，未显式武装不执行；返回 gated 信封而非假装成功。
-    # token 路径用于会话级授权：过期/撤销与 arm_manual 一样在这里被拒绝。
-    from mbdsdr_ai.tx_guard import get_tx_gate
-    armed = args.get("arm_manual", False) is True
-    tx_token = args.get("tx_token") or None
-    decision = get_tx_gate().authorize(arm_manual=armed, token=tx_token)
+    """发射CW信号（写工具：外部确认 token 门 + 如实信封）。"""
+    # 门只认外部确认通道签发的一次性 token（或上层已校验的授权上下文）；
+    # 模型自报 arm_manual 不再放行。RF 发射属高危写操作，未获授权不执行。
+    from mbdsdr_ai.tx_guard import resolve_write_authorization, tx_authorization
+    decision = resolve_write_authorization("sdr_transmit_cw", args)
     if not decision.allowed:
         return ToolResult(
             success=False,
-            content=f"手动模式：未执行 CW 发射（{decision.code}: {decision.reason}）",
+            content=f"未执行 CW 发射（{decision.code}: {decision.reason}）",
             data={"gated": True, "reason_code": decision.code,
                   "gate_state": decision.state},
         )
@@ -6010,12 +6105,13 @@ def _sdr_transmit_cw(args):
             yield np.full(take, amp, dtype=np.complex64)
             remaining -= take
 
-    rep = TxSession(backend).transmit(
-        _cw_blocks(), freq_hz=freq, arm_manual=armed, tx_token=tx_token,
-        caps=caps,
-        regulatory=policy, duration_s=dur, chunk_samples=4096,
-        rx_control=backend, rx_active=bool(getattr(backend, "rx_active", False)),
-        duplex=caps.duplex)
+    with tx_authorization(decision):
+        rep = TxSession(backend).transmit(
+            _cw_blocks(), freq_hz=freq,
+            caps=caps,
+            regulatory=policy, duration_s=dur, chunk_samples=4096,
+            rx_control=backend, rx_active=bool(getattr(backend, "rx_active", False)),
+            duplex=caps.duplex)
     if rep["state"] != TX_COMPLETED:
         return ToolResult(
             success=False,
@@ -6036,16 +6132,14 @@ def _sdr_transmit_cw(args):
 
 
 def _sdr_transmit_iq(args):
-    """发射任意 IQ 波形（写工具：arm_manual 强制门；本工具不合成信号）。"""
-    # 手动门：RF 发射属高危写操作，未显式武装不执行；返回 gated 信封而非假装成功。
-    from mbdsdr_ai.tx_guard import get_tx_gate
-    armed = args.get("arm_manual", False) is True
-    tx_token = args.get("tx_token") or None
-    decision = get_tx_gate().authorize(arm_manual=armed, token=tx_token)
+    """发射任意 IQ 波形（写工具：外部确认 token 强制门；本工具不合成信号）。"""
+    # 门只认外部确认 token/授权上下文；模型自报 arm_manual 不再放行。
+    from mbdsdr_ai.tx_guard import resolve_write_authorization, tx_authorization
+    decision = resolve_write_authorization("sdr_transmit_iq", args)
     if not decision.allowed:
         return ToolResult(
             success=False,
-            content=f"手动模式：未执行 IQ 发射（{decision.code}: {decision.reason}）",
+            content=f"未执行 IQ 发射（{decision.code}: {decision.reason}）",
             data={"gated": True, "reason_code": decision.code,
                   "gate_state": decision.state},
         )
@@ -6141,16 +6235,17 @@ def _sdr_transmit_iq(args):
                 data={"rejected": True, "code": chk.code, "limits": chk.to_dict()})
 
         scaled = amp * samples / (float(np.max(np.abs(samples))) + 1e-12)
-        rep = TxSession(backend).transmit(
-            scaled, freq_hz=freq, arm_manual=armed, tx_token=tx_token,
-            caps=caps,
-            regulatory=policy,
-            gain_db=args.get("gain_db"),
-            bandwidth_hz=args.get("bandwidth_hz"),
-            duration_s=dur, chunk_samples=4096,
-            rx_control=backend,
-            rx_active=bool(getattr(backend, "rx_active", False)),
-            duplex=caps.duplex)
+        with tx_authorization(decision):
+            rep = TxSession(backend).transmit(
+                scaled, freq_hz=freq,
+                caps=caps,
+                regulatory=policy,
+                gain_db=args.get("gain_db"),
+                bandwidth_hz=args.get("bandwidth_hz"),
+                duration_s=dur, chunk_samples=4096,
+                rx_control=backend,
+                rx_active=bool(getattr(backend, "rx_active", False)),
+                duplex=caps.duplex)
         if rep["state"] != TX_COMPLETED:
             return ToolResult(
                 success=False,
@@ -6900,7 +6995,8 @@ def _estimate_ppm_offset_tool(args):
         f"钳位建议: {applied:+.4f} ppm"
         + ("（已被钳位，值可疑：请核对参考频率与谱峰是否看对）" if clamped else "（未触发钳位）"),
         f"建议下发值: {suggest:+.4f} ppm（kalibrate 约定：新校正 = 原始误差取负）",
-        f"下一步: 确认可信后调用 set_ppm_correction(ppm={suggest:.4f}, arm_manual=true) 下发。",
+        f"下一步: 确认可信后经外部确认通道签发 confirm_token，再调用 "
+        f"set_ppm_correction(ppm={suggest:.4f}) 下发。",
     ]
     return ToolResult(
         success=True, content="\n".join(lines),
@@ -6926,13 +7022,16 @@ def _set_ppm_correction(mgr, args):
       2. 后端句柄 _sdr 上的 freq_correction 属性 setter（RtlTcpDeviceAdapter）。
     两者都没有（回放源等无射频前端）时诚实报错，绝不假装下发成功。
     """
-    # 手动门（与 core/mcp_server.py 写工具 gate 同语义）：未显式武装不执行，
-    # arm 标记在此消费，不透传给下层；返回 gated 信封而非假装成功。
-    if args.get("arm_manual", False) is not True:
+    # 写门（单一事实源 tx_guard）：无外部确认 token/上下文即拒绝；模型自报
+    # arm_manual 不再放行。返回 gated 信封而非假装成功。
+    from mbdsdr_ai.tx_guard import resolve_write_authorization
+    decision = resolve_write_authorization("set_ppm_correction", args)
+    if not decision.allowed:
         return ToolResult(
             success=False,
-            content="手动模式：未执行 set_ppm_correction（写操作需显式传 arm_manual=true）",
-            data={"gated": True},
+            content=f"未执行 set_ppm_correction（{decision.code}: {decision.reason}）",
+            data={"gated": True, "reason_code": decision.code,
+                  "gate_state": decision.state},
         )
 
     raw = args.get("ppm", 0)

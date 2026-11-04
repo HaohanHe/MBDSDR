@@ -230,16 +230,28 @@ class ToolCallLog:
 #: （微秒级 unix 时间 ≈1.7e15，不能被误杀）。
 _NUM_ABS_LIMIT = 1e15
 _NUM_ABS_LIMIT_TIME = 1e18
+#: 速率/频率类参数的极小正值下界（1e-300 这类值会让下游采样点数爆炸）。
+_MIN_RATE_VALUE = 1e-9
 _TIME_PARAM_RE = re.compile(r"(time|timestamp|epoch|unix|date)", re.I)
 
 #: 语义不可为负的参数名（offset/doppler/gain/经纬度等允许负值的参数不在其中）。
 _NONNEG_PARAM_RE = re.compile(
     r"(sample_rate|samplerate|bandwidth|baud|duration|seconds|secs|"
     r"num_samples|n_samples|samples|points|count|num_|size|length|"
-    r"frequency|freq|center_freq|prn|repeat|trials)", re.I)
+    r"frequency|freq|center_freq|prn|repeat|trials|rate|"
+    r"decim|iter|rounds|limit|last_n|max_results|max_items|max_count|"
+    r"max_tokens|max_iter|top_n|order|fft|sps|symbol_rate|oversampl|"
+    r"slot|interval|period)", re.I)
 _NEG_EXEMPT_RE = re.compile(
     r"(offset|shift|doppler|delta|error|gain|power|db|latitude|longitude|"
     r"lat|lon|azimuth|elevation|az|el)", re.I)
+
+
+#: 速率/频率类参数的极小正值下界：1e-300 会让采样/分频计算爆量或除零。
+_RATE_LIKE_PARAM_RE = re.compile(
+    r"(sample_rate|samplerate|baud|symbol_rate|sps|bandwidth|decim|"
+    r"oversampl|frequency|freq|rate|slot|interval|period|duration|"
+    r"window_s|time_s)", re.I)
 
 
 def _num_limit(param_name: str) -> float:
@@ -322,6 +334,17 @@ def validate_arguments(schema: Dict[str, Any],
                     "message": user_message(
                         "param_out_of_range", param=name,
                         detail=f"{value} 超出合理上界 {limit:g}")})
+                continue
+            # 速率/频率类参数的极小正值：1e-300 会让 1/baud、上采样倍数等爆量，
+            # 表现为"合法小正数"却把进程拖死，与负数一样按非法值拒绝。
+            if (value != 0 and abs(value) < _MIN_RATE_VALUE
+                    and _RATE_LIKE_PARAM_RE.search(name)
+                    and not _NEG_EXEMPT_RE.search(name)):
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": user_message(
+                        "param_out_of_range", param=name,
+                        detail=f"{value} 小于 {_MIN_RATE_VALUE:g}，不是有效的速率/频率")})
                 continue
             # 语义不可为负的参数（采样率/带宽/时长/计数/频率…）统一在此拒绝；
             # offset/doppler/gain/经纬度等允许负值的参数不在规则内。
@@ -434,11 +457,9 @@ def validate_arguments(schema: Dict[str, Any],
 
 
 #: 旧壳工具面写工具名字模式（安全面收口 2026-10-28）。写工具 = 会变更
-#: 持久状态 / 动硬件 / 落盘 / 发起对外连接的工具，走 arm_manual 人工门
-#: （AGENTS.md §3「写工具一律走 arm_manual 人工门」）。判定信号有两个：
-#:   1) schema 显式声明 arm_manual 参数（既有写工具契约，如
-#:      code_modify_file / sdr_transmit_cw / set_ppm_correction）；
-#:   2) 名字命中本表（fnmatch 通配）。
+#: 持久状态 / 动硬件 / 落盘 / 发起对外连接的工具，走外部确认 token
+#: （AGENTS.md §3：写工具一律走人工确认；S13 起禁止模型自报 arm_manual）。
+#: 判定信号：名字命中本表（fnmatch 通配）。
 #: 只向"写"收紧：拿不准的一律按读处理（不给只读路径加门、不改既有行为）。
 #: 边界约定：出站查询类（web_fetch_url、time_ntp_sync 等只读网络查询）与
 #: 验证类执行（code_run_tests）按读处理；混读写工具（sdr_fm_preset 的
@@ -451,6 +472,8 @@ WRITE_TOOL_NAME_PATTERNS = (
     "sdr_ai_sweep", "sdr_sweep_scan", "sdr_fm_scan", "sdr_fm_preset",
     "sdr_listen_fm", "sdr_watch_capture", "sdr_spectrum_screenshot",
     "sdr_wfm_stereo",
+    # ── 卫星上行/轨道写入 ──
+    "tc_uplink_transmit", "doppler_orbit_determine", "lro_track",
     # ── 电台 CAT / 云台 / VFO ──
     "radio_connect", "radio_ptt", "radio_send_*", "radio_set_*",
     "gimbal_connect", "gimbal_move", "gimbal_point", "gimbal_stop",
@@ -482,10 +505,11 @@ WRITE_TOOL_NAME_PATTERNS = (
 
 
 def _auto_write(name: str, parameters: Any) -> bool:
-    """写工具自动判定：arm_manual schema 契约 或 名字命中写模式。"""
-    props = (parameters or {}).get("properties") or {}
-    if "arm_manual" in props:
-        return True
+    """写工具自动判定：名字命中写模式。
+
+    S13 起不再用 schema 里的 ``arm_manual`` 作为判定信号——模型可传参数
+    不能既当"动作声明"又当"授权"。写工具资格只认名称模式（或显式 write=True）。
+    """
     return any(fnmatch.fnmatchcase(name, p) for p in WRITE_TOOL_NAME_PATTERNS)
 
 
@@ -521,8 +545,8 @@ class ToolRegistry:
     ):
         """注册一个工具。
 
-        write：写工具标记（走 arm_manual 人工门）。None = 自动判定
-        （schema 声明 arm_manual 参数，或名字命中
+        write：写工具标记（走外部确认 token 门）。None = 自动判定
+        （名字命中写模式）
         :data:`WRITE_TOOL_NAME_PATTERNS`）；显式 True/False 覆盖判定。
         description_i18n：可选 {语言码: 译文} 内联目录；``list_tools``
         /``get_tool_definitions`` 传 language 时优先于 description。

@@ -15,7 +15,7 @@
   5. streamable_http：本地 JSON-RPC echo server 验 application/json 路径、
      SSE（text/event-stream，多行 data + 注释跳过）路径、Accept 头约定、
      配置 headers 透传、401 needs_auth 信封、500/garbage 错误信封；
-  6. MCP 工具四件套端到端（经 MCPToolSet.call_tool + arm_manual 门）。
+  6. MCP 工具四件套端到端（经 MCPToolSet.call_tool + 外部确认 token 门）。
 """
 from __future__ import annotations
 
@@ -642,8 +642,14 @@ def test_http_unreachable_server_envelope():
 
 
 # ======================================================================
-# 6. MCP 工具四件套端到端（经 MCPToolSet.call_tool + arm_manual 门）
+# 6. MCP 工具四件套端到端（经 MCPToolSet.call_tool + 外部确认 token 门）
 # ======================================================================
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 def test_mcp_tools_suite_end_to_end():
     ts = MCPToolSet()
     try:
@@ -653,20 +659,20 @@ def test_mcp_tools_suite_end_to_end():
         assert listed["ok"] is True
         entry = next(s for s in listed["servers"] if s["name"] == "self")
         assert entry["state"] == "disconnected"
-        # 写工具默认 ask：无 arm_manual -> gated
+        # 写工具默认 ask：无 token -> gated
         gated = ts.call_tool("mcp_client_connect", {"name": "self"})
         assert gated["ok"] is False and gated["gated"] is True
-        # 带 arm_manual：真连、真调、真断
+        # 带外部确认 token：真连、真调、真断
         conn = ts.call_tool("mcp_client_connect",
-                            {"name": "self", "arm_manual": True})
+                            {"name": "self", "confirm_token": _tok()})
         assert conn["ok"] is True and conn["state"] == "connected"
         called = ts.call_tool("mcp_client_call",
                               {"server": "self", "tool": "get_status",
-                               "arguments": {}, "arm_manual": True})
+                               "arguments": {}, "confirm_token": _tok()})
         assert called["ok"] is True
         assert called["result"]["connected"] is False
         disc = ts.call_tool("mcp_client_disconnect",
-                            {"name": "self", "arm_manual": True})
+                            {"name": "self", "confirm_token": _tok()})
         assert disc["ok"] is True and disc["state"] == "disconnected"
     finally:
         ts.mcp_clients.disconnect_all()

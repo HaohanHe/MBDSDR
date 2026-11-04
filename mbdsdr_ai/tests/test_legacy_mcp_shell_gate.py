@@ -40,6 +40,12 @@ from mbdsdr_ai_mcp_server import MBSDRAIMCPServer  # noqa: E402
 # ---------------------------------------------------------------------------
 # stub 工具面（名字沿用真实工具名，分类判定走真实代码路径）
 # ---------------------------------------------------------------------------
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 def _ok_handler(args):
     return ToolResult(success=True, content="ok")
 
@@ -115,7 +121,7 @@ def test_write_tool_unarmed_gated_before_dispatch(monkeypatch):
     verdict = json.loads(out["content"][0]["text"])
     assert verdict["code"] == "manual_gate_required"
     assert verdict["ok"] is False and verdict["gated"] is True
-    assert "arm_manual=true" in verdict["hint"]
+    assert "confirm_token" in verdict["hint"]
 
 
 def test_arm_contract_tool_unarmed_gated_before_dispatch(monkeypatch):
@@ -127,8 +133,8 @@ def test_arm_contract_tool_unarmed_gated_before_dispatch(monkeypatch):
     assert out["isError"] is True and out["outcome"] == "gated"
 
 
-def test_write_tool_armed_dispatches_with_arm_flag(monkeypatch):
-    """正向对照：武装后放行分发，且 arm_manual 透传给 handler（旧壳契约）。"""
+def test_write_tool_with_token_dispatches_and_strips_gate_params(monkeypatch):
+    """正向对照：外部确认 token 有效时放行；门参数不得漏进 handler（S13）。"""
     seen = {}
 
     def _spy(args):
@@ -139,9 +145,11 @@ def test_write_tool_armed_dispatches_with_arm_flag(monkeypatch):
     reg.tools["sdr_set_frequency"]["handler"] = _spy
     srv = _server(monkeypatch, registry=reg)
     out = srv.call_tool("sdr_set_frequency",
-                        {"frequency_hz": 98_500_000, "arm_manual": True})
+                        {"frequency_hz": 98_500_000,
+                         "confirm_token": _tok()})
     assert out == {"content": [{"type": "text", "text": "ok"}], "isError": False}
-    assert seen.get("arm_manual") is True, "旧壳 handler 自检依赖 arm_manual 透传"
+    assert seen == {"frequency_hz": 98_500_000}, \
+        f"门参数不得透传，handler 实际收到: {seen}"
 
 
 def test_read_tool_not_gated(monkeypatch):
@@ -275,7 +283,7 @@ def test_unknown_tool_envelope_unchanged(monkeypatch):
 def test_registry_error_envelope_keys_unchanged(monkeypatch):
     """既有失败路径（缺必填参数）信封保持原构：只有 content/isError。"""
     srv = _server(monkeypatch)
-    out = srv.call_tool("sdr_set_frequency", {"arm_manual": True})
+    out = srv.call_tool("sdr_set_frequency", {"confirm_token": _tok()})
     assert set(out.keys()) == {"content", "isError"}, \
         f"既有错误信封不许增删键，实际: {out}"
     assert out["isError"] is True

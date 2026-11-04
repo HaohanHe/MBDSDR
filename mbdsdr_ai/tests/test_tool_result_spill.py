@@ -217,9 +217,11 @@ def test_outcome_gated_manual_gate():
     assert out["outcome"] == "gated"
     # 既有键一个不少（向后兼容，outcome 只增不改）
     assert out["ok"] is False and out["gated"] is True
-    assert out["error"] == "手动模式：未执行 set_frequency"
+    # S13：门不再认模型自报 arm_manual，改外部确认一次性 token
+    assert "缺少外部确认" in out["error"]
+    assert "arm_manual 不构成确认" in out["error"]
     assert out["policy"] == "ask"
-    assert "arm_manual=true" in out["hint"] and "approve_session=true" in out["hint"]
+    assert "confirm_token" in out["hint"]
 
 
 def test_outcome_denied_rule():

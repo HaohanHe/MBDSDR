@@ -1286,13 +1286,17 @@ def register_tool_registry(registry) -> None:
     )
 
     def _orbit_sky_plot(args: Dict[str, Any]) -> ToolResult:
-        """方位/仰角天空图 PNG（写工具：arm_manual 人工门）。"""
-        if args.get("arm_manual", False) is not True:
+        """方位/仰角天空图 PNG（写工具：外部确认 token 门）。"""
+        from .tx_guard import resolve_write_authorization
+        decision = resolve_write_authorization("orbit_sky_plot", args)
+        if not decision.allowed:
             return ToolResult(
                 success=False,
-                content=("手动模式：未执行 orbit_sky_plot"
-                         "（PNG 落盘属写操作，需显式传 arm_manual=true）"),
-                data={"gated": True},
+                content=(f"未执行 orbit_sky_plot（{decision.code}: "
+                         f"{decision.reason}）；PNG 落盘属写操作，"
+                         "需外部确认通道签发一次性 confirm_token"),
+                data={"gated": True, "reason_code": decision.code,
+                      "gate_state": decision.state},
             )
         try:
             import matplotlib  # noqa: F401  可选依赖：缺失时诚实报错，不伪造图片
@@ -1329,13 +1333,17 @@ def register_tool_registry(registry) -> None:
         )
 
     def _orbit_error_plot(args: Dict[str, Any]) -> ToolResult:
-        """定轨收敛/残差曲线 PNG（写工具：arm_manual 人工门）。"""
-        if args.get("arm_manual", False) is not True:
+        """定轨收敛/残差曲线 PNG（写工具：外部确认 token 门）。"""
+        from .tx_guard import resolve_write_authorization
+        decision = resolve_write_authorization("orbit_error_plot", args)
+        if not decision.allowed:
             return ToolResult(
                 success=False,
-                content=("手动模式：未执行 orbit_error_plot"
-                         "（PNG 落盘属写操作，需显式传 arm_manual=true）"),
-                data={"gated": True},
+                content=(f"未执行 orbit_error_plot（{decision.code}: "
+                         f"{decision.reason}）；PNG 落盘属写操作，"
+                         "需外部确认通道签发一次性 confirm_token"),
+                data={"gated": True, "reason_code": decision.code,
+                      "gate_state": decision.state},
             )
         try:
             import matplotlib  # noqa: F401  可选依赖：缺失时诚实报错，不伪造图片
@@ -1382,8 +1390,8 @@ def register_tool_registry(registry) -> None:
         name="orbit_sky_plot",
         description=(
             "定轨天空图：把方位/仰角观测序列画成极坐标天空图并保存 PNG"
-            "（北在上、顺时针）。写工具：PNG 落盘需显式传 arm_manual=true，"
-            "否则返回 gated 信封；观测为空或 az/el 长度不齐时诚实报错，"
+            "（北在上、顺时针）。写工具：PNG 落盘需外部确认通道签发一次性 "
+            "confirm_token，否则返回 gated 信封；观测为空或 az/el 长度不齐时诚实报错，"
             "不凭空画图。需要 matplotlib（可选依赖，缺失时报错不伪造）。"
         ),
         parameters={
@@ -1395,10 +1403,10 @@ def register_tool_registry(registry) -> None:
                            "description": "仰角序列（度）"},
                 "save_path": {"type": "string", "description": "PNG 保存路径"},
                 "title": {"type": "string", "description": "图标题，默认 Sky Plot"},
-                "arm_manual": {"type": "boolean",
-                               "description": "人工门：PNG 落盘前须显式传 true"},
+                "confirm_token": {"type": "string",
+                                  "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
             },
-            "required": ["az_deg", "el_deg", "save_path", "arm_manual"],
+            "required": ["az_deg", "el_deg", "save_path"],
         },
         handler=_orbit_sky_plot,
         category="orbit",
@@ -1409,8 +1417,8 @@ def register_tool_registry(registry) -> None:
         description=(
             "定轨收敛图：RLS/EKF 三维位置误差收敛曲线（对数轴，1 km 参考线）"
             "+ EKF 伪距率残差（频偏等效）双联图，保存 PNG。写工具：PNG 落盘需"
-            "显式传 arm_manual=true；序列为空或长度不齐时诚实报错，不凭空画图。"
-            "需要 matplotlib（可选依赖，缺失时报错不伪造）。"
+            "外部确认通道签发一次性 confirm_token；序列为空或长度不齐时诚实报错，"
+            "不凭空画图。需要 matplotlib（可选依赖，缺失时报错不伪造）。"
         ),
         parameters={
             "type": "object",
@@ -1426,11 +1434,11 @@ def register_tool_registry(registry) -> None:
                 "save_path": {"type": "string", "description": "PNG 保存路径"},
                 "f0_hz": {"type": "number",
                           "description": "载频 Hz（残差换算回 Hz 用），默认 F0_DEFAULT_HZ"},
-                "arm_manual": {"type": "boolean",
-                               "description": "人工门：PNG 落盘前须显式传 true"},
+                "confirm_token": {"type": "string",
+                                  "description": "外部确认通道签发的一次性 token（不透明；无 token 即拒绝）"},
             },
             "required": ["t", "pos_err_rls_km", "pos_err_ekf_km",
-                         "residuals_km_s", "save_path", "arm_manual"],
+                         "residuals_km_s", "save_path"],
         },
         handler=_orbit_error_plot,
         category="orbit",

@@ -32,6 +32,12 @@ def _simulate(box, g):
     return box.e00 + box.t * g / (1 - box.e11 * g)
 
 
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 def _read(out):
     if "spill_path" in out:
         with open(out["spill_path"], encoding="utf-8") as fh:
@@ -78,7 +84,7 @@ def test_full_vna_chain_end_to_end(tmp_path):
     png_path = tmp_path / "report.png"
     out = ts.call_tool("export_vna_report", {
         "freqs_hz": F.tolist(), "s11": _pairs(corrected),
-        "path": str(png_path), "arm_manual": True})
+        "path": str(png_path), "confirm_token": _tok()})
     assert out.get("ok") is True and png_path.exists()
     assert png_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 

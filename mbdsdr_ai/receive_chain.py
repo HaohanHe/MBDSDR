@@ -12,6 +12,7 @@ Pipeline (data flow, left to right)::
       │
       ├─ DCBlocker        independent I/Q first-order IIR DC removal
       ├─ IQCorrector      g/phi correction matrix, identity by default
+      ├─ Doppler NCO      optional stateful satellite doppler removal (fs_in)
       ├─ DecimatingFIR    anti-alias integer decimation fs_in -> fs_stage
       ├─ XlatingFIR       NCO shift (+/-offset) -> rational resample -> LPF
       │                   output complex baseband (complex128, if_sr)
@@ -78,6 +79,7 @@ from .decimating_fir import DecimatingFIR, design_decimation_taps
 from .channelizer import XlatingFIR
 from .squelch import Squelch
 from .audio_resampler import AudioResampler
+from .doppler_compensation import DopplerCompensationStage
 
 # Demodulators (constructed with their own defaults)
 from .demod_am import DemodAM
@@ -167,6 +169,8 @@ class ReceiveChain:
         # ── 前端（fs_in，与模式无关，只建一次）──
         self._dc = DCBlocker(r=0.999)
         self._iqcorr = IQCorrector()
+        # 可选：有状态多普勒补偿级（绑定预测源后才参与运算）
+        self._doppler: Optional[DopplerCompensationStage] = None
 
         # ── 后级（随模式/带宽重建）──
         self._decim: Optional[DecimatingFIR] = None
@@ -356,6 +360,38 @@ class ReceiveChain:
         """注入已知 I/Q 不平衡参数（默认单位阵直通）。"""
         self._iqcorr.set_imbalance(gain_ratio, phase_error_deg)
 
+    # ---- 多普勒补偿（接收链内唯一施加点） ----
+    def bind_doppler_source(self, source: object) -> None:
+        """绑定预测源（``doppler_link.DopplerLinkCompensator``）。
+
+        本链只消费源给出的 ``doppler_hz``，不在此做第二份轨道数学；
+        ``None`` 表示没有目标 → 补偿保持 0 并在读数里标注「无目标，未补偿」。
+        """
+        if self._doppler is None:
+            self._doppler = DopplerCompensationStage(source)
+        else:
+            self._doppler.bind(source)
+
+    def set_doppler_compensation(self, enabled: bool) -> bool:
+        """显式开关；返回是否接受（后端已补偿时拒绝，防双倍偏移）。"""
+        if self._doppler is None:
+            self._doppler = DopplerCompensationStage(None)
+        return self._doppler.set_enabled(enabled)
+
+    def doppler_status(self) -> dict:
+        """当前补偿量读数（``applied_hz`` / 目标 / 预测时刻 / 星历 / 原因）。"""
+        if self._doppler is None:
+            return {
+                "enabled": False, "active": False, "applied_hz": 0.0,
+                "target_doppler_hz": None, "settling": False,
+                "target_name": "", "predicted_at_unix": None,
+                "doppler_rate_hz_s": None, "tle_tier": "", "tle_age_days": None,
+                "application": "baseband",
+                "reason": "未绑定多普勒补偿源（无目标，未补偿）",
+                "error": "", "blocks": 0, "samples": 0,
+            }
+        return self._doppler.status()
+
     def reset(self) -> None:
         """清空所有内部状态（换源/换频后调用）。"""
         self._dc.reset()
@@ -374,6 +410,8 @@ class ReceiveChain:
             self._rs_l.reset()
         if self._rs_r is not None:
             self._rs_r.reset()
+        if self._doppler is not None:
+            self._doppler.reset()
 
     # ------------------------------------------------------------------
     # 处理面
@@ -393,6 +431,10 @@ class ReceiveChain:
         x = self._dc.process(x)
         # 2) I/Q 校正（默认单位阵，数值上近似直通）
         x = self._iqcorr.process(x)
+
+        # 2.5) 多普勒补偿（基带 NCO，抽取之前：大偏移不会被抽取先混叠掉）
+        if self._doppler is not None:
+            x = self._doppler.process(x, self.fs_in)
 
         # 3) 抗混叠抽取 fs_in → fs_stage
         if self._decim is not None:

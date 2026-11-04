@@ -164,12 +164,17 @@ def fake_manager(monkeypatch):
     mgr._active_backend = old
 
 
+def _tok():
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=10)
+
+
 def test_tool_rejects_out_of_range_frequency_before_write(fake_manager):
     from mbdsdr_ai.sdr_tools import _sdr_transmit_iq
     mgr, fake = fake_manager
     r = _sdr_transmit_iq({"frequency_hz": 6_500_000_000.0,
                           "iq": [0.1, -0.1] * 20,
-                          "arm_manual": True})
+                          "confirm_token": _tok()})
     assert r.success is False
     assert "frequency_out_of_range" in r.content
     assert fake.writes == 0
@@ -181,7 +186,7 @@ def test_tool_rejects_unknown_bandwidth_before_write(fake_manager):
     r = _sdr_transmit_iq({"frequency_hz": 145e6,
                           "iq": [0.1, -0.1] * 20,
                           "bandwidth_hz": 5e6,
-                          "arm_manual": True})
+                          "confirm_token": _tok()})
     assert r.success is False
     assert "capability_unknown" in r.content
     assert fake.writes == 0
@@ -192,6 +197,6 @@ def test_tool_in_range_path_reaches_driver(fake_manager):
     mgr, fake = fake_manager
     r = _sdr_transmit_iq({"frequency_hz": 145e6,
                           "iq": [0.1, -0.1] * 20,
-                          "arm_manual": True})
+                          "confirm_token": _tok()})
     assert r.success is True, r.content[:200]
     assert fake.writes == 1

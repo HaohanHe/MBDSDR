@@ -13,6 +13,11 @@ from .test_spectrum_snapshot import _parse_png
 F = np.linspace(88e6, 108e6, 128)
 
 
+def _tok():
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 def _rows(n=40):
     rows = []
     for t in range(n):
@@ -66,7 +71,7 @@ def test_peaks_csv_tool_roundtrip(tmp_path):
     out = ts.call_tool("export_peaks_csv", {
         "peaks": [{"freq_hz": 98e6, "db": -30.5, "label": "wfm"},
                   [100.1e6, -45.0]],
-        "path": str(p), "arm_manual": True})
+        "path": str(p), "confirm_token": _tok()})
     assert out.get("ok") is True and out["peaks"] == 2
     with open(p, newline="", encoding="utf-8") as fh:
         rows = list(csv.reader(fh))
@@ -82,10 +87,10 @@ def test_peaks_csv_gated_and_honest(tmp_path):
                                             "path": str(p)})
     assert out.get("gated") is True
     bad = ts.call_tool("export_peaks_csv", {
-        "peaks": [{"db": -1}], "path": str(p), "arm_manual": True})
+        "peaks": [{"db": -1}], "path": str(p), "confirm_token": _tok()})
     assert bad.get("ok") is not True and "error" in bad
     empty = ts.call_tool("export_peaks_csv", {
-        "peaks": [], "path": str(p), "arm_manual": True})
+        "peaks": [], "path": str(p), "confirm_token": _tok()})
     assert empty.get("ok") is not True
 
 
@@ -94,6 +99,6 @@ def test_snapshot_waterfall_view_via_tool(tmp_path):
     p = tmp_path / "wf.png"
     out = ts.call_tool("export_spectrum_snapshot", {
         "freqs_hz": F.tolist(), "db": _rows().tolist(),
-        "path": str(p), "view": "waterfall", "arm_manual": True})
+        "path": str(p), "view": "waterfall", "confirm_token": _tok()})
     assert out.get("ok") is True
     assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

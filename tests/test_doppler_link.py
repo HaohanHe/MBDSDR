@@ -249,10 +249,11 @@ class TestTcUplinkPrecomp:
 
     def test_precomp_applies_with_target(self):
         from mbdsdr_ai.tc_uplink import tc_uplink_transmit
+        from mbdsdr_ai.tx_guard import get_tx_gate
         comp = get_compensator()
         comp.tracker = FakeTracker(_valid_pos(-3.0))   # 接近 → TX 压低
         comp.arm_target(ISS, ISS_DOWNLINK_HZ)
-        r = tc_uplink_transmit(arm_manual=True, iq=[0.0, 0.0],
+        r = tc_uplink_transmit(iq=[0.0, 0.0], tx_token=get_tx_gate().arm(ttl_s=10),
                                freq_hz=435.0e6, doppler_precomp=True)
         assert r["status"] == "NEED_HW"          # 无设备仍诚实 NEED_HW
         assert r["doppler"]["applied"] is True
@@ -261,8 +262,9 @@ class TestTcUplinkPrecomp:
 
     def test_precomp_honest_note_without_target(self):
         from mbdsdr_ai.tc_uplink import tc_uplink_transmit
+        from mbdsdr_ai.tx_guard import get_tx_gate
         _reset_compensator_for_tests()           # 无目标
-        r = tc_uplink_transmit(arm_manual=True, iq=[0.0, 0.0],
+        r = tc_uplink_transmit(iq=[0.0, 0.0], tx_token=get_tx_gate().arm(ttl_s=10),
                                freq_hz=435.0e6, doppler_precomp=True)
         assert r["doppler"]["applied"] is False
         assert r["doppler"]["reason"]

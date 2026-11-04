@@ -92,7 +92,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `identity_mismatch` | access | 站点身份不匹配 | 站点身份不匹配：{detail} | 确认站点 ID 与数据库一致后重试。 | 否 |
 | `internal_error` | access | 内部异常 | 内部错误（{exc_type}）：{detail} | 重试一次；仍失败请收集日志（含异常类型与上下文）反馈开发者。 | 是 |
 | `invalid_argument` | access | 参数校验失败 | 参数校验失败：{detail} | 按参数说明修正后重试（本库不做静默钳位）。 | 否 |
-| `manual_gate_required` | access | 需要人工门确认 | 手动模式：未执行 {tool} | 带 arm_manual=true 执行；或 approve_session=true 让本会话免问。 | 否 |
+| `manual_gate_required` | access | 需要外部确认 | 未执行 {tool}：缺少外部确认（{reason}）。模型自报的 arm_manual 不构成确认。 | 由真人经外部确认通道签发一次性 confirm_token 后重试；token 有有效期且只能消费一次。 | 否 |
 | `no_audio_output` | access | 没有可用音频输出 | 没有可用音频输出设备：{detail} | 检查系统音频设备后重试。 | 否 |
 | `no_downlink_known` | access | 无已知下行频点 | 没有该卫星的已知下行频点：{detail} | 先补全频点库或显式指定频率。 | 否 |
 | `no_pass` | access | 当前无过境 | 当前时间窗内没有可用过境：{detail} | 扩大时间窗或换卫星后重试。 | 否 |

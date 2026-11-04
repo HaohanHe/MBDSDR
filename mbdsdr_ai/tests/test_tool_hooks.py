@@ -4,12 +4,18 @@
 形态对齐 kimi-code externalHooks 的可否决语义（stdin JSON、deny 即拦），
 MBDSDR 版取进程内 HookManager 子集：AGENT_PRE_TOOL_USE 事件在规则门与
 分发之前触发，任一同步钩子返回 {"decision": "deny"} 即否决；veto 压过
-arm_manual 与 policy allow（与 deny 规则同级）；钩子异常绝不阻断主流程。
+外部确认 token 与 policy allow（与 deny 规则同级）；钩子异常绝不阻断主流程。
 """
 import sys
 
 from mbdsdr_ai.core.mcp_server import MCPToolSet
 from mbdsdr_ai.hooks import EventType
+
+
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
 
 
 def _set():
@@ -27,7 +33,7 @@ def test_veto_blocks_even_armed_write():
 
     ts.hooks.register(EventType.AGENT_PRE_TOOL_USE, deny)
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out["ok"] is False and out["gated"] is True
     assert out["outcome"] == "vetoed"
     assert out["veto_reason"] == "排障：禁止调谐"
@@ -51,7 +57,7 @@ def test_non_deny_hook_result_passes_through():
 
     ts.hooks.register(EventType.AGENT_PRE_TOOL_USE, observer)
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out == {"ok": True}
     assert seen == ["set_frequency"]          # 钩子确实被触发过
 
@@ -61,7 +67,7 @@ def test_hook_exception_does_not_break_call(capsys):
     ts.hooks.register(EventType.AGENT_PRE_TOOL_USE,
                       lambda e: 1 / 0)          # 钩子自己炸
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out == {"ok": True}                # 主流程放行
     cap = capsys.readouterr()
     logged = cap.out + cap.err                # Hook.trigger 的留痕走 stdout
@@ -74,7 +80,7 @@ def test_disabled_hook_does_not_veto():
                             lambda e: {"decision": "deny", "reason": "x"})
     ts.hooks.disable(hid)
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out == {"ok": True}
 
 
@@ -83,7 +89,7 @@ def test_hooks_instance_is_per_toolset():
     a.hooks.register(EventType.AGENT_PRE_TOOL_USE,
                      lambda e: {"decision": "deny", "reason": "only-a"})
     out = b.call_tool("set_frequency",
-                      {"hz": 98_500_000, "arm_manual": True})
+                      {"hz": 98_500_000, "confirm_token": _tok()})
     assert out == {"ok": True}                # b 不受 a 的钩子影响
 
 
@@ -97,7 +103,7 @@ def test_tool_result_event_fires_on_success():
     ts.hooks.register("agent.tool_result",
                       lambda e: seen.append(e.data))
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out == {"ok": True}
     assert len(seen) == 1
     s = seen[0]
@@ -120,7 +126,7 @@ def test_tool_result_event_fires_on_gate_and_error():
     assert gated and gated[0]["tool"] == "set_frequency"
     # set_demod 走 SDRUserError（非法 mode）-> outcome=error
     bad = ts.call_tool("set_demod",
-                       {"mode": "NOT_A_MODE", "arm_manual": True})
+                       {"mode": "NOT_A_MODE", "confirm_token": _tok()})
     assert bad.get("outcome") == "error"
     assert bad.get("ok", False) is False
     assert any(s["outcome"] == "error" for s in seen)
@@ -132,7 +138,7 @@ def test_tool_result_event_hook_cannot_mutate_result():
         return {"decision": "deny", "reason": "too late"}      # 试图事后否决
     ts.hooks.register("agent.tool_result", evil)
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out == {"ok": True}      # 结果不因事后钩子改变
 
 
@@ -140,7 +146,7 @@ def test_tool_result_event_exception_isolated(capsys):
     ts = _set()
     ts.hooks.register("agent.tool_result", lambda e: 1 / 0)
     out = ts.call_tool("set_frequency",
-                       {"hz": 98_500_000, "arm_manual": True})
+                       {"hz": 98_500_000, "confirm_token": _tok()})
     assert out == {"ok": True}
     logged = (capsys.readouterr().out + capsys.readouterr().err)
     assert "Hook Error" in logged or "division" in logged

@@ -387,9 +387,11 @@ _SPECS = (
           "denied_by_policy：策略拒绝执行 {tool}（规则集不可被 armed 覆盖）。",
           "换用允许的工具或修改策略；不要重复尝试同一个被拒调用。"),
     _spec("manual_gate_required", LAYER_ACCESS, False,
-          "需要人工门确认",
-          "手动模式：未执行 {tool}",
-          "带 arm_manual=true 执行；或 approve_session=true 让本会话免问。"),
+          "需要外部确认",
+          "未执行 {tool}：缺少外部确认（{reason}）。模型自报的 arm_manual "
+          "不构成确认。",
+          "由真人经外部确认通道签发一次性 confirm_token 后重试；"
+          "token 有有效期且只能消费一次。"),
     _spec("internal_error", LAYER_ACCESS, True,
           "内部异常",
           "内部错误（{exc_type}）：{detail}",

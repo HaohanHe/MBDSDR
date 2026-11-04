@@ -150,8 +150,10 @@ def _fresh_gate():
 
 
 def _session(be, caps=CAPS_HALF, rx_active=True):
+    from mbdsdr_ai.tx_guard import get_tx_gate
     return TxSession(be).transmit(
-        np.ones(30, dtype=np.complex64), freq_hz=145e6, arm_manual=True,
+        np.ones(30, dtype=np.complex64), freq_hz=145e6,
+        tx_token=get_tx_gate().arm(ttl_s=10),
         caps=caps, chunk_samples=10, rx_control=be, rx_active=rx_active)
 
 

@@ -75,10 +75,17 @@ def _fresh_gate(monkeypatch):
     reset_tx_gate()
 
 
+def _arm_token(ttl_s: float = 120.0) -> str:
+    """测试用外部确认通道：签发一次性 token（S13 后不再有 arm_manual 直通）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=ttl_s)
+
+
 def _run(backend, samples, **kw):
     sess = TxSession(backend)
     kw.setdefault("freq_hz", 145e6)
-    kw.setdefault("arm_manual", True)
+    if kw.pop("arm_manual", True):
+        kw.setdefault("tx_token", _arm_token())
     kw.setdefault("caps", CAPS)
     return sess, sess.transmit(samples, **kw)
 
@@ -111,7 +118,7 @@ def test_cancel_mid_transmit_stops_immediately():
 
     be.on_write = on_write
     rep = sess.transmit(np.ones(100, dtype=np.complex64), freq_hz=145e6,
-                        arm_manual=True, caps=CAPS, chunk_samples=10)
+                        tx_token=_arm_token(), caps=CAPS, chunk_samples=10)
     assert rep["state"] == TX_CANCELLED
     assert rep["reason_code"] == "tx_cancel_requested"
     assert rep["reason"] == "操作员中途取消"
@@ -210,7 +217,7 @@ def test_playback_transmit_completes_and_uses_meta_freq(tmp_path):
     from mbdsdr_ai.playback import transmit_iq_playback
     path = _make_recording(tmp_path)
     be = FakeTxBackend()
-    rep = transmit_iq_playback(path, backend=be, arm_manual=True, caps=CAPS,
+    rep = transmit_iq_playback(path, backend=be, tx_token=_arm_token(), caps=CAPS,
                                chunk_samples=32)
     assert rep["state"] == TX_COMPLETED
     assert rep["sent_samples"] == 100
@@ -232,7 +239,7 @@ def test_playback_missing_or_truncated_is_rejected(tmp_path):
     from mbdsdr_ai.playback import transmit_iq_playback
     be = FakeTxBackend()
     rep = transmit_iq_playback(str(tmp_path / "nope.sigmf-data"),
-                               backend=be, arm_manual=True, caps=CAPS)
+                               backend=be, tx_token=_arm_token(), caps=CAPS)
     assert rep["state"] == "rejected"
     assert rep["reason_code"].startswith("playback_")
     assert be.writes == []
@@ -246,7 +253,7 @@ def test_playback_missing_or_truncated_is_rejected(tmp_path):
     data = tmp_path / "bad.sigmf-data"
     raw = data.read_bytes()
     data.write_bytes(raw[:-5])          # 破坏样本对齐 → truncated
-    rep2 = transmit_iq_playback(str(data), backend=be, arm_manual=True, caps=CAPS)
+    rep2 = transmit_iq_playback(str(data), backend=be, tx_token=_arm_token(), caps=CAPS)
     assert rep2["state"] == "rejected"
     assert "truncated" in rep2["reason_code"] or "truncated" in rep2["reason"]
 
@@ -267,7 +274,7 @@ def test_playback_deleted_mid_read_is_aborted(tmp_path, monkeypatch):
         return np.empty(0, dtype=np.complex64)
 
     monkeypatch.setattr(IQPlayback, "read_samples", read_deleted)
-    rep = transmit_iq_playback(path, backend=be, arm_manual=True, caps=CAPS,
+    rep = transmit_iq_playback(path, backend=be, tx_token=_arm_token(), caps=CAPS,
                                chunk_samples=32)
     assert rep["state"] == "aborted"
     assert rep["reason_code"] == "tx_source_deleted"

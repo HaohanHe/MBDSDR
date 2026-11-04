@@ -7,6 +7,12 @@ from mbdsdr_ai.core.mcp_server import MCPToolSet, _TOOL_DOMAIN, _build_tool_tabl
 from mbdsdr_ai.iq_correction import IQCorrector, inject_imbalance
 
 
+def _tok():
+    """外部确认通道（测试）：签发一次性 token（S13 后 arm_manual 不再放行）。"""
+    from mbdsdr_ai.tx_guard import get_tx_gate
+    return get_tx_gate().arm(ttl_s=60)
+
+
 def _tone(n=4096):
     return np.exp(2j * np.pi * 1000.0 * np.arange(n) / 48000.0)
 
@@ -19,7 +25,8 @@ def test_gated_without_arm():
 
 def test_armed_no_backend_is_honest():
     ts = MCPToolSet()
-    out = ts.call_tool("set_iq_invert", {"invert": True, "arm_manual": True})
+    out = ts.call_tool("set_iq_invert", {"invert": True,
+                                        "confirm_token": _tok()})
     assert out["error"] == "sdr_error"
     assert out["outcome"] == "error"
 

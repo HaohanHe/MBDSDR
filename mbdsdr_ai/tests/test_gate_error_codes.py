@@ -50,4 +50,4 @@ def test_gate_envelope_has_stable_code():
     out = srv.call_tool("set_frequency", {"hz": 145500000})
     assert out.get("code") == "manual_gate_required"
     assert out.get("outcome") == "gated"
-    assert "arm_manual=true" in out.get("hint", "")
+    assert "confirm_token" in out.get("hint", "")

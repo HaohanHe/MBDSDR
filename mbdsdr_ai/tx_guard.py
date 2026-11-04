@@ -18,6 +18,8 @@
 from __future__ import annotations
 
 import contextvars
+import hashlib
+import json
 import logging
 import threading
 import time
@@ -35,6 +37,15 @@ GATE_EXPIRED = "gate_expired"
 GATE_REVOKED = "gate_revoked"
 GATE_UNKNOWN_TOKEN = "gate_unknown_token"
 GATE_TOKEN_MISMATCH = "gate_token_mismatch"
+#: token 已被消费（一次性授权不得复用）。
+GATE_TOKEN_USED = "gate_token_used"
+#: token 绑定的动作摘要与本次调用不符（换参数/换工具重放都会被拒）。
+GATE_ACTION_MISMATCH = "gate_action_mismatch"
+#: 模型自报 ``arm_manual=true``：不再构成人工确认。
+GATE_MANUAL_UNTRUSTED = "gate_arm_manual_untrusted"
+
+#: 门参数：由门消费、绝不下发给 handler，也不参与动作摘要。
+GATE_PARAMS = ("arm_manual", "confirm_token", "tx_token", "approve_session")
 
 #: 单次授权默认有效期（秒）。过期后必须重新 arm（人工再次确认）。
 DEFAULT_TTL_S = 120.0
@@ -49,6 +60,9 @@ class GateDecision:
     reason: str
     state: str = ""
     token: str = ""
+    action: str = ""
+    issued_at: float = 0.0
+    expires_at: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -57,17 +71,22 @@ class GateDecision:
             "reason": self.reason,
             "state": self.state,
             "token": self.token,
+            "action": self.action,
+            "issued_at": self.issued_at,
+            "expires_at": self.expires_at,
         }
 
 
 class TxGate:
-    """进程级发射人工门。
+    """进程级人工门（发射 + 任意写工具的唯一事实源）。
 
-    语义：
-      * ``arm(ttl_s)`` 由人显式调用，签发一次性 token；token 在 TTL 内有效。
-      * ``revoke()`` 撤销授权：此后连 ``arm_manual=True`` 也拒绝，直到重新 arm。
-      * 不提供任何"永久放行"开关；``arm_manual=True`` 视为本次调用的人工确认，
-        但显式撤销状态下仍然无效。
+    语义（S13 红线）：
+      * ``arm(action=...)`` 只能由**外部确认通道**（真人弹窗/测试注入）调用，
+        签发一次性 token：绑定动作摘要、带签发时刻、有 TTL。
+      * token 在 TTL 内有效，成功消费一次后立即作废（重放 → ``gate_token_used``）。
+      * ``arm_manual=True`` 是模型可自报的普通参数，**不再构成确认**，一律拒绝
+        （``gate_arm_manual_untrusted``）。
+      * ``revoke()`` 撤销授权：撤销后 token 与任何自报参数都拒绝。
     """
 
     def __init__(self, default_ttl_s: float = DEFAULT_TTL_S) -> None:
@@ -78,12 +97,30 @@ class TxGate:
         self._ttl_s = float(default_ttl_s)
         self._revoked_reason = ""
         self._generation = 0
+        self._action = ""
+        self._used = False
+        self._single_use = True
         self._last_decision: Optional[GateDecision] = None
 
     # ------------------------------------------------------------------
-    def arm(self, *, ttl_s: Optional[float] = None,
-            note: str = "", now: Optional[float] = None) -> str:
-        """人工确认发射。返回本次授权 token（TTL 内可复用）。"""
+    def arm(self, *, ttl_s: Optional[float] = None, note: str = "",
+            action: str = "", single_use: bool = True,
+            now: Optional[float] = None) -> str:
+        """外部确认通道签发一次性 token。
+
+        Parameters
+        ----------
+        ttl_s : float
+            有效期（秒），必须为正。
+        note : str
+            人工确认备注（审计用）。
+        action : str
+            动作摘要（:func:`action_digest` 的结果）。token 只对同一动作有效。
+        single_use : bool
+            成功消费一次后是否作废；默认 True。
+        now : float
+            测试注入的单调时钟（不读墙钟）。
+        """
         with self._lock:
             ttl = self._ttl_s if ttl_s is None else float(ttl_s)
             if ttl <= 0:
@@ -93,13 +130,18 @@ class TxGate:
             self._armed_at = time.monotonic() if now is None else float(now)
             self._ttl_s = ttl
             self._revoked_reason = ""
+            self._action = str(action or "")
+            self._used = False
+            self._single_use = bool(single_use)
             self._generation += 1
             d = GateDecision(True, GATE_OK,
-                             f"人工门已开（{ttl:.0f}s 有效）" +
+                             f"人工门已开（{ttl:.0f}s 有效，一次性）" +
                              (f"：{note}" if note else ""),
-                             self._state, self._token)
+                             self._state, self._token, self._action,
+                             self._armed_at, self._armed_at + ttl)
             self._last_decision = d
-            logger.info("TxGate armed: ttl=%.1fs note=%s", ttl, note)
+            logger.info("TxGate armed: ttl=%.1fs single_use=%s action=%s note=%s",
+                        ttl, self._single_use, self._action[:12], note)
             return self._token
 
     def revoke(self, *, reason: str = "人工门被撤销") -> None:
@@ -127,8 +169,18 @@ class TxGate:
 
     def authorize(self, *, arm_manual: bool = False,
                   token: Optional[str] = None,
+                  action: Optional[str] = None,
+                  consume: bool = True,
                   now: Optional[float] = None) -> GateDecision:
-        """判定本次发射是否被允许。token 路径与 ``arm_manual`` 都走这里。"""
+        """判定本次写/发射是否被允许。
+
+        只有**外部确认通道签发的 token** 能放行：
+          * ``arm_manual=True``（模型自报）→ 直接拒绝；
+          * token 未知/不匹配/过期/已消费/动作摘要不符 → 各自可区分拒绝。
+
+        consume=True 时成功即消费 token（一次性）；传输会话中逐块复核用
+        consume=False（同一动作仍在执行，不重复消费）。
+        """
         with self._lock:
             now = time.monotonic() if now is None else float(now)
             state = self._state
@@ -147,20 +199,34 @@ class TxGate:
                     d = GateDecision(False, GATE_EXPIRED,
                                      f"人工门已过期（有效期 {self._ttl_s:.0f}s）",
                                      self._state)
+                elif self._used and consume:
+                    d = GateDecision(False, GATE_TOKEN_USED,
+                                     "授权 token 已被消费（一次性授权不得复用）",
+                                     state, self._token, self._action)
+                elif (action is not None and self._action
+                      and str(action) != self._action):
+                    d = GateDecision(False, GATE_ACTION_MISMATCH,
+                                     "授权 token 的动作摘要与本次调用不匹配",
+                                     state, self._token, self._action)
                 else:
+                    if consume and self._single_use:
+                        self._used = True
                     d = GateDecision(True, GATE_OK,
-                                     "人工门 token 有效", self._state, self._token)
+                                     "人工门 token 有效（一次性）",
+                                     state, self._token, self._action,
+                                     self._armed_at, self._armed_at + self._ttl_s)
             elif arm_manual is True:
-                # 本次调用显式人工确认：等价于本次一次性 arm。
-                d = GateDecision(True, GATE_OK,
-                                 "本次调用显式 arm_manual=true", state)
+                # 模型可自报的参数不再构成人工确认（S13 红线）。
+                d = GateDecision(False, GATE_MANUAL_UNTRUSTED,
+                                 "arm_manual=true 不构成人工确认：需外部确认通道"
+                                 "签发的一次性 token", state)
             else:
                 d = GateDecision(False, GATE_NOT_ARMED,
-                                 "未过人工门：需显式 arm_manual=true 或有效 token",
+                                 "未过人工门：需外部确认通道签发的一次性 token",
                                  state)
 
             if not d.allowed:
-                logger.warning("TxGate 拒绝发射(%s): %s", d.code, d.reason)
+                logger.warning("TxGate 拒绝(%s): %s", d.code, d.reason)
             self._last_decision = d
             return d
 
@@ -177,6 +243,12 @@ class TxGate:
                 "remaining_s": remaining,
                 "generation": self._generation,
                 "revoked_reason": self._revoked_reason,
+                "action": self._action,
+                "used": bool(self._used),
+                "single_use": bool(self._single_use),
+                "issued_at": self._armed_at if self._state == "armed" else 0.0,
+                "expires_at": (self._armed_at + self._ttl_s
+                               if self._state == "armed" else 0.0),
                 "last_decision": self._last_decision.to_dict()
                 if self._last_decision else None,
             }
@@ -195,6 +267,58 @@ def reset_tx_gate() -> TxGate:
     global _GATE
     _GATE = TxGate()
     return _GATE
+
+
+# ── 动作摘要 + 外部确认通道 ──────────────────────────────────────────────
+def _json_default(obj: Any) -> Any:
+    """把 numpy / bytes 等参数值规范成可序列化形式（同进程内稳定）。"""
+    if hasattr(obj, "tolist"):
+        return obj.tolist()
+    if isinstance(obj, (bytes, bytearray)):
+        return list(obj)
+    return repr(obj)
+
+
+def action_digest(tool_name: str, args: Optional[Dict[str, Any]]) -> str:
+    """计算一次写动作的摘要（工具名 + 全部非门参数，键排序）。
+
+    门参数（arm_manual / confirm_token / tx_token / approve_session）刻意排除：
+    它们只承载授权，不属于动作本身，不能影响摘要。
+    """
+    clean = {k: v for k, v in dict(args or {}).items()
+             if k not in GATE_PARAMS}
+    payload = json.dumps({"tool": str(tool_name), "args": clean},
+                         sort_keys=True, ensure_ascii=False,
+                         separators=(",", ":"), default=_json_default)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def issue_confirmation(tool_name: str, args: Optional[Dict[str, Any]],
+                       *, ttl_s: float = DEFAULT_TTL_S, note: str = "",
+                       now: Optional[float] = None) -> str:
+    """外部确认通道：为一次具体写动作签发一次性 token。
+
+    只有真人确认面（桌面弹窗 / 测试注入 / 受信任脚本）可以调用本函数。
+    模型永远拿不到调用本函数的能力——它只能拿到 opaque token 字符串。
+    """
+    digest = action_digest(tool_name, args)
+    return get_tx_gate().arm(ttl_s=ttl_s, note=note, action=digest, now=now)
+
+
+def resolve_write_authorization(tool_name: str,
+                                args: Optional[Dict[str, Any]]) -> GateDecision:
+    """handler 层复用门判定（单一事实源仍是 :class:`TxGate`）。
+
+    优先使用上层 ``ToolCallGate`` 已建立的一次性授权上下文（避免重复消费
+    token）；没有上下文时才用 args 里的 opaque token 现场校验。
+    模型自报的 ``arm_manual`` 在这里同样不参与判定。
+    """
+    ctx = current_tx_decision()
+    if ctx is not None and ctx.allowed:
+        return ctx
+    token = (args or {}).get("confirm_token") or (args or {}).get("tx_token")
+    return get_tx_gate().authorize(
+        token=token, action=action_digest(tool_name, args))
 
 
 # ── 授权上下文：底层 write_tx 只认这个，不认调用者口头声明 ─────────────────
@@ -653,6 +777,7 @@ class TxSession:
         self.token = ""
         self._cancel_reason = "用户取消发射"
         self._gate_reason = ""
+        self._action = ""
         self.stop_calls = 0
         self._duplex_coord: Optional[TxRxCoordinator] = None
         self._duplex_info: Optional[Dict[str, Any]] = None
@@ -711,7 +836,8 @@ class TxSession:
             self._gate_reason = snap.get("revoked_reason", "")
             return TX_GATE_REVOKED
         if self.token:
-            d = self.gate.authorize(token=self.token)
+            d = self.gate.authorize(token=self.token, action=self._action,
+                                    consume=False)
             if not d.allowed:
                 self._gate_reason = d.reason
                 return (TX_GATE_EXPIRED if d.code == GATE_EXPIRED
@@ -748,6 +874,7 @@ class TxSession:
         freq_hz: Optional[float],
         arm_manual: bool = False,
         tx_token: Optional[str] = None,
+        action: Optional[str] = None,
         gain_db: Optional[float] = None,
         bandwidth_hz: Optional[float] = None,
         caps: Optional[TxCapabilities] = None,
@@ -758,14 +885,27 @@ class TxSession:
         rx_active: bool = False,
         duplex: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """执行一次受控发射，返回 :meth:`status` 同构的如实报告。"""
-        decision = self.gate.authorize(arm_manual=arm_manual, token=tx_token)
+        """执行一次受控发射，返回 :meth:`status` 同构的如实报告。
+
+        授权来源只有两类：外部确认通道签发的 token（``tx_token`` + ``action``），
+        或上层门已建立的一次性授权上下文（``tx_authorization``）。
+        ``arm_manual`` 仅保留参数位，**不参与放行**（模型自报不算确认）。
+        """
+        ctx = current_tx_decision()
+        if ctx is not None and ctx.allowed and (
+                tx_token is None or not ctx.token or ctx.token == tx_token):
+            decision = ctx
+        else:
+            decision = self.gate.authorize(
+                arm_manual=False, token=tx_token,
+                action=action if action is not None else None)
         if not decision.allowed:
             self.state = TX_REJECTED
             self.reason_code = decision.code
             self.reason = decision.reason
             return self.status()
-        self.token = tx_token or ""
+        self.token = decision.token
+        self._action = decision.action
         self.state = TX_ARMED
         self.sent_samples = 0
 

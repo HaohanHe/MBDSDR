@@ -41,6 +41,8 @@ from ..hook_commands import HookCommandRunner
 from ..error_catalog import suggestion, user_message
 from ..tool_policy import ToolPolicy, normalize_key
 from ..mcp_client import MCPClientManager
+from ..tx_guard import (GATE_MANUAL_UNTRUSTED, GateDecision, action_digest,
+                        get_tx_gate, tx_authorization)
 
 
 # JSON Schema 片段复用
@@ -1596,6 +1598,8 @@ class ToolCallGate:
         self.policy = policy if policy is not None else ToolPolicy.load()
         self._session_approvals: Dict[tuple, float] = {}  # key -> 过期时刻
         self.source = source
+        #: 本次 check 放行的一次性 token 判定（供 handler 执行期复用授权上下文）。
+        self.last_token_decision: Optional[GateDecision] = None
 
     # ------------------------------------------------------------------
     def check(self, name: str, args: Dict[str, Any], is_write: bool,
@@ -1612,6 +1616,7 @@ class ToolCallGate:
         参数，armed/unarmed 命中同一份批准。
         """
         session_cached = False
+        self.last_token_decision = None
         # PreToolUse hook（可否否决）：在规则门与分发之前触发。veto 压过
         # arm_manual 与 policy allow——与 deny 规则同级的运行时安全闸（外部
         # 编排方/测试可在 self.hooks 上注册 pre_tool_use 钩子拦截调用）。
@@ -1623,17 +1628,17 @@ class ToolCallGate:
                     "gated": True,
                     "outcome": "vetoed",
                     "veto_reason": veto.get("reason") or "hook_denied"}, False
-        # Write-tool gate: ruleset (allow/ask/deny) + explicit once-approval
-        # (arm_manual) + optional session-level approval cache
-        # (approve_session). Semantics aligned with the C++ llm_worker gate:
-        # real execution only when policy allows or the caller explicitly arms;
-        # the arm flags are consumed here and never leak to the handler.
+        # 写工具门（S13 红线）：policy deny（单调）→ 外部确认通道 token →
+        # 会话批准缓存。模型自报的 arm_manual **不再**参与判定，且在所有
+        # 接入面一律剥离；无 token → 明确拒绝，绝不 success。
         if is_write:
             approve_session = args.pop("approve_session", False) is True
-            if consume_arm_flags:
-                armed = args.pop("arm_manual", False) is True
-            else:
-                armed = args.get("arm_manual", False) is True
+            # 模型可自报的 arm_manual：只记录"出现过"，绝不作为放行依据。
+            arm_manual_seen = ("arm_manual" in args)
+            args.pop("arm_manual", None)
+            # 外部确认通道签发的一次性 token（confirm_token 规范名；
+            # tx_token 为发射类工具的既有别名）。门内消费，不下发 handler。
+            token = args.pop("confirm_token", None) or args.pop("tx_token", None)
             # 域级规则第三级：名规则未命中时按 domain:<域名> 判定
             action = self.policy.action_for(name, True, domain)
             if action == "deny":
@@ -1647,25 +1652,37 @@ class ToolCallGate:
                         "code": "denied_by_policy",
                         "denied": True, "gated": True,
                         "outcome": "denied"}, False
-            gate_flags = ("arm_manual", "approve_session")
+            gate_flags = ("arm_manual", "approve_session",
+                          "confirm_token", "tx_token")
             key = normalize_key(name, {k: v for k, v in args.items()
                                        if k not in gate_flags})
             session_cached = self._is_session_approved(key)
             if action == "ask" and not session_cached:
-                if not armed:
+                if token:
+                    d = get_tx_gate().authorize(
+                        token=token, action=action_digest(name, args))
+                    if not d.allowed:
+                        return self._token_rejection(name, d), False
+                    self.last_token_decision = d
+                    if approve_session:
+                        self._remember_session_approval(key)
+                elif arm_manual_seen:
+                    # 反证核心：模型自报 arm_manual=true 但无 token → 拒绝。
+                    return self._token_rejection(
+                        name, get_tx_gate().authorize(arm_manual=True)), False
+                else:
                     gated_env = {"ok": False,
                                  "error": user_message(
-                                     "manual_gate_required", tool=name),
+                                     "manual_gate_required", tool=name,
+                                     reason="未提供一次性 confirm_token"),
                                  "code": "manual_gate_required",
                                  "gated": True,
                                  "policy": action,
                                  "outcome": "gated",
-                                 "hint": "带 arm_manual=true 执行；"
-                                         "approve_session=true 则本会话免问"}
+                                 "hint": "由外部确认通道签发一次性 confirm_token；"
+                                         "模型自报 arm_manual 不算确认"}
                     self._emit_result_event(name, gated_env)
                     return gated_env, False
-                if approve_session:
-                    self._remember_session_approval(key)
         try:
             _validate_args_finite(args)
         except SDRUserError as e:
@@ -1680,6 +1697,22 @@ class ToolCallGate:
             self._emit_result_event(name, out)
             return out, False
         return None, session_cached
+
+    # ------------------------------------------------------------------
+    def _token_rejection(self, name: str, decision: GateDecision) -> Dict[str, Any]:
+        """把 token 门拒绝包成明确状态（绝不 success，绝不静默当放行）。"""
+        env = {"ok": False,
+               "error": user_message("manual_gate_required", tool=name,
+                                     reason=decision.reason),
+               "code": "manual_gate_required",
+               "reason_code": decision.code,
+               "gate_state": decision.state,
+               "gated": True,
+               "outcome": "gated",
+               "hint": "由外部确认通道签发一次性 confirm_token；"
+                       "模型自报 arm_manual 不算确认"}
+        self._emit_result_event(name, env)
+        return env
 
     # ------------------------------------------------------------------
     # 会话批准缓存（带 TTL，见 SESSION_APPROVAL_TTL_S）
@@ -1864,7 +1897,7 @@ class MCPToolSet(ToolCallGate):
         """按名调用工具。无后端时安全降级，绝不抛异常。
 
         安全路径（继承自 :class:`ToolCallGate`，与旧壳共用）：PreToolUse
-        钩子 veto → write 门（policy allow/ask/deny + arm_manual）→ 入参
+        钩子 veto → write 门（policy allow/ask/deny + 外部确认 token）→ 入参
         有限性/区间校验，然后才分发 handler。
 
         结果出口（outcome 分类，2026-10-14 上游审计第二落点）：正常执行且
@@ -1884,7 +1917,14 @@ class MCPToolSet(ToolCallGate):
         if rejection is not None:
             return rejection
         try:
-            result = tool["handler"](self.controller, args)
+            decision = self.last_token_decision
+            if decision is not None and decision.allowed:
+                # 把已校验的一次性授权交给 handler：发射类工具在同一调用内
+                # 复用该上下文，不重复消费 token（单一事实源仍在 tx_guard）。
+                with tx_authorization(decision):
+                    result = tool["handler"](self.controller, args)
+            else:
+                result = tool["handler"](self.controller, args)
         except SDRUserError as e:
             out = e.to_dict()
             out["outcome"] = "error"

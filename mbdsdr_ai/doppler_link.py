@@ -42,6 +42,15 @@ class DopplerLinkState:
     elevation_deg: Optional[float] = None
     reason: str = ""                         # 失效/冲突原因（诚实提示）
     backend_comp_active: bool = False        # 后端（C++/基带）补偿活动标志
+    # ── 应用点仲裁：同一时刻只允许一处真正施加补偿 ──
+    # "tuner"    = 调谐器预偏（desktop 硬件重调 / C++ VFO offset）
+    # "baseband" = 接收链基带 NCO（ReceiveChain / DopplerCompensationStage）
+    application: str = "tuner"
+    # ── 预测溯源（读数/日志用：补偿依据哪个时刻、哪级星历）──
+    doppler_rate_hz_s: Optional[float] = None
+    predicted_at_unix: Optional[float] = None
+    tle_tier: str = ""
+    tle_age_days: Optional[float] = None
 
 
 @dataclass
@@ -80,6 +89,42 @@ class DopplerLinkCompensator:
         self.state.doppler_hz = None
         self.state.corrected_freq_hz = None
         self.state.reason = reason
+        self.state.doppler_rate_hz_s = None
+        self.state.predicted_at_unix = None
+        self.state.tle_tier = ""
+        self.state.tle_age_days = None
+
+    # ------------------------------------------------------------------ 应用点
+    def set_application(self, application: str) -> bool:
+        """声明补偿施加点：``tuner``（调谐器预偏）或 ``baseband``（基带 NCO）。
+
+        同一时刻只允许一个施加点真正生效：``tuner`` 时 :meth:`rx_freq` 返回
+        实际调谐频率；``baseband`` 时 :meth:`rx_freq` 返回 ``None``（硬调谐
+        保持标称），由 :meth:`baseband_doppler_hz` 提供给接收链 NCO。
+        """
+        app = str(application).strip().lower()
+        if app not in ("tuner", "baseband"):
+            raise ValueError(f"未知补偿施加点：{application!r}（只接受 tuner/baseband）")
+        self.state.application = app
+        return True
+
+    def reading(self) -> dict:
+        """预测读数（供接收链补偿级消费；不含第二份数学）。"""
+        st = self.state
+        return {
+            "target_name": st.target_name,
+            "downlink_hz": st.downlink_hz,
+            "enabled": st.enabled,
+            "valid": st.valid,
+            "doppler_hz": st.doppler_hz,
+            "doppler_rate_hz_s": st.doppler_rate_hz_s,
+            "predicted_at_unix": st.predicted_at_unix,
+            "tle_tier": st.tle_tier,
+            "tle_age_days": st.tle_age_days,
+            "application": st.application,
+            "backend_comp_active": st.backend_comp_active,
+            "reason": st.reason,
+        }
 
     # ------------------------------------------------------------------ 开关
     def set_enabled(self, on: bool) -> bool:
@@ -116,6 +161,9 @@ class DopplerLinkCompensator:
         at_unix 仅在没有 pos 时生效，显式钉死预测时刻（测试/回放）。
         """
         st = self.state
+        # 预测溯源：记录本次读数依据的时刻与星历新鲜度（界面/日志可查）
+        st.predicted_at_unix = (float(at_unix) if at_unix is not None
+                                else _engine_now_unix())
         if self.tracker is None or not st.target_name:
             st.valid = False
             st.doppler_hz = None
@@ -151,14 +199,31 @@ class DopplerLinkCompensator:
         st.corrected_freq_hz = st.downlink_hz + dop
         st.range_rate_km_s = float(pos.get("range_rate_km_s") or 0.0)
         st.elevation_deg = float(el)
+        st.doppler_rate_hz_s = _as_float(pos.get("doppler_rate_hz_s"))
+        st.tle_tier = str(pos.get("tle_tier") or "")
+        st.tle_age_days = _as_float(pos.get("tle_age_days"))
         st.reason = ""
         return True
 
     # ------------------------------------------------------------------ 应用
     def rx_freq(self) -> Optional[float]:
-        """RX 调谐中心 = 标称下行 + Δ（有效且开启时）；否则 None（不补偿）。"""
+        """RX 调谐中心 = 标称下行 + Δ（有效且开启时）；否则 None（不补偿）。
+
+        ``application == "baseband"`` 时恒为 None：偏移交给接收链 NCO，
+        硬调谐保持标称，避免「硬调谐 + 基带」双倍补偿。
+        """
+        if self.state.application != "tuner":
+            return None
         if self.state.enabled and self.state.valid:
             return self.state.corrected_freq_hz
+        return None
+
+    def baseband_doppler_hz(self) -> Optional[float]:
+        """基带施加点应去除的 Δ（Hz）；非基带/未开启/失效时 None。"""
+        if self.state.application != "baseband":
+            return None
+        if self.state.enabled and self.state.valid:
+            return self.state.doppler_hz
         return None
 
     def tx_freq(self, uplink_hz: float) -> Optional[float]:
@@ -181,6 +246,24 @@ class DopplerLinkCompensator:
 # ---------------------------------------------------------------------------
 # 进程级单例（desktop 主窗口与 tc_uplink 工具面共用同一真相源）
 # ---------------------------------------------------------------------------
+def _engine_now_unix() -> Optional[float]:
+    """预测时刻统一取 TimeEngine（模拟时刻优先）；不可用则诚实返回 None。"""
+    try:
+        from .new_spacetime import get_time_engine
+        return float(get_time_engine().now_unix())
+    except Exception:  # noqa: BLE001 - 只用于溯源元数据，不伪造时间
+        return None
+
+
+def _as_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 _SINGLETON: Optional[DopplerLinkCompensator] = None
 
 
