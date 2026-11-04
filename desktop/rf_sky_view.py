@@ -69,7 +69,7 @@ import math
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Tuple, Set
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
@@ -427,14 +427,273 @@ def format_observer_chip(observer: Optional[Dict[str, float]]) -> str:
         return "未设置"
     ns = "N" if lat >= 0.0 else "S"
     ew = "E" if lon >= 0.0 else "W"
-    txt = f"{abs(lat):.2f}°{ns} {abs(lon):.2f}°{ew}"
+    txt = (f"{format_angle_deg(abs(lat), digits=2)}{ns} "
+           f"{format_angle_deg(abs(lon), digits=2)}{ew}")
     alt = observer.get("alt_m")
     if alt is not None:
         try:
-            txt += f" {float(alt):.0f}m"
+            txt += f" {_format_number(float(alt), 0, 'm')}"
         except (TypeError, ValueError):
             pass
     return txt
+
+
+# ============================================================================
+# 屏幕读数格式化：唯一实现（「每个数字的可信度」）
+# ----------------------------------------------------------------------------
+# 纪律：界面上出现的每个数值都必须经这里格式化，绘制/信息卡/过境面板不再
+# 各自拼 f-string。每个函数都写出单位；时间注明 UTC 或本地 + 偏移。
+#
+# 舍入策略（防「显示精度把误差藏起来」）：
+#   * 非零但按显示精度会舍成 0 的量 -> 显示 "<0.1°"（负值 ">-0.1°"），
+#     绝不把 0.04° 冒充成 0°；
+#   * 百分数在 0/100 边界自动多给一位（99.6% 不显示成 100%，0.04% 不显示
+#     成 0.0%），最多补到 4 位小数。
+# ============================================================================
+AU_KM = 149597870.7
+
+# 16 方位名：方位角语义（N/NE/E…）与度数同时显示，不让人猜 0° 是哪边。
+_COMPASS_16 = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+               "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+
+
+def _round_half_up(value: float, digits: int) -> float:
+    """四舍五入（远离零），不随 Python 的 banker's rounding 抖动。"""
+    q = 10.0 ** int(digits)
+    v = float(value)
+    return math.copysign(math.floor(abs(v) * q + 0.5) / q, v)
+
+
+def compass_point(azimuth_deg: float) -> str:
+    """方位角的 16 方位名（0°=N，顺时针）。"""
+    az = float(azimuth_deg) % 360.0
+    return _COMPASS_16[int((az + 11.25) // 22.5) % 16]
+
+
+def _format_number(value: float, digits: int, unit: str,
+                   signed: bool = False) -> str:
+    """数值 + 单位的统一格式化（角度/距离/星等/角径共用这一处）。
+
+    非零却被显示精度舍成 0 时返回 "<precision<unit>"（负值 ">-precision"），
+    明确告诉读者「比显示精度还小」，而不是给一个会被误读的 0。
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    d = max(0, int(digits))
+    step = 10.0 ** (-d)
+    r = _round_half_up(v, d)
+    if v != 0.0 and r == 0.0:
+        return f"{'>-' if v < 0 else '<'}{step:.{d}f}{unit}"
+    if signed:
+        return f"{r:+.{d}f}{unit}"
+    return f"{r:.{d}f}{unit}"
+
+
+def format_angle_deg(value: float, digits: int = 1,
+                     signed: bool = False) -> str:
+    """仰角/相位角/太阳高度等（°）。"""
+    return _format_number(value, digits, "°", signed=signed)
+
+
+def format_azimuth(azimuth_deg: float, digits: int = 1) -> str:
+    """方位角：度数 + 16 方位名（例 "210.3° SW"）。0°=北，顺时针。"""
+    try:
+        az = float(azimuth_deg)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(az):
+        return "—"
+    wrapped = az % 360.0
+    # 359.96° 舍入成 360.0° -> 折回 0.0°（显示成 360.0° 会让人以为越界）
+    if _round_half_up(wrapped, digits) >= 360.0:
+        wrapped = 0.0
+    return f"{format_angle_deg(wrapped, digits)} {compass_point(wrapped)}"
+
+
+def format_dms_deg(value: float, signed: bool = True,
+                   digits: int = 1) -> str:
+    """度分秒（赤纬等）：+ 40°42'46.1"。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    sign = "-" if v < 0 else ("+" if signed else "")
+    a = abs(v)
+    d = int(a)
+    rem = (a - d) * 60.0
+    m = int(rem)
+    s = _round_half_up((rem - m) * 60.0, digits)
+    if s >= 60.0:
+        s -= 60.0
+        m += 1
+    if m >= 60:
+        m -= 60
+        d += 1
+    if a > 0.0 and d == 0 and m == 0 and s == 0.0:
+        return f"{sign}<{10.0 ** -digits:.{digits}f}\""
+    return f"{sign}{d:3d}°{m:02d}'{s:0{3 + digits}.{digits}f}\""
+
+
+def format_hms_ra(ra_deg: float, digits: int = 1) -> str:
+    """赤经时分秒：12h 34m 56.7s。"""
+    try:
+        v = float(ra_deg)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    h = (v % 360.0) / 15.0
+    hh = int(h)
+    mm_all = (h - hh) * 60.0
+    mm = int(mm_all)
+    ss = _round_half_up((mm_all - mm) * 60.0, digits)
+    if ss >= 60.0:
+        ss -= 60.0
+        mm += 1
+    if mm >= 60:
+        mm -= 60
+        hh = (hh + 1) % 24
+    if v > 0.0 and hh == 0 and mm == 0 and ss == 0.0:
+        return f"<{10.0 ** -digits:.{digits}f}s"
+    return f"{hh:02d}h {mm:02d}m {ss:0{3 + digits}.{digits}f}s"
+
+
+def format_distance_km(km: float, digits: int = 2) -> str:
+    """站心距离（km）。"""
+    return _format_number(km, digits, " km")
+
+
+def format_distance_ly(ly: float, digits: int = 1) -> str:
+    """恒星距离（ly，光年）。"""
+    return _format_number(ly, digits, " ly")
+
+
+def format_distance_au(au: float, digits: int = 3) -> str:
+    """行星/太阳距离：AU + 十进制换算（万/亿 km），单位写明不缩写。"""
+    try:
+        v = float(au)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    km = v * AU_KM
+    a = abs(km)
+    if a >= 1e8:
+        q, unit = 1e8, "亿 km"
+    elif a >= 1e4:
+        q, unit = 1e4, "万 km"
+    else:
+        q, unit = 1.0, "km"
+    au_txt = _format_number(v, digits, " AU")
+    return f"{au_txt} · {km / q:,.1f} {unit}"
+
+
+def format_magnitude(mag: float, digits: int = 2) -> str:
+    """视星等（mag）——单位写在读数里，不只给一个裸数。"""
+    return _format_number(mag, digits, " mag")
+
+
+def format_arcsec(arcsec: float, digits: int = 1) -> str:
+    """视直径/角径（″）。至少 1 位小数：1.4″ 不显示成 1″。"""
+    return _format_number(arcsec, digits, "″")
+
+
+def format_arcmin(arcmin: float, digits: int = 1) -> str:
+    """视大小（′）。至少 1 位小数：1.4′ 不显示成 1′。"""
+    return _format_number(arcmin, digits, "′")
+
+
+def format_percent(fraction: float, digits: int = 1) -> str:
+    """被照亮比例 [0,1] -> 百分数；0/100 边界自动多给一位精度。"""
+    try:
+        v = float(fraction)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    pct = v * 100.0
+    d = max(0, int(digits))
+    # 99.6% 不显示成 100%、0.04% 不显示成 0.0%：边界处补精度，最多 4 位。
+    while d < 4 and 0.0 < pct < 100.0 \
+            and _round_half_up(pct, d) in (0.0, 100.0):
+        d += 1
+    return f"{_round_half_up(pct, d):.{d}f}%"
+
+
+def format_speed_kms(value: float, digits: int = 2) -> str:
+    """径向速度（km/s）。"""
+    return _format_number(value, digits, " km/s", signed=True)
+
+
+def format_frequency_mhz(hz: float, digits: int = 1) -> str:
+    """频率（MHz）。"""
+    try:
+        return _format_number(float(hz) / 1e6, digits, " MHz")
+    except (TypeError, ValueError):
+        return "—"
+
+
+def format_frequency_hz(hz: float, digits: int = 0) -> str:
+    """频率/多普勒（Hz，带符号）。"""
+    return _format_number(hz, digits, " Hz", signed=True)
+
+
+def _utc_datetime(when) -> Optional[datetime]:
+    """datetime 或 unix 秒 -> 带 UTC tzinfo 的 datetime；缺值返回 None。"""
+    if when is None:
+        return None
+    if isinstance(when, datetime):
+        dt = when
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    try:
+        return datetime.fromtimestamp(float(when), tz=timezone.utc)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def format_utc_time(when, fmt: str = "%H:%M") -> str:
+    """UTC 时刻（调用处的行标签必须写明 UTC）。"""
+    dt = _utc_datetime(when)
+    return "—" if dt is None else dt.strftime(fmt)
+
+
+def format_utc_datetime(when) -> str:
+    """UTC 日期时刻（含 UTC 后缀）。"""
+    dt = _utc_datetime(when)
+    return "—" if dt is None else dt.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def format_local_time(when, tz=None, fmt: str = "%H:%M:%S") -> str:
+    """本地时刻 + 明确的 UTC 偏移，例 "03:06:07 (UTC+08:00)"。
+
+    tz 缺省用系统本地时区；偏移由 tzinfo 在该时刻给出，夏令时切换自动正确
+    （调用 `astimezone`，不手算固定偏移）。
+    """
+    dt = _utc_datetime(when)
+    if dt is None:
+        return "—"
+    local = dt.astimezone(tz) if tz is not None else dt.astimezone()
+    off = local.utcoffset()
+    secs = int((off or timedelta(0)).total_seconds())
+    sign = "+" if secs >= 0 else "-"
+    mins = abs(secs) // 60
+    return f"{local.strftime(fmt)} (UTC{sign}{mins // 60:02d}:{mins % 60:02d})"
+
+
+def format_satellite_description(alt_deg: float, range_km: float,
+                                 range_rate_kms: float) -> str:
+    """卫星一句话读数（视图快转重算与 SatelliteTracker 共用同一口径）。"""
+    return (f"仰角 {format_angle_deg(alt_deg)} · "
+            f"距离 {format_distance_km(range_km)} · "
+            f"径向速度 {format_speed_kms(range_rate_kms)}")
 
 
 # ============================================================================
@@ -1263,8 +1522,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             obj.elevation_deg = alt_d
             obj.visible = True
             # 与 SatelliteTracker 喂入的文案同口径（信息卡不因刷新来源而变）
-            obj.description = (f"仰角{alt_d:.0f} 距离{dist_km:.0f}km "
-                               f"径向速度{rr:+.2f}km/s")
+            obj.description = format_satellite_description(alt_d, dist_km, rr)
 
         # --- 轨迹：锚点落后当前模拟时刻超过 ~2 帧模拟推进 → 重算未来 10 分钟 ---
         stale_s = min(self.TRAJ_MAX_STALE_S,
@@ -1504,7 +1762,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         self._lock_snap_rate = rate
         label = (f"×{abs(rate):g}" if rate > 0 else f"倒放×{abs(rate):g}")
-        text = (f"摄像机跟踪：{label} 快转下单帧目标位移 {step_deg:.1f}°，"
+        text = (f"摄像机跟踪：{label} 快转下单帧目标位移 "
+                f"{format_angle_deg(step_deg)}，"
                 f"平滑跟随跟不上，已改为逐帧直贴")
         if step_deg > self.LOCK_FAST_SLIDE_STEP_DEG:
             text += "（画面按帧跳进，建议降速观察）"
@@ -2297,8 +2556,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._doppler_label.setText("多普勒 --")
             return
         dop = res.get("doppler_shift_hz", 0.0)
-        sign = "+" if dop >= 0 else "−"
-        self._doppler_label.setText(f"多普勒 {sign}{abs(dop):.0f} Hz")
+        self._doppler_label.setText(
+            f"多普勒 {format_frequency_hz(dop)}")
 
     def _on_tune_satellite(self):
         """点击 → 算实时多普勒 → 发 tune_satellite_requested 给主窗口调谐。"""
@@ -3093,7 +3352,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setFont(f)
         painter.setPen(QColor(_t.COLORS["gray_100"]))
         painter.drawText(self.width() - 92, 18,
-                         f"FOV {self.view_state.fov_deg:4.1f}°")
+                         f"FOV {format_angle_deg(self.view_state.fov_deg)}")
         painter.restore()
 
     def _draw_camera_hud(self, painter: QPainter):
@@ -3154,7 +3413,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setFont(self._mono_font)
         label = QRectF(x0 + btn + gap, y0, label_w, btn)
         painter.drawText(label, Qt.AlignCenter,
-                         f"{self.view_state.fov_deg:.0f}°")
+                         format_angle_deg(self.view_state.fov_deg, digits=0))
         painter.restore()
 
     def _draw_grid(self, painter: QPainter):
@@ -3442,11 +3701,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 # （卫星是操作对象，用户要靠它决定调谐/跟踪）。
                 lines: List[Tuple[str, bool, float]] = [
                     (obj.name, False, -5.0),
-                    (f"EL {obj.elevation_deg:4.1f} AZ {obj.azimuth_deg:5.1f}",
+                    (f"EL {format_angle_deg(obj.elevation_deg)} "
+                     f"AZ {format_azimuth(obj.azimuth_deg)}",
                      True, 22.0),
                 ]
                 if obj.frequency_hz > 0:
-                    lines.append((f"{obj.frequency_hz / 1e6:.1f} MHz",
+                    lines.append((format_frequency_mhz(obj.frequency_hz),
                                   True, 36.0))
                 self._queue_label_block(0.5, QPointF(pos.x() + 10, pos.y()),
                                         lines, self._ink())
@@ -3503,38 +3763,28 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         title = f"NORAD {norad}" if norad else obj.name
         kind_label = info.get("kind_label", "Satellite")
 
-        def _dms(deg: float, signed: bool = True) -> str:
-            sign = "-" if deg < 0 else ("+" if signed else "")
-            a = abs(deg)
-            d = int(a)
-            m = int((a - d) * 60.0)
-            s = ((a - d) * 60.0 - m) * 60.0
-            return f"{sign}{d:3d}°{m:02d}'{s:04.1f}\""
-
-        def _hms(ra_deg: float) -> str:
-            h = ra_deg / 15.0
-            hh = int(h); mm = int((h - hh) * 60); ss = ((h - hh) * 60 - mm) * 60
-            return f"{hh:02d}h {mm:02d}m {ss:04.1f}s"
-
         rise = info.get("rise"); sset = info.get("set")
+
         def _hm(jd):
             if jd is None:
                 return "..:.."
-            from datetime import datetime, timezone
-            return datetime.fromtimestamp(_jtime.jd_to_unix(jd),
-                                          tz=timezone.utc).strftime("%H:%M")
+            return format_utc_time(_jtime.jd_to_unix(jd))
 
         kv = [
-            ("Magnitude", "—" if info.get("mag") is None else str(info["mag"])),
-            ("Distance", f"{info.get('dist_km', 0.0):.2f} km"),
-            ("Ra/Dec", f"{_hms(info['ra'])}  {_dms(info['dec'])}"
-                       if info.get("ra") is not None else "—"),
-            ("Az/Alt", f"{_dms(obj.azimuth_deg)}  {_dms(obj.elevation_deg)}"),
-            ("Visibility", f"Rise {_hm(rise)}   Set {_hm(sset)}"),
+            ("Magnitude (mag)", "—" if info.get("mag") is None
+             else format_magnitude(info["mag"])),
+            ("Distance (km)", format_distance_km(info.get("dist_km", 0.0))),
+            ("Ra/Dec (hms / °′″)",
+             f"{format_hms_ra(info['ra'])}  {format_dms_deg(info['dec'])}"
+             if info.get("ra") is not None else "—"),
+            ("Az/Alt (Az 0°=N)",
+             f"{format_azimuth(obj.azimuth_deg)}  "
+             f"{format_angle_deg(obj.elevation_deg)}"),
+            ("Rise/Set (UTC)", f"Rise {_hm(rise)}   Set {_hm(sset)}"),
         ]
         # 点星即听：该把收音机拧到哪（无则缺省行不画）
         if info.get("downlink_mhz"):
-            dl = f"{info['downlink_mhz']:.4f} MHz"
+            dl = format_frequency_mhz(info['downlink_mhz'] * 1e6, digits=4)
             if info.get("downlink_mode"):
                 dl += f" ({info['downlink_mode']})"
             kv.append(("Downlink", dl))
@@ -4022,20 +4272,21 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 info["mag"] = float(pos.magnitude)
                 info["ra"] = float(pos.ra_deg)
                 info["dec"] = float(pos.dec_deg)
-                info["dist_text"] = (f"{pos.distance_au:.3f} AU · "
-                                     f"{pos.distance_au * 149597870.7 / 1e6:,.1f} M km")
+                info["dist_text"] = format_distance_au(pos.distance_au)
                 if key == "moon":
                     # 照度 = 0.5*(1+cos 相位角)，直接从历表已有的相位角导出，
                     # 是月球最直观的一条事实（满/弦/新月），不引入新模型。
                     illum = 0.5 * (1.0 + math.cos(math.radians(pos.phase_angle_deg)))
-                    info["desc"] = (f"照度 {illum * 100.0:.0f}% · "
-                                    f"视直径 {pos.angular_diameter_arcsec:.1f}″ · "
-                                    f"相位角 {pos.phase_angle_deg:.1f}° · "
-                                    f"Meeus ch.47 月球理论 (J2000 视位置)")
+                    info["desc"] = (
+                        f"照度 {format_percent(illum)} · "
+                        f"视直径 {format_arcsec(pos.angular_diameter_arcsec)} · "
+                        f"相位角 {format_angle_deg(pos.phase_angle_deg)} · "
+                        f"Meeus ch.47 月球理论 (J2000 视位置)")
                 else:
-                    info["desc"] = (f"视直径 {pos.angular_diameter_arcsec:.1f}″ · "
-                                    f"相位角 {pos.phase_angle_deg:.1f}° · "
-                                    f"Meeus 低精度历表 (J2000 视位置)")
+                    info["desc"] = (
+                        f"视直径 {format_arcsec(pos.angular_diameter_arcsec)} · "
+                        f"相位角 {format_angle_deg(pos.phase_angle_deg)} · "
+                        f"Meeus 低精度历表 (J2000 视位置)")
                 rs = self._body_rise_set(pos.ra_deg, pos.dec_deg, jd)
                 info["rise"] = rs["rise_jd"]
                 info["set"] = rs["set_jd"]
@@ -4050,7 +4301,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 info["mag"] = float(star.vmag)
                 info["ra"] = float(star.ra_deg)
                 info["dec"] = float(star.dec_deg)
-                info["dist_text"] = (f"{star.dist_ly:.0f} ly"
+                info["dist_text"] = (format_distance_ly(star.dist_ly)
                                      if star.dist_ly > 0 else "—")
                 jd = self._current_jd()
                 rs = self._body_rise_set(star.ra_deg, star.dec_deg, jd)
@@ -4081,7 +4332,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 info["mag"] = float(entry.magnitude)
                 info["ra"] = float(entry.ra_deg)
                 info["dec"] = float(entry.dec_deg)
-                info["desc"] = f"角大小 {entry.size_arcmin:.0f}′ · " \
+                info["desc"] = f"角大小 {format_arcmin(entry.size_arcmin)} · " \
                                f"Messier/NGC 公开星表数据"
                 jd = self._current_jd()
                 rs = self._body_rise_set(entry.ra_deg, entry.dec_deg, jd)
@@ -4104,11 +4355,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     pass
             dist_au = s.get("distance_au")
             if dist_au:
-                info["dist_text"] = (f"{float(dist_au):.5f} AU · "
-                                     f"{float(dist_au) * 149597870.7 / 1e6:,.1f} M km")
+                info["dist_text"] = format_distance_au(float(dist_au), digits=5)
             dia = s.get("diameter_deg")
             if dia:
-                info["desc"] = (f"视直径 {float(dia) * 60.0:.1f}′ · "
+                info["desc"] = (f"视直径 {format_arcmin(float(dia) * 60.0)} · "
                                 f"视星等 -26.74（标准常数） · "
                                 f"solar_system 视位置")
             else:
@@ -4160,24 +4410,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         _t = tokens()
 
-        def _dms(deg: float, signed: bool = True) -> str:
-            sign = "-" if deg < 0 else ("+" if signed else "")
-            a = abs(deg)
-            d = int(a)
-            m = int((a - d) * 60.0)
-            s = ((a - d) * 60.0 - m) * 60.0
-            return f"{sign}{d:3d}°{m:02d}'{s:04.1f}\""
-
-        def _hms(ra_deg: float) -> str:
-            h = ra_deg / 15.0
-            hh = int(h); mm = int((h - hh) * 60); ss = ((h - hh) * 60 - mm) * 60
-            return f"{hh:02d}h {mm:02d}m {ss:04.1f}s"
-
         def _hm(jd):
             if jd is None:
                 return "..:.."
-            return datetime.fromtimestamp(_jtime.jd_to_unix(jd),
-                                          tz=timezone.utc).strftime("%H:%M")
+            return format_utc_time(_jtime.jd_to_unix(jd))
 
         rise = info.get("rise"); sset = info.get("set")
         if rise is None and sset is None:
@@ -4185,13 +4421,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         else:
             vis = f"Rise {_hm(rise)}   Set {_hm(sset)}"
         kv = [
-            ("Magnitude", "—" if info.get("mag") is None
-             else f"{info['mag']:.2f}"),
+            ("Magnitude (mag)", "—" if info.get("mag") is None
+             else format_magnitude(info["mag"])),
             ("Distance", str(info.get("dist_text") or "—")),
-            ("Ra/Dec", f"{_hms(info['ra'])}  {_dms(info['dec'])}"
-                       if info.get("ra") is not None else "—"),
-            ("Az/Alt", "—"),   # 实时值在绘制循环尾部刷新
-            ("Visibility", vis),
+            ("Ra/Dec (hms / °′″)",
+             f"{format_hms_ra(info['ra'])}  {format_dms_deg(info['dec'])}"
+             if info.get("ra") is not None else "—"),
+            ("Az/Alt (Az 0°=N)", "—"),   # 实时值在绘制循环尾部刷新
+            ("Rise/Set (UTC)", vis),
         ]
 
         painter.save()
@@ -4259,7 +4496,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         key_pen = QColor(_t.COLORS["gray_300"])
         val_pen = QColor(_t.COLORS["text_primary"])
         for idx, (k, v) in enumerate(kv):
-            if k == "Az/Alt":
+            if k == "Az/Alt (Az 0°=N)":
                 # 实时坐标: 与行星标记同一坐标链现算
                 v = "—"
                 if gs is not None and info.get("ra") is not None:
@@ -4269,7 +4506,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                                            info["dec"]),
                                             gs, self._current_jd())
                         az, alt = azalt_from_vec(vv)
-                        v = f"{_dms(az, signed=False)}  {_dms(alt)}"
+                        v = f"{format_azimuth(az)}  {format_angle_deg(alt)}"
                     except Exception:
                         v = "—"
             painter.setPen(key_pen)
@@ -4289,10 +4526,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     @staticmethod
     def _parse_distance_km(obj: SkyObject) -> float:
         import re
-        m = re.search(r"距离\s*([0-9.]+)\s*km", obj.description or "")
+        m = re.search(r"距离\s*([0-9,]+(?:\.[0-9]+)?)\s*km",
+                      obj.description or "")
         if m:
             try:
-                return float(m.group(1))
+                return float(m.group(1).replace(",", ""))
             except ValueError:
                 pass
         return 0.0
@@ -4303,7 +4541,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return 0.0
         import re
         v_rel = 0.0
-        m = re.search(r"径向速度\s*(-?[0-9.]+)\s*km/s", obj.description or "")
+        m = re.search(r"径向速度\s*([+-]?[0-9.]+)\s*km/s",
+                      obj.description or "")
         if m:
             v_rel = float(m.group(1)) * 1000.0
         else:
@@ -4446,8 +4685,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setFont(self._mono_font)
         painter.setPen(QPen(self._colors["antenna"], 2).color())
         painter.drawText(card_x + 80, y,
-                         f"AZ {self._antenna.azimuth_deg:5.1f} "
-                         f"EL {self._antenna.elevation_deg:4.1f}")
+                         f"AZ {format_azimuth(self._antenna.azimuth_deg)} "
+                         f"EL {format_angle_deg(self._antenna.elevation_deg)}")
 
         y += 18
         painter.setFont(self._font)
@@ -4467,7 +4706,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(ink)
         sun_alt = self._sun["alt"] if self._sun else None
         painter.drawText(card_x + 80, y,
-                         f"{sun_alt:5.1f} deg" if sun_alt is not None else "--")
+                         format_angle_deg(sun_alt) if sun_alt is not None else "--")
         if self._stars_hidden_by_daylight():
             # 明示：白天恒星整层隐藏（近似口径见 stars_hidden_by_daylight）。
             painter.setFont(self._gnss_label_font)
@@ -4481,10 +4720,18 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setFont(self._mono_font)
         painter.setPen(dim)
         utc_now = self._time_info.get("utc_time") or datetime.now(timezone.utc)
-        utc_str = utc_now.strftime("%H:%M:%S") if isinstance(utc_now, datetime) \
-            else str(utc_now)
         painter.drawText(card_x + 52, y,
-                         f"{utc_str} [{self._time_info.get('ntp_status', 'system')}]")
+                         f"{format_utc_time(utc_now, '%H:%M:%S')} "
+                         f"[{self._time_info.get('ntp_status', 'system')}]")
+
+        # 本地时刻与 UTC 同时给，偏移由系统时区/DST 现算（不写死 +08:00）
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "本地")
+        painter.setFont(self._mono_font)
+        painter.setPen(dim)
+        painter.drawText(card_x + 52, y, format_local_time(utc_now))
 
         y += 18
         painter.setFont(self._font)
@@ -4545,7 +4792,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         dim = QColor(_t.COLORS["gray_300"])
         painter.setFont(self._font)
         painter.setPen(ink)
-        painter.drawText(panel_x + 10, panel_y + 16, "未来过境 (24h)")
+        painter.drawText(panel_x + 10, panel_y + 16, "未来过境 (24h, UTC)")
 
         painter.setFont(self._mono_font)
         ty = panel_y + 16 + row_h
@@ -4559,7 +4806,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawText(panel_x + 66, ty, name)
             painter.setPen(self._colors["accent"])
             painter.drawText(panel_x + panel_w - 78, ty,
-                             f"{float(p.get('max_alt', 0)):4.0f} deg")
+                             format_angle_deg(float(p.get('max_alt', 0)),
+                                              digits=1).rjust(8))
             ty += row_h
         painter.restore()
 
@@ -5089,7 +5337,7 @@ class RFSkyViewPanel(QFrame):
             rate = eng.get_rate()
             suffix = "" if rate == 1.0 else (" ⏸" if rate == 0.0
                                              else f" ×{rate:g}")
-            self.time_label.setText(t.strftime("%Y-%m-%d %H:%M UTC") + suffix)
+            self.time_label.setText(format_utc_datetime(t) + suffix)
         except Exception:
             self.time_label.setText("实时")
 
@@ -5365,8 +5613,8 @@ class SatelliteTracker:
                 obj_type="satellite",
                 frequency_hz=freq_mhz * 1e6,
                 color=color,
-                description=f"仰角{alt_d:.0f} 距离{dist_km:.0f}km "
-                            f"径向速度{range_rate:+.2f}km/s",
+                description=format_satellite_description(
+                    alt_d, dist_km, range_rate),
             ))
 
             # 未来 10 分钟轨迹（每 60s 一点）
@@ -5476,8 +5724,7 @@ class SatelliteTracker:
                 peak_unix = t0_unix + best_t
                 rows.append({
                     "name": name,
-                    "rise": datetime.fromtimestamp(
-                        peak_unix, tz=timezone.utc).strftime("%H:%M:%S"),
+                    "rise": format_utc_time(peak_unix, "%H:%M:%S"),
                     "peak_unix": peak_unix,
                     "max_alt": best_el,
                     "duration_min": 0.0,

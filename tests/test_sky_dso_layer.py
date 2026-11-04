@@ -302,10 +302,10 @@ def test_status_card_states_no_galaxy_layer(monkeypatch):
     """状态卡必须明示「无数据·不提供」；不画装饰性银河带冒充图层。"""
     v = _new_view()
     try:
-        shown = _card_row_crop(v, 118, 16)
+        shown = _card_row_crop(v, 136, 16)
         # 反证：把该行文案清空后同一区域必须变（证明绘制路径真在写这句）
         monkeypatch.setattr(rf_sky_view, "GALAXY_LAYER_NOTE", "")
-        blank = _card_row_crop(v, 118, 16)
+        blank = _card_row_crop(v, 136, 16)
     finally:
         v.close()
     assert _diff_pixels(shown, blank) > 20, "状态卡没有写「本视图无银河图层」的说明"
