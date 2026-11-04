@@ -260,6 +260,45 @@ class TestUiFlowGuards:
         assert w._app_mode == "ide"
 
 
+    def test_stop_tracking_action_follows_tracking_state(self, window, monkeypatch):
+        """假活修复：无跟踪时「停止卫星跟踪」必须置灰；启动/自动停止双向同步。"""
+        import main_window as mw
+
+        w = self._window(window)
+        act = getattr(w, "_sat_stop_action", None)
+        assert act is not None, "缺少「停止卫星跟踪」动作引用"
+        w._stop_satellite_tracking()  # 确保从空闲态开始
+        assert act.isEnabled() is False, "无跟踪目标时停止动作仍可点（假活）"
+        assert "无跟踪目标" in act.toolTip()
+
+        class _StubTracker:
+            selected_name = ""
+
+            def __init__(self, gs):
+                self.ground_station = gs
+                self.freq = 0.0
+
+            def select_satellite(self, name):
+                self.selected_name = name
+                return True
+
+            def set_downlink_freq(self, hz):
+                self.freq = float(hz)
+
+            def downlink_freq_hz(self):
+                return self.freq
+
+        monkeypatch.setattr(mw, "LoopSatTracker", _StubTracker)
+        monkeypatch.setattr(w, "_poll_satellite_track", lambda: None)
+        w._observer_lat, w._observer_lon = 0.0, 0.0  # 中性示例站点
+        w._start_satellite_tracking("ISS (ZARYA)", 145_800_000.0)
+
+        assert act.isEnabled() is True, "跟踪启动后停止动作仍置灰"
+        w._stop_satellite_tracking()
+        assert act.isEnabled() is False, "自动/手动停止后动作未复位（又变回假活）"
+        assert "无跟踪目标" in act.toolTip()
+
+
 def test_about_dialog_contains_dso_attribution(monkeypatch):
     """许可义务：关于框必须保留 OpenNGC / CC BY-SA 4.0 署名，且文案不被截断。"""
     import main_window as mw

@@ -794,7 +794,12 @@ class MainWindow(QMainWindow):
 
         sat_stop_action = QAction("停止卫星跟踪", self)
         sat_stop_action.triggered.connect(self._stop_satellite_tracking)
+        # 跟踪未运行时置灰：点下去走空闲早退、界面毫无变化＝假活。
+        # 状态统一由 _sync_tracking_ui 出口刷新（不另存第二份布尔）。
+        sat_stop_action.setEnabled(False)
+        sat_stop_action.setToolTip("当前无跟踪目标")
         tools_menu.addAction(sat_stop_action)
+        self._sat_stop_action = sat_stop_action
 
         sat_tle_action = QAction("更新卫星 TLE (Celestrak)", self)
         sat_tle_action.triggered.connect(self._on_update_sat_tle)
@@ -3004,6 +3009,13 @@ class MainWindow(QMainWindow):
             combo.setCurrentIndex(match if match >= 0 else 0)
             combo.blockSignals(False)
             _update_param_state()
+            # 刷新要有可观察结果：设备集合没变时也不能"点了什么都不发生"
+            if new_devices:
+                self.statusBar().showMessage(
+                    f"检测到 {len(new_devices)} 台 SDR 设备", 3000)
+            else:
+                self.statusBar().showMessage(
+                    "未发现 SDR 设备（请检查 USB/驱动后点刷新）", 5000)
 
         refresh_btn.clicked.connect(_reload_devices)
 
@@ -6535,6 +6547,19 @@ class MainWindow(QMainWindow):
             return
         self._start_satellite_tracking(name, self.sat_track_panel.current_downlink_hz())
 
+    def _sync_tracking_ui(self, tracking: bool) -> None:
+        """跟踪状态 → 面板按钮 + 「停止卫星跟踪」动作（单一真相源出口）。
+
+        启动/手动停止/过境结束自动停/断开清理都走这里：入口和退出必须同步，
+        否则无目标时动作仍可点，点下去只会静默早退（假活）。
+        """
+        self.sat_track_panel.set_tracking_state(bool(tracking))
+        act = getattr(self, "_sat_stop_action", None)
+        if act is not None:
+            act.setEnabled(bool(tracking))
+            act.setToolTip("停止当前卫星跟踪并恢复原频率/模式" if tracking
+                           else "当前无跟踪目标")
+
     def _start_satellite_tracking(self, sat_name: str, downlink_freq_hz: float):
         """进入闭环自动跟踪：选星 -> 500ms 轮询 az/el/多普勒 -> 自动调谐 SDR。
 
@@ -6547,7 +6572,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("卫星跟踪不可用（缺 skyfield 依赖）", 4000)
             return
         if self._observer_lat is None or self._observer_lon is None:
-            self.sat_track_panel.set_tracking_state(False)
+            self._sync_tracking_ui(False)
             self.statusBar().showMessage(
                 "需要观测者位置：连接 GNSS 或在 gui_config.json 配置 observer_lat/lon",
                 6000)
@@ -6589,7 +6614,7 @@ class MainWindow(QMainWindow):
             self._sat_track_timer.setInterval(500)
             self._sat_track_timer.timeout.connect(self._poll_satellite_track)
         self._sat_track_timer.start()
-        self.sat_track_panel.set_tracking_state(True)
+        self._sync_tracking_ui(True)
         self.statusBar().showMessage(
             f"开始跟踪 {sat_name}（下行 {downlink_freq_hz/1e6:.4f} MHz）", 4000)
         self._poll_satellite_track()  # 立即先调谐一次
@@ -6730,7 +6755,7 @@ class MainWindow(QMainWindow):
         # （test_auto_stop_resets_sky_button 钉住）。
         if not active and not self._gimbal_follow:
             self._sync_sky_track_btn(False)
-            self.sat_track_panel.set_tracking_state(False)
+            self._sync_tracking_ui(False)
             return
         if self._sat_track_timer is not None:
             self._sat_track_timer.stop()
@@ -6741,7 +6766,7 @@ class MainWindow(QMainWindow):
             self._update_doppler_chip(get_compensator())
         except Exception:
             pass
-        self.sat_track_panel.set_tracking_state(False)
+        self._sync_tracking_ui(False)
         self._sync_sky_track_btn(False)  # 自动停（过境结束）也复位天空图开关
         if self._gimbal_follow:
             # 云台跟随随跟踪单点停止：复位开关 + 下发停机（固件负值=释放）

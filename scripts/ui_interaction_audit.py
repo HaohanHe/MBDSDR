@@ -89,6 +89,8 @@ DISABLED_REASONS: dict[str, str] = {
                        "整组置灰（control_panel.py 的 `w.setEnabled(self._sdr_connected)`）",
     "按钮|断开|NtripConfigDialog": "NTRIP 配置对话框内尚未建立连接",
     "菜单项|工具(&T) / FM 扫频找台|*": "未连接 SDR（FM 扫频需要可调谐的本地接收机）",
+    "菜单项|工具(&T) / 停止卫星跟踪|*":
+        "当前无跟踪目标：主窗口 `_sync_tracking_ui` 随跟踪状态启用/置灰",
 }
 
 #: 会起线程 / 联网 / 写用户数据的动作：不实时触发，只登记代码依据。
@@ -114,11 +116,6 @@ SKIP_LIVE: dict[str, str] = {
 
 #: 已确认是问题、但修复点不在本线文件权限内的条目（白名单必须给理由）。
 FALSE_ALIVE_WHITELIST: dict[str, str] = {
-    "菜单项|工具(&T) / 停止卫星跟踪|MainWindow":
-        "无跟踪任务时 `_stop_satellite_tracking` 在 "
-        "`desktop/main_window.py:6584-6590` 主动早退（刻意不刷「已停止」假提示）。"
-        "修法是主窗口按 `_sat_track_timer/gimbal_follow` 置灰该菜单项；"
-        "`main_window.py` 归操作逻辑线，已登记 docs/limitations-register.md",
     "按钮|刷新|DevicePanel":
         "`device_panel._refresh_devices` 确实重枚举设备并把状态写成"
         "「检测到 N 台设备」；设备集合/状态未变时界面零变化（幂等刷新，"
