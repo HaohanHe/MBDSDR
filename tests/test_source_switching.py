@@ -7,7 +7,23 @@ import threading
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from mbdsdr_ai.sdr_backend import SDRBackendManager
+
+_CREATED: list = []
+
+
+@pytest.fixture(autouse=True)
+def _stop_stub_threads():
+    """无论断言是否失败，测试结束都收掉替身线程，避免污染其他用例。"""
+    yield
+    for be in _CREATED:
+        be._stop.set()
+        if getattr(be, "_thread", None) is not None:
+            be._thread.join(timeout=0.5)
+            be._thread = None
+    _CREATED.clear()
 
 
 class _StubDevice:
@@ -38,6 +54,7 @@ class _StubBackend:
         self._sdr = None
         self._stop = threading.Event()
         self._thread = None
+        _CREATED.append(self)
 
     def connect(self) -> bool:
         if self._connect_delay:
