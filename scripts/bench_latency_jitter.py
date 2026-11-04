@@ -19,9 +19,9 @@
 
 阈值（测试钉住，只许收紧）：
 
-  * ``MAX_AUDIO_P99_MS = 250``、``MAX_WATERFALL_P99_MS = 300``；
-  * ``MAX_JITTER_P99_MINUS_P50_MS = 100``；
-  * ``MAX_WRITE_GAP_S = 0.25``；
+  * ``MAX_AUDIO_P99_MS = 50``、``MAX_WATERFALL_P99_MS = 80``；
+  * ``MAX_JITTER_P99_MINUS_P50_MS = 30``；
+  * ``MAX_WRITE_GAP_S = 0.15``；
   * ``MIN_STAT_SAMPLES = 200``（样本不足则统计不可信，判失败）。
 
 结果写 ``output/bench/latency_jitter_<ts>.json``。成因提示按现象分类输出，

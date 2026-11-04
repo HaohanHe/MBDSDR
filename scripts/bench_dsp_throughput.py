@@ -9,6 +9,10 @@
   * ``wfm_rx``          WFMReceiver.process（信道 FIR + 鉴频 + 48k 重采样 + 去加重）
   * ``record_write``    cf32 交织 + 缓冲写盘（与 RecordTap 落盘路径同构）
 
+附加口径（``signal_dispatch``）：跨线程 queued 信号的分发开销（QObject
+Emitter → 主线程槽，含 GIL 与事件循环，不含 QPainter 绘制），给出单信号
+微秒数与生产最坏信号率下的占用比。
+
 两个口径：
 
 1. **微基准**：单线程逐环节计时。block = 16384 样本。实时倍率
@@ -375,6 +379,64 @@ def profile_hotspots(sr: float = 2400000.0, iterations: int = 10,
     return out
 
 
+def bench_signal_overhead(count: int = 2000, timeout_s: float = 10.0) -> dict:
+    """跨线程 queued 信号投递开销（线程切换 + 事件循环，不涉硬件）。
+
+    生产最坏情形：2.4 MS/s / 16384 样本 = 146.5 个 frame_ready/s。这里用
+    等量的 queued 信号从 Python 线程发往主线程，得到单个信号成本与
+    2.4MS/s 下的主线程占用比例。
+    """
+    import threading
+
+    from PySide6.QtCore import QObject, Signal, Slot
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication(sys.argv[:1])
+
+    class _Emitter(QObject):
+        sig = Signal(int)
+
+    class _Probe(QObject):
+        def __init__(self):
+            super().__init__()
+            self.received = 0
+
+        @Slot(int)
+        def on_signal(self, _i: int) -> None:
+            self.received += 1
+
+    emitter, probe = _Emitter(), _Probe()
+    emitter.sig.connect(probe.on_signal)
+
+    def _work():
+        for i in range(count):
+            emitter.sig.emit(i)
+
+    th = threading.Thread(target=_work, daemon=True)
+    t0 = time.perf_counter()
+    th.start()
+    while probe.received < count and time.perf_counter() - t0 < timeout_s:
+        app.processEvents()
+        time.sleep(0.0005)
+    elapsed = time.perf_counter() - t0
+    th.join(timeout=2.0)
+    per_us = (elapsed / count * 1e6) if count else None
+    signals_per_s = (count / elapsed) if elapsed > 0 else None
+    worst_rate = 2400000.0 / BLOCK_SAMPLES
+    duty = ((worst_rate / signals_per_s) * 100.0
+            if signals_per_s else None)
+    return {
+        "count": count,
+        "delivered": probe.received,
+        "elapsed_s": round(elapsed, 3),
+        "per_signal_us": round(per_us, 2) if per_us else None,
+        "max_signals_per_s": round(signals_per_s, 0) if signals_per_s else None,
+        "production_worst_signals_per_s": round(worst_rate, 1),
+        "duty_at_worst_pct": round(duty, 2) if duty is not None else None,
+        "note": "跨线程 queued 信号（含 GIL/事件循环）；不含实际 QPainter 绘制",
+    }
+
+
 def build_report(rates=RATES, seconds: float = E2E_SECONDS,
                  reps: int = MICRO_REPS, quick: bool = False,
                  include_hotspots: bool = False) -> dict:
@@ -407,6 +469,8 @@ def build_report(rates=RATES, seconds: float = E2E_SECONDS,
         },
         "rates": [],
     }
+    report["signal_dispatch"] = bench_signal_overhead(
+        count=300 if quick else 2000)
     if include_hotspots:
         # 热点归因跑在最高速率档（峰载下 CPU 分布最有代表性）
         report["hotspots"] = profile_hotspots(sr=max(rates))
