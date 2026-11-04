@@ -707,6 +707,49 @@ class RecordingLibrary:
         return LibraryResult(True, "ok", f"修复记录 {len(records)} 条",
                              {"records": records, "malformed_lines": malformed})
 
+    def stats(self) -> LibraryResult:
+        """库健康摘要：按状态计数、活动/回收站字节、未知元数据条目数。"""
+        loaded = self.load()
+        if not loaded.ok:
+            return loaded
+        entries = [RecordingEntry.from_dict(d) for d in loaded.data["entries"]]
+        by_state: Dict[str, int] = {}
+        active_entries = 0
+        active_bytes = 0
+        trashed_bytes = 0
+        missing_bytes = 0
+        unknown_meta = 0
+        for e in entries:
+            by_state[e.state] = by_state.get(e.state, 0) + 1
+            if e.state in ("trashed", "duplicate"):
+                trashed_bytes += int(e.size_bytes)
+            elif e.state == "missing":
+                missing_bytes += int(e.size_bytes)
+            else:
+                active_entries += 1
+                active_bytes += int(e.size_bytes)
+                if e.unknown_fields:
+                    unknown_meta += 1
+        journal = self.journal(limit=0)
+        journal_records = (len(journal.data["records"]) if journal.ok else 0)
+        return LibraryResult(
+            True, "ok", f"共 {len(entries)} 条，活动 {active_entries} 条",
+            {
+                "root": self.root,
+                "entries_total": len(entries),
+                "by_state": by_state,
+                "active_entries": active_entries,
+                "active_bytes": active_bytes,
+                "trashed_bytes": trashed_bytes,
+                "missing_bytes": missing_bytes,
+                "missing_entries": by_state.get("missing", 0),
+                "metadata_unknown_entries": unknown_meta,
+                "journal_records": journal_records,
+                "format_version": loaded.data.get("format_version"),
+                "library_revision": loaded.data.get("revision"),
+            },
+        )
+
     # ── 登记录音 ─────────────────────────────────────────────────────────
     def add_recording(self, data_path: str, *,
                       metadata: Optional[Dict[str, Any]] = None,
