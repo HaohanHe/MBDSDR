@@ -142,6 +142,32 @@ class TestSearch:
         v._on_search_text("")
         assert v._search_results == []
 
+    def test_moon_pick_card_is_moon_not_planet(self):
+        """月球可经同一条历表拾取（compute_all 含 moon），但信息卡如实标"Moon/月亮"，
+        不回退英文 "moon"、不误标 "Planet"；desc 给照度（最直观的月相事实）。"""
+        v = _new_view()
+        v.on_body_picked({"kind": "planet", "key": "moon"})
+        info = v._body_info or {}
+        assert info.get("title") == "月亮", \
+            f"月球标题应中文'月亮'，实测 {info.get('title')!r}"
+        assert info.get("kind_label") == "Moon", \
+            f"月球类别应'Moon'非'Planet'，实测 {info.get('kind_label')!r}"
+        assert info.get("mag") is not None and info.get("ra") is not None
+        assert "照度" in str(info.get("desc")), \
+            f"月球 desc 应含照度，实测 {info.get('desc')!r}"
+        # 视直径已按真角秒报（承 compute_moon 单位纠正），非旧的 km 数 ~3475
+        assert "视直径" in str(info.get("desc"))
+
+    def test_planet_pick_card_still_planet(self):
+        """对照：真行星不受月球特判影响，仍标 "Planet" 且中文标题。"""
+        v = _new_view()
+        v.on_body_picked({"kind": "planet", "key": "mars", "zh": "火星"})
+        info = v._body_info or {}
+        assert info.get("title") == "火星"
+        assert info.get("kind_label") == "Planet"
+        assert "照度" not in str(info.get("desc")), \
+            "行星 desc 不该混进月球专用的照度行"
+
 
 class TestPicking:
     def test_click_planet_picks_body(self):

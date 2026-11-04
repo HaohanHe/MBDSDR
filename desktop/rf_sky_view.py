@@ -2948,21 +2948,40 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         kind = body.get("kind")
         if kind == "planet":
             key = str(body.get("key"))
-            zh = str(body.get("zh") or _PLANET_STYLE.get(key, {}).get("zh", key))
             jd = self._current_jd()
             pos = self._planet_positions(jd).get(key)
-            info["title"] = zh
-            info["kind_label"] = "Planet"
-            info["aliases"] = [key.capitalize()]
+            if key == "moon":
+                # 月球走同一条历表（compute_all 含 moon）与同一张信息卡骨架，
+                # 但它不是行星：标题给中文"月亮"、类别标"Moon"。_PLANET_STYLE
+                # 无 moon 项，这里显式补齐而不塞进行星样式表——塞进去会让
+                # _draw_planets 给月球多画一颗行星点，与 _draw_celestial_bodies
+                # 的大标记重叠（月球由后者专画）。
+                info["title"] = "月亮"
+                info["kind_label"] = "Moon"
+                info["aliases"] = ["Luna"]
+            else:
+                zh = str(body.get("zh") or _PLANET_STYLE.get(key, {}).get("zh", key))
+                info["title"] = zh
+                info["kind_label"] = "Planet"
+                info["aliases"] = [key.capitalize()]
             if pos is not None:
                 info["mag"] = float(pos.magnitude)
                 info["ra"] = float(pos.ra_deg)
                 info["dec"] = float(pos.dec_deg)
                 info["dist_text"] = (f"{pos.distance_au:.3f} AU · "
                                      f"{pos.distance_au * 149597870.7 / 1e6:,.1f} M km")
-                info["desc"] = (f"视直径 {pos.angular_diameter_arcsec:.1f}″ · "
-                                f"相位角 {pos.phase_angle_deg:.1f}° · "
-                                f"Meeus 低精度历表 (J2000 视位置)")
+                if key == "moon":
+                    # 照度 = 0.5*(1+cos 相位角)，直接从历表已有的相位角导出，
+                    # 是月球最直观的一条事实（满/弦/新月），不引入新模型。
+                    illum = 0.5 * (1.0 + math.cos(math.radians(pos.phase_angle_deg)))
+                    info["desc"] = (f"照度 {illum * 100.0:.0f}% · "
+                                    f"视直径 {pos.angular_diameter_arcsec:.1f}″ · "
+                                    f"相位角 {pos.phase_angle_deg:.1f}° · "
+                                    f"Meeus ch.47 月球理论 (J2000 视位置)")
+                else:
+                    info["desc"] = (f"视直径 {pos.angular_diameter_arcsec:.1f}″ · "
+                                    f"相位角 {pos.phase_angle_deg:.1f}° · "
+                                    f"Meeus 低精度历表 (J2000 视位置)")
                 rs = self._body_rise_set(pos.ra_deg, pos.dec_deg, jd)
                 info["rise"] = rs["rise_jd"]
                 info["set"] = rs["set_jd"]
