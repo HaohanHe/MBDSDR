@@ -68,6 +68,11 @@ __all__ = [
     "predict_upcoming_passes",
 ]
 
+try:
+    from .time_basis import validate_pass_window
+except ImportError:  # 扁平导入（脚本/测试直接 import sat_passes）
+    from time_basis import validate_pass_window
+
 # 光速 m/s（c = 299792458 m/s，国际定义）。
 C_LIGHT_MPS = 299792458.0
 
@@ -295,13 +300,15 @@ def predict_passes(
             t_set_s = coarse[j - 1][0]
 
         # P11 守卫：负时长（时钟回跳/输入错乱）绝不当成正常过境输出。
-        if t_set_s < t_rise_s or (t_set_s - t_rise_s) <= 0.0:
+        # 判定口径统一走 time_basis.validate_pass_window（单一事实源）。
+        window = validate_pass_window(t_rise_s, t_set_s)
+        if not window["ok"]:
             if anomalies is not None:
                 anomalies.append({
                     "satellite": name,
                     "reason": "non_positive_duration",
                     "detail": (f"rise={t_rise_s:.1f}s set={t_set_s:.1f}s；"
-                               "疑似系统时钟回跳或时间输入错乱，已丢弃该过境"),
+                               f"{window['warning']}，已丢弃该过境"),
                 })
             i = max(j, i + 1)
             continue

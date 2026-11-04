@@ -529,6 +529,10 @@ def _predict_passes_impl(
     """
     _require_sgp4()
     from .tle_integrity import accuracy, freshness, verify_identity
+    try:
+        from .time_basis import validate_pass_window
+    except ImportError:  # 扁平导入（脚本直接 import orbit）
+        from time_basis import validate_pass_window
 
     coarse_step = 60.0   # 粗扫量级（~0.5min）
     fine_step = 2.0      # pass 内采样步长，找中天/多普勒极值
@@ -623,6 +627,18 @@ def _predict_passes_impl(
                 t_set = _bisect_threshold(_el_at, coarse[j - 1][0], coarse[j][0], min_elevation)
             else:
                 t_set = coarse[j - 1][0]
+
+            # P11 守卫：负时长/零时长（时钟回跳或输入错乱）丢弃并留痕，
+            # 绝不当正常过境输出（口径与 sat_passes 共用 validate_pass_window）。
+            window = validate_pass_window(t_rise, t_set)
+            if not window["ok"]:
+                degraded.append({
+                    "satellite": name, "catnr": catnr,
+                    "reason": "non_positive_duration",
+                    "detail": window["warning"],
+                })
+                i = j
+                continue
 
             # c) pass 内细采样找最大仰角、方位、多普勒
             seg_states = []
