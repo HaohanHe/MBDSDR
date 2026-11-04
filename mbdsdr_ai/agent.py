@@ -21,6 +21,7 @@ import math
 import os
 import time
 import tempfile
+import threading
 from typing import List, Dict, Any, Optional, Callable
 
 from .config import AgentConfig
@@ -105,6 +106,15 @@ def _tool_result_to_model_content(result) -> str:
     if ns:
         content = content + "\n[下一步建议] " + ns
     return content
+
+
+# 并发/取消相关的运行时字段是惰性创建的（测试里有些 agent 用 object.__new__
+# 构造，没有走 __init__）。用模块级锁保证多线程首次创建不会各拿一把锁。
+_CONCURRENCY_INIT_LOCK = threading.Lock()
+
+# chat() 并发被拒时的返回码（调用方据此区分「模型失败」与「本机正忙」）
+BUSY_ERROR = "agent_busy"
+CANCEL_ERROR = "cancelled"
 
 
 class MBDSDRAgent:
@@ -3396,6 +3406,41 @@ class MBDSDRAgent:
 
     # ── 核心对话循环 ────────────────────────────────────
 
+    # ── 并发与取消（P7.4）────────────────────────────────
+
+    def _ensure_concurrency_state(self) -> None:
+        """惰性创建并发控制字段（兼容 object.__new__ 构造的测试 agent）。"""
+        if getattr(self, "_chat_lock", None) is not None:
+            return
+        with _CONCURRENCY_INIT_LOCK:
+            if getattr(self, "_chat_lock", None) is None:
+                self._chat_lock = threading.Lock()
+                self._cancel_event = threading.Event()
+                self._chat_active = False
+
+    def is_busy(self) -> bool:
+        """是否有 chat 请求正在执行（供 UI/诊断查询）。"""
+        self._ensure_concurrency_state()
+        return bool(getattr(self, "_chat_active", False))
+
+    def request_cancel(self) -> bool:
+        """请求取消当前进行中的 chat。
+
+        返回是否确实有请求在跑（空闲时取消是 no-op，返回 False）。
+        取消在安全点生效：轮次之间、流式读取中、工具批次之间、工具重试
+        等待前。正在同步执行的单个工具不会被强行打断（Python 无法安全
+        终止线程），它执行完后不再继续下一个工具。
+        """
+        self._ensure_concurrency_state()
+        active = bool(getattr(self, "_chat_active", False))
+        if active:
+            self._cancel_event.set()
+        return active
+
+    def _cancel_pending(self) -> bool:
+        ev = getattr(self, "_cancel_event", None)
+        return bool(ev is not None and ev.is_set())
+
     def _build_tool_selection(self, request: str):
         """P7：按本轮请求与上下文窗口挑选工具 schema 子集。
 
@@ -3460,6 +3505,40 @@ class MBDSDRAgent:
 
     def chat(self, user_input: str, max_tool_rounds: int = 10,
              on_delta=None) -> Dict[str, Any]:
+        """处理用户输入（并发安全 + 可取消的外壳）。
+
+        - 同一 agent 同时只允许一个请求执行；第二个请求**不排队、不共享
+          上下文**，立刻返回 ``error=agent_busy``（调用方可提示稍后再试）。
+        - 执行期间可用 request_cancel() 请求取消；取消在安全点生效，
+          返回 ``cancelled=True`` 且本轮不算成功。
+        """
+        self._ensure_concurrency_state()
+        if not self._chat_lock.acquire(blocking=False):
+            return {
+                "content": "上一条请求仍在处理中，请稍候再试，或先取消当前请求。",
+                "tool_calls": [],
+                "tool_results": [],
+                "usage": {},
+                "latency_ms": 0,
+                "compacted": False,
+                "error": BUSY_ERROR,
+                "interrupted": False,
+                "cancelled": False,
+                "busy": True,
+                "rounds": 0,
+            }
+        try:
+            # 只有拿到锁、真正开始处理时才清取消标志：空闲时的取消是 no-op
+            self._cancel_event.clear()
+            self._chat_active = True
+            return self._chat_impl(user_input, max_tool_rounds, on_delta)
+        finally:
+            self._chat_active = False
+            self._cancel_event.clear()
+            self._chat_lock.release()
+
+    def _chat_impl(self, user_input: str, max_tool_rounds: int = 10,
+                   on_delta=None) -> Dict[str, Any]:
         """
         处理用户输入，返回 Agent 回复。
 
@@ -3481,6 +3560,9 @@ class MBDSDRAgent:
             "latency_ms": float,      # 总耗时
             "compacted": bool,        # 是否触发了压缩
             "error": str,             # 错误信息（如果有）
+            "interrupted": bool,      # 流中断/取消导致本轮未完成
+            "cancelled": bool,        # 是否由 request_cancel() 主动取消
+            "busy": bool,             # 是否因并发（已有请求在跑）被拒
         }
         """
         start_time = time.time()
@@ -3496,6 +3578,10 @@ class MBDSDRAgent:
                 "latency_ms": 0,
                 "compacted": False,
                 "error": "api_key_not_set",
+                "interrupted": False,
+                "cancelled": False,
+                "busy": False,
+                "rounds": 0,
             }
 
         # 1. 添加用户消息
@@ -3528,9 +3614,17 @@ class MBDSDRAgent:
         compacted = False
         final_content = ""
         interrupted = False
+        cancelled = False
         last_error = None
 
         for round_num in range(max_tool_rounds):
+            # P7.4：轮次之间检查取消（流未开始/上一批工具已结束）
+            if self._cancel_pending():
+                cancelled = True
+                interrupted = True
+                last_error = CANCEL_ERROR
+                final_content = "已按请求取消本轮对话（尚未开始新的模型轮次）。"
+                break
             # 检查是否需要压缩
             if self.context_manager.needs_compaction():
                 self.context_manager.compact()
@@ -3542,20 +3636,50 @@ class MBDSDRAgent:
             response = {"success": True, "content": "", "tool_calls": [],
                         "usage": {}, "model": self.model_manager.model,
                         "latency_ms": 0}
+            streamed = ""
+            stream = None
             try:
-                for ev in self.model_manager.chat_stream(messages=messages,
-                                                         tools=tools,
-                                                         tool_choice="auto"):
+                stream = self.model_manager.chat_stream(messages=messages,
+                                                        tools=tools,
+                                                        tool_choice="auto")
+                for ev in stream:
+                    # P7.4：流式读取中取消——停止消费并关闭生成器，
+                    # 不把已收到的半截文本当成完整回复。
+                    if self._cancel_pending():
+                        cancelled = True
+                        break
                     if ev.get("done"):
                         response = ev
-                    elif on_delta is not None and ev.get("delta"):
-                        try:
-                            on_delta(ev["delta"])
-                        except Exception:
-                            pass
+                    elif ev.get("delta"):
+                        streamed += ev["delta"] if isinstance(ev["delta"], str) else ""
+                        if on_delta is not None:
+                            try:
+                                on_delta(ev["delta"])
+                            except Exception:
+                                pass
             except Exception as e:
                 response = {"success": False, "content": "", "tool_calls": [],
                             "usage": {}, "error": str(e)}
+            finally:
+                # 显式关闭流：取消/异常后不把 HTTP 流和后续消费留在后台
+                if stream is not None:
+                    try:
+                        close = getattr(stream, "close", None)
+                        if close:
+                            close()
+                    except Exception:
+                        pass
+
+            if cancelled:
+                interrupted = True
+                last_error = CANCEL_ERROR
+                partial = streamed.strip()
+                if partial:
+                    final_content = (partial + "\n\n（已按请求取消：以上为取消前收到"
+                                     "的部分内容，本轮请求未完成。）")
+                else:
+                    final_content = "已按请求取消本轮对话（模型输出被中止）。"
+                break
 
             # 累计用量
             usage = response.get("usage", {})
@@ -3632,6 +3756,20 @@ class MBDSDRAgent:
                 tc_id = tc.get("id", "") or f"call_{int(time.time()*1000)}_{i}"
                 tc["id"] = tc_id
 
+                # P7.4：取消后不再执行剩余工具，但仍为每个 tool_call_id 写回
+                # 一条「已取消」结果，保证 assistant(tool_calls) ↔ tool 链完整
+                # （否则历史无法再作为合法请求发给模型）。
+                if self._cancel_pending():
+                    cancelled = True
+                    cancelled_content = "[已取消] 用户中途取消，该工具未执行。"
+                    all_tool_results.append(ToolResult(
+                        success=False, content=cancelled_content,
+                        error=CANCEL_ERROR).to_dict())
+                    self.context_manager.add_tool_message(
+                        tool_call_id=tc_id, content=cancelled_content,
+                        tool_name=tool_name)
+                    continue
+
                 # 工具执行安全调用：异常时返回错误给 LLM 而非卡死主循环
                 def _safe_tool_call(_tc=tc):
                     try:
@@ -3655,7 +3793,11 @@ class MBDSDRAgent:
                     low = (getattr(result, "content", "") or "").lower()
                     if any(h in low for h in RETRY_BAD) or not any(h in low for h in RETRY_OK):
                         break  # 参数错误或非临时错误：交给模型改，不空转
+                    if self._cancel_pending():  # P7.4：取消后不再等待重试
+                        break
                     time.sleep(0.4)
+                    if self._cancel_pending():
+                        break
                     result = _safe_tool_call()
                 all_tool_results.append(result.to_dict())
 
@@ -3689,6 +3831,12 @@ class MBDSDRAgent:
                 )
 
             # 继续循环，让模型看到工具结果后继续
+            if cancelled:
+                # P7.4：本批工具因取消未全部执行，不再开启下一轮模型调用
+                interrupted = True
+                last_error = CANCEL_ERROR
+                final_content = "已按请求取消本轮对话（工具调用循环已停止）。"
+                break
 
         # 工具循环耗尽：没有最终回复也没有错误时，明确告知而非静默空字符串
         if not final_content and not last_error:
@@ -3717,6 +3865,8 @@ class MBDSDRAgent:
             "compacted": compacted,
             "error": last_error,
             "interrupted": interrupted,
+            "cancelled": cancelled,
+            "busy": False,
             "rounds": len(all_tool_calls) + (1 if final_content else 0),
         }
 
