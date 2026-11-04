@@ -33,8 +33,14 @@ from mbdsdr_ai.tool_registry import ToolRegistry  # noqa: E402
 
 @pytest.fixture(scope="module")
 def real_registry():
+    from mbdsdr_ai import model_manager as _mm
     from mbdsdr_ai.agent import MBDSDRAgent
-    agent = MBDSDRAgent(AgentConfig(api_key="sk-test", model="test-model"))
+    original = _mm.ModelManager.fetch_models
+    _mm.ModelManager.fetch_models = lambda self, *a, **k: None  # 不发起网络请求
+    try:
+        agent = MBDSDRAgent(AgentConfig(api_key="sk-test", model="test-model"))
+    finally:
+        _mm.ModelManager.fetch_models = original
     return agent.tool_registry
 
 

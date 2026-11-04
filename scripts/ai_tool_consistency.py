@@ -191,9 +191,19 @@ def scan_registry(registry) -> dict:
 
 
 def _build_agent():
+    """构建真实 Agent 的注册表；构建期间屏蔽模型列表网络请求。
+
+    扫描本身不需要任何网络/模型调用（P7 纪律：不发起真实 API 调用）。
+    """
+    from mbdsdr_ai import model_manager as _mm
     from mbdsdr_ai.agent import MBDSDRAgent
     from mbdsdr_ai.config import AgentConfig
-    return MBDSDRAgent(AgentConfig(api_key="sk-test", model="test-model"))
+    original = _mm.ModelManager.fetch_models
+    _mm.ModelManager.fetch_models = lambda self, *a, **k: None
+    try:
+        return MBDSDRAgent(AgentConfig(api_key="sk-test", model="test-model"))
+    finally:
+        _mm.ModelManager.fetch_models = original
 
 
 def main(argv=None):
