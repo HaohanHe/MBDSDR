@@ -146,17 +146,16 @@ class DesignTokens:
         # ---- 主题语义色映射（单一来源）----
         # themes.py 的每套主题只从这里取色，不再各自写 hex。键名固定为下面
         # 17 个语义槽位；新增主题只需在 THEME_COLORS 里加一列。
-        # 2026-11 可读性修正：dark 的 text_secondary 压暗到达标值；default
-        # 的正文/次级正文属于既有缺陷，因牵动截图基线改为登记不改色（见
-        # tests/test_ui_contrast.py 的 REGISTERED_DEVIATIONS）。
+        # 2026-11 可读性修正：default 的正文/次级正文与 dark 的次级正文
+        # 都压暗到 ≥4.5:1（见 tests/test_ui_contrast.py 的门禁）。
         self.THEME_COLORS: Dict[str, Dict[str, str]] = {
             # 低饱和浅色（默认主题）
             "default": {
                 "bg": "#F5F3EF", "bg_alt": "#FAF8F5", "card": "#FFFFFF",
-                # 已知对比度缺陷（4.07 / 2.86:1）：改色会动到 12 张基线，
-                # 登记在 tests/test_ui_contrast.py，待基线评审后统一处理。
-                "text": "#5B7B8C",
-                "text_secondary": "#8A9BA8",
+                # 可读性修正（2026-11）：正文 4.07→5.11:1、次级 2.86→5.14:1
+                # 同色相压暗；受影响的 3 张频谱基线按受控流程重建。
+                "text": "#4F6B79",
+                "text_secondary": "#5F707A",
                 "text_disabled": "#A0A0A0",
                 "border": "#C8C0B4", "grid": "#D8D2C8",
                 "primary": "#C4845C", "accent": "#C4845C",

@@ -23,7 +23,7 @@ tests/test_ui_layout_locks.py
 运行:
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_ui_layout_locks.py -v
     python scripts/ui_layout_audit.py                    # 规则×尺寸汇总矩阵
-    python scripts/ui_layout_audit.py --update-baselines # 重建基线（需人工复核）
+    python scripts/ui_layout_audit.py --update-baselines --reason "..."  # 受控重建
 """
 import json
 import os
@@ -34,6 +34,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSettings, Qt  # noqa: E402
@@ -561,8 +562,12 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
     path = os.path.join(BASELINE_DIR, f"{panel}_{size}.png")
 
     if _UPDATE:
-        os.makedirs(BASELINE_DIR, exist_ok=True)
-        assert img.save(path, "PNG"), f"基线写入失败: {path}"
+        from ui_baseline import guarded_update
+        reason = os.environ.get("MBDSDR_UI_BASELINE_REASON", "").strip()
+        # 受控更新：必须带 --reason，几何漂移即使带 reason 也拒绝
+        summary = guarded_update(path, img, reason)
+        print(f"[baseline] {os.path.basename(path)}: {summary['text']}"
+              f"  reason={summary['reason']}", flush=True)
         pytest.skip(f"已更新基线 {os.path.basename(path)}")
 
     assert os.path.exists(path), (

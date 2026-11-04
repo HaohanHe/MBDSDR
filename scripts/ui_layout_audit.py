@@ -106,6 +106,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="MBDSDR UI 布局不变式审计")
     ap.add_argument("--update-baselines", action="store_true",
                     help="重建 tests/baselines/ 下的截图基线（需人工复核）")
+    ap.add_argument("--reason", default="",
+                    help="基线更新的原因（人工确认，--update-baselines 时必填）")
     ap.add_argument("pytest_args", nargs=argparse.REMAINDER,
                     help="透传给 pytest 的参数（写在 -- 之后）")
     args = ap.parse_args()
@@ -120,11 +122,19 @@ def main() -> int:
     scales = [("100%", "1.0")] if args.update_baselines else \
         [("125%", "1.25"), ("150%", "1.5"), ("200%", "2.0")]
     if args.update_baselines:
+        if not args.reason.strip():
+            ap.error("--update-baselines 必须配 --reason \"<原因>\"（人工确认）")
         env["MBDSDR_UI_BASELINE_UPDATE"] = "1"
-        print("[ui_layout_audit] 基线更新模式（仅 100% DPI）：写入后请 diff 复核 PNG。")
+        env["MBDSDR_UI_BASELINE_REASON"] = args.reason.strip()
+        print("[ui_layout_audit] 基线更新模式（仅 100% DPI）："
+              f"reason={args.reason.strip()}")
+        print("[ui_layout_audit] 每张图会打印尺寸/色块/像素差异摘要；"
+              "几何漂移会被拒绝。写入后请 diff 复核 PNG。")
 
     cmd = [sys.executable, "-m", "pytest", _TEST_FILE, "-v",
            "--tb=short", "--color=no", "-p", "no:cacheprovider"]
+    if args.update_baselines:
+        cmd.append("-s")   # 让每张基线的差异摘要直接打印出来
     extra = [a for a in args.pytest_args if a != "--"]
     cmd.extend(extra)
 

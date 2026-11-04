@@ -4,9 +4,10 @@
 ======================================
 
 用户口径：对比度不足直接算缺陷。阈值按 WCAG 2.1：
-  * 正文/次级正文：4.5:1（AA 正常字号）；
+  * 正文/次级正文：4.5:1（AA 正常字号）——全部主题必须达标，不许豁免；
   * 品牌色当正文（primary_text）：3:1（大字号/非文本门槛，见下方说明）；
-  * 禁用态：WCAG 豁免对比度，但"看得见"仍要求 ≥1.5:1。
+  * 禁用态：WCAG 豁免对比度，但"看得见"仍要求 ≥1.5:1；
+  * 白名单只收外部图标/系统原生控件这类不可改项，且必须写理由。
 
 颜色只从 tokens.THEME_COLORS 取，主题改了颜色这里立刻复查。
 
@@ -53,18 +54,14 @@ _TEXT_PAIRS = [
     ("text_secondary", "card"),
 ]
 
-#: 已登记缺陷（不是"忽略"：集合必须精确等于实际失败集合，多一个少一个都红）。
-#: default 浅色正文/次级正文不达 AA；改色会改变 12 张截图基线（布局锁禁改），
-#: 因此按"如实登记"处理，等基线评审单独立项。
-REGISTERED_DEVIATIONS = {
-    "default:text/bg": "4.07:1（蓝灰 #5B7B8C on 米白 #F5F3EF）",
-    "default:text_secondary/bg": "2.58:1（#8A9BA8 on #F5F3EF）",
-    "default:text_secondary/card": "2.86:1（#8A9BA8 on #FFFFFF）",
+#: 白名单：只允许"不可改项"（外部图标/系统原生控件自带的配色），必须写理由。
+#: 主题自己的文字/背景对**一律不许**进白名单；当前为空 = 全部达标。
+IMMUTABLE_WHITELIST = {
+    # "external:icon_x:text": "外部图标自带 SVG 固定色，改不了",
 }
 
 
-def test_body_text_contrast_gate_and_registered_deviations():
-    """正文/次级正文 ≥4.5:1；唯一豁免是登记表，且失败集合必须精确吻合。"""
+def _collect_failures():
     failures = {}
     for theme in _ALL:
         colors = tokens().theme_colors(theme)
@@ -72,9 +69,26 @@ def test_body_text_contrast_gate_and_registered_deviations():
             ratio = contrast_ratio(colors[fg_role], colors[bg_role])
             if ratio < 4.5:
                 failures[f"{theme}:{fg_role}/{bg_role}"] = round(ratio, 2)
-    assert set(failures) == set(REGISTERED_DEVIATIONS), (
-        f"对比度失败集合与登记表不一致：实际 {failures}；"
-        f"若已改色修好请从 REGISTERED_DEVIATIONS 删除对应项")
+    return failures
+
+
+def test_body_text_meets_wcag_aa_with_no_theme_whitelist():
+    """正文/次级正文 ≥4.5:1，全部主题无豁免。"""
+    failures = _collect_failures()
+    allowed = set(failures) & set(IMMUTABLE_WHITELIST)
+    assert not (set(failures) - allowed), (
+        f"以下组合低于 4.5:1 且不在白名单：{failures}")
+    # 白名单必须精确覆盖实际失败（防止条目过期后掩盖新问题）
+    assert set(failures) == set(IMMUTABLE_WHITELIST), (
+        f"白名单与失败集合不一致：失败 {failures}，白名单 {IMMUTABLE_WHITELIST}")
+
+
+def test_whitelist_only_immutable_items_with_reason():
+    """白名单只收外部/系统不可改项，且每条都必须写理由。"""
+    for key, reason in IMMUTABLE_WHITELIST.items():
+        assert reason.strip(), f"白名单 {key} 没写理由"
+        assert key.startswith(("external:", "system:")), (
+            f"主题自有颜色 {key} 不许进白名单")
 
 
 @pytest.mark.parametrize("theme", _ALL)
@@ -101,12 +115,11 @@ def test_disabled_state_still_visible(theme):
         f"{colors['button_disabled']} 对比度 {ratio:.2f} < 1.5")
 
 
-def test_known_brand_fill_deviation_is_registered():
-    """登记项：白字压在品牌橙填充上约 3.09:1。
+def test_brand_fill_meets_ui_component_threshold():
+    """品牌橙填充（accent）上的白字约 3.09:1，按 WCAG 1.4.11 非文本 3:1 核算。
 
-    该值达到 WCAG 1.4.11 非文本 3:1 门槛，但未达 4.5:1 正文门槛；品牌色
-    属设计决策，改为"文字用压暗档、填充保留原橙"的最小方案。此断言锁住
-    当前取值，防止有人悄悄改色却不重新核算。
+    品牌填充色属设计决策（改深会破坏品牌观感），文字场景已单独用
+    primary_text 压暗档满足 4.5:1；此断言锁住填充取值，防止悄悄改色。
     """
     colors = tokens().theme_colors("default")
     on_accent = contrast_ratio("#FFFFFF", colors["accent"])
