@@ -73,13 +73,16 @@ def _warn_once(key: str, msg: str, *args) -> None:
 # 纳入枚举：SDRBackendManager._discover() 读取本变量登记 RTLSDRBackend(host=...)。
 # 注意 rtl_tcp 是单客户端协议（listen backlog=1），登记不等于连接。
 RTL_TCP_ENV = "MBDSDR_RTL_TCP"
+# SpyServer 网络源登记口（同样的 host[:port] 语法，默认端口 7355）。
+SPYSERVER_ENV = "MBDSDR_SPYSERVER"
 
 
-def parse_rtl_tcp_env(value: str) -> List[Tuple[str, int]]:
+def parse_rtl_tcp_env(value: str, default_port: int = 1234
+                      ) -> List[Tuple[str, int]]:
     """解析 ``host[:port][,host[:port]...]`` 为 [(host, port), ...]。
 
     无法解析的条目记 debug 日志后跳过（诚实忽略，不为坏配置造后端）；
-    空值返回 []（显式未登记）。裸主机名/IP 用默认端口 1234。
+    空值返回 []（显式未登记）。裸主机名/IP 用 ``default_port``。
     """
     out: List[Tuple[str, int]] = []
     for raw in (value or "").split(","):
@@ -93,7 +96,7 @@ def parse_rtl_tcp_env(value: str) -> List[Tuple[str, int]]:
                 continue
             out.append((host, int(port_s)))
         else:
-            out.append((item, 1234))
+            out.append((item, int(default_port)))
     return out
 
 # 项目统一默认采样率（Hz）。
@@ -3989,6 +3992,11 @@ class SDRBackendManager:
         self.vfos: Dict[str, Dict] = {}  # vfo_id -> {name, frequency_hz, demod_mode, bandwidth_hz, active}
         self._vfo_counter = 0
         self.active_vfo_id: Optional[str] = None
+        # ── 多源切换（USB / rtl_tcp / spyserver 同时在册，单活跃）──
+        self._switch_lock = threading.RLock()
+        self._switch_in_progress = False
+        self.switch_generation = 0
+        self.last_conflict = ""  # 最近一次切换冲突/失败原因（空=无）
         self._discover()
 
     def _discover(self):
@@ -4047,6 +4055,18 @@ class SDRBackendManager:
             except Exception as e:
                 logger.debug(f"rtl_tcp 后端登记失败(忽略): {_host}:{_port}: {e}")
 
+        # SpyServer 网络源：与 rtl_tcp 同样走 env 显式登记（默认端口 7355）。
+        # 懒导入避免 sdr_backend <-> spyserver_client 的循环导入。
+        for _host, _port in parse_rtl_tcp_env(
+                os.environ.get(SPYSERVER_ENV, ""), default_port=7355):
+            try:
+                from .spyserver_client import SpyServerBackend
+                _sp = SpyServerBackend(_host, _port)
+                self.backends[_sp.device.device_id] = _sp
+                logger.debug(f"SpyServer 源已登记: {_host}:{_port}")
+            except Exception as e:
+                logger.debug(f"SpyServer 后端登记失败(忽略): {_host}:{_port}: {e}")
+
         # 无默认后端：active_backend 保持 None，等用户显式 connect 真实设备。
 
     def list_devices(self) -> List[Dict[str, Any]]:
@@ -4087,29 +4107,119 @@ class SDRBackendManager:
             logger.warning("connect: 无可用后端（未发现真实硬件），保持未连接")
             return False
 
-        if backend.connect():
-            self.active_backend = backend
-            # 连接成功后从硬件回读实际参数，对齐软件状态与硬件实际
+        return self._activate(backend)
+
+    _HANDLE_ATTRS = ("_ring_reader", "_client", "_sdr", "_hackrf", "_usrp",
+                     "_soapy", "_sock", "_streamer")
+
+    def _release_backend(self, backend: SDRBackend) -> bool:
+        """断开并验证句柄/线程确实释放；残留则拒绝完成切换。"""
+        had_ring = getattr(backend, "_ring_reader", None) is not None
+        backend.disconnect()
+        rr = getattr(backend, "_ring_reader", None)
+        if rr is not None:
             try:
-                backend.readback_hw_state()
-            except Exception as e:
-                logger.warning(f"硬件回读失败（不影响连接）: {e}")
-            return True
-        return False
+                rr.stop()
+            except Exception:
+                pass
+            try:
+                setattr(backend, "_ring_reader", None)
+            except Exception:
+                pass
+        for attr in self._HANDLE_ATTRS:
+            if getattr(backend, attr, None) is not None:
+                logger.warning(f"切换中止：旧源句柄 {attr} 未释放")
+                return False
+        if had_ring:
+            alive = [t for t in threading.enumerate()
+                     if t.name == "mbdsdr-ring-producer" and t.is_alive()]
+            if alive:
+                logger.warning("切换中止：旧源生产者线程仍在运行，拒绝残留")
+                return False
+        return True
+
+    def _activate(self, backend: SDRBackend) -> bool:
+        """把指定后端设为唯一活跃源；切换全程串行且可验证释放。
+
+        同一时刻只允许一个活跃源：旧源先断开并验证句柄/线程释放，再连接
+        新源；任何一步失败都明确写入 last_conflict，不静默保留两路。
+        """
+        with self._switch_lock:
+            if self._switch_in_progress:
+                self.last_conflict = "切换进行中：拒绝并发激活第二个源"
+                logger.warning(self.last_conflict)
+                return False
+            if self.active_backend is backend and backend.status.connected:
+                self.last_conflict = ""
+                return True
+            self._switch_in_progress = True
+            try:
+                old = self.active_backend
+                if old is not None and old is not backend:
+                    detail = ""
+                    try:
+                        released = self._release_backend(old)
+                    except Exception as e:
+                        released = False
+                        detail = f"{type(e).__name__}: {e}"
+                    if not released:
+                        self.active_backend = None
+                        self.last_conflict = (f"旧源 {old.device.device_id} "
+                                              f"未完全释放，已中止切换 {detail}".rstrip())
+                        return False
+                    self.active_backend = None
+                if not backend.connect():
+                    reason = backend.status.error or "connect 返回 False"
+                    self.active_backend = None
+                    self.last_conflict = (f"激活 {backend.device.device_id} 失败: "
+                                          f"{reason}")
+                    logger.warning(self.last_conflict)
+                    return False
+                self.active_backend = backend
+                self.switch_generation += 1
+                self.last_conflict = ""
+                # 连接成功后从硬件回读实际参数，对齐软件状态与硬件实际
+                try:
+                    backend.readback_hw_state()
+                except Exception as e:
+                    logger.warning(f"硬件回读失败（不影响连接）: {e}")
+                return True
+            finally:
+                self._switch_in_progress = False
 
     def disconnect(self):
-        """断开当前设备。"""
-        if self.active_backend:
-            self.active_backend.disconnect()
+        """断开当前设备，并验证句柄/线程释放。"""
+        with self._switch_lock:
+            old = self.active_backend
+            if old is not None:
+                if not self._release_backend(old):
+                    self.last_conflict = f"旧源 {old.device.device_id} 未完全释放"
+            self.active_backend = None
 
     def switch_device(self, device_id: str) -> bool:
-        """切换到另一个设备。"""
+        """切换到另一个设备（单活跃、释放旧源、冲突明确报错）。"""
         if device_id not in self.backends:
+            self.last_conflict = f"未知设备: {device_id}"
             return False
-        if self.active_backend:
-            self.active_backend.disconnect()
-        self.active_backend = self.backends[device_id]
-        return self.active_backend.connect()
+        return self._activate(self.backends[device_id])
+
+    def get_source_status(self) -> Dict[str, Any]:
+        """多源在册/活跃状态的如实快照。"""
+        return {
+            "active": (self.active_backend.device.device_id
+                       if self.active_backend else None),
+            "generation": self.switch_generation,
+            "switching": self._switch_in_progress,
+            "last_conflict": self.last_conflict,
+            "sources": [
+                {"device_id": be.device.device_id,
+                 "kind": getattr(be.device, "type", ""),
+                 "active": be is self.active_backend,
+                 "connected": be.status.connected,
+                 "error": be.status.error}
+                for be in self.backends.values()
+            ],
+        }
 
     def get_active(self) -> Optional[SDRBackend]:
         return self.active_backend
