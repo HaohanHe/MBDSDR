@@ -59,6 +59,9 @@ def test_real_registry_has_no_structural_errors(real_registry):
     assert report["fatal_count"] == 0, report["fatal"]
     assert report["ok"] is True
     assert report["source_scanned"] >= 400
+    # P11 集成体检：真实注册表不仅无结构错误，也不得出现 schema/handler 漂移
+    # （声明未读取 / 读取未声明）。新增工具若带漂移，此守卫直接红。
+    assert report["drift_count"] == 0, report["drift"]
 
 
 def test_scanner_catches_structural_problems():

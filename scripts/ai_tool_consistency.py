@@ -69,10 +69,25 @@ def _type_ok(param_type: str, value) -> bool:
 
 
 def _handler_source(handler) -> str:
+    """取 handler 源码；lambda 包装时额外并入被调用的模块级函数源码。
+
+    注册处常见写法 ``handler=lambda args: ToolResult(..., _fn(args))``，
+    只看 lambda 会漏掉真正读参数的下层函数（P11 发现的盲点）。
+    """
     try:
-        return inspect.getsource(handler)
+        src = inspect.getsource(handler)
     except Exception:
         return ""
+    if "lambda" in src:
+        globs = getattr(handler, "__globals__", None) or {}
+        for name in re.findall(r"\b(_?[A-Za-z]\w*)\s*\(\s*args", src):
+            fn = globs.get(name)
+            if callable(fn):
+                try:
+                    src += "\n" + inspect.getsource(fn)
+                except Exception:
+                    pass
+    return src
 
 
 def scan_tool(name: str, tool) -> dict:

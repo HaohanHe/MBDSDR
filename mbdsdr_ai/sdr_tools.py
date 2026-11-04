@@ -1180,6 +1180,10 @@ def register_sdr_tools(agent):
             "properties": {
                 "input_path": {"type": "string", "description": "输入 wav 文件路径"},
                 "output_path": {"type": "string", "description": "输出 PNG 路径（可选）"},
+                "mode": {"type": "string",
+                         "enum": ["auto", "Martin M1", "Martin M2", "Scottie S1",
+                                  "Scottie S2", "Scottie DX", "Robot 36", "Robot 72"],
+                         "default": "auto", "description": "SSTV 模式；auto 自动判别"},
             },
             "required": ["input_path"],
         },
@@ -1260,7 +1264,8 @@ def register_sdr_tools(agent):
             "properties": {
                 "latitude": {"type": "number", "description": "地面站纬度 (°N)，如 39.9；未传则从配置读取"},
                 "longitude": {"type": "number", "description": "地面站经度 (°E)，如 116.4；未传则从配置读取"},
-                "altitude_m": {"type": "number", "description": "海拔，单位米，默认 0"},
+                "altitude": {"type": "number", "description": "地面站海拔，单位米，默认 0"},
+                "min_elevation": {"type": "number", "description": "最小仰角阈值（度），默认 0"},
                 "satellite_type": {"type": "string", "description": "卫星类型: weather(气象)/amateur(业余)/iss(国际空间站)/all，默认 all"},
             },
             "required": ["latitude", "longitude"],
@@ -1279,6 +1284,7 @@ def register_sdr_tools(agent):
                 "frequency_hz": {"type": "number", "description": "标称下行频率，单位 Hz。先用 sat_link_get 查目标卫星下行频点"},
                 "latitude": {"type": "number", "description": "地面站纬度"},
                 "longitude": {"type": "number", "description": "地面站经度"},
+                "altitude": {"type": "number", "description": "地面站海拔，单位米，默认 0"},
             },
             "required": ["satellite_name", "frequency_hz", "latitude", "longitude"],
         },
@@ -1294,6 +1300,7 @@ def register_sdr_tools(agent):
             "properties": {
                 "latitude": {"type": "number", "description": "地面站纬度"},
                 "longitude": {"type": "number", "description": "地面站经度"},
+                "altitude": {"type": "number", "description": "地面站海拔，单位米，默认 0"},
                 "hours": {"type": "number", "description": "预测未来多少小时，默认 24"},
                 "min_elevation": {"type": "number", "description": "最小仰角阈值（度），默认 10"},
                 "satellite_type": {"type": "string", "description": "weather/amateur/all，默认 all"},
@@ -1690,10 +1697,14 @@ def register_sdr_tools(agent):
         description="自动调制方式识别。基于信号统计特征（幅度变化、频率变化、相位聚类），判断是AM/FM/SSB/QPSK/BPSK等调制类型。",
         parameters={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "iq_data": {"type": "array", "items": {"type": "number"},
+                            "description": "可选：显式传入 IQ；不传则读当前 SDR 实时流"},
+                "sample_rate": {"type": "number", "description": "采样率 Hz，默认 1e6"},
+            },
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_signal_identify_modulation(args)),
+        handler=lambda args: ToolResult(success=True, content=_signal_identify_modulation(args, agent)),
         category="sdr_analysis",
     )
 
@@ -1702,10 +1713,15 @@ def register_sdr_tools(agent):
         description="提取频谱特征。输出中心频率、带宽、峰值功率、噪声底、峰均比、动态范围。用于信号特征分析和记录。",
         parameters={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "iq_data": {"type": "array", "items": {"type": "number"},
+                            "description": "可选：显式传入 IQ；不传则读当前 SDR 实时流"},
+                "center_freq_hz": {"type": "number", "description": "中心频率 Hz，默认 100e6"},
+                "sample_rate": {"type": "number", "description": "采样率 Hz，默认 2.4e6"},
+            },
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_signal_extract_features(args)),
+        handler=lambda args: ToolResult(success=True, content=_signal_extract_features(args, agent)),
         category="sdr_analysis",
     )
 
@@ -6872,7 +6888,24 @@ def _signal_detect(mgr, spec, args):
     return '\n'.join(lines)
 
 
-def _signal_identify_modulation(args):
+def _current_iq_samples(agent, n: int):
+    """从当前活动后端读取实时 IQ；无硬件/未连接返回 None。
+
+    P11 集成修复：此前这里 import 了 sdr_backend.get_current_iq，但该函数
+    从未实现（跨线接口漂移），异常被吞掉后永远走合成演示信号，还会误报
+    「无 SDR 硬件」。改为走真实的后端读取面。
+    """
+    try:
+        mgr = getattr(agent, "sdr_manager", None) if agent is not None else None
+        backend = mgr.get_active() if mgr is not None else None
+        if backend is None:
+            return None
+        return backend.read_samples(n)
+    except Exception:
+        return None
+
+
+def _signal_identify_modulation(args, agent=None):
     """自动调制方式识别：优先用当前 SDR IQ 流，无硬件时回退合成并标注。"""
     from mbdsdr_ai.signal_analysis import identify_modulation
 
@@ -6880,15 +6913,11 @@ def _signal_identify_modulation(args):
     iq = args.get("iq_data")
     note = ""
     if iq is None:
-        try:
-            from mbdsdr_ai.sdr_backend import get_current_iq
-            iq = get_current_iq(n=1000)
-        except Exception:
-            iq = None
+        iq = _current_iq_samples(agent, 1000)
     if iq is None:
         t = np.linspace(0, 1, 1000)
         iq = np.exp(1j * 2 * np.pi * 1000 * t + 1j * np.random.randn(len(t)) * 0.1)
-        note = "（注：无 SDR 硬件，用合成 FM 信号演示识别逻辑）"
+        note = "（注：未取到实时 IQ（无硬件或未连接），用合成 FM 信号演示识别逻辑）"
 
     result = identify_modulation(np.asarray(iq), sample_rate=args.get("sample_rate", 1e6))
 
@@ -6906,18 +6935,14 @@ def _signal_identify_modulation(args):
     return '\n'.join(lines)
 
 
-def _signal_extract_features(args):
+def _signal_extract_features(args, agent=None):
     """提取频谱特征：优先用真 IQ 流算 FFT，无硬件时回退合成并标注。"""
     from mbdsdr_ai.signal_analysis import extract_spectrum_features
 
     note = ""
     iq = args.get("iq_data")
     if iq is None:
-        try:
-            from mbdsdr_ai.sdr_backend import get_current_iq
-            iq = get_current_iq(n=1024)
-        except Exception:
-            iq = None
+        iq = _current_iq_samples(agent, 1024)
     if iq is not None:
         iq = np.asarray(iq, dtype=np.complex128)
         win = np.hanning(len(iq))
@@ -6930,7 +6955,7 @@ def _signal_extract_features(args):
         freqs = np.linspace(100e6, 101e6, 1024)
         spectrum = np.random.randn(1024) * 3 + 40
         spectrum[500:520] += 30
-        note = "（注：无 SDR 硬件，用合成频谱演示特征提取）"
+        note = "（注：未取到实时 IQ（无硬件或未连接），用合成频谱演示特征提取）"
 
     features = extract_spectrum_features(spectrum, freqs)
 
