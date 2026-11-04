@@ -41,6 +41,50 @@ def _snr_signal_present(snr_db, was_present: bool,
     return bool(was_present)
 
 
+def format_doppler_status(st) -> str:
+    """把 get_doppler_compensation_status()/doppler_status() 的读数渲染成一行。
+
+    红线：applied_hz=None 一律显示 "—"（"不是我在施加/我不知道具体值"），
+    绝不渲染成 0——0 的语义是"算出来确实是 0"，两者混了就是假读数。
+    规则先命中先显示：
+      error → 后端施加 → Python 基带 → 调谐器施加 → 其余（未补偿）
+    """
+    st = dict(st or {})
+    if str(st.get("error") or "").strip():
+        return "补偿失败"
+
+    def _hz(value, digits=0):
+        try:
+            return f"{float(value):+.{digits}f} Hz"
+        except (TypeError, ValueError):
+            return "—"
+
+    applied_by = str(st.get("applied_by") or "none").lower()
+    applied = st.get("applied_hz")
+    predicted = st.get("predicted_hz")
+    note = f"预测 {_hz(predicted)}" if predicted is not None else ""
+
+    if applied_by == "backend":
+        return "—（由后端施加）" + (f" · {note}" if note else "")
+    if applied_by == "python":
+        txt = ("—" if applied is None else _hz(applied, 1)) + "（Python 基带）"
+        if st.get("settling"):
+            txt += "（切换中）"
+        return txt
+    if (applied_by == "none"
+            and str(st.get("application") or "") == "tuner"
+            and bool(st.get("enabled")) and predicted is not None):
+        return "—（由调谐器施加）"
+    if applied is None:
+        txt = "—（未补偿）"  # 红线：null 绝不显示 0
+    elif float(applied) == 0.0:
+        txt = "0 Hz（未补偿）"
+    else:
+        txt = f"{_hz(applied, 1)}（未补偿）"
+    reason = str(st.get("reason") or "").strip()
+    return txt + (f" · {reason}" if reason else "")
+
+
 def _is_text_entry_widget(w) -> bool:
     """是否为文本输入类控件（Ctrl+C 应走标准复制语义）。"""
     if w is None:
@@ -1965,6 +2009,13 @@ class MainWindow(QMainWindow):
             "发射上行反向预偏；点击开关补偿（目标失效自动关闭并提示）")
         self.doppler_chip.toggled.connect(self._on_doppler_chip_toggled)
         lay.addWidget(self.doppler_chip)
+        # 补偿量常驻读数（与上面的开关分开：开关只映射 enabled，读数只说施加量）
+        self.doppler_readout = QLabel("多普勒: —")
+        self.doppler_readout.setObjectName("statusValue")
+        self.doppler_readout.setToolTip(
+            "多普勒补偿读数：— 表示不是本机施加或施加量未知；"
+            "0 Hz 才表示确实算出 0")
+        lay.addWidget(self.doppler_readout)
         lay.addStretch(1)
 
         # 呼号（全局可编辑，持久化）
@@ -2151,6 +2202,10 @@ class MainWindow(QMainWindow):
                 self.toolbar_freq_label.setText("-- MHz")
             except Exception:
                 pass
+            try:
+                self.doppler_readout.setText("多普勒: —")
+            except Exception:
+                pass
             return
         try:
             st = backend.get_status()
@@ -2215,6 +2270,16 @@ class MainWindow(QMainWindow):
             self.status_rssi.setText(f"信号: {self._last_dbfs:.1f} dBFS")
         except Exception:
             pass
+        # 多普勒补偿读数：直接照后端/接收链的真值渲染，没有就不编
+        try:
+            self.doppler_readout.setText(
+                "多普勒: " + format_doppler_status(
+                    backend.get_doppler_compensation_status()))
+        except Exception:
+            try:
+                self.doppler_readout.setText("多普勒: 补偿失败")
+            except Exception:
+                pass
 
     # ========================================================================
     # 主题

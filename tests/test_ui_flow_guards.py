@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+﻿# SPDX-License-Identifier: MIT
 """桌面 UI 流程护栏（无硬件，offscreen）。
 
 钉住 docs/interaction-flows.md 里的 B2 / S1 / S9 / S10：
@@ -297,6 +297,25 @@ class TestUiFlowGuards:
         w._stop_satellite_tracking()
         assert act.isEnabled() is False, "自动/手动停止后动作未复位（又变回假活）"
         assert "无跟踪目标" in act.toolTip()
+
+    def test_doppler_readout_wired_to_backend_status(self, window):
+        """常驻读数是后端的真值，不允许占位文案或把 null 渲染成 0。"""
+        w = self._window(window)
+
+        class _DopBackend:
+            def get_doppler_compensation_status(self):
+                return {"applied_by": "backend", "applied_hz": None,
+                        "predicted_hz": 123.0}
+
+        w._active_sdr_backend = _DopBackend()
+        w._update_status_bar()
+        text = w.doppler_readout.text()
+        assert "—（由后端施加）" in text
+        assert "0 Hz" not in text
+
+        w._active_sdr_backend = None
+        w._update_status_bar()
+        assert w.doppler_readout.text() == "多普勒: —"
 
 
 def test_about_dialog_contains_dso_attribution(monkeypatch):
