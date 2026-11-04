@@ -855,6 +855,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         pointing_changed(float, float) - 天线指向改变 (az, el)
     """
 
+    # ---- 快转（|rate|>1）下的一致性参数 --------------------------------
+    # 摄像机锁定：指数趋近的时间常数按「真实秒」设计，快转时单帧目标位移
+    # 会远超平滑可跟随范围（×300 每帧模拟 10s，LEO 可动 0.5-10°）。此时
+    # 改为逐帧直贴（k=1），并一次性诚实提示——不静默改手感，也不让画面
+    # 抽搐（滞后 + 追赶振荡）。阈值按单帧目标位移（度）判定，1x 不触发。
+    LOCK_SMOOTH_K = 0.25
+    LOCK_SMOOTH_MAX_STEP_DEG = 0.25
+    # 单帧位移超过它时，直贴也只是「按帧跳进」，提示里如实说明
+    LOCK_FAST_SLIDE_STEP_DEG = 25.0
+
+    # 快转下轨迹过期判据：锚点落后当前模拟时刻超过 2 帧的模拟推进即重算。
+    TRAJ_FRAME_S = 0.033               # 视图刷新节拍（33ms）
+    TRAJ_MIN_STALE_S = 10.0            # 低倍率下限（避免每帧重算）
+    TRAJ_MAX_STALE_S = 120.0           # 高倍率上限（≥2 帧，保证不画过期曲线）
+    TRAJ_SPAN_S = 600.0                # 未来 10 分钟（与控制器喂入口径一致）
+
     object_clicked = Signal(object)  # SkyObject
     pointing_changed = Signal(float, float)  # az, el
     # 选中卫星后点「调到该星」：携带实时多普勒校正后的调谐参数。
@@ -886,6 +902,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._antenna = AntennaPointing()
         self._heatmap: List[HeatmapCell] = []
         self._trajectories: Dict[str, List[Tuple[float, float]]] = {}
+        # 轨迹时效锚点（模拟 Unix 秒）：只对带锚点的轨迹生效。
+        # 外部只调 set_trajectory(name, points) 的旧语义保持不变（无锚点不重算）。
+        self._traj_anchor: Dict[str, float] = {}
+        self._traj_span_s: Dict[str, float] = {}
+        # 视图侧 TLE -> Satrec 缓存（快转逐帧重算用；TLE 变即失效）
+        self._view_satrec_cache: Dict[str, Tuple[str, str, object]] = {}
+        # 最近一次按模拟时刻重算卫星位置的时刻（测试与面板一致性对拍用）
+        self._sat_positions_unix: Optional[float] = None
 
         # === SkyInteractionHandler 所需的宿主属性 ===
         # Stellarium StelProjector 透视投影 (pinhole camera); FOV 0.5..120°。
@@ -1055,6 +1079,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._lock_denied_reason: Optional[str] = None
         self._camera_notice: str = ""
         self._camera_notice_until: float = 0.0
+        # 当前已提示过的快转直贴倍率（None=未提示/已复位）；同一倍率只提示一次
+        self._lock_snap_rate: Optional[float] = None
+        # 上一次锁定目标 (az, el)：用于区分「逐帧目标位移」与「初始捕获跳转」
+        self._lock_prev_target: Optional[Tuple[float, float]] = None
         # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
         self._tune_sat_name: Optional[str] = None
         # 跟踪环目标星名（跟踪中防止换星残留假状态）
@@ -1153,10 +1181,137 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._breath_clock = lambda: time.monotonic()
 
     def _on_refresh_tick(self):
-        """33ms 节拍：步进 goto 动画 + 摄像机锁定跟随，再触发重绘。"""
+        """33ms 节拍：快转重算位置/轨迹 + 步进 goto 动画 + 摄像机锁定跟随。"""
+        self._refresh_fast_time_positions()
         self._step_goto_anim()
         self._apply_camera_lock()
         self.update()
+
+    # ------------------------------------------------------------------ #
+    # 快转（|rate|>1）一致性：位置、轨迹、过境面板都要跟当前模拟时刻同拍
+    # ------------------------------------------------------------------ #
+    def _time_rate(self) -> float:
+        """当前时间倍率；取不到引擎时按 1.0（不启用快转分支）。"""
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            return float(get_time_engine().get_rate())
+        except Exception:
+            return 1.0
+
+    def _view_satrec(self, name: str, line1: str, line2: str):
+        """视图侧 Satrec 缓存（TLE 行变化即失效，不把旧轨道当新数据）。"""
+        hit = self._view_satrec_cache.get(name)
+        if hit is not None and hit[0] == line1 and hit[1] == line2:
+            return hit[2]
+        try:
+            from sgp4.api import Satrec
+            sat = Satrec.twoline2rv(line1, line2)
+        except Exception:
+            self._view_satrec_cache.pop(name, None)
+            return None
+        self._view_satrec_cache[name] = (line1, line2, sat)
+        return sat
+
+    def _refresh_fast_time_positions(self) -> None:
+        """快转下按当前模拟时刻重算卫星点与过期轨迹（1x 完全不走这里）。
+
+        1x 时外部 5s 刷新已把位置误差压在「5s 视运动」内（LEO <0.01°）；
+        快转时 5s 墙钟 = 5×rate 模拟秒，天空点与轨迹会明显过期。此处用
+        同一 TLE + 同一坐标链（orbit._state_from_satrec）现算，不画旧帧。
+        无 TLE/无法解算 → 撤掉该轨迹（宁可不画，不画过期曲线）。
+        """
+        rate = self._time_rate()
+        if abs(rate) <= 1.0:
+            self._lock_snap_rate = None
+            return
+        obs = self._observer
+        if obs is None or not self._sat_catalog:
+            return
+        try:
+            from mbdsdr_ai import orbit
+        except Exception:
+            return
+        t_unix = self._engine_unix()
+        jd = t_unix / 86400.0 + 2440587.5
+        self._sat_positions_unix = t_unix
+
+        # --- 卫星点：只动带真实 TLE 的卫星对象，其余类型原样保留 ---
+        for obj in self._objects:
+            if getattr(obj, "obj_type", "") != "satellite":
+                continue
+            meta = self._sat_catalog.get(obj.name)
+            if not meta or not meta.get("line1") or not meta.get("line2"):
+                continue
+            sat = self._view_satrec(obj.name, str(meta["line1"]),
+                                    str(meta["line2"]))
+            if sat is None:
+                obj.visible = False
+                continue
+            try:
+                st = orbit._state_from_satrec(
+                    sat, obj.name, jd, obs["lat"], obs["lon"],
+                    obs.get("alt_m", 0.0) / 1000.0)
+            except Exception:
+                st = None
+            if st is None:
+                obj.visible = False
+                continue
+            alt_d = float(st["elevation"])
+            dist_km = float(st["range_km"])
+            rr = float(st.get("range_rate_kms", 0.0))
+            obj.azimuth_deg = float(st["azimuth"])
+            obj.elevation_deg = alt_d
+            obj.visible = True
+            # 与 SatelliteTracker 喂入的文案同口径（信息卡不因刷新来源而变）
+            obj.description = (f"仰角{alt_d:.0f} 距离{dist_km:.0f}km "
+                               f"径向速度{rr:+.2f}km/s")
+
+        # --- 轨迹：锚点落后当前模拟时刻超过 ~2 帧模拟推进 → 重算未来 10 分钟 ---
+        stale_s = min(self.TRAJ_MAX_STALE_S,
+                      max(self.TRAJ_MIN_STALE_S, 2.0 * self.TRAJ_FRAME_S * abs(rate)))
+        for name in list(self._trajectories.keys()):
+            anchor = self._traj_anchor.get(name)
+            if anchor is None or abs(t_unix - anchor) < stale_s:
+                continue
+            meta = self._sat_catalog.get(name)
+            sat = None
+            if meta and meta.get("line1") and meta.get("line2"):
+                sat = self._view_satrec(name, str(meta["line1"]),
+                                        str(meta["line2"]))
+            if sat is None:
+                # 无法重算 → 不画过期曲线
+                self._trajectories.pop(name, None)
+                self._traj_anchor.pop(name, None)
+                self._traj_span_s.pop(name, None)
+                continue
+            span = float(self._traj_span_s.get(name, self.TRAJ_SPAN_S))
+            step = 60.0
+            pts: List[Tuple[float, float]] = []
+            k = 0
+            while k * step <= span + 1e-6:
+                jd_k = (t_unix + k * step) / 86400.0 + 2440587.5
+                try:
+                    st = orbit._state_from_satrec(
+                        sat, name, jd_k, obs["lat"], obs["lon"],
+                        obs.get("alt_m", 0.0) / 1000.0)
+                except Exception:
+                    st = None
+                if st is not None:
+                    pts.append((float(st["azimuth"]), float(st["elevation"])))
+                k += 1
+            if pts:
+                self._trajectories[name] = pts
+                self._traj_anchor[name] = t_unix
+            else:
+                self._trajectories.pop(name, None)
+                self._traj_anchor.pop(name, None)
+                self._traj_span_s.pop(name, None)
+
+        # --- 过境面板：已过去的峰值不再冒充「未来过境」 ---
+        self._upcoming_passes = [
+            p for p in self._upcoming_passes
+            if float(p.get("peak_unix", t_unix + 1.0)) >= t_unix
+        ]
 
     # ------------------------------------------------------------------ #
     # 摄像机锁定（Stellarium StelMovementMgr::flagTracking 同款语义）
@@ -1193,6 +1348,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self.update()
             return False
         self._camera_lock = str(name)
+        self._lock_snap_rate = None
+        self._lock_prev_target = None
         self._sync_camera_btn()
         self.update()
         return True
@@ -1220,6 +1377,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """解除锁定；notice 非空时显示诚实退出原因（3s 淡出）。"""
         was = self._camera_lock
         self._camera_lock = None
+        self._lock_snap_rate = None
+        self._lock_prev_target = None
         if notice and was:
             self._camera_notice = notice
             self._camera_notice_until = time.time() + 3.0
@@ -1288,9 +1447,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _apply_camera_lock(self):
         """33ms tick：把视图中心贴到锁定目标的当前 az/el。
 
-        平滑策略：指数趋近 center += delta * 0.25（时间常数约 4 tick ≈ 0.13s），
-        无稳态误差；目标角速度（LEO 视运动 ~0.05-0.1°/s）下滞后 <0.02°，
-        远小于最小 FOV 5° 的像素当量。方位角按最短路径（±180° 折叠）。
+        平滑策略：指数趋近 center += delta * k（时间常数约 4 tick ≈ 0.13s），
+        1x 稳态滞后 <0.02°，远小于最小 FOV 的像素当量；方位角按最短路径。
+        快转（|rate|>1）且单帧目标位移超过 LOCK_SMOOTH_MAX_STEP_DEG 时，
+        平滑跟随必然跟不上（×300 一帧模拟 10s，目标可动数度到数十度）→
+        改为逐帧直贴（k=1），并一次性诚实提示「跟不上，已直贴」；位移超过
+        LOCK_FAST_SLIDE_STEP_DEG 时提示画面只能按帧跳进（不改口、不冒充平滑）。
         目标落地（el<0）/数据失效 → 诚实解锁并提示。
         """
         if self._camera_lock is None:
@@ -1315,9 +1477,39 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         d_alt = el - vs.center_alt
         if abs(d_az) < 1e-6 and abs(d_alt) < 1e-6:
             return
-        k = 0.25
+        rate = self._time_rate()
+        k = self.LOCK_SMOOTH_K
+        # 逐帧真实目标位移（首帧/换星后无基准 → 0，不把初始捕获跳转谎报成跟不上）
+        prev = self._lock_prev_target
+        move_deg = (0.0 if prev is None
+                    else angular_separation_deg(prev[0], prev[1], az, el))
+        self._lock_prev_target = (az, el)
+        if abs(rate) > 1.0:
+            step_deg = angular_separation_deg(
+                vs.center_az, vs.center_alt, az, el)
+            if step_deg > self.LOCK_SMOOTH_MAX_STEP_DEG:
+                k = 1.0                       # 逐帧直贴：贴住中心，不滞后
+                if move_deg > self.LOCK_SMOOTH_MAX_STEP_DEG:
+                    self._note_fast_lock(rate, move_deg)
         vs.center_az = (vs.center_az + d_az * k) % 360.0
         vs.center_alt = max(-89.9999, min(89.9999, vs.center_alt + d_alt * k))
+
+    def _note_fast_lock(self, rate: float, step_deg: float) -> None:
+        """快转直贴的一次性诚实提示（同一倍率只提示一次，解锁/换目标复位）。
+
+        不改口成「平滑」：说清楚跟不上（单帧位移多大）、改成了逐帧直贴；
+        位移大到直贴也只能按帧跳进时，明确建议降速观察。
+        """
+        if self._lock_snap_rate == rate:
+            return
+        self._lock_snap_rate = rate
+        label = (f"×{abs(rate):g}" if rate > 0 else f"倒放×{abs(rate):g}")
+        text = (f"摄像机跟踪：{label} 快转下单帧目标位移 {step_deg:.1f}°，"
+                f"平滑跟随跟不上，已改为逐帧直贴")
+        if step_deg > self.LOCK_FAST_SLIDE_STEP_DEG:
+            text += "（画面按帧跳进，建议降速观察）"
+        self._camera_notice = text
+        self._camera_notice_until = time.time() + 4.0
 
     def goto_animated(self, az_deg: float, alt_deg: float,
                       fov_deg: Optional[float] = None,
@@ -1370,6 +1562,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def set_satellite_catalog(self, catalog: List[Dict[str, object]]):
         """SatelliteTracker 喂入当前 TLE 目录, 供信息卡/搜索分类。"""
         self._sat_catalog = {}
+        self._view_satrec_cache.clear()
         for e in (catalog or []):
             name = str(e.get("name", ""))
             if not name:
@@ -1475,7 +1668,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.update()
 
     def set_upcoming_passes(self, passes: List[Dict]):
-        """喂入未来过境列表（rise 时间字符串 + max_alt + duration_min）。"""
+        """喂入未来过境列表（rise 时刻 HH:MM:SS(UTC) + max_alt + duration_min）。"""
         self._upcoming_passes = list(passes)[:12]
         self.update()
 
@@ -1579,12 +1772,28 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._show_heatmap = len(cells) > 0
         self.update()
 
-    def set_trajectory(self, name: str, points: List[Tuple[float, float]]):
+    def set_trajectory(self, name: str, points: List[Tuple[float, float]],
+                       anchor_unix: Optional[float] = None,
+                       span_s: float = 600.0):
+        """设置卫星轨迹点（az, el）。
+
+        anchor_unix 为这批点的基准模拟时刻：给了锚点后，快转下视图会按当前
+        模拟时刻重算（过期曲线不画）。不给锚点 = 旧语义（外部喂入即画，
+        视图不自行重算），保持既有调用方行为不变。
+        """
         self._trajectories[name] = points
+        if anchor_unix is None:
+            self._traj_anchor.pop(name, None)
+            self._traj_span_s.pop(name, None)
+        else:
+            self._traj_anchor[name] = float(anchor_unix)
+            self._traj_span_s[name] = float(span_s)
         self.update()
 
     def clear_trajectories(self):
         self._trajectories.clear()
+        self._traj_anchor.clear()
+        self._traj_span_s.clear()
         self.update()
 
     def clear(self):
@@ -1595,6 +1804,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._objects.clear()
         self.sky_objects = self._objects
         self._trajectories.clear()
+        self._traj_anchor.clear()
+        self._traj_span_s.clear()
         self._heatmap.clear()
         self._show_heatmap = False
         self._sun = None
@@ -1678,6 +1889,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return _jtime.unix_to_jd(eng.now_unix())
         except Exception:
             return _jtime.unix_to_jd(time.time())
+
+    def _engine_unix(self) -> float:
+        """当前模拟 Unix 秒（同 _current_jd 的引擎推进，只取秒数）。"""
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            eng = get_time_engine()
+            eng.tick()
+            return float(eng.now_unix())
+        except Exception:
+            return time.time()
 
     def _ground_station(self) -> Optional[GroundStation]:
         if self._observer is None:
@@ -4310,7 +4531,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         _t = tokens()
         rows = self._upcoming_passes[:8]
         row_h = 18
-        panel_w = 190
+        panel_w = 210
         panel_h = 26 + len(rows) * row_h
         panel_x = self.width() - panel_w - 12
         panel_y = 56
@@ -4330,10 +4551,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         ty = panel_y + 16 + row_h
         for p in rows:
             painter.setPen(dim)
-            painter.drawText(panel_x + 10, ty, str(p.get("rise", "--")))
+            # rise 为 HH:MM:SS：峰值时刻给到秒，避免「分钟取整」在近天顶过境上
+            # 与天空实际位置差出数度（NOAA19 87° 峰：整分钟处低 12°）
+            painter.drawText(panel_x + 10, ty, str(p.get("rise", "--"))[:8])
             painter.setPen(ink)
-            name = str(p.get("name", ""))[:12]
-            painter.drawText(panel_x + 58, ty, name)
+            name = str(p.get("name", ""))[:10]
+            painter.drawText(panel_x + 66, ty, name)
             painter.setPen(self._colors["accent"])
             painter.drawText(panel_x + panel_w - 78, ty,
                              f"{float(p.get('max_alt', 0)):4.0f} deg")
@@ -4908,6 +5131,15 @@ class SatelliteTracker:
     TLE 从用户文件或 Celestrak 加载；失败则显示"无 TLE 数据"，不造假。
     """
 
+    # 过境面板：24h 窗口、5 分钟粗扫 + 峰值邻域 30 秒细化（与天空同一坐标链）
+    PASS_WIN_HOURS = 24.0
+    PASS_COARSE_STEP_S = 300.0
+    PASS_FINE_STEP_S = 30.0
+    PASS_MIN_ALT_DEG = 10.0
+    # 快转下按模拟时间差重算（墙钟下限防止高倍率每帧扫 24h）
+    PASS_REFRESH_SIM_S = 300.0
+    PASS_REFRESH_WALL_S = 1.0
+
     def __init__(self, sky_view, lat: Optional[float], lon: Optional[float],
                  alt_km: float = 0.0, interval_ms: int = 10000):
         self.sky_view = sky_view
@@ -4917,6 +5149,9 @@ class SatelliteTracker:
         self._interval_ms = interval_ms
         self._catalog: List[Dict[str, object]] = []  # [{name, line1, line2, freq_mhz, kind}]
         self._satrec_cache: Dict[str, object] = {}   # name -> sgp4 Satrec
+        # 过境面板的预测基准时刻与墙钟（快转节流用；None=尚未预测）
+        self._passes_anchor_unix: Optional[float] = None
+        self._passes_wall: float = 0.0
 
         self._timer = QTimer(self.sky_view)
         self._timer.timeout.connect(self.refresh)
@@ -5048,6 +5283,7 @@ class SatelliteTracker:
             self._timer.stop()
             self.sky_view.set_objects([])
             self.sky_view.clear_trajectories()
+            self.sky_view.set_upcoming_passes([])
             self.sky_view.set_satellites_connected(False)
             self.sky_view.set_celestial_bodies(None, None, 0.0)
             self.sky_view.set_data_source("none")
@@ -5069,10 +5305,13 @@ class SatelliteTracker:
         except Exception:
             pass
 
-        # TLE 目录为空 -> 不计算卫星
+        # TLE 目录为空 -> 不计算卫星（过期轨迹/过境也要撤掉，不冒充现行数据）
         if not self._catalog:
             self.sky_view.set_satellites_connected(False)
             self.sky_view.set_objects([])
+            self.sky_view.set_satellite_catalog([])
+            self.sky_view.clear_trajectories()
+            self.sky_view.set_upcoming_passes([])
             return
 
         try:
@@ -5143,57 +5382,109 @@ class SatelliteTracker:
                 except Exception:
                     continue
             if pts:
-                self.sky_view.set_trajectory(name, pts)
+                # 带锚点：快转下视图侧据此重算完整曲线，不画过期轨迹
+                self.sky_view.set_trajectory(name, pts,
+                                             anchor_unix=t_unix,
+                                             span_s=600.0)
 
         self.sky_view.set_objects(objs)
         self.sky_view.set_satellite_catalog(self._catalog)
         self.sky_view.set_satellites_connected(connected > 0)
 
-        # 未来过境列表（best-effort）
+        # 未来过境列表（best-effort；快转下按模拟时间差重算，见 _maybe_refresh_passes）
         try:
-            self._refresh_passes(jd_utc)
+            self._maybe_refresh_passes(jd_utc, t_unix)
         except Exception:
             pass
 
-    def _refresh_passes(self, jd_utc: float):
-        """预测未来 24h 过境，喂入天空图侧栏。失败则清空列表。"""
+    def _engine_rate(self) -> float:
+        """当前时间倍率（取不到引擎按 1.0）。"""
         try:
-            from mbdsdr_ai import sat_passes
-            gs = sat_passes.GroundStation(
-                lat_deg=self.lat, lon_deg=self.lon,
-                alt_m=self.alt_km * 1000.0)
-            t0_unix = (jd_utc - 2440587.5) * 86400.0
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            return float(get_time_engine().get_rate())
+        except Exception:
+            return 1.0
+
+    def _maybe_refresh_passes(self, jd_utc: float, t_unix: float):
+        """过境面板与天空同一模拟时刻：快转下按模拟时间差重算。
+
+        1x 保持原有「每次 refresh（5s 墙钟）」语义；快转时若沿用 5s 墙钟，
+        ×300 就是 25 分钟模拟时间一跳，会列出已经过去的峰值（L23「两个时间
+        基准分叉」的复发形态）。快转下模拟时间差 ≥ PASS_REFRESH_SIM_S 才重算，
+        同时设墙钟下限，避免 ×1800 每帧扫 24h 拖慢渲染。
+        """
+        if abs(self._engine_rate()) <= 1.0:
+            self._refresh_passes(jd_utc)
+            return
+        now_wall = time.monotonic()
+        if (self._passes_anchor_unix is not None
+                and abs(t_unix - self._passes_anchor_unix)
+                < self.PASS_REFRESH_SIM_S
+                and now_wall - self._passes_wall < self.PASS_REFRESH_WALL_S):
+            return
+        self._refresh_passes(jd_utc)
+
+    def _refresh_passes(self, jd_utc: float):
+        """预测未来 24h 过境，喂入天空图侧栏。失败则清空列表。
+
+        行字段：peak_unix（峰值精确模拟时刻，供面板/天空同刻对拍与过期过滤）、
+        rise（HH:MM 显示口径的峰值时刻）、max_alt（峰值仰角）。
+        粗采样 5 分钟 + 峰值邻域 30 秒细化：纯 5 分钟粗采样会系统性低估峰值
+        （快过境可差数度），细化后 max_alt 才等于「该时刻天空里画出的仰角」。
+        """
+        t0_unix = (jd_utc - 2440587.5) * 86400.0
+        try:
+            from mbdsdr_ai import orbit
+            from sgp4.api import Satrec
+            win_s = self.PASS_WIN_HOURS * 3600.0
             rows = []
             for entry in self._catalog[:6]:
                 name = entry["name"]
                 line1 = entry["line1"]
                 line2 = entry["line2"]
                 try:
-                    from sgp4.api import Satrec
                     sat = Satrec.twoline2rv(line1, line2)
-                    # 简化：每 5 分钟采样找最大仰角
-                    best_el = -90.0
-                    best_t = 0.0
-                    for mins in range(0, 24 * 60, 5):
-                        jd_k = (t0_unix + mins * 60) / 86400.0 + 2440587.5
-                        from mbdsdr_ai import orbit
-                        st = orbit._state_from_satrec(
-                            sat, name, jd_k, self.lat, self.lon, self.alt_km)
-                        if st is not None and st["elevation"] > best_el:
-                            best_el = st["elevation"]
-                            best_t = mins
-                    if best_el > 10.0:
-                        dt = datetime.fromtimestamp(t0_unix + best_t * 60,
-                                                    tz=timezone.utc)
-                        rows.append({
-                            "name": name,
-                            "rise": dt.strftime("%H:%M"),
-                            "max_alt": best_el,
-                            "duration_min": 0.0,
-                        })
                 except Exception:
                     continue
-            rows.sort(key=lambda r: r["rise"])
+
+                def _el_at(sec: float):
+                    try:
+                        st = orbit._state_from_satrec(
+                            sat, name, (t0_unix + sec) / 86400.0 + 2440587.5,
+                            self.lat, self.lon, self.alt_km)
+                    except Exception:
+                        return None
+                    return None if st is None else float(st["elevation"])
+
+                best_el, best_t = -90.0, 0.0
+                for sec in range(0, int(win_s) + 1,
+                                 int(self.PASS_COARSE_STEP_S)):
+                    e = _el_at(float(sec))
+                    if e is not None and e > best_el:
+                        best_el, best_t = e, float(sec)
+                if best_el <= self.PASS_MIN_ALT_DEG:
+                    continue
+                # 峰值邻域细化（补回粗采样削掉的峰值）
+                lo = max(0.0, best_t - self.PASS_COARSE_STEP_S)
+                hi = min(win_s, best_t + self.PASS_COARSE_STEP_S)
+                sec = lo
+                while sec <= hi + 1e-6:
+                    e = _el_at(sec)
+                    if e is not None and e > best_el:
+                        best_el, best_t = e, sec
+                    sec += self.PASS_FINE_STEP_S
+                peak_unix = t0_unix + best_t
+                rows.append({
+                    "name": name,
+                    "rise": datetime.fromtimestamp(
+                        peak_unix, tz=timezone.utc).strftime("%H:%M:%S"),
+                    "peak_unix": peak_unix,
+                    "max_alt": best_el,
+                    "duration_min": 0.0,
+                })
+            rows.sort(key=lambda r: r["peak_unix"])
+            self._passes_anchor_unix = t0_unix
+            self._passes_wall = time.monotonic()
             self.sky_view.set_upcoming_passes(rows[:8])
         except Exception:
             self.sky_view.set_upcoming_passes([])
