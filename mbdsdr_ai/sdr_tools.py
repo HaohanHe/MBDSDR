@@ -5556,9 +5556,14 @@ def _satellite_predict_pass(args):
         from new_spacetime import predict_satellite_pass
 
     name = args['satellite_name']
-    lat = args['observer_lat']
-    lon = args['observer_lon']
-    alt = args.get('observer_alt', 0.0)
+    fix, ev = _resolve_station_args(args, lat_key="observer_lat",
+                                    lon_key="observer_lon",
+                                    alt_key="observer_alt")
+    if not ev["trusted"]:
+        return _station_untrusted_text(ev)
+    lat = float(fix.lat)
+    lon = float(fix.lon)
+    alt = float(fix.alt_m or 0.0)
     hours = args.get('hours_ahead', 24.0)
     min_elev = args.get('min_elevation', 5.0)
 
@@ -5585,9 +5590,14 @@ def _satellite_predict_all(args):
     except ImportError:
         from new_spacetime import predict_all_passes
 
-    lat = args['observer_lat']
-    lon = args['observer_lon']
-    alt = args.get('observer_alt', 0.0)
+    fix, ev = _resolve_station_args(args, lat_key="observer_lat",
+                                    lon_key="observer_lon",
+                                    alt_key="observer_alt")
+    if not ev["trusted"]:
+        return _station_untrusted_text(ev)
+    lat = float(fix.lat)
+    lon = float(fix.lon)
+    alt = float(fix.alt_m or 0.0)
     hours = args.get('hours_ahead', 24.0)
     min_elev = args.get('min_elevation', 5.0)
 
@@ -5615,8 +5625,12 @@ def _sky_view_visible(args):
     except ImportError:
         from new_spacetime import compute_visible_satellite_count
 
-    lat = args['observer_lat']
-    lon = args['observer_lon']
+    fix, ev = _resolve_station_args(args, lat_key="observer_lat",
+                                    lon_key="observer_lon")
+    if not ev["trusted"]:
+        return _station_untrusted_text(ev)
+    lat = float(fix.lat)
+    lon = float(fix.lon)
     min_elev = args.get('min_elevation', 5.0)
 
     ts = args.get("timestamp")
