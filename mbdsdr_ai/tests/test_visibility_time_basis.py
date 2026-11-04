@@ -71,6 +71,7 @@ def test_three_entries_agree_at_same_instant(same_tle_for_orbit):
                              "min_elevation": 10.0,
                              "timestamp": t_mid})
     assert NAME in txt
+    assert "时刻:" in txt and "本地" in txt   # UTC 与本地偏移都可见
 
     # 3) sdr_satellite_sky_view（orbit sgp4 口径，显式 timestamp）
     txt2 = _satellite_sky_view({"latitude": GS.lat_deg,
@@ -80,7 +81,7 @@ def test_three_entries_agree_at_same_instant(same_tle_for_orbit):
                                 "satellite_type": "weather",
                                 "timestamp": t_mid})
     assert NAME in txt2
-    assert "时刻:" in txt2
+    assert "时刻:" in txt2 and "本地" in txt2
 
     # 4) orbit.visible_satellites 直接结论
     vis = orbit.visible_satellites(GS.lat_deg, GS.lon_deg, GS.alt_m / 1000.0,

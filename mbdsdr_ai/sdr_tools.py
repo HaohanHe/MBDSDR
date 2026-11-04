@@ -4165,15 +4165,20 @@ def _satellite_sky_view(args):
                                        when=when)
 
     at_utc = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(when))
+    try:
+        from mbdsdr_ai.time_basis import format_local
+    except ImportError:
+        from time_basis import format_local
+    at_local = format_local(datetime.fromtimestamp(when, tz=timezone.utc))
     if not visible:
         return (f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n"
-                f"时刻: {at_utc}\n最小仰角: {min_elev}°\n"
+                f"时刻: {at_utc}（本地 {at_local}）\n最小仰角: {min_elev}°\n"
                 f"类型: {sat_type}\n\n当前没有可见卫星（仰角 > {min_elev}°）\n"
                 f"内置卫星: {', '.join(orbit.BUILTIN_SATS.keys())}")
 
     output = f"=== 卫星天空视图 ===\n"
     output += f"位置: {lat}°N, {lon}°E\n"
-    output += f"时刻: {at_utc}\n"
+    output += f"时刻: {at_utc}（本地 {at_local}）\n"
     output += f"最小仰角: {min_elev}°\n"
     output += f"类型: {sat_type}\n"
     output += f"可见卫星数: {len(visible)}\n\n"
@@ -5668,12 +5673,17 @@ def _sky_view_visible(args):
     lon = float(fix.lon)
     min_elev = args.get('min_elevation', 5.0)
 
-    ts = args.get("timestamp")
-    result = compute_visible_satellite_count(
-        lat, lon, min_elev,
-        timestamp=None if ts is None else float(ts))
+    when = _physics_now(args)
+    result = compute_visible_satellite_count(lat, lon, min_elev, timestamp=when)
 
+    stamp = datetime.fromtimestamp(when, tz=timezone.utc)
+    try:
+        from mbdsdr_ai.time_basis import format_local
+    except ImportError:
+        from time_basis import format_local
     lines = [f"=== 天空图可见卫星（仰角 > {min_elev:.0f}°）==="]
+    lines.append(f"时刻: {stamp.strftime('%Y-%m-%d %H:%M:%SZ')}"
+                 f"（本地 {format_local(stamp)}）")
     lines.append(f"可见数量: {result['total_visible']} 颗")
     lines.append("")
     for sat in result['satellites']:
