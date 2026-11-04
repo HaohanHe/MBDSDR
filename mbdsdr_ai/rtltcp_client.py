@@ -46,6 +46,21 @@ from .sdr_backend import (
     _ThreadedRingReader,
     RTLSDRBackend,
 )
+from .link_state import (
+    DataHealthTracker,
+    STATE_CONNECTED,
+    STATE_CONNECTING,
+    STATE_DISCONNECTED,
+    STATE_FAILED,
+    STATE_STALE,
+    CATEGORY_EOF,
+    CATEGORY_HANDSHAKE,
+    CATEGORY_IDLE,
+    CATEGORY_RESET,
+    classify_handshake_reason,
+    classify_network_error,
+    suggestion_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +90,8 @@ class RtlTcpClient:
     _DONGLE_INFO_LEN = 12
     _MAGIC = b"RTL0"
 
-    def __init__(self, host: str, port: int = 1234):
+    def __init__(self, host: str, port: int = 1234,
+                 idle_timeout: float = 5.0):
         self.host = host
         self.port = int(port)
         self._sock: Optional[socket.socket] = None
@@ -84,17 +100,93 @@ class RtlTcpClient:
         self.tuner_gain_count: int = 0
         # 最近一次错误的人话描述（含"连接失败"前缀），空串=正常
         self.error: str = ""
+        # 可区分错误类别与下一步建议（见 link_state.py 词表）
+        self.error_category: str = ""
+        self.suggestion: str = ""
+        # 链路状态机：connecting / connected / stale / disconnected / failed
+        self.state: str = STATE_DISCONNECTED
+        # 连续多久没有 IQ 数据判为"心跳缺失"（不再无限阻塞 recv）
+        self._idle_timeout = max(0.5, float(idle_timeout))
+        self._health = DataHealthTracker(
+            sample_rate_hz=None, stale_after=self._idle_timeout)
+        # 本次会话请求的采样率（用于吞吐/带宽不匹配判断）
+        self.sample_rate_hz: Optional[float] = None
+
+    # ── 链路状态 ──────────────────────────────────────────────────────
+    @property
+    def idle_timeout(self) -> float:
+        return self._idle_timeout
+
+    @idle_timeout.setter
+    def idle_timeout(self, value: float) -> None:
+        """运行中调整空闲阈值：同步 socket 超时与健康度 stale 口径。"""
+        self._idle_timeout = max(0.5, float(value))
+        self._health.stale_after = self._idle_timeout
+        if self._sock is not None:
+            try:
+                self._sock.settimeout(self._idle_timeout)
+            except OSError:
+                pass
+
+    @property
+    def connected(self) -> bool:
+        """socket 是否仍然连着（stale 也算连着，但数据流已不正常）。"""
+        return (self._sock is not None
+                and self.state in (STATE_CONNECTED, STATE_STALE))
+
+    @property
+    def link_state(self) -> str:
+        return self.state
+
+    def _mark_failed(self, category: str, message: str, suggestion: str = "") -> None:
+        self.state = STATE_FAILED
+        self.error_category = category
+        self.error = message
+        self.suggestion = suggestion or suggestion_for(category)
+        self._health.on_disconnect()
+
+    def _mark_stale(self, message: str = "") -> None:
+        """连接仍在但已超过 idle_timeout 没有数据：显式降级，不假装在线。"""
+        if self.state == STATE_CONNECTED:
+            self.state = STATE_STALE
+        self.error_category = CATEGORY_IDLE
+        self.error = message or (
+            f"超过 {self.idle_timeout:g}s 未收到 IQ 数据（心跳缺失），"
+            "连接仍在但数据流已中断")
+        self.suggestion = suggestion_for(CATEGORY_IDLE)
+
+    def _mark_disconnected(self, category: str, message: str,
+                           suggestion: str = "") -> None:
+        self.state = STATE_DISCONNECTED
+        self.error_category = category
+        self.error = message
+        self.suggestion = suggestion or suggestion_for(category)
+        self._health.on_disconnect()
+
+    def _mark_connected(self) -> None:
+        self.state = STATE_CONNECTED
+        self.error_category = ""
+        self.error = ""
+        self.suggestion = ""
 
     # ── 连接 / 握手 ──────────────────────────────────────────────────────
     def connect(self) -> bool:
         """建 TCP 连接并读满 12 字节设备信息。失败返回 False，self.error 含'连接失败'。"""
+        # 重连前先彻底释放旧 socket，绝不残留半开句柄。
+        self.close()
+        self.state = STATE_CONNECTING
+        self.error = ""
+        self.error_category = ""
+        self.suggestion = ""
         # socket.create_connection((host, port), timeout=5)：
         # 连接阶段 5 秒超时，避免 server 半开连接把客户端永久挂起。
         try:
             self._sock = socket.create_connection(
                 (self.host, self.port), timeout=5)
         except OSError as e:
-            self.error = f"连接失败: 无法连接 {self.host}:{self.port} ({e})"
+            cat, msg, sug = classify_network_error(
+                e, phase="connect", host=self.host, port=self.port)
+            self._mark_failed(cat, msg, sug)
             self._sock = None
             logger.warning("rtl_tcp %s:%d %s", self.host, self.port, self.error)
             return False
@@ -102,37 +194,42 @@ class RtlTcpClient:
         # 读满 12 字节 dongle_info_t（rtl_tcp.c:79-83）：
         #   magic[4] "RTL0" | tuner_type u32 BE | tuner_gain_count u32 BE
         try:
-            hdr = self._recvexactly(self._DONGLE_INFO_LEN)
+            hdr = self._recvexactly(self._DONGLE_INFO_LEN, phase="handshake")
         except OSError as e:
-            self.error = f"连接失败: 读取设备信息时 socket 异常 ({e})"
+            cat, msg, sug = classify_network_error(
+                e, phase="handshake", host=self.host, port=self.port)
+            self._mark_failed(cat, msg, sug)
             self.close()
             return False
 
         if hdr is None or len(hdr) < self._DONGLE_INFO_LEN:
-            self.error = "连接失败: 设备信息读取不完整（连接被对端关闭）"
+            cat, msg, sug = classify_handshake_reason(
+                "设备信息读取不完整（连接被对端关闭或半开），不是可用的 rtl_tcp 服务")
+            self._mark_failed(cat, msg, sug)
             self.close()
             return False
 
         magic = hdr[0:4]
         if magic != self._MAGIC:
-            self.error = (
-                f"连接失败: 非法设备信息 magic={magic!r}（期望 b'RTL0'），"
-                f"{self.host}:{self.port} 不是 rtl_tcp 服务器"
-            )
+            cat, msg, sug = classify_handshake_reason(
+                f"非法设备信息 magic={magic!r}（期望 b'RTL0'），"
+                f"{self.host}:{self.port} 不是 rtl_tcp 服务器")
+            self._mark_failed(cat, msg, sug)
             self.close()
             return False
 
         # 大端解析（rtl_tcp.c:623/627 server 侧 htonl → 客户端侧大端解）
         self.tuner_type, self.tuner_gain_count = struct.unpack(">II", hdr[4:12])
 
-        # 握手完成后切回阻塞读：IQ 流式数据靠阻塞 recv 自然背压，
-        # 断线时对端发 FIN 会让 recv 返回 b''，由 read_iq_bytes 判 None。
+        # 握手完成后设置空闲超时（不是永久阻塞）：长时间无数据必须能被
+        # 检测成 stale，而不是静默卡在"已连接"。
         try:
-            self._sock.settimeout(None)
+            self._sock.settimeout(self.idle_timeout)
         except OSError:
             pass
 
-        self.error = ""
+        self._mark_connected()
+        self._health.on_connect()
         logger.info(
             "rtl_tcp 已连接 %s:%d  tuner_type=%d  gain_count=%d",
             self.host, self.port, self.tuner_type, self.tuner_gain_count)
@@ -149,13 +246,17 @@ class RtlTcpClient:
         """
         if self._sock is None:
             self.error = "未连接，无法下发命令"
+            self.error_category = CATEGORY_RESET
+            self.suggestion = suggestion_for(CATEGORY_RESET)
             return False
         try:
             # >BI = big-endian, unsigned char(1) + unsigned int(4) = 5 字节
             self._sock.sendall(struct.pack(">BI", cmd & 0xFF, int(param) & 0xFFFFFFFF))
             return True
         except OSError as e:
-            self.error = f"命令下发失败: {e}"
+            cat, msg, sug = classify_network_error(
+                e, phase="stream", host=self.host, port=self.port)
+            self._mark_disconnected(cat, f"命令下发失败: {msg}", sug)
             logger.warning("rtl_tcp 发送命令 cmd=0x%02x 失败: %s", cmd, e)
             return False
 
@@ -165,7 +266,11 @@ class RtlTcpClient:
 
     def set_sample_rate(self, rate_hz: int) -> bool:
         """设置采样率（Hz）。opcode 0x02（rtl_tcp.c:320 set sample rate）。"""
-        return self._send_cmd(self.CMD_SET_SAMPLE_RATE, int(rate_hz))
+        ok = self._send_cmd(self.CMD_SET_SAMPLE_RATE, int(rate_hz))
+        if ok:
+            self.sample_rate_hz = float(rate_hz)
+            self._health.sample_rate_hz = float(rate_hz)
+        return ok
 
     def set_gain(self, gain_tenths_db: int) -> bool:
         """设置调谐器增益。参数是 0.1 dB 单位的整数（200 = 20.0 dB）。
@@ -182,20 +287,40 @@ class RtlTcpClient:
         return self._send_cmd(self.CMD_SET_FREQ_CORRECTION, int(ppm))
 
     # ── IQ 流读取 ───────────────────────────────────────────────────────
-    def _recvexactly(self, n: int) -> Optional[bytes]:
-        """从 socket 读满 n 字节（可能多次 recv）；连接断开返回 None。"""
+    def _recvexactly(self, n: int, phase: str = "stream") -> Optional[bytes]:
+        """从 socket 读满 n 字节（可能多次 recv）。
+
+        三种结局必须可区分：
+        - 空闲超时（socket.timeout）→ ``stale``（连接仍在但无数据）；
+        - 对端关闭（recv 返回 b''）→ ``disconnected``（EOF）；
+        - IO 错误（RST 等）→ 按 errno 归类为 reset/unknown。
+        ``phase="handshake"`` 时超时/EOF 都算握手失败（不再降级为 stale）。
+        """
         if self._sock is None:
             return None
         buf = bytearray()
         while len(buf) < n:
             try:
                 chunk = self._sock.recv(n - len(buf))
+            except (TimeoutError, socket.timeout) as e:
+                if phase == "handshake":
+                    raise e
+                self._mark_stale(
+                    f"超过 {self.idle_timeout:g}s 未收到 IQ 数据（心跳缺失）")
+                return None
             except OSError as e:
-                self.error = f"读取 IQ 失败: {e}"
+                if phase == "handshake":
+                    raise e
+                cat, msg, sug = classify_network_error(
+                    e, phase="stream", host=self.host, port=self.port)
+                self._mark_disconnected(cat, f"读取 IQ 失败: {msg}", sug)
                 return None
             if not chunk:
-                # 对端 FIN/RST：连接已断
-                self.error = "读取 IQ 失败: 连接已断开"
+                if phase == "handshake":
+                    return None
+                # 对端 FIN/RST：连接已断（半开/掉线，非"无数据"）
+                self._mark_disconnected(
+                    CATEGORY_EOF, "读取 IQ 失败: 连接已被对端关闭（服务停止或掉线）")
                 return None
             buf.extend(chunk)
         return bytes(buf)
@@ -205,9 +330,16 @@ class RtlTcpClient:
         if self._sock is None:
             return None
         try:
-            return self._recvexactly(int(num_bytes))
+            raw = self._recvexactly(int(num_bytes))
         except OSError:
             return None
+        if raw is not None and len(raw) >= 2:
+            # 字节路径同样计入真实数据流健康度（不重复计数：read_samples
+            # 通过本方法取数，故计数只在这里做一次）。
+            if self.state == STATE_STALE or self.state == STATE_CONNECTED:
+                self._mark_connected()
+            self._health.on_data(len(raw) // 2, n_bytes=len(raw))
+        return raw
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         """读 num_samples 个复样本（complex64）。
@@ -231,9 +363,30 @@ class RtlTcpClient:
         imag = (q - 128.0) / 128.0
         return (real + 1j * imag).astype(np.complex64)
 
+    def data_health(self) -> dict:
+        """可序列化的链路健康度（供 UI / agent 工具读取）。"""
+        return self._health.snapshot(
+            state=self.state,
+            extra={
+                "host": self.host,
+                "port": self.port,
+                "category": self.error_category,
+                "message": self.error,
+                "suggestion": self.suggestion,
+                "connected": self.connected,
+                "server_tuner_type": self.tuner_type,
+                "server_gain_count": self.tuner_gain_count,
+            },
+        )
+
     # ── 关闭 ─────────────────────────────────────────────────────────────
     def close(self):
-        """关闭底层 socket（幂等）。"""
+        """关闭底层 socket（幂等）。
+
+        只有在"运行中"状态才把状态翻回 disconnected；连接/握手失败已经写入
+        failed 的 error/category 不会被 close 抹掉。
+        """
+        was_active = self.state in (STATE_CONNECTED, STATE_STALE, STATE_CONNECTING)
         if self._sock is not None:
             try:
                 self._sock.shutdown(socket.SHUT_RDWR)
@@ -244,6 +397,9 @@ class RtlTcpClient:
             except OSError:
                 pass
             self._sock = None
+        self._health.on_disconnect()
+        if was_active:
+            self.state = STATE_DISCONNECTED
 
 
 class RtlTcpDeviceAdapter:
@@ -362,6 +518,14 @@ class RtlTcpDeviceAdapter:
         """
         return self._client.read_iq_bytes(int(num_bytes))
 
+    # ── 链路状态与健康度（供 RTLSDRBackend 的 _ring_read / data_health 读取）──
+    @property
+    def link_state(self) -> str:
+        return self._client.state
+
+    def data_health(self) -> dict:
+        return self._client.data_health()
+
     def close(self):
         self._client.close()
 
@@ -374,7 +538,8 @@ class RtlTcpBackend(SDRBackend):
     上层 main_window / VFO / 解调链路无需感知底层是 USB 还是网络。
     """
 
-    def __init__(self, host: str, port: int = 1234, ppm: int = 0):
+    def __init__(self, host: str, port: int = 1234, ppm: int = 0,
+                 idle_timeout: float = 5.0):
         device = SDRDevice(
             device_type="rtl_tcp",
             device_id=f"rtl_tcp_{host}_{port}",
@@ -392,8 +557,10 @@ class RtlTcpBackend(SDRBackend):
         self._host = host
         self._port = int(port)
         self._ppm = int(ppm)
+        self._idle_timeout = max(0.5, float(idle_timeout))
         self._client: Optional[RtlTcpClient] = None
         self._ring_reader: Optional[_ThreadedRingReader] = None
+        self._reconnect_count: int = 0
 
     def connect(self) -> bool:
         """建连并下发初始设置，然后启动环形缓冲生产者线程。
@@ -401,10 +568,20 @@ class RtlTcpBackend(SDRBackend):
         连不上（host 不可达 / 超时 / magic 不对）必须返回 False 且
         status.error 含"连接失败"，绝不伪造 IQ。
         """
-        client = RtlTcpClient(self._host, self._port)
+        # 重连前彻底释放旧 socket/生产者线程：不留半开连接与野线程。
+        if self._ring_reader is not None or self._client is not None:
+            try:
+                self.disconnect()
+            except Exception:
+                pass
+        self.status.link_state = "connecting"
+        client = RtlTcpClient(
+            self._host, self._port, idle_timeout=self._idle_timeout)
         if not client.connect():
             self._client = None
             self.status.connected = False
+            self.status.link_state = "failed"
+            self.status.error_category = client.error_category
             # 确保 error 一定含"连接失败"硬红线关键字
             msg = client.error or "未知错误"
             self.status.error = msg if "连接失败" in msg else f"连接失败: {msg}"
@@ -413,7 +590,9 @@ class RtlTcpBackend(SDRBackend):
 
         self._client = client
         self.status.connected = True
+        self.status.link_state = "connected"
         self.status.error = ""
+        self.status.error_category = ""
         self._start_time = time.time()
 
         # 对照 RTLSDRBackend.connect：打开后逐项显式下发设置，不停在出厂默认。
@@ -430,7 +609,7 @@ class RtlTcpBackend(SDRBackend):
         # 启动生产者线程持续读 IQ 写环形缓冲（对照 RTLSDRBackend.connect
         # 里 _ThreadedRingReader(read_fn=..., block_size=8192, ring_size=1_000_000)）。
         self._ring_reader = _ThreadedRingReader(
-            read_fn=self._client.read_samples,
+            read_fn=self._ring_read,
             block_size=8192,
             ring_size=1_000_000,
         )
@@ -440,6 +619,62 @@ class RtlTcpBackend(SDRBackend):
             logger.warning("RtlTcpBackend 启动环形缓冲生产者失败: %s", e)
             self._ring_reader = None
         return True
+
+    def _ring_read(self, num_samples: int) -> Optional[np.ndarray]:
+        """生产者读：把 stale / disconnected / failed 如实写进 status。"""
+        if self._client is None:
+            return None
+        out = self._client.read_samples(num_samples)
+        if out is None or len(out) == 0:
+            state = self._client.state
+            if state == STATE_STALE:
+                # socket 仍在：显式降级，不翻 connected，但不许显示"正常在线"
+                self.status.link_state = STATE_STALE
+                self.status.error_category = self._client.error_category
+                self.status.error = self._client.error
+                health = self._client.data_health()
+                self.status.last_data_age_s = health.get("last_data_age_s")
+            else:
+                self.status.connected = False
+                self.status.link_state = STATE_DISCONNECTED
+                self.status.error_category = self._client.error_category
+                self.status.error = (
+                    self._client.error or "读取 IQ 失败：连接已断开"
+                )
+            return None
+        if self.status.link_state in (STATE_STALE, STATE_DISCONNECTED, STATE_FAILED):
+            self.status.link_state = STATE_CONNECTED
+            self.status.error = ""
+            self.status.error_category = ""
+        self._last_ring_data_time = time.time()
+        self.status.last_data_age_s = 0.0
+        return out
+
+    def data_health(self) -> dict:
+        """链路健康度：客户端真实计数 + 后端环形缓冲指标。"""
+        st = self.get_status()
+        base = self._client.data_health() if self._client is not None else {}
+        out = {
+            "backend": "RtlTcpBackend",
+            "state": st.link_state or "disconnected",
+            "connected": bool(st.connected),
+            "category": st.error_category,
+            "message": st.error,
+            "suggestion": base.get("suggestion", ""),
+            "samples_total": int(st.samples_read),
+            "dropped_samples": int(st.dropped_samples),
+            "drop_ratio": (
+                st.dropped_samples / max(1, st.samples_read + st.dropped_samples)
+            ),
+            "buffer_fill": int(st.buffer_fill),
+            "last_data_age_s": st.last_data_age_s,
+            "expected_rate_hz": st.sample_rate_hz,
+            "reconnect_count": int(self._reconnect_count),
+        }
+        for k in ("bytes_total", "gap_events", "observed_rate_hz", "rate_ratio"):
+            if k in base:
+                out[k] = base[k]
+        return out
 
     def _apply_frequency(self, freq_hz: float) -> bool:
         """真正写远端 set freq；成功后清环形缓冲（丢旧频残留 IQ）。"""
@@ -461,6 +696,9 @@ class RtlTcpBackend(SDRBackend):
         ok = self._client.set_sample_rate(int(snapped))
         if ok and self._ring_reader is not None:
             self._ring_reader.clear()
+        if ok:
+            # 吸附后的真实档位写回 status，避免 UI 显示用户请求值而硬件是另一档
+            self.status.sample_rate_hz = float(snapped)
         return ok
 
     def _apply_gain(self, gain_db: float) -> bool:
@@ -512,6 +750,7 @@ class RtlTcpBackend(SDRBackend):
             except Exception:
                 pass
             self._client = None
+        self._last_ring_data_time = None
         super().disconnect()
 
     def close(self):

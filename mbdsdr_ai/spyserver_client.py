@@ -34,9 +34,25 @@ import logging
 import socket
 import struct
 import threading
+import time
 from typing import Any, Dict, Optional
 
 import numpy as np
+
+from .sdr_backend import SDRBackend, SDRDevice, _ThreadedRingReader
+from .link_state import (
+    DataHealthTracker,
+    STATE_CONNECTED,
+    STATE_CONNECTING,
+    STATE_DISCONNECTED,
+    STATE_FAILED,
+    STATE_STALE,
+    CATEGORY_EOF,
+    CATEGORY_RESET,
+    classify_handshake_reason,
+    classify_network_error,
+    suggestion_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +110,15 @@ class SpyServerClient:
         self.server_info: Dict[str, str] = {}
         self._running = False
         self._lock = threading.Lock()
+        # 空闲超时：超过则判"心跳缺失"(stale)，不再无限阻塞 recv
+        self.idle_timeout = max(0.5, float(timeout))
+        self._health = DataHealthTracker(
+            sample_rate_hz=None, stale_after=self.idle_timeout)
+        self.state: str = STATE_DISCONNECTED
+        self.error: str = ""
+        self.error_category: str = ""
+        self.suggestion: str = ""
+        self.sample_rate_hz: Optional[float] = None
 
     # -- 连接 / 握手 --------------------------------------------------------
     def start(self, host: Optional[str] = None, port: Optional[int] = None) -> None:
@@ -103,53 +128,65 @@ class SpyServerClient:
         if port is not None:
             self.port = int(port)
 
+        # 重连前先释放旧 socket，绝不残留半开句柄
+        self.stop()
+        self.state = STATE_CONNECTING
+        self.error = ""
+        self.error_category = ""
+        self.suggestion = ""
+
         # 1) 建 socket
         if self._sock_factory is not None:
             try:
                 self._sock = self._sock_factory(self.host, self.port)
             except OSError as e:
-                raise SpyServerError(
-                    f"连接失败: socket factory 拒绝 {self.host}:{self.port} ({e})"
-                ) from e
+                self._fail_from_network(e, "connect")
+                raise SpyServerError(self.error) from e
         else:
             try:
                 self._sock = socket.create_connection(
                     (self.host, self.port), timeout=self._timeout
                 )
             except OSError as e:
-                raise SpyServerError(
-                    f"连接失败: 无法连接 {self.host}:{self.port} ({e})"
-                ) from e
+                self._fail_from_network(e, "connect")
+                raise SpyServerError(self.error) from e
 
         # 2) 读 1024 字节握手配置串
         try:
             self._sock.settimeout(self._timeout)
-            raw = self._recvexactly(self._HANDSHAKE_BYTES)
+            raw = self._recvexactly(self._HANDSHAKE_BYTES, phase="handshake")
         except OSError as e:
+            self._fail_from_network(e, "handshake")
             self._close_sock()
-            raise SpyServerError(f"连接失败: 读取握手串失败 ({e})") from e
+            raise SpyServerError(self.error) from e
 
         if raw is None or len(raw) < self._HANDSHAKE_BYTES:
+            cat, msg, sug = classify_handshake_reason(
+                f"握手串不完整（{len(raw) if raw else 0}/{self._HANDSHAKE_BYTES} "
+                "字节，对端关闭或半开），不是可用的 SpyServer")
+            self._fail(cat, msg, sug)
             self._close_sock()
-            raise SpyServerError(
-                f"连接失败: 握手串不完整（{len(raw) if raw else 0}/"
-                f"{self._HANDSHAKE_BYTES} 字节）"
-            )
+            raise SpyServerError(self.error)
 
         # 3) 解析 ASCII key=value\\0 串
         self.server_info = self._parse_handshake(raw)
         if not self.server_info:
+            cat, msg, sug = classify_handshake_reason(
+                f"握手串未解析到任何 key=value（{self.host}:{self.port} 不是 SpyServer）")
+            self._fail(cat, msg, sug)
             self._close_sock()
-            raise SpyServerError(
-                f"连接失败: 握手串未解析到任何 key=value（{self.host}:{self.port} "
-                "不是 SpyServer）"
-            )
+            raise SpyServerError(self.error)
 
-        # 4) 切回阻塞读（IQ 流靠阻塞 recv 背压）
+        # 4) 空闲超时读（不用永久阻塞）：长时间无数据必须能被检测成 stale
         try:
-            self._sock.settimeout(None)
+            self._sock.settimeout(self.idle_timeout)
         except OSError:
             pass
+        self.state = STATE_CONNECTED
+        self.error = ""
+        self.error_category = ""
+        self.suggestion = ""
+        self._health.on_connect()
         self._running = True
         logger.info(
             "SpyServer 已连接 %s:%d  设备=%s  采样率=%s  增益=%s",
@@ -158,6 +195,44 @@ class SpyServerClient:
             self.server_info.get("SampleRate", "?"),
             self.server_info.get("Gain", "?"),
         )
+
+    # -- 链路状态 -----------------------------------------------------------
+    @property
+    def connected(self) -> bool:
+        return (self._sock is not None
+                and self.state in (STATE_CONNECTED, STATE_STALE))
+
+    @property
+    def link_state(self) -> str:
+        return self.state
+
+    def _fail(self, category: str, message: str, suggestion: str = "") -> None:
+        self.state = STATE_FAILED
+        self.error_category = category
+        self.error = message
+        self.suggestion = suggestion or suggestion_for(category)
+        self._running = False
+        self._health.on_disconnect()
+
+    def _fail_from_network(self, exc: BaseException, phase: str) -> None:
+        cat, msg, sug = classify_network_error(
+            exc, phase=phase, host=self.host, port=self.port)
+        self._fail(cat, msg, sug)
+
+    def _mark_stale(self, message: str) -> None:
+        if self.state == STATE_CONNECTED:
+            self.state = STATE_STALE
+        self.error_category = "idle"
+        self.error = message
+        self.suggestion = suggestion_for("idle")
+
+    def _mark_disconnected(self, category: str, message: str) -> None:
+        self.state = STATE_DISCONNECTED
+        self.error_category = category
+        self.error = message
+        self.suggestion = suggestion_for(category)
+        self._running = False
+        self._health.on_disconnect()
 
     @staticmethod
     def _parse_handshake(raw: bytes) -> Dict[str, str]:
@@ -186,20 +261,23 @@ class SpyServerClient:
         param 大端（htonl）。
         """
         if self._sock is None or not self._running:
-            raise SpyServerError("未连接，无法下发命令")
+            self._mark_disconnected(CATEGORY_RESET, "未连接，无法下发命令")
+            raise SpyServerError(self.error)
         try:
             self._sock.sendall(
                 struct.pack(">BI", cmd & 0xFF, int(param) & 0xFFFFFFFF)
             )
         except OSError as e:
-            self._running = False
-            raise SpyServerError(f"命令下发失败: {e}") from e
+            self._fail_from_network(e, "stream")
+            raise SpyServerError(f"命令下发失败: {self.error}") from e
 
     def set_frequency(self, freq_hz: int) -> None:
         self._send_cmd(self.CMD_SET_FREQUENCY, int(freq_hz))
 
     def set_sample_rate(self, rate_hz: int) -> None:
         self._send_cmd(self.CMD_SET_SAMPLERATE, int(rate_hz))
+        self.sample_rate_hz = float(rate_hz)
+        self._health.sample_rate_hz = float(rate_hz)
 
     def set_gain(self, gain_db: float) -> None:
         """设置增益 dB。先切手动模式，再下发增益（与 rtl_tcp 一致）。"""
@@ -211,17 +289,30 @@ class SpyServerClient:
         self._send_cmd(self.CMD_SET_GAIN_MODE, 0 if enabled else 1)
 
     # -- IQ 流读取 ----------------------------------------------------------
-    def _recvexactly(self, n: int) -> Optional[bytes]:
-        """读满 n 字节；连接断开返回 None。"""
+    def _recvexactly(self, n: int, phase: str = "stream") -> Optional[bytes]:
+        """读满 n 字节；三种结局必须可区分（超时/对端关闭/IO 错误）。"""
         if self._sock is None:
             return None
         buf = bytearray()
         while len(buf) < n:
             try:
                 chunk = self._sock.recv(n - len(buf))
+            except (TimeoutError, socket.timeout) as e:
+                if phase == "handshake":
+                    raise e
+                self._mark_stale(
+                    f"超过 {self.idle_timeout:g}s 未收到 IQ 数据（心跳缺失）")
+                raise SpyServerError(self.error) from e
             except OSError as e:
-                raise SpyServerError(f"读取 IQ 失败: {e}") from e
+                if phase == "handshake":
+                    raise e
+                self._fail_from_network(e, "stream")
+                raise SpyServerError(self.error) from e
             if not chunk:
+                if phase == "handshake":
+                    return None
+                self._mark_disconnected(
+                    CATEGORY_EOF, "读取 IQ 失败: 连接已被对端关闭（服务停止或掉线）")
                 return None
             buf.extend(chunk)
         return bytes(buf)
@@ -242,16 +333,54 @@ class SpyServerClient:
         with self._lock:
             raw = self._recvexactly(n * 2)
         if raw is None or len(raw) < n * 2:
-            self._running = False
-            raise SpyServerError(
-                f"读样本不足（{len(raw) if raw else 0}/{n*2} 字节），连接断开"
+            self._mark_disconnected(
+                CATEGORY_EOF,
+                f"读样本不足（{len(raw) if raw else 0}/{n*2} 字节），连接断开",
             )
+            raise SpyServerError(self.error)
         iq = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 2)
         i = iq[:, 0].astype(np.float32)
         q = iq[:, 1].astype(np.float32)
         real = (i - 128.0) / 128.0
         imag = (q - 128.0) / 128.0
+        # 真实数据到达：从 stale 恢复 connected，并更新健康计数
+        if self.state in (STATE_STALE, STATE_CONNECTED):
+            self.state = STATE_CONNECTED
+            self.error = ""
+            self.error_category = ""
+            self.suggestion = ""
+        self._health.on_data(n, n_bytes=len(raw))
         return (real + 1j * imag).astype(np.complex64)
+
+    def data_health(self) -> dict:
+        """可序列化的链路健康度（含服务端采样率与请求值的匹配情况）。"""
+        server_rate = None
+        raw_rate = str(self.server_info.get("SampleRate", "")).strip()
+        if raw_rate:
+            try:
+                server_rate = int(float(raw_rate))
+            except ValueError:
+                server_rate = None
+        mismatch = None
+        if server_rate and self.sample_rate_hz:
+            # 客户端请求值与服务端配置串声明的采样率不一致 → 数据实际速率
+            # 会与 UI/接收链假设不符，必须显式暴露（不许静默）。
+            mismatch = int(abs(int(self.sample_rate_hz) - server_rate)) > 1
+        return self._health.snapshot(
+            state=self.state,
+            extra={
+                "host": self.host,
+                "port": self.port,
+                "category": self.error_category,
+                "message": self.error,
+                "suggestion": self.suggestion,
+                "connected": self.connected,
+                "server_name": self.server_info.get("Name", ""),
+                "server_sample_rate_hz": server_rate,
+                "requested_sample_rate_hz": self.sample_rate_hz,
+                "sample_rate_mismatch": mismatch,
+            },
+        )
 
     # -- 关闭 ---------------------------------------------------------------
     def _close_sock(self) -> None:
@@ -267,12 +396,232 @@ class SpyServerClient:
             self._sock = None
 
     def stop(self) -> None:
-        """停止并关闭 socket（幂等）。"""
+        """停止并关闭 socket（幂等）。
+
+        仅当仍处于运行态时才翻回 disconnected；握手/连接失败写入的 failed
+        状态与 error/category 不会被 stop 抹掉。
+        """
+        was_active = self.state in (STATE_CONNECTED, STATE_STALE, STATE_CONNECTING)
         self._running = False
         self._close_sock()
+        self._health.on_disconnect()
+        if was_active:
+            self.state = STATE_DISCONNECTED
 
     def __del__(self):
         try:
             self.stop()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# SpyServer 后端封装（与 RtlTcpBackend 同接口，供 SDRBackend 上层统一使用）
+# ---------------------------------------------------------------------------
+class SpyServerBackend(SDRBackend):
+    """把 SpyServerClient 包成 SDRBackend：环形缓冲 + 链路状态 + 可观测指标。
+
+    与 RtlTcpBackend 的差异只在协议握手/命令细节；上层 UI / VFO / 解调链路
+    不需要感知底层是 rtl_tcp 还是 SpyServer。
+    """
+
+    DEFAULT_SAMPLE_RATE = 2_048_000.0
+
+    def __init__(self, host: str, port: int = 7355, ppm: int = 0,
+                 sock_factory: Optional[Any] = None,
+                 idle_timeout: float = 5.0):
+        device = SDRDevice(
+            device_type="spyserver",
+            device_id=f"spyserver_{host}_{port}",
+            name=f"SpyServer {host}:{port}",
+            frequency_range=(500_000, 1_766_000_000),
+            sample_rate_range=(225_001, 3_200_000),
+            max_gain=49.6,
+            supports_iq=True,
+            supports_tx=False,
+        )
+        super().__init__(device)
+        self.status.sample_rate_hz = self.DEFAULT_SAMPLE_RATE
+        self._host = host
+        self._port = int(port)
+        self._ppm = int(ppm)
+        self._sock_factory = sock_factory
+        self._idle_timeout = max(0.5, float(idle_timeout))
+        self._client: Optional[SpyServerClient] = None
+        self._ring_reader: Optional[_ThreadedRingReader] = None
+        self._reconnect_count = 0
+
+    def connect(self) -> bool:
+        # 重连前彻底释放旧 socket/生产者线程
+        if self._ring_reader is not None or self._client is not None:
+            try:
+                self.disconnect()
+            except Exception:
+                pass
+        self.status.link_state = STATE_CONNECTING
+        client = SpyServerClient(
+            self._host, self._port, timeout=self._idle_timeout,
+            sock_factory=self._sock_factory)
+        try:
+            client.start()
+        except SpyServerError as e:
+            self._client = None
+            self.status.connected = False
+            self.status.link_state = STATE_FAILED
+            self.status.error_category = client.error_category
+            msg = str(e) or client.error or "未知错误"
+            self.status.error = (
+                msg if "连接失败" in msg else f"连接失败: {msg}"
+            )
+            logger.warning("SpyServerBackend 连接失败: %s", self.status.error)
+            return False
+
+        self._client = client
+        self.status.connected = True
+        self.status.link_state = STATE_CONNECTED
+        self.status.error = ""
+        self.status.error_category = ""
+        self._start_time = time.time()
+
+        # 初始化下发（失败不掩盖：set_* 会把原因写进 status.error）
+        self.set_sample_rate(self.status.sample_rate_hz)
+        self.set_frequency(self.status.frequency_hz or 98_000_000.0)
+        self.set_gain(20.0)
+
+        self._ring_reader = _ThreadedRingReader(
+            read_fn=self._ring_read,
+            block_size=8192,
+            ring_size=1_000_000,
+        )
+        try:
+            self._ring_reader.start()
+        except Exception as e:
+            logger.warning("SpyServerBackend 启动环形缓冲生产者失败: %s", e)
+            self._ring_reader = None
+        return True
+
+    def _ring_read(self, num_samples: int) -> Optional[np.ndarray]:
+        if self._client is None:
+            return None
+        try:
+            out = self._client.read_samples(num_samples)
+        except SpyServerError:
+            state = self._client.state
+            self.status.error_category = self._client.error_category
+            self.status.error = self._client.error
+            if state == STATE_STALE:
+                self.status.link_state = STATE_STALE
+                self.status.last_data_age_s = self._client.data_health().get(
+                    "last_data_age_s")
+            else:
+                self.status.connected = False
+                self.status.link_state = STATE_DISCONNECTED
+            return None
+        if out is None or len(out) == 0:
+            self.status.connected = False
+            self.status.link_state = STATE_DISCONNECTED
+            self.status.error = "读取 IQ 失败：无数据（连接已断开）"
+            return None
+        if self.status.link_state in (STATE_STALE, STATE_DISCONNECTED, STATE_FAILED):
+            self.status.link_state = STATE_CONNECTED
+            self.status.error = ""
+            self.status.error_category = ""
+        self._last_ring_data_time = time.time()
+        self.status.last_data_age_s = 0.0
+        return out
+
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        if self._client is None:
+            return False
+        try:
+            self._client.set_frequency(int(freq_hz))
+        except SpyServerError:
+            return False
+        if self._ring_reader is not None:
+            self._ring_reader.clear()
+        return True
+
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        if self._client is None:
+            return False
+        try:
+            self._client.set_sample_rate(int(rate_hz))
+        except SpyServerError:
+            return False
+        if self._ring_reader is not None:
+            self._ring_reader.clear()
+        return True
+
+    def _apply_gain(self, gain_db: float) -> bool:
+        if self._client is None:
+            return False
+        try:
+            self._client.set_gain(float(gain_db))
+        except SpyServerError:
+            return False
+        return True
+
+    def data_health(self) -> dict:
+        st = self.get_status()
+        base = self._client.data_health() if self._client is not None else {}
+        out = {
+            "backend": "SpyServerBackend",
+            "state": st.link_state or "disconnected",
+            "connected": bool(st.connected),
+            "category": st.error_category,
+            "message": st.error,
+            "suggestion": base.get("suggestion", ""),
+            "samples_total": int(st.samples_read),
+            "dropped_samples": int(st.dropped_samples),
+            "drop_ratio": (
+                st.dropped_samples / max(1, st.samples_read + st.dropped_samples)
+            ),
+            "buffer_fill": int(st.buffer_fill),
+            "last_data_age_s": st.last_data_age_s,
+            "expected_rate_hz": st.sample_rate_hz,
+            "reconnect_count": int(self._reconnect_count),
+            "server_name": base.get("server_name", ""),
+            "server_sample_rate_hz": base.get("server_sample_rate_hz"),
+            "sample_rate_mismatch": base.get("sample_rate_mismatch"),
+        }
+        for k in ("bytes_total", "gap_events", "observed_rate_hz", "rate_ratio"):
+            if k in base:
+                out[k] = base[k]
+        return out
+
+    def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
+        if not self.status.connected:
+            return None
+        if self._ring_reader is not None:
+            samples = self._ring_reader.read(num_samples, timeout=1.0)
+            if samples is None:
+                return None
+            self._samples_read += len(samples)
+            return samples
+        return None
+
+    def disconnect(self):
+        if self._ring_reader is not None:
+            try:
+                self._ring_reader.stop()
+            except Exception:
+                pass
+            self._ring_reader = None
+        if self._client is not None:
+            try:
+                self._client.stop()
+            except Exception:
+                pass
+            self._client = None
+        self._last_ring_data_time = None
+        super().disconnect()
+
+    def close(self):
+        self.disconnect()
+
+
+__all__ = [
+    "SpyServerError",
+    "SpyServerClient",
+    "SpyServerBackend",
+]
