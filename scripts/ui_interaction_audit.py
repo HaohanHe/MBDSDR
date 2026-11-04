@@ -1,48 +1,73 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """
-交互覆盖审计（死按钮）
-======================
+交互覆盖审计（死按钮 / 假按钮 / 静默异常）
+==========================================
 
-运行时遍历主窗口里的 QAction / QAbstractButton（不是手写清单），逐项检查：
+运行时拉起真实 ``MainWindow``（offscreen），遍历所有 ``QAction`` 与
+``QAbstractButton``（菜单项、工具栏、面板按钮、dock 内控件，以及本次运行中
+由入口动作构造出来的对话框按钮），逐项检查：
 
-  1. 有没有接槽：QAction.triggered(bool) / QAbstractButton 的 clicked/toggled/
-     pressed 至少一个信号有接收者（``QObject.receivers("2<sig>")``）；
-  2. 触发后是否有可观测结果：状态栏文案、弹窗、对话框、文件选择框、或
-     可见 UI 状态（文本/勾选/页签/使能）发生变化；
-  3. 不可用时是否诚实：置灰项必须能给出"为什么不能"（控件提示 / 面板状态
-     文案 / 下方 DISABLED_REASONS 登记）。
+  1. ``enabled`` / ``visible`` / 主信号接收者数（``QObject.receivers()``）；
+  2. 真实触发一次，是否有**可观察结果**：状态栏文案、弹窗、对话框、文件框、
+     窗口/页签/dock 状态变化、控件文本/勾选/使能变化；
+  3. 触发过程中的异常（同步抛出的 + 被 Qt 静默吞掉只打到 stderr 的），
+     逐个捕获并计数。
 
-结论三选一：可用 / 诚实禁用 / 死按钮。死按钮必须为零，否则本脚本退出 1。
+判定三分类（互斥，异常优先）：
 
-产物：docs/interaction-audit.md（一行一个动作）。
+  * **真死** = 主信号 ``receivers() == 0``，点了不可能有反应；
+  * **假活** = 有接收者，但触发后无任何可观察变化；
+  * **抛异常** = 触发时同步抛出或被 Qt 吞掉的异常。
 
-运行（必须 offscreen + 无硬件环境，避免真机/真录音干扰）::
+不作为"假活"处理的只有两种情况，且都必须在报告里逐条列出证据：
+  * **诚实禁用**：``enabled == False``，且给出了"为什么不能用"；
+  * **未实时触发**：会起线程/联网/写用户数据的动作，只做代码核对并登记
+    依据（见 ``SKIP_LIVE``），不谎称已验证。
+
+产物：``docs/interaction-audit.md``。退出码 0=三类均为空；1=有问题（未在
+白名单内）或置灰没给理由。
+
+运行::
 
     QT_QPA_PLATFORM=offscreen MBDSDR_NULL_AUDIO=1 MBDSDR_NO_HW=1 \\
-        python scripts/ui_interaction_audit.py
-
-退出码：0=无死按钮；1=存在未解释的死按钮或未登记理由的禁用项。
+        MBDSDR_OFFLINE=1 python scripts/ui_interaction_audit.py
 """
 from __future__ import annotations
 
 import contextlib
 import io
 import os
+import re
 import sys
+import tempfile
+import traceback
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
 os.environ.setdefault("MBDSDR_NO_HW", "1")
 os.environ.setdefault("MBDSDR_OFFLINE", "1")
+os.environ.setdefault("QT_SCALE_FACTOR", "1.0")
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DOC = os.path.join(_ROOT, "docs", "interaction-audit.md")
 
 # ---------------------------------------------------------------------------
-# 置灰理由登记：键 = "种类|名称|父容器类名"，值 = 为什么此刻不能用。
-# 审计脚本发现置灰项没登记理由就退出 1（新增按钮必须顺手写清楚）。
+# 登记表
 # ---------------------------------------------------------------------------
+
+#: 无独立槽、但值在"对话框确认/父流程"里被读取的输入控件。
+#: 键 = "名称|所在对话框"，值 = 读取点（源码符号，可核对）。
+INPUT_CONTROLS: dict[str, str] = {
+    "Offset Tuning（直流抵消）|选择 SDR 设备":
+        "无 clicked/toggled 槽；布尔值在 `_connect_dialog` 里经 "
+        "`offset_chk.isChecked()` 读取后下发后端（main_window.py 设备参数区）",
+    "启用自动增益 (AGC)|选择 SDR 设备":
+        "无 clicked/toggled 槽；布尔值在 `_connect_dialog` 里经 "
+        "`agc_chk.isChecked()` 读取后下发后端（main_window.py 设备参数区）",
+}
+
+#: 置灰理由：键 = "种类|名称|父容器类名"（父容器可用 *），值 = 为什么不能用。
 DISABLED_REASONS: dict[str, str] = {
     "按钮|断开|*": "未连接 SDR，没有可断开的设备（连接成功后自动启用）",
     "按钮|录音|*": "未连接 SDR，没有 IQ 信号可录（连接成功后自动启用）",
@@ -58,37 +83,63 @@ DISABLED_REASONS: dict[str, str] = {
     "按钮|思考中...|*": "AI 推理进行中，按钮文案即状态；完成后恢复为「发送」",
     "按钮|取消|*": "当前没有正在运行的扫描任务",
     "按钮|停止跟踪|*": "当前没有正在运行的卫星跟踪任务",
+    "按钮|开始扫描|*": "无扫频后端（未连接 SDR）：scanner_panel 的 "
+                       "`scan_btn.setEnabled(ready and not scanning)` 里 ready=False",
+    "按钮|开始录音|*": "未连接 SDR：control_panel 随 `_sdr_connected` "
+                       "整组置灰（control_panel.py 的 `w.setEnabled(self._sdr_connected)`）",
     "按钮|断开|NtripConfigDialog": "NTRIP 配置对话框内尚未建立连接",
     "菜单项|工具(&T) / FM 扫频找台|*": "未连接 SDR（FM 扫频需要可调谐的本地接收机）",
 }
 
-#: 允许"点击无效果"的上下文例外（按钮只在某个形态/状态下才有意义）。
-CONTEXT_EXEMPT: dict[str, str] = {
-    "按钮|Cancel|*": "所在对话框仅在连接/配置时弹出；Cancel 走 QDialog.reject，"
-                     "关闭对话框且不改任何配置",
+#: 会起线程 / 联网 / 写用户数据的动作：不实时触发，只登记代码依据。
+SKIP_LIVE: dict[str, str] = {
+    "按钮|发送|*": "启动 AI 推理线程（ai_panel 写对话区并切「思考中…」）；"
+                   "不在审计里真跑模型",
+    "按钮|当前信号质量怎么样|*": "同「发送」：快捷指令把问题填进对话框并起 AI 推理线程",
+    "按钮|找一个信号强的 FM 电台|*": "同「发送」：填充问题并进入 AI 思考态",
+    "按钮|扫频 87-108 MHz 找所有电台|*": "同「发送」：填充问题并进入 AI 思考态",
+    "按钮|调谐到 98.5 MHz 并录 30 秒|*": "同「发送」：填充问题并进入 AI 思考态",
+    "按钮|开始跟踪|*": "按秒轮询硬件指向（sat_track_panel.start_tracking）；"
+                       "真跑会起定时器并写后端",
+    "按钮|开始扫描|*": "启动扫频线程（scanner_panel）；真跑会独占设备",
+    "按钮|开始录音|*": "启动录音线程并落盘（control_panel），审计不写真实录音",
+    "按钮|拉取挂载点列表|*": "发起 NTRIP 网络请求（ntrip_panel）",
+    "按钮|启用 Web 服务|*": "绑定端口起 HTTP 服务（settings_panel）",
+    "按钮|启用远程控制|*": "起远程控制服务（settings_panel）",
+    "菜单项|工具(&T) / 更新卫星 TLE (Celestrak)|*": "联网拉 Celestrak TLE",
+    "按钮|更新 TLE|*": "联网拉 Celestrak TLE（sat_track_panel）",
+    "菜单项|文件(&F) / 退出|*": "关闭主窗口退出进程；等价于 win.close()，"
+                                "审计窗口还要继续用，不真退出",
 }
 
-#: 不在本审计里实时点击的动作：会启动后台线程/阻塞网络/写用户数据。
-#: 键支持 "种类|名称|*"（按名称）或 "种类|名称|位置"（精确）；值 = 代码核对
-#: 到的真实可观测结果（不是"大概能用"）。
-SKIP_LIVE: dict[str, str] = {
-    "按钮|发送|*": "启动 AI 推理线程；按钮立即变「思考中…」，回复/失败写回对话区",
-    "按钮|找一个信号强的 FM 电台|*": "同「发送」：把问题填进对话框并进入思考态",
-    "按钮|扫频 87-108 MHz 找所有电台|*": "同「发送」：把问题填进对话框并进入思考态",
-    "按钮|调谐到 98.5 MHz 并录 30 秒|*": "同「发送」：把问题填进对话框并进入思考态",
-    "按钮|开始跟踪|*": "按秒轮询硬件指向；无硬件时由跟踪面板写「未连接」状态",
-    "按钮|开始扫描|*": "启动扫频线程；无后端时由面板写状态文案",
-    "按钮|开始录音|*": "启动录音线程并落盘到 ~/mbdsdr_recordings，失败写状态栏",
-    "按钮|拉取挂载点列表|*": "发起 NTRIP 网络请求，结果写面板状态标签",
+#: 已确认是问题、但修复点不在本线文件权限内的条目（白名单必须给理由）。
+FALSE_ALIVE_WHITELIST: dict[str, str] = {
+    "菜单项|工具(&T) / 停止卫星跟踪|MainWindow":
+        "无跟踪任务时 `_stop_satellite_tracking` 在 "
+        "`desktop/main_window.py:6584-6590` 主动早退（刻意不刷「已停止」假提示）。"
+        "修法是主窗口按 `_sat_track_timer/gimbal_follow` 置灰该菜单项；"
+        "`main_window.py` 归操作逻辑线，已登记 docs/limitations-register.md",
+    "按钮|刷新|DevicePanel":
+        "`device_panel._refresh_devices` 确实重枚举设备并把状态写成"
+        "「检测到 N 台设备」；设备集合/状态未变时界面零变化（幂等刷新，"
+        "非死按钮）。可选改进：每次刷新都走状态栏提示，需改 "
+        "`desktop/device_panel.py`，归操作逻辑线，已登记限制总账",
+    "按钮|刷新设备列表|对话框:选择 SDR 设备":
+        "`main_window._reload_devices` 重跑 enumerate 并重建下拉框；设备集合"
+        "不变时文本/索引一致（幂等刷新，非死按钮）。可选改进：刷新后给"
+        "「检测到 N 台设备」提示，需改 `desktop/main_window.py`，"
+        "归操作逻辑线，已登记限制总账",
 }
 
 INTERNAL_BUTTONS = {
-    # Qt 自带的滚动/折叠/表角按钮，不是业务动作
     "ScrollLeftButton", "ScrollRightButton", "qt_menubar_ext_button",
     "qt_toolbar_ext_button", "qt_tableview_cornerbutton",
 }
 
 
+# ---------------------------------------------------------------------------
+# 枚举
+# ---------------------------------------------------------------------------
 def _receivers(obj, sig: str) -> int:
     try:
         return int(obj.receivers(sig))
@@ -96,17 +147,39 @@ def _receivers(obj, sig: str) -> int:
         return -1
 
 
-def _parent_label(obj) -> str:
-    """父容器类名（面板级），用于位置列与理由登记键。"""
+def _wired(obj) -> bool:
+    """主信号是否有接收者。严格口径：receivers()==0 就是没接线。"""
+    if obj.inherits("QAction"):
+        return (_receivers(obj, "2triggered(bool)") > 0
+                or _receivers(obj, "2triggered()") > 0)
+    for sig in ("2clicked(bool)", "2clicked()", "2toggled(bool)",
+                "2pressed()"):
+        if _receivers(obj, sig) > 0:
+            return True
+    return False
+
+
+def _panel_of(obj) -> str:
+    """最近的面板/对话框/dock 名称，作为"所在面板"列。"""
+    from PySide6.QtWidgets import QDialog, QDockWidget, QMainWindow
+
     p = obj.parent()
     while p is not None:
-        if p.objectName() or type(p).__name__.endswith("Panel"):
-            return p.objectName() or type(p).__name__
+        t = type(p).__name__
+        if isinstance(p, QDialog):
+            return f"对话框:{p.windowTitle() or t}"
+        if isinstance(p, QDockWidget):
+            return f"dock:{p.windowTitle() or p.objectName() or t}"
+        if t.endswith("Panel") or t.endswith("Dock"):
+            return p.objectName() or t
+        if isinstance(p, QMainWindow):
+            return "MainWindow"
         p = p.parent()
     return "-"
 
 
 def _location(obj) -> str:
+    """父容器路径（最多 4 层），用于定位同名按钮。"""
     parts = []
     p = obj.parent()
     while p is not None and len(parts) < 4:
@@ -116,15 +189,6 @@ def _location(obj) -> str:
             parts.append(name)
         p = p.parent()
     return " / ".join(reversed(parts)) or "-"
-
-
-def _wired(obj) -> bool:
-    if obj.inherits("QAction"):
-        return _receivers(obj, "2triggered(bool)") > 0
-    for sig in ("2clicked(bool)", "2toggled(bool)", "2pressed()"):
-        if _receivers(obj, sig) > 0:
-            return True
-    return False
 
 
 def _walk_menu(menu, prefix=""):
@@ -137,11 +201,14 @@ def _walk_menu(menu, prefix=""):
             yield f"{prefix}{act.text()}", act
 
 
-def iter_controls(win):
-    """产出 (种类, 名称, 位置, 对象, 是否有槽, 备注)。"""
+def iter_controls(win, label_actions=True):
+    """产出 (种类, 名称, 位置, 对象, 是否有槽, 备注)。
+
+    这是给 ``tests/test_interaction_wiring.py`` 等守卫复用的最小接口；
+    审计脚本另用 ``collect_controls`` 保留 enabled/visible 等元数据。
+    """
     from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import (QAbstractButton, QCheckBox, QDialogButtonBox,
-                                   QRadioButton, QWidgetAction)
+    from PySide6.QtWidgets import QAbstractButton, QWidgetAction
 
     seen: set[int] = set()
     for label, act in _walk_menu(win.menuBar()):
@@ -160,298 +227,654 @@ def iter_controls(win):
             continue
         if not btn.text() and not btn.toolTip():
             continue
-        wired, note = _wired(btn), ""
-        if not wired and isinstance(btn, (QCheckBox, QRadioButton)):
-            # 输入控件：没有独立槽，值由所在对话框的"确认"流程读取
-            wired = True
-            note = "输入控件：勾选值在对话框确认时读取"
-        elif not wired and isinstance(btn.parent(), QDialogButtonBox):
-            # Qt 标准按钮盒：accept/reject 由 C++ 内部接线
-            wired = True
-            note = "Qt 标准按钮盒：accept/reject 语义"
         yield ("按钮", btn.text() or btn.toolTip(), _location(btn), btn,
-               wired, note)
+               _wired(btn), "")
 
 
-def _fingerprint(win) -> str:
+def _is_visible(w) -> bool:
+    try:
+        return bool(w.isVisible())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def collect_controls(win) -> list[dict]:
+    """一次性物化控件清单（避免探测过程中新建的控件混进主清单）。"""
+    rows = []
+    for kind, name, loc, obj, wired, note in iter_controls(win):
+        rows.append({
+            "kind": kind, "name": name, "loc": loc, "obj": obj,
+            "wired": wired, "note": note,
+            "enabled": bool(obj.isEnabled()),
+            "visible": _is_visible(obj),
+            "panel": _panel_of(obj),
+        })
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 可观察证据
+# ---------------------------------------------------------------------------
+def _snapshot(win) -> dict:
+    """控件状态快照：只取"用户看得见"的字段，做前后 diff。"""
     from PySide6.QtGui import QAction
     from PySide6.QtWidgets import (QAbstractButton, QComboBox, QDialog,
                                    QDockWidget, QLabel, QLineEdit, QStackedWidget,
                                    QTabWidget, QWidget)
-    out = []
+
+    snap: dict[str, str] = {}
     for w in win.findChildren(QWidget):
-        if isinstance(w, QLabel):
-            out.append(f"L{w.objectName()}:{w.text()}")
-        elif isinstance(w, QAbstractButton):
-            out.append(f"B{w.objectName()}:{w.text()}:{int(w.isChecked())}:"
-                       f"{int(w.isEnabled())}:{int(w.isVisible())}")
-        elif isinstance(w, QLineEdit):
-            out.append(f"E{w.objectName()}:{w.text()}")
-        elif isinstance(w, QComboBox):
-            out.append(f"C{w.objectName()}:{w.currentIndex()}:{w.currentText()}")
-        elif isinstance(w, QTabWidget):
-            out.append(f"T{w.objectName()}:{w.currentIndex()}")
-        elif isinstance(w, QStackedWidget):
-            out.append(f"P{w.objectName()}:{w.currentIndex()}")
-        elif isinstance(w, QDockWidget):
-            out.append(f"D{w.objectName()}:{int(w.isVisible())}")
-        elif isinstance(w, QDialog):
-            out.append(f"G{w.windowTitle()}:{int(w.isVisible())}")
+        # objectName 不唯一（多个面板都有 statusValue），必须带 id 才不丢字段
+        key = f"{type(w).__name__}({w.objectName()})#{id(w)}"
+        try:
+            if isinstance(w, QLabel):
+                snap[key] = f"text={w.text()[:120]!r}"
+            elif isinstance(w, QAbstractButton):
+                snap[key] = (f"text={w.text()[:60]!r} checked={int(w.isChecked())} "
+                             f"enabled={int(w.isEnabled())} "
+                             f"visible={int(w.isVisible())}")
+            elif isinstance(w, QLineEdit):
+                snap[key] = f"text={w.text()[:80]!r}"
+            elif isinstance(w, QComboBox):
+                snap[key] = f"idx={w.currentIndex()} text={w.currentText()[:60]!r}"
+            elif isinstance(w, QTabWidget):
+                snap[key] = f"idx={w.currentIndex()}"
+            elif isinstance(w, QStackedWidget):
+                snap[key] = f"idx={w.currentIndex()}"
+            elif isinstance(w, QDockWidget):
+                snap[key] = f"visible={int(w.isVisible())}"
+        except Exception:  # noqa: BLE001
+            continue
     for a in win.findChildren(QAction):
         if a.text() and not a.isSeparator():
-            out.append(f"A{a.text()}:{int(a.isChecked())}:{int(a.isEnabled())}")
-    out.append(f"S:{win.statusBar().currentMessage()}")
-    return "\n".join(out)
+            snap[f"QAction({a.text()})#{id(a)}"] = (
+                f"checked={int(a.isChecked())} enabled={int(a.isEnabled())} "
+                f"visible={int(a.isVisible())}")
+    # 状态栏不放进快照：showMessage 已被挂钩单独记账，避免"消息超时清空"
+    # 被误当成按钮有效果。
+    snap["__window__"] = (f"visible={int(win.isVisible())} "
+                          f"fullscreen={int(win.isFullScreen())} "
+                          f"maximized={int(win.isMaximized())} "
+                          f"minimized={int(win.isMinimized())} "
+                          f"geo={win.width()}x{win.height()}")
+    for w in win.findChildren(QDialog):
+        snap[f"QDialog({w.windowTitle() or type(w).__name__})#{id(w)}"] = (
+            f"visible={int(w.isVisible())}")
+    return snap
 
 
-def _reveal(obj) -> None:
-    """把动作所在的页签/堆栈页切到前台（否则可见性判断会让真实动作"看起来没反应"）。"""
-    from PySide6.QtWidgets import QApplication, QStackedWidget, QTabWidget
+#: 纯遥测读数（会自行跳动，不是按钮效果）：SNR / RSSI / S 表 / UTC / 电平。
+_TELEMETRY = re.compile(
+    r"text=(?:'|\")(?:SNR|RSSI|S[0-9]|UTC:|信号|电源|范围|\d{2}:\d{2}:\d{2})")
+
+
+def _is_telemetry(old, new) -> bool:
+    return bool(old and new and _TELEMETRY.match(str(old))
+                and _TELEMETRY.match(str(new)))
+
+
+def _diff(before: dict, after: dict, limit=5, exclude=()) -> list[str]:
+    """只认「既有控件的值变化」：定时器重建列表造成的增删不算按钮效果。"""
+    out = []
+    for k in before.keys() | after.keys():
+        if k in exclude:
+            continue
+        old, new = before.get(k), after.get(k)
+        if old is None or new is None:
+            continue        # 增删控件 = 列表重排/懒加载噪音，不作证据
+        if old == new or _is_telemetry(old, new):
+            continue
+        name = re.sub(r"#\d+", "", str(k))      # 报告里去掉 id，保留可读名
+        out.append(f"{name}: {old} -> {new}")
+        if len(out) >= limit:
+            break
+    return out
+
+
+class _ExceptionCatcher:
+    """捕获被 Qt 吞掉、只走 sys.excepthook 的槽异常。"""
+
+    def __init__(self):
+        self.errors: list[str] = []
+        self._old = sys.excepthook
+
+    def install(self):
+        sys.excepthook = self._hook
+
+    def restore(self):
+        sys.excepthook = self._old
+
+    def _hook(self, typ, val, tb):
+        self.errors.append("".join(
+            traceback.format_exception(typ, val, tb))[-600:])
+
+
+def _reveal(obj) -> list[str]:
+    """把控件所在页签/堆栈页/dock/对话框切到可交互状态；返回为此做的切换。"""
+    from PySide6.QtWidgets import (QApplication, QDialog, QDockWidget,
+                                   QStackedWidget, QTabWidget)
+
+    switched = []
     p = obj.parent()
     while p is not None:
         if isinstance(p, QTabWidget):
             for i in range(p.count()):
-                if p.widget(i) is not None and p.widget(i).isAncestorOf(obj):
-                    p.setCurrentIndex(i)
+                w = p.widget(i)
+                if w is not None and w.isAncestorOf(obj):
+                    if p.currentIndex() != i:
+                        switched.append(f"切页签 {type(p).__name__} -> {i}")
+                        p.setCurrentIndex(i)
                     break
         elif isinstance(p, QStackedWidget):
-            if p.isAncestorOf(obj):
-                for i in range(p.count()):
-                    if p.widget(i).isAncestorOf(obj):
+            for i in range(p.count()):
+                w = p.widget(i)
+                if w is not None and w.isAncestorOf(obj):
+                    if p.currentIndex() != i:
+                        switched.append(f"切堆栈 {type(p).__name__} -> {i}")
                         p.setCurrentIndex(i)
-                        break
+                    break
+        elif isinstance(p, QDockWidget) and not p.isVisible():
+            p.setVisible(True)
+            switched.append(f"打开 dock {p.windowTitle() or p.objectName()}")
+        elif isinstance(p, QDialog) and not p.isVisible():
+            p.show()
+            switched.append(f"打开对话框 {p.windowTitle() or type(p).__name__}")
         p = p.parent()
     QApplication.processEvents()
+    return switched
 
 
-def _restore_mode(win) -> None:
-    """把顶层形态栈切回 IDE 页（避免后续动作在星象仪页上被探测）。"""
-    stack = getattr(win, "_mode_stack", None)
-    if stack is not None and stack.count() > 0 and stack.currentIndex() != 0:
-        stack.setCurrentIndex(0)
+def _spy_signals(obj) -> tuple[dict, list]:
+    """给对象的主信号挂计数探针（在 receivers 统计之后挂，避免掩盖 0）。"""
+    counts: dict[str, int] = {}
+    conns = []
+
+    def _spy(name):
+        def cb(*_a, **_k):
+            counts[name] = counts.get(name, 0) + 1
+        return cb
+
+    try:
+        if obj.inherits("QAction"):
+            obj.triggered.connect(_spy("triggered"))
+        else:
+            obj.clicked.connect(_spy("clicked"))
+            obj.toggled.connect(_spy("toggled"))
+            obj.pressed.connect(_spy("pressed"))
+    except Exception:  # noqa: BLE001
+        pass
+    return counts, conns
 
 
-def _edge_key(row) -> str:
-    return f"{row['name']}|{row['loc'].split(' / ')[-1]}"
+def _detect_volatile(win, ms: int = 1600) -> set:
+    """全局识别"自己会变"的字段：UTC 时钟、SNR/电平读数、状态栏瞬时值。
+
+    观测一个完整秒级 tick，之后所有探测都排除这些字段，避免把时钟跳动
+    当成"按钮有效果"。
+    """
+    import time
+
+    from PySide6.QtWidgets import QApplication
+
+    changes: dict[str, int] = {}
+    prev = _snapshot(win)
+    end = time.monotonic() + ms / 1000.0
+    while time.monotonic() < end:
+        QApplication.processEvents()
+        time.sleep(0.05)
+        cur = _snapshot(win)
+        for k in prev.keys() | cur.keys():
+            if prev.get(k) != cur.get(k):
+                changes[k] = changes.get(k, 0) + 1
+        prev = cur
+    # 只变一次的多半是启动初始化（例如频率读数从 0 落到上次值）；
+    # 至少 tick 两次才算"自变字段"，否则会把真实按钮效果也剔掉。
+    return {k for k, n in changes.items() if n >= 2}
 
 
-def probe(win, obj, evidence: dict) -> tuple[list[str], bool, str]:
-    """触发一次，收集可观测证据；返回 (证据列表, 是否异常, stderr)。"""
-    before = _fingerprint(win)
-    evidence["msg"].clear()
-    evidence["dialog"].clear()
-    evidence["file"].clear()
-    evidence["quit"].clear()
-    evidence["stat"].clear()
-    evidence["close"].clear()
+def _probe(win, row, evidence, volatile_global=()) -> dict:
+    """触发一次并采集证据（返回 row 的观测字段）。"""
+    from PySide6.QtWidgets import QApplication
+
+    obj = row["obj"]
+    # 先空跑一段事件循环，把"自己会变的字段"（UTC 时钟、SNR 读数、谱线状态）
+    # 识别为 volatile 并从证据里剔除，别拿时钟跳动冒充按钮有效果。
+    quiet1 = _snapshot(win)
+    QApplication.processEvents()
+    QApplication.processEvents()
+    quiet2 = _snapshot(win)
+    volatile = {k for k in quiet1.keys() | quiet2.keys()
+                if quiet1.get(k) != quiet2.get(k)}
+    before = quiet2
+    for key in ("msg", "dialog", "file", "stat", "close", "new_top"):
+        evidence[key].clear()
+    # 非模态对话框是 show() 出来的（如 NTRIP 设置），exec 打桩抓不到，
+    # 用"点击前已可见的对话框 id 集合"来判定新冒出来的那个。
+    from PySide6.QtWidgets import QDialog
+    visible_before = {id(d) for d in win.findChildren(QDialog) if d.isVisible()}
+
+    counts, _ = _spy_signals(obj)
+    catcher = _ExceptionCatcher()
+    catcher.install()
     err = io.StringIO()
     with contextlib.redirect_stderr(err):
         try:
             if obj.inherits("QAction"):
                 obj.trigger()
             elif obj.isCheckable():
-                obj.toggle()
+                obj.click()
             else:
                 obj.click()
-        except Exception as exc:  # noqa: BLE001
-            evidence["exc"].append(repr(exc))
-    from PySide6.QtWidgets import QApplication
-    QApplication.processEvents()
-    after = _fingerprint(win)
+        except Exception:  # noqa: BLE001
+            row["exception"] = traceback.format_exc()[-600:]
+        QApplication.processEvents()
+        QApplication.processEvents()
+    catcher.restore()
+
+    after = _snapshot(win)
+    changed = _diff(before, after, exclude=volatile | set(volatile_global))
+    for d in win.findChildren(QDialog):
+        if d.isVisible() and id(d) not in visible_before:
+            evidence["dialog"].append(d.windowTitle() or type(d).__name__)
     obs = []
     if evidence["stat"]:
-        obs.append("状态栏：" + evidence["stat"][0][:70])
+        obs.append("状态栏：" + str(evidence["stat"][0])[:80])
     if evidence["close"]:
         obs.append("窗口关闭")
-    if evidence["quit"]:
-        obs.append("退出应用")
     if evidence["msg"]:
-        obs.append("弹窗：" + evidence["msg"][0][:70])
+        obs.append("弹窗：" + str(evidence["msg"][0])[:80])
     if evidence["dialog"]:
-        obs.append("对话框：" + "、".join(str(d) for d in evidence["dialog"])[:70])
+        obs.append("对话框：" + "、".join(map(str, evidence["dialog"]))[:80])
     if evidence["file"]:
-        obs.append("文件选择：" + "、".join(evidence["file"]))
-    if before != after and not obs:
-        obs.append("界面状态变化")
-    exc = ""
-    txt = err.getvalue()
-    if "Traceback" in txt:
-        exc = txt.strip().splitlines()[-1][:100]
-    return obs, bool(exc), exc
+        obs.append("文件框：" + "、".join(evidence["file"]))
+    if evidence["new_top"]:
+        obs.append("新窗口：" + "、".join(evidence["new_top"])[:80])
+    if changed:
+        obs.append("界面变化：" + "；".join(changed))
+
+    stderr_text = err.getvalue()
+    if "Traceback" in stderr_text:
+        # Qt 把槽异常打到 stderr（默认 excepthook）时也能被这里兜住
+        row.setdefault("exception", stderr_text.strip()[-600:])
+    if catcher.errors:
+        row["exception"] = catcher.errors[-1]
+    row["emitted"] = counts
+    row["obs"].extend(obs)
+    return row
 
 
-def audit(win) -> list[dict]:
-    from PySide6.QtGui import QAction
+# ---------------------------------------------------------------------------
+# 审计主流程
+# ---------------------------------------------------------------------------
+def _install_dialog_stubs(evidence):
+    """模态框/文件框一律不真开（offscreen 下 exec 会挂死）。"""
     from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox
 
-    evidence = {"msg": [], "dialog": [], "file": [], "quit": [],
-                "stat": [], "close": [], "exc": []}
-
-    # ---- 打桩：模态框/文件框一律不真开（offscreen 下 exec 会挂死） ----
     def _msg(kind):
         def f(parent, title, text, *a, **k):
             evidence["msg"].append(f"{kind}「{title}」{text}")
             return QMessageBox.Ok
         return staticmethod(f)
 
+    old = {}
     for name, kind in (("information", "提示"), ("warning", "警告"),
                        ("critical", "错误"), ("question", "询问"),
                        ("about", "关于")):
+        old[("msg", name)] = getattr(QMessageBox, name)
         setattr(QMessageBox, name, _msg(kind))
-    orig_exec = QDialog.exec
+    old["exec"] = QDialog.exec
     QDialog.exec = lambda self: (evidence["dialog"].append(self.windowTitle()),
                                  QDialog.Rejected)[1]
-    orig_open = QFileDialog.getOpenFileName
+    old["open"] = QFileDialog.getOpenFileName
     QFileDialog.getOpenFileName = staticmethod(
         lambda *a, **k: (evidence["file"].append("打开"), ("", ""))[1])
-    orig_save = QFileDialog.getSaveFileName
+    old["save"] = QFileDialog.getSaveFileName
     QFileDialog.getSaveFileName = staticmethod(
         lambda *a, **k: (evidence["file"].append("保存"), ("", ""))[1])
-    orig_input = QInputDialog.getText
+    old["get_text"] = QInputDialog.getText
     QInputDialog.getText = staticmethod(
         lambda *a, **k: (evidence["file"].append("输入"), ("", False))[1])
+    old["get_double"] = QInputDialog.getDouble
     QInputDialog.getDouble = staticmethod(
         lambda *a, **k: (evidence["file"].append("输入"), (0.0, False))[1])
+    old["get_item"] = QInputDialog.getItem
     QInputDialog.getItem = staticmethod(
         lambda *a, **k: (evidence["file"].append("输入"), ("", False))[1])
+    return old
+
+
+def _restore_dialog_stubs(old):
+    from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox
+
+    for name in ("information", "warning", "critical", "question", "about"):
+        setattr(QMessageBox, name, old[("msg", name)])
+    QDialog.exec = old["exec"]
+    QFileDialog.getOpenFileName = old["open"]
+    QFileDialog.getSaveFileName = old["save"]
+    QInputDialog.getText = old["get_text"]
+    QInputDialog.getDouble = old["get_double"]
+    QInputDialog.getItem = old["get_item"]
+
+
+def _reason(row) -> str:
+    name_key = f"{row['kind']}|{row['name']}|*"
+    loc_key = f"{row['kind']}|{row['name']}|{row['panel']}"
+    if loc_key in DISABLED_REASONS:
+        return DISABLED_REASONS[loc_key]
+    if name_key in DISABLED_REASONS:
+        return DISABLED_REASONS[name_key]
+    tip = getattr(row["obj"], "toolTip", lambda: "")()
+    if tip and row["kind"] == "按钮":
+        return f"控件提示：{tip}"
+    return ""
+
+
+def _input_reason(row) -> str:
+    key = f"{row['name']}|{str(row['panel']).replace('对话框:', '')}"
+    return INPUT_CONTROLS.get(key, "")
+
+
+def audit(win) -> list[dict]:
+    from PySide6.QtWidgets import QDialog
+
+    evidence = {"msg": [], "dialog": [], "file": [], "stat": [], "close": [],
+                "new_top": [], "exc": []}
+    old_stubs = _install_dialog_stubs(evidence)
 
     orig_show = win.statusBar().showMessage
     win.statusBar().showMessage = lambda msg, timeout=0: (
         evidence["stat"].append(str(msg)), orig_show(msg, timeout))[0]
-    orig_quit = win.close
+    orig_close = win.close
     win.close = lambda *a, **k: evidence["close"].append(1)
 
-    rows = []
-    for kind, name, loc, obj, wired, note in iter_controls(win):
-        enabled = obj.isEnabled()
-        tip = obj.toolTip() if hasattr(obj, "toolTip") else ""
-        row = dict(kind=kind, name=name, loc=loc, wired=wired,
-                   enabled=enabled, tip=tip, obs=[], exc="", note=note)
-        if enabled and note:
-            row["obs"] = [note]
-            row["skipped"] = True
-            rows.append(row)
-            continue
-        if enabled:
-            key = f"{kind}|{_edge_key(row)}"
-            note = SKIP_LIVE.get(key) or SKIP_LIVE.get(f"{kind}|{name}|*")
-            if note:
-                row["obs"] = ["未实时触发：" + note]
-                row["skipped"] = True
-                rows.append(row)
-                continue
-            print(f"[probe] {kind} {name}", flush=True)
-            _reveal(obj)
-            obs, exc, exc_text = probe(win, obj, evidence)
-            row["obs"], row["exc"] = obs, exc_text
-            _restore_mode(win)
-        rows.append(row)
+    rows = collect_controls(win)
+    # 只审计本次运行前就存在的对话框；探测中新建的对话框单独走第二阶段，
+    # 免得它们混进主清单造成"幽灵按钮"。
+    initial_dialogs = {id(d) for d in win.findChildren(QDialog)}
+    volatile = _detect_volatile(win)
+    _probe_rows(win, rows, evidence, volatile)
+    rows.extend(_audit_runtime_dialogs(win, initial_dialogs, evidence, volatile))
 
-    win.close = orig_quit
+    win.close = orig_close
     win.statusBar().showMessage = orig_show
-    QDialog.exec = orig_exec
-    QFileDialog.getOpenFileName = orig_open
-    QFileDialog.getSaveFileName = orig_save
-    QInputDialog.getText = orig_input
+    _restore_dialog_stubs(old_stubs)
     return rows
 
 
-def _reason(row) -> str:
-    key = f"{row['kind']}|{_edge_key(row)}"
-    name_key = f"{row['kind']}|{row['name']}|*"
-    if key in DISABLED_REASONS:
-        return DISABLED_REASONS[key]
-    if name_key in DISABLED_REASONS:
-        return DISABLED_REASONS[name_key]
-    if row["tip"] and row["kind"] == "按钮":
-        # QAction.toolTip() 在没设提示时会回落到 text，不能拿来当"原因"
-        return f"控件提示：{row['tip']}"
-    return ""
+def _init_row(row) -> None:
+    row.setdefault("obs", [])
+    row.setdefault("exception", "")
+    row.setdefault("emitted", {})
+    row["skipped"] = ""
+    row["switched"] = []
+    row["pre"] = []        # 审计前置动作（切页签/开 dock），不算"按钮有效果"
+    row["enabled_initial"] = row["enabled"]
+    row["visible_initial"] = row["visible"]
+
+
+def _probe_rows(win, rows, evidence, volatile=()) -> None:
+    """逐行真触发一次（enabled/visible 以触发当时的状态为准）。"""
+    from PySide6.QtWidgets import QApplication
+
+    for row in rows:
+        _init_row(row)
+
+        if not row["wired"]:
+            input_note = _input_reason(row)
+            if input_note:
+                row["obs"] = [input_note]
+            continue
+
+        row["switched"] = _reveal(row["obj"])
+        # 前面的动作可能改变了全局状态（例如连接设备后解锁控制面板），
+        # 所以 enabled/visible 取"点击当下"的真实值，不拿启动快照冒充。
+        row["enabled"] = bool(row["obj"].isEnabled())
+        row["visible"] = _is_visible(row["obj"])
+        row["pre"] = list(row["switched"])
+        if not row["enabled"]:
+            reason = _reason(row)
+            if reason:
+                row["reason"] = reason
+            continue
+
+        key = f"{row['kind']}|{row['name']}|*"
+        loc_key = f"{row['kind']}|{row['name']}|{row['panel']}"
+        skip = SKIP_LIVE.get(loc_key) or SKIP_LIVE.get(key)
+        if skip:
+            row["skipped"] = skip
+            continue
+        print(f"[probe] {row['kind']} {row['name']} @ {row['panel']}",
+              flush=True)
+        _probe(win, row, evidence, volatile)
+        # 留在 IDE 页，避免后续动作在星象仪页上被探测
+        stack = getattr(win, "_mode_stack", None)
+        if stack is not None and stack.count() > 0 and stack.currentIndex() != 0:
+            stack.setCurrentIndex(0)
+            QApplication.processEvents()
+
+
+def _audit_runtime_dialogs(win, initial_ids, evidence, volatile=()) -> list[dict]:
+    """第二阶段：入口动作触发后新建的对话框，其按钮也要逐个点一遍。
+
+    对话框在审计里不是 exec 出来的（exec 被打桩立即 Rejected），对象仍在，
+    可以 show() 后点 OK/Cancel/刷新等，验证它们真的会产生可观察结果。
+    """
+    from PySide6.QtWidgets import QAbstractButton, QDialog
+
+    out = []
+    seen: set[tuple[str, str]] = set()
+    for dlg in win.findChildren(QDialog):
+        if id(dlg) in initial_ids:
+            continue
+        title = dlg.windowTitle() or type(dlg).__name__
+        for btn in dlg.findChildren(QAbstractButton):
+            if btn.objectName() in INTERNAL_BUTTONS:
+                continue
+            if not btn.text() and not btn.toolTip():
+                continue
+            key = (title, btn.text() or btn.toolTip())
+            if key in seen:
+                # 同一入口被多个动作触发会造出多个同类对话框实例；
+                # 按「标题+控件名」去重，只审计一份（同类实例同码同行为）。
+                continue
+            seen.add(key)
+            out.append({
+                "kind": "按钮",
+                "name": btn.text() or btn.toolTip(),
+                "loc": _location(btn),
+                "obj": btn,
+                "wired": _wired(btn),
+                "note": "",
+                "enabled": bool(btn.isEnabled()),
+                "visible": _is_visible(btn),
+                "panel": f"对话框:{title}",
+                "runtime_dialog": True,
+            })
+    # 对话框按钮较少，直接在同一轮探测；对话框每次点击前由 _reveal 打开
+    _probe_rows(win, out, evidence, volatile)
+    return out
 
 
 def classify(rows) -> dict:
-    dead, unreasoned = [], []
+    dead, false_alive, exceptions, unreasoned = [], [], [], []
     for row in rows:
+        row["conclusion"] = ""
+        if row["exception"]:
+            row["conclusion"] = "抛异常"
+            exceptions.append(row)
+            continue
         if not row["wired"]:
-            row["conclusion"] = "死按钮（未接槽）"
-            dead.append((row, "没有接槽"))
+            if _input_reason(row):
+                row["conclusion"] = "输入控件（无独立槽，值被下游读取）"
+            else:
+                row["conclusion"] = "真死（receivers()=0）"
+                dead.append(row)
             continue
-        if row["enabled"]:
-            if row["obs"]:
-                row["conclusion"] = ("可用（代码核对）" if row.get("skipped")
-                                     else "可用")
-                continue
-            key = f"{row['kind']}|{_edge_key(row)}"
-            name_key = f"{row['kind']}|{row['name']}|*"
-            note = CONTEXT_EXEMPT.get(key) or CONTEXT_EXEMPT.get(name_key)
-            if note:
-                row["conclusion"] = "可用（上下文限定）"
-                row["obs"] = [note]
-                continue
-            dead.append((row, "点击无可观测结果"))
-            row["conclusion"] = "死按钮"
+        if not row["enabled"]:
+            if not row.get("reason"):
+                row["reason"] = _reason(row)
+            if row.get("reason"):
+                row["conclusion"] = "诚实禁用"
+            else:
+                row["conclusion"] = "诚实禁用（理由未登记）"
+                unreasoned.append(row)
             continue
-        reason = _reason(row)
-        if reason:
-            row["conclusion"] = "诚实禁用"
-            row["reason"] = reason
+        if row["skipped"]:
+            row["conclusion"] = "未实时触发（代码核对）"
+            continue
+        if row["obs"]:
+            row["conclusion"] = "可用"
+            continue
+        fired = sum(row.get("emitted", {}).values())
+        row["obs"].append(
+            f"主信号已触发 {fired} 次；状态栏/弹窗/窗口/控件状态均无变化")
+        key = f"{row['kind']}|{row['name']}|{row['panel']}"
+        note = FALSE_ALIVE_WHITELIST.get(key)
+        if note:
+            row["conclusion"] = "假活（已登记未修）"
+            row["whitelist"] = note
         else:
-            unreasoned.append(row)
-            row["conclusion"] = "诚实禁用（理由未登记）"
-    return {"dead": dead, "unreasoned": unreasoned}
+            row["conclusion"] = "假活"
+        false_alive.append(row)
+    return {"dead": dead, "false_alive": false_alive,
+            "exceptions": exceptions, "unreasoned": unreasoned}
+
+
+def _esc(text) -> str:
+    return str(text).replace("|", "\\|").replace("\n", "<br>")
 
 
 def render(rows, problems) -> str:
     total = len(rows)
+    actions = sum(1 for r in rows if r["kind"] == "菜单项")
+    buttons = total - actions
     enabled = sum(1 for r in rows if r["enabled"])
-    disabled = total - enabled
-    dead = len(problems["dead"])
+    visible = sum(1 for r in rows if r["visible"])
+    counts = {}
+    for r in rows:
+        counts[r["conclusion"]] = counts.get(r["conclusion"], 0) + 1
+
     lines = [
-        "# 交互覆盖审计（死按钮清单）",
+        "# 交互覆盖审计（死按钮 / 假按钮 / 静默异常）",
         "",
-        "> 本文件由 `scripts/ui_interaction_audit.py` 运行时遍历生成，请勿手改。",
-        "> 运行环境：offscreen + `MBDSDR_NULL_AUDIO=1` + `MBDSDR_NO_HW=1` + "
-        "`MBDSDR_OFFLINE=1`（无硬件/无网络/无样本）。",
-        "> 判定：有槽 = 主信号至少一个接收者；可观测 = 状态栏/弹窗/对话框/"
-        "文件框/界面状态变化；置灰必须给出原因。",
+        "> 由 `scripts/ui_interaction_audit.py` 运行时遍历生成，请勿手改。",
+        "> 环境：offscreen + `MBDSDR_NULL_AUDIO=1` + `MBDSDR_NO_HW=1` + "
+        "`MBDSDR_OFFLINE=1`，HOME/QSettings 隔离到临时目录。",
+        "> 口径：`receivers()==0` = 真死；有接收者但触发后无状态/信号下游/"
+        "窗口/弹窗变化 = 假活；触发抛出或被 Qt 吞掉的异常单列。",
+        "> 防误报：触发前先空跑事件循环，把 UTC 时钟/SNR 读数等自变字段"
+        "识别为 volatile 并从 diff 里剔除；运行时新建的同类对话框按"
+        "「标题+控件名」去重。",
         "",
-        f"- 遍历动作：**{total}** 个（可点 {enabled} / 置灰 {disabled}）",
-        f"- 死按钮（有槽但点了没反应 / 没接槽）：**{dead}**",
+        "## 结论",
         "",
-        "| 动作 | 位置 | 有槽 | 可观测结果 | 不可用理由 | 结论 |",
-        "| --- | --- | --- | --- | --- | --- |",
+        f"- 遍历动作 **{total}** 个（QAction {actions} / QAbstractButton "
+        f"{buttons}；enabled {enabled} / visible {visible}）",
+        f"- **真死** {len(problems['dead'])} 个",
+        f"- **假活** {len(problems['false_alive'])} 个"
+        + (f"（其中 {sum(1 for r in problems['false_alive'] if r.get('whitelist'))} "
+           "个已登记未修）" if problems["false_alive"] else ""),
+        f"- **抛异常** {len(problems['exceptions'])} 个",
+        f"- 诚实禁用 {counts.get('诚实禁用', 0)} 个；"
+        f"未实时触发 {counts.get('未实时触发（代码核对）', 0)} 个；"
+        f"输入控件 {counts.get('输入控件（无独立槽，值被下游读取）', 0)} 个",
+        "",
     ]
-    for r in sorted(rows, key=lambda x: (x["kind"] != "菜单项", x["loc"], x["name"])):
+
+    def _table(items):
+        out = ["| 动作 | 类型 | 所在面板 | 位置 | 证据 | 结论 |",
+               "| --- | --- | --- | --- | --- | --- |"]
+        for r in items:
+            ev = "；".join(r["obs"]) if r["obs"] else "—"
+            if r.get("exception"):
+                ev = "异常：" + _esc(r["exception"].strip().splitlines()[-1])
+            elif r.get("skipped"):
+                ev = "未实时触发：" + _esc(r["skipped"])
+            if r.get("whitelist"):
+                ev += "；登记：" + _esc(r["whitelist"])
+            out.append(f"| {_esc(r['name'])} | {r['kind']} | {_esc(r['panel'])} | "
+                       f"{_esc(r['loc'])} | {_esc(ev)} | {_esc(r['conclusion'])} |")
+        return out
+
+    lines += ["## 一、真死（receivers() == 0，点了不可能有反应）", ""]
+    lines += _table(problems["dead"]) if problems["dead"] else ["无。"]
+    lines += ["", "## 二、假活（有接收者，但触发后无可观察变化）", ""]
+    lines += _table(problems["false_alive"]) if problems["false_alive"] else ["无。"]
+    lines += ["", "## 三、抛异常（同步抛出 / 被 Qt 吞掉只打到 stderr）", ""]
+    lines += _table(problems["exceptions"]) if problems["exceptions"] else ["无。"]
+
+    lines += ["", "## 四、已登记的假活白名单（幂等/状态相关，待他线改）", "",
+              "> 本轮复现情况随设备枚举结果变化；白名单里的每一条都要有理由，",
+              "> pytest 守卫也读这份表（`FALSE_ALIVE_WHITELIST`）。", "",
+              "| 动作 | 理由 |", "| --- | --- |"]
+    for key, why in sorted(FALSE_ALIVE_WHITELIST.items()):
+        lines.append(f"| {_esc(key)} | {_esc(why)} |")
+
+    lines += ["", "## 五、诚实禁用但没写为什么", ""]
+    lines += _table(problems["unreasoned"]) if problems["unreasoned"] else ["无。"]
+
+    lines += ["", "## 附：全量明细", ""]
+    lines += ["| 动作 | 类型 | 所在面板 | 启用 | 可见 | 有槽 | 可观察结果 | 结论 |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for r in sorted(rows, key=lambda x: (x["kind"] != "菜单项", x["panel"], x["name"])):
         obs = "；".join(r["obs"]) if r["obs"] else "—"
-        if r["exc"]:
-            obs += f"；异常：{r['exc']}"
-        reason = r.get("reason") or "—"
+        if r.get("exception"):
+            obs = "异常：" + _esc(r["exception"].strip().splitlines()[-1])
+        if r.get("skipped"):
+            obs = "未实时触发：" + _esc(r["skipped"])
+        if r.get("whitelist"):
+            obs += "；登记：" + _esc(r["whitelist"])
+        if r.get("pre"):
+            obs = "前置：" + _esc("；".join(r["pre"])) + "；" + obs
         lines.append(
-            f"| {r['name']} | {r['loc']} | {'是' if r['wired'] else '**否**'} | "
-            f"{obs} | {reason} | {r['conclusion']} |")
+            f"| {_esc(r['name'])} | {r['kind']} | {_esc(r['panel'])} | "
+            f"{'是' if r['enabled'] else '否'} | {'是' if r['visible'] else '否'} | "
+            f"{'是' if r['wired'] else '**否**'} | {_esc(obs)} | "
+            f"{_esc(r['conclusion'])} |")
+
     lines += [
         "",
-        "## 未覆盖项",
+        "## 未覆盖项（如实列出，不计入通过）",
         "",
-        "- 右键菜单（频谱「删除此 VFO」）在交互时才构造，无法静态遍历；"
-        "已源码核对：菜单项选中后调用 `_delete_vfo`，属可用。",
+        "- 右键菜单（频谱「删除此 VFO」）在交互时才构造；已源码核对：菜单项"
+        "选中后调用 `_delete_vfo`，属可用。",
         "- 工具栏 `QWidgetAction` 是控件容器，本身不可点，不计入动作数。",
         "- Qt 自带的页签滚动/工具栏折叠按钮不是业务动作，已剔除。",
+        "- `SKIP_LIVE` 里的动作只做代码核对，未实时触发（起线程/联网/写用户数据）。",
         "",
     ]
     return "\n".join(lines)
 
 
-def main() -> int:
-    # 用户目录隔离：本脚本会真实触发录音/配置写入，绝不能污染真实 home
-    import tempfile
-    home = os.path.join(tempfile.gettempdir(), "mbdsdr_interaction_audit_home")
+_AUDIT_ROOT: Optional[str] = None
+
+
+def setup_isolated_environment() -> str:
+    """HOME + QSettings 隔离到**每次新建**的临时目录。
+
+    不能复用固定目录：上一轮留下的 gui_config/bookmarks 会让本轮结果漂移
+    （设备下拉框初始内容不同，探测结论就不同）。
+    """
+    global _AUDIT_ROOT
+    if _AUDIT_ROOT is None:
+        _AUDIT_ROOT = tempfile.mkdtemp(prefix="mbdsdr_audit_")
+    home = os.path.join(_AUDIT_ROOT, "home")
     os.makedirs(home, exist_ok=True)
     os.environ["USERPROFILE"] = home
     os.environ["HOME"] = home
+    return home
 
+
+def build_main_window():
+    """构造真实主窗口（停机启动定时器，断开真硬件）。"""
     from PySide6.QtWidgets import QApplication
+
     app = QApplication.instance() or QApplication(sys.argv)
+    from PySide6.QtCore import QSettings
+    QSettings.setDefaultFormat(QSettings.IniFormat)
+    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope,
+                      os.path.join(_AUDIT_ROOT or tempfile.gettempdir(),
+                                   "settings"))
     sys.path.insert(0, _ROOT)
     sys.path.insert(0, os.path.join(_ROOT, "desktop"))
     from main_window import MainWindow
@@ -463,39 +886,56 @@ def main() -> int:
             timer.stop()       # 不自动枚举/连接真硬件
         except Exception:  # noqa: BLE001
             pass
-    # 审计口径固定为"无硬件基线态"
     win._panels_set_sdr_connected(False)
     app.processEvents()
+    return app, win
 
-    rows = audit(win)
-    problems = classify(rows)
+
+def run() -> tuple[list[dict], dict]:
+    setup_isolated_environment()
+    app, win = build_main_window()
+    try:
+        rows = audit(win)
+        problems = classify(rows)
+    finally:
+        try:
+            win._disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+    return rows, problems
+
+
+def main() -> int:
+    rows, problems = run()
     text = render(rows, problems)
     os.makedirs(os.path.dirname(_DOC), exist_ok=True)
     with open(_DOC, "w", encoding="utf-8") as f:
         f.write(text)
-    print(f"[interaction-audit] 动作 {len(rows)} 个，死按钮 {len(problems['dead'])} 个，"
-          f"置灰无理由 {len(problems['unreasoned'])} 个 -> {_DOC}")
+    print(f"[interaction-audit] 动作 {len(rows)} 个；真死 "
+          f"{len(problems['dead'])}；假活 {len(problems['false_alive'])}；"
+          f"抛异常 {len(problems['exceptions'])}；"
+          f"置灰无理由 {len(problems['unreasoned'])} -> {_DOC}")
 
     rc = 0
-    for row, why in problems["dead"]:
-        print(f"  DEAD {row['kind']} {row['name']} @ {row['loc']}: {why}")
+    for row in problems["dead"]:
+        print(f"  DEAD  {row['kind']} {row['name']} @ {row['panel']}")
+        rc = 1
+    for row in problems["false_alive"]:
+        if not row.get("whitelist"):
+            print(f"  FALSE-ALIVE {row['kind']} {row['name']} @ {row['panel']}")
+            rc = 1
+    for row in problems["exceptions"]:
+        print(f"  EXCEPTION {row['kind']} {row['name']} @ {row['panel']}")
         rc = 1
     for row in problems["unreasoned"]:
-        print(f"  NO-REASON {row['kind']} {row['name']} @ {row['loc']}")
+        print(f"  NO-REASON {row['kind']} {row['name']} @ {row['panel']}")
         rc = 1
-    try:
-        win._disconnect()
-    except Exception:  # noqa: BLE001
-        pass
-    win.deleteLater()
-    app.processEvents()
     return rc
 
 
 if __name__ == "__main__":
     # 审计会临时打桩 Qt 静态方法并造出很多短命对话框；解释器退出时
-    # offscreen 平台偶发 Qt 析构崩溃（STATUS_STACK_BUFFER_OVERRUN）。
-    # 结果文件已落盘，这里直接硬退出，避免把一次成功审计伪装成崩溃。
+    # offscreen 平台偶发 Qt 析构崩溃。结果文件已落盘，这里直接硬退出。
     rc = main()
     sys.stdout.flush()
     sys.stderr.flush()
