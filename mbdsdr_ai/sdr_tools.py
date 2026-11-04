@@ -106,6 +106,29 @@ def _resolve_station_args(args, lat_key="latitude", lon_key="longitude",
     return fix, evaluate_station(fix)
 
 
+def _physics_now(args) -> float:
+    """物理计算统一时刻：显式 timestamp > TimeEngine 仿真时刻 > 墙钟。
+
+    P11 修复：天空视图/多普勒/过境三条入口必须同一时间基准，否则同一模拟
+    时刻会各算各的（例如快转到 2026-09 后仍按 2026-11 墙钟算可见性）。
+    """
+    ts = args.get("timestamp")
+    if ts is not None:
+        try:
+            return float(ts)
+        except (TypeError, ValueError):
+            pass
+    try:
+        from mbdsdr_ai.new_spacetime import get_time_engine
+    except ImportError:
+        from new_spacetime import get_time_engine
+    try:
+        return float(get_time_engine().now_unix())
+    except Exception:
+        import time as _time
+        return _time.time()
+
+
 def _station_untrusted_text(ev) -> str:
     reasons = "；".join(ev.get("reasons") or ["来源不可信"])
     return (f"错误: 站址不可信（{reasons}）。拒绝用不可信站址计算卫星过境/"
@@ -1297,6 +1320,7 @@ def register_sdr_tools(agent):
                 "altitude": {"type": "number", "description": "地面站海拔，单位米，默认 0"},
                 "min_elevation": {"type": "number", "description": "最小仰角阈值（度），默认 0"},
                 "satellite_type": {"type": "string", "description": "卫星类型: weather(气象)/amateur(业余)/iss(国际空间站)/all，默认 all"},
+                "timestamp": {"type": "number", "description": "可选 Unix UTC 秒；缺省用 TimeEngine 仿真时刻（与 sky_view_visible 同口径）"},
             },
             "required": ["latitude", "longitude"],
         },
@@ -1315,6 +1339,7 @@ def register_sdr_tools(agent):
                 "latitude": {"type": "number", "description": "地面站纬度"},
                 "longitude": {"type": "number", "description": "地面站经度"},
                 "altitude": {"type": "number", "description": "地面站海拔，单位米，默认 0"},
+                "timestamp": {"type": "number", "description": "可选 Unix UTC 秒；缺省用 TimeEngine 仿真时刻"},
             },
             "required": ["satellite_name", "frequency_hz", "latitude", "longitude"],
         },
@@ -1335,6 +1360,7 @@ def register_sdr_tools(agent):
                 "min_elevation": {"type": "number", "description": "最小仰角阈值（度），默认 10"},
                 "satellite_type": {"type": "string", "description": "weather/amateur/all，默认 all"},
                 "nominal_freq_hz": {"type": "number", "description": "可选，用于估算多普勒范围，先查 sat_link_get 的下行频点"},
+                "timestamp": {"type": "number", "description": "可选 Unix UTC 秒（预测起点）；缺省用 TimeEngine 仿真时刻"},
             },
             "required": ["latitude", "longitude"],
         },
@@ -2088,6 +2114,7 @@ def register_sdr_tools(agent):
                 "observer_lat": {"type": "number", "description": "观察者纬度"},
                 "observer_lon": {"type": "number", "description": "观察者经度"},
                 "min_elevation": {"type": "number", "description": "最小仰角（度），默认 5"},
+                "timestamp": {"type": "number", "description": "可选 Unix UTC 秒；缺省用 TimeEngine 仿真时刻"},
             },
             "required": ["observer_lat", "observer_lon"],
         },
@@ -4101,22 +4128,30 @@ def _decode_adsb(args):
     return output
 
 def _satellite_sky_view(args):
-    """卫星天空视图（真实实现，sgp4）。"""
-    lat = args["latitude"]
-    lon = args["longitude"]
-    alt = args.get("altitude", 0.0)
+    """卫星天空视图（真实实现，sgp4；时刻与 sky_view_visible 统一）。"""
+    fix, ev = _resolve_station_args(args)
+    if not ev["trusted"]:
+        return _station_untrusted_text(ev)
+    lat = float(fix.lat)
+    lon = float(fix.lon)
+    alt = float(fix.alt_m or 0.0)
     min_elev = args.get("min_elevation", 0.0)
     sat_type = args.get("satellite_type", "all")
+    when = _physics_now(args)
 
-    visible = orbit.visible_satellites(lat, lon, alt / 1000.0, min_elev, sat_type)
+    visible = orbit.visible_satellites(lat, lon, alt / 1000.0, min_elev, sat_type,
+                                       when=when)
 
+    at_utc = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(when))
     if not visible:
-        return (f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n最小仰角: {min_elev}°\n"
+        return (f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n"
+                f"时刻: {at_utc}\n最小仰角: {min_elev}°\n"
                 f"类型: {sat_type}\n\n当前没有可见卫星（仰角 > {min_elev}°）\n"
                 f"内置卫星: {', '.join(orbit.BUILTIN_SATS.keys())}")
 
     output = f"=== 卫星天空视图 ===\n"
     output += f"位置: {lat}°N, {lon}°E\n"
+    output += f"时刻: {at_utc}\n"
     output += f"最小仰角: {min_elev}°\n"
     output += f"类型: {sat_type}\n"
     output += f"可见卫星数: {len(visible)}\n\n"
@@ -4144,7 +4179,8 @@ def _satellite_doppler(args):
     lon = float(fix.lon)
     alt = float(fix.alt_m or 0.0)
 
-    result = orbit.doppler_correction(sat_name, freq_hz, lat, lon, alt / 1000.0)
+    result = orbit.doppler_correction(sat_name, freq_hz, lat, lon,
+                                      alt / 1000.0, when=_physics_now(args))
 
     if "error" in result:
         return (f"多普勒计算失败: {result['error']}\n"
@@ -4182,7 +4218,8 @@ def _satellite_passes(args):
     stype = args.get("satellite_type", "all")
     freq = args.get("nominal_freq_hz")
     rep = orbit.predict_passes_report(lat, lon, alt / 1000.0, hours, min_elev,
-                                      stype, freq, require_trusted_station=True)
+                                      stype, freq, require_trusted_station=True,
+                                      start_unix=_physics_now(args))
     passes = rep["passes"]
     out = ""
     if rep["degraded"]:
@@ -5582,7 +5619,10 @@ def _sky_view_visible(args):
     lon = args['observer_lon']
     min_elev = args.get('min_elevation', 5.0)
 
-    result = compute_visible_satellite_count(lat, lon, min_elev)
+    ts = args.get("timestamp")
+    result = compute_visible_satellite_count(
+        lat, lon, min_elev,
+        timestamp=None if ts is None else float(ts))
 
     lines = [f"=== 天空图可见卫星（仰角 > {min_elev:.0f}°）==="]
     lines.append(f"可见数量: {result['total_visible']} 颗")

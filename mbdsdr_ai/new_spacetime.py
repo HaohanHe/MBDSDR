@@ -1133,7 +1133,8 @@ def get_gnss_system_info(system: str = "all") -> str:
 
 
 def compute_visible_satellite_count(observer_lat: float, observer_lon: float,
-                                      min_elevation: float = 5.0) -> Dict[str, Any]:
+                                      min_elevation: float = 5.0,
+                                      timestamp: Optional[float] = None) -> Dict[str, Any]:
     """计算当前可见卫星数量（新时空天空图用）。
 
  时间全局 TimeEngine.now_unix，而非 time.time。
@@ -1143,8 +1144,9 @@ def compute_visible_satellite_count(observer_lat: float, observer_lon: float,
     except ImportError:
         from decoders import list_visible_satellites
 
-    # 注入模拟时间：时间穿梭后这里取到的是 sim time，不是系统时间
-    sim_ts = get_time_engine().now_unix()
+    # 注入模拟时间：显式 timestamp 优先；否则取 sim time（不是系统墙钟）
+    sim_ts = (get_time_engine().now_unix() if timestamp is None
+              else float(timestamp))
     visible = list_visible_satellites(observer_lat, observer_lon, 0, min_elevation,
                                       timestamp=sim_ts)
     return {

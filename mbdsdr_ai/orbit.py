@@ -425,10 +425,15 @@ def doppler_correction(
     observer_lat: float,
     observer_lon: float,
     observer_alt: float = 0.0,
+    when: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """真视线速度多普勒：f_rx = f_tx * (1 - v_los/c)（远离为正）。"""
+    """真视线速度多普勒：f_rx = f_tx * (1 - v_los/c)（远离为正）。
+
+    ``when`` 显式 Unix UTC 秒；缺省才用当前时刻。
+    """
     _require_sgp4()
-    st = compute_satellite_state(satellite_name, observer_lat, observer_lon, observer_alt)
+    st = compute_satellite_state(satellite_name, observer_lat, observer_lon,
+                                 observer_alt, when=when)
     if st is None:
         return {"error": f"无法计算卫星 {satellite_name} 位置（TLE 不可用或不在内置列表）"}
     v_los = st["range_rate_kms"]
@@ -453,8 +458,13 @@ def visible_satellites(
     observer_alt: float = 0.0,
     min_elevation: float = 0.0,
     satellite_type: str = "all",
+    when: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
-    """列出当前仰角超过阈值的卫星（真 sgp4）。"""
+    """列出指定时刻仰角超过阈值的卫星（真 sgp4）。
+
+    ``when`` 为显式 Unix UTC 秒；缺省才用当前时刻。仿真/快转时必须传入，
+    否则与 ``sky_view_visible``（TimeEngine 口径）结果分叉。
+    """
     out = []
     for name in BUILTIN_SATS:
         if satellite_type == "weather" and not any(
@@ -462,7 +472,8 @@ def visible_satellites(
             continue
         if satellite_type == "amateur" and "ISS" not in name:
             continue
-        st = compute_satellite_state(name, observer_lat, observer_lon, observer_alt)
+        st = compute_satellite_state(name, observer_lat, observer_lon,
+                                     observer_alt, when=when)
         if st and st["elevation"] >= min_elevation:
             out.append(st)
     out.sort(key=lambda x: x["elevation"], reverse=True)
@@ -509,6 +520,7 @@ def _predict_passes_impl(
     satellite_type: str = "all",
     nominal_freq_hz: Optional[float] = None,
     allow_stale: bool = True,
+    start_unix: Optional[float] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """过境预测内核：返回 ``(passes, degraded)``。
 
@@ -520,7 +532,8 @@ def _predict_passes_impl(
 
     coarse_step = 60.0   # 粗扫量级（~0.5min）
     fine_step = 2.0      # pass 内采样步长，找中天/多普勒极值
-    t0 = time.time()
+    # 显式时刻优先（仿真/测试口径）；缺省才用墙钟当前时刻
+    t0 = time.time() if start_unix is None else float(start_unix)
     t_end = t0 + hours * 3600.0
     names = [n for n in BUILTIN_SATS
              if not (satellite_type == "weather" and not any(
@@ -674,15 +687,19 @@ def predict_passes(
     min_elevation: float = 10.0,
     satellite_type: str = "all",
     nominal_freq_hz: Optional[float] = None,
+    start_unix: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """预测未来 hours 小时内的卫星过境事件（列表兼容接口）。
+
+    ``start_unix`` 显式 UTC 秒；缺省用墙钟当前时刻（仿真环境应传入）。
 
     自适应粗/细扫描（60s 粗扫 + 二分收敛 + 2s 中天采样）。每条结果都附带
     TLE 身份/历元/新鲜度/精度风险字段；过期或失效时时刻自动降到分钟级。
     """
     return _predict_passes_impl(
         observer_lat, observer_lon, observer_alt, hours,
-        min_elevation, satellite_type, nominal_freq_hz)[0]
+        min_elevation, satellite_type, nominal_freq_hz,
+        start_unix=start_unix)[0]
 
 
 def predict_passes_report(
@@ -695,6 +712,7 @@ def predict_passes_report(
     nominal_freq_hz: Optional[float] = None,
     allow_stale: bool = True,
     require_trusted_station: bool = False,
+    start_unix: Optional[float] = None,
 ) -> Dict[str, Any]:
     """过境面板用的完整报告：过境列表 + 被跳过/降级的诚实清单。
 
@@ -727,7 +745,8 @@ def predict_passes_report(
         }
     passes, degraded = _predict_passes_impl(
         observer_lat, observer_lon, observer_alt, hours,
-        min_elevation, satellite_type, nominal_freq_hz, allow_stale)
+        min_elevation, satellite_type, nominal_freq_hz, allow_stale,
+        start_unix)
     return {
         "n_passes": len(passes),
         "passes": passes,
