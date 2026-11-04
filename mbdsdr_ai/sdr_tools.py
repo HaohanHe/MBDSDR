@@ -83,6 +83,36 @@ def _get_ground_station_latlon() -> tuple:
     return (None, None)
 
 
+def _resolve_station_args(args, lat_key="latitude", lon_key="longitude",
+                          alt_key="altitude") -> tuple:
+    """工具参数 → (StationFix, 可信度评估)。来源显式：参数=user，配置=config。
+
+    任何情况下都不内置城市坐标；配置缺失时 source=none，评估必判不可信。
+    """
+    from mbdsdr_ai.station import (evaluate_station, resolve_station,
+                                   station_from_config, station_from_user)
+    cfg = station_from_config()
+    lat = args.get(lat_key)
+    lon = args.get(lon_key)
+    user = None
+    if lat is not None and lon is not None:
+        try:
+            user = station_from_user(float(lat), float(lon),
+                                     float(args.get(alt_key, 0.0) or 0.0),
+                                     origin="tool_args")
+        except (TypeError, ValueError):
+            user = None
+    fix = resolve_station(user=user, config=cfg)
+    return fix, evaluate_station(fix)
+
+
+def _station_untrusted_text(ev) -> str:
+    reasons = "；".join(ev.get("reasons") or ["来源不可信"])
+    return (f"错误: 站址不可信（{reasons}）。拒绝用不可信站址计算卫星过境/"
+            f"多普勒；请显式传入可信的 latitude/longitude，或先在配置中填写"
+            f"ground_station_lat/ground_station_lon。不给默认城市坐标。")
+
+
 def _tr_pair(pair) -> ToolResult:
     """把 (content_str, data_dict) 二元组包装成 ToolResult（D6 工作流 sidecar）。
 
@@ -4106,16 +4136,13 @@ def _satellite_doppler(args):
     """卫星多普勒计算（真实实现）。返回 (散文, data) 二元组（D6 sidecar）。"""
     sat_name = args["satellite_name"]
     freq_hz = args["frequency_hz"]
-    # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
-    cfg_lat, cfg_lon = _get_ground_station_latlon()
-    lat = args.get("latitude", cfg_lat)
-    lon = args.get("longitude", cfg_lon)
-    if lat is None or lon is None:
-        return ("错误: 未配置地面站坐标。请在参数中传入 latitude/longitude，"
-                "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。"), {}
-    lat = float(lat)
-    lon = float(lon)
-    alt = args.get("altitude", 0.0)
+    # 地面站坐标：参数(user) > 配置(config)；缺失/0,0/海上一律拒绝计算。
+    fix, ev = _resolve_station_args(args)
+    if not ev["trusted"]:
+        return (_station_untrusted_text(ev), {})
+    lat = float(fix.lat)
+    lon = float(fix.lon)
+    alt = float(fix.alt_m or 0.0)
 
     result = orbit.doppler_correction(sat_name, freq_hz, lat, lon, alt / 1000.0)
 
@@ -4144,15 +4171,18 @@ def _satellite_doppler(args):
 
 def _satellite_passes(args):
     """未来卫星过境预测（sgp4）。过境面板：TLE 过期/降级如实标注精度风险。"""
-    lat = args["latitude"]
-    lon = args["longitude"]
-    alt = args.get("altitude", 0.0)
+    fix, ev = _resolve_station_args(args)
+    if not ev["trusted"]:
+        return _station_untrusted_text(ev)
+    lat = float(fix.lat)
+    lon = float(fix.lon)
+    alt = float(fix.alt_m or 0.0)
     hours = args.get("hours", 24.0)
     min_elev = args.get("min_elevation", 10.0)
     stype = args.get("satellite_type", "all")
     freq = args.get("nominal_freq_hz")
     rep = orbit.predict_passes_report(lat, lon, alt / 1000.0, hours, min_elev,
-                                      stype, freq)
+                                      stype, freq, require_trusted_station=True)
     passes = rep["passes"]
     out = ""
     if rep["degraded"]:
@@ -4189,18 +4219,12 @@ def _satellite_doppler_track(mgr, args):
     duration = min(float(args.get("duration_s", 300.0)), 1200.0)
     sr = float(args.get("sample_rate_khz", 240.0)) * 1e3
     demod = args.get("demod", "WFM")
-    cfg_lat, cfg_lon = _get_ground_station_latlon()
-    lat = args.get("latitude", cfg_lat)
-    lon = args.get("longitude", cfg_lon)
-    if lat is None or lon is None:
-        return ToolResult(
-            success=False,
-            content="错误: 未配置地面站坐标。请在参数中传入 latitude/longitude，"
-                    "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
-        )
-    lat = float(lat)
-    lon = float(lon)
-    alt_km = float(args.get("altitude_m", 0.0)) / 1000.0
+    fix, ev = _resolve_station_args(args, alt_key="altitude_m")
+    if not ev["trusted"]:
+        return ToolResult(success=False, content=_station_untrusted_text(ev))
+    lat = float(fix.lat)
+    lon = float(fix.lon)
+    alt_km = float(fix.alt_m or 0.0) / 1000.0
     interval = max(float(args.get("update_interval_s", 2.0)), 0.05)
     min_elev = float(args.get("min_elevation", 0.0))
 

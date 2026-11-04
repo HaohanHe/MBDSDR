@@ -438,6 +438,7 @@ class TestPassHonesty:
         monkeypatch.setattr(orbit, "fetch_tle_record",
                             lambda c: self._old_iss_record())
         ctrl = SDRController(backend=None, config_dir=str(tmp_path))
+        ctrl.set_ground_station(45.0, 120.0, 0.0)   # P11：过境需可信站址
         out = ctrl.get_satellite_pass(25544)
         assert "error" not in out
         assert out["time_precision_s"] == 60
@@ -463,6 +464,7 @@ class TestPassHonesty:
             "refresh_status": "cache", "refresh_error": "", "cache_path": "",
         })
         ctrl = SDRController(backend=None, config_dir=str(tmp_path))
+        ctrl.set_ground_station(45.0, 120.0, 0.0)   # P11：过境需可信站址
         out = ctrl.get_satellite_pass(44016)
         assert out["error"] == "identity_mismatch"
         assert out["object_name"] == "ATLAS 5 CENTAUR DEB"

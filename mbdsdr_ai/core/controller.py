@@ -230,6 +230,9 @@ class SDRController:
         self._gs_lat: float = 0.0
         self._gs_lon: float = 0.0
         self._gs_alt: float = 0.0
+        # P11：站址来源/精度显式化；0,0 与「未设置」一律判不可信
+        self._gs_source: str = "none"
+        self._gs_accuracy_m: Optional[float] = None
 
         # ---- 扫描 / 解码 / 录制句柄 ----
         self._scans: Dict[str, Dict[str, Any]] = {}
@@ -907,11 +910,44 @@ class SDRController:
     # ==================================================================
     # 卫星
     # ==================================================================
-    def set_ground_station(self, lat: float, lon: float, alt: float = 0.0) -> None:
-        """设置地面站位置（经纬度度、海拔米）。"""
+    def set_ground_station(self, lat: float, lon: float, alt: float = 0.0,
+                           source: str = "user",
+                           accuracy_m: Optional[float] = None) -> None:
+        """设置地面站位置（经纬度度、海拔米）。
+
+        ``source`` 必须如实标（``user`` 手填 / ``gnss`` 定位 / ``config`` 配置）；
+        不传来源视为用户手填。``accuracy_m`` 可选定位精度元数据。
+        """
         self._gs_lat = float(lat)
         self._gs_lon = float(lon)
         self._gs_alt = float(alt)
+        self._gs_source = str(source or "user")
+        self._gs_accuracy_m = None if accuracy_m is None else float(accuracy_m)
+
+    def set_ground_station_from_gnss(self, lat: float, lon: float,
+                                     alt: float = 0.0,
+                                     accuracy_m: Optional[float] = None) -> None:
+        """GNSS 定位写入站址（优先级最高，覆盖手填/配置）。"""
+        self.set_ground_station(lat, lon, alt, source="gnss",
+                                accuracy_m=accuracy_m)
+
+    def load_ground_station_from_config(self, path: Optional[str] = None) -> bool:
+        """从 ``~/.mbdsdr/config.json`` 载入站址；未配置返回 False（不猜城市）。"""
+        from ..station import station_from_config
+        fix = station_from_config(path)
+        if fix.lat is None or fix.lon is None:
+            return False
+        self.set_ground_station(fix.lat, fix.lon, fix.alt_m,
+                                source="config", accuracy_m=fix.accuracy_m)
+        return True
+
+    def station_status(self) -> dict:
+        """当前站址可信度（来源、海陆、不可信原因）。"""
+        from ..station import StationFix, evaluate_station
+        fix = StationFix(self._gs_lat, self._gs_lon, self._gs_alt,
+                         source=self._gs_source or "none",
+                         accuracy_m=self._gs_accuracy_m)
+        return evaluate_station(fix)
 
     def list_satellites(self) -> List[SatInfo]:
         """列出内置可接收卫星（NORAD 编号 + 下行频率）。"""
@@ -965,6 +1001,18 @@ class SDRController:
             :class:`PassInfo` 序列化；轨道库缺失/无过境时返回
             ``{"error": "not_available"|"no_pass"|"identity_mismatch"}``。
         """
+        st = self.station_status()
+        if not st["trusted"]:
+            # P11 红线：站址不可信（缺失/0,0/海上/缺省）时拒绝算过境，
+            # 不许拿默认城市坐标冒充用户位置。
+            return {
+                "error": "station_untrusted",
+                "station": st["fix"],
+                "reasons": st["reasons"],
+                "suggestion": ("未获得可信站址（GNSS 定位或用户手填坐标）。"
+                               "拒绝用不可信站址计算过境；请先用 GNSS 定位或"
+                               "set_ground_station 显式设置经纬度。"),
+            }
         name = self._norad_to_name(norad)
         if name is None:
             return {"error": "not_available", "suggestion": "该 NORAD 编号不在内置表中。"}
@@ -1060,6 +1108,15 @@ class SDRController:
             ``{satellite, nominal_freq_hz, tuned_freq_hz, doppler_hz, elevation_deg}``；
             失败返回 ``{"error": ...}``。
         """
+        st = self.station_status()
+        if not st["trusted"]:
+            return {
+                "error": "station_untrusted",
+                "station": st["fix"],
+                "reasons": st["reasons"],
+                "suggestion": ("站址不可信，拒绝按错误位置做多普勒调谐；"
+                               "请先 GNSS 定位或显式 set_ground_station。"),
+            }
         name = self._norad_to_name(norad)
         if name is None:
             return {"error": "not_available", "suggestion": "该 NORAD 编号不在内置表中。"}

@@ -1509,19 +1509,24 @@ class MBDSDRAgent:
 
         def _passes(args):
             try:
-                # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
-                cfg_lat, cfg_lon = MBDSDRAgent._get_ground_station_latlon()
-                lat = args.get("observer_lat", cfg_lat)
-                lon = args.get("observer_lon", cfg_lon)
-                if lat is None or lon is None:
-                    return ToolResult(
-                        False,
-                        "未配置地面站坐标。请在参数中传入 observer_lat/observer_lon，"
-                        "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
-                    )
-                lat = float(lat)
-                lon = float(lon)
-                alt = float(args.get("observer_alt", 0) or 0)
+                # 站址：参数(user) > 配置(config)；不可信（缺失/0,0/海上）拒算
+                from mbdsdr_ai.station import (evaluate_station, resolve_station,
+                                               station_from_config, station_from_user)
+                lat_arg = args.get("observer_lat")
+                lon_arg = args.get("observer_lon")
+                user = (station_from_user(float(lat_arg), float(lon_arg),
+                                          float(args.get("observer_alt", 0) or 0),
+                                          origin="tool_args")
+                        if lat_arg is not None and lon_arg is not None else None)
+                fix = resolve_station(user=user, config=station_from_config())
+                ev = evaluate_station(fix)
+                if not ev["trusted"]:
+                    return ToolResult(False, "站址不可信，拒绝计算过境：" +
+                                      "；".join(ev["reasons"]) +
+                                      "。请显式传入可信 observer_lat/observer_lon。")
+                lat = float(fix.lat)
+                lon = float(fix.lon)
+                alt = float(fix.alt_m or 0)
                 hours = float(args.get("hours", 24) or 24)
                 min_el = float(args.get("min_elevation", 10) or 10)
                 stype = str(args.get("satellite_type", "all") or "all")
@@ -1562,17 +1567,20 @@ class MBDSDRAgent:
         def _point(args):
             try:
                 name = str(args.get("satellite", "NOAA 19"))
-                cfg_lat, cfg_lon = MBDSDRAgent._get_ground_station_latlon()
-                lat = args.get("observer_lat", cfg_lat)
-                lon = args.get("observer_lon", cfg_lon)
-                if lat is None or lon is None:
-                    return ToolResult(
-                        False,
-                        "未配置地面站坐标。请在参数中传入 observer_lat/observer_lon，"
-                        "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
-                    )
-                lat = float(lat)
-                lon = float(lon)
+                from mbdsdr_ai.station import (evaluate_station, resolve_station,
+                                               station_from_config, station_from_user)
+                lat_arg = args.get("observer_lat")
+                lon_arg = args.get("observer_lon")
+                user = (station_from_user(float(lat_arg), float(lon_arg),
+                                          origin="tool_args")
+                        if lat_arg is not None and lon_arg is not None else None)
+                fix = resolve_station(user=user, config=station_from_config())
+                ev = evaluate_station(fix)
+                if not ev["trusted"]:
+                    return ToolResult(False, "站址不可信，拒绝计算指向：" +
+                                      "；".join(ev["reasons"]))
+                lat = float(fix.lat)
+                lon = float(fix.lon)
                 s = compute_satellite_state(name, lat, lon)
                 if s is None:
                     return ToolResult(False, f"未知卫星: {name}")

@@ -695,12 +695,37 @@ def predict_passes_report(
     satellite_type: str = "all",
     nominal_freq_hz: Optional[float] = None,
     allow_stale: bool = True,
+    require_trusted_station: bool = False,
 ) -> Dict[str, Any]:
     """过境面板用的完整报告：过境列表 + 被跳过/降级的诚实清单。
 
     ``allow_stale=False`` 时过期/失效 TLE 默认不参与过境（目录默认口径）；
     无论是否放行，``degraded`` 都会逐条说明原因，调用方不得静默忽略。
+
+    ``require_trusted_station=True`` 时先评站址可信度（P11）：缺坐标/0,0/
+    海上/缺省兜底 → 不计算任何过境，``degraded`` 留痕 ``station_untrusted``。
     """
+    from .station import evaluate_station, station_from_user
+
+    station_ev = evaluate_station(station_from_user(
+        observer_lat, observer_lon, observer_alt))
+    if require_trusted_station and not station_ev["trusted"]:
+        return {
+            "n_passes": 0,
+            "passes": [],
+            "degraded": [{
+                "satellite": "（站址）", "catnr": 0,
+                "reason": "station_untrusted",
+                "detail": "；".join(station_ev["reasons"]),
+            }],
+            "station": station_ev,
+            "tle_policy": {
+                "allow_stale": bool(allow_stale),
+                "fresh_max_hours": 24.0,
+                "usable_max_days": 7.0,
+                "expired_max_days": 30.0,
+            },
+        }
     passes, degraded = _predict_passes_impl(
         observer_lat, observer_lon, observer_alt, hours,
         min_elevation, satellite_type, nominal_freq_hz, allow_stale)
@@ -708,6 +733,7 @@ def predict_passes_report(
         "n_passes": len(passes),
         "passes": passes,
         "degraded": degraded,
+        "station": station_ev,
         "tle_policy": {
             "allow_stale": bool(allow_stale),
             "fresh_max_hours": 24.0,
