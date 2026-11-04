@@ -529,7 +529,9 @@ def register_urh_tools(registry) -> None:
             "type": "object",
             "properties": {
                 "bits": {"type": "array", "items": {"type": "integer"}},
-                "modulation": {"type": "string", "enum": list(MODULATION_TYPES), "default": "ASK"},
+                "modulation": {"type": "string",
+                               "enum": sorted(set(_URH_MOD_ALIASES) | set(MODULATION_TYPES)),
+                               "default": "ASK"},
                 "samples_per_symbol": {"type": "integer", "default": 100},
                 "sample_rate": {"type": "number", "default": 1e6},
                 "carrier_freq_hz": {"type": "number", "default": 40e3},
@@ -548,7 +550,9 @@ def register_urh_tools(registry) -> None:
             "type": "object",
             "properties": {
                 "iq": {"type": "array", "items": {"type": "number"}},
-                "modulation": {"type": "string", "enum": list(MODULATION_TYPES), "default": "ASK"},
+                "modulation": {"type": "string",
+                               "enum": sorted(set(_URH_MOD_ALIASES) | set(MODULATION_TYPES)),
+                               "default": "ASK"},
             },
             "required": ["iq"],
         },

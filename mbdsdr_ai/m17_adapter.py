@@ -564,7 +564,8 @@ def register_m17_tools(registry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "bits": {"type": "integer", "default": 96},
+                "bits": {"description": "比特列表 [1,0,...]；或整数表示随机生成比特个数（默认 96）",
+                         "default": 96},
                 "seed": {"type": "integer", "default": 1},
             },
             "required": [],

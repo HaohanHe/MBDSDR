@@ -415,7 +415,10 @@ class ModelManager:
             self._last_error = str(e)
             yield {"done": True, "success": False, "content": full_content,
                    "tool_calls": [], "usage": usage, "model": self.model,
-                   "latency_ms": round(latency_ms, 1), "error": str(e)}
+                   "latency_ms": round(latency_ms, 1), "error": str(e),
+                   # P7.2：流中断不谎报成功，也不丢弃已收到的部分内容；
+                   # 半截 tool_calls 一律不返回（参数可能被截断，执行必错）。
+                   "interrupted": True, "partial": bool(full_content)}
 
     # ── 工具调用辅助 ────────────────────────────────────
 

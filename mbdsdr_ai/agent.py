@@ -3494,6 +3494,7 @@ class MBDSDRAgent:
         total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         compacted = False
         final_content = ""
+        interrupted = False
         last_error = None
 
         for round_num in range(max_tool_rounds):
@@ -3554,7 +3555,16 @@ class MBDSDRAgent:
 
             if not response.get("success"):
                 last_error = response.get("error", "unknown_error")
-                final_content = f"模型调用失败: {last_error}"
+                partial = (response.get("content") or "").strip()
+                if partial:
+                    # P7.2：流中断/失败时保留已收到的部分内容并明确标注未完成，
+                    # 不把半截回答当成完整成功回复，也不静默吞掉。
+                    interrupted = True
+                    final_content = (
+                        partial + "\n\n（模型输出中断：" + str(last_error)
+                        + "。以上为已收到的部分内容，本轮请求未完成。）")
+                else:
+                    final_content = f"模型调用失败: {last_error}"
                 break
 
             content = response.get("content", "")
@@ -3669,6 +3679,7 @@ class MBDSDRAgent:
             "latency_ms": latency_ms,
             "compacted": compacted,
             "error": last_error,
+            "interrupted": interrupted,
             "rounds": len(all_tool_calls) + (1 if final_content else 0),
         }
 

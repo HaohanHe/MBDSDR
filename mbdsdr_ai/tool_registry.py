@@ -217,6 +217,98 @@ class ToolCallLog:
     content_preview: str = ""
 
 
+#: JSON Schema 类型 -> 检查函数；bool 在 Python 里是 int 子类，需先排除。
+def _type_ok(param_type: str, value: Any) -> bool:
+    if param_type == "string":
+        return isinstance(value, str)
+    if param_type == "boolean":
+        return isinstance(value, bool)
+    if param_type == "array":
+        return isinstance(value, list)
+    if param_type == "object":
+        return isinstance(value, dict)
+    if param_type in ("number", "integer"):
+        if isinstance(value, bool):
+            return False
+        return isinstance(value, (int, float))
+    return True
+
+
+def validate_arguments(schema: Dict[str, Any],
+                       args: Dict[str, Any]) -> List[Dict[str, str]]:
+    """按工具 schema 校验参数（P7.2）。返回问题列表，空列表表示通过。
+
+    只校验 schema 显式声明的属性；`_` 开头的内部键跳过（工作流会带元数据）。
+    数值型允许「数字字符串」就地转成数字（弱模型常见），其余类型不静默强转：
+    类型不符 / 越界 / 不在枚举 一律返回明确错误，由 call() 拒绝执行 handler。
+    """
+    problems: List[Dict[str, str]] = []
+    if not isinstance(args, dict):
+        return [{"param": "", "error": "invalid_arguments_type",
+                 "message": "调用参数必须是 JSON 对象（键值对），收到的是 "
+                            f"{type(args).__name__}；未执行该工具。"}]
+    props: Dict[str, Any] = (schema or {}).get("properties", {}) or {}
+    for name, spec in props.items():
+        if name not in args or name.startswith("_"):
+            continue
+        value = args[name]
+        if value is None:
+            continue
+        ptype = (spec or {}).get("type", "")
+        if ptype in ("number", "integer") and isinstance(value, str):
+            try:
+                value = int(value) if ptype == "integer" and "." not in value else float(value)
+                args[name] = value
+            except ValueError:
+                problems.append({
+                    "param": name, "error": "param_type_mismatch",
+                    "message": f"参数 '{name}' 需要 {ptype}，收到的字符串 '{value}' 无法转成数字；未执行该工具。"})
+                continue
+        if not _type_ok(ptype, value):
+            problems.append({
+                "param": name, "error": "param_type_mismatch",
+                "message": f"参数 '{name}' 需要 {ptype}，收到 {type(value).__name__}；未执行该工具。"})
+            continue
+        if ptype == "integer" and isinstance(value, float) and value != int(value):
+            problems.append({
+                "param": name, "error": "param_type_mismatch",
+                "message": f"参数 '{name}' 需要整数，收到 {value}；未执行该工具。"})
+            continue
+        if ptype in ("number", "integer"):
+            lo = (spec or {}).get("minimum")
+            hi = (spec or {}).get("maximum")
+            if lo is not None and value < lo:
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": f"参数 '{name}' = {value} 小于允许下限 {lo}；未执行该工具。"})
+                continue
+            if hi is not None and value > hi:
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": f"参数 '{name}' = {value} 超出允许上限 {hi}；未执行该工具。"})
+                continue
+        enum = (spec or {}).get("enum")
+        if enum and value not in enum:
+            problems.append({
+                "param": name, "error": "param_not_in_enum",
+                "message": f"参数 '{name}' = {value!r} 不在允许取值 {enum} 中；未执行该工具。"})
+            continue
+        if ptype == "array":
+            min_items = (spec or {}).get("minItems")
+            max_items = (spec or {}).get("maxItems")
+            if min_items is not None and len(value) < min_items:
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": f"参数 '{name}' 至少需要 {min_items} 项，收到 {len(value)} 项；未执行该工具。"})
+                continue
+            if max_items is not None and len(value) > max_items:
+                problems.append({
+                    "param": name, "error": "param_out_of_range",
+                    "message": f"参数 '{name}' 最多允许 {max_items} 项，收到 {len(value)} 项；未执行该工具。"})
+                continue
+    return problems
+
+
 #: 旧壳工具面写工具名字模式（安全面收口 2026-10-28）。写工具 = 会变更
 #: 持久状态 / 动硬件 / 落盘 / 发起对外连接的工具，走 arm_manual 人工门
 #: （AGENTS.md §3「写工具一律走 arm_manual 人工门」）。判定信号有两个：
@@ -552,6 +644,19 @@ class ToolRegistry:
             self._log_call(result)
             return result
 
+        # 参数形态校验（P7.2）：非对象参数无法做别名/必填/范围检查，直接拒绝
+        if not isinstance(args, dict):
+            result = ToolResult(
+                success=False,
+                content=f"工具 '{tool_name}' 的调用参数必须是 JSON 对象，收到 {type(args).__name__}；未执行该工具。",
+                tool_name=tool_name,
+                args={},
+                error="invalid_arguments_type",
+                next_step="重新生成一个 {\"参数名\": 值} 形式的 JSON 对象；不要传数组、字符串或裸标量。",
+            )
+            self._log_call(result)
+            return result
+
         # 参数别名归一化：弱模型可能传 path/freq/gain 等别名，自动映射到标准参数名
         # 仅当标准键不存在时才映射，不覆盖已有值
         # 关键：必须按"目标工具 schema 实际声明的键"来映射，否则会把工具本来就接受的
@@ -601,6 +706,23 @@ class ToolRegistry:
                 )
                 self._log_call(result)
                 return result
+
+        # 参数类型/范围/枚举校验（P7.2）：不合格一律不执行 handler，如实报错，
+        # 且不进入重试（重试同一个坏参数只会空转）。数字字符串在此就地转数字。
+        problems = validate_arguments(tool_def.get("parameters", {}) or {}, args)
+        if problems:
+            first = problems[0]
+            detail = "\n".join("- " + p["message"] for p in problems[:5])
+            result = ToolResult(
+                success=False,
+                content=f"工具 '{tool_name}' 参数校验失败：\n{detail}",
+                tool_name=tool_name,
+                args=args,
+                error=first["error"],
+                next_step="按参数说明修正类型/范围/枚举取值后重试一次；不要原样重发同一组坏参数，也不要编造合规值。",
+            )
+            self._log_call(result)
+            return result
 
         # 调用 handler
         try:
@@ -708,16 +830,34 @@ class ToolRegistry:
         fn = tool_call.get("function", {})
         name = fn.get("name", "")
         args_str = fn.get("arguments", "{}")
-
-        try:
-            args = json.loads(args_str)
-        except json.JSONDecodeError:
-            # 尝试修复
+        if isinstance(args_str, dict):
+            args = args_str
+        else:
             try:
-                fixed = args_str.replace("'", '"').replace("True", "true").replace("False", "false")
-                args = json.loads(fixed)
-            except Exception:
-                args = {"_raw": args_str}
+                args = json.loads(args_str)
+            except json.JSONDecodeError:
+                # 尝试修复（只有整段能解析成对象才算修复成功）
+                try:
+                    fixed = (str(args_str).replace("'", '"')
+                             .replace("True", "true").replace("False", "false")
+                             .replace("None", "null"))
+                    fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
+                    args = json.loads(fixed)
+                except Exception:
+                    # P7.2：非法 JSON 绝不把原文塞给 handler 执行（此前会变成
+                    # {"_raw": ...}，无必填参数的工具就会被悄悄执行）。
+                    preview = str(args_str)[:200]
+                    result = ToolResult(
+                        success=False,
+                        content=(f"工具 '{name}' 的参数不是合法 JSON，未执行。"
+                                 f"收到的原文（前 200 字符）: {preview}"),
+                        tool_name=name,
+                        args={},
+                        error="invalid_json_arguments",
+                        next_step="重新生成完整、闭合的 JSON 对象参数；不要截断字符串，不要用单引号/尾逗号/Python 字面量。",
+                    )
+                    self._log_call(result)
+                    return result
 
         return self.call(name, args)
 
