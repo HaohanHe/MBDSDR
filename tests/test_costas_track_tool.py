@@ -66,4 +66,10 @@ def test_costas_track_bad_psk_order_is_honest(reg):
     iq = _offset_bpsk_iq(n=1024)
     r = reg.call("costas_track", {"iq": _as_pairs(iq), "psk_order": 3})
     assert r.success is False
-    assert "PSK order" in r.content or "不支持" in r.content, r.content[:160]
+    # P7.2 起 registry 先按 schema enum 拒绝（早于 handler、信息更具体），
+    # 这是更强的诚实拒绝；handler 自身的非法阶数守卫仍须在（下面直调验证）。
+    assert r.error == "param_not_in_enum", r.content[:160]
+    assert "psk_order" in r.content and "[2, 4, 8]" in r.content, r.content[:160]
+    direct = reg.tools["costas_track"]["handler"]({"iq": _as_pairs(iq), "psk_order": 3})
+    content = direct.content if hasattr(direct, "content") else str(direct)
+    assert "PSK order" in content or "不支持" in content, content[:160]

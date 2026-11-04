@@ -47,11 +47,20 @@ def _reg_call(tool_fn, args):
 
 
 def test_dtmf_handler_shape_guard():
-    """通过 registry 真实调用 dtmf_decode：标量输入 -> 诚实失败而非崩溃。"""
+    """通过 registry 真实调用 dtmf_decode：标量输入 -> 诚实失败而非崩溃。
+
+    P7.2 起 registry 在 handler 之前就地校验参数（类型不符不执行），
+    因此这里的「诚实失败」由注册层给出；handler 自身的形状守卫仍是最后一道，
+    用直调 handler 单独验证，两者都不得静默成功。
+    """
     from mbdsdr_ai.tool_registry import ToolRegistry
     from mbdsdr_ai import multimon_decoders as md
     reg = ToolRegistry()
     md.register_multimon_tools(reg)
     res = reg.call("dtmf_decode", {"samples": 1, "sample_rate": 8000})
     assert res.success is False
-    assert "数字数组" in (res.content or "")
+    assert res.error == "param_type_mismatch", res.content[:160]
+    assert "samples" in (res.content or "") and "array" in (res.content or "")
+    direct = reg.tools["dtmf_decode"]["handler"]({"samples": 1, "sample_rate": 8000})
+    content = direct.content if hasattr(direct, "content") else direct.get("content", "")
+    assert "数字数组" in (content or "")
