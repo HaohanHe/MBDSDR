@@ -165,6 +165,13 @@ class SDRStatus:
     underruns: int = 0             # 读侧因缓冲空而等待超时的次数（真实欠读）
     reconnect_count: int = 0       # 自进程启动以来的重连次数
     last_data_age_s: Optional[float] = None  # 距最后一次真实数据的时间（None=从未收到）
+    # ── 采样率/带宽切换瞬态（idle/switching/completed/failed）──
+    retune_state: str = "idle"       # 当前切换阶段；completed 表示新流已接管
+    retune_kind: str = ""            # sample_rate / bandwidth
+    retune_generation: int = 0       # 成功切换次数（单调递增，供消费方判新旧流）
+    retune_dropped_samples: int = 0  # 切换时丢弃的旧缓冲样点数（如实计数）
+    retune_elapsed_ms: float = 0.0   # 最近一次切换耗时
+    retune_error: str = ""           # 切换失败原因（空=无）
 
 
 class SDRBackend:
@@ -203,6 +210,8 @@ class SDRBackend:
         self._audio_out_q: "collections.deque" = collections.deque()
         self._audio_out_lock = threading.Lock()
         self._audio_max_q_samples = 48000 * 3  # ≈3s 缓冲上限
+        # 采样率/带宽切换串行化：同一时刻只允许一次切换，避免新旧流交叉。
+        self._retune_lock = threading.Lock()
 
     def connect(self) -> bool:
         """连接设备。"""
@@ -249,27 +258,86 @@ class SDRBackend:
     def get_frequency(self) -> float:
         return self.status.frequency_hz
 
+    # -- 切换瞬态辅助 -------------------------------------------------------
+    def _retune_ring_buffered(self) -> int:
+        """环形缓冲当前积压样点数；无环形缓冲时为 0。"""
+        rr = getattr(self, "_ring_reader", None)
+        if rr is None:
+            return 0
+        try:
+            return max(0, int(rr.available()))
+        except Exception:
+            return 0
+
+    def _clear_ring_for_retune(self) -> None:
+        """切换成功/失败边界上丢弃旧流样点，保证新读窗口不与旧流重叠。"""
+        rr = getattr(self, "_ring_reader", None)
+        if rr is not None:
+            try:
+                rr.clear()
+            except Exception:
+                pass
+
+    def _begin_retune(self, kind: str) -> Optional[float]:
+        """进入 switching；并发切换直接拒绝（不排队、不交叉）。"""
+        if not self._retune_lock.acquire(blocking=False):
+            self.status.retune_state = "failed"
+            self.status.retune_kind = kind
+            self.status.retune_error = "上一次采样率/带宽切换尚未完成"
+            self.status.error = self.status.retune_error
+            return None
+        self.status.retune_state = "switching"
+        self.status.retune_kind = kind
+        self.status.retune_error = ""
+        self.status.error = ""
+        return time.monotonic()
+
+    def _finish_retune(self, started: float, ok: bool, dropped: int,
+                       error: str = "") -> None:
+        """落切换结果；只有成功才推进 generation 并记丢弃量。"""
+        self.status.retune_elapsed_ms = (time.monotonic() - started) * 1000.0
+        if ok:
+            self.status.retune_state = "completed"
+            self.status.retune_generation += 1
+            self.status.retune_dropped_samples += int(dropped)
+            self.status.retune_error = ""
+        else:
+            self.status.retune_state = "failed"
+            self.status.retune_error = error or "切换失败"
+        self._retune_lock.release()
+
     def set_sample_rate(self, rate_hz: float) -> bool:
-        """设置采样率。失败时回滚 status。"""
+        """设置采样率。失败时回滚 status；切换瞬态与丢样如实暴露。"""
         if not self.status.connected:
             return False
         old = self.status.sample_rate_hz
-        self.status.error = ""
-        try:
-            ok = self._apply_sample_rate(rate_hz)
-        except Exception as e:
-            ok = False
-            self.status.error = f"set_sample_rate异常: {e}"
-        if not ok:
-            self.status.sample_rate_hz = old
-            if not self.status.error:
-                self.status.error = "set_sample_rate失败"
-            logger.warning(f"set_sample_rate({rate_hz}) 失败，已回滚到 {old}")
+        started = self._begin_retune("sample_rate")
+        if started is None:
             return False
-        self.status.sample_rate_hz = rate_hz
-        # 采样率改变 → 前端 fs_in 变了，重建整条接收链
-        self._invalidate_rx_chain(rebuild=True)
-        return True
+        dropped = self._retune_ring_buffered()
+        try:
+            try:
+                ok = self._apply_sample_rate(rate_hz)
+            except Exception as e:
+                ok = False
+                self.status.error = f"set_sample_rate异常: {e}"
+            if not ok:
+                self.status.sample_rate_hz = old
+                if not self.status.error:
+                    self.status.error = "set_sample_rate失败"
+                self._finish_retune(started, False, 0, self.status.error)
+                logger.warning(f"set_sample_rate({rate_hz}) 失败，已回滚到 {old}")
+                return False
+            self.status.sample_rate_hz = rate_hz
+            # 新流接管：先丢弃旧采样率下的缓冲（子类可能已清，重复清是幂等的），
+            # 再重建整条接收链（fs_in 已变）。
+            self._clear_ring_for_retune()
+            self._invalidate_rx_chain(rebuild=True)
+            self._finish_retune(started, True, dropped)
+            return True
+        except Exception:
+            self._retune_lock.release()
+            raise
 
     def _apply_sample_rate(self, rate_hz: float) -> bool:
         """子类覆写：把采样率真正写入硬件。"""
@@ -322,13 +390,40 @@ class SDRBackend:
         self.status.agc_enabled = enabled
         return True
 
+    def _apply_bandwidth(self, bw_hz: float) -> bool:
+        """子类覆写：把模拟/信道带宽真正写入硬件。默认无操作直接成功。"""
+        return True
+
     def set_bandwidth(self, bw_hz: float) -> bool:
+        """设置带宽。切换瞬态与丢弃的旧缓冲样点如实暴露。"""
         if not self.status.connected:
             return False
-        self.status.bandwidth_hz = bw_hz
-        # 信道带宽改变 → 重建信道化/解调器
-        self._invalidate_rx_chain(rebuild=True)
-        return True
+        old = self.status.bandwidth_hz
+        started = self._begin_retune("bandwidth")
+        if started is None:
+            return False
+        dropped = self._retune_ring_buffered()
+        try:
+            try:
+                ok = self._apply_bandwidth(bw_hz)
+            except Exception as e:
+                ok = False
+                self.status.error = f"set_bandwidth异常: {e}"
+            if not ok:
+                self.status.bandwidth_hz = old
+                if not self.status.error:
+                    self.status.error = "set_bandwidth失败"
+                self._finish_retune(started, False, 0, self.status.error)
+                return False
+            self.status.bandwidth_hz = bw_hz
+            # 带宽变化会改信道化/重采样结构：丢弃旧结构下的缓冲样点后重建。
+            self._clear_ring_for_retune()
+            self._invalidate_rx_chain(rebuild=True)
+            self._finish_retune(started, True, dropped)
+            return True
+        except Exception:
+            self._retune_lock.release()
+            raise
 
     def set_demod(self, mode: str) -> bool:
         # RAW/DIG 表示不解调模拟音频、直接取原始 IQ（ADS-B/APRS/FT8/导航等数字链路）
@@ -1760,6 +1855,17 @@ class RTLSDRBackend(SDRBackend):
         # 来源: librtlsdr src/librtlsdr.c:1702 — 换采样率后也要 reset_buffer
         self._reset_rtl_buffer()
         return True
+
+    def _apply_bandwidth(self, bw_hz: float) -> bool:
+        """写 tuner 模拟带宽；0=自动（交还驱动默认，不下发非法 0）。"""
+        if self._sdr is None or bw_hz <= 0:
+            return True
+        try:
+            self._sdr.bandwidth = int(bw_hz)
+            return True
+        except Exception as e:
+            logger.warning(f"RTL-SDR 设置带宽 {bw_hz} Hz 失败: {e}")
+            return False
 
     def _reset_rtl_buffer(self) -> None:
         """直接经 ctypes 调 rtlsdr_reset_buffer（RtlSdrAio 无此 Python 方法）。
