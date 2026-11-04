@@ -821,8 +821,12 @@ def register_tool_registry(registry) -> None:
     from .tool_registry import ToolResult
 
     def _fy4_handler(args):
-        vcdus = [bytes.fromhex(x) for x in args.get("vcdus", [])]
-        imgs = decode_fy4_vcdus(vcdus)
+        try:
+            vcdus = [bytes.fromhex(x) for x in args.get("vcdus", [])]
+            imgs = decode_fy4_vcdus(vcdus)
+        except (ValueError, TypeError) as e:
+            # 长度/hex 非法是参数错误：如实返回失败，不让异常冒到注册表
+            return ToolResult(False, f"FY-4 解码失败: {e}", error="invalid_vcdu")
         data = [{"width": i.width, "height": i.height, "channel": i.channel,
                  "satellite": i.satellite, "pixels": int(i.pixels.size)}
                 for i in imgs]

@@ -412,10 +412,7 @@ def register_sdr_tools(agent):
             },
             "required": ["device_id"],
         },
-        handler=lambda args: ToolResult(
-            success=mgr.switch_device(args["device_id"]),
-            content=f"已切换到: {mgr.get_active().device.name}" if mgr.get_active() else "切换失败",
-        ),
+        handler=lambda args: _switch_device_result(mgr, args["device_id"]),
         category="sdr_device",
     )
 
@@ -486,7 +483,7 @@ def register_sdr_tools(agent):
         name="sdr_get_frequency",
         description="查询当前接收频率。返回中心频率 Hz 和 MHz。前置条件: 设备已连接或已打开 IQ 文件; 未连接时返回调用错误而非虚构频率值，先 sdr_connect 再查。能力边界: 只读查询，不改变任何设备状态。",
         parameters={"type": "object", "properties": {}, "required": []},
-        handler=lambda args: ToolResult(success=True, content=f"当前频率: {_get_backend(mgr).get_frequency():.0f} Hz ({_get_backend(mgr).get_frequency()/1e6:.3f} MHz)"),
+        handler=lambda args: _get_frequency_result(mgr),
         category="sdr_frequency",
     )
 
@@ -2852,6 +2849,33 @@ def register_sdr_tools(agent):
 def _get_backend(mgr):
     """获取当前激活的后端。"""
     return mgr.get_active()
+
+
+def _switch_device_result(mgr, device_id: str) -> "ToolResult":
+    """切换设备：成功才报成功；失败给出原因码，不把「切换失败」写成成功。"""
+    ok = bool(mgr.switch_device(device_id))
+    active = mgr.get_active()
+    if ok and active is not None:
+        return ToolResult(success=True, content=f"已切换到: {active.device.name}")
+    return ToolResult(
+        success=False,
+        content=f"切换失败：设备 {device_id} 不存在或无法打开（先用 sdr_list_devices 核对 device_id）",
+        error="device_unavailable",
+    )
+
+
+def _get_frequency_result(mgr) -> "ToolResult":
+    """查询频率：未连接时如实报错，绝不虚构频率值。"""
+    backend = _get_backend(mgr)
+    if backend is None:
+        return ToolResult(
+            success=False,
+            content="未连接设备或未打开 IQ 文件，无法查询频率（先 sdr_connect / sdr_open_iq_file）",
+            error="not_connected",
+        )
+    freq = backend.get_frequency()
+    return ToolResult(success=True,
+                      content=f"当前频率: {freq:.0f} Hz ({freq / 1e6:.3f} MHz)")
 
 
 def _vfo_add_tool(mgr, args) -> "ToolResult":
@@ -6519,7 +6543,9 @@ def _lro_doppler_predict(args):
     from mbdsdr_ai.meteor_sat import LROOrbit, doppler_shift, MOON_RADIUS
 
     freq = args.get('freq_hz', 2200e6)
-    obs_time = args.get('observation_time_s', 600.0)
+    obs_time = float(args.get('observation_time_s', 600.0) or 600.0)
+    if obs_time < 2.0:
+        return "错误: observation_time_s 至少 2 秒，否则只有一个采样点、无法估计多普勒变化"
 
     orbit = LROOrbit(altitude_km=50)
 

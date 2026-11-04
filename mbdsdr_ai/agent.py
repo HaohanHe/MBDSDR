@@ -882,7 +882,8 @@ class MBDSDRAgent:
             r = analyze_iq_spectrum(
                 arr, sr,
                 center_hz=float(args.get("center_hz", 0) or 0),
-                fft_size=int(args.get("fft_size", 2048) or 2048),
+                # fft_size<=2 会让帧移为 0 → range step 0 崩溃；最小钳到 32
+                fft_size=max(int(args.get("fft_size", 2048) or 2048), 32),
                 n_peaks=int(args.get("n_peaks", 12) or 12),
                 margin_db=float(args.get("margin_db", 8) or 8),
             )
@@ -1359,6 +1360,13 @@ class MBDSDRAgent:
                 res = acars_decode_iq(audio, sr, 1200)
             except Exception as e:
                 return ToolResult(False, f"ACARS 解码失败: {e}")
+            if not res:
+                # 空结果必须说清楚原因，不能只回 "[]" 让模型误以为解码成功但没内容
+                return ToolResult(
+                    True,
+                    "未检测到 ACARS 帧（诚实空态：输入音频无同步/CRC 未通过；"
+                    "请用含真实报文的中频录音，合成正弦不会被当作报文）",
+                )
             return ToolResult(True, json.dumps(res, ensure_ascii=False, default=str))
 
         self.tool_registry.register(
@@ -2435,14 +2443,22 @@ class MBDSDRAgent:
             name="scheduler_enable",
             description="启用一个定时任务。",
             parameters={"type": "object", "properties": {"task_id": {"type": "string", "description": "任务 ID"}}, "required": ["task_id"]},
-            handler=lambda args: ToolResult(success=True, content="任务已启用" if sched.enable_task(args["task_id"]) else "任务不存在"),
+            handler=lambda args: (lambda ok: ToolResult(
+                success=ok,
+                content="任务已启用" if ok else f"任务不存在: {args['task_id']}",
+                error="" if ok else "task_not_found",
+            ))(sched.enable_task(args["task_id"])),
             category="scheduler",
         )
         self.tool_registry.register(
             name="scheduler_disable",
             description="禁用一个定时任务。",
             parameters={"type": "object", "properties": {"task_id": {"type": "string", "description": "任务 ID"}}, "required": ["task_id"]},
-            handler=lambda args: ToolResult(success=True, content="任务已禁用" if sched.disable_task(args["task_id"]) else "任务不存在"),
+            handler=lambda args: (lambda ok: ToolResult(
+                success=ok,
+                content="任务已禁用" if ok else f"任务不存在: {args['task_id']}",
+                error="" if ok else "task_not_found",
+            ))(sched.disable_task(args["task_id"])),
             category="scheduler",
         )
         self.tool_registry.register(
@@ -2534,10 +2550,11 @@ class MBDSDRAgent:
                 },
                 "required": [],
             },
-            handler=lambda args: ToolResult(
-                success=True,
-                content=evo.rollback(args.get("version_id"))[1],
-            ),
+            handler=lambda args: (lambda ok, msg: ToolResult(
+                success=ok,
+                content=msg,
+                error="" if ok else "rollback_unavailable",
+            ))(*evo.rollback(args.get("version_id"))),
             category="evolution",
         )
 
@@ -2783,6 +2800,16 @@ class MBDSDRAgent:
             category="workflow_recorder",
         )
 
+        def _create_template_handler(args):
+            try:
+                tpl = wr.create_template(args["recording_id"], args["name"],
+                                         args.get("description", ""),
+                                         args.get("parameters", {}))
+            except ValueError as e:
+                # 录制不存在是参数错误：如实失败，不让异常冒到注册表
+                return ToolResult(False, f"模板创建失败: {e}", error="recording_not_found")
+            return ToolResult(True, json.dumps(tpl.to_dict(), ensure_ascii=False, indent=2))
+
         self.tool_registry.register(
             name="workflow_template_create",
             description="从录制创建工作流模板。模板可以参数化，以后用不同参数回放。这是 Record & Replay 的核心：录一次，用无数次。",
@@ -2796,7 +2823,7 @@ class MBDSDRAgent:
                 },
                 "required": ["recording_id", "name"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(wr.create_template(args["recording_id"], args["name"], args.get("description",""), args.get("parameters",{})).to_dict(), ensure_ascii=False, indent=2)),
+            handler=_create_template_handler,
             category="workflow_recorder",
         )
 

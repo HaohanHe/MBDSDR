@@ -798,6 +798,17 @@ class ToolRegistry:
             result.content = (result.error
                               or f"工具 '{tool_name}' 调用失败（未提供错误详情）")
 
+        # P13 回归锁：成功但 content 与 data 全空 = 静默空结果，必须降级为失败并给原因码。
+        # 模型看到一个"成功"的空白结果会当成已执行，这是最难排查的一类假绿。
+        if result.success and not (result.content or "").strip() and not result.data:
+            result.success = False
+            result.error = "empty_result_without_reason"
+            result.content = (
+                f"工具 '{tool_name}' 返回了空结果且未提供原因（已按失败处理，"
+                "reason_code=empty_result_without_reason）；请检查输入是否为空/过短，"
+                "或改用能给出诚实空态原因的工具。"
+            )
+
         result.latency_ms = round((time.time() - start_time) * 1000, 1)
 
         # 输出裁剪（借鉴 DeepSeek harness tool-result-pruner：head/tail 保留，
@@ -1950,6 +1961,16 @@ class ToolRegistry:
             category="gnss",
         )
 
+        def _spp_locate_result(args):
+            rs = args["rs"]
+            if not isinstance(rs, list) or not rs or not all(
+                    isinstance(r, (list, tuple)) and len(r) == 3 for r in rs):
+                return ToolResult(False, "错误: rs 必须是 [[x,y,z],...] 的卫星 ECEF 列表",
+                                  error="invalid_rs_shape")
+            loc = ra.spp_locate(rs, args["dts"], args["pr"])
+            return ToolResult(True, json.dumps(loc, ensure_ascii=False, indent=2,
+                                               default=float), data=loc)
+
         self.register(
             name="spp_locate",
             description=(
@@ -1964,12 +1985,7 @@ class ToolRegistry:
                 "pr": {"type": "array", "items": {"type": "number"},
                        "description": "每颗卫星伪距 [m,...]"},
             }, "required": ["rs", "dts", "pr"]},
-            handler=lambda args: ToolResult(
-                success=True,
-                content=json.dumps(ra.spp_locate(args["rs"], args["dts"], args["pr"]),
-                                   ensure_ascii=False, indent=2, default=float),
-                data=ra.spp_locate(args["rs"], args["dts"], args["pr"]),
-            ),
+            handler=_spp_locate_result,
             category="gnss",
         )
 
@@ -2962,7 +2978,13 @@ class ToolRegistry:
 
         def _fir_filter(args):
             taps = list(args.get("taps", [1.0]))
+            if not taps:
+                return ToolResult(False, "错误: taps 不能为空（FIR 至少需要 1 个抽头）",
+                                  error="empty_taps")
             sig = list(args.get("signal", []))
+            if not sig:
+                return ToolResult(False, "错误: signal 不能为空（FIR 无可滤波样本）",
+                                  error="empty_signal")
             x = np.array(sig, dtype=complex if any(isinstance(v, list) for v in sig) else float)
             y = FIRFilter(taps).filter(np.asarray(sig))
             return ToolResult(

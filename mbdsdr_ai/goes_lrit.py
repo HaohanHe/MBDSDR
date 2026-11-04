@@ -893,22 +893,26 @@ def ToolResult_goes(args, is_hrit: bool):
 
     parser = HRITParser() if is_hrit else LRITParser()
     files = []
-    for raw in blobs:
-        for f in parser.feed_vcdu(raw):
-            h = parse_lrit_headers(f)
-            files.append({
-                "file_type": h.file_type,
-                "annotation": h.annotation,
-                "total_header_length": h.total_header_length,
-                "data_length_bits": h.data_length_bits,
-                "columns": h.columns,
-                "lines": h.lines,
-                "compression": h.compression,
-                "image_identifier": h.image_identifier,
-                "segment_number": h.segment_number,
-                "max_segment": h.max_segment,
-                "size_bytes": len(f),
-            })
+    try:
+        for raw in blobs:
+            for f in parser.feed_vcdu(raw):
+                h = parse_lrit_headers(f)
+                files.append({
+                    "file_type": h.file_type,
+                    "annotation": h.annotation,
+                    "total_header_length": h.total_header_length,
+                    "data_length_bits": h.data_length_bits,
+                    "columns": h.columns,
+                    "lines": h.lines,
+                    "compression": h.compression,
+                    "image_identifier": h.image_identifier,
+                    "segment_number": h.segment_number,
+                    "max_segment": h.max_segment,
+                    "size_bytes": len(f),
+                })
+    except ValueError as e:
+        # VCDU 长度/结构不合法是参数错误：如实失败，不把异常抛给注册表
+        return ToolResult(False, f"LRIT 解析失败: {e}", error="invalid_vcdu")
     return ToolResult(
         success=True,
         content=_json.dumps({"files": files, "symbol_rate": parser.symbol_rate},

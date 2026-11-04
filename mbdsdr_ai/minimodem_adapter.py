@@ -80,6 +80,10 @@ class FSKModem:
                 if band_width is None:
                     band_width = 10.0
 
+        # mark/space 由调用方显式给出时，上面的预设分支不会执行，
+        # band_width 会保持 None → float(None) 直接抛异常。这里补默认带宽。
+        if band_width is None:
+            band_width = 50.0
         self.f_mark = float(mark_freq)
         self.f_space = float(space_freq)
         self.band_width = float(band_width)
