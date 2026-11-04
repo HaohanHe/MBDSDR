@@ -794,7 +794,8 @@ class SatellitePass:
 def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lon: float,
                             observer_alt: float = 0.0, hours_ahead: float = 24.0,
                             min_elevation: float = 5.0,
-                            frequency_hz: float = 0.0) -> Optional[SatellitePass]:
+                            frequency_hz: float = 0.0,
+                            start_unix: Optional[float] = None) -> Optional[SatellitePass]:
     """
     预测卫星下一次过境。
     使用 sgp4 计算卫星位置，时间步长 30 秒。
@@ -810,10 +811,14 @@ def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lo
     if frequency_hz == 0 and satellite_name in SATELLITE_FREQUENCIES:
         frequency_hz = SATELLITE_FREQUENCIES[satellite_name] * 1e6  # MHz -> Hz
 
-    # 从全局 TimeEngine 取"模拟现在"，而非 datetime.now()。
-    # 这是修复"装饰条"问题的核心：UI 拖动时间后，pass 预测起点随之改变。
+    # 时刻基准：显式 start_unix（Unix UTC 秒）优先，缺省才取全局 TimeEngine
+    # 的"模拟现在"。这是修复"装饰条"问题的核心：UI 拖动时间后，pass 预测起点
+    # 随之改变；显式传参则与天空视图/多普勒共用同一时刻（P11/L23 口径）。
     # 对应 Stellarium：所有天体位置从 StelCore::getJD 取时间
-    now = get_time_engine().now_utc()
+    if start_unix is None:
+        now = get_time_engine().now_utc()
+    else:
+        now = datetime.fromtimestamp(float(start_unix), tz=timezone.utc)
     step = timedelta(seconds=30)
     total_steps = int(hours_ahead * 3600 / 30)
 
@@ -881,8 +886,9 @@ def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lo
 
 
 def predict_all_passes(observer_lat: float, observer_lon: float, observer_alt: float = 0.0,
-                        hours_ahead: float = 24.0, min_elevation: float = 5.0) -> List[SatellitePass]:
-    """预测所有内置卫星的过境。"""
+                        hours_ahead: float = 24.0, min_elevation: float = 5.0,
+                        start_unix: Optional[float] = None) -> List[SatellitePass]:
+    """预测所有内置卫星的过境。start_unix 显式时刻优先，缺省取 TimeEngine。"""
     try:
         from .decoders import BUILTIN_TLE, SATELLITE_FREQUENCIES
     except ImportError:
@@ -892,7 +898,8 @@ def predict_all_passes(observer_lat: float, observer_lon: float, observer_alt: f
     for name in BUILTIN_TLE:
         freq = SATELLITE_FREQUENCIES.get(name, 0.0) * 1e6  # MHz -> Hz
         p = predict_satellite_pass(name, observer_lat, observer_lon, observer_alt,
-                                    hours_ahead, min_elevation, freq)
+                                    hours_ahead, min_elevation, freq,
+                                    start_unix=start_unix)
         if p:
             passes.append(p)
 

@@ -2080,6 +2080,7 @@ def register_sdr_tools(agent):
                 "observer_alt": {"type": "number", "description": "观察者海拔（米），默认 0"},
                 "hours_ahead": {"type": "number", "description": "预测未来多少小时，默认 24"},
                 "min_elevation": {"type": "number", "description": "最小仰角（度），默认 5"},
+                "timestamp": {"type": "number", "description": "可选 Unix UTC 秒（预测起点）；缺省用 TimeEngine 仿真时刻，与天空视图/多普勒同口径"},
             },
             "required": ["satellite_name", "observer_lat", "observer_lon"],
         },
@@ -2098,6 +2099,7 @@ def register_sdr_tools(agent):
                 "observer_alt": {"type": "number", "description": "观察者海拔（米），默认 0"},
                 "hours_ahead": {"type": "number", "description": "预测未来多少小时，默认 24"},
                 "min_elevation": {"type": "number", "description": "最小仰角（度），默认 5"},
+                "timestamp": {"type": "number", "description": "可选 Unix UTC 秒（预测起点）；缺省用 TimeEngine 仿真时刻"},
             },
             "required": ["observer_lat", "observer_lon"],
         },
@@ -5567,7 +5569,8 @@ def _satellite_predict_pass(args):
     hours = args.get('hours_ahead', 24.0)
     min_elev = args.get('min_elevation', 5.0)
 
-    p = predict_satellite_pass(name, lat, lon, alt, hours, min_elev)
+    p = predict_satellite_pass(name, lat, lon, alt, hours, min_elev,
+                               start_unix=_physics_now(args))
 
     if p is None:
         return (f"卫星 {name} 在未来 {hours:.0f} 小时内没有仰角超过 {min_elev:.0f}° 的过境\n"
@@ -5601,7 +5604,8 @@ def _satellite_predict_all(args):
     hours = args.get('hours_ahead', 24.0)
     min_elev = args.get('min_elevation', 5.0)
 
-    passes = predict_all_passes(lat, lon, alt, hours, min_elev)
+    passes = predict_all_passes(lat, lon, alt, hours, min_elev,
+                                start_unix=_physics_now(args))
 
     if not passes:
         return f"未来 {hours:.0f} 小时内没有卫星过境（仰角 > {min_elev:.0f}°）"

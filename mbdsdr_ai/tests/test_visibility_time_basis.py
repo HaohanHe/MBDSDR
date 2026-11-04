@@ -112,6 +112,55 @@ def test_tool_default_uses_time_engine_not_wall_clock(same_tle_for_orbit, monkey
     assert NAME in txt
 
 
+def test_predict_pass_accepts_explicit_start_unix():
+    """同类过境入口（new_spacetime/sdr 工具）也须接受显式时刻。"""
+    from mbdsdr_ai.new_spacetime import predict_satellite_pass
+    from mbdsdr_ai.sdr_tools import _satellite_predict_pass
+
+    start = datetime(2026, 9, 26, 0, 0, tzinfo=timezone.utc).timestamp()
+    p = predict_satellite_pass(NAME, GS.lat_deg, GS.lon_deg, GS.alt_m,
+                               24.0, 5.0, start_unix=start)
+    assert p is not None
+    rise = p.rise_time.timestamp()
+    assert rise >= start                       # 起点不回退
+    assert p.set_time.timestamp() > rise       # 不允许负时长
+
+    # 同一 TLE 换起点，首次过境必须重算（不沿用墙钟/上一时刻）
+    p2 = predict_satellite_pass(NAME, GS.lat_deg, GS.lon_deg, GS.alt_m,
+                                24.0, 5.0, start_unix=start + 6 * 3600.0)
+    assert p2 is not None
+    assert p2.rise_time.timestamp() >= start + 6 * 3600.0
+
+    txt = _satellite_predict_pass({"satellite_name": NAME,
+                                   "observer_lat": GS.lat_deg,
+                                   "observer_lon": GS.lon_deg,
+                                   "observer_alt": GS.alt_m,
+                                   "hours_ahead": 24.0,
+                                   "timestamp": start})
+    assert isinstance(txt, str) and txt
+
+
+def test_predict_pass_default_matches_time_engine():
+    """缺省时刻 = TimeEngine 仿真时刻（不是墙钟）。"""
+    from mbdsdr_ai.new_spacetime import get_time_engine, predict_satellite_pass
+
+    start = datetime(2026, 9, 26, 0, 0, tzinfo=timezone.utc).timestamp()
+    eng = get_time_engine()
+    eng.set_utc(datetime.fromtimestamp(start, tz=timezone.utc))
+    eng.set_rate(0.0)
+    try:
+        p_default = predict_satellite_pass(NAME, GS.lat_deg, GS.lon_deg,
+                                           GS.alt_m, 24.0, 5.0)
+    finally:
+        eng.set_time_now()
+        eng.set_rate(1.0)
+    p_explicit = predict_satellite_pass(NAME, GS.lat_deg, GS.lon_deg,
+                                        GS.alt_m, 24.0, 5.0, start_unix=start)
+    assert p_default is not None and p_explicit is not None
+    assert abs(p_default.rise_time.timestamp()
+               - p_explicit.rise_time.timestamp()) <= 60.0
+
+
 def test_visible_satellites_honours_explicit_when(same_tle_for_orbit):
     """显式时刻不能退化为墙钟；两个不同时刻结论可以不同。"""
     _, t_mid = _pass_and_time()
