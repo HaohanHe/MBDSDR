@@ -450,6 +450,8 @@ class RecordingLibrary:
 
     def _write_doc_unlocked(self, doc: Dict[str, Any]) -> None:
         doc["format_version"] = LIBRARY_FORMAT_VERSION
+        # 迁移标记只用于本次加载提示，不写回文件（否则每次读都像「刚迁移」）
+        doc.pop("migrated_from", None)
         doc["root"] = self.root
         doc["revision"] = int(doc.get("revision", 0)) + 1
         doc["updated_at"] = _now_iso()
@@ -1318,6 +1320,243 @@ class RecordingLibrary:
         except OSError as exc:
             logger.error("保留策略执行失败: %s", exc)
             return LibraryResult(False, "io_error", f"清理执行失败: {exc}")
+
+    # ── 迁移、导出与格式版本 ─────────────────────────────────────────────
+    @staticmethod
+    def _is_within(child: str, parent: str) -> bool:
+        """child 是否位于 parent 之下（跨盘符返回 False，不抛异常）。"""
+        try:
+            cp = os.path.commonpath([os.path.abspath(child),
+                                     os.path.abspath(parent)])
+        except ValueError:
+            return False
+        return os.path.normcase(cp) == os.path.normcase(os.path.abspath(parent))
+
+    def relocate(self, new_root: str, *, verify: bool = True) -> LibraryResult:
+        """库目录被整体搬走后，在新位置重新锚定索引。
+
+        条目优先使用相对路径；跨盘符无法相对化的条目保留绝对路径。
+        只改路径/根目录，不移动、不复制、不删除任何录音文件。
+        """
+        new_root = os.path.abspath(new_root)
+        if os.path.normcase(new_root) == os.path.normcase(self.root):
+            return LibraryResult(True, "no_change", "库根目录未变化",
+                                 {"root": new_root})
+        if not os.path.isdir(new_root):
+            return LibraryResult(False, "dest_missing",
+                                 f"新库根目录不存在: {new_root}")
+        new_lib = RecordingLibrary(new_root, filename=self.filename,
+                                  lock_timeout_s=self.lock_timeout_s)
+        try:
+            with new_lib._lock():
+                doc, code, message = new_lib._read_unlocked()
+                if doc is None:
+                    return LibraryResult(False, code, message)
+                if code == "not_found":
+                    return LibraryResult(False, "library_not_found",
+                                         f"新目录下没有 {self.filename}，"
+                                         f"拒绝创建空库覆盖原索引")
+                entries = new_lib._entries_of(doc)
+                rebased = 0
+                for e in entries:
+                    if e.path.get("kind") == "absolute":
+                        value = os.path.normpath(str(e.path.get("value") or ""))
+                        if self._is_within(value, self.root):
+                            rel = os.path.relpath(value, self.root)
+                            e.path = new_lib._store_path(
+                                os.path.join(new_root, rel))
+                            rebased += 1
+                    if e.trash_path and self._is_within(e.trash_path, self.root):
+                        rel = os.path.relpath(e.trash_path, self.root)
+                        e.trash_path = os.path.normpath(
+                            os.path.join(new_root, rel))
+                missing: List[Dict[str, Any]] = []
+                if verify:
+                    for e in entries:
+                        if e.state in ("duplicate",):
+                            continue
+                        abs_path = new_lib._resolve_path(e.path)
+                        if not os.path.exists(abs_path):
+                            missing.append({"entry_id": e.entry_id,
+                                            "path": abs_path,
+                                            "state": e.state})
+                doc["entries"] = [e.to_dict() for e in entries]
+                doc["last_relocate"] = {
+                    "at": _now_iso(), "from_root": self.root,
+                    "to_root": new_root, "rebased": rebased,
+                    "missing": len(missing),
+                }
+                new_lib._write_doc_unlocked(doc)
+                new_lib._append_journal_unlocked(
+                    "relocate",
+                    detail={"from_root": self.root, "to_root": new_root,
+                            "rebased": rebased, "missing": len(missing)},
+                )
+                return LibraryResult(
+                    True, "relocated",
+                    f"已在 {new_root} 重新锚定 {len(entries)} 条（{len(missing)} 条文件缺失）",
+                    {"old_root": self.root, "new_root": new_root,
+                     "entries": len(entries), "rebased": rebased,
+                     "missing": missing, "journal": new_lib.journal_path},
+                )
+        except LibraryBusyError as exc:
+            return LibraryResult(False, exc.code, str(exc))
+        except OSError as exc:
+            return LibraryResult(False, "io_error", f"重新锚定失败: {exc}")
+
+    def export_to(self, dest_root: str, *,
+                  entry_ids: Optional[Iterable[str]] = None,
+                  overwrite: bool = False) -> LibraryResult:
+        """把录音与索引复制到新目录（源库原样保留）。
+
+        复制后在新目录写一份自洽的 ``library.json``，条目全部使用相对路径，
+        因此跨盘符搬迁后仍然可用；源文件一个字节都不删。
+        """
+        dest_root = os.path.abspath(dest_root)
+        if os.path.normcase(dest_root) == os.path.normcase(self.root):
+            return LibraryResult(False, "bad_param", "导出目标不能是源库根目录")
+        loaded = self.load()
+        if not loaded.ok:
+            return loaded
+        entries = [RecordingEntry.from_dict(d) for d in loaded.data["entries"]]
+        wanted = None
+        if entry_ids is not None:
+            wanted = {str(x) for x in entry_ids}
+        selected = [e for e in entries
+                    if e.state not in ("trashed", "duplicate")
+                    and (wanted is None or e.entry_id in wanted)]
+        if wanted is not None:
+            found = {e.entry_id for e in selected}
+            missing_ids = sorted(wanted - found)
+        else:
+            missing_ids = []
+        if not overwrite and os.path.exists(
+                os.path.join(dest_root, self.filename)):
+            return LibraryResult(
+                False, "dest_not_empty",
+                f"目标目录已有 {self.filename}；如需覆盖请显式 overwrite=True",
+                {"dest_root": dest_root},
+            )
+        os.makedirs(dest_root, exist_ok=True)
+        exported: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        failed: List[Dict[str, Any]] = []
+        new_entries: List[Dict[str, Any]] = []
+        for e in selected:
+            src = self._resolve_path(e.path)
+            if not os.path.exists(src):
+                skipped.append({"entry_id": e.entry_id, "path": src,
+                                "reason": "file_missing"})
+                continue
+            if self._is_within(src, self.root):
+                rel = os.path.relpath(src, self.root)
+            else:
+                # 库外文件（跨盘符绝对路径）放到 _external/，导出后仍是库内相对路径
+                rel = os.path.join("_external", e.entry_id[:8],
+                                   os.path.basename(src))
+            dst = os.path.join(dest_root, rel)
+            meta_src = (sigmf_meta_path(src) if e.kind == "iq" else "")
+            meta_dst = (os.path.splitext(dst)[0] + ".sigmf-meta"
+                        if meta_src else "")
+            if (not overwrite and os.path.exists(dst)) or \
+                    (meta_dst and not overwrite and os.path.exists(meta_dst)):
+                skipped.append({"entry_id": e.entry_id, "path": dst,
+                                "reason": "dest_exists"})
+                continue
+            try:
+                os.makedirs(os.path.dirname(dst) or dest_root, exist_ok=True)
+                shutil.copy2(src, dst)
+                if os.path.getsize(dst) != os.path.getsize(src):
+                    raise OSError("复制后大小不一致")
+                if meta_src and os.path.exists(meta_src):
+                    shutil.copy2(meta_src, meta_dst)
+                if meta_src and os.path.exists(meta_src) and \
+                        not os.path.exists(meta_dst):
+                    raise OSError("SigMF meta 复制失败")
+            except OSError as exc:
+                failed.append({"entry_id": e.entry_id, "path": src,
+                               "reason": str(exc)})
+                # 只清理本次自身复制出的半成品，不触碰源文件
+                for p in (dst, meta_dst):
+                    if p and os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except OSError:
+                            pass
+                continue
+            item = e.to_dict()
+            item["path"] = {"kind": "relative",
+                            "value": rel.replace(os.sep, "/")}
+            item["trash_path"] = None
+            item["updated_at"] = _now_iso()
+            new_entries.append(item)
+            exported.append({"entry_id": e.entry_id, "from": src, "to": dst,
+                             "size_bytes": int(e.size_bytes)})
+
+        dest_lib = RecordingLibrary(dest_root, filename=self.filename,
+                                   lock_timeout_s=self.lock_timeout_s)
+        doc = dest_lib._empty_doc()
+        doc["entries"] = new_entries
+        doc["last_export"] = {"at": _now_iso(), "from_root": self.root,
+                              "exported": len(exported),
+                              "skipped": len(skipped),
+                              "failed": len(failed)}
+        try:
+            with dest_lib._lock():
+                dest_lib._write_doc_unlocked(doc)
+                dest_lib._append_journal_unlocked(
+                    "export", detail={"from_root": self.root,
+                                      "exported": len(exported),
+                                      "skipped": len(skipped),
+                                      "failed": len(failed)},
+                )
+        except LibraryBusyError as exc:
+            return LibraryResult(False, exc.code, str(exc))
+        except OSError as exc:
+            return LibraryResult(False, "io_error",
+                                 f"导出索引落盘失败: {exc}")
+        ok = not failed
+        return LibraryResult(
+            ok, "exported" if ok else "partial_failure",
+            (f"已导出 {len(exported)} 条到 {dest_root}"
+             + (f"；跳过 {len(skipped)} 条" if skipped else "")
+             + (f"；失败 {len(failed)} 条" if failed else "")),
+            {"dest_root": dest_root, "exported": exported, "skipped": skipped,
+             "failed": failed, "unknown_entry_ids": missing_ids,
+             "library": dest_lib.library_path},
+        )
+
+    def upgrade_format(self) -> LibraryResult:
+        """把旧版本库文件原地升级为当前格式（保留全部条目）。"""
+        try:
+            with self._lock():
+                doc, code, message = self._read_unlocked()
+                if doc is None:
+                    return LibraryResult(False, code, message)
+                migrated_from = doc.get("migrated_from")
+                if migrated_from is None:
+                    return LibraryResult(True, "up_to_date",
+                                         f"库格式已是 v{LIBRARY_FORMAT_VERSION}",
+                                         {"format_version": LIBRARY_FORMAT_VERSION})
+                entries = self._entries_of(doc)
+                doc["entries"] = [e.to_dict() for e in entries]
+                self._write_doc_unlocked(doc)
+                self._append_journal_unlocked(
+                    "upgrade_format",
+                    detail={"from_version": migrated_from,
+                            "to_version": LIBRARY_FORMAT_VERSION},
+                )
+                return LibraryResult(
+                    True, "upgraded",
+                    f"库格式 v{migrated_from} → v{LIBRARY_FORMAT_VERSION}",
+                    {"from_version": migrated_from,
+                     "to_version": LIBRARY_FORMAT_VERSION,
+                     "entries": len(entries)},
+                )
+        except LibraryBusyError as exc:
+            return LibraryResult(False, exc.code, str(exc))
+        except OSError as exc:
+            return LibraryResult(False, "io_error", f"格式升级失败: {exc}")
 
     # ── 元数据恢复（中断写入 / 断电式损坏）─────────────────────────────
     def recover_metadata(self, entry_id: str, *,
