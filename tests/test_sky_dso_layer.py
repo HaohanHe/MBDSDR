@@ -13,7 +13,9 @@ RA/Dec/视星等/视大小），图层不做任何"像星云"的装饰性绘制�
   3. 绘制门 / 拾取门 / 地平门 / 白天门 与恒星同一套（不是第二套阈值）：
      亮且在地平线上 -> 画且可点；地平线下 -> 不画不可点；白天 -> 整层不画；
   4. 裸眼极限外的条目（星等 > Bortle 极限）不画也不可点；
-  5. DSO 标签进同一套避让队列（优先级 1.5，位于座名与星名之间）。
+  5. DSO 标签进同一套避让队列（优先级 1.5，位于座名与星名之间）；
+  6. 窄视场限幅：真实视半径 > 视口 40% 才截断，限幅有可见标注，
+     拾取半径与符号同一事实源（M31 不再吃掉整个视口）。
 
 反证（旧实现必红）：
   - 没有 `_draw_dso`：第 3 条 ink==0、第 4 条点不中；
@@ -324,3 +326,106 @@ def test_dso_labels_queue_at_priority_between_constellation_and_star():
     assert prios, "宽 FOV 下应有深空天体名进避让队列"
     assert all(p == RFSkyView.DSO_LABEL_PRIORITY for p in prios), prios
     assert 1.0 < RFSkyView.DSO_LABEL_PRIORITY < 2.0
+
+
+# --------------------------------------------------------------------------
+# 6. 窄视场限幅：只超视口 40% 才截断、限幅可见标注、拾取与符号同步
+# --------------------------------------------------------------------------
+def _m31_at(v):
+    gs = GroundStation(LON, LAT, 0.0)
+    jd = v._current_jd()
+    e = _entry("M31")
+    az, alt = _altaz(e, gs, jd)
+    assert alt > 20.0, alt
+    v.view_state.look_at(az, alt)
+    return gs, jd, e, az, alt
+
+
+def test_clamp_only_when_symbol_exceeds_viewport():
+    """两个模型只有一条判据：真实视半径 > 视口 40% 才限幅，否则照实画。"""
+    v = _new_view()
+    try:
+        _gs, _jd, e, az, alt = _m31_at(v)
+        cap = RFSkyView.DSO_CLAMP_VIEW_FRAC * WIN
+
+        v.view_state.fov_deg = 5.0
+        real_wide = float(v._angular_radius_px(
+            az, alt, e.size_arcmin / 120.0)[1])
+        r_wide, clamped_wide = v._dso_symbol_geometry(az, alt, e.size_arcmin)
+        assert clamped_wide is False and real_wide < cap
+        assert r_wide == pytest.approx(real_wide)
+
+        v.view_state.fov_deg = 0.5
+        real_narrow = float(v._angular_radius_px(
+            az, alt, e.size_arcmin / 120.0)[1])
+        r_narrow, clamped_narrow = v._dso_symbol_geometry(az, alt,
+                                                          e.size_arcmin)
+        assert real_narrow > cap, real_narrow    # 前提：真实角径确实超出视口
+        assert clamped_narrow is True
+        assert r_narrow == pytest.approx(cap)
+    finally:
+        v.close()
+
+
+def _danger_pixels(img: QImage) -> int:
+    n = 0
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = img.pixelColor(x, y)
+            if c.red() > c.green() + 25 and c.red() > c.blue() + 25:
+                n += 1
+    return n
+
+
+def test_clamped_symbol_has_visible_marker():
+    """限幅必须看得见（虚线外框 +「已限幅」红角标）；未超限时不得出现。"""
+    v = _new_view()
+    try:
+        _gs, _jd, _e, _az, _alt = _m31_at(v)
+        v.view_state.fov_deg = 0.5
+        clamped_img = _render_dso(v)
+        v.view_state.fov_deg = 5.0
+        normal_img = _render_dso(v)
+    finally:
+        v.close()
+    assert _danger_pixels(clamped_img) > 20, "限幅符号没有可见标注"
+    assert _danger_pixels(normal_img) == 0, "未超限的天体不该被标注为已限幅"
+
+
+def test_clamped_dso_pick_radius_follows_symbol(monkeypatch):
+    """限幅后命中区同步收窄：M31 不再吃掉视口，视口内其它天体仍可点中。"""
+    import types
+    from mbdsdr_ai.celestial_geometry import (
+        altaz_to_j2000, vec_from_azalt, radec_from_vec)
+
+    v = _new_view()
+    try:
+        gs, jd, _e, az, alt = _m31_at(v)
+        v.view_state.fov_deg = 0.5
+        center = v._sky_to_screen(az, alt)
+        cap = RFSkyView.DSO_CLAMP_VIEW_FRAC * WIN
+
+        # 1) 符号内仍能点中 M31
+        body_in = v._find_body_at(center.x() + cap * 0.8, center.y())
+        assert body_in and body_in.get("kind") == "dso" \
+            and body_in.get("key") == "M31", body_in
+
+        # 2) 限幅外的空点不再被 M31 吃掉（旧实现命中半径 ~2077px，必红）
+        blank = v._find_body_at(center.x() + cap + 40, center.y())
+        assert blank is None or blank.get("kind") != "dso", blank
+
+        # 3) 视口内另一颗天体（合成 3 等星，落在限幅符号之外）仍能点中
+        st_az, st_alt = az + 0.30, alt
+        st_vec = altaz_to_j2000(vec_from_azalt(st_az, st_alt), gs, jd)
+        ra_s, dec_s = radec_from_vec(st_vec)
+        fake = {"测试星": types.SimpleNamespace(
+            ra_deg=ra_s, dec_deg=dec_s, vmag=3.0)}
+        monkeypatch.setattr(rf_sky_view._constel, "merged_star_index",
+                            lambda: fake)
+        st_scr = v._sky_to_screen_finite(st_az, st_alt)
+        d_star = math.hypot(st_scr.x() - center.x(), st_scr.y() - center.y())
+        assert d_star > cap, (d_star, cap)       # 前提：星在限幅符号之外
+        body_star = v._find_body_at(st_scr.x(), st_scr.y())
+        assert body_star and body_star.get("kind") == "star", body_star
+    finally:
+        v.close()

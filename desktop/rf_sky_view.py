@@ -2435,10 +2435,60 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 外形尺寸取星表视大小（角分→像素按投影采样），亮度取视星等。
     DSO_LABEL_PRIORITY = 1.5      # 座名(1.0)之后、星名(2.0+)之前
     DSO_MIN_SYMBOL_R_PX = 1.6     # 视大小 < 1.6px 时给小符号，否则不可辨
+    # 符号限幅：仅当真实视半径超过视口短边 40% 时截断（否则仍按真实视大小画）。
+    # 限幅半径由绘制/拾取共用的 _dso_symbol_geometry() 统一给出，不另立第二套。
+    DSO_CLAMP_VIEW_FRAC = 0.40
 
     # 左下信息卡尺寸（绘制与测试的唯一事实源，避免测试写死像素值漂移）
     INFO_CARD_W = 240
     INFO_CARD_H = 186
+
+    def _dso_symbol_geometry(self, az: float, alt: float, dia_arcmin: float) \
+            -> Tuple[float, bool]:
+        """DSO 符号半径 + 是否限幅（绘制与拾取共用这一条事实源）。
+
+        ``r_ang`` 为星表视大小换算的像素半径；只有 ``r_ang > cap`` 才截到
+        ``cap = DSO_CLAMP_VIEW_FRAC * min(视口宽, 视口高)``，未超限的天体仍按
+        真实视大小画——两个模型之间只有「是否超过 cap」这一条判据。
+        """
+        geom = self._angular_radius_px(az, alt, dia_arcmin / 120.0)
+        r_ang = float(geom[1]) if geom is not None else 0.0
+        cap = self.DSO_CLAMP_VIEW_FRAC * float(min(self.width(), self.height()))
+        if r_ang > cap:
+            return cap, True
+        return max(r_ang, self.DSO_MIN_SYMBOL_R_PX), False
+
+    def _draw_dso_clamp_marker(self, painter: QPainter, pos: QPointF,
+                               r: float, alpha: int) -> None:
+        """限幅可见标记：虚线外框 + 中心「已限幅」角标。
+
+        限幅符号半径不再等于真实视大小，必须让人一眼看出「这是被截断的」，
+        否则就是把 M31 画小了还说它是真大小（新的谎报）。
+        """
+        _t = tokens()
+        col = QColor(_t.COLORS["danger"])
+        pen = QPen(QColor(col.red(), col.green(), col.blue(),
+                          min(220, alpha + 80)), 1)
+        pen.setStyle(Qt.DashLine)
+        painter.save()
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(pen)
+        painter.drawEllipse(pos, r + 3.0, r + 3.0)
+
+        f = self._gnss_label_font
+        painter.setFont(f)
+        fm = QFontMetrics(f)
+        tw = fm.horizontalAdvance("已限幅") + 8
+        th = fm.height() + 2
+        bx, by = pos.x() - tw / 2.0, pos.y() - th / 2.0
+        bg = QColor(_t.COLORS["card_1"])
+        bg.setAlpha(210)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(bg))
+        painter.drawRoundedRect(QRectF(bx, by, tw, th), 2, 2)
+        painter.setPen(QPen(col))
+        painter.drawText(QRectF(bx, by, tw, th), Qt.AlignCenter, "已限幅")
+        painter.restore()
 
     def _draw_dso(self, painter: QPainter):
         gs = self._ground_station()
@@ -2468,11 +2518,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 e.magnitude + _stars.extinction_delta_mag(alt), self._bortle)
             if r_star <= 0:
                 continue                # 与恒星同一亮度门（看不清的不画）
-            geom = self._angular_radius_px(az, alt, e.size_arcmin / 120.0)
-            r_ang = float(geom[1]) if geom is not None else 0.0
-            r = max(r_ang, self.DSO_MIN_SYMBOL_R_PX)
+            r, clamped = self._dso_symbol_geometry(az, alt, e.size_arcmin)
             alpha = int(round(70.0 + 150.0 * bright))
             self._draw_dso_glyph(painter, pos, r, e.dso_type, alpha)
+            if clamped:
+                self._draw_dso_clamp_marker(painter, pos, r, alpha)
             # 小而不亮的条目（1.6px 符号）不挂名，避免宽 FOV 下满屏缩写；
             # 名字仍然可以在信息卡/检索里看到。
             if r >= 2.0 or bright >= 0.5:
@@ -3639,9 +3689,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if disc is not None and float(disc["r"]) >= 2.0:
                     limit = max(limit, float(disc["r"]))
             elif kind == "dso" and dia_deg is not None and dia_deg > 0.0:
-                geom = self._angular_radius_px(az, alt, float(dia_deg) / 2.0)
-                if geom is not None:
-                    limit = max(limit, float(geom[1]))
+                # 与绘制同一个限幅事实源：符号被截断时命中区同步收窄，
+                # 不许「符号小、命中大」吃掉视口里其它天体。
+                r_sym, _clamped = self._dso_symbol_geometry(
+                    az, alt, float(dia_deg) * 60.0)
+                limit = max(limit, r_sym)
             dist = math.hypot(scr.x() - x, scr.y() - y)
             if dist >= limit:
                 continue
