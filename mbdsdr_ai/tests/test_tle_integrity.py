@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -28,6 +29,7 @@ import pytest  # noqa: E402
 from mbdsdr_ai.tle_integrity import (  # noqa: E402
     CatalogEntry,
     cache_entries,
+    freshness,
     names_match,
     normalize_name,
     scan_catalog,
@@ -37,6 +39,9 @@ from mbdsdr_ai.tle_integrity import (  # noqa: E402
 
 L1 = "1 40069U 14037A   26297.30989954  .00000323  00000+0  16680-3 0  9998"
 L2 = "2 40069  98.5301 268.5877 0006497  31.2770 328.8793 14.21494425637660"
+
+# 固定参考时刻：距夹具 TLE 历元 26297（2026-10-24）约 1.6 天 → usable
+NOW = datetime(2026, 10, 26, 0, 0, 0, tzinfo=timezone.utc)
 
 # 真实缓存快照（2026-11 本机 ~/.mbdsdr/tle_cache，Celestrak 下载件）
 TRUTH = {
@@ -101,7 +106,7 @@ class TestIdentity:
 # ---------------------------------------------------------------------------
 class TestCatalogScan:
     def test_fixed_ids_all_pass(self):
-        rep = scan_catalog(_decls(FIXED_MAP), _pool(TRUTH))
+        rep = scan_catalog(_decls(FIXED_MAP), _pool(TRUTH), now=NOW)
         assert (rep["total"], rep["passed"], rep["degraded"]) == (6, 6, 0)
         assert rep["mismatch"] == 0 and rep["no_data"] == 0
         assert all(r["selectable"] and r["pass_eligible"] for r in rep["rows"])
@@ -111,7 +116,7 @@ class TestCatalogScan:
         """事故回归锁：44016 声明为 METEOR M2、54234 声明为 FENGYUN 3D，
         数据侧实为 ATLAS 5 CENTAUR DEB / NOAA 21——必须降级，不得可选、
         不得用于过境与跟踪，且原因如实列出。"""
-        rep = scan_catalog(_decls(BUGGY_MAP), _pool(BUGGY_TRUTH))
+        rep = scan_catalog(_decls(BUGGY_MAP), _pool(BUGGY_TRUTH), now=NOW)
         assert rep["total"] == 6
         assert rep["passed"] == 4
         assert rep["degraded"] == 2
@@ -128,7 +133,7 @@ class TestCatalogScan:
         assert reasons["FENGYUN 3D"]["object_name"] == "NOAA 21 (JPSS-2)"
 
     def test_missing_data_is_no_data_not_mismatch(self):
-        rep = scan_catalog(_decls(FIXED_MAP), [])
+        rep = scan_catalog(_decls(FIXED_MAP), [], now=NOW)
         assert rep["passed"] == 0 and rep["degraded"] == 6
         assert rep["mismatch"] == 0 and rep["no_data"] == 6
         for r in rep["rows"]:
@@ -141,7 +146,7 @@ class TestCatalogScan:
             CatalogEntry(name="METEOR M2", catnr=44016, source="builtin"),
             CatalogEntry(name="ATLAS 5 CENTAUR DEB", catnr=44016, source="cache"),
         ]
-        rep = scan_catalog(decls, _pool(BUGGY_TRUTH))
+        rep = scan_catalog(decls, _pool(BUGGY_TRUTH), now=NOW)
         types = {c["type"] for c in rep["conflicts"]}
         assert types == {"name_catnr_conflict", "catnr_name_conflict"}
         # 冲突必须带在相关行上（不静默择一）
@@ -153,10 +158,112 @@ class TestCatalogScan:
             pytest.skip("无 Celestrak 缓存目录（离线环境，跳过实况扫描）")
         rep = scan_live(cache_dir=d)
         assert rep["mismatch"] == 0, rep["reasons"]["identity_mismatch"]
-        # 缓存齐全时不允许有缺数据/降级
+        # 缓存齐全时只剩「过期」类降级（缓存件历元可能偏旧，如实标注）
         cached = {e.catnr for e in cache_entries(cache_dir=d)}
         if set(FIXED_MAP.values()) <= cached:
-            assert rep["degraded"] == 0
+            assert rep["degraded"] == rep["stale"]
+            assert rep["no_data"] == 0
+
+
+# ---------------------------------------------------------------------------
+class TestFreshness:
+    """历元年龄四级：fresh ≤24h / usable ≤7d / expired ≤30d / dead >30d。"""
+
+    OLD_L1 = "1 25544U 98067A   24275.50000000  .00016717  00000-0  10270-3 0  9000"
+
+    @pytest.mark.parametrize("now,tier,eligible", [
+        (datetime(2024, 10, 2, 12, tzinfo=timezone.utc), "fresh", True),
+        (datetime(2024, 10, 5, 12, tzinfo=timezone.utc), "usable", True),
+        (datetime(2024, 10, 20, 12, tzinfo=timezone.utc), "expired", False),
+        (datetime(2024, 12, 1, 12, tzinfo=timezone.utc), "dead", False),
+    ])
+    def test_tiers(self, now, tier, eligible):
+        f = freshness(self.OLD_L1, now=now)
+        assert f["tier"] == tier
+        assert f["pass_eligible"] is eligible
+        assert f["tracking_eligible"] is eligible
+        assert f["epoch_utc"] == "2024-10-01T12:00:00Z"
+
+    def test_unknown_epoch_is_not_eligible(self):
+        f = freshness("not a tle", now=NOW)
+        assert f["tier"] == "unknown"
+        assert f["pass_eligible"] is False and f["age_days"] is None
+
+    def test_cache_time_is_separate_from_epoch(self):
+        """缓存时间与历元分开报告：历元新鲜但缓存很久没刷新也要看得见。"""
+        fetched = NOW.timestamp() - 5 * 86400.0
+        f = freshness(L1, fetched_at=fetched, now=NOW)
+        assert f["tier"] == "usable"
+        assert f["cache_age_hours"] == pytest.approx(120.0, abs=0.5)
+
+    def test_stale_entry_displayable_but_degraded(self):
+        """过期条目仍可显示/可查，但默认不得用于过境与跟踪。"""
+        old = CatalogEntry(name="ISS (ZARYA)", catnr=25544, source="cache",
+                           line1=self.OLD_L1,
+                           line2="2 25544  51.6400 292.0000 0001333  90.0000 270.0000 15.50000000    000",
+                           object_name="ISS (ZARYA)")
+        rep = scan_catalog([old], now=datetime(2024, 12, 1, tzinfo=timezone.utc))
+        row = rep["rows"][0]
+        assert rep["passed"] == 0 and rep["degraded"] == 1
+        assert rep["stale"] == 1 and rep["mismatch"] == 0
+        assert row["displayable"] is True
+        assert row["degraded"] is True
+        assert row["pass_eligible"] is False
+        assert row["tracking_eligible"] is False
+        assert row["degrade_reason"] == "tle_dead"
+        assert row["freshness"]["tier"] == "dead"
+
+
+# ---------------------------------------------------------------------------
+class TestFetchRecord:
+    """取新失败必须保留旧值并标「未更新」，不许静默。"""
+
+    @staticmethod
+    def _write_cache(tmp_path, catnr=40069, mtime=None):
+        p = tmp_path / f"{catnr}.tle"
+        p.write_text(f"METEOR-M 2\n{L1}\n{L2}\n", encoding="utf-8")
+        if mtime is not None:
+            os.utime(p, (mtime, mtime))
+        return p
+
+    def test_fresh_cache_is_reported_as_cache(self, monkeypatch, tmp_path):
+        import mbdsdr_ai.orbit as orbit
+        import time as _time
+        monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(orbit, "_TLE_CACHE", {})
+        self._write_cache(tmp_path, mtime=_time.time() - 3600.0)
+        rec = orbit.fetch_tle_record(40069)
+        assert rec["refresh_status"] == "cache"
+        assert rec["name"] == "METEOR-M 2"
+        assert rec["line1"].startswith("1 40069")
+
+    def test_stale_cache_kept_and_marked_not_updated(self, monkeypatch,
+                                                     tmp_path):
+        import mbdsdr_ai.orbit as orbit
+        import time as _time
+        monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(orbit, "_TLE_CACHE", {})
+        monkeypatch.setenv("MBDSDR_OFFLINE", "1")
+        old = _time.time() - 10 * 86400.0
+        self._write_cache(tmp_path, mtime=old)
+        rec = orbit.fetch_tle_record(40069)
+        # 旧值不丢、不抛错，且明确标「未更新」+ 原因
+        assert rec["refresh_status"] == "not_updated"
+        assert "离线" in rec["refresh_error"]
+        assert rec["line1"].startswith("1 40069")
+        assert rec["line2"].startswith("2 40069")
+        f = freshness(rec["line1"], rec["fetched_at"])
+        assert f["tier"] in ("usable", "expired", "dead")
+        assert f["pass_eligible"] is (f["tier"] in ("fresh", "usable"))
+
+    def test_no_data_no_network_is_honest_error(self, monkeypatch, tmp_path):
+        import mbdsdr_ai.orbit as orbit
+        from mbdsdr_ai.orbit import TLEUnavailableError
+        monkeypatch.setattr(orbit, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(orbit, "_TLE_CACHE", {})
+        monkeypatch.setenv("MBDSDR_OFFLINE", "1")
+        with pytest.raises(TLEUnavailableError):
+            orbit.fetch_tle_record(99999999)
 
 
 # ---------------------------------------------------------------------------

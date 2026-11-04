@@ -23,14 +23,22 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from .new_spacetime_tle import parse_tle_epoch
 
 __all__ = [
     "CatalogEntry",
     "SOURCE_PRIORITY",
+    "FRESH_MAX_HOURS",
+    "USABLE_MAX_DAYS",
+    "EXPIRED_MAX_DAYS",
+    "TIER_LABELS",
     "normalize_name",
     "names_match",
     "verify_identity",
+    "freshness",
     "parse_tle_blocks",
     "user_entries",
     "cache_entries",
@@ -38,6 +46,26 @@ __all__ = [
     "scan_catalog",
     "scan_live",
 ]
+
+# 新鲜度分级阈值（按 TLE 历元年龄，不是缓存文件年龄）：
+#   fresh   ≤ 24h      —— 可直接用于过境/跟踪
+#   usable  ≤ 7d       —— 可用，但预报时刻已开始漂移
+#   expired ≤ 30d      —— 可显示/可查，但默认不用于过境与跟踪
+#   dead    > 30d      —— 失效，默认不可用；只能由调用方显式放行
+FRESH_MAX_HOURS = 24.0
+USABLE_MAX_DAYS = 7.0
+EXPIRED_MAX_DAYS = 30.0
+
+TIER_LABELS: Dict[str, str] = {
+    "fresh": "新鲜",
+    "usable": "可用",
+    "expired": "过期",
+    "dead": "失效",
+    "unknown": "未知",
+}
+
+# 默认允许用于过境/跟踪的分级
+_DEFAULT_USABLE_TIERS = ("fresh", "usable")
 
 # 多源优先级：用户文件 > Celestrak（缓存/在线） > 内置表。
 # 数字越小优先级越高。内置表只是「编号目录声明」，不携带真实数据。
@@ -81,6 +109,8 @@ class CatalogEntry:
     object_name: str = ""
     fetched_at: Optional[float] = None
     origin: str = ""
+    refresh_status: str = "unknown"   # memory/cache/network/not_updated
+    refresh_error: str = ""
 
     @property
     def has_tle(self) -> bool:
@@ -96,6 +126,8 @@ class CatalogEntry:
             "object_name": self.object_name,
             "fetched_at": self.fetched_at,
             "origin": self.origin,
+            "refresh_status": self.refresh_status,
+            "refresh_error": self.refresh_error,
         }
 
     def priority(self) -> int:
@@ -134,6 +166,72 @@ def verify_identity(declared_name: str, object_name: str) -> Dict[str, Any]:
         "reason": (
             f"声明名「{declared_name}」与数据对象名「{object_name}」不符："
             "编号被映射到了另一颗/另一类对象，必须降级"
+        ),
+    }
+
+
+def freshness(line1: str, fetched_at: Optional[float] = None,
+              now: Optional[Any] = None) -> Dict[str, Any]:
+    """TLE 新鲜度分级（按历元年龄）+ 缓存时间。
+
+    返回 ``{"tier", "label", "age_days", "epoch_utc", "cache_age_hours",
+    "pass_eligible", "tracking_eligible", "epoch_in_future",
+    "thresholds"}``。
+
+    分级口径：fresh ≤24h / usable ≤7d / expired ≤30d / dead >30d /
+    unknown（历元无法解析）。过期与失效条目仍可显示与查询，但
+    ``pass_eligible=False``——默认不用于过境与跟踪，显式放行才降精度使用。
+    """
+    if now is None:
+        ref = datetime.now(timezone.utc)
+    elif isinstance(now, datetime):
+        ref = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    else:
+        ref = datetime.fromtimestamp(float(now), tz=timezone.utc)
+    epoch = parse_tle_epoch(line1)
+    cache_age_hours: Optional[float] = None
+    if fetched_at is not None:
+        cache_age_hours = round((ref.timestamp() - float(fetched_at)) / 3600.0, 2)
+    thresholds = {
+        "fresh_max_hours": FRESH_MAX_HOURS,
+        "usable_max_days": USABLE_MAX_DAYS,
+        "expired_max_days": EXPIRED_MAX_DAYS,
+    }
+    if epoch is None:
+        return {
+            "tier": "unknown", "label": TIER_LABELS["unknown"],
+            "age_days": None, "epoch_utc": None,
+            "cache_age_hours": cache_age_hours,
+            "pass_eligible": False, "tracking_eligible": False,
+            "epoch_in_future": False, "thresholds": thresholds,
+            "reason": "TLE 历元无法解析（缺/坏数据），年龄未知",
+        }
+    age_days = (ref - epoch).total_seconds() / 86400.0
+    in_future = age_days < 0.0
+    age = max(0.0, age_days)
+    if age <= FRESH_MAX_HOURS / 24.0:
+        tier = "fresh"
+    elif age <= USABLE_MAX_DAYS:
+        tier = "usable"
+    elif age <= EXPIRED_MAX_DAYS:
+        tier = "expired"
+    else:
+        tier = "dead"
+    usable = tier in _DEFAULT_USABLE_TIERS
+    return {
+        "tier": tier,
+        "label": TIER_LABELS[tier],
+        "age_days": round(age, 3),
+        "epoch_utc": epoch.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "cache_age_hours": cache_age_hours,
+        "pass_eligible": usable,
+        "tracking_eligible": usable,
+        "epoch_in_future": in_future,
+        "thresholds": thresholds,
+        "reason": (
+            "历元在将来（本机时钟可能不准），按新鲜处理但需核对时钟"
+            if in_future else
+            f"TLE 历元 {age:.2f} 天前，分级 {TIER_LABELS[tier]}"
         ),
     }
 
@@ -287,25 +385,40 @@ def _data_for(catnr: int,
 
 def scan_catalog(declarations: Sequence[CatalogEntry],
                  data_pool: Optional[Sequence[CatalogEntry]] = None,
-                 now: Optional[float] = None) -> Dict[str, Any]:
-    """全目录扫描：每条声明都做「编号 ↔ 名称 ↔ 来源」三方校验。
+                 now: Optional[Any] = None) -> Dict[str, Any]:
+    """全目录扫描：每条声明都做「编号 ↔ 名称 ↔ 来源」三方校验 + 新鲜度分级。
 
-    返回 ``{"total", "passed", "degraded", "mismatch", "no_data",
-    "reasons", "rows", "conflicts"}``。``passed`` = 已核实且可用于过境/跟踪；
-    ``degraded`` = 未核实/缺数据，不得参与过境或跟踪。
+    返回 ``{"total", "passed", "degraded", "mismatch", "no_data", "stale",
+    "reasons", "rows", "conflicts"}``。``passed`` = 已核实且 TLE 新鲜度
+    默认可用于过境/跟踪；``degraded`` = 未核实/缺数据/过期/失效，仍可显示
+    与查询，但默认不得参与过境或跟踪。
     """
     pool = list(data_pool or [])
     conflicts = _declaration_conflicts(list(declarations))
     rows: List[Dict[str, Any]] = []
     reasons: Dict[str, List[Dict[str, Any]]] = {
-        "identity_mismatch": [], "no_data": [],
+        "identity_mismatch": [], "no_data": [], "stale": [],
     }
     passed = 0
     for decl in declarations:
         data = _data_for(int(decl.catnr), pool) if not decl.has_tle else decl
         object_name = data.object_name if data is not None else ""
         identity = verify_identity(decl.name, object_name)
-        usable = identity["status"] == "verified"
+        fresh = freshness(
+            data.line1 if data is not None else "",
+            data.fetched_at if data is not None else None,
+            now=now)
+        usable = bool(identity["status"] == "verified" and fresh["pass_eligible"])
+        if identity["status"] != "verified":
+            degrade_reason = identity["status"]
+        elif not fresh["pass_eligible"]:
+            degrade_reason = f"tle_{fresh['tier']}"
+        else:
+            degrade_reason = ""
+        cache_time_utc = (
+            datetime.fromtimestamp(float(data.fetched_at), tz=timezone.utc)
+            .strftime("%Y-%m-%dT%H:%M:%SZ")
+            if data is not None and data.fetched_at is not None else None)
         row = {
             "name": decl.name,
             "catnr": int(decl.catnr),
@@ -314,20 +427,33 @@ def scan_catalog(declarations: Sequence[CatalogEntry],
             "data_origin": (data.origin if data is not None else ""),
             "object_name": object_name,
             "identity": identity,
+            "freshness": fresh,
+            "epoch_utc": fresh.get("epoch_utc"),
+            "cache_time_utc": cache_time_utc,
+            "refresh_status": (data.refresh_status if data is not None
+                               else "unknown"),
+            "displayable": True,
             "selectable": usable,
             "pass_eligible": usable,
             "tracking_eligible": usable,
             "degraded": not usable,
-            "degrade_reason": "" if usable else identity["status"],
+            "degrade_reason": degrade_reason,
         }
         if usable:
             passed += 1
         else:
-            key = "no_data" if identity["status"] == "no_data" else "identity_mismatch"
+            if identity["status"] == "no_data":
+                key = "no_data"
+            elif identity["status"] == "mismatch":
+                key = "identity_mismatch"
+            else:
+                key = "stale"
             reasons[key].append({
                 "name": decl.name, "catnr": int(decl.catnr),
                 "object_name": object_name,
-                "detail": identity["reason"],
+                "tier": fresh["tier"],
+                "detail": (identity["reason"] if key != "stale"
+                           else fresh["reason"]),
             })
         # 把与该条目相关的声明冲突附在行上（按名或号命中）
         row["conflicts"] = [
@@ -344,10 +470,12 @@ def scan_catalog(declarations: Sequence[CatalogEntry],
         "degraded": degraded,
         "mismatch": len(reasons["identity_mismatch"]),
         "no_data": len(reasons["no_data"]),
+        "stale": len(reasons["stale"]),
         "reasons": reasons,
         "rows": rows,
         "conflicts": conflicts,
-        "now": now if now is not None else time.time(),
+        "now": (now if isinstance(now, (int, float)) else
+                (now.timestamp() if isinstance(now, datetime) else time.time())),
     }
 
 

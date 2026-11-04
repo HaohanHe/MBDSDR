@@ -217,6 +217,114 @@ def fetch_tle(catnr: int, max_age_hours: float = 24.0) -> Tuple[str, str]:
     return tle
 
 
+def _read_cached_tle(catnr: int) -> Optional[Dict[str, Any]]:
+    """读取磁盘缓存（名称 + line1 + line2 + 缓存 mtime）；结构不自洽返回 None。"""
+    cf = os.path.join(_CACHE_DIR, f"{catnr}.tle")
+    if not os.path.isfile(cf):
+        return None
+    try:
+        with open(cf, "r", encoding="utf-8", errors="replace") as fh:
+            lines = [ln.strip() for ln in fh.read().splitlines()]
+        lines = [ln for ln in lines if ln]
+        if len(lines) < 3 or not lines[1].startswith("1 ") \
+                or not lines[2].startswith("2 "):
+            return None
+        if lines[1][2:7].strip() != lines[2][2:7].strip():
+            return None
+        return {
+            "catnr": int(catnr),
+            "name": lines[0],
+            "line1": lines[1],
+            "line2": lines[2],
+            "fetched_at": os.path.getmtime(cf),
+            "cache_path": cf,
+        }
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def fetch_tle_record(catnr: int, max_age_hours: float = 24.0,
+                     now: Optional[float] = None) -> Dict[str, Any]:
+    """按 CATNR 取 TLE 并附带「是否刷新成功」的诚实记录（不静默）。
+
+    与 :func:`fetch_tle` 的区别：取新数据失败时**保留旧缓存值**并在记录里
+    标明 ``refresh_status="not_updated"``（附 ``refresh_error``），而不是
+    把旧值藏起来或抛错。只有「完全无数据」才抛 TLEUnavailableError。
+
+    返回::
+
+        {"catnr", "name"(line0 对象名), "line1", "line2", "source",
+         "fetched_at", "refresh_status", "refresh_error", "cache_path"}
+
+    ``refresh_status``: ``memory`` / ``cache``（缓存未过期）/ ``network``
+    （本次联网成功）/ ``not_updated``（联网失败或离线，沿用旧值）。
+    """
+    ref = time.time() if now is None else float(now)
+    key = str(catnr)
+    disk = _read_cached_tle(catnr)
+
+    # 1) 内存缓存（未过期）
+    mem = _TLE_CACHE.get(key)
+    if mem is not None and ref - mem[0] < max_age_hours * 3600.0:
+        return {
+            "catnr": int(catnr),
+            "name": disk["name"] if disk is not None else "",
+            "line1": mem[1][0],
+            "line2": mem[1][1],
+            "source": "memory",
+            "fetched_at": float(mem[0]),
+            "refresh_status": "memory",
+            "refresh_error": "",
+            "cache_path": disk["cache_path"] if disk is not None else "",
+        }
+
+    # 2) 磁盘缓存（未过期）
+    if disk is not None and ref - disk["fetched_at"] < max_age_hours * 3600.0:
+        _TLE_CACHE[key] = (disk["fetched_at"], (disk["line1"], disk["line2"]))
+        return dict(disk, source="cache", refresh_status="cache",
+                    refresh_error="")
+
+    # 3) 联网取新
+    refresh_error = ""
+    if not _network_disabled():
+        url = f"https://celestrak.org/NORAD/elements/gp.php?CATNR={catnr}&FORMAT=tle"
+        req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})
+        try:
+            data = _bounded_urlopen(req, _FETCH_TIMEOUT_S,
+                                    _FETCH_HARD_DEADLINE_S).read().decode()
+            lines = [ln for ln in data.splitlines() if ln.strip()]
+            if (len(lines) < 3 or not lines[1].startswith("1 ")
+                    or not lines[2].startswith("2 ")):
+                raise RuntimeError(f"celestrak 返回异常: {data[:80]!r}")
+            line1, line2 = lines[1].strip(), lines[2].strip()
+            name = lines[0].strip()
+            os.makedirs(_CACHE_DIR, exist_ok=True)
+            with open(os.path.join(_CACHE_DIR, f"{catnr}.tle"), "w",
+                      encoding="utf-8") as fh:
+                fh.write("\n".join([name, line1, line2]))
+            _TLE_CACHE[key] = (ref, (line1, line2))
+            return {
+                "catnr": int(catnr), "name": name,
+                "line1": line1, "line2": line2,
+                "source": "celestrak", "fetched_at": ref,
+                "refresh_status": "network", "refresh_error": "",
+                "cache_path": os.path.join(_CACHE_DIR, f"{catnr}.tle"),
+            }
+        except Exception as e:  # noqa: BLE001 - 网络/DNS/超时统一降级
+            refresh_error = f"获取新 TLE 失败（{type(e).__name__}: {e}），沿用旧缓存"
+    else:
+        refresh_error = (f"离线模式（{_OFFLINE_ENV}），未联网刷新，沿用旧缓存")
+
+    # 4) 取新失败：保留旧值，标明未更新（不静默）
+    if disk is not None:
+        return dict(disk, source="cache", refresh_status="not_updated",
+                    refresh_error=refresh_error)
+    raise TLEUnavailableError(
+        f"无 CATNR {catnr} 的 TLE 缓存且{refresh_error or '无法联网'}；"
+        "拒绝编造轨道数据"
+    )
+
+
 def _state_from_satrec(
     sat: Satrec,
     satellite_name: str,
