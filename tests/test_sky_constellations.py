@@ -30,7 +30,7 @@ import math  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 
 from PySide6.QtCore import Qt, QPointF  # noqa: E402
-from PySide6.QtGui import QMouseEvent  # noqa: E402
+from PySide6.QtGui import QMouseEvent, QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -38,6 +38,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 from rf_sky_view import RFSkyView  # noqa: E402
 from mbdsdr_ai.skyengine import stars as _stars  # noqa: E402
 from mbdsdr_ai.skyengine import constellations as _constel  # noqa: E402
+from mbdsdr_ai.skyengine import xingguan as _xingguan  # noqa: E402
 from mbdsdr_ai.celestial_geometry import (  # noqa: E402
     GroundStation, vec_from_radec, j2000_to_altaz, azalt_from_vec,
 )
@@ -258,3 +259,138 @@ class TestRenderSmoke:
         v.repaint()
         v.on_object_picked(None)
         v.repaint()
+
+
+# --------------------------------------------------------------------------
+# 7. 星座/星官图层接线（数据层 overlay_layers → 绘制层）
+# --------------------------------------------------------------------------
+class TestLayerData:
+    def test_overlay_layers_carry_system_metadata(self):
+        layers = _constel.overlay_layers(
+            (_constel.SYSTEM_IAU, _constel.SYSTEM_CHINESE))
+        assert [l.system_id for l in layers] == [
+            _constel.SYSTEM_IAU, _constel.SYSTEM_CHINESE]
+        assert all(l.display_name and l.tag and l.items for l in layers)
+        assert len({l.tag for l in layers}) == 2, "两套体系标签不得合并同名"
+
+    def test_iau_842_segments_and_dropped_not_fabricated(self):
+        ds = _constel.load_iau_constellations()
+        assert len(ds) == 88
+        segs = [seg for con in ds for seg in con.segments()]
+        assert len(segs) == 842
+        # HIP 55203 在 HYG 缺失：只记录 unresolved，不由别处补坐标
+        assert sum(con.dropped_segment_count for con in ds) == 1
+        missing = [con for con in ds if 55203 in con.unresolved_hips]
+        assert len(missing) == 1
+        for con in ds:
+            for a, b in con.segments():
+                assert a.hyg_id is not None and b.hyg_id is not None
+
+    def test_xingguan_counts_and_unlinked_honest(self):
+        xg = _xingguan.load_xingguan()
+        assert len(xg) == 31
+        all_xg = [g for r in xg for g in r.xingguan]
+        assert len(all_xg) == 287
+        linked = [g for g in all_xg if len(g.lines) > 0]
+        assert len(linked) == 274
+        assert len(all_xg) - len(linked) == 13, "13 个无连线星官必须如实不画"
+        for r in xg:
+            for a, b in r.all_segments():
+                assert a.ra_deg is not None and b.ra_deg is not None, \
+                    "连线端点必须已映射，禁止拿空坐标补造"
+
+
+class TestLayerWiring:
+    def _draw_layer_queue(self, v, fov=120.0):
+        from PySide6.QtGui import QImage
+        img = QImage(v.width(), v.height(), QImage.Format_ARGB32)
+        img.fill(0)
+        painter = QPainter(img)
+        try:
+            v._label_items = []
+            v._draw_constellations(painter)
+        finally:
+            painter.end()
+        return list(v._label_items)
+
+    def test_default_is_iau_only(self):
+        v = _new_view()
+        assert v.constellation_systems() == (_constel.SYSTEM_IAU,)
+        assert v.constellation_systems_text() == "IAU"
+
+    def test_each_layer_toggles_independently(self):
+        v = _new_view()
+        v.set_constellation_layer_visible(_constel.SYSTEM_CHINESE, True)
+        assert set(v.constellation_systems()) == {
+            _constel.SYSTEM_IAU, _constel.SYSTEM_CHINESE}
+        assert v.constellation_systems_text() == "IAU + 中国星官"
+        v.set_constellation_layer_visible(_constel.SYSTEM_IAU, False)
+        assert v.constellation_systems() == (_constel.SYSTEM_CHINESE,)
+        assert v.constellation_systems_text() == "中国星官"
+        v.set_constellation_layer_visible(_constel.SYSTEM_CHINESE, False)
+        assert v.constellation_systems_text() == "关闭"
+        v.set_constellation_systems([_constel.SYSTEM_IAU])
+        assert v.constellation_systems_text() == "IAU"
+        import pytest
+        with pytest.raises(KeyError):
+            v.set_constellation_layer_visible("not_a_system", True)
+
+    def test_both_open_labels_carry_system_tags(self):
+        v = _new_view()
+        v.view_state.look_at(180.0, 45.0)
+        v.set_constellation_systems(
+            [_constel.SYSTEM_IAU, _constel.SYSTEM_CHINESE])
+        items = self._draw_layer_queue(v)
+        texts = [t for _p, _pos, lines, _c in items for t, _s, _d in lines]
+        assert any(t.startswith("[IAU]") for t in texts), \
+            f"双开时 IAU 标签必须带体系徽标: {texts[:6]}"
+
+    def test_single_open_labels_have_no_tag(self):
+        v = _new_view()
+        v.view_state.look_at(180.0, 45.0)
+        items = self._draw_layer_queue(v)
+        texts = [t for _p, _pos, lines, _c in items for t, _s, _d in lines]
+        assert texts and all(not t.startswith("[IAU]") for t in texts)
+
+    def test_label_priority_below_bodies(self):
+        v = _new_view()
+        v.view_state.look_at(180.0, 45.0)
+        items = self._draw_layer_queue(v)
+        constel_prios = [p for p, _pos, lines, _c in items
+                         if any(len(t) > 2 for t, _s, _d in lines)]
+        assert constel_prios and all(abs(p - 1.0) < 1e-9 for p in constel_prios)
+        assert all(p < 2.0 for p in constel_prios), "座名必须低于星名优先级"
+
+    def test_fov_layering_is_continuous(self):
+        """FOV 扫描：分层 alpha 连续单调 → 拉远拉近不闪烁。"""
+        v = _new_view()
+        prev = None
+        max_jump = 0.0
+        last_detail = 1.0
+        last_label = 0.0
+        fov = 0.5
+        while fov <= 120.0:
+            v.view_state.zoom_to(fov)
+            detail, label = v._constellation_layer_alpha()
+            assert 0.0 <= detail <= 1.0 and 0.0 <= label <= 1.0
+            assert detail <= last_detail + 1e-9, "星官细线随拉远只能淡出"
+            assert label >= last_label - 1e-9, "座名随拉远只能渐显"
+            if prev is not None:
+                max_jump = max(max_jump, abs(detail - prev[0]),
+                               abs(label - prev[1]))
+            prev = (detail, label)
+            last_detail, last_label = detail, label
+            fov += 0.5
+        assert max_jump < 0.05, f"相邻 FOV 之间 alpha 跳变 {max_jump:.3f} 会闪烁"
+        assert prev[0] == 0.0 and prev[1] == 1.0
+
+    def test_render_both_layers_smoke(self):
+        v = _new_view()
+        v.set_constellation_systems(
+            [_constel.SYSTEM_IAU, _constel.SYSTEM_CHINESE])
+        v.show()
+        app.processEvents()
+        for fov in (120.0, 40.0, 12.0):
+            v.view_state.zoom_to(fov)
+            v.repaint()
+

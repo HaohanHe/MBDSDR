@@ -192,14 +192,15 @@ def test_planet_below_horizon_not_drawn_nor_picked():
     base = P.compute_planet("venus", PLANET_JD)
     out = {}
     try:
-        for tag, alt in (("below", -0.5), ("above", 1.0)):
+        for tag, alt in (("below", -0.7), ("above", 1.0)):
             ra, dec = radec_from_vec(
                 altaz_to_j2000(vec_from_azalt(90.0, alt), gs, jd))
             pos = dataclasses.replace(base, ra_deg=ra, dec_deg=dec)
             v._planet_positions = lambda _jd, _p=pos: {"venus": _p}
             v.view_state.look_at(90.0, 0.0)
             v.view_state.fov_deg = 20.0
-            scr = v._sky_to_screen(90.0, alt)
+            # 绘制/拾取按视高度；-0.7° 的视高度仍 <0（真的看不见）
+            scr = v._sky_to_screen(90.0, v._display_alt_deg(alt))
             out[tag] = (_ink_at(_render_planets(v, 500, 500), scr.x(), scr.y(), 14),
                         v._find_body_at(scr.x(), scr.y()))
     finally:
@@ -292,13 +293,15 @@ def test_resolved_planet_draws_size_and_phase():
         P.compute_planet("venus", PLANET_JD),
         angular_diameter_arcsec=900.0, phase_angle_deg=130.3)
     az, alt = _planet_altaz(pos)
+    alt_draw = v._display_alt_deg(alt)
     v._planet_positions = lambda jd: {"venus": pos}
-    v.view_state.look_at(az, alt)
+    v.view_state.look_at(az, alt_draw)
     v.view_state.fov_deg = 2.0
     # 太阳置于行星正上方（亮区应朝上），与 az/alt 切向一致
-    v.set_celestial_bodies({"az": az, "alt": min(89.0, alt + 30.0)}, None, 0.0)
+    v.set_celestial_bodies({"az": az, "alt": min(89.0, alt_draw + 30.0)},
+                           None, 0.0)
 
-    disc = v._planet_screen_disc(az, alt, 900.0 / 3600.0)
+    disc = v._planet_screen_disc(az, alt_draw, 900.0 / 3600.0)
     assert disc is not None
     r = float(disc["r"])
     assert r > 20.0                 # 反证：旧实现恒为 star_draw 小圆点
@@ -352,12 +355,13 @@ def test_resolved_planet_disc_is_pickable_off_center(monkeypatch):
         P.compute_planet("venus", PLANET_JD),
         angular_diameter_arcsec=900.0, phase_angle_deg=130.3)
     az, alt = _planet_altaz(pos)
+    alt_draw = v._display_alt_deg(alt)
     v._planet_positions = lambda jd: {"venus": pos}
-    v.view_state.look_at(az, alt)
+    v.view_state.look_at(az, alt_draw)
     v.view_state.fov_deg = 2.0
     monkeypatch.setattr("rf_sky_view._constel.merged_star_index", lambda: {})
 
-    disc = v._planet_screen_disc(az, alt, 900.0 / 3600.0)
+    disc = v._planet_screen_disc(az, alt_draw, 900.0 / 3600.0)
     assert disc is not None
     r = float(disc["r"])
     center = disc["center"]

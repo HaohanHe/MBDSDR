@@ -205,8 +205,9 @@ def _card_state(v: RFSkyView, obj=None) -> QImage:
     v._selected_info = None
     if obj is not None:
         v._build_selected_info(obj)
-    # 受晒行基线：观测站 130 + 视角 148 + 调谐 166 + 受晒 184
-    return _card_row_crop(v, 174, 20)
+    # 受晒行基线：观测站 130 + 视轴 148 + 视角 166 + 调谐 184 + 受晒 202。
+    # 批 1 新增「恒星时」(UTC 后) 与「视轴」(观测站后) 两行 → 再 +36px。
+    return _card_row_crop(v, 210, 20)
 
 
 def test_status_card_states_differ_per_state():

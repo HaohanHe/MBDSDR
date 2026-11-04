@@ -342,8 +342,8 @@ def test_draw_and_pick_share_visibility_gate():
     got = v._find_body_at(pos.x(), pos.y())
     assert got is not None and got.get("key") == "moon"
 
-    # 地平线下 0.5°：新门不画也不点
-    _set_bodies(v, 180.0, -0.5, 180.0, 40.0, 0.5, 0.5)
+    # 地平线下 0.7°（视高度仍 <0）：新门不画也不点
+    _set_bodies(v, 180.0, -0.7, 180.0, 40.0, 0.5, 0.5)
     assert v._moon_screen_frame() is None
     got = v._find_body_at(pos.x(), pos.y())
     assert got is None or got.get("key") != "moon"

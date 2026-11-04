@@ -181,9 +181,10 @@ class TestStarExtinctionWiring:
     """_draw_stars 必须把大气消光灌进 star_draw（有效星等 = 视星等 + Δm(alt)）。"""
 
     def test_effective_vmag_includes_extinction(self, monkeypatch):
+        from datetime import datetime, timezone
         from desktop.rf_sky_view import RFSkyView
         from mbdsdr_ai.skyengine import stars as _stars
-        from mbdsdr_ai.skyengine import constellations as _constel
+        from mbdsdr_ai.new_spacetime import get_time_engine
 
         captured = []
         real_star_draw = _stars.star_draw
@@ -192,20 +193,26 @@ class TestStarExtinctionWiring:
             captured.append(float(vmag))
             return real_star_draw(vmag, bortle)
 
-        # 北极星：纬度 40° 处 alt≈40°、vmag=1.98，必在星表内
-        polaris = next(s for s in _stars.BRIGHT_STARS if s.name == "Polaris")
         monkeypatch.setattr(_stars, "star_draw", _spy)
-        # 2026-11-02 修缝：_draw_stars 遍历的是 constellations.merged_star_index()
-        # （亮星 + 星座扩员），不是 _stars.BRIGHT_STARS；constellations 对后者是
-        # import 值绑定，patch _stars.BRIGHT_STARS 传不进去——captured[0] 曾是
-        # 天狼星当下的低空消光值（随时间漂 0.01+）。按真实接缝钉死单星。
-        monkeypatch.setattr(
-            _constel, "merged_star_index", lambda: {"Polaris": polaris})
 
+        eng = get_time_engine()
+        eng.set_unix(datetime(2026, 9, 27, 12, 0,
+                             tzinfo=timezone.utc).timestamp())
+        eng.pause()
         v = RFSkyView()
         v.set_observer(40.0, 116.0, 0.0)
         v.resize(600, 600)
         v._sky_brightness = 0.0
+        # 新接缝：星表选择结果（eff_mag 已含 extinction）就是 star_draw 的入参。
+        sel = v._star_selection(v._ground_station(), v._current_jd())
+        assert sel is not None and len(sel) > 0
+        # 取一颗较高仰角的星，避免地平几何门把它裁掉
+        idx = next((i for i in range(len(sel)) if float(sel.alt_deg[i]) > 15.0), 0)
+        expected = float(sel.eff_mag[idx])
+        assert expected > float(sel.vmag[idx]) + 0.05, (
+            f"星表有效星等未含消光: vmag={sel.vmag[idx]:.2f} "
+            f"eff={expected:.2f}")
+
         from PySide6.QtGui import QPixmap, QPainter
         pm = QPixmap(600, 600)
         pm.fill()
@@ -216,11 +223,8 @@ class TestStarExtinctionWiring:
             painter.end()
 
         assert captured, "star_draw 未被调用（星不在屏/未绘制）"
-        expected = polaris.vmag + _stars.extinction_delta_mag(40.0)
-        assert abs(captured[0] - expected) < 0.35, \
-            f"有效星等 {captured[0]} ≠ vmag+Δm(40°)≈{expected}"
-        # 消光确实加了正增量（不是裸 vmag）
-        assert captured[0] > polaris.vmag + 0.2
+        assert any(abs(c - expected) < 1e-6 for c in captured), \
+            f"star_draw 未收到星表 eff_mag={expected}（captured 前 5: {captured[:5]}）"
 
 
 # ----------------------------------------------------------------------

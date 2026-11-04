@@ -186,7 +186,18 @@ class TestPicking:
         v.on_body_picked({"kind": "planet", "key": "mars", "zh": "火星"})
         assert v._picked_body is not None
         # 点天顶附近空白 (天体拾取容差 14px 内无任何行星/恒星/卫星)
-        _click(v, v.width() - 6.0, v.height() / 2.0)
+        # 全天星表接入后 700px 窗口内约有上千颗星，不能假定某个固定点是空的；
+        # 先找一个当帧确实没有任何天体可命中的点，再点它验证反选。
+        empty = None
+        for fx, fy in ((1.0, 0.5), (0.5, 0.08), (0.08, 0.5), (0.5, 0.92),
+                       (0.92, 0.08), (0.08, 0.08), (0.92, 0.92), (0.08, 0.92),
+                       (0.5, 0.5)):
+            x, y = v.width() * fx, v.height() * fy
+            if v._find_body_at(x, y) is None:
+                empty = (x, y)
+                break
+        assert empty is not None, "找不到空白点（拾取把整屏都占了）"
+        _click(v, empty[0], empty[1])
         assert v._picked_body is None
         assert v._body_info is None
 

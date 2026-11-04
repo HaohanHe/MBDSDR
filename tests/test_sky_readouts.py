@@ -43,7 +43,8 @@ import rf_sky_view as rsv  # noqa: E402
 from rf_sky_view import (  # noqa: E402
     RFSkyView, format_angle_deg, format_azimuth, format_arcmin, format_arcsec,
     format_distance_au, format_distance_km, format_magnitude, format_percent,
-    format_speed_kms, format_utc_time, format_local_time,
+    format_speed_kms, format_utc_time, format_local_time, format_hms_ra,
+    format_view_axis, local_sidereal_time_deg, star_catalog_credit_text,
     format_satellite_description, compass_point,
 )
 from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
@@ -374,7 +375,8 @@ class TestPassPanelReadouts:
 
     def test_pass_panel_labels_and_single_formatter(self):
         src = inspect.getsource(RFSkyView._draw_passes_panel)
-        assert "未来过境 (24h, UTC)" in src
+        assert "未来过境 24h UTC" in src
+        assert "峰值(几何)" in src
         assert "format_angle_deg(" in src
         assert ":4.0f} deg" not in src
 
@@ -388,7 +390,7 @@ class TestSingleFormatterAndUnitLabels:
         assert "Magnitude (mag)" in src
         assert "Distance (km)" in src
         assert "Rise/Set (UTC)" in src
-        assert "Az/Alt (Az 0°=N)" in src
+        assert "Az/Alt 几何 (Az 0°=N)" in src
         assert "format_azimuth(" in src
         assert "format_angle_deg(" in src
         assert "format_hms_ra(" in src and "format_dms_deg(" in src
@@ -400,9 +402,10 @@ class TestSingleFormatterAndUnitLabels:
         src = inspect.getsource(RFSkyView._draw_body_info)
         assert "Magnitude (mag)" in src
         assert "Rise/Set (UTC)" in src
-        assert "Az/Alt (Az 0°=N)" in src
+        assert "Az/Alt (视/几何, Az 0°=N)" in src
         assert "format_azimuth(" in src
-        assert "format_angle_deg(" in src
+        # 高度角统一走 _format_alt_pair（内部仍只调 format_angle_deg 单点实现）
+        assert "_format_alt_pair(" in src
         assert "format_hms_ra(" in src and "format_dms_deg(" in src
 
     def test_status_card_states_utc_and_local_offset(self):
@@ -422,3 +425,50 @@ class TestSingleFormatterAndUnitLabels:
         # 度分秒只允许一处实现（format_dms_deg）
         assert src.count(':3d}°{m:02d}') == 1
         assert ":.0f} km" not in src
+
+
+# ---------------------------------------------------------------------------
+# 7. 时空读数补全（批 1：恒星时/JD、视轴、星表署名）
+# ---------------------------------------------------------------------------
+class TestSpacetimeReadouts:
+    """原型 HUD 有 LST/JD/视轴，本仓状态卡补上后必须可独立复算（H-6）。"""
+
+    def test_lst_matches_astronomy_backend(self):
+        jd = _jd(UNIX)
+        lst_deg = local_sidereal_time_deg(jd, LON)
+        from mbdsdr_ai.astronomy import jd_to_lst
+        expect = math.degrees(jd_to_lst(jd, LON))
+        assert _circ_diff(lst_deg, expect) <= 0.05 / 240.0   # 半格 = 0.05 秒时角
+
+    def test_lst_display_roundtrip_half_grid(self):
+        jd = _jd(UNIX)
+        shown = format_hms_ra(local_sidereal_time_deg(jd, LON), digits=1)
+        m = re.fullmatch(r"(\d{2})h (\d{2})m (\d{2}\.\d)s", shown)
+        assert m, f"LST 显示格式异常: {shown!r}"
+        h, mi, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
+        shown_deg = (h + mi / 60.0 + s / 3600.0) * 15.0
+        assert _circ_diff(shown_deg, local_sidereal_time_deg(jd, LON)) \
+            <= 0.05 * 15.0 / 3600.0
+
+    def test_view_axis_readout_formats_both_fields(self):
+        txt = format_view_axis(123.4, 45.0)
+        assert txt.startswith("AZ 123.4°")
+        assert "SE" in txt                 # 16 方位名与度数同给
+        assert "ALT 45.0°" in txt
+        assert "几何" not in txt             # 口径在行标签上，不重复塞进值里
+
+    def test_card_rows_use_single_fact_source(self):
+        src = inspect.getsource(RFSkyView._draw_info_overlay)
+        assert '"恒星时"' in src
+        assert "local_sidereal_time_deg(" in src and "_current_jd(" in src
+        assert '"视轴(几何)"' in src and "format_view_axis(" in src
+        assert '"星表来源"' in src and "star_catalog_credit_text(" in src
+        # 无站址时 LST 必须显式空态，不许拿 0° 冒充
+        assert "—（无站址）" in src
+
+    def test_catalog_credit_from_meta(self):
+        txt = star_catalog_credit_text()
+        assert "HYG" in txt and "4.1" in txt
+        assert "CC BY-SA 4.0" in txt
+        assert "Database" not in txt       # 显示短名，不改来源身份
+

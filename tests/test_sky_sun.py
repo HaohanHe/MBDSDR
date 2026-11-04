@@ -122,7 +122,13 @@ def test_sun_draw_uses_angular_size_not_fixed_14px():
 # --------------------------------------------------------------------------
 # 2. 日出日落特例
 # --------------------------------------------------------------------------
-def test_sunrise_special_case_clamps_center_to_horizon():
+def test_sunrise_special_case_uses_apparent_alt():
+    """地平门改按视高度 + 上缘：圆心可略低于地平（真实日落形态）。
+
+    反证旧实现：旧代码把 alt=-0.5° 的圆心夹到 0°（`max(0.0, alt)`），
+    等于把太阳整体抬高；这里断言圆心**低于**地平（≈ -0.42°→视 +0.06°，
+    几何 -0.83° 时视 -0.21° 仍画），只有上缘沉下去才不画。
+    """
     v = _new_view()
     try:
         v.view_state.look_at(180.0, 0.0)
@@ -130,13 +136,22 @@ def test_sunrise_special_case_clamps_center_to_horizon():
         v.set_celestial_bodies(_sun_dict(alt=-0.5), None, 0.0)
         geom = v._sun_screen_geom()
         assert geom is not None, "日出日落（alt=-0.5°）仍应画太阳"
-        assert geom["alt_draw"] == 0.0
+        assert float(geom["alt_draw"]) == pytest.approx(0.063, abs=0.01)
         horizon = v._sky_to_screen(180.0, 0.0)
-        assert geom["center"].y() == pytest.approx(horizon.y(), abs=0.5)
+        assert geom["center"].y() == pytest.approx(horizon.y(), abs=1.0)
+
+        # 标准日落圆心 -0.833°：视高度约 -0.21°，上缘仍在地平上 -> 画，
+        # 但圆心在屏幕地平线**下方**（不再夹取到 0）。
+        v.set_celestial_bodies(_sun_dict(alt=-0.833), None, 0.0)
+        geom = v._sun_screen_geom()
+        assert geom is not None
+        assert float(geom["alt_draw"]) == pytest.approx(-0.213, abs=0.01)
+        assert geom["center"].y() > horizon.y() + 0.5
 
         v.set_celestial_bodies(_sun_dict(alt=-1.1), None, 0.0)
         assert v._sun_screen_geom() is None
 
+        # 视高度 -0.35°，上缘（-0.35+0.27≈-0.08°）已沉下地平 -> 不画
         v.set_celestial_bodies(_sun_dict(alt=-1.0), None, 0.0)
         assert v._sun_screen_geom() is None
     finally:

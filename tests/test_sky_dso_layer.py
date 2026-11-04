@@ -302,11 +302,12 @@ def test_status_card_states_no_galaxy_layer(monkeypatch):
     """状态卡必须明示「无数据·不提供」；不画装饰性银河带冒充图层。"""
     v = _new_view()
     try:
-        # 银河行位于观测站 + 视角 + 调谐 + 受晒之后 → 基线 202
-        shown = _card_row_crop(v, 188, 20)
+        # 银河行位于观测站 + 视轴 + 视角 + 调谐 + 受晒之后。
+        # 批 1 在银河行之前新增「恒星时 / 视轴」两行 → 下移 36px（188→224）。
+        shown = _card_row_crop(v, 224, 20)
         # 反证：把该行文案清空后同一区域必须变（证明绘制路径真在写这句）
         monkeypatch.setattr(rf_sky_view, "GALAXY_LAYER_NOTE", "")
-        blank = _card_row_crop(v, 188, 20)
+        blank = _card_row_crop(v, 224, 20)
     finally:
         v.close()
     assert _diff_pixels(shown, blank) > 20, "状态卡没有写「本视图无银河图层」的说明"
@@ -395,7 +396,6 @@ def test_clamped_symbol_has_visible_marker():
 
 def test_clamped_dso_pick_radius_follows_symbol(monkeypatch):
     """限幅后命中区同步收窄：M31 不再吃掉视口，视口内其它天体仍可点中。"""
-    import types
     from mbdsdr_ai.celestial_geometry import (
         altaz_to_j2000, vec_from_azalt, radec_from_vec)
 
@@ -415,15 +415,36 @@ def test_clamped_dso_pick_radius_follows_symbol(monkeypatch):
         blank = v._find_body_at(center.x() + cap + 40, center.y())
         assert blank is None or blank.get("kind") != "dso", blank
 
-        # 3) 视口内另一颗天体（合成 3 等星，落在限幅符号之外）仍能点中
+        # 3) 视口内另一颗天体（合成 3 等星，落在限幅符号之外）仍能点中。
+        #    新接缝是当帧星表选择结果（_star_sel），不再是 merged_star_index；
+        #    用一份只含该星的最小 selection 模拟「当帧画了这颗星」。
+        import numpy as np
         st_az, st_alt = az + 0.30, alt
         st_vec = altaz_to_j2000(vec_from_azalt(st_az, st_alt), gs, jd)
         ra_s, dec_s = radec_from_vec(st_vec)
-        fake = {"测试星": types.SimpleNamespace(
-            ra_deg=ra_s, dec_deg=dec_s, vmag=3.0)}
-        monkeypatch.setattr(rf_sky_view._constel, "merged_star_index",
-                            lambda: fake)
-        st_scr = v._sky_to_screen_finite(st_az, st_alt)
+        class _OneStar:
+            az_deg = np.array([st_az])
+            alt_deg = np.array([st_alt])
+            eff_mag = np.array([3.0])
+            vmag = np.array([3.0])
+            name = np.array([""])
+            hyg_id = np.array([-1])
+            ra_deg = np.array([ra_s])
+            dec_deg = np.array([dec_s])
+            bv = np.array([np.nan])
+            dist_pc = np.array([np.nan])
+            spect = np.array([""])
+            con = np.array([""])
+            limit_mag = 9.0
+            available = returned = 1
+            truncated = beyond_catalog_limit = False
+
+            def __len__(self):
+                return 1
+
+        fake = _OneStar()
+        monkeypatch.setattr(v, "_star_sel", fake, raising=False)
+        st_scr = v._sky_to_screen_finite(st_az, v._display_alt_deg(st_alt))
         d_star = math.hypot(st_scr.x() - center.x(), st_scr.y() - center.y())
         assert d_star > cap, (d_star, cap)       # 前提：星在限幅符号之外
         body_star = v._find_body_at(st_scr.x(), st_scr.y())
