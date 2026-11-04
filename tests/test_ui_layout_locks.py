@@ -62,39 +62,80 @@ def _pump(ms: int = 120) -> None:
 # ---------------------------------------------------------------------------
 # 窗口 fixture：每档尺寸一个 MainWindow（模块级，控制构造耗时）
 # ---------------------------------------------------------------------------
-def _isolate_settings():
-    """备份并清空窗口几何/分栏持久化，测试后原样还原。"""
+def _isolate_environment(tmp_dir: str):
+    """把用户目录整体重定向到临时目录：基线只反映代码，不反映跑它的人。
+
+    为什么需要（实测）：
+      * ``~/.mbdsdr/bookmarks.json`` 的 140 条书签会被画成谱面顶部的药丸，
+        同一份代码在开发者机器与干净账号下拍出不同基线（worst 差 100+）；
+      * ``%APPDATA%/mbdsdr/desktop_settings.json`` 会带回上一次的频率/增益，
+        直接改变频谱中心；
+      * ``%APPDATA%/MBDSDR/layouts.json``（layout_store）与 QSettings 里的
+        窗口几何/三栏比例会把上一次的窗口状态带进来。
+
+    隔离手段：
+      * ``os.path.expanduser`` 的 ``~`` → 临时 HOME（覆盖 bookmarks/config/
+        gui_config/recordings 等所有 ``~/.mbdsdr`` 读取）；
+      * ``APPDATA`` / ``XDG_CONFIG_HOME`` / ``HOME`` 环境变量 → 临时目录
+        （覆盖 DesktopSettings 与 layout_store 的平台路径）；
+      * layout_store 单例 → 临时 layouts.json；
+      * QSettings 的 3 个几何键备份后清空，测试结束原样还原。
+    退出时全部还原，不碰用户真实文件。
+    """
+    import shutil
+    from unittest.mock import patch
+
+    import layout_store as _ls
+
+    home = os.path.join(tmp_dir, "home")
+    appdata = os.path.join(tmp_dir, "appdata")
+    os.makedirs(home, exist_ok=True)
+    os.makedirs(appdata, exist_ok=True)
+
+    real_expanduser = os.path.expanduser
+
+    def _temp_expanduser(path):
+        if path == "~":
+            return home
+        if path.startswith("~/"):
+            return os.path.join(home, *path[2:].replace("\\", "/").split("/"))
+        return real_expanduser(path)
+
+    patcher = patch("os.path.expanduser", _temp_expanduser)
+    patcher.start()
+
+    env_keys = ("APPDATA", "XDG_CONFIG_HOME", "HOME")
+    env_backup = {k: os.environ.get(k) for k in env_keys}
+    os.environ["APPDATA"] = appdata
+    os.environ["XDG_CONFIG_HOME"] = os.path.join(tmp_dir, "config")
+    os.environ["HOME"] = home
+
+    store_backup = _ls._default_store
+    _ls._default_store = _ls.LayoutStore(os.path.join(tmp_dir, "layouts.json"))
+
     s = QSettings("MBDSDR", "Desktop")
     keys = ("window_geometry", "three_column_sizes",
             "three_column_layout_version")
-    backup = {k: s.value(k) for k in keys}
+    qs_backup = {k: s.value(k) for k in keys}
     for k in keys:
         s.remove(k)
     s.sync()
-    gui_cfg = os.path.expanduser("~/.mbdsdr/gui_config.json")
-    cfg_backup = None
-    if os.path.exists(gui_cfg):
-        with open(gui_cfg, "r", encoding="utf-8") as f:
-            cfg_backup = f.read()
-        try:   # 摘掉 window 键：_load_gui_config 定时器不再改测试窗口几何
-            data = json.loads(cfg_backup)
-            if "window" in data:
-                data.pop("window")
-                with open(gui_cfg, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
 
     def restore():
-        for k, v in backup.items():
+        for k, v in qs_backup.items():
             if v is None:
                 s.remove(k)
             else:
                 s.setValue(k, v)
         s.sync()
-        if cfg_backup is not None:
-            with open(gui_cfg, "w", encoding="utf-8") as f:
-                f.write(cfg_backup)
+        _ls._default_store = store_backup
+        for k, v in env_backup.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        patcher.stop()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return restore
 
@@ -103,11 +144,11 @@ def _clear_user_bookmarks(win) -> None:
     """基线必须与账号数据无关：清掉主窗口启动时从 ~/.mbdsdr/bookmarks.json
     灌进来的书签。
 
-    实测证据：真实 HOME 的 3 条 10 万字符书签会被 `_sync_spectrum_bookmarks`
-    画成谱面上的三枚药丸；同一张 spectrum 基线在真实 HOME 下 worst≤17，
-    干净账号（CI）下 worst=141 > 100 必红。布局锁只锁几何/主要色块，
-    书签内容不进基线，所以在拍照前固定清空（用户数据版本另见
-    tests/test_bookmark_dirty_data.py）。
+    实测证据：真实 HOME 的书签会被 `_sync_spectrum_bookmarks` 画成谱面
+    顶部的药丸；同一份代码在开发者机器与干净账号下 worst 差 100+。
+    隔离目录（_isolate_environment）已经保证读不到真实用户文件，这里再
+    清一次是最后一道闸：任何绕过 expanduser 的读取路径也不会把账号数据
+    拍进基线（用户数据版本另见 tests/test_bookmark_dirty_data.py）。
     """
     for fn in (
         lambda: win.spectrum.set_bookmarks([]),
@@ -124,7 +165,9 @@ def _clear_user_bookmarks(win) -> None:
                 ids=[f"{w}x{h}" for w, h in SIZES])
 def main_window(request):
     width, height = request.param
-    restore = _isolate_settings()
+    import tempfile
+    tmp_dir = tempfile.mkdtemp(prefix="mbdsdr_ui_baseline_")
+    restore = _isolate_environment(tmp_dir)
     from main_window import MainWindow
     win = MainWindow()
     for t in getattr(win, "_startup_timers", []):
@@ -137,6 +180,12 @@ def main_window(request):
     win.resize(width, height)
     win.show()
     _pump(200)
+    # 强制一次全量重抛光再拍照：QComboBox 的 AdjustToContentsOnFirstShow
+    # 按首次 show 时的 QSS 落地顺序算 sizeHint，同一进程里第 1 个窗口与
+    # 后续窗口会停在两种稳态（实测 fd 270px / 325px 交替），基线因此
+    # 依赖跑测顺序。重抛光把控件统一到 QSS 生效后的最终尺寸。
+    app.setStyleSheet(app.styleSheet())
+    _pump(150)
     yield win
     try:
         win._disconnect()
@@ -146,6 +195,19 @@ def main_window(request):
     win.deleteLater()
     app.sendPostedEvents(None, QEvent.DeferredDelete)
     restore()
+
+
+def test_baseline_environment_is_isolated(main_window):
+    """基线只反映代码：必须读不到开发者的书签/主题/窗口状态。"""
+    from themes import DEFAULT_THEME
+    assert main_window._current_theme == DEFAULT_THEME, (
+        f"基线环境带进了开发者的主题 {main_window._current_theme!r}")
+    assert not getattr(main_window, "_bookmarks", []), (
+        "基线环境带进了开发者书签")
+    # 隔离目录生效：~/.mbdsdr/bookmarks.json 指向临时 HOME，不存在
+    assert not os.path.exists(
+        os.path.expanduser("~/.mbdsdr/bookmarks.json")), (
+        "~/.mbdsdr 未重定向到临时目录，基线会依赖跑它的人")
 
 
 def _select_left(win, key: str) -> None:
@@ -630,18 +692,25 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
         f"--update-baselines 并人工复核")
     base = QImage(path)
     assert not base.isNull(), f"基线无法读取: {path}"
-    # DPI 换算有 ±1px 的取整差：宽度必须一致，高度允许 2px 内，
-    # 真正的比例问题交给下面的宽高比阈值。
-    assert img.width() == base.width() and \
-        abs(img.height() - base.height()) <= 2, (
-        f"{panel} 尺寸漂移: 当前 {img.width()}x{img.height()} "
-        f"基线 {base.width()}x{base.height()}")
-    # 宽高比：容差必须与上面允许的 ±2px 高度取整差一致，否则 2px 高度差
-    # 会直接顶爆固定 1% 阈值（320×191 vs 320×193 的比值差就有 1.7%）。
-    # 真正的比例畸变仍由「宽度严格相等 + 高度 ±2」这两条锁住。
-    aspect_tol = max(0.01, 2.2 * base.width() / (base.height() ** 2))
-    assert abs(img.width() / img.height()
-               - base.width() / base.height()) < aspect_tol
+    # 几何判据 = 绝对像素容差 + 比例容差双条件，两个容差都由归一化流程的
+    # 量化误差上界推出（不是拍的）：grab 取整 ≤0.5px + _normalize 的
+    # round() ≤0.5px，单图 ≤1px，被测图与基线各一张 → 最坏 2px。
+    # 3px 无法由取整解释，只可能来自 ≥1px 真实布局变化，故不放宽。
+    # 固定 1% 的旧判据会误杀纯取整差：320×240 高差 2px 的比值差就有
+    # 0.011 > 1%（把尺子的精度问题记成了产品的漂移）。推导见
+    # scripts/ui_baseline.py::geometry_tolerance。
+    from ui_baseline import geometry_tolerance, geometry_within_tolerance
+    if not geometry_within_tolerance(img.width(), img.height(),
+                                     base.width(), base.height()):
+        px, ratio = geometry_tolerance(base.width(), base.height())
+        cur_r = img.width() / img.height()
+        base_r = base.width() / base.height()
+        assert False, (
+            f"{panel} 几何漂移: 当前 {img.width()}x{img.height()} "
+            f"基线 {base.width()}x{base.height()}（Δw={img.width() - base.width():+d} "
+            f"Δh={img.height() - base.height():+d}，像素容差 ±{px:.0f}px；"
+            f"宽高比 {cur_r:.4f} vs {base_r:.4f} Δ={cur_r - base_r:+.4f}，"
+            f"比例容差 ±{ratio:.4f}）")
     if img.height() != base.height():
         # 尺寸有 ±2px 合法取整差时，先归一到同一分辨率再比色块：
         # 否则高度差 2px 会让整张色块网格重新采样，把几何取整误报成

@@ -23,7 +23,10 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_ROOT, "scripts"))
 
-from ui_baseline import BaselineUpdateRefused, guarded_update  # noqa: E402
+from ui_baseline import (  # noqa: E402
+    BaselineUpdateRefused, geometry_tolerance, geometry_within_tolerance,
+    guarded_update,
+)
 
 app = QApplication.instance() or QApplication(sys.argv)
 
@@ -79,6 +82,62 @@ def test_geometry_height_change_refused_even_with_reason(tmp_path):
     taller = _make(str(tmp_path / "new.png"), 320, 204, "#F5F3EF")
     with pytest.raises(BaselineUpdateRefused, match="几何"):
         guarded_update(path, taller, "只是重建基线")
+
+
+# ---------------------------------------------------------------------------
+# 几何判据边界：±1/±2px 是取整误差、±3px 必须红（不许只改常量不测边界）
+# ---------------------------------------------------------------------------
+_BASE_W, _BASE_H = 320, 240   # 与 spectrum_1000x600 同型（比值差最容易误杀）
+
+
+@pytest.mark.parametrize("delta,ok", [(1, True), (2, True), (3, False)])
+def test_geometry_height_delta_boundary(tmp_path, delta, ok):
+    """合成图高差 ±1/±2px 通过、±3px 失败——两个方向都要测。"""
+    base = _make(str(tmp_path / "base.png"), _BASE_W, _BASE_H, "#1E1E20")
+    for sign in (1, -1):
+        cur = _make(str(tmp_path / f"cur_{sign}.png"),
+                    _BASE_W, _BASE_H + sign * delta, "#1E1E20")
+        got = geometry_within_tolerance(cur.width(), cur.height(),
+                                        base.width(), base.height())
+        assert got is ok, f"高度差 {sign * delta}px 判定 {got}，期望 {ok}"
+
+
+@pytest.mark.parametrize("delta,ok", [(1, True), (2, True), (3, False)])
+def test_geometry_width_delta_boundary(tmp_path, delta, ok):
+    base = _make(str(tmp_path / "base.png"), _BASE_W, _BASE_H, "#1E1E20")
+    for sign in (1, -1):
+        cur = _make(str(tmp_path / f"cur_{sign}.png"),
+                    _BASE_W + sign * delta, _BASE_H, "#1E1E20")
+        got = geometry_within_tolerance(cur.width(), cur.height(),
+                                        base.width(), base.height())
+        assert got is ok, f"宽度差 {sign * delta}px 判定 {got}，期望 {ok}"
+
+
+def test_ratio_tolerance_is_derived_from_pixel_budget():
+    """320×240 高差 2px 的比值差 0.011 > 固定 1%——旧阈值会误杀取整误差。"""
+    base_aspect = _BASE_W / _BASE_H
+    assert abs(_BASE_W / (_BASE_H + 2) - base_aspect) > 0.01, \
+        "该基线不是会误杀 2px 取整差的几何，边界用例失去意义"
+    px, ratio = geometry_tolerance(_BASE_W, _BASE_H)
+    assert px == 2.0
+    assert ratio > abs(_BASE_W / (_BASE_H + 2) - base_aspect), \
+        "比例容差没有覆盖 2px 像素预算的最坏组合"
+    assert geometry_within_tolerance(_BASE_W, _BASE_H + 2, _BASE_W, _BASE_H)
+
+
+@pytest.mark.parametrize("delta,ok", [(1, True), (2, True), (3, False)])
+def test_guarded_update_pixel_delta_boundary(tmp_path, delta, ok):
+    """更新通道同样放行 ±1/±2px、拒绝 ±3px（且不需要几何变更 token）。"""
+    path = str(tmp_path / "panel_1000x600.png")
+    _make(path, _BASE_W, _BASE_H, "#1E1E20")
+    cur = _make(str(tmp_path / "new.png"), _BASE_W, _BASE_H + delta, "#1E1E20")
+    if ok:
+        summary = guarded_update(path, cur, "纯取整差，无设计变更")
+        assert summary["geometry"] is None, "±2px 取整差被当成几何变更"
+        assert QImage(path).height() == _BASE_H + delta
+    else:
+        with pytest.raises(BaselineUpdateRefused, match="几何"):
+            guarded_update(path, cur, "纯取整差，无设计变更")
 
 
 def test_missing_baseline_can_be_created_with_reason(tmp_path):

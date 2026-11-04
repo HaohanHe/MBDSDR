@@ -40,9 +40,13 @@ DEFECT_BASELINE_FIXES = {
         "FreqDisplay 被内容最小宽撑到 ~960px，归一化后成 320x20；"
         "右栏 300px 契约下的真实布局是 278x60（高 60 是控件 setMinimumHeight）",
     "ui-baseline-userdata-isolation":
-        "旧 spectrum 基线把开发者 ~/.mbdsdr/bookmarks.json 的书签药丸拍进了截图"
-        "（真实 HOME 3 条 10 万字符书签 → 谱面上三枚药丸；干净账号/CI 下"
-        "同一基线 worst=141>100 必红），改为夹具固定清空书签后重建",
+        "旧基线绑定跑它的人：书签药丸来自开发者 ~/.mbdsdr/bookmarks.json"
+        "（干净账号 worst=141>100 必红）、主题取自开发者 DesktopSettings"
+        "（figma 与出厂 default 整图色值不同）、窗口状态取自 QSettings/"
+        "layouts.json；且 QComboBox 首次 show 的 sizeHint 让同进程第 1 个"
+        "窗口与后续窗口交替停在 270px/325px 两种稳态。夹具改为隔离用户目录"
+        "（expanduser/APPDATA/layout_store/QSettings）+ 出厂默认主题 + "
+        "拍前全量重抛光后按真实布局重建",
 }
 
 
@@ -272,15 +276,56 @@ def save_labels(path: str, labels) -> str:
     return lp
 
 
+#: 归一化截图的几何量化误差上界（像素）。推导见 geometry_tolerance()。
+GEOMETRY_PX_TOL = 2.0
+
+
+def geometry_tolerance(width: int, height: int) -> tuple:
+    """由量化误差上界推出的 ``(像素容差, 比例容差)``，不是拍的常量。
+
+    像素容差 2px 的推导（为什么是 2 而不是 3）：
+
+      * ``grab()`` 把逻辑尺寸落到整数像素，每边误差 ≤0.5 raw px；
+        除以 DPR（125%/150%/200%）后仍 ≤0.5 逻辑 px；
+      * ``_normalize()`` 的 ``round(tw)`` / ``round(th)`` 再引入
+        ≤0.5 逻辑 px；高度先算 ``th = tw * lh / lw``，其中 ``tw/lw ≤ 1``
+        不会放大第一步的误差（放大系数 ≤1）；
+      → 单张图归一化误差 ≤1.0 px；被测图与基线各一张，最坏 **2.0 px**。
+      3px 已无法由取整解释，只可能来自 ≥1px 的真实布局变化，所以不放宽。
+
+    比例容差用同一 2px 预算的最坏组合（宽、高各偏满、方向相反）::
+
+        Δ(w/h) ≤ px/h + w * px/h² = px * (1/h + w/h²)
+
+    旧实现的固定 1% 会误杀纯取整误差：320×240 的图高差 2px 就有
+    Δ(w/h)=0.011 > 1%，把「尺子精度」记成了「产品漂移」。
+    """
+    if height <= 0:
+        return GEOMETRY_PX_TOL, 0.0
+    ratio = GEOMETRY_PX_TOL * (1.0 / height + width / float(height) ** 2)
+    return GEOMETRY_PX_TOL, ratio
+
+
+def geometry_within_tolerance(new_w: int, new_h: int,
+                              old_w: int, old_h: int,
+                              px_tol: float = GEOMETRY_PX_TOL) -> bool:
+    """绝对像素 + 比例双条件：两条都满足才算同一几何。"""
+    if (new_w, new_h) == (old_w, old_h):
+        return True
+    if old_h <= 0 or new_h <= 0 or old_w <= 0 or new_w <= 0:
+        return False
+    px, ratio = geometry_tolerance(old_w, old_h)
+    px = max(px, float(px_tol))
+    if abs(new_w - old_w) > px or abs(new_h - old_h) > px:
+        return False
+    return abs(new_w / new_h - old_w / old_h) <= ratio
+
+
 def _geometry_changed(old: QImage, new: QImage,
                       max_height_delta: int) -> bool:
-    if new.width() != old.width() or \
-            abs(new.height() - old.height()) > max_height_delta:
-        return True
-    if old.height() and abs(new.width() / new.height() -
-                            old.width() / old.height()) >= 0.01:
-        return True
-    return False
+    return not geometry_within_tolerance(
+        new.width(), new.height(), old.width(), old.height(),
+        px_tol=max_height_delta)
 
 
 def summarize(old: QImage, new: QImage, allow_geometry: bool = False) -> dict:
@@ -317,8 +362,9 @@ def guarded_update(path: str, image: QImage, reason: str,
                    label_geometry=None) -> dict:
     """受控写入基线；返回差异摘要（调用方负责打印与复核）。
 
-    默认判定与布局锁一致：宽度必须相同、高度允许 ±2px、宽高比误差 <1%，
-    且显式传入的刻度标签几何必须一致。几何不符时抛
+    默认判定与布局锁一致：几何同时满足「宽高各 ±2px（量化误差上界，
+    推导见 :func:`geometry_tolerance`）」与「比例在由同一 2px 预算推出的
+    容差内」，且显式传入的刻度标签几何必须一致。几何不符时抛
     BaselineUpdateRefused——**即使带 reason 也不放行**。
 
     确属本次设计变更时走第二通道：``accept_geometry_change=True`` 且
@@ -396,7 +442,9 @@ def guarded_update(path: str, image: QImage, reason: str,
                                     + ("；" + labels_diff["text"]
                                        if labels_diff else ""))
         else:
-            summary = summarize(old, image)
+            # ±2px 取整差不算几何变更，但尺寸确实不相等（缩图比色块需要
+            # allow_geometry=True，否则 summarize 会按"尺寸不一致"拒绝）。
+            summary = summarize(old, image, allow_geometry=True)
             summary["geometry"] = None
             summary["labels"] = None
     else:
