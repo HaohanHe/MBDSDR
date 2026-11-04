@@ -1531,8 +1531,14 @@ class MBDSDRAgent:
                 min_el = float(args.get("min_elevation", 10) or 10)
                 stype = str(args.get("satellite_type", "all") or "all")
                 freq = float(args.get("frequency_hz", 137.1e6) or 137.1e6)
+                # P11：过境预测用 TimeEngine 模拟时刻，与天空视图同一时间基准
+                try:
+                    from mbdsdr_ai.new_spacetime import get_time_engine
+                except ImportError:
+                    from new_spacetime import get_time_engine
                 ps = predict_passes(lat, lon, alt, hours, min_el, stype,
-                                    nominal_freq_hz=freq)
+                                    nominal_freq_hz=freq,
+                                    start_unix=get_time_engine().now_unix())
             except Exception as e:
                 return ToolResult(False, f"过境预测失败: {e}")
             return ToolResult(True, json.dumps({"passes": ps, "count": len(ps)},
@@ -1581,7 +1587,12 @@ class MBDSDRAgent:
                                       "；".join(ev["reasons"]))
                 lat = float(fix.lat)
                 lon = float(fix.lon)
-                s = compute_satellite_state(name, lat, lon)
+                try:
+                    from mbdsdr_ai.new_spacetime import get_time_engine
+                except ImportError:
+                    from new_spacetime import get_time_engine
+                s = compute_satellite_state(name, lat, lon,
+                                            when=get_time_engine().now_unix())
                 if s is None:
                     return ToolResult(False, f"未知卫星: {name}")
                 visible = s["elevation"] >= 0
