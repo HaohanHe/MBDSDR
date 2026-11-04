@@ -5807,7 +5807,9 @@ def _sdr_transmit_cw(args):
 
     rep = TxSession(backend).transmit(
         _cw_blocks(), freq_hz=freq, arm_manual=True, caps=caps,
-        regulatory=policy, duration_s=dur, chunk_samples=4096)
+        regulatory=policy, duration_s=dur, chunk_samples=4096,
+        rx_control=backend, rx_active=bool(getattr(backend, "rx_active", False)),
+        duplex=caps.duplex)
     if rep["state"] != TX_COMPLETED:
         return ToolResult(
             success=False,
@@ -5933,7 +5935,10 @@ def _sdr_transmit_iq(args):
             regulatory=policy,
             gain_db=args.get("gain_db"),
             bandwidth_hz=args.get("bandwidth_hz"),
-            duration_s=dur, chunk_samples=4096)
+            duration_s=dur, chunk_samples=4096,
+            rx_control=backend,
+            rx_active=bool(getattr(backend, "rx_active", False)),
+            duplex=caps.duplex)
         if rep["state"] != TX_COMPLETED:
             return ToolResult(
                 success=False,

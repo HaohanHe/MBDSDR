@@ -647,6 +647,8 @@ class TxSession:
         self._cancel_reason = "用户取消发射"
         self._gate_reason = ""
         self.stop_calls = 0
+        self._duplex_coord: Optional[TxRxCoordinator] = None
+        self._duplex_info: Optional[Dict[str, Any]] = None
 
     # ------------------------------------------------------------------
     def cancel(self, reason: str = "用户取消发射") -> None:
@@ -661,6 +663,7 @@ class TxSession:
             "sent_samples": int(self.sent_samples),
             "total_samples": int(self.total_samples),
             "gate": self.gate.snapshot(),
+            "duplex": dict(self._duplex_info) if self._duplex_info else None,
         }
 
     # ------------------------------------------------------------------
@@ -708,11 +711,23 @@ class TxSession:
                         else TX_GATE_REVOKED)
         return None
 
+    def _release_duplex(self) -> None:
+        if self._duplex_coord is None:
+            return
+        resume_s = self._duplex_coord.release()
+        info = dict(self._duplex_info or {})
+        info["resume_time_s"] = float(resume_s)
+        info["total_switch_time_s"] = float(
+            info.get("switch_time_s", 0.0) + resume_s)
+        self._duplex_info = info
+        self._duplex_coord = None
+
     def _abort(self, state: str, code: str, reason: str) -> Dict[str, Any]:
         self.state = TX_STOPPING
         self.reason_code = code
         self.reason = reason
         self._stop_backend()
+        self._release_duplex()
         self.state = state
         logger.warning("TxSession %s(%s): %s（已发 %d/%d 样本）",
                        state, code, reason, self.sent_samples, self.total_samples)
@@ -732,6 +747,9 @@ class TxSession:
         regulatory: Optional[RegulatoryPolicy] = None,
         duration_s: Optional[float] = None,
         chunk_samples: int = 4096,
+        rx_control: Any = None,
+        rx_active: bool = False,
+        duplex: Optional[str] = None,
     ) -> Dict[str, Any]:
         """执行一次受控发射，返回 :meth:`status` 同构的如实报告。"""
         decision = self.gate.authorize(arm_manual=arm_manual, token=tx_token)
@@ -763,6 +781,23 @@ class TxSession:
             self.reason_code = chk.code
             self.reason = chk.reason
             return self.status()
+
+        # 收发互斥：语义统一在这里，半双工暂停接收并如实报切换耗时。
+        duplex_mode = (duplex or caps.duplex or DUPLEX_UNKNOWN).lower()
+        coord = TxRxCoordinator()
+        dd = coord.acquire(
+            duplex=duplex_mode,
+            rx_active=bool(rx_active),
+            pause_rx=getattr(rx_control, "pause_rx", None),
+            resume_rx=getattr(rx_control, "resume_rx", None),
+        )
+        self._duplex_info = dd.to_dict()
+        if not dd.allowed:
+            self.state = TX_REJECTED
+            self.reason_code = dd.code
+            self.reason = dd.reason
+            return self.status()
+        self._duplex_coord = coord
 
         setter = getattr(self.backend, "set_frequency", None)
         if callable(setter):
@@ -797,6 +832,7 @@ class TxSession:
         self.state = TX_COMPLETED
         self.reason_code = "ok"
         self.reason = "发射完成"
+        self._release_duplex()
         return self.status()
 
     @staticmethod
@@ -819,5 +855,130 @@ def np_size(block: Any) -> int:
         return len(block)
     except TypeError:
         return 0
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 四、收发互斥：语义只在本模块实现，半双工切换时间实测上报
+# ═════════════════════════════════════════════════════════════════════════
+
+DUPLEX_FULL = "full"
+DUPLEX_HALF = "half"
+DUPLEX_UNKNOWN = "unknown"
+
+RX_IDLE = "rx_idle"
+RX_PAUSED = "rx_paused"
+RX_KEPT = "rx_kept"
+RX_CONFLICT = "rx_conflict"
+DUPLEX_CAPABILITY_UNKNOWN = "duplex_unknown"
+
+
+@dataclass
+class DuplexDecision:
+    """收发互斥判定：接收是暂停、保留、本就空闲，还是明确拒绝。"""
+
+    allowed: bool
+    code: str
+    reason: str
+    mode: str
+    switch_time_s: float = 0.0
+    basis: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "allowed": self.allowed,
+            "code": self.code,
+            "reason": self.reason,
+            "mode": self.mode,
+            "switch_time_s": float(self.switch_time_s),
+            "basis": self.basis,
+        }
+
+
+class TxRxCoordinator:
+    """统一收发互斥语义。
+
+    * 半双工 + 接收活跃 → 暂停接收；切换耗时实测后如实返回。
+    * 全双工 → 保留接收（不暂停）。
+    * 双工能力未知 + 接收活跃 → 明确拒绝发射（不假设可以边收边发）。
+    * 接收本就空闲 → 直接放行（``rx_idle``）。
+    暂停/恢复不可用或失败 → ``rx_conflict`` 明确报因，绝不静默丢弃接收。
+    """
+
+    def __init__(self, clock: Any = None) -> None:
+        self._clock = clock or time.monotonic
+        self._paused = False
+        self._resume_cb = None
+        self._decision: Optional[DuplexDecision] = None
+
+    def acquire(self, *, duplex: str, rx_active: bool,
+                pause_rx: Any = None, resume_rx: Any = None) -> DuplexDecision:
+        duplex = (duplex or DUPLEX_UNKNOWN).lower()
+        if not rx_active:
+            dd = DuplexDecision(True, RX_IDLE, "接收本就空闲，无需切换",
+                                RX_IDLE, 0.0, f"duplex={duplex}")
+        elif duplex == DUPLEX_FULL:
+            dd = DuplexDecision(True, RX_KEPT, "全双工：发射时保留接收",
+                                RX_KEPT, 0.0, "设备声明全双工（独立 RX/TX 通道）")
+        elif duplex == DUPLEX_HALF:
+            if not callable(pause_rx):
+                dd = DuplexDecision(
+                    False, RX_CONFLICT,
+                    "半双工设备正在接收，但接入层无法暂停接收——拒绝发射，"
+                    "不静默丢弃接收数据", RX_CONFLICT, 0.0, "duplex=half")
+            elif not callable(resume_rx):
+                dd = DuplexDecision(
+                    False, RX_CONFLICT,
+                    "半双工设备只能暂停接收、无法恢复——拒绝发射",
+                    RX_CONFLICT, 0.0, "duplex=half")
+            else:
+                t0 = self._clock()
+                try:
+                    ok = pause_rx()
+                except Exception as e:  # noqa: BLE001
+                    dd = DuplexDecision(False, RX_CONFLICT,
+                                        f"暂停接收失败，拒绝发射: {e}",
+                                        RX_CONFLICT, 0.0, "duplex=half")
+                    self._decision = dd
+                    return dd
+                dt = max(0.0, self._clock() - t0)
+                if ok is False or ok is None:
+                    dd = DuplexDecision(False, RX_CONFLICT,
+                                        "暂停接收返回失败，拒绝发射",
+                                        RX_CONFLICT, dt, "duplex=half")
+                else:
+                    self._paused = True
+                    self._resume_cb = resume_rx
+                    dd = DuplexDecision(
+                        True, RX_PAUSED,
+                        f"半双工：已暂停接收，切换耗时 {dt * 1e3:.1f} ms",
+                        RX_PAUSED, dt, "duplex=half")
+        else:
+            dd = DuplexDecision(
+                False, DUPLEX_CAPABILITY_UNKNOWN,
+                "设备双工能力未知且接收活跃——需用户确认，不能假设可边收边发",
+                DUPLEX_CAPABILITY_UNKNOWN, 0.0, f"duplex={duplex}")
+        self._decision = dd
+        return dd
+
+    def release(self) -> float:
+        """发射结束恢复接收；返回恢复耗时（秒），未暂停则为 0。"""
+        if not self._paused or not callable(self._resume_cb):
+            return 0.0
+        t0 = self._clock()
+        try:
+            self._resume_cb()
+        except Exception:  # noqa: BLE001
+            logger.warning("TxRxCoordinator: 恢复接收失败", exc_info=True)
+        dt = max(0.0, self._clock() - t0)
+        self._paused = False
+        self._resume_cb = None
+        return dt
+
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "decision": self._decision.to_dict() if self._decision else None,
+            "rx_paused": self._paused,
+        }
+
 
 

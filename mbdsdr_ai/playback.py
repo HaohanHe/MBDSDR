@@ -353,6 +353,9 @@ def transmit_iq_playback(
     regulatory: Any = None,
     cancel_event: Any = None,
     chunk_samples: int = 65536,
+    rx_control: Any = None,
+    rx_active: bool = False,
+    duplex: Optional[str] = None,
 ) -> Dict[str, Any]:
     """把录制 IQ 文件经 :class:`TxSession` 受控发射（回放发射路径）。
 
@@ -411,6 +414,9 @@ def transmit_iq_playback(
         regulatory=regulatory or policy_from_env(),
         duration_s=duration,
         chunk_samples=chunk_samples,
+        rx_control=rx_control or backend,
+        rx_active=rx_active,
+        duplex=duplex,
     )
     # 读到一半文件被删/损坏：read_samples 会返回空并落 deleted/failed，
     # 此时绝不能把"样本提前结束"报告成正常完成。
