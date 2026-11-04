@@ -308,6 +308,12 @@ def angular_separation_deg(az1_deg: float, alt1_deg: float,
 STAR_DAYLIGHT_SUN_ALT_DEG = -0.833
 
 
+# 银河图层：仓库内没有银河亮度/尘埃带数据 -> 按「无数据·不提供」处理
+# （不画装饰性光带当银河）。状态卡如实标注该图层缺失，接入所需见
+# docs/limitations-register.md L25/L28。
+GALAXY_LAYER_NOTE = "无数据·不提供"
+
+
 def stars_hidden_by_daylight(sun_alt_deg: Optional[float]) -> bool:
     """太阳在地平上方（按日落阈值）时恒星整层隐藏（绘制门与拾取门同一判据）。
 
@@ -1045,6 +1051,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._camera_btn.hide()
         # 摄像机锁定状态：目标星名（None=自由摄像机）+ 诚实退出通知
         self._camera_lock: Optional[str] = None
+        # 最近一次锁定失败的具体原因（站址不可信 / 数据不可用），供诚实提示
+        self._lock_denied_reason: Optional[str] = None
         self._camera_notice: str = ""
         self._camera_notice_until: float = 0.0
         # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
@@ -1176,6 +1184,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._unlock_camera("")
             return True
         if self._lock_target_azalt(name) is None:
+            why = self._lock_denied_reason
+            # 站址不可信时如实说原因（与过境预测同一守卫），不笼统报「数据不可用」
+            self._camera_notice = (
+                f"无法锁定：站址不可信（{why}），拒绝用该站址算卫星位置"
+                if why else f"无法锁定：{name} 轨道数据不可用")
+            self._camera_notice_until = time.time() + 3.0
+            self.update()
             return False
         self._camera_lock = str(name)
         self._sync_camera_btn()
@@ -1187,10 +1202,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if on:
             name = self._tune_sat_name or (
                 self._hovered_object.name if self._hovered_object else None)
-            if not name or not self.set_camera_lock(name):
-                # 无选中或目标不可解算：复位开关，不残留假状态
+            if not name:
+                # 无选中：复位开关，不残留假状态
                 self._camera_notice = "无法锁定：未选中卫星或轨道数据不可用"
                 self._camera_notice_until = time.time() + 3.0
+                self._camera_lock = None
+                self._sync_camera_btn()
+            elif not self.set_camera_lock(name):
+                # set_camera_lock 已按真实原因写入提示（站址不可信/轨道数据
+                # 不可用）；这里只复位开关，不覆盖成笼统文案。
                 self._camera_lock = None
                 self._sync_camera_btn()
         else:
@@ -1214,11 +1234,37 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._camera_btn.setChecked(locked)
             self._camera_btn.blockSignals(False)
 
+    def _station_trust_reason(self) -> Optional[str]:
+        """站址可信度（复用 mbdsdr_ai.station 的唯一守卫，不另立阈值）。
+
+        观测站未设置/0,0 占位/海上/无来源凭据 -> 返回原因字符串；
+        可信返回 None。摄像机锁定与过境预测共用同一判据（P11 红线）。
+        """
+        obs = self._observer
+        if obs is None:
+            return "观测站未设置"
+        try:
+            from mbdsdr_ai.station import StationFix, evaluate_station
+            ev = evaluate_station(StationFix(
+                obs["lat"], obs["lon"], obs.get("alt_m", 0.0),
+                source="user"))
+        except Exception as e:  # noqa: BLE001 - 守卫失败要留痕，不能默认可信
+            return f"站址校验失败（{type(e).__name__}: {e}）"
+        if ev["trusted"]:
+            return None
+        return "；".join(ev["reasons"]) or "站址不可信"
+
     def _lock_target_azalt(self, name: str):
         """目标星当前 az/el（与卫星绘制同一坐标链：TLE + sgp4 现算）。
 
-        返回 (az, el)；观测站未设置/TLE 缺失/解算失败返回 None（诚实）。
+        返回 (az, el)；站址不可信/TLE 缺失/解算失败返回 None（诚实）。
+        站址不可信时把具体原因写入 ``_lock_denied_reason``（拒绝用默认站址算）。
         """
+        self._lock_denied_reason = None
+        reason = self._station_trust_reason()
+        if reason is not None:
+            self._lock_denied_reason = reason
+            return None
         meta = self._sat_catalog.get(name)
         obs = self._observer
         if meta is None or obs is None:
@@ -1251,8 +1297,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         res = self._lock_target_azalt(self._camera_lock)
         if res is None:
-            self._unlock_camera(
-                f"摄像机已解锁：{self._camera_lock} 轨道数据失效")
+            why = self._lock_denied_reason
+            if why:
+                self._unlock_camera(
+                    f"摄像机已解锁：站址不可信（{why}），拒绝继续跟踪")
+            else:
+                self._unlock_camera(
+                    f"摄像机已解锁：{self._camera_lock} 轨道数据失效")
             return
         az, el = res
         if el < 0.0:
@@ -1857,7 +1908,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 换星：摄像机锁跟着选中走（Stellarium 语义：跟踪绑定选中对象）
         if self._camera_lock is not None and name != self._camera_lock:
             if not self.set_camera_lock(name):
-                self._unlock_camera("摄像机已解锁：新选中目标轨道数据不可用")
+                why = self._lock_denied_reason
+                self._unlock_camera(
+                    f"摄像机已解锁：站址不可信（{why}），拒绝跟踪新目标"
+                    if why else "摄像机已解锁：新选中目标轨道数据不可用")
         self._tune_sat_name = name
         self._tune_btn.show()
         self._track_btn.show()
@@ -2381,6 +2435,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 外形尺寸取星表视大小（角分→像素按投影采样），亮度取视星等。
     DSO_LABEL_PRIORITY = 1.5      # 座名(1.0)之后、星名(2.0+)之前
     DSO_MIN_SYMBOL_R_PX = 1.6     # 视大小 < 1.6px 时给小符号，否则不可辨
+
+    # 左下信息卡尺寸（绘制与测试的唯一事实源，避免测试写死像素值漂移）
+    INFO_CARD_W = 240
+    INFO_CARD_H = 186
 
     def _draw_dso(self, painter: QPainter):
         gs = self._ground_station()
@@ -4095,7 +4153,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """左下角信息卡片。"""
         painter.save()
         _t = tokens()
-        card_w, card_h = 240, 168
+        card_w, card_h = self.INFO_CARD_W, self.INFO_CARD_H
         card_x, card_y = 12, self.height() - card_h - 12
         bg = QColor(_t.COLORS["card_2"])
         bg.setAlpha(220)
@@ -4174,6 +4232,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         obs_txt = format_observer_chip(self._observer)
         painter.setPen(ink if obs_txt != "未设置" else dim)
         painter.drawText(card_x + 64, y, obs_txt)
+
+        # 图层诚实空态（复用状态卡既有状态位，不另起浮层）：
+        # 本视图没有银河亮度数据，如实说「无数据·不提供」，不画装饰性光带。
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "银河")
+        painter.setFont(self._gnss_label_font)
+        painter.setPen(dim)
+        painter.drawText(card_x + 52, y, GALAXY_LAYER_NOTE)
 
         y += 18
         painter.setFont(self._font)

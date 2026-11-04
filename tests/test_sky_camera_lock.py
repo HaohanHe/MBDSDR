@@ -117,6 +117,21 @@ class TestLockEngage:
         v.set_satellite_catalog(_catalog())
         assert v._observer is None
         assert v.set_camera_lock(ISS) is False
+        # 未设置/不可信站址必须给具体原因，不笼统说「轨道数据不可用」
+        assert "观测站" in v._camera_notice or "站址" in v._camera_notice
+
+    def test_lock_refuses_untrusted_station_places(self):
+        """0,0 占位站址不可信 -> 拒绝锁定并如实提示（与过境预测同一守卫）。"""
+        v = RFSkyView()
+        v.resize(700, 700)
+        v.set_observer(0.0, 0.0)
+        v.set_satellite_catalog(_catalog())
+        reason = v._station_trust_reason()
+        assert reason is not None and "null_island" in reason, reason
+        assert v.set_camera_lock(ISS) is False
+        assert v.camera_lock_target is None
+        assert "站址不可信" in v._camera_notice
+        assert "null_island" in v._camera_notice
 
     def test_lock_engages_on_real_chain(self):
         v = _new_view()
@@ -341,7 +356,31 @@ class TestTleTraceability:
         monkeypatch.setattr(sat_passes, "predict_passes",
                             lambda *a, **k: [fake_pass])
         ctrl = SDRController(backend=None, config_dir=str(tmp_path))
+        # 根因：此前用例没有同步 P11 站址可信守卫（controller.get_satellite_pass
+        # 在 source=none / 0,0 时直接拒绝），属「测试写死旧行为」，不是实现漏守卫。
+        # 本用例关心 TLE 字段透出，先显式给可信站址再断言。
+        ctrl.set_ground_station(LAT, LON, 0.0, source="user")
         out = ctrl.get_satellite_pass(25544)
         assert "error" not in out
         assert out["tle_epoch"].startswith("2026-")
         assert "builtin" in out["tle_source"]
+
+    def test_get_satellite_pass_refuses_untrusted_station(self, monkeypatch,
+                                                          tmp_path):
+        """站址不可信 → 拒绝算过境并如实说明；不许拿默认 0,0 站址冒充用户位置。"""
+        from mbdsdr_ai.core.controller import SDRController
+        from mbdsdr_ai import sat_passes
+
+        calls = []
+
+        def _spy(*a, **k):
+            calls.append(1)
+            return []
+
+        monkeypatch.setattr(sat_passes, "predict_passes", _spy)
+        ctrl = SDRController(backend=None, config_dir=str(tmp_path))
+        out = ctrl.get_satellite_pass(25544)
+        assert out.get("error") == "station_untrusted", out
+        assert out.get("reasons"), out          # 必须给出不可信原因
+        assert "set_ground_station" in out.get("suggestion", "")
+        assert calls == [], "站址不可信却仍调用了过境预测（拿默认站址算）"

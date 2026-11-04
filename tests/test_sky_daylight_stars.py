@@ -214,7 +214,8 @@ def _card_crop(v) -> QImage:
     finally:
         p.end()
     card_x = 12
-    card_y = v.height() - 168 - 12
+    # 卡片高度取实现常量（状态卡尺寸唯一事实源，避免测试写死像素值）
+    card_y = v.height() - RFSkyView.INFO_CARD_H - 12
     # 太阳高度行（第 3 行）右侧、避开左侧文案与数值的 x 区间
     return img.copy(card_x + 145, card_y + 40, 100, 22)
 

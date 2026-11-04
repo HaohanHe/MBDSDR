@@ -273,7 +273,44 @@ def test_faint_dso_beyond_naked_eye_limit_not_pickable():
 
 
 # --------------------------------------------------------------------------
-# 4. 标签进同一套避让队列
+# 4. 银河图层诚实空态（本视图确实没有该图层，状态卡必须说明）
+# --------------------------------------------------------------------------
+def _card_row_crop(v, dy: int, h: int) -> QImage:
+    img = QImage(v.width(), v.height(), QImage.Format_ARGB32)
+    img.fill(QColor(0, 0, 0))
+    p = QPainter(img)
+    try:
+        v._draw_info_overlay(p)
+    finally:
+        p.end()
+    card_y = v.height() - RFSkyView.INFO_CARD_H - 12
+    return img.copy(12 + 52, card_y + dy, 196, h)
+
+
+def _diff_pixels(a, b) -> int:
+    n = 0
+    for y in range(a.height()):
+        for x in range(a.width()):
+            if a.pixelColor(x, y) != b.pixelColor(x, y):
+                n += 1
+    return n
+
+
+def test_status_card_states_no_galaxy_layer(monkeypatch):
+    """状态卡必须明示「无数据·不提供」；不画装饰性银河带冒充图层。"""
+    v = _new_view()
+    try:
+        shown = _card_row_crop(v, 118, 16)
+        # 反证：把该行文案清空后同一区域必须变（证明绘制路径真在写这句）
+        monkeypatch.setattr(rf_sky_view, "GALAXY_LAYER_NOTE", "")
+        blank = _card_row_crop(v, 118, 16)
+    finally:
+        v.close()
+    assert _diff_pixels(shown, blank) > 20, "状态卡没有写「本视图无银河图层」的说明"
+
+
+# --------------------------------------------------------------------------
+# 5. 标签进同一套避让队列
 # --------------------------------------------------------------------------
 def test_dso_labels_queue_at_priority_between_constellation_and_star():
     v = _new_view()
