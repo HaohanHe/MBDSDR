@@ -180,3 +180,105 @@ class TestUiFlowGuards:
         panel._on_submit()
         assert len(calls) == 1, (
             f"S10：一次提交派发了 {len(calls)} 次 AI 调用（应恰好 1 次）")
+
+    # ------------------------------------------------------------ 全天模式入口
+    def test_all_sky_entry_mirrors_view_state(self, window):
+        """全天模式按钮/菜单必须双向跟随天空视图的真实状态，不自己记布尔。"""
+        w = self._window(window)
+        sv = w.sky_view
+        sv.set_all_sky_mode(False)
+        btn = getattr(w, "_all_sky_btn", None)
+        act = getattr(w, "_all_sky_action", None)
+        assert btn is not None, "天空页缺少全天模式切换按钮"
+        assert act is not None, "视图菜单缺少「全天模式（160°）」"
+        assert btn.isCheckable() and act.isCheckable()
+        assert act.shortcut().toString() == "A", "菜单项应提示与视图内一致的 A 键"
+        assert "已进入" not in btn.text()
+
+        # 视图状态 → 按钮 / 菜单
+        sv.set_all_sky_mode(True)
+        assert sv.all_sky_active
+        assert btn.isChecked() is True and "已进入" in btn.text()
+        assert act.isChecked() is True
+
+        # 按钮 → 视图状态（再次点击退出全天）
+        btn.click()
+        assert sv.all_sky_active is False
+        assert "已进入" not in btn.text()
+        assert act.isChecked() is False
+
+        # 菜单 → 视图状态
+        act.trigger()
+        assert sv.all_sky_active is True
+        act.trigger()
+        assert sv.all_sky_active is False
+
+        # 主视场 120° 不受影响：进出后恢复原值
+        assert abs(float(sv.view_state.fov_deg) - 120.0) < 0.5
+        assert abs(float(sv.ALL_SKY_FOV_DEG) - 160.0) < 0.5
+
+    def test_escape_layers_all_sky_then_sky_mode(self, window):
+        """Esc 分层：先退全天（仍在天空模式），再退天空模式。"""
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+
+        w = self._window(window)
+        sv = w.sky_view
+        sv.set_all_sky_mode(False)
+        w._enter_planetarium()
+        assert w._app_mode == "planetarium"
+        sv.set_all_sky_mode(True)
+
+        def esc():
+            return QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier)
+
+        # 视图自身处理第一层（分焦点在天空图上）
+        sv.keyPressEvent(esc())
+        assert sv.all_sky_active is False, "Esc 第一层应先退出全天"
+        assert w._app_mode == "planetarium", "第一层 Esc 不得退出天空模式"
+
+        # 窗口层再按一次：退出天空模式
+        w.keyPressEvent(esc())
+        assert w._app_mode == "ide", "第二层 Esc 应退出天空模式"
+
+    def test_escape_window_layer_keeps_order_without_view_focus(self, window):
+        """焦点不在天空图时，窗口层 Esc 也必须先退全天再退天空模式。"""
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QKeyEvent
+
+        w = self._window(window)
+        sv = w.sky_view
+        sv.set_all_sky_mode(False)
+        w._enter_planetarium()
+        sv.set_all_sky_mode(True)
+
+        w.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+        assert sv.all_sky_active is False, "窗口层 Esc 跳过了全天层"
+        assert w._app_mode == "planetarium"
+
+        w.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+        assert w._app_mode == "ide"
+
+
+def test_about_dialog_contains_dso_attribution(monkeypatch):
+    """许可义务：关于框必须保留 OpenNGC / CC BY-SA 4.0 署名，且文案不被截断。"""
+    import main_window as mw
+
+    captured = {}
+
+    def fake_about(parent, title, text):
+        captured["title"] = title
+        captured["text"] = text
+
+    monkeypatch.setattr(mw.QMessageBox, "about", fake_about)
+    mw.MainWindow._show_about(None)
+
+    text = captured.get("text", "")
+    assert captured.get("title") == "关于 MBDSDR"
+    assert "深空数据来自 OpenNGC（CC BY-SA 4.0）；中文名来自 Wikidata（CC0）。" \
+        "许可说明见 docs/dso-catalog.md。" in text, "署名文案不完整或被截断"
+    assert "OpenNGC" in text and "CC BY-SA 4.0" in text
+    assert "github.com/mattiaverga/OpenNGC" in text
+    assert "creativecommons.org/licenses/by-sa/4.0/" in text
+    # 不写死版本号：正文里不应出现 "版本 vX.Y" 之类硬编码
+    assert "v1." not in text and "version" not in text.lower()

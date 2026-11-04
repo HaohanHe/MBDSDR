@@ -722,6 +722,19 @@ class MainWindow(QMainWindow):
         reset_pos_action.triggered.connect(self._on_reset_window_position)
         view_menu.addAction(reset_pos_action)
 
+        # 全天模式（天空视图自带独立 ViewState + 立体投影 160°）。校验态与视图
+        # 状态双向同步；A 键作用域限定在天空视图控件内（与视图内 A 键同源），
+        # 避免在输入框里按 A 也切图。
+        all_sky_action = QAction("全天模式（160°）", self)
+        all_sky_action.setCheckable(True)
+        all_sky_action.setShortcut(QKeySequence("A"))
+        all_sky_action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+        all_sky_action.setToolTip(
+            "天空视图立体投影全天模式（视场 160°）；视图内按 A 切换，Esc 先退全天")
+        all_sky_action.triggered.connect(self._on_all_sky_action_triggered)
+        view_menu.addAction(all_sky_action)
+        self._all_sky_action = all_sky_action
+
         # 星象仪模式：顶层第二形态（全屏天空）。checkable 与当前形态同步。
         planetarium_action = QAction("星象仪模式", self)
         planetarium_action.setShortcut(QKeySequence(_key("view.planetarium")))
@@ -1010,6 +1023,8 @@ class MainWindow(QMainWindow):
             self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
         left_tab.addTab(self.sky_view, "天空模式")
         left_tab.tabBar().setTabData(left_tab.count() - 1, "rf_sky")
+        # 天空页左下角（那一排 sky 按钮上方）的全天模式开关
+        self._build_all_sky_toggle()
 
         # Tab: 卫星闭环自动跟踪
         self.sat_track_panel = SatTrackPanel()
@@ -1888,6 +1903,9 @@ class MainWindow(QMainWindow):
         if obj is getattr(self, "_planetarium_sky_slot", None) \
                 and event.type() == QEvent.Resize:
             self._position_planetarium_ai_card()
+        if obj is getattr(self, "sky_view", None) \
+                and event.type() == QEvent.Resize:
+            self._position_all_sky_btn()
         if event.type() == QEvent.ShortcutOverride:
             if self._handle_shortcut_override(event):
                 return True
@@ -5871,6 +5889,118 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"云台跟随已开启（{gc.status.backend_info}）", 4000)
 
+    # ------------------------------------------------------------------
+    # 全天模式（天空视图独立 ViewState / 立体投影 160°）
+    # ------------------------------------------------------------------
+    def _build_all_sky_toggle(self) -> None:
+        """在天空页左下角 sky 按钮排上方放「全天」开关。
+
+        状态一律从 sky_view 读（all_sky_active / all_sky_mode_changed），
+        按钮不自己留一份布尔；A 键的动作也挂到天空视图作用域内，与视图内
+        按 A 完全同源。
+        """
+        sv = getattr(self, "sky_view", None)
+        if sv is None or not hasattr(sv, "set_all_sky_mode"):
+            return
+        btn = QPushButton("🌐 全天 160°", sv)
+        btn.setCheckable(True)
+        btn.setToolTip(
+            "全天模式（立体投影，视场 160°）；视图内按 A 同效，Esc 先退全天")
+        t = tokens()
+        btn.setStyleSheet(
+            "QPushButton { background: " + t.COLORS["card_2"] + "; color: "
+            + t.text("primary") + ";"
+            " border:none; padding:4px 10px; border-radius:3px; }"
+            "QPushButton:hover { background: " + t.COLORS["card_hover"] + "; }"
+            "QPushButton:checked { background: " + t.COLORS["accent"]
+            + "; color: " + t.COLORS["bg_dark"] + "; }")
+        btn.clicked.connect(self._on_all_sky_btn_clicked)
+        self._all_sky_btn = btn
+        if hasattr(sv, "all_sky_mode_changed"):
+            sv.all_sky_mode_changed.connect(self._on_all_sky_mode_changed)
+        act = getattr(self, "_all_sky_action", None)
+        if act is not None:
+            # WidgetWithChildrenShortcut + 挂到天空视图：只在天空图上按 A 生效
+            sv.addAction(act)
+        self._position_all_sky_btn()
+        self._sync_all_sky_ui(bool(getattr(sv, "all_sky_active", False)))
+
+    def _position_all_sky_btn(self) -> None:
+        """贴在那排 sky 按钮正上方（左下角），随天空视图尺寸变化。"""
+        btn = getattr(self, "_all_sky_btn", None)
+        sv = getattr(self, "sky_view", None)
+        if btn is None or sv is None:
+            return
+        try:
+            h = 26
+            w = max(btn.sizeHint().width(), 118)
+            y = max(12, sv.height() - 26 - 12 - h - 6)
+            btn.setGeometry(12, y, w, h)
+            btn.raise_()
+        except Exception:
+            pass
+
+    def _sync_all_sky_ui(self, active: bool) -> None:
+        """视图状态 → 按钮/菜单（单向真相源，禁回环）。"""
+        btn = getattr(self, "_all_sky_btn", None)
+        if btn is not None:
+            btn.blockSignals(True)
+            btn.setChecked(bool(active))
+            btn.setText("🌐 全天 160°（已进入）" if active
+                        else "🌐 全天 160°")
+            btn.blockSignals(False)
+            self._position_all_sky_btn()
+        act = getattr(self, "_all_sky_action", None)
+        if act is not None:
+            act.blockSignals(True)
+            act.setChecked(bool(active))
+            act.blockSignals(False)
+
+    @Slot(bool)
+    def _on_all_sky_mode_changed(self, active: bool) -> None:
+        self._sync_all_sky_ui(active)
+
+    def _on_all_sky_btn_clicked(self, checked: bool) -> None:
+        sv = getattr(self, "sky_view", None)
+        if sv is not None:
+            sv.set_all_sky_mode(bool(checked))
+
+    def _on_all_sky_action_triggered(self, checked: bool) -> None:
+        sv = getattr(self, "sky_view", None)
+        if sv is None:
+            return
+        if checked and getattr(self, "_app_mode", "ide") != "planetarium":
+            # 从菜单进入时把天空页带到前台，否则状态改了却看不见效果
+            try:
+                idx = self.left_tab.indexOf(sv)
+                if idx >= 0:
+                    self.left_tab.setCurrentIndex(idx)
+            except Exception:
+                pass
+        sv.set_all_sky_mode(bool(checked))
+
+    def _handle_escape_layer(self) -> bool:
+        """Esc 分层：先退全天（仍在天空模式），再退天空模式。"""
+        sv = getattr(self, "sky_view", None)
+        if sv is not None and bool(getattr(sv, "all_sky_active", False)):
+            sv.set_all_sky_mode(False)
+            self.statusBar().showMessage(
+                "已退出全天模式（Esc 再按一次退出天空模式）", 3000)
+            return True
+        if getattr(self, "_app_mode", "ide") == "planetarium":
+            self._exit_planetarium()
+            self.statusBar().showMessage("已退出天空模式", 3000)
+            return True
+        return False
+
+    def keyPressEvent(self, event):  # noqa: N802 (Qt 命名)
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            if self._handle_escape_layer():
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
 
     def _on_toolbar_mode_selected(self, mode: str):
         """工具栏模式下拉 → 走控制面板既有信号链（真实切解调 + VFO 带宽）。
@@ -6291,6 +6421,13 @@ class MainWindow(QMainWindow):
             "<p>对标 GNU Radio / SDR++ / SatDump 等开源项目能力，独立实现（未包含其源代码）</p>"
             "<p>支持 MCP 工具调用，任意 AI IDE 可直接控制硬件</p>"
             "<p>天空模式视图借鉴 Stellarium 设计理念</p>"
+            "<hr>"
+            "<p>深空数据来自 OpenNGC（CC BY-SA 4.0）；中文名来自 Wikidata（CC0）。"
+            "许可说明见 docs/dso-catalog.md。</p>"
+            "<p>OpenNGC: <a href=\"https://github.com/mattiaverga/OpenNGC\">"
+            "github.com/mattiaverga/OpenNGC</a><br>"
+            "CC BY-SA 4.0: <a href=\"https://creativecommons.org/licenses/by-sa/4.0/\">"
+            "creativecommons.org/licenses/by-sa/4.0/</a></p>"
         )
 
     # ========================================================================
