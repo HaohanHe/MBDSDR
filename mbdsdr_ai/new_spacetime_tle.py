@@ -23,13 +23,15 @@ from datetime import datetime, timezone, timedelta
 CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/gp.php"
 
 # 默认关注卫星列表 (名称, NORAD CATNR)
+# 编号校正（2026-11）：METEOR-M 2 = 40069（44016 是 ATLAS 5 CENTAUR DEB），
+# FENGYUN 3D = 43010（54234 是 NOAA 21/JPSS-2）。
 DEFAULT_SATELLITES: List[Tuple[str, int]] = [
     ("ISS (ZARYA)", 25544),
     ("NOAA 19", 33591),
     ("NOAA 18", 28654),
     ("NOAA 15", 25338),
-    ("METEOR M2", 44016),
-    ("FENGYUN 3D", 54234),
+    ("METEOR M2", 40069),
+    ("FENGYUN 3D", 43010),
 ]
 
 # 缓存有效期：24 小时

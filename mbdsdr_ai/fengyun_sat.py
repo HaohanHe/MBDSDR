@@ -739,8 +739,9 @@ def decode_fy3_hrpt_bits(soft_bits: np.ndarray, img_width: int,
 # 复用 mbdsdr_ai/orbit.py 的 SGP4 坐标链与光速常数
 # ============================================================================
 
-#: FY-3D NORAD CATNR（orbit.py BUILTIN_SATS: "FENGYUN 3D"=54234）
-FY3D_CATNR = 54234
+#: FY-3D NORAD CATNR（orbit.py BUILTIN_SATS: "FENGYUN 3D"=43010）
+#: 54234 实为 NOAA 21 (JPSS-2)，不是 FY-3D——编号必须与对象名一致。
+FY3D_CATNR = 43010
 #: 836 km 太阳同步轨道标称高度（题目给定）
 FY3_ORBIT_ALT_KM = 836.0
 

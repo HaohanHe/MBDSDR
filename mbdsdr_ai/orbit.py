@@ -62,13 +62,17 @@ class TLEUnavailableError(RuntimeError):
 
 
 # 内置卫星 -> NORAD CATNR（真实编号，TLE 在线拉取）
+# 编号必须与真实对象一致（2026-11 校正）：
+#   METEOR-M 2 = 40069（44016 实为 ATLAS 5 CENTAUR DEB 残骸）
+#   FENGYUN 3D = 43010（54234 实为 NOAA 21/JPSS-2）
+# 三方校验见 tle_integrity.scan_catalog；改动前先跑全目录扫描。
 BUILTIN_SATS: Dict[str, int] = {
     "NOAA 15": 25338,
     "NOAA 18": 28654,
     "NOAA 19": 33591,
     "ISS (ZARYA)": 25544,
-    "METEOR M2": 44016,
-    "FENGYUN 3D": 54234,
+    "METEOR M2": 40069,
+    "FENGYUN 3D": 43010,
 }
 
 _TLE_CACHE: Dict[str, Tuple[float, Tuple[str, str]]] = {}
