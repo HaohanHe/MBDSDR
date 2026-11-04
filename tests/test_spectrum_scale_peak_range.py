@@ -1,0 +1,357 @@
+# SPDX-License-Identifier: MIT
+"""
+频谱侧三项的守卫 + 反证
+========================
+
+  1. 频轴刻度 1/2/5×10ⁿ 阶梯 + 按量程自动单位（kHz/MHz/GHz）；
+     反证：旧的“等距 5 刻度、固定 MHz”在窄谱面压字 / 在窄 span 上
+     给出非阶梯值且没有单位。
+  2. 峰值检测双通道（窄峰 + 平滑宽峰，合并去重）；
+     反证：旧的单通道局部极大把一条带内起伏的宽带信号拆成 ≥5 个点。
+  3. dB 轴按住拖动改量程，读数跟手，且与两根滑杆共享唯一状态源；
+     反证：旧路径只写 state 不写滑杆（两套量程值会不一致）。
+
+全部 offscreen，无硬件 / 无声卡；手感用几何断言 + 离屏截图，不靠肉眼。
+"""
+import math
+import os
+import sys
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MBDSDR_NO_HW", "1")
+os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+
+import numpy as np  # noqa: E402
+import pytest  # noqa: E402
+
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt  # noqa: E402
+from PySide6.QtGui import (  # noqa: E402
+    QColor, QFont, QFontMetricsF, QImage, QMouseEvent,
+)
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def qapp():
+    app = QApplication.instance() or QApplication(sys.argv)
+    yield app
+
+
+# ---------------------------------------------------------------------------
+# 文本几何采集（与 test_ui_layout_locks.py 同一套口径）
+# ---------------------------------------------------------------------------
+class _RecordingPainter:
+    def __init__(self):
+        self._font = QFont()
+        self._fm = QFontMetricsF(self._font)
+        self.texts = []
+
+    def setPen(self, *_a, **_k):
+        pass
+
+    def setBrush(self, *_a, **_k):
+        pass
+
+    def setFont(self, font):
+        self._font = font
+        self._fm = QFontMetricsF(font)
+
+    def fontMetrics(self):
+        return self._fm
+
+    def drawText(self, *args):
+        if len(args) == 2:
+            pt, text = args
+            self.texts.append((float(pt.x()), float(pt.y()), str(text), self._fm))
+
+
+def _text_rects(rec):
+    out = []
+    for x, y, text, fm in rec.texts:
+        w = fm.horizontalAdvance(text)
+        out.append((x, x + w, y - fm.ascent(), y + fm.descent(), text))
+    return out
+
+
+def _overlaps(a, b):
+    return a[0] < b[1] and a[1] > b[0] and a[2] < b[3] and a[3] > b[2]
+
+
+def _font8():
+    f = QFont()
+    f.setPointSize(8)
+    return QFontMetricsF(f)
+
+
+# ---------------------------------------------------------------------------
+# 1. 频轴刻度
+# ---------------------------------------------------------------------------
+def _legacy_freq_labels(center_hz, span_hz, n=5):
+    """旧实现：固定等距 n 刻度、固定 MHz、2 位小数。"""
+    return [f"{center_hz / 1e6 - span_hz / 2e6 + span_hz / 1e6 * i / (n - 1):.2f}"
+            for i in range(n)]
+
+
+def test_counterproof_legacy_freq_scale_presses_text_on_narrow_plot():
+    """窄谱面（120px）旧 5 等距刻度必然互相压字，几何判定当场红。"""
+    fm = _font8()
+    labels = _legacy_freq_labels(100e6, 2.048e6, 5)
+    rects = []
+    for i, s in enumerate(labels):
+        x = 120.0 * i / 4.0
+        w = fm.horizontalAdvance(s)
+        rects.append((x - w / 2, x + w / 2, -fm.ascent(), fm.descent(), s))
+    assert any(_overlaps(a, b) for i, a in enumerate(rects)
+               for b in rects[i + 1:]), "旧刻度在 120px 窄面上居然没压字？"
+
+
+def test_new_freq_scale_never_overlaps_or_clips(qapp):
+    import spectrum_widget as sw
+    fm = _font8()
+    for width, span, center in ((120.0, 2.048e6, 100e6),
+                                (220.0, 500e3, 100e6),
+                                (345.0, 48e3, 100e6)):
+        rect = QRectF(0, 0, width, 160)
+        rec = _RecordingPainter()
+        sw._draw_freq_scale(rec, rect, center, span, QColor("white"))
+        rects = _text_rects(rec)
+        # 刻度标签 + 右端一个自动单位
+        assert 3 <= len(rects) <= 6, f"width={width} 文本数 {len(rects)}"
+        assert any(r[4] in ("kHz", "MHz", "GHz") for r in rects), \
+            f"width={width} 没有自动单位"
+        for i, a in enumerate(rects):
+            for b in rects[i + 1:]:
+                assert not _overlaps(a, b), f"width={width} 压字 {a[4]}/{b[4]}"
+            assert a[0] >= rect.left() - 0.5 and a[1] <= rect.right() + 0.5, \
+                f"width={width} 刻度越界 {a[4]}"
+
+
+def test_freq_ticks_use_nice_ladder_and_auto_unit():
+    import spectrum_widget as sw
+    fm = _font8()
+    cases = (
+        (100e6, 48e3, "kHz"),
+        (100e6, 500e3, "kHz"),
+        (100e6, 2.048e6, "MHz"),
+        (100e6, 20e6, "MHz"),
+        (1e9, 1e9, "GHz"),
+    )
+    for center, span, unit in cases:
+        _step, vals, labels, uname = sw._freq_scale_ticks(
+            center, span, 345.0, fm.horizontalAdvance, reserve_px=40.0)
+        assert uname == unit, f"span={span} 单位应为 {unit}，实际 {uname}"
+        mang = _step / 10 ** math.floor(math.log10(_step))
+        assert mang in (1.0, 2.0, 5.0), f"步长不是 1/2/5：{_step}"
+        for v in vals:                       # 刻度必须落在阶梯网格上
+            assert abs(v / _step - round(v / _step)) < 1e-6
+
+
+def test_counterproof_legacy_freq_has_no_auto_unit():
+    labels = _legacy_freq_labels(100e6, 48e3, 5)
+    assert not any(s.endswith(("kHz", "MHz", "GHz")) for s in labels)
+    import spectrum_widget as sw
+    assert sw._freq_unit(48e3)[1] == "kHz"      # 新实现按量程给 kHz
+    values = [float(s) for s in labels]
+    diffs = [b - a for a, b in zip(values, values[1:])]
+    # 旧步长 12 kHz（= span/4）不在 1/2/5 阶梯上；新实现要求 m ∈ {1,2,5}。
+    assert any(d / 10 ** math.floor(math.log10(d)) not in (1.0, 2.0, 5.0)
+               for d in diffs), "旧刻度步长居然全落在 1/2/5 阶梯上？"
+
+
+# ---------------------------------------------------------------------------
+# 2. 双通道峰检测
+# ---------------------------------------------------------------------------
+def _legacy_peaks(s, rel_threshold_db=6.0, max_peaks=8):
+    """旧实现：仅原始谱严格局部极大。"""
+    finite = np.isfinite(s)
+    ss = s[finite]
+    if ss.size < 3:
+        return []
+    floor = float(np.median(ss))
+    thresh = floor + rel_threshold_db
+    left = np.empty_like(s)
+    right = np.empty_like(s)
+    left[0] = s[0]
+    left[1:] = s[:-1]
+    right[-1] = s[-1]
+    right[:-1] = s[1:]
+    idxs = np.nonzero(finite & (s >= left) & (s > right) & (s >= thresh))[0]
+    peaks = sorted([(int(i), float(s[i])) for i in idxs],
+                   key=lambda q: q[1], reverse=True)
+    return peaks[:max_peaks]
+
+
+def _wideband_with_ripple(n=512):
+    _x = np.arange(n)
+    bump = 20.0 * np.exp(-0.5 * ((_x - 256) / 18.0) ** 2)
+    ripple = 2.0 * np.sin(2 * np.pi * (_x - 256) / 4.0) * (bump > 4.0)
+    return np.full(n, -100.0) + bump + ripple
+
+
+def test_counterproof_legacy_splits_wideband_signal():
+    s = _wideband_with_ripple()
+    legacy = _legacy_peaks(s)
+    assert len(legacy) >= 5, f"旧实现没拆点：{len(legacy)}"
+    assert max(i for i, _ in legacy) - min(i for i, _ in legacy) > 10, \
+        "旧实现拆出的点没有铺开（反证场景不成立）"
+
+
+def test_new_dual_channel_merges_wideband_to_one_peak(qapp):
+    from spectrum_widget import SpectrumDataGenerator, _detect_peak_bins
+    s = _wideband_with_ripple()
+    bins = _detect_peak_bins(s, 6.0)
+    assert len(bins) == 1, f"宽带信号被拆成 {len(bins)} 个峰（应合并为 1）"
+    assert abs(bins[0] - 256) <= 18, f"合并后的峰位偏了：{bins[0]}"
+
+    gen = SpectrumDataGenerator(num_bins=512)
+    gen.spectrum = s.astype(np.float32)
+    gen._has_real_data = True
+    gen.wf_rows_written = 10          # 让节流缓存失效
+    peaks = gen.find_peaks(6.0)
+    assert len(peaks) == 1
+    assert abs(peaks[0][1] - (float(s.max())) ) < 3.0
+
+
+def test_new_dual_channel_keeps_wide_peak_without_ripple(qapp):
+    from spectrum_widget import _detect_peak_bins
+    n = 512
+    x = np.arange(n)
+    s = np.full(n, -100.0) + 18.0 * np.exp(-0.5 * ((x - 200) / 22.0) ** 2)
+    bins = _detect_peak_bins(s, 6.0)
+    assert len(bins) == 1
+    assert abs(bins[0] - 200) <= 22
+
+
+def test_new_dual_channel_keeps_narrow_spike(qapp):
+    from spectrum_widget import _detect_peak_bins
+    n = 512
+    s = np.full(n, -100.0)
+    s[300] = -65.0                  # 35 dB 单 bin 窄峰
+    bins = _detect_peak_bins(s, 6.0)
+    assert len(bins) == 1, f"窄单音被平滑吞掉：{bins}"
+    assert abs(bins[0] - 300) <= 2
+
+
+def test_new_dual_channel_keeps_two_far_apart_carriers(qapp):
+    from spectrum_widget import _detect_peak_bins
+    n = 512
+    s = np.full(n, -100.0)
+    s[120] = s[400] = -80.0
+    bins = _detect_peak_bins(s, 6.0)
+    assert len(bins) == 2, f"两个远离的载波被误合并：{bins}"
+
+
+# ---------------------------------------------------------------------------
+# 3. dB 量程拖动 + 滑杆共享状态源
+# ---------------------------------------------------------------------------
+def _panel(qapp, width=800, height=360):
+    from spectrum_widget import SpectrumPanel
+    panel = SpectrumPanel()
+    panel.resize(width, height)
+    panel._plot.resize(width, height // 2)
+    panel.show()
+    qapp.processEvents()
+    return panel
+
+
+def _mouse(typ, x, y, button=Qt.LeftButton, buttons=Qt.LeftButton):
+    pos = QPointF(float(x), float(y))
+    glob = QPointF(float(x), float(y))
+    return QMouseEvent(typ, pos, pos, glob, button, buttons, Qt.NoModifier)
+
+
+def _assert_single_source(panel):
+    lo, hi = panel.db_range()
+    assert panel._db_min_slider.value() == int(lo), \
+        f"状态 {lo} 与 Min 滑杆 {panel._db_min_slider.value()} 不一致"
+    assert panel._db_max_slider.value() == int(hi), \
+        f"状态 {hi} 与 Max 滑杆 {panel._db_max_slider.value()} 不一致"
+
+
+def _img_arr(widget):
+    img = widget.grab().toImage().convertToFormat(QImage.Format.Format_RGB32)
+    ptr = img.constBits()
+    arr = np.frombuffer(ptr, dtype=np.uint8).reshape(
+        img.height(), img.bytesPerLine())
+    return arr.copy()
+
+
+def test_counterproof_legacy_state_only_write_diverges(qapp):
+    """旧路径只写 state（拖动不碰滑杆）→ 两套值当场不一致。"""
+    panel = _panel(qapp)
+    before_slider = panel._db_min_slider.value()
+    panel._state.db_min = float(before_slider - 20)   # 模拟旧实现：只写 state
+    assert panel._db_min_slider.value() != int(panel._state.db_min), \
+        "旧的两套值竟然同步了？反证不成立"
+    panel.apply_db_range(-100.0, -20.0)                # 唯一状态源恢复正常
+    _assert_single_source(panel)
+
+
+def test_db_axis_drag_updates_readout_and_shared_sliders(qapp):
+    import spectrum_widget as sw
+    panel = _panel(qapp)
+    plot = panel._plot
+    _assert_single_source(panel)                       # 初始同源
+
+    plot.mousePressEvent(_mouse(QEvent.MouseButtonPress, 10, 120))
+    assert panel._state.db_drag_active is True
+    assert plot._db_drag_active is True
+
+    plot.mouseMoveEvent(_mouse(QEvent.MouseMove, 10, 80))
+    _assert_single_source(panel)                       # 拖动后仍同源
+    lo1, hi1 = panel.db_range()
+    assert hi1 - lo1 == pytest.approx(80.0, abs=1.5)   # 跨度保持
+
+    # 读数跟手：同一拖拽位置画出的文本与当前状态一致
+    rect = QRectF(0, 0, plot.width(), plot.height() - sw._SPEC_BOTTOM_PAD)
+    rec = _RecordingPainter()
+    sw._draw_db_scale(rec, rect, panel._state, QColor("white"))
+    readout = [t[2] for t in rec.texts if t[2].endswith("dB")]
+    assert readout, "拖动时没有量程读数"
+    assert readout[0] == f"{lo1:.0f} … {hi1:.0f} dB"
+    for r in _text_rects(rec):
+        assert r[0] >= rect.left() - 0.5 and r[1] <= rect.right() + 0.5
+
+    img1 = _img_arr(plot)                              # 离屏截图：拖动中
+    plot.mouseMoveEvent(_mouse(QEvent.MouseMove, 10, 240))
+    _assert_single_source(panel)
+    lo2, hi2 = panel.db_range()
+    assert (lo2, hi2) != (lo1, hi1), "拖动没有改变量程"
+    img2 = _img_arr(plot)
+    assert img1.shape == img2.shape and np.any(img1 != img2), \
+        "两次拖动位置的离屏截图完全相同（读数没跟手）"
+
+    plot.mouseReleaseEvent(_mouse(QEvent.MouseButtonRelease, 10, 240,
+                                  buttons=Qt.NoButton))
+    assert panel._state.db_drag_active is False
+    _assert_single_source(panel)
+
+
+def test_slider_and_apply_share_same_range(qapp):
+    panel = _panel(qapp)
+    panel._db_min_slider.setValue(-70)                 # 滑杆 → 唯一状态源
+    assert panel.db_range()[0] == -70.0
+    panel.apply_db_range(-90.0, -25.0)                 # 外部/拖动 → 滑杆
+    assert panel._db_min_slider.value() == -90
+    assert panel._db_max_slider.value() == -25
+    _assert_single_source(panel)
+
+
+def test_db_drag_clamps_to_axis_bounds(qapp):
+    panel = _panel(qapp)
+    plot = panel._plot
+    plot.mousePressEvent(_mouse(QEvent.MouseButtonPress, 10, 180))
+    plot.mouseMoveEvent(_mouse(QEvent.MouseMove, 10, 10_000))   # 向上狂拖
+    lo, hi = panel.db_range()
+    assert hi <= 0.0 and lo >= -160.0
+    assert hi - lo == pytest.approx(80.0, abs=1.5)
+    plot.mouseMoveEvent(_mouse(QEvent.MouseMove, 10, -10_000))  # 向下狂拖
+    lo, hi = panel.db_range()
+    assert hi <= 0.0 and lo >= -160.0
+    _assert_single_source(panel)
+    plot.mouseReleaseEvent(_mouse(QEvent.MouseButtonRelease, 10, -10_000,
+                                  buttons=Qt.NoButton))

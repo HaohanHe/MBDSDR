@@ -268,9 +268,14 @@ class TestSpectrumLabelsDoNotCollide:
         rec = _RecordingPainter()
         sw._draw_freq_scale(rec, rect, 100e6, 2.048e6, QColor("white"))
         freq_rects = _text_rects(rec)
+        # 轴右端只画一次的自动单位（kHz/MHz/GHz）不计入刻度数，
+        # 但同样纳入压字/越界检查（只增强，不放宽）。
+        units = {"kHz", "MHz", "GHz"}
+        tick_rects = [r for r in freq_rects if r[4] not in units]
+        assert any(r[4] in units for r in freq_rects), "频轴缺少自动单位"
         # 刻度数自适应：窄谱面可降到 2~4 个，宽谱面保持 5 个
-        assert 2 <= len(freq_rects) <= 5, \
-            f"频轴刻度数量异常：{len(freq_rects)}"
+        assert 2 <= len(tick_rects) <= 5, \
+            f"频轴刻度数量异常：{len(tick_rects)}"
         _assert_no_overlap(freq_rects, "频轴刻度")
         for r in freq_rects:
             assert r[0] >= rect.left() - 0.5, f"刻度 {r[4]} 左越界 {r[0]:.1f}"

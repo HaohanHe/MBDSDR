@@ -11,6 +11,7 @@ MBDSDR 频谱显示组件
 **不绘制任何谱线、不生成高斯峰、不使用 np.random 造假谱**。
 """
 
+import math
 import numpy as np
 import time
 from typing import Optional, List, Tuple, Dict
@@ -436,10 +437,14 @@ class SpectrumDataGenerator:
 
     def find_peaks(self, rel_threshold_db: float,
                    max_peaks: int = 8) -> List[Tuple[float, float]]:
-        """检测高于"噪声底 + rel_threshold_db"的局部极大值。
+        """双通道峰检测：窄峰（原始谱局部极大）+ 平滑后宽峰（gqrx 机制）。
 
-        返回 [(freq_hz, power_db), ...]，按功率降序。为不在 GUI 线程每帧
-        扫描全谱，结果按约 10 帧（~2Hz）节流复用。"""
+        参考 gqrx plotter.cpp:1699-1757：
+          - 窄峰通道用原始谱的严格局部极大；
+          - 宽峰通道先做窗口平滑，再在平滑曲线上找局部极大；
+          - 两路结果按窗口距离合并去重：宽峰吸收邻近窄峰后只留一个代表，
+            避免宽带信号被拆成一串小峰，也避免宽峰被窄峰淹没。
+        返回 [(freq_hz, power_db), ...]，按功率降序，约 10 帧（~2Hz）节流复用。"""
         if not self._has_real_data:
             return []
         s = self.spectrum
@@ -450,25 +455,99 @@ class SpectrumDataGenerator:
         if (pcache is not None and pcache[0] == tick
                 and abs(pcache[1] - float(rel_threshold_db)) < 1e-9):
             return pcache[2]
-        finite = np.isfinite(s)
-        ss = s[finite]
-        if ss.size < 3:
-            return []
-        floor = float(np.median(ss))     # 已有限，median 快于 nanmedian
-        thresh = floor + float(rel_threshold_db)
-        left = np.empty_like(s)
-        right = np.empty_like(s)
-        left[0] = s[0]
-        left[1:] = s[:-1]
-        right[-1] = s[-1]
-        right[:-1] = s[1:]
-        mask = finite & (s >= left) & (s > right) & (s >= thresh)
-        idxs = np.nonzero(mask)[0]
-        peaks = [(self.bin_to_freq(int(i)), float(s[i])) for i in idxs]
+        idxs = _detect_peak_bins(s, float(rel_threshold_db))
+        peaks = [(self.bin_to_freq(int(i)), float(s[i]))
+                 for i in idxs if np.isfinite(s[i])]
         peaks.sort(key=lambda q: q[1], reverse=True)
         peaks = peaks[:max_peaks]
         self._peak_cache = (tick, float(rel_threshold_db), peaks)
         return peaks
+
+
+def _detect_peak_bins(spectrum: np.ndarray,
+                      rel_threshold_db: float) -> List[int]:
+    """双通道峰检测核心（纯函数，无 Qt/状态依赖）。
+
+    通道 1：原始谱严格局部极大（窄峰）。
+    通道 2：窗口平滑后局部极大（宽峰，gqrx plotter.cpp:1723-1757）。
+    合并：宽峰窗口内的窄峰归入该宽峰，只保留最强的一个代表；落在宽峰
+    之外的窄峰原样保留。这样宽带信号不会被拆成多个点，窄单音也不会被
+    平滑吞掉。
+    """
+    n = len(spectrum)
+    if n < 3:
+        return []
+    finite = np.isfinite(spectrum)
+    ss = spectrum[finite]
+    if ss.size < 3:
+        return []
+    floor = float(np.median(ss))
+    thresh = floor + float(rel_threshold_db)
+
+    left = np.empty_like(spectrum)
+    right = np.empty_like(spectrum)
+    left[0] = spectrum[0]
+    left[1:] = spectrum[:-1]
+    right[-1] = spectrum[-1]
+    right[:-1] = spectrum[1:]
+    narrow = np.nonzero(finite & (spectrum >= left)
+                        & (spectrum > right)
+                        & (spectrum >= thresh))[0]
+
+    # 奇数平滑窗：约 3% 谱宽；宽带的细微起伏被抹平，窄单音仍保留在通道 1。
+    win = max(3, (n // 64) * 2 + 1)
+    pad = win // 2
+    fill = np.where(finite, spectrum, floor)
+    smooth = np.convolve(np.pad(fill, pad, mode="edge"),
+                         np.ones(win, dtype=np.float64) / win, mode="valid")
+    sm_left = np.empty_like(smooth)
+    sm_right = np.empty_like(smooth)
+    sm_left[0] = smooth[0]
+    sm_left[1:] = smooth[:-1]
+    sm_right[-1] = smooth[-1]
+    sm_right[:-1] = smooth[1:]
+    wide = np.nonzero((smooth >= sm_left) & (smooth > sm_right)
+                      & (smooth >= thresh))[0]
+    # 平滑曲线上的相邻宽峰合并为一个（同窗内的起伏仍属同一宽带信号）。
+    wide_sel: List[int] = []
+    for w in wide:
+        if wide_sel and abs(int(w) - wide_sel[-1]) < pad:
+            if smooth[w] > smooth[wide_sel[-1]]:
+                wide_sel[-1] = int(w)
+            continue
+        wide_sel.append(int(w))
+
+    out: List[int] = []
+    used = set()
+    for w in wide_sel:
+        # 宽带信号的“支撑区”：平滑曲线上连续高于阈值的整段。
+        # 该段内的所有窄峰起伏都归为同一宽带信号，只留最强的一个代表；
+        # 只按一个平滑窗吸收会让边缘的起伏漏成多个点。
+        l = int(w)
+        r = int(w)
+        while l > 0 and smooth[l - 1] >= thresh:
+            l -= 1
+        while r < n - 1 and smooth[r + 1] >= thresh:
+            r += 1
+        # 边界外再放宽一个平滑窗：宽带边缘的起伏略低于阈值也算同一条信号。
+        near = [int(i) for i in narrow if l - pad <= int(i) <= r + pad]
+        if near:
+            best = max(near, key=lambda i: float(spectrum[i]))
+            out.append(best)
+            used.update(near)
+        else:
+            out.append(int(w))
+    for i in narrow:
+        if int(i) not in used:
+            out.append(int(i))
+    # 去重：相邻 1 bin 内只留一个（保留先加入者 = 宽峰代表优先）。
+    out.sort()
+    dedup: List[int] = []
+    for i in out:
+        if dedup and i - dedup[-1] < 2:
+            continue
+        dedup.append(i)
+    return dedup
 
 
 # ============================================================================
@@ -757,6 +836,8 @@ class _PlotState:
         self.panel = panel
         self.db_min = -100.0
         self.db_max = -20.0
+        # dB 轴拖动中：绘制时叠加当前量程读数（跟手反馈）。
+        self.db_drag_active = False
         self.show_waterfall = True
         self.mouse_x_ratio: Optional[float] = None     # 鼠标悬停 x 比例
         self.mouse_in_spectrum = False
@@ -822,6 +903,117 @@ class _PlotState:
 
 # FFT 谱面底部预留高度（像素）：用于画频率轴刻度，避免标签被裁剪。
 _SPEC_BOTTOM_PAD = 18
+
+# 左侧 dB 轴拖拽热区宽度（像素）：gqrx plotter.cpp:350-368 YAXIS 捕获区。
+# 在频谱左缘这条带内按住拖动 = 整体平移 dB 量程（不调谐、不改 span）。
+_DB_AXIS_DRAG_W = 40.0
+
+
+# ---------------------------------------------------------------------------
+# 坐标轴刻度：1/2/5×10ⁿ 阶梯 + 按量程自动单位（SDR++ waterfall.cpp:40-62）
+# ---------------------------------------------------------------------------
+def _nice_step(span: float, max_ticks: int) -> float:
+    """从 1/2/5×10ⁿ 阶梯选最小步长，使刻度数不超过 max_ticks。"""
+    if span <= 0 or max_ticks < 2:
+        return 0.0
+    target = float(span) / float(max_ticks)
+    exp = math.floor(math.log10(target))
+    for e in range(exp - 2, exp + 3):
+        for m in (1.0, 2.0, 5.0):
+            step = m * 10.0 ** e
+            if step >= target:
+                return step
+    return 5.0 * 10.0 ** (exp + 2)
+
+
+def _next_nice_step(step: float) -> float:
+    """阶梯内下一个更大的 1/2/5×10ⁿ 步长。"""
+    if step <= 0:
+        return 1.0
+    exp = math.floor(math.log10(step))
+    m = step / 10.0 ** exp
+    if m < 1.5:
+        return 2.0 * 10.0 ** exp
+    if m < 3.5:
+        return 5.0 * 10.0 ** exp
+    return 10.0 ** (exp + 1)
+
+
+def _nice_ticks(lo: float, hi: float, max_ticks: int = 5) -> Tuple[float, List[float]]:
+    """返回 (步长, 落在 [lo, hi] 内的阶梯刻度值)。"""
+    span = hi - lo
+    step = _nice_step(span, max_ticks)
+    if step <= 0:
+        return 0.0, []
+    vals: List[float] = []
+    for _ in range(8):
+        k0 = int(math.ceil((lo - 1e-9 * step) / step))
+        k1 = int(math.floor((hi + 1e-9 * step) / step))
+        vals = [k * step for k in range(k0, k1 + 1)]
+        if len(vals) <= max_ticks:
+            break
+        step = _next_nice_step(step)
+    return step, vals
+
+
+def _step_decimals(step_in_unit: float) -> int:
+    """按步长决定小数位（0.5 → 1 位，0.05 → 2 位）。"""
+    if step_in_unit <= 0:
+        return 0
+    return max(0, min(3, int(math.ceil(-math.log10(step_in_unit)))))
+
+
+def _freq_unit(span_hz: float) -> Tuple[float, str]:
+    """按量程自动选轴单位（kHz / MHz / GHz）。"""
+    if span_hz < 1e6:
+        return 1e3, "kHz"
+    if span_hz < 1e9:
+        return 1e6, "MHz"
+    return 1e9, "GHz"
+
+
+def _labels_fit(vals, labels, lo: float, hi: float, width_px: float,
+                advance, reserve_px: float = 0.0) -> bool:
+    """按真实落位 + 端点夹边模拟，判断一组刻度标签是否互不压字。"""
+    span = hi - lo
+    right_bound = max(0.0, width_px - reserve_px)
+    boxes = []
+    for v, s in zip(vals, labels):
+        x = (v - lo) / span * width_px
+        w = advance(s)
+        tx = min(max(0.0, x - w / 2.0), max(0.0, right_bound - w))
+        boxes.append((tx, tx + w))
+    boxes.sort()
+    return all(b[0] >= a[1] + 3.0 for a, b in zip(boxes, boxes[1:]))
+
+
+def _freq_scale_ticks(view_center_hz: float, span_hz: float, width_px: float,
+                      advance, max_ticks: int = 5, reserve_px: float = 0.0):
+    """生成频轴刻度：先按 1/2/5 阶梯定步长，再按标注宽度递减数量。
+
+    单位不写在每个标签里（窄面会因单位后缀互相压字），由调用方在轴右端
+    画一次自动单位。返回 (step_hz, tick_hz 列表, 标签列表, 单位名)。
+    """
+    lo = view_center_hz - span_hz / 2.0
+    hi = view_center_hz + span_hz / 2.0
+    unit, uname = _freq_unit(span_hz)
+    for mt in (max_ticks, max_ticks - 1, 3, 2):
+        if mt < 2:
+            continue
+        step, vals = _nice_ticks(lo, hi, mt)
+        if len(vals) < 2:
+            continue
+        d = _step_decimals(step / unit)
+        labels = [f"{v / unit:.{d}f}" for v in vals]
+        if _labels_fit(vals, labels, lo, hi, width_px, advance, reserve_px):
+            return step, vals, labels, uname
+    # 极端窄面：退化为两端点，逐级减少小数直到放得下（绝不压字/裁字）。
+    for d in range(3, -1, -1):
+        vals = [lo, hi]
+        labels = [f"{lo / unit:.{d}f}", f"{hi / unit:.{d}f}"]
+        if _labels_fit(vals, labels, lo, hi, width_px, advance, reserve_px):
+            return span_hz, vals, labels, uname
+    return span_hz, [lo, hi], [f"{lo / unit:.0f}", f"{hi / unit:.0f}"], uname
 
 
 def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
@@ -1393,28 +1585,26 @@ def _draw_freq_scale(painter, rect, view_center_hz: float, span_hz: float,
     f.setPointSize(8)
     painter.setFont(f)
     fm = painter.fontMetrics()
-    # 刻度数量自适应：窄谱面（1000×600 左栏 345px）放 5 个「100.51」会互相
-    # 压字；从 5 递减到 2，首个「等距不交叠」的档位即采用。宽谱面仍是 5。
-    n = 2
-    for cand in (5, 4, 3, 2):
-        labels = [f"{view_center_hz/1e6 - span_hz/2e6 + span_hz/1e6*i/(cand-1):.2f}"
-                  for i in range(cand)]
-        widest = max(fm.horizontalAdvance(s) for s in labels)
-        # 1.5×宽：首尾标签各自被夹回边界时会向中间平移半个字宽，
-        # 只留 1×宽会被端点标签反压到相邻刻度上。
-        if rect.width() / (cand - 1) >= widest * 1.5 + 6.0:
-            n = cand
-            break
-    labels = [f"{view_center_hz/1e6 - span_hz/2e6 + span_hz/1e6*i/(n-1):.2f}"
-              for i in range(n)]
-    for i, s in enumerate(labels):
-        x = rect.x() + rect.width() * i / (n - 1)
+    # 1/2/5×10ⁿ 阶梯 + 按量程自动单位（SDR++ waterfall.cpp:40-62）。
+    # 单位只在轴右端画一次；刻度的可用宽度扣掉单位区，避免标签贴上去。
+    unit_w = fm.horizontalAdvance("MHz")   # 取最长单位宽度做统一预留
+    reserve = unit_w + 8.0
+    _step, ticks, labels, unit = _freq_scale_ticks(
+        view_center_hz, span_hz, rect.width(), fm.horizontalAdvance,
+        reserve_px=reserve)
+    right_bound = rect.x() + rect.width() - reserve
+    for tick_hz, s in zip(ticks, labels):
+        # 刻度按真实频率落位（不是等距），保证与谱线/网格严格对齐。
+        x = rect.x() + (tick_hz - view_center_hz) / span_hz * rect.width() \
+            + rect.width() / 2.0
         tw = fm.horizontalAdvance(s)
-        # 端点刻度夹进谱面（原「居中于 x=0/右缘」会让首尾标签各有半截被裁，
-        # 截图里像数字缺位）。中间刻度不受影响。
-        tx = x - tw / 2.0
-        tx = max(rect.x(), min(tx, rect.x() + rect.width() - tw))
+        tx = max(rect.x(), min(x - tw / 2.0, right_bound - tw))
         painter.drawText(QPointF(tx, rect.y() + rect.height() + 14), s)
+    # 自动单位（kHz / MHz / GHz）只标一次，右端对齐。
+    uw = fm.horizontalAdvance(unit)
+    painter.drawText(
+        QPointF(rect.x() + rect.width() - uw, rect.y() + rect.height() + 14),
+        unit)
 
 
 def _draw_db_scale(painter, rect, state, text_color):
@@ -1422,10 +1612,25 @@ def _draw_db_scale(painter, rect, state, text_color):
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
-    for i in range(5):
-        db = state.db_max - (state.db_max - state.db_min) * i / 4.0
-        y = rect.y() + rect.height() * 0.92 * i / 4.0 + rect.height() * 0.04
+    fm = painter.fontMetrics()
+    # dB 轴同理：1/2/5×10ⁿ 阶梯（默认 -100…-20 会选出 20 dB 步长，
+    # 与原 5 等分位置一致；量程变了也不会出现非整数刻度）。
+    span_db = state.db_max - state.db_min
+    _step, dbs = _nice_ticks(state.db_min, state.db_max, 5)
+    if not dbs:
+        dbs = [state.db_min, state.db_max]
+    for db in dbs:
+        # 4%…96% 内缩：与旧实现同几何，顶部/底部刻度不被边界裁半。
+        y = rect.y() + rect.height() * (
+            0.04 + 0.92 * (state.db_max - db) / max(1e-9, span_db))
         painter.drawText(QPointF(rect.x() + 4, y + 4), f"{db:.0f}")
+    # 拖动时读数跟手：把当前量程直接画在轴区右上，位置不随值移动，
+    # 内容随每一帧重算（几何断言 + 离屏截图可验，不靠肉眼）。
+    if getattr(state, "db_drag_active", False):
+        txt = f"{state.db_min:.0f} … {state.db_max:.0f} dB"
+        tw = fm.horizontalAdvance(txt)
+        tx = max(rect.x() + 4, rect.x() + rect.width() - tw - 4)
+        painter.drawText(QPointF(tx, rect.y() + 16), txt)
 
 
 # ============================================================================
@@ -1687,29 +1892,41 @@ class SpectrumPanel(QWidget):
 
         return col
 
+    def apply_db_range(self, db_min: float, db_max: float):
+        """dB 量程的唯一状态源：滑杆、轴上拖动、外部调用都走这里。
+
+        先把值规范成整数（滑杆本身是整数刻度，状态若留小数就会出现
+        "状态一套、滑杆一套"的假量程），再同步状态与两根滑杆。
+        """
+        lo = max(-160.0, min(float(db_min), 0.0))
+        hi = max(-160.0, min(float(db_max), 0.0))
+        if hi - lo < 10.0:                 # SDR++ main_window.cpp:639 最小间隔 10
+            hi = lo + 10.0
+            if hi > 0.0:
+                hi = 0.0
+                lo = -10.0
+        lo, hi = float(round(lo)), float(round(hi))
+        self._state.db_min = lo
+        self._state.db_max = hi
+        # 共享源：状态变了滑杆必须同帧跟上（信号阻断防回调环）。
+        for slider, val in ((self._db_max_slider, hi),
+                            (self._db_min_slider, lo)):
+            slider.blockSignals(True)
+            slider.setValue(int(val))
+            slider.blockSignals(False)
+        self._redraw()
+
+    def db_range(self) -> Tuple[float, float]:
+        """当前 dB 量程 (min, max)（状态即唯一事实源）。"""
+        return (float(self._state.db_min), float(self._state.db_max))
+
     def _on_db_max_changed(self, val: int):
         # SDR++ main_window.cpp:639: fftMax = max(fftMax, fftMin + 10)
-        val = int(val)
-        min_val = self._db_min_slider.value()
-        if val <= min_val + 10:
-            val = min_val + 10
-            self._db_max_slider.blockSignals(True)
-            self._db_max_slider.setValue(val)
-            self._db_max_slider.blockSignals(False)
-        self._state.db_max = float(val)
-        self._redraw()
+        self.apply_db_range(self._state.db_min, int(val))
 
     def _on_db_min_changed(self, val: int):
         # SDR++ main_window.cpp:652: fftMin = min(fftMax - 10, fftMin)
-        val = int(val)
-        max_val = self._db_max_slider.value()
-        if val >= max_val - 10:
-            val = max_val - 10
-            self._db_min_slider.blockSignals(True)
-            self._db_min_slider.setValue(val)
-            self._db_min_slider.blockSignals(False)
-        self._state.db_min = float(val)
-        self._redraw()
+        self.apply_db_range(int(val), self._state.db_max)
 
     def _set_controls_enabled(self, on: bool):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
@@ -1970,6 +2187,11 @@ class _TuningPlotMixin:
         # Shift+空白拖拽 = 橡皮筋新建 VFO
         self._vfo_create_mode = False
         self._vfo_create_start_x = 0.0
+        # ---- dB 轴拖动（gqrx plotter.cpp:350-368 YAXIS 捕获）----
+        self._db_drag_active = False
+        self._db_drag_press_y = 0.0
+        self._db_drag_press_min = 0.0
+        self._db_drag_press_max = 0.0
 
     # ------------------------------------------------------------------ 工具
     def _x_ratio(self, event):
@@ -1986,6 +2208,43 @@ class _TuningPlotMixin:
         view_center = _view_center_hz(self.state)
         span = gen.sample_rate_hz
         return view_center - span / 2.0 + x_px / max(1, self.width()) * span
+
+    # ------------------------------------------------------------------ dB 轴拖动
+    def _begin_db_drag(self, y_px: float) -> None:
+        """在左侧 dB 轴热区按下：锁定按下时的量程与 y 基准。"""
+        self._db_drag_active = True
+        self.state.db_drag_active = True
+        self._db_drag_press_y = float(y_px)
+        self._db_drag_press_min = float(self.state.db_min)
+        self._db_drag_press_max = float(self.state.db_max)
+        self.setCursor(Qt.SizeVerCursor)
+        self.update()
+
+    def _apply_db_drag(self, y_px: float) -> None:
+        """拖动中：整体平移量程（跨度不变），读数每帧刷新。"""
+        if not self._db_drag_active:
+            return
+        h = max(1.0, float(self._spectrum_height() - _SPEC_BOTTOM_PAD))
+        span = self._db_drag_press_max - self._db_drag_press_min
+        delta_db = (self._db_drag_press_y - float(y_px)) / h * span
+        lo = self._db_drag_press_min + delta_db
+        hi = self._db_drag_press_max + delta_db
+        # 夹回 [-160, 0] 时整体平移，保持选定量程跨度。
+        if lo < -160.0:
+            lo, hi = -160.0, hi + (-160.0 - lo)
+        if hi > 0.0:
+            lo, hi = lo + (0.0 - hi), 0.0
+        # 唯一状态源：状态 + 右栏两根滑杆由 panel.apply_db_range 同步。
+        self.state.panel.apply_db_range(lo, hi)
+        self.update()
+
+    def _end_db_drag(self) -> None:
+        if not self._db_drag_active:
+            return
+        self._db_drag_active = False
+        self.state.db_drag_active = False
+        self.unsetCursor()
+        self.update()
 
     def _hit_vfo_at(self, x_px: float):
         """命中检测：返回 (vfo, region)，region ∈ {'body','left','right'}。
@@ -2310,6 +2569,10 @@ class _TuningPlotMixin:
                         self.state.panel.bookmark_activated.emit(bm_freq)
                         self._show_tune_tip(f"书签 {bm_freq / 1e6:.4f} MHz")
                         return
+                # dB 轴热区（左缘竖条）：按住拖动 = 平移量程，不进调谐/VFO。
+                if x <= _DB_AXIS_DRAG_W:
+                    self._begin_db_drag(y)
+                    return
                 vfo, region = self._hit_vfo_at(x)
                 if vfo is not None:
                     self._begin_vfo_drag(x, vfo, region, event)
@@ -2335,6 +2598,10 @@ class _TuningPlotMixin:
         r = self._x_ratio(event)
         self.state.mouse_x_ratio = r
         self.state.mouse_in_spectrum = True
+
+        if self._db_drag_active:
+            self._apply_db_drag(event.position().y())
+            return
 
         # Shift 橡皮筋新建：实时更新预览矩形
         if self._vfo_create_mode:
@@ -2463,6 +2730,10 @@ class _TuningPlotMixin:
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            # dB 轴拖动结束：量程已随每帧写入唯一状态源，这里只清拖拽态。
+            if self._db_drag_active:
+                self._end_db_drag()
+                return
             # 橡皮筋新建 VFO 结束：按 rubber-band 区间 center/bw 创建
             if self._vfo_create_mode:
                 self._vfo_create_mode = False
