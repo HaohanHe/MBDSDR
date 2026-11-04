@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
-SIZES = [(1000, 600), (1600, 900)]
+SIZES = [(800, 600), (1000, 600), (1280, 720), (1600, 900), (1920, 1080)]
 BASELINE_DIR = os.path.join(_ROOT, "tests", "baselines")
 
 
@@ -110,6 +110,7 @@ def main_window(request):
             t.stop()
         except Exception:
             pass
+    win.setProperty("_audit_requested", f"{width}x{height}")
     win.resize(width, height)
     win.show()
     _pump(200)
@@ -152,9 +153,19 @@ class _RecordingPainter:
         self._font = QFont()
         self._fm = QFontMetricsF(self._font)
         self.texts = []            # [(x, y_baseline, text, QFontMetricsF)]
+        self.pills = []            # 书签药丸矩形（QRectF）
 
     def setPen(self, *_a, **_k):
         pass
+
+    def setBrush(self, *_a, **_k):
+        pass
+
+    def drawLine(self, *_a, **_k):
+        pass
+
+    def drawRoundedRect(self, rect, *_a, **_k):
+        self.pills.append(QRectF(rect))
 
     def setFont(self, font):
         self._font = font
@@ -293,6 +304,42 @@ class TestSpectrumLabelsDoNotCollide:
         for r in rects:
             assert r[0] >= -0.5 and r[1] <= width + 0.5, f"峰值标注越界 {r[4]}"
 
+    def test_bookmark_pills_do_not_stack(self, main_window):
+        """近距离书签药丸原来直接压在一起（截图叠字）；现在按行下移，
+        3 行放不下则只留虚线旗——锁住「药丸两两不相交」。"""
+        import spectrum_widget as sw
+        _select_left(main_window, "spectrum")
+        panel = main_window.spectrum
+        gen = panel.generator
+        old_gen = (gen.center_freq_hz, gen.sample_rate_hz)
+        old_bm = (panel._state.show_bookmarks, list(panel._state.bookmarks))
+        try:
+            gen.center_freq_hz = 100e6
+            gen.sample_rate_hz = 2.048e6
+            panel._state.show_bookmarks = True
+            panel._state.bookmarks = [
+                (100_000_000, "BOOKMARK-LONG-NAME-ALPHA"),
+                (100_001_000, "BOOKMARK-LONG-NAME-BETA"),
+                (100_002_000, "BOOKMARK-LONG-NAME-GAMMA"),
+            ]
+            rect = QRectF(0, 0, panel._fft_plot.width(),
+                          panel._fft_plot.height())
+            rec = _RecordingPainter()
+            sw._draw_bookmark_tags(rec, panel._state, rect)
+            pills = rec.pills
+            assert len(pills) >= 2, f"书签药丸只画出 {len(pills)} 个"
+            for i, a in enumerate(pills):
+                for b in pills[i + 1:]:
+                    assert not a.intersects(b), \
+                        f"书签药丸叠字: {a} vs {b}"
+                assert a.left() >= rect.left() - 0.5
+                assert a.right() <= rect.right() + 0.5
+                assert a.top() >= rect.top() - 0.5
+        finally:
+            gen.center_freq_hz, gen.sample_rate_hz = old_gen
+            panel._state.show_bookmarks, panel._state.bookmarks = old_bm
+            panel.update()
+
     def test_bandplan_labels_do_not_stack(self, main_window):
         """频段彩带标签同样不许叠字；低优先级在窄视口先消失。"""
         import spectrum_widget as sw
@@ -335,6 +382,17 @@ class TestColumnsAndEmptyPanels:
         assert 0.33 <= left / total <= 0.75, f"左栏份额异常: {sizes}"
         assert 0.12 <= center / total <= 0.35, f"空态中栏吞主区: {sizes}"
         assert 0.12 <= right / total <= 0.35, f"右栏份额异常: {sizes}"
+
+    def test_window_never_shrinks_below_declared_minimum(self, main_window):
+        """请求 800×600 时窗口被最小尺寸钳到 1000×600——这是已拍板的设计，
+        测试锁住「钳位后仍满足全部布局规则」，而不是偷偷跑一个假 800 档。"""
+        requested = main_window.property("_audit_requested")
+        assert main_window.minimumWidth() >= 1000
+        assert main_window.minimumHeight() >= 600
+        assert main_window.width() >= main_window.minimumWidth()
+        if requested == "800x600":
+            assert (main_window.width(), main_window.height()) != (800, 600), \
+                "800×600 不可达：若未来放开最小尺寸，请补真实 800 档基线"
 
     def test_empty_adsb_panel_does_not_take_main_area(self, main_window):
         """「无 ADS-B 飞机」空态：地图面板宽度不得超过中栏本身。"""
@@ -391,16 +449,74 @@ class TestWidgetsStayInsideParents:
 
 
 # ---------------------------------------------------------------------------
+# 补充：长名称 / 长文本在窄容器里的截断规则
+# ---------------------------------------------------------------------------
+class TestLongTextTruncation:
+    def test_module_node_name_is_pixel_elided(self):
+        """信号流节点名按像素省略：原来「超过 16 字符才截」，全角名在
+        108px 文本区里 16 字早已溢出，drawText 硬切且不给省略号。"""
+        from module_panel import _elide_node_name
+        f = QFont()
+        f.setPointSize(8)
+        fm = QFontMetricsF(f)
+        avail = 120 - 12          # FlowCanvas 节点宽 120，文本区左右各留 6
+        for name in ("WFM Demodulator 1234567890",
+                     "超长卫星下行链路解调器节点名称示例"):
+            elided = _elide_node_name(name, f, avail)
+            assert elided != name, f"{name!r} 未被截断"
+            assert elided.endswith("…"), f"{name!r} 截断无省略号: {elided!r}"
+            assert fm.horizontalAdvance(elided) <= avail + 0.5, (
+                f"{name!r} 省略后仍宽 {fm.horizontalAdvance(elided):.1f}px "
+                f"> {avail}px")
+        # 短名字原样保留（不许无脑加省略号）
+        assert _elide_node_name("AM", f, avail) == "AM"
+
+    def test_planetarium_ai_card_fits_narrow_sky_slot(self, main_window):
+        """AI 回复卡按天空槽收窄：文字上限 520px 大于槽宽时，卡片右缘会
+        顶出槽外被父容器裁掉半句话。槽被搬进窄容器（右 Dock）时必须收口。"""
+        mw = main_window
+        card = getattr(mw, "_planetarium_ai_card", None)
+        assert card is not None, "缺少星象仪 AI 卡片"
+        mw.set_app_mode("planetarium")
+        slot = mw._planetarium_sky_slot
+        old_min, old_max = slot.minimumWidth(), slot.maximumWidth()
+        try:
+            slot.setFixedWidth(300)      # 模拟窄槽（右 Dock 视口约 288px）
+            _pump(80)
+            assert slot.width() <= 320, f"天空槽未被收窄: {slot.width()}"
+            mw._on_planetarium_ai_reply("长文本占位 " * 60)
+            _pump(60)
+            g = card.geometry()
+            assert g.left() >= 0, f"AI 卡片左缘越界: {g}"
+            assert g.right() <= slot.width() + 1, (
+                f"AI 卡片顶出天空槽: card={g.x()}+{g.width()} "
+                f"slot={slot.width()}x{slot.height()}")
+        finally:
+            slot.setMinimumWidth(old_min)
+            slot.setMaximumWidth(old_max)
+            mw.set_app_mode("ide")
+            _pump(60)
+
+
+# ---------------------------------------------------------------------------
 # 截图基线：固定面板 + 宽松比对（尺寸/宽高比/32×24 粗网格色块）
 # ---------------------------------------------------------------------------
 _SIG_COLS, _SIG_ROWS = 32, 24
 _UPDATE = os.environ.get("MBDSDR_UI_BASELINE_UPDATE") == "1"
 
 
-def _normalize(img: QImage, max_w: int = 320) -> QImage:
-    if img.width() > max_w:
-        return img.scaledToWidth(max_w, Qt.SmoothTransformation)
-    return img
+def _normalize(img: QImage, dpr: float = 1.0, max_logical_w: int = 320) -> QImage:
+    """按逻辑像素归一：不同 QT_SCALE_FACTOR 下 grab 的像素数不同，
+    先除以 DPR 再等比缩到逻辑宽度 ≤320，最后回到 DPR=1 的逻辑图。
+    这样 125%/150%/200% 共用同一套基线，不用按 DPI 存多份。"""
+    lw = img.width() / dpr
+    lh = img.height() / dpr
+    tw = min(float(max_logical_w), lw)
+    th = tw * lh / lw
+    out = img.scaled(max(1, round(tw)), max(1, round(th)),
+                     Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    out.setDevicePixelRatio(1.0)
+    return out
 
 
 def _signature(img: QImage, cols: int = _SIG_COLS, rows: int = _SIG_ROWS):
@@ -438,7 +554,8 @@ def _panel_image(win, name: str) -> QImage:
 @pytest.mark.parametrize("panel", ["spectrum", "adsb_empty", "freq_readout"])
 def test_panel_screenshot_matches_baseline(main_window, panel):
     """关键面板截图基线：锁尺寸/宽高比/主要色块，不做逐像素死比。"""
-    img = _normalize(_panel_image(main_window, panel))
+    dpr = main_window.devicePixelRatioF()
+    img = _normalize(_panel_image(main_window, panel), dpr)
     assert not img.isNull(), f"{panel} 截图为空"
     size = f"{main_window.width()}x{main_window.height()}"
     path = os.path.join(BASELINE_DIR, f"{panel}_{size}.png")
@@ -453,7 +570,10 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
         f"--update-baselines 并人工复核")
     base = QImage(path)
     assert not base.isNull(), f"基线无法读取: {path}"
-    assert (img.width(), img.height()) == (base.width(), base.height()), (
+    # DPI 换算有 ±1px 的取整差：宽度必须一致，高度允许 2px 内，
+    # 真正的比例问题交给下面的宽高比阈值。
+    assert img.width() == base.width() and \
+        abs(img.height() - base.height()) <= 2, (
         f"{panel} 尺寸漂移: 当前 {img.width()}x{img.height()} "
         f"基线 {base.width()}x{base.height()}")
     # 宽高比（尺寸已等，等价于对缩放宽度的稳定性）

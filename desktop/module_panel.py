@@ -32,7 +32,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtGui import (
-    QPainter, QPen, QBrush, QColor, QFont, QPainterPath, QLinearGradient,
+    QPainter, QPen, QBrush, QColor, QFont, QFontMetricsF, QPainterPath,
+    QLinearGradient,
 )
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QComboBox, QPushButton,
@@ -65,6 +66,16 @@ _TYPE_COLORS = {
     "decoder": QColor(_t.COLORS["success"]),  # 偏绿：解码
     "sink": OCHRE,                    # 强调：sink
 }
+
+
+def _elide_node_name(name: str, font: QFont, width: float) -> str:
+    """信号流节点名按像素右省略。
+
+    按字符数截断（旧实现 len>16 才切）在窄节点里不够：节点文本区只有
+    108px，全角字符或长英文名仍会溢出，被 drawText 无声硬切且没有「…」
+    提示还有下文。
+    """
+    return QFontMetricsF(font).elidedText(name, Qt.ElideRight, width)
 
 
 # ======================================================================
@@ -164,9 +175,10 @@ class FlowCanvas(QWidget):
                        Qt.AlignLeft | Qt.AlignVCenter, n["type"].upper())
             f2 = QFont(self.font()); f2.setPointSize(8)
             p.setFont(f2)
-            elide = n["name"]
-            if len(elide) > 16:
-                elide = elide[:15] + "…"
+            # 按字符数截断会漏：16 个全角字符在 108px 文本区里远放不下，
+            # 多余部分被 drawText 直接切掉（无省略号，读不出「还有下文」）。
+            # 改按像素省略（QFontMetricsF 与当前字体同源，DPI 缩放后自动跟随）。
+            elide = _elide_node_name(n["name"], f2, n["w"] - 12)
             p.drawText(QRectF(x + 6, y + 22, n["w"] - 12, n["h"] - 24),
                        Qt.AlignLeft | Qt.AlignVCenter, elide)
         p.end()

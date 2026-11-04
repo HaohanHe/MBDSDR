@@ -1549,13 +1549,24 @@ class MainWindow(QMainWindow):
         return page
 
     def _position_planetarium_ai_card(self) -> None:
-        """AI 回复卡定位：天空槽底部居中，叠在瀑布上方。"""
+        """AI 回复卡定位：天空槽底部居中，叠在瀑布上方。
+
+        窄槽（天空被布局预设搬进右 Dock 时视口可窄到 288px）必须收窄：
+        卡片的 520px 文字上限大于槽宽时，`x = max(margin, ...)` 会把卡片
+        右缘顶出槽外，父容器直接裁掉半句话。所以先按槽宽收口再量尺寸。
+        """
         card = getattr(self, "_planetarium_ai_card", None)
         slot = getattr(self, "_planetarium_sky_slot", None)
         if card is None or slot is None:
             return
-        card.adjustSize()
         margin = 16
+        text = getattr(self, "_planetarium_ai_card_text", None)
+        avail = max(120, slot.width() - 2 * margin)
+        if text is not None:
+            # 卡片宽 = 文字宽 + layout 边距 8 + 样式 padding 左右 24
+            text.setMaximumWidth(max(60, min(520, avail - 32)))
+        card.setMaximumWidth(avail)
+        card.adjustSize()
         x = max(margin, (slot.width() - card.width()) // 2)
         wf = self._planetarium_waterfall_slot
         bottom = wf.y() if wf.isVisibleTo(slot) else slot.height()

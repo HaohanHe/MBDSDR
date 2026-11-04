@@ -1114,22 +1114,37 @@ def _draw_bookmark_tags(painter, state, rect):
     painter.setFont(f)
     fm = painter.fontMetrics()
     painter.setBrush(QBrush(color))
+    entries = []
     for freq_hz, name in state.bookmarks:
         x = rect.x() + (float(freq_hz) - f_left) / span * rect.width()
         if x < rect.x() or x > rect.x() + rect.width():
             continue
-        painter.setPen(QPen(color, 1, Qt.DashLine))
-        painter.drawLine(QPointF(x, rect.y() + _BM_TAG_H),
-                         QPointF(x, rect.y() + rect.height()))
         text = str(name)
         pw = fm.horizontalAdvance(text) + 10
         x0 = min(max(rect.x(), x - pw / 2.0),
                  rect.x() + rect.width() - pw)
+        entries.append((x, x0, pw, text))
+    # 近距离书签药丸会叠字（截图事故）：按 x 排序后逐行下移，
+    # 3 行仍放不下就只留虚线旗、不画药丸文字。虚线旗始终绘制。
+    placed_boxes: list = []
+    for x, x0, pw, text in sorted(entries, key=lambda e: e[0]):
+        painter.setPen(QPen(color, 1, Qt.DashLine))
+        painter.drawLine(QPointF(x, rect.y() + _BM_TAG_H),
+                         QPointF(x, rect.y() + rect.height()))
+        pill = None
+        for row in range(3):
+            box = QRectF(x0, rect.y() + 1.0 + row * _BM_TAG_H,
+                         pw, _BM_TAG_H - 2.0)
+            if all(not box.intersects(b) for b in placed_boxes):
+                pill = box
+                break
+        if pill is None:
+            continue
+        placed_boxes.append(pill)
         painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(QRectF(x0, rect.y() + 1.0, pw, _BM_TAG_H - 2.0),
-                                3.0, 3.0)
+        painter.drawRoundedRect(pill, 3.0, 3.0)
         painter.setPen(QPen(QColor(PAL_BG), 1))
-        painter.drawText(QPointF(x0 + 5.0, rect.y() + 1.0 + fm.ascent()), text)
+        painter.drawText(QPointF(x0 + 5.0, pill.y() + fm.ascent()), text)
 
 
 def _draw_center_cursor(painter, rect, color):
