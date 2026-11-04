@@ -1096,6 +1096,21 @@ class SDRController:
                 time_precision_s=acc["time_precision_s"],
             )
             out = info.to_dict()
+            # P11：内置 TLE 凑整值必须在数据里标注来源与可信度，不许当精确值。
+            try:
+                from ..builtin_tle_meta import analyze_tle_provenance
+                prov = analyze_tle_provenance(name, line1, line2,
+                                              source=tle_source)
+                out["tle_provenance"] = prov
+                if not prov["usable_for_tracking"]:
+                    out["tle_verified"] = False
+                    out["accuracy_risk"] = "unusable"
+                    prior = str(out.get("accuracy_note") or "").strip()
+                    extra = f"{prov['trust_label']}；{prov['note']}"
+                    out["accuracy_note"] = (f"{prior}；{extra}" if prior else extra)
+                    out["time_precision_s"] = max(60, int(out.get("time_precision_s", 60)))
+            except Exception as e:  # pragma: no cover
+                out["tle_provenance"] = {"trust": "unverified", "note": str(e)}
             # P11：同一 AOS 时刻三路径 az/el 对拍（过境/天空视图/多普勒），
             # 不一致必须报出，不许各算各的。
             try:
