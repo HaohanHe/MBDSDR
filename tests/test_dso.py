@@ -5,6 +5,11 @@ import pytest
 from mbdsdr_ai.astronomy import dso
 
 
+@pytest.fixture(scope="module")
+def cat():
+    return dso.DSOCatalog.builtin()
+
+
 def test_catalog_loads_builtin_entries():
     cat = dso.DSOCatalog.builtin()
     assert len(cat) >= 100
@@ -47,6 +52,26 @@ def test_near_query():
     names = [e.name for e in near]
     assert "M31" in names
     assert "M32" in names or "M110" in names
+
+
+def test_missing_fields_exposed_as_none(cat):
+    """OpenNGC 缺星等/尺寸的条目必须表现为 None（未知），不得是 0/99。"""
+    assert cat.get("M22").magnitude is None
+    assert cat.get("M35").magnitude is None
+    assert cat.get("M40").size_arcmin is None
+    assert cat.get("M73").size_arcmin is None
+    assert cat.get("M40").name_en == ""
+    assert cat.get("M40").zh_name == ""
+    assert cat.get("M31").magnitude == pytest.approx(3.44)
+    assert cat.get("M31").size_arcmin == pytest.approx(177.83)
+
+
+def test_m102_maps_to_ngc5866(cat):
+    m102 = cat.get("M102")
+    assert m102 is not None
+    assert dict(m102.cross_ids)["ngc"] == 5866
+    assert m102.source_name == "NGC5866"
+    assert len([e for e in cat if e.name.startswith("M")]) == 110
 
 
 def test_unknown_name_returns_none():

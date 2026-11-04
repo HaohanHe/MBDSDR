@@ -1,23 +1,24 @@
 # SPDX-License-Identifier: MIT
 """
-tests/test_dso_catalog.py — 深空天体事实目录测试
+tests/test_dso_catalog.py — 深空天体事实目录测试（OpenNGC 源）
 
 覆盖:
   - 117 条 = Messier 1–110 + 7 个常用亮 NGC；编号无重复、无缺号
-  - 每条坐标/星等/角径/类型与 Stellarium 源目录对拍（30 颗抽样）
-  - 英文名/中文名与 names.dat / zh_CN.po 对拍；缺失留空并计数
-  - 不得拿英文 proper name 冒充中文名
-  - 星座归属、交叉编号、源目录行号可追溯
-  - 重复编号、坐标越界、星等缺失、meta 缺失、SHA 篡改、计数不符均抛错
-  - API 字段与 desktop `_draw_dso` 期望的字段对齐
+  - 每条坐标/星等/角径/类型/星座与 OpenNGC 源文件独立解析结果对拍
+    （30 颗抽样，含 M31/M42/M45/M104/M40/M16/M76）
+  - meta 来源/许可/SHA/缺字段计数/复现命令可审计，且不含 GPL
+  - 源目录缺失字段写 null（不是 0/99），API 侧为 None
+  - 中文名只来自 Wikidata 或逐条标注的自译；覆盖数与清单固定
+  - M102 固定映射 NGC 5866 的约定被钉死（防止条目数变 116）
+  - 重复编号、坐标越界、星等 99、尺寸 0、meta 缺失、SHA 篡改均抛错
 """
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import re
-from collections import defaultdict
 from pathlib import Path
 
 import pytest
@@ -26,13 +27,13 @@ from mbdsdr_ai.astronomy import dso
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DSO_PATH = DATA_DIR / "dso_catalog.json"
-REFERENCE = Path(r"D:\mbdsdr\reference\stellarium")
-CATALOG_TXT = REFERENCE / "nebulae" / "default" / "catalog.txt"
-NAMES_DAT = REFERENCE / "nebulae" / "default" / "names.dat"
-ZH_PO = REFERENCE / "po" / "stellarium-sky" / "zh_CN.po"
-SPANS_DAT = REFERENCE / "data" / "constellations_spans.dat"
+ZH_PATH = DATA_DIR / "dso_zh_wikidata.json"
+REFERENCE = Path(r"D:\mbdsdr\reference\openngc")
+NGC_CSV = REFERENCE / "NGC.csv"
+ADDENDUM_CSV = REFERENCE / "addendum.csv"
+DOC_PATH = Path(__file__).resolve().parents[2] / "docs" / "dso-catalog.md"
 
-EXTRA_NGC = (253, 869, 884, 2070, 5139, 7000, 7293)
+EXTRAS = (253, 869, 884, 2070, 5139, 7000, 7293)
 CJK_RE = re.compile(r"[\u3400-\u9fff]")
 
 SAMPLE_30 = (
@@ -42,35 +43,33 @@ SAMPLE_30 = (
     "NGC253", "NGC869", "NGC2070", "NGC7293",
 )
 
-# 与源目录对拍时写死的容差（数据由源文件直接生成，不允许漂移）
 RA_DEC_TOL_DEG = 1e-6
 MAG_TOL = 1e-6
 SIZE_TOL_ARCMIN = 1e-6
 
-SAMPLE_CON = {
-    "M1": "Tau", "M8": "Sgr", "M13": "Her", "M16": "Ser", "M20": "Sgr",
-    "M27": "Vul", "M31": "And", "M33": "Tri", "M40": "UMa", "M42": "Ori",
-    "M45": "Tau", "M51": "CVn", "M57": "Lyr", "M63": "CVn", "M64": "Com",
-    "M74": "Psc", "M76": "Per", "M81": "UMa", "M83": "Hya", "M87": "Vir",
-    "M94": "CVn", "M97": "UMa", "M101": "UMa", "M102": "Dra",
-    "M104": "Vir", "M110": "And", "NGC253": "Scl", "NGC869": "Per",
-    "NGC2070": "Dor", "NGC7293": "Aqr",
-}
+MISSING_MAG = ["M22", "M35", "M62", "M69", "M70", "M71", "M107"]
+MISSING_SIZE = ["M40", "M73"]
+SELF_ZH = {"M11", "M13", "M17", "M99", "NGC2070"}
 
 SAMPLE_NAMES = {
     "M31": ("Andromeda Galaxy", "仙女座星系"),
     "M42": ("Great Orion Nebula", "猎户座大星云"),
-    "M45": ("Pleiades", "昴星团"),
-    "M104": ("Sombrero Galaxy", "草帽星系"),
-    "M40": ("Winnecke 4", "温内克4"),
-    "M102": ("Spindle Galaxy", "纺锤星系"),
-    "NGC5139": ("ω Cen Cluster", "半人马座欧米伽星团"),
+    "M45": ("Pleiades", "昴宿星团"),
+    "M104": ("Sombrero Galaxy", "阔边帽星系"),
+    "M16": ("Eagle Nebula", "鹰星云"),
+    "M76": ("Barbell Nebula", "小哑铃星云"),
+    "NGC2070": ("30 Dor Cluster", "蜘蛛星云"),
 }
 
 
 @pytest.fixture(scope="module")
 def cat():
     return dso.load_dso_catalog()
+
+
+@pytest.fixture(scope="module")
+def payload():
+    return json.loads(DSO_PATH.read_text(encoding="utf-8"))
 
 
 def _sha256_file(path: Path) -> str:
@@ -81,319 +80,344 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _read_rows(path: Path) -> list:
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+        return [dict(rec, _file=path.name, _row=i)
+                for i, rec in enumerate(csv.DictReader(fh, delimiter=";"), 2)]
+
+
 def _source_rows():
-    """独立解析源目录，作为测试真值（不复用生成脚本）。"""
-    mrows, ngcrows = {}, defaultdict(list)
-    with open(CATALOG_TXT, encoding="utf-8", errors="replace") as fh:
-        for lineno, line in enumerate(fh, 1):
-            if line.startswith("#") or not line.strip():
-                continue
-            parts = line.rstrip("\n").split("\t")
-            row = {"row": lineno, "parts": parts}
-            if int(parts[18] or 0):
-                mrows[int(parts[18])] = row
-            if int(parts[16] or 0):
-                ngcrows[int(parts[16])].append(row)
-    return mrows, ngcrows
+    rows = _read_rows(NGC_CSV) + _read_rows(ADDENDUM_CSV)
+    by_name = {r["Name"]: r for r in rows}
+    by_m = {}
+    for r in rows:
+        m = r["M"].strip()
+        if m and r["Type"] != "Dup":
+            by_m[int(m)] = r
+    return rows, by_name, by_m
 
 
-def _source_names():
-    names = defaultdict(list)
-    with open(NAMES_DAT, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if line.startswith("#") or not line.strip():
-                continue
-            prefix = line[0:5].strip()
-            ident = line[5:20].strip()
-            match = re.search(r'_\(\"(.*?)\"\)', line)
-            if prefix and ident and match:
-                name = match.group(1).strip()
-                if name and name not in names[(prefix, ident)]:
-                    names[(prefix, ident)].append(name)
-    return names
+def _source_row(key: str):
+    rows, by_name, by_m = _source_rows()
+    if key == "M102":
+        dup = [r for r in rows if r["Name"] == "M102"]
+        assert len(dup) == 1 and dup[0]["Type"] == "Dup"
+        assert dup[0]["M"] == "101"
+        return by_name["NGC5866"], dup[0]
+    if key.startswith("M"):
+        return by_m[int(key[1:])], None
+    number = int(key[3:])
+    for candidate in (f"NGC{number}", f"NGC{number:04d}"):
+        if candidate in by_name:
+            return by_name[candidate], None
+    raise AssertionError(f"源目录缺少 {key}")
 
 
-def _source_zh():
-    text = ZH_PO.read_text(encoding="utf-8", errors="replace")
-    zh = {}
-    for block in re.split(r"\n\n", text):
-        if "#, fuzzy" in block or "#~" in block:
-            continue
-        ids = re.findall(r'^msgid "((?:[^"\\]|\\.)*)"', block, re.M)
-        strs = re.findall(r'^msgstr "((?:[^"\\]|\\.)*)"', block, re.M)
-        if not ids or not strs or not ids[0] or not strs[0]:
-            continue
-        chinese = strs[0].strip()
-        if CJK_RE.search(chinese) and chinese != ids[0]:
-            zh[ids[0]] = chinese
-    return zh
+def _num(text: str):
+    text = (text or "").strip()
+    return float(text) if text else None
 
 
-def _row_for(name: str, mrows, ngcrows):
-    if name.startswith("M"):
-        return mrows[int(name[1:])]
-    return ngcrows[int(name[3:])][0]
+def _ra(text: str) -> float:
+    h, m, s = text.split(":")
+    return (float(h) + float(m) / 60 + float(s) / 3600) * 15.0
 
 
-def _names_for(row, names):
-    parts = row["parts"]
-    keys = []
-    if int(parts[18] or 0):
-        keys.append(("M", str(int(parts[18]))))
-    if int(parts[16] or 0):
-        keys.append(("NGC", str(int(parts[16]))))
-    if int(parts[17] or 0):
-        keys.append(("IC", str(int(parts[17]))))
-    for key in keys:
-        if key in names:
-            return names[key]
-    return []
+def _dec(text: str) -> float:
+    sign = -1.0 if text.startswith("-") else 1.0
+    d, m, s = text.lstrip("+-").split(":")
+    return sign * (float(d) + float(m) / 60 + float(s) / 3600)
 
 
-def _rehash(payload: dict) -> None:
-    clone = json.loads(json.dumps(payload, ensure_ascii=False))
-    clone["meta"].pop("data_sha256", None)
-    blob = json.dumps(clone, ensure_ascii=False, sort_keys=True,
-                      separators=(",", ":")).encode("utf-8")
-    payload["meta"]["data_sha256"] = hashlib.sha256(blob).hexdigest()
+def _mag(row: dict):
+    for band, column in (("V", "V-Mag"), ("B", "B-Mag")):
+        value = _num(row[column])
+        if value is not None and value != 0:
+            return value, band
+    return None, ""
 
 
-def _variant(tmp_path: Path, payload: dict, name: str = "dso.json") -> Path:
-    path = tmp_path / name
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
-                    encoding="utf-8")
-    return path
+def _size(row: dict, column: str):
+    value = _num(row[column])
+    return value if value is not None and value > 0 else None
 
 
-# ---------------------------------------------------------------------------
-# 覆盖与来源
-# ---------------------------------------------------------------------------
-def test_catalog_counts_and_exact_designations(cat):
-    counts = cat.meta["counts"]
+def _common(row: dict) -> list:
+    out = []
+    for part in row["Common names"].split(","):
+        part = part.strip()
+        if part and part not in out:
+            out.append(part)
+    return out
+
+
+def _con(row: dict) -> str:
+    return {"Se1": "Ser", "Se2": "Ser"}.get(row["Const"], row["Const"])
+
+
+def _ngc_from_name(row: dict):
+    name = row["Name"]
+    return int(name[3:]) if name.startswith("NGC") else None
+
+
+def _ic_from_name(row: dict):
+    name = row["Name"]
+    return int(name[2:]) if name.startswith("IC") else None
+
+
+def _expected_cross(key: str, row: dict):
+    pairs = []
+    ngc = _ngc_from_name(row)
+    if ngc is not None:
+        pairs.append(("ngc", ngc))
+    ic = _ic_from_name(row)
+    if ic is not None:
+        pairs.append(("ic", ic))
+    if key.startswith("M"):
+        pairs.append(("m", int(key[1:])))
+    return tuple(pairs)
+
+
+# ------------------------------------------------------------------ 整体--
+
+def test_catalog_size_and_designations(cat, payload):
+    objects = payload["objects"]
+    assert len(objects) == 117
     assert len(cat) == 117
-    assert counts["total"] == 117
-    assert counts["messier"] == 110
-    assert counts["extra_ngc"] == len(EXTRA_NGC)
-
-    expected = {f"M{i}" for i in range(1, 111)}
-    expected |= {f"NGC{n}" for n in EXTRA_NGC}
-    assert {e.name for e in cat} == expected
-    assert len({e.name for e in cat}) == 117
-    assert len({e.source_row for e in cat}) == 117
+    names = [o["name"] for o in objects]
+    assert len(set(names)) == 117
+    messier = sorted(int(n[1:]) for n in names if n.startswith("M"))
+    assert messier == list(range(1, 111))
+    assert len([n for n in names if n.startswith("NGC")]) == 7
 
 
-def test_meta_source_license_and_source_sha(cat):
-    meta = cat.meta
-    assert meta["schema"] == "mbdsdr.dso_catalog.v1"
-    assert meta["source"].startswith("Stellarium")
-    assert meta["source_url"].startswith("https://")
-    assert meta["source_license"] == "GPL-2.0-or-later"
-    assert meta["source_license_url"].startswith("https://")
-    assert len(meta["data_sha256"]) == 64
-    assert set(meta["source_files"]) == {
-        "catalog", "names", "zh_translations", "constellation_spans"}
-    for key, info in meta["source_files"].items():
-        assert len(info["path"]) > 0
-        assert len(info["sha256"]) == 64
-        if REFERENCE.exists():
-            assert _sha256_file(REFERENCE / info["path"]) == info["sha256"], key
+def test_meta_provenance(payload):
+    meta = payload["meta"]
+    assert meta["schema"] == "mbdsdr.dso_catalog.v2"
+    assert meta["source"] == "OpenNGC"
+    assert meta["source_license"] == "CC-BY-SA-4.0"
+    assert meta["source_license_url"] == (
+        "https://creativecommons.org/licenses/by-sa/4.0/")
+    assert "OpenNGC" in meta["attribution"]
+    assert "Wikidata" in meta["attribution"]
+    assert "GPL" not in json.dumps(meta, ensure_ascii=False).upper()
+    assert "zh_CN.po" not in json.dumps(meta, ensure_ascii=False)
+
+    files = meta["source_files"]
+    assert set(files) == {"ngc", "addendum", "zh_labels"}
+    assert files["ngc"]["sha256"] == _sha256_file(NGC_CSV)
+    assert files["addendum"]["sha256"] == _sha256_file(ADDENDUM_CSV)
+    assert files["zh_labels"]["sha256"] == _sha256_file(ZH_PATH)
+    assert meta["data_sha256"] == dso._payload_sha256(payload)
+    assert meta["generated_at"].endswith("+00:00")
+
+    commands = "\n".join(meta["reproduction"]["commands"])
+    assert "NGC.csv" in commands and "addendum.csv" in commands
+    assert "build_dso_catalog" in commands
 
 
-def test_name_coverage_and_no_english_as_chinese(cat):
-    counts = cat.meta["counts"]
-    assert counts["with_name_en"] == 74
-    assert counts["without_name_en"] == 43
-    assert counts["with_zh_name"] == 74
-    assert counts["without_zh_name"] == 43
-    assert counts["no_name_designations"] == counts["no_zh_name_designations"]
-    assert len(counts["no_name_designations"]) == 43
+def test_missing_fields_are_null_and_counted(cat, payload):
+    counts = payload["meta"]["counts"]
+    missing = payload["meta"]["missing"]
+    assert counts["without_magnitude"] == 7
+    assert missing["magnitude"]["designations"] == MISSING_MAG
+    assert counts["without_size_arcmin"] == 2
+    assert missing["size_arcmin"]["designations"] == MISSING_SIZE
+    assert counts["without_size_minor_arcmin"] == 66
+    assert counts["without_name_en"] == 81
+    assert counts["with_name_en"] == 36
+    assert counts["with_zh_name"] == 34
+    assert counts["without_zh_name"] == 83
+    assert counts["magnitude_band_counts"] == {"B": 1, "V": 109, "none": 7}
 
-    for e in cat:
-        if e.zh_name:
-            assert CJK_RE.search(e.zh_name), f"{e.name} 中文名不含汉字: {e.zh_name}"
-            assert e.zh_name != e.name_en, f"{e.name} 中文名与英文名相同"
-        else:
-            assert e.name_en == "", f"{e.name} 无中文名却有英文名，口径不一致"
+    for name in MISSING_MAG:
+        entry = cat.get(name)
+        assert entry is not None and entry.magnitude is None
+        assert entry.magnitude_band == ""
+    for name in MISSING_SIZE:
+        entry = cat.get(name)
+        assert entry is not None and entry.size_arcmin is None
+        assert entry.size_minor_arcmin is None
+    # null 不得被 0/99 冒充
+    for obj in payload["objects"]:
+        assert obj["magnitude"] != 0 and obj["magnitude"] != 99
+        if obj["size_arcmin"] is not None:
+            assert obj["size_arcmin"] > 0
+        if obj["size_minor_arcmin"] is not None:
+            assert obj["size_minor_arcmin"] > 0
 
 
-def test_unnamed_objects_keep_designation_label(cat):
-    for name in ("M2", "M3", "M9", "M10", "M110"):
-        e = cat.get(name)
-        assert e is not None
-        assert e.name_en == ""
-        assert e.zh_name == ""
-        assert e.display_name == name
-        assert e.label == name
-
-
-# ---------------------------------------------------------------------------
-# 30 颗抽样对拍
-# ---------------------------------------------------------------------------
-def test_thirty_sample_against_source_catalog(cat):
-    mrows, ngcrows = _source_rows()
+def test_30_sample_matches_independent_source(cat):
     for name in SAMPLE_30:
+        row, _dup = _source_row(name)
         entry = cat.get(name)
         assert entry is not None, name
-        row = _row_for(name, mrows, ngcrows)
-        parts = row["parts"]
-        assert abs(entry.ra_deg - float(parts[1])) <= RA_DEC_TOL_DEG, name
-        assert abs(entry.dec_deg - float(parts[2])) <= RA_DEC_TOL_DEG, name
-        assert abs(entry.magnitude - float(parts[4])) <= MAG_TOL, name
-        assert abs(entry.size_arcmin - float(parts[7])) <= SIZE_TOL_ARCMIN, name
-        assert entry.catalog_type == parts[5].strip(), name
-        assert entry.source_row == row["row"], name
-        assert entry.constellation == SAMPLE_CON[name], name
+        assert entry.ra_deg == pytest.approx(_ra(row["RA"]), abs=RA_DEC_TOL_DEG)
+        assert entry.dec_deg == pytest.approx(_dec(row["Dec"]), abs=RA_DEC_TOL_DEG)
+        assert entry.constellation == _con(row)
+        assert entry.catalog_type == row["Type"]
+        assert entry.source_file == row["_file"]
+        assert entry.source_row == row["_row"]
+        assert entry.source_name == row["Name"]
+        assert entry.cross_ids == _expected_cross(name, row)
+        if _mag(row)[0] is not None:
+            assert entry.magnitude == pytest.approx(_mag(row)[0], abs=MAG_TOL)
+            assert entry.magnitude_band == _mag(row)[1]
+        else:
+            assert entry.magnitude is None
+        expected_size = _size(row, "MajAx")
+        if expected_size is None:
+            assert entry.size_arcmin is None
+        else:
+            assert entry.size_arcmin == pytest.approx(
+                expected_size, abs=SIZE_TOL_ARCMIN)
+        expected_minor = _size(row, "MinAx")
+        if expected_minor is None:
+            assert entry.size_minor_arcmin is None
+        else:
+            assert entry.size_minor_arcmin == pytest.approx(
+                expected_minor, abs=SIZE_TOL_ARCMIN)
 
 
-def test_thirty_sample_names_against_source(cat):
-    mrows, ngcrows = _source_rows()
-    names = _source_names()
-    zh = _source_zh()
-    for name in SAMPLE_30:
+def test_sample_names(cat):
+    for name, (english, chinese) in SAMPLE_NAMES.items():
         entry = cat.get(name)
-        row = _row_for(name, mrows, ngcrows)
-        english = _names_for(row, names)
-        translated = [zh[n] for n in english if n in zh]
-        assert entry.name_en == (english[0] if english else ""), name
-        assert entry.zh_name == (translated[0] if translated else ""), name
-
-
-def test_sample_names_are_sourced(cat):
-    for name, (en, zh) in SAMPLE_NAMES.items():
-        entry = cat.get(name)
-        assert entry is not None
-        assert entry.name_en == en, name
-        assert entry.zh_name == zh, name
-    assert "Omega Centauri" in cat.get("NGC5139").aliases_en
-
-
-# ---------------------------------------------------------------------------
-# 类型 / M40 / M102
-# ---------------------------------------------------------------------------
-def test_type_mapping_and_special_objects(cat):
-    for e in cat:
-        assert cat.meta["type_mapping"][e.catalog_type] == e.dso_type
-
-    counts = cat.meta["counts"]
-    assert counts["render_type_counts"] == {
-        "cluster": 59, "cluster_nebula": 5, "double_star": 1,
-        "galaxy": 41, "nebula": 10, "supernova_remnant": 1,
-    }
-    assert {e.name for e in cat.filter_type("cluster_nebula")} == {
-        "M16", "M17", "M20", "M45", "NGC2070"}
-    assert {e.name for e in cat.filter_type("double_star")} == {"M40"}
+        assert entry.name_en == english
+        assert entry.zh_name == chinese
+        assert CJK_RE.search(entry.zh_name)
+        assert entry.zh_name_source in ("Wikidata", "自译")
 
     m40 = cat.get("M40")
-    assert m40.catalog_type == "*"
+    assert m40.name_en == "" and m40.zh_name == ""
+    assert m40.zh_name_source == ""
+    assert m40.size_arcmin is None and m40.size_minor_arcmin is None
     assert m40.dso_type == "double_star"
-    assert m40.size_arcmin == 0.0
-    assert m40.size_minor_arcmin is None
 
     m102 = cat.get("M102")
-    assert m102.catalog_type == "Gx"
-    assert dict(m102.cross_ids)["ngc"] == 5866
-    assert abs(m102.ra_deg - 226.623171) <= RA_DEC_TOL_DEG
-    assert abs(m102.dec_deg - 55.763308) <= RA_DEC_TOL_DEG
-    assert m102.constellation == "Dra"
+    assert m102.name_en == "" and m102.zh_name == ""
 
 
-# ---------------------------------------------------------------------------
-# API 与桌面 _draw_dso 字段对齐
-# ---------------------------------------------------------------------------
-def test_lookup_and_view_contract(cat):
-    # _draw_dso 实际读取的字段
-    for e in cat:
-        assert isinstance(e.name, str)
-        assert isinstance(e.dso_type, str)
-        assert isinstance(e.ra_deg, float)
-        assert isinstance(e.dec_deg, float)
-        assert isinstance(e.magnitude, float)
-        assert isinstance(e.size_arcmin, float)
-        assert e.ra_hours == e.ra_deg / 15.0
-
-    assert cat.get("M31") is not None
-    assert cat.get("m 31") is not None
-    assert cat.get("NGC 253") is not None
-    assert cat.get("M111") is None
-    assert cat.get("NGC9999") is None
-
-    near = cat.near(10.6847, 41.26875, 2.0)
-    assert {e.name for e in near} >= {"M31", "M32", "M110"}
-    assert len(cat.filter_type("galaxy")) == 41
-    assert len(cat.filter_type("supernova_remnant")) == 1
+def test_zh_names_are_sourced_and_counted(cat, payload):
+    self_translated = {e.name for e in cat if e.zh_name_source == "自译"}
+    wikidata = [e for e in cat if e.zh_name_source == "Wikidata"]
+    empty = [e for e in cat if not e.zh_name]
+    assert self_translated == SELF_ZH
+    assert len(wikidata) == 29
+    assert len(empty) == 83
+    assert len(wikidata) + len(self_translated) == 34
+    for entry in wikidata:
+        assert re.match(r"^Q\d+", entry.zh_name_ref)
+        assert entry.zh_name != entry.name_en
+        assert CJK_RE.search(entry.zh_name)
+    for entry in cat:
+        if not entry.zh_name:
+            assert entry.zh_name_source == "" and entry.zh_name_ref == ""
+        else:
+            assert entry.zh_name_source in ("Wikidata", "自译")
+    meta_text = json.dumps(payload["meta"], ensure_ascii=False)
+    assert "zh_CN.po" not in meta_text and "GPL" not in meta_text.upper()
 
 
-def test_display_name_prefers_chinese(cat):
-    assert cat.get("M31").display_name == "仙女座星系"
-    assert cat.get("M42").display_name == "猎户座大星云"
-    assert cat.get("M2").display_name == "M2"
+def test_m102_convention_pinned(cat, payload):
+    """OpenNGC 记为 Dup/M=101；本项目按历史约定取 NGC 5866，条目数保持 117。"""
+    assert len(cat) == 117
+    assert len([e for e in cat if e.name.startswith("M")]) == 110
+    m102 = cat.get("M102")
+    row, dup = _source_row("M102")
+    assert dup["Type"] == "Dup" and dup["M"] == "101"
+    assert m102 is not None
+    assert m102.source_name == "NGC5866"
+    assert m102.source_file == "NGC.csv"
+    assert m102.cross_ids == (("ngc", 5866), ("m", 102))
+    assert m102.catalog_type == "G"
+    assert m102.ra_deg == pytest.approx(_ra(row["RA"]), abs=1e-6)
+    assert m102.dec_deg == pytest.approx(_dec(row["Dec"]), abs=1e-6)
+    convention = payload["meta"]["m102_convention"]
+    assert convention["resolved_to"] == "NGC 5866"
+    assert convention["entry_count"] == 117
+    assert convention["messier_count"] == 110
+    assert "Dup" in convention["openngc_record"]
 
 
-# ---------------------------------------------------------------------------
-# 守卫：重复 / 越界 / 缺星等 / meta / SHA / 计数
-# ---------------------------------------------------------------------------
-def _base_payload() -> dict:
-    return json.loads(DSO_PATH.read_text(encoding="utf-8"))
+def test_type_mapping_and_counts(payload):
+    meta = payload["meta"]
+    mapping = meta["type_mapping"]
+    assert mapping["Other"] == "cluster"
+    assert mapping["*Ass"] == "cluster"
+    assert mapping["**"] == "double_star"
+    assert mapping["Cl+N"] == "cluster_nebula"
+    assert mapping["SNR"] == "supernova_remnant"
+    for obj in payload["objects"]:
+        assert mapping[obj["catalog_type"]] == obj["dso_type"]
+        assert obj["dso_type"] in dso._RENDER_TYPES
+    assert meta["counts"]["render_type_counts"] == {
+        "cluster": 60, "cluster_nebula": 1, "double_star": 1,
+        "galaxy": 41, "nebula": 13, "supernova_remnant": 1,
+    }
 
 
-def test_duplicate_designation_rejected(tmp_path):
-    payload = _base_payload()
-    payload["objects"].append(dict(payload["objects"][0]))
-    _rehash(payload)
-    path = _variant(tmp_path, payload, "dup.json")
-    with pytest.raises(dso.DSOIntegrityError, match="重复"):
-        dso.load_dso_catalog(str(path))
+def test_old_version_deprecated_in_documentation():
+    text = DOC_PATH.read_text(encoding="utf-8")
+    assert "GPL" in text
+    assert "已废弃" in text
+    assert "M102" in text and "NGC 5866" in text
+    assert "CC BY-SA 4.0" in text
 
 
-def test_out_of_range_coordinate_rejected(tmp_path):
-    payload = _base_payload()
-    payload["objects"][0]["ra_deg"] = 400.0
-    _rehash(payload)
-    path = _variant(tmp_path, payload, "ra.json")
-    with pytest.raises(dso.DSOIntegrityError, match="RA 越界"):
-        dso.load_dso_catalog(str(path))
+# ------------------------------------------------------------------ 守卫--
+
+def _rewrite(payload: dict) -> dict:
+    clone = json.loads(json.dumps(payload))
+    clone["meta"]["data_sha256"] = dso._payload_sha256(clone)
+    return clone
 
 
-def test_missing_magnitude_rejected(tmp_path):
-    payload = _base_payload()
-    payload["objects"][0]["magnitude"] = 99
-    _rehash(payload)
-    path = _variant(tmp_path, payload, "mag.json")
-    with pytest.raises(dso.DSOIntegrityError, match="星等缺失"):
-        dso.load_dso_catalog(str(path))
+def test_guard_duplicate_designation(payload):
+    clone = _rewrite(payload)
+    clone["objects"][1]["name"] = "M1"
+    clone["objects"][1]["cross_ids"]["m"] = 1
+    clone = _rewrite(clone)
+    with pytest.raises(dso.DSOIntegrityError):
+        dso._validate_payload(clone)
 
 
-@pytest.mark.parametrize("key", ["source_url", "source_license", "source_files"])
-def test_missing_meta_rejected(tmp_path, key):
-    payload = _base_payload()
-    payload["meta"].pop(key)
-    _rehash(payload)
-    path = _variant(tmp_path, payload, f"meta_{key}.json")
-    with pytest.raises(dso.DSOMetadataError):
-        dso.load_dso_catalog(str(path))
+def test_guard_magnitude_sentinel_rejected(payload):
+    clone = _rewrite(payload)
+    target = next(o for o in clone["objects"] if o["name"] == "M31")
+    target["magnitude"] = 99
+    clone = _rewrite(clone)
+    with pytest.raises(dso.DSOIntegrityError, match="星等"):
+        dso._validate_payload(clone)
 
 
-def test_tampered_source_sha_rejected(tmp_path):
-    payload = _base_payload()
-    payload["meta"]["source_files"]["catalog"]["sha256"] = "0" * 64
-    path = _variant(tmp_path, payload, "sha.json")
-    with pytest.raises(dso.DSOIntegrityError, match="SHA-256"):
-        dso.load_dso_catalog(str(path))
+def test_guard_zero_size_rejected(payload):
+    clone = _rewrite(payload)
+    target = next(o for o in clone["objects"] if o["name"] == "M31")
+    target["size_arcmin"] = 0
+    clone = _rewrite(clone)
+    with pytest.raises(dso.DSOIntegrityError, match="视尺寸"):
+        dso._validate_payload(clone)
 
 
-def test_tampered_record_rejected(tmp_path):
-    payload = _base_payload()
-    payload["objects"][0]["zh_name"] = "Fake English Name"
-    _rehash(payload)
-    path = _variant(tmp_path, payload, "tamper.json")
+def test_guard_zh_without_source_rejected(payload):
+    clone = _rewrite(payload)
+    target = next(o for o in clone["objects"] if o["name"] == "M31")
+    target["zh_name_source"] = ""
+    target["zh_name_ref"] = ""
+    clone = _rewrite(clone)
     with pytest.raises(dso.DSOIntegrityError, match="中文名"):
-        dso.load_dso_catalog(str(path))
+        dso._validate_payload(clone)
 
 
-def test_count_mismatch_rejected(tmp_path):
-    payload = _base_payload()
-    payload["meta"]["counts"]["total"] = 118
-    _rehash(payload)
-    path = _variant(tmp_path, payload, "count.json")
-    with pytest.raises(dso.DSOIntegrityError, match="counts.total"):
-        dso.load_dso_catalog(str(path))
+def test_guard_meta_gpl_rejected(payload):
+    clone = _rewrite(payload)
+    clone["meta"]["notes"].append("GPL")
+    with pytest.raises(dso.DSOMetadataError, match="GPL"):
+        dso._validate_payload(clone)
+
+
+def test_guard_sha_tamper(payload):
+    clone = json.loads(json.dumps(payload))
+    clone["objects"][0]["ra_deg"] += 0.01
+    with pytest.raises(dso.DSOIntegrityError, match="SHA-256"):
+        dso._validate_payload(clone)

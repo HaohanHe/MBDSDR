@@ -3,15 +3,21 @@
 mbdsdr_ai/astronomy/dso.py — 深空天体 (DSO) 目录
 ==================================================
 
-数据来自 ``data/dso_catalog.json``（由 ``build_dso_catalog.py`` 生成）：
+数据来自 ``data/dso_catalog.json``（由 ``build_dso_catalog.py`` 从 OpenNGC 生成）：
 
 - Messier 1–110 全量 + 7 个常用亮 NGC；
-- 坐标/星等/角径/类型取自 Stellarium ``nebulae/default/catalog.txt``；
-- 英文名取自同目录 ``names.dat``，中文名取自
-  ``po/stellarium-sky/zh_CN.po`` 对 ``names.dat`` 的翻译；
-- 星座归属由 Stellarium ``data/constellations_spans.dat``（ADC VI/42）
-  的 IAU spans 查表得到；
-- 取不到名字的条目留空并计数，不用英文名冒充中文名，不凭记忆补条目。
+- 坐标/星等/角径/类型/星座取自 OpenNGC
+  ``NGC.csv`` + ``addendum.csv``（CC BY-SA 4.0）；
+- 英文常用名取自 OpenNGC ``Common names`` 列；中文名取自 Wikidata
+  （CC0 1.0）标签，取不到且可意译者自译并逐条标注
+  ``zh_name_source="自译"``；仍取不到留空并计数；
+- M102 按历史约定固定映射 NGC 5866（OpenNGC 记为 Dup，M=101），
+  故 Messier 仍为 110 条、总数仍为 117 条；
+- 源目录缺失的星等/角径写 ``None``（未知），绝不用 0/99 冒充。
+
+旧版 ``a3aadd8`` 及更早的 ``dso_catalog.json`` 由 Stellarium
+``catalog.txt``/``zh_CN.po`` 生成，含 GPL-2.0-or-later 来源数据，已废弃。
+当前数据不含任何 GPL 来源。
 
 DSO 渲染类型：``galaxy`` / ``nebula`` / ``cluster`` /
 ``supernova_remnant`` / ``cluster_nebula`` / ``double_star``。
@@ -42,12 +48,12 @@ DEFAULT_DSO_PATH = Path(
 
 _REQUIRED_META_KEYS = (
     "schema", "catalog", "source", "source_url", "source_license",
-    "source_license_url", "attribution", "source_files",
-    "constellation_method", "name_policy", "type_mapping", "counts",
+    "source_license_url", "attribution", "source_dir", "source_files",
+    "constellation_method", "name_policy", "zh_name_policy", "type_mapping",
+    "counts", "missing", "m102_convention", "generated_at", "reproduction",
     "data_sha256",
 )
-_REQUIRED_SOURCE_FILES = ("catalog", "names", "zh_translations",
-                          "constellation_spans")
+_REQUIRED_SOURCE_FILES = ("ngc", "addendum", "zh_labels")
 _RENDER_TYPES = {
     "galaxy", "nebula", "cluster", "supernova_remnant",
     "cluster_nebula", "double_star",
@@ -71,8 +77,8 @@ class DSOEntry:
     dso_type: str
     ra_hours: float
     dec_deg: float
-    magnitude: float
-    size_arcmin: float
+    magnitude: Optional[float]
+    size_arcmin: Optional[float]
     constellation: str = ""
     name_en: str = ""
     zh_name: str = ""
@@ -82,6 +88,11 @@ class DSOEntry:
     size_minor_arcmin: Optional[float] = None
     cross_ids: Tuple[Tuple[str, int], ...] = ()
     source_row: int = 0
+    source_file: str = ""
+    source_name: str = ""
+    magnitude_band: str = ""
+    zh_name_source: str = ""
+    zh_name_ref: str = ""
 
     @property
     def ra_deg(self) -> float:
@@ -118,8 +129,15 @@ def _check_meta(payload: dict) -> dict:
     missing = [k for k in _REQUIRED_META_KEYS if not meta.get(k)]
     if missing:
         raise DSOMetadataError(f"DSO 数据 meta 缺少必需字段: {missing}")
-    if meta["schema"] != "mbdsdr.dso_catalog.v1":
+    if meta["schema"] != "mbdsdr.dso_catalog.v2":
         raise DSOMetadataError(f"DSO 数据 schema 不匹配: {meta['schema']!r}")
+    if meta.get("source") != "OpenNGC":
+        raise DSOMetadataError(f"DSO 数据 source 不是 OpenNGC: {meta.get('source')!r}")
+    if meta.get("source_license") != "CC-BY-SA-4.0":
+        raise DSOMetadataError(
+            f"DSO 数据许可不是 CC-BY-SA-4.0: {meta.get('source_license')!r}")
+    if "GPL" in json.dumps(meta, ensure_ascii=False).upper():
+        raise DSOMetadataError("DSO meta 不得再包含 GPL 来源声明")
     for key in ("source_url", "source_license_url"):
         if not str(meta[key]).startswith(("https://", "http://")):
             raise DSOMetadataError(f"meta.{key} 不是有效 URL")
@@ -154,19 +172,31 @@ def _check_entry(rec: dict, meta: dict) -> None:
         raise DSOIntegrityError(f"{name} RA 越界: {ra}")
     if not (-90.0 <= dec <= 90.0):
         raise DSOIntegrityError(f"{name} Dec 越界: {dec}")
-    try:
-        mag = float(rec["magnitude"])
-    except (TypeError, ValueError) as exc:
-        raise DSOIntegrityError(f"{name} 星等缺失") from exc
-    if not math.isfinite(mag) or not (0.0 < mag < 90.0):
-        # 99 是源目录的缺失哨兵；0/负值同样视为缺失，绝不静默丢条目。
-        raise DSOIntegrityError(f"{name} 星等缺失或非法: {mag}")
-    size = float(rec["size_arcmin"])
-    if not math.isfinite(size) or size < 0.0:
-        raise DSOIntegrityError(f"{name} 视尺寸非法: {size}")
+    mag = rec.get("magnitude")
+    band = rec.get("magnitude_band") or ""
+    if mag is None:
+        if band:
+            raise DSOIntegrityError(
+                f"{name} 星等未知却声明了波段 {band!r}")
+    else:
+        try:
+            mag = float(mag)
+        except (TypeError, ValueError) as exc:
+            raise DSOIntegrityError(f"{name} 星等非法") from exc
+        if not math.isfinite(mag) or not (0.0 < mag < 90.0):
+            raise DSOIntegrityError(f"{name} 星等非法: {mag}")
+        if band not in ("V", "B"):
+            raise DSOIntegrityError(f"{name} 星等波段非法: {band!r}")
+    size = rec.get("size_arcmin")
+    if size is not None:
+        size = float(size)
+        if not math.isfinite(size) or size <= 0.0:
+            raise DSOIntegrityError(f"{name} 视尺寸非法: {size}")
     minor = rec.get("size_minor_arcmin")
-    if minor is not None and (not math.isfinite(float(minor)) or float(minor) < 0):
-        raise DSOIntegrityError(f"{name} 短轴尺寸非法: {minor}")
+    if minor is not None:
+        minor = float(minor)
+        if not math.isfinite(minor) or minor <= 0.0:
+            raise DSOIntegrityError(f"{name} 短轴尺寸非法: {minor}")
     catalog_type = rec.get("catalog_type")
     expected_render = (meta.get("type_mapping") or {}).get(catalog_type)
     if expected_render != rec.get("dso_type") or expected_render not in _RENDER_TYPES:
@@ -177,10 +207,22 @@ def _check_entry(rec: dict, meta: dict) -> None:
         raise DSOIntegrityError(f"{name} 星座缩写非法: {con!r}")
     name_en = rec.get("name_en") or ""
     zh_name = rec.get("zh_name") or ""
-    if zh_name and not _CJK_RE.search(zh_name):
-        raise DSOIntegrityError(f"{name} 中文名不含汉字: {zh_name!r}")
-    if zh_name and zh_name == name_en:
-        raise DSOIntegrityError(f"{name} 中文名与英文名相同: {zh_name!r}")
+    zh_source = rec.get("zh_name_source") or ""
+    zh_ref = rec.get("zh_name_ref") or ""
+    if zh_name:
+        if not _CJK_RE.search(zh_name):
+            raise DSOIntegrityError(f"{name} 中文名不含汉字: {zh_name!r}")
+        if zh_name == name_en:
+            raise DSOIntegrityError(f"{name} 中文名与英文名相同: {zh_name!r}")
+        if zh_source not in ("Wikidata", "自译"):
+            raise DSOIntegrityError(
+                f"{name} 中文名来源非法: {zh_source!r}")
+        if zh_source == "Wikidata" and not re.match(r"^Q\d+", zh_ref):
+            raise DSOIntegrityError(
+                f"{name} Wikidata 中文名缺 QID: {zh_ref!r}")
+    elif zh_source or zh_ref:
+        raise DSOIntegrityError(
+            f"{name} 中文名为空却声明了来源/依据: {zh_source!r}/{zh_ref!r}")
     for field in ("aliases_en", "aliases_zh"):
         if not isinstance(rec.get(field), list):
             raise DSOIntegrityError(f"{name} {field} 不是列表")
@@ -194,24 +236,44 @@ def _check_entry(rec: dict, meta: dict) -> None:
         raise DSOIntegrityError(f"{name} 与 cross_ids.m 不一致")
     if name.startswith("NGC") and cross.get("ngc") != int(name[3:]):
         raise DSOIntegrityError(f"{name} 与 cross_ids.ngc 不一致")
+    source_file = rec.get("source_file")
+    if source_file not in ("NGC.csv", "addendum.csv"):
+        raise DSOIntegrityError(f"{name} source_file 非法: {source_file!r}")
     if not isinstance(rec.get("source_row"), int) or rec["source_row"] <= 0:
         raise DSOIntegrityError(f"{name} source_row 非法")
+    source_name = rec.get("source_name")
+    if not isinstance(source_name, str) or not source_name:
+        raise DSOIntegrityError(f"{name} source_name 缺失")
+    if name == "M102" and (cross.get("ngc") != 5866
+                           or source_name != "NGC5866"):
+        raise DSOIntegrityError(
+            "M102 必须固定映射 NGC 5866（OpenNGC Dup 约定）")
 
 
 def _check_counts(objects: List[dict], meta: dict) -> None:
     counts = meta.get("counts")
     if not isinstance(counts, dict):
         raise DSOMetadataError("meta.counts 不是对象")
+    missing = meta.get("missing")
+    if not isinstance(missing, dict):
+        raise DSOMetadataError("meta.missing 不是对象")
     total = len(objects)
     messier = [o for o in objects if o["name"].startswith("M")]
     ngc = [o for o in objects if o["name"].startswith("NGC")]
     without_en = [o["name"] for o in objects if not o.get("name_en")]
     without_zh = [o["name"] for o in objects if not o.get("zh_name")]
+    without_mag = [o["name"] for o in objects if o.get("magnitude") is None]
+    without_size = [o["name"] for o in objects if o.get("size_arcmin") is None]
+    without_minor = [o["name"] for o in objects
+                     if o.get("size_minor_arcmin") is None]
+    bands: Dict[str, int] = {}
     raw: Dict[str, int] = {}
     render: Dict[str, int] = {}
     for obj in objects:
         raw[obj["catalog_type"]] = raw.get(obj["catalog_type"], 0) + 1
         render[obj["dso_type"]] = render.get(obj["dso_type"], 0) + 1
+        label = obj.get("magnitude_band") or "none"
+        bands[label] = bands.get(label, 0) + 1
     expected = {
         "total": total,
         "messier": 110,
@@ -222,20 +284,41 @@ def _check_counts(objects: List[dict], meta: dict) -> None:
         "without_zh_name": len(without_zh),
         "no_name_designations": without_en,
         "no_zh_name_designations": without_zh,
+        "with_magnitude": total - len(without_mag),
+        "without_magnitude": len(without_mag),
+        "no_magnitude_designations": without_mag,
+        "with_size_arcmin": total - len(without_size),
+        "without_size_arcmin": len(without_size),
+        "no_size_designations": without_size,
+        "with_size_minor_arcmin": total - len(without_minor),
+        "without_size_minor_arcmin": len(without_minor),
+        "magnitude_band_counts": dict(sorted(bands.items())),
         "raw_type_counts": dict(sorted(raw.items())),
         "render_type_counts": dict(sorted(render.items())),
+        "m102_resolved_to_ngc": 5866,
     }
     for key, value in expected.items():
         if counts.get(key) != value:
             raise DSOIntegrityError(
                 f"meta.counts.{key} 与数据不一致: {counts.get(key)!r} != {value!r}")
+    for key, names in (
+            ("magnitude", without_mag), ("size_arcmin", without_size),
+            ("size_minor_arcmin", without_minor), ("name_en", without_en),
+            ("zh_name", without_zh)):
+        if missing.get(key, {}).get("count") != len(names):
+            raise DSOIntegrityError(f"meta.missing.{key}.count 与数据不一致")
+        if missing[key].get("designations") != names:
+            raise DSOIntegrityError(
+                f"meta.missing.{key}.designations 与数据不一致")
     if len(messier) != 110:
         raise DSOIntegrityError(f"Messier 条数不是 110: {len(messier)}")
     numbers = sorted(int(o["name"][1:]) for o in messier)
     if numbers != list(range(1, 111)):
         raise DSOIntegrityError("Messier 编号缺号或重复")
-    if len({o["source_row"] for o in objects}) != total:
-        raise DSOIntegrityError("DSO source_row 重复，疑似同一条目被复制")
+    locations = [(o.get("source_file"), o.get("source_row")) for o in objects]
+    if len(set(locations)) != total:
+        raise DSOIntegrityError(
+            "DSO (source_file, source_row) 重复，疑似同一条目被复制")
 
 
 def _load_payload(path: Path) -> dict:
@@ -246,6 +329,11 @@ def _load_payload(path: Path) -> dict:
         raise
     except ValueError as exc:
         raise DSOMetadataError(f"DSO 数据不是合法 JSON: {path}") from exc
+    return _validate_payload(payload)
+
+
+def _validate_payload(payload: dict) -> dict:
+    """校验内存中的 DSO payload（测试与加载共用）。"""
     meta = _check_meta(payload)
     objects = payload.get("objects")
     if not isinstance(objects, list) or not objects:
@@ -262,13 +350,15 @@ def _load_payload(path: Path) -> dict:
 
 def _entry_from_record(rec: dict) -> DSOEntry:
     cross = tuple((k, v) for k, v in rec["cross_ids"].items() if v is not None)
+    magnitude = rec.get("magnitude")
+    size = rec.get("size_arcmin")
     return DSOEntry(
         name=rec["name"],
         dso_type=rec["dso_type"],
         ra_hours=float(rec["ra_deg"]) / 15.0,
         dec_deg=float(rec["dec_deg"]),
-        magnitude=float(rec["magnitude"]),
-        size_arcmin=float(rec["size_arcmin"]),
+        magnitude=None if magnitude is None else float(magnitude),
+        size_arcmin=None if size is None else float(size),
         constellation=rec["constellation"],
         name_en=rec.get("name_en") or "",
         zh_name=rec.get("zh_name") or "",
@@ -279,6 +369,11 @@ def _entry_from_record(rec: dict) -> DSOEntry:
                            else float(rec["size_minor_arcmin"])),
         cross_ids=cross,
         source_row=int(rec.get("source_row") or 0),
+        source_file=rec.get("source_file") or "",
+        source_name=rec.get("source_name") or "",
+        magnitude_band=rec.get("magnitude_band") or "",
+        zh_name_source=rec.get("zh_name_source") or "",
+        zh_name_ref=rec.get("zh_name_ref") or "",
     )
 
 
@@ -349,6 +444,8 @@ def recommend_dso(jd: float, observer_lat_deg: float,
 
     out: List[DSOEntry] = []
     for e in cat:
+        if e.magnitude is None:
+            continue  # 星等未知，不能据此声称可见
         if e.magnitude > max_magnitude:
             continue
         ha = math.radians((gmst - e.ra_deg) % 360.0)

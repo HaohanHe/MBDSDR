@@ -175,7 +175,7 @@ def test_symbol_size_follows_catalog_angular_size():
 def _find_bright_visible(v, gs, jd, min_alt=20.0, max_mag=4.0):
     for e in _dso.BUILTIN_CATALOG:
         az, alt = _altaz(e, gs, jd)
-        if alt < min_alt or e.magnitude > max_mag:
+        if e.magnitude is None or alt < min_alt or e.magnitude > max_mag:
             continue
         if not v._on_screen(v._sky_to_screen(az, alt)):
             continue
@@ -254,7 +254,7 @@ def test_faint_dso_beyond_naked_eye_limit_not_pickable():
     try:
         faint = None
         for e in _dso.BUILTIN_CATALOG:
-            if e.magnitude < 7.5:
+            if e.magnitude is None or e.magnitude < 7.5:
                 continue
             az, alt = _altaz(e, gs, jd)
             if alt > 20.0 and v._on_screen(v._sky_to_screen(az, alt)):

@@ -5052,9 +5052,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             try:
                 from mbdsdr_ai.astronomy import dso as _dso
                 for e in _dso.BUILTIN_CATALOG:
+                    size = dso_size_arcmin(e)
                     candidates.append(("dso", e.name, e.ra_deg, e.dec_deg,
-                                       float(e.magnitude),
-                                       float(e.size_arcmin) / 60.0))
+                                       dso_magnitude(e),
+                                       None if size is None else size / 60.0))
             except Exception:
                 pass
         # 已选 DSO 有标记环, 可再点中（星表内条目用真实星等；目录外不给点）
@@ -5063,9 +5064,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             ra_d, de_d = pb.get("ra_deg"), pb.get("dec_deg")
             ent = self._dso_entry(str(pb.get("key")))
             if ra_d is not None and ent is not None:
+                size = dso_size_arcmin(ent)
                 candidates.append(("dso", ent.name, float(ra_d),
-                                   float(de_d), float(ent.magnitude),
-                                   float(ent.size_arcmin) / 60.0))
+                                   float(de_d), dso_magnitude(ent),
+                                   None if size is None else size / 60.0))
 
         best: Optional[Dict[str, object]] = None
         best_score: Optional[float] = None

@@ -1,0 +1,2722 @@
+{
+ "meta": {
+  "source": "Wikidata",
+  "source_url": "https://query.wikidata.org/sparql",
+  "license": "CC0-1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "fetched_at": "2026-11-04T15:40:54+00:00",
+  "query": "SELECT ?item ?cat ?zh ?zhcn ?zhhans ?zhhant ?en ?typeLabel WHERE {\n  VALUES ?cat { \"M 1\" \"M 10\" \"M 100\" \"M 101\" \"M 103\" \"M 104\" \"M 105\" \"M 106\" \"M 107\" \"M 108\" \"M 109\" \"M 11\" \"M 110\" \"M 12\" \"M 13\" \"M 14\" \"M 15\" \"M 16\" \"M 17\" \"M 18\" \"M 19\" \"M 2\" \"M 20\" \"M 21\" \"M 22\" \"M 23\" \"M 24\" \"M 25\" \"M 26\" \"M 27\" \"M 28\" \"M 29\" \"M 3\" \"M 30\" \"M 31\" \"M 32\" \"M 33\" \"M 34\" \"M 35\" \"M 36\" \"M 37\" \"M 38\" \"M 39\" \"M 4\" \"M 40\" \"M 41\" \"M 42\" \"M 43\" \"M 44\" \"M 45\" \"M 46\" \"M 47\" \"M 48\" \"M 49\" \"M 5\" \"M 50\" \"M 51\" \"M 52\" \"M 53\" \"M 54\" \"M 55\" \"M 56\" \"M 57\" \"M 58\" \"M 59\" \"M 6\" \"M 60\" \"M 61\" \"M 62\" \"M 63\" \"M 64\" \"M 65\" \"M 66\" \"M 67\" \"M 68\" \"M 69\" \"M 7\" \"M 70\" \"M 71\" \"M 72\" \"M 73\" \"M 74\" \"M 75\" \"M 76\" \"M 77\" \"M 78\" \"M 79\" \"M 8\" \"M 80\" \"M 81\" \"M 82\" \"M 83\" \"M 84\" \"M 85\" \"M 86\" \"M 87\" \"M 88\" \"M 89\" \"M 9\" \"M 90\" \"M 91\" \"M 92\" \"M 93\" \"M 94\" \"M 95\" \"M 96\" \"M 97\" \"M 98\" \"M 99\" \"M1\" \"M10\" \"M100\" \"M101\" \"M103\" \"M104\" \"M105\" \"M106\" \"M107\" \"M108\" \"M109\" \"M11\" \"M110\" \"M12\" \"M13\" \"M14\" \"M15\" \"M16\" \"M17\" \"M18\" \"M19\" \"M2\" \"M20\" \"M21\" \"M22\" \"M23\" \"M24\" \"M25\" \"M26\" \"M27\" \"M28\" \"M29\" \"M3\" \"M30\" \"M31\" \"M32\" \"M33\" \"M34\" \"M35\" \"M36\" \"M37\" \"M38\" \"M39\" \"M4\" \"M40\" \"M41\" \"M42\" \"M43\" \"M44\" \"M45\" \"M46\" \"M47\" \"M48\" \"M49\" \"M5\" \"M50\" \"M51\" \"M52\" \"M53\" \"M54\" \"M55\" \"M56\" \"M57\" \"M58\" \"M59\" \"M6\" \"M60\" \"M61\" \"M62\" \"M63\" \"M64\" \"M65\" \"M66\" \"M67\" \"M68\" \"M69\" \"M7\" \"M70\" \"M71\" \"M72\" \"M73\" \"M74\" \"M75\" \"M76\" \"M77\" \"M78\" \"M79\" \"M8\" \"M80\" \"M81\" \"M82\" \"M83\" \"M84\" \"M85\" \"M86\" \"M87\" \"M88\" \"M89\" \"M9\" \"M90\" \"M91\" \"M92\" \"M93\" \"M94\" \"M95\" \"M96\" \"M97\" \"M98\" \"M99\" \"NGC 2070\" \"NGC 253\" \"NGC 5139\" \"NGC 5866\" \"NGC 7000\" \"NGC 7293\" \"NGC 869\" \"NGC 884\" \"NGC2070\" \"NGC253\" \"NGC5139\" \"NGC5866\" \"NGC7000\" \"NGC7293\" \"NGC869\" \"NGC884\" }\n  ?item wdt:P528 ?cat .\n  OPTIONAL { ?item rdfs:label ?zh FILTER(lang(?zh)=\"zh\") }\n  OPTIONAL { ?item rdfs:label ?zhcn FILTER(lang(?zhcn)=\"zh-cn\") }\n  OPTIONAL { ?item rdfs:label ?zhhans FILTER(lang(?zhhans)=\"zh-hans\") }\n  OPTIONAL { ?item rdfs:label ?zhhant FILTER(lang(?zhhant)=\"zh-hant\") }\n  OPTIONAL { ?item rdfs:label ?en FILTER(lang(?en)=\"en\") }\n  OPTIONAL { ?item wdt:P31 ?type . ?type rdfs:label ?typeLabel FILTER(lang(?typeLabel)=\"en\") }\n}",
+  "note": "Messier/NGC/IC objects matched by Wikidata P528 catalog number; only labels in zh/zh-cn/zh-hans/zh-hant containing CJK and not equal to a bare designation are kept.",
+  "zh_conversion": "Wikidata zh/zh-cn/zh-hans 标签原样保留于 label_raw；显示用 label 仅做常用繁体字→简体字转写（逐字替换，不改词）。"
+ },
+ "labels": {
+  "M1": {
+   "designation": "M 1",
+   "chosen": {
+    "qid": "Q10934",
+    "label": "蟹状星云",
+    "lang": "zh",
+    "en": "Crab Nebula",
+    "types": [
+     "supernova remnant"
+    ],
+    "matched": "M1",
+    "label_raw": "蟹狀星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q10934",
+     "cats": [
+      "M1"
+     ],
+     "labels": {
+      "zh": "蟹狀星雲"
+     },
+     "en": "Crab Nebula",
+     "types": [
+      "supernova remnant"
+     ]
+    }
+   ]
+  },
+  "M2": {
+   "designation": "M 2",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11099",
+     "cats": [
+      "M2"
+     ],
+     "labels": {
+      "zh": "M2"
+     },
+     "en": "Messier 2",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M3": {
+   "designation": "M 3",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q78384126",
+     "cats": [
+      "M 3"
+     ],
+     "labels": {
+      "zh": "M3"
+     },
+     "en": "Messier 3",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M4": {
+   "designation": "M 4",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11212",
+     "cats": [
+      "M 4"
+     ],
+     "labels": {
+      "zh": "M4"
+     },
+     "en": "Messier 4",
+     "types": [
+      "globular cluster",
+      "star cluster"
+     ]
+    }
+   ]
+  },
+  "M5": {
+   "designation": "M 5",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11217",
+     "cats": [
+      "M 5"
+     ],
+     "labels": {
+      "zh": "M5"
+     },
+     "en": "Messier 5",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M6": {
+   "designation": "M 6",
+   "chosen": {
+    "qid": "Q11225",
+    "label": "蝴蝶星团",
+    "lang": "zh",
+    "en": "Butterfly Cluster",
+    "types": [
+     "open cluster"
+    ],
+    "matched": "M 6",
+    "label_raw": "蝴蝶星團",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q11225",
+     "cats": [
+      "M 6"
+     ],
+     "labels": {
+      "zh": "蝴蝶星團"
+     },
+     "en": "Butterfly Cluster",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M7": {
+   "designation": "M 7",
+   "chosen": {
+    "qid": "Q11234",
+    "label": "托勒密星团",
+    "lang": "zh",
+    "en": "Messier 7",
+    "types": [
+     "open cluster"
+    ],
+    "matched": "M 7",
+    "label_raw": "托勒密星團",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q11234",
+     "cats": [
+      "M 7"
+     ],
+     "labels": {
+      "zh": "托勒密星團"
+     },
+     "en": "Messier 7",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M8": {
+   "designation": "M 8",
+   "chosen": {
+    "qid": "Q11243",
+    "label": "礁湖星云",
+    "lang": "zh",
+    "en": "Lagoon Nebula",
+    "types": [
+     "H II region"
+    ],
+    "matched": "M 8",
+    "label_raw": "礁湖星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q11243",
+     "cats": [
+      "M 8"
+     ],
+     "labels": {
+      "zh": "礁湖星雲"
+     },
+     "en": "Lagoon Nebula",
+     "types": [
+      "H II region"
+     ]
+    }
+   ]
+  },
+  "M9": {
+   "designation": "M 9",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11258",
+     "cats": [
+      "M 9"
+     ],
+     "labels": {
+      "zh": "M9"
+     },
+     "en": "Messier 9",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M10": {
+   "designation": "M 10",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11267",
+     "cats": [
+      "M 10"
+     ],
+     "labels": {
+      "zh": "M10"
+     },
+     "en": "Messier 10",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M11": {
+   "designation": "M 11",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11294",
+     "cats": [
+      "M 11"
+     ],
+     "labels": {
+      "zh": "M11"
+     },
+     "en": "Wild Duck Cluster",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M12": {
+   "designation": "M 12",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11307",
+     "cats": [
+      "M 12"
+     ],
+     "labels": {
+      "zh": "M12"
+     },
+     "en": "Messier 12",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M13": {
+   "designation": "M 13",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11312",
+     "cats": [
+      "M 13"
+     ],
+     "labels": {
+      "zh": "M13"
+     },
+     "en": "Messier 13",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M14": {
+   "designation": "M 14",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11320",
+     "cats": [
+      "M 14"
+     ],
+     "labels": {
+      "zh": "M14"
+     },
+     "en": "Messier 14",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M15": {
+   "designation": "M 15",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11332",
+     "cats": [
+      "M 15"
+     ],
+     "labels": {
+      "zh": "M15"
+     },
+     "en": "Messier 15",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M16": {
+   "designation": "M 16",
+   "chosen": {
+    "qid": "Q11349",
+    "label": "鹰星云",
+    "lang": "zh",
+    "en": "Eagle Nebula",
+    "types": [
+     "H II region",
+     "astronomical radio source",
+     "open cluster"
+    ],
+    "matched": "M 16",
+    "label_raw": "鹰星云",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q11349",
+     "cats": [
+      "M 16"
+     ],
+     "labels": {
+      "zh": "鹰星云"
+     },
+     "en": "Eagle Nebula",
+     "types": [
+      "H II region",
+      "astronomical radio source",
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M17": {
+   "designation": "M 17",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11357",
+     "cats": [
+      "M 17"
+     ],
+     "labels": {
+      "zh": "M17"
+     },
+     "en": "Omega Nebula",
+     "types": [
+      "H II region"
+     ]
+    }
+   ]
+  },
+  "M18": {
+   "designation": "M 18",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11370",
+     "cats": [
+      "M 18"
+     ],
+     "labels": {
+      "zh-hant": "M18",
+      "zh": "M18"
+     },
+     "en": "Messier 18",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M19": {
+   "designation": "M 19",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11374",
+     "cats": [
+      "M 19"
+     ],
+     "labels": {
+      "zh": "M19"
+     },
+     "en": "Messier 19",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M20": {
+   "designation": "M 20",
+   "chosen": {
+    "qid": "Q11377",
+    "label": "三叶星云",
+    "lang": "zh",
+    "en": "Trifid Nebula",
+    "types": [
+     "H II region"
+    ],
+    "matched": "M 20",
+    "label_raw": "三葉星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q11377",
+     "cats": [
+      "M 20"
+     ],
+     "labels": {
+      "zh": "三葉星雲"
+     },
+     "en": "Trifid Nebula",
+     "types": [
+      "H II region"
+     ]
+    }
+   ]
+  },
+  "M21": {
+   "designation": "M 21",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11383",
+     "cats": [
+      "M 21"
+     ],
+     "labels": {
+      "zh": "M21"
+     },
+     "en": "Messier 21",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M22": {
+   "designation": "M 22",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11392",
+     "cats": [
+      "M 22"
+     ],
+     "labels": {
+      "zh": "M22"
+     },
+     "en": "Messier 22",
+     "types": [
+      "astrophysical X-ray source",
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M23": {
+   "designation": "M 23",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q11396",
+     "cats": [
+      "M 23"
+     ],
+     "labels": {
+      "zh": "M23"
+     },
+     "en": "Messier 23",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M24": {
+   "designation": "M 24",
+   "chosen": {
+    "qid": "Q13618",
+    "label": "人马座恒星云",
+    "lang": "zh",
+    "en": "Sagittarius Star Cloud",
+    "types": [
+     "asterism",
+     "stellar association"
+    ],
+    "matched": "M 24",
+    "label_raw": "人馬座恆星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q13618",
+     "cats": [
+      "M 24"
+     ],
+     "labels": {
+      "zh": "人馬座恆星雲"
+     },
+     "en": "Sagittarius Star Cloud",
+     "types": [
+      "asterism",
+      "stellar association"
+     ]
+    }
+   ]
+  },
+  "M25": {
+   "designation": "M 25",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13623",
+     "cats": [
+      "M 25"
+     ],
+     "labels": {
+      "zh": "M25"
+     },
+     "en": "Messier 25",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M26": {
+   "designation": "M 26",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13626",
+     "cats": [
+      "M 26"
+     ],
+     "labels": {
+      "zh": "M26"
+     },
+     "en": "Messier 26",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M27": {
+   "designation": "M 27",
+   "chosen": {
+    "qid": "Q13628",
+    "label": "哑铃星云",
+    "lang": "zh",
+    "en": "Dumbbell Nebula",
+    "types": [
+     "planetary nebula"
+    ],
+    "matched": "M 27",
+    "label_raw": "哑铃星云",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q13628",
+     "cats": [
+      "M 27"
+     ],
+     "labels": {
+      "zh": "哑铃星云"
+     },
+     "en": "Dumbbell Nebula",
+     "types": [
+      "planetary nebula"
+     ]
+    }
+   ]
+  },
+  "M28": {
+   "designation": "M 28",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13644",
+     "cats": [
+      "M 28"
+     ],
+     "labels": {
+      "zh": "M28"
+     },
+     "en": "Messier 28",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M29": {
+   "designation": "M 29",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13647",
+     "cats": [
+      "M 29"
+     ],
+     "labels": {
+      "zh": "M29"
+     },
+     "en": "Messier 29",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M30": {
+   "designation": "M 30",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13653",
+     "cats": [
+      "M 30"
+     ],
+     "labels": {
+      "zh": "M30"
+     },
+     "en": "Messier 30",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M31": {
+   "designation": "M 31",
+   "chosen": {
+    "qid": "Q2469",
+    "label": "仙女座星系",
+    "lang": "zh-hans",
+    "en": "Andromeda Galaxy",
+    "types": [
+     "spiral galaxy"
+    ],
+    "matched": "M 31",
+    "label_raw": "仙女座星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q2469",
+     "cats": [
+      "M 31"
+     ],
+     "labels": {
+      "zh-hans": "仙女座星系",
+      "zh": "仙女座星系"
+     },
+     "en": "Andromeda Galaxy",
+     "types": [
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M32": {
+   "designation": "M 32",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13720",
+     "cats": [
+      "M 32"
+     ],
+     "labels": {
+      "zh": "M32"
+     },
+     "en": "Messier 32",
+     "types": [
+      "astrophysical X-ray source",
+      "dwarf elliptical galaxy",
+      "infrared source"
+     ]
+    }
+   ]
+  },
+  "M33": {
+   "designation": "M 33",
+   "chosen": {
+    "qid": "Q13724",
+    "label": "三角座星系",
+    "lang": "zh",
+    "en": "Triangulum Galaxy",
+    "types": [
+     "flocculent spiral galaxy"
+    ],
+    "matched": "M 33",
+    "label_raw": "三角座星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q13724",
+     "cats": [
+      "M 33"
+     ],
+     "labels": {
+      "zh": "三角座星系"
+     },
+     "en": "Triangulum Galaxy",
+     "types": [
+      "flocculent spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M34": {
+   "designation": "M 34",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13729",
+     "cats": [
+      "M 34"
+     ],
+     "labels": {
+      "zh": "M34"
+     },
+     "en": "Messier 34",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M35": {
+   "designation": "M 35",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13736",
+     "cats": [
+      "M 35"
+     ],
+     "labels": {
+      "zh": "M35"
+     },
+     "en": "Messier 35",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M36": {
+   "designation": "M 36",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13738",
+     "cats": [
+      "M 36"
+     ],
+     "labels": {
+      "zh": "M36"
+     },
+     "en": "Messier 36",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M37": {
+   "designation": "M 37",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13878",
+     "cats": [
+      "M 37"
+     ],
+     "labels": {
+      "zh": "M37"
+     },
+     "en": "Messier 37",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M38": {
+   "designation": "M 38",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13880",
+     "cats": [
+      "M 38"
+     ],
+     "labels": {
+      "zh": "M38"
+     },
+     "en": "Messier 38",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M39": {
+   "designation": "M 39",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13883",
+     "cats": [
+      "M 39"
+     ],
+     "labels": {
+      "zh": "M39"
+     },
+     "en": "Messier 39",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M40": {
+   "designation": "M 40",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13886",
+     "cats": [
+      "M 40"
+     ],
+     "labels": {
+      "zh": "M40"
+     },
+     "en": "Messier 40",
+     "types": [
+      "double star"
+     ]
+    }
+   ]
+  },
+  "M41": {
+   "designation": "M 41",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13897",
+     "cats": [
+      "M 41"
+     ],
+     "labels": {
+      "zh": "M41"
+     },
+     "en": "Messier 41",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M42": {
+   "designation": "M 42",
+   "chosen": {
+    "qid": "Q13903",
+    "label": "猎户座大星云",
+    "lang": "zh",
+    "en": "Orion Nebula",
+    "types": [
+     "H II region",
+     "astronomical radio source",
+     "astrophysical X-ray source",
+     "diffuse nebula",
+     "reflection nebula"
+    ],
+    "matched": "M 42",
+    "label_raw": "猎户座大星云",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q13903",
+     "cats": [
+      "M 42"
+     ],
+     "labels": {
+      "zh": "猎户座大星云"
+     },
+     "en": "Orion Nebula",
+     "types": [
+      "H II region",
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "diffuse nebula",
+      "reflection nebula"
+     ]
+    }
+   ]
+  },
+  "M43": {
+   "designation": "M 43",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13906",
+     "cats": [
+      "M 43"
+     ],
+     "labels": {
+      "zh": "M43"
+     },
+     "en": "Messier 43",
+     "types": [
+      "H II region",
+      "emission nebula",
+      "reflection nebula"
+     ]
+    }
+   ]
+  },
+  "M44": {
+   "designation": "M 44",
+   "chosen": {
+    "qid": "Q13760",
+    "label": "鬼宿星团",
+    "lang": "zh",
+    "en": "Beehive Cluster",
+    "types": [
+     "open cluster"
+    ],
+    "matched": "M 44",
+    "label_raw": "鬼宿星團",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q13760",
+     "cats": [
+      "M 44"
+     ],
+     "labels": {
+      "zh": "鬼宿星團"
+     },
+     "en": "Beehive Cluster",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M45": {
+   "designation": "M 45",
+   "chosen": {
+    "qid": "Q13423",
+    "label": "昴宿星团",
+    "lang": "zh",
+    "en": "Pleiades",
+    "types": [
+     "open cluster"
+    ],
+    "matched": "M 45",
+    "label_raw": "昴宿星團",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q13423",
+     "cats": [
+      "M 45"
+     ],
+     "labels": {
+      "zh": "昴宿星團"
+     },
+     "en": "Pleiades",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M46": {
+   "designation": "M 46",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13910",
+     "cats": [
+      "M 46"
+     ],
+     "labels": {
+      "zh": "M46"
+     },
+     "en": "Messier 46",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M47": {
+   "designation": "M 47",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13942",
+     "cats": [
+      "M 47"
+     ],
+     "labels": {
+      "zh": "M47"
+     },
+     "en": "Messier 47",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M48": {
+   "designation": "M 48",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13951",
+     "cats": [
+      "M 48"
+     ],
+     "labels": {
+      "zh": "M48"
+     },
+     "en": "Messier 48",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M49": {
+   "designation": "M 49",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13952",
+     "cats": [
+      "M 49"
+     ],
+     "labels": {
+      "zh": "M49"
+     },
+     "en": "Messier 49",
+     "types": [
+      "Seyfert 2 galaxy",
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "elliptical galaxy",
+      "type-cD galaxy"
+     ]
+    }
+   ]
+  },
+  "M50": {
+   "designation": "M 50",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13956",
+     "cats": [
+      "M 50"
+     ],
+     "labels": {
+      "zh": "M50"
+     },
+     "en": "Messier 50",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M51": {
+   "designation": "M 51",
+   "chosen": {
+    "qid": "Q13957",
+    "label": "涡状星系",
+    "lang": "zh",
+    "en": "Whirlpool Galaxy",
+    "types": [
+     "Seyfert 2 galaxy",
+     "grand design spiral galaxy",
+     "interacting galaxy"
+    ],
+    "matched": "M 51",
+    "label_raw": "渦狀星系",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q13957",
+     "cats": [
+      "M 51"
+     ],
+     "labels": {
+      "zh": "渦狀星系"
+     },
+     "en": "Whirlpool Galaxy",
+     "types": [
+      "Seyfert 2 galaxy",
+      "grand design spiral galaxy",
+      "interacting galaxy"
+     ]
+    }
+   ]
+  },
+  "M52": {
+   "designation": "M 52",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13958",
+     "cats": [
+      "M 52"
+     ],
+     "labels": {},
+     "en": "",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M53": {
+   "designation": "M 53",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13960",
+     "cats": [
+      "M 53"
+     ],
+     "labels": {
+      "zh-cn": "M53",
+      "zh-hans": "M53",
+      "zh-hant": "M53",
+      "zh": "M53"
+     },
+     "en": "Messier 53",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M54": {
+   "designation": "M 54",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13962",
+     "cats": [
+      "M 54"
+     ],
+     "labels": {
+      "zh": "M54"
+     },
+     "en": "Messier 54",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M55": {
+   "designation": "M 55",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13965",
+     "cats": [
+      "M 55"
+     ],
+     "labels": {
+      "zh": "M55"
+     },
+     "en": "Messier 55",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M56": {
+   "designation": "M 56",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13967",
+     "cats": [
+      "M 56"
+     ],
+     "labels": {
+      "zh": "M56"
+     },
+     "en": "Messier 56",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M57": {
+   "designation": "M 57",
+   "chosen": {
+    "qid": "Q13969",
+    "label": "环状星云",
+    "lang": "zh",
+    "en": "Ring Nebula",
+    "types": [
+     "planetary nebula"
+    ],
+    "matched": "M 57",
+    "label_raw": "環狀星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q13969",
+     "cats": [
+      "M 57"
+     ],
+     "labels": {
+      "zh": "環狀星雲"
+     },
+     "en": "Ring Nebula",
+     "types": [
+      "planetary nebula"
+     ]
+    }
+   ]
+  },
+  "M58": {
+   "designation": "M 58",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13970",
+     "cats": [
+      "M 58"
+     ],
+     "labels": {
+      "zh": "M58"
+     },
+     "en": "Messier 58",
+     "types": [
+      "HI (21cm) source",
+      "Seyfert galaxy",
+      "astrophysical X-ray source",
+      "infrared source",
+      "spiral galaxy",
+      "sub-millimetric radio source"
+     ]
+    }
+   ]
+  },
+  "M59": {
+   "designation": "M 59",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13971",
+     "cats": [
+      "M 59"
+     ],
+     "labels": {
+      "zh": "M59"
+     },
+     "en": "Messier 59",
+     "types": [
+      "astrophysical X-ray source",
+      "elliptical galaxy"
+     ]
+    }
+   ]
+  },
+  "M60": {
+   "designation": "M 60",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13976",
+     "cats": [
+      "M 60"
+     ],
+     "labels": {
+      "zh": "M60"
+     },
+     "en": "Messier 60",
+     "types": [
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "elliptical galaxy"
+     ]
+    }
+   ]
+  },
+  "M61": {
+   "designation": "M 61",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13978",
+     "cats": [
+      "M 61"
+     ],
+     "labels": {
+      "zh-cn": "M61",
+      "zh-hans": "M61",
+      "zh-hant": "M61",
+      "zh": "M61"
+     },
+     "en": "Messier 61",
+     "types": [
+      "HI (21cm) source",
+      "Seyfert 2 galaxy",
+      "astrophysical X-ray source",
+      "infrared source",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M62": {
+   "designation": "M 62",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13980",
+     "cats": [
+      "M 62"
+     ],
+     "labels": {
+      "zh": "M62"
+     },
+     "en": "Messier 62",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M63": {
+   "designation": "M 63",
+   "chosen": {
+    "qid": "Q13981",
+    "label": "向日葵星系",
+    "lang": "zh",
+    "en": "Sunflower Galaxy",
+    "types": [
+     "infrared source",
+     "low-ionization nuclear emission-line region",
+     "spiral galaxy",
+     "sub-millimetric radio source"
+    ],
+    "matched": "M 63",
+    "label_raw": "向日葵星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q13981",
+     "cats": [
+      "M 63"
+     ],
+     "labels": {
+      "zh": "向日葵星系"
+     },
+     "en": "Sunflower Galaxy",
+     "types": [
+      "infrared source",
+      "low-ionization nuclear emission-line region",
+      "spiral galaxy",
+      "sub-millimetric radio source"
+     ]
+    }
+   ]
+  },
+  "M64": {
+   "designation": "M 64",
+   "chosen": {
+    "qid": "Q13983",
+    "label": "黑眼星系",
+    "lang": "zh",
+    "en": "Black Eye Galaxy",
+    "types": [
+     "HI (21cm) source",
+     "Seyfert galaxy",
+     "astrophysical X-ray source",
+     "infrared source",
+     "spiral galaxy"
+    ],
+    "matched": "M 64",
+    "label_raw": "黑眼星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q13983",
+     "cats": [
+      "M 64"
+     ],
+     "labels": {
+      "zh": "黑眼星系"
+     },
+     "en": "Black Eye Galaxy",
+     "types": [
+      "HI (21cm) source",
+      "Seyfert galaxy",
+      "astrophysical X-ray source",
+      "infrared source",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M65": {
+   "designation": "M 65",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13986",
+     "cats": [
+      "M 65"
+     ],
+     "labels": {
+      "zh": "M65"
+     },
+     "en": "Messier 65",
+     "types": [
+      "astrophysical X-ray source",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M66": {
+   "designation": "M 66",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13992",
+     "cats": [
+      "M 66"
+     ],
+     "labels": {
+      "zh": "M66"
+     },
+     "en": "Messier 66",
+     "types": [
+      "HI (21cm) source",
+      "astrophysical X-ray source",
+      "infrared source",
+      "spiral galaxy",
+      "sub-millimetric radio source"
+     ]
+    }
+   ]
+  },
+  "M67": {
+   "designation": "M 67",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q13997",
+     "cats": [
+      "M 67"
+     ],
+     "labels": {
+      "zh": "梅西爾67"
+     },
+     "en": "Messier 67",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M68": {
+   "designation": "M 68",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14000",
+     "cats": [
+      "M 68"
+     ],
+     "labels": {
+      "zh": "M68"
+     },
+     "en": "Messier 68",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M69": {
+   "designation": "M 69",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14002",
+     "cats": [
+      "M 69"
+     ],
+     "labels": {
+      "zh": "M69"
+     },
+     "en": "Messier 69",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M70": {
+   "designation": "M 70",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14004",
+     "cats": [
+      "M 70"
+     ],
+     "labels": {
+      "zh": "M70"
+     },
+     "en": "Messier 70",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M71": {
+   "designation": "M 71",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14006",
+     "cats": [
+      "M 71"
+     ],
+     "labels": {
+      "zh": "M71"
+     },
+     "en": "Messier 71",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M72": {
+   "designation": "M 72",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14008",
+     "cats": [
+      "M 72"
+     ],
+     "labels": {
+      "zh": "M72"
+     },
+     "en": "Messier 72",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M73": {
+   "designation": "M 73",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14009",
+     "cats": [
+      "M 73"
+     ],
+     "labels": {
+      "zh": "M73"
+     },
+     "en": "Messier 73",
+     "types": [
+      "asterism"
+     ]
+    }
+   ]
+  },
+  "M74": {
+   "designation": "M 74",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14013",
+     "cats": [
+      "M 74"
+     ],
+     "labels": {
+      "zh": "M74"
+     },
+     "en": "Messier 74",
+     "types": [
+      "grand design spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M75": {
+   "designation": "M 75",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14014",
+     "cats": [
+      "M 75"
+     ],
+     "labels": {
+      "zh": "M75"
+     },
+     "en": "Messier 75",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M76": {
+   "designation": "M 76",
+   "chosen": {
+    "qid": "Q14015",
+    "label": "小哑铃星云",
+    "lang": "zh",
+    "en": "Little Dumbbell Nebula",
+    "types": [
+     "astronomical radio source",
+     "infrared source",
+     "planetary nebula"
+    ],
+    "matched": "M 76",
+    "label_raw": "小啞鈴星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q14015",
+     "cats": [
+      "M 76"
+     ],
+     "labels": {
+      "zh": "小啞鈴星雲"
+     },
+     "en": "Little Dumbbell Nebula",
+     "types": [
+      "astronomical radio source",
+      "infrared source",
+      "planetary nebula"
+     ]
+    }
+   ]
+  },
+  "M77": {
+   "designation": "M 77",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14017",
+     "cats": [
+      "M 77"
+     ],
+     "labels": {
+      "zh": "M77"
+     },
+     "en": "Messier 77",
+     "types": [
+      "HI (21cm) source",
+      "Seyfert galaxy",
+      "astrophysical X-ray source",
+      "barred spiral galaxy",
+      "centimetric radio source",
+      "infrared source"
+     ]
+    }
+   ]
+  },
+  "M78": {
+   "designation": "M 78",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14018",
+     "cats": [
+      "M 78"
+     ],
+     "labels": {
+      "zh": "M78"
+     },
+     "en": "Messier 78",
+     "types": [
+      "reflection nebula"
+     ]
+    }
+   ]
+  },
+  "M79": {
+   "designation": "M 79",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14019",
+     "cats": [
+      "M 79"
+     ],
+     "labels": {
+      "zh": "M79"
+     },
+     "en": "Messier 79",
+     "types": [
+      "astrophysical X-ray source",
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M80": {
+   "designation": "M 80",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14021",
+     "cats": [
+      "M 80"
+     ],
+     "labels": {
+      "zh": "M80"
+     },
+     "en": "Messier 80",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M81": {
+   "designation": "M 81",
+   "chosen": {
+    "qid": "Q81102410",
+    "label": "波德星系",
+    "lang": "zh",
+    "en": "Messier 81",
+    "types": [
+     "Seyfert 2 galaxy",
+     "active galactic nucleus",
+     "astronomical radio source",
+     "astrophysical X-ray source",
+     "infrared source"
+    ],
+    "matched": "M 81",
+    "label_raw": "波德星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q81102410",
+     "cats": [
+      "M 81"
+     ],
+     "labels": {
+      "zh": "波德星系"
+     },
+     "en": "Messier 81",
+     "types": [
+      "Seyfert 2 galaxy",
+      "active galactic nucleus",
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "infrared source"
+     ]
+    }
+   ]
+  },
+  "M82": {
+   "designation": "M 82",
+   "chosen": {
+    "qid": "Q14026",
+    "label": "雪茄星系",
+    "lang": "zh",
+    "en": "Messier 82",
+    "types": [
+     "astronomical radio source",
+     "edge-on galaxy",
+     "interacting galaxies",
+     "interacting galaxy",
+     "irregular galaxy",
+     "luminous infrared galaxy",
+     "starburst galaxy"
+    ],
+    "matched": "M 82",
+    "label_raw": "雪茄星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q14026",
+     "cats": [
+      "M 82"
+     ],
+     "labels": {
+      "zh": "雪茄星系"
+     },
+     "en": "Messier 82",
+     "types": [
+      "astronomical radio source",
+      "edge-on galaxy",
+      "interacting galaxies",
+      "interacting galaxy",
+      "irregular galaxy",
+      "luminous infrared galaxy",
+      "starburst galaxy"
+     ]
+    }
+   ]
+  },
+  "M83": {
+   "designation": "M 83",
+   "chosen": {
+    "qid": "Q14030",
+    "label": "南风车星系",
+    "lang": "zh",
+    "en": "Messier 83",
+    "types": [
+     "HI (21cm) source",
+     "astrophysical X-ray source",
+     "infrared source",
+     "spiral galaxy",
+     "starburst galaxy"
+    ],
+    "matched": "M 83",
+    "label_raw": "南風車星系",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q14030",
+     "cats": [
+      "M 83"
+     ],
+     "labels": {
+      "zh": "南風車星系"
+     },
+     "en": "Messier 83",
+     "types": [
+      "HI (21cm) source",
+      "astrophysical X-ray source",
+      "infrared source",
+      "spiral galaxy",
+      "starburst galaxy"
+     ]
+    }
+   ]
+  },
+  "M84": {
+   "designation": "M 84",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q92258118",
+     "cats": [
+      "M 84"
+     ],
+     "labels": {
+      "zh": "M84"
+     },
+     "en": "Messier 84",
+     "types": [
+      "Seyfert 2 galaxy",
+      "astrophysical X-ray source",
+      "elliptical galaxy",
+      "infrared source",
+      "lenticular galaxy",
+      "sub-millimetric radio source"
+     ]
+    }
+   ]
+  },
+  "M85": {
+   "designation": "M 85",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14035",
+     "cats": [
+      "M 85"
+     ],
+     "labels": {
+      "zh": "M85"
+     },
+     "en": "Messier 85",
+     "types": [
+      "astrophysical X-ray source",
+      "elliptical galaxy",
+      "lenticular galaxy"
+     ]
+    }
+   ]
+  },
+  "M86": {
+   "designation": "M 86",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q92258250",
+     "cats": [
+      "M 86"
+     ],
+     "labels": {
+      "zh": "M86"
+     },
+     "en": "Messier 86",
+     "types": [
+      "HI (21cm) source",
+      "astrophysical X-ray source",
+      "elliptical galaxy",
+      "infrared source",
+      "lenticular galaxy"
+     ]
+    }
+   ]
+  },
+  "M87": {
+   "designation": "M 87",
+   "chosen": {
+    "qid": "Q14041",
+    "label": "室女A星系",
+    "lang": "zh-cn",
+    "en": "Messier 87",
+    "types": [
+     "astronomical radio source",
+     "astrophysical X-ray source",
+     "brightest cluster galaxy",
+     "elliptical galaxy",
+     "infrared source"
+    ],
+    "matched": "M 87",
+    "label_raw": "室女A星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q14041",
+     "cats": [
+      "M 87"
+     ],
+     "labels": {
+      "zh-cn": "室女A星系",
+      "zh-hant": "室女A星系",
+      "zh": "室女A星系"
+     },
+     "en": "Messier 87",
+     "types": [
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "brightest cluster galaxy",
+      "elliptical galaxy",
+      "infrared source"
+     ]
+    }
+   ]
+  },
+  "M88": {
+   "designation": "M 88",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14048",
+     "cats": [
+      "M 88"
+     ],
+     "labels": {
+      "zh": "M88"
+     },
+     "en": "Messier 88",
+     "types": [
+      "Seyfert 2 galaxy",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M89": {
+   "designation": "M 89",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14337",
+     "cats": [
+      "M 89"
+     ],
+     "labels": {
+      "zh": "M89"
+     },
+     "en": "Messier 89",
+     "types": [
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "elliptical galaxy",
+      "low-ionization nuclear emission-line region"
+     ]
+    }
+   ]
+  },
+  "M90": {
+   "designation": "M 90",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14343",
+     "cats": [
+      "M 90"
+     ],
+     "labels": {
+      "zh": "M90"
+     },
+     "en": "Messier 90",
+     "types": [
+      "HI (21cm) source",
+      "Seyfert 2 galaxy",
+      "anemic galaxy",
+      "astrophysical X-ray source",
+      "infrared source"
+     ]
+    }
+   ]
+  },
+  "M91": {
+   "designation": "M 91",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14344",
+     "cats": [
+      "M 91"
+     ],
+     "labels": {
+      "zh": "M91"
+     },
+     "en": "Messier 91",
+     "types": [
+      "HI (21cm) source",
+      "infrared source",
+      "low-ionization nuclear emission-line region",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M92": {
+   "designation": "M 92",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q78262275",
+     "cats": [
+      "M 92"
+     ],
+     "labels": {
+      "zh": "M92"
+     },
+     "en": "Messier 92",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M93": {
+   "designation": "M 93",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14347",
+     "cats": [
+      "M 93"
+     ],
+     "labels": {
+      "zh": "M93"
+     },
+     "en": "Messier 93",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M94": {
+   "designation": "M 94",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14349",
+     "cats": [
+      "M 94"
+     ],
+     "labels": {
+      "zh": "梅西爾94"
+     },
+     "en": "Messier 94",
+     "types": [
+      "Seyfert galaxy",
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M95": {
+   "designation": "M 95",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14351",
+     "cats": [
+      "M 95"
+     ],
+     "labels": {
+      "zh": "M95"
+     },
+     "en": "Messier 95",
+     "types": [
+      "HI (21cm) source",
+      "barred spiral galaxy",
+      "infrared source"
+     ]
+    }
+   ]
+  },
+  "M96": {
+   "designation": "M 96",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14354",
+     "cats": [
+      "M 96"
+     ],
+     "labels": {
+      "zh": "梅西爾96"
+     },
+     "en": "Messier 96",
+     "types": [
+      "HI (21cm) source",
+      "infrared source",
+      "spiral galaxy",
+      "sub-millimetric radio source"
+     ]
+    }
+   ]
+  },
+  "M97": {
+   "designation": "M 97",
+   "chosen": {
+    "qid": "Q14359",
+    "label": "猫头鹰星云",
+    "lang": "zh",
+    "en": "Owl Nebula",
+    "types": [
+     "planetary nebula"
+    ],
+    "matched": "M 97",
+    "label_raw": "猫头鹰星云",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q14359",
+     "cats": [
+      "M 97"
+     ],
+     "labels": {
+      "zh": "猫头鹰星云"
+     },
+     "en": "Owl Nebula",
+     "types": [
+      "planetary nebula"
+     ]
+    }
+   ]
+  },
+  "M98": {
+   "designation": "M 98",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14361",
+     "cats": [
+      "M 98"
+     ],
+     "labels": {
+      "zh": "M98"
+     },
+     "en": "Messier 98",
+     "types": [
+      "HI (21cm) source",
+      "astrophysical X-ray source",
+      "infrared source",
+      "low-ionization nuclear emission-line region",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M99": {
+   "designation": "M 99",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14364",
+     "cats": [
+      "M99"
+     ],
+     "labels": {},
+     "en": "Messier 99",
+     "types": [
+      "HI (21cm) source",
+      "astrophysical X-ray source",
+      "grand design spiral galaxy",
+      "infrared source",
+      "sub-millimetric radio source"
+     ]
+    }
+   ]
+  },
+  "M100": {
+   "designation": "M 100",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14365",
+     "cats": [
+      "M100"
+     ],
+     "labels": {},
+     "en": "Messier 100",
+     "types": [
+      "HI (21cm) source",
+      "active galactic nucleus",
+      "astrophysical X-ray source",
+      "infrared source",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M101": {
+   "designation": "M 101",
+   "chosen": {
+    "qid": "Q14371",
+    "label": "风车星系",
+    "lang": "zh",
+    "en": "Pinwheel Galaxy",
+    "types": [
+     "interacting galaxy"
+    ],
+    "matched": "M 101",
+    "label_raw": "風車星系",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q14371",
+     "cats": [
+      "M 101"
+     ],
+     "labels": {
+      "zh": "風車星系"
+     },
+     "en": "Pinwheel Galaxy",
+     "types": [
+      "interacting galaxy"
+     ]
+    }
+   ]
+  },
+  "M102": {
+   "designation": "NGC 5866",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q830937",
+     "cats": [
+      "NGC 5866"
+     ],
+     "labels": {
+      "zh-hans": "NGC 5866",
+      "zh-hant": "NGC 5866",
+      "zh": "NGC 5866"
+     },
+     "en": "NGC 5866",
+     "types": [
+      "edge-on galaxy",
+      "lenticular galaxy"
+     ]
+    }
+   ]
+  },
+  "M103": {
+   "designation": "M 103",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14376",
+     "cats": [
+      "M 103"
+     ],
+     "labels": {
+      "zh": "M103"
+     },
+     "en": "Messier 103",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "M104": {
+   "designation": "M 104",
+   "chosen": {
+    "qid": "Q91461627",
+    "label": "阔边帽星系",
+    "lang": "zh",
+    "en": "Sombrero Galaxy",
+    "types": [
+     "edge-on galaxy",
+     "peculiar galaxy"
+    ],
+    "matched": "M 104",
+    "label_raw": "闊邊帽星系",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q91461627",
+     "cats": [
+      "M 104"
+     ],
+     "labels": {
+      "zh": "闊邊帽星系"
+     },
+     "en": "Sombrero Galaxy",
+     "types": [
+      "edge-on galaxy",
+      "peculiar galaxy"
+     ]
+    }
+   ]
+  },
+  "M105": {
+   "designation": "M 105",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q14377",
+     "cats": [
+      "M 105"
+     ],
+     "labels": {
+      "zh": "M105"
+     },
+     "en": "Messier 105",
+     "types": [
+      "HI (21cm) source",
+      "elliptical galaxy",
+      "low-ionization nuclear emission-line region"
+     ]
+    }
+   ]
+  },
+  "M106": {
+   "designation": "M 106",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q4658",
+     "cats": [
+      "M 106"
+     ],
+     "labels": {
+      "zh": "M106"
+     },
+     "en": "Messier 106",
+     "types": [
+      "Seyfert 2 galaxy",
+      "astrophysical X-ray source",
+      "astrophysical maser",
+      "spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M107": {
+   "designation": "M 107",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q4755",
+     "cats": [
+      "M 107"
+     ],
+     "labels": {
+      "zh": "M107"
+     },
+     "en": "Messier 107",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "M108": {
+   "designation": "M 108",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q4751",
+     "cats": [
+      "M 108"
+     ],
+     "labels": {
+      "zh": "M108"
+     },
+     "en": "Messier 108",
+     "types": [
+      "edge-on galaxy",
+      "starburst galaxy"
+     ]
+    }
+   ]
+  },
+  "M109": {
+   "designation": "M 109",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q4746",
+     "cats": [
+      "M 109"
+     ],
+     "labels": {
+      "zh": "M109"
+     },
+     "en": "Messier 109",
+     "types": [
+      "barred spiral galaxy"
+     ]
+    }
+   ]
+  },
+  "M110": {
+   "designation": "M 110",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q4662",
+     "cats": [
+      "M110"
+     ],
+     "labels": {},
+     "en": "Messier 110",
+     "types": [
+      "dwarf elliptical galaxy"
+     ]
+    }
+   ]
+  },
+  "NGC253": {
+   "designation": "NGC 253",
+   "chosen": {
+    "qid": "Q487221",
+    "label": "玉夫座星系",
+    "lang": "zh-hans",
+    "en": "Sculptor Galaxy",
+    "types": [
+     "Seyfert galaxy",
+     "spiral galaxy",
+     "starburst galaxy"
+    ],
+    "matched": "NGC 253",
+    "label_raw": "玉夫座星系",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q487221",
+     "cats": [
+      "NGC 253"
+     ],
+     "labels": {
+      "zh-hans": "玉夫座星系",
+      "zh-hant": "玉夫座星系",
+      "zh": "玉夫座星系"
+     },
+     "en": "Sculptor Galaxy",
+     "types": [
+      "Seyfert galaxy",
+      "spiral galaxy",
+      "starburst galaxy"
+     ]
+    }
+   ]
+  },
+  "NGC869": {
+   "designation": "NGC 869",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q482454",
+     "cats": [
+      "NGC 869"
+     ],
+     "labels": {},
+     "en": "",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "NGC884": {
+   "designation": "NGC 884",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q33571",
+     "cats": [
+      "NGC 884"
+     ],
+     "labels": {},
+     "en": "",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "NGC2070": {
+   "designation": "NGC 2070",
+   "chosen": null,
+   "candidates": [
+    {
+     "qid": "Q23306973",
+     "cats": [
+      "NGC 2070"
+     ],
+     "labels": {},
+     "en": "NGC 2070",
+     "types": [
+      "open cluster"
+     ]
+    }
+   ]
+  },
+  "NGC5139": {
+   "designation": "NGC 5139",
+   "chosen": {
+    "qid": "Q14275",
+    "label": "半人马座ω",
+    "lang": "zh",
+    "en": "Omega Centauri",
+    "types": [
+     "globular cluster"
+    ],
+    "matched": "NGC 5139",
+    "label_raw": "半人马座ω",
+    "converted": false
+   },
+   "candidates": [
+    {
+     "qid": "Q14275",
+     "cats": [
+      "NGC 5139"
+     ],
+     "labels": {
+      "zh": "半人马座ω"
+     },
+     "en": "Omega Centauri",
+     "types": [
+      "globular cluster"
+     ]
+    }
+   ]
+  },
+  "NGC7000": {
+   "designation": "NGC 7000",
+   "chosen": {
+    "qid": "Q265515",
+    "label": "北美洲星云",
+    "lang": "zh",
+    "en": "North America Nebula",
+    "types": [
+     "H II region"
+    ],
+    "matched": "NGC 7000",
+    "label_raw": "北美洲星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q265515",
+     "cats": [
+      "NGC 7000"
+     ],
+     "labels": {
+      "zh": "北美洲星雲"
+     },
+     "en": "North America Nebula",
+     "types": [
+      "H II region"
+     ]
+    }
+   ]
+  },
+  "NGC7293": {
+   "designation": "NGC 7293",
+   "chosen": {
+    "qid": "Q97017154",
+    "label": "螺旋星云",
+    "lang": "zh",
+    "en": "Helix Nebula",
+    "types": [
+     "astronomical radio source",
+     "astrophysical X-ray source",
+     "infrared source",
+     "planetary nebula"
+    ],
+    "matched": "NGC 7293",
+    "label_raw": "螺旋星雲",
+    "converted": true
+   },
+   "candidates": [
+    {
+     "qid": "Q97017154",
+     "cats": [
+      "NGC 7293"
+     ],
+     "labels": {
+      "zh": "螺旋星雲"
+     },
+     "en": "Helix Nebula",
+     "types": [
+      "astronomical radio source",
+      "astrophysical X-ray source",
+      "infrared source",
+      "planetary nebula"
+     ]
+    }
+   ]
+  }
+ }
+}
