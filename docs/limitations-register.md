@@ -97,9 +97,13 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 ## 附 B：本轮环境特有测试事实
 
 - `mbdsdr_ai/tests`：1 failed（`test_dtmf_handler_shape_guard`，**真红**，非环境：
-  P7.2 注册层参数校验先于 handler，旧断言只认 handler 文案）。
+  P7.2 注册层参数校验先于 handler，旧断言只认 handler 文案；已按新契约修正）。
 - `tests/` A 组：1708 passed、1 skipped（约 10 分 50 秒）。
-- `tests/` B 组：见 P11 汇报（含 2 个红，归因单独给）。
+- `tests/` B 组：2 failed、1521 passed、3 skipped（约 12 分 28 秒）。两红：
+  ① `test_costas_track_bad_psk_order_is_honest`——与 dtmf 同因（P7.2 注册层
+     enum 校验先于 handler），**真红、已修**；
+  ② `test_mainwindow_real_hardware_loop`——`LIBUSB_ERROR_ACCESS` 抢设备，
+    单跑该文件 1 passed，判**环境特有**（A/B 两个套件并行共用同一 RTL-SDR）。
 - `experiments/tests`：34 passed（17.22 秒）。
 - `tools/onboarding` + `tools/hw_selfcheck`：54 passed、4 skipped（5.39 秒）。
 - skip 口径：无硬件（RTL-TCP/设备）、可选依赖缺失（SatDump/reedsolo/zstandard）、
