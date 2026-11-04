@@ -2282,6 +2282,8 @@ def register_sdr_tools(agent):
                 "frequency_hz": {"type": "number", "description": "发射中心频率（Hz）"},
                 "amplitude": {"type": "number", "description": "幅度（0.0-1.0）", "default": 0.1},
                 "duration_sec": {"type": "number", "description": "持续时间（秒）", "default": 1.0},
+                "gain_db": {"type": "number",
+                            "description": "TX 增益（dB）；越界或能力未知时拒绝，不静默钳制"},
                 "arm_manual": {"type": "boolean",
                                "description": "人工门：实际发射前须显式传 true"
                                               "（无人值守调用保持缺省=false）"},
@@ -2314,6 +2316,12 @@ def register_sdr_tools(agent):
                 "iq": {"type": "array",
                        "description": "float 交错 [re,im,...] 或 [[re,im],...]（与 iq_b64 二选一）"},
                 "amplitude": {"type": "number", "description": "幅度 (0,1]", "default": 0.1},
+                "bandwidth_hz": {"type": "number",
+                                 "description": "TX 带宽（Hz）；越界或能力未知时拒绝"},
+                "gain_db": {"type": "number",
+                            "description": "TX 增益（dB）；越界或能力未知时拒绝"},
+                "duration_sec": {"type": "number",
+                                 "description": "发射时长（秒）；超出设备/法规上限时拒绝"},
                 "arm_manual": {"type": "boolean",
                                "description": "人工门：实际发射前须显式传 true"},
             },
@@ -5760,6 +5768,21 @@ def _sdr_transmit_cw(args):
             success=False,
             content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP 等TX-capable设备支持。")
 
+    from mbdsdr_ai.tx_guard import (capabilities_from_hal_backend,
+                                    check_tx_request, policy_from_env)
+    chk = check_tx_request(
+        capabilities_from_hal_backend(backend),
+        freq_hz=freq,
+        gain_db=args.get("gain_db"),
+        duration_s=dur,
+        regulatory=policy_from_env(),
+    )
+    if not chk.ok:
+        return ToolResult(
+            success=False,
+            content=f"发射被拒绝({chk.code}): {chk.reason}",
+            data={"rejected": True, "code": chk.code, "limits": chk.to_dict()})
+
     ok = mgr.transmit_cw(freq, amp, dur, arm_manual=True)
     if not ok and getattr(mgr, "last_tx_error", ""):
         return ToolResult(success=False,
@@ -5851,6 +5874,29 @@ def _sdr_transmit_iq(args):
                 success=False,
                 content="错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/"
                         "LimeSDR/USRP 等TX-capable设备支持。")
+
+        from mbdsdr_ai.tx_guard import (capabilities_from_hal_backend,
+                                        check_tx_request, policy_from_env)
+        dur = args.get("duration_sec")
+        if dur is not None:
+            try:
+                dur = float(dur)
+            except (TypeError, ValueError):
+                return ToolResult(success=False,
+                                  content=f"duration_sec 无效: {dur!r}（应为正数秒）")
+        chk = check_tx_request(
+            capabilities_from_hal_backend(backend),
+            freq_hz=freq,
+            bandwidth_hz=args.get("bandwidth_hz"),
+            gain_db=args.get("gain_db"),
+            duration_s=dur,
+            regulatory=policy_from_env(),
+        )
+        if not chk.ok:
+            return ToolResult(
+                success=False,
+                content=f"发射被拒绝({chk.code}): {chk.reason}",
+                data={"rejected": True, "code": chk.code, "limits": chk.to_dict()})
 
         ok = mgr.transmit_modulated(freq, samples, amp, arm_manual=True)
         if not ok and getattr(mgr, "last_tx_error", ""):
