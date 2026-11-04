@@ -28,9 +28,9 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt  # noqa: E402
 from PySide6.QtGui import (  # noqa: E402
-    QColor, QFont, QFontMetricsF, QImage, QMouseEvent,
+    QColor, QFont, QFontMetricsF, QImage, QMouseEvent, QWheelEvent,
 )
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -312,7 +312,9 @@ def test_db_axis_drag_updates_readout_and_shared_sliders(qapp):
     sw._draw_db_scale(rec, rect, panel._state, QColor("white"))
     readout = [t[2] for t in rec.texts if t[2].endswith("dB")]
     assert readout, "拖动时没有量程读数"
-    assert readout[0] == f"{lo1:.0f} … {hi1:.0f} dB"
+    assert readout[0] == (
+        f"{lo1:.0f} … {hi1:.0f} dB · 跨度 {hi1 - lo1:.0f} dB"), \
+        f"读数缺跨度：{readout[0]!r}"
     for r in _text_rects(rec):
         assert r[0] >= rect.left() - 0.5 and r[1] <= rect.right() + 0.5
 
@@ -355,3 +357,175 @@ def test_db_drag_clamps_to_axis_bounds(qapp):
     _assert_single_source(panel)
     plot.mouseReleaseEvent(_mouse(QEvent.MouseButtonRelease, 10, -10_000,
                                   buttons=Qt.NoButton))
+
+
+# ---------------------------------------------------------------------------
+# 4. 峰值命中：命中区可宽，落点必须准（标签文字也算自己的峰）
+# ---------------------------------------------------------------------------
+def _panel_with_one_peak(qapp, center_hz=100e6, span_hz=2.4e6, bin_idx=200):
+    panel = _panel(qapp)
+    gen = panel.generator
+    gen.center_freq_hz = center_hz
+    gen.sample_rate_hz = span_hz
+    s = np.full(gen.num_bins, -100.0, dtype=np.float32)
+    s[bin_idx] = -40.0
+    gen.spectrum = s
+    gen._has_real_data = True
+    gen.wf_rows_written = 10          # 让 find_peaks 缓存失效
+    return panel, float(gen.bin_to_freq(bin_idx))
+
+
+def _peak_xy(panel, freq_hz, db=-40.0):
+    import spectrum_widget as sw
+    plot = panel._plot
+    rect = QRectF(0, 0, plot.width(), plot.height() - sw._SPEC_BOTTOM_PAD)
+    x = sw._freq_to_x(rect, sw._view_center_hz(panel._state),
+                      panel.generator.sample_rate_hz, freq_hz)
+    y = sw._db_to_y(rect, db, panel._state.db_min, panel._state.db_max)
+    return x, y
+
+
+def _click_at(plot, x, y):
+    plot.mousePressEvent(_mouse(QEvent.MouseButtonPress, x, y))
+    plot.mouseReleaseEvent(
+        _mouse(QEvent.MouseButtonRelease, x, y, buttons=Qt.NoButton))
+
+
+def test_peak_click_lands_on_measured_peak_not_pixel_and_not_snapped(qapp):
+    panel, peak_freq = _panel_with_one_peak(qapp)
+    plot = panel._plot
+    gen = panel.generator
+    x, y = _peak_xy(panel, peak_freq)
+    assert peak_freq % panel._state.snap_interval != 0, \
+        "该峰正好落在 snap 网格上，反证不成立"
+    _click_at(plot, x, y)
+    assert gen.center_freq_hz == pytest.approx(peak_freq, abs=1e-6), (
+        f"点峰应精确落到 {peak_freq:.1f} Hz，实际 {gen.center_freq_hz:.1f}"
+        f"（偏差 {gen.center_freq_hz - peak_freq:.1f} Hz）")
+
+
+def test_peak_label_click_hits_its_own_peak_and_lands_exact(qapp):
+    panel, peak_freq = _panel_with_one_peak(qapp)
+    plot = panel._plot
+    gen = panel.generator
+    x, y = _peak_xy(panel, peak_freq)
+    assert plot._peak_at(x, y) is not None
+    # 标签挂在峰右侧 6px 起：按像素旧路径会落到“峰右边”，命中盒必须认回原峰
+    lx, ly = x + 40.0, y - 8.0
+    hit = plot._peak_at(lx, ly)
+    assert hit is not None and abs(hit[0] - peak_freq) < 1.0
+    _click_at(plot, lx, ly)
+    assert gen.center_freq_hz == pytest.approx(peak_freq, abs=1e-6)
+
+
+def test_peak_click_after_view_offset_still_lands_on_peak(qapp):
+    panel, peak_freq = _panel_with_one_peak(qapp)
+    panel._state.view_offset_hz = 300e3
+    plot = panel._plot
+    gen = panel.generator
+    x, y = _peak_xy(panel, peak_freq)
+    assert plot._peak_at(x, y) is not None
+    _click_at(plot, x, y)
+    assert gen.center_freq_hz == pytest.approx(peak_freq, abs=1e-6)
+
+
+def test_hover_peak_shows_pointing_hand_cursor(qapp):
+    panel, peak_freq = _panel_with_one_peak(qapp)
+    plot = panel._plot
+    x, y = _peak_xy(panel, peak_freq)
+    plot.mouseMoveEvent(_mouse(QEvent.MouseMove, x, y,
+                               button=Qt.NoButton, buttons=Qt.NoButton))
+    assert plot.cursor().shape() == Qt.PointingHandCursor, \
+        "峰命中区内没有给出“可点”的光标反馈"
+    # 离开峰命中区 → 光标恢复默认
+    plot.mouseMoveEvent(_mouse(QEvent.MouseMove, x + 200.0, y,
+                               button=Qt.NoButton, buttons=Qt.NoButton))
+    assert plot.cursor().shape() != Qt.PointingHandCursor
+
+
+def test_peak_click_moves_current_vfo_exact_in_normal_mode(qapp):
+    panel, peak_freq = _panel_with_one_peak(qapp)
+    plot = panel._plot
+    mgr = panel.vfo_manager
+    vfo = mgr.add(100e6, 8000.0, "FM", inherit_last=False)
+    mgr.set_active_context(vfo, temporary=False)
+    panel._state.tune_mode = "normal"
+    x, y = _peak_xy(panel, peak_freq)
+    _click_at(plot, x, y)
+    assert vfo.center_hz == pytest.approx(peak_freq, abs=1e-6), \
+        f"normal 模式点峰应精确移 VFO，实际 {vfo.center_hz:.1f} Hz"
+
+
+# ---------------------------------------------------------------------------
+# 5. dB 轴手势：Ctrl+竖拖改跨度；轴上滚轮缩跨度，不再落到调频
+# ---------------------------------------------------------------------------
+def _mouse_mod(typ, x, y, modifiers, buttons=None):
+    pos = QPointF(float(x), float(y))
+    if buttons is None:
+        buttons = Qt.LeftButton if typ != QEvent.MouseButtonRelease else Qt.NoButton
+    return QMouseEvent(typ, pos, pos, pos, Qt.LeftButton, buttons, modifiers)
+
+
+def _wheel(widget, x, y, dy, modifiers=Qt.NoModifier):
+    ev = QWheelEvent(QPointF(float(x), float(y)),
+                     widget.mapToGlobal(QPointF(float(x), float(y))),
+                     QPoint(0, 0), QPoint(0, dy),
+                     Qt.NoButton, modifiers,
+                     Qt.NoScrollPhase, False)
+    widget.wheelEvent(ev)
+
+
+def test_ctrl_db_drag_narrows_span_anchored_at_press(qapp):
+    panel = _panel(qapp)
+    plot = panel._plot
+    h = float(plot._spectrum_height() - 18)
+    press_y = h * 0.55
+    plot.mousePressEvent(
+        _mouse_mod(QEvent.MouseButtonPress, 10, press_y, Qt.ControlModifier))
+    lo0, hi0 = panel.db_range()
+    anchor0 = hi0 - (press_y / h) * (hi0 - lo0)
+
+    # 向下拖 = 收窄跨度（锚点仍是按下处 dB）
+    plot.mouseMoveEvent(
+        _mouse_mod(QEvent.MouseMove, 10, h * 0.80, Qt.ControlModifier))
+    lo1, hi1 = panel.db_range()
+    assert hi1 - lo1 < 80.0, f"Ctrl 竖拖没有收窄跨度：{lo1} … {hi1}"
+    assert hi1 - lo1 >= 10.0, f"跨度越过 10 dB 下限：{lo1} … {hi1}"
+    anchor1 = hi1 - (press_y / h) * (hi1 - lo1)
+    assert abs(anchor1 - anchor0) <= 1.5, \
+        f"按下处 dB 没被锚住：{anchor0:.1f} → {anchor1:.1f}"
+    _assert_single_source(panel)
+
+
+def test_wheel_on_db_axis_zooms_span_not_tune(qapp):
+    panel, _peak_freq = _panel_with_one_peak(qapp)
+    plot = panel._plot
+    gen = panel.generator
+    center0 = gen.center_freq_hz
+    lo0, hi0 = panel.db_range()
+    # 下滚（dy<0）= 收窄跨度（与频率轴 Ctrl+滚轮“上滚=放大”同一方向约定）
+    _wheel(plot, 10, 100, -120)
+    assert gen.center_freq_hz == pytest.approx(center0, abs=1e-6), \
+        "dB 轴上的滚轮又落到了调频"
+    lo1, hi1 = panel.db_range()
+    assert hi1 - lo1 < hi0 - lo0, f"dB 轴滚轮没有收窄跨度：{lo1} … {hi1}"
+    _assert_single_source(panel)
+
+
+def test_db_zoom_clamps_span_and_axis_bounds(qapp):
+    panel = _panel(qapp)
+    plot = panel._plot
+    h = float(plot._spectrum_height() - 18)
+    plot.mousePressEvent(
+        _mouse_mod(QEvent.MouseButtonPress, 10, h / 2.0, Qt.ControlModifier))
+    plot.mouseMoveEvent(
+        _mouse_mod(QEvent.MouseMove, 10, -5000, Qt.ControlModifier))
+    lo, hi = panel.db_range()
+    assert hi - lo <= 160.0
+    assert lo >= -160.0 and hi <= 0.0
+    plot.mouseMoveEvent(
+        _mouse_mod(QEvent.MouseMove, 10, 5000, Qt.ControlModifier))
+    lo, hi = panel.db_range()
+    assert hi - lo >= 10.0
+    assert lo >= -160.0 and hi <= 0.0
+    _assert_single_source(panel)

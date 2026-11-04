@@ -20,8 +20,8 @@ from constants import DEFAULT_SAMPLE_RATE_HZ
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
 from PySide6.QtGui import (
-    QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QImage,
-    QPainterPath, QPolygonF, QCursor,
+    QPainter, QColor, QPen, QBrush, QFont, QFontMetricsF, QLinearGradient,
+    QImage, QPainterPath, QPolygonF, QCursor,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
@@ -905,8 +905,33 @@ class _PlotState:
 _SPEC_BOTTOM_PAD = 18
 
 # 左侧 dB 轴拖拽热区宽度（像素）：gqrx plotter.cpp:350-368 YAXIS 捕获区。
-# 在频谱左缘这条带内按住拖动 = 整体平移 dB 量程（不调谐、不改 span）。
+# 在频谱左缘这条带内按住拖动 = 整体平移 dB 量程（不调谐、不改 span）；
+# Ctrl+竖拖 = 以按下处 dB 为锚缩放跨度；该带上的滚轮同样只缩跨度。
 _DB_AXIS_DRAG_W = 40.0
+
+# dB 量程边界与跨度限制（唯一口径；滑杆、拖动、滚轮都走 apply_db_range）。
+_DB_AXIS_MIN = -160.0
+_DB_AXIS_MAX = 0.0
+_DB_MIN_SPAN = 10.0       # 与右栏滑杆最小间隔一致（SDR++ main_window.cpp:639）
+_DB_MAX_SPAN = _DB_AXIS_MAX - _DB_AXIS_MIN
+# Ctrl+竖拖满量程一屏 = 跨度 ×4（或 ÷4）；半屏 = ×2，手感线性于像素。
+_DB_ZOOM_PER_HEIGHT = 4.0
+
+
+def _clamp_db_span(lo: float, hi: float, span: float) -> Tuple[float, float]:
+    """把 [lo, hi] 夹进 [_DB_AXIS_MIN, _DB_AXIS_MAX]，尽量保持 span。"""
+    if lo < _DB_AXIS_MIN:
+        hi += _DB_AXIS_MIN - lo
+        lo = _DB_AXIS_MIN
+    if hi > _DB_AXIS_MAX:
+        lo += _DB_AXIS_MAX - hi
+        hi = _DB_AXIS_MAX
+    lo = max(_DB_AXIS_MIN, lo)
+    hi = min(_DB_AXIS_MAX, hi)
+    if hi < lo:                     # span 超过全量程时给合法空区间
+        lo, hi = _DB_AXIS_MIN, _DB_AXIS_MIN + span
+        hi = min(hi, _DB_AXIS_MAX)
+    return lo, hi
 
 
 # ---------------------------------------------------------------------------
@@ -1627,7 +1652,9 @@ def _draw_db_scale(painter, rect, state, text_color):
     # 拖动时读数跟手：把当前量程直接画在轴区右上，位置不随值移动，
     # 内容随每一帧重算（几何断言 + 离屏截图可验，不靠肉眼）。
     if getattr(state, "db_drag_active", False):
-        txt = f"{state.db_min:.0f} … {state.db_max:.0f} dB"
+        span_now = state.db_max - state.db_min
+        txt = (f"{state.db_min:.0f} … {state.db_max:.0f} dB"
+               f" · 跨度 {span_now:.0f} dB")
         tw = fm.horizontalAdvance(txt)
         tx = max(rect.x() + 4, rect.x() + rect.width() - tw - 4)
         painter.drawText(QPointF(tx, rect.y() + 16), txt)
@@ -1898,13 +1925,13 @@ class SpectrumPanel(QWidget):
         先把值规范成整数（滑杆本身是整数刻度，状态若留小数就会出现
         "状态一套、滑杆一套"的假量程），再同步状态与两根滑杆。
         """
-        lo = max(-160.0, min(float(db_min), 0.0))
-        hi = max(-160.0, min(float(db_max), 0.0))
-        if hi - lo < 10.0:                 # SDR++ main_window.cpp:639 最小间隔 10
-            hi = lo + 10.0
-            if hi > 0.0:
-                hi = 0.0
-                lo = -10.0
+        lo = max(_DB_AXIS_MIN, min(float(db_min), _DB_AXIS_MAX))
+        hi = max(_DB_AXIS_MIN, min(float(db_max), _DB_AXIS_MAX))
+        if hi - lo < _DB_MIN_SPAN:        # SDR++ main_window.cpp:639 最小间隔 10
+            hi = lo + _DB_MIN_SPAN
+            if hi > _DB_AXIS_MAX:
+                hi = _DB_AXIS_MAX
+                lo = _DB_AXIS_MAX - _DB_MIN_SPAN
         lo, hi = float(round(lo)), float(round(hi))
         self._state.db_min = lo
         self._state.db_max = hi
@@ -2192,6 +2219,8 @@ class _TuningPlotMixin:
         self._db_drag_press_y = 0.0
         self._db_drag_press_min = 0.0
         self._db_drag_press_max = 0.0
+        self._db_drag_zoom = False       # Ctrl+竖拖 = 锚点缩放跨度
+        self._peak_hover_key = None      # 当前悬停峰（避免每帧重弹气泡）
 
     # ------------------------------------------------------------------ 工具
     def _x_ratio(self, event):
@@ -2210,10 +2239,14 @@ class _TuningPlotMixin:
         return view_center - span / 2.0 + x_px / max(1, self.width()) * span
 
     # ------------------------------------------------------------------ dB 轴拖动
-    def _begin_db_drag(self, y_px: float) -> None:
-        """在左侧 dB 轴热区按下：锁定按下时的量程与 y 基准。"""
+    def _begin_db_drag(self, y_px: float, zoom: bool = False) -> None:
+        """在左侧 dB 轴热区按下：锁定按下时的量程与 y 基准。
+
+        zoom=True（Ctrl）：以按下处 dB 为锚缩放跨度；False：整体平移。
+        """
         self._db_drag_active = True
         self.state.db_drag_active = True
+        self._db_drag_zoom = bool(zoom)
         self._db_drag_press_y = float(y_px)
         self._db_drag_press_min = float(self.state.db_min)
         self._db_drag_press_max = float(self.state.db_max)
@@ -2221,22 +2254,53 @@ class _TuningPlotMixin:
         self.update()
 
     def _apply_db_drag(self, y_px: float) -> None:
-        """拖动中：整体平移量程（跨度不变），读数每帧刷新。"""
+        """拖动中：平移量程，或 Ctrl 时以按下处 dB 为锚缩放跨度。"""
         if not self._db_drag_active:
             return
         h = max(1.0, float(self._spectrum_height() - _SPEC_BOTTOM_PAD))
         span = self._db_drag_press_max - self._db_drag_press_min
-        delta_db = (self._db_drag_press_y - float(y_px)) / h * span
-        lo = self._db_drag_press_min + delta_db
-        hi = self._db_drag_press_max + delta_db
-        # 夹回 [-160, 0] 时整体平移，保持选定量程跨度。
-        if lo < -160.0:
-            lo, hi = -160.0, hi + (-160.0 - lo)
-        if hi > 0.0:
-            lo, hi = lo + (0.0 - hi), 0.0
+        if self._db_drag_zoom:
+            y = max(0.0, min(h, float(y_px)))
+            anchor = (self._db_drag_press_max
+                      - (self._db_drag_press_y / h) * span)
+            frac = (anchor - self._db_drag_press_min) / max(1e-9, span)
+            factor = _DB_ZOOM_PER_HEIGHT ** (
+                (self._db_drag_press_y - y) / h)
+            new_span = max(_DB_MIN_SPAN,
+                           min(_DB_MAX_SPAN, span * factor))
+            lo = anchor - frac * new_span
+            hi = lo + new_span
+        else:
+            delta_db = (self._db_drag_press_y - float(y_px)) / h * span
+            lo = self._db_drag_press_min + delta_db
+            hi = self._db_drag_press_max + delta_db
+        # 夹回 [-160, 0] 时整体平移/整体回弹，保持选定量程跨度。
+        lo, hi = _clamp_db_span(lo, hi, span)
         # 唯一状态源：状态 + 右栏两根滑杆由 panel.apply_db_range 同步。
         self.state.panel.apply_db_range(lo, hi)
         self.update()
+
+    def _zoom_db_span_at(self, y_px: float, wheel: int) -> None:
+        """dB 轴滚轮：以光标处 dB 为锚缩/放跨度（一格 ×1.1 或 ÷1.1）。"""
+        h = max(1.0, float(self._spectrum_height() - _SPEC_BOTTOM_PAD))
+        y = max(0.0, min(h, float(y_px)))
+        lo = float(self.state.db_min)
+        hi = float(self.state.db_max)
+        span = hi - lo
+        if span <= 0:
+            return
+        anchor = hi - (y / h) * span
+        frac = (anchor - lo) / span
+        new_span = max(_DB_MIN_SPAN,
+                       min(_DB_MAX_SPAN, span * (1.1 ** int(wheel))))
+        new_lo = anchor - frac * new_span
+        new_hi = new_lo + new_span
+        new_lo, new_hi = _clamp_db_span(new_lo, new_hi, new_span)
+        self.state.panel.apply_db_range(new_lo, new_hi)
+        lo2, hi2 = self.state.panel.db_range()
+        self._show_tune_tip(
+            f"量程 {lo2:.0f} … {hi2:.0f} dB"
+            f"（跨度 {hi2 - lo2:.0f} dB）")
 
     def _end_db_drag(self) -> None:
         if not self._db_drag_active:
@@ -2363,6 +2427,14 @@ class _TuningPlotMixin:
             step *= 10.0
         elif mods & Qt.AltModifier:
             step *= 0.1
+        # dB 轴（左缘）滚轮 = 缩放 dB 跨度，不落到调频：用户想缩量程时
+        # 滚轮却动了频率，是“看着正常、实际做错事”的偏。优先级同按下。
+        if (event.position().x() <= _DB_AXIS_DRAG_W
+                and event.position().y()
+                < self._spectrum_height() - _SPEC_BOTTOM_PAD):
+            self._zoom_db_span_at(event.position().y(), wheel)
+            self.update()
+            return
         vfo, edge_region = self._hit_vfo_at(event.position().x())
         # 频率轴手势分层（P2-9，gqrx 密度）：悬停底部频率刻度轴上滚轮 =
         # 以光标为锚缩放 span（与 Ctrl+滚轮同数学）；VFO 正下方不抢手势。
@@ -2569,9 +2641,11 @@ class _TuningPlotMixin:
                         self.state.panel.bookmark_activated.emit(bm_freq)
                         self._show_tune_tip(f"书签 {bm_freq / 1e6:.4f} MHz")
                         return
-                # dB 轴热区（左缘竖条）：按住拖动 = 平移量程，不进调谐/VFO。
+                # dB 轴热区（左缘竖条）：按住拖动 = 平移量程，不进调谐/VFO；
+                # Ctrl+竖拖 = 以按下处 dB 为锚缩放跨度。
                 if x <= _DB_AXIS_DRAG_W:
-                    self._begin_db_drag(y)
+                    self._begin_db_drag(
+                        y, zoom=bool(event.modifiers() & Qt.ControlModifier))
                     return
                 vfo, region = self._hit_vfo_at(x)
                 if vfo is not None:
@@ -2644,11 +2718,15 @@ class _TuningPlotMixin:
             return
 
         # 悬停（未按键）：更新 VfoManager 三态焦点 active_context（临时悬停语义）
-        # 并按命中区域切换鼠标光标：边沿 → SizeHorCursor（提示可拖改带宽）。
+        # 并按命中区域切换鼠标光标：VFO 边沿 → SizeHorCursor；峰 → PointingHand。
         mgr = self.state.panel.vfo_manager
+        y_hover = event.position().y()
+        axis_top = max(0.0, self._spectrum_height() - _SPEC_BOTTOM_PAD)
+        hovering = (not self._is_panning and self._vfo_drag_mode is None
+                    and not self._vfo_create_mode)
+        peak = None
         if mgr is not None and not self._is_panning:
-            y = event.position().y()
-            if y <= self._spectrum_height():
+            if y_hover <= self._spectrum_height():
                 vfo, reg = self._hit_vfo_at(event.position().x())
                 if vfo is not None:
                     mgr.set_active_context(vfo, temporary=True)
@@ -2658,20 +2736,47 @@ class _TuningPlotMixin:
                         self.unsetCursor()
                 else:
                     mgr.clear_active_context()
-                    self.unsetCursor()
+                    if hovering and y_hover < axis_top:
+                        peak = self._peak_at(event.position().x(), y_hover)
+                    if peak is not None:
+                        self.setCursor(Qt.PointingHandCursor)
+                    else:
+                        self.unsetCursor()
             else:
                 mgr.clear_active_context()
+                self.unsetCursor()
+        elif not self._is_panning:
+            if hovering and y_hover < axis_top:
+                peak = self._peak_at(event.position().x(), y_hover)
+            if peak is not None:
+                self.setCursor(Qt.PointingHandCursor)
+            else:
                 self.unsetCursor()
         else:
             self.unsetCursor()
 
+        # 峰值气泡：只在“进入某个峰”时弹一次，离开/拖拽时收；
+        # 不弹右键菜单峰值项，避免长出第二个假入口。
+        key = None if peak is None else round(peak[0])
+        if key != self._peak_hover_key:
+            self._peak_hover_key = key
+            try:
+                if peak is not None and hovering:
+                    QToolTip.showText(
+                        QCursor.pos(),
+                        f"跳到 {peak[0] / 1e6:.4f} MHz（{peak[1]:.1f} dB）",
+                        self)
+                else:
+                    QToolTip.hideText()
+            except Exception:  # noqa: BLE001 —— 气泡是辅助，失败静默
+                pass
+
         # 频段彩带悬停（SDR++ bandplan 仿妆）：命中变化时提亮 + 气泡提示；
-        # 拖拽/平移中不刷气泡，避免噪声。提示失败绝不影响交互。
-        if not self._is_panning and self._vfo_drag_mode is None \
-                and not self._vfo_create_mode:
+        # 拖拽/平移中不刷气泡，避免噪声。峰命中优先，两个气泡不抢同一光标。
+        if hovering:
             y = event.position().y()
             idx = self._band_at(event.position().x()) \
-                if y <= self._spectrum_height() else None
+                if (peak is None and y <= self._spectrum_height()) else None
             if idx != self.state.bandplan_hover:
                 self.state.bandplan_hover = idx
                 try:
@@ -2711,8 +2816,9 @@ class _TuningPlotMixin:
         瀑布保留多信号轨迹。无主听 VFO 时退回 center 行为。
         """
         gen = self.state.panel.generator
-        freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
-                + ratio * gen.sample_rate_hz)
+        # 必须走 _freq_at_x：它含 view_offset_hz（Ctrl 平移后的视图偏移）。
+        # 只按 gen.center 算会让点击系统性偏 -Δ —— 用户看着正常，实际收错频率。
+        freq = self._freq_at_x(ratio * max(1, self.width()))
         if self.state.tune_mode == "normal":
             mgr = self.state.panel.vfo_manager
             vfo = mgr.current if mgr is not None else None
@@ -2727,6 +2833,79 @@ class _TuningPlotMixin:
         gen.center_freq_hz = freq
         snapped = self._snap_center()
         self._emit_tuned(snapped)
+
+    def _tune_peak(self, freq_hz: float) -> None:
+        """点中峰：落点取 find_peaks 的 freq_hz，1 Hz 直下发，不做 snap。
+
+        空白单击仍走 _tune_click（带吸附），这是两回事：前者是"点到一个
+        测出来的峰"，后者是"顺手点一下谱面"。
+        """
+        gen = self.state.panel.generator
+        freq = float(freq_hz)
+        if self.state.tune_mode == "normal":
+            mgr = self.state.panel.vfo_manager
+            vfo = mgr.current if mgr is not None else None
+            if vfo is not None:
+                vfo.center_hz = freq
+                self.state.panel.vfo_moved.emit(vfo.vfo_id, freq)
+                self.update()
+                return
+        gen.center_freq_hz = freq
+        self._emit_tuned(freq)
+
+    def _peak_at(self, x_px: float, y_px: float):
+        """峰值命中测试：返回 (freq_hz, db) 或 None。
+
+        命中区 = 峰圆点 ±6px + 它自己的标签文字框（与 _draw_peaks 共用
+        同一套 _peak_label_placements）。命中区可以宽（容手抖），落点
+        只认 find_peaks 的 freq_hz，绝不按像素换算。
+        """
+        state = self.state
+        gen = state.panel.generator
+        if not state.show_peaks or not gen.has_data():
+            return None
+        peaks = gen.find_peaks(state.peak_rel_db)
+        if not peaks:
+            return None
+        rect = QRectF(0, 0, self.width(),
+                      max(1, self._spectrum_height() - _SPEC_BOTTOM_PAD))
+        if y_px > rect.height():
+            return None
+        view_center = _view_center_hz(state)
+        span = gen.sample_rate_hz
+        f = QFont()
+        f.setPointSize(8)
+        fm = QFontMetricsF(f)
+        row_h = fm.height() + 2.0
+        pts = []
+        for freq_hz, db in peaks:
+            px = _freq_to_x(rect, view_center, span, freq_hz)
+            py = _db_to_y(rect, db, state.db_min, state.db_max)
+            pts.append((px, py, f"{freq_hz / 1e6:.3f}MHz {db:.1f}dB",
+                        float(freq_hz), float(db)))
+        pts.sort(key=lambda p: p[0])
+        placed = _peak_label_placements(
+            [(p[0], p[1], p[2]) for p in pts], fm.horizontalAdvance,
+            rect.x() + 2.0, rect.x() + rect.width() - 2.0, row_h,
+            text_ascent=fm.ascent(), text_descent=fm.descent())
+        hits = []
+        for p in pts:
+            if abs(x_px - p[0]) <= 6.0 and abs(y_px - p[1]) <= 6.0:
+                hits.append((abs(x_px - p[0]) + abs(y_px - p[1]), p))
+        for tx, ty, _label, _row in placed:
+            src = min(pts, key=lambda p: abs(p[0] - (tx - 6.0)))
+            if abs(src[0] - (tx - 6.0)) > 0.01:
+                continue
+            w = fm.horizontalAdvance(src[2])
+            if (tx - 2.0 <= x_px <= tx + w + 2.0
+                    and ty - fm.ascent() - 2.0 <= y_px
+                    <= ty + fm.descent() + 2.0):
+                hits.append((100.0 + abs(x_px - src[0]), src))
+        if not hits:
+            return None
+        hits.sort(key=lambda h: h[0])
+        best = hits[0][1]
+        return best[3], best[4]
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -2795,10 +2974,22 @@ class _TuningPlotMixin:
                     # 画面跟过去，同 x 已对应别的频率），再调谐；选中 → 常驻
                     # 描边 + 摘要提示，点在空白频率 → 清除。不改变调谐语义。
                     sel = self._band_at(event.position().x())
-                    self._tune_click(self._x_ratio(event))
+                    axis_top = max(
+                        0.0, self._spectrum_height() - _SPEC_BOTTOM_PAD)
+                    peak = (self._peak_at(event.position().x(), y)
+                            if y < axis_top else None)
+                    if peak is not None:
+                        # 点中峰：落点取测量值，1 Hz 直下发（不吸附）
+                        self._tune_peak(peak[0])
+                        self._show_tune_tip(
+                            f"峰值 {peak[0] / 1e6:.4f} MHz"
+                            f"（{peak[1]:.1f} dB）")
+                    else:
+                        # 空白/刻度轴仍走顺手调谐（带 snap）
+                        self._tune_click(self._x_ratio(event))
                     if sel != self.state.bandplan_selected:
                         self.state.bandplan_selected = sel
-                        if sel is not None:
+                        if sel is not None and peak is None:
                             self._show_tune_tip(
                                 "频段 "
                                 + self._band_tip_text(self.state.bandplan[sel]))
@@ -2816,15 +3007,39 @@ class _TuningPlotMixin:
             self.update()
 
     def mouseDoubleClickEvent(self, event):
-        # 双击直接调谐到鼠标处频率（SDR++ waterfall 行为），
-        # center/VFO 模式语义与单击一致（_tune_click）
-        self._tune_click(self._x_ratio(event))
+        # 双击底部频率刻度轴 = 复位 Ctrl 平移留下的 view_offset（回调谐中心）。
+        # 这是唯一的复位入口：view_offset 只增不减，没有它用户拖出去就回不来。
+        y = event.position().y()
+        axis_top = max(0.0, self._spectrum_height() - _SPEC_BOTTOM_PAD)
+        if event.button() == Qt.LeftButton \
+                and axis_top <= y <= self._spectrum_height():
+            if self.state.view_offset_hz != 0.0:
+                self.state.view_offset_hz = 0.0
+                self._show_tune_tip("视图已复位到调谐中心")
+            else:
+                self._show_tune_tip("视图已在调谐中心")
+            self.update()
+            return
+        # 双击峰同样按测量值落点；空白处仍按像素调谐（SDR++ waterfall 行为）。
+        peak = self._peak_at(event.position().x(), y)
+        if peak is not None:
+            self._tune_peak(peak[0])
+            self._show_tune_tip(
+                f"峰值 {peak[0] / 1e6:.4f} MHz（{peak[1]:.1f} dB）")
+        else:
+            self._tune_click(self._x_ratio(event))
         self.update()
 
     def leaveEvent(self, event):
-        # 鼠标离开谱面：清频段悬停态，提亮/气泡不残留
+        # 鼠标离开谱面：清频段悬停态与峰值悬停，提亮/气泡不残留
+        hover_stale = False
         if getattr(self.state, "bandplan_hover", None) is not None:
             self.state.bandplan_hover = None
+            hover_stale = True
+        if self._peak_hover_key is not None:
+            self._peak_hover_key = None
+            hover_stale = True
+        if hover_stale:
             try:
                 QToolTip.hideText()
             except Exception:  # noqa: BLE001 —— 气泡是辅助，失败静默

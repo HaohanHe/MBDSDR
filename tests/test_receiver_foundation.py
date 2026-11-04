@@ -35,7 +35,7 @@ if REPO_ROOT not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from PySide6.QtCore import Qt, QPointF, QPoint  # noqa: E402
+from PySide6.QtCore import Qt, QEvent, QPointF, QPoint  # noqa: E402
 from PySide6.QtGui import QMouseEvent, QWheelEvent, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -137,6 +137,80 @@ def test_click_spectrum_tunes_vfo(qapp):
     assert abs(emitted[-1] - new_center / 1e6) < 1e-6, (
         f"freq_changed 应报 {new_center/1e6:.4f} MHz，实际 {emitted[-1]}")
 
+    panel.close()
+
+
+# ---------------------------------------------------------------------------
+# T1b：Ctrl 平移视图后，点击落点仍以“光标下看到的频率”为准（不偏 -Δ）
+# ---------------------------------------------------------------------------
+
+def _press(plot, x, y, modifiers=Qt.NoModifier, buttons=None):
+    if buttons is None:
+        buttons = Qt.LeftButton
+    plot.mousePressEvent(QMouseEvent(QMouseEvent.MouseButtonPress,
+                                    QPointF(x, y), Qt.LeftButton,
+                                    buttons, modifiers))
+
+
+def _release(plot, x, y):
+    plot.mouseReleaseEvent(QMouseEvent(QMouseEvent.MouseButtonRelease,
+                                         QPointF(x, y), Qt.LeftButton,
+                                         Qt.NoButton, Qt.NoModifier))
+
+
+def test_click_after_ctrl_pan_tunes_at_cursor_not_offset(qapp):
+    center_hz, sr = 98.5e6, 2.4e6
+    panel = _new_panel(qapp)
+    panel.generator.center_freq_hz = center_hz
+    panel.generator.sample_rate_hz = sr
+    panel.update_iq(_make_tone_iq(center_hz, sr, n=8192, tone_offset_hz=1000.0),
+                    center_hz, sr)
+    plot = panel._plot
+    plot.state.show_peaks = False        # 隔离空白单击路径，不让峰值命中抢手势
+    width = float(plot.width())
+
+    # Ctrl 平移：400 → 300，dx=-100 → view_offset +300 kHz（只移视图不改中心）
+    _press(plot, width * 0.5, 200.0, Qt.ControlModifier)
+    plot.mouseMoveEvent(QMouseEvent(QMouseEvent.MouseMove,
+                                    QPointF(width * 0.5 - 100.0, 200.0),
+                                    Qt.NoButton, Qt.LeftButton,
+                                    Qt.ControlModifier))
+    _release(plot, width * 0.5 - 100.0, 200.0)
+    offset = plot.state.view_offset_hz
+    assert abs(offset - 300e3) < 1.0, f"Ctrl 平移偏移应为 300 kHz，实际 {offset}"
+
+    # 点 x=600：光标下频率 = (center+offset) - sr/2 + 0.75*sr，落在 snap 网格上
+    x = width * 0.75
+    expected = (center_hz + offset) - sr / 2.0 + 0.75 * sr
+    _press(plot, x, 200.0)
+    _release(plot, x, 200.0)
+    one_pixel_hz = sr / width
+    err = abs(panel.generator.center_freq_hz - expected)
+    assert err <= one_pixel_hz, (
+        f"点击落点偏了 {err / 1e3:.1f} kHz（>1px={one_pixel_hz / 1e3:.1f} kHz）；"
+        f"应为 {expected / 1e6:.4f} MHz，实际 "
+        f"{panel.generator.center_freq_hz / 1e6:.4f} MHz")
+    panel.close()
+
+
+def test_double_click_frequency_axis_resets_view_offset(qapp):
+    center_hz, sr = 98.5e6, 2.4e6
+    panel = _new_panel(qapp)
+    panel.generator.center_freq_hz = center_hz
+    panel.generator.sample_rate_hz = sr
+    panel.update_iq(_make_tone_iq(center_hz, sr, n=4096), center_hz, sr)
+    plot = panel._plot
+    plot.state.view_offset_hz = 300e3
+    before = panel.generator.center_freq_hz
+
+    y = float(plot._spectrum_height() - 4)       # 底部频率刻度轴
+    plot.mouseDoubleClickEvent(QMouseEvent(
+        QEvent.MouseButtonDblClick, QPointF(200.0, y), Qt.LeftButton,
+        Qt.LeftButton, Qt.NoModifier))
+    assert plot.state.view_offset_hz == 0.0, \
+        f"双击频率轴没有复位视图偏移（仍为 {plot.state.view_offset_hz}）"
+    assert panel.generator.center_freq_hz == pytest.approx(before, abs=1e-6), \
+        "复位视图不该调谐中心频率"
     panel.close()
 
 
