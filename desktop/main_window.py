@@ -7218,12 +7218,15 @@ class MainWindow(QMainWindow):
         """
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         backup = f"{config_file}.corrupt-{stamp}"
+        # 先进入损坏态再尝试改名：改名失败时也要让 _save_gui_config 拒绝写入，
+        # 否则下一次保存会用默认值把唯一证据覆盖掉。
+        self._gui_config_corrupt = True
         try:
             os.replace(config_file, backup)
         except Exception as e:  # noqa: BLE001
             logger.warning("备份损坏配置失败: %s", e)
+            self._gui_config_corrupt_backup = None
             return None
-        self._gui_config_corrupt = True
         self._gui_config_corrupt_backup = backup
         logger.warning("gui_config.json 损坏（%s），已备份到 %s", why, backup)
         try:
