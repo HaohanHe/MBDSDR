@@ -559,6 +559,47 @@ def moon_lit_path(cos_alpha: float) -> QPainterPath:
     return path
 
 
+# 每档标签数量上限（P0..P4）。依据：160° B3 实测队列 55 条、避让保留 40，
+# 座名 33 条是最大占用；一屏可读座名约 24，其余名额留给 DSO/星名。
+LABEL_TIER_CAPS = (5, 4, 24, 12, 20)
+
+
+def label_tier(priority: float) -> int:
+    """标签优先级 -> 档位 P0..P4（0.0 行星 / 0.5 卫星 / 1.0 星座 / 1.5 DSO / ≥2 星名）。"""
+    p = float(priority)
+    if p < 0.5:
+        return 0
+    if p < 1.0:
+        return 1
+    if p < 1.5:
+        return 2
+    if p < 2.0:
+        return 3
+    return 4
+
+
+def label_tier_keep(items, center_x: float, center_y: float,
+                    caps: Tuple[int, ...] = LABEL_TIER_CAPS) -> List[int]:
+    """按档限流：每档只保留离视场中心最近的 cap 条。
+
+    items: [(priority, pos, lines, color)]，pos 有 x()/y()。同档按距离升序，
+    距离相同再按登记顺序（稳定）。这样被丢的是**远处**座名，不是随机或
+    按目录顺序硬截断；近处用户正在看的名字不会被远处挤掉。
+    """
+    buckets: Dict[int, List[Tuple[float, int]]] = {}
+    for i, (prio, pos, _lines, _color) in enumerate(items):
+        tier = label_tier(prio)
+        d = math.hypot(float(pos.x()) - float(center_x),
+                       float(pos.y()) - float(center_y))
+        buckets.setdefault(tier, []).append((d, i))
+    keep: List[int] = []
+    for tier, rows in buckets.items():
+        cap = int(caps[tier]) if tier < len(caps) else 0
+        rows.sort(key=lambda r: (r[0], r[1]))
+        keep.extend(i for _d, i in rows[:max(0, cap)])
+    return sorted(keep)
+
+
 def label_boxes_keep(items: List[Tuple[float, float, float, float, float]],
                      pad: float = 2.0) -> List[int]:
     """二维标签碰撞剔除（纯函数，便于无头断言）。
@@ -4175,6 +4216,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._label_items = []
         if not items:
             return
+        # 先按档限流（每档只留离视场中心最近的 N 条），再做二维避让。
+        # 限流先于避让：否则远处座名会先占掉像素位，把近处名字挤没。
+        kept = label_tier_keep(items, self.width() / 2.0, self.height() / 2.0)
+        items = [items[i] for i in kept]
         fonts = {False: self._font, True: self._gnss_label_font}
         metrics = {k: QFontMetrics(f) for k, f in fonts.items()}
         boxes: List[Tuple[float, float, float, float, float]] = []
@@ -5277,28 +5322,45 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if sel is None and not self._stars_hidden_by_daylight():
             sel = self._star_selection(gs, jd)
             self._star_sel = sel
-        if sel is not None and not self._stars_hidden_by_daylight():
-            for i in range(len(sel)):
+        if sel is not None and not self._stars_hidden_by_daylight() and len(sel):
+            # 批量预筛：整表一次视高度/落屏（与 _draw_stars 同一条批量换算核），
+            # numpy 先按「点击点 ±tolerance」裁到几个候选，再逐候选做精确评分。
+            # 拾取半径 limit = max(tolerance, r_pick)，r_pick 不会超过 tolerance
+            # 之外，所以 box 预筛与逐星判决等价，不改变任何命中结果。
+            try:
+                azs = np.asarray(sel.az_deg, dtype=float)
+                alts = np.asarray(sel.alt_deg, dtype=float)
+                alt_draw_arr = np.array(
+                    [self._display_alt_deg(float(a)) for a in alts], dtype=float)
+                px_arr, py_arr = self._sky_to_screen_many(azs, alt_draw_arr)
+            except Exception:
+                px_arr = py_arr = alt_draw_arr = None
+            if px_arr is not None:
+                w = float(self.width())
+                h = float(self.height())
+                box = (np.abs(px_arr - x) <= tolerance) \
+                    & (np.abs(py_arr - y) <= tolerance) \
+                    & (alt_draw_arr >= 0.0) \
+                    & np.isfinite(px_arr) & np.isfinite(py_arr) \
+                    & (px_arr >= -4.0) & (px_arr <= w + 4.0) \
+                    & (py_arr >= -4.0) & (py_arr <= h + 4.0)
+                star_idx = np.flatnonzero(box)
+            else:
+                star_idx = []
+            for i in star_idx:
                 try:
-                    az = float(sel.az_deg[i])
-                    alt = float(sel.alt_deg[i])
                     mag_eff = float(sel.eff_mag[i])
                     vmag = float(sel.vmag[i])
                 except Exception:
                     continue
-                alt_draw = self._display_alt_deg(alt)
-                if alt_draw < 0.0:
-                    continue
+                alt_draw = float(alt_draw_arr[i])
                 # 与 _draw_stars 同一份 _star_visual（含 LOD 放出的暗星）。
                 r_pick = self._star_visual(
                     mag_eff, sel.limit_mag, self._bortle)[0]
                 if r_pick <= 0:
                     continue
-                scr = self._sky_to_screen_finite(az, alt_draw)
-                if scr is None or not self._on_screen(scr):
-                    continue
                 limit = max(float(tolerance), r_pick)
-                dist = math.hypot(scr.x() - x, scr.y() - y)
+                dist = math.hypot(float(px_arr[i]) - x, float(py_arr[i]) - y)
                 if dist >= limit:
                     continue
                 norm = max(0.0, min(1.0, (4.5 - vmag) / 9.0))

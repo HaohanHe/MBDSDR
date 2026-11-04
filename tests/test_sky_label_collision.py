@@ -30,7 +30,13 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 app = QApplication.instance() or QApplication(sys.argv)
 
 import rf_sky_view  # noqa: E402
-from rf_sky_view import RFSkyView, label_boxes_keep  # noqa: E402
+from rf_sky_view import (  # noqa: E402
+    LABEL_TIER_CAPS,
+    RFSkyView,
+    label_boxes_keep,
+    label_tier,
+    label_tier_keep,
+)
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
 
 LAT, LON = 40.0, 116.0
@@ -168,6 +174,48 @@ def test_flush_paints_only_higher_priority_of_overlapping_pair():
 
     assert both == alone, "两条标签框重叠时只能画优先级高的那条（否则压字）"
     assert disjoint != alone, "不重叠的标签必须都画（剔除不能误伤）"
+
+
+# --------------------------------------------------------------------------
+# 4. 每档上限 + 丢弃规则：远处先丢，不是按队列/目录顺序随机截断
+# --------------------------------------------------------------------------
+def test_tier_caps_are_the_agreed_numbers():
+    assert LABEL_TIER_CAPS == (5, 4, 24, 12, 20)
+    assert [label_tier(p) for p in (0.0, 0.5, 1.0, 1.5, 2.0, 3.5)] \
+        == [0, 1, 2, 3, 4, 4]
+
+
+def test_constellation_cap_drops_farthest_not_queue_order():
+    from PySide6.QtCore import QPointF
+    # 30 条座名，x 距离 = (i*7)%30（0..29 各一次），中心在 (0,0)。
+    items = [(1.0, QPointF(float((i * 7) % 30), 0.0),
+              [("座名", False, 0.0)], QColor(255, 255, 255))
+             for i in range(30)]
+    kept = label_tier_keep(items, 0.0, 0.0)
+    assert len(kept) == 24
+    kept_dist = sorted(abs(float(items[i][1].x())) for i in kept)
+    assert kept_dist == [float(d) for d in range(24)], \
+        "必须保留离视场中心最近的 24 条"
+    dropped = sorted(i for i in range(30) if i not in kept)
+    assert all(abs(float(items[i][1].x())) >= 24.0 for i in dropped)
+
+
+def test_tier_caps_apply_per_tier_independently():
+    from PySide6.QtCore import QPointF
+    items = []
+    for p, n in ((0.0, 10), (0.5, 6), (1.0, 30), (1.5, 13), (2.0, 21)):
+        items.extend((p, QPointF(float(j), 0.0), [("x", False, 0.0)],
+                      QColor(255, 255, 255)) for j in range(n))
+    kept = label_tier_keep(items, 0.0, 0.0)
+    assert len(kept) == 5 + 4 + 24 + 12 + 20
+
+
+def test_flush_labels_uses_tier_cap_before_collision():
+    import inspect
+    src = inspect.getsource(RFSkyView._flush_labels)
+    assert "label_tier_keep(" in src
+    # 限流必须先于 label_boxes_keep，否则远处标签先占像素位
+    assert src.index("label_tier_keep(") < src.index("label_boxes_keep(")
 
 
 # --------------------------------------------------------------------------
