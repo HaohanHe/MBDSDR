@@ -1095,7 +1095,29 @@ class SDRController:
                 accuracy_note=acc["note"],
                 time_precision_s=acc["time_precision_s"],
             )
-            return info.to_dict()
+            out = info.to_dict()
+            # P11：同一 AOS 时刻三路径 az/el 对拍（过境/天空视图/多普勒），
+            # 不一致必须报出，不许各算各的。
+            try:
+                from ..sat_consistency import check_pass_object
+                cons = check_pass_object(p, [line1, line2], gs,
+                                         tol_deg=0.5, threshold_alt_deg=10.0)
+                out["consistency"] = cons
+                if cons.get("checked") and not cons.get("consistent"):
+                    out["consistency_warning"] = cons.get("warning", "")
+            except Exception as e:  # pragma: no cover - 守卫失败要留痕
+                out["consistency"] = {"checked": False, "reason": str(e)}
+            # P11：系统时钟跳变（NTP/用户改时间）告警，随过境结果一并返回
+            try:
+                from ..time_basis import get_clock_guard
+                cst = get_clock_guard().observe()
+                if cst.get("type") != "ok":
+                    st = get_clock_guard().status()
+                    out["clock"] = st
+                    out["clock_warning"] = st.get("warning", "")
+            except Exception:  # pragma: no cover
+                pass
+            return out
         except Exception as e:
             return {"error": "not_available", "technical_detail": str(e)}
 
