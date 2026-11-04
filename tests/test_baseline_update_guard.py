@@ -138,6 +138,31 @@ def test_accept_geometry_with_declared_change_passes(tmp_path, capsys):
     assert QImage(path).width() == 336, "几何通道放行后应真的写入"
 
 
+def test_accept_geometry_with_defect_baseline_reason_passes(tmp_path, capsys):
+    """第三条合法通道：旧基线本身记录缺陷态（不是设计变更）。
+
+    freq_readout 的 320x20 是书签长名撑爆右栏时期的归一化产物；按控件真实
+    布局重建时必须点名已登记的缺陷修正 token，且摘要与打印都要能追溯。
+    """
+    path = str(tmp_path / "freq_readout_1000x600.png")
+    _make(path, 320, 20, "#1E1E20")
+    real = _make(str(tmp_path / "new.png"), 278, 60, "#1E1E20")
+    with pytest.raises(BaselineUpdateRefused, match="缺陷基线"):
+        guarded_update(path, real, "只是重建基线", accept_geometry_change=True)
+    summary = guarded_update(
+        path, real,
+        "freq-readout-bookmark-blowout: 旧基线记录了已知缺陷（书签长名撑爆"
+        "右栏），非本次设计变更",
+        accept_geometry_change=True)
+    out = capsys.readouterr().out
+    assert "[baseline][defect-fix]" in out and "→" in out
+    assert summary["defect_baseline"] == "freq-readout-bookmark-blowout"
+    assert summary["design_change"] is None
+    assert "缺陷基线修正已登记" in summary["text"]
+    assert summary["geometry"]["size"] == (320, 20, 278, 60)
+    assert QImage(path).width() == 278, "登记缺陷修正后应真的写入"
+
+
 def test_label_geometry_change_needs_accept_flag(tmp_path):
     """尺寸不变但刻度标签位置变了：默认拒绝，声明后放行并打印标签 diff。"""
     path = str(tmp_path / "panel_1000x600.png")

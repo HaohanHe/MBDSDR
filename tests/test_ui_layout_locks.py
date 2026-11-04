@@ -99,6 +99,27 @@ def _isolate_settings():
     return restore
 
 
+def _clear_user_bookmarks(win) -> None:
+    """基线必须与账号数据无关：清掉主窗口启动时从 ~/.mbdsdr/bookmarks.json
+    灌进来的书签。
+
+    实测证据：真实 HOME 的 3 条 10 万字符书签会被 `_sync_spectrum_bookmarks`
+    画成谱面上的三枚药丸；同一张 spectrum 基线在真实 HOME 下 worst≤17，
+    干净账号（CI）下 worst=141 > 100 必红。布局锁只锁几何/主要色块，
+    书签内容不进基线，所以在拍照前固定清空（用户数据版本另见
+    tests/test_bookmark_dirty_data.py）。
+    """
+    for fn in (
+        lambda: win.spectrum.set_bookmarks([]),
+        lambda: win.control_panel.load_bookmarks_from_list([]),
+        lambda: win._bookmarks.clear(),
+    ):
+        try:
+            fn()
+        except Exception:
+            pass
+
+
 @pytest.fixture(scope="module", params=SIZES,
                 ids=[f"{w}x{h}" for w, h in SIZES])
 def main_window(request):
@@ -111,6 +132,7 @@ def main_window(request):
             t.stop()
         except Exception:
             pass
+    _clear_user_bookmarks(win)
     win.setProperty("_audit_requested", f"{width}x{height}")
     win.resize(width, height)
     win.show()
@@ -614,8 +636,18 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
         abs(img.height() - base.height()) <= 2, (
         f"{panel} 尺寸漂移: 当前 {img.width()}x{img.height()} "
         f"基线 {base.width()}x{base.height()}")
-    # 宽高比（尺寸已等，等价于对缩放宽度的稳定性）
-    assert abs(img.width() / img.height() - base.width() / base.height()) < 0.01
+    # 宽高比：容差必须与上面允许的 ±2px 高度取整差一致，否则 2px 高度差
+    # 会直接顶爆固定 1% 阈值（320×191 vs 320×193 的比值差就有 1.7%）。
+    # 真正的比例畸变仍由「宽度严格相等 + 高度 ±2」这两条锁住。
+    aspect_tol = max(0.01, 2.2 * base.width() / (base.height() ** 2))
+    assert abs(img.width() / img.height()
+               - base.width() / base.height()) < aspect_tol
+    if img.height() != base.height():
+        # 尺寸有 ±2px 合法取整差时，先归一到同一分辨率再比色块：
+        # 否则高度差 2px 会让整张色块网格重新采样，把几何取整误报成
+        # "内容变了"（频谱曲线尤其明显）。尺寸/比例锁在上面已经生效。
+        img = img.scaled(base.width(), base.height(), Qt.IgnoreAspectRatio,
+                         Qt.SmoothTransformation)
 
     # 两档尺度：粗网格看「主要色块区域」，细网格容忍字形/抗锯齿差异
     worst, mean = _diff_stats(_signature(img, 8, 6), _signature(base, 8, 6))

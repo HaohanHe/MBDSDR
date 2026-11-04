@@ -31,6 +31,20 @@ DESIGN_CHANGES = {
         "频谱频轴/dB 轴刻度改 1/2/5×10ⁿ 阶梯 + 按量程自动单位（MHz 右端单标）",
 }
 
+# 已登记「旧基线记录缺陷态」的修正清单：同样是几何变化，但这不是设计变更，
+# 而是把"缺陷时期拍下的错误基线"按控件真实布局纠正。reason 必须点名 token；
+# 与设计变更分开登记，避免以后拿缺陷修正当设计变更的挡箭牌。
+DEFECT_BASELINE_FIXES = {
+    "freq-readout-bookmark-blowout":
+        "旧 freq_readout 基线记录的是书签长名撑爆右栏的缺陷态："
+        "FreqDisplay 被内容最小宽撑到 ~960px，归一化后成 320x20；"
+        "右栏 300px 契约下的真实布局是 278x60（高 60 是控件 setMinimumHeight）",
+    "ui-baseline-userdata-isolation":
+        "旧 spectrum 基线把开发者 ~/.mbdsdr/bookmarks.json 的书签药丸拍进了截图"
+        "（真实 HOME 3 条 10 万字符书签 → 谱面上三枚药丸；干净账号/CI 下"
+        "同一基线 worst=141>100 必红），改为夹具固定清空书签后重建",
+}
+
 
 class BaselineUpdateRefused(RuntimeError):
     """基线更新被拒绝（缺原因 / 几何漂移 / 未声明设计变更）。"""
@@ -42,6 +56,17 @@ def matching_design_change(reason: str) -> str | None:
     if not text:
         return None
     for token in DESIGN_CHANGES:
+        if token.lower() in text:
+            return token
+    return None
+
+
+def matching_defect_baseline(reason: str) -> str | None:
+    """返回 reason 命中的已登记缺陷基线修正 token；未命中返回 None。"""
+    text = (reason or "").strip().lower()
+    if not text:
+        return None
+    for token in DEFECT_BASELINE_FIXES:
         if token.lower() in text:
             return token
     return None
@@ -326,16 +351,27 @@ def guarded_update(path: str, image: QImage, reason: str,
                     f"{what}，拒绝更新：旧 {old.width()}x{old.height()} "
                     f"新 {image.width()}x{image.height()}；"
                     f"确属本次设计变更须加 --accept-geometry-change 且 "
-                    f"reason 点名已声明变更（{', '.join(DESIGN_CHANGES)}）")
+                    f"reason 点名已声明变更（{', '.join(DESIGN_CHANGES)}）；"
+                    f"旧基线记录缺陷态则点名已登记修正"
+                    f"（{', '.join(DEFECT_BASELINE_FIXES)}）")
             token = matching_design_change(reason)
-            if token is None:
+            defect = matching_defect_baseline(reason)
+            if token is None and defect is None:
                 raise BaselineUpdateRefused(
-                    "--accept-geometry-change 的 reason 必须点名已声明设计变更："
+                    "--accept-geometry-change 的 reason 必须点名已声明的设计变更"
+                    "或已登记的缺陷基线修正："
                     + "、".join(f"{k}（{v}）" for k, v in DESIGN_CHANGES.items())
+                    + "；缺陷基线修正 "
+                    + "、".join(f"{k}（{v}）"
+                               for k, v in DEFECT_BASELINE_FIXES.items())
                     + f"；当前 reason={reason.strip()!r}")
             gdiff = geometry_diff(old, image)
-            print(f"[baseline][geometry] 已声明 {token}: {gdiff['text']}",
-                  flush=True)
+            if token is not None:
+                print(f"[baseline][geometry] 已声明 {token}: {gdiff['text']}",
+                      flush=True)
+            else:
+                print(f"[baseline][defect-fix] 已登记缺陷基线 {defect}: "
+                      f"{gdiff['text']}", flush=True)
             if labels_diff is not None:
                 print(f"[baseline][labels] {labels_diff['text']}", flush=True)
             for i, ot, nt, dx, dy in (labels_diff["moves"]
@@ -345,11 +381,20 @@ def guarded_update(path: str, image: QImage, reason: str,
             summary = summarize(old, image, allow_geometry=True)
             summary["geometry"] = gdiff
             summary["labels"] = labels_diff
-            summary["text"] += ("；几何变更已声明 " + token
-                                + "：" + gdiff["text"]
-                                + ("；" + labels_diff["text"]
-                                   if labels_diff else ""))
-            summary["design_change"] = token
+            if token is not None:
+                summary["design_change"] = token
+                summary["defect_baseline"] = None
+                summary["text"] += ("；几何变更已声明 " + token
+                                    + "：" + gdiff["text"]
+                                    + ("；" + labels_diff["text"]
+                                       if labels_diff else ""))
+            else:
+                summary["design_change"] = None
+                summary["defect_baseline"] = defect
+                summary["text"] += ("；缺陷基线修正已登记 " + defect
+                                    + "：" + gdiff["text"]
+                                    + ("；" + labels_diff["text"]
+                                       if labels_diff else ""))
         else:
             summary = summarize(old, image)
             summary["geometry"] = None
