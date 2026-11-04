@@ -221,6 +221,18 @@ class TimeEngine:
         与时间倍率/仿真推进无关。"""
         return self._clock_guard.status()
 
+    def local_display(self) -> Dict[str, Any]:
+        """当前仿真时刻的本地时区显示（带偏移，仅显示；计算仍用 UTC）。"""
+        try:
+            from .time_basis import format_local
+        except ImportError:
+            from time_basis import format_local
+        utc = self.now_utc()
+        return {
+            "utc_iso": utc.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "local_iso": format_local(utc),
+        }
+
     # ---- 当前模拟时间读取 ----------------------------------------------
     def now_jd(self) -> float:
         """返回当前模拟儒略日（UT）。对应 StelCore::getJD"""
@@ -249,6 +261,7 @@ class TimeEngine:
             "following_system": self.is_following_system(),
             "clock": self.clock_status(),
             "rate_semantics": "倍率只推进显示/仿真时刻；轨道物理按显式 UTC 时刻计算",
+            "sim_local": self.local_display(),
         }
 
 
@@ -284,7 +297,9 @@ class TimeInfo:
     ntp_server: str = ""  # NTP 服务器
     ntp_rtt_ms: float = 0.0  # NTP 往返延迟（ms）
     source: str = "system"  # 时间源：system/ntp/gnss
-    leap_seconds: int = 18  # GPS-UTC 闰秒
+    leap_seconds: int = 18  # GPS-UTC 闰秒（按 UTC 时刻查表，不写死）
+    utc_iso: str = ""       # UTC ISO（带 Z 语义，用于计算口径）
+    local_iso: str = ""     # 本地时区 ISO（带偏移，仅显示；可逆验证）
 
 
 class NTPError(Exception):
@@ -333,6 +348,15 @@ def get_ntp_time(server: str = "ntp.aliyun.com", timeout: float = 3.0) -> Tuple[
         raise NTPError(f"NTP 获取失败: {e}")
 
 
+def _leap_seconds(utc_dt: datetime) -> int:
+    """按 UTC 时刻查闰秒表（复用 time_basis，避免写死 18）。"""
+    try:
+        from .time_basis import leap_seconds_at
+    except ImportError:
+        from time_basis import leap_seconds_at
+    return int(leap_seconds_at(utc_dt))
+
+
 def get_time_info(prefer_ntp: bool = True) -> TimeInfo:
     """
     获取当前时间信息。
@@ -341,6 +365,7 @@ def get_time_info(prefer_ntp: bool = True) -> TimeInfo:
     info = TimeInfo()
     info.local_time = datetime.now()
     info.utc_time = datetime.now(timezone.utc)
+    info.leap_seconds = _leap_seconds(info.utc_time)
 
     if prefer_ntp:
         for server in DEFAULT_NTP_SERVERS:
@@ -366,6 +391,15 @@ def get_time_info(prefer_ntp: bool = True) -> TimeInfo:
         gps_seconds = (gps_datetime - gps_epoch).total_seconds()
         info.gps_time = gps_seconds % 604800  # 周内秒
 
+    # 显示口径：UTC 用于计算，本地时区只做可逆显示（含偏移）
+    info.leap_seconds = _leap_seconds(info.utc_time)
+    info.utc_iso = info.utc_time.astimezone(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ")
+    try:
+        from .time_basis import format_local
+    except ImportError:
+        from time_basis import format_local
+    info.local_iso = format_local(info.utc_time)
     return info
 
 

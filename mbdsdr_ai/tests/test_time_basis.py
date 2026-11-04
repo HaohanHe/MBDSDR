@@ -134,6 +134,25 @@ class TestClockGuard:
         assert g.status()["clock_jump"] is False
 
 
+class TestUiDisplayContract:
+    def test_time_info_exposes_utc_and_local_with_offset(self):
+        from mbdsdr_ai.new_spacetime import TimeEngine, get_time_info
+
+        info = get_time_info(prefer_ntp=False)
+        assert info.utc_iso.endswith("Z")
+        assert info.local_iso
+        assert info.local_iso[-6] in "+-" and info.local_iso[-3] == ":"
+        assert info.leap_seconds == 18
+
+        eng = TimeEngine()
+        eng.set_utc(datetime(2026, 11, 4, 12, 0, 0, tzinfo=UTC))
+        disp = eng.local_display()
+        assert disp["utc_iso"] == "2026-11-04T12:00:00Z"
+        tz = timezone(timedelta(hours=8))
+        assert format_local(datetime(2026, 11, 4, 12, tzinfo=UTC), tz) == \
+            "2026-11-04T20:00:00+08:00"
+
+
 class TestPassWindowGuard:
     def test_negative_duration_is_reported(self):
         rep = validate_pass_window(rise_unix=1000.0, set_unix=900.0)
