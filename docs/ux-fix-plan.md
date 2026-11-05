@@ -483,6 +483,11 @@ assert w.control_panel._bookmarks[0][3] is True                 # 当前只有 3
 - `desktop/main_window.py`：不干净，等交干净。
 - `mbdsdr_ai/frequency_manager.py`：只读，不改（`builtin` 字段与 `remove()` 的“内置不可删”语义已存在）。
 
+**取舍（已定稿）**
+- 现状：内置项在列表里标「（内置）」且不可删；点删除弹「内置书签」说明不能删除，并给下一步（调到目标频点后用「收藏当前频率」建自定义书签）。落地提交 `50d9548`。
+- 为什么不做「可删 + 可恢复」：`FrequencyManager.remove()` 只删 `builtin=False`，`_save_user()` 只写自定义项；要真删内置必须新增持久化的 `hidden_builtin` 集合与配置字段，跨 `mbdsdr_ai/frequency_manager.py` + 设置清单两条线，超出 8b 边界。
+- 将来要做的条件：频率库线把 `hidden_builtin`（读写 `bookmarks.json`）与「恢复全部内置」入口定为正式 API，并在 `docs/settings-inventory.md` 登记该字段后，8b 再回改删除分支；在那之前维持“不可删 + 给下一步”。
+
 ---
 
 ## 落地顺序与提交边界（预演）
