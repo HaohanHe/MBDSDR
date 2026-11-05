@@ -209,16 +209,33 @@ def _restore_tuning(backend, old, default_demod: str) -> str:
     返回空串表示恢复成功；否则返回一行可展示的警告。恢复失败意味着设备
     可能停留在临时调谐状态，后续工具会读到错误频率——必须让用户看见，
     不能像以前那样 `except: pass` 后继续声称"已回到原频率"。
+
+    注意：setter 显式返回 False（不抛异常）同样是失败；只看异常会把
+    "设备拒绝恢复"当成"已恢复"。
     """
+    failed = []
+
+    def _apply(what, fn, *args):
+        try:
+            if fn(*args) is False:
+                failed.append(_setter_refusal_reason(backend, what))
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            failed.append(f"{what}下发失败（{e}）")
+
     try:
-        backend.set_frequency(int(old[0]))
+        _apply("恢复频率", backend.set_frequency, int(old[0]))
         if hasattr(backend, "set_sample_rate"):
-            backend.set_sample_rate(old[1])
-        backend.set_demod(old[2] or default_demod)
+            _apply("恢复采样率", backend.set_sample_rate, old[1])
+        _apply("恢复解调模式", backend.set_demod, old[2] or default_demod)
     except (RuntimeError, OSError, ValueError, TypeError) as e:
         logger.warning("恢复调谐状态失败（freq=%s sr=%s demod=%s）: %s",
                        old[0], old[1], old[2], e)
-        return f"恢复原调谐状态失败: {e}；设备可能停留在临时频率/采样率。"
+        failed.append(str(e))
+    if failed:
+        reason = "；".join(failed)
+        logger.warning("恢复调谐状态失败（freq=%s sr=%s demod=%s）: %s",
+                       old[0], old[1], old[2], reason)
+        return f"恢复原调谐状态失败: {reason}；设备可能停留在临时频率/采样率。"
     return ""
 
 

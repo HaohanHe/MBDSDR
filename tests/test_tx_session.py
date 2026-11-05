@@ -13,9 +13,9 @@ if _ROOT not in sys.path:
 
 from mbdsdr_ai import playback as pb_mod  # noqa: E402
 from mbdsdr_ai.tx_guard import (  # noqa: E402
-    TX_ABORTED, TX_CANCELLED, TX_COMPLETED, TX_DEVICE_LOST, TX_GATE_REVOKED,
-    TX_GATE_EXPIRED, TX_UNDERRUN, TxCapabilities, TxSession, get_tx_gate,
-    reset_tx_gate,
+    TX_ABORTED, TX_CANCELLED, TX_COMPLETED, TX_DEVICE_LOST, TX_FAILED,
+    TX_GATE_REVOKED, TX_GATE_EXPIRED, TX_UNDERRUN, TxCapabilities, TxSession,
+    get_tx_gate, reset_tx_gate,
 )
 
 CAPS = TxCapabilities(
@@ -40,12 +40,28 @@ class FakeTxBackend:
         self.on_write = None
         self._alive = True
         self._underrun = False
+        self.gain = None
+        self.bandwidth = None
+        self.gain_fail = False
+        self.bandwidth_fail = False
 
     def supports_tx(self):
         return True
 
     def set_frequency(self, hz):
         self.freq = hz
+
+    def set_gain(self, db):
+        if self.gain_fail:
+            return False
+        self.gain = float(db)
+        return True
+
+    def set_bandwidth(self, hz):
+        if self.bandwidth_fail:
+            return False
+        self.bandwidth = float(hz)
+        return True
 
     def device_alive(self):
         return self._alive
@@ -279,3 +295,22 @@ def test_playback_deleted_mid_read_is_aborted(tmp_path, monkeypatch):
     assert rep["state"] == "aborted"
     assert rep["reason_code"] == "tx_source_deleted"
     assert "删除" in rep["reason"] or "移走" in rep["reason"]
+
+
+def test_gain_and_bandwidth_are_applied_and_refusal_blocks_tx():
+    """预检通过 ≠ 已生效：请求的 gain/bandwidth 必须真下发，拒绝则不发波。"""
+    be = FakeTxBackend()
+    _, rep = _run(be, np.ones(100, dtype=np.complex64), gain_db=20.0,
+                  bandwidth_hz=2e6, chunk_samples=10)
+    assert rep["state"] == TX_COMPLETED
+    assert be.gain == 20.0, "gain 只校验不下发 = 按默认增益发波"
+    assert be.bandwidth == 2e6
+
+    be2 = FakeTxBackend()
+    be2.gain_fail = True
+    _, rep2 = _run(be2, np.ones(100, dtype=np.complex64), gain_db=20.0,
+                   bandwidth_hz=2e6, chunk_samples=10)
+    assert rep2["state"] == TX_FAILED
+    assert rep2["reason_code"] == "tx_set_gain_failed"
+    assert be2.writes == [], "增益未落到硬件时不得开始写波"
+    assert be2.stopped == 1

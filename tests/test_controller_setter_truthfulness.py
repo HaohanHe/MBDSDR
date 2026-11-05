@@ -17,7 +17,9 @@ for _p in (_ROOT, os.path.join(_ROOT, "desktop")):
         sys.path.insert(0, _p)
 
 from mbdsdr_ai.core.controller import SDRController, _RCShim  # noqa: E402
-from mbdsdr_ai.core.errors import SampleRateNotSupportedError  # noqa: E402
+from mbdsdr_ai.core.errors import (  # noqa: E402
+    SampleRateNotSupportedError, SDRUserError,
+)
 
 
 class _FakeRadio:
@@ -135,3 +137,28 @@ def test_rc_shim_reports_backend_truth():
     assert shim.set_freq(145e6) is False
     assert shim.get_freq() == 98e6
     assert shim.get_gain() == 20.0
+
+
+def test_connect_fails_when_initial_params_not_applied(monkeypatch):
+    """设备打开了但参数没落到硬件：不许返回 True 并标记已连接。"""
+    import mbdsdr_ai.device_manager as dm
+
+    fake = _FakeRadio(sr=2.4e6)
+    fake.reject_sr = True
+
+    class _DM:
+        @staticmethod
+        def list_devices():
+            return [SimpleNamespace(device_key="fake", serial="", name="FakeRadio")]
+
+        @staticmethod
+        def open(target):
+            return fake
+
+    monkeypatch.setattr(dm, "DeviceManager", _DM)
+    c = SDRController()
+
+    with pytest.raises(SDRUserError, match="初始参数未能生效"):
+        c.connect("fake")
+    assert c.is_connected() is False
+    assert c._backend is None

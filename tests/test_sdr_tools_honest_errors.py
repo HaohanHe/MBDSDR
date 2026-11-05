@@ -103,6 +103,14 @@ def test_restore_tuning_success_is_silent():
     assert st._restore_tuning(backend, (100e6, 2e6, "WFM"), "WFM") == ""
 
 
+def test_restore_tuning_explicit_refusal_is_reported():
+    """设备显式返回 False（不抛异常）也是恢复失败，不得当成已恢复。"""
+    backend = _OkBackend(refuse={"set_frequency"})
+    warning = st._restore_tuning(backend, (100e6, 2e6, "WFM"), "WFM")
+    assert "恢复原调谐状态失败" in warning
+    assert "未落到硬件" in warning
+
+
 def test_recordings_list_reports_corrupt_sidecar(tmp_path, monkeypatch):
     """修复前：坏 sidecar 被 pass，列表里 frequency_mhz=None 看起来像没记录。"""
     rec_dir = tmp_path / "recordings"

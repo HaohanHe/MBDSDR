@@ -1472,6 +1472,32 @@ class TxSession:
                 )
                 return self._abort(TX_FAILED, "tx_set_frequency_failed", reason)
 
+        # 预检只回答"参数是否在允许范围"；校验过不等于已落到硬件。
+        # 此前 gain/bandwidth 只检查不下发，等于把"检查通过"当成"已生效"。
+        for what, value, setter_name, code in (
+            ("发射增益", gain_db, "set_gain", "tx_set_gain_failed"),
+            ("发射带宽", bandwidth_hz, "set_bandwidth", "tx_set_bandwidth_failed"),
+        ):
+            if value is None:
+                continue
+            fn = getattr(self.backend, setter_name, None)
+            # 请求了却没能力下发：拒绝发射，不能按默认值发波后报成功。
+            if not callable(fn):
+                return self._abort(
+                    TX_FAILED, code,
+                    f"后端不支持设置{what}，已拒绝发射（参数不能只校验不下发）")
+            try:
+                applied = fn(float(value))
+            except Exception as e:
+                return self._abort(TX_FAILED, code,
+                                   f"{what}下发失败（{e}），已拒绝发射")
+            if applied is False:
+                reason = (
+                    getattr(getattr(self.backend, "status", None), "error", "")
+                    or f"{what} {float(value):g} 未落到硬件，已拒绝发射"
+                )
+                return self._abort(TX_FAILED, code, reason)
+
         blocks = self._iter_blocks(iq_blocks, chunk_samples)
         self.state = TX_TRANSMITTING
         try:

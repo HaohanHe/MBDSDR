@@ -341,13 +341,41 @@ class SDRController:
         self._device_name = target.name
         self._is_debug = False
         self._connected = True
-        # 下发当前参数
-        try:
-            opened.set_sample_rate(self._sample_rate)
-            opened.set_frequency(self._freq_hz)
-            opened.set_gain(self._gain_db)
-        except Exception as e:
-            logger.warning("下发初始参数失败: %s", e)
+        # 下发初始参数：任何一项没落到硬件都必须让 connect 失败。
+        # 以前只在异常时记一条 warning，返回 True——调用方以为"已连接且
+        # 参数已生效"，实际设备仍跑默认值，属典型的失败当成功。
+        failures = []
+        for what, fn_name, value in (
+            ("采样率", "set_sample_rate", self._sample_rate),
+            ("频率", "set_frequency", self._freq_hz),
+            ("增益", "set_gain", self._gain_db),
+        ):
+            fn = getattr(opened, fn_name, None)
+            if not callable(fn):
+                failures.append(f"{what}下发失败（后端不支持该设置）")
+                continue
+            try:
+                ok = fn(value)
+            except Exception as e:
+                failures.append(f"{what}下发失败（{e}）")
+                continue
+            if ok is False:
+                failures.append(self._setter_failure_text(what))
+        if failures:
+            self._backend = None
+            self._connected = False
+            self._device_name = ""
+            try:
+                opened.disconnect()
+            except Exception:
+                pass
+            raise SDRUserError(
+                "设备已打开但初始参数未能生效：" + "；".join(failures),
+                suggestion=(
+                    "请确认设备驱动支持当前采样率/频率/增益，或先用 connect('debug') "
+                    "自检；参数未生效时不会把设备标记为已连接。"
+                ),
+            )
         return True
 
     def disconnect(self) -> None:
