@@ -359,6 +359,92 @@ class TestUiFlowGuards:
         assert w.tx_readout.text() == "发射: 未预偏（回放，保持原频率）"
         w._replay_timer = None
 
+    def test_tx_button_greyed_without_hardware_and_says_why(self, window):
+        """无硬件：按钮置灰 + tooltip 说明原因（不许"点了没反应"）。"""
+        w = self._window(window)
+        w._active_sdr_backend = None
+        w._replay_timer = None
+        w._refresh_tx_button_state()
+        assert not w.tx_button.isEnabled()
+        assert "未连接设备" in w.tx_button.toolTip()
+        assert w.tx_button.text() == "发射"
+
+    def test_tx_button_greyed_when_backend_has_no_tx_channel(self, window):
+        """设备声明支持发射但后端没有 write_tx：同样置灰并写明「无 TX 通道」。"""
+        class _NoTxChannel:
+            def supports_tx(self):
+                return True
+
+        w = self._window(window)
+        w._active_sdr_backend = _NoTxChannel()
+        w._refresh_tx_button_state()
+        assert not w.tx_button.isEnabled()
+        assert "没有 TX 通道" in w.tx_button.toolTip()
+        w._active_sdr_backend = None
+
+    def test_tx_button_enabled_only_with_tx_channel(self, window):
+        class _TxCapable:
+            def supports_tx(self):
+                return True
+
+            def write_tx(self, iq):
+                raise AssertionError("本用例不应真的发波")
+
+        w = self._window(window)
+        w._active_sdr_backend = _TxCapable()
+        w._refresh_tx_button_state()
+        assert w.tx_button.isEnabled()
+        assert "人工确认" in w.tx_button.toolTip()
+        w._active_sdr_backend = None
+
+    def test_tx_button_greyed_during_replay(self, window):
+        """回放：PTT 置灰 + 自动预偏开关置灰（保持原频率）。"""
+        w = self._window(window)
+        w._active_sdr_backend = object()
+        w._replay_timer = object()
+        w._refresh_tx_button_state()
+        assert not w.tx_button.isEnabled()
+        assert "回放中" in w.tx_button.toolTip()
+        w._replay_timer = None
+        w._active_sdr_backend = None
+
+    def test_tx_denied_by_human_gate_touches_hardware_zero_times(
+            self, window, monkeypatch):
+        """人工确认拒绝 → 硬件 0 次调用、按钮复位、读数写「未发射」。"""
+        class _TxCapable:
+            def __init__(self):
+                self.writes = 0
+
+            def supports_tx(self):
+                return True
+
+            def write_tx(self, iq):
+                self.writes += 1
+
+        w = self._window(window)
+        backend = _TxCapable()
+        w._active_sdr_backend = backend
+        w._vfo_center_hz = 145_800_000.0
+
+        import mbdsdr_ai.sdr_tools as sdr_tools
+        note = {"requested": None, "mode": "auto", "applied": True,
+                "nominal_hz": 145_800_000.0, "freq_hz": 145_799_027.0,
+                "delta_hz": -973.0, "predicted_hz": 973.0,
+                "target": "ISS (ZARYA)", "reason": ""}
+        monkeypatch.setattr(
+            sdr_tools, "resolve_tx_doppler",
+            lambda nominal_hz, requested=None: (note["freq_hz"], dict(note)))
+        w._approval_handler = lambda tool_name, args: False
+        w._audit_approval = lambda *a, **k: None
+
+        w.tx_button.setChecked(True)  # 触发 PTT 按下路径
+
+        assert backend.writes == 0, "人工确认拒绝时绝不能碰硬件"
+        assert not w.tx_button.isChecked(), "拒绝后按钮必须复位，不能停留在发射态"
+        assert "未发射（人工确认未通过）" in w.tx_readout.text()
+        assert "已预偏" not in w.tx_readout.text()
+        w._active_sdr_backend = None
+
 
 def test_about_dialog_contains_dso_attribution(monkeypatch):
     """许可义务：关于框必须保留 OpenNGC / CC BY-SA 4.0 署名，且文案不被截断。"""

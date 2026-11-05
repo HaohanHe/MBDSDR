@@ -388,6 +388,8 @@ class MainWindow(QMainWindow):
     # AI 后台线程 → UI 线程的人工确认请求（payload dict，含 event/approved）。
     # 用 queued 信号而不是直接调 QMessageBox：MCP handler 在 AI 线程里跑。
     _human_approval_requested = Signal(object)
+    # 发射线程 → UI 线程的收尾（TxSession.status() 字典），跨线程改按钮必须走信号
+    _tx_finished = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -424,6 +426,8 @@ class MainWindow(QMainWindow):
         # 人工确认门：AI 后台线程发请求，UI 线程弹窗/显式确认后回填结果。
         # 模型自带的 arm_manual 一律作废——确认只能来自真人（S13）。
         self._human_approval_requested.connect(self._on_human_approval_requested)
+        # 发射线程收尾（恢复接收/复位按钮）必须排队回 UI 线程
+        self._tx_finished.connect(self._on_tx_finished)
         self._approval_handler = None      # 测试注入：可替换弹窗，签名 (tool, args) -> bool
         self._approval_timeout_s = 180.0   # 无人应答超时＝拒绝
         self._approval_audit_path = os.path.join(
@@ -542,6 +546,12 @@ class MainWindow(QMainWindow):
         self._replay_total: int = 0
         self._replay_block: int = 0
         self._replay_resume_poll: bool = False
+
+        # ---- 最小发射面（PTT）：真人确认 + 一次性 token + TxSession 状态机 ----
+        # 只有「设备有 write_tx 通道 + 人工确认通过」才允许发波；无硬件时按钮置灰。
+        self._tx_session = None          # 正在发射的 TxSession（None = 空闲）
+        self._tx_thread: Optional[threading.Thread] = None
+        self._tx_button_guard: bool = False  # 程序改按钮选中态时防重入
 
         # ---- 产品体验集成：状态栏信息密度 / 无设备引导 / 书签 ----
         # 书签内存表（freq_hz, name, mode）；持久化走 FrequencyManager（见下方）
@@ -2086,6 +2096,16 @@ class MainWindow(QMainWindow):
             "发射频点读数：实际发波频率 / 标称频率 / 预偏状态。"
             "— 表示未连接设备或读数未知，绝不表示 0")
         lay.addWidget(self.tx_readout)
+        # 最小发射面：PTT 按钮（按下=发射，再次按下=停止）。默认置灰；
+        # 无设备/无 TX 通道/回放中都会在 tooltip 里写明原因（不出现"点了没反应"）。
+        self.tx_button = QToolButton()
+        self.tx_button.setObjectName("statusValue")
+        self.tx_button.setCheckable(True)
+        self.tx_button.setText("发射")
+        self.tx_button.setToolTip("发射/停止（PTT）：需经人工确认")
+        self.tx_button.toggled.connect(self._on_tx_button_toggled)
+        self.tx_button.setEnabled(False)
+        lay.addWidget(self.tx_button)
         lay.addStretch(1)
 
         # 呼号（全局可编辑，持久化）
@@ -2391,6 +2411,202 @@ class MainWindow(QMainWindow):
             lbl.setText("发射: —")
             return
         lbl.setText("发射: " + format_tx_doppler(note))
+
+    # ---------------------------------------------------------------- 最小发射面
+    def _tx_block_reason(self) -> str:
+        """不能发射的原因（空串=可以发）。置灰与 tooltip 共用这一个出口。"""
+        if self._replay_timer is not None:
+            return "回放中：保持原频率，不发射"
+        backend = getattr(self, "_active_sdr_backend", None)
+        if backend is None:
+            return "未连接设备：请先连接支持发射的 SDR"
+        if not callable(getattr(backend, "write_tx", None)):
+            return "当前设备不支持发射（后端没有 TX 通道）"
+        try:
+            if not bool(backend.supports_tx()):
+                return "当前设备声明不支持发射"
+        except Exception as e:
+            logger.debug("读取发射能力失败: %s", e)
+            return "无法确认设备是否支持发射"
+        return ""
+
+    def _set_tx_button_checked(self, checked: bool) -> None:
+        """程序改选中态（防重入，避免触发 toggled 里的发/停逻辑）。"""
+        btn = getattr(self, "tx_button", None)
+        if btn is None or btn.isChecked() == bool(checked):
+            return
+        self._tx_button_guard = True
+        try:
+            btn.setChecked(bool(checked))
+        finally:
+            self._tx_button_guard = False
+
+    def _refresh_tx_button_state(self) -> None:
+        """按钮可用性/文案/tooltip 单一出口：置灰必须说明原因，不出现"点了没反应"。"""
+        btn = getattr(self, "tx_button", None)
+        if btn is None:
+            return
+        if self._tx_session is not None:
+            self._set_tx_button_checked(True)
+            btn.setText("停止发射")
+            btn.setEnabled(True)
+            btn.setToolTip("正在发射：再次按下停止（PTT）")
+            return
+        reason = self._tx_block_reason()
+        self._set_tx_button_checked(False)
+        btn.setText("发射")
+        btn.setEnabled(not reason)
+        btn.setToolTip("发射/停止（PTT）：需经人工确认" if not reason
+                       else f"无法发射：{reason}")
+
+    @Slot(bool)
+    def _on_tx_button_toggled(self, checked: bool) -> None:
+        """PTT：按下 → 能力检查 → 预偏裁决 → 真人确认 → 发波；再按 → 停止。"""
+        if self._tx_button_guard:
+            return
+        if not checked:
+            self._stop_tx()
+            return
+        reason = self._tx_block_reason()
+        if reason:
+            self._set_tx_button_checked(False)
+            self.statusBar().showMessage(f"无法发射：{reason}", 6000)
+            return
+        nominal_hz = float(getattr(self, "_vfo_center_hz", 0.0) or 0.0)
+        if nominal_hz <= 0.0:
+            self._set_tx_button_checked(False)
+            self.statusBar().showMessage("无法发射：当前没有标称频率", 6000)
+            return
+        # 契约唯一真相源：发波频率与读数用同一次裁决结果，UI 不算 Δ
+        try:
+            from mbdsdr_ai.sdr_tools import resolve_tx_doppler
+            freq_hz, note = resolve_tx_doppler(nominal_hz, None)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("发射预偏裁决失败: %s", e)
+            self._set_tx_button_checked(False)
+            self.tx_readout.setText("发射: " + format_tx_doppler(
+                None, failed_reason=f"预偏裁决失败：{e}"))
+            self.statusBar().showMessage(f"未发射（预偏裁决失败：{e}）", 6000)
+            return
+        self.tx_readout.setText("发射: " + format_tx_doppler(note))
+        args = {"nominal_hz": round(nominal_hz, 3),
+                "freq_hz": round(float(freq_hz), 3)}
+        approved = self._confirm_write_action(
+            "desktop_transmit", args,
+            prompt=(f"确认发射？\n\n"
+                    f"{format_tx_doppler(note)}\n\n"
+                    "发射会占用设备并可能影响接收；确认后立即发波，是否继续？"))
+        self._audit_approval("desktop_transmit", args, approved, note="桌面 PTT")
+        if not approved:
+            self._set_tx_button_checked(False)
+            self.tx_readout.setText("发射: " + format_tx_doppler(
+                None, failed_reason="人工确认未通过"))
+            self.statusBar().showMessage("未发射（人工确认未通过）", 6000)
+            return
+        self._start_tx(self._active_sdr_backend, freq_hz, args)
+
+    def _start_tx(self, backend, freq_hz: float, args: dict) -> None:
+        """人工确认通过后：签发一次性 token → 后台 TxSession 连续发波。"""
+        try:
+            from mbdsdr_ai.tx_guard import (
+                TxSession, action_digest, capabilities_from_device,
+                capabilities_from_hal_backend, issue_confirmation,
+                policy_from_env)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("发射安全网关不可用: %s", e)
+            self._set_tx_button_checked(False)
+            self.statusBar().showMessage(f"未发射（安全网关不可用：{e}）", 8000)
+            return
+        # desktop 后端的能力源是 SDRDevice；hal 后端才用 hal 版推导
+        caps = (capabilities_from_device(getattr(backend, "device", None))
+                if getattr(backend, "device", None) is not None
+                else capabilities_from_hal_backend(backend))
+        if not caps.known:
+            self._set_tx_button_checked(False)
+            self.tx_readout.setText("发射: " + format_tx_doppler(
+                None, failed_reason=f"设备发射能力未知（{caps.source}）"))
+            self.statusBar().showMessage(
+                f"未发射（设备能力未知：{caps.source}）", 8000)
+            return
+        try:
+            token = issue_confirmation("desktop_transmit", args,
+                                       note="桌面发射按钮（人工确认）")
+            action = action_digest("desktop_transmit", args)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("签发发射 token 失败: %s", e)
+            self._set_tx_button_checked(False)
+            self.statusBar().showMessage(f"未发射（签发授权失败：{e}）", 8000)
+            return
+        session = TxSession(backend)
+        self._tx_session = session
+        # 半双工：先在 UI 线程暂停接收（TxSession 运行在后台线程，不能跨线程碰 Qt 定时器）
+        try:
+            self._stop_iq_streams()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("发射前暂停接收失败: %s", e)
+        self._refresh_tx_button_state()
+        carrier = np.ones(4096, dtype=np.complex64)
+
+        def _blocks():
+            while not session.cancel_event.is_set():
+                yield carrier
+
+        def _run():
+            try:
+                info = session.transmit(
+                    _blocks(), freq_hz=float(freq_hz),
+                    tx_token=token, action=action, caps=caps,
+                    regulatory=policy_from_env())
+            except Exception as e:  # noqa: BLE001
+                logger.error("发射线程异常: %s", e)
+                info = {"state": "failed", "reason": f"发射线程异常: {e}"}
+            self._tx_finished.emit(info)
+
+        self._tx_thread = threading.Thread(target=_run, name="desktop-tx",
+                                           daemon=True)
+        self._tx_thread.start()
+
+    def _stop_tx(self, reason: str = "用户停止发射", *, wait: bool = False) -> None:
+        """停止当前发射（若空闲则无动作）。``wait`` 用于断开/回放前确认已停波。"""
+        session = self._tx_session
+        if session is None:
+            self._refresh_tx_button_state()
+            return
+        session.cancel(reason)
+        self.statusBar().showMessage("正在停止发射…", 3000)
+        if wait and self._tx_thread is not None:
+            self._tx_thread.join(timeout=2.0)
+
+    @Slot(object)
+    def _on_tx_finished(self, info) -> None:
+        """发射线程收尾（UI 线程）：恢复接收、复位按钮、按真实结果报文案。"""
+        info = dict(info or {})
+        self._tx_session = None
+        self._tx_thread = None
+        self._set_tx_button_checked(False)
+        # 恢复接收（发波前在 UI 线程暂停过）
+        try:
+            if self._active_sdr_backend is not None and self._replay_timer is None:
+                self._start_iq_streams()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("发射结束后恢复接收失败: %s", e)
+            self.statusBar().showMessage(f"恢复接收失败：{e}", 8000)
+        state = str(info.get("state") or "")
+        reason = str(info.get("reason") or "")
+        if state == "cancelled":
+            self.statusBar().showMessage("发射已停止", 4000)
+            self._refresh_tx_readout()
+        elif state == "completed":
+            self.statusBar().showMessage("发射完成", 4000)
+            self._refresh_tx_readout()
+        elif state in ("rejected", "failed"):
+            self.tx_readout.setText("发射: " + format_tx_doppler(
+                None, failed_reason=reason or "发射被拒"))
+            self.statusBar().showMessage(f"未发射（{reason}）", 8000)
+        else:  # aborted / stopping：发过波但被中止，不谎报「未发射」
+            self.statusBar().showMessage(f"发射中止（{reason}）", 8000)
+            self._refresh_tx_readout()
+        self._refresh_tx_button_state()
 
     # ========================================================================
     # 主题
@@ -3001,6 +3217,7 @@ class MainWindow(QMainWindow):
         self._update_status_bar()
         # 设备就绪 → 发射频点读数就位（此后只在频率/目标变化时重算）
         self._refresh_tx_readout()
+        self._refresh_tx_button_state()
         # 启动真实 IQ 流：频谱/录制/声卡全部接通
         self._start_iq_streams()
         return True
@@ -3530,6 +3747,8 @@ class MainWindow(QMainWindow):
         `_disconnect()` 与 `_connect_backend()` 共用这一条拆除路径，
         重复调用安全（全程 try/except）。
         """
+        # 发射中先停波（先停硬件动作，再拆其余资源）
+        self._stop_tx("断开连接", wait=True)
         # 回放：先清 resume 标志，避免 _stop_replay 在拆连接过程中又拉起流水线
         self._replay_resume_poll = False
         try:
@@ -3592,6 +3811,7 @@ class MainWindow(QMainWindow):
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
         self._refresh_tx_readout()  # 无设备 → 发射读数回 "—"，不留旧频点
+        self._refresh_tx_button_state()  # 无硬件 → 发射按钮置灰并说明原因
 
     def _disconnect(self):
         """断开连接（用户点"断开"）：幂等拆除 + 未连接时如实说明。"""
@@ -3631,6 +3851,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._refresh_tx_readout()
+            self._refresh_tx_button_state()
 
     @Slot(dict)
     def _on_status_for_ui(self, status: dict):
@@ -4146,19 +4367,26 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             logger.warning("人工确认审计写入失败: %s", e)
 
-    def _confirm_write_action(self, tool_name: str, args: dict) -> bool:
-        """桌面真人确认（默认弹窗；测试可注入 _approval_handler 替代）。"""
+    def _confirm_write_action(self, tool_name: str, args: dict,
+                              prompt: Optional[str] = None) -> bool:
+        """桌面真人确认（默认弹窗；测试可注入 _approval_handler 替代）。
+
+        ``prompt`` 仅供桌面自发操作（如 PTT 发射）改写弹窗正文；判定逻辑不变。
+        """
         handler = self._approval_handler
         if handler is not None:
             try:
                 return bool(handler(tool_name, dict(args or {})))
             except Exception:
                 return False
+        if prompt:
+            text = prompt
+        else:
+            text = (f"AI 请求执行写操作：{tool_name}\n\n"
+                    f"{self._summarize_args(args)}\n\n"
+                    "该操作会改变设备状态且不可自动撤销，是否允许执行？")
         ret = QMessageBox.warning(
-            self, "确认硬件操作",
-            f"AI 请求执行写操作：{tool_name}\n\n"
-            f"{self._summarize_args(args)}\n\n"
-            "该操作会改变设备状态且不可自动撤销，是否允许执行？",
+            self, "确认硬件操作", text,
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         return ret == QMessageBox.Yes
 
@@ -6456,6 +6684,7 @@ class MainWindow(QMainWindow):
         """
         if self._replay_timer is not None:
             self._stop_replay()
+        self._stop_tx("回放开始", wait=True)  # 安全：回放前必须停波
         path, _ = QFileDialog.getOpenFileName(
             self, "选择录音文件",
             os.path.expanduser("~/mbdsdr_recordings"),
@@ -6523,6 +6752,10 @@ class MainWindow(QMainWindow):
             f"回放中: {os.path.basename(path)}  "
             f"0.0/{self._replay_total/sr:.1f}s", 0)
         self._refresh_tx_readout()  # 回放不预偏：读数显式说明保持原频率
+        # 回放保持原频率：自动预偏开关置灰 + PTT 置灰（tooltip 说明原因）
+        self.doppler_chip.setEnabled(False)
+        self.doppler_chip.setToolTip("回放中：保持原频率，自动预偏不可用")
+        self._refresh_tx_button_state()
 
     def _replay_tick(self):
         """回放定时器：按采样率把下一块真实 IQ 推给频谱 + 解调链出声。
@@ -6582,7 +6815,12 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._replay_resume_poll = False
+        self.doppler_chip.setEnabled(True)
+        self.doppler_chip.setToolTip(
+            "多普勒链路补偿：存在卫星目标时调谐中心 = 标称频率 + 预测 Δ，"
+            "发射上行反向预偏；点击开关补偿（目标失效自动关闭并提示）")
         self._refresh_tx_readout()
+        self._refresh_tx_button_state()
 
     def _open_ntrip_dialog(self):
         """打开 NTRIP 配置对话框（非模态）。
