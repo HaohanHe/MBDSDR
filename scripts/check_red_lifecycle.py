@@ -5,7 +5,12 @@
 规则：
   R1 FAIL  出现「已修 / 已修复 / 已落地 / 已解决」但同一行没有 commit hash。
   R2 FAIL  写了 hash，但 `git cat-file -e <sha>^{commit}` 查不到（hash 打错/不是提交）。
-  R3 WARN  状态为已修且 hash 有效，但相邻行没有可复跑命令（`ctest -R ...` / `pytest ...`）。
+  R3 WARN  状态为已修且 hash 有效，但相邻行没有可复跑命令（`ctest -R ...` / `pytest ...`），
+          且无法按测试名/槽名/脚本自动映射。
+  R3 SKIP  同一情形但**能**自动映射到可执行命令 → 视为已举证（不记 WARN）；
+          映射失败 → 记 SKIP 并逐条打印（`SKIP 1（R3 无复跑命令：<file>:<line>，…）`），不许静默。
+          映射规则见 `CommandResolver`（测试函数名→`pytest <file>::<name>`、C++ 槽名→`ctest -R`、
+          `scripts/*.py`→`python scripts/*.py`；同名多处/无符号时为无法映射）。
   R4 FAIL  标了 `not_verified` / 「未复核」，但没写「为什么没验 / 缺什么才能验」。
   R5 FAIL  同一红项（测试名 / 槽名 / 条目编号 / §节号 / `§7.3.1 A` 组键）在 ≥2 处
           （跨文档或同文档不同节）状态不一致。
@@ -172,10 +177,131 @@ def _banner_line(lines: List[Tuple[int, str]]) -> Optional[int]:
     return None
 
 
+class CommandResolver:
+    """把文档里的测试名 / C++ 槽名 / 脚本路径映射成可执行复跑命令。
+
+    只在 R3 分支用：相邻行没有显式命令时尝试补一条；补不出来就记 SKIP 并打印原因。
+    索引按需构建，结果缓存；不写盘、不执行命令。
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._py: Optional[Dict[str, List[str]]] = None
+        self._ctest: Optional[Dict[str, str]] = None
+        self._symbols: Dict[str, List[str]] = {}
+        self._ctest_names: Optional[set] = None
+
+    def _load_py(self) -> Dict[str, List[str]]:
+        if self._py is None:
+            index: Dict[str, List[str]] = defaultdict(list)
+            tests_dir = self.root / "tests"
+            if tests_dir.is_dir():
+                for path in sorted(tests_dir.rglob("*.py")):
+                    try:
+                        text = path.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    for name in set(re.findall(r"\bdef\s+(test_[A-Za-z0-9_]+)", text)):
+                        index[name].append(path.relative_to(self.root).as_posix())
+            self._py = {key: sorted(set(value)) for key, value in index.items()}
+        return self._py
+
+    def _load_ctest(self) -> Dict[str, str]:
+        if self._ctest is None:
+            mapping: Dict[str, str] = {}
+            for candidate in (
+                self.root / "cpp" / "build" / "CTestTestfile.cmake",
+                self.root / "cpp" / "CTestTestfile.cmake",
+            ):
+                if not candidate.exists():
+                    continue
+                text = candidate.read_text(encoding="utf-8", errors="replace")
+                for match in re.finditer(r'add_test\(\s*([^)\s]+)\s+"([^"]+)"', text):
+                    exe = Path(match.group(2).replace("\\", "/")).name
+                    mapping.setdefault(Path(exe).stem, match.group(1))
+            self._ctest = mapping
+        return self._ctest
+
+    def _cpp_files(self, symbol: str) -> List[str]:
+        if symbol not in self._symbols:
+            hits: List[str] = []
+            tests_dir = self.root / "cpp" / "tests"
+            if tests_dir.is_dir():
+                for path in sorted(tests_dir.glob("*.cpp")):
+                    try:
+                        text = path.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    if symbol in text:
+                        hits.append(path.stem)
+            self._symbols[symbol] = hits
+        return self._symbols[symbol]
+
+    def resolve(self, text: str) -> Optional[str]:
+        tokens = re.findall(r"`([^`]+)`", text)
+        # 1) 显式测试文件：`tests/test_x.py` / `test_x.py` / `test_xxx`
+        for token in tokens:
+            base = token.split(":")[0].strip()
+            name = Path(base).name
+            if not name.startswith("test_"):
+                continue
+            if base.endswith(".py"):
+                if base.startswith("tests/") and (self.root / base).exists():
+                    return f"pytest {base}"
+                stem_candidates = [name]
+            else:
+                stem_candidates = [name + ".py"]
+            tests_dir = self.root / "tests"
+            if tests_dir.is_dir():
+                for candidate in stem_candidates:
+                    hits = sorted(tests_dir.rglob(candidate))
+                    if len(hits) == 1:
+                        return "pytest " + hits[0].relative_to(self.root).as_posix()
+        # 2) Python 测试函数名：唯一出现 → pytest <file>::<name>
+        for name in re.findall(r"\b(test_[A-Za-z0-9_]+)\b", text):
+            files = self._load_py().get(name, [])
+            if len(files) == 1:
+                return f"pytest {files[0]}::{name}"
+        # 3) C++ 槽名：`display::Foo` 或表格里的裸写法 display::Foo → 唯一测试源文件 → ctest 名
+        ctest = self._load_ctest()
+        for match in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_~][A-Za-z0-9_]*)", text):
+            symbol = match.group(2)
+            files = self._cpp_files(symbol)
+            if len(files) == 1:
+                name = ctest.get(files[0])
+                if name:
+                    return f'ctest -R "^{name}$"'
+        if self._ctest_names is None:
+            self._ctest_names = set(ctest.values())
+        # 4) 直接写 ctest 名：`spectrum_display`
+        for token in tokens:
+            name = token.strip()
+            if name in self._ctest_names:
+                return f'ctest -R "^{name}$"'
+        # 5) 脚本：`scripts/check_x.py` → python scripts/check_x.py
+        for token in tokens:
+            base = token.split(":")[0].strip()
+            if base.startswith("scripts/") and base.endswith(".py") and (self.root / base).exists():
+                return f"python {base}"
+        return None
+
+    def reason(self, text: str) -> str:
+        """映射失败时给出可打印的原因，不许静默。"""
+        names = re.findall(r"\b(test_[A-Za-z0-9_]+)\b", text)
+        for name in names:
+            files = self._load_py().get(name, [])
+            if len(files) > 1:
+                return f"测试名 `{name}` 出现在 {len(files)} 个文件，无法唯一映射"
+        if re.findall(r"`([^`]+)`", text):
+            return "有文件名/符号但无法唯一映射到 pytest/ctest"
+        return "无可识别的测试名/槽名/脚本"
+
+
 def scan_file(
     path: Path,
     display: str,
     hash_cache: Dict[str, bool],
+    resolver: Optional[CommandResolver] = None,
 ) -> Tuple[List[Finding], List[Hit]]:
     findings: List[Finding] = []
     hits: List[Hit] = []
@@ -250,13 +376,31 @@ def scan_file(
                         )
                     )
                 if not bad and not CMD_RE.search(window_text):
-                    findings.append(
-                        Finding(
-                            "R3", "WARN", display, number,
-                            "已修 + hash 有效，但相邻行内没有可复跑命令（ctest -R / pytest）",
-                            raw.strip(), historical,
+                    command = None
+                    if resolver is not None:
+                        command = resolver.resolve(text) or resolver.resolve(window_text)
+                    if command:
+                        # 自动映射到可执行命令：视为已举证，不记 WARN。
+                        pass
+                    elif resolver is None:
+                        findings.append(
+                            Finding(
+                                "R3", "WARN", display, number,
+                                "已修 + hash 有效，但相邻行内没有可复跑命令（ctest -R / pytest）",
+                                raw.strip(), historical,
+                            )
                         )
-                    )
+                    else:
+                        reason = resolver.reason(text + "\n" + window_text)
+                        key = keys[0] if keys else ""
+                        findings.append(
+                            Finding(
+                                "R3", "SKIP", display, number,
+                                f"无复跑命令且无法自动映射：{reason}"
+                                + (f"（键=`{key}`）" if key else ""),
+                                raw.strip(), historical,
+                            )
+                        )
             elif status == "not_verified":
                 if not REASON_RE.search(window_text):
                     findings.append(
@@ -364,10 +508,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     all_hits: List[Hit] = []
     skip_entries: List[Dict[str, object]] = []
     errors: List[str] = []
+    resolver = CommandResolver(SCAN_ROOT)
 
     for path, display in docs:
         try:
-            findings, hits = scan_file(path, display, hash_cache)
+            findings, hits = scan_file(path, display, hash_cache, resolver)
         except OSError as exc:
             errors.append(f"{display}: {exc}")
             continue
@@ -394,7 +539,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     fails = [f for f in all_findings if f.level == "FAIL"]
     warns = [f for f in all_findings if f.level == "WARN" and not f.historical]
     hist_warns = [f for f in all_findings if f.level == "WARN" and f.historical]
-    skip_total = sum(int(entry["count"]) for entry in skip_entries)
+    r3_skips = [f for f in all_findings if f.level == "SKIP"]
+    skip_total = sum(int(entry["count"]) for entry in skip_entries) + len(r3_skips)
     skip_label = "、".join(f"{entry['path']}" for entry in skip_entries) or "-"
 
     if args.json:
@@ -407,6 +553,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "hist_warn_count": len(hist_warns),
                     "skip_count": skip_total,
                     "skipped": skip_entries,
+                    "r3_skips": [f.as_dict() for f in r3_skips],
                     "by_file": _group_counts(fails, warns, hist_warns),
                     "findings": [f.as_dict() for f in all_findings],
                     "errors": errors,
@@ -426,6 +573,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(
                 f"  SKIP {entry['count']}（豁免：{entry['path']}，"
                 f"机制={entry['mechanism']}，理由见 {EXEMPTION_FILE}）"
+            )
+        for finding in r3_skips:
+            print(
+                f"  SKIP 1（R3 无复跑命令：{finding.path}:{finding.line}，"
+                f"{finding.message}）"
             )
     for err in errors:
         print(f"  ERROR {err}")

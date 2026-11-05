@@ -230,3 +230,43 @@ def test_section_group_conflict_is_red(tmp_path: Path) -> None:
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "[R5]" in proc.stdout
     assert "§7.3.1 B" in proc.stdout
+
+
+def test_r3_auto_maps_pytest_by_test_name(tmp_path: Path) -> None:
+    """R3 自动映射：测试函数名唯一 → pytest <file>::<name>，不再记 WARN。"""
+    root = _repo(tmp_path)
+    _write_at(root, "tests/test_sample.py", "def test_alpha():\n    assert True\n")
+    sha = _sha(root)
+    path = _write(root, "r3.md", f"已修复 `{sha}`，`test_alpha` 已绿。\n")
+    proc = _run(root, "--paths", path, "--json")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["warn_count"] == 0
+    assert payload["r3_skips"] == []
+
+
+def test_r3_ctest_slot_maps_to_ctest(tmp_path: Path) -> None:
+    """R3 自动映射：C++ 槽名只在唯一测试源文件出现 → ctest -R 该测试。"""
+    root = _repo(tmp_path)
+    _write_at(root, "cpp/tests/test_spectrum_display.cpp", "TEST(FooSlot) {}\n")
+    _write_at(
+        root,
+        "cpp/build/CTestTestfile.cmake",
+        'add_test(spectrum_display "D:/build/test_spectrum_display.exe")\n',
+    )
+    sha = _sha(root)
+    path = _write(root, "r3c.md", f"| display::FooSlot | 已修 `{sha}` |\n")
+    proc = _run(root, "--paths", path, "--json")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["r3_skips"] == []
+
+
+def test_r3_unmapped_prints_skip(tmp_path: Path) -> None:
+    """无法映射 → 记 SKIP 并逐条打印，不许静默。"""
+    root = _repo(tmp_path)
+    sha = _sha(root)
+    path = _write(root, "r3u.md", f"已修复 `{sha}`，详见当时的记录。\n")
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "SKIP 1（R3 无复跑命令" in proc.stdout
+    assert "docs/r3u.md:1" in proc.stdout
