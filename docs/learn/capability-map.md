@@ -433,7 +433,7 @@ memory_search 只检索已落库条目（异步 writer 未 flush 前检索不到
 显式 opt-in）；experiments/nanovna_rh770 数据诚实（含失败记录，且其实测
 证伪了仓内一条注释）。核查中新发现四项，全部处置：
 
-1. **CI 并行度假因（已修）**：fcafa80 注释猜「Linux 红属环境差异」被取证
+1. **CI 并行度假因（已修）** — `8e794505` — `.github/workflows/ci.yml:274` — `-j4`；`fcafa80` 的注释猜「Linux 红属环境差异」被取证
    推翻——真实原因是 `-j$(nproc)`。32 核机上两次 -j32 全套分别曝露
    spectrum_display 瀑布图时间刻度族的两个用例（释放时基后 tick 未清空
    :881；无时基却画出 tick :904）；机制是两例预设「紧密推帧循环的帧间隔

@@ -357,17 +357,31 @@ def test_snapshot_without_required_wording_is_red(tmp_path: Path) -> None:
     assert "[R1]" in proc.stdout
 
 
-def test_snapshot_count_mismatch_is_red(tmp_path: Path) -> None:
-    """反证：声明共 1 条、实际 2 条 → R7 FAIL（不许随手改数字销红）。"""
+def test_snapshot_count_is_rechecked_after_file_is_rewritten(tmp_path: Path) -> None:
+    """回归：转 T 后同一文件再被改写、N 未同步 → 复跑必须 R7 FAIL。
+
+    不是「转 T 时核对一次」：第一次 N=2 且实际 2 条 → 过；随后在同一文件
+    追加第 3 条红项、快照头仍写「共 2 条」→ 再次运行必须判红。
+    """
     root = _repo(tmp_path)
     path = _write(
         root,
-        "snap-count.md",
-        "> 本文为当时状态快照。\n> 未逐条复核；不作现状依据。\n> 共 1 条未复核。\n\n"
+        "snap-rewrite.md",
+        "> 本文为当时状态快照。\n> 未逐条复核；不作现状依据。\n> 共 2 条未复核。\n\n"
         "已修复：书签删除确认框不再早退。\n"
         "已修复：频谱上限拆分。\n",
     )
-    proc = _run(root, "--paths", path)
-    assert proc.returncode == 1, proc.stdout + proc.stderr
-    assert "[R7]" in proc.stdout
-    assert "声明 1 条，实际 2 条" in proc.stdout
+    first = _run(root, "--paths", path)
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    # 文件后续被改写：多出第 3 条红项，但快照头的 N 仍是 2。
+    target = root / "docs" / "snap-rewrite.md"
+    target.write_text(
+        target.read_text(encoding="utf-8") + "已修复：面板接线判定改为行为断言。\n",
+        encoding="utf-8",
+    )
+    second = _run(root, "--paths", path)
+    assert second.returncode == 1, second.stdout + second.stderr
+    assert "[R7]" in second.stdout
+    assert "声明 2 条，实际 3 条" in second.stdout
+    assert "[R1]" in second.stdout

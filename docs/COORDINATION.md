@@ -1276,7 +1276,7 @@ python scripts/git_sync_index.py --check                 # 只校验，不改 in
   **9 次破坏性 + 1 次前进补齐**（历史，早于 2026-11-05 订立的 reset 禁令）。
 - **批次 B（2026-11-05）**：10 次破坏性 reset + 1 次 no-op。
 - 两批合计 **19 次破坏性 reset + 1 次前进补齐 + 1 次 no-op**。
-  原口径「11-04 有 10 次破坏性」已按逐条复核更正，`01:21:07` 那笔不丢提交。
+  〔推断〕原口径「11-04 有 10 次破坏性」按逐条复核修正为 9 破坏 + 1 前进补齐，`01:21:07` 那笔不丢提交。依据：reflog 相邻行 + `git merge-base --is-ancestor 97683abc bf52ee38` 返回 1、反向返回 0（新 HEAD 是旧 HEAD 的后代）；无对应代码提交，故按 §7.4 标推断。
 
 
 **前置规矩（上游真因，比「禁止 reset」更早一步）**
@@ -1397,7 +1397,7 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 | 21:17:05 | `HEAD~1` | `ba77be00` | 破坏性 |
 
 10 条中 **9 条破坏性 + 1 条前进补齐**。原口径按「10 次破坏性」记，2026-11-06
-补登时用 `git merge-base --is-ancestor` 逐条复核更正：`01:21:07` 的新 HEAD
+补登时用 `git merge-base --is-ancestor` 逐条复核〔推断〕修正（依据：该命令两次返回 + reflog 相邻行，见下）：`01:21:07` 的新 HEAD
 （`97683abc`）是旧 HEAD（`bf52ee38`）的后代，未丢提交。被移出提交按 reflog
 相邻行还原。**这段早于 11-05 的 reset 禁令，补登只为留痕，不作追责依据**。
 
@@ -1662,7 +1662,7 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 > **未改写其已有段落**；本说明只加在正文之前。
 > **并入时复核（2026-11-06）**：A 的 4 条与 A2 的 1 条**当前已转绿**
 > （`test_ui_wiring_audit.py` 实测 `11 passed`；`test_control_panel_nan_gain_keeps_previous`
-> 实测 `1 passed`），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽**已修 `ef07c133`**
+> 实测 1 passed），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽**已修 — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`**
 > （原构建阻塞 `main_window.cpp:5644` 已随本笔消除，见 §B 末）；C 是断言闸门的报告口径，不是新欠账。复跑 `ctest -R "^(spectrum_display|spectrum_autorange)$"`；**2026-11-06 在 `cpp/build` 重新构建后实测：`100% tests passed, 0 tests failed out of 2`（spectrum_display / spectrum_autorange 各 Passed）**。
 
 ## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
@@ -1684,16 +1684,16 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 
 | 用例 | 断言 | 成因 | 引入者 | owner | 下一步 |
 |---|---|---|---|---|---|
-| display::reRenderHistoryOnPaletteSwitch | 灰阶 t=0.9 → 229 | HEAD `spectrum_display.cpp:692/704` 用 `tokens::kDbUpperDefault` 当显示上限硬夹，`tokens.h:336` 已是 **-20** → `setDbRange(-100,0)` 被夹成 -20，t=1.125 饱和 255 | `65163cf6` 11-05 16:05 | 采样率真值线 | **已修 `ef07c133`**（拆分常量，未改期望值；复跑与反证见本节末） |
+| display::reRenderHistoryOnPaletteSwitch | 灰阶 t=0.9 → 229 | **已修 — `ef07c133` — `cpp/src/ui/spectrum_display.cpp:693` — `tokens::kDbCeilingMax`**；成因：HEAD 在 692/704 行用 tokens::kDbUpperDefault 当显示上限硬夹，该常量在 cpp/src/core/tokens.h 已是 **-20** → setDbRange(-100,0) 被夹成 -20，t=1.125 饱和 255 | 引入者 `65163cf6`（11-05 16:05，只动 tokens.h） | 采样率真值线 | 复跑与该反证见本节末 |
 | display::loadColormapFileRoundTrip | 同上 229 | 同上 | 同上 | 同上 | 同上 |
 | display::manualRangeChangeRecoloursWholeHistory | 改量程后历史必须变色 | 两量程同被夹到 -20，结果相同 → 像素不变（:1400） | 同上 | 同上 | 同上 |
-| autorange::defaultCeilingStaysAtFullScale | `currentDbCeil()==0` | auto 目标 `clamp(...,-40,kDbUpperDefault)` 落 -20 | 同上 | 同上 | **已修 `ef07c133`**（复跑与反证见本节末） |
+| autorange::defaultCeilingStaysAtFullScale | currentDbCeil()==0 | **已修 — `ef07c133` — `cpp/src/ui/spectrum_display.cpp:693` — `tokens::kDbCeilingMax`**；auto 目标 clamp(...,-40,kDbUpperDefault) 落 -20 | 同上 | 同上 | 复跑与反证见本节末 |
 | autorange::strongSignalPullsCeilingDownSmoothly | 单帧 ≤1.5 dB | 目标钉边界后步长超限（:140） | 同上 | 同上 | 同上 |
 | autorange::ceilingRecoversWhenSignalFalls | 回 0 | 同上（:158） | 同上 | 同上 | 同上 |
 | autorange::freezeThenWeakFrameDoesNotMoveCeiling | `> -15` | 冻结值 -20（:212） | 同上 | 同上 | 同上 |
 | autorange::freezeHonestEmptyState | 冻结值一致 | 同上（:240） | 同上 | 同上 | 同上 |
 
-**状态：已修 `ef07c133`**（2026-11-06 03:28:30，8 文件 +35/−19）。根因是
+**状态：已修 — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`**（2026-11-06 03:28:30，8 文件 +35/−19）。根因是
 `tokens::kDbUpperDefault` 一个常量同时承担「默认视窗上限」与「显示天花板硬上限」两种语义，
 拆为 `kDbViewUpperDefault=-20` / `kDbCeilingMax=0`，并同步 `main_window.cpp`、
 `settings_dialog.cpp`、`spectrum_display.cpp`、`spectrum_widget.cpp`。**未改任何期望值**。
@@ -1748,6 +1748,8 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 > **派发规则（写死）**：截止 **2026-11-13**。到期未完成 → **自动转 T**：按 §7.4 在文首写齐「本文为当时状态快照 / 未逐条复核 / 不作现状依据 / 共 N 条未复核」，机检转 `SNAPSHOT` 单独计数进总账（不再计 FAIL，但欠账保留）。**不得删断言、改词或写错 N 销红**（R7 会抓）。状态只认 `open / in_progress / done / T`。
 >
 > 修法代号：**H** = 逐条补 commit hash + 可复跑命令（R6 必须证明 hash 碰到该条引用对象）；**T** = 转当时状态快照；**O** = 交 owner 限期补证或重写。`H→T` 表示先补，补不动到期转 T。
+>
+> **转 T 后仍受 R7 约束（写死）**：转 T 之后该文件若再被改写、快照头声明的条数 N 与实际红项条数不符 → **R7 必红**（不降级，原红项照常判红）。这是每次复跑的动态检查，不是转 T 时的一次性核对；回归用例 `tests/test_red_lifecycle.py::test_snapshot_count_is_rechecked_after_file_is_rewritten` 证明「同一文件后续追加红项、N 未同步」会被抓。
 
 | 文件 | R1 条数 | 修法 | 建议 owner | 截止 | 现状 |
 |---|---:|---|---|---|---|
@@ -1797,7 +1799,7 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 |---|---|---|
 | P1 回放读盘移后台（`_replay_recording` 仍冻 GUI 4.9 s） | 操作逻辑线（`desktop/main_window.py` 持有中） | `docs/pending-patches/2026-11-06-handoff-p1-replay-main-window.md` |
 | P2-C `control_panel` 未连接增益标「—」 | 设置架构线（该文件工作树有在途改动） | `docs/pending-patches/2026-11-06-handoff-p2c-control-panel-gain.md` |
-| `test_ui_wiring_audit` 4 条基线红 + 1 条连带红 | 已修 4 条（**测试侧**，`86fdbd0b` 改断言/白名单/接线判定，产品代码未动；详见 §7.3.1 A，复跑 `pytest tests/test_ui_wiring_audit.py`）；#5 留给 P2-C | `docs/pending-patches/2026-11-06-baseline-red-owners.md` |
+| test_ui_wiring_audit 4 条基线红 + 1 条连带红 | 已修 4 条 — `86fdbd0b` — `tests/test_ui_wiring_audit.py:56` — `mw_window`（**测试侧**，改断言/白名单/接线判定，产品代码未动；详见 §7.3.1 A，复跑 `pytest tests/test_ui_wiring_audit.py`）；#5 留给 P2-C | `docs/pending-patches/2026-11-06-baseline-red-owners.md` |
 
 其余待落库项（P2-A/B/D/E、P3）仍在
 `docs/pending-patches/2026-11-06-ux-basis-main-window.md`，每条附反证用例。

@@ -9,7 +9,7 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 136 -->
+<!-- waived-total: 135 -->
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -56,7 +56,6 @@
 | 41 | docs/PRD.md | ad8fbb6e0a6d | - **现状**：半有｜证据：动作总线 `desktop/main_window.py:1330-1340` 与执行器 `:1341-1402`（`TARGET_MISMATCH`/`UNAVA… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 42 | docs/PRD.md | 7502bd759f36 | - **现状**：半有｜证据：错误码单一来源 `docs/error-catalog.md` + `tests/test_error_catalog_guard.py`；离线 A/B 二分 `d… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 43 | docs/PRD.md | 7f6683248e15 | / P2-05 / 打包与许可交付 / 星表已进 wheel/sdist 并有包内断言（`test_star_catalog_packaging.py`）；再分发需保留 HYG 署名与 CC B… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 44 | docs/PRD.md | b295d219aef9 | - AC-R11（待补）：自动重连接入后，断网 30s 内状态依次 `retrying → gave_up`；重连成功回填真实频率（不得回填 0 Hz，`4abde1a` 已修假 0 Hz）。 | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 45 | docs/PRD.md | 707861baadb5 | / 时间源 / `docs/time-source.md` / 18 场景、14 条违反已修、测试纪律 / | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 46 | docs/constellations.md | ac337af5dc66 | > 结论先行：IAU 88 座已补齐（拉丁名/缩写/中文名/示意连线，88/88）； | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 47 | docs/design-basis-sky-figma-note.md | 3eea4e7e7446 | **对「334×334 大圆」这一描述的更正**：`284_177/index.module.scss` 写的是 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |

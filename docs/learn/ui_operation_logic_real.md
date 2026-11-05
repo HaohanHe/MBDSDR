@@ -57,7 +57,7 @@ Ctrl+C 焦点冲突——文本框获焦时全局动作必须让位系统惯例�
 上游三家都不承诺跨语言/跨版本布局兼容（dock 标题即身份，改翻译就丢布局）
 〔推断〕。MBDSDR 走得更前：panel id 稳定身份（`panel_registry.py` + tabBar().tabData），
 落盘存 id、恢复时 id ∪ 译文别名双索引。〔实测〕phase85 A1：
-`_raise_center_tab` 译文残留已清；C++ 侧 7d3fa3f 同类修复早已落地。
+〔推断〕`_raise_center_tab` 译文残留已清（本线无对应提交，仅凭当时实测，未留证）；C++ 侧同类修复 `7d3fa3f` 已落地于 `cpp/src/ui/main_window.cpp`（panel id 取代译文 tabText）。
 
 ## 5. 待对齐清单（下一轮 UI 候选，按影响排序）
 
