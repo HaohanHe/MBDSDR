@@ -256,6 +256,10 @@ class SDRBackend:
             pass
         self.status.connected = False
         self.status.link_state = "disconnected"
+        # 断开即废弃接收链：链内 BaselineSquelch 的底噪/门限是按上一段流
+        # 校准的，复用会把旧静噪口径带进新流（热插拔实测第 2 轮即残留）。
+        # 重连由 _ensure_receive_chain() 按当时 status 全新构建。
+        self._receive_chain = None
 
     def set_frequency(self, freq_hz: float) -> bool:
         """设置中心频率。失败时回滚 status，不留"已设置"假状态。"""

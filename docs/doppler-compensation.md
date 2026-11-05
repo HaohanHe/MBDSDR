@@ -369,6 +369,73 @@ def ptt_state(backend) -> tuple[str, bool, bool]:
 - 现有 `if not callable(write_tx): → 「后端没有 TX 通道」` 这句要删掉，改走
   上表第 4/6/7 行；「没有 TX 通道」只允许在 `driver_capable=false`（第 5 行）。
 
+#### 3.8.3 驱动能力矩阵（2026-11-05 实测重出，声明 ↔ 实现逐项对账）
+
+取数方式：`tx_capability()` 逐类实例化后直接读字段（未连接状态），
+`<类>.write_tx` 用 `callable(getattr(type(obj), "write_tx", None))` 判定。
+「降级表现」由 `main_window.py::ptt_state` + `_refresh_tx_button_state`
+（`:2681-2686`）决定：`clickable=False` → `tx_button.setEnabled(False)` 且
+tooltip 写明原因，**不弹窗**；`clickable=True` → 可点，失败后才按
+`status.error` 显示真实原因。
+
+| 驱动 / 后端 | 注册入口 | `supports_tx` 声明 | 实际存在的 TX 方法 | `tx_verified` | 不支持时的降级表现 |
+| --- | --- | --- | --- | --- | --- |
+| `RTLSDRBackend`（USB） | `SDRBackendManager._discover` | `False` | 无 | `False` | 第 7 行文案，PTT 置灰 + tooltip，无弹窗 |
+| `RTLSDRBackend(host=…)`（rtl_tcp 网络源） | `_discover`（`MBDSDR_RTL_TCP`） | `False` | 无 | `False` | 同上 |
+| `HackRFBackend` | `_discover`（libhackrf 可加载才登记） | `True` | `write_tx`（`sdr_backend.py:2666`） | `False` | 已连接 → 第 1 行「驱动级已实现 / 真机未验证」，可点 + 黄色警示；未连接 → 落第 7 行（见 3.8.4 F1） |
+| `USRPBackend` | `_discover`（`import uhd` 成功才登记） | `True` | `write_tx`（`:3385`，UHD `get_tx_stream` → `send`） | `False` | 同 HackRF（未连接落第 7 行） |
+| `PlutoSDRBackend` | `_discover`（`enumerate()` 真探测到才登记） | `True` | `write_tx`（`:4127`，IIO/Soapy 两条写流） | `False` | 已连接且 TX 流打开 → 第 1 行可点；TX 流未打开 → 第 7 行置灰（见 F1） |
+| `SoapySDRBackend`（通用路径） | `_discover` 不登记；HAL/工具面按需构造 | `False`（恒 False，本路径无写流） | 无 | `False` | 驱动报告 TX 通道数 → 第 4/5/6 行，PTT 置灰 + tooltip，无弹窗 |
+| `AISDRMiniBackend` | 不在 `_discover`；工具/AI 面直接构造 | `False` | 无 | `False` | 第 7 行，置灰 |
+| `FileIQBackend`（离线回放） | 工具面直接构造 | `False` | 无 | `False` | 第 7 行，置灰 |
+| `NetworkIQBackend` | 工具面直接构造 | `False` | 无 | `False` | 第 7 行，置灰 |
+| `RtlTcpBackend`（`rtltcp_client.py`，桌面直连路径） | 桌面/工具直接构造 | `False` | 无 | `False` | 第 7 行，置灰 |
+| `SpyServerBackend`（`spyserver_client.py`） | 桌面/工具直接构造 | `False` | 无 | `False` | 第 7 行，置灰 |
+| `hal.SoapySDRBackend`（HAL 通用层，非桌面注册表） | `hal.py` 独立路径 | 运行时 `getNumTxChannels()>0` 才 True | `write_tx` 存在但抛 `NotImplementedError` | 无此字段 | 不参与 `ptt_state()`；`implemented=true/ready=false` → 若误接会显示第 7 行「未实现」 |
+| `hackrf_params.HackRFBackend`（驱动层封装，非 SDRBackend） | 仅被 `_discover` 用作 `_load_lib()` 探针 | 无该字段 | `write_tx`（低层 ctypes 写流） | 无 | 不参与 UI 能力判定 |
+| `bladerf_params.BladeRFBackend` / `limesuite_params.LimeSDRBackend` | 未接入任何注册/构造路径 | 无该字段 | 无 | 无 | 不在 UI 能力矩阵内（能力缺口，非「已支持」） |
+
+**实测字段快照**（未连接、逐类实例化）：
+
+```
+RTLSDRBackend      declared=False impl=False ready=False verified=False driver=None
+AISDRMiniBackend   declared=False impl=False ready=False verified=False driver=None
+HackRFBackend      declared=True  impl=True  ready=False verified=False driver=None
+SoapySDRBackend    declared=False impl=False ready=False verified=False driver=None
+USRPBackend        declared=True  impl=True  ready=False verified=False driver=None
+PlutoSDRBackend    declared=True  impl=True  ready=False verified=False driver=None
+FileIQBackend      declared=False impl=False ready=False verified=False driver=None
+NetworkIQBackend   declared=False impl=False ready=False verified=False driver=None
+RtlTcpBackend      declared=False impl=False ready=False verified=False driver=None
+SpyServerBackend   declared=False impl=False ready=False verified=False driver=None
+```
+
+#### 3.8.4 PTT 七行表逐行核对（与 3.8.3 同一时点）
+
+核对对象：`desktop/main_window.py:187-231` 的 `ptt_state()` 实现
+vs 3.8.2 的七行表。七条分支的条件与文案**逐字一致**，优先级顺序也一致
+（`verified` 分支在 `ready` 分支前，二者条件互斥，结果等价）。
+
+**不一致项（按行号）**：
+
+| 编号 | 行 | 现象 | 影响 |
+| --- | --- | --- | --- |
+| F1 | 第 1/2 行与第 7 行的缝隙 | 七行表没有「`implemented=true && ready=false`」这一行；`ptt_state()` 落到第 7 行。实测 `HackRFBackend` / `USRPBackend` / `PlutoSDRBackend` 未连接时全部显示「本后端发射：未实现」，但它们确有 `write_tx` | 桌面只在 `connect()` 成功后赋值 `_active_sdr_backend`（`:3393`），HackRF/USRP 在正常界面里通常看不到；**Pluto 若 TX 流打开失败，连接仍成功，就会常驻显示「未实现」**，把「实现存在、发射流没就绪」说成「没实现」。这是文案层面的假信息，不是门语义错误（按钮仍正确置灰） |
+| F2 | 第 3 行 vs 第 4 行（潜在顺序风险） | 实现里第 3 行 `declared && !impl` 先于 `driver_capable=true` 判定。若未来出现「声明 True、无 `write_tx`、但驱动可发」的后端，会显示「仅有声明 / 未实现」而不是「驱动级可发 / 本路径未接入」 | 当前不可达（声明 True 的三个后端都有 `write_tx`）；留作接线时的顺序约束 |
+| F3（非不一致，但需知） | 第 7 行 | 同一句「未实现」同时覆盖「RX-only 硬件（RTLSDR/AISDRMini/网络源）」与「代码里确实没有实现」。表格本身就这么定义，`ptt_state()` 与之一致 | 用户会把「硬件只能收」读成「软件缺功能」；若要区分需新增第 8 行，属操作逻辑线改动，本线只报缺口 |
+
+**逐类实测文案**（未连接，`ptt_state()` 直接调用）：
+
+```
+RTLSDR/AISDRMini/FileIQ/NetworkIQ/RtlTcp/SpyServer → 本后端发射：未实现
+HackRF/USRP/Pluto                                  → 本后端发射：未实现      ← F1
+SoapySDRBackend                                    → 本后端发射：能力未知（未连接/驱动未报告）
+```
+
+Soapy 的 `driver_capable` 只在本类 `tx_capability()` 里出现；基类返回的
+`driver=None`，因此第 4/5/6 行**只对 Soapy 通用路径**生效——与七行表的
+设计一致。
+
 ### 3.9 C++ → Python `backend_comp_active` 状态桥接：可做，但现在不能接
 
 **结论：技术上可做，现有通道够用；现在接的是死代码，所以不接——但出事条件

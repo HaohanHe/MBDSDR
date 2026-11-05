@@ -135,7 +135,10 @@ class ReceiveChain:
     frequency_offset : float
         VFO 相对中心频率的偏移 Hz：把 +frequency_offset 处的信号搬到基带 0Hz。
     squelch_db : float
-        RMS 静噪门限 dBFS；-150 表示完全开门。
+        **余量刻度**（比噪声底高多少 dB），不是绝对 dBFS 门；-150 表示完全
+        开门。绝对值只在 `BaselineSquelch` 内由「余量 + 实测底噪」换算得到。
+        注意：C++ 侧的 `-50` 是**绝对 dBFS**（`Threshold` 直接门限），与本字段
+        的 `-50`（余量 ≈6 dB）语义相反，两个概念不可互换。
     gain_db : float
         链后数字音频增益 dB（硬件增益由设备端/GainStager 负责）。
     audio_out_sr : float
