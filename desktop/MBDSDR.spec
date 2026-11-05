@@ -80,6 +80,9 @@ hiddenimports += _collect_namespace_submodules('scipy', '_external')
 # --- 数据文件：图标资源 + 项目合规文件 + mbdsdr_ai 包内数据（如有） ---
 datas = [
     (os.path.join(here, 'assets'), 'assets'),
+    (os.path.join(root, 'LICENSE'), '.'),
+    (os.path.join(root, 'NOTICE.md'), '.'),
+    (os.path.join(root, 'third_party_licenses'), 'third_party_licenses'),
 ]
 datas += collect_data_files('mbdsdr_ai')
 

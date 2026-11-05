@@ -9,13 +9,16 @@
 - 全仓 SPDX 标识：`SPDX-License-Identifier: MIT`。
 - 版权声明：`Copyright (c) 2026 the MBDSDR contributors`。
 - 本文件仅用于署名与合规说明，不改变上述许可证的任何条款。
-- **许可证总体策略与 GPL 组件使用/隔离政策，见 `LICENSING.md`**：主项目保持 MIT；个别必须
-  使用的 GPL 组件以独立进程、可替换外部工具后端方式接入，不改变主项目的 MIT 许可。
+- **许可证总体策略与 GPL 组件使用/隔离政策，见 `LICENSING.md`**：主项目自有代码保持
+  MIT；随产物分发的 GPL 组件（pyrtlsdr / librtlsdr）逐项登记并随包附许可证全文（见 §二）；
+  仓外运行的 GPL 工具仍按独立进程方式接入。
 
 ## 二、第三方打包依赖（各自保留其原始许可证与版权声明）
 
-下列依赖作为第三方组件随构建/运行环境引入，**本仓库未修改其源代码**，其许可证与
-版权声明以各包自带的 LICENSE / NOTICE 文件为准。
+下列依赖作为第三方组件随构建/运行环境引入，**本仓库未修改其源代码**。桌面产物
+（`desktop/MBDSDR.spec`）随包携带项目 `LICENSE`、`NOTICE.md` 与目录
+`third_party_licenses/`；copyleft 组件（GPL / LGPL）的许可证全文在该目录内提供，
+其余宽松许可组件的版权与许可声明以各包自带的 LICENSE / NOTICE 文件为准。
 
 ### 移动端（`mobile/`）
 
@@ -39,22 +42,30 @@
 | numpy | BSD-3-Clause | DSP、频谱处理 |
 | scipy | BSD-3-Clause | 滤波 / 重采样 / 频谱 |
 | requests | Apache-2.0 | LLM / 多模态 API 调用、TLE 下载 |
-| setuptools | MIT | 构建/运行支撑（可选注释项；仅当用户自装 pyrtlsdr 0.2.x 时为其提供 `pkg_resources`） |
+| setuptools | MIT | 构建/运行支撑（可选注释项；随包 pyrtlsdr 0.2.x 运行期提供 `pkg_resources`） |
 | websocket-client | Apache-2.0 | 连接 ai-sdr Mini 硬件（MCP 客户端） |
 | websockets | BSD-3-Clause | 无硬件时的设备模拟器服务端 |
 | sgp4 | Apache-2.0 | 卫星轨道计算（SGP4/SDP4） |
 | skyfield | MIT | 高精度天文计算（轨道 / 多普勒 / 过境预测） |
-| pymap3d | BSD-2-Clause | 坐标转换（ECEF / ENU / 经纬高） |
 | pyserial | BSD-3-Clause | GNSS 串口 NMEA 读取（USB 转串口） |
 | Pillow | MIT-CMU / HPND | 图像处理（NOAA APT / SSTV 解码输出 PNG） |
 | sounddevice | MIT | 解调后实时音频输出到默认声卡 |
-| PySide6 | LGPL-3.0 | `desktop/` 桌面 GUI 框架（动态链接） |
+| PySide6 | LGPL-3.0 | `desktop/` 桌面 GUI 框架（动态链接）；许可证全文 `third_party_licenses/LGPL-3.0.txt` |
+| shiboken6 | LGPL-3.0 | PySide6 绑定生成器运行时（Qt for Python 同许可）；许可证全文同上 |
+| pyrtlsdr | GPL-3.0 | RTL-SDR 原生绑定（`rtlsdr` 模块随产物分发）；许可证全文 `third_party_licenses/GPL-3.0.txt` |
 
-上表各依赖的许可证与版权声明以各 PyPI 包自带的 LICENSE 为准。
+上表宽松许可依赖的许可证与版权声明以各 PyPI 包自带的 LICENSE 为准；copyleft 组件的
+许可证全文见产物内 `third_party_licenses/`。
 
-### pyrtlsdr（GPL-3.0）
+### pyrtlsdr（GPL-3.0）与 librtlsdr（GPL-2.0）
 
-- **pyrtlsdr**（GPL-3.0）：可选的 RTL-SDR 原生绑定，用户自装、不随包分发。
+- **pyrtlsdr 0.2.93**（GPL-3.0）：RTL-SDR 原生绑定，**实际随桌面产物分发**——产物内
+  有 `rtlsdr` 模块与 `pyrtlsdr-0.2.93.dist-info`。许可证全文
+  `third_party_licenses/GPL-3.0.txt`；源码 <https://github.com/pyrtlsdr/pyrtlsdr>。
+- **librtlsdr / `rtlsdr.dll`**（GPL-2.0，osmocom rtl-sdr）：pyrtlsdr 的底层驱动，
+  产物 `_internal/librtlsdr.dll` 与 `_internal/rtlsdr.dll` 实际随包分发。许可证全文
+  `third_party_licenses/GPL-2.0.txt`；源码 <https://github.com/osmocom/rtl-sdr>。
+- 上述两个 GPL 组件已按 `LICENSING.md` §2 / §4 登记；项目自有代码仍以 MIT 发布。
 
 ## 三、技术参考 / 标准与向量来源
 

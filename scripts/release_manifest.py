@@ -103,17 +103,48 @@ def _status_of(items: list[dict]) -> str:
 # ----------------------------------------------------------------------
 # 1. 版本号一致性
 # ----------------------------------------------------------------------
-#: (文件, 正则, 说明)。每处都必须命中；命中值与 canonical 不同即 FAIL。
-VERSION_SITES = (
-    ("cpp/CMakeLists.txt", r"project\(mbdsdr\s+VERSION\s+([0-9]+(?:\.[0-9]+)+)", "打包版本（唯一事实源）"),
-    ("pyproject.toml", r'^\s*version\s*=\s*"([^"]+)"', "Python 包元数据"),
-    ("mbdsdr_ai/__init__.py", r'^__version__\s*=\s*"([^"]+)"', "AI 包 __version__"),
-    ("mbdsdr_ai/core/__init__.py", r'^__version__\s*=\s*"([^"]+)"', "core 子包 __version__"),
-    ("desktop/main.py", r'setApplicationVersion\(\s*"([^"]+)"\s*\)', "QApplication 版本"),
+#: 唯一手抄版本点。其余出现处必须从这里派生，不得再写死字面量。
+VERSION_FILE = ROOT / "mbdsdr_ai" / "VERSION"
+#: 版本字面量：排除 IP（192.168.4.1）与四段版本后缀。
+VERSION_LITERAL_RE = re.compile(r"(?<![\d.])(\d+\.\d+\.\d+)(?![\d.])")
+STRICT_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+
+#: (文件, [(必须命中的正则, 说明)], 用途)。任一处失配 → FAIL
+#: （这是防止「删掉取值点」被当成变绿的唯一手段，不许降级为 WARN）。
+VERSION_DERIVATIONS = (
+    ("cpp/CMakeLists.txt", (
+        (r"file\(\s*READ\s+[^\n]*mbdsdr_ai/VERSION[^\n]*\)", "从 mbdsdr_ai/VERSION 读版本"),
+        (r"project\(\s*mbdsdr\s+VERSION\s+\$\{MBDSDR_VERSION\}", "project() 用派生变量"),
+    ), "CMake 工程版本"),
+    ("pyproject.toml", (
+        (r'^\s*dynamic\s*=\s*\[[^\]]*"version"[^\]]*\]', "[project] version 为 dynamic"),
+        (r"\[tool\.setuptools\.dynamic\]", "setuptools 动态版本段"),
+        (r'version\s*=\s*\{\s*file\s*=\s*"mbdsdr_ai/VERSION"\s*\}', "版本取自 VERSION 文件"),
+    ), "pyproject 元数据"),
+    ("mbdsdr_ai/version.py", (
+        (r'with_name\("VERSION"\)', "读取 VERSION 文件"),
+        (r"__version__\s*=\s*_read_version\(\)", "对外导出 __version__"),
+    ), "版本读取实现"),
+    ("mbdsdr_ai/__init__.py", (
+        (r"from\s+\.version\s+import\s+__version__", "从 version.py 派生"),
+    ), "AI 包 __version__"),
+    ("mbdsdr_ai/core/__init__.py", (
+        (r"from\s+\.\.version\s+import\s+__version__", "从 version.py 派生"),
+    ), "core 子包 __version__"),
+    ("desktop/main.py", (
+        (r"from\s+mbdsdr_ai\.version\s+import\s+__version__", "导入共享版本"),
+        (r"setApplicationVersion\(\s*_app_version\s*\)", "QApplication 版本取共享值"),
+    ), "QApplication 版本"),
+    ("desktop/MBDSDR.spec", (
+        (r"os\.path\.join\(root,\s*'mbdsdr_ai',\s*'VERSION'\)", "读取 VERSION 文件"),
+        (r"version\s*=\s*VSVersionInfo\(", "EXE 版本资源"),
+    ), "EXE FileVersion"),
 )
 
-SPEC_VERSION_RE = re.compile(r'^\s*(?:version|version_file)\s*=', re.MULTILINE)
-SEMVER_RE = re.compile(r"\b[0-9]+\.[0-9]+\.[0-9]+\b")
+#: 关于对话框：必须显示 QApplication 版本，且块内不得写死版本。
+ABOUT_RE = re.compile(r"def _show_about\(.*?\n(.*?)(?=\n    def |\Z)", re.S)
+ABOUT_VERSION_RE = re.compile(r"applicationVersion\(\)")
+
 
 
 def _exe_file_version(exe: Path) -> str | None:
@@ -149,43 +180,45 @@ def _exe_file_version(exe: Path) -> str | None:
 
 def check_version(dist: Path | None) -> list[dict]:
     items: list[dict] = []
-    values: dict[str, str] = {}
-    canonical = ""
-    for rel, pattern, note in VERSION_SITES:
+    if not VERSION_FILE.exists():
+        _record(FAIL, f"缺少版本单一事实源 {VERSION_FILE.relative_to(ROOT)}", items)
+        return items
+    canonical = _read(VERSION_FILE).strip()
+    if not STRICT_VERSION_RE.fullmatch(canonical):
+        _record(FAIL, f"mbdsdr_ai/VERSION 内容不是 x.y.z：{canonical!r}", items)
+        return items
+    _record(PASS, f"canonical = {canonical}（mbdsdr_ai/VERSION，唯一手抄点）", items)
+
+    # 各出现处：必须命中派生表达式；任一失配即 FAIL（不许改成正则软匹配）。
+    for rel, rules, note in VERSION_DERIVATIONS:
         path = ROOT / rel
         if not path.exists():
-            _record(FAIL, f"{rel} 不存在（版本出现处消失），无法取值", items)
+            _record(FAIL, f"{rel} 不存在（版本派生点消失）", items)
             continue
-        m = re.search(pattern, _read(path), re.MULTILINE)
-        if not m:
-            _record(FAIL, f"{rel} 未命中版本正则：{pattern}（取值点被删/改名，需人工确认）", items)
+        text = _read(path)
+        missed = [desc for pat, desc in rules if not re.search(pat, text, re.MULTILINE)]
+        if missed:
+            _record(FAIL, f"{rel} 版本派生失配：未命中「{' / '.join(missed)}」← {note}"
+                          f"（正则失配即 FAIL）", items)
             continue
-        val = m.group(1)
-        values[rel] = val
-        if not canonical:
-            canonical = val
-            _record(PASS, f"{rel} = {val}  ← {note}（canonical）", items)
-            continue
-        if val == canonical:
-            _record(PASS, f"{rel} = {val}  ← {note}", items)
+        literals = [f"第 {i} 行 {m.group(1)}"
+                    for i, line in enumerate(text.splitlines(), 1)
+                    for m in [VERSION_LITERAL_RE.search(line)] if m]
+        if literals:
+            _record(FAIL, f"{rel} 写死版本字面量：{'；'.join(literals[:3])}"
+                          f" ← {note}（版本只能来自 mbdsdr_ai/VERSION）", items)
         else:
-            _record(FAIL, f"{rel} = {val}  ≠ canonical {canonical}  ← {note}", items)
+            _record(PASS, f"{rel} 版本从 mbdsdr_ai/VERSION 派生 ← {note}", items)
 
-    # 打包器：spec 是否声明版本资源 / 产物 exe 是否真的带版本
-    spec_text = _read(SPEC) if SPEC.exists() else ""
-    if SPEC_VERSION_RE.search(spec_text):
-        _record(WARN, "desktop/MBDSDR.spec 声明了版本字段；本脚本尚未解析其取值，需人工复核", items)
-    else:
-        _record(WARN, "desktop/MBDSDR.spec 未声明 version/version_file → EXE 无版本资源（打包器侧缺口）", items)
-
+    # 产物 exe：必须有 FileVersion，且与 canonical 一致（x.y.z 允许补 .0）。
     if dist:
         exe = dist / "MBDSDR" / "MBDSDR.exe"
         fv = _exe_file_version(exe)
         if fv is None:
             _record(FAIL, f"产物 exe 版本资源读取失败：{exe}", items)
         elif fv == "":
-            _record(WARN, f"产物 {exe.name} 无 FileVersion/ProductVersion（与 spec 未注入一致）", items)
-        elif canonical and not fv.startswith(canonical + ".") and fv != canonical:
+            _record(FAIL, f"产物 {exe.name} 无 FileVersion/ProductVersion（spec 版本资源未生效）", items)
+        elif fv != canonical and not fv.startswith(canonical + "."):
             _record(FAIL, f"产物 exe 版本资源 {fv} ≠ canonical {canonical}", items)
         else:
             _record(PASS, f"产物 exe 版本资源 {fv}", items)
@@ -193,31 +226,32 @@ def check_version(dist: Path | None) -> list[dict]:
     # 文档首行
     readme = ROOT / "README.md"
     first = _read(readme).splitlines()[0] if readme.exists() else ""
-    m = SEMVER_RE.search(first)
+    m = VERSION_LITERAL_RE.search(first)
     if m:
-        if canonical and m.group(0) != canonical:
-            _record(FAIL, f"README.md 首行版本 {m.group(0)} ≠ canonical {canonical}", items)
+        if m.group(1) != canonical:
+            _record(FAIL, f"README.md 首行版本 {m.group(1)} ≠ canonical {canonical}", items)
         else:
-            _record(PASS, f"README.md 首行版本 {m.group(0)}", items)
+            _record(PASS, f"README.md 首行版本 {m.group(1)}", items)
     else:
-        _record(WARN, f"README.md 首行无版本号（首行：{first[:60]}）", items)
+        _record(FAIL, f"README.md 首行无版本号（首行：{first[:60]}）", items)
 
-    # 关于对话框
+    # 关于对话框：必须显示 QApplication 版本，块内不得写死版本
     mw = ROOT / "desktop" / "main_window.py"
-    if mw.exists():
-        text = _read(mw)
-        m = re.search(r"def _show_about\(.*?\n(.*?)(?=\n    def |\Z)", text, re.S)
-        block = m.group(1) if m else ""
-        hit = SEMVER_RE.search(block)
-        if hit:
-            if canonical and hit.group(0) != canonical:
-                _record(FAIL, f"关于对话框版本 {hit.group(0)} ≠ canonical {canonical}", items)
-            else:
-                _record(PASS, f"关于对话框版本 {hit.group(0)}", items)
-        else:
-            _record(WARN, "desktop/main_window.py:_show_about 未显示版本号（关于对话框缺口）", items)
-    else:
+    if not mw.exists():
         _record(FAIL, "desktop/main_window.py 不存在，无法检查关于对话框", items)
+    else:
+        text = _read(mw)
+        block_m = ABOUT_RE.search(text)
+        block = block_m.group(1) if block_m else ""
+        if not block_m:
+            _record(FAIL, "desktop/main_window.py 找不到 _show_about（关于对话框检查点消失）", items)
+        elif not ABOUT_VERSION_RE.search(block):
+            _record(FAIL, "desktop/main_window.py:_show_about 未显示 QApplication.applicationVersion()", items)
+        elif VERSION_LITERAL_RE.search(block):
+            _record(FAIL, "desktop/main_window.py:_show_about 写死版本字面量"
+                          f"（{VERSION_LITERAL_RE.search(block).group(1)}），应由 applicationVersion() 提供", items)
+        else:
+            _record(PASS, "关于对话框显示 QApplication.applicationVersion()（无写死版本）", items)
 
     # 安装器脚本
     installers = _installer_files()
@@ -362,12 +396,87 @@ def _license_class(dist: str) -> str:
     return "permissive/unknown"
 
 
+TEST_FRAMEWORK = ("pytest", "_pytest", "pluggy", "iniconfig")
+
+
+def _test_framework_hits(dist: Path, names: set[str], modules: set[str]) -> list[str]:
+    """测试框架及其闭包在产物里的证据：顶层模块 / PYZ 模块 / dist-info 目录。"""
+    hits: list[str] = []
+    for needle in TEST_FRAMEWORK:
+        if needle in names:
+            hits.append(f"顶层 {needle}")
+        if any(m == needle or m.startswith(needle + ".") for m in modules):
+            hits.append(f"PYZ 模块 {needle}.*")
+    internal = dist / "MBDSDR" / "_internal"
+    if internal.is_dir():
+        for p in internal.iterdir():
+            low = p.name.lower()
+            if any(low == n or low.startswith(n + ".") or low.startswith(n + "-")
+                   for n in TEST_FRAMEWORK):
+                hits.append(f"_internal/{p.name}")
+    return sorted(set(hits))
+
+
+def _xref_reverse(dist: Path) -> dict[str, set[str]] | None:
+    """从 PyInstaller xref HTML 建「被谁 import」反向边；找不到构建目录则返回 None。"""
+    m = re.fullmatch(r"pyi-dist(\d+)", dist.name)
+    if not m:
+        return None
+    xref = TMP_ROOT / f"pyi-build{m.group(1)}" / "MBDSDR" / "xref-MBDSDR.html"
+    if not xref.exists():
+        return None
+    text = xref.read_text(encoding="utf-8", errors="replace")
+    reverse: dict[str, set[str]] = {}
+    for block in text.split('<div class="node">')[1:]:
+        anchor = re.search(r'<a name="([^"]+)"></a>', block)
+        if not anchor:
+            continue
+        src = anchor.group(1)
+        for imp in re.findall(r'href="#([^"]+)"', block):
+            reverse.setdefault(imp, set()).add(src)
+    return reverse
+
+
+def _chain_for(imp: str, reverse: dict[str, set[str]] | None, roots: set[str],
+               max_depth: int = 4) -> list[str]:
+    """从产物里的 import 名向上走，找一条到达项目/已声明顶层包的 import 链。"""
+    if not reverse:
+        return []
+    queue: list[tuple[str, list[str], int]] = [(imp, [imp], 0)]
+    seen = {imp}
+    expanded = 0
+    while queue and expanded < 4000:
+        node, path, depth = queue.pop(0)
+        expanded += 1
+        if node != imp and node.split(".")[0] in roots:
+            return list(reversed(path))  # 根 → … → imp（import 方向）
+        if depth >= max_depth:
+            continue
+        parents = sorted(reverse.get(node, ()))
+        # 优先外部上游（不是同顶层包内部的互相引用），避免链在包内打转
+        parents = [p for p in parents if p.split(".")[0] != node.split(".")[0]][:16]
+        for parent in parents:
+            if parent in seen:
+                continue
+            seen.add(parent)
+            queue.append((parent, path + [parent], depth + 1))
+    return []
+
+
 def check_deps(dist: Path) -> list[dict]:
     items: list[dict] = []
     declared = _declared_requirements()
     dist2imports = _dist_to_imports()
     imp2dist = _import_to_dist()
     names, modules, origin = _artifact_imports(dist)
+
+    # 硬断言：测试框架及其闭包不得进入产物（任一命中即 FAIL）。
+    test_hits = _test_framework_hits(dist, names, modules)
+    if test_hits:
+        _record(FAIL, "产物泄漏测试框架：" + "；".join(test_hits), items)
+    else:
+        _record(PASS, "产物不含 pytest/_pytest/pluggy/iniconfig"
+                      "（顶层模块、PYZ、dist-info 三处均无）", items)
 
     # 声明面（requirements + spec）
     spec_mods, spec_datas = _spec_modules()
@@ -406,22 +515,36 @@ def check_deps(dist: Path) -> list[dict]:
         else:
             _record(FAIL, f"spec datas → 产物缺 {item}", items)
 
-    # 产物差集
+    # 产物差集：每个额外包都要能说清「为什么在产物里」。
     artifact_dists = {imp2dist[n] for n in names if n in imp2dist}
     declared_norm = set(declared)
-    closure = _requires_closure(declared_norm)
+    root_closures = {d: _requires_closure({d}) for d in declared_norm}
+    roots = {i.split(".")[0] for d in declared_norm for i in dist2imports.get(d, [])}
+    roots |= {"mbdsdr_ai", "main"}
+    reverse = _xref_reverse(dist)
     extras = sorted(artifact_dists - declared_norm)
-    transitive = [d for d in extras if d in closure]
-    undeclared = [d for d in extras if d not in closure]
-    if transitive:
-        _record(WARN, "产物有但没声明（可归因为已声明包的传递依赖）：" + ", ".join(transitive), items)
-    if undeclared:
-        _record(WARN, "产物有但没声明（不在声明面、也不在 Requires-Dist 闭包）："
-                      + ", ".join(undeclared), items)
-        for d in undeclared:
-            cls = _license_class(d)
-            if cls in {"GPL", "LGPL", "AGPL"}:
-                _record(FAIL, f"未声明且 copyleft 的包混入产物：{d}（{cls}）", items)
+    transitive: list[str] = []
+    undeclared: list[str] = []
+    for d in extras:
+        owners = sorted(r for r, c in root_closures.items() if d in c and r != d)
+        if owners:
+            transitive.append(d)
+            _record(WARN, f"差集② {d}：已声明包的传递依赖 ← {', '.join(owners)}", items)
+            continue
+        undeclared.append(d)
+        chat: list[str] = []
+        for imp_name in dist2imports.get(d, []):
+            chat = _chain_for(imp_name, reverse, roots)
+            if chat:
+                break
+        if chat:
+            _record(WARN, f"差集② {d}：由 import 链带入 {' → '.join(chat)}", items)
+        else:
+            _record(WARN, f"差集② {d}：不在 Requires-Dist 闭包，xref 也未找到上游 import 链"
+                          f"（需人工确认它为何在产物里；构建目录 {dist.name} 有对应 xref 时重跑可得链）", items)
+        cls = _license_class(d)
+        if cls in {"GPL", "LGPL", "AGPL"}:
+            _record(FAIL, f"未声明且 copyleft 的包混入产物：{d}（{cls}）", items)
     if not extras:
         _record(PASS, "产物里没有声明面之外的发行包", items)
 
@@ -429,15 +552,33 @@ def check_deps(dist: Path) -> list[dict]:
         _record(FAIL, "差集①「声明了但产物没有」：" + ", ".join(sorted(missing)), items)
     else:
         _record(PASS, "差集①「声明了但产物没有」：空", items)
-    _record(WARN, "差集②「产物里有但没声明」：" + (", ".join(extras) if extras else "空")
-                  + "（传递/未声明拆分见上）", items)
+    _record(WARN, f"差集②「产物里有但没声明」：{len(extras)} 个"
+                  f"（Requires-Dist 传递 {len(transitive)} / import 链或未归因 {len(undeclared)}，逐包见上）",
+            items)
     return items
 
 
 # ----------------------------------------------------------------------
 # 3. 许可证与合规文件
 # ----------------------------------------------------------------------
-COPYLEFT_DEPS = ("pyrtlsdr",)
+#: 逐包许可证全文映射（产物内 `third_party_licenses/` 下）。
+PACKAGE_TEXT = {
+    "pyrtlsdr": "GPL-3.0.txt",
+    "pyside6": "LGPL-3.0.txt",
+    "shiboken6": "LGPL-3.0.txt",
+}
+COPYLEFT_TEXTS = {"GPL": "GPL-3.0.txt", "LGPL": "LGPL-3.0.txt", "AGPL": "AGPL-3.0.txt"}
+THIRD_PARTY_TEXTS = ("GPL-2.0.txt", "GPL-3.0.txt", "LGPL-3.0.txt")
+
+
+def _artifact_text(dist: Path, name: str) -> Path | None:
+    for cand in (dist / "MBDSDR" / name,
+                 dist / "MBDSDR" / "_internal" / name,
+                 dist / "MBDSDR" / "third_party_licenses" / name,
+                 dist / "MBDSDR" / "_internal" / "third_party_licenses" / name):
+        if cand.is_file():
+            return cand
+    return None
 
 
 def _artifact_license_files(dist: Path) -> list[Path]:
@@ -484,7 +625,18 @@ def check_license(dist: Path) -> list[dict]:
             _record(FAIL, f"产物缺项目自身 {need}（构建未把它打进包根/_internal；"
                           f"产物现有许可证类文件 {len(rel_found)} 个，均为第三方 wheel 自带）", items)
 
-    # copyleft 组件
+    # 第三方许可证全文（仓库 + 产物）
+    for name in THIRD_PARTY_TEXTS:
+        repo_p = ROOT / "third_party_licenses" / name
+        _record(PASS if repo_p.exists() else FAIL,
+                f"仓库 third_party_licenses/{name} {'在位' if repo_p.exists() else '缺失'}", items)
+        art = _artifact_text(dist, name)
+        if art:
+            _record(PASS, f"产物随包许可证全文：{art.relative_to(dist)}", items)
+        else:
+            _record(FAIL, f"产物缺 third_party_licenses/{name}（LGPL/GPL 要求随分发附全文）", items)
+
+    # copyleft 组件：逐项登记 + 许可证全文
     names, _, _ = _artifact_imports(dist)
     imp2dist = _import_to_dist()
     artifact_dists = {imp2dist[n] for n in names if n in imp2dist}
@@ -495,31 +647,47 @@ def check_license(dist: Path) -> list[dict]:
         cls = _license_class(d)
         if cls not in {"GPL", "LGPL", "AGPL"}:
             continue
-        _record(FAIL, f"产物含 copyleft 包 {d}（{cls}），需在 NOTICE 登记并随包附许可证文本", items)
-        has_text = any(re.search(rf"[/\\]{re.escape(_norm(d))}[^/\\]*[/\\]", str(p)) for p in found)
-        if not has_text:
-            _record(FAIL, f"{d} 的许可证文本不在产物里（其 dist-info/目录内无 LICENSE/COPYING）", items)
-        if d not in notice.lower():
-            _record(FAIL, f"NOTICE.md 未登记 {d}", items)
-        if d == "pyrtlsdr" and ("不随包分发" in notice or "不随包分发" in licensing):
-            _record(FAIL, "NOTICE/LICENSING 声称 pyrtlsdr「不随包分发」，"
-                          "但产物含 rtlsdr 模块 + pyrtlsdr-0.2.93.dist-info（陈述与产物相反）", items)
+        if d in notice.lower():
+            _record(PASS, f"NOTICE.md 已登记 copyleft 包 {d}（{cls}）", items)
+        else:
+            _record(FAIL, f"NOTICE.md 未登记 copyleft 包 {d}（{cls}）", items)
+        text_name = PACKAGE_TEXT.get(d) or COPYLEFT_TEXTS.get(cls)
+        hit = _artifact_text(dist, text_name) if text_name else None
+        if hit:
+            _record(PASS, f"{d} 许可证全文随包：{hit.relative_to(dist)}", items)
+        else:
+            _record(FAIL, f"{d}（{cls}）许可证全文不在产物（期望 third_party_licenses/{text_name}）", items)
+
+    # pyrtlsdr 陈述必须是事实（随包），不能写「不随包 / 用户自装」
+    py_lines = [ln for ln in (notice + "\n" + licensing).splitlines()
+                if "pyrtlsdr" in ln.lower()]
+    bad_py = [ln for ln in py_lines if re.search(r"不随包|用户自装|用户自行安装", ln)]
+    if bad_py:
+        _record(FAIL, "NOTICE/LICENSING 仍声称 pyrtlsdr「不随包 / 用户自装」，"
+                      f"与产物事实相反：{bad_py[0].strip()}", items)
+    elif "pyrtlsdr" in notice.lower() and "0.2.93" in notice and "rtlsdr" in notice.lower():
+        _record(PASS, "NOTICE 的 pyrtlsdr 陈述与产物一致（0.2.93 随包 / rtlsdr 模块）", items)
+    else:
+        _record(FAIL, "NOTICE 未按事实登记 pyrtlsdr 0.2.93（随包分发 + rtlsdr 模块）", items)
 
     for dll in ("librtlsdr.dll", "rtlsdr.dll"):
         if (dist / "MBDSDR" / "_internal" / dll).exists():
             if "librtlsdr" not in notice.lower():
-                _record(FAIL, f"产物随包 {dll}（上游 osmocom librtlsdr，GPL-2.0），"
+                _record(FAIL, f"产物随包 {dll}（osmocom librtlsdr，GPL-2.0），"
                               f"但 NOTICE.md 未登记该组件与许可证", items)
+            elif not _artifact_text(dist, "GPL-2.0.txt"):
+                _record(FAIL, f"产物随包 {dll}（GPL-2.0），但产物内没有 GPL-2.0 全文", items)
             else:
-                _record(PASS, f"产物随包 {dll}，NOTICE 已登记", items)
-
-    # Qt / PySide6（LGPL-3.0）
-    if "PySide6" in names:
-        qt_license = [p for p in found if "PySide6" in str(p) or "Qt" in str(p)]
-        if qt_license:
-            _record(PASS, f"Qt/PySide6 许可证文本在产物：{qt_license[0].relative_to(dist)}", items)
+                _record(PASS, f"产物随包 {dll}，NOTICE + GPL-2.0 全文齐备", items)
         else:
-            _record(FAIL, "PySide6 在产物里，但找不到 Qt/PySide6 的 LGPL 许可证文本"
+            _record(FAIL, f"产物缺 {dll}（pyrtlsdr 的底层驱动；若构建刻意不带，需改 NOTICE）", items)
+
+    # Qt / PySide6（LGPL-3.0）：许可证全文 + NOTICE 登记
+    if "PySide6" in names:
+        if _artifact_text(dist, "LGPL-3.0.txt"):
+            _record(PASS, "PySide6/shiboken6 的 LGPL-3.0 全文随包", items)
+        else:
+            _record(FAIL, "PySide6 在产物里，但产物没有 LGPL-3.0 全文"
                           "（LGPL 要求随分发附许可证与可重新链接说明）", items)
 
     # 数据署名：产物里的 CC BY-SA 数据自带 meta 就不算缺

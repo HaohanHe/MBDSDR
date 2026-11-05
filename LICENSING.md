@@ -40,6 +40,12 @@ aggregate"），不使其他程序适用 GPL。本项目的"工具化、可插�
 保守原则：独立进程 + 松耦合通用数据格式。同一进程内动态加载 GPL 模块的边界存在不同解释，
 除非接口足够通用、模块确为独立作品，否则改为独立进程。
 
+**随产物分发的 GPL 组件（2026-11 实测登记）**：`pyrtlsdr`（GPL-3.0）及其底层
+`librtlsdr` / `rtlsdr.dll`（GPL-2.0）由 PyInstaller 打进桌面产物，属同一分发包内的
+第三方组件，不是本项目自有代码。其分发义务按 GPL 条款处理，并在 §4 逐项登记：保留
+版权与许可证声明、随包附 `third_party_licenses/GPL-3.0.txt` 与 `GPL-2.0.txt`、给出
+源码获取途径。NOTICE 中对自有代码的 MIT 声明不改变这些第三方组件的 GPL 义务。
+
 ## 3. 边界判据速查（依据 FSF 说明整理）
 
 倾向"单一作品、GPL 条款随之适用"：
@@ -57,11 +63,14 @@ aggregate"），不使其他程序适用 GPL。本项目的"工具化、可插�
 
 FSF 指出：仅在同一系统上安装两个独立程序，不构成更大作品，二者许可证无需因此兼容。
 
-## 4. GPL 组件登记表（使用时逐项登记）
+## 4. copyleft 组件登记表（GPL / LGPL，使用时逐项登记）
 
 | 组件 | 许可证 | 用途 | 接入方式 | 源码地址 |
 | --- | --- | --- | --- | --- |
-| pyrtlsdr | GPL-3.0 | RTL-SDR 原生绑定（可选） | 用户自行安装，不随包分发 | https://github.com/pyrtlsdr/pyrtlsdr |
+| pyrtlsdr 0.2.93 | GPL-3.0 | RTL-SDR 原生绑定 | **随桌面产物分发**（`rtlsdr` 模块 + `pyrtlsdr-0.2.93.dist-info`）；全文 `third_party_licenses/GPL-3.0.txt` | https://github.com/pyrtlsdr/pyrtlsdr |
+| librtlsdr / `rtlsdr.dll` | GPL-2.0 | pyrtlsdr 底层驱动 | **随桌面产物分发**（`_internal/librtlsdr.dll`、`_internal/rtlsdr.dll`）；全文 `third_party_licenses/GPL-2.0.txt` | https://github.com/osmocom/rtl-sdr |
+| PySide6 | LGPL-3.0 | 桌面 GUI 框架 | 动态链接，随产物分发；全文 `third_party_licenses/LGPL-3.0.txt` | https://code.qt.io/cgit/pyside/pyside-setup.git |
+| shiboken6 | LGPL-3.0 | PySide6 绑定生成器运行时 | 随产物分发；全文 `third_party_licenses/LGPL-3.0.txt` | https://code.qt.io/cgit/pyside/pyside-setup.git |
 | （按需登记运行时外部 GPL 工具后端） | — | — | 独立进程、通用数据格式 | — |
 
 引入新的 GPL 依赖前，先在此登记并确认满足 §2 的边界；存疑时默认采用独立进程松耦合方式，或
