@@ -221,6 +221,18 @@
 |---|---|---|---|
 | _（空：本笔交付已完成，见下方归档行）_ | | | |
 
+> 归档：2026-11-05 卫星过境线三笔已入库并 release：
+> `08a4500`（过境仰角设置真正生效：列表门读 settings，低仰角可列出）、
+> `4faddb2`（采样步长收敛到 `sat_passes` 单一事实源；ISS 24h 峰值偏差
+> 旧 300/30 = 13.1 s / 0.40°，新 60/2 = 0.9 s / 0.004°；另修正
+> `new_spacetime_timeline._gmst_rad` 漏项，AOS 由偏 16110 s 回到 +29.8 s）、
+> `886244d`（`pass_window_hours` 真正生效：6 h / 24 h 实测 1 条 vs 5 条，
+> 1 h = 0 条）。
+> 涉及 `desktop/new_spacetime_panel.py` / `desktop/sat_track_panel.py` /
+> `mbdsdr_ai/sat_passes.py` / `desktop/rf_sky_view.py` /
+> `mbdsdr_ai/new_spacetime_timeline.py` / `tests/test_pass_gate_wiring.py` /
+> `tests/test_pass_step_alignment.py` / `tests/test_pass_window_hours.py`，
+> 锁均已释放；参数账本同步于 `d804cb4`（#25 接线、A-1 红表清零）。
 > 归档：2026-11-05 机制线在交付 `f197678` 期间持有 `docs/COORDINATION.md`、
 > `scripts/file_claim.py`、`scripts/check_commit_scope.py`、`tests/test_file_claim.py`；
 > commit 成功后已 release。实时锁以 `status` 为准。
