@@ -149,7 +149,8 @@ class NtripConfigDialog(QDialog):
         self.host_edit = QLineEdit()
         self.host_edit.setPlaceholderText("ntrip.example.com")
         self.host_edit.setToolTip(
-            "填差分数据服务器的主机名或 IP；不清楚就问服务商，端口通常是 2101")
+            "Caster 是分发 NTRIP 差分改正数的服务器；这里填它的域名或 IP"
+            "（如 ntrip.example.com），不清楚就问服务商，端口通常是 2101")
         form.addRow("Caster 主机:", self.host_edit)
 
         self.port_spin = QSpinBox()
