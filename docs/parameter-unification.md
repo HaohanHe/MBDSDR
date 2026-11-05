@@ -263,7 +263,7 @@ mobile AppTokens.sampleRatesHz          : 4 档 {1.024M, 2.048M, 2.4M, 3.2M}
 
 ### C.7 7 档在 C++ 内核下的逐档结论（2026-11-05 记录；现状见 C.9）
 
-先给路径事实（**以下三条为 `dd72ba1c` 前的状态**；2026-11-06 已落地，现状见 C.9 的「三条生效路径」表）：
+先给路径事实（**以下三条为 `dd72ba1c` 前的状态**；2026-11-06 已落地（取证 `dd72ba1c` — `cpp/src/control/control_hub.cpp:510` — `采样率不在能力档内`），现状见 C.9 的「三条生效路径」表）：
 - **AI 工具路径**：`cpp/src/ai/tool_schema.cpp` 枚举 + `cpp/src/ai/agent_tools.cpp:execSetSampleRate` 用 `tokens::kSampleRatesHz` 逐个比较，不在表内直接返回错误文本“采样率不在能力档内（1024000/2048000/2400000/3200000），收到 %1——未生效”。
 - **控制面路径（`dd72ba1c` 前）**：`cpp/src/control/control_hub.cpp:cmdSetSampleRate` 只校验“是数字”，**不校验档位表**，直接 `engine_->onSetSampleRate(sr)`；**现状**：按 `tokens::kSampleRatesHz` 逐档比对、档外显式拒绝（取证 `dd72ba1c` — `cpp/src/control/control_hub.cpp:510` — `采样率不在能力档内`）。
 - **RTL 落地（`dd72ba1c` 前）**：`cpp/src/dsp/rtl_sdr_source.cpp:setSampleRate` 调 `rtlsdr_set_sample_rate` 后**不检查返回值、也没有 `rtlsdr_get_sample_rate` 读回**（`cpp/src/dsp/rtl_sdr_ops.h` 无该函数指针）；引擎按请求值下发。**现状**：`cpp/src/dsp/rtl_sdr_source.cpp:pushSampleRate` 检查返回码、`cpp/src/dsp/rtl_sdr_ops.h:getSampleRate` 接 `rtlsdr_get_sample_rate` 读回，不一致同时报请求/读回两值（取证 `dd72ba1c` — `cpp/src/dsp/rtl_sdr_source.cpp:505` — `sampleRateRc_`；`cpp/src/dsp/rtl_sdr_source.cpp:522-523` — `getSampleRate`）。
@@ -480,6 +480,7 @@ constexpr double kCandidateRatesHz[] = {
 | 2026-11-06 | 本笔 | 核对 control_hub 现状：只有回读（readback_sample_rate_hz / sample_rate_readback_available / sample_rate_status / sample_rate_error）与量程（sample_rate_min_hz / sample_rate_max_hz），无 sample_rate_options_hz；buildSampleRateOptions 存在但未接进 get_capabilities。组 4 第 2 项维持「阻塞」；C.11 补证据级别（真机 12 档 = E3，注入三态 = E2） | 参数治理线 |
 | 2026-11-06 | 本笔 | 修订组 4 旧口径残留：`cmdGetCapabilities` 档位面（取证 `f0a19376` — `cpp/src/control/control_hub.cpp:1083` — `sample_rate_options_hz`）——调用 `dsp::buildSampleRateOptions(caps)` 于 `cpp/src/control/control_hub.cpp:1080`，字段 `:1083`、状态 `:1084-1085`；C.11 第 2 项与结论行补 `path:line`；C.0/C.1/C.3/C.7/C.8/C.10.2 的「10 档 / 候选表 2.8M / 控制面不校验 / 无读回 / 待内核下发」按 `dd72ba1c` 后事实改写或标注「改前」；组 4 状态列改为「剩移动端接线（内核已下发，Dart 尚未解析）」 | 采样率真值线 |
 | 2026-11-06 | 本笔 | 新增档位单一真值源机检 `tests/test_sample_rate_single_source.py`：C++ `kCandidateRatesHz` / Python `RTLSDRBackend.SAMPLE_RATES` / 桌面 `sample_rate_options_for_backend` / 本文 C.1 行四处逐项相等（含顺序），不等即打印两侧 11 档清单与差集；2.8M 吸附单独断言（四处均无 2.800M、请求 2,800,000 → 假棒实收 2,880,000，差 80,000，C++ 注释与 C.10.2 实测行同口径）；变异反证删 C.1 的 `**2.16**` → `1 failed`（仅 C++ 有 2160000），复位 `5 passed`。C.1 第 2 行由旧 `SAMPLE_RATES` 副本改为动态取表；C.12 新增「移动端解析 `sample_rate_options_hz`」独立待办（内核已下发 / 客户端未解析） | 采样率真值线 |
+| 2026-11-06 | 本笔 | C.7 路径事实行补四元组（`dd72ba1c` — `cpp/src/control/control_hub.cpp:510` — `采样率不在能力档内`），`git show --name-only dd72ba1c` 触及该文件、`git log -S` 命中同笔；该行由「未证实（文档过期）」转为「可证实」 | 采样率真值线 |
 
 ## 附录 D：C++/Python 峰值独有口径（作废数 / 现行数）
 
