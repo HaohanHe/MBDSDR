@@ -14,6 +14,20 @@
   R4 FAIL  标了 `not_verified` / 「未复核」，但没写「为什么没验 / 缺什么才能验」。
   R5 FAIL  同一红项（测试名 / 槽名 / 条目编号 / §节号 / `§7.3.1 A` 组键）在 ≥2 处
           （跨文档或同文档不同节）状态不一致。
+  R6 FAIL  写了有效 hash，但该提交的改动文件与本条描述的对象（文件名 / 符号 /
+          测试名）无任何交集，或本条根本没描述可比对象——「随便填一个仓库里
+          存在的 hash」不能混过 R1。
+  R7 FAIL  出现快照标记，但头部不完整（缺「本文为当时状态快照」/「未逐条复核」/
+          「不作现状依据」/「共 N 条未复核」），或声明的 N 与实际条数不符。
+
+快照（T 路线，单独成类计数，不许改文档销红）：
+  * 头部四要素齐全且 N 与实际条数一致 → 该文件内所有红项状态行降为
+    `level="SNAPSHOT"`（不记 FAIL/WARN，也不参与 R1/R2/R4/R6/R5），
+    但每条仍逐条打印并计入总账的 SNAPSHOT 数。
+  * 头部不完整或 N 不符 → R7 FAIL，且**不**降级，原红项照常判红。
+  * 总账行固定打印：
+    `R1 实修 X 条 / SNAPSHOT Y 条 / 历史横幅 Z 条`
+    其中 X = 已修 + hash 有效 + R6 相交的条数；Z = 历史横幅降级条数。
 
 豁免（显式，不静默）：
   * 默认读 `docs/red-lifecycle-exemptions.md`；只对文件里逐条列明、且机制可验证的路径生效。
@@ -45,7 +59,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 # 测试可用 --root 指到临时仓库；运行期由 main() 覆盖。
@@ -55,6 +69,11 @@ EXEMPTION_FILE = "docs/red-lifecycle-exemptions.md"
 BANNER_TEXT = "历史快照，不作现状依据"
 HISTORICAL_PATH_RE = re.compile(r"^docs/learn/phase\d+/")
 ALLOWED_MECHANISMS = {"content-hash-ledger"}
+
+SNAPSHOT_TITLE = "本文为当时状态快照"
+SNAPSHOT_REQUIRED = ("未逐条复核", "不作现状依据")
+SNAPSHOT_COUNT_RE = re.compile(r"共\s*(\d+)\s*条未复核")
+SNAPSHOT_MARKERS = (SNAPSHOT_TITLE, "未逐条复核", "不作现状依据")
 
 FIXED_RE = re.compile(r"已修复|已修|已落地|已解决")
 # 「未复核」只有落在红项语境里才算状态；「未复核 claim」是协作时序，不是红项未验。
@@ -72,6 +91,25 @@ ITEM_RE = re.compile(r"`([^`]*(?:::|test_[A-Za-z0-9_]+)[^`]*)`")
 SLOT_KEY_RE = re.compile(r"`([A-Z]\d+)`")
 SECTION_KEY_RE = re.compile(r"§\s*(\d+(?:\.\d+)*)\s+([A-Z])(?![0-9A-Za-z])")
 GROUP_REF_RE = re.compile(r"(?<![0-9A-Za-z])([A-C])\s*的\s*\d+\s*(?:条|槽|个)")
+# R6：从条目里抽「改动对象」。只认有辨识度的东西，避免把普通词当符号。
+PATH_REF_RE = re.compile(
+    r"[A-Za-z0-9_][A-Za-z0-9_./\\-]*"
+    r"\.(?:py|cpp|cc|cxx|h|hpp|js|ts|tsx|md|json|ps1|cmake|txt|yml|yaml)"
+)
+CXX_SYMBOL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*::([A-Za-z_~][A-Za-z0-9_]*)")
+TEST_NAME_RE = re.compile(r"\b(test_[A-Za-z0-9_]+)\b")
+# 反引号里的首标识符也算对象：`kDbViewUpperDefault=-20`、`currentDbCeil()==0`、
+# `main_window.cpp:5644` 都能取到 `kDbViewUpperDefault` / `currentDbCeil` / `main_window`。
+BACKTICK_IDENT_RE = re.compile(r"`[ \t]*([A-Za-z_][A-Za-z0-9_]{3,})")
+TEXT_SUFFIXES = {
+    ".py", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".js", ".ts", ".tsx", ".md",
+    ".json", ".ps1", ".cmake", ".txt", ".yml", ".yaml",
+}
+IDENT_STOPWORDS = {
+    "not_verified", "open", "fixed", "ctest", "pytest", "python", "commit",
+    "hash", "sha", "docs", "tests", "script", "scripts", "true", "false",
+    "none", "null", "todo", "skip", "warn", "fail", "pass",
+} | ALLOWED_MECHANISMS
 QUOTE_PAIRS = (("「", "」"), ("“", "”"), ("‘", "’"), ('"', '"'))
 STATUS_LABELS = {
     "fixed": "已修",
@@ -297,11 +335,148 @@ class CommandResolver:
         return "无可识别的测试名/槽名/脚本"
 
 
+@dataclass
+class ChangeRefs:
+    paths: Set[str] = field(default_factory=set)
+    symbols: Set[str] = field(default_factory=set)
+
+    def __bool__(self) -> bool:
+        return bool(self.paths or self.symbols)
+
+    def brief(self, limit: int = 3) -> str:
+        items = sorted(self.paths) + sorted(self.symbols)
+        head = "、".join(items[:limit])
+        return head + ("…" if len(items) > limit else "")
+
+
+def _brief(items: Iterable[str], limit: int = 3) -> str:
+    listing = list(items)
+    head = "、".join(listing[:limit]) or "-"
+    return head + ("…" if len(listing) > limit else "")
+
+
+def _change_refs(text: str) -> ChangeRefs:
+    """从条目文本里抽 R6 要比对的改动对象：文件路径 + 符号/测试名。"""
+    refs = ChangeRefs()
+    for match in PATH_REF_RE.finditer(text):
+        raw = match.group(0).strip("`（）()、，。:：;；")
+        if raw:
+            refs.paths.add(raw.replace("\\", "/"))
+    for match in CXX_SYMBOL_RE.finditer(text):
+        refs.symbols.add(match.group(1))
+    for match in TEST_NAME_RE.finditer(text):
+        refs.symbols.add(match.group(1))
+    for match in BACKTICK_IDENT_RE.finditer(text):
+        token = match.group(1)
+        if token.lower() in IDENT_STOPWORDS or HASH_RE.fullmatch(token) or token.startswith("test_"):
+            # test_ 名字已由 TEST_NAME_RE 收进 symbols，这里不重复。
+            continue
+        refs.symbols.add(token)
+    return refs
+
+
+class CommitInspector:
+    """R6 防伪闸门：hash 必须真的碰到该条声称改动的东西。
+
+    - 改动文件列表来自 `git show --name-only --format= <sha>`（按 sha 缓存）。
+    - 文件交集：完整路径或 basename 命中即算相交。
+    - 符号/测试名：在该提交的这些改动文件里 `git grep -F` 能找到即算相交
+      （命中文件名 stem 也算）。
+    - 本条一个可比对象都抽不出来 → 无法比对，同样判红。
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._files: Dict[str, List[str]] = {}
+        self._grep: Dict[Tuple[str, str], bool] = {}
+
+    def files(self, sha: str) -> List[str]:
+        if sha not in self._files:
+            proc = subprocess.run(
+                ["git", "show", "--no-renames", "--name-only", "--format=", sha],
+                cwd=str(self.root),
+                capture_output=True,
+                text=True,
+            )
+            self._files[sha] = (
+                [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+                if proc.returncode == 0
+                else []
+            )
+        return self._files[sha]
+
+    def _contains(self, sha: str, symbol: str, paths: List[str]) -> bool:
+        key = (sha, symbol)
+        if key not in self._grep:
+            text_paths = [
+                p for p in paths if Path(p).suffix.lower() in TEXT_SUFFIXES
+            ] or paths
+            proc = subprocess.run(
+                ["git", "grep", "-F", "-q", "-e", symbol, sha, "--", *text_paths],
+                cwd=str(self.root),
+                capture_output=True,
+                text=True,
+            )
+            self._grep[key] = proc.returncode == 0
+        return self._grep[key]
+
+    def match(self, sha: str, refs: ChangeRefs) -> Optional[str]:
+        """相交则返回命中的对象，否则 None。"""
+        files = self.files(sha)
+        if not files:
+            return None
+        basenames = {Path(f).name for f in files}
+        for ref in refs.paths:
+            if ref in files or Path(ref).name in basenames:
+                return ref
+        for symbol in refs.symbols:
+            if any(symbol in Path(f).name for f in files):
+                return symbol
+            if self._contains(sha, symbol, files):
+                return symbol
+        return None
+
+
+def _snapshot_header(
+    lines: List[Tuple[int, str]],
+) -> Tuple[bool, Optional[int], List[str], Set[int]]:
+    """识别快照头。返回 (是否出现快照标记, 声明条数, 问题列表, 头部行集合)。"""
+    head = lines[:30]
+    head_text = "\n".join(raw for _number, raw in head)
+    count_match = SNAPSHOT_COUNT_RE.search(head_text)
+    # 只有显式标题或「共 N 条未复核」才算快照声明；
+    # 历史横幅里的「不作现状依据」不能误触发快照头。
+    present = SNAPSHOT_TITLE in head_text or count_match is not None
+    if not present:
+        return False, None, [], set()
+    header_lines = {
+        number
+        for number, raw in head
+        if any(marker in raw for marker in SNAPSHOT_MARKERS)
+        or SNAPSHOT_COUNT_RE.search(raw)
+    }
+
+    problems: List[str] = []
+    if SNAPSHOT_TITLE not in head_text:
+        problems.append(f"缺少「{SNAPSHOT_TITLE}」")
+    for required in SNAPSHOT_REQUIRED:
+        if required not in head_text:
+            problems.append(f"缺少「{required}」")
+    declared: Optional[int] = None
+    if count_match is None:
+        problems.append("缺少「共 N 条未复核」计数")
+    else:
+        declared = int(count_match.group(1))
+    return True, declared, problems, header_lines
+
+
 def scan_file(
     path: Path,
     display: str,
     hash_cache: Dict[str, bool],
     resolver: Optional[CommandResolver] = None,
+    inspector: Optional[CommitInspector] = None,
+    stats: Optional[Dict[str, int]] = None,
 ) -> Tuple[List[Finding], List[Hit]]:
     findings: List[Finding] = []
     hits: List[Hit] = []
@@ -319,7 +494,48 @@ def scan_file(
     in_731 = False
     group: Optional[str] = None
 
+    present, declared, problems, header_lines = _snapshot_header(lines)
+    status_entries: List[Tuple[int, str, str]] = []
     for index, (number, raw) in enumerate(lines):
+        if number in header_lines:
+            continue
+        text = _strip_quoted(raw)
+        window_text = _strip_quoted(
+            "\n".join(item for _n, item in lines[max(0, index - 2): index + 3])
+        )
+        for status in _detect_statuses(text, window_text):
+            status_entries.append((number, raw, status))
+
+    if present:
+        header_line = min(header_lines) if header_lines else 1
+        header_text = lines[header_line - 1][1].strip() if header_line - 1 < len(lines) else ""
+        reason = ""
+        if problems or declared is None:
+            reason = "快照头无效：" + "；".join(problems or ["缺少「共 N 条未复核」计数"])
+        elif declared != len(status_entries):
+            reason = (
+                f"快照头声明的未复核条数与实际不符：声明 {declared} 条，"
+                f"实际 {len(status_entries)} 条"
+            )
+        if reason:
+            # 头不合法就不认快照，原红项照常判红，避免「写错头就销红」。
+            findings.append(Finding("R7", "FAIL", display, header_line, reason, header_text, historical))
+        else:
+            for number, raw, status in status_entries:
+                findings.append(
+                    Finding(
+                        "SNAPSHOT", "SNAPSHOT", display, number,
+                        f"当时状态快照、未逐条复核（{STATUS_LABELS.get(status, status)}）",
+                        raw.strip(), historical,
+                    )
+                )
+                if stats is not None:
+                    stats["snapshot"] = stats.get("snapshot", 0) + 1
+            return findings, []
+
+    for index, (number, raw) in enumerate(lines):
+        if number in header_lines:
+            continue
         stripped = raw.strip()
         if re.match(r"^####\s+7\.3\.1", stripped):
             in_731, group = True, None
@@ -375,6 +591,33 @@ def scan_file(
                             raw.strip(), historical,
                         )
                     )
+                verified = not bad
+                if verified and inspector is not None:
+                    refs = _change_refs(raw + "\n" + window)
+                    hit = None
+                    for sha in hashes:
+                        hit = inspector.match(sha, refs)
+                        if hit:
+                            break
+                    if hit is None:
+                        level = "WARN" if (banner is not None and historical) else "FAIL"
+                        if refs:
+                            detail = (
+                                f"引用对象={refs.brief()}；"
+                                f"该提交改动文件={_brief(inspector.files(hashes[0]))}"
+                            )
+                        else:
+                            detail = "本条没有可比的改动对象（无文件名/符号/测试名）"
+                        findings.append(
+                            Finding(
+                                "R6", level, display, number,
+                                f"hash {_brief(hashes, 2)} 与本条描述的改动对象无交集：" + detail,
+                                raw.strip(), historical,
+                            )
+                        )
+                        verified = False
+                if verified and not (banner is not None and historical) and stats is not None:
+                    stats["fixed_verified"] = stats.get("fixed_verified", 0) + 1
                 if not bad and not CMD_RE.search(window_text):
                     command = None
                     if resolver is not None:
@@ -509,10 +752,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     skip_entries: List[Dict[str, object]] = []
     errors: List[str] = []
     resolver = CommandResolver(SCAN_ROOT)
+    inspector = CommitInspector(SCAN_ROOT)
+    stats: Dict[str, int] = {"fixed_verified": 0, "snapshot": 0}
 
     for path, display in docs:
         try:
-            findings, hits = scan_file(path, display, hash_cache, resolver)
+            findings, hits = scan_file(path, display, hash_cache, resolver, inspector, stats)
         except OSError as exc:
             errors.append(f"{display}: {exc}")
             continue
@@ -540,8 +785,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     warns = [f for f in all_findings if f.level == "WARN" and not f.historical]
     hist_warns = [f for f in all_findings if f.level == "WARN" and f.historical]
     r3_skips = [f for f in all_findings if f.level == "SKIP"]
+    snapshots = [f for f in all_findings if f.level == "SNAPSHOT"]
+    snapshot_files = sorted({f.path for f in snapshots})
     skip_total = sum(int(entry["count"]) for entry in skip_entries) + len(r3_skips)
-    skip_label = "、".join(f"{entry['path']}" for entry in skip_entries) or "-"
+    fixed_verified = stats["fixed_verified"]
+    ledger = (
+        f"R1 实修 {fixed_verified} 条 / SNAPSHOT {len(snapshots)} 条 / "
+        f"历史横幅 {len(hist_warns)} 条"
+    )
 
     if args.json:
         print(
@@ -551,10 +802,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                     "fail_count": len(fails),
                     "warn_count": len(warns),
                     "hist_warn_count": len(hist_warns),
+                    "snapshot_count": len(snapshots),
+                    "fixed_verified_count": fixed_verified,
+                    "hist_banner_count": len(hist_warns),
+                    "ledger": ledger,
                     "skip_count": skip_total,
                     "skipped": skip_entries,
                     "r3_skips": [f.as_dict() for f in r3_skips],
-                    "by_file": _group_counts(fails, warns, hist_warns),
+                    "snapshot_files": snapshot_files,
+                    "snapshots": [f.as_dict() for f in snapshots],
+                    "by_file": _group_counts(fails, warns, hist_warns, snapshots),
                     "findings": [f.as_dict() for f in all_findings],
                     "errors": errors,
                 },
@@ -566,8 +823,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print(
         f"SCAN {len(docs)} 个文档；FAIL {len(fails)}，WARN {len(warns)}，"
-        f"HIST-WARN {len(hist_warns)}（历史快照降级），SKIP {skip_total}"
+        f"HIST-WARN {len(hist_warns)}（历史快照降级），SNAPSHOT {len(snapshots)}，"
+        f"SKIP {skip_total}"
     )
+    print(f"总账：{ledger}")
+    if snapshots:
+        for path in snapshot_files:
+            count = sum(1 for f in snapshots if f.path == path)
+            print(f"  SNAPSHOT {count}（{path}，当时状态快照 / 未逐条复核）")
     if skip_total:
         for entry in skip_entries:
             print(
@@ -583,15 +846,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"  ERROR {err}")
     print()
 
-    groups = _group_counts(fails, warns, hist_warns)
+    groups = _group_counts(fails, warns, hist_warns, snapshots)
     if groups:
-        print("按文件汇总（FAIL / WARN / HIST-WARN）：")
+        print("按文件汇总（FAIL / WARN / HIST-WARN / SNAPSHOT）：")
         for row in groups:
-            print(f"  {row['path']}  FAIL {row['fail']} / WARN {row['warn']} / HIST {row['hist']}")
+            print(
+                f"  {row['path']}  FAIL {row['fail']} / WARN {row['warn']} / "
+                f"HIST {row['hist']} / SNAP {row['snap']}"
+            )
         print()
 
     by_file: Dict[str, List[Finding]] = defaultdict(list)
-    for finding in fails + warns + hist_warns:
+    for finding in fails + warns + hist_warns + snapshots:
         by_file[finding.path].append(finding)
     print(f"明细（每文件最多 {args.max_detail} 条）：")
     if not by_file:
@@ -599,7 +865,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     for path in sorted(by_file):
         print(f"  {path}")
         for finding in by_file[path][: args.max_detail]:
-            if finding.historical:
+            if finding.level == "SNAPSHOT":
+                level = "SNAPSHOT"
+            elif finding.historical:
                 level = "HIST-WARN"
             else:
                 level = "FAIL" if finding.level == "FAIL" else "WARN"
@@ -616,24 +884,33 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _group_counts(
-    fails: List[Finding], warns: List[Finding], hist_warns: List[Finding]
+    fails: List[Finding],
+    warns: List[Finding],
+    hist_warns: List[Finding],
+    snapshots: Optional[List[Finding]] = None,
 ) -> List[Dict[str, object]]:
     fail_counts: Dict[str, int] = defaultdict(int)
     warn_counts: Dict[str, int] = defaultdict(int)
     hist_counts: Dict[str, int] = defaultdict(int)
+    snap_counts: Dict[str, int] = defaultdict(int)
     for finding in fails:
         fail_counts[finding.path] += 1
     for finding in warns:
         warn_counts[finding.path] += 1
     for finding in hist_warns:
         hist_counts[finding.path] += 1
-    paths = sorted(set(fail_counts) | set(warn_counts) | set(hist_counts))
+    for finding in snapshots or []:
+        snap_counts[finding.path] += 1
+    paths = sorted(
+        set(fail_counts) | set(warn_counts) | set(hist_counts) | set(snap_counts)
+    )
     return [
         {
             "path": path,
             "fail": fail_counts.get(path, 0),
             "warn": warn_counts.get(path, 0),
             "hist": hist_counts.get(path, 0),
+            "snap": snap_counts.get(path, 0),
         }
         for path in paths
     ]

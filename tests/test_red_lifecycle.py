@@ -49,6 +49,17 @@ def _sha(root: Path) -> str:
     ).stdout.strip()
 
 
+def _commit(root: Path, files: dict, message: str = "change") -> str:
+    """提交指定文件，返回该提交 sha（R6 要求 hash 真的碰到被引用对象）。"""
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        subprocess.run(["git", "add", relative], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=root, check=True)
+    return _sha(root)
+
+
 def test_fixed_without_hash_is_red(tmp_path: Path) -> None:
     """反证 (a)：写「已修复」但没有 commit hash → R1 FAIL。"""
     root = _repo(tmp_path)
@@ -80,7 +91,7 @@ def test_not_verified_without_reason_is_red(tmp_path: Path) -> None:
 def test_cross_doc_status_conflict_is_red(tmp_path: Path) -> None:
     """反证 (d)：同一测试名在两份文档里状态打架 → R5 FAIL。"""
     root = _repo(tmp_path)
-    sha = _sha(root)
+    sha = _commit(root, {"tests/test_foo.py": "def test_foo():\n    assert True\n"})
     good = _write(
         root,
         "d1.md",
@@ -97,7 +108,10 @@ def test_cross_doc_status_conflict_is_red(tmp_path: Path) -> None:
 def test_well_formed_table_passes(tmp_path: Path) -> None:
     """真表口径：已修 + 有效 hash + 复跑命令 → PASS（WARN 不阻断）。"""
     root = _repo(tmp_path)
-    sha = _sha(root)
+    sha = _commit(
+        root,
+        {"cpp/tests/test_spectrum_display.cpp": "TEST(Display, reRenderHistoryOnPaletteSwitch) {}\n"},
+    )
     path = _write(
         root,
         "good.md",
@@ -109,6 +123,7 @@ def test_well_formed_table_passes(tmp_path: Path) -> None:
     proc = _run(root, "--paths", path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "PASS" in proc.stdout
+    assert "R1 实修 1 条 / SNAPSHOT 0 条 / 历史横幅 0 条" in proc.stdout
 
 
 def test_json_output_shape(tmp_path: Path) -> None:
@@ -209,7 +224,10 @@ def test_banner_on_modern_doc_is_rejected(tmp_path: Path) -> None:
 def test_section_group_conflict_is_red(tmp_path: Path) -> None:
     """反证：同文档 §7.3.1 B 组「未复核」与「已修」并存 → R5 FAIL。"""
     root = _repo(tmp_path)
-    sha = _sha(root)
+    sha = _commit(
+        root,
+        {"cpp/tests/test_spectrum_display.cpp": "TEST(Display, reRenderHistoryOnPaletteSwitch) {}\n"},
+    )
     path = _write(
         root,
         "ledger.md",
@@ -235,8 +253,7 @@ def test_section_group_conflict_is_red(tmp_path: Path) -> None:
 def test_r3_auto_maps_pytest_by_test_name(tmp_path: Path) -> None:
     """R3 自动映射：测试函数名唯一 → pytest <file>::<name>，不再记 WARN。"""
     root = _repo(tmp_path)
-    _write_at(root, "tests/test_sample.py", "def test_alpha():\n    assert True\n")
-    sha = _sha(root)
+    sha = _commit(root, {"tests/test_sample.py": "def test_alpha():\n    assert True\n"})
     path = _write(root, "r3.md", f"已修复 `{sha}`，`test_alpha` 已绿。\n")
     proc = _run(root, "--paths", path, "--json")
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -248,13 +265,13 @@ def test_r3_auto_maps_pytest_by_test_name(tmp_path: Path) -> None:
 def test_r3_ctest_slot_maps_to_ctest(tmp_path: Path) -> None:
     """R3 自动映射：C++ 槽名只在唯一测试源文件出现 → ctest -R 该测试。"""
     root = _repo(tmp_path)
-    _write_at(root, "cpp/tests/test_spectrum_display.cpp", "TEST(FooSlot) {}\n")
-    _write_at(
+    sha = _commit(
         root,
-        "cpp/build/CTestTestfile.cmake",
-        'add_test(spectrum_display "D:/build/test_spectrum_display.exe")\n',
+        {
+            "cpp/tests/test_spectrum_display.cpp": "TEST(FooSlot) {}\n",
+            "cpp/build/CTestTestfile.cmake": 'add_test(spectrum_display "D:/build/test_spectrum_display.exe")\n',
+        },
     )
-    sha = _sha(root)
     path = _write(root, "r3c.md", f"| display::FooSlot | 已修 `{sha}` |\n")
     proc = _run(root, "--paths", path, "--json")
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -264,9 +281,93 @@ def test_r3_ctest_slot_maps_to_ctest(tmp_path: Path) -> None:
 def test_r3_unmapped_prints_skip(tmp_path: Path) -> None:
     """无法映射 → 记 SKIP 并逐条打印，不许静默。"""
     root = _repo(tmp_path)
-    sha = _sha(root)
-    path = _write(root, "r3u.md", f"已修复 `{sha}`，详见当时的记录。\n")
+    sha = _commit(root, {"docs/target.md": "当时的记录。\n"})
+    path = _write(root, "r3u.md", f"已修复 `{sha}`：`docs/target.md` 当时的记录。\n")
     proc = _run(root, "--paths", path)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "SKIP 1（R3 无复跑命令" in proc.stdout
     assert "docs/r3u.md:1" in proc.stdout
+
+
+def test_r6_unrelated_hash_is_red(tmp_path: Path) -> None:
+    """反证 (e)：hash 真实存在，但提交改的是 docs/beta.md，本条说 docs/alpha.md → R6 FAIL。"""
+    root = _repo(tmp_path)
+    sha = _commit(root, {"docs/beta.md": "beta\n"})
+    path = _write(root, "alpha.md", f"已修 `{sha}`：`docs/alpha.md` 的说明已更新。\n")
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R6]" in proc.stdout
+    assert sha[:7] in proc.stdout
+
+
+def test_r6_related_hash_passes(tmp_path: Path) -> None:
+    """同一条改成引用被该提交改到的文件 → R6 通过。"""
+    root = _repo(tmp_path)
+    sha = _commit(root, {"docs/alpha.md": "alpha\n"})
+    path = _write(root, "alpha-ok.md", f"已修 `{sha}`：`docs/alpha.md` 的说明已更新。\n")
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "[R6]" not in proc.stdout
+
+
+def test_r6_without_any_reference_is_red(tmp_path: Path) -> None:
+    """反证：条目没有任何可比对象（只有 hash）→ R6 FAIL，不许蒙混。"""
+    root = _repo(tmp_path)
+    sha = _commit(root, {"docs/alpha.md": "alpha\n"})
+    path = _write(root, "noref.md", f"已修复 `{sha}`，详见当时的记录。\n")
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R6]" in proc.stdout
+    assert "没有可比的改动对象" in proc.stdout
+
+
+def test_snapshot_downgrades_red_items(tmp_path: Path) -> None:
+    """有效快照头：红项转 SNAPSHOT 计数，不再计 FAIL，但总账里看得见。"""
+    root = _repo(tmp_path)
+    path = _write(
+        root,
+        "snap.md",
+        "# 当时状态\n\n"
+        "> **本文为当时状态快照**：以下为当时账面状态。\n"
+        "> 未逐条复核；不作现状依据。\n"
+        "> 共 2 条未复核。\n\n"
+        "已修复：书签删除确认框不再早退。\n"
+        "已修复：频谱上限拆分。\n",
+    )
+    proc = _run(root, "--paths", path, "--json")
+    payload = json.loads(proc.stdout)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert payload["fail_count"] == 0
+    assert payload["snapshot_count"] == 2
+    assert payload["snapshot_files"] == ["docs/snap.md"]
+    assert payload["ledger"] == "R1 实修 0 条 / SNAPSHOT 2 条 / 历史横幅 0 条"
+
+
+def test_snapshot_without_required_wording_is_red(tmp_path: Path) -> None:
+    """反证：快照头缺「未逐条复核 / 不作现状依据」→ R7 FAIL，且红项照常判红。"""
+    root = _repo(tmp_path)
+    path = _write(
+        root,
+        "snap-bad.md",
+        "> 本文为当时状态快照。\n> 共 1 条未复核。\n\n已修复：频谱上限拆分。\n",
+    )
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R7]" in proc.stdout
+    assert "[R1]" in proc.stdout
+
+
+def test_snapshot_count_mismatch_is_red(tmp_path: Path) -> None:
+    """反证：声明共 1 条、实际 2 条 → R7 FAIL（不许随手改数字销红）。"""
+    root = _repo(tmp_path)
+    path = _write(
+        root,
+        "snap-count.md",
+        "> 本文为当时状态快照。\n> 未逐条复核；不作现状依据。\n> 共 1 条未复核。\n\n"
+        "已修复：书签删除确认框不再早退。\n"
+        "已修复：频谱上限拆分。\n",
+    )
+    proc = _run(root, "--paths", path)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "[R7]" in proc.stdout
+    assert "声明 1 条，实际 2 条" in proc.stdout
