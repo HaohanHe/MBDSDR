@@ -754,6 +754,33 @@
 > `desktop/new_spacetime_panel.py` / `tests/test_freq_orbit_unknown.py`，
 > 锁均已释放。
 
+> 归档：2026-11-05/06 卫星过境线七笔已入库并 release：
+> `e12faf16`（`sat_track_panel` 三条文案：多普勒负零 `-0 Hz`→`+0.0 Hz`、
+> 「跟踪已停止（仰角低于设定门限 N°；卫星尚未落下）」门限取运行时值、
+> `freq_spin` tooltip 补「设备」）、
+> `05f3a6b5`（`SatellitePass` 增 `tle_age_days/tle_tier/tle_tier_label/
+> accuracy_risk/accuracy_note`，逐星走 `tle_integrity.freshness+accuracy`）、
+> `cff501fc`（SDR 工具 `_satellite_passes` 首行「站址提醒：…」）、
+> `0232887c`（新时空面板提示区 + 表格后缀显示 TLE 老化与站址提醒）、
+> `f2c65c46`（站址条目从 `orbit.degraded` 首位改末尾，修 `TestPassHonesty` 2 红）、
+> `46ad501e`（`docs/limitations-register.md` 附 O 登记 TLE 老化/性能/站址三条实测）、
+> `2dcabd1d`（**TLE 年龄分级判定表**：`tle_integrity.age_band()`/`band_note()` 六档
+> ≤24h/≤7d/7–30d/31–90d/>90d/未知，`accuracy()` 文案改为从表取；面板提示区常驻
+> 「时刻来源：TimelineEngine 60 秒网格」+ 实测偏差；`sdr_tools`/controller/agent
+> 补 `pass_time_source` 与 `pass_time_sampling_precision_s`；天空图过境标题
+> 「· 2s采样」；`SatellitePass.sampling_step_s`；limitations 补分级表与三路径精度表）。
+> 实测：365 天面板原文「TLE 已失效（365 天，超过 90 天）：轨道已严重不可信，过境
+> 时刻仅供占位，禁止用于跟踪/调谐，必须刷新星历（time_precision_s=60 是预测时刻
+> 精度约 60 秒，不是卫星位置精度）」；TimelineEngine 60 s 网格 vs 2 s 细扫
+> （24h/28 条）峰值 ≤30 s、升落 ≤58 s、峰值仰角最大差 7.6°；全表 ×72h
+> TimelineEngine 0.187 s（N=12 0.232 s）vs `sat_passes` 单星路径 16.5 s（N=12 外推 ~33 s，
+> 禁止用于 UI 同步）。
+> 涉及 `desktop/{sat_track_panel,new_spacetime_panel,rf_sky_view}.py` /
+> `mbdsdr_ai/{tle_integrity,new_spacetime_timeline,sdr_tools,agent,orbit}.py` /
+> `mbdsdr_ai/core/controller.py` / `docs/limitations-register.md` 及
+> `tests/test_{sat_track_copy,tle_age_visibility,station_warning_visibility,pass_ui_warnings}.py`，
+> 锁均已释放（`sat_track_panel.py` 后续由 UX 线窄屏重排接管）。
+
 ### 6.1.1 接管过期 claim 前必须查工作区（2026-11-05 事故后立规）
 
 **TTL 过期 ≠ 对方停手。** `expired_steal` 只说明心跳停了，不说明对方工作区
