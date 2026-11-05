@@ -307,6 +307,68 @@ switch_on = bool(st["enabled"])          # 只由 enabled 驱动
 - 契约测试锚点：`tests/test_backend_tx_capability.py`（三后端 verified=False；
   Soapy 第三态三种取值）。
 
+#### 3.8.2 UI 接线顺序（供操作逻辑线照抄）
+
+**结论：三步都不能提前下结论。第 1/2 步只回答「本后端有没有写流 / 是否声明」，
+任何一步为否都不许直接显示「没有 TX 通道」——必须走到第 3 步取
+`tx_capability()` 的 `driver_capable` 才能区分「硬件不能发」与「本路径未接」。**
+
+1. `impl = callable(getattr(type(backend), "write_tx", None))` —— 本类是否有
+   写流实现（Soapy 通用路径为 False，但这**不代表**硬件不能发）。
+2. `declared = bool(backend.supports_tx())` —— 声明 ∧ 就绪（Soapy 为 False）。
+3. `cap = backend.tx_capability()` —— 唯一文案事实源：
+   `impl/declared/ready/verified` + `driver_capable/driver_tx_channels/
+   blocked_reason/notice`。前两步得到的值跟 `cap` 冲突时，**以 `cap` 为准**。
+
+判定与文案（按优先级从上到下，命中即停）：
+
+| # | 条件（以 `cap` 字段为准） | 用户看到原文 | PTT 按钮 |
+|---|---|---|---|
+| 1 | `implemented=true && ready=true && verified=false` | 本后端发射：驱动级已实现 / 真机未验证 | **可点 + 常驻警示**（黄色条，非 tooltip） |
+| 2 | `implemented=true && ready=true && verified=true` | 本后端发射：驱动级已实现 / 真机已验证 | 可点 |
+| 3 | `declared=true && implemented=false` | 本后端发射：仅有声明 / 未实现（不可发射） | 置灰 |
+| 4 | `driver_capable=true`（`blocked_reason=driver_capable_path_not_implemented`） | 本后端发射：驱动级可发 / 本路径未接入（不可发射） | 置灰 |
+| 5 | `driver_capable=false`（`blocked_reason=no_tx_channels`） | 本后端发射：硬件仅接收（驱动报告 0 个 TX 通道） | 置灰 |
+| 6 | `blocked_reason=driver_capability_unknown` | 本后端发射：能力未知（未连接/驱动未报告） | 置灰 |
+| 7 | 其余（`declared=false && implemented=false`） | 本后端发射：未实现 | 置灰 |
+
+照抄骨架（只替换 `main_window.py` 里生成置灰文案的那个分支；**不要改门语义**）：
+
+```python
+def ptt_state(backend) -> tuple[str, bool, bool]:
+    """返回 (常驻文案, 是否可点, 是否带警示)。"""
+    impl = callable(getattr(type(backend), "write_tx", None))
+    declared = bool(backend.supports_tx())
+    try:
+        cap = backend.tx_capability()
+    except Exception:
+        cap = {}
+    impl = bool(cap.get("implemented", impl))
+    declared = bool(cap.get("declared", declared))
+    driver = cap.get("driver_capable")
+    reason = str(cap.get("blocked_reason") or "")
+
+    if impl and bool(cap.get("ready")) and bool(cap.get("verified")):
+        return "本后端发射：驱动级已实现 / 真机已验证", True, False
+    if impl and bool(cap.get("ready")):
+        return "本后端发射：驱动级已实现 / 真机未验证", True, True
+    if declared and not impl:
+        return "本后端发射：仅有声明 / 未实现（不可发射）", False, False
+    if driver is True:
+        return "本后端发射：驱动级可发 / 本路径未接入（不可发射）", False, False
+    if driver is False:
+        return "本后端发射：硬件仅接收（驱动报告 0 个 TX 通道）", False, False
+    if reason == "driver_capability_unknown":
+        return "本后端发射：能力未知（未连接/驱动未报告）", False, False
+    return "本后端发射：未实现", False, False
+```
+
+接线注意：
+- 文案必须在 PTT **可按下之前**就可见，不能只在按下失败后弹一次。
+- 第 1 行（未验证）按钮**可点但带警示**；`verified` 不得由 UI 推导，只能读字段。
+- 现有 `if not callable(write_tx): → 「后端没有 TX 通道」` 这句要删掉，改走
+  上表第 4/6/7 行；「没有 TX 通道」只允许在 `driver_capable=false`（第 5 行）。
+
 ### 3.9 C++ → Python `backend_comp_active` 状态桥接：可做，但现在不能接
 
 **结论：技术上可做，现有通道够用；现在接的是死代码，所以不接——但出事条件

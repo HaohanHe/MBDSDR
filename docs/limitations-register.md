@@ -191,4 +191,51 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
 | --- | --- | --- | --- | --- |
 | L43 | **三后端发射全部 `tx_verified=False`**：HackRF / USRP / Pluto 都是「驱动级已实现、真机未验证」。PTT 按下前必须显示「本后端发射：驱动级已实现 / 真机未验证」，不得显示「支持发射」 | `SDRDevice.tx_verified`（`mbdsdr_ai/sdr_backend.py`）；`backend.tx_capability()` 四态 `declared/implemented/ready/verified`；`tests/test_backend_tx_capability.py::test_tx_capability_marks_all_three_unverified`；UI 契约见 `docs/doppler-compensation.md` §3.8.1 | 仅自测（mock 驱动 + 假后端真调 `write_tx`，无真机发波） | 每后端各备一台真机 + 衰减器/假负载 + 接收机，按 §3.8.1 先在 PTT 前显示「真机未验证」，再真发并核对频点/波形；通过后才可把该后端 `tx_verified` 置 True |
-| L44 | **SoapySDR 通用路径的「把能说成不能」**：`supports_tx()` 恒为 False（本类无 `write_tx`），而 HAL `getNumTxChannels()` 对 HackRF/USRP/Pluto 常 >0。桌面现有 PTT 文案按 `supports_tx()` 显示「当前设备不支持发射（后端没有 TX 通道）」，会把「本路径未接写流」误报成「硬件不能发」 | `mbdsdr_ai/sdr_backend.py::SoapySDRBackend.tx_capability()` 新增 `driver_tx_channels` / `driver_capable` / `blocked_reason` / `notice`；`tests/test_backend_tx_capability.py::test_soapy_generic_reports_driver_capable_third_state`；旧文案在 `desktop/main_window.py`（属操作逻辑线，本线不改） | 后端已能给出第三种状态「驱动级可发 / 本路径未接入（不可发射）」；**UI 仍显示旧文案**，属已知假信息缺口 | 操作逻辑线把 PTT 置灰文案改读 `tx_capability()` 的 `blocked_reason/notice`（按 `docs/doppler-compensation.md` §3.8.1 文案表），用 Soapy 路径接一台能发的 HackRF/USRP 复测：显示「驱动级可发 / 本路径未接入」，而不是「没有 TX 通道」 |
+| L44 | **SoapySDR 通用路径的「把能说成不能」**：`supports_tx()` 恒为 False（本类无 `write_tx`），而 HAL `getNumTxChannels()` 对 HackRF/USRP/Pluto 常 >0。桌面现有 PTT 文案按 `supports_tx()` 显示「当前设备不支持发射（后端没有 TX 通道）」，会把「本路径未接写流」误报成「硬件不能发」 | `mbdsdr_ai/sdr_backend.py::SoapySDRBackend.tx_capability()` 新增 `driver_tx_channels` / `driver_capable` / `blocked_reason` / `notice`；`tests/test_backend_tx_capability.py::test_soapy_generic_reports_driver_capable_third_state`；旧文案在 `desktop/main_window.py`（属操作逻辑线，本线不改） | 后端已能给出第三种状态「驱动级可发 / 本路径未接入（不可发射）」；**UI 仍显示旧文案**，属已知假信息缺口 | 操作逻辑线把 PTT 置灰文案改读 `tx_capability()` 的 `blocked_reason/notice`（按 `docs/doppler-compensation.md` §3.8.2 判定顺序与文案表），用 Soapy 路径接一台能发的 HackRF/USRP 复测：显示「驱动级可发 / 本路径未接入」，而不是「没有 TX 通道」 |
+
+## 附 F：真机发射验证清单（准备件，未执行；2026-11-05 追加）
+
+> **本附录只写"怎么验、什么算过、谁能改状态"。当前三个后端仍是
+> `tx_verified=False`，任何人（包括 AI/代理）不得自行改成 True。**
+
+### F.1 通用安全前置（每后端都适用）
+
+1. **必须接假负载或 ≥30 dB 衰减器 + 屏蔽**，禁止裸接天线；确有法规频段要求
+   （业余执照/ISM/屏蔽箱）时以当地法规为准，拿不准就不发。
+2. **最小功率起测**：发射增益置最低档，先短时长（≤5 s）单音，确认频点后再加。
+3. 发射前确认目标频段无人使用；测试频点优先选 435 MHz（业余）或 915 MHz
+   （ISM，按地区裁定），避开 GPS/航空/应急频段。
+4. 全程有人值守；出现异常（驻波/过热/杂散超限）立即停发并断开。
+5. 每次只验一个后端，不同时上电；记录设备序列号。
+
+### F.2 每后端最小步骤与判据
+
+| 后端 | 最小验证步骤 | 通过判据（全部满足才算过） |
+| --- | --- | --- |
+| **HackRF One** | ① 假负载 + 50 Ω 衰减；② 频率 435.000 MHz、采样率 2 MS/s、增益最低档；③ 走本仓 `write_tx` 发 3–5 s 单音（基带 +10 kHz 偏移）；④ 用第二台 SDR/频谱仪在同轴取样口观察；⑤ 再发一段 1 kHz 方波 IQ，确认波形结构；⑥ 记录 `status.error`、`last_tx_error`、`tx_error_count` | 中心频点落在 435.000 ±0.005 MHz；偏移单音位置与基带设置一致；谐波/杂散 ≤ −40 dBc 且不落在受保护频段；`write_tx` 返回 True、`last_tx_error` 为空、无 underrun；重复 3 次结果一致 |
+| **USRP（UHD）** | ① 同 F.1；② `tx_gain` 最低、435 MHz、1 MS/s；③ `get_tx_stream` + `TXMetadata` 发 3–5 s 单音（含 EOF 收尾）；④ 频谱仪核对频点/功率/杂散；⑤ 记录 `TXMetadata` 返回与流关闭耗时 | 频点与功率符合设置（功率以实测为准，不采信标称）；EOF 正常收尾且无挂起；杂散 ≤ −40 dBc；无 `U`/`O` 溢出告警；重复 3 次一致 |
+| **PlutoSDR** | ① 同 F.1；② `tx_attenuation` 最大（最低功率）、915 MHz（按地区）、2 MS/s；③ `Buffer.write/push` 发 3–5 s 单音；④ 频谱仪核对；⑤ 拔插复位后重跑一次，确认状态不残留 | 频点 915 ±0.005 MHz（或所选频点 ±5 kHz）；`push` 返回成功、无 `-EBUSY`/欠载；复位后 `tx_capability()` 回到未连接态且 `verified` 仍为 False（说明未被硬编码）；重复 3 次一致 |
+| **Soapy 通用路径** | 本路径**未实现** `write_tx`，不列入"可发射验证"；只验第三态显示：接一台能发的 HackRF/USRP，确认 `tx_capability()` 给出 `driver_capable=true`、`blocked_reason=driver_capable_path_not_implemented` | UI 显示「驱动级可发 / 本路径未接入（不可发射）」且按钮置灰；不得显示「没有 TX 通道」。**此项通过也不得把 `tx_verified` 置 True**（本路径仍不能发） |
+
+### F.3 「未验证」在界面上如何持续可见
+
+- **常驻**：PTT 按下前显示 §3.8.1/§3.8.2 的「本后端发射：驱动级已实现 /
+  真机未验证」，按钮可点但带黄色警示；不是 tooltip、不是按失败后弹一次。
+- **字段驱动**：文案只读 `backend.tx_capability()["verified"]`（源头
+  `SDRDevice.tx_verified`），UI 不得缓存成常量、不得按设备型号猜。
+- **状态面**：`get_tx_gate().snapshot()` 与 `tx_capability()` 随每次连接重算，
+  断开后回到「未知/未连接」，不会保留上次的"已验证"字样。
+- **登记面**：本条 L43 在验证完成前不得删除或改成「已验证」；`verified=false`
+  时任何界面/文档不得出现「支持发射」「已验证」用于三后端。
+
+### F.4 谁能把 `tx_verified` 改成 True（硬门槛）
+
+1. **只有实际执行 F.2 且拿到实测记录的真人**可以提交改动；AI/代理/自动化
+   任务**一律不许**改这个字段，也不许用"测试通过"替代真机证据。
+2. 提交必须同时附：日期、设备型号 + 序列号、频点/功率/衰减配置、频谱截图或
+   数据文件路径、3 次重复结果、执行人 + 复核人；记录写入
+   `docs/real_hw_acceptance_*.md`（新建当次文档，不改旧记录）。
+3. 改动范围：`mbdsdr_ai/sdr_backend.py` 对应后端的 `SDRDevice.tx_verified=True`
+   （只改已验证的那一个后端），同步更新 `tests/test_backend_tx_capability.py`
+   的断言与 L43；两者必须同一提交。
+4. 复核人未签字前，字段保持 False；验收记录缺失即视为未验证。
