@@ -19,55 +19,29 @@ AGC/主题）以**明文 JSON** 落到磁盘，下次启动读回。设计取舍
 import json
 import os
 import platform
-from typing import Any, Dict
+from datetime import datetime
+from typing import Any, Dict, Optional
 
 from PySide6.QtCore import QTimer
 
+try:  # 包内导入
+    from config_schema import SCHEMA, defaults, validate_value
+except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
+    from .config_schema import SCHEMA, defaults, validate_value
 
-#: 全部可持久化字段及其默认值。新字段先在这里登记，load/set 自动校验。
-DEFAULTS: Dict[str, Any] = {
-    "frequency_hz": 98_000_000.0,   # 中心频率 Hz
-    "gain_db": 20.0,                # LNA 增益 dB
-    "demod_mode": "FM",             # 解调模式：FM/WFM/AM/USB/LSB/CW
-    "bandwidth_hz": 0.0,            # VFO 带宽 Hz；0 = 随模式自动
-    "sample_rate_hz": 2_048_000.0,  # 采样率 Hz
-    "callsign": "",                 # 操作员呼号；空 = 未设置
-    "gnss_port": "",                # GNSS 串口设备路径；空 = 自动探测
-    "gnss_baudrate": 9600,          # GNSS 串口波特率
-    "agc_enabled": True,            # 自动增益开关
-    "agc_speed": "medium",          # 音频 AGC 档位：off/fast/medium/slow
-    "volume": 48,                   # 音量 0–100（人类量纲；下发 0–63 硬件量纲在 main_window 边界换算）
-    # 音量量纲迁移标记：新文件/新装默认 True。旧 desktop_settings.json 有
-    # "volume"（0–63 硬件量纲）但没有本标记 → load() 一次性换算成 0–100
-    # 并随下次落盘写入标记（幂等）。用「原始文件里键是否存在」判旧新，
-    # 不靠数值猜量纲（48 在两个量纲下都合法）。
-    "volume_scale_v2": True,
-    "show_waterfall": True,         # 瀑布图可见性
-    "theme": "default",             # 主题名
-    # 触屏/Surface/平板二合一适配："auto"=自动检测 QTouchDevice，
-    # "on"=强制触屏模式（放大触控目标/手势），"off"=强制鼠标模式。
-    "touch_mode": "auto",
-    # 服务开关（远程控制 TCP / Web 服务）。默认全关：监听端口属于对外暴露面，
-    # 必须由用户显式勾选才开启。持久化"上次是否启用"，重启后按用户上次的
-    # 显式意图恢复——改了重启就丢属于反人类，与"默认关闭"并不冲突。
-    "rc_enabled": False,            # 远程控制 TCP（GQRX/hamlib 风格）开关
-    "rc_port": 7356,                # 远程控制监听端口
-    "web_enabled": False,           # Web 服务（HTTP + WebSocket）开关
-    "web_port": 8080,               # Web 服务监听端口
-    # UI 语言（i18n）：zh/en/ja。源语言 zh（tr() 源文即中文）；en/ja 由
-    # desktop/i18n/*.qm 提供（Qt Linguist 管线），未知值诚实回退 zh。
-    "ui_language": "zh",
-    # 顶层形态：ide = 传统 SDR 工作台；planetarium = 星象仪形态（全屏天空）。
-    # 重启按上次形态恢复；未知值由 main_window 回退 ide。
-    "app_mode": "ide",
-}
 
-#: 数值字段（写盘前做类型归一，防止 JSON 里混入字符串导致下游类型错误）
-_FLOAT_KEYS = ("frequency_hz", "gain_db", "bandwidth_hz", "sample_rate_hz")
-#: 端口等整数字段：不登记会被 _coerce 落成字符串，下游 int() 再炸一次
-_INT_KEYS = ("gnss_baudrate", "rc_port", "web_port", "volume")
-_BOOL_KEYS = ("agc_enabled", "rc_enabled", "web_enabled", "show_waterfall",
-              "volume_scale_v2")
+#: 全部可持久化字段及其默认值——**唯一来源是 config_schema.py**。
+#: 这里只做派生，不再手写第二份默认值（防 UI/配置层默认值漂移）。
+DEFAULTS: Dict[str, Any] = defaults("settings")
+
+#: 类型分组由 schema.kind 派生，避免手写清单漏登记（漏登记会被 _coerce 落成
+#: 字符串，下游 int() 再炸一次）。
+_FLOAT_KEYS = tuple(k for k, it in SCHEMA.items()
+                    if it.storage == "settings" and it.kind == "float")
+_INT_KEYS = tuple(k for k, it in SCHEMA.items()
+                  if it.storage == "settings" and it.kind == "int")
+_BOOL_KEYS = tuple(k for k, it in SCHEMA.items()
+                   if it.storage == "settings" and it.kind == "bool")
 
 
 # ----------------------------------------------------------------------
@@ -101,17 +75,34 @@ def default_config_path() -> str:
 
 
 def _coerce(key: str, value: Any) -> Any:
-    """按字段类型把读回的 JSON 值归一；失败时退回默认值。"""
+    """按 schema 把读回的 JSON 值归一；越界夹范围、坏值回默认。
+
+    ``validate_value`` 本身是纯函数且已全类型兜底（永不抛），这里不再套
+    catch-all——配置层最忌"静默吞编程错误"，多一层兜底只会掩盖 schema 缺陷。
+
+    未知键保持旧行为（原样返回），避免把调用方的临时值意外转成字符串。
+    """
+    item = SCHEMA.get(key)
+    if item is None:
+        return value
+    norm, _reason = validate_value(item, value)
+    return norm
+
+
+def backup_corrupt_config(path: str) -> Optional[str]:
+    """把损坏的配置文件改名为 ``*.corrupt-时间戳``，返回备份路径（失败 None）。
+
+    与 gui_config 既有机制同一套命名（main_window.py:7674-7685），复用它而不是
+    另起一套；先留证据再回默认值，绝不静默覆盖用户原文件。
+    只捕获文件系统边界（OSError）；编程错误照常抛出。
+    """
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = f"{path}.corrupt-{stamp}"
     try:
-        if key in _FLOAT_KEYS:
-            return float(value)
-        if key in _INT_KEYS:
-            return int(value)
-        if key in _BOOL_KEYS:
-            return bool(value)
-        return str(value)
-    except (TypeError, ValueError):
-        return DEFAULTS.get(key, value)
+        os.replace(path, backup)
+        return backup
+    except OSError:
+        return None
 
 
 class DesktopSettings:
@@ -131,6 +122,13 @@ class DesktopSettings:
         self._path = path or default_config_path()
         self._data: Dict[str, Any] = dict(DEFAULTS)
         self._dirty = False
+        #: 上次 load 时若原文件损坏，这里是备份路径（None = 未损坏）
+        self.corrupt_backup: Optional[str] = None
+        #: 最近一次读/写失败的用户可读说明（None = 无错误）。
+        #: 设置面板订阅 on_error 后能在状态栏显示"改了没保存"这类真相。
+        self.last_error: Optional[str] = None
+        #: 写盘失败回调（签名 (message) -> None）；由 UI 注入，避免配置层依赖 Qt。
+        self.on_error: Optional[Any] = None
         # 防抖写盘定时器：singleShot 语义，每次 set() 都重启，连续改动只写最后一次。
         # 挂在主线程（QTimer 必须在创建它的线程里 start），与 set() 同源，无需加锁。
         self._timer = QTimer(parent)
@@ -150,23 +148,31 @@ class DesktopSettings:
             if os.path.exists(inst._path):
                 with open(inst._path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
-                if isinstance(raw, dict):
-                    for k, v in raw.items():
-                        if k in DEFAULTS:
-                            inst._data[k] = _coerce(k, v)
-                    # 音量量纲一次性迁移（0–63 硬件量纲 → 0–100 人类量纲）：
-                    # 旧文件有 volume 但没有 volume_scale_v2 标记。判据是
-                    # 「原始文件里的键」，不靠数值猜量纲——48 在两套量纲下
-                    # 都合法。迁移后随下次落盘写入标记，幂等。
-                    if "volume" in raw and "volume_scale_v2" not in raw:
-                        try:
-                            old = int(raw.get("volume", 30))
-                        except (TypeError, ValueError):
-                            old = 30
-                        inst._data["volume"] = volume_hw_to_pct(old)
-                        inst._data["volume_scale_v2"] = True
-        except Exception:
-            # 文件损坏/不可读：静默回退全默认，绝不让配置文件搞挂 GUI
+                if not isinstance(raw, dict):
+                    raise ValueError("顶层不是 JSON 对象")
+                for k, v in raw.items():
+                    if k in DEFAULTS:
+                        inst._data[k] = _coerce(k, v)
+                # 音量量纲一次性迁移（0–63 硬件量纲 → 0–100 人类量纲）：
+                # 旧文件有 volume 但没有 volume_scale_v2 标记。判据是
+                # 「原始文件里的键」，不靠数值猜量纲——48 在两套量纲下
+                # 都合法。迁移后随下次落盘写入标记，幂等。
+                if "volume" in raw and "volume_scale_v2" not in raw:
+                    try:
+                        old = int(raw.get("volume", 30))
+                    except (TypeError, ValueError):
+                        old = 30
+                    inst._data["volume"] = volume_hw_to_pct(old)
+                    inst._data["volume_scale_v2"] = True
+        except (OSError, ValueError, TypeError) as exc:
+            # 文件损坏/不可读：先备份证据（*.corrupt-时间戳）再回默认值。
+            # 必须留用户可见的错误说明——"读失败静默给默认值"会让用户以为
+            # 自己上次保存的参数还在，实际已被默认值顶掉。
+            inst.corrupt_backup = backup_corrupt_config(inst._path)
+            inst.last_error = (
+                f"配置读取失败（{exc.__class__.__name__}）：{inst._path}；"
+                f"原文件已备份为 {inst.corrupt_backup or '（备份失败）'}，"
+                "本次以默认值启动")
             inst._data = dict(DEFAULTS)
         return inst
 
@@ -193,6 +199,30 @@ class DesktopSettings:
             # timer 已销毁（退出中）：直接同步写一次，不丢最后一次改动
             self._write_to_disk()
 
+    def reset(self, key: str) -> Any:
+        """把单项恢复到 schema 默认值；返回恢复后的值（未知 key 返回 None）。"""
+        if key not in DEFAULTS:
+            return None
+        self.set(key, DEFAULTS[key])
+        return self._data[key]
+
+    def reset_all(self) -> None:
+        """恢复全部默认值（一次落盘）。"""
+        self._data = dict(DEFAULTS)
+        self._dirty = True
+        try:
+            self._timer.start()
+        except RuntimeError:
+            self._write_to_disk()
+
+    def values(self) -> Dict[str, Any]:
+        """返回当前全部设置的浅拷贝（供导出/审计）。"""
+        return dict(self._data)
+
+    @property
+    def path(self) -> str:
+        return self._path
+
     # ------------------------------------------------------------------
     # 落盘
     # ------------------------------------------------------------------
@@ -216,9 +246,13 @@ class DesktopSettings:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
             os.replace(tmp_path, self._path)
             self._dirty = False
-        except Exception:
-            # 磁盘满/权限不足/只读：不抛，下次 set 再试；退出 flush 也不崩
-            pass
+            self.last_error = None
+        except (OSError, TypeError, ValueError) as exc:
+            # 磁盘满/权限不足/只读/不可序列化：不抛（退出 flush 也不崩），
+            # 但必须让用户看见——"改设置写失败静默"等于下次开机改动凭空消失。
+            self.last_error = f"设置保存失败（{exc.__class__.__name__}）：{exc}"
+            if callable(self.on_error):
+                self.on_error(self.last_error)
 
     # ------------------------------------------------------------------
     # 上下文管理器：with DesktopSettings.load() as s: ... 退出自动 flush
