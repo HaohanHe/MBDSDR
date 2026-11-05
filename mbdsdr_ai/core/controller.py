@@ -987,18 +987,29 @@ class SDRController:
             logger.warning("_norad_to_name 内置表查询失败: %s", e)
         return None
 
-    def get_satellite_pass(self, norad: int) -> dict:
-        """预报某卫星未来 24h 最近一次过境。
+    def get_satellite_pass(self, norad: int,
+                           min_elevation_deg: Optional[float] = None,
+                           window_hours: Optional[float] = None) -> dict:
+        """预报某卫星在指定窗口内最近一次过境。
 
         真实数据优先：先用缓存/在线 TLE（含编号↔名称↔来源校验）；身份不符
         直接拒绝（绝不拿错轨道算过境）。取新失败时沿用旧缓存并标
         ``refresh_status="not_updated"``；完全无数据才退回内置表，且明确标注
         「未核实/合成回退」并把时刻降到分钟级。
 
+        ``min_elevation_deg`` / ``window_hours`` 为**显式注入**的筛选门与搜索
+        窗口：桌面侧可读同源设置 ``settings.effective_pass_min_elevation_deg()``
+        / ``effective_pass_window_hours()`` 后传入，MCP 工具面由调用方传参。
+        控制器属 AI 侧、无 desktop settings 依赖，因此这里不读设置，也不写
+        第二份默认值：缺省回落 ``sat_passes`` 的 ``PASS_MIN_ALT_DEG`` 与
+        ``PASS_WINDOW_HOURS``。
+
         Returns
         -------
         dict
-            :class:`PassInfo` 序列化；轨道库缺失/无过境时返回
+            :class:`PassInfo` 序列化，另带 ``passes_in_window``（本窗口内符合
+            该峰值门的总条数）与生效的 ``min_elevation_deg`` / ``window_hours``；
+            轨道库缺失/无过境时返回
             ``{"error": "not_available"|"no_pass"|"identity_mismatch"}``。
         """
         st = self.station_status()
@@ -1021,6 +1032,7 @@ class SDRController:
             from ..sat_passes import (
                 GroundStation,
                 PASS_MIN_ALT_DEG,
+                PASS_WINDOW_HOURS,
                 predict_passes,
             )
             from ..orbit import fetch_tle_record, tle_epoch_iso
@@ -1072,13 +1084,23 @@ class SDRController:
             # 与天空视图同一时间源：TimeEngine（模拟时刻优先，未穿越即墙钟）
             from ..new_spacetime import get_time_engine
             start_unix = get_time_engine().now_unix()
-            passes = predict_passes([name, line1, line2], gs, hours=24.0,
-                                    min_alt=PASS_MIN_ALT_DEG,
+            # 门/窗口显式入参 → 未注入时回落 sat_passes 的单一事实源常量
+            gate_deg = (float(min_elevation_deg)
+                        if min_elevation_deg is not None
+                        else PASS_MIN_ALT_DEG)
+            hours_ahead = (float(window_hours)
+                           if window_hours is not None
+                           else PASS_WINDOW_HOURS)
+            passes = predict_passes([name, line1, line2], gs,
+                                    hours=hours_ahead,
+                                    min_alt=gate_deg,
                                     start_unix=start_unix)
             if not passes:
                 return {"error": "no_pass",
+                        "min_elevation_deg": gate_deg,
+                        "window_hours": hours_ahead,
                         "suggestion":
-                        f"未来 24h 内无高于 {PASS_MIN_ALT_DEG:g}° 的过境。"}
+                        f"未来 {hours_ahead:g}h 内无高于 {gate_deg:g}° 的过境。"}
             p = passes[0]
 
             def _fmt(dt) -> str:
@@ -1106,6 +1128,10 @@ class SDRController:
                 time_precision_s=acc["time_precision_s"],
             )
             out = info.to_dict()
+            # 本窗口内符合该峰值门的总条数（对照测试与调用方可直接计数）
+            out["passes_in_window"] = len(passes)
+            out["min_elevation_deg"] = gate_deg
+            out["window_hours"] = hours_ahead
             # P11：内置 TLE 凑整值必须在数据里标注来源与可信度，不许当精确值。
             try:
                 from ..builtin_tle_meta import analyze_tle_provenance
@@ -1125,8 +1151,11 @@ class SDRController:
             # 不一致必须报出，不许各算各的。
             try:
                 from ..sat_consistency import check_pass_object
+                # 对拍用的升起门必须与本次实际预测门一致，否则注入 5°/15°
+                # 时路径 1 的 el 固定 10° 会与天空路径假性不一致
                 cons = check_pass_object(p, [line1, line2], gs,
-                                         tol_deg=0.5, threshold_alt_deg=10.0)
+                                         tol_deg=0.5,
+                                         threshold_alt_deg=gate_deg)
                 out["consistency"] = cons
                 if cons.get("checked") and not cons.get("consistent"):
                     out["consistency_warning"] = cons.get("warning", "")

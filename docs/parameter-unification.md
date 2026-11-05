@@ -138,3 +138,4 @@
 | 2026-11-05 | `3c4b7ad` | 复核附录 A（34/35 有消费点，红表 1 项 `pass_window_hours`；改 #24/#25）；更新组 2/4/6/8/9/10 状态；新增附录 B（8 组跨端差值实测） | 参数治理线 |
 | 2026-11-05 | `16e9917` | `pass_window_hours` 定为接线不删键（#25 改“待接线”，派卫星线补两处消费点）；复验静噪四拦点全落地（`0d6d465`+`e501555`），组 1 改“已统一”；B6 写明唯一事实源与改哪一侧 | 参数治理线 |
 | 2026-11-05 | `886244d` | #25 接线完成：两处过境列表读 `effective_pass_window_hours`（删 `PASS_WIN_HOURS`）；实测 6 h vs 24 h = **1 条 vs 5 条**，1 h = 0 条；A-1 红表清零（35/35 有消费点）；B4 补步长实测数字；另 `4faddb2` 修正 `_gmst_rad` 漏项（AOS 由偏 **16110 s** 回到 **+29.8 s**） | 卫星过境线 |
+| 2026-11-05 | `d1dfd16` | AI/MCP 工具面 `controller.get_satellite_pass` 不再写死 10°/24h：改为显式注入 `min_elevation_deg` / `window_hours`，缺省回落 `sat_passes` 的 `PASS_MIN_ALT_DEG` / 新增 `PASS_WINDOW_HOURS`（AI 侧单一默认源，不反向依赖 desktop settings）。实测同一工具调用 **5°=6 条 vs 10°=5 条**、**24h=5 条 vs 72h=14 条**；`rf_sky_view` 过境标题窗口随设置显示 | 卫星过境线 |

@@ -89,6 +89,10 @@ _AU_KM = 149597870.700
 # 分叉）。粗扫按固定间隔采样仰角曲线，细采样在峰值邻域找中天。
 PASS_COARSE_STEP_S = 60.0     # 粗扫：60s 定位过境区间
 PASS_FINE_STEP_S = 2.0        # pass 内细采样：找中天/最大仰角
+# 过境搜索窗口默认值（小时）。AI/无头面（controller.get_satellite_pass）
+# 没有桌面 settings 依赖，默认值只在这里定义一次；桌面面板的默认值来自
+# config_schema，经 settings.effective_pass_window_hours() 显式注入。
+PASS_WINDOW_HOURS = 24.0
 # 兼容旧调用点的私有别名（值只在这里定义一次，别名不构成第二事实源）
 _COARSE_STEP_S = PASS_COARSE_STEP_S
 _FINE_STEP_S = PASS_FINE_STEP_S
@@ -227,7 +231,7 @@ def predict_passes(
     tle_lines: Sequence[str],
     ground_station: GroundStation,
     start_time: Optional[Time] = None,
-    hours: float = 24.0,
+    hours: float = PASS_WINDOW_HOURS,
     min_alt: float = PASS_MIN_ALT_DEG,
     require_sunlit: bool = False,
     anomalies: Optional[List[Dict[str, Any]]] = None,
@@ -617,7 +621,7 @@ def compute_doppler_curve(
 def predict_upcoming_passes(
     tle_list: Sequence[Sequence[str]],
     ground_station: GroundStation,
-    hours: float = 24.0,
+    hours: float = PASS_WINDOW_HOURS,
     min_alt: float = PASS_MIN_ALT_DEG,
     max_sats: Optional[int] = None,
     freq_hz: Optional[float] = None,

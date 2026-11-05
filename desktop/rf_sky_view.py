@@ -1843,8 +1843,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 未来过境列表
         self._upcoming_passes: List[Dict[str, float]] = []
-        # 列表口径（供面板标题显示）：峰值门 & 是否含低仰角
+        # 列表口径（供面板标题显示）：峰值门 / 搜索窗口 / 是否含低仰角
         self._pass_gate_deg: Optional[float] = None
+        self._pass_window_hours: Optional[float] = None
         self._pass_show_low: bool = False
 
         # === 「调到该星」覆盖按钮（自包含，不依赖 main_window）===
@@ -2614,14 +2615,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def set_upcoming_passes(self, passes: List[Dict],
                             gate_deg: Optional[float] = None,
-                            show_low: bool = False):
+                            show_low: bool = False,
+                            window_hours: Optional[float] = None):
         """喂入未来过境列表（rise 时刻 HH:MM:SS(UTC) + max_alt + duration_min）。
 
-        ``gate_deg`` / ``show_low`` 只用于标题口径：列表按**峰值仰角** ≥ 门筛选，
-        低仰角开关打开时 5°–用户门的过境会额外列出并标注「低仰角」。
+        ``gate_deg`` / ``show_low`` / ``window_hours`` 只用于标题口径：列表按
+        **峰值仰角** ≥ 门筛选，窗口为用户设置的小时数（1–72h）；低仰角开关
+        打开时 5°–用户门的过境会额外列出并标注「低仰角」。
         """
         self._upcoming_passes = list(passes)[:12]
         self._pass_gate_deg = gate_deg
+        self._pass_window_hours = window_hours
         self._pass_show_low = bool(show_low)
         self.update()
 
@@ -6625,10 +6629,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         dim = QColor(_t.COLORS["gray_300"])
         painter.setFont(self._font)
         painter.setPen(ink)
+        # 窗口来自用户设置（effective_pass_window_hours，1–72h），标题不许
+        # 再写死固定小时数；未注入窗口时省略时长，避免显示与实际搜索范围不符
+        span = (f"{self._pass_window_hours:g}h"
+                if self._pass_window_hours is not None else "")
         if self._pass_gate_deg is not None:
-            title = f"未来过境 24h · 峰值≥{self._pass_gate_deg:g}°"
+            title = f"未来过境{(' ' + span) if span else ''} · 峰值≥{self._pass_gate_deg:g}°"
         else:
-            title = "未来过境 24h UTC · 峰值(几何)"
+            title = f"未来过境{(' ' + span) if span else ''} UTC · 峰值(几何)"
         if self._pass_show_low:
             title += " · 低仰角已标"
         painter.drawText(panel_x + 10, panel_y + 16, title)
@@ -7667,6 +7675,7 @@ class SatelliteTracker:
             self._passes_anchor_unix = t0_unix
             self._passes_wall = time.monotonic()
             self.sky_view.set_upcoming_passes(
-                rows[:8], gate_deg=gate, show_low=show_low)
+                rows[:8], gate_deg=gate, show_low=show_low,
+                window_hours=window_hours)
         except Exception:
             self.sky_view.set_upcoming_passes([])

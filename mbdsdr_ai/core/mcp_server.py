@@ -836,9 +836,14 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
     add("list_satellites", "列出内置可接收卫星。", _schema({}),
         lambda c, a: [s.to_dict() for s in c.list_satellites()])
 
-    add("get_satellite_pass", "预报某 NORAD 编号卫星最近一次过境。",
-        _schema({"norad": _INT}, ["norad"]),
-        lambda c, a: c.get_satellite_pass(int(a["norad"])))
+    add("get_satellite_pass",
+        "预报某 NORAD 编号卫星最近一次过境；可选注入峰值仰角门与搜索窗口。",
+        _schema({"norad": _INT, "min_elevation_deg": _NUM,
+                 "window_hours": _NUM}, ["norad"]),
+        lambda c, a: c.get_satellite_pass(
+            int(a["norad"]),
+            min_elevation_deg=a.get("min_elevation_deg"),
+            window_hours=a.get("window_hours")))
 
     add("tune_satellite", "按多普勒调谐到某卫星。",
         _schema({"norad": _INT}, ["norad"]),

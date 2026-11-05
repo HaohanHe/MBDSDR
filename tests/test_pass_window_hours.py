@@ -73,12 +73,14 @@ class _FakeSkyView:
     def window(self):
         return SimpleNamespace(settings=self._settings)
 
-    def set_upcoming_passes(self, rows, gate_deg=None, show_low=False):
+    def set_upcoming_passes(self, rows, gate_deg=None, show_low=False,
+                            window_hours=None):
         self.rows = list(rows)
+        self.window_hours = window_hours
 
 
 def _rf_rows(settings: dict):
-    """走 SatelliteTracker._refresh_passes，返回喂给天空图的行数。"""
+    """走 SatelliteTracker._refresh_passes，返回 (行数, 标题窗口小时数)。"""
     from desktop.rf_sky_view import SatelliteTracker
 
     jd = FIXED_UTC.timestamp() / 86400.0 + 2440587.5
@@ -89,7 +91,8 @@ def _rf_rows(settings: dict):
     tracker._passes_anchor_unix = None
     tracker._passes_wall = 0.0
     tracker._refresh_passes(jd)
-    return list(tracker.sky_view.rows or [])
+    return (list(tracker.sky_view.rows or []),
+            tracker.sky_view.window_hours)
 
 
 def test_panel_window_6h_vs_24h_counts_differ(qapp, monkeypatch):
@@ -139,14 +142,17 @@ def test_panel_window_schema_bounds_1h_vs_72h(qapp, monkeypatch):
 
 def test_rf_sky_tracker_window_1h_vs_72h():
     """天空图侧同样读设置：1 h 无过境，72 h 至少 1 条。"""
-    one = _rf_rows({"pass_window_hours": 1,
-                    "pass_min_elevation_deg": 10.0,
-                    "show_low_elevation_passes": False})
-    long = _rf_rows({"pass_window_hours": 72,
-                     "pass_min_elevation_deg": 10.0,
-                     "show_low_elevation_passes": False})
+    one, one_win = _rf_rows({"pass_window_hours": 1,
+                             "pass_min_elevation_deg": 10.0,
+                             "show_low_elevation_passes": False})
+    long, long_win = _rf_rows({"pass_window_hours": 72,
+                               "pass_min_elevation_deg": 10.0,
+                               "show_low_elevation_passes": False})
 
     assert one == [], (
         f"1 h 窗口不应列出过境，实际 {len(one)} 条：_refresh_passes 仍在用"
         "写死的 PASS_WIN_HOURS=24.0")
     assert len(long) >= 1, f"72 h 窗口应至少有 1 条过境，实际 {long}"
+    # 标题用的窗口必须与设置一致，不许在 UI 上留下第二个 24h
+    assert (one_win, long_win) == (1, 72), (
+        f"天空图标题窗口应随设置变化，实际 1h→{one_win}、72h→{long_win}")

@@ -101,7 +101,7 @@ ts.call_tool("read_spectrum", {"nfft": 256})
 | 工具 | 必填参数 | 说明 |
 |---|---|---|
 | `list_satellites` | — | 内置卫星列表 |
-| `get_satellite_pass` | `norad` | 最近一次过境预报 |
+| `get_satellite_pass` | `norad` (min_elevation_deg / window_hours 可选) | 最近一次过境预报；可选注入峰值仰角门与搜索窗口 |
 | `tune_satellite` | `norad` | 按多普勒调谐 |
 | `set_ground_station` | `lat, lon` | 设置地面站（alt_m 可选）|
 
@@ -183,7 +183,7 @@ ts.call_tool("read_spectrum", {"nfft": 256})
 | `get_demod` | — | 读取当前解调模式。 |
 | `get_frequency` | — | 读取当前中心频率（Hz）。 |
 | `get_recording_status` | — | 录制状态。 |
-| `get_satellite_pass` | `norad` | 预报某 NORAD 编号卫星最近一次过境。 |
+| `get_satellite_pass` | `norad` | 预报某 NORAD 编号卫星最近一次过境；可选注入峰值仰角门与搜索窗口。 |
 | `get_scan_results` | `handle` | 获取扫描活动段结果。 |
 | `get_service_status` | — | 远程/Web 服务状态。 |
 | `get_status` | — | 完整系统状态。 |

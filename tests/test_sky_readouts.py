@@ -375,7 +375,10 @@ class TestPassPanelReadouts:
 
     def test_pass_panel_labels_and_single_formatter(self):
         src = inspect.getsource(RFSkyView._draw_passes_panel)
-        assert "未来过境 24h UTC" in src
+        assert "未来过境" in src
+        # 窗口来自用户设置，标题不许写死 24h（否则 6h 窗口仍显示「24h」）
+        assert "24h" not in src
+        assert "_pass_window_hours" in src
         assert "峰值(几何)" in src
         assert "format_angle_deg(" in src
         assert ":4.0f} deg" not in src
