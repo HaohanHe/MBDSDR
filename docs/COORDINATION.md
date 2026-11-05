@@ -1716,13 +1716,16 @@ HEAD 条数用 HEAD 文档快照跑同一套 `verify_claims` 判据得出。
 
 这 4 条**不删**：删掉只是把红从 stale 闸门挪进 `measured - waived`，白名单的销账语义没有兑现。
 
-**C. 采样率线报的「HEAD 13 条」对不上 HEAD 实测**
+**C. 采样率线报的「HEAD 13 条」对不上 HEAD 实测（按 owner 拆分）**
 
-- `docs/settings-inventory.md` id 132–140（9 条）在 HEAD 均**不 stale**（白名单仍覆盖），
-  既不在 A 组也不在 B 组；
-- 那 13 条里能与 HEAD 对上的只有 id 51（A 组）与 55/56/57（B 组）；
-- 差异来源：`test_claims_guard.py` 读工作区，别线在途编辑把条数推到了 13。
-  按「只认 HEAD」的口径，本期不按 13 条删任何行。
+| 归属 | 条数 | HEAD 实况 | 处置 |
+| --- | --- | --- | --- |
+| 硬编码与参数治理线（`docs/hardcoded-parameters.md`） | 4（id 51/55/56/57） | id 51 在 A 组；55/56/57 在 B 组 | 51 待书面确认后删；55/56/57 不删 |
+| 机制线（`docs/settings-inventory.md`） | 9（id 132–140） | 9 条均**不 stale**，白名单仍覆盖 | 本期不删；待其文档改动落库后再复核 |
+
+- 差异来源：`test_claims_guard.py` 读工作区（`WAIVERS = ROOT/"docs"/"claim-waivers.md`、
+  `verify_docs(ROOT)`），别线在途编辑把条数推到了 13，HEAD 实测是 15（不同集合）。
+- 按「只认 HEAD」的口径，本期不按 13 条删任何行。
 
 **D. 实测（快照 HEAD `e4810574`）**
 
