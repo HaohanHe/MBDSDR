@@ -442,18 +442,32 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 default="", source="desktop/settings.py:34", exposed=False),
     SettingItem(key="gnss_port", group="", kind="text", label="", help="",
                 default="", source="desktop/settings.py:35", exposed=False),
-    SettingItem(key="gnss_baudrate", group="", kind="int", label="", help="",
-                default=9600, source="desktop/settings.py:36", exposed=False),
+    SettingItem(key="gnss_baudrate", group="", kind="enum", label="", help="",
+                default=9600,
+                source="desktop/main_window.py:8426 GNSS 波特率下拉"
+                       "（9600/19200/38400/57600/115200）",
+                choices=tuple(_e(b, str(b)) for b in
+                              (9600, 19200, 38400, 57600, 115200)),
+                exposed=False),
     SettingItem(key="agc_enabled", group="", kind="bool", label="", help="",
                 default=True, source="desktop/settings.py:37", exposed=False),
-    SettingItem(key="agc_speed", group="", kind="text", label="", help="",
-                default="medium", source="desktop/settings.py:38", exposed=False),
+    SettingItem(key="agc_speed", group="", kind="enum", label="", help="",
+                default="medium",
+                source="desktop/control_panel.py:1332 与 desktop/main_window.py:3319 "
+                       "共同认的四档（off/fast/medium/slow）",
+                choices=(_e("off", "off"), _e("fast", "fast"),
+                         _e("medium", "medium"), _e("slow", "slow")),
+                exposed=False),
     SettingItem(key="volume", group="", kind="int", label="", help="",
                 default=48, source="desktop/settings.py:39", exposed=False),
     SettingItem(key="volume_scale_v2", group="", kind="bool", label="", help="",
                 default=True, source="desktop/settings.py:44", exposed=False),
-    SettingItem(key="app_mode", group="", kind="text", label="", help="",
-                default="ide", source="desktop/settings.py:62", exposed=False),
+    SettingItem(key="app_mode", group="", kind="enum", label="", help="",
+                default="ide",
+                source="desktop/main_window.py:2190 _restore_app_mode 只认 "
+                       "ide/planetarium（写入点 :2117/:2153）",
+                choices=(_e("ide", "ide"), _e("planetarium", "planetarium")),
+                exposed=False),
     # 服务开关（既有面板，保留）
     SettingItem(key="rc_enabled", group="服务与远程访问", kind="bool",
                 label="启用远程控制（TCP）", default=False,
@@ -561,27 +575,30 @@ def validate_value(item: SettingItem, value: Any) -> Tuple[Any, Optional[str]]:
         return (int(round(num)) if item.kind == "int" else float(num)), reason
 
     if item.kind == "enum":
+        # 三步顺序（顺序不可颠倒）：归一 → 判合法 → 才回落。
+        # 归一只改变写法、不改变值：先 strip，再对字符串档位做大小写不敏感
+        # 比对，再对数字档位按数值比对（容忍 "2048" 这类 JSON 字符串）。
+        # 归一命中必须留痕——用户要看见文件被改写过一次，不能静默采用另一写法。
         if value in item.choice_values:
             return value, None
-        # 判定顺序：先归一（strip 空白 → upper 比对），再看是否合法。
-        # 手改 JSON 常写成 "usb"、" Usb "；直接拿原值判非法会把用户本意的
-        # USB 回落成另一个模式 FM。归一后命中即采用，但必须留痕——用户得
-        # 知道文件被改写过一次，不能静默。
+        raw = value
         if isinstance(value, str):
             stripped = value.strip()
-            if stripped in item.choice_values:
-                return stripped, (
-                    f"大小写/空白已归一：{value!r} → {stripped!r}")
             for v in item.choice_values:
-                if isinstance(v, str) and v.upper() == stripped.upper():
-                    return v, (
-                        f"大小写/空白已归一：{value!r} → {v!r}")
-        # 容忍 "2048" 这类字符串数字（JSON/命令行常见）
-        for v in item.choice_values:
-            if isinstance(v, int) and str(value) == str(v):
-                return v, None
+                if isinstance(v, str) and v.strip().upper() == stripped.upper():
+                    return v, f"大小写/空白已归一：{raw!r} → {v!r}"
+            try:
+                num = float(stripped)
+            except ValueError:
+                num = None
+            if num is not None:
+                for v in item.choice_values:
+                    if (isinstance(v, (int, float)) and not isinstance(v, bool)
+                            and float(v) == num):
+                        return v, f"数字档位已归一：{raw!r} → {v!r}"
+        # 归一后仍不在可选值内才回落；说明里带原值与回落值，不许静默。
         return item.default, (
-            f"值 {value!r} 不在可选值 {item.choice_values} 内，"
+            f"值 {raw!r} 不在可选值 {item.choice_values} 内，"
             f"已回默认 {item.default!r}")
 
     # text：保持字符串，不接受 None

@@ -13,7 +13,7 @@
 | 其中已暴露到设置面板 | **31 条** | 23 条落 DesktopSettings，2 条落 gui_config，5 条落 AI config；去重后 35 个 schema 项 |
 | 判定锁死、不暴露 | **6 类** | 理由见 §4（不是偷懒，每条都有具体消费点缺失或双入口风险） |
 | schema 总条目 | **48** | 35 暴露 + 13 内部键（频率/增益/音量等已有即时控件） |
-| 设置面板新增测试 | **77 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 14 项手改 JSON 非法值矩阵 + 5 项内部键消费端实测 + 6 项 demod_mode 枚举收口（含归一做测试）） |
+| 设置面板新增测试 | **116 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 14 项手改 JSON 非法值矩阵 + 5 项内部键消费端实测 + 6 项 demod_mode 枚举收口 + 39 项全枚举覆盖：13 个枚举 × 归一/合法值/落盘读回） |
 | 相关回归 | **96 + 29 个** | 配置/主题/布局/触屏/i18n 96；三栏与面板集成 29 |
 
 **接手时的现状（已在本轮修复，记录备查）**：用户点"设置"当时**不是空面板，而是只有
@@ -447,9 +447,12 @@ from settings import (
 | `tuning_step_hz` | `5000` | `10000` | 非档位值回默认（七档枚举） | 是 |
 | `show_low_elevation_passes` | `"maybe"` | `False` | 无法识别布尔 → 回默认 | 是 |
 | `demod_mode`（内部键） | `"NBEM"` | `"FM"` | 不在合法模式集合 → 回默认（§13.2） | 是 |
+| `agc_speed`（内部键） | `"JUNK"` | `"medium"` | 四档枚举 → 回默认（§13.3） | 是 |
+| `app_mode`（内部键） | `"Planetarium"` | `"planetarium"` | 大小写归一后采用（不是回落，§13.3） | 是 |
+| `gnss_baudrate`（内部键） | `12345` | `9600` | 五档枚举 → 回默认（§13.3） | 是 |
 | `show_waterfall` | `"yes"` | `True` | 合法别名（`1/true/yes/on`），**不记原因** | 否（预期） |
 | `record_dir` | `123` | `"123"` | text 强制转字符串 | 否（预期） |
-| 枚举字符串 `"2048"` | `"2048"`（fft_size） | `2048`（int） | 容忍数字字符串，不记原因 | 否（预期） |
+| 枚举字符串 `"2048"` | `"2048"`（fft_size） | `2048`（int） | 数字档位归一，**记原因**（§13.3） | **是** |
 
 **已确认的缺口（本线不改，登记给对应线）**：
 
@@ -458,10 +461,11 @@ from settings import (
    会被原样接受（测试 `test_internal_keys_from_hand_edited_json_are_not_bounded` 钉住
    现状）。实测三种输入均由消费方兜底、不崩（§13.1）；是否在 schema 补范围仍需
    设备线确认（补错范围会把合法的频率/带宽夹坏）。
-2. **其余内部 text 键仍不收窄**：`agc_speed` / `app_mode` 在 schema 层原样接受
-   （`migration_notes` 为空），但消费端有兜底——`control_panel.py:set_agc_speed`
-   对未知值回落 `medium`；`main_window._restore_app_mode` 只认 `"planetarium"`，
-   其余落 `ide`。`demod_mode` 已于本轮收窄为枚举（§13.2），不再属于本条。
+2. **其余内部 text 键无受限集合**：`callsign` / `gnss_port` / `record_dir` 是真正的
+   自由文本，schema 只保证转字符串，不定义合法集合。原先有集合却按 text 收下的
+   `agc_speed` / `app_mode` 已于本轮收窄为枚举（§13.3）；`gnss_baudrate` 的
+   五档波特率也一并收窄。消费端兜底仍保留（用于非 settings 来源的调用），但
+   落盘/读回路径现在由 schema 归一并留痕，不再静默变值。
 3. **“拒绝”路径只有跨主版本**：同主版本内一律归一（夹取/回默认），不拒绝单个键；
    这是有意选择——手改一个键不应让整份配置导入失败。跨主版本由
    `parse_import` 整体拒绝并给出原因与替代做法（§10）。
@@ -515,9 +519,17 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 
 * 下拉项事实：`desktop/control_panel.py:314` 用 `_PANEL_MODE_ORDER` 过滤注册表，
   集合与注册表 analog 模式相同（7 项）。
-* 为什么取**交集**而不是并集：并集会放进 `DSB`（后端接受、UI 下拉没有 → 落盘后
-  下拉又会空白）、`RAW`/`DIG`（注册表有、下拉不列，用户选不到）；`decode_router`
-  的 `DIGITAL_MODE_CAPABILITIES` 是 adsb/ft8 等**数字解码器**，不是解调模式，不并入。
+* 为什么取**交集**而不是并集（以后还会有人问，写全）：
+  - **并集** = 注册表 analog ∪ 后端 `VALID_MODES` ∪ 下拉项。多出来的项会让「写进
+    文件的值」与「用户能选的值」脱节：`DSB` 后端 `VALID_MODES` 接受，但注册表
+    analog 与下拉都没有 → 手改 `DSB` 能过枚举，落盘后下拉反而空白；
+    `RAW`/`DIG` 在注册表里有、下拉不列，用户选不到，也不该成为持久化目标。
+  - **交集** = 两个事实源都承认的 7 项：既保证「UI 能选中」，又保证「后端
+    set_demod 不拒绝」，落盘值读回后下拉一定有对应项。
+  - `decode_router.DIGITAL_MODE_CAPABILITIES`（adsb/ft8 等）是**数字解码器**能力表，
+    与模拟解调模式不是同一概念，既不在交集也不在并集里。
+  - 结论：合法集 = `mode_names("analog")` ∩ `VALID_MODES`，不是并集；测试
+    `test_demod_mode_choices_are_ui_backend_intersection_exact` 逐项钉住。
 * 集合内容（7 项，逐项由测试钉住）：`FM` / `WFM` / `NFM` / `AM` / `USB` / `LSB` / `CW`。
 * 实现位置：`desktop/config_schema.py` 的 `_LEGAL_DEMOD_MODES` 在导入时从两处事实源
   求交，`demod_mode` 的 `SettingItem(kind="enum")` 直接用它，没有第二份清单。
@@ -544,6 +556,49 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 * `test_hand_edited_demod_mode_falls_back_to_fm_with_reason`（`"NBEM"` → `FM` 且 notes 非空）
 * `test_legal_demod_mode_is_not_rewritten_and_has_no_note`（7 个合法值不被改写、无 notes）
 * `test_settings_panel_shows_demod_migration_reason`（面板状态行含 `demod_mode`/`NBEM`/`FM`）
+
+### 13.3 全枚举字段：归一 → 判合法 → 才回落
+
+实现只有一处：`desktop/config_schema.py:validate_value` 的 `enum` 分支，13 个枚举
+字段共用；不存在「先回落再判」的字段，也没有每个字段各写一份归一逻辑。
+
+**三步顺序（不可颠倒）**：
+
+1. **归一**：字符串先 `strip()`；字符串档位再按 `upper()` 做大小写不敏感比对；
+   数字档位先把 `"2048"` / `" 2048 "` 这类字符串转成数值再比对档位。
+2. **判合法**：归一后的值与 `choice_values` 逐项比对，命中即采用。
+3. **才回落**：归一后仍不在集合 → `item.default`，`migration_notes` 写原值 +
+   回落值（`settings.py:_coerce` 统一加键名前缀）。
+
+| 字段 | 合法集来源 | 归一步骤 | 非法回落 | 写 notes |
+|---|---|---|---|---|
+| `ui_language` | `desktop/settings.py:59`；l10n 三语 | strip → 大小写不敏感 | `zh` | 是 |
+| `touch_mode` | `desktop/settings.py:49`；`touch_manager.py` | strip → 大小写不敏感 | `auto` | 是 |
+| `theme` | `desktop/themes.py:545` | strip → 大小写不敏感 | `default` | 是 |
+| `fft_size` | `desktop/spectrum_widget.py:151`；C++ `settings_dialog` | strip → 数字字符串转数值 | `2048` | 是 |
+| `fft_window` | `desktop/spectrum_widget.py:150` | strip → 大小写不敏感 | `Nuttall` | 是 |
+| `fft_avg_frames` | `desktop/spectrum_widget.py:152` | strip → 数字字符串转数值 | `1` | 是 |
+| `waterfall_palette` | `desktop/spectrum_widget.py` `_PlotState.wf_colors` | strip → 大小写不敏感 | `default` | 是 |
+| `tuning_step_hz` | 控制面板步进下拉（`step_combo`） | strip → 数字字符串转数值 | `10000` | 是 |
+| `waterfall_depth_rows` | `desktop/spectrum_widget.py` 六档 `WF_DEPTH_*` | strip → 数字字符串转数值 | `256` | 是 |
+| `demod_mode` | `mode_registry.py` analog ∩ `mbdsdr_ai/core/controller.py:43`（§13.2） | strip → 大小写不敏感 | `FM` | 是 |
+| `gnss_baudrate`（本轮收窄） | `desktop/main_window.py:8426` 五档波特率 | strip → 数字字符串转数值 | `9600` | 是 |
+| `agc_speed`（本轮收窄） | `desktop/control_panel.py:1332` / `desktop/main_window.py:3319` 四档 | strip → 大小写不敏感 | `medium` | 是 |
+| `app_mode`（本轮收窄） | `desktop/main_window.py:2190 _restore_app_mode` | strip → 大小写不敏感 | `ide` | 是 |
+
+**收窄范围说明**：`agc_speed` / `app_mode` 原先 `kind="text"`（消费端兜底、notes
+为空）；`gnss_baudrate` 原先是无范围 `int`。三项本轮改为枚举，落盘/读回路径
+统一归一并留痕。真正的自由文本 `callsign` / `gnss_port` / `record_dir` 没有受限
+集合，不套三步（只保证转字符串）。
+
+**落盘/读回等价性测试**（13 个枚举 × 3，自动随 `SCHEMA` 枚举项增删）：
+
+* `test_every_enum_normalizes_spelling_before_judging`：写法变体（大小写 + 首尾
+  空白）归一命中，说明含“归一”。
+* `test_every_enum_legal_value_is_not_rewritten`：每个合法值原样通过、无说明。
+* `test_every_enum_roundtrip_records_normalization_and_fallback`：写盘 → `load` →
+  写法变体得规范值 + notes（含原值与归一值）；非法值得默认值 + notes（含原值），
+  非法值不会静默变成另一个合法值。
 
 ## 14. A7 / A8 遗留收尾确认
 

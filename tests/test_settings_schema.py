@@ -463,6 +463,60 @@ def _load_payload(tmp_path, payload):
     return DesktopSettings.load(path=str(path))
 
 
+#: 全部枚举项。归一覆盖与落盘/读回等价性都按这张清单逐项跑，新增枚举自动纳入。
+_ENUM_ITEMS = tuple(it for it in SCHEMA.values() if it.kind == "enum")
+
+
+def _enum_spelling_variant(item):
+    """构造「写法不同、值相同」的输入：大小写 + 首尾空白（数字档位用字符串）。"""
+    canonical = item.choice_values[0]
+    if isinstance(canonical, str):
+        return " " + canonical.swapcase() + " ", canonical
+    return " " + str(canonical) + " ", canonical
+
+
+@pytest.mark.parametrize("item", _ENUM_ITEMS, ids=[it.key for it in _ENUM_ITEMS])
+def test_every_enum_normalizes_spelling_before_judging(item):
+    """全枚举统一三步：strip/大小写/数字字符串归一命中即采用，且必须留痕。"""
+    raw, expected = _enum_spelling_variant(item)
+    assert raw != expected
+    value, reason = validate_value(item, raw)
+    assert value == expected
+    assert reason and "归一" in reason, f"{item.key} 归一未留痕：{reason!r}"
+
+
+@pytest.mark.parametrize("item", _ENUM_ITEMS, ids=[it.key for it in _ENUM_ITEMS])
+def test_every_enum_legal_value_is_not_rewritten(item):
+    """7/5/4 项合法值逐个原样通过，不产生任何说明。"""
+    for v in item.choice_values:
+        value, reason = validate_value(item, v)
+        assert value == v and reason is None, f"{item.key}={v!r} 被改写"
+
+
+@pytest.mark.parametrize("item", _ENUM_ITEMS, ids=[it.key for it in _ENUM_ITEMS])
+def test_every_enum_roundtrip_records_normalization_and_fallback(tmp_path, item):
+    """落盘/读回等价：写法变体 → 规范值 + notes；非法值 → 默认值 + notes。"""
+    norm_dir = tmp_path / "normalized"
+    norm_dir.mkdir()
+    raw, expected = _enum_spelling_variant(item)
+    ds = _load_payload(norm_dir, {item.key: raw})
+    assert ds.get(item.key) == expected
+    notes = ds.migration_notes or []
+    assert any(item.key in n and "归一" in n and repr(raw) in n for n in notes), \
+        f"{item.key} 归一后 notes 缺原值/归一值：{notes!r}"
+
+    bad_dir = tmp_path / "illegal"
+    bad_dir.mkdir()
+    bad = "ZZZ-非法档位"
+    ds_bad = _load_payload(bad_dir, {item.key: bad})
+    value = ds_bad.get(item.key)
+    assert value == item.default, f"{item.key}={bad!r} 应回默认 {item.default!r}"
+    assert value != bad, "非法值不许静默变成另一个合法值"
+    notes = ds_bad.migration_notes or []
+    assert any(item.key in n and repr(bad) in n and "回默认" in n for n in notes), \
+        f"{item.key} 回落未留痕：{notes!r}"
+
+
 @pytest.mark.parametrize("raw,expected_panel,notes_expected", [
     (1e12, 6.0e9, False),      # 高于 6 GHz → ControlPanel 夹到上限
     (-1.0, 10_000.0, False),   # 负值 → ControlPanel 夹到下限
