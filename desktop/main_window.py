@@ -197,7 +197,8 @@ if _REPO_ROOT not in sys.path:
 
 from themes import get_theme, THEMES, DEFAULT_THEME
 from shortcuts import bind as _key
-from spectrum_widget import create_spectrum_widget, HAS_OPENGL
+from spectrum_widget import (
+    create_spectrum_widget, HAS_OPENGL, owns_local_shortcuts)
 from control_panel import ControlPanel
 from mode_registry import (
     default_bandwidth,
@@ -3908,17 +3909,54 @@ class MainWindow(QMainWindow):
     # 信号槽：从控制面板/AI 面板接收指令
     # ========================================================================
 
+    def _report_hw_failure(self, action: str, exc: Exception) -> None:
+        """硬件写失败的三段式提示：发生了什么 / 可能原因 / 下一步。"""
+        self.statusBar().showMessage(
+            f"{action}未生效：{type(exc).__name__}: {exc}。"
+            "可能原因：SDR 已断开、被其他程序占用或驱动异常。"
+            "下一步：点工具栏「连接」重连后重试；"
+            "界面与已保存配置保持上次成功值。",
+            8000,
+        )
+
+    def _apply_hw_action(self, action: str, fn) -> bool:
+        """执行硬件写入；失败只提示并返回 False，不抛、不提交 UI。"""
+        try:
+            fn()
+        except Exception as e:
+            self._report_hw_failure(action, e)
+            return False
+        return True
+
+    def _revert_tune_ui(self) -> None:
+        """把频率/模式显示拉回最后一次真实成功值（失败后不许留在新值）。"""
+        last_hz = float(getattr(self, "_backend_center_hz", 0.0) or 0.0)
+        if last_hz > 0:
+            self.freq_label.setText(f"{last_hz / 1e6:.3f} MHz")
+            self.status_freq.setText(f"频率: {last_hz / 1e6:.3f} MHz")
+        else:
+            self.freq_label.setText("-- MHz")
+            self.status_freq.setText("频率: --")
+        cp = getattr(self, "control_panel", None)
+        if cp is not None:
+            if last_hz > 0:
+                cp.set_frequency_hz(last_hz)
+            prev_mode = (getattr(self._demod_cfg, "mode", None)
+                         if self._demod_cfg is not None else None)
+            if prev_mode:
+                cp.set_mode(prev_mode)
+
     @Slot(float)
     def _on_tune_fm(self, freq: float):
+        backend = self._active_sdr_backend
+        if backend is not None:
+            if not self._apply_hw_action(
+                    "调谐", lambda: backend.set_frequency(freq * 1e6)):
+                self._revert_tune_ui()
+                return
         if self._worker:
             self._worker.request_tool.emit("tune_fm", {"freq_mhz": freq})
         self.spectrum.set_center_freq(freq)
-        # 真实 SDR 后端：真正下发到硬件
-        if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_frequency(freq * 1e6)
-            except Exception:
-                pass
         # 更新频率显示
         self.freq_label.setText(f"{freq:.3f} MHz")
         self.status_freq.setText(f"频率: {freq:.3f} MHz")
@@ -3929,31 +3967,31 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def _on_tune_am(self, freq: int):
+        backend = self._active_sdr_backend
+        if backend is not None:
+            if not self._apply_hw_action(
+                    "调谐", lambda: backend.set_frequency(freq * 1e3)):
+                self._revert_tune_ui()
+                return
         if self._worker:
             self._worker.request_tool.emit("tune_am", {"freq_khz": freq})
-        # 真实 SDR 后端：真正下发到硬件
-        if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_frequency(freq * 1e3)
-            except Exception:
-                pass
 
     @Slot(float, str)
     def _on_tune_sdr(self, freq_hz: float, mode: str):
+        backend = self._active_sdr_backend
+        if backend is not None:
+            if not self._apply_hw_action(
+                    "调谐", lambda: backend.set_frequency(freq_hz)):
+                self._revert_tune_ui()
+                return
+            if not self._apply_hw_action(
+                    "切换解调模式", lambda: backend.set_demod(mode)):
+                self._revert_tune_ui()
+                return
         if self._worker:
             self._worker.request_tool.emit("tune_sdr",
                                    {"freq_hz": freq_hz, "mode": mode})
         self.spectrum.set_center_freq(freq_hz / 1e6)
-        # 真实 SDR 后端：真正下发频率 + 解调模式
-        if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_frequency(freq_hz)
-            except Exception:
-                pass
-            try:
-                self._active_sdr_backend.set_demod(mode)
-            except Exception:
-                pass
         # 更新频率显示
         self.freq_label.setText(f"{freq_hz / 1e6:.3f} MHz")
         self.status_freq.setText(f"频率: {freq_hz / 1e6:.3f} MHz")
@@ -3963,7 +4001,7 @@ class MainWindow(QMainWindow):
         if self._demod_cfg is not None:
             self._demod_cfg.mode = str(mode).upper()
         self._update_main_vfo_offset()
-        # 持久化：频率 + 解调模式（防抖写盘）
+        # 持久化：频率 + 解调模式（防抖写盘；仅在真实成功后落盘）
         try:
             self.settings.set("frequency_hz", float(freq_hz))
             self.settings.set("demod_mode", str(mode))
@@ -3997,18 +4035,17 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def _on_gain_changed(self, db: int):
+        backend = self._active_sdr_backend
+        if backend is not None:
+            if not self._apply_hw_action(
+                    "设置增益", lambda: backend.set_gain(float(db))):
+                return
         if self._worker:
             try:
                 self._worker.request_tool.emit("sdr_set_gain", {"gain_db": float(db)})
             except Exception:
                 pass
-        # 真实 SDR 后端：真正下发 LNA 增益
-        if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_gain(float(db))
-            except Exception:
-                pass
-        # 持久化：LNA 增益
+        # 持久化：LNA 增益（仅真实成功后落盘）
         try:
             self.settings.set("gain_db", float(db))
         except Exception:
@@ -4092,12 +4129,13 @@ class MainWindow(QMainWindow):
         - VFO 带宽按 MODE_VFO_BANDWIDTH 逐模式套用（CW 500Hz / SSB 2.4k /
           AM 6k / NBFM 12.5k / WFM 180k），推到已绑定的 DDC。
         """
-        # 真实 SDR 后端：下发解调模式
-        if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_demod(mode)
-            except Exception:
-                pass
+        # 真实 SDR 后端：下发解调模式；失败则不提交 UI/不落配置
+        backend = self._active_sdr_backend
+        if backend is not None:
+            if not self._apply_hw_action(
+                    "切换解调模式", lambda: backend.set_demod(mode)):
+                self._revert_tune_ui()
+                return
         # 同步到解调 worker 共享配置（后台线程下一帧生效，音频不中断）
         if self._demod_cfg is not None:
             self._demod_cfg.mode = str(mode).upper()
@@ -6614,6 +6652,14 @@ class MainWindow(QMainWindow):
             sv.set_all_sky_mode(bool(checked))
 
     def _on_all_sky_action_triggered(self, checked: bool) -> None:
+        # 焦点在哪，局部优先：频谱获焦时 A 归频谱的局部 AM（Qt 已按
+        # WidgetShortcut 派发），全局动作不得再改天空状态。这里兜底
+        # 处理快捷键歧义/菜单调用，并恢复菜单勾选为真实状态。
+        if owns_local_shortcuts(_focus_widget()):
+            sv = getattr(self, "sky_view", None)
+            self._sync_all_sky_ui(
+                bool(getattr(sv, "all_sky_active", False)) if sv else False)
+            return
         sv = getattr(self, "sky_view", None)
         if sv is None:
             return
