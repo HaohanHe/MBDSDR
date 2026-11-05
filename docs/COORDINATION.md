@@ -662,6 +662,13 @@
 > `tests/test_sky_readouts.py` / `docs/mcp_tools.md` / `docs/parameter-unification.md`，
 > 锁均已释放。
 
+> 归档：2026-11-05 卫星过境线 `44371b4` 已入库并 release：
+> 新时空面板「刷新过境」三种空态各有可断言文案——未获取 TLE / 未配置观测站 /
+> 窗口内无过境（N/X/Y 取 effective_* 实际值）；站址缺失时不再白跑 TLE 请求；
+> 同步加载期间按钮置灰且拒绝重入。涉及 `desktop/new_spacetime_panel.py` /
+> `tests/test_new_spacetime_panel_feedback.py` / `tests/test_interaction_wiring.py`，
+> 锁均已释放。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`
