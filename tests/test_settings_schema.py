@@ -660,14 +660,27 @@ def test_legal_demod_mode_is_not_rewritten_and_has_no_note(tmp_path, qapp):
 
 
 def test_settings_panel_shows_demod_migration_reason(tmp_path, qapp):
-    """用户可见：设置面板状态行显示修复原因（该键无独立行，走面板状态行）。"""
+    """用户可见：设置面板状态行必须逐字显示数据层产生的修复原因。
+
+    行为断言（不钉生产源码里的字面量）：
+      * 非法值真的被收敛到 schema 的默认值（数据层行为）；
+      * 数据层留下了以该键名开头的迁移原因；
+      * 面板状态行原样带上这条原因（接线行为），而不是各自出现几个词。
+    """
     from settings_panel import SettingsPanel
 
     ds = _load_payload(tmp_path, {"demod_mode": "NBEM"})
+    assert ds.get("demod_mode") == SCHEMA["demod_mode"].default, \
+        "非法解调模式没有被收敛到 schema 默认值"
+    notes = [n for n in (ds.migration_notes or [])
+             if n.startswith("demod_mode: ")]
+    assert notes, f"回落原因必须以键名开头，实际 notes={ds.migration_notes!r}"
+
     panel = SettingsPanel(settings=ds)
     text = panel.status_label.text()
-    assert "demod_mode" in text and "NBEM" in text and "FM" in text, \
-        f"设置面板未显示修复原因：{text!r}"
+    assert notes[0] in text, (
+        "面板状态行没有逐字显示数据层的迁移原因："
+        f"note={notes[0]!r}, text={text!r}")
     panel.deleteLater()
 
 
@@ -1296,21 +1309,54 @@ def test_record_dir_missing_target_reports_actionable_error(tmp_path, monkeypatc
     assert "请检查" in seen[0][1]
 
 
-def test_record_dir_panel_row_and_buttons(env):
+def test_record_dir_panel_row_and_buttons(env, monkeypatch):
+    """录音目录行的两个按钮必须真的接上：选择→持久化、打开→调系统打开器。
+
+    行为断言（不按按钮文案找按钮）：取该行容器里的两个 QPushButton，
+    逐个点击并观察副作用——其中一个必须把文件对话框返回值写进 settings
+    并回填控件，另一个必须调 QDesktopServices 打开当前生效目录。
+    """
+    import os
+
     from PySide6.QtWidgets import QLineEdit, QPushButton
 
     ds, host, panel, tmp_path = env
     editor = panel._rows["record_dir"]
     assert isinstance(editor, QLineEdit)
     assert settings_mod.default_record_dir() in editor.placeholderText()
-    texts = {b.text() for b in panel.findChildren(QPushButton)}
-    assert "打开目录" in texts and "选择目录…" in texts
+
+    box = editor.parentWidget()
+    buttons = box.findChildren(QPushButton)
+    assert len(buttons) == 2, \
+        f"录音目录行必须恰有两个工具按钮，实际 {[b.text() for b in buttons]}"
 
     target = str(tmp_path / "new_recordings")
-    panel._on_changed("record_dir", target)
-    assert ds.get("record_dir") == target
+    os.makedirs(target)
+    opened = []
+    monkeypatch.setattr(
+        "settings_panel.QFileDialog.getExistingDirectory",
+        staticmethod(lambda *a, **k: target))
+    monkeypatch.setattr(
+        "settings_panel.QDesktopServices.openUrl",
+        staticmethod(lambda url: (opened.append(url.toLocalFile()), True)[1]))
+
+    buttons[0].click()
+    if ds.get("record_dir") == target:
+        browse_btn, open_btn = buttons[0], buttons[1]
+    else:
+        browse_btn, open_btn = buttons[1], buttons[0]
+
+    assert ds.get("record_dir") == target, \
+        "选择目录按钮没有把对话框返回值持久化到 settings"
+    assert editor.text() == target, "选择目录后没有回填控件：%r" % editor.text()
     assert target in panel.status_label.text()
-    assert "只影响新录音" in panel.status_label.text()
+
+    open_btn.click()
+    from PySide6.QtCore import QUrl
+    expected_url = QUrl.fromLocalFile(target).toLocalFile()
+    assert opened and opened[-1] == expected_url, \
+        f"打开目录按钮没有调系统打开器，实际 opened={opened}"
+    assert target in panel.status_label.text()
 
 
 # ---------------------------------------------------------------------------
