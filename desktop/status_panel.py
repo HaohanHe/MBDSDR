@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont
 
 from tokens import tokens
+from mbdsdr_ai.squelch import margin_threshold_db
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,33 @@ def _fmt_bw(hz):
     if hz >= 1e6:
         return f"{hz / 1e6:.3f} MHz"
     return f"{hz / 1e3:.0f} kHz"
+
+
+def _fmt_squelch(squelch_db, applied_by="none", threshold_dbfs=None):
+    """静噪读数：按「谁在生效」分支，只有绝对门才允许标 dBFS。
+
+    ``SDRStatus.squelch_db`` 的语义是**余量刻度**（-100≈0 dB、-50≈6 dB、
+    -20≈16 dB），不是绝对 dBFS；把它渲染成 "dBFS" 等于把两套语义混成一个
+    数字。只有 ``squelch_threshold_dbfs``（真正下发的绝对门）才能标 dBFS。
+    """
+    by = str(applied_by or "none")
+    if by == "cpp-auto":
+        return "自动（底噪 +8 dB，C++ 内核）"
+    if by == "cpp-manual":
+        if threshold_dbfs is not None:
+            try:
+                return f"{float(threshold_dbfs):.0f} dBFS（C++ 手动门）"
+            except (TypeError, ValueError):
+                pass
+        return "C++ 手动门（门限未回读）"
+    if by != "desktop-margin" or squelch_db is None:
+        # 非桌面余量、或从未设置过来源：不给数字戴任何单位帽子
+        return "--"
+    try:
+        s = float(squelch_db)
+    except (TypeError, ValueError):
+        return "--"
+    return f"{s:.0f}（{margin_threshold_db(s):.0f} dB 余量，桌面生效）"
 
 
 def _dbfs_to_smeter(dbfs):
@@ -598,7 +626,10 @@ class StatusPanel(QWidget):
             agc = self._safe_get(status, "agc_enabled")
             self.rx_agc.setText("开" if agc else ("关" if agc is False else "--"))
             squelch = self._safe_get(status, "squelch_db")
-            self.rx_squelch.setText(f"{squelch:.0f} dBFS" if squelch is not None else "--")
+            self.rx_squelch.setText(_fmt_squelch(
+                squelch,
+                self._safe_get(status, "squelch_applied_by"),
+                self._safe_get(status, "squelch_threshold_dbfs")))
             vol = self._safe_get(status, "volume")
             # volume: 后端 0.0~1.0；按 0-63 量程显示（GQRX 风格）
             if vol is None:
