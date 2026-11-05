@@ -5,10 +5,13 @@
 
     GNSS（实时定位，精度可带） > 用户手填/配置（user/config） > 缺省（default）
 
-``default`` 与缺失坐标、``(0,0)``、明显海上位置一律判「站址不可信」，
-调用方（过境预测/跟踪）必须拒绝计算，并如实说明原因。
+``default``、缺失坐标（真没配）一律判「站址不可信」，调用方必须拒绝计算。
+``(0,0)`` 与「明显海上位置」**不是**未配置哨兵：显式来源（gnss/user/config）
+在只读/计算口径（:func:`trust_for_calculation`）下照常计算并留 warning；
+写/控制口径（:func:`trust_for_tx`）仍严格拒绝。`(0,0)` 坐标合法性与海域
+启发式分别留痕，不混成一句。
 
-海陆判定是**低分辨率粗略多边形**，只用于拒绝明显海上坐标（如太平洋、
+海陆判定是**低分辨率粗略多边形**，只用于提示「明显海上坐标」（如太平洋、
 大西洋、几内亚湾）；它不替代 GIS 海岸线，结论字段标 ``coarse``。
 """
 from __future__ import annotations
@@ -23,6 +26,8 @@ __all__ = [
     "StationFix",
     "SOURCE_PRIORITY",
     "evaluate_station",
+    "trust_for_calculation",
+    "trust_for_tx",
     "resolve_station",
     "station_from_gnss",
     "station_from_user",
@@ -82,8 +87,12 @@ _SEA_BOXES: Tuple[Tuple[float, float, float, float], ...] = (
     (-5.0, 8.0, -10.0, 15.0),      # 几内亚湾
 )
 
-# 0,0 判定的容差（度）。绝对 0,0 是「未设置」的典型占位值。
+# 0,0 判定的容差（度）。注意：0,0 是几内亚湾的真实坐标，只对**非显式来源**
+# 当占位值；gnss/user/config 的显式输入按用户声明处理（见 _evaluate）。
 _NULL_ISLAND_TOL_DEG = 0.01
+
+# 显式来源：用户/GNSS/配置明确声明的位置，启发式不得直接否掉。
+_EXPLICIT_SOURCES = ("gnss", "user", "config")
 
 # 精度元数据阈值：超过 50 km 的定位不应用于过境对准。
 _MAX_USABLE_ACCURACY_M = 50000.0
@@ -220,25 +229,33 @@ def coarse_land_status(lat: float, lon: float) -> Dict[str, Any]:
     return {"status": "sea", "box": "open_ocean", "coarse": True}
 
 
-def evaluate_station(fix: Any, require_accuracy: bool = False) -> Dict[str, Any]:
-    """站址可信度评估（不抛异常，逐条给原因）。
+def _evaluate(fix: Any, require_accuracy: bool = False,
+              allow_explicit_sea: bool = False) -> Dict[str, Any]:
+    """站址可信度评估的**唯一**判定实现。
 
-    不可信条件（任一命中）：
-      * 坐标缺失 / 非有限数 / 超出经纬度范围；
-      * ``(0,0)``（未设置占位值，Gulf of Guinea）；
-      * 粗略海陆判定为 sea；
-      * 来源缺失或为 ``default``（无凭据的兜底坐标）；
-      * 精度元数据存在但粗于 50 km；
-      * ``require_accuracy=True`` 且精度元数据缺失。
+    两个公开入口（:func:`trust_for_calculation` / :func:`trust_for_tx`）只是
+    改变这里的 ``allow_explicit_sea``，不各自复制一套判定。
 
-    返回 ``{"trusted", "reasons", "warnings", "land", "source", "fix"}``。
+    ``allow_explicit_sea=True``（只读/计算口径）：显式来源
+    （``gnss``/``user``/``config``）的 ``(0,0)`` 或落在粗略海域的坐标**降为
+    warning 并照常计算**——用户显式声明的位置是声明，不该被启发式否掉。
+    ``allow_explicit_sea=False``（写/控制口径）：保持严格拒绝。
+
+    两类问题分别留痕，不混成一句：
+      * ``null_island_0_0``：坐标合法性/占位值问题；
+      * ``at_sea_explicit``：位置启发式可信度问题。
+
+    返回 ``{"trusted", "reasons", "warnings", "station_warning", "land",
+    "source", "fix", "priority"}``。
     """
     st = _coerce(fix)
     reasons: List[str] = []
     warnings: List[str] = []
+    location_warnings: List[str] = []
     source = str(st.source or "none")
     lat, lon = st.lat, st.lon
     land = {"status": "unknown", "box": "", "coarse": True}
+    explicit = source in _EXPLICIT_SOURCES
 
     if lat is None or lon is None:
         reasons.append("missing_coordinates（未提供经纬度）")
@@ -254,14 +271,27 @@ def evaluate_station(fix: Any, require_accuracy: bool = False) -> Dict[str, Any]
                 reasons.append("non_finite_coordinates（经纬度含 NaN/Inf）")
             elif not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
                 reasons.append(f"out_of_range（{lat:.3f}, {lon:.3f} 超出经纬度范围）")
-            elif abs(lat) <= _NULL_ISLAND_TOL_DEG and abs(lon) <= _NULL_ISLAND_TOL_DEG:
-                reasons.append("null_island_0_0（疑似未设置的占位坐标）")
             else:
                 land = coarse_land_status(lat, lon)
-                if land["status"] == "sea":
-                    reasons.append(
-                        f"at_sea（粗略海陆判定为海上：{land['box']}；"
-                        "站址不可信，拒绝算过境）")
+                if abs(lat) <= _NULL_ISLAND_TOL_DEG and abs(lon) <= _NULL_ISLAND_TOL_DEG:
+                    # (0,0) 是真实坐标，不是越界哨兵。显式来源放行、留 warning。
+                    if allow_explicit_sea and explicit:
+                        msg = ("null_island_0_0（显式输入坐标恰为 0,0（几内亚湾）；"
+                               "照常计算，但位置可疑）")
+                        warnings.append(msg)
+                        location_warnings.append(msg)
+                    else:
+                        reasons.append("null_island_0_0（疑似未设置的占位坐标）")
+                elif land["status"] == "sea":
+                    if allow_explicit_sea and explicit:
+                        msg = (f"at_sea_explicit（显式输入落在粗略海域：{land['box']}；"
+                               "照常计算，但位置可疑）")
+                        warnings.append(msg)
+                        location_warnings.append(msg)
+                    else:
+                        reasons.append(
+                            f"at_sea（粗略海陆判定为海上：{land['box']}；"
+                            "站址不可信，拒绝算过境）")
 
     if source in ("none", "unknown", ""):
         reasons.append(f"source_missing（来源={source or '空'}，无凭据）")
@@ -289,6 +319,8 @@ def evaluate_station(fix: Any, require_accuracy: bool = False) -> Dict[str, Any]
         "trusted": trusted,
         "reasons": reasons,
         "warnings": warnings,
+        # 只汇总「坐标被启发式怀疑」的 warning，供调用方原样透传给用户。
+        "station_warning": "；".join(location_warnings),
         "land": land,
         "source": source,
         "fix": st.to_dict(),
@@ -296,6 +328,32 @@ def evaluate_station(fix: Any, require_accuracy: bool = False) -> Dict[str, Any]
     }
 
 
+def trust_for_calculation(fix: Any, require_accuracy: bool = False) -> Dict[str, Any]:
+    """只读/计算口径：显式来源的 (0,0)/海上坐标降为 warning 并照常计算。
+
+    用于过境预测、可见性、天文、纯展示；不得用于 TX 授权/指向/发射安全。
+    """
+    return _evaluate(fix, require_accuracy=require_accuracy,
+                     allow_explicit_sea=True)
+
+
+def trust_for_tx(fix: Any, require_accuracy: bool = False) -> Dict[str, Any]:
+    """写/控制口径：保持严格（显式 (0,0)/海上坐标仍然拒绝）。"""
+    return _evaluate(fix, require_accuracy=require_accuracy,
+                     allow_explicit_sea=False)
+
+
+def evaluate_station(fix: Any, require_accuracy: bool = False) -> Dict[str, Any]:
+    """严格（写/控制）口径的兼容入口；语义等同 :func:`trust_for_tx`。
+
+    新代码请显式选 :func:`trust_for_calculation` 或 :func:`trust_for_tx`；
+    保留本名只为不改变既有调用点的对外语义。
+    """
+    return _evaluate(fix, require_accuracy=require_accuracy,
+                     allow_explicit_sea=False)
+
+
 def pass_prediction_allowed(fix: Any, require_accuracy: bool = False) -> bool:
-    """过境/跟踪是否可用该站址（清楚表达，调用方据此拒绝计算）。"""
-    return bool(evaluate_station(fix, require_accuracy=require_accuracy)["trusted"])
+    """过境预测是否可用该站址（只读口径：显式 (0,0)/海上坐标也放行）。"""
+    return bool(trust_for_calculation(
+        fix, require_accuracy=require_accuracy)["trusted"])

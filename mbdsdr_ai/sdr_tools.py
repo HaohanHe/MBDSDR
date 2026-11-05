@@ -92,13 +92,18 @@ def _get_ground_station_latlon() -> tuple:
 
 
 def _resolve_station_args(args, lat_key="latitude", lon_key="longitude",
-                          alt_key="altitude") -> tuple:
+                          alt_key="altitude", intent="tx") -> tuple:
     """工具参数 → (StationFix, 可信度评估)。来源显式：参数=user，配置=config。
 
     任何情况下都不内置城市坐标；配置缺失时 source=none，评估必判不可信。
+
+    ``intent``: ``tx``（默认，写/控制口径，严格，语义与旧行为一致）；
+    ``calculation``（只读计算口径，显式 (0,0)/海上坐标放行并带 warning）。
+    判定逻辑本身只在 ``station.py`` 的 ``_evaluate`` 里，这里仅选择入口。
     """
-    from mbdsdr_ai.station import (evaluate_station, resolve_station,
-                                   station_from_config, station_from_user)
+    from mbdsdr_ai.station import (resolve_station, station_from_config,
+                                   station_from_user, trust_for_calculation,
+                                   trust_for_tx)
     cfg = station_from_config()
     lat = args.get(lat_key)
     lon = args.get(lon_key)
@@ -111,7 +116,9 @@ def _resolve_station_args(args, lat_key="latitude", lon_key="longitude",
         except (TypeError, ValueError):
             user = None
     fix = resolve_station(user=user, config=cfg)
-    return fix, evaluate_station(fix)
+    ev = (trust_for_calculation(fix) if intent == "calculation"
+          else trust_for_tx(fix))
+    return fix, ev
 
 
 def _physics_now(args) -> float:
@@ -176,6 +183,12 @@ def _station_untrusted_text(ev) -> str:
     return (f"错误: 站址不可信（{reasons}）。拒绝用不可信站址计算卫星过境/"
             f"多普勒；请显式传入可信的 latitude/longitude，或先在配置中填写"
             f"ground_station_lat/ground_station_lon。不给默认城市坐标。")
+
+
+def _station_warning_text(ev) -> str:
+    """只读口径放宽显式 (0,0)/海上坐标时的可读提醒（空串=无提醒）。"""
+    warning = str(ev.get("station_warning") or "").strip()
+    return f"站址提醒: {warning}\n" if warning else ""
 
 
 def _tr_pair(pair) -> ToolResult:
@@ -4294,9 +4307,10 @@ def _decode_adsb(args):
 
 def _satellite_sky_view(args):
     """卫星天空视图（真实实现，sgp4；时刻与 sky_view_visible 统一）。"""
-    fix, ev = _resolve_station_args(args)
+    fix, ev = _resolve_station_args(args, intent="calculation")
     if not ev["trusted"]:
         return _station_untrusted_text(ev)
+    warn = _station_warning_text(ev)
     lat = float(fix.lat)
     lon = float(fix.lon)
     alt = float(fix.alt_m or 0.0)
@@ -4309,12 +4323,13 @@ def _satellite_sky_view(args):
 
     at_utc, at_local = _utc_local(when)
     if not visible:
-        return (f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n"
+        return (warn + f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n"
                 f"时刻: {at_utc}（本地 {at_local}）\n最小仰角: {min_elev}°\n"
                 f"类型: {sat_type}\n\n当前没有可见卫星（仰角 > {min_elev}°）\n"
                 f"内置卫星: {', '.join(orbit.BUILTIN_SATS.keys())}")
 
-    output = f"=== 卫星天空视图 ===\n"
+    output = warn
+    output += f"=== 卫星天空视图 ===\n"
     output += f"位置: {lat}°N, {lon}°E\n"
     output += f"时刻: {at_utc}（本地 {at_local}）\n"
     output += f"最小仰角: {min_elev}°\n"
@@ -4336,8 +4351,8 @@ def _satellite_doppler(args):
     """卫星多普勒计算（真实实现）。返回 (散文, data) 二元组（D6 sidecar）。"""
     sat_name = args["satellite_name"]
     freq_hz = args["frequency_hz"]
-    # 地面站坐标：参数(user) > 配置(config)；缺失/0,0/海上一律拒绝计算。
-    fix, ev = _resolve_station_args(args)
+    # 地面站坐标：参数(user) > 配置(config)；只读计算口径。
+    fix, ev = _resolve_station_args(args, intent="calculation")
     if not ev["trusted"]:
         return (_station_untrusted_text(ev), {})
     lat = float(fix.lat)
@@ -4351,7 +4366,8 @@ def _satellite_doppler(args):
         return (f"多普勒计算失败: {result['error']}\n"
                 f"支持的卫星: {', '.join(orbit.BUILTIN_SATS.keys())}"), {}
 
-    output = f"=== 卫星多普勒计算 (sgp4 真速度) ===\n"
+    output = _station_warning_text(ev)
+    output += f"=== 卫星多普勒计算 (sgp4 真速度) ===\n"
     output += f"卫星: {result['satellite']}\n"
     output += f"标称频率: {result['nominal_freq_mhz']:.6f} MHz\n"
     output += f"修正频率: {result['corrected_freq_mhz']:.6f} MHz\n"
@@ -4367,12 +4383,14 @@ def _satellite_doppler(args):
         "elevation_deg": float(result['elevation_deg']),
         "azimuth_deg": float(result['azimuth_deg']),
     }
+    if ev.get("station_warning"):
+        data["station_warning"] = ev["station_warning"]
     return output, data
 
 
 def _satellite_passes(args):
     """未来卫星过境预测（sgp4）。过境面板：TLE 过期/降级如实标注精度风险。"""
-    fix, ev = _resolve_station_args(args)
+    fix, ev = _resolve_station_args(args, intent="calculation")
     if not ev["trusted"]:
         return _station_untrusted_text(ev)
     lat = float(fix.lat)
@@ -5819,7 +5837,8 @@ def _satellite_predict_pass(args):
     name = args['satellite_name']
     fix, ev = _resolve_station_args(args, lat_key="observer_lat",
                                     lon_key="observer_lon",
-                                    alt_key="observer_alt")
+                                    alt_key="observer_alt",
+                                    intent="calculation")
     if not ev["trusted"]:
         return _station_untrusted_text(ev)
     lat = float(fix.lat)
@@ -5832,7 +5851,8 @@ def _satellite_predict_pass(args):
                                start_unix=_physics_now(args))
 
     if p is None:
-        return (f"卫星 {name} 在未来 {hours:.0f} 小时内没有仰角超过 {min_elev:.0f}° 的过境\n"
+        return (_station_warning_text(ev) +
+                f"卫星 {name} 在未来 {hours:.0f} 小时内没有仰角超过 {min_elev:.0f}° 的过境\n"
                 f"建议: 降低最小仰角或延长预测时间")
 
     lines = [p.summary()]
@@ -5846,6 +5866,9 @@ def _satellite_predict_pass(args):
     if notes:
         lines.append("")
         lines.extend(notes)
+    warn = _station_warning_text(ev).strip()
+    if warn:
+        lines.insert(0, warn)
     return '\n'.join(lines)
 
 
@@ -5858,7 +5881,8 @@ def _satellite_predict_all(args):
 
     fix, ev = _resolve_station_args(args, lat_key="observer_lat",
                                     lon_key="observer_lon",
-                                    alt_key="observer_alt")
+                                    alt_key="observer_alt",
+                                    intent="calculation")
     if not ev["trusted"]:
         return _station_untrusted_text(ev)
     lat = float(fix.lat)
@@ -5872,7 +5896,8 @@ def _satellite_predict_all(args):
 
     catalog_notes = _tle_provenance_lines(list(BUILTIN_TLE.keys()))
     if not passes:
-        msg = f"未来 {hours:.0f} 小时内没有卫星过境（仰角 > {min_elev:.0f}°）"
+        msg = _station_warning_text(ev) + \
+              f"未来 {hours:.0f} 小时内没有卫星过境（仰角 > {min_elev:.0f}°）"
         if catalog_notes:
             msg += "\n\n" + "\n".join(catalog_notes)
         return msg
@@ -5889,6 +5914,9 @@ def _satellite_predict_all(args):
     if catalog_notes:
         lines.append("")
         lines.extend(catalog_notes)
+    warn = _station_warning_text(ev).strip()
+    if warn:
+        lines.insert(0, warn)
     return '\n'.join(lines)
 
 
@@ -5900,7 +5928,8 @@ def _sky_view_visible(args):
         from new_spacetime import compute_visible_satellite_count
 
     fix, ev = _resolve_station_args(args, lat_key="observer_lat",
-                                    lon_key="observer_lon")
+                                    lon_key="observer_lon",
+                                    intent="calculation")
     if not ev["trusted"]:
         return _station_untrusted_text(ev)
     lat = float(fix.lat)
@@ -5924,6 +5953,9 @@ def _sky_view_visible(args):
     if notes:
         lines.append("")
         lines.extend(notes)
+    warn = _station_warning_text(ev).strip()
+    if warn:
+        lines.insert(0, warn)
     return '\n'.join(lines)
 
 

@@ -941,13 +941,25 @@ class SDRController:
                                 source="config", accuracy_m=fix.accuracy_m)
         return True
 
-    def station_status(self) -> dict:
-        """当前站址可信度（来源、海陆、不可信原因）。"""
-        from ..station import StationFix, evaluate_station
-        fix = StationFix(self._gs_lat, self._gs_lon, self._gs_alt,
+    def _station_fix(self):
+        """取当前站址数据（不含任何可信度判定，判定统一在 station.py）。"""
+        from ..station import StationFix
+        return StationFix(self._gs_lat, self._gs_lon, self._gs_alt,
                          source=self._gs_source or "none",
                          accuracy_m=self._gs_accuracy_m)
-        return evaluate_station(fix)
+
+    def station_status(self) -> dict:
+        """当前站址可信度（来源、海陆、不可信原因）。
+
+        严格（写/控制）口径：显式 (0,0)/海上坐标仍拒绝。对外语义不变。
+        """
+        from ..station import evaluate_station
+        return evaluate_station(self._station_fix())
+
+    def station_status_for_calculation(self) -> dict:
+        """只读/计算口径的站址可信度（显式 (0,0)/海上坐标降为 warning）。"""
+        from ..station import trust_for_calculation
+        return trust_for_calculation(self._station_fix())
 
     def list_satellites(self) -> List[SatInfo]:
         """列出内置可接收卫星（NORAD 编号 + 下行频率）。"""
@@ -1012,10 +1024,11 @@ class SDRController:
             轨道库缺失/无过境时返回
             ``{"error": "not_available"|"no_pass"|"identity_mismatch"}``。
         """
-        st = self.station_status()
+        st = self.station_status_for_calculation()
         if not st["trusted"]:
-            # P11 红线：站址不可信（缺失/0,0/海上/缺省）时拒绝算过境，
-            # 不许拿默认城市坐标冒充用户位置。
+            # P11 红线：站址缺失/缺省（真没配）时拒绝算过境，
+            # 不许拿默认城市坐标冒充用户位置。显式 (0,0)/海上坐标已按
+            # 计算口径放行，并带 station_warning 透传给调用方。
             return {
                 "error": "station_untrusted",
                 "station": st["fix"],
@@ -1132,6 +1145,10 @@ class SDRController:
             out["passes_in_window"] = len(passes)
             out["min_elevation_deg"] = gate_deg
             out["window_hours"] = hours_ahead
+            # 显式 (0,0)/海上坐标被计算口径放行时，把可疑位置原因原样带给
+            # 用户，不许静默算完。
+            if st.get("station_warning"):
+                out["station_warning"] = st["station_warning"]
             # P11：内置 TLE 凑整值必须在数据里标注来源与可信度，不许当精确值。
             try:
                 from ..builtin_tle_meta import analyze_tle_provenance

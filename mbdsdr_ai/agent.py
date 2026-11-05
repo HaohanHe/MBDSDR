@@ -1542,8 +1542,9 @@ class MBDSDRAgent:
 
         def _passes(args):
             try:
-                # 站址：参数(user) > 配置(config)；不可信（缺失/0,0/海上）拒算
-                from mbdsdr_ai.station import (evaluate_station, resolve_station,
+                # 站址：参数(user) > 配置(config)；只读计算口径：
+                # 缺失/缺省（真没配）拒算，显式 (0,0)/海上坐标放行并带 warning。
+                from mbdsdr_ai.station import (trust_for_calculation, resolve_station,
                                                station_from_config, station_from_user)
                 lat_arg = args.get("observer_lat")
                 lon_arg = args.get("observer_lon")
@@ -1552,7 +1553,7 @@ class MBDSDRAgent:
                                           origin="tool_args")
                         if lat_arg is not None and lon_arg is not None else None)
                 fix = resolve_station(user=user, config=station_from_config())
-                ev = evaluate_station(fix)
+                ev = trust_for_calculation(fix)
                 if not ev["trusted"]:
                     return ToolResult(False, "站址不可信，拒绝计算过境：" +
                                       "；".join(ev["reasons"]) +
@@ -1574,8 +1575,10 @@ class MBDSDRAgent:
                                     start_unix=get_time_engine().now_unix())
             except Exception as e:
                 return ToolResult(False, f"过境预测失败: {e}")
-            return ToolResult(True, json.dumps({"passes": ps, "count": len(ps)},
-                                               ensure_ascii=False, default=str))
+            return ToolResult(True, json.dumps(
+                {"passes": ps, "count": len(ps),
+                 "station_warning": ev.get("station_warning") or ""},
+                ensure_ascii=False, default=str))
 
         self.tool_registry.register(
             name="predict_satellite_passes",
@@ -1606,7 +1609,7 @@ class MBDSDRAgent:
         def _point(args):
             try:
                 name = str(args.get("satellite", "NOAA 19"))
-                from mbdsdr_ai.station import (evaluate_station, resolve_station,
+                from mbdsdr_ai.station import (trust_for_calculation, resolve_station,
                                                station_from_config, station_from_user)
                 lat_arg = args.get("observer_lat")
                 lon_arg = args.get("observer_lon")
@@ -1614,7 +1617,7 @@ class MBDSDRAgent:
                                           origin="tool_args")
                         if lat_arg is not None and lon_arg is not None else None)
                 fix = resolve_station(user=user, config=station_from_config())
-                ev = evaluate_station(fix)
+                ev = trust_for_calculation(fix)
                 if not ev["trusted"]:
                     return ToolResult(False, "站址不可信，拒绝计算指向：" +
                                       "；".join(ev["reasons"]))
@@ -1638,6 +1641,8 @@ class MBDSDRAgent:
                            f"方位 {s['azimuth']:.0f}°，等过境再架天线")
                 s["visible"] = visible
                 s["instruction"] = cmd
+                if ev.get("station_warning"):
+                    s["station_warning"] = ev["station_warning"]
             except Exception as e:
                 return ToolResult(False, f"指向计算失败: {e}")
             return ToolResult(True, json.dumps(s, ensure_ascii=False, default=str))

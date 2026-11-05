@@ -672,12 +672,14 @@ def predict_passes_report(
     ``allow_stale=False`` 时过期/失效 TLE 默认不参与过境（目录默认口径）；
     无论是否放行，``degraded`` 都会逐条说明原因，调用方不得静默忽略。
 
-    ``require_trusted_station=True`` 时先评站址可信度（P11）：缺坐标/0,0/
-    海上/缺省兜底 → 不计算任何过境，``degraded`` 留痕 ``station_untrusted``。
+    ``require_trusted_station=True`` 时先评站址可信度（P11），口径为**只读/
+    计算**：缺坐标/缺省兜底 → 不计算任何过境，``degraded`` 留痕
+    ``station_untrusted``；显式 (0,0)/海上坐标照常计算，但把可疑位置原因写进
+    ``station.station_warning`` 与 ``degraded`` 的 ``station_warning`` 条目。
     """
-    from .station import evaluate_station, station_from_user
+    from .station import trust_for_calculation, station_from_user
 
-    station_ev = evaluate_station(station_from_user(
+    station_ev = trust_for_calculation(station_from_user(
         observer_lat, observer_lon, observer_alt))
     if require_trusted_station and not station_ev["trusted"]:
         return {
@@ -700,6 +702,13 @@ def predict_passes_report(
         observer_lat, observer_lon, observer_alt, hours,
         min_elevation, satellite_type, nominal_freq_hz, allow_stale,
         start_unix)
+    if station_ev.get("station_warning"):
+        # 放宽必须留痕：位置被启发式怀疑也要进降级清单，用户看得见。
+        degraded = [{
+            "satellite": "（站址）", "catnr": 0,
+            "reason": "station_warning",
+            "detail": station_ev["station_warning"],
+        }] + list(degraded)
     return {
         "n_passes": len(passes),
         "passes": passes,

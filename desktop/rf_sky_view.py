@@ -1932,6 +1932,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._camera_lock: Optional[str] = None
         # 最近一次锁定失败的具体原因（站址不可信 / 数据不可用），供诚实提示
         self._lock_denied_reason: Optional[str] = None
+        # 显式 (0,0)/海上坐标被计算口径放行时的可读提醒（空=无疑问）
+        self._station_warning: str = ""
         self._camera_notice: str = ""
         self._camera_notice_until: float = 0.0
         # 当前已提示过的快转直贴倍率（None=未提示/已复位）；同一倍率只提示一次
@@ -2244,6 +2246,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._lock_snap_rate = None
         self._lock_prev_target = None
         self._pending_time_jump = None
+        if getattr(self, "_station_warning", ""):
+            # 放宽必须留痕：锁定了，但让用户知道这个位置被启发式怀疑。
+            self._camera_notice = f"站址提醒：{self._station_warning}"
+            self._camera_notice_until = time.time() + 3.0
         self._sync_camera_btn()
         self.update()
         return True
@@ -2291,20 +2297,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _station_trust_reason(self) -> Optional[str]:
         """站址可信度（复用 mbdsdr_ai.station 的唯一守卫，不另立阈值）。
 
-        观测站未设置/0,0 占位/海上/无来源凭据 -> 返回原因字符串；
-        可信返回 None。摄像机锁定与过境预测共用同一判据（P11 红线）。
+        摄像机锁定是**只读视图**，用计算口径：显式 (0,0)（几内亚湾）或海上
+        坐标照常锁定，但把可疑位置原因存到 ``_station_warning`` 供提示。
+        观测站未设置/无来源凭据（真没配）仍返回原因字符串。
         """
         obs = self._observer
         if obs is None:
             return "观测站未设置"
         try:
-            from mbdsdr_ai.station import StationFix, evaluate_station
-            ev = evaluate_station(StationFix(
+            from mbdsdr_ai.station import StationFix, trust_for_calculation
+            ev = trust_for_calculation(StationFix(
                 obs["lat"], obs["lon"], obs.get("alt_m", 0.0),
                 source="user"))
         except Exception as e:  # noqa: BLE001 - 守卫失败要留痕，不能默认可信
             return f"站址校验失败（{type(e).__name__}: {e}）"
         if ev["trusted"]:
+            self._station_warning = ev.get("station_warning") or ""
             return None
         return "；".join(ev["reasons"]) or "站址不可信"
 

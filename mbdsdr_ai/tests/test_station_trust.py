@@ -21,6 +21,8 @@ from mbdsdr_ai.station import (  # noqa: E402
     station_from_config,
     station_from_gnss,
     station_from_user,
+    trust_for_calculation,
+    trust_for_tx,
 )
 
 
@@ -61,16 +63,30 @@ class TestEvaluation:
         assert ev["land"]["status"] == "land"
         assert ev["reasons"] == []
 
-    def test_null_island_rejected(self):
-        ev = evaluate_station(station_from_user(0.0, 0.0))
+    def test_null_island_strict_for_tx_but_allowed_for_calculation(self):
+        # 写/控制口径：显式 (0,0)（几内亚湾真实坐标）仍拒绝
+        fix = station_from_user(0.0, 0.0)
+        ev = evaluate_station(fix)
         assert ev["trusted"] is False
         assert any("null_island" in r for r in ev["reasons"])
+        assert trust_for_tx(fix)["trusted"] is False
+        # 只读/计算口径：按用户显式声明照常计算，但要留可读 warning
+        calc = trust_for_calculation(fix)
+        assert calc["trusted"] is True
+        assert "null_island_0_0" in calc["station_warning"]
 
-    def test_open_ocean_rejected(self):
-        ev = evaluate_station(station_from_user(0.0, -150.0))
+    def test_open_ocean_strict_for_tx_but_allowed_for_calculation(self):
+        # 写/控制口径：海上坐标仍拒绝
+        fix = station_from_user(0.0, -150.0)
+        ev = evaluate_station(fix)
         assert ev["trusted"] is False
         assert any("at_sea" in r for r in ev["reasons"])
         assert coarse_land_status(0.0, -150.0)["status"] == "sea"
+        # 只读/计算口径：显式声明放行，warning 单独标注海域（不是 0,0 占位）
+        calc = trust_for_calculation(fix)
+        assert calc["trusted"] is True
+        assert "at_sea_explicit" in calc["station_warning"]
+        assert "null_island" not in calc["station_warning"]
 
     def test_missing_coordinates_rejected(self):
         ev = evaluate_station(StationFix(None, None, source="user"))

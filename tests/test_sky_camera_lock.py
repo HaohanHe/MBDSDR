@@ -120,17 +120,18 @@ class TestLockEngage:
         # 未设置/不可信站址必须给具体原因，不笼统说「轨道数据不可用」
         assert "观测站" in v._camera_notice or "站址" in v._camera_notice
 
-    def test_lock_refuses_untrusted_station_places(self):
-        """0,0 占位站址不可信 -> 拒绝锁定并如实提示（与过境预测同一守卫）。"""
+    def test_lock_allows_explicit_null_island_with_warning(self):
+        """显式 (0,0)（几内亚湾真实坐标）在只读视图口径下可锁定，但要留 warning。"""
         v = RFSkyView()
         v.resize(700, 700)
         v.set_observer(0.0, 0.0)
         v.set_satellite_catalog(_catalog())
         reason = v._station_trust_reason()
-        assert reason is not None and "null_island" in reason, reason
-        assert v.set_camera_lock(ISS) is False
-        assert v.camera_lock_target is None
-        assert "站址不可信" in v._camera_notice
+        assert reason is None, "显式 (0,0) 不该再被当成「未配置」拒绝"
+        assert "null_island_0_0" in v._station_warning
+        assert v.set_camera_lock(ISS) is True
+        assert v.camera_lock_target == ISS
+        assert "站址提醒" in v._camera_notice
         assert "null_island" in v._camera_notice
 
     def test_lock_engages_on_real_chain(self):

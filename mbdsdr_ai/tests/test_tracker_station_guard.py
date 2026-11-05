@@ -19,6 +19,7 @@ from mbdsdr_ai.sat_tracker import SatelliteTracker  # noqa: E402
 def test_null_island_station_refuses_tracking():
     t = SatelliteTracker(GroundStation(lat_deg=0.0, lon_deg=0.0, alt_m=0.0))
     assert t.select_satellite("NOAA 15") is True
+    # 写/控制口径（老入口）语义不变：显式 (0,0) 仍严格拒绝
     st = t.station_status()
     assert st["trusted"] is False
     p = t.current_position()
@@ -26,7 +27,14 @@ def test_null_island_station_refuses_tracking():
     assert p["station_untrusted"] is True
     assert p["azimuth"] is None
     assert p["station_reasons"]
-    assert t.next_pass() is None
+    # 只读/计算口径：显式声明放行并带 warning
+    st_calc = t.station_status_for_calculation()
+    assert st_calc["trusted"] is True
+    assert "null_island_0_0" in st_calc["station_warning"]
+    p_calc = t.current_position_for_calculation()
+    assert p_calc["valid"] is True
+    assert p_calc["station_warning"]
+    assert t.next_pass() is not None
 
 
 def test_ocean_station_refuses_tracking():
@@ -34,6 +42,9 @@ def test_ocean_station_refuses_tracking():
     assert t.select_satellite("NOAA 15") is True
     assert t.station_status()["trusted"] is False
     assert t.current_position()["valid"] is False
+    # 只读口径：显式海上坐标照常算，warning 标注海域
+    assert t.station_status_for_calculation()["trusted"] is True
+    assert t.current_position_for_calculation()["valid"] is True
 
 
 def test_trusted_station_tracks_normally():

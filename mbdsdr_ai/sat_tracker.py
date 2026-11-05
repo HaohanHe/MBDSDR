@@ -461,14 +461,26 @@ class SatelliteTracker:
 
     # ------------------------------------------------------------- 实时位置
     def current_position(self, at_unix: Optional[float] = None) -> Dict[str, object]:
-        """计算当前时刻的 az/el/斜距/多普勒/校正后频率。
+        """计算当前时刻的 az/el/斜距/多普勒/校正后频率（严格/控制口径）。
 
         ``at_unix`` 显式注入 Unix UTC 秒（测试/回放钉死时钟）；缺省取全局
         TimeEngine（未做时间穿越时等于系统时钟），与过境预测、天空视图同一时间源。
 
         无观测者位置、未选卫星或传播失败时返回 valid=False（各数值字段为 None），
         调用方据此空转，绝不抛异常、绝不编造。
+
+        本入口被面板显示、RX 调谐、云台跟随与 TX 预偏共用，保持严格口径；
+        纯只读展示请用 :meth:`current_position_for_calculation`。
         """
+        return self._position(at_unix, self.station_status())
+
+    def current_position_for_calculation(
+            self, at_unix: Optional[float] = None) -> Dict[str, object]:
+        """只读/计算口径的实时位置（显式 (0,0)/海上坐标放行并带 warning）。"""
+        return self._position(at_unix, self.station_status_for_calculation())
+
+    def _position(self, at_unix: Optional[float],
+                  st: Dict[str, object]) -> Dict[str, object]:
         empty: Dict[str, object] = {
             "valid": False,
             "azimuth": None,
@@ -481,12 +493,12 @@ class SatelliteTracker:
             "is_visible": False,
             "station_untrusted": None,
             "station_reasons": [],
+            "station_warning": "",
             "clock_warning": "",
         }
         if self.ground_station is None or self._diff is None or self._sat is None:
             return empty
-        # P11 红线：站址不可信（0,0/海上/缺失）时不跟踪、不输出方位
-        st = self.station_status()
+        # P11 红线：严格口径下站址不可信（0,0/海上/缺失）时不跟踪、不输出方位
         if not st["trusted"]:
             empty["station_untrusted"] = True
             empty["station_reasons"] = st["reasons"]
@@ -547,23 +559,37 @@ class SatelliteTracker:
             "refresh_status": self._last_refresh_error or "ok",
             "station_untrusted": False,
             "station_reasons": [],
+            "station_warning": st.get("station_warning") or "",
             "clock_warning": clock_warning,
         }
 
-    def station_status(self) -> Dict[str, object]:
-        """当前观测者站址可信度（来源/海陆/拒绝原因）。"""
-        from .station import StationFix, evaluate_station
+    def _station_fix(self):
+        """取站址数据（不含任何可信度判定，判定统一在 station.py）。"""
+        from .station import StationFix
         gs = self.ground_station
         if gs is None:
-            return evaluate_station(StationFix(source="none"))
-        return evaluate_station(StationFix(
+            return StationFix(source="none")
+        return StationFix(
             lat=gs.lat_deg, lon=gs.lon_deg, alt_m=gs.alt_m, source="user",
-            origin="GroundStation"))
+            origin="GroundStation")
+
+    def station_status(self) -> Dict[str, object]:
+        """当前观测者站址可信度（严格/控制口径；对外语义不变）。"""
+        from .station import evaluate_station
+        return evaluate_station(self._station_fix())
+
+    def station_status_for_calculation(self) -> Dict[str, object]:
+        """只读/计算口径的站址可信度（显式 (0,0)/海上坐标降为 warning）。"""
+        from .station import trust_for_calculation
+        return trust_for_calculation(self._station_fix())
 
     def is_visible(self, min_elevation: float = DEFAULT_MIN_ELEVATION_DEG,
                    at_unix: Optional[float] = None) -> bool:
-        """当前仰角是否 >= 阈值（默认 5°）。``at_unix`` 可显式钉死时刻。"""
-        pos = self.current_position(at_unix=at_unix)
+        """当前仰角是否 >= 阈值（默认 5°）。``at_unix`` 可显式钉死时刻。
+
+        只读判断，用计算口径（显式 (0,0)/海上坐标照常算）。
+        """
+        pos = self.current_position_for_calculation(at_unix=at_unix)
         if not pos["valid"] or pos["elevation"] is None:
             return False
         return float(pos["elevation"]) >= min_elevation
@@ -584,8 +610,8 @@ class SatelliteTracker:
         """
         if self.ground_station is None or self._selected_name is None:
             return None
-        if not self.station_status()["trusted"]:
-            return None   # P11：站址不可信（0,0/海上）拒绝算过境
+        if not self.station_status_for_calculation()["trusted"]:
+            return None   # P11：只读口径下仍要求「真配了」站址（缺省/缺失）
         entry = next((c for c in self._catalog if c["name"] == self._selected_name), None)
         if entry is None:
             return None
