@@ -16,10 +16,10 @@ Pipeline (data flow, left to right)::
       ├─ DecimatingFIR    anti-alias integer decimation fs_in -> fs_stage
       ├─ XlatingFIR       NCO shift (+/-offset) -> rational resample -> LPF
       │                   output complex baseband (complex128, if_sr)
-      ├─ Squelch          RMS gate (attack/decay/hang), before AGC/demod
       ├─ Demodulator      AM / USB / LSB / NFM / WFM(stereo) / CW
       │                   output float32 mono; WFM outputs (L, R)
       ├─ AudioResampler   stateful polyphase FIR resample if_sr -> 48 kHz
+      ├─ Squelch          「余量」门控（解调后音频，与 receive_pipeline 同一实现）
       └─ float32 output (mono (N,) or stereo (N,2)), sample rate 48000 Hz
 
 Stage defaults per mode (see ``_MODE_TABLE``)::
@@ -77,7 +77,7 @@ from .dc_blocker import DCBlocker
 from .iq_correction import IQCorrector
 from .decimating_fir import DecimatingFIR, design_decimation_taps
 from .channelizer import XlatingFIR
-from .squelch import Squelch
+from .squelch import BaselineSquelch, SQUELCH_MIN_DBFS
 from .audio_resampler import AudioResampler
 from .doppler_compensation import DopplerCompensationStage
 
@@ -175,7 +175,7 @@ class ReceiveChain:
         # ── 后级（随模式/带宽重建）──
         self._decim: Optional[DecimatingFIR] = None
         self._channel: Optional[XlatingFIR] = None
-        self._squelch: Optional[Squelch] = None
+        self._squelch: Optional[BaselineSquelch] = None
         self._demod = None
         self._rs_mono: Optional[AudioResampler] = None
         self._rs_l: Optional[AudioResampler] = None
@@ -235,12 +235,11 @@ class ReceiveChain:
             offset=offset,
         )
 
-        # 3) 静噪门控（在解调前）。时间常数按 if_sr 换算。
-        self._squelch = Squelch(
-            threshold_db=self._squelch_db,
-            hang_ms=200.0, attack_ms=5.0, decay_ms=50.0,
-            sample_rate=if_sr,
-        )
+        # 3) 静噪门控（解调后音频，**余量口径**）。
+        #    与 desktop/receive_pipeline.py 同一个实现（BaselineSquelch）：
+        #    滑杆 -100..-20 是"相对噪声基线的余量"，绝不能当绝对 dBFS 门。
+        #    -150（及更小）是"完全开门"哨兵：不建门控，直通。
+        self._squelch = self._make_squelch()
 
         # 4) 解调器
         if kind == "am":
@@ -346,11 +345,30 @@ class ReceiveChain:
         self._cfg["bandwidth"] = self._bandwidth
         self._build_backend()
 
+    def _make_squelch(self) -> Optional[BaselineSquelch]:
+        """按**余量刻度**建门控；-150（及更小）表示完全开门 → 不建门。"""
+        if self._squelch_db < SQUELCH_MIN_DBFS:
+            return None
+        return BaselineSquelch(
+            squelch_db=self._squelch_db,
+            mode=self._mode,
+            sample_rate=self.audio_out_sr,
+            hang_ms=250.0,
+        )
+
     def set_squelch(self, db: float) -> None:
-        """设置 RMS 静噪门限 dBFS（-150=完全开门）。"""
+        """设置静噪**余量刻度**（-100..-20；-150=完全开门）。
+
+        这里的数字是"比噪声基线高多少"，不是绝对 dBFS 门；换算是
+        :meth:`mbdsdr_ai.squelch.BaselineSquelch.set_threshold` 的唯一职责。
+        """
         self._squelch_db = float(db)
-        if self._squelch is not None:
-            self._squelch.threshold_db = float(db)
+        if self._squelch_db < SQUELCH_MIN_DBFS:
+            self._squelch = None
+        elif self._squelch is None:
+            self._squelch = self._make_squelch()
+        else:
+            self._squelch.set_threshold(self._squelch_db)
 
     def set_gain(self, db: float) -> None:
         """设置链后数字音频增益 dB。"""
@@ -450,11 +468,7 @@ class ReceiveChain:
         if x.size == 0:
             return np.zeros(0, dtype=np.float32)
 
-        # 5) 静噪门控（RMS，解调前）：门关时整块置零
-        if self._squelch is not None:
-            x = self._squelch.apply(x)
-            if x.size == 0:
-                return np.zeros(0, dtype=np.float32)
+        # 5) （静噪已移到解调后：见步骤 7c；解调前不再拿余量当绝对门）
 
         # 6) 解调
         kind = self._cfg["kind"]
@@ -475,6 +489,13 @@ class ReceiveChain:
             if self._rs_mono is not None:
                 audio = self._rs_mono.process(audio)
             out = audio.astype(np.float32)
+
+        # 7c) 静噪门控（解调后音频，余量口径；与 receive_pipeline 同一实现）。
+        #     标定期间 BaselineSquelch 保持开门；门关时整块静音。
+        if self._squelch is not None and out.size:
+            mono = out.mean(axis=1) if out.ndim == 2 else out
+            if not self._squelch.update(mono):
+                out = np.zeros_like(out)
 
         # 8) 数字增益
         if self._gain_db != 0.0 and out.size:

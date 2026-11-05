@@ -139,6 +139,11 @@ class SDRDevice:
     connected: bool = False
 
 
+#: ``SDRStatus.squelch_applied_by`` 的合法取值（Python 与 C++ 回写共用同一组
+#: 字面量；中文文档见 docs/limitations-register.md 附 H）。
+SQUELCH_APPLIED_BY_VALUES = ("desktop-margin", "cpp-auto", "cpp-manual", "none")
+
+
 @dataclass
 class SDRStatus:
     """SDR 当前状态。"""
@@ -154,9 +159,18 @@ class SDRStatus:
     agc_enabled: bool = True
     bandwidth_hz: float = 0.0  # 0=自动
     demod_mode: str = "FM"  # FM/AM/SSB/LSB/USB/CW/NFM/WFM
-    # 来源: gqrx/src/qtgui/dockrxopt.cpp:697 —— reset 到 -150 dB = 完全开门，
+    # 来源: gqrx/src/qtgui/dockrxopt.cpp:697 —— reset 到 -150 = 完全开门，
     # 与 analog_demod.py 静噪默认对齐。
+    # **语义固定为「余量刻度」**（-100≈0 dB、-50≈6 dB、-20≈16 dB，见
+    # mbdsdr_ai/squelch.py 顶部裁定）：它不是绝对 dBFS 门，禁止原样下发给
+    # 解调链；换算只在 margin_threshold_db()/BaselineSquelch 里做。
     squelch_db: float = -150.0
+    # 谁最后写的静噪值、按什么语义应用：
+    # desktop-margin / cpp-auto / cpp-manual / none（空值=从未设置）。
+    squelch_applied_by: str = "none"
+    # 只有真正下发**绝对门**时才填（dBFS，由 margin_threshold_db + 实测底噪
+    # 推导）；Python 路径按余量口径门控时保持 None。
+    squelch_threshold_dbfs: Optional[float] = None
     volume: float = 0.5
     rssi_db: float = -100.0
     snr_db: float = 0.0
@@ -477,7 +491,24 @@ class SDRBackend:
         return True
 
     def set_squelch(self, db: float) -> bool:
-        self.status.squelch_db = db
+        """设置静噪**余量刻度**（-100..-20；-150=完全开门）。
+
+        滑杆/agent 工具/遥控传进来的都是"比噪声基线高多少"（-50≈6 dB），
+        **不是绝对 dBFS 门**。这里只记录余量与来源，绝不再把该数字原样当
+        绝对门下发；ReceiveChain 内部统一用 BaselineSquelch 按余量换算
+        （与 desktop/receive_pipeline.py 同一实现）。
+        """
+        value = float(db)
+        self.status.squelch_db = value
+        self.status.squelch_applied_by = "desktop-margin"
+        # 没有真正下发绝对门 → 该字段保持 None（只有 C++/硬件路径才填）。
+        self.status.squelch_threshold_dbfs = None
+        chain = getattr(self, "_receive_chain", None)
+        if chain is not None:
+            try:
+                chain.set_squelch(value)
+            except Exception as e:  # 重建窗口内的偶发失败不打断主流程
+                logger.warning("同步 ReceiveChain 静噪失败: %s", e)
         return True
 
     def set_volume(self, vol: float) -> bool:
