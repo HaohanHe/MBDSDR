@@ -618,7 +618,10 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
 
 发布前总顺序（2026-11-06 起）：① 九步 `python scripts/release_check.py`；
 ② 产物对拍 `python scripts/check_dist_head_parity.py --dist <同一产物> --head <构建 commit>`
-（见 §10）。第二步**单独跑、不并入九步**，不改变九步既有口径；**对拍不过不进发布**。
+（见 §10）；③ 生成物复现 `python web/product/tests/verify_build_json.py --check`
+（**不联网**，本机约 2 秒；退出码非 0 即产物漂移；进程被 kill 后下次运行会先
+自动恢复，也可 `--restore` 手工恢复）。第二步**单独跑、不并入九步**，不改变九步
+既有口径；**对拍不过不进发布**；③ 放在最后，产物先过复现再发。
 
 一次跑完四项（任一项 FAIL → 退出码 1；`--json` 输出纯 JSON）：
 
