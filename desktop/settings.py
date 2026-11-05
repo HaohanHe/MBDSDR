@@ -17,6 +17,7 @@ AGC/主题）以**明文 JSON** 落到磁盘，下次启动读回。设计取舍
 """
 
 import json
+import math
 import os
 import platform
 from datetime import datetime
@@ -94,6 +95,87 @@ def resolve_record_dir(value: Any) -> str:
     if raw:
         return os.path.expanduser(os.path.expandvars(raw))
     return default_record_dir()
+
+
+# ----------------------------------------------------------------------
+# 过境筛选读取入口（A1 / A2 / A9）
+# ----------------------------------------------------------------------
+#: 消费点在卫星/星空线（`new_spacetime_panel.refresh_passes` /
+#: `rf_sky_view._refresh_passes`）。两条线**只调用下面四个函数**，不各自读 JSON，
+#: 保证「时空面板列表」与「天空图过境列表」永远同一组门槛/窗口。
+#: 默认/范围优先取 config_schema（进 schema 后自动以 schema 为准）。
+_A1_ITEM = SCHEMA.get("pass_min_elevation_deg")
+_A2_ITEM = SCHEMA.get("pass_window_hours")
+
+PASS_MIN_ELEVATION_DEFAULT_DEG = float(_A1_ITEM.default) if _A1_ITEM else 10.0
+PASS_WINDOW_HOURS_DEFAULT = int(_A2_ITEM.default) if _A2_ITEM else 24
+PASS_MIN_ELEVATION_RANGE_DEG = (
+    (float(_A1_ITEM.minimum), float(_A1_ITEM.maximum)) if _A1_ITEM else (0.0, 45.0))
+PASS_WINDOW_RANGE_HOURS = (
+    (int(_A2_ITEM.minimum), int(_A2_ITEM.maximum)) if _A2_ITEM else (1, 72))
+
+#: 「低仰角过境」的物理下限：低于 5° 基本被地形/大气挡住，再低没有观测意义。
+PASS_LOW_ELEVATION_FLOOR_DEG = 5.0
+
+
+def _read_setting(settings: Any, key: str, default: Any) -> Any:
+    """从 DesktopSettings / dict / None 读一个键；缺值或坏容器一律回 default。"""
+    if settings is None:
+        return default
+    getter = getattr(settings, "get", None)
+    if callable(getter):
+        try:
+            value = getter(key, default)
+        except TypeError:          # 只收一个参数的旧 get()
+            value = getter(key)
+        return default if value is None else value
+    if isinstance(settings, dict):
+        value = settings.get(key, default)
+        return default if value is None else value
+    return default
+
+
+def effective_pass_min_elevation_deg(settings: Any = None) -> float:
+    """A1：过境列表要求的峰值仰角下限（度），越界夹到 0–45。"""
+    low, high = PASS_MIN_ELEVATION_RANGE_DEG
+    try:
+        value = float(_read_setting(settings, "pass_min_elevation_deg",
+                                    PASS_MIN_ELEVATION_DEFAULT_DEG))
+    except (TypeError, ValueError):
+        return PASS_MIN_ELEVATION_DEFAULT_DEG
+    if not math.isfinite(value):
+        return PASS_MIN_ELEVATION_DEFAULT_DEG
+    return max(low, min(high, value))
+
+
+def effective_pass_window_hours(settings: Any = None) -> int:
+    """A2：向未来搜索过境的小时数，越界夹到 1–72。"""
+    low, high = PASS_WINDOW_RANGE_HOURS
+    try:
+        value = int(_read_setting(settings, "pass_window_hours",
+                                  PASS_WINDOW_HOURS_DEFAULT))
+    except (TypeError, ValueError):
+        return PASS_WINDOW_HOURS_DEFAULT
+    return max(low, min(high, value))
+
+
+def effective_show_low_elevation_passes(settings: Any = None) -> bool:
+    """A9：是否把 5°–A1 的低仰角过境也列出来（默认否）。"""
+    value = _read_setting(settings, "show_low_elevation_passes", False)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def effective_pass_visibility_gate_deg(settings: Any = None) -> float:
+    """`compute_passes` 实际该用的峰值仰角门。
+
+    A9 关：等于 A1；A9 开：降到 ``min(A1, 5°)``（除非用户把 A1 设得比 5° 还低）。
+    """
+    gate = effective_pass_min_elevation_deg(settings)
+    if effective_show_low_elevation_passes(settings):
+        return min(gate, PASS_LOW_ELEVATION_FLOOR_DEG)
+    return gate
 
 
 def _coerce(key: str, value: Any) -> Any:

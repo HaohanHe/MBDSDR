@@ -6,3 +6,7 @@
 # dvbs2_bch_vectors.json 钉 CRLF 工作副本 SHA，CI LF checkout 收集期炸红）。
 # 含 .f32 等二进制——二进制里 0x0D0A 是数据不是行尾，一律不许转换。
 tests/golden/** -text
+
+# 测试参考数据按字节冻结：OpenNGC 源与 HYG 样本以原始字节/SHA 为准，
+# 禁止 autocrlf 在 checkout 时改写行尾（否则干净 clone 的 SHA 与 meta 分叉）。
+mbdsdr_ai/tests/fixtures/** -text

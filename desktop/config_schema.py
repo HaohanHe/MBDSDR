@@ -293,6 +293,31 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         source="desktop/main_window.py:447 初始 None；:7769 从 gui_config.json 读回",
     ),
 
+    SettingItem(
+        key="pass_min_elevation_deg", group="卫星与多普勒", kind="float",
+        label="过境最低仰角", default=10.0, minimum=0.0, maximum=45.0, step=1.0,
+        help=("过境列表只保留「峰值仰角」不低于该值的过境（度）。"
+              "0=连贴地过境也列；45=只留头顶高仰角的好机会。"
+              "打开「显示低仰角过境」时，下限让位到 5°。"),
+        source="desktop/settings.py: effective_pass_min_elevation_deg()"
+               "（消费点接线见 docs/settings-inventory.md §9.1）",
+    ),
+    SettingItem(
+        key="pass_window_hours", group="卫星与多普勒", kind="int",
+        label="过境搜索窗口", default=24, minimum=1, maximum=72, step=1,
+        help=("向未来搜索多少小时的过境（1–72）。窗口越长列表越多、算得越久。"),
+        source="desktop/settings.py: effective_pass_window_hours()"
+               "（消费点接线见 docs/settings-inventory.md §9.1）",
+    ),
+    SettingItem(
+        key="show_low_elevation_passes", group="卫星与多普勒", kind="bool",
+        label="显示低仰角过境", default=False,
+        help=("打开后把峰值仰角 5°–「过境最低仰角」之间的过境也列出来"
+              "（适合追低轨/地平线附近的机会）；关闭只列达到最低仰角的过境。"),
+        source="desktop/settings.py: effective_show_low_elevation_passes() / "
+               "effective_pass_visibility_gate_deg()",
+    ),
+
     # ---------------------------------------------------------------- AI
     SettingItem(
         key="ai_temperature", group="AI", kind="float",
