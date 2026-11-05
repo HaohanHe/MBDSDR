@@ -614,6 +614,8 @@ class MainWindow(QMainWindow):
         # 发射线程收尾（恢复接收/复位按钮）必须排队回 UI 线程
         self._tx_finished.connect(self._on_tx_finished)
         self._approval_handler = None      # 测试注入：可替换弹窗，签名 (tool, args) -> bool
+        # S11：转发到硬件的工具参数先记账，等 tool_result 确认成功后才同步 UI
+        self._pending_ui_sync: dict = {}
         self._approval_timeout_s = 180.0   # 无人应答超时＝拒绝
         self._approval_audit_path = os.path.join(
             os.path.expanduser("~"), ".mbdsdr", "approval_audit.jsonl")
@@ -4048,6 +4050,7 @@ class MainWindow(QMainWindow):
         self._worker.connection_changed.connect(self._on_connection_for_ui)
         self._worker.tool_result.connect(self.status_panel.on_tool_result)
         self._worker.tool_result.connect(self.ai_panel.on_tool_result)
+        self._worker.tool_result.connect(self._on_worker_tool_result)
         self._worker.error_occurred.connect(self._on_error)
         self._worker.log_message.connect(self._on_log)
 
@@ -5006,6 +5009,14 @@ class MainWindow(QMainWindow):
         """
         args = dict(args or {})
         args.pop(GATE_PARAM, None)   # 模型自报"已确认"一律作废
+        if tool_name == "tune_fm" and args.get("freq_mhz") in (None, ""):
+            # S12：缺 freq_mhz 直接拒绝，绝不让演示频率（98.5MHz）进入界面/硬件
+            return {
+                "success": False,
+                "error": "missing_argument",
+                "content": "缺少 freq_mhz：拒绝执行 tune_fm（不接受演示频率）。",
+                "next_step": "请让模型给出真实目标频率后重试。",
+            }
         if is_write_tool(tool_name) and not self._request_human_approval(tool_name, args):
             return {
                 "success": False,
@@ -5050,18 +5061,33 @@ class MainWindow(QMainWindow):
 
         只转发 MCP 注册名（硬件面）；软件工具不过二次转发、不产生 FAIL 噪声。
         AI 来源的写请求同样过真人确认门（S13）；UI 直操不走此链。
-        先确认、后同步 UI：拒绝时频谱/按钮不得先跳到目标值（S11）。
+        先确认、后转发；UI 只在硬件真实执行成功后同步（S11），缺参数直接拒绝（S12）。
         """
         params = dict(params or {})
         params.pop(GATE_PARAM, None)   # 模型自报"已确认"一律作废
         if not (self._worker and self._worker.is_hardware_tool(tool_name)):
             return
+        if tool_name == "tune_fm" and params.get("freq_mhz") in (None, ""):
+            self.ai_panel._add_system_message(
+                "缺少 freq_mhz：未转发 tune_fm（不接受演示频率）")
+            return
         if is_write_tool(tool_name) and not self._request_human_approval(tool_name, params):
             self.ai_panel._add_system_message(
                 f"等待人工确认：未转发 {tool_name}（模型不能自行放行写操作）")
             return
-        self._sync_ui_for_tool(tool_name, params)
+        # S11：执行前不改 UI，只记参数；等 tool_result 回来说明成功后再同步
+        self._pending_ui_sync[tool_name] = params
         self._worker.request_tool.emit(tool_name, params)
+
+    @Slot(str, dict)
+    def _on_worker_tool_result(self, tool_name: str, result: dict):
+        """硬件调用返回后同步 UI：仅成功才改，失败不留“已调谐/已改音量”的假状态。"""
+        params = self._pending_ui_sync.pop(tool_name, None)
+        if params is None:
+            return
+        if isinstance(result, dict) and ("error" in result or result.get("skipped")):
+            return
+        self._sync_ui_for_tool(tool_name, params)
 
     @Slot(float)
     def _on_spectrum_freq_changed(self, freq: float):
