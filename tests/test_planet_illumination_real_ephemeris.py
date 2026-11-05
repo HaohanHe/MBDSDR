@@ -221,3 +221,78 @@ def test_three_backends_agree_on_planet_illumination():
         assert 0.88 <= value <= 0.91, f"{kind} 火星方照照度越界：{value:.5f}"
     if skipped:
         print("跳过的后端：" + "；".join(skipped))
+
+
+# --------------------------------------------------------------------------
+# 6. 与 Meeus 独立模型（mbdsdr_ai/astronomy/planets.py）交叉校验
+# --------------------------------------------------------------------------
+def _illum_from_phase_deg(phase_deg: float) -> float:
+    """参考定义：illum = 0.5(1+cos χ)，与渲染层 planet_phase_illumination 同式。"""
+    return 0.5 * (1.0 + math.cos(math.radians(phase_deg)))
+
+
+def _meeus_planet(name: str, when: datetime):
+    from mbdsdr_ai.astronomy import planets as _p
+    jd = when.timestamp() / 86400.0 + 2440587.5
+    return _p.compute_planet(name, jd)
+
+
+def test_planets_module_delegates_phase_geometry():
+    """独立模型只算星历三边，余弦定理必须调 solar_system 的唯一入口。
+
+    这条是结构守卫：谁想在 planets.py 里再写一份 ``(r²+Δ²-R²)/(2rΔ)``，
+    这里立刻红（数值交叉校验在两边都正确时抓不到「悄悄新增第二份」）。
+    """
+    import inspect
+    from mbdsdr_ai.astronomy import planets as _p
+    src = inspect.getsource(_p.compute_planet)
+    assert "planet_phase_angle_from_geometry(" in src, \
+        "planets.py 必须委托 solar_system.planet_phase_angle_from_geometry"
+    assert "r_e * r_e" not in src, "旧余弦定理片段仍在（第二份实现）"
+    assert "math.acos" not in src, "acos 也应归一到唯一入口"
+
+
+CROSS_CHECK_EVENTS = [
+    ("venus", VENUS_INFERIOR),
+    ("venus", VENUS_SUPERIOR),
+    ("mercury", MERCURY_INFERIOR),
+    ("mars", MARS_OPPOSITION),
+    ("mars", MARS_QUADRATURE),
+    ("jupiter", JUPITER_OPPOSITION),
+    ("jupiter", JUPITER_QUADRATURE),
+    ("saturn", SATURN_OPPOSITION),
+    ("saturn", SATURN_QUADRATURE),
+]
+
+
+def test_meeus_model_and_ephemeris_model_agree_on_illumination():
+    """两份独立实现（Meeus 低精度 vs DE421）在同一时刻的照度差 ≤1e-4。
+
+    意义：任一侧以后偷偷改公式，数值立刻分叉、这条当场红。
+    """
+    worst = (0.0, "")
+    for name, when in CROSS_CHECK_EVENTS:
+        eph_illum = float(_planet(name, when).illumination)
+        meeus_illum = _illum_from_phase_deg(
+            float(_meeus_planet(name, when).phase_angle_deg))
+        diff = abs(eph_illum - meeus_illum)
+        if diff > worst[0]:
+            worst = (diff, f"{name} {when.date()}")
+        assert diff <= 1e-4, \
+            f"{name} {when.date()} 两模型照度差 {diff:.2e}：{eph_illum:.5f} vs {meeus_illum:.5f}"
+    print(f"两模型最大照度差 {worst[0]:.2e}（{worst[1]}）")
+
+
+def test_phase_angle_zero_basis_is_identical_between_models():
+    """零度基准一致：两边都是「日-行星-地球」夹角，0°=全亮。
+
+    对照：月球函数的入参是「日月距角」，0°=新月，且月相照度用 1-cos——
+    语义相反，别把月球的换算套到行星上。
+    """
+    for name, when in CROSS_CHECK_EVENTS:
+        eph = float(_planet(name, when).phase_angle_deg)
+        meeus = float(_meeus_planet(name, when).phase_angle_deg)
+        # Meeus ch.31 低精度（外行星 ~0.1°）与 DE421 的允许差，不是基准差
+        assert abs(eph - meeus) <= 0.5, f"{name} {when.date()} 基准不一致：{eph} vs {meeus}"
+        assert 0.0 <= eph <= 180.0 and 0.0 <= meeus <= 180.0
+

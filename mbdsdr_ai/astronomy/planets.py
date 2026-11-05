@@ -21,6 +21,9 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
+# 相位几何只认 solar_system 的唯一入口（本模块只负责 Meeus 星历三边）
+from mbdsdr_ai.solar_system import planet_phase_angle_from_geometry
+
 __all__ = ["PlanetPos", "compute_planet", "compute_moon", "compute_all", "recommend_targets"]
 
 J2000_JD = 2451545.0
@@ -138,9 +141,9 @@ def compute_planet(name: str, jd: float) -> PlanetPos:
 
     r_p = math.sqrt(x_p * x_p + y_p * y_p + z_p * z_p)
     r_e = math.sqrt(x_e * x_e + y_e * y_e + z_e * z_e)
-    cos_i = (r_p * r_p + dist * dist - r_e * r_e) / (2.0 * r_p * dist)
-    cos_i = max(-1.0, min(1.0, cos_i))
-    phase = math.degrees(math.acos(cos_i))
+    # 相位角基准与 solar_system 一致：P 点处 ∠(太阳, 地球)，0°=全亮、180°=全暗。
+    # 勿与月球混用——月球函数的入参是「日月距角」，0°=新月，照度用 1-cos。
+    phase = planet_phase_angle_from_geometry(r_p, dist, r_e)
 
     H, k = _MAGNITUDE_COEFFS[name]
     mag = H + 5.0 * math.log10(r_p * dist) + k * phase
