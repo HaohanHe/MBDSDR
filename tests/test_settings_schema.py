@@ -1391,9 +1391,9 @@ def test_ai_params_write_without_touching_secret(env):
 
 def test_restart_items_are_marked():
     restart = [it.key for it in EXPOSED_ITEMS if it.requires_restart]
-    assert restart == ["ui_language"]
-    item = SCHEMA["ui_language"]
-    assert item.restart_note
+    assert restart == ["ui_language", "log_level"]
+    for key in restart:
+        assert SCHEMA[key].restart_note
 
 
 def test_locked_items_documented():

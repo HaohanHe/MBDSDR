@@ -430,8 +430,14 @@ def main():
     # 绝不拦启动（仅告警）。
     try:
         import l10n as _l10n
+        from logging_setup import configure_from_settings
         from settings import DesktopSettings as _DesktopSettings
-        _l10n.install_translator(app, _DesktopSettings.load().get("ui_language"))
+
+        _boot_settings = _DesktopSettings.load()
+        # 日志级别来自设置项 log_level（默认 INFO）；在启动阶段读取，
+        # 改设置后重启生效。必须先于主窗口构造，避免丢掉启动期调试信息。
+        configure_from_settings(_boot_settings)
+        _l10n.install_translator(app, _boot_settings.get("ui_language"))
     except Exception as _l10n_ex:  # noqa: BLE001
         print(f"[mbdsdr] i18n: 加载失败，保持源语言 zh: {_l10n_ex}",
               file=sys.stderr)

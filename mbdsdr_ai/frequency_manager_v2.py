@@ -31,10 +31,20 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import tempfile
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+#: v2 文件格式的版本号；写入与读取必须一致。
+FILE_VERSION = 2
+
+
+class UnsupportedBookmarkVersion(ValueError):
+    """书签文件 version 与当前 v2 不兼容：拒绝读取，且不覆盖原文件。"""
 
 
 # ----------------------------------------------------------------------
@@ -101,8 +111,40 @@ class FrequencyManagerV2:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            # 读失败不静默：保留证据、保持空库，而且绝不回写覆盖原文件。
+            logger.warning("书签文件读取失败（%s）：%s；保持空库，不覆盖原文件",
+                           exc.__class__.__name__, self.path)
             return
+        if not isinstance(data, dict):
+            logger.warning("书签文件根节点不是对象，拒绝读取：%s", self.path)
+            return
+
+        version = data.get("version")
+        if version is None:
+            # 旧文件没有 version 字段：按 v1 语义读取，读出后补写 version=2，
+            # 让下一次读取走显式校验而不是再次猜测。
+            logger.info("书签文件缺少 version 字段，按 v1 语义读取：%s", self.path)
+            self._apply_payload(data)
+            try:
+                self.save()
+                logger.info("已补写 version=%s：%s", FILE_VERSION, self.path)
+            except OSError as exc:
+                logger.warning("补写 version=%s 失败（%s）：%s",
+                               FILE_VERSION, exc.__class__.__name__, self.path)
+            return
+
+        if version != FILE_VERSION:
+            # 明确的拒绝路径：不猜语义、不迁移、不改写文件。
+            message = (f"书签文件 version={version!r} 不受支持（只接受 "
+                       f"{FILE_VERSION}）：{self.path}；已拒绝读取，原文件保持不动")
+            logger.error(message)
+            raise UnsupportedBookmarkVersion(message)
+
+        self._apply_payload(data)
+
+    def _apply_payload(self, data: dict) -> None:
+        """把已通过版本校验（或 v1 迁移）的载荷装入内存。"""
         for g, meta in data.get("groups", {}).items():
             self.groups[g] = dict(meta)
         self.bookmarks = {g: [] for g in self.groups}
@@ -118,7 +160,7 @@ class FrequencyManagerV2:
     def save(self) -> None:
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         data = {
-            "version": 2,
+            "version": FILE_VERSION,
             "groups": self.groups,
             "bookmarks": [b.to_dict() for g in self.bookmarks for b in self.bookmarks[g]],
         }

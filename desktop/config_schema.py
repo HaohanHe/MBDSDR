@@ -334,6 +334,17 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         source=("desktop/main_window.py:5536 旧写死 ~/mbdsdr_recordings；"
                 "新唯一来源 desktop/settings.py:resolve_record_dir"),
     ),
+    SettingItem(
+        key="log_level", group="存储与日志", kind="enum",
+        label="日志级别", default="INFO",
+        help=("默认 INFO 只记常规信息；DEBUG 会多出调试细节，便于排查设备/解码问题。"
+              "级别在启动阶段读取，改完需重启应用才生效。"),
+        source=("desktop/logging_setup.py:configure_logging（默认 INFO；"
+                "消费点 desktop/main.py:main 启动时调用）"),
+        choices=(_e("INFO", "INFO（常规）"), _e("DEBUG", "DEBUG（调试）")),
+        requires_restart=True,
+        restart_note="日志级别在启动阶段读取，切换后重启应用才生效。",
+    ),
 
     # ---------------------------------------------------------------- 卫星与多普勒
     SettingItem(
@@ -508,9 +519,6 @@ LOCKED: Tuple[Tuple[str, str], ...] = (
      "设置里再开一套会出现两个不同步入口；持久化需坐标视图线在底栏直接写配置。"),
     ("Max/Min hold、dB 显示范围",
      "它们是测量态临时工具，不是长期偏好；重启清零是预期行为，持久化反而制造困惑。"),
-    ("日志级别",
-     "桌面端没有 logging.basicConfig/级别开关（仅分散的 getLogger），"
-     "没有可改的消费点；先补日志基础设施再谈配置。"),
     ("采样率 / 带宽 / 增益 / 解调模式 / 音量",
      "控制面板与设备面板已有即时控件并已持久化（main_window.py:3939-4226），"
      "重复暴露会产生两个入口；保持单一交互入口。"),

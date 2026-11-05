@@ -7,6 +7,7 @@ frequency_manager_v2 单测：CRUD / 持久化 / nearest / CSV / 自动分类
 import os
 import sys
 import json
+import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -14,6 +15,7 @@ import pytest
 
 from mbdsdr_ai.frequency_manager_v2 import (
     FrequencyManagerV2, BookmarkV2, DEFAULT_GROUPS,
+    UnsupportedBookmarkVersion,
 )
 
 
@@ -99,3 +101,40 @@ def test_classify_signal(fm):
     assert fm.classify_signal(98e6, mode_hint="WFM") == "broadcast"
     assert fm.classify_signal(156.8e6) == "marine"
     assert fm.classify_signal(145e6) == "ham"
+
+
+def test_missing_version_is_v1_migrated_and_rewritten(tmp_path, caplog):
+    """没有 version 的旧文件：按 v1 读，读出后补写 version=2。"""
+    path = tmp_path / "bookmarks_v2.json"
+    path.write_text(json.dumps({
+        "groups": {"ham": {"label": "业余", "color": "#43A047", "icon": "antenna"}},
+        "bookmarks": [{"name": "old", "freq_hz": 145e6, "group": "ham"}],
+    }), encoding="utf-8")
+
+    with caplog.at_level(logging.INFO, logger="mbdsdr_ai.frequency_manager_v2"):
+        fm = FrequencyManagerV2(path=str(path))
+
+    assert [b.name for b in fm.list()] == ["old"]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["version"] == 2
+    assert "缺少 version 字段" in caplog.text
+    assert "已补写 version=2" in caplog.text
+
+
+def test_unsupported_version_is_rejected_and_file_untouched(tmp_path, caplog):
+    """version=99：明确拒绝并报错，不猜语义、不改写原文件。"""
+    path = tmp_path / "bookmarks_v2.json"
+    payload = {
+        "version": 99,
+        "groups": {"ham": {"label": "业余"}},
+        "bookmarks": [{"name": "keep", "freq_hz": 145e6, "group": "ham"}],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR, logger="mbdsdr_ai.frequency_manager_v2"):
+        with pytest.raises(UnsupportedBookmarkVersion, match="version=99"):
+            FrequencyManagerV2(path=str(path))
+
+    assert "不受支持" in caplog.text
+    # 拒绝路径不得静默覆盖：原文件仍是 version 99。
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 99
