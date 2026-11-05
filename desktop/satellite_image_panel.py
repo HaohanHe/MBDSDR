@@ -194,9 +194,11 @@ class SatelliteImagePanel(QWidget):
             self.stats_label.setText(f"解码失败: {_clean_exc(e)}")
             return
         if not result.get("apt_present"):
+            lines = result.get("lines_aligned")
+            lock = result.get("lock_ratio")
             self.stats_label.setText(
-                f"行数: {result.get('lines_aligned',0)}  | "
-                f"同步: {result.get('lock_ratio',0):.0%}  | 无 APT 信号")
+                f"行数: {'—' if lines is None else lines}  | "
+                f"同步: {'—' if lock is None else f'{lock:.0%}'}  | 无 APT 信号")
             self.image_label.setText(SAT_WAIT_TEXT)
             return
         self._show_apt_result(result, sat)
@@ -218,11 +220,13 @@ class SatelliteImagePanel(QWidget):
                 pix.scaled(self.image_label.size(),
                            Qt.KeepAspectRatio, Qt.SmoothTransformation))
             self.save_btn.setEnabled(True)
-        lr = result.get("lock_ratio", 0.0)
-        lines = result.get("lines_aligned", 0)
+        lr = result.get("lock_ratio")
+        lines = result.get("lines_aligned")
+        quality = ("—" if lr is None
+                   else "优" if lr > 0.85 else "中" if lr > 0.6 else "弱")
         self.stats_label.setText(
-            f"行数: {lines}  | 同步: {lr:.0%}  | "
-            f"信号质量: {'优' if lr > 0.85 else '中' if lr > 0.6 else '弱'}")
+            f"行数: {'—' if lines is None else lines}  | "
+            f"同步: {'—' if lr is None else f'{lr:.0%}'}  | 信号质量: {quality}")
         self.progress.setValue(100)
         self._load_history()
 

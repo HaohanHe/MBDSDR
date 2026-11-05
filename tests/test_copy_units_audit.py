@@ -332,3 +332,37 @@ def test_u03_status_output_uses_ms_per_s_for_sample_rate():
     txt = _format_status(SDRStatus(sample_rate_hz=2_048_000.0))
     assert "采样率: 2.048 MS/s" in txt
     assert "采样率: 2.048 MHz" not in txt
+
+
+# ---------------------------------------------------------------------------
+# 批次 5：缺值不得冒充读数（APT 统计 / 表单预填）
+# ---------------------------------------------------------------------------
+def test_u02_apt_stats_missing_values_render_dash():
+    """U-02：放射性统计（行数/锁相）缺值显示「—」，不显示 0 / 0%。"""
+    _SAT_IMG = open(os.path.join(_ROOT, "desktop", "satellite_image_panel.py"),
+                    encoding="utf-8").read()
+    _WEATHER = open(os.path.join(_ROOT, "desktop", "weather_panel.py"),
+                    encoding="utf-8").read()
+    for src in (_SAT_IMG, _WEATHER):
+        assert "get('lines_aligned',0)" not in src
+        assert "get('lock_ratio',0)" not in src
+        assert 'get("lock_ratio", 0.0)' not in src
+        assert 'get("lines_aligned", 0)' not in src
+    assert "行数: {'—' if lines is None else lines}" in _SAT_IMG
+    assert "同步: {'—' if lock is None else f'{lock:.0%}'}" in _SAT_IMG
+
+
+def test_u02_satellite_form_prefill_uses_empty_placeholder():
+    """U-02：卫星参数表单缺值不得预填 0.000 / 0.0。"""
+    _WEATHER = open(os.path.join(_ROOT, "desktop", "weather_panel.py"),
+                    encoding="utf-8").read()
+    assert "get('freq_mhz', 0)" not in _WEATHER
+    assert "get('symrate_ksps', 0)" not in _WEATHER
+
+
+def test_u03_troubleshooting_error_hint_uses_ms_per_s():
+    """U-03：错误建议里的采样率档位不得写 MHz。"""
+    _TROUBLE = open(os.path.join(_ROOT, "desktop", "troubleshooting.py"),
+                    encoding="utf-8").read()
+    assert "如 2.048 MHz" not in _TROUBLE
+    assert "如 2.048 MS/s" in _TROUBLE

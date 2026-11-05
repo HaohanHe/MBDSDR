@@ -286,9 +286,11 @@ class DecodeWorker(QObject):
         self.progress.emit(f"音频 {len(audio)/fs:.1f}s @ {fs/1e3:.1f}kHz → AM 包络/行同步 ...")
         res = apt.decode_apt(audio, fs)
         if not res.get("apt_present"):
+            lines = res.get("lines_aligned")
+            lock = res.get("lock_ratio")
             self._emit(ok=False, error=f"APT 未锁相: {res.get('reason')} "
-                                       f"(对齐行 {res.get('lines_aligned', 0)}, "
-                                       f"lock {res.get('lock_ratio', 0)})")
+                                       f"(对齐行 {'—' if lines is None else lines}, "
+                                       f"lock {'—' if lock is None else lock})")
             return
         paths = apt.save_apt_png(res, out_prefix)
         self._emit(ok=True, png=paths["combo"],
@@ -530,9 +532,12 @@ class WeatherPanel(QWidget):
 
     def _on_satellite_changed(self, _idx: int):
         sat = self._current_sat()
-        self.freq_edit.setText(f"{sat.get('freq_mhz', 0):.3f}")
-        self.sym_edit.setText(f"{sat.get('symrate_ksps', 0):.1f}")
-        self.sr_edit.setText(f"{sat.get('srate_msps', 1.0):.2f}")
+        freq = sat.get("freq_mhz")
+        sym = sat.get("symrate_ksps")
+        srate = sat.get("srate_msps")
+        self.freq_edit.setText("" if freq is None else f"{float(freq):.3f}")
+        self.sym_edit.setText("" if sym is None else f"{float(sym):.1f}")
+        self.sr_edit.setText("" if srate is None else f"{float(srate):.3f}")
         self._refresh_state()
 
     def _refresh_state(self):
