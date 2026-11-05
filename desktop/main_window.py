@@ -1647,6 +1647,15 @@ class MainWindow(QMainWindow):
         ok = bool(panel.request_sky_action(context))
         if not ok:
             self._reset_sky_pending_ui(action)
+            name = "跟踪" if action == "track" else "云台跟随"
+            text = (
+                f"{name}未启动：AI 没有接受这次请求"
+                "（可能未配置 API Key、正忙或需要先确认硬件）。"
+                "下一步：打开右侧「AI」面板查看原因后重试，"
+                "或在天空页手动操作。")
+            self.statusBar().showMessage(text, 8000)
+            if getattr(self, "_app_mode", "ide") == "planetarium":
+                self._on_planetarium_ai_reply(text)
         return ok
 
     def _reset_sky_pending_ui(self, action: str) -> None:
