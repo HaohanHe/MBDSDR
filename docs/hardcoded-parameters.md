@@ -164,7 +164,7 @@ rel 6.0 dB / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘
 | # | 语义 | 两套值 | 位置 |
 |---|---|---|---|
 | D-1 | 默认采样率 | `2.048 MS/s` vs `2.4 MS/s` | `config_schema.py:260` vs `tokens.h:301` |
-| D-2 | ~~调谐步进默认 10 kHz vs 100 kHz~~ **已撤回（见下）** | Python 10 kHz；C++ `kFreqCoarseStepHz = 10000` | `control_panel.py:323` vs `tokens.h:816` |
+| D-2 | ~~调谐步进默认 10 kHz vs 100 kHz~~ **判据不成立**：两端实际均为 10 kHz，不构成两套数 | Python `self._step_hz = 10_000.0`；C++ `kFreqCoarseStepHz = 10000.0` | `desktop/control_panel.py:195` / `cpp/src/core/tokens.h:850` |
 | D-3 | ~~FFT 档位数量~~ **已统一（2026-11-05，见下）** | 两端均三档 `1024/2048/4096`（Python `FFT_SIZES` == schema `fft_size.choices`） | `e883a62b` — `desktop/spectrum_widget.py:218` — `FFT_SIZES = (1024, 2048, 4096)`；两端对照 `config_schema.py:176` / `settings_dialog.cpp:250` |
 | D-4 | dB 默认量程 | `-100..-20` vs `-45..0` | `spectrum_widget.py:916-917` + 默认值 vs `tokens.h:329-330` |
 | D-5 | 瀑布行数 | 固定 `256` vs 可选 `128..4096` | `spectrum_widget.py:161` vs `tokens.h:698` |
@@ -532,9 +532,9 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 | # | 议题 | 状态 |
 |---|---|---|
-| 1 | 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 6 dB 余量） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a），`gain_db` 写入需设置线接 1 行。 |
-| 2 | 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° | **已落地**（§10-2）。剩余：`rf_sky_view` 的 `PASS_MIN_ALT_DEG` 改引用常量（P-2b）。 |
-| 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 |
+| 1 | 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 6 dB 余量） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a），`gain_db` 写入需设置线接 1 行。 待他线落库后回填取证。 |
+| 2 | 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° | **已落地**（§10-2）。剩余：`rf_sky_view` 的 `PASS_MIN_ALT_DEG` 改引用常量（P-2b）。 待他线落库后回填取证。 |
+| 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 待他线落库后回填取证。 |
 | 3b | 调谐步进统一 10 kHz | **前提不成立，撤回**（§D-2）：C++ 调谐步进本就是 `kFreqCoarseStepHz=10 kHz`；100 kHz 是扫描步进。 |
 | 4 | 峰值 6 dB vs 15 dB | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧 / 5 bin / 10 帧`**；Python 6.0 保留，C++ 显示门新增 `kPeakRelDb=6.0`（校准参考门 15 保留不合并）。15 dB + 绝对底 = -85 dBFS，+8 dB 弱载波 -92 dBFS → 24 帧 0 峰，故不取 15。 |
 | 5 | "无数据"哨兵 | **结论：改用 NaN/None，禁止用落在量程内的 dB 数**；改 Python 侧 → P-8c。C++ `-100` 是真实安静读数，加注释区分。 |
@@ -761,7 +761,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | 6 | `cpp/src/core/tokens.h:407-409` | `kSquelchMinDb=-100` / `kSquelchMaxDb=-20` / `kSquelchDefaultDb=-50`，注释 "AUDIO-BLOCK RMS dBFS domain" | C++ 48 kHz **解调音频块 RMS 绝对 dBFS** | **保留**；auto 门 = 同域噪声底 + `kSquelchAutoMarginDb=8.0`（`spectrum_engine.cpp:1892-1896`），是"绝对底+余量"，与 Python 滑杆余量不同量纲（本行为登记声明，无可引提交；对应实现在 `cpp/src/core/tokens.h:407-409` 由内核线维护；口径见 §7） |
 | 7 | `cpp/src/dsp/spectrum_engine.h:951` | `float squelchThreshold_ = -50.0f;` | 同上；token 默认值的缓存镜像 | **保留** |
 | 8 | `desktop/main_window.py:567` | `self._squelch_db: float = -80.0` | 旧单线程演示路径的**绝对 IQ dBFS** 门 | **P-8a**（操作逻辑线，本线不动） |
-| 9 | `desktop/main_window.py:5534-5535` | `dbfs = 10.0 * math.log10(p + 1e-12)` / `if dbfs < self._squelch_db:` | 同上（全带宽 IQ 功率） | **P-8a**；多线程 `ReceivePipeline` 路径已改余量 |
+| 9 | `desktop/main_window.py:5534-5535` | `dbfs = 10.0 * math.log10(p + 1e-12)` / `if dbfs < self._squelch_db:` | 同上（全带宽 IQ 功率） | **P-8a**；改动在位：多线程 `ReceivePipeline` 改用 `BaselineSquelch`（`desktop/receive_pipeline.py:251`）；本行所指旧演示路径仍未改 |
 | 10 | `mbdsdr_ai/receive_chain.py:153` + `:239-243` | `squelch_db: float = -150.0` → `Squelch(threshold_db=self._squelch_db, ... sample_rate=if_sr)` | AI 后端（`sdr_backend.py:159/646`）**IF RMS 绝对 dBFS** | **保留**；另一后端链，工具面 `sdr_tools.py:654` 描述 "静噪阈值，单位 dB。-100=关闭静噪" |
 | 11 | `mbdsdr_ai/gated_recorder.py:252-257` | `AutoSquelch(margin_db=self.cfg["margin"], ...)` / `NoiseSquelch(...)` | 音频域**自跟踪噪声底 + 余量** / 频谱形态判据 | **保留**；不是固定绝对阈值 |
 | 12 | `mbdsdr_ai/agent.py:1796-1813` | `th = float(args.get("threshold_db", -50.0))`，描述 "门控阈值 dBFS" | `sdr_squelch_gate` 对**传入 IQ** 按块 RSSI 判门 | **保留**；独立工具，不驱动桌面静噪 |
