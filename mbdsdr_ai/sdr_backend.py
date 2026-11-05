@@ -1567,8 +1567,9 @@ class RTLSDRBackend(SDRBackend):
             supports_tx=False,
         )
         super().__init__(device)
-        # 默认采样率：吸附到 SDR++ main.cpp:27-39 离散档里的 2.048M（见类常量
-        # DEFAULT_SAMPLE_RATE 注释）。connect() 后 _apply_sample_rate 会真正下发硬件。
+        # 默认采样率：2.400 MS/s（模块级 DEFAULT_SAMPLE_RATE_HZ，见类常量
+        # DEFAULT_SAMPLE_RATE 注释）；该档在 SDR++ main.cpp:27-39 的离散档内。
+        # connect() 后 _apply_sample_rate 会真正下发硬件。
         self.status.sample_rate_hz = float(self.DEFAULT_SAMPLE_RATE)
         self._device_index = device_index
         self._host = host

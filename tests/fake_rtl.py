@@ -33,7 +33,7 @@ class FakeRtlSdr:
     只实现 RTLSDRBackend 真正用到的属性/方法：
       - center_freq / sample_rate / gain / freq_correction / bandwidth：
         可读写 property，写入时记录到 call_history
-      - tuner_type：int（R820T = 5，与 sdr_backend.py:580 枚举一致）
+      - tuner_type：int（R820T = 5，与 `RTLSDRBackend._probe_tuner_type` 的码表一致）
       - read_samples(n) -> np.complex64 一维数组
       - set_manual_gain_mode / set_agc_mode / set_direct_sampling /
         set_bias_tee / set_offset_tuning / reset_buffer / close
