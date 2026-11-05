@@ -11,10 +11,13 @@ MBDSDR 频谱显示组件
 **不绘制任何谱线、不生成高斯峰、不使用 np.random 造假谱**。
 """
 
+import logging
 import math
 import numpy as np
 import time
 from typing import Optional, List, Tuple, Dict
+
+_log = logging.getLogger(__name__)
 
 from constants import DEFAULT_SAMPLE_RATE_HZ
 
@@ -2768,8 +2771,8 @@ class _TuningPlotMixin:
                         self)
                 else:
                     QToolTip.hideText()
-            except Exception:  # noqa: BLE001 —— 气泡是辅助，失败静默
-                pass
+            except Exception as exc:  # noqa: BLE001 —— 气泡是辅助，失败留痕
+                _log.debug("峰值悬停提示失败: %s", exc)
 
         # 频段彩带悬停（SDR++ bandplan 仿妆）：命中变化时提亮 + 气泡提示；
         # 拖拽/平移中不刷气泡，避免噪声。峰命中优先，两个气泡不抢同一光标。
