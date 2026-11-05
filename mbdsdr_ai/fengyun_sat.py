@@ -667,7 +667,12 @@ def decode_fy4_vcdus(vcdus: List[bytes]) -> List[FY4Image]:
 
 
 def fy4_lrit_pipeline(segments: List[bytes]) -> List[FY4Image]:
-    """给定若干完整 FY-4 xRIT 段文件字节，直接重组出图（跳过传输层）。"""
+    """给定若干完整 FY-4 xRIT 段文件字节，直接重组出图（跳过传输层）。
+
+    保留（入口角色，见 docs/redundancy-register.md §5.8.1）：本函数是 FY-4 LRIT
+    的对外流水线入口，可被外部按名调用；tests/test_fy4_iq_chain.py 覆盖的是
+    链路零件，不能用「零件有测试」推导「入口可删」，零文本命中不等于无调用方。
+    """
     asm = FY4SegmentAssembler()
     out: List[FY4Image] = []
     for s in segments:

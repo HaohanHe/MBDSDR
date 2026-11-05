@@ -144,6 +144,11 @@ def select_decoder(freq_mhz: Optional[float] = None,
       1. 若指定 mode 且已注册 → 直接返回该解码器
       2. 否则若指定 freq_mhz → 返回频段匹配的第一个解码器
       3. 都不满足 → 返回 None
+
+    保留（入口角色，见 docs/redundancy-register.md §5.8.1）：全仓文本零命中的
+    结论来自「本轮快照里没有调用方」，不等于没有外部/CLI 按名调用；本函数是
+    注册表对外公开的稳定选择入口，且 tests/test_modularization_audit.py 依赖
+    注册表完整性。删除属于移除 API 面，不是清理死代码。
     """
     if mode:
         desc = get_decoder(mode)
