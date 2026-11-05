@@ -820,7 +820,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | 机制 | 实现位置 | 实际行为 |
 |---|---|---|
 | 私有模块冒烟 | `desktop/main.py:_RISKY_IMPORTS`（13 项）、`_run_import_smoke` | 在创建 `QApplication` 之前逐项 `importlib.import_module`；结果写成 `[smoke] 私有模块导入自检 n/13 通过`，失败项列名，**不阻断启动** |
-| 缺件归因三分类 | `desktop/main.py:_packaging_verdict`、`_import_error_text` | `defect`（安装包从未打进，属打包问题）/ `incomplete`（安装包里有但被删或被隔离）/ `unknown`（判不了），三类文案与行动建议不同 |
+| 缺件归因三分类 | `desktop/main.py:_packaging_verdict`、`_import_error_text` | `defect`（整棵子树缺失）/ `incomplete`（只缺单文件、同子树其余仍可导入）/ `unknown`（判不了），三类文案与行动建议不同 |
 | Qt 平台插件判定 | `desktop/main.py:_qt_platform_plugin_problem` | 仅 Windows 生效；区分"平台插件缺失"与一般启动失败 |
 | 日志落点策略 | `desktop/startup_paths.py:log_candidates` / `startup_log_path` / `append_startup_log` | 候选顺序：`MBDSDR_STARTUP_LOG` 覆盖 → 各固定/可移动盘 `X:\mbdsdr\logs\` → 程序目录 `logs\` → `%PROGRAMDATA%\MBDSDR\logs\`；**不写用户目录**；全不可写时回退内存环形缓冲（200 行），`startup_log_path()` 返回空串 |
 | 异步可写探测 | `desktop/startup_paths.py:probe_dir_writable_async` | 探针线程 + 回调，避免安装目录/网络盘写入卡 UI |
