@@ -405,10 +405,23 @@ def test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz():
                    encoding="utf-8").read()
     _PIPE = open(os.path.join(_ROOT, "mbdsdr_ai", "decode_pipeline.py"),
                  encoding="utf-8").read()
-    assert "fs ≥ 2 MS/s 且为 1 MS/s 整数倍" in _ADSB
-    assert "fs ≥ 2 MS/s 且为 1 MS/s 整数倍（Mode-S 1Mbit/s 前导 8us）" in _ROUTER
-    assert "fs=2 MS/s 或 4 MS/s" in _ROUTER
-    assert "fs ≥ 2 MS/s 且为 1 MS/s 整数倍（1Mbit/s PPM）" in _PIPE
+    # 只钉不变式（采样率必须以 MS/s 表达），不钉整句：规则正文会被 ADS-B 线
+    # 正常改写（如 8c95b227 换成「fs ≥ 2 MS/s；严格入口…」），钉整句就会误报。
+    assert "fs ≥ 2 MS/s" in _ADSB
+    assert "fs ≥ 2 MS/s" in _ROUTER
+    assert "fs ≥ 2 MS/s" in _PIPE
+    # 频率仍用 MHz（1090MHz 是频点，不是采样率）
+    assert "1090MHz" in _ROUTER
+
+
+def test_u03_troubleshooting_next_steps_use_ms_per_s_for_adsb_fs():
+    """U-03：排障「下一步」里 ADS-B 的 fs 必须 MS/s（fs=2MHz / 2/4MHz 是错量纲）。"""
+    _TR = open(os.path.join(_ROOT, "desktop", "troubleshooting.py"),
+               encoding="utf-8").read()
+    for bad in ("fs=2/4MHz", "fs=2MHz", "fs=2/4 MHz", "2/4 MHz"):
+        assert bad not in _TR, f"troubleshooting.py: 仍写 {bad}"
+    assert "ADS-B 保持 1090MHz 与 fs=2 MS/s 或 4 MS/s。" in _TR
+    assert "（ADS-B 需 fs=2 MS/s 或 4 MS/s）" in _TR
 
 
 def test_u02_gnss_psd_fields_never_labeled_dbm():

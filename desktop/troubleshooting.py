@@ -249,7 +249,7 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
 CODE_NEXT_STEPS: Dict[str, str] = {
     "crc_failed": (
         "「控制」页签降低解调带宽并提高增益，改善天线后重录；"
-        "APRS 类录满一整帧（实战建议 ≥5s），ADS-B 保持 1090MHz 与 fs=2/4MHz。"),
+        "APRS 类录满一整帧（实战建议 ≥5s），ADS-B 保持 1090MHz 与 fs=2 MS/s 或 4 MS/s。"),
     "insufficient_samples": (
         "点「工具」菜单的「开始/停止录音」（Ctrl+R）延长录制时长到至少一整帧再"
         "重试（代码按最短一帧校验：APRS 0.2s，FT4 75s 整帧）。"),
@@ -265,7 +265,7 @@ CODE_NEXT_STEPS: Dict[str, str] = {
         "「控制」页签核对频点与增益，确认真有信号后再重试；"
         "没有信号时不要继续重试。"),
     "preamble_not_found": (
-        "在「控制」页签核对频点与采样率（ADS-B 需 fs=2MHz 或 4MHz），"
+        "在「控制」页签核对频点与采样率（ADS-B 需 fs=2 MS/s 或 4 MS/s），"
         "确认信号存在后再重试。"),
     "sample_rate_mismatch": (
         "在「控制」页签把采样率改成解码器要求的整数倍档位（如 ADS-B 用 "
