@@ -192,6 +192,24 @@ def main_window(request):
     # 依赖跑测顺序。重抛光把控件统一到 QSS 生效后的最终尺寸。
     app.setStyleSheet(app.styleSheet())
     _pump(150)
+    # 尺寸归一化：实际尺寸只允许是「请求值」与「产品声明的最小尺寸」的较大者。
+    # show() 后若被布局最小高度或前序用例的 resize/set_app_mode 残留撑高，
+    # 先记在 _audit_actual_after_show 上，交给
+    # test_window_size_is_run_order_independent 点名（不静默重钉把耦合藏起来），
+    # 再显式钉回声明尺寸，保证后续用例与截图都落在同一个尺寸上。
+    actual_after_show = (win.width(), win.height())
+    expected = (max(width, win.minimumWidth()),
+                max(height, win.minimumHeight()))
+    win.setProperty("_audit_actual_after_show",
+                    f"{actual_after_show[0]}x{actual_after_show[1]}")
+    win.setProperty("_audit_expected", f"{expected[0]}x{expected[1]}")
+    if actual_after_show != expected:
+        win.resize(*expected)
+        win.layout().activate()
+        _pump(100)
+    assert (win.width(), win.height()) == expected, (
+        f"窗口尺寸 {win.width()}x{win.height()} 钉不到声明尺寸 "
+        f"{expected[0]}x{expected[1]}")
     yield win
     try:
         win._disconnect()
@@ -214,6 +232,27 @@ def test_baseline_environment_is_isolated(main_window):
     assert not os.path.exists(
         os.path.expanduser("~/.mbdsdr/bookmarks.json")), (
         "~/.mbdsdr 未重定向到临时目录，基线会依赖跑它的人")
+
+
+def test_window_size_is_run_order_independent(main_window):
+    """窗口尺寸只由「请求值」与产品声明的最小尺寸决定，与跑测顺序无关。
+
+    反证（2026-11-05 实测）：只跑 ``-k "1000x600 or 1600x900"`` 时曾出现
+    1000x774，而截图基线键取自 live 尺寸（``{panel}_{宽}x{高}.png``），
+    于是报「基线缺失 *_1000x774.png」。根因是夹具从未核对 ``resize()``
+    是否真的落地，任何前序用例（如 planetarium 卡片的 set_app_mode）留下
+    的高度都会顺着模块级夹具传给截图用例。本用例把 show() 后的真实尺寸
+    与声明尺寸对拍，跑单个尺寸子集时同样生效。
+    """
+    requested = main_window.property("_audit_requested")
+    expected = main_window.property("_audit_expected")
+    after_show = main_window.property("_audit_actual_after_show")
+    assert after_show == expected, (
+        f"{requested}: show() 后窗口被撑成 {after_show}，声明尺寸是 "
+        f"{expected}；尺寸漂移会让截图按 live 尺寸取基线键并误报缺失")
+    assert f"{main_window.width()}x{main_window.height()}" == expected, (
+        f"{requested}: 当前窗口 {main_window.width()}x{main_window.height()} "
+        f"已偏离声明尺寸 {expected}")
 
 
 def _select_left(win, key: str) -> None:
@@ -674,7 +713,13 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
     dpr = main_window.devicePixelRatioF()
     img = _normalize(_panel_image(main_window, panel), dpr)
     assert not img.isNull(), f"{panel} 截图为空"
-    size = f"{main_window.width()}x{main_window.height()}"
+    # 基线键按「请求尺寸钳到声明最小尺寸」取，不跟 live 尺寸走：先断言
+    # 当前窗口仍是声明尺寸，否则 1000x774 这类漂移会伪装成「基线缺失」。
+    expected = main_window.property("_audit_expected")
+    assert f"{main_window.width()}x{main_window.height()}" == expected, (
+        f"{panel}: 截图前窗口 {main_window.width()}x{main_window.height()} "
+        f"已偏离声明尺寸 {expected}（基线键不跟 live 尺寸走）")
+    size = expected
     path = os.path.join(BASELINE_DIR, f"{panel}_{size}.png")
 
     if _UPDATE:
