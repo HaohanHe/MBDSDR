@@ -112,6 +112,24 @@ def test_rtty_roundtrip():
     print("[PASS] RTTY 2FSK roundtrip")
 
 
+def test_rtty_long_frame_no_clock_drift():
+    """长帧回归：调制与解调必须使用同一个整数每 bit 采样数。
+
+    修复前调制按 int(round(spb)) = 176 样本/bit 发射，解调窗口却用
+    int(k * 176.0176) 的浮点边界：k=57 起窗口多 1 样本，约 4853 bit
+    （≈600 字符）后累计漂移半个 bit，位判决开始错。实测 1000 字符
+    失配 1485 bit、2000 字符失配 5728 bit，最终只回 handler_error。
+    """
+    modem = RTTYModem()
+    assert modem.spb == 8000 / 45.45
+    assert modem.spb_samples == 176, "8000/45.45 应量化为 176 样本/bit"
+    text = ("HELLO BI1AAA " * 214).strip()  # 2996 字符
+    wav = modem.modulate(text)
+    out = modem.demodulate(wav)
+    assert out.strip() == text, f"RTTY 长帧失配：{len(text)} 字符"
+    print(f"[PASS] RTTY long frame ({len(text)} chars, no clock drift)")
+
+
 # ---------------------------------------------------------------------------
 # 5. MFSK 符号往返
 # ---------------------------------------------------------------------------
@@ -170,6 +188,7 @@ if __name__ == "__main__":
     test_psk31_roundtrip()
     test_ita2_letter_figure_shift()
     test_rtty_roundtrip()
+    test_rtty_long_frame_no_clock_drift()
     test_mfsk_roundtrip()
     test_feldhell_framework()
     test_olivia_thor_params()

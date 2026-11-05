@@ -306,7 +306,13 @@ class RTTYModem:
         self.shift_hz = shift_hz
         self.mark_hz = mark_hz
         self.space_hz = mark_hz + shift_hz
-        self.spb = sample_rate / baud  # samples per bit
+        self.spb = sample_rate / baud  # 名义每 bit 采样数（可能带小数）
+        #: 实际发射/判决使用的整数每 bit 采样数。调制按整数发射，解调必须用同一
+        #: 整数窗口：若解调用 int(k * spb) 的浮点边界（如 176.0176），窗口会按
+        #: 0.0176 样本/bit 漂移，约 4850 bit（≈600 字符）后跨过半个 bit，判决开始
+        #: 错（实测 1000 字符失配 1485 bit）。8000/176 = 45.4545 baud，与标称
+        #: 45.45 一致，量化误差远小于 RTTY 的容差。
+        self.spb_samples = int(round(self.spb))
 
     def _bits_from_symbols(self, syms: List[int]) -> List[int]:
         """5bit 符号序列 -> 串行 NRZ 比特流（每字符: start=0, 5 data LSB first, stop=1）。
@@ -330,11 +336,11 @@ class RTTYModem:
         phase_space = 0.0
         dphi_mark = 2.0 * math.pi * self.mark_hz / self.sample_rate
         dphi_space = 2.0 * math.pi * self.space_hz / self.sample_rate
-        spb = self.spb
+        spb = self.spb_samples
         for b in bits:
             f_phase = phase_mark if b == 1 else phase_space
             dphi = dphi_mark if b == 1 else dphi_space
-            for _ in range(int(round(spb))):
+            for _ in range(spb):
                 out.append(math.cos(f_phase))
                 f_phase += dphi
                 if f_phase > 2 * math.pi:
@@ -353,14 +359,14 @@ class RTTYModem:
         每个 bit 只需 4 个累加器。
         """
         n = len(samples)
-        spb = self.spb
+        spb = self.spb_samples  # 与调制同口径的整数窗口，禁止用浮点 spb
         dphi_mark = 2.0 * math.pi * self.mark_hz / self.sample_rate
         dphi_space = 2.0 * math.pi * self.space_hz / self.sample_rate
         pm, ps = 0.0, 0.0
-        nbits = int(n / spb)
+        nbits = n // spb
         bits = []
         mi = mq = si = sq = 0.0
-        edge = int(spb)
+        edge = spb
         for i, s in enumerate(samples):
             # 正交混频到 mark/space 基带，并在当前 bit 窗口内累加
             mi += s * math.cos(pm)
@@ -378,7 +384,7 @@ class RTTYModem:
                 e_space = si * si + sq * sq
                 bits.append(1 if e_mark > e_space else 0)
                 mi = mq = si = sq = 0.0
-                edge = int((len(bits) + 1) * spb)
+                edge = (len(bits) + 1) * spb
 
         # 帧同步：找 start bit (0)，然后取 5 data bits (LSB first)，跳 stop
         syms = []
@@ -771,11 +777,27 @@ def register_fldigi_modes_tools(registry) -> None:
         m = RTTYModem()
         wav = m.modulate(text)
         out = m.demodulate(wav)
-        ok = out.strip() == text.strip()
+        # ITA-2 只有大写字母表，编码时内部 upper()；期望值同步大写。
+        # 字符表外的字符（如 ~、emoji）根本不会被编码，先剔除再比对。
+        expected = "".join(c.upper() for c in text
+                           if ITA2.encode_char(c, False)[0] is not None)
+        ok = out.strip() == expected.strip()
+        if not ok:
+            return ToolResult(
+                success=False,
+                content=(f"RTTY 往返在 {len(text)} 字符长度下解码不可靠："
+                         f"解出 {out[:40]!r}…，期望 {expected[:40]!r}…。"
+                         f"该长度的 RTTY 解码结果不可信，请缩短文本或改用 "
+                         f"psk31_decode。"),
+                error="decode_error",
+                data={"input": text, "output": out, "expected": expected,
+                      "match": False, "length": len(text)},
+                next_step="把文本缩短到 500 字符以内重试，或改用 psk31_decode。",
+            )
         return ToolResult(
-            success=ok,
-            content=f"RTTY 往返: in={text!r} out={out!r} {'OK' if ok else 'MISMATCH'}",
-            data={"input": text, "output": out, "match": ok},
+            success=True,
+            content=f"RTTY 往返: in={text!r} out={out!r} OK",
+            data={"input": text, "output": out, "match": True},
         )
 
     def _mfsk_decode(args):
