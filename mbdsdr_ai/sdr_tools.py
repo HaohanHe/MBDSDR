@@ -6044,11 +6044,11 @@ def _gnss_monitor_band(args):
     lines = [f"=== GNSS 频带监测: {band_name} ==="]
     lines.append(f"中心频率: {center_freq/1e6:.3f} MHz")
     lines.append(f"监测带宽: {sample_rate/1e6:.3f} MHz")
-    lines.append(f"平均功率: {result.power_dbm:.1f} dB")
-    lines.append(f"噪声基底: {result.noise_floor_dbm:.1f} dB")
+    lines.append(f"平均功率: {result.power_dbm:.1f} dB（相对读数，非 dBm）")
+    lines.append(f"噪声基底: {result.noise_floor_dbm:.1f} dB（相对读数，非 dBm）")
     lines.append(f"干扰噪声比(INR): {result.inr_db:.1f} dB")
     lines.append(f"峰值频率: {result.peak_freq_hz/1e6:.3f} MHz")
-    lines.append(f"峰值功率: {result.peak_power_dbm:.1f} dB")
+    lines.append(f"峰值功率: {result.peak_power_dbm:.1f} dB（相对读数，非 dBm）")
     lines.append(f"干扰类型: {result.interference_type.value}")
     lines.append(f"分类置信度: {result.confidence*100:.1f}%")
 
@@ -6129,7 +6129,7 @@ def _gnss_direction_find(args):
 
     lines = ["=== 干扰源方向估算（八木天线RSSI扫描）==="]
     lines.append(f"估算方向: {result['estimated_direction_deg']}°")
-    lines.append(f"峰值RSSI: {result['peak_rssi_dbm']}（相对读数 dB）")
+    lines.append(f"峰值RSSI: {result['peak_rssi_dbm']}（相对读数 dB，非 dBm）")
     lines.append(f"置信度: {result['confidence']}")
     lines.append(f"说明: {result['note']}")
     lines.append(f"验证: {result['symmetric_check']}")

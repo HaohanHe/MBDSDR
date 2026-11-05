@@ -44,11 +44,13 @@ class GNSSBandResult:
     band_name: str           # 频带名称（L1/L2/L5/B1/B2/B3）
     center_freq_hz: float    # 中心频率
     bandwidth_hz: float      # 监测带宽
-    power_dbm: float = 0.0   # 平均功率（dBm）
-    noise_floor_dbm: float = 0.0  # 噪声基底（dBm）
+    # 字段名沿用历史 *_dbm 以兼容消费方；实际是相对读数 dB（归一化 PSD
+    # |I/Q|²/Hz 的 dB 比值），**不是 dBm**，不可按绝对功率换算或标 dBm。
+    power_dbm: float = 0.0   # 平均功率（相对读数 dB，非 dBm）
+    noise_floor_dbm: float = 0.0  # 噪声基底（相对读数 dB，非 dBm）
     inr_db: float = 0.0      # 干扰噪声比（dB）
     peak_freq_hz: float = 0.0  # 峰值频率
-    peak_power_dbm: float = 0.0  # 峰值功率
+    peak_power_dbm: float = 0.0  # 峰值功率（相对读数 dB，非 dBm）
     interference_type: InterferenceType = InterferenceType.NONE
     confidence: float = 0.0  # 分类置信度（0-1）
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
