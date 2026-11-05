@@ -84,7 +84,7 @@ python scripts/lint_swallow_all.py --write-baseline docs/code-guards-baseline.js
 python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不越线）
 ```
 
-### 复核记录（2026-11-05，HEAD `9b803d0`，工作区含他线在途改动）
+### 复核记录（2026-11-05，HEAD `d41591b`，工作区含他线在途改动）
 
 - 扫描：1,069 文件 / catch-all 1,896 / 静默 1,392 / 须修 1,391（基线 1,398，总量仍**只降**）。
 - 越线 1 项（**干净 HEAD 也红**）：`mbdsdr_ai/hackrf_params.py` `WARN 2 > 基线 1`。基线提交 `7332b95`（10:23）之后落地的 `9b803d0`（10:57，TX 流）新增了 `write_tx` 的 `except Exception: return False`（HEAD 第 625 行）。**不得靠调高该文件基线消化**：交后端线补日志/错误状态字段，或按标准修法登记白名单三问 + `review_by`。
@@ -102,8 +102,8 @@ python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不�
 
 ### A1. `desktop/main_window.py`：连接/录制/设备路径的 EMPTY（48 处）
 
-`main_window.py` 本轮不碰，交桌面/操作逻辑线。行号已按当前 HEAD 提交树
-（`26fb3d7`）重新核对；该文件无在途改动，工作区与 HEAD 一致：
+`main_window.py` 本轮不碰，交桌面/操作逻辑线。行号已按当前提交树
+（`5332140`）重新核对；该文件近期无提交改动：
 
 | 方法（用户动作） | ERROR 行号 |
 | --- | --- |
@@ -124,23 +124,24 @@ python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不�
 
 ### A2. `desktop/rf_sky_view.py::_find_body_at`（6 处，含 DSO 事故）
 
-| 行号（当前工作区） | 行号（HEAD `26fb3d7`） | 类别 | 现状 |
-| --- | --- | --- | --- |
-| 5393 | 5341 | ERROR/EMPTY | `float(None)` 类失败被 `pass`（事故点） |
-| 5407 | 5355 | ERROR/EMPTY | `pass` |
-| 5453 | 5401 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
-| 5513 | 5461 | WARN/SILENT_FALLBACK | `px_arr = py_arr = alt_draw_arr = None` |
-| 5531 | 5479 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
-| 5548 | 5496 | WARN/SILENT_FALLBACK | `hyg = 0` |
+| 行号（HEAD `5332140` 起） | 类别 | 现状 |
+| --- | --- | --- |
+| 5399 | ERROR/EMPTY | `float(None)` 类失败被 `pass`（事故点） |
+| 5413 | ERROR/EMPTY | `pass` |
+| 5459 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
+| 5519 | WARN/SILENT_FALLBACK | `px_arr = py_arr = alt_draw_arr = None` |
+| 5537 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
+| 5554 | WARN/SILENT_FALLBACK | `hyg = 0` |
 
-天空线当前工作区已在该函数之前新增约 75 行，故两套行号并列；定位一律以
-`RFSkyView._find_body_at` + 片段为锚，不要只认行号。命中数仍为 6（2 ERROR + 4 WARN）。
+天空线在 `5332140` 已把在途改动提交，工作区与 HEAD 一致；命中数仍为 6
+（2 ERROR + 4 WARN）。定位一律以 `RFSkyView._find_body_at` + 片段为锚，
+不要只认行号（该文件近期每次提交都会整体位移）。
 
 要求：每处修复都要有「天体出现在图层 / 点击命中返回该天体」的断言；`_find_body_at` 至少要区分「星表无此目标」与「解析失败」。
 
 ### A3. `mbdsdr_ai/sdr_tools.py`：AI 工具面（49 处，17 ERROR + 32 WARN）
 
-ERROR（`pass`，模型会当成成功继续编解释）行号（已按 HEAD `26fb3d7` 复核，17 处逐一命中）：661, 3117, 3185, 3191, 3375, 3471, 3797, 3986, 4055, 4118, 4527, 4930, 5451, 7873, 7891, 7925, 7943。
+ERROR（`pass`，模型会当成成功继续编解释）行号（已按 `5332140` 复核，17 处逐一命中）：661, 3117, 3185, 3191, 3375, 3471, 3797, 3986, 4055, 4118, 4527, 4930, 5451, 7873, 7891, 7925, 7943。
 
 WARN 多数是 `return ToolResult(success=False, content=...)`（用户/模型能看到失败文本，但没有日志与错误码）。这 32 处至少要补错误码/日志，不能让模型只拿到一句自由文本。
 
