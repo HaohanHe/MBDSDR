@@ -78,6 +78,8 @@ class DevicePanel(QWidget):
         self._connected = False
         self._current_dev_key: Optional[str] = None
         self._current_dev_locator: Optional[tuple] = None
+        self._last_capability_report: Dict = {}
+        self._last_verdict: tuple = (None, "尚未连接")
         self._build_ui()
         self.refresh_devices()
 
@@ -100,6 +102,7 @@ class DevicePanel(QWidget):
         dev_row = QHBoxLayout()
         self.dev_combo = QComboBox()
         self.dev_combo.setMinimumWidth(180)
+        self.dev_combo.currentIndexChanged.connect(self._on_device_selected)
         dev_row.addWidget(self.dev_combo, stretch=1)
         self.refresh_btn = QPushButton("刷新")
         self.refresh_btn.clicked.connect(self.refresh_devices)
@@ -226,6 +229,24 @@ class DevicePanel(QWidget):
         return (d.get("driver") or "", idx)
 
     # ------------------------------------------------------------------ 状态
+    def last_capability_verdict(self):
+        """最近一次连接校验的 (verdict, reason)。
+
+        verdict 为 True/False/None；None = 能力未知、无法校验（不是通过）。
+        """
+        return self._last_verdict
+
+    def last_capability_report(self) -> Dict:
+        return self._last_capability_report
+
+    def _on_device_selected(self, idx: int) -> None:
+        if 0 <= idx < len(self._devices):
+            from mbdsdr_ai.device_capabilities import summarize_device
+            try:
+                self.status_label.setToolTip(summarize_device(self._devices[idx]))
+            except Exception:
+                self.status_label.setToolTip("")
+
     def set_connected(self, connected: bool, dev_label: str = "") -> None:
         """主窗口连接成功/断开后调用。"""
         self._connected = bool(connected)
@@ -269,15 +290,21 @@ class DevicePanel(QWidget):
             QMessageBox.warning(
                 self, "采样率无效", f"采样率必须为正数（Hz），收到 {sr}。")
             return
-        rng = dev.get("sample_rate_range")
-        if isinstance(rng, (tuple, list)) and len(rng) == 2:
-            lo, hi = float(rng[0]), float(rng[1])
-            if not (lo <= sr <= hi):
-                QMessageBox.warning(
-                    self, "采样率超出设备能力",
-                    f"采样率 {sr:.0f} Hz 超出该设备范围 "
-                    f"{lo:.0f}–{hi:.0f} Hz。请改值后重试。")
-                return
+        from mbdsdr_ai.device_capabilities import build_capability_report, check_range
+        report = build_capability_report(dev)
+        self._last_capability_report = report
+        verdict, reason = check_range(report, "sample_rate_range", sr)
+        self._last_verdict = (verdict, reason)
+        if verdict is False:
+            lo, hi = report["sample_rate_range"].value
+            QMessageBox.warning(
+                self, "采样率超出设备能力",
+                f"采样率 {sr:.0f} Hz 超出该设备范围 "
+                f"{lo:.0f}–{hi:.0f} Hz。请改值后重试。")
+            return
+        if verdict is None:
+            # 未知范围：不能假装校验通过，也不能凭空填默认范围；如实说明后放行。
+            self.status_label.setText(f"采样率范围未知，无法校验；将以 {sr:.0f} Hz 下发")
         dev["_sample_rate"] = sr
 
         text = self.gain_edit.text().strip()
@@ -288,15 +315,17 @@ class DevicePanel(QWidget):
                 self, "增益无效",
                 f"“{text}”不是数字。请填写总增益（dB），如 30。")
             return
-        rng = dev.get("gain_range")
-        if isinstance(rng, (tuple, list)) and len(rng) == 2:
-            lo, hi = float(rng[0]), float(rng[1])
-            if not (lo <= gain <= hi):
-                QMessageBox.warning(
-                    self, "增益超出设备能力",
-                    f"增益 {gain:g} dB 超出该设备范围 "
-                    f"{lo:g}–{hi:g} dB。请改值后重试。")
-                return
+        gverdict, greason = check_range(report, "gain_range", gain)
+        if gverdict is False:
+            lo, hi = report["gain_range"].value
+            QMessageBox.warning(
+                self, "增益超出设备能力",
+                f"增益 {gain:g} dB 超出该设备范围 "
+                f"{lo:g}–{hi:g} dB。请改值后重试。")
+            return
+        if gverdict is None:
+            self.status_label.setText(
+                f"增益范围未知，无法校验；将以 {gain:g} dB 下发")
         dev["_gain"] = gain
 
         text = self.ppm_edit.text().strip()

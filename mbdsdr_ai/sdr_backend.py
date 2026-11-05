@@ -38,6 +38,7 @@ PlutoSDR 接入说明：
 
 import time
 import logging
+import math
 
 import os
 import json
@@ -2833,6 +2834,31 @@ class SoapySDRBackend(SDRBackend):
             pass
         return default
 
+    @staticmethod
+    def _range_tuple_strict(rl) -> Optional[Tuple[float, float]]:
+        """同 _range_tuple，但**不回落默认值**：查不到就返回 None（未知）。
+
+        能力表红线：未知项不许填一个「看起来合理」的宽范围冒充已知。
+        """
+        try:
+            if not rl:
+                return None
+            if hasattr(rl, "minimum") and hasattr(rl, "maximum"):
+                lo, hi = float(rl.minimum()), float(rl.maximum())
+            elif isinstance(rl, (tuple, list)):
+                if len(rl) == 2 and all(isinstance(x, (int, float)) for x in rl):
+                    lo, hi = float(rl[0]), float(rl[1])
+                else:
+                    lo = min(float(r.minimum()) for r in rl)
+                    hi = max(float(r.maximum()) for r in rl)
+            else:
+                return None
+        except Exception:
+            return None
+        if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+            return None
+        return (lo, hi)
+
     # ------------------------------------------------------------------
     # 枚举：优先 Python 绑定，降级 SoapySDRUtil CLI，都没有返回 []
     # ------------------------------------------------------------------
@@ -2907,29 +2933,71 @@ class SoapySDRBackend(SDRBackend):
                 "gain_range": None,
                 "freq_range": None,
                 "sample_rate_range": None,
+                "bandwidth_range": None,
+                "antennas": None,
+                "tx_channels": None,
+                "capability_status": {},
+                "capability_note": {},
                 "device_args": dict(info),
             }
+            status = entry["capability_status"]
+            note = entry["capability_note"]
+
+            def _probe_range(key: str, fn) -> Optional[Tuple[float, float]]:
+                try:
+                    val = cls._range_tuple_strict(fn())
+                except Exception as e:
+                    status[key] = "unknown"
+                    note[key] = f"查询失败：{e}"
+                    return None
+                if val is None:
+                    status[key] = "unknown"
+                    note[key] = "驱动返回空/非法范围"
+                    return None
+                status[key] = "probed"
+                return val
+
             # best-effort 开一下设备读范围；失败不影响身份列出
             try:
                 probe = SoapySDR.Device(info)
                 rx = getattr(SoapySDR, "SOAPY_SDR_RX", 1)
-                entry["freq_range"] = cls._range_tuple(
-                    probe.getFrequencyRange(rx, 0), (1e3, 7.2e9))
-                entry["sample_rate_range"] = cls._range_tuple(
-                    probe.getSampleRateRange(rx, 0), (1e3, 61.44e6))
-                entry["gain_range"] = cls._range_tuple(
-                    probe.getGainRange(rx, 0), (0.0, 60.0))
+                tx = getattr(SoapySDR, "SOAPY_SDR_TX", 2)
+                entry["freq_range"] = _probe_range(
+                    "freq_range", lambda: probe.getFrequencyRange(rx, 0))
+                entry["sample_rate_range"] = _probe_range(
+                    "sample_rate_range", lambda: probe.getSampleRateRange(rx, 0))
+                entry["gain_range"] = _probe_range(
+                    "gain_range", lambda: probe.getGainRange(rx, 0))
+                entry["bandwidth_range"] = _probe_range(
+                    "bandwidth_range", lambda: probe.getBandwidthRange(rx, 0))
+                # 天线口（Device.hpp:listAntennas）——查不到就是未知，不猜
+                try:
+                    ants = list(probe.listAntennas(rx, 0) or [])
+                except Exception as e:
+                    status["antenna"] = "unknown"
+                    note["antenna"] = f"查询失败：{e}"
+                else:
+                    entry["antennas"] = ants
+                    status["antenna"] = "probed"
+                    if not ants:
+                        note["antenna"] = "驱动未报告任何天线口"
                 # 驱动级 TX 通道数（Device.hpp:1155）：用于区分"驱动可发"
                 # 与"本通用路径未接 TX 写流"，不影响 supports_tx()。
                 try:
-                    tx = getattr(SoapySDR, "SOAPY_SDR_TX", 2)
                     entry["tx_channels"] = int(probe.getNumTxChannels(tx))
+                    status["tx"] = "probed"
                 except Exception as e:
                     entry["tx_channels"] = None
+                    status["tx"] = "unknown"
+                    note["tx"] = f"查询失败：{e}"
                     logger.debug(f"probe {entry['label']} 读 TX 通道数失败(忽略): {e}")
                 # 来源: lib/Factory.cpp:133 make() 返回的指针由 Python 端 del/close 释放
                 del probe
             except Exception as e:
+                for key in ("freq_range", "sample_rate_range", "gain_range",
+                            "bandwidth_range", "antenna", "tx"):
+                    status.setdefault(key, "unknown")
+                    note.setdefault(key, f"打开设备查询失败：{e}")
                 logger.debug(f"probe {entry['label']} 读范围失败(忽略): {e}")
             out.append(entry)
         return out
@@ -2972,6 +3040,7 @@ class SoapySDRBackend(SDRBackend):
             out.append(cur)
 
         result = []
+        _why = "CLI 枚举只给身份，未打开设备查询范围"
         for info in out:
             result.append({
                 "driver": info.get("driver", "?"),
@@ -2982,6 +3051,19 @@ class SoapySDRBackend(SDRBackend):
                 "gain_range": None,
                 "freq_range": None,
                 "sample_rate_range": None,
+                "bandwidth_range": None,
+                "antennas": None,
+                "tx_channels": None,
+                "capability_status": {
+                    "freq_range": "unknown", "sample_rate_range": "unknown",
+                    "gain_range": "unknown", "bandwidth_range": "unknown",
+                    "antenna": "unknown", "tx": "unknown",
+                },
+                "capability_note": {
+                    "freq_range": _why, "sample_rate_range": _why,
+                    "gain_range": _why, "bandwidth_range": _why,
+                    "antenna": _why, "tx": _why,
+                },
                 "device_args": dict(info),
             })
         return result
@@ -4888,6 +4970,16 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
                 "sample_rate_range": (225001, 3_200_000),
                 # 来源: SoapyRTLSDR/Settings.cpp:410-427 —— R820T 类默认 24MHz~1.764GHz
                 "freq_range": (24e6, 1764e6),
+                "capability_status": {
+                    "freq_range": "declared", "sample_rate_range": "declared",
+                    "gain_range": "declared", "bandwidth_range": "unknown",
+                    "tx": "unknown", "antenna": "unknown",
+                },
+                "capability_note": {
+                    "bandwidth_range": "原生枚举未查询带宽",
+                    "tx": "原生枚举未查询 TX 通道",
+                    "antenna": "原生枚举未查询天线口",
+                },
                 "device_args": {"driver": "rtlsdr", "index": dev.get("index", 0)},
             }
     except Exception as e:
@@ -4920,6 +5012,16 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
                 "freq_range": dev.get("freq_range",
                                       (PlutoSDRBackend.FREQ_MIN_HZ,
                                        PlutoSDRBackend.FREQ_MAX_HZ)),
+                "capability_status": {
+                    "freq_range": "declared", "sample_rate_range": "declared",
+                    "gain_range": "declared", "bandwidth_range": "unknown",
+                    "tx": "unknown", "antenna": "unknown",
+                },
+                "capability_note": {
+                    "bandwidth_range": "Pluto 枚举未查询带宽",
+                    "tx": "Pluto 枚举未查询 TX 通道",
+                    "antenna": "Pluto 枚举未查询天线口",
+                },
                 "device_args": {"uri": dev.get("uri", "")},
             }
     except Exception as e:
@@ -4941,9 +5043,28 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
                 "serial": dev.get("serial", ""),
                 "manufacturer": "",
                 "product": dev.get("subdriver", ""),
-                "gain_range": (0.0, 0.0),
-                "sample_rate_range": (0.0, 0.0),
-                "freq_range": (0.0, 0.0),
+                # gr-osmosdr 枚举只返回设备字符串，范围未打开设备查询。
+                # 以前填 (0.0, 0.0) 会被 UI 当成「真实范围 0–0」并拦住连接；
+                # 这里如实留空 = 未知。
+                "gain_range": None,
+                "sample_rate_range": None,
+                "freq_range": None,
+                "bandwidth_range": None,
+                "antennas": None,
+                "tx_channels": None,
+                "capability_status": {
+                    "freq_range": "unknown", "sample_rate_range": "unknown",
+                    "gain_range": "unknown", "bandwidth_range": "unknown",
+                    "antenna": "unknown", "tx": "unknown",
+                },
+                "capability_note": {
+                    "freq_range": "osmosdr 枚举只给设备字符串，未查询范围",
+                    "sample_rate_range": "osmosdr 枚举只给设备字符串，未查询范围",
+                    "gain_range": "osmosdr 枚举只给设备字符串，未查询范围",
+                    "bandwidth_range": "osmosdr 枚举只给设备字符串，未查询带宽",
+                    "antenna": "osmosdr 枚举只给设备字符串，未查询天线口",
+                    "tx": "osmosdr 枚举只给设备字符串，未查询 TX",
+                },
                 "device_args": {"osmosdr_string": dev.get("device_string", "")},
             }
     except Exception as e:
@@ -4968,6 +5089,16 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
             "gain_range": (0.0, 49.6),
             "sample_rate_range": (225001, 3_200_000),
             "freq_range": (24e6, 1764e6),
+            "capability_status": {
+                "freq_range": "declared", "sample_rate_range": "declared",
+                "gain_range": "declared", "bandwidth_range": "unknown",
+                "tx": "unknown", "antenna": "unknown",
+            },
+            "capability_note": {
+                "bandwidth_range": "rtl_tcp 未查询带宽",
+                "tx": "rtl_tcp 未查询 TX 通道",
+                "antenna": "rtl_tcp 未查询天线口",
+            },
             "device_args": {"driver": "rtlsdr", "host": _host, "port": _port},
         }
 

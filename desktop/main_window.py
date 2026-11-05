@@ -14,7 +14,7 @@ import math
 import threading
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -1675,7 +1675,7 @@ class MainWindow(QMainWindow):
     # 天空动作总线：模型协商结束后 → UI 线程落地
     # ------------------------------------------------------------------
     def _init_sky_action_bus(self):
-        from mbdsdr_ai.gimbal_follow import GimbalFollowLimiter
+        from mbdsdr_ai.gimbal_follow import GimbalFollowLimiter, PointingErrorRecorder
         from mbdsdr_ai.sky_actions import get_sky_bus
         bus = get_sky_bus()
         bus.executor = self._execute_sky_action
@@ -1686,6 +1686,10 @@ class MainWindow(QMainWindow):
         self._sky_bus_timer.start()
         # 云台跟随整形器：死区 + 最小间隔 + 速率上限，避免指令风暴
         self._gimbal_limiter = GimbalFollowLimiter()
+        # 过境全过程指向误差：指令角 vs 卫星真角（可选姿态回读角）
+        self._gimbal_error = PointingErrorRecorder()
+        self._gimbal_cycle_seq = 0
+        self._last_gimbal_cycle: Optional[Dict] = None
 
     def _sky_selected_name(self) -> str:
         sv = getattr(self, "sky_view", None)
@@ -7003,6 +7007,58 @@ class MainWindow(QMainWindow):
         if sv is not None and hasattr(sv, "set_gimbal_available"):
             sv.set_gimbal_available(self._gimbal_available())
 
+    def _pointing_station_trust(self) -> Dict:
+        """云台指向用的站址可信度：**走 TX 同级严格口** ``trust_for_tx``。
+
+        站址 (0,0)、显式海上坐标、缺坐标一律拒绝；只读的计算口径
+        （``trust_for_calculation``）不能用于会动机械/会发射的动作。
+        """
+        from mbdsdr_ai.station import StationFix, trust_for_tx
+        lat = getattr(self, "_observer_lat", None)
+        lon = getattr(self, "_observer_lon", None)
+        if lat is None or lon is None:
+            return {"trusted": False,
+                    "reasons": ["missing_coordinates（未设置站址，拒绝指向）"],
+                    "warnings": []}
+        source = "gnss" if getattr(self, "_observer_from_gnss", False) else "user"
+        fix = StationFix(lat=float(lat), lon=float(lon), alt_m=0.0,
+                         source=source, origin="main_window")
+        return trust_for_tx(fix)
+
+    def _stop_gimbal_follow(self, reason: str,
+                            important: bool = False) -> None:
+        """明确停止云台跟随：复位开关、整形器、下发停机，并把原因说清楚。"""
+        self._gimbal_follow = False
+        limiter = getattr(self, "_gimbal_limiter", None)
+        if limiter is not None:
+            limiter.reset()
+        self._sync_sky_gimbal_btn(False)
+        try:
+            gc = self._gimbal_controller()
+            if gc is not None:
+                gc.stop()
+        except Exception:
+            pass
+        self.statusBar().showMessage(
+            reason, MSG_IMPORTANT if important else MSG_NORMAL)
+
+    def last_gimbal_cycle(self) -> Optional[Dict]:
+        """最近一拍「卫星真角 → 指令角 → 姿态 → 耗时」原始数据。"""
+        return dict(self._last_gimbal_cycle) if self._last_gimbal_cycle else None
+
+    def gimbal_tracking_report(self) -> Dict:
+        """过境全过程指向误差统计（指令角/实际指向 vs 卫星真角）。"""
+        rec = getattr(self, "_gimbal_error", None)
+        rep = rec.stats() if rec is not None else {"samples": 0}
+        rep["last_cycle"] = self.last_gimbal_cycle()
+        rep["command_mode"] = "absolute_az_el"
+        limiter = getattr(self, "_gimbal_limiter", None)
+        if limiter is not None:
+            rep["deadband_deg"] = limiter.deadband_deg
+            rep["min_interval_s"] = limiter.min_interval_s
+            rep["max_rate_deg_s"] = limiter.max_rate_deg_s
+        return rep
+
     def _on_sky_gimbal_follow_toggled(self, on: bool):
         """天空图「云台跟随」开关：确认后端可用后随跟踪环同拍驱动。"""
         if not on:
@@ -7032,6 +7088,12 @@ class MainWindow(QMainWindow):
                 "无可用云台后端：连接 ai-sdr-mini 或在 AI 对话里配置 rotctld",
                 MSG_NORMAL)
             self._sync_sky_gimbal_btn(False)
+            return
+        trust = self._pointing_station_trust()
+        if not trust.get("trusted"):
+            reasons = "；".join(trust.get("reasons") or []) or "站址不可信"
+            self._stop_gimbal_follow(
+                f"站址不可信，拒绝云台指向：{reasons}", important=True)
             return
         self._gimbal_follow = True
         limiter = getattr(self, "_gimbal_limiter", None)
@@ -7823,6 +7885,12 @@ class MainWindow(QMainWindow):
             self._sat_track_timer = QTimer(self)
             self._sat_track_timer.setInterval(500)
             self._sat_track_timer.timeout.connect(self._poll_satellite_track)
+        # 新一次过境：误差统计从零开始，不混入上一次的样本
+        rec = getattr(self, "_gimbal_error", None)
+        if rec is not None:
+            rec.reset()
+        self._gimbal_cycle_seq = 0
+        self._last_gimbal_cycle = None
         self._sat_track_timer.start()
         self._sync_tracking_ui(True)
         self.statusBar().showMessage(
@@ -7834,7 +7902,9 @@ class MainWindow(QMainWindow):
         """500ms 轮询：取实时 az/el/多普勒 -> 自动调谐 SDR -> 刷新面板。"""
         if self._loop_sat_tracker is None:
             return
+        t_cycle = time.monotonic()
         pos = self._loop_sat_tracker.current_position()
+        t_pos = time.monotonic()
         self.sat_track_panel.update_position(pos)
         # 链路补偿状态（唯一真相源；失效自动关闭 + 原因上芯片）
         from mbdsdr_ai.doppler_link import get_compensator
@@ -7859,11 +7929,12 @@ class MainWindow(QMainWindow):
                     "目标位置失效，云台跟随已停止并解锁（保持最后指向）", MSG_NORMAL)
             return
         el = float(pos["elevation"])
-        # 仰角 < 5°：过境结束，停止闭环
+        # 仰角 < 5°：卫星不可见 → 跟踪与云台一起明确停止，不向地平线下发角
         if el < 5.0:
             self._stop_satellite_tracking()
             self.statusBar().showMessage(
-                f"卫星过境结束（仰角 {el:.1f}° < 5°）", MSG_IMPORTANT)
+                f"卫星不可见（仰角 {el:.1f}° < 5°），跟踪与云台跟随已停止",
+                MSG_IMPORTANT)
             return
         # 核心：调谐频率 = 下行频率 + 多普勒偏移（补偿开启时）；
         # 用户关闭补偿 → 调谐标称下行（诚实不补偿，不沿用过期偏移）。
@@ -7891,24 +7962,97 @@ class MainWindow(QMainWindow):
             pass
         # 云台跟随：同一拍内驱动天线指向卫星（调谐与云台天然同步、单点停止）。
         # 经整形器：死区 + 最小间隔 + 速率上限，目标到位后不再重复下发。
+        # 指令为**绝对角** (az, el)，不是增量；误差按球面角距统计。
         if self._gimbal_follow:
+            from mbdsdr_ai.gimbal_follow import angular_separation_deg
+            trust = self._pointing_station_trust()
+            if not trust.get("trusted"):
+                reasons = "；".join(trust.get("reasons") or []) or "站址不可信"
+                self._stop_gimbal_follow(
+                    f"站址不可信，云台跟随已停止：{reasons}", important=True)
+                return
+            if not self._gimbal_available():
+                self._stop_gimbal_follow(
+                    "云台后端已离线，跟随已停止（不再下发角度）", important=True)
+                return
             try:
                 gc = self._activate_gimbal_if_needed()
                 if gc is None:
-                    # 后端中途掉线：诚实关闭跟随，不造假动作
-                    self._gimbal_follow = False
-                    limiter = getattr(self, "_gimbal_limiter", None)
-                    if limiter is not None:
-                        limiter.reset()
-                    self._sync_sky_gimbal_btn(False)
-                    self.statusBar().showMessage("云台后端已离线，跟随关闭", MSG_NORMAL)
-                else:
-                    az = float(pos.get("azimuth") or 0.0)
-                    limiter = getattr(self, "_gimbal_limiter", None)
-                    cmd = (limiter.plan(az, el) if limiter is not None
-                           else (az, el))
+                    self._stop_gimbal_follow(
+                        "云台后端已离线，跟随已停止（不再下发角度）",
+                        important=True)
+                    return
+                az = float(pos.get("azimuth") or 0.0)
+                limiter = getattr(self, "_gimbal_limiter", None)
+                t_plan = time.monotonic()
+                cmd = (limiter.plan(az, el) if limiter is not None
+                       else (az, el))
+                t_cmd = time.monotonic()
+                # 指令没触发整形器下发时，仍用「当前生效的绝对角」与真角比，
+                # 这样死区/限速造成的滞后也会进过境误差统计。
+                effective = cmd
+                if effective is None and limiter is not None:
+                    effective = limiter.last_command
+                if effective is not None:
+                    rec = getattr(self, "_gimbal_error", None)
+                    t_dispatch = 0.0
+                    res = None
                     if cmd is not None:
-                        gc.point_to_satellite(cmd[0], cmd[1])
+                        t0 = time.monotonic()
+                        try:
+                            res = gc.point_to_satellite(cmd[0], cmd[1])
+                        except Exception as e:  # 后端异常 = 指令未执行
+                            res = {"dispatched": False, "error": str(e)}
+                        t_dispatch = time.monotonic() - t0
+                    res = res if isinstance(res, dict) else {}
+                    dispatched = bool(res.get("dispatched", False))
+                    if cmd is not None and not dispatched:
+                        err = res.get("error") or "无应答/超时"
+                        self._gimbal_cycle_seq = getattr(
+                            self, "_gimbal_cycle_seq", 0) + 1
+                        self._last_gimbal_cycle = {
+                            "seq": self._gimbal_cycle_seq,
+                            "satellite_az": az, "satellite_el": el,
+                            "command_az": cmd[0], "command_el": cmd[1],
+                            "dispatched": False, "pose_valid": False,
+                            "pose_az": None, "pose_el": None,
+                            "cmd_error_deg": angular_separation_deg(
+                                az, el, cmd[0], cmd[1]),
+                            "pose_error_deg": None,
+                            "pos_ms": (t_pos - t_cycle) * 1000.0,
+                            "dispatch_ms": t_dispatch * 1000.0,
+                            "total_ms": (time.monotonic() - t_cycle) * 1000.0,
+                        }
+                        if rec is not None:
+                            rec.record(az, el, cmd[0], cmd[1],
+                                       elapsed_s=0.5)
+                        self._stop_gimbal_follow(
+                            f"云台指令未执行（{err}），跟随已停止",
+                            important=True)
+                        return
+                    pose_valid = bool(res.get("pose_valid"))
+                    pose_az = res.get("current_az") if pose_valid else None
+                    pose_el = res.get("current_el") if pose_valid else None
+                    errs = (rec.record(az, el, effective[0], effective[1],
+                                       pose_az=pose_az, pose_el=pose_el,
+                                       elapsed_s=0.5)
+                            if rec is not None else {})
+                    self._gimbal_cycle_seq = getattr(
+                        self, "_gimbal_cycle_seq", 0) + 1
+                    self._last_gimbal_cycle = {
+                        "seq": self._gimbal_cycle_seq,
+                        "satellite_az": az, "satellite_el": el,
+                        "command_az": effective[0], "command_el": effective[1],
+                        "dispatched": dispatched,
+                        "pose_valid": pose_valid,
+                        "pose_az": pose_az, "pose_el": pose_el,
+                        "cmd_error_deg": errs.get("cmd_error_deg"),
+                        "pose_error_deg": errs.get("pose_error_deg"),
+                        "pos_ms": (t_pos - t_cycle) * 1000.0,
+                        "cmd_ms": (t_cmd - t_plan) * 1000.0,
+                        "dispatch_ms": t_dispatch * 1000.0,
+                        "total_ms": (time.monotonic() - t_cycle) * 1000.0,
+                    }
             except Exception:
                 pass
 

@@ -229,6 +229,7 @@ class ModulePanel(QWidget):
         lv = QVBoxLayout(left)
         self.device_combo = QComboBox()
         self.device_combo.setMinimumWidth(180)
+        self.device_combo.currentIndexChanged.connect(self._on_device_selected)
         lv.addWidget(self.device_combo)
         btn_row = QHBoxLayout()
         self.refresh_btn = QPushButton("刷新")
@@ -365,16 +366,26 @@ class ModulePanel(QWidget):
                 label = d.get("label") or d.get("driver", "?")
                 self.device_combo.addItem(label)
             d0 = self._devices[0]
-            self.device_info.setText(
-                f"{d0.get('driver','?')}\n"
-                f"频率 {d0.get('freq_range','?')}\n"
-                f"采样率 {d0.get('sample_rate_range','?')}")
+            self._show_device_info(d0)
 
         # 设备列表没变化时界面只会"纹丝不动"；给刷新按钮一个明确的动作反馈，
         # 避免用户以为按钮坏了（本次交互审计发现的死按钮）。
         self.refresh_btn.setText("已刷新")
         QTimer.singleShot(1200, self.refresh_btn,
                           lambda: self.refresh_btn.setText("刷新"))
+
+    def _show_device_info(self, d: Dict) -> None:
+        """只显示设备真实报出的能力；未知项写「未知」，绝不填量程数字。"""
+        try:
+            from mbdsdr_ai.device_capabilities import summarize_device
+            summary = summarize_device(d)
+        except Exception:
+            summary = "能力未知（能力表不可用）"
+        self.device_info.setText(f"{d.get('driver', '?')}\n{summary}")
+
+    def _on_device_selected(self, idx: int) -> None:
+        if 0 <= idx < len(self._devices):
+            self._show_device_info(self._devices[idx])
 
     def selected_sample_rate_hz(self) -> float:
         """当前采样率下拉档位（Hz）。

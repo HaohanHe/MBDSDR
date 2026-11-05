@@ -119,22 +119,37 @@ class RotctldClient:
         self.host = host
         self.port = port
         self.timeout = timeout
+        #: 最近一次命令失败原因（超时/无应答/连接失败），供上层诚实上报
+        self.last_error = ""
 
     def _command(self, cmd: str, n_lines: int = 1) -> List[str]:
-        with socket.create_connection((self.host, self.port), timeout=self.timeout) as s:
-            s.sendall((cmd + "\n").encode("ascii"))
-            buf = b""
-            # rotctld 回复以换行分隔，读够 n_lines 或超时
-            s.settimeout(self.timeout)
-            try:
-                while buf.count(b"\n") < n_lines:
-                    chunk = s.recv(256)
-                    if not chunk:
-                        break
-                    buf += chunk
-            except socket.timeout:
-                pass
-        return [line.strip() for line in buf.decode("ascii", errors="replace").splitlines() if line.strip()]
+        self.last_error = ""
+        try:
+            with socket.create_connection((self.host, self.port),
+                                          timeout=self.timeout) as s:
+                s.sendall((cmd + "\n").encode("ascii"))
+                buf = b""
+                # rotctld 回复以换行分隔，读够 n_lines 或超时
+                s.settimeout(self.timeout)
+                try:
+                    while buf.count(b"\n") < n_lines:
+                        chunk = s.recv(256)
+                        if not chunk:
+                            break
+                        buf += chunk
+                except socket.timeout:
+                    self.last_error = f"超时（{self.timeout:.1f}s 未收齐应答）"
+        except (socket.timeout, TimeoutError):
+            self.last_error = f"连接/应答超时（{self.timeout:.1f}s）"
+            return []
+        except OSError as e:
+            self.last_error = f"连接失败：{e}"
+            return []
+        lines = [line.strip() for line in
+                 buf.decode("ascii", errors="replace").splitlines() if line.strip()]
+        if not lines and not self.last_error:
+            self.last_error = "无应答（连接被关闭或返回空）"
+        return lines
 
     def get_position(self) -> GimbalPose:
         lines = self._command("p", n_lines=2)
@@ -285,6 +300,9 @@ class GimbalController:
                 return pose
             except Exception:
                 pass
+        # 本次读姿态失败 → 旧值可能已过期，必须撤销 pose_valid，
+        # 否则上层会拿过期的"已对准"当真（假成功）。
+        self._pose_valid = False
         return self.status.current or GimbalPose()
 
     # ---- 运动控制 ----
@@ -292,25 +310,33 @@ class GimbalController:
         """指向目标方位角/仰角。返回执行结果与人工引导信息。"""
         target = GimbalPose(azimuth=az % 360.0, elevation=clamp_angle(el, 0, 90))
         self.status.target = target
-        result: Dict = {"target_az": target.azimuth, "target_el": target.elevation}
+        result: Dict = {"target_az": target.azimuth, "target_el": target.elevation,
+                        "command_mode": "absolute_az_el"}
 
         if self.status.mode == GimbalMode.BOARD_PWM:
             r = self.board.set_position(target.azimuth, target.elevation)
             result["dispatched"] = r.get("ok", False)
             result["backend"] = "board_pwm"
+            if not result["dispatched"]:
+                result["error"] = r.get("error", "板载通道未确认执行")
 
         elif self.status.mode == GimbalMode.ROTCTLD and self.rotctld:
             ok = self.rotctld.set_position(target.azimuth, target.elevation)
             result["dispatched"] = ok
             result["backend"] = "rotctld"
+            if not ok:
+                result["error"] = (self.rotctld.last_error
+                                   or "rotctld 未返回 RPRT 0")
 
         elif self.status.mode == GimbalMode.MANUAL:
             result["dispatched"] = False
             result["backend"] = "manual"
+            result["error"] = "manual 模式不自动下发指令"
 
         else:
             result["dispatched"] = False
             result["backend"] = "offline"
+            result["error"] = "云台后端离线"
 
         # 无论哪种模式，都给出基于当前姿态的引导
         cur = self.read_pose()

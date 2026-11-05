@@ -160,6 +160,9 @@ class TestMainWindowGimbalLoop:
         fake = FakeGimbal()
         monkeypatch.setattr(mw, "_gimbal_controller", lambda: fake)
         monkeypatch.setattr(mw, "_on_tune_sdr", lambda *a, **k: None)
+        # 云台指向走 trust_for_tx 严格口：给一个真实陆地站址（非 (0,0) 占位）
+        mw._observer_lat, mw._observer_lon = 39.9, 116.4
+        mw._observer_from_gnss = False
         monkeypatch.setattr(mw, "_loop_sat_tracker", SimpleNamespace(
             current_position=lambda: {
                 "valid": True, "elevation": 30.0, "azimuth": 123.0,
