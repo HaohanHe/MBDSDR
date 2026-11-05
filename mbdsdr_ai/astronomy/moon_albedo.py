@@ -72,10 +72,6 @@ def albedo_meta(path: Optional[str] = None) -> dict:
     return dict(_load(path)[1])
 
 
-def grid_resolution_pix_per_deg(path: Optional[str] = None) -> float:
-    return float(albedo_meta(path)["resolution_pix_per_deg"])
-
-
 def reference_albedo(path: Optional[str] = None) -> float:
     """归一用参考反照率 = 网格均值（数据给出，不是假设值）。"""
     grid = albedo_grid(path)
