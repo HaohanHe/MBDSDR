@@ -345,7 +345,8 @@ class DecodeWorker(QObject):
                 ok=False, frames=0, stage="iq_sync", error_code="unsupported_raw_iq",
                 error=("FY-4 DVB-S2 raw complex64 IQ 尚不能解码（可用帧 0）："
                        "定时、载波和 PL 符号同步未实现。库层符号级 QPSK→FEC→"
-                       "BBHEADER 不等于 raw IQ 接收，DATAFIELD→VCDU/出图也未接通。"),
+                       "BBHEADER 不等于 raw IQ 接收；库层 DATAFIELD→VCDU 重组已实现"
+                       "但未接入本面板，出图也未接通。"),
                 meta={"raw_iq_supported": False, "required_input": "已同步 PLFRAME 复数符号"})
             return
         self.progress.emit(f"读取录制 {os.path.basename(path)} ...")

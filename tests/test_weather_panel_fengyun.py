@@ -48,7 +48,7 @@ def test_fy4_raw_iq_reports_unsupported_without_fake_symbol_path(tmp_path):
     assert "定时" in result["error"]
     assert "载波" in result["error"]
     assert "PL 符号同步" in result["error"]
-    assert "DATAFIELD→VCDU/出图也未接通" in result["error"]
+    assert "DATAFIELD→VCDU 重组已实现但未接入本面板" in result["error"]
     assert not (tmp_path / "must_not_exist.png").exists()
     unpackbits.assert_not_called()
     decoder.assert_not_called()

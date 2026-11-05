@@ -14,7 +14,9 @@ MBDSDR AI 内核 - 风云系列气象卫星接收管道
       - fengyun4_a_hrit23: 1679.0 MHz, 1,000,000 sym/s, DVB-S2 QPSK modcod=9
     已取得真实 VCDU 后可走经典 CCSDS 链路（VCDU→TP_PDU→SessionPDU），与
     GOES 共用传输层并替换 FY-4 文件头。DVB-S2 目前支持已同步 PL 符号的 QPSK
-    →LDPC/BCH→BBHEADER/DATAFIELD；raw IQ 同步及 DATAFIELD→VCDU 尚未接通。
+    →LDPC/BCH→BBHEADER/DATAFIELD，以及 BBFRAME→VCDU 重组
+    （`mbdsdr_ai/dvbs2_datafield.py`，P5.1）；raw IQ 的定时/载波恢复仍未实现，
+    因此真实 FY-4 空口 IQ 尚不能直接解。
   * FY-4 专用文件头（依据 FY-4 xRIT 公开格式）：
       - ImageInformationRecord (type=1)：卫星名/仪器名/位深/列行/段号/压缩信息
       - ImageNavigationRecord   (type=2)：投影名 + 4 个 float 缩放/偏移
@@ -493,7 +495,8 @@ def bits_to_bytes(bits: np.ndarray) -> bytes:
 #     ──帧前 892B──> VCDU ──decode_fy4_vcdus──> FY-4 段图 ──> PNG
 # 帧内 VCDU 口径与 GK-2A 链一致（vcdu = block[:VCDU_LEN]），便于互相对拍。
 # 边界：真实 FY-4 空口是 DVB-S2；符号级 QPSK 虽已接至 LDPC/BCH 与 BBHEADER，
-# 但 raw IQ 同步、DATAFIELD→VCDU 未实现，故本经典链不适用于真实 FY-4 空口。
+# 且 BBFRAME→VCDU 重组已在 dvbs2_datafield 落地，但 raw IQ 的定时/载波恢复
+# 仍未实现，故本经典链不适用于真实 FY-4 空口。
 # ============================================================================
 
 #: FY-4 链默认 ASM（CCSDS 标准附加同步字）

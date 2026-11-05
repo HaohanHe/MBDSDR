@@ -8,7 +8,9 @@ FY-4 测试构造 BBFRAME→BB 加扰→BCH/LDPC→QPSK PLFRAME，再验证真�
   * ~~raw IQ 同步~~ —— 已补：dvbs2_pl.find_sof_candidates（非相干滑动
     相关 + NMS，ETSI §5.5.2.1 原文核对 SOF=18D2E82），端到端钉扎见
     tests/test_dvbs2_sof_sync.py（raw 流→SOF→解帧→FECFRAME 逐位一致）；
-  * DATAFIELD→VCDU 重组仍未实现；
+  * ~~DATAFIELD→VCDU 重组~~ —— 已补：`mbdsdr_ai/dvbs2_datafield.py`
+    （BBHEADER CRC-8/DFL/SYNCD → VCDU 主头/计数器/填充帧），端到端钉扎见
+    tests/test_dvbs2_datafield_vcdu.py；
   * 真实 OTA IQ 样本未获得（最小采样条件见 test_dvbs2_sof_sync.py 头）。
 
 运行: py -3.14 -m pytest tests/test_fengyun_dvbs2.py -q
