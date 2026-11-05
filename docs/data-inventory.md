@@ -1,0 +1,243 @@
+# 数据清点：星表分层 / DSO 完整性 / 许可合规
+
+本文是数据侧的三本硬账。每个数字都标出来源文件与符号；口径与参数写死在
+下面，照第 5 节的命令可以复算。任何一项对不上，按 bug 处理，不靠印象。
+
+---
+
+## 1. 星表分层一致性（HYG v4.1 全天星表）
+
+### 1.1 固定测量条件
+
+| 项 | 值 | 来源 |
+|---|---|---|
+| 观测站 | 北纬 40°、东经 116°、海拔 0 m | `GroundStation(116.0, 40.0, 0.0)` |
+| 时刻（UT1） | 2026-09-27 12:00 UTC → JD 2461311.0 | `mbdsdr_ai/sky_interaction.py` 坐标链 |
+| 视场中心 | az = 0°、alt = 90°（天顶） | `ViewState(center_az=0.0, center_alt=90.0, fov_deg=…)` |
+| 画布 | 700 × 700 px | 仅影响边缘裁剪的 ±1~2 颗（见 1.4） |
+| 投影 | `PerspectiveProjection`（专业模式默认）。全天模式另用 `StereographicProjection`，见 1.4 | `desktop/rf_sky_view.py:1734` / `:1742` |
+| 大气消光 | `stars.EXTINCTION_K` 默认，逐星按仰角算 | `mbdsdr_ai/skyengine/stars.py` |
+| 单帧预算 | `max_count = STAR_MAX_DRAW = 20000` | `desktop/rf_sky_view.py:3696`、`:3875` |
+
+星等分箱边界：`(-∞, 2) [2,4) [4,6) [6,7) [7,+∞)`，左闭右开。
+
+### 1.2 数据文件 vs 加载后（逐箱对账）
+
+| 星等箱 | 数据文件条数 | 星表加载后条数 | 差 |
+|---|---|---|---|
+| < 2 | 50 | 50 | 0 |
+| 2–4 | 470 | 470 | 0 |
+| 4–6 | 4,499 | 4,499 | 0 |
+| 6–7 | 10,439 | 10,439 | 0 |
+| > 7 | 68,021 | 68,021 | 0 |
+| **合计** | **83,479** | **83,479** | **0** |
+
+来源：
+
+- 数据文件条数：`mbdsdr_ai/data/full_sky_hyg_v41.npz` 的 `npz["vmag"]` 数组
+  （`np.histogram(npz["vmag"], bins=[-inf,2,4,6,7,inf])`）。
+- 星表加载后条数：`mbdsdr_ai/skyengine/star_catalog.py` 的
+  `StarCatalog.vmag`（`load_catalog()` 返回的实例属性，不是方法）。
+- 合计对照 `npz["meta"].star_count = 83,479` 与 `StarCatalog.count = 83,479`。
+
+**结论：加载层零去重、零截断、零星等筛选。** 两份数字逐箱相等，
+不存在「入库时丢条」。
+
+### 1.3 实际落笔条数（Bortle 3 / Bortle 8 × FOV 120° / 160°）
+
+| 星等箱 | 120°/B3 | 120°/B8 | 160°/B3 | 160°/B8 |
+|---|---|---|---|---|
+| < 2 | 4 | 4 | 11 | 11 |
+| 2–4 | 115 | 115 | 178 | 174 |
+| 4–6 | 1,159 | 100 | 1,671 | 112 |
+| 6–7 | 392 | 0 | 405 | 0 |
+| > 7 | 0 | 0 | 0 | 0 |
+| **落笔合计** | **1,670** | **219** | **2,265** | **297** |
+| 选择集 `returned` | 1,672 | 219 | 2,271 | 298 |
+| 其中屏幕边缘裁剪 | 2 | 0 | 6 | 1 |
+
+来源：
+
+- 选择集：`mbdsdr_ai/skyengine/star_catalog.py::select_for_view`，内部由
+  `desktop/rf_sky_view.py::_star_selection`（`:3677`）以
+  `bortle=…`、`max_count=STAR_MAX_DRAW` 调用。
+- 落笔过滤（按顺序，全部在 `desktop/rf_sky_view.py::_draw_stars` `:3806-3821`）：
+  1. `window._display_alt_many(sel.alt_deg)`（`:4406`）——显示层折射后的视高度；
+  2. `_sky_to_screen_many`（`:3483`）→ `sky_interaction.sky_to_screen_many`；
+  3. `alt_draw < 0` 跳过（`:3810`）；
+  4. `px/py` 非有限跳过（`:3813`）；
+  5. 画布外 `(-4.0 … width+4.0, -4.0 … height+4.0)` 跳过（`:3815`）；
+  6. `r <= 0` 跳过（`:3820`，半径来自 `_star_visual_many` `:3730`）。
+- 星等分箱依据 `StarSelection.vmag`（原始星表星等），不是 `eff_mag`；
+  `eff_mag` 只用于半径/透明度。
+
+### 1.4 差值归因
+
+| 差值 | 数量 | 原因 | 证据 |
+|---|---|---|---|
+| 数据 → 加载 | 0 | 无 | 1.2 逐箱相等；`meta.star_count` = `count` |
+| 加载 → 选择集 | 由视场与极限星等决定 | **极限星等筛掉暗星**，不是去重 | `limit_magnitude(fov, bortle)` |
+| 选择集 → 落笔 | 2 / 0 / 6 / 1 | **仅屏幕边缘裁剪** | `_draw_stars` 第 5 步 |
+
+- 极限星等：B3 = 6.500，B8 = 4.750（`StarSelection.limit_mag`）。
+  `>7` 整箱、`6–7` 在 B8 下整箱为 0，都是**极限星等**筛掉，
+  不是截断、不是去重。
+- `StarSelection.truncated` 四组均为 `False`，`available == returned`
+  （1,672 / 219 / 2,271 / 298），说明单帧预算 20,000 远未触顶；
+  因此差值不可能来自 `max_count`。
+- 落笔过滤中 `below_horizon = 0`（选择集已按几何 alt ≥ 0 裁剪，
+  天顶视场全覆盖），`non_finite = 0`，`r <= 0 = 0`；唯一扣减是边缘裁剪。
+- 边缘裁剪是**投影与画布形状的函数**：同一组星用全天模式的
+  `StereographicProjection` 时，160°/B3 为 2,271 颗、160°/B8 为 298 颗
+  （裁剪 0）。换画布/换投影只挪动这 0~6 颗，不改变分层结论。
+- 视场只影响「哪些星在锥内」与「极限星等」（`detail_gain_mag` /
+  `effective_limit_mag`）；数据层不因 FOV 改变星表内容。
+
+---
+
+## 2. DSO 数据完整性（随仓 OpenNGC 副本）
+
+源文件：
+
+- `mbdsdr_ai/tests/fixtures/openngc/NGC.csv`（13,971 行 = 1 表头 + 13,970 条）
+- `mbdsdr_ai/tests/fixtures/openngc/addendum.csv`（65 行 = 1 表头 + 64 条）
+
+合计 **14,034 条**。UTF-8 BOM、分号分隔、32 列。字节已由
+`.gitattributes` 的 `mbdsdr_ai/tests/fixtures/** -text` 冻结，避免
+checkout 时 CRLF 改写导致 SHA 分叉。
+
+### 2.1 完整性计数
+
+| 项 | 条数 | 判定 | 出处 |
+|---|---|---|---|
+| 总条目 | 14,034 | 两文件数据行相加 | `NGC.csv` + `addendum.csv` |
+| 有坐标 | 14,027 | `RA` 与 `Dec` 均非空 | 同上 |
+| 有轴比 | 11,096 | `MajAx` 与 `MinAx` 均 > 0 | 同上 |
+| 有星等 | 11,519 | `V-Mag` 或 `B-Mag` 非空且非 0 | 同上 |
+| 星系 | 10,522 | `Type == "G"` | 同上 |
+| 星团 | 1,001 | `GCl + OCl + *Ass + Cl+N` | 同上 |
+| 星云 | 234 | `Neb + HII + RfN + EmN + SNR` | 同上 |
+| 行星状星云 | 130 | `Type == "PN"` | 同上 |
+
+口径说明：
+
+- 四类互斥分组，`PN` 不计入「星云」；`Dup`（652 条）、`*`（547 条）、
+  `Other`（419 条）、`**`（244 条）、`GPair`（231 条）等不进入四类。
+- 「有轴比」是按源文件的 `MajAx`/`MinAx` 两列同时齐全来算；
+  进 DSO 目录后只有 51 条落在 117 条目录内（见 `docs/dso-catalog.md`）。
+
+原始 `Type` 分布（14,034 条）：
+
+`G` 10,522 · `OCl` 663 · `Dup` 652 · `*` 547 · `Other` 419 · `**` 244 ·
+`GPair` 231 · `GCl` 208 · `PN` 130 · `Neb` 94 · `HII` 83 · `Cl+N` 67 ·
+`*Ass` 63 · `RfN` 38 · `GTrpl` 26 · `GGroup` 13 · `SNR` 11 · `NonEx` 10 ·
+`EmN` 8 · `Nova` 3 · `DrkN` 2。
+
+### 2.2 列名契约
+
+两份文件的表头逐字相同、顺序固定，共 32 列：
+
+```
+Name, Type, RA, Dec, Const, MajAx, MinAx, PosAng, B-Mag, V-Mag, J-Mag,
+H-Mag, K-Mag, SurfBr, Hubble, Pax, Pm-RA, Pm-Dec, RadVel, Redshift,
+Cstar U-Mag, Cstar B-Mag, Cstar V-Mag, M, NGC, IC, Cstar Names,
+Identifiers, Common names, NED notes, OpenNGC notes, Sources
+```
+
+测试实际读取的 13 列：
+
+```
+Name, Type, RA, Dec, Const, MajAx, MinAx, B-Mag, V-Mag, M, NGC, IC,
+Common names
+```
+
+钉扎测试：`mbdsdr_ai/tests/test_dso_catalog.py`
+`test_openngc_header_contract`（表头全等）与
+`test_test_used_columns_exist_in_source_headers`（测试列 ⊆ 真实列）。
+上游改列名/改顺序 → 先在这两条红，不会等到 30 抽样对拍报 `KeyError`。
+
+### 2.3 M102 固定映射
+
+源文件里 `M102` 只有一行，在 `addendum.csv`：
+
+| 字段 | 值 |
+|---|---|
+| `Name` | `M102` |
+| `Type` | `Dup` |
+| `M` | `101`（OpenNGC 认为它是 M101 的重复条目） |
+| `RA` / `Dec` | `14:03:12.54` / `+54:20:56.2` |
+| `Const` | `UMa` |
+| `NGC` | 空 |
+
+`NGC.csv` 中不存在 `M == 102` 的非 `Dup` 行。本项目按历史约定把
+`M102` 映射到 `NGC 5866`（`dso_catalog.json` 中 `source_name == "NGC5866"`、
+`cross_ids == (("ngc", 5866), ("m", 102))`），条目数保持 117。
+
+钉扎测试：`test_m102_raw_addendum_record`（原始行字段）与
+`test_m102_convention_pinned`（目录映射 + `meta.m102_convention`）。
+
+---
+
+## 3. 许可合规的可执行检查
+
+### 3.1 规则
+
+- 扫描仓库内所有数据文件（`.json .csv .tsv .npz .npy .dat .txt .xml
+  .yaml .yml`；`.npz` 只读 `meta` 数组）。
+- 只认**许可声明**形态：`GPL-3.0` / `GPLv2` / `GNU General Public License` /
+  `"license": "GPL"` / `SPDX-License-Identifier: GPL…`。
+  不认裸 `GPL` 子串（base64 测试向量里会偶然出现这三个字母，那是误报）。
+- **MIT 主库路径** = `mbdsdr_ai/`。该路径下的 GPL 声明 = **违规**（退出码 1）；
+  路径外的同类声明只作提示（`--verbose` 打印），不影响退出码。
+- 构建目录（`build`/`build-local`/`dist`/`__pycache__` 等）不扫。
+
+脚本：`scripts/check_data_licenses.py`；测试：`tests/test_data_licenses.py`。
+
+### 3.2 白名单（显式列出 + 理由）
+
+| 路径 | 理由 |
+|---|---|
+| `mbdsdr_ai/data/constellations_iau.json` | 88 个 IAU 星座中 61 个中文名取自 Stellarium `zh_CN.po` 译文（GPL-2.0-or-later）；均为 2–6 字事实性专名，不含可版权文本；星座连线为 CC BY-SA 4.0。后续计划：改用 Wikidata CC0 标签后移除本豁免。 |
+
+白名单为空理由视为配置错误（`ScanError`，退出码 2）。
+
+### 3.3 反证（必须红）
+
+```powershell
+python scripts/check_data_licenses.py            # 绿：0
+python scripts/check_data_licenses.py --probe    # 临时写 GPL 探针 -> 必须红 -> 自动清理
+```
+
+`--probe` 在 `mbdsdr_ai/data/_gpl_probe.json` 写入
+`{"meta": {"source_license": "GPL-3.0-or-later"}}`，扫描后必须命中，
+`finally` 删除探针。通过时打印 `PROBE RED OK`，退出码 0；
+未命中打印 `PROBE FAILED`，退出码 2。
+
+当前实测：扫描 400 个数据文件，0 违规，1 条白名单命中；`--probe` 报红成功。
+
+---
+
+## 4. 已知边界
+
+- 星表覆盖只到 V ≤ 9.0（`CATALOG_DEPTH_MAG`）。`select_for_view` 收到更深
+  请求时夹到 9.0 并置 `beyond_catalog_limit=True`，本表四组均未触发。
+- 落笔数是几何量，受投影/画布影响（1.4）。它不是「星表被删条」的证据。
+- OpenNGC 的 `Dup` 条目（652 条）保留在副本里以维持与上游逐字节一致；
+  进入 117 条目录时不作为独立天体。
+- 许可检查覆盖数据文件，不覆盖源代码注释中的「学机制」引用；
+  后者由 `NOTICE.md` 与代码审查负责。
+
+---
+
+## 5. 复现命令
+
+```powershell
+# 1) 星表分层（数据/加载）
+python -m pytest mbdsdr_ai/tests/test_star_catalog.py -q
+# 2) DSO 完整性 + 列名契约 + M102
+python -m pytest mbdsdr_ai/tests/test_dso_catalog.py -q
+# 3) 许可检查（绿 + 反证红）
+python scripts/check_data_licenses.py
+python scripts/check_data_licenses.py --probe
+python -m pytest tests/test_data_licenses.py -q
+```
