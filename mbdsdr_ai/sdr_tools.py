@@ -4407,6 +4407,11 @@ def _satellite_passes(args):
     passes = rep["passes"]
     at_utc, at_local = _utc_local(when)
     out = f"预测起点: {at_utc}（本地 {at_local}）\n\n"
+    station_warning = (rep.get("station") or {}).get("station_warning") or ""
+    if station_warning:
+        # 站址被启发式怀疑时，用户必须在首屏看到，而不是只在 degraded 里
+        # 与「真正没算」的条目混在一起。
+        out = f"站址提醒：{station_warning}\n\n" + out
     if rep["degraded"]:
         out += "=== 未参与/不可信条目（如实留痕） ===\n"
         for d in rep["degraded"]:
