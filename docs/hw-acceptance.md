@@ -204,19 +204,24 @@ python scripts\hw_acceptance\check_ring_labels.py
 
 ## 四、可复跑命令表
 
-> **跑前自检（每次真机之前，禁止假定设备空闲）**：先列进程与 PnP 状态，再动手。
+> **跑前自检（每次真机之前，禁止假定设备空闲）**：先查占用表/锁、进程、PnP 三项，再动手。
 > 本机曾出现**非任何线启动**的 `MBDSDR`（pid 30740）占用设备；`Status OK` 只说明
 > 枚举正常，不等于拿得到句柄。
 >
 > ```powershell
-> Get-Process | Where-Object { $_.ProcessName -match 'rtl|sdr|gqrx|hdsdr|MBDSDR' } |
->   Select-Object Id,ProcessName
+> python scripts\file_claim.py status                    # ① 占用表 / 活跃锁
+> Get-Process python | Sort-Object CPU -Descending |
+>   Select-Object -First 10 Id,ProcessName,CPU          # ② 重负载脚本
 > Get-PnpDevice -InstanceId 'USB\VID_0BDA&PID_2832\77771111153705700' |
->   Select-Object Status
+>   Select-Object Status                                 # ③ PnP
 > ```
 >
-> 判据：① 进程列表非空 → **等它跑完，或以 `SKIP(NEEDS_OPERATOR)` 收场**，不 kill 他人进程；
-> ② PnP 非 `OK` → SKIP 并写原因码；③ 两项都干净才开跑，跑完再执行同两条命令确认句柄已释放。
+> 判据（三条缺一不得开跑；**空表 ≠ 无人占**，见 `COORDINATION.md` §6.1）：
+> ① 占用表/claim 出现活跃行 → 等对方释放或以 `SKIP(NEEDS_OPERATOR)` 收场，不篡改别人的行；
+> ② 进程命中 `deadscan.py` / `perf_probe_deep.py` / `capture_throughput.py` / `run_all.py` /
+> `acceptance_suite.py` / `pytest`，或单核持续 ≥90% → **等它跑完，或以 `SKIP(NEEDS_OPERATOR)` 收场**，不 kill 他人进程；
+> ③ PnP 非 `OK` → SKIP 并写原因码；
+> 三项都干净才开跑，跑完再执行同样三条确认句柄已释放。长跑脚本必须「注册 + 跑完即退 + 有超时」。
 
 | 命令 | 实测耗时 | 依赖（设备/数据/端口） | 产物 / 口径 |
 |---|---|---|---|
@@ -552,6 +557,14 @@ python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
 
 命令（先按 §四 的跑前自检确认设备空闲）：
 
+> **干净窗口三条件（与 `COORDINATION.md` §6.1 同口径，缺一不得开跑）**：
+> ① 占用表无活跃行且 `python scripts\file_claim.py status` 无活跃锁；
+> ② 进程列表无 `deadscan.py` / `perf_probe_deep.py` / `capture_throughput.py` /
+> `run_all.py` / `acceptance_suite.py` / `pytest`，或单核持续 ≥90%；
+> ③ RTL-SDR PnP `Status OK`。只满足「表里没人写」不算干净窗口：2026-11-06 的
+> 一组 product 数据就是在他线 `deadscan.py`（pid 43832，单核 100%，累计 CPU 1132 s）
+> 常驻时作废的（详见 §6.2.4 表 E 组与 `COORDINATION.md` §6.1）。
+
 ```powershell
 python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 `
   --modes product --mode-runs product=3 --out D:\mbdsdr\tmp\product_path.json
@@ -577,8 +590,16 @@ python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 `
 三项之和一致；不一致说明丢样记账又被改坏或有未登记订阅者——按缺陷处理，
 **不要把它当成性能门限数字**。
 
-`drop_pct` 跟着 USB 供给走，不只看代码。下表是 2026-11-06 05:30–06:15 本机
-**同台同源**（93.305 MHz / 17.9 dB）、五组窗口各 3 次 × 6 s 的并列实测。
+**前置：独占窗口要三合一证据，且「空表 ≠ 无人占」。** `COORDINATION.md §6.1`
+的占用表只有模板行，**不等于没人占**——2026-11-06 06:10 的实测就是表里
+`_（空）_`、实际有人常驻 `deadscan.py`（单核持续 100%，E 组因此作废）。
+开跑前必须同时给出并留时间戳：① 占用表无活跃行；② 进程列表无 `deadscan.py` /
+`perf_probe_deep` / `ui_narrow_breakdown` / `hw_acceptance`；③ 设备 PnP `OK`。
+判读顺序永远是**先看 `produced_msps`、再看 `drop_pct`**：单核满载的耗时扫描会
+把供给打掉，此时 product 数据只能作废重跑，不是代码退化。
+
+`drop_pct` 跟着 USB 供给走，不只看代码。下表是 2026-11-06 05:30–06:23 本机
+**同台同源**（93.305 MHz / 17.9 dB）、六组窗口各 3 次 × 6 s 的并列实测。
 **组别先按「能不能当判据」分开**，不要混着引用：
 
 | 组 | 窗口条件 | 用途 | 供给 MS/s | `captured_s`（按次） | `drop_pct`（按次） | `backlog.max_ms` | `underruns` | `cpu_s` | `rss_peak_mb` |
@@ -588,26 +609,31 @@ python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 `
 | C | 无并发探针 ② | **可当判据** | 2.195–2.305 | 5.495 / 5.762 / 5.639 | 8.4 / 4.0 / 6.0 | 3.41–6.83 | 0 | 2.92–3.20 | 127.4–142.9 |
 | D | 无并发探针 ③ | **可当判据** | 2.310–2.375 | 5.939 / 5.912 / 5.775 | **1.0 / 1.5** / 3.7 | 3.41 | 0 | 2.92–3.14 | 127.2 / 134.8 / 40.0⚠ |
 | E | 他线常驻 `deadscan.py`（单核持续满载） | **被污染，仅方向判断** | 2.337–2.378 | 5.946 / 5.844 / 5.939 | 0.9 / 2.6 / 1.0 | **23.89** / 3.41 / 3.41⚠ | 0 | 3.06–3.23 | 127.5–143.2 |
+| F | 独占窗口（`deadscan.py` 已退出，06:22:55–06:23:20；`product_final_clean.json`） | **可当判据（真·独占）** | 2.382–2.391 | 5.987 / 5.973 / 5.967 | **0.2 / 0.4 / 0.6** | 3.41 | 0 | 2.89–3.17 | 127.7 / 135.3 / 143.4 |
 
-- 可判据组（B/C/D）开跑前逐项确认：无 `perf_probe_deep` / `ui_narrow_breakdown` /
-  `pytest` / 其它 `capture_throughput` 进程，设备 PnP `OK`；这是本机当时能做到的
-  最干净窗口。被污染组（A/E）**数字不代表代码能力，不得引用为判据**：
-  A 是被并行压测探针挤占；E 是他线常驻 `deadscan.py`（pid 43832，单核持续
-  100%，本线无权终止，只能如实记录）。
-- **判据 2 在 15/15 次全部成立**：`probe-audio`/`probe-fft` 的 dropped 均为
+- 可判据组（B/C/D/F）开跑前逐项确认：无 `perf_probe_deep` / `ui_narrow_breakdown` /
+  `deadscan.py` / `pytest` / 其它 `capture_throughput` 进程，设备 PnP `OK`。
+  **其中只有 F 满足「三合一独占证据 + 时间戳」**（占用表无活跃行、进程列表干净、
+  PnP `OK`，06:22:55 开跑、06:23:20 结束），是最可信的一组；B/C/D 虽无探针，
+  但宿主仍有 IDE/浏览器等常态负载，供给只到 2.19–2.38 MS/s。
+  被污染组（A/E）**数字不代表代码能力，不得引用为判据**：A 是被并行压测探针
+  挤占；E 是他线常驻 `deadscan.py`（pid 43832，单核持续 100%，本线无权终止，
+  只能如实记录，E 组整体作废）。
+- **判据 2 在 18/18 次全部成立**：`probe-audio`/`probe-fft` 的 dropped 均为
   0.0 s，`ring_dropped_total_s` 与分项之和逐次严格相等；`probe-gui` 只读
-  13.7–14.7%（其自身 dropped 不计入判据 2）。
-- **判据 3 在可判据组 9/9 成立**（≤6.83 ms）；被污染组 E 的 1 次出现 **23.89 ms**
+  13.6–14.7%（其自身 dropped 不计入判据 2）。
+- **判据 3 在可判据组 12/12 成立**（≤6.83 ms）；被污染组 E 的 1 次出现 **23.89 ms**
   单点尖峰（同次 p95 = 0.0、中位 0.0，属瞬态），按「不成立」记，不掩盖。
-- **判据 1 不是稳定值**：可判据组 9 次里 3 次 ≤1.7%（0.7 / 1.0 / 1.5），其余
-  1.8–8.4%；全部 15 次里 5 次成立。`drop_pct ≈ 1 − produced_s/6`，主要由 USB
-  供给缺口决定（同机供给 2.19–2.38 MS/s），与读块耗时无关：读中位 4.2–4.8 ms，
+- **判据 1 的真值在独占窗口**：F 组 3/3 成立，`drop_pct` **0.2 / 0.4 / 0.6%**
+  （供给 2.382–2.391 MS/s）。可判据组 12 次里 6 次 ≤1.7%（0.7 / 1.0 / 1.5 /
+  0.2 / 0.4 / 0.6），其余 1.8–8.4%；全部 18 次里 8 次成立。`drop_pct ≈
+  1 − produced_s/6`，主要由 USB 供给缺口决定，与读块耗时无关：读中位 4.2–4.9 ms，
   仍低于 16384 点在 2.4 MS/s 下的供给周期 6.83 ms。
 - **判读顺序固定**：先看 `produced_msps`——≥2.35 且 `drop_pct` 仍 >1.7% 才怀疑
   代码退化；供给掉到 2.2–2.3 时第 1 条按「不成立」记，**不改阈值、不改代码**。
-  今天唯一一次「供给 ≥2.35 但 drop 略超」是 B-run3（2.357 MS/s / 1.8%，超 0.1
-  个百分点），单次不作退化结论。历史 8 次实测 0.0–1.7% 是在更安静的窗口取的
-  （见 §6.2.2 表），与今天并列记录、不合并。
+  F 组在 2.382–2.391 下拿到 0.2–0.6%，说明历史 8 次 0.0–1.7%（§6.2.2 表）在
+  真正独占时是可复现的；唯一一次「供给 ≥2.35 但 drop 略超」是 B-run3
+  （2.357 MS/s / 1.8%，超 0.1 个百分点），单次不作退化结论。
 - ⚠ D-run3 的 `rss_peak_mb` 40.0 与同组其余两次（127–135）不成比例，未查到
   解释，按异常读数原样记录，不作为内存结论。
 
