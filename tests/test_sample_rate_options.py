@@ -251,3 +251,33 @@ def test_window_rejected_rate_keeps_previous_and_warns(window):
     assert "未被设备接受" in window.statusBar().currentMessage()
     # 被拒时不得把请求值持久化（否则下次启动会拿一个后端不接受的档去连）
     assert window.settings.get("sample_rate_hz") is None
+
+
+def test_status_sr_flags_unapplied_config_request(window):
+    """状态栏采样率一致性：配置请求 ≠ 后端生效 → 标「未生效」；一致 → 不加任何字符。"""
+
+    class _Backend:
+        def get_status(self):
+            return None
+
+        def get_frequency(self):
+            return 100_000_000.0
+
+        def get_sample_rate(self):
+            return 3_200_000.0
+
+    window._active_sdr_backend = _Backend()
+    # 去掉 fixture 里的空桩，回到真实实现
+    del window._update_status_bar
+
+    window.settings.set("sample_rate_hz", 1_000_000_000.0)
+    window._update_status_bar()
+    text = window.status_sr.text()
+    assert "3.200 MS/s" in text
+    assert "未生效" in text and "1000.000 MS/s" in text, \
+        "配置请求 1 GHz、后端生效 3.2 MS/s 时必须点明「未生效」"
+
+    window.settings.set("sample_rate_hz", 3_200_000.0)
+    window._update_status_bar()
+    assert window.status_sr.text() == "采样率: 3.200 MS/s", \
+        "请求值与生效值一致时不得添加任何字符"

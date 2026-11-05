@@ -2707,7 +2707,21 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         try:
-            self.status_sr.setText(f"采样率: {sr / 1e6:.3f} MS/s")
+            # 配置请求值 vs 后端实际生效值：不一致时在读数里点明，一致时不加任何字符。
+            # 请求值唯一来源是 settings["sample_rate_hz"]（启动回填/用户下发都写这里）；
+            # 后端没报出实际值（sr<=0）时不做比较，避免把「未知」说成「未生效」。
+            req = sr
+            try:
+                cfg = self.settings.get("sample_rate_hz", None)
+                if cfg is not None:
+                    req = float(cfg)
+            except Exception as exc:
+                logger.debug("读取配置采样率失败（按实际值显示）: %s: %s",
+                             type(exc).__name__, exc)
+            text = f"采样率: {sr / 1e6:.3f} MS/s"
+            if sr > 0 and req > 0 and abs(req - sr) > 1.0:
+                text += f"（配置请求 {format_sample_rate(req)} 未生效）"
+            self.status_sr.setText(text)
         except Exception:
             pass
         try:
