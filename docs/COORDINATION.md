@@ -227,7 +227,8 @@
 >
 > 归档：2026-11-05 设置线提交 `b742f89`（A5/A7/A8 + 导入迁移/全部恢复默认钉扎）、
 > `4ef3a15`（采样率统一 2.4 MS/s，schema 派生自 constants）、`605e89d`（FFT 收紧
-> 1024/2048/4096，旧 8192/16384 回落并记原因）；`config_schema.py` / `settings.py` /
+> 1024/2048/4096，旧 8192/16384 回落并记原因）、`f59bfe9`（A8 端到端星数用例 +
+> 参数统一附录 A）；`config_schema.py` / `settings.py` /
 > `settings_panel.py` / `tests/test_settings_schema.py` 已 release。
 >
 > 冻结表缺口复核（C）：`tests/test_hardcoded_parameter_registry.py` 在 `5ece441`
