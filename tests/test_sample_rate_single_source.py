@@ -137,15 +137,26 @@ def test_cxx_dispatch_loop_traverses_the_same_table():
     m = re.search(r"buildSampleRateOptions\([^)]*\)\s*\{", src)
     assert m, "C++ 找不到 buildSampleRateOptions 定义"
     body = src[m.start():src.index("\n}\n", m.end())]
-    assert "kCandidateRatesHz" in body, \
-        "buildSampleRateOptions 没有遍历 kCandidateRatesHz——表和实际下发脱钩"
+    # 取循环真正遍历的标识符，而不是「函数体里提到过表名」
+    loop = re.search(r"for\s*\([^:]*:\s*(\w+)\s*\)", body)
+    assert loop, "buildSampleRateOptions 没有 for 循环真正遍历档位表"
+    assert loop.group(1) == "kCandidateRatesHz", \
+        f"buildSampleRateOptions 遍历的是 {loop.group(1)}——表和实际下发脱钩"
+
+
+def _desktop_tier_table_reference_counts():
+    return {
+        name: (_ROOT / "desktop" / name).read_text(
+            encoding="utf-8").count("SAMPLE_RATES")
+        for name in ("control_panel.py", "main_window.py")
+    }
 
 
 def test_desktop_holds_no_local_tier_copy():
-    for name in ("control_panel.py", "main_window.py"):
-        text = (_ROOT / "desktop" / name).read_text(encoding="utf-8")
-        assert "SAMPLE_RATES" not in text, \
-            f"desktop/{name} 仍在维护本地档位表（应经 sample_rate_options_for_backend 动态取）"
+    counts = _desktop_tier_table_reference_counts()
+    assert counts == {"control_panel.py": 0, "main_window.py": 0}, \
+        "desktop 仍在维护本地档位表（应经 sample_rate_options_for_backend 动态取）：" \
+        f"{counts}"
 
 
 def _fake_rtl_backend():
@@ -175,8 +186,15 @@ def test_2_8m_is_absorbed_to_2_88m_and_is_not_a_requestable_tier():
     assert int(round(backend.get_sample_rate())) == 2_880_000
 
     src = CXX_SRC.read_text(encoding="utf-8")
-    assert "2,800,000" in src and "+80,000" in src, \
+    recorded_base = re.search(r"2,800,000", src)
+    assert recorded_base, \
         "C++ 候选表必须注释 2.8M→2.88M 的吸附关系（不许只在 Python/文档里写）"
+    window = src[recorded_base.start():recorded_base.start() + 200]
+    recorded_delta = re.search(r"\+\d[\d,]*", window)
+    assert recorded_delta, "C++ 注释未记录吸附量（+80,000）"
+    # 注释记录的吸附量必须与实测差值一致（不是「随便写了几个数字」）
+    assert int(recorded_delta.group(0).lstrip("+").replace(",", "")) \
+        == readback - 2_800_000
 
     row = next((line for line in LEDGER.read_text(encoding="utf-8").splitlines()
                 if line.lstrip().startswith("| 2,800,000 |")), None)

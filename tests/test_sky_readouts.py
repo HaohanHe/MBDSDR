@@ -250,9 +250,15 @@ class TestSatelliteReadouts:
         # UTC 与本地（+08:00）确实不同：证明行里标的 UTC 不是本地时间
         local = format_local_time(rise_u, ZoneInfo("Asia/Shanghai"), "%H:%M")
         assert local != expect
-        # 源码锁：行标签必须写明 UTC
-        src = inspect.getsource(RFSkyView._draw_picked_info)
-        assert "Rise/Set (UTC)" in src
+        # 真实渲染锁：卡里画出来的是 UTC 时刻，不是本地时刻
+        v._hovered_object = obj
+        rec = _TextRecorder()
+        v._draw_picked_info(rec)
+        assert "Rise/Set (UTC)" in rec.texts
+        joined = "\n".join(rec.texts)
+        assert f"Rise {format_utc_time(rise_u)}" in joined
+        assert format_local_time(rise_u, ZoneInfo("Asia/Shanghai"),
+                                 "%H:%M") not in joined
 
 
 def _parse_km(obj):
@@ -375,14 +381,23 @@ class TestPassPanelReadouts:
         assert row["rise"] == format_utc_time(peak, "%H:%M:%S")
 
     def test_pass_panel_labels_and_single_formatter(self):
-        src = inspect.getsource(RFSkyView._draw_passes_panel)
-        assert "未来过境" in src
-        # 窗口来自用户设置，标题不许写死 24h（否则 6h 窗口仍显示「24h」）
-        assert "24h" not in src
-        assert "_pass_window_hours" in src
-        assert "峰值(几何)" in src
-        assert "format_angle_deg(" in src
-        assert ":4.0f} deg" not in src
+        # 真实渲染：注入 6h 窗口，标题必须跟着变成 6h（写死 24h 会立刻红）
+        v = RFSkyView()
+        v._upcoming_passes = [{"name": "ISS", "rise": "12:00:00",
+                               "max_alt": 30.0}]
+        v._pass_gate_deg = 10.0
+        v._pass_show_low = False
+        v._pass_window_hours = 6.0
+        rec = _TextRecorder()
+        v._draw_passes_panel(rec)
+        texts = "\n".join(rec.texts)
+        assert "未来过境 6h" in texts
+        assert "24h" not in texts
+        assert "峰值≥10°" in texts
+        assert "峰值(几何)" not in texts
+        # 行内角度走唯一格式化器：30.0°，不是 "30 deg"
+        assert "30.0°" in texts
+        assert all(" deg" not in t for t in rec.texts), rec.texts
 
 
 # ---------------------------------------------------------------------------
@@ -450,23 +465,44 @@ class TestSingleFormatterAndUnitLabels:
         # 升降时刻按 UTC 显示（本地时刻不应出现在卡里）
         assert format_local_time(rise_u) not in texts
 
-    def test_body_card_units(self):
-        src = inspect.getsource(RFSkyView._draw_body_info)
-        assert "Magnitude (mag)" in src
-        assert "Rise/Set (UTC)" in src
-        assert "Az/Alt (视/几何, Az 0°=N)" in src
-        assert "format_azimuth(" in src
-        # 高度角统一走 _format_alt_pair（内部仍只调 format_angle_deg 单点实现）
-        assert "_format_alt_pair(" in src
-        assert "format_hms_ra(" in src and "format_dms_deg(" in src
+    def test_body_card_units(self, engine):
+        """渲染天体卡：行标签与显示值都必须是真实格式化路径的输出。"""
+        v = RFSkyView()
+        v.set_observer(LAT, LON, 0.0)
+        v._picked_body = {"kind": "planet", "key": "moon"}
+        v._build_body_info(v._picked_body)
+        rec = _TextRecorder()
+        v._draw_body_info(rec)
+        texts = rec.texts
+        info = v._body_info
+        assert "Magnitude (mag)" in texts
+        assert "Rise/Set (UTC)" in texts
+        assert "Az/Alt (视/几何, Az 0°=N)" in texts
+        assert format_magnitude(info["mag"]) in texts
+        assert (f"{format_hms_ra(info['ra'])}  "
+                f"{format_dms_deg(info['dec'])}") in texts
+        # 视/几何高度同给，角度只走 ° 单点实现，不出现 "deg"
+        azalt = next(t for t in texts if "几何" in t and "视(" in t)
+        assert "°" in azalt and "ALT" not in azalt
+        assert all(" deg" not in t for t in texts), texts
 
-    def test_status_card_states_utc_and_local_offset(self):
-        src = inspect.getsource(RFSkyView._draw_info_overlay)
-        assert "format_utc_time(" in src
-        assert "format_local_time(" in src
-        assert '"本地"' in src
-        assert "format_azimuth(" in src and "format_angle_deg(" in src
-        assert 'deg"' not in src
+    def test_status_card_states_utc_and_local_offset(self, engine):
+        """渲染状态卡：UTC 与本地（带偏移）两个时刻都要真的画出来。"""
+        import datetime as _dt
+        v = RFSkyView()
+        v.set_observer(LAT, LON, 0.0)
+        utc_dt = _dt.datetime.fromtimestamp(UNIX, tz=_dt.timezone.utc)
+        v._time_info = {"utc_time": utc_dt}
+        rec = _TextRecorder()
+        v._draw_info_overlay(rec)
+        texts = rec.texts
+        assert "UTC" in texts
+        assert "本地" in texts
+        assert f"{format_utc_time(utc_dt, '%H:%M:%S')} [system]" in texts
+        assert format_local_time(utc_dt) in texts
+        axis = next(t for t in texts if t.startswith("AZ ") and "· ALT " in t)
+        assert axis.endswith("°")
+        assert all(" deg" not in t for t in texts), texts
 
     def test_no_ad_hoc_numeric_formatting_left(self):
         """全文件只有一套时间/角度格式化（禁止各处自己 strftime/拼度数）。"""
@@ -509,14 +545,26 @@ class TestSpacetimeReadouts:
         assert "ALT 45.0°" in txt
         assert "几何" not in txt             # 口径在行标签上，不重复塞进值里
 
-    def test_card_rows_use_single_fact_source(self):
-        src = inspect.getsource(RFSkyView._draw_info_overlay)
-        assert '"恒星时"' in src
-        assert "local_sidereal_time_deg(" in src and "_current_jd(" in src
-        assert '"视轴(几何)"' in src and "format_view_axis(" in src
-        assert '"星表来源"' in src and "star_catalog_credit_text(" in src
-        # 无站址时 LST 必须显式空态，不许拿 0° 冒充
-        assert "—（无站址）" in src
+    def test_card_rows_use_single_fact_source(self, engine):
+        """渲染状态卡：恒星时/视轴/星表来源都来自单一事实源，无站址给空态。"""
+        v = RFSkyView()
+        v.set_observer(LAT, LON, 0.0)
+        rec = _TextRecorder()
+        v._draw_info_overlay(rec)
+        texts = rec.texts
+        assert "恒星时" in texts
+        assert "视轴(几何)" in texts
+        assert "星表来源" in texts
+        joined = "\n".join(texts)
+        assert format_hms_ra(local_sidereal_time_deg(_jd(UNIX), LON),
+                             digits=1) in joined
+        assert any(t.startswith("AZ ") and "· ALT " in t for t in texts)
+        assert star_catalog_credit_text() in texts
+        # 无站址：LST 必须显式空态，不许拿 0° 冒充
+        v2 = RFSkyView()
+        rec2 = _TextRecorder()
+        v2._draw_info_overlay(rec2)
+        assert "—（无站址）" in rec2.texts
 
     def test_catalog_credit_from_meta(self):
         txt = star_catalog_credit_text()

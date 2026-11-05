@@ -130,11 +130,12 @@ def test_u02_status_defaults_are_none_and_format_has_no_fake_minus100():
 def test_u02_cli_has_no_minus_one_fake_rssi_and_labels_dbuV():
     """U-02：CLI 扫描缺值存 None 显「—」，并标 dBµV。"""
     import mbdsdr_mcp_client as cli
-    _CLI = open(os.path.join(_ROOT, "mbdsdr_mcp_client.py"),
-                encoding="utf-8").read()
-    assert 'status.get("rssi", -1)' not in _CLI
-    assert 'status.get("rssi")' in _CLI
-    assert "dBµV" in _CLI
+    # 真实扫频路径：固件没给 rssi 时结果必须是 None，不能拿 -1 冒充信号强度
+    client = cli.MBDSDRClient()
+    client.tune_fm = lambda *args, **kwargs: {}
+    client.get_status = lambda: {}
+    rows = client.scan_fm(100.0, 100.0, 0.1, 0)
+    assert rows == [{"freq_mhz": 100.0, "rssi": None, "snr": None}], rows
     assert cli._fmt_mcp_readout(None, 0, "dBµV") == "—"
     assert cli._fmt_mcp_readout(42, 0, "dBµV") == "42 dBµV"
     assert not any(ch.isdigit() for ch in cli._fmt_mcp_readout(None, 0, "dBµV"))
@@ -386,14 +387,6 @@ def test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s():
 # ---------------------------------------------------------------------------
 _MODULE = open(os.path.join(_ROOT, "desktop", "module_panel.py"),
                encoding="utf-8").read()
-_TOOLREG = open(os.path.join(_ROOT, "mbdsdr_ai", "tool_registry.py"),
-                encoding="utf-8").read()
-_BLADERF = open(os.path.join(_ROOT, "mbdsdr_ai", "bladerf_params.py"),
-                encoding="utf-8").read()
-_STARTUP = open(os.path.join(_ROOT, "mbdsdr_ai", "startup_sequence.py"),
-                encoding="utf-8").read()
-_CLI_DOC = open(os.path.join(_ROOT, "docs", "cli_usage.md"),
-                encoding="utf-8").read()
 
 
 def test_u03_module_panel_combo_renders_ms_per_s_three_decimals():
@@ -409,23 +402,76 @@ def test_u03_module_panel_combo_renders_ms_per_s_three_decimals():
 
 
 def test_u03_bladerf_sample_rate_range_is_ms_per_s():
-    """同一 bladeRF2 采样率区间：AI 工具描述与参数 docstring 都写 MS/s。"""
-    assert "SR 520834-61.44MHz" not in _TOOLREG
-    assert "SR 0.520834-61.44 MS/s" in _TOOLREG
-    assert "bladeRF2: 520834-61.44 MHz" not in _BLADERF
-    assert "bladeRF2: 0.520834-61.44 MS/s" in _BLADERF
+    """同一 bladeRF2 采样率区间：参数 docstring 与 AI 工具描述都写 MS/s。"""
+    import inspect
+
+    from mbdsdr_ai import bladerf_params as bp
+    p = bp.DEFAULT_PARAMS
+    # 真实边界行为：0.520834-61.44 MS/s，两侧越界一位都必须拒绝
+    assert p.is_valid_sample_rate(520_834) is True
+    assert p.is_valid_sample_rate(61_440_000) is True
+    assert p.is_valid_sample_rate(520_833) is False
+    assert p.is_valid_sample_rate(61_440_001) is False
+    assert "0.520834-61.44 MS/s" in inspect.getdoc(p.is_valid_sample_rate)
+    # 运行期注册的工具描述（不是源码文本）：量程单位必须 MS/s，不得回退 MHz
+    from mbdsdr_ai.tool_registry import ToolRegistry
+    reg = ToolRegistry()
+    reg.register_bladerf_params_tools()
+    desc = reg.tools["bladerf_get_freq_range"]["definition"]["function"][
+        "description"]
+    assert "SR 0.520834-61.44 MS/s" in desc, desc
+    assert "SR 520834-61.44MHz" not in desc, desc
 
 
 def test_u03_startup_step_reports_fs_in_ms_per_s():
     """启动步骤读数里的采样率不得回退成裸 Hz（2400000Hz）。"""
-    assert "sr={int(round(sample_rate_hz))}Hz" not in _STARTUP
-    assert "sr={sample_rate_hz / 1e6:.3f} MS/s" in _STARTUP
+    from types import SimpleNamespace
+
+    from mbdsdr_ai.startup_sequence import STEP_CONFIGURE, StartupSequence
+
+    class _Backend:
+        def set_sample_rate(self, rate_hz):
+            return True
+
+        def set_frequency(self, freq_hz):
+            return True
+
+        def set_gain(self, gain_db):
+            return True
+
+    seq = StartupSequence(backend_factory=lambda index, info: _Backend())
+    seq.device_info = SimpleNamespace(name="fake", sample_rates=[2_400_000])
+    seq.backend = _Backend()
+    seq.configure(98_500_000.0, 2_400_000.0, 20.0)
+    assert seq.steps[STEP_CONFIGURE].detail == \
+        "freq=98.500MHz sr=2.400 MS/s gain=20.0dB"
+
+
+def _cli_doc_example_rate_hz() -> int:
+    """从 CLI 文档解析 --sample-rate 示例的取值（不在测试里另抄一份）。"""
+    import re
+    doc = open(os.path.join(_ROOT, "docs", "cli_usage.md"),
+               encoding="utf-8").read()
+    match = re.search(r"--sample-rate\s+(\d+)", doc)
+    assert match, "CLI 文档缺 --sample-rate 示例"
+    return int(match.group(1))
+
+
+def _cli_doc_rate_unit_tokens():
+    """CLI 文档里所有「数值+采样率单位」串，用于查旧量纲是否残留。"""
+    import re
+    doc = open(os.path.join(_ROOT, "docs", "cli_usage.md"),
+               encoding="utf-8").read()
+    return re.findall(r"\d[\d.]*\s?(?:MSps|MS/s)", doc)
 
 
 def test_u03_cli_usage_doc_says_ms_per_s_not_msps():
     """文档示例里采样率不再写 MSps（与桌面/CLI 输出同口径）。"""
-    assert "2.4 MSps" not in _CLI_DOC
-    assert "2.400 MS/s" in _CLI_DOC
+    rate_hz = _cli_doc_example_rate_hz()
+    # 文档示例的取值经共享格式化器渲染后必须是 MS/s；改示例值而忘了单位即红
+    assert format_sample_rate(rate_hz) == "2.400 MS/s"
+    tokens = _cli_doc_rate_unit_tokens()
+    assert not any("MSps" in token for token in tokens), tokens
 
 
 def test_u03_orchestration_and_advice_copy_use_ms_per_s():
@@ -444,7 +490,13 @@ def test_u03_orchestration_and_advice_copy_use_ms_per_s():
     assert "采样率 2.048 MS/s（ oversample ~16x）" in out_rtl
     assert "采样率 2.5 MS/s" in out_pluto
     assert "MSPS" not in out_rtl + out_pluto
-    assert '"采样率 (MS/s)"' in _WEATHER
+    # 真实天气面板：采样率行的标签必须写明 MS/s
+    _qt_app()
+    from PySide6.QtWidgets import QLabel
+    from weather_panel import WeatherPanel
+    panel = WeatherPanel()
+    labels = [w.text() for w in panel.findChildren(QLabel)]
+    assert "采样率 (MS/s)" in labels
 
 
 def test_u03_status_output_uses_ms_per_s_for_sample_rate():
@@ -475,10 +527,14 @@ def test_u02_apt_stats_missing_values_render_dash():
 
 def test_u02_satellite_form_prefill_uses_empty_placeholder():
     """U-02：卫星参数表单缺值不得预填 0.000 / 0.0。"""
-    _WEATHER = open(os.path.join(_ROOT, "desktop", "weather_panel.py"),
-                    encoding="utf-8").read()
-    assert "get('freq_mhz', 0)" not in _WEATHER
-    assert "get('symrate_ksps', 0)" not in _WEATHER
+    _qt_app()
+    from weather_panel import WeatherPanel
+    panel = WeatherPanel()
+    panel._current_sat = lambda: {}
+    panel._on_satellite_changed(0)
+    assert panel.freq_edit.text() == ""
+    assert panel.sym_edit.text() == ""
+    assert panel.sr_edit.text() == ""
 
 
 def test_u03_troubleshooting_error_hint_uses_ms_per_s():
@@ -539,5 +595,23 @@ def test_u02_gnss_psd_fields_never_labeled_dbm():
                   encoding="utf-8").read()
     assert "**不是 dBm**" in _GNSS
     assert "平均功率（相对读数 dB，非 dBm）" in _GNSS
-    assert "平均功率: {result.power_dbm:.1f} dB（相对读数，非 dBm）" in _TOOLS
-    assert "峰值RSSI: {result['peak_rssi_dbm']}（相对读数 dB，非 dBm）" in _TOOLS
+    # 真实格式化路径：把假监测结果喂给工具，输出必须是 dB + 「非 dBm」说明
+    from types import SimpleNamespace
+    import mbdsdr_ai.gnss_monitor as gm
+    import mbdsdr_ai.sdr_tools as tools
+    fake = SimpleNamespace(power_dbm=-40.0, noise_floor_dbm=-90.0,
+                           inr_db=12.0, peak_freq_hz=1.57542e9,
+                           peak_power_dbm=-38.0,
+                           interference_type=SimpleNamespace(value="cw"),
+                           confidence=0.9)
+    gm.monitor_gnss_band = lambda *a, **k: fake
+    out = tools._gnss_monitor_band(
+        {"band_name": "L1", "center_freq_hz": 1575.42e6})
+    assert "平均功率: -40.0 dB（相对读数，非 dBm）" in out
+    assert "峰值功率: -38.0 dB（相对读数，非 dBm）" in out
+    gm.interference_direction_finding = lambda d: {
+        "estimated_direction_deg": 90.0, "peak_rssi_dbm": -70,
+        "confidence": 0.8, "note": "", "symmetric_check": ""}
+    txt, data = tools._gnss_direction_find({"rssi_by_azimuth": {"0": -82}})
+    assert "峰值RSSI: -70（相对读数 dB，非 dBm）" in txt
+    assert data["interference_az"] == 90.0

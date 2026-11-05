@@ -148,15 +148,28 @@ class TestWidgetSeam:
         v.close()
 
 
+class _EllipseRecorder:
+    """假画家：记录所有 drawEllipse 调用，其余绘制调用空操作。"""
+
+    def __init__(self):
+        self.ellipses = []
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+    def drawEllipse(self, *args):  # noqa: N802 (Qt 命名)
+        self.ellipses.append(args)
+
+
 class TestNoDoubleRingRegression:
     """回归：_draw_picked_info 不再自画静态双环（十字由 _draw_objects 统一）。"""
 
     def test_picked_info_has_no_static_double_ring(self):
-        src = open(os.path.join(_ROOT, "desktop", "rf_sky_view.py"),
-                   encoding="utf-8").read()
-        i = src.index("def _draw_picked_info")
-        j = src.index("def ", i + 10)
-        body = src[i:j]
-        assert "drawEllipse(pos, 12, 12)" not in body, \
-            "_draw_picked_info 不应再画静态双环（改由呼吸十字统一）"
-        assert "drawEllipse(pos, 16, 16)" not in body
+        v = _new_view()
+        v._hovered_object = SkyObject("SAT A", 90.0, 45.0,
+                                      obj_type="satellite")
+        v._selected_info = {}
+        rec = _EllipseRecorder()
+        v._draw_picked_info(rec)
+        assert rec.ellipses == [], \
+            f"_draw_picked_info 不应再画静态双环（改由呼吸十字统一）：{rec.ellipses}"
