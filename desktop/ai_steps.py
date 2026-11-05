@@ -42,6 +42,22 @@ WORKFLOW_TOOLS = ("workflow_execute",)
 SUBAGENT_TOOLS = ("subagent_execute",)
 
 
+def latency_ms(payload: Any) -> Optional[float]:
+    """从结果字典取真实耗时（ms）；缺键/非数字/负数一律 ``None``。
+
+    绝不写 0：0ms 会被读成「瞬间完成」，与「没测到」是两回事（步骤卡渲染「—」）。
+    """
+    if not isinstance(payload, dict):
+        return None
+    v = payload.get("latency_ms")
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    f = float(v)
+    if f != f or f < 0 or f == float("inf"):   # NaN / 负 / inf
+        return None
+    return f
+
+
 @dataclass
 class StepRecord:
     """一步真实工具调用的步骤卡模型。"""
@@ -49,7 +65,8 @@ class StepRecord:
     args_preview: str = ""
     status: str = STATUS_RUNNING
     summary: str = ""
-    elapsed_ms: float = 0.0
+    # None = 未测到耗时（渲染「—」），不是 0ms。
+    elapsed_ms: Optional[float] = None
     error: str = ""
     parent: str = ""          # 所属多步工具名（workflow_execute 等）；空 = 顶层步骤
     depth: int = 0            # 渲染缩进层级（子步骤 = 1）
@@ -156,7 +173,7 @@ def steps_from_chat(tool_calls: List[Dict[str, Any]],
             # 未收到结果（流被打断/执行器未回填）：诚实落 running，不臆造
             steps.append(StepRecord(
                 tool=name, args_preview=args_preview(args),
-                status=STATUS_RUNNING, summary="", elapsed_ms=0.0))
+                status=STATUS_RUNNING, summary=""))
             continue
 
         content = tr.get("content", "")
@@ -169,7 +186,7 @@ def steps_from_chat(tool_calls: List[Dict[str, Any]],
             args_preview=args_preview(tr.get("args", args) or args),
             status=status,
             summary=summarize_result(text),
-            elapsed_ms=float(tr.get("latency_ms", 0) or 0),
+            elapsed_ms=latency_ms(tr),
             error=err,
         ))
 
@@ -201,7 +218,7 @@ def steps_from_tool_result(tool_name: str, result: Dict[str, Any]) -> StepRecord
         args_preview="",
         status=STATUS_FAILED if failed else STATUS_SUCCESS,
         summary=summarize_result(text),
-        elapsed_ms=float(result.get("latency_ms", 0) or 0),
+        elapsed_ms=latency_ms(result),
         error=str(result.get("error", "") or ""),
     )
 
@@ -246,7 +263,7 @@ def steps_from_workflow(payload: Dict[str, Any]) -> List[StepRecord]:
             summary = summarize_result(err) or "步骤失败"
         out.append(StepRecord(
             tool=tool, args_preview="", status=status, summary=summary,
-            elapsed_ms=0.0, error=err, parent="workflow_execute", depth=1,
+            error=err, parent="workflow_execute", depth=1,
             extra={"step_id": entry.get("step_id"), "workflow": wf_name},
         ))
     return out
@@ -278,7 +295,7 @@ def steps_from_subagent(payload: Dict[str, Any]) -> List[StepRecord]:
     for tool in tools:
         out.append(StepRecord(
             tool=str(tool), args_preview="", status=status,
-            summary=note, elapsed_ms=0.0,
+            summary=note,
             error=str(payload.get("error", "") or ""),
             parent="subagent_execute", depth=1,
             extra={"subagent_id": payload.get("subagent_id", "")},

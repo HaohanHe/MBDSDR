@@ -67,6 +67,15 @@ void main() {
       final v = NmeaParser().parse(mk('GNRMC,072545.00,V,3351.1111,S,11820.2222,W,0,0,010126,,A'));
       expect((v as RmcRecord).valid, isFalse);
     });
+
+    test('无速度字段：speedKnots/speedKmh 为 null，不是 0 km/h（静止）', () {
+      final r = NmeaParser().parse(
+          mk('GNRMC,072545.00,A,3351.1111,S,11820.2222,W,,45.0,010126,,A'));
+      expect(r, isA<RmcRecord>());
+      final m = r as RmcRecord;
+      expect(m.speedKnots, isNull);
+      expect(m.speedKmh, isNull);
+    });
   });
 
   group('GSA / VTG / ZDA', () {

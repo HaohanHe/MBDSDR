@@ -314,7 +314,8 @@ class NmeaParser {
       latitude: f.length > 4 ? _ddmmToDeg(f[3], f[4], true) : null,
       longitude: f.length > 6 ? _ddmmToDeg(f[5], f[6], false) : null,
       speedKnots: knots,
-      speedKmh: (knots ?? 0.0) * 1.852,
+      // 缺速度字段 = 未知（null），绝不写 0 km/h——0 会被读成「静止」。
+      speedKmh: knots == null ? null : knots * 1.852,
       courseDeg: _f(f, 8),
       date: f.length > 9 ? f[9] : '',
     );

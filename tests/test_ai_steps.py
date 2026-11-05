@@ -48,6 +48,27 @@ class TestStepsFromChat:
         assert "98.5" in s.args_preview
         assert s.elapsed_ms == 12.5
 
+    def test_missing_latency_is_none_not_zero(self):
+        """缺 latency_ms → None（渲染「—」），不是 0ms。"""
+        calls = [{"name": "tune_fm", "arguments": "{}"}]
+        result = _chat_result('{"ok": true}')
+        del result["latency_ms"]
+        steps = ai_steps.steps_from_chat(calls, [result])
+        assert steps[0].elapsed_ms is None
+        assert ai_steps.latency_ms(result) is None
+        # 非数字 / 负数 / NaN 同样不冒充 0
+        assert ai_steps.latency_ms({"latency_ms": "12"}) is None
+        assert ai_steps.latency_ms({"latency_ms": -1.0}) is None
+        assert ai_steps.latency_ms({"latency_ms": float("nan")}) is None
+        assert ai_steps.latency_ms({}) is None
+
+    def test_unresolved_step_has_no_fake_zero_latency(self):
+        """未收到结果的 running 步骤不写 0ms（没测到 ≠ 瞬间完成）。"""
+        steps = ai_steps.steps_from_chat([{"name": "sdr_status",
+                                           "arguments": "{}"}], [])
+        assert steps[0].status == ai_steps.STATUS_RUNNING
+        assert steps[0].elapsed_ms is None
+
     def test_failure_from_success_flag(self):
         calls = [{"name": "sdr_record_start", "arguments": "{}"}]
         results = [_chat_result("设备未连接", success=False, error="not_connected")]

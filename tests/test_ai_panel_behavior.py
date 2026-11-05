@@ -639,6 +639,21 @@ class TestStepCardRendering:
             tool="t", status=ai_steps.STATUS_SUCCESS, elapsed_ms=137.6))
         assert "138ms" in "".join(_card_labels(panel))
 
+    def test_missing_elapsed_ms_shows_dash_not_zero(self, panel):
+        """缺耗时显示「—」，绝不写 0ms（0ms 会被读成「瞬间完成」）。"""
+        panel._append_step_card(ai_steps.StepRecord(
+            tool="t", status=ai_steps.STATUS_SUCCESS, elapsed_ms=None))
+        labels = "".join(_card_labels(panel))
+        assert "—" in labels and "0ms" not in labels
+
+    def test_missing_latency_omits_the_whole_duration_phrase(self, panel):
+        """反证：结果里没有 latency_ms 时，页脚不出现「耗时 0ms」。"""
+        panel._on_ai_finished({"content": "ok", "tool_calls": [],
+                               "tool_results": [], "compacted": False})
+        view = _view_text(panel)
+        assert "耗时" not in view
+        assert "调用 0 个工具" in view
+
     def test_child_step_card_is_indented(self, panel):
         panel._append_step_card(ai_steps.StepRecord(
             tool="parent", status=ai_steps.STATUS_SUCCESS))

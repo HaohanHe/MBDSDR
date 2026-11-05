@@ -562,13 +562,16 @@ class AIPanel(QWidget):
             ai_steps.STATUS_SKIPPED: "跳过",
         }.get(step.status, step.status)
 
+        # 耗时缺值显示「—」：0ms 会被读成「瞬间完成」，与「没测到」是两回事。
+        elapsed_txt = ("—" if step.elapsed_ms is None
+                       else f"{step.elapsed_ms:.0f}ms")
         html = (
             f'<div>'
             f'<span style="color:{_t["text_muted"]}; font-family: monospace;">'
             f'{idx:02d}</span> '
             f'<b style="color:{_t["light_text_strong"]};">{_esc(step.tool)}</b> '
             f'<span style="color:{status_color};">{status_label}</span> '
-            f'<span style="color:{_t["disabled_gray"]};">{step.elapsed_ms:.0f}ms</span>'
+            f'<span style="color:{_t["disabled_gray"]};">{elapsed_txt}</span>'
         )
         if step.args_preview:
             html += (f'<br><span style="color:{_t["light_text_secondary"]};">'
@@ -784,7 +787,8 @@ class AIPanel(QWidget):
         tool_calls = result.get("tool_calls", [])
         tool_results = result.get("tool_results", [])
         compacted = result.get("compacted", False)
-        latency = result.get("latency_ms", 0)
+        # 缺 latency_ms = 没测到：None，绝不当成 0ms。
+        latency = ai_steps.latency_ms(result)
         error = result.get("error")
 
         # 结构化步骤卡：本轮全部工具调用（含 workflow_execute / subagent_execute
@@ -842,7 +846,11 @@ class AIPanel(QWidget):
                 "AI 的文字回复可能没有反映这些失败；"
                 "请按「执行步骤」中的错误原因处理后重试。")
 
-        footer = f"耗时 {latency:.0f}ms，调用 {len(tool_calls)} 个工具"
+        # 没测到耗时就不渲染这一整段，绝不写「耗时 0ms」。
+        if latency is None:
+            footer = f"调用 {len(tool_calls)} 个工具"
+        else:
+            footer = f"耗时 {latency:.0f}ms，调用 {len(tool_calls)} 个工具"
         if failed:
             footer += f"，其中 {len(failed)} 个失败"
         self._add_system_message(footer)
