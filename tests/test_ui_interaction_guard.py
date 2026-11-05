@@ -42,11 +42,21 @@ app = QApplication.instance() or QApplication(sys.argv)
 
 @pytest.fixture(scope="module")
 def isolated_home(tmp_path_factory):
-    """HOME 隔离到临时目录：不读用户真实书签/配置，也不写用户目录。"""
+    """HOME 隔离到临时目录：不读用户真实书签/配置，也不写用户目录。
+
+    Windows 上 ``DesktopSettings.default_config_path()`` 走 ``%APPDATA%``：
+    审计会真点「恢复本组默认」「启用 Web 服务」这类会落盘的按钮，只改
+    ``HOME/USERPROFILE`` 挡不住真实 ``desktop_settings.json`` 被写脏
+    （P0 见 ``tests/test_ui_settings_isolation_guard.py``）。因此把
+    ``APPDATA`` / ``LOCALAPPDATA`` 一起重定向。
+    """
     home = str(tmp_path_factory.mktemp("home"))
-    saved = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+    saved = {k: os.environ.get(k)
+             for k in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA")}
     os.environ["HOME"] = home
     os.environ["USERPROFILE"] = home
+    for var in ("APPDATA", "LOCALAPPDATA"):
+        os.environ[var] = home
 
     qset = QSettings("MBDSDR", "Desktop")
     backup = {k: qset.value(k) for k in qset.allKeys()}
