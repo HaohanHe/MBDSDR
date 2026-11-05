@@ -417,6 +417,15 @@ class ControlPanel(QWidget):
 
         self.preset_combo = QComboBox()
         self.preset_combo.setMinimumHeight(28)
+        # 尺寸策略：条目文本长短不得改变面板最小宽。占位文案
+        # 「（无预设：请用“自动扫台”或手动输入频率）」曾经 AdjustToContentsOnFirstShow
+        # 把「频率预设」组撑到 332，清空后该最小宽缓存又是 292↔101 两态，右栏随
+        # 之在 356↔278 间跳（1000×600 下挤压 13↔15）。与 bookmark_combo 同一策略：
+        # 最小宽只按最少字符数算，水平 Ignored 让布局用可用宽度。
+        self.preset_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.preset_combo.setMinimumContentsLength(16)
+        self.preset_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._populate_presets("FM 广播")
         self.preset_combo.currentIndexChanged.connect(self._on_preset_selected)
         preset_layout.addWidget(self.preset_combo)
@@ -817,7 +826,10 @@ class ControlPanel(QWidget):
     def _on_mode_changed(self, mode: str):
         self._current_mode = mode
         self.mode_changed.emit(mode)
-        self._populate_presets(mode)
+        # 预设列表属于「频段」，不属于解调模式：切模式只换带宽，不重排电台。
+        # 旧实现把模式名（"FM"）当频段名传进去，_populate_presets 无一支命中，
+        # 结果 clear() 后列表为空，还留下一条内容相关的最小宽缓存。
+        self._populate_presets(self.band_combo.currentText())
         self._update_freq_display()
         # 切换模式时自动套用该模式的典型 VFO 带宽，并 emit vfo_bandwidth_changed
         bw = default_bandwidth(mode)
@@ -1275,7 +1287,8 @@ class ControlPanel(QWidget):
         self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentText(mode)
         self.mode_combo.blockSignals(False)
-        self._populate_presets(mode)
+        # 同 _on_mode_changed：预设按频段走，模式名不能当频段名（见该处注释）。
+        self._populate_presets(self.band_combo.currentText())
         if self._sdr_connected:
             self._update_freq_display()
         # 同步带宽下拉到该模式典型带宽（blockSignals，不 emit）
