@@ -246,11 +246,14 @@ def _run_import_probe(spec: str) -> int:
 
     发布清单用它给「产物里有、requirements 没声明」的第三方包补运行时证据：
     静态 import 链只能说明 PyInstaller 为什么收集它，不能说明产物里真的能用。
-    失败返回 2（成功 0），不建窗口、不初始化 Qt。
+    失败返回 2（成功 0）。**洁净约束**：不建窗口、不初始化 Qt、不写任何文件
+    或配置（包括启动日志），只在 stdout/stderr 输出结果。无控制台且没有继承
+    管道时两者都是 None，此时只返回退出码、不输出（双击运行才会遇到的边界）。
     """
     import importlib
 
     names = [n.strip() for n in spec.split(",") if n.strip()]
+    stream = sys.stdout if sys.stdout is not None else sys.stderr
     failed: list[str] = []
     for name in names:
         try:
@@ -259,9 +262,22 @@ def _run_import_probe(spec: str) -> int:
         except Exception as exc:  # noqa: BLE001 - 任何导入失败都要如实报出
             failed.append(name)
             line = f"[probe] FAIL {name}: {type(exc).__name__}: {exc}"
-        print(line)
-        _append_startup_log(line)
+        if stream is not None:
+            print(line, file=stream, flush=True)
     return 0 if not failed else 2
+
+
+def _import_probe_spec(argv: list[str]) -> str | None:
+    """只识别 ``--import-probe``（空格/等号两种写法）；值缺失/为空返回 None，
+    交给 argparse 按普通非法参数报错。其余开关一律不看，保持既有入口不变。"""
+    for i, arg in enumerate(argv):
+        if arg == "--import-probe":
+            value = argv[i + 1] if i + 1 < len(argv) else ""
+            return value if value and not value.startswith("-") else None
+        if arg.startswith("--import-probe="):
+            value = arg.split("=", 1)[1]
+            return value or None
+    return None
 
 
 def _import_error_text(exc: BaseException) -> str:
@@ -383,6 +399,13 @@ def _ensure_stdio_for_pythonw():
     if sys.stderr is None:
         sys.stderr = sys.stdout
 
+
+# 探针入口必须在任何日志/Qt/界面模块初始化之前判掉：它只做 import 并退出。
+# 放在 _ensure_stdio_for_pythonw() 之前，保证「不写日志文件」；放在 PySide6 /
+# themes / main_window 导入之前，保证「不初始化 Qt」。
+_probe_spec = _import_probe_spec(sys.argv[1:])
+if _probe_spec is not None:
+    raise SystemExit(_run_import_probe(_probe_spec))
 
 # 打包版是 GUI 子系统（无控制台）：导入失败如果放任抛 traceback，用户只会
 # 看到一个 "Unhandled exception in script" 英文弹窗，或干脆静默退出。
@@ -518,12 +541,11 @@ def main():
     parser.add_argument("--theme", type=str, default=DEFAULT_THEME,
                         choices=["default", "dark", "high_contrast"],
                         help="主题")
+    # --import-probe 已在模块级提前拦截（见文件上方），这里只保留帮助文本与
+    # 参数校验；不要把它改回 main() 内处理，否则会重新走到 Qt/日志初始化。
     parser.add_argument("--import-probe", type=str, default=None, metavar="MOD1,MOD2",
                         help="只做导入自检（逗号分隔模块名），打印结果后退出，不建窗口")
     args = parser.parse_args()
-
-    if args.import_probe:
-        return _run_import_probe(args.import_probe)
 
     # 启动自检：把 PyInstaller 静态分析易漏的私有模块逐个导入并记日志。
     _run_import_smoke()

@@ -800,3 +800,20 @@ python scripts/release_manifest.py --only installer
 `BY-DESIGN` 与 `SKIP` 的区别是**有没有决策记录**：BY-DESIGN 必须能指到本文或
 `docs/release-notes.md` 的具体条款；指不到就只能记 `SKIP`，不算绿。
 
+### 9.6 `--import-probe` 入口的边界
+
+- **产物内**：`MBDSDR.exe --import-probe A,B` 逐模块打印 `[probe] OK|FAIL <模块>`，
+  全成功退出 0、任一失败退出 2；空格与等号（`--import-probe=A,B`）两种写法都收。
+- **洁净保证**：入口在 `desktop/main.py:406` 提前判掉——位于
+  `_ensure_stdio_for_pythonw()` 与 `from PySide6 ...` 之前，因此**不初始化 Qt、
+  不写启动日志、不落配置**。`tests/test_import_probe.py` 用「一被 import 就炸」
+  的假 `PySide6` 证明前者，用重定向的 `MBDSDR_STARTUP_LOG`/`APPDATA` 证明后者
+  （跑完文件系统一个文件都没多）。
+- **产物外**：源码直跑同样支持（`python desktop/main.py --import-probe json`），
+  不依赖 `sys.frozen`、不依赖产物布局；产物侧由 `release_manifest` 的
+  `_runtime_import_probe` 复验同一入口。
+- **无控制台边界**：GUI 子系统双击运行且没有继承管道时 `sys.stdout`/`sys.stderr`
+  都是 None，此时只返回退出码、不输出（清单/CI 用管道启动，不受影响）。
+- **既有入口**：无参数启动、`--help`、`--host`/`--port`/`--theme` 保持原样；
+  `--import-probe` 缺值或未知开关仍由 argparse 以退出码 2 报错。
+
