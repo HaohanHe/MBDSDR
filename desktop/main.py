@@ -17,6 +17,20 @@ import sys
 import os
 import argparse
 
+_here = os.path.dirname(os.path.abspath(__file__))
+if _here not in sys.path:
+    sys.path.insert(0, _here)
+
+from startup_paths import (  # noqa: E402  (先修 sys.path 再导入同目录模块)
+    append_startup_log as _append_startup_log,
+    buffered_log as _buffered_log,
+    persistent_log_note as _persistent_log_note,
+    probe_dir_writable_async,
+    program_dir as _program_dir,
+    runtime_dll_report,
+    startup_log_path as _startup_log_path,
+)
+
 # 确保能导入同目录和上层目录模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,56 +53,6 @@ _PIP_HINTS = {
     "sounddevice": "pip install sounddevice",
     "astropy": "pip install astropy",
 }
-
-
-def _program_dir() -> str:
-    """程序根目录：冻结版是 exe 所在目录，源码版是仓库根目录。"""
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def _startup_log_path() -> str:
-    """启动失败日志落点：显式环境变量 > 非 C 盘 > 程序目录 logs > %PROGRAMDATA%。
-
-    刻意不写 C 盘用户目录（~/.config、%APPDATA%、%LOCALAPPDATA%），也不落
-    系统临时目录：临时目录在 C 盘用户目录下（%TEMP%），且会被清理。
-    """
-    candidates = []
-    override = (os.environ.get("MBDSDR_STARTUP_LOG") or "").strip()
-    if override:
-        candidates.append(os.path.expanduser(override))
-    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
-        root = f"{letter}:\\"
-        if os.path.isdir(root):
-            candidates.append(os.path.join(root, "mbdsdr", "logs",
-                                          _STARTUP_LOG_NAME))
-    candidates.append(os.path.join(_program_dir(), "logs", _STARTUP_LOG_NAME))
-    programdata = os.path.expandvars("%PROGRAMDATA%")
-    if programdata and not programdata.startswith("%"):
-        candidates.append(os.path.join(programdata, "MBDSDR", "logs",
-                                      _STARTUP_LOG_NAME))
-    for path in candidates:
-        try:
-            directory = os.path.dirname(path)
-            if directory:
-                os.makedirs(directory, exist_ok=True)
-            return path
-        except OSError:
-            continue
-    return ""
-
-
-def _append_startup_log(text: str) -> str:
-    path = _startup_log_path()
-    if not path:
-        return ""
-    try:
-        with open(path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(text.rstrip() + "\n")
-        return path
-    except OSError:
-        return ""
 
 
 def _show_native_message(title: str, text: str) -> None:
@@ -216,6 +180,13 @@ def _report_startup_failure(summary: str, detail: str) -> None:
     body = f"{summary}\n\n{detail}"
     if log_path:
         body += f"\n\n日志：{log_path}"
+    else:
+        # 落点全部不可写（无非 C 盘、安装根只读、ProgramData 也写不进）：
+        # 唯一副本在内存缓冲里，必须如实告诉用户，不能假装日志已落盘。
+        body += "\n\n" + _persistent_log_note()
+        tail = _buffered_log()[-6:]
+        if tail:
+            body += "\n\n本次会话日志（未持久化）：\n" + "\n".join(tail)
     _show_native_message("MBDSDR 启动失败", body)
 
 
@@ -294,7 +265,7 @@ _ensure_stdio_for_pythonw()
 
 try:
     from PySide6.QtWidgets import QApplication
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, QObject, Signal
     from PySide6.QtGui import QFont, QIcon
 
     from themes import get_theme, DEFAULT_THEME, get_app_font
@@ -307,6 +278,69 @@ except ImportError as _startup_exc:
         _first_line or _startup_exc.__class__.__name__)
     _report_startup_failure(_summary, _import_error_text(_startup_exc))
     raise SystemExit(3)
+
+
+def _report_runtime_dlls() -> None:
+    """启动自检：运行期 DLL 存在性检查。
+
+    打包版缺 ``_internal`` 里的 DLL 时，用户看到的是 ``0xC0000135`` / 窗口一闪，
+    这里提前用中文说明「缺哪个运行库、怎么修」。
+    """
+    report = runtime_dll_report()
+    missing = report["missing_packaged"]
+    if missing:
+        text = ("缺少运行库：" + "、".join(missing) + "\n\n"
+                "这些 DLL 应随安装包放在 _internal 目录（或 exe 同目录）。\n"
+                "请重新安装完整包，不要手工删 _internal 里的文件；"
+                "若使用外部 SDR 驱动，也可安装对应驱动后重试；"
+                "若杀毒软件隔离了它们，请恢复后重试。")
+        _append_startup_log("[dll] 缺失：" + "、".join(missing))
+        _show_native_message("MBDSDR 运行库缺失", text)
+    optional = report["missing_optional"]
+    if optional:
+        line = ("[dll] 未发现 " + "、".join(optional) +
+                "：SoapySDR 设备不可用；RTL-SDR 直连不受影响")
+        _append_startup_log(line)
+        print(line, file=sys.stderr)
+
+
+class _UiNotifier(QObject):
+    """把工作线程的探测结果切回 GUI 线程（statusBar 只能在主线程动）。"""
+
+    message = Signal(str)
+
+    def __init__(self, window):
+        super().__init__(window)      # 父对象 = 主窗口 → 线程亲和性在 GUI 线程
+        self._window = window
+        self.message.connect(self._show)
+
+    def _show(self, text: str) -> None:
+        try:
+            self._window.statusBar().showMessage(text, 20000)
+        except AttributeError:
+            print(text, file=sys.stderr)
+
+    def notify(self, text: str) -> None:
+        self.message.emit(text)
+
+
+def _check_record_dir_async(window) -> None:
+    """启动时不阻塞地试写录音目录；不可写时把原因送到状态栏。
+
+    主线程不等探测结果（ACL deny-write 目录创建文件会卡数十秒，实测 >6s）。
+    """
+    settings_obj = getattr(window, "settings", None)
+    record_dir = getattr(settings_obj, "record_dir", "")
+    if not record_dir:
+        return
+    notifier = _UiNotifier(window)
+
+    def _on_result(error: str) -> None:
+        if error:
+            notifier.notify(error)
+            _append_startup_log("[record] " + error)
+
+    probe_dir_writable_async(record_dir, _on_result)
 
 
 def main():
@@ -405,6 +439,11 @@ def main():
         QTimer.singleShot(500, lambda: window._connect_real(mcp_host, mcp_port))
 
     window.show()
+
+    # 启动自检：运行期 DLL（缺件给「缺运行库：x」而不是 0xC0000135），
+    # 以及录音目录的后台可写探测（不阻塞主线程，失败进状态栏）。
+    _report_runtime_dlls()
+    _check_record_dir_async(window)
 
     print("=" * 60)
     print("  MBDSDR - AI 定义无线电桌面端")

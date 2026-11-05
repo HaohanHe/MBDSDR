@@ -19,12 +19,16 @@
    `importlib.spec_from_file_location` 按**文件路径**加载被同名包遮住的
    `../astronomy.py`，静态分析看不见 → 该文件没进包，冻结版启动报
    `cannot import name 'Observer' from 'mbdsdr_ai.astronomy'`。已作为 data 文件带入。
-4. 冻结版最新构建（`d:\mbdsdr\.tmp\pyi-dist9`，18:03 构建）实测：进程存活 40s、
-   窗口标题 `MBDSDR - AI 定义无线电`、hwnd `921316`；启动日志
-   `[smoke] 私有模块导入自检 13/13 通过`。
-5. `desktop/main.py` 的 catch-all 棘轮：**ERROR 6 / WARN 4 → 2/2 → 0/0**（最终
-   `INFO 1`，基线 2/2），未顶破。全仓唯二越线项 `scripts/ui_interaction_audit.py`
-   属 UX 线，不是本线改动。
+4. 冻结版最终构建（`d:\mbdsdr\.tmp\pyi-dist11`）实测：进程存活 40s、窗口标题
+   `MBDSDR - AI 定义无线电`、hwnd `25495906`；启动日志
+   `[smoke] 私有模块导入自检 13/13 通过`；`C:\Users\xxhzb\.config\MBDSDR\mbdsdr_desktop.log`
+   mtime 停在旧构建的 `17:50:11`（新构建不再写 C 盘用户目录）。
+5. 启动期新增三类自检：运行库 DLL（缺 `librtlsdr.dll` 弹「缺少运行库：librtlsdr.dll」，
+   不摊 `0xC0000135`）、录音目录后台可写探测（失败进状态栏 + 日志，不阻塞启动）、
+   日志落点策略（`%PROGRAMDATA%` 兜底，全不可写进内存缓冲并如实说明）。
+6. `desktop/main.py` 的 catch-all 棘轮：**ERROR 6 / WARN 4 → 2/2 → 0/0**（最终
+   `INFO 1`，基线 2/2），未顶破。本轮全仓越线项 `scripts/ui_interaction_audit.py`
+   与 `tests/test_ui_layout_locks.py` 均属其它线（UX / 测试锁），不是本线改动。
 
 ## 1. 打包现状清点
 
@@ -197,10 +201,68 @@ Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹�
 
 | 约束 | 实测行为 | 期望 | 差距 / 已修 |
 |---|---|---|---|
-| ① 机器没有 D 盘 | 启动日志：非 C 盘都不存在时落程序目录 `logs`，再落 `%PROGRAMDATA%\MBDSDR\logs`；审计日志 `default_audit_path()` 落 `<程序根>\logs\tx_audit.jsonl` 并告警「未检测到非 C 盘…请用设置项 tx_audit_path 指定持久位置」；录音默认目录：非 C 盘不可用 → `%LOCALAPPDATA%\MBDSDR\recordings` | 不得写 C 盘**用户目录**的日志；能看到明确告警 | 日志路径符合（程序目录 / ProgramData 都不是 `C:\Users`）；**录音**在只有 C 盘且程序目录只读时会落到 `%LOCALAPPDATA%`（设计如此，因为录音是用户数据，不是日志）。若程序恰好装在 `C:\Users\...` 下，程序目录日志会落在用户目录——**未修**，见待办 |
-| ② 目标目录只读/无写权限 | 设置写盘失败：`设置保存失败（PermissionError）：[WinError 5] 拒绝访问。: '…\readonly_appdata\mbdsdr'`；录音写盘失败：`录音目录不可用（…\readonly_root\recordings）：[WinError 5] 拒绝访问。…请检查该磁盘/网盘是否已连接，或在「设置 → 存储与日志」重新选择目录。` | 明确说明「哪不可写、下一步怎么办」，不裸崩 | 提示已达预期；`_dir_writable()` 只用 stat 写位 + 受保护安装根判断，**不试写**（试写 `tempfile.mkstemp` 在 ACL deny-write 目录会卡住 >6s，实测 faulthandler 停在 `tempfile._mkstemp_inner`）。因此 ACL 级只读但非 Program Files 的目录，启动期不会自动回退，只在真正写盘时给可行动错误——已知取舍 |
+| ① 机器没有 D 盘 | 启动日志按裁定顺序：环境变量 → 非 C 盘盘符 → 安装根 `logs`（实际可创建）→ `%PROGRAMDATA%\MBDSDR\logs`；全不可写则进内存环形缓冲（200 行）。审计日志 `default_audit_path()` 落 `<程序根>\logs\tx_audit.jsonl` 并告警；录音默认目录：非 C 盘不可用 → `%LOCALAPPDATA%\MBDSDR\recordings` | 绝不写 C 盘用户目录的日志；能看到明确告警 | 日志已按裁定落地，`%LOCALAPPDATA%` / `~/.config` / `%TEMP%` 全部不在候选内。**录音**是用户数据不是日志，仍按原设计在只有 C 盘时落 `%LOCALAPPDATA%` |
+| ② 目标目录只读/无写权限 | 设置写盘失败：`设置保存失败（PermissionError）：[WinError 5] 拒绝访问。: '…\readonly_appdata\mbdsdr'`；录音写盘失败：`录音目录不可用（…\readonly_root\recordings）：[WinError 5] 拒绝访问。…`。启动期改为后台线程试写 0 字节文件（不阻塞主线程），失败进状态栏 + 日志（见 §5.1） | 明确说明「哪不可写、下一步怎么办」，不裸崩 | 提示达预期；启动期不再用 `tempfile.mkstemp`（ACL deny-write 目录实测会卡 >6s） |
 | ③ 安装路径含中文 | 冻结版整包移到 `d:\mbdsdr\.tmp\clean_test\中文 安装 目录\MBDSDR 打包版` 后启动：窗口标题 `MBDSDR - AI 定义无线电`，hwnd `9440640`，`[smoke] 私有模块导入自检 13/13 通过`；源码副本在中文目录下运行只打印 SoapySDR 缺失告警，无编码异常 | 中文路径可用 | 无差距 |
 | ④ 用户目录被重定向 | `APPDATA` 指到 `D:\mbdsdr\.tmp\clean_test\appdata_redirected` 后启动冻结版：该目录里出现 `desktop_settings.json.corrupt-20261105-175724`（损坏配置被备份，证明读的是重定向目录）；同时 `C:\Users\xxhzb\AppData\Roaming\mbdsdr\desktop_settings.json` 的 mtime 保持 `17:53:52` 不变 | 跟随重定向，不写真实用户目录 | 无差距 |
+
+日志落点策略改动（`desktop/startup_paths.py` 是唯一实现，`main.py` 只接线）：
+
+```
+顺序：MBDSDR_STARTUP_LOG → D:/E:/... 非 C 盘 → 安装根 logs → %PROGRAMDATA%\MBDSDR\logs
+全部不可写：startup_log_path() 返回 ""，内容进内存 deque(maxlen=200)，
+            错误出口打印「本次无持久日志（原因：无可用写入位置）。」+ 本次会话日志
+```
+
+断言（`tests/test_startup_log_policy.py`，7 项全过）：
+
+```
+$ python -m pytest tests/test_startup_log_policy.py -q
+.......                                                                  [100%]
+7 passed in 0.26s
+```
+
+覆盖：模拟无 D 盘 + 安装根不可写 → 落点字符串必须等于
+`%PROGRAMDATA%\MBDSDR\logs\mbdsdr_startup.log`，且不含 `\users\` / `appdata`；
+全部不可写 → 空串 + 内存缓冲 + 固定说明；`%APPDATA%` mtime 前后不变；
+候选列表不出现用户目录。
+
+### 5.1 异步可写探测（不阻塞启动）
+
+`probe_dir_writable_async()` 起 daemon 线程试写 0 字节文件、写完即删，失败经 Qt
+信号切回主线程显示在状态栏（20 秒），同时写启动日志。主线程不等结果，启动不受
+ACL deny-write 目录影响。实测日志：
+
+```
+[record] 录音目录不可写（Z:\nope）：[WinError 3] 系统找不到指定的路径。: 'Z:\\'。
+         请在「设置 → 存储与日志」改到可写目录。
+```
+
+（此条来自冻结版实测：设置里残留 `Z:\nope`，探测在后台拿到错误并回报。）
+
+### 5.2 运行期 DLL 存在性检查
+
+`runtime_dll_report()` 在程序根、`_internal`、`bin`、PATH 里查
+`librtlsdr.dll`、`libusb-1.0.dll`（打包必备）与 `SoapySDR.dll`（环境可选）。
+缺失打包必备项时弹中文提示（应用继续运行，不阻断）：
+
+```
+标题：MBDSDR 运行库缺失
+缺少运行库：librtlsdr.dll
+
+这些 DLL 应随安装包放在 _internal 目录（或 exe 同目录）。
+请重新安装完整包，不要手工删 _internal 里的文件；若使用外部 SDR 驱动，
+也可安装对应驱动后重试；若杀毒软件隔离了它们，请恢复后重试。
+```
+
+实测方法：冻结版改名 `_internal/librtlsdr.dll`，并用干净 PATH
+（`C:\Windows\system32;C:\Windows`，避开本机 `C:\rtl-sdr\bin`）启动，
+读到上面对话框原文；日志同时出现 `[dll] 缺失：librtlsdr.dll`。
+SoapySDR.dll 缺失只告警不弹窗：`[dll] 未发现 SoapySDR.dll：SoapySDR 设备不可用；
+RTL-SDR 直连不受影响`。
+
+**限制**：该检查在 Python 桌面端启动时执行；直接双击 C++ 线 `mbdsdr.exe` 仍会
+先被 Windows 加载器拦成 `0xC0000135`（见 §7.5）。
 
 此外修掉一条越线：打包版无控制台时 `sys.stdout/stderr` 为 `None`，旧实现把
 stderr 兜底日志写到 `~/.config/MBDSDR/mbdsdr_desktop.log`（C 盘用户目录），
@@ -240,6 +302,37 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
 - 源码环境 17 项全部导入成功（`OK 17 / 17`）；
 - 冻结版新构建启动日志 `[smoke] 私有模块导入自检 13/13 通过`。
 
+### 6.1 可复用判据（以后新增 scipy / numpy 子依赖先查这两条）
+
+1. **PEP 420 命名空间包**：目录里有没有 `__init__.py`？
+   没有 → `pkgutil.iter_modules` / `pkgutil.walk_packages` / `collect_submodules`
+   一律枚举不到，PyInstaller 的 scipy hook 也看不见，必须按文件系统遍历收集。
+   一条命令判定：
+
+   ```
+   python -c "import os,scipy; p=os.path.join(os.path.dirname(scipy.__file__),'_external'); print(os.path.exists(os.path.join(p,'__init__.py'))"
+   ```
+
+   `False` 就说明 `scipy/_external` 需要显式遍历（本次 P0 根因）。
+2. **动态 `__import__` / 动态模块名**：源码里出现任一形态，静态分析就看不见：
+   - `__import__(__package__ + ".fft")`（本次 numpy 的写法）
+   - `importlib.import_module(拼接字符串)`（例如 `scipy._lib._array_api`）
+   - `importlib.util.spec_from_file_location(name, path)`（本次 `astronomy.py` 的写法）
+
+   判定命令：
+
+   ```
+   rg -n "__import__\(|import_module\(|spec_from_file_location" --type py <包目录>
+   ```
+
+   命中后必须在 spec 里显式 `hiddenimports`（模块名）或 `datas`（按路径加载的文件），
+   并在冻结版里跑一次「导入即验证」冒烟，不能只看源码能导入。
+3. 版本升级复核：每次升级 scipy/numpy，按上面两条重新扫一遍；`_external` 里如果
+   某天出现 `__init__.py`（不再是命名空间包），遍历收集仍然正确，可保留。
+
+这两个坑与具体包无关：任何「无 `__init__.py` 的 vendored 子树 + 运行时按需导入」
+都会重演同一条故障链（漏收文件 → 用户看到 `No module named ...`）。
+
 同类风险仍存在但**未逐个**纳入启动自检的：`scipy.io._*`、`scipy.sparse._*`、
 `scipy.ndimage._*` 这类“公开包的私有实现模块”，它们由 scipy hook 正常收集；
 只有 PEP 420 命名空间子树（`_external`）需要文件系统遍历。新增 scipy 版本时，
@@ -247,26 +340,35 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
 
 ## 7. 待办与已知限制
 
-1. **测试未跑**：`python -m pytest tests/test_settings_schema.py` 被其它会话持有的
-   Qt 测试互斥锁挡住（`MBDSDR_TEST_LOCK_TIMEOUT=20` 实测 `no tests ran`，exit 2）。
-   未用 `MBDSDR_TEST_LOCK=0` 绕过（会顶破内存预算纪律）。需等锁释放后补跑。
+1. **测试等待中**：`tests/test_startup_log_policy.py` 7/7 已通过（不依赖 Qt 锁）；
+   `tests/test_settings_schema.py` 仍被 PID 7956 持有的 Qt 测试互斥锁挡住
+   （`MBDSDR_TEST_LOCK_TIMEOUT=20` → `no tests ran`，exit 2）。按裁定不自重试、
+   不用 `MBDSDR_TEST_LOCK=0`，等「锁已释放」通知后补跑。
 2. 4 个扩展项（cobyqa/pyprima、deprecation/_ccallback/_uarray、numpy._core.multiarray、
    numpy.fft/linalg）只在源码与 TOC 层核验，未纳入冻结版启动自检；要覆盖需把它们
    加进 `_RISKY_IMPORTS` 再重建。
-3. 程序装在 `C:\Users\...` 下且只有 C 盘时，程序目录日志仍会落在用户目录：
-   `_startup_log_path()` 未排除「程序目录位于用户主目录」的情况。可加判据
-   （路径前缀 `%USERPROFILE%` 时跳过程序目录，只留 `%PROGRAMDATA%`），但会导致
-   非管理员用户完全没有日志文件，需要先决定取舍。
-4. `_dir_writable()` 探测不了 ACL 级只读（非 Program Files）；启动期不回退，
-   写盘时才报错。要做真实探测就得接受写入超时的风险（已实测会卡 6s+）。
-5. C++ 线缺 `librtlsdr.dll` 是链接期硬依赖，退出码 `0xC0000135`，**没有**自绘提示；
-   目前只有打包脚本前置校验。若要做到「缺件说人话」，需要 C++ 启动期自检。
-6. `scripts/ui_interaction_audit.py` 棘轮越线（WARN 7 > 基线 3）属 UX 线，未处置。
+3. 日志落点按裁定为「安装根可写则用安装根」：若用户把程序装在
+   `C:\Users\<user>\...` 下，日志会写在该安装根内。这是裁定顺序本身的结果，
+   不再回落到 `%APPDATA%`/`%LOCALAPPDATA%`；如要连安装根在用户目录也拒绝，
+   需另行裁定（会导致部分用户完全没有持久日志）。
+4. ACL 级只读（非 Program Files）不再靠启动期同步判断：已改为后台线程试写 +
+   状态栏/日志回报（§5.1）。主线程不等待，因此不会出现「启动不报、写盘才炸」，
+   但状态栏提示可能晚于窗口出现几秒。
+5. C++ 线直接双击 `mbdsdr.exe` 时，缺 `librtlsdr.dll` 仍由 Windows 加载器先拦成
+   `0xC0000135`：Python 侧启动检查只能在 Python 桌面端生效。C++ 启动期自检属于
+   另一条线，未做；打包脚本的前置校验仍在。
+6. PyInstaller 自身缓存默认落在 `%LOCALAPPDATA%\pyinstaller`（工具缓存，不是产物）。
+   要严格不碰 C 盘，构建时设 `PYINSTALLER_CONFIG_DIR=<D 盘目录>`；本次 `--distpath`
+   / `--workpath` 已全部在 D 盘。
+7. `scripts/ui_interaction_audit.py` 棘轮越线（WARN 7 > 基线 3）属 UX 线，未处置。
 
 ## 8. 本轮改动的文件
 
 - `desktop/MBDSDR.spec`：scipy 命名空间子树收集 + `astronomy.py` 数据文件。
-- `desktop/main.py`：启动自检、缺件分类文案、Qt 插件前置检查、日志落点策略、
-  stdio 兜底改到非 C 盘用户目录；catch-all 收窄到 `ImportError`/`OSError` 等。
+- `desktop/main.py`：启动自检、缺件分类文案、Qt 插件前置检查、运行库 DLL 检查、
+  异步录音目录探测接线；catch-all 收窄到 `ImportError`/`OSError` 等。
+- `desktop/startup_paths.py`（新）：日志落点策略 + 内存缓冲 + 异步可写探测 +
+  DLL 存在性检查（无 Qt 依赖，可单测）。
 - `desktop/settings.py`：录音默认目录回退（受保护安装根/只读）+ 写盘错误可见。
+- `tests/test_startup_log_policy.py`（新）：日志落点/内存缓冲/用户目录禁令断言。
 - `docs/packaging.md`：本文。
