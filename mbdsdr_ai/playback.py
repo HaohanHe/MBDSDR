@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import weakref
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -36,6 +37,17 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 from .error_catalog import user_message
+
+
+class PlaybackViewsInUseError(RuntimeError):
+    """``close()`` 时仍有 ``read_samples`` 发出的零拷贝视图未被释放。
+
+    零拷贝路径把 memmap 映射地址借给调用方；若提前解除映射，这些 ndarray
+    就成了悬空指针，下一次访问会直接触发进程级访问冲突（Windows
+    0xC0000005，Python 层 try/except 拦不住）。所以这种情况下 ``close()``
+    必须显式失败，而不是静默解除映射。处置：先消费/拷贝这些视图，或改用
+    ``read_samples(n, copy=True)``，再重试 ``close()``。
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +151,7 @@ class IQPlayback:
         self._mmap: Optional[np.memmap] = None  # complex64 视图
         self._n_samples: int = 0
         self._cursor: int = 0
+        self._views: list = []  # read_samples(copy=False) 发出的视图（weakref.ref）
         self.opened: bool = False
         # ── 文件完整性/可恢复状态（closed/open/eof/failed/deleted）──
         self.state: str = "closed"
@@ -156,6 +169,7 @@ class IQPlayback:
         paths = _resolve_sigmf(filepath)
         data_path = paths["data"]
         meta_path = paths["meta"]
+        self._views = []  # 新会话：旧文件遗留的视图由它们自己的引用链保活，不再跟踪
         if not os.path.exists(data_path):
             # 兜底：用户直接传了原始扩展名文件
             if os.path.exists(filepath):
@@ -232,7 +246,27 @@ class IQPlayback:
         return False
 
     # ------------------------------------------------------------------
+    def _live_views(self) -> list:
+        """仍存活的零拷贝视图（weakref 名单里尚未被调用方释放的项）。"""
+        self._views = [r for r in self._views if r() is not None]
+        return self._views
+
     def close(self) -> None:
+        """关闭回放器并解除 memmap 映射。
+
+        Raises
+        --------
+        PlaybackViewsInUseError
+            仍有 :meth:`read_samples` 发出的零拷贝视图未释放。此时**不解除映射**，
+            调用方消费/拷贝完这些视图后可重试 ``close()``。
+        """
+        live = self._live_views()
+        if live:
+            raise PlaybackViewsInUseError(
+                f"IQPlayback.close(): 还有 {len(live)} 个视图未被使用完"
+                "（read_samples 默认零拷贝，返回数组指向 memmap）。"
+                "请先消费或拷贝这些视图（或改用 read_samples(n, copy=True)），"
+                "再 close()；在此之前映射保持有效。")
         if self._mmap is not None:
             try:
                 self._mmap._mmap.close()  # type: ignore[attr-defined]
@@ -249,9 +283,21 @@ class IQPlayback:
         self.close()
 
     # ------------------------------------------------------------------
-    def read_samples(self, n: int) -> np.ndarray:
+    def read_samples(self, n: int, copy: bool = False) -> np.ndarray:
         """读取接下来 n 个 complex64 样本。
 
+        两条所有权路径（**默认零拷贝**）：
+
+        - ``copy=False``（默认）：返回 **memmap 视图**，零拷贝、不额外占内存，
+          但生命周期与回放器绑定——必须在 ``close()`` 之前消费完或丢掉；
+          否则 ``close()`` 抛 :class:`PlaybackViewsInUseError`（而不是静默
+          解除映射、让调用方在下次访问时吃进程级 0xC0000005）。
+        - ``copy=True``：返回独立副本，``close()`` 后可继续持有。代价是每次
+          调用多一份 ``n*8`` 字节；若调用方把整段录音逐块累加，峰值内存约为
+          文件大小的 2 倍（1.85 GB 的录音再复制一份就可能 OOM，长录音优先
+          走「零拷贝 + close 前消费」）。
+
+        其它语义：
         - 未打开返回空数组。
         - 到 EOF：loop=True 回绕；loop=False 返回剩余样本并停在末尾（再读返回空）。
         """
@@ -263,11 +309,8 @@ class IQPlayback:
             self.error_code = "deleted"
             self.last_error = user_message("deleted")
             self.opened = False
-            try:
-                if self._mmap is not None:
-                    self._mmap._mmap.close()  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            # 不在此处强制解除映射：外面可能仍有视图，提前 close 会让它们悬空。
+            # 交出引用即可，映射随最后一个视图释放而回收。
             self._mmap = None
             return np.empty(0, dtype=np.complex64)
         total = self._n_samples
@@ -306,8 +349,17 @@ class IQPlayback:
             self.state = "eof"
             self.error_code = "eof"
             self.last_error = user_message("eof")
-        return np.concatenate(out_parts).astype(np.complex64, copy=False) \
-            if len(out_parts) > 1 else out_parts[0]
+        if copy:
+            if len(out_parts) > 1:
+                return np.concatenate(out_parts).astype(np.complex64, copy=False)
+            return np.array(out_parts[0], dtype=np.complex64, copy=True)
+        if len(out_parts) > 1:
+            # 跨 EOF 回绕时本来就是 concatenate 出来的独立数组，无需跟踪。
+            return np.concatenate(out_parts).astype(np.complex64, copy=False)
+        view = out_parts[0]
+        self._live_views()
+        self._views.append(weakref.ref(view))
+        return view
 
     # ------------------------------------------------------------------
     def seek(self, time_s: float) -> None:
@@ -406,7 +458,9 @@ def transmit_iq_playback(
     def _blocks() -> Any:
         try:
             while True:
-                block = pb.read_samples(chunk_samples)
+                # 安全路径：块要穿过生成器交给 TxSession，其生命周期不受本函数
+                # 控制（最后一块可能在 close 后仍被持有），必须用副本。
+                block = pb.read_samples(chunk_samples, copy=True)
                 if block is None or int(block.size) == 0:
                     break
                 yield block
@@ -508,7 +562,9 @@ class PlaybackSource:
     def read_samples(self, n: int) -> Optional[np.ndarray]:
         if not self._connected:
             return None
-        out = self._pb.read_samples(n)
+        # 安全路径：返回值直接交给消费方（UI/流水线），其生命周期可能超出
+        # disconnect()，因此这里取副本，避免 close 后悬空。
+        out = self._pb.read_samples(n, copy=True)
         if out.size == 0:
             self._error_code = self._pb.error_code or "no_data"
             self._last_error = (self._pb.last_error

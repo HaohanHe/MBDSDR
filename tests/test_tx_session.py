@@ -263,7 +263,7 @@ def test_playback_deleted_mid_read_is_aborted(tmp_path, monkeypatch):
     path = _make_recording(tmp_path)
     be = FakeTxBackend()
 
-    def read_deleted(self, n):
+    def read_deleted(self, n, copy=False):
         # 直接落到 read_samples 检测到文件被删时的同一状态（Windows 上
         # mmap 持有句柄时 os.remove 不一定成功，故用状态注入等价复现）。
         self.state = "deleted"

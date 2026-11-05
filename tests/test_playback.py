@@ -44,6 +44,7 @@ def test_open_reads_exact_samples(tmp_path):
     assert out2.shape == (N - half,)
     # 非 loop：再读应为空
     assert pb.read_samples(10).size == 0
+    del out, out2  # 默认零拷贝视图：释放后才能 close
     pb.close()
 
 
@@ -71,6 +72,7 @@ def test_seek_tell(tmp_path):
     # seek 超界钳位
     pb.seek(999.0)
     assert pb.tell() == pytest.approx((N - 1) / SR, abs=1e-3)
+    del out  # 默认零拷贝视图：释放后才能 close
     pb.close()
 
 

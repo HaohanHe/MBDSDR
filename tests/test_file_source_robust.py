@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import builtins
 import errno
+import gc
 import json
 import os
 
@@ -46,7 +47,70 @@ def test_valid_playback_reads_real_samples(tmp_path):
     got = pb.read_samples(10)
     assert len(got) == 10
     assert got.real[0] == 0.0
+    del got  # 默认零拷贝视图：先释放再 close（否则 close 按新契约抛异常）
     pb.close()
+
+
+def test_read_samples_default_is_view_and_close_refuses(tmp_path):
+    """默认零拷贝：视图未释放时 close() 必须响亮失败，而不是解除映射。"""
+    data = _write_sigmf(str(tmp_path / "own"), np.arange(100, dtype=np.float32))
+    pb = IQPlayback(loop=False)
+    assert pb.open(data) is True
+    got = pb.read_samples(10)
+    assert got.flags.owndata is False
+    assert np.shares_memory(got, pb._mmap)
+
+    with pytest.raises(playback.PlaybackViewsInUseError, match="还有 1 个视图"):
+        pb.close()
+    assert pb.opened is True  # 映射保持有效，可消费/释放后重试
+
+    del got
+    gc.collect()
+    pb.close()
+    assert pb.opened is False
+
+
+def test_read_samples_copy_survives_close(tmp_path):
+    """copy=True 返回独立副本，close() 之后仍可安全访问。"""
+    data = _write_sigmf(str(tmp_path / "copy"), np.arange(100, dtype=np.float32))
+    pb = IQPlayback(loop=False)
+    assert pb.open(data) is True
+    got = pb.read_samples(10, copy=True)
+    assert got.flags.owndata is True
+    assert not np.shares_memory(got, pb._mmap)
+
+    pb.close()  # 副本路径不应触发视图守卫
+    assert np.array_equal(got.real, np.arange(10, dtype=np.float32))
+
+
+def test_derived_view_also_blocks_close(tmp_path):
+    """从返回视图再切片得到的数组同样使映射无法关闭。"""
+    data = _write_sigmf(str(tmp_path / "sub"), np.arange(100, dtype=np.float32))
+    pb = IQPlayback(loop=False)
+    assert pb.open(data) is True
+    got = pb.read_samples(10)
+    sub = got[::2]
+    del got
+    gc.collect()  # sub.base 仍引用原视图 → 画面仍在用映射
+
+    with pytest.raises(playback.PlaybackViewsInUseError):
+        pb.close()
+
+    del sub
+    gc.collect()
+    pb.close()
+
+
+def test_playback_source_returns_owned_copy(tmp_path):
+    """PlaybackSource 把数据交给 UI/流水线，必须返回副本以跨 disconnect() 存活。"""
+    data = _write_sigmf(str(tmp_path / "src"), np.arange(100, dtype=np.float32))
+    src = PlaybackSource(data, loop=False)
+    assert src.connect() is True
+    blk = src.read_samples(10)
+    assert blk is not None
+    src.disconnect()
+    assert blk.flags.owndata is True
+    assert blk.real[0] == 0.0
 
 
 def test_truncated_file_refuses_to_look_normal(tmp_path):

@@ -16,19 +16,21 @@
 用法（PowerShell）
 ------------------
     $env:PYTHONPATH='d:\\mbdsdr\\MBDSDR'
-    python scripts/hw_acceptance/repro_replay_demod_crash.py --mode repro        # 预期 0xC0000005
+    python scripts/hw_acceptance/repro_replay_demod_crash.py --mode repro        # 预期 3（可读异常）
     python scripts/hw_acceptance/repro_replay_demod_crash.py --mode safe-oneshot # 预期 OK（整段解调）
     python scripts/hw_acceptance/repro_replay_demod_crash.py --mode chunked      # 预期 OK（4M 分块）
 
-判据
-----
-* ``repro``：在 ``[3/5] concatenate`` 处进程退出，Windows 退出码
-  ``-1073741819``（0xC0000005），faulthandler 文本
-  ``Windows fatal exception: access violation``。
-* ``safe-oneshot`` / ``chunked``：退出 0，打印 audio 样本数与 RMS。
+判据（修复后）
+--------------
+* ``repro``：走零拷贝默认路径，``close()`` 抛 ``PlaybackViewsInUseError``
+  （消息含「还有 N 个视图未被使用完」），脚本捕获后**退出码 3**。
+  **不得**再出现 ``-1073741819``（0xC0000005）。
+* ``safe-oneshot`` / ``chunked``：``read_samples(copy=True)`` 取副本，
+  退出 0，打印 audio 样本数与 RMS（与修复前逐位一致：476,160 / 0.24147、
+  476,160 / 0.24763）。
 
-若 ``repro`` 没崩，说明该机器/该 numpy 版本不复现，请如实记录退出码，
-不要写成「已复现」。
+修复前（2026-11-06 现场记录）：``repro`` 在 ``[3/5]`` 后进程级 AV，退出码
+``-1073741819``，faulthandler 打印 ``Windows fatal exception: access violation``。
 """
 
 from __future__ import annotations
@@ -54,12 +56,12 @@ READ_CHUNK = 1 << 20      # 1,048,576：与崩溃当时的读取粒度一致
 DEMOD_CHUNK = 4_194_304   # 4,194,304：与 2026-11-06 分块成功路径一致
 
 
-def _read_chunks(pb: IQPlayback) -> tuple[list[np.ndarray], int]:
+def _read_chunks(pb: IQPlayback, copy: bool) -> tuple[list[np.ndarray], int]:
     chunks = []
     total = 0
     i = 0
     while True:
-        c = pb.read_samples(READ_CHUNK)
+        c = pb.read_samples(READ_CHUNK, copy=copy)
         if c is None or len(c) == 0:
             break
         i += 1
@@ -90,15 +92,22 @@ def main() -> int:
         print("FAIL IQPlayback.open: %s" % getattr(pb, "last_error", ""), flush=True)
         return 2
     rate = float(getattr(pb, "sample_rate", 0) or args.fs)
-    print("[2/5] fs=%.0f Hz，逐块读取（块大小 %d）" % (rate, READ_CHUNK), flush=True)
-    chunks, total = _read_chunks(pb)
+    print("[2/5] fs=%.0f Hz，逐块读取（块大小 %d，copy=%s）"
+          % (rate, READ_CHUNK, args.mode != "repro"), flush=True)
+    chunks, total = _read_chunks(pb, copy=(args.mode != "repro"))
 
     if args.mode == "repro":
-        # 崩溃现场的原样顺序：先 close，再 concatenate 悬空视图
-        print("[3/5] close（map 已关闭），随后 concatenate 悬空视图…", flush=True)
-        pb.close()
+        # 误用现场：默认零拷贝（视图），却先 close 再 concatenate。
+        # 修复后这里不会再 AV，而是 close() 抛出可读的 PlaybackViewsInUseError。
+        print("[3/5] close（仍有 %d 个未消费视图）…" % len(chunks), flush=True)
+        try:
+            pb.close()
+        except RuntimeError as e:
+            print("[4/5] 可读异常（非崩溃码）：%s: %s"
+                  % (type(e).__name__, e), flush=True)
+            return 3
         x = np.concatenate(chunks)
-        print("[4/5] 未崩溃：concatenate 返回 %s" % (x.shape,), flush=True)
+        print("[4/5] 未抛异常：concatenate 返回 %s" % (x.shape,), flush=True)
         audio = np.asarray(wfm_broadcast_demod(x, rate, audio_sr=48_000), dtype=np.float32)
         print("[5/5] audio=%d rms=%.5f elapsed=%.1fs"
               % (audio.size, float(np.sqrt(np.mean(audio ** 2))) if audio.size else 0.0,
@@ -106,10 +115,9 @@ def main() -> int:
         return 0
 
     if args.mode == "safe-oneshot":
-        # 修复方式：在 map 仍存活时把视图拷贝成独立数组，再 close / 解调
-        print("[3/5] close 前拷贝块 → 整段 concatenate（20,316,160 样本一次性解调）",
-              flush=True)
-        x = np.concatenate([np.array(c, dtype=np.complex64, copy=True) for c in chunks])
+        # 安全路径：read_samples(copy=True) 返回独立副本，close 后仍可持有
+        print("[3/5] 整段 concatenate（20,316,160 样本一次性解调）", flush=True)
+        x = np.concatenate(chunks)
         pb.close()
         audio = np.asarray(wfm_broadcast_demod(x, rate, audio_sr=48_000), dtype=np.float32)
         print("[4/5] audio=%d（%.3f s）rms=%.5f elapsed=%.1fs"
@@ -123,9 +131,8 @@ def main() -> int:
     print("[3/5] 分块解调 chunk=%d（共 %d 块）"
           % (DEMOD_CHUNK, (total + DEMOD_CHUNK - 1) // DEMOD_CHUNK), flush=True)
     audios = []
-    # 关键：chunks 是 memmap 视图，必须在 close 之前拷贝出独立数组；
-    # 顺序错了就会复现与 repro 相同的 use-after-close AV。
-    x = np.concatenate([np.array(c, dtype=np.complex64, copy=True) for c in chunks])
+    # 安全路径：chunks 已是副本（copy=True），close 后可继续持有/解调。
+    x = np.concatenate(chunks)
     pb.close()
     for i in range(0, len(x), DEMOD_CHUNK):
         seg = x[i:i + DEMOD_CHUNK]
