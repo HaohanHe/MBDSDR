@@ -1422,19 +1422,24 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
   越线 7 项全部来自他线在途，本线登记项无越线）：
   - `scripts/decode_sensitivity.py`（0/5 > 基线 0/2，+3）：P5 线在途新增的
     `except Exception` 分支；owner = 解码流水线 P5，到期 2026-11-07。
-  - `scripts/hw_acceptance/common.py`（1/4 > 基线 0/3）：接入层健壮性线在途；
-    owner = 接入层健壮性线，到期 2026-11-07。
+  - `scripts/hw_acceptance/common.py`（1/4 > 基线 0/3）：操作逻辑线在途
+    （claim 已过期 +21.8min，仍需续或交接），到期 2026-11-07。
   - `scripts/hw_acceptance/manual_usb_cycle.py`（新文件，2 ERROR / 4 WARN，不在基线）：
     接入层健壮性线在途新增；owner = 接入层健壮性线，到期 2026-11-07。
   - `tests/test_destructive_confirm_guards.py`（新文件，1 ERROR / 0 WARN，不在基线）：
-    owner = 操作逻辑线，到期 2026-11-07。
+    操作逻辑线在途（claim 剩余 55.7min），到期 2026-11-07。
   - `tests/test_ui_layout_locks.py`（E1/W0，不在基线）：新增用例
     `test_bottom_dock_height_is_locked` 里 `except Exception: pass` 停定时器；
     三问答不上（非外部边界、无降级、无兜底）→ 不登记；owner = 操作逻辑线，
     到期 2026-11-07。修法：收窄为 `except RuntimeError` 或去掉 try。
+- 断言闸门剩余红（`python -m pytest tests/test_claims_guard.py -q`，2026-11-06 01:4x）：
+  `docs/error-code-visibility.md:440`、`:518`、`docs/parameter-unification.md:206`、
+  `:210` 四条是本轮新写/改写的无 hash 断言，属他线在途改动（前者 claim 属
+  discoverability-line 且已过期，后者未见 claim）→ 补齐四元组或删断言；
+  本线未替它们开白名单。
 - 顶层 docs 的存量断言：白名单 `docs/claim-waivers.md`（142 条，逐条附指纹 +
   原因，只许往下减）；门禁 `tests/test_claims_guard.py` 只锁增量——新增或
   改写的断言四元组不全即红，存量由各文档 owner 逐条补 hash 或删断言。
 - 增量漂移登记：`docs/narrow-screen-plan.md:463`「宽度收口」那段是新写的
-  无 hash 断言（UI 操作逻辑线，到期 2026-11-07），本轮已计入基线 5；该行
-  补上 hash 与字面量后，把本文件的基线计数改回 4。
+  无 hash 断言（UI 操作逻辑线，到期 2026-11-07），已收进 claim-waivers；
+  补上 hash 与字面量后从白名单销账。
