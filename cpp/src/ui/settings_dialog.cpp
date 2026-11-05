@@ -209,7 +209,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         dbMinSlider_ = new QSlider(Qt::Horizontal, dbMinRow);
         dbMinSlider_->setRange(tokens::kDbSpinLowerMin, tokens::kDbSpinLowerMax);
         dbMinSlider_->setSingleStep(tokens::kDbSliderStep);
-        dbMinValue_ = new QLabel(QStringLiteral("-45 dB"), dbMinRow);
+        dbMinValue_ = new QLabel(QStringLiteral("%1 dB")
+                                     .arg(tokens::kDbLowerDefault), dbMinRow);
         dbMinValue_->setMinimumWidth(tokens::scaled(64));
         dbMinLay->addWidget(dbMinSlider_, 1);
         dbMinLay->addWidget(dbMinValue_);
@@ -222,7 +223,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         dbMaxSlider_ = new QSlider(Qt::Horizontal, dbMaxRow);
         dbMaxSlider_->setRange(tokens::kDbSpinUpperMin, tokens::kDbSpinUpperMax);
         dbMaxSlider_->setSingleStep(tokens::kDbSliderStep);
-        dbMaxValue_ = new QLabel(QStringLiteral("0 dB"), dbMaxRow);
+        dbMaxValue_ = new QLabel(QStringLiteral("%1 dB")
+                                     .arg(tokens::kDbUpperDefault), dbMaxRow);
         dbMaxValue_->setMinimumWidth(tokens::scaled(64));
         dbMaxLay->addWidget(dbMaxSlider_, 1);
         dbMaxLay->addWidget(dbMaxValue_);

@@ -201,8 +201,8 @@ CPP_EXPECTED = {
     "kDbSpinLowerMax": -20,
     "kDbSpinUpperMin": -40,
     "kDbSpinUpperMax": 20,
-    "kDbLowerDefault": -45,
-    "kDbUpperDefault": 0,
+    "kDbLowerDefault": -100,
+    "kDbUpperDefault": -20,
     # 两条峰门**分开记账**：显示门 6.0 / 校准门 15.0（见 3b 节）。
     "kPeakRelDb": 6.0,
     "kPeakThresholdDefault": 15.0,
@@ -237,13 +237,30 @@ def test_cpp_tokens_match_documented_values():
             "跨语言参数表 docs/hardcoded-parameters.md 需同步评审")
 
 
+@pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
+def test_db_default_range_matches_python_and_keeps_minus50_visible():
+    """C++ 默认 dB 视窗冻结在 -100..-20（与 Python 一致）。
+
+    反证：改回 -45..0 时本测试立即红，且 -50 dBFS 会被夹到底边——
+    同一录音在 C++ 与 Python 界面显示成两种样子。
+    """
+    found = {m.group(1): float(m.group(2))
+             for m in _INLINE_CONSTEXPR.finditer(
+                 TOKENS_H.read_text(encoding="utf-8"))}
+    lo, hi = found["kDbLowerDefault"], found["kDbUpperDefault"]
+    assert (lo, hi) == (-100.0, -20.0), (
+        f"C++ 默认 dB 量程应为 -100..-20，实际 {lo:g}..{hi:g}")
+    assert lo <= -50.0 <= hi, "-50 dBFS 的常见信号必须落在默认视窗内"
+
+
 #: 已知且**有意**的跨语言差异（不是 bug，但必须登记）。若某天两侧统一了，
 #: 删掉对应行即可——测试会提醒。
 CROSS_LANGUAGE_DELTAS = {
     # 语义                    Python               C++
+    # 默认视窗已统一为 -100..-20（见 test_db_default_range_*）；下面只剩
+    # “允许拖到的夹取边界”这一层残留，不是默认值差异。
     "dB 轴下限": ("-160.0", "-140"),
     "dB 轴上限": ("0.0", "20"),
-    "dB 默认下限": ("-100.0", "-45"),
     "FFT 档位数量": ("5", "3"),
 }
 

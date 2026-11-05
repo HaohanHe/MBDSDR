@@ -326,8 +326,14 @@ inline constexpr int    kDbSpinLowerMin = -140;   // lower spinbox allowed min
 inline constexpr int    kDbSpinLowerMax = -20;    // lower spinbox allowed max
 inline constexpr int    kDbSpinUpperMin = -40;    // upper spinbox allowed min
 inline constexpr int    kDbSpinUpperMax = 20;     // upper spinbox allowed max
-inline constexpr int    kDbLowerDefault = -45;   // 噪底 ~-37dBFS 落在色图底部=黑色
-inline constexpr int    kDbUpperDefault = 0;
+// 默认视窗与 Python（spectrum_widget.py `_PlotState.db_min/db_max`）一致：
+// -100..-20 dBFS。基准相同（满量程正弦 = 0 dBFS），此处只定默认视窗。
+// 约束：常见信号电平 -50 dBFS 必须落在图内；改成 -45..0 会把 -50 dBFS
+// 夹到底边，同一录音在两端显示不同（冻结测试 test_db_default_range_*）。
+// 残留（未统一）：滑杆夹取边界仍是 Python -160..0 / C++ spin -140..20，
+// 属"允许拖到的动态范围"，不是默认视窗，本轮不动。
+inline constexpr int    kDbLowerDefault = -100;
+inline constexpr int    kDbUpperDefault = -20;
 // dB reference gridline spacing (dB between horizontal grid lines + y labels).
 // Selectable from the spectrum toolbar (格线 combo): denser (10 dB) for a finer
 // y-axis ruler, sparser (40 dB) for a cleaner plot. Only the named tiers below
