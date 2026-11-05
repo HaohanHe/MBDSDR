@@ -40,6 +40,8 @@ env/
 .audit_tmp/
 *.tmp
 *.log
+# 证据原件放行（docs/evidence 下 .log/.txt/.json 等一律入库；本行必须排在 *.log 之后）
+!docs/evidence/**
 
 # 系统
 .DS_Store
