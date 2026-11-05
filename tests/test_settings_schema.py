@@ -82,9 +82,83 @@ class _FakeCombo:
         pass
 
 
+class _FakeSignal:
+    def __init__(self):
+        self._slots = []
+
+    def connect(self, fn):
+        self._slots.append(fn)
+
+    def emit(self, *args):
+        for fn in list(self._slots):
+            fn(*args)
+
+
+class _FakeSlider:
+    def __init__(self):
+        self.value = -50
+        self.blocked = False
+
+    def blockSignals(self, flag):
+        self.blocked = bool(flag)
+
+    def setValue(self, value):
+        self.value = int(value)
+
+
+class _FakeStepCombo:
+    VALUES = (10, 100, 1000, 10000, 100000, 1000000)
+
+    def __init__(self):
+        self.index = 3
+        self.blocked = False
+
+    def blockSignals(self, flag):
+        self.blocked = bool(flag)
+
+    def findData(self, value):
+        try:
+            return list(self.VALUES).index(int(value))
+        except ValueError:
+            return -1
+
+    def setCurrentIndex(self, idx):
+        self.index = int(idx)
+
+
+class _FakeCheckbox:
+    def __init__(self, checked=True):
+        self._checked = bool(checked)
+
+    def isChecked(self):
+        return self._checked
+
+    def setChecked(self, v):
+        self._checked = bool(v)
+
+
+class _FakeLabel:
+    def __init__(self):
+        self.text_value = ""
+
+    def setText(self, text):
+        self.text_value = str(text)
+
+
+class _FakeControlPanel:
+    def __init__(self):
+        self.squelch_slider = _FakeSlider()
+        self.squelch_val = _FakeLabel()
+        self.auto_squelch_check = _FakeCheckbox(True)
+        self.step_combo = _FakeStepCombo()
+        self.squelch_changed = _FakeSignal()
+        self.step_changed = _FakeSignal()
+
+
 class _FakeSpectrum:
     def __init__(self):
         self.generator = _FakeGen()
+        self.snap_interval = 10000.0
         self._state = type("S", (), {
             "show_waterfall": True, "show_peaks": True,
             "show_bookmarks": True, "show_bandplan": True,
@@ -115,6 +189,9 @@ class _FakeSpectrum:
     def _redraw(self):
         self.redraws += 1
 
+    def set_snap_interval(self, hz):
+        self.snap_interval = float(hz)
+
 
 class _FakeSky:
     def __init__(self):
@@ -136,6 +213,9 @@ class _FakeHost:
     def __init__(self):
         self.spectrum = _FakeSpectrum()
         self.sky_view = _FakeSky()
+        self.control_panel = _FakeControlPanel()
+        self.squelch_db = None
+        self.auto_squelch = True
         self._observer_lat = None
         self._observer_lon = None
         self.observer_apply = 0
@@ -144,6 +224,13 @@ class _FakeHost:
         self.touch = "auto"
         self.ai_panel = None
         self.service_settings_panel = None
+
+    def _on_squelch_changed(self, dbfs):
+        self.squelch_db = float(dbfs)
+        self.auto_squelch = False          # 与 main_window 一致：手动门限关自动
+
+    def _on_auto_squelch_toggled(self, on):
+        self.auto_squelch = bool(on)
 
     def _apply_theme(self, name):
         self.theme = name
@@ -473,6 +560,66 @@ def test_sky_view_bortle_setter_clamps_and_rejects_garbage():
 
 
 # ---------------------------------------------------------------------------
+# 5.1b 参数治理 A5/A11：真实消费点必须跟着设置值变
+# ---------------------------------------------------------------------------
+def test_squelch_schema_range_comes_from_kernel_constants():
+    """A5 交付说明：默认/范围不许在 schema 再写一份字面量。"""
+    from mbdsdr_ai.squelch import (
+        DEFAULT_SQUELCH_DBFS, SQUELCH_MAX_DBFS, SQUELCH_MIN_DBFS)
+
+    item = SCHEMA["squelch_default_db"]
+    assert item.default == int(DEFAULT_SQUELCH_DBFS)
+    assert item.minimum == int(SQUELCH_MIN_DBFS)
+    assert item.maximum == int(SQUELCH_MAX_DBFS)
+
+
+def test_squelch_setting_reaches_slider_and_gate(env):
+    ds, host, panel, _ = env
+    panel._on_changed("squelch_default_db", -70)
+    assert ds.get("squelch_default_db") == -70
+    assert host.control_panel.squelch_slider.value == -70
+    assert host.control_panel.squelch_val.text_value == "-70 dB"
+    assert host.squelch_db == -70.0, "消费点没收到新门限 = 假设置"
+    # 「自动静噪」勾选时，应用默认门限不能把它偷偷关掉
+    assert host.auto_squelch is True
+    # 用户手动关掉自动后，再改默认值应保持手动模式
+    host.control_panel.auto_squelch_check.setChecked(False)
+    panel._on_changed("squelch_default_db", -60)
+    assert host.auto_squelch is False and host.squelch_db == -60.0
+    # 顶部滑杆改动反写 settings（单一权威源）
+    host.control_panel.squelch_changed.emit(-80.0)
+    assert ds.get("squelch_default_db") == -80
+
+
+def test_tuning_step_reaches_spectrum_and_combo(env):
+    ds, host, panel, _ = env
+    panel._on_changed("tuning_step_hz", 1000)
+    assert ds.get("tuning_step_hz") == 1000
+    assert host.spectrum.snap_interval == 1000.0, "频谱吸附没变 = 假设置"
+    assert host.control_panel.step_combo.index == 2
+    # 顶部步进改动反写 settings
+    host.control_panel.step_changed.emit(100000.0)
+    assert ds.get("tuning_step_hz") == 100000.0
+
+
+def test_squelch_migration_notice_is_visible_on_old_config(tmp_path, qapp):
+    path = str(tmp_path / "old_settings.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"volume": 30}, f)
+    ds = DesktopSettings.load(path=path)
+    panel = settings_panel.SettingsPanel(settings=ds, host=_FakeHost())
+    text = panel.status_label.text()
+    assert "静噪默认值迁移" in text
+    assert "-80" in text and "-50" in text
+    # 新文件已有该键 → 不再提示
+    ds.set("squelch_default_db", -50)
+    ds.flush()
+    ds2 = DesktopSettings.load(path=path)
+    panel2 = settings_panel.SettingsPanel(settings=ds2, host=_FakeHost())
+    assert "静噪默认值迁移" not in panel2.status_label.text()
+
+
+# ---------------------------------------------------------------------------
 # 5.2 录音目录：可配置、默认不落 C 盘用户目录、只影响新录音
 # ---------------------------------------------------------------------------
 def test_record_dir_default_is_sibling_of_project_not_user_dir():
@@ -498,6 +645,35 @@ def test_record_dir_blank_means_default_and_ensure_creates(tmp_path):
     ds.flush()
     again = DesktopSettings.load(path=str(tmp_path / "s.json"))
     assert again.record_dir == str(tmp_path / "rec")
+
+
+def test_record_dir_missing_target_reports_actionable_error(tmp_path, monkeypatch):
+    """盘拔了/路径被文件占了：返回可读文案，界面弹窗用同一段文字。"""
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("x", encoding="utf-8")
+    ds = DesktopSettings(path=str(tmp_path / "s.json"))
+    ds.set("record_dir", str(blocker))
+    path, err = ds.ensure_record_dir()
+    assert path == str(blocker)
+    assert err and "录音目录不可用" in err
+    assert str(blocker) in err
+    assert "请检查" in err          # 告诉用户下一步做什么，而不是只报 WinError
+    # 值仍保存（可能只是暂时拔盘），但错误必须同时进状态栏与弹窗
+    seen = []
+
+    def _warning(parent, title, text):
+        seen.append((title, text))
+        return 0
+
+    monkeypatch.setattr(
+        settings_panel, "QMessageBox",
+        type("_MB", (), {"warning": staticmethod(_warning)}))
+    panel = settings_panel.SettingsPanel(settings=ds, host=_FakeHost())
+    panel._on_changed("record_dir", str(blocker))
+    assert ds.get("record_dir") == str(blocker)
+    assert "录音目录不可用" in panel.status_label.text()
+    assert seen and seen[0][0] == "录音目录不可用"
+    assert "请检查" in seen[0][1]
 
 
 def test_record_dir_panel_row_and_buttons(env):

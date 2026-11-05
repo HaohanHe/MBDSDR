@@ -254,7 +254,10 @@ def test_satellite_tune_updates_control_panel():
     异常被 pass 吞掉 = 联动显示永不更新的死路径）。"""
     assert "freq_spin.setValue" not in _MAIN_WINDOW_SRC, \
         "freq_spin 不存在（真实控件是 freq_input），不许再调用它"
-    assert "self.control_panel.set_frequency_hz(float(obj.frequency_hz))" in _MAIN_WINDOW_SRC
+    assert re.search(
+        r"self\.control_panel\.set_frequency_hz\(\s*float\(obj\.frequency_hz\)\s*\)",
+        _MAIN_WINDOW_SRC,
+    ), "卫星调谐没有走 control_panel.set_frequency_hz = 联动显示不更新"
 
 
 # ------------------------------------------- 音量量纲收敛（0-100 人类量纲，2026-10-30）

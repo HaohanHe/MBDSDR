@@ -151,6 +151,8 @@ class DesktopSettings:
         self.last_error: Optional[str] = None
         #: 写盘失败回调（签名 (message) -> None）；由 UI 注入，避免配置层依赖 Qt。
         self.on_error: Optional[Any] = None
+        #: 上次文件里**真实出现**的键（用于一次性迁移提示：缺键 ≠ 用户选择了默认值）
+        self._file_keys: set = set()
         # 防抖写盘定时器：singleShot 语义，每次 set() 都重启，连续改动只写最后一次。
         # 挂在主线程（QTimer 必须在创建它的线程里 start），与 set() 同源，无需加锁。
         self._timer = QTimer(parent)
@@ -172,6 +174,7 @@ class DesktopSettings:
                     raw = json.load(f)
                 if not isinstance(raw, dict):
                     raise ValueError("顶层不是 JSON 对象")
+                inst._file_keys = set(raw)
                 for k, v in raw.items():
                     if k in DEFAULTS:
                         inst._data[k] = _coerce(k, v)
@@ -241,6 +244,14 @@ class DesktopSettings:
         """返回当前全部设置的浅拷贝（供导出/审计）。"""
         return dict(self._data)
 
+    def has_file_key(self, key: str) -> bool:
+        """该键是否**真实存在于上次磁盘文件**（区分"用户选了默认值"与"从未有过"）。
+
+        用于一次性迁移提示：旧文件没有新键时，用户可以被告知默认值变了；
+        文件里已有该键则说明用户已表达过意图，不再提示。
+        """
+        return key in self._file_keys
+
     @property
     def path(self) -> str:
         return self._path
@@ -265,7 +276,10 @@ class DesktopSettings:
             os.makedirs(directory, exist_ok=True)
             return directory, None
         except OSError as exc:
-            return directory, f"录音目录不可用（{directory}）：{exc}"
+            return directory, (
+                f"录音目录不可用（{directory}）：{exc}。"
+                "请检查该磁盘/网盘是否已连接，或在「设置 → 存储与日志」"
+                "重新选择目录。")
 
     # ------------------------------------------------------------------
     # 落盘

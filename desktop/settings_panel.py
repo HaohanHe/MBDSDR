@@ -401,11 +401,15 @@ class SettingsPanel(QWidget):
         self._host = host
         self._rows: Dict[str, QWidget] = {}
         self._building = False
+        self._host_signals_wired = False
         self._ai = _load_json_dict(AI_CONFIG_PATH)
         self._build_ui()
         self._refresh_from_storage()
-        # 持久化的 Bortle 在启动时推给天空图（默认 3 与视图内置默认一致；
-        # 用户改过 8 的话重启后仍是 8，不是"改了白改"）。
+        self._wire_host_signals()
+        # 一次性迁移提示要在回推默认值之前（避免自己写盘把"从未有过"变成"已有"）
+        self._announce_squelch_migration()
+        # 持久化的 Bortle/静噪/步进在启动时推给消费点（默认值与内置默认一致；
+        # 用户改过的话重启后仍是用户值，不是"改了白改"）。
         self._apply_initial_state()
 
     # ------------------------------------------------------------ 外部接线
@@ -417,18 +421,67 @@ class SettingsPanel(QWidget):
         """注入主窗口（主题/触屏/频谱/星象仪/观测站的应用入口）。"""
         self._host = host
         self._refresh_from_storage()
+        self._wire_host_signals()
         self._apply_initial_state()
 
-    def _apply_initial_state(self):
-        """把需要在启动时同步的持久化项推给天空图（目前是 Bortle）。"""
+    def _wire_host_signals(self):
+        """把控制面板的既有控件改动反写 settings，保持"一个权威源"。
+
+        只连接，不改别人文件：顶部步进/静噪滑杆改动后，schema 值跟着变，
+        下次启动推回同值；否则会出现"面板设 1 kHz、顶部改成 100 Hz、重启又回
+        1 kHz"的双入口假象。
+        """
         h = self._host
-        sky = getattr(h, "sky_view", None) if h is not None else None
-        if sky is None or not hasattr(sky, "set_bortle"):
+        if h is None or self._host_signals_wired or self._settings is None:
+            return
+        cp = getattr(h, "control_panel", None)
+        if cp is None:
             return
         try:
-            sky.set_bortle(int(self._current_value(SCHEMA["bortle"])))
-        except (AttributeError, TypeError, ValueError) as exc:
-            self._notify(f"启动时同步光害等级失败（用天空图默认值）：{exc}")
+            step_sig = getattr(cp, "step_changed", None)
+            if step_sig is not None:
+                step_sig.connect(self._on_step_from_control)
+            sq_sig = getattr(cp, "squelch_changed", None)
+            if sq_sig is not None:
+                sq_sig.connect(self._on_squelch_from_control)
+            self._host_signals_wired = True
+        except (RuntimeError, TypeError) as exc:
+            self._notify(f"与控制面板同步失败（改动只在本会话生效）：{exc}")
+
+    def _on_step_from_control(self, hz):
+        if self._settings is not None:
+            self._settings.set("tuning_step_hz", float(hz))
+
+    def _on_squelch_from_control(self, dbfs):
+        if self._settings is not None:
+            self._settings.set("squelch_default_db", int(round(float(dbfs))))
+
+    def _announce_squelch_migration(self):
+        """旧行为是滑杆 -50、门控实际 -80；只在旧配置文件上提示一次。"""
+        if self._settings is None:
+            return
+        checker = getattr(self._settings, "has_file_key", None)
+        path = getattr(self._settings, "path", "")
+        if not callable(checker) or not path or not os.path.exists(path):
+            return
+        if checker("squelch_default_db"):
+            return
+        self._notify(
+            "静噪默认值迁移：旧版本滑杆显示 -50、门控实际按 -80 dBFS 生效；"
+            "现在统一按 -50 dBFS（没有改动你保存过的任何值）。"
+            "若你以前依赖 -80，请在「频谱与解码」把静噪门限改成 -80。")
+
+    def _apply_initial_state(self):
+        """把需要在启动时同步的持久化项推给消费点。"""
+        h = self._host
+        if h is None:
+            return
+        for key in ("bortle", "squelch_default_db", "tuning_step_hz"):
+            item = SCHEMA[key]
+            try:
+                self._apply(item, self._current_value(item))
+            except (AttributeError, TypeError, ValueError) as exc:
+                self._notify(f"启动时同步 {item.label} 失败：{exc}")
 
     # ------------------------------------------------------------ 取/存
     @staticmethod
@@ -680,6 +733,13 @@ class SettingsPanel(QWidget):
         msg = f"已保存：{item.label}"
         if key == "record_dir":
             msg += f"（生效目录 {self._record_effective_dir()}；只影响新录音）"
+            # 保存即检查可写性：盘拔了/路径非法时当场说清楚，不等用户点"打开目录"。
+            dir_error = None
+            if self._settings is not None and hasattr(self._settings, "ensure_record_dir"):
+                _effective, dir_error = self._settings.ensure_record_dir()
+            if dir_error:
+                msg += f"；{dir_error}"
+                QMessageBox.warning(self, "录音目录不可用", dir_error)
         if item.requires_restart:
             msg += "（重启后生效）"
         elif not applied:
@@ -728,11 +788,53 @@ class SettingsPanel(QWidget):
                 return True
             if key == "bortle":
                 # 公开 setter（不直接改 _bortle）：下一帧按新等级重算可见星。
-                setter = getattr(h.sky_view, "set_bortle", None)
+                setter = getattr(getattr(h, "sky_view", None), "set_bortle", None)
                 if setter is None:
                     return False
                 setter(int(value))
                 return True
+            if key == "squelch_default_db":
+                # 真实消费点：控制面板滑杆 + 主窗口 _on_squelch_changed → 解调门控。
+                cp = getattr(h, "control_panel", None)
+                slider = getattr(cp, "squelch_slider", None)
+                label = getattr(cp, "squelch_val", None)
+                if slider is not None:
+                    slider.blockSignals(True)
+                    try:
+                        slider.setValue(int(value))
+                    finally:
+                        slider.blockSignals(False)
+                if label is not None:
+                    label.setText(f"{int(value)} dB")
+                # 「自动」勾选时门限由噪声底跟踪，应用默认值不能把它偷偷关掉；
+                # 记录旧状态，推送后原样恢复。
+                auto_check = getattr(cp, "auto_squelch_check", None)
+                was_auto = bool(auto_check.isChecked()) if auto_check is not None else False
+                setter = getattr(h, "_on_squelch_changed", None)
+                if callable(setter):
+                    setter(float(value))
+                if was_auto:
+                    restore = getattr(h, "_on_auto_squelch_toggled", None)
+                    if callable(restore):
+                        restore(True)
+                return slider is not None or callable(setter)
+            if key == "tuning_step_hz":
+                # 真实消费点：control_panel 步进下拉 → spectrum.snap_interval。
+                cp = getattr(h, "control_panel", None)
+                combo = getattr(cp, "step_combo", None)
+                if combo is not None:
+                    idx = combo.findData(int(value))
+                    if idx >= 0:
+                        combo.blockSignals(True)
+                        try:
+                            combo.setCurrentIndex(idx)
+                        finally:
+                            combo.blockSignals(False)
+                sp = getattr(h, "spectrum", None)
+                setter = getattr(sp, "set_snap_interval", None)
+                if callable(setter):
+                    setter(float(value))
+                return combo is not None or callable(setter)
             if key == "record_dir":
                 # 目录只给消费方读；改值不影响已录文件（消费点在主窗口线）。
                 return True

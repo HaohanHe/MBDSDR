@@ -25,6 +25,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+# 静噪默认值/范围取自内核常量，schema 不再写第二份字面量（A5 交付说明）。
+# 内核缺失（如裁剪打包）时退回同值，避免整个设置页签导入失败。
+try:
+    from mbdsdr_ai.squelch import (
+        DEFAULT_SQUELCH_DBFS, SQUELCH_MAX_DBFS, SQUELCH_MIN_DBFS,
+    )
+except ImportError:  # pragma: no cover - 仅内核缺失时
+    DEFAULT_SQUELCH_DBFS = -50.0
+    SQUELCH_MAX_DBFS = -20.0
+    SQUELCH_MIN_DBFS = -100.0
+
 #: 配置导出格式版本（导出文件里写这个整数）。
 #: 版本策略：**同主版本允许导入并迁移**（缺字段按默认补齐、多字段列出后忽略），
 #: 只有跨主版本才拒绝——主版本变化意味着字段语义/取值范围可能重定义，
@@ -206,6 +217,28 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help="按 bandplan.json 在谱面标注短波/航空/业余/卫星等频段。",
         source="desktop/spectrum_widget.py:855 show_bandplan=True",
     ),
+    SettingItem(
+        key="squelch_default_db", group="频谱与解码", kind="int",
+        label="静噪门限默认值", default=int(DEFAULT_SQUELCH_DBFS),
+        minimum=int(SQUELCH_MIN_DBFS), maximum=int(SQUELCH_MAX_DBFS), step=1,
+        help=("解调后音频电平低于此值就静音（单位 dBFS，不是射频功率）。"
+              "门限越高越容易切断弱信号，越低越容易放过底噪。"
+              "旧版本的滑杆默认 -50 但门控实际按 -80 生效，两者已于此统一；"
+              "如果你以前依赖 -80，请把这里改成 -80。"),
+        source="mbdsdr_ai/squelch.py:52 DEFAULT_SQUELCH_DBFS=-50；"
+               "旧行为 -80 见 desktop/main_window.py:520",
+    ),
+    SettingItem(
+        key="tuning_step_hz", group="频谱与解码", kind="enum",
+        label="调谐步进", default=10_000,
+        help=("滚轮/方向键与频谱吸附网格按这个步进走，与顶部「步进」下拉框同值。"
+              "10 kHz 是默认平衡点；细调选 10/100 Hz，快速跨越选 1 MHz。"),
+        source="desktop/spectrum_widget.py:921 snap_interval=10_000；"
+               "档位同 desktop/control_panel.py:331-332",
+        choices=(_e(10, "10 Hz"), _e(100, "100 Hz"), _e(1_000, "1 kHz"),
+                 _e(10_000, "10 kHz"), _e(100_000, "100 kHz"),
+                 _e(1_000_000, "1 MHz")),
+    ),
 
     # ---------------------------------------------------------------- 存储与日志
     SettingItem(
@@ -330,9 +363,6 @@ LOCKED: Tuple[Tuple[str, str], ...] = (
     ("星象仪图层（方位网格/赤道网格/罗盘/轨迹）",
      "星象仪底栏已有四个图层开关（rf_sky_view.py:6944-6957），"
      "设置里再开一套会出现两个不同步入口；持久化需坐标视图线在底栏直接写配置。"),
-    ("调谐吸附步进（snap_interval）",
-     "控制面板步进值会在运行时写入频谱吸附网格（main_window.py:4232-4235），"
-     "设置里再设默认值会被下一次步进覆盖，形成假配置。"),
     ("Max/Min hold、dB 显示范围",
      "它们是测量态临时工具，不是长期偏好；重启清零是预期行为，持久化反而制造困惑。"),
     ("日志级别",

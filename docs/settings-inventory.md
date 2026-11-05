@@ -9,17 +9,18 @@
 | 项 | 数量 | 说明 |
 |---|---|---|
 | 盘点的配置/持久化入口 | **6 处** | DesktopSettings、gui_config、AI config、QSettings、layout_store、bookmarks |
-| 盘点出的"硬编码但用户会想改"条目 | **31 条** | 见 §3 清单 |
-| 其中已暴露到设置面板 | **24 条** | 21 条落 DesktopSettings，2 条落 gui_config，5 条落 AI config；去重后 28 个 schema 项 |
-| 判定锁死、不暴露 | **7 类** | 理由见 §4（不是偷懒，每条都有具体消费点缺失或双入口风险） |
-| schema 总条目 | **41** | 28 暴露 + 13 内部键（频率/增益/音量等已有即时控件） |
-| 设置面板新增测试 | **34 个** | `tests/test_settings_schema.py`，全绿 |
-| 相关回归 | **117 + 29 个** | 配置/主题/布局/触屏/i18n 117；三栏与面板集成 29 |
+| 盘点出的"硬编码但用户会想改"条目 | **32 条** | 见 §3 清单（新增 #25 调谐步进、#32 静噪门限） |
+| 其中已暴露到设置面板 | **26 条** | 23 条落 DesktopSettings，2 条落 gui_config，5 条落 AI config；去重后 30 个 schema 项 |
+| 判定锁死、不暴露 | **6 类** | 理由见 §4（不是偷懒，每条都有具体消费点缺失或双入口风险） |
+| schema 总条目 | **43** | 30 暴露 + 13 内部键（频率/增益/音量等已有即时控件） |
+| 设置面板新增测试 | **39 个** | `tests/test_settings_schema.py`，全绿 |
+| 相关回归 | **96 + 29 个** | 配置/主题/布局/触屏/i18n 96；三栏与面板集成 29 |
 
-**必须先说的事实**：用户点"设置"目前**不是空面板，而是只有一个"服务设置"页签**——
-里面只有 2 个开关（远程控制 TCP、Web 服务）和 2 个端口输入框（7356 / 8080）。
-除此之外**没有任何通用设置面板**：主题与触屏只藏在"视图"菜单里，语言只有配置文件，
-观测站坐标、频谱偏好、AI 参数、星象仪气象参数全都没有 UI。用户的抱怨成立。
+**接手时的现状（已在本轮修复，记录备查）**：用户点"设置"当时**不是空面板，而是只有
+一个"服务设置"页签**——2 个开关（远程控制 TCP、Web 服务）+ 2 个端口输入框。
+主题与触屏只藏在"视图"菜单，语言只有配置文件，观测站坐标、频谱偏好、AI 参数、
+星象仪气象参数全都没有 UI。用户的抱怨成立。现在设置面板已有 7 个分组，
+详见 §1 与 §5。
 
 ## 1. 现状取证：点"设置"到底能看到什么
 
@@ -86,39 +87,44 @@
 | 22 | AI 超时 | `mbdsdr_ai/config.py:26` 60 s | 只能手改 JSON | **暴露** |
 | 23 | Bortle / 肉眼极限星等 | `rf_sky_view.py:1714` 默认 3；新增公开 `set_bortle` | 设置面板 1–9 级 | **暴露** `bortle`（立即生效，实测 3↔8 星数 1456↔194） |
 | 24 | 星象仪图层四开关 | `rf_sky_view.py:6944-6957` | 底栏即时，不持久 | **锁死**（双入口） |
-| 25 | 调谐吸附步进 | `main_window.py:4232-4235` 由控制面板步进覆盖 | 控制面板 | **锁死**（会被覆盖） |
+| 25 | 调谐吸附步进 | 旧 `spectrum_widget.py:921` `snap_interval=10_000`；控制面板步进下拉 | 控制面板即时；本轮起也持久化 | **暴露** `tuning_step_hz`（与顶部「步进」双向同步，改哪边都落盘） |
 | 26 | Max/Min hold、dB 范围 | `spectrum_widget.py` 会话态 | 工具栏 | **锁死**（测量态非偏好） |
-| 27 | 录音目录 | `main_window.py:5536` 旧值 `~/mbdsdr_recordings`；新默认由 `settings.py:default_record_dir()` 给出 | 设置面板可改 + 选择/打开目录 | **暴露** `record_dir`（默认 `D:\mbdsdr\recordings`，只影响新录音） |
+| 27 | 录音目录 | `main_window.py:5749` 旧值 `~/mbdsdr_recordings`；新默认由 `settings.py:default_record_dir()` 给出 | 设置面板可改 + 选择/打开目录 | **暴露** `record_dir`（默认 `D:\mbdsdr\recordings`，只影响新录音） |
 | 28 | 日志级别 | 无 `basicConfig`，只有分散 `getLogger` | 不能 | **锁死**（没有消费点） |
 | 29 | 采样率/带宽/增益/解调/音量 | 旧 `settings.py` + 设备/控制面板 | 面板即时且已持久 | **锁死**（已有单一入口） |
 | 30 | AI provider/model/key/base_url | `ai_panel.py` 配置对话框 | 已有 UI | **锁死**（避免密钥双入口） |
 | 31 | 星象仪 FOV / 时间倍率 | 星象仪底栏 | 已有 UI | **锁死**（会话态视图操作） |
+| 32 | 静噪门限默认值 | `mbdsdr_ai/squelch.py:52` `DEFAULT_SQUELCH_DBFS=-50`；旧门控 `main_window.py:520` 实际按 -80 | 控制面板滑杆即时；本轮起也持久化 | **暴露** `squelch_default_db`（默认/范围直接取内核常量；与滑杆双向同步） |
 
-**统计口径**：31 条中 24 条暴露（#1–#23、#27），7 类锁死（#24–#26、#28–#31）。
+**统计口径**：32 条中 26 条暴露（#1–#23、#25、#27、#32），6 类锁死（#24、#26、#28–#31）。
 
-## 4. 为什么锁死（逐条理由）
+## 4. 为什么锁死（逐条理由，当前真实状态）
+
+以下 6 类**仍然锁死**，其余此前登记为锁死的 Bortle、录音目录、调谐步进已按实际
+消费链改为暴露（见 §9 处置表）：
 
 1. **星象仪图层**：底栏已有方位网格/赤道网格/罗盘/轨迹四个开关；设置里再开一套会
    出现"设置里打开、底栏显示关闭"的假象。持久化应由坐标视图线在底栏直接写 schema。
-2. **吸附步进**：控制面板每次改步进都会覆盖 `snap_interval`（`main_window.py:4232`），
-   设置默认值活不过一次调谐，属于假配置。
-3. **Hold / dB 范围**：是测量态临时工具，重启清零是预期行为；持久化反而让用户以为
+2. **Hold / dB 范围**：是测量态临时工具，重启清零是预期行为；持久化反而让用户以为
    下次还在测同一个信号。
-4. **日志级别**：桌面端没有统一 logging 配置，只有分散 `getLogger`，没有可改的消费点。
+3. **日志级别**：桌面端没有统一 logging 配置，只有分散 `getLogger`，没有可改的消费点。
    先补日志基础设施，再谈级别配置。
-5. **采样率/带宽/增益/解调/音量**：设备面板与控制面板已有即时控件且已持久化，设置里
+4. **采样率/带宽/增益/解调/音量**：设备面板与控制面板已有即时控件且已持久化，设置里
    重复暴露会产生两个入口（§2 表第 1 行已覆盖这些键，因此它们仍是 schema 的内部键）。
-6. **AI provider/model/key/base_url**：AI 面板已有配置对话框（`ai_panel.py:355-415`），
+5. **AI provider/model/key/base_url**：AI 面板已有配置对话框（`ai_panel.py:355-415`），
    设置里再放一个 Key 输入框会导致两处密钥、两套保存路径。
-7. **星象仪 FOV / 时间倍率**：底栏已有倍率与重置摄像机按钮，且属于会话态视图操作，
+6. **星象仪 FOV / 时间倍率**：底栏已有倍率与重置摄像机按钮，且属于会话态视图操作，
    不是长期偏好。
 
-> 已移出锁死（按用户裁定修正）：
+> 已移出锁死（按用户裁定与真实消费链修正）：
 > - **Bortle**：此前以"无 setter"为由锁死是错误的——那是实现缺口。已补公开
 >   `RFSkyView.set_bortle(level)`，进 schema（1–9），面板即时生效。
 > - **录音目录**：此前以"消费点在主窗口线"为由锁死是协作问题而非产品理由。已进
 >   schema 与面板（选择/打开目录），并提供公开读取入口 `DesktopSettings.record_dir`
 >   与 `ensure_record_dir()`；主窗口消费点由操作逻辑线接入（改前需报备）。
+> - **调谐步进**：此前担心"控制面板会覆盖设置值"；改为双向同步（顶部下拉改 → 写回
+>   settings，设置改 → 同时推 `control_panel.step_combo` 与
+>   `spectrum.set_snap_interval`）后不再是假配置，已进 schema（10 Hz–1 MHz）。
 
 ## 5. 暴露项三问（何时改 / 默认依据 / 改错校验）
 
@@ -141,6 +147,8 @@
 | 瀑布平滑 | 追踪弱轨迹 | False：既有默认 | 布尔；即时 |
 | 显示书签 | 小屏省空间 | True：既有默认 | 布尔；即时 |
 | 显示频段彩带 | 只想看谱 | True：既有默认 | 布尔；即时 |
+| 调谐步进 | 细调弱信号 vs 快速跨段 | 10 kHz：`spectrum_widget.py` 既有 `snap_interval`，档位同控制面板 | 10 Hz–1 MHz 六档枚举；未知回 10 kHz；即时推 `step_combo` + `set_snap_interval`；顶部改动反写设置 |
+| 静噪门限 | 底噪大 / 弱信号被切断 | -50 dBFS：直接取 `mbdsdr_ai.squelch DEFAULT_SQUELCH_DBFS`（schema 不写第二份） | -100～-20 dBFS（取 `SQUELCH_MIN/MAX_DBFS`），越界夹住；即时推滑杆 + `_on_squelch_changed`；滑杆改动反写设置 |
 | 观测站纬度 | 换城市/设台 | None：未配置就保持空状态，不编造位置 | -90–90，越界夹住；空白=未设置；即时写 gui_config + 重算过境 |
 | 观测站经度 | 同上 | None | -180–180，同上 |
 | AI 温度 | 要稳定操作建议/要发散 | 0.7：`DEFAULT_CONFIG` | 0–2，越界夹住；写 config.json + 现有 agent 即时生效 |
@@ -163,6 +171,10 @@
   **`set_bortle`**（新公开 setter，面板构造时也把持久化值推给天空图，重启不丢）；
   观测站 → 写 `gui_config` 并调 `_apply_observer_location` / `_save_gui_config`；
   录音目录 → 写入 settings 并即时更新生效路径提示（消费方读 `settings.record_dir`）；
+  保存时立刻调 `ensure_record_dir()`，失败在弹窗+状态栏可见（值仍保留，方便用户插回外接盘）；
+  **静噪/步进 → 同时推控制面板控件与消费点**（`_on_squelch_changed` /
+  `set_snap_interval`），顶部控件改动也反写 settings；应用静噪默认值**不会**把
+  「自动静噪」偷偷关掉（推送前记录、推送后恢复）；
   AI → 写 `config.json`（保留 api_key）并同步现有 `agent.config`。
   **只有界面语言需要重启**：下拉框正下方橙色提示与 tooltip 原文为
   「重启后生效：Qt 翻译器必须在窗口创建前安装，切换后重启应用才生效。」，
@@ -188,17 +200,21 @@
 
 ## 7. 测试证据
 
-- 新增：`tests/test_settings_schema.py` **34 passed**，覆盖
+- 新增：`tests/test_settings_schema.py` **39 passed**，覆盖
   单一事实源、越界/坏类型不崩、损坏备份、写失败可见、落盘往返、单项/全部恢复默认、
   导出含版本且无密钥、同主版本旧文件补齐迁移/较新次版本未知字段列出/跨主版本拒绝、
   面板分组齐全、真实控件信号→落盘→生效、观测站写 gui_config、AI 参数不动密钥、
   重启项标注、锁死项有理由；Bortle 1–9 schema + 即时生效 + 重启仍生效 + **同 FOV
   星数反证（Bortle 3=1456、Bortle 8=194）** + setter 越界/坏值；录音目录默认不落
-  用户目录、留空回默认、`ensure_record_dir` 建目录、面板行与"选择/打开目录"按钮；
+  用户目录、留空回默认、`ensure_record_dir` 建目录、盘不可用时返回可执行文案且
+  状态栏与弹窗同时可见、面板行与"选择/打开目录"按钮；
+  **A5 静噪** schema 默认/范围与 `mbdsdr_ai.squelch` 常量逐值相等 + 改设置后
+  滑杆与门控都变 + 滑杆反写设置 + 旧配置迁移提示；**A11 调谐步进**改设置后
+  `snap_interval` 与下拉框都变 + 下拉反写设置；
   服务面板保存/启动/停止失败都在状态行可见。
 - 回归：`test_settings_convergence` / `test_settings_semantics` / `test_theme_switch` /
   `test_theme_tokens` / `test_layout_store` / `test_touch_adaptation` /
-  `test_desktop_i18n` + 新测试 = **117 passed**。
+  `test_desktop_i18n` = **96 passed**（另有本文件 39 项专项测试，合计 135）。
 - 集成：`test_three_column_layout` + `test_ui_panels_integration` = **29 passed**
   （含新"设置"页签停靠与三栏布局不回归）。
 - 棘轮：`lint_swallow_all.py --no-fail` 扫描，`desktop/settings.py` 0、
@@ -214,8 +230,8 @@
 - `desktop/rf_sky_view.py` **只新增**公开 `set_bortle()`（不改既有逻辑/私有状态调用），
   面板与持久化都走它；该文件另有坐标视图线的未提交 logging 改动，本线提交时只取
   自己那段 hunk，不覆盖对方修改。
-- 录音目录消费点仍是 `desktop/main_window.py:5713` 的 `~/mbdsdr_recordings` 与
-  `:6913` 回放对话框（归操作逻辑线）。本线已提供 `settings.record_dir` /
+- 录音目录消费点仍是 `desktop/main_window.py:5749` 的 `~/mbdsdr_recordings` 与
+  `:6957` 回放对话框（归操作逻辑线）。本线已提供 `settings.record_dir` /
   `ensure_record_dir()` 读取入口，**未改消费代码**；接入说明见 §8.1。
 - 现场另有他人未提交改动（`desktop/rf_sky_view.py`、`desktop/receive_pipeline.py` 等），
   本线未触碰、未覆盖；`receive_pipeline.py` 的棘轮越线由审计线另案处理。
@@ -228,8 +244,55 @@
    返回 `(path, error)`；`path` 就是本次要用的目录，`error is None` 表示可用。
 3. **失败怎么显示**：`error` 非空时必须在状态栏/对话框显示该文案，并**拒绝开始
    本次录音**；不要再静默退到 `tempfile.gettempdir()`（那会让用户以为录到了目标盘）。
-4. **要替换的旧点**：`desktop/main_window.py:5713` 的
-   `rec_dir = os.path.expanduser("~/mbdsdr_recordings")` 及 5714-5717 的
-   `makedirs`/兜底；`desktop/main_window.py:6913` 回放文件对话框的初始目录也改读
+   **盘不存在（外接盘拔了/盘符没挂载）的约定**：`ensure_record_dir()` 返回
+   `(原路径, "录音目录不可用（<路径>）：<系统错误>。请检查该磁盘/网盘是否已连接，
+   或在「设置 → 存储与日志」重新选择目录。")`——**保留用户填的路径**，不擅自改回
+   默认值，也不抛异常。界面用同一段文字：弹窗标题「录音目录不可用」，正文即上面
+   的 error 全文；同时写进设置页状态栏。设置值仍会保存（用户可能只是暂时拔盘），
+   但本次录音必须被拒绝。
+4. **要替换的旧点**：`desktop/main_window.py:5749` 的
+   `rec_dir = os.path.expanduser("~/mbdsdr_recordings")` 及随后的
+   `makedirs`/兜底；`desktop/main_window.py:6957` 回放文件对话框的初始目录也改读
    `self.settings.record_dir`。
 5. **语义**：改目录只影响新录音，已有录音不迁移、不删除。
+
+## 9. 参数治理线 A1–A11 处置表（按 `docs/hardcoded-parameters.md` §4）
+
+原则：**没有真实消费点的不进 schema**（进了也没人读 = 假设置）；消费点在别人文件、
+且没有公开 setter 的，本线只登记读取入口与接入代码，不越界修改对方文件。
+
+| # | 条目 | 处置 | schema 键 / 默认 / 范围 / 单位 | 生效方式 | 消费点与证据 |
+|---|---|---|---|---|---|
+| A1 | 过境最低仰角 | **暂不暴露**（消费点在卫星线） | 拟 `pass_min_elevation_deg` / 10 / 0–45 / 度 | 接入后即时 | `sat_track_panel.py`、`rf_sky_view.py`、`new_spacetime_panel.py`；本线未改 |
+| A2 | 过境搜索窗口 | **暂不暴露**（消费点在卫星线） | 拟 `pass_window_hours` / 24 / 1–72 / 小时 | 接入后即时 | `new_spacetime_panel.py:533 compute_passes`；本线未改 |
+| A3 | 录音总容量保留上限 | **不做**（无消费点） | 拟 `recording_retention_total_gb` / 0–2000 / GB | — | `RetentionPolicy` 存在但 desktop 无调用者；加了也没人执行 |
+| A4 | 录音保留天数 | **不做**（无消费点） | 拟 `recording_retention_days` / 0–3650 / 天 | — | 同上 |
+| A5 | 静噪门限默认值 | **已落地** | `squelch_default_db` / `int(DEFAULT_SQUELCH_DBFS)`=-50 / `int(SQUELCH_MIN_DBFS)`=-100 ～ `int(SQUELCH_MAX_DBFS)`=-20 / dBFS | **即时**：滑杆 + 门控；滑杆反写设置 | `control_panel.squelch_slider` → `main_window._on_squelch_changed`；默认/范围取自 `mbdsdr_ai/squelch.py`，schema 无第二份字面量 |
+| A6 | AI 工具超时 | **不做**（无消费点） | 拟 `ai_tool_timeout_s` / 120 / 10–600 / 秒 | — | `mbdsdr_ai/agent.py:630` 为常量，无配置字段可读，改了不生效 |
+| A7 | 瀑布深度行数 | **不做**（Python 无 setter） | 拟 `waterfall_depth_rows` / 256 / 128–4096 / 行 | — | `cpp/tokens.h:698` 可选，Python `spectrum_widget` 固定且无 `set_waterfall_depth` |
+| A8 | 大气消光系数 | **不做**（无 setter） | 拟 `sky_extinction_k` / 0.2 / 0–0.5 / 星等 | — | `stars.py` 有 `k` 参数但视图不传，无公开入口 |
+| A9 | 显示低仰角过境 | **暂不暴露**（消费点在卫星线） | 拟 `show_low_elevation_passes` / False / 布尔 | 接入后即时 | `sat_passes` / `sat_track_panel` / `new_spacetime_panel`；无公开 setter |
+| A10 | 默认采样率 | **不新增第二键** | 复用既有 `sample_rate_hz`（2.4 MSPS 由后端能力回落） | 即时 | `main_window.py:2944/3363-3367`、`spectrum_widget.py:188`、`sdr_backend.DEFAULT_SAMPLE_RATE_HZ` 已覆盖 |
+| A11 | 调谐步进 | **已落地** | `tuning_step_hz` / 10 000 / 10–1 000 000 / Hz（六档） | **即时**：`step_combo` + `spectrum.set_snap_interval`；顶部下拉反写设置 | `control_panel.step_combo`、`spectrum_widget.py:921 snap_interval`；无代码缺口（本项为「无缺口更正」） |
+
+### 9.1 给卫星/天空线的接入说明（可直接照抄）
+
+以下三条在**对方文件**里改，本线不代办。已在 `DesktopSettings.get()` 提供通用读取；
+等对方接上消费点后，再按 §9 第一列把 key 加入 `ALL_ITEMS` 并设 `exposed=True`：
+
+```python
+# A1：过境最低仰角（度）
+min_elev = float(getattr(self, "settings", None).get("pass_min_elevation_deg", 10))
+# 传给 sf.compute_passes(..., min_elevation_deg=min_elev)
+
+# A2：过境搜索窗口（小时）
+hours = int(getattr(self, "settings", None).get("pass_window_hours", 24))
+# 传给 new_spacetime_panel.compute_passes(..., hours=hours)
+
+# A9：是否显示低仰角过境
+show_low = bool(getattr(self, "settings", None).get("show_low_elevation_passes", False))
+# 传给过境列表过滤：if not show_low: rows = [r for r in rows if r.max_elev >= min_elev]
+```
+
+> 注意：在这三条被真正读取之前，本线**不会**把它们写进 schema/面板——否则就是又一个
+> “能存能读但没人用”的假设置。A5/A11 已按反证测试（改设置 → 消费点读到新值）落地。
