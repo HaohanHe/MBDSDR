@@ -16,6 +16,7 @@
 的断开同步或 ai_panel `_call_ai` 的忙锁，本文件断言即红。
 """
 import json
+import logging
 import os
 import sys
 
@@ -26,6 +27,8 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="module")
@@ -52,8 +55,9 @@ def window(isolated_profile, qtapp):
     yield w
     try:
         w._teardown_connection()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("fixture 收尾失败（MainWindow._teardown_connection）：%s: %s",
+                    type(exc).__name__, exc)
 
 
 @pytest.mark.usefixtures("qtapp", "window")
@@ -403,7 +407,7 @@ class TestUiFlowGuards:
         w._refresh_tx_button_state()
         assert w.tx_button.isEnabled()
         assert "人工确认" in w.tx_button.toolTip()
-        assert w.tx_capability_label.text() == (
+        assert w.tx_capability_label.toolTip() == (
             "本后端发射：驱动级已实现 / 真机未验证")
         w._active_sdr_backend = None
 
