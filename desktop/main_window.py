@@ -1352,7 +1352,7 @@ class MainWindow(QMainWindow):
         try:
             if self._freq_mgr is not None and hasattr(
                     self.control_panel, "load_bookmarks_from_list"):
-                bm_list = [(b.freq_hz, b.name, b.mode)
+                bm_list = [(b.freq_hz, b.name, b.mode, bool(b.builtin))
                            for b in self._freq_mgr.list() if b.freq_hz > 0]
                 self.control_panel.load_bookmarks_from_list(bm_list)
                 # 同一批收藏同时灌进内存表（频谱书签标签的数据源）
@@ -4444,7 +4444,8 @@ class MainWindow(QMainWindow):
     def _on_bookmark_added(self, freq_hz: float, name: str, mode: str):
         """控制面板书签按钮 → 内存保存 + FrequencyManager 持久化 + 频谱标签。"""
         try:
-            self._bookmarks.append((float(freq_hz), str(name), str(mode)))
+            self._bookmarks.append(
+                (float(freq_hz), str(name), str(mode), False))
             if self._freq_mgr is not None:
                 try:
                     self._freq_mgr.add(
@@ -4463,7 +4464,8 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self.spectrum, "set_bookmarks"):
                 self.spectrum.set_bookmarks(
-                    [(float(hz), str(name)) for hz, name, _m in self._bookmarks])
+                    [(float(hz), str(name))
+                     for hz, name, _m, _b in self._bookmarks])
         except Exception:
             pass
 
@@ -4474,7 +4476,7 @@ class MainWindow(QMainWindow):
         书签带模式则一并切过去；否则保持当前解调模式。
         """
         mode = None
-        for hz, _name, m in self._bookmarks:
+        for hz, _name, m, _b in self._bookmarks:
             if abs(float(hz) - float(freq_hz)) < 1.0:
                 mode = str(m) if m else None
                 break

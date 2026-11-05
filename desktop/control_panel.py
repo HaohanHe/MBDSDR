@@ -914,11 +914,12 @@ class ControlPanel(QWidget):
         if not self._bookmarks:
             self.bookmark_combo.addItem("暂无书签，右键频谱保存当前频率", None)
         else:
-            for i, (hz, name, mode) in enumerate(self._bookmarks):
+            for i, (hz, name, mode, builtin) in enumerate(self._bookmarks):
                 shown, bad = self._bookmark_display_name(name)
                 abnormal += int(bad)
+                tag = "（内置）" if builtin else ""
                 label = self._elide_bookmark_text(
-                    f"{shown} ({hz / 1e6:.3f}MHz {mode})")
+                    f"{shown}{tag} ({hz / 1e6:.3f}MHz {mode})")
                 self.bookmark_combo.addItem(("⚠ " if bad else "") + label, i)
                 if bad:
                     self.bookmark_combo.setItemData(
@@ -937,9 +938,15 @@ class ControlPanel(QWidget):
     def load_bookmarks_from_list(self, bookmarks: list):
         """从外部（FrequencyManager）加载书签列表。
 
-        每项为 (freq_hz, name, mode) 元组；替换当前内存书签并刷新下拉框。
+        每项为 (freq_hz, name, mode, builtin) 元组；旧调用给的 3 元组按
+        ``builtin=False`` 归一化（兼容既有测试/外部脚本）。替换当前内存
+        书签并刷新下拉框。
         """
-        self._bookmarks = list(bookmarks)
+        self._bookmarks = [
+            (float(b[0]), str(b[1]), str(b[2]),
+             bool(b[3]) if len(b) > 3 else False)
+            for b in bookmarks
+        ]
         self._refresh_bookmarks()
 
     @Slot()
@@ -957,7 +964,8 @@ class ControlPanel(QWidget):
                 f"书签名 {len(name)} 字符，超过上限 {BOOKMARK_NAME_MAX_CHARS} 字符，"
                 "未保存。请缩短后重试。")
             return
-        self._bookmarks.append((self._freq_hz, name, self._current_mode))
+        self._bookmarks.append(
+            (self._freq_hz, name, self._current_mode, False))
         self._refresh_bookmarks()
         self.bookmark_combo.setCurrentIndex(self.bookmark_combo.count() - 1)
         self.bookmark_added.emit(self._freq_hz, name, self._current_mode)
@@ -969,7 +977,14 @@ class ControlPanel(QWidget):
             return
         if not (0 <= idx < len(self._bookmarks)):
             return
-        hz, name, _mode = self._bookmarks[idx]
+        hz, name, _mode, builtin = self._bookmarks[idx]
+        if builtin:
+            QMessageBox.information(
+                self, "内置书签",
+                f"「{name}」是内置频率，不能删除。"
+                "下一步：先调到你要保留的频点，再用「收藏当前频率」"
+                "保存为你自己的自定义书签。")
+            return
         answer = QMessageBox.question(
             self, "删除书签",
             f"删除书签「{name}」（{hz / 1e6:.3f} MHz）？此操作不能撤销。",
@@ -1011,7 +1026,7 @@ class ControlPanel(QWidget):
             return
         if not (0 <= idx < len(self._bookmarks)):
             return
-        hz, _name, mode = self._bookmarks[idx]
+        hz, _name, mode, _builtin = self._bookmarks[idx]
         self._current_mode = mode
         self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentText(mode)
