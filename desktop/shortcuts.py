@@ -76,6 +76,8 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
              note="帮助菜单常驻入口；从注册表实时生成，低频操作"),
     Shortcut("help.shortcuts", None, "快捷键一览",
              note="帮助菜单常驻入口；内容由本表生成，低频操作"),
+    Shortcut("help.command_palette", "Ctrl+K", "命令面板",
+             note="一个搜索框定位菜单命令/面板页签/能力/快捷键；想不起入口在哪时用"),
     # ---- 面板菜单 ----
     Shortcut("panel.reset_layout", None, "恢复出厂布局", note="破坏性操作，要求点击确认"),
     # ---- 顶栏 ----
