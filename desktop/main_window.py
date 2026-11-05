@@ -3675,7 +3675,8 @@ class MainWindow(QMainWindow):
                 cp.set_sdr_connected(connected)
         except Exception:
             pass
-        # 控制面板频率显示：未连接时显占位，连接后由实际调谐更新
+        # 控制面板频率显示：未连接时显占位；连接后若无真实频率也保持占位，
+        # 绝不用 0 Hz 顶替“未知”，真实频率由实际调谐/恢复 setter 回填。
         try:
             cp = getattr(self, "control_panel", None)
             if cp is not None:
@@ -3683,9 +3684,6 @@ class MainWindow(QMainWindow):
                 if fd is not None and hasattr(fd, "set_frequency"):
                     if not connected:
                         fd.set_frequency(None)
-                    elif hasattr(fd, "has_frequency") and not fd.has_frequency:
-                        # 连接后若频率显示还是占位，填 0（后续由真实调谐覆盖）
-                        fd.set_frequency(0)
         except Exception:
             pass
         # 工具栏录音按钮（无 SDR 不可录音）
