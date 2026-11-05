@@ -51,8 +51,8 @@ def test_planetarium_exit_entry_is_readable(window):
 
 def test_planetarium_recording_indicator_reads_state(window):
     w, mw = window
-    page = w._planetarium_page
-    rec = page.findChild(QLabel, "planetariumRecIndicator")
+    strip = w._planetarium_strip
+    rec = strip.findChild(QLabel, "planetariumRecIndicator")
     assert rec is not None, "星象仪必须有独立录音指示"
     assert rec.isHidden() is True, "未录音时指示必须隐藏"
 
@@ -73,3 +73,41 @@ def test_planetarium_recording_indicator_reads_state(window):
     w._recording = False
     w._sync_planetarium_recording()
     assert rec.isHidden() is True, "停止录音后必须隐藏"
+
+
+def test_overlay_is_not_in_layout_and_sky_keeps_full_width(window, qtapp):
+    w, mw = window
+    w.set_app_mode("planetarium")
+    qtapp.processEvents()
+    w._planetarium_page.layout().activate()
+
+    strip = w._planetarium_strip
+    sky = w.sky_view
+    page = w._planetarium_page
+    assert strip.parent() is sky, "浮层必须挂在天空视图上，才不占布局"
+    assert page.layout().indexOf(strip) == -1, "浮层不得进入页面布局"
+    # 满宽 = 天空宽度等于页面宽度（浮层不扣任何一列像素）。
+    assert sky.width() == page.width(), (
+        f"天空视图必须满宽：sky={sky.width()} page={page.width()}")
+    assert sky.height() == w._planetarium_sky_slot.height(), (
+        f"天空视图必须填满天空槽：sky={sky.height()} "
+        f"slot={w._planetarium_sky_slot.height()}")
+    # 相对窄条版（764 宽 / 534 高）不得更小；浮层版实际是 800×536。
+    assert sky.width() >= 764 and sky.height() >= 534, (
+        f"天空视图不得比窄条版更小，实际: {sky.width()}x{sky.height()}")
+    assert strip.x() + strip.width() == sky.width() - 12, (
+        f"浮层须贴右边距 12px，实际 x={strip.x()} w={strip.width()} "
+        f"sky={sky.width()}")
+    assert strip.y() == 12, "浮层须贴上边距 12px"
+
+
+def test_overlay_exit_button_is_clickable(window):
+    w, mw = window
+    w.set_app_mode("planetarium")
+    strip = w._planetarium_strip
+    btn = strip.findChild(QPushButton, "planetariumExit")
+    assert strip.isVisible() is True
+    assert btn.isVisible() is True and btn.isEnabled() is True
+    btn.click()
+    assert w._app_mode == "ide", "浮层按钮点击必须能退出星象仪"
+    assert strip.isHidden() is True, "退出后浮层必须隐藏"

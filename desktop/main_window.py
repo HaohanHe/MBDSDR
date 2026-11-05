@@ -1781,7 +1781,7 @@ class MainWindow(QMainWindow):
         self._sky_restore_info: Optional[dict] = None
 
     def _build_planetarium_page(self) -> QWidget:
-        """星象仪容器页：天空铺满 + 底部瀑布 + 右侧 36px 形态窄条。
+        """星象仪容器页：天空铺满 + 底部瀑布 + 天空右上角形态浮层。
 
         AI 命令栏（IDE 中栏已有那颗胶囊）进形态时 reparent 到天空槽上，
         回复经 ai_panel.reply_received 打到 _planetarium_ai_card 覆盖卡。
@@ -1819,13 +1819,21 @@ class MainWindow(QMainWindow):
 
         hbox.addWidget(left_col, stretch=1)
 
-        # 右侧形态窄条：36px 只够写 "IDE"，全屏下用户看不出这是出口。
-        # 放宽到 132px，并用完整中文文案 + 触控高度。
-        strip = QFrame(page)
+        # 形态浮层：浮在天空视图右上角，不参与布局。占一条 132px 的窄条会
+        # 永久吃掉 96px 天空宽度（764→668，面积 -12.6%），浮层只遮右上角一隅。
+        strip = QFrame(self.sky_view)
         strip.setObjectName("planetariumStrip")
-        strip.setFixedWidth(132)
+        # 152px：内容外边距 6×2 + 按钮 sizeHint 136 + 边框 2，留 2px 余量；
+        # 132px 会把「退出星象仪」裁掉右缘。
+        strip.setFixedWidth(152)
+        strip.setAttribute(Qt.WA_StyledBackground, True)
+        strip.setStyleSheet(
+            "QFrame#planetariumStrip {"
+            " background-color: rgba(18,19,22,0.55);"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            " border-radius: 10px; }")
         strip_lay = QVBoxLayout(strip)
-        strip_lay.setContentsMargins(0, 8, 0, 8)
+        strip_lay.setContentsMargins(6, 6, 6, 6)
         strip_lay.setSpacing(4)
         # 录音指示：只读 _recording/_record_seconds，不自起计时
         rec_indicator = QLabel("")
@@ -1846,7 +1854,8 @@ class MainWindow(QMainWindow):
         strip_lay.addStretch(1)
         self._planetarium_strip = strip
         self._planetarium_rec_indicator = rec_indicator
-        hbox.addWidget(strip)
+        strip.installEventFilter(self)
+        strip.hide()  # 只在星象仪形态显示；不占布局，天空视图保持满宽
 
         # AI 回复覆盖卡（天空槽上的半透明卡片；隐藏=无回复，诚实空态不编造）
         card = QFrame(self._planetarium_sky_slot)
@@ -1975,6 +1984,8 @@ class MainWindow(QMainWindow):
         self.settings.set("app_mode", "planetarium")
         self._sync_mode_action()
         self._sync_planetarium_recording()
+        self._position_planetarium_overlay()
+        self._planetarium_strip.show()
         # 窗口已显示才联动全屏；启动恢复阶段窗口未 show，交给正常 show 流程。
         if self.isVisible() and not self.isFullScreen():
             self.showFullScreen()
@@ -2007,6 +2018,7 @@ class MainWindow(QMainWindow):
         self._mode_stack.setCurrentIndex(0)
         self._app_mode = "ide"
         self.settings.set("app_mode", "ide")
+        self._planetarium_strip.hide()
         self._sync_mode_action()
         if self.isFullScreen():
             self.showNormal()
@@ -2157,6 +2169,12 @@ class MainWindow(QMainWindow):
         if obj is getattr(self, "sky_view", None) \
                 and event.type() == QEvent.Resize:
             self._position_all_sky_btn()
+            self._position_planetarium_overlay()
+        if obj is getattr(self, "_planetarium_strip", None):
+            if event.type() == QEvent.Enter:
+                self._set_planetarium_strip_hover(True)
+            elif event.type() == QEvent.Leave:
+                self._set_planetarium_strip_hover(False)
         if event.type() == QEvent.ShortcutOverride:
             if self._handle_shortcut_override(event):
                 return True
@@ -4811,10 +4829,35 @@ class MainWindow(QMainWindow):
             return
         if not getattr(self, "_recording", False):
             rec.setVisible(False)
+            self._position_planetarium_overlay()
             return
         secs = int(getattr(self, "_record_seconds", 0) or 0)
         rec.setText(f"● 录音中 {secs // 60:02d}:{secs % 60:02d}")
         rec.setVisible(True)
+        # 录音指示显隐会改变浮层高度：必须重新 adjustSize，否则底部按钮被裁。
+        self._position_planetarium_overlay()
+
+    def _position_planetarium_overlay(self) -> None:
+        """浮层贴天空视图右上角 12px；不参与布局，随天空尺寸重排。"""
+        strip = getattr(self, "_planetarium_strip", None)
+        sky = getattr(self, "sky_view", None)
+        if strip is None or sky is None:
+            return
+        strip.adjustSize()
+        strip.move(max(12, sky.width() - strip.width() - 12), 12)
+        strip.raise_()
+
+    def _set_planetarium_strip_hover(self, on: bool) -> None:
+        """鼠标移入变实、移开变淡（浮层不挡视线）。"""
+        strip = getattr(self, "_planetarium_strip", None)
+        if strip is None:
+            return
+        alpha = "0.92" if on else "0.55"
+        strip.setStyleSheet(
+            "QFrame#planetariumStrip {"
+            f" background-color: rgba(18,19,22,{alpha});"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            " border-radius: 10px; }")
 
     def _toggle_record(self):
         """菜单 / 工具栏录音按钮统一入口。
