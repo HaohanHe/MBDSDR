@@ -1663,7 +1663,7 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 > **并入时复核（2026-11-06）**：A 的 4 条与 A2 的 1 条**当前已转绿**
 > （`test_ui_wiring_audit.py` 实测 `11 passed`；`test_control_panel_nan_gain_keeps_previous`
 > 实测 `1 passed`），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽**已修 `ef07c133`**
-> （原构建阻塞 `main_window.cpp:5644` 已随本笔消除，见 §B 末）；C 是断言闸门的报告口径，不是新欠账。复跑 `ctest -R "^(spectrum_display|spectrum_autorange)$"`。
+> （原构建阻塞 `main_window.cpp:5644` 已随本笔消除，见 §B 末）；C 是断言闸门的报告口径，不是新欠账。复跑 `ctest -R "^(spectrum_display|spectrum_autorange)$"`；**2026-11-06 在 `cpp/build` 重新构建后实测：`100% tests passed, 0 tests failed out of 2`（spectrum_display / spectrum_autorange 各 Passed）**。
 
 ## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
 
@@ -1737,6 +1737,7 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 - **豁免显式**：默认清单 [red-lifecycle-exemptions.md](./red-lifecycle-exemptions.md)，逐文件写机制与理由；只对列明且机制可验证的文件生效。每次运行必打印 `SKIP n（豁免：<文件>，机制=…，理由见 …）`，不许静默；清单进版本，改动留痕。反证：往清单里加普通文档 → 该文件仍红（机制对不上报 X0）。
 - **R5 身份键**：测试名、槽名（`A2` / `B3`）、`§7.3.1 A` 这类组键都算键；同一键在两处（跨文档或同文档不同节）状态不一致即 FAIL。
 - **历史横幅**：只有 `docs/learn/phase*/` 下的文件可写「历史快照，不作现状依据」；带横幅的文件内 R1/R2 降为 HIST-WARN 并单列计数，不带横幅仍 FAIL；现代文档写该横幅判 X1 FAIL（反证：删横幅回红、给现代文档加横幅被拒）。
+- **R3 复跑命令自动映射**：测试函数名 → `pytest <file>::<name>`；C++ 槽名（`display::Foo`，仅一个测试源文件命中）→ `ctest -R "^<name>$"`；`scripts/*.py` → `python scripts/*.py`。映射成功即视为已举证；映射不到记 **SKIP** 并逐条打印 `SKIP 1（R3 无复跑命令：<file>:<line>，…）`，不许静默。
 - 复跑：`python scripts/check_red_lifecycle.py`；反证：`python -m pytest tests/test_red_lifecycle.py -q`。
 
 ---
