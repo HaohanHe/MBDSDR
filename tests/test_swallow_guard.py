@@ -9,10 +9,12 @@
 - EMPTY（`pass` / 只有注释）→ ERROR
 - 只 `return None` / `continue` / `break` / 无记录降级 → WARN
 - 有日志/状态记录，或重新抛出 → 不算静默
-- 白名单条目必须同时回答三问：reason / user_visible / test，缺一即不合格
+- 白名单条目必须同时回答三问：reason / user_visible / test，并声明 trigger
+  （边界怎么失效）与 review_by；门禁会源码级校验 trigger 在 test 里真的被执行。
 
-当前仓库存量缺陷数是红的事实来源：`test_repo_has_no_unwhitelisted_silent_catch_all`
-会失败并打印 `文件:行号`。这是任务要求的「修前必红」反证，不是测试环境问题。
+当前仓库的存量缺陷数是红的事实来源：`test_repo_ratchet_within_baseline`
+会失败并逐条打印 `文件:行号 [级别] 符号`，这是任务要求的「修前必红」反证，
+不是测试环境问题。
 """
 from __future__ import annotations
 
@@ -155,7 +157,7 @@ def test_whitelist_requires_three_answers(tmp_path):
 
 
 def test_whitelist_complete_entry_excuses_location(tmp_path):
-    test_file = REPO_ROOT / "tests" / "test_swallow_guard.py"
+    test_file = REPO_ROOT / "tests" / "test_audio_selection_e2e.py"
     _write(tmp_path, "def f():\n"
                      "    try:\n"
                      "        import sounddevice\n"
@@ -166,6 +168,7 @@ def test_whitelist_complete_entry_excuses_location(tmp_path):
         "reason": "外部边界：可选依赖缺失",
         "user_visible": "该功能不可用并显示提示",
         "test": str(test_file.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "trigger": {"import_fail": "sounddevice"},
         "review_by": "2099-01",
     }]})
     assert report.whitelisted == 1
@@ -174,7 +177,7 @@ def test_whitelist_complete_entry_excuses_location(tmp_path):
 
 def test_whitelist_requires_review_by(tmp_path):
     """白名单必须有到期复核标记，防止永久豁免。"""
-    test_file = REPO_ROOT / "tests" / "test_swallow_guard.py"
+    test_file = REPO_ROOT / "tests" / "test_audio_selection_e2e.py"
     _write(tmp_path, "def f():\n"
                      "    try:\n"
                      "        import sounddevice\n"
@@ -185,6 +188,7 @@ def test_whitelist_requires_review_by(tmp_path):
         "reason": "外部边界：可选依赖缺失",
         "user_visible": "该功能不可用并显示提示",
         "test": str(test_file.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "trigger": {"import_fail": "sounddevice"},
     }]})
     assert report.whitelisted == 0
     assert report.whitelist_invalid == 1
@@ -192,7 +196,7 @@ def test_whitelist_requires_review_by(tmp_path):
 
 
 def test_whitelist_overdue_is_invalid(tmp_path):
-    test_file = REPO_ROOT / "tests" / "test_swallow_guard.py"
+    test_file = REPO_ROOT / "tests" / "test_audio_selection_e2e.py"
     _write(tmp_path, "def f():\n"
                      "    try:\n"
                      "        import sounddevice\n"
@@ -203,11 +207,55 @@ def test_whitelist_overdue_is_invalid(tmp_path):
         "reason": "外部边界：可选依赖缺失",
         "user_visible": "该功能不可用并显示提示",
         "test": str(test_file.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "trigger": {"import_fail": "sounddevice"},
         "review_by": "2000-01",
     }]})
     assert report.whitelisted == 0
     assert report.whitelist_overdue == 1
     assert report.defect_count == 1
+
+
+def _trigger_entry(**overrides):
+    entry = {
+        "reason": "外部边界：可选依赖缺失",
+        "user_visible": "该功能不可用并显示提示",
+        "test": "tests/test_audio_selection_e2e.py",
+        "trigger": {"import_fail": "sounddevice"},
+        "review_by": "2099-01",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_whitelist_trigger_must_be_exercised():
+    """反证：trigger 指向测试里不存在的屏蔽方式 → 必须判不合格。
+
+    这是防「改个 test 路径就过」的核心：只校验路径存在不够，必须能在
+    测试源码里找到同构的屏蔽语句。
+    """
+    issue = scanner._entry_issue(
+        _trigger_entry(trigger={"import_fail": "no_such_module_xyz"}), REPO_ROOT)
+    assert "trigger" in issue
+    assert "no_such_module_xyz" in issue
+
+
+def test_whitelist_trigger_missing_or_unknown_is_invalid():
+    assert "trigger" in scanner._entry_issue(
+        {k: v for k, v in _trigger_entry().items() if k != "trigger"}, REPO_ROOT)
+    assert "trigger" in scanner._entry_issue(
+        _trigger_entry(trigger={"unplug_cable": "usb"}), REPO_ROOT)
+    assert "trigger" in scanner._entry_issue(
+        _trigger_entry(trigger={"import_fail": "sounddevice", "env_absent": "X"}), REPO_ROOT)
+
+
+def test_real_whitelist_entry_passes_full_gate():
+    """仓库里唯一一条白名单必须通过完整门禁（三问 + trigger + review_by）。"""
+    import json
+    entries = json.loads(
+        (REPO_ROOT / "scripts" / "swallow_whitelist.json").read_text(encoding="utf-8")
+    )["entries"]
+    assert len(entries) == 1, "新增白名单必须逐条人工复核，这里只允许 1 条"
+    assert scanner._entry_issue(entries[0], REPO_ROOT) == ""
 
 
 # ── 白名单降级路径的真实覆盖 ─────────────────────────────────────────
@@ -270,10 +318,33 @@ def baseline():
 
 
 def test_repo_ratchet_within_baseline(repo_report, baseline):
-    """棘轮：任何文件/总量不得超过基线；只许降不许升。"""
+    """棘轮：任何文件/总量不得超过基线；只许降不许升。
+
+    失败时必须让作者直接定位：文件 + 行号 + 符号 + 级别 + 修法提示。
+    """
     assert baseline is not None, "缺少 docs/code-guards-baseline.json，门禁失效"
     violations = scanner.check_ratchet(repo_report, baseline)
-    assert not violations, "棘轮越线（新增静默吞噬）：\n" + "\n".join(violations[:30])
+    if violations:
+        by_file = {}
+        for f in repo_report.defects:
+            by_file.setdefault(f.path, []).append(f)
+        details = []
+        for v in violations:
+            details.append(f"  {v}")
+            path = v.split(": ", 1)[0] if ": " in v else ""
+            rows = by_file.get(path, [])
+            for f in rows[:12]:
+                details.append(
+                    f"      {f.path}:{f.line} [{f.severity}] {f.symbol}"
+                    f" body={f.body} | {f.snippet}")
+            if len(rows) > 12:
+                details.append(f"      ……该文件共 {len(rows)} 处，其余用 "
+                               f"`python scripts/lint_swallow_all.py --list` 查看")
+        details.append(
+            "  修法：每处要么补日志/状态字段（变 RECORDED 即不计），要么证明是"
+            "外部边界后按白名单登记 reason/user_visible/test/trigger/review_by；"
+            "不允许修改 docs/code-guards-baseline.json 来抬基线。")
+        pytest.fail("棘轮越线（新增静默吞噬）：\n" + "\n".join(details))
 
 
 def test_repo_forbidden_constructs(repo_report):

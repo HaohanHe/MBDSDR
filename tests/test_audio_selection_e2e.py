@@ -192,3 +192,34 @@ def test_sounddevice_absent_degrades(monkeypatch):
     assert player.write(np.zeros(100, dtype=np.float32)) == 0
     assert player.is_playing is False
     player.stop()  # 不崩即可
+
+
+def test_sounddevice_import_fail_degrades(monkeypatch):
+    """白名单 trigger=import_fail:sounddevice 的真实触发点。
+
+    `import sounddevice` 抛 ImportError 时整条音频链必须降级；
+    白名单门禁会源码级校验本函数内同时出现 `sounddevice` 与
+    `raise ImportError`，只改 test 路径过不了门禁。
+    """
+    import builtins
+    import importlib
+
+    real_import = builtins.__import__
+
+    def deny_sounddevice(name, *args, **kwargs):
+        if name == "sounddevice" or name.startswith("sounddevice."):
+            raise ImportError("No module named 'sounddevice'（测试注入）")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", deny_sounddevice)
+    try:
+        reloaded = importlib.reload(audio_out_mod)
+        assert reloaded._SD_AVAILABLE is False
+        player = reloaded.AudioPlayer(sample_rate=48000)
+        assert player.available is False
+        assert player.start() is False
+        assert player.write(np.zeros(100, dtype=np.float32)) == 0
+        player.stop()
+    finally:
+        monkeypatch.undo()
+        importlib.reload(audio_out_mod)

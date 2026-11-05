@@ -321,6 +321,89 @@ def _load_whitelist(path: Path) -> List[Dict[str, Any]]:
     return [e for e in entries if isinstance(e, dict)]
 
 
+#: 白名单 trigger 支持的外部边界失效方式 → 测试里必须能找到同构屏蔽。
+TRIGGER_KINDS = {
+    "import_fail": "第三方模块导入失败",
+    "env_absent": "必需的环境/命令缺失",
+}
+
+
+def _load_test_ast(path: Path):
+    """读取测试源码并解析；失败返回 (None, "")，由调用方判不合格。"""
+    try:
+        src = _read_source(path)
+        return ast.parse(src, filename=str(path)), src
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return None, ""
+
+
+def _iter_test_functions(tree: ast.AST):
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node
+
+
+def _test_raises_import_error_for(path: Path, module: str) -> bool:
+    """测试函数里必须同时出现模块名与 `raise ImportError`。
+
+    只声明 test 路径不够——改个路径就能过；要求真实的导入失败屏蔽语句。
+    """
+    tree, src = _load_test_ast(path)
+    if tree is None:
+        return False
+    for fn in _iter_test_functions(tree):
+        seg = ast.get_source_segment(src, fn) or ""
+        if module not in seg:
+            continue
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Raise) or node.exc is None:
+                continue
+            exc = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+            if isinstance(exc, ast.Name) and exc.id == "ImportError":
+                return True
+    return False
+
+
+def _test_simulates_env_absent(path: Path, target: str) -> bool:
+    """测试函数里必须出现目标名，并 monkeypatch 环境/命令查找。"""
+    tree, src = _load_test_ast(path)
+    if tree is None:
+        return False
+    markers = ("monkeypatch.setenv", "monkeypatch.delenv", "patch.dict",
+               "environ.pop", "environ.__delitem__", "shutil.which")
+    for fn in _iter_test_functions(tree):
+        seg = ast.get_source_segment(src, fn) or ""
+        if target in seg and any(m in seg for m in markers):
+            return True
+    return False
+
+
+def _trigger_issue(entry: Dict[str, Any], test_path: Path) -> str:
+    """校验 trigger 声明，并要求对应测试真的执行了这种屏蔽。
+
+    形如 ``{"import_fail": "sounddevice"}`` 或 ``{"env_absent": "AUDIO_DEVICE"}``。
+    """
+    trigger = entry.get("trigger")
+    declared = entry.get("test") or test_path.name
+    if not isinstance(trigger, dict) or len(trigger) != 1:
+        return ('缺少或非法 trigger（应为单键对象，如 {"import_fail": "sounddevice"}）')
+    kind, target = next(iter(trigger.items()))
+    if kind not in TRIGGER_KINDS:
+        return f"未知 trigger 类型 {kind!r}；支持 {sorted(TRIGGER_KINDS)}"
+    target = str(target).strip()
+    if not target:
+        return f"trigger[{kind}] 的目标为空"
+    if kind == "import_fail":
+        if not _test_raises_import_error_for(test_path, target):
+            return (f"trigger 未被测试真实触发：{declared} 里没有"
+                    f"「引用 {target} 且 raise ImportError」的测试函数")
+        return ""
+    if not _test_simulates_env_absent(test_path, target):
+        return (f"trigger 未被测试真实触发：{declared} 里没有"
+                f"「操作 {target} 且 monkeypatch 环境」的测试函数")
+    return ""
+
+
 def _entry_issue(entry: Dict[str, Any], root: Path) -> str:
     for field_name in ("reason", "user_visible", "test"):
         value = (entry.get(field_name) or "").strip() if isinstance(entry.get(field_name), str) else ""
@@ -328,7 +411,8 @@ def _entry_issue(entry: Dict[str, Any], root: Path) -> str:
             return f"缺少 {field_name}"
     test = entry.get("test", "")
     candidates = [root / test, ROOT / test, Path(test)]
-    if not any(p.exists() for p in candidates):
+    test_path = next((p for p in candidates if p.exists()), None)
+    if test_path is None:
         return f"测试文件不存在: {test}"
     review = entry.get("review_by")
     if not isinstance(review, str) or not re.fullmatch(r"\d{4}-\d{2}", review.strip()):
@@ -340,7 +424,7 @@ def _entry_issue(entry: Dict[str, Any], root: Path) -> str:
             return f"白名单已过期，需复核: review_by={review}"
     except ValueError:
         return "缺少或非法 review_by（应为 YYYY-MM）"
-    return ""
+    return _trigger_issue(entry, test_path)
 
 
 def _entry_matches(entry: Dict[str, Any], finding: Finding) -> bool:

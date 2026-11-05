@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "policy": "每条必须回答三问：reason=为什么允许降级（外部边界）、user_visible=降级后用户看到什么、test=覆盖该降级路径的测试文件。缺一项即不合格，脚本会打印文件:行号。",
+  "version": 2,
+  "policy": "白名单不是「写个理由就过」，必须同时满足：reason=为什么允许降级（外部边界）、user_visible=降级后用户看到什么、test=覆盖该降级路径的测试文件、trigger=边界怎么失效、review_by=到期复核。门禁会源码级校验 trigger 在 test 里真的被触发（模块名 + raise ImportError，或环境删除 + monkeypatch），缺一项即不合格。",
   "entries": [
     {
       "path": "mbdsdr_ai/audio_out.py",
@@ -9,6 +9,7 @@
       "reason": "外部边界：sounddevice/PortAudio 是可选依赖，导入失败（库缺失、平台无 PortAudio、后端初始化失败）必须整体降级，不能拖垮整个应用。",
       "user_visible": "AudioPlayer.available=False；start() 返回 False 并保持静音；write() 返回 0；UI 音频入口显示不可用，而不是崩溃或假装播放。",
       "test": "tests/test_audio_selection_e2e.py",
+      "trigger": {"import_fail": "sounddevice"},
       "review_by": "2027-01"
     }
   ]

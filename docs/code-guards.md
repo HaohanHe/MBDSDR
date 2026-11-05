@@ -20,18 +20,23 @@
 - **禁令**：`except Exception: raise` 这种单条裸 `raise`（`FAKE_RERAISE`）判 ERROR；`contextlib.suppress(Exception)` / `suppress(Exception)`（`FORBIDDEN_SUPPRESS`）判 ERROR。两者都不可进白名单，防止绕过扫描器。
 - 裸 `except:` 当前为 **0** 处。
 
-每处白名单必须同时回答三问 + 复核期限，缺一即不合格：
+每处白名单必须同时回答三问 + 声明触发方式 + 复核期限，缺一即不合格：
 
 1. `reason`：为什么允许降级（必须是外部边界：第三方库/网络/硬件/平台）；
 2. `user_visible`：降级后用户看到什么（不能是「什么都没有」）；
 3. `test`：哪条测试覆盖这条降级路径（文件必须存在）；
-4. `review_by`：`YYYY-MM`，到期即判不合格，必须复核后再续期。
+4. `trigger`：边界**怎么失效**，单键对象，如 `{"import_fail": "sounddevice"}` /
+   `{"env_absent": "AUDIO_DEVICE"}`。门禁做**源码级**校验：`test` 指定的测试函数里
+   必须真的出现「模块名 + `raise ImportError`」（或「目标名 + 环境 monkeypatch」）。
+   **只改 `test` 路径、写个理由过不了门禁**；反证见
+   `test_whitelist_trigger_must_be_exercised`。
+5. `review_by`：`YYYY-MM`，到期即判不合格，必须复核后再续期。
 
 ## 白名单（1 处）
 
-| 位置 | ① 为什么允许降级 | ② 用户看到什么 | ③ 覆盖测试 | ④ 复核 |
-| --- | --- | --- | --- | --- |
-| `mbdsdr_ai/audio_out.py:37` | 外部边界：`sounddevice`/PortAudio 是可选依赖，导入失败（库缺失、平台无 PortAudio、后端初始化失败）必须整体降级，不能拖垮整个应用。 | `_SD_AVAILABLE=False`，`AudioPlayer.available=False`；`start()` 返回 False 并保持静音；`write()` 返回 0；UI 音频入口显示不可用，而不是崩溃或假装播放。 | `tests/test_swallow_guard.py::test_audio_player_degrades_without_sounddevice`（拦截 `import sounddevice`，断言 `available/start/write/stop` 的降级行为）。 | 2027-01 |
+| 位置 | ① 为什么允许降级 | ② 用户看到什么 | ③ 覆盖测试 | ④ trigger | ⑤ 复核 |
+| --- | --- | --- | --- | --- | --- |
+| `mbdsdr_ai/audio_out.py:37` | 外部边界：`sounddevice`/PortAudio 是可选依赖，导入失败（库缺失、平台无 PortAudio、后端初始化失败）必须整体降级，不能拖垮整个应用。 | `_SD_AVAILABLE=False`，`AudioPlayer.available=False`；`start()` 返回 False 并保持静音；`write()` 返回 0；UI 音频入口显示不可用，而不是崩溃或假装播放。 | `tests/test_audio_selection_e2e.py::test_sounddevice_import_fail_degrades`（`builtins.__import__` 对 `sounddevice` 抛 `ImportError` 后 reload，断言 `available/start/write/stop` 降级）；另有 `test_sounddevice_absent_degrades` 覆盖 `sd=None` 形态。 | `{"import_fail": "sounddevice"}` —— 门禁已确认测试里同时出现模块名与 `raise ImportError`。 | 2027-01 |
 
 其余 1398 处**没有一处能同时回答三问**：绝大多数连日志都没有，更谈不上覆盖降级路径的测试。因此不把「可选依赖 = 自动豁免」当作批量白名单——豁免必须逐条给出三问，否则就是静默丢功能。
 
@@ -65,10 +70,11 @@
 
 ## 反证（棘轮，不再靠全量缺陷判红）
 
-`tests/test_swallow_guard.py` 分四组：
+`tests/test_swallow_guard.py` 分五组：
 
 - 扫描器行为组：DSO 事故同构（`float(None)` 被 `except Exception: pass` → `ERROR/EMPTY`）；静默 return → WARN；窄异常不误报；有记录/真重抛不误报；**假重抛**判 ERROR；**`suppress(Exception)`** 判 ERROR 且不可白名单；白名单三问缺项/缺 `review_by`/过期均判不合格；三问齐全才豁免。
-- 降级路径组：`audio_out` 无 `sounddevice` 时整链降级（覆盖唯一白名单）。
+- 白名单 trigger 组：`trigger` 缺失 / 未知类型 / 指向测试里不存在的屏蔽方式均判不合格（`test_whitelist_trigger_must_be_exercised` 是反证）；仓库里现有条目必须通过完整门禁。
+- 降级路径组：`audio_out` 在 `import sounddevice` 抛 `ImportError` 时整链降级（`test_sounddevice_import_fail_degrades`），以及 `sd=None` 形态（`test_sounddevice_absent_degrades`）。
 - 棘轮组：新文件出现静默 catch-all → 越线；存量下降 → 不越线；单文件 ERROR 增长 → 越线；仓库当前扫描 `check_ratchet` 必须为空。
 - 现状组：白名单有效且未失效；禁令构造为 0；扫描确定性用固定夹具验证（仓库在途文件会被其他线并发改写，不能当夹具）。
 
