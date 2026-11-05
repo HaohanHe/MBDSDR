@@ -19,7 +19,8 @@
     R3 流稳定性          持续读 IQ 的请求/实收样本数、短读次数、吞吐比
                          （pyrtlsdr 无 overflow 计数，不伪造丢样本数）
     R4 解调与音频输出    音频帧数、RMS、声道、19 kHz 导频、WAV 字节（不出声）
-    R5 云台回读          rotctld/板载回读延迟（ms）、方位/仰角、读回一致性
+    R5 云台回读          rotctld/板载回读延迟（ms）、方位/仰角、读回一致性；
+                         无硬件时附 SIMULATED 模拟替代路径（不计 PASS）
     R6 GNSS 定位         首次定位耗时（s）、经纬度、星数、HDOP
     R7 星象仪渲染        太阳误差、月球 vs JPL DE421（含 1h 错位反证）、
                          渲染耗时（ms）、PNG 字节、非空白像素
@@ -386,6 +387,17 @@ def ring4() -> dict:
                          True, [wav], "音频只落 WAV，不经过任何声卡。")
 
 
+def _ring5_simulated() -> dict:
+    """无真云台时的模拟替代结论：status 恒 SIMULATED，不计 PASS、不影响退出码。
+
+    模拟后端只证「指令链 + 量化 + 延迟」，不含机械齿隙/风力/加减速曲线，
+    所以它永远不能把 R5 判成 PASS；放进汇总只是让「无真机」时仍有一份可复跑
+    证据。readback 样本一旦非 0，build_result 自己会抛错拒绝出结论。
+    """
+    from ring5_gimbal_sim import build_result  # 同目录；只在无硬件路径导入
+    return build_result()
+
+
 # ---------------------------------------------------------------- R5
 def ring5() -> dict:
     """云台回读：只读姿态，不下发任何运动指令（避免未经确认转动硬件）。"""
@@ -399,7 +411,7 @@ def ring5() -> dict:
     except OSError:
         reachable = False
     if not reachable:
-        return skip_result(
+        res = skip_result(
             "R5", "云台回读", "NO_HW",
             metrics={"rotctld_host": host, "rotctld_port": port,
                      "probe_ms": round((time.perf_counter() - t0) * 1000.0, 1),
@@ -407,6 +419,8 @@ def ring5() -> dict:
             checks=[common.check("rotctld_reachable", False,
                                  f"{host}:{port} 无应答", skipped=True)],
             notes="本机不可验：未检测到 rotctld/板载云台；未下发任何运动指令。")
+        res["simulated_alternative"] = _ring5_simulated()
+        return res
     from mbdsdr_ai.gimbal import RotctldClient
     client = RotctldClient(host, port, timeout=1.0)
     t1 = time.perf_counter()
@@ -595,14 +609,20 @@ def main() -> int:
     passed = sum(1 for r in results if r["status"] == common.PASS)
     failed = sum(1 for r in results if r["status"] == common.FAIL)
     skipped = sum(1 for r in results if r["status"] == SKIP)
+    simulated = sum(
+        1 for r in results
+        if (r.get("simulated_alternative") or {}).get("status") == "SIMULATED")
     summary = {
         "when": datetime.now().isoformat(timespec="seconds"),
         "root": root,
         "mode": "hw" if args.hw else "all",
         "red_line": common.RED_LINE,
-        "counts": {"pass": passed, "fail": failed, "skip": skipped},
+        "counts": {"pass": passed, "fail": failed, "skip": skipped,
+                   "simulated": simulated},
         "rings": [{"ring": r["ring"], "name": r["name"], "status": r["status"],
                    "skip_reason": _skip_code(r),
+                   "simulated_alternative": (r.get("simulated_alternative")
+                                             or {}).get("status", "none"),
                    "elapsed_ms": r.get("elapsed_ms")}
                   for r in results],
     }
@@ -610,11 +630,20 @@ def main() -> int:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
     print("\n" + "=" * 72)
-    print(f"汇总：PASS {passed} / FAIL {failed} / SKIP {skipped}")
+    print(f"汇总：PASS {passed} / FAIL {failed} / SKIP {skipped} / SIMULATED {simulated}"
+          "（SIMULATED 不计 PASS、不影响退出码）")
     print("SKIP 明细：")
     for r in results:
         if r["status"] == SKIP:
             print(f"  {r['ring']} {r['name']} [{_skip_code(r)}]: {r.get('notes', '')}")
+    for r in results:
+        alt = r.get("simulated_alternative")
+        if (alt or {}).get("status") == "SIMULATED":
+            m = alt.get("metrics", {})
+            rb = ((m.get("pose_error_by_source") or {}).get("readback") or {})
+            print(f"  {r['ring']} 模拟替代路径 [SIMULATED，不计 PASS] "
+                  f"mechanical_accuracy_claimable={m.get('mechanical_accuracy_claimable')} "
+                  f"readback_samples={rb.get('samples', 0)}")
     print(common.RED_LINE)
     print("=" * 72)
     return 1 if failed else 0
