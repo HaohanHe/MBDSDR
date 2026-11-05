@@ -925,3 +925,111 @@ $msg | git commit --only -F - -- <自己的路径...>
 - 清理 `%TEMP%` 时只按前缀 + 时间筛选（`mbdsdr_*`、mtime 早于 2 小时），
   不动目录、不动非本前缀文件；删除被占用而失败的不强删，列出文件名与占用情况。
 
+### 6.10 历史改写事件（2026-11-05，主分支两次被 reset）
+
+**铁律（立即生效，不是建议）**
+
+1. **禁止用 `git reset` 移动 `main`**：含 `--soft` / `--mixed` / `--hard`，也含无参数
+   `git reset` 与 `reset HEAD` 这类 no-op（no-op 说明有人习惯性在跑，必须一起戒）。
+   撤销已提交内容只有两个合法动作：
+   - 已推送 / 已被别人依赖：`git revert <hash>`（保留历史、留痕）；
+   - 未推送且内容本身要改：补一笔新提交修正。**不许改写历史。**
+2. 确需清理未推送的错误提交（内容本身不该存在），也**必须先报主会话**，由主会话
+   确认没有其他会话正在写相关文件后才可动手；任何线不得单方面 reset。
+3. **误操作后立刻报主会话**（时间、reset 目标、被移出 hash、当前 HEAD），
+   **不许自己悄悄重提把痕迹盖掉**。内容可以补，事件必须报——悄悄重提会让台账与
+   归属失真，别的线也无法判断自己的工作是否被移出。
+4. 恢复统一入口：先 `git branch rescue/<short> <hash>`（只加引用，不动 main 与
+   工作区，防 gc），再决定 cherry-pick / 重提；`reset --hard` 到旧提交重建**一律禁止**
+   （会丢后续提交）。
+
+**事件 1（上午，`becc596`）实测时间线**
+
+| 时间 | 事件 | HEAD 变化 |
+|---|---|---|
+| 16:35:18 | `becc596d` 提交（fix(tuning)，6 文件） | → becc596d |
+| 16:35:59 | `reset: moving to HEAD~1` | becc596d → 250a4ec7 |
+| 16:37:59 | `0e738489` 重提同标题 | → 0e738489 |
+
+- 对象：`git cat-file -t becc596` / `0e738489` = commit，均在库（becc596 现仅 reflog 引用）。
+- 内容：重提的 5 个文件 `git diff --numstat becc596 0e738489 -- <5 paths>` 为空
+  （**字节等价**）；`desktop/main_window.py` 不在重提内，后续多线持续改该文件，
+  无法仅凭 blob 证明已吸收，需该线自证。
+- 归属：reset 时点（16:35:59）台账在持有的是 卫星过境线（main_window.py 16:30:39）、
+  操作逻辑线（status_panel.py 16:31:23）；被 reset 的 4 个文件由审阅线 16:38:17 才
+  claim，**晚于 reset，不能作为操作者证据**。结论：**无法定人**。
+
+**事件 2（晚间，`f3ef1cbb` + `948ff803`）实测时间线**
+
+| 时间 | 事件 | HEAD 变化 |
+|---|---|---|
+| 22:29:00 | `0ba9e75f` 提交（release 自检） | → 0ba9e75f |
+| 22:31:11 | `reset: moving to HEAD`（no-op） | 0ba9e75f → 0ba9e75f |
+| 22:31:51 | `948ff803` 提交（U-02 RSSI，10 文件） | → 948ff803 |
+| 22:31:52–53 | `STALE_INDEX_SUSPECT` ×4（948ff803） | — |
+| 22:33:30 | `f3ef1cbb` 提交（参数台账附录 D，1 文件） | → f3ef1cbb |
+| 22:33:31 | `reset: moving to HEAD~1`（同秒另有 `moving to HEAD` no-op） | f3ef1cbb → 948ff803 |
+| 22:34:00 | `reset: moving to 0ba9e75f`（同秒另有 `moving to HEAD` no-op） | 948ff803 → 0ba9e75f |
+| 22:34:49 | `dc0d1a65` 重提附录 D（父=0ba9e75f） | → dc0d1a65 |
+| 22:39:29 | `d42a5cc3` 提交（U-02「完整版」，10 文件 +345/−84） | → d42a5cc3 |
+| 22:39:59 | `reset: moving to dc0d1a65` ×2 | d42a5cc3 → dc0d1a65 |
+| 22:42:02 | `84b83758` 重提 U-02（`STALE_INDEX_SUSPECT` ×4） | → 84b83758 |
+| 22:45:54 | `ebc897fa` U-03（吃进 U-02 剩余 sdr_tools / test） | → ebc897fa |
+| 22:49:09 | `817b2a77` APRS 接线（**当前 HEAD**，取证时点） | → 817b2a77 |
+
+- 被移出主分支且未再入库：`f3ef1cbb`、`948ff803`（`git log HEAD..f3ef1cbb` 恰这两笔）；
+  `d42a5cc3` 属窗口内「提交 30 秒后即被 reset」，不在该 diff 内，同样已不在 main。
+- 对象：三笔 `git cat-file -t` 均为 commit，**全部存在**；但 `git fsck --unreachable
+  --no-reflogs` 把它们列为 unreachable，即**只靠 reflog 支撑**——gc 前必须先建 rescue 引用。
+- 内容：**本轮无内容彻底丢失**，逐笔走向见 §6.10.1。
+- 归属推断（git author 全为归一身份，只能靠 claim 台账 + 时间窗 + 提交内容）：
+  - 22:33:31 / 22:34:00 两次 reset：**审阅线**（`docs/parameter-unification.md` claim
+    22:30:20–22:35:16；f3ef1cbb 22:33:30 与 dc0d1a65 22:34:49 都落在其窗内；
+    reset 到 0ba9e75f 后只有它重提该文档）。**置信中高**。
+    注：主会话口径称这笔属「频谱/内核线」，与台账 owner「审阅线」不一致，需主会话裁决。
+  - 22:39:59 reset 到 dc0d1a65：**文案审计线**（10 个 U-02 文件 claim 22:15:49–22:46:32，
+    是该时刻唯一活跃 owner；d42a5cc3 被移出后 2.5 分钟由其重提 84b83758）。**置信高**。
+    动机可解释：d42a5cc3 的 `desktop/main_window.py` 扫进了 ux-basis 未提交的窄屏改动
+    （99 行 vs 948ff803 的 43 行），它 reset 后重提时只带回自己的 U-02 内容
+    （旧索引，故 `STALE_INDEX_SUSPECT` ×4）。内容上是对的，**行为上仍违规**：
+    同窗口里 `948ff803` 已被 22:34:00 那次移出主分支。
+- bypass 日志：22:25–22:45 只有 948ff803 / 84b83758 的 `STALE_INDEX_SUSPECT`，
+  **没有 `--no-verify` 记录**——reset 不经钩子，bypass 日志天然查不到它，别拿「无 bypass」当清白证据。
+
+**今日 reset 全表（`git reflog --all` 实测）**
+
+| 时间 | 目标 | 性质 |
+|---|---|---|
+| 22:39:59 | dc0d1a65 | 破坏性（移出 d42a5cc3） |
+| 22:34:00 | 0ba9e75f | 破坏性（移出 948ff803） |
+| 22:33:31 | HEAD~1 | 破坏性（移出 f3ef1cbb） |
+| 22:31:11 | HEAD | no-op |
+| 16:35:59 | HEAD~1 | 破坏性（移出 becc596d） |
+| 12:54:09 | HEAD~1 | 破坏性 |
+| 12:24:39 | HEAD~1 | 破坏性 |
+| 12:05:13 | HEAD~1 | 破坏性 |
+
+即 **7 次破坏性 reset + 1 次 no-op**；22:33:31 / 22:34:00 / 22:39:59 同秒的
+`moving to HEAD` 与重复目标均为 no-op，不计。（12:54:09 / 12:24:39 / 12:05:13
+三次的逐笔去向本轮未取证，需回溯时另开一笔。）
+
+**处置要求**
+
+- 任何线发现 HEAD 与自己的提交不符：先 `git reflog` 查 `reset` / `rebase` / `amend`，
+  再报主会话；不要先猜、更不要自己重提后再报。
+- 主会话收到报告：立刻 `git branch rescue/<short> <hash>` 保命（只加 ref），
+  再 `git status` 确认无人在写被移出文件，最后才决定 cherry-pick / 重提。
+- 台账（`check_commit_scope` / claim history）只作**归因参考**，不是证据本身；
+  结论必须标置信度，不得伪造逐行作者。
+
+#### 6.10.1 晚间事件逐笔去向（取证时点 HEAD=`817b2a77`，22:53）
+
+| 被移出提交 | 作者时间 | 对象 | 改动现在在哪 |
+|---|---|---|---|
+| `f3ef1cbb` | 22:33:30 | 在（仅 reflog） | **已重提**为 `dc0d1a65`；`docs/parameter-unification.md` blob `f182778a…` 在 f3ef1cbb / dc0d1a65 / HEAD 三处完全相同 |
+| `948ff803` | 22:31:51 | 在（仅 reflog） | **已入库**：10 文件中 7 个 blob 与 HEAD 完全相同（含 `desktop/main_window.py` = `5c0ae888`）；`sdr_backend.py` 1/1 是 U-03 的「MHz→MS/s」更名；`sdr_tools.py` / `test_copy_units_audit.py` 由 `ebc897fa` 吃进（HEAD 为更新版本，非丢失） |
+| `d42a5cc3` | 22:39:29 | 在（仅 reflog） | 9/10 文件 blob 与 HEAD 相同；`desktop/main_window.py` 多出的 44 行（QToolButton 窄屏图标化、UTC 进 tooltip 等）**不是 U-02 内容**，是 ux-basis 的在途改动被该提交扫入；这部分仍在工作区未提交，现由 ux-basis 持有（claim 22:46:20 起 ACTIVE） |
+
+结论：**U-02 一行没丢**；`desktop/main_window.py` 当前工作区 +49/−14 是 ux-basis 的
+窄屏工作（不是文案审计线的 U-02 欠账），何时提交归 ux-basis 决定。
+
