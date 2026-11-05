@@ -238,7 +238,10 @@ ACL deny-write 目录影响。实测日志：
          请在「设置 → 存储与日志」改到可写目录。
 ```
 
-（此条来自冻结版实测：设置里残留 `Z:\nope`，探测在后台拿到错误并回报。）
+（此条曾由冻结版实测：本机配置残留测试写的 `Z:\nope`，探测在后台拿到错误并回报。
+该残留已从 `%APPDATA%\mbdsdr\desktop_settings.json` 清回默认 `record_dir=""`，
+重启冻结版后新增日志里不再出现 `[record]` 行；录音目录指向拔掉的盘/非法盘符时
+仍按同一文案每次启动报一次，这是**如实提示**，不做静默回落。）
 
 ### 5.2 运行期 DLL 存在性检查
 
@@ -261,8 +264,13 @@ ACL deny-write 目录影响。实测日志：
 SoapySDR.dll 缺失只告警不弹窗：`[dll] 未发现 SoapySDR.dll：SoapySDR 设备不可用；
 RTL-SDR 直连不受影响`。
 
-**限制**：该检查在 Python 桌面端启动时执行；直接双击 C++ 线 `mbdsdr.exe` 仍会
-先被 Windows 加载器拦成 `0xC0000135`（见 §7.5）。
+**限制**（两条，均为诚实口径）：
+1. 该检查在 Python 桌面端启动时执行；直接双击 C++ 线 `mbdsdr.exe` 仍会
+   先被 Windows 加载器拦成 `0xC0000135`（见 §7.5）。
+2. 检查按「程序根 / `_internal` / `bin` / PATH」全机存在性判定：本机另装了
+   rtl-sdr 且 `C:\rtl-sdr\bin` 在 PATH 时，删包内 `librtlsdr.dll` 也不会报缺——
+   判据是「能否加载」，不是「包内是否自带」。要证明包内缺失必须用干净 PATH
+   （实测方法即如此）。
 
 此外修掉一条越线：打包版无控制台时 `sys.stdout/stderr` 为 `None`，旧实现把
 stderr 兜底日志写到 `~/.config/MBDSDR/mbdsdr_desktop.log`（C 盘用户目录），
@@ -340,10 +348,12 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
 
 ## 7. 待办与已知限制
 
-1. **测试等待中**：`tests/test_startup_log_policy.py` 7/7 已通过（不依赖 Qt 锁）；
-   `tests/test_settings_schema.py` 仍被 PID 7956 持有的 Qt 测试互斥锁挡住
-   （`MBDSDR_TEST_LOCK_TIMEOUT=20` → `no tests ran`，exit 2）。按裁定不自重试、
-   不用 `MBDSDR_TEST_LOCK=0`，等「锁已释放」通知后补跑。
+1. **测试已补跑**：`tests/test_startup_log_policy.py` 7/7；锁释放后按裁定只跑
+   `tests/test_settings_schema.py -k "record_dir or corrupt or write_failure"`
+   子集，6/6 通过（全量 51/51 由频谱线另行实测）。注意：单独 `-k` 选到
+   `test_record_dir_missing_target_reports_actionable_error` 时会因没有
+   QApplication 而 Qt abort（`0xC0000409`）——已给该用例补 `qapp` fixture，
+   子集命令现可独立复现全绿，不依赖全量顺序。
 2. 4 个扩展项（cobyqa/pyprima、deprecation/_ccallback/_uarray、numpy._core.multiarray、
    numpy.fft/linalg）只在源码与 TOC 层核验，未纳入冻结版启动自检；要覆盖需把它们
    加进 `_RISKY_IMPORTS` 再重建。
@@ -361,6 +371,10 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
    要严格不碰 C 盘，构建时设 `PYINSTALLER_CONFIG_DIR=<D 盘目录>`；本次 `--distpath`
    / `--workpath` 已全部在 D 盘。
 7. `scripts/ui_interaction_audit.py` 棘轮越线（WARN 7 > 基线 3）属 UX 线，未处置。
+8. **测试污染真实用户配置**：`tests/test_record_dir_consumption.py` 的 `window`
+   fixture 直接 `mw.MainWindow()`，用的是默认 `%APPDATA%\mbdsdr\desktop_settings.json`；
+   用例 `record_dir` 写入 tmp 路径后落盘，把真实配置改成 `…\pytest-…\rec`。
+   本机残留已清理，但该 fixture 未隔离配置路径（属测试隔离线），下次整跑仍会再脏。
 
 ## 8. 本轮改动的文件
 
@@ -371,4 +385,6 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
   DLL 存在性检查（无 Qt 依赖，可单测）。
 - `desktop/settings.py`：录音默认目录回退（受保护安装根/只读）+ 写盘错误可见。
 - `tests/test_startup_log_policy.py`（新）：日志落点/内存缓冲/用户目录禁令断言。
+- `tests/test_settings_schema.py`：给录音目录错误文案用例补 `qapp` fixture，
+  使 `-k record_dir` 子集可独立运行（原顺序依赖缺 QApplication 会 abort）。
 - `docs/packaging.md`：本文。

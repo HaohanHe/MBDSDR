@@ -965,7 +965,7 @@ def test_record_dir_blank_means_default_and_ensure_creates(tmp_path):
     assert again.record_dir == str(tmp_path / "rec")
 
 
-def test_record_dir_missing_target_reports_actionable_error(tmp_path, monkeypatch):
+def test_record_dir_missing_target_reports_actionable_error(tmp_path, monkeypatch, qapp):
     """盘拔了/路径被文件占了：返回可读文案，界面弹窗用同一段文字。"""
     blocker = tmp_path / "not_a_dir"
     blocker.write_text("x", encoding="utf-8")
