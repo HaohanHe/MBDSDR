@@ -296,5 +296,32 @@ def test_tx_capability_marks_all_three_unverified():
         assert cap["verified"] is False, name
 
 
+def test_soapy_generic_reports_driver_capable_third_state():
+    """Soapy 通用路径不能说「没有 TX 通道」：驱动可发与本路径未接要分开。"""
+    be = SoapySDRBackend()
+    # 未探测 → 未知（不臆断为"不能发"）
+    assert be.supports_tx() is False
+    cap = be.tx_capability()
+    assert cap["driver_capable"] is None
+    assert cap["blocked_reason"] == "driver_capability_unknown"
+
+    # 驱动上报 2 个 TX 通道（如 HackRF/USRP 经 Soapy）：驱动级可发，本路径未接
+    be._num_tx_channels = 2
+    assert be.supports_tx() is False, "本类没有 write_tx，仍不许声称可发射"
+    cap = be.tx_capability()
+    assert cap["declared"] is False and cap["implemented"] is False
+    assert cap["driver_capable"] is True
+    assert cap["driver_tx_channels"] == 2
+    assert cap["blocked_reason"] == "driver_capable_path_not_implemented"
+    assert "驱动级可发" in cap["notice"]
+    assert "本路径不能发射" in cap["notice"]
+
+    # 驱动上报 0 个 TX 通道 → 明确只能收
+    be._num_tx_channels = 0
+    cap = be.tx_capability()
+    assert cap["driver_capable"] is False
+    assert cap["blocked_reason"] == "no_tx_channels"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

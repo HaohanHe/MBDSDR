@@ -2732,6 +2732,41 @@ class SoapySDRBackend(SDRBackend):
         self._stream = None    # setupStream 返回的流句柄
         self._chan = 0
         self._rx = 1           # SOAPY_SDR_RX，来源: Constants.h:22
+        # 驱动报告的 TX 通道数（None=未探测）。只用于把「本路径未接写流」
+        # 与「硬件不能发」区分开，不改变 supports_tx() 的 False。
+        self._num_tx_channels = info.get("tx_channels")
+
+    def tx_capability(self) -> Dict[str, Any]:
+        """SoapySDR 通用路径：四态之外再加「驱动级可发但本路径未接」。
+
+        本类没有 ``write_tx``，``supports_tx()`` 恒为 False——这是"本路径不能发"
+        的事实，但不是"硬件不能发"的事实。HAL 的 ``getNumTxChannels()``
+        （Device.hpp:1155）会报告驱动级 TX 通道数：HackRF/USRP/Pluto 经 Soapy
+        打开时通常 >0。把两者分开列出，UI 才不会把 1 读成 2。
+
+        ``blocked_reason`` 取值：
+          * ``driver_capable_path_not_implemented`` —— 驱动可发，本路径未接写流；
+          * ``no_tx_channels`` —— 驱动明确报告 0 个 TX 通道（只能收）；
+          * ``driver_capability_unknown`` —— 未连接/驱动未报告，能力未知。
+        """
+        cap = super().tx_capability()
+        n = getattr(self, "_num_tx_channels", None)
+        cap["driver_tx_channels"] = n
+        if n is None:
+            cap["driver_capable"] = None
+            cap["blocked_reason"] = "driver_capability_unknown"
+            cap["notice"] = ("尚未探测 SoapySDR TX 通道数（未连接或驱动未报告）："
+                             "发射能力未知")
+        elif int(n) > 0:
+            cap["driver_capable"] = True
+            cap["blocked_reason"] = "driver_capable_path_not_implemented"
+            cap["notice"] = (f"SoapySDR 驱动报告 {int(n)} 个 TX 通道：驱动级可发，"
+                             "但本通用后端未接入 TX 写流，本路径不能发射")
+        else:
+            cap["driver_capable"] = False
+            cap["blocked_reason"] = "no_tx_channels"
+            cap["notice"] = "SoapySDR 驱动报告 0 个 TX 通道：该硬件/驱动只能接收"
+        return cap
 
     # ------------------------------------------------------------------
     # 工具：RangeList → (min, max)
@@ -2848,6 +2883,14 @@ class SoapySDRBackend(SDRBackend):
                     probe.getSampleRateRange(rx, 0), (1e3, 61.44e6))
                 entry["gain_range"] = cls._range_tuple(
                     probe.getGainRange(rx, 0), (0.0, 60.0))
+                # 驱动级 TX 通道数（Device.hpp:1155）：用于区分"驱动可发"
+                # 与"本通用路径未接 TX 写流"，不影响 supports_tx()。
+                try:
+                    tx = getattr(SoapySDR, "SOAPY_SDR_TX", 2)
+                    entry["tx_channels"] = int(probe.getNumTxChannels(tx))
+                except Exception as e:
+                    entry["tx_channels"] = None
+                    logger.debug(f"probe {entry['label']} 读 TX 通道数失败(忽略): {e}")
                 # 来源: lib/Factory.cpp:133 make() 返回的指针由 Python 端 del/close 释放
                 del probe
             except Exception as e:
@@ -2927,6 +2970,12 @@ class SoapySDRBackend(SDRBackend):
             # enumerate() 返回的 dict 可直接传回（官方标准用法）；空串/空 dict 表示自动选第一台。
             self._sdr = SoapySDR.Device(self._device_args)
             self._rx = getattr(SoapySDR, "SOAPY_SDR_RX", 1)
+            # 驱动级 TX 通道数：只用于能力展示，不据此声明可发射。
+            try:
+                tx = getattr(SoapySDR, "SOAPY_SDR_TX", 2)
+                self._num_tx_channels = int(self._sdr.getNumTxChannels(tx))
+            except Exception as e:
+                logger.debug("SoapySDR 读 TX 通道数失败(保持未知): %s", e)
         except Exception as e:
             self.status.error = f"SoapySDR 打开设备失败({self._args_str}): {e}"
             logger.error(self.status.error)
@@ -2971,6 +3020,7 @@ class SoapySDRBackend(SDRBackend):
             except Exception:
                 pass
             self._sdr = None
+        self._num_tx_channels = None  # 断开后不再持有驱动上报值（回到未知）
         super().disconnect()
 
     # ------------------------------------------------------------------
