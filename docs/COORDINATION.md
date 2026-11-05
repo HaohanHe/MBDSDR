@@ -754,6 +754,29 @@
 > `desktop/new_spacetime_panel.py` / `tests/test_freq_orbit_unknown.py`，
 > 锁均已释放。
 
+### 6.1.1 接管过期 claim 前必须查工作区（2026-11-05 事故后立规）
+
+**TTL 过期 ≠ 对方停手。** `expired_steal` 只说明心跳停了，不说明对方工作区
+干净——对方可能正握着未提交改动，只是没再跑心跳。
+
+接管前必须做：
+
+1. `git status --porcelain -- <该文件>`：出现 ` M` / `??` 即存在在途改动；
+2. 有在途改动时**禁止整文件 `git add` 后 `--only` 提交**（会把他人的未提交
+   内容一起卷走）；只能按 hunk 进 index：`git diff -- <文件> > 补丁` → 剔除
+   他人 hunk → `git apply --cached 补丁`，或用 `GIT_INDEX_FILE` 建独立 index；
+3. 拿不准就先问对方，别赌。
+
+实测依据（今天两次，各一句）：
+
+- 事故 1：参数治理线对 `docs/parameter-unification.md` 的 claim 心跳停在取得
+  时刻，**679 s（约 11 分钟）**后被判 `expired_steal` 并由卫星过境线接管——
+  超时只反映心跳，不反映人是否还在改。
+- 事故 2：审阅线同一文件的 claim 心跳停在取得时刻，**3666 s（约 61 分钟）**
+  后被判 `expired_steal`；本线接管时未查工作区，把其未提交的附录 D.1–D.5
+  约 78 行并入 `ba238bc5`（内容未改，归属错位，已在
+  `docs/parameter-unification.md` 加注记）。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`
