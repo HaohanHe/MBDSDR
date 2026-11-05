@@ -1,0 +1,60 @@
+{
+  "generated_by": "scripts/make_decode_fixtures.py",
+  "license": "MIT",
+  "honesty": "synthetic remodulation of known-truth frames with in-repo encoders; NOT OTA recordings. Proves stage-by-stage byte-exactness, not over-the-air reception performance.",
+  "ais": {
+    "file": "ais_two_frames.cf32",
+    "fs_hz": 240000.0,
+    "target_fs_hz": 48000.0,
+    "frame_count": 2,
+    "samples": 18175,
+    "expected_payloads_hex": [
+      "045742de04000645d18740152bec01c22d00000000",
+      "145742de08025ad0fc22710410405054d4813209400000000000000000000000000040000000000000000000000000000000000000"
+    ],
+    "expected_fields": [
+      {
+        "mmsi": 366000001,
+        "type": 1,
+        "callsign": null
+      },
+      {
+        "mmsi": 366000002,
+        "type": 5,
+        "callsign": "BI1AAA"
+      }
+    ]
+  },
+  "adsb": {
+    "file": "adsb_three_frames.cf32",
+    "fs_hz": 8000000.0,
+    "target_fs_hz": 4000000.0,
+    "frame_count": 3,
+    "samples": 6880,
+    "expected_frames_hex": [
+      "8f4d2023587f345e35837e2218b2",
+      "8d4d2023991094ad487c14fc9e3d",
+      "8f4d20232004d0f4cb1820000d24"
+    ],
+    "expected_frames": [
+      {
+        "icao": "4D2023",
+        "callsign": null,
+        "df": 17,
+        "tc": 11
+      },
+      {
+        "icao": "4D2023",
+        "callsign": null,
+        "df": 17,
+        "tc": 19
+      },
+      {
+        "icao": "4D2023",
+        "callsign": "AMC421",
+        "df": 17,
+        "tc": 4
+      }
+    ]
+  }
+}
