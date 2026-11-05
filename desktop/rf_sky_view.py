@@ -1897,6 +1897,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._gimbal_btn.setToolTip(
             "云台跟随：跟踪时同步驱动天线指向（无可用云台后端："
             "连接 ai-sdr-mini 或在 AI 对话里配置 rotctld）")
+        #: 指向精度口径（主窗口写入）。不可报时写原因，绝不写「0°」。
+        self._gimbal_accuracy_text = ""
         self._gimbal_btn.setStyleSheet(
             "QPushButton { background: " + _t.COLORS["card_2"] + "; color: "
             + _t.text("primary") + ";"
@@ -3210,13 +3212,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._stop_gimbal_ui()
         self._gimbal_btn.setEnabled(bool(available) and
                                     self._track_btn.isVisibleTo(self))
-        if available:
-            self._gimbal_btn.setToolTip(
-                "云台跟随：跟踪时同步驱动天线指向卫星（每 500ms 一拍）")
+        self._apply_gimbal_tooltip()
+
+    def set_gimbal_accuracy_text(self, text: str) -> None:
+        """写入指向精度口径（主窗口报告的唯一投影，不改布局/像素）。"""
+        self._gimbal_accuracy_text = str(text or "")
+        self._apply_gimbal_tooltip()
+
+    def _apply_gimbal_tooltip(self) -> None:
+        if getattr(self, "_gimbal_available", False):
+            base = "云台跟随：跟踪时同步驱动天线指向卫星（每 500ms 一拍）"
         else:
-            self._gimbal_btn.setToolTip(
-                "云台跟随：跟踪时同步驱动天线指向（无可用云台后端："
-                "连接 ai-sdr-mini 或在 AI 对话里配置 rotctld）")
+            base = ("云台跟随：跟踪时同步驱动天线指向（无可用云台后端："
+                    "连接 ai-sdr-mini 或在 AI 对话里配置 rotctld）")
+        tip = (f"{base}\n{self._gimbal_accuracy_text}"
+               if self._gimbal_accuracy_text else base)
+        self._gimbal_btn.setToolTip(tip)
 
     def _stop_gimbal_ui(self) -> None:
         """云台按钮回到未跟随态；若在跟随则发停止信号。"""

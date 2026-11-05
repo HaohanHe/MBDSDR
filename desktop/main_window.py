@@ -7181,8 +7181,30 @@ class MainWindow(QMainWindow):
             _warn_throttled("gimbal_stop", "云台停机指令未确认：%s", stop_err)
         if stop_err:
             reason = f"{reason}（云台停机指令未确认：{stop_err}）"
+        text = self.gimbal_accuracy_text()
+        self._sync_gimbal_accuracy_ui(text)
         self.statusBar().showMessage(
-            reason, MSG_IMPORTANT if important else MSG_NORMAL)
+            f"{reason} · {text}", MSG_IMPORTANT if important else MSG_NORMAL)
+
+    def gimbal_accuracy_text(self) -> str:
+        """用户可见的指向精度口径：不可报时必须写明原因，绝不渲染成 0°。
+
+        口径唯一来源是 ``gimbal_tracking_report()``：``pose_*`` 只含真实回读；
+        模拟执行/无回读时显示「不可报（原因）」，不显示「精度 0」。
+        """
+        rep = self.gimbal_tracking_report()
+        summ = rep.get("pose_source_summary") or {}
+        if summ.get("mechanical_accuracy_claimable"):
+            return (f"指向精度：机械回读 {int(rep.get('pose_samples') or 0)} 样本，"
+                    f"max {float(rep.get('pose_max_deg') or 0.0):.2f}° / "
+                    f"mean {float(rep.get('pose_mean_deg') or 0.0):.2f}°")
+        return f"指向精度：不可报（{summ.get('note') or '原因未知'}）"
+
+    def _sync_gimbal_accuracy_ui(self, text: str) -> None:
+        """把精度口径落到用户可见处（云台按钮 tooltip；不改布局/像素）。"""
+        sv = getattr(self, "sky_view", None)
+        if sv is not None and hasattr(sv, "set_gimbal_accuracy_text"):
+            sv.set_gimbal_accuracy_text(text)
 
     def last_gimbal_cycle(self) -> Optional[Dict]:
         """最近一拍「卫星真角 → 指令角 → 姿态 → 耗时」原始数据。"""
@@ -7268,8 +7290,10 @@ class MainWindow(QMainWindow):
         if limiter is not None:
             limiter.reset()  # 新会话首拍给完整指向，不做插值
         self._sync_sky_gimbal_btn(True)
+        text = self.gimbal_accuracy_text()
+        self._sync_gimbal_accuracy_ui(text)
         self.statusBar().showMessage(
-            f"云台跟随已开启（{gc.status.backend_info}）", MSG_NORMAL)
+            f"云台跟随已开启（{gc.status.backend_info}） · {text}", MSG_NORMAL)
 
     # ------------------------------------------------------------------
     # 全天模式（天空视图独立 ViewState / 立体投影 160°）

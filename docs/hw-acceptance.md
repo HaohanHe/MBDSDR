@@ -59,7 +59,8 @@ python scripts\hw_acceptance\acceptance_suite.py --out D:\mbdsdr\tmp\hw_suite
 
 - **R1–R4**：本机无 RTL-SDR，全部 `SKIP(no_device)`，**零实测数字**；
 - **R5**：本机无 rotctld/板载云台，`SKIP(no_gimbal)`；机械跟随精度需真 rotator/IMU，
-  且 `pose_error_by_source.readback.samples > 0` 前不得把指令误差当机械精度；
+  且 `pose_error_by_source.readback.samples > 0` 前不得把指令误差当机械精度；UI
+  在云台按钮 tooltip 与停机文案里原样写「指向精度：不可报（原因）」，**不显示 0°**；
 - **R6**：本机无串口 GNSS，`SKIP(no_gnss)`；坐标未产生，未用任何默认站址冒充；
 - **R7 月球绝对位置**：缺星历文件，未独立验证（太阳误差已量化）；
 - **人耳听感**：R4 数据面已验证，音质/爆音需操作者放行出声后手动验；

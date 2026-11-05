@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import sys
 import math
+import logging
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -99,6 +100,25 @@ class TestPointingErrorRecorder:
         rec.record(truth_az=1.0, truth_el=1.0, cmd_az=1.0, cmd_el=1.0)
         assert rec.stats()["pose_mean_deg"] is None
 
+    def test_simulated_cannot_be_mixed_into_readback(self):
+        """锁：simulated/别名一律不得落进 readback；混入则 pose_samples≠0 → 红。"""
+        from mbdsdr_ai.gimbal_follow import PointingErrorRecorder
+        for alias in ("simulated", "command_echo", "stub", "fake", "SIMULATED"):
+            assert PointingErrorRecorder.pose_bucket(alias, True) == "simulated"
+        rec = PointingErrorRecorder()
+        for alias in ("simulated", "command_echo"):
+            rec.record(truth_az=120.0, truth_el=20.0, cmd_az=121.0, cmd_el=20.0,
+                       pose_az=121.0, pose_el=20.0, pose_source=alias)
+        stats = rec.stats()
+        assert stats["pose_samples"] == 0, "把 simulated 混进 readback 就会红"
+        assert stats["pose_max_deg"] is None
+        assert "readback" not in stats["pose_error_by_source"]
+        # 没声明来源的姿态只能进 unknown，不能默认算回读
+        rec.record(truth_az=120.0, truth_el=20.0, cmd_az=120.0, cmd_el=20.0,
+                   pose_az=120.0, pose_el=20.0)
+        assert rec.stats()["pose_error_by_source"]["unknown"]["samples"] == 1
+        assert rec.stats()["pose_samples"] == 0
+
 
 # ---------------------------------------------------------------------------
 # 主窗口：模拟过境全程
@@ -129,6 +149,8 @@ class FakeGimbal:
         if self.reply == "offline":
             return {"dispatched": False, "pose_valid": False,
                     "error": "后端未连接"}
+        if self.reply == "raise":
+            raise RuntimeError("驱动串口崩了")
         self.pointed.append((az, el))
         return {"dispatched": True, "pose_valid": True,
                 "current_az": az + self.pose_offset[0],
@@ -179,6 +201,10 @@ def _active_tracking(mw, monkeypatch, pos, gimbal):
         selected_name="NOAA 19"))
     mw._observer_lat, mw._observer_lon = 39.9, 116.4
     mw._observer_from_gnss = False
+    # mw 是 module 级夹具：每个用例前清空误差记录，避免上一用例的回读样本串味。
+    if getattr(mw, "_gimbal_error", None) is not None:
+        mw._gimbal_error.reset()
+    mw._last_gimbal_cycle = None
     return t
 
 
@@ -350,6 +376,77 @@ class TestFailurePaths:
         for fn in (MainWindow._start_tx, MainWindow._refresh_tx_readout):
             src = inspect.getsource(fn)
             assert "gimbal" not in src.lower(), f"{fn.__name__} 竟与云台耦合"
+
+
+class TestUserVisibleAccuracyAndStopReporting:
+    """新增三字段必须落到用户可见处；不可报时写原因，绝不渲染成 0°。"""
+
+    def test_simulated_pass_ui_says_unclaimable_with_reason(self, mw, monkeypatch):
+        g = FakeGimbal()  # 指令回声 = 模拟执行
+        _active_tracking(mw, monkeypatch, _pos(123.0, 30.0), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        text = mw.gimbal_accuracy_text()
+        assert "不可报" in text and "模拟执行" in text
+        assert "0.00°" not in text, "不可报不得伪装成精度 0"
+        # 停机时同一句话既进状态栏，也进云台按钮 tooltip（用户可见处）
+        mw._stop_gimbal_follow("测试停止")
+        msg = mw.statusBar().currentMessage()
+        assert "指向精度：不可报" in msg and "模拟执行" in msg
+        assert "0.00°" not in msg
+        tip = mw.sky_view._gimbal_btn.toolTip()
+        assert "指向精度：不可报" in tip and "模拟执行" in tip
+
+    def test_real_readback_ui_shows_measured_accuracy(self, mw, monkeypatch):
+        g = FakeGimbal(pose_source="rotctld", pose_offset=(2.0, 0.0))
+        _active_tracking(mw, monkeypatch, _pos(123.0, 30.0), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        text = mw.gimbal_accuracy_text()
+        assert "机械回读 1 样本" in text and "不可报" not in text
+        assert "max" in text and "mean" in text
+
+    def test_stop_failure_reason_in_status_and_throttled_warning(
+            self, mw, monkeypatch, caplog):
+        """gc.stop() 抛异常：状态栏带原因；30s 内同 key 只落一条 warning。"""
+        import main_window as mwmod
+        mwmod._WARN_THROTTLE_LAST.clear()
+        g = FakeGimbal()
+
+        def _boom():
+            raise RuntimeError("电机还在转")
+
+        g.stop = _boom
+        _active_tracking(mw, monkeypatch, _pos(123.0, 30.0), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        with caplog.at_level(logging.WARNING):
+            mw._stop_gimbal_follow("测试停止", important=True)
+            mw._stop_gimbal_follow("测试停止", important=True)
+        msg = mw.statusBar().currentMessage()
+        assert "云台停机指令未确认" in msg and "电机还在转" in msg
+        hits = [r for r in caplog.records
+                if "云台停机指令未确认" in r.getMessage()]
+        assert len(hits) == 1, "30s 限流内同一 key 只能落一条 warning"
+
+    def test_dispatch_exception_reaches_cycle_and_status(
+            self, mw, monkeypatch, caplog):
+        """云台指令抛异常：周期记录带 error，状态栏明确停止。"""
+        g = FakeGimbal(reply="raise")
+        _active_tracking(mw, monkeypatch, _pos(123.0, 30.0), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        with caplog.at_level(logging.WARNING):
+            mw._poll_satellite_track()
+        cyc = mw.last_gimbal_cycle()
+        assert cyc["dispatched"] is False
+        assert "驱动串口崩了" in (cyc.get("error") or "")
+        msg = mw.statusBar().currentMessage()
+        assert "云台指令未执行" in msg
+        assert "驱动串口崩了" in msg
+        assert "跟随已停止" in msg
+        assert mw._gimbal_follow is False
+        n = len(g.pointed)
+        mw._poll_satellite_track()
+        assert len(g.pointed) == n, "异常停机后不得再次下发"
 
 
 if __name__ == "__main__":
