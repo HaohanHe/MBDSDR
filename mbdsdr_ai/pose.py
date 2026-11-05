@@ -284,28 +284,44 @@ class TiltCompensatedCompass:
 
 class MadgwickFilter:
     """
-    Madgwick 滤波：9DOF 姿态估计（IMU+磁力计）。
+    简化互补 / Madgwick 风格姿态融合（9DOF：加速度计 + 陀螺仪 + 磁力计）。
 
-    这是一种基于梯度下降的姿态估计算法，
-    比互补滤波更精确，能同时估计 roll/pitch/yaw。
+    这是简化实现，不是完整的 Madgwick 梯度下降：
+    - 加速度计与磁力计的观测修正已作为等效角速度的修正项进入积分
+      （在 q_dot 计算之前），不再是写完即弃的无效局部变量。
+    - 加速度计用 accel × estimated_gravity 的叉积误差修正等效角速度；
+      磁力计用倾斜补偿的水平航向误差只修正 z 轴角速度。
+    - mag 全零时诚实降级为 6DOF（只做加速度计 + 陀螺仪），不编造航向。
+    - 不实现完整 Madgwick 的 Jacobian / 梯度步长，也不代表真实硬件精度。
 
-    简化实现：使用四元数表示姿态。
+    注意：本模块无 BMI260 / TMAG5273 驱动，数值全部由调用方注入，
+    不代表真实硬件读数。
     """
 
     def __init__(self, beta: float = 0.1):
         """
-        beta: 算法增益（0.1 典型值）
+        beta: 加速度计观测修正增益（0.1 典型值）。
+        beta_mag: 磁力计航向修正增益，默认与 beta 相同，仅作用于 z 轴角速度。
         """
         self.beta = beta
+        self.beta_mag = beta
         self.q = np.array([1.0, 0.0, 0.0, 0.0])  # 四元数 [w, x, y, z]
         self._last_time = 0.0
+        # 最近一次加速度观测与估计重力的一致性（误差向量模）；无观测时为 None
+        self.last_accel_error: Optional[float] = None
 
     def update(self, imu: IMUData) -> np.ndarray:
         """
         更新姿态（9DOF：加速度计+陀螺仪+磁力计）。
 
         返回四元数 [w, x, y, z]。
+
+        观测修正在积分之前作用于等效角速度，随后才计算 q_dot 并积分。
+        无 BMI260 / TMAG5273 驱动：数值全部由调用方注入，不代表真实硬件读数。
         """
+        # 每次先清空一致性诊断：本次无有效观测融合（早退/首次）即保持 None
+        self.last_accel_error = None
+
         if self._last_time == 0.0:
             self._last_time = imu.timestamp
             return self.q.copy()
@@ -316,27 +332,57 @@ class MadgwickFilter:
         if dt <= 0 or dt > 1.0:
             return self.q.copy()
 
-        q = self.q
+        # 用积分前的当前姿态做观测修正（副本，避免原地改动 self.q）
+        q = self.q.copy()
 
         # 归一化加速度计
-        accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+        accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z], dtype=float)
         accel_norm = np.linalg.norm(accel)
         if accel_norm > 0:
             accel = accel / accel_norm
 
         # 归一化磁力计
-        mag = np.array([imu.mag_x, imu.mag_y, imu.mag_z])
+        mag = np.array([imu.mag_x, imu.mag_y, imu.mag_z], dtype=float)
         mag_norm = np.linalg.norm(mag)
         if mag_norm > 0:
             mag = mag / mag_norm
 
         # 陀螺仪（rad/s）
-        gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
+        gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z], dtype=float)
 
-        # 简化版 Madgwick：用梯度下降修正四元数
-        # （完整实现比较复杂，这里用简化的互补滤波+四元数表示）
+        # ---- 加速度计观测修正：在积分之前修正等效角速度 ----
+        # 保留原有符号约定：error = accel × estimated_gravity，增益 self.beta
+        if accel_norm > 0:
+            w, x, y, z = q[0], q[1], q[2], q[3]
+            gx = 2*(x*z - w*y)
+            gy = 2*(w*x + y*z)
+            gz = w**2 - x**2 - y**2 + z**2
+            estimated_gravity = np.array([gx, gy, gz])
+            error = np.cross(accel, estimated_gravity)
+            self.last_accel_error = float(np.linalg.norm(error))
+            gyro = gyro + self.beta * error
 
-        # 陀螺仪积分
+        # ---- 磁力计观测修正：倾斜补偿的水平航向误差，只修正 z 轴 ----
+        # mag 全零时诚实降级为 6DOF，完全跳过本分支，不编造航向
+        if mag_norm > 0:
+            w, x, y, z = q[0], q[1], q[2], q[3]
+            # 由当前四元数得到 roll/pitch（与 get_euler 一致），用于倾斜补偿
+            roll = math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
+            sinp = 2*(w*y - z*x)
+            pitch = math.asin(max(-1.0, min(1.0, sinp)))
+            cr, sr = math.cos(roll), math.sin(roll)
+            cp, sp = math.cos(pitch), math.sin(pitch)
+            # 把归一化磁向量投到水平面
+            mx_h = mag[0]*cp + mag[1]*sr*sp + mag[2]*cr*sp
+            my_h = mag[1]*cr - mag[2]*sr
+            if math.hypot(mx_h, my_h) > 1e-6:
+                yaw_mag = math.atan2(-mx_h, my_h)          # 倾斜补偿后的磁航向
+                yaw_est = math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+                # 航向误差 wrap 到 [-pi, pi]
+                err = (yaw_mag - yaw_est + math.pi) % (2*math.pi) - math.pi
+                gyro[2] += self.beta_mag * err
+
+        # ---- 用修正后的等效角速度积分 ----
         q_dot = 0.5 * np.array([
             -q[1]*gyro[0] - q[2]*gyro[1] - q[3]*gyro[2],
             q[0]*gyro[0] + q[2]*gyro[2] - q[3]*gyro[1],
@@ -345,19 +391,6 @@ class MadgwickFilter:
         ])
 
         q = q + q_dot * dt
-
-        # 加速度计修正（简化：直接用互补滤波思想）
-        if accel_norm > 0:
-            # 从四元数计算重力方向
-            gx = 2*(q[1]*q[3] - q[0]*q[2])
-            gy = 2*(q[0]*q[1] + q[2]*q[3])
-            gz = q[0]**2 - q[1]**2 - q[2]**2 + q[3]**2
-
-            # 误差 = 加速度计方向 - 重力方向（叉积）
-            error = np.cross(accel, np.array([gx, gy, gz]))
-
-            # 用误差修正陀螺仪（简化版）
-            gyro = gyro + self.beta * error
 
         # 归一化四元数
         q_norm = np.linalg.norm(q)
@@ -441,7 +474,25 @@ class PoseFusion:
         self.pose.yaw = yaw
         self.pose.timestamp = imu.timestamp
         self.pose.source = "imu"
-        self.pose.confidence = min(1.0, self.pose.confidence + 0.01)
+        # confidence：依据观测质量可升可降，钳在 [0,1]，不再无条件 +0.01
+        accel = np.array([imu.accel_x, imu.accel_y, imu.accel_z])
+        gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z])
+        mag = np.array([imu.mag_x, imu.mag_y, imu.mag_z])
+        imu_all_zero = (np.linalg.norm(accel) == 0.0
+                        and np.linalg.norm(gyro) == 0.0
+                        and np.linalg.norm(mag) == 0.0)
+        if imu_all_zero:
+            delta = -0.05                       # 缺观测 / 全零 IMU → 下降
+        elif (self._use_madgwick
+              and self.madgwick.last_accel_error is not None
+              and self.madgwick.last_accel_error <= 0.3):
+            delta = +0.01                       # 有效观测且与估计一致 → 上升
+        elif (not self._use_madgwick
+              and np.linalg.norm(accel) > 0.0):
+            delta = +0.01                       # 互补滤波路径：有有效加速度观测
+        else:
+            delta = -0.02                       # 无有效观测或误差大 → 下降
+        self.pose.confidence = max(0.0, min(1.0, self.pose.confidence + delta))
 
         return self.pose
 

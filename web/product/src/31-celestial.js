@@ -95,11 +95,27 @@
   }
   const MAG_CAP = Number(CAT.meta.magMax || 7.5);
 
+  /* 按星等升序的索引：extinction >= 0，所以 mag > 极限星等 L 的星**必然**
+     不可见。按亮度排好后循环可以直接 break，不必为暗星做任何三角运算。
+     FOV 越大 L 越小（暗适应），广角下可跳过 70%+ 的星表（体检 P1）。 */
+  const ORDER = new (N > 65535 ? Uint32Array : Uint16Array)(N);
+  {
+    const idx = Array.from({ length: N }, (_, i) => i);
+    idx.sort((a, b) => MAG[a] - MAG[b]);
+    for (let i = 0; i < N; i++) ORDER[i] = idx[i];
+  }
+
   const NAMED = (CAT.named || []).map(s => {
     const ra = s.ra * D2R, dec = s.dec * D2R;
     return { name: s.n, zh: s.zh || "", mag: s.m, bv: s.bv,
              cosRA: Math.cos(ra), sinRA: Math.sin(ra),
              sinDec: Math.sin(dec), cosDec: Math.cos(dec) };
+  });
+  /* DSO 的赤经赤纬是常量，三角值只算一次（体检 P4）。 */
+  const DSO_T = (CAT.dso || []).map(d => {
+    const ra = d.ra * D2R, dec = d.dec * D2R;
+    return { d, cRA: Math.cos(ra), sRA: Math.sin(ra),
+             sD: Math.sin(dec), cD: Math.cos(dec) };
   });
 
   /* ---------- 赤道 → 地平单位向量（x=北, y=东, z=天顶） ---------- */
@@ -186,19 +202,30 @@
    * 立体：k = 2/(1+Z)；sx = cx + X·k·ppr，ppr 使 θ=fov/2 时正好落在短边半宽
    * 二者都只做"球→平面"，裁剪交给画布矩形（和原项目 window_size 一致）。
    */
-  function toScreen(v, W, H) {
-    const b = getBasis();
-    const Z = v.x * b.f.x + v.y * b.f.y + v.z * b.f.z;
-    if (Z <= zCut()) return null;
+  function dotF(v, b) { return v.x * b.f.x + v.y * b.f.y + v.z * b.f.z; }
+  /* 纯投影，不做可见性判定。projectSegment 已经把端点裁到可见侧；
+     若这里再判一次 Z，球面插值 + 归一化带来的微小回落会把**整段**丢掉
+     （体检 B6：鱼眼边界的网格断口）。唯一必须挡的是立体投影背极点 Z=-1
+     造成的除零；靠近它的点投影半径极大，本来就在窗口外，画布会裁掉。 */
+  function projectUnchecked(v, W, H, b, Z) {
     const X = v.x * b.r.x + v.y * b.r.y + v.z * b.r.z;
     const Y = v.x * b.u.x + v.y * b.u.y + v.z * b.u.z;
     let k;
     if (V.fov <= PERSP_MAX_FOV) {
       k = focalOf(W, H) / Z;
     } else {
-      k = 2 / (1 + Z) * ((Math.min(W, H) / 2) / (2 * Math.tan(V.fov * D2R / 4)));
+      // 靠近背极点时把分母钳到下限，而不是丢掉整段：这类点投影半径极大，
+      // 本来就在窗口外，画布矩形裁剪会处理；丢段才会留下可见的断口。
+      const denom = Math.max(1e-6, 1 + Z);
+      k = 2 / denom * ((Math.min(W, H) / 2) / (2 * Math.tan(V.fov * D2R / 4)));
     }
     return { x: W / 2 + X * k, y: H / 2 - Y * k, z: Z };
+  }
+  function toScreen(v, W, H) {
+    const b = getBasis();
+    const Z = dotF(v, b);
+    if (Z <= zCut()) return null;
+    return projectUnchecked(v, W, H, b, Z);
   }
   function projectAltAz(azDeg, altDeg, W, H) {
     return toScreen(altAzVector(azDeg, altDeg), W, H);
@@ -211,15 +238,20 @@
     const za = a.x * bs.f.x + a.y * bs.f.y + a.z * bs.f.z;
     const zb = b.x * bs.f.x + b.y * bs.f.y + b.z * bs.f.z;
     if (za <= zc && zb <= zc) return null;
+    // 插值到「阈值 + 余量」而不是阈值本身：端点是球面单位向量，插值后
+    // 归一化会让 Z 略微回落，若正好落在 zc 上，toScreen 的二次 Z 判定会
+    // 把它判成不可见 → 整段被丢，鱼眼边界出现断口（体检 B6）。
+    const zSafe = zc + 1e-6;
     let A = a, B = b;
     if (za <= zc) {
-      const t = (zc - za) / (zb - za);
+      const t = (zSafe - za) / (zb - za);
       A = norm({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t });
     } else if (zb <= zc) {
-      const t = (zc - zb) / (za - zb);
+      const t = (zSafe - zb) / (za - zb);
       B = norm({ x: b.x + (a.x - b.x) * t, y: b.y + (a.y - b.y) * t, z: b.z + (a.z - b.z) * t });
     }
-    const pa = toScreen(A, W, H), pb = toScreen(B, W, H);
+    const pa = projectUnchecked(A, W, H, bs, dotF(A, bs)),
+          pb = projectUnchecked(B, W, H, bs, dotF(B, bs));
     if (!pa || !pb) return null;
     return [pa, pb];
   }
@@ -257,8 +289,11 @@
    * 这里给的是真几何：平黄经 → 黄赤交角 → 赤经赤纬 → 地平。
    * 精度够判昼夜/晨昏蒙影；不用于日食、日出时刻表（not_verified）。
    */
+  let _sunCache = { jd: NaN, val: null };
   function sunAltAz(state) {
     const jd = nowJd(state);
+    // 同一模拟时刻：天空底色与 HUD 会各要一次，命中即复用（体检 P4）。
+    if (_sunCache.val && Math.abs(jd - _sunCache.jd) < 1e-12) return _sunCache.val;
     const n = jd - JD_J2000;
     const L = (280.460 + 0.9856474 * n) % 360;
     const g = ((357.528 + 0.9856003 * n) % 360) * D2R;
@@ -268,7 +303,10 @@
     const dec = Math.asin(Math.sin(eps) * Math.sin(lam));
     const v = eqToHorizon(Math.cos(ra), Math.sin(ra), Math.sin(dec), Math.cos(dec), frame(state));
     const d = dirAltAz(v);
-    return { az: d.az, alt: d.alt, ra: ((ra * R2D) % 360 + 360) % 360, dec: dec * R2D };
+    const val = { az: d.az, alt: d.alt,
+                  ra: ((ra * R2D) % 360 + 360) % 360, dec: dec * R2D };
+    _sunCache = { jd, val };
+    return val;
   }
 
   /* ---------- 可见判据 ---------- */
@@ -278,18 +316,22 @@
     const l = base + LM.kFov * Math.log10(LM.fovRef / Math.max(1, fovDeg));
     return clamp(l, LM.lMin, MAG_CAP);
   }
+  /* sin(asin(z)) === z：eachStar 已经算出了单位向量的 z 分量（= sin alt），
+     直接传进来即可，不必 asin 求角度再 sin 回去（体检 P1）。 */
+  function extinctionFromSin(sinAlt) {
+    if (sinAlt >= 1) return 0;
+    return Math.min(LM.maxExt, LM.kExt / Math.max(Math.sin(0.5 * D2R), sinAlt));
+  }
   function extinction(altDeg) {
-    if (altDeg >= 90) return 0;
-    const s = Math.sin(Math.max(0.5, altDeg) * D2R);
-    return Math.min(LM.maxExt, LM.kExt / s);
+    return extinctionFromSin(Math.sin(altDeg * D2R));
   }
   function effectiveLimit(fovDeg, bortle) {
     const L = limitMag(fovDeg, bortle);
     return 2.0 + (L - 2.0) * V.intro;
   }
   function daylightHidden(sunAltDeg) { return sunAltDeg > -0.833; }
-  function starStyle(mag, bv, L, altDeg) {
-    const eff = mag + extinction(altDeg);
+  function starStyle(mag, bv, L, sinAlt) {
+    const eff = mag + extinctionFromSin(sinAlt);
     if (eff > L) return null;
     const depth = L - eff;
     const r = clamp(0.60 + depth * 0.55, 0.55, 4.6);
@@ -310,24 +352,40 @@
     const kBase = persp ? focalOf(W, H)
                         : (Math.min(W, H) / 2) / (2 * Math.tan(V.fov * D2R / 4));
     const cx0 = W / 2, cy0 = H / 2;
+    /* 视场早筛：Z = cos(与视轴夹角)。屏幕矩形外接圆半径对应的最小 Z，
+       小于它的星连 X/Y/k 都不用算。窄视场可剔除 95%+ 的 25,792 颗，
+       广角时阈值自然落到背极点附近，等于不启作用（数学上不误删）。 */
+    const maxR = Math.hypot(W / 2, H / 2) + 8;
+    let zViewMin;
+    if (persp) {
+      const q = maxR / kBase;
+      zViewMin = 1 / Math.sqrt(1 + q * q);
+    } else {
+      const q = maxR / (2 * kBase);
+      zViewMin = (1 - q * q) / (1 + q * q);
+    }
+    if (zViewMin < zc) zViewMin = zc;
+    const horizonSin = Math.sin(-1.2 * D2R);
     let shown = 0;
-    for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const i = ORDER[j];
+      if (MAG[i] > L) break;          // 消光只会更暗，后面全不可见
       const cRA = cosRA[i], sRA = sinRA[i], sD = sinDec[i], cD = cosDec[i];
       const cosH = f.cL * cRA + f.sL * sRA, sinH = f.sL * cRA - f.cL * sRA;
       const vx = f.cPhi * sD - f.sPhi * cD * cosH;
       const vy = -cD * sinH;
       const vz = f.sPhi * sD + f.cPhi * cD * cosH;
       const Z = vx * fx + vy * fy + vz * fz;
-      if (Z <= zc) continue;
+      if (Z <= zc || Z < zViewMin) continue;
       const X = vx * rx + vy * ry + vz * rz, Y = vx * ux + vy * uy + vz * uz;
       const k = persp ? kBase / Z : kBase * 2 / (1 + Z);
       const sx = cx0 + X * k, sy = cy0 - Y * k;
       if (sx < -8 || sx > W + 8 || sy < -8 || sy > H + 8) continue;   // 窗口矩形裁剪
-      const alt = Math.asin(clamp(vz, -1, 1)) * R2D;
-      if (alt < -1.2) continue;                                        // 地平门
-      const st = starStyle(MAG[i], BV[i], L, alt);
+      const sinAlt = clamp(vz, -1, 1);
+      if (sinAlt < horizonSin) continue;                               // 地平门
+      const st = starStyle(MAG[i], BV[i], L, sinAlt);
       if (!st) continue;
-      cb(sx, sy, st, MAG[i], BV[i], alt, i);
+      cb(sx, sy, st, MAG[i], BV[i], Math.asin(sinAlt) * R2D, i);
       shown++;
     }
     return { shown, L };
@@ -343,9 +401,9 @@
   }
   function dsoScreen(state, W, H, L) {
     const f = frame(state), out = [];
-    for (const d of CAT.dso) {
-      const ra = d.ra * D2R, dec = d.dec * D2R;
-      const v = eqToHorizon(Math.cos(ra), Math.sin(ra), Math.sin(dec), Math.cos(dec), f);
+    for (const e of DSO_T) {
+      const d = e.d;
+      const v = eqToHorizon(e.cRA, e.sRA, e.sD, e.cD, f);
       const p = toScreen(v, W, H);
       if (!p || v.z < -0.02) continue;
       const alt = Math.asin(clamp(v.z, -1, 1)) * R2D;

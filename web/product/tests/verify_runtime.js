@@ -226,6 +226,95 @@ try {
   ts = frames(2, ts);
 } catch (e) { errors.push(`SEQ: ${e.stack}`); }
 
+// ---------- 回归：体检 B1 / B4 / B5 / B6 ----------
+try {
+  const X = sandbox.MBDSDR, CX = X.celestial;
+  let fakeNow = 1e6;
+  sandbox.performance = { now: () => fakeNow };
+
+  // B1：专业模式频谱轮询不再因 sky.now() 冻结而死锁；一次采样只压一行
+  let samples = 0, seq = 0;
+  const fakeLive = {
+    sourceName: () => "bridge.online", isLive: () => true,
+    listSatellites: () => [], getTle: () => null, getPasses: () => [],
+    getCapabilities: () => [], invokeTool: () => Promise.resolve({ ok: true, data: null }),
+    readSpectrum() {
+      samples++;
+      const a = new Float32Array(32);
+      for (let i = 0; i < 32; i++) a[i] = (i + seq++) * 0.01;
+      return a;
+    }
+  };
+  const savedData = X.data;
+  X.data = fakeLive;
+  getEl("proForm").classList.add("on");   // draw() 有形态前置门
+  X.workbench.resetChat();
+  for (let i = 0; i < 6; i++) { fakeNow += 500; X.workbench.draw(16); }
+  if (samples < 5) errors.push(`B1: 专业模式频谱轮询仍死锁（samples=${samples}）`);
+  const d = X.workbench.diag ? X.workbench.diag() : null;
+  if (!d) errors.push("B1: 缺 workbench.diag 诊断入口");
+  else {
+    if (d.rows > samples + 1) errors.push(`B1: 瀑布 ${d.rows} 行 > ${samples} 次采样（假滚动回潮）`);
+    if (d.distinct === false) errors.push("B1: 瀑布相邻两行完全相同（同一帧被反复压入）");
+  }
+  X.data = savedData;
+  delete sandbox.performance;
+
+  // B4：切语言不得清空对话、不得强拉 FOV
+  X.workbench.resetChat();
+  const stream = getEl("proStream");
+  stream.innerHTML += '<div class="msg user">USER-KEEP-ME</div>';
+  X.emit("i18n:refresh");
+  if (!stream.innerHTML.includes("USER-KEEP-ME"))
+    errors.push("B4: 切语言清空了用户对话");
+  if (X.SATS && X.SATS.length) {
+    X.sky.lockSat(X.SATS[0]);
+    CX.V.fovTarget = 62;
+    X.sky.retranslate();
+    if (Math.abs(CX.V.fovTarget - 62) > 1e-6)
+      errors.push(`B4: 切语言强拉 FOV → ${CX.V.fovTarget}`);
+    X.sky.unlock();
+  }
+
+  // B5：宿主桥抛异常必须可观测，不能静默吞成「无数据」
+  let evt = null;
+  X.on("bridge:exception", e => { evt = e; });
+  const savedBridge = sandbox.mbdsdrBridge;
+  sandbox.mbdsdrBridge = {
+    invoke: () => ({ ok: true, data: null }),
+    getTle: () => { throw new Error("host tle broken"); }
+  };
+  X.detectSource();
+  X.data.getTle("25544");
+  if (!evt || evt.method !== "getTle")
+    errors.push("B5: 宿主桥异常被静默吞掉，未发 bridge:exception");
+  if (!X.bridgeSource.lastError)
+    errors.push("B5: 桥异常未留 lastError");
+  sandbox.mbdsdrBridge = savedBridge;
+  X.detectSource();
+
+  // PERF：地景全量重算一帧的球面反投影次数（旧逐点粗扫约 7.7 万次）
+  getEl("skyForm").classList.add("on");
+  CX.V.fov = 100; CX.V.az = 45; CX.V.alt = 8;
+  X.sky.draw(16);
+  const edgeCalls = X.sky.edgeStat ? X.sky.edgeStat() : -1;
+  if (edgeCalls < 0) errors.push("PERF: 缺 sky.edgeStat 可观测入口");
+  else if (edgeCalls > 20000)
+    errors.push(`PERF: 地景单帧反投影 ${edgeCalls} 次，超过 2 万次上限`);
+
+  // B6：跨越背极点阈值的线段不得被二次 Z 判定整段丢掉
+  const fov0 = CX.V.fov, az0 = CX.V.az, alt0 = CX.V.alt;
+  CX.V.fov = 150; CX.V.az = 0; CX.V.alt = 0;
+  let dropped = 0;
+  for (let az = 0; az < 360; az += 15) {
+    const front = CX.altAzVector(az, 0);
+    const back = CX.altAzVector((az + 177) % 360, 0);
+    if (!CX.projectSegment(front, back, 1280, 720)) dropped++;
+  }
+  if (dropped) errors.push(`B6: ${dropped}/24 条跨阈值线段被整段丢弃`);
+  CX.V.fov = fov0; CX.V.az = az0; CX.V.alt = alt0;
+} catch (e) { errors.push(`REGRESSION: ${e.stack}`); }
+
 // 结果
 const MB = sandbox.MBDSDR;
 const summary = {
@@ -235,7 +324,8 @@ const summary = {
   caps: MB ? MB.CAPS.length : 0,
   i18nKeys: MB && MB.i18n ? MB.i18n.keys().length : 0,
   textNodes: textNodes.length,
-  framesRendered: ts / 16
+  framesRendered: ts / 16,
+  edgeUnproject: MB && MB.sky && MB.sky.edgeStat ? MB.sky.edgeStat() : -1
 };
 console.log("RUNTIME", JSON.stringify(summary));
 if (errors.length) {

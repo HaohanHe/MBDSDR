@@ -16,7 +16,7 @@
 | 星座 | 27 座 / 115 段连线（端点全部可查） |
 | DSO | 117 条（类型符号，非形态还原） |
 | DSO 来源 | OpenNGC · CC-BY-SA-4.0 · schema `mbdsdr.dso_catalog.v2` |
-| DSO 未知量 | 星等缺失 7 条 / 角径缺失 2 条（**保持 null，不拿 0/99 冒充**） |
+| DSO 未知量 | 星等缺失 0 条 / 角径缺失 0 条（**保持 null，不拿 0/99 冒充**） |
 | 星等范围 | -26.7 ~ 7.5 |
 
 **条数全部由数据文件实际读出**；`HYG v4.1` 与仓库 141 颗亮星逐值同源
@@ -56,7 +56,7 @@
 
 - 仓库 `f0c8fa25` 把 DSO 从 Stellarium `catalog.txt`（GPL）换成 **OpenNGC**（CC-BY-SA-4.0），退役 GPL 数据；`dbf2a3e7` 补 `axis_ratio` 与来源标记。
 - 产品同步链随之从 `astronomy/dso.py` 的 `_DSO_ROWS` AST 字面量，改读 `mbdsdr_ai/data/dso_catalog.json`（`meta` + `objects`），并校验 `schema` 与 `source_license`；RA 已是**度**，不再 ×15。
-- 署名：Deep-sky object data from OpenNGC (https://github.com/mattiaverga/OpenNGC), by Mattia Verga and contributors, licensed CC BY-SA 4.0. Chinese names are Wikidata labels (CC0 1.0) matched by P528 catalog number; entries without a Wikidata label are marked 自译 or left empty. This derived catalog is distributed under CC BY-SA 4.0.
+- 署名：Deep-sky object data from OpenNGC (https://github.com/mattiaverga/OpenNGC), by Mattia Verga and contributors, licensed CC BY-SA 4.0. Chinese names are Wikidata labels (CC0 1.0) matched by P528 catalog number; entries without a Wikidata label are marked 自译 or left empty. Missing magnitudes/sizes are taken verbatim from public catalogs: HEASARC MESSIER (compiled from Sky Catalogue 2000.0 Vol. 2, 1985skca.book.....H), the Washington Double Star Catalog (USNO), and Lynga's Catalogue of Open Cluster Data (VII/92A). This derived catalog is distributed under CC BY-SA 4.0.
 - 未知星等 / 角径保持 `null`，前端只画类型符号、不参与亮度门，与仓库「绝不用 0/99 冒充」同口径。
 
 ## not_verified（勿当作已上线）
@@ -74,4 +74,4 @@
 球面投影、DSO 层与时间引擎（带测试）。Web 产品是独立自研的轻量近似，
 未与桌面端联调，不宣称等价。差距与上面 not_verified 逐条对应。
 
-生成时间：2026-11-06T00:42:04
+生成时间：2026-11-06T01:51:16
