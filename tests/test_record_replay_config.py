@@ -102,13 +102,22 @@ def _isolate_home(monkeypatch, tmp_path):
     return home
 
 
-def _make_recording(window, monkeypatch):
-    """连桩后端并开录，返回 (录制路径, 桩后端)。"""
+def _make_recording(window, monkeypatch, tmp_path):
+    """连桩后端并开录，返回 (录制路径, 桩后端)。
+
+    必须真写一块样本：S4 分段落盘对零样本段按设计删档、不写 sidecar，
+    只开会话不喂数据会造出"录音中却零采样"的假状态（正是本文件要防的）。
+    录制目录也指到 tmp_path，避免读写真机 settings 里的 record_dir。
+    """
+    monkeypatch.setattr(window.settings, "ensure_record_dir",
+                        lambda: (str(tmp_path), None))
     backend = _StubBackend()
     window._active_sdr_backend = backend
     window._start_recording()
     assert window._recording is True
     assert window._record_stream_fh is not None, "录音未建立流式落盘句柄"
+    window._record_write_chunk(np.ones(4096, dtype=np.complex64))
+    assert window._record_samples_total > 0, "录音没有落盘任何样本"
     return window._record_file_path, backend
 
 
@@ -119,7 +128,7 @@ def test_replay_stops_recording_and_saves_sidecar(window, monkeypatch, tmp_path)
     from mbdsdr_ai import baseband_io
 
     _isolate_home(monkeypatch, tmp_path)
-    rec_path, _backend = _make_recording(window, monkeypatch)
+    rec_path, _backend = _make_recording(window, monkeypatch, tmp_path)
 
     iq_path = str(tmp_path / "replay_src.iq")
     # 300k 样本 ≈ 0.15s，确保断言时回放仍在进行（小文件会一 tick 播完）

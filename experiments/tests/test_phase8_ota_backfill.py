@@ -35,8 +35,14 @@ def _make_sigmf_dir(root: str, mode: str = "adsb", with_messages: bool = True) -
 
     用仓库自己的 adsb.encode/modulate 造帧——这就是 onboard record 步落地的
     同一种文件；测试里它代表"真机录回来的那一段"。数字由此经真实解码器得出。
+
+    注意：``adsb.modulate_baseband`` 只按 ``round(fs/1e6)`` 的整数网格合成，
+    fs=2.4MHz 时会偷偷生成 2 样点/us 的波形（与 2.4MS/s 元数据不符）。
+    这里先在 4MHz 整档合成，再带限抽取到 2.4MHz，保证录制文件在物理上真是
+    2.4MS/s —— 与 onboard 从 RTL-SDR 真实采回的样本同一量纲。
     """
     from mbdsdr_ai import adsb
+    from scipy.signal import resample_poly
 
     d = os.path.join(root, "recording_dir")
     os.makedirs(d, exist_ok=True)
@@ -44,7 +50,8 @@ def _make_sigmf_dir(root: str, mode: str = "adsb", with_messages: bool = True) -
 
     me7 = bytes.fromhex("784f5e3a594620")
     frame = adsb.build_long_frame(0x11, 0xABCDEF, me7)
-    sig = adsb.modulate_baseband(frame, fs=fs, lead_us=20, amplitude=1.0)
+    sig4m = adsb.modulate_baseband(frame, fs=4_000_000.0, lead_us=20, amplitude=1.0)
+    sig = resample_poly(sig4m, 3, 5).astype(np.complex64)  # 4MHz -> 2.4MHz
     rng = np.random.default_rng(20261002)
     noise = (rng.standard_normal(200000) + 1j * rng.standard_normal(200000)) * 0.05
     iq = np.concatenate([noise[:50000], sig, noise[50000:]]).astype(np.complex64)

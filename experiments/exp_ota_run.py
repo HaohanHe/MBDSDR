@@ -108,15 +108,37 @@ def _estimate_snr_db(iq: np.ndarray, fs: float) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # ADS-B 贪心多帧扫描（复用真实前导检测，数候选 vs CRC 通过）
 # ---------------------------------------------------------------------------
-def _scan_adsb_frames(iq: np.ndarray, fs: float) -> Dict[str, int]:
+def _adsb_decode_iq(iq: np.ndarray, fs: float) -> "tuple[np.ndarray, float, str]":
+    """把录制 IQ 送到 ``decode_baseband`` 能接受的采样率档位。
+
+    ``decode_baseband`` 只认 ≥2MHz 的整数 MHz 档（宁可显式拒绝也不静默取整）。
+    onboard 默认录制是 2.4MS/s，直接传进去会 ValueError、被扫描循环吞成 crc=0。
+    这里先带限重采样到 8MHz（0.5us=4 样点，位判决窗口不贴边），原始录制文件不动。
+    返回 (解码用 IQ, 解码采样率, 说明)。
+    """
+    from fractions import Fraction
+    sps = int(round(fs / 1e6))
+    if fs >= 2e6 and abs(fs / 1e6 - sps) <= 1e-6:
+        return iq, float(fs), ""
+    target_hz = 8_000_000
+    from scipy.signal import resample_poly
+    ratio = Fraction(target_hz, int(round(fs)))
+    out = resample_poly(iq, ratio.numerator, ratio.denominator)
+    note = (f"fs={fs:.0f}Hz 非整数MHz（decode_baseband 不支持），"
+            f"已重采样到 {target_hz / 1e6:.0f}MHz 解码；录制文件未改")
+    return out.astype(np.complex64), float(target_hz), note
+
+
+def _scan_adsb_frames(iq: np.ndarray, fs: float) -> Dict[str, Any]:
     """贪心找前导 -> 解码 -> 掩码 -> 再找，统计候选数与 CRC 通过数。
 
     复用 mbdsdr_ai.adsb 的真实 ``_find_preamble`` + ``decode_baseband``，
-    不重写判决逻辑。返回 {"candidates": n, "crc_ok": k}。
+    不重写判决逻辑。返回 {"candidates": n, "crc_ok": k, "decode_fs_hz", "note"}。
     """
     from mbdsdr_ai import adsb
-    work = np.abs(iq) ** 2
-    sps = int(round(fs / 1e6))
+    scan_iq, scan_fs, note = _adsb_decode_iq(iq, fs)
+    work = np.abs(scan_iq) ** 2
+    sps = int(round(scan_fs / 1e6))
     candidates = 0
     crc_ok = 0
     # 一帧（前导 8us + 长帧 112us）+ 保护窗，样本数
@@ -126,18 +148,21 @@ def _scan_adsb_frames(iq: np.ndarray, fs: float) -> Dict[str, int]:
         if k is None:
             break
         candidates += 1
-        seg = iq[k:k + frame_len]
+        seg = scan_iq[k:k + frame_len]
         if seg.size >= frame_len // 2:
             try:
-                res = adsb.decode_baseband(seg, fs)
-            except Exception:  # noqa: BLE001 - 单帧解码失败不拖垮整批
+                res = adsb.decode_baseband(seg, scan_fs)
+            except Exception as e:  # noqa: BLE001 - 单帧解码失败不拖垮整批
                 res = {"crc_ok": False}
+                note = f"{note}；解码异常 {type(e).__name__}: {e}" if note \
+                    else f"解码异常 {type(e).__name__}: {e}"
             if res.get("crc_ok"):
                 crc_ok += 1
         # 掩码掉这一帧区域，让检测器去找下一个前导
         end = min(work.size, k + frame_len)
         work[k:end] = 0.0
-    return {"candidates": candidates, "crc_ok": crc_ok}
+    return {"candidates": candidates, "crc_ok": crc_ok,
+            "decode_fs_hz": round(float(scan_fs), 1), "note": note}
 
 
 def _load_onboard_messages(recordings_dir: str) -> Dict[str, Any]:
@@ -203,6 +228,8 @@ def measure_recording(data_path: str, recordings_dir: str,
         "ebn0_db_estimate": None,
         "n_candidates": 0,
         "n_crc_ok": 0,
+        "adsb_decode_fs_hz": "",
+        "adsb_decode_note": "",
         "success_rate": "",
         "wilson_lo": "",
         "wilson_hi": "",
@@ -253,6 +280,8 @@ def measure_recording(data_path: str, recordings_dir: str,
         scan = _scan_adsb_frames(iq, fs)
         row["n_candidates"] = scan["candidates"]
         row["n_crc_ok"] = scan["crc_ok"]
+        row["adsb_decode_fs_hz"] = scan["decode_fs_hz"]
+        row["adsb_decode_note"] = scan["note"]
         cell = runner.BinomialCell(scan["crc_ok"], scan["candidates"])
         if scan["candidates"] > 0:
             lo, hi = cell.wilson
