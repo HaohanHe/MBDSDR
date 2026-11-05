@@ -18,7 +18,7 @@ Opendigitalradio/dablin (https://github.com/Opendigitalradio/dablin) 仅作技�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Tuple
 
 
 # =============================================================================
@@ -477,20 +477,6 @@ class DABAudioInfo:
     sample_rate_khz: int = 48
     bitrate_kbps: int = -1
     channels: str = "stereo"
-
-
-def audio_info_from_service(svc: FICService, sc: Optional[FICSubchannel]) -> DABAudioInfo:
-    """根据 FIG 0/2 的音频类型 + FIG 0/1 的子信道比特率汇总音频参数。"""
-    info = DABAudioInfo(
-        subchid=svc.subchid,
-        codec="heaac" if svc.dab_plus else "mpeg_layer2",
-        dab_plus=svc.dab_plus,
-    )
-    if sc is not None:
-        info.bitrate_kbps = sc.bitrate_kbps
-    # DAB/DAB+ 核心采样率均为 48 kHz 基线（HE-AAC 经 SBR 上采样）
-    info.sample_rate_khz = 48
-    return info
 
 
 # DAB+ 超帧格式字节 -> 核心采样率索引 (dabplus_decoder.h GetCoreSrIndex)
