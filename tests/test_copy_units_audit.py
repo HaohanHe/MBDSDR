@@ -366,3 +366,35 @@ def test_u03_troubleshooting_error_hint_uses_ms_per_s():
                     encoding="utf-8").read()
     assert "如 2.048 MHz" not in _TROUBLE
     assert "如 2.048 MS/s" in _TROUBLE
+
+
+# ---------------------------------------------------------------------------
+# 批次 6：解码能力规则文案的采样率量纲（desktop/capability_catalog.py:180 直接展示）
+# ---------------------------------------------------------------------------
+def test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz():
+    """U-03：ADS-B 采样率规则文案不得写 MHz；能力目录会原样展示 sample_rate_rule。"""
+    for name in ("adsb.py", "decode_router.py", "decode_pipeline.py"):
+        src = open(os.path.join(_ROOT, "mbdsdr_ai", name), encoding="utf-8").read()
+        for bad in ("fs ≥ 2MHz", "fs=2MHz", "fs=2/4MHz", "2MHz 或 4MHz"):
+            assert bad not in src, f"{name}: 仍写 {bad}"
+    _ADSB = open(os.path.join(_ROOT, "mbdsdr_ai", "adsb.py"), encoding="utf-8").read()
+    _ROUTER = open(os.path.join(_ROOT, "mbdsdr_ai", "decode_router.py"),
+                   encoding="utf-8").read()
+    _PIPE = open(os.path.join(_ROOT, "mbdsdr_ai", "decode_pipeline.py"),
+                 encoding="utf-8").read()
+    assert "fs ≥ 2 MS/s 且为 1 MS/s 整数倍" in _ADSB
+    assert "fs ≥ 2 MS/s 且为 1 MS/s 整数倍（Mode-S 1Mbit/s 前导 8us）" in _ROUTER
+    assert "fs=2 MS/s 或 4 MS/s" in _ROUTER
+    assert "fs ≥ 2 MS/s 且为 1 MS/s 整数倍（1Mbit/s PPM）" in _PIPE
+
+
+def test_u02_gnss_psd_fields_never_labeled_dbm():
+    """U-02：GNSS PSD 字段名沿用 *_dbm，但注释与展示必须写「相对读数，非 dBm」。"""
+    _GNSS = open(os.path.join(_ROOT, "mbdsdr_ai", "gnss_monitor.py"),
+                 encoding="utf-8").read()
+    _TOOLS = open(os.path.join(_ROOT, "mbdsdr_ai", "sdr_tools.py"),
+                  encoding="utf-8").read()
+    assert "**不是 dBm**" in _GNSS
+    assert "平均功率（相对读数 dB，非 dBm）" in _GNSS
+    assert "平均功率: {result.power_dbm:.1f} dB（相对读数，非 dBm）" in _TOOLS
+    assert "峰值RSSI: {result['peak_rssi_dbm']}（相对读数 dB，非 dBm）" in _TOOLS

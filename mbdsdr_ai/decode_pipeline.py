@@ -201,7 +201,7 @@ def _downconvert(trace: _Trace, iq: np.ndarray, fs: float, target_fs: float,
         rule = "AIS 要求 fs ≥ 19200 且为 9600 的整数倍（9600bd GMSK）"
     else:
         ok_rate = fs >= 2e6 and abs(fs % 1e6) < 1e-6
-        rule = "ADS-B 要求 fs ≥ 2MHz 且为 1MHz 整数倍（1Mbit/s PPM）"
+        rule = "ADS-B 要求 fs ≥ 2 MS/s 且为 1 MS/s 整数倍（1Mbit/s PPM）"
     if not ok_rate:
         ms = (time.perf_counter() - t0) * 1000
         trace.add("downconvert", "complex_samples", n_in,

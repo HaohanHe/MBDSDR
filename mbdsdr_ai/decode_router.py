@@ -103,11 +103,11 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.adsb",
         input_formats=(".cf32", ".cfile"),
         output_kind="frames",
-        sample_rate_rule="fs ≥ 2MHz 且为 1MHz 整数倍（Mode-S 1Mbit/s 前导 8us）",
+        sample_rate_rule="fs ≥ 2 MS/s 且为 1 MS/s 整数倍（Mode-S 1Mbit/s 前导 8us）",
         evidence=EVIDENCE_REAL,
         truth_source="external-truth",   # dump1090 官方样本逐帧对拍
         min_sample_condition=(
-            "1090MHz 下行 .cf32，fs=2MHz 或 4MHz，≥ 3 个干净 DF17 前导"
+            "1090MHz 下行 .cf32，fs=2 MS/s 或 4 MS/s，≥ 3 个干净 DF17 前导"
             "（CRC-24 通过与 dump1090 对拍；多帧扫描见 adsb.decode_baseband）"
         ),
         external_tools=("dump1090", "dump1090-fa"),
@@ -700,7 +700,7 @@ def _error_result(cap: Optional[DigitalModeCapability], mode: str,
 
 # ---- 运行期前置校验：采样率整数倍 + 最短一帧 -------------------------------
 _IQ_RATE_RULES = {
-    "adsb": (2e6, 1e6, "fs ≥ 2MHz 且为 1MHz 整数倍"),
+    "adsb": (2e6, 1e6, "fs ≥ 2 MS/s 且为 1 MS/s 整数倍"),
     "ais": (19200.0, 9600.0, "fs ≥ 19200 且为 9600 整数倍"),
     "meteor": (144000.0, 72000.0, "fs ≥ 144000 且为 72k 符号率整数倍"),
 }

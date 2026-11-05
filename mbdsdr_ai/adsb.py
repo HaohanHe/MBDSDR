@@ -636,7 +636,7 @@ def decode_baseband(iq: np.ndarray, fs: float = 4e6,
     sps = int(round(fs / 1e6))
     if fs < 2e6 or abs(fs / 1e6 - sps) > 1e-6:
         raise ValueError(
-            f"ADS-B 要求 fs ≥ 2MHz 且为 1MHz 整数倍，收到 fs={fs:g} Hz"
+            f"ADS-B 要求 fs ≥ 2 MS/s 且为 1 MS/s 整数倍，收到 fs={fs:g} Hz"
             f"（按当前采样率取整为 sps={sps}，拒绝静默取整）"
         )
     chip = max(sps // 2, 1)
