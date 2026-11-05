@@ -90,7 +90,10 @@ datas = [
     (os.path.join(root, 'NOTICE.md'), '.'),
     (os.path.join(root, 'third_party_licenses'), 'third_party_licenses'),
 ]
-datas += collect_data_files('mbdsdr_ai')
+# 开发资产不进发行物：mbdsdr_ai/tests/ 只服务 pytest 与构建期脚本，
+# 运行期无人读它。Path 先按 os.sep 归一，避免 Windows 上漏判。
+datas += [item for item in collect_data_files('mbdsdr_ai')
+          if '/tests/' not in item[0].replace(os.sep, '/')]
 
 # mbdsdr_ai/astronomy/__init__.py 用 importlib.spec_from_file_location 按**文件路径**
 # 加载被同名 package 遮住的 ../astronomy.py（改名 mbdsdr_ai._astronomy_legacy）。

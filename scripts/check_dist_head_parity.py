@@ -25,6 +25,8 @@
    ``desktop/assets/``（spec 的 datas 源）、``third_party_licenses/``、
    根 ``LICENSE``/``NOTICE.md``、``mbdsdr_ai/`` 下的数据文件，外加 spec
    显式声明的 ``mbdsdr_ai/astronomy.py``。缺件按别名映射回 dist 侧比对。
+5. **``mbdsdr_ai/tests/`` 不得出现在产物里**：spec 的 ``datas`` 已过滤开发
+   资产；产物里命中该前缀即 FAIL（防止 spec 被改回去没人发现）。
 
 豁免（不参与任何清单，只在报告里给计数）:
 
@@ -38,7 +40,7 @@
 字节数只作展示，不作判据：同一文本在 dist 侧可能是 CRLF、在 HEAD blob 里是 LF
 （实测 ``assets/icon.svg`` dist 1241 B vs HEAD 1211 B，哈希一致），别再当差异查一遍。
 
-退出码：0 = 无差异；1 = 有差异（三个清单任一非空）；2 = 参数/环境错误。
+退出码：0 = 无差异；1 = 有差异（清单或禁止路径任一命中）；2 = 参数/环境错误。
 不修改任何打包清单，只报事实。
 """
 
@@ -62,6 +64,8 @@ PROJECT_ROOT_FILES = {"LICENSE", "NOTICE.md"}
 # spec 显式当 data 带进来的源文件（静态分析看不见的动态加载路径）。
 EXPLICIT_DATAS = {"mbdsdr_ai/astronomy.py"}
 HEAD_ONLY_EXCLUDE_DIRS = ("mbdsdr_ai/tests/",)
+# 发行物里不得出现的项目路径（spec 已过滤的开发资产）。
+FORBIDDEN_DIST_PREFIXES = ("mbdsdr_ai/tests/",)
 
 
 def _run(cmd, cwd=None, check=True):
@@ -192,8 +196,12 @@ def main(argv=None):
 
     dist_by_head_path = {}
     alias_map = []
+    forbidden = []
     for rel, full, size in files:
         hp = map_to_head(rel)
+        if any(hp == pre.rstrip("/") or hp.startswith(pre)
+               for pre in FORBIDDEN_DIST_PREFIXES):
+            forbidden.append({"path": hp, "bytes": size})
         top = hp.split("/")[0] if "/" in hp else hp
         in_project = top in PROJECT_TOP or (("/" not in hp) and hp in PROJECT_ROOT_FILES)
         target = hp if hp in inv else (resolve_alias(hp) if in_project else None)
@@ -224,7 +232,7 @@ def main(argv=None):
         if path not in dist_by_head_path:
             head_only.append({"path": path, "head_bytes": inv[path][1]})
 
-    problems = bool(hash_diff or dist_only or head_only)
+    problems = bool(hash_diff or dist_only or head_only or forbidden)
     print(f"构建 HEAD：{head_sha}")
     print(f"产物：{os.path.abspath(args.dist)}；文件 {len(files)} 个")
     print(f"直比（可读源）：{hashed}；一致 {hashed - len(hash_diff)}；"
@@ -246,6 +254,9 @@ def main(argv=None):
     for item in hash_diff:
         print(f"  - {item['path']}  dist {item['dist_bytes']} B / "
               f"head {item['head_bytes']} B")
+    print(f"禁止路径（{'、'.join(FORBIDDEN_DIST_PREFIXES)}）：{len(forbidden)}")
+    for item in forbidden:
+        print(f"  - {item['path']}  {item['bytes']} B")
     print("结论：" + ("FAIL（见上方清单）" if problems else "PASS（无差异）"))
     if third_party_tops:
         print("豁免的第三方顶层目录：" + ", ".join(sorted(third_party_tops)))
@@ -262,6 +273,7 @@ def main(argv=None):
                 "alias_map": alias_map,
                 "dist_only": dist_only,
                 "head_only": head_only,
+                "forbidden": forbidden,
                 "binary_existing": binary_existing,
                 "third_party_tops": sorted(third_party_tops),
                 "third_party_files": third_party_files,
