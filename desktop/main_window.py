@@ -5982,7 +5982,7 @@ class MainWindow(QMainWindow):
 
         调用链：UI 调谐事件 → _on_tune_* → 本方法 →
         VfoManager.push_offset(vfo_id, offset) → dsp_vfo.set_offset(offset)
-        → VFO._rebuild_xlator() 重算 _d_theta（dsp.py:980），process() 真搬频。
+        → VFO._rebuild_xlator() 重算 _d_theta（dsp._d_theta），process() 真搬频。
         多 VFO 时每个 DDC 各自搬频到自己的中心频率。
         """
         if self._vfo_mgr is None:
