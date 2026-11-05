@@ -6,7 +6,8 @@ AudioPlayer 无设备安全降级测试
 对照上游：
 - sdrpp/sink_modules/new_portaudio_sink/src/main.cpp:106-109
     Pa_OpenStream 失败时 flog::error 并 return（不崩溃、不假成功）。
-- audio_out.py:149-174 start()：打开失败时 available=False 并 return False。
+- `mbdsdr_ai.audio_out.AudioPlayer.start()`：打开失败时 available=False 并
+  return False（不写裸行号：行号随插行必漂，按符号名查）。
 
 测试在无声卡（CI 沙箱）环境下：
 - AudioPlayer.available 可能为 False（sounddevice 不可用或无设备）
