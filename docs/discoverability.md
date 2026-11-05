@@ -130,11 +130,12 @@ MCP 域摘要），不在帮助面板里另抄一份。
   `help.*` 3 条），没有删任何既有键位；登记后顺带修好了 guard 的 2 个存量红灯。
 - `desktop/panel_registry.py`：`PanelSpec` 新增 `summary` 字段并给 10 个面板填真实
   一句话说明（能力目录直接取用）。
-- `desktop/main_window.py`（归另一条线，先报备改动行）：
-  - L846：`QKeySequence("A")` → `QKeySequence(_key("view.all_sky"))`（收回事实源）；
-  - L931–945：新增「帮助(&H)」菜单与 3 个 QAction（三步上手 / 能力目录 / 快捷键一览）；
-  - L6868–6892：新增 `_show_help_panel` / `_show_shortcuts_panel`（`show()` 非模态，
-    `WA_DeleteOnClose`，不抢焦点）。
+- `desktop/main_window.py`（归另一条线，按 hunk 报备并只暂存这 3 段）：
+  - `_build_menu_bar`：`QKeySequence("A")` → `QKeySequence(_key("view.all_sky"))`
+    （把散落键字收回事实源）；
+  - 工具菜单之后新增「帮助(&H)」菜单与 3 个 QAction（三步上手 / 能力目录 / 快捷键一览）；
+  - `_show_about` 之前新增 `_show_help_panel` / `_show_shortcuts_panel`
+    （`show()` 非模态、`WA_DeleteOnClose`、不抢焦点）。
 
 ## 七、护栏与反证
 
