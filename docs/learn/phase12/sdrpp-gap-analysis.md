@@ -1,5 +1,7 @@
 # SDR++ 差距清单（Phase 12 整合稿）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 来源：六份精读笔记（docs/learn/phase12/sdrpp-{waterfall,device,demod,dsp,ui,plugin}.md，均为真读源码产出，file:line 可查）。SDR++ = repos/sdrpp（GPLv3，只学机制）。MBDSDR 基线：cpp 95 / flutter 305 / python 225+7。
 > 判定口径：已实现且真实 / 已实现但缺深度 / 未实现。
 

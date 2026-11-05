@@ -1,5 +1,7 @@
 # P3 原生静态审查清单（MainActivity.kt / AppDelegate.swift）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 范围：`mobile/android/.../MainActivity.kt`、`mobile/ios/Runner/AppDelegate.swift`，
 > 以及 `AndroidManifest.xml`、`ios/Runner/Info.plist`。
 > 环境事实（2026-10-01）：云 VM **无 Android SDK / 无 Xcode**，下列原生代码**从未真编译、

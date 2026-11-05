@@ -1,5 +1,7 @@
 # Agent 本地记忆族设计笔记（P3 #73）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 状态：已落地（工具 #73–#75，工具面 72→75）。
 代码位置：`cpp/src/ai/memory_store.{h,cpp}`；工具 `memory_add`/`memory_search`/`memory_update`
 （`cpp/src/ai/tool_schema.cpp` / `agent_tools.cpp` / `control_hub.{h,cpp}`）；

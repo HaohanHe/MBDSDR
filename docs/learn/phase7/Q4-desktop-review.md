@@ -4,6 +4,8 @@ SPDX-License-Identifier: MIT
 
 # Q4 · 桌面四项收尾复查（第六阶段 P3 交付对照）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 范围：对照第六阶段 P3「对标缺口」交付（`docs/learn/phase6/_PHASE6_SPEC.md` §P3）
 > 与第四阶段 B4 审计（`docs/learn/phase4/audits/B4-gap-learning.md`），逐项核对桌面端
 > 四项：**热插拔 UI 提示 / 声卡链接健康 / 分段增益 / VFO 出声**。

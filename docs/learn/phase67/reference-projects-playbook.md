@@ -1,5 +1,7 @@
 # 参考项目学习 Playbook（phase67 · sdroxide / OnAir / DeepSeek-Harness）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > **目的**：把三个参考项目里**可迁移的工程模式**提炼成 MBDSDR 的改造依据，
 > 并记录 phase67 已落地 / 未落地的映射，防止「学完就忘、下轮重学」。
 > **材料**：`/workspace/reference/{sdroxide,OnAir-src,deepseek-harness}`（本地精读件；

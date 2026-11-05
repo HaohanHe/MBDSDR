@@ -1,5 +1,7 @@
 # Phase 63 · 扫频会话持久化（scan-session-persistence）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 HEAD 落地：`b1812c2`。全程 offscreen（`QT_QPA_PLATFORM=offscreen`，
 `LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），未操控真实 GUI。
 只接真实数据源：保存的命中来自真实 `FrequencyScanner::hits()`；安静频带如实存 0 命中。

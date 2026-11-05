@@ -1,5 +1,7 @@
 # Phase83 · UI 设计推进蓝图 + 设置前后端治理
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 日期：2026-10-26 ｜ 状态：本批已落地 P0 修复（见 §5），路线图待逐批推进
 > 依据材料：docs/learn/phase82/research/02-sdrpp-gqrx-ui.md（SDR++/gqrx UI 对标）、
 > docs/learn/carwith_ui_design_teardown.md（CarWith 设计语言拆解，git afcb93c 可取）、

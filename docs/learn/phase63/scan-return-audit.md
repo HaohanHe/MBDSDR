@@ -1,5 +1,7 @@
 # Phase 63 — Scan Return Audit
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 ## 机制
 
 SDR++-style frequency scanner (`FrequencyScanner`, pure logic state machine) walks a

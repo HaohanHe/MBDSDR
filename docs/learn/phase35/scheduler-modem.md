@@ -3,6 +3,8 @@
 
 # SDR++ Scheduler 与 Decoder/Modem 组织精读
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 范围：`repos/sdrpp/misc_modules/scheduler/`（Task/Action）与 `decoder_modules/`
 > 组织（注册与挂进处理链）。判定哪些机制我方已等价拥有、哪些值得借、哪些是反例。
 

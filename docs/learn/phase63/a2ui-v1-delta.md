@@ -1,5 +1,7 @@
 # A2UI v1.0 官方 spec vs MBDSDR AIGUI P0 子集——差距清单（Delta）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > **文档性质**：对照 A2UI Protocol v1.0（Candidate，Last Updated 2026-06-08）官方原文，逐项核对 MBDSDR 已落地的 AIGUI P0 子集（commit 链 e330700 后）的差距。
 > - 官方原文来源：<https://a2ui.org/specification/v1.0-a2ui/>（全文 21 194 字符，2026-10-13 分页读完，end_offset=21194=total_length）；roadmap：<https://a2ui.org/roadmap/>（1 859 字符，全文读完）。
 > - 我方现状来源：`ci/D135/cpp/src/ui/workspace_layout.{h,cpp}`、`workspace_controller.{h,cpp}`、`component_registry.{h,cpp}`、`agent_tools.cpp`（第 2778–2920 行）、`tool_schema.cpp`（第 1563–1620 行）。

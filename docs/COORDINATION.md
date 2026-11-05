@@ -305,7 +305,7 @@
      - `test_identity_redline`：命中已从"两处测试文件"收敛成**唯一一处＝台账
        自己那一行**（`docs/COORDINATION.md:79` 照抄了规则字面量）。复核
        `tests/test_doppler_link.py` / `test_sky_camera_lock.py` 现均 0 命中
-       （对应会话已修），全仓 `git grep` 仅剩台账自指。已按 AGENTS.md 第 1 条
+       （当时状态：该会话已处理，未单列 hash），全仓 `git grep` 仅剩台账自指。已按 AGENTS.md 第 1 条
        「规则字面量用拼接构造，门禁自身不命中自己」改写为只描述类别；
        改完 `tests/test_identity_redline.py` **3 passed / 12.13 s**。
        注意这条红只在工作树存在（HEAD 干净），但本地跑测会一直红，
@@ -482,7 +482,7 @@
 9. **「已知红」必须有 owner 和期限；写进提交说明不算处理**（2026-11-06 立的
    第六种形态）。守卫/棘轮已经报红的条目，只在 commit message 里写「改前
    即高于基线/属他线漂移」= **红被记录后没人接**，比没发现更危险：
-   下一轮看到绿就以为已修。硬口径：任何红要么当天转绿并留下复跑命令，
+   下一轮看到绿就以为问题已清。硬口径：任何红要么当天转绿并留下复跑命令，
    要么进 §七「未清红清单」并挂 owner + 到期日；两条都没做，按未处理算。
    实例：`f664638a` 的提交说明自认 `tests/test_ui_layout_locks.py`「改前已
    高于基线 3」，此后无人接，直到 2026-11-06 全量守卫实测仍是
@@ -558,7 +558,7 @@
   全绿（行尾根治生效）。队列 #8 销账，收尾件拆出 #10。
 
 - 2026-11-05（接续线）：`mbdsdr_ai/agent.py` 自编程四工具从 arm_manual 自报改为外部确认一次性 `confirm_token`（`tx_guard` 单一事实源），schema 移除 arm_manual；`desktop/mcp_protocol.py` 仅改 schema 注入（执行层真人确认不变）。**报备审计线**：本次动到 `agent.py`，但只动 `_register_code_editor_tools` 段（约 3078-3244），未碰 catch-all；若审计棘轮同段在途，按 hunk 归属拆分，别整文件覆盖。
-- 2026-11-05（接续线，**给操作逻辑线**）：PTT 置灰问题已修，按钮状态可复位。`sdr_backend.SDRBackend` 新增
+- 2026-11-05（接续线，**给操作逻辑线**）：PTT 置灰问题已修 `9b803d07`，按钮状态可复位；复跑 `pytest tests/test_backend_tx_capability.py`。`sdr_backend.SDRBackend` 新增
   `supports_tx()`（单一事实源：设备声明 ∧ 本类确有 `write_tx` ∧ 运行时就绪）
   与 `tx_capability()`（declared/implemented/ready/verified 四态）。HackRF / USRP /
   Pluto 三个后端已实现真实写流（libhackrf `hackrf_start_tx` 回调队列 / UHD
@@ -1662,8 +1662,8 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 > **未改写其已有段落**；本说明只加在正文之前。
 > **并入时复核（2026-11-06）**：A 的 4 条与 A2 的 1 条**当前已转绿**
 > （`test_ui_wiring_audit.py` 实测 `11 passed`；`test_control_panel_nan_gain_keeps_previous`
-> 实测 `1 passed`），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽因构建阻塞
-> `main_window.cpp:5644` **未复核**（`not_verified`）；C 是断言闸门的报告口径，不是新欠账。
+> 实测 `1 passed`），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽**已修 `ef07c133`**
+> （原构建阻塞 `main_window.cpp:5644` 已随本笔消除，见 §B 末）；C 是断言闸门的报告口径，不是新欠账。复跑 `ctest -R "^(spectrum_display|spectrum_autorange)$"`。
 
 ## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
 
@@ -1732,13 +1732,22 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 
 ---
 
+### 7.4 红项机检口径（2026-11-06 立，`scripts/check_red_lifecycle.py`）
+
+- **豁免显式**：默认清单 [red-lifecycle-exemptions.md](./red-lifecycle-exemptions.md)，逐文件写机制与理由；只对列明且机制可验证的文件生效。每次运行必打印 `SKIP n（豁免：<文件>，机制=…，理由见 …）`，不许静默；清单进版本，改动留痕。反证：往清单里加普通文档 → 该文件仍红（机制对不上报 X0）。
+- **R5 身份键**：测试名、槽名（`A2` / `B3`）、`§7.3.1 A` 这类组键都算键；同一键在两处（跨文档或同文档不同节）状态不一致即 FAIL。
+- **历史横幅**：只有 `docs/learn/phase*/` 下的文件可写「历史快照，不作现状依据」；带横幅的文件内 R1/R2 降为 HIST-WARN 并单列计数，不带横幅仍 FAIL；现代文档写该横幅判 X1 FAIL（反证：删横幅回红、给现代文档加横幅被拒）。
+- 复跑：`python scripts/check_red_lifecycle.py`；反证：`python -m pytest tests/test_red_lifecycle.py -q`。
+
+---
+
 ## 八、UI 多线对接（2026-11-06，ux-basis）
 
 | 交接项 | 收件线 | 文档 |
 |---|---|---|
 | P1 回放读盘移后台（`_replay_recording` 仍冻 GUI 4.9 s） | 操作逻辑线（`desktop/main_window.py` 持有中） | `docs/pending-patches/2026-11-06-handoff-p1-replay-main-window.md` |
 | P2-C `control_panel` 未连接增益标「—」 | 设置架构线（该文件工作树有在途改动） | `docs/pending-patches/2026-11-06-handoff-p2c-control-panel-gain.md` |
-| `test_ui_wiring_audit` 4 条基线红 + 1 条连带红 | 已修 4 条（ux-basis，测试侧）；#5 留给 P2-C | `docs/pending-patches/2026-11-06-baseline-red-owners.md` |
+| `test_ui_wiring_audit` 4 条基线红 + 1 条连带红 | 已修 4 条（**测试侧**，`86fdbd0b` 改断言/白名单/接线判定，产品代码未动；详见 §7.3.1 A，复跑 `pytest tests/test_ui_wiring_audit.py`）；#5 留给 P2-C | `docs/pending-patches/2026-11-06-baseline-red-owners.md` |
 
 其余待落库项（P2-A/B/D/E、P3）仍在
 `docs/pending-patches/2026-11-06-ux-basis-main-window.md`，每条附反证用例。

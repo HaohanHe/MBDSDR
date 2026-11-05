@@ -1,5 +1,7 @@
 # Phase37 块3：三态验证截图报告
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 范围：只读验证 + offscreen 截图 + 本目录文档。未改任何 cpp/mobile 源码（Wave1 的 tokens.h/ui10 文件/mobile token 化均为 A、B 已落地成果，本块只在其之上做视觉收口）。
 > 截图方式：`QT_QPA_PLATFORM=offscreen` 运行 `cpp/build` 下既有 `ui_shot_*` 目标（CMake 截图程序，`MainWindow::grab()` 出真 PNG，无伪造数据）。
 > 环境基线：ctest 127/127；mbdsdr 已按 A 的 token 化重编成功。

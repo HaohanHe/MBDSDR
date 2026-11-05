@@ -1,5 +1,7 @@
 # CHANGES.md — MBDSDR 论文系统级自查与修订记录
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 - 日期：2026-10-02（Asia/Shanghai）
 - 对象：`docs/learn/phase7/paper/main.md`（DRAFT v0.2 → v0.3）
 - 数据口径核对基准：`paper/experiments/*.csv` 与 `paper/experiments/manifest_*.json`、`paper/experiments/figures/*.png`

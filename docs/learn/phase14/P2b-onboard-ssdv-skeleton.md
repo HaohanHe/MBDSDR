@@ -1,5 +1,7 @@
 # Wave2 骨架：onboard "ssdv" 模式（核心接通前）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 依据权威规格 `SSDV_SSTV_SPEC.md`（fsphil 现代方言：15B 头 + MCU 级 JPEG 重组）。
 > `mbdsdr_ai/ssdv_decoder.py` 正按 fsphil 重写；本批只落**不依赖核心接口**的部分。
 

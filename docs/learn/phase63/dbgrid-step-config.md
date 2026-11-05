@@ -1,5 +1,7 @@
 # dB 参考格线密度可配置（dB grid step tier）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 HEAD `57ee5f7`。本 phase 把频谱 trace 的水平 dB 参考格线（及 y 轴刻度）间距从一个写死的
 具名常量（`kDbGridStep = 20 dB`）升级为用户可选的「10 / 20 / 40 dB」三档，并走 QSettings
 持久化往返。全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`），无 GUI 操控；只接真实

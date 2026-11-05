@@ -1,5 +1,7 @@
 # Peak-hold 衰减速率可配置（maxHold decay tier）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 HEAD `aabc309`。本 phase 把峰值保持（maxHold）的每帧衰减步长从一个写死的具名常量
 （`kMaxHoldDecayDb = 1.5 dB/帧`）升级为用户可选的「慢 / 中 / 快」三档，并走 QSettings
 持久化往返。全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`），无 GUI 操控；只接真实

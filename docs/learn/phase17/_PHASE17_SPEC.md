@@ -1,5 +1,7 @@
 # 第十七阶段实现规格：C++ 补齐 POCSAG / m17 / VOR 三个通用数字 decoder
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 基线：HEAD = c7e4bd6（频率校准 + AM 前置载波 AGC 回归已修复）。ctest 基线 **107/107**。
 >
 > 目标：C++ 侧三个通用数字 decoder 完全没有（grep 空）。自有 Python 参考：mbdsdr_ai/{m17_adapter.py,pocsag_decoder.py,vor_decoder.py}（协议理解）；SDR++ decoder_modules 只学机制（GPL，不复制）；m17 官方规范宽松许可，POCSAG/VOR 公开标准。

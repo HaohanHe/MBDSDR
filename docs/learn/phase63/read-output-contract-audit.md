@@ -1,5 +1,7 @@
 # get_* 工具输出侧契约一致性审计（Agent executor × CH handler）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 - HEAD：`57ee5f7b02a5f1a2a6c3070576d8e8e8c6b20f38`
 - 上轮（入参侧，`ch-agent-param-contract.md`）已修 D1–D5 双侧兼容别名；本轮转到**输出侧**：同一语义字段在 Agent（LLM）通道与 CH/HTTP/Flutter 通道的返回类型/单位/键名/格式是否一致。
 - 审计面：`cpp/src/ai/agent_tools.cpp`（executor 输出 JSON）vs `cpp/src/control/control_hub.cpp`（handler 输出 JSON），并下探消费侧 `mobile/lib/models/control_hub.dart`、`control_http_server.cpp` 以判定漂移方向。

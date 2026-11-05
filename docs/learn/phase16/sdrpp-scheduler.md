@@ -1,5 +1,7 @@
 # Wave3 / P3 — SDR++ misc_modules/scheduler 精读笔记
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 范围：`repos/sdrpp/misc_modules/scheduler/` 全部源码（仅 5 个文件、约 486 行）：
 > `src/main.cpp`、`src/sched_task.h`、`src/sched_action.h`、`src/actions/tune_vfo.h`、`src/actions/start_recorder.h`、`CMakeLists.txt`。
 >

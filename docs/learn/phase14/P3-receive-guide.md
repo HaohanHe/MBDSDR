@@ -5,6 +5,8 @@ Phase14 P3 接收步骤手册：SSTV / SSDV 两路径
 
 # P3 接收手册：从插设备到出图（SSTV / SSDV 两路径）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 本手册命令/接口均**来自真实代码**（已逐行核对，不臆造）：
 > - SSTV：`tools/onboarding/onboard.py --mode sstv`、`mbdsdr_ai/sstv_decoder.py`；
 > - SSDV：`mbdsdr_ai/ssdv_decoder.py`（P2 已交付的**库接口**，见路径 B）。

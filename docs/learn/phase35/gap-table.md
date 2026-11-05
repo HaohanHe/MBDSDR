@@ -2,6 +2,8 @@
 
 # Phase35 差距裁决表（gap-table）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 来源：`docs/learn/phase35/{radio-frontend,dsp-core,scheduler-modem,spectrum-render,file-sink}.md`
 > 基线：HEAD b20bfb7；对照我方 `cpp/src/`（学机制，不抄 GPL 代码）。
 > **W2 落地状态：进行中**——本轮只落两项真差距（AGC 块级峰值前瞻防削波、maxHold 逐帧衰减），

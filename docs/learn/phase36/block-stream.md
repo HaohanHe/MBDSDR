@@ -4,6 +4,8 @@
 
 # GNU Radio 块式流处理精读（block work / flowgraph / TPB / buffer）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 范围：`repos/gnuradio/gnuradio-runtime/`。判定哪些机制我方已等价拥有、哪些值得借、
 > 哪些是反例。我方流链 = `spectrum_engine.cpp` 单线程 pull 泵 + `VfoChannel` 向量级同步链。
 

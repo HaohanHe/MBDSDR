@@ -1,5 +1,7 @@
 # Phase63 — 录制产物管理 UI / 书签交互 / 状态栏密度 三候选复核
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 - **HEAD**: `e1b296a`（侦察前后未变，未做任何 git add/commit/push）
 - **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **运行方式**: 全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），未操控 GUI；构建走持久 `cpp/build/` 增量；截图走既有 `ui_shot_narrow`（`cpp/tests/ui_screenshot_narrow.cpp`）通道，环境变量 `MBD_W/MBD_H/MBD_SCROLL/MBD_TAB/MBD_OUT`。真实数据源 + 诚实空态，未注入任何 mock。

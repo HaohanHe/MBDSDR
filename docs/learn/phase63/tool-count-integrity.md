@@ -1,5 +1,7 @@
 # Phase63 — MBDSDR 47 工具数量完整性核对（桌面 spec ↔ mobile catalog ↔ 计数引用处 ↔ 金集实跑）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 - 审计 HEAD：`3f1f7fb330782e0d062d73c6d5e1366d00ed6a95`
 - 审计口径：只读为主；修复仅限明确"该修"且最小；禁 git add/commit/push；禁 mock；offscreen 跑既有二进制，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，`QT_QPA_PLATFORM=offscreen`，`env -u MBDSDR_TEST_SOURCE`。
 - 工作树未跟踪文件（`cpp/scratch/gated_render_snapshot.cpp`、`cpp/scratch/regen_tool_doc*`、`cpp/tests/ui_diag_freeze.cpp`）未触碰。

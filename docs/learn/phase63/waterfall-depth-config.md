@@ -1,5 +1,7 @@
 # Waterfall 历史深度可配置（independent 机制深化）
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 HEAD = `7ad9a8b`。本轮对三候选先侦察核实，落地真缺口 #1（waterfall 历史深度/时间窗可配置）。全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），零 GUI 操控，零 mock，真实数据源 + 诚实空态。
 
 ## 一、三候选判定表

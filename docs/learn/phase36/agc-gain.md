@@ -2,6 +2,8 @@
 
 # Phase36 G3：GNU Radio AGC 与增益控制
 
+> **历史快照，不作现状依据**。本文记录当时的阶段状态，其中的「已修 / 未修 / 已完成」等结论不得作为现状依据；现状以代码、测试与最新台账为准。
+
 > 精读对象：`repos/gnuradio/gr-analog/`（真读源码）
 > 我方对照：`cpp/src/dsp/agc.{h,cpp}`（Phase35 已落地块级峰值前瞻防削波）
 > 红线：只学机制，不抄 GPL 代码；file:line 留痕。
