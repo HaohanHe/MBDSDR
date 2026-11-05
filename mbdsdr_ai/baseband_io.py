@@ -169,8 +169,90 @@ def save_iq(iq, path: str, sample_rate: float, center_freq_hz: float = 0.0,
     return {**meta, "path": path, "sidecar": sidecar, "size_bytes": size_bytes}
 
 
+def _normalize_segments(manifest):
+    """把 sidecar 的 ``segments`` 清单归一成段表；字段不全就返回 None。
+
+    段表是写入端分段落盘的权威数据（每段一个独立 .iq + 恒定采样率），
+    这里只做核对，不猜缺失字段。每个文件只是其中一段，不能用本文件
+    样本数去核对会话总样本。
+    """
+    if not isinstance(manifest, list) or not manifest:
+        return None
+    segments = []
+    expected_start = 0
+    try:
+        for i, seg in enumerate(manifest):
+            samples = int(seg["samples"])
+            sr = float(seg["sample_rate"])
+            start = int(seg.get("start_sample", expected_start))
+            if samples < 0 or sr <= 0 or start != expected_start:
+                return None
+            segments.append({
+                "path": str(seg.get("path") or ""),
+                "segment_index": int(seg.get("segment_index", i + 1)),
+                "start_sample": start,
+                "samples": samples,
+                "sample_rate": sr,
+                "duration_s": round(samples / sr, 3),
+                "start_time": str(seg.get("start_time") or ""),
+            })
+            expected_start = start + samples
+    except (KeyError, TypeError, ValueError):
+        return None
+    return segments
+
+
+def _segments_from_changes(changes, total_samples: int):
+    """按 ``sample_rate_changes`` 重建段表；只有边界/初始速率明确时才成功。
+
+    旧版写入端把最终采样率写进 sidecar、变更表只留新速率，初始速率和
+    样本边界都已丢失——这种文件返回 None，由调用方如实标“时长未知”，
+    绝不按末次速率编造一个 duration_s。
+    """
+    if not isinstance(changes, list) or not changes:
+        return None
+    try:
+        first_rate = float(changes[0]["from_sample_rate"])
+        bounds = []
+        rates = [first_rate]
+        prev = 0
+        for ch in changes:
+            start = int(ch["start_sample"])
+            sr = float(ch["sample_rate"])
+            if first_rate <= 0 or sr <= 0 or start <= prev or start >= total_samples:
+                return None
+            bounds.append(start)
+            rates.append(sr)
+            prev = start
+    except (KeyError, TypeError, ValueError):
+        return None
+    bounds.append(total_samples)
+    segments = []
+    for i, sr in enumerate(rates):
+        start = 0 if i == 0 else bounds[i - 1]
+        end = bounds[i]
+        segments.append({
+            "start_sample": start,
+            "samples": end - start,
+            "sample_rate": sr,
+            "duration_s": round((end - start) / sr, 3),
+        })
+    duration = round(sum(s["samples"] / s["sample_rate"] for s in segments), 3)
+    return segments, duration
+
+
 def load_iq(path: str, sample_rate: float = None) -> Dict:
-    """读回 IQ 文件为复数 IQ。优先读 sidecar 拿采样率/格式。"""
+    """读回 IQ 文件为复数 IQ。优先读 sidecar 拿采样率/格式。
+
+    分段语义（S4）：
+      * ``segments`` 清单（分段落盘的录音）：返回每段 path/速率/样本/时长，
+        并给本段的精确 ``duration_s`` 与会话总时长 ``session_duration_s``；
+      * ``sample_rate_changes`` 且带 ``from_sample_rate``/``start_sample``：
+        按变更边界重建段表，``duration_s`` 为整段录制的真实总和；
+      * 旧版只有 ``time_s``/``sample_rate`` 的混率文件：初始速率与样本边界
+        不可重建，``duration_s`` 返回 None 并带 ``duration_unknown_reason``，
+        不按末次速率编造数字。
+    """
     if not os.path.exists(path):
         return {"error": f"文件不存在: {path}"}
     meta: Dict = {}
@@ -197,7 +279,8 @@ def load_iq(path: str, sample_rate: float = None) -> Dict:
         raw = np.fromfile(path, dtype=np.float32).astype(np.float64)
         iq = raw[0::2] + 1j * raw[1::2]
 
-    return {
+    total = int(len(iq))
+    result = {
         "path": path,
         "iq": iq.tolist(),
         "sample_rate": float(sample_rate),
@@ -206,9 +289,42 @@ def load_iq(path: str, sample_rate: float = None) -> Dict:
         "gain_db": meta.get("gain_db", 0.0),
         "device": meta.get("device", ""),
         "driver": meta.get("driver", ""),
-        "samples": int(len(iq)),
-        "duration_s": round(len(iq) / (sample_rate or 1), 3),
+        "samples": total,
+        "duration_s": round(total / (sample_rate or 1), 3),
     }
+
+    manifest = meta.get("segments")
+    changes = meta.get("sample_rate_changes")
+    segments = _normalize_segments(manifest)
+    if segments:
+        result["segments"] = segments
+        result["session_samples"] = sum(s["samples"] for s in segments)
+        result["session_duration_s"] = round(
+            sum(s["samples"] / s["sample_rate"] for s in segments), 3)
+        result["mixed_sample_rates"] = len(
+            {s["sample_rate"] for s in segments}) > 1
+        return result
+
+    if isinstance(changes, list) and changes:
+        rebuilt = _segments_from_changes(changes, total)
+        if rebuilt:
+            segments, duration = rebuilt
+            result["segments"] = segments
+            result["sample_rate"] = segments[0]["sample_rate"]
+            result["duration_s"] = duration
+            result["session_samples"] = total
+            result["session_duration_s"] = duration
+            result["sample_rate_changes"] = changes
+            result["mixed_sample_rates"] = len(
+                {s["sample_rate"] for s in segments}) > 1
+        else:
+            result["sample_rate_changes"] = changes
+            result["mixed_sample_rates"] = True
+            result["duration_s"] = None
+            result["duration_unknown_reason"] = (
+                "录制中改过采样率，但 sidecar 缺少 from_sample_rate/"
+                "start_sample，初始速率与分段边界不可重建")
+    return result
 
 
 # ========================================================================

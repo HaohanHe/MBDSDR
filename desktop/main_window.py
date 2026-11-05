@@ -85,6 +85,14 @@ def format_doppler_status(st) -> str:
     return txt + (f" · {reason}" if reason else "")
 
 
+def _record_segment_path(base_path: str, index: int) -> str:
+    """分段落盘路径：第 1 段用原路径，其后 ``<stem>_part<N><ext>``。"""
+    if index <= 1:
+        return base_path
+    stem, ext = os.path.splitext(base_path)
+    return f"{stem}_part{index}{ext}"
+
+
 def _tx_unapplied_reason(note) -> str:
     """把 resolve_tx_doppler 的 reason 归成读数里的短标签（只做措辞，不算 Δ）。"""
     reason = str((note or {}).get("reason") or "").strip()
@@ -496,6 +504,11 @@ class MainWindow(QMainWindow):
         self._record_gain_db: float = 0.0
         self._record_device: str = ""
         self._record_driver: str = ""
+        # 分段落盘（S4）：录音中改采样率 → 关旧段、开新段，绝不混速率写同一文件。
+        self._record_session_path: Optional[str] = None
+        self._record_segments: list = []
+        self._record_segment_index: int = 1
+        self._record_segment_start_time: str = ""
         # 声卡实时输出（sounddevice 可选；无设备时 available=False 安全降级）
         self._audio_player = None
         if AudioPlayer is not None:
@@ -4124,32 +4137,84 @@ class MainWindow(QMainWindow):
 
     @Slot(float)
     def _on_sample_rate_changed(self, rate_hz: float):
-        """控制面板采样率下拉切换 → 下发后端 + 重建流水线（VFO 重采样系数变了）。"""
-        # 真实 SDR 后端：真正下发采样率
-        if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_sample_rate(float(rate_hz))
-            except Exception:
-                pass
-        # 更新录制采样率（下一次开始录制时生效）
-        # 录制中变率：记录变更点写进 sidecar（不再只留最终采样率致混样失真）
+        """控制面板采样率下拉切换 → 下发后端 + 重建流水线（VFO 重采样系数变了）。
+
+        录音中改率（S4）：先停旧流水线等录制 tap join，收尾当前文件段并写
+        sidecar，再用新速率开下一段——同一个 .iq 绝不混两种采样率。各段速率
+        全程精确，读取端按 ``segments`` / ``sample_rate_changes`` 分段。
+        """
+        rate = float(rate_hz)
         if self._recording:
+            if rate <= 0.0 or abs(rate - float(self._record_sr)) < 1.0:
+                return
+            old_sr = float(self._record_sr)
+            # 1) 停旧流水线：shutdown join record tap，确保旧速率的块已落盘
+            self._stop_iq_streams()
+            # 2) 关当前段（sidecar 固定旧速率），得到该段信息
+            info = self._finalize_record_segment()
+            # 3) 下发新速率；中心频率可能随设备/档位变化，重新读取
+            if self._active_sdr_backend is not None:
+                try:
+                    self._active_sdr_backend.set_sample_rate(rate)
+                except Exception as e:
+                    logger.warning("设备切换采样率失败: %s", e)
+                    # 后端速率没变：用旧速率续录新段，绝不让 _recording=True
+                    # 却没有任何段可写（否则停止时会覆盖已收尾的旧文件）。
+                    next_index = len(self._record_segments) + 1
+                    new_path = _record_segment_path(
+                        self._record_session_path or self._record_file_path or "",
+                        next_index)
+                    self._open_record_segment(
+                        new_path, old_sr, float(self._record_center_hz),
+                        datetime.now().isoformat(timespec="seconds"),
+                        next_index)
+                    self._start_iq_streams()
+                    self.statusBar().showMessage(
+                        f"采样率切换失败，继续按 {old_sr:g} Hz 录制: {e}", 8000)
+                    return
             try:
+                center_hz = float(self._active_sdr_backend.get_frequency())
+            except Exception as e:
+                logger.warning("切换采样率后读取中心频率失败: %s", e)
+                center_hz = float(self._record_center_hz)
+            # 4) 开下一段（有空段被丢弃时沿用未占用的序号）
+            next_index = len(self._record_segments) + 1
+            new_path = _record_segment_path(
+                self._record_session_path or self._record_file_path or "", next_index)
+            self._open_record_segment(
+                new_path, rate, center_hz,
+                datetime.now().isoformat(timespec="seconds"), next_index)
+            # 5) 变更表保留精确边界（供只读 sidecar 的读者按段还原）
+            if info is not None:
                 self._record_rate_changes.append({
                     "time_s": getattr(self, "_record_seconds", 0),
-                    "sample_rate": float(rate_hz),
+                    "from_sample_rate": old_sr,
+                    "sample_rate": rate,
+                    "start_sample": sum(int(s["samples"])
+                                        for s in self._record_segments),
                 })
-            except Exception:
-                pass
-        self._record_sr = float(rate_hz)
-        # VFO 输入采样率变了 → 拆旧流水线重建（新 VFO 的 in_sr/重采样系数正确）
-        self._stop_iq_streams()
-        self._start_iq_streams()
-        # 刷新底部状态栏采样率显示
-        self._update_status_bar()
+            self._start_iq_streams()
+            self._update_status_bar()
+            self.statusBar().showMessage(
+                f"采样率 {old_sr:g} → {rate:g} Hz，录音已分到新文件段: "
+                f"{os.path.basename(new_path)}", 8000)
+        else:
+            # 非录音：下发后端 + 重建流水线；后端拒绝就如实报错，不改 UI 读数
+            if self._active_sdr_backend is not None:
+                try:
+                    self._active_sdr_backend.set_sample_rate(rate)
+                except Exception as e:
+                    logger.warning("设备切换采样率失败（非录音态）: %s", e)
+                    self.statusBar().showMessage(
+                        f"采样率切换失败（保持原速率）: {e}", 6000)
+                    return
+            self._record_sr = rate
+            self._stop_iq_streams()
+            self._start_iq_streams()
+            self._update_status_bar()
         # 持久化：采样率
         try:
-            self.settings.set("sample_rate_hz", float(rate_hz))
+            self.settings.set("sample_rate_hz", rate)
         except Exception:
             pass
 
@@ -5486,6 +5551,118 @@ class MainWindow(QMainWindow):
         else:
             self._stop_recording()
 
+    def _open_record_segment(self, path: str, sr: float, center_hz: float,
+                             start_time: str, index: int) -> None:
+        """打开一个录制文件段（每段速率恒定），初始化该段计数。"""
+        self._record_file_path = path
+        self._record_segment_index = int(index)
+        self._record_segment_start_time = start_time or ""
+        self._record_iq_buffer = []
+        self._record_sr = float(sr)
+        self._record_center_hz = float(center_hz)
+        self._record_samples_total = 0
+        self._record_stream_fh = None
+        try:
+            self._record_stream_fh = open(path, "wb")
+        except Exception as e:
+            logger.warning("录制流打开失败（退回内存缓冲）: %s", e)
+            self.statusBar().showMessage(
+                f"录制流打开失败（退回内存缓冲）: {e}", 4000)
+            self._record_stream_fh = None
+
+    def _record_segment_meta(self) -> dict:
+        """当前段的 sidecar 元数据（速率/样本/时长严格自洽）。"""
+        n = int(getattr(self, "_record_samples_total", 0))
+        secs = (n / self._record_sr) if self._record_sr else 0.0
+        return {
+            "sample_rate": float(self._record_sr),
+            "center_freq_hz": float(self._record_center_hz),
+            "start_time": (self._record_segment_start_time
+                           or self._record_start_time),
+            "samples": n,
+            "duration_s": round(secs, 3),
+            "gain_db": self._record_gain_db,
+            "device": self._record_device,
+            "driver": self._record_driver,
+            "format": "cf32",
+            "segment_index": int(self._record_segment_index),
+            "session_path": self._record_session_path or self._record_file_path,
+            "note": "MBDSDR baseband recording (float32 interleaved I/Q, streamed)",
+        }
+
+    def _finalize_record_segment(self) -> Optional[dict]:
+        """收尾当前段：关流 + 写 sidecar；零样本段删除不留空文件。
+
+        返回段信息（写入 ``_record_segments``）；无数据可落盘时返回 None。
+        """
+        path = self._record_file_path
+        n = int(getattr(self, "_record_samples_total", 0))
+        fh = getattr(self, "_record_stream_fh", None)
+        self._record_stream_fh = None
+        info = None
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception as e:
+                logger.warning("关闭录制流失败: %s", e)
+            if n <= 0:
+                # 改率发生在任何样本之前：删掉空壳，段序号也不占位
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            else:
+                info = None
+                try:
+                    from mbdsdr_ai.baseband_io import write_sidecar
+                    meta = self._record_segment_meta()
+                    sidecar = write_sidecar(path, meta)
+                    info = {"path": path, "samples": n,
+                            "sample_rate": float(self._record_sr),
+                            "duration_s": meta["duration_s"],
+                            "start_time": meta["start_time"],
+                            "segment_index": meta["segment_index"],
+                            "size_bytes": n * 8, "sidecar": sidecar}
+                except Exception as e:
+                    logger.warning("录制 sidecar 写盘失败: %s", e)
+                    self.statusBar().showMessage(
+                        f"录制 sidecar 写盘失败: {e}", 5000)
+                    info = {"path": path, "samples": n,
+                            "sample_rate": float(self._record_sr),
+                            "duration_s": round(n / (self._record_sr or 1), 3),
+                            "start_time": self._record_segment_start_time,
+                            "segment_index": int(self._record_segment_index),
+                            "size_bytes": n * 8, "sidecar": None}
+        else:
+            # 流打开失败 → 保留既有内存缓冲降级（S7 单独收口）
+            try:
+                buf = getattr(self, "_record_iq_buffer", None) or []
+                iq = np.concatenate(buf) if buf else np.zeros(0, dtype=np.complex64)
+                if iq.size > 0 and path and _save_iq is not None:
+                    saved = _save_iq(
+                        iq, path, sample_rate=self._record_sr,
+                        center_freq_hz=self._record_center_hz,
+                        start_time=self._record_segment_start_time or None,
+                        gain_db=self._record_gain_db,
+                        device=self._record_device,
+                        driver=self._record_driver,
+                        note="MBDSDR baseband recording (float32 interleaved I/Q)")
+                    info = {"path": path, "samples": int(iq.size),
+                            "sample_rate": float(self._record_sr),
+                            "duration_s": saved.get("duration_s"),
+                            "start_time": self._record_segment_start_time,
+                            "segment_index": int(self._record_segment_index),
+                            "size_bytes": saved.get("size_bytes", 0),
+                            "sidecar": saved.get("sidecar")}
+            except Exception as e:
+                logger.warning("录制存盘失败: %s", e)
+                self.statusBar().showMessage(f"录制存盘失败: {e}", 5000)
+                info = None
+        self._record_iq_buffer = []
+        if info is not None:
+            self._record_segments.append(info)
+        return info
+
     def _start_recording(self):
         """开始录制：检查后端 → 建文件名 → 清 buffer → 状态栏提示。
         无 SDR 后端时弹提示且不造假文件（按钮会被调用方弹回）。"""
@@ -5541,20 +5718,14 @@ class MainWindow(QMainWindow):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(rec_dir, f"baseband_{ts}.iq")
 
-        self._record_file_path = path
-        self._record_iq_buffer = []
-        self._record_sr = sr
-        self._record_center_hz = center_hz
+        self._record_session_path = path
+        self._record_segments = []
+        self._record_segment_index = 1
+        self._record_rate_changes = []
         self._recording = True
         # 流式落盘：边收边写，不再全程攒数组（长录制内存安全）
-        self._record_stream_fh = None
-        self._record_samples_total = 0
-        self._record_rate_changes = []
-        try:
-            self._record_stream_fh = open(path, "wb")
-        except Exception as e:
-            self.statusBar().showMessage(f"录制流打开失败（退回内存缓冲）: {e}", 4000)
-            self._record_stream_fh = None
+        self._open_record_segment(
+            path, sr, center_hz, self._record_start_time, 1)
 
         # 1s 计时 UI（沿用原有 _record_timer）
         self._record_seconds = 0
@@ -5575,8 +5746,52 @@ class MainWindow(QMainWindow):
             pass
         self.statusBar().showMessage(f"开始录制 baseband: {path}")
 
+    def _write_session_sidecars(self, segments: list, manifest: list,
+                                total_samples: int, session_duration: float):
+        """把整场录音的 segments 清单写回每一段的 sidecar。
+
+        各段自己的 ``sample_rate``/``samples``/``duration_s`` 保持不变；
+        追加 ``segments`` 与会话汇总，读取端据此按段还原，不再靠猜。
+        """
+        try:
+            from mbdsdr_ai.baseband_io import write_sidecar
+        except Exception as e:
+            logger.warning("会话 sidecar 写入不可用: %s", e)
+            return
+        changes = getattr(self, "_record_rate_changes", None)
+        for seg in segments:
+            spath = seg["path"] + ".json"
+            try:
+                with open(spath, encoding="utf-8") as f:
+                    meta = json.load(f)
+            except Exception as e:
+                logger.warning("读取分段 sidecar 失败，按段信息重建: %s", e)
+                meta = {
+                    "sample_rate": float(seg["sample_rate"]),
+                    "samples": int(seg["samples"]),
+                    "duration_s": round(int(seg["samples"])
+                                        / float(seg["sample_rate"]), 3),
+                    "start_time": seg.get("start_time", ""),
+                    "segment_index": int(seg.get("segment_index", 1)),
+                }
+            meta["segments"] = manifest
+            meta["session_path"] = segments[0]["path"]
+            meta["session_samples"] = int(total_samples)
+            meta["session_duration_s"] = session_duration
+            meta["session_start_time"] = segments[0].get("start_time", "")
+            if changes:
+                meta["sample_rate_changes"] = changes
+            try:
+                write_sidecar(seg["path"], meta)
+            except Exception as e:
+                logger.warning("会话 sidecar 写盘失败（%s）: %s",
+                               os.path.basename(seg["path"]), e)
+                self.statusBar().showMessage(
+                    f"会话 sidecar 写盘失败（{os.path.basename(seg['path'])}）: {e}",
+                    5000)
+
     def _stop_recording(self):
-        """停止录制：拼接 buffer → save_iq 落盘（.iq + .json sidecar）→ 状态栏汇报。"""
+        """停止录制：收尾最后一段并写 sidecar；多段时汇总 segments 清单。"""
         self._recording = False
         if self._record_timer is not None:
             try:
@@ -5586,57 +5801,37 @@ class MainWindow(QMainWindow):
             self._record_timer = None
 
         info = None
-        fh = getattr(self, "_record_stream_fh", None)
-        if fh is not None:
-            # 流式录制：数据早已在盘上，只需关流 + 写 sidecar
-            try:
-                fh.close()
-            except Exception:
-                pass
-            self._record_stream_fh = None
-            try:
-                from mbdsdr_ai.baseband_io import write_sidecar
-                n = int(getattr(self, "_record_samples_total", 0))
-                secs_d = (n / self._record_sr) if self._record_sr else 0.0
-                meta = {
-                    "sample_rate": self._record_sr,
-                    "center_freq_hz": self._record_center_hz,
-                    "start_time": self._record_start_time,
-                    "samples": n,
-                    "duration_s": round(secs_d, 3),
-                    "gain_db": self._record_gain_db,
-                    "device": self._record_device,
-                    "driver": self._record_driver,
-                    "format": "cf32",
-                    "note": "MBDSDR baseband recording (float32 interleaved I/Q, streamed)",
-                }
-                if getattr(self, "_record_rate_changes", None):
-                    meta["sample_rate_changes"] = self._record_rate_changes
-                sidecar = write_sidecar(self._record_file_path, meta)
-                info = {"path": self._record_file_path, "samples": n,
-                        "size_bytes": n * 8, "sidecar": sidecar}
-            except Exception as e:
-                self.statusBar().showMessage(f"录制 sidecar 写盘失败: {e}", 5000)
-                info = None
-        else:
-            try:
-                if self._record_iq_buffer:
-                    iq = np.concatenate(self._record_iq_buffer)
-                else:
-                    iq = np.zeros(0, dtype=np.complex64)
-                if iq.size > 0 and self._record_file_path and _save_iq is not None:
-                    info = _save_iq(
-                        iq, self._record_file_path,
-                        sample_rate=self._record_sr,
-                        center_freq_hz=self._record_center_hz,
-                        start_time=self._record_start_time or None,
-                        gain_db=self._record_gain_db,
-                        device=self._record_device,
-                        driver=self._record_driver,
-                        note="MBDSDR baseband recording (float32 interleaved I/Q)")
-            except Exception as e:
-                self.statusBar().showMessage(f"录制存盘失败: {e}", 5000)
-                info = None
+        self._finalize_record_segment()
+        segments = list(getattr(self, "_record_segments", None) or [])
+        if segments:
+            total_samples = sum(int(s["samples"]) for s in segments)
+            total_bytes = sum(int(s.get("size_bytes") or 0) for s in segments)
+            session_duration = round(sum(
+                int(s["samples"]) / float(s["sample_rate"]) for s in segments), 3)
+            if len(segments) > 1:
+                manifest = []
+                offset = 0
+                for i, seg in enumerate(segments):
+                    manifest.append({
+                        "path": seg["path"],
+                        "segment_index": int(seg.get("segment_index", i + 1)),
+                        "start_sample": offset,
+                        "samples": int(seg["samples"]),
+                        "sample_rate": float(seg["sample_rate"]),
+                        "start_time": seg.get("start_time", ""),
+                    })
+                    offset += int(seg["samples"])
+                self._write_session_sidecars(
+                    segments, manifest, total_samples, session_duration)
+                info = {"path": segments[0]["path"],
+                        "samples": total_samples,
+                        "size_bytes": total_bytes,
+                        "segments": len(segments),
+                        "session_duration_s": session_duration,
+                        "sidecar": segments[0].get("sidecar")}
+            else:
+                info = dict(segments[0])
+                info["segments"] = 1
         self._record_iq_buffer = []
 
         # UI 恢复
@@ -5649,8 +5844,12 @@ class MainWindow(QMainWindow):
             pass
         if info:
             kb = info.get("size_bytes", 0) / 1024.0
-            msg = (f"录制完成: {info['path']}  "
-                   f"({info['samples']} 样本, {kb:.1f} KB, {secs}s)")
+            if int(info.get("segments") or 1) > 1:
+                msg = (f"录制完成: {info['segments']} 段, 首段 {info['path']}  "
+                       f"(共 {info['samples']} 样本, {kb:.1f} KB, {secs}s)")
+            else:
+                msg = (f"录制完成: {info['path']}  "
+                       f"({info['samples']} 样本, {kb:.1f} KB, {secs}s)")
             try:
                 self.control_panel.record_status.setText(
                     f"已存 {info['samples']} 样本 ({kb:.0f} KB)")
@@ -6735,6 +6934,18 @@ class MainWindow(QMainWindow):
             return
         sr = float(rec.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ))
         center_hz = float(rec.get("center_freq_hz", 0.0))
+        # S4：分段录音/混率录音的读数不能装成单一速率
+        segments = rec.get("segments") or []
+        self._replay_unknown_duration = rec.get("duration_s") is None
+        if segments and len(segments) > 1:
+            self.statusBar().showMessage(
+                f"该录音共 {len(segments)} 段（录制中改过采样率）；"
+                f"本次回放第 {rec.get('segment_index', 1)} 段", 8000)
+        elif self._replay_unknown_duration:
+            QMessageBox.warning(
+                self, "回放说明",
+                "该录音在录制中改过采样率，sidecar 缺少分段边界；"
+                "无法确定真实时长，本次按 sidecar 末次采样率回放。")
 
         # 停止实时轮询（回放期间独占频谱）；结束后按当时连接状态恢复。
         # 恢复条件 = 实时后端是否连着，而不是旧 UI 线程 _iq_poll_timer
@@ -6808,12 +7019,18 @@ class MainWindow(QMainWindow):
         self._replay_pos += n
         cur_s = self._replay_pos / self._replay_sr
         tot_s = self._replay_total / self._replay_sr
-        self.statusBar().showMessage(
-            f"回放中: {min(cur_s, tot_s):.1f}/{tot_s:.1f}s", 0)
-        if self._replay_pos >= self._replay_total:
-            self._stop_replay()
+        if getattr(self, "_replay_unknown_duration", False):
             self.statusBar().showMessage(
-                f"回放完成（{tot_s:.1f}s）", 5000)
+                f"回放中: {cur_s:.1f}s（总时长未知：录制中改过采样率）", 0)
+        else:
+            self.statusBar().showMessage(
+                f"回放中: {min(cur_s, tot_s):.1f}/{tot_s:.1f}s", 0)
+        if self._replay_pos >= self._replay_total:
+            done = ("回放完成（时长未知：录制中改过采样率）"
+                    if getattr(self, "_replay_unknown_duration", False)
+                    else f"回放完成（{tot_s:.1f}s）")
+            self._stop_replay()
+            self.statusBar().showMessage(done, 5000)
 
     def _stop_replay(self):
         """停止回放并恢复实时状态。
