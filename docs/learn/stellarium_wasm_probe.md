@@ -114,7 +114,7 @@ scons: done building targets.
 
 ---
 
-## 5. 构建产物（已验证）
+## 5. 构建产物（可复跑；产物未入库）
 
 路径：`stellarium-web-engine/build/`
 
@@ -150,7 +150,7 @@ scons: done building targets.
 
 ---
 
-## 7. 复现步骤（已验证可跑通）
+## 7. 复现步骤（可复跑；构建日志未入库）
 
 ```bash
 # 1. 装工具（无 sudo）

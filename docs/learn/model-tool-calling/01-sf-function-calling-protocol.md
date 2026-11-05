@@ -287,7 +287,7 @@ while (true) {
 
 | 边界 | 文档依据 | 实现要点 |
 |---|---|---|
-| **a) Function calling = OpenAI 兼容循环** | `:133`（兼容 OpenAI）、`:86-100`（tools 格式）、`:295-305`（响应+回传）、`:307-313`（二次调用） | 完整闭环已验证：tools 请求 → tool_calls 响应 → role=tool 回传 → 二次调用出结果。硅基流动严格遵循 OpenAI 协议 |
+| **a) Function calling = OpenAI 兼容循环** | `:133`（兼容 OpenAI）、`:86-100`（tools 格式）、`:295-305`（响应+回传）、`:307-313`（二次调用） | 完整闭环（**无请求/响应日志留存，按未验证引用**）：tools 请求 → tool_calls 响应 → role=tool 回传 → 二次调用出结果。硅基流动严格遵循 OpenAI 协议 |
 | **b) reasoning_content 透传** | 本文档未涉及（§全文无 reasoning 字样） | 硅基流动基础 FC 文档不提思考链保留；但平台有"推理模型"专区（`:434` 链接），思考模型的 reasoning_content 保留需另查推理模型文档 |
 | **c) arguments 合法性 / schema 校验** | `:296-297`（arguments 字段）、`:203-216`（schema 定义示例）、`:297`（官方用 eval 直接执行——反证：官方没做校验，我们必须做） | arguments 是 JSON 字符串，必须 parse + schema 校验 + 参数白名单；官方 eval 示例是反面教材 |
 | **d) tool_choice 强制** | 文档未提及 tool_choice 参数 | 推断为默认 auto（OpenAI 兼容行为），无法强制指定工具 |

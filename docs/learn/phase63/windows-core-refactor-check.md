@@ -3,7 +3,8 @@
 - 仓库 HEAD：`1068d5d`；全程只读审计（grep / Read / git show），**零代码改动**，未 git add/commit/push。
 - 触发背景：commit `97c60b7`（build: compile app once into mbdsdr_core static lib; kill per-target autogen）
   把整棵应用源码收敛为单一静态库 `mbdsdr_core`，AUTOMOC/AUTOUIC/AUTORCC 只跑一次；
-  Linux 侧已验证（clean configure + -j4，758s 全量构建 rc=0，ctest 133/133）。
+  Linux 侧已验证（clean configure + -j4，758s 全量构建 rc=0，ctest 133/133；
+  **构建日志未入库，结论按可复跑引用，未留存原始输出**）。
   本文档在**不实际构建**的前提下，从 CMake/源码事实推演 Windows MinGW-w64 13.1 + Qt 6.8.2
   侧（用户环境 `D:\mbdsdr\MBDSDR`）需要复核/验证的差异点。
 - 结论先行：**重构本身的 CMake 逻辑是平台无关的，未发现"重构后 Windows 必须改码"的硬性差异点**；

@@ -33,7 +33,12 @@ agent 侧 `list_devices` 永远只有 debug 信号源。
 
 `device_id` 统一形态：`rtl_tcp_{host}_{port}`（RTLSDRBackend 原有命名）。
 
-## 真机验证（agent -> MCP -> rtl_tcp -> 棒子）
+## 链路记录（文档转述；原始日志未留存，按「未验证」引用）
+
+> **证据分级（2026-11-05 复核）**：下面是当时会话的转述，仓内**没有** MCP 请求/响应的原始日志
+> （`.jsonl`/`.log`/抓包）留存，因此整条链的三通道数值一律按「未验证」引用，不得写成「已验证」。
+> 可复跑部分：`pytest mbdsdr_ai/tests/test_sdr_rtltcp_registration.py`（实测 14 passed / 2 skipped，
+> 活体用例在 `MBDSDR_RTL_TCP` 未配置时诚实跳过）。
 
 ```
 list_devices  -> [{"name": "rtl_tcp 127.0.0.1:1234", "driver": "rtltcp", ...}]
@@ -45,9 +50,13 @@ get_status    -> {"connected": true, "device": "rtl_tcp 127.0.0.1:1234",
                   "frequency_hz": 435274000.0, "demod": "FM", "gain_db": 20.0}
 ```
 
-射频侧交叉印证：同机 NanoVNA-H 测得 RH770 天线 430 段谐振 ≈419.5MHz（手持），
+~~射频侧交叉印证：同机 NanoVNA-H 测得 RH770 天线 430 段谐振 ≈419.5MHz（手持），
 SDR 端 435.25MHz 中心 Welch PSD 见到 9 个真实窄带载波、435.274 解调语音带
-RMS 0.49（空频点噪声底 0.09）。
+RMS 0.49（空频点噪声底 0.09）。~~
+
+**上述射频侧交叉印证已撤回（2026-11-05 复核）**：419.5MHz、435.25MHz 9 载波、
+435.274 RMS 0.49 均无原始采集件（无扫频存档、无 PSD 图/IQ、无脚本输出）；且已入库的
+24 平均扫频在 400–455MHz 单调下降，不支持 419.5MHz 谐振。详见 `docs/limitations-register.md` 附 P。
 
 ## 测试
 

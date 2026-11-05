@@ -604,8 +604,8 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | 结论 | 数字 | 证据类型 | 证据位置 | 可否复跑 | 判定 |
 | --- | --- | --- | --- | --- | --- |
 | NanoVNA RH770 半拉谐振（深坑） | 408MHz / -28dB | 文档自述（侦察细扫，未入 24 平均存档） | `experiments/nanovna_rh770/README.md:32,50,53` | 否：无原始单扫数据，且需 VNA+手持 | **未验证（证据不足）** |
-| NanoVNA RH770 全展谐振 | ≈419.5MHz | 文档自述，无采集件 | `docs/learn/agent-onboarding-runbook.md:192`；`docs/learn/sdr-rtltcp-agent-path.md:48` | 否 | **未验证**；且与存档 24 平均扫频矛盾（见下行） |
-| RH770 430 段回损（全展，24 平均存档） | 400MHz 15.0dB；419MHz 10.3dB；435MHz 6.7dB（400–455 单调下降） | 入库扫频 JSON | `experiments/nanovna_rh770/data/rh770.json`（seg1，101 点/1MHz） | 是（离线复算） | **有证据**（不支持 419.5MHz 谐振） |
+| NanoVNA RH770 全展谐振 | ≈419.5MHz | 文档自述，无采集件 | `docs/learn/agent-onboarding-runbook.md:192`；`docs/learn/sdr-rtltcp-agent-path.md:48` | 否 | **与存档矛盾**：存档 400–455MHz 总体单调下降（|S11| 全局最小在 400.0MHz 端 = 0.1786，RL 14.96dB；455MHz 最差 RL 4.94dB），仅 418–419MHz 有 0.1dB 级浅平台（418.0MHz |S11|=0.3046、RL 10.32dB、VSWR≈1.86），未见 419.5MHz 谐振；1MHz 步长也无法分辨 419.5 |
+| RH770 430 段回损（全展，24 平均存档） | 400MHz 14.96dB；418MHz 10.32dB；419MHz 10.32dB；435MHz 6.66dB；455MHz 4.94dB | 入库扫频 JSON | `experiments/nanovna_rh770/data/rh770.json`（seg1，400–500MHz，101 点/1MHz，前 56 点 400–455） | 是（离线复算：`np.argmin(abs(s11))`） | **有证据**（不支持 419.5MHz 谐振） |
 | 馈线 TDR 单程时延 | 4.89ns（复算 4.885–4.886ns） | 入库 S11 相位斜率 + 分析脚本 | `experiments/nanovna_rh770/data/cable_open.json`；`scripts/vna_cable_analyze.py` | 是（`python scripts/vna_cable_analyze.py` 实测电气长度 1.459/1.556m、435MHz 1.53dB） | **有证据（时延本体）**；长度换算两口径矛盾，见下注 |
 | 相位残差 | 0.033rad | 无脚本、无输出记录 | 仅见于论文/说明文档 | 部分：复核复算 max 0.037rad / std 0.0155rad（段1） | **未核实** |
 | NanoVNA TCXO 回读 | 26000000Hz | 文档自述 + 回放夹具 | `docs/learn/nanovna/feature-parity.md:674,705`；`mbdsdr_ai/nanovna_dump.py:247`（夹具） | 否：无原始串口日志 | **未验证（证据不足）**（夹具不算真机证据） |
@@ -617,11 +617,34 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | RTL-SDR 七环 R1–R5/R7（2026-11-03） | results.json 内各值 | results.json + wav + SigMF + PNG | `.tmp-tool-results/hw_acceptance/20261103_191805/`（未入库，现存） | 需硬件；当前 `device_count=0` | **有证据（当时）**；本机不可复跑（缺设备） |
 | hw-acceptance R5/R6/R7（无硬件环） | 仰角误差 0.03–0.05°、太阳 0.005°、7 门判定全过 | 现场重跑输出 | 本次重跑 `.tmp-tool-results/hw_acceptance/20261105_235725/summary.json` | 是（已实跑 PASS 3/FAIL 0） | **有证据** |
 
-> 长度换算注：`4.89ns` 是单程时延（Γ_open 相位斜率 = −4πfL/v）。电气长度 `Le = c·τ`
-> 是「空气等效长度」，物理长度 `L = Le·VF`。按 VF≈0.687 得 L≈1.00m，与「1 米」标签
-> 相符；`experiments/nanovna_rh770/README.md:38-39` 用 `VF = Le/L = 1.46` 后反推
-> 「实际 1.7–2.2m 或标签不准」，方向算反了，该结论**未核实**。两种表述不得同时对外引用。
+> 长度换算注（可复算式）：`Γ_open` 相位 `φ(f) = −4πfL/v`，斜率 `s = dφ/df = −4πL/v`。
+> 单程时延 `τ = |s|/(4π)`；空气等效电气长度 `Le = c·τ`；**物理长度 `L = Le·VF`**（乘以 VF）。
+> 存档复算：`|s| = 0.0611 rad/MHz` → `τ = 4.86ns` → `Le = 1.459m`；VF=0.66–0.70 时
+> `L = 0.963–1.021m`，与「1 米」标签相符。原 `README.md:38-39` 写成 `VF = Le/L = 1.46`
+> （**除以**而非**乘以** L），再按 `L = Le/VF` 反推「实际 1.7–2.2m 或标签不准」，方向算反，
+> 该结论**未核实**；正文已同步改成上式，两种表述不得同时对外引用。
 >
 > 本次重跑原始输出（R5/R6/R7）：PASS 3 / FAIL 0 / SKIPPED 0 / UNVERIFIED 0；
 > 证据目录 `D:\mbdsdr\MBDSDR\.tmp-tool-results\hw_acceptance\20261105_235725\`。
+
+### 附 P.2 全仓「已验证/实测通过/真机验证」字样扫描（2026-11-06）
+
+> 命令：`grep -rn "已验证\|实测通过\|真机验证\|真机实测" docs experiments`
+> 命中：`docs/` 96 行、`experiments/` 3 行。命中中绝大多数本身是否定式（「未验证」
+> 「待真机验证」「不得写成已验证」）或软件/静态证据（测试、构建、源码引用），
+> 不属于真机事实。**仅文字、无原始件的正称条目统一列在下表，正文不得再当事实引用。**
+
+| 文件:行 | 原字样 | 原声明 | 判定 / 处置 |
+| --- | --- | --- | --- |
+| `docs/learn/capability-map.md:451-454` | 真机实测 | USB CDC 320×240 帧「约 0.5s 传完」 | **无原始件**（无时间戳/日志；153600B 帧本身有采集件，耗时无记录）。正文已加保留说明 |
+| `docs/learn/model-tool-calling/01-sf-function-calling-protocol.md:290` | 完整闭环已验证 | OpenAI 兼容 tools 循环 | **无原始件**（无请求/响应日志留存）。按「未验证」引用，已加注 |
+| `docs/learn/stellarium_wasm_probe.md:117,153` | 已验证（构建产物/复现步骤） | wasm 构建可跑通 | **无原始件**（产物/日志未入库）；可复跑，重跑才算证据，已加注 |
+| `docs/learn/phase63/windows-core-refactor-check.md:6` | Linux 侧已验证 | clean configure + 133/133 ctest | **无原始件**（构建日志未入库）；可复跑，已加注 |
+| `docs/doppler-compensation.md:293,328,352` | 真机已验证（UI 文案） | `verified=true` 时的按钮文案 | **不可达文案**（当前无 `verified=True` 后端，`docs/PRD.md:919`）；不构成对外事实，无需改代码 |
+| `docs/hw-acceptance.md:66`；`docs/real_hw_acceptance_20261103.md:68` | 已验证（数据面） | R4 导频/音频 RMS/频谱 | **有原始件（当时）**：`.tmp-tool-results/hw_acceptance/20261103_191805/`；人耳听感仍**无原始件**，原文已标「需人工放行」 |
+| `experiments/nanovna_rh770/README.md:37`；`scripts/vna_screenshot.py:10` | 真机验证 | `capture_screen()` 代码路径 | **有原始件**：`data/vna_screen_*.rgb/.png` |
+
+> 其余「已验证」均为测试/静态引用（如 `test_acars_consistency.py`、`network-layer.md` 46 用例、
+> `redsea_real.md` 1024 双射、`protocol_analysis.md` 往返测试、`audit_r2` 源码事实），
+> 属可复跑的软件证据，不列入真机证据链。
 

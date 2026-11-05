@@ -671,7 +671,9 @@ resume/vbat/freqoffset/edelay/bandwidth）两面对齐情况此前已登记；�
   （agent_tools.cpp execGetVnaStatus / control_hub.cpp cmdGetVnaStatus）
   新增 `tcxo_hz` 字段——仅在固件回出可解析 `current: <Hz>` 时出现，老固件
   字段缺失而非伪造 0。
-- 真机实测：`current: 26000000`（26.000000 MHz）。
+- **未验证（证据不足）**：当时回显 `current: 26000000`，但仓内无原始串口日志/抓包留存；
+  `mbdsdr_ai/nanovna_dump.py:247` 的 `current: 26000000` 是**回放夹具**，不构成真机证据
+  （2026-11-05 复核，见 `docs/limitations-register.md` 附 P）。复跑需 NanoVNA + COM 口。
 
 ## 缺口 2：capture 屏幕截图（原为"探测到特性但无实现"的半适配）
 
@@ -700,12 +702,14 @@ resume/vbat/freqoffset/edelay/bandwidth）两面对齐情况此前已登记；�
   **本机 Qt MinGW cc1.exe 损坏（0xC000007B）无法编译验证，需在有 healthy
   工具链的机器上跑一次 ctest。**
 
-## 真机验证证据（COM11，注入式预开传输层）
+## 真机证据分级（COM11，注入式预开传输层；2026-11-05 复核）
 
-- `read_tcxo()` -> 26000000；
-- `capture_screen()` -> 153600 字节（0.6s）；
-- RGB565->BMP 230454 字节（54+320x240x3）精确一致，PNG 目视确认为设备屏幕
-  （残留上一发 152-175MHz 扫描与 Smith 图）。
+- `read_tcxo()` → 26000000：**未验证（证据不足）**，仅文档自述，无原始回显日志；
+- `capture_screen()` → 153600 字节（0.6s）：**有证据**——入库采集件
+  `experiments/nanovna_rh770/data/vna_screen_{live,detail,wide,2m}.rgb`（4×153600B，320×240 RGB565）；
+  PNG 同目录同尺寸（离线校验非空白）。
+- RGB565→BMP 230454 字节（54+320x240x3）：**由帧尺寸推导**，可由上述 `.rgb` 离线生成；
+  无独立存档 BMP，按推导值引用。
 
 ## 顺带登记（未做，宁缺毋滥）
 
