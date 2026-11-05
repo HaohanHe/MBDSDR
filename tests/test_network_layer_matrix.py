@@ -306,6 +306,7 @@ class TestRtlTcpMatrix:
             [sys.executable, "-c", code, str(port)],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         proc2 = None
+        be = None
         try:
             assert proc.stdout.readline().strip() == "READY", "假服务未就绪"
             be = _make_rtl_backend(port, idle=1.0)
@@ -336,6 +337,9 @@ class TestRtlTcpMatrix:
             _assert_frame_is_normal(frame2)
             print("[matrix] rtl_tcp after-restart first-frame=ok")
         finally:
+            # 必须收掉生产者线程：别的用例会数 mbdsdr-ring-producer 线程
+            if be is not None:
+                be.disconnect()
             for p in (proc, proc2):
                 if p is not None and p.poll() is None:
                     p.kill()
@@ -572,6 +576,7 @@ class TestSpyServerMatrix:
             assert be._receive_chain is not old_chain
             assert be._receive_chain._squelch is not old_squelch
             print(f"[matrix] spyserver normal-close detect={t_detect:.3f}s via=EOF")
+            be.disconnect()
             stop.set()
 
     def test_spyserver_process_killed_then_half_open(self):
@@ -674,6 +679,7 @@ class TestSpyServerMatrix:
             with pytest.raises(Exception):
                 c.read_samples(16)
             assert c.state == link_state.STATE_STALE
+            c.stop()
             stop.set()
 
         # 差异 2：握手 12 字节 vs 1024 字节（常量对拍）
