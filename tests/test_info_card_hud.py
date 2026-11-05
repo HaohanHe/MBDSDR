@@ -209,12 +209,32 @@ class TestObserverChip:
         v2._observer = None
         v2.grab()                     # 画「未设置」，不崩
 
-    def test_overlay_wires_formatter(self):
-        src = open(os.path.join(_ROOT, "desktop", "rf_sky_view.py"),
-                   encoding="utf-8").read()
-        i = src.index("def _draw_info_overlay")
-        j = src.index("def ", i + 10)
-        body = src[i:j]
-        assert "format_observer_chip(self._observer)" in body, \
-            "信息卡必须真调 format_observer_chip 读观测站"
-        assert "观测站" in body, "信息卡应有「观测站」行标签"
+    def test_overlay_reads_observer_through_formatter(self, monkeypatch):
+        """信息卡绘制必须经 format_observer_chip 读观测站（观测站行不许消失）。
+
+        旧写法按源码 `src.index("def _draw_info_overlay")` 切段钉字符串；
+        这里在模块里装一个 spy，绘制时若没调格式化函数就直接红。
+        """
+        import sys
+        rv = sys.modules[RFSkyView.__module__]
+
+        calls = []
+        real = rv.format_observer_chip
+
+        def spy(observer):
+            calls.append(observer)
+            return real(observer)
+
+        monkeypatch.setattr(rv, "format_observer_chip", spy)
+
+        v = _new_view()
+        v.grab()
+        assert calls and calls[-1] == v._observer, \
+            "信息卡绘制没有读取观测站（观测站读数行不见了）"
+
+        v2 = RFSkyView()
+        v2.resize(600, 600)
+        v2._observer = None
+        v2.grab()
+        assert calls[-1] is None, \
+            "无观测站时绘制必须仍经格式化函数走诚实空状态"

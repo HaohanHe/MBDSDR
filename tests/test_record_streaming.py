@@ -98,23 +98,45 @@ def test_stream_write_no_accumulation(tmp_path):
     assert out["samples"] == 3072
 
 
-def test_stop_recording_uses_sidecar_when_streamed():
-    src = open(os.path.join(_ROOT, "desktop", "main_window.py"),
-               encoding="utf-8").read()
-    i = src.index("def _stop_recording")
-    j = src.index("def ", i + 10)
-    body = src[i:j]
-    # S4 起收尾走统一段落收尾（_finalize_record_segment），sidecar 由它落盘；
-    # 这里跟着契约走，仍然钉住「流式路径必须写 sidecar」，不是放宽。
-    assert "_finalize_record_segment" in body, (
-        "流式收尾必须走统一的段落收尾，不能再自己 concatenate")
-    helper = src[src.index("def _finalize_record_segment"):]
-    helper = helper[:helper.index("\n    def ", 1)]
-    assert "write_sidecar" in helper, "段落收尾必须写 sidecar"
-    # 多段会话清单由 _write_session_sidecars 回写（S4 取代了 _stop_recording
-    # 里的 concatenate / 手工 sidecar 拼接）
-    assert "_write_session_sidecars" in body
-    assert "session_duration_s" in body
+def test_stop_recording_uses_sidecar_when_streamed(window, tmp_path):
+    """流式路径收尾：逐段落 sidecar + 会话清单，不把多段拼成一个大数组。
+
+    旧写法扫 `_stop_recording` / `_finalize_record_segment` 的函数体字符串；
+    这里真开两段（含改率开新段），停机后检查每段 sidecar 的样本数、
+    会话清单 start_sample 偏移与总时长——拼接实现无法给出这个结构。
+    """
+    p1 = tmp_path / "baseband_20261105_000000.iq"
+    p2 = tmp_path / "baseband_20261105_000100.iq"
+
+    assert _prepare_segment(window, p1, sr=1_000_000.0) is True
+    window._record_write_chunk(np.ones(10_000, dtype=np.complex64))
+
+    # 改率 → 新开第二段（与 _start_recording 的真实分段路径一致）
+    assert window._finalize_record_segment() is not None
+    window._record_segment_start_time = "2026-11-05T00:00:01"
+    assert window._open_record_segment(str(p2), 500_000.0, 100_000_000.0,
+                                       "2026-11-05T00:00:01", 2) is True
+    window._record_write_chunk(np.ones(5_000, dtype=np.complex64))
+    assert window._recording is True
+
+    window._stop_recording()
+
+    meta1 = json.loads((tmp_path / "baseband_20261105_000000.iq.json")
+                       .read_text(encoding="utf-8"))
+    meta2 = json.loads((tmp_path / "baseband_20261105_000100.iq.json")
+                       .read_text(encoding="utf-8"))
+    assert (meta1["samples"], meta2["samples"]) == (10_000, 5_000), \
+        "逐段 sidecar 的样本数不是各自段落真实落盘量（可能被拼接覆盖）"
+    assert os.path.getsize(p1) == 10_000 * 8
+    assert os.path.getsize(p2) == 5_000 * 8
+    assert meta1.get("session_samples") == 15_000, \
+        "会话总样本数没回写到段 sidecar"
+    assert meta1.get("session_duration_s") == pytest.approx(0.02), \
+        "会话总时长没按各段 sr 求和回写"
+    segs = meta1.get("segments") or []
+    assert [(s.get("start_sample"), s.get("samples")) for s in segs] == \
+        [(0, 10_000), (10_000, 5_000)], \
+        f"会话清单的段偏移/长度不对：{segs}"
 
 
 def test_open_failure_refuses_start_instead_of_buffering(window, tmp_path):

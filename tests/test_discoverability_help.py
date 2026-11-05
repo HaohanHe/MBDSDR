@@ -36,6 +36,18 @@ def catalog():
     return build_catalog()
 
 
+@pytest.fixture(scope="module")
+def main_window(qtapp):
+    from main_window import MainWindow
+    w = MainWindow()
+    yield w
+    try:
+        w._disconnect()
+    except Exception:  # noqa: BLE001 - 收尾失败不拖垮用例
+        pass
+    w.close()
+
+
 def _by_prefix(items, prefix):
     return [x for x in items if x.source.startswith(prefix)]
 
@@ -167,17 +179,26 @@ def test_decoder_registry_reports_wiring_gap(catalog):
     assert "未接线" in rows["VOR"].note
 
 
-def test_static_capabilities_symbols_exist(catalog):
-    """无注册表可查的两条：用源码符号反证，不靠口说。"""
+def test_static_capabilities_symbols_exist(catalog, main_window):
+    """无注册表可查的两条：直接调真实对象验行为，不靠扫源码口说。"""
     sky = [x for x in catalog if x.source.endswith(":_build_search_widgets")]
     tx = [x for x in catalog if x.source.endswith(":_tx_block_reason")]
     assert sky and tx
 
-    with open(os.path.join(_ROOT, "desktop", "rf_sky_view.py"), encoding="utf-8") as f:
-        assert "_build_search_widgets" in f.read()
-    with open(os.path.join(_ROOT, "desktop", "main_window.py"), encoding="utf-8") as f:
-        src = f.read()
-    assert "self.tx_button" in src and "_tx_block_reason" in src
+    from rf_sky_view import RFSkyView
+    v = RFSkyView()
+    build = getattr(v, "_build_search_widgets", None)
+    assert callable(build), "天球搜索入口方法消失（目录里的「搜索天体」成空话）"
+    build()
+    assert getattr(v, "_search_edit", None) is not None and v._search_edit.placeholderText(), \
+        "天球搜索框没建出来"
+
+    assert callable(getattr(main_window, "_tx_block_reason", None)), \
+        "TX 拦截原因出口消失"
+    assert getattr(main_window, "tx_button", None) is not None, "TX 按钮控件消失"
+    reason = main_window._tx_block_reason()
+    assert isinstance(reason, str) and "未连接" in reason, (
+        "未连接时 TX 必须给出可读原因，实际 " f"{reason!r}")
 
 
 def test_unavailable_panels_would_be_caught(qtapp):
@@ -285,10 +306,26 @@ def test_shortcuts_panel_smoke(qtapp):
     dlg.deleteLater()
 
 
-def test_help_menu_is_wired_in_main_window():
-    with open(os.path.join(_ROOT, "desktop", "main_window.py"), encoding="utf-8") as f:
-        src = f.read()
-    for label in ("三步上手", "能力目录", "快捷键一览"):
-        assert f'QAction("{label}"' in src
-    assert "_show_help_panel(0)" in src and "_show_help_panel(1)" in src
-    assert "_show_shortcuts_panel" in src
+def test_help_menu_is_wired_in_main_window(main_window, qtapp):
+    """帮助菜单三个入口必须真的打开对应面板，且落在正确的页签。"""
+    from PySide6.QtGui import QAction
+
+    acts = {a.text(): a for a in main_window.findChildren(QAction)}
+    for label, tab in (("三步上手", 0), ("能力目录", 1)):
+        assert label in acts, f"帮助菜单缺「{label}」入口"
+        acts[label].trigger()
+        qtapp.processEvents()
+        dlg = getattr(main_window, "_help_dialog", None)
+        assert dlg is not None and dlg.isVisible(), f"「{label}」没有打开帮助面板"
+        assert dlg.tabs.currentIndex() == tab, (
+            f"「{label}」打开的页签是 {dlg.tabs.currentIndex()}，应为 {tab}")
+        dlg.close()
+        qtapp.processEvents()
+
+    assert "快捷键一览" in acts, "帮助菜单缺「快捷键一览」入口"
+    acts["快捷键一览"].trigger()
+    qtapp.processEvents()
+    sc = getattr(main_window, "_shortcuts_dialog", None)
+    assert sc is not None and sc.isVisible(), "「快捷键一览」没有打开面板"
+    sc.close()
+    qtapp.processEvents()

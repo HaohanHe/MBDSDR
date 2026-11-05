@@ -172,15 +172,29 @@ def test_palette_blocks_unavailable_with_reason(main_window, index):
 # ---------------------------------------------------------------------------
 # 主窗口接缝 + 登记
 # ---------------------------------------------------------------------------
-def test_main_window_exposes_locator_and_registered_shortcut(main_window):
+def test_main_window_exposes_locator_and_registered_shortcut(main_window, qapp):
     assert callable(getattr(main_window, "select_tab", None))
     assert callable(getattr(main_window, "_show_command_palette", None))
 
+    from PySide6.QtGui import QAction
     from shortcuts import BY_ID
     entry = BY_ID["help.command_palette"]
     assert entry.key == "Ctrl+K" and entry.label == "命令面板"
 
-    src = open(os.path.join(_ROOT, "desktop", "main_window.py"),
-               encoding="utf-8").read()
-    assert '_key("help.command_palette")' in src
-    assert '_show_command_palette' in src
+    # 行为断言：菜单里真有一个 Ctrl+K 的动作，触发后真的打开命令面板
+    matches = [a for a in main_window.findChildren(QAction)
+               if a.shortcut().toString() == entry.key]
+    assert matches, "菜单栏里没有登记 Ctrl+K 的动作（命令面板入口消失）"
+    matches[0].trigger()
+    qapp.processEvents()
+
+    dlg = getattr(main_window, "_command_palette_dialog", None)
+    if dlg is None:
+        from PySide6.QtWidgets import QDialog
+        raise AssertionError(
+            "触发 Ctrl+K 菜单项没有真的打开命令面板；窗口下现存对话框："
+            f"{[(type(x).__name__, x.isVisible()) for x in main_window.findChildren(QDialog)]}")
+    assert dlg.isVisible(), "命令面板打开后不可见"
+    assert getattr(dlg, "_commands", []), "命令面板打开但索引为空（空壳入口）"
+    dlg.close()
+    qapp.processEvents()
