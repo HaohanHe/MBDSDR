@@ -81,7 +81,9 @@ def test_no_station_hint(panel, monkeypatch):
         calls.append(1)
         return None
 
-    # 默认 0,0 就是本面板的「未配置」哨兵
+    # None = 未配置（真实缺省）；0.0 是合法坐标，不能当哨兵
+    panel.set_observer(None, None, 0.0)
+    assert panel._observer_configured is False
     monkeypatch.setattr(panel._tle_mgr, "fetch", _fetch)
     panel.refresh_passes()
 
@@ -90,6 +92,28 @@ def test_no_station_hint(panel, monkeypatch):
     assert text.startswith("未配置观测站位置"), (
         f"没配站址仍去算 0,0 的过境/打网络：{text!r}")
     assert calls == [], f"未配置站址时不应发起 TLE 请求，实际请求 {len(calls)} 次"
+
+
+def test_null_island_is_a_legal_station(panel, monkeypatch):
+    """显式设置 (0,0) 必须照常算过境：实测 24h/10° 门内 2 条。"""
+    from desktop import new_spacetime_panel as nsp
+    import mbdsdr_ai.new_spacetime_timeline as nst
+
+    panel._settings = {"pass_window_hours": 24,
+                       "pass_min_elevation_deg": 10.0,
+                       "show_low_elevation_passes": False}
+    panel.set_observer(0.0, 0.0, 0.0)
+    assert panel._observer_configured is True
+    monkeypatch.setattr(nsp, "DEFAULT_SATELLITES", [(ISS_NAME, 25544)])
+    monkeypatch.setattr(panel._tle_mgr, "fetch", lambda *_a, **_k: _tle_entry())
+    monkeypatch.setattr(nst, "datetime", _fixed_datetime_class())
+
+    panel.refresh_passes()
+
+    assert panel.passes_table.rowCount() == 2, (
+        f"(0,0) 是几内亚湾合法坐标，应算出 2 条过境，实际 "
+        f"{panel.passes_table.rowCount()} 条（被当成未配置哨兵了）")
+    assert "未配置观测站位置" not in panel.passes_hint.text()
 
 
 def test_empty_window_hint_uses_effective_values(panel, monkeypatch):

@@ -266,6 +266,10 @@ class NewSpacetimePanel(QWidget):
         self._gnss_nmea: Optional[str] = None
         # 过境刷新是同步阻塞调用：重入保护 + 加载期间按钮置灰，避免连点叠加
         self._refreshing = False
+        # 观测站「是否已配置」用显式状态位，不用坐标值当哨兵：
+        # (0,0) 是几内亚湾的真实坐标，必须能正常算过境。None/False = 未配置。
+        self._observer_configured = False
+        self._setting_observer = False  # 程序写入 spin 时不误判为"用户已配置"
 
         self._build_ui()
         self._apply_styles()
@@ -355,7 +359,8 @@ class NewSpacetimePanel(QWidget):
             f"color: {COLOR_DANGER}; font-weight: 600;")
         lay.addWidget(self.time_sync_label)
 
-        # 观测站坐标输入（初始 0.0，不预设任何城市）
+        # 观测站坐标输入。spin 只能显示数值（0.0），"是否配置"由
+        # _observer_configured 显式记录：0.0/0.0 是合法站址，不是哨兵。
         obs_form = QFormLayout()
         self.lat_spin = QDoubleSpinBox()
         self.lat_spin.setRange(-90.0, 90.0)
@@ -373,6 +378,8 @@ class NewSpacetimePanel(QWidget):
         self.alt_spin.setSingleStep(1.0)
         self.alt_spin.setSuffix(" km")
         self.alt_spin.setValue(0.0)
+        self.lat_spin.valueChanged.connect(self._on_observer_edited)
+        self.lon_spin.valueChanged.connect(self._on_observer_edited)
         obs_form.addRow("纬度 (°):", self.lat_spin)
         obs_form.addRow("经度 (°):", self.lon_spin)
         obs_form.addRow("海拔 (km):", self.alt_spin)
@@ -507,11 +514,27 @@ class NewSpacetimePanel(QWidget):
     # ==================================================================
     # 区域 2 对外接口
     # ==================================================================
-    def set_observer(self, lat: float, lon: float, alt_km: float) -> None:
-        """由外部（GNSS / 手动）设置观测站坐标。"""
-        self.lat_spin.setValue(float(lat))
-        self.lon_spin.setValue(float(lon))
-        self.alt_spin.setValue(float(alt_km))
+    def set_observer(self, lat: Optional[float], lon: Optional[float],
+                     alt_km: float = 0.0) -> None:
+        """由外部（GNSS / 手动）设置观测站坐标。
+
+        ``lat``/``lon`` 为 ``None`` 表示**未配置**（真实缺省）；``0.0`` 是
+        合法坐标（几内亚湾），必须照常计算，不得当占位哨兵。
+        """
+        self._setting_observer = True
+        try:
+            configured = lat is not None and lon is not None
+            self._observer_configured = configured
+            self.lat_spin.setValue(float(lat) if configured else 0.0)
+            self.lon_spin.setValue(float(lon) if configured else 0.0)
+            self.alt_spin.setValue(float(alt_km or 0.0))
+        finally:
+            self._setting_observer = False
+
+    def _on_observer_edited(self, _value: float) -> None:
+        """用户在 spin 里改经纬度即视为显式配置（含手输 0.0/0.0）。"""
+        if not self._setting_observer:
+            self._observer_configured = True
 
     def set_gnss_nmea(self, nmea: str) -> None:
         """注入一段 GNSS RMC NMEA，本地计算授时状态（不尝试 NTP）。"""
@@ -597,9 +620,9 @@ class NewSpacetimePanel(QWidget):
         lon = self.lon_spin.value()
         alt_km = self.alt_spin.value()
 
-        # 观测站是过境的必要条件：0,0 是本面板的「未设置」哨兵（与控制器
-        # 站址可信度口径一致），先给明确反馈，不白跑一次网络请求
-        if lat == 0.0 and lon == 0.0:
+        # 观测站是过境的必要条件。判定用显式状态位：None/未配置才提示，
+        # 绝不能拿 0.0 当哨兵（0.0/0.0 是合法站址）。未配置时不白跑网络请求。
+        if not self._observer_configured:
             self.passes_hint.setText(
                 "未配置观测站位置：请在纬度/经度输入框填写地面站坐标")
             self._populate_passes([])
