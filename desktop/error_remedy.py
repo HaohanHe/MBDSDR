@@ -68,7 +68,7 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "playback_failed", "bad_parameter", "tx_source_deleted",
         "tx_source_failed",
     ),
-    "TLE 细项（限流/HTTP/解析）：卫星面板只显示通用提示，不渲染 code；超时与不可达已有帮助条目": (
+    "TLE 细项（限流/HTTP/解析）：过境面板与状态栏现在直接渲染 code + 原因 + 建议动作（`tle_fetch.failure_copy`）；帮助条目只覆盖精选码": (
         "rate_limited", "http_4xx", "http_5xx", "network_other",
         "parse_failure", "empty_response", "tle_unknown",
     ),

@@ -77,6 +77,8 @@ class TLEManager:
         self._mem: Dict[int, TLEEntry] = {}
         self._tle_store = None
         self._last_group_error = ""
+        # catnr -> 最近一次失败的 code/label/reason/action（成功即清）
+        self._last_failures: Dict[int, Dict[str, object]] = {}
         try:
             os.makedirs(self.cache_dir, exist_ok=True)
         except OSError:
@@ -110,6 +112,15 @@ class TLEManager:
     def last_group_error(self) -> str:
         """最近一次 ``fetch_group`` 的失败原因（空串 = 成功或未尝试）。"""
         return self._last_group_error
+
+    def last_failure(self, catnr: int) -> Optional[Dict[str, object]]:
+        """该 CATNR 最近一次失败的结构化文案（成功即清空，永不冒充成功）。
+
+        返回 ``{"code","label","reason","action","status"}``；没有失败返回 None。
+        桌面只该拿这四段话展示，不许再写与 code 无关的固定文案。
+        """
+        rec = self._last_failures.get(int(catnr))
+        return dict(rec) if rec else None
 
     # ------------------------------------------------------------------ HTTP
     def _http_get(self, url: str) -> str:
@@ -176,8 +187,17 @@ class TLEManager:
         try:
             rec = self._store().fetch_record(
                 catnr, max_age_hours=_CACHE_TTL / 3600.0)
-        except TLEFetchError:
+        except TLEFetchError as e:
             # 4) 取数失败：回退本地磁盘缓存（即便过期也用，旧数据好过没有）
+            self._last_failures[catnr] = dict(
+                getattr(e, "failure", None) or {
+                    "code": self._store().health_report().get(
+                        "last_error_kind") or "tle_unknown",
+                    "label": self._store().health_report().get("last_error")
+                    or "TLE 刷新失败",
+                    "reason": str(e),
+                    "action": "检查网络/源状态后重试；持续失败可导入离线 TLE。",
+                })
             if disk is not None:
                 disk.source = "cache"
                 self._annotate(disk, name)
@@ -193,7 +213,12 @@ class TLEManager:
                 self._annotate(disk, name)
                 self._mem[catnr] = disk
                 return disk
+            from .tle_fetch import failure_copy
+            self._last_failures[catnr] = failure_copy(
+                "parse_failure", "TLE 校验位不匹配（数据损坏）")
             return None
+
+        self._last_failures.pop(catnr, None)
 
         e = TLEEntry(
             name=rec.get("name") or f"NORAD {catnr}",

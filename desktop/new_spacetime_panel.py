@@ -650,9 +650,31 @@ class NewSpacetimePanel(QWidget):
                 sats.append((ent.name, ent.line1, ent.line2))
 
         if not sats:
-            # 诚实说明"为什么没有"：TLE 拉取失败（离线/无网络/被限流）
-            self.passes_hint.setText(
-                "未获取 TLE：请先更新卫星星历（离线或无网络时无法拉取）")
+            # 诚实说明"为什么没有"：把抓取链路的失败码/原因/建议原样带到界面，
+            # 不再用与 code 无关的固定句子（离线/断网/限流/解析失败各有话术）。
+            fails = []
+            for name, catnr in DEFAULT_SATELLITES:
+                rec = self._tle_mgr.last_failure(catnr)
+                if rec:
+                    fails.append((name, rec))
+            if fails:
+                names = "、".join(n for n, _ in fails[:3])
+                more = f" 等 {len(fails)} 颗" if len(fails) > 3 else ""
+                codes = []
+                for _, rec in fails:
+                    code = str(rec.get("code") or "tle_unknown")
+                    if code not in codes:
+                        codes.append(code)
+                first = fails[0][1]
+                text = (f"未获取 TLE：{names}{more}。"
+                        f"{first.get('code')}：{first.get('label')} — "
+                        f"{first.get('reason')}；建议：{first.get('action')}")
+                if len(codes) > 1:
+                    text += f"（本轮共 {len(codes)} 类失败码：{'、'.join(codes)}）"
+            else:
+                text = ("未获取 TLE：抓取链路未记录失败码/原因（请查 TLE 源健康度与日志）；"
+                        "建议：连接网络后重试或导入离线星历。")
+            self.passes_hint.setText(text)
             self._populate_passes([])
             self.chart.set_data([])
             return

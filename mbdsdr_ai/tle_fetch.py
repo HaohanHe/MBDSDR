@@ -55,7 +55,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from .error_catalog import ERRORS, retryable as catalog_retryable, user_message
+from .error_catalog import (
+    ERRORS,
+    retryable as catalog_retryable,
+    suggestion as catalog_suggestion,
+    user_message,
+)
 
 __all__ = [
     "DEFAULT_SOURCE",
@@ -66,6 +71,8 @@ __all__ = [
     "SourceHealth",
     "TleFetcher",
     "classify_failure",
+    "failure_copy",
+    "tle_refresh_status_text",
 ]
 
 # 群组拉取与单星拉取共用同一「源」限速/退避账本；群组本身没有 CATNR，
@@ -154,6 +161,61 @@ def classify_failure(exc: Optional[BaseException] = None,
         "status": status,
         "detail": detail,
     }
+
+
+def failure_copy(kind: str, detail: str = "",
+                 status: Optional[int] = None) -> Dict[str, str]:
+    """失败分类 → 用户可见的 code/label/reason/action（三种典型失败分话术）。
+
+    面板与状态栏只该展示这里产出的文案：``code`` 是稳定错误码（与
+    docs/error-catalog.md 一致），``reason`` 是原因原文（截断到可读长度），
+    ``action`` 是用户下一步能做的事。绝不再写「与 code 无关的固定文案」。
+    """
+    kind = str(kind or "tle_unknown")
+    detail = str(detail or "").strip()
+    if len(detail) > 120:
+        detail = detail[:117] + "…"
+    if kind == "offline":
+        label = "离线未联网"
+        action = "连接网络后重试，或用 TLE 文件导入离线星历。"
+    elif kind == "empty_response" or (kind == "http_4xx" and status == 404):
+        # 编号在源里没有对应对象：不是网络问题，别让用户反复重试
+        label = "星历不存在（该 NORAD 编号在源中无数据）"
+        action = "核对卫星编号/目录名；该对象可能已再入或不在源目录中。"
+    elif kind in ("network_unreachable", "network_timeout", "network_other"):
+        label = FAILURE_LABELS.get(kind, kind)
+        action = catalog_suggestion(kind)
+    elif kind == "parse_failure":
+        label = "返回数据损坏/解析失败"
+        action = catalog_suggestion(kind)
+    else:
+        spec = ERRORS.get(kind) or ERRORS["tle_unknown"]
+        label = spec.meaning
+        action = spec.suggestion
+    return {
+        "code": kind,
+        "label": label,
+        "reason": detail or label,
+        "action": action,
+    }
+
+
+def tle_refresh_status_text(count: int,
+                            failure: Optional[Dict[str, Any]] = None) -> str:
+    """状态栏文案：成功才说成功；失败必须带 code + 原因 + 建议动作。"""
+    if count > 0 and not failure:
+        return f"TLE 已更新（{count} 颗刷新）"
+    if not failure:
+        if count == 0:
+            # 请求成功但源目录没有匹配对象：既不是成功，也不能冒充失败码
+            return ("TLE 在线刷新完成，但源目录未匹配到本地卫星（0 颗更新）；"
+                    "建议：核对本地目录与源中的 NORAD 编号是否一致。")
+        return "TLE 在线刷新失败（未记录 code/原因，请查抓取链路日志）"
+    copy = failure_copy(str(failure.get("code") or "tle_unknown"),
+                        str(failure.get("reason") or ""),
+                        failure.get("status"))
+    return (f"TLE 在线更新失败（{copy['code']}：{copy['label']}）："
+            f"{copy['reason']}；建议：{copy['action']}")
 
 
 @dataclass
@@ -494,10 +556,13 @@ class TleFetcher:
                             offline=True, offline_label="离线·缓存（未刷新）",
                             failure_kind="offline", failure_label="离线",
                             health=health())
-            raise self._error_cls(
+            _err = self._error_cls(
                 f"离线模式（MBDSDR_OFFLINE）且无 CATNR {catnr} 的 TLE 缓存；"
                 "拒绝编造轨道数据，也不以内置合成 TLE 冒充实时"
             )
+            _err.failure = failure_copy(
+                "offline", "离线模式（MBDSDR_OFFLINE）且该编号无本地缓存")
+            raise _err
 
         # 4) 退避：不发起请求，不刷屏重试；最小间隔则排队等待
         decision = self.attempt_decision(catnr, ref)
@@ -513,9 +578,12 @@ class TleFetcher:
                             failure_label=FAILURE_LABELS.get(
                                 self.health.last_error_kind or "", ""),
                             health=health())
-            raise self._error_cls(
+            _err = self._error_cls(
                 f"无 CATNR {catnr} 的 TLE 缓存，且{reason}"
             )
+            _err.failure = failure_copy(
+                self.health.last_error_kind or "tle_unknown", reason)
+            raise _err
 
         # 5) 联网取新（遵守最小间隔）
         ref = self._wait_for_slot(ref)
@@ -544,9 +612,13 @@ class TleFetcher:
                             offline_label=label,
                             failure_kind=failure["kind"],
                             failure_label=failure["label"], health=health())
-            raise self._error_cls(
+            _err = self._error_cls(
                 f"获取 CATNR {catnr} 的 TLE 失败：{err}；且无缓存，拒绝编造"
             )
+            _err.failure = failure_copy(
+                failure["kind"], failure.get("detail", err),
+                failure.get("status"))
+            raise _err
 
         name, line1, line2 = parsed
         self._record_success(ref)

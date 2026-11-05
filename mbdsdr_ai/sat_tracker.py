@@ -41,6 +41,7 @@ except ImportError:  # skyfield 属 satellite 可选依赖组；缺它模块仍�
 
 from .sat_passes import _require_skyfield  # noqa: E402  (统一的诚实报错口径)
 from .tle_integrity import accuracy, freshness, verify_identity  # noqa: E402
+from .tle_fetch import classify_failure, failure_copy  # noqa: E402
 
 # 复用 sat_passes 已经过验证的核心：地面站数据类、过境预测、TLE 解析、
 # 站心方位/仰角/斜距/径向速度计算、光速常量。本模块不重写坐标数学。
@@ -217,6 +218,9 @@ class SatelliteTracker:
         self._tle_date: str = BUILTIN_TLE_DATE
         # P10：刷新结果留痕（取新失败不静默）与身份冲突清单
         self._last_refresh_error: str = ""
+        # 结构化失败（code/label/reason/action）：状态栏只该展示这份文案，
+        # 不许再写与 code 无关的固定句子。
+        self._last_refresh_failure: Optional[Dict[str, object]] = None
         self._identity_conflicts: List[Dict[str, object]] = []
 
         # 启动即加载内置真实 TLE（失败不崩：单条无效跳过）。
@@ -300,13 +304,16 @@ class SatelliteTracker:
         """
         from .orbit import _network_disabled
         if _network_disabled():
-            self._last_refresh_error = (
-                "离线模式（MBDSDR_OFFLINE），未联网刷新（沿用旧 TLE）")
+            detail = "离线模式（MBDSDR_OFFLINE），未联网刷新（沿用旧 TLE）"
+            self._last_refresh_error = detail
+            self._last_refresh_failure = failure_copy("offline", detail)
             return 0
         try:
             import requests  # noqa: F401 - 可用性探测放在真正发起请求前
         except Exception:
-            self._last_refresh_error = "requests 不可用，未刷新（沿用旧 TLE）"
+            detail = "requests 不可用，未刷新（沿用旧 TLE）"
+            self._last_refresh_error = detail
+            self._last_refresh_failure = failure_copy("tle_unknown", detail)
             return 0
         deadline = (float(hard_deadline_s) if hard_deadline_s is not None
                     else float(timeout) + _TLE_HARD_DEADLINE_MARGIN_S)
@@ -317,7 +324,13 @@ class SatelliteTracker:
             resp.raise_for_status()
             text = resp.text
         except Exception as e:  # noqa: BLE001 - 网络失败如实留痕
-            self._last_refresh_error = f"联网刷新失败（{type(e).__name__}: {e}），沿用旧 TLE"
+            self._last_refresh_error = \
+                f"联网刷新失败（{type(e).__name__}: {e}），沿用旧 TLE"
+            classified = classify_failure(e)
+            self._last_refresh_failure = failure_copy(
+                str(classified.get("kind") or "tle_unknown"),
+                str(classified.get("detail") or self._last_refresh_error),
+                classified.get("status"))
             return 0
 
         # norad_id -> (name, line1, line2)
@@ -327,8 +340,20 @@ class SatelliteTracker:
             nid = l2[2:7].strip()
             fresh[nid] = [name, l1, l2]
 
+        if not fresh:
+            # HTTP 成功但响应体没有可解析 TLE：这不是「0 颗更新」，是解析失败/
+            # 空响应，必须带码留痕，否则状态栏会把坏数据说成「未匹配」。
+            failure = classify_failure(body=text)
+            self._last_refresh_failure = failure_copy(
+                str(failure.get("kind") or "parse_failure"),
+                str(failure.get("detail") or ""), failure.get("status"))
+            self._last_refresh_error = (
+                f"响应无可解析 TLE：{self._last_refresh_failure['reason']}")
+            return 0
+
         updated = 0
         self._last_refresh_error = ""
+        self._last_refresh_failure = None
         for entry in self._catalog:
             nid = str(entry["norad_id"])
             if nid not in fresh:
@@ -369,6 +394,15 @@ class SatelliteTracker:
     def last_refresh_error(self) -> str:
         """最近一次联网刷新的失败原因（空串 = 成功或未尝试）。"""
         return self._last_refresh_error
+
+    @property
+    def last_refresh_failure(self) -> Optional[Dict[str, object]]:
+        """最近一次联网刷新的结构化失败（``code/label/reason/action``）。
+
+        成功或未尝试返回 None。桌面状态栏只渲染这份文案，确保错误码从
+        抓取链路一路传到用户眼前，不在中途被固定句子替换。
+        """
+        return dict(self._last_refresh_failure) if self._last_refresh_failure else None
 
     @property
     def identity_conflicts(self) -> List[Dict[str, object]]:

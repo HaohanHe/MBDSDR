@@ -70,8 +70,10 @@ def test_no_tle_hint(panel, monkeypatch):
 
     assert not panel.passes_hint.isHidden(), "空态提示必须可见"
     text = panel.passes_hint.text()
-    assert text.startswith("未获取 TLE：请先更新卫星星历"), (
+    # 抓取链路没留失败记录时，也必须说清"没记录"而不是假装给了原因
+    assert text.startswith("未获取 TLE：抓取链路未记录失败码/原因"), (
         f"没有 TLE 时用户看不出该做什么：{text!r}")
+    assert "建议" in text and "成功" not in text
 
 
 def test_no_station_hint(panel, monkeypatch):

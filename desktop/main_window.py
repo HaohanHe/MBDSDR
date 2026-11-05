@@ -8025,10 +8025,13 @@ class MainWindow(QMainWindow):
         names = [s["name"] for s in self._loop_sat_tracker.list_satellites()]
         self.sat_track_panel.populate_satellites(names)
         self.sat_track_panel.set_tle_date(self._loop_sat_tracker.tle_date)
-        if n > 0:
-            self.statusBar().showMessage(f"TLE 已更新（{n} 颗刷新）", MSG_NORMAL)
-        else:
-            self.statusBar().showMessage("TLE 在线更新失败，使用内置 TLE", MSG_NORMAL)
+        # 状态栏只渲染抓取链路给出的 code/label/reason/action：
+        # 失败时必须有码和原因，绝不回落到与 code 无关的固定句子。
+        from mbdsdr_ai.tle_fetch import tle_refresh_status_text
+        failure = self._loop_sat_tracker.last_refresh_failure
+        msg = tle_refresh_status_text(n, failure)
+        ok = n > 0 and not failure
+        self.statusBar().showMessage(msg, MSG_NORMAL if ok else MSG_IMPORTANT)
 
     def _menu_start_sat_track(self):
         """菜单项触发：等价于点面板上的开始按钮。"""
