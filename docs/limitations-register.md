@@ -239,3 +239,222 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
    （只改已验证的那一个后端），同步更新 `tests/test_backend_tx_capability.py`
    的断言与 L43；两者必须同一提交。
 4. 复核人未签字前，字段保持 False；验收记录缺失即视为未验证。
+
+## 附 G：TX 审计日志落地策略（2026-11-05 追加）
+
+> **结论**：发射审计默认落 `D:\mbdsdr\logs\tx_audit.jsonl`（不写 C 盘用户目录）；
+> 超限**删最旧**而不是停写（停写会让 TX 变成不可发射）；每次真实发射另落一条
+> 结果记录；任何密钥在落盘前打码。fail-closed 仍只作用于"发射前"的签发/放行，
+> 发射后的结果记录失败不阻断（射频已发出，事后记录无法撤回）。
+
+### G.1 默认路径与优先级
+
+| 顺序 | 来源 | 值 |
+|---|---|---|
+| 1 | 环境变量 `MBDSDR_TX_AUDIT_PATH` | 原样使用（测试/受信任脚本显式指定） |
+| 2 | 设置项 `tx_audit_path`（`~/.mbdsdr/config.json`） | 原样使用（支持 `~` 展开） |
+| 3 | 内置（Windows 且有 D 盘） | `D:\mbdsdr\logs\tx_audit.jsonl` |
+| 4 | 内置（无 D 盘） | `<第一个非 C 盘>:\mbdsdr\logs\tx_audit.jsonl`（D 优先） |
+| 5 | 内置（机器只有 C 盘） | `<程序目录>\logs\tx_audit.jsonl` + 告警（仍**不是** C 盘用户目录） |
+
+测试断言：`tests/test_tx_audit.py::test_default_path_is_not_c_drive`——盘符 ≠ `C:`，
+且路径不在 `~`（用户目录）下。
+
+### G.2 轮转与保留（超限删最旧，绝不停写）
+
+| 设置项（磁盘键） | 默认 | 范围 | 单位 | 含义 |
+|---|---|---|---|---|
+| `tx_audit_max_mb` | 50 | 1–1024 | MB | 单个文件到上限即轮转 |
+| `tx_audit_keep_files` | 10 | 2–100 | 个 | 当前文件 + 轮转备份的总数 |
+| `tx_audit_retention_days` | 365 | 1–3650 | 天 | 备份最长保留天数（与份数取先到者） |
+
+- **超限行为**：写前发现当前文件 ≥ 上限 → 删掉最旧的 `.N` → 依次后移 →
+  当前文件改名 `.1` → 继续写。份数或天数任一超限都只删最旧；当前活动文件永不删除。
+- **为什么必须删最旧**：若改成"超限停写"，审计写失败会按 fail-closed 拒绝签发/
+  放行，等于 TX 永久不可发射；删最旧只损失最老的历史，保住发射可用性。
+- **量级依据**：一次发射约 3 条记录（`armed` / `allowed` / `tx_ok`），单条约
+  600 B；按 1,000 次发射/天估算 ≈ 1.8 MB/天 ≈ 650 MB/年。50 MB × 10 份 ≈
+  500 MB，覆盖约 9 个月且磁盘占用有硬上界；峰值 5 次发射/秒时单文件约 4.6 小时
+  写满，但只影响最旧文件，不停止写入。
+- 测试：`test_rotation_deletes_oldest_and_keeps_newest`（`.3` 不存在、最新
+  `tool-59` 完整、最旧 `tool-0` 已删）；`test_rotation_by_size`（轮转后仍只留
+  token 前 8 位）。
+
+### G.3 每次发射记什么
+
+每次**过门之后**的真实发射尝试追加一条 `result=tx_ok` / `tx_failed`：
+
+| 字段 | 内容 |
+|---|---|
+| `ts_local` / `ts_utc` | 本地与 UTC 时间（毫秒） |
+| `tool` | 工具名（`TxSession` 记 `TxSession.transmit`） |
+| `freq_hz` | 发射中心频率（Hz） |
+| `args_summary` | 参数摘要（已剔除门参数，≤ 240 字符） |
+| `token_prefix` | token 前 8 位；签发来源看同一次发射的 `armed` 记录 |
+| `result` / `code` / `reason` | 成功或失败原因（如 `tx_write_failed`） |
+| `source` | `desktop` / `test` / `script` |
+
+**密钥红线**：`api_key` / `access_key` / `token` / `secret` / `password` /
+`authorization` 等键名整值打码为 `***`；自由文本中的 `key=value`、
+`Authorization: Bearer …`、`sk-…` 形态同样打码。测试：
+`test_secrets_are_redacted_in_audit_file`、`test_args_summary_redacts_secret_named_keys`。
+
+### G.4 交给设置线的可照抄条目（本线不直接改 `desktop/config_schema.py`）
+
+> 说明：schema 键名以 `ai_` 开头时，设置面板按 `key[3:]` 映射到
+> `~/.mbdsdr/config.json` 的 `AgentConfig` 字段（见
+> `desktop/settings_panel.py:499` 的 `_disk_key`）。故下面四项都加 `ai_` 前缀。
+
+```python
+    # 「存储与日志」组：TX 发射审计（后端线 2026-11-05 拟定，设置线照抄）
+    SettingItem(
+        key="ai_tx_audit_path", group="存储与日志", kind="text",
+        label="发射审计日志路径", default="",
+        storage="ai_config",
+        help=("每次发射（签发/放行/结果）的审计 JSONL 存到这里。留空 = 自动选"
+              "非 C 盘：D:\\mbdsdr\\logs\\tx_audit.jsonl（无 D 盘则程序所在盘/"
+              "程序目录 logs，绝不写 C 盘用户目录）。改路径只影响新记录，"
+              "旧文件不动。"),
+        source="mbdsdr_ai/tx_guard.py:default_audit_path（默认 D:\\mbdsdr\\logs）",
+    ),
+    SettingItem(
+        key="ai_tx_audit_max_mb", group="存储与日志", kind="int",
+        label="发射审计单文件上限", default=50, minimum=1, maximum=1024, step=1,
+        storage="ai_config",
+        help=("单个审计文件到多少 MB 就轮转。默认 50 MB：按 1,000 次发射/天、"
+              "每次约 3 条、单条约 600 B 估算约 1.8 MB/天（约 650 MB/年）。"
+              "超限删除最旧文件，不会停止写入（停写会导致无法发射）。"),
+        source="mbdsdr_ai/tx_guard.py:TX_AUDIT_MAX_MB=50",
+    ),
+    SettingItem(
+        key="ai_tx_audit_keep_files", group="存储与日志", kind="int",
+        label="发射审计保留份数", default=10, minimum=2, maximum=100, step=1,
+        storage="ai_config",
+        help=("当前文件 + 轮转备份的总个数。默认 10（当前 + 9 份备份，配 50 MB "
+              "上限共约 500 MB）。超限删除最旧，当前活动文件永不删除。"),
+        source="mbdsdr_ai/tx_guard.py:TX_AUDIT_KEEP_FILES=10",
+    ),
+    SettingItem(
+        key="ai_tx_audit_retention_days", group="存储与日志", kind="int",
+        label="发射审计保留天数", default=365, minimum=1, maximum=3650, step=1,
+        storage="ai_config",
+        help=("备份文件超过多少天自动删除（与保留份数取先到者）。默认 365 天。"
+              "当前活动文件不受此限，永不因天数删除。"),
+        source="mbdsdr_ai/tx_guard.py:TX_AUDIT_RETENTION_DAYS=365",
+    ),
+```
+
+对应 `mbdsdr_ai/config.py` 已加同名字段（`tx_audit_path=""`、
+`tx_audit_max_mb=50`、`tx_audit_keep_files=10`、
+`tx_audit_retention_days=365`），并支持 `MBDSDR_TX_AUDIT_MAX_MB` /
+`MBDSDR_TX_AUDIT_KEEP_FILES` / `MBDSDR_TX_AUDIT_RETENTION_DAYS` 环境变量覆盖。
+
+### G.5 已知边界（诚实记录）
+
+- **只有 C 盘的机器**没有合法"非 C 盘"位置；此时退到 `<程序目录>\logs`（不是
+  C 盘用户目录）并告警。`test_default_path_is_not_c_drive` 的"盘符 ≠ C:"断言
+  只在存在 D 盘的本机成立，CI/纯 C 盘机器上会命中该边界。
+- **轮转删旧失败**（最旧文件被其它进程锁住）时仍按 fail-closed 拒绝本次写入并
+  限流告警；这是"删最旧"不可用时的安全降级，不是常态。
+- **发射后的结果记录**写失败不阻断发射，只在 `tx_audit_status()` 的
+  `write_failures` / `last_error` 如实计数；与"发射前"的 fail-closed 语义不同。
+- 测试数字：`tests/test_tx_audit.py` 21 passed（含默认盘符、轮转删最旧、
+  密钥打码、不可写路径 fail-closed、发射结果成功/失败）；关联回归
+  `tests/test_tx_session.py` + `tests/test_tx_rx_exclusive.py` +
+  `tests/test_config_key_migration.py` 共 31 passed。
+
+## 附 H：静噪「同一数字、两种语义」处置（2026-11-05，参数治理线追加）
+
+> **结论：采纳方案 ②**（禁止把桌面滑杆值直传 C++；C++ 内核只走自动门，
+> 桌面滑杆只管 Python 解调链，界面明示当前生效的是哪一套）。
+> 理由：不制造第二套语义、不改任何检测器数学、不假装统一；改动只在 4 个边界点。
+
+### H.1 问题（已实测，非推测）
+
+| 位置 | 数字 `-50` 的含义 | 往 `-20` 拧的后果 |
+|---|---|---|
+| 桌面 `BaselineSquelch` / `margin_threshold_db()` | 比该模式噪声基线高 **6 dB 余量** | 余量 16 dB，**更少放行** |
+| C++ `SpectrumEngine::setSquelchThreshold` | 48 kHz 音频块 RMS **绝对 -50 dBFS** | 绝对门抬高到 -20，**几乎全开** |
+| `mbdsdr_ai/receive_chain.py:Squelch(threshold_db=...)` | 同样是 **RMS dBFS 绝对门**（默认 -50） | 同样更开放门 |
+| `mbdsdr_ai/analog_demod.py:_MODE_DEFAULTS` | IF 功率绝对门（am/fm -40、wfm -30、ssb -60） | 与滑杆完全无关 |
+
+两条隐蔽通路会让语义串线，**且都是静默的**：
+
+1. `mbdsdr_ai/sdr_backend.py:set_squelch` 现在只做 `status.squelch_db = db`，接收链重建时
+   `receive_chain` 把这个值直接塞进 `Squelch(threshold_db=...)` → 桌面余量 `-50`
+   被当成绝对 `-50 dBFS`。agent 工具 `sdr_set_squelch`、`remote_control_v2`
+   的 `set_squelch` 都走这条。
+2. `cpp/src/dsp/spectrum_engine.cpp:setSquelchThreshold` 里
+   `squelchAuto_.store(false)` —— 任何一次手动下发都会**关掉自动门**。所以
+   "把滑杆值发给 C++"这件事本身就会顺手破坏 C++ 的自动跟踪。
+
+### H.2 三选一（代价与后果）
+
+| 方案 | 改什么 | 后果 | 工作量 |
+|---|---|---|---|
+| ① C++ 改余量口径 | `cpp/src/dsp/spectrum_engine.cpp` 的 auto 推导改成 `floor + margin` 并让手动门也解释为余量；`cpp/src/dsp/squelch.cpp/h` 比较语义；C++ 滑杆文案；agent schema；C++ 单测 + 真机/录音回归 | 两端语义真统一，桌面滑杆可同时控 C++；但 **改变了 C++ 现有静噪行为**（口径变化），所有依赖绝对 dBFS 门限的扫描/校准/agent 调用都要重验 | 中-大：4–6 个 C++ 文件 + 两套测试 + 真机回归 |
+| ② 禁止直传 + C++ 只走自动门（**采纳**） | 4 个边界点（见 H.3），加 `applied_by` 字段与界面文案；**不动任何检测器数学** | 桌面滑杆不再影响 C++ 内核静噪；C++ 用自己的滑杆/自动门（底噪 + 8 dB）。用户需要在界面上看到"当前生效：桌面余量 / 内核自动" | 小：3 个 Python 文件 + 2 个 C++ 文件 + 文案 |
+| ③ 保留两套 + 只标注 `applied_by` | 只加字段和显示 | 若不阻断直传，`setSquelchThreshold` 仍会静默关掉 C++ 自动门 → 界面标注的是**假状态**；所以 ③ 必须包含 ② 的阻断才有意义，单独的 ③ 不可取 | 最小，但不可单独使用 |
+
+### H.3 方案 ② 的具体落点
+
+**字段（Python 侧，`mbdsdr_ai/sdr_backend.py:SDRStatus`）**
+
+- `squelch_db`：语义固定为**桌面余量刻度**（-100..-20），不再解释为绝对 dBFS。
+- 新增 `squelch_applied_by: str`：`desktop-margin` / `cpp-auto` / `cpp-manual` / `none`。
+  沿用 `doppler_compensation.py` 已有的 `applied_by` 字段惯例。
+- 新增 `squelch_threshold_dbfs: float`：**只有真正下发绝对门时才填**，且必须由
+  `margin_threshold_db(squelch_db)` + 实测底噪推导，不允许等于滑杆原值。
+
+**拦点（按数据流顺序，四处缺一不可）**
+
+1. `mbdsdr_ai/sdr_backend.py:set_squelch`：写 `squelch_db` 与
+   `squelch_applied_by="desktop-margin"`；**不再**把原值传给 `ReceiveChain` 的绝对门。
+2. `mbdsdr_ai/receive_chain.py` 构造静噪：改读余量换算后的门限，或直接换用
+   `BaselineSquelch`（与 `receive_pipeline` 同一个实现）。两者只能选一套，避免第三条语义。
+3. `cpp/src/control/control_hub.cpp:cmdSetSquelch`：请求里增加 `domain`
+   （`margin` / `dbfs`）。`domain=margin` 或 `auto=true` 时**不下发**
+   `threshold_db` 给 `setSquelchThreshold`，只允许 `auto`；返回 `applied_by="cpp-auto"`。
+   `cmdGetSquelchStatus` 同步返回 `applied_by` 与 `threshold_db_domain`。
+4. `cpp/src/ui/main_window.cpp`：`squelchAutoBtn_` 勾选时把 `squelchSlider_`
+   设为不可拖，`squelchValue_` 文案改为"自动：底噪 + 8 dB"；只有取消勾选才允许手动。
+   防"拖一下就静默关自动"。
+
+**怎么让用户看见**
+
+- `desktop/status_panel.py` 读 `applied_by` 显示两种文案之一：
+  "静噪 -50（6 dB 余量，桌面生效）" / "静噪 自动（底噪 + 8 dB，C++ 内核）"。
+- `desktop/control_panel.py` 滑杆 tooltip 明说"此值只作用于桌面解调链；
+  C++ 内核静噪自动跟踪底噪"。
+- `mbdsdr_ai/sdr_tools.py:sdr_set_squelch` 描述改成"余量刻度（-100≈0 dB、
+  -50≈6 dB、-20≈16 dB）"，返回值带上 `applied_by`，不再宣称直接设 C++ 门限。
+
+**反证测试写法（四条，任一失败即方案 ② 失效）**
+
+1. 新增 `tests/test_squelch_applied_by.py`：fake backend 记录"是否收到绝对门"。
+   滑杆 -50→-20 后断言 `status.squelch_db == -20`、`applied_by == "desktop-margin"`、
+   绝对门下发记录为空、`squelch_threshold_dbfs` 只可能等于"底噪 + 16"而不是 -20。
+2. 新增 `tests/test_receive_chain_squelch_domain.py`：同一段噪声 IQ 用 -50 与 -20
+   各跑一次 `ReceiveChain`，断言 -20 的**开门帧数严格更少**（今天会更开放门，
+   这条会红，正是要修的）。
+3. C++ 侧在现有静噪测试里加：`cmdSetSquelch({auto:true, threshold_db:-20})` 之后
+   `get_squelch_status()` 的 `auto` 仍为 true、`threshold_db` 不等于 -20、
+   `applied_by == "cpp-auto"`；同时保留"显式手动"用例断言 `setSquelchThreshold`
+   后 `squelchAuto()` 为 false（旧语义只允许走手动路径）。
+4. 扩展 `tests/test_hardcoded_parameter_registry.py::test_squelch_has_one_domain_and_one_constant_set`：
+   断言 `SDRStatus.squelch_db` 的说明含"余量"、`Squelch.threshold_db` 的说明含"dBFS"，
+   防止未来又把两个字段合并成一个。
+
+### H.4 方案 ② 明确放弃的能力（必须写清，不能假装没有）
+
+- 桌面滑杆**不再控制** C++ 内核静噪；C++ 用户要用它自己的滑杆/自动门。
+- 同一台机器同时开桌面与 C++ 时，两端的静噪门限**可以不同**且都合法；
+  这属于"两套实现各自的本地参数"，不是同一物理量的两次表达。
+- 若以后产品要求"一个滑杆同时控两端"，必须回到方案 ①，不能在 ② 上叠补丁。
+
+### H.5 与清零表的对应
+
+- 本条目对应 `docs/parameter-unification.md` 第 1 组；方案 ② 落地后该组状态改为
+  `已统一`（按"桌面一条链、C++ 一条链、界面明示"的口径），并在变更记录追加一行。
+- `receive_pipeline` 基线未动：当前 17 ERROR / 3 WARN / 1 INFO，`tests/test_swallow_guard.py` 21 passed。
+
