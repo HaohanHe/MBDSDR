@@ -955,7 +955,7 @@ dist 无 0、哈希不一致 0 → PASS**。
 
 事实与观察（不是对拍差异，本轮未改打包清单）：
 
-- **`mbdsdr_ai/tests/fixtures/` 5 个文件随包发出**（合计 **3,964,317 B / 3.78 MiB**：
+- **`mbdsdr_ai/tests/fixtures/` 5 个文件随包发出**（合计 **3,963,317 B / 3.78 MiB**：
   `openngc/NGC.csv` 3,942,946 B、`openngc/addendum.csv` 17,496 B、
   `hyg_v41_reference_sample.csv` 1,171 B、两份 `provenance.json` 960/744 B）。
   `collect_data_files('mbdsdr_ai')` 收的是非 `.py` 数据，spec 只 `excludes` 了
