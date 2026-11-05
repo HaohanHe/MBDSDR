@@ -225,7 +225,7 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 **前三名（可归因叶子块）**：① `eventFilter` **2566.4 ms**（占构造 59%；80.5k 次事件，每次 4 个 `getattr` + 一次 `from PySide6.QtCore import QEvent`）；② 首帧后后端枚举 **1543.5 ms**（仍在 GUI 线程）；③ `_build_kernel_panels` **1138.8 ms**（其中 `SettingsPanel` 625.0 ms）。
 
-**eventFilter A/B（交替跑，n=3，只测构造）**：正常中位 **4198.4 ms** → 把 `eventFilter` 换成只调 `QMainWindow.eventFilter` **1180.9 ms**，差 **3017.5 ms**。两条独立口径（包装计时 2566.4 / A/B 3017.5）同量级，说明这是真实开销，不是采样噪声。热点在 `desktop/main_window.py:2355-2379`；该文件归「操作逻辑线」，本轮**未改**，只把数字交回持有方。
+**eventFilter A/B（交替跑，n=3，只测构造）**：正常中位 **4198.4 ms** → 把 `eventFilter` 换成只调 `QMainWindow.eventFilter` **1180.9 ms**，差 **3017.5 ms**。两条独立口径（包装计时 2566.4 / A/B 3017.5）同量级，说明这是真实开销，不是采样噪声。热点在 `desktop/main_window.py:2355-2379`；该文件归「操作逻辑线」，**本节是改前快照**——2026-11-06 第三刀已落地，见 §8.1（旧/新 A/B -2028.0 ms / -58.6%，事件回归 67 passed）。
 
 **可后台化边界（按实测大小判断）**
 
@@ -318,3 +318,175 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 - `docs/perf-evidence/deep_perf_20261106.json`：四个小节的原始 JSON（含每次独立进程的 runs、A/B、cProfile top、微基准、TLE 原始耗时）。
 - 探针：`scripts/perf_probe_deep.py`（只读产品代码，不改任何源文件；回放测试文件建在 `D:\mbdsdr\.tmp` 并默认当场删除）。
+
+---
+
+## 8. 性能账第三刀（2026-11-06：eventFilter 分型减负 / 启动枚举后台化 / 帧周期拆账 / TLE 超时裁定）
+
+> 复跑：`python scripts/perf_probe_deep.py --section startup --runs 3 --json docs/perf-evidence/deep_perf_third_20261106.json`
+> 　　`$env:SPECTRUM_PRECISE=1; python scripts/perf_probe_deep.py --section spectrum`（PreciseTimer 对照）
+> 条件：同 §7（i5-13420H / 12 线程 / 15.7 GB / Python 3.14.0 / PySide6 offscreen 软件光栅 DPR=1 / 未设 `MBDSDR_NO_HW`，枚举到 1 台 RTL-SDR）。**同机仍有其它会话在跑测**，所以所有改前/改后一律**交替子进程 A/B**，绝对值只作趋势参考。
+> 本节数字与 §7.1 冲突时**以本节为准**：§7.1 是改前快照，且其中「首帧后枚举 1543.5 ms」的归因已被拆解纠正（见 8.2）。
+
+### 8.1 eventFilter：按事件类型分型 + A/B + 行为回归
+
+**分型（一次完整启动，`STARTUP_EF_PROFILE=1`；计数为改后实现，A/B 三次总事件数 78,002–81,445 与之同量级）**
+
+| 事件类型 | 次数 | 累计 ms | 单次 µs | 说明 |
+|---|---:|---:|---:|---|
+| `PaletteChange` | 19,945 | 63.7 | 3.19 | 样式表传播 |
+| `FontChange` | 19,499 | 61.3 | 3.14 | 字体传播 |
+| `StyleChange` | 12,477 | 37.8 | 3.03 | 样式传播 |
+| `DynamicPropertyChange` | 4,545 | 15.8 | 3.48 | 动态属性（主题/QSS 副作用） |
+| `ChildAdded` | 2,992 | 10.0 | 3.34 | 控件树生长 |
+| `Timer` | 906 | 9.7 | **10.71** | 含真实定时器回调 |
+| `MetaCall` | 1,916 | 8.5 | 4.44 | 跨线程信号投递 |
+| `Polish` | 1,987 | 6.3 | 3.17 | 控件抛光 |
+| `Create` | 1,976 | 5.4 | 2.73 | 控件创建 |
+| `Paint` | 826 | 5.1 | 6.17 | 首帧前绘制 |
+| `ChildPolished` | 1,542 | 4.7 | 3.05 | 子控件抛光 |
+| `Move` | 1,585 | 4.7 | 2.97 | 布局移动 |
+| 其余类型合计 | 7,844 | 47.4 | 6.04 | 共 78,040 次 / 280.4 ms |
+
+前三类**样式传播事件 51,921 次（66.5% 的调用量）但只占 162.8 ms（58.1% 的时间）**——它们的单次成本（3.0–3.2 µs）低于平均值 3.59 µs。真正贵的是 `Timer`（10.7 µs，因为要真的进基类派发）和 `Paint`（6.2 µs）。
+
+**减负做了什么（`desktop/main_window.py` `eventFilter`）**
+
+1. `from PySide6.QtCore import QEvent` 从**每次调用内**提到模块顶部（旧实现 80,522 次调用 = 80,522 次 `import` 语句）；
+2. `event.type()` 从**最多 6 次**降为 **1 次**，先按类型分派；
+3. 旧实现无论什么事件都要做 **4 次 `getattr` + 4 次身份比较**；新实现只在 `Resize` / `Enter` / `Leave` 分支里做身份比较，样式类事件直接落到 `super().eventFilter()` 的早退路径；`Enter`/`Leave` 合并为一次 `etype == QEvent.Enter or etype == QEvent.Leave`。
+
+**A/B（交替子进程，n=3，只测 `MainWindow.__init__` 到构造结束）**
+
+| | 第 1 次 | 第 2 次 | 第 3 次 | 中位 |
+|---|---:|---:|---:|---:|
+| 改前（按 HEAD 原样重建的旧 `eventFilter`） | 3324.2 | 3459.2 | 3666.9 | **3459.2 ms** |
+| 改后 | 1431.2 | 1526.2 | 1395.3 | **1431.2 ms** |
+| 差值 | | | | **-2028.0 ms（-58.6%）** |
+
+三条独立口径同向：旧实现包装计时 **2566.4 ms**（§7.1，80,522 次 → **31.9 µs/次**）→ 新实现包装计时 **280.4 ms**（78,040 次 → **3.59 µs/次**，**-88.7%**）；A/B 构造差值 **2028.0 ms**。
+
+**哪些类型不能减、为什么**
+
+- `PaletteChange`/`FontChange`/`StyleChange`（52k 次）**不能从过滤器里摘掉**：`MainWindow` 装的是**应用级**过滤器（`main_window.py:858` `app.installEventFilter(self)`），这三类是 Qt 在 `setStyleSheet`/`setFont`/`setPalette` 后向每个控件递归派发的传播通知。过滤器必须收到并**放行**（返回 `False`），拦截=主题/字体/样式不生效。要少收只能卸掉应用级过滤器，但 `ShortcutOverride`（Ctrl+C 在文本框内放行复制）和 `Resize` 重排都依赖它——所以这 52k 次的成本只剩「过滤器入口本身」，已压到 PySide6 虚函数调用的地板（~3 µs）。
+- `Timer`/`MetaCall`/`Paint` **不能减**：它们不是「多余通知」，是应用自己的定时器、跨线程信号和首帧前真实绘制；早退路径已经只做一次类型比较。
+- `ChildAdded`/`Polish`/`Create`/`ChildPolished`/`Move` 是控件树构建的固有事件，发生在 `_build_kernel_panels`/`_build_mode_shell` 内部；删掉等于不建控件。
+
+**行为回归（9 个测试文件，一次跑完：`67 passed, 1 xfailed, 2 warnings in 38.27 s`）**
+
+| 依赖事件路径的功能 | 测试文件 | 结果 |
+|---|---|---|
+| 快捷键注册表/冲突/菜单绑定（11 项） | `tests/test_shortcuts_guard.py` | 11 PASSED（含 `test_no_raw_key_literals_outside_registry`、`test_every_registered_id_is_used_by_main_window`） |
+| Esc 关闭浮层/退出天象仪（3 项） | `tests/test_shortcuts_guard.py` | PASSED |
+| Ctrl+C 焦点链（4 项） | `tests/test_ctrl_c_focus_guard.py` | 4 PASSED（`test_ctrl_c_goes_to_text_widget_not_global_action` 等） |
+| 快捷键焦点优先级（A 键不劫持频谱 AM，4 项） | `tests/test_shortcut_focus_priority.py` | 4 PASSED |
+| 触摸模式（17 项：单例/尺寸/强制触摸/捏合/设置往返） | `tests/test_touch_adaptation.py` | 17 PASSED |
+| 关闭确认（录音中关窗：取消保留/保存后退出/保存失败留在窗口，3 项） | `tests/test_close_recording_guard.py` | 3 PASSED |
+| 设备列表填充/切换/失败回滚/断开清理（6 项） | `tests/test_device_switch_flow.py` | 6 PASSED |
+| 无设备空态（横幅文案/连接对话框禁用/刷新进度，4 项 + 3 项） | `tests/test_no_device_onboarding.py`、`tests/test_desktop_ui_responsiveness.py::TestAutoEnumerateNoDevice` | 7 PASSED |
+| 断连/重连（手动路径，6 项；热插拔自动恢复 1 项） | `tests/test_desktop_ui_responsiveness.py::TestCleanDisconnect`、`tests/test_desktop_hotplug_autorecovery.py` | 6 PASSED；热插拔 **XFAIL（strict）**，原因是产品尚未接入自动重连（`tests/test_desktop_hotplug_autorecovery.py:68-72` 自带说明，与本改动无关） |
+
+期望字段：`startup.ef_profile`（类型 → [次数, 累计 ms]）、`startup.ef_opt_ab.median_old_ms/median_new_ms/delta_ms/delta_pct`、`startup.median.eventfilter_ms/eventfilter_calls`。
+
+### 8.2 首帧后枚举 + 硬件连接后台化
+
+**claim 结果**：动手前 `python scripts/file_claim.py status` 里 `desktop/main_window.py` **未被占用**（原持有方已释放），可以拿；拿到后按 UX 线要求**立即释放**，本线改动留在工作树、等 UX 线落库后再提交（未夹带他线改动，见 §8.5）。
+
+**先纠正 §7.1 的前提**：「首帧后后端枚举 **1543.5 ms**」不是一次 `enumerate_all_sdr_devices()` 的耗时，而是「首帧 → 启动自动连接结束」的整段 span。按相位时间戳拆开（3 次）：
+
+| 组成 | 实测（3 次） | 说明 |
+|---|---|---|
+| `enumerate_all_sdr_devices()`（启动路径这次） | **74 / 85 / 114 ms** | `enum_worker_start → build_backend_start` |
+| `build_backend_for_device()` | 0.1 ms | 只 new 对象 |
+| `backend.connect()`（硬件） | 18.7 / 1057.4 / 1083.7 ms | USB 打开 + 调谐器探测，**硬件/驱动态波动很大** |
+| UI 挂接 + `_start_iq_streams` | 844.0 / 928.8（中位）/ 1013.5 ms | 构建流水线 + 启动音频，仍在 GUI |
+
+另外 `startup.median.backend_enum_ms = 954.4` **不是单次枚举**，而是进程内**所有枚举调用之和**（`device_panel` 首帧后刷新、`module_panel` 后台刷新、启动路径都算在内），每次 ~0.8–1.3 s；不要拿它当启动单次成本。
+
+**改动**：`_auto_enumerate_and_connect_async()` 起 `threading.Thread`（`auto-sdr-enum`，daemon），后台依次做 **enumerate → `_pick_auto_device` → `build_backend_for_device` → `backend.connect()`**（全程不碰控件），结果经 `_auto_enum_ready`（`Qt.QueuedConnection`）回 GUI；GUI 侧只做标签/状态切换 + `_start_iq_streams`。同步版 `_auto_enumerate_and_connect()` 保留原语义，测试/直接调用路径不变。
+
+**A/B（交替子进程，n=3，其中 1 次当轮没连上设备，不计入连接类指标）**
+
+GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backend_end`（枚举+connect+挂接都在 GUI）；异步版 `auto_ready_start → connect_backend_end`（只有挂接在 GUI）。
+
+| | 第 2 次 | 第 3 次 | 中位 | 变化 |
+|---|---:|---:|---:|---|
+| 改前（同步，GUI 内联） | 2242.4 | 3041.8 | **2642.1 ms** | |
+| 改后（异步） | 1099.2 | 913.4 | **1006.3 ms** | **-1635.8 ms（-61.9%）** |
+| 心跳最大间隔（旁证，低估） | 1219.4 / 1734.4 | 1108.4 / 919.2 | 1476.9 → 1013.8 ms | -463.1 ms（-31.3%） |
+
+> 心跳只作旁证：`_connect_backend` 内部会调 `QApplication.processEvents()`，被它服务的心跳会低估阻塞，所以主指标用相位时间戳。
+
+**残余大头**：改后 GUI 仍占 **1006 ms**，其中 `_start_iq_streams` **844.0–1013.5 ms（中位 928.8）**，占 92%。它构建 `ReceiveChain`/`AudioPlayer`（QObject + 音频设备），跨线程要改所有权与信号边界——属下一刀，本轮不动。
+
+**已知差异（未改，留档）**：启动自动连接路径不再显示「状态: 连接中」，因为 `connect()` 已在后台；GUI 在探测/连接期间显示的是「未连接」，完成后直接跳到已连接或失败提示。手动连接路径行为不变（仍先写「连接中」再 `processEvents`）。若要补提示，最小改动 = 在 `_auto_enumerate_and_connect_async` 起线程前写一条 `MSG_QUICK` 状态栏文案。
+
+**行为验证**：设备列表填充/切换/失败回滚 = `test_device_switch_flow` 6 PASSED；断开清理 = `TestCleanDisconnect` 3 PASSED；无设备空态 = `TestAutoEnumerateNoDevice` 3 + `test_no_device_onboarding` 4 PASSED；自动连接/热插拔 = 热插拔严格 `XFAIL`（产品未接入自动重连，非本改动引入）。合计见 8.1 的 67 passed。
+
+期望字段：`startup.enum_bg_ab_detail.sync[]/async[].enum_worker_ms/connect_backend_ms/start_streams_ms`、`startup.enum_bg_ab_detail.*[].auto_ready_ms`；GUI 忙区间用 `startup.enum_bg_ab_hb_max.old_ms[]` 与 `.new_ms[]` 里的 `enum_worker_start`/`auto_ready_start` → `connect_backend_end` 相减得到（原始相位戳都在证据 JSON 里）。
+
+### 8.3 帧周期拆账：13.16 fps 的 13.2 ms 去哪了
+
+配置同 §7.3（2.4 MS/s、FFT 1024、384 bin、曲线定时器 66 ms、控件 858×283、每 50 ms 推 120,000 样本）。
+
+| 项 | 实测 | 来源 |
+|---|---:|---|
+| 6.003 s 内 paint | 79 帧 → **13.16 fps**（名义 15.15） | `measured.paints/elapsed_s/fps` |
+| 定时器实际间隔 | p50 **79.20** / p95 82.02 / max 85.82 ms（n=76） | `timer_gap` |
+| 单帧 paint | p50 **8.19** / p95 10.89 / max 11.68 ms | `paint` |
+| 定时器到 paint 的延迟 | p50 **0.58** / p95 2.18 ms | `paint_latency_from_timeout` |
+| 喂数摊薄 | **1.31 ms/帧**（`push_iq` 1.05 ms × 95 次 / 76 帧） | `push_iq` |
+| 事件循环其它占用 | **3.44 ms/帧**（600 个 10 ms 心跳 gap 累计超出 261.5 ms） | `heartbeat_blocked_ms_per_frame` |
+| 其中 eventFilter（首帧后） | **0.25–0.43 ms/帧**（890–1,497 事件/s × 3.59 µs） | `ef_after_show_*` |
+
+**拆账（以定时器为准，避免与心跳重复计数）**
+
+```
+79.20 ms（实测周期）
+= 66.00（interval）
++ 0.58（timeout → paint 开始）
++ 8.19（paint）
++ 4.43（paint 结束 → 下一次 timeout 重排：喂数、面板/星表定时器、eventFilter、投递）
+```
+
+4.43 ms 有两条独立旁证：心跳阻塞 3.44 ms/帧（会与 paint 部分重叠，只能当下界）+ 可点名子项 `push_iq` 1.31 + eventFilter 0.25–0.43 ≈ 1.56–1.74 ms。**结论：13.2 ms 全部可归因，没有「约 10 ms 去向不明」**；若按「要达成 15.15 fps 需要周期回到 66 ms」来算，缺口是 13.2 ms，其中 **62% 是 paint**。
+
+**PreciseTimer 对照（排除「Qt 定时器精度」这条解释）**
+
+| | CoarseTimer（默认） | PreciseTimer | 差 |
+|---|---:|---:|---:|
+| 定时器间隔 p50 | 79.20 | 78.82 | **-0.38 ms** |
+| 单帧 paint p50 | 8.19 | 8.57 | +0.38 ms |
+| fps | 13.16 | 13.00 | -0.16 |
+
+换 `Qt.PreciseTimer` 没有改善（-0.38 ms 落在单次运行噪声内，fps 反而低 0.16）。根因是 **QTimer 重复定时器的语义**：下一次 timeout 从本次回调返回后重新计时，周期 = `interval + handler`，不会补偿已消耗的 13.2 ms。这是「结构性扣除」而非「漂移」，也不是 CoarseTimer 的 5% 粒度（若真是粒度问题，Precise 应显著改善）。
+
+**裁定**
+
+| 类别 | 结论 |
+|---|---|
+| 可改善 | paint 8.19 ms（其中 Qt 光栅 `drawPolygon`+`drawPolyline`+`drawLine`+`drawText` 约占 72%，见 §7.3）；事件循环 4.43 ms 里的面板/星表定时器可再合并 |
+| 固有（不可消除，但可补偿） | `interval` 66 ms 本身 + 0.58 ms 派发延迟 + 重复定时器不补偿 handler 时间 |
+| 唯一能把「实测 fps」拉回 15.15 的杠杆 | 把性能档曲线定时器 66 → **约 53 ms**（66 − 13.2），代价是每秒多渲染约 2 帧、光栅占空比 +16%。属产品取舍（帧率 vs CPU），本轮**未改** |
+
+期望字段：`spectrum.measured.fps/paint/timer_gap/paint_gap/paint_latency_from_timeout/heartbeat_gap*/timer_gap_median_minus_interval_ms/timer_type`；对照跑 `spectrum_precise.measured.*`。
+
+### 8.4 决策记录：TLE 超时**不做成可配**
+
+| 项 | 内容 |
+|---|---|
+| 决策 | 维持 `TLEManager(timeout=10.0 s)` + 硬截止 `timeout + 5.0 = 15.0 s`，**不**暴露为用户可配项 |
+| 日期 | 2026-11-06 |
+| 状态 | 已裁定（本条取代 §7.4 末尾「代价」段的悬置表述） |
+| 依据（实测） | 真实 Celestrak 联网 3 次全部 SSL handshake 超时，**10.031 / 10.012 / 10.011 s 吃满**；黑洞服务器 10.010 s；`TLEManager.fetch` 首次 10.009 s；把硬截止改 1 s 验证 1.011 s（证明硬截止路径真实生效）。最坏真实耗时 **10.031 s**，理论上限 15 s |
+| 理由 1：六步代价 | ① `desktop/new_spacetime_panel.py:278` 要把设置值传进 `TLEManager(timeout=)`（1 行）；② `_bounded_urlopen` 的硬截止写死 `timeout + 5.0`，要独立可配就得加参数/比例（1 个函数签名 + 全部调用点）；③ 设置面板加键 + 校验 + schema（1 处 UI）；④ `mbdsdr_ai/tle_fetch.py` 的 `FetchPolicy`（request 15 s / hard 20 s）与 `TLEManager` 是两套默认值，删或标注未使用，否则口径分叉；⑤ `docs/error-code-visibility.md` 里「ai_timeout 不影响 TLE」的说明要改；⑥ 现有测试对 `TLEManager` 零覆盖，需新增超时用例（联网与黑洞两种） |
+| 理由 2：误杀慢网 | 实测三次都吃满 10 s ⇒「慢网」是常态而不是异常。默认值调到 <10 s 会把本来能成功的慢网判死（误杀），且失败提示会与「网络不可达」混淆；调到 >10 s 只延长「刷新中」的显示时长，不产生任何收益（网络等待在后台线程，不卡 UI） |
+| 理由 3：收益为零 | 可配的唯一用途是「让用户更快放弃」。当前放弃成本只是状态栏/面板停在「刷新中」，没有阻塞任何交互；为此引入 6 步改动面不划算 |
+| 若日后要做：最小改动面 | 必须项 **①+②**（把 timeout 与硬截止成对传进去，避免「软超时 5 s / 硬截止仍 15 s」的错配）；配套项 ③④⑤⑥ 不做就是口径分叉/文档说谎。默认值建议保持 10 s，可配范围下限不得 <5 s（低于实测最坏 10.03 s 必然误杀） |
+| 复验 | `python scripts/perf_probe_deep.py --section tle`；期望字段 `tle.config.*`、`tle.celestrak_real[].wall_s`、`tle.blackhole_timeout.wall_s`、`tle.blackhole_hard_deadline_1s.wall_s` |
+
+### 8.5 证据文件与提交边界
+
+- `docs/perf-evidence/deep_perf_third_20261106.json`：本轮三份原始输出的合并快照——`startup`（EF 分型、旧/新 EF A/B、sync/async 枚举 A/B、全部相位时间戳）、`spectrum`（CoarseTimer）、`spectrum_precise`（PreciseTimer 对照）。顶层带 `conditions`/`commands`。
+- 合并源（临时产物，已删除）：`.tmp\startup_v3.json` + `.tmp\spectrum_v3.json` + `.tmp\spectrum_precise.json`；探针脚本自身的 A/B 开关是 `STARTUP_EF_PROFILE` / `STARTUP_OLD_EF` / `STARTUP_SYNC_ENUM` / `SPECTRUM_PRECISE`。
+- 提交边界：`desktop/main_window.py` 只提交本线 9 个 hunk（Qt 导入、`_auto_enum_ready` 信号、`__init__` 线程字段、启动定时器目标、`eventFilter`、`_auto_enumerate_and_connect*` 系列、`_connect_backend(already_connected=)`）；**同文件里他人未落库的 hunk 不进本次提交**（用私有 `GIT_INDEX_FILE` + `check_commit_scope.py --staged --expect` 精确核对）。

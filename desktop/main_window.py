@@ -377,8 +377,8 @@ import l10n   # i18n 加载层（Qt Linguist）；同级裸导入，双上下文
 import numpy as np
 
 from PySide6.QtCore import (
-    Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings, QRect,
-    QPoint,
+    QEvent, Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
+    QRect, QPoint,
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QFont, QShortcut, QGuiApplication,
@@ -616,6 +616,8 @@ class MainWindow(QMainWindow):
     replay_load_finished = Signal(object)    # 结果 dict（含 error/cancelled）
     # TLE 在线刷新线程 → UI 线程（网络调用最坏数十秒，绝不压 GUI）
     _tle_update_result = Signal(object)      # (更新数, 失败对象|None)
+    # 启动自动枚举：后台线程 → UI 线程（枚举实测 1.5 s，不能压首帧后的可交互时间）
+    _auto_enum_ready = Signal(object)        # {"devices": [...]} 或 {"error": "..."}
 
     def __init__(self):
         super().__init__()
@@ -691,6 +693,10 @@ class MainWindow(QMainWindow):
         self._tle_update_thread: Optional[threading.Thread] = None
         self._tle_update_result.connect(
             self._on_tle_update_result, Qt.QueuedConnection)
+        # 启动自动选源的后台枚举线程（只做 enumerate，不碰控件）
+        self._auto_enum_thread: Optional[threading.Thread] = None
+        self._auto_enum_ready.connect(
+            self._on_auto_enum_ready, Qt.QueuedConnection)
         self._sat_track_timer: Optional[QTimer] = None
         self._sat_track_prev_freq_hz: Optional[float] = None
         self._sat_track_prev_mode: Optional[str] = None
@@ -874,7 +880,7 @@ class MainWindow(QMainWindow):
         # _release_runtime_resources 统一停掉。
         self._startup_timers: list = []
         for _ms, _fn in ((100, self._load_gui_config),
-                         (200, self._auto_enumerate_and_connect),
+                         (200, self._auto_enumerate_and_connect_async),
                          (1200, self._update_sky_satellites)):
             _t = QTimer(self)
             _t.setSingleShot(True)
@@ -2359,25 +2365,23 @@ class MainWindow(QMainWindow):
         return False
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)
-        from PySide6.QtCore import QEvent
-        if obj is getattr(self, "_ai_cmd_parent", None) \
-                and event.type() == QEvent.Resize:
-            self._position_ai_cmd_bar()
-        if obj is getattr(self, "_planetarium_sky_slot", None) \
-                and event.type() == QEvent.Resize:
-            self._position_planetarium_ai_card()
-        if obj is getattr(self, "sky_view", None) \
-                and event.type() == QEvent.Resize:
-            self._position_all_sky_btn()
-            self._position_planetarium_overlay()
-        if obj is getattr(self, "_planetarium_strip", None):
-            if event.type() == QEvent.Enter:
-                self._set_planetarium_strip_hover(True)
-            elif event.type() == QEvent.Leave:
-                self._set_planetarium_strip_hover(False)
-        if event.type() == QEvent.ShortcutOverride:
+        # 构造期 8 万次事件：先取一次事件类型，按类型分派后再比对象身份，
+        # 不再对每个事件做 4 次 getattr + 重复 event.type()（旧实现占构造 59%）。
+        etype = event.type()
+        if etype == QEvent.Resize:
+            if obj is getattr(self, "_ai_cmd_parent", None):
+                self._position_ai_cmd_bar()
+            elif obj is getattr(self, "_planetarium_sky_slot", None):
+                self._position_planetarium_ai_card()
+            elif obj is getattr(self, "sky_view", None):
+                self._position_all_sky_btn()
+                self._position_planetarium_overlay()
+        elif etype == QEvent.ShortcutOverride:
             if self._handle_shortcut_override(event):
                 return True
+        elif etype == QEvent.Enter or etype == QEvent.Leave:
+            if obj is getattr(self, "_planetarium_strip", None):
+                self._set_planetarium_strip_hover(etype == QEvent.Enter)
         return super().eventFilter(obj, event)
 
     def _on_cmd_submit(self) -> None:
@@ -3464,14 +3468,41 @@ class MainWindow(QMainWindow):
     # 枚举失败（缺 pyrtlsdr / 缺驱动 / 无棒）时状态栏明确提示，绝不静默走假后端。
     # ------------------------------------------------------------------
     def _auto_enumerate_and_connect(self):
-        """启动后自动枚举 SDR 设备；找到 RTL-SDR 则直接连接，否则提示排查。
+        """同步版：枚举 SDR 设备 → 找到 RTL-SDR 就直接连接，否则提示排查。
 
-        只在启动时调用一次（QTimer.singleShot 延迟到事件循环就绪）。
-        用户已手动连接 / 已有后端时直接返回，不重复连接。
+        保留同步语义供测试/直接调用（调用返回即已完成）；启动路径改用
+        _auto_enumerate_and_connect_async，枚举 1.5 s 不压 GUI 线程。
         任何异常都不崩溃，降级为状态栏提示 + 保持未连接状态。
         """
-        if self._active_sdr_backend is not None:
+        if self._auto_enum_guard():
             return
+        try:
+            from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
+            devices = enumerate_all_sdr_devices()
+        except Exception as e:
+            # 枚举本身抛异常（典型：pyrtlsdr 未安装 / librtlsdr 缺失）
+            self._show_no_rtl_hint(f"设备枚举失败：{e}")
+            return
+        self._auto_select_and_connect(devices)
+
+    def _auto_enumerate_and_connect_async(self):
+        """启动路径：枚举放后台线程，选源/连接排队回 GUI 线程。
+
+        实测枚举 1543.5 ms（1 台 RTL-SDR，含 SoapySDR 总线探测），留在 GUI
+        线程会让首帧后继续冻结同样长。worker 只做 enumerate，不碰控件。
+        """
+        if self._auto_enum_guard():
+            return
+        if self._auto_enum_thread is not None and self._auto_enum_thread.is_alive():
+            return
+        self._auto_enum_thread = threading.Thread(
+            target=self._auto_enum_worker, name="auto-sdr-enum", daemon=True)
+        self._auto_enum_thread.start()
+
+    def _auto_enum_guard(self) -> bool:
+        """已连接 / 离线模式 → 不枚举。返回 True 表示调用方直接返回。"""
+        if self._active_sdr_backend is not None:
+            return True
         # 离线模式（conftest/CI 默认 MBDSDR_OFFLINE=1）：不碰真实硬件。
         # 否则启动 200ms 后就去枚举 USB —— 在测试进程里会同步阻塞（本机
         # RTL-SDR 处于异常态时阻塞发生在原生层、不释放 GIL，整个会话挂死，
@@ -3480,30 +3511,118 @@ class MainWindow(QMainWindow):
             # 不枚举硬件，但状态栏提示必须与"无设备"口径一致（含排查关键词）：
             # 离线态同样没有连上后端，用户需要知道怎么排查，不能只说"跳过"。
             self._show_no_rtl_hint("离线模式（未枚举硬件）。" + _NO_SDR_HINT)
-            return
+            return True
+        return False
+
+    def _auto_enum_worker(self) -> None:
+        """后台线程：枚举 → 选源 → 构造后端 → 硬件 connect（全程不碰控件）。
+
+        本机实测：枚举 ~93 ms，真正的阻塞是 RTLSDRBackend.connect() ~2.0 s
+        （USB 打开/调谐器探测）。两者都在后台做完，GUI 只做 UI 挂接。
+        """
         try:
             from mbdsdr_ai.sdr_backend import (
                 enumerate_all_sdr_devices, build_backend_for_device)
             devices = enumerate_all_sdr_devices()
-        except Exception as e:
-            # 枚举本身抛异常（典型：pyrtlsdr 未安装 / librtlsdr 缺失）
-            self._show_no_rtl_hint(f"设备枚举失败：{e}")
+        except Exception as e:  # noqa: BLE001
+            self._emit_auto_enum({"error": f"{type(e).__name__}: {e}"})
             return
+        chosen = self._pick_auto_device(devices)
+        if chosen is None:
+            self._emit_auto_enum({"devices": devices})
+            return
+        backend = build_backend_for_device(chosen)
+        if backend is None:
+            self._emit_auto_enum({"devices": devices})
+            return
+        try:
+            ok = backend.connect()
+        except Exception as e:  # noqa: BLE001
+            ok = False
+            try:
+                backend.status.error = f"connect 异常: {e}"
+            except Exception:
+                pass
+        if ok:
+            self._emit_auto_enum({"backend": backend, "device": chosen})
+            return
+        raw_err = ""
+        try:
+            raw_err = backend.get_status().error or ""
+        except Exception:
+            pass
+        self._emit_auto_enum({"backend": backend, "connect_error": raw_err})
 
-        # 优先选 RTL-SDR 原生棒（driver == "rtlsdr"），其次任意真实设备
-        rtl_dev = None
+    def _emit_auto_enum(self, payload: dict) -> None:
+        try:
+            self._auto_enum_ready.emit(payload)
+        except RuntimeError:
+            # 窗口已销毁：Qt 拒绝向已删除对象排队，属正常退出路径。
+            pass
+
+    @staticmethod
+    def _pick_auto_device(devices):
+        """选源优先级：RTL-SDR 原生棒（driver == "rtlsdr"）→ 任意真实设备。"""
         other_dev = None
         for dev in devices:
             if not isinstance(dev, dict):
                 continue
             drv = (dev.get("driver") or "").lower()
             if drv == "rtlsdr":
-                rtl_dev = dev
-                break
+                return dev
             if other_dev is None:
                 other_dev = dev
+        return other_dev
 
-        chosen = rtl_dev or other_dev
+    @Slot(object)
+    def _on_auto_enum_ready(self, payload: dict) -> None:
+        """GUI 线程：接收后台结果，只做 UI 挂接（硬件已连好）。"""
+        if self._active_sdr_backend is not None:
+            return
+        backend = payload.get("backend")
+        if backend is not None:
+            if "connect_error" in payload:
+                self._on_auto_connect_failed(backend, payload["connect_error"])
+                return
+            self._connect_backend(
+                backend,
+                sample_rate=float(DEFAULT_SAMPLE_RATE_HZ),
+                gain=20.0,
+                ppm=0,
+                agc=True,
+                offset_tuning=False,
+                already_connected=True,
+            )
+            return
+        if "error" in payload:
+            self._show_no_rtl_hint(f"设备枚举失败：{payload['error']}")
+            return
+        self._auto_select_and_connect(payload.get("devices") or [])
+
+    def _on_auto_connect_failed(self, backend, raw_err: str) -> None:
+        """启动自动连接失败：与 _connect_backend 的失败分支保持同一套提示。"""
+        friendly = self._humanize_error(raw_err) if raw_err else \
+            "设备无响应：请检查 USB 棒、librtlsdr 驱动、以及设备是否被 SDR#/GQRX 占用。"
+        self._last_connect_code = classify_connect_error(raw_err)
+        self._show_error_status(f"连接失败：{friendly}",
+                                self._last_connect_code, 6000)
+        try:
+            backend.disconnect()
+        except Exception:
+            pass
+        try:
+            self.conn_label.setText("  状态: 未连接  ")
+            self.status_conn.setText("未连接")
+        except Exception:
+            pass
+        self._show_no_rtl_hint(
+            "RTL-SDR 连接失败：检查 Zadig WinUSB 驱动 / SoapySDR 驱动 / 设备是否被占用",
+            code=self._last_connect_code)
+
+    def _auto_select_and_connect(self, devices) -> None:
+        """GUI 线程：按优先级选源 → 构造后端 → 连接（失败给排查提示）。"""
+        from mbdsdr_ai.sdr_backend import build_backend_for_device
+        chosen = self._pick_auto_device(devices)
         if chosen is None:
             # 真的没设备：明确提示，不弹对话框、不造假。
             # 默认 USB 走 SoapySDR（无 GPL）；pyrtlsdr 仅可选自装。
@@ -3568,7 +3687,8 @@ class MainWindow(QMainWindow):
     def _connect_backend(self, backend, sample_rate: float = float(DEFAULT_SAMPLE_RATE_HZ),
                          gain: float = 20.0, ppm: int = 0,
                          agc: bool = True, offset_tuning: bool = False,
-                         bandwidth: float = 0.0) -> bool:
+                         bandwidth: float = 0.0,
+                         already_connected: bool = False) -> bool:
         """通用后端连接流程：connect → 成功则切状态 + 下发参数 + 启动 IQ 流。
 
         被 _connect_dialog（用户手动选设备）和 _auto_enumerate_and_connect
@@ -3596,24 +3716,28 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("已取消切换（发射继续）", MSG_NORMAL)
                 return False
             self._teardown_connection()
-        # 连接是同步阻塞调用（远端后端默认 5s 超时）：先把「连接中」写上并
-        # 冲一次事件循环，否则用户在最长 5s 内看到的仍是旧标签（假状态）。
-        try:
-            name = getattr(getattr(backend, "device", None), "name", "") or "设备"
-            self.conn_label.setText(f"  状态: 连接中 {name}  ")
-            self.status_conn.setText(f"连接中 {name}")
-            self.statusBar().showMessage(f"正在连接 {name} ...", MSG_QUICK)
-            QApplication.processEvents()
-        except Exception:
-            pass
-        try:
-            ok = backend.connect()
-        except Exception as e:
-            ok = False
+        # 连接是同步阻塞调用（本机 RTL-SDR 原生 connect 实测 2.0 s）：先把
+        # 「连接中」写上并冲一次事件循环，否则用户在阻塞期内看到的仍是旧标签。
+        if already_connected:
+            # 启动自动连接路径：硬件 connect 已在后台线程完成，这里只做 UI 挂接。
+            ok = True
+        else:
             try:
-                backend.status.error = f"connect 异常: {e}"
+                name = getattr(getattr(backend, "device", None), "name", "") or "设备"
+                self.conn_label.setText(f"  状态: 连接中 {name}  ")
+                self.status_conn.setText(f"连接中 {name}")
+                self.statusBar().showMessage(f"正在连接 {name} ...", MSG_QUICK)
+                QApplication.processEvents()
             except Exception:
                 pass
+            try:
+                ok = backend.connect()
+            except Exception as e:
+                ok = False
+                try:
+                    backend.status.error = f"connect 异常: {e}"
+                except Exception:
+                    pass
 
         if not ok:
             raw_err = ""

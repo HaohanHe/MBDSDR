@@ -95,7 +95,7 @@ def _child_env(**extra):
 # 1) 启动分阶段
 # =========================================================================== #
 _STARTUP_CHILD = r"""
-import json, os, sys, time
+import json, os, statistics, sys, time
 ROOT = os.environ["MBDSDR_ROOT"]
 sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "desktop"))
 marks = {}
@@ -111,6 +111,7 @@ def mark(n):
 
 mark("process_start")
 from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtCore import QEvent, QTimer
 mark("qt_import")
 from themes import get_theme, DEFAULT_THEME, get_app_font
 from main_window import MainWindow
@@ -118,6 +119,10 @@ mark("main_window_import")
 from PySide6.QtGui import QFontDatabase
 QUICK = os.environ.get("STARTUP_QUICK") == "1"
 STUB = os.environ.get("STARTUP_STUB_EF") == "1"
+EF_PROFILE = os.environ.get("STARTUP_EF_PROFILE") == "1"
+OLD_EF = os.environ.get("STARTUP_OLD_EF") == "1"
+SYNC_ENUM = os.environ.get("STARTUP_SYNC_ENUM") == "1"
+ef_types = {}
 
 app = QApplication.instance() or QApplication([])
 mark("qt_app_create")
@@ -200,14 +205,54 @@ def _shell(self, *a, **k):
     r = _orig_shell(self, *a, **k)
     box["mode_shell_ms"] += (time.perf_counter() - t) * 1000.0
     return r
+def _old_ef(self, obj, ev):
+    # 改动前（HEAD 2361-2381）的原样实现，用于改前/改后 A/B。
+    if obj is getattr(self, "_ai_cmd_parent", None) \
+            and ev.type() == QEvent.Resize:
+        self._position_ai_cmd_bar()
+    if obj is getattr(self, "_planetarium_sky_slot", None) \
+            and ev.type() == QEvent.Resize:
+        self._position_planetarium_ai_card()
+    if obj is getattr(self, "sky_view", None) \
+            and ev.type() == QEvent.Resize:
+        self._position_all_sky_btn()
+        self._position_planetarium_overlay()
+    if obj is getattr(self, "_planetarium_strip", None):
+        if ev.type() == QEvent.Enter:
+            self._set_planetarium_strip_hover(True)
+        elif ev.type() == QEvent.Leave:
+            self._set_planetarium_strip_hover(False)
+    if ev.type() == QEvent.ShortcutOverride:
+        if self._handle_shortcut_override(ev):
+            return True
+    return QMainWindow.eventFilter(self, obj, ev)
+
+_impl_ef = _old_ef if OLD_EF else _orig_ef
+
 def _ef(self, obj, ev):
     box["ef_calls"] += 1
     t = time.perf_counter()
-    r = _orig_ef(self, obj, ev)
-    box["ef_ms"] += (time.perf_counter() - t) * 1000.0
+    r = _impl_ef(self, obj, ev)
+    dt = (time.perf_counter() - t) * 1000.0
+    box["ef_ms"] += dt
+    if EF_PROFILE:
+        try:
+            name = QEvent.Type(ev.type()).name
+        except Exception:
+            name = str(int(ev.type()))
+        rec = ef_types.get(name)
+        if rec is None:
+            rec = ef_types[name] = [0, 0.0]
+        rec[0] += 1
+        rec[1] += dt
     return r
+
 MainWindow._build_kernel_panels = _kernel
 MainWindow._build_mode_shell = _shell
+if SYNC_ENUM:
+    # A/B 用：把启动枚举改回 GUI 线程内联，等价于改动前的阻塞行为。
+    MainWindow._auto_enumerate_and_connect_async = \
+        lambda self: self._auto_enum_worker()
 if STUB:
     # 仅用于 A/B：把 eventFilter 换成只调 C++ 基类，测它本身吃掉多少构造时间
     def _stub_ef(self, obj, ev):
@@ -216,28 +261,105 @@ if STUB:
 else:
     MainWindow.eventFilter = _ef
 
+# 关键回调加绝对时间戳：定位首帧后那 2 s 到底花在哪个回调上（线程内也记）。
+def _wrap(label, name):
+    orig = getattr(MainWindow, name)
+    def ww(self, *a, **k):
+        marks[label + "_start"] = round((time.perf_counter() - t_all) * 1000.0, 1)
+        r = orig(self, *a, **k)
+        marks[label + "_end"] = round((time.perf_counter() - t_all) * 1000.0, 1)
+        return r
+    setattr(MainWindow, name, ww)
+for _label, _name in (("async_enter", "_auto_enumerate_and_connect_async"),
+                      ("enum_worker", "_auto_enum_worker"),
+                      ("auto_ready", "_on_auto_enum_ready"),
+                      ("auto_select", "_auto_select_and_connect"),
+                      ("connect_backend", "_connect_backend"),
+                      ("start_streams", "_start_iq_streams"),
+                      ("backfill", "_backfill_real_rf_readings"),
+                      ("sky_sat", "_update_sky_satellites")):
+    _wrap(_label, _name)
+# 后端构造 vs 硬件 connect 的拆分（build 只 new 对象，connect 才碰 USB）
+import mbdsdr_ai.sdr_backend as _sb
+_build_orig = _sb.build_backend_for_device
+def _build_marked(dev):
+    marks["build_backend_start"] = round((time.perf_counter() - t_all) * 1000.0, 1)
+    b = _build_orig(dev)
+    marks["build_backend_end"] = round((time.perf_counter() - t_all) * 1000.0, 1)
+    for _n in ("connect", "set_sample_rate", "set_bandwidth", "set_frequency",
+               "set_ppm", "set_offset_tuning", "set_agc", "set_gain",
+               "start_stream", "stop_stream", "disconnect"):
+        _o = getattr(b, _n, None)
+        if callable(_o):
+            def _mk(n, o):
+                def _w(*a, **k):
+                    _t = time.perf_counter()
+                    r = o(*a, **k)
+                    _key = "backend_" + n + "_ms"
+                    box[_key] = box.get(_key, 0.0) + (time.perf_counter() - _t) * 1000.0
+                    return r
+                return _w
+            setattr(b, _n, _mk(_n, _o))
+    return b
+_sb.build_backend_for_device = _build_marked
+
 t = time.perf_counter(); w = MainWindow()
 marks["main_window_init"] = round((time.perf_counter() - t) * 1000.0, 1)
 mark("main_window_init_end")
 if QUICK:
     print("PHASES_JSON " + json.dumps(marks))
     raise SystemExit(0)
+# GUI 心跳从构造结束就开始：200ms 单发定时器可能在 processEvents 里就触发，
+# 只在 grab 之后起表会漏掉那一段。存 (绝对时刻, 间隔) 便于按阶段切片。
+hb = []
+hb_last = [time.perf_counter()]
+def _hb():
+    now = time.perf_counter()
+    hb.append((round((now - t_all) * 1000.0, 1), (now - hb_last[0]) * 1000.0))
+    hb_last[0] = now
+hb_timer = QTimer(); hb_timer.setInterval(10)
+hb_timer.timeout.connect(_hb); hb_timer.start()
+
 w.show(); app.processEvents()
 mark("show_process_events")
 t = time.perf_counter(); w.grab()
 marks["grab_first_frame"] = round((time.perf_counter() - t) * 1000.0, 1)
 mark("grab_end")
+box["ef_calls_at_show"] = box["ef_calls"]
+box["ef_ms_at_show"] = box["ef_ms"]
 
-from PySide6.QtCore import QTimer
 QTimer.singleShot(3500, app.quit)
 app.exec()
+hb_timer.stop()
 mark("deferred_end")
+if hb:
+    s = sorted(g for _, g in hb)
+    marks["hb_n"] = len(s)
+    marks["hb_p50_ms"] = round(statistics.median(s), 2)
+    marks["hb_p95_ms"] = round(s[max(0, int(len(s) * 0.95) - 1)], 2)
+    marks["hb_max_ms"] = round(s[-1], 2)
+    marks["hb_max_at_ms"] = max(hb, key=lambda x: x[1])[0]
+    post = [g for r, g in hb if r >= marks["grab_end"]]
+    if post:
+        marks["hb_max_after_first_frame_ms"] = round(max(post), 2)
+        marks["hb_p95_after_first_frame_ms"] = round(
+            sorted(post)[max(0, int(len(post) * 0.95) - 1)], 2)
+marks["ef_after_show_calls"] = box["ef_calls"] - box["ef_calls_at_show"]
+marks["ef_after_show_ms"] = round(box["ef_ms"] - box["ef_ms_at_show"], 1)
+if EF_PROFILE:
+    marks["ef_by_type"] = {
+        k: [v[0], round(v[1], 1)]
+        for k, v in sorted(ef_types.items(), key=lambda kv: -kv[1][1])[:12]
+    }
 marks["star_load_ms"] = round(box["star_ms"], 1)
 marks["star_load_calls"] = box["star_calls"]
 marks["star_catalog_mb"] = round(box["star_bytes"] / 1048576.0, 1)
 marks["backend_enum_ms"] = round(box["enum_ms"], 1)
 marks["backend_enum_devices"] = box["enum_devices"]
 marks["backend_connect_ms"] = round(box["connect_ms"], 1)
+for _k, _v in box.items():
+    if _k.startswith("backend_"):
+        marks[_k] = round(_v, 1)
 marks["eventfilter_ms"] = round(box["ef_ms"], 1)
 marks["eventfilter_calls"] = box["ef_calls"]
 marks["kernel_panels_ms"] = round(box["kernel_ms"], 1)
@@ -267,6 +389,17 @@ def section_startup(runs=3):
         for _ in range(max(1, runs)):
             ab_normal.append(_one(STARTUP_QUICK=1)["main_window_init"])
             ab_stub.append(_one(STARTUP_QUICK=1, STARTUP_STUB_EF=1)["main_window_init"])
+        # eventFilter 改前/改后 A/B（旧实现由探针按 HEAD 原样重建）
+        ef_old, ef_new = [], []
+        for _ in range(max(1, runs)):
+            ef_old.append(_one(STARTUP_QUICK=1, STARTUP_OLD_EF=1))
+            ef_new.append(_one(STARTUP_QUICK=1))
+        # 启动枚举：GUI 内联（改前）vs 后台线程（改后），看首帧后心跳最大间隔
+        en_sync, en_async = [], []
+        for _ in range(max(1, runs)):
+            en_sync.append(_one(STARTUP_SYNC_ENUM=1))
+            en_async.append(_one())
+        ef_profile = _one(STARTUP_EF_PROFILE=1)
         if not each:
             raise RuntimeError("startup child 没有输出 PHASES_JSON")
         keys = [k for k in each[0] if isinstance(each[0][k], (int, float))]
@@ -295,7 +428,35 @@ def section_startup(runs=3):
             os.remove(probe)
         except OSError:
             pass
+    def _span(r, a, b):
+        if r.get(a) is None or r.get(b) is None:
+            return None
+        return round(r[b] - r[a], 1)
+
+    def _enum_detail(r):
+        return {
+            "hb_max_ms": r.get("hb_max_ms"),
+            "hb_max_at_ms": r.get("hb_max_at_ms"),
+            "hb_p95_ms": r.get("hb_p95_ms"),
+            "enum_ms_total": r.get("backend_enum_ms"),
+            "enum_worker_ms": _span(r, "enum_worker_start", "enum_worker_end"),
+            "connect_backend_ms": _span(r, "connect_backend_start", "connect_backend_end"),
+            "start_streams_ms": _span(r, "start_streams_start", "start_streams_end"),
+            "auto_ready_ms": _span(r, "auto_ready_start", "auto_ready_end"),
+            "backend_connect_ms": r.get("backend_connect_ms"),
+            "deferred_end": r.get("deferred_end"),
+        }
+
+    def _ab(old, new, key):
+        mo = statistics.median([r[key] for r in old])
+        mn = statistics.median([r[key] for r in new])
+        return {"old_ms": old, "new_ms": new,
+                "median_old_ms": round(mo, 1), "median_new_ms": round(mn, 1),
+                "delta_ms": round(mn - mo, 1),
+                "delta_pct": round((mn - mo) / mo * 100.0, 1) if mo else None}
+
     return {"runs": each, "median": med, "top3": top3,
+            "ef_profile": ef_profile.get("ef_by_type", {}),
             "eventfilter_ab": {
                 "normal_init_ms": ab_normal,
                 "stubbed_init_ms": ab_stub,
@@ -303,6 +464,13 @@ def section_startup(runs=3):
                 "median_stubbed_ms": round(statistics.median(ab_stub), 1),
                 "delta_ms": round(statistics.median(ab_normal)
                                    - statistics.median(ab_stub), 1),
+            },
+            "ef_opt_ab": _ab(ef_old, ef_new, "main_window_init"),
+            "enum_bg_ab_hb_max": _ab(en_sync, en_async, "hb_max_ms"),
+            "enum_bg_ab_enum_ms": _ab(en_sync, en_async, "backend_enum_ms"),
+            "enum_bg_ab_detail": {
+                "sync": [_enum_detail(r) for r in en_sync],
+                "async": [_enum_detail(r) for r in en_async],
             },
             "stderr_note": "子进程 QT_QPA_PLATFORM=offscreen；"
                            "MBDSDR_NULL_AUDIO=1；无 MBDSDR_NO_HW"}
@@ -482,7 +650,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QPainter
-from PySide6.QtCore import QPoint, QTimer
+from PySide6.QtCore import QPoint, QTimer, Qt
 import numpy as np
 import spectrum_widget as sw
 from spectrum_widget import _render_spectrum
@@ -490,8 +658,10 @@ from spectrum_widget import _render_spectrum
 # PySide6 的虚函数在类创建时绑定；运行期给类赋 paintEvent 不会拦到 Qt 的虚调用，
 # 只能在建面板前换成"在类体里定义 paintEvent"的子类。
 paint_ms = []
+paint_ts = []
 class CountingCurve(sw.SpectrumCurveWidget):
     def paintEvent(self, ev):
+        paint_ts.append(time.perf_counter())
         t = time.perf_counter()
         super().paintEvent(ev)
         paint_ms.append((time.perf_counter() - t) * 1000.0)
@@ -506,6 +676,9 @@ app.processEvents()
 # 1024 点档：schema 合法三档之一，性能档 1 同时把谱线 bin 调到 384
 panel.generator.set_fft_size(1024)
 panel.set_performance_mode(1)
+if os.environ.get("SPECTRUM_PRECISE") == "1":
+    # 对照实验：只改定时器精度，不改绘制，量化 CoarseTimer 的 5% 抖动
+    panel._plot._timer.setTimerType(Qt.PreciseTimer)
 gen = panel.generator
 SR = 2_400_000.0
 gen.sample_rate_hz = SR
@@ -526,12 +699,42 @@ feed = QTimer()
 feed.setInterval(50)          # 2.4 MS/s × 50 ms = 120k 样本/块
 feed.timeout.connect(lambda: gen.push_iq(block, 100e6, SR))
 feed.start()
+
+# 帧周期拆账：定时器实际触发时刻 / 绘制时刻 / 事件循环心跳。
+timer_ts = []
+panel._plot._timer.timeout.connect(lambda: timer_ts.append(time.perf_counter()))
+hb_gaps = []
+hb_last = [time.perf_counter()]
+def _hb():
+    now = time.perf_counter()
+    hb_gaps.append((now - hb_last[0]) * 1000.0)
+    hb_last[0] = now
+hb_timer = QTimer(); hb_timer.setInterval(10)
+hb_timer.timeout.connect(_hb); hb_timer.start()
+
 t0 = time.perf_counter()
 QTimer.singleShot(6000, app.quit)
 app.exec()
 elapsed = time.perf_counter() - t0
 feed.stop()
+hb_timer.stop()
 n_paint = len(paint_ms)
+
+def diffs_ms(ts):
+    return [(b - a) * 1000.0 for a, b in zip(ts, ts[1:])]
+
+timer_gap = diffs_ms(timer_ts)
+paint_gap = diffs_ms(paint_ts)
+# timeout → 该次 paint 的延迟（update 请求到真正落到 paintEvent 的排队时间）
+paint_latency = []
+j = 0
+for p in paint_ts:
+    while j + 1 < len(timer_ts) and timer_ts[j + 1] <= p:
+        j += 1
+    if timer_ts and timer_ts[j] <= p:
+        paint_latency.append((p - timer_ts[j]) * 1000.0)
+# 心跳间隔超出节拍（10ms）的部分 = GUI 线程被别的活占住的时间
+hb_block_total = sum(max(0.0, g - 10.0) for g in hb_gaps)
 
 def st(xs):
     if not xs:
@@ -634,6 +837,18 @@ out = {
         "paint": st(paint_ms),
         "push_iq": st(push_ms),
         "direct_render": st(frame_ms),
+        "timer_type": str(panel._plot._timer.timerType()),
+        "timer_gap": st(timer_gap),
+        "paint_gap": st(paint_gap),
+        "paint_latency_from_timeout": st(paint_latency),
+        "heartbeat_gap": st(hb_gaps),
+        "heartbeat_gap_gt15ms": sum(1 for g in hb_gaps if g > 15.0),
+        "heartbeat_blocked_ms_total": round(hb_block_total, 1),
+        "heartbeat_blocked_ms_per_frame": round(
+            hb_block_total / max(1, len(timer_gap)), 2),
+        "timer_gap_median_minus_interval_ms": (
+            round(statistics.median(timer_gap) - panel._plot._timer.interval(), 2)
+            if timer_gap else None),
     },
     "profile_top": prof_top,
     "profile_text": prof_text,
@@ -795,8 +1010,8 @@ def _markdown(result: dict) -> str:
             ("show + processEvents（首帧）", m.get("dur_show_first_paint")),
             ("grab 首帧", m.get("grab_first_frame")),
             ("**进程 → 首帧合计**", m.get("dur_first_frame")),
-            ("首帧后后端枚举（GUI 线程）", m.get("backend_enum_ms")),
-            ("**进程 → 枚举完成**", m.get("deferred_end")),
+            ("首帧后枚举累计（含后台线程 + 面板轮询）", m.get("backend_enum_ms")),
+            ("**进程 → 3.5 s 观察窗结束**", m.get("deferred_end")),
         ]
         md += ["## 1) 启动分阶段（独立子进程，时间戳=perf_counter，单位 ms）", "",
                _md_table(rows, ["阶段", "中位 ms（3 次独立进程）"]), "",
@@ -808,7 +1023,14 @@ def _markdown(result: dict) -> str:
                "eventFilter 同窗口 A/B（只测构造，n=3）："
                f"正常 {s['eventfilter_ab']['median_normal_ms']} ms → "
                f"置空 {s['eventfilter_ab']['median_stubbed_ms']} ms，"
-               f"差 **{s['eventfilter_ab']['delta_ms']} ms**。", ""]
+               f"差 **{s['eventfilter_ab']['delta_ms']} ms**。", "",
+               "eventFilter 改前/改后（旧实现按 HEAD 原样重建，交替 3 次）："
+               f"{s['ef_opt_ab']['median_old_ms']} ms → "
+               f"{s['ef_opt_ab']['median_new_ms']} ms（"
+               f"{s['ef_opt_ab']['delta_pct']}%）。", "",
+               "启动自动连接 GUI 占用（sync=枚举+connect 在 GUI，async=只在后台）："
+               f"sync {s['enum_bg_ab_detail']['sync']}；async "
+               f"{s['enum_bg_ab_detail']['async']}。", ""]
     if "replay" in result:
         md += ["## 2) 回放读盘 GUI 心跳（10 ms QTimer）", "",
                _md_table([(c["mode"], c["max_samples"], c["file_mb"],
