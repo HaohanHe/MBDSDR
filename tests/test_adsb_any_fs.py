@@ -130,3 +130,41 @@ def test_experiment_scan_on_2p4_ms_is_not_silently_zero():
     scan = _scan_adsb_frames(iq, 2.4e6)
     assert scan["crc_ok"] >= 1, scan
     assert scan["decode_fs_hz"] % 1e6 == 0
+
+
+def test_experiment_wrapper_delegates_to_single_implementation():
+    """`experiments/exp_ota_run.py::_adsb_decode_iq` 只是薄包装。
+
+    行为判据（不是静态检查）：IQ、目标 fs、note 文案三项都必须与
+    ``adsb.resample_to_legal_fs`` 逐项一致——旧副本自拼 note 时会漂移。
+    """
+    from experiments.exp_ota_run import _adsb_decode_iq
+
+    iq = _frame_iq_at(2.4e6, lead_us=50.0)
+    want_iq, want_fs, want_note = adsb.resample_to_legal_fs(iq, 2.4e6)
+    got_iq, got_fs, got_note = _adsb_decode_iq(iq, 2.4e6)
+    assert np.array_equal(got_iq, want_iq.astype(np.complex64))
+    assert got_fs == pytest.approx(want_fs)
+    assert got_note == want_note
+
+
+def test_experiment_wrapper_resamples_odd_mhz():
+    """旧副本只查整数 MHz，3 MS/s 会直通；薄包装必须继承官方入口的奇数档重采样。"""
+    from experiments.exp_ota_run import _adsb_decode_iq
+
+    iq = _frame_iq_at(3e6)
+    got_iq, got_fs, got_note = _adsb_decode_iq(iq, 3e6)
+    assert got_fs == pytest.approx(adsb.RESAMPLE_TARGET_HZ)
+    assert "奇数 MHz" in got_note
+    assert got_iq.size > iq.size
+
+
+def test_experiment_wrapper_passthrough_keeps_samples_and_note():
+    """合法偶数档（2 MS/s）不得重采样，也不许产生 note。"""
+    from experiments.exp_ota_run import _adsb_decode_iq
+
+    iq = np.zeros(1024, dtype=np.complex64)
+    got_iq, got_fs, got_note = _adsb_decode_iq(iq, 2e6)
+    assert got_iq.size == iq.size
+    assert got_fs == pytest.approx(2e6)
+    assert got_note == ""

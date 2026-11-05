@@ -111,22 +111,14 @@ def _estimate_snr_db(iq: np.ndarray, fs: float) -> Dict[str, Any]:
 def _adsb_decode_iq(iq: np.ndarray, fs: float) -> "tuple[np.ndarray, float, str]":
     """把录制 IQ 送到 ``decode_baseband`` 能接受的采样率档位。
 
-    ``decode_baseband`` 只认 ≥2MHz 的整数 MHz 档（宁可显式拒绝也不静默取整）。
-    onboard 默认录制是 2.4MS/s，直接传进去会 ValueError、被扫描循环吞成 crc=0。
-    这里先带限重采样到 8MHz（0.5us=4 样点，位判决窗口不贴边），原始录制文件不动。
+    唯一实现放在 ``mbdsdr_ai.adsb.resample_to_legal_fs``（直通条件、8 MS/s
+    目标档、Kaiser 窗 FIR 带限重采样、note 文案全由它决定），这里只做薄包装，
+    不再自拼 ``Fraction`` 比值和第二份 note。原始录制文件不动。
     返回 (解码用 IQ, 解码采样率, 说明)。
     """
-    from fractions import Fraction
-    sps = int(round(fs / 1e6))
-    if fs >= 2e6 and abs(fs / 1e6 - sps) <= 1e-6:
-        return iq, float(fs), ""
-    target_hz = 8_000_000
-    from scipy.signal import resample_poly
-    ratio = Fraction(target_hz, int(round(fs)))
-    out = resample_poly(iq, ratio.numerator, ratio.denominator)
-    note = (f"fs={fs:.0f}Hz 非整数MHz（decode_baseband 不支持），"
-            f"已重采样到 {target_hz / 1e6:.0f}MHz 解码；录制文件未改")
-    return out.astype(np.complex64), float(target_hz), note
+    from mbdsdr_ai import adsb
+    scan_iq, scan_fs, note = adsb.resample_to_legal_fs(iq, fs)
+    return scan_iq.astype(np.complex64), float(scan_fs), note
 
 
 def _scan_adsb_frames(iq: np.ndarray, fs: float) -> Dict[str, Any]:
