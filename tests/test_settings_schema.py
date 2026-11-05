@@ -159,6 +159,7 @@ class _FakeSpectrum:
     def __init__(self):
         self.generator = _FakeGen()
         self.snap_interval = 10000.0
+        self.wf_depth_rows = 256
         self._state = type("S", (), {
             "show_waterfall": True, "show_peaks": True,
             "show_bookmarks": True, "show_bandplan": True,
@@ -192,6 +193,10 @@ class _FakeSpectrum:
     def set_snap_interval(self, hz):
         self.snap_interval = float(hz)
 
+    def set_waterfall_depth_rows(self, rows):
+        self.wf_depth_rows = int(rows)
+        return int(rows)
+
 
 class _FakeSky:
     def __init__(self):
@@ -207,6 +212,9 @@ class _FakeSky:
 
     def set_bortle(self, level):
         self.bortle = int(level)
+
+    def set_extinction_k(self, k):
+        self.extinction_k = float(k)
 
 
 class _FakeHost:
@@ -355,12 +363,12 @@ def test_write_failure_calls_on_error(tmp_path):
 def test_new_keys_persist_roundtrip(tmp_path):
     path = tmp_path / "desktop_settings.json"
     ds = DesktopSettings(path=str(path))
-    ds.set("fft_size", 8192)
+    ds.set("fft_size", 4096)
     ds.set("waterfall_palette", "sdrpp")
     ds.set("sky_pressure_hpa", 1002.5)
     ds.flush()
     again = DesktopSettings.load(path=str(path))
-    assert again.get("fft_size") == 8192
+    assert again.get("fft_size") == 4096
     assert again.get("waterfall_palette") == "sdrpp"
     assert again.get("sky_pressure_hpa") == 1002.5
 
@@ -368,10 +376,10 @@ def test_new_keys_persist_roundtrip(tmp_path):
 def test_reset_single_and_all(env):
     ds, host, panel, _ = env
     ds.set("theme", "dark")
-    ds.set("fft_size", 16384)
+    ds.set("fft_size", 1024)
     assert ds.reset("theme") == "default"
     assert ds.get("theme") == "default"
-    assert ds.get("fft_size") == 16384      # 单项只动一项
+    assert ds.get("fft_size") == 1024      # 单项只动一项
 
     ds.reset_all()
     assert ds.values() == settings_mod.DEFAULTS
@@ -380,10 +388,10 @@ def test_reset_single_and_all(env):
 def test_panel_reset_all_restores_behavior(env):
     ds, host, panel, _ = env
     panel._on_changed("theme", "dark")
-    panel._on_changed("fft_size", 8192)
+    panel._on_changed("fft_size", 4096)
     panel._on_changed("observer_lat", 39.9)
     assert host.theme == "dark"
-    assert host.spectrum.generator.fft_size == 8192
+    assert host.spectrum.generator.fft_size == 4096
     assert host._observer_lat == 39.9
 
     assert panel.reset_all(confirm=False) is True
@@ -392,6 +400,65 @@ def test_panel_reset_all_restores_behavior(env):
     assert host.spectrum.generator.fft_size == 2048
     assert host._observer_lat is None
     assert host.spectrum.generator.fft_size == SCHEMA["fft_size"].default
+
+
+def _non_default_probe(item):
+    """给每个暴露项造一个合法的非默认值（用于"全部恢复默认"覆盖钉扎）。"""
+    if item.kind == "bool":
+        return not bool(item.default)
+    if item.kind == "enum":
+        for value, _label in item.choices:
+            if value != item.default:
+                return value
+        return item.default
+    if item.kind == "int":
+        step = int(item.step or 1)
+        candidate = int(item.default) + step
+        if item.maximum is not None and candidate > item.maximum:
+            candidate = int(item.default) - step
+        return candidate
+    if item.kind == "float":
+        if item.default is None:            # 观测站：默认 None，用可解析的经纬度
+            return 39.9 if item.key.endswith("_lat") else 116.4
+        step = float(item.step or 1.0)
+        candidate = float(item.default) + step
+        if item.maximum is not None and candidate > item.maximum:
+            candidate = float(item.default) - step
+        return candidate
+    return "_reset_probe"
+
+
+def test_reset_all_covers_every_exposed_item(env, monkeypatch):
+    """全局「恢复全部默认」必须覆盖 schema 全部暴露项：漏一项就红。"""
+    ds, host, panel, _ = env
+    applied = []
+    real_apply = panel._apply
+
+    def spy(item, value):
+        applied.append(item.key)
+        return real_apply(item, value)
+
+    monkeypatch.setattr(panel, "_apply", spy)
+
+    # 每项都先改成非默认值（三种存储分别写）
+    for item in EXPOSED_ITEMS:
+        panel._store_value(item, _non_default_probe(item))
+    for item in EXPOSED_ITEMS:
+        assert panel._current_value(item) != item.default, \
+            f"{item.key} 探针值等于默认，覆盖测试无效"
+
+    assert panel.reset_all(confirm=False) is True
+
+    # 1) 每一项都回到 schema 默认（gui_config 的观测站回到 None）
+    drifted = [it.key for it in EXPOSED_ITEMS
+               if panel._current_value(it) != it.default]
+    assert drifted == [], f"恢复默认漏项：{drifted}"
+
+    # 2) 非 gui_config 的每一项都真的走过 _apply（GUI 存储由 _refresh 回填）
+    expect = {it.key for it in EXPOSED_ITEMS if it.storage != "gui_config"}
+    assert set(applied) == expect, \
+        f"未生效项：{sorted(expect - set(applied))}"
+    assert len(applied) == len(expect)
 
 
 # ---------------------------------------------------------------------------
@@ -441,28 +508,51 @@ def test_import_rejects_cross_major_version(env):
 
 
 def test_import_old_document_migrates_missing_fields(env):
-    """同主版本旧文件（缺字段）→ 允许导入，缺的取默认并报告补齐项数。"""
+    """真造旧格式 JSON（删掉本轮新增键）→ 允许导入、按默认补齐、用户值不动。"""
     ds, host, panel, tmp_path = env
+    base = str(tmp_path / "base.json")
+    panel.export_to(base)
+    payload = json.loads((tmp_path / "base.json").read_text(encoding="utf-8"))
+
+    # 模拟旧版本导出文件：本轮新增的键在旧文件里根本不存在
+    new_keys = ("tuning_step_hz", "squelch_default_db", "waterfall_depth_rows",
+                "sky_extinction_k", "pass_min_elevation_deg",
+                "pass_window_hours", "show_low_elevation_passes")
+    for key in new_keys:
+        payload["settings"].pop(key, None)
+
+    # 旧文件里带着用户自己调过的值，导入时一个都不许被覆盖
+    user_values = {
+        "theme": "high_contrast", "fft_size": 4096, "fft_avg_frames": 16,
+        "bortle": 8, "peak_threshold_db": 12.0, "show_waterfall": False,
+        "ui_language": "en", "sky_pressure_hpa": 1002.5,
+    }
+    payload["settings"].update(user_values)
+    payload["gui_config"] = {"observer_lat": 39.9, "observer_lon": 116.4}
+    # 旧文件里多出的字段也必须逐条列出名字，不静默丢
+    payload["settings"]["future_a"] = 1
+    payload["settings"]["future_b"] = "x"
     path = tmp_path / "old.json"
-    path.write_text(json.dumps({
-        "schema_version": "1.0",
-        "settings": {"theme": "dark", "fft_size": 4096},
-    }), encoding="utf-8")
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
     res = panel.import_from(str(path))
     assert res.ok, res.error
-    assert ds.get("theme") == "dark"
-    assert ds.get("fft_size") == 4096
-    # 文件里缺的字段按 schema 默认补齐，并逐项列出
-    assert "bortle" in res.filled
-    assert "record_dir" in res.filled
-    assert ds.get("bortle") == SCHEMA["bortle"].default
+    assert set(new_keys) <= set(res.filled)
+    # 缺字段 = 当前 schema 默认值
+    for key in new_keys:
+        assert ds.get(key) == SCHEMA[key].default, key
     assert any("已按默认补齐" in w for w in res.warnings)
     assert "已按默认补齐" in res.summary()
-    assert len(res.filled) >= 20
 
-    # 未知字段仍在“忽略”里显式列出，不静默丢
-    assert res.unknown == []
+    # 用户原有值一个都没被覆盖（含 gui_config 的观测站坐标）
+    for key, value in user_values.items():
+        assert ds.get(key) == value, key
+    assert host._observer_lat == 39.9
+    assert host._observer_lon == 116.4
+
+    # 多出的字段逐条列名字（不是只报个数）
+    assert res.unknown == ["settings.future_a", "settings.future_b"]
+    assert "忽略未知 2 项" in res.summary()
 
 
 def test_import_same_major_newer_minor_accepts_and_lists_unknown(env):
@@ -617,6 +707,146 @@ def test_tuning_step_reaches_spectrum_and_combo(env):
     assert ds.get("tuning_step_hz") == 100000.0
 
 
+def test_waterfall_depth_reaches_generator_and_falls_back(env):
+    """A7：设置改深度 → 消费点环形缓冲真的变；非六档值回落 256 而非夹取。"""
+    ds, host, panel, _ = env
+    panel._on_changed("waterfall_depth_rows", 2048)
+    assert ds.get("waterfall_depth_rows") == 2048
+    assert host.spectrum.wf_depth_rows == 2048, "消费点没收到深度 = 假设置"
+    panel._on_changed("waterfall_depth_rows", 99999)
+    assert ds.get("waterfall_depth_rows") == 256, (
+        "非档位值必须回落默认 256（夹到 4096 会与 C++ 回看时长不一致）")
+    assert host.spectrum.wf_depth_rows == 256
+    panel._on_changed("waterfall_depth_rows", 384)
+    assert ds.get("waterfall_depth_rows") == 256, "384 不是六档之一，必须回落"
+
+
+def test_waterfall_depth_schema_is_six_tier_enum():
+    """GUI/schema/AI/C++ 同一枚举：六档精确值，不再是任意 128–4096。"""
+    item = SCHEMA["waterfall_depth_rows"]
+    assert item.kind == "enum"
+    assert tuple(item.choice_values) == (128, 256, 512, 1024, 2048, 4096)
+    value, reason = validate_value(item, 384)
+    assert value == 256 and reason and "不在可选值" in reason, (
+        "非法档位必须回落 256 且给出可见原因，不许静默")
+
+
+def test_waterfall_depth_real_buffer_memory_and_history(caplog):
+    """A7 反证：真实缓冲截断到新深度、保留最近行，内存可核算。"""
+    import logging
+    import numpy as np
+    from spectrum_widget import (
+        SpectrumDataGenerator, WF_DEPTH_CHOICES, WF_DEPTH_DEFAULT_ROWS)
+
+    gen = SpectrumDataGenerator(num_bins=512)
+    assert gen.set_waterfall_depth(2048) == 2048
+    assert gen._wf_buf.shape == (2048, 512)
+    assert gen._wf_buf.nbytes == 2048 * 512 * 4      # 4 MiB，float32
+    # 六档之外的值（384 曾被旧实现当真）必须回落 256，且留下原因。
+    with caplog.at_level(logging.WARNING, logger="spectrum_widget"):
+        assert gen.set_waterfall_depth(384) == WF_DEPTH_DEFAULT_ROWS
+    assert "不在六档" in caplog.text
+    assert gen.max_waterfall_lines == WF_DEPTH_DEFAULT_ROWS
+    assert gen.set_waterfall_depth(4096) == 4096
+    assert set(WF_DEPTH_CHOICES) == {128, 256, 512, 1024, 2048, 4096}
+
+    # 写入 600 行（每行唯一值），再把深度缩到 256：只保留最近 256 行
+    gen.set_waterfall_depth(2048)
+    for i in range(600):
+        gen._wf_buf[gen._wf_head] = np.full(512, float(i), dtype=np.float32)
+        gen._wf_head = (gen._wf_head + 1) % gen.max_waterfall_lines
+        gen._wf_count = min(gen._wf_count + 1, gen.max_waterfall_lines)
+        gen.wf_rows_written += 1
+    gen.set_waterfall_depth(256)
+    assert gen.wf_available_rows() == 256
+    assert gen.wf_rows_at(600, 1)[0, 0] == 599
+    assert gen.wf_rows_at(gen.wf_rows_written - 255, 1)[0, 0] == 344
+    # 旧行已丢：回看窗口不能越过保留范围
+    assert len(gen.wf_rows_at(344, 5)) == 0
+
+
+def test_extinction_k_reaches_sky(env):
+    """A8：设置改 k → 天空视图消费点真的变；越界夹取。"""
+    ds, host, panel, _ = env
+    panel._on_changed("sky_extinction_k", 0.5)
+    assert ds.get("sky_extinction_k") == 0.5
+    assert host.sky_view.extinction_k == 0.5, "消费点没收到 k = 假设置"
+    panel._on_changed("sky_extinction_k", -1.0)
+    assert ds.get("sky_extinction_k") == 0.0
+    assert host.sky_view.extinction_k == 0.0
+
+
+def test_extinction_k_changes_star_count_but_not_bortle():
+    """A8 反证：同 FOV 同时间 k=0 vs 0.5 可见星数显著不同，且不与 Bortle 重复。"""
+    from mbdsdr_ai.celestial_geometry import GroundStation
+    from mbdsdr_ai.skyengine.star_catalog import (
+        effective_limit_mag, get_catalog, limit_magnitude, select_for_view)
+
+    get_catalog()
+    gs = GroundStation(0.0, 0.0, 0.0)
+    jd = 2451545.0
+    kw = dict(bortle=3, max_count=100000)
+    n0 = len(select_for_view(gs, jd, 0.0, 20.0, 120.0,
+                             extinction_k=0.0, **kw))
+    n5 = len(select_for_view(gs, jd, 0.0, 20.0, 120.0,
+                             extinction_k=0.5, **kw))
+    assert n0 > n5, f"k=0 应看到更多星：0={n0}, 0.5={n5}"
+    assert n0 - n5 >= n0 * 0.1, f"差异不够显著：0={n0}, 0.5={n5}"
+
+    # 消光按仰角逐星算：低仰角受 k 影响远大于天顶，不是把 Bortle 重算一遍
+    d_zenith = (effective_limit_mag(90.0, 120.0, 3, 0.5)
+                - effective_limit_mag(90.0, 120.0, 3, 0.0))
+    d_low = (effective_limit_mag(15.0, 120.0, 3, 0.5)
+             - effective_limit_mag(15.0, 120.0, 3, 0.0))
+    assert -0.55 <= d_zenith <= -0.45, f"天顶 Δm≈-k：{d_zenith}"
+    assert abs(d_low) > abs(d_zenith) * 3, \
+        f"低仰角消光应远大于天顶：{d_low} vs {d_zenith}"
+    # Bortle 仍独立决定天顶极限星等；k=0 时与 limit_magnitude 完全一致
+    assert effective_limit_mag(90.0, 120.0, 3, 0.0) == limit_magnitude(120.0, 3)
+    assert effective_limit_mag(90.0, 120.0, 8, 0.0) == limit_magnitude(120.0, 8)
+
+
+def test_pass_filter_readers_are_real_functions(tmp_path):
+    """A1/A2/A9：读取入口必须是可用函数（不是文档里的「拟」）。
+
+    反证：改 DesktopSettings → 函数读到新值；越界夹取；A9 开时门降到 5°。
+    消费点（new_spacetime_panel / rf_sky_view）接上一行就生效。
+    """
+    from settings import (
+        PASS_LOW_ELEVATION_FLOOR_DEG, effective_pass_min_elevation_deg,
+        effective_pass_visibility_gate_deg, effective_pass_window_hours,
+        effective_show_low_elevation_passes)
+
+    ds = DesktopSettings.load(path=str(tmp_path / "pass_filters.json"))
+    assert effective_pass_min_elevation_deg(ds) == 10.0
+    assert effective_pass_window_hours(ds) == 24
+    assert effective_show_low_elevation_passes(ds) is False
+    assert effective_pass_visibility_gate_deg(ds) == 10.0
+
+    ds.set("pass_min_elevation_deg", 30)
+    ds.set("pass_window_hours", 48)
+    ds.set("show_low_elevation_passes", True)
+    assert effective_pass_min_elevation_deg(ds) == 30.0
+    assert effective_pass_window_hours(ds) == 48
+    assert effective_show_low_elevation_passes(ds) is True
+    assert effective_pass_visibility_gate_deg(ds) == PASS_LOW_ELEVATION_FLOOR_DEG
+
+    # schema 校验先把越界夹住，函数再兜一层（dict/坏值也不抛）
+    ds.set("pass_min_elevation_deg", 90)
+    ds.set("pass_window_hours", 0)
+    assert effective_pass_min_elevation_deg(ds) == 45.0
+    assert effective_pass_window_hours(ds) == 1
+    assert effective_pass_min_elevation_deg(
+        {"pass_min_elevation_deg": "abc"}) == 10.0
+    assert effective_pass_window_hours({"pass_window_hours": None}) == 24
+    assert effective_pass_visibility_gate_deg(
+        {"pass_min_elevation_deg": 3, "show_low_elevation_passes": True}) == 3.0
+
+    for key in ("pass_min_elevation_deg", "pass_window_hours",
+                "show_low_elevation_passes"):
+        assert SCHEMA[key].exposed, f"{key} 没暴露到设置面板"
+
+
 def test_squelch_migration_notice_is_visible_on_old_config(tmp_path, qapp):
     path = str(tmp_path / "old_settings.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -736,7 +966,7 @@ def test_panel_change_immediately_applies(env):
     panel._on_changed("theme", "dark")
     panel._on_changed("touch_mode", "on")
     panel._on_changed("show_waterfall", False)
-    panel._on_changed("fft_size", 8192)
+    panel._on_changed("fft_size", 4096)
     panel._on_changed("fft_window", "Hann")
     panel._on_changed("waterfall_palette", "sdrpp")
     panel._on_changed("peak_threshold_db", 9.0)
@@ -747,7 +977,7 @@ def test_panel_change_immediately_applies(env):
     assert host.theme == "dark"
     assert host.touch == "on"
     assert host.spectrum._state.show_waterfall is False
-    assert host.spectrum.generator.fft_size == 8192
+    assert host.spectrum.generator.fft_size == 4096
     assert host.spectrum.generator.window == "Hann"
     assert host.spectrum.palette_idx == 1
     assert host.spectrum._state.peak_rel_db == 9.0
@@ -755,7 +985,7 @@ def test_panel_change_immediately_applies(env):
     assert host.spectrum._state.wf_smooth is True
     assert host.sky_view.pressure == 1000.0
     # 落盘值同样一致
-    assert ds.get("fft_size") == 8192
+    assert ds.get("fft_size") == 4096
     assert ds.get("sky_pressure_hpa") == 1000.0
 
 
@@ -763,9 +993,9 @@ def test_ui_widget_emits_and_applies(env):
     """真实控件路径：下拉框换项 → schema → 落盘 → 生效。"""
     ds, host, panel, _ = env
     combo = panel._rows["fft_size"]
-    combo.setCurrentIndex(3)            # 8192
-    assert ds.get("fft_size") == 8192
-    assert host.spectrum.generator.fft_size == 8192
+    combo.setCurrentIndex(2)            # 4096（schema 只暴露 1024/2048/4096）
+    assert ds.get("fft_size") == 4096
+    assert host.spectrum.generator.fft_size == 4096
 
 
 def test_observer_writes_existing_gui_config(env):

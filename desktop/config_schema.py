@@ -36,6 +36,11 @@ except ImportError:  # pragma: no cover - 仅内核缺失时
     SQUELCH_MAX_DBFS = -20.0
     SQUELCH_MIN_DBFS = -100.0
 
+try:
+    from mbdsdr_ai.skyengine.stars import EXTINCTION_K as _SKY_EXTINCTION_K
+except ImportError:  # pragma: no cover - 仅内核缺失时
+    _SKY_EXTINCTION_K = 0.2
+
 #: 配置导出格式版本（导出文件里写这个整数）。
 #: 版本策略：**同主版本允许导入并迁移**（缺字段按默认补齐、多字段列出后忽略），
 #: 只有跨主版本才拒绝——主版本变化意味着字段语义/取值范围可能重定义，
@@ -184,20 +189,24 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="waterfall_palette", group="频谱与解码", kind="enum",
         label="瀑布配色", default="default",
         help="默认低饱和不刺眼；经典 SDR++ 色带对弱信号层次更敏感。",
-        source="desktop/spectrum_widget.py:1789 调色板默认第 0 项「默认」",
+        source="desktop/spectrum_widget.py: _PlotState.wf_colors（默认第 0 项「默认」）",
         choices=(_e("default", "默认（低饱和）"), _e("sdrpp", "经典 SDR++")),
     ),
     SettingItem(
         key="peak_threshold_db", group="频谱与解码", kind="float",
         label="峰值判定阈值", default=6.0, minimum=1.0, maximum=30.0, step=1.0,
-        help="高出底噪多少 dB 才算一个峰；调大只标强信号，调小会标出更多弱峰。",
-        source="desktop/spectrum_widget.py:859 peak_rel_db=6.0",
+        help=("峰值显示门：高于「本帧全部有限 bin 的中位数」多少 dB 才算一个峰。"
+              "这是相对余量，不是绝对 dBFS 电平（中位数随信号环境浮动，"
+              "所以同一阈值在不同噪声下卡到的峰不同）。"
+              "调大只标强信号，调小会标出更多弱峰。"),
+        source="desktop/spectrum_widget.py: _PEAK_REL_DB_DEFAULT"
+               "（峰值显示门，默认 6.0 dB，基准为全帧中位数）",
     ),
     SettingItem(
         key="show_peaks", group="频谱与解码", kind="bool",
         label="标注峰值", default=True,
         help="在谱面上画出超过阈值的峰点与频率标签。",
-        source="desktop/spectrum_widget.py:858 show_peaks=True",
+        source="desktop/spectrum_widget.py: _PlotState.show_peaks（默认 True）",
     ),
     SettingItem(
         key="waterfall_smooth", group="频谱与解码", kind="bool",
@@ -292,7 +301,6 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help="东经为正。与纬度一起决定过境时刻与多普勒曲线。",
         source="desktop/main_window.py:447 初始 None；:7769 从 gui_config.json 读回",
     ),
-
     SettingItem(
         key="pass_min_elevation_deg", group="卫星与多普勒", kind="float",
         label="过境最低仰角", default=10.0, minimum=0.0, maximum=45.0, step=1.0,

@@ -485,7 +485,8 @@ class SettingsPanel(QWidget):
         h = self._host
         if h is None:
             return
-        for key in ("bortle", "squelch_default_db", "tuning_step_hz"):
+        for key in ("bortle", "squelch_default_db", "tuning_step_hz",
+                    "waterfall_depth_rows", "sky_extinction_k"):
             item = SCHEMA[key]
             try:
                 self._apply(item, self._current_value(item))
@@ -659,6 +660,17 @@ class SettingsPanel(QWidget):
                 w.valueChanged.connect(_squelch_suffix)
             w.valueChanged.connect(lambda v, k=item.key: self._on_changed(k, int(v)))
             return w
+        if item.kind == "float" and item.default is not None:
+            w = QDoubleSpinBox()
+            w.setRange(float(item.minimum if item.minimum is not None else -1e9),
+                       float(item.maximum if item.maximum is not None else 1e9))
+            step = float(item.step or 0.01)
+            w.setDecimals(2 if step < 0.1 else 1)
+            w.setSingleStep(step)
+            w.setValue(float(value) if value is not None else float(item.default or 0.0))
+            w.valueChanged.connect(
+                lambda v, k=item.key: self._on_changed(k, float(v)))
+            return w
         # 文本：录音目录等路径项（留空 = 使用 schema/配置层给出的默认位置）
         if item.kind == "text":
             w = QLineEdit()
@@ -729,6 +741,8 @@ class SettingsPanel(QWidget):
                     w.setCurrentIndex(0)
             elif item.kind == "int":
                 w.setValue(int(value) if value is not None else int(item.default or 0))
+            elif item.kind == "float" and item.default is not None:
+                w.setValue(float(value) if value is not None else float(item.default or 0))
             elif item.kind == "text":
                 w.setText("" if value is None else str(value))
             elif item.default is None:
@@ -793,7 +807,9 @@ class SettingsPanel(QWidget):
                         bool(getattr(st, "show_waterfall", True)) != bool(value):
                     sp.toggle_waterfall()
                 return sp is not None
-            if key.startswith("fft_") or key.startswith("waterfall_") or \
+            if key.startswith("fft_") or (
+                    key.startswith("waterfall_") and
+                    key != "waterfall_depth_rows") or \
                     key.startswith("peak_") or key in (
                         "show_peaks", "show_bookmarks", "show_bandplan"):
                 return self._apply_spectrum(h, key, value)
@@ -852,6 +868,31 @@ class SettingsPanel(QWidget):
                 if callable(setter):
                     setter(float(value))
                 return combo is not None or callable(setter)
+            if key == "waterfall_depth_rows":
+                # 真实消费点：SpectrumPanel.set_waterfall_depth_rows → 环形缓冲重建
+                sp = getattr(h, "spectrum", None)
+                setter = getattr(sp, "set_waterfall_depth_rows", None)
+                if callable(setter):
+                    setter(int(value))
+                    return True
+                return False
+            if key == "sky_extinction_k":
+                # 真实消费点：RFSkyView.set_extinction_k → 星表选择与逐星绘制
+                sky = getattr(h, "sky_view", None)
+                setter = getattr(sky, "set_extinction_k", None)
+                if callable(setter):
+                    setter(float(value))
+                    return True
+                return False
+            if key in ("pass_min_elevation_deg", "pass_window_hours",
+                       "show_low_elevation_passes"):
+                # 读取入口是 settings.effective_pass_*；卫星/星空面板下次刷新时
+                # 会读到新值。这里只做尽力而为的即时刷新（面板公开方法存在才调）。
+                panel = getattr(h, "new_spacetime_panel", None)
+                refresh = getattr(panel, "refresh_passes", None)
+                if callable(refresh):
+                    refresh()
+                return True
             if key == "record_dir":
                 # 目录只给消费方读；改值不影响已录文件（消费点在主窗口线）。
                 return True
