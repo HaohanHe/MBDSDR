@@ -856,7 +856,7 @@ python scripts/release_manifest.py --only installer
   都是 None，此时只返回退出码、不输出（清单/CI 用管道启动，不受影响）。
 - **既有入口**：无参数启动、`--help`、`--host`/`--port`/`--theme` 保持原样；
   `--import-probe` 缺值或未知开关仍由 argparse 以退出码 2 报错。
-- **产物实测**（`pyi-dist16`，windowed + 重定向管道，`Start-Process -Wait` 取退出码）：
+- **产物实测**（`pyi-dist15`，windowed + 重定向管道，`Start-Process -Wait` 取退出码）：
   `--import-probe=json` → 退出 0、stdout `[probe] OK json`；
   `--import-probe=no_such_module_mbdsdr` → 退出 2、stdout 带 `[probe] FAIL … ModuleNotFoundError`；
   `--help` → 退出 0 且打印 usage；`--bogus` 与 `--import-probe` 缺值 → 退出 2。
