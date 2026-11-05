@@ -584,3 +584,110 @@ def test_sat_track_start_is_idempotent_while_tracking():
     panel.set_tracking_state(False)
     panel._on_start_clicked()
     assert sent == ["NOAA 19", "NOAA 19"], "停止后应能再次开始"
+
+
+# ======================================================================
+# Q 组：误触收口（回放连点 / 跟踪中关窗）
+# ======================================================================
+def test_replay_second_click_stops_without_file_dialog(window, monkeypatch):
+    """回放中再点「回放」→ 只停当前回放，绝不再弹文件框。
+
+    旧行为：先 _stop_replay 再 getOpenFileName；用户点取消 = 误触停播，
+    且界面没有显式「停止回放」入口。二次点击现在是确定的停止动作。
+    """
+    w, mw = window
+    stopped, dialogs = [], []
+    monkeypatch.setattr(w, "_stop_replay", lambda: stopped.append(1))
+    monkeypatch.setattr(
+        mw.QFileDialog, "getOpenFileName",
+        staticmethod(lambda *a, **k: dialogs.append(1) or ("", "")))
+    w._replay_timer = object()
+    try:
+        w._replay_recording()
+        assert stopped == [1], "回放中再点必须先停止回放"
+        assert dialogs == [], "停止回放后不得再弹文件框"
+        assert "已停止回放" in w.statusBar().currentMessage(), \
+            "停止后必须给出可逆操作说明"
+    finally:
+        w._replay_timer = None
+
+
+def test_satellite_start_is_idempotent_while_tracking(window, monkeypatch):
+    """跟踪中重复开始同一颗星：不重建定时器、不覆盖跟踪前频率。"""
+    w, mw = window
+    assert mw.LoopSatTracker is not None, "前提：测试环境装有 skyfield"
+
+    class _Tracker:
+        selected_name = "NOAA 19"
+        ground_station = None
+
+        def select_satellite(self, name):
+            return True
+
+        def set_downlink_freq(self, hz):
+            pass
+
+    class _Timer:
+        def __init__(self):
+            self.starts = 0
+
+        def isActive(self):  # noqa: N802 - 模拟 QTimer 接口
+            return True
+
+        def start(self):
+            self.starts += 1
+
+        def stop(self):
+            pass
+
+    tracker, timer = _Tracker(), _Timer()
+    monkeypatch.setattr(w, "_poll_satellite_track", lambda: None)
+    w._loop_sat_tracker = tracker
+    w._sat_track_timer = timer
+    w._observer_lat, w._observer_lon = 30.0, 120.0
+    w._vfo_center_hz = 145_000_000.0
+    w._sat_track_prev_freq_hz = 145_000_000.0
+    try:
+        w._start_satellite_tracking("NOAA 19", 137.1e6)
+        assert timer.starts == 0, "跟踪中重复开始不得重建/重启定时器"
+        assert w._sat_track_prev_freq_hz == 145_000_000.0, \
+            "重复开始不得覆盖「跟踪前频率」（否则停止回不到原调谐）"
+        assert "忽略重复开始" in w.statusBar().currentMessage()
+    finally:
+        w._loop_sat_tracker = None
+        w._sat_track_timer = None
+        w._observer_lat = w._observer_lon = None
+        w._sat_track_prev_freq_hz = None
+
+
+def test_close_while_tracking_restores_tuning_before_save(window, monkeypatch):
+    """跟踪中关窗：先停跟踪（写回原调谐）再落盘，否则下次启动停在卫星频点。
+
+    重判结论：跟踪停止不丢录音/数据（只停定时器 + 云台 + 写回频率），
+    真正会丢的是「跟踪前调谐」——旧顺序先 flush/_save_gui_config 再
+    _disconnect，保存的是多普勒频点。故修顺序，不加二次确认。
+    """
+    from PySide6.QtGui import QCloseEvent
+    w, mw = window
+    order = []
+    monkeypatch.setattr(w, "_stop_satellite_tracking",
+                        lambda: order.append("stop_track"))
+    monkeypatch.setattr(w, "_save_window_state",
+                        lambda: order.append("save_window"))
+    monkeypatch.setattr(w, "_save_gui_config", lambda: order.append("save_gui"))
+    monkeypatch.setattr(w, "_disconnect", lambda: order.append("disconnect"))
+    monkeypatch.setattr(w, "_release_runtime_resources", lambda: None)
+    monkeypatch.setattr(w, "settings",
+                        type("S", (), {"flush": lambda self: order.append("flush")})())
+    w._tx_session = None
+    w._recording = False
+    try:
+        w.closeEvent(QCloseEvent())
+        assert "stop_track" in order, "跟踪中关窗必须先停跟踪并写回原调谐"
+        assert order.index("stop_track") < order.index("flush"), \
+            "先停跟踪再 flush，否则保存的是多普勒频点"
+        assert order.index("stop_track") < order.index("save_gui"), \
+            "先停跟踪再存运行参数"
+    finally:
+        w._tx_session = None
+        w._recording = False

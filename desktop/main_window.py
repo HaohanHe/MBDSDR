@@ -8076,7 +8076,14 @@ class MainWindow(QMainWindow):
         文件里有什么就播什么，绝不造假。回放期间暂停实时 SDR 轮询，结束后恢复。
         """
         if self._replay_timer is not None:
+            # 回放中再点「回放」= 停止当前回放，**不再弹文件框**。
+            # 旧行为是先 _stop_replay 再 getOpenFileName：用户取消选择就等于
+            # 误触停播，且没有「停止回放」的显式入口。这里把二次点击定义成
+            # 幂等的停止动作，状态栏给出可逆说明。
             self._stop_replay()
+            self.statusBar().showMessage(
+                "已停止回放（再点「回放」可重新选择文件）", MSG_NORMAL)
+            return
         self._stop_tx("回放开始", wait=True)  # 安全：回放前必须停波
         path, _ = QFileDialog.getOpenFileName(
             self, "选择录音文件",
@@ -8448,6 +8455,23 @@ class MainWindow(QMainWindow):
                 "需要观测者位置：连接 GNSS 或在 gui_config.json 配置 observer_lat/lon",
                 MSG_IMPORTANT)
             return
+
+        # 重复开始守卫：跟踪中再次点「开始」（天空图开关/菜单/外部调用）
+        # 会重走本函数。若直接继续，下面记录的「跟踪前频率」已是上一次
+        # 多普勒后的频点，停跟踪时就回不到用户原来的调谐；同一颗星
+        # 重复开始还会重建定时器。同一目标按幂等忽略，切换目标先停旧跟踪
+        # （_stop 会把频率/模式写回，再开始才能记对 prev）。
+        active = (self._sat_track_timer is not None
+                  and self._sat_track_timer.isActive())
+        if active:
+            current = str(getattr(self._loop_sat_tracker,
+                                  "selected_name", "") or "")
+            if not current or sat_name == current:
+                self.statusBar().showMessage(
+                    f"已在跟踪 {sat_name}，忽略重复开始", MSG_NORMAL)
+                self._sync_tracking_ui(True)
+                return
+            self._stop_satellite_tracking()
 
         from mbdsdr_ai.sat_passes import GroundStation
         gs = GroundStation(lat_deg=self._observer_lat,
@@ -9087,6 +9111,15 @@ class MainWindow(QMainWindow):
                     "下一步：先不要关闭窗口，检查磁盘与目录后点「停止录音」重试。")
                 event.ignore()
                 return
+        # 跟踪中关窗：先把调谐/模式恢复成跟踪前的值，再落盘配置。
+        # 否则下面的 settings.flush()/_save_gui_config() 会把当前多普勒频点
+        # 当成「上次使用频率」写进设置，下次启动回不到用户原调谐。
+        # 跟踪停止本身不丢数据（只停定时器/云台并把调谐回写），
+        # 因此这里修复保存顺序而不是加二次确认。
+        try:
+            self._stop_satellite_tracking()
+        except Exception:
+            pass
         # 先停掉远程控制 / Web 服务（daemon 线程，避免端口残留）
         try:
             sp = getattr(self, "service_settings_panel", None)
