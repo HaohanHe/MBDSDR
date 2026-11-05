@@ -163,8 +163,25 @@ abstract interface class RadioApi {
   Stream<Float32List> get audioStream;
 }
 
+/// 可选能力：后端报告的可用采样率档位（Hz）。
+///
+/// 单独成接口而不是并入 [RadioApi]，是为了不打破现有 `implements RadioApi`
+/// 的测试假实现；档位由后端能力决定，前端不许硬编码兜底。
+abstract interface class SampleRateCapabilitySource {
+  /// null = 后端未报告（未知）。
+  List<double>? get sampleRateOptionsHz;
+}
+
+extension SampleRateOptionsLookup on RadioApi {
+  /// 拿不到能力源 = 后端未报告 → null，由界面显示「未知」并禁用选择。
+  List<double>? get sampleRateOptionsHz => this is SampleRateCapabilitySource
+      ? (this as SampleRateCapabilitySource).sampleRateOptionsHz
+      : null;
+}
+
 /// 真实收音机控制器。
-class RadioController extends ChangeNotifier implements RadioApi {
+class RadioController extends ChangeNotifier
+    implements RadioApi, SampleRateCapabilitySource {
   RadioController({
     PcmSink? sink,
     RtlTcpClient Function()? clientFactory,
@@ -212,6 +229,8 @@ class RadioController extends ChangeNotifier implements RadioApi {
   double _gainDb = 20;
   bool _autoGain = true;
   double _sampleRateHz = 2.048e6;
+  //: 后端下发的档位（未知为 null）。本轮协议字段未落地，保持 null，不编造。
+  List<double>? _sampleRateOptionsHz;
   double _volume = 1.0;
   bool _muted = false;
 
@@ -300,6 +319,8 @@ class RadioController extends ChangeNotifier implements RadioApi {
   bool get autoGain => _autoGain;
   @override
   double get sampleRateHz => _sampleRateHz;
+  @override
+  List<double>? get sampleRateOptionsHz => _sampleRateOptionsHz;
   @override
   double get volume => _volume;
   @override
@@ -795,6 +816,13 @@ class RadioController extends ChangeNotifier implements RadioApi {
 
   @override
   Future<void> setSampleRateHz(double hz) async {
+    final options = _sampleRateOptionsHz;
+    if (options == null || options.isEmpty) {
+      throw StateError('后端未报告采样率档位，暂不可设置采样率');
+    }
+    if (!options.contains(hz)) {
+      throw StateError('采样率 ${hz.round()} Hz 不在后端可接受档位内');
+    }
     _sampleRateHz = hz;
     notifyListeners();
     await _client?.setSampleRateHz(hz.round());

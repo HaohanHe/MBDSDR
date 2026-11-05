@@ -213,6 +213,12 @@ abstract final class AppTokens {
   static const double gainMinDb = 0;
   static const double gainMaxDb = 49.6;
   static const double gainStepDb = 0.6;
+  /// **历史默认，无人读取**（2026-11 起档位由后端能力决定）。
+  ///
+  /// 以前移动端下拉直接用这 4 档；现已改为读 `sample_rate_options_hz`，
+  /// 缺失时显示「未知」并禁用。保留此常量只为对照旧版本行为，任何新代码
+  /// 不得引用。删除条件：确认无外部引用且旧版本回滚窗口关闭。
+  @Deprecated('历史默认，不被任何人读取；档位由后端能力决定')
   static const List<double> sampleRatesHz = <double>[
     1.024e6,
     2.048e6,

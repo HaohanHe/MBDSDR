@@ -211,19 +211,18 @@ List<AiTool> buildRadioTools(
     ),
     AiTool(
       name: 'set_sample_rate',
-      description: '设置采样率（Hz），只能取支持的档位之一。'
-          '前置条件: 接收机必须已连接。'
-          '失败恢复: 传入非档位值时返回四个合法档位列表（1.024 / 2.048 / 2.400 / 3.200 MS/s）'
-          '——按列表重试，不要重发同一非法值。'
+      description: '设置采样率（Hz），档位由后端能力决定（sample_rate_options_hz）。'
+          '前置条件: 接收机必须已连接，且后端已报告可用档位。'
+          '失败恢复: 后端未报告档位时直接失败并提示「暂不可设置」，'
+          '不得按本地硬编码列表重试。'
           '副作用: 改变采样率会重建数据流，并决定可见带宽上限（约为采样率八成）。'
-          '能力边界: 只能取四个固定档位，不能任意设定。',
+          '能力边界: 可选档位只来自后端 sample_rate_options_hz，前端不硬编码、不猜测。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
           'sample_rate_hz': <String, dynamic>{
             'type': 'number',
-            'description': '采样率，单位 Hz。',
-            'enum': AppTokens.sampleRatesHz,
+            'description': '采样率，单位 Hz；取值须在后端报告的档位内。',
           },
         },
         'required': <String>['sample_rate_hz'],
@@ -235,11 +234,14 @@ List<AiTool> buildRadioTools(
           final raw = args['sample_rate_hz'];
           if (raw is! num) return _err('缺少 sample_rate_hz 参数');
           final rate = raw.toDouble();
-          final ok = AppTokens.sampleRatesHz
-              .any((r) => (r - rate).abs() < AppTokens.freqStepHz);
+          final options = radio.sampleRateOptionsHz;
+          if (options == null || options.isEmpty) {
+            return _err('后端未报告采样率档位，暂不可设置采样率');
+          }
+          final ok = options.any((r) => (r - rate).abs() < 1);
           if (!ok) {
             return _err('采样率必须取以下档位之一: '
-                '${AppTokens.sampleRatesHz.map((r) => '${(r / 1e6).toStringAsFixed(3)} MS/s').join(' / ')}');
+                '${options.map((r) => '${(r / 1e6).toStringAsFixed(3)} MS/s').join(' / ')}');
           }
           await radio.setSampleRateHz(rate);
           return jsonEncode(<String, dynamic>{

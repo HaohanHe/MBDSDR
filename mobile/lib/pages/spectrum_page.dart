@@ -756,22 +756,37 @@ class _ControlPanel extends StatelessWidget {
                 const Text('采样率', style: AppTokens.auxiliary),
                 const SizedBox(width: AppTokens.spacingM),
                 Expanded(
-                  child: DropdownButton<double>(
-                    value: AppTokens.sampleRatesHz.contains(controller.sampleRateHz)
+                  child: Builder(builder: (context) {
+                    // 档位由后端能力决定：后端没报告（null/空）就只显示「未知」并禁用，
+                    // 绝不用 AppTokens.sampleRatesHz 之类的本地常量兜底。
+                    final options = controller.sampleRateOptionsHz;
+                    if (options == null || options.isEmpty) {
+                      return const DropdownButton<double>(
+                        items: <DropdownMenuItem<double>>[],
+                        hint: Text('未知（设备未报告采样率范围）'),
+                        isExpanded: true,
+                        onChanged: null,
+                      );
+                    }
+                    final value = options.contains(controller.sampleRateHz)
                         ? controller.sampleRateHz
-                        : AppTokens.sampleRatesHz.first,
-                    isExpanded: true,
-                    dropdownColor: AppTokens.bgBar,
-                    style: AppTokens.mono,
-                    items: AppTokens.sampleRatesHz
-                        .map((r) => DropdownMenuItem(
-                              value: r,
-                              child: Text('${(r / 1e6).toStringAsFixed(3)} MS/s'),
-                            ))
-                        .toList(),
-                    onChanged: (v) =>
-                        v == null ? null : controller.setSampleRateHz(v),
-                  ),
+                        : null;
+                    return DropdownButton<double>(
+                      value: value,
+                      hint: const Text('未知（当前速率不在可用档位内）'),
+                      isExpanded: true,
+                      dropdownColor: AppTokens.bgBar,
+                      style: AppTokens.mono,
+                      items: options
+                          .map((r) => DropdownMenuItem(
+                                value: r,
+                                child: Text('${(r / 1e6).toStringAsFixed(3)} MS/s'),
+                              ))
+                          .toList(),
+                      onChanged: (v) =>
+                          v == null ? null : controller.setSampleRateHz(v),
+                    );
+                  }),
                 ),
               ],
             ),
