@@ -87,6 +87,8 @@ recordings/
 reference/
 # 测试/运行产物
 syn_*.npy
+# 运行/验收产物（AI 回归、bench、soak、OTA 演示截图；脚本每次重写，不入库）
+output/
 
 # 例外：NanoVNA 实测实验证据截图（experiments/nanovna_rh770/，真机 recorded 口径）
 !experiments/nanovna_rh770/data/*.png
