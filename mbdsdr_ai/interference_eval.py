@@ -12,7 +12,7 @@
 
 诚实边界（AGENTS 第 2 条）：
   * 全合成：不驱动任何发射硬件；真机发射路径须走 TT&C 既有
-    arm_manual 人工门，本工具不参与；
+    外部确认 token 门，本工具不参与；
   * SINAD 估计基于平滑 PSD + 分位噪声底 + 固定频带口径，绝对值是
     保守下界（频带边界 bin 含噪声）；本工具的判读价值在**相对降级
     量**（同一对偶快照的差），estimate 字段明示口径，不冒充精确测量；
@@ -295,7 +295,7 @@ def register_tool_registry(registry) -> None:
         description=(
             "合成干扰源（tone/noise/chirp/pulse 复基带 IQ，功率/频率/"
             "带宽/占空参数化，种子可复现）。纯合成不驱动发射硬件；"
-            "真机发射须走 TT&C arm_manual 人工门。"),
+            "真机发射须走 TT&C 外部确认 token 门。"),
         parameters={
             "type": "object",
             "properties": {

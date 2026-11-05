@@ -220,14 +220,29 @@ switch_on = bool(st["enabled"])          # 只由 enabled 驱动
   桌面「回放」入口也必须传 `false`。
 - `tc_uplink_transmit`（TC 上行）：同一规则，`doppler.requested=null` 即
   自动、`mode` 取 `auto/on/off`，`applied` 与 `delta_hz` 如实给。
-- 三个发射工具共用同一公共仲裁 `sdr_tools.resolve_tx_doppler(nominal_hz,
+- 四个发射入口共用同一公共仲裁 `sdr_tools.resolve_tx_doppler(nominal_hz,
   requested)`，返回 `(实际发波频率, 读数)`；UI 预览只能调它，不得自己算 Δ。
 - 工具 `data.doppler` 字段：`requested` / `mode` / `applied` / `nominal_hz`
   / `freq_hz` / `delta_hz` / `target`；未预偏必须带 `reason`，不得用预测值
   冒充实际。
 - 反证测试 `mbdsdr_ai/tests/test_transmit_doppler.py`：CW/IQ 已知频偏下
   `发波频率 − 标称 == 预测 Δ`；显式关时**严格等于**标称；无目标两种
-  （自动/显式开）都不偏；后端接管时也不追加预偏。
+  （自动/显式开）都不偏；后端接管时也不追加预偏；回放路径默认严格标称
+  且 `doppler.mode=off`。
+
+全仓真发波入口清点（2026-11-05，不含纯预览/纯建模）：
+
+| 入口 | 类型 | 过 `resolve_tx_doppler` | 说明 |
+| --- | --- | --- | --- |
+| `sdr_transmit_cw` | MCP 工具 | 是 | 有目标自动预偏、`doppler_precomp=false` 严格标称 |
+| `sdr_transmit_iq` | MCP 工具 | 是 | 同上；回放已知录音必须显式 `false` |
+| `tc_uplink_transmit` | MCP 工具 | 是 | 同上，TC 上行同一符号约定 |
+| `playback.transmit_iq_playback` | 库 API（IQ 回放给硬件） | 是（默认 `doppler_precomp=False`） | 回放是「这段录音本来要表达的频率」，默认严格标称；结果带 `data.doppler` 读数 |
+| `hal.HardwareManager.transmit_cw` / `transmit_modulated` | HAL 底层原语 | 否 | 接收**已仲裁**的频点，禁止二次施加；全仓无生产调用方（仅测试直调），不是用户面入口 |
+| C++ `soapy_transmit` / `tx_controller.sendCw` / AX.25 beacon | C++ 发射 | 否 | 不接 Python `doppler_link`；见限制总账 L42（桌面 C++ 发射无预偏） |
+
+桌面 UI 的「回放」入口若未来接线，必须走 `transmit_iq_playback`（或显式
+传 `doppler_precomp=false`），不能绕过公共仲裁。
 
 ### 3.8 发射可见性（桌面 UI 契约，交操作逻辑线接线）
 
@@ -258,6 +273,53 @@ switch_on = bool(st["enabled"])          # 只由 enabled 驱动
   `未预偏（回放，保持原频率）`，并置灰/隐藏自动预偏开关，避免误改录音频率。
 - 预览调用时机：发射频率变化、面板打开、目标切换时，不做每帧轮询。
 
+### 3.9 C++ → Python `backend_comp_active` 状态桥接：可做，但现在不能接
+
+**结论：技术上可做，现有通道够用；现在接的是死代码，所以不接——但出事条件
+必须写死，不能只挂“开放项”。**
+
+可行的只读上报（不需要新 WebSocket/新协议）：
+
+- C++ `ControlHub::cmdGetStatus` 已有 `doppler_available` / `doppler_enabled`，
+  经 loopback HTTP（`127.0.0.1:50732`，`GET /status`）与 MCP `get_status`
+  工具对外；
+- 主窗口已缓存**引擎实际施加**的累计 offset：`lastSpDopplerHz_`
+  （`cpp/src/ui/main_window.cpp:7603-7621`），C++ 的补偿施加点就在
+  `engine_->vfoSetOffset(...)`；
+- `cpp/src/dsp/doppler_control_surface.h` 是现成的接口面，加一个只读
+  `dopplerAppliedHz()`（`compOn && trackedPass ? lastSpDopplerHz_ : 0`）
+  后，在 status 里加 `doppler_applied_hz` 即可；它只读，不参与控制；
+- Python 侧消费点也已就绪：`doppler_link.use_backend_compensation()`
+  （`doppler_link.py:167-178`）能置 `backend_comp_active`，
+  `sdr_backend.py:660` 也会从 status 读该字段。
+
+**为什么不接**：`set_backend_compensation_active()` 全仓**零调用方**；而且
+Python 只有在本地 `SDRBackend` 真正 claim 流时才置
+`python_stream_owner=True`（唯一 claim 点 `_ensure_receive_chain`），
+C++ 桌面 / WebSocket 形态下 Python 不读 IQ（`desktop` 无本地后端）。
+两侧各自在自己的链上施加，互不相见——这正是「默认保守不施加」成立的原因。
+没有消费方就加上报，等于第二个 `tx_backend_comp_active` 式的假接口。
+
+**什么条件下会真的出事（必须同时满足）**：
+
+1. Python 侧 `python_stream_owner=True`（某本地/网络后端由 Python 独占读 IQ）；
+2. 同一路 IQ 的中心频率已被 C++ 移动过——只有 `vfoSetOffset` 的**出带**
+   分支会动共享 tuner（`|target − center| > usableHalf`，
+   `cpp/src/dsp/spectrum_engine.cpp:1140-1148` → `source_->setCenterFreq`）；
+3. Python 接收链 NCO 又按自己的预测施加一次。
+
+此时同一 Δ 被施加两次（接近 −2Δ、远离 +2Δ），读数仍显示
+`applied_by=python`，只有残余频偏能暴露。注意：常规多普勒 Δ 通常 < 1 kHz，
+远小于 `usableHalf`（数百 kHz），走的是 C++ **自己通道内**的 VFO NCO，
+不会移动共享 tuner，也不影响 Python 读到的原始流——所以当前不会触发。
+真正的触发形态是「C++ 把补偿搬到 tuner / 或别的功能移动了共享中心，同时
+Python 还在按旧中心做基带补偿」。
+
+**收口前提（写死，不靠记忆）**：一旦出现「Python 读同一路 IQ 且 C++ 在补偿」
+的部署形态（例如同一 rtl_tcp 共享源 + C++ 出带重调 + Python 本地后端），
+必须先接 C++ `doppler_applied_hz` 只读上报，再由该形态的 Python 侧调用
+`use_backend_compensation()`；在那之前不接。
+
 ## 4. 验证（离线、合成 IQ）
 
 测试：`mbdsdr_ai/tests/test_receive_doppler.py`
@@ -273,6 +335,9 @@ switch_on = bool(st["enabled"])          # 只由 enabled 驱动
 | 后端接管（双施加反证） | 先 Python 把 500 Hz 补到 0；后端声明 `backend_comp_active=True` 后，Python 在 20 ms ramp 内退回 0；最终残余实测 **500 Hz（1 倍，±5 Hz）**，不是 0 也不是 1000 |
 | 读数不混用 | 后端施加时 `applied_by=backend`、`applied_hz=null`、`predicted_hz=500`、`python_applied_hz=0`；Python 施加时三者分别为 `python` / 实测值 / 预测值 |
 | 过境全程（真实 TLE） | 内嵌 ISS(25544) 真实 TLE，示例站点 (0,0)，近天顶过境（TCA 仰角 86.3°），1 s / 块跑满 600 s；多普勒 +3358 → −3361 Hz 过零；稳态残余峰值实测 **59.31 Hz ≤ 80 Hz**；逐样本相位差 ≤ 2π·100/fs（无爆音）；零交叉前后块边界频移跳变 < 5 Hz |
+
+发射侧反证：`mbdsdr_ai/tests/test_transmit_doppler.py`（CW/IQ/TC 与回放
+各条，判据见 3.7；回放用例在修复前因缺 `doppler` 读数必红）。
 
 残余容差依据（固定频偏）：CW 解调 BFO 800 Hz、信道带宽 200 Hz，音频峰
 分辨率由 FFT 长度决定（≥0.7 Hz/格）；留 ±5 Hz 覆盖滤波器群延迟与 ramp 残留。

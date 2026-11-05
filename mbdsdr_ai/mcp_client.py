@@ -65,7 +65,8 @@ status/body 片段）、坏响应（``bad_response``）……每个信封都带
   （MCP 工具面 / agent）自行消毒。
 * 连接动作会**起子进程 / 发网络请求**——在 MCP 工具面（见
   ``core/mcp_server.py`` 的「外部工具」域）中 connect/disconnect/call
-  均为写工具，走既有 ``arm_manual`` 门。
+  均为写工具，走外部确认 ``confirm_token`` 门（模型自报 ``arm_manual``
+  不构成确认）。
 
 线程安全（最小化）
 ----------------

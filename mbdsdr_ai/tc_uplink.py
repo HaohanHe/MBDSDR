@@ -7,10 +7,11 @@
   * ``tc_build_frame``   数据 → CCSDS TC 传输帧（5 字节主头 + 数据 + CRC16-CCSDS）
   * ``tc_frame_parse``   帧字节 → 头字段 + 数据 + CRC 校验（对拍/验收侧）
   * ``pcm_psk_pm_modulate`` 比特 → NRZ-L → PSK 副载波 → PM 载波（复基带）
-  * ``tc_uplink_transmit`` **发射工具**：arm_manual 人工门 + 无设备诚实 NEED_HW
+  * ``tc_uplink_transmit`` **发射工具**：外部确认 token 门 + 无设备诚实 NEED_HW
 
 诚实/安全纪律（AGENTS §2/§3，最高优先级）：
-  * 发射工具未显式 ``arm_manual=true`` 一律拒绝（gated 信封，不假装成功）；
+  * 发射工具未持有效 ``tx_token`` 一律拒绝（gated 信封，不假装成功；
+    模型自报 ``arm_manual`` 不构成确认）；
   * 已武装但环境无可用发射设备 → 如实 NEED_HW，绝不伪造"已发射"；
   * 频点/帧布局不硬编码：布局从 frame_layouts.json 注入，频点调用方给；
   * TC 主头按 CCSDS 232.0-B-4 图 4-1/4-2，真值取自 CCSDS 230.1-G-3 Annex F。

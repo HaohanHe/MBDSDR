@@ -233,6 +233,40 @@ def test_tc_default_off_without_target():
     assert "无目标，未预偏" in r["doppler"]["reason"]
 
 
+# ── 录音回放发射：回放已知录音默认严格标称（不自动改频） ────────────────
+def test_playback_default_is_strict_nominal_with_readout(tmp_path):
+    """回放已录 IQ：即使有跟踪目标，默认也不预偏；读数必须给出 mode=off。
+
+    回放改的是「那段录音本来要表达的频率」，所以默认必须显式关闭预偏。
+    """
+    from mbdsdr_ai.playback import transmit_iq_playback
+    from mbdsdr_ai.recorder import IQRecorder
+    from mbdsdr_ai.tx_guard import TxCapabilities
+
+    caps = TxCapabilities(
+        known=True, freq_range_hz=(1e6, 6e9), bandwidth_range_hz=(2e5, 20e6),
+        gain_range_db=(0.0, 47.0), max_duration_s=600.0, duplex="half",
+        source="测试参数表")
+    rec = IQRecorder(str(tmp_path / "replay"), sample_rate=1e6,
+                     center_freq_hz=NOMINAL_HZ)
+    assert rec.open()
+    rec.write(np.ones(32, dtype=np.complex64))
+    rec.close()
+    path = str(tmp_path / "replay.sigmf-data")
+
+    backend = _FakeTxBackend()
+    comp = get_compensator()
+    _arm_target(comp, rr=-2.0)          # 若误用自动预偏，会差 ~973 Hz
+
+    rep = transmit_iq_playback(path, backend=backend,
+                               tx_token=get_tx_gate().arm(ttl_s=10),
+                               caps=caps, chunk_samples=16)
+    assert rep["state"] == "completed"
+    assert backend.sent_freqs[-1] == NOMINAL_HZ      # 严格相等，不 approx
+    assert rep["doppler"]["mode"] == "off"
+    assert rep["doppler"]["applied"] is False
+
+
 def _expected_delta(range_rate_km_s: float) -> float:
     """TX 预偏后相对标称的偏移：tx − nominal = rr·1000/c·f（接近为负）。"""
     return range_rate_km_s * 1000.0 / C_LIGHT_MPS * NOMINAL_HZ

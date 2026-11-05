@@ -15,7 +15,7 @@ MBDSDR AI 内核 - MCP stdio 服务器
 
   2. 命令行直接调用 (测试用):
      python3 mbdsdr_ai_mcp_server.py --cli list_tools
-     python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000, "arm_manual": true}'
+     python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000, "confirm_token": "<外部确认通道签发的一次性 token>"}'
      python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_spectrum_analyze '{"fft_size": 512}'
 
   3. 作为 Python 库:
@@ -23,7 +23,8 @@ MBDSDR AI 内核 - MCP stdio 服务器
      server = MBSDRAIMCPServer()
      tools = server.list_tools()
      result = server.call_tool("sdr_set_frequency",
-                               {"frequency_hz": 98500000, "arm_manual": True})
+                               {"frequency_hz": 98500000,
+                                "confirm_token": "<外部确认通道签发的一次性 token>"})
 
 MCP 协议 (JSON-RPC 2.0 over stdio):
   - initialize: 初始化握手
@@ -34,9 +35,11 @@ MCP 协议 (JSON-RPC 2.0 over stdio):
 安全面（2026-10-28 收口，与 mbdsdr_ai/core/mcp_server.py 的 MCPToolSet
 共用同一份 ToolCallGate）：
   - PreToolUse 钩子（进程内 + 外部命令）可否决一切调用；
-  - 写工具走 arm_manual 人工门 + tool_policy.json 的 allow/ask/deny 规则
-    （deny 单调，arm_manual 翻不动）；未武装的写工具在触达工具实现之前
-    即被拦下；
+  - 写工具走外部确认 token 门 + tool_policy.json 的 allow/ask/deny 规则
+    （deny 单调，token 也翻不动）；未持有效 ``confirm_token`` 的写工具在
+    触达工具实现之前即被拦下；模型自报 ``arm_manual`` 不构成确认。
+    token 由可信外部通道调用 ``tx_guard.get_tx_gate().arm(action=...)``
+    签发（绑定动作摘要、TTL、一次性），再以 ``confirm_token`` 传回；
   - 入参 NaN/Inf、超长数组、越界物理量报 invalid_argument，绝不钳位；
   - 审计账本默认关闭，设 MBDSDR_AUDIT_LOG=<jsonl 路径> 开启（opt-in，
     与正规面一致；显式 off 可关）。
@@ -116,7 +119,7 @@ class MBSDRAIMCPServer:
         self.tool_registry = self.agent.tool_registry
 
         # 安全门（与正规面 MCPToolSet 共用同一份 ToolCallGate 实现）：
-        # PreToolUse 钩子 veto → write 门（allow/ask/deny + arm_manual）→
+        # PreToolUse 钩子 veto → write 门（allow/ask/deny + confirm_token）→
         # 入参有限性/区间校验。审计账本 opt-in：未设 MBDSDR_AUDIT_LOG 且
         # 未显式注入时默认关闭，与正规面库内构造语义一致。
         self.gate = gate if gate is not None else ToolCallGate(
@@ -435,8 +438,8 @@ def main():
   # 命令行测试: 列出工具
   python3 mbdsdr_ai_mcp_server.py --cli list_tools
 
-  # 命令行测试: 调用工具（写工具需 arm_manual=true 才过人工门）
-  python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000, "arm_manual": true}'
+  # 命令行测试: 调用工具（写工具需外部确认通道签发的一次性 confirm_token）
+  python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_set_frequency '{"frequency_hz": 98500000, "confirm_token": "<token>"}'
   python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_spectrum_analyze '{"fft_size": 512}'
 
   # 带 API Key (启用 LLM 对话能力)

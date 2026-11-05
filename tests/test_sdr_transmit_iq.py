@@ -37,7 +37,7 @@ def test_registered_and_gate_in_schema(reg):
 
 
 def test_gate_blocks_unarmed(reg):
-    # 显式 arm_manual=False：到达 handler 人工门，返回 gated 信封。
+    # 显式 arm_manual=False（旧参数、不构成确认）：到达 handler 门，返回 gated 信封。
     r = reg.call("sdr_transmit_iq", {"frequency_hz": 145.8e6,
                                      "iq": [0.1, -0.1] * 50,
                                      "arm_manual": False})
@@ -45,8 +45,8 @@ def test_gate_blocks_unarmed(reg):
     assert (r.data or {}).get("gated") is True, r.content[:120]
 
 
-def test_missing_arm_manual_rejected_at_schema_level(reg):
-    # 连 arm_manual 都不给：registry 层 required 校验先拦。
+def test_missing_confirm_token_rejected_at_schema_level(reg):
+    # 不给 confirm_token：registry 层 required 校验先拦。
     r = reg.call("sdr_transmit_iq", {"frequency_hz": 145.8e6,
                                      "iq": [0.1, -0.1] * 50})
     assert r.success is False

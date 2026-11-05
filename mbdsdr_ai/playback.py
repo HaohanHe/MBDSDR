@@ -347,6 +347,7 @@ def transmit_iq_playback(
     *,
     backend: Any,
     freq_hz: Optional[float] = None,
+    doppler_precomp: Optional[bool] = False,
     arm_manual: bool = False,
     tx_token: Optional[str] = None,
     gain_db: Optional[float] = None,
@@ -367,7 +368,11 @@ def transmit_iq_playback(
       * 回放文件缺失/损坏/截断/读到一半被删时如实拒绝或中止，绝不把坏
         文件当成"正常波形"发出去；
       * 未指定频点时使用 SigMF 记录的中心频率；元数据缺失（0）则拒绝，
-        不假设一个频点。
+        不假设一个频点；
+      * **回放已知录音默认严格按标称频点发射**（``doppler_precomp=False``）：
+        自动预偏会把录音本来要表达的频率改掉。发波频点仍走公共
+        :func:`mbdsdr_ai.sdr_tools.resolve_tx_doppler` 仲裁，并把读数随
+        结果返回，绝不默默改频。
     """
     from .tx_guard import TxSession, policy_from_env
 
@@ -408,11 +413,16 @@ def transmit_iq_playback(
         finally:
             pb.close()
 
+    # 回放已知录音：默认 strict nominal；仍走公共 TX 仲裁（不另写一套），
+    # 读数随结果返回，调用方/UI 能看见「发的是什么频率」。
+    from .sdr_tools import resolve_tx_doppler
+    tx_freq, doppler_note = resolve_tx_doppler(center, doppler_precomp)
+
     duration = pb.get_duration() if pb.sample_rate > 0 else None
     session = TxSession(backend, cancel_event=cancel_event)
     result = session.transmit(
         _blocks(),
-        freq_hz=center,
+        freq_hz=tx_freq,
         arm_manual=arm_manual,
         tx_token=tx_token,
         gain_db=gain_db,
@@ -441,6 +451,7 @@ def transmit_iq_playback(
         "meta_valid": pb.meta_valid,
         "total_samples": pb._n_samples,
     }
+    result["doppler"] = doppler_note
     return result
 
 

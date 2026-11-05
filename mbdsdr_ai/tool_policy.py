@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""工具权限规则集：把二值 arm_manual 门升级为 allow/ask/deny 三级策略。
+"""工具权限规则集：allow/ask/deny 三级策略（S13 起与外部确认 token 串联）。
 
 来源（2026-10-14 上游审计，kimi-code 与 kilocode 独立收敛的第一落点）：
 - kimi-code（MoonshotAI/kimi-code）：permissionPolicyService 有序政策链 +
@@ -13,11 +13,12 @@ MBDSDR 保留自己的红线：结果信封诚实、绝不伪造执行结果—�
   1. 精确工具名规则（allow/ask/deny）
   2. fnmatch 通配模式（如 "set_*"）
   3. 默认策略：写工具 ask、读工具 allow
-deny 拥有最高优先级：即使调用方带 arm_manual=True 也不执行（对齐
-kilocode hard ruleset veto）。
-会话批准缓存：调用带 arm_manual=True 且 approve_session=True 时，按
-(工具名, 规范化参数) 记入本会话免问名单；后续同键调用自动放行并在结果
-标注 approval="session"（可观测，不隐形）。
+deny 拥有最高优先级：即使调用方持有效 token 也不执行（对齐 kilocode
+hard ruleset veto）。S13 起模型自报 ``arm_manual=True`` 本身已不构成确认。
+会话批准缓存：仅当调用持**外部确认通道签发的一次性 token**且
+``approve_session=True`` 时，按 (工具名, 规范化参数) 记入本会话免问名单
+（带 TTL）；后续同键调用在窗口内放行并在结果标注 approval="session"
+（可观测，不隐形）。
 """
 from __future__ import annotations
 

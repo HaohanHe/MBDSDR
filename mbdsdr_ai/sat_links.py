@@ -8,8 +8,8 @@
   * 数据全在 ``data/sat_links.json``，源码零频点字面量（与 sat_profile
     同一套「算法进工具、皮进配置」红线，grep 级钉扎在测试里）；
   * 每条带 source 可追溯，每条带一句话 culture 星性注记；
-  * 只含 downlink：任何上行（发射）一律走 tc_uplink 的 arm_manual
-    人工门，本表永不收录上行频点；
+  * 只含 downlink：任何上行（发射）一律走 tc_uplink 的外部确认 token
+    门，本表永不收录上行频点；
   * 反向查询 identify() 回答「频谱上这条竖线是谁」——这是把瀑布图和
     星空图缝起来的那根针。
 
