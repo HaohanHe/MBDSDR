@@ -78,17 +78,21 @@ grep 命中 0 **不等于**没有调用方。本仓库已确认存在以下会�
 ### B. 多真值源：采样率档位逐份清单
 
 > 采样率是本次最容易被误判成"冗余"的一组。**逐份列字面量与消费方**，不做合并。
+>
+> **本账本不引用采样率同步面数量（旧 23/26）**；如后续需要，以采样率线在 HEAD 的重数为准（同步面 28：代码 17 / 测试 7 / 文档 4；只数档位集合为 24：代码 13）。
+>
+> B1–B4、B6–B8 已按 HEAD 逐条复核：行号用 `git show HEAD:<path>` 对字面量，hash 用 `git show --name-only <hash> -- <path>` 反查归属、`git log -S <字面量>` 命中后才写。
 
 | # | 表 / 位置 | 字面量 | 消费方（命中） | 判定 |
 |---|---|---|---|---|
-| B1 | C++ 可下发白名单 `cpp/src/core/tokens.h:287 kSampleRatesHz` | `1.024 / 2.048 / 2.4 / 3.2 MHz`（4 档） | `cpp/src/control/control_hub.cpp:503/507`（档外显式拒绝） | **保留 = 控制面白名单**。与 B2 是"白名单 ⊆ 候选"关系，**不许合并** |
-| B2 | C++ 设备候选探测表 `cpp/src/dsp/device_capabilities.cpp:36-48 kCandidateRatesHz` | `250k / 1024k / 1536k / 1792k / 1920k / 2048k / 2160k / 2400k / 2560k / 2880k / 3200k`（11 档） | `:128 for (const double r : kCandidateRatesHz)` 按设备实际范围过滤 | **保留 = 候选探测表**。`:46` 已是 `2_880_000`：真机请求 `2,800,000` 被设备吸附到 `2,880,000`（读回 +80,000 Hz，E3，见 `limitations-register` 附 M.4 L60），候选表只列设备实际给出值 |
-| B3 | Python 后端档位 `mbdsdr_ai/sdr_backend.py:1442 RTLSDRBackend.SAMPLE_RATES` | 与 B2 **同 11 档**（含 `2_880_000`） | `mbdsdr_ai/device_capabilities.py:198` 动态 `__import__` 取表 → `sample_rate_options()`；`desktop/control_panel.py:1253` 间接消费 | **保留**：Python 侧后端自报档位，无 C++ 运行时共享，不能"派生自 C++" |
-| B4 | Python AI 参考表 `mbdsdr_ai/rtlsdr_params.py:139-150 SUPPORTED_SAMPLE_RATES` | `250k / 1024k / 1536k / 1800k / 1920k / 2000k / 2048k / 2400k / 2560k / 3200k`（**10 档，与 B2 不同**） | **生产消费方存在**：`mbdsdr_ai/tool_registry.py:2583`、`:2618` 作为 AI 工具 `recommended_rates_hz` 输出；测试 `tests/rtlsdr_params_test.py:101` | **保留 = AI 工具推荐表（故意不同）**：含 1.8M/2.0M 常用收音机档，缺 1.792M/2.16M/2.88M。它不驱动任何 UI 下拉，**不参与"可见档位"** |
+| B1 | C++ 可下发白名单 `cpp/src/core/tokens.h:287 kSampleRatesHz` | `1.024 / 2.048 / 2.4 / 3.2 MHz`（4 档） | `cpp/src/control/control_hub.cpp:503/507`（档外显式拒绝） | **保留 = 控制面白名单**。与 B2 是"白名单 ⊆ 候选"关系，**不许合并**。证据：`474f7cd2` — `cpp/src/core/tokens.h:287` — `kSampleRatesHz`（`show --name-only` 触及 + `log -S` 命中） |
+| B2 | C++ 设备候选探测表 `cpp/src/dsp/device_capabilities.cpp:36-48 kCandidateRatesHz` | `250k / 1024k / 1536k / 1792k / 1920k / 2048k / 2160k / 2400k / 2560k / 2880k / 3200k`（11 档） | `:131 for (const double r : kCandidateRatesHz)` 按设备实际范围过滤 | **保留 = 候选探测表**。`:46` 已是 `2_880_000`：真机请求 `2,800,000` 被设备吸附到 `2,880,000`（读回 +80,000 Hz，E3，见 `limitations-register` 附 M.4 L60），候选表只列设备实际给出值。证据：`30214fac` — `cpp/src/dsp/device_capabilities.cpp:36` — `kCandidateRatesHz`；吸附档 `dd72ba1c` — `:46` — `2880000.0` |
+| B3 | Python 后端档位 `mbdsdr_ai/sdr_backend.py:1501 RTLSDRBackend.SAMPLE_RATES` | 与 B2 **同 11 档**（含 `2_880_000`） | `mbdsdr_ai/device_capabilities.py:205` 动态 `__import__` 取表 → `sample_rate_options()`（`:217`）；`desktop/control_panel.py:1360` 间接消费 | **保留**：Python 侧后端自报档位，无 C++ 运行时共享，不能"派生自 C++"。证据：`4b8060f7` — `mbdsdr_ai/sdr_backend.py:1501` — `SAMPLE_RATES` |
+| B4 | Python AI 参考表 `mbdsdr_ai/rtlsdr_params.py:139-150 SUPPORTED_SAMPLE_RATES` | `250k / 1024k / 1536k / 1800k / 1920k / 2000k / 2048k / 2400k / 2560k / 3200k`（**10 档，与 B2 不同**） | **生产消费方存在**：`mbdsdr_ai/tool_registry.py:2583`、`:2618` 作为 AI 工具 `recommended_rates_hz` 输出；测试 `tests/rtlsdr_params_test.py:102` | **保留 = AI 工具推荐表（故意不同）**：含 1.8M/2.0M 常用收音机档，缺 1.792M/2.16M/2.88M。它不驱动任何 UI 下拉，**不参与"可见档位"**。证据：`3e316233` — `mbdsdr_ai/rtlsdr_params.py:139` — `SUPPORTED_SAMPLE_RATES` |
 | B5 | 桌面模块面板采样率下拉 `desktop/module_panel.py:534 _fill_sample_rate_options` | **无前端字面量档位表**：`items = sample_rate_combo_items(device)`（`:541`）→ `constants.sample_rate_combo_items`（`desktop/constants.py:51`）→ `mbdsdr_ai.device_capabilities.sample_rate_options(device)`（后端离散表 ∩ 设备量程）；显示文案统一走 `format_sample_rate`（`mbdsdr_ai/sdr_backend.py:114/131`，`MS/s` + 三位小数） | 初始化 `:348 _fill_sample_rate_options(None)`；选设备 `:529-532 _on_device_selected`；取值 `:557 selected_sample_rate_hz()` → `:600 dev["_sample_rate"]` → `:607 device_selected.emit`；接线 `desktop/main_window.py:1635 device_selected.connect` → `:7400 _on_module_device_selected`；未报能力时单项「未知（…将用默认 X）」且置灰（`:346-348` 注释 + `:550-556` tooltip） | **已改能力驱动（已落库）**：`7bea149a` — `desktop/module_panel.py:541` — `sample_rate_combo_items(device)`。全文件无 `1.024 / 1.440 / 2.048 / 2.400 / 3.200 MS/s` 任一档位字面量，原「5 档静态表、代码未落地」判定**作废**。与 §5.1 原规格的差异：`selected_sample_rate_hz()` 仍回退 `DEFAULT_SAMPLE_RATE_HZ`（不返回 `None`），但能力未知时控件禁用，该回退只作连接兜底、不再冒充可选档位 | 若产品确需 `1.440 MS/s`，仍须进内核两表 + 真机读回（B1/B2/B3/B4 均无此档）；桌面侧不得单补 |
-| B6 | 桌面默认值回退 `desktop/constants.py:16-20` | `DEFAULT_SAMPLE_RATE_HZ`（优先导入内核值，失败回退 `2_400_000`） | 全桌面共享 | **保留**（安全回退，与内核基准一致，不是新真值） |
-| B7 | 移动端历史默认 `mobile/lib/app/tokens.dart:222-227 sampleRatesHz` | 4 档，已标 `@Deprecated('历史默认，不被任何人读取')` | 全仓 Swift/Dart 代码命中 **0**；仅 `mobile/lib/pages/spectrum_page.dart:761` 一句注释 | **保留**：删除条件写在 `tokens.dart:218-220` = "确认无外部引用且旧版本回滚窗口关闭"。回滚窗口无法从仓库核实 → 不删 |
-| B8 | 真机硬件吸附档 `2,800,000 → 读回 2,880,000` | — | 另一条线真机逐档实测：**11 档一致，仅 2800k 档驱动返回成功但静默吸附到 2880k（+80 kHz）**；`rtl_sdr_source` 侧 `rtlsdr_get_sample_rate` 读回已接上 | **不是冗余，不许删**。任何把 2.88M 当"多余档位"删掉的判断都是错的；该档的价值是"必须靠读回才发现"的负样本 |
+| B6 | 桌面默认值回退 `desktop/constants.py:19-26` | `DEFAULT_SAMPLE_RATE_HZ`（优先导入内核值，失败回退 `2_400_000`） | 全桌面共享 | **保留**（安全回退，与内核基准一致，不是新真值）。证据：`6ed9ee7d` — `desktop/constants.py:26` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
+| B7 | 移动端历史默认 `mobile/lib/app/tokens.dart:222-227 sampleRatesHz` | 4 档，已标 `@Deprecated('历史默认，不被任何人读取')` | 全仓 Swift/Dart 代码命中 **0**；仅 `mobile/lib/pages/spectrum_page.dart:761` 一句注释 | **保留**：删除条件写在 `tokens.dart:217-220` = "确认无外部引用且旧版本回滚窗口关闭"。回滚窗口无法从仓库核实 → 不删。证据：`61d4eaf6` — `mobile/lib/app/tokens.dart:222` — `sampleRatesHz` |
+| B8 | 真机硬件吸附档 `2,800,000 → 读回 2,880,000`（`cpp/src/dsp/device_capabilities.cpp:46`） | `2880000.0`（候选表 11 档见 `:36-47`） | 另一条线真机逐档实测：**11 档一致，仅 2800k 档驱动返回成功但静默吸附到 2880k（+80 kHz）**；`rtl_sdr_source` 侧 `rtlsdr_get_sample_rate` 读回已接上 | **不是冗余，不许删**。任何把 2.88M 当"多余档位"删掉的判断都是错的；该档的价值是"必须靠读回才发现"的负样本。证据：`dd72ba1c` — `cpp/src/dsp/device_capabilities.cpp:46` — `2880000.0` |
 
 ### C. 死代码 / 无人调用
 
@@ -379,6 +383,108 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 
 ---
 
+### 5.8 死代码扫描：全仓公开函数/类（2026-11-06，**只登记不删**）
+
+扫描口径（HEAD `ce561bcb`，工作区含他线在途改动）：
+- 范围：`mbdsdr_ai/`、`desktop/` 的顶层公开 `def`/`class`（不含 `_` 前缀）；`scripts/`、`tools/`、`experiments/`、`tests/` 内的定义不计入候选（脚本入口/测试夹具）。
+- 引用判定：全仓（`.py`/`.dart`/`.cpp`/`.h`/`.md`/配置文件）整词匹配，排除定义行自身；零命中项再用 `git grep -n -w <symbol> HEAD` 复核，必须全仓只有定义一行。
+- 已排除：`__all__` 导出（候选里 `all=1` 为 0 条）；生产代码中按名取用的 `getattr`/`importlib`（未发现能命中这些符号名的形态，§1.2 那几类动态调用已单独核过）；`connect(self.x)` 这类信号槽属正常标识符引用，已计入。
+- 结果：候选 **116** 项 = 确认无用 10 / 动态调用存疑 7 / 上游 API 保留 99。**本清单不计入 §0 的 41 项，处置一律"登记待批"，不删任何代码。**
+
+#### 5.8.1 确认无用（10 项，全仓仅定义行 1 处）
+
+| 位置 | 符号 | 备注 |
+|---|---|---|
+| `desktop/rf_sky_view.py` | `load_ground_station_config` | 配置读取辅助，无调用 |
+| `mbdsdr_ai/adsb_lite.py` | `build_short_frame` | 帧构造辅助，无调用 |
+| `mbdsdr_ai/astronomy/moon_albedo.py` | `grid_resolution_pix_per_deg` | 换算辅助，无调用 |
+| `mbdsdr_ai/dab_plus_lite.py` | `audio_info_from_service` | DAB 服务信息辅助，无调用 |
+| `mbdsdr_ai/decoder_registry.py` | `select_decoder` | 注册表选择入口；删前需确认无按模式名派发 |
+| `mbdsdr_ai/fengyun_sat.py` | `fy4_lrit_pipeline` | 流水线入口；删前需确认无按卫星/产品名派发 |
+| `mbdsdr_ai/ft8_decode.py` | `hard_tones_to_llr` | 算法辅助，无调用 |
+| `mbdsdr_ai/gps_ca.py` | `nav_bits_from_corr` | 导航比特提取辅助，无调用 |
+| `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | 卷积交织辅助，无调用 |
+| `mbdsdr_ai/orbit_determination.py` | `ecef_state_to_keplerian` | 轨道根数换算辅助，无调用 |
+
+#### 5.8.2 动态调用存疑（7 项，无生产引用但有测试/文档引用）
+
+| 位置 | 符号 | 依据 |
+|---|---|---|
+| `mbdsdr_ai/ax25.py` | `APRSWeather` | 1 份文档引用，无代码/测试引用 |
+| `mbdsdr_ai/ft8_ldpc.py` | `get_colorder` | 2 份文档引用，无代码/测试引用 |
+| `mbdsdr_ai/new_spacetime.py` | `GNSSDataSource` | 2 份文档引用；数据源类，可能按名注入 |
+| `mbdsdr_ai/new_spacetime.py` | `SDRDataSource` | 1 份文档引用；数据源类，可能按名注入 |
+| `mbdsdr_ai/new_spacetime.py` | `format_dms` | 1 份文档引用 |
+| `mbdsdr_ai/new_spacetime.py` | `parse_nmea_sentence` | 1 份文档引用 |
+| `mbdsdr_ai/new_spacetime.py` | `web_mercator_project` | 1 份文档引用 |
+
+#### 5.8.3 上游 API 保留（99 项，按文件分组）
+
+保留口径：模块属 §5.3 library-only（①/②/③）、对外适配器（`*_adapter`/`*_source`/外部工具对接）、或已被测试钉住（删了会让测试失去被钉对象）。
+
+| 文件 | 项数 | 符号 |
+|---|---|---|
+| `desktop/error_remedy.py` | 2 | `mapping_overlaps`, `no_entry_reason` |
+| `desktop/layout_store.py` | 1 | `reset_layout_store_singleton` |
+| `desktop/rf_sky_view.py` | 2 | `RFSkyViewPanel`, `satellite_catalog_mismatches` |
+| `mbdsdr_ai/acars_decoder.py` | 2 | `frame_bits_from_bytes`, `synthesize_msk_audio` |
+| `mbdsdr_ai/adsb_lite.py` | 1 | `synthesize_modes_iq` |
+| `mbdsdr_ai/ais_decoder.py` | 4 | `build_type18`, `build_type24a`, `nmea_decode`, `nmea_encode` |
+| `mbdsdr_ai/analysis/protocol_parser.py` | 1 | `infer_field_boundaries` |
+| `mbdsdr_ai/ardop_adapter.py` | 2 | `ARDOFFrame`, `demodulate_qam` |
+| `mbdsdr_ai/astronomy.py` | 3 | `FrameType`, `get_observer_from_gps`, `mjd_to_jd` |
+| `mbdsdr_ai/astronomy/moon_albedo.py` | 3 | `albedo_at_disc`, `screen_to_disc`, `selenographic_to_disc` |
+| `mbdsdr_ai/audio_resampler.py` | 1 | `resample_audio` |
+| `mbdsdr_ai/dab_plus_lite.py` | 2 | `crc_fire_code`, `dabplus_samplerate` |
+| `mbdsdr_ai/decode_pipeline.py` | 2 | `benchmark_pipeline`, `sweep_frequency_offset` |
+| `mbdsdr_ai/decode_router.py` | 1 | `capability_matrix` |
+| `mbdsdr_ai/digital_modes.py` | 1 | `demodulate_qpsk` |
+| `mbdsdr_ai/dmr_demod.py` | 4 | `dmr_decode_iq`, `dmr_encode_iq`, `dmr_encode_voice_lc_header`, `qr1676_encode` |
+| `mbdsdr_ai/dsdcc_lite.py` | 1 | `MBEParams` |
+| `mbdsdr_ai/dsp.py` | 3 | `DSPChain`, `QuadratureDemod`, `make_agc2` |
+| `mbdsdr_ai/fengyun_sat.py` | 7 | `bits_to_bpsk`, `bpsk_to_bits`, `build_fy3_hrpt_frame`, `build_fy4_image_information`, `build_fy4_xrit_file`, `extract_plframe`, `fy3_extract_channels` |
+| `mbdsdr_ai/fldigi_modes.py` | 2 | `OliviaMFSK`, `ThorMode` |
+| `mbdsdr_ai/frequency_manager.py` | 1 | `get_mode_params` |
+| `mbdsdr_ai/frequency_manager_v2.py` | 1 | `FrequencyManagerV2` |
+| `mbdsdr_ai/fst4_ldpc.py` | 1 | `fst4_decode` |
+| `mbdsdr_ai/gk2a_lrit.py` | 3 | `build_gk2a_lrit_file`, `cadu_to_iq`, `vcdus_to_cadu` |
+| `mbdsdr_ai/gpredict_adapter.py` | 1 | `jd_from_datetime_utc` |
+| `mbdsdr_ai/gps_ca.py` | 1 | `ca_code_taps` |
+| `mbdsdr_ai/hal.py` | 1 | `DeviceCapability` |
+| `mbdsdr_ai/hooks.py` | 1 | `create_auto_record_hook` |
+| `mbdsdr_ai/js8call_adapter.py` | 1 | `tones_to_audio` |
+| `mbdsdr_ai/kismet_adapter.py` | 1 | `build_beacon_frame` |
+| `mbdsdr_ai/m17_adapter.py` | 2 | `golay24_encode`, `m17_scramble` |
+| `mbdsdr_ai/meteor_sat.py` | 1 | `lrpt_find_frames` |
+| `mbdsdr_ai/module_graph.py` | 1 | `enumerate_sources` |
+| `mbdsdr_ai/multimon_decoders.py` | 4 | `PocsagWord`, `pocsag_build_batch`, `pocsag_encode_address_word`, `pocsag_encode_message_word` |
+| `mbdsdr_ai/nrsc5_lite.py` | 1 | `HDCDecoder` |
+| `mbdsdr_ai/op25_adapter.py` | 1 | `p25_imbe_pack_params` |
+| `mbdsdr_ai/openapi_integration.py` | 1 | `get_satellite_passes` |
+| `mbdsdr_ai/openwebrx_adapter.py` | 2 | `owx_apply_waterfall`, `owx_soapy_settings_parse` |
+| `mbdsdr_ai/orbit_determination.py` | 1 | `plot_residual_histogram` |
+| `mbdsdr_ai/osmosdr_source.py` | 2 | `SoapySDRSource`, `osmosdr_list_backends` |
+| `mbdsdr_ai/radio_control.py` | 2 | `cw_decode_from_audio`, `text_to_cw_audio` |
+| `mbdsdr_ai/rds_lite.py` | 1 | `build_4a_group` |
+| `mbdsdr_ai/remote_control_v2.py` | 1 | `RemoteControlV2` |
+| `mbdsdr_ai/rtcm3_decoder.py` | 1 | `build_rtcm3_frame` |
+| `mbdsdr_ai/rtklib_adapter.py` | 3 | `SatelliteOrbit`, `klobuchar_ion_delay`, `ntrip_manager_from_config` |
+| `mbdsdr_ai/rtl433_decoder.py` | 1 | `manchester_encode_bits` |
+| `mbdsdr_ai/rtlsdr_params.py` | 1 | `get_gain_table_tenths` |
+| `mbdsdr_ai/sat_image_processing.py` | 1 | `channel_algebra` |
+| `mbdsdr_ai/sat_pipeline_params.py` | 1 | `list_pipelines` |
+| `mbdsdr_ai/sat_pipeline_runner.py` | 1 | `run_pipeline` |
+| `mbdsdr_ai/satdump_adapter.py` | 1 | `circular_orbit_ecef` |
+| `mbdsdr_ai/satnogs_adapter.py` | 2 | `ObservationPipeline`, `SatnogsNetworkClient` |
+| `mbdsdr_ai/sdrangel_adapter.py` | 3 | `MagAGC`, `NFMDemodSink`, `SSBDemodSink` |
+| `mbdsdr_ai/sdrangel_plugins.py` | 1 | `encode_flarm_frame` |
+| `mbdsdr_ai/spectrum_accumulator.py` | 1 | `SpectrumAccumulator` |
+| `mbdsdr_ai/urh_adapter.py` | 1 | `slice_bits_from_pulses` |
+| `mbdsdr_ai/xastir_adapter.py` | 1 | `APRSItem` |
+| `mbdsdr_ai/ysf_demod.py` | 3 | `ysf_decode_iq`, `ysf_encode_data_frame`, `ysf_encode_iq` |
+
+> 说明：本清单只给"谁没有调用方"，**不给删除许可**。删除须另开 patch + 回滚窗口结论；`select_decoder`/`fy4_lrit_pipeline`/`GNSSDataSource`/`SDRDataSource` 这四项属"入口/按名注入"角色，即便零命中也不得直接删。
+
 ## 6. 账本线登记行并入（R1–R20）
 
 > 来源：`D:\mbdsdr\.tmp\account_redundancy_rows.md`（账本线导出 20 行，不是 16 行）。
@@ -441,6 +547,7 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 2026-11-06 | （本表更新提交） | 新增 A12（`kDbUpperDefault` 常量复用，owner 内核线）；§4.3 逐文件钉住 6 条吞错越线的引入提交与 owner，补 A/B 重编取证格式；§5 落地 B5 能力驱动规格/测试/协调下家、白名单反证记录、46 个仅测试模块三类归档、4 个零调用方法的具体接线点；R19 文案按 `device_capabilities.cpp:46` 现状更新；共 41 项 |
 | 2026-11-06 | （本次提交） | A12 状态：**已修** — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`；拆分后为 `kDbViewUpperDefault=-20`（默认视野）+ `kDbCeilingMax=0`（0 dBFS 满量程硬上限）；10 个目标全绿、未改期望值；反证改回 -20 红项与修复前逐字一致；原建议 `kDbSpinUpperMax=20` 标注**已否决**（会抹掉满量程物理事实） |
 | 2026-11-06 | `7bea149a` | B5 **已改**能力驱动（已落库）：`7bea149a` — `desktop/module_panel.py:541` — `sample_rate_combo_items(device)`；`_fill_sample_rate_options`（`desktop/module_panel.py:534`）的档位来自 `desktop/constants.py:51` → `sample_rate_options(device)`，全文件无档位字面量；标签仍走 `format_sample_rate`（`MS/s` 三位小数）。原「5 档硬编码、代码未落地」判定作废。历史：`385d0e15` 的五标签 `MS/s` 文案改动已被派生链取代（`1.440 MS/s` 已不在 HEAD） |
-| 2026-11-06 | （本次提交） | A10 `:74` 补四元组 `8213a3d7 — mbdsdr_ai/decode_router.py:499 — ACARSDecoder`（`git show --name-only` 触及 + `log -S` 命中）；R8 `:405` 补可点开实现位置（`desktop/status_panel.py:185 DECODE_ERROR_LABELS` 四元组 `90f5eccc`、`desktop/troubleshooting.py:249 CODE_NEXT_STEPS`、`mbdsdr_ai/error_catalog.py:704 ERRORS`）；§5.7 的 B5/C2 行按 `7bea149a` 落库结果收口 |
+| 2026-11-06 | （本次提交） | A10 `:74` 补四元组 `8213a3d7 — mbdsdr_ai/decode_router.py:499 — ACARSDecoder`（`git show --name-only` 触及 + `log -S` 命中）；R8 `:398` 补可点开实现位置（`desktop/status_panel.py:185 DECODE_ERROR_LABELS` 四元组 `90f5eccc`、`desktop/troubleshooting.py:249 CODE_NEXT_STEPS`、`mbdsdr_ai/error_catalog.py:704 ERRORS`）；§5.7 的 B5/C2 行按 `7bea149a` 落库结果收口 |
+| 2026-11-06 | （本次提交） | B1–B4/B6–B8 按 HEAD 逐条复核：行号校正（B2 `:128→:131`、B3 `1442→1501`/`198→205`/`1253→1360`、B4 测试 `:101→:102`、B6 `:16-20→:19-26`、B7 `218-220→217-220`、B8 补 `cpp/src/dsp/device_capabilities.cpp:46`），每条补证据三元组（7 个 hash 均先经 `show --name-only` 反查归属）；新增 §5.8 死代码扫描（116 候选 = 无用 10 / 存疑 7 / API 保留 99，只登记不删）；B 表前补"本账本不引用 23/26"一句 |
 | 2026-11-06 | （本次提交） | A10 改判：**两实现并存、入口不止一个、退休条件未满足**（`decoder_registry.py:78` 只是一个入口；CLI 生产路径 `decode_router.py:517` 仍走 `acars_decoder` 状态机）；新增 §5.6 差异表（模式/链路/质量/测试/调用方）+ 5 条退休判据，不出 patch、不删生产路径；清单 2 的 A3/C5/C12 摘要行补「见 §X」指针；A3 的 `53 passed` 标注为 2026-11-06 02:21 实跑记录（本轮未复跑） |
 | 2026-11-06 | （本次提交） | 新增 §5.7 落库依赖表：A 表 6 项等「操作逻辑线」提交 `main_window.py`/`module_panel.py` 后按 HEAD 校正（B5、C2、C3、A11、§5.4、§4.3）；B 表 6 项无他线依赖（C7 其余 4 方法、A9、A7/A8、B7、§5.3、A3 历史位置）；C 表 `device_panel.py:296`→HEAD `366` 可即改；明确「claim 到期但没提交不算落库」 |
