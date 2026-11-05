@@ -32,6 +32,11 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
     # ---- 视图菜单 ----
     Shortcut("view.waterfall", "Ctrl+Shift+W", "显示瀑布图"),
     Shortcut("view.fullscreen", "F11", "全屏"),
+    Shortcut("view.reset_position", None, "重置窗口位置",
+             note="窗口跑到屏幕外时的救援入口，低频操作，只从「视图」菜单点击"),
+    Shortcut("view.all_sky", "A", "全天模式（160°）",
+             note="绑在主窗（WidgetWithChildrenShortcut），会先于频谱内的 A=AM 截获按键；"
+                  "这是预存在的键位冲突，见 docs/discoverability.md"),
     Shortcut("view.planetarium", "Ctrl+Shift+P", "星象仪模式"),
     Shortcut("view.planetarium_exit", "Esc", "星象仪形态退出", scope="planetarium",
              note="只在该形态启用；先关 AI 回复卡再退出形态"),
@@ -47,6 +52,15 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
     Shortcut("tools.sat_tle", None, "更新卫星 TLE (Celestrak)",
              note="联网操作，避免误触"),
     Shortcut("tools.about", "F1", "关于 MBDSDR"),
+    # ---- 帮助菜单 ----
+    # 可发现性入口：内容由本表与注册表实时生成，不另抄一份键位/能力清单。
+    # 不配键是刻意的——F1 已绑「关于」，避免抢占系统帮助键的既有语义。
+    Shortcut("help.quick_start", None, "三步上手",
+             note="帮助菜单常驻入口；低频操作，不占系统帮助键 F1"),
+    Shortcut("help.catalog", None, "能力目录",
+             note="帮助菜单常驻入口；从注册表实时生成，低频操作"),
+    Shortcut("help.shortcuts", None, "快捷键一览",
+             note="帮助菜单常驻入口；内容由本表生成，低频操作"),
     # ---- 面板菜单 ----
     Shortcut("panel.reset_layout", None, "恢复出厂布局", note="破坏性操作，要求点击确认"),
     # ---- 顶栏 ----

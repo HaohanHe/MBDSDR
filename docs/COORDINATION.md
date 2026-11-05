@@ -183,3 +183,15 @@
   全链 + **woven 约定裁决**（decode_cadu order 参数化，concat=合成链
   口径/woven=真录真值序）+ 真录图像出图 + 图像金样 6 项。CI 9dd272d
   全绿（行尾根治生效）。队列 #8 销账，收尾件拆出 #10。
+- 2026-11-05（可发现性/帮助线）：新增 `desktop/capability_catalog.py`、
+  `desktop/shortcuts_panel.py`、`desktop/help_panel.py`，`PanelSpec` 加 `summary`；
+  `shortcuts.py` 只追加 5 条（`view.all_sky`/`view.reset_position`/`help.*` ×3，
+  **未删任何既有键位**）。能力目录 53 项（可用 47 / 需条件 1 / 暂不可用 5）
+  全部由面板/解调/数字解码/长尾解码器/AI 工具域注册表实时生成；
+  `tests/test_discoverability_help.py` 15 条逐 source 反查注册表，
+  `test_shortcuts_guard.py` 10 条全绿（含原 2 条存量红灯：A 键与重置窗口位置）。
+  **报备 main_window（按 hunk 拆提交，未带走同文件在途的设置面板改动）**：
+  `QKeySequence("A")` → `_key("view.all_sky")`；新增「帮助」菜单 3 项；
+  新增 `_show_help_panel` / `_show_shortcuts_panel`（非模态）。
+  未改 `rf_sky_view.py` / `spectrum_widget.py` / 设置面板。盘点见
+  `docs/discoverability.md`。未推送。

@@ -43,6 +43,8 @@ class PanelSpec:
     min_w: float = 280.0
     ratio_hint: float = 0.0   # 初始占可用宽度比例（0 = 由布局预设决定）
     closable: bool = True
+    # 一句话能力说明（帮助面板「能力目录」直接取此字段，避免另抄一份清单）
+    summary: str = ""
 
 
 class PanelRegistry:
@@ -69,28 +71,39 @@ class PanelRegistry:
             # 中央主表面（Tab 页，可全屏铺满）
             PanelSpec("spectrum",   "频谱",       "≡", AREA_CENTER,
                       collapsible=False, min_w=center_min,
-                      ratio_hint=t.RATIO["splitter_center"]),
+                      ratio_hint=t.RATIO["splitter_center"],
+                      summary="实时频谱与瀑布；拖动谱面改频，滚轮缩放，单键切解调模式"),
             PanelSpec("rf_sky",     "天空模式",   "◎", AREA_CENTER,
                       collapsible=False, min_w=center_min,
-                      ratio_hint=t.RATIO["splitter_center"]),
+                      ratio_hint=t.RATIO["splitter_center"],
+                      summary="全天球视图：恒星/行星/深空/卫星；点天体看信息，点卫星调谐收听"),
             PanelSpec("weather",    "气象云图",   "☁", AREA_CENTER,
-                      collapsible=False, min_w=center_min),
+                      collapsible=False, min_w=center_min,
+                      summary="气象卫星云图：GOES/GK-2A/Meteor/NOAA/FY 用真实录制或实时数据解码出图"),
             PanelSpec("module",      "模块/信号流","▤", AREA_CENTER,
-                      collapsible=False, min_w=center_min),
+                      collapsible=False, min_w=center_min,
+                      summary="SDR++ 式信号流：源设备 → 解调 → 解码 → 输出，逐段调参数"),
             PanelSpec("sat_track",   "卫星跟踪",   "◍", AREA_CENTER,
-                      collapsible=False, min_w=center_min),
+                      collapsible=False, min_w=center_min,
+                      summary="选卫星后闭环跟踪：500ms 更新方位/仰角/多普勒并自动调谐"),
             PanelSpec("new_spacetime","新时空",    "◷", AREA_CENTER,
-                      collapsible=False, min_w=center_min),
+                      collapsible=False, min_w=center_min,
+                      summary="调制自动识别 + 卫星过境时间线与授时 + 频率-轨道关系图"),
             PanelSpec("adsb",       "ADS-B 航路", "✈", AREA_CENTER,
-                      collapsible=False, min_w=center_min),
+                      collapsible=False, min_w=center_min,
+                      summary="ADS-B 飞机位置图与航班列表；只画真实解算出的经纬度"),
             # 右侧停靠面板（可折叠成窄条 / 可悬浮）
             PanelSpec("control",    "控制",       "⚙", AREA_RIGHT,
                       collapsible=True, min_w=side_min,
-                      ratio_hint=t.RATIO["focus_side"]),
+                      ratio_hint=t.RATIO["focus_side"],
+                      summary="接收参数：频率/解调/带宽/增益/静噪/采样率与音量"),
             PanelSpec("status",      "状态",       "▦", AREA_RIGHT,
-                      collapsible=True, min_w=side_min),
+                      collapsible=True, min_w=side_min,
+                      summary="设备/信号/GNSS/接收参数实时读数；无数据显「--」"),
             PanelSpec("ai",          "AI 助手",    "✦", AREA_RIGHT,
-                      collapsible=True, min_w=side_min),
+                      collapsible=True, min_w=side_min,
+                      summary="用自然语言描述需求，AI 调用工具完成调谐/解码/录制等操作"),
+
         ]
         for s in specs:
             self._specs[s.id] = s

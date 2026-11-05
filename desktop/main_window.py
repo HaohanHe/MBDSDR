@@ -843,7 +843,7 @@ class MainWindow(QMainWindow):
         # 避免在输入框里按 A 也切图。
         all_sky_action = QAction("全天模式（160°）", self)
         all_sky_action.setCheckable(True)
-        all_sky_action.setShortcut(QKeySequence("A"))
+        all_sky_action.setShortcut(QKeySequence(_key("view.all_sky")))
         all_sky_action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
         all_sky_action.setToolTip(
             "天空视图立体投影全天模式（视场 160°）；视图内按 A 切换，Esc 先退全天")
@@ -927,6 +927,22 @@ class MainWindow(QMainWindow):
         about_action.setShortcut(QKeySequence(_key("tools.about")))
         about_action.triggered.connect(self._show_about)
         tools_menu.addAction(about_action)
+
+        # 帮助菜单：可发现性入口。内容全部从 shortcuts.py / 注册表实时生成，
+        # 不在这里手抄键位或能力清单。
+        help_menu = menubar.addMenu("帮助(&H)")
+
+        quick_start_action = QAction("三步上手", self)
+        quick_start_action.triggered.connect(lambda: self._show_help_panel(0))
+        help_menu.addAction(quick_start_action)
+
+        catalog_action = QAction("能力目录", self)
+        catalog_action.triggered.connect(lambda: self._show_help_panel(1))
+        help_menu.addAction(catalog_action)
+
+        shortcuts_action = QAction("快捷键一览", self)
+        shortcuts_action.triggered.connect(self._show_shortcuts_panel)
+        help_menu.addAction(shortcuts_action)
 
     def _build_tool_bar(self):
         """构建工具栏（SDR++ 风格：大触控目标，前置频率/模式/音量，右侧折叠坞菜单）。"""
@@ -6848,6 +6864,26 @@ class MainWindow(QMainWindow):
         self._ntrip_dialog.show()
         self._ntrip_dialog.raise_()
         self._ntrip_dialog.activateWindow()
+
+    def _show_help_panel(self, tab: int = 0) -> None:
+        """打开帮助/能力目录（非模态，不挡住主界面操作）。"""
+        from help_panel import HelpPanel
+        dlg = HelpPanel(self, initial_tab=tab)
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        self._help_dialog = dlg
+
+    def _show_shortcuts_panel(self) -> None:
+        """打开快捷键一览（键位实时来自 desktop/shortcuts.py）。"""
+        from shortcuts_panel import ShortcutsPanel
+        dlg = ShortcutsPanel(self)
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        self._shortcuts_dialog = dlg
 
     def _show_about(self):
         QMessageBox.about(
