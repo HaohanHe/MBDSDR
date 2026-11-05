@@ -610,9 +610,10 @@ class ControlPanel(QWidget):
         self.ppm_spin.setRange(-1000, 1000)
         self.ppm_spin.setSingleStep(1)
         self.ppm_spin.setValue(0)
-        self.ppm_spin.setToolTip(
+        self._ppm_base_tip = (
             "晶振频偏校正（PPM = 百万分率）。廉价棒典型偏差 20~50 ppm，"
             "对照频率计数器修正")
+        self.ppm_spin.setToolTip(self._ppm_base_tip)
         self.ppm_spin.valueChanged.connect(self._on_ppm_changed)
         ppm_row.addWidget(self.ppm_spin)
         ppm_row.addStretch(1)
@@ -620,9 +621,10 @@ class ControlPanel(QWidget):
 
         # Offset 调谐开关（PPM 下方）
         self.offset_check = QCheckBox("偏移调谐")
-        self.offset_check.setToolTip(
+        self._offset_base_tip = (
             "Offset Tuning：把本振偏移半个信道，避开零中频的 DC 尖峰，"
             "改善强台附近的接收")
+        self.offset_check.setToolTip(self._offset_base_tip)
         self.offset_check.toggled.connect(self._on_offset_tuning_changed)
         rx_layout.addWidget(self.offset_check)
 
@@ -1357,6 +1359,55 @@ class ControlPanel(QWidget):
             self.gain_val.setToolTip(f"⚠ {hint}")
         else:
             self.gain_val.setToolTip("已连接：读数来自设备回执")
+        return True
+
+    def set_ppm_applied(self, value: int) -> bool:
+        """回填设备最后确认生效的 PPM（不是用户请求值）；不发射 ppm_changed。
+
+        后端没有 ``get_ppm`` 回读接口（见 ``mbdsdr_ai/sdr_backend.py``），
+        「设备真实值」只能是最后一次被设备接受的请求值；写失败时调用方传
+        这个值而不是刚被拒的请求值。未连接或不可渲染返回 ``False``。
+        """
+        if not self._sdr_connected:
+            return False
+        try:
+            ppm = int(value)
+        except (TypeError, ValueError):
+            return False
+        ppm = max(self.ppm_spin.minimum(), min(self.ppm_spin.maximum(), ppm))
+        requested = self.ppm_spin.value()
+        self.ppm_spin.blockSignals(True)
+        self.ppm_spin.setValue(ppm)
+        self.ppm_spin.blockSignals(False)
+        if ppm != requested:
+            hint = f"设备最后生效的 PPM 是 {ppm}（请求 {requested} 未生效）"
+            logger.warning("%s", hint)
+            self.ppm_spin.setToolTip(f"{self._ppm_base_tip}\n⚠ {hint}")
+        else:
+            self.ppm_spin.setToolTip(self._ppm_base_tip)
+        return True
+
+    def set_offset_tuning_applied(self, enabled: bool) -> bool:
+        """回填设备最后确认生效的 Offset Tuning 状态；不发射 offset_tuning_changed。
+
+        与 :meth:`set_ppm_applied` 同一策略：没有回读接口，只能显示最后一次
+        被设备接受的状态。未连接返回 ``False``。
+        """
+        if not self._sdr_connected:
+            return False
+        requested = self.offset_check.isChecked()
+        applied = bool(enabled)
+        self.offset_check.blockSignals(True)
+        self.offset_check.setChecked(applied)
+        self.offset_check.blockSignals(False)
+        if applied != requested:
+            hint = (f"设备最后生效的 Offset Tuning 是"
+                    f"{'开' if applied else '关'}（请求 "
+                    f"{'开' if requested else '关'} 未生效）")
+            logger.warning("%s", hint)
+            self.offset_check.setToolTip(f"{self._offset_base_tip}\n⚠ {hint}")
+        else:
+            self.offset_check.setToolTip(self._offset_base_tip)
         return True
 
     @staticmethod

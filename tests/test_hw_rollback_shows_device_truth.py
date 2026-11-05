@@ -10,6 +10,12 @@
    修后按连接默认（AGC 开）回退。
 3. 增益回读自身失败：``_show_real_gain`` 提前返回，标签/滑杆停在新值；
    修后退回最后一次成功读回值。
+4. PPM 被拒：数值框停在用户刚输入的请求值（PPM 无回读接口）；
+   修后回填最后确认生效值，从未确认过则退连接默认 0。
+5. Offset Tuning 被拒：开关停在用户刚切的新状态；
+   修后回填最后确认生效状态，从未确认过则退连接默认（关）。
+6. 带宽被拒：下拉停在用户选的档；修后回到 ``get_bandwidth()`` 设备真实值，
+   回读不可用/失败时用最后已生效的 ``_vfo_bw``（与采样率同一策略）。
 
 反证：任一处改回旧行为，对应用例必红。
 """
@@ -107,3 +113,137 @@ def test_gain_readback_failure_falls_back_to_last_applied(mw, monkeypatch):
     mw._show_real_gain(_Backend())
 
     assert shown == [20.0], "读不到真实值时必须退回最后一次读回值"
+
+
+class _RefusingPpmBackend:
+    def set_ppm(self, ppm):
+        return False
+
+    def get_status(self):
+        return SimpleNamespace(error="设备拒绝该 PPM")
+
+
+class _RefusingOffsetBackend:
+    def set_offset_tuning(self, enabled):
+        return False
+
+    def get_status(self):
+        return SimpleNamespace(error="设备拒绝 Offset Tuning")
+
+
+def test_ppm_rejection_restores_last_applied(mw):
+    """PPM 被拒后，数值框回到最后生效值，不停在请求值。"""
+    cp = mw.control_panel
+    cp.set_sdr_connected(True)
+    mw._active_sdr_backend = None          # 先把「用户改值」与下发隔开
+    mw._last_ppm_applied = 25
+    cp.ppm_spin.setValue(25)
+    cp.ppm_spin.setValue(50)
+    assert cp.ppm_spin.value() == 50       # 此刻控件就是「从未生效的请求值」
+
+    mw._active_sdr_backend = _RefusingPpmBackend()
+    mw._on_ppm_changed(50)
+
+    assert cp.ppm_spin.value() == 25, "拒绝后必须回到最后生效的 PPM"
+    assert "未生效" in mw.statusBar().currentMessage()
+
+
+def test_ppm_without_confirmed_history_falls_back_to_zero(mw):
+    """从未确认过任何 PPM 时，拒绝后退回连接默认 0（不是请求值）。"""
+    cp = mw.control_panel
+    cp.set_sdr_connected(True)
+    mw._active_sdr_backend = None
+    mw._last_ppm_applied = None
+    cp.ppm_spin.setValue(0)
+    cp.ppm_spin.setValue(40)
+
+    mw._active_sdr_backend = _RefusingPpmBackend()
+    mw._on_ppm_changed(40)
+
+    assert cp.ppm_spin.value() == 0, "无生效历史时必须退回连接默认 0"
+
+
+def test_offset_rejection_restores_last_applied(mw):
+    """Offset Tuning 被拒后，开关回到最后生效状态。"""
+    cp = mw.control_panel
+    cp.set_sdr_connected(True)
+    mw._active_sdr_backend = None
+    mw._last_offset_applied = True
+    cp.offset_check.setChecked(True)
+    cp.offset_check.setChecked(False)
+    assert cp.offset_check.isChecked() is False
+
+    mw._active_sdr_backend = _RefusingOffsetBackend()
+    mw._on_offset_tuning_changed(False)
+
+    assert cp.offset_check.isChecked() is True, "拒绝后必须回到最后生效状态"
+
+
+def test_offset_without_confirmed_history_falls_back_to_off(mw):
+    """从未确认过 Offset Tuning 时，拒绝后退回连接默认（关）。"""
+    cp = mw.control_panel
+    cp.set_sdr_connected(True)
+    mw._active_sdr_backend = None
+    mw._last_offset_applied = None
+    cp.offset_check.setChecked(False)
+    cp.offset_check.setChecked(True)
+
+    mw._active_sdr_backend = _RefusingOffsetBackend()
+    mw._on_offset_tuning_changed(True)
+
+    assert cp.offset_check.isChecked() is False, "无生效历史时必须退回连接默认（关）"
+
+
+class _RefusingBandwidthBackend:
+    def __init__(self, readback):
+        self._readback = readback
+
+    def set_bandwidth(self, bw):
+        return False
+
+    def get_bandwidth(self):
+        if isinstance(self._readback, Exception):
+            raise self._readback
+        return self._readback
+
+    def get_status(self):
+        return SimpleNamespace(error="设备拒绝该带宽")
+
+
+def test_bandwidth_rejection_restores_device_readback(mw):
+    """带宽被拒后，下拉回到 get_bandwidth() 的设备真实值。"""
+    cp = mw.control_panel
+    cp.set_sdr_connected(True)
+    mw._active_sdr_backend = None
+    idx = cp.vfo_bw_combo.findData(180_000.0)
+    assert idx >= 0
+    cp.vfo_bw_combo.setCurrentIndex(idx)
+    assert cp.vfo_bw_combo.currentData() == 180_000.0
+    # 下拉切换会经信号把本地 _vfo_bw 也改成 180 kHz；这里还原成最后一次
+    # 真正下发成功的 12.5 kHz，失败回填才有可比较的真值。
+    mw._vfo_bw = 12_500.0
+
+    mw._active_sdr_backend = _RefusingBandwidthBackend(12_500.0)
+    ok = mw._on_vfo_bandwidth_changed(180_000.0)
+
+    assert ok is False
+    assert cp.vfo_bw_combo.currentData() == 12_500.0, "必须回到设备真实带宽"
+    assert "未生效" in mw.statusBar().currentMessage()
+
+
+def test_bandwidth_rejection_without_readback_uses_last_known(mw):
+    """回读也失败时，下拉退回最后已生效值（不回落到请求值）。"""
+    cp = mw.control_panel
+    cp.set_sdr_connected(True)
+    mw._active_sdr_backend = None
+    idx = cp.vfo_bw_combo.findData(180_000.0)
+    assert idx >= 0
+    cp.vfo_bw_combo.setCurrentIndex(idx)
+    mw._vfo_bw = 12_500.0   # 最后真正下发成功的值（见上一条用例说明）
+
+    mw._active_sdr_backend = _RefusingBandwidthBackend(OSError("读不到带宽"))
+    ok = mw._on_vfo_bandwidth_changed(180_000.0)
+
+    assert ok is False
+    assert cp.vfo_bw_combo.currentData() == 12_500.0, \
+        "回读失败必须用最后已知值"

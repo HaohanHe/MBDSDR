@@ -807,6 +807,10 @@ class MainWindow(QMainWindow):
         self._vfo_out_sr: float = 48000.0
         # 默认 VFO 带宽 12.5 kHz（NBFM 语音档，与 control_panel.MODE_VFO_BANDWIDTH["FM"] 对齐）
         self._vfo_bw: float = 12_500.0
+        # 最后确认生效的 PPM / Offset Tuning（无回读接口，只能记「被设备接受
+        # 过的请求值」）。写失败时回填这里，绝不回填刚被拒的请求值。
+        self._last_ppm_applied: Optional[int] = None
+        self._last_offset_applied: Optional[bool] = None
         # 调试/测试断言用：记录 _demod_and_play 本次实际使用的解调模式
         self._last_demod_mode: str = "FM"
 
@@ -4674,8 +4678,15 @@ class MainWindow(QMainWindow):
                     cp.set_sample_rate(actual)
         _run("带宽", lambda: backend.set_bandwidth(bandwidth))
         _run("初始频率", lambda: backend.set_frequency(freq))
-        _run("PPM", lambda: backend.set_ppm(ppm))
-        _run("Offset Tuning", lambda: backend.set_offset_tuning(offset))
+        # 只有设备接受的连接值才算「最后生效值」；被拒时记 None，失败回填
+        # 会退到连接默认（PPM 0 / Offset 关），而不是一个设备没接受过的数。
+        self._last_ppm_applied = (int(ppm) if
+                                  _run("PPM", lambda: backend.set_ppm(ppm))
+                                  else None)
+        self._last_offset_applied = (
+            bool(offset) if
+            _run("Offset Tuning", lambda: backend.set_offset_tuning(offset))
+            else None)
         _run("AGC", lambda: backend.set_agc(agc))
         if not agc:
             _run("增益", lambda: backend.set_gain(gain))
@@ -5224,8 +5235,24 @@ class MainWindow(QMainWindow):
         if not callable(set_ppm):
             self.statusBar().showMessage(
                 "PPM 未下发：当前后端不支持 PPM 校正", MSG_IMPORTANT)
+            self._restore_ppm_display()
             return
-        self._apply_hw_action("设置 PPM", lambda: set_ppm(int(ppm)))
+        if self._apply_hw_action("设置 PPM", lambda: set_ppm(int(ppm))):
+            self._last_ppm_applied = int(ppm)
+        else:
+            # 失败后控件必须回到最后生效值（没有回读接口）；停在请求值就是
+            # 显示一个设备从未接受的数。
+            self._restore_ppm_display()
+
+    def _restore_ppm_display(self) -> None:
+        """把 PPM 控件回填到最后确认生效值；从未确认过则退连接默认 0。"""
+        cp = getattr(self, "control_panel", None)
+        if cp is None:
+            return
+        revert = self._last_ppm_applied
+        if revert is None:
+            revert = 0
+        cp.set_ppm_applied(revert)
 
     @Slot(bool)
     def _on_offset_tuning_changed(self, enabled: bool):
@@ -5240,8 +5267,42 @@ class MainWindow(QMainWindow):
         if not callable(set_ot):
             self.statusBar().showMessage(
                 "Offset tuning 未下发：当前后端不支持该能力", MSG_IMPORTANT)
+            self._restore_offset_tuning_display()
             return
-        self._apply_hw_action("Offset tuning", lambda: set_ot(bool(enabled)))
+        if self._apply_hw_action("Offset tuning", lambda: set_ot(bool(enabled))):
+            self._last_offset_applied = bool(enabled)
+        else:
+            # 同 PPM：失败后回填最后生效状态，不回填刚被拒的新状态。
+            self._restore_offset_tuning_display()
+
+    def _restore_offset_tuning_display(self) -> None:
+        """把 Offset Tuning 开关回填到最后确认生效状态；从未确认过则退连接默认（关）。"""
+        cp = getattr(self, "control_panel", None)
+        if cp is None:
+            return
+        revert = self._last_offset_applied
+        if revert is None:
+            revert = False
+        cp.set_offset_tuning_applied(revert)
+
+    def _device_bandwidth_or_last_known(self) -> float:
+        """设备真实带宽；无 ``get_bandwidth`` 或回读失败时用最后已生效值。
+
+        与采样率失败回填同一策略（见 ``_on_sample_rate_changed``）：能回读就
+        用设备值，回读不可用就用最近一次真下发成功的 ``_vfo_bw``，绝不编造
+        用户刚请求的那个值。
+        """
+        backend = self._active_sdr_backend
+        get_bw = getattr(backend, "get_bandwidth", None)
+        if callable(get_bw):
+            try:
+                val = float(get_bw())
+                if math.isfinite(val) and val > 0:
+                    return val
+            except Exception as e:  # noqa: BLE001 - 回读失败要留证再退回已知值
+                logger.warning("回读设备带宽失败，退回最后已知值: %s: %s",
+                               type(e).__name__, e)
+        return float(self._vfo_bw)
 
     @Slot(float)
     def _on_vfo_bandwidth_changed(self, bw_hz: float) -> bool:
@@ -5261,6 +5322,10 @@ class MainWindow(QMainWindow):
         if backend is not None:
             if not self._apply_hw_action(
                     "设置带宽", lambda: backend.set_bandwidth(bw)):
+                # 下拉必须回到设备真实带宽（回读失败则最后已知值）：停在
+                # 请求档上就是显示一个从未生效的带宽。
+                self.control_panel.set_vfo_bandwidth(
+                    self._device_bandwidth_or_last_known())
                 return False
         self._vfo_bw = bw
         # VFO 已创建则更新其带宽（经 VfoManager.push_bandwidth → set_bandwidth）
