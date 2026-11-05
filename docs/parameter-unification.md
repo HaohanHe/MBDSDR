@@ -201,7 +201,7 @@
 
 补充事实：手动切换路径的 bool 返回未校验（`desktop/main_window.py:_on_sample_rate_changed` 调 `set_sample_rate` 不判返回值）——这是 C.0 第 1 条的同频项，落地时必须一并补“返回 False 也走状态栏可见错误并回填实际档”，否则会出现“下拉停在 250k、实际仍是 1.024M”的新分叉（2026-11-06 已落地：`70429a02` — `desktop/main_window.py:4691` — `该采样率未被设备接受（保持`，见 C.10.1）。
 `desktop/settings_panel.py` **没有**独立采样率档位表（grep `sample_rate` 无命中），只经 `control_panel`/设置下发 → 同步面为 0，但它的文案若引用档位需跟随；`cpp/src/core/app_settings.*` **没有** sampleRate 键（grep 无命中），C++ 不持久化采样率，故 C 的旧配置迁移只在 Python 侧发生，C++ 侧按 `kDefaultSampleRateHz` 起档。
-**文案审计线口径（别撞车）**：桌面 `desktop/constants.py:33` 已统一 `MS/s`、3 位小数（取证 `d0b585a0` — `desktop/constants.py:33` — `0.250 MS/s`；回归锁 `ebc897fa` — `tests/test_copy_units_audit.py:28` — `0.250 MS/s`）；移动端 `d543c87d` — `mobile/lib/pages/spectrum_page.dart:389` — `toStringAsFixed(3)} MS/s`（同字面量亦在 `mobile/lib/widgets/device_info_card.dart:104`）。新增 250k 时**必须显示 `0.250 MS/s`，不得写 `250 kHz`**；`docs/copy-audit.md` 的 U-03 已是这条口径，文档里不要另立单位。
+**文案审计线口径（别撞车）**：桌面 `desktop/constants.py:37`（符号 `format_sample_rate`）已统一 `MS/s`、3 位小数（取证 `d0b585a0` — `desktop/constants.py:33` — `0.250 MS/s`，其中 `:33` 是该提交当时的历史行号；行号随重构漂，定位以符号名为准；回归锁 `ebc897fa` — `tests/test_copy_units_audit.py:28` — `0.250 MS/s`）；移动端 `d543c87d` — `mobile/lib/pages/spectrum_page.dart:389` — `toStringAsFixed(3)} MS/s`（同字面量亦在 `mobile/lib/widgets/device_info_card.dart:104`）。新增 250k 时**必须显示 `0.250 MS/s`，不得写 `250 kHz`**；`docs/copy-audit.md` 的 U-03 已是这条口径，文档里不要另立单位。
 
 ### C.4 250k 证据分级（细则见 `docs/limitations-register.md` 附 M）
 
