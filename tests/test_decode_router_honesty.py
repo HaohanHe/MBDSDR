@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import math
+import os
 import sys
 import wave
 
@@ -336,3 +337,97 @@ class TestAcarsProductionPath:
         assert m["reg"].strip() == "N842UA"
         assert m["label"] == "DF"
         assert "WEATHER" in m["text"]
+
+
+# ---------------------------------------------------------------------------
+# 10. 已知合法帧 → 生产入口字段级断言（不只断言「不抛异常 / 非空 / 帧数>0」）
+# ---------------------------------------------------------------------------
+_SENS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "fixtures", "sensitivity")
+
+
+def _ac12_for(alt_ft):
+    """反解 Q=1 的 12bit 气压高度域（decode_ac12_altitude 的逆）。"""
+    from mbdsdr_ai.adsb import decode_ac12_altitude
+
+    for ac12 in range(0x1000):
+        if ac12 & 0x10 and decode_ac12_altitude(ac12) == alt_ft:
+            return ac12
+    raise AssertionError(f"无法编码高度 {alt_ft} ft")
+
+
+def _airborne_position_frame(icao_hex="780ABC", alt_ft=35000, odd=False):
+    """构造已知 TC=11 空中位置长帧（高度可解，CPR 仅占位不求位置）。"""
+    from mbdsdr_ai.adsb import build_long_frame
+
+    bits = [0] * 56
+    bits[0:5] = [(11 >> (4 - i)) & 1 for i in range(5)]      # TC=11
+    ac12 = _ac12_for(alt_ft)
+    bits[8:20] = [(ac12 >> (11 - i)) & 1 for i in range(12)]  # 气压高度
+    bits[21] = 1 if odd else 0                                # F 奇偶标志
+    cpr_lat, cpr_lon = 0x0ABCD, 0x12345
+    bits[22:39] = [(cpr_lat >> (16 - i)) & 1 for i in range(17)]
+    bits[39:56] = [(cpr_lon >> (16 - i)) & 1 for i in range(17)]
+    me7 = bytes(int("".join(map(str, bits[i:i + 8])), 2)
+                for i in range(0, 56, 8))
+    return build_long_frame(0x8D, int(icao_hex, 16), me7)
+
+
+class TestKnownFrameFields:
+    """每条都断言「已知合法帧里的具体字段」，改错字段即红。"""
+
+    def test_pocsag_route_yields_known_address_and_message(self):
+        # 真值见 tests/fixtures/sensitivity/manifest.json（address/message/baud）
+        out = dr.run_digital_mode(os.path.join(_SENS, "pocsag.wav"), "pocsag",
+                                  sample_rate=22050, baud=1200)
+        assert out["ok"] is True, out.get("error")
+        assert out["num_messages"] == 1
+        m = out["messages"][0]
+        assert m["address"] == 54321
+        assert m["message"].rstrip() == "HELLO"
+        assert m["baud"] == 1200
+
+    def test_adsb_route_yields_known_altitude(self, tmp_path):
+        from mbdsdr_ai.adsb import modulate_baseband
+
+        fs = 4e6
+        iq = modulate_baseband(_airborne_position_frame(alt_ft=35000),
+                               fs=fs, lead_us=4.0)
+        cf = _write_cf32(tmp_path / "pos.cf32", iq)
+
+        out = dr.run_digital_mode(cf, "adsb", sample_rate=fs)
+
+        assert out["ok"] is True, out.get("error")
+        assert out["num_frames"] == 1
+        f = out["frames"][0]
+        assert f["crc_ok"] is True and f["icao"] == "780ABC"
+        assert f["tc"] == 11
+        parsed = f["frame"]
+        assert parsed["altitude_ft"] == 35000
+        assert parsed["cpr"]["cpr_lat"] == 0x0ABCD
+        assert parsed["cpr"]["cpr_lon"] == 0x12345
+
+    def test_ais_route_yields_known_type5_static_fields(self, tmp_path):
+        from mbdsdr_ai import ais_decoder as ais
+
+        payload = ais.build_type5(
+            mmsi=477123456, imo=9876543, callsign="BOAB12",
+            shipname="OCEAN STAR", ship_type=70, dim_bow=120, dim_stern=30,
+            dim_port=8, dim_starboard=12, fix_type=1, eta_month=11,
+            eta_day=4, eta_hour=12, eta_minute=30, draught_m=8.5,
+            destination="SHANGHAI", dte=0, ais_version=1)
+        iq = ais.ais_modulate_iq(ais.ais_frame_encode(payload), 48000.0)
+        cf = _write_cf32(tmp_path / "ais5.cf32", iq)
+
+        out = dr.run_digital_mode(cf, "ais", sample_rate=48000.0)
+
+        assert out["ok"] is True, out.get("error")
+        assert out["num_messages"] == 1
+        m = out["messages"][0]
+        assert m["type"] == 5
+        assert m["mmsi"] == 477123456
+        assert m["imo"] == 9876543
+        assert m["callsign"] == "BOAB12"
+        assert m["shipname"] == "OCEAN STAR"
+        assert m["destination"] == "SHANGHAI"
+        assert m["draught_m"] == pytest.approx(8.5, abs=0.05)
