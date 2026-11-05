@@ -210,5 +210,34 @@ class TestEndToEnd:
         assert len(rec) >= 8
 
 
+# ─────────────────────────────────────────────────────────────────────
+# 6. decode_audio：CLI 生产路径直接测试
+# ─────────────────────────────────────────────────────────────────────
+class TestDecodeAudioProductionPath:
+    """``decode_router`` / ``--decode-file --mode acars`` 的生产入口。
+
+    说明：以下用 ``build_acars_frame`` 合成信号，只能证明链路连通
+    （调制→解调→帧同步→解析），**不能证明真实空中信号（多径/频偏/弱
+    信噪比）下的解调质量**；真实质量需真机采集对拍，别把合成样本当对拍证据。
+    """
+
+    def test_frame_sync_and_known_frame_fields(self):
+        body = build_acars_frame(mode="2", reg="N842UA", label="DF",
+                                 block_id="6", text="WEATHER 1500Z")
+        # build_acars_frame 只返回 SOH 之后的 body；空中帧前导必须自拼。
+        over_air = bytes([SYN, SYN, SOH]) + body
+        audio = synthesize_msk_audio(frame_bits_from_bytes(over_air), 12500, 1200)
+
+        msgs = ACARSDecoder(12500, 1200).decode_audio(audio)
+
+        assert len(msgs) == 1, "decode_audio 必须完成帧同步并解出 1 帧"
+        m = msgs[0]
+        assert m.crc_ok is True, "自合成合法帧的 CRC 必须通过"
+        assert m.reg.strip() == "N842UA"
+        assert m.label == "DF"
+        assert m.block_id == "6"
+        assert "WEATHER" in m.text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

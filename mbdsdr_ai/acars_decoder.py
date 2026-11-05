@@ -446,6 +446,16 @@ class ACARSDecoder:
         self.baud_rate = baud_rate
 
     def decode_audio(self, audio) -> List[ACARSMessage]:
+        """实数 FM 解调音频 -> 解析成功的消息列表。
+
+        输入约定：音频应包含空中帧的 ``SYN, SYN, SOH`` 前导（真实采集
+        本来就有）。``build_acars_frame`` 只返回 SOH 之后的 body，自测时
+        必须自行拼 ``bytes([SYN, SYN, SOH]) + body``；只喂 body 时帧同步
+        状态机不会启动、返回空列表——这是输入约定，不是解码失败。
+
+        本路径是 ``decode_router`` / ``--decode-file --mode acars`` 的
+        生产入口（2026-11-06 起有直接行为测试，见 tests/acars_test.py）。
+        """
         audio = np.asarray(audio, dtype=np.float64)
         demod = ACARSMDemod(self.sample_rate, self.baud_rate)
         bits = demod.demodulate_bits(audio)
@@ -573,14 +583,20 @@ def acars_parse_message(body) -> dict:
 
 def acars_decode_iq(audio, sample_rate: float = ACARS_DEFAULT_SAMPLE_RATE,
                     baud_rate: int = ACARS_BAUD_RATE) -> List[dict]:
-    """ACARS 接收解码入口：实数 FM 调调音频 -> 消息列表。
+    """ACARS 接收解码入口：实数 FM 解调音频 -> 消息列表。
 
-    实现说明（诚实标注）：本模块自带的状态机解码路径
-    （ACARSFrameSynchronizer）在同模块自合成信号上**自环不通**（crc_ok=False），
-    而已验证实现（acars_protocol：相位搜索 + 极性对齐 + CRC 校验选择）可正确
-    解出同一帧。本入口因此委托已验证实现，保证对外行为与测试一致。
-    原生状态机路径保留与测试同在本文件内，待对真实采集的时域对齐问题
-    排查后再切回（切回前保留回归测试，避免静默回归）。
+    实现说明（2026-11-06 复核，更正此前注释）：
+    - 原生路径 ``ACARSDecoder.decode_audio`` 在带前导 ``SYN, SYN, SOH``
+      的合成信号（含 0.03 噪声）上实测 ``crc_ok=True`` 且字段正确，并非
+      此前注释所称「自环不通」。此前自环失败的真实原因是
+      ``build_acars_frame`` 只返回 SOH 之后的 body：缺前导时
+      ``ACARSFrameSynchronizer`` 不会启动，表现为 0 条消息，而不是
+      ``crc_ok=False``。
+    - 本入口仍委托 acars_protocol 的已验证实现（相位搜索 + 极性对齐 +
+      CRC 选择），保证对外行为与既有测试一致；无前导的 body-only 信号
+      两条路径都解不出，属正常约定。
+    - 合成样本只能证明链路连通（调制→解调→帧同步→解析），不能证明真实
+      空中信号（多径/频偏/弱信噪比）下的解调质量；真实质量需真机采集对拍。
     """
     from .acars_protocol import acars_decode as _verified_decode
     return _verified_decode(np.asarray(audio, dtype=np.float64),
