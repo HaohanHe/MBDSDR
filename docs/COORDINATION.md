@@ -152,6 +152,16 @@
   静态守卫改为「禁圆形视场盘 / 禁屏幕中心径向渐变 / 必须有 projectSegment」。
   **未入库**：仓库工作树仍是别的会话在途 M/??。
 
+- **[11-05 22:00] 产品工程阶段 A 入库（5a977026，本线已提交）**：详见队列 #11。
+  开工前撞到 C 盘 195G 满、余 455MB，`Grep` 工具写临时缓存 ENOSPC；
+  定位为长期累积（WinSxS 13G / Program Files 31G / AppData 下各类 SDK 与
+  AI 工具缓存 ~90G / hiberfil 6.3G），**未擅自删任何系统盘文件**，只做只读诊断，
+  清理需用户拍板。本笔产物全落 D 盘，不受影响。
+  另外把 `swe-study-notes.md` 与 v1 原型 HTML 两个仓库外依赖收进
+  `web/product/{docs/source,prototype}/`，`NOTICE.md` 逐条登记
+  HYG / OpenNGC（CC BY-SA 4.0）与代码 MIT 的边界。
+  **未碰**：别线在途的 11 个 M 文件与 `.audit_tmp/`；提交用 `--only` 拆范围。
+
 ### TRAE 那边（观察到的在途，未打扰）
 - `scripts/smoke_exe_no_popup.ps1`（??）——弹窗冒烟脚本在途
 - CMake 布防模块化（deploy_runtime.cmake）已落（1b675e7）
@@ -430,15 +440,22 @@
     decode_cadu 默认翻转 + C++ lrptDecodeCadu 同迁 + 全部 concat 钉
     随迁）、图像内容级真值对拍（对照第三方产物）
 
-11. **[认领]** 产品工程合并入库：把 `output/mbdsdr-product/` 的 dist +
-    docs 落进仓库（建议 `web/product/` 与 `docs/product/`），并把
-    `window.mbdsdrBridge` 接到 `mbdsdr_ai/tool_registry.py`（阶段 B）。
-    入库前先与天空模式会话核对 HEAD，按血规 hunk 拆提交，避免扫走在途改动。
-    现状（20:25）：一键复现与事实源同步已备（run_all.py / VERIFY-REPORT.md），
-    入库前先跑一遍确认事实源未随 HEAD 漂移。
-    补充（22:25）：星表数据与天球引擎已并入产品工程，入库时需一并带
-    `data/hygdata_v41.csv` 的**来源/许可登记**（CC BY-SA 4.0，不能标公共
-    领域），或改为运行时按需下载并在 NOTICE.md 登记。
+11. ~~**[我] 产品工程阶段 A 合入仓库**~~ **已闭环（5a977026，11-05 22:00）**：
+    `web/product/` 76 文件 / 36 MB（分层前端、构建器、静态守卫、投影自检、
+    36 篇文档、HYG v4.1 源 CSV + SHA256、自包含 dist、NOTICE.md），
+    `docs/product/README.md` 只作索引不复制漂移副本。
+    入库前按纪律重跑 `run_all.py`，抓到 HEAD 漂移：仓库 `f0c8fa25`/`dbf2a3e7`
+    把 DSO 换成 OpenNGC 的 `dso_catalog.json`、退役 `_DSO_ROWS`，
+    产品同步链已随之改读 JSON（校验 schema/许可、RA 已是度、未知量保持 null）。
+    全部脚本经 `paths.py` 解析 ROOT/REPO，仓库内 `cd web/product && python run_all.py`
+    九步 ALL PASS；`.gitignore` 否定仓库根全局 `build/` 规则保住构建源码。
+    提交走 `--only -F - -- web/product docs/product`（stdin，不落 C 盘临时文件），
+    机械闸放行，提交后 `git diff HEAD -- <本次路径>` 为空，别线在途 M/?? 一个没碰。
+12. **[认领] 阶段 B：`window.mbdsdrBridge` → `mbdsdr_ai/tool_registry.py` 运行时桥接**。
+    仓库里目前**没有** `mbdsdrBridge` / QWebChannel 实现（grep 无命中），
+    产品 `MB.CONTRACT` 8 个方法在离线时走诚实空态。要做的是新建桥接层 +
+    `arm_manual` 人工门 + 对拍测试，**不要顺手改 desktop/main_window.py**
+    （操作逻辑线在途）。这是独立一笔，不算进阶段 A。
 
 ---
 
