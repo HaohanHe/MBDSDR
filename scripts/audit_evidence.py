@@ -44,7 +44,7 @@ NUM_RE = re.compile(
 # 表格按“块”整体判定：表头写了实测/谐振，整张表都算测量断言。
 CLAIM_VERB_RE = re.compile(
     r"实测|测量|测得|验证|已验|真机|复跑|通过|证明|复现|回损|驻波|VSWR|"
-    r"RMS|SNR|Eb/N0|BER|误码|谐振|标定"
+    r"RMS|SNR|Eb/N0|BER|误码|谐振|标定|约|≈"
 )
 # 纯参数/默认值句（没有实测动作）不算测量断言，否则设置清单会被全量误报
 SPEC_LINE_RE = re.compile(
@@ -78,6 +78,34 @@ CMD_RE = re.compile(
 LINE_REF_RE = re.compile(r"\w+\.(?:py|cpp|h|md|json|csv|txt):\d+")
 DATE_RE = re.compile(r"(?:19|20)\d{2}-\d{1,2}-\d{1,2}")
 URL_RE = re.compile(r"https?://\S+")
+
+# ---- 五类分诊（只用于“无证据”行；分类不改变闸门退出码）----
+# ① 本来就不需要证据：参数/规格/判据、标准或外部引用、可推导常量
+BUCKET_SPEC_RE = re.compile(
+    r"默认|阈值|上限|下限|范围|配置|设置项|可供|可选|步进|档位|分辨率|量程|枚举|标称|"
+    r"规格|单位|换算|定义|公式|λ/4|λg|λ/2|频段|下行|上行|频道|判据|容差|≤|≥"
+)
+BUCKET_REF_RE = re.compile(
+    r"标准|规范|教程|材料给出|协议|文献|论文|参考|引用|ITU|CCSDS|3GPP|IEC|GB/T|"
+    r"EN 302|教材|实测口径"
+)
+BUCKET_DERIVE_RE = re.compile(r"bin 宽|由 ?fs|推导|核算|= ?fs|fs/?N|N ?= ?\d|相干增益")
+MEASURE_VERB_RE = re.compile(r"实测|测得|读数|真机(?!红|绿)|现场|当晚|复跑|验证|测量")
+# ④ 验收/性能结论：载荷性数字，标“未验证”不够，必须补测留件
+BUCKET_ACCEPT_FILE_RE = re.compile(
+    r"docs/hw-acceptance\.md|docs/real_hw_acceptance_|dsp-performance-baseline"
+)
+BUCKET_ACCEPT_LINE_RE = re.compile(r"PASS|通过|达标|验收|总耗时|本机实测|实测")
+# ⑤ 应删除或改写：已划线撤回、显式作废、预期值冒充实测
+BUCKET_RETRACT_RE = re.compile(
+    r"~~|已撤回|作废|应删|不再引用|是预期值|预期值.{0,8}非实测|非实测|已推翻"
+)
+# ③ 工件存在但没写路径：按文件名去仓内索引里找
+ARTIFACT_EXT = (r"(?:json|csv|wav|rgb|sigmf-data|sigmf-meta|npy|npz|bmp|png|iq|"
+                r"bin|dat|log|txt|tsv)")
+ARTIFACT_TOKEN_RE = re.compile(rf"([A-Za-z0-9_.-]+\.{ARTIFACT_EXT})")
+EXP_SCRIPT_RE = re.compile(r"([A-Za-z0-9_.-]+\.py)")
+EXPERIMENT_README_RE = re.compile(r"^experiments/[^/]+/README\.md$")
 
 
 def _files(paths: Optional[List[str]]) -> List[Path]:
@@ -128,9 +156,21 @@ def _resolve(tok: str) -> Optional[Path]:
     return cand if cand.exists() else None
 
 
-def _classify(window: str) -> Tuple[str, str]:
+def _classify(window: str, line: Optional[str] = None) -> Tuple[str, str]:
     """返回 (列名, 证据说明) 列名 ∈ 有证据/无证据/已显式标未验证。"""
     if UNVERIFIED_RE.search(window):
+        # 表格块的“未验证”只写在表头/别行时，不自动给整表背书：
+        # 本行若真带原始件，按 E1 计；否则仍记“已标未验证”，但注明是借用标记。
+        if line is not None and not UNVERIFIED_RE.search(line):
+            for tok in PATH_RE.findall(line):
+                p = _resolve(tok)
+                if p is None:
+                    continue
+                if ".tmp-tool-results" in tok:
+                    return "有证据", f"E3 不可复跑（历史产物 {tok}；块级标记不覆盖本行）"
+                if p.suffix.lower() != ".md":
+                    return "有证据", f"E1 有原始件（{tok}；块级标记不覆盖本行）"
+            return "已显式标未验证", "仅同表他行标未验证（本行无标注，需核）"
         return "已显式标未验证", "有未验证/证据不足标记"
 
     paths = PATH_RE.findall(window)
@@ -155,6 +195,68 @@ def _classify(window: str) -> Tuple[str, str]:
         return "无证据", f"仅 commit {commits[0]}（E3 时点线索，非测量证据）"
 
     return "无证据", "无 commit/原始件/复跑命令/未验证标记"
+
+
+_artifact_index: Optional[Dict[str, str]] = None
+
+
+def _artifact_names() -> Dict[str, str]:
+    """仓内数据工件文件名索引（用于判断“有工件、只是没写路径”）。"""
+    global _artifact_index
+    if _artifact_index is None:
+        idx: Dict[str, str] = {}
+        skip_dirs = {".git", "__pycache__", "node_modules", "build", ".venv"}
+        for dirpath, dirnames, files in os.walk(ROOT):
+            dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+            for fn in files:
+                idx.setdefault(fn, os.path.join(dirpath, fn))
+        _artifact_index = idx
+    return _artifact_index
+
+
+def _has_sibling_data(rel: str) -> bool:
+    """experiments/<name>/README.md 同目录是否存在 data/ 采集件。"""
+    d = (ROOT / rel).parent / "data"
+    if not d.is_dir():
+        return False
+    return any(p.is_file() and p.suffix.lower() not in {".md", ".py"} for p in d.iterdir())
+
+
+def _is_table_sep(line: str) -> bool:
+    t = line.strip()
+    return t.startswith("|") and "-" in t and not any(ch.isalnum() for ch in t)
+
+
+def _bucket(rel: str, line: str) -> Tuple[str, str]:
+    """给“无证据”行一个处置类（①–⑤）。规则可解释、可复跑；分类不放行。"""
+    rel = rel.replace("\\", "/")
+    # ⑤ 已撤回/划线/预期值：应删除或改写
+    if BUCKET_RETRACT_RE.search(line):
+        return "⑤", "已划线/撤回/预期值冒充实测"
+    # ③ 工件存在但没写路径
+    idx = _artifact_names()
+    arts = [t for t in ARTIFACT_TOKEN_RE.findall(line) if os.path.basename(t) in idx]
+    if arts:
+        return "③", f"工件存在未引路径（{arts[0]}）"
+    sc = [t for t in EXP_SCRIPT_RE.findall(line)
+          if os.path.basename(t).startswith("exp_") and os.path.basename(t) in idx]
+    if sc:
+        return "③", f"可复跑实验脚本存在未引路径（{sc[0]}）"
+    if EXPERIMENT_README_RE.match(rel) and _has_sibling_data(rel):
+        return "③", "同目录 data/ 有采集件，未逐条写路径"
+    # ① 本来就不需要证据（只对没有测量动作的行生效）
+    if not MEASURE_VERB_RE.search(line):
+        if BUCKET_SPEC_RE.search(line):
+            return "①", "参数/规格/判据定义"
+        if BUCKET_REF_RE.search(line):
+            return "①", "标准或外部引用"
+        if BUCKET_DERIVE_RE.search(line):
+            return "①", "可推导常量"
+    # ④ 验收/性能结论：必须补测并留原始件
+    if BUCKET_ACCEPT_FILE_RE.search(rel) and BUCKET_ACCEPT_LINE_RE.search(line):
+        return "④", "验收/性能结论，须补测留件"
+    # ② 其余测量断言：降级为未验证
+    return "②", "测量断言无工件，降级为未验证"
 
 
 def _blocks(prose: List[Tuple[int, str]]) -> Iterator[List[Tuple[int, str]]]:
@@ -193,7 +295,11 @@ def _numbers(line: str) -> Iterable[str]:
     clean = LINE_REF_RE.sub(" ", clean)
     clean = INLINE_CODE_RE.sub(" ", clean)      # 反引号里是代码/路径/哈希，不是断言
     metric_ctx = bool(METRIC_NEAR_RE.search(clean))
+    # 章节号（`## 2.1 signal_quality`）不是测量数字
+    head = re.match(r"^\s*#{1,6}\s+(\d+(?:\.\d+)*)\s", line)
     for m in NUM_RE.finditer(clean):
+        if head and m.group(1) == head.group(1) and m.start() < 12:
+            continue
         val, unit = m.group(1), m.group(2)
         if unit:
             if unit == "%" and not metric_ctx:
@@ -207,7 +313,7 @@ def _numbers(line: str) -> Iterable[str]:
             yield val
 
 
-def run(paths: Optional[List[str]] = None) -> Dict:
+def run(paths: Optional[List[str]] = None, classify: bool = False) -> Dict:
     files = _files(paths)
     rows: List[Dict] = []
     for f in files:
@@ -224,7 +330,12 @@ def run(paths: Optional[List[str]] = None) -> Dict:
                 # 表格按整块判定：表头写“谐振/实测”，整张表都是测量断言
                 if not CLAIM_VERB_RE.search(block_text):
                     continue
-                lines = [(no, ln, block_text) for no, ln in block]
+                # 表头与 |---|---| 分隔行不是断言（否则“90% 档”这类列名会入账）
+                skip = {block[0][0]}
+                if len(block) > 1 and _is_table_sep(block[1][1]):
+                    skip.add(block[1][0])
+                lines = [(no, ln, block_text) for no, ln in block
+                         if no not in skip and not _is_table_sep(ln)]
             else:
                 # 散文按句/行判定，避免一段里一个“验证”把整段参数数字都算断言
                 lines = [(no, ln, ln) for no, ln in block
@@ -232,15 +343,19 @@ def run(paths: Optional[List[str]] = None) -> Dict:
                          and not (SPEC_LINE_RE.search(ln)
                                   and not MEASURED_LINE_RE.search(ln))]
             for lineno, line, window in lines:
-                col, why = _classify(window)
+                col, why = _classify(window, line)
                 for num in _numbers(line):
-                    rows.append({"file": rel, "line": lineno, "number": num,
-                                 "column": col, "evidence": why})
+                    row = {"file": rel, "line": lineno, "number": num,
+                           "column": col, "evidence": why}
+                    if classify and col == "无证据":
+                        row["bucket"], row["bucket_reason"] = _bucket(rel, line)
+                    rows.append(row)
 
     counts = Counter(r["column"] for r in rows)
+    buckets = Counter(r["bucket"] for r in rows if r.get("bucket"))
     files_with_none = sorted({r["file"] for r in rows if r["column"] == "无证据"})
     return {"files": len(files), "claims": len(rows), "counts": dict(counts),
-            "rows": rows, "files_with_none": files_with_none}
+            "buckets": dict(buckets), "rows": rows, "files_with_none": files_with_none}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -252,10 +367,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--paths", nargs="*", default=None, help="只扫指定文件（默认全仓范围）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--max-list", type=int, default=80, help="每栏最多列多少条明细")
+    ap.add_argument("--classify", action="store_true",
+                    help="对“无证据”行做五类分诊（①无需证据 ②降级未验证 ③有工件缺路径 "
+                         "④必须补测 ⑤删除/改写）；分类不放行，退出码不变")
+    ap.add_argument("--classify-samples", type=int, default=5, help="每类列多少条代表")
     args = ap.parse_args(argv)
 
     t0 = time.time()
-    rep = run(args.paths)
+    rep = run(args.paths, classify=args.classify)
 
     if args.json:
         print(json.dumps(rep, ensure_ascii=False, indent=2))
@@ -267,6 +386,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("| --- | --- | --- |")
         print(f"| {c.get('有证据', 0)} | {c.get('无证据', 0)} "
               f"| {c.get('已显式标未验证', 0)} |\n")
+
+        if args.classify:
+            b = rep["buckets"]
+            print("| ①无需证据 | ②降级未验证 | ③有工件缺路径 | ④必须补测 | ⑤删除/改写 |")
+            print("| --- | --- | --- | --- | --- |")
+            print(f"| {b.get('①', 0)} | {b.get('②', 0)} | {b.get('③', 0)} "
+                  f"| {b.get('④', 0)} | {b.get('⑤', 0)} |\n")
+            for bucket in ("①", "②", "③", "④", "⑤"):
+                items = [r for r in rep["rows"] if r.get("bucket") == bucket]
+                print(f"### {bucket}（{len(items)}）")
+                for r in items[:args.classify_samples]:
+                    print(f"- `{r['file']}:{r['line']}` {r['number']} — "
+                          f"{r['bucket_reason']}")
+                print()
 
         for col in ("无证据", "有证据", "已显式标未验证"):
             items = [r for r in rep["rows"] if r["column"] == col]
