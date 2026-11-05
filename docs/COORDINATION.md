@@ -694,6 +694,27 @@
 |---|---|---|---|
 | _（空）_ | | | |
 
+> **干净窗口三条件（2026-11-06 立规；三者缺一，不得声称窗口干净）**
+>
+> 1. **占用表无活跃行**——但「表里没行」本身不算证据：必须同时跑
+>    `python scripts/file_claim.py status`，确认真机相关文件无活跃锁。表可能被清空、
+>    或被别线临时 claim 挡住写不进去；**空表 ≠ 无人占**。
+> 2. **进程列表无已知重负载脚本**——`Get-Process python | Sort-Object CPU -Descending`
+>    取前 10；命中 `deadscan.py` / `perf_probe_deep.py` / `capture_throughput.py` /
+>    `run_all.py` / `acceptance_suite.py` / `pytest` 任一，或单核持续 ≥90%，判「不干净」。
+> 3. **PnP OK**——`Get-PnpDevice -InstanceId 'USB\VID_0BDA&PID_2832\77771111153705700'`
+>    的 `Status` 必须为 `OK`。
+>
+> 实测（2026-11-06）：§6.1 表里只有模板行，同一时段他线 `deadscan.py`（pid 43832）
+> 常驻单核 100%、累计 CPU 1132 s，§6.2.4 的 product 一组数据当场作废；同时
+> `COORDINATION.md` 正被另一会话临时 claim（pid 42412），真机线连占用行都写不进去。
+> 这组事故就是形态表 ⑬「空表被当无人占」。
+>
+> **长跑脚本三条（扫描 / 探针 / 基准一律适用）**：**注册**（跑前在 §6.1 写占用行，
+> 并在 `file_claim.py` 登记）、**跑完即退**（禁止常驻轮询 / 无退出条件）、**有超时**
+> （外层硬上限，超时自杀并留日志）。缺任一条，视为「随时可能污染窗口」，其它线有权
+> 按「不干净」处理，不得先开跑再说。
+
 > 归档：2026-11-05 天空线历表照度反转修复已入库 `056e073`
 > （`mbdsdr_ai/solar_system.py` 三后端收敛为 `moon_illum_from_elongation`，
 > 渲染层 `cosα = 2·illum − 1` 未改；新增
