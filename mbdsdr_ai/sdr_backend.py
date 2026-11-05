@@ -110,6 +110,27 @@ def parse_rtl_tcp_env(value: str, default_port: int = 1234
 # 不要再写裸字面量；数字链路（ADS-B 等）自己声明所需采样率，不依赖此默认。
 DEFAULT_SAMPLE_RATE_HZ = 2_400_000
 
+
+def format_sample_rate(hz) -> str:
+    """采样率唯一显示口径（U-03）：``MS/s``、固定 3 位小数、空格分隔。
+
+    采样率是每秒样本数，量纲是 MS/s（样本/秒），不是 MHz（频率/带宽）；
+    ``<1 MS/s`` 也写 ``0.250 MS/s``。缺失/NaN 显「—」，不拿 0 或默认值冒充读数。
+
+    本函数是内核侧唯一实现；``desktop/constants.format_sample_rate`` 与
+    ``mbdsdr_ai.sdr_tools._fmt_sample_rate`` 均从这里派生（内核 → 桌面）。
+    """
+    if hz is None:
+        return "—"
+    try:
+        v = float(hz)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    return f"{v / 1e6:.3f} MS/s"
+
+
 # 实时接收链 + 声卡输出（可选依赖，导入失败时音频路径安全降级，不崩）
 try:
     from .receive_chain import ReceiveChain
@@ -1384,25 +1405,46 @@ class RTLSDRBackend(SDRBackend):
     _TUNER_NAMES = {0: "Unknown", 1: "E4000", 2: "FC0012", 3: "FC0013",
                     4: "FC2580", 5: "R820T", 6: "R828D"}
 
+    # 调谐器型号是设备的静态属性；每次热插拔轮询都 rtlsdr_open 一次在本机实测
+    # 0.2–2.4 s（设备被占用时更长），2 s 一次的轮询会把 GUI 线程吃满。
+    # 缓存命中后不再打开设备；设备数变化（插拔）时整表失效。
+    _TUNER_PROBE_CACHE: Dict[tuple, tuple] = {}
+    _TUNER_PROBE_TTL_S = 30.0       # 成功探测结果的有效期
+    _TUNER_PROBE_FAIL_TTL_S = 5.0   # 打不开（被占用）时避免每次重试的冷却期
+    _LAST_DEVICE_COUNT: Optional[int] = None
+
     @staticmethod
-    def _probe_tuner_type(index) -> int:
+    def _probe_tuner_type(index, serial: str = "") -> int:
         # 通过 ctypes 打开设备读取调谐器枚举值（0=Unknown）。
         # pyrtlsdr 0.2.93 的 `from rtlsdr import RtlSdr` 在 AIO 可用时解析为
         # RtlSdrAio，该类没有 tuner_type；便捷函数 rtlsdr_get_tuner_type(by index)
         # 在部分 DLL 构建里恒返回 0。直接 rtlsdr_open 拿句柄再查
         # rtlsdr_get_tuner_type(handle) 可靠（实测 FC0012 返回 2）。
+        key = (int(index), str(serial or ""))
+        ent = RTLSDRBackend._TUNER_PROBE_CACHE.get(key)
+        now = time.monotonic()
+        if ent is not None:
+            tcode, ts = ent
+            if tcode != 0 and (now - ts) < RTLSDRBackend._TUNER_PROBE_TTL_S:
+                return tcode
+            if tcode == 0 and (now - ts) < RTLSDRBackend._TUNER_PROBE_FAIL_TTL_S:
+                return 0
         try:
             import ctypes
             import rtlsdr as _r
             lib = _r.librtlsdr
             dev = ctypes.c_void_p()
             if int(lib.rtlsdr_open(ctypes.byref(dev), int(index))) != 0:
+                RTLSDRBackend._TUNER_PROBE_CACHE[key] = (0, now)
                 return 0
             try:
-                return int(lib.rtlsdr_get_tuner_type(dev))
+                tcode = int(lib.rtlsdr_get_tuner_type(dev))
             finally:
                 lib.rtlsdr_close(dev)
+            RTLSDRBackend._TUNER_PROBE_CACHE[key] = (tcode, now)
+            return tcode
         except Exception:
+            RTLSDRBackend._TUNER_PROBE_CACHE[key] = (0, now)
             return 0
 
     # 来源: librtlsdr src/librtlsdr.c:1100-1104 — 合法采样率区间为
@@ -1526,13 +1568,17 @@ class RTLSDRBackend(SDRBackend):
             out = []
             # pyrtlsdr 0.2.93 has no get_device_count(); use the ctypes binding
             n = int(_rtlsdr.librtlsdr.rtlsdr_get_device_count())
+            # 设备数变化 = 插拔发生过，调谐器缓存整表失效（不拿旧设备的型号冒充新设备）。
+            if RTLSDRBackend._LAST_DEVICE_COUNT != n:
+                RTLSDRBackend._TUNER_PROBE_CACHE.clear()
+                RTLSDRBackend._LAST_DEVICE_COUNT = n
             try:
                 serials = RtlSdr.get_device_serial_addresses()  # list, not dict
             except Exception:
                 serials = []
             for i in range(n):
                 serial = serials[i] if i < len(serials) else ""
-                tcode = RTLSDRBackend._probe_tuner_type(i)
+                tcode = RTLSDRBackend._probe_tuner_type(i, serial)
                 tuner = RTLSDRBackend._TUNER_NAMES.get(tcode, "Unknown")
                 out.append({"index": i, "serial": serial, "tuner": tuner})
             return out
@@ -3749,6 +3795,10 @@ class PlutoSDRBackend(SDRBackend):
 
         用 socket 先做一次 TCP 连通性探测（短超时），避免 iio.Context 长时间阻塞。
         """
+        # 没有 libiio 时后续 iio.Context 必然不可能成功；不要先花 0.5 s 做 TCP
+        # 超时探测（本机实测每次枚举固定 0.50 s，2 s 一次的热插拔轮询白烧 25%）。
+        if iio_mod is None:
+            return None
         import socket
         host = "192.168.2.1"
         # 先 ping TCP 30431 (libiio 网络默认端口)

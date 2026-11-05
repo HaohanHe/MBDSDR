@@ -38,7 +38,7 @@ from .error_catalog import exception_code, user_message
 from .tool_registry import ToolResult
 from . import orbit
 from . import doppler_link
-from .sdr_backend import SDRBackendManager, SDRStatus
+from .sdr_backend import SDRBackendManager, SDRStatus, format_sample_rate
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
 from .audio_out import AudioPlayer
@@ -3054,20 +3054,9 @@ def _disconnect_sdr(mgr):
         return f"已断开: {name}"
     return "没有已连接的设备"
 
-def _fmt_sample_rate(hz) -> str:
-    """采样率唯一口径：MS/s、固定 3 位小数、空格；None/NaN → 「—」（U-03）。
-
-    采样率是每秒样本数，量纲是 MS/s（样本/秒），不是 MHz（频率/带宽）。
-    """
-    if hz is None:
-        return "—"
-    try:
-        v = float(hz)
-    except (TypeError, ValueError):
-        return "—"
-    if not math.isfinite(v):
-        return "—"
-    return f"{v / 1e6:.3f} MS/s"
+# 采样率显示口径的唯一实现在 mbdsdr_ai.sdr_backend.format_sample_rate；
+# 这里只保留本模块内部沿用的私有别名，避免第二份字面量（内核 → 工具/桌面）。
+_fmt_sample_rate = format_sample_rate
 
 
 def _fmt_readout(value, digits: int = 1, unit: str = "") -> str:

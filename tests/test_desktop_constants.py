@@ -106,15 +106,18 @@ class TestSampleRateConstant:
 # ----------------------------------------------------------------------
 class TestNoSecondSourceOfTruth:
     def test_module_exposes_only_the_shared_constant(self):
-        """常量模块保持薄身：只许三条共享常量，不夹带别的公开符号。
+        """常量模块保持薄身：只许三条共享常量 + 一个内核格式化复用名。
 
         2026-10-30 契约演进：E3 频率范围收敛把 FREQ_MIN_HZ/FREQ_MAX_HZ
-        收口进本模块（单一事实源），白名单随之从 1 条升到 3 条——
-        仍是**封闭白名单**，多一个符号照样红。
+        收口进本模块（单一事实源），白名单随之从 1 条升到 3 条。
+        2026-11-06 采样率显示口径上收内核：``format_sample_rate`` 改为
+        ``mbdsdr_ai.sdr_backend.format_sample_rate`` 的直接复用（本模块不再
+        持有一份字面量），故白名单补一个**函数名**；仍是封闭白名单，
+        多一个符号照样红。
         """
         public = {n for n in vars(constants) if not n.startswith("_")}
-        assert public == {"DEFAULT_SAMPLE_RATE_HZ", "FREQ_MIN_HZ", "FREQ_MAX_HZ"}, \
-            sorted(public)
+        assert public == {"DEFAULT_SAMPLE_RATE_HZ", "FREQ_MIN_HZ", "FREQ_MAX_HZ",
+                          "format_sample_rate"}, sorted(public)
 
     def test_no_module_redefines_the_constant(self):
         """desktop 侧只 import，不重新赋值（第二事实源会静默漂移）。"""
