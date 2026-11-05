@@ -155,7 +155,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="theme", group="显示与主题", kind="enum",
         label="主题", default="default",
         help="整套配色与控件样式；频谱/瀑布会同步换色。",
-        source="desktop/themes.py:545 DEFAULT_THEME=default",
+        source="desktop/themes.DEFAULT_THEME（默认 \"default\"）",
         choices=(_e("default", "默认浅色"), _e("dark", "深色"),
                  _e("high_contrast", "高对比（无障碍）"),
                  _e("dark_car", "CarWith 深色"), _e("figma", "Figma 深色")),
@@ -175,14 +175,14 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         label="当地大气压", default=1013.25, minimum=800.0, maximum=1100.0,
         step=1.0,
         help="用于地平线附近的大气折射修正；与当地气象站读数一致时高度角更准。",
-        source="desktop/rf_sky_view.py:227 DISPLAY_REFRACTION_PRESSURE_HPA=1013.25",
+        source="desktop/rf_sky_view.DISPLAY_REFRACTION_PRESSURE_HPA（1013.25 hPa）",
     ),
     SettingItem(
         key="sky_temperature_c", group="星象仪", kind="float",
         label="当地气温", default=10.0, minimum=-50.0, maximum=50.0,
         step=1.0,
         help="与气压一起决定折射强度；极端高温/低温下地平线附近高度角会有差异。",
-        source="desktop/rf_sky_view.py:228 DISPLAY_REFRACTION_TEMPERATURE_C=10.0",
+        source="desktop/rf_sky_view.DISPLAY_REFRACTION_TEMPERATURE_C（10.0 °C）",
     ),
     SettingItem(
         key="bortle", group="星象仪", kind="int",
@@ -224,7 +224,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help=("多帧平均让底噪更平滑、弱信号更易读，但会拖慢响应。"
               "联动：与「频谱分辨率（FFT 点数）」叠加，点数越大单帧越慢，"
               "平均帧数越多总延迟越高。"),
-        source="desktop/spectrum_widget.py:152 默认 1；档位见同上 AVG_FRAMES",
+        source=("desktop/spectrum_widget.SpectrumDataGenerator.AVG_FRAMES"
+                "（默认第 0 项 1；档位 1/4/8/16）"),
         choices=(_e(1, "不平均"), _e(4, "4 帧"), _e(8, "8 帧"), _e(16, "16 帧")),
     ),
     SettingItem(
