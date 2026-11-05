@@ -157,7 +157,7 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 1. **C++ 内核侧热点**：未做。没有用 perf/VTune 采样，也没有逐行计时，因此**不报任何 C++ 侧结论**。
 2. **长时间内存曲线（30 分钟连续频谱）**：未做。只做了 300 帧（约 1 分钟）与 1000 帧短跑。
 3. **天空 700/120 仍未进 33 ms**：`_draw_stars` 已从 15.67 降到 12.27 ms，但整帧 37.97 ms（p95 54.06），距 30 fps 还差 5 ms 左右。下一步候选（**未实现**）：`_draw_constellations` 4.98 ms 与 `_draw_dso` 2.63 ms 的批量路径、标签图层合并；这些都需要新的视觉对比，不在本轮。
-4. **`main_window._auto_enumerate_and_connect` 仍是主线程同步枚举**：2026-11-06 复测 **1644 ms/次**（1 台 RTL-SDR；`--section startup` 的 `backend_enum_ms`），发生在首帧之后、仍占 GUI 线程。该文件被「操作逻辑线」持有（`claims.json` current 非空），按纪律**未抢**；建议持有方按 `device_panel` 的 `QThreadPool` 做法迁走（边界见 §7.1）。
+4. **`main_window._auto_enumerate_and_connect` 仍是主线程同步枚举**：2026-11-06 复测 **1543.5 ms/次**（1 台 RTL-SDR；`--section startup` 的 `backend_enum_ms`），发生在首帧之后、仍占 GUI 线程。该文件被「操作逻辑线」持有（`claims.json` current 非空），按纪律**未抢**；建议持有方按 `device_panel` 的 `QThreadPool` 做法迁走（边界见 §7.1）。
 5. **频谱曲线仍 19.79 ms**（60 fps 预算 16 ms）：已降 51%，但未达标；再往下要降低 FFT bin 到像素的采样密度或改用增量绘制，属绘制改动，未做。
 6. **整屏 `grab()` 未复测**：本轮只测 `_draw_spectrum` 本体，整屏 44.85 ms 是改前数字。
 7. **独占机器复测启动绝对值**：未能取得。两次窗口内 `pid 1784` 都占用 0.69–0.90 核，系统负载 62–100%；因此该指标只用同窗口 A/B 相对值，绝对值不写基线。
@@ -206,31 +206,31 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 | 阶段 | 中位 ms | 3 次范围 |
 |---|---|---|
-| Qt 导入（PySide6） | 147.2 | 122.7–155.0 |
-| `main_window` 导入 | 1108.2 | 1070.2–1263.1 |
-| `QApplication` 构造 | 11.5 | 10.0–12.3 |
-| 字体（`QFontDatabase.families` + `setFont`） | 0.5 | 0.4–0.6 |
+| Qt 导入（PySide6） | 146.7 | 130.1–149.8 |
+| `main_window` 导入 | 910.6 | 906.3–984.9 |
+| `QApplication` 构造 | 12.9 | 11.0–12.9 |
+| 字体（`QFontDatabase.families` + `setFont`） | 0.4 | 0.4–0.9 |
 | 主题 `apply` | 0.2 | 0.2 |
-| **MainWindow 构造（容器）** | **5059.6** | 4744.5–5705.0 |
-| 　└ `eventFilter`（构造期事件 79,780 次） | **2939.6** | 2809.9–3275.1 |
-| 　└ `_build_kernel_panels` | 1124.9 | 1047.9–1428.1 |
-| 　　└ `SettingsPanel` 构造 | 683.9 | — |
-| 　└ `_build_mode_shell` | 1224.0 | 1040.5–1334.5 |
-| 　└ 星表加载（首帧内，1.9 MB npz） | 38.2 | 36.0–42.5 |
-| show + `processEvents`（首帧） | 198.2 | — |
-| `grab` 首帧 | 95.8 | 75.7–100.9 |
-| **进程 → 首帧合计** | **6620.5** | 6096.8–7315.4 |
-| 首帧后后端枚举（GUI 线程，1 台） | **1644.3** | 1561.1–1795.2 |
-| **进程 → 枚举完成** | **10391.6** | 9911–11151 |
+| **MainWindow 构造（容器）** | **4314.3** | 4054.2–4483.1 |
+| 　└ `eventFilter`（构造期事件 80,522 次） | **2566.4** | 2475.2–2666.8 |
+| 　└ `_build_kernel_panels` | 1138.8 | 1072.2–1206.5 |
+| 　　└ `SettingsPanel` 构造 | 625.0 | 616.2–719.0 |
+| 　└ `_build_mode_shell` | 802.8 | 792.2–986.1 |
+| 　└ 星表加载（首帧内，1.9 MB npz） | 33.4 | 32.1–35.0 |
+| show + `processEvents`（首帧） | 160.5 | 148.6–188.3 |
+| `grab` 首帧 | 45.3 | 43.0–62.7 |
+| **进程 → 首帧合计** | **5590.3** | 5410.5–5785.3 |
+| 首帧后后端枚举（GUI 线程，1 台） | **1543.5** | 1474.3–1606.7 |
+| **进程 → 枚举完成** | **9333.3** | 9163.6–9562.4 |
 
-**前三名（可归因叶子块）**：① `eventFilter` **2939.6 ms**（占构造 58%；80k 次事件，每次 4 个 `getattr` + 一次 `from PySide6.QtCore import QEvent`）；② 首帧后后端枚举 **1644.3 ms**（仍在 GUI 线程）；③ `_build_kernel_panels` **1124.9 ms**（其中 `SettingsPanel` 683.9 ms）。
+**前三名（可归因叶子块）**：① `eventFilter` **2566.4 ms**（占构造 59%；80.5k 次事件，每次 4 个 `getattr` + 一次 `from PySide6.QtCore import QEvent`）；② 首帧后后端枚举 **1543.5 ms**（仍在 GUI 线程）；③ `_build_kernel_panels` **1138.8 ms**（其中 `SettingsPanel` 625.0 ms）。
 
-**eventFilter A/B（交替跑，n=3，只测构造）**：正常中位 **3884.4 ms** → 把 `eventFilter` 换成只调 `QMainWindow.eventFilter` **1191.9 ms**，差 **2692.5 ms**。两条独立口径（包装计时 2939.6 / A/B 2692.5）同量级，说明这是真实开销，不是采样噪声。热点在 `desktop/main_window.py:2355-2379`；该文件归「操作逻辑线」，本轮**未改**，只把数字交回持有方。
+**eventFilter A/B（交替跑，n=3，只测构造）**：正常中位 **4198.4 ms** → 把 `eventFilter` 换成只调 `QMainWindow.eventFilter` **1180.9 ms**，差 **3017.5 ms**。两条独立口径（包装计时 2566.4 / A/B 3017.5）同量级，说明这是真实开销，不是采样噪声。热点在 `desktop/main_window.py:2355-2379`；该文件归「操作逻辑线」，本轮**未改**，只把数字交回持有方。
 
 **可后台化边界（按实测大小判断）**
 
-- **星表（1.9 MB / 38.2 ms）**：不值得为它专门起线程；若星表涨到几十 MB，`load_catalog()` 只做 `np.load` + SHA 校验，返回的是 numpy 数组 + 字符串（无 QObject），可放 `QThreadPool` 预载；**不能跨线程**的是 `RFSkyView`/`QPainter`/`QPixmap` 以及任何控件方法。`get_catalog()` 是模块级 `lru_cache`，要么在首帧前预载命中缓存，要么把数组通过信号交给 GUI，不能在工作线程里边读边调 `RFSkyView`。
-- **后端枚举（1644 ms）**：`enumerate_all_sdr_devices()` 返回 `list[dict]`，不碰 Qt，可整体放 `QThreadPool`（`device_panel`/`module_panel` 已经这么做）。**不能跨线程**的是 `SettingsPanel.__init__` 本身（QWidget 构造）；只能把枚举调用点延后/搬走，控件仍在 GUI 线程创建。`build_backend_for_device` 实测 0.1 ms，没必要搬。
+- **星表（1.9 MB / 33.4 ms）**：不值得为它专门起线程；若星表涨到几十 MB，`load_catalog()` 只做 `np.load` + SHA 校验，返回的是 numpy 数组 + 字符串（无 QObject），可放 `QThreadPool` 预载；**不能跨线程**的是 `RFSkyView`/`QPainter`/`QPixmap` 以及任何控件方法。`get_catalog()` 是模块级 `lru_cache`，要么在首帧前预载命中缓存，要么把数组通过信号交给 GUI，不能在工作线程里边读边调 `RFSkyView`。
+- **后端枚举（1543.5 ms）**：`enumerate_all_sdr_devices()` 返回 `list[dict]`，不碰 Qt，可整体放 `QThreadPool`（`device_panel`/`module_panel` 已经这么做）。**不能跨线程**的是 `SettingsPanel.__init__` 本身（QWidget 构造）；只能把枚举调用点延后/搬走，控件仍在 GUI 线程创建。`build_backend_for_device` 实测 0.1 ms，没必要搬。
 - **eventFilter**：不能后台化；只能把每事件重复的 `import`/`getattr` 提到常量或实例属性，属持有方改动。
 
 期望字段：`startup.median.dur_*`、`startup.median.eventfilter_ms`、`startup.median.backend_enum_ms`、`startup.median.settings_panel_init_ms`、`startup.eventfilter_ab`。
@@ -243,19 +243,19 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 | 模式 | 上限 | 读盘 s | gap p50 | gap p95 | **gap max** | 峰值 WS |
 |---|---|---|---|---|---|---|
-| 同步（假设仍在 UI） | 全文件 | 1.817 | 0.63 | 0.63 | **1816.44 ms** | 1174.3 MB |
-| 后台线程（当前实现） | 全文件 | 1.858 | 9.99 | 10.84 | **11.84 ms** | 1174.5 MB |
-| 同步（假设仍在 UI） | 24M（真实路径） | 0.304 | 0.67 | 0.67 | **304.1 ms** | 259.9 MB |
-| 后台线程（当前实现） | 24M（真实路径） | 0.288 | 10.02 | 10.75 | **10.84 ms** | 260.0 MB |
+| 同步（假设仍在 UI） | 全文件 | 2.070 | 0.52 | 0.80 | **2069.70 ms** | 1174.3 MB |
+| 后台线程（当前实现） | 全文件 | 1.758 | 10.05 | 11.13 | **12.70 ms** | 1174.3 MB |
+| 同步（假设仍在 UI） | 24M（真实路径） | 0.257 | 0.54 | 0.54 | **256.4 ms** | 259.6 MB |
+| 后台线程（当前实现） | 24M（真实路径） | 0.266 | 10.01 | 10.76 | **11.17 ms** | 259.5 MB |
 
-> 本次实测 1.1 GiB 全量读盘 1.817 s、峰值 1174 MB（文件刚由探针写入，页缓存是热的）；早前 4.90 s / 1.04 GB 是另一个窗口/另一份文件，不作为本轮基线。
+> 本次实测 1.1 GiB 全量读盘 2.070 s、峰值 1174 MB（文件刚由探针写入，页缓存是热的）；早前 4.90 s / 1.04 GB 是另一个窗口/另一份文件，不作为本轮基线。
 
 **“移到线程后卡顿降到多少”的估算方法与误差**
 
 - 公式：`T_block_thread ≈ max(心跳间隔, 单块转换 + 进度信号投递 + 事件循环调度)`；`单块转换 ≈ T_load × chunk_samples / limit`。
-- 代入全文件：`1816.44 × 1,048,576 / 144,179,200 ≈ 13.2 ms`，实测 max 11.84 ms（numpy/`fromfile` 期间释放 GIL，且进度事件是排队投递）。
-- 误差：心跳 10 ms → 单次 gap 的分辨率是 **±10 ms**（即实测 11.84 ms 对应真实区间约 1.8–21.8 ms）；p95 10.84 ms 可作为稳态上限。若 worker 里出现纯 Python 逐样本循环（不释放 GIL），公式失效，会退化到接近 `T_load`。
-- 降幅：全文件 **1816.4 → 11.8 ms（-99.35%）**；真实 24M 路径 **304.1 → 10.8 ms（-96.4%）**。
+- 代入全文件：`2069.70 × 1,048,576 / 144,179,200 ≈ 15.05 ms`，实测 max 12.70 ms（numpy/`fromfile` 期间释放 GIL，且进度事件是排队投递）。
+- 误差：心跳 10 ms → 单次 gap 的分辨率是 **±10 ms**（即实测 12.70 ms 对应真实区间约 2.7–22.7 ms）；p95 11.13 ms 可作为稳态上限。若 worker 里出现纯 Python 逐样本循环（不释放 GIL），公式失效，会退化到接近 `T_load`。
+- 降幅：全文件 **2069.7 → 12.7 ms（-99.39%）**；真实 24M 路径 **256.4 → 11.2 ms（-95.6%）**。
 
 期望字段：`replay.cases[].mode/max_samples/file_mb/wall_s/gap_p95_ms/gap_max_ms/peak_ws_mb/samples/progress_events`。
 
@@ -265,26 +265,26 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 | 指标 | 实测 |
 |---|---|
-| 5.999 s 内曲线 paint | **78 帧 → 13.0 fps**（名义 15.15 的 86%） |
-| 单帧 `paintEvent` | 中位 **10.01 ms** / p95 11.75 / max 12.19 |
-| 直接 `_render_spectrum`（同一状态） | 中位 **11.07 ms** / p95 13.54 |
-| `push_iq`（每 120k 样本块） | 中位 **1.62 ms** / p95 2.12 |
-| 实际帧周期 | **76.9 ms ≈ 66 ms 定时器 + 10.0 ms paint + 0.9 ms 调度** |
+| 6.001 s 内曲线 paint | **78 帧 → 13.0 fps**（名义 15.15 的 86%） |
+| 单帧 `paintEvent` | 中位 **8.26 ms** / p95 9.80 / max 10.79 |
+| 直接 `_render_spectrum`（同一状态） | 中位 **10.67 ms** / p95 12.10 |
+| `push_iq`（每 120k 样本块） | 中位 **1.22 ms** / p95 1.72 |
+| 实际帧周期 | **76.9 ms ≈ 66 ms 定时器 + 8.3 ms paint + 2.6 ms 调度/喂数** |
 
-热函数（200 帧 cProfile，按 tottime）：`drawPolygon` 400 次 **0.958 s**（2.40 ms/次、2 次/帧 ≈ 4.79 ms/帧）；`drawPolyline` 200 次 **0.636 s**（3.18 ms/帧）；`_draw_spectrum` 自身 **0.283 s**（1.42 ms/帧）；`drawLine` 0.069 s；`drawText` 0.037 s。**Qt 光栅化（polygon+polyline+line）约占 8.3 ms/11.07 ms = 75%**，Python 侧 `_draw_spectrum` 自身约 13%，没有其它 Python 函数超过 0.8%。
+热函数（200 帧 cProfile，按 tottime）：`drawPolygon` 400 次 **0.846 s**（2.12 ms/次、2 次/帧 ≈ 4.23 ms/帧）；`drawPolyline` 200 次 **0.574 s**（2.87 ms/帧）；`_draw_spectrum` 自身 **0.258 s**（1.29 ms/帧）；`drawLine` 1600 次 0.066 s（0.41 ms/帧）；`drawText` 0.035 s；`horizontalAdvance` 0.035 s。**Qt 光栅化（polygon+polyline+line+text）约占 7.7 ms/10.67 ms = 72%**，Python 侧 `_draw_spectrum` 自身约 12%，没有其它 Python 函数超过 0.5%。
 
 **Python 热循环对比（同一 1024 点数据）**
 
 | 微基准 | 中位 |
 |---|---|
-| `20*log10(abs(fft))` 向量化 | **0.006 ms** |
-| 同语义纯 Python `for` 循环（1024 点） | **0.100 ms**（慢 16.7×） |
-| `_resample_max` 1024→384 的逐 bin 循环 | **0.998 ms** |
-| `np.maximum.reduceat` 等价向量化 | **0.020 ms**（快 49.9×） |
+| `20*log10(abs(fft))` 向量化 | **0.011 ms** |
+| 同语义纯 Python `for` 循环（1024 点） | **0.178 ms**（慢 16.2×） |
+| `_resample_max` 1024→384 的逐 bin 循环 | **0.983 ms** |
+| `np.maximum.reduceat` 等价向量化 | **0.017 ms**（快 57.8×） |
 
-`_resample_max` 在 `push_iq` 里（`spectrum_widget.py:536`）确实占了 push 的 62%（1.0/1.62 ms），但 push 每 50 ms 才跑 1 次（约 2% 占空），**不是帧率瓶颈**；换向量化只能省 ~1 ms/50 ms。另：1024/384 不能整除，当前循环用 `max` + 空 bin 置 NaN，`reduceat` 语义不同，不能直接替换；若要走向量化，应选能整除的 bin 数（如 1024/256）。
+`_resample_max` 在 `push_iq` 里（`spectrum_widget.py:536`）确实占了 push 的 80%（0.98/1.22 ms），但 push 每 50 ms 才跑 1 次（约 2% 占空），**不是帧率瓶颈**；换向量化只能省 ~1 ms/50 ms。另：1024/384 不能整除，当前循环用 `max` + 空 bin 置 NaN，`reduceat` 语义不同，不能直接替换；若要走向量化，应选能整除的 bin 数（如 1024/256）。
 
-**结论**：帧率上限由 `1/(定时器间隔 + 单帧 paint)` 决定（66+10 ≈ 76.9 ms → 13.0 fps），不是 Python 循环；要把 13 fps 抬到 15 fps，得降 `drawPolygon/drawPolyline` 的光栅成本或调小谱线 bin/采样密度——属绘制改动，本轮未做。
+**结论**：帧率上限由 `1/(定时器间隔 + 单帧 paint + 调度)` 决定（66 + 8.3 + 2.6 ≈ 76.9 ms → 13.0 fps），不是 Python 循环；要把 13 fps 抬到 15 fps，得降 `drawPolygon/drawPolyline` 的光栅成本或调小谱线 bin/采样密度——属绘制改动，本轮未做。
 
 期望字段：`spectrum.config.*`、`spectrum.measured.fps/paint/direct_render/push_iq`、`spectrum.profile_top`、`spectrum.microbench`。
 
@@ -301,12 +301,12 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 | 实测 | 结果 |
 |---|---|
-| 真实 Celestrak ×3 | 全部 **SSL handshake 超时**：10.004 / 10.016 / 10.044 s |
-| `TLEManager.fetch(25544, "ISS")` 首次 | **10.027 s**（网络失败后回退到离线/缓存，返回 ok）；第二次 0.000 s |
-| 本机黑洞服务器（收连接不回包） | **10.017 s**（socket 读超时先触发） |
-| 硬截止改 1 s 验证 | **1.007 s**（证明硬截止路径真实生效） |
+| 真实 Celestrak ×3 | 全部 **SSL handshake 超时**：10.031 / 10.012 / 10.011 s |
+| `TLEManager.fetch(25544, "ISS")` 首次 | **10.009 s**（网络失败后回退到离线/缓存，返回 ok）；第二次 0.000 s |
+| 本机黑洞服务器（收连接不回包） | **10.010 s**（socket 读超时先触发） |
+| 硬截止改 1 s 验证 | **1.011 s**（证明硬截止路径真实生效） |
 
-**真实最坏耗时 = 10.044 s**（5 次联网尝试的最大值）；理论上限 **15 s**（若 DNS/连接阶段卡住、socket 超时没触发，由硬截止兜底）。本次三次真实请求都吃满 10 s，说明当前网络到 celestrak 不可达，**不是“偶发慢”**。
+**真实最坏耗时 = 10.031 s**（5 次联网尝试的最大值）；理论上限 **15 s**（若 DNS/连接阶段卡住、socket 超时没触发，由硬截止兜底）。本次三次真实请求都吃满 10 s，说明当前网络到 celestrak 不可达，**不是“偶发慢”**。
 
 **是否卡 UI**：`_compute_refresh` 跑在 `threading.Thread`（`desktop/new_spacetime_panel.py:654`），网络等待不占 GUI 线程，只延长“刷新中”状态；启动只构造 `TLEManager()`（`new_spacetime_panel.py:278`），不发请求，所以 §7.1 的启动账里不含这 10 s。
 
