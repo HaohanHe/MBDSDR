@@ -6993,10 +6993,12 @@ class MainWindow(QMainWindow):
     def _start_recording(self):
         """开始录制：检查后端 → 建文件名 → 清 buffer → 状态栏提示。
         无 SDR 后端时弹提示且不造假文件（按钮会被调用方弹回）。"""
-        # 回放与录音互斥：回放中按录音＝先停回放再录，语义确定且用户可见
+        # 回放与录音互斥：回放中按录音＝先停回放再录，语义确定且用户可见。
+        # 这里只报「已停止回放」：能否真正开始录音取决于后面的确认/目录检查，
+        # 提前写「开始录音」会在取消路径留下一个从未发生的完成态。
         if self._replay_timer is not None:
             self._stop_replay()
-            self.statusBar().showMessage("已停止回放，开始录音", MSG_IMPORTANT)
+            self.statusBar().showMessage("已停止回放", MSG_IMPORTANT)
         backend = self._active_sdr_backend
         if backend is None or not callable(getattr(backend, "read_samples", None)):
             QMessageBox.warning(
@@ -7035,6 +7037,10 @@ class MainWindow(QMainWindow):
         # 「删目录即卸载」保护：录音目录落在程序目录内且从未确认过时先弹窗，
         # 默认按钮是改到用户目录。用户取消则整体不录并复位按钮。
         if not self._confirm_record_dir_safe():
+            # 取消必须有自己的结束语，不能让用户以为还在录（口径 A+B，
+            # 已与录音线确认 2026-11-06）；完成态只在成功路径出现。
+            self.statusBar().showMessage(
+                "已取消录音（录音目录未确认）", MSG_IMPORTANT)
             self._recording = False
             self._record_guard = True
             try:

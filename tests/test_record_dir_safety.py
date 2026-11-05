@@ -198,3 +198,90 @@ def test_gate_silent_after_ack(monkeypatch):
     mw = _patch_box(monkeypatch, "改用用户目录并录音")
     assert mw.MainWindow._confirm_record_dir_safe(fake) is True
     assert fake.settings.written == []
+
+
+# ---------------------------------------------------------------------------
+# 5. 取消路径的文案口径（A+B，2026-11-06 与录音线确认）
+#
+# 「已停止回放」只陈述回放确实被停；「开始录音」这类完成态只能出现在
+# 文件真正打开成功之后。取消/未确认路径一律不出现完成态，并补一句
+# 「已取消录音（录音目录未确认）」收尾。
+# ---------------------------------------------------------------------------
+class _FakeButton:
+    def __init__(self):
+        self.checked = None
+
+    def setChecked(self, value):
+        self.checked = value
+
+
+class _FakeBackend:
+    """只提供 _start_recording 走到确认闸门之前所需的读接口。"""
+
+    class status:
+        gain_db = 0.0
+
+    class device:
+        name = "FakeSDR"
+
+    def read_samples(self, *_a, **_k):
+        return None
+
+    def get_sample_rate(self):
+        return 2_048_000.0
+
+    def get_frequency(self):
+        return 100_000_000.0
+
+
+class _FakeRecordSelf:
+    """替换 MainWindow 实例：_replay_timer 置哨兵，让前置句真的被执行。"""
+
+    def __init__(self):
+        self._replay_timer = object()
+        self._active_sdr_backend = _FakeBackend()
+        self._recording = True          # 进入前假装在录，取消后必须复位
+        self._record_guard = False
+        self.stopped_replay = 0
+        self.status = []
+        self.record_btn = _FakeButton()
+        self.control_panel = type("_CP", (), {"record_button": _FakeButton()})()
+
+    def _stop_replay(self):
+        self.stopped_replay += 1
+        self._replay_timer = None
+
+    def statusBar(self):
+        outer = self
+
+        class _SB:
+            def showMessage(self, text, level=0):
+                outer.status.append(text)
+
+        return _SB()
+
+
+def test_cancel_path_says_cancelled_and_never_says_started():
+    """取消确认：有「已停止回放」+「已取消录音」，绝无「开始录音/开始录制」。
+
+    变异反证：把 :6999 的前置句改回「已停止回放，开始录音」时，
+    下面 ``"开始录音" not in joined`` 必须变红。因此本用例必须先让
+    ``_replay_timer`` 非 None、桩掉 ``_stop_replay``，否则旧句根本走不到，
+    变异就是空反证（假绿）。
+    """
+    import main_window  # noqa: WPS433  (只在用例里导入，避免拖慢其它测试)
+
+    fake = _FakeRecordSelf()
+    fake._confirm_record_dir_safe = lambda: False
+    main_window.MainWindow._start_recording(fake)
+
+    joined = "\n".join(fake.status)
+    assert fake.stopped_replay == 1
+    assert fake._replay_timer is None
+    assert "已停止回放" in joined
+    assert "已取消录音（录音目录未确认）" in joined
+    assert "开始录音" not in joined
+    assert "开始录制" not in joined
+    assert fake._recording is False
+    assert fake.record_btn.checked is False
+    assert fake.control_panel.record_button.checked is False
