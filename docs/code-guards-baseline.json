@@ -3,8 +3,22 @@
   "snapshot": "2026-11-06",
   "policy": "棘轮基线：任何文件的 ERROR/WARN 不得超过此处计数；新文件出现静默 catch-all 即红。只许降不许升。",
   "total": 1284,
-  "whitelisted": 1,
+  "whitelisted": 2,
   "forbidden": 0,
+  "registry": [
+    {
+      "path": "scripts/hw_acceptance/ring6_sky_mode.py",
+      "symbol": "_moon_reference",
+      "line": 104,
+      "severity": "WARN",
+      "current_ew": "E0 / W2（基线 E0 / W1；白名单豁免 :104 一处，基线未抬）",
+      "boundary": "是：第三方/平台边界。JPL DE421 真值必须经 skyfield（可选库）与仓库外 de421.bsp（缺失/损坏/版本不兼容）读取。",
+      "degrade": "是：返回 None，调用方把 moon_ephemeris_match 标 skipped=True / UNVERIFIED，不参与判定。",
+      "fallback": "有：显式 UNVERIFIED 文案「缺 de421.bsp 或 skyfield，月球绝对位置 UNVERIFIED（未补数）」，不补数、不伪造星位。",
+      "owner": "天空线（cdc69e5e R7 月球对拍 JPL DE421）",
+      "deadline": "2027-01-31"
+    }
+  ],
   "files": {
     "desktop/adsb_map_panel.py": {
       "ERROR": 4,

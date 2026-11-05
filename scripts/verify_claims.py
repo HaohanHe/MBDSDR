@@ -48,6 +48,8 @@ STALE = "未证实（文档过期）"
 NO_HASH = "未证实（无 hash）"
 
 EXCLUDE_DIRS = {"audit_r2"}
+#: 白名单/账本本身不是断言；它按设计要引用「已修复…」原文，扫它等于自吞。
+EXCLUDE_FILES = {"claim-waivers.md"}
 
 
 @dataclass
@@ -183,6 +185,8 @@ def iter_claim_lines(docs_root: Path, recursive: bool = False) -> List[tuple]:
     out: List[tuple] = []
     pattern = "**/*.md" if recursive else "*.md"
     for p in sorted(docs_root.glob(pattern)):
+        if p.name in EXCLUDE_FILES:
+            continue
         if any(part in EXCLUDE_DIRS for part in p.parts):
             continue
         in_fence = False

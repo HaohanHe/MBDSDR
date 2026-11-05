@@ -145,3 +145,27 @@ def test_fm_nearest():
     bm = fm.nearest(121.5e6, within_hz=1e3)
     assert bm is not None
     assert "121.5" in bm.name
+
+
+# ── 默认 0 假成功反证（COORDINATION §7.3，2026-11-06）──────────────
+
+def test_fm_missing_freq_is_skipped_not_zero(tmp_path):
+    """缺频率的书签不许落成 0.0：0 Hz 永远 nearest 不到 = 静默丢书签。"""
+    path = tmp_path / "bookmarks.json"
+    path.write_text(json.dumps([
+        {"name": "坏条目-无频率", "mode": "NFM"},
+        {"name": "好条目", "freq_hz": 145_000_000},
+    ], ensure_ascii=False), encoding="utf-8")
+    fm = FrequencyManager(user_path=str(path))
+    names = [b.name for b in fm.list()]
+    assert "好条目" in names
+    assert "坏条目-无频率" not in names
+    assert fm.load_error, "跳过条目必须留痕，不能静默吞掉"
+
+
+def test_fm_broken_json_sets_load_error(tmp_path):
+    path = tmp_path / "bookmarks.json"
+    path.write_text("{not json", encoding="utf-8")
+    fm = FrequencyManager(user_path=str(path))
+    assert fm.load_error, "坏书签文件必须带原因，不能 pass 了事"
+    assert len(fm.list()) > 0, "内置库不受用户文件损坏影响"

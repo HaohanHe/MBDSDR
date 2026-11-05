@@ -487,6 +487,10 @@
    实例：`f664638a` 的提交说明自认 `tests/test_ui_layout_locks.py`「改前已
    高于基线 3」，此后无人接，直到 2026-11-06 全量守卫实测仍是
    `1633 > 1347 / FAILED 20.93s`。
+   转绿：2026-11-06 00:26 `79932b5d`（操作逻辑线）——审计脚本 W7→W0、
+   `tests/test_ui_layout_locks.py` E4→E0；基线未动。复跑：
+   `python scripts/lint_swallow_all.py --no-fail`、
+   `python -m pytest tests/test_swallow_guard.py -q`。
 
 ### 测试纪律（2026-11-05 落地，硬规矩）
 
@@ -1403,22 +1407,34 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
   5. 验收：mock `backend.set_frequency` 抛异常 → 动作返回 `UNAVAILABLE` 且
      `ok=False`；`tuned_freq_hz` 缺失 → `UNAVAILABLE`；成功路径仍 `DONE`。
      复跑 `python -m pytest tests/test_sky_track_wiring.py tests/test_main_window.py -q`。
-- `mbdsdr_ai/frequency_manager.py:208` + `NetworkIQBackend.set_frequency`
-  网络源假成功——owner = 网络/后端线，到期 2026-11-07。可执行条目：
-  1. 证据：`frequency_manager.py:208` 把缺字段读成 `0.0`，`:214-215`
-     把 `FileNotFoundError/JSONDecodeError/KeyError/TypeError` 吞成 `pass`；
-     `sdr_backend.py:4524` `NetworkIQBackend.set_frequency` 只记
-     `self._center_freq_hz = float(hz)` 并 `return None`，与基类
-     `-> bool` 契约不一致。
-  2. 改：`set_frequency` 返回 `bool`（范围非法返回 False 并记录原因）；
-     `frequency_manager` 缺字段/坏文件不再落 `0.0`，返回 `None` 或抛，
-     由调用方出 `UNAVAILABLE`；吞异常处至少写日志并把原因带进返回值。
-  3. 验收：坏 `bookmarks.json` 不再产生 `freq_hz=0.0` 书签；网络后端
-     `set_frequency(0)` 返回 False 且上游不是 `DONE`。
-- 顶层 docs 的存量「无 hash」断言：已在 20 个文档文首加
-  「本篇结论未经 commit 取证，引用前须复核」；`tests/test_claims_guard.py`
-  只锁增量（基线 `docs/claims-baseline.json`，按文件只许降），存量由各文档
-  owner 逐篇补 hash 或删断言。
+- `mbdsdr_ai/frequency_manager.py:208` 书签落 0.0 —— **本轮本线改掉**
+  （2026-11-06 提交说明为准）：缺频率条目跳过并置 `load_error`（不再落 `0.0`）；
+  坏文件记原因并写日志，不再 `pass`。反证：
+  `python -m pytest tests/test_dsp_backend_vfo_frequency.py -q`
+  （含「缺频率不落 0」「坏文件必带原因」两条）。
+- `NetworkIQBackend.set_frequency`（`mbdsdr_ai/sdr_backend.py`）只记账不返回
+  成功/失败，0 Hz 会被上层读成「已调谐 0.0000 MHz」——**该文件此刻由接入层
+  健壮性线持有**（claim 至 03:10），本线不动，只挂清单：到期 2026-11-07，
+  验收「`set_frequency(0)` 返回 False 且上游不是 DONE」。
+- `desktop/main_window.py:1772` 假 `DONE` —— 文件由操作逻辑线持有（claim
+  剩余 18 min），本线不动；改法见本节第 4-5 条。
+- 守卫复跑剩余必须修（2026-11-06 01:3x，`D:\mbdsdr\output\tmp\scan_r5.json`，
+  越线 7 项全部来自他线在途，本线登记项无越线）：
+  - `scripts/decode_sensitivity.py`（0/5 > 基线 0/2，+3）：P5 线在途新增的
+    `except Exception` 分支；owner = 解码流水线 P5，到期 2026-11-07。
+  - `scripts/hw_acceptance/common.py`（1/4 > 基线 0/3）：接入层健壮性线在途；
+    owner = 接入层健壮性线，到期 2026-11-07。
+  - `scripts/hw_acceptance/manual_usb_cycle.py`（新文件，2 ERROR / 4 WARN，不在基线）：
+    接入层健壮性线在途新增；owner = 接入层健壮性线，到期 2026-11-07。
+  - `tests/test_destructive_confirm_guards.py`（新文件，1 ERROR / 0 WARN，不在基线）：
+    owner = 操作逻辑线，到期 2026-11-07。
+  - `tests/test_ui_layout_locks.py`（E1/W0，不在基线）：新增用例
+    `test_bottom_dock_height_is_locked` 里 `except Exception: pass` 停定时器；
+    三问答不上（非外部边界、无降级、无兜底）→ 不登记；owner = 操作逻辑线，
+    到期 2026-11-07。修法：收窄为 `except RuntimeError` 或去掉 try。
+- 顶层 docs 的存量断言：白名单 `docs/claim-waivers.md`（142 条，逐条附指纹 +
+  原因，只许往下减）；门禁 `tests/test_claims_guard.py` 只锁增量——新增或
+  改写的断言四元组不全即红，存量由各文档 owner 逐条补 hash 或删断言。
 - 增量漂移登记：`docs/narrow-screen-plan.md:463`「宽度收口」那段是新写的
   无 hash 断言（UI 操作逻辑线，到期 2026-11-07），本轮已计入基线 5；该行
   补上 hash 与字面量后，把本文件的基线计数改回 4。

@@ -1,72 +1,89 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""断言取证棘轮：docs 里的「已修复/已提交」只许少、不许新增无证据的。
+"""文档断言闸门：存量白名单只减不增，增量必须带四元组。
 
-口径（与 ``scripts/verify_claims.py`` 同源）：
-  * 一条断言要算**可证实**，必须四元组齐全且 git 三步复核通过：
-    ``<结论> — <hash> — <path>:<line> — <改动后字面量>``;
-  * 存量（``docs/claims-baseline.json`` 里的计数）允许留着，但**按文件只许降**
-    —— 新写的断言没 hash 会直接把计数顶上去，这里就红；
-  * 存量怎么销：给该条补 hash 与字面量，或删掉这条断言，然后把
-    ``docs/claims-baseline.json`` 的计数改小（只能改小）。
+口径（与 `scripts/verify_claims.py` 一致）：
 
-为什么不一次性把 100 多条都补 hash：那是一次性劳动，补完还会再漂；
-这里只锁增量，存量由各文档 owner 逐篇销。
+    <结论> — <commit hash> — <path>:<line> — <改动后唯一字面量>
+
+* 白名单 `docs/claim-waivers.md` 只登记**建表时 HEAD 已提交**的未证实断言；
+  每条附指纹与「为什么暂不补证」。
+* `docs/` 下新增/改写过的断言，指纹不在白名单 → 红（补齐四元组后才许提交）。
+* 白名单行失效（断言已补证或已删）→ 红（必须销账，只减不增）。
 """
 from __future__ import annotations
 
-import json
+import hashlib
+import re
 import sys
 from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-
 import verify_claims as vc  # noqa: E402
 
-BASELINE = ROOT / "docs" / "claims-baseline.json"
+WAIVERS = ROOT / "docs" / "claim-waivers.md"
+CAP_RE = re.compile(r"<!--\s*waived-total:\s*(\d+)\s*-->")
+ROW_RE = re.compile(r"^\|\s*(\d+)\s*\|")
+#: 建表时（2026-11-06）HEAD 的未证实断言数；只许往下减。
+BUILT_AT = 142
 
 
-def _load_baseline() -> dict:
-    data = json.loads(BASELINE.read_text(encoding="utf-8"))
-    assert isinstance(data.get("docs"), dict), "基线格式错：缺 docs 映射"
-    return data
+def _fp(doc: str, text: str) -> str:
+    return hashlib.sha256(f"{doc}\x00{text}".encode("utf-8")).hexdigest()[:12]
 
 
-def _measured() -> Counter:
+def _measured() -> tuple[Counter, list]:
     claims = vc.verify_docs(ROOT)
-    return Counter(c.doc for c in claims if c.status != vc.OK)
+    bad = [c for c in claims if c.status != vc.OK]
+    return Counter(_fp(c.doc, c.text) for c in bad), bad
 
 
-def test_claims_baseline_exists_and_has_policy():
-    data = _load_baseline()
-    assert data.get("policy"), "基线必须写明口径"
-    assert int(data.get("total_unverified", 0)) > 0
+def _waived() -> tuple[Counter, list]:
+    rows = []
+    for line in WAIVERS.read_text(encoding="utf-8").splitlines():
+        if not ROW_RE.match(line):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        rows.append((cells[1], cells[2]))
+    return Counter(f for _, f in rows), rows
 
 
-def test_unverified_claims_do_not_increase():
-    """按文件棘轮：任何文件的未证实断言不得超过基线；新文件一条都不许有。"""
-    base = _load_baseline()
-    allowed = base["docs"]
-    measured = _measured()
-    violations = []
-    for doc, count in sorted(measured.items()):
-        limit = int(allowed.get(doc, 0))
-        if count > limit:
-            violations.append(f"{doc}: {count} > 基线 {limit}（新增 {count - limit}）")
-    total = sum(measured.values())
-    if total > int(base["total_unverified"]):
-        violations.append(
-            f"总量 {total} > 基线 {base['total_unverified']}"
-            f"（新增 {total - int(base['total_unverified'])}）")
-    assert not violations, (
-        "新增断言必须带四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>`，"
-        "或删掉无法取证的断言：\n" + "\n".join(violations))
+def test_waiver_file_is_declared():
+    assert WAIVERS.exists(), "docs/claim-waivers.md 缺失：闸门没有存量白名单"
+    assert CAP_RE.search(WAIVERS.read_text(encoding="utf-8")), "缺 waived-total 声明"
 
 
-def test_baseline_is_not_raised():
-    """基线文件只能往下改：本次实测总量必须 ≤ 基线，留松弛由 owner 收紧。"""
-    data = _load_baseline()
-    total = sum(_measured().values())
-    assert total <= int(data["total_unverified"])
+def test_waiver_count_matches_cap_and_never_increases():
+    cap = int(CAP_RE.search(WAIVERS.read_text(encoding="utf-8")).group(1))
+    waived, _ = _waived()
+    assert len(waived) == cap, (
+        f"白名单行数 {len(waived)} != waived-total {cap}：删行必须同步调小计数")
+    assert len(waived) <= BUILT_AT, (
+        f"白名单只减不增：{len(waived)} 已超过建表时 {BUILT_AT} 条")
+
+
+def test_no_new_or_modified_unverified_claims():
+    """新增/改写的断言没有四元组 → 红。"""
+    measured, claims = _measured()
+    waived, _ = _waived()
+    added = measured - waived
+    if added:
+        detail = [f"{c.doc}:{c.line} [{c.status}] {c.reason}\n    {c.text[:120]}"
+                  for c in claims if _fp(c.doc, c.text) in added]
+        raise AssertionError(
+            "docs/ 有新增或改写的断言未带完整四元组（也不在白名单里）：\n  "
+            + "\n  ".join(detail)
+            + "\n修复：补 <hash> — <path>:<line> — <改动后字面量>，或删除断言。")
+
+
+def test_waivers_are_not_stale():
+    """白名单里的断言已补证/已删 → 红：必须销账，体现「只减」。"""
+    measured, _ = _measured()
+    waived, rows = _waived()
+    gone = waived - measured
+    if gone:
+        detail = [f"{doc} 指纹 {f}" for doc, f in rows if f in gone]
+        raise AssertionError(
+            "白名单条目已失效（断言已补证或已删除），请删行并调小 waived-total：\n  "
+            + "\n  ".join(detail))

@@ -249,13 +249,14 @@ def test_whitelist_trigger_missing_or_unknown_is_invalid():
 
 
 def test_real_whitelist_entry_passes_full_gate():
-    """仓库里唯一一条白名单必须通过完整门禁（三问 + trigger + review_by）。"""
+    """仓库里每条白名单都必须通过完整门禁（三问 + trigger + review_by）。"""
     import json
     entries = json.loads(
         (REPO_ROOT / "scripts" / "swallow_whitelist.json").read_text(encoding="utf-8")
     )["entries"]
-    assert len(entries) == 1, "新增白名单必须逐条人工复核，这里只允许 1 条"
-    assert scanner._entry_issue(entries[0], REPO_ROOT) == ""
+    assert len(entries) == 2, "新增白名单必须逐条人工复核，这里按实数钉扎"
+    for entry in entries:
+        assert scanner._entry_issue(entry, REPO_ROOT) == "", entry.get("path")
 
 
 # ── 白名单降级路径的真实覆盖 ─────────────────────────────────────────
@@ -392,3 +393,68 @@ def test_ratchet_blocks_per_file_growth(tmp_path):
     baseline = {"total": 5, "files": {"sample.py": {"ERROR": 1, "WARN": 0}}}
     violations = scanner.check_ratchet(report, baseline)
     assert any("ERROR 2 > 基线 1" in v for v in violations)
+
+
+# ── 登记账本（registry）：只许「白名单 + 三问 + owner + 期限」 ──────────
+
+def _registry_baseline(**overrides):
+    entry = {
+        "path": "sample.py", "symbol": "f", "line": 4, "severity": "ERROR",
+        "current_ew": "E1 / W0",
+        "boundary": "外部边界：可选依赖缺失",
+        "degrade": "降级：该功能返回不可用",
+        "fallback": "兜底：UI 显示不可用，不假装成功",
+        "owner": "某线", "deadline": "2099-01-01",
+    }
+    entry.update(overrides)
+    return {"total": 0, "files": {"sample.py": {"ERROR": 0, "WARN": 0}},
+            "registry": [entry]}
+
+
+def _whitelisted_scan(tmp_path):
+    test_file = REPO_ROOT / "tests" / "test_audio_selection_e2e.py"
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        import sounddevice\n"
+                     "    except Exception:\n"
+                     "        pass\n")
+    return _scan(tmp_path, {"entries": [{
+        "path": "sample.py", "symbol": "f", "line": 4,
+        "reason": "外部边界：可选依赖缺失",
+        "user_visible": "该功能不可用并显示提示",
+        "test": str(test_file.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "trigger": {"import_fail": "sounddevice"},
+        "review_by": "2099-01",
+    }]})
+
+
+def test_registry_entry_with_three_answers_passes(tmp_path):
+    report = _whitelisted_scan(tmp_path)
+    assert scanner.check_ratchet(report, _registry_baseline()) == []
+    assert report.registered == 1
+
+
+def test_registry_missing_answer_is_violation(tmp_path):
+    report = _whitelisted_scan(tmp_path)
+    violations = scanner.check_ratchet(
+        report, _registry_baseline(fallback=""))
+    assert any("登记缺项" in v and "fallback" in v for v in violations)
+
+
+def test_registry_without_whitelist_is_violation(tmp_path):
+    """登记不能替代白名单：没有源码级 trigger 校验就放行 → 红。"""
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        g()\n"
+                     "    except Exception:\n"
+                     "        pass\n")
+    report = _scan(tmp_path)
+    violations = scanner.check_ratchet(report, _registry_baseline())
+    assert any("登记无对应有效白名单" in v for v in violations)
+
+
+def test_registry_expired_is_violation(tmp_path):
+    report = _whitelisted_scan(tmp_path)
+    violations = scanner.check_ratchet(
+        report, _registry_baseline(deadline="2000-01-01"))
+    assert any("登记已过期限" in v for v in violations)

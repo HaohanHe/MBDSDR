@@ -117,6 +117,7 @@ class ScanReport:
     whitelist_invalid: int = 0
     whitelist_overdue: int = 0
     whitelist_stale: int = 0
+    registered: int = 0
     ratchet_violations: List[str] = field(default_factory=list)
     scope: str = "filesystem"      # git-tracked / filesystem（非 git 环境回退）
     defects: List[Finding] = field(default_factory=list)
@@ -571,9 +572,71 @@ def load_baseline(path: Path) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
-def check_ratchet(report: ScanReport, baseline: Dict[str, Any]) -> List[str]:
-    """返回所有超基线项；空列表 = 只降没升。"""
+_REGISTRY_FIELDS = ("path", "symbol", "severity", "current_ew", "boundary",
+                    "degrade", "fallback", "owner", "deadline")
+
+
+def _check_registry(report: ScanReport, baseline: Dict[str, Any],
+                    today: date) -> List[str]:
+    """校验 ``registry`` 登记账本：三问 + owner + 期限，且必须与白名单同源。
+
+    登记不是「抬基线」：``files``/``total`` 一格不动，真正放行靠
+    ``scripts/swallow_whitelist.json``（源码级校验 trigger）。这里只保证
+    每条登记有据可查、到期复核、不会凭空豁免。
+    """
     violations: List[str] = []
+    entries = baseline.get("registry") or []
+    excused = {(f.path, f.symbol, f.line)
+               for f in report.all_findings if f.whitelisted}
+    seen: set = set()
+    ok = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            violations.append("登记账本项不是对象")
+            continue
+        missing = [k for k in _REGISTRY_FIELDS
+                   if not str(entry.get(k) or "").strip()]
+        if missing:
+            violations.append(
+                f"登记缺项 {entry.get('path', '?')}:{entry.get('line', '?')}"
+                f"：{', '.join(missing)}")
+            continue
+        if entry.get("severity") not in ("ERROR", "WARN"):
+            violations.append(f"登记 severity 非法：{entry.get('severity')!r}")
+            continue
+        try:
+            line = int(entry.get("line"))
+        except (TypeError, ValueError):
+            violations.append(f"登记 line 非法：{entry.get('line')!r}")
+            continue
+        try:
+            deadline = date.fromisoformat(str(entry["deadline"]).strip())
+        except ValueError:
+            violations.append(f"登记期限不是 YYYY-MM-DD：{entry['deadline']!r}")
+            continue
+        if deadline < today:
+            violations.append(
+                f"登记已过期限 {deadline.isoformat()}：{entry['path']}:{line}")
+            continue
+        key = (entry["path"], entry["symbol"], line)
+        if key in seen:
+            violations.append(f"登记重复：{entry['path']}:{line}")
+            continue
+        seen.add(key)
+        if key not in excused:
+            violations.append(
+                f"登记无对应有效白名单：{entry['path']}:{line} {entry['symbol']}"
+                "（先按三问进 scripts/swallow_whitelist.json，登记不能替代白名单）")
+            continue
+        ok += 1
+    report.registered = ok
+    return violations
+
+
+def check_ratchet(report: ScanReport, baseline: Dict[str, Any],
+                  today: Optional[date] = None) -> List[str]:
+    """返回所有超基线项；空列表 = 只降没升。"""
+    violations: List[str] = _check_registry(report, baseline, today or date.today())
     files = baseline.get("files") or {}
     current: Dict[str, Dict[str, int]] = {}
     for f in report.defects:
@@ -627,7 +690,9 @@ def print_report(report: ScanReport, list_all: bool = False) -> None:
           + (f" / {report.whitelist_invalid} 处不合格" if report.whitelist_invalid else "")
           + (f" / {report.whitelist_overdue} 处到期" if report.whitelist_overdue else "")
           + (f" / {report.whitelist_stale} 处失效（代码已变）" if report.whitelist_stale else ""))
-    print(f"存量须修：{report.defect_count} 处")
+    print(f"存量须修：{report.defect_count} 处"
+          + (f"（其中 {report.registered} 处已按三问登记）"
+             if report.registered else ""))
 
     if report.ratchet_violations:
         print(f"\n[棘轮越线] {len(report.ratchet_violations)} 项")

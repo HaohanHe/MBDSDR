@@ -18,9 +18,13 @@ AI 可经工具：列出/搜索书签、按名称或频率跳转（同时设置�
 from __future__ import annotations
 
 import json
+import logging
+import math
 import os
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,6 +55,15 @@ class Bookmark:
 
 def _m(mhz: float) -> float:
     return float(mhz) * 1e6
+
+
+def _num(value) -> Optional[float]:
+    """把书签字段转成有限浮点；缺失/非法返回 None（绝不默认成 0）。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
 
 
 def _default_bookmarks() -> List[Bookmark]:
@@ -190,29 +203,57 @@ class FrequencyManager:
                                      "bookmarks.json")
         self.user_path = user_path
         self.bookmarks: List[Bookmark] = _default_bookmarks()
+        #: 上次读取用户书签的失败原因（""=无错）。供 UI 出 UNAVAILABLE，
+        #: 而不是把「读不出来」静默成「没有书签」。
+        self.load_error = ""
         self._load_user()
 
     def _load_user(self):
+        """读取用户书签；失败留痕，缺频率的条目跳过而不是落成 0.0。
+
+        0 Hz 单点书签在 nearest()/get_bookmarks_in_range() 里永远匹配不到，
+        用户只会看到「书签没了」却无任何报错——那是假数据，不是降级。
+        """
+        self.load_error = ""
         try:
             with open(self.user_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if isinstance(data, dict):
-                # BookmarkManager 写的是 {"tag_colors": ..., "bookmarks": [...]}；
-                # 同一个人口文件，两种格式都得能读，否则书签面板一存就互相踢死。
-                data = data.get("bookmarks", [])
-            for d in data:
-                if not isinstance(d, dict):
-                    continue
-                self.bookmarks.append(Bookmark(
-                    name=d.get("name", ""),
-                    freq_hz=d.get("freq_hz", d.get("frequency_hz", 0.0)),
-                    mode=d.get("mode", d.get("modulation", "")),
-                    category=d.get("category", d.get("group", "自定义")),
-                    bandwidth_hz=d.get("bandwidth_hz", 0.0),
-                    start_hz=d.get("start_hz", 0.0), end_hz=d.get("end_hz", 0.0),
-                    note=d.get("note", ""), builtin=False))
-        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
-            pass
+        except FileNotFoundError:
+            return                      # 首次运行：没有文件不是错误
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            self.load_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("书签文件读取失败（%s）：%s", self.user_path, self.load_error)
+            return
+        if isinstance(data, dict):
+            # BookmarkManager 写的是 {"tag_colors": ..., "bookmarks": [...]}；
+            # 同一个人口文件，两种格式都得能读，否则书签面板一存就互相踢死。
+            data = data.get("bookmarks", [])
+        if not isinstance(data, list):
+            self.load_error = f"书签文件顶层不是列表：{type(data).__name__}"
+            logger.warning("%s（%s）", self.load_error, self.user_path)
+            return
+        skipped = 0
+        for d in data:
+            if not isinstance(d, dict):
+                skipped += 1
+                continue
+            freq = _num(d.get("freq_hz", d.get("frequency_hz")))
+            start = _num(d.get("start_hz")) or 0.0
+            end = _num(d.get("end_hz")) or 0.0
+            if freq is None and not end > start > 0:
+                skipped += 1
+                continue
+            self.bookmarks.append(Bookmark(
+                name=str(d.get("name", "")),
+                freq_hz=freq if freq is not None else 0.0,
+                mode=str(d.get("mode", d.get("modulation", ""))),
+                category=str(d.get("category", d.get("group", "自定义"))),
+                bandwidth_hz=_num(d.get("bandwidth_hz")) or 0.0,
+                start_hz=start, end_hz=end,
+                note=str(d.get("note", "")), builtin=False))
+        if skipped:
+            self.load_error = f"跳过 {skipped} 条缺少有效频率/字段非法的书签"
+            logger.warning("%s（%s）", self.load_error, self.user_path)
 
     def _save_user(self):
         users = [b.to_dict() for b in self.bookmarks if not b.builtin]
