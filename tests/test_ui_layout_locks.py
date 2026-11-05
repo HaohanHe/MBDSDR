@@ -152,15 +152,17 @@ def _clear_user_bookmarks(win) -> None:
     清一次是最后一道闸：任何绕过 expanduser 的读取路径也不会把账号数据
     拍进基线（用户数据版本另见 tests/test_bookmark_dirty_data.py）。
     """
-    for fn in (
-        lambda: win.spectrum.set_bookmarks([]),
-        lambda: win.control_panel.load_bookmarks_from_list([]),
-        lambda: win._bookmarks.clear(),
+    for action, fn in (
+        ("spectrum.set_bookmarks", lambda: win.spectrum.set_bookmarks([])),
+        ("control_panel.load_bookmarks_from_list",
+         lambda: win.control_panel.load_bookmarks_from_list([])),
+        ("_bookmarks.clear", lambda: win._bookmarks.clear()),
     ):
         try:
             fn()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - 清书签失败不阻断基线，但要留证
+            log.warning("test_ui_layout_locks.py 清书签失败（%s）：%s: %s",
+                        action, type(exc).__name__, exc)
 
 
 @pytest.fixture(scope="module", params=SIZES,
@@ -175,8 +177,9 @@ def main_window(request):
     for t in getattr(win, "_startup_timers", []):
         try:
             t.stop()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - 停定时器失败不阻断基线，但要留证
+            log.warning("test_ui_layout_locks.py 停启动定时器失败：%s: %s",
+                        type(exc).__name__, exc)
     _clear_user_bookmarks(win)
     # 主题显式钉住：基线只认产品默认主题，不认跑它的人上次存的什么。
     # 隔离目录已读不到 DesktopSettings，这里再兜一道（隔离被绕过时扳回来）。
@@ -278,8 +281,9 @@ def test_request_800_is_clamped_to_declared_1000():
         for t in getattr(win, "_startup_timers", []):
             try:
                 t.stop()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - 停定时器失败不阻断断言，但要留证
+                log.warning("test_ui_layout_locks.py 停启动定时器失败：%s: %s",
+                            type(exc).__name__, exc)
         _clear_user_bookmarks(win)
         if getattr(win, "_current_theme", None) != DEFAULT_THEME:
             win._apply_theme(DEFAULT_THEME)
@@ -299,8 +303,9 @@ def test_request_800_is_clamped_to_declared_1000():
         if win is not None:
             try:
                 win._disconnect()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+                log.warning("test_ui_layout_locks.py 用例收尾失败（MainWindow._disconnect）：%s: %s",
+                            type(exc).__name__, exc)
             win.close()
             win.deleteLater()
             app.sendPostedEvents(None, QEvent.DeferredDelete)

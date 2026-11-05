@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import logging
 import os
 import re
 import sys
@@ -51,6 +52,8 @@ os.environ.setdefault("QT_SCALE_FACTOR", "1.0")
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DOC = os.path.join(_ROOT, "docs", "interaction-audit.md")
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 登记表
@@ -155,7 +158,9 @@ INTERNAL_BUTTONS = {
 def _receivers(obj, sig: str) -> int:
     try:
         return int(obj.receivers(sig))
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - 控件可能已被销毁，按「未知」保守计，但要留证
+        log.warning("读取信号接收者失败（%s）：%s: %s",
+                    sig, type(exc).__name__, exc)
         return -1
 
 
@@ -246,7 +251,9 @@ def iter_controls(win, label_actions=True):
 def _is_visible(w) -> bool:
     try:
         return bool(w.isVisible())
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - 控件可能已被销毁，按「不可见」保守计，但要留证
+        log.warning("读取控件可见性失败（%s）：%s: %s",
+                    w.objectName() or type(w).__name__, type(exc).__name__, exc)
         return False
 
 
@@ -299,7 +306,9 @@ def _snapshot(win) -> dict:
                 snap[key] = f"idx={w.currentIndex()}"
             elif isinstance(w, QDockWidget):
                 snap[key] = f"visible={int(w.isVisible())}"
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - 单个控件快照失败不阻断整表，但要留证
+            log.warning("控件快照失败（%s）：%s: %s",
+                        _widget_key(w), type(exc).__name__, exc)
             continue
     for a in win.findChildren(QAction):
         if a.text() and not a.isSeparator():
@@ -344,7 +353,9 @@ def _still_alive(obj) -> bool:
     try:
         import shiboken6
         return bool(shiboken6.isValid(obj))
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - shiboken 缺失/版本差异按「未销毁」处理，但要留证
+        log.warning("判定控件存活失败（shiboken6.isValid）：%s: %s",
+                    type(exc).__name__, exc)
         return True
 
 
@@ -418,7 +429,10 @@ def _perturb_container(btn) -> str:
                 w.setValue(nxt)
                 return (f"扰动 {w.objectName() or type(w).__name__}: "
                         f"{cur} -> {nxt}")
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 单个控件扰动失败不阻断审计，但要留证
+                log.warning("扰动数值控件失败（%s）：%s: %s",
+                            w.objectName() or type(w).__name__,
+                            type(exc).__name__, exc)
                 continue
 
         for w in p.findChildren(QComboBox):
@@ -429,7 +443,10 @@ def _perturb_container(btn) -> str:
                 w.setCurrentIndex((old + 1) % w.count())
                 return (f"扰动 {w.objectName() or type(w).__name__}: "
                         f"idx {old} -> {w.currentIndex()}")
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 单个控件扰动失败不阻断审计，但要留证
+                log.warning("扰动下拉控件失败（%s）：%s: %s",
+                            w.objectName() or type(w).__name__,
+                            type(exc).__name__, exc)
                 continue
 
         for w in p.findChildren(QCheckBox):
@@ -440,7 +457,10 @@ def _perturb_container(btn) -> str:
                 w.blockSignals(False)
                 return (f"扰动 {w.objectName() or type(w).__name__}: "
                         f"checked {int(old)} -> {int(w.isChecked())}")
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 单个控件扰动失败不阻断审计，但要留证
+                log.warning("扰动勾选控件失败（%s）：%s: %s",
+                            w.objectName() or type(w).__name__,
+                            type(exc).__name__, exc)
                 continue
     return ""
 
@@ -515,8 +535,10 @@ def _spy_signals(obj) -> tuple[dict, list]:
             obj.clicked.connect(_spy("clicked"))
             obj.toggled.connect(_spy("toggled"))
             obj.pressed.connect(_spy("pressed"))
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001 - 个别信号连不上不阻断审计，但要留证
+        log.warning("挂接信号探针失败（%s）：%s: %s",
+                    obj.objectName() or type(obj).__name__,
+                    type(exc).__name__, exc)
     return counts, conns
 
 
@@ -1022,8 +1044,9 @@ def build_main_window():
     for timer in getattr(win, "_startup_timers", []):
         try:
             timer.stop()       # 不自动枚举/连接真硬件
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001 - 停启动定时器失败不阻断审计，但要留证
+            log.warning("停启动定时器失败：%s: %s",
+                        type(exc).__name__, exc)
     win._panels_set_sdr_connected(False)
     app.processEvents()
     return app, win
@@ -1038,8 +1061,9 @@ def run() -> tuple[list[dict], dict]:
     finally:
         try:
             win._disconnect()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+            log.warning("审计收尾失败（MainWindow._disconnect）：%s: %s",
+                        type(exc).__name__, exc)
     return rows, problems
 
 
