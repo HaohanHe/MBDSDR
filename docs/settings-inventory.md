@@ -13,7 +13,7 @@
 | 其中已暴露到设置面板 | **31 条** | 23 条落 DesktopSettings，2 条落 gui_config，5 条落 AI config；去重后 35 个 schema 项 |
 | 判定锁死、不暴露 | **6 类** | 理由见 §4（不是偷懒，每条都有具体消费点缺失或双入口风险） |
 | schema 总条目 | **48** | 35 暴露 + 13 内部键（频率/增益/音量等已有即时控件） |
-| 设置面板新增测试 | **45 个** | `tests/test_settings_schema.py`，全绿 |
+| 设置面板新增测试 | **67 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 13 项手改 JSON 非法值矩阵） |
 | 相关回归 | **96 + 29 个** | 配置/主题/布局/触屏/i18n 96；三栏与面板集成 29 |
 
 **接手时的现状（已在本轮修复，记录备查）**：用户点"设置"当时**不是空面板，而是只有
@@ -186,7 +186,7 @@
   `set_snap_interval`），顶部控件改动也反写 settings；应用静噪默认值**不会**把
   「自动静噪」偷偷关掉（推送前记录、推送后恢复）；
   **瀑布深度 → `spectrum.set_waterfall_depth_rows()`**（保留最近历史、重建环形
-  缓冲，回看缓存作废）；**消光 k → `sky_view.set_extinction_k()`**（改完即时按
+  缓冲，回看缓存作废）；**消光 k → `sky_view.set_extinction()`**（改完即时按
   新 k 重算星表可见性与逐星亮度）；**过境筛选三键 → `settings.effective_pass_*`**
   （设置面板写盘后尽力调用 `host.new_spacetime_panel.refresh_passes()`，面板存在
   即即时刷新；消费方只需在刷新时调用函数读值）；
@@ -259,8 +259,9 @@
 - `mbdsdr_ai/skyengine/star_catalog.py`：按 A8 给 `select_for_view()` /
   `effective_limit_mag()` 增加可选 `extinction_k` 参数（默认仍是 `EXTINCTION_K`，
   旧调用方行为不变），透传逐星 `Δm = k/sin(仰角)`。
-- `desktop/rf_sky_view.py`：在既有 `set_bortle()` 旁新增公开 `set_extinction_k()`
-  （不改既有逻辑/私有状态调用），面板与持久化都走它；该文件另有坐标视图线的未提交
+- `desktop/rf_sky_view.py`：在既有 `set_bortle()` 旁新增公开 `set_extinction()`
+  （`set_extinction_k()` 为同一函数的兼容别名；不改既有逻辑/私有状态调用），
+  面板与持久化都走它；该文件另有坐标视图线的未提交
   logging 改动，本线提交时只取自己那段 hunk，不覆盖对方修改。
 - **`gain_db` 一行接线**：已派给操作逻辑线，位置 `main_window.py::_on_gain_changed`
   （增益改动写回 `SharedDemodConfig.gain_db`，变化才触发静噪基线重标）。本线只登记
@@ -360,4 +361,112 @@ from settings import (
 
 冻结表缺口（C）：`tests/test_hardcoded_parameter_registry.py` 在 `5ece441` 已同时
 冻结 `kPeakThresholdDefault=15` 与 `kPeakRelDb=6.0`，本线复核通过，未改动该文件。
+
+## 11. 分组与呈现架构（2026-11-05 实测）
+
+入口分层：右栏停靠页签「设置」（`SettingsPanel`）→ 组页签（`QTabWidget`）→
+组内滚动区（`QScrollArea`）→ 每项一行（`QGroupBox`：控件 + 「默认」按钮 + help 文案）。
+**服务与远程访问不在这个面板**：四个键在独立停靠页签「服务设置」
+（`ServiceSettingsPanel`），避免两个面板各持一套 `RemoteControl`/`WebServer`；
+「存储与日志」是特殊页签（`_build_storage_tab`），只有录音目录一项。
+每行 help 由 `QLabel(item.help)` 渲染，因此 §12 的联动提示**只改 schema 文案即可显示**，
+不需要动布局。
+
+| 分组 | 面板位置 | 项数 | 项（生效方式） | 找一个项要几层 |
+|---|---|---|---|---|
+| 通用 | 设置页签「通用」 | 2 | 界面语言（**需重启应用**）、触屏适配（即时） | 3 |
+| 显示与主题 | 设置页签 | 2 | 主题（即时）、显示瀑布图（即时） | 3 |
+| 星象仪 | 设置页签 | 4 | 大气压（即时）、气温（即时）、光害等级 Bortle（即时）、大气消光 k（即时） | 3 |
+| 频谱与解码 | 设置页签 | 12 | FFT 点数/窗/平均帧数、瀑布配色/深度/平滑、峰值阈值/标注、书签/频段彩带、静噪默认、调谐步进（均即时） | 3 |
+| 卫星与多普勒 | 设置页签 | 5 | 地面站纬度/经度（即时写 `gui_config` 并重算）、过境最低仰角/搜索窗口/显示低仰角（即时保存，过境列表**下次刷新**生效） | 3 |
+| AI | 设置页签 | 5 | 温度/top_p/输出上限/上下文/超时（即时写 `config.json`，下一轮请求即用） | 3 |
+| 存储与日志 | 设置页签（特殊页） | 1 | 录音目录（只影响新录音） | 3 |
+| 服务与远程访问 | **独立「服务设置」页签** | 4 | 启用 RC/Web（即时启停）、RC/Web 端口（即时保存，**服务需重启**） | **4** |
+
+合计 35 个暴露项（设置面板 31 个，含 AI 与观测站坐标；独立「服务设置」4 个），
+与 §0 口径一致。
+
+**「翻几层」结论**：普通项 3 层（设置入口 → 组页签 → 行）；服务四项 4 层，
+要先切到另一个「服务设置」停靠页签，最容易「在设置里找不到端口」。
+
+### 11.1 错位分组（只记录，视觉冻结不动布局）
+
+| # | 现状 | 问题 | 建议（文案/信息架构，非本轮改动） |
+|---|---|---|---|
+| 1 | `ui_language`（需重启）与 `touch_mode`（即时）同在「通用」 | 生效方式不同的项混排；用户可能以为语言已切换 | 面板已有橙色「重启后生效」行内提示，不误导；若要更清楚可把重启项单列一节 |
+| 2 | `show_waterfall` 在「显示与主题」，`waterfall_depth_rows`/`waterfall_smooth` 在「频谱与解码」 | 同一「瀑布」概念拆两个页签，用户找深度要换页 | 保留现状（瀑布深度属频谱渲染参数）；help 已互相点名 |
+| 3 | `squelch_default_db`/`tuning_step_hz` 在「频谱与解码」，实际控件在顶部控制面板 | 用户可能先去「通用」找静噪/步进 | help 写明「与顶部控件双向同步/换算入口」 |
+| 4 | `observer_lat/lon` 在「卫星与多普勒」，同时驱动星象仪过境列表 | 天空线用户会去「星象仪」找坐标 | help 写明两者共同决定过境；不搬组 |
+| 5 | 服务四项不在设置面板 | 4 层入口，用户找不到端口 | 属于既有设计（单一服务实例）；保持 |
+
+## 12. 依赖约束表（改 A 必须同时改 B 才成立）
+
+机械护栏：`tests/test_settings_schema.py::test_dependency_help_carries_cross_hint`
+断言下列 10 对项**两侧 help 都点名对方 label 且含「联动」**。面板每行 help 是
+`QLabel(item.help)`，所以提示直接可见，不涉及布局/颜色/尺寸。
+
+| # | 项对（A ↔ B） | 约束 | 只改 A 不改 B 的后果 | 面板联动提示（已落地） |
+|---|---|---|---|---|
+| 1 | `show_low_elevation_passes` ↔ `pass_min_elevation_deg` | 开启低仰角时实际门降到 5°（`PASS_LOW_ELEVATION_FLOOR_DEG`）；`pass_min` 本身 ≤5° 时开低仰角不再增加任何过境 | 门已是 5° 时勾选开关「没反应」，用户以为坏了 | `show_low...` 点名「过境最低仰角」；`pass_min...` 点名「显示低仰角过境」 |
+| 2 | `sky_extinction_k` ↔ `bortle` | 两项独立叠加：Bortle 定天顶极限星等，k 只按 `Δm=k/sin(仰角)` 压低低空天体 | 只调 Bortle 时低仰角变化不足；只调 k 时天顶星数不变——都正常，但不能互相替代 | `bortle` 点名「大气消光系数 k」；`sky_extinction_k` 点名「光害等级（Bortle）」 |
+| 3 | `fft_size` ↔ `fft_avg_frames` | 延迟随两者乘积增长：4096 点 + 16 帧最慢 | 只调点数以为「只是更细」，实际刷新明显变慢 | 两侧都写明「叠加」 |
+| 4 | `show_waterfall` ↔ `waterfall_depth_rows` | 瀑布关闭时深度没有可见效果，但数值保留 | 关闭瀑布后改深度「看不出变化」，误以为设置失效 | 两侧互相点名，注明关闭时保留取值 |
+| 5 | `show_peaks` ↔ `peak_threshold_db` | 阈值只在「标注峰值」开启时才参与绘制 | 只调阈值但峰值开关关着，谱面毫无变化 | 两侧互相点名 |
+| 6 | `waterfall_smooth` ↔ `show_waterfall` | 平滑只在瀑布绘制时生效 | 关闭瀑布后改平滑无效果 | 两侧互相点名 |
+| 7 | `rc_enabled` ↔ `rc_port` | 端口只在启用远程控制时监听；运行中改端口必须重启该服务 | 只改端口不重启 → 实际仍监听旧端口 | `rc_enabled` 点名「远程控制端口」；`rc_port` 点名「启用远程控制（TCP）」 |
+| 8 | `web_enabled` ↔ `web_port` | 同上（Web 服务） | 同上 | 两侧互相点名 |
+| 9 | `observer_lat` ↔ `observer_lon` | 经纬度缺一不可算过境；只填一个时过境列表保持空态 | 只填纬度 → 没有任何过境，用户以为 TLE 坏了 | 两侧写明「缺任一项过境列表都为空」 |
+| 10 | `ai_temperature` ↔ `ai_top_p` | 两个采样参数共同决定回答风格 | 只调温度可能与 top_p 截断冲突，效果被抵消 | 两侧互相点名 |
+
+不在约束表内的「伪依赖」（避免过度联动）：`squelch_default_db` 与增益/模式之间是
+**基线重标**关系（切模式或改增益会重标噪声基线），不是同一组设置必须同时改；
+`bortle` 与 `sky_pressure_hpa/temperature_c` 是独立物理量，互不覆盖。
+
+## 13. 手改 JSON 非法值实测（逐项：夹取 / 回默认 / 拒绝）
+
+同主版本迁移已覆盖「旧导出文件缺字段」；本节补的是**用户直接手改
+`desktop_settings.json` 写入非法值**的路径。`DesktopSettings.load` 对每个已知键调用
+`_coerce` → `validate_value`，归一成功即落地，原因写入 `migration_notes`（不静默）。
+以下每行都有参数化测试
+`test_hand_edited_json_outliers_are_clamped_and_recorded` 钉住。
+
+| 键 | 非法输入 | 实测落地 | 处理方式 | 原因可见 |
+|---|---|---|---|---|
+| `bortle` | `99` | `9` | 夹到上限 | 是（“高于上限 9，已夹到上限”） |
+| `sky_extinction_k` | `9.0` | `0.5` | 夹到上限 | 是 |
+| `pass_min_elevation_deg` | `-5` | `0.0` | 夹到下限 | 是 |
+| `pass_window_hours` | `999` | `72` | 夹到上限 | 是 |
+| `peak_threshold_db` | `100` | `30.0` | 夹到上限 | 是 |
+| `squelch_default_db` | `100` | `-20` | 夹到上限（内核常量上界） | 是 |
+| `rc_port` | `70000` | `65535` | 夹到上限 | 是 |
+| `web_port` | `0` | `1` | 夹到下限 | 是 |
+| `waterfall_depth_rows` | `384` | `256` | **非档位值回默认**（六档枚举） | 是 |
+| `fft_size` | `8192` | `2048` | 非档位值回默认（三档枚举） | 是 |
+| `ui_language` | `"fr"` | `"zh"` | 未知枚举回默认 | 是 |
+| `tuning_step_hz` | `5000` | `10000` | 非档位值回默认（七档枚举） | 是 |
+| `show_low_elevation_passes` | `"maybe"` | `False` | 无法识别布尔 → 回默认 | 是 |
+| `show_waterfall` | `"yes"` | `True` | 合法别名（`1/true/yes/on`），**不记原因** | 否（预期） |
+| `record_dir` | `123` | `"123"` | text 强制转字符串 | 否（预期） |
+| 枚举字符串 `"2048"` | `"2048"`（fft_size） | `2048`（int） | 容忍数字字符串，不记原因 | 否（预期） |
+
+**已确认的缺口（本线不改，登记给对应线）**：
+
+1. **内部键没有上下限**：`frequency_hz` / `gain_db` / `bandwidth_hz` / `sample_rate_hz`
+   等 13 个内部键没有 `minimum/maximum`，手改 `frequency_hz: 1e9`、`gain_db: 999`
+   会被原样接受（测试 `test_internal_keys_from_hand_edited_json_are_not_bounded` 钉住
+   现状）。它们由控制面板/设备层写入、UI 侧自带范围，但手改 JSON 可绕过——是否在
+   schema 补范围需与设备线确认（补错范围会把合法的频率/带宽夹坏）。
+2. **内部 text 键不收窄**：`demod_mode` / `agc_speed` / `app_mode` 是 text，
+   手改 `"FMX"` 会原样接受；消费点在 `main_window`/后端，本线不越界改。
+   若要做枚举，应先由消费方给出完整合法集合，避免把可用模式误拒。
+3. **“拒绝”路径只有跨主版本**：同主版本内一律归一（夹取/回默认），不拒绝单个键；
+   这是有意选择——手改一个键不应让整份配置导入失败。跨主版本由
+   `parse_import` 整体拒绝并给出原因与替代做法（§10）。
+
+## 14. A7 / A8 遗留收尾确认
+
+| 遗留 | 状态 | 证据 |
+|---|---|---|
+| A7 瀑布深度六档枚举的非法值处理 | **已收** | schema `choices=(128,256,512,1024,2048,4096)`，帮助文案写明「非档位值（如 384）回落 256 并在状态栏说明原因」；`test_waterfall_depth_schema_is_six_tier_enum` + 本轮参数化 `384 → 256`（带 `migration_notes`） |
+| A8 消光范围与 `set_extinction` 对齐 | **已收** | schema `minimum=0.0, maximum=0.5`（与 `rf_sky_view.EXTINCTION_K_MIN/MAX` 一致）；`RFSkyView.set_extinction()` 越界夹取并回显，`set_extinction_k()` 是**同一函数对象**的别名（`test_set_extinction_clamps_and_returns_effective_value`）；本轮参数化 `9.0 → 0.5`；端到端星数测试 `test_extinction_setting_end_to_end_changes_visible_star_count` 仍绿 |
 
