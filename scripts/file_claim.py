@@ -28,9 +28,11 @@
   python scripts/file_claim.py status desktop/main_window.py
   python scripts/file_claim.py audit-stale            # 定期跑：过期 claim 却仍在改文件
   python scripts/file_claim.py audit-stale --json
+  python scripts/file_claim.py takeover desktop/main_window.py --owner 接管线 \
+      --reason "原持有者进程已死，工作区干净"
 
-退出码：0 成功；2 被拒绝（被他人占用 / 非持有者 / 本就没有 claim）；1 用法错误；
-3 = `audit-stale` 发现「claim 已过期但文件 mtime 晚于 acquired_at」的漂移。
+退出码：0 成功；2 被拒绝（被他人占用 / 非持有者 / 本就没有 claim / 接管判据不足）；
+1 用法错误；3 = `audit-stale` 发现「claim 已过期但文件 mtime 晚于 acquired_at」的漂移。
 """
 from __future__ import annotations
 
@@ -38,20 +40,24 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(
+    os.environ.get("MBDSDR_CLAIM_ROOT") or Path(__file__).resolve().parents[1]
+)
 # 硬默认：与 qt_test.lock 同目录，且在 D 盘。环境变量只给测试用。
 DEFAULT_LOCKS_DIR = Path(r"D:\mbdsdr\.locks")
 LOCKS_DIR = Path(os.environ.get("MBDSDR_LOCKS_DIR") or DEFAULT_LOCKS_DIR)
 REGISTRY_PATH = LOCKS_DIR / "claims.json"
 MARKER_DIR = LOCKS_DIR / "claims"
 REGISTRY_MUTEX = LOCKS_DIR / "claims.mutex"
+TAKEOVER_LOG = LOCKS_DIR / "claim_takeovers.log"
 
 LOCK_TIMEOUT_S = 15.0
 EXIT_OK = 0
@@ -80,6 +86,77 @@ def _duration(seconds: float) -> str:
     if seconds < 60:
         return f"{seconds:.1f} 秒"
     return f"{seconds / 60.0:.1f} 分钟"
+
+
+# ---------------------------------------------------------------------------
+# 进程身份（防 pid 复用）
+# ---------------------------------------------------------------------------
+
+def _win_proc_snapshot(pid: int) -> Tuple[str, Optional[float], Optional[str]]:
+    """Windows 无 psutil 时的兜底：用 GetProcessTimes 取进程创建时间。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return "unknown", None, None
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return "gone", None, None
+    try:
+        creation = wintypes.FILETIME()
+        exit_t = wintypes.FILETIME()
+        kernel_t = wintypes.FILETIME()
+        user_t = wintypes.FILETIME()
+        ok = kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_t),
+            ctypes.byref(kernel_t),
+            ctypes.byref(user_t),
+        )
+        if not ok:
+            return "alive", None, None
+        ticks = creation.dwHighDateTime * 2 ** 32 + creation.dwLowDateTime
+        return "alive", ticks / 1e7 - 11644473600.0, None
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _posix_proc_snapshot(pid: int) -> Tuple[str, Optional[float], Optional[str]]:
+    """POSIX 无 psutil 时的兜底：/proc 存在性 + 命令行。创建时间取不到。"""
+    base = Path(f"/proc/{pid}")
+    if not base.exists():
+        return "gone", None, None
+    try:
+        raw = (base / "cmdline").read_bytes()
+        cmdline = raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+    except OSError:
+        cmdline = None
+    return "alive", None, cmdline or None
+
+
+def _proc_snapshot(pid: int) -> Tuple[str, Optional[float], Optional[str]]:
+    """返回 (状态, 创建时间, 命令行)；状态 ∈ {"alive","gone","unknown"}。
+
+    只看 pid 号会不会「活着」不够：pid 会被系统复用。判据因此落在
+    **创建时间**上——同一 pid、创建时间不同 = 原进程已死、号被复用。
+    """
+    try:
+        import psutil
+    except ImportError:
+        return _win_proc_snapshot(pid) if os.name == "nt" else _posix_proc_snapshot(pid)
+    try:
+        proc = psutil.Process(pid)
+        return "alive", proc.create_time(), " ".join(proc.cmdline())
+    except psutil.NoSuchProcess:
+        return "gone", None, None
+    except psutil.ZombieProcess:
+        return "gone", None, None
+    except psutil.AccessDenied:
+        return "alive", None, None
+    except OSError:
+        return "unknown", None, None
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +308,7 @@ def _peek_marker(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _marker_payload(display: str, key: str, owner: str, ttl_min: float, now: float) -> Dict[str, Any]:
+    state, create_time, cmdline = _proc_snapshot(os.getpid())
     return {
         "path": display,
         "key": key,
@@ -239,6 +317,9 @@ def _marker_payload(display: str, key: str, owner: str, ttl_min: float, now: flo
         "heartbeat_at": now,
         "ttl_min": ttl_min,
         "pid": os.getpid(),
+        # pid 会被系统复用；接管时必须靠创建时间确认「还是不是那个进程」。
+        "pid_create_time": create_time,
+        "pid_cmdline": cmdline,
     }
 
 
@@ -305,20 +386,27 @@ def _entry(data: Dict[str, Any], key: str) -> Dict[str, Any]:
     return entry
 
 
-def _close_active(entry: Dict[str, Any], now: float, reason: str) -> None:
+def _close_active(entry: Dict[str, Any], now: float, reason: str, extra: Optional[Dict[str, Any]] = None) -> None:
     for item in reversed(entry["history"]):
         if item.get("released_at") is None:
             item["released_at"] = now
             item["closed_reason"] = reason
+            if extra:
+                item["takeover"] = extra
             return
 
 
-def _registry_record_claim(payload: Dict[str, Any], replaced: Optional[Dict[str, Any]]) -> None:
+def _registry_record_claim(
+    payload: Dict[str, Any],
+    replaced: Optional[Dict[str, Any]],
+    close_reason: str = "expired_steal",
+    takeover: Optional[Dict[str, Any]] = None,
+) -> None:
     def mutate(data: Dict[str, Any]) -> None:
         entry = _entry(data, payload["key"])
         entry["path"] = payload["path"]
         if replaced is not None:
-            _close_active(entry, payload["heartbeat_at"], "expired_steal")
+            _close_active(entry, payload["heartbeat_at"], close_reason, takeover)
         entry["history"].append(
             {
                 "owner": payload["owner"],
@@ -469,6 +557,193 @@ def cmd_release(path: str, owner: str) -> int:
     return EXIT_OK
 
 
+def _inflight_lines(display: str) -> Optional[List[str]]:
+    """工作区是否还有该文件的未提交改动；None = 查不到（git 不可用）。"""
+    try:
+        proc = subprocess.run(
+            ["git", "status", "--porcelain", "--", display],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _orphan_criteria(payload: Dict[str, Any], display: str, now: float) -> Dict[str, Any]:
+    """逐条判定孤儿 claim：心跳过期 / 原进程已死或 pid 被复用 / 无在途改动。"""
+    heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
+    ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
+    held_s = max(0.0, now - heartbeat)
+    expired = held_s > ttl_s
+
+    pid = payload.get("pid")
+    recorded_create = payload.get("pid_create_time")
+    if pid is None:
+        state, current_create, cmdline = "unknown", None, None
+    else:
+        state, current_create, cmdline = _proc_snapshot(int(pid))
+
+    if state == "gone":
+        pid_ok, pid_detail = True, f"pid {pid} 已不存在"
+    elif state == "alive":
+        if recorded_create is None or current_create is None:
+            pid_ok = False
+            pid_detail = f"pid {pid} 仍存活，且无法排除 pid 复用（claim 未记录/取不到创建时间）"
+        elif abs(float(current_create) - float(recorded_create)) > 0.5:
+            pid_ok = True
+            pid_detail = (
+                f"pid {pid} 号已活着但创建时间不同（{recorded_create:.0f} vs {current_create:.0f}）"
+                " = 原进程已死、号被复用"
+            )
+        else:
+            pid_ok = False
+            pid_detail = f"pid {pid} 仍是原进程（创建时间一致），疑似繁忙而非死亡"
+    else:
+        pid_ok, pid_detail = False, f"无法确认 pid {pid} 的状态"
+
+    lines = _inflight_lines(display)
+    if lines is None:
+        inflight_ok, inflight_detail = False, "无法查询工作区（git status 失败）"
+    elif not lines:
+        inflight_ok, inflight_detail = True, "工作区无未提交改动"
+    else:
+        inflight_ok = False
+        inflight_detail = "有在途改动：" + "；".join(lines[:5])
+
+    return {
+        "expired": {"ok": expired, "detail": f"心跳 {_iso(heartbeat)}，已 {_minutes(held_s)}min / TTL {_minutes(ttl_s)}min"},
+        "pid_dead_or_reused": {"ok": pid_ok, "detail": pid_detail},
+        "no_inflight": {"ok": inflight_ok, "detail": inflight_detail},
+        "state": state,
+        "create_time": current_create,
+        "cmdline": cmdline,
+        "heartbeat": heartbeat,
+        "ttl_s": ttl_s,
+        "held_s": held_s,
+    }
+
+
+def _append_takeover_log(record: Dict[str, Any]) -> None:
+    TAKEOVER_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(TAKEOVER_LOG, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def cmd_takeover(path: str, owner: str, ttl_min: float, reason: str = "") -> int:
+    owner = owner.strip()
+    if not owner:
+        print("OWNER 不能为空", file=sys.stderr)
+        return EXIT_USAGE
+    if ttl_min <= 0:
+        print("--ttl-min 必须大于 0", file=sys.stderr)
+        return EXIT_USAGE
+
+    key, display = canonical_path(path)
+    marker = _marker_for(key)
+    if not marker.exists():
+        raise ClaimDenied(f"TAKEOVER DENIED {display}\n  该文件当前没有 claim；直接 claim 即可。")
+
+    now = _now()
+    with _locked_fd(marker, create=False) as fd:
+        data = _read_marker_fd(fd)
+        holder = str(data.get("owner", "<unknown>"))
+        if holder == owner:
+            raise ClaimDenied(
+                f"TAKEOVER DENIED {display}\n  当前持有者就是你（{owner}）；用 claim 续租，不用 takeover。"
+            )
+
+        criteria = _orphan_criteria(data, display, now)
+        passed = [name for name in ("expired", "pid_dead_or_reused", "no_inflight") if criteria[name]["ok"]]
+        # pid 死亡/复用是硬前提；其余两条至少再满足一条（总计 ≥2 条）。
+        allowed = criteria["pid_dead_or_reused"]["ok"] and (
+            criteria["expired"]["ok"] or criteria["no_inflight"]["ok"]
+        )
+        if not allowed:
+            lines = [f"TAKEOVER DENIED {display}", f"  当前持有者={holder} pid={data.get('pid')}"]
+            for name, label in (
+                ("expired", "心跳过期"),
+                ("pid_dead_or_reused", "pid 已死/被复用"),
+                ("no_inflight", "无在途改动"),
+            ):
+                mark = "PASS" if criteria[name]["ok"] else "FAIL"
+                lines.append(f"  [{mark}] {label}：{criteria[name]['detail']}")
+            lines.append(
+                f"  通过 {len(passed)}/3 条（需 pid 条件 + 过期/无在途之一）；"
+                "缺的条目见上。pid 仍存活时一律拒绝，疑似繁忙请等它续租或人工协调。"
+            )
+            raise ClaimDenied("\n".join(lines))
+
+        old = dict(data)
+        payload = _marker_payload(display, key, owner, ttl_min, now)
+        takeover_note = {
+            "old_owner": holder,
+            "old_pid": old.get("pid"),
+            "criteria": {name: criteria[name]["ok"] for name in ("expired", "pid_dead_or_reused", "no_inflight")},
+            "detail": {name: criteria[name]["detail"] for name in ("expired", "pid_dead_or_reused", "no_inflight")},
+            "reason": reason,
+            "at": _iso(now),
+        }
+        record = {
+            "action": "orphan_takeover",
+            "logged_at": _iso(now),
+            "epoch": now,
+            "path": display,
+            "old_owner": holder,
+            "old_pid": old.get("pid"),
+            "old_acquired_at": _iso(float(old.get("acquired_at") or 0)),
+            "old_heartbeat_at": _iso(criteria["heartbeat"]),
+            "new_owner": owner,
+            "new_pid": os.getpid(),
+            "reason": reason,
+            "criteria": takeover_note["criteria"],
+            "detail": takeover_note["detail"],
+        }
+        try:
+            _append_takeover_log(record)
+        except OSError as exc:
+            raise ClaimDenied(
+                f"TAKEOVER DENIED {display}\n  接管日志写入失败，占位文件未改：{exc}"
+            ) from None
+        try:
+            _write_fd(fd, json.dumps(payload, ensure_ascii=False))
+        except OSError as exc:
+            _write_fd(fd, json.dumps(old, ensure_ascii=False))
+            raise ClaimDenied(
+                f"TAKEOVER DENIED {display}\n  占位文件写入失败，已回滚原持有者：{exc}"
+            ) from None
+
+    try:
+        _registry_record_claim(payload, old, close_reason="orphan_takeover", takeover=takeover_note)
+    except ClaimDenied as exc:
+        print(f"WARN 台账写入失败（接管仍有效）：{exc}", file=sys.stderr)
+    if not criteria["no_inflight"]["ok"]:
+        print(
+            "WARN 工作区有在途改动：接管后只能按 hunk 进 index 或私有 index，"
+            "禁止整文件 add / --only 提交（§6.1.1）",
+            file=sys.stderr,
+        )
+    print(
+        f"TAKEOVER OK {display} 原持有者={holder} 新持有者={owner} "
+        f"到期={_iso(now + _ttl(ttl_min, now))}\n"
+        f"  判据："
+        + " ".join(
+            f"{name}={'PASS' if criteria[name]['ok'] else 'FAIL'}"
+            for name in ("expired", "pid_dead_or_reused", "no_inflight")
+        )
+        + f"\n  日志：{TAKEOVER_LOG}"
+    )
+    return EXIT_OK
+
+
 def _describe(payload: Dict[str, Any], now: float) -> str:
     owner = payload.get("owner", "<unknown>")
     ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
@@ -615,6 +890,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.add_argument("--json", action="store_true", help="输出机器可读 JSON")
 
+    takeover = sub.add_parser(
+        "takeover",
+        help="接管孤儿 claim（原进程已死/pid 被复用 + 心跳过期/无在途改动），强制写日志",
+    )
+    takeover.add_argument("path")
+    takeover.add_argument("--owner", required=True, help="接管方线名")
+    takeover.add_argument("--ttl-min", type=float, default=10.0, help="新租期（分钟），默认 10")
+    takeover.add_argument("--reason", default="", help="接管原因（写入日志）")
+
     return parser
 
 
@@ -627,6 +911,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return cmd_release(args.path, args.owner)
         if args.command == "audit-stale":
             return cmd_audit_stale(args.json)
+        if args.command == "takeover":
+            return cmd_takeover(args.path, args.owner, args.ttl_min, args.reason)
         return cmd_status(args.path)
     except ClaimDenied as exc:
         print(str(exc), file=sys.stderr)

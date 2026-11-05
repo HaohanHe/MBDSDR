@@ -818,6 +818,55 @@
   约 78 行并入 `ba238bc5`（内容未改，归属错位，已在
   `docs/parameter-unification.md` 加注记）。
 
+### 6.1.2 孤儿 claim 与合法接管（2026-11-06 立规）
+
+**问题**：持有者进程已死，claim 占位文件仍在，TTL 到期前谁都进不来，到期后
+`claim` 也只是「抢」，没有任何「确认对方真死了」的留痕路径。实测案例：
+`docs/evidence-standard.md` 由真机证据线持有，`pid=25880` 已不存在，
+心跳停在 `01:11:10`（TTL 90 min），文件工作区干净——一个死进程把文件锁死。
+
+**判据（三条，逐条由脚本判定，不靠人眼）**
+
+1. `expired`：`now - heartbeat_at > ttl_min`（TTL 已过期）。
+2. `pid_dead_or_reused`：原 `pid` **不是**那个还活着的进程。只看 pid 号不行——
+   pid 会被系统复用；必须比对进程**创建时间**（claim 时记 `pid_create_time`，
+   接管时用 `psutil`/`GetProcessTimes` 取当前同号进程的创建时间）：
+   - 号下无进程 → 死亡；
+   - 号下有进程但创建时间不同 → 原进程已死、号被复用；
+   - 创建时间相同 → **仍是原进程，一律拒绝**（疑似繁忙）；
+   - 取不到创建时间（旧 claim / 权限不足）→ 无法排除复用，按拒绝处理。
+3. `no_inflight`：`git status --porcelain -- <该文件>` 为空。
+
+**放行条件**：`pid_dead_or_reused` 是硬前提，另加 `expired` / `no_inflight`
+至少一条（总计 ≥2 条）。`pid` 仍存活时，即使心跳过期也**必须拒绝**。
+
+**接管程序（谁有权、怎么留痕、记哪个账）**
+
+- 任何线都可接管，但**只能**走脚本，不许手工删占位文件：
+
+  ```powershell
+  python scripts/file_claim.py takeover <path> --owner <接管线> --reason "<原因>"
+  ```
+
+- 判据不足时退出码 2，并逐条打印 `[PASS]/[FAIL]` 与缺哪一条；
+  拒绝的接管不写日志、不改占位文件。
+- 成功时**强制**写 `.locks/claim_takeovers.log`（JSONL，每笔含原持有者、
+  原 pid、原心跳、三条判据逐条结果与明细、新持有者、新 pid、时间、原因）；
+  日志写失败即回滚占位文件。台账 `claims.json` 的历史项同时记
+  `closed_reason="orphan_takeover"` 与 `takeover` 明细。
+- 接管成功后按 §6.1 在「当前占用」表写一行，注明是从孤儿 claim 接管。
+
+**与 §6.1.1 对齐**：接管只解决「锁」，不解决「对方的在途改动」。判据 3 不满足
+但 `pid` 已死 + 过期时仍允许接管，同时脚本会告警：接管后只能按 hunk 进 index
+或私有 index，**禁止整文件 `git add` / `--only` 提交**，否则会把死者的未提交
+内容一起卷走。
+
+**反证**（`tests/test_file_claim_takeover.py`）：
+
+- (a) `pid` 死 + 心跳过期 → 接管成功，日志含原持有者、三条判据、新持有者与时间；
+- (b) `pid` 活着（创建时间一致）+ 心跳过期 → 退出码 2，打印 `[FAIL] pid 已死/被复用`，
+  不产生成功日志。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`
