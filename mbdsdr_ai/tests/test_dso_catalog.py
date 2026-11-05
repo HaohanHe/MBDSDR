@@ -407,6 +407,106 @@ def test_old_version_deprecated_in_documentation():
     assert "CC BY-SA 4.0" in text
 
 
+# ------------------------------------------------- OpenNGC 随仓副本契约--
+# 这两条把「测试读的列」与「源文件真实列名」钉在一起：上游改列名（哪怕只是
+# 大小写或连字符），这里立刻红，而不是等到 30 抽样对拍时报 KeyError。
+# 数字口径见 docs/data-inventory.md 第 2 节。
+
+OPENNGC_COLUMNS = (
+    "Name", "Type", "RA", "Dec", "Const", "MajAx", "MinAx", "PosAng",
+    "B-Mag", "V-Mag", "J-Mag", "H-Mag", "K-Mag", "SurfBr", "Hubble", "Pax",
+    "Pm-RA", "Pm-Dec", "RadVel", "Redshift", "Cstar U-Mag", "Cstar B-Mag",
+    "Cstar V-Mag", "M", "NGC", "IC", "Cstar Names", "Identifiers",
+    "Common names", "NED notes", "OpenNGC notes", "Sources",
+)
+
+# 本文件所有断言实际读取的列（外加 _read_rows 注入的 _file/_row）。
+TEST_USED_COLUMNS = {
+    "Name", "Type", "RA", "Dec", "Const", "MajAx", "MinAx",
+    "B-Mag", "V-Mag", "M", "NGC", "IC", "Common names",
+}
+
+EXPECTED_INVENTORY = {
+    "total": 14034,
+    "with_coords": 14027,
+    "with_axis_ratio": 11096,
+    "with_magnitude": 11519,
+    "galaxies": 10522,
+    "clusters": 1001,
+    "nebulae": 234,
+    "planetary_nebulae": 130,
+}
+
+
+def _header(path: Path):
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+        return tuple(next(csv.reader(fh, delimiter=";")))
+
+
+def test_openngc_header_contract():
+    """两份随仓副本的列名逐字冻结（32 列，顺序也不许漂）。"""
+    assert _header(NGC_CSV) == OPENNGC_COLUMNS
+    assert _header(ADDENDUM_CSV) == OPENNGC_COLUMNS
+    assert len(OPENNGC_COLUMNS) == 32
+
+
+def test_test_used_columns_exist_in_source_headers():
+    """测试覆盖到的字段必须一一对应真实列名；列名改了这里先红。"""
+    header = _header(NGC_CSV)
+    assert TEST_USED_COLUMNS <= set(header)
+    assert TEST_USED_COLUMNS <= set(_header(ADDENDUM_CSV))
+    # 反向：断言里引用的列若拼错（不在真实表头），下面会失败
+    referenced = {c for c in TEST_USED_COLUMNS if c not in header}
+    assert referenced == set()
+
+
+def test_openngc_inventory_counts():
+    """总条目 / 有坐标 / 有轴比 / 有星等 / 四类天体计数，均来自随仓副本。"""
+    rows = _read_rows(NGC_CSV) + _read_rows(ADDENDUM_CSV)
+    assert len(_read_rows(NGC_CSV)) == 13970
+    assert len(_read_rows(ADDENDUM_CSV)) == 64
+    assert len(rows) == EXPECTED_INVENTORY["total"]
+
+    with_coords = sum(1 for r in rows if r["RA"].strip() and r["Dec"].strip())
+    with_axes = sum(1 for r in rows
+                    if _size(r, "MajAx") is not None
+                    and _size(r, "MinAx") is not None)
+    with_mag = sum(1 for r in rows if _mag(r)[0] is not None)
+    assert with_coords == EXPECTED_INVENTORY["with_coords"]
+    assert with_axes == EXPECTED_INVENTORY["with_axis_ratio"]
+    assert with_mag == EXPECTED_INVENTORY["with_magnitude"]
+
+    types = {t: 0 for t in ("G", "GCl", "OCl", "*Ass", "Cl+N",
+                            "Neb", "HII", "RfN", "EmN", "SNR", "PN")}
+    for row in rows:
+        if row["Type"] in types:
+            types[row["Type"]] += 1
+    assert types["G"] == EXPECTED_INVENTORY["galaxies"]
+    assert sum(types[k] for k in ("GCl", "OCl", "*Ass", "Cl+N")) == \
+        EXPECTED_INVENTORY["clusters"]
+    assert sum(types[k] for k in ("Neb", "HII", "RfN", "EmN", "SNR")) == \
+        EXPECTED_INVENTORY["nebulae"]
+    assert types["PN"] == EXPECTED_INVENTORY["planetary_nebulae"]
+
+
+def test_m102_raw_addendum_record(cat):
+    """M102 的原始记录在 addendum.csv：Type=Dup、M=101，NGC.csv 里没有 M=102。"""
+    dup = [r for r in _read_rows(ADDENDUM_CSV) if r["Name"] == "M102"]
+    assert len(dup) == 1
+    row = dup[0]
+    assert row["Type"] == "Dup"
+    assert row["M"] == "101"
+    assert row["RA"] == "14:03:12.54" and row["Dec"] == "+54:20:56.2"
+    assert row["Const"] == "UMa"
+    assert row["NGC"] == ""
+    assert not [r for r in _read_rows(NGC_CSV)
+                if r["M"].strip() == "102" and r["Type"] != "Dup"]
+    # 项目约定：M102 -> NGC 5866（不是 addendum 指向的 M101）
+    m102 = cat.get("M102")
+    assert m102.source_name == "NGC5866"
+    assert m102.cross_ids == (("ngc", 5866), ("m", 102))
+
+
 # ------------------------------------------------------------------ 守卫--
 
 def _rewrite(payload: dict) -> dict:
