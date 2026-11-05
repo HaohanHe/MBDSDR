@@ -554,7 +554,9 @@ class SpectrumDataGenerator:
         for i in range(nb):
             lo, hi = edges[i], edges[i + 1]
             seg = spec[lo:hi]
-            out[i] = float(seg.max()) if seg.size else -120.0
+            # 哨兵必须与可测范围不相交：空段填 NaN（未采到），不是 -120
+            # dBFS（真实弱信号）。渲染层遇 NaN 不画、峰检测也跳过非有限值。
+            out[i] = float(seg.max()) if seg.size else np.nan
         return out
 
     # ------------------------------------------------------------------ 频率轴
@@ -726,7 +728,8 @@ def _detect_peak_bins(spectrum: np.ndarray,
     sm_right[:-1] = smooth[1:]
     wide = np.nonzero((smooth >= sm_left) & (smooth > sm_right)
                       & (smooth >= thresh)
-                      & (smooth > abs_floor_dbfs))[0]
+                      & (smooth > abs_floor_dbfs)
+                      & finite)[0]
     # 平滑曲线上的相邻宽峰合并为一个（同窗内的起伏仍属同一宽带信号）。
     wide_sel: List[int] = []
     for w in wide:
@@ -1406,27 +1409,53 @@ def _draw_spectrum(painter, state, rect, line_color):
     ii = np.arange(n, dtype=np.float64)
     freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
             + gen.sample_rate_hz * (ii + 0.5) / n)
-    db = np.where(np.isfinite(spec), spec, state.db_min)
+    finite = np.isfinite(spec)
+    db = np.where(finite, spec, state.db_min)
     x = rx0 + (freq - f_left) / span * rw
     ratio = np.clip((db - state.db_min) / (state.db_max - state.db_min),
                     0.0, 1.0)
     y = ry0 + rh - ratio * rh * 0.92
-    poly = QPolygonF([QPointF(float(a), float(b))
-                      for a, b in zip(x, y)])
     # 低饱和橙渐变填充
-    fillpoly = QPolygonF()
-    fillpoly.append(QPointF(rx0, ry0 + rh))
-    fillpoly += poly
-    fillpoly.append(QPointF(rx0 + rw, ry0 + rh))
     grad = QLinearGradient(0, ry0, 0, ry0 + rh)
     grad.setColorAt(0.0, QColor(PAL_LINE).lighter(130))
     grad.setColorAt(1.0, QColor(PAL_LINE).darker(160))
     # PySide6 QPainter 无 fillPolygon(poly, brush)：把渐变设为当前 brush，
     # drawPolygon 会按当前 brush 填充，语义与原 fillPolygon 一致。
-    painter.setBrush(QBrush(grad))
-    painter.drawPolygon(fillpoly)
     painter.setPen(QPen(line_color, 2))
-    painter.drawPolyline(poly)
+    if finite.all():
+        poly = QPolygonF([QPointF(float(a), float(b))
+                          for a, b in zip(x, y)])
+        fillpoly = QPolygonF()
+        fillpoly.append(QPointF(rx0, ry0 + rh))
+        fillpoly += poly
+        fillpoly.append(QPointF(rx0 + rw, ry0 + rh))
+        painter.setBrush(QBrush(grad))
+        painter.drawPolygon(fillpoly)
+        painter.drawPolyline(poly)
+        return
+    # NaN = 未采到（不是弱信号）：在断点处分段，不连线、不填充。
+    start = None
+    for i in range(n + 1):
+        ok = bool(finite[i]) if i < n else False
+        if ok and start is None:
+            start = i
+        elif not ok and start is not None:
+            a, b = start, i
+            start = None
+            seg = QPolygonF([QPointF(float(x[j]), float(y[j]))
+                             for j in range(a, b)])
+            if b - a >= 2:
+                fillpoly = QPolygonF()
+                fillpoly.append(QPointF(float(x[a]), ry0 + rh))
+                fillpoly += seg
+                fillpoly.append(QPointF(float(x[b - 1]), ry0 + rh))
+                painter.setBrush(QBrush(grad))
+                painter.drawPolygon(fillpoly)
+                painter.drawPolyline(seg)
+            else:
+                painter.setBrush(Qt.NoBrush)
+                painter.drawPoint(QPointF(float(x[a]), float(y[a])))
+    painter.setBrush(Qt.NoBrush)
 
 
 def _draw_hold_lines(painter, state, rect):
@@ -1447,15 +1476,33 @@ def _draw_hold_lines(painter, state, rect):
         ii = np.arange(n, dtype=np.float64)
         freq = (gen.center_freq_hz - span / 2.0
                 + span * (ii + 0.5) / n)
-        db = np.where(np.isfinite(hold), hold, state.db_min)
+        finite = np.isfinite(hold)
+        db = np.where(finite, hold, state.db_min)
         x = rect.x() + (freq - f_left) / span * rect.width()
         ratio = np.clip((db - state.db_min) / (state.db_max - state.db_min),
                         0.0, 1.0)
         y = rect.y() + rect.height() - ratio * rect.height() * 0.92
-        poly = QPolygonF([QPointF(float(a), float(b))
-                          for a, b in zip(x, y)])
         painter.setPen(QPen(color, 1))
-        painter.drawPolyline(poly)
+        if finite.all():
+            poly = QPolygonF([QPointF(float(a), float(b))
+                              for a, b in zip(x, y)])
+            painter.drawPolyline(poly)
+            return
+        # NaN = 未采到：断点处分段，不连线。
+        start = None
+        for i in range(n + 1):
+            ok = bool(finite[i]) if i < n else False
+            if ok and start is None:
+                start = i
+            elif not ok and start is not None:
+                a, b = start, i
+                start = None
+                seg = QPolygonF([QPointF(float(x[j]), float(y[j]))
+                                 for j in range(a, b)])
+                if b - a >= 2:
+                    painter.drawPolyline(seg)
+                else:
+                    painter.drawPoint(QPointF(float(x[a]), float(y[a])))
 
     if gen.show_max_hold and gen.max_hold is not None:
         _line(gen.max_hold, QColor(PAL_MAXHOLD))
@@ -1787,15 +1834,16 @@ def _wf_paint_row_into(state: "_PlotState", row_db: np.ndarray, dst_row: np.ndar
     f0 = gen.center_freq_hz - span / 2.0
     idx = np.floor((freq - f0) / span * n).astype(np.int64)
     valid = (idx >= 0) & (idx < n)
-    vals = np.where(valid, row_db[np.clip(idx, 0, max(0, n - 1))], state.db_min)
-    vals = np.where(np.isfinite(vals), vals, state.db_min)
+    # NaN = 未采到：该像素画背景色（不是色图最低档，避免与真实弱信号混淆）。
+    raw = np.where(valid, row_db[np.clip(idx, 0, max(0, n - 1))], np.nan)
+    ok = np.isfinite(raw)
+    vals = np.where(ok, raw, state.db_min)
     dmin, dmax = state.db_min, state.db_max
     t = np.clip((vals - dmin) / (dmax - dmin + 1e-9), 0.0, 1.0)
     li = (t * 255.0).astype(np.int64)
-    dst_row[:, 0:3] = state._wf_lut[li]
-    if not valid.all():
-        bg = QColor(PAL_BG)
-        dst_row[~valid, 0:3] = (bg.red(), bg.green(), bg.blue())
+    bg = QColor(PAL_BG)
+    dst_row[:, 0:3] = (bg.red(), bg.green(), bg.blue())
+    dst_row[ok, 0:3] = state._wf_lut[li[ok]]
     dst_row[:, 3] = 255
 
 

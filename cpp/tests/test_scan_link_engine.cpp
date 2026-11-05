@@ -62,6 +62,8 @@ private slots:
     void initTestCase();
     void busyBandParksRecordsAndDemodulates();
     void quietBandIsHonestEmpty();
+    // 哨兵：未出第一块数据必须是 NaN（未知），不能与真实 -100 dBFS 同读。
+    void unknownRssiIsNaNBeforeFirstBlock();
 };
 
 void TestScanLinkEngine::initTestCase() {
@@ -70,6 +72,17 @@ void TestScanLinkEngine::initTestCase() {
     QDir().rmdir(kRecDir);
     QDir().mkpath(kRecDir);
 }
+
+void TestScanLinkEngine::unknownRssiIsNaNBeforeFirstBlock() {
+    // 不启动引擎，run() 尚未写入第一块测量值。
+    SpectrumEngine eng;
+    const float rssi = eng.rssiDbfs();
+    QVERIFY2(std::isnan(rssi),
+             "未出第一块数据前 rssiDbfs() 必须是 NaN（未知）");
+    QVERIFY2(rssi != -100.0f,
+             "哨兵不得与真实可测电平 -100 dBFS（kPeakAbsFloorDbfs）同值");
+}
+
 
 void TestScanLinkEngine::busyBandParksRecordsAndDemodulates() {
     SpectrumEngine eng;

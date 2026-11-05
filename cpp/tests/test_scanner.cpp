@@ -18,8 +18,10 @@
 #include <QMap>
 #include <QList>
 #include <QTemporaryDir>
+#include <limits>
 
 #include "dsp/frequency_scanner.h"
+#include "dsp/signal_watch.h"
 #include "ui/scan_session.h"
 
 using namespace mbdsdr::dsp;
@@ -78,6 +80,8 @@ private slots:
     // 10: scan-session honest rejection -- garbage / wrong-type / hand-corrupted
     //     bytes must be refused loudly (non-empty error), never silently healed.
     void scanSessionRejectsCorrupt();
+    // 11: NaN RSSI = 未知（未出第一块数据），不得污染平滑/触发停驻。
+    void unknownRssiIsNaN();
 };
 
 void TestScanner::rangeStep() {
@@ -613,6 +617,26 @@ void TestScanner::scanSessionRejectsCorrupt() {
                  dir.filePath("does-not-exist.mbdscan"), out, &err),
              "missing file must be refused, not treated as empty session");
     QVERIFY2(!err.isEmpty(), "missing-file rejection must carry a reason");
+}
+
+// 11: NaN RSSI 表示"尚未出第一块数据"（未知）。它不得推进平滑或触发停驻；
+// 真实的 -100 dBFS 则是可测电平，门限设到 -100 以下时必须能触发。
+void TestScanner::unknownRssiIsNaN() {
+    SignalWatch w(30.0);
+    w.setThresholdDb(-150.0f);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    for (int i = 0; i < 20; ++i) {
+        QVERIFY2(!w.update(nan), "NaN(未知) 不得触发停驻");
+    }
+    QVERIFY2(!std::isnan(w.smoothedDb()), "NaN 不得污染平滑状态");
+    QCOMPARE(w.smoothedDb(), -150.0f);
+    QVERIFY(!w.active());
+
+    // 同一个门限下，真实 -100 dBFS 必须能触发：未知 != 弱信号。
+    for (int i = 0; i < 20; ++i) {
+        w.update(-100.0f);
+    }
+    QVERIFY2(w.active(), "真实 -100 dBFS 必须与未知区分开");
 }
 
 QTEST_MAIN(TestScanner)

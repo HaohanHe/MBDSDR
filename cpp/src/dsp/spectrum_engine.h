@@ -9,6 +9,7 @@
 #include <QList>
 #include <QMap>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <complex>
@@ -885,9 +886,10 @@ private:
     mutable std::mutex frameMu_;
     SpectrumFrame latestFrame_;   // last emitted spectrum frame (read-only snapshot)
     // Honest measured total-power RSSI (dBFS) of the currently tuned channel,
-    // refreshed in run() every block; -100 until the first block flows. The
-    // decoupled ScanActivityLink driver polls this (see rssiDbfs()).
-    std::atomic<float> rssiDbfs_{-100.0f};
+    // refreshed in run() every block. 哨兵值必须与可测范围不相交：
+    // 未出第一块数据前是 NaN（未知），不是 -100 dBFS——kPeakAbsFloorDbfs
+    // 也是 -100，用 -100 会让扫描链把"没数据"当成真实弱信号。
+    std::atomic<float> rssiDbfs_{std::numeric_limits<float>::quiet_NaN()};
     std::atomic<bool> running_{true};
     std::atomic<bool> needDemodReset_{false};
     // Set by the SpyServerServer via setSpyServerTapRequested: when true, each

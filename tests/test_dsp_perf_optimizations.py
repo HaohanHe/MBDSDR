@@ -34,7 +34,8 @@ def _loop_resample_max(spec: np.ndarray, nb: int) -> np.ndarray:
     out = np.empty(nb, dtype=np.float32)
     for i in range(nb):
         seg = spec[edges[i]:edges[i + 1]]
-        out[i] = float(seg.max()) if seg.size else -120.0
+        # 哨兵与可测范围不相交：空段 = 未采到 = NaN，不是 -120 dBFS。
+        out[i] = float(seg.max()) if seg.size else np.nan
     return out
 
 
@@ -63,6 +64,22 @@ def test_resample_max_vectorized_matches_loop():
         spec = rng.uniform(-120.0, 0.0, n).astype(np.float32)
         np.testing.assert_array_equal(gen._resample_max(spec),
                                       _loop_resample_max(spec, 512))
+
+
+def test_resample_max_empty_segments_use_nan_sentinel():
+    """空段必须是 NaN（未采到），不能与真实 -120 dBFS 弱信号重合。"""
+    gen = SpectrumDataGenerator(num_bins=512)
+    res = gen._resample_max(np.arange(100, dtype=np.float32))
+    assert res.shape == (512,)
+    assert np.isnan(res).any(), "输入短于 bin 数时必然有空段，应为 NaN"
+    finite = res[np.isfinite(res)]
+    assert finite.size > 0
+    assert not np.any(np.isclose(finite, -120.0)), (
+        "-120 是真实可测电平，不能当哨兵")
+    # 峰检测路径跳过非有限值：NaN 不得被当成峰
+    from spectrum_widget import _detect_peak_bins
+    bins = _detect_peak_bins(res, rel_threshold_db=6.0)
+    assert all(np.isfinite(res[b]) for b in bins), "NaN 段不得入选峰"
 
 
 def test_vfo_rotator_cache_matches_recompute_and_invalidates():

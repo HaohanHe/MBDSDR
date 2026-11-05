@@ -44,6 +44,12 @@ void SignalWatch::reset() {
 }
 
 bool SignalWatch::update(float levelDb) {
+    // 哨兵值必须与可测范围不相交：NaN 表示"尚未出第一块数据"（未知），
+    // 不是 -100 dBFS 的弱信号。未知不推进平滑、不触发停驻，否则 NaN 会
+    // 污染 smoothDb_ 并让后续真实信号永远无法判定。
+    if (!std::isfinite(levelDb)) {
+        return active_;
+    }
     // Fast-attack / slow-decay smoothing of the REAL measured RSSI.
     const float alpha = (levelDb > smoothDb_) ? attackAlpha_ : decayAlpha_;
     smoothDb_ += alpha * (levelDb - smoothDb_);

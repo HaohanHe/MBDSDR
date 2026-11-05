@@ -6,6 +6,7 @@
 #include "spectrum_widget.h"
 
 #include <QVBoxLayout>
+#include <limits>
 #include <QHBoxLayout>
 #include <QSplitter>
 #include <QFrame>
@@ -4473,10 +4474,12 @@ void MainWindow::scanLinkTimerTick() {
         elapsed = static_cast<int>(scanLinkTickClock_->restart());
     else
         scanLinkTickClock_->start();
-    // Honess input: the engine's REAL measured channel RSSI. Before the first
-    // block flows this reads -100 (quiet band) -> the link never dwells on a
-    // fabricated hit.
-    const float rssi = engine_ ? engine_->rssiDbfs() : -100.0f;
+    // Honest input: the engine's REAL measured channel RSSI.
+    // 引擎尚未就绪时 RSSI 是"未知"=NaN；不能用 -100，那是真实可测电平
+    // （与 kPeakAbsFloorDbfs 同值），会让扫描链误判为弱信号。
+    const float rssi = engine_
+        ? engine_->rssiDbfs()
+        : std::numeric_limits<float>::quiet_NaN();
     scanLink_->tick(elapsed, rssi);
     updateScanLinkStatus();
 }
