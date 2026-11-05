@@ -283,6 +283,49 @@ def test_meeus_model_and_ephemeris_model_agree_on_illumination():
     print(f"两模型最大照度差 {worst[0]:.2e}（{worst[1]}）")
 
 
+# 4 时刻 × 4 行星：跨模型最坏网格（含水星借金星下合时刻，Meeus 低精度误差最大）
+COS_GRID_EVENTS = (
+    MERCURY_INFERIOR,
+    VENUS_INFERIOR,
+    MARS_QUADRATURE,
+    SATURN_QUADRATURE,
+)
+COS_GRID_PLANETS = ("mercury", "venus", "mars", "saturn")
+
+
+def test_meeus_and_ephemeris_cos_phase_agree_within_model_tolerance():
+    """4 时刻 × 4 行星：两条路径的 cos χ 与 illum 差必须落在「模型精度带」内。
+
+    公式已经单源（两边都走 ``planet_phase_angle_from_geometry``），剩余差
+    全部来自星历模型：Meeus ch.31 低精度 vs DE421。实测最坏值
+    ``|Δcos χ| = 2.900e-4``、``|Δillum| = 1.450e-4``（均出现在
+    mercury @ 2026-10-25，即「水星 + 金星下合时刻」这组最不利几何）。
+    因此 1e-6 不可达；这里是**显式约束**，谁把任一侧悄悄改出模型精度就红。
+    """
+    worst_cos = (0.0, "")
+    worst_illum = (0.0, "")
+    for when in COS_GRID_EVENTS:
+        for name in COS_GRID_PLANETS:
+            eph = _planet(name, when)
+            meeus = _meeus_planet(name, when)
+            cos_eph = math.cos(math.radians(float(eph.phase_angle_deg)))
+            cos_meeus = math.cos(math.radians(float(meeus.phase_angle_deg)))
+            illum_meeus = 0.5 * (1.0 + cos_meeus)
+            d_cos = abs(cos_eph - cos_meeus)
+            d_illum = abs(float(eph.illumination) - illum_meeus)
+            tag = f"{name} {when.date()}"
+            if d_cos > worst_cos[0]:
+                worst_cos = (d_cos, tag)
+            if d_illum > worst_illum[0]:
+                worst_illum = (d_illum, tag)
+            assert d_cos <= 5e-4, \
+                f"{tag} |Δcos χ|={d_cos:.3e} 超出模型精度带 5e-4（公式或星历被改？）"
+            assert d_illum <= 3e-4, \
+                f"{tag} |Δillum|={d_illum:.3e} 超出模型精度带 3e-4（公式或星历被改？）"
+    print(f"4×4 最大 |Δcos χ|={worst_cos[0]:.3e}（{worst_cos[1]}）；"
+          f"最大 |Δillum|={worst_illum[0]:.3e}（{worst_illum[1]}）")
+
+
 def test_phase_angle_zero_basis_is_identical_between_models():
     """零度基准一致：两边都是「日-行星-地球」夹角，0°=全亮。
 
