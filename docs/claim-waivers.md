@@ -9,7 +9,8 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 103 -->
+<!-- waived-total: 79 -->
+> 本轮销账注记：id 79（`docs/packaging.md`）原依据「表行已不存在」不成立（`HEAD:204` 仍在），按改写事实销账——该行已附 `c295423e` — `desktop/startup_paths.py:59` — `def startup_log_path() -> str:`，HEAD 复核通过。
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -62,16 +63,7 @@
 | 48 | docs/design-basis.md | d1db6fb52bad | 取证附带发现（`af7208b` 已修）：`test_ui_layout_locks.py` 原来的 `800x600` 参数**实际跑在 1000×600**。 | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 49 | docs/design-basis.md | 23b9f2f6b319 | / 4 / 无设备引导是「基准外」的我们多做项 / 横幅 + 状态栏双份引导；横幅已改单行不换行（`e6f0e7d`） / 仍是双份占位：横幅独占一行高度 / wordWrap 已撤（§3）；下… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 50 | docs/design_tokens_mapping.md | ac1079782e56 | （4.15→5.22:1）均已修到达标。品牌橙新增 `primary_text` `#9A5F33` | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 51 | docs/hardcoded-parameters.md | c850ad585a26 | / A10 / `default_sample_rate_msps` / 默认采样率 / `2.4` / 设备支持档位 / MS/s / 设备与后端 / "启动时优先用 2.4 MS/s；设备不… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 52 | docs/hardcoded-parameters.md | 707ff33e1312 | - **A11 调谐步进**：**更正**——C++ 调谐步进本就是 10 kHz（§D-2 撤回）， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 53 | docs/hardcoded-parameters.md | 96044a799385 | / P-1 / `cpp/src/core/tokens.h`（频谱线已改） / Python `6.0` 与 C++ 原 `15.0` 两套显示峰阈值；原"统一到 15 dB"已被实测驳回 /… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 54 | docs/hardcoded-parameters.md | c62a48c734e9 | - ~~**D-3 FFT 档位**~~ **已收口（2026-11-05）**：`FFT_SIZES` 已删掉 8192/16384， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 55 | docs/hardcoded-parameters.md | 38856a625a5c | / 1 / 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 6 dB 余量） / **已落地**（§10-1）。剩余：`main_window` … | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 56 | docs/hardcoded-parameters.md | 601d94035be0 | / 2 / 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° / **已落地**（§10-2）。剩余：`rf_sky_view` 的 `P… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 57 | docs/hardcoded-parameters.md | c62289517319 | / 3 / 默认采样率 2.4 MS/s（按设备能力回落） / **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 58 | docs/hardcoded-parameters.md | 7c1d44bdf464 | / 控制器 / 固定 10° / 24 h 字面量 / **已改为显式入参注入**：`get_satellite_pass(min_elevation_deg=None, window_hour… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 59 | docs/hardcoded-parameters.md | da98f7eb5925 | / 1 / `mbdsdr_ai/analog_demod.py:123-131` / `"am" ... sql_db=-40.0` / `"wfm" ... sql_db=-30.0` / … | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 60 | docs/hardcoded-parameters.md | 6694cfa54dfb | / 9 / `desktop/main_window.py:5534-5535` / `dbfs = 10.0 * math.log10(p + 1e-12)` / `if dbfs < sel… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 61 | docs/hardcoded-parameters.md | db1b11eabf00 | 表中 1-7、10-14 是**明确登记的另一些测量点/死参数**，处置如上，不冒充已收口。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 62 | docs/limitations-register.md | 2d31e68b87e9 | / L29 / 快转（×60/×300/×1800）一致性是**按模拟时刻重算 + 诚实提示**，不是「延平滑」 / `desktop/rf_sky_view.py`：`LOCK_SMOOTH_… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 63 | docs/limitations-register.md | 1ca40533f6e1 | / L32 / 时间控制与摄像机锁定的交互语义（倍率切换 / 一次性跳时 / 暂停 / 倒放） / `desktop/rf_sky_view.py`：`notify_time_jump/_pen… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
@@ -87,12 +79,6 @@
 | 74 | docs/narrow-screen-plan.md | 9c3f596afb44 | 6. 上述省量是估算，**已落地实测为 85 / 140**（见 §3.1）；若后续再改分组框内容， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 75 | docs/narrow-screen-plan.md | 87bcc22756c3 | **宽度已收口**：offscreen 窗口宽 **1625→1265**（顶栏，§2.3.1）；真屏 **1237→960**。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 76 | docs/network-layer.md | c5867aec39fc | 该复现的 faulthandler 实抓栈（本机，Python 3.14，2s 超时；线程名已改）： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 77 | docs/packaging.md | be31b61be6c1 | 2. 修法已落地：[MBDSDR.spec](../../desktop/MBDSDR.spec) 增加按文件系统遍历 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 78 | docs/packaging.md | 19ac2a62d66a | Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过。） | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 79 | docs/packaging.md | 2882e4fa8ea4 | / 约束 / 实测行为 / 期望 / 差距 / 已修 / | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 80 | docs/packaging.md | fa864f5bb53e | 4. ACL 级只读（非 Program Files）不再靠启动期同步判断：已改为后台线程试写 + | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 81 | docs/parameter-unification.md | e1906b2ae6d7 | / 1 / 连接对话框 `sr_combo` 能力化 + 逐档回读/显式拒绝 / **已落地** / 删除 11 档直灌 → `_fill_sr_combo(device)` 按设备能力生成；`… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 83 | docs/parameter-unification.md | 50a84f50aa61 | / 3 / 逐档回读端到端证据 / **已落地（真机 + 注入双证）** / 新增 `scripts/sample_rate_readback_check.py`：逐档 `set_sample_… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 85 | docs/prototype-gap.md | d8d2b47e377a | / 批 2（已完成） / A10 DSO 四步（两型 glyph、中文标签、真实轴比、轴比未知）；状态卡超高滚动 / `pytest tests/test_sky_dso_layer.py te… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 86 | docs/prototype-gap.md | 9f84477f0dae | **OpenNGC v2 换源口径（已落地）**：`dso_catalog.json` 已是 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 87 | docs/prototype-gap.md | dcf687b3939a | P0–P4 顺序未失效。**每档上限已落地（当前实现 `LABEL_TIER_CAPS`）**： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
@@ -107,14 +93,5 @@
 | 96 | docs/reference-mechanisms.md | a8b23ef93460 | > - 「决定」三态：**照做**（机制已按参考思路落地，保持）／**改良后做**（路线不同或只落一半，已落地或已排给某条线）／**明确不做**（给理由与可追踪的挂账/验收门）。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 130 | docs/sat-illumination.md | 29be1b8c9337 | - 既有 `sat_passes._is_sunlit_geometric()` 已改为委托本模块，避免第二份地影数学源。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 131 | docs/settings-inventory.md | d97d002af22a | - `desktop/main_window.py` 仅做了**最小停靠接线**（已提交 `49eddcf`，9 insertions / | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 132 | docs/settings-inventory.md | 37bf58072ff7 | / A1 / 过境最低仰角 / **已落地（读取入口）** / `pass_min_elevation_deg` / 10 / 0–45 / 度 / 设置面板写盘；消费方下次刷新调用函数读值 /… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 133 | docs/settings-inventory.md | 4a33fb9903de | / A2 / 过境搜索窗口 / **已落地（读取入口）** / `pass_window_hours` / 24 / 1–72 / 小时 / 同上 / `settings.effective_p… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 134 | docs/settings-inventory.md | 86b2d5e2e73e | / A5 / 静噪门限 / **已落地** / `squelch_default_db` / `int(DEFAULT_SQUELCH_DBFS)`=-50 / `int(SQUELCH_MIN… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 135 | docs/settings-inventory.md | 797637cf9833 | / A7 / 瀑布深度行数 / **已落地** / `waterfall_depth_rows` / 256 / 128–4096 / 行 / **即时**：`spectrum.set_wate… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 136 | docs/settings-inventory.md | 02c297ebf835 | / A8 / 大气消光系数 / **已落地** / `sky_extinction_k` / 0.2 / 0.0–0.5 / 星等 / **即时**：`sky_view.set_extincti… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 137 | docs/settings-inventory.md | f1dc27a6fe45 | / A9 / 显示低仰角过境 / **已落地（读取入口）** / `show_low_elevation_passes` / False / 布尔 / 同上 / `settings.effect… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 138 | docs/settings-inventory.md | c20bad856004 | / A10 / 默认采样率 / **已落地（统一 2.4 MS/s）** / 复用既有 `sample_rate_hz`，默认**派生自** `desktop/constants.py: DEF… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 139 | docs/settings-inventory.md | 3c941c92647d | / A11 / 调谐步进 / **已落地** / `tuning_step_hz` / 10 000 / 10–1 000 000 / Hz（六档） / **即时**：`step_combo` … | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 140 | docs/settings-inventory.md | a0cd442edfb8 | / # / 项对（A ↔ B） / 约束 / 只改 A 不改 B 的后果 / 面板联动提示（已落地） / | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 141 | docs/settings-inventory.md | fb7a2a12d205 | （“启动时已修正配置：…”），不静默写日志。视觉冻结：只加文本，不碰布局/颜色/尺寸。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 142 | docs/star-catalog.md | d4fa8e2b56ba | 10. **打包**：已修。`pyproject.toml` 的 `package-data` 现含 `data/*.npz`； | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |

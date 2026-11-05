@@ -197,7 +197,7 @@ DLL load failed while importing QtWidgets: 找不到指定的模块。
 ```
 
 （早期版本只检查「platforms 目录里有任意一个平台插件」，qoffscreen 还在时会误放行，
-Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过（`50aa1db0` — `desktop/main.py:350` — `缺少 Qt 平台插件 platforms/`）。）
+Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过（`50aa1db0` — `desktop/main.py:366` — `缺少 Qt 平台插件 platforms/`）。）
 
 ## 5. 四条现实约束（实际 vs 期望）
 
