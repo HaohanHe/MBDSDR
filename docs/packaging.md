@@ -616,6 +616,10 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
 > 重跑**。`TEMPORARY_WIDENED` 的收紧按约定等 UI 收口后单独重测，本轮不涉及
 > （`release_check.py` 的窄屏/overlap 阈值未动）。
 
+发布前总顺序（2026-11-06 起）：① 九步 `python scripts/release_check.py`；
+② 产物对拍 `python scripts/check_dist_head_parity.py --dist <同一产物> --head <构建 commit>`
+（见 §10）。第二步**单独跑、不并入九步**，不改变九步既有口径；**对拍不过不进发布**。
+
 一次跑完四项（任一项 FAIL → 退出码 1；`--json` 输出纯 JSON）：
 
 ```
@@ -948,10 +952,28 @@ dist 无 0、哈希不一致 0 → PASS**。
 
 事实与观察（不是对拍差异，本轮未改打包清单）：
 
-- `collect_data_files('mbdsdr_ai')` 把 `mbdsdr_ai/tests/fixtures/` 的 **5 个文件**也带进
-  包；它们与 HEAD 一致，但属开发期资产，是否随分发包发出需另议。
+- **`mbdsdr_ai/tests/fixtures/` 5 个文件随包发出**（合计 **3,964,317 B / 3.78 MiB**：
+  `openngc/NGC.csv` 3,942,946 B、`openngc/addendum.csv` 17,496 B、
+  `hyg_v41_reference_sample.csv` 1,171 B、两份 `provenance.json` 960/744 B）。
+  `collect_data_files('mbdsdr_ai')` 收的是非 `.py` 数据，spec 只 `excludes` 了
+  `mbdsdr_ai.tests` 模块，没挡数据。**运行期无人读**：全仓 `mbdsdr_ai/*.py` 与
+  `desktop/*.py` 对这些文件名的唯一命中是 `desktop/main_window.py` 关于对话框里的
+  OpenNGC 署名文本；实际读取只发生在 `mbdsdr_ai/tests/` 与构建期脚本
+  （`mbdsdr_ai/astronomy/build_dso_catalog.py`、`scripts/check_data_licenses.py`）。
+  结论：**开发资产混进了发行物，建议排除**。
+  Patch 计划（未擅自改，待确认后落地）：
+
+  ```diff
+  -datas += collect_data_files('mbdsdr_ai')
+  +datas += [item for item in collect_data_files('mbdsdr_ai')
+  +          if '/tests/' not in item[0].replace(os.sep, '/')]
+  ```
+
+  已在干净 worktree（HEAD `6b54c7b7`）实测该 patch：产物 **4420 文件 / 812.0 MiB**
+  （比现状少 5 文件 / 3.7 MiB），`smoke` **PASS 13/13**，对本 HEAD 的产物对拍
+  **PASS**（dist-only 0、HEAD-only 0、哈希不一致 0）。
 - dist 侧 `assets/icon.svg` 1241 B，HEAD blob 1211 B，哈希一致——差异只是 CRLF；
-  判据以内容哈希为准，字节数仅作展示。
+  判据以内容哈希为准，字节数仅作展示（脚本头部也写了这句，避免下次再当差异查）。
 
 发现漏打/陈旧时只出 patch 计划，不擅自改打包清单；也不把本检查塞进九步（构建后单独一条）。
 
