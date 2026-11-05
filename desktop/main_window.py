@@ -3691,12 +3691,16 @@ class MainWindow(QMainWindow):
             backend.set_bandwidth(float(bandwidth))
         except Exception as e:
             self.statusBar().showMessage(f"带宽应用失败: {e}", MSG_NORMAL)
-        # 连接后立即下发默认中心频率（从控制面板读回，否则 98.5MHz）
+        # 连接后立即下发默认中心频率：切换设备沿用切换前的调谐，
+        # 首次连接才退回落 98.5 MHz。
         default_freq = 98_500_000.0
-        try:
-            default_freq = float(self.control_panel.get_frequency_hz())
-        except Exception:
-            default_freq = 98_500_000.0
+        if carried_freq is not None:
+            default_freq = carried_freq
+        else:
+            try:
+                default_freq = float(self.control_panel.get_frequency_hz())
+            except Exception:
+                default_freq = 98_500_000.0
         try:
             backend.set_frequency(default_freq)
         except Exception as e:
