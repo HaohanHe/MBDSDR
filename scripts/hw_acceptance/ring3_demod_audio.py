@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import math
 import os
 import time
 import wave
@@ -19,31 +20,84 @@ import common
 
 FS = 2.4e6
 AUDIO_FS = 48000
+PILOT_MPX_FS = 200000
+PILOT_SEG = 65536
+
+
+def _mpx_200k(x: np.ndarray, fs: float) -> np.ndarray:
+    """IQ → MPX（瞬时频偏），用 ``resample_poly`` 带抗混叠滤波降到 200 kHz。
+
+    原实现用 ``mpx[::dec]`` 直接抽取（dec=12），没有抗混叠：任何落在
+    200 kHz·k 附近的杂散都会折回通带。实测 2.4 MS/s 下 181159 Hz 的杂散
+    折到 200000−181159 = 18841 Hz，正好落在 18.5–19.5 kHz 搜索带里，
+    把导频读数从 19 kHz 拽到 18.8 kHz（一次真机 R3 报的 18841 Hz 即此）。
+    """
+    from math import gcd
+
+    from scipy import signal as sg
+
+    x = np.asarray(x, dtype=np.complex128)
+    x = x - np.mean(x)
+    dphi = np.angle(x[1:] * np.conj(x[:-1]))
+    mpx = dphi * fs / (2.0 * np.pi)
+    g = gcd(int(round(fs)), PILOT_MPX_FS)
+    return sg.resample_poly(mpx, PILOT_MPX_FS // g, int(round(fs)) // g)
+
+
+def _analyze_mpx(mpx: np.ndarray) -> tuple[float, float, int] | None:
+    """Welch（65536 点/Hann，段间不重叠）在 18.5–19.5 kHz 找峰 + 抛物线插值。
+
+    返回 (频率 Hz, 峰高于邻域 dB, 平均段数)。bin = 200 kHz/65536 = 3.05 Hz，
+    插值后频率不确定度约 ±1 Hz；单段 FFT 的频率方差远大于此，且无抗混叠时
+    邻域底被折叠噪声抬高，两个口径都会漂。
+    """
+    n = PILOT_SEG
+    k_seg = len(mpx) // n
+    if k_seg < 1:
+        return None
+    w = np.hanning(n)
+    acc = np.zeros(n // 2 + 1)
+    for i in range(k_seg):
+        seg = mpx[i * n:(i + 1) * n]
+        acc += np.abs(np.fft.rfft((seg - seg.mean()) * w)) ** 2
+    acc /= k_seg
+    fr = np.arange(len(acc)) * PILOT_MPX_FS / n
+    band = np.flatnonzero((fr > 18500) & (fr < 19500))
+    if len(band) == 0:
+        return None
+    k = int(band[np.argmax(acc[band])])
+    if 0 < k < len(acc) - 1:
+        y0, y1, y2 = (math.log(float(acc[k + d]) + 1e-30) for d in (-1, 0, 1))
+        den = y0 - 2 * y1 + y2
+        delta = 0.5 * (y0 - y2) / den if den else 0.0
+    else:
+        delta = 0.0
+    f_p = (k + delta) * PILOT_MPX_FS / n
+    neigh = ((fr > 16500) & (fr < 18000)) | ((fr > 20000) & (fr < 21500))
+    neigh_db = 10.0 * math.log10(float(acc[k]) / (float(np.median(acc[neigh])) + 1e-30))
+    return float(f_p), float(neigh_db), k_seg
 
 
 def _pilot(fs: float, iq: np.ndarray) -> tuple[float, float] | None:
     """信号级 MPX 找 19 kHz 导频，返回 (频率 Hz, 高于邻域 dB)。"""
-    x = np.asarray(iq, dtype=np.complex128)
-    x = x - np.mean(x)
-    dphi = np.diff(np.unwrap(np.angle(x)))
-    mpx = dphi * fs / (2 * np.pi)
-    dec = max(1, int(fs // 192000))
-    mpx = mpx[::dec]
-    fs2 = fs / dec
-    n = min(131072, len(mpx))
-    if n < 8192:
+    r = _analyze_mpx(_mpx_200k(iq, fs))
+    return None if r is None else (r[0], r[1])
+
+
+def _pilot_from_ctrl(ctrl, fs: float, seconds: float = 2.0) -> tuple[float, float, int] | None:
+    """连读 seconds 秒 IQ 逐块转 MPX，喂给 Welch（约 6 段，段数越多底越稳）。"""
+    parts = []
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < seconds:
+        blk = ctrl.read_iq(262144)
+        if blk is None or len(blk) < 1024:
+            break
+        parts.append(_mpx_200k(blk, fs))
+    if not parts:
         return None
-    sp = np.abs(np.fft.fft(mpx[:n] * np.hanning(n)))
-    fr = np.arange(n) * fs2 / n
-    # 导频只在 19 kHz ±500 Hz 内找；邻域取 16.5–18 kHz + 20–21.5 kHz。
-    # 原来在 15–23 kHz 取全局最大会把节目/SCA 内容误当导频（实测 20.47 kHz）。
-    band = (fr > 18500) & (fr < 19500)
-    idx = int(np.argmax(sp[band]))
-    mag = float(sp[band][idx])
-    neigh_mask = (((fr > 16500) & (fr < 18000)) |
-                  ((fr > 20000) & (fr < 21500)))
-    neigh = float(np.median(sp[neigh_mask]) + 1e-12)
-    return float(fr[band][idx]), 20 * np.log10(mag / neigh)
+    r = _analyze_mpx(np.concatenate(parts))
+    return None if r is None else (r[0], r[1], r[2])
+
 
 
 def _offline(skip_code: str = "NO_HW", why: str = "") -> dict:
@@ -197,15 +251,12 @@ def run(freq_hz: float) -> dict:
                          f"<15k/>15k 能量比={ratio:.1f}"),
         ]
 
-        pilot = None
-        iq = ctrl.read_iq(131072)
-        if iq is not None and len(iq) >= 65536:
-            pilot = _pilot(FS, iq)
+        pilot = _pilot_from_ctrl(ctrl, FS, 2.0)
         if pilot is None:
             checks.append(common.check("stereo_pilot_19k", False,
                                        "IQ 不足，无法测导频", skipped=True))
         else:
-            f_p, snr_p = pilot
+            f_p, snr_p, segs = pilot
             ok_p = abs(f_p - 19000) < 100 and snr_p > 10
             weak = snr_p <= 10
             # 单声道台没有 19 kHz 导频是合法状态，不判失败，标 skipped 并写明。
@@ -213,7 +264,7 @@ def run(freq_hz: float) -> dict:
                 "导频过弱，可能为单声道台（不判失败）" if weak else "19 kHz 导频频率异常")
             checks.append(common.check(
                 "stereo_pilot_19k", ok_p,
-                f"导频 {f_p:.0f} Hz，高于邻域 {snr_p:.1f} dB；{verdict}",
+                f"导频 {f_p:.1f} Hz，高于邻域 {snr_p:.1f} dB（Welch {segs} 段）；{verdict}",
                 skipped=not ok_p and weak))
 
         # 证据：把这段音频写成 wav（不经过声卡，仅落盘）
@@ -232,8 +283,11 @@ def run(freq_hz: float) -> dict:
             "channels": channels,
             "audio_rms": round(rms, 5),
             "energy_ratio_below_15k": round(ratio, 1),
-            "pilot_hz": round(pilot[0], 0) if pilot else None,
+            "pilot_hz": round(pilot[0], 1) if pilot else None,
             "pilot_snr_db": round(pilot[1], 1) if pilot else None,
+            "pilot_method": ("Welch 65536/Hann @200kHz（resample_poly 抗混叠），"
+                             "18.5–19.5kHz 取峰+抛物线插值；dB=峰/邻域中位数"),
+            "pilot_welch_segments": pilot[2] if pilot else None,
             "soundcard_opened": False,
         }
         status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL

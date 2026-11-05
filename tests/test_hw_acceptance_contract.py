@@ -107,3 +107,44 @@ def test_missing_a_block_goes_red():
                      if not line.startswith("| A"))
     problems = labels.check_text(text)
     assert problems, "A 段缺失却没判红"
+
+
+# ------------------------------------------------- 导频测量法 / 噪声底阈值（同为实测结论）
+import numpy as np  # noqa: E402
+
+import ring3_demod_audio as ring3  # noqa: E402
+
+FS = 2.4e6
+
+
+def _iq_pilot_plus_spur(seconds: float = 0.36) -> np.ndarray:
+    """2.4 MS/s 复基带：19 kHz 导频 + 181159 Hz 杂散（后者无滤波抽取会折到 18841 Hz）。"""
+    n = int(FS * seconds)
+    t = np.arange(n) / FS
+    mpx = 0.09 * np.cos(2 * np.pi * 19000.0 * t) + 0.5 * np.cos(2 * np.pi * 181159.0 * t)
+    return np.exp(1j * 2 * np.pi * np.cumsum(mpx) / FS)
+
+
+def test_pilot_measurement_ignores_aliased_spur():
+    """断 18841 Hz 是折叠加法产物：带抗混叠重采样后必须读回 19000 Hz。"""
+    r = ring3._pilot(FS, _iq_pilot_plus_spur())
+    assert r is not None
+    f_p, db = r
+    assert abs(f_p - 19000.0) < 3.0, f"导频被杂散拽到 {f_p:.1f} Hz"
+    assert db > 10.0, f"导频只高出邻域 {db:.1f} dB"
+
+
+def test_old_decimation_would_report_the_alias():
+    """反证：旧法 mpx[::12] 无抗混叠，181159 Hz 折到 200000−181159=18841 Hz。"""
+    x = _iq_pilot_plus_spur()
+    x = x - x.mean()
+    mpx = np.angle(x[1:] * np.conj(x[:-1])) * FS / (2 * np.pi)
+    mpx = mpx[::12]
+    fs2 = FS / 12
+    n = min(131072, len(mpx))
+    sp = np.abs(np.fft.fft(mpx[:n] * np.hanning(n)))
+    fr = np.arange(n) * fs2 / n
+    band = (fr > 18500) & (fr < 19500)
+    f_old = float(fr[band][int(np.argmax(sp[band]))])
+    assert abs(f_old - 18841.0) < 5.0, f"旧法读数 {f_old:.1f} Hz（预期 18841）"
+
