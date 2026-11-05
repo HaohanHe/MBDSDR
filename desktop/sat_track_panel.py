@@ -355,6 +355,11 @@ class SatTrackPanel(QFrame):
         return self.freq_spin.value() * 1e6
 
     def _on_start_clicked(self):
+        if self._tracking:
+            # 已在跟踪：重复触发（连点、菜单/外部调用）一律幂等，
+            # 绝不再发一次 track_requested——主窗口若重入会覆盖
+            # 「跟踪前频率/模式」，停止时就回不到用户原来的调谐。
+            return
         name = self.sat_combo.currentText().strip()
         if not name:
             QMessageBox.warning(self, "卫星跟踪", "请先选择一颗卫星。")

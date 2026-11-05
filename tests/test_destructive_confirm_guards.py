@@ -461,3 +461,126 @@ def test_record_filename_collision_does_not_overwrite(window, monkeypatch,
     finally:
         w._active_sdr_backend = None
         w._recording = False
+
+
+# ======================================================================
+# P 组：其余面板忙锁 / 重复点击实测
+#   调制：识别 worker 在跑时重复点击必须幂等；
+#   星座：无异步操作，重复「清空」是空操作；
+#   ADS-B：无异步操作，重复喂同一帧不得造出两架飞机；
+#   频谱：扫频 worker 在跑时重复点击不得再弹参数框；
+#   卫星：跟踪中重复「开始」不得重复发 track_requested。
+# ======================================================================
+def test_modulation_identify_is_idempotent_while_running():
+    """识别线程在跑时再点「识别」→ 不替换 worker、不新起线程、按钮置灰。"""
+    import modulation_panel as mp
+
+    panel = mp.ModulationPanel()
+    panel._backend = object()
+    panel._connected = True
+
+    class _RunningWorker:
+        def __init__(self):
+            self.start_calls = 0
+
+        def isRunning(self):  # noqa: N802 - 模拟 QThread 接口
+            return True
+
+        def start(self):
+            self.start_calls += 1
+
+    stub = _RunningWorker()
+    panel._worker = stub
+    panel._on_identify_clicked()
+
+    assert panel._worker is stub, "识别中重复点击不得替换 worker"
+    assert stub.start_calls == 0, "识别中重复点击不得再起线程"
+    assert panel.identify_btn.isEnabled() is False, "识别中按钮必须置灰"
+
+
+def test_constellation_clear_is_idempotent():
+    """星座面板没有异步操作：连点「清空」只是重复的空操作。"""
+    from constellation_panel import ConstellationPanel
+
+    panel = ConstellationPanel()
+    signals = []
+    panel.cleared.connect(lambda: signals.append(1))
+    panel._on_clear()
+    panel._on_clear()
+
+    assert panel.view._points == []
+    assert panel.view._has_data is False
+    assert signals == [1, 1], "重复清空不得改其它状态或抛异常"
+
+
+def test_adsb_duplicate_frame_does_not_duplicate_aircraft():
+    """ADS-B 面板无异步操作：同一 ICAO 的重复帧必须合并成一架。"""
+    from adsb_panel import AdsbPanel
+
+    panel = AdsbPanel()
+    frame = {"icao": "abc123", "callsign": "CCA123", "altitude_ft": 30000}
+    panel.submit_decoded_frame(frame)
+    panel.submit_decoded_frame(frame)
+
+    assert panel.aircraft_count() == 1, "同一 ICAO 重复帧不得变成两架"
+    assert panel.table.rowCount() == 1
+
+
+def test_spectrum_sweep_is_idempotent_while_running(window, monkeypatch):
+    """扫频在跑时再点「扫频找台」→ 直接返回，不再弹参数框、不重起 worker。"""
+    w, mw = window
+
+    class _RunningSweep:
+        def isRunning(self):  # noqa: N802 - 模拟 QThread 接口
+            return True
+
+        def cancel(self):
+            pass
+
+        def wait(self, *_):
+            pass
+
+    class _Backend:
+        def read_samples(self, n):
+            return []
+
+        def set_frequency(self, hz):
+            pass
+
+    class _SweepDialogSpy:
+        """扫频进行中若仍构造参数框，说明忙锁失守 → 直接失败（不阻塞事件循环）。"""
+
+        def __init__(self, *a, **k):
+            raise AssertionError("扫频在跑时不得再弹参数框")
+
+    stub = _RunningSweep()
+    w._sweep_worker = stub
+    w._active_sdr_backend = _Backend()
+    monkeypatch.setattr(mw, "QDialog", _SweepDialogSpy)
+    try:
+        w._start_sweep()
+        assert w._sweep_worker is stub, "扫频中重复点击不得重起/替换 worker"
+    finally:
+        w._sweep_worker = None
+        w._active_sdr_backend = None
+
+
+def test_sat_track_start_is_idempotent_while_tracking():
+    """跟踪中重复「开始」→ 幂等不发请求（面板层，菜单/外部调用也走这里）。"""
+    from sat_track_panel import SatTrackPanel
+
+    panel = SatTrackPanel()
+    panel.populate_satellites(["NOAA 19"])
+    sent = []
+    panel.track_requested.connect(lambda name, hz: sent.append(name))
+
+    panel._on_start_clicked()
+    assert sent == ["NOAA 19"], "首次开始应发一次请求"
+
+    panel.set_tracking_state(True)
+    panel._on_start_clicked()
+    assert sent == ["NOAA 19"], "跟踪中重复开始不得再发请求"
+
+    panel.set_tracking_state(False)
+    panel._on_start_clicked()
+    assert sent == ["NOAA 19", "NOAA 19"], "停止后应能再次开始"
