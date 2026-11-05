@@ -492,3 +492,31 @@ class TestE5FailureMessagesHumanized:
         assert msgs, "失败必须 emit error"
         assert "Traceback" not in msgs[0], f"堆栈泄漏: {msgs[0]!r}"
         assert "boom" in msgs[0], "细节（供排查）必须保留"
+
+
+# ======================================================================
+# E2b 采样率：输入保持 Hz，等价值按统一读数口径（MS/s）
+# ======================================================================
+class TestE2bSampleRateHzInputWithMsPerSEquiv:
+    """Hz 输入量纲合法且不截断精度；旁边给 MS/s 等价值，不改写输入。"""
+
+    def test_equiv_label_tracks_hz_input(self):
+        _app()
+        from device_panel import DevicePanel
+        p = DevicePanel()
+        p._hotplug_timer.stop()
+        p.sr_edit.setText("2048000")
+        assert p.sr_edit.text() == "2048000", "输入必须是用户原样（Hz）"
+        assert p.sr_equiv.text() == "= 2.048 MS/s", p.sr_equiv.text()
+        p.sr_edit.setText("2400000")
+        assert p.sr_equiv.text() == "= 2.400 MS/s", p.sr_equiv.text()
+
+    def test_equiv_label_is_dash_for_empty_or_invalid(self):
+        _app()
+        from device_panel import DevicePanel
+        p = DevicePanel()
+        p._hotplug_timer.stop()
+        for bad in ("", "  ", "abc", "0", "-1"):
+            p.sr_edit.setText(bad)
+            assert p.sr_equiv.text() == "—", (bad, p.sr_equiv.text())
+        assert p.sr_edit.text() == "-1", "不得改写用户输入"

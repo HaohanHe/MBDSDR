@@ -34,7 +34,7 @@ except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
     _ENUM_OK = False
 
-from constants import DEFAULT_SAMPLE_RATE_HZ
+from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
 
 
 def _list_audio_output_devices() -> List[Dict]:
@@ -162,10 +162,22 @@ class DevicePanel(QWidget):
         form.addRow("设备", dev_row)
 
         # 参数
+        # 采样率输入保留 Hz：帧格式与后端接口都以 Hz 计，输入框量纲合法，
+        # 且 2048000 这类整数值不该被 3 位小数截断。右侧给等价值
+        # （format_sample_rate，与状态栏/内核同一读数口径），用户不必自己换算。
         self.sr_edit = QLineEdit(str(DEFAULT_SAMPLE_RATE_HZ))
         self.sr_edit.setToolTip(
             "每秒采集的样本数；越高能看的带宽越宽，默认值通常够用")
-        form.addRow("采样率(Hz)", self.sr_edit)
+        self.sr_equiv = QLabel("")
+        self.sr_equiv.setObjectName("statusValue")
+        self.sr_equiv.setToolTip("等价值：按项目统一读数口径（MS/s，3 位小数）显示")
+        sr_row = QHBoxLayout()
+        sr_row.setContentsMargins(0, 0, 0, 0)
+        sr_row.addWidget(self.sr_edit, 1)
+        sr_row.addWidget(self.sr_equiv)
+        form.addRow("采样率(Hz)", sr_row)
+        self.sr_edit.textChanged.connect(self._update_sr_equiv)
+        self._update_sr_equiv()
 
         self.gain_edit = QLineEdit("30")
         self.gain_edit.setToolTip(
@@ -204,6 +216,21 @@ class DevicePanel(QWidget):
 
         root.addStretch()
         self._refresh_audio_devices()
+
+    def _update_sr_equiv(self) -> None:
+        """采样率等价值：2048000 → 「= 2.048 MS/s」；空/非数字/非正 → 「—」。
+
+        Hz 输入不截断精度（后端按 Hz 下发），等价值只按项目读数口径展示，
+        不改写输入框，也不参与连接载荷。
+        """
+        text = self.sr_edit.text().strip()
+        try:
+            hz = float(text)
+        except (TypeError, ValueError):
+            self.sr_equiv.setText("—")
+            return
+        shown = format_sample_rate(hz)
+        self.sr_equiv.setText(f"= {shown}" if hz > 0 else "—")
 
     # ------------------------------------------------------------------ 设备枚举
     def refresh_devices(self) -> None:

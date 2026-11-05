@@ -127,7 +127,7 @@ tooltip 必须 ≥12 字、且不得与同一函数内该控件的可见文字�
 | 9 | `weather_panel.py` file_btn | complex64 raw .iq/.cfile/.raw，或 NOAA APT 的 .wav | 选择要解码的录制文件：IQ 录制用 .iq/.cfile/.raw，NOAA APT 录音用 .wav |
 | 10 | `weather_panel.py` freq_edit | 下行中心频率 MHz | 卫星下行信号的中心频率（MHz）；选好制式会自动填入，手动改动前先确认 |
 | 11 | `weather_panel.py` sym_edit | 符号率 ksps | 卫星信号的符号率（ksps）；要与所选制式匹配，不确定就用制式默认值 |
-| 12 | `weather_panel.py` sr_edit | 采样率 Msps（complex64 录制） | 录制文件的采样率（Msps）；必须与录制时一致，不一致会解码失败 |
+| 12 | `weather_panel.py` sr_edit | 采样率 MS/s（complex64 录制） | 录制文件的采样率（MS/s）；必须与录制时一致，不一致会解码失败 |
 | 13 | `weather_panel.py` start_btn | 后台线程调用 mbdsdr_ai 真实解码链出图 | 开始解码当前文件或实时信号；完成后右侧出图，失败时下方会写明原因 |
 | 14 | `weather_panel.py` stop_btn | 停止接收/解码 | 停止当前解码；已经生成的图会保留，想重来再点「开始解码」 |
 | 15 | `dock_layout_manager.py` 面板图标 | `spec.name`（与图标名逐字相同） | `{面板名}面板：点击显示或隐藏` |

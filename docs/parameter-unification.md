@@ -203,6 +203,8 @@
 `desktop/settings_panel.py` **没有**独立采样率档位表（grep `sample_rate` 无命中），只经 `control_panel`/设置下发 → 同步面为 0，但它的文案若引用档位需跟随；`cpp/src/core/app_settings.*` **没有** sampleRate 键（grep 无命中），C++ 不持久化采样率，故 C 的旧配置迁移只在 Python 侧发生，C++ 侧按 `kDefaultSampleRateHz` 起档。
 **文案审计线口径（别撞车）**：桌面 `desktop/constants.py:37`（符号 `format_sample_rate`）已统一 `MS/s`、3 位小数（取证 `d0b585a0` — `desktop/constants.py:33` — `0.250 MS/s`，其中 `:33` 是该提交当时的历史行号；行号随重构漂，定位以符号名为准；回归锁 `ebc897fa` — `tests/test_copy_units_audit.py:28` — `0.250 MS/s`）；移动端 `d543c87d` — `mobile/lib/pages/spectrum_page.dart:389` — `toStringAsFixed(3)} MS/s`（同字面量亦在 `mobile/lib/widgets/device_info_card.dart:104`）。新增 250k 时**必须显示 `0.250 MS/s`，不得写 `250 kHz`**；`docs/copy-audit.md` 的 U-03 已是这条口径，文档里不要另立单位。
 
+**`device_panel` 采样率输入为什么保留 Hz（取舍记账）**：该输入框是**下发给后端**的原始量，后端接口与 `.cf32` 帧格式都以 Hz 计；若把它改成 `MS/s` 输入框，`2048000` 这类整数会被 3 位小数截断，而采样率在调谐/抽取链路上是要精确到 Hz 的参数。折中：**输入保持 Hz，旁边给等价值**——`desktop/device_panel.py:_update_sr_equiv`，输入 `2048000` 显示 `= 2.048 MS/s`，空/非数字/非正显示 `—`；等价值只走 `format_sample_rate`（与状态栏/内核同一读数口径），**不改写输入框、不进连接载荷**。回归：`tests/test_settings_semantics.py::TestE2bSampleRateHzInputWithMsPerSEquiv`。
+
 ### C.4 250k 证据分级（细则见 `docs/limitations-register.md` 附 M）
 
 - **驱动依据（已核实）**：librtlsdr 合法区间 `(225k, 300k]`（`sdr_backend.py:_clamp_sample_rate`，来源 librtlsdr.c 区间判定），250k 是低段唯一档；`cpp/src/dsp/device_capabilities.cpp:kRtlsdrSrMinHz = 250000.0` 与 `kCandidateRatesHz` 首项 250k、`cpp/tests/test_device_capabilities.cpp` 已断言 `opts.contains(250000.0)`——C++ 设备下拉与 C++ 测试都已在用 250k。

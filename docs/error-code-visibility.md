@@ -342,6 +342,10 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
   +        "在「控制」面板把「采样率」降到设备支持的档位（如 2.048 MS/s）；"
   ```
 
+  说明：上面的 `-` 行是 `ff964183` 的历史**改前**状态，原样抄录、不修改——
+  把它也改成 `MS/s` 会让 diff 两边相同，等于伪造证据。当前代码与 `+` 行一致
+  （`git status --porcelain -- desktop/troubleshooting.py` 无输出）。
+
 - 结论：**早已入库、改的人不是参数治理线**；`ff964183` 是 `2b7a71b9` 的祖先
   （`git merge-base --is-ancestor ff964183 2b7a71b9` 退出码 0），故 `2b7a71b9`
   不含该行是正常继承，**不是漏改**。参数治理线的 4 个复位路径与此行无关。

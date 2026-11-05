@@ -859,6 +859,10 @@ def performance_summary(report: Dict[str, Any],
     实时率 = 输入复样本吞吐 / nominal_sample_rate。>1 表示单线程能跟上；
     <1 表示跟不上。跟不上时的行为是**同步累积延迟**，不卡死、也不伪造丢帧
     —— `dropped_frames` 只统计 FCS/CRC 失败的帧。
+
+    契约键名里的 ``2_4msps`` 是历史命名，消费方按名取值，改名会破坏兼容：
+    其中的 **2.4 指 2.400 MS/s**（即 ``nominal_sample_rate`` 的默认基准），
+    不是频率 MHz。比值本身无量纲。
     """
     stages = report.get("stages") or []
     total_ms = sum(float(s.get("elapsed_ms", 0.0)) for s in stages)
