@@ -161,6 +161,8 @@ _MOBILE_SPECTRUM = open(os.path.join(_ROOT, "mobile", "lib", "pages",
                                      "spectrum_page.dart"), encoding="utf-8").read()
 _MOBILE_INFO = open(os.path.join(_ROOT, "mobile", "lib", "widgets",
                                  "device_info_card.dart"), encoding="utf-8").read()
+_CPP_SPECTRUM = open(os.path.join(_ROOT, "cpp", "src", "ui",
+                                  "spectrum_widget.cpp"), encoding="utf-8").read()
 
 
 def test_u02_cpp_status_strip_labels_rssi_and_snr_units():
@@ -324,6 +326,13 @@ def test_u03_same_value_renders_identically_on_three_fronts():
     # C++ 与移动端确实按 3 位小数 + MS/s 构造，而非只是常量巧合
     assert "QString(\"%1 MS/s\").arg(hz / 1e6, 0, 'f', 3)" in _CPP_STATUS
     assert "toStringAsFixed(3)} MS/s" in _MOBILE_SPECTRUM
+
+
+def test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s():
+    """U-03：C++ 频谱信息条里的 Fs 是采样率，必须 MS/s + 3 位小数（不是 MHz）。"""
+    assert 'QString("%1  Fs=%2 MS/s  F0=%3 MHz  N=%4")' in _CPP_SPECTRUM
+    assert "Fs=%2 MHz" not in _CPP_SPECTRUM
+    assert ".arg(frame.sampleRateHz / 1e6, 0, 'f', 3)" in _CPP_SPECTRUM
 
 
 def test_u03_status_output_uses_ms_per_s_for_sample_rate():

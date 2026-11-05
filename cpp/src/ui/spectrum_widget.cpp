@@ -845,9 +845,11 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
     // Honest source banner: the offline fallback is explicitly NOT hardware.
     testLabel_->setText(frame.isTestSignal
         ? QStringLiteral("测试信号（非硬件） · NOT HARDWARE") : QString());
-    const QString info = QString("%1  Fs=%2 MHz  F0=%3 MHz  N=%4")
+    // Fs is a sample rate, so it is labelled MS/s (3 decimals, same as
+    // ui::fmtStripSampleRate); F0 is a frequency and stays in MHz.
+    const QString info = QString("%1  Fs=%2 MS/s  F0=%3 MHz  N=%4")
                         .arg(frame.sourceName.isEmpty() ? "?" : frame.sourceName)
-                        .arg(frame.sampleRateHz / 1e6, 0, 'f', 1)
+                        .arg(frame.sampleRateHz / 1e6, 0, 'f', 3)
                         .arg(frame.centerFreqHz / 1e6, 0, 'f', 1)
                         .arg(frame.fftSize);
     QFontMetrics fm(infoLabel_->font());
