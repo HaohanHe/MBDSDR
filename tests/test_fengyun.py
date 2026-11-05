@@ -60,6 +60,22 @@ def _make_test_image(w: int, h: int) -> np.ndarray:
     return img
 
 
+class TestVcduHeader(unittest.TestCase):
+    """CCSDS AOS VCDU 主头位布局：version 必须为 '01'（=1）。"""
+
+    def test_file_to_vcdus_header_fields(self):
+        frames = file_to_vcdus(b"\x00" * 1000, scid=0x20, vcid=1,
+                               apid=0x10, chunk=16)
+        self.assertGreater(len(frames), 1)
+        for index, frame in enumerate(frames):
+            self.assertEqual(len(frame), 892)
+            self.assertEqual((frame[0] >> 6) & 0x3, 1, "VCDU version 必须是 01")
+            self.assertEqual(
+                ((frame[0] & 0x3F) << 2) | (frame[1] >> 6), 0x20)
+            self.assertEqual(frame[1] & 0x3F, 1)
+            self.assertEqual(int.from_bytes(frame[2:5], "big"), index)
+
+
 class TestFY4Roundtrip(unittest.TestCase):
     """第一部分：FY-4 LRIT 编码→调制→解调→解码→出图。"""
 

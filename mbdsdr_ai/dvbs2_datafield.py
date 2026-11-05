@@ -104,9 +104,9 @@ class DatafieldVcduReassembler:
     def __init__(self, vcdu_len: int = 892, expect_crc: bool = False,
                  accepted_versions=(VCDU_VALID_VERSION,)):
         """vcdu_len：VCDU 帧长（字节）；expect_crc：帧尾 CRC-16 校验开关；
-        accepted_versions：接受的 VCDU version 集合（默认 (1,) 为 CCSDS
-        标准口径；仓内 `fengyun_sat.file_to_vcdus` 编码侧造 version=0 帧，
-        兼容该链时显式传 (0, 1)）。"""
+        accepted_versions：接受的 VCDU version 集合，默认 (1,) 为 CCSDS
+        AOS 标准口径（`fengyun_sat.file_to_vcdus` 已按标准造 version=1；
+        参数保留仅为对接历史/第三方 version=0 流的兼容选择）。"""
         if vcdu_len < VCDU_HEADER_BYTES + 2:
             raise ValueError(f"VCDU 长度非法: {vcdu_len}")
         self.vcdu_len = int(vcdu_len)

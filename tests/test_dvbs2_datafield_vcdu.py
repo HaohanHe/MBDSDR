@@ -119,12 +119,14 @@ class TestProtocolAnchors:
 class TestValidSequence:
     def test_encoded_frames_roundtrip_across_chunked_datafields(self):
         """file_to_vcdus 造连续流 → 按 4016B（非 892 整数倍）切分喂入 →
-        逐字节重组，计数连续。编码侧造 version=0 帧，按兼容口径收。"""
+        逐字节重组，计数连续。编码侧按 CCSDS AOS 造 version=1 帧，
+        用默认（严格）重组器即可收。"""
         payload = bytes((i * 37) & 0xFF for i in range(4000))
         vcdus = file_to_vcdus(payload, scid=0x20, vcid=1)
         assert len(vcdus) >= 3
+        assert all(((f[0] >> 6) & 0x3) == 1 for f in vcdus)
         stream = b"".join(vcdus)
-        r = DatafieldVcduReassembler(accepted_versions=(0, 1))
+        r = DatafieldVcduReassembler()
         out = []
         for i in range(0, len(stream), 4016):   # 跨 DATA FIELD 切分
             out += r.feed(stream[i:i + 4016])

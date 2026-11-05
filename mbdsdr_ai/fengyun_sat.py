@@ -289,6 +289,8 @@ def file_to_vcdus(file_bytes: bytes, scid: int = 0x20, vcid: int = 1,
 
     封装规则严格对齐 goes_lrit 解码：
       - VCDU 892B：6B 头(version/scid/vcid/counter/reserved) + 886B M_PDU；
+        版本号固定为 CCSDS AOS 的 '01'（=1），与 dvbs2_datafield 的
+        VCDU_VALID_VERSION 同一口径；
       - M_PDU 前 2B = first_header_pointer（高 3 位在 byte6，低 8 位在 byte7）；
       - M_PDU 数据区 884B；TP_PDU 可跨 VCDU 切分（解码器 in_progress 续接）。
     """
@@ -348,7 +350,7 @@ def file_to_vcdus(file_bytes: bytes, scid: int = 0x20, vcid: int = 1,
                 off = 0
         # 组 VCDU 头
         vcdu = bytearray(VCDU_LEN)
-        vcdu[0] = (0 << 6) | ((scid >> 2) & 0x3F)
+        vcdu[0] = (1 << 6) | ((scid >> 2) & 0x3F)   # version='01' (CCSDS AOS)
         vcdu[1] = ((scid & 0x03) << 6) | (vcid & 0x3F)
         vcdu[2] = (counter >> 16) & 0xFF
         vcdu[3] = (counter >> 8) & 0xFF
