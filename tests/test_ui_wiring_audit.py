@@ -72,16 +72,21 @@ class TestModulePanelParamsReachBackend:
     """修前：sr_combo / gain_slider 改了只改内存，连接恒用默认值。"""
 
     def test_sample_rate_combo_carries_hz(self):
+        from constants import format_sample_rate
         from module_panel import ModulePanel
         p = ModulePanel()
-        # 档位集合不变；显示文本按 U-03 统一 MS/s，Hz 仍挂 itemData 上
-        # （不靠解析文本，避免精度坑）
-        assert p.sr_combo.count() == 5
-        assert p.sr_combo.itemText(1) == "1.440 MS/s"
-        p.sr_combo.setCurrentIndex(1)
-        assert p.selected_sample_rate_hz() == pytest.approx(1_440_000.0)
-        p.sr_combo.setCurrentIndex(4)
-        assert p.selected_sample_rate_hz() == pytest.approx(3_200_000.0)
+        # 档位来自设备能力（不再有前端静态 5 档表）；显示文本按 U-03 统一
+        # MS/s，Hz 仍挂 itemData 上（不靠解析文本，避免精度坑）
+        p._apply_devices([{
+            "label": "RTL-SDR", "driver": "rtlsdr",
+            "sample_rate_range": (1_000_000, 2_560_000),
+        }])
+        assert p.sr_combo.count() == 8
+        assert p.sr_combo.itemText(0) == format_sample_rate(1_024_000)
+        p.sr_combo.setCurrentIndex(0)
+        assert p.selected_sample_rate_hz() == pytest.approx(1_024_000.0)
+        p.sr_combo.setCurrentIndex(p.sr_combo.count() - 1)
+        assert p.selected_sample_rate_hz() == pytest.approx(2_560_000.0)
 
     def test_gain_slider_value_readable(self):
         from module_panel import ModulePanel
@@ -104,12 +109,15 @@ class TestModulePanelParamsReachBackend:
         got = []
         p.device_selected.connect(lambda d: got.append(dict(d)))
         # 注入一台"设备"（无硬件：面板枚举为空，这里直接塞内存表模拟选中）
-        p._devices = [{"label": "FakeSDR", "driver": "fake"}]
+        p._devices = [{
+            "label": "FakeSDR", "driver": "rtlsdr",
+            "sample_rate_range": (1_000_000, 2_560_000),
+        }]
         p.device_combo.clear()
         p.device_combo.addItem("FakeSDR")
-        p.device_combo.setCurrentIndex(0)
+        p.device_combo.setCurrentIndex(0)      # 触发按设备能力重填采样率档位
 
-        p.sr_combo.setCurrentIndex(0)          # 1.024 MHz
+        p.sr_combo.setCurrentIndex(0)          # 1.024 MHz（量程内第一档）
         p.gain_slider.setValue(42)
         p._on_connect()
 
@@ -229,7 +237,6 @@ ALLOWED_UNCONNECTED = {
     "ai_panel.py:api_key_edit": "配置对话框：Accepted 后统一读 text()",
     "ai_panel.py:base_url_edit": "配置对话框：Accepted 后统一读 text()",
     "ai_panel.py:model_edit": "配置对话框：Accepted 后统一读 text()",
-    "device_panel.py:self.sr_edit": "连接按钮读 text() → dev['_sample_rate']",
     "device_panel.py:self.gain_edit": "连接按钮读 text() → dev['_gain']",
     "device_panel.py:self.ppm_edit": "连接按钮读 text() → dev['_ppm']",
     "ntrip_panel.py:self.host_edit": "get_config()/连接按钮读 text()",

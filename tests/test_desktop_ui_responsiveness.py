@@ -282,6 +282,30 @@ class TestAutoEnumerateNoDevice:
         assert "RTL-SDR" in hint_text, f"横幅应含 RTL-SDR, 实际 {hint_text}"
         assert main_window.status_conn.text() == "未连接"
 
+    def test_async_auto_connect_shows_status_hint(self, main_window, monkeypatch):
+        """T4b: 后台自动连接期间状态栏必须有非阻塞提示，不能空白约 1 s。"""
+        import threading
+        started = threading.Event()
+        release = threading.Event()
+
+        def _stub_worker():
+            started.set()
+            release.wait(3.0)
+
+        monkeypatch.delenv("MBDSDR_OFFLINE", raising=False)
+        monkeypatch.setattr(main_window, "_auto_enum_worker", _stub_worker)
+        main_window._active_sdr_backend = None
+        main_window._auto_enumerate_and_connect_async()
+        try:
+            assert started.wait(2.0), "后台枚举/连接线程未启动"
+            msg = main_window.statusBar().currentMessage()
+            assert "正在连接设备" in msg, \
+                f"自动连接期间状态栏必须有提示，实际 {msg!r}"
+        finally:
+            release.set()
+            if main_window._auto_enum_thread is not None:
+                main_window._auto_enum_thread.join(3.0)
+
 
 class TestCleanDisconnect:
     """T7: 干净断开——stop 流水线、关流、释放后端、控件置灰。"""

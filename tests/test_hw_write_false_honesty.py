@@ -211,6 +211,69 @@ def test_gain_success_shows_device_value_keeps_user_intent(window):
         "配置被写成设备值，用户意图丢失"
 
 
+# ------------------------------------------------ 应用解调 / 书签：带宽必须真下发
+def test_apply_demod_applies_bandwidth_to_backend(window):
+    """「应用解调」带的带宽必须真的写到设备，不是只改界面。
+
+    旧实现里这行是 `hasattr(self, "_on_vfo_bandwidth_changed_ui")` 守卫的死
+    代码（全文件无该方法），带宽永不下发。这行本身删掉也「看不出区别」——
+    因为并没有异常，所以这里钉行为而不是钉源码文本：
+    反证：把任意一处改回 `hasattr(self, "_on_vfo_bandwidth_changed_ui")` 的
+    假调用 → 后端收不到 set_bandwidth，本用例红。
+    """
+    w = window
+    be = _Backend()
+    w._active_sdr_backend = be
+    w.settings.set("bandwidth_hz", 0.0)
+    w.statusBar().clearMessage()
+
+    w._on_apply_demod_requested("NFM", 12_000)
+
+    bw_calls = [v for (label, v) in be.calls if label == "set_bandwidth"]
+    assert bw_calls == [12_000.0], f"带宽没有真下发: 实际后端调用 {be.calls}"
+    assert float(w._vfo_bw) == 12_000.0, "本地带宽没跟上设备实际值"
+    assert float(w.settings.get("bandwidth_hz")) == 12_000.0, "带宽没有落盘"
+    assert "已应用解调" in w.statusBar().currentMessage()
+
+
+def test_apply_demod_bandwidth_failure_not_reported_as_success(window):
+    """模式切换成功但带宽失败 → 不得整句报「已应用解调」，带宽不落盘。
+
+    反证：把 `bw_applied` 判定删掉（无条件写「已应用解调」）→ 本用例红。
+    """
+    w = window
+    be = _Backend(fail={"set_bandwidth"})
+    w._active_sdr_backend = be
+    w.settings.set("bandwidth_hz", 2_400.0)
+    w.statusBar().clearMessage()
+
+    w._on_apply_demod_requested("NFM", 3_000)
+
+    msg = w.statusBar().currentMessage()
+    assert "已应用解调" not in msg, "带宽失败仍报「已应用解调」（半成功冒充成功）"
+    assert "带宽未生效" in msg and "设备拒绝带宽设置" in msg
+    assert float(w.settings.get("bandwidth_hz")) == 2_400.0, "失败带宽被落盘"
+    assert float(w._vfo_bw) != 3_000.0, "失败带宽被写进本地 VFO"
+
+
+def test_bookmark_tune_applies_bandwidth(window):
+    """书签（频率+模式+带宽）点击后，带宽同样必须真下发。
+
+    反证：把 `_on_bookmark_tune_requested` 里那行改回 `hasattr(...)` 假调用 → 红。
+    """
+    w = window
+    be = _Backend()
+    w._active_sdr_backend = be
+    w.settings.set("bandwidth_hz", 0.0)
+    w.statusBar().clearMessage()
+
+    w._on_bookmark_tune_requested(145_500_000.0, "FM", 15_000)
+
+    bw_calls = [v for (label, v) in be.calls if label == "set_bandwidth"]
+    assert bw_calls == [15_000.0], f"书签带宽没有真下发: {be.calls}"
+    assert float(w.settings.get("bandwidth_hz")) == 15_000.0
+
+
 # ---------------------------------------------------------------- 卫星点选调谐
 def test_sky_satellite_tune_false_keeps_label_and_reports(window):
     """点选卫星自动调谐失败 → tuned 不置位：标签不动，状态栏给原因。

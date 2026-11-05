@@ -50,6 +50,23 @@ GIMBAL_DISPATCH_GRACE_S = 0.05
 GIMBAL_DISPATCH_TIMEOUT_S = 2.5
 
 
+def fill_sample_rate_combo(combo, device) -> None:
+    """按设备能力重建采样率下拉（主窗口与模块面板共用同一真值源）。
+
+    - 设备报告量程 → 档位 = 后端离散表 ∩ 量程（不编中间档）；
+    - 量程未知（含尚未连接）→ 单项显式说明且 data=None，应用侧按
+      ``DEFAULT_SAMPLE_RATE_HZ`` 兜底；绝不把假档位摆进下拉。
+    """
+    items = sample_rate_combo_items(device)
+    combo.blockSignals(True)
+    combo.clear()
+    for text, hz in items:
+        combo.addItem(text, hz)
+    # 默认档与后端 DEFAULT_SAMPLE_RATE 对齐（U-03：唯一 MS/s 口径）
+    combo.setCurrentIndex(default_sample_rate_combo_index(items))
+    combo.blockSignals(False)
+
+
 def _focus_widget():
     """当前焦点控件（便于单测打桩）。"""
     from PySide6.QtWidgets import QApplication
@@ -426,7 +443,12 @@ from module_panel import ModulePanel
 from tokens import tokens
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
-from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
+from constants import (
+    DEFAULT_SAMPLE_RATE_HZ,
+    default_sample_rate_combo_index,
+    format_sample_rate,
+    sample_rate_combo_items,
+)
 # 气象云图面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
 # 在用户首次点解码时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
@@ -495,7 +517,9 @@ try:
 except Exception:  # pragma: no cover
     LoopSatTracker = None  # type: ignore
 # 运行参数持久化（频率/增益/模式/带宽/采样率/呼号/AGC/主题 落 JSON，退出不丢）
-from settings import DesktopSettings, volume_pct_to_hw, volume_hw_to_pct
+from settings import (DesktopSettings, default_record_dir,
+                      record_dir_needs_confirmation,
+                      volume_pct_to_hw, volume_hw_to_pct)
 # 触屏/Surface/平板二合一适配：单例管理器 + 触控目标/手势辅助。
 from touch_manager import touch_manager
 from touch_helpers import (enable_touch_events, apply_touch_target,
@@ -3486,15 +3510,18 @@ class MainWindow(QMainWindow):
         self._auto_select_and_connect(devices)
 
     def _auto_enumerate_and_connect_async(self):
-        """启动路径：枚举放后台线程，选源/连接排队回 GUI 线程。
+        """启动路径：枚举/连接放后台线程，UI 只做挂接。
 
-        实测枚举 1543.5 ms（1 台 RTL-SDR，含 SoapySDR 总线探测），留在 GUI
-        线程会让首帧后继续冻结同样长。worker 只做 enumerate，不碰控件。
+        实测启动单次枚举 74–114 ms、硬件 connect() 0.02–1.1 s（USB 打开/
+        调谐器探测，波动来自驱动与设备状态），两者都不该压 GUI 线程。
         """
         if self._auto_enum_guard():
             return
         if self._auto_enum_thread is not None and self._auto_enum_thread.is_alive():
             return
+        # 后台连接期间（最长约 1 s）不能让状态栏空白：showMessage 不阻塞，
+        # 之后「已连接 / 连接失败 / 无设备提示」会直接覆盖它。
+        self.statusBar().showMessage("正在连接设备…", MSG_NORMAL)
         self._auto_enum_thread = threading.Thread(
             target=self._auto_enum_worker, name="auto-sdr-enum", daemon=True)
         self._auto_enum_thread.start()
@@ -3629,7 +3656,8 @@ class MainWindow(QMainWindow):
             self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found")
             return
 
-        # 构造后端并连接（默认参数：2.048MS/s、AGC 开、PPM 0、offset 关）
+        # 构造后端并连接（默认参数：DEFAULT_SAMPLE_RATE_HZ = 2.400 MS/s、
+        # AGC 开、PPM 0、offset 关）
         try:
             backend = build_backend_for_device(chosen)
         except Exception as e:
@@ -3939,33 +3967,6 @@ class MainWindow(QMainWindow):
 
         sr_combo = QComboBox()
 
-        def _fill_sr_combo(device):
-            """采样率档位来自该设备的能力，不再写死前端档位表。
-
-            - 设备报告了量程且后端有离散表 → 用后端表 ∩ 量程；
-            - 有量程但后端无离散表 → 只给量程两端（不编中间档）；
-            - 量程未知（含尚未连接的 rtl_tcp）→ 单项显式说明且 data=None，
-              连接后按默认档；绝不把假档位摆进下拉。
-            """
-            try:
-                from mbdsdr_ai.device_capabilities import sample_rate_options
-                options = sample_rate_options(device) if isinstance(device, dict) else None
-            except Exception:
-                options = None
-            sr_combo.blockSignals(True)
-            sr_combo.clear()
-            if not options:
-                sr_combo.addItem(
-                    "未知（设备未报告采样率范围，将用默认 "
-                    f"{format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）", None)
-            else:
-                for _r in options:
-                    sr_combo.addItem(format_sample_rate(_r), float(_r))
-                # 默认档与后端 DEFAULT_SAMPLE_RATE 对齐（U-03：唯一 MS/s 口径）
-                _idx = sr_combo.findData(float(DEFAULT_SAMPLE_RATE_HZ))
-                sr_combo.setCurrentIndex(_idx if _idx >= 0 else 0)
-            sr_combo.blockSignals(False)
-
         param_form.addRow("采样率", sr_combo)
 
         gain_spin = QSpinBox()
@@ -4017,7 +4018,7 @@ class MainWindow(QMainWindow):
             )
             ppm_spin.setEnabled(is_rtl)
             # 采样率档位随选中设备能力重建（换设备即换档位集合）
-            _fill_sr_combo(d)
+            fill_sample_rate_combo(sr_combo, d)
 
         def _fill_combo(device_list, select_prev=None):
             """真实设备优先、rtl_tcp 殿后；无设备时不可选占位项置顶且默认选中。"""
@@ -4884,7 +4885,7 @@ class MainWindow(QMainWindow):
             self._demod_cfg.auto_squelch = False
         # 写回后端状态：状态栏据此显示「桌面余量 / C++ 自动 / 手动」；
         # 不写回时界面会一直挂着旧来源（或 none），用户分不清谁在生效。
-        backend = getattr(self, "_backend", None)
+        backend = getattr(self, "_active_sdr_backend", None)
         set_squelch = getattr(backend, "set_squelch", None)
         if callable(set_squelch):
             try:
@@ -5198,21 +5199,24 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Offset tuning 设置失败: {e}", MSG_NORMAL)
 
     @Slot(float)
-    def _on_vfo_bandwidth_changed(self, bw_hz: float):
+    def _on_vfo_bandwidth_changed(self, bw_hz: float) -> bool:
         """控制面板 VFO 带宽 → 更新本地 _vfo_bw + 频谱 VFO 带宽（Agent B 接口）。
 
         后端 RF 带宽写在最前面：失败即返回，绝不继续改 UI/落盘——否则
         「配置里是 2.4 kHz、硬件还是旧带宽」会被下次启动当成用户意图。
+
+        返回是否真的生效：自动识别/书签这类「模式+带宽」组合动作要据此
+        决定能不能报「已应用」，不能把带宽失败吞掉只剩成功文案。
         """
         try:
             bw = float(bw_hz)
         except Exception:
-            return
+            return False
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
                     "设置带宽", lambda: backend.set_bandwidth(bw)):
-                return
+                return False
         self._vfo_bw = bw
         # VFO 已创建则更新其带宽（经 VfoManager.push_bandwidth → set_bandwidth）
         try:
@@ -5233,18 +5237,13 @@ class MainWindow(QMainWindow):
                 self.spectrum.set_vfo_bandwidth(self._vfo_bw)
         except Exception:
             pass
-        # 后端 RF 带宽
-        if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_bandwidth(self._vfo_bw)
-            except Exception:
-                pass
         self._update_status_bar()
         # 持久化：VFO 带宽
         try:
             self.settings.set("bandwidth_hz", float(bw_hz))
         except Exception:
             pass
+        return True
 
     @Slot(float)
     def _on_step_changed(self, step_hz: float):
@@ -6835,6 +6834,43 @@ class MainWindow(QMainWindow):
             self._record_segments.append(info)
         return info
 
+    def _confirm_record_dir_safe(self) -> bool:
+        """录音目录在程序目录内时，首次录音前必须让用户明确确认。
+
+        便携包按「删目录即卸载」分发：目录在程序根内，删/升级程序目录会把
+        录音一起删掉。未确认就弹窗，默认按钮是「改用用户目录并录音」；选
+        「仍用当前目录」会把 record_dir_inside_program_ack 置真，不再追问。
+        返回 False = 用户取消，调用方必须复位录音按钮。
+        """
+        directory = self.settings.record_dir
+        acked = bool(self.settings.get("record_dir_inside_program_ack", False))
+        if not record_dir_needs_confirmation(directory, acked):
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("录音会随程序目录一起删除")
+        box.setText(
+            "当前录音目录在程序目录内：\n"
+            f"{directory}\n\n"
+            "删除或升级程序目录（便携包「删目录即卸载」）会把这里的录音"
+            "一起删掉。\n"
+            f"推荐改用用户目录：\n{default_record_dir()}")
+        use_user = box.addButton("改用用户目录并录音", QMessageBox.AcceptRole)
+        keep = box.addButton("仍用当前目录", QMessageBox.DestructiveRole)
+        box.setDefaultButton(use_user)
+        box.exec()
+        if box.clickedButton() is use_user:
+            self.settings.set("record_dir", "")
+            self.settings.flush()
+            self.statusBar().showMessage(
+                f"录音目录已改为 {self.settings.record_dir}", MSG_NORMAL)
+            return True
+        if box.clickedButton() is keep:
+            self.settings.set("record_dir_inside_program_ack", True)
+            self.settings.flush()
+            return True
+        return False
+
     def _start_recording(self):
         """开始录制：检查后端 → 建文件名 → 清 buffer → 状态栏提示。
         无 SDR 后端时弹提示且不造假文件（按钮会被调用方弹回）。"""
@@ -6876,6 +6912,18 @@ class MainWindow(QMainWindow):
         self._record_device = str(
             getattr(_dev_obj, "name", "") or backend.__class__.__name__)
         self._record_driver = backend.__class__.__name__
+
+        # 「删目录即卸载」保护：录音目录落在程序目录内且从未确认过时先弹窗，
+        # 默认按钮是改到用户目录。用户取消则整体不录并复位按钮。
+        if not self._confirm_record_dir_safe():
+            self._recording = False
+            self._record_guard = True
+            try:
+                self.record_btn.setChecked(False)
+                self.control_panel.record_button.setChecked(False)
+            finally:
+                self._record_guard = False
+            return
 
         # 录音目录唯一来源是设置（settings.record_dir）；目录不可用时绝不
         # 静默退 tempfile/默认目录——那会让用户以为录到了自己选的盘上。
@@ -7550,12 +7598,8 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         self._on_tune_sdr(peak, mode)
-        if bw is not None and math.isfinite(bw) and bw > 0 \
-                and hasattr(self, "_on_vfo_bandwidth_changed_ui"):
-            try:
-                self._on_vfo_bandwidth_changed_ui("", bw)
-            except Exception:
-                pass
+        if bw is not None and math.isfinite(bw) and bw > 0:
+            self._on_vfo_bandwidth_changed(bw)
 
     def _on_panel_scan_began(self):
         """扫频开始：暂停共享 IQ 轮询，避免抢读同一环形缓冲。"""
@@ -7598,13 +7642,18 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001 - 模式切换异常同样算失败
             ok = False
             reason = f"{type(e).__name__}: {e}"
+        bw_applied = True
         if ok and bandwidth_hz > 0:
-            try:
-                self._on_vfo_bandwidth_changed_ui("", float(bandwidth_hz))
-            except Exception:
-                pass
-        if ok:
+            bw_applied = self._on_vfo_bandwidth_changed(float(bandwidth_hz))
+        if ok and bw_applied:
             self.statusBar().showMessage(f"已应用解调：{mode}", MSG_NORMAL)
+        elif ok:
+            # 模式切换成功但带宽失败：不许整句报「已应用解调」，那会把
+            # `_apply_hw_action` 刚给的失败提示覆盖成成功。
+            self.statusBar().showMessage(
+                f"解调已切换，但带宽未生效：{self._hw_failure_detail() or '设备返回失败'}。"
+                "界面与已保存配置保持上次成功值。",
+                MSG_IMPORTANT)
         else:
             # 失败时绝不再写「已应用解调」——那会把前一秒的失败提示覆盖成成功。
             self.statusBar().showMessage(
@@ -7617,10 +7666,7 @@ class MainWindow(QMainWindow):
         """书签点击 → 调谐 + 设模式 + 带宽。"""
         self._on_tune_sdr(float(freq_hz), mode or "NFM")
         if bandwidth_hz and bandwidth_hz > 0:
-            try:
-                self._on_vfo_bandwidth_changed_ui("", float(bandwidth_hz))
-            except Exception:
-                pass
+            self._on_vfo_bandwidth_changed(float(bandwidth_hz))
 
     def _on_sky_tune_satellite(self, info: dict):
         """天空视图「调到该星」→ 用实时多普勒校正后的频率真正调谐。"""

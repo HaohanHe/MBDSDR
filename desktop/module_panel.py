@@ -47,7 +47,9 @@ from PySide6.QtWidgets import (
 
 from tokens import tokens as _tok
 from mode_registry import get as _get_mode
-from constants import DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ
+from constants import (
+    DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate,
+    default_sample_rate_combo_index, sample_rate_combo_items)
 
 try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
     from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
@@ -332,12 +334,10 @@ class ModulePanel(QWidget):
         form.addRow("增益", gw)
 
         self.sr_combo = QComboBox()
-        # 采样率不是频率：显示文本按 U-03 统一 MS/s + 3 位小数（档位本身不变）；
-        # 同时挂 Hz 数值到 itemData，供连接时下发（避免解析文本）
-        for _txt, _hz in (("1.024 MS/s", 1_024_000.0), ("1.440 MS/s", 1_440_000.0),
-                          ("2.048 MS/s", 2_048_000.0), ("2.400 MS/s", 2_400_000.0),
-                          ("3.200 MS/s", 3_200_000.0)):
-            self.sr_combo.addItem(_txt, _hz)
+        # 档位来自所选设备能力（与主窗口 _fill_sr_combo 共用
+        # constants.sample_rate_combo_items）；不持有前端静态档位表。
+        # 未连接/能力未知时只显示单项「未知」说明并置灰（不静默列全表）。
+        self._fill_sample_rate_options(None)
         form.addRow("采样率", self.sr_combo)
 
         self.bw_spin = QDoubleSpinBox()
@@ -423,6 +423,7 @@ class ModulePanel(QWidget):
                 self.device_info.setText(
                     "未发现SDR设备\n插上 RTL-SDR/HackRF 后点刷新。")
             self.connect_btn.setEnabled(False)
+            self._fill_sample_rate_options(None)
         else:
             self.connect_btn.setEnabled(True)
             for d in self._devices:
@@ -430,6 +431,7 @@ class ModulePanel(QWidget):
                 self.device_combo.addItem(label)
             d0 = self._devices[0]
             self._show_device_info(d0)
+            self._fill_sample_rate_options(d0)
 
         # 设备列表没变化时界面只会"纹丝不动"；给刷新按钮一个明确的动作反馈，
         # 避免用户以为按钮坏了（本次交互审计发现的死按钮）。
@@ -450,6 +452,30 @@ class ModulePanel(QWidget):
     def _on_device_selected(self, idx: int) -> None:
         if 0 <= idx < len(self._devices):
             self._show_device_info(self._devices[idx])
+            self._fill_sample_rate_options(self._devices[idx])
+
+    def _fill_sample_rate_options(self, device) -> None:
+        """按设备能力重填采样率下拉（单一真值源见 constants 同名函数）。
+
+        能力已知 → 可选项来自后端离散表 ∩ 设备量程，可正常选择；
+        能力未知（未连接/驱动未报告范围）→ 只保留一项显式说明，data=None，
+        应用侧按 DEFAULT_SAMPLE_RATE_HZ 兜底，控件置灰避免「选了不生效」。
+        """
+        items = sample_rate_combo_items(device)
+        self.sr_combo.blockSignals(True)
+        self.sr_combo.clear()
+        for text, hz in items:
+            self.sr_combo.addItem(text, hz)
+        self.sr_combo.setCurrentIndex(default_sample_rate_combo_index(items))
+        self.sr_combo.blockSignals(False)
+        known = any(hz is not None for _text, hz in items)
+        self.sr_combo.setEnabled(known)
+        self.sr_combo.setToolTip(
+            "可设采样率来自所连设备能力（后端离散表 ∩ 设备量程）。"
+            f"未报告范围时置灰，连接按默认 {format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}。"
+            if not known else
+            "可设采样率来自所选设备的真实能力；连接时按此档下发，"
+            "实际生效值以设备回执为准。")
 
     def selected_sample_rate_hz(self) -> float:
         """当前采样率下拉档位（Hz）。
@@ -491,7 +517,8 @@ class ModulePanel(QWidget):
             return
         # 面板参数随设备一起下发：沿用 device_panel 的 dev["_sample_rate"] /
         # dev["_gain"] 协议（main_window._on_panel_device_connect 读取这两个键）。
-        # 此前这两个控件改了不下发，连接永远走默认 2.048 MHz / 20 dB。
+        # 此前这两个控件改了不下发，连接永远走默认
+        # DEFAULT_SAMPLE_RATE_HZ = 2.400 MS/s / 20 dB。
         dev = dict(self._devices[idx])
         dev["_sample_rate"] = self.selected_sample_rate_hz()
         dev["_gain"] = self.selected_gain_db()

@@ -41,7 +41,10 @@ def _bare_window():
     w = MainWindow.__new__(MainWindow)
     w._squelch_db = -80.0
     w._demod_cfg = SharedDemodConfig(squelch_db=-80.0)
-    w._backend = _RecordingBackend()
+    # 与 MainWindow 真实属性名一致（历史用例这里写成 `_backend`，恰好配合
+    # 生产的 `getattr(self, "_backend", None)` 一起骗过了自己：真实窗口从未
+    # 有过 `_backend`，静噪永远写不回后端）。
+    w._active_sdr_backend = _RecordingBackend()
     return w
 
 
@@ -51,11 +54,11 @@ def test_slider_writes_back_source_and_margin():
 
     MainWindow._on_squelch_changed(w, -20)
 
-    st = w._backend.status
+    st = w._active_sdr_backend.status
     assert st.squelch_applied_by == "desktop-margin", st.squelch_applied_by
     assert st.squelch_db == -20.0
     assert st.squelch_threshold_dbfs is None, "Python 余量口径不下发绝对门"
-    assert w._backend.calls == [-20.0], w._backend.calls
+    assert w._active_sdr_backend.calls == [-20.0], w._active_sdr_backend.calls
     # 本地链仍然照旧
     assert w._squelch_db == -20.0
     assert w._demod_cfg.squelch_db == -20.0
@@ -69,7 +72,7 @@ def test_status_text_follows_applied_by():
 
     MainWindow._on_squelch_changed(w, -20)
 
-    st = w._backend.status
+    st = w._active_sdr_backend.status
     text = _fmt_squelch(st.squelch_db, st.squelch_applied_by,
                         st.squelch_threshold_dbfs)
     assert text == "-20（16 dB 余量，桌面生效）", text
@@ -81,7 +84,7 @@ def test_without_backend_does_not_raise():
     w = MainWindow.__new__(MainWindow)
     w._squelch_db = -50.0
     w._demod_cfg = None
-    w._backend = None
+    w._active_sdr_backend = None
 
     MainWindow._on_squelch_changed(w, -50)   # 无后端只是不写回，不许崩
     assert w._squelch_db == -50.0

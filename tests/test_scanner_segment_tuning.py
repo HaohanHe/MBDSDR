@@ -35,7 +35,7 @@ def test_scanner_segment_without_peak_never_tunes_to_zero():
     orig_mb = mw.QMessageBox
     win = mw.MainWindow.__new__(mw.MainWindow)
     win._on_tune_sdr = lambda f, m: calls.append(("tune", f, m))
-    win._on_vfo_bandwidth_changed_ui = lambda *a, **k: calls.append(("bw", a))
+    win._on_vfo_bandwidth_changed = lambda *a, **k: calls.append(("bw", a)) or True
     win.statusBar = lambda: _StatusBar()
     mw.QMessageBox = _QMB
     try:
@@ -52,5 +52,10 @@ def test_scanner_segment_without_peak_never_tunes_to_zero():
             win, {"peak_freq": 98_500_000.0, "kind": "FM"})
         assert calls == [("tune", 98_500_000.0, "NFM")], \
             "缺带宽时只调频率，带宽不得写 0"
+        del calls[:]
+        mw.MainWindow._on_scanner_segment_chosen(
+            win, {"peak_freq": 98_500_000.0, "kind": "FM", "bandwidth": 12_000.0})
+        assert calls == [("tune", 98_500_000.0, "NFM"), ("bw", (12_000.0,))], \
+            "带带宽的活动段必须真的下发带宽"
     finally:
         mw.QMessageBox = orig_mb

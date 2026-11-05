@@ -13,6 +13,7 @@ MBDSDR 桌面端共享常量
 与内核基准一致，不引入新的"假数字"。
 """
 
+import logging
 import math as _math
 
 try:
@@ -43,4 +44,44 @@ except Exception:  # noqa: BLE001 - mbdsdr_ai 不可用时的安全回退
 # "能调多少"说法不一。收口到此，各面板共用；实际可调范围仍以设备为准。
 FREQ_MIN_HZ = 10_000.0
 FREQ_MAX_HZ = 6.0e9
+
+logger = logging.getLogger(__name__)
+
+
+def sample_rate_combo_items(device) -> list:
+    """采样率下拉的 (显示文案, itemData) 唯一事实源。
+
+    档位只来自设备能力 ``mbdsdr_ai.device_capabilities.sample_rate_options``
+    （后端离散表 ∩ 设备量程）；桌面不再持有第二份档位表。设备未报告量程
+    （含尚未连接）时只给一项显式「未知」说明，data=None，应用侧按
+    ``DEFAULT_SAMPLE_RATE_HZ`` 兜底——文案里的默认值与兜底是同一个常量。
+    能力查询失败只记日志并按「未知」处理，不编档位。
+    """
+    options = None
+    try:
+        from mbdsdr_ai.device_capabilities import sample_rate_options
+    except Exception as exc:  # noqa: BLE001 - 缺内核时按未知降级
+        logger.warning("采样率能力模块不可用，下拉按未知处理: %s", exc)
+    else:
+        try:
+            if isinstance(device, dict):
+                options = sample_rate_options(device)
+        except Exception as exc:  # noqa: BLE001 - 解析失败不编档位
+            logger.warning("读取设备采样率档位失败，按未知处理: %s: %s",
+                           type(exc).__name__, exc)
+    if not options:
+        return [(
+            "未知（设备未报告采样率范围，将用默认 "
+            f"{format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）",
+            None,
+        )]
+    return [(format_sample_rate(rate), float(rate)) for rate in options]
+
+
+def default_sample_rate_combo_index(items) -> int:
+    """默认选中档：优先与 ``DEFAULT_SAMPLE_RATE_HZ`` 对齐，缺该档选第一项。"""
+    for index, (_text, hz) in enumerate(items):
+        if hz is not None and float(hz) == float(DEFAULT_SAMPLE_RATE_HZ):
+            return index
+    return 0
 
