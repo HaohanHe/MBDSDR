@@ -770,6 +770,40 @@ def _demod_iq_to_audio(input_path: str, sample_rate: float,
     return np.asarray(audio, dtype=np.float64), float(out_sr), None
 
 
+def _demod_am_to_audio(input_path: str, sample_rate: float,
+                       out_sr: int = 12500) -> Tuple[Optional[np.ndarray], float, Optional[str]]:
+    """把 .cf32/.cfile 复基带做 AM 包络检波并重采样到 out_sr（ACARS 等 AM 下行）。
+
+    ACARS 是 VHF AM（载波 + MSK 调幅），信息在包络上；FM 鉴频对它只会得到
+    与信号无关的频偏直流。包络 ``|z|`` 与载波相位/频偏无关，所以这里**不**
+    先去复均值——那会把直流载波本身一并消掉。去的是包络的均值（未调幅载波
+    的直流分量），再带通 300–4500 Hz 留下 1200/2400 Hz MSK 音调。
+
+    返回 (audio, out_sr, error)。
+    """
+    try:
+        raw = np.fromfile(input_path, dtype=np.float32)
+        if raw.size < 4:
+            return None, 0.0, "IQ 样本太少"
+        iq = raw[0::2] + 1j * raw[1::2]
+        env = np.abs(iq).astype(np.float64)
+        env -= np.mean(env)
+        from scipy.signal import butter, sosfiltfilt, resample_poly
+        from math import gcd
+        nyq = float(sample_rate) / 2.0
+        high = min(4500.0, nyq - 1.0)
+        if nyq > 600.0:
+            sos = butter(4, [300.0 / nyq, high / nyq], btype="band", output="sos")
+        else:
+            sos = butter(4, high / nyq, btype="low", output="sos")
+        env = sosfiltfilt(sos, env)
+        g = gcd(int(out_sr), int(sample_rate))
+        audio = resample_poly(env, out_sr // g, int(sample_rate) // g)
+    except Exception as e:
+        return None, 0.0, f"IQ 包络检波失败: {e}"
+    return np.asarray(audio, dtype=np.float64), float(out_sr), None
+
+
 def _resample_audio(audio: np.ndarray, source_rate: float,
                     target_rate: float) -> np.ndarray:
     """用多相滤波保持窄带音频时长；支持 WSPR 下变频后的复序列。"""

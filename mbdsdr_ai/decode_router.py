@@ -212,10 +212,10 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.acars_decoder",
         input_formats=(".wav", ".cf32", ".cfile"),
         output_kind="messages",
-        sample_rate_rule="音频任意 fs（内部 12.5kHz 走带）；.cf32 走宽带 FM 鉴频",
+        sample_rate_rule="音频任意 fs（内部 12.5kHz 走带）；.cf32 走 AM 包络检波",
         evidence=EVIDENCE_PARTIAL,
         min_sample_condition=(
-            "131.55MHz AM 下行解调音频 ≥ 5s，含 ≥ 1 条 2400baud MSK ACARS"
+            "131.55MHz AM 下行解调音频 ≥ 5s，含 ≥ 1 条 1200baud MSK ACARS"
             "报文且 CRC 通过"
         ),
         failure_codes=(
@@ -497,13 +497,14 @@ def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
 
 def _route_acars(ctx: _Ctx) -> Dict[str, Any]:
     from .acars_decoder import ACARSDecoder
-    from .decoders import _demod_iq_to_audio, _read_wav_audio
+    from .decoders import _demod_am_to_audio, _read_wav_audio
 
     result = ctx.result
     if ctx.ext == ".wav":
         audio, a_sr, err = _read_wav_audio(ctx.input_path)
     elif ctx.ext in (".cf32", ".cfile"):
-        audio, a_sr, err = _demod_iq_to_audio(
+        # ACARS 是 VHF AM 下行：走包络检波，不能走 FM 鉴频（见 _demod_am_to_audio）。
+        audio, a_sr, err = _demod_am_to_audio(
             ctx.input_path, ctx.sample_rate, out_sr=12500)
     else:
         audio, a_sr = None, 0.0

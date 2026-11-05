@@ -132,7 +132,7 @@ EVIDENCE = {
     ),
     "acars": (
         "tests/test_acars_roundtrip.py / tests/test_acars_consistency.py"
-        "（2400baud MSK 往返 + 字段一致性）",
+        "（MSK 往返：默认 1200 bd + 2400 bd 兼容档 + 字段一致性）",
         "python -m pytest tests/test_acars_roundtrip.py tests/test_acars_consistency.py -q",
         "半个真：合成链自洽，缺真实航司报文真录",
     ),

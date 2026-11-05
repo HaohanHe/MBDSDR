@@ -287,27 +287,32 @@ def _acars_over_air(text="WEATHER 1500Z WIND 270/15"):
     return bytes([SYN, SYN, SOH]) + body
 
 
+def _am_iq(audio, fs, carrier_hz=3000.0, depth=0.7):
+    """真实 AM 调制：复载波 + MSK 基带调幅，包络 = 1 + depth·audio/峰值。"""
+    base = 1.0 + depth * np.asarray(audio, dtype=np.float64) / np.max(np.abs(audio))
+    t = np.arange(base.size) / float(fs)
+    return base * np.exp(1j * 2 * np.pi * carrier_hz * t)
+
+
 class TestAcarsProductionPath:
     """`decode_router._route_acars` 是 CLI 生产入口，上游不得剥掉前导。
 
     前导若在路由层被裁掉，`ACARSDecoder.decode_audio` 会静默返回 0 帧
     （不报错、不记 crc 失败），因此这里用端到端断言把「必需前导」钉住。
 
-    合成的 IQ 是仓内 `_demod_iq_to_audio`（FM 鉴频）的逆运算，只证明路由
-    把前导完整交给 decode_audio；ACARS 实际是 AM 下行，这份合成 IQ 不代表
-    真实 AM 空中信号，也不能当作解调质量的对拍证据。频偏取 3000Hz，是因为
-    鉴频前的去均值会吃掉过小频偏（±1Hz）的慢相位，那是合成方式问题，不是
-    真实录音条件。
+    `.cf32` 用例按**真实 AM 调制**合成 IQ（载波 + MSK 基带调幅），不是
+    FM 鉴频的逆运算；同一份 IQ 另跑一条 FM 鉴频对照，预期 0 帧——用来证明
+    AM 包络路线确实必要，而不是两条路都能解。
     """
 
-    def test_cf32_iq_end_to_end_yields_known_frame(self, tmp_path):
+    def test_am_cf32_iq_end_to_end_yields_known_frame(self, tmp_path):
         from mbdsdr_ai.acars_decoder import frame_bits_from_bytes, synthesize_msk_audio
 
-        fs = 12500.0
+        fs = 48000.0
         audio = synthesize_msk_audio(frame_bits_from_bytes(_acars_over_air()),
                                      fs, 1200)
-        iq = np.exp(1j * 2 * np.pi * 3000.0 * np.cumsum(audio) / fs)
-        cf = _write_cf32(tmp_path / "acars.cf32", iq)
+        cf = _write_cf32(tmp_path / "acars_am.cf32",
+                         _am_iq(audio, fs, carrier_hz=3000.0, depth=0.7))
 
         out = dr.run_digital_mode(cf, "acars", sample_rate=fs)
 
@@ -320,6 +325,22 @@ class TestAcarsProductionPath:
         assert m["label"] == "DF"
         assert m["block_id"] == "6"
         assert "WEATHER" in m["text"]
+
+    def test_same_am_iq_fails_through_fm_discriminator(self, tmp_path):
+        """对照：旧的 FM 鉴频路径吃同一份 AM IQ，必须 0 帧。"""
+        from mbdsdr_ai.acars_decoder import ACARSDecoder, frame_bits_from_bytes, synthesize_msk_audio
+        from mbdsdr_ai.decoders import _demod_iq_to_audio
+
+        fs = 48000.0
+        audio = synthesize_msk_audio(frame_bits_from_bytes(_acars_over_air()),
+                                     fs, 1200)
+        cf = _write_cf32(tmp_path / "acars_am_ctl.cf32",
+                         _am_iq(audio, fs, carrier_hz=3000.0, depth=0.7))
+
+        fm_audio, fm_sr, err = _demod_iq_to_audio(cf, fs, out_sr=12500)
+
+        assert err is None
+        assert ACARSDecoder(sample_rate=fm_sr).decode_audio(fm_audio) == []
 
     def test_wav_audio_end_to_end_yields_known_frame(self, tmp_path):
         from mbdsdr_ai.acars_decoder import frame_bits_from_bytes, synthesize_msk_audio
