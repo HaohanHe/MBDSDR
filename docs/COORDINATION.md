@@ -207,3 +207,85 @@
   声明（在本台账或会话里写明文件名与占用时段）。** 共有文件按 hunk 拆分提交时
   只允许 `git apply --cached` 自己的 hunk，**禁止整文件 `git add`**；
   也不得为抢文件执行 stash / checkout 他人改动（咨询线已因此险些丢活）。
+
+---
+
+## 六、共享文件占用锁（file_claim，2026-11-05 落地）
+
+### 6.1 当前占用
+
+改共享文件前先写一行，**提交后删行**。表里没有行不代表可以改——先跑
+`python scripts/file_claim.py status` 查操作系统锁（表靠人记得写，锁不会忘）。
+
+| 文件 | 线名 | 开始时间 | 预计提交 hash |
+|---|---|---|---|
+| `docs/COORDINATION.md` | 机制线 | 2026-11-05 12:49 | 本笔提交（`git log -1 --format=%h`） |
+| `scripts/file_claim.py` | 机制线 | 2026-11-05 12:40 | 本笔提交 |
+| `tests/test_file_claim.py` | 机制线 | 2026-11-05 12:40 | 本笔提交 |
+| `scripts/check_commit_scope.py` | 机制线 | 2026-11-05 12:40 | 本笔提交 |
+
+### 6.2 共享文件清单（今天实际撞过的）
+
+- `desktop/main_window.py`
+- `desktop/spectrum_widget.py`
+- `desktop/control_panel.py`
+- `mbdsdr_ai/agent.py`
+- `docs/COORDINATION.md`
+- `docs/limitations-register.md`
+
+清单只是高频雷区，不等于「清单外的文件可以并发改」。新增高频文件时往这里加一行。
+
+### 6.3 claim 与 release 的时机
+
+```
+python scripts/file_claim.py claim   desktop/main_window.py --owner 操作逻辑线 [--ttl-min 10]
+python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线
+python scripts/file_claim.py status  [desktop/main_window.py]
+```
+
+- **claim 在第一次 Edit 之前**（不是"看完代码准备改"，是动手那一刻）。
+- **release 在 `git commit` 成功之后**（commit 失败就还持有着，别提前放）。
+- 每次写该文件前可再 `claim` 一次续租（同 owner 直接成功，并刷新心跳）。
+- 超过 TTL 没续租视为过期，别人可夺取；夺取会打印
+  「原持有者 X 已超时 N，请确认它真的停了」。
+- `release` 只有原持有者能执行；别人 release 必失败（互相解锁等于没有锁）。
+- 状态文件 `D:\mbdsdr\.locks\claims.json`，占位文件 `D:\mbdsdr\.locks\claims\*.claim`，
+  与既有 `qt_test.lock` 同目录；不写 C 盘。
+- 互斥由操作系统裁决：占位文件 `O_CREAT|O_EXCL` 原子创建，续租/夺取/释放都在
+  文件字节锁（Windows `msvcrt.locking`）里完成，不是"读 JSON 再写 JSON"。
+
+### 6.4 被拒绝时怎么办
+
+**只有两个合法动作：等，或者换文件。**
+
+- 等：`status` 看剩余 TTL；到期后对方续租就继续等，确实停了才夺取（先确认它真停了）。
+- 换：先做不冲突的部分，别在别人占着的文件里抢改。
+
+**禁止**：`git stash`、`git checkout -- <别人的文件>`、`git reset`、整文件 `git add`。
+这些动作会把别人的在途改动丢掉或卷进自己的提交——今天三次事故就是这么来的。
+
+### 6.5 提交范围检查：能做的与做不到的
+
+```
+python scripts/check_commit_scope.py <hash>
+```
+
+- 能：列出该提交改动的全部文件；查 claim 台账，标出提交时刻被 ≥2 条线同时持有的
+  文件（`MULTI`）；附「整文件替换」提示（新增行数 = 新版本总行数）。
+- 不能：**从 `git show` 判断某个 hunk 属于哪条线**。Git 不记录逐行作者，任何这么
+  声称的检测都是假的，本工具不做。台账只在机制落地后积累，更早的提交一律
+  `NO_RECORD`，不伪造结论。
+
+### 6.6 Qt 锁超时：先查并行 pytest，不是本线回归
+
+4 个并行 pytest 会抢 `D:\mbdsdr\.locks\qt_test.lock`；报「等待 5s 仍未拿到 Qt 测试
+互斥锁」时先查是不是并跑/残留进程，**不要**据此改本线代码。
+
+### 6.7 本次归属争议记录（2026-11-05 13:00）
+
+`docs/COORDINATION.md` 工作区 +400/−12 不是一条线的改动，是至少 5 条线的追加：
+WorkBuddy 台账线（"我这边" UI 原型/产品工程/星象仪）、巡检会话（新增段）、
+星象仪/彩带会话（11-04 提交记录段）、接续线（`agent.py` confirm_token / PTT）、
+硬编码与参数治理线（三笔变更日志）。**没有单一 owner**；按「谁在途谁所有」
+不整文件提交、不删除任何一段。本次只提交机制线自己追加的 hunk，其余原样留在
+工作区，由各自线自行提交。
