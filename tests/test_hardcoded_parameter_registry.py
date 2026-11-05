@@ -157,13 +157,42 @@ def test_squelch_has_one_domain_and_one_constant_set():
         -100.0, -20.0, -50.0)
 
 
-def test_control_panel_uses_kernel_squelch_constants():
-    """桌面滑杆的范围/默认值必须取自内核常量，不能写字面量。"""
-    src = (REPO / "desktop" / "control_panel.py").read_text(encoding="utf-8")
-    assert "SQUELCH_MIN_DBFS" in src and "SQUELCH_MAX_DBFS" in src
-    assert "DEFAULT_SQUELCH_DBFS" in src
-    code = _code_only(REPO / "desktop" / "control_panel.py")
-    assert "setRange(-120, 0)" not in code
+@pytest.fixture(scope="module")
+def qapp():
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    yield app
+
+
+def test_control_panel_uses_kernel_squelch_constants(qapp):
+    """桌面滑杆的范围/默认值必须与内核静噪常量逐项一致（控件回读）。
+
+    行为断言：构造真实 ControlPanel，读 squelch_slider 的 min/max/value，
+    再把它设到内核两端确认端点可达（不被别处的范围夹住）。
+    写字面量 -120/0 或别的默认值会在下面的相等断言上当场红。
+    """
+    from control_panel import ControlPanel
+    from mbdsdr_ai.squelch import (
+        DEFAULT_SQUELCH_DBFS, SQUELCH_MAX_DBFS, SQUELCH_MIN_DBFS)
+
+    cp = ControlPanel()
+    try:
+        slider = cp.squelch_slider
+        assert slider.minimum() == int(SQUELCH_MIN_DBFS), (
+            "静噪滑杆下限没跟内核常量走："
+            f"{slider.minimum()} != {int(SQUELCH_MIN_DBFS)}")
+        assert slider.maximum() == int(SQUELCH_MAX_DBFS), (
+            "静噪滑杆上限没跟内核常量走："
+            f"{slider.maximum()} != {int(SQUELCH_MAX_DBFS)}")
+        assert slider.value() == int(DEFAULT_SQUELCH_DBFS), (
+            "静噪滑杆默认值没跟内核常量走："
+            f"{slider.value()} != {int(DEFAULT_SQUELCH_DBFS)}")
+        slider.setValue(int(SQUELCH_MIN_DBFS))
+        assert slider.value() == int(SQUELCH_MIN_DBFS), "下限端点不可达"
+        slider.setValue(int(SQUELCH_MAX_DBFS))
+        assert slider.value() == int(SQUELCH_MAX_DBFS), "上限端点不可达"
+    finally:
+        cp.deleteLater()
 
 
 # ---------------------------------------------------------------------------
