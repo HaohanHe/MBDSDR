@@ -78,6 +78,32 @@ def _push_kind(args: List[str]) -> Optional[str]:
     return None
 
 
+def _pathspec_args(args: List[str]) -> List[str]:
+    """从 `git commit` 参数里挑出 pathspec（含 `--` 之后的路径）。
+
+    形态⑩的触发器：设了私有 index 还带 pathspec，git 会按**工作区**取这些路径，
+    私有 index 的 blob 被绕过。这里只负责认出来，不做任何推断。
+    """
+    value_opts = {
+        "-m", "--message", "-F", "--file", "-C", "-c", "--author",
+        "--date", "--template", "-S", "--gpg-sign", "--fixup", "--squash",
+    }
+    found: List[str] = []
+    skip_next = False
+    for tok in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok == "--":
+            return ["--"]
+        if tok.startswith("-") and len(tok) > 1:
+            if tok in value_opts:
+                skip_next = True
+            continue
+        found.append(tok)
+    return found
+
+
 def _log(entry: dict) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a", encoding="utf-8") as fh:
@@ -92,6 +118,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     op, rest = args[0], args[1:]
     kind: Optional[str] = None
+    if op == "commit" and (os.environ.get("MBDSDR_DECLARED_INDEX") or "").strip():
+        pathspecs = _pathspec_args(rest)
+        if pathspecs:
+            print("REJECT 已设置 MBDSDR_DECLARED_INDEX（私有 index 模式），禁止 `git commit` 带 pathspec。")
+            print("  原因：pathspec 会让 git 按**工作区**取内容，私有 index 的 blob 被绕过，")
+            print("        他线在途改动会被一起带进本次提交（形态⑩）。")
+            print("  改法：改用不含 pathspec 的 `git commit`，或先 unstage 到干净 index 再提交。")
+            return 3
     if op == "reset":
         kind = _reset_kind(rest)
     elif op == "push":

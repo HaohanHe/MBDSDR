@@ -1342,6 +1342,126 @@ python scripts/git_sync_index.py --check                 # 只校验，不改 in
 3. 基线红转绿必须给出 HEAD 版本复跑证据（本脚本，或 `git show HEAD:<test>` 对照），
    否则一律按「被测版本不同」驳回。
 
+#### 6.9.10 私有 index + `git commit -- <paths>` = 工作区内容覆盖 index（第十种形态，2026-11-06）
+
+**事故**：采样率线用 `git commit -F ... -- <paths>` 做部分提交。pathspec 会让 git
+按**工作区**重新取这些路径的内容，**绕过私有 index**——该线的私有 index blob 是对的
+（`git diff --cached` 只有自己 4 个 hunk），但提交把文案审计线在
+`docs/parameter-unification.md:202` 的 `constants.py:30→:33` 一起带进了 `0e97be9a`。
+当事线自报，未改写历史。
+
+**实例（2026-11-06）：`a10c32e8`（`docs/hw-acceptance.md`，49 插入 / 23 删除）**
+
+- 卷进了谁的 hunk：真机线正在改同文件的 §四 跑前自检判据与 §6.2.4 干净窗口三条件；
+  该提交按工作区取内容，把这两处（`@@ -204,19 +204,24 @@`、`@@ -552,6 +557,14 @@`）
+  一起带进；另两处 `@@ -577` / `@@ -588` 是该线自己的组 F。
+- 内容是否冲突：**不冲突**。两边都在补「空占用表 ≠ 无人占」的前置判据，语义一致；
+  提交后 HEAD 同时含 §四 判据改写与 §6.2.4 三条件。
+- 为什么不回滚：回滚会把作者自己的组 F 与实测数据一起撤掉，代价大于归属更正；
+  按形态⑩处置第 2 步「该行归属线补正/登记，机制线不重复改文案」，此处只登记归属。
+- 机械口径：`git commit -- <path>` 会连工作区里别人的同文件改动一起提交；hunk 级选择
+  必须用私有 index（`read-tree HEAD` + `git apply --cached` / `update-index --cacheinfo`），
+  不能只靠 pathspec。
+
+**30 秒认出**（两侧 blob 不等即中招）：
+
+```
+GIT_INDEX_FILE=<private> git rev-parse :<path>
+git rev-parse HEAD:<path>
+```
+
+也可直接跑 `python scripts/check_commit_scope.py --post-commit HEAD --declared-index <private>`：
+逐 path 打印 `HEAD <blob>` / `INDEX <blob>`，不等即 FAIL（退出码 1）。
+
+**三步处置（不 reset）**：
+
+1. 停，不 push、不改写历史；
+2. 该行归属线补正（谁的内容谁补一笔或在台账登记），机制线不重复改文案；
+3. 在 `docs/COMMIT-INCIDENT-CARD.md` ⑩ 登记；`python scripts/git_sync_index.py --check` 复核共享 index。
+
+**规矩（写死）**：
+
+1. 设置 `MBDSDR_DECLARED_INDEX` 后**不许带 pathspec**：`python scripts/git_safe.py commit` 检测到
+   `--`/路径参数直接拒（退出码 3）。要选文件，先 unstage 到干净 index，或只在私有 index 上 add。
+2. 提交后立刻跑 `--post-commit`；两侧 blob 不一致时按形态⑩ 处置，不得以「提交成功了」当作归属正确。
+3. 反证：`tests/test_commit_scope_post_commit.py` —— 私有 index 只装一行、工作区多一行，
+   用 pathspec 提交 → `--post-commit` 必红并打印两侧 blob；工作区与 index 一致时放行。
+
+
+
+#### 6.9.11 私有 index 的基线不是当时的 HEAD（第十一种形态，2026-11-06）
+
+**事故（一小时内两例）**：
+
+1. 打包线**复用陈旧私有 index**，里面残留他线两个测试文件的改动，提交时误带入；
+   处置：`git reset --soft` 撤掉这条提交 + `read-tree HEAD` 重建后重做（HEAD 只含自己的 7 个文件）。
+2. 接入线私有 index 基于旧 HEAD，而其他线在毫秒级窗口内连续提交两笔
+   （`42831acb`、`439993a`），闸门正确报出 **9 条 EXTRA + 1 条幻影 DELETE**；
+   处置：加「重建 `read-tree` 且 HEAD 未变才提交」的守卫。
+
+**共同点**：私有 index 的基线不是提交时的 HEAD。现有
+`--post-commit HEAD --declared-index` 只比对提交后状态，抓不到「带进来的他线文件」——
+他线文件可能以 `EXTRA` 或**幻影 `DELETE`** 的形式暴露，最坏情况是闸门被绕过。
+
+**30 秒认出**：
+
+```
+git rev-parse HEAD                          # 当前 HEAD
+cat <私有 index>.head                      # read-tree 时记下的基线，或从日志回看
+# 两者不等 → 中招
+python scripts/check_commit_scope.py --staged --expect <自己的清单>
+```
+
+**三步处置（不 reset 历史）**：
+
+1. 停，不 push；坏提交已入库先 `git revert`，未入库可 `git reset --soft` 撤提交、工作区保留；
+2. 在**同一份私有 index** 上用**当时的** HEAD `git read-tree HEAD` 重建，重新 add 自己的文件；
+3. 提交前再取一次 `git rev-parse HEAD`，与 read-tree 时记下的值比对，未变才提交；
+   变了就回第 2 步重建。
+
+**规矩（写死）**：
+
+1. 私有 index 每次使用前必须用**当时的** HEAD `read-tree` 重建，不复用上一次的 index 文件；
+2. 记下 read-tree 时刻的 HEAD hash，提交前再比一次；**毫秒窗口内他线提交也算变了**，必须重建；
+3. `--post-commit` 与 `--staged --expect` 两道闸不互相替代：提交前查归属，提交后查 blob；
+4. 反证：临时仓里「旧 HEAD 建 index → 他线连续提交两笔 → 用旧 index 提交」，闸门应报
+   `EXTRA` 与幻影 `DELETE`；`read-tree` 重建后归零。
+
+
+
+#### 6.9.12 私有 index 的环境变量泄漏（第十二种形态，2026-11-06）
+
+**事故**：协议线用 `$env:GIT_INDEX_FILE=<path>` 把变量导出到当前会话后提交；几分钟内并发会话
+往**同一个 index 路径**写入 `module_panel.py`、`sdr_tools.py`、`test_unit_dimension_lint.py`，
+钩子以 `EXTRA`+`MULTI` 正确拒绝。处置：改成一次性 Python 驱动，`GIT_INDEX_FILE` 只进子进程
+`env`、不复用导出变量，并在提交前重新校验基线 blob。
+
+**与 ⑪ 的区别**：⑪ 是「基线不是当时的 HEAD」；⑫ 是「index 路径被共享环境变量带出去」，
+别的会话直接写进了同一个 index 文件。
+
+**30 秒认出**：
+
+```
+echo $env:GIT_INDEX_FILE            # 非空且指向共享/固定路径
+git status --short                  # 出现不属于自己的文件
+# 钩子输出含 EXTRA / MULTI
+```
+
+**三步处置**：
+
+1. 停；先把当前会话的 `GIT_INDEX_FILE` 清掉（`Remove-Item Env:GIT_INDEX_FILE`）；
+2. 改一次性驱动：`subprocess.run([...], env={**os.environ, "GIT_INDEX_FILE": unique_path})`，
+   不要 `$env:GIT_INDEX_FILE=...` 持久化到会话；
+3. 用唯一路径 `read-tree HEAD` 重建 index，提交前比对基线 blob 与自己声明的文件清单。
+
+**规矩（写死）**：
+
+1. `GIT_INDEX_FILE` 只允许以子进程环境变量的一次性形式出现，禁止 `export` / `$env:` 会话级持久化；
+2. 私有 index 路径必须带会话标识 + 时间戳，固定路径/共享路径一律视为已污染，先重建；
+3. 提交前同时校验「基线 == 当时的 HEAD」与「index 里的文件 == 自己的清单」，两道都不省。
+
+
+
 ### 6.10 历史改写事件（主分支被 reset 改写；按批次登记，跨日后继续累计）
 
 **批次划分（时间限定一律换成批次号，避免跨日后统计口径自动失效）**

@@ -23,9 +23,16 @@
   python scripts/check_commit_scope.py HEAD
   python scripts/check_commit_scope.py <hash> [--json]
   python scripts/check_commit_scope.py --staged [--json]
+  python scripts/check_commit_scope.py --post-commit HEAD --declared-index <私有 index>
 
   `--staged` 供 pre-commit 钩子调用：读取 `git diff --cached` 的路径，检查这些
   路径当前被几个**仍在 TTL 内**的 owner 持有；≥2 个 owner 即拒绝提交（退出码 1）。
+
+  `--post-commit` 供 post-commit 钩子/人工复核调用：逐 path 比较
+  `git rev-parse HEAD:<path>` 与声明私有 index 里的 `:<path>` blob。
+  不等 → 说明本次提交按**工作区**取内容，绕过了私有 index（形态⑩：
+  `git commit -- <paths>` 的 pathspec 覆盖 index），打印两侧 blob 并拒绝（退出码 1）。
+  未声明私有 index 时明确 SKIP（不假报）。
 
   `--staged --expect <路径...>`（或环境变量 `MBDSDR_COMMIT_PATHS`，换行/`;` 分隔）
   再加一道：**提交的文件集合必须全部落在声明清单内，多一个就拒**，并把多出来的
@@ -212,6 +219,110 @@ def check(ref: str, as_json: bool) -> int:
     print("  1. git 不记录 hunk 作者，任何「从提交反推某 hunk 属于哪条线」都做不到，本工具不做。")
     print(f"  2. 台账 {REGISTRY_PATH} 从机制落地起积累；更早的提交无法判定，不伪造结论。")
     return 1 if multi else 0
+
+
+def _revparse_optional(spec: str, index_path: Optional[str] = None) -> Optional[str]:
+    """解析 rev（如 `HEAD:path` / `:path`），不存在时返回 None（不抛）。"""
+    env = dict(os.environ)
+    if index_path:
+        env["GIT_INDEX_FILE"] = index_path
+    proc = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", spec],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def check_post_commit(
+    ref: str,
+    as_json: bool,
+    declared_index_arg: Optional[str] = None,
+) -> int:
+    """提交后核对：本次提交的每个 path 的 blob 是否等于私有 index 里同一 path 的 blob。
+
+    这是形态⑩（私有 index + `git commit -- <paths>`，pathspec 按工作区取内容、
+    绕过 index）的机械闸。相等 → 提交用的就是私有 index 的内容；不等 → 这个 path
+    被工作区覆盖了，本次提交带进了不属于私有 index 的改动。
+    """
+    sha = _git("rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+    declared = (
+        (declared_index_arg or os.environ.get("MBDSDR_DECLARED_INDEX", "")).strip()
+    )
+    if not declared:
+        print("SKIP 未声明私有 index（--declared-index / MBDSDR_DECLARED_INDEX），无法逐 path 比对。")
+        return 0
+    index_path = _index_abs(declared)
+    if not os.path.exists(index_path):
+        print(f"ERROR 声明的私有 index 不存在：{index_path}")
+        return 2
+
+    paths: List[tuple] = []
+    for line in _git("show", "--format=", "--name-status", "--no-renames", sha).splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        paths.append((parts[0].strip(), parts[-1].strip()))
+
+    rows: List[Dict[str, Any]] = []
+    mismatches: List[Dict[str, Any]] = []
+    for status, path in paths:
+        head_blob = _revparse_optional(f"{sha}:{path}")
+        index_blob = _revparse_optional(f":{path}", index_path=index_path)
+        same = head_blob == index_blob
+        row = {
+            "path": path,
+            "status": status,
+            "head_blob": head_blob,
+            "index_blob": index_blob,
+            "match": same,
+        }
+        rows.append(row)
+        if not same:
+            mismatches.append(row)
+
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "commit": sha,
+                    "declared_index": index_path,
+                    "paths": rows,
+                    "mismatch": len(mismatches),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 1 if mismatches else 0
+
+    print(f"COMMIT {sha}")
+    print(f"INDEX 声明 {index_path}")
+    print(f"比对 {len(rows)} 个 path")
+    for row in rows:
+        head = row["head_blob"] or "（无）"
+        idx = row["index_blob"] or "（无）"
+        mark = "OK  " if row["match"] else "FAIL"
+        print(f"  {mark} {row['status']:<2} {row['path']}")
+        print(f"       HEAD  {head}")
+        print(f"       INDEX {idx}")
+    print()
+    if mismatches:
+        print(
+            f"结论：{len(mismatches)} 个 path 的 HEAD blob 与私有 index 不一致 —— "
+            "本次提交按工作区内容取了这些文件（pathspec 覆盖 index，形态⑩）。"
+        )
+        print("处置：不 reset；由该行归属线补正；在 docs/COMMIT-INCIDENT-CARD.md ⑩ 登记。")
+        return 1
+    print("结论：全部 path 与私有 index 一致。")
+    return 0
+
 
 
 def _active_claim(entry: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]:
@@ -448,12 +559,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="操作者声明的私有 index 路径；与实际读到的 index 不一致即拒绝"
         "（也可用环境变量 MBDSDR_DECLARED_INDEX）",
     )
+    parser.add_argument(
+        "--post-commit",
+        nargs="?",
+        const="HEAD",
+        default=None,
+        metavar="REF",
+        help="提交后核对：逐 path 比对 HEAD:<path> 与声明私有 index 的 :<path> blob，"
+        "不等即拒（形态⑩：pathspec 覆盖 index）",
+    )
     parser.add_argument("--json", action="store_true", help="JSON 输出")
     args = parser.parse_args(argv)
     try:
         if args.staged:
             return check_staged(
                 args.json, expect=args.expect, declared_index_arg=args.declared_index
+            )
+        if args.post_commit:
+            return check_post_commit(
+                args.post_commit, args.json, declared_index_arg=args.declared_index
             )
         if not args.ref:
             parser.error("需要 ref，或使用 --staged")
