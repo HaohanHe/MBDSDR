@@ -669,6 +669,15 @@
 > `tests/test_new_spacetime_panel_feedback.py` / `tests/test_interaction_wiring.py`，
 > 锁均已释放。
 
+> 归档：2026-11-05 卫星过境线 `1f0b19c` 已入库并 release：
+> 删除面板里 `(0,0)` 这个「未配置站址」哨兵（几内亚湾是真实坐标，与可测范围
+> 相交），改用显式 `_observer_configured` 状态位；`set_observer(None, None)`
+> = 未配置（不发 TLE 请求），`set_observer(0.0, 0.0)` = 合法站址正常计算。
+> 固定 ISS TLE / 2008-09-20 06:00Z / 24h / 10° 夹具下 (0,0) 实测 **2 条**过境；
+> 修前同一夹具 rowCount=0 且误显「未配置观测站位置」。涉及
+> `desktop/new_spacetime_panel.py` / `tests/test_new_spacetime_panel_feedback.py`，
+> 锁均已释放。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`
