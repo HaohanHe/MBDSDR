@@ -418,7 +418,11 @@ def _test_framework_hits(dist: Path, names: set[str], modules: set[str]) -> list
 
 
 def _xref_reverse(dist: Path) -> dict[str, set[str]] | None:
-    """从 PyInstaller xref HTML 建「被谁 import」反向边；找不到构建目录则返回 None。"""
+    """从 PyInstaller xref HTML 建「被谁 import」反向边；找不到构建目录则返回 None。
+
+    xref 的每个节点同时有 `imports:` 与 `imported by:` 两段，两段的 href 含义相反；
+    只取 `imports:` 段建正向边再反转，混读会把链走成假路径。
+    """
     m = re.fullmatch(r"pyi-dist(\d+)", dist.name)
     if not m:
         return None
@@ -432,13 +436,16 @@ def _xref_reverse(dist: Path) -> dict[str, set[str]] | None:
         if not anchor:
             continue
         src = anchor.group(1)
-        for imp in re.findall(r'href="#([^"]+)"', block):
-            reverse.setdefault(imp, set()).add(src)
+        imports = re.search(r"imports:(.*?)(?:imported by:|$)", block, re.S)
+        if not imports:
+            continue
+        for dep in re.findall(r'href="#([^"]+)"', imports.group(1)):
+            reverse.setdefault(dep, set()).add(src)
     return reverse
 
 
 def _chain_for(imp: str, reverse: dict[str, set[str]] | None, roots: set[str],
-               max_depth: int = 4) -> list[str]:
+               max_depth: int = 12) -> list[str]:
     """从产物里的 import 名向上走，找一条到达项目/已声明顶层包的 import 链。"""
     if not reverse:
         return []
@@ -453,9 +460,11 @@ def _chain_for(imp: str, reverse: dict[str, set[str]] | None, roots: set[str],
         if depth >= max_depth:
             continue
         parents = sorted(reverse.get(node, ()))
-        # 优先外部上游（不是同顶层包内部的互相引用），避免链在包内打转
-        parents = [p for p in parents if p.split(".")[0] != node.split(".")[0]][:16]
-        for parent in parents:
+        # 外部上游优先，但不能丢掉包内父子关系（openpyxl ← pandas.io.excel.*
+        # ← pandas ← matplotlib.pyplot ← mbdsdr_ai 这类链全靠包内节点接起来）。
+        external = [p for p in parents if p.split(".")[0] != node.split(".")[0]]
+        internal = [p for p in parents if p.split(".")[0] == node.split(".")[0]]
+        for parent in (external + internal)[:24]:
             if parent in seen:
                 continue
             seen.add(parent)
@@ -540,8 +549,8 @@ def check_deps(dist: Path) -> list[dict]:
         if chat:
             _record(WARN, f"差集② {d}：由 import 链带入 {' → '.join(chat)}", items)
         else:
-            _record(WARN, f"差集② {d}：不在 Requires-Dist 闭包，xref 也未找到上游 import 链"
-                          f"（需人工确认它为何在产物里；构建目录 {dist.name} 有对应 xref 时重跑可得链）", items)
+            _record(WARN, f"差集② {d}：不在 Requires-Dist 闭包，xref 也没有给出上游"
+                          f"（多为运行时动态 import / 数据收集带入，需人工确认）", items)
         cls = _license_class(d)
         if cls in {"GPL", "LGPL", "AGPL"}:
             _record(FAIL, f"未声明且 copyleft 的包混入产物：{d}（{cls}）", items)
