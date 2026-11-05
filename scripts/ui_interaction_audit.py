@@ -112,6 +112,11 @@ SKIP_LIVE: dict[str, str] = {
     "按钮|更新 TLE|*": "联网拉 Celestrak TLE（sat_track_panel）",
     "菜单项|文件(&F) / 退出|*": "关闭主窗口退出进程；等价于 win.close()，"
                                 "审计窗口还要继续用，不真退出",
+    "按钮|退出星象仪\n(Esc)|*":
+        "星象仪浮层按钮只在星象仪形态显示（`_exit_planetarium` 里 "
+        "`_planetarium_strip.hide()`，IDE 形态不可见也不可点）；审计每条动作前"
+        "强制回 IDE 页，此处点击等于 no-op。星象仪形态下的真实点击路径由 "
+        "`tests/test_planetarium_entry_visibility.py::test_overlay_exit_button_is_clickable` 覆盖",
 }
 
 #: 已确认是问题、但修复点不在本线文件权限内的条目（白名单必须给理由）。
@@ -528,6 +533,15 @@ def _install_dialog_stubs(evidence):
     old["save"] = QFileDialog.getSaveFileName
     QFileDialog.getSaveFileName = staticmethod(
         lambda *a, **k: (evidence["file"].append("保存"), ("", ""))[1])
+    # 选目录同样必须打桩：offscreen 下 getExistingDirectory 会进原生模态循环
+    # 永不返回（2026-11-05 实测：test_no_false_alive_and_no_swallowed_exceptions
+    # 卡死 19 分钟零输出，faulthandler 栈尖在 settings_panel._browse_record_dir）。
+    old["dir"] = QFileDialog.getExistingDirectory
+    QFileDialog.getExistingDirectory = staticmethod(
+        lambda *a, **k: (evidence["file"].append("选目录"), "")[1])
+    old["open_many"] = QFileDialog.getOpenFileNames
+    QFileDialog.getOpenFileNames = staticmethod(
+        lambda *a, **k: (evidence["file"].append("打开"), ([], ""))[1])
     old["get_text"] = QInputDialog.getText
     QInputDialog.getText = staticmethod(
         lambda *a, **k: (evidence["file"].append("输入"), ("", False))[1])
@@ -548,6 +562,8 @@ def _restore_dialog_stubs(old):
     QDialog.exec = old["exec"]
     QFileDialog.getOpenFileName = old["open"]
     QFileDialog.getSaveFileName = old["save"]
+    QFileDialog.getExistingDirectory = old["dir"]
+    QFileDialog.getOpenFileNames = old["open_many"]
     QInputDialog.getText = old["get_text"]
     QInputDialog.getDouble = old["get_double"]
     QInputDialog.getItem = old["get_item"]
