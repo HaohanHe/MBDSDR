@@ -255,7 +255,7 @@ class BladeRFParams:
         return self.min_freq_hz <= float(freq_hz) <= self.max_freq_hz
 
     def is_valid_sample_rate(self, rate_hz: float) -> bool:
-        """采样率是否落在量程内（bladeRF2: 520834-61.44 MHz）。"""
+        """采样率是否落在量程内（bladeRF2: 0.520834-61.44 MS/s）。"""
         return self.min_sr_hz <= float(rate_hz) <= self.max_sr_hz
 
     def is_valid_bandwidth(self, bw_hz: float) -> bool:

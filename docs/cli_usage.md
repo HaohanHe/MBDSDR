@@ -23,7 +23,7 @@ python -m mbdsdr_ai --connect "rtlsdr:00000001"
 ## 接收与解调
 
 ```bash
-# 调谐到 98.5 MHz，WFM 立体声，增益 20 dB，采样率 2.4 MSps
+# 调谐到 98.5 MHz，WFM 立体声，增益 20 dB，采样率 2.400 MS/s
 python -m mbdsdr_ai --connect debug \
     --freq 98500000 --demod WFM --gain 20 --sample-rate 2400000
 

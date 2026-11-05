@@ -381,6 +381,53 @@ def test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s():
     assert ".arg(frame.sampleRateHz / 1e6, 0, 'f', 3)" in _CPP_SPECTRUM
 
 
+# ---------------------------------------------------------------------------
+# 批次 5：同族收口（U-03 残余：模块面板 / AI 工具描述 / 启动读数 / 文档）
+# ---------------------------------------------------------------------------
+_MODULE = open(os.path.join(_ROOT, "desktop", "module_panel.py"),
+               encoding="utf-8").read()
+_TOOLREG = open(os.path.join(_ROOT, "mbdsdr_ai", "tool_registry.py"),
+                encoding="utf-8").read()
+_BLADERF = open(os.path.join(_ROOT, "mbdsdr_ai", "bladerf_params.py"),
+                encoding="utf-8").read()
+_STARTUP = open(os.path.join(_ROOT, "mbdsdr_ai", "startup_sequence.py"),
+                encoding="utf-8").read()
+_CLI_DOC = open(os.path.join(_ROOT, "docs", "cli_usage.md"),
+                encoding="utf-8").read()
+
+
+def test_u03_module_panel_combo_renders_ms_per_s_three_decimals():
+    """U-03：模块面板「采样率」下拉的可见文本必须是 MS/s，不是 MHz。"""
+    _qt_app()
+    from module_panel import ModulePanel
+    panel = ModulePanel()
+    texts = [panel.sr_combo.itemText(i) for i in range(panel.sr_combo.count())]
+    assert texts == ["1.024 MS/s", "1.440 MS/s", "2.048 MS/s",
+                     "2.400 MS/s", "3.200 MS/s"], texts
+    # 反证：旧的频率量纲标签一个都不许留
+    assert not any("MHz" in t for t in texts), texts
+
+
+def test_u03_bladerf_sample_rate_range_is_ms_per_s():
+    """同一 bladeRF2 采样率区间：AI 工具描述与参数 docstring 都写 MS/s。"""
+    assert "SR 520834-61.44MHz" not in _TOOLREG
+    assert "SR 0.520834-61.44 MS/s" in _TOOLREG
+    assert "bladeRF2: 520834-61.44 MHz" not in _BLADERF
+    assert "bladeRF2: 0.520834-61.44 MS/s" in _BLADERF
+
+
+def test_u03_startup_step_reports_fs_in_ms_per_s():
+    """启动步骤读数里的采样率不得回退成裸 Hz（2400000Hz）。"""
+    assert "sr={int(round(sample_rate_hz))}Hz" not in _STARTUP
+    assert "sr={sample_rate_hz / 1e6:.3f} MS/s" in _STARTUP
+
+
+def test_u03_cli_usage_doc_says_ms_per_s_not_msps():
+    """文档示例里采样率不再写 MSps（与桌面/CLI 输出同口径）。"""
+    assert "2.4 MSps" not in _CLI_DOC
+    assert "2.400 MS/s" in _CLI_DOC
+
+
 def test_u03_orchestration_and_advice_copy_use_ms_per_s():
     """U-03：编排任务标题与 SDR 采样率建议串不得写 MSPS；天气面板采样率行标单位。"""
     from mbdsdr_ai.orchestrator import Orchestrator

@@ -2966,7 +2966,7 @@ class ToolRegistry:
             description=(
                 "返回 Nuand bladeRF 真实频率范围(Hz)、采样率合法区间与带宽区间。"
                 "bladeRF 2.0 Micro: RX 70MHz-6GHz, TX 47MHz-6GHz, "
-                "SR 520834-61.44MHz, BW 200kHz-56MHz。"
+                "SR 0.520834-61.44 MS/s, BW 200kHz-56MHz。"
                 "来源 bladerf2_common.h:518-562。"
             ),
             parameters={"type": "object", "properties": {}, "required": []},

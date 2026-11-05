@@ -74,9 +74,10 @@ class TestModulePanelParamsReachBackend:
     def test_sample_rate_combo_carries_hz(self):
         from module_panel import ModulePanel
         p = ModulePanel()
-        # 档位文本保持原样，Hz 挂在 itemData 上（不靠解析文本，避免精度坑）
+        # 档位集合不变；显示文本按 U-03 统一 MS/s，Hz 仍挂 itemData 上
+        # （不靠解析文本，避免精度坑）
         assert p.sr_combo.count() == 5
-        assert p.sr_combo.itemText(1) == "1.44 MHz"
+        assert p.sr_combo.itemText(1) == "1.440 MS/s"
         p.sr_combo.setCurrentIndex(1)
         assert p.selected_sample_rate_hz() == pytest.approx(1_440_000.0)
         p.sr_combo.setCurrentIndex(4)

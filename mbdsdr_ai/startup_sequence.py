@@ -368,7 +368,7 @@ class StartupSequence:
             "gain_db": float(gain_db),
         }
         step.done(
-            f"freq={freq_hz / 1e6:.3f}MHz sr={int(round(sample_rate_hz))}Hz "
+            f"freq={freq_hz / 1e6:.3f}MHz sr={sample_rate_hz / 1e6:.3f} MS/s "
             f"gain={gain_db}dB"
         )
 

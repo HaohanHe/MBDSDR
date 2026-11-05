@@ -332,10 +332,11 @@ class ModulePanel(QWidget):
         form.addRow("增益", gw)
 
         self.sr_combo = QComboBox()
-        # 文本沿用原档位；同时挂 Hz 数值到 itemData，供连接时下发（避免解析文本）
-        for _txt, _hz in (("1.024 MHz", 1_024_000.0), ("1.44 MHz", 1_440_000.0),
-                          ("2.048 MHz", 2_048_000.0), ("2.4 MHz", 2_400_000.0),
-                          ("3.2 MHz", 3_200_000.0)):
+        # 采样率不是频率：显示文本按 U-03 统一 MS/s + 3 位小数（档位本身不变）；
+        # 同时挂 Hz 数值到 itemData，供连接时下发（避免解析文本）
+        for _txt, _hz in (("1.024 MS/s", 1_024_000.0), ("1.440 MS/s", 1_440_000.0),
+                          ("2.048 MS/s", 2_048_000.0), ("2.400 MS/s", 2_400_000.0),
+                          ("3.200 MS/s", 3_200_000.0)):
             self.sr_combo.addItem(_txt, _hz)
         form.addRow("采样率", self.sr_combo)
 
