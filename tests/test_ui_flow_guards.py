@@ -370,7 +370,7 @@ class TestUiFlowGuards:
         assert w.tx_button.text() == "发射"
 
     def test_tx_button_greyed_when_backend_has_no_tx_channel(self, window):
-        """设备声明支持发射但后端没有 write_tx：同样置灰并写明「无 TX 通道」。"""
+        """仅声明、本类没有写流：置灰并写明「仅有声明 / 未实现」（§3.8.2 行 3）。"""
         class _NoTxChannel:
             def supports_tx(self):
                 return True
@@ -379,13 +379,18 @@ class TestUiFlowGuards:
         w._active_sdr_backend = _NoTxChannel()
         w._refresh_tx_button_state()
         assert not w.tx_button.isEnabled()
-        assert "没有 TX 通道" in w.tx_button.toolTip()
+        assert "仅有声明 / 未实现" in w.tx_button.toolTip()
+        assert "没有 TX 通道" not in w.tx_button.toolTip()
         w._active_sdr_backend = None
 
     def test_tx_button_enabled_only_with_tx_channel(self, window):
         class _TxCapable:
             def supports_tx(self):
                 return True
+
+            def tx_capability(self):
+                return {"implemented": True, "declared": True,
+                        "ready": True, "verified": False}
 
             def write_tx(self, iq):
                 raise AssertionError("本用例不应真的发波")
@@ -395,6 +400,8 @@ class TestUiFlowGuards:
         w._refresh_tx_button_state()
         assert w.tx_button.isEnabled()
         assert "人工确认" in w.tx_button.toolTip()
+        assert w.tx_capability_label.text() == (
+            "本后端发射：驱动级已实现 / 真机未验证")
         w._active_sdr_backend = None
 
     def test_tx_button_greyed_during_replay(self, window):
@@ -417,6 +424,10 @@ class TestUiFlowGuards:
 
             def supports_tx(self):
                 return True
+
+            def tx_capability(self):
+                return {"implemented": True, "declared": True,
+                        "ready": True, "verified": False}
 
             def write_tx(self, iq):
                 self.writes += 1
