@@ -834,3 +834,44 @@ def test_panel_screenshot_matches_baseline(main_window, panel):
     worst, mean = _diff_stats(_signature(img), _signature(base))
     assert worst <= 100 and mean <= 20.0, (
         f"{panel} 细节色块漂移（worst={worst}, mean={mean:.1f}）: {path}")
+
+
+# ---------------------------------------------------------------------------
+# 底坞高度锁：它是 8 张布局基线的间接输入
+# ---------------------------------------------------------------------------
+def test_bottom_dock_height_is_locked():
+    """底坞定高 48。
+
+    注意：改这个数会让 spectrum / adsb_empty **8 张布局基线全变**——
+    面板纵向位移 = 底坞高度差（ADS-B 恒定，频谱按 320×Δ/W 归一化）。
+    改 48 必须同时按算式重定标、写 provenance，并跑一遍反证；
+    不能只改产品代码让基线人肉反推。
+    """
+    import tempfile
+    from PySide6.QtWidgets import QWidget
+
+    tmp_dir = tempfile.mkdtemp(prefix="mbdsdr_dock_lock_")
+    restore = _isolate_environment(tmp_dir)
+    try:
+        from main_window import MainWindow
+        win = MainWindow()
+        for timer in getattr(win, "_startup_timers", []):
+            try:
+                timer.stop()
+            except Exception:  # noqa: BLE001 - 停定时器失败不阻断本条断言
+                pass
+        win.resize(1000, 600)
+        win.show()
+        _pump(80)
+        dock = win.findChild(QWidget, "bottomDock")
+        assert dock is not None, "缺少 bottomDock（底坞高度锁失效）"
+        assert dock.height() == 48, (
+            f"底坞高度 {dock.height()} != 48；改这个数会让 8 张布局基线全变，"
+            f"必须同时重定标")
+        assert dock.minimumHeight() == dock.maximumHeight() == 48, (
+            "底坞必须是固定高 48（min == max），否则布局会随内容伸缩")
+        win.close()
+        win.deleteLater()
+        app.sendPostedEvents(None, QEvent.DeferredDelete)
+    finally:
+        restore()
