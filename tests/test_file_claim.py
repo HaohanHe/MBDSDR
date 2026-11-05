@@ -173,3 +173,51 @@ def test_status_lists_claims_and_registry_location(tmp_path: Path) -> None:
     assert len(data["claims"]) == 2
     # 占位文件与台账都在指定锁目录内（不碰真实 D:\mbdsdr\.locks）
     assert any((locks / "claims").glob("*.claim"))
+
+
+def test_audit_stale_flags_expired_claim_with_newer_mtime(tmp_path: Path) -> None:
+    """反证：造一个过期 claim + 触碰文件 → audit-stale 必须报警（退出码 3）。"""
+    locks = tmp_path / "locks"
+    target = tmp_path / "narrow_plan.md"
+    target.write_text("x", encoding="utf-8")
+    claimed = run(locks, "claim", str(target), "--owner", "审计线", "--ttl-min", "0.01")
+    assert claimed.returncode == 0, claimed.stderr
+    time.sleep(0.8)  # 0.6s TTL 已过
+    os.utime(target, None)  # 触碰文件：mtime=现在，晚于 acquired_at
+    audit = run(locks, "audit-stale")
+    assert audit.returncode == 3, audit.stdout + audit.stderr
+    assert "STALE-EDIT" in audit.stdout
+    assert "narrow_plan.md" in audit.stdout
+    as_json = run(locks, "audit-stale", "--json")
+    assert as_json.returncode == 3
+    data = json.loads(as_json.stdout)
+    assert data["stale_edit"][0]["path"].endswith("narrow_plan.md")
+    assert data["stale_edit"][0]["exists"] is True
+
+
+def test_audit_stale_ignores_fresh_claim_even_if_file_touched(tmp_path: Path) -> None:
+    """负例：claim 未过期时，文件 mtime 晚于 acquired_at 属正常持有，不得报警。"""
+    locks = tmp_path / "locks"
+    target = tmp_path / "fresh.md"
+    target.write_text("x", encoding="utf-8")
+    claimed = run(locks, "claim", str(target), "--owner", "审计线", "--ttl-min", "60")
+    assert claimed.returncode == 0, claimed.stderr
+    os.utime(target, None)
+    audit = run(locks, "audit-stale")
+    assert audit.returncode == 0, audit.stdout
+    assert "STALE-EDIT" not in audit.stdout
+    assert "AUDIT:" in audit.stdout
+
+
+def test_case_variant_is_same_file_not_two_markers(tmp_path: Path) -> None:
+    """反证：同一文件用不同大小写 claim 两次，第二次必须被认定为「已有 claim」。"""
+    locks = tmp_path / "locks"
+    first = run(locks, "claim", "desktop/MBDSDR.spec", "--owner", "线A", "--ttl-min", "30")
+    assert first.returncode == 0, first.stderr
+    second = run(locks, "claim", "desktop/mbdsdr.spec", "--owner", "线B", "--ttl-min", "30")
+    assert second.returncode == 2, second.stdout
+    assert "线A" in second.stdout + second.stderr
+    markers = list((locks / "claims").glob("*.claim"))
+    assert len(markers) == 1, [m.name for m in markers]
+    registry = _registry(locks)
+    assert list(registry["claims"]) == ["desktop/mbdsdr.spec"]

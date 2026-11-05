@@ -338,7 +338,8 @@ def _route_adsb(ctx: _Ctx) -> Dict[str, Any]:
         raw = np.fromfile(ctx.input_path, dtype=np.float32)
         iq = raw[0::2] + 1j * raw[1::2]
         # 真做多帧扫描：每个前导独立判决 + CRC，最多 64 个候选（扫描预算）。
-        # 任意 fs 入口：2.4/2.8 MS/s 等常见录制先带限重采样到合法档，并把
+        # 任意 fs 入口：2.4/2.8 MS/s 等常见录制（历史/外部录制档，非设备可下发档位）
+        # 先带限重采样到合法档，并把
         # 实际解码采样率与说明带进结果（不许静默换采样率）。
         d = decode_baseband_any_fs(iq, fs=float(ctx.sample_rate), max_frames=64)
         result["source_fs_hz"] = d.get("source_fs_hz")

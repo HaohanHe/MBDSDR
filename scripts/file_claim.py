@@ -26,8 +26,11 @@
   python scripts/file_claim.py release desktop/main_window.py --owner 操作逻辑线
   python scripts/file_claim.py status
   python scripts/file_claim.py status desktop/main_window.py
+  python scripts/file_claim.py audit-stale            # 定期跑：过期 claim 却仍在改文件
+  python scripts/file_claim.py audit-stale --json
 
-退出码：0 成功；2 被拒绝（被他人占用 / 非持有者 / 本就没有 claim）；1 用法错误。
+退出码：0 成功；2 被拒绝（被他人占用 / 非持有者 / 本就没有 claim）；1 用法错误；
+3 = `audit-stale` 发现「claim 已过期但文件 mtime 晚于 acquired_at」的漂移。
 """
 from __future__ import annotations
 
@@ -54,6 +57,7 @@ LOCK_TIMEOUT_S = 15.0
 EXIT_OK = 0
 EXIT_USAGE = 1
 EXIT_DENIED = 2
+EXIT_FINDINGS = 3
 
 
 class ClaimDenied(RuntimeError):
@@ -513,6 +517,75 @@ def cmd_status(path: Optional[str]) -> int:
     return EXIT_OK
 
 
+def _audit_rows(now: float) -> list:
+    """扫描全部占位文件，标记「已过期但文件在过期后仍被修改」的漂移。
+
+    判据：`now - heartbeat_at > ttl`（claim 已过期）且目标文件
+    `mtime > acquired_at`（持有者声明的时间之后文件又被改过）。后者说明
+    有人没走 claim 就在改，或持有者早已换进程却还在写——台账的占用保护
+    在这条上是失效的，必须报警而不是等下一次事故。
+    """
+    MARKER_DIR.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for marker in sorted(MARKER_DIR.glob("*.claim")):
+        payload = _peek_marker(marker)
+        if payload is None:
+            continue
+        raw = str(payload.get("path") or "")
+        p = Path(raw)
+        target = p if p.is_absolute() else ROOT / p
+        heartbeat = float(payload.get("heartbeat_at") or payload.get("acquired_at") or now)
+        acquired = float(payload.get("acquired_at") or heartbeat)
+        ttl_s = float(payload.get("ttl_min") or 0.0) * 60.0
+        expired_s = now - heartbeat - ttl_s
+        try:
+            mtime = target.stat().st_mtime
+            exists = True
+        except OSError:
+            mtime = None
+            exists = False
+        later_s = (mtime - acquired) if exists and mtime is not None else None
+        rows.append(
+            {
+                "path": raw,
+                "owner": payload.get("owner"),
+                "pid": payload.get("pid"),
+                "ttl_min": payload.get("ttl_min"),
+                "expired_min": round(expired_s / 60.0, 1) if expired_s > 0 else 0.0,
+                "exists": exists,
+                "mtime_after_acquired_min": round(later_s / 60.0, 1) if later_s is not None else None,
+                "stale_edit": bool(expired_s > 0 and exists and later_s is not None and later_s > 0),
+            }
+        )
+    return rows
+
+
+def cmd_audit_stale(as_json: bool = False) -> int:
+    """子命令 `audit-stale`：只输出，不改任何 claim；有漂移返回退出码 3。"""
+    now = _now()
+    rows = _audit_rows(now)
+    hits = [r for r in rows if r["stale_edit"]]
+    if as_json:
+        print(
+            json.dumps(
+                {"now": now, "total": len(rows), "stale_edit": hits, "rows": rows},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        for r in hits:
+            print(
+                f"STALE-EDIT {r['path']} owner={r['owner']} "
+                f"过期+{r['expired_min']}min "
+                f"mtime 晚于 acquired {r['mtime_after_acquired_min']}min pid={r['pid']}"
+            )
+        print(
+            f"AUDIT: {len(rows)} 条 claim，其中 {len(hits)} 条「已过期但文件在声明时间之后仍被修改」"
+        )
+    return EXIT_FINDINGS if hits else EXIT_OK
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -536,6 +609,12 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="查看占用状态")
     status.add_argument("path", nargs="?")
 
+    audit = sub.add_parser(
+        "audit-stale",
+        help="扫描「claim 已过期但文件 mtime 晚于 acquired_at」的漂移（只读，有命中退出码 3）",
+    )
+    audit.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+
     return parser
 
 
@@ -546,6 +625,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             return cmd_claim(args.path, args.owner, args.ttl_min)
         if args.command == "release":
             return cmd_release(args.path, args.owner)
+        if args.command == "audit-stale":
+            return cmd_audit_stale(args.json)
         return cmd_status(args.path)
     except ClaimDenied as exc:
         print(str(exc), file=sys.stderr)

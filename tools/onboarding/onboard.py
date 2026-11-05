@@ -817,7 +817,8 @@ def step_decode(
     try:
         if mode == "adsb":
             from mbdsdr_ai import adsb
-            # 任意 fs 入口：2.4/2.8 MS/s 等非整数 MHz 录制先带限重采样到
+            # 任意 fs 入口：2.4/2.8 MS/s 等非整数 MHz 录制（历史/外部录制档，
+            # 非设备可下发档位）先带限重采样到
             # 最近的合法档（≥2 MS/s、1 MHz 整数倍），并把实际解码采样率与
             # 重采样说明放进 detail——不许静默换采样率。
             results = adsb.decode_baseband_any_fs(iq, sample_rate_hz,

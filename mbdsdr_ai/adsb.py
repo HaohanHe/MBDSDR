@@ -804,7 +804,8 @@ def decode_baseband_any_fs(iq: np.ndarray, fs: float,
     """任意采样率的 ADS-B 解码入口（带限重采样到合法档后调用严格契约）。
 
     ``decode_baseband`` 的严格契约（≥2 MS/s 且 1 MS/s 整数倍）保持不变；
-    真实录制常见 2.4/2.8 MS/s，本入口负责把它们带限重采样到最近的合法档，
+    真实录制（历史/外部录制档，非设备可下发档位）常见 2.4/2.8 MS/s，
+    本入口负责把它们带限重采样到最近的合法档，
     并在返回值里显式带上 ``source_fs_hz`` / ``decode_fs_hz`` / ``resample_note``
     ——不允许静默换采样率。重采样失败或解码失败时异常照常抛出/写入
     ``decode_error``，不吞 ``ValueError``。
