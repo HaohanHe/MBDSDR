@@ -96,6 +96,9 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
         effective_show_low_elevation_passes,
     )
 
+# 站址只读口径：显式 (0,0)/海上坐标照常算，但必须把 warning 展示给用户。
+from mbdsdr_ai.station import station_from_user, trust_for_calculation  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # 默认主题色值（从 tokens.py 语义化取色，与 light 主题对齐）
 # ---------------------------------------------------------------------------
@@ -620,10 +623,11 @@ class NewSpacetimePanel(QWidget):
         self._pass_visibility_gate_deg = effective_pass_visibility_gate_deg(settings)
         self._pass_show_low = effective_show_low_elevation_passes(settings)
         self._pass_window_hours = effective_pass_window_hours(settings)
-        self.passes_filter_label.setText(
-            self._pass_filter_text(self._pass_min_elevation_deg,
-                                   self._pass_show_low,
-                                   self._pass_window_hours))
+        base_filter = self._pass_filter_text(
+            self._pass_min_elevation_deg,
+            self._pass_show_low,
+            self._pass_window_hours)
+        self.passes_filter_label.setText(base_filter)
 
         lat = self.lat_spin.value()
         lon = self.lon_spin.value()
@@ -668,9 +672,67 @@ class NewSpacetimePanel(QWidget):
                 + f"，窗口 {self._pass_window_hours:g} 小时）")
         self._populate_passes(passes)
 
+        # 站址与 TLE 的疑问必须进提示区（表格与 AI 结果已各自留痕，但用户
+        # 最先看的是这一行；只写日志/返回字段等于没提示）。
+        station_ev = trust_for_calculation(
+            station_from_user(lat, lon, alt_km * 1000.0))
+        warnings = self._pass_warning_lines(passes, station_ev)
+        if warnings:
+            self.passes_filter_label.setText(
+                base_filter + "\n" + "\n".join(warnings))
+
         # 顺手刷新频率-轨道散点（无频率数据时频率为 0）
         fo_points = self._engine.compute_freq_orbit(sats)
         self.chart.set_data(fo_points)
+
+    def _pass_warning_lines(self, passes: List[SatellitePass],
+                            station_ev: dict) -> List[str]:
+        """把「用户必须知道但不会自己发现」的两类提醒压成文案行。
+
+        - 站址可疑（显式 (0,0)/海上坐标）：照常计算，但先说清位置可疑；
+        - TLE 过期/失效/年龄未知：必须给出年龄、分级和时刻精度口径，
+          否则过境列表看起来和新鲜星历一模一样。
+        """
+        lines: List[str] = []
+        sw = (station_ev or {}).get("station_warning")
+        if sw:
+            lines.append(f"站址提醒：{sw}")
+
+        stale = {}
+        for p in passes:
+            tier = getattr(p, "tle_tier", "")
+            if tier not in ("expired", "dead", "unknown"):
+                continue
+            prev = stale.get(p.name)
+            if prev is None or ((p.tle_age_days or 0)
+                                > (prev.tle_age_days or 0)):
+                stale[p.name] = p
+        if not stale:
+            return lines
+
+        names = "、".join(stale.keys())
+        ages = [p.tle_age_days for p in stale.values()
+                if p.tle_age_days is not None]
+        age_txt = f"最老 {max(ages):.0f} 天" if ages else "年龄未知"
+        has_dead = any(p.tle_tier == "dead" for p in stale.values())
+        has_unknown = any(p.tle_tier == "unknown" for p in stale.values())
+        precision = ("time_precision_s=60 表示预测时刻精度约 60 秒"
+                     "（不是卫星位置精度）")
+        if has_dead:
+            lines.append(
+                f"TLE 提醒：{len(stale)} 颗星的星历已过期/失效（{age_txt}）："
+                f"{names}。轨道已不可信，过境时刻仅供占位，必须刷新星历；"
+                f"{precision}。")
+        elif has_unknown:
+            lines.append(
+                f"TLE 提醒：{len(stale)} 颗星的 TLE 年龄未知：{names}；"
+                f"无法判断星历是否新鲜，请刷新后使用。"
+                f"{precision}。")
+        else:
+            lines.append(
+                f"TLE 提醒：{len(stale)} 颗星的星历已过期（{age_txt}）："
+                f"{names}。预报时刻已开始漂移，建议刷新星历；{precision}。")
+        return lines
 
     def _populate_passes(self, passes: List[SatellitePass]) -> None:
         self.passes_table.setRowCount(0)
@@ -683,7 +745,15 @@ class NewSpacetimePanel(QWidget):
             # 低仰角 = 峰值低于用户设置门（只有开关打开时才会进列表）
             low = (self._pass_show_low
                    and p.max_elevation < self._pass_min_elevation_deg)
-            self._set_item(row, 0, f"{p.name}（低仰角）" if low else p.name)
+            name = f"{p.name}（低仰角）" if low else p.name
+            tier = getattr(p, "tle_tier", "")
+            if tier in ("expired", "dead"):
+                age = (f" {p.tle_age_days:.0f} 天"
+                       if p.tle_age_days is not None else "")
+                name += f"（TLE {p.tle_tier_label or '过期'}{age}）"
+            elif tier == "unknown":
+                name += "（TLE 年龄未知）"
+            self._set_item(row, 0, name)
             self._set_item(row, 1, self._fmt_dt(p.rise_time))
             self._set_item(row, 2, self._fmt_dt(p.max_time))
             self._set_item(row, 3, self._fmt_dt(p.set_time))
