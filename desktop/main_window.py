@@ -1161,7 +1161,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # 大字号频率显示（等宽字体 bold；由 _update_status_bar 从真实后端同步）
-        self.toolbar_freq_label = QLabel("-- MHz")
+        self.toolbar_freq_label = QLabel("—")
         self.toolbar_freq_label.setStyleSheet(
             "font-family: 'Consolas','Menlo',monospace; font-size:14pt;"
             " font-weight:700; padding:0 6px;")
@@ -2404,7 +2404,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._vsep())
 
         # Now Bar：频率 / 增益 / 带宽 / 录音状态 / 处理指示
-        self.dock_freq_label = QLabel("-- MHz")
+        self.dock_freq_label = QLabel("—")
         self.dock_freq_label.setObjectName("dockNow")
         lay.addWidget(self.dock_freq_label)
         lay.addWidget(self._vsep())
@@ -2542,7 +2542,7 @@ class MainWindow(QMainWindow):
     def _update_status_bar(self):
         """统一从后端状态刷新底部状态栏射频字段。
 
-        无后端 / 后端异常时全部显 "--"；绝不保留旧值或编造数值。
+        无后端 / 后端异常时全部显「—」；绝不保留旧值或编造数值。
         由 _poll_sdr_iq 节流调用（约每 500ms），也可在连接/断开时手动触发。
         """
         backend = self._active_sdr_backend
@@ -2559,9 +2559,9 @@ class MainWindow(QMainWindow):
                     lbl.setText(txt)
                 except Exception:
                     pass
-            # 顶栏大字号频率显示同步为 "--"（无后端绝不展示旧值/假值）
+            # 顶栏大字号频率显示同步为「—」（无后端绝不展示旧值/假值）
             try:
-                self.toolbar_freq_label.setText("-- MHz")
+                self.toolbar_freq_label.setText("—")
             except Exception:
                 pass
             try:
@@ -2594,8 +2594,8 @@ class MainWindow(QMainWindow):
                 self.dock_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
             else:
                 self.status_freq.setText("频率: —")
-                self.toolbar_freq_label.setText("-- MHz")
-                self.dock_freq_label.setText("-- MHz")
+                self.toolbar_freq_label.setText("—")
+                self.dock_freq_label.setText("—")
         except Exception:
             pass
         # 顶栏解调模式下拉同步（blockSignals 防回环；后端未上报则不动，不编造）
@@ -3959,7 +3959,7 @@ class MainWindow(QMainWindow):
         """把真实 SDR 连接状态同步到各操作控件。
         未连接时：气象云图面板的实时 SDR 按钮置灰；
         控制面板的调谐/音量/模式/预设控件与录音按钮一并禁用，绝不暴露假可控状态；
-        频率显示显 "-- MHz"（避免误导用户以为正在接收 98.5）；
+        频率显示显「—」（避免误导用户以为正在接收 98.5）；
         频谱上方显示引导横幅，连接按钮恢复高亮。"""
         for panel in (getattr(self, "weather_panel", None),):
             if panel is not None:
