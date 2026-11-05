@@ -295,7 +295,7 @@ mobile AppTokens.sampleRatesHz          : 4 档 {1.024M, 2.048M, 2.4M, 3.2M}
 | C++ 实时设备下拉 | 10 档候选（2.8M 而非 2.88M；**2026-11-06 已为 11 档**，见 C.1/C.9） | 11 档（同 `kCandidateRatesHz`，按能力过滤） | 驱动读回（`rtlsdr_get_sample_rate`），不一致同时报请求/读回两值 | 已核实（读码 + 真机 12 档） |
 | C++ 设置对话框 | 4 档 | 4 档（**剩余：仍是自写常量表**） | 引擎请求值 | 已核实（未改） |
 | C++ AI 工具 | 4 档 | 4 档 | 拒档外值 | 已核实 |
-| 移动端 | 4 档（`AppTokens.sampleRatesHz`，死表） | 单项「未知」并禁用（**未解析 `sample_rate_options_hz`**，C.12） | 服务端返回值 | 消费侧已改（`754f64e6`）；字段未解析 |
+| 移动端 | 4 档（`AppTokens.sampleRatesHz`，死表） | 单项「未知」并禁用（**未解析 `sample_rate_options_hz`**，C.12） | 服务端返回值 | 消费侧已改（取证 `754f64e6` — `mobile/lib/pages/spectrum_page.dart:761` — `绝不用 AppTokens.sampleRatesHz`）；字段未解析（C.12） |
 
 **本轮已落/未落**：
 - 已落：`mbdsdr_ai/device_capabilities.py` 新增能力取档；`desktop/control_panel.py` 删除 `SAMPLE_RATES` 常量，改为下拉展开时按活跃后端刷新；新增 `tests/test_sample_rate_options.py`（7 条）。
