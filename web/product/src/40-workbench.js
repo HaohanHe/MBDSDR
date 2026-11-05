@@ -11,11 +11,6 @@
   const $ = MB.$, t = (k, v) => MB.i18n.t(k, v);
   const sc = $("#specCanvas"), sx = sc.getContext("2d");
   let wfRows = [], lastSpectrum = null, lastPoll = 0;
-  /* 瀑布的每一行必须是**一次真实采样**。此前每帧都 unshift 同一帧谱线，
-     220 行长得一模一样，看起来在滚动其实没有数据——体检 B1。
-     另：节流时钟不能用 MB.sky.now()（只在 sky.draw 里累加），专业模式下
-     帧循环不调 sky.draw，时钟冻结，readSpectrum 一次都不会被调。 */
-  let cachedSpec = null;
 
   for (const sel of ["#proStream", ".status-bar", "#capBody", "#capHead", "#aiStream", "#satCard", "#docNav"]) {
     const el = $(sel); if (el) el.setAttribute("data-i18n-skip", "");
@@ -58,38 +53,26 @@
     }
 
     if (!MB.data.isLive()) {
-      wfRows = []; lastSpectrum = null; cachedSpec = null;
+      wfRows = []; lastSpectrum = null;
       emptyState(t("spec.empty"), t("spec.emptyHint"));
       return;
     }
-    // 墙钟：与形态无关，专业模式也持续推进（体检 B1）
-    const now = (typeof performance !== "undefined" && performance.now)
-      ? performance.now() : Date.now();
+    const now = (MB.sky && MB.sky.now) ? MB.sky.now() : Date.now();
     if (now - lastPoll > 480) {
       lastPoll = now;
-      const accept = a => {
-        if (!Array.isArray(a) || !a.length) return;
-        lastSpectrum = a;
-        cachedSpec = normalize(a);
-        wfRows.unshift(cachedSpec);            // 一次采样 = 一行
-        if (wfRows.length > 220) wfRows.pop();
-      };
       try {
         const r = MB.data.readSpectrum();
-        if (r && typeof r.then === "function") r.then(accept, () => { lastSpectrum = null; });
-        else accept(r);
-      } catch (err) {
-        lastSpectrum = null;
-        MB.emit("spectrum:exception", { detail: String(err && err.message || err) });
-      }
+        if (r && typeof r.then === "function") r.then(a => { lastSpectrum = a; });
+        else lastSpectrum = r;
+      } catch (_) { lastSpectrum = null; }
     }
-    if (!cachedSpec || !cachedSpec.length) {
-      wfRows = []; cachedSpec = null;
+    if (!Array.isArray(lastSpectrum) || !lastSpectrum.length) {
+      wfRows = [];
       emptyState(t("spec.noIq"), t("spec.noIqHint"));
       return;
     }
 
-    const spec = cachedSpec, n = spec.length;
+    const spec = normalize(lastSpectrum), n = spec.length;
     sx.beginPath(); sx.moveTo(0, specH);
     for (let i = 0; i < n; i++) sx.lineTo(i / (n - 1) * w, specH - spec[i] * specH * .92);
     sx.lineTo(w, specH); sx.closePath();
@@ -103,6 +86,7 @@
       i ? sx.lineTo(x, y) : sx.moveTo(x, y);
     }
     sx.stroke();
+    wfRows.unshift(spec); if (wfRows.length > 220) wfRows.pop();
     const wfTop = specH + 6, wfH = h - wfTop, rowH = wfH / 220;
     for (let r = 0; r < wfRows.length; r++) {
       const row = wfRows[r];
@@ -118,31 +102,16 @@
   }
 
   /* ---------- 动态文案（工具名来自真实工具面） ---------- */
-  function toolCard(name, state, cls, id) {
-    return `<div class="toolcard"${id ? ` data-initcard="${id}"` : ""}>${name}` +
-           `<span class="st ${cls}">${state}</span></div>`;
+  function toolCard(name, state, cls) {
+    return `<div class="toolcard">${name}<span class="st ${cls}">${state}</span></div>`;
   }
   function resetChat() {
-    const live = MB.data.isLive(), st = t(live ? "ai.available" : "tool.offline"),
-          cls = live ? "ok" : "off";
-    $("#proStream").innerHTML =
-      `<div class="msg model" data-welcome><div class="who">${t("ai.head")}</div>${t("pro.ready")}</div>` +
-      toolCard("get_status()", st, cls, "status") +
-      toolCard("read_spectrum(nfft: 1024)", st, cls, "spectrum");
-  }
-  /* 切语言只重译欢迎语与初始工具卡，**保留用户对话**（体检 B4）。
-     旧实现 i18n:refresh → resetChat() → innerHTML 整体覆盖，消息全丢。 */
-  function retranslateChat() {
-    const stream = $("#proStream");
-    const w = stream.querySelector("[data-welcome]");
-    if (w) w.innerHTML = `<div class="who">${t("ai.head")}</div>${t("pro.ready")}`;
     const live = MB.data.isLive();
-    stream.querySelectorAll("[data-initcard]").forEach(el => {
-      const s = el.querySelector(".st");
-      if (!s) return;
-      s.textContent = t(live ? "ai.available" : "tool.offline");
-      s.className = "st " + (live ? "ok" : "off");
-    });
+    $("#proStream").innerHTML =
+      `<div class="msg model"><div class="who">${t("ai.head")}</div>${t("pro.ready")}</div>` +
+      toolCard("get_status()", live ? t("ai.available") : t("tool.offline"), live ? "ok" : "off") +
+      toolCard("read_spectrum(nfft: 1024)", live ? t("ai.available") : t("tool.offline"),
+        live ? "ok" : "off");
   }
   function renderStatus() {
     const n = MB.CAPS.filter(c => S.caps[c.id]).length, total = MB.CAPS.length;
@@ -187,19 +156,6 @@
     });
   })();
 
-  MB.on("i18n:refresh", () => { retranslateChat(); renderStatus(); });
-  /* 诊断入口：让无头回归能证明「一次采样=一行」，而不必猜画面。
-     不参与 UI，也不改数据面。 */
-  function diag() {
-    const a = wfRows[0], b = wfRows[1];
-    let distinct = null;
-    if (a && b && a.length === b.length) {
-      distinct = false;
-      for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i]) { distinct = true; break; }
-      }
-    }
-    return { rows: wfRows.length, distinct, samples: lastPoll > 0 };
-  }
-  MB.workbench = { draw, resetChat, renderStatus, diag };
+  MB.on("i18n:refresh", () => { resetChat(); renderStatus(); });
+  MB.workbench = { draw, resetChat, renderStatus };
 })(window);

@@ -28,6 +28,7 @@ from mbdsdr_ai.astronomy import dso
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DSO_PATH = DATA_DIR / "dso_catalog.json"
 ZH_PATH = DATA_DIR / "dso_zh_wikidata.json"
+SUPPLEMENT_PATH = DATA_DIR / "dso_supplement.json"
 # 随仓副本（干净 clone 也能独立对拍）；生成器仍默认读仓库外 reference/openngc。
 REFERENCE = Path(__file__).resolve().parent / "fixtures" / "openngc"
 NGC_CSV = REFERENCE / "NGC.csv"
@@ -50,6 +51,12 @@ SIZE_TOL_ARCMIN = 1e-6
 
 MISSING_MAG = ["M22", "M35", "M62", "M69", "M70", "M71", "M107"]
 MISSING_SIZE = ["M40", "M73"]
+#: OpenNGC 原始行缺、由 dso_supplement.json 补齐的字段（逐条记出处）。
+SUPPLEMENT_MAG = {
+    "M22": 5.1, "M35": 5.1, "M62": 6.6, "M69": 7.7,
+    "M70": 8.1, "M71": 8.3, "M107": 8.1,
+}
+SUPPLEMENT_SIZE = {"M40": 0.887, "M73": 2.8}
 SELF_ZH = {"M11", "M13", "M17", "M99", "NGC2070"}
 
 SAMPLE_NAMES = {
@@ -201,44 +208,84 @@ def test_meta_provenance(payload):
         "https://creativecommons.org/licenses/by-sa/4.0/")
     assert "OpenNGC" in meta["attribution"]
     assert "Wikidata" in meta["attribution"]
+    assert "HEASARC" in meta["attribution"]
+    assert "Washington Double Star" in meta["attribution"]
+    assert "Lynga" in meta["attribution"]
     assert "GPL" not in json.dumps(meta, ensure_ascii=False).upper()
     assert "zh_CN.po" not in json.dumps(meta, ensure_ascii=False)
 
     files = meta["source_files"]
-    assert set(files) == {"ngc", "addendum", "zh_labels"}
+    assert set(files) == {"ngc", "addendum", "zh_labels", "supplement"}
     assert files["ngc"]["sha256"] == _sha256_file(NGC_CSV)
     assert files["addendum"]["sha256"] == _sha256_file(ADDENDUM_CSV)
     assert files["zh_labels"]["sha256"] == _sha256_file(ZH_PATH)
+    assert files["supplement"]["sha256"] == _sha256_file(SUPPLEMENT_PATH)
+    assert files["supplement"]["payload_sha256"] == (
+        json.loads(SUPPLEMENT_PATH.read_text(encoding="utf-8"))
+        ["meta"]["payload_sha256"])
     assert meta["data_sha256"] == dso._payload_sha256(payload)
     assert meta["generated_at"].endswith("+00:00")
 
     commands = "\n".join(meta["reproduction"]["commands"])
     assert "NGC.csv" in commands and "addendum.csv" in commands
     assert "build_dso_catalog" in commands
+    assert "fetch_dso_supplement" in commands
+
+
+def test_supplement_snapshot_is_fixed_and_citable():
+    """补字段快照必须入库、可校验、逐条带出处（不许只有数值没有来源）。"""
+    raw = SUPPLEMENT_PATH.read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
+    meta = payload["meta"]
+    assert meta["schema"] == "mbdsdr.dso_supplement.v1"
+    canonical = json.dumps(payload["objects"], ensure_ascii=False,
+                           sort_keys=True, separators=(",", ":"))
+    assert meta["payload_sha256"] == hashlib.sha256(
+        canonical.encode("utf-8")).hexdigest()
+    assert meta["fetched_at"].endswith("+00:00")
+    assert set(meta["sources"]) == {"heasarc_messier", "wds", "lynga"}
+    assert len(payload["objects"]) == 9
+    for key, rec in payload["objects"].items():
+        assert rec["source_id"] in meta["sources"], key
+        assert rec["catalog_row"], key          # 必须有原始出处行
+        assert rec["derivation"], key           # 必须写清取值方式
+    assert "GPL" not in raw.decode("utf-8").upper()
 
 
 def test_missing_fields_are_null_and_counted(cat, payload):
     counts = payload["meta"]["counts"]
     missing = payload["meta"]["missing"]
-    assert counts["without_magnitude"] == 7
-    assert missing["magnitude"]["designations"] == MISSING_MAG
-    assert counts["without_size_arcmin"] == 2
-    assert missing["size_arcmin"]["designations"] == MISSING_SIZE
+    # 补字段快照上线后：星等/角径缺口归零（不是把 null 改成 0/99）。
+    assert counts["without_magnitude"] == 0
+    assert missing["magnitude"]["designations"] == []
+    assert counts["without_size_arcmin"] == 0
+    assert missing["size_arcmin"]["designations"] == []
     assert counts["without_size_minor_arcmin"] == 66
     assert counts["without_name_en"] == 81
     assert counts["with_name_en"] == 36
     assert counts["with_zh_name"] == 34
     assert counts["without_zh_name"] == 83
-    assert counts["magnitude_band_counts"] == {"B": 1, "V": 109, "none": 7}
+    assert counts["magnitude_band_counts"] == {"B": 1, "V": 116}
 
-    for name in MISSING_MAG:
+    for name, value in SUPPLEMENT_MAG.items():
         entry = cat.get(name)
-        assert entry is not None and entry.magnitude is None
-        assert entry.magnitude_band == ""
-    for name in MISSING_SIZE:
+        assert entry is not None
+        assert entry.magnitude == pytest.approx(value, abs=MAG_TOL)
+        assert entry.magnitude_band == "V"
+        assert entry.magnitude_source == "heasarc_messier"
+    for name, value in SUPPLEMENT_SIZE.items():
         entry = cat.get(name)
-        assert entry is not None and entry.size_arcmin is None
+        assert entry is not None
+        assert entry.size_arcmin == pytest.approx(value, abs=SIZE_TOL_ARCMIN)
+        assert entry.size_source in ("wds", "lynga")
         assert entry.size_minor_arcmin is None
+        assert entry.axis_ratio is None
+    # 未被补充的字段仍保持 OpenNGC 口径
+    for obj in payload["objects"]:
+        if obj["name"] not in SUPPLEMENT_MAG:
+            assert obj["magnitude_source"] in ("catalog", "none")
+        if obj["name"] not in SUPPLEMENT_SIZE:
+            assert obj["size_source"] in ("catalog", "none")
     # null 不得被 0/99 冒充
     for obj in payload["objects"]:
         assert obj["magnitude"] != 0 and obj["magnitude"] != 99
@@ -310,7 +357,12 @@ def test_30_sample_matches_independent_source(cat):
             assert entry.magnitude is None
         expected_size = _size(row, "MajAx")
         if expected_size is None:
-            assert entry.size_arcmin is None
+            if entry.size_source != "none":
+                assert entry.size_arcmin == pytest.approx(
+                    SUPPLEMENT_SIZE[entry.name], abs=SIZE_TOL_ARCMIN)
+                assert entry.size_source in ("wds", "lynga")
+            else:
+                assert entry.size_arcmin is None
         else:
             assert entry.size_arcmin == pytest.approx(
                 expected_size, abs=SIZE_TOL_ARCMIN)
@@ -333,7 +385,10 @@ def test_sample_names(cat):
     m40 = cat.get("M40")
     assert m40.name_en == "" and m40.zh_name == ""
     assert m40.zh_name_source == ""
-    assert m40.size_arcmin is None and m40.size_minor_arcmin is None
+    # 角径已由 WDS 双星分离补齐；短轴仍无来源
+    assert m40.size_arcmin == pytest.approx(0.887, abs=SIZE_TOL_ARCMIN)
+    assert m40.size_source == "wds"
+    assert m40.size_minor_arcmin is None
     assert m40.dso_type == "double_star"
 
     m102 = cat.get("M102")
@@ -500,8 +555,8 @@ SOURCE_FIELD_GAPS = {
 
 # 进入 117 条目录后的缺失条数（后果见 docs/data-inventory.md §2.2）。
 CATALOG_FIELD_GAPS = {
-    "magnitude": 7,          # 无法按亮度排序/推荐，仅影响打分不影响可见
-    "size_arcmin": 2,        # 无角径，绘制退化为点标记（M40/M73）
+    "magnitude": 0,          # 已由 dso_supplement.json 补齐（HEASARC MESSIER）
+    "size_arcmin": 0,        # M40←WDS 分离、M73←Lynga 角径，均已补齐
     "size_minor_arcmin": 66,  # 无短轴
     "axis_ratio": 66,        # 按圆形绘制；查询/推荐不读取该字段
     "zh_name": 83,           # 中文名为空，界面回退 name_en
@@ -535,10 +590,15 @@ def test_catalog_field_gap_counts(cat):
     unknown = [e for e in entries if e.axis_ratio_source == "unknown"]
     assert len(unknown) == 66
     assert all(e.axis_ratio is None for e in unknown)
-    # 缺星等的 7 条全是球状星团；缺角径的 2 条是双星/星群
-    assert {e.name for e in entries if e.magnitude is None} == {
-        "M22", "M35", "M62", "M69", "M70", "M71", "M107"}
-    assert {e.name for e in entries if e.size_arcmin is None} == {"M40", "M73"}
+    assert {e.name for e in entries if e.magnitude is None} == set()
+    assert {e.name for e in entries if e.size_arcmin is None} == set()
+    # 补齐必须带出处：星等 ← heasarc_messier，角径 ← wds / lynga
+    assert {e.name for e in entries
+            if e.magnitude_source == "heasarc_messier"} == set(MISSING_MAG)
+    assert {e.name for e in entries if e.size_source == "wds"} == {"M40"}
+    assert {e.name for e in entries if e.size_source == "lynga"} == {"M73"}
+    assert all(e.magnitude_source != "none" for e in entries)
+    assert all(e.size_source != "none" for e in entries)
 
 
 def test_m102_raw_addendum_record(cat):

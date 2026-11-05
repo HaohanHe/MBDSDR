@@ -57,14 +57,22 @@ def test_near_query():
 
 
 def test_missing_fields_exposed_as_none(cat):
-    """OpenNGC 缺星等/尺寸的条目必须表现为 None（未知），不得是 0/99。"""
-    assert cat.get("M22").magnitude is None
-    assert cat.get("M35").magnitude is None
-    assert cat.get("M40").size_arcmin is None
-    assert cat.get("M73").size_arcmin is None
+    """未知量必须表现为 None（不得是 0/99）；已补齐的字段要带出处。"""
+    # OpenNGC 缺、已由 dso_supplement.json 从公开星表补齐
+    assert cat.get("M22").magnitude == pytest.approx(5.1)
+    assert cat.get("M22").magnitude_source == "heasarc_messier"
+    assert cat.get("M35").magnitude == pytest.approx(5.1)
+    assert cat.get("M40").size_arcmin == pytest.approx(0.887)
+    assert cat.get("M40").size_source == "wds"
+    assert cat.get("M73").size_arcmin == pytest.approx(2.8)
+    assert cat.get("M73").size_source == "lynga"
+    # 仍无来源的字段保持 None + none
+    assert cat.get("M40").size_minor_arcmin is None
     assert cat.get("M40").name_en == ""
     assert cat.get("M40").zh_name == ""
+    # 主来源字段仍按 OpenNGC 口径
     assert cat.get("M31").magnitude == pytest.approx(3.44)
+    assert cat.get("M31").magnitude_source == "catalog"
     assert cat.get("M31").size_arcmin == pytest.approx(177.83)
 
 

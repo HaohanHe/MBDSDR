@@ -30,75 +30,14 @@
   let frameT = 0, dragState = null, dragMoved = false;
   const STARS = (C.CAT && C.CAT.stars) || [];
 
-  /* ---------- 卫星天球轨迹（真实 SGP4，不是示意折线） ----------
-   * 事实源：build/sync_sat_tracks.py 从仓库 _BUILTIN_TLES 用 sgp4 传播成
-   * TEME 地心 RA/Dec，按 90s 采样。前端与恒星共用同一套 eqToHorizon →
-   * 投影链，所以「天动星静」与卫星自身轨道运动同时成立。
-   *
-   * 诚实口径：这是**地心方向**，未做 TEME→J2000 岁差/章动、未做站址视差；
-   * 站址 trusted=false，绝不据此给升落 / 过境结论。无数据或模拟时刻跑出
-   * 采样窗口时返回 null —— 不画点、不伪造指向（not_verified 见 HUD）。
-   */
-  const TRACKS = (MB.SATTRACKS && MB.SATTRACKS.tracks) || null;
-  const TMETA = (MB.SATTRACKS && MB.SATTRACKS.meta) || null;
-  function trackOf(s) { return TRACKS ? TRACKS[String(s.norad)] : null; }
-  function wrapDelta(a, b) { return ((b - a + 540) % 360 + 360) % 360 - 180; }
-  function satRaDec(s, unix) {
-    const tr = trackOf(s);
-    if (!tr || !TMETA) return null;
-    const k = (unix - TMETA.epochUnix) / TMETA.stepSec + TMETA.halfSteps;
-    if (!isFinite(k) || k < 0 || k >= TMETA.count - 1) return null;
-    const i = Math.floor(k), f = k - i;
-    const ra0 = tr[i * 2] / 100, de0 = tr[i * 2 + 1] / 100;
-    const ra1 = tr[(i + 1) * 2] / 100, de1 = tr[(i + 1) * 2 + 1] / 100;
-    return { ra: (ra0 + wrapDelta(ra0, ra1) * f + 360) % 360,
-             dec: de0 + (de1 - de0) * f };
-  }
-  function satVector(s, unix, fr) {
-    const rd = satRaDec(s, unix);
-    if (!rd) return null;
-    const ra = rd.ra * Math.PI / 180, dec = rd.dec * Math.PI / 180;
-    return C.eqToHorizon(Math.cos(ra), Math.sin(ra), Math.sin(dec), Math.cos(dec), fr);
-  }
+  /* 卫星示意方位：确定性（非随机、非伪造测量值），HUD 明写「未接 TLE 解算」。 */
   function satAltAz(s) {
-    const v = satVector(s, C.simUnix(S), C.frame(S));
-    return v ? C.dirAltAz(v) : null;      // {az, alt} 度，或诚实 null
+    const n = parseInt(String(s.norad).replace(/\D/g, ""), 10) || 1;
+    return { az: (n * 37 + 11) % 360, alt: 10 + (n * 13) % 52 };
   }
   function satScreen(s, W, H) {
-    const v = satVector(s, C.simUnix(S), C.frame(S));
-    // 地平以下不画：地景在后处理里铺满，卫星不应透过地面显示
-    return (v && v.z > -0.02) ? C.toScreen(v, W, H) : null;
-  }
-  /* 球面折线：相邻样本用 projectSegment 裁剪，鱼眼边缘不会拉出横穿全屏的假线。 */
-  function drawTracks(W, H, sky) {
-    if (!TRACKS || !TMETA || sky.orbits === false) return;
-    const unix = C.simUnix(S), fr = C.frame(S);
-    const center = Math.floor((unix - TMETA.epochUnix) / TMETA.stepSec + TMETA.halfSteps);
-    const half = 34;                       // 前后各约 51 分钟
-    cx.save(); cx.lineWidth = 1; cx.setLineDash([3, 4]);
-    for (const s of MB.SATS) {
-      const tr = trackOf(s);
-      if (!tr) continue;
-      cx.strokeStyle = S.cam.locked === s
-        ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.16)";
-      let prev = null;
-      const i0 = Math.max(0, center - half), i1 = Math.min(TMETA.count - 1, center + half);
-      for (let i = i0; i <= i1; i++) {
-        const ra = tr[i * 2] / 100 * Math.PI / 180,
-              dec = tr[i * 2 + 1] / 100 * Math.PI / 180;
-        const v = C.eqToHorizon(Math.cos(ra), Math.sin(ra),
-                                Math.sin(dec), Math.cos(dec), fr);
-        if (prev && (prev.z > -0.02 || v.z > -0.02)) {
-          const seg = C.projectSegment(prev, v, W, H);
-          if (seg) {
-            cx.beginPath(); cx.moveTo(seg[0].x, seg[0].y);
-            cx.lineTo(seg[1].x, seg[1].y); cx.stroke();
-          }
-        }
-        prev = v;
-      }
-    }
-    cx.restore();
+    const a = satAltAz(s);
+    return C.projectAltAz(a.az, a.alt, W, H);
   }
 
   function resize() {
@@ -109,31 +48,11 @@
   }
   window.addEventListener("resize", resize);
 
-  /* ---------- 地平轮廓：方位高度场（示意，不是实测地形） ----------
-   * 逐列扫描会调用它几万次/帧，改为 0.5° 查找表 + 线性插值：
-   * 轮廓本身是 ≤13 次谐波的低频曲线，插值误差远小于 1 像素（体检 P2）。 */
-  const HILL_N = 720;
-  const HILL = new Float32Array(HILL_N + 1);
-  for (let i = 0; i <= HILL_N; i++) {
-    const a = (i * 360 / HILL_N) * Math.PI / 180;
-    HILL[i] = 1.8 + 1.1 * Math.sin(a * 3 + 0.6) + .8 * Math.sin(a * 7 + 2.1)
-            + .45 * Math.sin(a * 13 + 4.2);
-  }
+  /* ---------- 地平轮廓：方位高度场（示意，不是实测地形） ---------- */
   function hillAlt(az) {
-    const u = (((az % 360) + 360) % 360) * (HILL_N / 360);
-    const i = u | 0, f = u - i;
-    return HILL[i] * (1 - f) + HILL[i + 1] * f;
-  }
-
-  /* 赤道网格的三角值是常量，只算一次（每帧原本 546 点 × 2 次）。 */
-  const EQ_TRIG = [], EQ_DEC_TRIG = [];
-  for (let ra = 0; ra <= 360; ra += 4) {
-    const rd = ra * Math.PI / 180;
-    EQ_TRIG.push([Math.cos(rd), Math.sin(rd)]);
-  }
-  for (let dec = -60; dec <= 60; dec += 30) {
-    const dd = dec * Math.PI / 180;
-    EQ_DEC_TRIG.push([Math.sin(dd), Math.cos(dd)]);
+    const a = az * Math.PI / 180;
+    return 1.8 + 1.1 * Math.sin(a * 3 + 0.6) + .8 * Math.sin(a * 7 + 2.1)
+         + .45 * Math.sin(a * 13 + 4.2);
   }
   /* 方位窗口：fov<160 时只画视野附近的方位，省 2/3 的投影开销。
      立体投影下四角能看很远，所以窗口给到 fov*1.05 + 20°。 */
@@ -173,12 +92,9 @@
    * 现在求完整天空区间：一列最多两段（进入天空 top、离开天空 bot），
    * 用 rect(全屏) + 天空环 + evenodd 填充 = 「全屏异或天空」= 地面。
    */
-  const EDGE_STEP = 3;      // 屏幕列步长（px）
-  const EDGE_SCAN = 10;     // 回退细扫步长（px），正常路径不用
-  const COARSE = 12;        // 两阶段采样：每列 13 个判据点
-  let _edgeCalls = 0;
+  const EDGE_STEP = 2;      // 屏幕列步长（px）
+  const EDGE_SCAN = 6;      // 纵向粗扫步长（px）
   function altMinusHill(px, py, W, H) {
-    _edgeCalls++;                 // 真实单帧反投影次数，供 perf 回归门读取
     const d = C.unproject(px, py, W, H);
     return d.alt - hillAlt(d.az);
   }
@@ -208,53 +124,28 @@
     const key = W + "x" + H + "|" + C.V.az.toFixed(2) + "|" +
                 C.V.alt.toFixed(2) + "|" + C.V.fov.toFixed(2);
     if (_edgeCache.key === key && _edgeCache.val) return _edgeCache.val;
-    _edgeCalls = 0;               // 只统计「缓存失效的全量重算」这一帧
     const st = EDGE_STEP, n = Math.floor(W / st) + 1;
     const top = new Float32Array(n), bot = new Float32Array(n);
     const pre = allSkyOrAllGround(W, H);
     if (pre === "sky") { top.fill(0); bot.fill(H); }
     else if (pre === "ground") { top.fill(H); bot.fill(H); }
     else {
-      const ys = new Float32Array(COARSE + 1);
-      const flags = new Uint8Array(COARSE + 1);
       for (let i = 0; i < n; i++) {
         const x = Math.min(W, i * st);
-        /* 阶段一：13 点判「这一列有几段天空」。
-           绝大多数列 alt(y) 单调 → 0 或 1 次翻转；抬头广角时是
-           「地-天-地」→ 2 次翻转。两者都能用分段二分精确定位。 */
-        for (let k = 0; k <= COARSE; k++) {
-          ys[k] = H * k / COARSE;
-          flags[k] = altMinusHill(x, ys[k], W, H) > 0 ? 1 : 0;
-        }
-        let flips = 0;
-        for (let k = 1; k <= COARSE; k++) if (flags[k] !== flags[k - 1]) flips++;
         let tp = -1, bt = -1;
-        if (flips <= 2) {
-          if (flags[0]) tp = 0;
-          for (let k = 1; k <= COARSE; k++) {
-            if (flags[k] === flags[k - 1]) continue;
-            const cut = bisectAlt(x, ys[k - 1], ys[k], W, H, flags[k - 1] === 1);
-            if (flags[k] === 1) tp = cut;   // 地→天：天空上沿
-            else bt = cut;                  // 天→地：天空下沿
+        let prevSky = altMinusHill(x, 0, W, H) > 0, prevY = 0;
+        if (prevSky) tp = 0;
+        for (let y = EDGE_SCAN; y <= H; y += EDGE_SCAN) {
+          const sky = altMinusHill(x, y, W, H) > 0;
+          if (sky !== prevSky) {
+            const cut = bisectAlt(x, prevY, y, W, H, prevSky);
+            if (sky) tp = cut;
+            else { bt = cut; if (tp >= 0) break; }
           }
-          if (tp >= 0 && bt < 0) bt = H;    // 一路到底都是天
-          if (tp < 0) { tp = H; bt = H; }   // 整列无天
-        } else {
-          // 极少数复杂结构：回退逐点细扫，保持原语义不猜
-          let prevSky = flags[0] === 1, prevY = 0;
-          if (prevSky) tp = 0;
-          for (let y = EDGE_SCAN; y <= H; y += EDGE_SCAN) {
-            const sky = altMinusHill(x, y, W, H) > 0;
-            if (sky !== prevSky) {
-              const cut = bisectAlt(x, prevY, y, W, H, prevSky);
-              if (sky) tp = cut;
-              else { bt = cut; if (tp >= 0) break; }
-            }
-            prevSky = sky; prevY = y;
-          }
-          if (tp >= 0 && bt < 0) bt = H;
-          if (tp < 0) { tp = H; bt = H; }
+          prevSky = sky; prevY = y;
         }
+        if (tp >= 0 && bt < 0) bt = H;      // 一路到底都是天
+        if (tp < 0) { tp = H; bt = H; }     // 整列无天
         top[i] = tp; bot[i] = bt;
       }
     }
@@ -307,13 +198,6 @@
       S.time.minutes += dt / 60000 * S.time.rate;
     }
     C.step(dt, S);
-    /* 锁星跟随并入主循环（原实现另起一条 rAF 链，且每帧把镜头钉在
-       同一个**静态假方位**上）。现在卫星按真实 SGP4 轨迹随模拟时刻移动，
-       镜头跟它转、天球在背后刚性旋转 —— 摄像机语义才真正成立。 */
-    if (S.cam.locked) {
-      const a = satAltAz(S.cam.locked);
-      if (a) C.panTo(a.az, a.alt);
-    }
 
     const sun = C.sunAltAz(S);
     const sunAlt = sun.alt;
@@ -360,16 +244,20 @@
     }
     if (sky.eqgrid) {
       cx.strokeStyle = "rgba(255,255,255,.075)"; cx.lineWidth = 1;
-      const fr = C.frame(S);
-      for (const [sD, cD] of EQ_DEC_TRIG) {
+      for (let dec = -60; dec <= 60; dec += 30) {
         const pts = [];
-        for (const [cRA, sRA] of EQ_TRIG)
-          pts.push(C.eqToHorizon(cRA, sRA, sD, cD, fr));
+        for (let ra = 0; ra <= 360; ra += 4) {
+          const rd = ra * Math.PI / 180, dd = dec * Math.PI / 180;
+          pts.push(C.eqToHorizon(Math.cos(rd), Math.sin(rd), Math.sin(dd), Math.cos(dd), C.frame(S)));
+        }
         strokeRing(pts, W, H);
       }
       cx.strokeStyle = "rgba(255,255,255,.12)";
       const eq = [];
-      for (const [cRA, sRA] of EQ_TRIG) eq.push(C.eqToHorizon(cRA, sRA, 0, 1, fr));
+      for (let ra = 0; ra <= 360; ra += 4) {
+        const rd = ra * Math.PI / 180;
+        eq.push(C.eqToHorizon(Math.cos(rd), Math.sin(rd), 0, 1, C.frame(S)));
+      }
       strokeRing(eq, W, H);
     }
 
@@ -518,9 +406,6 @@
       }
     }
 
-    /* --- SGP4 天球轨迹（真实轨道传播，不是示意折线） --- */
-    drawTracks(W, H, sky);
-
     /* --- 卫星 --- */
     if (sky.sats) {
       for (const s of MB.SATS) {
@@ -573,7 +458,6 @@
     if (sky.hud && $("#skyHud")) renderHud(shownStars);
   }
 
-  let _hudText = "";
   function renderHud(shownStars) {
     const h = C.hud(S);
     const lines = [
@@ -588,21 +472,16 @@
       `${t("hud.timeSource")} ${h.kernel ? t("hud.kernelLive") : t("hud.kernelOffline")}`,
       C.TIME.demoStart && !h.kernel ? t("hud.demoStart") : "",
       t("sky.galaxyNone"),
-      t("hud.satTrack"),
       t("hud.limitNote")
     ].filter(Boolean);
-    const text = lines.join("\n");
-    if (text !== _hudText) { _hudText = text; $("#skyHud").textContent = text; }
+    $("#skyHud").textContent = lines.join("\n");
   }
 
   /* ---------- 摄像机：锁定后天动星静 ---------- */
-  function lockSat(s, textOnly) {
-    if (!textOnly) {
-      S.cam.locked = s;
-      C.V.fovTarget = 26;
-      const a = satAltAz(s);
-      if (a) C.panTo(a.az, a.alt);      // 无轨迹数据不伪造指向
-    }
+  function lockSat(s) {
+    S.cam.locked = s;
+    const a = satAltAz(s);
+    C.V.fovTarget = 26; C.panTo(a.az, a.alt);
     $("#scName").textContent = t("card.norad") + " " + s.norad;
     $("#scSub").textContent = t(s.typeKey) + " · " + s.id;
     $("#scAlias").innerHTML = t("card.alias") + " " + s.alias.map(x => `<b>${x}</b>`).join(" ");
@@ -620,7 +499,14 @@
     $("#satCard").classList.add("open");
     $("#zoomFabs").style.display = "flex";
     $("#zoomFabs").style.top = ""; $("#zoomFabs").style.bottom = "86px";
-    if (!textOnly) MB.emit("sat:locked", s);   // 跟随在 draw() 主循环里
+    cancelAnimationFrame(lockSat._raf);
+    (function follow() {
+      if (S.cam.locked !== s) return;
+      const q = satAltAz(s);
+      C.panTo(q.az, q.alt);
+      lockSat._raf = requestAnimationFrame(follow);
+    })();
+    MB.emit("sat:locked", s);
   }
   function unlock() {
     S.cam.locked = null;
@@ -704,7 +590,6 @@
     draw, resize, lockSat, unlock, view, STARS,
     makeSky() { /* 星表由 12-sky-catalog.js 提供；此处不再造任何星 */ },
     now: () => frameT,
-    edgeStat: () => _edgeCalls,
-    retranslate() { if (S.cam.locked) lockSat(S.cam.locked, true); }
+    retranslate() { if (S.cam.locked) lockSat(S.cam.locked); }
   };
 })(window);

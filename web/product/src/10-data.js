@@ -189,31 +189,25 @@
    */
   const BridgeSource = {
     _bridge: null,
-    lastError: null,
-    /* 宿主桥没提供方法 = 诚实的空值；宿主桥抛异常 = 另一回事。
-       旧实现 catch(_) 一律返回 null/[]，UI 分不清「没有」和「坏了」，
-       也不留任何记录（体检 B5）。 */
-    _call(method, fallback, args) {
-      try {
-        const b = this._bridge;
-        return (b && typeof b[method] === "function")
-          ? b[method].apply(b, args || []) : fallback;
-      } catch (err) {
-        this.lastError = { method, detail: String(err && err.message || err), at: Date.now() };
-        MB.emit("bridge:exception", this.lastError);
-        return fallback;
-      }
-    },
     sourceName() { return "bridge.online"; },
     isLive() { return !!(this._bridge && typeof this._bridge.invoke === "function"); },
     listSatellites() {
       const b = this._bridge;
       return (b && Array.isArray(b.satellites)) ? b.satellites : MB.SATS.slice();
     },
-    getTle(norad) { return this._call("getTle", null, [norad]); },
-    getPasses(norad) { return this._call("getPasses", [], [norad]); },
+    getTle(norad) {
+      try { return this._bridge && this._bridge.getTle ? this._bridge.getTle(norad) : null; }
+      catch (_) { return null; }
+    },
+    getPasses(norad) {
+      try { return this._bridge && this._bridge.getPasses ? this._bridge.getPasses(norad) : []; }
+      catch (_) { return []; }
+    },
     getCapabilities() { return MB.CAPS.filter(c => S.caps[c.id]); },
-    readSpectrum() { return this._call("readSpectrum", null, []); },
+    readSpectrum() {
+      try { return this._bridge && this._bridge.readSpectrum ? this._bridge.readSpectrum() : null; }
+      catch (_) { return null; }
+    },
     invokeTool(name, args) {
       if (!this.isLive()) return OfflineSource.invokeTool(name, args);
       const clean = MB.stripSelfReport(args);

@@ -77,6 +77,20 @@
   <https://creativecommons.org/licenses/by-sa/4.0/>）：深空天体目录
   `mbdsdr_ai/data/dso_catalog.json` 的坐标/星等/角径/类型来源；该派生数据库以
   CC BY-SA 4.0 同许可分发。中文名取自 Wikidata（CC0 1.0）。
+- **缺字段补充来源**（`mbdsdr_ai/data/dso_supplement.json`，9 条，只填
+  OpenNGC 为 `null` 的字段，快照含逐条原始行与 `payload_sha256`，抓取脚本
+  `scripts/fetch_dso_supplement.py`）：
+  - **HEASARC `MESSIER` 表**（NASA HEASARC W3Browse，据 Sky Catalogue 2000.0
+    Vol. 2 表 III 编成，bibcode `1985skca.book.....H`）：M22/M35/M62/M69/M70/
+    M71/M107 的 V 波段视星等（`vmag` 列原值）；
+  - **Washington Double Star Catalog (WDS)**（U.S. Naval Observatory）：M40
+    （Winnecke 4，WDS J12222+5805）的双星分离，取最近一次观测 53.2″
+    （2017 年）/60 = 0.887′；
+  - **Lynga, Catalogue of Open Cluster Data, 3rd ed.**（CDS `VII/92A`，
+    bibcode `1987CoORo...16....1L`）：M73（NGC 6994）的
+    `angular_diameter = 2.8′`。
+  - 以上均取编目原值，不做插值或估算；字段级出处写在每条记录的
+    `magnitude_source` / `size_source`。
 - **CCSDS 232.0-B-4 / CCSDS 230.1-G-3 Annex F**：TC 主头为 5 字节；Example 10
   样例 `001B000E06010203040506070814BB` 用于 `tc_uplink.py` 与帧布局的逐字节对拍。
 - **ETSI EN 302 307-1 V1.4.1 (2014-11)**：DVB-S2 专用 BCH 参数来源，对应

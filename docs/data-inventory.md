@@ -138,12 +138,17 @@ checkout 时 CRLF 改写导致 SHA 分叉。
 
 | 字段 | 缺条数 | 后果 | 缺的条目 |
 |---|---|---|---|
-| `magnitude` | 7 | 亮度排序/推荐打分缺输入；历史上 `float(None)` 会静默丢候选（L37） | M22/M35/M62/M69/M70/M71/M107（全为球状星团） |
-| `size_arcmin` | 2 | 无角径，FOV 适配与椭圆绘制退化为点 | M40（双星）、M73（星群） |
+| `magnitude` | 0 | 已补齐：HEASARC `MESSIER` 表 `vmag`（V 波段），逐条 `magnitude_source=heasarc_messier` | — |
+| `size_arcmin` | 0 | 已补齐：M40←WDS 双星分离 0.887′、M73←Lynga `VII/92A` 2.8′ | — |
 | `size_minor_arcmin` | 66 | 无短轴，不能画椭圆 | 与 `axis_ratio` 同一批 |
 | `axis_ratio` | 66 | 按圆形绘制；查询/推荐不读该字段（有钉扎测试） | 30 GCl / 27 OCl / 5 PN / 1 Neb / 1 `**` / 1 Other / 1 RfN |
 | `zh_name` | 83 | 界面回退 `name_en`；中文名覆盖 34/117 | — |
 | `aliases_en` | 107 | 仅 10 条有英文别名，别名搜索覆盖有限 | — |
+
+补字段口径：**只填 OpenNGC 为 `null` 的字段**，原值来自公开星表快照
+`mbdsdr_ai/data/dso_supplement.json`（含逐条原始行、`fetched_at`、
+`payload_sha256`，由 `scripts/fetch_dso_supplement.py` 生成）；不插值、
+不估算。已有值与补充值冲突时生成器直接报错，绝不静默覆盖。
 
 上表数字由 `test_openngc_field_gap_counts` 与
 `test_catalog_field_gap_counts` 钉扎；数据一变测试先红，文档随后更新。

@@ -93,6 +93,8 @@ class DSOEntry:
     source_file: str = ""
     source_name: str = ""
     magnitude_band: str = ""
+    magnitude_source: str = "none"
+    size_source: str = "none"
     zh_name_source: str = ""
     zh_name_ref: str = ""
 
@@ -194,6 +196,22 @@ def _check_entry(rec: dict, meta: dict) -> None:
         size = float(size)
         if not math.isfinite(size) or size <= 0.0:
             raise DSOIntegrityError(f"{name} 视尺寸非法: {size}")
+    # 字段来源必须与取值共存：有值不能标 none，无值不能标来源。
+    # 以 meta.source_files.supplement 为标记：无补充快照的历史数据不强制
+    # （包导入会在重建前先读到旧文件），重建后必然带该字段。
+    if "supplement" in (meta.get("source_files") or {}):
+        for value_key, source_key in (("magnitude", "magnitude_source"),
+                                      ("size_arcmin", "size_source")):
+            source = rec.get(source_key)
+            if not isinstance(source, str) or not source:
+                raise DSOIntegrityError(f"{name} 缺 {source_key}")
+            if rec.get(value_key) is None:
+                if source != "none":
+                    raise DSOIntegrityError(
+                        f"{name} {value_key}=null 却标来源 {source!r}")
+            elif source == "none":
+                raise DSOIntegrityError(
+                    f"{name} {value_key} 有值却标 source=none")
     minor = rec.get("size_minor_arcmin")
     if minor is not None:
         minor = float(minor)
@@ -405,6 +423,8 @@ def _entry_from_record(rec: dict) -> DSOEntry:
         source_file=rec.get("source_file") or "",
         source_name=rec.get("source_name") or "",
         magnitude_band=rec.get("magnitude_band") or "",
+        magnitude_source=rec.get("magnitude_source") or "none",
+        size_source=rec.get("size_source") or "none",
         zh_name_source=rec.get("zh_name_source") or "",
         zh_name_ref=rec.get("zh_name_ref") or "",
     )

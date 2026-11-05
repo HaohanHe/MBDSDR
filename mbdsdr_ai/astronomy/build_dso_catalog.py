@@ -53,6 +53,7 @@ from ..skyengine.build_constellation_data import (
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 OUT_PATH = DATA_DIR / "dso_catalog.json"
 ZH_LABELS_PATH = DATA_DIR / "dso_zh_wikidata.json"
+SUPPLEMENT_PATH = DATA_DIR / "dso_supplement.json"
 DEFAULT_OPENNGC = Path(
     Path(__file__).resolve().parents[3] / "reference" / "openngc")
 
@@ -294,7 +295,23 @@ def _zh_fields(key: str, rec: dict, name_en: str, common: List[str],
 
 # ---------------------------------------------------------------- 记录构建--
 
-def _record(key: str, rec: dict, snapshot: dict) -> dict:
+def _load_supplement(path: Path) -> dict:
+    """读取缺字段补充快照，校验 schema 与 payload SHA。"""
+    with open(path, "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    meta = payload.get("meta") or {}
+    objects = payload.get("objects") or {}
+    if meta.get("schema") != "mbdsdr.dso_supplement.v1":
+        raise ValueError(f"{path} schema 非法: {meta.get('schema')!r}")
+    if meta.get("payload_sha256") != canonical_sha256(objects):
+        raise ValueError(f"{path} 的 payload_sha256 与 objects 不一致")
+    if not isinstance(meta.get("sources"), dict):
+        raise ValueError(f"{path} 缺 meta.sources")
+    return payload
+
+
+def _record(key: str, rec: dict, snapshot: dict,
+            supplement: Optional[dict] = None) -> dict:
     raw_type = rec["Type"]
     if raw_type not in TYPE_MAP:
         raise ValueError(f"{key} 未知 OpenNGC 类型: {raw_type!r}")
@@ -307,6 +324,32 @@ def _record(key: str, rec: dict, snapshot: dict) -> dict:
     magnitude, band = _magnitude(rec)
     size = _size(rec, "MajAx")
     minor = _size(rec, "MinAx")
+    magnitude_source = "catalog" if magnitude is not None else "none"
+    size_source = "catalog" if size is not None else "none"
+
+    # 补充快照只允许填 OpenNGC 为 null 的字段；已有值出现分歧必须报错，
+    # 绝不用补充值静默覆盖主来源。
+    if supplement:
+        if "magnitude" in supplement:
+            if magnitude is not None:
+                raise ValueError(
+                    f"{key} OpenNGC 已有星等 {magnitude}，补充快照不得覆盖")
+            magnitude = float(supplement["magnitude"])
+            band = str(supplement["magnitude_band"])
+            magnitude_source = str(supplement["source_id"])
+            if not (0.0 < magnitude < 99.0):
+                raise ValueError(f"{key} 补充星等越界: {magnitude}")
+            if band not in ("V", "B"):
+                raise ValueError(f"{key} 补充星等波段非法: {band!r}")
+        if "size_arcmin" in supplement:
+            if size is not None:
+                raise ValueError(
+                    f"{key} OpenNGC 已有角径 {size}，补充快照不得覆盖")
+            size = float(supplement["size_arcmin"])
+            size_source = str(supplement["source_id"])
+            if not (0.0 < size < 600.0):
+                raise ValueError(f"{key} 补充角径越界: {size}")
+
     axis_ratio = None if size is None or minor is None else minor / size
     axis_ratio_source = "catalog" if axis_ratio is not None else "unknown"
     ra_deg = _parse_ra(rec["RA"])
@@ -354,8 +397,10 @@ def _record(key: str, rec: dict, snapshot: dict) -> dict:
         "dec_deg": dec_deg,
         "magnitude": magnitude,
         "magnitude_band": band,
+        "magnitude_source": magnitude_source,
         "size_arcmin": size,
         "size_minor_arcmin": minor,
+        "size_source": size_source,
         "axis_ratio": axis_ratio,
         "axis_ratio_source": axis_ratio_source,
         "constellation": constellation,
@@ -563,24 +608,32 @@ def fetch_wikidata(openngc: Path, out_path: Path) -> dict:
 
 # ---------------------------------------------------------------- 组装--
 
-def build(opengnc: Path, zh_path: Path) -> dict:
+def build(opengnc: Path, zh_path: Path,
+          supplement_path: Path = SUPPLEMENT_PATH) -> dict:
     rows: List[dict] = []
     for name in ("NGC.csv", "addendum.csv"):
         rows.extend(_read_openngc_csv(opengnc / name))
     by_name, by_m, dup_by_m = _index_rows(rows)
     snapshot = _load_zh_snapshot(zh_path)
+    supplement = _load_supplement(supplement_path)
+    sup_objects = supplement["objects"]
 
     objects: List[dict] = []
     for number in range(1, 111):
         row, dup = _row_for_messier(number, by_name, by_m, dup_by_m)
         key = f"M{number}"
-        objects.append(_record(key, row, snapshot))
+        objects.append(_record(key, row, snapshot, sup_objects.get(key)))
         if number == 102 and dup is not None:
             if dup["Type"] != "Dup" or dup["M"] != "101":
                 raise ValueError(f"M102 源记录不符合约定: {dup}")
     for number in EXTRAS:
         objects.append(_record(f"NGC{number}", _row_for_ngc(number, by_name),
-                               snapshot))
+                               snapshot, sup_objects.get(f"NGC{number}")))
+
+    built = {o["name"] for o in objects}
+    orphan = sorted(set(sup_objects) - built)
+    if orphan:
+        raise ValueError(f"补充快照含目录外编号: {orphan}")
 
     missing = _missing(objects)
     counts = _counts(objects, missing)
@@ -597,8 +650,12 @@ def build(opengnc: Path, zh_path: Path) -> dict:
             "mattiaverga/OpenNGC), by Mattia Verga and contributors, "
             "licensed CC BY-SA 4.0. Chinese names are Wikidata labels "
             "(CC0 1.0) matched by P528 catalog number; entries without a "
-            "Wikidata label are marked 自译 or left empty. This derived "
-            "catalog is distributed under CC BY-SA 4.0."),
+            "Wikidata label are marked 自译 or left empty. Missing "
+            "magnitudes/sizes are taken verbatim from public catalogs: "
+            "HEASARC MESSIER (compiled from Sky Catalogue 2000.0 Vol. 2, "
+            "1985skca.book.....H), the Washington Double Star Catalog "
+            "(USNO), and Lynga's Catalogue of Open Cluster Data (VII/92A). "
+            "This derived catalog is distributed under CC BY-SA 4.0."),
         "source_dir": SOURCE_DIR_LABEL,
         "source_files": {
             "ngc": {
@@ -624,6 +681,21 @@ def build(opengnc: Path, zh_path: Path) -> dict:
                 "license": WIKIDATA_LICENSE,
                 "sha256": sha256_file(zh_path),
                 "fetched_at": snapshot["meta"].get("fetched_at", ""),
+            },
+            "supplement": {
+                "path": "mbdsdr_ai/data/dso_supplement.json",
+                "sha256": sha256_file(supplement_path),
+                "fetched_at": supplement["meta"].get("fetched_at", ""),
+                "payload_sha256": supplement["meta"].get("payload_sha256"),
+                "fields": ["magnitude", "size_arcmin"],
+                "sources": {
+                    sid: {
+                        "catalog": info.get("catalog", ""),
+                        "bibcode": info.get("bibcode", ""),
+                        "table": info.get("table", ""),
+                    }
+                    for sid, info in supplement["meta"]["sources"].items()
+                },
             },
         },
         "constellation_method": (
@@ -655,10 +727,15 @@ def build(opengnc: Path, zh_path: Path) -> dict:
                 "约定取 NGC 5866，故条目数保持 117。禁止改成 116 条。"),
         },
         "notes": [
-            "M40（Winnecke 4）在 OpenNGC 为双星 **，无 MajAx/MinAx，"
-            "尺寸留空；常用名列为空，故 name_en/zh_name 为空。",
-            "M73（NGC6994）在 OpenNGC 为 Other（星群），无尺寸；渲染类型"
-            "按 cluster 处理，映射见 type_mapping。",
+            "M40（Winnecke 4）在 OpenNGC 为双星 **，无 MajAx/MinAx；角径"
+            "取 WDS 最近一次观测的双星分离（53.2″/60=0.887′），"
+            "size_source=wds；短轴仍 null。",
+            "M73（NGC6994）在 OpenNGC 为 Other（星群），无尺寸；角径取"
+            "Lynga 开放星团表 VII/92A 的 angular_diameter=2.8′，"
+            "size_source=lynga；渲染类型按 cluster 处理。",
+            "7 个 OpenNGC 无星等的天体（M22/M35/M62/M69/M70/M71/M107）"
+            "从 HEASARC MESSIER 表取 vmag（V 波段），magnitude_source="
+            "heasarc_messier；只填 null 字段，不覆盖 OpenNGC 已有值。",
             "星等优先 V-Mag，缺失时用 B-Mag 并以 magnitude_band 标注波段；"
             "两者皆缺写 null。",
             "cross_ids 取 OpenNGC Name 中的编号；NGC/IC 列仅作交叉引用，"
@@ -672,10 +749,12 @@ def build(opengnc: Path, zh_path: Path) -> dict:
                 "curl -L -o reference/openngc/NGC.csv " + NGC_URL,
                 "curl -L -o reference/openngc/addendum.csv " + ADDENDUM_URL,
                 "python -m mbdsdr_ai.astronomy.build_dso_catalog --fetch-zh",
+                "python scripts/fetch_dso_supplement.py",
                 "python -m mbdsdr_ai.astronomy.build_dso_catalog "
                 "--opengnc reference/openngc",
             ],
             "wikidata_query": snapshot["meta"].get("query", ""),
+            "supplement_queries": supplement["meta"].get("queries", {}),
         },
     }
     payload = {"meta": meta, "objects": objects}
@@ -689,6 +768,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="OpenNGC NGC.csv/addendum.csv 所在目录")
     parser.add_argument("--zh-labels", default=str(ZH_LABELS_PATH),
                         help="Wikidata 中文名快照 JSON")
+    parser.add_argument("--supplement", default=str(SUPPLEMENT_PATH),
+                        help="缺字段补充快照 JSON（dso_supplement.json）")
     parser.add_argument("--out", default=str(OUT_PATH),
                         help="输出 dso_catalog.json")
     parser.add_argument("--fetch-zh", action="store_true",
@@ -703,7 +784,7 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"{sum(1 for r in snapshot['labels'].values() if r['chosen'])}"
               f"/{len(snapshot['labels'])} 条有中文标签")
         return 0
-    payload = build(opengnc, zh_path)
+    payload = build(opengnc, zh_path, Path(args.supplement))
     write_json(Path(args.out), payload)
     print(f"已写入 {args.out}：{len(payload['objects'])} 条，"
           f"中文名 {payload['meta']['counts']['with_zh_name']} 条")

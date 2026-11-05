@@ -13,6 +13,19 @@
 - **中文名**：Wikidata 标签（CC0 1.0），按 `P528`（星表编号）匹配；
   取不到且英文常用名可意译者自译，逐条标注 `zh_name_source="自译"`；
   仍取不到留空并计数。
+- **缺失字段补充**（`mbdsdr_ai/data/dso_supplement.json`，逐字段记出处）：
+  OpenNGC 原始行缺星等/角径时，从公开星表按原值补齐，**不做插值或估算**：
+
+  | 字段 | 条数 | 编号 | 来源 | 出处 |
+  | --- | --- | --- | --- | --- |
+  | 视星等（V） | 7 | M22/M35/M62/M69/M70/M71/M107 | HEASARC `MESSIER` 表 | 据 Sky Catalogue 2000.0 Vol. 2 表 III（`1985skca.book.....H`） |
+  | 长轴 | 1 | M40 | USNO `WDS` J12222+5805 | 最近一次观测双星分离 53.2″（2017）/60=0.887′ |
+  | 长轴 | 1 | M73 | Lynga 开放星团表 `VII/92A` | `angular_diameter=2.8′`（`1987CoORo...16....1L`） |
+
+  每条记录同时写入 `magnitude_source` / `size_source`（`catalog` = OpenNGC，
+  否则为补充来源 id，`none` = 仍为空）；`dso.py` 对「有值却标 none」
+  「空值却标来源」直接抛错。快照含 `fetched_at`、逐条 `catalog_row`
+  原始行与 `payload_sha256`，消费方离线读取，禁止运行时联网。
 - **数据快照**（SHA-256，写入 `meta.source_files`）：
 
 | 源文件 | 字节 | 数据行 | SHA-256 |
@@ -20,6 +33,7 @@
 | `NGC.csv` | 3,942,946 | 13,970 | `54abea0b57b0a103831bfc7a8e3a99a23acfbf4bb581fcf3d8af539cbb826c84` |
 | `addendum.csv` | 17,496 | 64 | `c93f983dda6780b76b7b2e9271a856a892627710148a982ee98101a54c642fdd` |
 | `dso_zh_wikidata.json`（Wikidata 快照，CC0） | — | 34 条 | `809168bbe75964558b5ace2102d39cb644841cea5c313506d1bd301085f3611d` |
+| `dso_supplement.json`（补字段快照） | — | 9 条 | 见 `meta.source_files.supplement.sha256` |
 
 - **产物**：117 条（Messier 1–110 全量 + 7 个常用亮 NGC：NGC 253/869/884/
   2070/5139/7000/7293），`meta.generated_at` 与 `meta.data_sha256` 随生成更新。
@@ -30,11 +44,14 @@
 curl -L -o reference/openngc/NGC.csv https://cdn.jsdelivr.net/gh/mattiaverga/OpenNGC@master/database_files/NGC.csv
 curl -L -o reference/openngc/addendum.csv https://cdn.jsdelivr.net/gh/mattiaverga/OpenNGC@master/database_files/addendum.csv
 python -m mbdsdr_ai.astronomy.build_dso_catalog --fetch-zh
+python scripts/fetch_dso_supplement.py
 python -m mbdsdr_ai.astronomy.build_dso_catalog --opengnc reference/openngc
 ```
 
-`--fetch-zh` 只在需要刷新 Wikidata 快照时使用；日常重建离线读取
-`mbdsdr_ai/data/dso_zh_wikidata.json`，不联网。
+`--fetch-zh` 只在需要刷新 Wikidata 快照时使用；`scripts/fetch_dso_supplement.py`
+只在刷新补字段快照时使用（`--check` 可离线校验快照 SHA 与出处完整性）。
+日常重建离线读取 `mbdsdr_ai/data/dso_zh_wikidata.json` 与
+`mbdsdr_ai/data/dso_supplement.json`，不联网。
 
 ### 旧版已废弃
 
@@ -67,21 +84,30 @@ NGC 5866，故条目数保持 117。**
 （`—`），**不得用 `0` 或 `99` 冒充**。`dso.py` 对 `99` 星等与 `0` 尺寸
 直接判非法；重复编号、SHA 篡改同样抛错。
 
+「补齐」只允许从公开星表取**原值**（快照见 §1），并逐条写出处；
+不做插值、不按类别均值填、不把双星分离之外的尺寸推算当实测。
+
 | 字段 | 缺失数 | 缺失清单 |
 | --- | --- | --- |
-| 视星等 `magnitude` | **7** | M22、M35、M62、M69、M70、M71、M107 |
-| 长轴 `size_arcmin` | **2** | M40、M73 |
+| 视星等 `magnitude` | **0** | （已补齐：HEASARC `MESSIER`） |
+| 长轴 `size_arcmin` | **0** | （已补齐：M40←WDS、M73←Lynga） |
 | 短轴 `size_minor_arcmin` | **66** | 见 `meta.missing.size_minor_arcmin.designations` |
 | 英文常用名 `name_en` | **81** | 见 `meta.missing.name_en.designations` |
 | 中文名 `zh_name` | **83** | 见 `meta.missing.zh_name.designations` |
 
-- 星等口径：优先 `V-Mag`，缺失时用 `B-Mag` 并以 `magnitude_band` 标注；
-  两者皆缺写 `null` 且 `magnitude_band=""`。
-  实际分布：`V=109`、`B=1`（NGC 7000 = 4.0，仅有 B 波段）、`none=7`。
-- **M40（Winnecke 4）**：OpenNGC 为双星 `**`，无 `MajAx/MinAx`，尺寸为空；
-  常用名列为空，故 `name_en`/`zh_name` 也为空。渲染类型为 `double_star`。
-- **M73（NGC 6994）**：OpenNGC 为 `Other`（星群），无尺寸；渲染类型按
-  `cluster` 映射。
+- 星等口径：优先 OpenNGC `V-Mag`，缺失时用 `B-Mag` 并以
+  `magnitude_band` 标注；仅当两者皆缺且补充快照无值时写 `null` 且
+  `magnitude_band=""`。实际分布：`V=116`、`B=1`（NGC 7000 = 4.0，仅有 B
+  波段），无空值。
+- **M40（Winnecke 4）**：OpenNGC 为双星 `**`，无 `MajAx/MinAx`；长轴取
+  WDS 最近一次观测的双星分离 **53.2″ = 0.887′**（`size_source="wds"`），
+  短轴仍为 `null`（双星没有「短轴」，不做推算）。渲染类型 `double_star`。
+  常用名列为空，故 `name_en`/`zh_name` 也为空。
+- **M73（NGC 6994）**：OpenNGC 为 `Other`（星群），无尺寸；长轴取 Lynga
+  `VII/92A` 的 `angular_diameter=2.8′`（`size_source="lynga"`）。渲染类型
+  按 `cluster` 映射。
+- **7 个无星等天体**：M22/M35/M62/M69/M70/M71/M107 从 HEASARC `MESSIER`
+  表取 `vmag`（V 波段，`magnitude_source="heasarc_messier"`）。
 - **轴比 `axis_ratio`**：仅当长轴与短轴都有时由数据层给出
   `axis_ratio = size_minor_arcmin / size_arcmin`，并标
   `axis_ratio_source="catalog"`（51 条）；缺短轴一律 `axis_ratio=null` +

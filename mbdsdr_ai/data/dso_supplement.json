@@ -1,0 +1,191 @@
+{
+ "meta": {
+  "schema": "mbdsdr.dso_supplement.v1",
+  "purpose": "补齐 OpenNGC 缺字段：7 条 V 星等 + M40/M73 角径。只填 OpenNGC 为 null 的字段；已有值不覆盖。",
+  "fetched_at": "2026-11-05T17:31:49+00:00",
+  "queries": {
+   "magnitude": "SELECT name, alt_name, object_type, dimension, vmag FROM messier WHERE name IN ('M 22', 'M 35', 'M 62', 'M 69', 'M 70', 'M 71', 'M 107')",
+   "m40_size": "SELECT wds, discoverer, ra, dec, first_date, last_date, number_obs, pa_date1, pa_date2, separation_date1, separation_date2, comp1_mag, comp2_mag FROM wds WHERE wds = '12222+5805'",
+   "m73_size": "SELECT name, alt_name, ra, dec, angular_diameter, ref_angular_diameter, type_flag FROM lyngaclust WHERE name = 'NGC 6994'"
+  },
+  "sources": {
+   "heasarc_messier": {
+    "catalog": "HEASARC W3Browse MESSIER",
+    "compiled_from": "Sky Catalogue 2000.0, Vol. 2 (Hirshfeld & Sinnott 1985), Table III",
+    "bibcodes": [
+     "1781cote.rept..227M",
+     "1985skca.book.....H"
+    ],
+    "archive": "NASA HEASARC",
+    "url": "https://heasarc.gsfc.nasa.gov/xamin/vo/tap/sync",
+    "table": "messier",
+    "fields_used": [
+     "vmag"
+    ],
+    "terms": "公开天文档案，按 HEASARC 惯例引用编目来源；数值为事实性数据，不做再分发许可声明之外的限制"
+   },
+   "wds": {
+    "catalog": "Washington Double Star Catalog (WDS)",
+    "maintainer": "U.S. Naval Observatory",
+    "archive": "NASA HEASARC 镜像",
+    "url": "https://heasarc.gsfc.nasa.gov/xamin/vo/tap/sync",
+    "table": "wds",
+    "fields_used": [
+     "separation_date2"
+    ],
+    "terms": "USNO 公开编目；使用时致谢：“This research has made use of the Washington Double Star Catalog maintained at the U.S. Naval Observatory.”"
+   },
+   "lynga": {
+    "catalog": "Lynga, Catalogue of Open Cluster Data (3rd ed.)",
+    "bibcode": "1987CoORo...16....1L",
+    "archive": "CDS VII/92A（经 HEASARC lyngaclust 表）",
+    "url": "https://heasarc.gsfc.nasa.gov/xamin/vo/tap/sync",
+    "table": "lyngaclust",
+    "fields_used": [
+     "angular_diameter"
+    ],
+    "terms": "公开出版星表；数值为事实性数据，按编目引用"
+   }
+  },
+  "payload_sha256": "5ab576914c4d428dd6ad6e08094c43ca73db3f0c40eb63b89c69809cc8f73c2a",
+  "payload_sha256_scope": "objects（canonical JSON：sort_keys、无空格、UTF-8）",
+  "object_count": 9,
+  "note": "本快照只存事实性取值与出处行，不含任何插值或估算；消费方必须离线读取本文件，禁止运行时联网。"
+ },
+ "objects": {
+  "M22": {
+   "magnitude": 5.1,
+   "magnitude_band": "V",
+   "source_id": "heasarc_messier",
+   "catalog_designation": "M 22",
+   "catalog_row": {
+    "name": "M 22",
+    "alt_name": "NGC 6656",
+    "object_type": "GB",
+    "dimension": "24",
+    "vmag": "5.1"
+   },
+   "derivation": "vmag 列直接取值（V 波段）"
+  },
+  "M35": {
+   "magnitude": 5.1,
+   "magnitude_band": "V",
+   "source_id": "heasarc_messier",
+   "catalog_designation": "M 35",
+   "catalog_row": {
+    "name": "M 35",
+    "alt_name": "NGC 2168",
+    "object_type": "OC",
+    "dimension": "28",
+    "vmag": "5.1"
+   },
+   "derivation": "vmag 列直接取值（V 波段）"
+  },
+  "M62": {
+   "magnitude": 6.6,
+   "magnitude_band": "V",
+   "source_id": "heasarc_messier",
+   "catalog_designation": "M 62",
+   "catalog_row": {
+    "name": "M 62",
+    "alt_name": "NGC 6266",
+    "object_type": "GB",
+    "dimension": "14",
+    "vmag": "6.6"
+   },
+   "derivation": "vmag 列直接取值（V 波段）"
+  },
+  "M69": {
+   "magnitude": 7.7,
+   "magnitude_band": "V",
+   "source_id": "heasarc_messier",
+   "catalog_designation": "M 69",
+   "catalog_row": {
+    "name": "M 69",
+    "alt_name": "NGC 6637",
+    "object_type": "GB",
+    "dimension": "7",
+    "vmag": "7.7"
+   },
+   "derivation": "vmag 列直接取值（V 波段）"
+  },
+  "M70": {
+   "magnitude": 8.1,
+   "magnitude_band": "V",
+   "source_id": "heasarc_messier",
+   "catalog_designation": "M 70",
+   "catalog_row": {
+    "name": "M 70",
+    "alt_name": "NGC 6681",
+    "object_type": "GB",
+    "dimension": "8",
+    "vmag": "8.1"
+   },
+   "derivation": "vmag 列直接取值（V 波段）"
+  },
+  "M71": {
+   "magnitude": 8.3,
+   "magnitude_band": "V",
+   "source_id": "heasarc_messier",
+   "catalog_designation": "M 71",
+   "catalog_row": {
+    "name": "M 71",
+    "alt_name": "NGC 6838",
+    "object_type": "GB",
+    "dimension": "7",
+    "vmag": "8.3"
+   },
+   "derivation": "vmag 列直接取值（V 波段）"
+  },
+  "M107": {
+   "magnitude": 8.1,
+   "magnitude_band": "V",
+   "source_id": "heasarc_messier",
+   "catalog_designation": "M 107",
+   "catalog_row": {
+    "name": "M 107",
+    "alt_name": "NGC 6171",
+    "object_type": "GB",
+    "dimension": "10",
+    "vmag": "8.1"
+   },
+   "derivation": "vmag 列直接取值（V 波段）"
+  },
+  "M40": {
+   "size_arcmin": 0.887,
+   "source_id": "wds",
+   "catalog_designation": "WDS J12222+5805",
+   "catalog_row": {
+    "wds": "12222+5805",
+    "discoverer": "WNC   4",
+    "ra": "185.55",
+    "dec": "58.08333333",
+    "first_date": "1863",
+    "last_date": "2017",
+    "number_obs": "26",
+    "pa_date1": "88",
+    "pa_date2": "76",
+    "separation_date1": "49.2",
+    "separation_date2": "53.2",
+    "comp1_mag": "9.74",
+    "comp2_mag": "10.18"
+   },
+   "derivation": "最近一次观测分离 53.2 arcsec （2017 年）/ 60 = 0.887 arcmin"
+  },
+  "M73": {
+   "size_arcmin": 2.8,
+   "source_id": "lynga",
+   "catalog_designation": "NGC 6994",
+   "catalog_row": {
+    "name": "NGC 6994",
+    "alt_name": "2056-128",
+    "ra": "314.7604038",
+    "dec": "-12.6218156",
+    "angular_diameter": "2.8",
+    "ref_angular_diameter": "315",
+    "type_flag": "DO"
+   },
+   "derivation": "angular_diameter 列直接取值（arcmin）"
+  }
+ }
+}

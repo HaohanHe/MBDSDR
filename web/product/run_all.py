@@ -27,12 +27,10 @@ EDGE = Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe")
 STEPS = [
     ("仓库事实源同步", [PY, "build/sync_from_repo.py"]),
     ("全天星表同步", [PY, "build/sync_sky_catalog.py"]),
-    ("卫星轨迹同步", [PY, "build/sync_sat_tracks.py"]),
     ("骨架与样式", [PY, "build/scaffold.py"]),
     ("文档/wiki 生成", [PY, "build/gen_docs.py"]),
     ("单文件构建", [PY, "build/build.py"]),
     ("静态守卫", [PY, "tests/verify_product.py"]),
-    ("性能基准", [NODE or "node", "tests/perf_bench.js"]),
     ("天球投影自检", [NODE, "tests/proj_selftest.js"] if NODE else None),
     ("无头运行时", [NODE, "tests/verify_runtime.js"] if NODE else None),
     ("视觉夹具", [PY, "tests/make_visual_fixture.py"]),

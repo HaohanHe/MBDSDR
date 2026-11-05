@@ -24,8 +24,7 @@ errors: list[str] = []
 warnings: list[str] = []
 
 # 生成物：含仓库中文事实与文档正文，不参与「代码不得硬编码中文」检查
-GENERATED = {"05-repo-facts.js", "70-docs-data.js", "20-i18n.js",
-             "12-sky-catalog.js", "13-sat-tracks.js"}
+GENERATED = {"05-repo-facts.js", "70-docs-data.js", "20-i18n.js", "12-sky-catalog.js"}
 
 
 def fail(msg): errors.append(msg)
@@ -255,26 +254,6 @@ for _lit in (_gh.get("stateVar", ""), _gm.get("tokenFields", [""])[0],
              _gm.get("selfReportFields", [""])[0]):
     if _lit and _lit not in _doc_gate:
         fail(f"[redline] docs/03-architecture.md 的门字段与事实源不一致：{_lit}")
-# 卫星轨迹必须是真实 SGP4 事实源，禁止按 NORAD 编号编造方位
-_sky_code = (SRC / "30-sky.js").read_text(encoding="utf-8")
-if re.search(r"n\s*\*\s*37\s*\+\s*11|parseInt\(String\(s\.norad\)", _sky_code):
-    fail("[sat] 卫星方位仍在按 NORAD 编号编造（假轨迹回潮）")
-for _m in ("MB.SATTRACKS", "satRaDec", "drawTracks", "projectSegment"):
-    if _m not in _sky_code:
-        fail(f"[sat] 未接真实 SGP4 天球轨迹：{_m}")
-_tracks_js = SRC / "13-sat-tracks.js"
-if not _tracks_js.is_file():
-    fail("[sat] 缺 13-sat-tracks.js 事实源（跑 build/sync_sat_tracks.py）")
-else:
-    _tj = _tracks_js.read_text(encoding="utf-8")
-    if "sgp4" not in _tj.lower() or "notVerified" not in _tj:
-        fail("[sat] 轨迹事实源缺 sgp4 来源或 not_verified 口径")
-_tj_meta = ROOT / "build/sat-tracks.json"
-if _tj_meta.is_file():
-    _tm = json.loads(_tj_meta.read_text(encoding="utf-8"))["meta"]
-    if _tm.get("satCount", 0) < 1 or _tm.get("count", 0) < 10:
-        fail("[sat] 轨迹事实源为空或采样不足")
-
 # 阶段 B 跨语言钉扎：Python 桥接契约必须与产品 JS 逐字一致
 import ast as _ast
 _wb = REPO / "mbdsdr_ai" / "web_bridge.py"

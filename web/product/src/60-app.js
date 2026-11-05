@@ -140,15 +140,9 @@
   });
 
   /* ---------- 帧循环 ---------- */
-  let last = 0, bridgeCheck = 0;
+  let last = 0;
   function animate(ts) {
     const dt = Math.min(50, ts - (last || ts)); last = ts;
-    // Qt/WebEngine 常在页面加载**之后**才注入 window.mbdsdrBridge。
-    // 每秒一次低频重检（仅离线态），让宿主后注入也能被感知（体检 B5）。
-    if (ts - bridgeCheck > 1000) {
-      bridgeCheck = ts;
-      if (S.source === "offline" && window.mbdsdrBridge) MB.detectSource();
-    }
     if ($("#skyForm").classList.contains("on")) MB.sky.draw(dt);
     MB.workbench.draw(dt);
     requestAnimationFrame(animate);
