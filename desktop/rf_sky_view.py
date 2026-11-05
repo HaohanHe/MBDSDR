@@ -1255,7 +1255,7 @@ class SkyObject:
         azimuth_deg: float,
         elevation_deg: float,
         obj_type: str = "satellite",
-        frequency_hz: float = 0.0,
+        frequency_hz: Optional[float] = None,
         signal_strength_db: float = 0.0,
         description: str = "",
         color: str = "",
@@ -1267,6 +1267,8 @@ class SkyObject:
         self.azimuth_deg = azimuth_deg  # 方位角 0-360°（北=0，东=90）
         self.elevation_deg = elevation_deg  # 仰角 -90..90°
         self.obj_type = obj_type  # satellite / signal / interferer / sun / moon / custom
+        # 下行频率（Hz）：None = 目录未登记。**不是 0 Hz**——0 会被排序/多普勒/
+        # 调谐等消费方当成真实频点。所有消费方必须先判 None 再比较大小。
         self.frequency_hz = frequency_hz
         self.signal_strength_db = signal_strength_db
         self.description = description
@@ -1398,6 +1400,23 @@ def load_ground_station_config() -> Optional[Dict[str, float]]:
 # ============================================================================
 
 
+def _positive_mhz_or_none(value) -> Optional[float]:
+    """目录频率（MHz）→ 正数或 None：缺值/空串/非数值/非正数一律「未登记」。
+
+    绝不用 0.0 冒充「没有频率」：0 Hz 会被下游当真实频点参与排序、多普勒、
+    调谐与连线计算。``None`` 是本模块唯一认可的「未登记」语义。
+    """
+    if value is None or value == "":
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f) or f <= 0.0:
+        return None
+    return f
+
+
 def _load_user_tle_catalog() -> List[Dict[str, object]]:
     """扫描 ~/.mbdsdr/tle/*.tle，返回用户提供的 TLE 列表。
 
@@ -1431,15 +1450,12 @@ def _load_user_tle_catalog() -> List[Dict[str, object]]:
             if not (line1.startswith("1 ") and line2.startswith("2 ")):
                 continue
             # 尝试从名称行解析频率（如 "NOAA 15  137.62MHz"）
-            freq_mhz = 0.0
+            freq_mhz = None
             kind = "custom"
             import re
             m = re.search(r"([\d.]+)\s*MHz", name_line, re.IGNORECASE)
             if m:
-                try:
-                    freq_mhz = float(m.group(1))
-                except ValueError:
-                    pass
+                freq_mhz = _positive_mhz_or_none(m.group(1))
             # 去掉频率注释，保留纯名称
             clean_name = re.sub(r"\s*[\d.]+\s*MHz.*$", "", name_line,
                                flags=re.IGNORECASE).strip()
@@ -2520,7 +2536,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 "aliases": list(meta.aliases) if meta else [name],
                 "line1": line1,
                 "line2": str(e.get("line2", "")),
-                "freq_mhz": float(e.get("freq_mhz", 0.0)),
+                "freq_mhz": _positive_mhz_or_none(e.get("freq_mhz")),
                 # TLE 可追溯（B2）：来源/历元透传（缺省空串，不编造）
                 "tle_source": str(e.get("tle_source", "")),
                 "tle_epoch": str(e.get("tle_epoch", "")),
@@ -5162,7 +5178,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                      f"AZ {format_azimuth(obj.azimuth_deg)}",
                      True, 22.0),
                 ]
-                if obj.frequency_hz > 0:
+                if obj.frequency_hz is not None and obj.frequency_hz > 0:
                     lines.append((format_frequency_mhz(obj.frequency_hz),
                                   True, 36.0))
                 self._queue_label_block(0.5, QPointF(pos.x() + 10, pos.y()),
@@ -5240,8 +5256,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             ("Rise/Set (UTC)", f"Rise {_hm(rise)}   Set {_hm(sset)}"),
         ]
         # 点星即听：该把收音机拧到哪（无则缺省行不画）
-        if info.get("downlink_mhz"):
-            dl = format_frequency_mhz(info['downlink_mhz'] * 1e6, digits=4)
+        dl_mhz = info.get("downlink_mhz")
+        if dl_mhz is not None and dl_mhz > 0:
+            dl = format_frequency_mhz(dl_mhz * 1e6, digits=4)
             if info.get("downlink_mode"):
                 dl += f" ({info['downlink_mode']})"
             kv.append(("Downlink", dl))
@@ -6177,9 +6194,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return 0.0
 
     @staticmethod
-    def _estimate_doppler_hz(obj: SkyObject) -> float:
-        if obj.frequency_hz <= 0:
-            return 0.0
+    def _estimate_doppler_hz(obj: SkyObject) -> Optional[float]:
+        """多普勒偏移；频率未登记时返回 None（不拿 0 Hz 算出一个 0）。"""
+        hz = obj.frequency_hz
+        if hz is None or hz <= 0:
+            return None
         import re
         v_rel = 0.0
         m = re.search(r"径向速度\s*([+-]?[0-9.]+)\s*km/s",
@@ -6191,7 +6210,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if m:
                 v_rel = float(m.group(1))
         c = 299792458.0
-        return -v_rel * obj.frequency_hz / c
+        return -v_rel * hz / c
 
     def _draw_antenna_beam(self, painter: QPainter):
         if self._antenna.elevation_deg <= 0:
@@ -7564,7 +7583,7 @@ class SatelliteTracker:
             name = entry["name"]
             line1 = entry["line1"]
             line2 = entry["line2"]
-            freq_mhz = float(entry.get("freq_mhz", 0.0))
+            freq_mhz = _positive_mhz_or_none(entry.get("freq_mhz"))
             kind = str(entry.get("kind", "custom"))
 
             sat = self._get_satrec(name, line1, line2)
@@ -7596,7 +7615,7 @@ class SatelliteTracker:
                 azimuth_deg=az_d,
                 elevation_deg=alt_d,
                 obj_type="satellite",
-                frequency_hz=freq_mhz * 1e6,
+                frequency_hz=(freq_mhz * 1e6) if freq_mhz is not None else None,
                 color=color,
                 description=format_satellite_description(
                     alt_d, dist_km, range_rate),
