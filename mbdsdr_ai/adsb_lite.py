@@ -78,13 +78,6 @@ def build_long_frame(df_ca: int, icao: int, payload7: bytes) -> bytes:
     return head + crc.to_bytes(3, "big")
 
 
-def build_short_frame(df_ca: int, icao: int) -> bytes:
-    """构造 7 字节短帧（56bit）：DF/CA + ICAO + CRC。测试/信号源用。"""
-    head = bytes([df_ca]) + int(icao & 0xFFFFFF).to_bytes(3, "big")
-    crc = crc24(bytes_to_bits(head), 32)
-    return head + crc.to_bytes(3, "big")
-
-
 # --------------------------------------------------------------------------- #
 # 合成 IQ（离线验证 / 自检信号源）
 # --------------------------------------------------------------------------- #
