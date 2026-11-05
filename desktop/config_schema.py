@@ -141,7 +141,9 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(
         key="show_waterfall", group="显示与主题", kind="bool",
         label="显示瀑布图", default=True,
-        help="关闭后只保留频谱曲线，可省一点绘制开销。",
+        help=("关闭后只保留频谱曲线，可省一点绘制开销。"
+              "联动：关闭时「瀑布历史深度」与「瀑布时间平滑」不再可见，"
+              "但两项取值仍保留，重新打开即恢复。"),
         source="desktop/settings.py:45（show_waterfall=True）",
     ),
 
@@ -167,7 +169,9 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
               "5=郊外可见银河但无细节，9=市中心（几乎看不到银河）。"
               "等级越高可见星数越少——同一视场下 Bortle 3 的可见星数约为 "
               "Bortle 8 的 7 倍（本星表实测 1456 对 194 颗）。"
-              "本模型对 1–3 档统一取裸眼极限 6.5 等，4 档起每档少约 0.35 等。"),
+              "本模型对 1–3 档统一取裸眼极限 6.5 等，4 档起每档少约 0.35 等。"
+              "联动：与「大气消光系数 k」叠加——本项定天顶极限星等，"
+              "消光只按仰角压低低空天体，两者不重复计。"),
         source="mbdsdr_ai/skyengine/stars.py:155 DEFAULT_BORTLE=3",
     ),
 
@@ -178,7 +182,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help=("点数越大，频率分得越细但刷新越慢；2048 是速度与细节的平衡点。"
               "更大的点数（8192/16384）当前内核不支持：C++ 侧与 AI 工具只认 "
               "1024/2048/4096，越界会被回退 2048（分辨率骤降 4×/8×），"
-              "因此这里只暴露三档。"),
+              "因此这里只暴露三档。"
+              "联动：与「频谱平均帧数」叠加——点数越大单帧越慢，再平均多帧会更迟钝。"),
         source="desktop/spectrum_widget.py:151 默认 2048；档位与 C++ settings_dialog 对齐",
         choices=(_e(1024, "1024（快）"), _e(2048, "2048（均衡）"),
                  _e(4096, "4096")),
@@ -194,7 +199,9 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(
         key="fft_avg_frames", group="频谱与解码", kind="enum",
         label="频谱平均帧数", default=1,
-        help="多帧平均让底噪更平滑、弱信号更易读，但会拖慢响应。",
+        help=("多帧平均让底噪更平滑、弱信号更易读，但会拖慢响应。"
+              "联动：与「频谱分辨率（FFT 点数）」叠加，点数越大单帧越慢，"
+              "平均帧数越多总延迟越高。"),
         source="desktop/spectrum_widget.py:152 默认 1；档位见同上 AVG_FRAMES",
         choices=(_e(1, "不平均"), _e(4, "4 帧"), _e(8, "8 帧"), _e(16, "16 帧")),
     ),
@@ -211,20 +218,23 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help=("峰值显示门：高于「本帧全部有限 bin 的中位数」多少 dB 才算一个峰。"
               "这是相对余量，不是绝对 dBFS 电平（中位数随信号环境浮动，"
               "所以同一阈值在不同噪声下卡到的峰不同）。"
-              "调大只标强信号，调小会标出更多弱峰。"),
+              "调大只标强信号，调小会标出更多弱峰。"
+              "联动：仅当「标注峰值」开启时才会在谱面画出峰点，关闭后本阈值仍保存。"),
         source="desktop/spectrum_widget.py: _PEAK_REL_DB_DEFAULT"
                "（峰值显示门，默认 6.0 dB，基准为全帧中位数）",
     ),
     SettingItem(
         key="show_peaks", group="频谱与解码", kind="bool",
         label="标注峰值", default=True,
-        help="在谱面上画出超过阈值的峰点与频率标签。",
+        help=("在谱面上画出超过阈值的峰点与频率标签。"
+              "联动：标不标由「峰值判定阈值」决定，阈值越大画出的峰越少。"),
         source="desktop/spectrum_widget.py: _PlotState.show_peaks（默认 True）",
     ),
     SettingItem(
         key="waterfall_smooth", group="频谱与解码", kind="bool",
         label="瀑布时间平滑", default=False,
-        help="对瀑布逐行做轻度 IIR 平滑，弱信号轨迹更连贯，但快速突发会被抹淡。",
+        help=("对瀑布逐行做轻度 IIR 平滑，弱信号轨迹更连贯，但快速突发会被抹淡。"
+              "联动：仅当「显示瀑布图」开启时有意义，关闭后平滑不参与绘制。"),
         source="desktop/spectrum_widget.py:173 wf_smooth=False；UI 默认见 :1795",
     ),
     SettingItem(
@@ -273,7 +283,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
               "工具同一枚举；非档位值（如 384）回落 256 并在状态栏说明原因。"
               "2048 行在 512 bin 下约 4 MB、2048 bin 下约 16 MB。"
               "深度只影响回看长度与内存，不拖慢每帧刷新；"
-              "在瀑布窗口滚轮上滚即可回看，下滚回到最新。"),
+              "在瀑布窗口滚轮上滚即可回看，下滚回到最新。"
+              "联动：仅当「显示瀑布图」开启时才有可见效果，关闭时本项设置仍保留。"),
         source="desktop/spectrum_widget.py WF_DEPTH_CHOICES / set_waterfall_depth()；"
                "cpp/src/core/tokens.h kWaterfallDepthChoices 同六档",
         choices=(_e(128, "128 行"), _e(256, "256 行"), _e(512, "512 行"),
@@ -285,9 +296,10 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         minimum=0.0, maximum=0.5, step=0.01,
         help=("大气对星光的消光强度：Δm = k / sin(仰角)，逐星按各自高度计算。"
               "0=理想无消光，0.2=晴朗海平面（默认），0.5=雾霾/低空污染。"
-              "它只压低低仰角天体，不改变 Bortle 决定的天顶极限星等，两者不重复计。"),
+              "它只压低低仰角天体，不改变 Bortle 决定的天顶极限星等，两者不重复计。"
+              "联动：与「光害等级（Bortle）」一起决定可见星数，改一个而另一个不动时星数仍会变。"),
         source="mbdsdr_ai/skyengine/stars.py EXTINCTION_K=0.2；"
-               "desktop/rf_sky_view.py set_extinction_k()",
+               "desktop/rf_sky_view.py set_extinction()（set_extinction_k() 为同函数别名）",
     ),
 
     # ---------------------------------------------------------------- 存储与日志
@@ -306,14 +318,16 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="observer_lat", group="卫星与多普勒", kind="float",
         label="地面站纬度", default=None, minimum=-90.0, maximum=90.0, step=0.000001,
         storage="gui_config",
-        help="北纬为正。未设置时卫星过境/天空图保持空状态，不编造位置。",
+        help=("北纬为正。未设置时卫星过境/天空图保持空状态，不编造位置。"
+              "联动：需与「地面站经度」一起填写，缺任一项过境列表都为空。"),
         source="desktop/main_window.py:447 初始 None；:7768 从 gui_config.json 读回",
     ),
     SettingItem(
         key="observer_lon", group="卫星与多普勒", kind="float",
         label="地面站经度", default=None, minimum=-180.0, maximum=180.0, step=0.000001,
         storage="gui_config",
-        help="东经为正。与纬度一起决定过境时刻与多普勒曲线。",
+        help=("东经为正。与纬度一起决定过境时刻与多普勒曲线。"
+              "联动：需与「地面站纬度」一起填写，缺任一项过境列表都为空。"),
         source="desktop/main_window.py:447 初始 None；:7769 从 gui_config.json 读回",
     ),
     SettingItem(
@@ -321,7 +335,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         label="过境最低仰角", default=10.0, minimum=0.0, maximum=45.0, step=1.0,
         help=("过境列表只保留「峰值仰角」不低于该值的过境（度）。"
               "0=连贴地过境也列；45=只留头顶高仰角的好机会。"
-              "打开「显示低仰角过境」时，下限让位到 5°。"),
+              "联动：打开「显示低仰角过境」时，下限让位到 5°。"),
         source="desktop/settings.py: effective_pass_min_elevation_deg()"
                "（消费点接线见 docs/settings-inventory.md §9.1）",
     ),
@@ -335,7 +349,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(
         key="show_low_elevation_passes", group="卫星与多普勒", kind="bool",
         label="显示低仰角过境", default=False,
-        help=("打开后把峰值仰角 5°–「过境最低仰角」之间的过境也列出来"
+        help=("联动：与「过境最低仰角」联动——打开后把峰值仰角 5°–"
+              "「过境最低仰角」之间的过境也列出来"
               "（适合追低轨/地平线附近的机会）；关闭只列达到最低仰角的过境。"),
         source="desktop/settings.py: effective_show_low_elevation_passes() / "
                "effective_pass_visibility_gate_deg()",
@@ -347,7 +362,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         label="回答随机度（temperature）", default=0.7,
         minimum=0.0, maximum=2.0, step=0.05,
         storage="ai_config",
-        help="越高越发散、越低越保守；无线电操作建议 0.2–0.8。",
+        help=("越高越发散、越低越保守；无线电操作建议 0.2–0.8。"
+              "联动：与「采样截断（top_p）」一起控制回答风格。"),
         source="mbdsdr_ai/config.py:24 DEFAULT_CONFIG temperature=0.7",
     ),
     SettingItem(
@@ -355,7 +371,8 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         label="采样截断（top_p）", default=0.9,
         minimum=0.0, maximum=1.0, step=0.05,
         storage="ai_config",
-        help="只从累计概率前 top_p 的词里采样；与温度一起控制回答风格。",
+        help=("只从累计概率前 top_p 的词里采样。"
+              "联动：与「回答随机度（temperature）」一起控制回答风格。"),
         source="mbdsdr_ai/config.py:25 DEFAULT_CONFIG top_p=0.9",
     ),
     SettingItem(
@@ -413,19 +430,23 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     # 服务开关（既有面板，保留）
     SettingItem(key="rc_enabled", group="服务与远程访问", kind="bool",
                 label="启用远程控制（TCP）", default=False,
-                help="hamlib rigctld 风格；只监听 127.0.0.1，默认关闭。",
+                help=("hamlib rigctld 风格；只监听 127.0.0.1，默认关闭。"
+                      "联动：启用后才监听「远程控制端口」，改端口需重启该服务。"),
                 source="desktop/settings.py:53"),
     SettingItem(key="rc_port", group="服务与远程访问", kind="int",
                 label="远程控制端口", default=7356, minimum=1, maximum=65535,
-                step=1, help="hamlib/rigctld 兼容端口；仅本机监听，改完需重启服务。",
+                step=1, help=("hamlib/rigctld 兼容端口；仅本机监听，改完需重启服务。"
+                              "联动：仅当「启用远程控制（TCP）」开启时生效。"),
                 source="mbdsdr_ai/remote_control.py:40 DEFAULT_RC_PORT=7356"),
     SettingItem(key="web_enabled", group="服务与远程访问", kind="bool",
                 label="启用 Web 服务", default=False,
-                help="HTTP + WebSocket 频谱/音频流；只监听 127.0.0.1，默认关闭。",
+                help=("HTTP + WebSocket 频谱/音频流；只监听 127.0.0.1，默认关闭。"
+                      "联动：启用后才监听「Web 服务端口」。"),
                 source="desktop/settings.py:55"),
     SettingItem(key="web_port", group="服务与远程访问", kind="int",
                 label="Web 服务端口", default=8080, minimum=1, maximum=65535,
-                step=1, help="浏览器访问 http://127.0.0.1:端口/ 的端口；仅本机监听。",
+                step=1, help=("浏览器访问 http://127.0.0.1:端口/ 的端口；仅本机监听。"
+                              "联动：仅当「启用 Web 服务」开启时生效，改端口需重启该服务。"),
                 source="git HEAD:desktop/settings_panel.py DEFAULT_WEB_PORT=8080"),
 )
 

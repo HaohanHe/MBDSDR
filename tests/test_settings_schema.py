@@ -340,6 +340,33 @@ def test_ui_does_not_hardcode_port_defaults():
     assert settings_panel.DEFAULT_WEB_PORT == SCHEMA["web_port"].default
 
 
+#: 「改了 A 不同时改 B 就不成立」的项对。两侧 help 必须互相点名对方 label，
+#: 并带「联动」字样——面板每行 help 由 QLabel(item.help) 渲染，这就是用户看到
+#: 的联动提示；没有这条断言，文案会随重构悄悄丢掉提示。
+_DEPENDENCY_PAIRS = (
+    ("show_low_elevation_passes", "pass_min_elevation_deg"),
+    ("sky_extinction_k", "bortle"),
+    ("fft_size", "fft_avg_frames"),
+    ("show_waterfall", "waterfall_depth_rows"),
+    ("show_peaks", "peak_threshold_db"),
+    ("rc_enabled", "rc_port"),
+    ("web_enabled", "web_port"),
+    ("observer_lat", "observer_lon"),
+    ("ai_temperature", "ai_top_p"),
+    ("waterfall_smooth", "show_waterfall"),
+)
+
+
+def test_dependency_help_carries_cross_hint():
+    """联动提示必须落在 help 文案里（面板自动渲染，不碰布局）。"""
+    for a, b in _DEPENDENCY_PAIRS:
+        ha, hb = SCHEMA[a].help, SCHEMA[b].help
+        assert SCHEMA[b].label in ha, f"{a}.help 未点名「{SCHEMA[b].label}」"
+        assert SCHEMA[a].label in hb, f"{b}.help 未点名「{SCHEMA[a].label}」"
+        assert "联动" in ha, f"{a}.help 缺「联动」提示"
+        assert "联动" in hb, f"{b}.help 缺「联动」提示"
+
+
 # ---------------------------------------------------------------------------
 # 2. 校验：越界不崩且给原因
 # ---------------------------------------------------------------------------
@@ -367,6 +394,67 @@ def test_bad_types_fall_back_without_crash():
             validate_value(item, object())
         except (TypeError, ValueError, AttributeError, KeyError, RuntimeError) as e:
             pytest.fail(f"{item.key} 对坏类型抛异常：{e}")
+
+
+#: 用户手改 JSON 的非法值路径：键 → 写入值 → 期望落地值 → 原因关键字。
+#: 「启动即归一」由 DesktopSettings.load 里的 _coerce 负责，且原因必须进
+#: migration_notes（不静默）。
+_HAND_EDITED_OUTLIERS = (
+    ("bortle", 99, 9, "上限"),
+    ("sky_extinction_k", 9.0, 0.5, "上限"),
+    ("waterfall_depth_rows", 384, 256, "回默认"),
+    ("fft_size", 8192, 2048, "回默认"),
+    ("pass_min_elevation_deg", -5, 0.0, "下限"),
+    ("pass_window_hours", 999, 72, "上限"),
+    ("peak_threshold_db", 100, 30.0, "上限"),
+    ("squelch_default_db", 100, -20, "上限"),
+    ("rc_port", 70000, 65535, "上限"),
+    ("web_port", 0, 1, "下限"),
+    ("ui_language", "fr", "zh", "回默认"),
+    ("tuning_step_hz", 5000, 10000, "回默认"),
+    ("show_low_elevation_passes", "maybe", False, "回默认"),
+)
+
+
+@pytest.mark.parametrize("key,raw,expected,reason_word", _HAND_EDITED_OUTLIERS)
+def test_hand_edited_json_outliers_are_clamped_and_recorded(
+        tmp_path, key, raw, expected, reason_word):
+    """手改 JSON 写非法值 → 启动归一（夹取/回默认）并记录原因，其他键不受影响。"""
+    path = tmp_path / "desktop_settings.json"
+    path.write_text(json.dumps({key: raw, "theme": "dark"}), encoding="utf-8")
+    ds = DesktopSettings.load(path=str(path))
+    assert ds.get(key) == expected, f"{key}={raw!r} 应落到 {expected!r}"
+    assert ds.get("theme") == "dark", "无关的用户值不得被连带改掉"
+    notes = ds.migration_notes or []
+    assert any(key in n and reason_word in n for n in notes), \
+        f"{key} 的回落原因必须可见，实际 notes={notes!r}"
+
+
+def test_hand_edited_bool_alias_is_legal_and_text_is_coerced(tmp_path):
+    """合法别名不报原因；text 键的 JSON 数字按字符串收下（记录口径）。"""
+    path = tmp_path / "desktop_settings.json"
+    path.write_text(json.dumps({"show_waterfall": "yes", "record_dir": 123}),
+                    encoding="utf-8")
+    ds = DesktopSettings.load(path=str(path))
+    assert ds.get("show_waterfall") is True
+    assert ds.get("record_dir") == "123"
+    assert not ds.migration_notes, \
+        f"合法别名/文本不该产生回落原因：{ds.migration_notes!r}"
+
+
+def test_internal_keys_from_hand_edited_json_are_not_bounded(tmp_path):
+    """已知口径：内部键（无面板入口）没有上下限，手改值原样接受。
+
+    它们由控制面板/设备层写入且 UI 侧自带范围；这里钉住现状，避免误以为
+    schema 对 1e9 Hz 做过夹取。
+    """
+    path = tmp_path / "desktop_settings.json"
+    path.write_text(json.dumps({"frequency_hz": 1e9, "gain_db": 999.0}),
+                    encoding="utf-8")
+    ds = DesktopSettings.load(path=str(path))
+    assert ds.get("frequency_hz") == 1e9
+    assert ds.get("gain_db") == 999.0
+    assert not ds.migration_notes
 
 
 # ---------------------------------------------------------------------------
