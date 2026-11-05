@@ -3757,8 +3757,12 @@ class MainWindow(QMainWindow):
         # 控制面板：调谐/音量/模式/录音
         try:
             cp = getattr(self, "control_panel", None)
-            if cp is not None and hasattr(cp, "set_sdr_connected"):
-                cp.set_sdr_connected(connected)
+            if cp is not None:
+                # 断连必须清真值/模式下拉/录音状态，只置灰会留下“还在工作”的假象。
+                if hasattr(cp, "set_connected"):
+                    cp.set_connected(connected)
+                elif hasattr(cp, "set_sdr_connected"):
+                    cp.set_sdr_connected(connected)
         except Exception:
             pass
         # 控制面板频率显示：未连接时显占位；连接后若无真实频率也保持占位，

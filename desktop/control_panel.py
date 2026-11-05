@@ -273,6 +273,9 @@ class ControlPanel(QWidget):
             self.mode_combo.blockSignals(True)
             self.mode_combo.setCurrentIndex(-1)
             self.mode_combo.blockSignals(False)
+            self.record_status.setText("未连接")
+        elif not self._recording:
+            self.record_status.setText("未录音")
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
