@@ -189,7 +189,7 @@
 
 补充事实：手动切换路径的 bool 返回未校验（`desktop/main_window.py:_on_sample_rate_changed` 调 `set_sample_rate` 不判返回值）——这是 C.0 第 1 条的同频项，落地时必须一并补“返回 False 也走状态栏可见错误并回填实际档”，否则会出现“下拉停在 250k、实际仍是 1.024M”的新分叉。
 `desktop/settings_panel.py` **没有**独立采样率档位表（grep `sample_rate` 无命中），只经 `control_panel`/设置下发 → 同步面为 0，但它的文案若引用档位需跟随；`cpp/src/core/app_settings.*` **没有** sampleRate 键（grep 无命中），C++ 不持久化采样率，故 C 的旧配置迁移只在 Python 侧发生，C++ 侧按 `kDefaultSampleRateHz` 起档。
-**文案审计线口径（别撞车）**：桌面 `desktop/constants.py:format_sample_rate` 已统一 `MS/s`、3 位小数（`format_sample_rate(250_000) == "0.250 MS/s"`，`tests/test_copy_units_audit.py` 已锁）；移动端 `spectrum_page.dart` / `device_info_card.dart` 同为 `MS/s`、3 位小数。新增 250k 时**必须显示 `0.250 MS/s`，不得写 `250 kHz`**；`docs/copy-audit.md` 的 U-03 已是这条口径，文档里不要另立单位。
+**文案审计线口径（别撞车）**：桌面 `desktop/constants.py:30` 已统一 `MS/s`、3 位小数（取证 `d0b585a0` — `desktop/constants.py:30` — `0.250 MS/s`；回归锁 `ebc897fa` — `tests/test_copy_units_audit.py:28` — `0.250 MS/s`）；移动端 `d543c87d` — `mobile/lib/pages/spectrum_page.dart:389` — `toStringAsFixed(3)} MS/s`（同字面量亦在 `mobile/lib/widgets/device_info_card.dart:104`）。新增 250k 时**必须显示 `0.250 MS/s`，不得写 `250 kHz`**；`docs/copy-audit.md` 的 U-03 已是这条口径，文档里不要另立单位。
 
 ### C.4 250k 证据分级（细则见 `docs/limitations-register.md` 附 M）
 
@@ -375,7 +375,7 @@ constexpr double kCandidateRatesHz[] = {
 | 2,880,000 | True | 2,880,000 | 2,880,000 | 一致 |
 | 3,200,000 | True | 3,200,000 | 3,200,000 | 一致（内核档） |
 
-结论：12 档里 **11 档请求=回读=硬件实收**，1 档（2.800M，非任何一端可见档）被吸附到 2.880M，改后回读如实报 2.880M 并由界面提示「请求 2.800 MS/s → 实际 2.880 MS/s」。改前该档回读是 2.800M，属"静默接受后 DSP 按别的率跑"的 Python 侧实例——本轮已修。
+结论：12 档里 **11 档请求=回读=硬件实收**，1 档（2.800M，非任何一端可见档）被吸附到 2.880M，改后回读如实报 2.880M 并由界面提示「请求 2.800 MS/s → 实际 2.880 MS/s」。改前该档回读是 2.800M，属"静默接受后 DSP 按别的率跑"的 Python 侧实例——本轮已修（取证 `70429a02` — `desktop/main_window.py:4694` — `该采样率未被设备接受（保持`；测试 `70429a02` — `tests/test_sample_rate_options.py:222` — `未被设备接受`）。
 
 **新增测试**（`tests/test_sample_rate_options.py`，共 12 条）：11 档逐档回读一致 + 硬件侧一致；档外 2.800M 回读=2.880M；未连接返回 `False`；主窗口槽逐档下发后 `_record_sr`/持久化均为生效值；后端拒绝时 `_record_sr` 不变、下拉回填、状态栏含「未被设备接受」、**不写配置**。实测 `12 passed`（8.77s）。
 
@@ -578,3 +578,28 @@ S_state 62、D_merge 0；R_region 用宽通道关闭实验拆为同格 303 / 仅
 4. 证据强度：30 条单条级实测 + 硬核全量 484 条 stale 统计 + 全量 2796 配对计数，
    均为**实测**；「宽通道吸收」与「陈旧保持」的机制链路由第 4/6 条原文与
    `track@kk` 状态直接支撑，不靠推断。
+
+---
+
+## 附录 E、文案审计线补证（2026-11-06）
+
+### E.1 GNSS `*_dbm` 字段名：保留名、明写单位（不改协议）
+
+- **判定**：保留字段名。数据源是 SDR 归一化 PSD（`|I/Q|²/Hz`）的相对比值，单位随后端（dBFS 或 dBµV），**不是 dBm**，不能按绝对功率换算。改名会破坏 `workflow_engine` 对 `rssi_by_azimuth` / `peak_az` 的回填与现有消费方，故按「字段名兼容 + 展示层明写」处理。
+- **展示口径**：平均功率 / 噪声基底 / 峰值功率 / 峰值RSSI 一律标「相对读数，非 dBm」。
+- 四元组：
+  - `84446a8d` — `mbdsdr_ai/gnss_monitor.py:49` — `平均功率（相对读数 dB，非 dBm）`
+  - `84446a8d` — `mbdsdr_ai/gnss_monitor.py:50` — `噪声基底（相对读数 dB，非 dBm）`
+  - `84446a8d` — `mbdsdr_ai/gnss_monitor.py:53` — `峰值功率（相对读数 dB，非 dBm）`
+  - `84446a8d` — `mbdsdr_ai/sdr_tools.py:6047` — `平均功率: {result.power_dbm:.1f} dB（相对读数，非 dBm）`
+  - `84446a8d` — `mbdsdr_ai/sdr_tools.py:6132` — `峰值RSSI: {result['peak_rssi_dbm']}（相对读数 dB，非 dBm）`
+
+### E.2 C++ RSSI 注释与头文件初值对齐
+
+- `4cdabbb5` — `cpp/src/dsp/spectrum_engine.cpp:1748` — `header keeps rssiDbfs_ at NaN (unknown), not a -100 dBFS quiet default.`
+- 头文件事实：`cpp/src/dsp/spectrum_engine.h:892` 的 `rssiDbfs_{quiet_NaN()}` 是哨兵，未出首块数据前为 NaN；改注释不动代码。
+
+### E.3 本线文档断言回查（`python scripts/verify_claims.py`）
+
+- 本文件行 192（采样率口径）与行 378（2.800M 吸附回读）的四元组已就地补齐。
+- 本文件行 206 / 210（C++ 档位与回读结论）：**未证实（无 commit）**。所引改动仍在工作区（`cpp/src/dsp/device_capabilities.cpp`、`cpp/src/control/control_hub.cpp` 为 M），且这两行正被参数治理线在途改写；本线不代改他人 hunk，待该线提交后由其补四元组。
