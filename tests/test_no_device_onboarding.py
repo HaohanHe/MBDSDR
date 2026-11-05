@@ -47,7 +47,10 @@ def test_no_device_banner_is_plain_and_actionable(window, monkeypatch):
 
     w._auto_enumerate_and_connect()
 
-    assert w._no_device_hint.wordWrap() is True
+    # 不换行是板子的决定：wordWrap 会随窗口宽度变成 2~3 行，把下方频谱
+    # 压到 320x228（频谱基线 320x240，见 test_ui_layout_locks）。
+    # 单行省略 + tooltip 的替代方案另案提交，不在本笔。
+    assert w._no_device_hint.wordWrap() is False
     text = w._no_device_hint.text()
     assert "没找到 SDR 设备" in text, f"横幅必须直说没找到设备，实际: {text}"
     assert "可能原因" in text and "下一步" in text, f"横幅必须给原因和下一步，实际: {text}"

@@ -1362,7 +1362,9 @@ class MainWindow(QMainWindow):
         self._no_device_hint = QLabel(
             "正在查找 SDR 设备…没有设备也可以先看天空模式和 AI 对话。")
         self._no_device_hint.setObjectName("hintLabel")
-        self._no_device_hint.setWordWrap(True)
+        # 单行不换行：wordWrap 会随窗口宽度变成 2~3 行，把下方频谱压到
+        # 320x228（基线 320x240，见 test_ui_layout_locks 频谱基线）。
+        # 窄窗省略与完整文案进 tooltip 的做法另行提交，不与本笔混改。
         self._no_device_hint.setAlignment(Qt.AlignCenter)
         _hint_bg = self._tok("light_hint_bg", "#F0E8DC")
         _hint_fg = self._tok("light_hint_text", "#8A6D4A")
