@@ -16,64 +16,297 @@ AI 定义无线电全栈开源平台 - 桌面客户端。
 import sys
 import os
 import argparse
-import tempfile
 
 # 确保能导入同目录和上层目录模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QIcon
+_STARTUP_LOG_NAME = "mbdsdr_startup.log"
 
-from themes import get_theme, DEFAULT_THEME, get_app_font
-from main_window import MainWindow
+#: 缺硬依赖时给出的下一步命令（模块名 → pip 包名）。
+_PIP_HINTS = {
+    "PySide6": "pip install PySide6",
+    "numpy": "pip install numpy",
+    "scipy": "pip install scipy",
+    "sgp4": "pip install sgp4",
+    "skyfield": "pip install skyfield",
+    "pymap3d": "pip install pymap3d",
+    "serial": "pip install pyserial",
+    "requests": "pip install requests",
+    "websockets": "pip install websockets",
+    "websocket": "pip install websocket-client",
+    "PIL": "pip install Pillow",
+    "sounddevice": "pip install sounddevice",
+    "astropy": "pip install astropy",
+}
+
+
+def _program_dir() -> str:
+    """程序根目录：冻结版是 exe 所在目录，源码版是仓库根目录。"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _startup_log_path() -> str:
+    """启动失败日志落点：显式环境变量 > 非 C 盘 > 程序目录 logs > %PROGRAMDATA%。
+
+    刻意不写 C 盘用户目录（~/.config、%APPDATA%、%LOCALAPPDATA%），也不落
+    系统临时目录：临时目录在 C 盘用户目录下（%TEMP%），且会被清理。
+    """
+    candidates = []
+    override = (os.environ.get("MBDSDR_STARTUP_LOG") or "").strip()
+    if override:
+        candidates.append(os.path.expanduser(override))
+    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+        root = f"{letter}:\\"
+        if os.path.isdir(root):
+            candidates.append(os.path.join(root, "mbdsdr", "logs",
+                                          _STARTUP_LOG_NAME))
+    candidates.append(os.path.join(_program_dir(), "logs", _STARTUP_LOG_NAME))
+    programdata = os.path.expandvars("%PROGRAMDATA%")
+    if programdata and not programdata.startswith("%"):
+        candidates.append(os.path.join(programdata, "MBDSDR", "logs",
+                                      _STARTUP_LOG_NAME))
+    for path in candidates:
+        try:
+            directory = os.path.dirname(path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            return path
+        except OSError:
+            continue
+    return ""
+
+
+def _append_startup_log(text: str) -> str:
+    path = _startup_log_path()
+    if not path:
+        return ""
+    try:
+        with open(path, "a", encoding="utf-8", errors="replace") as f:
+            f.write(text.rstrip() + "\n")
+        return path
+    except OSError:
+        return ""
+
+
+def _show_native_message(title: str, text: str) -> None:
+    """不依赖 Qt 的 Windows 弹窗：Qt 没起来时也能把原因说清。"""
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, text, title, 0x10 | 0x10000)
+        return
+    except (AttributeError, OSError):
+        pass
+    print(f"{title}: {text}", file=sys.stderr)
+
+
+#: 运行时按需 / 动态导入、PyInstaller 静态分析容易漏掉的私有模块。
+#: 启动自检逐个 import 一遍，结果写日志（不阻塞启动，只记录）。
+_RISKY_IMPORTS = [
+    "scipy._external.array_api_compat.numpy.fft",
+    "scipy._external.array_api_compat.numpy.linalg",
+    "scipy._external.array_api_compat.common",
+    "scipy._external.array_api_extra",
+    "scipy._external.packaging_version",
+    "scipy._lib._array_api",
+    "scipy._lib._util",
+    "scipy.signal",
+    "scipy.special",
+    "scipy.fft",
+    "scipy.interpolate",
+    "scipy.optimize",
+    "numpy._core._multiarray_umath",
+]
+
+#: 私有子树 → 兄弟模块探针。用来区分「整棵子树没打进包」还是「只缺单个文件」。
+_PACKAGING_SIBLINGS = {
+    "scipy._external": (
+        "scipy._external.array_api_compat.common",
+        "scipy._external.array_api_extra",
+        "scipy._external.packaging_version",
+    ),
+    "scipy._lib": (
+        "scipy._lib._array_api",
+        "scipy._lib._util",
+        "scipy._lib.deprecation",
+    ),
+    "numpy._core": (
+        "numpy._core.multiarray",
+        "numpy._core._multiarray_umath",
+    ),
+    "numpy": (
+        "numpy.fft",
+        "numpy.linalg",
+    ),
+}
+
+
+def _probe_import(name: str) -> bool:
+    """只判断能不能导入；缺件之外的真实错误不在这里吞掉。"""
+    import importlib
+    try:
+        importlib.import_module(name)
+        return True
+    except ImportError:
+        return False
+
+
+def _packaging_verdict(missing: str) -> "tuple[str, str]":
+    """返回 (判定, 子树)：defect=整棵子树缺失；incomplete=只缺单文件；unknown=判不了。"""
+    for subtree, siblings in _PACKAGING_SIBLINGS.items():
+        if missing == subtree or missing.startswith(subtree + "."):
+            if any(_probe_import(name) for name in siblings):
+                return "incomplete", subtree
+            return "defect", subtree
+    return "unknown", ""
+
+
+def _run_import_smoke() -> None:
+    """启动自检：把易漏的私有模块逐个导入，结果写进启动日志。"""
+    failed = [name for name in _RISKY_IMPORTS if not _probe_import(name)]
+    total = len(_RISKY_IMPORTS)
+    line = f"[smoke] 私有模块导入自检 {total - len(failed)}/{total} 通过"
+    if failed:
+        line += "；失败：" + ", ".join(failed)
+    _append_startup_log(line)
+    print(line, file=sys.stderr)
+
+
+def _import_error_text(exc: BaseException) -> str:
+    """把导入失败翻译成「缺什么 + 是打包缺陷还是解压不全 + 怎么补」。"""
+    detail = str(exc).strip() or exc.__class__.__name__
+    missing = getattr(exc, "name", None) or ""
+    if not missing and "No module named" in detail and "'" in detail:
+        missing = detail.split("'")[1]
+    lines = [detail]
+    if getattr(sys, "frozen", False):
+        verdict, subtree = _packaging_verdict(missing) if missing else ("unknown", "")
+        if verdict == "defect":
+            lines.extend([
+                "这是打包缺陷，不是你的操作问题：",
+                f"  安装包里整棵 {subtree} 子树都没打进去"
+                "（同一子包里的兄弟模块也导入失败）。",
+                "请获取最新构建版本；如果这就是最新版，请把日志发给维护者。",
+            ])
+        elif verdict == "incomplete":
+            lines.extend([
+                "安装包解压不完整：",
+                f"  只缺 {missing}，同包其它模块可以正常导入。",
+                "请整包重新解压/重新安装（不要只拷贝 exe，也不要删 _internal 里的文件）。",
+            ])
+        else:
+            lines.append(
+                "安装包不完整或缺少 Microsoft VC++ 运行库。"
+                "请整包重新解压；仍失败则安装 VC++ 2015-2022 x64 运行库。")
+    else:
+        hint = _PIP_HINTS.get(missing) or _PIP_HINTS.get(missing.split(".")[0])
+        if hint:
+            lines.append(f"修复：{hint}")
+        lines.append("修复：pip install -r requirements.txt")
+    return "\n".join(lines)
+
+
+def _report_startup_failure(summary: str, detail: str) -> None:
+    """启动失败统一出口：写日志 + 原生弹窗，任何情况下都不静默退出。"""
+    log_path = _append_startup_log(
+        f"[{__import__('datetime').datetime.now().isoformat(timespec='seconds')}] "
+        f"{summary}\n{detail}\n")
+    body = f"{summary}\n\n{detail}"
+    if log_path:
+        body += f"\n\n日志：{log_path}"
+    _show_native_message("MBDSDR 启动失败", body)
+
+
+def _qt_platform_plugin_problem() -> str | None:
+    """QApplication 之前检查 platforms 插件，避免 Qt 自己 abort 成裸弹窗。"""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, "PySide6", "plugins", "platforms"))
+        candidates.append(os.path.join(meipass, "platforms"))
+    try:
+        import PySide6 as _pyside
+        candidates.append(os.path.join(
+            os.path.dirname(_pyside.__file__), "plugins", "platforms"))
+    except ImportError:
+        pass
+    for var in ("QT_QPA_PLATFORM_PLUGIN_PATH", "QT_PLUGIN_PATH"):
+        value = (os.environ.get(var) or "").strip()
+        if value:
+            candidates.append(value)
+            candidates.append(os.path.join(value, "platforms"))
+    # 只认「这次真正要用的平台」：默认 windows 就必须有 qwindows.dll；
+    # 不能因为包里还躺着 qoffscreen/qminimal 就放行（Qt 仍会 abort 成英文弹窗）。
+    requested = (os.environ.get("QT_QPA_PLATFORM") or "windows").strip().lower()
+    requested = requested.split(":", 1)[0] or "windows"
+    plugin_name = "qwindows.dll" if requested in ("windows", "win32") \
+        else f"q{requested}.dll"
+    for directory in candidates:
+        try:
+            names = {name.lower() for name in os.listdir(directory)}
+        except OSError:
+            continue
+        if plugin_name in names:
+            return None
+    return (f"缺少 Qt 平台插件 platforms/{plugin_name}（当前平台 {requested}）。\n"
+            "常见原因：安装包没解压完整，或只拷贝了 MBDSDR.exe。\n"
+            "修复：重新解压完整安装包，_internal 目录必须与 exe 放在一起。")
 
 
 def _ensure_stdio_for_pythonw():
-    """pythonw.exe 启动时没有控制台，sys.stdout/sys.stderr 会是 None。
+    """pythonw.exe / 打包版启动时没有控制台，sys.stdout/sys.stderr 会是 None。
 
     此时任何 print() 落到 None 都会在启动阶段就抛 AttributeError 直接崩。
-    这里在最早时机把二者补回来：
-      1) 优先追加写日志文件（desktop 配置目录 ~/.config/MBDSDR，失败再退回
-         系统临时目录 tempfile.gettempdir() 下的 mbdsdr_desktop.log），
-         追加模式、UTF-8、errors="replace"；
-      2) 日志文件也打不开时退到 os.devnull（黑洞），保证任何 print 都不崩。
+    这里在最早时机把二者补回来：落点与启动自检共用 :func:`_startup_log_path`
+    的策略（显式环境变量 > 非 C 盘 > 程序目录 logs > %PROGRAMDATA%），
+    **不写 C 盘用户目录**（~/.config、%APPDATA%、%LOCALAPPDATA%、%TEMP% 全部禁用）；
+    连一个可写落点都没有时退到 os.devnull（黑洞），保证任何 print 都不崩。
     正常 python3 运行时 stdout/stderr 都不是 None，本函数直接返回、零副作用。
     """
     if sys.stdout is not None and sys.stderr is not None:
         return
 
     def _open_log():
-        candidates = []
         try:
-            cfg_dir = os.path.join(os.path.expanduser("~"), ".config", "MBDSDR")
-            os.makedirs(cfg_dir, exist_ok=True)
-            candidates.append(os.path.join(cfg_dir, "mbdsdr_desktop.log"))
-        except Exception:
-            pass
-        try:
-            candidates.append(os.path.join(tempfile.gettempdir(), "mbdsdr_desktop.log"))
-        except Exception:
-            pass
-        for path in candidates:
+            path = _startup_log_path()
+        except OSError:
+            path = ""
+        if path:
             try:
                 return open(path, "a", encoding="utf-8", errors="replace")
-            except Exception:
-                continue
-        # 日志目录都不可用 → 黑洞兜底
+            except OSError:
+                pass
+        # 日志落点都不可用 → 黑洞兜底
         return open(os.devnull, "w", encoding="utf-8", errors="replace")
 
     if sys.stdout is None:
-        try:
-            sys.stdout = _open_log()
-        except Exception:
-            sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="replace")
+        sys.stdout = _open_log()
     if sys.stderr is None:
-        try:
-            sys.stderr = _open_log()
-        except Exception:
-            sys.stderr = sys.stdout
+        sys.stderr = sys.stdout
+
+
+# 打包版是 GUI 子系统（无控制台）：导入失败如果放任抛 traceback，用户只会
+# 看到一个 "Unhandled exception in script" 英文弹窗，或干脆静默退出。
+# 这里统一截获，翻译成「缺哪个模块 + 怎么补」，并写日志。
+_ensure_stdio_for_pythonw()
+
+try:
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont, QIcon
+
+    from themes import get_theme, DEFAULT_THEME, get_app_font
+    from main_window import MainWindow
+except ImportError as _startup_exc:
+    # 缺件只会是 ImportError / ModuleNotFoundError；其它异常照常向上抛，
+    # 不在这里把真实 bug 伪装成「安装包坏了」。
+    _first_line = (str(_startup_exc).strip().splitlines() or [""])[0]
+    _summary = "无法加载界面依赖：" + (
+        _first_line or _startup_exc.__class__.__name__)
+    _report_startup_failure(_summary, _import_error_text(_startup_exc))
+    raise SystemExit(3)
 
 
 def main():
@@ -90,12 +323,25 @@ def main():
                         help="主题")
     args = parser.parse_args()
 
+    # 启动自检：把 PyInstaller 静态分析易漏的私有模块逐个导入并记日志。
+    _run_import_smoke()
+
     # 高 DPI 支持
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
-    app = QApplication(sys.argv)
+    # 平台插件缺失时 Qt 自己会 abort（连 Python 异常都拿不到），必须前置检查。
+    plugin_problem = _qt_platform_plugin_problem()
+    if plugin_problem:
+        _report_startup_failure("Qt 平台插件缺失，未能创建窗口", plugin_problem)
+        return 3
+    try:
+        app = QApplication(sys.argv)
+    except RuntimeError as qt_exc:
+        _report_startup_failure("创建 QApplication 失败",
+                                _import_error_text(qt_exc))
+        return 3
     app.setApplicationName("MBDSDR")
     app.setApplicationDisplayName("MBDSDR - AI 定义无线电")
     app.setOrganizationName("MBDSDR Project")
@@ -122,6 +368,24 @@ def main():
     # 创建主窗口
     window = MainWindow()
     window.app = app  # 传递 app 引用给主题切换
+
+    # 设置写盘失败（例如安装目录/配置目录只读）时把真相送到状态栏，
+    # 而不是只写进 settings.last_error 里无人看见。
+    settings_obj = getattr(window, "settings", None)
+    if settings_obj is not None:
+        previous_handler = settings_obj.on_error
+
+        def _on_settings_error(message, _window=window, _previous=previous_handler):
+            try:
+                _window.statusBar().showMessage(str(message), 15000)
+            except AttributeError:
+                print(str(message), file=sys.stderr)
+            if callable(_previous):
+                _previous(message)
+
+        settings_obj.on_error = _on_settings_error
+        if getattr(settings_obj, "last_error", None):
+            _on_settings_error("设置未能保存：" + settings_obj.last_error)
 
     # 设置应用图标（标题栏 / 任务栏）
     icon_path = os.path.join(

@@ -20,6 +20,9 @@ import json
 import math
 import os
 import platform
+import re
+import stat
+import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -80,13 +83,79 @@ def project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+#: 受保护安装根目录：普通用户默认写不进去（Program Files / Windows / ProgramData）。
+_PROTECTED_INSTALL_ROOT = re.compile(
+    r"^[A-Za-z]:\\(?:Program Files(?: \(x86\))?|Windows|ProgramData)(?:\\|$)",
+    re.IGNORECASE)
+
+
+def _dir_writable(directory: str) -> bool:
+    """启动期可写性判断（**不做真实写入探测**）。
+
+    不用 ``tempfile.mkstemp`` 试写：在 ACL 显式 deny-write 的目录上，
+    Windows 的创建文件调用会卡住数十秒（实测 faulthandler 停在
+    ``tempfile._mkstemp_inner``），启动期不能冒这个风险。
+    这里只看「已存在目录的只读属性」+「是否位于受保护安装根」。
+    ACL 级只读（非 Program Files 的自定义目录）由 ensure_record_dir
+    在真正写盘时给出可行动错误，而不是在启动期猜。
+    """
+    parent = directory if os.path.isdir(directory) else os.path.dirname(directory)
+    if not os.path.isdir(parent):
+        return False
+    if _PROTECTED_INSTALL_ROOT.match(os.path.abspath(parent)):
+        return False
+    try:
+        mode = os.stat(parent).st_mode
+    except OSError:
+        return False
+    return bool(mode & stat.S_IWRITE)
+
+
+def _first_writable_record_dir(primary: str) -> str:
+    """默认目录不可写时的回退顺序：非 C 盘 → %LOCALAPPDATA% → 家目录。"""
+    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
+        root = f"{letter}:\\"
+        if os.path.isdir(root):
+            candidate = os.path.join(root, "mbdsdr", "recordings")
+            if _dir_writable(candidate):
+                return candidate
+    appdata = os.path.expandvars("%LOCALAPPDATA%")
+    if appdata and not appdata.startswith("%"):
+        candidate = os.path.join(appdata, "MBDSDR", "recordings")
+        if _dir_writable(candidate):
+            return candidate
+    candidate = os.path.join(os.path.expanduser("~"), ".mbdsdr", "recordings")
+    if _dir_writable(candidate):
+        return candidate
+    return primary
+
+
+#: 默认录音目录按程序根目录缓存：安装目录只读时不必每次调用都做写探测。
+_DEFAULT_RECORD_DIR_CACHE: Dict[str, str] = {}
+
+
 def default_record_dir() -> str:
     """录音目录默认值：程序根目录的**同级** ``recordings``。
 
     本机项目在 ``D:\\mbdsdr\\MBDSDR``，故默认是 ``D:\\mbdsdr\\recordings``——
     刻意不写 ``C:\\Users\\...`` 用户目录（该目录只放少量配置，不堆大文件）。
+
+    例外：程序装在 ``C:\\Program Files`` 等只读目录、且机器上没有非 C 盘时，
+    同级 ``recordings`` 永远写不进去。此时（且仅在用户**没手选**目录时）
+    回退到第一个可写位置，避免「一装好就默认不能录音」。
     """
-    return os.path.join(os.path.dirname(project_root()), "recordings")
+    primary = os.path.join(os.path.dirname(project_root()), "recordings")
+    cached = _DEFAULT_RECORD_DIR_CACHE.get(primary)
+    if cached:
+        return cached
+    chosen = primary
+    if not _dir_writable(primary):
+        chosen = _first_writable_record_dir(primary)
+        if chosen != primary:
+            print(f"[settings] 程序目录不可写，录音默认目录回退到 {chosen}",
+                  file=sys.stderr)
+    _DEFAULT_RECORD_DIR_CACHE[primary] = chosen
+    return chosen
 
 
 def resolve_record_dir(value: Any) -> str:
