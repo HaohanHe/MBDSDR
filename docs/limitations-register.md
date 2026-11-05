@@ -525,3 +525,12 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 - 250k 档的 waterfall/谱线列宽按 FFT 自然变化，无额外最小宽度约束（见账本附录 C.5“瀑布最小宽度”）。
 - 移动端若同时开放 250k，`mobile/lib/pages/spectrum_page.dart` 的“值不在集合回 `.first`”会把 250k 兜底成 1.024M；改档必须先改兜底。
 
+## 附 N：桌面自动重连 / 热插拔未接入（2026-11-05，接入层线追加）
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L48 | **自动重连 / 设备热插拔：库层可用，桌面未接入，实际是「拆连接 + 手动重连」** | 调用点普查（`grep -n "ReconnectionManager\|DeviceManager\|start_monitor\|stop_monitor" desktop/`）：**0 处**；库层定义在 `mbdsdr_ai/reconnection.py`、`mbdsdr_ai/device_manager.py`。桌面掉线路径 `desktop/main_window.py:5245 _handle_backend_lost()` 只做 `_teardown_connection()` + 状态栏「设备已断开：{原因}」，重连靠用户点「连接」。反证用例 `tests/test_desktop_hotplug_autorecovery.py` 模拟「拔出→插回→等 2 个健康周期」，当前断言 `_active_sdr_backend is not None` 必红（原始红原文：`AssertionError: 设备插回后主窗口未自动恢复连接`）；本文件以 `xfail(strict=True)` 记录，不拖红套件 | 未接入（本轮明确不接） | 接线后去掉 xfail 并转绿：在 `_handle_backend_lost` 后登记「上次设备 id」，由 `_health_timer`（1s/拍）或 `DeviceManager.start_monitor` 在设备重新出现时调用现有连接路径；同时恢复依赖控件状态。复跑 `pytest tests/test_desktop_hotplug_autorecovery.py --runxfail` |
+| L49 | **状态栏文案不构成假承诺**（核查结论：通过） | `desktop/main_window.py:5255` 仅 `设备已断开：{msg}`；全 `desktop/` 搜「将自动重连 / 自动恢复 / 重新连接」：**0 处**匹配自动重连承诺；`main_window.py:3554` 明说「请检查后手动连接」、`:3914` 明说「点刷新」 | 诚实 | 若未来接入自动重连，必须同时把文案改成可兑现的承诺（如「正在尝试重连（第 n 次）」），不得只改文档 |
+
+> 与热插拔 10 次基线的关系：`tests/test_backend_reconnect_stress.py`（线程 1→1、句柄 333→333）证明的是 **`SDRBackend`/接收流水线不泄漏**，不是「桌面产品能热插拔」。两者不可互相替代；本条登记的桌面缺口以 L48 的必红用例为准。
+
