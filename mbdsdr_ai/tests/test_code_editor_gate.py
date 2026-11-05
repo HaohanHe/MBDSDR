@@ -89,10 +89,8 @@ class TestWriteToolTokenGate:
         res = agent.tool_registry.call(tool, args)
         assert res.success is False
         assert (res.data or {}).get("gated") is True
-        # 门实现刻意不读 arm_manual（自报不参与判定），因此报 not_armed 而非
-        # untrusted；两者都证明"带 true 也过不去"。
-        assert (res.data or {}).get("reason") in (
-            "gate_not_armed", "gate_arm_manual_untrusted")
+        # 显式拒绝码：arm_manual 已不支持，不再被当作任何形式的确认。
+        assert (res.data or {}).get("reason") == "gate_arm_manual_untrusted"
         assert "未执行" in res.content
         _assert_readme_untouched(readme_bytes)
 

@@ -115,14 +115,14 @@ def annotate_write_gate(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         t = dict(tool)
         t["description"] = (
             str(t.get("description", "") or "").rstrip()
-            + " 写操作，需外部确认通道签发的一次性 confirm_token（须由可信通道签发，"
-              "绑定本次动作摘要；模型自报 arm_manual 不放行）。"
+            + " 写操作，需用户在本机签发的一次性 confirm_token（由可信外部通道签发，"
+              "绑定本次动作摘要；模型无法自行获得）。"
         )
         schema = dict(t.get("inputSchema") or {"type": "object", "properties": {}})
         props = dict(schema.get("properties") or {})
         props[CONFIRM_PARAM] = {
             "type": "string",
-            "description": "外部确认通道签发的一次性 token（绑定本次动作摘要、TTL 内单次有效）；模型自报 arm_manual 不构成确认",
+            "description": "用户在本机外部确认通道签发的一次性 token（绑定本次动作摘要、TTL 内单次有效）；模型无法自行获得或伪造",
         }
         schema["properties"] = props
         required = list(schema.get("required") or [])

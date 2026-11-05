@@ -7,6 +7,7 @@
 3. 转发策略：只转发硬件面（注册名 ∪ 可配置别名表），软件工具返回 None
    不二次转发；别名表可整体替换（可配置而非内联写死）。
 """
+import json
 import os
 import sys
 
@@ -153,6 +154,10 @@ class TestManualGate:
         assert "confirm_token" in write_t["inputSchema"]["required"]
         assert "arm_manual" not in write_t["inputSchema"]["properties"]
         assert "confirm_token" in write_t["description"]
+        # schema 全文（含描述）不得再出现已废弃的假接口参数
+        assert "arm_manual" not in json.dumps(write_t, ensure_ascii=False)
+        assert "本机" in write_t["description"]
+        assert "模型无法自行获得" in write_t["inputSchema"]["properties"]["confirm_token"]["description"]
         assert "arm_manual" not in read_t["inputSchema"]["properties"]
         assert "confirm_token" not in read_t["inputSchema"]["properties"]
         assert read_t["description"] == "状态"

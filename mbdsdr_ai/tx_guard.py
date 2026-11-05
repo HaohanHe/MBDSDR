@@ -311,13 +311,15 @@ def resolve_write_authorization(tool_name: str,
 
     优先使用上层 ``ToolCallGate`` 已建立的一次性授权上下文（避免重复消费
     token）；没有上下文时才用 args 里的 opaque token 现场校验。
-    模型自报的 ``arm_manual`` 在这里同样不参与判定。
+    模型自报的 ``arm_manual`` 不参与放行判定，仅用于给出可区分的
+    ``gate_arm_manual_untrusted`` 拒绝码（显式说明"该参数已不支持"）。
     """
     ctx = current_tx_decision()
     if ctx is not None and ctx.allowed:
         return ctx
     token = (args or {}).get("confirm_token") or (args or {}).get("tx_token")
     return get_tx_gate().authorize(
+        arm_manual=(args or {}).get("arm_manual") is True,
         token=token, action=action_digest(tool_name, args))
 
 
