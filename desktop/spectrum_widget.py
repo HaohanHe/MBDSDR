@@ -627,6 +627,17 @@ def _view_center_hz(state: "_PlotState") -> float:
     return state.panel.generator.center_freq_hz + state.view_offset_hz
 
 
+def _px_to_freq(x_px: float, width: float, view_center_hz: float,
+                span_hz: float) -> float:
+    """像素 → 绝对频率的唯一定义（频谱与瀑布共用）。
+
+    与 _freq_to_x 互逆；`view_center_hz` 已含 state.view_offset_hz，
+    所以 Ctrl 平移后两区仍然落在同一频率上，不会各画各的。
+    """
+    return (view_center_hz - span_hz / 2.0
+            + x_px / max(1.0, float(width)) * span_hz)
+
+
 def _freq_to_x(rect: QRectF, view_center_hz: float, span_hz: float,
                freq_hz: float) -> float:
     """绝对频率 → 谱面 x 像素（含视图平移偏移）。"""
@@ -931,6 +942,7 @@ class _PlotState:
         self._wf_cw: int = -1          # 画布宽度（像素）
         self._wf_ch: int = -1          # 画布高度（像素）
         self._wf_consumed: int = 0     # 已并入画布的瀑布行数（对齐 gen.wf_rows_written）
+        self._wf_map_key: Optional[Tuple[float, float, int, int, int]] = None
         self._wf_lut: Optional[np.ndarray] = None   # db→RGB 查找表 (256,3)
         self._wf_lut_key: Tuple[float, float] = (0.0, 0.0)
 
@@ -1574,16 +1586,31 @@ def _wf_build_lut(state: "_PlotState"):
 
 
 def _wf_paint_row_into(state: "_PlotState", row_db: np.ndarray, dst_row: np.ndarray):
-    """把一行 dB 频谱（长度 num_bins）映射到画布一行 (w,4) 的 RGB。"""
+    """把一行 dB 频谱（长度 num_bins）映射到画布一行 (w,4) 的 RGB。
+
+    x→频率走 _px_to_freq（含 view_offset_hz），与上方谱面同一把尺子；
+    平移后频率落在采集带宽外的像素填背景色，不把边界数据拉伸。
+    """
     w = dst_row.shape[0]
     n = len(row_db)
-    idx = np.linspace(0, n - 1, w).astype(np.int64)
-    vals = row_db[idx]
+    gen = state.panel.generator
+    view_center = _view_center_hz(state)
+    span = gen.sample_rate_hz
+    # 像素中心 → 频率 → bin；与 _freq_at_x 的像素含义严格一致。
+    x = np.arange(w, dtype=np.float64) + 0.5
+    freq = _px_to_freq(x, w, view_center, span)
+    f0 = gen.center_freq_hz - span / 2.0
+    idx = np.floor((freq - f0) / span * n).astype(np.int64)
+    valid = (idx >= 0) & (idx < n)
+    vals = np.where(valid, row_db[np.clip(idx, 0, max(0, n - 1))], state.db_min)
     vals = np.where(np.isfinite(vals), vals, state.db_min)
     dmin, dmax = state.db_min, state.db_max
     t = np.clip((vals - dmin) / (dmax - dmin + 1e-9), 0.0, 1.0)
     li = (t * 255.0).astype(np.int64)
     dst_row[:, 0:3] = state._wf_lut[li]
+    if not valid.all():
+        bg = QColor(PAL_BG)
+        dst_row[~valid, 0:3] = (bg.red(), bg.green(), bg.blue())
     dst_row[:, 3] = 255
 
 
@@ -1629,6 +1656,24 @@ def _draw_waterfall(painter, rect, state):
     buf = state._wf_buf
     bg = QColor(PAL_BG)
     total = gen.wf_rows_written
+
+    # x→频率映射变化（Ctrl 平移 / 改调谐中心 / 换采样率）时，旧画布是按老
+    # 映射画成的，必须按环形缓冲全量重绘，否则瀑布与上方光谱会横向错开。
+    map_key = (round(_view_center_hz(state), 3),
+               float(gen.sample_rate_hz), int(gen.num_bins), w, h)
+    if state._wf_map_key != map_key:
+        state._wf_map_key = map_key
+        buf[:, :, 0] = bg.red()
+        buf[:, :, 1] = bg.green()
+        buf[:, :, 2] = bg.blue()
+        buf[:, :, 3] = 255
+        m = min(total, h)
+        if m > 0:
+            rows = gen.wf_latest_rows(m)
+            for i in range(len(rows)):
+                _wf_paint_row_into(state, rows[i], buf[h - len(rows) + i])
+        state._wf_consumed = total
+
     consumed = state._wf_consumed
 
     # 检测复位（clear_data() 后 total 归零）：清空画布回到空白。
@@ -2085,6 +2130,7 @@ class SpectrumPanel(QWidget):
         self._state._wf_cw = -1
         self._state._wf_ch = -1
         self._state._wf_consumed = 0
+        self._state._wf_map_key = None
         self._redraw()
 
     def _on_wf_smooth_toggled(self, on: bool):
@@ -2312,9 +2358,8 @@ class _TuningPlotMixin:
     def _freq_at_x(self, x_px: float) -> float:
         """谱面某 x 像素对应的绝对频率（含视图平移偏移）。"""
         gen = self.state.panel.generator
-        view_center = _view_center_hz(self.state)
-        span = gen.sample_rate_hz
-        return view_center - span / 2.0 + x_px / max(1, self.width()) * span
+        return _px_to_freq(x_px, self.width(),
+                           _view_center_hz(self.state), gen.sample_rate_hz)
 
     # ------------------------------------------------------------------ dB 轴拖动
     def _begin_db_drag(self, y_px: float, zoom: bool = False) -> None:
@@ -3218,6 +3263,12 @@ class WaterfallWidget(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(100)
+
+    def freq_at_x(self, x_px: float) -> float:
+        """瀑布某 x 像素对应的绝对频率：与上方谱面 _freq_at_x 同一公式。"""
+        gen = self.state.panel.generator
+        return _px_to_freq(x_px, self.width(),
+                           _view_center_hz(self.state), gen.sample_rate_hz)
 
     def paintEvent(self, event):
         p = QPainter(self)
