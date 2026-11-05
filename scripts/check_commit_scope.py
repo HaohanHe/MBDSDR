@@ -57,7 +57,7 @@ def _git(*args: str) -> str:
 
 
 def _canonical(path: str) -> str:
-    return os.path.normcase(path.replace("\\", "/")).lstrip("./")
+    return os.path.normcase(path.replace("\\", "/")).replace("\\", "/").lstrip("./")
 
 
 def _load_registry() -> Dict[str, Any]:
@@ -144,7 +144,7 @@ def check(ref: str, as_json: bool) -> int:
         rows.append(
             {
                 "path": path,
-                "status": status,
+                "status": item["status"],
                 "verdict": verdict,
                 "owners_at_commit": owners,
                 "added": added,

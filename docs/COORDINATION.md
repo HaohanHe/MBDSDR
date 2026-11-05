@@ -219,10 +219,11 @@
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
-| `docs/COORDINATION.md` | 机制线 | 2026-11-05 12:49 | 本笔提交（`git log -1 --format=%h`） |
-| `scripts/file_claim.py` | 机制线 | 2026-11-05 12:40 | 本笔提交 |
-| `tests/test_file_claim.py` | 机制线 | 2026-11-05 12:40 | 本笔提交 |
-| `scripts/check_commit_scope.py` | 机制线 | 2026-11-05 12:40 | 本笔提交 |
+| _（空：本笔交付已完成，见下方归档行）_ | | | |
+
+> 归档：2026-11-05 机制线在交付 `f197678` 期间持有 `docs/COORDINATION.md`、
+> `scripts/file_claim.py`、`scripts/check_commit_scope.py`、`tests/test_file_claim.py`；
+> commit 成功后已 release。实时锁以 `status` 为准。
 
 ### 6.2 共享文件清单（今天实际撞过的）
 
