@@ -494,9 +494,11 @@ python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
    `SDRStatus.dropped_samples` 读的就是这个合计，`clear()` 不清历史。
    **旧口径的假数字**（`_count` 只跟默认 `read()` 记账）：product 探针第一版
    在 2 s 窗口报 `ring_dropped_total_s=1.908 s`，而解调实际消费 1.959 s、
-   三个订阅者 dropped 全 0。换成 6 s / 2.4 MS/s 更好算：窗口内写 14.4 M 样点，
-   默认 `read()` 一次没调，`_count` 涨满 1 M 之后其余 **13.4 M 样点
-   （≈5.6 s，占窗口约 93%）全被记成丢弃**。新口径下同一场景为 0
+   三个订阅者 dropped 全 0。换成 6 s 窗口更好算：按请求 2.4 MS/s 满速写作
+   14.4 M 样点、默认 `read()` 一次没调时，`_count` 涨满 1 M 之后其余
+   **13.4 M 样点（≈5.6 s，占窗口约 93%）全被记成丢弃**；本机 USB 实际供给
+   5.62–6.00 s（13.5–14.4 M）时，旧口径会报 **12.5–13.4 M（≈5.2–5.6 s，
+   87–93%）**，新口径下同一场景为 0
    （`tests/test_fake_rtl_chain.py::test_following_subscriber_not_counted_as_dropped`
    与 `test_two_subscribers_each_read_half_no_drop` 钉住）。
    注意合计口径的边界：同一样点被 N 个订阅者各跳过一次会计 N 次，它回答
@@ -574,6 +576,13 @@ python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 `
 复跑口径：3 次里任一次满足即可（本机 8 次实测 0.0–1.7%，见 §6.2.2 表）。
 `ring_dropped_total_s` 应与 `sub_dropped_s` 三项之和一致；不一致说明丢样记账
 又被改坏或有未登记订阅者——按缺陷处理，**不要把它当成性能门限数字**。
+
+`drop_pct` 跟着 USB 供给走，不只看代码。同一台机器在并行重负载（例如另开
+`perf_probe_deep.py` 启动探针）时，ring 供给会从 2.355–2.403 MS/s 掉到
+**2.25–2.31 MS/s**，`drop_pct` 随之升到 4.0–6.4%：这时第 1 条不成立，但第 2/3
+条仍可核对（本轮复跑即为该情形：audio/fft `dropped` 0.0 s、`ring_dropped_total_s`
+与分项之和相等、积压 max 3.41 ms）。判断是代码退化还是机器被占，先看
+`produced_msps`。
 
 重采样比算式（音频链，`decode_stereo → _resample_to`）：
 `gcd(2048000, 48000) = 16000` → `up = 3`、`down = 128` → 有效比 128/3 = 42.6667，
