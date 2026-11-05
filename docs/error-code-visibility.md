@@ -4,6 +4,8 @@
 后剩 114 个——它们要么已在 `troubleshooting.VISIBLE_BY_FAMILY` 里补了条目，
 要么在 `error_remedy.NO_ENTRY_REASONS` 里登记「不出入口」。本文逐行给出
 **触发条件 / 是否用户可见 / 可见路径 / 文件:行证据 / 处置**。
+（2026-11-06 新增 6 个存量野码，第八节；目录总数不在此手写，实时值见
+`len(error_catalog.ERRORS)`。）
 
 三条判据（逐条都问，缺一即判不可见）：
 
@@ -354,3 +356,28 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 - 全文件内可核对的提交号共 2 个（`e95945bd`、`0e4b9ef6`），均为 `git show --stat` 实证过的真实提交；
   无其他凭印象引用。
+
+## 八、新增登记的 6 个存量野码（`mbdsdr_ai/core/mcp_server.py`）
+
+`tests/test_error_catalog_guard.py::test_no_wild_codes` 报 **8 处引用 / 6 个码**
+（`scan_not_found` 与 `decoder_not_found` 各 2 处，其余各 1 处）。
+该文件属遗留 stdio MCP 壳：桌面硬件工具走 `desktop/mcp_worker.py` 的
+`MBDSDRClient`（连 ai-sdr Mini 的 host:port），**不加载这个壳**；本仓也没有
+其它 UI 渲染点，只有 MCP 客户端与测试脚手架会读这些返回值。
+按判据「MCP 客户端不算用户可见面」→ 6 个全部**可达但不可见**。
+
+| # | code | 触发条件 | 用户可见 | 可见路径 | 判定依据（文件:行） | 处置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 115 | `audio_start_failed` | `start_audio` 已连接但 `ctrl.start_audio()` 返回 False（无声卡/驱动不可用/采样率不支持） | 否 | 无（仅 MCP 协议返回） | `mbdsdr_ai/core/mcp_server.py:395-399`；桌面不加载该壳：`desktop/mcp_worker.py:229-300` 走 `MBDSDRClient` | 已登记目录（`LAYER_TOOL`，可重试）；`NO_ENTRY_REASONS`「遗留 stdio MCP 壳」 |
+| 116 | `audio_output_unavailable` | `set_audio_output` 的索引不存在，或 PortAudio 不可用 | 否 | 无 | `mbdsdr_ai/core/mcp_server.py:621-630` | 同上 |
+| 117 | `invalid_text` | FST4 编码收到缺呼号/网格的文本（如 `AUDIT`），`pack77` 解析失败 | 否 | 无 | `mbdsdr_ai/core/mcp_server.py:266-274` | 同上 |
+| 118 | `scan_not_found` | `stop_scan` / `get_scan_results` 传入不存在或已过期的 handle（2 处引用） | 否 | 无 | `mbdsdr_ai/core/mcp_server.py:891-899`、`:901-906` | 同上 |
+| 119 | `decoder_not_found` | `stop_decoder` / `get_decoder_messages` 传入不存在或已过期的 handle（2 处引用） | 否 | 无 | `mbdsdr_ai/core/mcp_server.py:928-936`、`:938-944` | 同上 |
+| 120 | `vfo_not_found` | `set_primary_vfo` 传入不存在的 `vfo_id` | 否 | 无 | `mbdsdr_ai/core/mcp_server.py:1110-1117` | 同上 |
+
+- 可达性：6 个都在正常参数路径上可直接触发（错 handle / 错索引 / 非法文本 / 无音频设备），**非死分支**。
+- 计数不手写：目录总数以 `len(error_catalog.ERRORS)` 为唯一真相源（本轮 +6）。
+  同期 `1e813902`（decode 线）另入库 9 个解码原因码且尚未登记帮助条目，
+  故 `mapping_gaps()` 当前非空，缺的正是那 9 个，**不含本节 6 个**。
+- 本节 6 个均已登记目录并进 `NO_ENTRY_REASONS`「遗留 stdio MCP 壳」；新增条目 0。
+- 未修改 `mbdsdr_ai/core/mcp_server.py`（没有需要删除的不可达码，故不启用该例外）。

@@ -72,6 +72,11 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "rate_limited", "http_4xx", "http_5xx", "network_other",
         "parse_failure", "empty_response", "tle_unknown",
     ),
+    "遗留 stdio MCP 壳（core/mcp_server.py）细项：code 只经 MCP 协议返回调用方"
+    "（桌面硬件工具走 mcp_worker/MBDSDRClient），桌面 UI 无渲染点": (
+        "audio_start_failed", "audio_output_unavailable", "invalid_text",
+        "scan_not_found", "decoder_not_found", "vfo_not_found",
+    ),
     "内部错误：只用于日志与开发排查，不面向用户操作": ("unexpected_error",),
 }
 

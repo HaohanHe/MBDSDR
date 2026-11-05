@@ -171,6 +171,12 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `llm_unreachable` | ai | 模型服务不可达 | 连接失败：连不上模型服务（{detail}） | 检查网络/代理后重试。 | 是 |
 | `unexpected_error` | ui | 未预期异常 | 意外错误（{exc_type}）：{detail} | 重试一次；反复出现请把日志（含异常类型与上下文）提交开发者。 | 是 |
 | `missing_error_detail` | common | 缺少错误详情 | {context} 未提供错误详情。 | 查看日志，或让上游补上错误码/异常信息。 | 否 |
+| `audio_start_failed` | tool | 音频启动失败 | 音频启动失败（无声卡/驱动不可用或采样率不支持）。 | 检查系统音频输出与驱动，或先用 list_audio_outputs 选定设备后重试。 | 是 |
+| `audio_output_unavailable` | tool | 音频输出设备不可用 | 无法切换到该音频输出设备（索引 {detail}）。 | 先 list_audio_outputs 确认索引存在，或检查 PortAudio 是否可用。 | 否 |
+| `decoder_not_found` | tool | 解码器句柄不存在 | 解码器句柄不存在：{detail} | 用 start_decoder 返回的 handle。 | 否 |
+| `invalid_text` | tool | FST4 文本格式非法 | FST4 文本格式无法解析：{detail} | text 形如 'CQ BI1AAA OM74'（CQ/呼号 + 网格，空格分隔）。 | 否 |
+| `scan_not_found` | tool | 扫描句柄不存在 | 扫描句柄不存在：{detail} | 用 start_scan 返回的 handle，或先 get_scan_results 核对。 | 否 |
+| `vfo_not_found` | tool | VFO 不存在 | VFO 不存在：{detail} | 先 list_vfos 确认 vfo_id。 | 否 |
 
 > 表中 `exception` 一行覆盖 `exception:<原始异常类型>`（如
 > `exception:ValueError`）；`playback` 一行覆盖 `playback_<底层码>`。
