@@ -10,7 +10,6 @@ websocket-client>=1.6.0   # 连接 ai-sdr Mini 硬件（mbdsdr_mcp_client.py）
 websockets>=12.0          # 设备模拟器（mbdsdr_sim_server.py）
 sgp4>=2.22.0            # 卫星轨道计算(SGP4/SDP4)
 skyfield>=1.45.0        # 高精度天文计算(卫星轨道/多普勒/过境预测)
-pymap3d>=2.9.0          # 坐标转换(ECEF/ENU/经纬高，卫星指向与GNSS)
 pyserial>=3.5           # GNSS 串口 NMEA 读取（CH340/PL2303 等 USB 转串口）
 Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)
 
@@ -29,18 +28,12 @@ Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)
 #   MIT、无 GPL），无需任何额外硬件库——RTLSDRBackend(host=...) 或 desktop 的
 #   RtlTcpBackend 直接连 rtl_tcp server。
 
-# --- 可选：pyrtlsdr（GPL-3.0，用户自行安装，不随包强制） ---
-# pyrtlsdr==0.2.93      # 仅当你想走 pyrtlsdr 原生 USB 直连路径时才需要；
-#                        # GPL-3.0 许可，故默认不安装、不随包强制。
-#                        # 未安装时：本机 USB 自动改用上面的 SoapySDR 路径；
-#                        #           rtl_tcp 网络路径用自研客户端（无需 pyrtlsdr）。
-#                        # 缺失时 connect() 报明确错误（status.error），绝不静默降级
-#                        # 到 Mock/假 IQ。固定 0.2.93：0.3.4+ 需要 rtlsdr_set_dithering
-#                        # （仅 rtlsdr-blog 分支 DLL 提供），与官方 osmocom librtlsdr
-#                        # Windows DLL 不兼容，import 即崩。
-# setuptools<81.0.0     # 历史上仅因 pyrtlsdr 0.2.x 用 pkg_resources 才引脚；
-#                        # 本项目代码已零处使用 pkg_resources，pyrtlsdr 改可选后
-#                        # 不再需要此引脚（仅当你自装 pyrtlsdr 且跑在 Python3.14
-#                        # 自带的 setuptools>=84 上时才可能需要，按需自行添加）。
+# --- pyrtlsdr（GPL-3.0）：桌面产物随包分发（0.2.93）；核心最小安装可不装 ---
+# pyrtlsdr==0.2.93      # 桌面打包（desktop/requirements.txt）已强制带上；仅跑 AI 内核
+#                        # 且只用 rtl_tcp 网络路径时可不装（自研 MIT 客户端，无需 GPL）。
+#                        # 固定 0.2.93：0.3.4+ 需要 rtlsdr_set_dithering（仅 rtlsdr-blog
+#                        # 分支 DLL 提供），与官方 osmocom librtlsdr Windows DLL 不兼容，
+#                        # import 即崩。缺失时 connect() 报明确错误（status.error），绝不
+#                        # 静默降级到 Mock/假 IQ。
 
 sounddevice>=0.4.6      # 解调后实时音频输出到默认声卡必需；未安装时无声（AudioPlayer.available=False），不影响也不伪造 IQ 接收

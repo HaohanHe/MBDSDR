@@ -11,7 +11,6 @@ scipy>=1.10.0          # 解调滤波/重采样，缺失会崩
 # 卫星追踪 / GNSS
 sgp4>=2.22.0
 skyfield>=1.45.0
-pymap3d>=2.9.0
 pyserial>=3.5           # GNSS 串口 NMEA
 
 # MCP 客户端（连接 ai-sdr Mini）
@@ -27,7 +26,8 @@ websockets>=12.0
 # 远端共享棒：desktop 直接用自研 RtlTcpBackend 连 rtl_tcp，无需任何硬件库。
 # SoapySDR
 
-# --- 可选：pyrtlsdr（GPL-3.0，用户自行安装，不随包强制）---
-# pyrtlsdr==0.2.93     # 仅当你想走 pyrtlsdr 原生 USB 直连时才需要；GPL-3.0，
-#                       # 默认不装。未装时本机 USB 自动改用上面的 SoapySDR 路径。
+# --- pyrtlsdr（GPL-3.0）：桌面产物实际随包分发（0.2.93，见 NOTICE.md / LICENSING.md）---
+# 固定 0.2.93：0.3.4+ 需要 rtlsdr_set_dithering（仅 rtlsdr-blog 分支 DLL 提供），
+# 与随包的 osmocom librtlsdr Windows DLL 不兼容，import 即崩。
+pyrtlsdr==0.2.93
 sounddevice>=0.4.6

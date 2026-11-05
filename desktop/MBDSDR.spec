@@ -35,7 +35,9 @@ _parts = [int(p) for p in (_version.split('.') + ['0', '0', '0', '0'])[:4]]
 # --- 隐藏导入：避免 PyInstaller 模块图漏掉动态加载的子模块 ---
 hiddenimports = []
 hiddenimports += collect_submodules('PySide6')
-hiddenimports += collect_submodules('mbdsdr_ai')
+# mbdsdr_ai/tests 只服务开发期，且会经 pytest 把测试框架整条闭包拖进产物。
+hiddenimports += collect_submodules(
+    'mbdsdr_ai', filter=lambda name: not name.startswith('mbdsdr_ai.tests'))
 
 # scipy 的私有子包（_external/_lib）在 __init__ 里是条件导入，PyInstaller 的
 # scipy hook 只收一部分，冻结版会在启动时抛
@@ -102,7 +104,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['pytest', '_pytest', 'pluggy', 'iniconfig', 'mbdsdr_ai.tests'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
