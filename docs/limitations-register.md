@@ -457,4 +457,13 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 - 本条目对应 `docs/parameter-unification.md` 第 1 组；方案 ② 落地后该组状态改为
   `已统一`（按"桌面一条链、C++ 一条链、界面明示"的口径），并在变更记录追加一行。
 - `receive_pipeline` 基线未动：当前 17 ERROR / 3 WARN / 1 INFO，`tests/test_swallow_guard.py` 21 passed。
+  （2026-11-05 操作逻辑线 A 笔收口后为 **13 ERROR / 1 WARN / 1 INFO**，棘轮只降未升。）
+
+## 附 I：中断/强杀退出 0xC0000005 与残留线程（2026-11-05，操作逻辑线追加）
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L45 | **事件循环运行中被中断（等价 Ctrl+C）退出码 0xC0000005，并伴随残留线程**；正常关窗不受影响 | 探针（`%TEMP%\kilo\mw_exit_probe*.py`，offscreen + `MBDSDR_NO_HW=1/MBDSDR_OFFLINE=1/MBDSDR_NULL_AUDIO=1`）：① `MainWindow()` 构造 → `close()` → 正常退出：退出码 **0**、`threading.enumerate()` 只剩 MainThread；② `app.exec()` 中 `_thread.interrupt_main()`：进程**卡在 `app.exec()`**，5 秒后探针看门狗打印 `MainThread` + 自己的守护线程，退出码 **-1073741819 = 0xC0000005**；`faulthandler` 栈显示 `KeyboardInterrupt` 抛在 `desktop/main_window.py::eventFilter`（Python 回调）里并越过 Qt C++ 边界 | **存量，非本轮引入**：同一步骤在 `bbc46e1`（`b74810f^`，我动 `main_window.py` 之前的提交）复现出**完全相同**的退出码与栈。属既有 PySide6 崩溃家族（Python 异常越界进入 Qt，`pyside6.abi3.dll` 访问违例）：`KeyboardInterrupt` 是 `BaseException`，Qt 事件分发不会吞它，出栈即崩。**结论句**：**关窗正常退出是干净的；强制中断/强杀不干净，原因是存量 PySide6 回调边界崩溃，与本轮接收链/PTT 改动无关。** | 若要在中断时干净退出：在 Qt 入口回调（至少 `eventFilter`、`QTimer` 槽）外层捕获 `BaseException` 并转成 `app.quit()`，或安装 `signal.SIGINT` 处理器只置停止标志（不在 C++ 回调里抛 Python 异常）；改完需用同探针复跑断言退出码 0 且无残留线程。**在此之前不得把「强杀会 0xC0000005」当成新回归** |
+
+**残留线程归因（实测+代码普查）**：产品代码里所有 14 处 `threading.Thread(` 创建点均为 `daemon=True`（`audio_device_manager.py:321`、`core/controller.py:568/796/865/1310`、`device_manager.py:242/244/642`、`mcp_client.py:304/307`、`remote_control.py:190`、`usb_watchdog.py:172`、`reconnection.py:355`、`scheduler.py:343`、`dsp.py:1294`）；正常构造/关闭路径实测无任何残留线程。因此复现里出现的 `Thread-1` **不是产品的非守护线程**：`DemodWorker` 与 rtlsdr 回调都是 native/QThread 线程，不出现在 `threading.enumerate()`；该 `Thread-1` 只能是复现脚本/宿主 harness 自己创建且未 join 的线程。也就是说，**不存在「产品非守护线程没 join 导致退不出」这一条**；卡住的原因是 Qt 事件循环没有返回（中断没被转成 `app.quit()`），而不是 Python 线程阻塞解释器退出。
 
