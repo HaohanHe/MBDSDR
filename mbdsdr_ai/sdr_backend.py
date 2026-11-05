@@ -2736,12 +2736,16 @@ class SoapySDRBackend(SDRBackend):
         driver = info.get("driver", "soapy")
         label = info.get("label", str(device_args) or "SoapySDR device")
         serial = info.get("serial", "")
-        # 频率/采样率/增益范围：优先用枚举阶段探测到的真实范围；
-        # 探测不到时给"宽但保守"的占位范围，connect 后会用 readback_hw_state() 校正。
+        # 频率/采样率范围：优先用枚举阶段探测到的真实范围；探测不到时给
+        # 「宽但保守」的**操作占位**（connect 后 readback_hw_state() 会校正），
+        # 但能力状态仍标记为 unknown，UI 不据此显示具体量程。
         freq_range = self._range_tuple(info.get("freq_range"), (1e3, 7.2e9))
         rate_range = self._range_tuple(info.get("sample_rate_range"), (1e3, 61.44e6))
-        max_gain = float((info.get("gain_range") or (0.0, 60.0))[1]) \
-            if isinstance(info.get("gain_range"), (tuple, list)) else 60.0
+        # 增益上限：未知时用 0.0 哨兵（主窗口只按 >0 收放滑杆），
+        # 不再伪造 60 dB 上限让 UI 显示成「已知能力」。
+        _gr = info.get("gain_range")
+        max_gain = (float(_gr[1]) if isinstance(_gr, (tuple, list)) and len(_gr) >= 2
+                    else 0.0)
 
         device = SDRDevice(
             device_type=f"soapy_{driver}",

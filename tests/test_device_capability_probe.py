@@ -253,6 +253,13 @@ def test_fake_soapy_partial_only_rate_and_gain(monkeypatch):
     assert d["gain_range"] == (0.0, 49.6)
 
 
+def test_soapy_device_unknown_gain_uses_zero_sentinel():
+    """增益范围未知时 max_gain=0.0 哨兵，不再伪造 60 dB 上限给 UI 显示。"""
+    from mbdsdr_ai.sdr_backend import SoapySDRBackend
+    dev = SoapySDRBackend("driver=fake", {"driver": "fake", "label": "Fake"})
+    assert dev.device.max_gain == 0.0
+
+
 def test_cli_enumeration_marks_capabilities_unknown(monkeypatch):
     from unittest import mock
     stdout = ("Found device 0:\n"
