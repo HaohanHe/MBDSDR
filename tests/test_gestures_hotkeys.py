@@ -10,6 +10,8 @@ tests/test_gestures_hotkeys.py
   4. Ctrl+滚轮悬停空白 = 锚点缩放（既有行为保持）；
   5. 键盘 , / . = 按模式预设表步进滤波宽窄档（无主听 VFO 时诚实提示不崩）；
   6. 单键 A/N/F/W/S/C 切解调发 mode_hotkey_requested（S=LSB，Shift+S=USB）。
+     单键切模式由频谱控件上的局部 QShortcut（WidgetShortcut）派发，
+     不再由 keyPressEvent 处理——这里直接驱动该 QShortcut。
 
 运行：
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_gestures_hotkeys.py -v
@@ -66,6 +68,15 @@ def _wheel(widget, x, y, dy, modifiers=Qt.KeyboardModifier.NoModifier):
 def _key(widget, key, modifiers=Qt.KeyboardModifier.NoModifier):
     ev = QKeyEvent(QKeyEvent.Type.KeyPress, key, modifiers, "")
     widget.keyPressEvent(ev)
+
+
+def _mode_key(widget, key_text):
+    """驱动频谱的局部模式 QShortcut（WidgetShortcut，焦点内局部优先）。"""
+    matches = [sc for sc in widget._local_mode_shortcuts
+               if sc.key().toString() == key_text]
+    assert matches, f"频谱没有登记局部键 {key_text}"
+    for sc in matches:
+        sc.activated.emit()
 
 
 class TestVfoWheelGestures:
@@ -159,17 +170,17 @@ class TestModeHotkeys:
         panel, _mgr, _vfo = _make_panel_with_vfo()
         got = []
         panel.mode_hotkey_requested.connect(got.append)
-        _key(panel._plot, Qt.Key_A)
-        _key(panel._plot, Qt.Key_N)
-        _key(panel._plot, Qt.Key_W)
+        _mode_key(panel._plot, "A")
+        _mode_key(panel._plot, "N")
+        _mode_key(panel._plot, "W")
         assert got == ["AM", "NFM", "WFM"]
 
     def test_s_key_lsb_usb(self):
         panel, _mgr, _vfo = _make_panel_with_vfo()
         got = []
         panel.mode_hotkey_requested.connect(got.append)
-        _key(panel._plot, Qt.Key_S)
-        _key(panel._plot, Qt.Key_S, Qt.KeyboardModifier.ShiftModifier)
+        _mode_key(panel._plot, "S")
+        _mode_key(panel._plot, "Shift+S")
         assert got == ["LSB", "USB"]
 
     def test_unrelated_key_passes_through(self):

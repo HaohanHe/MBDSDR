@@ -35,12 +35,14 @@ GROUP_BY_PREFIX: Tuple[Tuple[str, str], ...] = (
     ("panel", "面板"),
     ("layout", "顶栏"),
     ("vfo", "顶栏"),
+    ("spectrum", "频谱视图（焦点内）"),
 )
 GROUP_ORDER: Tuple[str, ...] = tuple(
     dict.fromkeys(g for _prefix, g in GROUP_BY_PREFIX))
 _MENU_PATH = {
     "文件": "文件菜单", "视图": "视图菜单", "工具": "工具菜单",
     "帮助": "帮助菜单", "面板": "面板菜单", "顶栏": "顶栏按钮",
+    "频谱视图（焦点内）": "频谱控件获焦时",
 }
 
 

@@ -24,7 +24,7 @@ from constants import DEFAULT_SAMPLE_RATE_HZ
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetricsF, QLinearGradient,
-    QImage, QPainterPath, QPolygonF, QCursor,
+    QImage, QPainterPath, QPolygonF, QCursor, QShortcut, QKeySequence,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
@@ -61,13 +61,53 @@ except Exception:  # pragma: no cover
 
 # 单键切解调映射（gqrx kbd-shortcuts：A=AM N=NFM W=WFM S=LSB Shift+S=USB C=CW；
 # F=FM 为 gqrx 所无、按我方惯例补）
-_MODE_HOTKEYS = {
-    Qt.Key_A: "AM",
-    Qt.Key_N: "NFM",
-    Qt.Key_F: "FM",
-    Qt.Key_W: "WFM",
-    Qt.Key_C: "CW",
+# 键位本身来自 desktop/shortcuts.py（唯一事实源，scope=spectrum），
+# 这里只声明「登记 id → 解调模式」的业务映射。
+try:
+    from shortcuts import bind as _bind_shortcut
+except ImportError:  # pragma: no cover - 以 desktop 包方式导入时
+    from desktop.shortcuts import bind as _bind_shortcut
+
+#: 登记 id -> 解调模式（单键切模式；S/Shift+S 分别是 LSB/USB）
+_LOCAL_MODE_SHORTCUTS = (
+    ("spectrum.mode.am", "AM"),
+    ("spectrum.mode.nfm", "NFM"),
+    ("spectrum.mode.fm", "FM"),
+    ("spectrum.mode.wfm", "WFM"),
+    ("spectrum.mode.cw", "CW"),
+    ("spectrum.sideband.lsb", "LSB"),
+    ("spectrum.sideband.usb", "USB"),
+)
+
+#: 登记 id -> Qt 键码（keyPressEvent 用；键位串只在 shortcuts.py 维护）
+_LOCAL_KEY_CODES = {
+    _sid: QKeySequence(_bind_shortcut(_sid))[0].key()
+    for _sid in (
+        "spectrum.tune.left", "spectrum.tune.right",
+        "spectrum.tune.up", "spectrum.tune.down",
+        "spectrum.filter.narrow", "spectrum.filter.wide",
+    )
 }
+
+#: 焦点控件（及其祖先）带此属性 = 该控件声明了局部键作用域，
+#: 主窗的 WidgetWithChildrenShortcut 不得抢键（见 desktop/shortcuts.py 规则）。
+LOCAL_SHORTCUT_SCOPE_ATTR = "_owns_local_shortcuts"
+
+
+def owns_local_shortcuts(widget) -> bool:
+    """焦点控件或其祖先是否声明「局部键优先」。
+
+    main_window 的全天模式 A 在触发槽里用它兜底：频谱获焦时不抢 A。
+    """
+    while widget is not None:
+        if getattr(widget, LOCAL_SHORTCUT_SCOPE_ATTR, False):
+            return True
+        try:
+            widget = widget.parentWidget()
+        except Exception:  # pragma: no cover - 防御非 QWidget 对象
+            return False
+    return False
+
 
 # 触屏手势：双指捏合缩放 + 单指拖动平移（Surface/平板）。鼠标模式下零旁路。
 try:
@@ -2317,6 +2357,17 @@ class _TuningPlotMixin:
     def _tuning_common_init(self):
         # 接收键盘事件需要 StrongFocus（否则 keyPressEvent 不触发）
         self.setFocusPolicy(Qt.StrongFocus)
+        # 局部快捷键（A/N/F/W/C、S/Shift+S）：装成 QShortcut + WidgetShortcut，
+        # 只有本控件自身获焦时才匹配——这是 Qt 里最具体的上下文，优先于主窗
+        # 的全天模式 A（WidgetWithChildrenShortcut）。键位来自 shortcuts.py。
+        # 同时打上作用域标记，供主窗槽内兜底判断（见 owns_local_shortcuts）。
+        setattr(self, LOCAL_SHORTCUT_SCOPE_ATTR, True)
+        self._local_mode_shortcuts: List[QShortcut] = []
+        for _sid, _mode in _LOCAL_MODE_SHORTCUTS:
+            _sc = QShortcut(QKeySequence(_bind_shortcut(_sid)), self)
+            _sc.setContext(Qt.WidgetShortcut)
+            _sc.activated.connect(lambda m=_mode: self._apply_mode_hotkey(m))
+            self._local_mode_shortcuts.append(_sc)
         self.setMinimumHeight(300)
         self.setMouseTracking(True)
         self._press_x: Optional[float] = None
@@ -2633,20 +2684,38 @@ class _TuningPlotMixin:
         self.update()
 
     # ------------------------------------------------------------------ 键盘
+    def _apply_mode_hotkey(self, mode: str) -> None:
+        """应用单键解调模式（局部 QShortcut 的唯一落点）。
+
+        模式键不再走 keyPressEvent：键盘事件永远先给焦点控件，局部
+        QShortcut 由 Qt 在焦点控件获焦时派发，输入框里按这些字母不会被抢。
+        """
+        if _get_demod_mode is not None and _get_demod_mode(mode) is None:
+            self._show_tune_tip(f"模式 {mode} 未注册")
+            return
+        self.state.panel.mode_hotkey_requested.emit(mode)
+        self._show_tune_tip(f"模式 {mode}")
+        self.update()
+
     def keyPressEvent(self, event):
         # main_window.cpp:553-576：左右箭头按 snapInterval 调谐。
         # 上下箭头 = 细调（snap_interval*0.1，对标 SDR++ 步进微调）；
         # Shift ×10 / Alt ×0.1 修饰同样生效。
+        # 键位来自 shortcuts.py（scope=spectrum），别处不再写裸键码。
         key = event.key()
         mods = event.modifiers()
-        if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+        k_left = _LOCAL_KEY_CODES["spectrum.tune.left"]
+        k_right = _LOCAL_KEY_CODES["spectrum.tune.right"]
+        k_up = _LOCAL_KEY_CODES["spectrum.tune.up"]
+        k_down = _LOCAL_KEY_CODES["spectrum.tune.down"]
+        if key in (k_left, k_right, k_up, k_down):
             gen = self.state.panel.generator
-            if key in (Qt.Key_Left, Qt.Key_Right):
+            if key in (k_left, k_right):
                 interval = self.state.snap_interval          # 左右 = 整格步进
-                direction = -1.0 if key == Qt.Key_Left else 1.0
+                direction = -1.0 if key == k_left else 1.0
             else:
                 interval = self.state.snap_interval * 0.1     # 上下 = 细调 1/10 格
-                direction = 1.0 if key == Qt.Key_Up else -1.0
+                direction = 1.0 if key == k_up else -1.0
             if mods & Qt.ShiftModifier:
                 interval *= 10.0
             elif mods & Qt.AltModifier:
@@ -2660,25 +2729,13 @@ class _TuningPlotMixin:
                 f"{nfreq / 1e6:.4f} MHz（步进 {interval / 1e3:g} kHz）")
             self.update()
             return
-        # 单键切解调（gqrx 键盘流）；S=LSB，Shift+S=USB
-        mode = None
-        if key == Qt.Key_S:
-            mode = "USB" if (mods & Qt.ShiftModifier) else "LSB"
-        elif key in _MODE_HOTKEYS:
-            mode = _MODE_HOTKEYS[key]
-        if mode is not None:
-            if _get_demod_mode is not None and _get_demod_mode(mode) is None:
-                self._show_tune_tip(f"模式 {mode} 未注册")
-                return
-            self.state.panel.mode_hotkey_requested.emit(mode)
-            self._show_tune_tip(f"模式 {mode}")
-            self.update()
-            return
         # 滤波宽窄档（, 窄 / . 宽，gqrx </./> 惯例；按模式预设表步进）
-        if key in (Qt.Key_Comma, Qt.Key_Period):
+        k_narrow = _LOCAL_KEY_CODES["spectrum.filter.narrow"]
+        k_wide = _LOCAL_KEY_CODES["spectrum.filter.wide"]
+        if key in (k_narrow, k_wide):
             mgr = self.state.panel.vfo_manager
             vfo = mgr.current if mgr is not None else None
-            direction = -1 if key == Qt.Key_Comma else 1
+            direction = -1 if key == k_narrow else 1
             if vfo is None or next_bandwidth_preset is None:
                 self._show_tune_tip("无主听 VFO：滤波档未生效")
                 return

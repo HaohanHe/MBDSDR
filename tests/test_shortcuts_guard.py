@@ -5,10 +5,12 @@
 
 防"加了按钮没登记快捷键"，双向核对：
   * main_window 里每个 `_key("id")` 的 id 都必须在 desktop/shortcuts.py 登记；
-  * 登记表里每个带键的条目都必须真的被 main_window 使用（死条目直接红）；
+  * window/planetarium scope 的带键条目必须真的被 main_window 使用（死条目红）；
+  * spectrum scope 的条目必须被 spectrum_widget 用 `bind(...)` 取键（同一事实源）；
   * main_window 里不许再出现裸 `QKeySequence("Ctrl+X")` 字面量；
   * 菜单 QAction 的中文标签必须能在登记表里找到（新增菜单项必须先登记）；
-  * 带键的条目键位不得重复。
+  * 同一 scope 内键位不得重复；跨 scope 允许同键（如 A：全天 / AM），
+    归属由「焦点在哪，局部优先」规则决定（见 shortcuts.py 顶部注释）。
 
 另锁：Esc 分层退出（先关星象仪 AI 回复卡，再退形态）+ 顶栏 Tab 顺序存在。
 
@@ -29,6 +31,10 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 from shortcuts import SHORTCUTS, BY_ID  # noqa: E402
 
 _MAIN_WINDOW = os.path.join(_ROOT, "desktop", "main_window.py")
+_SPECTRUM_WIDGET = os.path.join(_ROOT, "desktop", "spectrum_widget.py")
+
+#: 由 main_window 装配的 scope（其余由所属控件自己装配）
+_WINDOW_SCOPES = ("window", "planetarium")
 
 
 def _main_tree():
@@ -58,8 +64,16 @@ def _collect_calls(tree):
 
 
 def test_registry_has_no_duplicate_or_conflicting_keys():
-    keys = [s.key for s in SHORTCUTS if s.key]
-    assert len(keys) == len(set(keys)), f"快捷键重复登记: {sorted(keys)}"
+    # 同一 scope 内同键 = 真冲突（同一个控件里 Qt 无法消歧）；
+    # 跨 scope 同键是「焦点在哪，局部优先」的合法用法。
+    seen = {}
+    for s in SHORTCUTS:
+        if not s.key:
+            continue
+        slot = (s.scope, s.key)
+        assert slot not in seen, (
+            f"scope={s.scope} 内快捷键重复: {s.id} 与 {seen[slot]} 都是 {s.key}")
+        seen[slot] = s.id
     ids = [s.id for s in SHORTCUTS]
     assert len(ids) == len(set(ids)), "登记 id 重复"
 
@@ -73,9 +87,20 @@ def test_unbound_entries_explain_why():
 
 def test_every_registered_id_is_used_by_main_window():
     used_ids, _, _ = _collect_calls(_main_tree())
-    declared = {s.id for s in SHORTCUTS if s.key is not None}
+    declared = {s.id for s in SHORTCUTS
+                if s.key is not None and s.scope in _WINDOW_SCOPES}
     missing = declared - used_ids
     assert not missing, f"登记了但 main_window 没用上（死条目）: {sorted(missing)}"
+
+
+def test_spectrum_scoped_ids_are_owned_by_spectrum_widget():
+    """spectrum scope 的键由频谱控件自己装配，必须真的在那里出现。"""
+    with open(_SPECTRUM_WIDGET, "r", encoding="utf-8") as f:
+        src = f.read()
+    declared = {s.id for s in SHORTCUTS if s.scope == "spectrum"}
+    missing = [sid for sid in sorted(declared) if f'"{sid}"' not in src]
+    assert not missing, f"spectrum scope 登记了但频谱控件没用上: {missing}"
+    assert "_bind_shortcut(" in src, "频谱控件没走 shortcuts.bind 取键（第二事实源）"
 
 
 def test_main_window_only_uses_registered_ids():

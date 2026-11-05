@@ -9,8 +9,23 @@ QShortcut 与本表是否一致——新增按钮忘了登记会直接红。
 
 约定：
   * ``key=None`` 表示该动作**故意不配快捷键**，必须在 ``note`` 里写原因；
-  * ``scope`` 区分生效范围：window=主窗恒生效，planetarium=仅星象仪形态；
+  * ``scope`` 区分生效范围：window=主窗恒生效，planetarium=仅星象仪形态，
+    spectrum=仅频谱控件自身获焦时生效；
   * id 命名 ``域.动作``，域与菜单/顶栏分区一致。
+
+键位归属规则：**焦点在哪，局部优先**。
+-------------------------------------
+同一键序列允许在不同 scope 各登记一条（例如 ``A`` 同时是
+``view.all_sky``（window）和 ``spectrum.mode.am``（spectrum））：
+
+  * 频谱控件自身获焦 → A 归频谱的 AM 解调，主窗「全天模式」不抢键；
+  * 频谱没有焦点（焦点在天空视图/主窗其他区域）→ A 归主窗，进入全天模式。
+
+实现靠 Qt 的上下文优先级，不靠 keyPressEvent 拦截：
+频谱侧的局部键装成 ``QShortcut`` + ``Qt.WidgetShortcut``（只在父控件自身
+获焦时匹配，是 Qt 里最具体的上下文）；主窗侧的全天模式仍是
+``WidgetWithChildrenShortcut``，并在槽内跳过「焦点属于频谱局部键作用域」
+的情形兜底。这样输入框里按 A 只会输入字母，频谱里按 A 只切 AM。
 """
 
 from typing import NamedTuple, Optional, Tuple
@@ -35,8 +50,8 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
     Shortcut("view.reset_position", None, "重置窗口位置",
              note="窗口跑到屏幕外时的救援入口，低频操作，只从「视图」菜单点击"),
     Shortcut("view.all_sky", "A", "全天模式（160°）",
-             note="绑在主窗（WidgetWithChildrenShortcut），会先于频谱内的 A=AM 截获按键；"
-                  "这是预存在的键位冲突，见 docs/discoverability.md"),
+             note="焦点在频谱时该键归频谱的 A=AM（局部优先）；频谱无焦点时"
+                  "才进入全天模式。规则见本文件顶部「焦点在哪，局部优先」"),
     Shortcut("view.planetarium", "Ctrl+Shift+P", "星象仪模式"),
     Shortcut("view.planetarium_exit", "Esc", "星象仪形态退出", scope="planetarium",
              note="只在该形态启用；先关 AI 回复卡再退出形态"),
@@ -70,6 +85,36 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
     Shortcut("vfo.cycle", "Ctrl+Tab", "切换主听"),
     Shortcut("vfo.mute", "Ctrl+M", "静音"),
     Shortcut("vfo.replay", "Ctrl+Shift+R", "回放"),
+    # ---- 频谱视图（焦点内局部键，scope=spectrum）----
+    # 只在频谱控件自身获焦时生效（QShortcut + Qt.WidgetShortcut）。这些键
+    # 不进主窗 QAction，避免焦点在输入框/其他面板时误触。同一键位可与
+    # window 条目重复（见本文件顶部「焦点在哪，局部优先」）。
+    Shortcut("spectrum.mode.am", "A", "AM 解调", scope="spectrum",
+             note="频谱获焦时 A=AM；焦点不在频谱时 A 归「全天模式」"),
+    Shortcut("spectrum.mode.nfm", "N", "NFM 解调", scope="spectrum",
+             note="频谱获焦时生效"),
+    Shortcut("spectrum.mode.fm", "F", "FM 解调", scope="spectrum",
+             note="频谱获焦时生效"),
+    Shortcut("spectrum.mode.wfm", "W", "WFM 解调", scope="spectrum",
+             note="频谱获焦时生效"),
+    Shortcut("spectrum.mode.cw", "C", "CW 解调", scope="spectrum",
+             note="频谱获焦时生效"),
+    Shortcut("spectrum.sideband.lsb", "S", "LSB 解调", scope="spectrum",
+             note="频谱获焦时生效"),
+    Shortcut("spectrum.sideband.usb", "Shift+S", "USB 解调", scope="spectrum",
+             note="频谱获焦时生效"),
+    Shortcut("spectrum.tune.left", "Left", "频率 −1 格（Shift ×10 / Alt ×0.1）",
+             scope="spectrum", note="频谱获焦时生效；按网格步进向下调谐"),
+    Shortcut("spectrum.tune.right", "Right", "频率 +1 格（Shift ×10 / Alt ×0.1）",
+             scope="spectrum", note="频谱获焦时生效；按网格步进向上调谐"),
+    Shortcut("spectrum.tune.up", "Up", "频率细调 +（1/10 格）", scope="spectrum",
+             note="频谱获焦时生效"),
+    Shortcut("spectrum.tune.down", "Down", "频率细调 −（1/10 格）",
+             scope="spectrum", note="频谱获焦时生效"),
+    Shortcut("spectrum.filter.narrow", ",", "滤波收窄一档", scope="spectrum",
+             note="频谱获焦时生效；按当前模式的带宽预设表步进"),
+    Shortcut("spectrum.filter.wide", ".", "滤波放宽一档", scope="spectrum",
+             note="频谱获焦时生效；按当前模式的带宽预设表步进"),
 )
 
 #: id -> Shortcut（构建期按 id 取键）

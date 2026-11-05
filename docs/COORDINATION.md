@@ -195,3 +195,15 @@
   新增 `_show_help_panel` / `_show_shortcuts_panel`（非模态）。
   未改 `rf_sky_view.py` / `spectrum_widget.py` / 设置面板。盘点见
   `docs/discoverability.md`。未推送。
+
+- 2026-11-05（可发现性/快捷键线，本笔修复 HEAD ImportError）：**同文件并发事故**。
+  `desktop/main_window.py` 被另一条线整文件提交时，带走了本线尚未提交的
+  `owns_local_shortcuts` 导入，而 `desktop/spectrum_widget.py` 侧实现仍在
+  工作区 → HEAD 上 `python -m desktop.main_window` 直接 ImportError，应用起不来。
+  本笔把控件侧实现、`shortcuts.py`（spectrum scope 13 条局部键）与测试同批落盘，
+  并用 `tests/test_shortcut_focus_priority.py::test_main_window_imports_without_shim`
+  钉住「两侧符号必须同时存在」。
+  **新增纪律：同一文件同一时间只允许一条线写；谁先占谁写，占之前先在工作区
+  声明（在本台账或会话里写明文件名与占用时段）。** 共有文件按 hunk 拆分提交时
+  只允许 `git apply --cached` 自己的 hunk，**禁止整文件 `git add`**；
+  也不得为抢文件执行 stash / checkout 他人改动（咨询线已因此险些丢活）。
