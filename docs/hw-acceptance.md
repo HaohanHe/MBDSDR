@@ -204,6 +204,20 @@ python scripts\hw_acceptance\check_ring_labels.py
 
 ## 四、可复跑命令表
 
+> **跑前自检（每次真机之前，禁止假定设备空闲）**：先列进程与 PnP 状态，再动手。
+> 本机曾出现**非任何线启动**的 `MBDSDR`（pid 30740）占用设备；`Status OK` 只说明
+> 枚举正常，不等于拿得到句柄。
+>
+> ```powershell
+> Get-Process | Where-Object { $_.ProcessName -match 'rtl|sdr|gqrx|hdsdr|MBDSDR' } |
+>   Select-Object Id,ProcessName
+> Get-PnpDevice -InstanceId 'USB\VID_0BDA&PID_2832\77771111153705700' |
+>   Select-Object Status
+> ```
+>
+> 判据：① 进程列表非空 → **等它跑完，或以 `SKIP(NEEDS_OPERATOR)` 收场**，不 kill 他人进程；
+> ② PnP 非 `OK` → SKIP 并写原因码；③ 两项都干净才开跑，跑完再执行同两条命令确认句柄已释放。
+
 | 命令 | 实测耗时 | 依赖（设备/数据/端口） | 产物 / 口径 |
 |---|---|---|---|
 | `python scripts\hw_acceptance\run_all.py` | **80.4 s**（真机 7/7 PASS）；**56.1 s**（强制无硬件：PASS 3 / SKIP 4） | R1–R4：RTL-SDR；R5：TLE 缓存 + skyfield；R6：`de421.bsp` + PySide6；R7：纯软件 | `summary.json` / `summary.md` / 逐环 `result.json`；SKIP 必带原因码 |
