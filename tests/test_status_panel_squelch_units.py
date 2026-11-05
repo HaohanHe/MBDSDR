@@ -23,6 +23,16 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    yield app
+
+
 def _fmt():
     from status_panel import _fmt_squelch
     return _fmt_squelch
@@ -84,9 +94,39 @@ def test_static_guard_no_bare_dbfs_on_margin():
     assert "余量" in head, "squelch_db 字段说明必须写明「余量」语义"
 
 
-def test_update_from_backend_uses_new_formatter():
-    src = open(os.path.join(_ROOT, "desktop", "status_panel.py"),
-               encoding="utf-8").read()
-    start = src.index("def update_from_backend")
-    body = src[start:src.index("\n    def ", start + 10)]
-    assert "_fmt_squelch(" in body, "状态栏刷新必须走来源感知的格式化"
+def test_update_from_backend_uses_new_formatter(qapp):
+    """后端刷新必须走来源感知的格式化：面板文本 == _fmt_squelch 的输出。
+
+    行为断言：用假后端（只提供 get_status()）把六种来源/门限组合推给真实
+    StatusPanel，逐一回读 rx_squelch 文本，必须与纯格式化函数的输出完全一致。
+    若 update_from_backend 绕开该函数自己拼字符串，下面必有分支对不上。
+    """
+    from types import SimpleNamespace
+
+    from status_panel import StatusPanel, _fmt_squelch
+
+    panel = StatusPanel()
+    try:
+        cases = [
+            (-50.0, "desktop-margin", None),
+            (-20.0, "desktop-margin", None),
+            (-50.0, "cpp-auto", None),
+            (-50.0, "cpp-manual", -42.0),
+            (-50.0, "cpp-manual", None),
+            (-50.0, "none", None),
+            (None, "desktop-margin", None),
+        ]
+        for squelch, applied_by, threshold in cases:
+            status = SimpleNamespace(
+                squelch_db=squelch,
+                squelch_applied_by=applied_by,
+                squelch_threshold_dbfs=threshold)
+            backend = SimpleNamespace(get_status=lambda: status)
+            panel.update_from_backend(backend)
+            expected = _fmt_squelch(squelch, applied_by, threshold)
+            assert panel.rx_squelch.text() == expected, (
+                "后端刷新没走来源感知格式化："
+                f"({squelch!r}, {applied_by!r}, {threshold!r}) -> "
+                f"{panel.rx_squelch.text()!r}，期望 {expected!r}")
+    finally:
+        panel.deleteLater()
