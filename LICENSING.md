@@ -83,6 +83,34 @@ WTFPL（Do What The Fuck You Want To Public License，v2）及其同类极宽松
 可作为参考与依赖使用其协议事实，**不把上游源码文件整体拷入主代码库**。真需随包分发上游文件
 时，保留其 WTFPL.txt 与归属登记。
 
+## 4c. 数据资产许可边界（2026-11 B1 决策：零 GPL）
+
+**结论**：星座中文名与星座连线分开处理。连线保留 Stellarium `modern_iau`
+（CC BY-SA 4.0，署名保留）；61 个中文名的来源从 Stellarium `zh_CN.po`
+（GPL-2.0-or-later）替换为 Wikidata 标签（CC0-1.0）。仓库内现无 GPL 级数据。
+
+| 资产 | 许可证 | 处置 | 文件 / 证据 |
+| --- | --- | --- | --- |
+| 星座中文名（61 座） | **CC0-1.0** | 固定快照随仓，禁止运行时联网抓取 | `mbdsdr_ai/data/constellation_names_cc0.json`；`fetched_at 2026-11-05T16:45:46+00:00`；`payload_sha256 00b8ac93…`；文件 SHA-256 `75597803…`；抓取脚本 `scripts/fetch_constellation_names_cc0.py` |
+| 星座中文名（27 座旧文化名） | 项目自建（MIT 仓库内容） | 保持原样 | `mbdsdr_ai/data/constellation_culture.json` |
+| 星座连线（148 折线 / 842 段） | **CC BY-SA 4.0** | 保留署名；衍生数据同许可分发 | `mbdsdr_ai/data/constellations_iau.json`，`meta.source_*` |
+| OpenNGC 深空天体数据 | CC BY-SA 4.0 | 保留署名；衍生数据同许可分发 | `NOTICE.md`；`docs/data-inventory.md` §2 |
+| HYG 星表 | CC BY-SA 4.0 | 保留署名 | `NOTICE.md` |
+
+**为什么是 B1，而不是 A / B2**：
+
+- GPL 只存在于 61 个中文名（约 300 字节），连线本身是 CC BY-SA 4.0；
+- A（保留 GPL 名 + `LICENSING.md` 豁免）：豁免是政策承诺而非法律结论，且会让
+  `mbdsdr_ai/` 长期存在 GPL 级数据，门禁只能靠白名单放行；
+- B2（连星连线一起换）：对 GPL 问题零收益（连线本就不是 GPL），视觉回归面最大；
+- B1（只换名）：唯一零 GPL、零可见文案变化（7 项仅简繁字形转写，逐字对拍后同名）
+  且零连线改动的解。
+
+**分发义务**：CC0 名称无署名义务（仍在此登记来源）；CC BY-SA 连线必须保留
+Stellarium 与 Sky & Telescope（Roger Sinnott、Rick Fienberg）署名，派生数据继续
+以 CC BY-SA 4.0 分发。`scripts/check_data_licenses.py` 的白名单已清空，任何
+GPL 级数据进入 `mbdsdr_ai/` 即报红（退出码 1）。
+
 ## 5. 自有实现
 
 - 核心、计划写入论文的能力，依据公开标准/协议规范独立编写，以 MIT 发布；协议常量、字节布局、
@@ -139,5 +167,6 @@ WTFPL（Do What The Fuck You Want To Public License，v2）及其同类极宽松
 4. **无许可证文件的目录**（`wsjtx`、`wspr_audio`、`openngc`）：按上游项目许可证保守处理
    （WSJT-X=GPL-3.0，OpenNGC=CC-BY-SA-4.0）；在补齐许可证证据前不得复制任何内容。
 5. **自动守卫**：`scripts/check_data_licenses.py` 以 `mbdsdr_ai/` 为 MIT 主库路径，发现 GPL
-   声明即报红（退出码 1）；新增参考数据前先跑该脚本。规则字面量在脚本内拼接构造，门禁自身
-   不应命中自己（与 `AGENTS.md` 第 1 条一致）。
+   声明即报红（退出码 1）；白名单已按 B1 清空（空表 = 禁入）；新增参考数据前先跑该脚本
+   （`--check`）。规则字面量在脚本内拼接构造，门禁自身不应命中自己（与 `AGENTS.md`
+   第 1 条一致）。

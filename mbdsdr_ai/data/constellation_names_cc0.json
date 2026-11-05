@@ -1,0 +1,387 @@
+{
+  "meta": {
+    "schema": "mbdsdr.constellation_names_cc0.v1",
+    "system_id": "iau_88",
+    "source": "Wikidata",
+    "source_url": "https://www.wikidata.org/",
+    "license": "CC0-1.0",
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "fetched_at": "2026-11-05T16:45:46+00:00",
+    "query": "SPARQL P31=Q8928 (constellation) + wbgetentities labels zh|zh-hans|zh-cn|zh-tw|en; Aries Q10584 / Cancer Q8849 explicitly mapped (their zodiac items lack P31=Q8928).",
+    "matching": "Every IAU latin_name must resolve to a Wikidata item; failure aborts instead of guessing.",
+    "transcription": "raw is verbatim Wikidata; zh only applies per-character traditional→simplified transcription (鷹→鹰 劍→剑 獅→狮 魚→鱼 鵑→鹃 寶→宝 獵→猎 戶→户). Word-level rewriting is never performed.",
+    "count": 88,
+    "raw_diff_count": 7,
+    "payload_sha256": "00b8ac9321aa37c8b5062f0e455e26c290182eef9badfa9cfdf1a6621983fc5c",
+    "payload_sha256_scope": "names{} canonical JSON: ensure_ascii=False, sort_keys=True, separators=(',',':'), UTF-8",
+    "note": "Fixed local snapshot for license decision B1. Runtime consumers must read this file and must not fetch Wikidata."
+  },
+  "names": {
+    "And": {
+      "qid": "Q9256",
+      "zh": "仙女座"
+    },
+    "Ant": {
+      "qid": "Q10481",
+      "zh": "唧筒座"
+    },
+    "Aps": {
+      "qid": "Q10506",
+      "zh": "天燕座"
+    },
+    "Aql": {
+      "qid": "Q10586",
+      "zh": "天鹰座",
+      "raw": "天鷹座",
+      "transcribed": "鷹→鹰"
+    },
+    "Aqr": {
+      "qid": "Q10576",
+      "zh": "宝瓶座",
+      "raw": "寶瓶座",
+      "transcribed": "寶→宝"
+    },
+    "Ara": {
+      "qid": "Q9253",
+      "zh": "天坛座"
+    },
+    "Ari": {
+      "qid": "Q10584",
+      "zh": "白羊座"
+    },
+    "Aur": {
+      "qid": "Q10476",
+      "zh": "御夫座"
+    },
+    "Boo": {
+      "qid": "Q8667",
+      "zh": "牧夫座"
+    },
+    "CMa": {
+      "qid": "Q10538",
+      "zh": "大犬座"
+    },
+    "CMi": {
+      "qid": "Q9305",
+      "zh": "小犬座"
+    },
+    "CVn": {
+      "qid": "Q10452",
+      "zh": "猎犬座"
+    },
+    "Cae": {
+      "qid": "Q10488",
+      "zh": "雕具座"
+    },
+    "Cam": {
+      "qid": "Q8832",
+      "zh": "鹿豹座"
+    },
+    "Cap": {
+      "qid": "Q10535",
+      "zh": "摩羯座"
+    },
+    "Car": {
+      "qid": "Q10470",
+      "zh": "船底座"
+    },
+    "Cas": {
+      "qid": "Q10464",
+      "zh": "仙后座"
+    },
+    "Cen": {
+      "qid": "Q8844",
+      "zh": "半人马座"
+    },
+    "Cep": {
+      "qid": "Q10468",
+      "zh": "仙王座"
+    },
+    "Cet": {
+      "qid": "Q8839",
+      "zh": "鲸鱼座"
+    },
+    "Cha": {
+      "qid": "Q10457",
+      "zh": "蝘蜓座"
+    },
+    "Cir": {
+      "qid": "Q10508",
+      "zh": "圆规座"
+    },
+    "Cnc": {
+      "qid": "Q8849",
+      "zh": "巨蟹座"
+    },
+    "Col": {
+      "qid": "Q10425",
+      "zh": "天鸽座"
+    },
+    "Com": {
+      "qid": "Q9285",
+      "zh": "后发座"
+    },
+    "CrA": {
+      "qid": "Q10413",
+      "zh": "南冕座"
+    },
+    "CrB": {
+      "qid": "Q10406",
+      "zh": "北冕座"
+    },
+    "Crt": {
+      "qid": "Q9282",
+      "zh": "巨爵座"
+    },
+    "Cru": {
+      "qid": "Q10542",
+      "zh": "南十字座"
+    },
+    "Crv": {
+      "qid": "Q10517",
+      "zh": "乌鸦座"
+    },
+    "Cyg": {
+      "qid": "Q8921",
+      "zh": "天鹅座"
+    },
+    "Del": {
+      "qid": "Q9302",
+      "zh": "海豚座"
+    },
+    "Dor": {
+      "qid": "Q8837",
+      "zh": "剑鱼座",
+      "raw": "劍魚座",
+      "transcribed": "劍→剑 魚→鱼"
+    },
+    "Dra": {
+      "qid": "Q8675",
+      "zh": "天龙座"
+    },
+    "Equ": {
+      "qid": "Q10438",
+      "zh": "小马座"
+    },
+    "Eri": {
+      "qid": "Q10433",
+      "zh": "波江座"
+    },
+    "For": {
+      "qid": "Q8913",
+      "zh": "天炉座"
+    },
+    "Gem": {
+      "qid": "Q8923",
+      "zh": "双子座"
+    },
+    "Gru": {
+      "qid": "Q10563",
+      "zh": "天鹤座"
+    },
+    "Her": {
+      "qid": "Q10448",
+      "zh": "武仙座"
+    },
+    "Hor": {
+      "qid": "Q10574",
+      "zh": "时钟座"
+    },
+    "Hya": {
+      "qid": "Q10578",
+      "zh": "长蛇座"
+    },
+    "Hyi": {
+      "qid": "Q10416",
+      "zh": "水蛇座"
+    },
+    "Ind": {
+      "qid": "Q10450",
+      "zh": "印第安座"
+    },
+    "LMi": {
+      "qid": "Q10403",
+      "zh": "小狮座",
+      "raw": "小獅座",
+      "transcribed": "獅→狮"
+    },
+    "Lac": {
+      "qid": "Q10430",
+      "zh": "蝎虎座"
+    },
+    "Leo": {
+      "qid": "Q8853",
+      "zh": "狮子座"
+    },
+    "Lep": {
+      "qid": "Q10446",
+      "zh": "天兔座"
+    },
+    "Lib": {
+      "qid": "Q10580",
+      "zh": "天秤座"
+    },
+    "Lup": {
+      "qid": "Q10571",
+      "zh": "豺狼座"
+    },
+    "Lyn": {
+      "qid": "Q10443",
+      "zh": "天猫座"
+    },
+    "Lyr": {
+      "qid": "Q10484",
+      "zh": "天琴座"
+    },
+    "Men": {
+      "qid": "Q9289",
+      "zh": "山案座"
+    },
+    "Mic": {
+      "qid": "Q10492",
+      "zh": "显微镜座"
+    },
+    "Mon": {
+      "qid": "Q10428",
+      "zh": "麒麟座"
+    },
+    "Mus": {
+      "qid": "Q10435",
+      "zh": "苍蝇座"
+    },
+    "Nor": {
+      "qid": "Q10582",
+      "zh": "矩尺座"
+    },
+    "Oct": {
+      "qid": "Q10503",
+      "zh": "南极座"
+    },
+    "Oph": {
+      "qid": "Q8906",
+      "zh": "蛇夫座"
+    },
+    "Ori": {
+      "qid": "Q8860",
+      "zh": "猎户座",
+      "raw": "獵戶座",
+      "transcribed": "獵→猎 戶→户"
+    },
+    "Pav": {
+      "qid": "Q10515",
+      "zh": "孔雀座"
+    },
+    "Peg": {
+      "qid": "Q8864",
+      "zh": "飞马座"
+    },
+    "Per": {
+      "qid": "Q10511",
+      "zh": "英仙座"
+    },
+    "Phe": {
+      "qid": "Q10441",
+      "zh": "凤凰座"
+    },
+    "Pic": {
+      "qid": "Q10486",
+      "zh": "绘架座"
+    },
+    "PsA": {
+      "qid": "Q10409",
+      "zh": "南鱼座",
+      "raw": "南魚座",
+      "transcribed": "魚→鱼"
+    },
+    "Psc": {
+      "qid": "Q8679",
+      "zh": "双鱼座"
+    },
+    "Pup": {
+      "qid": "Q9251",
+      "zh": "船尾座"
+    },
+    "Pyx": {
+      "qid": "Q10473",
+      "zh": "罗盘座"
+    },
+    "Ret": {
+      "qid": "Q10498",
+      "zh": "网罟座"
+    },
+    "Scl": {
+      "qid": "Q9286",
+      "zh": "玉夫座"
+    },
+    "Sco": {
+      "qid": "Q8865",
+      "zh": "天蝎座"
+    },
+    "Sct": {
+      "qid": "Q10529",
+      "zh": "盾牌座"
+    },
+    "Ser": {
+      "qid": "Q8910",
+      "zh": "巨蛇座"
+    },
+    "Sex": {
+      "qid": "Q10525",
+      "zh": "六分仪座"
+    },
+    "Sge": {
+      "qid": "Q10513",
+      "zh": "天箭座"
+    },
+    "Sgr": {
+      "qid": "Q8866",
+      "zh": "人马座"
+    },
+    "Tau": {
+      "qid": "Q10570",
+      "zh": "金牛座"
+    },
+    "Tel": {
+      "qid": "Q10546",
+      "zh": "望远镜座"
+    },
+    "TrA": {
+      "qid": "Q10422",
+      "zh": "南三角座"
+    },
+    "Tri": {
+      "qid": "Q10565",
+      "zh": "三角座"
+    },
+    "Tuc": {
+      "qid": "Q10567",
+      "zh": "杜鹃座",
+      "raw": "杜鵑座",
+      "transcribed": "鵑→鹃"
+    },
+    "UMa": {
+      "qid": "Q8918",
+      "zh": "大熊座"
+    },
+    "UMi": {
+      "qid": "Q10478",
+      "zh": "小熊座"
+    },
+    "Vel": {
+      "qid": "Q10521",
+      "zh": "船帆座"
+    },
+    "Vir": {
+      "qid": "Q8842",
+      "zh": "室女座"
+    },
+    "Vol": {
+      "qid": "Q10437",
+      "zh": "飞鱼座"
+    },
+    "Vul": {
+      "qid": "Q10519",
+      "zh": "狐狸座"
+    }
+  }
+}

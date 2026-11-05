@@ -11,8 +11,8 @@
     "attribution": "Constellation line figures from Stellarium's modern_iau sky culture (CC BY-SA 4.0), produced in collaboration with Sky & Telescope (Roger Sinnott, Rick Fienberg) and published on the IAU website. IAU itself defines 88 constellation names and boundaries, not stick figures.",
     "source_file": "reference/stellarium/skycultures/modern_iau/index.json",
     "source_file_sha256": "6a5f5251be8d89651e2c447c3d70d91926af976e649d89a345c0e0a61d28db1c",
-    "name_source": "Stellarium zh_CN translation (po/stellarium/zh_CN.po, po/stellarium-skycultures/zh_CN.po) + existing constellation_culture.json",
-    "name_source_license": "GPL-2.0-or-later (translation files); constellation names are short factual labels",
+    "name_source": "Wikidata labels snapshot mbdsdr_ai/data/constellation_names_cc0.json (88/88) + existing constellation_culture.json (27 old-culture names)",
+    "name_source_license": "CC0-1.0 (Wikidata labels); constellation names are short factual labels",
     "lines_are_iau_official": false,
     "lines_note": "星座连线是传统/民间约定，不是 IAU 官方定义。IAU 只规定 88 个星座的名称与边界；本文件的连线图形来自 Stellarium modern_iau （与 Sky & Telescope 合作、发布于 IAU 网站），仅作示意，不应用作边界或科学坐标依据。",
     "boundary_source": null,
@@ -27,7 +27,13 @@
     "mapping": "HIP -> HYG v4.1 id exact match; proper/Bayer recorded from HYG; unresolved endpoints are dropped and counted, never guessed",
     "hyg_source": "HYG Database v4.1 (CC BY-SA 4.0)",
     "generated_utc": "2026-11-04T14:05:57Z",
-    "data_sha256": "e482df3f86146864d3dc6d3a537ca1c0fc8d4736fa166d1273817052e74e2e31"
+    "data_sha256": "60b8a2348e7daa619ed66942e107c5058a4c316022f531275463379af2108f2d",
+    "name_source_license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "name_source_url": "https://www.wikidata.org/",
+    "name_source_file": "mbdsdr_ai/data/constellation_names_cc0.json",
+    "name_source_file_sha256": "75597803a485cc217b5716265f5d165e35b3804aaf1fbaaba50cad292e73d2f3",
+    "name_source_payload_sha256": "00b8ac9321aa37c8b5062f0e455e26c290182eef9badfa9cfdf1a6621983fc5c",
+    "name_decision": "B1: 61 个原取自 Stellarium zh_CN.po 的中文名，逐一替换为 Wikidata CC0 标签（5 个仅简繁转写，可见文案不变）；星座连线仍为 Stellarium modern_iau（CC BY-SA 4.0）。历史译名许可与决策理由见 LICENSING.md；本文件不再保留任何豁免。"
   },
   "constellations": [
     {
@@ -469,7 +475,7 @@
       "latin_name": "Antlia",
       "english_name": "Air Pump",
       "zh_name": "唧筒座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10481, CC0-1.0)",
       "lines": [
         [
           {
@@ -554,7 +560,7 @@
       "latin_name": "Apus",
       "english_name": "Bird of Paradise",
       "zh_name": "天燕座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10506, CC0-1.0)",
       "lines": [
         [
           {
@@ -674,7 +680,7 @@
       "latin_name": "Aquila",
       "english_name": "Eagle",
       "zh_name": "天鹰座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10586, CC0-1.0)",
       "lines": [
         [
           {
@@ -1468,7 +1474,7 @@
       "latin_name": "Ara",
       "english_name": "Altar",
       "zh_name": "天坛座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q9253, CC0-1.0)",
       "lines": [
         [
           {
@@ -1674,7 +1680,7 @@
       "latin_name": "Aries",
       "english_name": "Ram",
       "zh_name": "白羊座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10584, CC0-1.0)",
       "lines": [
         [
           {
@@ -2736,7 +2742,7 @@
       "latin_name": "Canes Venatici",
       "english_name": "Hunting Dogs",
       "zh_name": "猎犬座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10452, CC0-1.0)",
       "lines": [
         [
           {
@@ -2799,7 +2805,7 @@
       "latin_name": "Caelum",
       "english_name": "Engraving Tool",
       "zh_name": "雕具座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10488, CC0-1.0)",
       "lines": [
         [
           {
@@ -2906,7 +2912,7 @@
       "latin_name": "Camelopardalis",
       "english_name": "Giraffe",
       "zh_name": "鹿豹座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8832, CC0-1.0)",
       "lines": [
         [
           {
@@ -3351,7 +3357,7 @@
       "latin_name": "Carina",
       "english_name": "Keel",
       "zh_name": "船底座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10470, CC0-1.0)",
       "lines": [
         [
           {
@@ -4761,7 +4767,7 @@
       "latin_name": "Cetus",
       "english_name": "Sea Monster",
       "zh_name": "鲸鱼座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8839, CC0-1.0)",
       "lines": [
         [
           {
@@ -5088,7 +5094,7 @@
       "latin_name": "Chamaeleon",
       "english_name": "Chameleon",
       "zh_name": "蝘蜓座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10457, CC0-1.0)",
       "lines": [
         [
           {
@@ -5228,7 +5234,7 @@
       "latin_name": "Circinus",
       "english_name": "Drawing Compass",
       "zh_name": "圆规座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10508, CC0-1.0)",
       "lines": [
         [
           {
@@ -5313,7 +5319,7 @@
       "latin_name": "Cancer",
       "english_name": "Crab",
       "zh_name": "巨蟹座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8849, CC0-1.0)",
       "lines": [
         [
           {
@@ -5453,7 +5459,7 @@
       "latin_name": "Columba",
       "english_name": "Dove",
       "zh_name": "天鸽座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10425, CC0-1.0)",
       "lines": [
         [
           {
@@ -5630,7 +5636,7 @@
       "latin_name": "Coma Berenices",
       "english_name": "Bernice's Hair",
       "zh_name": "后发座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q9285, CC0-1.0)",
       "lines": [
         [
           {
@@ -5715,7 +5721,7 @@
       "latin_name": "Corona Australis",
       "english_name": "Southern Crown",
       "zh_name": "南冕座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10413, CC0-1.0)",
       "lines": [
         [
           {
@@ -5844,7 +5850,7 @@
       "latin_name": "Corona Borealis",
       "english_name": "Northern Crown",
       "zh_name": "北冕座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10406, CC0-1.0)",
       "lines": [
         [
           {
@@ -6017,7 +6023,7 @@
       "latin_name": "Crater",
       "english_name": "Cup",
       "zh_name": "巨爵座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q9282, CC0-1.0)",
       "lines": [
         [
           {
@@ -6400,7 +6406,7 @@
       "latin_name": "Corvus",
       "english_name": "Crow",
       "zh_name": "乌鸦座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10517, CC0-1.0)",
       "lines": [
         [
           {
@@ -6847,7 +6853,7 @@
       "latin_name": "Delphinus",
       "english_name": "Dolphin",
       "zh_name": "海豚座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q9302, CC0-1.0)",
       "lines": [
         [
           {
@@ -6987,7 +6993,7 @@
       "latin_name": "Dorado",
       "english_name": "Swordfish",
       "zh_name": "剑鱼座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8837, CC0-1.0)",
       "lines": [
         [
           {
@@ -7171,7 +7177,7 @@
       "latin_name": "Draco",
       "english_name": "Dragon",
       "zh_name": "天龙座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8675, CC0-1.0)",
       "lines": [
         [
           {
@@ -7564,7 +7570,7 @@
       "latin_name": "Equuleus",
       "english_name": "Little Horse",
       "zh_name": "小马座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10438, CC0-1.0)",
       "lines": [
         [
           {
@@ -7649,7 +7655,7 @@
       "latin_name": "Eridanus",
       "english_name": "Eridanus",
       "zh_name": "波江座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10433, CC0-1.0)",
       "lines": [
         [
           {
@@ -8350,7 +8356,7 @@
       "latin_name": "Fornax",
       "english_name": "Furnace",
       "zh_name": "天炉座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8913, CC0-1.0)",
       "lines": [
         [
           {
@@ -8905,7 +8911,7 @@
       "latin_name": "Grus",
       "english_name": "Crane",
       "zh_name": "天鹤座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10563, CC0-1.0)",
       "lines": [
         [
           {
@@ -9706,7 +9712,7 @@
       "latin_name": "Horologium",
       "english_name": "Clock",
       "zh_name": "时钟座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10574, CC0-1.0)",
       "lines": [
         [
           {
@@ -9857,7 +9863,7 @@
       "latin_name": "Hydra",
       "english_name": "Female Water Snake",
       "zh_name": "长蛇座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10578, CC0-1.0)",
       "lines": [
         [
           {
@@ -10340,7 +10346,7 @@
       "latin_name": "Hydrus",
       "english_name": "Male Water Snake",
       "zh_name": "水蛇座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10416, CC0-1.0)",
       "lines": [
         [
           {
@@ -10458,7 +10464,7 @@
       "latin_name": "Indus",
       "english_name": "Indian",
       "zh_name": "印第安座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10450, CC0-1.0)",
       "lines": [
         [
           {
@@ -10598,7 +10604,7 @@
       "latin_name": "Leo Minor",
       "english_name": "Lesser Lion",
       "zh_name": "小狮座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10403, CC0-1.0)",
       "lines": [
         [
           {
@@ -10738,7 +10744,7 @@
       "latin_name": "Lacerta",
       "english_name": "Lizard",
       "zh_name": "蝎虎座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10430, CC0-1.0)",
       "lines": [
         [
           {
@@ -11420,7 +11426,7 @@
       "latin_name": "Lepus",
       "english_name": "Hare",
       "zh_name": "天兔座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10446, CC0-1.0)",
       "lines": [
         [
           {
@@ -11928,7 +11934,7 @@
       "latin_name": "Lupus",
       "english_name": "Wolf",
       "zh_name": "豺狼座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10571, CC0-1.0)",
       "lines": [
         [
           {
@@ -12189,7 +12195,7 @@
       "latin_name": "Lynx",
       "english_name": "Lynx",
       "zh_name": "天猫座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10443, CC0-1.0)",
       "lines": [
         [
           {
@@ -12568,7 +12574,7 @@
       "latin_name": "Mensa",
       "english_name": "Table Mountain",
       "zh_name": "山案座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q9289, CC0-1.0)",
       "lines": [
         [
           {
@@ -12631,7 +12637,7 @@
       "latin_name": "Microscopium",
       "english_name": "Microscope",
       "zh_name": "显微镜座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10492, CC0-1.0)",
       "lines": [
         [
           {
@@ -12694,7 +12700,7 @@
       "latin_name": "Monoceros",
       "english_name": "Unicorn",
       "zh_name": "麒麟座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10428, CC0-1.0)",
       "lines": [
         [
           {
@@ -12966,7 +12972,7 @@
       "latin_name": "Musca",
       "english_name": "Fly",
       "zh_name": "苍蝇座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10435, CC0-1.0)",
       "lines": [
         [
           {
@@ -13128,7 +13134,7 @@
       "latin_name": "Norma",
       "english_name": "Carpenter's Square",
       "zh_name": "矩尺座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10582, CC0-1.0)",
       "lines": [
         [
           {
@@ -13246,7 +13252,7 @@
       "latin_name": "Octans",
       "english_name": "Octant",
       "zh_name": "南极座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10503, CC0-1.0)",
       "lines": [
         [
           {
@@ -14481,7 +14487,7 @@
       "latin_name": "Pavo",
       "english_name": "Peacock",
       "zh_name": "孔雀座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10515, CC0-1.0)",
       "lines": [
         [
           {
@@ -15683,7 +15689,7 @@
       "latin_name": "Phoenix",
       "english_name": "Phoenix",
       "zh_name": "凤凰座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10441, CC0-1.0)",
       "lines": [
         [
           {
@@ -15869,7 +15875,7 @@
       "latin_name": "Pictor",
       "english_name": "Painter's Easel",
       "zh_name": "绘架座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10486, CC0-1.0)",
       "lines": [
         [
           {
@@ -15954,7 +15960,7 @@
       "latin_name": "Piscis Austrinus",
       "english_name": "Southern Fish",
       "zh_name": "南鱼座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10409, CC0-1.0)",
       "lines": [
         [
           {
@@ -16171,7 +16177,7 @@
       "latin_name": "Pisces",
       "english_name": "Fishes",
       "zh_name": "双鱼座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8679, CC0-1.0)",
       "lines": [
         [
           {
@@ -16542,7 +16548,7 @@
       "latin_name": "Puppis",
       "english_name": "Stern",
       "zh_name": "船尾座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q9251, CC0-1.0)",
       "lines": [
         [
           {
@@ -16827,7 +16833,7 @@
       "latin_name": "Pyxis",
       "english_name": "Mariner Compass",
       "zh_name": "罗盘座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10473, CC0-1.0)",
       "lines": [
         [
           {
@@ -16934,7 +16940,7 @@
       "latin_name": "Reticulum",
       "english_name": "Reticle",
       "zh_name": "网罟座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10498, CC0-1.0)",
       "lines": [
         [
           {
@@ -17052,7 +17058,7 @@
       "latin_name": "Sculptor",
       "english_name": "Sculptor",
       "zh_name": "玉夫座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q9286, CC0-1.0)",
       "lines": [
         [
           {
@@ -17611,7 +17617,7 @@
       "latin_name": "Scutum",
       "english_name": "Shield",
       "zh_name": "盾牌座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10529, CC0-1.0)",
       "lines": [
         [
           {
@@ -17729,7 +17735,7 @@
       "latin_name": "Serpens",
       "english_name": "Serpent",
       "zh_name": "巨蛇座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q8910, CC0-1.0)",
       "lines": [
         [
           {
@@ -18069,7 +18075,7 @@
       "latin_name": "Sextans",
       "english_name": "Sextant",
       "zh_name": "六分仪座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10525, CC0-1.0)",
       "lines": [
         [
           {
@@ -18176,7 +18182,7 @@
       "latin_name": "Sagitta",
       "english_name": "Arrow",
       "zh_name": "天箭座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10513, CC0-1.0)",
       "lines": [
         [
           {
@@ -19035,7 +19041,7 @@
       "latin_name": "Telescopium",
       "english_name": "Telescope",
       "zh_name": "望远镜座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10546, CC0-1.0)",
       "lines": [
         [
           {
@@ -19120,7 +19126,7 @@
       "latin_name": "Triangulum Australe",
       "english_name": "Southern Triangle",
       "zh_name": "南三角座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10422, CC0-1.0)",
       "lines": [
         [
           {
@@ -19238,7 +19244,7 @@
       "latin_name": "Triangulum",
       "english_name": "Triangle",
       "zh_name": "三角座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10565, CC0-1.0)",
       "lines": [
         [
           {
@@ -19334,7 +19340,7 @@
       "latin_name": "Tucana",
       "english_name": "Toucan",
       "zh_name": "杜鹃座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10567, CC0-1.0)",
       "lines": [
         [
           {
@@ -20211,7 +20217,7 @@
       "latin_name": "Vela",
       "english_name": "Sails",
       "zh_name": "船帆座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10521, CC0-1.0)",
       "lines": [
         [
           {
@@ -20821,7 +20827,7 @@
       "latin_name": "Volans",
       "english_name": "Flying Fish",
       "zh_name": "飞鱼座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10437, CC0-1.0)",
       "lines": [
         [
           {
@@ -20972,7 +20978,7 @@
       "latin_name": "Vulpecula",
       "english_name": "Fox",
       "zh_name": "狐狸座",
-      "zh_source": "Stellarium zh_CN.po (IAU constellation name)",
+      "zh_source": "data/constellation_names_cc0.json (Wikidata Q10519, CC0-1.0)",
       "lines": [
         [
           {

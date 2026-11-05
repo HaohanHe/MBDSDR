@@ -25,8 +25,8 @@ build_constellation_data.py — 从本地 Stellarium 天空文化数据生成两
   - ``reference/stellarium/skycultures/chinese/index.json``
   - ``reference/stellarium/skycultures/chinese/star_names.zh_CN.fab``
   - ``reference/stellarium/skycultures/chinese/description.md``
-  - ``reference/stellarium/po/stellarium/zh_CN.po``（IAU 星座中文名）
-  - ``reference/stellarium/po/stellarium-skycultures/zh_CN.po``（补充中文名）
+  - ``mbdsdr_ai/data/constellation_names_cc0.json``（IAU 星座中文名，
+     Wikidata CC0 固定快照；不再读取 Stellarium ``po/zh_CN.po``）
   - ``scratch/hygdata_v41.csv``（HYG v4.1，用于 HIP→HYG 精确映射）
 
 用法::
@@ -58,6 +58,7 @@ DATA_DIR = PKG_ROOT / "data"
 DEFAULT_STELLARIUM = Path(r"D:\mbdsdr\reference\stellarium")
 DEFAULT_HYG_CSV = Path(r"D:\mbdsdr\scratch\hygdata_v41.csv")
 DEFAULT_NPZ = DATA_DIR / "full_sky_hyg_v41.npz"
+DEFAULT_NAME_SNAPSHOT = DATA_DIR / "constellation_names_cc0.json"
 
 IAU_OUT = DATA_DIR / "constellations_iau.json"
 XINGGUAN_OUT = DATA_DIR / "xingguan_chinese.json"
@@ -127,35 +128,16 @@ def load_catalog_ids(path: Path) -> set:
     return {int(x) for x in npz["hyg_id"]}
 
 
-_QUOTED = re.compile(r'"((?:[^"\\]|\\.)*)"')
+def load_cc0_name_snapshot(path: Path) -> dict:
+    """读取 Wikidata CC0 中文名快照（固定入库，运行时不得联网）。
 
-
-def _po_msgstr(block: str) -> Optional[str]:
-    out = []
-    for line in block.splitlines():
-        if line.startswith("msgstr"):
-            out.append(line.split(" ", 1)[1] if " " in line else "")
-        elif out and line.startswith('"'):
-            out.append(line)
-    if not out:
-        return None
-    text = "".join(out)
-    parts = _QUOTED.findall(text)
-    return "".join(parts) if parts else text.strip('"')
-
-
-def load_po_iau_names(path: Path) -> Dict[str, str]:
-    names: Dict[str, str] = {}
-    if not path.exists():
-        return names
-    for block in path.read_text(encoding="utf-8").split("\n\n"):
-        if 'msgctxt "IAU constellation name"' not in block:
-            continue
-        mi = re.search(r'msgid "((?:[^"\\]|\\.)*)"', block)
-        ms = _po_msgstr(block)
-        if mi and ms:
-            names.setdefault(mi.group(1), ms)
-    return names
+    返回 ``{abbr: {"qid":..., "zh":..., "raw":...}}``；payload SHA 自校验，
+    防止快照被悄悄改动。
+    """
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if canonical_sha256(raw["names"]) != raw["meta"]["payload_sha256"]:
+        raise ValueError(f"{path} 的 payload_sha256 与 names 不一致")
+    return raw["names"]
 
 
 def star_ref(hip: int, row: dict, catalog_ids: set) -> dict:
@@ -172,18 +154,11 @@ def star_ref(hip: int, row: dict, catalog_ids: set) -> dict:
     }
 
 
-def build_iau(stellarium: Path, hyg: Dict[int, dict], catalog_ids: set) -> dict:
+def build_iau(stellarium: Path, hyg: Dict[int, dict], catalog_ids: set,
+              name_snapshot: Path) -> dict:
     src = stellarium / "skycultures" / "modern_iau" / "index.json"
     raw = json.loads(src.read_text(encoding="utf-8"))
-
-    po_main = load_po_iau_names(stellarium / "po" / "stellarium" / "zh_CN.po")
-    po_sky = load_po_iau_names(
-        stellarium / "po" / "stellarium-skycultures" / "zh_CN.po")
-    zh_po: Dict[str, str] = {}
-    for k, v in po_sky.items():
-        zh_po[_norm_text(k).casefold()] = v
-    for k, v in po_main.items():
-        zh_po[_norm_text(k).casefold()] = v
+    cc0_names = load_cc0_name_snapshot(name_snapshot)
 
     culture_path = DATA_DIR / "constellation_culture.json"
     culture = json.loads(culture_path.read_text(encoding="utf-8"))
@@ -206,9 +181,11 @@ def build_iau(stellarium: Path, hyg: Dict[int, dict], catalog_ids: set) -> dict:
             name_zh = culture[abbr]["zh"]
             zh_source = "data/constellation_culture.json"
         else:
-            key = _norm_text(latin).casefold()
-            name_zh = zh_po.get(key, "")
-            zh_source = "Stellarium zh_CN.po (IAU constellation name)"
+            entry = cc0_names.get(abbr) or {}
+            name_zh = entry.get("zh", "")
+            zh_source = (
+                f"data/constellation_names_cc0.json "
+                f"(Wikidata {entry.get('qid')}, CC0-1.0)")
         if not name_zh:
             raise ValueError(f"{abbr} ({latin}) 缺中文名，拒绝编造")
 
@@ -283,11 +260,26 @@ def build_iau(stellarium: Path, hyg: Dict[int, dict], catalog_ids: set) -> dict:
             "boundaries, not stick figures."),
         "source_file": "reference/stellarium/skycultures/modern_iau/index.json",
         "source_file_sha256": sha256_file(src),
-        "name_source": ("Stellarium zh_CN translation "
-                        "(po/stellarium/zh_CN.po, po/stellarium-skycultures/"
-                        "zh_CN.po) + existing constellation_culture.json"),
-        "name_source_license": ("GPL-2.0-or-later (translation files); "
-                                "constellation names are short factual labels"),
+        "name_source": (
+            "Wikidata labels snapshot mbdsdr_ai/data/"
+            "constellation_names_cc0.json (88/88) + existing "
+            "constellation_culture.json (27 old-culture names)"),
+        "name_source_license": (
+            "CC0-1.0 (Wikidata labels); constellation names are short "
+            "factual labels"),
+        "name_source_license_url": (
+            "https://creativecommons.org/publicdomain/zero/1.0/"),
+        "name_source_url": "https://www.wikidata.org/",
+        "name_source_file": "mbdsdr_ai/data/constellation_names_cc0.json",
+        "name_source_file_sha256": sha256_file(name_snapshot),
+        "name_source_payload_sha256": (
+            json.loads(name_snapshot.read_text(encoding="utf-8"))
+            ["meta"]["payload_sha256"]),
+        "name_decision": (
+            "B1: 61 个原取自 Stellarium zh_CN.po 的中文名，"
+            "逐一替换为 Wikidata CC0 标签（5 个仅简繁转写，可见文案不变）；"
+            "星座连线仍为 Stellarium modern_iau（CC BY-SA 4.0）。"
+            "历史译名许可与决策理由见 LICENSING.md；本文件不再保留任何豁免。"),
         "lines_are_iau_official": False,
         "lines_note": (
             "星座连线是传统/民间约定，不是 IAU 官方定义。IAU 只规定 88 个"
@@ -685,12 +677,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     ap.add_argument("--stellarium", default=str(DEFAULT_STELLARIUM))
     ap.add_argument("--hyg-csv", default=str(DEFAULT_HYG_CSV))
     ap.add_argument("--catalog-npz", default=str(DEFAULT_NPZ))
+    ap.add_argument("--name-snapshot", default=str(DEFAULT_NAME_SNAPSHOT))
     args = ap.parse_args(list(argv) if argv is not None else None)
 
     stellarium = Path(args.stellarium)
     hyg = load_hyg(Path(args.hyg_csv))
     catalog_ids = load_catalog_ids(Path(args.catalog_npz))
-    iau = build_iau(stellarium, hyg, catalog_ids)
+    iau = build_iau(stellarium, hyg, catalog_ids, Path(args.name_snapshot))
     xg = build_xingguan(stellarium, hyg, catalog_ids)
     write_json(IAU_OUT, iau)
     write_json(XINGGUAN_OUT, xg)

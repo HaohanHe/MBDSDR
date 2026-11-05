@@ -5,8 +5,9 @@ check_data_licenses.py — 数据文件许可合规的可执行检查
 =====================================================
 
 规则：仓库内**数据文件**的来源声明若属于 GPL 家族，不得出现在 MIT 主库路径
-``mbdsdr_ai/`` 下；确实无法替换的必须在本脚本 ``WHITELIST`` 中显式列出并写明
-理由。写法与 ``docs/data-inventory.md`` 第 3 节同步。
+``mbdsdr_ai/`` 下。2026-11 B1 决策后**豁免表为空**：任何 GPL 级数据文件都
+视为违规（禁入），不再提供按文件豁免的通道。写法与
+``docs/data-inventory.md`` 第 3 节同步。
 
 扫描范围：``.json/.csv/.tsv/.npz/.npy/.dat/.txt/.xml/.yaml/.yml``；
 ``.npz`` 只读 ``meta`` 数组，其它按 UTF-8 文本扫描。命中判定只认**许可声明**
@@ -25,7 +26,7 @@ check_data_licenses.py — 数据文件许可合规的可执行检查
     python scripts/check_data_licenses.py --verbose  # 同时列出路径外提示
     python scripts/check_data_licenses.py --probe    # 反证：临时放 GPL 文件，必须报红
 
-退出码：0 合规；1 存在未豁免的 GPL 数据文件；2 扫描错误。
+退出码：0 合规；1 存在 GPL 数据文件（无豁免机制）；2 扫描错误。
 """
 
 from __future__ import annotations
@@ -48,6 +49,8 @@ DATA_EXTENSIONS = {
 SKIP_DIRS = {
     ".git", "__pycache__", ".venv", "venv", "node_modules", "dist",
     "scratch", ".mypy_cache", ".pytest_cache", ".audit_tmp",
+    # 测试/工具生成的图像与曲线（.gitignore 已忽略），不是随仓数据。
+    "artifacts",
 }
 # 构建目录（build/build-local/…）里全是 CMake 自动生成物，不属随仓数据。
 SKIP_PREFIXES = ("build", ".tmp")
@@ -72,13 +75,9 @@ PROVENANCE_OVERRIDES = {
 }
 
 # path -> 理由。空理由视为配置错误。
-WHITELIST: Dict[str, str] = {
-    "mbdsdr_ai/data/constellations_iau.json": (
-        "88 个 IAU 星座中 61 个中文名取自 Stellarium zh_CN.po 译文"
-        "（GPL-2.0-or-later）；均为 2–6 字事实性专名，不含可版权文本，"
-        "连线为 CC BY-SA 4.0。后续计划：改用 Wikidata CC0 标签后移除本豁免。"
-    ),
-}
+# B1（2026-11）后豁免表清空：星座中文名已迁到 Wikidata CC0 快照，仓库内
+# 不存在需要豁免的 GPL 数据。保留该结构仅供未来配置校验与测试。
+WHITELIST: Dict[str, str] = {}
 
 
 class ScanError(RuntimeError):
@@ -231,6 +230,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--list", action="store_true",
                     help="逐条列出每个数据文件的来源与许可证")
     ap.add_argument("--probe", action="store_true", help="反证：必须报红")
+    ap.add_argument("--check", action="store_true",
+                    help="合规检查（默认动作；显式写出便于脚本调用）")
     args = ap.parse_args(argv)
     try:
         if args.probe:
@@ -243,7 +244,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result["violations"]:
             print(f"合规检查失败：{len(result['violations'])} 个 GPL 数据文件在 "
-                  f"mbdsdr_ai/ 下且未豁免", file=sys.stderr)
+                  f"mbdsdr_ai/ 下（B1 后无豁免机制）", file=sys.stderr)
             return 1
         return 0
     else:
@@ -260,7 +261,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  VIOLATION: {item['path']} ({item['matched']})")
     if result["violations"]:
         print(f"合规检查失败：{len(result['violations'])} 个 GPL 数据文件在 "
-              f"mbdsdr_ai/ 下且未豁免", file=sys.stderr)
+              f"mbdsdr_ai/ 下（B1 后无豁免机制）", file=sys.stderr)
         return 1
     print("合规检查通过")
     return 0

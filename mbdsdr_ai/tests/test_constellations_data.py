@@ -29,9 +29,15 @@ from mbdsdr_ai.skyengine import xingguan as x
 
 DATA_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "data"
 IAU_PATH = DATA_DIR / "constellations_iau.json"
+NAME_SNAPSHOT_PATH = DATA_DIR / "constellation_names_cc0.json"
 XG_PATH = DATA_DIR / "xingguan_chinese.json"
 XG_NAMES_PATH = DATA_DIR / "xingguan_star_names_zh.json"
 REFERENCE = Path(r"D:\mbdsdr\reference\stellarium")
+
+# B1 前后连线结构的规范化哈希（改前实测 8a5ce5…，改后必须逐字节一致）。
+IAU_LINES_SHA256 = {
+    "8a5ce58074da3bff8fed088732481afc81a92d628cf232d8e0749666376bff0a"
+}
 
 IAU_UNRESOLVED = [55203]
 XG_UNRESOLVED = [55203, 78727, 115125]
@@ -91,6 +97,47 @@ def test_iau_meta_source_and_license(iau):
     assert meta["lines_are_iau_official"] is False
     assert "不是 IAU 官方" in meta["lines_note"]
     assert meta["constellation_count"] == 88
+
+
+def test_iau_names_use_cc0_snapshot_and_lines_unchanged():
+    """B1：61 个中文名换 Wikidata CC0 来源；连线结构逐项不变。"""
+    raw = json.loads(IAU_PATH.read_text(encoding="utf-8"))
+    snap = json.loads(NAME_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    meta = raw["meta"]
+
+    assert meta["name_source_license"].startswith("CC0-1.0")
+    assert meta["name_source_file"] == \
+        "mbdsdr_ai/data/constellation_names_cc0.json"
+    assert meta["name_source_file_sha256"] == _sha256_file(NAME_SNAPSHOT_PATH)
+    payload = json.dumps(snap["names"], ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+    assert hashlib.sha256(payload).hexdigest() == \
+        snap["meta"]["payload_sha256"] == meta["name_source_payload_sha256"]
+    assert len(snap["names"]) == snap["meta"]["count"] == 88
+
+    src = {c["abbr"]: c["zh_source"] for c in raw["constellations"]}
+    cc0 = [a for a, s in src.items() if "constellation_names_cc0" in s]
+    culture = [a for a, s in src.items() if "constellation_culture" in s]
+    assert len(cc0) == 61
+    assert len(culture) == 27
+    assert not any("Stellarium" in s for s in src.values())
+    assert all(re.search(r"Wikidata Q\d+", src[a]) for a in cc0)
+    # 换来源不改可见文案：61 个 zh_name 与快照逐字一致
+    zh = {c["abbr"]: c["zh_name"] for c in raw["constellations"]}
+    assert all(zh[a] == snap["names"][a]["zh"] for a in cc0)
+    # 数据文件内不得再有 GPL 字样（许可检查另外独立兜底）
+    assert "GPL" not in IAU_PATH.read_text(encoding="utf-8")
+
+    # 连线零改动：规范化哈希与改前一致
+    lines = [c["lines"] for c in raw["constellations"]]
+    digest = hashlib.sha256(json.dumps(
+        lines, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":")).encode("utf-8")).hexdigest()
+    assert digest in IAU_LINES_SHA256
+    assert sum(len(c["lines"]) for c in raw["constellations"]) == 148
+    assert sum(len(p) - 1 for c in raw["constellations"]
+               for p in c["lines"]) == 842
+    assert sum(c["star_count"] for c in raw["constellations"]) == 756
 
 
 def test_iau_count_and_unique_names(iau):

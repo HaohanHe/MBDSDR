@@ -207,7 +207,10 @@ Common names
 - CC BY-SA **不判红**：主库的 HYG 星表、OpenNGC 目录、星座连线本身就是
   CC BY-SA 4.0 并已在 `NOTICE.md` 署名。若一并禁止，会与「可分发」结论
   自相矛盾。脚本用 `--list` 把每条数据的许可证列出来，CC BY-SA 同样可见。
-- 构建目录（`build`/`build-local`/`.tmp*`/`dist`/`__pycache__` 等）不扫。
+- 构建目录（`build`/`build-local`/`.tmp*`/`dist`/`__pycache__` 等）与测试生成的
+  `mbdsdr_ai/artifacts/` 不扫。
+- **B1 后白名单为空（空表 = 禁入）**：`mbdsdr_ai/` 下出现 GPL 级数据即红，
+  不再提供按文件豁免通道。
 
 脚本：`scripts/check_data_licenses.py`；测试：`tests/test_data_licenses.py`。
 
@@ -224,26 +227,36 @@ python scripts/check_data_licenses.py --list
 |---|---|---|
 | `mbdsdr_ai/data/full_sky_hyg_v41.npz` | CC BY-SA 4.0 | HYG Database v4.1 |
 | `mbdsdr_ai/data/dso_catalog.json` | CC-BY-SA-4.0 | OpenNGC |
-| `mbdsdr_ai/data/constellations_iau.json` | CC BY-SA 4.0（中文名 GPL-2.0-or-later，已豁免） | Stellarium skyculture modern_iau |
+| `mbdsdr_ai/data/constellations_iau.json` | CC BY-SA 4.0（连线；中文名 Wikidata CC0，见 `docs/constellations.md` §1.1.1） | Stellarium skyculture modern_iau |
+| `mbdsdr_ai/data/constellation_names_cc0.json` | CC0-1.0 | Wikidata |
 | `mbdsdr_ai/tests/fixtures/openngc/NGC.csv` | CC BY-SA 4.0 | OpenNGC NGC.csv |
 | `mbdsdr_ai/tests/fixtures/openngc/addendum.csv` | CC BY-SA 4.0 | OpenNGC addendum.csv |
 | `mbdsdr_ai/tests/fixtures/hyg_v41_reference_sample.csv` | CC BY-SA 4.0 | HYG Database v4.1 sample |
 
 `--list --json` 机器可读，`files[]` 每项带 `path/license/source/in_mit_package`。
 
-### 3.2 白名单（显式列出 + 理由）
+### 3.2 白名单（B1 后清空 = 禁入）
 
 | 路径 | 理由 |
 |---|---|
-| `mbdsdr_ai/data/constellations_iau.json` | 88 个 IAU 星座中 61 个中文名取自 Stellarium `zh_CN.po` 译文（GPL-2.0-or-later）；均为 2–6 字事实性专名，不含可版权文本；星座连线为 CC BY-SA 4.0。后续计划：改用 Wikidata CC0 标签后移除本豁免。 |
+| （空） | — |
 
-白名单为空理由视为配置错误（`ScanError`，退出码 2）。
+**2026-11 B1 决策**：星座中文名与连线分开处理。连线保留 Stellarium
+`modern_iau`（CC BY-SA 4.0，署名保留）；61 个中文名（约 300 字节，原取自
+Stellarium `zh_CN.po`，GPL-2.0-or-later）替换为 Wikidata 标签（CC0-1.0）的
+固定快照 `mbdsdr_ai/data/constellation_names_cc0.json`（88/88，文件 SHA-256
+`75597803…`）。逐座对拍后 7 项仅简繁字形差异、可见文案逐字不变。因此不需要、
+也不再保留任何白名单条目；空理由仍视为配置错误（`ScanError`，退出码 2）。
+
+A（保留 GPL 名 + 文档豁免）未采用：豁免是政策承诺而非法律结论，且会让
+`mbdsdr_ai/` 长期存在 GPL 级数据。B2（连线一起换）未采用：连线本就不是 GPL，
+替换对 GPL 问题零收益、视觉回归面最大。详见 `LICENSING.md` §4c。
 
 ### 3.3 反证（必须红）
 
 ```powershell
-python scripts/check_data_licenses.py            # 绿：0
-python scripts/check_data_licenses.py --probe    # 临时写 GPL 探针 -> 必须红 -> 自动清理
+python scripts/check_data_licenses.py --check   # 绿：0
+python scripts/check_data_licenses.py --probe   # 临时写 GPL 探针 -> 必须红 -> 自动清理
 ```
 
 `--probe` 在 `mbdsdr_ai/data/_gpl_probe.json` 写入
@@ -251,22 +264,22 @@ python scripts/check_data_licenses.py --probe    # 临时写 GPL 探针 -> 必�
 `finally` 删除探针。通过时打印 `PROBE RED OK`，退出码 0；
 未命中打印 `PROBE FAILED`，退出码 2。
 
-当前实测（2026-11-05）：
+当前实测（2026-11-06，B1 后）：
 
 ```
-scanned data files: 375
-  WHITELIST: mbdsdr_ai/data/constellations_iau.json (GPL / GPL-2.0-or-later)
+scanned data files: 380
 合规检查通过
 ```
+
+`--probe` 输出 `PROBE RED OK: GPL 探针被检出并拦截`，退出码 0（探针工作正常）。
 
 手工反证：在 `mbdsdr_ai/data/_gpl_red_probe.json` 写入
 `{"meta": {"source": "red-probe", "source_license": "GPL-3.0-or-later"}}`
 后运行，必须且实际得到：
 
 ```
-合规检查失败：1 个 GPL 数据文件在 mbdsdr_ai/ 下且未豁免
-scanned data files: 376
-  WHITELIST: mbdsdr_ai/data/constellations_iau.json (GPL / GPL-2.0-or-later)
+合规检查失败：1 个 GPL 数据文件在 mbdsdr_ai/ 下（B1 后无豁免机制）
+scanned data files: 380
   VIOLATION: mbdsdr_ai/data/_gpl_red_probe.json (GPL / GPL-3.0-or-later)
 ```
 

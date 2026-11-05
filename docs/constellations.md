@@ -35,15 +35,38 @@
   `meta.lines_note` 明确写“不是 IAU 官方定义”；
 - `lines` **不能**当作星座边界或科学坐标依据。
 
-**中文名来源**：
+**中文名来源（2026-11 B1 决策：零 GPL）**：
 
 - 旧版 27 座沿用 `mbdsdr_ai/data/constellation_culture.json` 的人工中文名/文化注记；
-- 其余 61 座取自 Stellarium 中文翻译
-  `po/stellarium/zh_CN.po`、`po/stellarium-skycultures/zh_CN.po`
-  的 `msgctxt "IAU constellation name"` 条目；
-- 翻译文件许可为 **GPL-2.0-or-later**；其中星座中文名是短事实性名称，
-  本数据仅记录“来源/许可”，不从记忆补写。逐座来源见
-  `constellations[].zh_source`。
+- 其余 61 座改为 **Wikidata 中文标签（CC0-1.0）**，固定快照随仓：
+  `mbdsdr_ai/data/constellation_names_cc0.json`（88/88 全覆盖，
+  7,574 字节；`meta.fetched_at = 2026-11-05T16:45:46+00:00`；
+  `meta.payload_sha256 = 00b8ac9321aa37c8b5062f0e455e26c290182eef9badfa9cfdf1a6621983fc5c`；
+  文件 SHA-256 = `75597803a485cc217b5716265f5d165e35b3804aaf1fbaaba50cad292e73d2f3`）；
+  抓取脚本 `scripts/fetch_constellation_names_cc0.py` 入库，**消费方不得运行时联网**；
+- 连线结构仍为 Stellarium `modern_iau`，**CC BY-SA 4.0 署名保留**；GPL 只存在于
+  61 个中文名（约 300 字节），替换后 `mbdsdr_ai/` 不再含 GPL 数据；
+- 逐座对拍（见 §1.1.1）：88 个别名与旧名比对，7 个仅繁体字形差异，逐字转写后与
+  旧名逐字一致，**保留原译名、只换来源**；0 个词级差异，无「一键全换」；
+- 逐座来源见 `constellations[].zh_source`，许可细节见 `LICENSING.md` §4c。
+
+### 1.1.1 中文名逐座对拍（B1）
+
+快照保留 Wikidata 原标签（`raw`）与显示名（`zh`）。下表 7 项是唯一不一致项，
+全部为「繁体字形 → 简体字形」的逐字转写，转写后与旧译名逐字相同，故保留旧译名：
+
+| 座 | 显示名（不变） | Wikidata 原标签 | 逐字转写 | 判断 |
+| --- | --- | --- | --- | --- |
+| Aql | 天鹰座 | 天鷹座 | 鷹→鹰 | 等价，保留原译名 |
+| Aqr | 宝瓶座 | 寶瓶座 | 寶→宝 | 等价，保留原译名 |
+| Dor | 剑鱼座 | 劍魚座 | 劍→剑 魚→鱼 | 等价，保留原译名 |
+| LMi | 小狮座 | 小獅座 | 獅→狮 | 等价，保留原译名 |
+| Ori | 猎户座 | 獵戶座 | 獵→猎 戶→户 | 等价，保留原译名 |
+| PsA | 南鱼座 | 南魚座 | 魚→鱼 | 等价，保留原译名 |
+| Tuc | 杜鹃座 | 杜鵑座 | 鵑→鹃 | 等价，保留原译名 |
+
+其余 81 座 Wikidata 中文标签与旧名完全相同。若未来 Wikidata 标签出现词级差异，
+`scripts/fetch_constellation_names_cc0.py` 会直接失败并列出，不静默改写文案。
 
 ### 1.2 中国星官（三垣二十八宿）
 
@@ -146,7 +169,7 @@ xingguan.xingguan_label("角宿", with_system_tag=True)      # "[中国星官] �
 | 未映射端点 | **HIP 55203**（HYG v4.1 无此行） |
 | 连线端点星（去重） | **744 颗**，全部在随仓 V ≤ 9.0 星表内 |
 | 每座段数 | 1–31 段（源图形差异，不人为补齐） |
-| 中文名 | 27 座来自现有文化 JSON，61 座来自 Stellarium 中文翻译 |
+| 中文名 | 27 座项目自建（`constellation_culture.json`）+ 61 座 Wikidata CC0 快照（逐座对拍，可见文案不变） |
 
 > 说明：`modern_iau` 的源图形里 HIP 55203 位于一个折线末端；生成脚本
 > 在未映射端点处**断开折线并丢弃受影响段**，同时把该 HIP 写进
@@ -370,9 +393,15 @@ layers = iau.overlay_layers()                 # 每层带 system_id/tag
 ## 6. 复现
 
 ```powershell
+# 仅当需要重新抓取 Wikidata 标签时（会更新 fetched_at / 两个 SHA-256）
+python scripts/fetch_constellation_names_cc0.py
+# 离线校验快照（推荐在 CI / 提交前跑）
+python scripts/fetch_constellation_names_cc0.py --check
+
 python -m mbdsdr_ai.skyengine.build_constellation_data `
     --stellarium D:/mbdsdr/reference/stellarium `
-    --hyg-csv D:/mbdsdr/scratch/hygdata_v41.csv
+    --hyg-csv D:/mbdsdr/scratch/hygdata_v41.csv `
+    --name-snapshot mbdsdr_ai/data/constellation_names_cc0.json
 ```
 
 脚本只读本地 Stellarium 参考数据与 HYG CSV，输出两份 JSON 并写入

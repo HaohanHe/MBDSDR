@@ -2,9 +2,9 @@
 """数据文件许可合规检查的可执行测试（`scripts/check_data_licenses.py`）。
 
 判据：
-- 真实仓库扫描必须零违规；白名单每条都要有非空理由且路径确实存在；
+- 真实仓库扫描必须零违规；B1 后白名单必须为空（任何 GPL 数据 = 禁入）；
 - 反证：在 MIT 主库路径 ``mbdsdr_ai/`` 下临时放一个 GPL 源数据文件，
-  检查必须报违规（再清理，不留残渣）；
+  检查必须报违规（再清理，不留残渣）；GPL-2.0 级同样必须红；
 - 同理，GPL 文件放在路径外只算提示，不应判违规（谁主张谁举证）；
 - 误报守卫：base64 数据里偶然出现的裸 ``GPL`` 三个字母不算许可声明
   （历史实测：``tests/golden/dvbs2_ldpc_vectors.json`` 的 base64 段命中）。
@@ -52,6 +52,11 @@ def test_repo_scan_has_no_violations():
     assert result["scanned"] > 0
 
 
+def test_whitelist_is_empty_after_b1():
+    """B1 决策后不允许按文件豁免：空表即禁入，防止悄悄加回。"""
+    assert checker.WHITELIST == {}
+
+
 def test_whitelist_entries_are_justified_and_exist():
     for rel, reason in checker.WHITELIST.items():
         assert reason.strip(), f"白名单 {rel} 缺理由"
@@ -70,6 +75,17 @@ def test_gpl_file_under_mit_package_is_violation(tmp_path):
     })
     result = checker.scan(root)
     assert _paths(result) == {"mbdsdr_ai/data/bad.json"}
+
+
+def test_gpl2_data_under_mit_package_is_violation_without_exemption(tmp_path):
+    """守卫：mbdsdr_ai/ 下出现 GPL-2.0 级数据文件，未豁免即红。"""
+    root = _fake_repo(tmp_path, {
+        "mbdsdr_ai/data/constellations_iau.json":
+            '{"meta": {"name_source_license": "GPL-2.0-or-later"}}',
+    })
+    assert checker.WHITELIST == {}
+    assert _paths(checker.scan(root)) == {
+        "mbdsdr_ai/data/constellations_iau.json"}
 
 
 def test_gpl_file_outside_mit_package_is_only_warning(tmp_path):
@@ -200,6 +216,12 @@ def test_list_mode_reports_shipped_data_provenance(capsys):
     by_path = {item["path"]: item for item in payload["files"]}
     assert by_path["mbdsdr_ai/data/constellations_iau.json"]["license"] == \
         "CC BY-SA 4.0"
+    assert by_path["mbdsdr_ai/data/constellation_names_cc0.json"] == {
+        "path": "mbdsdr_ai/data/constellation_names_cc0.json",
+        "license": "CC0-1.0",
+        "source": "Wikidata",
+        "in_mit_package": True,
+    }
     assert by_path["mbdsdr_ai/data/full_sky_hyg_v41.npz"]["source"].startswith(
         "HYG")
     assert by_path["mbdsdr_ai/data/dso_catalog.json"]["source"] == "OpenNGC"

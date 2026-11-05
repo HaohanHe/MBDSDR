@@ -62,6 +62,17 @@
 相关上游实现的源代码不随本仓库分发；各资料的权利与许可按原出处条款处理。本说明只
 记录来源与协议事实，不对任何资料的版权状态或许可合规作绝对法律保证。
 
+- **Stellarium `modern_iau` 星座连线**（<https://github.com/Stellarium/stellarium/tree/master/skycultures/modern_iau>，
+  **CC BY-SA 4.0**，<https://creativecommons.org/licenses/by-sa/4.0/>，图形由
+  Stellarium 与 Sky & Telescope 的 Roger Sinnott、Rick Fienberg 合作制作并发布于
+  IAU 网站）：`mbdsdr_ai/data/constellations_iau.json` 的 148 条折线 / 842 段
+  连线数据来源；本仓保留署名，该派生数据继续以 CC BY-SA 4.0 分发。文件内
+  88 个中文名中 61 个另取自 **Wikidata**（CC0-1.0）固定快照
+  `mbdsdr_ai/data/constellation_names_cc0.json`（7,574 字节，`fetched_at`
+  2026-11-05T16:45:46+00:00，文件 SHA-256
+  `75597803a485cc217b5716265f5d165e35b3804aaf1fbaaba50cad292e73d2f3`，
+  抓取脚本 `scripts/fetch_constellation_names_cc0.py`）；其余 27 个为项目
+  `constellation_culture.json`。连线结构未改，名称替换决策见 `LICENSING.md` §4c。
 - **OpenNGC**（<https://github.com/mattiaverga/OpenNGC>，CC BY-SA 4.0，
   <https://creativecommons.org/licenses/by-sa/4.0/>）：深空天体目录
   `mbdsdr_ai/data/dso_catalog.json` 的坐标/星等/角径/类型来源；该派生数据库以
