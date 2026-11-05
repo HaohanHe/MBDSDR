@@ -38,8 +38,57 @@
 | 10 过境采样步长 | `mbdsdr_ai/sat_passes.py:_COARSE_STEP_S/_FINE_STEP_S`（60/2）；`desktop/rf_sky_view.py:PASS_COARSE_STEP_S/PASS_FINE_STEP_S`（300/30）与 `_refresh_passes`；`desktop/new_spacetime_panel.py:refresh_passes`（`step_sec=60.0`）+ `_sync_timer`；`desktop/rf_sky_view.py:_timer` | 否（两套独立过境算法） | `sat_passes` **60 s 粗扫 + 2 s 细采样**；`rf_sky_view` **300 s 粗扫 + 30 s 峰值邻域细化** | 卫星线（`sat_passes.py`、`rf_sky_view.py`、`new_spacetime_panel.py`） | 同一次 6 分钟 LEO 过境，时空面板 2 s 采样、天空面板 30 s → 峰值时刻最多偏 15 s，按 0.2–0.5°/s 计峰值仰角差 **3–7.5°**、AOS/LOS 差数十秒；两个面板给出不同"下一次过境"，多普勒预置按哪个都失配 | 同一 TLE/站点/时刻，比对 `predict_passes` 与 `rf_sky_view._refresh_passes` 的峰值仰角与 AOS/LOS | 未统一 |
 | 11 状态提示时长 | `desktop/main_window.py` 的 `statusBar().showMessage(...)` 共 111 处 | 否 | 字面毫秒 88 处：`2 s`×1、`3 s`×15、`4 s`×25、`5 s`×16、`6 s`×13、`8 s`×14、`10 s`×3、`15 s`×1；16 处单参走 Qt `timeout=0`；7 处传变量 | 操作逻辑线（`desktop/main_window.py`） | 8 档时长：同一类"已保存"在 A 处 4 s、B 处 8 s；2 s 的错误提示抬头前就消失；15 s 那条压住随后 1–3 s 的新提示；16 处单参消息常驻状态栏，断连后仍可能挂"已连接" | 扫全部 `showMessage` 时长并断言只落在一个登记档位集合（如 2/4/8 s），未登记值或单参常驻一律红 | 未统一 |
 
+## 附录 A：35 个设置暴露项的消费点自检（设置线，2026-11-05）
+
+口径：只列 `config_schema.EXPOSED_ITEMS`（35 项）。“消费点”指**改值后真正读它的生产代码**
+（文件:符号），不是面板的转发函数本身。结论：**35 项全部有生产消费点，没有“只写不读”的键。**
+
+| # | 键 | 默认 | 范围/枚举 | 消费点（文件:符号） | 即时生效 |
+|---|---|---|---|---|---|
+| 1 | `ui_language` | zh | zh/en/ja | `desktop/main.py:117` → `l10n.install_translator(Qt)` | 否，重启（行内已标注） |
+| 2 | `touch_mode` | auto | auto/on/off | `desktop/main_window.py:_set_touch_mode` → `touch_manager` | 是 |
+| 3 | `theme` | default | 5 枚举 | `desktop/main_window.py:_apply_theme` → `themes` | 是 |
+| 4 | `show_waterfall` | True | bool | `desktop/spectrum_widget.py:_PlotState.show_waterfall` → `toggle_waterfall/_draw_waterfall` | 是 |
+| 5 | `sky_pressure_hpa` | 1013.25 | 800–1100 | `desktop/rf_sky_view.py:set_refraction_params` → 折射修正 | 是 |
+| 6 | `sky_temperature_c` | 10.0 | -50–50 | 同上（`set_refraction_params(temperature_c=…)`） | 是 |
+| 7 | `bortle` | 3 | 1–9 | `desktop/rf_sky_view.py:set_bortle` → `star_catalog.select_for_view` 极限星等 | 是 |
+| 8 | `fft_size` | 2048 | 1024/2048/4096 | `desktop/spectrum_widget.py:SpectrumDataGenerator.set_fft_size` → FFT | 是 |
+| 9 | `fft_window` | Nuttall | 6 枚举 | `desktop/spectrum_widget.py:SpectrumDataGenerator.set_window` | 是 |
+| 10 | `fft_avg_frames` | 1 | 1/4/8/16 | `desktop/spectrum_widget.py:SpectrumDataGenerator.set_avg_frames` | 是 |
+| 11 | `waterfall_palette` | default | default/sdrpp | `desktop/spectrum_widget.py:SpectrumPanel._on_palette_changed` → `_PlotState.wf_colors` | 是 |
+| 12 | `peak_threshold_db` | 6.0 | 1–30 | `desktop/spectrum_widget.py:_PlotState.peak_rel_db` → `find_peaks_with_snr` | 是 |
+| 13 | `show_peaks` | True | bool | `desktop/spectrum_widget.py:_PlotState.show_peaks` → 峰值绘制 | 是 |
+| 14 | `waterfall_smooth` | False | bool | `desktop/spectrum_widget.py:_on_wf_smooth_toggled` → `generator.wf_smooth` | 是 |
+| 15 | `show_bookmarks` | True | bool | `desktop/spectrum_widget.py:_PlotState.show_bookmarks` → `_draw_bookmarks` | 是 |
+| 16 | `show_bandplan` | True | bool | `desktop/spectrum_widget.py:_PlotState.show_bandplan` → 频段彩带 | 是 |
+| 17 | `squelch_default_db` | -50 | -100–-20 | `control_panel` 滑杆 → `main_window._on_squelch_changed` → `mbdsdr_ai/squelch.py:margin_threshold_db` | 是 |
+| 18 | `tuning_step_hz` | 10000 | 6 枚举 | `desktop/main_window.py:_on_step_changed` → `spectrum_widget.py:set_snap_interval` | 是 |
+| 19 | `waterfall_depth_rows` | 256 | 128/256/512/1024/2048/4096 | `desktop/spectrum_widget.py:SpectrumDataGenerator.set_waterfall_depth` → `_wf_buf` | 是 |
+| 20 | `sky_extinction_k` | 0.2 | 0.0–0.5 | `desktop/rf_sky_view.py:set_extinction`（别名 `set_extinction_k`）→ `select_for_view(extinction_k=…)` + 逐星 `extinction_delta_mag` | 是 |
+| 21 | `record_dir` | 空 | 文本路径 | `desktop/settings.py:ensure_record_dir` → `main_window.py:6062` 录音启动 | 是（只影响新录音） |
+| 22 | `observer_lat` | None | -90–90 | `desktop/main_window.py:_apply_observer_location` → `SatelliteTracker(..., lat, lon)` / 天空图 | 是 |
+| 23 | `observer_lon` | None | -180–180 | 同上 | 是 |
+| 24 | `pass_min_elevation_deg` | 10.0 | 0–45 | `desktop/new_spacetime_panel.py:refresh_passes` → `effective_pass_min_elevation_deg` → `compute_passes(min_elevation=…)` | 是（下次刷新） |
+| 25 | `pass_window_hours` | 24 | 1–72 | `desktop/new_spacetime_panel.py:refresh_passes` → `effective_pass_window_hours` → `compute_passes(hours_ahead=…)` | 是（下次刷新） |
+| 26 | `show_low_elevation_passes` | False | bool | `desktop/new_spacetime_panel.py:refresh_passes` → `effective_pass_visibility_gate_deg` / 低仰角标注 | 是（下次刷新） |
+| 27 | `ai_temperature` | 0.7 | 0.0–2.0 | `desktop/settings_panel.py:_store_value` 写 `config.json` 并推 `ai_panel.agent.config`；读侧 `mbdsdr_ai/config.py:AgentConfig` | 是（已建 agent 时） |
+| 28 | `ai_top_p` | 0.9 | 0.0–1.0 | 同上 | 是 |
+| 29 | `ai_max_output_tokens` | 2048 | 128–16384 | 同上 | 是 |
+| 30 | `ai_max_context_tokens` | 8192 | 1024–131072 | 同上 | 是 |
+| 31 | `ai_timeout` | 60 | 5–300 | 同上 | 是 |
+| 32 | `rc_enabled` | False | bool | `desktop/settings_panel.py:_start_rc/_stop_rc` → `mbdsdr_ai/remote_control.py:RemoteControl.start` | 是 |
+| 33 | `rc_port` | 7356 | 1–65535 | `desktop/settings_panel.py:_start_rc` → `RemoteControl(port=…)` | 是（重启该服务后） |
+| 34 | `web_enabled` | False | bool | `desktop/settings_panel.py:_start_web/_stop_web` → `mbdsdr_ai/web/server.py:WebServer.start` | 是 |
+| 35 | `web_port` | 8080 | 1–65535 | `desktop/settings_panel.py:_start_web` → `WebServer(port=…)` | 是（重启该服务后） |
+
+> 基线变化（本线已提交）：第 2 行“过境仰角”不再零消费——`new_spacetime_panel.refresh_passes`
+> 已读 `effective_pass_*`；第 4 行采样率已统一 2.4 MS/s（`4ef3a15`）；第 6 行 FFT 已收紧
+> 1024/2048/4096（`605e89d`）；第 8 行瀑布深度已是六档枚举（非任意 128–4096）。
+> 上表之外没有“有键无消费”的暴露项，因此本轮无需删键或补消费点。
+
 ## 变更记录
 
 | 日期 | 基线 | 变更 | 操作人 |
 |---|---|---|---|
 | 2026-11-05 | `5ece441` | 建账：11 组逐条落表，状态按当时实测填写 | 参数治理线 |
+| 2026-11-05 | `605e89d` | 附录 A：35 个暴露项消费点自检（全部有消费点） | 设置线 |

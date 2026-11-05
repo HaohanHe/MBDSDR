@@ -812,6 +812,40 @@ def test_extinction_k_reaches_sky(env):
     assert host.sky_view.extinction_k == 0.0
 
 
+def test_extinction_setting_end_to_end_changes_visible_star_count(env, qapp):
+    """A8 端到端：面板改设置 → 真实 RFSkyView 可见星数变化（不只是 setter 被调用）。"""
+    ds, host, panel, _ = env
+    from datetime import datetime, timezone
+
+    from mbdsdr_ai.celestial_geometry import GroundStation
+    from mbdsdr_ai.new_spacetime import get_time_engine
+    from mbdsdr_ai.skyengine import jtime
+    from rf_sky_view import RFSkyView
+
+    unix = datetime(2026, 9, 27, 12, 0, tzinfo=timezone.utc).timestamp()
+    jd = jtime.unix_to_jd(unix)
+    eng = get_time_engine()
+    eng.set_unix(unix)
+    eng.pause()
+    view = RFSkyView()
+    try:
+        view.resize(700, 700)
+        view.set_observer(40.0, 116.0, 0.0)
+        view.set_bortle(3)
+        view.view_state.look_at(180.0, 40.0)
+        view.view_state.fov_deg = 120.0
+        host.sky_view = view
+        gs = GroundStation(116.0, 40.0, 0.0)
+        panel._on_changed("sky_extinction_k", 0.2)
+        n02 = len(view._star_selection(gs, jd))
+        panel._on_changed("sky_extinction_k", 0.5)
+        n05 = len(view._star_selection(gs, jd))
+        assert n02 > n05, f"k=0.2 应比 k=0.5 见更多星：{n02} vs {n05}"
+        assert n02 - n05 >= 50, f"星数差 {n02 - n05} 太小，设置链路可能没进选择"
+    finally:
+        view.close()
+
+
 def test_extinction_k_changes_star_count_but_not_bortle():
     """A8 反证：同 FOV 同时间 k=0 vs 0.5 可见星数显著不同，且不与 Bortle 重复。"""
     from mbdsdr_ai.celestial_geometry import GroundStation
