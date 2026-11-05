@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MBDSDR · 时空操作台 — 能力，而非流程</title>
+<link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+
+
+<header>
+  <div class="brand">
+    <h1>MBDSDR</h1>
+    <div class="tag">AI 定义无线电 · 时空操作台</div>
+  </div>
+  <div class="mode-switch" id="modeSwitch">
+    <button data-form="sky" class="on">星象仪模式</button>
+    <button data-form="pro">专业模式</button>
+  </div>
+  <!-- 搜索胶囊 -->
+    <div class="search-pill">
+      <span class="ico">⌕</span>
+      <input id="searchInput" placeholder="搜索卫星 / 天体…（试试 NOAA 或 ISS）">
+    </div>
+  <div class="hdr-right">
+    <span class="chip ok">演示会话</span>
+    <span class="chip">一套系统 · 两副面孔</span>
+    <span class="clock" id="clock">--:--:--</span>
+    <button class="hdr-btn" id="langSwitch" title="Language / 语言 / 言語">中文</button>
+    <button class="hdr-btn" id="docOpen" title="文档 / Wiki">? 文档</button>
+  </div>
+</header>
+
+<div class="stage">
+  <!-- ═══════════ 星象仪模式（Stellarium Web 形态） ═══════════ -->
+  <div class="form on" id="skyForm">
+    <canvas id="skyCanvas"></canvas>
+    <div class="grain"></div>
+
+
+    <!-- 汉堡 + 侧栏 -->
+    <div class="burger" id="burger"><i></i><i></i><i></i></div>
+    <div id="sidebar">
+      <div class="sb-brand">
+        <div class="logo">MBDSDR<sup>SKY</sup></div>
+        <div class="user"><div class="face">☺</div><div class="lbl">登录</div></div>
+      </div>
+      <div class="sb-item"><i>☾</i>今夜</div>
+      <div class="sb-item"><i>▤</i>我的观测</div>
+      <div class="sb-item"><i>▦</i>日历</div>
+      <div class="sb-item"><i>⚙</i>视图设置　<span style="margin-left:auto;opacity:.5">▾</span></div>
+      <div class="sb-sep"></div>
+      <div class="sb-item" data-cap-open><i>◧</i>能力矩阵</div>
+      <div class="sb-item"><i>◎</i>追踪 / 接收</div>
+      <div class="sb-bottom">
+        <div class="sb-sep"></div>
+        <div class="sb-item" data-doc-open><i>▤</i>文档 / Wiki</div>
+      <div class="sb-item"><i>ⓘ</i>关于</div>
+        <div class="sb-item"><i>🔒</i>隐私</div>
+        <div class="sb-item"><i>©</i>数据来源</div>
+        <div class="sb-note">星表：Gaia / Hipparcos · TLE：NORAD<br>引擎形态参照 Stellarium Web · AGPL</div>
+      </div>
+    </div>
+
+    <!-- 信息卡（Stellarium Web 布局：左上 NORAD 标题式） -->
+    <div id="satCard">
+      <div class="sc-head">
+        <div class="sc-ico" id="scIco">🛰</div>
+        <div>
+          <div class="name" id="scName"></div>
+          <div class="sub" id="scSub"></div>
+        </div>
+        <button class="sc-close" id="scClose">✕</button>
+      </div>
+      <div class="sc-alias" id="scAlias"></div>
+      <dl class="sc-kv" id="scKv"></dl>
+      <div class="sc-desc" id="scDesc"></div>
+      <div class="sc-lock" id="scLock">摄像机锁定 · 天动星静</div>
+      <div class="sc-actions">
+        <button class="btn primary" data-act="track"><i>◎</i>追踪</button>
+        <button class="btn primary" data-act="receive"><i>▽</i>接收</button>
+        <button class="btn" data-act="point"><i>➤</i>指向</button>
+      </div>
+    </div>
+
+    <!-- 圆形缩放钮（信息卡下方） -->
+    <div class="zoom-fabs" id="zoomFabs" style="display:none">
+      <button class="fab" id="zoomOut">−</button>
+      <button class="fab" id="zoomIn">＋</button>
+    </div>
+
+    <!-- 底部中央工具栏 -->
+    <div class="sky-toolbar" id="skyToolbar">
+      <button class="tb on" data-tb="orbits" title="轨道线">🛰</button>
+      <button class="tb on" data-tb="labels" title="目标标签">A</button>
+      <button class="tb" data-tb="milkyway" title="银河（无数据·不提供）">☁</button>
+      <button class="tb on" data-tb="atmosphere" title="大气 / 地平辉光">☀</button>
+      <button class="tb on" data-tb="landscape" title="地景（固定在地平系，不随时间转）">⛰</button>
+      <button class="tb on" data-tb="constellations" title="星座连线">⋈</button>
+      <button class="tb on" data-tb="dso" title="DSO 类型符号">◈</button>
+      <button class="tb" data-tb="grid" title="方位网格">◎</button>
+      <button class="tb" data-tb="eqgrid" title="赤道网格">⊕</button>
+      <button class="tb" data-tb="night" title="夜视模式">☾</button>
+      <button class="tb on" data-tb="sats" title="卫星层">✦</button>
+      <button class="tb on" data-tb="hud" title="时空读数">◷</button>
+      <button class="tb" data-tb="time" title="时间流速：⏸ / ▶ / ×60 / ×300 / ×1800">⏱<span id="rateTag" style="font-size:8px;margin-left:2px">1×</span></button>
+      <button class="tb" data-tb="fullscreen" title="全屏">⛶</button>
+    </div>
+    <div class="sky-hud" id="skyHud"></div>
+
+    <!-- 角落 chip -->
+    <div class="corner-chip loc">示例站点 · 0.0, 0.0</div>
+    <div class="corner-chip time"><b id="timeChip">--:--:--</b><span id="dateChip">----</span></div>
+
+    <!-- 能力矩阵 -->
+    <div id="capDrawer" class="folded">
+      <div class="cap-head" id="capHead">◧ 能力矩阵（原仓库工具域）<span class="badge">事实源自动生成</span></div>
+      <div class="cap-body" id="capBody"></div>
+    </div>
+
+    <!-- AI 抽屉 -->
+    <div id="aiDrawer">
+      <div class="ai-head">
+        <div class="ai-avatar">✦</div>
+        <div><div class="t">MBDSDR 模型</div><div class="s">现场能力协商 · 动态规划</div></div>
+        <button class="ai-close" id="aiClose">✕</button>
+      </div>
+      <div class="ai-stream" id="aiStream"></div>
+      <div class="ai-input"><input id="aiInput" placeholder="直接跟模型说…（能力协商 / 下达任务）"><button id="aiSend">说</button></div>
+      <div class="ai-note">以下对话由模型现场组织 · 不是预制向导</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 专业模式 ═══════════ -->
+  <div class="form" id="proForm">
+    <div class="pro-main">
+      <div class="pro-left">
+        <div class="tree-g">
+          <h3>接收设备</h3>
+          <div class="tree-i"><i>▦</i>RTL-SDR（未连接）</div>
+          <div class="tree-i"><i>▦</i>ADALM-Pluto（未接）</div>
+          <div class="tree-i"><i>▦</i>云台转台（未接）</div>
+        </div>
+        <div class="tree-g">
+          <h3>解调协议栈</h3>
+          <div class="tree-i"><i>≋</i>LRPT · QPSK 72k</div>
+          <div class="tree-i"><i>≋</i>APT · AM</div>
+          <div class="tree-i"><i>≋</i>FT8 · GFSK</div>
+          <div class="tree-i"><i>≋</i>ADS-B · PPM</div>
+          <div class="tree-i"><i>≋</i>SSTV</div>
+        </div>
+        <div class="tree-g">
+          <h3>AI 工具箱</h3>
+          <div class="tree-i"><i>✦</i>get_status / list_devices</div>
+          <div class="tree-i"><i>✦</i>set_frequency / read_spectrum</div>
+          <div class="tree-i"><i>✦</i>get_satellite_pass / sat_link_identify</div>
+        </div>
+        <div class="tree-g">
+          <h3>任务场景</h3>
+          <div class="tree-i"><i>◫</i>科教教培</div>
+          <div class="tree-i"><i>◫</i>科学研究</div>
+          <div class="tree-i"><i>◫</i>通联 / 应急</div>
+        </div>
+      </div>
+
+      <div class="pro-center">
+        <div class="ctrl-bar">
+          <div class="ctrl">
+            <label>中心频率</label>
+            <div class="freq-display">137.100<span>MHz</span></div>
+          </div>
+          <div class="ctrl"><label>模式</label>
+            <select><option>LRPT QPSK 72k</option><option>APT AM</option><option>WFM</option><option>USB</option></select>
+          </div>
+          <div class="ctrl"><label>带宽</label>
+            <select><option>150 kHz</option><option>200 kHz</option><option>12.5 kHz</option></select>
+          </div>
+          <div class="ctrl"><label>增益</label><input type="range" min="0" max="49" value="33"></div>
+          <div class="ctrl"><label>参考电平</label><input type="range" min="-120" max="-20" value="-70"></div>
+          <div class="ctrl"><label>解调链</label>
+            <select><option>Costas + Viterbi + RS(255,223)</option><option>直通</option></select>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="specCanvas"></canvas>
+          <div class="spec-tag">频谱 · 瀑布 <em>演示参数 · 非实时读数</em></div>
+          <div class="spec-read">
+            <span>RMS <b id="rmsVal">—</b> dB</span>
+            <span>CFO <b id="cfoVal">—</b> Hz</span>
+            <span>符号率 <b>—</b> ksym/s</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="proSplit"></div>
+
+      <div class="pro-right" id="proRight">
+        <div class="pro-chat-head">
+          <div class="ai-avatar" style="width:30px;height:30px;font-size:13px">✦</div>
+          <div><div class="t">模型协作栏</div><div class="s">与星象仪模式同一能力核心</div></div>
+        </div>
+        <div id="proStream"></div>
+        <div class="pro-input">
+          <input id="proInput" placeholder="对模型说话…（能力协商 / 下达任务）">
+          <button id="proSend">发送</button>
+        </div>
+      </div>
+    </div>
+    <div class="status-bar"></div>
+  </div>
+</div>
+
+
+<!-- ═══════════ 文档中心（wiki / 产品规格 / 场景） ═══════════ -->
+<div id="docPanel">
+  <div class="doc-side">
+    <div class="doc-brand">MBDSDR<sup>DOCS</sup></div>
+    <div class="doc-hint">产品文档 · 能力百科</div>
+    <div id="docNav"></div>
+  </div>
+  <div class="doc-main">
+    <div class="doc-top">
+      <span id="docCrumb">文档中心</span>
+      <button class="hdr-btn" id="docLang">中文</button>
+      <button class="hdr-btn" id="docClose">✕</button>
+    </div>
+    <article id="docBody"></article>
+  </div>
+</div>
+
+<script src="src/00-core.js"></script>
+<script src="src/05-repo-facts.js"></script>
+<script src="src/10-data.js"></script>
+<script src="src/12-sky-catalog.js"></script>
+<script src="src/20-i18n.js"></script>
+<script src="src/31-celestial.js"></script>
+<script src="src/30-sky.js"></script>
+<script src="src/40-workbench.js"></script>
+<script src="src/50-dialog.js"></script>
+<script src="src/70-docs-data.js"></script>
+<script src="src/70-docs.js"></script>
+<script src="src/60-app.js"></script>
+</body>
+</html>

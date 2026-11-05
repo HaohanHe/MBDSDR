@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MBDSDR · 形态原型 — 能力，而非流程</title>
+<style>
+  /* ===== 设计语言（源自 D:/mbdsdr/.figma 设计稿）=====
+     纯黑 #000 画布 · 白/灰阶 · MiSans · 圆角 3/8/13/24/42 ·
+     巨型软阴影 · opacity 层级 · 白色圆头线与白点环标
+     星象仪形态对齐 Stellarium Web（信息卡/搜索胶囊/底栏/方位字/地景） */
+  :root{
+    --bg:#000;
+    --panel:#1f1f1f;
+    --panel2:#2c2c2c;
+    --chip:#606060;
+    --txt:#ffffff;
+    --txt2:rgba(255,255,255,.62);
+    --txt3:rgba(255,255,255,.32);
+    --line:rgba(255,255,255,.12);
+    --line2:rgba(255,255,255,.24);
+    --cardinal:#d2542c;
+    --shadow:0 22px 90px rgba(0,0,0,.55), 0 8px 28px rgba(0,0,0,.45);
+    --glow:0 0 47px rgba(255,255,255,.10);
+    --mono:"Cascadia Code",Consolas,"Courier New",monospace;
+    --sans:MiSans,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",SimHei,Arial,Helvetica,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased}
+  ::selection{background:rgba(255,255,255,.22)}
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ===== 顶栏（星象仪模式下透明浮层化） ===== */
+  header{position:fixed;top:0;left:0;right:0;height:56px;z-index:60;
+    display:flex;align-items:center;gap:20px;padding:0 22px;
+    background:rgba(0,0,0,.55);backdrop-filter:blur(12px);
+    border-bottom:1px solid transparent;transition:all .45s ease}
+  body.sky-immersive header{background:rgba(0,0,0,.18);height:52px}
+  body.sky-immersive .brand .tag{display:none}
+  .brand{display:flex;align-items:baseline;gap:12px}
+  .brand h1{font-size:18px;letter-spacing:.16em;font-weight:700}
+  .brand .tag{font-size:11px;color:var(--txt3);letter-spacing:.26em}
+  .mode-switch{display:flex;gap:5px;padding:4px;border-radius:84px;
+    background:rgba(28,28,28,.75);backdrop-filter:blur(12px);border:1px solid var(--line)}
+  .mode-switch button{border:0;background:transparent;color:var(--txt3);
+    font-size:12.5px;padding:7px 18px;border-radius:84px;cursor:pointer;
+    transition:all .35s cubic-bezier(.2,.8,.2,1);font-family:var(--sans);letter-spacing:.08em}
+  .mode-switch button.on{background:#fff;color:#000;font-weight:600}
+  .hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--txt3)}
+  .clock{font-family:var(--mono);color:var(--txt2);letter-spacing:.08em}
+  .chip{padding:5px 12px;border-radius:84px;border:1px solid var(--line);
+    font-size:11px;color:var(--txt2);background:rgba(28,28,28,.7);backdrop-filter:blur(12px)}
+  .chip.ok{color:#fff;border-color:rgba(255,255,255,.35)}
+  .chip.ok::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:#fff;margin-right:7px;vertical-align:1px}
+
+  /* ===== 形态容器 ===== */
+  .stage{position:fixed;inset:0}
+  .form{position:absolute;inset:0;opacity:0;pointer-events:none;
+    transition:opacity .55s ease,transform .55s cubic-bezier(.2,.8,.2,1);transform:scale(1.02)}
+  .form.on{opacity:1;pointer-events:auto;transform:scale(1)}
+  #proForm{inset:56px 0 0 0}
+
+  /* ===== 星象仪模式 ===== */
+  #skyCanvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+
+  /* 搜索胶囊（Stellarium Web 顶中） */
+  .search-pill{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:30;
+    width:min(390px,40vw);display:flex;align-items:center;gap:10px;
+    background:rgba(28,28,28,.72);backdrop-filter:blur(19px);border:1px solid var(--line);
+    border-radius:24px;padding:11px 18px;box-shadow:var(--shadow)}
+  .search-pill .ico{opacity:.55;font-size:14px}
+  .search-pill input{flex:1;background:transparent;border:0;outline:0;color:var(--txt);
+    font-size:13.5px;font-family:var(--sans)}
+  .search-pill input::placeholder{color:var(--txt3)}
+
+  /* 汉堡 + 侧栏（Stellarium Web 左上） */
+  .burger{position:absolute;top:14px;left:18px;z-index:45;width:44px;height:44px;
+    border-radius:13px;border:1px solid var(--line);background:rgba(28,28,28,.72);
+    backdrop-filter:blur(19px);cursor:pointer;display:flex;align-items:center;
+    justify-content:center;flex-direction:column;gap:4px;box-shadow:var(--shadow)}
+  .burger i{display:block;width:17px;height:1.8px;background:#fff;border-radius:2px}
+  #sidebar{position:absolute;top:0;left:0;bottom:0;width:262px;z-index:50;
+    background:rgba(14,14,14,.96);backdrop-filter:blur(24px);border-right:1px solid var(--line);
+    transform:translateX(-100%);transition:transform .45s cubic-bezier(.2,.8,.2,1);
+    display:flex;flex-direction:column;padding:18px 0}
+  #sidebar.open{transform:translateX(0)}
+  .sb-brand{padding:8px 22px 18px;display:flex;align-items:center;justify-content:space-between}
+  .sb-brand .logo{font-size:17px;font-weight:700;letter-spacing:.12em}
+  .sb-brand .logo sup{font-size:9px;color:var(--txt3);letter-spacing:.2em}
+  .sb-brand .user{text-align:center;cursor:pointer}
+  .sb-brand .user .face{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--txt2);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 4px;font-size:15px}
+  .sb-brand .user .lbl{font-size:10px;color:var(--txt3);letter-spacing:.12em}
+  .sb-item{display:flex;align-items:center;gap:13px;padding:13px 22px;font-size:13.5px;
+    color:var(--txt2);cursor:pointer;transition:all .2s;letter-spacing:.05em}
+  .sb-item:hover{background:rgba(255,255,255,.06);color:#fff}
+  .sb-item i{font-style:normal;width:18px;text-align:center;opacity:.75;font-size:14px}
+  .sb-sep{height:1px;background:var(--line);margin:10px 22px}
+  .sb-bottom{margin-top:auto}
+  .sb-note{padding:14px 22px;font-size:10px;color:var(--txt3);line-height:1.7;letter-spacing:.06em}
+
+  /* 信息卡（Stellarium Web 左上，NORAD 标题式） */
+  #satCard{position:absolute;top:72px;left:18px;width:326px;z-index:35;
+    background:rgba(18,18,18,.93);backdrop-filter:blur(24px);border:1px solid var(--line);
+    border-radius:24px;overflow:hidden;box-shadow:var(--shadow);
+    transform:translateX(-18px);opacity:0;pointer-events:none;
+    transition:all .5s cubic-bezier(.2,.8,.2,1)}
+  #satCard.open{transform:translateX(0);opacity:1;pointer-events:auto}
+  .sc-head{padding:18px 20px 12px;display:flex;gap:12px;position:relative}
+  .sc-ico{width:38px;height:38px;flex-shrink:0;display:flex;align-items:center;
+    justify-content:center;font-size:22px;opacity:.9}
+  .sc-head .name{font-size:19px;font-weight:700;letter-spacing:.03em;line-height:1.25}
+  .sc-head .sub{font-size:12px;color:var(--txt3);margin-top:2px}
+  .sc-close{position:absolute;top:12px;right:12px;width:26px;height:26px;border:0;
+    background:transparent;color:var(--txt3);font-size:17px;cursor:pointer;line-height:1}
+  .sc-close:hover{color:#fff}
+  .sc-alias{padding:0 20px 12px;font-size:11.5px;color:var(--txt3);line-height:1.7}
+  .sc-alias b{color:var(--txt2);cursor:pointer;border-bottom:1px solid var(--line2)}
+  .sc-kv{padding:0 20px 8px;display:grid;grid-template-columns:76px 1fr;gap:6px 10px;font-size:11.5px}
+  .sc-kv dt{color:var(--txt3)} .sc-kv dd{color:var(--txt2);font-family:var(--mono);font-size:11px}
+  .sc-kv dd.hl{color:#fff}
+  .sc-desc{padding:10px 20px 16px;font-size:11.5px;color:var(--txt2);line-height:1.75}
+  .sc-desc a{color:var(--txt);text-decoration:underline;cursor:pointer}
+  .sc-lock{display:inline-flex;align-items:center;gap:7px;font-size:10px;color:var(--txt2);
+    margin:0 20px 16px;padding:5px 12px;border-radius:84px;border:1px solid var(--line2);
+    background:rgba(255,255,255,.06);letter-spacing:.12em}
+  .sc-lock::before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;
+    box-shadow:0 0 12px rgba(255,255,255,.8);animation:pulse 1.6s infinite}
+  @keyframes pulse{50%{opacity:.3}}
+  .sc-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 20px 18px}
+  .btn{border:1px solid var(--line2);background:var(--panel2);color:var(--txt);
+    border-radius:13px;padding:11px 8px;font-size:12.5px;cursor:pointer;font-family:var(--sans);
+    transition:all .25s ease;display:flex;align-items:center;justify-content:center;gap:7px;
+    letter-spacing:.12em}
+  .btn:hover{background:#404040;transform:translateY(-1px)}
+  .btn.primary{background:#fff;border:0;color:#000;font-weight:600}
+  .btn.primary:hover{filter:brightness(.92)}
+  .btn i{font-style:normal;font-size:14px}
+
+  /* 圆形缩放钮（信息卡下方，Stellarium Web 同款） */
+  .zoom-fabs{position:absolute;left:18px;z-index:34;display:flex;gap:10px}
+  .fab{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
+    background:rgba(28,28,28,.78);backdrop-filter:blur(14px);color:var(--txt);
+    font-size:19px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    box-shadow:var(--shadow);transition:all .2s;font-family:var(--sans)}
+  .fab:hover{background:#404040}
+
+  /* 底部中央工具栏（Stellarium Web 图标条） */
+  .sky-toolbar{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);z-index:30;
+    display:flex;gap:4px;padding:7px 9px;border-radius:24px;
+    background:rgba(28,28,28,.68);backdrop-filter:blur(19px);border:1px solid var(--line);
+    box-shadow:var(--shadow)}
+  .tb{width:38px;height:38px;border:0;border-radius:12px;background:transparent;
+    color:rgba(255,255,255,.55);font-size:16px;cursor:pointer;transition:all .2s;
+    display:flex;align-items:center;justify-content:center;font-family:var(--sans)}
+  .tb:hover{background:rgba(255,255,255,.1);color:#fff}
+  .tb.on{background:#fff;color:#000}
+
+  /* 角落 chip（地点 / 时间） */
+  .corner-chip{position:absolute;bottom:22px;z-index:30;
+    background:rgba(28,28,28,.78);backdrop-filter:blur(19px);border:1px solid var(--line);
+    border-radius:84px;padding:10px 18px;font-size:11px;letter-spacing:.18em;
+    color:var(--txt2);box-shadow:var(--shadow);cursor:pointer}
+  .corner-chip.loc{left:18px}
+  .corner-chip.time{right:18px;font-family:var(--mono);letter-spacing:.08em;text-align:right}
+  .corner-chip.time b{display:block;font-size:14.5px;color:#fff;font-weight:500;letter-spacing:.06em}
+
+  /* AI 抽屉 */
+  #aiDrawer{position:absolute;top:0;right:0;bottom:0;width:426px;z-index:40;
+    background:rgba(12,12,12,.96);border-left:1px solid var(--line);backdrop-filter:blur(24px);
+    transform:translateX(100%);transition:transform .5s cubic-bezier(.2,.8,.2,1);
+    display:flex;flex-direction:column;box-shadow:-30px 0 90px rgba(0,0,0,.55)}
+  #aiDrawer.open{transform:translateX(0)}
+  .ai-head{padding:20px 22px 15px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  .ai-avatar{width:38px;height:38px;border-radius:13px;background:#fff;color:#000;
+    display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700}
+  .ai-head .t{font-size:14px;font-weight:600;letter-spacing:.1em}
+  .ai-head .s{font-size:10px;color:var(--txt3);letter-spacing:.18em;margin-top:2px}
+  .ai-close{margin-left:auto;cursor:pointer;color:var(--txt3);font-size:18px;line-height:1;
+    background:none;border:0;padding:4px}
+  .ai-close:hover{color:var(--txt)}
+  .ai-stream{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+  .msg{max-width:92%;border-radius:24px;padding:12px 16px;font-size:13px;line-height:1.7;
+    animation:rise .4s ease both}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .msg.model{background:var(--panel2);border:1px solid var(--line);align-self:flex-start}
+  .msg.user{background:#fff;color:#000;align-self:flex-end;font-weight:500}
+  .msg .who{font-size:9.5px;letter-spacing:.22em;color:var(--txt3);margin-bottom:6px;text-transform:uppercase}
+  .msg.user .who{color:rgba(0,0,0,.45)}
+  .toolcard{align-self:flex-start;width:92%;border-radius:13px;border:1px dashed rgba(255,255,255,.28);
+    background:rgba(255,255,255,.04);padding:11px 14px;font-family:var(--mono);font-size:11px;
+    color:var(--txt2);animation:rise .4s ease both}
+  .toolcard .st{float:right;font-family:var(--sans);font-size:10px;padding:2px 10px;
+    border-radius:84px;letter-spacing:.12em}
+  .toolcard .st.ok{background:#fff;color:#000}
+  .toolcard .st.wait{background:rgba(255,255,255,.16);color:var(--txt)}
+  .toolcard .st.off{background:transparent;color:var(--txt3);border:1px solid var(--line)}
+  .quick{display:flex;flex-wrap:wrap;gap:8px;padding:4px 2px}
+  .quick button{border:1px solid var(--line2);background:rgba(255,255,255,.06);color:var(--txt2);
+    border-radius:84px;padding:8px 15px;font-size:12px;cursor:pointer;transition:all .2s;
+    font-family:var(--sans);letter-spacing:.06em}
+  .quick button:hover{background:#fff;color:#000;border-color:#fff}
+  .ai-input{border-top:1px solid var(--line);padding:11px 14px;display:flex;gap:8px}
+  .ai-input input{flex:1;background:var(--panel2);border:1px solid var(--line);
+    border-radius:24px;padding:11px 16px;color:var(--txt);font-size:12.5px;outline:none;
+    font-family:var(--sans)}
+  .ai-input input:focus{border-color:rgba(255,255,255,.45)}
+  .ai-input button{border:0;background:#fff;color:#000;border-radius:13px;padding:0 18px;
+    font-size:12.5px;cursor:pointer;font-family:var(--sans);font-weight:600;letter-spacing:.12em}
+  .ai-note{padding:10px 22px 14px;font-size:9.5px;color:var(--txt3);letter-spacing:.28em;
+    border-top:1px solid var(--line);text-align:center}
+
+  /* 能力矩阵（左下浮层） */
+  #capDrawer{position:absolute;left:18px;bottom:86px;z-index:30;width:340px;
+    background:rgba(20,20,20,.88);backdrop-filter:blur(19px);border:1px solid var(--line);
+    border-radius:24px;overflow:hidden;transition:all .4s cubic-bezier(.2,.8,.2,1);
+    box-shadow:var(--shadow)}
+  #capDrawer.folded .cap-body{display:none}
+  .cap-head{display:flex;align-items:center;gap:9px;padding:13px 17px;cursor:pointer;
+    border-bottom:1px solid var(--line);font-size:12px;font-weight:600;letter-spacing:.14em}
+  .cap-head .badge{margin-left:auto;font-size:9px;color:var(--txt3);font-weight:400;letter-spacing:.2em}
+  .cap-body{padding:13px;display:grid;grid-template-columns:1fr 1fr;gap:8px;max-height:264px;overflow-y:auto}
+  .cap{border:1px solid var(--line);border-radius:13px;padding:10px 12px;cursor:pointer;
+    transition:all .25s ease;background:rgba(255,255,255,.03);position:relative}
+  .cap:hover{border-color:var(--line2)}
+  .cap .n{font-size:11.5px;font-weight:600;display:flex;align-items:center;gap:6px;letter-spacing:.06em}
+  .cap .n i{font-style:normal;font-size:12px;opacity:.8}
+  .cap .m{font-size:9.5px;color:var(--txt3);margin-top:3px;line-height:1.5}
+  .cap .sw{position:absolute;top:10px;right:10px;width:25px;height:13px;border-radius:84px;
+    background:rgba(255,255,255,.16);transition:all .25s}
+  .cap .sw::after{content:"";position:absolute;top:2px;left:2px;width:9px;height:9px;border-radius:50%;
+    background:rgba(255,255,255,.45);transition:all .25s}
+  .cap.on .sw{background:#fff}
+  .cap.on .sw::after{left:14px;background:#000}
+  .cap.on{border-color:rgba(255,255,255,.4)}
+  .cap.dim{opacity:.55}
+
+  /* ===== 专业模式 ===== */
+  #proForm{display:flex;flex-direction:column;background:#050505}
+  .pro-main{flex:1;display:flex;min-height:0}
+  .pro-left{width:242px;flex-shrink:0;border-right:1px solid var(--line);
+    background:rgba(12,12,12,.75);overflow-y:auto;padding:14px}
+  .tree-g{margin-bottom:18px}
+  .tree-g h3{font-size:10px;letter-spacing:.32em;color:var(--txt3);margin-bottom:9px;text-transform:uppercase}
+  .tree-i{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:10px;font-size:12.5px;
+    color:var(--txt3);cursor:pointer;transition:all .2s;letter-spacing:.04em}
+  .tree-i:hover{background:rgba(255,255,255,.07);color:var(--txt2)}
+  .tree-i.on{background:#fff;color:#000;font-weight:600}
+  .tree-i i{font-style:normal;width:16px;text-align:center}
+  .pro-center{flex:1;display:flex;flex-direction:column;min-width:0}
+  .ctrl-bar{display:flex;align-items:center;gap:18px;padding:12px 18px;border-bottom:1px solid var(--line);
+    background:rgba(10,10,10,.7);flex-wrap:wrap}
+  .freq-display{font-family:var(--mono);font-size:24px;letter-spacing:.02em;color:#fff}
+  .freq-display span{font-size:11px;color:var(--txt3);margin-left:5px}
+  .ctrl{display:flex;flex-direction:column;gap:4px}
+  .ctrl label{font-size:9px;letter-spacing:.26em;color:var(--txt3);text-transform:uppercase}
+  .ctrl select{background:var(--panel2);border:1px solid var(--line);
+    color:var(--txt);border-radius:8px;padding:6px 11px;font-size:12px;font-family:var(--mono);outline:none}
+  .ctrl input[type=range]{width:104px;accent-color:#fff}
+  .canvas-wrap{flex:1;position:relative;min-height:0}
+  #specCanvas{position:absolute;inset:0;width:100%;height:100%}
+  .spec-tag{position:absolute;top:12px;left:14px;font-size:9.5px;letter-spacing:.32em;color:var(--txt3)}
+  .spec-read{position:absolute;top:12px;right:14px;display:flex;gap:14px;font-family:var(--mono);
+    font-size:11px;color:var(--txt3)}
+  .spec-read b{color:#fff;font-weight:500}
+  #proSplit{width:5px;cursor:col-resize;background:transparent;position:relative;flex-shrink:0}
+  #proSplit:hover,#proSplit.drag{background:rgba(255,255,255,.35)}
+  .pro-right{width:368px;flex-shrink:0;display:flex;flex-direction:column;
+    border-left:1px solid var(--line);background:rgba(12,12,12,.8);min-width:280px}
+  .pro-chat-head{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .pro-chat-head .t{font-size:13px;font-weight:600;letter-spacing:.12em}
+  .pro-chat-head .s{font-size:9.5px;color:var(--txt3);letter-spacing:.18em}
+  #proStream{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:11px}
+  .pro-input{border-top:1px solid var(--line);padding:12px;display:flex;gap:9px}
+  .pro-input input{flex:1;background:var(--panel2);border:1px solid var(--line);
+    border-radius:24px;padding:12px 18px;color:var(--txt);font-size:13px;outline:none;font-family:var(--sans)}
+  .pro-input input:focus{border-color:rgba(255,255,255,.45)}
+  .pro-input button{border:0;background:#fff;color:#000;border-radius:13px;padding:0 22px;
+    font-size:13px;cursor:pointer;font-family:var(--sans);font-weight:600;letter-spacing:.12em}
+  .status-bar{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;
+    gap:20px;padding:0 16px;font-size:10px;color:var(--txt3);font-family:var(--mono);
+    background:#000;letter-spacing:.08em}
+  .status-bar .ok{color:#fff}
+  .status-bar .sep{color:rgba(255,255,255,.15)}
+
+  .grain{position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.7'/%3E%3C/svg%3E")}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>MBDSDR</h1>
+    <div class="tag">AI 定义无线电 · 时空操作台</div>
+  </div>
+  <div class="mode-switch" id="modeSwitch">
+    <button data-form="sky" class="on">星象仪模式</button>
+    <button data-form="pro">专业模式</button>
+  </div>
+  <div class="hdr-right">
+    <span class="chip ok">演示会话</span>
+    <span class="chip">一套系统 · 两副面孔</span>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</header>
+
+<div class="stage">
+  <!-- ═══════════ 星象仪模式（Stellarium Web 形态） ═══════════ -->
+  <div class="form on" id="skyForm">
+    <canvas id="skyCanvas"></canvas>
+    <div class="grain"></div>
+
+    <!-- 搜索胶囊 -->
+    <div class="search-pill">
+      <span class="ico">⌕</span>
+      <input id="searchInput" placeholder="搜索卫星 / 天体…（试试 METEOR 或 ISS）">
+    </div>
+
+    <!-- 汉堡 + 侧栏 -->
+    <div class="burger" id="burger"><i></i><i></i><i></i></div>
+    <div id="sidebar">
+      <div class="sb-brand">
+        <div class="logo">MBDSDR<sup>SKY</sup></div>
+        <div class="user"><div class="face">☺</div><div class="lbl">登录</div></div>
+      </div>
+      <div class="sb-item"><i>☾</i>今夜</div>
+      <div class="sb-item"><i>▤</i>我的观测</div>
+      <div class="sb-item"><i>▦</i>日历</div>
+      <div class="sb-item"><i>⚙</i>视图设置　<span style="margin-left:auto;opacity:.5">▾</span></div>
+      <div class="sb-sep"></div>
+      <div class="sb-item" data-cap-open><i>◧</i>能力矩阵</div>
+      <div class="sb-item"><i>◎</i>追踪 / 接收</div>
+      <div class="sb-bottom">
+        <div class="sb-sep"></div>
+        <div class="sb-item"><i>ⓘ</i>关于</div>
+        <div class="sb-item"><i>🔒</i>隐私</div>
+        <div class="sb-item"><i>©</i>数据来源</div>
+        <div class="sb-note">星表：Gaia / Hipparcos · TLE：NORAD<br>引擎形态参照 Stellarium Web · AGPL</div>
+      </div>
+    </div>
+
+    <!-- 信息卡（Stellarium Web 布局：左上 NORAD 标题式） -->
+    <div id="satCard">
+      <div class="sc-head">
+        <div class="sc-ico" id="scIco">🛰</div>
+        <div>
+          <div class="name" id="scName">NORAD 40069</div>
+          <div class="sub" id="scSub">气象卫星 · METEOR-M2</div>
+        </div>
+        <button class="sc-close" id="scClose">✕</button>
+      </div>
+      <div class="sc-alias" id="scAlias">又称 <b>METEOR-M2</b> <b>Метеор-М №2</b> <b>2014-037A</b></div>
+      <dl class="sc-kv" id="scKv"></dl>
+      <div class="sc-desc" id="scDesc"></div>
+      <div class="sc-lock" id="scLock">摄像机锁定 · 天动星静</div>
+      <div class="sc-actions">
+        <button class="btn primary" data-act="track"><i>◎</i>追踪</button>
+        <button class="btn primary" data-act="receive"><i>▽</i>接收</button>
+        <button class="btn" data-act="point"><i>➤</i>指向</button>
+      </div>
+    </div>
+
+    <!-- 圆形缩放钮（信息卡下方） -->
+    <div class="zoom-fabs" id="zoomFabs" style="display:none">
+      <button class="fab" id="zoomOut">−</button>
+      <button class="fab" id="zoomIn">＋</button>
+    </div>
+
+    <!-- 底部中央工具栏 -->
+    <div class="sky-toolbar" id="skyToolbar">
+      <button class="tb on" data-tb="orbits" title="轨道线">🛰</button>
+      <button class="tb on" data-tb="labels" title="目标标签">A</button>
+      <button class="tb on" data-tb="milkyway" title="银河">☁</button>
+      <button class="tb on" data-tb="atmosphere" title="大气 / 地平辉光">☀</button>
+      <button class="tb on" data-tb="landscape" title="地景（固定在地平系，不随时间转）">⛰</button>
+      <button class="tb" data-tb="grid" title="赤纬网格">◎</button>
+      <button class="tb" data-tb="night" title="夜视模式">☾</button>
+      <button class="tb on" data-tb="sats" title="卫星层">✦</button>
+      <button class="tb" data-tb="time" title="时间流速：1× → 60× → 600× → 静止">⏱<span id="rateTag" style="font-size:8px;margin-left:2px">1×</span></button>
+      <button class="tb" data-tb="fullscreen" title="全屏">⛶</button>
+    </div>
+
+    <!-- 角落 chip -->
+    <div class="corner-chip loc">丰满区 · 吉林</div>
+    <div class="corner-chip time"><b id="timeChip">--:--:--</b><span id="dateChip">----</span></div>
+
+    <!-- 能力矩阵 -->
+    <div id="capDrawer">
+      <div class="cap-head" id="capHead">◧ 能力矩阵（模型可调用）<span class="badge">非固定流程 · 可开关</span></div>
+      <div class="cap-body" id="capBody"></div>
+    </div>
+
+    <!-- AI 抽屉 -->
+    <div id="aiDrawer">
+      <div class="ai-head">
+        <div class="ai-avatar">✦</div>
+        <div><div class="t">MBDSDR 模型</div><div class="s">现场能力协商 · 动态规划</div></div>
+        <button class="ai-close" id="aiClose">✕</button>
+      </div>
+      <div class="ai-stream" id="aiStream"></div>
+      <div class="ai-input"><input id="aiInput" placeholder="直接跟模型说…（能力协商 / 下达任务）"><button id="aiSend">说</button></div>
+      <div class="ai-note">以下对话由模型现场组织 · 不是预制向导</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ 专业模式 ═══════════ -->
+  <div class="form" id="proForm">
+    <div class="pro-main">
+      <div class="pro-left">
+        <div class="tree-g">
+          <h3>接收设备</h3>
+          <div class="tree-i on"><i>▦</i>RTL-SDR · 137 MHz</div>
+          <div class="tree-i"><i>▦</i>ADALM-Pluto（未接）</div>
+          <div class="tree-i"><i>▦</i>云台转台（未接）</div>
+        </div>
+        <div class="tree-g">
+          <h3>解调协议栈</h3>
+          <div class="tree-i on"><i>≋</i>LRPT · QPSK 72k</div>
+          <div class="tree-i"><i>≋</i>APT · AM</div>
+          <div class="tree-i"><i>≋</i>FT8 · GFSK</div>
+          <div class="tree-i"><i>≋</i>ADS-B · PPM</div>
+          <div class="tree-i"><i>≋</i>SSTV</div>
+        </div>
+        <div class="tree-g">
+          <h3>AI 工具箱</h3>
+          <div class="tree-i"><i>✦</i>get_satellite_pass</div>
+          <div class="tree-i"><i>✦</i>tune_sdr / point_gimbal</div>
+          <div class="tree-i"><i>✦</i>demodulate / decode_image</div>
+        </div>
+        <div class="tree-g">
+          <h3>任务场景</h3>
+          <div class="tree-i"><i>◫</i>科教教培</div>
+          <div class="tree-i"><i>◫</i>科学研究</div>
+          <div class="tree-i"><i>◫</i>通联 / 应急</div>
+        </div>
+      </div>
+
+      <div class="pro-center">
+        <div class="ctrl-bar">
+          <div class="ctrl">
+            <label>中心频率</label>
+            <div class="freq-display">137.100<span>MHz</span></div>
+          </div>
+          <div class="ctrl"><label>模式</label>
+            <select><option>LRPT QPSK 72k</option><option>APT AM</option><option>WFM</option><option>USB</option></select>
+          </div>
+          <div class="ctrl"><label>带宽</label>
+            <select><option>150 kHz</option><option>200 kHz</option><option>12.5 kHz</option></select>
+          </div>
+          <div class="ctrl"><label>增益</label><input type="range" min="0" max="49" value="33"></div>
+          <div class="ctrl"><label>参考电平</label><input type="range" min="-120" max="-20" value="-70"></div>
+          <div class="ctrl"><label>解调链</label>
+            <select><option>Costas + Viterbi + RS(255,223)</option><option>直通</option></select>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="specCanvas"></canvas>
+          <div class="spec-tag">频谱 · 瀑布</div>
+          <div class="spec-read">
+            <span>RMS <b id="rmsVal">-78.2</b> dB</span>
+            <span>CFO <b id="cfoVal">+0.31</b> Hz</span>
+            <span>符号率 <b>72.0</b> ksym/s</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="proSplit"></div>
+
+      <div class="pro-right" id="proRight">
+        <div class="pro-chat-head">
+          <div class="ai-avatar" style="width:30px;height:30px;font-size:13px">✦</div>
+          <div><div class="t">模型协作栏</div><div class="s">与星象仪模式同一能力核心</div></div>
+        </div>
+        <div id="proStream">
+          <div class="msg model"><div class="who">MBDSDR 模型</div>
+            专业模式就绪。当前链路：RTL-SDR → 137.100 MHz → LRPT QPSK 72k → Costas/Viterbi/RS。
+            我可以接管调谐、解调、过境规划与追踪——你需要什么？</div>
+          <div class="toolcard">tune_sdr(freq_hz: 137100000)<span class="st ok">可用</span></div>
+          <div class="toolcard">point_gimbal(az, el)<span class="st off">无云台</span></div>
+        </div>
+        <div class="pro-input">
+          <input id="proInput" placeholder="对模型说话…（能力协商 / 下达任务）">
+          <button id="proSend">发送</button>
+        </div>
+      </div>
+    </div>
+    <div class="status-bar">
+      <span class="ok">● RTL-SDR 已连接</span><span class="sep">│</span>
+      <span>解调 LRPT · Viterbi 0.12 s/帧</span><span class="sep">│</span>
+      <span>RS 全纠正 16 VCDU · ASM 91</span><span class="sep">│</span>
+      <span>能力矩阵 5/9 在位</span><span class="sep">│</span>
+      <span id="cpuLine">CPU 12%</span><span class="sep">│</span>
+      <span>MBDSDR · 能力而非流程</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   MBDSDR UI 形态原型
+   星象仪形态对齐 Stellarium Web（搜索胶囊/侧栏/信息卡/底栏/方位字/地景）
+   设计语言：.figma（黑白灰阶/MiSans/大圆角/软阴影）
+   原则：能力而非流程 · 摄像机锁星 · 模型提问而非预制
+   ================================================================ */
+"use strict";
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+/* 周日视运动（引擎机制：ICRF 星空随时间转，OBSERVED 地景纹丝不动）。
+   TIME.angle 只作用于星点与银河；CAM.x/y 是视角，作用于全部层。
+   rate 是可演示的时间倍率——点底栏 ⏱ 切换，看"天在动、地不动"。
+   定义在时钟函数之前：tickClock() 启动时会立即读它。 */
+const TIME = { angle:0, rate:1, minutes:0 };
+const TIME_RATES = [0, 1, 60, 600];
+let timeRateIdx = 1;
+
+/* ---------- 时钟（右下 chip 显示模拟时刻，顶栏显示真实 UTC） ---------- */
+function tickClock(){
+  const now = new Date();
+  const sim = new Date(now.getTime() + TIME.minutes*60000);
+  const p = n => String(n).padStart(2,"0");
+  const t = p(sim.getHours())+":"+p(sim.getMinutes())+":"+p(sim.getSeconds());
+  const utc = p(now.getUTCHours())+":"+p(now.getUTCMinutes())+":"+p(now.getUTCSeconds());
+  $("#clock").textContent = utc + " UTC";
+  $("#timeChip").textContent = t;
+  $("#dateChip").textContent = sim.getFullYear()+"-"+p(sim.getMonth()+1)+"-"+p(sim.getDate())
+    + (TIME.rate !== 1 ? "  ·  " + (TIME.rate === 0 ? "静止" : TIME.rate + "×") : "");
+}
+setInterval(tickClock, 1000); tickClock();
+
+/* ---------- 形态切换 ---------- */
+$("#modeSwitch").addEventListener("click", e => {
+  const b = e.target.closest("button"); if(!b) return;
+  $$("#modeSwitch button").forEach(x => x.classList.toggle("on", x===b));
+  const form = b.dataset.form;
+  $("#skyForm").classList.toggle("on", form==="sky");
+  $("#proForm").classList.toggle("on", form==="pro");
+  document.body.classList.toggle("sky-immersive", form==="sky");
+});
+document.body.classList.add("sky-immersive");
+
+/* ---------- 汉堡 / 侧栏 ---------- */
+$("#burger").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
+$("#skyForm").addEventListener("click", e => {
+  if(!e.target.closest("#sidebar") && !e.target.closest("#burger"))
+    $("#sidebar").classList.remove("open");
+});
+
+/* ================================================================
+   星象仪模式 — 天球渲染 + 摄像机
+   ================================================================ */
+const cv = $("#skyCanvas"), cx = cv.getContext("2d");
+let W=0, H=0, DPR = Math.min(2, window.devicePixelRatio||1);
+
+const CAM = { x:0, y:0, scale:1, tx:0, ty:0, ts:1, locked:null };
+let burstT = 0;
+const STARS = [], SATS = [];
+const SKY = { orbits:true, labels:true, milkyway:true, landscape:true,
+               grid:false, night:false, sats:true, atmosphere:true };
+
+function makeSky(){
+  STARS.length = 0;
+  for(let i=0;i<820;i++){
+    const ang = Math.random()*Math.PI*2;
+    const rad = Math.pow(Math.random(), .62) * 1.35;
+    STARS.push({
+      ang, rad,
+      mag: Math.random()*.9 + .12,
+      tw: Math.random()*Math.PI*2,
+      sp: .3 + Math.random()*1.4,
+      // 微色温（Stellarium 式：蓝白→橙白，克制）
+      hue: Math.random()<.14 ? (Math.random()<.55 ? 210 : 32) : 215
+    });
+  }
+}
+
+const SAT_DEFS = [
+  { id:"METEOR-M2",  norad:"40069", type:"气象卫星", alias:"METEOR-M2 · Метеор-М №2 · 2014-037A",
+    band:"137.100 MHz", mode:"LRPT · QPSK 72k",
+    orbit:{a:.92, b:.42, tilt:-.5, w:.00021, phase:.4}, size:3.2,
+    desc:"俄罗斯 Meteor-M 系列极轨气象卫星，下行 LRPT 数字图像（72 ksym/s QPSK）。是本仓真录金样与图像链的标的星。",
+    kv:[["星等","4.1"],["距离","10404.25 km"],["Ra/Dec","18h 34m / -39°39'"],
+        ["Az/Alt","257°05' / -50°47'"],["可见","升 14:22 / 落 14:33"],
+        ["下行","137.100 MHz"],["体制","LRPT 72k QPSK"],["多普勒","±39.2 kHz"]] },
+  { id:"NOAA-19",    norad:"33591", type:"气象卫星", alias:"NOAA-19 · 2009-005A",
+    band:"137.9125 MHz", mode:"APT · AM",
+    orbit:{a:1.05, b:.5, tilt:.32, w:.00019, phase:2.1}, size:3.0,
+    desc:"NOAA 系列极轨气象卫星，APT 模拟图像双副载波 AM 下行，业余接收经典标的。",
+    kv:[["星等","3.8"],["距离","2210.6 km"],["Ra/Dec","06h 12m / +12°04'"],
+        ["Az/Alt","188°41' / +47°12'"],["可见","升 15:41 / 落 15:52"],
+        ["下行","137.9125 MHz"],["体制","APT 2×AM"],["多普勒","±33.7 kHz"]] },
+  { id:"ISS (ZARYA)", norad:"25544", type:"空间站", alias:"ISS · ISS (ZARYA) · COSPAR 1998-067A",
+    band:"145.800 MHz", mode:"SSTV / 业余",
+    orbit:{a:.72, b:.72, tilt:.9, w:.00031, phase:4.4}, size:3.8,
+    desc:"国际空间站（ISS）是近地轨道载人空间站，由五家航天机构共同运营：NASA、Roscosmos、ESA、JAXA、CSA……",
+    kv:[["星等","99.00"],["距离","10404.25 km"],["Ra/Dec","18h 34m / -39°39'"],
+        ["Az/Alt","257°05' / -50°47'"],["可见","升 00:06 / 落 00:17"],
+        ["下行","145.800 MHz"],["体制","FM / SSTV"],["多普勒","±40.1 kHz"]] },
+  { id:"IRIDIUM 107", norad:"24793", type:"通信卫星", alias:"IRIDIUM 107 · 1997-043C",
+    band:"1626.250 MHz", mode:"L 波段 · 突发试验",
+    orbit:{a:1.22, b:.34, tilt:-1.1, w:.00026, phase:1.2}, size:2.8,
+    desc:"Iridium 星座卫星，L 波段突发信号，多普勒观测数据集标的。",
+    kv:[["星等","5.2"],["距离","780.3 km"],["Ra/Dec","21h 02m / +33°18'"],
+        ["Az/Alt","301°22' / +62°40'"],["可见","—"],
+        ["下行","1626.250 MHz"],["体制","L 波段 突发"],["轨道","780 km LEO"]] },
+  { id:"STARLINK-1007", norad:"44713", type:"通信卫星", alias:"STARLINK-1007 · 2019-084A",
+    band:"10.7–12.7 GHz", mode:"Ku · 波束成形",
+    orbit:{a:1.45, b:.62, tilt:.16, w:.00034, phase:5.6}, size:2.4,
+    desc:"SpaceX Starlink 星座低轨通信卫星，Ku 波段下行。",
+    kv:[["星等","6.1"],["距离","552.0 km"],["Ra/Dec","03h 44m / +58°12'"],
+        ["Az/Alt","112°18' / +41°02'"],["可见","持续"],
+        ["下行","10.7–12.7 GHz"],["体制","DVB-S2X"],["多普勒","±210 kHz"]] },
+];
+
+function makeSats(){
+  SATS.length = 0;
+  for(const d of SAT_DEFS) SATS.push({ ...d, t: d.orbit.phase*6.0 });
+}
+
+function resize(){
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = W*DPR; cv.height = H*DPR;
+  cx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener("resize", resize);
+
+function satPos(s, timeMs){
+  const o = s.orbit;
+  const th = o.phase + timeMs*o.w;
+  let x = Math.cos(th)*o.a, y = Math.sin(th)*o.b;
+  const ct = Math.cos(o.tilt), st = Math.sin(o.tilt);
+  return { x: x*ct - y*st, y: x*st + y*ct };
+}
+
+function worldToScreen(p){
+  return {
+    x: W/2 + (p.x - CAM.x)*CAM.scale*260,
+    y: H/2 - (p.y - CAM.y)*CAM.scale*260
+  };
+}
+
+let skyAnimT = 0;
+function drawSky(dt){
+  skyAnimT += dt;
+  // 时间流逝只推星空角，不再推视角——地景/方位字/轨道弧固定在地平系
+  // dt 为毫秒：/60000 = 真实分钟数，再乘倍率
+  TIME.angle += dt * 0.000008 * Math.min(TIME.rate, 60);   // 角速度封顶，600× 不转晕
+  TIME.minutes += dt / 60000 * TIME.rate;
+  const ease = 1 - Math.pow(0.0025, dt);
+  CAM.x += (CAM.tx - CAM.x)*ease;
+  CAM.y += (CAM.ty - CAM.y)*ease;
+  CAM.scale += (CAM.ts - CAM.scale)*ease;
+
+  // 太阳高度（简化天文钟：6:00 日出 / 12:00 中天 / 18:00 日落）
+  const simHour = ((new Date().getHours() + new Date().getMinutes()/60)
+                   + TIME.minutes/60) % 24;
+  const sunAlt = Math.sin((simHour - 6)/12 * Math.PI);   // -1..1
+  const day = Math.max(0, sunAlt);
+  const twilight = Math.max(0, 1 - Math.abs(sunAlt)*3.2);
+
+  // 背景：白天被大气提亮，夜里深蓝黑
+  const g = cx.createRadialGradient(W*.5, H*.42, 60, W*.5, H*.5, Math.max(W,H)*.75);
+  const bgTop = day > .08 ? `rgb(${Math.round(16+day*54)},${Math.round(19+day*72)},${Math.round(24+day*108)})`
+                          : "#101318";
+  g.addColorStop(0, bgTop); g.addColorStop(.45, "#070a10"); g.addColorStop(1, "#020308");
+  cx.fillStyle = g; cx.fillRect(0,0,W,H);
+
+  // 银河（ICRF：随时间转，随视角平移）
+  if(SKY.milkyway){
+    cx.save();
+    const k = CAM.scale*260;
+    cx.translate(W/2 - CAM.x*k*0.15, H/2 + CAM.y*k*0.15);
+    cx.rotate(-0.42 + TIME.angle*0.6);
+    const mg = cx.createLinearGradient(-W*.7, 0, W*.7, 0);
+    mg.addColorStop(0, "rgba(140,165,220,0)");
+    mg.addColorStop(.5, "rgba(150,175,225,.10)");
+    mg.addColorStop(1, "rgba(140,165,220,0)");
+    cx.fillStyle = mg;
+    cx.fillRect(-W*.7, -40, W*1.4, 80);
+    cx.restore();
+  }
+
+  // 赤纬网格
+  if(SKY.grid){
+    cx.strokeStyle = "rgba(255,255,255,.08)"; cx.lineWidth = 1;
+    for(let i=0;i<6;i++){
+      cx.beginPath(); cx.ellipse(W/2, H/2, (i+1)*110, (i+1)*70, 0, 0, 7); cx.stroke();
+    }
+  }
+
+  // 星点（入场炸开 + 微色温；周日视运动只转这里，地景不动）
+  for(const s of STARS){
+    const rr = s.rad * (0.08 + 0.92*burstT);
+    const a = s.ang + TIME.angle*s.sp;          // 只随时间转
+    // 位置完全交 worldToScreen → 视角拖拽时星点与地景同一变换
+    const p = worldToScreen({ x: Math.cos(a)*rr*1.7, y: Math.sin(a)*rr*1.7 });
+    if(p.x < -20 || p.x > W+20 || p.y < -20 || p.y > H+20) continue;
+    const tw = 0.62 + 0.38*Math.sin(skyAnimT*0.0016*s.sp + s.tw);
+    const r = (0.5 + s.mag*1.55) * (0.55 + 0.45*burstT);
+    // 白天恒星整层消隐（引擎 skybrightness 机制的 2D 近似）
+    cx.globalAlpha = (0.2 + s.mag*.68) * tw * burstT * (1 - 0.94*day);
+    cx.fillStyle = `hsl(${s.hue}, 38%, ${76 + s.mag*18}%)`;
+    cx.beginPath(); cx.arc(p.x, p.y, r, 0, 7); cx.fill();
+    if(s.mag > .82){ cx.globalAlpha *= .3; cx.beginPath(); cx.arc(p.x, p.y, r*3.2, 0, 7); cx.fill(); }
+  }
+  cx.globalAlpha = 1;
+
+  // 轨道弧
+  if(SKY.orbits && SKY.sats){
+    for(const s of SATS){
+      const o = s.orbit;
+      cx.strokeStyle = "rgba(255,255,255,.15)";
+      cx.lineWidth = 1.3; cx.lineCap = "round";
+      cx.setLineDash([3, 8]);
+      cx.beginPath();
+      for(let i=0;i<=64;i++){
+        const th = (i/64)*Math.PI*2;
+        let x = Math.cos(th)*o.a, y = Math.sin(th)*o.b;
+        const ct = Math.cos(o.tilt), st = Math.sin(o.tilt);
+        const p = worldToScreen({ x: x*ct - y*st, y: x*st + y*ct });
+        i ? cx.lineTo(p.x, p.y) : cx.moveTo(p.x, p.y);
+      }
+      cx.stroke(); cx.setLineDash([]);
+    }
+  }
+
+  // 卫星：白点+环
+  if(SKY.sats){
+    for(const s of SATS){
+      const wp = satPos(s, skyAnimT);
+      const p = worldToScreen(wp);
+      const locked = CAM.locked === s;
+      const col = "#ffffff";
+      const halo = cx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
+      halo.addColorStop(0, col + (locked ? "bb" : "55"));
+      halo.addColorStop(1, col + "00");
+      cx.fillStyle = halo;
+      cx.beginPath(); cx.arc(p.x, p.y, 14, 0, 7); cx.fill();
+      cx.strokeStyle = col; cx.lineWidth = 1;
+      cx.globalAlpha = .55;
+      cx.beginPath(); cx.arc(p.x, p.y, s.size + 3.4, 0, 7); cx.stroke();
+      cx.globalAlpha = 1;
+      cx.fillStyle = col;
+      cx.beginPath(); cx.arc(p.x, p.y, s.size + (locked?1.4:0), 0, 7); cx.fill();
+      if(SKY.labels){
+        cx.font = "11px MiSans, sans-serif";
+        cx.fillStyle = locked ? "#fff" : "rgba(255,255,255,.6)";
+        cx.fillText(s.id, p.x + 13, p.y + 3.5);
+      }
+      if(locked){
+        // Stellarium 式虚线追踪环（呼吸周期 2s，引擎 pointer.c 口径）+ 准星
+        const breathe = Math.sin(skyAnimT * Math.PI / 1000) * 1.2;
+        cx.strokeStyle = "rgba(255,255,255,.85)"; cx.lineWidth = 1;
+        cx.setLineDash([4, 4]);
+        cx.beginPath(); cx.arc(p.x, p.y, 17 + breathe, 0, 7); cx.stroke();
+        cx.setLineDash([]);
+        cx.beginPath();
+        cx.moveTo(p.x-26, p.y); cx.lineTo(p.x-20, p.y);
+        cx.moveTo(p.x+20, p.y); cx.lineTo(p.x+26, p.y);
+        cx.moveTo(p.x, p.y-26); cx.lineTo(p.x, p.y-20);
+        cx.moveTo(p.x, p.y+20); cx.lineTo(p.x, p.y+26);
+        cx.stroke();
+      }
+      s._screen = p;
+    }
+  }
+
+  // 大气 / 地平辉光（引擎机制：Preetham 解析天空的 2D 近似）
+  // 顺序=星空之后、地景之前；加法混合 (ONE,ONE) 只增亮不遮挡；
+  // 天顶暗、地平亮，日落方位暖红，白天把恒星整层洗掉。
+  if(SKY.atmosphere){
+    const hzA = worldToScreen({ x:0, y:-0.62 }).y;
+    cx.save();
+    cx.globalCompositeOperation = "lighter";
+    const band = Math.max(110, H*0.34);
+    const warm = twilight > .05;
+    const rgb = warm ? [255,124,58] : [86,126,205];
+    const amp = warm ? 0.10 + 0.18*twilight + 0.16*day : 0.045 + 0.20*day;
+    cx.globalAlpha = Math.min(.55, amp);
+    const ag = cx.createLinearGradient(0, hzA-band, 0, hzA+band*0.30);
+    ag.addColorStop(0, "rgb(0,0,0)");
+    ag.addColorStop(.62, `rgb(${Math.round(rgb[0]*.45)},${Math.round(rgb[1]*.45)},${Math.round(rgb[2]*.45)})`);
+    ag.addColorStop(1, `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`);
+    cx.fillStyle = ag;
+    cx.fillRect(0, hzA-band, W, band*1.30);
+    // 太阳方位的局部暖辉光（时间/视角可感的"日落方向"）
+    if(warm){
+      const sunX = W/2 + ((2.1 - CAM.x) * CAM.scale * 260) % (W*1.4);
+      const sg = cx.createRadialGradient(sunX, hzA-18, 0, sunX, hzA-18, 190);
+      sg.addColorStop(0, "rgba(255,168,86,.42)");
+      sg.addColorStop(1, "rgba(255,120,40,0)");
+      cx.fillStyle = sg;
+      cx.fillRect(sunX-190, hzA-208, 380, 380);
+    }
+    cx.restore();
+    // 雾带：地平 ±11.5° 白色半透明（引擎 0.15·smoothstep 机制的近似）
+    const fogH = Math.max(26, H*0.055);
+    const fg = cx.createLinearGradient(0, hzA-fogH, 0, hzA+fogH);
+    fg.addColorStop(0, "rgba(255,255,255,0)");
+    fg.addColorStop(.5, "rgba(255,255,255,.13)");
+    fg.addColorStop(1, "rgba(255,255,255,0)");
+    cx.fillStyle = fg;
+    cx.fillRect(0, hzA-fogH, W, fogH*2);
+  }
+
+  // 地景剪影（相机感知：长在世界坐标上，随拖拽方位平移、随缩放缩放——
+  // Stellarium 式 360° 全景地景的 2D 近似；机制学习自 Stellarium Web Engine）
+  if(SKY.landscape){
+    const k = CAM.scale * 260;
+    const hz = worldToScreen({ x:0, y:-0.62 }).y;   // 地平线：随镜头俯仰升降
+    // 高度场 = 世界方位 x 的连续函数 → 拖拽/缩放自动跟随
+    const hillH = wx =>
+      0.115 * (0.55 + 0.35*Math.sin(wx*0.34) + 0.22*Math.sin(wx*0.9+1.7)
+             + 0.13*Math.sin(wx*2.1+4.2) + 0.08*Math.sin(wx*4.7+0.9));
+    cx.fillStyle = "#000";
+    // 缩放淡出（引擎 alpha_fov 机制：贴图放大到极限会糊，学 SWE 淡出）
+    const landAlpha = CAM.ts > 2.6 ? Math.max(0.35, 1 - (CAM.ts - 2.6) * 0.28) : 1;
+    cx.globalAlpha = landAlpha;
+    cx.beginPath();
+    cx.moveTo(0, H);
+    const step = 8;
+    for(let sxp=0; sxp<=W; sxp+=step){
+      const wx = CAM.x + (sxp - W/2) / k;
+      const top = hz - hillH(wx) * k * 2.4;
+      sxp ? cx.lineTo(sxp, top) : cx.lineTo(0, top);
+    }
+    cx.lineTo(W, H); cx.closePath(); cx.fill();
+    // 树丛：世界坐标定植，随镜头走、随缩放变
+    const period = 0.62;
+    const k1 = k || 1;
+    const i0 = Math.floor((CAM.x - W/2/k1) / period) - 1;
+    const i1 = Math.ceil((CAM.x + W/2/k1) / period) + 1;
+    for(let i=i0;i<=i1;i++){
+      const wx = i*period + (Math.sin(i*12.9898)*0.5+0.5)*0.3;
+      const sxp = W/2 + (wx - CAM.x)*k1;
+      if(sxp < -40 || sxp > W+40) continue;
+      const baseY = hz - hillH(wx) * k * 2.4;
+      const th = (10 + (Math.abs(i*7)%14)) * CAM.scale * 0.9;
+      cx.beginPath();
+      cx.moveTo(sxp - 5*CAM.scale, baseY + 3);
+      cx.lineTo(sxp, baseY - th);
+      cx.lineTo(sxp + 5*CAM.scale, baseY + 3);
+      cx.closePath(); cx.fill();
+      cx.fillRect(sxp - 1.2*CAM.scale, baseY - 1, 2.4*CAM.scale, th*0.35);
+    }
+    cx.globalAlpha = 1;
+  }
+
+  // 方位字（锚在世界方位上，随镜头平移/缩放；红点+字母，Stellarium 式）
+  const hzC = worldToScreen({ x:0, y:-0.62 }).y;
+  const kC = CAM.scale * 260;
+  const cyc = 5.2;
+  for(const [ch, off] of [["N",0],["E",1.3],["S",2.6],["W",3.9]]){
+    const first = Math.floor((CAM.x - W/2/kC - off)/cyc) - 1;
+    for(let i=first;i<=first+3;i++){
+      const wx = i*cyc + off;
+      const x = W/2 + (wx - CAM.x)*kC;
+      if(x < -40 || x > W+40) continue;
+      const y = hzC - 30;
+      if(y < -30 || y > H+30) continue;
+      cx.fillStyle = "#d2542c";
+      cx.beginPath(); cx.arc(x, y+9, 3, 0, 7); cx.fill();
+      cx.font = "bold 17px MiSans, sans-serif";
+      cx.fillText(ch, x-6, y);
+    }
+  }
+
+  // 夜视模式（Stellarium 红色夜视）
+  if(SKY.night){
+    cx.fillStyle = "rgba(120,0,0,.42)";
+    cx.fillRect(0,0,W,H);
+    cx.fillStyle = "rgba(255,40,20,.10)";
+    cx.fillRect(0,0,W,H);
+  }
+}
+
+function animate(ts){
+  const dt = Math.min(50, ts - (animate.last || ts));
+  animate.last = ts;
+  if(burstT < 1) burstT = Math.min(1, burstT + dt*0.0011);
+  if($("#skyForm").classList.contains("on")) drawSky(dt);
+  drawWaterfall(dt);
+  requestAnimationFrame(animate);
+}
+
+/* ---------- 拖拽看天（grab-the-sky：按下点钉在光标下）+ 滚轮缩放（zoom-to-cursor） ---------- */
+let dragState = null, dragMoved = false;
+cv.addEventListener("mousedown", e => {
+  dragMoved = false;
+  const r = cv.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  const k = CAM.scale * 260;
+  // 反投影出按下点的世界方向，拖拽全程让这个点保持在光标下
+  dragState = { sx, sy, wx: CAM.x + (sx - W/2)/k, wy: CAM.y - (sy - H/2)/k };
+  if(CAM.locked) unlock();          // 拖拽即脱离锁定（Stellarium 同款行为）
+});
+window.addEventListener("mousemove", e => {
+  if(!dragState) return;
+  const r = cv.getBoundingClientRect();
+  const px = e.clientX - r.left, py = e.clientY - r.top;
+  if(Math.abs(px - dragState.sx) > 5 || Math.abs(py - dragState.sy) > 5) dragMoved = true;
+  const k = CAM.scale * 260;
+  CAM.tx = dragState.wx - (px - W/2)/k;
+  CAM.ty = dragState.wy + (py - H/2)/k;
+});
+window.addEventListener("mouseup", () => { dragState = null; });
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const k0 = CAM.ts * 260;
+  const wx = CAM.tx + (mx - W/2)/k0;
+  const wy = CAM.ty - (my - H/2)/k0;
+  const next = Math.max(0.6, Math.min(5, CAM.ts * (e.deltaY < 0 ? 1.12 : 1/1.12)));
+  const k1 = next * 260;
+  // 补回视角，使光标下的天体不动（引擎 zoom-to-cursor 口径）
+  CAM.tx = wx - (mx - W/2)/k1;
+  CAM.ty = wy + (my - H/2)/k1;
+  CAM.ts = next;
+}, { passive:false });
+
+/* ---------- 点击选星 → 摄像机锁定 ---------- */
+cv.addEventListener("click", e => {
+  if(dragMoved) return;             // 拖拽不算点击
+  const r = cv.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = null, bd = 26*26;
+  for(const s of SATS){
+    if(!s._screen) continue;
+    const d = (s._screen.x-mx)**2 + (s._screen.y-my)**2;
+    if(d < bd){ bd = d; best = s; }
+  }
+  if(best) lockSat(best);
+});
+
+function lockSat(s){
+  CAM.locked = s;
+  CAM.ts = 2.1;
+  const wp = satPos(s, skyAnimT);
+  CAM.tx = wp.x; CAM.ty = wp.y;
+  // 信息卡（Stellarium Web 字段式）
+  $("#scName").textContent = "NORAD " + s.norad;
+  $("#scSub").textContent = `${s.type} · ${s.id}`;
+  $("#scAlias").innerHTML = `又称 ` + s.alias.split(" · ").map(a=>`<b>${a}</b>`).join(" ");
+  $("#scKv").innerHTML = s.kv.map(([k,v]) =>
+    `<dt>${k}</dt><dd class="${/可见|下行|体制|多普勒/.test(k)?"hl":""}">${v}</dd>`).join("");
+  $("#scDesc").innerHTML = s.desc + `　<a>more on wikipedia</a>`;
+  $("#satCard").classList.add("open");
+  $("#zoomFabs").style.display = "flex";
+  $("#zoomFabs").style.top = "";
+  $("#zoomFabs").style.bottom = "86px";
+  cancelAnimationFrame(lockSat._raf);
+  follow();
+  function follow(){
+    if(CAM.locked !== s) return;
+    const p = satPos(s, skyAnimT);
+    CAM.tx = p.x; CAM.ty = p.y;
+    lockSat._raf = requestAnimationFrame(follow);
+  }
+}
+function unlock(){
+  // 只脱离锁定，视角原地不动（Stellarium 语义；旧版把视角弹回中心是错的）
+  CAM.locked = null;
+  $("#satCard").classList.remove("open");
+  $("#zoomFabs").style.display = "none";
+}
+$("#scClose").addEventListener("click", unlock);
+$("#satCard").addEventListener("click", e => {
+  const b = e.target.closest("[data-act]"); if(!b) return;
+  const act = b.dataset.act;
+  if(act === "unlock"){ unlock(); return; }
+  openAI(act, CAM.locked);
+});
+
+/* 缩放钮 */
+$("#zoomIn").addEventListener("click", () => { CAM.ts = Math.min(4, CAM.ts*1.35); });
+$("#zoomOut").addEventListener("click", () => {
+  CAM.ts = Math.max(1, CAM.ts/1.35);
+  if(CAM.ts <= 1.02 && !CAM.locked) CAM.ts = 1;
+});
+
+/* ---------- 搜索 ---------- */
+$("#searchInput").addEventListener("keydown", e => {
+  if(e.key !== "Enter") return;
+  const q = e.target.value.trim().toLowerCase();
+  if(!q) return;
+  const hit = SATS.find(s => (s.id+s.norad+s.type).toLowerCase().includes(q));
+  if(hit) lockSat(hit);
+});
+
+/* ---------- 工具栏 ---------- */
+$("#skyToolbar").addEventListener("click", e => {
+  const b = e.target.closest("[data-tb]"); if(!b) return;
+  const k = b.dataset.tb;
+  if(k === "fullscreen"){
+    if(document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.();
+    b.classList.toggle("on");
+    return;
+  }
+  if(k === "time"){
+    // 时间流速循环：1× → 60× → 600× → 静止 → 1×
+    timeRateIdx = (timeRateIdx + 1) % TIME_RATES.length;
+    TIME.rate = TIME_RATES[timeRateIdx];
+    $("#rateTag").textContent = TIME.rate === 0 ? "停" : TIME.rate + "×";
+    b.classList.toggle("on", TIME.rate !== 0);
+    tickClock();
+    return;
+  }
+  SKY[k] = !SKY[k];
+  b.classList.toggle("on", SKY[k]);
+});
+
+/* ================================================================
+   能力矩阵 — 能力而非流程
+   ================================================================ */
+const CAPS = [
+  { id:"sdr",     icon:"▦", name:"SDR 接收机",   desc:"RTL-SDR / Pluto / 收发信机", on:true },
+  { id:"gimbal",  icon:"◎", name:"云台 / 转台",   desc:"天线指向 · 自动跟踪", on:false },
+  { id:"gnss",    icon:"⊕", name:"GNSS / 授时",   desc:"位置时间基准 · 1PPS", on:true },
+  { id:"vis6dof", icon:"✦", name:"6DOF 视觉引导", desc:"位姿估计 · 视线校正", on:false },
+  { id:"calib",   icon:"✛", name:"视觉校准",     desc:"相机-天线轴系标定", on:false },
+  { id:"vrxr",    icon:"◌", name:"VR / XR",      desc:"沉浸视场 · 后续接入", on:false },
+  { id:"spec",    icon:"≋", name:"频谱分析",     desc:"FFT / 瀑布 / 信道化", on:true },
+  { id:"stack",   icon:"⇶", name:"解调协议栈",   desc:"LRPT/APT/FT8/ADS-B/SSTV", on:true },
+  { id:"point",   icon:"➤", name:"天线指向",     desc:"az/el 预置 · 随动", on:true },
+];
+const capState = Object.fromEntries(CAPS.map(c => [c.id, c.on]));
+
+function renderCaps(){
+  $("#capBody").innerHTML = CAPS.map(c => `
+    <div class="cap ${capState[c.id]?"on":"dim"}" data-cap="${c.id}">
+      <div class="n"><i>${c.icon}</i>${c.name}</div>
+      <div class="m">${c.desc}</div>
+      <div class="sw"></div>
+    </div>`).join("");
+}
+renderCaps();
+$("#capBody").addEventListener("click", e => {
+  const el = e.target.closest("[data-cap]"); if(!el) return;
+  const id = el.dataset.cap;
+  capState[id] = !capState[id];
+  renderCaps();
+});
+$("#capHead").addEventListener("click", () => $("#capDrawer").classList.toggle("folded"));
+$("[data-cap-open]")?.addEventListener("click", () => {
+  $("#capDrawer").classList.remove("folded");
+  $("#sidebar").classList.remove("open");
+});
+
+/* ================================================================
+   AI 协商 — 模型提问（非预制向导）
+   ================================================================ */
+const aiStream = $("#aiStream");
+function bubble(who, html, cls="model"){
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.innerHTML = `<div class="who">${who}</div>${html}`;
+  aiStream.appendChild(d);
+  aiStream.scrollTop = aiStream.scrollHeight;
+  return d;
+}
+function tool(name, st, cls="ok"){
+  const d = document.createElement("div");
+  d.className = "toolcard";
+  d.innerHTML = `${name}<span class="st ${cls}">${st}</span>`;
+  aiStream.appendChild(d);
+  aiStream.scrollTop = aiStream.scrollHeight;
+}
+function quicks(opts){
+  const w = document.createElement("div");
+  w.className = "quick";
+  w.innerHTML = opts.map(o => `<button data-q="${o[1]}">${o[0]}</button>`).join("");
+  w.addEventListener("click", e => {
+    const b = e.target.closest("button"); if(!b) return;
+    const val = b.textContent;
+    bubble("你", val, "user");
+    w.remove();
+    respond(val, b.dataset.q);
+  });
+  aiStream.appendChild(w);
+  aiStream.scrollTop = aiStream.scrollHeight;
+}
+function typeText(el, text, done){
+  let i = 0;
+  el.innerHTML = '<div class="who">MBDSDR 模型</div><span class="tw"></span>';
+  const span = el.querySelector(".tw");
+  const timer = setInterval(() => {
+    span.textContent = text.slice(0, ++i);
+    aiStream.scrollTop = aiStream.scrollHeight;
+    if(i >= text.length){ clearInterval(timer); done && done(); }
+  }, 16);
+}
+
+function openAI(act, sat){
+  $("#aiDrawer").classList.add("open");
+  const name = sat ? sat.id : "目标";
+  aiStream.innerHTML = "";
+  const first = bubble("MBDSDR 模型", "");
+  const line = act==="receive"
+    ? `收到——对 ${name} 启动「接收」。我不预设链路方案，先确认现场能力：① 有 SDR 吗？什么型号、覆盖到哪个频段？② 有云台（天线转台）吗？③ 有 GNSS/授时模块吗？`
+    : act==="track"
+    ? `收到——「追踪」${name}。这需要闭环：测角/测频反馈 + 指向执行。我先问现场：① 有 SDR 吗？② 有云台吗？③ 有 GNSS 吗？有没有视觉（摄像头）可用于 6DOF 引导？`
+    : act==="point"
+    ? `「指向」${name}：需要执行机构。① 有云台/转台吗？控制协议是什么？② 有 GNSS 给出站址与真北吗？`
+    : `「视觉校准」：相机-天线轴系标定。① 有相机吗？② 有云台吗？③ 6DOF 视觉引导是否启用？`;
+  typeText(first, line, () => {
+    tool(`get_satellite_pass(name="${name}")`, "已调用", "ok");
+    quicks([
+      ["有 SDR：RTL-SDR","sdr:rtl"],
+      ["有 SDR：ADALM-Pluto","sdr:pluto"],
+      ["没有 SDR","sdr:none"],
+      ["有云台","gimbal:yes"],
+      ["没有云台","gimbal:no"],
+      ["有 GNSS","gnss:yes"],
+    ]);
+  });
+}
+
+let flow = { sdr:null, gimbal:null, gnss:null };
+function respond(text, key){
+  const map = {
+    "sdr:rtl":   () => {
+      flow.sdr = "RTL-SDR";
+      return {
+        t:`好，RTL-SDR 覆盖 24–1766 MHz，${CAM.locked?CAM.locked.band:"137 MHz"} 在范围内。继续：有云台吗？没有的话我用「固定天线 + 预报过境」的降级方案。`,
+        tools:[["tune_sdr(freq_hz=137100000)","可用","ok"]],
+        next:[["有云台","gimbal:yes"],["没有云台","gimbal:no"]]
+      };
+    },
+    "sdr:pluto": () => {
+      flow.sdr = "ADALM-Pluto";
+      return {
+        t:`注意——PlutoSDR 基带 325 MHz 起，137 MHz 需要上变频器/前置混频，或者 VHF 用另一台机器。方案我会按此调整。云台情况？`,
+        tools:[["tune_sdr(freq_hz=325e6..3.8e9)","频段受限","wait"],["downconverter_hint","需外置","wait"]],
+        next:[["有云台","gimbal:yes"],["没有云台","gimbal:no"],["我再找台 RTL-SDR","sdr:rtl"]]
+      };
+    },
+    "sdr:none":  () => {
+      flow.sdr = null;
+      return {
+        t:`明白，暂无 SDR。那我把任务降级为「过境预报 + 指向/记录计划」，把可执行清单留好——等设备接入，我随时能把全链路拉起来。云台与 GNSS 呢？`,
+        tools:[["tune_sdr(...)","无设备","off"],["get_satellite_pass(...)","可用","ok"]],
+        next:[["有云台","gimbal:yes"],["没有云台","gimbal:no"]]
+      };
+    },
+    "gimbal:yes":() => {
+      flow.gimbal = true;
+      return {
+        t:`云台在位，追踪可以做闭环（az/el 随动 + 多普勒引导）。GNSS/授时有吗？它决定时间戳精度与站址标定方式。`,
+        tools:[["point_gimbal(az, el)","可用","ok"],["track_mode: closed-loop","启用","ok"]],
+        next:[["有 GNSS","gnss:yes"],["没有 GNSS","gnss:no"]]
+      };
+    },
+    "gimbal:no": () => {
+      flow.gimbal = false;
+      return {
+        t:`没有云台——那就「固定天线 + 高仰角过境窗口」方案，追踪降级为预报跟随。GNSS/授时呢？`,
+        tools:[["point_gimbal(az, el)","无云台","off"],["track_mode: precompute","降级","wait"]],
+        next:[["有 GNSS","gnss:yes"],["没有 GNSS","gnss:no"]]
+      };
+    },
+    "gnss:yes":  () => { flow.gnss = true; return finish(); },
+    "gnss:no":   () => { flow.gnss = false; return finish(); },
+  };
+  const fn = map[key] || (() => ({ t:"（继续）", tools:[], next:[["有 SDR","sdr:rtl"],["没有","sdr:none"]] }));
+  const r = fn();
+  setTimeout(() => {
+    const m = bubble("MBDSDR 模型", "");
+    typeText(m, r.t, () => {
+      (r.tools||[]).forEach(t => tool(t[0], t[1], t[2]));
+      if(r.next) quicks(r.next);
+    });
+  }, 260);
+}
+
+function finish(){
+  const sat = CAM.locked;
+  const name = sat ? sat.id : "目标";
+  const parts = [];
+  if(flow.sdr) parts.push(flow.sdr); else parts.push("无 SDR（仅预报）");
+  parts.push(flow.gimbal ? "云台闭环" : "固定天线");
+  parts.push(flow.gnss ? "GNSS 授时" : "自由时钟");
+  return {
+    t:`能力盘点完成：${parts.join(" · ")}。我现在把 ${name} 的任务装配成你现场的样子——不套模板。${flow.sdr&&flow.gimbal?"追踪闭环已拉起：多普勒引导 + az/el 随动。":flow.sdr?"先按过境窗口预置频率计划，信号进来我就解调。":"设备就位后随时唤醒全链路。"}VR/XR、6DOF 视觉引导挂了能力位，随时可并入。`,
+    tools:[
+      ["get_satellite_pass(...)","已调用","ok"],
+      [`plan_downlink(${flow.sdr?"live":"offline"})`,"已生成","ok"],
+    ],
+    next:null
+  };
+}
+
+$("#aiClose").addEventListener("click", () => $("#aiDrawer").classList.remove("open"));
+
+/* ---------- AI 抽屉对话输入（定轨等任务的唯一触发口：用户开口说） ---------- */
+$("#aiSend").addEventListener("click", sendAI);
+$("#aiInput").addEventListener("keydown", e => { if(e.key === "Enter") sendAI(); });
+function sendAI(){
+  const inp = $("#aiInput");
+  const v = inp.value.trim(); if(!v) return;
+  bubble("你", v, "user");
+  inp.value = "";
+  setTimeout(() => {
+    const m = bubble("MBDSDR 模型", "");
+    if(/定轨|轨道确定|orbit/i.test(v)){
+      // 定轨不是 UI 功能——只有用户跟模型说，才走这条协商
+      typeText(m, `「定轨」收到。走多普勒观测 → RLS 估计（参考 IRIDIUM 107 观测数据集）。我不预设方案，先确认设备：① 有 SDR 做频率测量吗？什么频稳水平？② 有 GNSS 授时打时间戳吗？`, () => {
+        quicks([
+          ["有 SDR：RTL-SDR","sdr:rtl"],
+          ["有 SDR：ADALM-Pluto","sdr:pluto"],
+          ["没有 SDR","sdr:none"],
+          ["有 GNSS","gnss:yes"],
+        ]);
+      });
+    } else {
+      typeText(m, `明白。我可以直接操作的能力：调谐、解调、过境规划、指向、追踪闭环……都是工具调用，不是固定流程。先确认现场设备清单，还是直接装配任务？`, () => {
+        tool("inspect_capabilities()", "已扫描", "ok");
+      });
+    }
+  }, 240);
+}
+
+/* ================================================================
+   专业模式 — 频谱/瀑布（灰阶热力）+ 可拖分隔条
+   ================================================================ */
+const sc = $("#specCanvas"), sx = sc.getContext("2d");
+let wfRows = [];
+function drawWaterfall(dt){
+  if(!$("#proForm").classList.contains("on")) return;
+  const w = sc.clientWidth, h = sc.clientHeight;
+  if(sc.width !== w*2 || sc.height !== h*2){ sc.width = w*2; sc.height = h*2; }
+  sx.setTransform(2,0,0,2,0,0);
+  sx.fillStyle = "#050505"; sx.fillRect(0,0,w,h);
+  const specH = h*0.42;
+  sx.strokeStyle = "rgba(255,255,255,.06)"; sx.lineWidth = 1;
+  for(let i=0;i<=8;i++){
+    const x = i/8*w;
+    sx.beginPath(); sx.moveTo(x,0); sx.lineTo(x,h); sx.stroke();
+    const y = i/8*specH;
+    sx.beginPath(); sx.moveTo(0,y); sx.lineTo(w,y); sx.stroke();
+  }
+  const n = 180;
+  const spec = [];
+  for(let i=0;i<n;i++){
+    const x = i/(n-1);
+    let v = 0.12 + Math.random()*0.05 + 0.05*Math.sin(x*24 + skyAnimT*0.001);
+    v += 0.52*Math.exp(-((x-0.42)**2)/0.0016);
+    v += 0.18*Math.exp(-((x-0.58)**2)/0.004);
+    v += 0.11*Math.exp(-((x-0.16)**2)/0.006);
+    spec.push(v);
+  }
+  sx.beginPath();
+  sx.moveTo(0, specH);
+  spec.forEach((v,i) => sx.lineTo(i/(n-1)*w, specH - v*specH*0.92));
+  sx.lineTo(w, specH); sx.closePath();
+  const fg = sx.createLinearGradient(0,0,0,specH);
+  fg.addColorStop(0, "rgba(255,255,255,.30)"); fg.addColorStop(1, "rgba(255,255,255,.02)");
+  sx.fillStyle = fg; sx.fill();
+  sx.strokeStyle = "#ffffff"; sx.lineWidth = 1.3;
+  sx.beginPath();
+  spec.forEach((v,i) => {
+    const x = i/(n-1)*w, y = specH - v*specH*0.92;
+    i ? sx.lineTo(x,y) : sx.moveTo(x,y);
+  });
+  sx.stroke();
+  wfRows.unshift(spec);
+  if(wfRows.length > 220) wfRows.pop();
+  const wfTop = specH + 6, wfH = h - wfTop;
+  const rowH = wfH / 220;
+  for(let r=0;r<wfRows.length;r++){
+    const row = wfRows[r];
+    for(let i=0;i<n;i++){
+      const v = row[i];
+      const lum = Math.min(235, Math.pow(v*1.25, 1.2) * 235) | 0;
+      sx.fillStyle = `rgb(${lum},${lum},${lum})`;
+      sx.fillRect(i/n*w, wfTop + r*rowH, w/n + 1, rowH + 1);
+    }
+  }
+  if(Math.random() < .06){
+    $("#rmsVal").textContent = (-78 - Math.random()*3).toFixed(1);
+    $("#cfoVal").textContent = (Math.random()*0.8 - 0.3).toFixed(2);
+  }
+}
+
+/* 分隔条拖拽 */
+(() => {
+  const split = $("#proSplit"), right = $("#proRight");
+  let dragging = false;
+  split.addEventListener("mousedown", () => { dragging = true; split.classList.add("drag"); });
+  window.addEventListener("mouseup", () => { dragging = false; split.classList.remove("drag"); });
+  window.addEventListener("mousemove", e => {
+    if(!dragging) return;
+    const w = Math.max(280, Math.min(620, window.innerWidth - e.clientX));
+    right.style.width = w + "px";
+  });
+})();
+
+/* 专业模式聊天输入 */
+$("#proSend").addEventListener("click", sendPro);
+$("#proInput").addEventListener("keydown", e => { if(e.key === "Enter") sendPro(); });
+function sendPro(){
+  const inp = $("#proInput");
+  const v = inp.value.trim(); if(!v) return;
+  const s = $("#proStream");
+  s.insertAdjacentHTML("beforeend",
+    `<div class="msg user"><div class="who">你</div>${v}</div>`);
+  inp.value = "";
+  s.scrollTop = s.scrollHeight;
+  setTimeout(() => {
+    s.insertAdjacentHTML("beforeend",
+      `<div class="msg model"><div class="who">MBDSDR 模型</div>
+       明白。这条能力我可以直接操作（频谱/调谐/解调等皆为工具调用，非固定流程）。
+       需要我先确认现场设备清单，还是直接装配任务？</div>
+       <div class="toolcard">inspect_capabilities()<span class="st ok">已扫描</span></div>`);
+    s.scrollTop = s.scrollHeight;
+  }, 420);
+}
+
+/* ---------- 启动 ---------- */
+makeSky(); makeSats(); resize();
+requestAnimationFrame(animate);
+setTimeout(() => {
+  if(!CAM.locked && $("#skyForm").classList.contains("on")) lockSat(SATS[2]); // ISS 同款信息卡
+}, 2400);
+</script>
+</body>
+</html>

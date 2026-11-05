@@ -1,0 +1,323 @@
+# -*- coding: utf-8 -*-
+"""产品工程静态验收：语法 / DOM / 三语覆盖 / 硬编码文案 / 事实源一致性 /
+定轨铁律 / 原仓库红线 / 文档链 / 产物。
+
+用法：python tests/verify_product.py
+退出码 0 = 全部通过；非 0 会列出每一条失败原因。
+"""
+from __future__ import annotations
+import json
+import re
+import subprocess
+import sys
+from html.parser import HTMLParser
+from pathlib import Path
+
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from paths import ROOT, REPO
+SRC = ROOT / "src"
+DOCS = ROOT / "docs"
+NODE = "node"
+PY = sys.executable
+errors: list[str] = []
+warnings: list[str] = []
+
+# 生成物：含仓库中文事实与文档正文，不参与「代码不得硬编码中文」检查
+GENERATED = {"05-repo-facts.js", "70-docs-data.js", "20-i18n.js", "12-sky-catalog.js"}
+
+
+def fail(msg): errors.append(msg)
+def warn(msg): warnings.append(msg)
+
+
+def strip_comments(js: str) -> str:
+    js = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
+    return "\n".join(re.sub(r"(?<!:)//.*$", "", ln) for ln in js.splitlines())
+
+
+# ---------- 0. 事实源是否存在且与 JS 生成物一致 ----------
+facts_path = ROOT / "build/repo-facts.json"
+if not facts_path.is_file():
+    fail("[facts] 缺 build/repo-facts.json（先跑 build/sync_from_repo.py）")
+    FACTS = {}
+    payload_norm = ""
+else:
+    FACTS = json.loads(facts_path.read_text(encoding="utf-8"))
+    payload_norm = json.dumps(FACTS, ensure_ascii=False, sort_keys=True)
+    gen = (SRC / "05-repo-facts.js")
+    if not gen.is_file():
+        fail("[facts] 缺 src/05-repo-facts.js")
+    elif payload_norm not in gen.read_text(encoding="utf-8").replace("\n", " "):
+        # JS 是 indent=2 的原文，逐字比较更严格
+        raw = facts_path.read_text(encoding="utf-8").rstrip("\n")
+        if raw not in gen.read_text(encoding="utf-8"):
+            fail("[facts] 05-repo-facts.js 与 repo-facts.json 漂移（重跑同步器）")
+FACT_IDS = {d["id"] for d in FACTS.get("domains", [])} | \
+           {p["id"] for p in FACTS.get("planned", [])}
+print(f"[0] 事实源：{len(FACTS.get('domains', []))} 域 + "
+      f"{len(FACTS.get('planned', []))} 规划项，共 {len(FACT_IDS)} 个能力位")
+
+# ---------- 1. JS 语法 ----------
+js_files = sorted(SRC.glob("*.js"))
+for f in js_files:
+    r = subprocess.run([NODE, "--check", str(f)], capture_output=True, text=True)
+    if r.returncode:
+        fail(f"[syntax] {f.name}: {r.stderr.strip()[:300]}")
+print(f"[1] JS 语法：{len(js_files)} 个模块")
+
+# ---------- 2. 词典 ----------
+i18n_src = (SRC / "20-i18n.js").read_text(encoding="utf-8")
+pat = re.compile(
+    r'^\s*"([^"]+)":\s*\{\s*zh:\s*"((?:[^"\\]|\\.)*)",\s*'
+    r'ja:\s*"((?:[^"\\]|\\.)*)",\s*en:\s*"((?:[^"\\]|\\.)*)"\s*\}', re.M)
+DICT = {m.group(1): (m.group(2), m.group(3), m.group(4)) for m in pat.finditer(i18n_src)}
+if len(DICT) < 100:
+    fail(f"[i18n] 词典条目过少（{len(DICT)}），解析正则可能失效")
+for k, (zh, ja, en) in DICT.items():
+    if not zh.strip() or not ja.strip() or not en.strip():
+        fail(f"[i18n] {k} 缺语言：zh={bool(zh)} ja={bool(ja)} en={bool(en)}")
+zh_seen: dict[str, str] = {}
+for k, (zh, _, _) in DICT.items():
+    n = re.sub(r"\s+", " ", zh).strip()
+    if n in zh_seen:
+        warn(f"[i18n] zh 反查冲突：{zh_seen[n]} / {k}（后者胜出，需人工确认译文可接受）")
+    zh_seen[n] = k
+LOOKUP = {re.sub(r"\s+", " ", zh).strip() for zh, _, _ in DICT.values()}
+print(f"[2] 词典：{len(DICT)} 条 × 3 语，{len(warnings)} 条反查冲突提示")
+
+# ---------- 3. t() / 元数据引用是否都有词条 ----------
+all_js = "\n".join(strip_comments(f.read_text(encoding="utf-8")) for f in js_files
+                   if f.name not in GENERATED)
+used = set(re.findall(r'\bt\(\s*["\']([A-Za-z0-9_.\-]+)["\']', all_js))
+data_src = (SRC / "10-data.js").read_text(encoding="utf-8")
+for k in re.findall(r'"([a-z][a-z0-9_]*(?:\.[a-z0-9_\-]+)+)"', data_src):
+    if k.endswith(".md") or "/" in k:
+        continue
+    used.add(k)
+missing = sorted(k for k in used if k not in DICT)
+if missing:
+    fail("[i18n] 代码引用了不存在的词条: " + ", ".join(missing[:20]))
+
+# ---------- 4. 静态 HTML 中文覆盖 ----------
+html = (ROOT / "index.html").read_text(encoding="utf-8")
+body = html.split("<body>", 1)[1]
+class Scanner(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.items = []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        for k in ("title", "placeholder", "aria-label"):
+            if a.get(k) and re.search(r"[\u4e00-\u9fff]", a[k]):
+                self.items.append(("ATTR", k, a[k].strip()))
+
+    def handle_data(self, d):
+        s = d.strip()
+        if s and re.search(r"[\u4e00-\u9fff]", s):
+            self.items.append(("TEXT", "", s))
+
+
+sc = Scanner(); sc.feed(body)
+uncovered = sorted({re.sub(r"\s+", " ", v).strip() for _, _, v in sc.items
+                    if re.sub(r"\s+", " ", v).strip() not in LOOKUP})
+if uncovered:
+    fail("[i18n] 静态 HTML 中文未收录词典: " + " | ".join(uncovered[:12]))
+print(f"[3-4] 静态文案节点 {len(sc.items)} 个，未覆盖 {len(uncovered)} 个")
+
+# ---------- 5. 非词典模块不得硬编码中文字符串 ----------
+hard = []
+for f in js_files:
+    if f.name in GENERATED:
+        continue
+    for ln in strip_comments(f.read_text(encoding="utf-8")).splitlines():
+        for m in re.finditer(r'(["\'])(?:[^"\'\\]|\\.)*?\1', ln):
+            s = m.group(0)
+            if re.search(r"[\u4e00-\u9fff]", s):
+                hard.append(f"{f.name}: {s[:70]}")
+if hard:
+    fail("[i18n] 代码里出现硬编码中文字符串（应走 t()）:\n    " + "\n    ".join(hard[:10]))
+
+# ---------- 6. DOM 引用 ----------
+ids_html = set(re.findall(r'id="([^"]+)"', html))
+ids_js = set(re.findall(r'[\$]\(\s*["\']#([A-Za-z][\w-]*)["\']', all_js))
+ids_js |= set(re.findall(r'\$\$\(\s*["\']#([A-Za-z][\w-]*)["\']', all_js))
+missing_dom = sorted(ids_js - ids_html)
+if missing_dom:
+    fail("[dom] JS 引用了不存在的 id: " + ", ".join(missing_dom))
+print(f"[5-6] DOM id 引用 {len(ids_js)} 个，缺失 {len(missing_dom)} 个")
+
+# ---------- 7. 定轨铁律 ----------
+acts = set(re.findall(r'data-act="([a-z]+)"', html))
+if acts != {"track", "receive", "point"}:
+    fail(f"[ironlaw] 动作按钮集合异常：{sorted(acts)}（只允许 track/receive/point）")
+if "定轨" in body or "estimate_orbit" in body or "RLS" in body:
+    fail("[ironlaw] 静态 HTML 出现定轨/RLS 功能面字样")
+for f in js_files:
+    if f.name in GENERATED:
+        continue
+    code = strip_comments(f.read_text(encoding="utf-8"))
+    for bad in ("定轨", "estimate_orbit", "轨道确定", "orbit determination"):
+        if bad in code:
+            fail(f"[ironlaw] {f.name} 的功能面代码出现「{bad}」")
+# CAPS 由事实源生成：功能面里不得出现 orbit 类能力位，规划项必须标注
+if "orbit" in FACT_IDS:
+    fail("[ironlaw] 事实源里出现 orbit 能力位")
+tool_names = set(re.findall(r'\{ name: "([a-z_]+)", descKey:', data_src))
+if any("orbit" in n for n in tool_names):
+    fail("[ironlaw] TOOLS 出现定轨工具入口")
+print(f"[7] 铁律：动作 {sorted(acts)} · 能力位 {len(FACT_IDS)} 个（事实源） · "
+      f"工具 {len(tool_names)} 个，均无定轨入口")
+
+# ---------- 8. 事实源 ↔ UI ↔ wiki ↔ dist 一致性 ----------
+cap_pages = {p.stem for p in (DOCS / "wiki/capabilities").glob("*.md")}
+if cap_pages != FACT_IDS:
+    fail(f"[facts] wiki 能力词条与事实源漂移：词条 {sorted(cap_pages)} vs 事实 {sorted(FACT_IDS)}")
+data_code = strip_comments(data_src)
+if "MB.REPO || {}" not in data_code or "R.domains" not in data_code or "R.planned" not in data_code:
+    fail("[facts] 10-data.js 未由 MB.REPO 生成能力位")
+if "planned: true" not in data_code:
+    fail("[facts] 规划能力未标 planned:true")
+if "caps.notVerified" not in i18n_src:
+    fail("[facts] 词典缺规划未验证标注")
+for pid in {p["id"] for p in FACTS.get("planned", [])}:
+    page = (DOCS / "wiki/capabilities" / f"{pid}.md")
+    if page.is_file() and "未验证" not in page.read_text(encoding="utf-8"):
+        fail(f"[facts] 规划词条 {pid}.md 未标注未验证")
+# 文档链
+md_files = list(DOCS.rglob("*.md"))
+broken = []
+for p in md_files:
+    text = p.read_text(encoding="utf-8")
+    for target in re.findall(r'\[[^\]]+\]\(([^)]+)\)', text):
+        if target.startswith(("http", "#", "mailto:")):
+            continue
+        t = target.split("#")[0]
+        if not t:
+            continue
+        dest = (p.parent / t).resolve()
+        if not dest.exists():
+            broken.append(f"{p.relative_to(DOCS)} -> {t}")
+if broken:
+    fail("[docs] 断链: " + ", ".join(broken[:10]))
+print(f"[8] 文档 {len(md_files)} 篇，能力词条 {len(cap_pages)} 篇，断链 {len(broken)} 处")
+
+# ---------- 9. 原仓库红线守卫 ----------
+ui_sources = {f.name: strip_comments(f.read_text(encoding="utf-8"))
+              for f in js_files if f.name not in GENERATED}
+ui_text = "\n".join(ui_sources.values()) + "\n" + html + "\n" + \
+          "\n".join((DOCS / n).read_text(encoding="utf-8")
+                    for n in ("README.md", "01-product-spec.md", "02-user-guide.md"))
+# 真实地理位置默认值（身份红线）
+for bad in ("丰满区", "吉林", "北京", "长春", "43.80", "126.60", "39.9042", "116.4074"):
+    if bad in ui_text:
+        fail(f"[redline] UI/产品文档出现真实地理位置默认值：{bad}")
+# 能力数字标语（虚荣指标 / 写入即过期）
+for m in re.finditer(r"(?:支持|拥有|内置)\s*\d+\s*(?:个|项|条)\s*(?:工具|测试|能力|域)", ui_text):
+    fail(f"[redline] 硬编码能力数字标语：{m.group(0)}")
+if re.search(r"\b\d+\s*/\s*\d+\s*在位", ui_text):
+    fail("[redline] 状态栏出现写死的能力计数")
+# 诚实空态：不得造合成谱 / 预填充瀑布 / 伪造已连接
+wb = ui_sources.get("40-workbench.js", "")
+if "Math.random" in wb:
+    fail("[redline] 频谱模块仍在用随机数合成谱线")
+for key in ("spec.empty", "spec.noIq", "status.disconnected"):
+    if key not in wb and key not in i18n_src:
+        fail(f"[redline] 缺诚实空态口径：{key}")
+if "MB.data.isLive()" not in wb:
+    fail("[redline] 频谱未按数据源状态显示空态")
+if "● RTL-SDR 已连接" in html or "16 VCDU" in html:
+    fail("[redline] 静态骨架残留伪造的已连接/实时解码状态")
+# 通道与人工门
+if "50732" in data_src:
+    fail("[redline] ControlHub 端口被硬编码（应来自 MB.REPO）")
+if "arm_manual" not in ui_text or "gated" not in ui_text:
+    fail("[redline] 未保留 arm_manual 人工门与 gated 回执口径")
+# 站点
+core = ui_sources.get("00-core.js", "")
+if "lat: 0.0, lon: 0.0" not in core or "trusted: false" not in core:
+    fail("[redline] 默认站点不是中性示例 / 未标不可信")
+print("[9] 红线：站点中性 / 无能力数字 / 诚实空态 / 人工门 / 通道来自事实源，全部通过")
+
+# ---------- 9.5 全天星象仪科学性守卫（用户点名的三条：假星 / 飞散 / 横条投影） ----------
+cat_json_path = ROOT / "build/sky-catalog.json"
+if not cat_json_path.is_file():
+    fail("[sky] 缺 build/sky-catalog.json（先跑 build/sync_sky_catalog.py）")
+    CAT = {}
+else:
+    CAT = json.loads(cat_json_path.read_text(encoding="utf-8"))
+meta = CAT.get("meta", {})
+if meta.get("starCount", 0) < 10000:
+    fail(f"[sky] 全天星表退化：starCount={meta.get('starCount')} < 10000（禁止只画亮星冒充全天）")
+hyg = meta.get("hyg", {})
+if len(hyg.get("sha256", "")) != 64 or "CC BY-SA 4.0" not in hyg.get("license", ""):
+    fail("[sky] HYG 来源 SHA256 / 许可署名缺失或未如实登记")
+if len(meta.get("notVerified", [])) < 5:
+    fail("[sky] 星象仪 not_verified 条目不足（不得把设计项写成已上线）")
+if not (ROOT / "data/hygdata_v41.csv").is_file():
+    fail("[sky] 真下载的 HYG 源 CSV 不在位（拒绝闷头造车）")
+if not (DOCS / "10-sky-catalog.md").is_file() or "HYG" not in (DOCS / "10-sky-catalog.md").read_text(encoding="utf-8"):
+    fail("[sky] 缺星表来源/许可/口径文档")
+
+sky_code = strip_comments(ui_sources.get("30-sky.js", ""))
+cel_code = strip_comments(ui_sources.get("31-celestial.js", ""))
+if "Math.random" in sky_code or "Math.random" in cel_code:
+    fail("[sky] 仍在用随机星点（AGENTS §2 绝不伪造数据）")
+for bad in ("burstT", "STARS.push", "sp: .3", "mg.addColorStop"):
+    if bad in sky_code:
+        fail(f"[sky] 残留被用户点名批评的机制：{bad}")
+if "sky.galaxyNone" not in sky_code or "无数据·不提供" not in i18n_src:
+    fail("[sky] 银河层未标诚实空态（渲染调用或词典口径缺失）")
+# 天球几何（2026-11-04 重做口径，对齐 Stellarium Web Engine 的投影链）：
+#   相机在球心 → 视图空间 → 全屏平面投影（透视 / 立体二选一）→ 窗口矩形裁剪。
+#   判据：必须有 toScreen + projectSegment + 双投影切换；**不得**再出现
+#   「圆形视场盘 + cx.clip」那种把天空塞进球里的画法。
+for marker in ("eqToHorizon", "toScreen", "projectSegment", "PERSP_MAX_FOV",
+               "projMode", "unproject", "sunAltAz"):
+    if marker not in cel_code:
+        fail(f"[sky] 缺球面天球/视图空间投影机制：{marker}")
+if "worldToScreen" in sky_code or "screenToWorld" in sky_code:
+    fail("[sky] 天空层仍在用平面线性投影（横向带鱼屏的根因）")
+if "cx.arc(W / 2, H / 2, discR" in sky_code or "discR" in sky_code:
+    fail("[sky] 圆形视场盘回潮（天空是球、屏幕是平面，不得用圆盘遮罩）")
+if "createRadialGradient(W / 2, H / 2" in sky_code:
+    fail("[sky] 以屏幕中心为圆心的径向渐变回潮（会造成「看进球里」的观感）")
+if "ring(" not in sky_code or "hillAlt" not in sky_code or "fillLandscape" not in sky_code:
+    fail("[sky] 地平/地景不是沿球面方位环采样")
+if "azVisible" not in sky_code:
+    fail("[sky] 缺方位窗口裁剪（地景必须绕 360° 铺，而不是只画屏幕正前方）")
+if "evenodd" not in sky_code or "bot[i]" not in sky_code:
+    fail("[sky] 地景必须按「天空区间 top/bot + evenodd」填充：只找一个上沿会把"
+         "朝天顶（地平线成闭合大圆）画成竖直硬边")
+if "id=\"skyHud\"" not in html and 'id="skyHud"' not in html:
+    fail("[sky] 缺时空主导 HUD 容器")
+print(f"[9.5] 全天星象仪：{meta.get('starCount', 0):,} 颗真实星 / 球面投影 / 圆形视场 / "
+      f"地平大圆弧 / 无随机星点 / 无飞散动画 / 银河诚实空态 / not_verified 齐备")
+
+# ---------- 10. 构建产物 ----------
+dist = ROOT / "dist/index.html"
+if not dist.is_file():
+    fail("[dist] 未找到 dist/index.html（先跑 build/build.py）")
+else:
+    d = dist.read_text(encoding="utf-8")
+    if 'src="src/' in d or 'href="src/' in d:
+        fail("[dist] 单文件仍引用外部 src/ 资源")
+    for marker in ("window.MBDSDR_DOC_DATA", "MB.CAPS", "isOrbitRequest",
+                   "MB.REPO", "controlHub", "05-repo-facts"):
+        if marker not in d and marker != "05-repo-facts":
+            fail(f"[dist] 缺少模块内容：{marker}")
+    if "丰满区" in d or "● RTL-SDR 已连接" in d:
+        fail("[dist] 产物残留旧口径")
+    print(f"[10] dist 自包含：{dist.stat().st_size} bytes")
+
+# ---------- 汇总 ----------
+print("\n" + "=" * 60)
+for w in warnings[:8]:
+    print("WARN", w)
+if errors:
+    for e in errors:
+        print("FAIL", e)
+    print(f"RESULT: {len(errors)} 项失败")
+    sys.exit(1)
+print("RESULT: ALL PASS ✅")

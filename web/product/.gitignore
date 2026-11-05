@@ -1,0 +1,24 @@
+# 仓库根 .gitignore:144 有全局 `build/`（原意是忽略 C++ 构建产物）。
+# 本目录的 build/ 是**源码**（事实源同步器 + 生成器），必须入库，故在此否定。
+!build/
+!build/*.py
+!build/*.json
+
+# 只忽略可再生的本地产物；事实源与数据副本**必须入库**
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 截图 / 夹具由 tests/make_visual_fixture.py 生成，不入库
+tests/verify_*.png
+tests/visual_*.html
+tests/_fixture_inject.js
+tests/_crop.png
+
+# HYG 稀疏克隆的工作树与分块下载缓存（73 MB），可由 fetch_hyg.py 重建
+data/HYG/.git/
+data/HYG/hyg/
+data/parts/
+
+# 其他临时探针
+*.log
