@@ -21,6 +21,12 @@ import struct
 from typing import List, Tuple, Optional, Dict
 
 
+#: 文本往返类工具的单次输入上限（字符）。P13 实测：feldhell 1 万字符约 24s、
+#: 2 万约 65s、4 万超 90s（超线性）；psk31/rtty 近似线性但仍受 Python 吞吐
+#: 限制，10 万字符均超 60s。真实业余文本远小于此，超限给结构化错误。
+MAX_ROUNDTRIP_TEXT = 10_000
+
+
 # ============================================================================
 # Varicode 表
 # 每行 8 个，共 256 项。索引即 ASCII/字节值，值为发射比特串（首比特先发）。
@@ -694,6 +700,25 @@ def register_fldigi_modes_tools(registry) -> None:
     """
     from .tool_registry import ToolResult
 
+    def _too_long(text: str, tool: str):
+        """文本往返工具的输入上限（P13 挂死收口，实测曲线见 docs/code-guards.md）。
+
+        feldhell 的耗时随长度超线性增长（1 万字符约 24s、2 万约 65s），
+        psk31/rtty 近似线性但仍受 Python 调制解调吞吐限制。单次上限取
+        1 万字符：真实业余文本远小于此，超限给结构化错误，不挂死、不截断。
+        """
+        if len(text) <= MAX_ROUNDTRIP_TEXT:
+            return None
+        return ToolResult(
+            success=False,
+            content=(f"{tool}: 输入文本 {len(text)} 字符，超过单次上限 "
+                     f"{MAX_ROUNDTRIP_TEXT} 字符。请分段后重试。"),
+            error="param_out_of_range",
+            data={"param": "text", "length": len(text),
+                  "limit": MAX_ROUNDTRIP_TEXT},
+            next_step=f"把 text 拆成不超过 {MAX_ROUNDTRIP_TEXT} 字符的片段，逐段调用。",
+        )
+
     def _psk31_encode(args):
         text = args.get("text", "")
         bits = Varicode.encode_text(text)
@@ -706,6 +731,9 @@ def register_fldigi_modes_tools(registry) -> None:
     def _psk31_decode(args):
         # 离线往返：编码→调制→解调
         text = args.get("text", "Hello")
+        too_long = _too_long(text, "psk31_decode")
+        if too_long is not None:
+            return too_long
         m = PSK31Modem()
         wav = m.modulate(text)
         out = m.demodulate(wav)
@@ -718,6 +746,9 @@ def register_fldigi_modes_tools(registry) -> None:
 
     def _rtty_decode(args):
         text = args.get("text", "HELLO BI1AAA")
+        too_long = _too_long(text, "rtty_decode")
+        if too_long is not None:
+            return too_long
         m = RTTYModem()
         wav = m.modulate(text)
         out = m.demodulate(wav)
@@ -743,6 +774,9 @@ def register_fldigi_modes_tools(registry) -> None:
 
     def _feldhell_decode(args):
         text = args.get("text", "HELLO")
+        too_long = _too_long(text, "feldhell_decode")
+        if too_long is not None:
+            return too_long
         d = FeldHellDecoder()
         wav = d.modulate_text(text)
         env = d.demodulate_envelope(wav)

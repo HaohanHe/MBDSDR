@@ -234,3 +234,24 @@ def test_typical_silent_accept_lock(fuzz_sample):
     assert rec, "抽样里缺少 cantenna_design 的 NaN 频率用例"
     assert rec[0]["class"] == "OK"
     assert "param_out_of_range" in rec[0]["detail"]
+
+
+def test_long_text_roundtrip_is_bounded():
+    """P13 挂死收口：10 万字符文本必须秒回结构化错误，不许跑 DSP 挂死。
+
+    实测（见 docs/code-guards.md）：feldhell 1 万字符约 24s、2 万约 65s，
+    psk31/rtty 10 万字符均超 60s。上限 1 万字符后，超限路径不做调制解调。
+    """
+    import time
+
+    from mbdsdr_ai.fldigi_modes import register_fldigi_modes_tools
+
+    reg = ToolRegistry()
+    register_fldigi_modes_tools(reg)
+    for name in ("feldhell_decode", "psk31_decode", "rtty_decode"):
+        started = time.perf_counter()
+        res = reg.call(name, {"text": "A" * 100_000})
+        elapsed = time.perf_counter() - started
+        assert res.success is False, name
+        assert res.error == "param_out_of_range", f"{name}: {res.error!r}"
+        assert elapsed < 5.0, f"{name} 仍可能挂死：{elapsed:.2f}s"

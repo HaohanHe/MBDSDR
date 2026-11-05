@@ -1,0 +1,1034 @@
+{
+  "version": 1,
+  "snapshot": "2026-11-05",
+  "policy": "棘轮基线：任何文件的 ERROR/WARN 不得超过此处计数；新文件出现静默 catch-all 即红。只许降不许升。",
+  "total": 1398,
+  "whitelisted": 1,
+  "forbidden": 0,
+  "files": {
+    "desktop/adsb_map_panel.py": {
+      "ERROR": 4,
+      "WARN": 1
+    },
+    "desktop/adsb_panel.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "desktop/ai_panel.py": {
+      "ERROR": 6,
+      "WARN": 1
+    },
+    "desktop/ai_steps.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "desktop/anr_panel.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "desktop/aprs_panel.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "desktop/bookmark_panel.py": {
+      "ERROR": 0,
+      "WARN": 5
+    },
+    "desktop/constants.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "desktop/control_panel.py": {
+      "ERROR": 2,
+      "WARN": 3
+    },
+    "desktop/device_panel.py": {
+      "ERROR": 0,
+      "WARN": 5
+    },
+    "desktop/dock_layout_manager.py": {
+      "ERROR": 11,
+      "WARN": 9
+    },
+    "desktop/gain_panel.py": {
+      "ERROR": 2,
+      "WARN": 2
+    },
+    "desktop/layout_store.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "desktop/main.py": {
+      "ERROR": 2,
+      "WARN": 2
+    },
+    "desktop/main_window.py": {
+      "ERROR": 239,
+      "WARN": 102
+    },
+    "desktop/mcp_worker.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "desktop/mode_registry.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "desktop/modulation_panel.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "desktop/module_panel.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "desktop/ntrip_panel.py": {
+      "ERROR": 3,
+      "WARN": 3
+    },
+    "desktop/receive_pipeline.py": {
+      "ERROR": 18,
+      "WARN": 3
+    },
+    "desktop/rf_sky_view.py": {
+      "ERROR": 21,
+      "WARN": 51
+    },
+    "desktop/satellite_image_panel.py": {
+      "ERROR": 1,
+      "WARN": 4
+    },
+    "desktop/scanner_panel.py": {
+      "ERROR": 0,
+      "WARN": 5
+    },
+    "desktop/settings.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "desktop/settings_panel.py": {
+      "ERROR": 6,
+      "WARN": 5
+    },
+    "desktop/spectrum_widget.py": {
+      "ERROR": 7,
+      "WARN": 4
+    },
+    "desktop/status_panel.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "desktop/themes.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "desktop/tokens.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "desktop/touch_helpers.py": {
+      "ERROR": 4,
+      "WARN": 2
+    },
+    "desktop/touch_manager.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "desktop/vfo_panel.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "desktop/weather_panel.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "docs/learn/phase14/pass_predict.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "experiments/exp_digital_modes.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "experiments/exp_fhss_detection.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "experiments/exp_llm_baseline.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "experiments/exp_ota_run.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "experiments/exp_sstv_identification.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "experiments/exp_weak_model_toolcall.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "experiments/nanovna_rh770/scripts/vna_capture2.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "experiments/nanovna_rh770/scripts/vna_capture3.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "experiments/satellite_rx/data/check_tles.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "experiments/satellite_rx/scripts/mbdsdr_ctl.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "experiments/satellite_rx/scripts/pass_recorder.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "experiments/satellite_rx/scripts/passes_leo.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "experiments/satellite_rx/scripts/sat_catch.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "experiments/satellite_rx/scripts/sat_radar.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "experiments/satellite_rx/scripts/stack_up.py": {
+      "ERROR": 4,
+      "WARN": 4
+    },
+    "mbdsdr_ai/__init__.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "mbdsdr_ai/acquisition.py": {
+      "ERROR": 0,
+      "WARN": 8
+    },
+    "mbdsdr_ai/agent.py": {
+      "ERROR": 11,
+      "WARN": 40
+    },
+    "mbdsdr_ai/aprs_parser.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/ardop_adapter.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/astronomy.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/atmosphere.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/audio_device_manager.py": {
+      "ERROR": 0,
+      "WARN": 5
+    },
+    "mbdsdr_ai/audio_out.py": {
+      "ERROR": 2,
+      "WARN": 4
+    },
+    "mbdsdr_ai/audio_resampler.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/ax25.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/background_decoder.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/bch_codecs.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/bladerf_params.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "mbdsdr_ai/blind_param_est.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/builtin_tle_meta.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "mbdsdr_ai/ccsds_tools.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/channelizer.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/cma_equalizer.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/code_editor.py": {
+      "ERROR": 0,
+      "WARN": 7
+    },
+    "mbdsdr_ai/context_manager.py": {
+      "ERROR": 1,
+      "WARN": 5
+    },
+    "mbdsdr_ai/conversation.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/core/controller.py": {
+      "ERROR": 1,
+      "WARN": 14
+    },
+    "mbdsdr_ai/core/mcp_server.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "mbdsdr_ai/cubicsdr_adapter.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/decoders.py": {
+      "ERROR": 0,
+      "WARN": 10
+    },
+    "mbdsdr_ai/device_manager.py": {
+      "ERROR": 8,
+      "WARN": 8
+    },
+    "mbdsdr_ai/df_amplitude.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/df_position.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/digital_modes.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/doppler_compensation.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/doppler_link.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/dsp.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/feature_manager.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/fec.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/fengyun_sat.py": {
+      "ERROR": 1,
+      "WARN": 3
+    },
+    "mbdsdr_ai/fhss_dehop.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/fm_scan.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/frame_layout_tool.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/gimbal.py": {
+      "ERROR": 2,
+      "WARN": 2
+    },
+    "mbdsdr_ai/gk2a_lrit.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/gnss_monitor.py": {
+      "ERROR": 1,
+      "WARN": 7
+    },
+    "mbdsdr_ai/gnss_timestamps.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/gnuradio_blocks.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/golden_regression.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/gpredict_adapter.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/gps_bit_sync.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/gps_ca.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/gps_nav.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/gqrx_receiver.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/guardian.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/hackrf_params.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/hal.py": {
+      "ERROR": 2,
+      "WARN": 6
+    },
+    "mbdsdr_ai/hal_enhanced.py": {
+      "ERROR": 4,
+      "WARN": 2
+    },
+    "mbdsdr_ai/hdsdr_adapter.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/hooks.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "mbdsdr_ai/inspectrum_adapter.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/interference_eval.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/interferometry.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/js8call_adapter.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/kismet_adapter.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/limesuite_params.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "mbdsdr_ai/llm_judge.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/lrpt_image.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/lrpt_pipeline.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/lrpt_vcdu.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/m17_adapter.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/mcp_client.py": {
+      "ERROR": 4,
+      "WARN": 1
+    },
+    "mbdsdr_ai/mimo_v2.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/mobile_server.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/model_manager.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/modulation.py": {
+      "ERROR": 0,
+      "WARN": 7
+    },
+    "mbdsdr_ai/module_graph.py": {
+      "ERROR": 2,
+      "WARN": 1
+    },
+    "mbdsdr_ai/multi_user.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "mbdsdr_ai/nanovna_dump.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/new_spacetime.py": {
+      "ERROR": 2,
+      "WARN": 1
+    },
+    "mbdsdr_ai/new_spacetime_timeline.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/op25_adapter.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/openapi_integration.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/openwebrx_adapter.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/orbit.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/orbit_determination.py": {
+      "ERROR": 3,
+      "WARN": 6
+    },
+    "mbdsdr_ai/orbit_dynamics.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/orbit_perturbation.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/orbit_tools.py": {
+      "ERROR": 0,
+      "WARN": 13
+    },
+    "mbdsdr_ai/osmosdr_source.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/pat_adapter.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/playback.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "mbdsdr_ai/plugin_system.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "mbdsdr_ai/position_service.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "mbdsdr_ai/protocol_stack.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/r2cloud_adapter.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/radio_control.py": {
+      "ERROR": 3,
+      "WARN": 1
+    },
+    "mbdsdr_ai/reconnection.py": {
+      "ERROR": 3,
+      "WARN": 2
+    },
+    "mbdsdr_ai/remote_control.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/rtcm3_decoder.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/rtk_solver.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/rtklib_adapter.py": {
+      "ERROR": 5,
+      "WARN": 2
+    },
+    "mbdsdr_ai/rtltcp_client.py": {
+      "ERROR": 3,
+      "WARN": 1
+    },
+    "mbdsdr_ai/sandbox.py": {
+      "ERROR": 3,
+      "WARN": 1
+    },
+    "mbdsdr_ai/sat_consistency.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/sat_image_processing.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/sat_links.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/sat_passes.py": {
+      "ERROR": 0,
+      "WARN": 8
+    },
+    "mbdsdr_ai/sat_pipeline_runner.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/sat_profile.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/sat_tracker.py": {
+      "ERROR": 0,
+      "WARN": 6
+    },
+    "mbdsdr_ai/satellite/tracker.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/satnogs_adapter.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/scheduler.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/sdr_backend.py": {
+      "ERROR": 50,
+      "WARN": 62
+    },
+    "mbdsdr_ai/sdr_tools.py": {
+      "ERROR": 17,
+      "WARN": 32
+    },
+    "mbdsdr_ai/sdrangel_plugins.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/sdrpp_decoders.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/sdrsharp_adapter.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/sdrtrunk_adapter.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/self_evolution.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "mbdsdr_ai/self_learning.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "mbdsdr_ai/serial_gnss.py": {
+      "ERROR": 7,
+      "WARN": 6
+    },
+    "mbdsdr_ai/sigdigger_adapter.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/skill_registry.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "mbdsdr_ai/sky_actions.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/skyengine/satellites.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/solar_system.py": {
+      "ERROR": 3,
+      "WARN": 7
+    },
+    "mbdsdr_ai/spacetime_predict.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/spyserver_client.py": {
+      "ERROR": 4,
+      "WARN": 1
+    },
+    "mbdsdr_ai/sstv_decoder.py": {
+      "ERROR": 1,
+      "WARN": 3
+    },
+    "mbdsdr_ai/startup_sequence.py": {
+      "ERROR": 4,
+      "WARN": 7
+    },
+    "mbdsdr_ai/subagents.py": {
+      "ERROR": 2,
+      "WARN": 7
+    },
+    "mbdsdr_ai/sync_tools.py": {
+      "ERROR": 0,
+      "WARN": 6
+    },
+    "mbdsdr_ai/tc_uplink.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/tests/exp_phase58_multisat.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/tests/test_mobile_server.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/tests/test_optional_deps.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/tests/test_phase58_multisat.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/tests/test_sdr_rtltcp_registration.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/time_sync.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/tle_fetch.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/tool_budget.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/tool_registry.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_ai/tx_guard.py": {
+      "ERROR": 1,
+      "WARN": 5
+    },
+    "mbdsdr_ai/ui_actions.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "mbdsdr_ai/urh_adapter.py": {
+      "ERROR": 0,
+      "WARN": 4
+    },
+    "mbdsdr_ai/verify_chain.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/vna_pipeline.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/web/server.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "mbdsdr_ai/web/streamer.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "mbdsdr_ai/windows_setup.py": {
+      "ERROR": 3,
+      "WARN": 0
+    },
+    "mbdsdr_ai/workflow_engine.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "mbdsdr_ai/workflow_recorder.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "mbdsdr_ai/xastir_adapter.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "mbdsdr_mcp_client.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "scripts/access_layer_fault_injection.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "scripts/ai_tool_consistency.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "scripts/bench_dsp_throughput.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "scripts/decode_sensitivity.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "scripts/real_hw_acceptance.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "scripts/rtl_selfcheck.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "scripts/serial_gnss_probe.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "scripts/soak_receive_chain.py": {
+      "ERROR": 1,
+      "WARN": 4
+    },
+    "scripts/tool_availability_audit.py": {
+      "ERROR": 1,
+      "WARN": 2
+    },
+    "scripts/ui_interaction_audit.py": {
+      "ERROR": 3,
+      "WARN": 3
+    },
+    "tests/conftest.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_adsb_dump1090_golden.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_agc_speed.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_app_mode.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_bookmark_tags.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_clean_exc.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_cli.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_desktop_ui_responsiveness.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_device_switch_flow.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_ft8_wsjtx_golden.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_full_integration.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_gimbal_follow_wiring.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_gk2a_jp2.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_gui_real_hardware.py": {
+      "ERROR": 2,
+      "WARN": 1
+    },
+    "tests/test_headless_smoke.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_identity_redline.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_interaction_wiring.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "tests/test_lrpt_meteor_real_golden.py": {
+      "ERROR": 0,
+      "WARN": 5
+    },
+    "tests/test_main_window.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_mcp_server.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_mode_switch_preset.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_no_sim_regression.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "tests/test_orphan_connection.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_record_replay_config.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_satellite_tracker.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_sdr_backend_audio.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "tests/test_serial_gnss.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_sky_capability_negotiation.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_sky_daylight_stars.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/test_sky_track_wiring.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_three_column_layout.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_touch_adaptation.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_ui_flow_guards.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/test_ui_hard_defects.py": {
+      "ERROR": 4,
+      "WARN": 0
+    },
+    "tests/test_ui_interaction_guard.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "tests/test_ui_layout_actions.py": {
+      "ERROR": 3,
+      "WARN": 0
+    },
+    "tests/test_ui_layout_locks.py": {
+      "ERROR": 3,
+      "WARN": 0
+    },
+    "tests/test_ui_vfo_constellation.py": {
+      "ERROR": 2,
+      "WARN": 0
+    },
+    "tests/test_user_layouts.py": {
+      "ERROR": 1,
+      "WARN": 0
+    },
+    "tests/tool_health_check.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "tests/tool_param_smoke.py": {
+      "ERROR": 1,
+      "WARN": 1
+    },
+    "tests/tool_selftest.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "tools/hw_selfcheck/selfcheck.py": {
+      "ERROR": 1,
+      "WARN": 5
+    },
+    "tools/onboarding/onboard.py": {
+      "ERROR": 0,
+      "WARN": 2
+    }
+  }
+}

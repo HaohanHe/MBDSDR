@@ -1,9 +1,11 @@
 # 代码守卫：catch-all 静默吞噬（P13 补充）
 
-- 结论：全仓 catch-all 处理器 **1883** 处，其中「无记录」静默吞噬 **1399** 处，白名单 **1** 处，**须修 1398 处**（`ERROR` 574 / `WARN` 824）。
-- 扫描快照：2026-11-05，1066 个 Python 文件、377 个测试文件；行号随在途文件变化，以脚本实时输出为准。
-- 事故首例：`desktop/rf_sky_view.py::RFSkyView._find_body_at` 的 `float(None)` 抛 `TypeError` 被 `try/except Exception: pass` 吞掉，深空天体既不可见也不可点，无日志无报错。该文件快照内有 6 处（2 ERROR + 4 WARN），修复归属桌面线。
-- 本轮只报不修（除本人文件内的两处）；`docs/limitations-register.md` 未触碰，`desktop/main_window.py` 未触碰。
+- 结论：全仓 catch-all 处理器 **1884** 处，其中「无记录」静默吞噬 **1399** 处，白名单 **1** 处，存量 **1398 处**（`ERROR` 573 / `WARN` 825）。
+- 策略：**棘轮 + 定点清除**。存量不逐处修；基线只许降不许升，新代码必须干净；只清用户能感知“点了没反应/功能凭空消失”的点。
+- 基线：`docs/code-guards-baseline.json`（按文件记 `ERROR`/`WARN`，快照 2026-11-05）。任何文件超基线、新文件出现静默 catch-all、总量上升 → 红。
+- 扫描快照：1061 个 Python 文件（提交树口径；工作区另含未跟踪/在途文件时以脚本实时输出为准）。
+- 事故首例：`desktop/rf_sky_view.py::RFSkyView._find_body_at` 的 `float(None)` 抛 `TypeError` 被 `try/except Exception: pass` 吞掉，深空天体既不可见也不可点，无日志无报错。该函数快照内 6 处（2 ERROR + 4 WARN）。
+- 本轮只报不修；`docs/limitations-register.md` 未触碰，`desktop/main_window.py` 未触碰。
 
 ## 判据
 
@@ -14,20 +16,22 @@
   - `EMPTY`：只有 `pass`、`...` 或注释（AST 里注释不可见，等同 Pass）→ **ERROR**
   - `SILENT_CONTROL`：只 `return None` / `return <常量>` / `continue` / `break` → **WARN**
   - `SILENT_FALLBACK`：有语句但无记录（塞默认值后继续）→ **WARN**
-- 有记录（RECORDED）或重新抛出（RERAISE）→ 只计数，不入缺陷；
+- 有记录（RECORDED）或真正重新抛出（RERAISE）→ 只计数，不入缺陷；
+- **禁令**：`except Exception: raise` 这种单条裸 `raise`（`FAKE_RERAISE`）判 ERROR；`contextlib.suppress(Exception)` / `suppress(Exception)`（`FORBIDDEN_SUPPRESS`）判 ERROR。两者都不可进白名单，防止绕过扫描器。
 - 裸 `except:` 当前为 **0** 处。
 
-每处白名单必须同时回答三问，缺一即不合格：
+每处白名单必须同时回答三问 + 复核期限，缺一即不合格：
 
 1. `reason`：为什么允许降级（必须是外部边界：第三方库/网络/硬件/平台）；
 2. `user_visible`：降级后用户看到什么（不能是「什么都没有」）；
-3. `test`：哪条测试覆盖这条降级路径（文件必须存在）。
+3. `test`：哪条测试覆盖这条降级路径（文件必须存在）；
+4. `review_by`：`YYYY-MM`，到期即判不合格，必须复核后再续期。
 
 ## 白名单（1 处）
 
-| 位置 | ① 为什么允许降级 | ② 用户看到什么 | ③ 覆盖测试 |
-| --- | --- | --- | --- |
-| `mbdsdr_ai/audio_out.py:37` | 外部边界：`sounddevice`/PortAudio 是可选依赖，导入失败（库缺失、平台无 PortAudio、后端初始化失败）必须整体降级，不能拖垮整个应用。 | `_SD_AVAILABLE=False`，`AudioPlayer.available=False`；`start()` 返回 False 并保持静音；`write()` 返回 0；UI 音频入口显示不可用，而不是崩溃或假装播放。 | `tests/test_swallow_guard.py::test_audio_player_degrades_without_sounddevice`（拦截 `import sounddevice`，断言 `available/start/write/stop` 的降级行为）。 |
+| 位置 | ① 为什么允许降级 | ② 用户看到什么 | ③ 覆盖测试 | ④ 复核 |
+| --- | --- | --- | --- | --- |
+| `mbdsdr_ai/audio_out.py:37` | 外部边界：`sounddevice`/PortAudio 是可选依赖，导入失败（库缺失、平台无 PortAudio、后端初始化失败）必须整体降级，不能拖垮整个应用。 | `_SD_AVAILABLE=False`，`AudioPlayer.available=False`；`start()` 返回 False 并保持静音；`write()` 返回 0；UI 音频入口显示不可用，而不是崩溃或假装播放。 | `tests/test_swallow_guard.py::test_audio_player_degrades_without_sounddevice`（拦截 `import sounddevice`，断言 `available/start/write/stop` 的降级行为）。 | 2027-01 |
 
 其余 1398 处**没有一处能同时回答三问**：绝大多数连日志都没有，更谈不上覆盖降级路径的测试。因此不把「可选依赖 = 自动豁免」当作批量白名单——豁免必须逐条给出三问，否则就是静默丢功能。
 
@@ -59,33 +63,101 @@
 - 天体/星表查找失败后 `continue` / 置 `None`：图层绘制与点击命中整段失效（`rf_sky_view.py::_find_body_at`）。
 - `float(None)`、`KeyError`、`AttributeError` 等**编程错误**被 catch-all 吞掉：本类一律算缺陷，不能以「兜底」名义保留。
 
-## 反证（修前必红）
+## 反证（棘轮，不再靠全量缺陷判红）
 
-`tests/test_swallow_guard.py` 共 10 条：
+`tests/test_swallow_guard.py` 分四组：
 
-- 扫描器行为 6 条：DSO 事故同构（`float(None)` 被 `except Exception: pass` → 命中 `ERROR/EMPTY`）、静默 return → WARN、窄异常不误报、有记录/重抛不误报、白名单三问缺项判不合格、三问齐全才豁免。
-- 降级路径 1 条：`audio_out` 无 `sounddevice` 时整链降级（覆盖唯一白名单）。
-- 仓库现状 3 条：白名单有效且未失效、扫描确定性、**`test_repo_has_no_unwhitelisted_silent_catch_all` 当前为红**——它打印前 15 个 `文件:行号` 并以「须修 1398 处」失败。这是本任务的修前必红证据，不是环境问题。
+- 扫描器行为组：DSO 事故同构（`float(None)` 被 `except Exception: pass` → `ERROR/EMPTY`）；静默 return → WARN；窄异常不误报；有记录/真重抛不误报；**假重抛**判 ERROR；**`suppress(Exception)`** 判 ERROR 且不可白名单；白名单三问缺项/缺 `review_by`/过期均判不合格；三问齐全才豁免。
+- 降级路径组：`audio_out` 无 `sounddevice` 时整链降级（覆盖唯一白名单）。
+- 棘轮组：新文件出现静默 catch-all → 越线；存量下降 → 不越线；单文件 ERROR 增长 → 越线；仓库当前扫描 `check_ratchet` 必须为空。
+- 现状组：白名单有效且未失效；禁令构造为 0；扫描确定性用固定夹具验证（仓库在途文件会被其他线并发改写，不能当夹具）。
+
+修前必红的证据保留在扫描器本身：旧版 `test_repo_has_no_unwhitelisted_silent_catch_all` 曾以「须修 1398 处」失败；现在改为基线棘轮——存量不阻塞，新增立刻红。
 
 复跑：
 
 ```
-python scripts/lint_swallow_all.py              # 汇总 + 须修清单（有缺陷退出 1）
-python scripts/lint_swallow_all.py --list       # 打印每一处 catch-all
-python scripts/lint_swallow_all.py --json out.json
-python -m pytest tests/test_swallow_guard.py -q  # 9 passed / 1 failed（红为反证）
+python scripts/lint_swallow_all.py                        # 棘轮判定（越线才退 1）
+python scripts/lint_swallow_all.py --list                 # 打印每一处 catch-all
+python scripts/lint_swallow_all.py --json out.json        # 完整明细
+python scripts/lint_swallow_all.py --write-baseline docs/code-guards-baseline.json
+python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不越线）
 ```
 
-## 修复归属（只报不修）
+## 标准修法（修一处就是这三步）
 
-- `desktop/` 574 处 → 桌面线（含 `main_window.py` 341、`rf_sky_view.py` 71；`main_window.py` 本轮不碰，仅报）。
-- `mbdsdr_ai/` 692 处 → AI/后端各模块归属线（`sdr_backend.py` 112、`agent.py` 51、`sdr_tools.py` 49 优先）。
-- `tests/` 62 处 → 测试线（多为 teardown 静默吞异常，至少补 `logging.debug`）。
-- `experiments/` 32 / `tools/` 8 / `scripts/` 26 → 对应工具线；其中 `scripts/tool_param_fuzz.py` 与 `lint_swallow_all.py` 已由本线收窄异常类型（自身缺陷清零）。
-- 修法（按序）：
-  1. 能收窄异常类型的直接收窄（`except ValueError` 等），不吞编程错误；
-  2. 确实要兜底的外部边界，写日志/状态字段 + 覆盖降级路径的测试，然后登记白名单三问；
-  3. 不许改成 `contextlib.suppress(Exception)` 或等价写法绕过门禁。
+1. 能收窄异常类型的直接收窄（`except ValueError` / `except (OSError, RuntimeError)`），不吞编程错误；
+2. 确属外部边界：补日志或错误状态字段 + 一条断言「降级后用户看到什么」的测试 + 登记白名单三问 + `review_by`；
+3. 禁止 `contextlib.suppress(Exception)`、`except Exception: raise`、以及任何等价绕过写法；扫描器已把前两者判红。
+
+## 定点清除清单（按用户会被伤到的顺序）
+
+### A1. `desktop/main_window.py`：连接/录制/设备路径的 EMPTY（48 处）
+
+`main_window.py` 本轮不碰，交桌面/操作逻辑线。快照行号：
+
+| 方法（用户动作） | ERROR 行号 |
+| --- | --- |
+| `_connect_backend`（连接后端） | 2792, 2799, 2806, 2822, 2829, 2834, 2875, 2879, 2883, 2888 |
+| `_connect_real`（连接真实设备） | 3270 |
+| `_panels_set_sdr_connected`（连接后启用面板） | 3299, 3308, 3315, 3328, 3334, 3340, 3353, 3360, 3366, 3373, 3392, 3397, 3405 |
+| `_teardown_connection`（断开/清理） | 3424, 3432, 3438, 3446, 3459, 3464, 3470 |
+| `_on_connection_for_ui` / `_on_module_device_selected` | 3511, 3517, 5596 |
+| `_on_device_plugged` / `_on_panel_device_connect` | 5656, 5753 |
+| `_on_record_toggled` / `_record_write_chunk` / `_on_pipeline_record_iq` | 3696, 4603, 4613 |
+| `_start_recording` / `_stop_recording`（录音） | 5209, 5219, 5229, 5283, 5292, 5298 |
+| `_replay_recording`（回放） | 6384, 6388 |
+| `_disconnect_gnss` | 6970 |
+
+判定：这些吞一次就是「点了没反应」；修的时候必须断言用户看到的状态（状态栏、按钮、提示），不能只补日志。
+
+### A2. `desktop/rf_sky_view.py::_find_body_at`（6 处，含 DSO 事故）
+
+| 行号 | 类别 | 现状 |
+| --- | --- | --- |
+| 5318 | ERROR/EMPTY | `float(None)` 类失败被 `pass`（事故点） |
+| 5332 | ERROR/EMPTY | `pass` |
+| 5378 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
+| 5438 | WARN/SILENT_FALLBACK | `px_arr = py_arr = alt_draw_arr = None` |
+| 5456 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
+| 5473 | WARN/SILENT_FALLBACK | `hyg = 0` |
+
+要求：每处修复都要有「天体出现在图层 / 点击命中返回该天体」的断言；`_find_body_at` 至少要区分「星表无此目标」与「解析失败」。
+
+### A3. `mbdsdr_ai/sdr_tools.py`：AI 工具面（49 处，17 ERROR + 32 WARN）
+
+ERROR（`pass`，模型会当成成功继续编解释）行号：661, 3117, 3185, 3191, 3375, 3471, 3797, 3986, 4055, 4118, 4527, 4930, 5451, 7873, 7891, 7925, 7943。
+
+WARN 多数是 `return ToolResult(success=False, content=...)`（用户/模型能看到失败文本，但没有日志与错误码）。这 32 处至少要补错误码/日志，不能让模型只拿到一句自由文本。
+
+### 其余
+
+`desktop/` 其余 526 处、`mbdsdr_ai/` 其余 643 处按兵不动，靠棘轮只降不升。测试线 62 处（多为 teardown）与 `experiments/` 32 处排在最后。
+
+### D. 三条长输入挂死：实测曲线与处置
+
+单位：秒；`>91.7` 表示 90s 预算外被异步异常中止；rtty 各长度均返回 `handler_error`（往返结果不匹配，独立于耗时）。
+
+| 字符数 | feldhell_decode | psk31_decode | rtty_decode |
+| --- | --- | --- | --- |
+| 2,000 | 4.74 | 1.93 | 1.45（失败） |
+| 5,000 | 11.86 | 4.02 | 3.70（失败） |
+| 10,000 | 24.22 | 7.86 | 7.46（失败） |
+| 20,000 | 65.49 | 14.83 | 15.11（失败） |
+| 40,000 | >91.7 | 28.73 | 50.91（失败） |
+| 80,000 | — | 58.75 | — |
+| 100,000 | P13 实测 >60s 挂死 | P13 实测 >60s 挂死 | P13 实测 >60s 挂死 |
+
+诊断：
+
+- **psk31**：严格线性，约 **0.7 ms/字符 + 0.9s 固定开销**；10 万字符 58.7s，正好卡在 60s 预算边缘。
+- **rtty**：2 万字符前线性（约 0.75 ms/字符）；4 万时升到 1.27 ms/字符，是纯 Python 大列表与 GC 的超线性抬升，不是算法 O(n²)。
+- **feldhell**：每字符 14 列 × 每列约 457 样本（8kHz / 17.5 列/秒），逐样本 `math.cos` 在 Python 循环里生成；2 万前约 2.4 ms/字符，2 万后因 900 万级浮点列表的内存/GC 抬到 3.3 ms/字符。本质是**按音频样本数线性**，不是 O(n²)。
+- 换算：FeldHell 1 字符 = 0.8 秒音频，1 万字符 = 2.2 小时音频；10 万字符要在内存里生成约 5.1 GB 样本。真实业余文本远小于此。
+
+处置（限流，但不是“砍功能”）：`MAX_ROUNDTRIP_TEXT = 10000`，超限在 handler 入口返回结构化 `param_out_of_range`（带 `length/limit/param`），不做调制解调。选 1 万的理由：实测最慢的 feldhell 10k 为 24.2s，仍低于 60s 单次预算；再往上 20k 已 65.5s，必然挂死。回归锁：`tests/test_tool_param_fuzz_guard.py::test_long_text_roundtrip_is_bounded`（10 万字符必须 <5s 返回结构化错误）。
+
+未做向量化优化：把 `math.cos` 改成 numpy 只改变常数，不改变“单次输出是数小时音频”的事实；真要长文本应按段落分块调用，而不是把整个波形塞进一次调用。
 
 ## 附录 A：按文件分布（256 个文件）
 

@@ -106,12 +106,37 @@ def test_recorded_or_reraised_is_not_silent(tmp_path):
                      "def h():\n"
                      "    try:\n"
                      "        g()\n"
-                     "    except Exception:\n"
-                     "        raise\n")
+                     "    except Exception as e:\n"
+                     "        raise RuntimeError('上抛') from e\n")
     report = _scan(tmp_path)
     assert report.defect_count == 0
     assert report.recorded == 1
     assert report.reraised == 1
+
+
+def test_fake_reraise_is_defect(tmp_path):
+    """`except Exception: raise` 是骗扫描器的假重抛，明令禁止。"""
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        g()\n"
+                     "    except Exception:\n"
+                     "        raise\n")
+    report = _scan(tmp_path)
+    assert report.defect_count == 1
+    assert report.defects[0].body == "FAKE_RERAISE"
+    assert report.defects[0].severity == "ERROR"
+
+
+def test_suppress_exception_is_forbidden(tmp_path):
+    """`contextlib.suppress(Exception)` 是 pass 的等价写法，必须拦住。"""
+    _write(tmp_path, "import contextlib\n"
+                     "def f():\n"
+                     "    with contextlib.suppress(Exception):\n"
+                     "        g()\n")
+    report = _scan(tmp_path)
+    assert report.defect_count == 1
+    assert report.defects[0].body == "FORBIDDEN_SUPPRESS"
+    assert report.forbidden == 1
 
 
 def test_whitelist_requires_three_answers(tmp_path):
@@ -141,9 +166,48 @@ def test_whitelist_complete_entry_excuses_location(tmp_path):
         "reason": "外部边界：可选依赖缺失",
         "user_visible": "该功能不可用并显示提示",
         "test": str(test_file.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "review_by": "2099-01",
     }]})
     assert report.whitelisted == 1
     assert report.defect_count == 0
+
+
+def test_whitelist_requires_review_by(tmp_path):
+    """白名单必须有到期复核标记，防止永久豁免。"""
+    test_file = REPO_ROOT / "tests" / "test_swallow_guard.py"
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        import sounddevice\n"
+                     "    except Exception:\n"
+                     "        pass\n")
+    report = _scan(tmp_path, {"entries": [{
+        "path": "sample.py", "symbol": "f", "line": 4,
+        "reason": "外部边界：可选依赖缺失",
+        "user_visible": "该功能不可用并显示提示",
+        "test": str(test_file.relative_to(REPO_ROOT)).replace("\\", "/"),
+    }]})
+    assert report.whitelisted == 0
+    assert report.whitelist_invalid == 1
+    assert "review_by" in report.defects[0].whitelist_issue
+
+
+def test_whitelist_overdue_is_invalid(tmp_path):
+    test_file = REPO_ROOT / "tests" / "test_swallow_guard.py"
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        import sounddevice\n"
+                     "    except Exception:\n"
+                     "        pass\n")
+    report = _scan(tmp_path, {"entries": [{
+        "path": "sample.py", "symbol": "f", "line": 4,
+        "reason": "外部边界：可选依赖缺失",
+        "user_visible": "该功能不可用并显示提示",
+        "test": str(test_file.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "review_by": "2000-01",
+    }]})
+    assert report.whitelisted == 0
+    assert report.whitelist_overdue == 1
+    assert report.defect_count == 1
 
 
 # ── 白名单降级路径的真实覆盖 ─────────────────────────────────────────
@@ -200,17 +264,60 @@ def test_scan_is_deterministic(tmp_path):
            [(f.key, f.body) for f in second.all_findings]
 
 
-def test_repo_has_no_unwhitelisted_silent_catch_all(repo_report):
-    """修前必红：存量静默吞噬仍存在，必须按 `文件:行号` 派给各线。"""
-    report = repo_report
-    if report.defect_count:
-        sample = "\n".join(
-            f"  {f.path}:{f.line} [{f.severity}/{f.body}] {f.symbol}"
-            for f in report.defects[:15]
-        )
-        pytest.fail(
-            f"全仓 catch-all {report.total_catch_all} 处，静默吞噬 {report.silent} 处，"
-            f"白名单 {report.whitelisted} 处，须修 {report.defect_count} 处；"
-            f"前 15 处：\n{sample}\n"
-            f"完整清单：python scripts/lint_swallow_all.py"
-        )
+@pytest.fixture(scope="module")
+def baseline():
+    return scanner.load_baseline(REPO_ROOT / "docs" / "code-guards-baseline.json")
+
+
+def test_repo_ratchet_within_baseline(repo_report, baseline):
+    """棘轮：任何文件/总量不得超过基线；只许降不许升。"""
+    assert baseline is not None, "缺少 docs/code-guards-baseline.json，门禁失效"
+    violations = scanner.check_ratchet(repo_report, baseline)
+    assert not violations, "棘轮越线（新增静默吞噬）：\n" + "\n".join(violations[:30])
+
+
+def test_repo_forbidden_constructs(repo_report):
+    """suppress(Exception) / 假重抛是禁令，存量也应为 0。"""
+    assert repo_report.forbidden == 0, "存在 suppress(Exception) 等价绕过"
+    fake = [f for f in repo_report.defects if f.body == "FAKE_RERAISE"]
+    assert not fake, "存在假重抛：\n" + "\n".join(f"{f.path}:{f.line}" for f in fake[:20])
+
+
+def test_ratchet_new_file_is_violation(tmp_path):
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        g()\n"
+                     "    except Exception:\n"
+                     "        pass\n")
+    report = _scan(tmp_path)
+    violations = scanner.check_ratchet(report, {"total": 0, "files": {}})
+    assert len(violations) == 2  # 新文件 + 总量
+    assert any("基线中没有该文件" in v for v in violations)
+
+
+def test_ratchet_allows_decrease(tmp_path):
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        g()\n"
+                     "    except Exception:\n"
+                     "        pass\n")
+    report = _scan(tmp_path)
+    baseline = {"total": 5, "files": {"sample.py": {"ERROR": 3, "WARN": 2}}}
+    assert scanner.check_ratchet(report, baseline) == []
+
+
+def test_ratchet_blocks_per_file_growth(tmp_path):
+    _write(tmp_path, "def f():\n"
+                     "    try:\n"
+                     "        g()\n"
+                     "    except Exception:\n"
+                     "        pass\n"
+                     "def h():\n"
+                     "    try:\n"
+                     "        g()\n"
+                     "    except Exception:\n"
+                     "        pass\n")
+    report = _scan(tmp_path)
+    baseline = {"total": 5, "files": {"sample.py": {"ERROR": 1, "WARN": 0}}}
+    violations = scanner.check_ratchet(report, baseline)
+    assert any("ERROR 2 > 基线 1" in v for v in violations)

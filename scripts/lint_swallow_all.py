@@ -17,18 +17,29 @@
   - SILENT_FALLBACK：有语句但没有记录（例如给变量塞默认值后继续）
 
 判定：
-  - EMPTY / SILENT_CONTROL / SILENT_FALLBACK 未进白名单 → 须修（defect）
-  - 有记录（RECORDED）或重新抛（RERAISE）→ 只计数，不入缺陷
+  - EMPTY / SILENT_CONTROL / SILENT_FALLBACK 未进白名单 → 存量（defect）
+  - 有记录（RECORDED）→ 只计数，不入缺陷
+  - `except Exception: raise`（单条裸 raise 的假重抛）→ FAKE_RERAISE，须修
+  - `contextlib.suppress(Exception)` / `suppress(Exception)` → 禁令，须修
+    （禁止用 suppress(Exception) 或假重抛绕过本扫描器）
 
-白名单 `scripts/swallow_whitelist.json` 每条必须回答三问，缺一即判不合格：
+白名单 `scripts/swallow_whitelist.json` 每条必须回答三问 + 复核期限，缺一即不合格：
   1. reason      为什么允许降级（必须是外部边界：第三方库/网络/硬件/平台）
   2. user_visible 降级后用户看到什么（不能是“什么都没有”）
   3. test        哪条测试覆盖这条降级路径（文件必须存在）
+  4. review_by   `YYYY-MM`，到期必须复核，否则按不合格处理
+
+棘轮策略：存量不是逐处修完，而是「只许降不许升」。
+  - `docs/code-guards-baseline.json` 按文件记录 ERROR/WARN 基线；
+  - 任何文件超过基线、或基线里没有的文件出现静默 catch-all → 新红线；
+  - 总量超过基线 → 红。
+  - 生成基线是人工动作：`--write-baseline docs/code-guards-baseline.json`
 
 用法：
-  python scripts/lint_swallow_all.py            # 汇总 + 缺陷清单
+  python scripts/lint_swallow_all.py            # 汇总 + 棘轮判定（超基线退出 1）
   python scripts/lint_swallow_all.py --list     # 打印每一处（含已记录型）
   python scripts/lint_swallow_all.py --json out.json
+  python scripts/lint_swallow_all.py --write-baseline docs/code-guards-baseline.json
   python scripts/lint_swallow_all.py --no-fail  # 只报告，不改退出码
 """
 from __future__ import annotations
@@ -40,6 +51,7 @@ import re
 import sys
 import tokenize
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -80,7 +92,7 @@ class Finding:
     symbol: str                    # 所在类/函数，点分
     exception: str                 # 捕获类型原文
     bare: bool                     # 是否裸 except
-    body: str                      # EMPTY / SILENT_CONTROL / SILENT_FALLBACK / RECORDED / RERAISE
+    body: str                      # EMPTY / SILENT_CONTROL / SILENT_FALLBACK / RECORDED / RERAISE / FAKE_RERAISE / FORBIDDEN_SUPPRESS
     severity: str                  # ERROR / WARN / INFO
     snippet: str
     whitelisted: bool = False
@@ -97,9 +109,12 @@ class ScanReport:
     silent: int = 0
     recorded: int = 0
     reraised: int = 0
+    forbidden: int = 0
     whitelisted: int = 0
     whitelist_invalid: int = 0
+    whitelist_overdue: int = 0
     whitelist_stale: int = 0
+    ratchet_violations: List[str] = field(default_factory=list)
     defects: List[Finding] = field(default_factory=list)
     all_findings: List[Finding] = field(default_factory=list)
     parse_errors: List[str] = field(default_factory=list)
@@ -163,6 +178,9 @@ def _classify(body: List[ast.stmt]) -> str:
     stmts = [s for s in body if not _noop(s)]
     if not stmts:
         return "EMPTY"
+    # 假重抛：except Exception: raise —— 什么都没做，只是骗扫描器“我重抛了”。
+    if len(stmts) == 1 and isinstance(stmts[0], ast.Raise) and stmts[0].exc is None:
+        return "FAKE_RERAISE"
     if any(isinstance(s, ast.Raise) for s in stmts):
         return "RERAISE"
     if _recorded(stmts):
@@ -215,6 +233,25 @@ class _Walker(ast.NodeVisitor):
     visit_AsyncFunctionDef = _visit_named
     visit_ClassDef = _visit_named
 
+    def visit_Call(self, node: ast.Call) -> None:
+        # 明令禁止 contextlib.suppress(Exception)：它是 `except Exception: pass`
+        # 的等价写法，扫描器必须拦住，否则门禁形同虚设。
+        name = _call_name(node.func)
+        if name in {"suppress", "contextlib.suppress"} or name.endswith(".suppress"):
+            if any(_catches_all(arg) for arg in node.args):
+                self.findings.append(Finding(
+                    path=self.path,
+                    line=node.lineno,
+                    end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+                    symbol=".".join(self.stack) or "<module>",
+                    exception="suppress(Exception)",
+                    bare=False,
+                    body="FORBIDDEN_SUPPRESS",
+                    severity="ERROR",
+                    snippet=_first_code_line([node], self.src) or "suppress(Exception)",
+                ))
+        self.generic_visit(node)
+
     def visit_Try(self, node: ast.Try) -> None:
         for i, handler in enumerate(node.handlers):
             if not _catches_all(handler.type):
@@ -224,7 +261,7 @@ class _Walker(ast.NodeVisitor):
                 severity = "INFO"
             elif body_kind == "RECORDED":
                 severity = "INFO"
-            elif body_kind == "EMPTY":
+            elif body_kind in {"EMPTY", "FAKE_RERAISE"}:
                 severity = "ERROR"
             else:
                 severity = "WARN"
@@ -293,6 +330,16 @@ def _entry_issue(entry: Dict[str, Any], root: Path) -> str:
     candidates = [root / test, ROOT / test, Path(test)]
     if not any(p.exists() for p in candidates):
         return f"测试文件不存在: {test}"
+    review = entry.get("review_by")
+    if not isinstance(review, str) or not re.fullmatch(r"\d{4}-\d{2}", review.strip()):
+        return "缺少或非法 review_by（应为 YYYY-MM）"
+    try:
+        year, month = (int(x) for x in review.strip().split("-"))
+        today = date.today()
+        if (year, month) < (today.year, today.month):
+            return f"白名单已过期，需复核: review_by={review}"
+    except ValueError:
+        return "缺少或非法 review_by（应为 YYYY-MM）"
     return ""
 
 
@@ -327,13 +374,21 @@ def scan_repo(root: Path = ROOT, whitelist_path: Optional[Path] = None) -> ScanR
         walker = _Walker(rel, src)
         walker.visit(tree)
         for finding in walker.findings:
-            report.total_catch_all += 1
-            if finding.body == "RECORDED":
-                report.recorded += 1
-            elif finding.body == "RERAISE":
-                report.reraised += 1
+            if finding.body == "FORBIDDEN_SUPPRESS":
+                report.forbidden += 1
             else:
-                report.silent += 1
+                report.total_catch_all += 1
+                if finding.body == "RECORDED":
+                    report.recorded += 1
+                elif finding.body == "RERAISE":
+                    report.reraised += 1
+                else:
+                    report.silent += 1
+            # 禁令构造（suppress(Exception) / 假重抛）不允许白名单豁免。
+            if finding.body in {"FORBIDDEN_SUPPRESS", "FAKE_RERAISE"}:
+                report.defects.append(finding)
+                report.all_findings.append(finding)
+                continue
             entry_hit = None
             for idx, entry in enumerate(entries):
                 if _entry_matches(entry, finding):
@@ -344,7 +399,10 @@ def scan_repo(root: Path = ROOT, whitelist_path: Optional[Path] = None) -> ScanR
                 issue = _entry_issue(entry, root)
                 if issue:
                     finding.whitelist_issue = issue
-                    report.whitelist_invalid += 1
+                    if issue.startswith("白名单已过期"):
+                        report.whitelist_overdue += 1
+                    else:
+                        report.whitelist_invalid += 1
                 else:
                     finding.whitelisted = True
                     report.whitelisted += 1
@@ -357,6 +415,74 @@ def scan_repo(root: Path = ROOT, whitelist_path: Optional[Path] = None) -> ScanR
     report.all_findings.sort(key=lambda f: (f.path, f.line, f.end_line))
     report.defects.sort(key=lambda f: (f.path, f.line, f.end_line))
     return report
+
+
+DEFAULT_BASELINE = "docs/code-guards-baseline.json"
+
+
+def build_baseline(report: ScanReport) -> Dict[str, Any]:
+    """按文件记录 ERROR/WARN 计数，作为棘轮上限（只许降不许升）。"""
+    files: Dict[str, Dict[str, int]] = {}
+    for f in report.defects:
+        row = files.setdefault(f.path, {"ERROR": 0, "WARN": 0})
+        row[f.severity] = row.get(f.severity, 0) + 1
+    return {
+        "version": 1,
+        "snapshot": date.today().isoformat(),
+        "policy": "棘轮基线：任何文件的 ERROR/WARN 不得超过此处计数；新文件出现静默 catch-all 即红。只许降不许升。",
+        "total": len(report.defects),
+        "whitelisted": report.whitelisted,
+        "forbidden": report.forbidden,
+        "files": dict(sorted(files.items())),
+    }
+
+
+def load_baseline(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def check_ratchet(report: ScanReport, baseline: Dict[str, Any]) -> List[str]:
+    """返回所有超基线项；空列表 = 只降没升。"""
+    violations: List[str] = []
+    files = baseline.get("files") or {}
+    current: Dict[str, Dict[str, int]] = {}
+    for f in report.defects:
+        row = current.setdefault(f.path, {"ERROR": 0, "WARN": 0})
+        row[f.severity] = row.get(f.severity, 0) + 1
+
+    for path in sorted(current):
+        cur = current[path]
+        base = files.get(path)
+        if base is None:
+            violations.append(
+                f"{path}: 基线中没有该文件，但出现了静默 catch-all "
+                f"({cur['ERROR']} ERROR / {cur['WARN']} WARN)")
+            continue
+        for sev in ("ERROR", "WARN"):
+            allow = int(base.get(sev, 0))
+            if cur[sev] > allow:
+                violations.append(
+                    f"{path}: {sev} {cur[sev]} > 基线 {allow}（新增 {cur[sev] - allow}）")
+
+    total_allow = int(baseline.get("total", 0))
+    if len(report.defects) > total_allow:
+        violations.append(
+            f"总量 {len(report.defects)} > 基线 {total_allow}"
+            f"（新增 {len(report.defects) - total_allow}）")
+    return violations
+
+
+def write_baseline(report: ScanReport, path: Path) -> None:
+    data = build_baseline(report)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _group_by_file(findings: List[Finding]) -> Dict[str, List[Finding]]:
@@ -372,10 +498,22 @@ def print_report(report: ScanReport, list_all: bool = False) -> None:
     print(f"全仓 catch-all 处理器：{report.total_catch_all}")
     print(f"  静默吞噬（pass/空块/静默 return-continue/无记录降级）：{report.silent}")
     print(f"  有记录或重新抛（非静默）：{report.recorded + report.reraised}")
+    if report.forbidden:
+        print(f"  禁令构造（suppress(Exception)/假重抛）：{report.forbidden}")
     print(f"白名单：{report.whitelisted} 处有效"
           + (f" / {report.whitelist_invalid} 处不合格" if report.whitelist_invalid else "")
+          + (f" / {report.whitelist_overdue} 处到期" if report.whitelist_overdue else "")
           + (f" / {report.whitelist_stale} 处失效（代码已变）" if report.whitelist_stale else ""))
-    print(f"须修：{report.defect_count} 处")
+    print(f"存量须修：{report.defect_count} 处")
+
+    if report.ratchet_violations:
+        print(f"\n[棘轮越线] {len(report.ratchet_violations)} 项")
+        for item in report.ratchet_violations[:30]:
+            print(f"  {item}")
+        if len(report.ratchet_violations) > 30:
+            print(f"  ……其余 {len(report.ratchet_violations) - 30} 项见 --json")
+    else:
+        print("棘轮：未越基线（只降没升）")
 
     if report.parse_errors:
         print("\n[解析失败]")
@@ -408,10 +546,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--whitelist", default=None, help="白名单 JSON 路径")
     parser.add_argument("--json", default=None, help="把完整报告写成 JSON")
     parser.add_argument("--list", action="store_true", help="打印每一处 catch-all")
-    parser.add_argument("--no-fail", action="store_true", help="有缺陷也返回 0")
+    parser.add_argument("--baseline", default=None, help="棘轮基线 JSON 路径")
+    parser.add_argument("--write-baseline", default=None,
+                        help="把当前存量写成棘轮基线（人工动作）")
+    parser.add_argument("--no-fail", action="store_true", help="只报告，不因越线返回 1")
     args = parser.parse_args(argv)
 
-    report = scan_repo(Path(args.root), Path(args.whitelist) if args.whitelist else None)
+    root = Path(args.root)
+    report = scan_repo(root, Path(args.whitelist) if args.whitelist else None)
+
+    if args.write_baseline:
+        out = Path(args.write_baseline)
+        write_baseline(report, out)
+        print(f"基线已写入：{out}（total={report.defect_count}）")
+        return 0
+
+    baseline_path = Path(args.baseline) if args.baseline else root / DEFAULT_BASELINE
+    baseline = load_baseline(baseline_path)
+    if baseline is not None:
+        report.ratchet_violations = check_ratchet(report, baseline)
+
     print_report(report, list_all=args.list)
 
     if args.json:
@@ -420,9 +574,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             "total_catch_all": report.total_catch_all,
             "silent": report.silent,
             "recorded_or_reraised": report.recorded + report.reraised,
+            "forbidden": report.forbidden,
             "whitelisted": report.whitelisted,
             "whitelist_invalid": report.whitelist_invalid,
+            "whitelist_overdue": report.whitelist_overdue,
             "whitelist_stale": report.whitelist_stale,
+            "ratchet_violations": report.ratchet_violations,
             "defects": [asdict(f) for f in report.defects],
             "all_findings": [asdict(f) for f in report.all_findings],
             "parse_errors": report.parse_errors,
@@ -432,9 +589,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nJSON: {out}")
 
-    if report.defect_count and not args.no_fail:
-        return 1
-    return 0
+    if args.no_fail:
+        return 0
+    # 有基线时只看“越线”（存量不阻塞 CI）；无基线时退回全量缺陷判定，
+    # 避免误删基线后门禁静默变绿。
+    if baseline is not None:
+        gate = (report.ratchet_violations or report.whitelist_invalid
+                or report.whitelist_overdue or report.whitelist_stale)
+        return 1 if gate else 0
+    return 1 if report.defect_count else 0
 
 
 if __name__ == "__main__":
