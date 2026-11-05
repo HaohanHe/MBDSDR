@@ -228,6 +228,7 @@ python scripts\hw_acceptance\check_ring_labels.py
 | `python -m pytest tests\test_moon_reference_acceptance.py -q` | **0.5 s**（3 passed） | `de421.bsp` + skyfield | 月球对拍 + 1h 反证回归 |
 | `python -m pytest tests\test_hw_acceptance_contract.py -q` | **1.9 s**（18 passed） | 无（纯契约） | 锁四码、锁 `skip_result` 永不 PASS、锁 `UNVERIFIED→SKIP(NO_DATA)`、锁 R/A 编号不同义、锁导频测法与采集记账、锁噪声底阈值区间、锁占位序列号重试 |
 | `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 65536,262144,1048576 --modes sync,sync_only,thread,async` | 约 **3.5 min**（24 次 6 s 采集） | RTL-SDR；async 模式直连 pyrtlsdr | `throughput.json`：逐块读/转换耗时、captured/wall/吞吐/丢样；用于 §6.2.1 的归因 |
+| `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 --modes product --mode-runs product=3` | 约 **20 s** | RTL-SDR；开的是产品类 `RTLSDRBackend`（ring 生产者），不是验收用的 OpenDevice | `product_path.json`：ring 供给、解调 consumed、各订阅者 dropped、ring 积压、CPU/RSS；用于 §6.2.2 |
 | `python scripts\hw_acceptance\check_ring_labels.py` | **0.1 s** | 无（纯文本） | 文档编号闸；`--selftest` 是它的反证（4 种改坏法必须红） |
 | `python scripts\hw_acceptance\ring{1..7}_*.py --out D:\...` | R1 17.4 / R2 8.8 / R3 8.0 / R4 12.0 / R5 25.0 / R6 4.6 / R7 4.2 s | 见上表 | 单环排障；每环独立 `result.json` |
 
@@ -357,11 +358,11 @@ Welch（65536 点/Hann，不重叠）→ 18.5–19.5 kHz 取峰 + 抛物线插�
    无平均、无插值 → 幅度也被折叠底压低（旧法 7.3–8.9 dB vs 新法同台 12.0–38.2 dB）。
 
 已修：`ring3._pilot` 改为 `resample_poly` 抗混叠 + Welch 平均 + 抛物线插值，
-并连读约 6 s IQ（约 14 段）而不是单段 131072 点。真机 98.0 MHz 复跑 →
+并连读约 6 s IQ（读线程修复后实得 5.7–5.9 s，约 17–18 段）而不是单段 131072 点。真机 98.0 MHz 复跑 →
 `PASS`，导频 **19003.0 Hz / 37.7 dB**；91.24375 MHz 复测 12.05–13.46 dB
 仍过 10 dB 门限。
 
-**段数对幅度读数的影响（同一台 93.305 MHz）**：5 段 10.4 dB、14 段 15.2 dB、
+**段数对幅度读数的影响（同一台 93.305 MHz；下面的段数是旧采集速率下的实验值）**：5 段 10.4 dB、14 段 15.2 dB、
 22–26 段 16.7–20.1 dB——短采集的估计方差会把一台稳定立体声台压到 10 dB
 门限附近（10.4 只差 0.4 dB）。所以采集时长从 2 s 提到 6 s，不是调门限。
 **幅度口径**：37.7 dB 是「峰/邻域中位数」，与产品链 `pilot_snr_db`
@@ -445,6 +446,88 @@ python scripts\hw_acceptance\capture_throughput.py --seconds 6 `
 python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
 # 看 result.json 的 pilot_captured_s / pilot_drop_pct / pilot_mpx_points / pilot_welch_segments
 ```
+
+#### 6.2.2 产品主路径：读与处理本来就不在同一线程（同仪器 0.0–1.7%，不是 12–16%）
+
+上一节修的是**验收脚本**的串行读法。产品桌面走的是另一条路，用同一仪器
+（`capture_throughput.py --modes product`）实测：
+
+- `RTLSDRBackend.connect()` 启动 `_ThreadedRingReader` 生产者线程
+  （`mbdsdr_ai/sdr_backend.py` 的 `_produce_loop`，8192 样点/块、ring 1,000,000 样点
+  ≈ 0.42 s），USB bulk 读只发生在这条线程；
+- 桌面 `ReceivePipeline` 的 `IqReaderThread` 从 ring 订阅连续读 16384 块，经
+  ping-pong 分发给 `FftWorker` / `DemodWorker` / `RecordTap`
+  （`desktop/receive_pipeline.py`）；
+- 探针开的就是产品类 `RTLSDRBackend`，三个订阅者分别模拟：解调（桌面
+  `DemodWorker` 用的同一个 `mbdsdr_ai.dsp.WFMReceiver`，不含声卡与 UI）、FFT、
+  20 fps 频谱快照。
+
+同台（93.305 MHz / 2.4 MS/s / 请求 6 s / 消费块 16384），3 个独立进程各 1 次 +
+同一进程连跑 5 次：
+
+| 批 | # | ring 供给 produced_s（MS/s） | 解调消费 captured_s | 丢样 | 解调每块中位 | audio / fft 订阅者 dropped | ring 积压 max | CPU s | RSS 峰值 |
+|---|---|---|---|---|---|---|---|---|---|
+| 独立进程 | 1 | 6.001（2.400） | 6.007 | 0.0% | 1.91 ms | 0.0 / 0.0 s | 3.4 ms | 2.77 | 127.4 MB |
+| 独立进程 | 2 | 5.990（2.396） | 6.001 | 0.0% | 1.95 ms | 0.0 / 0.0 s | 6.8 ms | 2.61 | 127.4 MB |
+| 独立进程 | 3 | 5.888（2.355） | 5.898 | 1.7% | 2.08 ms | 0.0 / 0.0 s | 6.8 ms | 2.89 | 126.5 MB |
+| 同进程连跑 | 1–5 | 5.967–5.997（2.386–2.399） | 5.973–6.001 | 0.0–0.4% | 1.8–2.1 ms | 0.0 / 0.0 s | ≤6.8 ms | 2.64–3.25 | 127.2–158.0 MB |
+
+> 连跑批的 RSS 每次约 +7.7 MB（≈ ring 的 8 MB），但换成独立进程每次都是
+> 126.5–127.4 MB——属 Windows 堆保留而非单连接泄漏；产品正常一次连接只建一个
+> ring。该增长未改产品代码，仅记录观测量。
+
+判据：
+
+1. **处理没有占住读循环**：audio 与 fft 订阅者 `dropped` 都是 **0.0 s**；WFM 解调
+   每 16384 块 1.8–2.1 ms（对应信号 6.83 ms，约占 30% 单核），ring 积压 ≤6.8 ms
+   ——读线程与处理线程互不阻塞。若按旧 ring3 的串行读法，转换期间没有在途 bulk
+   传输，丢样会回到 12–16%。
+2. **残留 0.0–1.7% 是 USB 供给差，不是处理丢样**：ring 生产者 6 s 实际写入
+   5.888–6.001 s（2.355–2.403 MS/s），与 §6.2.1 的 sync_only 同一边界；解调消费
+   与供给差 ≤10 ms。`drop_pct` 沿用 ring3 的 `max(0, 1 − captured/6)`，把供给差
+   如实记账，不掩盖成 0。
+3. **20 fps 频谱快照只覆盖 13.6–13.8% 是有意为之**：每 50 ms 取最新 16384 点做
+   一帧快照，本来就不承诺连续消费；跳过记在它自己的 `sub_dropped`，不参与
+   音频/录制路径。**不能把这 14% 读成「产品丢样」**。
+4. **`ring.dropped_total()` 不能当产品丢样指标**：它只跟默认 `read()` 的
+   `_count` 记账，fan-out 订阅者读走的量不回填，整段都会被算成丢弃；本探针
+   因此只报每个订阅者自己的 `dropped`。（记账口径的已知缺陷，未改产品代码。）
+
+结论：**产品没有这个病**。验收脚本会踩，是因为它用 `DeviceManager.open()` 返回的
+`OpenDevice`（裸 pyrtlsdr，一次调用一次同步 bulk 读，没有常驻读线程），旧
+`_pilot_from_ctrl` 又在这个循环里串行做 13–17 ms 的 MPX 转换；产品用 ring 生产者
++ 独立 worker，转换不占 USB 读线程。**这次 ring3 的修复是验收仪器的修复，不能当
+产品性能证据**。本探针覆盖解调/频谱消费；`RecordTap` 的落盘吞吐不在表内（它和
+音频一样由同一读线程每块分发，但磁盘写另计）。
+
+#### 6.2.3 异步读：做 / 不做 / 什么条件下做（架构决策记录）
+
+背景数字：异步读 2.370–2.398 MS/s、丢样 0；同步块读 2.27–2.36。差 2–5%。
+
+| 维度 | 绕开 controller 直连 pyrtlsdr 异步读 | 现同步读线程 / ring |
+|---|---|---|
+| rtl_tcp / 远程源 | `RtlSdr.read_bytes_async` 只对本地 USB 有效；`RTLSDRBackend(host=...)` 的 TCP 源没有对应接口，只能另写一套或在 host 模式回退同步，同一后端出现两条语义 | 本地与 rtl_tcp 共用 `read_fn`，行为一致 |
+| 热插拔 | 回调线程里出错或静默停止；拔出后 `cancel_read_async` 可能挂在失效句柄上，必须外加看门狗并把错误送回主线程 | 每次 `read_fn` 同步抛错，生产者循环 `logger.warning` + 10 ms 重试 |
+| 设备生命周期 | 回调可能在 `cancel` 之后仍被调用；`close()`/重开顺序错会 use-after-free；重连还要重新枚举（本机还有占位序列号 `rtl-0` 的坑） | 句柄只在生产者线程里用；断开 = 停线程 + close，路径短 |
+| 错误恢复 | 回调内异常若被吞，主线程只看到「没数据」；要自带计数（callback / queue-full / 短回调）才能区分「设备停」与「消费慢」 | `None`/空块有明确分支，异常与欠读可计数 |
+| 背压 / 内存 | librtlsdr 内部多缓冲不感知 Python 消费速度；回调里排队满只能丢，必须自己记账，否则又是静默丢样 | 有界队列满则读线程阻塞，内存有界（ring3 已用） |
+| 收益 | 供给 2.37–2.40 vs 2.27–2.36；6 s 丢样 0 vs 1.7–3.5%（验收）/ 4.1–4.9%（产品） | — |
+
+**决策：不做**（默认路径保持同步读线程 / ring）。理由：12.6–16.3% 的病根是串行
+转换，已由读线程消除；剩下的 1.7–3.5%（验收）/ 4.1–4.9%（产品）是 USB 供给差，
+收益 <5%，却要新增回调错误通道、热插拔与生命周期处理，并把 rtl_tcp 与本地 USB
+拆成两条路径。
+
+**什么条件下做**（任一）：
+
+1. 出现「必须样点完整」的用户可见需求（例如 IQ 录制逐样点对齐、长时无缺口），
+   且 4–5% 的供给差会破坏该需求；
+2. 异步适配器只替换 `_ThreadedRingReader` 的 `read_fn`，ring / 消费者 / 线程模型
+   不变，同时补齐：回调异常通道、queue-full 计数、`cancel_read_async` + 3 s
+   join、拔出/重插测试；`host`（rtl_tcp）模式自动回退同步；
+3. `mbdsdr_ai/sdr_backend.py` 的 claim owner 同意并承担回归。
+
+在此之前，不得把异步读的 2.37–2.40 MS/s 写进产品指标；它只是本机「带宽够」的证据。
 
 重采样比算式（音频链，`decode_stereo → _resample_to`）：
 `gcd(2048000, 48000) = 16000` → `up = 3`、`down = 128` → 有效比 128/3 = 42.6667，

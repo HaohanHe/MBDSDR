@@ -9,6 +9,9 @@
   thread      独立读线程 + 有界队列，消费线程只做 MPX 转换（ring3 现在的做法）
   async       librtlsdr 异步读（rtlsdr_read_async）+ 队列；消费线程做
               uint8->complex64 与 MPX（与 OpenDevice 同口径）
+  product     **产品主路径**：桌面用的 RTLSDRBackend（ring 生产者线程 8192/块）
+              + 产品 ReceiveChain 解调 + 产品式 FFT 消费线程；量 ring 供给、
+              ring 丢样、订阅者丢样、积压延迟、CPU/RSS
 
 判定依据：丢样率应与「转换耗时 / 墙钟」同阶；sync_only 与 async 的吞吐差
 即「同步块读传输间死区」，与 Python 侧无关。
@@ -240,11 +243,135 @@ def run_async(block, seconds, freq, gain, qsize=6):
                     reader_error="; ".join(err) or None)
 
 
+def run_product(block, seconds, freq, gain):
+    """量产品主路径：RTLSDRBackend 的 ring 生产者 + 产品解调/FFT 消费线程。
+
+    与验收环的区别：验收环用 ``DeviceManager.open()`` 返回的 OpenDevice（裸
+    pyrtlsdr，一次调用一次同步 bulk 读），没有常驻读线程；桌面产品用
+    ``RTLSDRBackend``，connect 时就启动 ``_ThreadedRingReader`` 生产者线程
+    （8192/块、ring 1,000,000 样点），消费方（ReceivePipeline 的 reader /
+    FftWorker / DemodWorker）只从 ring 取数。因此这里开的是产品类，不是验收
+    用的 controller/OpenDevice。
+
+    读数口径：
+      produced_s       ring 生产者实际写入的样点数（USB 供给）
+      captured_s       解调消费线程取走的样点数（音频/录制路径的实际覆盖）
+      drop_pct         max(0, 1 - captured_s/seconds) —— 与 ring3 同一公式
+      ring_dropped_s   因消费落后、ring 覆盖掉的样点数（处理占住读循环才会 >0）
+      sub_dropped      各订阅者游标被跳过的样点数（频谱快照订阅者按设计会跳）
+      backlog_s        每次取数前的 ring 积压（约等于端到端排队延迟）
+      cpu_s / rss_peak_mb  窗口内整进程 CPU 与 RSS 峰值（psutil）
+    """
+    from mbdsdr_ai.dsp import WFMReceiver           # 桌面 DemodWorker 用的同一类
+    from mbdsdr_ai.sdr_backend import RTLSDRBackend
+
+    import psutil
+
+    backend = RTLSDRBackend(device_index=0)
+    backend.connect()
+    try:
+        backend.set_sample_rate(FS)
+        backend.set_frequency(freq)
+        backend.set_gain(gain)
+        time.sleep(0.3)
+        ring = getattr(backend, "_ring_reader", None)
+        if ring is None:
+            return {"mode": "product", "block": int(block), "requested_s": seconds,
+                    "error": "产品后端未启动 ring 生产者（无法量产品路径）"}
+
+        audio_sub = ring.subscribe("probe-audio")   # 模拟 DemodWorker/RecordTap 的连续消费
+        fft_sub = ring.subscribe("probe-fft")       # 模拟 FftWorker
+        gui_sub = ring.subscribe("probe-gui")       # 模拟 20 fps 频谱快照（按设计稀疏）
+
+        chain = WFMReceiver(sample_rate=FS, audio_sr=48000)
+        chain.process(np.zeros(16384, dtype=np.complex64))  # 预热滤波设计，不进窗口
+
+        stop = threading.Event()
+        read_t, conv_t, backlog, n_audio, n_fft, n_gui = [], [], [], [0], [0], [0]
+
+        def demod_loop():
+            while not stop.is_set():
+                backlog.append(audio_sub.available() / FS)
+                a = time.perf_counter()
+                iq = audio_sub.read(block)
+                read_t.append(time.perf_counter() - a)
+                if iq is None:
+                    continue
+                n_audio[0] += len(iq)
+                c = time.perf_counter()
+                chain.process(iq)
+                conv_t.append(time.perf_counter() - c)
+
+        def fft_loop():
+            win = np.hanning(16384)
+            while not stop.is_set():
+                iq = fft_sub.read(16384)
+                if iq is None:
+                    continue
+                n_fft[0] += len(iq)
+                np.abs(np.fft.fftshift(np.fft.fft(iq * win)))
+
+        def gui_loop():
+            while not stop.is_set():
+                iq = gui_sub.read(16384)
+                if iq is None:
+                    continue
+                n_gui[0] += len(iq)
+                time.sleep(0.05)
+
+        proc = psutil.Process()
+        cpu0 = sum(proc.cpu_times()[:2])
+        rss_peak = [proc.memory_info().rss]
+
+        def sampler():
+            while not stop.is_set():
+                rss_peak[0] = max(rss_peak[0], proc.memory_info().rss)
+                stop.wait(0.05)
+
+        threads = [threading.Thread(target=f, name=f"probe-{f.__name__}", daemon=True)
+                   for f in (demod_loop, fft_loop, gui_loop, sampler)]
+        under0 = ring.underruns_total()
+        sub_drop0 = {s.name: s.dropped for s in (audio_sub, fft_sub, gui_sub)}
+        for t in threads:
+            t.start()
+        t0 = time.perf_counter()
+        produced0 = ring._produced
+        time.sleep(seconds)
+        produced1 = ring._produced
+        wall = time.perf_counter() - t0
+        stop.set()
+        for t in threads:
+            t.join(timeout=2.0)
+
+        produced = produced1 - produced0
+        cpu = sum(proc.cpu_times()[:2]) - cpu0
+        row = _summary("product", block, seconds, n_audio[0], wall, read_t, conv_t,
+                       produced_s=round(produced / FS, 3),
+                       produced_msps=round(produced / wall / 1e6, 3),
+                       # 只看每个订阅者自己的 dropped：ring.dropped_total() 只跟默认 read()
+                       # 的 _count 记账，fan-out 订阅者读走的量不回填，整段都会被算成丢弃。
+                       sub_dropped_s={s.name: round((s.dropped - sub_drop0[s.name]) / FS, 3)
+                                      for s in (audio_sub, fft_sub, gui_sub)},
+                       underruns_delta=ring.underruns_total() - under0,
+                       backlog=_stats(backlog),
+                       fft_captured_s=round(n_fft[0] / FS, 3),
+                       gui_captured_s=round(n_gui[0] / FS, 3),
+                       gui_coverage_pct=round(n_gui[0] / max(produced, 1) * 100.0, 1),
+                       sub_dropped={k: v for k, v in ring.subscriber_dropped().items()
+                                    if k.startswith("probe-")},
+                       cpu_s=round(cpu, 3),
+                       rss_peak_mb=round(rss_peak[0] / (1 << 20), 1))
+        return row
+    finally:
+        _close(backend)
+
+
 MODES = {
     "sync": lambda *a: run_sync(*a, convert=True),
     "sync_only": lambda *a: run_sync(*a, convert=False),
     "thread": run_thread,
     "async": run_async,
+    "product": run_product,
 }
 
 
