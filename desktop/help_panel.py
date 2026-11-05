@@ -3,7 +3,7 @@
 帮助与能力目录面板
 ====================
 
-两页，一页能看完：
+三页，一页能看完：
 
   * **三步上手**：连接设备 → 看频谱/听声音 → 打开天空模式。步骤里的键位
     从 ``shortcuts.py`` 取，不手抄；没有硬件时明确说明「不会伪造信号」，
@@ -11,6 +11,9 @@
   * **能力目录**：可搜索的分类列表，内容由 ``desktop/capability_catalog.py``
     从真实注册表（面板/解调/数字解码/长尾解码器/AI 工具域/快捷键）实时生成；
     触发不了的条目如实标注「暂不可用」并写原因。
+  * **怎么办**：现象/可能原因/下一步，条目逐字取自 ``mbdsdr_ai/error_catalog``
+    的真实错误条目（见 ``desktop/troubleshooting.py``），下一步必须点到
+    具体控件名或设置项键名，空话会被测试拦红。
 
 面板默认非模态、只在用户主动点菜单时出现，不遮挡主界面操作。
 """
@@ -29,6 +32,7 @@ from shortcuts import bind as _key  # noqa: E402
 from capability_catalog import (  # noqa: E402
     CATEGORIES, Capability, build_catalog, catalog_stats, search_capabilities,
 )
+from troubleshooting import build_remedies, search_remedies  # noqa: E402
 
 #: 三步上手：键位一律现取 shortcuts.py；步骤顺序是产品约定。
 ONBOARDING_STEPS = (
@@ -82,6 +86,7 @@ def _build_dialog_class():
             self.resize(900, 640)
             self.setModal(False)
             self._catalog = build_catalog()
+            self._remedies = build_remedies()
 
             root = QVBoxLayout(self)
             self.tabs = QTabWidget(self)
@@ -89,13 +94,15 @@ def _build_dialog_class():
 
             self.tabs.addTab(self._build_quick_start(), "三步上手")
             self.tabs.addTab(self._build_catalog_tab(), "能力目录")
+            self.tabs.addTab(self._build_troubleshooting_tab(), "怎么办")
             if initial_tab:
-                self.tabs.setCurrentIndex(1)
+                self.tabs.setCurrentIndex(min(initial_tab, self.tabs.count() - 1))
 
             close_btn = QPushButton("关闭", self)
             close_btn.clicked.connect(self.close)
             root.addWidget(close_btn)
             self._refresh_catalog()
+            self._refresh_troubleshooting()
 
         # ---------------- 三步上手 ----------------
         def _build_quick_start(self) -> QWidget:
@@ -208,11 +215,80 @@ def _build_dialog_class():
                     for col in range(3):
                         child.setForeground(col, Qt.gray)
 
+        # ---------------- 怎么办 ----------------
+        def _build_troubleshooting_tab(self) -> QWidget:
+            page = QWidget(self)
+            lay = QVBoxLayout(page)
+
+            row = QHBoxLayout()
+            self.trouble_search_edit = QLineEdit(page)
+            self.trouble_search_edit.setPlaceholderText(
+                "搜索症状或关键词（例如：没声音、静噪、连接失败、超时、磁盘满）")
+            self.trouble_search_edit.textChanged.connect(
+                self._refresh_troubleshooting)
+            row.addWidget(self.trouble_search_edit, stretch=1)
+            lay.addLayout(row)
+
+            self.trouble_count_label = QLabel(page)
+            self.trouble_count_label.setWordWrap(True)
+            lay.addWidget(self.trouble_count_label)
+
+            self.trouble_tree = QTreeWidget(page)
+            self.trouble_tree.setColumnCount(3)
+            self.trouble_tree.setHeaderLabels(
+                ["现象（界面原文）", "可能原因", "下一步"])
+            self.trouble_tree.setRootIsDecorated(True)
+            self.trouble_tree.setSelectionMode(QAbstractItemView.NoSelection)
+            self.trouble_tree.setFocusPolicy(Qt.NoFocus)
+            self.trouble_tree.setColumnWidth(0, 300)
+            lay.addWidget(self.trouble_tree, stretch=1)
+
+            self.trouble_empty_label = QLabel(page)
+            self.trouble_empty_label.setWordWrap(True)
+            self.trouble_empty_label.setText(
+                "没有匹配的条目。换个词（例如「没声音」「静噪」「采样率」），"
+                "或清空搜索框看全部。")
+            self.trouble_empty_label.setVisible(False)
+            lay.addWidget(self.trouble_empty_label)
+
+            foot = QLabel(page)
+            foot.setWordWrap(True)
+            foot.setText(
+                "条目逐字取自 error_catalog 的真实错误；下一步必须点到具体"
+                "控件名或设置项键名，写「请检查配置」这类空话会被测试拦下。")
+            lay.addWidget(foot)
+            return page
+
+        def _refresh_troubleshooting(self) -> None:
+            rows = search_remedies(self._remedies,
+                                   self.trouble_search_edit.text())
+            self.trouble_count_label.setText(
+                f"显示 {len(rows)} / 共 {len(self._remedies)} 条 · "
+                "每条含现象（界面原文）/ 可能原因 / 下一步")
+            self.trouble_tree.clear()
+            self.trouble_empty_label.setVisible(not rows)
+            self.trouble_tree.setVisible(bool(rows))
+            groups: dict = {}
+            for r in rows:
+                groups.setdefault(r.group, []).append(r)
+            for group, items in groups.items():
+                top = QTreeWidgetItem([group, "", ""])
+                self.trouble_tree.addTopLevelItem(top)
+                top.setExpanded(True)
+                for r in items:
+                    top.addChild(QTreeWidgetItem(
+                        [r.symptom, r.cause, r.next_step]))
+
         # ---------------- 测试/自动化接口 ----------------
         def visible_row_count(self) -> int:
             return sum(top.childCount() for top in
                        (self.tree.topLevelItem(i)
                         for i in range(self.tree.topLevelItemCount())))
+
+        def visible_remedy_count(self) -> int:
+            return sum(top.childCount() for top in
+                       (self.trouble_tree.topLevelItem(i)
+                        for i in range(self.trouble_tree.topLevelItemCount())))
 
     return HelpPanel
 
