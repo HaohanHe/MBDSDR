@@ -484,6 +484,17 @@
    现场：`test_record_dir_consumption.py` 曾把
    `...pytest-1486\...\rec`、`Z:\nope` 写进用户配置，用户每次启动看到
    「录音目录不可写」假报警。
+   现场（HIGH，2026-11-05 守卫实跑）：
+   - `tests/test_ui_stability_resources.py`：`mw` 没请求 `isolated_profile`，
+     直接 `MainWindow()` 且 `close()` 触发 `settings.flush()`。守卫实测
+     1074→1074 bytes、sha256 不变、仅 mtime 变（**+0 bytes 的同内容写入
+     同样判红**）。**已修 `f0f68cc6`**（`mw(qapp, isolated_profile)`），
+     连跑两次守卫绿、真实配置 sha/长度/mtime 全不变；**没有把守卫改成
+     忽略 mtime**。
+   - `tests/test_device_switch_flow.py`：**不是写配置的文件**。单文件复跑
+     mtime 不变；当时红是 `ModulePanel` 在途改名（`_on_device_selected` 缺失）
+     导致用例失败，会话级守卫错误只是挂在该会话最后一条用例上——归因时
+     按「文件路径 + 字节差 + fixture 链」对，不能看报错挂在谁头上。
 3. **构造 Qt 控件必须声明 `qapp`**（或模块级 `qapp` fixture）。子集单跑没有
    QApplication 时 Qt 直接 abort `0xC0000409`（`SettingsPanel(...)` 已中过）。
 4. 新增/修改测试后，至少跑一次**目标模块单文件**（不是只跑全量）——顺序依赖
