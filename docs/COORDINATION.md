@@ -1738,7 +1738,56 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 - **R5 身份键**：测试名、槽名（`A2` / `B3`）、`§7.3.1 A` 这类组键都算键；同一键在两处（跨文档或同文档不同节）状态不一致即 FAIL。
 - **历史横幅**：只有 `docs/learn/phase*/` 下的文件可写「历史快照，不作现状依据」；带横幅的文件内 R1/R2 降为 HIST-WARN 并单列计数，不带横幅仍 FAIL；现代文档写该横幅判 X1 FAIL（反证：删横幅回红、给现代文档加横幅被拒）。
 - **R3 复跑命令自动映射**：测试函数名 → `pytest <file>::<name>`；C++ 槽名（`display::Foo`，仅一个测试源文件命中）→ `ctest -R "^<name>$"`；`scripts/*.py` → `python scripts/*.py`。映射成功即视为已举证；映射不到记 **SKIP** 并逐条打印 `SKIP 1（R3 无复跑命令：<file>:<line>，…）`，不许静默。
+- **R6 防伪闸门**：写了 hash 还不够。取 `git show --name-only --format= <sha>` 的改动文件，与条目内引用的文件名 / 符号 / 测试名比对；无交集，或本条根本没写可比对象 → **R6 FAIL**。反证：真实存在但与内容无关的 hash 必须红（`tests/test_red_lifecycle.py::test_r6_unrelated_hash_is_red`）。
+- **快照（T 路线）单独计数**：转快照的文件文首必须写齐四要素——「本文为当时状态快照」、「未逐条复核」、「不作现状依据」、「共 N 条未复核」，且 N 与实际条数一致。齐全 → 该文件红项降为 **SNAPSHOT** 并逐条计数；缺项或 N 不符 → **R7 FAIL**，且不降级（原红项照常判红）。禁止删断言/改词销红。
+- **总账行（每次必打）**：`R1 实修 X 条 / SNAPSHOT Y 条 / 历史横幅 Z 条`。X = 修复断言 + hash 有效 + R6 相交的条数；Y = 快照内未复核条数；Z = 历史横幅降级条数。欠账必须可见，不允许红项总数直接变 0。
 - 复跑：`python scripts/check_red_lifecycle.py`；反证：`python -m pytest tests/test_red_lifecycle.py -q`。
+
+### 7.5 R1 派发表（2026-11-06 立，109 条 / 24 文件）
+
+> **派发规则（写死）**：截止 **2026-11-13**。到期未完成 → **自动转 T**：按 §7.4 在文首写齐「本文为当时状态快照 / 未逐条复核 / 不作现状依据 / 共 N 条未复核」，机检转 `SNAPSHOT` 单独计数进总账（不再计 FAIL，但欠账保留）。**不得删断言、改词或写错 N 销红**（R7 会抓）。状态只认 `open / in_progress / done / T`。
+>
+> 修法代号：**H** = 逐条补 commit hash + 可复跑命令（R6 必须证明 hash 碰到该条引用对象）；**T** = 转当时状态快照；**O** = 交 owner 限期补证或重写。`H→T` 表示先补，补不动到期转 T。
+
+| 文件 | R1 条数 | 修法 | 建议 owner | 截止 | 现状 |
+|---|---:|---|---|---|---|
+| `docs/PRD-现状对照.md` | 16 | T 快照 | WorkBuddy | 2026-11-13 | open |
+| `docs/settings-inventory.md` | 13 | H（补不动转 T） | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/settings-surface-audit.md` | 10 | H（补不动转 T） | WorkBuddy | 2026-11-13 | open |
+| `docs/PRD.md` | 10 | O：产品线重写/补证 | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/capability-map.md` | 7 | H | WorkBuddy | 2026-11-13 | open |
+| `docs/limitations-register.md` | 7 | H→T | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/nanovna/feature-parity.md` | 6 | T 快照 | TRAE | 2026-11-13 | open |
+| `docs/narrow-screen-plan.md` | 6 | O：UI 线重写/补证 | TRAE | 2026-11-13 | open |
+| `docs/hardcoded-parameters.md` | 5 | H | WorkBuddy | 2026-11-13 | open |
+| `docs/prototype-gap.md` | 4 | T 快照 | WorkBuddy | 2026-11-13 | open |
+| `docs/reference-mechanisms.md` | 4 | O：协议线补证 | TRAE | 2026-11-13 | open |
+| `docs/learn/dedup-ledger.md` | 3 | H→T | WorkBuddy | 2026-11-13 | open |
+| `docs/packaging.md` | 3 | H | TRAE | 2026-11-13 | open |
+| `docs/parameter-unification.md` | 3 | H | TRAE | 2026-11-13 | open |
+| `docs/audit_r2/FINAL_REPORT_R2.md` | 2 | T 快照 | WorkBuddy | 2026-11-13 | open |
+| `docs/python-crash-20261105.md` | 2 | H | WorkBuddy | 2026-11-13 | open |
+| `docs/audit_r2/01_dsp_core.md` | 1 | T 快照 | WorkBuddy | 2026-11-13 | open |
+| `docs/code-guards.md` | 1 | H | WorkBuddy | 2026-11-13 | open |
+| `docs/design_tokens_mapping.md` | 1 | H | TRAE | 2026-11-13 | open |
+| `docs/hw-acceptance.md` | 1 | O：真机线补证 | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/cpp-tool-ui-reverse-audit.md` | 1 | T 快照 | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/sdr-rtltcp-agent-path.md` | 1 | H | TRAE | 2026-11-13 | open |
+| `docs/pending-patches/2026-11-06-restore-capability-hints.md` | 1 | H | TRAE | 2026-11-13 | open |
+| `docs/star-catalog.md` | 1 | H | TRAE | 2026-11-13 | open |
+| **合计** | **109** | — | — | — | — |
+
+**R6 防伪红项（本轮新增 5 条，到期未完成同样转 T）**
+
+| 文件:行 | 声称 hash | 冲突点 | 修法 | 建议 owner | 截止 | 现状 |
+|---|---|---|---|---|---|---|
+| `docs/learn/capability-map.md:436` | `fcafa80` | 本条没有可比的改动对象 | 补文件名/符号或删断言 | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/settings-surface-audit.md:51` | `4cd0881` | 引用 `docs/learn/cpp-tool-ui-reverse-audit.md`，提交改的是 `desktop/*.py` | 改引用为实际 desktop 文件 + 复跑 | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/settings-surface-audit.md:199` | `451073e` | 本条没有可比的改动对象 | 补文件名/符号或删断言 | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/ui_operation_logic_real.md:60` | `7d3fa3f` | 引用 Python 对象，提交改的是 C++ | 拆开两条或换正确 hash | WorkBuddy | 2026-11-13 | open |
+| `docs/PRD.md:869` | `4abde1a` | 引用测试文件，提交改的是 `desktop/main_window.py` | 改引用 + 复跑 | WorkBuddy | 2026-11-13 | open |
+
+机检复跑：`python scripts/check_red_lifecycle.py` → 期望 `R1 实修 53 条 / SNAPSHOT 0 条 / 历史横幅 123 条`（截至 2026-11-06 基线）；派发完成后总账里的 `SNAPSHOT` 必须上升、`FAIL` 必须相应下降，不允许两边都不动。
 
 ---
 
