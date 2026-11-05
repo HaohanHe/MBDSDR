@@ -324,10 +324,34 @@ class GimbalController:
 
     # ---- 运动控制 ----
     def point_to(self, az: float, el: float) -> Dict:
-        """指向目标方位角/仰角。返回执行结果与人工引导信息。"""
-        target = GimbalPose(azimuth=az % 360.0, elevation=clamp_angle(el, 0, 90))
+        """指向目标方位角/仰角。返回执行结果与人工引导信息。
+
+        越界处理是**显式**的（不静默）：仰角夹到 0–90°、方位环形归一到
+        0–360°，两者都会写进 ``clamped`` 与 ``note``（「已夹到 X°」），
+        调用方必须把 note 呈现给用户，否则用户会以为请求原样执行了。
+        """
+        raw_az = float(az)
+        raw_el = float(el)
+        target = GimbalPose(azimuth=raw_az % 360.0,
+                            elevation=clamp_angle(raw_el, 0, 90))
+        clamped: Dict[str, Dict] = {}
+        notes: List[str] = []
+        if abs(raw_el - target.elevation) > 1e-6:
+            clamped["elevation"] = {"requested": raw_el,
+                                    "applied": target.elevation,
+                                    "limits": [0.0, 90.0]}
+            notes.append(f"仰角 {raw_el:.1f}° 超出机械范围 0–90°，"
+                         f"已夹到 {target.elevation:.1f}°")
+        if raw_az < 0.0 or raw_az >= 360.0:
+            clamped["azimuth"] = {"requested": raw_az,
+                                  "applied": target.azimuth,
+                                  "limits": "0–360（环形归一）"}
+            notes.append(f"方位 {raw_az:.1f}° 已归一到 {target.azimuth:.1f}°")
         self.status.target = target
         result: Dict = {"target_az": target.azimuth, "target_el": target.elevation,
+                        "requested_az": raw_az, "requested_el": raw_el,
+                        "clamped": clamped or None,
+                        "note": "；".join(notes),
                         "command_mode": "absolute_az_el"}
 
         if self.status.mode == GimbalMode.BOARD_PWM:

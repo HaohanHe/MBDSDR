@@ -34,6 +34,13 @@ HEALTH_POLL_MS = 1000
 DATA_STALE_S = 2.0
 HEALTH_GRACE_S = 3.0
 
+#: 云台指令在后台线程执行。GUI 线程每拍最多等这么久收结果（快速后端仍在
+#: 同一拍落地）；超过就本拍先放过，下一拍再收——绝不让云台把界面冻住。
+GIMBAL_DISPATCH_GRACE_S = 0.05
+#: 指令在途多久判超时并停止跟随。取略大于 rotctld 套接字超时（2.0s），
+#: 让正常超时仍报它自己的原因（「超时（2.0s 未收齐应答）」）。
+GIMBAL_DISPATCH_TIMEOUT_S = 2.5
+
 
 def _focus_widget():
     """当前焦点控件（便于单测打桩）。"""
@@ -1748,6 +1755,10 @@ class MainWindow(QMainWindow):
         self._gimbal_error = PointingErrorRecorder()
         self._gimbal_cycle_seq = 0
         self._last_gimbal_cycle: Optional[Dict] = None
+        # 云台指令后台任务：GUI 线程只投递/收结果，不阻塞等回包
+        self._gimbal_task_thread: Optional[threading.Thread] = None
+        self._gimbal_task: Optional[Dict] = None
+        self._gimbal_pending_notified = False
 
     def _sky_selected_name(self) -> str:
         sv = getattr(self, "sky_view", None)
@@ -7254,24 +7265,210 @@ class MainWindow(QMainWindow):
                          source=source, origin="main_window")
         return trust_for_tx(fix)
 
+    # ---- 云台指令后台派发：GUI 线程绝不等云台应答 ------------------------
+    def _gimbal_task_running(self) -> bool:
+        """是否还有云台指令在后台执行（应答未回）。"""
+        th = getattr(self, "_gimbal_task_thread", None)
+        return th is not None and th.is_alive()
+
+    def _drop_gimbal_task(self) -> None:
+        """解除对在途任务的引用（线程是 daemon，不等也不杀）。"""
+        self._gimbal_task = None
+        self._gimbal_task_thread = None
+        self._gimbal_pending_notified = False
+
+    def _gimbal_dispatch_async(self, gc, cmd, ctx: Dict) -> bool:
+        """后台线程执行 ``point_to_satellite``；GUI 线程只等 GRACE 收结果。
+
+        ``ctx`` 是本拍的真相快照（真角/指令角/各阶段时刻），结果落地时
+        仍用它记账，避免跨拍数据串台。返回 True 表示本拍已拿到结论并落地。
+        """
+        box: Dict = {}
+        t0 = time.monotonic()
+
+        def _run():
+            try:
+                box["res"] = gc.point_to_satellite(cmd[0], cmd[1])
+            except Exception as e:  # 后端异常 = 指令未执行（原因原样上报）
+                box["err"] = f"{e.__class__.__name__}: {e}"
+                box["err_type"] = e.__class__.__name__
+
+        th = threading.Thread(target=_run, name="gimbal-dispatch", daemon=True)
+        self._gimbal_task = {"thread": th, "cmd": (float(cmd[0]), float(cmd[1])),
+                             "ctx": ctx, "t0": t0, "box": box}
+        self._gimbal_task_thread = th
+        self._gimbal_pending_notified = False
+        th.start()
+        th.join(GIMBAL_DISPATCH_GRACE_S)
+        return self._collect_gimbal_task(0.0)
+
+    def _collect_gimbal_task(self, wait_s: float = GIMBAL_DISPATCH_GRACE_S) -> bool:
+        """收取在途云台指令。最多等 ``wait_s``；超过 TIMEOUT 则合成超时并停机。
+
+        返回 True 表示本拍已出结论（成功/失败/超时都已落地），False 表示
+        指令还在途，调用方本拍放过（界面继续响应，不叠加新指令）。
+        """
+        task = getattr(self, "_gimbal_task", None)
+        if task is None:
+            return False
+        th = task["thread"]
+        if wait_s > 0 and th.is_alive():
+            th.join(wait_s)
+        elapsed_s = time.monotonic() - float(task["t0"])
+        if th.is_alive():
+            if elapsed_s < GIMBAL_DISPATCH_TIMEOUT_S:
+                if not self._gimbal_pending_notified:
+                    self._gimbal_pending_notified = True
+                    self.statusBar().showMessage(
+                        "云台指令等待应答中（后台执行，界面未阻塞）"
+                        f" · {self.gimbal_accuracy_text()}", MSG_QUICK)
+                return False
+            self._drop_gimbal_task()
+            self._apply_gimbal_result(
+                task,
+                {"dispatched": False, "pose_valid": False,
+                 "error": f"超时（{elapsed_s:.1f}s 未返回应答）"},
+                elapsed_s * 1000.0)
+            return True
+        box = task["box"]
+        err = str(box.get("err") or "")
+        if err:
+            # 2 Hz 跟踪环里同一类异常会刷屏：按异常类型限流记日志，
+            # 但原因原样进 res/周期记录/状态栏，不吞。
+            _warn_throttled(f"gimbal_dispatch:{box.get('err_type') or 'unknown'}",
+                            "云台指令异常（az=%.1f el=%.1f）：%s",
+                            task["cmd"][0], task["cmd"][1], err)
+        res = {"dispatched": False, "error": err} if err else box.get("res")
+        res = res if isinstance(res, dict) else {}
+        self._drop_gimbal_task()
+        self._apply_gimbal_result(task, res, elapsed_s * 1000.0)
+        return True
+
+    def _apply_gimbal_result(self, task: Dict, res: Dict,
+                             dispatch_ms: float) -> None:
+        """把一条云台指令的结论落地：周期记录 / 误差统计 / 失败即停机。
+
+        失败（未执行、异常、超时）必须明确停止并给原因；成功按姿态来源
+        分桶记账，模拟回声永不计入机械精度。
+        """
+        from mbdsdr_ai.gimbal_follow import angular_separation_deg
+        ctx = task.get("ctx") or {}
+        az = float(ctx.get("truth_az") or 0.0)
+        el = float(ctx.get("truth_el") or 0.0)
+        cmd = ctx.get("cmd")
+        effective = ctx.get("effective")
+        t_cycle = float(ctx.get("t_cycle") or 0.0)
+        t_pos = float(ctx.get("t_pos") or 0.0)
+        t_plan = float(ctx.get("t_plan") or 0.0)
+        t_cmd = float(ctx.get("t_cmd") or 0.0)
+        rec = getattr(self, "_gimbal_error", None)
+        res = res if isinstance(res, dict) else {}
+        dispatched = bool(res.get("dispatched", False))
+        note = str(res.get("note") or "")
+        dispatch_ms = max(0.0, float(dispatch_ms))
+
+        if cmd is not None and not dispatched:
+            err_text = str(res.get("error") or "无应答/超时")
+            self._gimbal_cycle_seq = getattr(self, "_gimbal_cycle_seq", 0) + 1
+            self._last_gimbal_cycle = {
+                "seq": self._gimbal_cycle_seq,
+                "satellite_az": az, "satellite_el": el,
+                "command_az": cmd[0], "command_el": cmd[1],
+                "dispatched": False, "pose_valid": False,
+                "pose_az": None, "pose_el": None, "pose_source": "",
+                "error": err_text, "note": note,
+                "cmd_error_deg": angular_separation_deg(az, el, cmd[0], cmd[1]),
+                "pose_error_deg": None,
+                "pos_ms": (t_pos - t_cycle) * 1000.0,
+                "dispatch_ms": dispatch_ms,
+                "total_ms": (time.monotonic() - t_cycle) * 1000.0,
+            }
+            if rec is not None:
+                rec.record(az, el, cmd[0], cmd[1], elapsed_s=0.5)
+            self._stop_gimbal_follow(
+                f"云台指令未执行（{err_text}），跟随已停止", important=True)
+            return
+
+        if effective is None:
+            return
+        pose_valid = bool(res.get("pose_valid"))
+        pose_az = res.get("current_az") if pose_valid else None
+        pose_el = res.get("current_el") if pose_valid else None
+        # 姿态来源必须记账：真实回读（imu/rotctld）与假后端的「指令回声」
+        # 是两种口径，后者的 0° 误差不代表机械精度。
+        pose_source = str(res.get("pose_source") or (
+            "unknown" if pose_valid else ""))
+        errs = (rec.record(az, el, effective[0], effective[1],
+                           pose_az=pose_az, pose_el=pose_el,
+                           pose_source=pose_source,
+                           elapsed_s=0.5)
+                if rec is not None else {})
+        self._gimbal_cycle_seq = getattr(self, "_gimbal_cycle_seq", 0) + 1
+        self._last_gimbal_cycle = {
+            "seq": self._gimbal_cycle_seq,
+            "satellite_az": az, "satellite_el": el,
+            "command_az": effective[0], "command_el": effective[1],
+            "dispatched": dispatched,
+            "pose_valid": pose_valid,
+            "pose_az": pose_az, "pose_el": pose_el,
+            "pose_source": pose_source,
+            "note": note,
+            "cmd_error_deg": errs.get("cmd_error_deg"),
+            "pose_error_deg": errs.get("pose_error_deg"),
+            "pos_ms": (t_pos - t_cycle) * 1000.0,
+            "cmd_ms": (t_cmd - t_plan) * 1000.0,
+            "dispatch_ms": dispatch_ms,
+            "total_ms": (time.monotonic() - t_cycle) * 1000.0,
+        }
+        if note:
+            # 越界夹取/归一必须让用户看见「已夹到 X°」，不许静默执行
+            self.statusBar().showMessage(note, MSG_NORMAL)
+
+    def _stop_gimbal_backend_bounded(self) -> str:
+        """下发停机但最多等 GRACE；返回未确认原因（空串=已确认或无后端）。
+
+        挂死的后端不得冻住 GUI：线程置 daemon，超时后由后台继续等。
+        """
+        try:
+            gc = self._gimbal_controller()
+        except Exception as e:
+            err = str(e) or e.__class__.__name__
+            _warn_throttled("gimbal_stop", "云台停机指令未确认：%s", err)
+            return err
+        if gc is None:
+            return ""
+        box: Dict = {}
+
+        def _run():
+            try:
+                box["ok"] = gc.stop()
+            except Exception as e:  # 停机失败必须留证，不能静默
+                box["err"] = str(e) or e.__class__.__name__
+
+        th = threading.Thread(target=_run, name="gimbal-stop", daemon=True)
+        th.start()
+        th.join(GIMBAL_DISPATCH_GRACE_S)
+        if th.is_alive():
+            return (f"停机指令已发出，{GIMBAL_DISPATCH_GRACE_S * 1000:.0f}ms "
+                    "内未确认（后台继续等待）")
+        err = str(box.get("err") or "")
+        if err:
+            _warn_throttled("gimbal_stop", "云台停机指令未确认：%s", err)
+        return err
+
     def _stop_gimbal_follow(self, reason: str,
                             important: bool = False) -> None:
         """明确停止云台跟随：复位开关、整形器、下发停机，并把原因说清楚。"""
         self._gimbal_follow = False
+        # 在途指令立即解除引用：停机后到达的应答不得再驱动任何动作
+        self._drop_gimbal_task()
         limiter = getattr(self, "_gimbal_limiter", None)
         if limiter is not None:
             limiter.reset()
         self._sync_sky_gimbal_btn(False)
         # 停机失败不能让开关卡死（状态已在上方复位），但原因必须留证并进上报，
         # 否则用户只看到「已停止」而不知道电机可能还在动。
-        stop_err = ""
-        try:
-            gc = self._gimbal_controller()
-            if gc is not None:
-                gc.stop()
-        except Exception as e:
-            stop_err = str(e) or e.__class__.__name__
-            _warn_throttled("gimbal_stop", "云台停机指令未确认：%s", stop_err)
+        stop_err = self._stop_gimbal_backend_bounded()
         if stop_err:
             reason = f"{reason}（云台停机指令未确认：{stop_err}）"
         text = self.gimbal_accuracy_text()
@@ -7347,17 +7544,17 @@ class MainWindow(QMainWindow):
         if not on:
             was_on = self._gimbal_follow
             self._gimbal_follow = False
+            self._drop_gimbal_task()
             limiter = getattr(self, "_gimbal_limiter", None)
             if limiter is not None:
                 limiter.reset()
             if was_on:
-                # 用户主动解锁：下发停机（固件负值=释放），不留持续指令
-                try:
-                    gc = self._gimbal_controller()
-                    if gc is not None:
-                        gc.stop()
-                except Exception:
-                    pass
+                # 用户主动解锁：下发停机（固件负值=释放），不留持续指令。
+                # 有界等待：慢/挂死后端不得让「关开关」这个点击卡住界面。
+                stop_err = self._stop_gimbal_backend_bounded()
+                if stop_err:
+                    self.statusBar().showMessage(
+                        f"云台跟随已关闭，但停机未确认：{stop_err}", MSG_NORMAL)
             return
         if not (self._sat_track_timer is not None
                 and self._sat_track_timer.isActive()):
@@ -7379,6 +7576,9 @@ class MainWindow(QMainWindow):
                 f"站址不可信，拒绝云台指向：{reasons}", important=True)
             return
         self._gimbal_follow = True
+        # 新会话：丢弃上一轮可能残留的在途任务引用（线程为 daemon，不等不杀），
+        # 避免旧目标的应答在新会话里被误记账。
+        self._drop_gimbal_task()
         limiter = getattr(self, "_gimbal_limiter", None)
         if limiter is not None:
             limiter.reset()  # 新会话首拍给完整指向，不做插值
@@ -8202,19 +8402,8 @@ class MainWindow(QMainWindow):
         if not pos.get("valid"):
             # 目标位置失效：云台跟随不能对着过期方位继续下发，诚实解锁并提示
             if self._gimbal_follow:
-                self._gimbal_follow = False
-                limiter = getattr(self, "_gimbal_limiter", None)
-                if limiter is not None:
-                    limiter.reset()
-                self._sync_sky_gimbal_btn(False)
-                try:
-                    gc = self._gimbal_controller()
-                    if gc is not None:
-                        gc.stop()
-                except Exception:
-                    pass
-                self.statusBar().showMessage(
-                    "目标位置失效，云台跟随已停止并解锁（保持最后指向）", MSG_NORMAL)
+                self._stop_gimbal_follow(
+                    "目标位置失效，云台跟随已停止并解锁（保持最后指向）")
             return
         el = float(pos["elevation"])
         # 仰角 < 5°：卫星不可见 → 跟踪与云台一起明确停止，不向地平线下发角
@@ -8248,11 +8437,12 @@ class MainWindow(QMainWindow):
                     sv.set_sat_signal(sat_name, now_present)
         except Exception:
             pass
-        # 云台跟随：同一拍内驱动天线指向卫星（调谐与云台天然同步、单点停止）。
+        # 云台跟随：同一拍驱动天线指向卫星（调谐与云台天然同步、单点停止）。
         # 经整形器：死区 + 最小间隔 + 速率上限，目标到位后不再重复下发。
         # 指令为**绝对角** (az, el)，不是增量；误差按球面角距统计。
+        # 下发在后台线程（GUI 线程每拍最多等 GIMBAL_DISPATCH_GRACE_S）：
+        # 慢响应/永不应答的后端不得冻住界面。
         if self._gimbal_follow:
-            from mbdsdr_ai.gimbal_follow import angular_separation_deg
             trust = self._pointing_station_trust()
             if not trust.get("trusted"):
                 reasons = "；".join(trust.get("reasons") or []) or "站址不可信"
@@ -8262,6 +8452,17 @@ class MainWindow(QMainWindow):
             if not self._gimbal_available():
                 self._stop_gimbal_follow(
                     "云台后端已离线，跟随已停止（不再下发角度）", important=True)
+                return
+            # ① 先收上一拍的在途指令（可能已完成、异常或已超时）。
+            self._collect_gimbal_task()
+            if not self._gimbal_follow:
+                return
+            # ② 指令仍在途：本拍不叠加新指令；整形器也不得先走
+            #    （否则指令没发却已按「已下发」记账，下一拍会被死区吃掉）。
+            if self._gimbal_task_running():
+                self.statusBar().showMessage(
+                    "云台指令等待应答中（后台执行，界面未阻塞）"
+                    f" · {self.gimbal_accuracy_text()}", MSG_QUICK)
                 return
             try:
                 gc = self._activate_gimbal_if_needed()
@@ -8281,81 +8482,19 @@ class MainWindow(QMainWindow):
                 effective = cmd
                 if effective is None and limiter is not None:
                     effective = limiter.last_command
-                if effective is not None:
-                    rec = getattr(self, "_gimbal_error", None)
-                    t_dispatch = 0.0
-                    res = None
-                    if cmd is not None:
-                        t0 = time.monotonic()
-                        try:
-                            res = gc.point_to_satellite(cmd[0], cmd[1])
-                        except Exception as e:  # 后端异常 = 指令未执行
-                            # 2 Hz 跟踪环里同一类异常会刷屏：按异常类型限流记日志，
-                            # 但原因必须原样进 res/周期记录/状态栏，不吞。
-                            err_text = f"{e.__class__.__name__}: {e}"
-                            _warn_throttled(
-                                f"gimbal_dispatch:{type(e).__name__}",
-                                "云台指令异常（az=%.1f el=%.1f）：%s",
-                                cmd[0], cmd[1], err_text)
-                            res = {"dispatched": False, "error": err_text}
-                        t_dispatch = time.monotonic() - t0
-                    res = res if isinstance(res, dict) else {}
-                    dispatched = bool(res.get("dispatched", False))
-                    if cmd is not None and not dispatched:
-                        err = res.get("error") or "无应答/超时"
-                        self._gimbal_cycle_seq = getattr(
-                            self, "_gimbal_cycle_seq", 0) + 1
-                        self._last_gimbal_cycle = {
-                            "seq": self._gimbal_cycle_seq,
-                            "satellite_az": az, "satellite_el": el,
-                            "command_az": cmd[0], "command_el": cmd[1],
-                            "dispatched": False, "pose_valid": False,
-                            "pose_az": None, "pose_el": None,
-                            "pose_source": "",
-                            "error": err,
-                            "cmd_error_deg": angular_separation_deg(
-                                az, el, cmd[0], cmd[1]),
-                            "pose_error_deg": None,
-                            "pos_ms": (t_pos - t_cycle) * 1000.0,
-                            "dispatch_ms": t_dispatch * 1000.0,
-                            "total_ms": (time.monotonic() - t_cycle) * 1000.0,
-                        }
-                        if rec is not None:
-                            rec.record(az, el, cmd[0], cmd[1],
-                                       elapsed_s=0.5)
-                        self._stop_gimbal_follow(
-                            f"云台指令未执行（{err}），跟随已停止",
-                            important=True)
-                        return
-                    pose_valid = bool(res.get("pose_valid"))
-                    pose_az = res.get("current_az") if pose_valid else None
-                    pose_el = res.get("current_el") if pose_valid else None
-                    # 姿态来源必须记账：真实回读（imu/rotctld）与假后端的
-                    # 「指令回声」是两种口径，后者的 0° 误差不代表机械精度。
-                    pose_source = str(res.get("pose_source") or (
-                        "unknown" if pose_valid else ""))
-                    errs = (rec.record(az, el, effective[0], effective[1],
-                                       pose_az=pose_az, pose_el=pose_el,
-                                       pose_source=pose_source,
-                                       elapsed_s=0.5)
-                            if rec is not None else {})
-                    self._gimbal_cycle_seq = getattr(
-                        self, "_gimbal_cycle_seq", 0) + 1
-                    self._last_gimbal_cycle = {
-                        "seq": self._gimbal_cycle_seq,
-                        "satellite_az": az, "satellite_el": el,
-                        "command_az": effective[0], "command_el": effective[1],
-                        "dispatched": dispatched,
-                        "pose_valid": pose_valid,
-                        "pose_az": pose_az, "pose_el": pose_el,
-                        "pose_source": pose_source,
-                        "cmd_error_deg": errs.get("cmd_error_deg"),
-                        "pose_error_deg": errs.get("pose_error_deg"),
-                        "pos_ms": (t_pos - t_cycle) * 1000.0,
-                        "cmd_ms": (t_cmd - t_plan) * 1000.0,
-                        "dispatch_ms": t_dispatch * 1000.0,
-                        "total_ms": (time.monotonic() - t_cycle) * 1000.0,
-                    }
+                if effective is None:
+                    return
+                ctx = {"cmd": cmd, "effective": effective,
+                       "truth_az": az, "truth_el": el,
+                       "t_cycle": t_cycle, "t_pos": t_pos,
+                       "t_plan": t_plan, "t_cmd": t_cmd}
+                if cmd is None:
+                    # 死区/限速抑制：没有下发，但仍记账（含指令侧滞后）
+                    self._apply_gimbal_result(ctx, {}, 0.0)
+                    return
+                # 下发 + 本拍收结果（快速后端在同一拍落地；
+                # 慢后端返回 False，状态栏提示等待中，下一拍再收）
+                self._gimbal_dispatch_async(gc, cmd, ctx)
             except Exception:
                 pass
 
@@ -8430,18 +8569,15 @@ class MainWindow(QMainWindow):
         self._sync_tracking_ui(False)
         self._sync_sky_track_btn(False)  # 自动停（过境结束）也复位天空图开关
         if self._gimbal_follow:
-            # 云台跟随随跟踪单点停止：复位开关 + 下发停机（固件负值=释放）
+            # 云台跟随随跟踪单点停止：复位开关 + 下发停机（固件负值=释放）。
+            # 停止路径也必须有界：挂死后端不得让「停止跟踪」卡住界面。
             self._gimbal_follow = False
+            self._drop_gimbal_task()
             limiter = getattr(self, "_gimbal_limiter", None)
             if limiter is not None:
                 limiter.reset()
             self._sync_sky_gimbal_btn(False)
-            try:
-                gc = self._gimbal_controller()
-                if gc is not None:
-                    gc.stop()
-            except Exception:
-                pass
+            self._stop_gimbal_backend_bounded()
         if self._sat_track_prev_freq_hz is not None:
             mode = self._sat_track_prev_mode or "FM"
             try:

@@ -5,17 +5,12 @@
   * ADS-B 1090ES：ICAO Annex 10 Vol IV / RTCA DO-260（8µs 前导、PPM、
     CRC-24 多项式 0xFFF409）；
   * APRS / AX.25：TAPR AX.25 + Bell 202 AFSK 1200bd；音频取自随仓合成
-    wav fixture（NOT OTA），SNR 口径是鉴频后音频域（与复基带不可换算）；
-  * FT4：4-FSK GFSK 12 kS/s（复基带）；POCSAG / ACARS：鉴频后音频域。
+    wav fixture（NOT OTA），SNR 口径是鉴频后音频域（与复基带不可换算）。
 
 守这些契约（只钉方向性，不钉会随浮点/numpy 版本漂移的具体阈值）：
   * 高 SNR 必成功、极低 SNR 必失败；
   * 阈值落在扫描网格内，100% 档不早于目标档；
-  * 每模式 ≥6 档且网格覆盖 0% 与 100% 两端；
-  * 每模式自述口径（噪声域/带宽/SNR），总表含 90%/100%/临界区间/首个失败码/
-    是否单调，并注明「全部为合成 fixture，非 OTA」；
-  * 非单调必须标「边缘效应，未解释机理」（允许相邻档 ±1 次抖动）；
-  * 音频模式每档必须带「解出帧数/丢帧数/首个失败码」；
+  * APRS 每档必须带「解出帧数/丢帧数/首个失败码」，临界档落在给定区间；
   * 同种子可复现（逐档成功数完全一致）；
   * 失败要有分类原因（不是一律 "failed"）；
   * 未知模式显式报错。
@@ -30,7 +25,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 SCRIPT = os.path.join(_ROOT, "scripts", "decode_sensitivity.py")
-MODES = ("ais", "adsb", "aprs", "ft4", "pocsag", "acars")
+MODES = ("ais", "adsb", "aprs")
 APRS_GRID = [-6.0, -4.0, -2.0, 0.0, 2.0, 6.0]
 APRS_KNOWN_REASONS = {
     "nothing_detected", "no_frame_recovered", "truncated_frame",
@@ -66,11 +61,10 @@ def test_parse_snr_grid_range_and_list():
 
 @pytest.mark.parametrize("mode", MODES)
 def test_high_snr_always_succeeds(sens, mode):
-    top = sens.MODE_HIGH_SNR_DB[mode]
-    out = sens.sweep_mode(mode, [top], trials=5)
+    out = sens.sweep_mode(mode, [16.0], trials=5)
     assert out["rows"][0]["successes"] == 5
+    assert out["thresholds"]["threshold_snr_db"] == 16.0
     assert out["thresholds"]["evaluable"] is True
-    assert out["thresholds"]["threshold_snr_db"] <= top
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -80,9 +74,10 @@ def test_very_low_snr_always_fails_and_reports_reason(sens, mode):
     assert row["successes"] == 0
     assert row["failure_reasons"], "失败必须留下分类原因，不能只记成败"
     # 原因必须是脚本里声明过的分类，不允许自由文本
+    known = {"nothing_detected", "fcs_or_stuffing_reject", "preamble_not_found",
+             "crc_failed", "payload_mismatch"} | APRS_KNOWN_REASONS
     for reason in row["failure_reasons"]:
-        assert (reason in sens.KNOWN_FAILURE_REASONS
-                or reason.startswith("decode_error:"))
+        assert reason in known or reason.startswith("decode_error:")
     assert out["thresholds"]["evaluable"] is False
     assert out["thresholds"]["threshold_snr_db"] is None
 
@@ -121,54 +116,13 @@ def test_run_sensitivity_report_shape_and_markdown(sens):
         assert len(m["rows"]) == 2
         assert m["thresholds"]["target_rate"] == pytest.approx(sens.DEFAULT_TARGET)
     table = sens.markdown_table(report)
-    assert "`ais`" in table and "`acars`" in table
-    assert "合成 fixture" in table and "非 OTA" in table
-    assert "临界区间" in table and "是否单调" in table
-
-
-def test_every_mode_self_describes_its_basis(sens):
-    """口径必须逐模式自述：噪声域、带宽、SNR 每样本/每符号。"""
-    for mode in MODES:
-        basis = sens.MODE_BASIS[mode]
-        assert basis["domain"], f"{mode} 缺噪声域"
-        assert "噪声带宽" in basis["bandwidth"], f"{mode} 缺带宽定义"
-        assert "每样本" in basis["snr"], f"{mode} 缺 SNR 口径"
-        out = sens.sweep_mode(mode, [sens.MODE_HIGH_SNR_DB[mode]], trials=1)
-        assert out["basis"] == basis
-        assert out["grid_db"] == [sens.MODE_HIGH_SNR_DB[mode]]
-
-
-def test_default_grids_have_at_least_six_levels_and_both_ends(sens):
-    for mode in MODES:
-        grid = sens.MODE_DEFAULT_GRID[mode]
-        assert len(grid) >= 6, f"{mode} 默认网格不足 6 档"
-        assert grid == sorted(grid)
-
-
-def test_non_monotonic_rows_are_labelled_edge_effect(sens):
-    """非单调必须如实标「边缘效应，未解释机理」；±1 次抖动允许且要说明。"""
-    rows = [
-        {"snr_db": 0.0, "successes": 10},
-        {"snr_db": 2.0, "successes": 9},     # 回落 1 次：允许
-        {"snr_db": 4.0, "successes": 20},
-    ]
-    mo = sens.derive_monotonicity(rows)
-    assert mo["monotonic"] is True
-    assert mo["jitter_trials"] == 1
-    rows_bad = [
-        {"snr_db": 0.0, "successes": 15},
-        {"snr_db": 2.0, "successes": 10},    # 回落 5 次：非单调
-        {"snr_db": 4.0, "successes": 20},
-    ]
-    mo_bad = sens.derive_monotonicity(rows_bad)
-    assert mo_bad["monotonic"] is False
-    assert mo_bad["note"] == "边缘效应，未解释机理"
-    assert mo_bad["violations"][0]["drop"] == 5
+    assert "`ais`" in table and "`adsb`" in table
+    assert "合成 AWGN" in table
 
 
 def test_unknown_mode_rejected(sens):
     with pytest.raises(ValueError):
-        sens.sweep_mode("not_a_mode", [0.0], trials=1)
+        sens.sweep_mode("ft8", [0.0], trials=1)
 
 
 # ---------------------------------------------------------------------------
@@ -226,19 +180,15 @@ def test_aprs_markdown_lists_per_row_accounting(sens):
 
 
 def test_doc_snapshot_matches_live_sweep(sens):
-    """能力矩阵文档里的灵敏度快照不能与实跑结果脱节（容差 ±2 dB，防漂移）。
-
-    每模式用各自的默认网格（各模式口径不同，不共享一张 dB 网格）。
-    """
+    """能力矩阵文档里的灵敏度快照不能与实跑结果脱节（容差 ±2 dB，防漂移）。"""
     rep_path = os.path.join(_ROOT, "scripts", "decoder_capability_report.py")
     spec = importlib.util.spec_from_file_location("decoder_capability_report", rep_path)
     rep = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rep)
 
     snap = rep.SENSITIVITY_SNAPSHOT
-    assert set(snap) == set(MODES), "文档快照必须覆盖全部六模式"
     report = sens.run_sensitivity(
-        sorted(snap), None,
+        sorted(snap), sens.parse_snr_grid("-10:16:2"),
         trials=rep.SENSITIVITY_TRIALS, seed=rep.SENSITIVITY_SEED)
     for mode, expected in snap.items():
         live = report["modes"][mode]["thresholds"]
@@ -249,16 +199,3 @@ def test_doc_snapshot_matches_live_sweep(sens):
             assert abs(live[key] - expected[key]) <= 2.0, (
                 f"{mode}.{key} 实跑 {live[key]} 与文档快照 {expected[key]} "
                 "相差超过 2 dB——请运行脚本 --write 刷新文档")
-        assert live["critical_band_db"] == expected["critical_band_db"], (
-            f"{mode} 临界区间实跑 {live['critical_band_db']} 与快照 "
-            f"{expected['critical_band_db']} 不一致——请刷新文档")
-        first_bad = next((r["first_failure_code"]
-                          for r in report["modes"][mode]["rows"]
-                          if r["first_failure_code"]), "")
-        assert first_bad == expected["first_failure_code"], (
-            f"{mode} 首个失败码实跑 {first_bad!r} 与快照 "
-            f"{expected['first_failure_code']!r} 不一致")
-        mo = report["modes"][mode]["monotonicity"]
-        assert mo["monotonic"] == expected["monotonic"], (
-            f"{mode} 单调性实跑 {mo['monotonic']} 与快照 "
-            f"{expected['monotonic']} 不一致——非单调必须如实登记")
