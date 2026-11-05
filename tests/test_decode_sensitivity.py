@@ -29,7 +29,7 @@ MODES = ("ais", "adsb", "aprs")
 APRS_GRID = [-6.0, -4.0, -2.0, 0.0, 2.0, 6.0]
 APRS_KNOWN_REASONS = {
     "nothing_detected", "no_frame_recovered", "truncated_frame",
-    "crc_failed", "frame_lost", "payload_mismatch", "insufficient_samples",
+    "crc_failed", "payload_mismatch", "insufficient_samples",
 }
 
 os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")

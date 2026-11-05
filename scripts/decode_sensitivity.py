@@ -186,10 +186,10 @@ def evaluate_aprs(audio, fs, case=None) -> tuple:
         return False, (r.get("reason") or "nothing_detected"), detail
     truth = case["truth"] if case else []
     got = [(f["frame_hex"], f["info_hex"]) for f in frames]
-    if len(got) != len(truth):
-        return False, "frame_lost", detail
     if got == truth:
         return True, "", detail
+    # 解出的帧集与真值不一致（含只解出 1/2 帧）：沿用既有 `payload_mismatch`
+    # 分类，不新造失败码；「解出几帧」由 detail.frames_decoded 明示。
     return False, "payload_mismatch", detail
 
 
