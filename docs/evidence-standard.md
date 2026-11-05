@@ -105,3 +105,26 @@
 | ③ 有工件缺路径 | 行内点名的数据文件/`exp_*.py` 在仓内存在，或 `experiments/*/README.md` 同目录有 `data/` 采集件 | 补显式相对路径或测试命令，升 E1/E2 |
 | ④ 必须补测 | `hw-acceptance` / `real_hw_acceptance_*` / `dsp-performance-baseline` 里的 PASS、总耗时、吞吐等载荷性数字 | 重跑验收/基准，留原始件；标“未验证”不够 |
 | ⑤ 删除改写 | 带删除线 `~~`、显式撤回/作废、把预期值写成实测 | 删除或改写为预期/未验证表述 |
+
+### 7.7 四元组行号的坐标口径（2026-11-06 写死）
+
+**口径**：`path:N` 是**当前 HEAD 坐标**。新增的「行号内容校验」必须取
+`git show HEAD:<path>` 的第 N 行，判断该行是否包含被引字面量；**不得取被引提交坐标**
+（`git show <hash>:<path>` 第 N 行）来判。
+
+**依据（8/8 反例，2026-11-06 实测）**：settings-inventory 那批 8 条四元组在 HEAD 坐标
+全部成立，但在被引提交坐标全部不成立：
+
+- `2614c7f8` 的 `desktop/config_schema.py:377` 当时是 `agc_enabled`
+  （不是 `pass_min_elevation_deg`）；
+- `6ed9ee7d` 的 `mbdsdr_ai/sdr_backend.py:111` 当时是空行
+  （不是 `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`）。
+
+同一批四元组在两套坐标下会被判成相反结果，所以口径必须在校验实现前钉死。
+
+**区间行号**：`path:N–M` 默认只取首行 N 判定；确需「区间内任一」语义时，必须在字面量后
+显式写 `区间内任一`，否则按首行判。
+
+**与现有三步的关系**：`verify_claims` 现三步只校验「该提交确实改过该路径、且
+`git log -S` 能在同一 hash 命中该字面量」（`cat-file` / `--name-only` / `log -S`），
+**不校验行号内容**；第 4 步（HEAD 第 N 行含字面量）就是补这一环，判红名为「行号失效」。
