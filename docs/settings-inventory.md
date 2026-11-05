@@ -309,17 +309,17 @@ A1/A2/A9 例外：读取入口已做成真实函数（`settings.effective_pass_*
 
 | # | 条目 | 处置 | schema 键 / 默认 / 范围 / 单位 | 生效方式 | 消费点与证据 |
 |---|---|---|---|---|---|
-| A1 | 过境最低仰角 | **已落地（读取入口）** | `pass_min_elevation_deg` / 10 / 0–45 / 度 | 设置面板写盘；消费方下次刷新调用函数读值 | `settings.effective_pass_min_elevation_deg()`（真实函数，越界夹取）；消费点待接一行：`new_spacetime_panel.refresh_passes`、`rf_sky_view._refresh_passes`（§9.1） |
-| A2 | 过境搜索窗口 | **已落地（读取入口）** | `pass_window_hours` / 24 / 1–72 / 小时 | 同上 | `settings.effective_pass_window_hours()`；消费点待接一行：`refresh_passes` 的 `hours_ahead`、`rf_sky_view.PASS_WIN_HOURS`（§9.1） |
+| A1 | 过境最低仰角 | **已落地（读取入口）** | `pass_min_elevation_deg` / 10 / 0–45 / 度 | 设置面板写盘；消费方下次刷新调用函数读值 | `settings.effective_pass_min_elevation_deg()`（真实函数，越界夹取）；消费点待接一行：`new_spacetime_panel.refresh_passes`、`rf_sky_view._refresh_passes`（§9.1） 取证 `2614c7f8` — `desktop/config_schema.py:377` — `pass_min_elevation_deg` |
+| A2 | 过境搜索窗口 | **已落地（读取入口）** | `pass_window_hours` / 24 / 1–72 / 小时 | 同上 | `settings.effective_pass_window_hours()`；消费点待接一行：`refresh_passes` 的 `hours_ahead`、`rf_sky_view.PASS_WIN_HOURS`（§9.1） 取证 `2614c7f8` — `desktop/config_schema.py:386` — `pass_window_hours` |
 | A3 | 录音总容量保留上限 | **不做**（无消费点） | 拟 `recording_retention_total_gb` / 0–2000 / GB | — | `RetentionPolicy` 存在但 desktop 无调用者；加了也没人执行 |
 | A4 | 录音保留天数 | **不做**（无消费点） | 拟 `recording_retention_days` / 0–3650 / 天 | — | 同上 |
-| A5 | 静噪门限 | **已落地** | `squelch_default_db` / `int(DEFAULT_SQUELCH_DBFS)`=-50 / `int(SQUELCH_MIN_DBFS)`=-100 ～ `int(SQUELCH_MAX_DBFS)`=-20 / 刻度=**相对噪声基线余量**（-100≈0、-50≈6、-20≈16 dB），不是绝对 dBFS | **即时**：滑杆 + 门控；滑杆反写设置 | `control_panel.squelch_slider` → `main_window._on_squelch_changed`；默认/范围/换算取自 `mbdsdr_ai/squelch.py`，schema 无第二份字面量 |
+| A5 | 静噪门限 | **已落地** | `squelch_default_db` / `int(DEFAULT_SQUELCH_DBFS)`=-50 / `int(SQUELCH_MIN_DBFS)`=-100 ～ `int(SQUELCH_MAX_DBFS)`=-20 / 刻度=**相对噪声基线余量**（-100≈0、-50≈6、-20≈16 dB），不是绝对 dBFS | **即时**：滑杆 + 门控；滑杆反写设置 | `control_panel.squelch_slider` → `main_window._on_squelch_changed`；默认/范围/换算取自 `mbdsdr_ai/squelch.py`，schema 无第二份字面量 取证 `45832a57` — `desktop/config_schema.py:276` — `squelch_default_db` |
 | A6 | AI 工具超时 | **不做**（无消费点） | 拟 `ai_tool_timeout_s` / 120 / 10–600 / 秒 | — | `mbdsdr_ai/agent.py:630` 为常量，无配置字段可读，改了不生效 |
-| A7 | 瀑布深度行数 | **已落地** | `waterfall_depth_rows` / 256 / 128–4096 / 行 | **即时**：`spectrum.set_waterfall_depth_rows()`；保留最近历史、重建环形缓冲 | `SpectrumDataGenerator.set_waterfall_depth()` + `wf_rows_at()` + 瀑布滚轮回看。实测（512 bin、真实 IQ 灌 2048/4096 帧）：256 行 = 0.5 MiB，整段历史重绘 3.2 ms；2048 行 = 4 MiB，整段重绘 21.6 ms、实际视口(240 行) 2.3 ms；4096 行 = 8 MiB，整段重绘 28–40 ms、视口 2.1–2.8 ms；实时每帧只画 1 行 0.09–0.15 ms（不随深度变慢）。2048 bin 时内存线性放大 4×（2048 行 16 MiB、4096 行 32 MiB）。4096 是实测可用上限（整段重绘 <100 ms），越界夹取；截图 `a7_history_256.png` / `a7_history_2048.png` 对应历史长度 256 vs 2048 行（高度 8×） |
-| A8 | 大气消光系数 | **已落地** | `sky_extinction_k` / 0.2 / 0.0–0.5 / 星等 | **即时**：`sky_view.set_extinction_k()`，重算星表可见性与亮度 | `star_catalog.effective_limit_mag()/select_for_view(extinction_k=)` + `stars.extinction_delta_mag(alt,k)`。实测同 FOV 120°、alt 20°：k=0 见 1650 颗、k=0.5 见 488 颗；alt 60° 2292→858；天顶 2372→1076。极限星等 Δm：天顶 -0.50、60° -0.58、20° -1.46、15° -1.93、5° -3.50（证明按 airmass 逐星衰减，Bortle 只定天顶极限，两者不重复） |
-| A9 | 显示低仰角过境 | **已落地（读取入口）** | `show_low_elevation_passes` / False / 布尔 | 同上 | `settings.effective_show_low_elevation_passes()` + `effective_pass_visibility_gate_deg()`（开时门降到 5°）；消费点与 A1 同一调用点（§9.1） |
-| A10 | 默认采样率 | **已落地（统一 2.4 MS/s）** | 复用既有 `sample_rate_hz`，默认**派生自** `desktop/constants.py: DEFAULT_SAMPLE_RATE_HZ`（2.4 MS/s，源头 `sdr_backend`），不写字面量 | 即时 | 三值相等有测试：schema 默认 / `settings.DEFAULTS` / `control_panel.sample_rate_combo.currentData()`。**遗留（他线文件）**：`desktop/main_window.py` 兜底项文案仍写「2.048 MS/s」却绑 `DEFAULT_SAMPLE_RATE_HZ`（2.4M）数据，需操作逻辑线统一为同一常量，本线未越界修改 |
-| A11 | 调谐步进 | **已落地** | `tuning_step_hz` / 10 000 / 10–1 000 000 / Hz（六档） | **即时**：`step_combo` + `spectrum.set_snap_interval`；顶部下拉反写设置 | `control_panel.step_combo`、`spectrum_widget.py:921 snap_interval`；无代码缺口（本项为「无缺口更正」） |
+| A7 | 瀑布深度行数 | **已落地** | `waterfall_depth_rows` / 256 / 128–4096 / 行 | **即时**：`spectrum.set_waterfall_depth_rows()`；保留最近历史、重建环形缓冲 | `SpectrumDataGenerator.set_waterfall_depth()` + `wf_rows_at()` + 瀑布滚轮回看。实测（512 bin、真实 IQ 灌 2048/4096 帧）：256 行 = 0.5 MiB，整段历史重绘 3.2 ms；2048 行 = 4 MiB，整段重绘 21.6 ms、实际视口(240 行) 2.3 ms；4096 行 = 8 MiB，整段重绘 28–40 ms、视口 2.1–2.8 ms；实时每帧只画 1 行 0.09–0.15 ms（不随深度变慢）。2048 bin 时内存线性放大 4×（2048 行 16 MiB、4096 行 32 MiB）。4096 是实测可用上限（整段重绘 <100 ms），越界夹取；截图 `a7_history_256.png` / `a7_history_2048.png` 对应历史长度 256 vs 2048 行（高度 8×） 取证 `d4b2a807` — `desktop/config_schema.py:302` — `waterfall_depth_rows` |
+| A8 | 大气消光系数 | **已落地** | `sky_extinction_k` / 0.2 / 0.0–0.5 / 星等 | **即时**：`sky_view.set_extinction_k()`，重算星表可见性与亮度 | `star_catalog.effective_limit_mag()/select_for_view(extinction_k=)` + `stars.extinction_delta_mag(alt,k)`。实测同 FOV 120°、alt 20°：k=0 见 1650 颗、k=0.5 见 488 颗；alt 60° 2292→858；天顶 2372→1076。极限星等 Δm：天顶 -0.50、60° -0.58、20° -1.46、15° -1.93、5° -3.50（证明按 airmass 逐星衰减，Bortle 只定天顶极限，两者不重复） 取证 `d4b2a807` — `desktop/config_schema.py:317` — `sky_extinction_k` |
+| A9 | 显示低仰角过境 | **已落地（读取入口）** | `show_low_elevation_passes` / False / 布尔 | 同上 | `settings.effective_show_low_elevation_passes()` + `effective_pass_visibility_gate_deg()`（开时门降到 5°）；消费点与 A1 同一调用点（§9.1） 取证 `2614c7f8` — `desktop/config_schema.py:393` — `show_low_elevation_passes` |
+| A10 | 默认采样率 | **已落地（统一 2.4 MS/s）** | 复用既有 `sample_rate_hz`，默认**派生自** `desktop/constants.py: DEFAULT_SAMPLE_RATE_HZ`（2.4 MS/s，源头 `sdr_backend`），不写字面量 | 即时 | 三值相等有测试：schema 默认 / `settings.DEFAULTS` / `control_panel.sample_rate_combo.currentData()`。**遗留（他线文件）**：`desktop/main_window.py` 兜底项文案仍写「2.048 MS/s」却绑 `DEFAULT_SAMPLE_RATE_HZ`（2.4M）数据，需操作逻辑线统一为同一常量，本线未越界修改 取证 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
+| A11 | 调谐步进 | **已落地** | `tuning_step_hz` / 10 000 / 10–1 000 000 / Hz（六档） | **即时**：`step_combo` + `spectrum.set_snap_interval`；顶部下拉反写设置 | `control_panel.step_combo`、`desktop/spectrum_widget.py` 的 `snap_interval`；无代码缺口（本项为「无缺口更正」） 取证 `45832a57` — `desktop/config_schema.py:288` — `tuning_step_hz` |
 
 ### 9.1 A1 / A2 / A9「待接线清单」（转操作逻辑线）
 
@@ -409,7 +409,7 @@ from settings import (
 断言下列 10 对项**两侧 help 都点名对方 label 且含「联动」**。面板每行 help 是
 `QLabel(item.help)`，所以提示直接可见，不涉及布局/颜色/尺寸。
 
-| # | 项对（A ↔ B） | 约束 | 只改 A 不改 B 的后果 | 面板联动提示（已落地） |
+| # | 项对（A ↔ B） | 约束 | 只改 A 不改 B 的后果 | 面板联动提示（当前实现） |
 |---|---|---|---|---|
 | 1 | `show_low_elevation_passes` ↔ `pass_min_elevation_deg` | 开启低仰角时实际门降到 5°（`PASS_LOW_ELEVATION_FLOOR_DEG`）；`pass_min` 本身 ≤5° 时开低仰角不再增加任何过境 | 门已是 5° 时勾选开关「没反应」，用户以为坏了 | `show_low...` 点名「过境最低仰角」；`pass_min...` 点名「显示低仰角过境」 |
 | 2 | `sky_extinction_k` ↔ `bortle` | 两项独立叠加：Bortle 定天顶极限星等，k 只按 `Δm=k/sin(仰角)` 压低低空天体 | 只调 Bortle 时低仰角变化不足；只调 k 时天顶星数不变——都正常，但不能互相替代 | `bortle` 点名「大气消光系数 k」；`sky_extinction_k` 点名「光害等级（Bortle）」 |
