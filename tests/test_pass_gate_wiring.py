@@ -9,7 +9,7 @@
 - TLE：ISS，epoch 2008-264（确定性）
 - 站点：39.9°N / 116.4°E / 0 km
 - 基准时刻：2008-09-20 06:00:00 UTC
-- 该窗口内已知有一次峰值 8.77° 的过境（另有多条 >10°）
+- 该 24h 窗口内：5° 门 6 条、10° 门 5 条；唯一差异是 15:30 峰值 9.8° 的低仰角过境
 """
 import os
 import sys
@@ -28,7 +28,8 @@ ISS_NAME = "ISS (ZARYA)"
 ISS_L1 = "1 25544U 98067A   08264.51780074  .00016553  00000-0  10270-3 0  2897"
 ISS_L2 = "2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563530"
 FIXED_UTC = datetime(2008, 9, 20, 6, 0, 0, tzinfo=timezone.utc)
-LOW_PEAK_DEG = 8.77  # 该窗口内唯一 5–10° 过境的峰值
+# 该窗口内 5° 门比 10° 门多出的唯一一条过境（表格里显示为 9.8°）
+LOW_PEAK_DEG = 9.8
 
 
 @pytest.fixture(scope="session")
@@ -90,10 +91,11 @@ def test_refresh_passes_respects_user_min_elevation(qapp, monkeypatch):
     assert at5 != at10, (
         "设 5° 与设 10° 返回了同一集合：说明 refresh_passes 没有消费 "
         "settings.effective_pass_min_elevation_deg，仍在用写死的 10°")
-    assert any(abs(alt - LOW_PEAK_DEG) <= 1.5 for _, alt in at5), (
-        f"5° 门槛下应能列出峰值 ≈{LOW_PEAK_DEG}° 的过境，实际 {at5}")
-    assert not any(abs(alt - LOW_PEAK_DEG) <= 1.5 for _, alt in at10), (
-        f"10° 门槛下不应列出峰值 ≈{LOW_PEAK_DEG}° 的过境，实际 {at10}")
+    extra = [row for row in at5 if row not in at10]
+    assert len(extra) == 1, (
+        f"5° 应比 10° 恰好多列 1 条 5–10° 过境，实际多出 {extra}（5°={at5}，10°={at10}）")
+    assert abs(extra[0][1] - LOW_PEAK_DEG) <= 0.1, (
+        f"多出的过境应是峰值 ≈{LOW_PEAK_DEG}° 的低仰角过境，实际 {extra[0]}")
 
 
 def test_show_low_elevation_passes_lists_and_marks_5_to_10(qapp, monkeypatch):
@@ -113,10 +115,13 @@ def test_show_low_elevation_passes_lists_and_marks_5_to_10(qapp, monkeypatch):
         panel.close()
 
     assert off != on, "「显示低仰角过境」开关没有生效，两次列表相同"
-    low_on = [row for row in on if abs(row[1] - LOW_PEAK_DEG) <= 1.5]
-    assert low_on, f"开关打开后应出现峰值 ≈{LOW_PEAK_DEG}° 的过境，实际 {on}"
-    assert any("低仰角" in name for name, _ in low_on), (
-        f"低仰角过境未在表格里标注「低仰角」，实际 {low_on}")
+    extra = [row for row in on if row not in off]
+    assert len(extra) == 1, (
+        f"开关打开后应恰好多列 1 条 5–10° 过境，实际多出 {extra}（关={off}，开={on}）")
+    assert abs(extra[0][1] - LOW_PEAK_DEG) <= 0.1, (
+        f"多出的过境应是峰值 ≈{LOW_PEAK_DEG}° 的低仰角过境，实际 {extra[0]}")
+    low_on = [row for row in on if "低仰角" in row[0]]
+    assert low_on, f"开关打开后低仰角过境未在表格里标注「低仰角」，实际 {on}"
     assert "峰值仰角" in label and "10" in label, (
         f"筛选口径文案没有写清「峰值仰角 ≥ N°」，实际：{label}")
     assert "低仰角" in label, f"文案没有解释低仰角开关，实际：{label}"

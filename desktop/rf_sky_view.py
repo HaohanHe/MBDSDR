@@ -118,10 +118,26 @@ from mbdsdr_ai.skyengine import constellations as _constel
 from mbdsdr_ai.skyengine import xingguan as _xingguan
 from mbdsdr_ai.skyengine import satellites as _sats
 from mbdsdr_ai.skyengine import jtime as _jtime
-# 过境峰值仰角门：与 sat_tracker / new_spacetime_panel / controller 同一事实源。
+# 过境峰值仰角门与采样步长：与 sat_passes 同一事实源（本视图不再私藏 300/30）。
 # 注意区分 VISIBLE_MIN_ALT_DEG=5°（当前可见/跟踪门）——本视图过境列表用的是
-# PASS_MIN_ALT_DEG=10°（「这次过境值不值得列出来」），不是 5°。
-from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG
+# 用户设置 effective_pass_min_elevation_deg（默认 10°，「这次过境值不值得列出来」）。
+from mbdsdr_ai.sat_passes import (
+    PASS_COARSE_STEP_S as _SAT_PASS_COARSE_STEP_S,
+    PASS_FINE_STEP_S as _SAT_PASS_FINE_STEP_S,
+)
+
+try:
+    from settings import (
+        effective_pass_min_elevation_deg,
+        effective_pass_visibility_gate_deg,
+        effective_show_low_elevation_passes,
+    )
+except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
+    from .settings import (  # type: ignore
+        effective_pass_min_elevation_deg,
+        effective_pass_visibility_gate_deg,
+        effective_show_low_elevation_passes,
+    )
 
 from tokens import tokens
 
@@ -1825,6 +1841,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 未来过境列表
         self._upcoming_passes: List[Dict[str, float]] = []
+        # 列表口径（供面板标题显示）：峰值门 & 是否含低仰角
+        self._pass_gate_deg: Optional[float] = None
+        self._pass_show_low: bool = False
 
         # === 「调到该星」覆盖按钮（自包含，不依赖 main_window）===
         # 选中带 TLE 的卫星且有观测站时才启用；否则置灰。
@@ -2591,9 +2610,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._sky_brightness = max(0.0, min(1.0, float(sky_brightness)))
         self.update()
 
-    def set_upcoming_passes(self, passes: List[Dict]):
-        """喂入未来过境列表（rise 时刻 HH:MM:SS(UTC) + max_alt + duration_min）。"""
+    def set_upcoming_passes(self, passes: List[Dict],
+                            gate_deg: Optional[float] = None,
+                            show_low: bool = False):
+        """喂入未来过境列表（rise 时刻 HH:MM:SS(UTC) + max_alt + duration_min）。
+
+        ``gate_deg`` / ``show_low`` 只用于标题口径：列表按**峰值仰角** ≥ 门筛选，
+        低仰角开关打开时 5°–用户门的过境会额外列出并标注「低仰角」。
+        """
         self._upcoming_passes = list(passes)[:12]
+        self._pass_gate_deg = gate_deg
+        self._pass_show_low = bool(show_low)
         self.update()
 
     # ------------------------------------------------------------------ #
@@ -6582,7 +6609,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         _t = tokens()
         rows = self._upcoming_passes[:8]
         row_h = 18
-        panel_w = 210
+        panel_w = 250
         panel_h = 26 + len(rows) * row_h
         panel_x = self.width() - panel_w - 12
         panel_y = 56
@@ -6596,7 +6623,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         dim = QColor(_t.COLORS["gray_300"])
         painter.setFont(self._font)
         painter.setPen(ink)
-        painter.drawText(panel_x + 10, panel_y + 16, "未来过境 24h UTC · 峰值(几何)")
+        if self._pass_gate_deg is not None:
+            title = f"未来过境 24h · 峰值≥{self._pass_gate_deg:g}°"
+        else:
+            title = "未来过境 24h UTC · 峰值(几何)"
+        if self._pass_show_low:
+            title += " · 低仰角已标"
+        painter.drawText(panel_x + 10, panel_y + 16, title)
 
         painter.setFont(self._mono_font)
         ty = panel_y + 16 + row_h
@@ -6606,8 +6639,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # 与天空实际位置差出数度（NOAA19 87° 峰：整分钟处低 12°）
             painter.drawText(panel_x + 10, ty, str(p.get("rise", "--"))[:8])
             painter.setPen(ink)
-            name = str(p.get("name", ""))[:10]
-            painter.drawText(panel_x + 66, ty, name)
+            raw_name = str(p.get("name", ""))
+            # 低仰角（5°–用户设置门）显式标注，不靠颜色让用户猜
+            name = ("低仰角 " + raw_name) if p.get("low_elevation") else raw_name
+            painter.drawText(panel_x + 66, ty, name[:11])
             painter.setPen(self._colors["accent"])
             painter.drawText(panel_x + panel_w - 78, ty,
                              format_angle_deg(float(p.get('max_alt', 0)),
@@ -7216,6 +7251,75 @@ class RFSkyViewPanel(QFrame):
 # ============================================================================
 
 
+def compute_pass_peaks(catalog, lat, lon, alt_km, t0_unix, *,
+                       min_peak_deg: float, low_peak_deg: Optional[float] = None,
+                       win_s: float = 24.0 * 3600.0,
+                       coarse_step_s: float = _SAT_PASS_COARSE_STEP_S,
+                       fine_step_s: float = _SAT_PASS_FINE_STEP_S,
+                       max_sats: int = 6) -> List[Dict[str, object]]:
+    """每颗卫星在窗口内的最佳过境峰值（纯函数，便于对拍测试）。
+
+    参数口径：
+    - ``min_peak_deg``：列表门。按**峰值仰角**筛，低于它不列出。
+    - ``low_peak_deg``：低仰角开关打开时传用户设置值；峰值低于它标注
+      ``low_elevation=True``（5°–用户门）。关闭时传 None。
+    - 步长默认取 ``sat_passes`` 的公开常量（单一事实源），调用方可覆盖。
+
+    算法保留「粗扫 + 峰值邻域细化」：纯粗扫会系统性削掉峰值（6 分钟 LEO
+    过境在 60s 粗采样下可低数度），细化后 ``max_alt`` 才与天空里画出的
+    仰角一致。
+    """
+    from mbdsdr_ai import orbit
+    from sgp4.api import Satrec
+
+    coarse = max(1, int(round(float(coarse_step_s))))
+    fine = max(1e-3, float(fine_step_s))
+    rows: List[Dict[str, object]] = []
+    for entry in list(catalog or [])[:max_sats]:
+        name = str(entry["name"])
+        try:
+            sat = Satrec.twoline2rv(str(entry["line1"]), str(entry["line2"]))
+        except Exception:
+            continue
+
+        def _el_at(sec: float):
+            try:
+                st = orbit._state_from_satrec(
+                    sat, name, (t0_unix + sec) / 86400.0 + 2440587.5,
+                    lat, lon, alt_km)
+            except Exception:
+                return None
+            return None if st is None else float(st["elevation"])
+
+        best_el, best_t = -90.0, 0.0
+        for sec in range(0, int(win_s) + 1, coarse):
+            e = _el_at(float(sec))
+            if e is not None and e > best_el:
+                best_el, best_t = e, float(sec)
+        if best_el < float(min_peak_deg):
+            continue
+        # 峰值邻域细化（补回粗采样削掉的峰值）
+        lo = max(0.0, best_t - coarse)
+        hi = min(win_s, best_t + coarse)
+        sec = lo
+        while sec <= hi + 1e-6:
+            e = _el_at(sec)
+            if e is not None and e > best_el:
+                best_el, best_t = e, sec
+            sec += fine
+        rows.append({
+            "name": name,
+            "rise": format_utc_time(t0_unix + best_t, "%H:%M:%S"),
+            "peak_unix": t0_unix + best_t,
+            "max_alt": best_el,
+            "duration_min": 0.0,
+            "low_elevation": (low_peak_deg is not None
+                              and best_el < float(low_peak_deg)),
+        })
+    rows.sort(key=lambda r: r["peak_unix"])
+    return rows
+
+
 class SatelliteTracker:
     """定时用 sgp4 计算卫星实时地平坐标，更新天空图。
 
@@ -7224,12 +7328,12 @@ class SatelliteTracker:
     TLE 从用户文件或 Celestrak 加载；失败则显示"无 TLE 数据"，不造假。
     """
 
-    # 过境面板：24h 窗口、5 分钟粗扫 + 峰值邻域 30 秒细化（与天空同一坐标链）
+    # 过境面板：24h 窗口；粗扫/细化步长引用 sat_passes 的公开常量（单一事实源），
+    # 不在本类另写字面量。峰值邻域细化保留（粗采样会系统性削掉峰值）。
     PASS_WIN_HOURS = 24.0
-    PASS_COARSE_STEP_S = 300.0
-    PASS_FINE_STEP_S = 30.0
-    # 峰值仰角门来自 mbdsdr_ai.sat_passes.PASS_MIN_ALT_DEG（10°），
-    # 不再持有私有字面量；与 5° 的可见门是两个量，勿混用。
+    PASS_COARSE_STEP_S = _SAT_PASS_COARSE_STEP_S
+    PASS_FINE_STEP_S = _SAT_PASS_FINE_STEP_S
+    # 峰值仰角门读 settings.effective_pass_*（默认 10°）；与 5° 的可见门是两个量。
     # 快转下按模拟时间差重算（墙钟下限防止高倍率每帧扫 24h）
     PASS_REFRESH_SIM_S = 300.0
     PASS_REFRESH_WALL_S = 1.0
@@ -7525,66 +7629,41 @@ class SatelliteTracker:
             return
         self._refresh_passes(jd_utc)
 
+    def _resolved_settings(self):
+        """取宿主（主窗口）的 settings 实例；取不到时用 schema 默认值。"""
+        try:
+            return getattr(self.sky_view.window(), "settings", None)
+        except Exception:
+            return None
+
     def _refresh_passes(self, jd_utc: float):
         """预测未来 24h 过境，喂入天空图侧栏。失败则清空列表。
 
         行字段：peak_unix（峰值精确模拟时刻，供面板/天空同刻对拍与过期过滤）、
-        rise（HH:MM 显示口径的峰值时刻）、max_alt（峰值仰角）。
-        粗采样 5 分钟 + 峰值邻域 30 秒细化：纯 5 分钟粗采样会系统性低估峰值
-        （快过境可差数度），细化后 max_alt 才等于「该时刻天空里画出的仰角」。
+        rise（HH:MM 显示口径的峰值时刻）、max_alt（峰值仰角）、
+        low_elevation（低仰角标注；仅在「显示低仰角过境」开启时为 True）。
+        粗扫/细化步长与 sat_passes 同源（60s / 2s），不再自成一套；峰值邻域
+        细化保留，否则粗采样会系统性低估峰值。
+        峰值门读 settings.effective_pass_min_elevation_deg；低仰角开关打开时
+        实际门为 min(用户设置, 5°)，并标注低于用户设置门的过境。
         """
         t0_unix = (jd_utc - 2440587.5) * 86400.0
         try:
-            from mbdsdr_ai import orbit
-            from sgp4.api import Satrec
-            win_s = self.PASS_WIN_HOURS * 3600.0
-            rows = []
-            for entry in self._catalog[:6]:
-                name = entry["name"]
-                line1 = entry["line1"]
-                line2 = entry["line2"]
-                try:
-                    sat = Satrec.twoline2rv(line1, line2)
-                except Exception:
-                    continue
-
-                def _el_at(sec: float):
-                    try:
-                        st = orbit._state_from_satrec(
-                            sat, name, (t0_unix + sec) / 86400.0 + 2440587.5,
-                            self.lat, self.lon, self.alt_km)
-                    except Exception:
-                        return None
-                    return None if st is None else float(st["elevation"])
-
-                best_el, best_t = -90.0, 0.0
-                for sec in range(0, int(win_s) + 1,
-                                 int(self.PASS_COARSE_STEP_S)):
-                    e = _el_at(float(sec))
-                    if e is not None and e > best_el:
-                        best_el, best_t = e, float(sec)
-                if best_el <= PASS_MIN_ALT_DEG:
-                    continue
-                # 峰值邻域细化（补回粗采样削掉的峰值）
-                lo = max(0.0, best_t - self.PASS_COARSE_STEP_S)
-                hi = min(win_s, best_t + self.PASS_COARSE_STEP_S)
-                sec = lo
-                while sec <= hi + 1e-6:
-                    e = _el_at(sec)
-                    if e is not None and e > best_el:
-                        best_el, best_t = e, sec
-                    sec += self.PASS_FINE_STEP_S
-                peak_unix = t0_unix + best_t
-                rows.append({
-                    "name": name,
-                    "rise": format_utc_time(peak_unix, "%H:%M:%S"),
-                    "peak_unix": peak_unix,
-                    "max_alt": best_el,
-                    "duration_min": 0.0,
-                })
-            rows.sort(key=lambda r: r["peak_unix"])
+            settings = self._resolved_settings()
+            gate = effective_pass_visibility_gate_deg(settings)
+            user_gate = effective_pass_min_elevation_deg(settings)
+            show_low = effective_show_low_elevation_passes(settings)
+            rows = compute_pass_peaks(
+                self._catalog, self.lat, self.lon, self.alt_km, t0_unix,
+                min_peak_deg=gate,
+                low_peak_deg=(user_gate if show_low else None),
+                win_s=self.PASS_WIN_HOURS * 3600.0,
+                coarse_step_s=self.PASS_COARSE_STEP_S,
+                fine_step_s=self.PASS_FINE_STEP_S,
+            )
             self._passes_anchor_unix = t0_unix
             self._passes_wall = time.monotonic()
-            self.sky_view.set_upcoming_passes(rows[:8])
+            self.sky_view.set_upcoming_passes(
+                rows[:8], gate_deg=gate, show_low=show_low)
         except Exception:
             self.sky_view.set_upcoming_passes([])
