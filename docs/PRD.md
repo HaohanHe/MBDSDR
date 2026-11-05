@@ -845,7 +845,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 
 **验收**
 - AC-R4（已有自动化）：`python -m pytest tests/test_demod_worker_failure_visibility.py -q` 全绿（4 条：恰好 1 次上报且线程继续；helper 层编程错误原样上抛；`run()` 捕获后干净退出；连发 20 块只 1 条 warning）。
-- AC-R5（已有自动化）：`python -m pytest tests/test_s8_backend_loss.py tests/test_backend_resilience.py -q` 全绿。`test_s8_backend_loss.py` 8 条覆盖：后端异常上报为断开、陈旧数据不依赖信号、未连接态、新鲜数据保持、宽限期不误报、未知新鲜度交给信号路径、尚无帧不算丢、短停顿只警告且第三次才断开。
+- AC-R5（已有自动化）：`python -m pytest tests/test_s8_backend_loss.py tests/test_backend_resilience.py -q` 全绿。`test_s8_backend_loss.py` 覆盖：后端异常上报为断开、陈旧数据不依赖信号、未连接态、新鲜数据保持、宽限期不误报、未知新鲜度交给信号路径、尚无帧不算丢、短停顿只警告且第三次才断开、星象仪模式不误报、切换静默后端时健康位复位、健康定时器生命周期。
 - AC-R6（待补）：给 `FftWorker` 注入抛异常的 `push_iq` → 应有 1 次可见失败信号；当前无信号、无测试，不算通过。
 - 提交：`52cc888`（接收链单帧失败可见化）；`7f518fe`（掉线如实断开）。
 
