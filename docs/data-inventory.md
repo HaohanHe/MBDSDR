@@ -138,8 +138,8 @@ checkout 时 CRLF 改写导致 SHA 分叉。
 
 | 字段 | 缺条数 | 后果 | 缺的条目 |
 |---|---|---|---|
-| `magnitude` | 0 | 已补齐：HEASARC `MESSIER` 表 `vmag`（V 波段），逐条 `magnitude_source=heasarc_messier` | — |
-| `size_arcmin` | 0 | 已补齐：M40←WDS 双星分离 0.887′、M73←Lynga `VII/92A` 2.8′ | — |
+| `magnitude` | 0 | 已补齐（`16f075f3` — `mbdsdr_ai/data/dso_catalog.json:44` — `heasarc_messier`）：HEASARC `MESSIER` 表 `vmag`（V 波段），逐条 `magnitude_source=heasarc_messier` | — |
+| `size_arcmin` | 0 | 已补齐（`16f075f3` — `mbdsdr_ai/data/dso_catalog.json:54` — `lynga`）：M40←WDS 双星分离 0.887′、M73←Lynga `VII/92A` 2.8′ | — |
 | `size_minor_arcmin` | 66 | 无短轴，不能画椭圆 | 与 `axis_ratio` 同一批 |
 | `axis_ratio` | 66 | 按圆形绘制；查询/推荐不读该字段（有钉扎测试） | 30 GCl / 27 OCl / 5 PN / 1 Neb / 1 `**` / 1 Other / 1 RfN |
 | `zh_name` | 83 | 界面回退 `name_en`；中文名覆盖 34/117 | — |

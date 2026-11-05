@@ -89,8 +89,8 @@ NGC 5866，故条目数保持 117。**
 
 | 字段 | 缺失数 | 缺失清单 |
 | --- | --- | --- |
-| 视星等 `magnitude` | **0** | （已补齐：HEASARC `MESSIER`） |
-| 长轴 `size_arcmin` | **0** | （已补齐：M40←WDS、M73←Lynga） |
+| 视星等 `magnitude` | **0** | （已补齐：`16f075f3` — `mbdsdr_ai/data/dso_catalog.json:44` — `heasarc_messier`；HEASARC `MESSIER`） |
+| 长轴 `size_arcmin` | **0** | （已补齐：`16f075f3` — `mbdsdr_ai/data/dso_catalog.json:54` — `lynga`；M40←WDS、M73←Lynga） |
 | 短轴 `size_minor_arcmin` | **66** | 见 `meta.missing.size_minor_arcmin.designations` |
 | 英文常用名 `name_en` | **81** | 见 `meta.missing.name_en.designations` |
 | 中文名 `zh_name` | **83** | 见 `meta.missing.zh_name.designations` |
