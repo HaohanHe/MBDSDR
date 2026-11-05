@@ -193,6 +193,8 @@
 
 > 计数口径（2026-11-06 按 `HEAD 63bf5874` 重数）：只算「自己持有一份档位值 / 顺序 / 默认值」的点，按 `文件:符号` 去重；纯消费点（按表遍历、比对、格式化、UI 绑定变量）不计。**下表「数量」列 = 本行基准 + 归属本行的位置**（跨行不重复），五行相加 = 28。
 > 旧标题写「23（15/4/4）」、旧五行「数量」相加 26：26 是**逐行「其余位置」相加**，其中第 2、3 行共享同一批 8 个 C++ 位置被重复计了一次——这正是标题与表不闭合的原因；现已按去重重算，五行相加等于标题总数。
+> 分项：只数「档位集合」时是 **24（代码 13 / 测试 7 / 文档 4）**，另 **4 个默认值点**（`cpp/src/core/tokens.h:kDefaultSampleRateHz`、`mbdsdr_ai/sdr_backend.py:DEFAULT_SAMPLE_RATE_HZ`、`desktop/constants.py:DEFAULT_SAMPLE_RATE_HZ`、`desktop/config_schema.py` 回退字面量）单列，合计 28。
+> 旧标题「23（15/4/4）」按 HEAD 无法复现，差额来自：漏算三份自持副本（`mbdsdr_ai/device_manager.py:_RTL_SRATES`、`mbdsdr_ai/osmosdr_source.py:RTL_SAMPLE_RATES_HZ`、`scripts/sample_rate_readback_check.py:RTL_TIERS`）；旧 15 另含两个消费点（`cpp/src/control/control_hub.cpp:cmdSetSampleRate`、`desktop/control_panel.py:sample_rate_combo`）；测试 4 也漏了 `cpp/tests/test_control_hub.cpp`、`tests/test_settings_schema.py`、`tests/test_desktop_constants.py`。
 
 | 若改这里（基准） | 归属本行的位置（含基准；跨行不重复） | 数量 |
 |---|---|---|
