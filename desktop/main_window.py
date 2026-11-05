@@ -253,6 +253,11 @@ from shortcuts import bind as _key
 from spectrum_widget import (
     create_spectrum_widget, HAS_OPENGL, owns_local_shortcuts)
 from control_panel import ControlPanel
+# 错误码 → 帮助「怎么办」入口（无对应条目的 code 不出链接，见 error_remedy）
+from error_remedy import (
+    RemedyLinkLabel, attach_remedy_link, classify_connect_error,
+    classify_record_dir_error,
+)
 from mode_registry import (
     default_bandwidth,
     audio_cutoff,
@@ -2351,6 +2356,26 @@ class MainWindow(QMainWindow):
         """
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
+        # 「查看怎么办 →」：只在带上 error_catalog code 的错误消息里出现；
+        # 普通瞬态消息（messageChanged）自动清掉旧链接，绝不指向过期错误。
+        self._remedy_link = RemedyLinkLabel(status_bar)
+        status_bar.addPermanentWidget(self._remedy_link)
+        status_bar.messageChanged.connect(
+            lambda _text: self._remedy_link.clear_code())
+
+    def _show_error_status(self, text: str, code=None, timeout: int = 6000):
+        """状态栏错误消息 + 可点的「查看怎么办」入口（无条目则不出链接）。"""
+        self.statusBar().showMessage(text, timeout)  # 先触发 messageChanged 清旧链接
+        if code:
+            self._remedy_link.set_code(code)
+
+    def _show_error_dialog(self, icon, title: str, text: str, code=None):
+        """有正文的错误弹窗：底部追加「查看怎么办」，不新增按钮/不动默认焦点。"""
+        box = QMessageBox(icon, title, text, QMessageBox.Ok, self)
+        box.setDefaultButton(QMessageBox.Ok)
+        if code:
+            attach_remedy_link(box, code)
+        box.exec()
 
     def _go_home(self):
         """主页按钮：切回频谱 Tab。"""
@@ -3235,17 +3260,18 @@ class MainWindow(QMainWindow):
         if chosen is None:
             # 真的没设备：明确提示，不弹对话框、不造假。
             # 默认 USB 走 SoapySDR（无 GPL）；pyrtlsdr 仅可选自装。
-            self._show_no_rtl_hint(_NO_SDR_HINT)
+            self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found")
             return
 
         # 构造后端并连接（默认参数：2.048MS/s、AGC 开、PPM 0、offset 关）
         try:
             backend = build_backend_for_device(chosen)
         except Exception as e:
-            self._show_no_rtl_hint(f"构造后端失败：{e}")
+            self._show_no_rtl_hint(f"构造后端失败：{e}",
+                                   code=classify_connect_error(str(e)))
             return
         if backend is None:
-            self._show_no_rtl_hint(_NO_SDR_HINT)
+            self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found")
             return
 
         ok = self._connect_backend(
@@ -3257,18 +3283,21 @@ class MainWindow(QMainWindow):
             offset_tuning=False,
         )
         if not ok:
-            # 连接失败：状态栏已由 _connect_backend 写了错误；补充无设备引导
+            # 连接失败：状态栏已由 _connect_backend 写了错误；补充无设备引导。
+            # 链接沿用 _connect_backend 分类出的同一个 code，避免两条提示
+            # 对同一次失败给出两个不同的「怎么办」。
             self._show_no_rtl_hint(
-                "RTL-SDR 连接失败：检查 Zadig WinUSB 驱动 / SoapySDR 驱动 / 设备是否被占用")
+                "RTL-SDR 连接失败：检查 Zadig WinUSB 驱动 / SoapySDR 驱动 / 设备是否被占用",
+                code=getattr(self, "_last_connect_code", None))
 
-    def _show_no_rtl_hint(self, message: str):
+    def _show_no_rtl_hint(self, message: str, code=None):
         """无设备 / 枚举失败时：状态栏 + 频谱上方横幅同时显示明确提示。
 
         绝不静默走假后端、绝不显示"已连接"。横幅文字与状态栏一致，
         用户一眼看到排查方向（Zadig 驱动 / pyrtlsdr 库）。
         """
         try:
-            self.statusBar().showMessage(message, 8000)
+            self._show_error_status(message, code, 8000)
         except Exception:
             pass
         try:
@@ -3322,7 +3351,11 @@ class MainWindow(QMainWindow):
                 pass
             friendly = self._humanize_error(raw_err) if raw_err else \
                 "设备无响应：请检查 USB 棒、librtlsdr 驱动、以及设备是否被 SDR#/GQRX 占用。"
-            self.statusBar().showMessage(f"连接失败：{friendly}", 6000)
+            # 原始错误 → error_catalog code：认不出就不出「查看怎么办」，
+            # 绝不硬套一个码把用户带到不相关的条目。
+            self._last_connect_code = classify_connect_error(raw_err)
+            self._show_error_status(f"连接失败：{friendly}",
+                                    self._last_connect_code, 6000)
             try:
                 backend.disconnect()
             except Exception:
@@ -3333,6 +3366,7 @@ class MainWindow(QMainWindow):
             return False
 
         # 连接成功：停掉旧 worker，切换到真实后端
+        self._last_connect_code = None
         self._worker_manager.stop()
         self._worker = None
         self._active_sdr_backend = backend
@@ -3626,11 +3660,11 @@ class MainWindow(QMainWindow):
         data = combo.currentData()
         if data is None:
             # 占位项不可选；万一被键盘路径确认了，也要说清为什么没继续。
-            QMessageBox.information(
-                self, "未选择设备",
+            self._show_error_dialog(
+                QMessageBox.Information, "未选择设备",
                 "当前没有可连接的 SDR 设备。"
                 "下一步：接好 USB/安装驱动后重新打开此窗口，"
-                "或选择「远程 rtl_tcp 源」。")
+                "或选择「远程 rtl_tcp 源」。", code="device_not_found")
             return
 
         # 收集对话框参数（WebSocket 路径不用）
@@ -3658,9 +3692,10 @@ class MainWindow(QMainWindow):
             try:
                 from mbdsdr_ai.rtltcp_client import RtlTcpBackend
             except ImportError:
-                QMessageBox.critical(
-                    self, "连接失败",
-                    "rtl_tcp 客户端模块未就绪（mbdsdr_ai.rtltcp_client 导入失败）")
+                self._show_error_dialog(
+                    QMessageBox.Critical, "连接失败",
+                    "rtl_tcp 客户端模块未就绪（mbdsdr_ai.rtltcp_client 导入失败）",
+                    code="missing_dependency")
                 return
             backend = RtlTcpBackend(host, port, ppm=chosen_ppm)
             ok = self._connect_backend(
@@ -3672,10 +3707,11 @@ class MainWindow(QMainWindow):
                 offset_tuning=chosen_offset,
             )
             if not ok:
-                QMessageBox.warning(
-                    self, "连接失败",
+                self._show_error_dialog(
+                    QMessageBox.Warning, "连接失败",
                     f"无法连接远程 rtl_tcp 源 {host}:{port}\n"
-                    "请检查地址/端口、网络连通性，以及远端 rtl_tcp 服务是否在运行。")
+                    "请检查地址/端口、网络连通性，以及远端 rtl_tcp 服务是否在运行。",
+                    code="network_unreachable")
             return
 
         # 真实 SDR 设备：构造后端并走通用连接流程（_connect_backend，
@@ -3696,11 +3732,13 @@ class MainWindow(QMainWindow):
             offset_tuning=chosen_offset,
         )
         if not ok:
-            # _connect_backend 已在状态栏写了详细错误；对话框额外弹一次提醒
-            QMessageBox.warning(
-                self, "连接失败",
+            # _connect_backend 已在状态栏写了详细错误；对话框额外弹一次提醒。
+            # code 沿用同一次失败分类结果；认不出（None）就不出链接。
+            self._show_error_dialog(
+                QMessageBox.Warning, "连接失败",
                 "设备连接失败，请查看状态栏错误详情。\n"
-                "常见原因：USB 棒未插 / 驱动未装（Zadig WinUSB）/ 被其他软件占用。")
+                "常见原因：USB 棒未插 / 驱动未装（Zadig WinUSB）/ 被其他软件占用。",
+                code=getattr(self, "_last_connect_code", None))
 
     @staticmethod
     def _parse_host_port(s: str, default_port: int = 1234):
@@ -5994,8 +6032,10 @@ class MainWindow(QMainWindow):
         # 静默退 tempfile/默认目录——那会让用户以为录到了自己选的盘上。
         rec_dir, rec_error = self.settings.ensure_record_dir()
         if rec_error:
-            QMessageBox.warning(self, "录音目录不可用", rec_error)
-            self.statusBar().showMessage(rec_error, 8000)
+            rec_code = classify_record_dir_error(rec_error)
+            self._show_error_dialog(
+                QMessageBox.Warning, "录音目录不可用", rec_error, code=rec_code)
+            self._show_error_status(rec_error, rec_code, 8000)
             self._recording = False
             self._record_guard = True
             try:

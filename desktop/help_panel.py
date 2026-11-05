@@ -276,8 +276,33 @@ def _build_dialog_class():
                 self.trouble_tree.addTopLevelItem(top)
                 top.setExpanded(True)
                 for r in items:
-                    top.addChild(QTreeWidgetItem(
-                        [r.symptom, r.cause, r.next_step]))
+                    child = QTreeWidgetItem(
+                        [r.symptom, r.cause, r.next_step])
+                    # 错误码挂在条目上：状态栏/弹窗的「查看怎么办」按 code 定位，
+                    # 不靠模糊搜索（搜「连接」可能落到别的条目）。
+                    child.setData(0, Qt.UserRole, r.code)
+                    top.addChild(child)
+
+        # ---------------- 按错误码定位 ----------------
+        def show_remedy_code(self, code: str) -> bool:
+            """切到「怎么办」并按错误码选中对应条目；没有条目返回 False。
+
+            状态栏/弹窗的「查看怎么办」走这里——按 code 精确命中，不做模糊
+            搜索，也不落到「未找到」空页（调用方在无条目时根本不出链接）。
+            """
+            self.tabs.setCurrentIndex(2)
+            if self.trouble_search_edit.text():
+                self.trouble_search_edit.clear()
+            for i in range(self.trouble_tree.topLevelItemCount()):
+                top = self.trouble_tree.topLevelItem(i)
+                for j in range(top.childCount()):
+                    child = top.child(j)
+                    if child.data(0, Qt.UserRole) == code:
+                        top.setExpanded(True)
+                        self.trouble_tree.setCurrentItem(child)
+                        self.trouble_tree.scrollToItem(child)
+                        return True
+            return False
 
         # ---------------- 测试/自动化接口 ----------------
         def visible_row_count(self) -> int:
