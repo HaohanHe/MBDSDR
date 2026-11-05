@@ -115,6 +115,51 @@ def test_repo_has_no_sample_rate_formatted_as_mhz():
     assert hits == [], "\n".join(hits)
 
 
+# ---------------------------------------------------------------------------
+# R3/R4：sdr_tools 的频率读数精度与工具默认采样率
+# ---------------------------------------------------------------------------
+SDR_TOOLS = ROOT / "mbdsdr_ai" / "sdr_tools.py"
+
+# 频率读数只允许 3 位小数；需要 Hz 级精度时用 6 位并紧跟「Hz」。
+# 1/2/4 位是历史混用（同一 137.62 在不同工具里写成 137.6 / 137.62 / 137.6200）。
+COARSE_OR_EXTRA = re.compile(r":(?:[0-9]+)?\.(?:1|2|4)f\}\s*MHz")
+
+
+def test_precision_rule_catches_coarse_and_extra_digits():
+    """纯函数级反证：1/2/4 位必须命中，3 位与「6 位+Hz」放行。"""
+    assert COARSE_OR_EXTRA.search('f"{f/1e6:.1f} MHz"')
+    assert COARSE_OR_EXTRA.search('f"{f/1e6:9.4f} MHz"')
+    assert COARSE_OR_EXTRA.search('f"{f/1e6:.2f}MHz"')
+    assert not COARSE_OR_EXTRA.search('f"{f/1e6:.3f} MHz"')
+    assert not COARSE_OR_EXTRA.search('f"{f/1e6:.6f} MHz（137620000 Hz）"')
+
+
+def test_sdr_tools_frequency_readouts_use_three_decimals():
+    """sdr_tools 的用户可见频率读数统一 3 位小数（Hz 级精度另走 6 位+Hz）。"""
+    lines = SDR_TOOLS.read_text(encoding="utf-8", errors="ignore").splitlines()
+    hits = [
+        f"mbdsdr_ai/sdr_tools.py:{i}:{line.strip()}"
+        for i, line in enumerate(lines, 1)
+        if COARSE_OR_EXTRA.search(line)
+        and not BW_EXEMPT.search(line)
+        and not ALLOW_MARK.search(line)
+    ]
+    assert hits == [], "\n".join(hits)
+
+
+def test_sdr_tools_gnss_sample_rate_default_is_project_default():
+    """GNSS 工具默认采样率必须跟随项目真值源，不许另写一份 2.048 MS/s。
+
+    理由：这两个工具生成的是模拟 IQ（无硬件依赖），不存在「某后端只支持 2.048」
+    的兼容理由；2.048 只是 RTL-SDR 的一个可用档。
+    """
+    src = SDR_TOOLS.read_text(encoding="utf-8", errors="ignore")
+    assert "2.048e6" not in src, "仍有手写的 2.048e6（应引用 DEFAULT_SAMPLE_RATE_HZ）"
+    assert '"default": DEFAULT_SAMPLE_RATE_HZ' in src
+    assert "args.get('sample_rate_hz', DEFAULT_SAMPLE_RATE_HZ)" in src
+    assert "sample_rate = DEFAULT_SAMPLE_RATE_HZ" in src
+
+
 def test_default_sample_rate_advice_matches_project_default():
     """建议文案里的「默认采样率」必须来自 `DEFAULT_SAMPLE_RATE_HZ`。
 

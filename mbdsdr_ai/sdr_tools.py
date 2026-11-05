@@ -38,7 +38,8 @@ from .error_catalog import exception_code, user_message
 from .tool_registry import ToolResult
 from . import orbit
 from . import doppler_link
-from .sdr_backend import SDRBackendManager, SDRStatus, format_sample_rate
+from .sdr_backend import (SDRBackendManager, SDRStatus, format_sample_rate,
+                           DEFAULT_SAMPLE_RATE_HZ)
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
 from .audio_out import AudioPlayer
@@ -2275,7 +2276,7 @@ def register_sdr_tools(agent):
                 "band_name": {"type": "string", "description": "频带名称：L1/L2/L5/B1/B2/B3"},
                 "center_freq_hz": {"type": "number", "description": "中心频率（Hz）"},
                 "duration_sec": {"type": "number", "description": "采样时长（秒）", "default": 1.0},
-                "sample_rate_hz": {"type": "number", "description": "采样率（Hz）", "default": 2.048e6},
+                "sample_rate_hz": {"type": "number", "description": "采样率（Hz）", "default": DEFAULT_SAMPLE_RATE_HZ},
             },
             "required": ["band_name", "center_freq_hz"],
         },
@@ -3213,7 +3214,7 @@ def _sweep_scan_tool(mgr, args) -> "ToolResult":
             logger.warning("扫频收尾 %s", restore_error)
 
     lines = [
-        f"=== 扫频 {f0/1e6:.2f}-{f1/1e6:.2f} MHz ===",
+        f"=== 扫频 {f0/1e6:.3f}-{f1/1e6:.3f} MHz ===",
         f"瞬时带宽 {sr/1e6:.2f}MHz，调谐 {len(res.centers_scanned)} 段，"
         f"噪声底 {res.noise_floor_db:.1f}dB，门限 {res.threshold_db:.1f}dB",
         f"检出活动信号 {len(res.activities)} 个（按强度排序）:",
@@ -3222,7 +3223,7 @@ def _sweep_scan_tool(mgr, args) -> "ToolResult":
         lines.append("  未发现超过门限的信号。可减小 margin_db 或确认频段/天线。")
     for k, a in enumerate(res.activities[:20], 1):
         lines.append(
-            f"  {k:2d}. {a.center_hz/1e6:9.4f} MHz  带宽 {a.bandwidth_hz/1e3:7.1f} kHz  "
+            f"  {k:2d}. {a.center_hz/1e6:9.3f} MHz  带宽 {a.bandwidth_hz/1e3:7.1f} kHz  "
             f"峰 {a.peak_db:6.1f}dB  范围 {a.low_hz/1e6:.3f}-{a.high_hz/1e6:.3f}"
         )
     if len(res.activities) > 20:
@@ -3236,7 +3237,7 @@ def _fmt_bookmark(b) -> str:
     if b.is_range:
         head = f"[{b.category}] {b.name}: {b.start_hz/1e6:.3f}-{b.end_hz/1e6:.3f} MHz（频段）"
     else:
-        head = f"[{b.category}] {b.name}: {b.freq_hz/1e6:.4f} MHz"
+        head = f"[{b.category}] {b.name}: {b.freq_hz/1e6:.3f} MHz"
     extras = []
     if b.mode:
         extras.append(b.mode)
@@ -3273,7 +3274,7 @@ def _bookmark_goto(mgr, fm, args) -> "ToolResult":
         return ToolResult(success=False, content="错误: 设备未连接，无法跳转频率")
 
     freq = b.center_hz
-    actions = [f"频率 {freq/1e6:.4f} MHz"]
+    actions = [f"频率 {freq/1e6:.3f} MHz"]
     skipped = []
     if b.mode and hasattr(backend, "set_demod"):
         try:
@@ -3398,7 +3399,7 @@ def _watch_capture_tool(mgr, fm, args) -> "ToolResult":
         hang_s=float(args.get("hang_s", 0.5)),
     )
 
-    head = (f"守听 {freq/1e6:.4f} MHz：噪声底 {res['noise_floor_db']:.1f}dB，"
+    head = (f"守听 {freq/1e6:.3f} MHz：噪声底 {res['noise_floor_db']:.1f}dB，"
             f"门限 {res['threshold_db']:.1f}dB，等待 {res['waited_s']:.1f}s")
     if soft:
         head += "\n未生效: " + "；".join(soft)
@@ -3510,7 +3511,7 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
             return ToolResult(success=False, content="未采集到 IQ 数据")
         iq = np.concatenate(chunks)
         res = decode_adsb(iq, sr, threshold_sigma=k)
-        src = f"实时采集 {freq/1e6:.1f}MHz / {_fmt_sample_rate(sr)} / {duration:.0f}s"
+        src = f"实时采集 {freq/1e6:.3f}MHz / {_fmt_sample_rate(sr)} / {duration:.0f}s"
 
     if res["crc_ok"] == 0:
         return ToolResult(success=True, content=_append_warning(
@@ -3576,7 +3577,7 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
         if not chunks:
             return ToolResult(success=False, content="IQ 文件已读到末尾，无数据")
         iq = np.concatenate(chunks)
-        src = f"IQ 文件回放（中心 {backend.get_frequency()/1e6:.1f}MHz / {_fmt_sample_rate(sr)}）"
+        src = f"IQ 文件回放（中心 {backend.get_frequency()/1e6:.3f}MHz / {_fmt_sample_rate(sr)}）"
     else:
         req_sr = float(args.get("sample_rate_khz", 240.0)) * 1e3
         old = (backend.get_frequency(), backend.get_sample_rate(),
@@ -3603,7 +3604,7 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
         if not chunks:
             return ToolResult(success=False, content=_append_warning("未采集到 IQ 数据", restore_warn))
         iq = np.concatenate(chunks)
-        src = f"实时采集 {backend.get_frequency()/1e6:.2f}MHz / {_fmt_sample_rate(sr)} / {duration:.0f}s"
+        src = f"实时采集 {backend.get_frequency()/1e6:.3f}MHz / {_fmt_sample_rate(sr)} / {duration:.0f}s"
 
     if sr < 140000:
         return ToolResult(success=False, content=_append_warning((
@@ -4026,7 +4027,7 @@ def _spectrum_screenshot(mgr, spec, args):
             ax.plot(spectrum.frequencies / 1e6, spectrum.powers_db)
             ax.set_xlabel("频率 (MHz)")
             ax.set_ylabel("功率 (dB)")
-            ax.set_title(f"MBDSDR 频谱图 - {spectrum.center_freq/1e6:.2f} MHz")
+            ax.set_title(f"MBDSDR 频谱图 - {spectrum.center_freq/1e6:.3f} MHz")
             ax.grid(True, alpha=0.3)
             fig.tight_layout()
             fig.savefig(save_path, dpi=100)
@@ -4457,8 +4458,8 @@ def _satellite_doppler(args):
     output = _station_warning_text(ev)
     output += f"=== 卫星多普勒计算 (sgp4 真速度) ===\n"
     output += f"卫星: {result['satellite']}\n"
-    output += f"标称频率: {result['nominal_freq_mhz']:.6f} MHz\n"
-    output += f"修正频率: {result['corrected_freq_mhz']:.6f} MHz\n"
+    output += f"标称频率: {result['nominal_freq_mhz']:.6f} MHz（{int(round(result['nominal_freq_mhz'] * 1e6))} Hz）\n"
+    output += f"修正频率: {result['corrected_freq_mhz']:.6f} MHz（{int(round(result['corrected_freq_mhz'] * 1e6))} Hz）\n"
     output += f"多普勒频移: {result['doppler_shift_hz']:.1f} Hz\n"
     output += f"视向速度: {result['range_rate_kms']:+.2f} km/s\n"
     output += f"仰角: {result['elevation_deg']:.1f}°, 方位: {result['azimuth_deg']:.1f}°\n"
@@ -4715,7 +4716,7 @@ def _satellite_doppler_track(mgr, args):
         json.dump(sidecar, f, ensure_ascii=False, indent=1)
     lines = [
         f"=== {sat} 多普勒跟踪录制完成 ===",
-        f"标称频率: {nominal/1e6:.6f} MHz　解调标记: {demod}　采样率: {_fmt_sample_rate(sr)}",
+        f"标称频率: {nominal/1e6:.6f} MHz（{int(round(nominal))} Hz）　解调标记: {demod}　采样率: {_fmt_sample_rate(sr)}",
         f"录制: {sidecar['duration_recorded_s']:.1f}s，{n_samples} 样本，调谐 {tune_count} 次（每 {interval:.1f}s 补偿）",
         f"多普勒范围: {sidecar['doppler_min_hz']:.0f} ~ {sidecar['doppler_max_hz']:.0f} Hz",
         f"仰角: {sidecar['elevation_start_deg']:.1f}° → {sidecar['elevation_end_deg']:.1f}°",
@@ -4882,7 +4883,7 @@ def _ai_sweep(mgr, spec, args):
     if auto_tune and strongest["freq"] != freq_start:
         backend.set_frequency(strongest["freq"])
 
-    result = f"AI 扫频完成\n范围: {freq_start/1e6:.1f} - {freq_end/1e6:.1f} MHz, 步进 {step/1e3:.0f} kHz\n扫描点数: {len(results)}\n最强台: {strongest['freq']/1e6:.3f} MHz @ {strongest['power']:.1f} dB\n"
+    result = f"AI 扫频完成\n范围: {freq_start/1e6:.3f} - {freq_end/1e6:.3f} MHz, 步进 {step/1e3:.0f} kHz\n扫描点数: {len(results)}\n最强台: {strongest['freq']/1e6:.3f} MHz @ {strongest['power']:.1f} dB\n"
     if auto_tune:
         result += f"已自动调谐到最强台\n"
     result += "\n扫描结果（前10个最强点）:\n"
@@ -4926,7 +4927,7 @@ def _ai_find_center(mgr, spec, args):
     if auto_correct and abs(offset) > 100:
         backend.set_frequency(strongest["freq"])
 
-    result = f"AI 找中心频点完成\n当前频率: {current_freq/1e6:.6f} MHz\n精确中心: {strongest['freq']/1e6:.6f} MHz\n偏移: {offset:.1f} Hz ({ppm:.2f} ppm)\n峰值功率: {strongest['power']:.1f} dB\n"
+    result = f"AI 找中心频点完成\n当前频率: {current_freq/1e6:.6f} MHz（{int(round(current_freq))} Hz）\n精确中心: {strongest['freq']/1e6:.6f} MHz（{int(round(strongest['freq']))} Hz）\n偏移: {offset:.1f} Hz ({ppm:.2f} ppm)\n峰值功率: {strongest['power']:.1f} dB\n"
     if auto_correct and abs(offset) > 100:
         result += f"已自动修正到精确中心频率\n"
     return result
@@ -6015,7 +6016,7 @@ def _satellite_predict_all(args):
         rise_str = p.rise_time.strftime('%H:%M') if p.rise_time else '?'
         set_str = p.set_time.strftime('%H:%M') if p.set_time else '?'
         dur_str = f"{p.duration_sec/60:.0f}分" if p.duration_sec > 0 else '?'
-        freq_str = f"{p.frequency_hz/1e6:.1f}MHz" if p.frequency_hz > 0 else ''
+        freq_str = f"{p.frequency_hz/1e6:.3f}MHz" if p.frequency_hz > 0 else ''
         lines.append(f"{i}. {p.name}: {rise_str}-{set_str} ({dur_str}), "
                      f"最大仰角 {p.max_elevation:.0f}°, 方位 {p.max_azimuth:.0f}° {freq_str}")
     if catalog_notes:
@@ -6079,7 +6080,7 @@ def _gnss_monitor_band(args):
 
     band_name = args['band_name'].upper()
     center_freq = args['center_freq_hz']
-    sample_rate = args.get('sample_rate_hz', 2.048e6)
+    sample_rate = args.get('sample_rate_hz', DEFAULT_SAMPLE_RATE_HZ)
     duration = args.get('duration_sec', 1.0)
 
     # 生成模拟IQ数据（模拟模式下）
@@ -6125,7 +6126,7 @@ def _gnss_monitor_all(args):
             monitor_all_gnss_bands, generate_interference_alerts, GNSS_BANDS
         )
 
-    sample_rate = 2.048e6
+    sample_rate = DEFAULT_SAMPLE_RATE_HZ
     duration = args.get('duration_sec', 0.5)
     inr_warn = args.get('inr_warning_db', 10.0)
 
@@ -6409,12 +6410,12 @@ def _sdr_transmit_cw(args):
     ok = True
 
     lines = ["=== CW 发射 ==="]
-    lines.append(f"频率: {freq/1e6:.6f} MHz")
+    lines.append(f"频率: {freq/1e6:.6f} MHz（{int(round(freq))} Hz）")
     if doppler_note["applied"]:
         mode = "自动" if doppler_note["mode"] == "auto" else "显式"
         lines.append(
             f"多普勒预偏: 已预偏 {doppler_note['delta_hz']:+.1f} Hz"
-            f"（标称 {nominal_hz/1e6:.6f} MHz，目标 {doppler_note['target']}，{mode}）")
+            f"（标称 {nominal_hz/1e6:.6f} MHz，即 {int(round(nominal_hz))} Hz，目标 {doppler_note['target']}，{mode}）")
     else:
         lines.append(f"多普勒预偏: 未预偏（{doppler_note['reason']}）")
     lines.append(f"幅度: {amp:.2f}")
@@ -6564,12 +6565,12 @@ def _sdr_transmit_iq(args):
             error=exception_code(e))
 
     lines = ["=== IQ 发射 ==="]
-    lines.append(f"频率: {freq/1e6:.6f} MHz")
+    lines.append(f"频率: {freq/1e6:.6f} MHz（{int(round(freq))} Hz）")
     if doppler_note["applied"]:
         mode = "自动" if doppler_note["mode"] == "auto" else "显式"
         lines.append(
             f"多普勒预偏: 已预偏 {doppler_note['delta_hz']:+.1f} Hz"
-            f"（标称 {nominal_hz/1e6:.6f} MHz，目标 {doppler_note['target']}，{mode}）")
+            f"（标称 {nominal_hz/1e6:.6f} MHz，即 {int(round(nominal_hz))} Hz，目标 {doppler_note['target']}，{mode}）")
     else:
         lines.append(f"多普勒预偏: 未预偏（{doppler_note['reason']}）")
     lines.append(f"幅度: {amp:.2f}")
@@ -6738,7 +6739,7 @@ def _radio_set_frequency(args):
     radio.set_frequency(freq)
 
     lines = ["=== 频率设置 ==="]
-    lines.append(f"频率: {freq} Hz ({freq/1e6:.4f} MHz)")
+    lines.append(f"频率: {freq} Hz ({freq/1e6:.3f} MHz)")
     lines.append(f"状态: 已设置")
 
     return '\n'.join(lines)
@@ -6849,7 +6850,7 @@ def _meteor_list_sats(args):
 
     for s in sats:
         lines.append(f"【{s['name']}】")
-        lines.append(f"  频率: {s['frequency_mhz']:.1f} MHz")
+        lines.append(f"  频率: {s['frequency_mhz']:.3f} MHz")
         lines.append(f"  符号率: {s['symbol_rate_ksps']:.0f} ksps")
         lines.append(f"  调制: {s['modulation']}")
         lines.append(f"  轨道: {s['orbital_type']}")
@@ -7109,7 +7110,7 @@ def _satdump_list_sats(args):
     lines.append("")
 
     for s in sats:
-        lines.append(f"  {s['name']:20s}  {s['frequency_mhz']:7.1f} MHz  (key: {s['key']})")
+        lines.append(f"  {s['name']:20s}  {s['frequency_mhz']:7.3f} MHz  (key: {s['key']})")
 
     return '\n'.join(lines)
 
@@ -7266,7 +7267,7 @@ def _cfo_correct(mgr, args):
 
     lines = ["=== 载波频偏（CFO）估计与校正 ===",
              f"数据来源: {source}，N={len(iq)}，采样率 {fs/1e3:.1f} kS/s，频率分辨率 {fs/len(iq):.2f} Hz",
-             f"估计频偏: {r.offset_hz:.3f} Hz（相对标称 {f_exp/1e6:.4f} MHz）",
+             f"估计频偏: {r.offset_hz:.3f} Hz（相对标称 {f_exp/1e6:.6f} MHz，即 {int(round(f_exp))} Hz）",
              f"折合晶体误差: {r.offset_ppm_100mhz:.2f} ppm（按 100 MHz 载波参考）",
              f"  FFT 粗估: {r.coarse_hz:.3f} Hz；Kay 精估: {r.fine_hz:.3f} Hz"
              f"（{'已启用' if r.fine_applied else '未启用，相干性不足'}）",
@@ -7301,7 +7302,7 @@ def _estimate_ppm_offset_tool(args):
     suggest = -applied
     lines = [
         "=== ppm 误差估计 ===",
-        f"已知参考: {expected_hz/1e6:.6f} MHz，实测谱峰: {measured_hz/1e6:.6f} MHz",
+        f"已知参考: {expected_hz/1e6:.6f} MHz（{int(round(expected_hz))} Hz），实测谱峰: {measured_hz/1e6:.6f} MHz（{int(round(measured_hz))} Hz）",
         f"频率差: {measured_hz - expected_hz:+.3f} Hz",
         f"原始误差估计: {ppm:+.4f} ppm",
         f"钳位建议: {applied:+.4f} ppm"
@@ -8200,7 +8201,7 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
 
     # 格式化输出
     lines = [
-        f"=== FM 搜台 {result.f_start_mhz:.1f}-{result.f_stop_mhz:.1f} MHz ===",
+        f"=== FM 搜台 {result.f_start_mhz:.3f}-{result.f_stop_mhz:.3f} MHz ===",
         f"步进 {result.step_khz:.0f}kHz，采样率 {_fmt_sample_rate(result.sample_rate_hz)}，"
         f"每点 {result.dwell_samples} 样本，噪声底 {result.noise_floor_db:.1f}dB",
         f"门限 {threshold}dB，检出 {len(result.stations)} 个电台（按强度排序），耗时 {result.scan_time_s:.1f}s",
@@ -8409,7 +8410,7 @@ def _listen_fm_tool(mgr, args) -> "ToolResult":
         listener.stop()
         mgr._fm_listener = None
         return ToolResult(success=True,
-                          content=f"已停止收听 {freq:.1f}MHz（共播放 {blocks} 个音频块）。")
+                          content=f"已停止收听 {freq:.3f}MHz（共播放 {blocks} 个音频块）。")
 
     # action == start
     freq_mhz = args.get("freq_mhz")
@@ -8450,7 +8451,7 @@ def _listen_fm_tool(mgr, args) -> "ToolResult":
     audio_avail = listener.player.available
     mode = "实时播放" if audio_avail else "解调运行中（无 sounddevice，音频输出已降级）"
     lines = [
-        f"=== 开始收听 FM {freq_mhz:.1f} MHz ===",
+        f"=== 开始收听 FM {freq_mhz:.3f} MHz ===",
         f"采样率 {_fmt_sample_rate(sr)} → 音频 {audio_sr/1e3:.1f} kHz，增益 {gain}",
         f"状态: {mode}",
         f"用 sdr_listen_fm action=stop 停止收听。",
