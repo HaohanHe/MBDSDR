@@ -5,10 +5,11 @@
 四项都只读仓库与已构建产物，不改产品代码、不调阈值。任一项 FAIL → 退出码 1。
 
 口径：
-* **版本号**：以 ``cpp/CMakeLists.txt`` 的 ``project(mbdsdr VERSION x.y.z)``
-  为打包单一事实源（``tests/test_pyproject_packaging.py`` 已钉死 pyproject 同号），
-  其余出现处逐一取值比对；打包器/文档首行/关于对话框若有“确实没有版本号”
-  的缺口，报 WARN（不是取值不一致），有取值且不同才 FAIL。
+* **版本号**：``mbdsdr_ai/VERSION`` 是唯一手抄点，CMake / pyproject / ``version.py`` /
+  两个 ``__init__`` / spec / C++ / 关于对话框全部从它派生（清单见
+  ``docs/packaging.md`` §9.1）。每个派生点必须正则命中“读取 VERSION 或引用共享
+  常量”，失配即 FAIL；派生文件里出现 ``x.y.z`` 字面量、或仓库其他位置出现
+  canonical 字面量（豁免清单除外）也 FAIL。
 * **依赖**：声明面 = 根 ``requirements.txt`` + ``desktop/requirements.txt``
   的实际依赖行 + spec 里 ``collect_submodules``/datas 明确点名的包。
   产物定位 = ``<dist>/MBDSDR/_internal`` 顶层 + exe 内嵌 ``PYZ.pyz`` 模块表
@@ -21,10 +22,9 @@
 * **许可证**：复用 ``scripts/check_data_licenses.py`` 的既有 GPL 扫描结论
   （不另造一套规则）；再查产物里是否带项目 LICENSE/NOTICE、copyleft 组件
   （GPL/LGPL）的许可证文本与 NOTICE 登记。
-* **安装器**：仓库若真存在 Inno Setup / NSIS / WiX 等安装器描述文件，则要求
-  配套冒烟实现（本脚本发现安装器但无冒烟时 FAIL 提示补）；当前仓库没有安装器
-  脚本，输出「无安装器，本条不适用」并给出证据（glob 结果 + 打包脚本自述），
-  本条 SKIP，不算绿也不算红。
+* **安装器**：当前裁定为 **BY-DESIGN 绿色包分发**（不提供安装器，删除目录即卸载）；
+  glob 未命中安装器描述文件是有理由的 BY-DESIGN，不是 SKIP。若以后真新增安装器
+  描述文件，则要求配套安装/启动/卸载冒烟，否则 FAIL（防止删位置置换绿）。
 
 用法::
 
@@ -51,7 +51,7 @@ TMP_ROOT = ROOT.parent / ".tmp"
 SPEC = ROOT / "desktop" / "MBDSDR.spec"
 CHECK_LICENSE = ROOT / "scripts" / "check_data_licenses.py"
 
-PASS, WARN, FAIL, SKIP = "PASS", "WARN", "FAIL", "SKIP"
+PASS, WARN, FAIL, SKIP, BY_DESIGN = "PASS", "WARN", "FAIL", "SKIP", "BY-DESIGN"
 
 
 # ----------------------------------------------------------------------
@@ -86,7 +86,7 @@ def _record(status: str, text: str, items: list[dict]) -> None:
 
 
 def _counts(items: list[dict]) -> dict[str, int]:
-    out = {PASS: 0, WARN: 0, FAIL: 0, SKIP: 0}
+    out = {PASS: 0, WARN: 0, FAIL: 0, SKIP: 0, BY_DESIGN: 0}
     for it in items:
         out[it["status"]] += 1
     return out
@@ -100,6 +100,8 @@ def _status_of(items: list[dict]) -> str:
         return WARN
     if c[PASS]:
         return PASS
+    if c[BY_DESIGN]:
+        return BY_DESIGN
     return SKIP
 
 
@@ -273,7 +275,8 @@ def check_version(dist: Path | None) -> list[dict]:
     if installers:
         _record(WARN, f"安装器描述文件 {len(installers)} 个；版本号需在安装器冒烟里单独核对", items)
     else:
-        _record(SKIP, "无安装器脚本（本条不适用，见第 4 项证据）", items)
+        _record(BY_DESIGN, "无安装器脚本：按绿色包分发（决策见 docs/packaging.md §9.4 与 "
+                           "docs/release-notes.md；触发器条件见同处决策记录）", items)
 
     return items
 
@@ -821,31 +824,39 @@ def _installer_files() -> list[Path]:
 
 
 def check_installer() -> list[dict]:
+    """安装器检查。本轮裁定：**不提供安装器，按绿色包分发**（BY-DESIGN）。
+
+    决策与理由见 ``docs/packaging.md`` §9.4 与 ``docs/release-notes.md``；
+    出现「企业部署 / 自动更新」需求且签名方案落地时，才启动 A 路（Inno Setup，
+    版本从 ``mbdsdr_ai/VERSION`` 派生并纳入版本派生点机检）。
+    """
     items: list[dict] = []
     found = _installer_files()
     if found:
         _record(FAIL, "发现安装器描述文件：" + ", ".join(str(p.relative_to(ROOT)) for p in found)
-                      + "；但本脚本没有对应的安装/启动/卸载冒烟实现，发布前必须补齐", items)
+                      + "；但这与 BY-DESIGN（绿色包分发）冲突，必须同步补安装/启动/卸载冒烟，"
+                        "否则删除位置置换绿", items)
         return items
 
-    # 无安装器：给证据，避免“没找到”被当成“没查”
+    _record(BY_DESIGN, "不提供安装器（glob 未命中 " + "/".join(INSTALLER_GLOBS)
+                       + "）：按绿色包分发，解压即用、删除目录即卸载", items)
     pkg = ROOT / "scripts" / "package_windows.ps1"
     bat = ROOT / "desktop" / "build_windows.bat"
-    evidence = []
     if pkg.exists():
         text = _read(pkg)
         m = re.search(r"诚实口径：本脚本只做.*?不做安装器（无注册表/快捷方式）", text)
         if m:
-            evidence.append(f"scripts/package_windows.ps1 自述：{m.group(0)}")
-        evidence.append("scripts/package_windows.ps1 产物是 zip 便携包 + SHA256，无安装/卸载入口")
+            _record(BY_DESIGN, f"scripts/package_windows.ps1 自述：{m.group(0)}", items)
+        _record(BY_DESIGN, "产物是 zip 便携包 + SHA256；校验方式见 docs/release-notes.md"
+                           "（重新计算 SHA256 与发布页值逐字比对）", items)
     if bat.exists():
-        text = _read(bat)
-        evidence.append("desktop/build_windows.bat 只调 pyinstaller 出 onedir 目录，无 install/uninstall 目标")
-    _record(SKIP, "无安装器，本条不适用（glob 未命中 " + "/".join(INSTALLER_GLOBS) + "）", items)
-    for e in evidence:
-        _record(SKIP, e, items)
-    _record(SKIP, "替代覆盖：scripts/release_check.py 的 smoke 步已验证「便携包解压后启动到窗口出现」；"
-                  "卸载残留无对象可查（没有安装器写注册表/快捷方式）", items)
+        _record(BY_DESIGN, "desktop/build_windows.bat 只调 pyinstaller 出 onedir，无 install/uninstall 目标", items)
+    _record(BY_DESIGN, "卸载残留无对象可查：没有安装器写注册表/快捷方式；"
+                       "用户数据落点（配置/录音/日志）见 docs/release-notes.md"
+                       "（配置在 %APPDATA% 不随目录删除；录音默认在程序目录内的 recordings，"
+                       "删目录会一并删除，发布说明要求先移走）", items)
+    _record(BY_DESIGN, "启动这一半的替代覆盖：scripts/release_check.py 的 smoke 步"
+                       "验证「便携包解压后启动到窗口出现」", items)
     return items
 
 
@@ -904,8 +915,10 @@ def main(argv: list[str] | None = None) -> int:
         all_items.extend(items)
 
     c = _counts(all_items)
-    overall = FAIL if c[FAIL] else (WARN if c[WARN] else (PASS if c[PASS] else SKIP))
-    human.append(f"\n== 总判 == FAIL={c[FAIL]} WARN={c[WARN]} PASS={c[PASS]} SKIP={c[SKIP]} -> {overall}")
+    overall = FAIL if c[FAIL] else (WARN if c[WARN] else (PASS if c[PASS] else
+                                    (BY_DESIGN if c[BY_DESIGN] else SKIP)))
+    human.append(f"\n== 总判 == FAIL={c[FAIL]} WARN={c[WARN]} PASS={c[PASS]} "
+                 f"BY-DESIGN={c[BY_DESIGN]} SKIP={c[SKIP]} -> {overall}")
     human.append(f"产物：{dist}")
     report["summary"] = {"status": overall, **c}
 

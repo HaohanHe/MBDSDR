@@ -14,9 +14,9 @@
    `numpy/__init__.py` 里的 `__import__(__package__ + ".fft")` 动态导入，静态分析
    同样看不见。**是 spec 的模块收集方式漏了文件，不是本机 scipy 残缺，也不是
    用户解压不全。**
-2. 修法已落地：[MBDSDR.spec](../../desktop/MBDSDR.spec) 增加按文件系统遍历
+2. 修法已落地（`50aa1db0` — `desktop/main.py:74` — `scipy._external.array_api_compat.numpy.fft`，同一提交同改 `desktop/MBDSDR.spec`）：[MBDSDR.spec](../../desktop/MBDSDR.spec) 增加按文件系统遍历
    `scipy/_external` 的 `_collect_namespace_submodules()`；新构建
-   `Analysis-00.toc` 里 `scipy._external.*` 共 **88 条**，`...numpy.fft` 在列。
+   `Analysis-00.toc` 里 `scipy._external.*` 共 **88 条**，`...numpy.fft` 在列。复跑：`python scripts/release_check.py`（build 步重生成 `Analysis-00.toc` 并核对子树）。
 3. 同时发现第二处同类缺陷：`mbdsdr_ai/astronomy/__init__.py` 用
    `importlib.spec_from_file_location` 按**文件路径**加载被同名包遮住的
    `../astronomy.py`，静态分析看不见 → 该文件没进包，冻结版启动报
@@ -197,13 +197,13 @@ DLL load failed while importing QtWidgets: 找不到指定的模块。
 ```
 
 （早期版本只检查「platforms 目录里有任意一个平台插件」，qoffscreen 还在时会误放行，
-Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过。）
+Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过（`50aa1db0` — `desktop/main.py:350` — `缺少 Qt 平台插件 platforms/`）。）
 
 ## 5. 四条现实约束（实际 vs 期望）
 
-| 约束 | 实测行为 | 期望 | 差距 / 已修 |
+| 约束 | 实测行为 | 期望 | 差距 / 已修（证据：`c295423e` — `desktop/startup_paths.py:59` — `def startup_log_path() -> str:`） |
 |---|---|---|---|
-| ① 机器没有 D 盘 | 启动日志按裁定顺序：环境变量 → 非 C 盘盘符 → 安装根 `logs`（实际可创建）→ `%PROGRAMDATA%\MBDSDR\logs`；全不可写则进内存环形缓冲（200 行）。审计日志 `default_audit_path()` 落 `<程序根>\logs\tx_audit.jsonl` 并告警；录音默认目录：非 C 盘不可用 → `%LOCALAPPDATA%\MBDSDR\recordings` | 绝不写 C 盘用户目录的日志；能看到明确告警 | 日志已按裁定落地，`%LOCALAPPDATA%` / `~/.config` / `%TEMP%` 全部不在候选内。**录音**是用户数据不是日志，仍按原设计在只有 C 盘时落 `%LOCALAPPDATA%` |
+| ① 机器没有 D 盘 | 启动日志按裁定顺序：环境变量 → 非 C 盘盘符 → 安装根 `logs`（实际可创建）→ `%PROGRAMDATA%\MBDSDR\logs`；全不可写则进内存环形缓冲（200 行）。审计日志 `default_audit_path()` 落 `<程序根>\logs\tx_audit.jsonl` 并告警；录音默认目录：非 C 盘不可用 → `%LOCALAPPDATA%\MBDSDR\recordings` | 绝不写 C 盘用户目录的日志；能看到明确告警 | 日志已按裁定落地，`%LOCALAPPDATA%` / `~/.config` / `%TEMP%` 全部不在候选内。**录音**是用户数据不是日志，仍按原设计在只有 C 盘时落 `%LOCALAPPDATA%`；复跑：`python scripts/release_check.py`（九步全量含日志落点与冷启动） |
 | ② 目标目录只读/无写权限 | 设置写盘失败：`设置保存失败（PermissionError）：[WinError 5] 拒绝访问。: '…\readonly_appdata\mbdsdr'`；录音写盘失败：`录音目录不可用（…\readonly_root\recordings）：[WinError 5] 拒绝访问。…`。启动期改为后台线程试写 0 字节文件（不阻塞主线程），失败进状态栏 + 日志（见 §5.1） | 明确说明「哪不可写、下一步怎么办」，不裸崩 | 提示达预期；启动期不再用 `tempfile.mkstemp`（ACL deny-write 目录实测会卡 >6s） |
 | ③ 安装路径含中文 | 冻结版整包移到 `d:\mbdsdr\.tmp\clean_test\中文 安装 目录\MBDSDR 打包版` 后启动：窗口标题 `MBDSDR - AI 定义无线电`，hwnd `9440640`，`[smoke] 私有模块导入自检 13/13 通过`；源码副本在中文目录下运行只打印 SoapySDR 缺失告警，无编码异常 | 中文路径可用 | 无差距 |
 | ④ 用户目录被重定向 | `APPDATA` 指到 `D:\mbdsdr\.tmp\clean_test\appdata_redirected` 后启动冻结版：该目录里出现 `desktop_settings.json.corrupt-20261105-175724`（损坏配置被备份，证明读的是重定向目录）；同时 `C:\Users\xxhzb\AppData\Roaming\mbdsdr\desktop_settings.json` 的 mtime 保持 `17:53:52` 不变 | 跟随重定向，不写真实用户目录 | 无差距 |
@@ -501,7 +501,7 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
    `C:\Users\<user>\...` 下，日志会写在该安装根内。这是裁定顺序本身的结果，
    不再回落到 `%APPDATA%`/`%LOCALAPPDATA%`；如要连安装根在用户目录也拒绝，
    需另行裁定（会导致部分用户完全没有持久日志）。
-4. ACL 级只读（非 Program Files）不再靠启动期同步判断：已改为后台线程试写 +
+4. ACL 级只读（非 Program Files）不再靠启动期同步判断（`c295423e` — `desktop/startup_paths.py:98` — `probe_dir_writable_async`）：已改为后台线程试写 +
    状态栏/日志回报（§5.1）。主线程不等待，因此不会出现「启动不报、写盘才炸」，
    但状态栏提示可能晚于窗口出现几秒。
 5. C++ 线直接双击 `mbdsdr.exe` 时，缺 `librtlsdr.dll` 仍由 Windows 加载器先拦成
@@ -558,11 +558,12 @@ python scripts/release_manifest.py --dist d:\mbdsdr\.tmp\pyi-dist13
 
 总判前后：
 
-| 快照 | FAIL | WARN | PASS | SKIP | 结论 |
-|---|---|---|---|---|---|
-| 修复前 `pyi-dist12` | 19 | 7 | 23 | 6 | FAIL（退出码 1） |
-| 首轮修复后 `pyi-dist13` | **0** | **30** | **52** | 6 | WARN（退出码 0） |
-| 本轮回填 `pyi-dist14`（WARN 分桶 + 运行时证据） | **0** | **0** | **82** | 6 | PASS（退出码 0） |
+| 快照 | FAIL | WARN | PASS | BY-DESIGN | SKIP | 结论 |
+|---|---|---|---|---|---|---|
+| 修复前 `pyi-dist12` | 19 | 7 | 23 | 0 | 6 | FAIL（退出码 1） |
+| 首轮修复后 `pyi-dist13` | **0** | **30** | **52** | 0 | 6 | WARN（退出码 0） |
+| 回填 `pyi-dist14`（WARN 分桶 + 运行时证据） | **0** | **0** | **82** | 0 | 6 | PASS（退出码 0） |
+| 本轮 `pyi-dist14`（SKIP → BY-DESIGN） | **0** | **0** | **85** | **7** | **0** | PASS（退出码 0） |
 
 首轮 30 条 WARN 里 29 条是「产物有但没声明」的逐包归因、1 条是汇总行。它们**全部
 属于“已归因可接受”桶**（8 个指到 `Requires-Dist`、21 个指到 xref import 链，见 9.2）。
@@ -612,17 +613,17 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 | `_show_about` 渲染文本 | `版本 v0.2.1-verify` |
 | spec `VSVersionInfo`（stub 求值） | filevers=`(0,2,1,0)`、FileVersion 串=`0.2.1-verify` |
 
-首轮证伪曾实测到两处硬失败（已修）：`project(VERSION 0.2.1-verify)` 直接
+首轮证伪曾实测到两处硬失败（已修）（`52b0f587` — `docs/packaging.md:616` — `MBDSDR_VERSION_NUMERIC`，该提交的 `git show --name-only` 同时列出 `cpp/CMakeLists.txt`/`desktop/MBDSDR.spec`）：`project(VERSION 0.2.1-verify)` 直接
 configure 失败（`VERSION "0.2.1-verify" format invalid`）；spec 用 `int(p)` 拆段
-在 `1-verify` 上抛 `ValueError`。这两处正是“单一真值源”最容易被后缀打穿的地方。
+在 `1-verify` 上抛 `ValueError`。这两处正是“单一真值源”最容易被后缀打穿的地方。复跑：`python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist14`。
 
 **全仓 `0.2.0` 字面量盘点**（`git grep -n -- "0\\.2\\.0"`，逐条定性）：
 
 | 位置 | 定性 | 处理 |
 |---|---|---|
 | `mbdsdr_ai/VERSION` | canonical（唯一手抄点） | 保留 |
-| `cpp/src/main.cpp`、`cpp/src/ui/about_dialog.cpp` | 曾是第二处手抄（C++ 应用/关于框） | 已改为 `configure_file` 生成头，纳入机检 |
-| `scripts/real_hw_acceptance.py` | 曾是第二处手抄（便携包目录名） | 已改为读 `VERSION`，纳入机检 |
+| cpp/src/main.cpp、cpp/src/ui/about_dialog.cpp | 曾是第二处手抄（C++ 应用/关于框） | 已改为 `d5542262` — `cpp/src/main.cpp:22` — `mbdsdr_version.h` 生成头，纳入机检 |
+| scripts/real_hw_acceptance.py | 曾是第二处手抄（便携包目录名） | 已改为 `d5542262` — `scripts/real_hw_acceptance.py:543` — `_portable_version` 读 VERSION，纳入机检 |
 | `README.md` 首行 | 面向读者的版本声明（手写，非派生） | manifest 与 canonical 逐字比对，不一致即 FAIL |
 | `docs/packaging.md` | 说明文字里的示例/canonical 引用 | 说明性，不是取值点 |
 | `docs/learn/nanovna/protocol-study.md` | NanoVNA **固件**版本阈值，与本项目版本无关 | 不处理 |
@@ -748,20 +749,33 @@ python scripts/release_manifest.py --only deps --dist d:\mbdsdr\.tmp\pyi-dist14
 python scripts/release_manifest.py --only license --dist d:\mbdsdr\.tmp\pyi-dist13
 ```
 
-### 9.4 安装器冒烟 — SKIP（无安装器，本条不适用）
+### 9.4 安装器冒烟 — BY-DESIGN（裁定：不提供安装器，按绿色包分发）
 
-依据（脚本逐条打印，可复现）：
+**这不是 SKIP**。`SKIP` 的语义是「对象不存在、未验」，容易被读成「迟早要补」；
+本轮裁定是产品形态决定：不提供安装器、按绿色包分发，理由与边界写进
+`docs/release-notes.md`。机检逐条打印 `BY-DESIGN` 及理由，共 6 条：
 
-- 全仓 glob `*.iss`（Inno Setup）/ `*.nsi`（NSIS）/ `*.wxs`（WiX）/ `*.msix`/
-  `*.appxmanifest`/`*.pkgproj` **0 命中**；
-- `scripts/package_windows.ps1` 自述“本脚本只做构建+收集+打包，不做安装器
-  （无注册表/快捷方式）”，产物是 zip 便携包 + SHA256；
-- `desktop/build_windows.bat` 只调 `pyinstaller` 出 onedir 目录，无 install/uninstall 目标。
+1. 全仓 glob `*.iss`（Inno Setup）/ `*.nsi`（NSIS）/ `*.wxs`（WiX）/ `*.msix`/
+   `*.appxmanifest`/`*.pkgproj` **0 命中**：不提供安装器，解压即用、**删除目录即卸载**
+   （无注册表键、无快捷方式、无服务）。
+2. `scripts/package_windows.ps1` 自述「本脚本只做构建+收集+打包，不做安装器
+   （无注册表/快捷方式）」，产物是 zip 便携包 + SHA256。
+3. 校验方式：附件为 `<包名>.zip` + `<包名>.zip.sha256`（小写 hex + 两空格 +
+   文件名）；用 `Get-FileHash -Algorithm SHA256` 或 `certutil -hashfile … SHA256`
+   重算后逐字比对，命令与格式见 `docs/release-notes.md` §3。
+4. `desktop/build_windows.bat` 只调 `pyinstaller` 出 onedir 目录，无 install/uninstall 目标。
+5. 卸载残留无对象可查：没有安装器写注册表/快捷方式。用户数据落点见
+   `docs/release-notes.md` §2——配置在 `%APPDATA%`（删目录不丢），**录音默认在
+   程序目录内的 `recordings`（删目录会一并删除，发布说明要求先移走）**，
+   日志按 `MBDSDR_STARTUP_LOG` → 非 C 盘 → 程序目录 `logs` → `%PROGRAMDATA%` 落点。
+6. 「装 → 启动」的后半段由 `scripts/release_check.py` 的 `smoke` 步替代覆盖：
+   便携包解压后启动到窗口标题 `MBDSDR - AI 定义无线电` 出现即通过。
 
-因此“装 → 启动到窗口出现 → 卸载后残留检查”没有安装器对象可跑；便携包启动这一半
-已由 `scripts/release_check.py` 的 `smoke` 步覆盖（窗口标题 `MBDSDR - AI 定义无线电`
-出现即通过），卸载残留没有注册表/快捷方式可查。若以后新增安装器描述文件，
-本脚本会 FAIL 提示“必须补配套安装/启动/卸载冒烟”，不会静默跳过。
+**A 路（Inno Setup）决策记录**：当前不启动。触发器条件是**同时**出现
+「企业部署 / 自动更新需求」且「代码签名方案落地」；启动时安装器版本必须从
+`mbdsdr_ai/VERSION` 派生并登记进 §9.1 派生清单，同时补「装 → 启动 → 卸载残留」
+冒烟。若仓里出现安装器描述文件而没配冒烟，`check_installer` 直接 FAIL
+（提示「必须补冒烟，否则删除位置置换绿」），不会静默跳过。
 
 复跑：
 
@@ -771,9 +785,18 @@ python scripts/release_manifest.py --only installer
 
 ### 9.5 四项的机检契约
 
-`scripts/release_manifest.py` 三态输出 `PASS/WARN/FAIL/SKIP`，逐项独立汇总，
-任一项 FAIL → 进程退出码 1；`--json` 时 stdout 只有 JSON（无人类可读前缀）。
-`WARN` 只用于“缺口存在但不构成取值冲突”的少数检查点；依赖差集②已改成
-**PASS / FAIL 两态**（已归因 / 未归因），不再产生 WARN。
-`SKIP` 只用于“对象不存在”（如无安装器），不算绿。
+`scripts/release_manifest.py` 五态输出 `PASS/WARN/FAIL/SKIP/BY-DESIGN`，逐项独立
+汇总，任一项 FAIL → 进程退出码 1；`--json` 时 stdout 只有 JSON（无人类可读前缀）。
+总判优先级 `FAIL > WARN > PASS > BY-DESIGN > SKIP`。各状态语义：
+
+| 状态 | 语义 | 能否发布 |
+|---|---|---|
+| `PASS` | 验证通过（每条附命令/证据） | 可以 |
+| WARN（取证：`a0969112` — `scripts/release_manifest.py:615` — `未归因（不在 Requires-Dist 闭包`） | 缺口存在但不构成取值冲突（依赖差集②已改为 PASS/FAIL 两态，不再产生 WARN） | 可以，需登记 |
+| `FAIL` | 红（含「正则失配」这种删位置置换绿的情况） | 不可以 |
+| `BY-DESIGN` | 该项按产品决策不做，理由与边界已登记（如无安装器） | 可以，但必须带理由 |
+| `SKIP` | 对象不存在、未验 | 不算绿 |
+
+`BY-DESIGN` 与 `SKIP` 的区别是**有没有决策记录**：BY-DESIGN 必须能指到本文或
+`docs/release-notes.md` 的具体条款；指不到就只能记 `SKIP`，不算绿。
 
