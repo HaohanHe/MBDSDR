@@ -29,7 +29,7 @@
 | 1 静噪 | `desktop/receive_pipeline.py:DemodWorker.run`（`_cfg.squelch_db`→`BaselineSquelch.set_threshold`→`margin_threshold_db()`）；`mbdsdr_ai/squelch.py:DEFAULT_SQUELCH_DBFS/SQUELCH_MIN_DBFS/SQUELCH_MAX_DBFS/margin_threshold_db`；`desktop/config_schema.py:squelch_default_db`；`desktop/control_panel.py:squelch_changed`；`desktop/main_window.py:_squelch_db/_replay_squelch_gate`；`mbdsdr_ai/sdr_backend.py:set_squelch/SQUELCH_APPLIED_BY_VALUES`；`mbdsdr_ai/receive_chain.py:_make_squelch/set_squelch`（`BaselineSquelch`）；`cpp/src/core/tokens.h:kSquelchMinDb/kSquelchMaxDb/kSquelchDefaultDb/kSquelchAutoMarginDb`；`cpp/src/dsp/spectrum_engine.cpp:setSquelchThreshold`；`cpp/src/control/control_hub.cpp:cmdSetSquelch/cmdGetSquelchStatus`；`cpp/src/ui/main_window.cpp:squelchAutoBtn_/squelchSlider_`；`mbdsdr_ai/analog_demod.py:_MODE_DEFAULTS/squelch_db`（信道 IQ 域，有意分开） | 部分（桌面/后端余量语义已统一；原 4 处拦点全落地 `0d6d465`+`e501555`；控制层仍剩 1 处绝对门可绕过 auto） | 桌面/`BaselineSquelch`/`ReceiveChain`/`sdr_backend` 全走余量刻度（`-100→0`、`-50→6`、`-20→16` dB）；C++ 音频 RMS 域绝对 dBFS 门，靠 `domain` 守卫与余量值隔离；`analog_demod` 保持信道 IQ 域绝对（`am/fm -40`、`wfm -30`、`usb/lsb/cw -60`，初值 `-150`），不与桌面滑杆互通 | 操作逻辑线（`desktop/main_window.py`、`desktop/receive_pipeline.py`）；后端线（`mbdsdr_ai/sdr_backend.py`、`mbdsdr_ai/receive_chain.py`、`mbdsdr_ai/analog_demod.py`）；C++ 内核线（`cpp/src/core/tokens.h`、`cpp/src/dsp/spectrum_engine.cpp`、`cpp/src/control/control_hub.cpp`、`cpp/src/ui/main_window.cpp`） | 已无“同一滑杆数字两端反语义”路径：`sdr_backend.set_squelch` 只记余量（`applied_by=desktop-margin`，不填绝对门）；`receive_chain` 解调前绝对 RMS 门已删，改 `BaselineSquelch`；`cmdSetSquelch` 对 `domain=margin/auto` 且带 `threshold_db` 直接报错不改门限；C++ 勾“自动门限”会显式 `setSquelchAuto(true)` 并禁用滑杆。**剩余 1 处**：legacy 绝对门命令 `cpp/src/control/control_hub.cpp:cmdSetSquelchThreshold`（以及 `cmdSetSquelch` 未带 `domain` 但带 `threshold_db`）仍调用 `cpp/src/dsp/spectrum_engine.cpp:setSquelchThreshold`，后者静默 `squelchAuto_.store(false)`，而 `cpp/src/ui/main_window.cpp:squelchAutoBtn_/squelchSlider_` 仍显示“自动”已勾、滑杆仍禁用 → UI 与内核状态分叉。`analog_demod` 仍是信道 IQ 域绝对门（AI 无头 `demod_analog` 工具，有意分开，界面不暴露） | 跑 `tests/test_squelch_domain.py`（`0d6d465` 新增）；再对同一段 88.1M OTA IQ，桌面 `-50`/`-20` 各一次，开门帧占比应随余量升高而下降；C++ `get_squelch_status` 应回 `none/cpp-auto/cpp-manual` | 部分统一（拦点还剩 1 处：legacy 绝对门命令绕过 auto 状态，UI 不跟随） |
 | 2 过境仰角 | `mbdsdr_ai/sat_passes.py:VISIBLE_MIN_ALT_DEG/PASS_MIN_ALT_DEG/PASS_COARSE_STEP_S/PASS_FINE_STEP_S`；`desktop/sat_track_panel.py:_MIN_ELEVATION_DEG`；`desktop/new_spacetime_panel.py:_pass_visibility_gate_deg/_pass_min_elevation_deg/_pass_show_low/refresh_passes`；`desktop/rf_sky_view.py:_refresh_passes`；`desktop/settings.py:effective_pass_min_elevation_deg/effective_pass_visibility_gate_deg/effective_show_low_elevation_passes/effective_pass_window_hours`；`desktop/config_schema.py:pass_min_elevation_deg/pass_window_hours/show_low_elevation_passes` | 部分（5/10 数值有意分开；`effective_pass_*` 四个入口均已接上，`pass_window_hours` 于 `886244d` 接线） | 可见/跟踪基准 **5°**；列表默认 **10°**，`show_low` 打开后门限降到 5° 并给低仰角标注；窗口默认 **24 h**、范围 1–72；仰角默认 10°、范围 0–45 | 卫星线（`sat_passes.py`、`new_spacetime_panel.py`、`rf_sky_view.py`、`sat_track_panel.py`）；设置线（`settings.py`、`config_schema.py`） | 已无写死窗口：两处均读 `effective_pass_window_hours`（实测 6 h=1 条、24 h=5 条、1 h=0 条）；仰角门两侧亦无分叉（`rf_sky_view` 与 `new_spacetime_panel` 同读 `effective_*`，固定夹具 5°=6 条 / 10°=5 条） | 设 `pass_window_hours=1/6/72` 各调一次 `refresh_passes`，条数应随窗口变化（`tests/test_pass_window_hours.py`） | 已统一（窗口+仰角门） |
 | 3 峰值 | `desktop/spectrum_widget.py:_PEAK_REL_DB_DEFAULT/_PEAK_ABS_FLOOR_DBFS/_PEAK_MIN_SEEN_FRAMES/_PEAK_MATCH_BINS/_PEAK_MAX_MISS_FRAMES/_PEAK_MAX_LABELS`；`desktop/config_schema.py:peak_threshold_db`；`cpp/src/core/tokens.h:kPeakRelDb/kPeakThresholdDefault/kPeakAbsFloorDbfs/kPeakMatchBins/kPeakMinSeenFrames/kPeakMaxMissFrames`；`cpp/src/ui/spectrum_display.cpp`（显示）；`cpp/src/ui/calibration_dialog.cpp`（校准） | 是（显示检测器已统一并在测试里锁死；校准门**有意分开**） | 显示 `rel 6.0 dB + abs -100 dBFS + 3 帧确认 + 5 bin 匹配 + 10 帧遗忘`；校准参考门 `15.0 dB` | 频谱线（`desktop/spectrum_widget.py`、`cpp/src/ui/spectrum_display.cpp`、`cpp/src/ui/calibration_dialog.cpp`） | 若合并成 15：显示侧漏掉 median+8 dB 的持续载波（数学上进不了候选）；若合并成 6：校准参考门掉到 6 dB，噪声尖峰被当校准参考，频偏估计被噪声拉走 | 跑 `tests/test_hardcoded_parameter_registry.py` 的显示门/校准门分锁断言；把两个常量各改 1 dB，确认只红对应一条 | 已统一（校准门有意分开） |
-| 4 采样率 | `desktop/config_schema.py:sample_rate_hz`（2.4 M，exposed=False，`4ef3a15`）；`desktop/settings.py:DEFAULTS`；`desktop/constants.py:DEFAULT_SAMPLE_RATE_HZ`（2.4 M）；`mbdsdr_ai/sdr_backend.py:DEFAULT_SAMPLE_RATE_HZ/_FALLBACK_SAMPLE_RATE_HZ/RTLSDRBackend.SAMPLE_RATES`；`desktop/control_panel.py:sample_rate_combo`（能力驱动；旧前端常量 `SAMPLE_RATES` 已删除）；`desktop/main_window.py:_connect_backend/采样率兜底项`；`cpp/src/core/tokens.h:kDefaultSampleRateHz/kSampleRatesHz`；`cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz`；`cpp/src/ui/settings_dialog.cpp:srCombo_`；`mobile/lib/app/tokens.dart:AppTokens.sampleRatesHz`；`mbdsdr_ai/device_capabilities.py:sample_rate_options/sample_rate_options_for_backend`；`tests/test_sample_rate_options.py` | 默认值**已统一**；控制面板可见档位**已按后端能力生成**；连接对话框/移动端仍是前端常量（2 处） | 运行/设置/C++ 默认均 **2.4 MS/s**；C++ 档位 `1.024/2.048/2.4/3.2`（4 档）；Python 档位 11 档 `250k…3.2M` | 设置线（`config_schema.py`、`settings.py`、`control_panel.py`、`main_window.py`）；后端线（`sdr_backend.py`）；C++ 内核线（`tokens.h`） | 旧 `desktop_settings.json` 里仍是 2.048 M：新默认 2.4 只对新建/无键配置生效，老用户启动后下拉显示 2.048、状态栏 2.4，**差 352 kHz** 直到手动切一次；`main_window` import 兜底项文案写 "2.048 MS/s" 却绑 `DEFAULT_SAMPLE_RATE_HZ=2.4 M`，显示与下发值不一致；C++ 4 档 vs Python 11 档，同一配置在两端可选项差 **7 档** | 新装与旧配置各启动一次，同时打印下拉 `currentData()`、状态栏实际采样率、`DEFAULT_SAMPLE_RATE_HZ`，三值应相等 | 部分统一（默认值 2.4M 已统一；控制面板可见档位已改为后端能力生成；剩余 3 项：连接对话框 `sr_combo`、移动端 `AppTokens.sampleRatesHz`、回落/逐档回读提示（`main_window` 占用）） |
+| 4 采样率 | `desktop/config_schema.py:sample_rate_hz`（2.4 M，exposed=False，`4ef3a15`）；`desktop/settings.py:DEFAULTS`；`desktop/constants.py:DEFAULT_SAMPLE_RATE_HZ`（2.4 M）；`mbdsdr_ai/sdr_backend.py:DEFAULT_SAMPLE_RATE_HZ/_FALLBACK_SAMPLE_RATE_HZ/RTLSDRBackend.SAMPLE_RATES`；`desktop/control_panel.py:sample_rate_combo`（能力驱动；旧前端常量 `SAMPLE_RATES` 已删除）；`desktop/main_window.py:_connect_backend/_fill_sr_combo/_on_sample_rate_changed`（能力驱动 + 逐档回读）；`cpp/src/core/tokens.h:kDefaultSampleRateHz/kSampleRatesHz`；`cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz`；`cpp/src/ui/settings_dialog.cpp:srCombo_`；`mobile/lib/app/tokens.dart:AppTokens.sampleRatesHz`；`mbdsdr_ai/device_capabilities.py:sample_rate_options/sample_rate_options_for_backend`；`tests/test_sample_rate_options.py` | 默认值**已统一**；控制面板与连接对话框可见档位**均按后端能力生成**；移动端仍是前端常量（1 处） | 运行/设置/C++ 默认均 **2.4 MS/s**；C++ 档位 `1.024/2.048/2.4/3.2`（4 档）；Python 档位 11 档 `250k…3.2M` | 设置线（`config_schema.py`、`settings.py`、`control_panel.py`、`main_window.py`）；后端线（`sdr_backend.py`）；C++ 内核线（`tokens.h`） | 旧 `desktop_settings.json` 里仍是 2.048 M：新默认 2.4 只对新建/无键配置生效，老用户启动后下拉显示 2.048、状态栏 2.4，**差 352 kHz** 直到手动切一次；`main_window` import 兜底项文案写 "2.048 MS/s" 却绑 `DEFAULT_SAMPLE_RATE_HZ=2.4 M`，显示与下发值不一致；C++ 4 档 vs Python 11 档，同一配置在两端可选项差 **7 档** | 新装与旧配置各启动一次，同时打印下拉 `currentData()`、状态栏实际采样率、`DEFAULT_SAMPLE_RATE_HZ`，三值应相等；另 11 档逐档下发回读=请求（`tests/test_sample_rate_options.py`） | 部分统一（默认值 2.4M 已统一；控制面板与连接对话框已能力化 + 逐档回读；剩移动端 `AppTokens.sampleRatesHz` 待协议字段；C++ 四项派内核线） |
 | 5 步进 | `desktop/config_schema.py:tuning_step_hz`；`desktop/control_panel.py:step_combo/step_changed`；`desktop/main_window.py:_on_step_changed`；`desktop/settings_panel.py:_apply/_on_step_from_control/_apply_initial_state`；`desktop/spectrum_widget.py:_PlotState.snap_interval/set_snap_interval/wheelEvent/keyPressEvent/prepare_snap`；`cpp/src/core/tokens.h:kFreqCoarseStepHz`（死值，原 `kFreqFineStepHz`）；`cpp/src/ui/main_window.cpp:stepCombo_/scanStepCombo_` | Python 四处**是**（同一 `snap_interval`）；跨语言**否** | 默认 **10 kHz**，六档 `10/100/1k/10k/100k/1M`；滚轮 1×、Shift ×10、Alt ×0.1；←→ 1×、↑↓ ×0.1；吸附网格 1×；引擎落点=吸附后绝对值 | 设置线（`config_schema.py`、`control_panel.py`、`settings_panel.py`）；频谱线（`spectrum_widget.py`）；C++ UI/内核线（`cpp/src/ui/main_window.cpp`、`tokens.h`） | 默认 10 kHz 下四处一致（差 0）；若下拉改了而吸附没跟上：下拉写 100 kHz、按一下只跳 **10 kHz**（应跳的 1/10）且落点吸回 10 kHz 网格；反向错位一次跳 **1 MHz（10×）**；C++ `kFreqCoarseStepHz=10000.0` 仍**零消费点**，而 Python ↑↓ 实际是 0.1×snap（默认 1 kHz）——真接进细调会错 **10 倍**；C++ 步进 7 档含 1 Hz、Python 6 档最低 10 Hz（1 Hz 配置进来回默认 10 kHz，差 10,000 倍） | `tests/test_settings_schema.py::test_tuning_step_reaches_spectrum_and_combo` + `tests/test_wheel_step_gear.py` 四例；另需一条"下拉=滚轮步长=网格=落点"的端到端断言（目前缺） | 已统一（Python 四处）；跨语言未统一 |
 | 6 FFT 点数 | `desktop/spectrum_widget.py:SpectrumDataGenerator.FFT_SIZES`（3 档）/`set_fft_size`（档外回落最近档 + warning）、`SpectrumPanel._fft_combo`；`desktop/config_schema.py:fft_size`（3 档）；`desktop/settings_panel.py:_apply_spectrum`（回落时同步下拉并提示）；`cpp/src/ui/settings_dialog.cpp:fftCombo_`（3 档）；`cpp/src/ai/tool_schema.cpp:set_fft_params`（enum 1024/2048/4096） | 是（设置/工具条/C++/AI 同一组 3 档；旧值回落 4096 并提示） | 合法集合 `1024/2048/4096`，默认 2048；`8192/16384` 一律回落最近档 **4096**；@2.4 MS/s bin 宽差 **439.453125 Hz → 0** | 频谱线（`spectrum_widget.py`）；设置线（`config_schema.py`、`settings_panel.py`）；C++ UI/AI 线（`settings_dialog.cpp`、`tool_schema.cpp`） | 旧配置存 8192/16384 时启动回落 4096：bin 宽从 146.5 变 585.9 Hz，用户会觉得“分辨率变粗”；状态栏明示“内核不支持，已回落最近档 4096”，不会把界面显示成不存在的档位 | 设 8192 读回实际 4096 且状态栏有回落提示；两端 `sr/fft` 均应为 585.938 Hz（差 0） | 已统一 |
 | 7 dB 量程 | `desktop/spectrum_widget.py:_PlotState.db_min/db_max/_DB_AXIS_MIN/_DB_AXIS_MAX/apply_db_range`；`cpp/src/core/tokens.h:kDbLowerDefault/kDbUpperDefault`；`cpp/src/ui/spectrum_widget.cpp`/`settings_dialog.cpp` | 否 | Python 默认 **-100..-20**，轴夹取 **-160..0**，最小 span 10；C++ 默认 **-45..0** | 频谱线（`spectrum_widget.py`）；C++ UI 线（`tokens.h`、`settings_dialog.cpp`） | 同一段 IQ，`-50 dBFS` 信号在 Python 是轴中间、在 C++ 已低于 -45 下界被夹到底边 → 同一录音两端口径"正常谱线"vs"贴底看不出"，用户误判无信号；可拖动态范围差 115 dB | 同一 IQ 段两端各画一次，读回 `db_min/db_max`，看 -50 dBFS bin 是否在图内 | 未统一 |
@@ -341,7 +341,60 @@ constexpr double kCandidateRatesHz[] = {
 3. 反证：注入 `1,400,000` → `1 failed`，复位后 `79 passed`（另相关子集 `93 passed`、含文案审计三文件 `100 passed`）。
 4. **未落**："每档选一次、回读值=请求值或显式拒绝" 这条需 `main_window` 接线（当前 `_on_sample_rate_changed` 不检查 `set_sample_rate` 返回值、回落不提示），文件由 ux-basis 持有，登记为剩余。
 
-**未落/派单**：C++ 侧 4 档 AI 接线、2160/2880 的 `control_hub` 拒绝路径、2800 vs 2880 统一 → **待 C++ 内核线**（本轮未改 `cpp/`）；`main_window` 连接对话框 `sr_combo` 与回落提示 → **待 ux-basis 释放**；移动端 `AppTokens.sampleRatesHz` → 未接能力字段。
+**未落/派单**：C++ 侧 4 档 AI 接线、2160/2880 的 `control_hub` 拒绝路径、2800 vs 2880 统一 → **待 C++ 内核线**（本轮未改 `cpp/`）；移动端 `AppTokens.sampleRatesHz` → 未接能力字段（改法见 C.10.3）。
+
+### C.10 逐档回读实测与剩余两项（2026-11-05 第二轮）
+
+**C.10.1 `main_window` 接线已落**（`ux-basis` 已释放，工作区干净后才动）：
+
+| 位置 | 改动 |
+|---|---|
+| 连接对话框 `sr_combo` | 删除 `RTLSDRBackend.SAMPLE_RATES` 直灌，改 `_fill_sr_combo(device)`：有量程走 `sample_rate_options(device)`，无量程给单项「未知（…将用默认 2.400 MS/s）」且 `data=None`；`_update_param_state()` 内随设备切换重建 |
+| `_on_sample_rate_changed`（非录音） | 检查 `set_sample_rate` 返回值：`False` → 状态栏「该采样率未被设备接受（保持 X）」并回填下拉、**不持久化**；回读≠请求 → 「设备按 Y 生效（请求 X）」并回填；相等才继续重建流水线 |
+| `_on_sample_rate_changed`（录音中） | 同样检查返回值（`False` 抛入原有回滚分支）；段头与 `sample_rate_hz` 持久化改用**回读值** |
+| `mbdsdr_ai/sdr_backend.py` | 新增 `_resolve_applied_sample_rate()` 钩子，`status.sample_rate_hz` 记**实际生效值**；RTL 覆写为「11 档最近邻吸附 + 合法性钳位」 |
+
+**C.10.2 逐档实测（RTL + `tests/fake_rtl.py`，脚本 `D:\mbdsdr\.tmp\measure_sample_rate.py`，不进仓）**
+
+内核 4 档 + 候选 10 档 + 桌面可见 11 档，并集 12 档，逐档 `set_sample_rate` → 读回 → 读假棒硬件侧实收值：
+
+| 请求 Hz | 返回 | get_sample_rate | 硬件侧实收 | 判定 |
+|---|---|---|---|---|
+| 250,000 | True | 250,000 | 250,000 | 一致 |
+| 1,024,000 | True | 1,024,000 | 1,024,000 | 一致（内核档） |
+| 1,536,000 | True | 1,536,000 | 1,536,000 | 一致 |
+| 1,792,000 | True | 1,792,000 | 1,792,000 | 一致 |
+| 1,920,000 | True | 1,920,000 | 1,920,000 | 一致 |
+| 2,048,000 | True | 2,048,000 | 2,048,000 | 一致（内核档） |
+| 2,160,000 | True | 2,160,000 | 2,160,000 | 一致 |
+| 2,400,000 | True | 2,400,000 | 2,400,000 | 一致（内核档） |
+| 2,560,000 | True | 2,560,000 | 2,560,000 | 一致 |
+| 2,800,000 | True | **2,880,000** | **2,880,000** | **被吸附（改前回读谎报 2,800,000）** |
+| 2,880,000 | True | 2,880,000 | 2,880,000 | 一致 |
+| 3,200,000 | True | 3,200,000 | 3,200,000 | 一致（内核档） |
+
+结论：12 档里 **11 档请求=回读=硬件实收**，1 档（2.800M，非任何一端可见档）被吸附到 2.880M，改后回读如实报 2.880M 并由界面提示「请求 2.800 MS/s → 实际 2.880 MS/s」。改前该档回读是 2.800M，属"静默接受后 DSP 按别的率跑"的 Python 侧实例——本轮已修。
+
+**新增测试**（`tests/test_sample_rate_options.py`，共 12 条）：11 档逐档回读一致 + 硬件侧一致；档外 2.800M 回读=2.880M；未连接返回 `False`；主窗口槽逐档下发后 `_record_sr`/持久化均为生效值；后端拒绝时 `_record_sr` 不变、下拉回填、状态栏含「未被设备接受」、**不写配置**。实测 `12 passed`（8.77s）。
+
+**C.10.3 移动端改法（只出方案，本轮未改 Dart）**
+
+移动端说 rtl_tcp 私有协议（`mobile/lib/services/rtl_tcp_client.dart:171`），协议本身没有"查询档位"命令，因此能力必须先由服务端下发：
+
+| 改动文件 | 端 | 内容 | 状态 |
+|---|---|---|---|
+| `cpp/src/control/control_hub.cpp`（status 快照，约 `:1020` `o["sample_rate_hz"]`） | 桌面内核 | 增加 `sample_rate_options_hz: [..]` 与 `sample_rate_options_status: "probed"/"declared"/"unknown"` | 待内核线 |
+| `docs/protocol*.md`（控制面消息表） | 协议 | 登记上述两个可选字段；旧客户端忽略即可 | 待内核线 |
+| `mobile/lib/services/control_hub_client.dart` | 移动 | 解析两个新字段，缺省 `unknown` | 待协议落地 |
+| `mobile/lib/services/radio_controller.dart:53/80/302/797` | 移动 | 暴露 `List<double>? sampleRateOptionsHz`；`setSampleRateHz` 校验并抛明确错误 | 待协议落地 |
+| `mobile/lib/pages/spectrum_page.dart:760-773` | 移动 | 下拉项由 `sampleRateOptionsHz` 生成；未知则禁用并显示「未知」 | 待协议落地 |
+| `mobile/lib/widgets/device_info_card.dart:104` | 移动 | 文案不改（仍是实际值），仅注释来源 | 待协议落地 |
+| `mobile/lib/app/tokens.dart:216` | 移动 | 删除 `AppTokens.sampleRatesHz`，或降级为「历史默认」并注明无读取方 | 待协议落地 |
+
+影响端：桌面（新增字段，纯加性）、移动（解析+下拉+校验）、rtl_tcp 直连路径（协议无能力查询 → 只能是 unknown，不得造假档位）。
+
+**组 4 状态维持「部分统一」**：桌面两处已能力化，剩移动端一项（阻塞于协议字段）与 C++ 四项派单；三项未全落地前不改字。
+
 
 ## 变更记录
 
@@ -366,6 +419,7 @@ constexpr double kCandidateRatesHz[] = {
 | 2026-11-05 | 本笔 | C.9 收口取证：`tokens.h:287` 内核 4 档原文（1.024/2.048/2.4/3.2 MS/s）、`device_capabilities.cpp:36-46` 候选 10 档原文、三条路径分写（AI 有档位校验并明确拒；`control_hub.cpp:494-502` 无校验、静默接受；`rtl_sdr_source.cpp:445-450` 不检查返回值、无硬件读回）；7 档逐档去向：5 档"支持但 AI 未接线"、2 档（2160/2880）内核不支持；组 4 状态仍为部分统一（不能写"已统一"：连接对话框/移动端/回落提示未收口）；派单内核线与 ux-basis | 参数治理线 |
 | 2026-11-05 | 本笔 | 附录 D 追补 D.1–D.5：关 4:1 max-pool 同 2048 栅格复跑（py_only 1283 / cpp_only 2796；C++ 三栏 75.1/8.0/16.9）；原 704 仅解释 60（8.5%），判定 max-pool 非主因；Python 门限 6→3 dB 再解释 33/85；C++ 关 NMS、门限 3 dB 两次消融可归因 0（top-12/跟踪位移）；最终 559（79.4% of 704）/ 440（15.7% of 2796），机制未证实 | 审阅线 |
 | 2026-11-05 | 本笔 | 附录 D：D.1–D.5 归属注记（实质作者审阅线，claim 心跳超时后被并入 `ba238bc5`）；新增 D.6 定义对拍 8 条（文件:行 + 原文）、D.7 30 条单条判定：本地极大子定义 **4/30=13.3%**，完整定义链 **30/30=100%**；同栅格 2796 口径未归因 473 改判「定义差异（宽通道合并 + 跟踪保持）」、该栏无事件；原 704 口径 **559（79.4%）仍挂账**（交集未映射） | 审阅线 |
+| 2026-11-05 | 本笔 | C.10 收口第二轮：`ux-basis` 释放后接管 `main_window.py`（接手前 `git status` 干净）——连接对话框 `sr_combo` 改 `_fill_sr_combo(device)` 能力驱动、`_on_sample_rate_changed` 加返回值检查 + 回读比对 + 拒绝时回填且不持久化；`sdr_backend.py` 新增 `_resolve_applied_sample_rate` 钩子（RTL 覆写为吸附后值），修掉 2.800M 回读谎报请求值；逐档实测 12 档 = 11 一致 + 1 吸附（2.800M→2.880M，回读已如实）；测试 12 条（含主窗口槽逐档 + 拒绝路径），`12 passed`；C.10.3 给移动端协议字段改法（7 文件，待内核线）；组 4 仍「部分统一」 | 参数治理线 |
 
 ## 附录 D：C++/Python 峰值独有口径（作废数 / 现行数）
 

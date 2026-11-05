@@ -111,3 +111,114 @@ def test_backend_options_helper_matches_device_options(qapp):
     backend = _FakeBackend((225_001, 3_200_000))
     opts = sample_rate_options_for_backend(backend)
     assert opts == sample_rate_options(_device("rtlsdr", (225_001, 3_200_000)))
+
+
+# ---------------------------------------------------------------------------
+# 逐档回读：每档选一次，回读值必须等于请求值（或如实报出被吸附后的实际值）
+# ---------------------------------------------------------------------------
+def _fake_rtl_backend():
+    sys.path.insert(0, os.path.join(_ROOT, "tests"))
+    from fake_rtl import FakeRtlSdr  # tests/ 专属假棒，绝不进生产路径
+
+    backend = RTLSDRBackend(device_index=0)
+    fake = FakeRtlSdr(device_index=0)
+    backend._sdr = fake
+    backend._ring_reader = None
+    backend.status.connected = True
+    backend.status.sample_rate_hz = float(fake.sample_rate)
+    return backend, fake
+
+
+def test_rtlsdr_every_visible_rate_reads_back_as_requested(qapp):
+    """可见 11 档逐档下发：回读 == 请求 == 硬件侧实收（无“选了无变化”）。"""
+    backend, fake = _fake_rtl_backend()
+    for rate in RTLSDRBackend.SAMPLE_RATES:
+        assert backend.set_sample_rate(float(rate)) is True
+        assert backend.get_sample_rate() == float(rate), f"{rate} 回读不一致"
+        assert float(fake.sample_rate) == float(rate), f"{rate} 硬件侧未生效"
+
+
+def test_rtlsdr_offtable_rate_reports_applied_not_requested(qapp):
+    """档外请求被吸附时必须报实际生效值（2.800M → 2.880M），不许谎报请求值。"""
+    backend, fake = _fake_rtl_backend()
+    assert backend.set_sample_rate(2_800_000) is True
+    assert float(fake.sample_rate) == 2_880_000
+    assert backend.get_sample_rate() == 2_880_000
+    assert backend.get_sample_rate() != 2_800_000
+
+
+def test_rtlsdr_rejected_when_not_connected(qapp):
+    """未连接时显式拒绝（返回 False），不是静默接受。"""
+    backend = RTLSDRBackend(device_index=0)
+    assert backend.set_sample_rate(1_024_000) is False
+    assert backend.get_sample_rate() != 1_024_000
+
+
+# ---------------------------------------------------------------------------
+# 主窗口槽：每档选一次 → 回读=请求值；后端拒绝 → 显式提示且回填原档
+# ---------------------------------------------------------------------------
+class _RejectingBackend:
+    def __init__(self, sr=1_024_000.0):
+        self.sr = float(sr)
+        self.calls = []
+
+    def get_sample_rate(self):
+        return self.sr
+
+    def set_sample_rate(self, rate):
+        self.calls.append(float(rate))
+        return False          # 显式拒绝，速率不变
+
+    def get_frequency(self):
+        return 100_000_000.0
+
+
+class _WindowSettings:
+    def __init__(self):
+        self.saved = {}
+
+    def set(self, key, value):
+        self.saved[key] = value
+
+    def get(self, key, default=None):
+        return self.saved.get(key, default)
+
+
+@pytest.fixture()
+def window(isolated_profile, qapp):
+    from main_window import MainWindow
+
+    w = MainWindow()
+    w.settings = _WindowSettings()
+    w._recording = False
+    w._stop_iq_streams = lambda: None
+    w._start_iq_streams = lambda: None
+    w._update_status_bar = lambda: None
+    yield w
+    w._disconnect()
+    w.close()
+
+
+def test_window_every_visible_rate_applies_and_reads_back(window):
+    backend, fake = _fake_rtl_backend()
+    window._active_sdr_backend = backend
+    for rate in RTLSDRBackend.SAMPLE_RATES:
+        window.control_panel.set_sample_rate(float(rate))
+        window._on_sample_rate_changed(float(rate))
+        assert backend.get_sample_rate() == float(rate)
+        assert float(fake.sample_rate) == float(rate)
+        assert window._record_sr == float(rate)
+        assert window.settings.get("sample_rate_hz") == float(rate)
+
+
+def test_window_rejected_rate_keeps_previous_and_warns(window):
+    backend = _RejectingBackend(1_024_000.0)
+    window._active_sdr_backend = backend
+    window._record_sr = 1_024_000.0
+    window._on_sample_rate_changed(2_400_000.0)
+    assert backend.calls == [2_400_000.0]
+    assert window._record_sr == 1_024_000.0, "被拒后不得把速率记成请求值"
+    assert window.control_panel.sample_rate_combo.currentData() == 1_024_000.0
+    assert "未被设备接受" in window.statusBar().currentMessage()
+    # 被拒时不得把请求值持久化（否则下次启动会拿一个后端不接受的档去连）
+    assert window.settings.get("sample_rate_hz") is None

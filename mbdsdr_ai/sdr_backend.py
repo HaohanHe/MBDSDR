@@ -375,7 +375,9 @@ class SDRBackend:
                 self._finish_retune(started, False, 0, self.status.error)
                 logger.warning(f"set_sample_rate({rate_hz}) 失败，已回滚到 {old}")
                 return False
-            self.status.sample_rate_hz = rate_hz
+            # 记录“真正生效值”而非请求值：RTL 会把请求吸附到 11 档离散集，
+            # 记请求值会让 status/DSP 的 fs_in 与硬件实际速率不一致。
+            self.status.sample_rate_hz = self._resolve_applied_sample_rate(rate_hz)
             # 新流接管：先丢弃旧采样率下的缓冲（子类可能已清，重复清是幂等的），
             # 再重建整条接收链（fs_in 已变）。
             self._clear_ring_for_retune()
@@ -389,6 +391,14 @@ class SDRBackend:
     def _apply_sample_rate(self, rate_hz: float) -> bool:
         """子类覆写：把采样率真正写入硬件。"""
         return True
+
+    def _resolve_applied_sample_rate(self, rate_hz: float) -> float:
+        """子类覆写：返回硬件真正接受的采样率（吸附/钳位后的值）。
+
+        默认等于请求值。会改写请求值的后端必须覆写，否则 ``get_sample_rate``
+        回读的是请求值而非实际值，调用方无法判断「选了是否真生效」。
+        """
+        return float(rate_hz)
 
     def get_sample_rate(self) -> float:
         return self.status.sample_rate_hz
@@ -2077,6 +2087,12 @@ class RTLSDRBackend(SDRBackend):
         # 来源: librtlsdr src/librtlsdr.c:1702 — 换采样率后也要 reset_buffer
         self._reset_rtl_buffer()
         return True
+
+    def _resolve_applied_sample_rate(self, rate_hz: float) -> float:
+        """RTL 实际生效值 = 11 档最近邻吸附后再过合法性钳位。"""
+        snapped = self.nearest_sample_rate(rate_hz)
+        clamped, _ = self._clamp_sample_rate(float(snapped))
+        return float(clamped)
 
     def _apply_bandwidth(self, bw_hz: float) -> bool:
         """写 tuner 模拟带宽；0=自动（交还驱动默认，不下发非法 0）。"""

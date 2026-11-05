@@ -3710,17 +3710,34 @@ class MainWindow(QMainWindow):
         param_form = QFormLayout(param_group)
 
         sr_combo = QComboBox()
-        try:
-            from mbdsdr_ai.sdr_backend import RTLSDRBackend
-            for _r in RTLSDRBackend.SAMPLE_RATES:
-                sr_combo.addItem(format_sample_rate(_r), _r)
-            # 默认档与后端 DEFAULT_SAMPLE_RATE 对齐（U-03：唯一 MS/s 口径）
-            _idx = sr_combo.findData(DEFAULT_SAMPLE_RATE_HZ)
-            if _idx >= 0:
-                sr_combo.setCurrentIndex(_idx)
-        except Exception:
-            sr_combo.addItem(format_sample_rate(DEFAULT_SAMPLE_RATE_HZ),
-                             DEFAULT_SAMPLE_RATE_HZ)
+
+        def _fill_sr_combo(device):
+            """采样率档位来自该设备的能力，不再写死前端档位表。
+
+            - 设备报告了量程且后端有离散表 → 用后端表 ∩ 量程；
+            - 有量程但后端无离散表 → 只给量程两端（不编中间档）；
+            - 量程未知（含尚未连接的 rtl_tcp）→ 单项显式说明且 data=None，
+              连接后按默认档；绝不把假档位摆进下拉。
+            """
+            try:
+                from mbdsdr_ai.device_capabilities import sample_rate_options
+                options = sample_rate_options(device) if isinstance(device, dict) else None
+            except Exception:
+                options = None
+            sr_combo.blockSignals(True)
+            sr_combo.clear()
+            if not options:
+                sr_combo.addItem(
+                    "未知（设备未报告采样率范围，将用默认 "
+                    f"{format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）", None)
+            else:
+                for _r in options:
+                    sr_combo.addItem(format_sample_rate(_r), float(_r))
+                # 默认档与后端 DEFAULT_SAMPLE_RATE 对齐（U-03：唯一 MS/s 口径）
+                _idx = sr_combo.findData(float(DEFAULT_SAMPLE_RATE_HZ))
+                sr_combo.setCurrentIndex(_idx if _idx >= 0 else 0)
+            sr_combo.blockSignals(False)
+
         param_form.addRow("采样率", sr_combo)
 
         gain_spin = QSpinBox()
@@ -3771,6 +3788,8 @@ class MainWindow(QMainWindow):
                 or d == self._RTL_TCP_SPECIAL
             )
             ppm_spin.setEnabled(is_rtl)
+            # 采样率档位随选中设备能力重建（换设备即换档位集合）
+            _fill_sr_combo(d)
 
         def _fill_combo(device_list, select_prev=None):
             """真实设备优先、rtl_tcp 殿后；无设备时不可选占位项置顶且默认选中。"""
@@ -4589,9 +4608,14 @@ class MainWindow(QMainWindow):
             # 2) 关当前段（sidecar 固定旧速率），得到该段信息
             info = self._finalize_record_segment()
             # 3) 下发新速率；中心频率可能随设备/档位变化，重新读取
+            applied_sr = rate
             if self._active_sdr_backend is not None:
                 try:
-                    self._active_sdr_backend.set_sample_rate(rate)
+                    ok = self._active_sdr_backend.set_sample_rate(rate)
+                    if ok is False:
+                        raise RuntimeError("设备拒绝该采样率（后端已回滚原速率）")
+                    # 回读真正生效值：RTL 会吸附到 11 档，段头必须写实际速率
+                    applied_sr = float(self._active_sdr_backend.get_sample_rate())
                 except Exception as e:
                     logger.warning("设备切换采样率失败: %s", e)
                     # 后端速率没变：用旧速率续录新段，绝不让 _recording=True
@@ -4611,6 +4635,13 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(
                         f"采样率切换失败，继续按 {format_sample_rate(old_sr)} 录制: {e}", MSG_IMPORTANT)
                     return
+                if abs(applied_sr - rate) > 1.0:
+                    logger.warning("采样率 %s 被设备吸附到 %s", rate, applied_sr)
+                    self.statusBar().showMessage(
+                        f"设备只接受 {format_sample_rate(applied_sr)}，"
+                        f"已按该速率续录（请求 {format_sample_rate(rate)}）",
+                        MSG_IMPORTANT)
+                    rate = applied_sr
             try:
                 center_hz = float(self._active_sdr_backend.get_frequency())
             except Exception as e:
@@ -4642,15 +4673,32 @@ class MainWindow(QMainWindow):
                 f"{format_sample_rate(rate)}，录音已分到新文件段: "
                 f"{os.path.basename(new_path)}", MSG_IMPORTANT)
         else:
-            # 非录音：下发后端 + 重建流水线；后端拒绝就如实报错，不改 UI 读数
+            # 非录音：下发后端 → 回读实际值。三种结果分别说清楚，不改 UI 读数：
+            # ① 后端返回 False → 显式拒绝，保持原速率；② 回读≠请求（被吸附）
+            # → 报实际生效值并把下拉回填；③ 相等 → 真生效。
             if self._active_sdr_backend is not None:
                 try:
-                    self._active_sdr_backend.set_sample_rate(rate)
+                    ok = self._active_sdr_backend.set_sample_rate(rate)
+                    applied = float(self._active_sdr_backend.get_sample_rate())
                 except Exception as e:
                     logger.warning("设备切换采样率失败（非录音态）: %s", e)
                     self.statusBar().showMessage(
                         f"采样率切换失败（保持原速率）: {e}", MSG_IMPORTANT)
                     return
+                if ok is False:
+                    logger.warning("设备拒绝采样率 %s，保持 %s", rate, applied)
+                    self.statusBar().showMessage(
+                        f"该采样率未被设备接受（保持 {format_sample_rate(applied)}）",
+                        MSG_IMPORTANT)
+                    self.control_panel.set_sample_rate(applied)
+                    return
+                if abs(applied - rate) > 1.0:
+                    logger.warning("采样率 %s 被设备吸附到 %s", rate, applied)
+                    self.statusBar().showMessage(
+                        f"设备按 {format_sample_rate(applied)} 生效"
+                        f"（请求 {format_sample_rate(rate)}）", MSG_IMPORTANT)
+                    self.control_panel.set_sample_rate(applied)
+                rate = applied
             self._record_sr = rate
             self._stop_iq_streams()
             self._start_iq_streams()
