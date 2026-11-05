@@ -13,7 +13,7 @@
 | 其中已暴露到设置面板 | **31 条** | 23 条落 DesktopSettings，2 条落 gui_config，5 条落 AI config；去重后 35 个 schema 项 |
 | 判定锁死、不暴露 | **6 类** | 理由见 §4（不是偷懒，每条都有具体消费点缺失或双入口风险） |
 | schema 总条目 | **48** | 35 暴露 + 13 内部键（频率/增益/音量等已有即时控件） |
-| 设置面板新增测试 | **75 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 14 项手改 JSON 非法值矩阵 + 5 项内部键消费端实测 + 4 项 demod_mode 枚举收口） |
+| 设置面板新增测试 | **77 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 14 项手改 JSON 非法值矩阵 + 5 项内部键消费端实测 + 6 项 demod_mode 枚举收口（含归一做测试）） |
 | 相关回归 | **96 + 29 个** | 配置/主题/布局/触屏/i18n 96；三栏与面板集成 29 |
 
 **接手时的现状（已在本轮修复，记录备查）**：用户点"设置"当时**不是空面板，而是只有
@@ -495,7 +495,20 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 需要登记的一点：夹取只发生在消费端，**磁盘上的 `1e12` 不会被改写**，下次启动
 仍会再夹一次；等用户改任意设置触发保存才会覆盖。
 
-### 13.2 `demod_mode`：已收窄为枚举（2026-11-05 收口）
+### 13.2 `demod_mode`：枚举 + 归一后判合法（2026-11-05 收口）
+
+**判定顺序（三步，顺序不可颠倒）**：
+
+1. **归一**：字符串先 `strip()` 去首尾空白，再按 `upper()` 大小写归一比对。
+   归一命中即采用该规范值，并**必须**写入 `migration_notes`，例如
+   `demod_mode: 大小写/空白已归一：'usb' → 'USB'`——不许静默归一，
+   用户得知道文件被改写过一次。
+2. **判合法**：归一后的值与 7 项集合逐项比对，命中即采用。
+3. **才回落**：只有归一后仍不在集合（`"NBEM"`、`"USB2"`、空串）才回 `FM`，
+   `migration_notes` 写明原值与回落值。
+
+> 先判合法再归一是错的：`"usb"` 会被判非法并回落成 `FM`——那是另一个模式，
+> 不是用户本意。实现见 `desktop/config_schema.py:validate_value` 的 enum 分支。
 
 **合法集合来源（不手写清单）**：`desktop/mode_registry.py` 的 analog 模式 ∩
 `mbdsdr_ai/core/controller.py:43 VALID_MODES`。
@@ -509,13 +522,14 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 * 实现位置：`desktop/config_schema.py` 的 `_LEGAL_DEMOD_MODES` 在导入时从两处事实源
   求交，`demod_mode` 的 `SettingItem(kind="enum")` 直接用它，没有第二份清单。
 
-**处置前后对照**：
+**处置对照（收窄前 → 归一 → 判合法 → 才回落）**：
 
-| 输入 `demod_mode` | 收窄前（2026-11-05 上午实测） | 收窄后 |
-|---|---|---|
-| `"NBEM"` | 原样接受；`migration_notes` 空；`_current_mode="NBEM"`；下拉空白（index -1）；带宽 12.5 kHz | 落 `FM`；`migration_notes` = `demod_mode: 值 'NBEM' 不在可选值 (...) 内，已回默认 'FM'`；下拉恢复 index 0；设置面板状态行显示原因 |
-| `"USB"` 等 7 个合法值 | 原样 | 原样，`migration_notes` 为空 |
-| 大小写不一致（如 `"fm"`） | 原样接受 | 不在集合 → 回 `FM` 并记原因（下拉只写大写，不做别名） |
+| 输入 `demod_mode` | 归一后 | 收窄前（2026-11-05 上午实测） | 收窄后（三步判定） |
+|---|---|---|---|
+| `"usb"` | `USB` | 原样接受 | **采用 `USB`**；notes = `demod_mode: 大小写/空白已归一：'usb' → 'USB'` |
+| `" Usb "` | `USB` | 原样接受 | **采用 `USB`**；notes 同上格式（含原值与归一值） |
+| `"USB"` 等 7 个合法值 | 同值 | 原样 | 原样，`migration_notes` 为空 |
+| `"NBEM"` / `"USB2"` / `""` | 仍不合法 | 原样接受；`migration_notes` 空；`_current_mode="NBEM"`；下拉空白（index -1）；带宽 12.5 kHz | 落 `FM`；notes = `demod_mode: 值 'NBEM' 不在可选值 (...) 内，已回默认 'FM'`；下拉恢复 index 0；设置面板状态行显示原因 |
 
 **用户可见**：`demod_mode` 是内部键，没有独立设置行；修复原因由
 `SettingsPanel._announce_migration_notes` 显示在设置面板**状态行**
@@ -525,6 +539,8 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 
 * `test_demod_mode_choices_are_ui_backend_intersection_exact`（与注册表∩后端逐项
   相等，且与下拉项相等；多一项/少一项都红）
+* `test_hand_edited_demod_mode_is_normalized_before_rejecting`
+  （`"usb"` / `" Usb "` → `USB` 且 notes 含归一说明）
 * `test_hand_edited_demod_mode_falls_back_to_fm_with_reason`（`"NBEM"` → `FM` 且 notes 非空）
 * `test_legal_demod_mode_is_not_rewritten_and_has_no_note`（7 个合法值不被改写、无 notes）
 * `test_settings_panel_shows_demod_migration_reason`（面板状态行含 `demod_mode`/`NBEM`/`FM`）

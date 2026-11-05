@@ -563,6 +563,19 @@ def validate_value(item: SettingItem, value: Any) -> Tuple[Any, Optional[str]]:
     if item.kind == "enum":
         if value in item.choice_values:
             return value, None
+        # 判定顺序：先归一（strip 空白 → upper 比对），再看是否合法。
+        # 手改 JSON 常写成 "usb"、" Usb "；直接拿原值判非法会把用户本意的
+        # USB 回落成另一个模式 FM。归一后命中即采用，但必须留痕——用户得
+        # 知道文件被改写过一次，不能静默。
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped in item.choice_values:
+                return stripped, (
+                    f"大小写/空白已归一：{value!r} → {stripped!r}")
+            for v in item.choice_values:
+                if isinstance(v, str) and v.upper() == stripped.upper():
+                    return v, (
+                        f"大小写/空白已归一：{value!r} → {v!r}")
         # 容忍 "2048" 这类字符串数字（JSON/命令行常见）
         for v in item.choice_values:
             if isinstance(v, int) and str(value) == str(v):

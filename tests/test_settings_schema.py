@@ -556,6 +556,29 @@ def test_demod_mode_choices_are_ui_backend_intersection_exact(qapp):
     assert cp.mode_combo.isEditable() is False
 
 
+@pytest.mark.parametrize("raw,expected", [("usb", "USB"), (" Usb ", "USB")])
+def test_hand_edited_demod_mode_is_normalized_before_rejecting(
+        tmp_path, qapp, raw, expected):
+    """归一 → 判合法 → 才回落：大小写/空白差异归一后命中即采用。
+
+    直接拿原值判合法会把用户本意的 `usb` 回落成另一个模式 `FM`；这里钉住
+    先 strip + upper 再比对，且归一必须留痕（notes 写原值与归一值）。
+    """
+    from control_panel import ControlPanel
+
+    ds = _load_payload(tmp_path, {"demod_mode": raw})
+    assert ds.get("demod_mode") == expected
+    notes = ds.migration_notes or []
+    assert any("归一" in n and repr(raw) in n and expected in n for n in notes), \
+        f"归一必须留痕（含原值与归一值），实际 notes={notes!r}"
+
+    cp = ControlPanel()
+    cp.set_mode(ds.get("demod_mode"))
+    assert cp._current_mode == expected
+    assert cp.mode_combo.currentText() == expected
+    assert cp.mode_combo.currentIndex() >= 0
+
+
 def test_hand_edited_demod_mode_falls_back_to_fm_with_reason(tmp_path, qapp):
     """手改不存在的 "NBEM" → 落 FM、migration_notes 写明原值与回落值、下拉可选。"""
     from control_panel import ControlPanel
