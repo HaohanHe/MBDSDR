@@ -489,6 +489,58 @@ def test_openngc_inventory_counts():
     assert types["PN"] == EXPECTED_INVENTORY["planetary_nebulae"]
 
 
+# 源文件 14,034 条中每列的缺失条数（空字符串计缺）。Name/Type 零缺失。
+SOURCE_FIELD_GAPS = {
+    "RA": 7, "Dec": 7, "Const": 7,
+    "MajAx": 1959, "MinAx": 2938,
+    "B-Mag": 2693, "V-Mag": 9784,
+    "M": 13924, "NGC": 13126, "IC": 13574,
+    "Common names": 13882,
+}
+
+# 进入 117 条目录后的缺失条数（后果见 docs/data-inventory.md §2.2）。
+CATALOG_FIELD_GAPS = {
+    "magnitude": 7,          # 无法按亮度排序/推荐，仅影响打分不影响可见
+    "size_arcmin": 2,        # 无角径，绘制退化为点标记（M40/M73）
+    "size_minor_arcmin": 66,  # 无短轴
+    "axis_ratio": 66,        # 按圆形绘制；查询/推荐不读取该字段
+    "zh_name": 83,           # 中文名为空，界面回退 name_en
+}
+
+
+def test_openngc_field_gap_counts():
+    """逐列缺失条数：缺的 7 条坐标全是 NonEx（不存在的天体）。"""
+    rows = _read_rows(NGC_CSV) + _read_rows(ADDENDUM_CSV)
+    for column, expected in SOURCE_FIELD_GAPS.items():
+        actual = sum(1 for row in rows if not row[column].strip())
+        assert actual == expected, f"{column}: {actual} != {expected}"
+    no_coord = [row["Name"] for row in rows
+                if not row["RA"].strip() or not row["Dec"].strip()]
+    assert len(no_coord) == 7
+    assert all(row["Type"] == "NonEx" for row in rows
+               if not row["RA"].strip() or not row["Dec"].strip())
+
+
+def test_catalog_field_gap_counts(cat):
+    entries = list(cat)
+    assert len(entries) == 117
+    for field, expected in CATALOG_FIELD_GAPS.items():
+        actual = sum(
+            1 for entry in entries
+            if getattr(entry, field) is None or (
+                isinstance(getattr(entry, field), str)
+                and not getattr(entry, field).strip()))
+        assert actual == expected, f"{field}: {actual} != {expected}"
+    # 轴比缺失必须与 unknown 来源严格同号，不许出现「有值却标 unknown」
+    unknown = [e for e in entries if e.axis_ratio_source == "unknown"]
+    assert len(unknown) == 66
+    assert all(e.axis_ratio is None for e in unknown)
+    # 缺星等的 7 条全是球状星团；缺角径的 2 条是双星/星群
+    assert {e.name for e in entries if e.magnitude is None} == {
+        "M22", "M35", "M62", "M69", "M70", "M71", "M107"}
+    assert {e.name for e in entries if e.size_arcmin is None} == {"M40", "M73"}
+
+
 def test_m102_raw_addendum_record(cat):
     """M102 的原始记录在 addendum.csv：Type=Dup、M=101，NGC.csv 里没有 M=102。"""
     dup = [r for r in _read_rows(ADDENDUM_CSV) if r["Name"] == "M102"]
