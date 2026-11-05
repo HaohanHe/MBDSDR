@@ -967,13 +967,20 @@ class ControlPanel(QWidget):
         idx = self.bookmark_combo.currentData()
         if idx is None or not isinstance(idx, int):
             return
-        if 0 <= idx < len(self._bookmarks):
-            _hz, name, _mode = self._bookmarks[idx]
-            del self._bookmarks[idx]
-            self._refresh_bookmarks()
-            # 删除必须落盘：只删内存列表时 FrequencyManager 里的记录还在，
-            # 下次启动 load_bookmarks_from_list 会把删掉的书签原样读回来。
-            self._remove_bookmark_persisted(name)
+        if not (0 <= idx < len(self._bookmarks)):
+            return
+        hz, name, _mode = self._bookmarks[idx]
+        answer = QMessageBox.question(
+            self, "删除书签",
+            f"删除书签「{name}」（{hz / 1e6:.3f} MHz）？此操作不能撤销。",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        del self._bookmarks[idx]
+        self._refresh_bookmarks()
+        # 删除必须落盘：只删内存列表时 FrequencyManager 里的记录还在，
+        # 下次启动 load_bookmarks_from_list 会把删掉的书签原样读回来。
+        self._remove_bookmark_persisted(name)
 
     def set_bookmark_store(self, mgr) -> None:
         """注入书签持久化仓库（mbdsdr_ai.frequency_manager.FrequencyManager）。
