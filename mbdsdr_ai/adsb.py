@@ -49,6 +49,10 @@ __all__ = [
     "ADSBDecoder",
     "modulate_baseband",
     "decode_baseband",
+    "RESAMPLE_TARGET_HZ",
+    "is_legal_decode_fs",
+    "resample_to_legal_fs",
+    "decode_baseband_any_fs",
     "add_awgn",
     "register_adsb_tools",
 ]
@@ -565,11 +569,32 @@ class ADSBDecoder:
 # --------------------------------------------------------------------------- #
 # 基带调制 / 前导检测 / 位判决（保留实验链路，参数对齐 demod_2400.c）
 # --------------------------------------------------------------------------- #
+def _validate_tx_fs(fs: float) -> int:
+    """合成侧采样率校验：必须 ≥2 MS/s 且为 1 MS/s 整数倍。
+
+    旧实现用 ``round(fs/1e6)`` 把 2.4 MS/s 静默当成 2 MS/s 合成，产出的波形
+    与元数据不自洽（合成器自己在骗人）。现在宁可显式拒绝，也不 round()。
+    """
+    try:
+        value = float(fs)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ADS-B 合成采样率必须是有限数值") from exc
+    sps = int(round(value / 1e6))
+    if not math.isfinite(value) or value < 2e6 or abs(value / 1e6 - sps) > 1e-6:
+        raise ValueError(
+            f"ADS-B 合成要求 fs ≥ 2 MS/s 且为 1 MS/s 整数倍，收到 fs={value:g} Hz；"
+            f"拒绝按 round() 静默取整为 {sps} 样本/µs（会生成与采样率元数据"
+            "不自洽的波形）。请改用 2/3/4/8 MS/s 等合法档位，或先用 "
+            "scipy.signal.resample_poly 做带限重采样。"
+        )
+    return sps
+
+
 def modulate_baseband(frame: bytes, fs: float = 4e6,
                       lead_us: float = 0.0,
                       amplitude: float = 1.0) -> np.ndarray:
     """把报文调制成复基带 PPM/OOK 样本（含前导）。lead_us 为前导前静默。"""
-    sps = int(round(fs / 1e6))  # 样本/微秒 = 样本/比特
+    sps = _validate_tx_fs(fs)  # 样本/微秒 = 样本/比特；非整数 MHz 显式拒绝
     chip = max(sps // 2, 1)
     lead = int(round(lead_us * sps))
     preamble = np.zeros(int(PREAMBLE_LEN_US * sps), dtype=np.complex128)
@@ -697,6 +722,100 @@ def decode_baseband(iq: np.ndarray, fs: float = 4e6,
     for key in ("frame", "df", "icao", "tc", "callsign"):
         if key in best:
             result[key] = best[key]
+    return result
+
+
+# 任意采样率入口的重采样目标档位：固定 8 MS/s。
+#
+# 为什么不是「最小的合法档位」：``_find_preamble``/``decode_baseband`` 把
+# 0.5 µs 前导脉冲宽度写成 ``chip = sps // 2`` 个样点。4 MHz 下 chip=2，
+# 位判决窗口只有 2 个样点，前后沿差 1 个样点就是半个脉冲；8 MHz 下 chip=4，
+# 脉冲有 4 个样点、前后各留余量。3/5/7 MHz 这类奇数 sps 会把 chip 取整成
+# 1/2/3 个样点（0.333/0.4/0.428 µs），与真实 0.5 µs 不符，实测 CRC 恒 0。
+# 2.048/2.4/2.8/3.2 MS/s 四种常见录制重采样到 8 MHz 的整数化比值分别为
+# 125/32、10/3、20/7、5/2，都在受控范围内。
+RESAMPLE_TARGET_HZ = 8_000_000.0
+
+
+def is_legal_decode_fs(fs: float) -> bool:
+    """``decode_baseband`` 的**严格契约**：≥2 MS/s 且为 1 MS/s 整数倍。
+
+    注意这只是「会不会被解码器拒绝」的契约；奇数 MHz（3/5/7）虽然不触发
+    ValueError，但 ``chip = sps // 2`` 取整会失真，``resample_to_legal_fs``
+    不把它们当直通档位。
+    """
+    try:
+        value = float(fs)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(value) or value < 2e6:
+        return False
+    sps = int(round(value / 1e6))
+    return abs(value / 1e6 - sps) <= 1e-6
+
+
+def resample_to_legal_fs(iq: np.ndarray,
+                         fs: float) -> Tuple[np.ndarray, float, str]:
+    """把任意采样率 IQ 带限重采样到 ``RESAMPLE_TARGET_HZ``（8 MS/s）。
+
+    **为什么必须带限**：ADS-B 的 0.5 µs 脉冲在 2 MS/s 下只有 1 个样本，
+    直接抽点（decimation）会把脉冲抽没或抽偏，还会把带外噪声折叠进来。
+    ``scipy.signal.resample_poly`` 内部先做 Kaiser 窗 FIR 低通再抽取/内插，
+    等价于抗混叠带限重采样；这里只用它，不手写 ``[::n]``。
+
+    直通条件（三条同时满足）：
+      1. ≥ 2 MS/s；2. 1 MS/s 整数倍（过严格契约）；3. 偶数 sps（chip 取整无损）。
+
+    返回 ``(iq_out, target_fs, note)``：
+      * 已满足直通条件 → 原样返回、``note=""``（不重采样，不改变样本）；
+      * 否则重采样到 8 MS/s，并在 ``note`` 里写清「原始 fs、目标 fs、方法」，
+        让下游能看见换过采样率。
+    """
+    iq_arr = np.asarray(iq)
+    if iq_arr.ndim != 1:
+        raise ValueError("IQ 必须是一维复基带序列")
+    value = float(fs)
+    sps = int(round(value / 1e6))
+    if is_legal_decode_fs(value) and sps % 2 == 0:
+        return iq_arr, value, ""
+    target = RESAMPLE_TARGET_HZ
+    from fractions import Fraction
+    ratio = Fraction(target / value).limit_denominator(10_000)
+    up, down = ratio.numerator, ratio.denominator
+    if up > 400 or down > 400:
+        raise ValueError(
+            f"采样率比 {value:g} → {target:g} 的整数化比值过大"
+            f"（{up}/{down}），拒绝做不受控的重采样"
+        )
+    from scipy.signal import resample_poly
+    out = resample_poly(iq_arr, up, down)
+    reason = ("低于 2 MS/s" if value < 2e6
+              else "非 1 MS/s 整数倍" if abs(value / 1e6 - sps) > 1e-6
+              else f"奇数 MHz（sps={sps}，0.5µs 脉冲宽度取整失真）")
+    note = (f"原始 fs={value:g} Hz {reason}，已用 resample_poly"
+            f"（Kaiser 窗 FIR 带限低通）重采样到 {target / 1e6:.3f} MS/s；"
+            f"解码在 {target:g} Hz 上进行。")
+    return out.astype(np.complex128, copy=False), target, note
+
+
+def decode_baseband_any_fs(iq: np.ndarray, fs: float,
+                           long_frame: bool = True,
+                           max_frames: int = 1) -> Dict[str, Any]:
+    """任意采样率的 ADS-B 解码入口（带限重采样到合法档后调用严格契约）。
+
+    ``decode_baseband`` 的严格契约（≥2 MS/s 且 1 MS/s 整数倍）保持不变；
+    真实录制常见 2.4/2.8 MS/s，本入口负责把它们带限重采样到最近的合法档，
+    并在返回值里显式带上 ``source_fs_hz`` / ``decode_fs_hz`` / ``resample_note``
+    ——不允许静默换采样率。重采样失败或解码失败时异常照常抛出/写入
+    ``decode_error``，不吞 ``ValueError``。
+    """
+    scan_iq, decode_fs, note = resample_to_legal_fs(iq, fs)
+    result = decode_baseband(scan_iq, fs=decode_fs, long_frame=long_frame,
+                             max_frames=max_frames)
+    result["source_fs_hz"] = round(float(fs), 3)
+    result["decode_fs_hz"] = round(float(decode_fs), 3)
+    result["resample_note"] = note
+    result.setdefault("decode_error", "")
     return result
 
 

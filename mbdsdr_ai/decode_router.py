@@ -103,12 +103,15 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.adsb",
         input_formats=(".cf32", ".cfile"),
         output_kind="frames",
-        sample_rate_rule="fs ≥ 2 MS/s 且为 1 MS/s 整数倍（Mode-S 1Mbit/s 前导 8us）",
+        sample_rate_rule=("fs ≥ 2 MS/s；严格入口 decode_baseband 要求 1 MS/s "
+                          "整数倍，路由走 decode_baseband_any_fs 带限重采样到 "
+                          "8 MS/s 并回报 decode_fs_hz / resample_note"),
         evidence=EVIDENCE_REAL,
         truth_source="external-truth",   # dump1090 官方样本逐帧对拍
         min_sample_condition=(
-            "1090MHz 下行 .cf32，fs=2 MS/s 或 4 MS/s，≥ 3 个干净 DF17 前导"
-            "（CRC-24 通过与 dump1090 对拍；多帧扫描见 adsb.decode_baseband）"
+            "1090MHz 下行 .cf32，fs ≥ 2 MS/s（任意档由 any_fs 入口带限重采样），"
+            "≥ 3 个干净 DF17 前导（CRC-24 通过与 dump1090 对拍；多帧扫描见 "
+            "adsb.decode_baseband）"
         ),
         external_tools=("dump1090", "dump1090-fa"),
         failure_codes=(
@@ -327,7 +330,7 @@ class _Ctx:
 
 def _route_adsb(ctx: _Ctx) -> Dict[str, Any]:
     """内置纯 numpy Mode-S DF17 多帧扫描（CRC-24 MSB-first、8us 前导模板）。"""
-    from .adsb import decode_baseband
+    from .adsb import decode_baseband_any_fs
 
     result = ctx.result
     try:
@@ -335,7 +338,12 @@ def _route_adsb(ctx: _Ctx) -> Dict[str, Any]:
         raw = np.fromfile(ctx.input_path, dtype=np.float32)
         iq = raw[0::2] + 1j * raw[1::2]
         # 真做多帧扫描：每个前导独立判决 + CRC，最多 64 个候选（扫描预算）。
-        d = decode_baseband(iq, fs=float(ctx.sample_rate), max_frames=64)
+        # 任意 fs 入口：2.4/2.8 MS/s 等常见录制先带限重采样到合法档，并把
+        # 实际解码采样率与说明带进结果（不许静默换采样率）。
+        d = decode_baseband_any_fs(iq, fs=float(ctx.sample_rate), max_frames=64)
+        result["source_fs_hz"] = d.get("source_fs_hz")
+        result["decode_fs_hz"] = d.get("decode_fs_hz")
+        result["resample_note"] = d.get("resample_note", "")
         frames = d.get("frames", [])
         result["found"] = bool(d.get("found", False))
         result["crc_ok"] = bool(d.get("crc_ok", False))
@@ -357,7 +365,13 @@ def _route_adsb(ctx: _Ctx) -> Dict[str, Any]:
             f"（前导候选 {result['num_preamble_candidates']} 个）"
         )
     except Exception as e:
+        # 失败原因必须进结果，不许只留一句人读消息就不见。
+        result["decode_error"] = f"{type(e).__name__}: {e}"
         result["analysis_error"] = str(e)
+        result["crc_ok"] = False
+        result["found"] = False
+        if not result.get("error_code"):
+            result["error_code"] = "invalid_input"
     return result
 
 

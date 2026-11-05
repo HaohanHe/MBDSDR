@@ -817,9 +817,21 @@ def step_decode(
     try:
         if mode == "adsb":
             from mbdsdr_ai import adsb
-            results = adsb.decode_baseband(iq, sample_rate_hz)
+            # 任意 fs 入口：2.4/2.8 MS/s 等非整数 MHz 录制先带限重采样到
+            # 最近的合法档（≥2 MS/s、1 MHz 整数倍），并把实际解码采样率与
+            # 重采样说明放进 detail——不许静默换采样率。
+            results = adsb.decode_baseband_any_fs(iq, sample_rate_hz,
+                                                  max_frames=64)
+            r.detail["decode_fs_hz"] = results.get("decode_fs_hz")
+            r.detail["source_fs_hz"] = results.get("source_fs_hz")
+            r.detail["resample_note"] = results.get("resample_note", "")
+            r.detail["decode_error"] = results.get("decode_error", "")
+            if results.get("resample_note"):
+                r.add_evidence(
+                    f"ADS-B 解码采样率 {results.get('decode_fs_hz')} Hz"
+                    f"（原始 {sample_rate_hz} Hz）：{results['resample_note']}")
             # ADS-B 验收只认 CRC 有效的 DF17；其他 Mode-S 下行格式不能凑数。
-            candidates = [results] if isinstance(results, dict) else results
+            candidates = results.get("frames") if isinstance(results, dict) else []
             if not isinstance(candidates, list):
                 candidates = []
             crc_frames = [
@@ -1002,6 +1014,9 @@ def step_decode(
         r.message = f"解码器模块导入失败: {e}"
         r.add_fix(f"确认 mbdsdr_ai 包完整安装（pip install -r requirements.txt）")
     except Exception as e:  # noqa: BLE001
+        # 失败原因必须进结果，不能只留一句人读消息（下游要能判失败码）。
+        r.detail["decode_error"] = f"{type(e).__name__}: {e}"
+        r.detail["verification_status"] = "decode_error"
         r.message = f"解码过程异常: {type(e).__name__}: {e}"
         r.add_fix(f"检查 IQ 数据质量；模式 {mode} 是否与频率匹配")
 

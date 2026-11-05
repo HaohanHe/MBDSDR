@@ -4322,7 +4322,11 @@ def _decode_adsb(args):
         return f"解码失败: {result['error']}"
     output = f"=== ADS-B 解码 ===\n"
     output += f"输入: {input_path}\n"
-    output += f"采样率: {_fmt_sample_rate(sample_rate)}\n"
+    output += f"采样率: {_fmt_sample_rate(sample_rate)}"
+    decode_fs = result.get("decode_fs_hz")
+    if decode_fs and float(decode_fs) != float(sample_rate):
+        output += f" → 实际解码 {_fmt_sample_rate(float(decode_fs))}"
+    output += "\n"
     if result.get("found"):
         output += f"前导检测: 命中 {result.get('num_preamble_candidates', 1)} 个候选\n"
         output += f"CRC-24 校验: {'通过' if result.get('crc_ok') else '失败'}，"
@@ -4334,6 +4338,10 @@ def _decode_adsb(args):
     else:
         output += "前导检测: 未命中（无有效 Mode-S 帧或信噪比过低）\n"
     output += f"可用外部工具: {result.get('external_tools_available', '无')}\n"
+    if result.get("resample_note"):
+        output += f"说明: {result['resample_note']}\n"
+    if result.get("decode_error"):
+        output += f"解码异常: {result['decode_error']}\n"
     if "note" in result:
         output += f"说明: {result['note']}\n"
     return output
