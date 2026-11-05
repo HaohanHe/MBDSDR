@@ -161,6 +161,13 @@ WATERFALL_COLORS_SDRPP = [
 ]
 
 
+# 瀑布历史环形缓冲深度（行）。合法集合必须与 C++ tokens.h
+# kWaterfallDepthChoices 逐值一致（GUI / schema / AI 共用六档）；不在档位内
+# 的值（例如 384）不静默夹取，回落默认 256 并记录原因。上限 4096 按实测
+# 可用性给出（512 bin 时约 8 MiB，2048 bin 时 32 MiB）。
+WF_DEPTH_CHOICES = (128, 256, 512, 1024, 2048, 4096)
+WF_DEPTH_DEFAULT_ROWS = 256
+
 #: 峰值判定默认门限（dB）：高于「本帧全部有限 bin 的中位数」多少才算峰。
 #: 设置 schema 的 peak_threshold_db 默认值与频谱条滑杆共用这个语义；
 #: 引用请用本符号名，不要写行号（行号会随重构漂）。
@@ -225,11 +232,12 @@ class SpectrumDataGenerator:
         # getFFTBuffer() 里 currentFFTLine-- 后回绕写入新行；pushFFT() 里 memmove
         # 把整帧缓冲上移一行再把新行写到底部。这里用 numpy 2D 环形缓冲复刻：
         # 新行从底部写入画布，旧行向上滚动，O(1) 写入、无 list.pop(0) 开销。
-        self.max_waterfall_lines = 256
+        self.max_waterfall_lines = WF_DEPTH_DEFAULT_ROWS
         self._wf_buf = np.full((self.max_waterfall_lines, num_bins),
                                np.nan, dtype=np.float32)
         self._wf_head = 0          # 下一个写入槽位（写后回绕）
         self._wf_count = 0         # 已写入的有效行数（<= max_waterfall_lines）
+        self._wf_base = 0          # 槽位 0 对应的绝对行号（改变深度后重算）
         self.wf_rows_written = 0   # 单调递增计数，供瀑布画布做增量同步
         self._has_real_data = False
         # ---- 跨帧峰跟踪（C++ rescanPeaks 同款语义）----
@@ -301,6 +309,59 @@ class SpectrumDataGenerator:
         part2 = self._wf_buf[:(start + k - N)]
         return np.concatenate([part1, part2], axis=0)
 
+    def set_waterfall_depth(self, rows: int) -> int:
+        """改变环形缓冲保留行数，返回实际生效值。
+
+        合法值只有六档 ``WF_DEPTH_CHOICES``（与 C++/AI 同一枚举）。档位外的
+        值（如 384、99999）回落到 ``WF_DEPTH_DEFAULT_ROWS`` 并写一条 warning，
+        不静默夹取——夹到 384 会让 Python 与 C++ 的回看时长差 1.5 倍。
+
+        只搬最近 ``min(已有行数, 新深度)`` 行，旧→新顺序不变；更老的历史被丢弃。
+        内存 = 深度 × bin 数 × 4 字节，改变深度不影响每帧增量绘制开销。
+        """
+        try:
+            n = int(rows)
+        except (TypeError, ValueError):
+            _log.warning("瀑布深度 %r 不是整数，已回落到 %d 行",
+                         rows, WF_DEPTH_DEFAULT_ROWS)
+            n = WF_DEPTH_DEFAULT_ROWS
+        if n not in WF_DEPTH_CHOICES:
+            _log.warning("瀑布深度 %r 不在六档 %s 内，已回落到 %d 行（不夹取，"
+                         "以免与 C++ 回看时长不一致）",
+                         rows, WF_DEPTH_CHOICES, WF_DEPTH_DEFAULT_ROWS)
+            n = WF_DEPTH_DEFAULT_ROWS
+        if n == self.max_waterfall_lines:
+            return n
+        keep = self.wf_latest_rows(min(self._wf_count, n))
+        buf = np.full((n, self.num_bins), np.nan, dtype=np.float32)
+        if len(keep):
+            buf[:len(keep)] = keep
+        self._wf_buf = buf
+        self.max_waterfall_lines = n
+        self._wf_head = len(keep) % n
+        self._wf_count = len(keep)
+        self._wf_base = self.wf_rows_written - len(keep)
+        return n
+
+    def wf_available_rows(self) -> int:
+        """当前环形缓冲里可回看的有效行数（<= max_waterfall_lines）。"""
+        return int(self._wf_count)
+
+    def wf_rows_at(self, end_index: int, k: int) -> np.ndarray:
+        """返回绝对行号 ``[end-k, end)`` 的瀑布数据（旧→新），用于历史回看。
+
+        绝对行号以 ``wf_rows_written`` 计；超出当前保留范围的请求会被夹取。
+        """
+        k = max(0, int(k))
+        end = min(int(end_index), self.wf_rows_written)
+        oldest = self.wf_rows_written - self._wf_count
+        start = max(end - k, self._wf_base, oldest, 0)
+        if end <= start:
+            return np.empty((0, self.num_bins), dtype=np.float32)
+        N = self.max_waterfall_lines
+        idx = (np.arange(start, end) - self._wf_base) % N
+        return self._wf_buf[idx]
+
     # ------------------------------------------------------------------ 配置
     def set_window(self, name: str):
         if name in self.WINDOWS and name != self.window_name:
@@ -336,6 +397,7 @@ class SpectrumDataGenerator:
                                np.nan, dtype=np.float32)
         self._wf_head = 0
         self._wf_count = 0
+        self._wf_base = 0
         self.wf_rows_written = 0
         self._prev_wf_row = None
         self.max_hold = None
@@ -354,6 +416,7 @@ class SpectrumDataGenerator:
         self._wf_buf.fill(np.nan)
         self._wf_head = 0
         self._wf_count = 0
+        self._wf_base = 0
         self.wf_rows_written = 0
         self._prev_wf_row = None
         self.max_hold = None
@@ -1035,6 +1098,9 @@ class _PlotState:
         # ---- 调谐步进网格（对标 SDR++ waterfall.h:38 snapInterval）----
         # 普通滚轮/左右箭头按此步进调谐；Shift ×10，Alt ×0.1。
         self.snap_interval = 10_000.0                   # Hz，默认 10 kHz
+        # 瀑布历史回看：None=跟随最新；否则为「显示窗口的上边界绝对行号」。
+        self.wf_history_end: Optional[int] = None
+        self._wf_hist_key = None                        # 回看画面缓存键（避免 10 Hz 重算）
         # ---- VFO 带宽显示（对标 SDR++ waterfall.cpp:221-231 VFO 矩形）----
         # None = 不绘制 VFO 矩形；否则在谱面画半透明橙色带宽带。
         self.vfo_bandwidth_hz: Optional[float] = None
@@ -1776,6 +1842,26 @@ def _draw_waterfall(painter, rect, state):
     bg = QColor(PAL_BG)
     total = gen.wf_rows_written
 
+    # 历史回看：滚轮在瀑布上滚到旧行时，按绝对窗口重绘，不再增量跟随最新。
+    # 回看窗口固定（新数据继续入环形缓冲，不抢走用户正在看的旧行）。
+    hist_end = getattr(state, "wf_history_end", None)
+    if hist_end is not None:
+        key = (int(hist_end), h, w, float(state.db_min), float(state.db_max))
+        if getattr(state, "_wf_hist_key", None) == key:
+            painter.drawImage(rect, state._wf_canvas)
+            return
+        rows = gen.wf_rows_at(int(hist_end), h)
+        buf[:, :, 0] = bg.red()
+        buf[:, :, 1] = bg.green()
+        buf[:, :, 2] = bg.blue()
+        buf[:, :, 3] = 255
+        m = len(rows)
+        for i in range(m):
+            _wf_paint_row_into(state, rows[i], buf[h - m + i])
+        state._wf_hist_key = key
+        painter.drawImage(rect, state._wf_canvas)
+        return
+
     # x→频率映射变化（Ctrl 平移 / 改调谐中心 / 换采样率）时，旧画布是按老
     # 映射画成的，必须按环形缓冲全量重绘，否则瀑布与上方光谱会横向错开。
     map_key = (round(_view_center_hz(state), 3),
@@ -2346,6 +2432,21 @@ class SpectrumPanel(QWidget):
     def set_snap_interval(self, hz: float):
         """主窗口设置滚轮 / 键盘调谐步进网格（Hz），转发给 _PlotState。"""
         self._state.set_snap_interval(hz)
+
+    def set_waterfall_depth_rows(self, rows: int) -> int:
+        """设置瀑布历史保留行数（六档：128/256/512/1024/2048/4096），
+        立即生效并返回实际生效值；非档位值回落 256 并记录原因。
+
+        深度只决定能回看多久与内存占用；每帧增量绘制仍只处理新行，
+        不随深度线性变慢。回看用滚轮在下方瀑布窗口操作。
+        """
+        n = self.generator.set_waterfall_depth(rows)
+        self._state.wf_history_end = None
+        self._state._wf_hist_key = None  # 回看缓存按旧缓冲算的，必须作废
+        self._state._wf_map_key = None   # 深度变了 → 画布按新环形缓冲全量重建
+        self._state._wf_consumed = 0
+        self._redraw()
+        return n
 
     def set_vfo_bandwidth(self, bw_hz: Optional[float]):
         """主窗口设置 VFO 带宽（Hz）；转发给 _PlotState。传 None 关闭 VFO 矩形。"""
@@ -3413,6 +3514,45 @@ class WaterfallWidget(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         _render_wf_only(p, self.state, self.width(), self.height())
         p.end()
+
+    def wheelEvent(self, event):
+        """滚轮回看历史：上滚看更旧，下滚回到最新；回看时新数据继续入缓冲。
+
+        回看窗口按绝对行号固定，不会被新行推走；深度由设置项
+        ``waterfall_depth_rows`` 决定（六档 128/256/512/1024/2048/4096 行）。
+        """
+        gen = self.state.panel.generator
+        total = gen.wf_rows_written
+        avail = gen.wf_available_rows()
+        if total <= 0 or avail <= 0:
+            event.ignore()
+            return
+        dy = event.angleDelta().y()
+        if dy == 0:
+            event.ignore()
+            return
+        h = max(1, self.height())
+        oldest = total - avail
+        min_end = min(total, oldest + h)
+        end = self.state.wf_history_end
+        if end is None:
+            end = total
+        step = max(1, h // 20)                 # 一格滚轮约 5% 屏高
+        end += -step if dy > 0 else step
+        end = max(min_end, min(total, end))
+        if end >= total:
+            self.state.wf_history_end = None
+            self.state._wf_hist_key = None     # 退出回看，缓存的旧窗口画面作废
+            self.state._wf_map_key = None      # 回到实时 → 按最新 h 行全量重建
+            tip = "瀑布：回到最新"
+        else:
+            self.state.wf_history_end = int(end)
+            self.state._wf_hist_key = None     # 窗口边界变了，缓存键必然失配
+            tip = f"瀑布回看：-{total - int(end)} 行（下滚回到最新）"
+        self.update()
+        QToolTip.showText(event.globalPosition().toPoint(), tip,
+                          self, self.rect(), 800)
+        event.accept()
 
 
 # 向后兼容别名：旧代码若直接引用 SpectrumPlot / SpectrumGLPlot 仍可用。

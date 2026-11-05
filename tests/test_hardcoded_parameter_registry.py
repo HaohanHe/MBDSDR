@@ -238,6 +238,42 @@ def test_cpp_tokens_match_documented_values():
 
 
 @pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
+def test_waterfall_depth_is_six_tier_enum_everywhere(caplog):
+    """瀑布深度六档：C++ / Python 生成器 / 设置 schema 三者逐值一致。
+
+    反证：任一端允许 384（旧 Python 行为）或多一档，本测试红；非档位值必须
+    回落 256 并留下原因，不许静默夹取（夹到 384 会让回看时长差 1.5 倍）。
+    """
+    import logging
+    if str(REPO / "desktop") not in sys.path:
+        sys.path.insert(0, str(REPO / "desktop"))
+    import config_schema
+    import spectrum_widget
+
+    expected = (128, 256, 512, 1024, 2048, 4096)
+    # Python 生成器
+    assert spectrum_widget.WF_DEPTH_CHOICES == expected
+    gen = spectrum_widget.SpectrumDataGenerator(num_bins=512)
+    with caplog.at_level(logging.WARNING, logger="spectrum_widget"):
+        assert gen.set_waterfall_depth(384) == 256
+    assert "不在六档" in caplog.text, "非法档位必须记录原因，不许静默"
+    assert gen.set_waterfall_depth(1024) == 1024
+
+    # 设置 schema 不再是任意 128–4096 的 int
+    item = config_schema.SCHEMA["waterfall_depth_rows"]
+    assert item.kind == "enum"
+    assert tuple(item.choice_values) == expected
+    value, reason = config_schema.validate_value(item, 384)
+    assert value == 256 and reason and "不在可选值" in reason
+
+    # C++ tokens.h 同一数组
+    m = re.search(r"kWaterfallDepthChoices\[\]\s*=\s*\{([^}]*)\}",
+                  TOKENS_H.read_text(encoding="utf-8"))
+    assert m, "tokens.h 里找不到 kWaterfallDepthChoices"
+    assert tuple(int(x) for x in re.findall(r"\d+", m.group(1))) == expected
+
+
+@pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
 def test_db_default_range_matches_python_and_keeps_minus50_visible():
     """C++ 默认 dB 视窗冻结在 -100..-20（与 Python 一致）。
 

@@ -241,6 +241,31 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                  _e(1_000_000, "1 MHz")),
     ),
 
+    SettingItem(
+        key="waterfall_depth_rows", group="频谱与解码", kind="enum",
+        label="瀑布历史深度", default=256,
+        help=("瀑布图保留多少行历史，决定能向上回溯多久。"
+              "只提供六档（128/256/512/1024/2048/4096 行），与 C++ 界面和 AI "
+              "工具同一枚举；非档位值（如 384）回落 256 并在状态栏说明原因。"
+              "2048 行在 512 bin 下约 4 MB、2048 bin 下约 16 MB。"
+              "深度只影响回看长度与内存，不拖慢每帧刷新；"
+              "在瀑布窗口滚轮上滚即可回看，下滚回到最新。"),
+        source="desktop/spectrum_widget.py WF_DEPTH_CHOICES / set_waterfall_depth()；"
+               "cpp/src/core/tokens.h kWaterfallDepthChoices 同六档",
+        choices=(_e(128, "128 行"), _e(256, "256 行"), _e(512, "512 行"),
+                 _e(1024, "1024 行"), _e(2048, "2048 行"), _e(4096, "4096 行")),
+    ),
+    SettingItem(
+        key="sky_extinction_k", group="星象仪", kind="float",
+        label="大气消光系数 k", default=float(_SKY_EXTINCTION_K),
+        minimum=0.0, maximum=0.5, step=0.01,
+        help=("大气对星光的消光强度：Δm = k / sin(仰角)，逐星按各自高度计算。"
+              "0=理想无消光，0.2=晴朗海平面（默认），0.5=雾霾/低空污染。"
+              "它只压低低仰角天体，不改变 Bortle 决定的天顶极限星等，两者不重复计。"),
+        source="mbdsdr_ai/skyengine/stars.py EXTINCTION_K=0.2；"
+               "desktop/rf_sky_view.py set_extinction_k()",
+    ),
+
     # ---------------------------------------------------------------- 存储与日志
     SettingItem(
         key="record_dir", group="存储与日志", kind="text",
