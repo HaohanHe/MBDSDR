@@ -5202,6 +5202,11 @@ class MainWindow(QMainWindow):
                 self._active_sdr_backend.set_frequency(freq * 1e6)
             except Exception:
                 pass
+        else:
+            # 无设备：频谱交互仍更新显示（预置频率可用），但必须明说没下发，
+            # 否则「频率标签变了」会被读成「已经调谐到那里」。
+            self.statusBar().showMessage(
+                "未连接 SDR：仅更新显示频率，未下发硬件调谐", MSG_NORMAL)
         # 更新状态栏频率显示
         self.freq_label.setText(f"{freq:.3f} MHz")
         self.status_freq.setText(f"频率: {freq:.3f} MHz")
@@ -7916,7 +7921,9 @@ class MainWindow(QMainWindow):
                 "请连接 RTL-SDR/HackRF/SoapySDR 等 USB 设备后再试。")
             return
         if self._sweep_worker is not None and self._sweep_worker.isRunning():
-            return  # 已经在扫
+            # 已在扫频：幂等忽略重复触发，但状态栏必须说明，而不是点了没反应。
+            self.statusBar().showMessage("扫频进行中，请稍候…", MSG_NORMAL)
+            return
 
         # ---- 扫频参数对话框（对标 SDR++ scanner 的 start/end/step/dwell）----
         try:
@@ -8516,8 +8523,12 @@ class MainWindow(QMainWindow):
         self._last_gimbal_cycle = None
         self._sat_track_timer.start()
         self._sync_tracking_ui(True)
+        no_backend = self._active_sdr_backend is None
         self.statusBar().showMessage(
-            f"开始跟踪 {sat_name}（下行 {downlink_freq_hz/1e6:.4f} MHz）", MSG_NORMAL)
+            f"开始跟踪 {sat_name}（下行 {downlink_freq_hz/1e6:.4f} MHz）"
+            + ("；未连接 SDR：仅显示预测频率/多普勒，未下发硬件调谐"
+               if no_backend else ""),
+            MSG_IMPORTANT if no_backend else MSG_NORMAL)
         self._poll_satellite_track()  # 立即先调谐一次
         self._refresh_tx_readout()    # 目标切换 → 发射预偏读数立即重算
 

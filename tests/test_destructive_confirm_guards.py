@@ -491,11 +491,14 @@ def test_modulation_identify_is_idempotent_while_running():
 
     stub = _RunningWorker()
     panel._worker = stub
+    panel.status_label.setText("就绪：对准信号后点「识别信号」")
     panel._on_identify_clicked()
 
     assert panel._worker is stub, "识别中重复点击不得替换 worker"
     assert stub.start_calls == 0, "识别中重复点击不得再起线程"
     assert panel.identify_btn.isEnabled() is False, "识别中按钮必须置灰"
+    assert "识别中" in panel.status_label.text(), \
+        "识别中重复点击必须有可见反馈（不能静默 return）"
 
 
 def test_constellation_clear_is_idempotent():
@@ -556,10 +559,13 @@ def test_spectrum_sweep_is_idempotent_while_running(window, monkeypatch):
     stub = _RunningSweep()
     w._sweep_worker = stub
     w._active_sdr_backend = _Backend()
+    w.statusBar().clearMessage()
     monkeypatch.setattr(mw, "QDialog", _SweepDialogSpy)
     try:
         w._start_sweep()
         assert w._sweep_worker is stub, "扫频中重复点击不得重起/替换 worker"
+        assert "扫频进行中" in w.statusBar().currentMessage(), \
+            "扫频中重复点击必须有状态栏提示（不能静默 return）"
     finally:
         w._sweep_worker = None
         w._active_sdr_backend = None
@@ -578,8 +584,12 @@ def test_sat_track_start_is_idempotent_while_tracking():
     assert sent == ["NOAA 19"], "首次开始应发一次请求"
 
     panel.set_tracking_state(True)
+    panel.state_label.setText("空闲")
     panel._on_start_clicked()
     assert sent == ["NOAA 19"], "跟踪中重复开始不得再发请求"
+    assert "忽略重复开始" in panel.state_label.text(), \
+        "跟踪中重复开始必须有可见反馈（不能静默 return）"
+    assert panel.start_btn.isEnabled() is False, "跟踪中开始按钮必须置灰"
 
     panel.set_tracking_state(False)
     panel._on_start_clicked()
@@ -691,3 +701,82 @@ def test_close_while_tracking_restores_tuning_before_save(window, monkeypatch):
     finally:
         w._tx_session = None
         w._recording = False
+
+
+# ======================================================================
+# R 组：未连接 / 无设备时可点性（矩阵里三条"真缺陷"的收口）
+# ======================================================================
+def test_modulation_apply_disabled_after_disconnect():
+    """识别成功后断开设备 → 「应用」必须置灰，不能点半截旧结果冒充已下发。"""
+    import modulation_panel as mp
+
+    panel = mp.ModulationPanel()
+    panel.set_backend(object())
+    panel.set_sdr_connected(True)
+    panel._last = object()
+    panel.apply_btn.setEnabled(True)
+
+    panel.set_sdr_connected(False)
+    assert panel.apply_btn.isEnabled() is False, \
+        "断开后「应用」必须置灰（否则点了只回一句已应用解调 = 假应用）"
+
+
+def test_spectrum_click_without_backend_warns_not_fake_tuned(window):
+    """无设备时频谱拖动/滚轮：显示频率可以更新，但状态栏必须明说没下发。"""
+    w, _mw = window
+    w._active_sdr_backend = None
+    w.statusBar().clearMessage()
+    w._on_spectrum_freq_changed(100.0)
+    msg = w.statusBar().currentMessage()
+    assert "未连接 SDR" in msg and "未下发" in msg, \
+        "无设备调谐必须显式提示，不能只改频率标签冒充已调谐"
+    assert "100.000" in w.freq_label.text(), "显示频率仍应更新（可预置）"
+
+
+def test_sat_track_start_without_backend_warns(window, monkeypatch):
+    """无设备仍可看跟踪预测，但开始跟踪时必须明说未下发硬件调谐。"""
+    w, mw = window
+    assert mw.LoopSatTracker is not None, "前提：测试环境装有 skyfield"
+
+    class _Tracker:
+        selected_name = ""
+        ground_station = None
+
+        def __init__(self, *_a, **_k):
+            pass
+
+        def select_satellite(self, name):
+            self.selected_name = name
+            return True
+
+        def set_downlink_freq(self, hz):
+            pass
+
+    class _Timer:
+        def start(self):
+            pass
+
+        def isActive(self):  # noqa: N802 - 模拟 QTimer 接口
+            return False
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(mw, "LoopSatTracker", _Tracker)
+    monkeypatch.setattr(w, "_poll_satellite_track", lambda: None)
+    w._loop_sat_tracker = None
+    w._sat_track_timer = _Timer()
+    w._observer_lat, w._observer_lon = 30.0, 120.0
+    w._active_sdr_backend = None
+    w.statusBar().clearMessage()
+    try:
+        w._start_satellite_tracking("NOAA 19", 137.1e6)
+        msg = w.statusBar().currentMessage()
+        assert "开始跟踪 NOAA 19" in msg
+        assert "未连接 SDR" in msg and "未下发" in msg, \
+            "无设备开始跟踪必须显式提示，不能让人以为硬件已跟着卫星调谐"
+    finally:
+        w._loop_sat_tracker = None
+        w._sat_track_timer = None
+        w._observer_lat = w._observer_lon = None
+        w.sat_track_panel.set_tracking_state(False)

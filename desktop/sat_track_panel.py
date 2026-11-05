@@ -359,6 +359,8 @@ class SatTrackPanel(QFrame):
             # 已在跟踪：重复触发（连点、菜单/外部调用）一律幂等，
             # 绝不再发一次 track_requested——主窗口若重入会覆盖
             # 「跟踪前频率/模式」，停止时就回不到用户原来的调谐。
+            # 但必须留下可见反馈：静默 return 等于点了没反应。
+            self.state_label.setText("跟踪中（忽略重复开始）")
             return
         name = self.sat_combo.currentText().strip()
         if not name:

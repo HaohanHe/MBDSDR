@@ -182,20 +182,27 @@ class ModulationPanel(QWidget):
                      and _KERNEL_AVAILABLE)
         working = self._worker is not None and self._worker.isRunning()
         self.identify_btn.setEnabled(ready and not working)
+        if not ready:
+            # 断开后「应用」必须一起置灰：旧识别结果还在，但后端已不在，
+            # 点「应用」只会回一句"已应用解调"——那是假应用。
+            self.apply_btn.setEnabled(False)
         if not _KERNEL_AVAILABLE:
             self.status_label.setText("识别内核不可用")
         elif not ready:
             self.status_label.setText("未连接，无法识别")
         elif working:
-            self.status_label.setText("识别中…")
+            self.status_label.setText("识别中…，请稍候")
         else:
             self.status_label.setText("就绪：对准信号后点「识别信号」")
 
     # ------------------------------------------------------------------ slots
     def _on_identify_clicked(self):
         if self._worker is not None and self._worker.isRunning():
+            # 已在识别：幂等忽略重复点击，但必须留下可见反馈——
+            # 静默 return 会让用户以为是「点了没反应」。
+            self.status_label.setText("识别中…，请稍候")
             return
-        self.status_label.setText("识别中…")
+        self.status_label.setText("识别中…，请稍候")
         self.identify_btn.setEnabled(False)
         self._worker = _IdentifyWorker(self._backend, parent=self)
         self._worker.done.connect(self._on_done)
