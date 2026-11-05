@@ -4224,6 +4224,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._refraction_enabled = bool(enabled)
         self.update()
 
+    def set_bortle(self, level: int) -> None:
+        """设置 Bortle 光害等级（1=极暗乡村 … 9=市中心），越界夹到 1–9。
+
+        这是**唯一**公开写入 ``_bortle`` 的入口（设置面板/持久化都走它，
+        不允许外部直接改私有属性）。下一帧 ``_star_selection`` 会用新等级
+        重算可见星与极限星等，因此调用后立即生效；不改观测站/图层，不写盘。
+        """
+        try:
+            lv = int(level)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Bortle 等级必须是整数：{level!r}") from exc
+        self._bortle = max(1, min(9, lv))
+        self.update()
+
     # -- 星座/星官图层开关（每套体系可单独开关） --------------------------
     def set_constellation_layer_visible(self, system_id: str,
                                         visible: bool) -> None:
