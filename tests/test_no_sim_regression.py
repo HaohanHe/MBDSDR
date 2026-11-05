@@ -427,7 +427,9 @@ def test_real_iq_tone_spectrum(qapp):
     iq = (tone + noise).astype(np.complex64)
 
     # 5.1 update_iq() 后频谱非 NaN
-    panel.update_iq(iq, center_hz, sr)
+    # 峰值要 3 帧持续确认（检测器定义）：同一 IQ 连喂 3 帧再断言峰。
+    for _ in range(3):
+        panel.update_iq(iq, center_hz, sr)
     assert panel.generator.has_data() is True, "喂入 IQ 后应有数据"
     assert np.isfinite(panel.generator.spectrum).any(), "频谱应含有限值"
 

@@ -203,7 +203,13 @@ CPP_EXPECTED = {
     "kDbSpinUpperMax": 20,
     "kDbLowerDefault": -45,
     "kDbUpperDefault": 0,
+    # 两条峰门**分开记账**：显示门 6.0 / 校准门 15.0（见 3b 节）。
+    "kPeakRelDb": 6.0,
     "kPeakThresholdDefault": 15.0,
+    "kPeakAbsFloorDbfs": -100.0,
+    "kPeakMatchBins": 5,
+    "kPeakMinSeenFrames": 3,
+    "kPeakMaxMissFrames": 10,
     "kPeakThresholdMin": 5,
     "kPeakThresholdMax": 40,
     "kSquelchMinDb": -100,
@@ -251,3 +257,87 @@ def test_cross_language_deltas_are_documented():
     for semantic in CROSS_LANGUAGE_DELTAS:
         assert semantic in text, (
             f"跨语言差异「{semantic}」未在 docs/hardcoded-parameters.md 登记")
+
+
+# ---------------------------------------------------------------------------
+# 3b. 峰值检测：显示门与校准门分开记账（2026-11-05 裁定）
+# ---------------------------------------------------------------------------
+CPP_SPECTRUM_DISPLAY_H = REPO / "cpp" / "src" / "ui" / "spectrum_display.h"
+CPP_SPECTRUM_WIDGET_CPP = REPO / "cpp" / "src" / "ui" / "spectrum_widget.cpp"
+CPP_CALIBRATION_DIALOG_CPP = REPO / "cpp" / "src" / "ui" / "calibration_dialog.cpp"
+DESKTOP = REPO / "desktop"
+
+#: Python 侧同一套检测器定义（spectrum_widget.py 的模块常量）。
+PY_PEAK_DEFINITION = {
+    "_PEAK_REL_DB_DEFAULT": "kPeakRelDb",
+    "_PEAK_ABS_FLOOR_DBFS": "kPeakAbsFloorDbfs",
+    "_PEAK_MIN_SEEN_FRAMES": "kPeakMinSeenFrames",
+    "_PEAK_MATCH_BINS": "kPeakMatchBins",
+    "_PEAK_MAX_MISS_FRAMES": "kPeakMaxMissFrames",
+}
+
+
+def _tokens_values():
+    text = TOKENS_H.read_text(encoding="utf-8")
+    return {m.group(1): float(m.group(2))
+            for m in _INLINE_CONSTEXPR.finditer(text)}
+
+
+def _tokens_comment_text():
+    """把 tokens.h 的 // 注释抽出来并归一空白（跨行句子才能整句断言）。"""
+    parts = [line.split("//", 1)[1] for line in
+             TOKENS_H.read_text(encoding="utf-8").splitlines() if "//" in line]
+    return re.sub(r"\s+", " ", " ".join(parts))
+
+
+@pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
+def test_display_gate_and_calibration_gate_are_locked_apart():
+    """显示门 6.0 与校准门 15.0 是两条门：各自冻结、各自接线、注释禁止合并。
+
+    反证：把 kPeakRelDb 改成别的值 → 冻结红；把 kPeakThresholdDefault 改成
+    别的值 → 冻结红。两个都红，才说明两条门各自有守卫（而不是一条锁死、
+    另一条自由漂）。
+    """
+    found = _tokens_values()
+    assert found["kPeakRelDb"] == pytest.approx(6.0), (
+        "显示检测器门限漂了；这是 2026-11-05 裁定的定义值，"
+        "改它必须同步 docs/hardcoded-parameters.md 与两份实现")
+    assert found["kPeakThresholdDefault"] == pytest.approx(15.0), (
+        "频率校准参考门漂了；校准必须拒绝纯噪声（test_frequency_calibrator）")
+    assert found["kPeakRelDb"] != found["kPeakThresholdDefault"], \
+        "两条门被合并成一个值：显示反证与校准诚实性要求相反"
+
+    # 接线：显示路径只许用显示门，校准路径只许用校准门。
+    display_h = CPP_SPECTRUM_DISPLAY_H.read_text(encoding="utf-8")
+    widget_cpp = CPP_SPECTRUM_WIDGET_CPP.read_text(encoding="utf-8")
+    calib_cpp = CPP_CALIBRATION_DIALOG_CPP.read_text(encoding="utf-8")
+    assert "tokens::kPeakRelDb" in display_h, \
+        "spectrum_display.h 没有引用显示门（又写回 15 了？）"
+    assert "tokens::kPeakRelDb" in widget_cpp, \
+        "峰值自旋框默认值没有引用显示门"
+    assert "tokens::kPeakThresholdDefault" in calib_cpp, \
+        "频率校准没有引用校准门"
+    assert "tokens::kPeakThresholdDefault" not in display_h, \
+        "显示路径又引用了校准门：两条门被串线了"
+    assert "tokens::kPeakRelDb" not in calib_cpp, \
+        "校准路径引用了显示门：校准会放进纯噪声"
+
+    # 注释必须保留「不要合并」的裁定（跨行句子按空白归一后断言）。
+    assert "Do NOT merge the two" in _tokens_comment_text(), \
+        "tokens.h 丢了禁止合并的注释：后来人会以为两条门可以统一"
+
+
+@pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
+def test_python_peak_detector_definition_matches_cpp():
+    """Python 路径必须按同一套检测器定义（不是只对齐相对门那一个数字）。"""
+    if str(DESKTOP) not in sys.path:
+        sys.path.insert(0, str(DESKTOP))
+    import spectrum_widget as sw
+
+    found = _tokens_values()
+    for py_name, cpp_name in PY_PEAK_DEFINITION.items():
+        assert hasattr(sw, py_name), (
+            f"spectrum_widget.py 未定义 {py_name}：检测器定义没有落成常量")
+        assert float(getattr(sw, py_name)) == pytest.approx(found[cpp_name]), (
+            f"{py_name}={getattr(sw, py_name)} 与 C++ {cpp_name}="
+            f"{found[cpp_name]} 不一致；两条路径的检测器定义必须同一套")

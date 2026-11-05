@@ -161,6 +161,36 @@ WATERFALL_COLORS_SDRPP = [
 ]
 
 
+#: 峰值判定默认门限（dB）：高于「本帧全部有限 bin 的中位数」多少才算峰。
+#: 设置 schema 的 peak_threshold_db 默认值与频谱条滑杆共用这个语义；
+#: 引用请用本符号名，不要写行号（行号会随重构漂）。
+#:
+#: 6 dB 是 2026-11-05 裁定的检测器定义值（与 C++ tokens.h::kPeakRelDb 同值）。
+#: 反证：median+8 dBFS 的持续载波在 15 dB 下数学上进不了候选。
+#: 已知代价（不是 bug）：6 dB 会把比全帧中位数还低 0.3 dB 的持续噪声线
+#: （88.1 MHz OTA 录音里的 87.700 MHz）经 10 帧跟踪升成常驻标签，且
+#: 228/256 帧撞满标签上限。接受这个代价，别当漏掉的 bug 去"修"。
+_PEAK_REL_DB_DEFAULT = 6.0
+
+#: 绝对电平门（dBFS）：低于它的 bin 不参与候选。
+#: 已知副作用（是绝对电平门的固有行为，不是 bug）：底噪中位数 -110 dBFS
+#: 时，+8 dB 载波 = -102 dBFS 会被这条门挡掉（同余量在 -100 底噪下可标）。
+_PEAK_ABS_FLOOR_DBFS = -100.0
+
+#: 持续确认帧数：同一位置连续出现 3 帧才升成标签（单帧尖峰永不成熟）。
+_PEAK_MIN_SEEN_FRAMES = 3
+#: 跨帧匹配半径（bin）：同一信号允许 ±2 bin 漂移。
+_PEAK_MATCH_BINS = 5
+#: 遗忘帧数：连续 10 帧没再出现才丢弃跟踪。
+_PEAK_MAX_MISS_FRAMES = 10
+
+#: 标签数量上限：按「标签矩形互交」实测选（1360px 面板、8pt、带 SNR）。
+#: 12 个丢弃 50.0%、8 个 37.5%，都超过 30% 可读性判据；6 个 16.7% 达标。
+#: 证据与回归门见 tests/test_spectrum_scale_peak_range.py::test_peak_label_cap_*。
+#: C++ 侧 cap=12 不冲突：它只画三角形不画文字（spectrum_display.cpp:1527-1557）。
+_PEAK_MAX_LABELS = 6
+
+
 # ============================================================================
 # 频谱数据生成器（真 IQ FFT，无任何合成数据）
 # ============================================================================
@@ -202,6 +232,10 @@ class SpectrumDataGenerator:
         self._wf_count = 0         # 已写入的有效行数（<= max_waterfall_lines）
         self.wf_rows_written = 0   # 单调递增计数，供瀑布画布做增量同步
         self._has_real_data = False
+        # ---- 跨帧峰跟踪（C++ rescanPeaks 同款语义）----
+        # 每数据帧推进一次（push_iq 内），不随瀑布行号节流。
+        self.peak_rel_db = _PEAK_REL_DB_DEFAULT   # 跟踪用相对门（面板随滑杆同步）
+        self._peak_tracks: List[dict] = []
         # 多帧幅度平均累加器（复数 FFT 幅度域平均，降低噪声）
         self._mag_accum: Optional[np.ndarray] = None
         self._avg_count = 0
@@ -306,7 +340,7 @@ class SpectrumDataGenerator:
         self._prev_wf_row = None
         self.max_hold = None
         self.min_hold = None
-        self._peak_snr_cache = None
+        self._peak_tracks = []
         self._reset_average()
 
     # ------------------------------------------------------------------ 状态
@@ -324,7 +358,7 @@ class SpectrumDataGenerator:
         self._prev_wf_row = None
         self.max_hold = None
         self.min_hold = None
-        self._peak_snr_cache = None
+        self._peak_tracks = []
         self._reset_average()
 
     # ------------------------------------------------------------------ 窗函数
@@ -423,6 +457,8 @@ class SpectrumDataGenerator:
         self.spectrum = self._resample_max(power_db)
         self._has_real_data = True
         self._update_hold()
+        # 峰跟踪随每个数据帧推进（不挂在瀑布行号上，避免 10 帧绘制缓存）。
+        self.advance_peak_tracks()
 
         # 瀑布行：可选 IIR 时间平滑（只影响瀑布，不影响上面的频谱曲线）
         if self.wf_smooth and self._prev_wf_row is not None \
@@ -493,39 +529,77 @@ class SpectrumDataGenerator:
             return None
         return float(np.median(finite))
 
-    def find_peaks_with_snr(self, rel_threshold_db: float,
-                            max_peaks: int = 8
-                            ) -> List[Tuple[float, float, float]]:
-        """同 find_peaks，但每个峰多带一个 SNR（峰功率 − 本帧中位数）。
+    def advance_peak_tracks(self, rel_threshold_db: Optional[float] = None):
+        """用当前 spectrum 推进**一帧**峰跟踪（每个数据帧调用一次）。
 
-        返回 [(freq_hz, power_db, snr_db), ...]，按功率降序；约 10 帧节流。
+        与 C++ rescanPeaks 同一套定义：±``_PEAK_MATCH_BINS`` 内匹配、
+        命中 seen++、未命中 missed++、seen ≥ ``_PEAK_MIN_SEEN_FRAMES``
+        才成熟、missed ≥ ``_PEAK_MAX_MISS_FRAMES`` 才遗忘。
+        单帧尖峰永远到不了 3，因此不会变成常驻标签。
+        """
+        if not self._has_real_data:
+            return
+        s = self.spectrum
+        if len(s) < 3:
+            return
+        thr = float(self.peak_rel_db if rel_threshold_db is None
+                    else rel_threshold_db)
+        fresh = [(int(i), float(s[i])) for i in _detect_peak_bins(s, thr)
+                 if np.isfinite(s[i])]
+        matched = [False] * len(self._peak_tracks)
+        for idx, db in fresh:
+            best, best_d = -1, _PEAK_MATCH_BINS
+            for k, t in enumerate(self._peak_tracks):
+                if matched[k]:
+                    continue
+                d = abs(int(t["bin"]) - idx)
+                if d < best_d:
+                    best_d, best = d, k
+            if best >= 0:
+                t = self._peak_tracks[best]
+                t["bin"], t["db"] = idx, db
+                t["seen"] += 1
+                t["missed"] = 0
+                matched[best] = True
+            else:
+                self._peak_tracks.append(
+                    {"bin": idx, "db": db, "seen": 1, "missed": 0})
+                matched.append(True)
+        for k, t in enumerate(self._peak_tracks):
+            if not matched[k]:
+                t["missed"] += 1
+        self._peak_tracks = [t for t in self._peak_tracks
+                             if int(t["missed"]) < _PEAK_MAX_MISS_FRAMES]
+
+    def find_peaks_with_snr(self, rel_threshold_db: float,
+                            max_peaks: int = _PEAK_MAX_LABELS
+                            ) -> List[Tuple[float, float, float]]:
+        """已成熟的峰 + SNR（峰功率 − 本帧中位数）。
+
+        只返回跨帧确认过 ≥``_PEAK_MIN_SEEN_FRAMES`` 帧的峰；每帧实时读跟踪
+        状态，**没有** ``wf_rows_written // 10`` 节流缓存。
+        返回 [(freq_hz, power_db, snr_db), ...]，按功率降序。
         图上的峰值标签与命中测试都读这一份，保证两处数值同源。
         """
         if not self._has_real_data:
             return []
-        s = self.spectrum
-        if len(s) < 3:
+        if len(self.spectrum) < 3:
             return []
         floor = self.noise_floor_db()
         if floor is None:
             return []
-        tick = int(self.wf_rows_written // 10)
-        pcache = getattr(self, '_peak_snr_cache', None)
-        if (pcache is not None and pcache[0] == tick
-                and abs(pcache[1] - float(rel_threshold_db)) < 1e-9):
-            return pcache[2]
-        idxs = _detect_peak_bins(s, float(rel_threshold_db))
-        peaks = [(self.bin_to_freq(int(i)),
-                  float(s[i]),
-                  float(s[i]) - floor)
-                 for i in idxs if np.isfinite(s[i])]
+        gate = floor + float(rel_threshold_db)
+        peaks = [(self.bin_to_freq(int(t["bin"])),
+                  float(t["db"]),
+                  float(t["db"]) - floor)
+                 for t in self._peak_tracks
+                 if int(t["seen"]) >= _PEAK_MIN_SEEN_FRAMES
+                 and float(t["db"]) >= gate]
         peaks.sort(key=lambda q: q[1], reverse=True)
-        peaks = peaks[:max_peaks]
-        self._peak_snr_cache = (tick, float(rel_threshold_db), peaks)
-        return peaks
+        return peaks[:max_peaks]
 
     def find_peaks(self, rel_threshold_db: float,
-                   max_peaks: int = 8) -> List[Tuple[float, float]]:
+                   max_peaks: int = _PEAK_MAX_LABELS) -> List[Tuple[float, float]]:
         """双通道峰检测：窄峰（原始谱局部极大）+ 平滑后宽峰（gqrx 机制）。
 
         参考 gqrx plotter.cpp:1699-1757：
@@ -540,7 +614,8 @@ class SpectrumDataGenerator:
 
 
 def _detect_peak_bins(spectrum: np.ndarray,
-                      rel_threshold_db: float) -> List[int]:
+                      rel_threshold_db: float,
+                      abs_floor_dbfs: float = _PEAK_ABS_FLOOR_DBFS) -> List[int]:
     """双通道峰检测核心（纯函数，无 Qt/状态依赖）。
 
     通道 1：原始谱严格局部极大（窄峰）。
@@ -567,7 +642,10 @@ def _detect_peak_bins(spectrum: np.ndarray,
     left[1:] = spectrum[:-1]
     right[-1] = spectrum[-1]
     right[:-1] = spectrum[1:]
-    narrow = np.nonzero(finite & (spectrum >= left)
+    # 绝对电平门：低于 abs_floor_dbfs 的 bin 连候选都不算。它是绝对行为，
+    # 与相对门叠加——底噪很低时（如 -110）弱载波会被它挡掉（已知副作用）。
+    above_floor = finite & (spectrum > abs_floor_dbfs)
+    narrow = np.nonzero(above_floor & (spectrum >= left)
                         & (spectrum > right)
                         & (spectrum >= thresh))[0]
 
@@ -584,7 +662,8 @@ def _detect_peak_bins(spectrum: np.ndarray,
     sm_right[-1] = smooth[-1]
     sm_right[:-1] = smooth[1:]
     wide = np.nonzero((smooth >= sm_left) & (smooth > sm_right)
-                      & (smooth >= thresh))[0]
+                      & (smooth >= thresh)
+                      & (smooth > abs_floor_dbfs))[0]
     # 平滑曲线上的相邻宽峰合并为一个（同窗内的起伏仍属同一宽带信号）。
     wide_sel: List[int] = []
     for w in wide:
@@ -949,7 +1028,7 @@ class _PlotState:
         # 门与 kPeakMinSeenFrames=3 的持续门，宽带噪声不会碎成假峰；本侧
         # 单帧检测没有持续门，抬到 15 dB 会把真实弱载波整条藏掉。
         # 两边基准同源（均为 median），数值不同是机制差异，不是写错。
-        self.peak_rel_db = 6.0
+        self.peak_rel_db = _PEAK_REL_DB_DEFAULT
         # ---- 瀑布调色板 / 时间平滑 ----
         self.wf_colors: List[str] = list(WATERFALL_COLORS)   # 当前瀑布色带
         self.wf_smooth: bool = False                 # IIR 时间平滑（仅瀑布）
@@ -2198,6 +2277,8 @@ class SpectrumPanel(QWidget):
     def update_iq(self, iq_data: np.ndarray, center_freq_hz: float,
                   sample_rate_hz: float):
         """真接 SDR 复 IQ：做窗+fft+dBFS+平均。"""
+        # 峰跟踪门限跟 UI 滑杆同步（跟踪每帧都在 push_iq 内推进）。
+        self.generator.peak_rel_db = float(self._state.peak_rel_db)
         self.generator.push_iq(iq_data, center_freq_hz, sample_rate_hz)
         self._refresh_status_labels()
 

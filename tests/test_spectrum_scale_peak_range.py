@@ -217,7 +217,8 @@ def test_new_dual_channel_merges_wideband_to_one_peak(qapp):
     gen = SpectrumDataGenerator(num_bins=512)
     gen.spectrum = s.astype(np.float32)
     gen._has_real_data = True
-    gen.wf_rows_written = 10          # 让节流缓存失效
+    for _ in range(3):                # 3 帧持续确认后才会标
+        gen.advance_peak_tracks(6.0)
     peaks = gen.find_peaks(6.0)
     assert len(peaks) == 1
     assert abs(peaks[0][1] - (float(s.max())) ) < 3.0
@@ -378,7 +379,8 @@ def _panel_with_one_peak(qapp, center_hz=100e6, span_hz=2.4e6, bin_idx=200):
     s[bin_idx] = -40.0
     gen.spectrum = s
     gen._has_real_data = True
-    gen.wf_rows_written = 10          # 让 find_peaks 缓存失效
+    for _ in range(3):                # 3 帧持续确认后才会标
+        gen.advance_peak_tracks(6.0)
     return panel, float(gen.bin_to_freq(bin_idx))
 
 
@@ -476,7 +478,8 @@ def _panel_with_known_floor_peak(qapp, floor_db=-100.0, peak_db=-40.0,
     s[bin_idx] = peak_db
     gen.spectrum = s
     gen._has_real_data = True
-    gen.wf_rows_written = 10          # 让峰缓存失效
+    for _ in range(3):                # 3 帧持续确认后才会标
+        gen.advance_peak_tracks(6.0)
     return panel, float(gen.bin_to_freq(bin_idx))
 
 
@@ -528,7 +531,8 @@ def test_peak_snr_uses_median_not_mean(qapp):
     s[200] = -40.0
     gen.spectrum = s
     gen._has_real_data = True
-    gen.wf_rows_written = 10
+    for _ in range(3):
+        gen.advance_peak_tracks(6.0)
     mean = float(np.mean(s[np.isfinite(s)]))
     median = float(np.median(s[np.isfinite(s)]))
     assert mean < median - 2.0, "反证场景不成立：均值与中位数没拉开"
@@ -710,3 +714,174 @@ def test_waterfall_canvas_pixel_follows_view_offset(qapp):
         gen.sample_rate_hz, gen.bin_to_freq(256))))
     assert cols.size and abs(int(cols[0]) - want) <= 3, \
         f"瀑布 bin 落在 {cols[:3]}px，频谱对应 {want}px"
+
+
+# ---------------------------------------------------------------------------
+# 7. 峰值检测器定义（2026-11-05 裁定）：rel 6 dB + 绝对门 -100 dBFS
+#    + 3 帧持续确认 + 5 bin 匹配 + 10 帧遗忘
+#
+# 与 C++ tokens.h 的 kPeakRelDb / kPeakAbsFloorDbfs / kPeakMatchBins /
+# kPeakMinSeenFrames / kPeakMaxMissFrames 同一套定义。本组测试用「连续帧」
+# 而不是「一帧静态谱」，因为持续确认是定义的一部分，不是可选的降噪。
+# ---------------------------------------------------------------------------
+_NB = 512
+
+
+def _frame(floor_db=-100.0, carrier_db=None, bin_idx=100):
+    s = np.full(_NB, floor_db, dtype=np.float32)
+    if carrier_db is not None:
+        s[bin_idx] = carrier_db
+    return s
+
+
+def _peak_gen():
+    from spectrum_widget import SpectrumDataGenerator
+    return SpectrumDataGenerator(num_bins=_NB)
+
+
+def _feed(gen, frame, rel_db=None):
+    """喂一帧谱并推进一次跟踪（等价于 push_iq 里每数据帧一次）。"""
+    from spectrum_widget import _PEAK_REL_DB_DEFAULT
+    gen.spectrum = np.asarray(frame, dtype=np.float32)
+    gen._has_real_data = True
+    gen.advance_peak_tracks(_PEAK_REL_DB_DEFAULT if rel_db is None else rel_db)
+
+
+def test_15db_relative_gate_hides_8db_sustained_carrier(qapp):
+    """反证钉住：15 dB 相对门下，median+8 dB 的持续载波连候选都进不了。
+
+    这不是留旧行为——它证明「统一到 15 dB」在数学上不可行：门限
+    median+15，载波 median+8，无论持续多少帧都不会成熟。
+    """
+    gen = _peak_gen()
+    frame = _frame(-100.0, -92.0, 100)
+    for _ in range(10):
+        _feed(gen, frame, 15.0)
+    assert gen.find_peaks(15.0) == [], \
+        "15 dB 下 +8 dB 载波居然被标了：门限基准被改错了"
+
+
+def test_weak_sustained_carrier_matures_on_third_frame(qapp):
+    """6 dB 下 median+8 dB 的持续载波：前两帧不标，第三帧成熟。"""
+    gen = _peak_gen()
+    frame = _frame(-100.0, -92.0, 100)
+    _feed(gen, frame)
+    _feed(gen, frame)
+    assert gen.find_peaks(6.0) == [], "不足 3 帧就标了（持续确认没生效）"
+    _feed(gen, frame)
+    peaks = gen.find_peaks(6.0)
+    assert len(peaks) == 1, f"第三帧应成熟 1 个峰，实际 {peaks}"
+    assert peaks[0][0] == pytest.approx(gen.bin_to_freq(100), abs=1.0)
+    assert peaks[0][1] == pytest.approx(-92.0, abs=0.2)
+
+
+def test_single_frame_spike_never_matures(qapp):
+    """单帧 +25 dB 尖峰不得成熟：靠的是 3 帧确认，不是单帧幅度。"""
+    gen = _peak_gen()
+    spike = _frame(-100.0, -75.0, 300)
+    quiet = _frame(-100.0)
+    _feed(gen, spike)
+    assert gen.find_peaks(6.0) == []
+    for _ in range(5):
+        _feed(gen, quiet)
+    assert gen.find_peaks(6.0) == [], "单帧尖峰被升成了常驻标签"
+
+
+def test_abs_floor_rejects_minus_102_carrier_under_minus_110_floor(qapp):
+    """绝对门的固有副作用：底噪 -110 时，+8 dB 载波 = -102 会被 -100 挡掉。
+
+    同一相对余量在 -100 底噪下（载波 -92）就能标——挡掉它的是绝对电平门，
+    不是相对门。这条测试是刻意钉住这个已知行为，不是 bug 报告。
+    """
+    gen = _peak_gen()
+    buried = _frame(-110.0, -102.0, 200)
+    for _ in range(3):
+        _feed(gen, buried)
+    assert gen.find_peaks(6.0) == [], "-102 dBFS 载波越过了 -100 绝对门"
+
+    ok = _peak_gen()
+    visible = _frame(-100.0, -92.0, 200)
+    for _ in range(3):
+        _feed(ok, visible)
+    assert len(ok.find_peaks(6.0)) == 1, \
+        "对照场景不成立：同样的 +8 dB 余量在 -100 底噪下应当可标"
+
+
+def test_push_iq_advances_tracks_once_per_data_frame(qapp):
+    """跟踪必须随 push_iq 每帧推进，而不是等瀑布写满 10 行。"""
+    from spectrum_widget import SpectrumDataGenerator
+    gen = SpectrumDataGenerator(num_bins=_NB)
+    n = gen.fft_size
+    iq = np.exp(2j * np.pi * 100 * np.arange(n) / n).astype(np.complex64)
+    for _ in range(2):
+        gen.push_iq(iq, 100e6, 1.024e6)
+    assert gen.find_peaks_with_snr(6.0) == [], "两帧就成熟了（确认帧数错了）"
+    gen.push_iq(iq, 100e6, 1.024e6)
+    assert gen.find_peaks_with_snr(6.0), \
+        "第三帧之后仍无峰：跟踪没有在 push_iq 里推进"
+
+
+def test_peak_power_follows_current_frame_not_ten_row_cache(qapp):
+    """取消 wf_rows_written//10 缓存：同一 10 行窗口内，峰功率必须跟着本帧变。"""
+    gen = _peak_gen()
+    frame = _frame(-100.0, -92.0, 100)
+    for _ in range(3):
+        _feed(gen, frame)
+    assert gen.find_peaks_with_snr(6.0)[0][1] == pytest.approx(-92.0, abs=0.2)
+    frame[100] = -70.0
+    _feed(gen, frame)                       # 瀑布行号没动
+    peaks = gen.find_peaks_with_snr(6.0)
+    assert peaks[0][1] == pytest.approx(-70.0, abs=0.2), \
+        f"峰功率是旧的（10 帧缓存没删）：{peaks}"
+
+
+# ---------------------------------------------------------------------------
+# 7b. cap 可读性探针：8 与 12 个标签在 1360px 面板上的矩形互交丢弃率
+#
+# 口径与天空线/频段彩带同一套：标签盒 (x0,x1,y0,y1) 两两相交即算挤，
+# _peak_label_placements 放不下就诚实丢弃——丢弃率 = 重叠率。判据 30%。
+# 峰值取自一段真实 88.1 MHz OTA 录音里一帧的 12 个成熟峰（bin, dBFS），
+# 真实帧 89 的实测值，不是拍的分布。
+# ---------------------------------------------------------------------------
+_CAP_PROBE_PEAKS = (
+    (320, -8.7), (328, -11.9), (65, -27.4), (74, -27.8), (86, -28.2),
+    (58, -30.2), (104, -30.8), (110, -30.8), (114, -30.9), (71, -31.2),
+    (61, -31.3), (49, -31.3),
+)
+_CAP_PROBE_MEDIAN_DB = -40.3
+_CAP_PROBE_DB = (-100.0, -20.0)
+_CAP_PROBE_W, _CAP_PROBE_H = 1360.0, 500.0
+
+
+def _cap_label_drop_rate(cap, fm):
+    """该 cap 下被矩形互交规则丢弃的标签比例（0..1）。"""
+    import spectrum_widget as sw
+    peaks = sorted(_CAP_PROBE_PEAKS, key=lambda p: -p[1])[:cap]
+    db_min, db_max = _CAP_PROBE_DB
+    pts = []
+    for idx, db in peaks:
+        x = _CAP_PROBE_W * idx / _NB
+        y = _CAP_PROBE_H * max(0.0, min(1.0, (db_max - db) / (db_max - db_min)))
+        freq = 88.1e6 + (idx - _NB / 2) * 1.024e6 / _NB
+        label = (f"{freq/1e6:.3f}MHz {db:.1f}dB "
+                 f"SNR {db - _CAP_PROBE_MEDIAN_DB:.1f}dB")
+        pts.append((x, y, label))
+    placed = sw._peak_label_placements(
+        sorted(pts), fm.horizontalAdvance, 2.0, _CAP_PROBE_W - 2.0,
+        fm.height() + 2.0, text_ascent=fm.ascent(), text_descent=fm.descent())
+    return 1.0 - len(placed) / len(pts)
+
+
+def test_peak_label_cap_is_the_largest_that_meets_30pct(qapp):
+    """cap 由实测决定：8 与 12 在 1360px 上都超 30%，只有更小的 cap 达标。"""
+    import spectrum_widget as sw
+    fm = _font8()
+    rates = {n: _cap_label_drop_rate(n, fm) for n in (6, 8, 12)}
+    assert rates[8] > 0.30, f"cap8 丢弃率 {rates[8]:.1%}，证据变了"
+    assert rates[12] > 0.30, f"cap12 丢弃率 {rates[12]:.1%}，证据变了"
+    cap = getattr(sw, "_PEAK_MAX_LABELS", None)
+    assert cap is not None, "spectrum_widget 未定义 _PEAK_MAX_LABELS（cap 未落库）"
+    assert cap in (6, 8, 12), f"未预期的 cap：{cap}"
+    assert rates[cap] <= 0.30, (
+        f"选定的 cap={cap} 丢弃率 {rates[cap]:.1%} > 30%，"
+        f"可读性不达标（实测 {[f'{n}:{r:.1%}' for n, r in rates.items()]}）")
