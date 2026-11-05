@@ -289,6 +289,21 @@ def test_defaults_derive_from_schema_only():
             assert item.key not in settings_mod.DEFAULTS
 
 
+def test_sample_rate_default_is_single_source_and_combo_matches(qapp):
+    """采样率三值必须相等：schema/settings 默认 = constants = 控制面板下拉。"""
+    import constants as desktop_constants
+    from mbdsdr_ai.sdr_backend import DEFAULT_SAMPLE_RATE_HZ as backend_default
+
+    assert desktop_constants.DEFAULT_SAMPLE_RATE_HZ == backend_default
+    assert SCHEMA["sample_rate_hz"].default == float(desktop_constants.DEFAULT_SAMPLE_RATE_HZ)
+    assert settings_mod.DEFAULTS["sample_rate_hz"] == SCHEMA["sample_rate_hz"].default
+
+    from control_panel import ControlPanel
+    cp = ControlPanel()
+    assert float(cp.sample_rate_combo.currentData()) == \
+        SCHEMA["sample_rate_hz"].default
+
+
 def test_schema_keys_unique_and_sourced():
     keys = [it.key for it in config_schema.ALL_ITEMS]
     assert len(keys) == len(set(keys))

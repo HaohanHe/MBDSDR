@@ -41,6 +41,16 @@ try:
 except ImportError:  # pragma: no cover - 仅内核缺失时
     _SKY_EXTINCTION_K = 0.2
 
+# 采样率默认值的单一事实源是 desktop/constants.py（它又派生自
+# mbdsdr_ai.sdr_backend.DEFAULT_SAMPLE_RATE_HZ=2.4 MS/s）；这里不写第二份字面量。
+try:
+    from desktop.constants import DEFAULT_SAMPLE_RATE_HZ as _DEFAULT_SAMPLE_RATE_HZ
+except ImportError:  # desktop 目录直接上 sys.path（脚本/测试）时
+    try:
+        from constants import DEFAULT_SAMPLE_RATE_HZ as _DEFAULT_SAMPLE_RATE_HZ
+    except ImportError:  # 常量模块也不可用时退回同值，保证 schema 仍可导入
+        _DEFAULT_SAMPLE_RATE_HZ = 2_400_000
+
 #: 配置导出格式版本（导出文件里写这个整数）。
 #: 版本策略：**同主版本允许导入并迁移**（缺字段按默认补齐、多字段列出后忽略），
 #: 只有跨主版本才拒绝——主版本变化意味着字段语义/取值范围可能重定义，
@@ -375,7 +385,10 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(key="bandwidth_hz", group="", kind="float", label="", help="",
                 default=0.0, source="desktop/settings.py:32", exposed=False),
     SettingItem(key="sample_rate_hz", group="", kind="float", label="", help="",
-                default=2_048_000.0, source="desktop/settings.py:33", exposed=False),
+                default=float(_DEFAULT_SAMPLE_RATE_HZ),
+                source="desktop/constants.py: DEFAULT_SAMPLE_RATE_HZ"
+                       "（派生自 mbdsdr_ai/sdr_backend.py:110，2.4 MS/s）",
+                exposed=False),
     SettingItem(key="callsign", group="", kind="text", label="", help="",
                 default="", source="desktop/settings.py:34", exposed=False),
     SettingItem(key="gnss_port", group="", kind="text", label="", help="",
