@@ -704,11 +704,13 @@ def predict_passes_report(
         start_unix)
     if station_ev.get("station_warning"):
         # 放宽必须留痕：位置被启发式怀疑也要进降级清单，用户看得见。
-        degraded = [{
+        # 放在末尾：站址 warning 是「照常计算但位置可疑」，不该抢掉
+        # 首条（首条仍属于真正导致跳过/降级的原因，如 identity_mismatch）。
+        degraded = list(degraded) + [{
             "satellite": "（站址）", "catnr": 0,
             "reason": "station_warning",
             "detail": station_ev["station_warning"],
-        }] + list(degraded)
+        }]
     return {
         "n_passes": len(passes),
         "passes": passes,
