@@ -84,9 +84,14 @@ _AU_KM = 149597870.700
 # SGP4 传播：Python sgp4 库默认 WGS-72 legacy 模式；对 LEO 过境时刻影响在
 # 秒级以内，满足 SDR 预报需求。
 
-# 粗扫/细扫步长（秒）。粗扫按固定间隔采样仰角曲线。
-_COARSE_STEP_S = 60.0     # 粗扫：60s 定位过境区间
-_FINE_STEP_S = 2.0        # pass 内细采样：找中天/最大仰角
+# 粗扫/细扫步长（秒）。**全仓唯一事实源**：桌面端过境列表（天空图/新时空面板）
+# 必须从这里 import，不许各自再写一套（两套步长会让同一次过境的峰值时刻/AOS/LOS
+# 分叉）。粗扫按固定间隔采样仰角曲线，细采样在峰值邻域找中天。
+PASS_COARSE_STEP_S = 60.0     # 粗扫：60s 定位过境区间
+PASS_FINE_STEP_S = 2.0        # pass 内细采样：找中天/最大仰角
+# 兼容旧调用点的私有别名（值只在这里定义一次，别名不构成第二事实源）
+_COARSE_STEP_S = PASS_COARSE_STEP_S
+_FINE_STEP_S = PASS_FINE_STEP_S
 _BISECT_TOL_S = 0.5       # 二分收敛容差（秒），LEO 仰角变化 ~0.5°/s ⇒ ~0.25° 精度
 
 
@@ -294,12 +299,12 @@ def predict_passes(
         return _alt_az(diff, t)
 
     total_s = hours * 3600.0
-    n_steps = int(total_s / _COARSE_STEP_S) + 1
+    n_steps = int(total_s / PASS_COARSE_STEP_S) + 1
 
     # a) 粗扫：60s 步长记录 (sec, el)。
     coarse: List[Tuple[float, Optional[float]]] = []
     for k in range(n_steps + 1):
-        sec = min(k * _COARSE_STEP_S, total_s)
+        sec = min(k * PASS_COARSE_STEP_S, total_s)
         coarse.append((sec, el_at_s(sec)))
     if all(e is None for _, e in coarse):
         return []
@@ -348,7 +353,7 @@ def predict_passes(
             r = el_az_at_s(s)
             if r is not None and r[0] > best_el:
                 best_el, best_sec = r[0], s
-            s += _FINE_STEP_S
+            s += PASS_FINE_STEP_S
 
         rise_r = el_az_at_s(t_rise_s) or (None, None)
         set_r = el_az_at_s(t_set_s) or (None, None)

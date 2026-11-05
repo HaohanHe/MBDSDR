@@ -26,12 +26,24 @@ from PySide6.QtWidgets import (
 
 from tokens import tokens
 
-# 过境结束阈值 = 可见门（5°），不是过境列表的峰值筛选门（10°）。
-from mbdsdr_ai.sat_passes import (
-    PASS_MIN_ALT_DEG,
-    VISIBLE_MIN_ALT_DEG,
-)
-_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG
+# 两个**语义不同**的仰角量，别合并：
+#   VISIBLE_MIN_ALT_DEG（5°）= 当前可见/跟踪门：仰角低于它就不再把状态当作
+#     「跟踪中」；它决定「现在能不能收」，与用户排班偏好无关。
+#   effective_pass_min_elevation_deg()（用户设置，默认 10°）= 过境列表筛选门：
+#     按**峰值**仰角筛「这次过境值不值得列出来」，不是当前仰角门。
+from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
+try:
+    from settings import (
+        effective_pass_min_elevation_deg,
+        effective_pass_visibility_gate_deg,
+        effective_show_low_elevation_passes,
+    )
+except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
+    from .settings import (  # type: ignore
+        effective_pass_min_elevation_deg,
+        effective_pass_visibility_gate_deg,
+        effective_show_low_elevation_passes,
+    )
 
 
 class SatTrackPanel(QFrame):
@@ -51,11 +63,13 @@ class SatTrackPanel(QFrame):
     stop_requested = Signal()
     update_tle_requested = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings=None):
         super().__init__(parent)
         self.setObjectName("satTrackPanel")
         self.setFrameShape(QFrame.StyledPanel)
         self._tracking = False
+        # 过境列表筛选门从这里读（不是当前可见门，见模块顶部注释）。
+        self._settings = settings
         self._build_ui()
         # 面板级 setStyleSheet 已删除，由全局 dark_car QSS 接管按钮/分组框/标签样式。
 
@@ -139,6 +153,14 @@ class SatTrackPanel(QFrame):
         self.el_bar.setTextVisible(True)
         self.el_bar.setFormat("仰角 %v° / 90°")
         el_layout.addWidget(self.el_bar)
+        # 口径分开展示：跟踪可见门（5°）≠ 过境列表峰值筛选门（用户设置）
+        self.pass_gate_label = QLabel()
+        self.pass_gate_label.setObjectName("passGateLabel")
+        self.pass_gate_label.setWordWrap(True)
+        self.pass_gate_label.setStyleSheet(
+            "color: " + tokens().text("tertiary") + "; font-size: 8.5pt;")
+        el_layout.addWidget(self.pass_gate_label)
+        self._refresh_pass_gate_label()
         root.addWidget(el_box)
 
         root.addStretch(1)
@@ -180,6 +202,8 @@ class SatTrackPanel(QFrame):
 
     def update_position(self, pos: Dict[str, object]):
         """用 tracker.current_position() 的结果刷新显示。"""
+        # 设置可能被用户改过：每次刷新重读两个门的显示（只拼一行文本）。
+        self._refresh_pass_gate_label()
         if not pos.get("valid"):
             self.az_label.setText("--")
             self.el_label.setText("--")
@@ -206,11 +230,13 @@ class SatTrackPanel(QFrame):
         el_bar_val = int(max(0.0, min(90.0, el)))
         self.el_bar.setValue(el_bar_val)
 
-        if el < _MIN_ELEVATION_DEG:
-            # 仰角 < 5°：变红 + 提示过境结束
+        if el < VISIBLE_MIN_ALT_DEG:
+            # 当前可见/跟踪门（5°）：低于它标红并提示过境结束。
+            # 用户设置的「过境最低仰角」是峰值筛选门，**不用在这里**——
+            # 25° 时卫星仍可跟踪，不能因为用户想少列过境就假装跟踪结束。
             _t = tokens()
             self._set_el_color(_t.COLORS["danger"])
-            self.state_label.setText("过境结束 (仰角<5°)")
+            self.state_label.setText(f"过境结束 (仰角<{VISIBLE_MIN_ALT_DEG:g}°)")
             self.state_label.setStyleSheet("color:" + _t.COLORS["danger"]
                                            + "; font-weight:600;")
         else:
@@ -219,6 +245,24 @@ class SatTrackPanel(QFrame):
             self.state_label.setText("跟踪中")
             self.state_label.setStyleSheet("color:" + _t.COLORS["success"]
                                            + "; font-weight:600;")
+
+    def _resolved_settings(self):
+        """显式注入优先；否则取宿主（主窗口）的 settings 实例（内存值即时生效）。"""
+        if self._settings is not None:
+            return self._settings
+        return getattr(self.window(), "settings", None)
+
+    def _refresh_pass_gate_label(self) -> None:
+        """显示两个门的分工：可见/跟踪门 5° vs 过境列表峰值门（用户设置）。"""
+        settings = self._resolved_settings()
+        a1 = effective_pass_min_elevation_deg(settings)
+        gate = effective_pass_visibility_gate_deg(settings)
+        show_low = effective_show_low_elevation_passes(settings)
+        text = (f"跟踪/可见门 {VISIBLE_MIN_ALT_DEG:g}°（只决定当前能否跟踪）；"
+                f"过境列表筛选门：峰值仰角 ≥ {gate:g}°")
+        if show_low and a1 > gate:
+            text += f"（已含 {gate:g}–{a1:g}° 低仰角）"
+        self.pass_gate_label.setText(text)
 
     def _set_el_color(self, hex_color: str):
         _t = tokens()

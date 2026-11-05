@@ -66,8 +66,8 @@ except ImportError:  # pragma: no cover - 直接以脚本方式运行时
         TimeSyncStatus, FreqOrbitPoint,
     )
 
-# 过境列表的峰值仰角门（10°）与可见门（5°）是两个语义，见 sat_passes.py。
-from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG  # noqa: E402
+# 采样步长引用 sat_passes 的单一事实源（不在本面板另写 60/2 之类字面量）。
+from mbdsdr_ai.sat_passes import PASS_COARSE_STEP_S  # noqa: E402
 
 
 # 以包方式从仓库根 import（如 import desktop.new_spacetime_panel）时本目录不在
@@ -77,6 +77,22 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from tokens import tokens
+
+# 过境筛选门只从 settings 读取（与天空图同一组入口，见 docs/settings-inventory.md）。
+try:
+    from settings import (
+        PASS_LOW_ELEVATION_FLOOR_DEG,
+        effective_pass_min_elevation_deg,
+        effective_pass_visibility_gate_deg,
+        effective_show_low_elevation_passes,
+    )
+except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
+    from .settings import (  # type: ignore
+        PASS_LOW_ELEVATION_FLOOR_DEG,
+        effective_pass_min_elevation_deg,
+        effective_pass_visibility_gate_deg,
+        effective_show_low_elevation_passes,
+    )
 
 # ---------------------------------------------------------------------------
 # 默认主题色值（从 tokens.py 语义化取色，与 light 主题对齐）
@@ -227,9 +243,16 @@ class FreqOrbitChart(QWidget):
 class NewSpacetimePanel(QWidget):
     """新时空差异化面板：AMR 调制识别 + 卫星过境时间线/授时 + 频率-轨道图。"""
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, settings=None):
         super().__init__(parent)
         self.setObjectName("newSpacetimePanel")
+
+        # 过境筛选的读取入口（DesktopSettings / dict）；None 时用 schema 默认值。
+        self._settings = settings
+        # 最近一次刷新实际使用的门（_populate_passes 标注低仰角用）
+        self._pass_min_elevation_deg = effective_pass_min_elevation_deg(settings)
+        self._pass_visibility_gate_deg = effective_pass_visibility_gate_deg(settings)
+        self._pass_show_low = effective_show_low_elevation_passes(settings)
 
         # 后端引擎（纯对象，构造不联网）
         self._tle_mgr = TLEManager()
@@ -357,8 +380,8 @@ class NewSpacetimePanel(QWidget):
 
         # 筛选口径明示：低于峰值门的过境不会出现在表里（用户必须能看见这条规则）
         self.passes_filter_label = QLabel(
-            f"列表按峰值仰角 ≥ {PASS_MIN_ALT_DEG:g}° 筛选"
-            "（更低的过境不列出；需要低仰角过境请在设置里开启）")
+            self._pass_filter_text(self._pass_min_elevation_deg,
+                                   self._pass_show_low))
         self.passes_filter_label.setObjectName("hintLabel")
         self.passes_filter_label.setWordWrap(True)
         lay.addWidget(self.passes_filter_label)
@@ -506,11 +529,51 @@ class NewSpacetimePanel(QWidget):
             self.time_sync_label.setStyleSheet(
                 f"color: {COLOR_DANGER}; font-weight: 600;")
 
+    def set_settings(self, settings) -> None:
+        """注入/替换配置源；下一次 refresh_passes 起按新设置筛选。"""
+        self._settings = settings
+
+    def _resolved_settings(self):
+        """显式注入优先；否则取宿主（主窗口）的 settings 实例。
+
+        主窗口用 `self.settings = DesktopSettings.load()` 作为唯一实例，
+        设置面板改的就是它（内存值立即生效，不依赖 500ms 防抖落盘）。
+        """
+        if self._settings is not None:
+            return self._settings
+        return getattr(self.window(), "settings", None)
+
+    @staticmethod
+    def _pass_filter_text(min_elevation_deg: float, show_low: bool) -> str:
+        """列表筛选口径文案（用户必须能一眼看见「按峰值仰角」而非「当前仰角」）。"""
+        floor = PASS_LOW_ELEVATION_FLOOR_DEG
+        if show_low and min_elevation_deg > floor:
+            return (f"列表按峰值仰角 ≥ {min_elevation_deg:g}° 筛选；"
+                    f"「显示低仰角过境」已开启：额外列出 {floor:g}–"
+                    f"{min_elevation_deg:g}° 的过境并标注「低仰角」")
+        if show_low:
+            return (f"列表按峰值仰角 ≥ {min_elevation_deg:g}° 筛选；"
+                    f"「显示低仰角过境」已开启（当前设置不低于 {floor:g}°，"
+                    "没有额外低仰角区间）")
+        return (f"列表按峰值仰角 ≥ {min_elevation_deg:g}° 筛选"
+                f"（峰值低于该值的过境不列出；要列 {floor:g}–"
+                f"{min_elevation_deg:g}° 请打开「显示低仰角过境」）")
+
     def refresh_passes(self) -> None:
         """同步拉取 DEFAULT_SATELLITES 的 TLE 并计算过境 / 频率-轨道关系。
 
         会阻塞若干秒（TLE fetch 带超时），仅由按钮点击触发。
+        峰值筛选门读 settings.effective_pass_*（与天空图过境列表同一组入口）。
         """
+        # 每次刷新重读设置：设置面板点「应用」后立即调用本方法，必须生效。
+        settings = self._resolved_settings()
+        self._pass_min_elevation_deg = effective_pass_min_elevation_deg(settings)
+        self._pass_visibility_gate_deg = effective_pass_visibility_gate_deg(settings)
+        self._pass_show_low = effective_show_low_elevation_passes(settings)
+        self.passes_filter_label.setText(
+            self._pass_filter_text(self._pass_min_elevation_deg,
+                                   self._pass_show_low))
+
         lat = self.lat_spin.value()
         lon = self.lon_spin.value()
         alt_km = self.alt_spin.value()
@@ -530,15 +593,17 @@ class NewSpacetimePanel(QWidget):
             self.chart.set_data([])
             return
 
+        gate = self._pass_visibility_gate_deg
         passes = self._engine.compute_passes(
             observer_lat=lat, observer_lon=lon, observer_alt=alt_km,
             satellites=sats, hours_ahead=24.0,
-            min_elevation=PASS_MIN_ALT_DEG, step_sec=60.0,
+            min_elevation=gate, step_sec=PASS_COARSE_STEP_S,
         )
         if not passes:
             # 有 TLE 但确实没有过境：别沿用上一轮"没网络"的旧文案
             self.passes_hint.setText(
-                f"24 小时内无过境（峰值仰角 ≥ {PASS_MIN_ALT_DEG:g}°）")
+                f"24 小时内无过境（峰值仰角 ≥ {gate:g}°"
+                + ("，含低仰角" if self._pass_show_low else "") + "）")
         self._populate_passes(passes)
 
         # 顺手刷新频率-轨道散点（无频率数据时频率为 0）
@@ -553,7 +618,10 @@ class NewSpacetimePanel(QWidget):
         self.passes_hint.setVisible(False)
         self.passes_table.setRowCount(len(passes))
         for row, p in enumerate(passes):
-            self._set_item(row, 0, p.name)
+            # 低仰角 = 峰值低于用户设置门（只有开关打开时才会进列表）
+            low = (self._pass_show_low
+                   and p.max_elevation < self._pass_min_elevation_deg)
+            self._set_item(row, 0, f"{p.name}（低仰角）" if low else p.name)
             self._set_item(row, 1, self._fmt_dt(p.rise_time))
             self._set_item(row, 2, self._fmt_dt(p.max_time))
             self._set_item(row, 3, self._fmt_dt(p.set_time))
