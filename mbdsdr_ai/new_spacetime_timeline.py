@@ -115,14 +115,23 @@ class TimeSyncStatus:
 
 @dataclass
 class FreqOrbitPoint:
-    """频率-轨道关系散点。"""
+    """频率-轨道关系散点。
+
+    ``frequency_mhz`` 为 ``None`` 表示**频率未知**（真实缺省）；不得用
+    ``0.0`` 兼任「无数据」——0 是可有意义的数值，混用会让未知点被画到
+    坐标 0 处。
+    """
     name: str
-    frequency_mhz: float
+    frequency_mhz: Optional[float]
     altitude_km: float
     inclination_deg: float
     period_min: float
     eccentricity: float
     catnr: int
+
+    @property
+    def has_frequency(self) -> bool:
+        return self.frequency_mhz is not None
 
 
 # ============================================================
@@ -452,10 +461,13 @@ class TimelineEngine:
             altitude_km = a_km - WGS84_A_KM
             period_min = 1440.0 / mm
 
-            freq_hz = float(frequencies.get(name, 0.0))
+            # 频率未知 = None（真实缺省），不再用 0.0 兼任「无数据」。
+            raw_hz = frequencies.get(name)
+            freq_hz = float(raw_hz) if raw_hz is not None else None
             out.append(FreqOrbitPoint(
                 name=name,
-                frequency_mhz=freq_hz / 1e6 if freq_hz > 0 else 0.0,
+                frequency_mhz=(freq_hz / 1e6
+                               if freq_hz is not None and freq_hz > 0 else None),
                 altitude_km=altitude_km,
                 inclination_deg=inc,
                 period_min=period_min,

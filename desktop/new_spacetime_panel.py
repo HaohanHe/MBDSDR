@@ -145,8 +145,15 @@ class FreqOrbitChart(QWidget):
         self._points = list(points or [])
         self.update()
 
+    def plottable_points(self) -> List[FreqOrbitPoint]:
+        """可绘制的点：频率未知（``None``）的不进入绘制循环。
+
+        未知频率不是 0 MHz；若照画会落在 Y=0 的坐标 0 处，与真实频点混淆。
+        """
+        return [p for p in self._points if p.frequency_mhz is not None]
+
     def has_data(self) -> bool:
-        return len(self._points) > 0
+        return len(self.plottable_points()) > 0
 
     # ------------------------------------------------------------------
     def paintEvent(self, event):  # noqa: D401 - Qt 虚函数
@@ -154,13 +161,15 @@ class FreqOrbitChart(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.fillRect(self.rect(), QColor(COLOR_CARD))
 
-        # 无数据：居中提示
-        if not self._points:
+        points = self.plottable_points()
+        # 无数据：居中提示（区分「一颗都没算到」与「有星但频率未知」）
+        if not points:
             painter.setPen(QColor(COLOR_TEXT_SEC))
             f = painter.font()
             f.setPointSize(10)
             painter.setFont(f)
-            painter.drawText(self.rect(), Qt.AlignCenter, "无数据")
+            painter.drawText(self.rect(), Qt.AlignCenter,
+                             "无频率数据" if self._points else "无数据")
             painter.end()
             return
 
@@ -171,8 +180,8 @@ class FreqOrbitChart(QWidget):
             painter.end()
             return
 
-        xs = [p.altitude_km for p in self._points]
-        ys = [p.frequency_mhz for p in self._points]
+        xs = [p.altitude_km for p in points]
+        ys = [p.frequency_mhz for p in points]
         xmin, xmax = min(xs), max(xs)
         ymin, ymax = min(ys), max(ys)
         # 防止零范围除零
@@ -225,13 +234,13 @@ class FreqOrbitChart(QWidget):
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(QColor(COLOR_PRIMARY)))
         r = 5.0
-        for p in self._points:
+        for p in points:
             cx, cy = sx(p.altitude_km), sy(p.frequency_mhz)
             painter.drawEllipse(QPointF(cx, cy), r, r)
 
         # 点标注名称（#5B7B8C）
         painter.setPen(text_pen)
-        for p in self._points:
+        for p in points:
             cx, cy = sx(p.altitude_km), sy(p.frequency_mhz)
             painter.drawText(QRectF(cx + 8, cy - 9, 110, 16),
                              Qt.AlignLeft | Qt.AlignVCenter, p.name)
