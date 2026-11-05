@@ -61,6 +61,7 @@ REASON_NOTHING_DETECTED = "nothing_detected"
 REASON_NO_FRAME_RECOVERED = "no_frame_recovered"
 REASON_TRUNCATED_FRAME = "truncated_frame"
 REASON_CRC_FAILED = "crc_failed"
+REASON_UNSUPPORTED_FORMAT = "unsupported_format"
 REASON_DECODE_ERROR = "decode_error"
 
 # AIS 最短真帧：168 bit 报文 + 16 bit FCS + 16 bit 首尾标志（不含填充）。
@@ -471,6 +472,136 @@ def _aprs_frame_candidates(raw_bits: List[int]) -> Tuple[List[int], List[List[in
     return flags, candidates, tail
 
 
+def _aprs_decode_audio(trace: _Trace, audio: np.ndarray, target_fs: float,
+                       extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """从 48k 音频开始跑 APRS 的后四级（cf32 与 wav 入口共用）。"""
+    from .ax25 import AX25Frame, bits_to_bytes, unstuff_bits
+
+    sps = float(target_fs) / 1200.0
+    required_audio = int(math.ceil(APRS_MIN_HDLC_BITS * sps))
+    audio = np.asarray(audio, dtype=np.float64)
+
+    # --- 第 3 级：Bell 202 正交相关 + PLL 位定时 + NRZI ---------------------
+    t0 = time.perf_counter()
+    if audio.size < required_audio:
+        ms = (time.perf_counter() - t0) * 1000
+        trace.add("demod", "audio_samples", int(audio.size), "bits", 0,
+                  elapsed_ms=ms, note="不足一个 HDLC 帧")
+        payload = {"required_samples": int(required_audio)}
+        if extra:
+            payload.update(extra)
+        return _fail(trace, "demod", REASON_INSUFFICIENT_SAMPLES,
+                     f"音频长度不足一个 HDLC 帧：需要 ≥ {required_audio} 样本"
+                     f"（{APRS_MIN_HDLC_BITS} bit × {sps:g} 样本/bit），"
+                     f"实际 {audio.size}", payload)
+    try:
+        from .multimon_decoders import AFSK1200Demod
+        levels = AFSK1200Demod(sample_rate=float(target_fs)).demodulate(audio)
+        raw_bits = _aprs_nrzi_decode(levels)
+    except Exception as exc:
+        ms = (time.perf_counter() - t0) * 1000
+        trace.add("demod", "audio_samples", int(audio.size), "bits", 0,
+                  elapsed_ms=ms, note=f"异常 {type(exc).__name__}")
+        return _fail(trace, "demod", REASON_DECODE_ERROR,
+                     f"AFSK 1200bd 解调异常: {type(exc).__name__}: {exc}")
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("demod", "audio_samples", int(audio.size), "bits", len(raw_bits),
+              elapsed_ms=ms,
+              note="Bell 202 正交相关 + PLL 位定时 + NRZI 差分")
+
+    # --- 第 4 级：HDLC 0x7E 标志 + 去位填充（候选帧在此切出） -------------
+    t0 = time.perf_counter()
+    flags, candidates, tail = _aprs_frame_candidates(raw_bits)
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("sync", "bits", len(raw_bits), "frame_candidates",
+              len(candidates), elapsed_ms=ms,
+              note=f"HDLC 0x7E 标志 {len(flags)} 个；去填充后按标志切帧")
+    if not flags:
+        return _fail(trace, "sync", REASON_NOTHING_DETECTED,
+                     f"位流 {len(raw_bits)} bit 中没有 HDLC 0x7E 标志"
+                     "（纯噪声/无 AFSK 信号都会落到这里）",
+                     {"wire_bits": len(raw_bits), "flag_count": 0})
+    if not candidates and (len(tail) < 8 or 0 not in tail):
+        return _fail(trace, "sync", REASON_NOTHING_DETECTED,
+                     f"只看到 {len(flags)} 个 HDLC 标志/空闲位，没有帧数据",
+                     {"wire_bits": len(raw_bits), "flag_count": len(flags),
+                      "tail_bits": len(tail)})
+
+    # --- 第 5 级：去填充 + CRC-16/X.25（失败帧在此计数） -------------------
+    t0 = time.perf_counter()
+    valid_raw: List[bytes] = []
+    valid_frames: List[Any] = []
+    crc_fail = 0
+    short_fragments = 0
+    for seg in candidates:
+        unstuffed = unstuff_bits(seg)
+        n_bits = (len(unstuffed) // 8) * 8
+        raw = bits_to_bytes(unstuffed[:n_bits])
+        if len(raw) < APRS_MIN_FRAME_BYTES:
+            short_fragments += 1
+            continue
+        frame = AX25Frame.from_bytes(raw)
+        if frame is None:
+            short_fragments += 1
+        elif frame.fcs_valid:
+            valid_frames.append(frame)
+            valid_raw.append(raw)
+        else:
+            crc_fail += 1
+    truncated = bool(tail) and len(tail) >= 8 and 0 in tail
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("frame", "frame_candidates", len(candidates), "frames",
+              len(valid_raw), dropped=crc_fail, elapsed_ms=ms,
+              note=(f"CRC-16/X.25 FCS；CRC 失败丢弃 {crc_fail}，"
+                    f"非帧碎片 {short_fragments}，尾部残段 {len(tail)} bit"))
+    if not valid_raw:
+        payload = {"candidate_frames": len(candidates),
+                   "dropped_frames": int(crc_fail),
+                   "truncated_fragments": int(short_fragments),
+                   "tail_bits": int(len(tail))}
+        if crc_fail:
+            return _fail(trace, "frame", REASON_CRC_FAILED,
+                         f"{len(candidates)} 个候选帧全部 CRC-16 失败"
+                         f"（丢弃 {crc_fail}）", payload)
+        if truncated or short_fragments:
+            return _fail(trace, "frame", REASON_TRUNCATED_FRAME,
+                         "看到帧起始标志，但没有凑够一个完整 AX.25 帧"
+                         f"（碎片 {short_fragments} 个，尾部残段 {len(tail)} bit）",
+                         payload)
+        return _fail(trace, "frame", REASON_NO_FRAME_RECOVERED,
+                     f"{len(candidates)} 个候选帧都未通过 CRC-16 校验", payload)
+
+    # --- 第 6 级：AX.25 地址/控制/PID/信息字段 ----------------------------
+    t0 = time.perf_counter()
+    frames: List[Dict[str, Any]] = []
+    for frame, raw in zip(valid_frames, valid_raw):
+        frames.append({
+            "source": frame.source,
+            "source_ssid": int(frame.source_ssid),
+            "destination": frame.destination,
+            "dest_ssid": int(frame.dest_ssid),
+            "digipeaters": [[c, int(s), bool(r)]
+                            for c, s, r in frame.digipeaters],
+            "control": int(frame.control),
+            "pid": int(frame.pid),
+            "info_hex": frame.info.hex(),
+            "info_text": frame.info.decode("latin-1", errors="replace"),
+            "info_len": len(frame.info),
+            "frame_hex": raw.hex(),
+            "fcs": int(frame.fcs),
+            "fcs_valid": bool(frame.fcs_valid),
+        })
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("content", "frames", len(valid_raw), "frames", len(frames),
+              elapsed_ms=ms,
+              note="AX.25 源/目的/digipeater 路径 + 控制/PID + payload")
+    return _ok(trace, {
+        "frames": frames,
+        "payloads_hex": [f["info_hex"] for f in frames],
+    }, {"num_frames": len(frames), "dropped_frames": int(crc_fail),
+        "truncated_fragments": int(short_fragments)})
+
+
 def run_aprs_pipeline(path: str, fs: float, target_fs: float = 48000.0,
                       center_offset_hz: float = 0.0) -> Dict[str, Any]:
     """APRS：NFM 复基带 → 鉴频/低通 → AFSK → NRZI → HDLC → CRC-16 → AX.25。
@@ -546,124 +677,176 @@ def run_aprs_pipeline(path: str, fs: float, target_fs: float = 48000.0,
                   note=(f"FM 鉴频 + 4.5kHz 低通 + 重采样 {fs:g}→{target_fs:g} Hz "
                         f"(offset={center_offset_hz:g} Hz)"))
 
-    # --- 第 3 级：Bell 202 正交相关 + PLL 位定时 + NRZI ---------------------
+    return _aprs_decode_audio(trace, audio, target_fs,
+                              extra={"required_input_samples": required_input})
+
+
+class _WavFormatError(Exception):
+    """WAV 容器/编码不受支持；detail 会原样进入失败原因。"""
+
+    def __init__(self, message: str, info: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.info = info or {}
+
+
+def _probe_wav_header(path: str) -> Dict[str, Any]:
+    """解析 RIFF/WAVE 头，给「不支持」失败提供声道/位深/编码的准确原因。
+
+    只读头部与 fmt 块，不把整段 PCM 读进内存（真录音可能很长）。
+    """
+    import struct
+
+    with open(path, "rb") as f:
+        head = f.read(12)
+        if len(head) < 12 or head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+            raise _WavFormatError("不是 RIFF/WAVE 文件")
+        fmt = None
+        fmt_body = b""
+        data_len = 0
+        while True:
+            hdr = f.read(8)
+            if len(hdr) < 8:
+                break
+            cid = hdr[:4]
+            size = struct.unpack("<I", hdr[4:8])[0]
+            if cid == b"fmt ":
+                fmt_body = f.read(size)
+                if len(fmt_body) >= 16:
+                    fmt = struct.unpack("<HHIIHH", fmt_body[:16])
+                if size & 1:
+                    f.seek(1, os.SEEK_CUR)
+                continue
+            if cid == b"data":
+                data_len = size
+            f.seek(size + (size & 1), os.SEEK_CUR)
+    if fmt is None:
+        raise _WavFormatError("WAV 缺少 fmt 块，无法判断编码")
+
+    audio_format, channels, sample_rate, byte_rate, block_align, bits = fmt
+    if audio_format == 0xFFFE and len(fmt_body) >= 26:
+        audio_format = struct.unpack("<H", fmt_body[24:26])[0]
+    codec = {1: "PCM", 3: "IEEE float", 6: "A-law", 7: "mu-law"}.get(
+        audio_format, f"format={audio_format}")
+    meta = {"codec": codec, "audio_format": int(audio_format),
+            "channels": int(channels), "bits_per_sample": int(bits),
+            "sample_rate_hz": float(sample_rate), "data_bytes": int(data_len)}
+    if audio_format != 1:
+        raise _WavFormatError(
+            f"不支持的编码: {codec}（仅支持 16-bit PCM）", meta)
+    if channels != 1:
+        raise _WavFormatError(
+            f"不支持的声道数: {channels}（仅支持单声道，不做静默下混）", meta)
+    if bits != 16:
+        raise _WavFormatError(
+            f"不支持的位深: {bits}-bit（仅支持 16-bit PCM）", meta)
+    if data_len <= 0:
+        raise _WavFormatError("WAV 没有 data 块或数据为空", meta)
+    return meta
+
+
+def run_aprs_wav_pipeline(path: str, target_fs: float = 48000.0) -> Dict[str, Any]:
+    """APRS：16-bit PCM 单声道 .wav → 重采样 48k → AFSK → AX.25。
+
+    只接受 16-bit PCM 单声道；立体声/8-bit/24-bit/浮点 WAV 一律
+    `unsupported_format`，并给出声道数/位深/编码的具体原因，不静默下混。
+    格式合法但信号解不出时，原因码来自后面的流水线（如 `nothing_detected`），
+    不让格式门背锅。
+    """
+    import wave
+
+    trace = _Trace()
     t0 = time.perf_counter()
-    if audio.size < required_audio:
-        ms = (time.perf_counter() - t0) * 1000
-        trace.add("demod", "audio_samples", int(audio.size), "bits", 0,
-                  elapsed_ms=ms, note="不足一个 HDLC 帧")
-        return _fail(trace, "demod", REASON_INSUFFICIENT_SAMPLES,
-                     f"音频长度不足一个 HDLC 帧：需要 ≥ {required_audio} 样本"
-                     f"（{APRS_MIN_HDLC_BITS} bit × {sps:g} 样本/bit），"
-                     f"实际 {audio.size}",
-                     {"required_samples": int(required_audio),
-                      "required_input_samples": int(required_input)})
     try:
-        from .multimon_decoders import AFSK1200Demod
-        levels = AFSK1200Demod(sample_rate=float(target_fs)).demodulate(audio)
-        raw_bits = _aprs_nrzi_decode(levels)
+        meta = _probe_wav_header(path)
+    except FileNotFoundError:
+        trace.add("load_iq", "pcm_frames", 0, "audio_samples", 0,
+                  elapsed_ms=0.0, note="输入文件不存在")
+        return _fail(trace, "load_iq", REASON_INPUT_NOT_FOUND,
+                     f"输入文件不存在: {path}")
+    except _WavFormatError as exc:
+        trace.add("load_iq", "pcm_frames", 0, "audio_samples", 0,
+                  elapsed_ms=(time.perf_counter() - t0) * 1000,
+                  note=str(exc))
+        return _fail(trace, "load_iq", REASON_UNSUPPORTED_FORMAT, str(exc),
+                     dict(exc.info))
     except Exception as exc:
-        ms = (time.perf_counter() - t0) * 1000
-        trace.add("demod", "audio_samples", int(audio.size), "bits", 0,
-                  elapsed_ms=ms, note=f"异常 {type(exc).__name__}")
-        return _fail(trace, "demod", REASON_DECODE_ERROR,
-                     f"AFSK 1200bd 解调异常: {type(exc).__name__}: {exc}")
-    ms = (time.perf_counter() - t0) * 1000
-    trace.add("demod", "audio_samples", int(audio.size), "bits", len(raw_bits),
-              elapsed_ms=ms,
-              note="Bell 202 正交相关 + PLL 位定时 + NRZI 差分")
+        trace.add("load_iq", "pcm_frames", 0, "audio_samples", 0,
+                  elapsed_ms=(time.perf_counter() - t0) * 1000,
+                  note=f"WAV 头解析异常 {type(exc).__name__}")
+        return _fail(trace, "load_iq", REASON_UNSUPPORTED_FORMAT,
+                     f"WAV 头解析失败: {type(exc).__name__}: {exc}")
 
-    # --- 第 4 级：HDLC 0x7E 标志 + 去位填充（候选帧在此切出） -------------
-    t0 = time.perf_counter()
-    flags, candidates, tail = _aprs_frame_candidates(raw_bits)
-    ms = (time.perf_counter() - t0) * 1000
-    trace.add("sync", "bits", len(raw_bits), "frame_candidates",
-              len(candidates), elapsed_ms=ms,
-              note=f"HDLC 0x7E 标志 {len(flags)} 个；去填充后按标志切帧")
-    if not flags:
-        return _fail(trace, "sync", REASON_NOTHING_DETECTED,
-                     f"位流 {len(raw_bits)} bit 中没有 HDLC 0x7E 标志"
-                     "（纯噪声/无 AFSK 信号都会落到这里）",
-                     {"wire_bits": len(raw_bits), "flag_count": 0})
-    if not candidates and (len(tail) < 8 or 0 not in tail):
-        return _fail(trace, "sync", REASON_NOTHING_DETECTED,
-                     f"只看到 {len(flags)} 个 HDLC 标志/空闲位，没有帧数据",
-                     {"wire_bits": len(raw_bits), "flag_count": len(flags),
-                      "tail_bits": len(tail)})
+    try:
+        with wave.open(path, "rb") as w:
+            n_frames = w.getnframes()
+            pcm = w.readframes(n_frames)
+    except Exception as exc:
+        trace.add("load_iq", "pcm_frames", 0, "audio_samples", 0,
+                  elapsed_ms=(time.perf_counter() - t0) * 1000,
+                  note=f"PCM 读取失败 {type(exc).__name__}")
+        return _fail(trace, "load_iq", REASON_UNSUPPORTED_FORMAT,
+                     f"无法读取 16-bit PCM 数据: {type(exc).__name__}: {exc}",
+                     {"codec": meta["codec"], "channels": meta["channels"],
+                      "bits_per_sample": meta["bits_per_sample"]})
+    audio = np.frombuffer(pcm, dtype="<i2").astype(np.float64) / 32768.0
+    sample_rate = float(meta["sample_rate_hz"])
+    trace.add("load_iq", "pcm_frames", int(n_frames), "audio_samples",
+              int(audio.size), elapsed_ms=(time.perf_counter() - t0) * 1000,
+              note=(f"16-bit PCM mono {sample_rate:g}Hz "
+                    f"(channels={meta['channels']}, bits={meta['bits_per_sample']})"))
 
-    # --- 第 5 级：去填充 + CRC-16/X.25（失败帧在此计数） -------------------
+    # --- 重采样到流水线需要的 48k -----------------------------------------
     t0 = time.perf_counter()
-    valid_raw: List[bytes] = []
-    valid_frames: List[Any] = []
-    crc_fail = 0
-    short_fragments = 0
-    for seg in candidates:
-        unstuffed = unstuff_bits(seg)
-        n_bits = (len(unstuffed) // 8) * 8
-        raw = bits_to_bytes(unstuffed[:n_bits])
-        if len(raw) < APRS_MIN_FRAME_BYTES:
-            short_fragments += 1
-            continue
-        frame = AX25Frame.from_bytes(raw)
-        if frame is None:
-            short_fragments += 1
-        elif frame.fcs_valid:
-            valid_frames.append(frame)
-            valid_raw.append(raw)
-        else:
-            crc_fail += 1
-    truncated = bool(tail) and len(tail) >= 8 and 0 in tail
-    ms = (time.perf_counter() - t0) * 1000
-    trace.add("frame", "frame_candidates", len(candidates), "frames",
-              len(valid_raw), dropped=crc_fail, elapsed_ms=ms,
-              note=(f"CRC-16/X.25 FCS；CRC 失败丢弃 {crc_fail}，"
-                    f"非帧碎片 {short_fragments}，尾部残段 {len(tail)} bit"))
-    if not valid_raw:
-        extra = {"candidate_frames": len(candidates),
-                 "dropped_frames": int(crc_fail),
-                 "truncated_fragments": int(short_fragments),
-                 "tail_bits": int(len(tail))}
-        if crc_fail:
-            return _fail(trace, "frame", REASON_CRC_FAILED,
-                         f"{len(candidates)} 个候选帧全部 CRC-16 失败"
-                         f"（丢弃 {crc_fail}）", extra)
-        if truncated or short_fragments:
-            return _fail(trace, "frame", REASON_TRUNCATED_FRAME,
-                         "看到帧起始标志，但没有凑够一个完整 AX.25 帧"
-                         f"（碎片 {short_fragments} 个，尾部残段 {len(tail)} bit）",
-                         extra)
-        return _fail(trace, "frame", REASON_NO_FRAME_RECOVERED,
-                     f"{len(candidates)} 个候选帧都未通过 CRC-16 校验", extra)
+    n_in = int(audio.size)
+    if sample_rate < 4800.0:
+        trace.add("downconvert", "audio_samples", n_in, "audio_samples", 0,
+                  elapsed_ms=(time.perf_counter() - t0) * 1000,
+                  note=f"采样率过低: {sample_rate:g} Hz")
+        return _fail(trace, "downconvert", REASON_SAMPLE_RATE_MISMATCH,
+                     "WAV 采样率过低：Bell 202 space=2200Hz 要求 fs ≥ 4800Hz；"
+                     f"收到 {sample_rate:g} Hz",
+                     {"sample_rate_hz": sample_rate,
+                      "target_sample_rate_hz": float(target_fs)})
+    try:
+        from scipy.signal import resample_poly
+        if abs(sample_rate - target_fs) > 1e-6:
+            src, dst = int(round(sample_rate)), int(round(target_fs))
+            from math import gcd
+            g = gcd(src, dst)
+            audio = resample_poly(audio, dst // g, src // g,
+                                  window=("kaiser", 5.0))
+    except ImportError:
+        trace.add("downconvert", "audio_samples", n_in, "audio_samples", 0,
+                  elapsed_ms=(time.perf_counter() - t0) * 1000, note="scipy 缺失")
+        return _fail(trace, "downconvert", REASON_MISSING_DEPENDENCY,
+                     "WAV 重采样需要 scipy.signal.resample_poly，当前环境缺失")
+    except Exception as exc:
+        trace.add("downconvert", "audio_samples", n_in, "audio_samples", 0,
+                  elapsed_ms=(time.perf_counter() - t0) * 1000,
+                  note=f"异常 {type(exc).__name__}")
+        return _fail(trace, "downconvert", REASON_DECODE_ERROR,
+                     f"WAV 重采样异常: {type(exc).__name__}: {exc}")
+    audio = np.asarray(audio, dtype=np.float64)
+    trace.add("downconvert", "audio_samples", n_in, "audio_samples",
+              int(audio.size), elapsed_ms=(time.perf_counter() - t0) * 1000,
+              note=f"PCM audio 重采样 {sample_rate:g}→{target_fs:g} Hz")
 
-    # --- 第 6 级：AX.25 地址/控制/PID/信息字段 ----------------------------
-    t0 = time.perf_counter()
-    frames: List[Dict[str, Any]] = []
-    for frame, raw in zip(valid_frames, valid_raw):
-        frames.append({
-            "source": frame.source,
-            "source_ssid": int(frame.source_ssid),
-            "destination": frame.destination,
-            "dest_ssid": int(frame.dest_ssid),
-            "digipeaters": [[c, int(s), bool(r)]
-                            for c, s, r in frame.digipeaters],
-            "control": int(frame.control),
-            "pid": int(frame.pid),
-            "info_hex": frame.info.hex(),
-            "info_text": frame.info.decode("latin-1", errors="replace"),
-            "info_len": len(frame.info),
-            "frame_hex": raw.hex(),
-            "fcs": int(frame.fcs),
-            "fcs_valid": bool(frame.fcs_valid),
-        })
-    ms = (time.perf_counter() - t0) * 1000
-    trace.add("content", "frames", len(valid_raw), "frames", len(frames),
-              elapsed_ms=ms,
-              note="AX.25 源/目的/digipeater 路径 + 控制/PID + payload")
-    return _ok(trace, {
-        "frames": frames,
-        "payloads_hex": [f["info_hex"] for f in frames],
-    }, {"num_frames": len(frames), "dropped_frames": int(crc_fail),
-        "truncated_fragments": int(short_fragments)})
+    return _aprs_decode_audio(trace, audio, target_fs)
+
+
+def decode_aprs_audio(audio: np.ndarray, target_fs: float = 48000.0) -> Dict[str, Any]:
+    """对已在目标采样率上的浮点音频直接跑 APRS 后四级（无容器/无 I/O）。
+
+    供灵敏度扫描等「同一帧反复加噪重解」的场景使用；音频必须已归一化
+    （16-bit PCM 口径为 int16/32768）。容器与格式检查不在本入口职责内。
+    """
+    trace = _Trace()
+    arr = np.asarray(audio, dtype=np.float64)
+    trace.add("load_iq", "audio_samples", int(arr.size), "audio_samples",
+              int(arr.size), note="内存浮点音频（无容器）")
+    trace.add("downconvert", "audio_samples", int(arr.size), "audio_samples",
+              int(arr.size), note=f"已是目标采样率 {target_fs:g} Hz（无重采样）")
+    return _aprs_decode_audio(trace, arr, float(target_fs))
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,9 @@
     让 downconvert 级真做多相抽取/鉴频，而不是恒等直通。
   * 三条 APRS 失败 fixture（噪声、截断、CRC 坏帧）也由本生成器产出，并在
     生成时用 `decode_pipeline.run_aprs_pipeline` 验证原因码。
+  * APRS 的 `.wav` 入口 fixture（16-bit PCM 单声道，44.1k/48k）由**同一段
+    cf32 IQ** 鉴频出的音频重采样、量化而来；生成时用
+    `run_aprs_wav_pipeline` 反校验两帧逐字节与 cf32 一致。
 
 用法：
     python scripts/make_decode_fixtures.py           # 生成/覆盖
@@ -38,6 +41,8 @@ OUT_DIR = os.path.join(ROOT, "tests", "fixtures", "decode_pipeline")
 AIS_FILE = "ais_two_frames.cf32"
 ADSB_FILE = "adsb_three_frames.cf32"
 APRS_FILE = "aprs_two_frames.cf32"
+APRS_WAV_44100_FILE = "aprs_two_frames_44100.wav"
+APRS_WAV_48000_FILE = "aprs_two_frames_48000.wav"
 APRS_NOISE_FILE = "aprs_noise.cf32"
 APRS_TRUNCATED_FILE = "aprs_truncated.cf32"
 APRS_CRC_FAIL_FILE = "aprs_crc_fail.cf32"
@@ -317,12 +322,102 @@ def _build_aprs_failures():
     return out
 
 
+def _fm_discriminate_audio(iq: np.ndarray, fs: float) -> np.ndarray:
+    """从 NFM 复基带还原音频（与 decode_pipeline 的 downconvert 同一算法）。"""
+    from scipy.signal import butter, sosfiltfilt
+
+    z = np.asarray(iq, dtype=np.complex128)
+    z = z - z.mean()
+    inst = np.angle(z[1:] * np.conj(z[:-1])) * (fs / (2.0 * np.pi))
+    sos = butter(4, min(4500.0, fs / 2.0 - 1.0) / (fs / 2.0),
+                 btype="low", output="sos")
+    return sosfiltfilt(sos, inst)
+
+
+def _resample_audio(audio: np.ndarray, src: float, dst: float) -> np.ndarray:
+    from math import gcd
+    from scipy.signal import resample_poly
+
+    s, d = int(round(src)), int(round(dst))
+    g = gcd(s, d)
+    return resample_poly(np.asarray(audio, dtype=np.float64),
+                         d // g, s // g, window=("kaiser", 5.0))
+
+
+def _wav_pcm16_bytes(audio: np.ndarray, sample_rate: float) -> bytes:
+    """单声道 16-bit PCM WAV（峰值归一到 90% 满量程，避免削顶）。"""
+    import io
+    import wave
+
+    a = np.asarray(audio, dtype=np.float64)
+    peak = float(np.max(np.abs(a))) if a.size else 0.0
+    if peak > 0:
+        a = a / peak * (32767.0 * 0.9)
+    pcm = np.clip(np.round(a), -32768, 32767).astype("<i2")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(int(round(sample_rate)))
+        w.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+def _build_aprs_wavs(aprs_iq: np.ndarray, aprs_meta: dict):
+    """从 aprs_two_frames.cf32 的同一 IQ 生成 44.1k/48k 的 16-bit PCM wav。"""
+    audio96 = _fm_discriminate_audio(aprs_iq, APRS_FS)
+    out = {}
+    for name, sr in ((APRS_WAV_44100_FILE, 44100.0),
+                     (APRS_WAV_48000_FILE, 48000.0)):
+        audio = _resample_audio(audio96, APRS_FS, sr)
+        data = _wav_pcm16_bytes(audio, sr)
+        meta = {
+            "file": name,
+            "sample_rate_hz": sr,
+            "encoding": "PCM 16-bit mono",
+            "frame_count": aprs_meta["frame_count"],
+            "frames": aprs_meta["frames"],
+            "generation": ("从 aprs_two_frames.cf32 复基带做 FM 鉴频 + 4.5kHz "
+                           f"低通，再重采样到 {sr:g}Hz 并量化为 16-bit PCM"),
+            "honesty": "synthetic remodulation; NOT OTA",
+        }
+        out[name] = (data, meta)
+    return out
+
+
+def _verify_aprs_wav_blob(name: str, data: bytes, expected_frames) -> None:
+    import tempfile
+    from mbdsdr_ai.decode_pipeline import run_aprs_wav_pipeline
+
+    fd, tmp = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        r = run_aprs_wav_pipeline(tmp)
+    finally:
+        os.unlink(tmp)
+    if not r["ok"] or r["num_frames"] != len(expected_frames):
+        raise RuntimeError(
+            f"{name}: 期望 {len(expected_frames)} 帧，实际 ok={r['ok']} "
+            f"num_frames={r['num_frames']} reason={r['reason']}")
+    for got, exp in zip(r["content"]["frames"], expected_frames):
+        for key in ("source", "source_ssid", "destination", "dest_ssid",
+                    "digipeaters", "info_hex", "frame_hex"):
+            if got[key] != exp[key]:
+                raise RuntimeError(f"{name}: 字段 {key} 不一致 "
+                                   f"got={got[key]!r} exp={exp[key]!r}")
+
+
 def build_all():
     ais_iq, ais_meta = _build_ais()
     adsb_iq, adsb_meta = _build_adsb()
     aprs_iq, aprs_meta = _build_aprs()
     _verify_aprs_blob(APRS_FILE, _cf32_bytes(aprs_iq), APRS_FS,
                       expected_frames=aprs_meta["frames"])
+    aprs_wavs = _build_aprs_wavs(aprs_iq, aprs_meta)
+    for name, (data, meta) in aprs_wavs.items():
+        _verify_aprs_wav_blob(name, data, meta["frames"])
     aprs_failures = _build_aprs_failures()
     manifest = {
         "generated_by": "scripts/make_decode_fixtures.py",
@@ -333,12 +428,20 @@ def build_all():
         "ais": ais_meta,
         "adsb": adsb_meta,
         "aprs": aprs_meta,
+        "aprs_wav": {
+            "source": APRS_FILE,
+            "generation": ("FM discriminator of the same cf32 IQ + 4.5kHz lowpass, "
+                           "resampled to 44.1k/48k and quantized to 16-bit PCM mono"),
+            "files": [meta for _data, meta in aprs_wavs.values()],
+        },
         "aprs_failures": {name: meta for name, (_iq, meta)
                           in aprs_failures.items()},
     }
     blobs = {AIS_FILE: _cf32_bytes(ais_iq),
              ADSB_FILE: _cf32_bytes(adsb_iq),
              APRS_FILE: _cf32_bytes(aprs_iq)}
+    for name, (data, _meta) in aprs_wavs.items():
+        blobs[name] = data
     for name, (iq, _meta) in aprs_failures.items():
         blobs[name] = _cf32_bytes(iq)
     return blobs, manifest
@@ -368,7 +471,7 @@ def main(argv=None) -> int:
         if failures:
             print("FAIL: " + "; ".join(failures))
             return 1
-        print(f"OK: {len(blobs)} 个 cf32 + manifest 与生成器一致")
+        print(f"OK: {len(blobs)} 个 fixture（cf32/wav）+ manifest 与生成器一致")
         return 0
 
     os.makedirs(OUT_DIR, exist_ok=True)

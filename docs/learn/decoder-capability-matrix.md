@@ -46,17 +46,18 @@ export MBDSDR_NULL_AUDIO=1 MBDSDR_NO_HW=1 QT_QPA_PLATFORM=offscreen
 
 ## 灵敏度基线（合成 AWGN，仅供相对比较）
 
-上表回答「是不是真的」；这张小表回答「同一实现里谁更耐噪」。口径是**复基带突发内平均每样本 SNR**，信号由仓内编码器合成、注入白噪声后交给本仓解码器，成功 = CRC/FCS 通过且字段与合成真值一致。
+上表回答「是不是真的」；这张小表回答「同一实现里谁更耐噪」。AIS/ADS-B 的口径是**复基带突发内平均每样本 SNR**；APRS 是**鉴频后 48k 音频域**的每样本 SNR（两者不可横向换算）。信号由仓内编码器/fixture 合成、注入白噪声后交给本仓解码器，成功 = CRC/FCS 通过且字段与合成真值一致。
 
 | 模式 | 90% 成功率所需 SNR | 首次 100% 的 SNR | 采样条件 |
 |---|---|---|---|
 | `ais` | 8 dB | 10 dB | GMSK 9600 bit/s，fs=48000（9600×5），单帧 Type 1 |
 | `adsb` | 6 dB | 8 dB | 1090ES PPM 1 Mbit/s，fs=4e6（4 样本/bit），DF17 识别帧 |
+| `aprs` | 0 dB | 2 dB | Bell 202 AFSK 1200bd，48k 音频，2 帧 AX.25（合成 wav fixture） |
 
-快照日期 2026-11-04，种子 20261104，每档 20 次。**以实跑为准**，过期就重新生成：
+快照日期 2026-11-05，种子 20261104，每档 20 次。**以实跑为准**，过期就重新生成：
 
 ```bash
-python scripts/decode_sensitivity.py --modes ais,adsb \
+python scripts/decode_sensitivity.py --modes ais,adsb,aprs \
     --snr -10:16:2 --trials 20 --seed 20261104 --md sensitivity.md
 ```
 

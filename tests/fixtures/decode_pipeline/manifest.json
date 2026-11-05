@@ -101,6 +101,98 @@
     ],
     "honesty": "synthetic remodulation; NOT OTA"
   },
+  "aprs_wav": {
+    "source": "aprs_two_frames.cf32",
+    "generation": "FM discriminator of the same cf32 IQ + 4.5kHz lowpass, resampled to 44.1k/48k and quantized to 16-bit PCM mono",
+    "files": [
+      {
+        "file": "aprs_two_frames_44100.wav",
+        "sample_rate_hz": 44100.0,
+        "encoding": "PCM 16-bit mono",
+        "frame_count": 2,
+        "frames": [
+          {
+            "source": "BI1AAA",
+            "source_ssid": 1,
+            "destination": "APRS",
+            "dest_ssid": 0,
+            "digipeaters": [
+              [
+                "WIDE1",
+                1,
+                false
+              ],
+              [
+                "WIDE2",
+                2,
+                false
+              ]
+            ],
+            "control": 3,
+            "pid": 240,
+            "info_hex": "21333730302e30304e2f31323230302e3030572d73796e7468657469632061783235206f6e65",
+            "frame_hex": "82a0a4a64040e084926282828262ae92888a624062ae92888a64406503f021333730302e30304e2f31323230302e3030572d73796e7468657469632061783235206f6e6599d5"
+          },
+          {
+            "source": "BI1BBB",
+            "source_ssid": 9,
+            "destination": "APRS",
+            "dest_ssid": 0,
+            "digipeaters": [],
+            "control": 3,
+            "pid": 240,
+            "info_hex": "21333935342e30304e2f31313632342e3030452d73796e74686574696320617832352074776f",
+            "frame_hex": "82a0a4a64040e08492628484847303f021333935342e30304e2f31313632342e3030452d73796e74686574696320617832352074776f257f"
+          }
+        ],
+        "generation": "从 aprs_two_frames.cf32 复基带做 FM 鉴频 + 4.5kHz 低通，再重采样到 44100Hz 并量化为 16-bit PCM",
+        "honesty": "synthetic remodulation; NOT OTA"
+      },
+      {
+        "file": "aprs_two_frames_48000.wav",
+        "sample_rate_hz": 48000.0,
+        "encoding": "PCM 16-bit mono",
+        "frame_count": 2,
+        "frames": [
+          {
+            "source": "BI1AAA",
+            "source_ssid": 1,
+            "destination": "APRS",
+            "dest_ssid": 0,
+            "digipeaters": [
+              [
+                "WIDE1",
+                1,
+                false
+              ],
+              [
+                "WIDE2",
+                2,
+                false
+              ]
+            ],
+            "control": 3,
+            "pid": 240,
+            "info_hex": "21333730302e30304e2f31323230302e3030572d73796e7468657469632061783235206f6e65",
+            "frame_hex": "82a0a4a64040e084926282828262ae92888a624062ae92888a64406503f021333730302e30304e2f31323230302e3030572d73796e7468657469632061783235206f6e6599d5"
+          },
+          {
+            "source": "BI1BBB",
+            "source_ssid": 9,
+            "destination": "APRS",
+            "dest_ssid": 0,
+            "digipeaters": [],
+            "control": 3,
+            "pid": 240,
+            "info_hex": "21333935342e30304e2f31313632342e3030452d73796e74686574696320617832352074776f",
+            "frame_hex": "82a0a4a64040e08492628484847303f021333935342e30304e2f31313632342e3030452d73796e74686574696320617832352074776f257f"
+          }
+        ],
+        "generation": "从 aprs_two_frames.cf32 复基带做 FM 鉴频 + 4.5kHz 低通，再重采样到 48000Hz 并量化为 16-bit PCM",
+        "honesty": "synthetic remodulation; NOT OTA"
+      }
+    ]
+  },
   "aprs_failures": {
     "aprs_noise.cf32": {
       "file": "aprs_noise.cf32",

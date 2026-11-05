@@ -122,11 +122,12 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         mode="aprs",
         impl="decode_pipeline.py",
         dependency="mbdsdr_ai.decode_pipeline",
-        input_formats=(".cf32", ".cfile"),
+        input_formats=(".wav", ".cf32", ".cfile"),
         output_kind="frames",
         sample_rate_rule=(
-            "NFM 复基带 fs ≥ 16000Hz（dev≈3kHz + Bell202 1200/2200Hz 音调）；"
-            "解码前鉴频并重采样到 48kHz（40 样/bit）"
+            ".wav：16-bit PCM 单声道，任意 fs ≥ 4800Hz（44.1k/48k/8k 均可），"
+            "解码前重采样到 48kHz；.cf32：NFM 复基带 fs ≥ 16000Hz，解码前鉴频"
+            "并重采样到 48kHz（40 样/bit）"
         ),
         evidence=EVIDENCE_PARTIAL,
         min_sample_condition=(
@@ -290,21 +291,24 @@ def _route_ft8(ctx: _Ctx) -> Dict[str, Any]:
 
 
 def _route_aprs(ctx: _Ctx) -> Dict[str, Any]:
-    """APRS：真接到 `decode_pipeline.run_aprs_pipeline`，不伪造结果。"""
+    """APRS：真接流水线；.wav 走 PCM 入口，.cf32/.cfile 走 NFM 入口。"""
     result = ctx.result
-    if ctx.ext not in (".cf32", ".cfile"):
+    if ctx.ext not in (".cf32", ".cfile", ".wav"):
         result["error"] = user_message(
             "unsupported_format", mode="APRS",
-            allowed=".cf32/.cfile（NFM 复基带；AFSK 音频请先调制/录制为 cf32）",
+            allowed=".wav（16-bit PCM 单声道）、.cf32/.cfile（NFM 复基带）",
             actual=ctx.ext)
         result["error_code"] = ERR_UNSUPPORTED_FORMAT
         return result
 
-    from .decode_pipeline import run_aprs_pipeline
-
     try:
-        rep = run_aprs_pipeline(ctx.input_path, fs=float(ctx.sample_rate),
-                                target_fs=48000.0)
+        if ctx.ext == ".wav":
+            from .decode_pipeline import run_aprs_wav_pipeline
+            rep = run_aprs_wav_pipeline(ctx.input_path, target_fs=48000.0)
+        else:
+            from .decode_pipeline import run_aprs_pipeline
+            rep = run_aprs_pipeline(ctx.input_path, fs=float(ctx.sample_rate),
+                                    target_fs=48000.0)
     except Exception as exc:
         result["error"] = f"APRS 流水线异常: {type(exc).__name__}: {exc}"
         result["error_code"] = ERR_DECODE_ERROR

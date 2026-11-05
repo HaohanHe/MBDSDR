@@ -73,6 +73,13 @@ def test_fixtures_are_in_repo_and_manifest_is_honest():
         p = FIXTURE_DIR / m[key]["file"]
         assert p.exists() and p.stat().st_size > 0
         assert str(p).startswith(str(FIXTURE_DIR))
+    for meta in m["aprs_wav"]["files"]:
+        p = FIXTURE_DIR / meta["file"]
+        assert p.exists() and p.stat().st_size > 0, (
+            f"缺少 wav fixture {meta['file']}；运行 "
+            "python scripts/make_decode_fixtures.py")
+        assert meta["encoding"] == "PCM 16-bit mono"
+        assert meta["frame_count"] == m["aprs"]["frame_count"]
     for key, meta in m["aprs_failures"].items():
         p = FIXTURE_DIR / meta["file"]
         assert p.exists() and p.stat().st_size > 0
@@ -303,6 +310,149 @@ def test_aprs_short_input_and_bad_rate_are_explicit(pipe, tmp_path):
     assert r2["ok"] is False and r2["content"] == {}
     assert r2["reason"] == "sample_rate_mismatch"
     assert r2["stage"] == "downconvert"
+
+
+# ---------------------------------------------------------------------------
+# 3) .wav 入口：与 .cf32 逐字节一致；不支持的编码给具体原因，不合谋格式门
+# ---------------------------------------------------------------------------
+def _aprs_wav_metas():
+    return {float(f["sample_rate_hz"]): f for f in _manifest()["aprs_wav"]["files"]}
+
+
+def _decode_aprs_cf32(pipe):
+    m = _manifest()["aprs"]
+    return pipe.run_aprs_pipeline(
+        str(FIXTURE_DIR / m["file"]), fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]))
+
+
+def test_aprs_wav_and_cf32_decode_byte_identically(pipe):
+    """同一帧经 .cf32 与 .wav 两条入口，frame_hex/info_hex 必须逐字节相同。"""
+    cf = _decode_aprs_cf32(pipe)
+    assert cf["ok"] is True
+    wav_cf32_truth = [(f["frame_hex"], f["info_hex"])
+                      for f in cf["content"]["frames"]]
+    assert wav_cf32_truth == [(f["frame_hex"], f["info_hex"])
+                              for f in _manifest()["aprs"]["frames"]]
+
+    for rate, meta in _aprs_wav_metas().items():
+        r = pipe.run_aprs_wav_pipeline(
+            str(FIXTURE_DIR / meta["file"]), target_fs=48000.0)
+        assert r["ok"] is True, f"{rate:g}Hz wav 未解出: {r['reason']}"
+        _assert_stage_shape(r["stages"],
+                            ["load_iq", "downconvert", "demod", "sync",
+                             "frame", "content"])
+        assert r["stages"][0]["unit_in"] == "pcm_frames"
+        got = [(f["frame_hex"], f["info_hex"])
+               for f in r["content"]["frames"]]
+        assert got == wav_cf32_truth, (
+            f"{rate:g}Hz wav 与 cf32 的 frame_hex/info_hex 不一致")
+        assert got == [(f["frame_hex"], f["info_hex"])
+                       for f in meta["frames"]], "wav 结果必须与 manifest 真值一致"
+
+
+def test_aprs_wav_44100_and_48000_decode_identically(pipe):
+    """44.1k 与 48k 两条 wav 入口解出的整帧/信息字段逐字节相同。"""
+    metas = _aprs_wav_metas()
+    assert set(metas) == {44100.0, 48000.0}, "manifest 缺两种采样率的 wav"
+    results = {}
+    for rate, meta in metas.items():
+        r = pipe.run_aprs_wav_pipeline(
+            str(FIXTURE_DIR / meta["file"]), target_fs=48000.0)
+        assert r["ok"] is True, f"{rate:g}Hz wav 未解出: {r['reason']}"
+        results[rate] = [(f["frame_hex"], f["info_hex"])
+                         for f in r["content"]["frames"]]
+    assert results[44100.0] == results[48000.0]
+
+
+def _write_pcm16_mono(path, samples, rate=48000):
+    import wave
+    pcm = np.asarray(samples, dtype=np.int16)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm.tobytes())
+    return path
+
+
+@pytest.mark.parametrize("case,needle,field,value", [
+    ("stereo", "声道数", "channels", 2),
+    ("8bit", "位深", "bits_per_sample", 8),
+    ("float", "编码", "codec", "IEEE float"),
+])
+def test_aprs_wav_unsupported_encodings_are_explicit(
+        pipe, tmp_path, case, needle, field, value):
+    """立体声/8-bit/浮点不许静默当单声道；原因必须点名声道数/位深/编码。"""
+    n = 48000
+    path = tmp_path / f"aprs_{case}.wav"
+    if case == "stereo":
+        import wave
+        pcm = np.zeros(n, dtype=np.int16)
+        stereo = np.repeat(pcm[:, None], 2, axis=1).reshape(-1)
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(48000)
+            w.writeframes(stereo.tobytes())
+    elif case == "8bit":
+        import wave
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(1)
+            w.setframerate(48000)
+            w.writeframes(np.full(n, 128, dtype=np.uint8).tobytes())
+    else:
+        from scipy.io import wavfile
+        wavfile.write(str(path), 48000,
+                      np.zeros(n, dtype=np.float32))
+
+    r = pipe.run_aprs_wav_pipeline(str(path))
+    assert r["ok"] is False and r["status"] == "error"
+    assert r["content"] == {}, "格式门失败不允许带伪造 content"
+    assert r["reason"] == "unsupported_format"
+    assert r["stage"] == "load_iq"
+    assert needle in r["detail"], r["detail"]
+    assert r[field] == value, f"detail 应点名 {field}={value}，实际 {r[field]!r}"
+
+
+def test_aprs_valid_wav_noise_fails_with_decode_reason_not_format(pipe, tmp_path):
+    """格式合法但解不出：原因码必须是具体解码失败码，不能归咎格式门。"""
+    rng = np.random.default_rng(20261105)
+    path = _write_pcm16_mono(
+        tmp_path / "aprs_valid_noise.wav",
+        np.round(rng.standard_normal(48000) * 1638.0))
+    r = pipe.run_aprs_wav_pipeline(str(path))
+    assert r["ok"] is False and r["content"] == {}
+    assert r["reason"] != "unsupported_format", (
+        "合法 16-bit PCM 单声道 wav 不许被格式门拒绝")
+    assert r["reason"] in {"nothing_detected", "no_frame_recovered",
+                           "truncated_frame", "crc_failed"}, r["reason"]
+    assert r["stage"] in {"demod", "sync", "frame"}
+    assert r["detail"]
+
+
+def test_aprs_wav_short_and_low_rate_are_explicit(pipe, tmp_path):
+    short = _write_pcm16_mono(tmp_path / "aprs_short.wav",
+                              np.zeros(8, dtype=np.int16))
+    r = pipe.run_aprs_wav_pipeline(str(short))
+    assert r["ok"] is False and r["content"] == {}
+    assert r["reason"] == "insufficient_samples"
+    assert r["stage"] == "demod"
+
+    low = _write_pcm16_mono(tmp_path / "aprs_lowrate.wav",
+                            np.zeros(2048, dtype=np.int16), rate=4000)
+    r2 = pipe.run_aprs_wav_pipeline(str(low))
+    assert r2["ok"] is False and r2["content"] == {}
+    assert r2["reason"] == "sample_rate_mismatch"
+    assert r2["stage"] == "downconvert"
+
+
+def test_aprs_wav_missing_file_is_explicit(pipe, tmp_path):
+    r = pipe.run_aprs_wav_pipeline(str(tmp_path / "ghost.wav"))
+    assert r["ok"] is False and r["content"] == {}
+    assert r["reason"] == "input_not_found"
+    assert r["stage"] == "load_iq"
 
 
 # ---------------------------------------------------------------------------

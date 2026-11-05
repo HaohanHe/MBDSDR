@@ -180,22 +180,47 @@ class TestFormatGate:
         assert out["ok"] is False
         assert out["note"]
 
-    def test_aprs_now_rejects_wav_and_decodes_cf32(self, tmp_path):
-        """APRS 已接线：格式门收紧到 cf32/cfile，cf32 走真实流水线。"""
-        wav = _write_wav(tmp_path / "aprs.wav", np.zeros(480))
-        out = decode_digital_mode(wav, "aprs")
-        assert out["error_code"] == dm.ERR_UNSUPPORTED_FORMAT
-        assert "cf32" in out["error"]
-
-        fixture = os.path.join(_ROOT, "tests", "fixtures", "decode_pipeline",
-                               "aprs_two_frames.cf32")
-        res = decode_digital_mode(fixture, "aprs", sample_rate=96000.0,
+    def test_aprs_accepts_wav_and_cf32(self, tmp_path):
+        """APRS 已接线：.wav（16-bit PCM 单声道）与 .cf32 都走真实流水线。"""
+        fixture_dir = os.path.join(_ROOT, "tests", "fixtures", "decode_pipeline")
+        wav = os.path.join(fixture_dir, "aprs_two_frames_48000.wav")
+        res = decode_digital_mode(wav, "aprs",
                                   output_dir=str(tmp_path / "out"))
         assert res["ok"] is True and res["status"] == "decoded"
         assert res["num_frames"] == 2
         assert len(res["stages"]) == 6
         assert res["frames"][0]["source"] == "BI1AAA"
         assert res["frames"][0]["digipeaters"]
+
+        fixture = os.path.join(fixture_dir, "aprs_two_frames.cf32")
+        res2 = decode_digital_mode(fixture, "aprs", sample_rate=96000.0,
+                                   output_dir=str(tmp_path / "out2"))
+        assert res2["ok"] is True and res2["num_frames"] == 2
+        assert [f["frame_hex"] for f in res["frames"]] == \
+            [f["frame_hex"] for f in res2["frames"]], "两条入口必须逐字节一致"
+
+    def test_aprs_rejects_other_containers(self, tmp_path):
+        """真正不支持的容器仍要格式门报错，且给出允许格式。"""
+        f = tmp_path / "aprs.mp3"
+        f.write_bytes(b"\x00" * 64)
+        out = decode_digital_mode(str(f), "aprs")
+        assert out["error_code"] == dm.ERR_UNSUPPORTED_FORMAT
+        assert ".wav" in out["error"] and "cf32" in out["error"]
+
+    def test_aprs_rejects_unsupported_wav_encoding(self, tmp_path):
+        """立体声 wav 不许静默当单声道：格式门 + 具体原因（声道数）。"""
+        stereo = np.zeros(960, dtype=np.int16)
+        stereo = np.repeat(stereo[:, None], 2, axis=1).reshape(-1)
+        path = tmp_path / "aprs_stereo.wav"
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(2)
+            w.setsampwidth(2)
+            w.setframerate(48000)
+            w.writeframes(stereo.tobytes())
+        out = decode_digital_mode(str(path), "aprs")
+        assert out["ok"] is False
+        assert out["error_code"] == "unsupported_format"
+        assert "声道数" in out["detail"]
 
 
 # ---------------------------------------------------------------------------
