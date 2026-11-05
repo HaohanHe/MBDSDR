@@ -400,8 +400,11 @@ class DemodWorker(QThread):
                     if self.audio_tap is not None:
                         audio = self.audio_tap(audio)
                     player.write(audio)
-                except Exception:
-                    pass
+                except Exception as e:
+                    # 这一段混合了内部后处理（AGC/tap）和外部写卡；后者会因
+                    # 设备拔出而失败，前者出错则是真 bug。静默吞掉两者都会
+                    # 让"没声音"无从定位，所以留一行带上下文的日志。
+                    log.warning("WFM 音频后处理/写卡失败: %s", e)
                 continue
 
             # ===== 窄带路径（FM/NFM/AM/USB/LSB/CW）=====
