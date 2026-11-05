@@ -13,12 +13,12 @@
 
 | 类型 | 项数 | 已处置（删除/合并） | 必须保留 | 待裁定/待修 |
 |---|---|---|---|---|
-| 重复实现 / 常量复用 | 12 | 2（采样率格式化**已合并** `f529ba62`；`kDbUpperDefault` 常量复用**已拆** `ef07c133`） | 10（频谱双实现、频率分精度、错误码标签/下一步/常量、ACARS、dBFS/dBµV、路径引导） | 0 |
+| 重复实现 / 常量复用 | 12 | 2（采样率格式化**已合并** `f529ba62`（取证见 §5.5）；`kDbUpperDefault` 常量复用**已拆** `ef07c133`（四元组见 A12）） | 10（频谱双实现、频率分精度、错误码标签/下一步/常量、ACARS、dBFS/dBµV、路径引导） | 0 |
 | 多真值源 | 11 | 0 | 10（采样率白名单/候选/后端表/AI 参考表/回退/移动端/硬件吸附档/默认值分层/配置路径/工具目录快照） | 1（`module_panel` 5 档 → 能力驱动，见 §5.1） |
-| 死代码 | 12 | 2（4 个函数 `c14ac51e`；2 个纯函数 `1c0464b6`） | 9（三录音模块、C++ 同名模块、仅测试模块、未接线方法、触屏控件、两条动态调用误报、测试钉住函数） | 1（46 个 library-only 模块，已三类归档 §5.3） |
+| 死代码 | 12 | 2（4 个函数 `c14ac51e`；2 个纯函数 `1c0464b6`；删除取证见 §4.1/§4.2，C12 见 §6.2） | 9（三录音模块、C++ 同名模块、仅测试模块、未接线方法、触屏控件、两条动态调用误报、测试钉住函数） | 1（46 个 library-only 模块，已三类归档 §5.3） |
 | 死分支/死配置 | 6 | 0 | 6（ACARS 死分支、`not_implemented`、零消费常量、全部在用设置键、无死键结论、legacy 别名） | 0 |
 
-**一句话结论**：真正能动的只有 2 组死函数（已删 6 个）、1 组逐字相同的格式化函数（已合并）和 1 处常量复用（已拆分 `ef07c133`）；
+**一句话结论**：真正能动的只有 2 组死函数（已删 6 个，见 §4.1/§4.2）、1 组逐字相同的格式化函数（已合并，见 §5.5）和 1 处常量复用（已拆分 `ef07c133`，见 A12）；
 其余"看起来重复"的，要么是**两种用途**（采样率白名单 vs 候选探测表），要么是
 **两个独立 App 各自的实现**（C++ Qt 与 Python PyQt6 无共享运行时），要么是
 **动态调用/泛化读取导致 grep 假阴性**，都不得按"简洁"合并。
@@ -71,7 +71,7 @@ grep 命中 0 **不等于**没有调用方。本仓库已确认存在以下会�
 | A7 | `desktop/status_panel.py:185 DECODE_ERROR_LABELS` | 多真值源（局部，账本 R8） | 至少 11 条短标签；与 `mbdsdr_ai/error_catalog.py:226-249` 的 `unknown_mode/missing_dependency/missing_sample/unsupported_format/decode_error/not_implemented` 同码不同文案 | **保留**（界面短标签）；建议后续从 catalog 派生短标题，本轮不改 | 新错误码只改 catalog 时，状态栏仍显示旧短文案或退回裸码 |
 | A8 | `desktop/troubleshooting.py:249 CODE_NEXT_STEPS` | 多真值源（局部，账本 R8） | 至少 8 条逐码"下一步"；与 catalog 每个码第 4 参数（remedy）在 `insufficient_samples`/`invalid_wav`/`no_frame_recovered` 等重叠 | **保留分层，禁止直接合并** | 同一码两处建议不同步（catalog 说"重录一整帧"，排障页说"≥5s"），用户照哪条都可能失败 |
 | A9 | 解码错误码常量 3 套 | 重复定义（账本 R9） | `mbdsdr_ai/decode_router.py:51-61`、`mbdsdr_ai/decode_pipeline.py:54-64`、`mbdsdr_ai/decoders.py:871/1037` 裸串；catalog 另有同一批码 | **保留待合并**（需先确认无外部脚本按名导入 `ERR_*`/`REASON_*`） | 漏改一处会让路由与管线对同一输入判定分裂（一处接受、一处拒绝） |
-| A10 | ACARS 双实现（账本 R3） | 重复实现（已收敛） | `mbdsdr_ai/acars_protocol.py` 13 命中；`mbdsdr_ai/acars_decoder.py` 33 命中；`mbdsdr_ai/decoder_registry.py` 为唯一入口；`tests/test_acars_consistency.py` 对拍 | **保留，走公开入口** | 绕过入口直调自带状态机会出现自环 CRC `crc_ok=False`，与统一入口结果不一致 |
+| A10 | ACARS 双实现（账本 R3） | **重复实现（两实现并存，入口不止一个，退休条件未满足）** | `mbdsdr_ai/acars_protocol.py`（13 命中）与 `mbdsdr_ai/acars_decoder.py`（33 命中）**都活着**：协议实现是验证核心（`mbdsdr_ai/acars_decoder.py:585` 的 `acars_decode_iq` 直接委托它），解码器实现提供 MSK 解调/帧解析/状态机。入口不止一个：`mbdsdr_ai/decoder_registry.py:78`（`decode_func="acars_decode"`，但 `desktop/capability_catalog.py:212` 另注「registry 尚未接主调度」）、`mbdsdr_ai/acars_decoder.py:585`（AI 工具）、`mbdsdr_ai/decode_router.py:499/517`（CLI `--decode-file --mode acars` 的生产解码路径，经 `mbdsdr_ai/decoders.py:1157`）、`mbdsdr_ai/agent.py:1375-1376`（三个工具）。差异表与退休判据见 §5.6 | **不退休**：整体退休任一侧都会打断生产入口（判据见 §5.6）；本行不再写「已收敛/唯一入口」 | `ACARSDecoder.decode_audio`（`mbdsdr_ai/acars_decoder.py:448`）是 CLI 生产路径，却**无直接测试**（`tests/acars_test.py:27` 仅 import）且自合成信号自环 `crc_ok=False`（`:578-583` 自述）；把它当「已验证实现」会误判解码质量 |
 | A11 | dBFS / dBµV 两套格式化（账本 R7） | 重复实现（不同量纲） | `desktop/status_panel.py:49/62`；`desktop/main_window.py:87 _fmt_dbfs`（0 生产调用、13 测试引用）；`:105` 1 调用 | 保留量纲两份；`_fmt_dbfs` 另见 C11 | 把 dBµV 当 dBFS 合并会差约 107 dB（50Ω/75Ω 基准不同） |
 | A12 | `cpp/src/core/tokens.h` 原 `kDbUpperDefault` **一个常量担两个语义** | **常量复用**（不是重复实现，也不是多份表） | 语义①「默认视窗上限」→ 现 `kDbViewUpperDefault=-20`（`cpp/src/ui/main_window.cpp:5644`、`cpp/src/ui/settings_dialog.cpp:227/432/543`、`cpp/src/ui/spectrum_widget.cpp:308/658`）；语义②「显示天花板硬上限」→ 现 `kDbCeilingMax=0`（`cpp/src/ui/spectrum_display.cpp:693/705`）。修复前实测：显式 `setDbRange(-100, 0)` 被 `:705` 夹到 -20；同一帧 -10 dB 峰值渲染成 **255（纯白）**，按 -100..0 视窗应为 **229** | **已修** — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`：拆成 `kDbViewUpperDefault=-20`（默认视野）+ `kDbCeilingMax=0`（0 dBFS 满量程硬上限）；2 个 ctest + 全部频谱与 UI 集成共 **10 个目标全绿**，**未改任何期望值**；反证把 `kDbCeilingMax` 改回 -20 → 红项槽级明细与修复前**逐字一致**。**原建议「硬上限 = `kDbSpinUpperMax` = 20」已否决**：上界取 20 会让"超过满量程"与"未超过"的画法不再有区别，等于抹掉 0 dBFS 满量程这个物理事实 | 不拆则所有"手动视窗上限 > -20 dB"的调用都被静默改档、波形顶部白化；拆后须保留 A/B 同帧对拍 255→229 作为回归证据（格式见 §4.3） |
 
@@ -320,9 +320,35 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 
 | 项 | 结论 |
 |---|---|
-| A3 采样率格式化合并 | **已完成**（`f529ba62`）；`constants.format_sample_rate is sdr_backend.format_sample_rate`，53 passed |
+| A3 采样率格式化合并 | **改动在位**（`f529ba62`）：`constants.format_sample_rate is sdr_backend.format_sample_rate` 于 2026-11-06 复验成立；`53 passed` 为 `f529ba62` 提交信息所记当次实跑（2026-11-06 02:21 +0800，本机 Windows/PowerShell `pytest`），**本轮未复跑** |
 | C3 桌面写盘 vs `recorder`/`playback` | 不删不接线（录音/回放线持线） |
 | A1 频谱双实现 | 维持双实现；统一前须跑 D.7 对拍 |
+
+### 5.6 A10 两份 ACARS 实现：差异对照与退休判据
+
+> 取证口径：HEAD 树 `git grep -nE ... HEAD -- ...`，2026-11-06。结论：**两实现并存、入口不止一个、退休条件未满足**。
+
+| 维度 | `mbdsdr_ai/acars_protocol.py`（自包含协议/验证核心） | `mbdsdr_ai/acars_decoder.py`（MSK 解调 + 状态机） |
+|---|---|---|
+| 覆盖模式 | 仅 ACARS；`mode` 为 1 字符**透传**（无按 mode 分支）；支持 1200/2400 baud | 同左：`mode` 透传（`:393`）；另含帧合成 `build_acars_frame`（`:494`）/ `synthesize_msk_audio`（测试与样本生成用） |
+| 解码链路 | `_fsk_discriminate` → 16 相位 × 2 极性 × 8 字节对齐搜索，取 CRC 通过最多的候选（`:421-455`） | `ACARSMDemod` → `ACARSFrameSynchronizer` → `ACARSMessageParser`；`decode_audio`（`:448`）优先取 CRC 通过者，全不过则返回候选（`crc_ok=False`） |
+| 解码质量 | 合成帧在 1200/2400、15 dB SNR 下 `crc_ok=True`（`tests/test_acars_consistency.py`） | 自合成信号自环 `crc_ok=False`（`:578-583` 自述）；对外 `acars_decode_iq` 因此委托协议实现（`:585`） |
+| 测试覆盖 | `tests/test_acars_roundtrip.py` 5 项 + `tests/test_acars_consistency.py` 4 项（双入口一致、ETB、1200 bps） | 解析器/解调有测试（`tests/acars_test.py` 的 `TestMessageParse`/`TestMSKDemod`）；**`ACARSDecoder.decode_audio` 0 直接测试**（`tests/acars_test.py:27` 仅 import） |
+| 调用方 | `mbdsdr_ai/decoder_registry.py:78`；`mbdsdr_ai/acars_decoder.py:585`（委托）；`scripts/make_sensitivity_fixtures.py:109`（生成 `acars.wav`） | `mbdsdr_ai/decode_router.py:499/517`（CLI `--decode-file --mode acars` 生产解码）；`mbdsdr_ai/agent.py:1375-1376`（三个 AI 工具）；`scripts/decode_sensitivity.py:480`（经 `acars_decode_iq`，实际走协议） |
+
+**可退休性判定**：
+
+- 整体退休 `acars_protocol`：**不成立**。会同时打断 `decoder_registry` 的 ACARS 描述、`acars_decode_iq`（AI 工具/灵敏度脚本）、样本生成与两组往返测试。
+- 整体退休 `acars_decoder`：**不成立**。会打断 CLI 生产路径（`decode_router.py:517`）与三个 AI 工具；且帧合成/解调/解析是协议模块没有的独立能力。
+- 唯一可考虑的退休候选是 `ACARSDecoder.decode_audio` 状态机路径（改由 `acars_protocol.acars_decode` 承担 `decode_router` 的 ACARS 路由）。**当前条件未满足**，判据如下（需全部成立才可出 patch，patch 放 `docs/pending-patches/`）：
+
+1. **真实采集对拍**：≥3 段真实 ACARS 音频（`.wav`/`.cf32`，含至少 1 段低 SNR）两条路径的 `crc_ok/reg/label/text` 一致。现有 `tests/fixtures/sensitivity/acars.wav` 由 `acars_protocol.acars_encode` 生成（`scripts/make_sensitivity_fixtures.py:109-116`），**不是真实采集**，不能作对拍证据。
+2. **调用点改线清单**：仅 `mbdsdr_ai/decode_router.py:499`（import）与 `:517`（调用）改为 `acars_protocol.acars_decode`，保持结果键 `messages`/`num_messages`/`crc_ok_count` 不变；不动 `agent.py`（它已走协议）。
+3. **先补测试再删**：为 `ACARSDecoder.decode_audio` 增加自环回归并记录红/绿；删除后同组测试通过项数不得下降（`ACARSMDemod`/`ACARSMessageParser` 仍被工具与测试使用，只能删 `ACARSFrameSynchronizer` 及 `decode_audio` 本身）。
+4. **回滚窗口**：`:582-583` 明写「待真实采集的时域对齐问题排查后再切回」；该排查未出结论前保留原生路径，不得按「重复实现」删除。
+5. **删除纪律**：单独提交、附改前/改后同组测试通过项数、`git grep` 删除后命中 0。
+
+结论：**不退休、不删生产路径、不出 patch**；本项保持双实现，待判据 1/3/4 满足后再议。
 
 ---
 
@@ -337,7 +363,7 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 |---|---|---|
 | R1 频谱双实现 | A1 | 已一致，补 Python 生产调用 `:613` |
 | R2 4 档 vs 11 档 | B1 + B2 | 已一致 |
-| R3 ACARS 双实现 | **A10（新增）** | 新登 |
+| R3 ACARS 双实现 | **A10（新增）** | 新登；2026-11-06 改判为「两实现并存、入口不止一个、退休条件未满足」，差异与判据见 §5.6 |
 | R4 录音库同名 | C1 + C4 | 已一致 |
 | R5 桌面录制/回放旁路 | C3 | 行号按当前树校正为 `:6405/:6468/:8105` |
 | R6 频率格式化 4 套 | A4 | **冲突**：本表证据为 5 份；裁定见 6.3 |
@@ -354,7 +380,7 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | R17 `ai_*` 三键 | C10 | 已一致 |
 | R18 `_LEGACY_KEY_ALIAS` | D6 | 已一致 |
 | R19 2800k→2880000 | B8 | 已一致，补提交 `dd72ba1c` |
-| R20 config_schema 两函数 | **C12（新增，已删）** | 已删 `1c0464b6` |
+| R20 config_schema 两函数 | **C12（新增，已删）** | 已删 `1c0464b6`（见 §6.2 C12） |
 
 ### 6.2 新增登记行
 
@@ -388,3 +414,4 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 2026-11-06 | （本表更新提交） | 新增 A12（`kDbUpperDefault` 常量复用，owner 内核线）；§4.3 逐文件钉住 6 条吞错越线的引入提交与 owner，补 A/B 重编取证格式；§5 落地 B5 能力驱动规格/测试/协调下家、白名单反证记录、46 个仅测试模块三类归档、4 个零调用方法的具体接线点；R19 文案按 `device_capabilities.cpp:46` 现状更新；共 41 项 |
 | 2026-11-06 | （本次提交） | A12 状态：**已修** — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`；拆分后为 `kDbViewUpperDefault=-20`（默认视野）+ `kDbCeilingMax=0`（0 dBFS 满量程硬上限）；10 个目标全绿、未改期望值；反证改回 -20 红项与修复前逐字一致；原建议 `kDbSpinUpperMax=20` 标注**已否决**（会抹掉满量程物理事实） |
 | 2026-11-06 | （本次提交） | B5 采样率标签口径：**已修** — `385d0e15` — `desktop/module_panel.py:345` — `1.440 MS/s`；五个标签统一为 `MS/s` + 三位小数（`1.024 / 1.440 / 2.048 / 2.400 / 3.200 MS/s`，档位数值未变）；§5.1 的定位同步为 `:342-348` / `:531` / `:395` |
+| 2026-11-06 | （本次提交） | A10 改判：**两实现并存、入口不止一个、退休条件未满足**（`decoder_registry.py:78` 只是一个入口；CLI 生产路径 `decode_router.py:517` 仍走 `acars_decoder` 状态机）；新增 §5.6 差异表（模式/链路/质量/测试/调用方）+ 5 条退休判据，不出 patch、不删生产路径；清单 2 的 A3/C5/C12 摘要行补「见 §X」指针；A3 的 `53 passed` 标注为 2026-11-06 02:21 实跑记录（本轮未复跑） |
