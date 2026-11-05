@@ -377,7 +377,7 @@ spin `-140..20`）才是 B 类锁死项，各写清理由。
 | A7 | `waterfall_depth_rows` | 瀑布历史行数 | `256` | 128–4096（2 的幂） | 行 | 频谱与解码 | "瀑布能回看多久；越大越吃内存。" | C++ 侧已可选（`tokens.h:698`），Python 固定 256，建议对齐。 |
 | A8 | `sky_extinction_k` | 大气消光系数 | `0.2` | 0.0–0.5 | mag/airmass | 星象仪（高级） | "低仰角星光被大气削弱的程度；城郊 0.2–0.3，高山 0.15。" | 影响地平附近恒星的可见性判断；有物理定义的合理默认。**低优先**（Bortle 尚被锁，先解锁 Bortle 更值）。 |
 | A9 | `show_low_elevation_passes` | 显示低仰角过境 | `关` | 布尔 | — | 卫星与多普勒 | "默认只列峰值 ≥10° 的过境；开启后连 5–10° 的一起显示（更适合固定天线/低噪环境）。" | 决策人要求：列表筛选必须可见且可放宽。与 A1 联动（A1 是门槛值，A9 是"是否显示门槛以下"）。 |
-| A10 | `default_sample_rate_msps` | 默认采样率 | `2.4` | 设备支持档位 | MS/s | 设备与后端 | "启动时优先用 2.4 MS/s；设备不支持就自动取最接近的支持值，并在状态栏显示实际值。" | 决策人裁定 3。**内核默认与能力回落已落地**（§10-3）；设置在 schema 里只写首选值，实际值以后端状态为准，不要复制一份"默认 2.4"的字面量。 |
+| A10 | `default_sample_rate_msps` | 默认采样率 | `2.4` | 设备支持档位 | MS/s | 设备与后端 | "启动时优先用 2.4 MS/s；设备不支持就自动取最接近的支持值，并在状态栏显示实际值。" | 决策人裁定 3。**内核默认与能力回落已落地**（§10-3）；设置在 schema 里只写首选值，实际值以后端状态为准，不要复制一份"默认 2.4"的字面量。 取证 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
 | A11 | `tuning_step_hz` | 调谐步进 | `10 kHz` | 10 Hz–1 MHz | Hz | 频谱与解码 | "与频谱吸附网格同值；滚轮/箭头按它走。" | 已一致（§D-2 撤回），只需把三步（视图吸附 / 工具面 / 默认档）确认共用一处。 |
 
 > **A-备注（受阻项，不重复报）**：Bortle 等级、调谐吸附步进、dB 量程、录音目录
@@ -481,14 +481,14 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | P-2b | `desktop/rf_sky_view.py` | 私有 `PASS_MIN_ALT_DEG = 10.0` 字面量 | 改为 `from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG`；与 `sat_track_panel` / `new_spacetime_panel` 共用同一常量。星象仪的 `PASS_COARSE_STEP_S/FINE_STEP_S` 属 D-6，**不要**顺手合并。 |
 | P-2c | `mbdsdr_ai/sat_consistency.py:141` | `check_next_pass_consistency(min_alt=5.0)` 仍把 5 传进默认 10 的 `predict_passes` | 这正是裁定 2 禁止的形态（"下一次过境"却用可见门）。改默认 `PASS_MIN_ALT_DEG`，或明确改名为"从 5° 起算的下一次过境"并加注释。**诊断工具口径需与 `next_pass()` 一致，否则对拍结论不可信。** |
 | P-8a | `desktop/main_window.py` | `_squelch_db = -80.0`（约 507 行）是权威初值，滑杆已显示 -50 | 改为 `DEFAULT_SQUELCH_DBFS`（一行）。**必须与 P-8d 迁移提示同批**：否则旧配置读入后仍按 -80 门控，UI 显示与行为继续分裂。 |
-| P-8b | `mbdsdr_ai/sdr_backend.py` + `osmosdr_source.py` + `rtltcp_client.py` | RTL 基线三套（2.048 / 1.024 / 2.048 硬编码） | **已完成**（§10-3）：统一为 2.4 MS/s 首选 + `nearest_sample_rate()` 回落 + 状态回报实际值；三处不再各写字面量。相关测试期望已成对更新（100 passed）。 |
+| P-8b | `mbdsdr_ai/sdr_backend.py` + `osmosdr_source.py` + `rtltcp_client.py` | RTL 基线三套（2.048 / 1.024 / 2.048 硬编码） | **已完成**（§10-3）：统一为 2.4 MS/s 首选 + `nearest_sample_rate()` 回落 + 状态回报实际值；三处不再各写字面量。相关测试期望已成对更新（100 passed）。 证据 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
 | P-8c | `desktop/spectrum_widget.py:419` | 无数据哨兵 `-120.0` 落在可显示量程内 | 改为 `float("nan")`（绘制/重采样对 NaN 显式判空）。C++ `rssiDbfs_{-100.0f}` 是**真实安静读数**，不得当哨兵；若要哨兵请用量程外的 `-999` 并注释。 |
 | P-8d | 设置线（`desktop/config_schema.py`） | 旧配置静噪值按新口径解释 | 读入旧 key 时若值落在 `-120..-101`（旧量纲域外沿）或明显偏离新域，弹一次提示："此静噪值按旧量纲（IQ 功率）保存，现在滑杆表示'相对该模式噪声基线的余量'；请复核。"**不许静默改意思**。 |
 
 ### 6.3 暂缓（需要跨线决策，本线不动）
 
-- ~~**D-3 FFT 档位**~~ **已收口（2026-11-05）**：`FFT_SIZES` 已删掉 8192/16384，
-  与 schema / C++ / AI 三档逐项一致；旧值回落最近档 4096 并记录原因
+- ~~**D-3 FFT 档位**~~ **已收口（2026-11-05）**：`e883a62b` — `desktop/spectrum_widget.py:218` — `FFT_SIZES = (1024, 2048, 4096)`；
+  `FFT_SIZES` 已删掉 8192/16384，与 schema / C++ / AI 三档逐项一致；旧值回落最近档 4096 并记录原因
   （§2.4 D-3）。
 - **D-6 过境预测两套采样**：`rf_sky_view` 为 UI 流畅用 300 s/30 s，
   `sat_passes` 为精度用 60 s/2 s。**不许合并成一个数**——正确做法是
