@@ -1,8 +1,8 @@
 # MBDSDR Web 产品 · 一键复现验收报告
 
-- 生成时间：2026-11-05T22:02:33
+- 生成时间：2026-11-06T00:43:20
 - 事实源：D:\mbdsdr\MBDSDR（只读，未修改）
-- 单文件产物：`dist/index.html` 972245 bytes · sha256 `724a8dfff480e72290e4c81c871649c14961d5ba81c4ae3bde8ac28b2c36d05d`
+- 单文件产物：`dist/index.html` 987477 bytes · sha256 `660184752579930709d0e3184b42e9433287327efe837ff52f670e608544aa13`
 - 工具域 14 个 · 工具→域映射 82 条 · 写工具模式 82 条
 - ControlHub 端口 `50732` · 时间倍率 5 档 · 中性站点 0.0, 0.0（trusted=False）
 - **全天星表 HYG v4.1**：25,792 颗（V ≤ 7.5），J2000，CC BY-SA 4.0 · sha256 `eb086d463456ba8c…`
@@ -20,8 +20,8 @@
 | 单文件构建 | PASS | `scripts: 00-core.js, 05-repo-facts.js, 10-data.js, 12-sky-catalog.js, 20-i18n.js, 31-celestial.js, 30-sky.js, 40-workbench.js, 50-dialog.js, 70-docs-data.js, 70-docs.js, 60-app.js ` |
 | 静态守卫 | PASS | `WARN [i18n] zh 反查冲突：lang.current / lang.zhLabel（后者胜出，需人工确认译文可接受） / WARN [i18n] zh 反查冲突：cap.stack.name / pro.stack（后者胜出，需人工确认译文可接受） / WARN [i18n] zh 反查冲突：sidebar.docs / docs.openTit` |
 | 天球投影自检 | PASS | `horizon straight under perspective OK (spread 0.00 px over ±30° az) / horizon curved under stereographic OK (spread 28.9 px) / corners unprojectable at 158°: 4/4 / ALL PROJECTION C` |
-| 无头运行时 | PASS | `RUNTIME {"modules":12,"docs":35,"locale":"zh-CN","caps":17,"i18nKeys":268,"textNodes":71,"framesRendered":37} / RESULT: RUNTIME-OK ✅` |
-| 视觉夹具 | PASS | `fixture: D:\mbdsdr\MBDSDR\web\product\tests\visual_check.html 884674 bytes / standalone fixtures: visual_{sky,pro,ja,en,docs,ai,caps}.html / fixture inject script: node --check OK` |
+| 无头运行时 | PASS | `RUNTIME {"modules":12,"docs":35,"locale":"zh-CN","caps":17,"i18nKeys":269,"textNodes":71,"framesRendered":37} / RESULT: RUNTIME-OK ✅` |
+| 视觉夹具 | PASS | `fixture: D:\mbdsdr\MBDSDR\web\product\tests\visual_check.html 894897 bytes / standalone fixtures: visual_{sky,pro,ja,en,docs,ai,caps}.html / fixture inject script: node --check OK` |
 
 ## 视觉态
 
@@ -40,7 +40,8 @@
 
 ## not_verified（明确未验证，勿当作已上线）
 
-- **真实硬件链路未接通**：本产品不直接读写 SDR；`ControlHub` 与 `arm_manual` 人工门只按原仓库代码常量建模为契约，未连接真实 C++ headless / Python 内核。
+- **真实硬件链路未接通**：本产品不直接读写 SDR；`ControlHub`（C++ 宿主写开关 `writeEnabled_`）与 Python 内核的一次性 `confirm_token` 门只按原仓库代码常量建模为契约，未连接真实 C++ headless / Python 内核，也未接入可签发 token 的外部确认通道。
+- **阶段 B 宿主注入未接通**：`mbdsdr_ai/web_bridge.py` 已把 `ToolRegistry` 映射成 `window.mbdsdrBridge` 形状并做 16 条单测对拍，但 QWebChannel / JS 全局注入、 `confirm_channel` 接到 `mcp_server.call_tool` 均未实现；写工具恒返回 `gated`。
 - **频谱与瀑布无 IQ 输入**：专业模式显示诚实空态，未展示任何实时或合成谱线。
 - **卫星目录为离线演示条目**：TLE 与下行频率取自 `sat_tracker.py`；合成/凑整 TLE 不用于精确过境，站址未校准时不给可信过境结论。
 - **规划能力位**：6DOF 视觉引导 / 视觉校准 / VR·XR 在原仓库为设计项，UI 中标注「规划 · 未验证」且禁用。

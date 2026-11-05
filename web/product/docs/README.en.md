@@ -10,7 +10,7 @@ Orbit determination is deliberately **not a UI feature**: it can only be trigger
 The capability matrix, tool names, satellite catalogue, ControlHub port, time-rate presets and design
 tokens are **generated from the repository source** by `build/sync_from_repo.py` — not hand-copied from
 a design draft. Empty tool domains stay empty; 6DOF / AR / VR are marked planned / unverified.
-Offline by default: no fake IQ, no fake successes. Writes require the `arm_manual` human gate.
+Offline by default: no fake IQ, no fake successes. Writes are gated by the C++ host switch (`writeEnabled_`) for ControlHub, or a one-shot `confirm_token` issued by an external confirmation channel for the Python kernel; a model self-reporting `arm_manual` is rejected. The front end only forwards arguments, never issues tokens, and distinguishes `gated` from a real failure.
 
 - Languages: 中文 / 日本語 / English, switchable at runtime and persisted.
 - Design language: the `.figma` export mapped through `desktop/tokens.py` (pure black, greyscale, MiSans, large radii).

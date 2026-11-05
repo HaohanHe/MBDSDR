@@ -117,8 +117,12 @@ def main() -> int:
         "\n".join(f"- `{s}`" for s in shots) or "- （未生成：Edge 不可用或前序失败）",
         "",
         "## not_verified（明确未验证，勿当作已上线）", "",
-        "- **真实硬件链路未接通**：本产品不直接读写 SDR；`ControlHub` 与 `arm_manual`"
-        " 人工门只按原仓库代码常量建模为契约，未连接真实 C++ headless / Python 内核。",
+        "- **真实硬件链路未接通**：本产品不直接读写 SDR；`ControlHub`（C++ 宿主写开关 "
+        "`writeEnabled_`）与 Python 内核的一次性 `confirm_token` 门只按原仓库代码常量建模"
+        "为契约，未连接真实 C++ headless / Python 内核，也未接入可签发 token 的外部确认通道。",
+        "- **阶段 B 宿主注入未接通**：`mbdsdr_ai/web_bridge.py` 已把 `ToolRegistry`"
+        " 映射成 `window.mbdsdrBridge` 形状并做 16 条单测对拍，但 QWebChannel / JS 全局注入、"
+        " `confirm_channel` 接到 `mcp_server.call_tool` 均未实现；写工具恒返回 `gated`。",
         "- **频谱与瀑布无 IQ 输入**：专业模式显示诚实空态，未展示任何实时或合成谱线。",
         "- **卫星目录为离线演示条目**：TLE 与下行频率取自 `sat_tracker.py`；"
         "合成/凑整 TLE 不用于精确过境，站址未校准时不给可信过境结论。",

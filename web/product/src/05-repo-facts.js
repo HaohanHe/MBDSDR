@@ -3,10 +3,10 @@
   "use strict";
   const MB = global.MBDSDR = global.MBDSDR || {};
   MB.REPO = {
-  "generatedAt": "2026-11-05T22:01:44+08:00",
+  "generatedAt": "2026-11-06T00:42:03+08:00",
   "repo": {
     "root": "D:\\mbdsdr\\MBDSDR",
-    "head": "0592b519",
+    "head": "8e244e69",
     "note": "只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线"
   },
   "domains": [
@@ -436,6 +436,44 @@
     "sdrangel_remotecontrol",
     "cubicsdr_drag_tune"
   ],
+  "gates": {
+    "controlHub": {
+      "owner": "C++ ControlHub 宿主写开关（不由 Web 前端签发）",
+      "stateVar": "writeEnabled_",
+      "guard": "row->write && !writeEnabled_.load()",
+      "resultField": "gated",
+      "errorContains": "write gate 关闭",
+      "frontEndAction": "只透传 args；gated:true 如实回显，不自行放行",
+      "source": "cpp/src/control/control_hub.cpp: gatedResult / execute"
+    },
+    "mcp": {
+      "owner": "外部确认通道签发的一次性 token（Python 内核消费）",
+      "tokenFields": [
+        "confirm_token",
+        "tx_token"
+      ],
+      "consumedGateFlags": [
+        "arm_manual",
+        "approve_session",
+        "confirm_token",
+        "tx_token"
+      ],
+      "selfReportFields": [
+        "arm_manual"
+      ],
+      "errorCode": "manual_gate_required",
+      "selfReportRejected": true,
+      "hint": "由真人经外部确认通道签发一次性 confirm_token 后重试；token 有有效期且只能消费一次。",
+      "frontEndAction": "只透传已签发的 token；不生成、不把 arm_manual 当放行",
+      "source": "mbdsdr_ai/core/mcp_server.py · mbdsdr_ai/error_catalog.py"
+    },
+    "frontEndPolicy": {
+      "mayNotIssueToken": true,
+      "mustStripSelfReport": true,
+      "gatedIsNotFailure": true,
+      "note": "前端不得签发 token、不得因自报 arm_manual 放行；gated 与执行失败严格区分"
+    }
+  },
   "planned": [
     {
       "id": "vis6dof",
@@ -569,7 +607,7 @@
           "args": {}
         }
       },
-      "writeGate": "arm_manual",
+      "writeGate": "writeEnabled_ (C++ host switch, not arm_manual)",
       "source": "cpp/src/core/tokens.h · cpp/src/control/control_http_server.cpp · docs/CHROMEOS_CROSTINI_SDR.md"
     },
     "mcp": {
@@ -669,7 +707,8 @@
     "noRealLocationDefault": true,
     "hardcodedCapabilityNumbers": false,
     "noMockFakeData": true,
-    "writeToolsNeedArmManual": true,
+    "writeToolsNeedExternalConfirmation": true,
+    "frontEndMustNotSelfArm": true,
     "orbitDeterminationNotAFeature": true,
     "license": "MIT · AGPL 引擎只学机制不引代码",
     "source": "AGENTS.md §1–§3 · README.md · LICENSING.md · NOTICE.md"

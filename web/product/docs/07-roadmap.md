@@ -11,12 +11,23 @@
 - [x] 文档与 wiki 体系、产品内文档中心、离线自包含
 - [x] 构建脚本 + 静态/运行时自动校验（含铁律守卫）
 - [x] 设计语言 .figma 全量对齐、AGPL 合规纪律
+- [x] 写工具确认门事实源对齐（C++ 宿主开关 / Python `confirm_token`），
+      模型自报 `arm_manual` 的前端放行判据已清除
+- [x] 阶段 B 的 Python 侧桥接层 `mbdsdr_ai/web_bridge.py` + 16 条跨语言对拍用例
 
-## 阶段 B · 接真内核（下一个里程碑）
+## 阶段 B · 接真内核（Python 侧已落地，宿主注入待接）
+
+> 状态（2026-11-06）：`mbdsdr_ai/web_bridge.py` 已把 `ToolRegistry` 映射成
+> `window.mbdsdrBridge` 的形状，写工具门与内核 S13 红线对齐，离线可测。
+> **仍未接通**：宿主注入、`confirm_channel` 接 `mcp_server.call_tool`、
+> 真实硬件。在此之前写工具恒返回 `gated`，产品仍以诚实空态为主。
+> 阶段 A 不宣称已接线；下列验收门槛一条都还没判定通过。
 
 | 项 | 落点 | 验收门槛 |
 |---|---|---|
 | 启用 ControlHub（`?hub=1`）或宿主注入桥 | `cpp/src/control/control_http_server.cpp` | 状态栏从「未连接 SDR」变为「ControlHub 已连接」，工具调用有真实回执 |
+| 宿主注入 `window.mbdsdrBridge` | `desktop/`（**操作逻辑线在途，勿顺手改 `main_window.py`**）+ `mbdsdr_ai/web_bridge.py` | 干净机器上 `as_bridge_dict()` 注入后 8 个契约方法全部可调用，`getCapabilities()` 与运行时 `tools/list` 一致 |
+| 写工具确认通道接线 | `confirm_channel` → `mcp_server.call_tool` | 带真实外部签发的 token 才执行，自报 `arm_manual` 与无 token 一律 gated，`gated` 不被显示成失败 |
 | TLE / SGP4 接真 | Celestrak 缓存 + 内核传播 | 卫星位置与过境时刻可被第三方预报复算；无 TLE 时仍如实提示 |
 | 站址校准 | GNSS / 手动输入 + 真北基准 | `site.trusted=true` 后才允许锁定/过境结论；偏差留痕 |
 | 真 IQ → 频谱瀑布 | `rtl_tcp` / `MBDSDR_RTL_TCP` | 频谱与已知信号金样对拍无系统性偏差 |

@@ -6,7 +6,8 @@
  * 产品侧只保留：视觉轨道参数、译名、图标、Wikipedia 链接、场景组合。
  *
  * 诚实口径（AGENTS.md §2）：无硬件 → 显式空态；不合成 IQ；演示目录不可用于
- * 精确过境；站址不可信拒绝预报；写工具过 arm_manual 人工门（gated≠失败）。
+ * 精确过境；站址不可信拒绝预报；写工具由宿主 / 外部确认通道把关，
+ * 前端不自造放行（gated≠失败，模型自报 arm_manual 无效）。
  */
 (function () {
   "use strict";
@@ -136,8 +137,9 @@
 
   /* ---------- 数据源 B：ControlHub 回环 HTTP（真实通道） ----------
    * 端口/端点/写工具模式全部来自 MB.REPO（cpp/src/core/tokens.h 等）。
-   * POST /command body = {tool, args}；写工具未带 arm_manual:true 时返回
-   * gated:true（人工门未确认），与执行失败严格区分。
+   * POST /command body = {tool, args}。写命令的门在 **C++ 宿主**
+   * （row->write && !writeEnabled_.load()），Web 前端无权打开、也不自判；
+   * 内核回 gated:true 时如实回显，与执行失败严格区分。
    */
   const hub = (R.channels && R.channels.controlHub) || { host: "127.0.0.1", port: 0 };
   const ControlHubSource = {
@@ -159,19 +161,23 @@
     },
     invokeTool(name, args) {
       if (!this.isLive()) return OfflineSource.invokeTool(name, args);
-      const a = args || {};
-      if (MB.isWriteTool(name) && a.arm_manual !== true)
-        return Promise.resolve(MB.envelope("gated", name, {
-          gated: true, suggestion: "human confirmation required (arm_manual)"
-        }));
+      // 前端不判「是否已确认」——那是 C++ 宿主 writeEnabled_ 的职责。
+      // 只剥掉模型自报标记（内核明确拒绝），其余 args 原样下发。
+      const clean = MB.stripSelfReport(args);
       return window.fetch(this.endpoint(hub.postCommand ? hub.postCommand.path : "/command"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: name, args: a })
+        body: JSON.stringify({ tool: name, args: clean.args })
       }).then(r => r.json()).then(r => {
         if (!r || typeof r !== "object") return MB.envelope("bad_envelope", name);
-        // ControlHub::execute() 原样透传；ok:false / gated:true 都是诚实结果
-        return Object.assign({ ok: false, tool: name, data: null }, r);
+        // ControlHub::execute() 的回执原样透传：ok:false / gated:true 都是诚实结果
+        const env = Object.assign({ ok: false, tool: name, data: null }, r);
+        if (env.gated === true) {
+          env.notFailure = true;             // 未获确认 ≠ 执行失败
+          env.gateFacts = MB.gateFacts("controlHub");
+        }
+        if (clean.selfReport.length) env.selfReportRejected = clean.selfReport;
+        return env;
       }).catch(err => MB.envelope("unreachable", name, {
         detail: String(err && err.message || err)
       }));
@@ -204,9 +210,25 @@
     },
     invokeTool(name, args) {
       if (!this.isLive()) return OfflineSource.invokeTool(name, args);
+      const clean = MB.stripSelfReport(args);
+      // Python 内核的门：写工具必须由外部确认通道签发一次性 confirm_token。
+      // 前端无权签发；缺 token 时**不送进内核**，直接给诚实 gated 回执。
+      if (MB.isWriteTool(name) && !MB.hasConfirmToken(clean.args))
+        return Promise.resolve(MB.gateEnvelope(name, "mcp", {
+          selfReportRejected: clean.selfReport,
+          suggestion: "external confirm_token required; the front end cannot issue one"
+        }));
       try {
-        const r = this._bridge.invoke(name, args || {});
-        return Promise.resolve(r && typeof r.then === "function" ? r : { ok: true, data: r });
+        const r = this._bridge.invoke(name, clean.args);
+        return Promise.resolve(r).then(v => {
+          // 宿主返回结构化回执时原样透传，绝不能把 gated:true / ok:false
+          // 包成 {ok:true, data:...} 伪装成功。
+          if (v && typeof v === "object" && ("ok" in v || "gated" in v || "error" in v))
+            return Object.assign({ ok: false, tool: name, data: null }, v);
+          return { ok: true, tool: name, data: v == null ? null : v };
+        }).catch(err => MB.envelope("exception", name, {
+          detail: String(err && err.message || err)
+        }));
       } catch (err) {
         return Promise.resolve(MB.envelope("exception", name, {
           detail: String(err && err.message || err)

@@ -45,8 +45,7 @@ ControlHub 端口来自 `cpp/src/core/tokens.h`，时间倍率来自 `desktop/rf
 - **宿主注入桥**：Qt/WebEngine 注入 `window.mbdsdrBridge`（`invoke` / `satellites` 等）即可。
 - **MCP**：外部 agent 走 `tools/list` / `tools/call`。
 
-写工具必须带 `arm_manual:true` 才会下发；未确认时 UI 显示
-「人工门未确认（gated · 非失败）」，与执行失败严格区分。
+写工具的确认门**不在前端**：ControlHub 由 C++ 宿主写开关 `writeEnabled_` 决定，Python 内核只认外部确认通道签发的一次性 `confirm_token`（别名 `tx_token`）。**模型自报 `arm_manual` 明确无效**，前端会剥离它；缺 token 时返回 `manual_gate_required` / `gated:true`，UI 显示「未获确认（gated · 非失败）」，与执行失败严格区分。前端不签发 token、不自行放行。
 
 ## 为什么界面上找不到「定轨」？
 

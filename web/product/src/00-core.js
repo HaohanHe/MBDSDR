@@ -116,7 +116,9 @@
    *   ControlHub 回环 HTTP（cpp/src/core/tokens.h 端口常量 + POST /command）、
    *   MCP tools/list / tools/call（mbdsdr_ai/core/mcp_server.py）、
    *   Headless SDRController（docs/headless_api.md）。
-   * 写工具一律过 arm_manual 人工门；gated:true 是「未过人工门」，不是执行失败。
+   * 写工具确认门由内核 / 宿主持有，事实见 MB.REPO.gates（脚本从 C++ 与 Python
+   * 代码抽取）：ControlHub 是宿主写开关，Python 内核是外部签发的 confirm_token。
+   * **模型自报 arm_manual 明确无效**；gated:true 是「未获确认」，不是执行失败。
    * 契约见 docs/03-architecture.md §4 与 docs/09-repo-alignment.md §3。
    */
   MB.CONTRACT = Object.freeze([
@@ -145,5 +147,29 @@
   MB.envelope = (kind, tool, extra) => Object.assign({
     ok: false, tool: tool || "", data: null
   }, { error: kind }, extra || {});
+
+  /* ---------- 写工具确认门（事实源 MB.REPO.gates，脚本只读抽取内核代码） ----------
+   * 前端只做三件事：剥离模型自报标记、透传**外部已签发**的 token、如实区分
+   * gated 与执行失败。前端绝不签发 token，也绝不因 arm_manual 放行——两条
+   * 真实通道都不认这个自报标记（C++ 是 writeEnabled_，Python 是 confirm_token）。
+   */
+  MB.gateFacts = channel => ((MB.REPO && MB.REPO.gates) || {})[channel] || null;
+  MB.stripSelfReport = args => {
+    const a = Object.assign({}, args || {});
+    const f = MB.gateFacts("mcp");
+    const keys = (f && f.selfReportFields) || [];
+    const seen = keys.filter(k => k in a);
+    for (const k of seen) delete a[k];
+    return { args: a, selfReport: seen };
+  };
+  MB.hasConfirmToken = args => {
+    const f = MB.gateFacts("mcp");
+    const keys = (f && f.tokenFields) || [];
+    return keys.some(k => !!(args && args[k]));
+  };
+  MB.gateEnvelope = (name, channel, extra) => MB.envelope(
+    channel === "mcp" ? "manual_gate_required" : "gated", name,
+    Object.assign({ gated: true, gate: channel, notFailure: true,
+                    facts: MB.gateFacts(channel) }, extra || {}));
 
 })(typeof window !== "undefined" ? window : globalThis);

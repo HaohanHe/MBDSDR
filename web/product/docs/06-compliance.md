@@ -63,7 +63,7 @@
 
 - `AGENTS.md §1`：禁止真实地理位置默认值、禁止硬编码能力数字；本工程默认中性示例站点。
 - `AGENTS.md §2`：无硬件显式空态，绝不 mock 假数据；本工程删除了合成频谱与预填充瀑布。
-- `AGENTS.md §3`：写工具统一 `arm_manual` 人工门；本工程区分 `gated` 与失败。
+- `AGENTS.md §3`：写工具须经宿主写开关 / 外部 `confirm_token` 确认，模型自报 `arm_manual` 无效；本工程前端只透传、不签发，并区分 `gated` 与失败。
 - `LICENSING.md` / `NOTICE.md`：全仓 MIT，GPL 组件独立进程、不随包分发；
   Stellarium Web Engine（AGPL-3.0）只学机制，不引代码 / 贴图 / 星表。
 - 07 历史设计稿里的北京默认坐标、GPL-3.0 声明、未落地 API 均**不作为事实源**。

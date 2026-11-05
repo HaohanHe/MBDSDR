@@ -48,6 +48,17 @@ python run_all.py
 从 HYG v4.1 + 仓库命名星/连线/DSO 目录生成。**不手抄、不造数据**，
 仓库事实变了重跑 `run_all.py` 就能发现（2026-11-05 的 DSO 换源就是这么抓到的）。
 
+## 阶段 B · 运行时桥接（Python 侧已落地）
+
+仓库 `mbdsdr_ai/web_bridge.py` 把 `ToolRegistry` 映射成 `window.mbdsdrBridge` 的
+可注入形状，8 个契约方法与本工程 `MB.CONTRACT` 逐字对拍（`tests/test_web_bridge.py`）。
+写工具确认门对齐内核 S13 红线：ControlHub 是 C++ 宿主写开关，Python 内核是外部签发的
+一次性 `confirm_token`，**模型自报 `arm_manual` 无效**；本工程前端只透传、不签发、不自判放行。
+
+**尚未接通**：宿主注入（QWebChannel / JS 全局）、`confirm_channel` 接
+`mcp_server.call_tool`、真实硬件逐工具实测。写工具在此之前恒返回 `gated`，
+产品默认仍是离线诚实空态。
+
 ## 许可与未验证项
 
 `NOTICE.md` 逐条登记：代码 MIT；HYG v4.1 与 OpenNGC 数据及其派生

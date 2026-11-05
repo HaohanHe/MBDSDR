@@ -33,9 +33,7 @@ VNA 扫频设置与 S 参数原始测量读取。
 - MCP：`tools/call`（`mbdsdr-core`）
 - Headless：`SDRController` 方法面
 
-写工具一律过 `arm_manual` 人工门；`gated:true` 表示**人工门未确认**，不是执行失败，
-也不是设备故障。离线时返回 `{"ok":false,"error":"not_connected","suggestion":"..."}`，
-不伪装成功。
+写工具确认门由宿主 / 外部确认通道持有（事实源 `MB.REPO.gates`）：ControlHub 是 C++ 宿主写开关 `writeEnabled_`，Python 内核是外部签发的一次性 `confirm_token`（别名 `tx_token`）。**模型自报 `arm_manual` 无效**；`gated:true` 表示**未获确认**，不是执行失败、更不是设备故障。前端只透传、不签发 token、不自判放行。离线时返回 `{"ok":false,"error":"not_connected","suggestion":"..."}`，不伪装成功。
 
 ## 现状与 not_verified
 

@@ -230,15 +230,58 @@ if "MB.data.isLive()" not in wb:
 if "● RTL-SDR 已连接" in html or "16 VCDU" in html:
     fail("[redline] 静态骨架残留伪造的已连接/实时解码状态")
 # 通道与人工门
+core = ui_sources.get("00-core.js", "")
 if "50732" in data_src:
     fail("[redline] ControlHub 端口被硬编码（应来自 MB.REPO）")
-if "arm_manual" not in ui_text or "gated" not in ui_text:
-    fail("[redline] 未保留 arm_manual 人工门与 gated 回执口径")
+# 写工具门事实必须由内核代码抽取，前端不得自造放行条件
+_gf = json.loads((ROOT / "build/repo-facts.json").read_text(encoding="utf-8"))
+_gates = _gf.get("gates") or {}
+_gh, _gm = _gates.get("controlHub", {}), _gates.get("mcp", {})
+if not (_gh.get("stateVar") and _gm.get("tokenFields") and _gm.get("selfReportFields")):
+    fail("[redline] 缺写工具确认门事实（MB.REPO.gates 必须由 C++ / Python 内核代码抽取）")
+if not _gm.get("selfReportRejected") or not _gates.get("frontEndPolicy", {}).get("mayNotIssueToken"):
+    fail("[redline] 门事实缺「自报无效 / 前端不得签发 token」口径")
+for _marker in ("MB.gateEnvelope", "MB.stripSelfReport", "MB.hasConfirmToken"):
+    if _marker not in core:
+        fail(f"[redline] 00-core.js 缺前端门适配：{_marker}")
+if re.search(r"arm_manual\s*(?:!==|===)\s*true", data_src):
+    fail("[redline] 10-data.js 仍在用模型自报 arm_manual 作为放行判据（内核明确拒绝）")
+if "gated" not in ui_text:
+    fail("[redline] 未保留 gated 回执口径（未获确认不是执行失败）")
+# 文档里的门字面量必须与事实源一致，防止内核改名后文档悄悄漂移
+_doc_gate = (DOCS / "03-architecture.md").read_text(encoding="utf-8")
+for _lit in (_gh.get("stateVar", ""), _gm.get("tokenFields", [""])[0],
+             _gm.get("selfReportFields", [""])[0]):
+    if _lit and _lit not in _doc_gate:
+        fail(f"[redline] docs/03-architecture.md 的门字段与事实源不一致：{_lit}")
+# 阶段 B 跨语言钉扎：Python 桥接契约必须与产品 JS 逐字一致
+import ast as _ast
+_wb = REPO / "mbdsdr_ai" / "web_bridge.py"
+if not _wb.is_file():
+    fail("[bridge] 缺阶段 B Python 侧桥接层 mbdsdr_ai/web_bridge.py")
+else:
+    _wb_code = _wb.read_text(encoding="utf-8")
+    for _marker in ("CONTRACT_METHODS", "TOKEN_FIELDS", "SELF_REPORT_FIELDS",
+                    "manual_gate_required", "confirm_channel", "as_bridge_dict",
+                    "notVerified", "isLiveIsNotDeviceOnline"):
+        if _marker not in _wb_code:
+            fail(f"[bridge] 桥接层缺关键机制：{_marker}")
+    _py_contract = None
+    for _node in _ast.parse(_wb_code).body:
+        _tgt = (_node.targets[0] if isinstance(_node, _ast.Assign)
+                else _node.target if isinstance(_node, _ast.AnnAssign) else None)
+        if isinstance(_tgt, _ast.Name) and _tgt.id == "CONTRACT_METHODS":
+            _py_contract = list(_ast.literal_eval(_node.value))
+    _m = re.search(r"MB\.CONTRACT\s*=\s*Object\.freeze\(\[(.*?)\]\)", core, re.S)
+    _js_names = re.findall(r'"([A-Za-z][A-Za-z0-9]*)"', _m.group(1)) if _m else []
+    if _py_contract != _js_names:
+        fail(f"[bridge] Python / JS 契约不一致：{_py_contract} vs {_js_names}")
+    if not (REPO / "tests" / "test_web_bridge.py").is_file():
+        fail("[bridge] 缺桥接层跨语言对拍测试 tests/test_web_bridge.py")
 # 站点
-core = ui_sources.get("00-core.js", "")
 if "lat: 0.0, lon: 0.0" not in core or "trusted: false" not in core:
     fail("[redline] 默认站点不是中性示例 / 未标不可信")
-print("[9] 红线：站点中性 / 无能力数字 / 诚实空态 / 人工门 / 通道来自事实源，全部通过")
+print("[9] 红线：站点中性 / 无能力数字 / 诚实空态 / 写工具确认门（宿主开关 + confirm_token）/ 通道来自事实源，全部通过")
 
 # ---------- 9.5 全天星象仪科学性守卫（用户点名的三条：假星 / 飞散 / 横条投影） ----------
 cat_json_path = ROOT / "build/sky-catalog.json"
@@ -292,8 +335,9 @@ if "evenodd" not in sky_code or "bot[i]" not in sky_code:
          "朝天顶（地平线成闭合大圆）画成竖直硬边")
 if "id=\"skyHud\"" not in html and 'id="skyHud"' not in html:
     fail("[sky] 缺时空主导 HUD 容器")
-print(f"[9.5] 全天星象仪：{meta.get('starCount', 0):,} 颗真实星 / 球面投影 / 圆形视场 / "
-      f"地平大圆弧 / 无随机星点 / 无飞散动画 / 银河诚实空态 / not_verified 齐备")
+print(f"[9.5] 全天星象仪：{meta.get('starCount', 0):,} 颗真实星 / 球心相机→全屏平面投影 / "
+      f"≤88° 针孔透视 + 更大立体投影 / 地平大圆 / 逐列天空区间地景 / "
+      f"无随机星点 / 无飞散动画 / 银河诚实空态 / not_verified 齐备")
 
 # ---------- 10. 构建产物 ----------
 dist = ROOT / "dist/index.html"

@@ -2,7 +2,7 @@
 
 > 本页由 `build/sync_from_repo.py` 生成，勿手改。产品工程在仓库外，
 > 但**能力面、通道、设计令牌、站点口径全部来自原仓库代码**，不是手抄的设计稿。
-> 生成时间：2026-11-05T22:01:44+08:00 · 仓库基线：`0592b519`（只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线）。
+> 生成时间：2026-11-06T00:42:03+08:00 · 仓库基线：`8e244e69`（只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线）。
 
 ## 为什么要有这一层
 
@@ -64,13 +64,33 @@ python tests/verify_product.py     # 校验事实源与 UI/文档一致
   设置键 `control/httpPort`。
 - 发现文档 `GET /`、状态 `GET /status`、命令 `POST /command`（body `{"tool":...,"args":{...}}`）。
   代码里抓到的路径：`/`、`/status`、`/command`、`/pocsag_messages`、`/m17_calls`、`/vor_radial`、`/acars_packets`、`/navtex_messages`。
-- **写工具一律过 `arm_manual` 人工门**：`gated:true` 是「人工门未确认」，不是执行失败、
-  更不是设备故障。UI 必须区分这两种回执。写工具名模式来自
-  `mbdsdr_ai/tool_registry.py: WRITE_TOOL_NAME_PATTERNS`（82 条）。
+- **两条通道、两道门，前端一道都不签发**（事实源 `MB.REPO.gates`，全部由代码抽取）：
+  - **ControlHub（C++）**：写命令在 `row->write && !writeEnabled_.load()` 被拦，回执
+    `{"ok":false,"gated":true}` +「写入被禁止（write gate 关闭）」。
+    开关 `writeEnabled_` 属于宿主桌面端，Web 前端**无权打开**；
+    产品只透传 `args`，如实回显 `gated`，不自行放行。
+  - **Python 内核 / MCP**：写工具由外部确认通道签发的一次性
+    `confirm_token`（别名 `tx_token`）放行；
+    门内消费 `arm_manual、approve_session、confirm_token、tx_token` 且不下发 handler。缺 token
+    返回 `manual_gate_required`；**模型自报 `arm_manual` 明确拒绝**——
+    `由真人经外部确认通道签发一次性 confirm_token 后重试；token 有有效期且只能消费一次。`
+  - **产品前端**：`mayNotIssueToken` / `mustStripSelfReport` / `gatedIsNotFailure`。
+    `gated:true` 是「未获确认」，**不是执行失败、更不是设备故障**，UI 必须严格区分。
+- 写工具名模式来自 `mbdsdr_ai/tool_registry.py: WRITE_TOOL_NAME_PATTERNS`（82 条）。
 - 另有 MCP `tools/list` / `tools/call`（`mbdsdr-core`，协议 `2024-11-05`）
   与 Headless `SDRController`（`docs/headless_api.md`）。三通道行为一致。
 - **不要沿用旧端口**：历史设计稿里的 `7878`、`81` 等 Python 后端已不存在；`7356` 是 rigctl、
   `8000` 是 Python `start_web_server`、`4533` 是 rotctld，都不是 ControlHub。
+
+### 3.1 阶段 B 运行时桥接（仓库 Python 侧）
+
+`mbdsdr_ai/web_bridge.py` 把 `mbdsdr_ai/tool_registry.py` 的工具面映射成产品
+`MB.CONTRACT` 的 8 个方法，`as_bridge_dict()` 给出 `window.mbdsdrBridge` 形状，
+`manifest()` 是可对拍的 JSON 契约；`tests/test_web_bridge.py` 把 Python / JS 契约
+与本页的门事实钉在一起（16 条用例）。**写工具绝不走裸 `registry.call()`**：
+内核的门在 `mcp_server.call_tool` 层，缺 `confirm_token` 返回
+`manual_gate_required`，未接 `confirm_channel` 时恒 gated。宿主注入、
+确认通道接线与真实硬件实测**尚未完成**，见 `manifest().notVerified`。
 
 ## 4. 设计令牌（事实源：`desktop/tokens.py`）
 

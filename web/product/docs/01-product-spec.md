@@ -75,7 +75,7 @@
   不手抄设计稿；`docs/mcp_tools.md` 的自动生成标记区与 README 的域数均已漂移，不作为依据。
 - 无硬件 → 显式空态 / `not_connected` 信封，**绝不合成 IQ 或伪造频谱**；
   `debug` 类调试源若存在必须显式标「非真实设备」。
-- 写工具一律过 `arm_manual` 人工门；`gated:true` = 人工门未确认，不是执行失败。
+- 写工具确认门由宿主 / 外部确认通道持有（事实源 `MB.REPO.gates`）：ControlHub 是 C++ 宿主写开关 `writeEnabled_`，Python 内核是外部签发的一次性 `confirm_token`。**模型自报 `arm_manual` 无效**；`gated:true` = 未获确认，不是执行失败；前端只透传，不签发 token、不自判放行。
 - 不硬编码能力数字（工具数 / 测试数 / 域数），能力用可复跑命令证明。
 - 默认站点为中性示例 `0.0, 0.0`、`trusted=false`；未校准时拒绝锁定与过境结论。
 - 6DOF / AR / VR 等规划项带 `not_verified` 标注，不包装成已上线能力。

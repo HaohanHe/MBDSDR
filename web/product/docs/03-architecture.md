@@ -85,11 +85,38 @@
   `window.mbdsdrBridge`（`invoke` / `satellites` / `readSpectrum`）。`file://` 直连回环可能被
   CORS 拦，正式部署建议由引擎同源托管。
 
-### 写工具人工门
+### 阶段 B：Python 侧运行时桥接（`mbdsdr_ai/web_bridge.py`）
 
-写工具名模式来自 `mbdsdr_ai/tool_registry.py: WRITE_TOOL_NAME_PATTERNS`。未带
-`arm_manual:true` 时前端直接返回 `{ok:false, gated:true}`（**人工门未确认**），
-UI 显示「gated · 非失败」，与执行失败 / 设备故障严格区分。
+阶段 A 只有前端契约，没有运行时。阶段 B 在仓库 Python 侧新增**独立**适配层：
+不 import Qt、不碰 `desktop/main_window.py`（该文件是操作逻辑线在途改动）。
+
+- `WebBridge` 把 `ToolRegistry` 的 `list_tools` / `call` 映射成 `MB.CONTRACT`
+  的 8 个方法；`as_bridge_dict()` 给出 `window.mbdsdrBridge` 的可注入形状
+  （产品 `BridgeSource` 用的是 `invoke` 而不是 `invokeTool`，已逐字对齐）。
+- `manifest()` 是可对拍的 JSON 契约；`tests/test_web_bridge.py` 用 16 条用例把
+  Python 契约与 JS `MB.CONTRACT`、`repo-facts.json` 的门字段钉在一起。
+- **写工具绝不走裸 `registry.call()`**：内核的门在 `mcp_server.call_tool` 层，
+  `ToolRegistry.call()` 本身没有门。缺 `confirm_token` / `tx_token` →
+  `manual_gate_required`；即便带 token，也需 `confirm_channel`（应接到带门的
+  `mcp_server.call_tool`）转发，未接线则恒 gated。
+- 站址 `site_trusted=False` 时过境恒空；卫星 / TLE / 频谱无 provider 时诚实空值；
+  `isLive()` 只表示桥已接注册表，**不代表设备在线**。
+- **未做**：宿主注入（QWebChannel / JS 全局）、`confirm_channel` 接
+  `mcp_server.call_tool`、真实硬件逐工具实测。见 `manifest().notVerified`。
+
+### 写工具确认门（两道门，前端一道都不签发）
+
+写工具名模式来自 `mbdsdr_ai/tool_registry.py: WRITE_TOOL_NAME_PATTERNS`（判「是否写工具」，
+不判「是否已获确认」）。门的事实由 `build/sync_from_repo.py` 从内核代码抽进 `MB.REPO.gates`：
+
+| 通道 | 门归谁 | 未获确认的回执 | 前端职责 |
+|---|---|---|---|
+| `ControlHub` C++ | 宿主写开关 `writeEnabled_`（`row->write && !writeEnabled_.load()`） | `{ok:false, gated:true}` + 「写入被禁止（write gate 关闭）」 | 剥离自报 `arm_manual`，其余 args 原样 POST，如实回显 `gated` |
+| Python 内核 / MCP | 外部确认通道签发的一次性 `confirm_token`（别名 `tx_token`） | `manual_gate_required` | 只透传已签发 token；无 token 不下发、返回 `gated` 信封 |
+
+**模型自报 `arm_manual` 明确无效**（内核 `mcp_server.py` 只记录出现过，绝不作为放行依据）。
+前端不签发 token、不打开宿主开关、不自判放行。`gated:true` 是「未获确认」，UI 显示
+「gated · 非失败」，与执行失败 / 设备故障严格区分。
 
 ### 工具名 → 内核落点（全部为代码里真实存在的工具）
 

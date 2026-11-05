@@ -159,6 +159,67 @@ for p in re.findall(r'"(/(?:[a-z_][a-z0-9_?=]*)?)"', hub_cpp):
     if p not in paths:
         paths.append(p)
 
+# ---------- 5b. 写工具确认门（两条真实通道，各有各的门，前端都不许自造放行） ----------
+# 事实源必须是代码本身：早期版本把 arm_manual 当成「写工具放行口令」，
+# 但 C++ ControlHub 的门是宿主写开关，Python 内核的门是外部签发的
+# confirm_token；两边都不认前端自报的 arm_manual。抽不到就 assert 失败，
+# 绝不静默退回手抄常量。
+hub_src = read("cpp/src/control/control_hub.cpp")
+mcp_src = read("mbdsdr_ai/core/mcp_server.py")
+err_src = read("mbdsdr_ai/error_catalog.py")
+
+gate_guard = re.search(r"row->write\s*&&\s*!(\w+)\.load\(\)", hub_src)
+assert gate_guard, "ControlHub 写开关守卫未找到（cpp/src/control/control_hub.cpp）"
+hub_state_var = gate_guard.group(1)
+hub_gate_err = re.search(r"写入被禁止（([^）]+)）：未执行", hub_src)
+assert hub_gate_err, "ControlHub gated 文案未找到"
+assert 'o["gated"] = true' in hub_src, "ControlHub gated 回执字段未找到"
+
+flags_m = re.search(r"gate_flags\s*=\s*\(([^)]*)\)", mcp_src)
+assert flags_m, "mcp_server.py gate_flags 未找到"
+gate_flags = list(ast.literal_eval("(" + flags_m.group(1) + ")"))
+token_m = re.search(
+    r'args\.pop\("(confirm_token)", None\)\s*or\s*args\.pop\("(tx_token)", None\)',
+    mcp_src)
+assert token_m, "confirm_token / tx_token 消费链未找到"
+token_fields = [token_m.group(1), token_m.group(2)]
+assert '"manual_gate_required"' in mcp_src, "manual_gate_required 错误码未找到"
+assert "模型自报 arm_manual 不算确认" in mcp_src, "自报拒绝口径未找到"
+self_report_m = re.search(r'\w+_seen\s*=\s*\("(\w+)" in args\)', mcp_src)
+assert self_report_m, "模型自报标记（arm_manual_seen）未找到"
+self_report_fields = [self_report_m.group(1)]
+assert "由真人经外部确认通道签发一次性 confirm_token 后重试" in err_src, \
+    "error_catalog 门建议文案未找到"
+
+gates = dict(
+    controlHub=dict(
+        owner="C++ ControlHub 宿主写开关（不由 Web 前端签发）",
+        stateVar=hub_state_var,
+        guard=f"row->write && !{hub_state_var}.load()",
+        resultField="gated",
+        errorContains=hub_gate_err.group(1),
+        frontEndAction="只透传 args；gated:true 如实回显，不自行放行",
+        source="cpp/src/control/control_hub.cpp: gatedResult / execute",
+    ),
+    mcp=dict(
+        owner="外部确认通道签发的一次性 token（Python 内核消费）",
+        tokenFields=token_fields,
+        consumedGateFlags=gate_flags,
+        selfReportFields=self_report_fields,
+        errorCode="manual_gate_required",
+        selfReportRejected=True,
+        hint="由真人经外部确认通道签发一次性 confirm_token 后重试；token 有有效期且只能消费一次。",
+        frontEndAction="只透传已签发的 token；不生成、不把 arm_manual 当放行",
+        source="mbdsdr_ai/core/mcp_server.py · mbdsdr_ai/error_catalog.py",
+    ),
+    frontEndPolicy=dict(
+        mayNotIssueToken=True,
+        mustStripSelfReport=True,
+        gatedIsNotFailure=True,
+        note="前端不得签发 token、不得因自报 arm_manual 放行；gated 与执行失败严格区分",
+    ),
+)
+
 # ---------- 6. 卫星目录与演示数据口径（事实源：sat_tracker.py） ----------
 sat_tree = parse("mbdsdr_ai/sat_tracker.py")
 downlink = literal_assign(sat_tree, "BUILTIN_DOWNLINK_HZ") or {}
@@ -190,6 +251,7 @@ facts = dict(
     frozenCount=len(frozen_names), pythonExtensionCount=len(ext_names),
     toolDomainCount=len(tool_domain),
     writePatterns=list(write_patterns),
+    gates=gates,
     planned=PLANNED,
     tokens=dict(figma=figma, radius=radius, font=font, textAlpha=alpha, size=size,
                 source="desktop/tokens.py · THEME_COLORS['figma'] / RADIUS / FONT / TEXT_ALPHA / SIZE"),
@@ -201,7 +263,7 @@ facts = dict(
             settingsKey=settings_key.group(1) if settings_key else "",
             endpoints=paths,
             postCommand=dict(path="/command", body={"tool": "<name>", "args": {}}),
-            writeGate="arm_manual",
+            writeGate=f"{hub_state_var} (C++ host switch, not arm_manual)",
             source="cpp/src/core/tokens.h · cpp/src/control/control_http_server.cpp · docs/CHROMEOS_CROSTINI_SDR.md",
         ),
         mcp=dict(serverName="mbdsdr-core", protocolVersion="2024-11-05",
@@ -221,7 +283,8 @@ facts = dict(
         noRealLocationDefault=True,
         hardcodedCapabilityNumbers=False,
         noMockFakeData=True,
-        writeToolsNeedArmManual=True,
+        writeToolsNeedExternalConfirmation=True,
+        frontEndMustNotSelfArm=True,
         orbitDeterminationNotAFeature=True,
         license="MIT · AGPL 引擎只学机制不引代码",
         source="AGENTS.md §1–§3 · README.md · LICENSING.md · NOTICE.md",
@@ -307,13 +370,33 @@ python tests/verify_product.py     # 校验事实源与 UI/文档一致
   设置键 `{facts['channels']['controlHub']['settingsKey']}`。
 - 发现文档 `GET /`、状态 `GET /status`、命令 `POST /command`（body `{{"tool":...,"args":{{...}}}}`）。
   代码里抓到的路径：{('、'.join('`'+p+'`' for p in paths[:12])) or '（见源码）'}。
-- **写工具一律过 `arm_manual` 人工门**：`gated:true` 是「人工门未确认」，不是执行失败、
-  更不是设备故障。UI 必须区分这两种回执。写工具名模式来自
-  `mbdsdr_ai/tool_registry.py: WRITE_TOOL_NAME_PATTERNS`（{len(write_patterns)} 条）。
+- **两条通道、两道门，前端一道都不签发**（事实源 `MB.REPO.gates`，全部由代码抽取）：
+  - **ControlHub（C++）**：写命令在 `{gates['controlHub']['guard']}` 被拦，回执
+    `{{"ok":false,"gated":true}}` +「写入被禁止（{gates['controlHub']['errorContains']}）」。
+    开关 `{gates['controlHub']['stateVar']}` 属于宿主桌面端，Web 前端**无权打开**；
+    产品只透传 `args`，如实回显 `gated`，不自行放行。
+  - **Python 内核 / MCP**：写工具由外部确认通道签发的一次性
+    `{gates['mcp']['tokenFields'][0]}`（别名 `{gates['mcp']['tokenFields'][1]}`）放行；
+    门内消费 `{'、'.join(gates['mcp']['consumedGateFlags'])}` 且不下发 handler。缺 token
+    返回 `{gates['mcp']['errorCode']}`；**模型自报 `arm_manual` 明确拒绝**——
+    `{gates['mcp']['hint']}`
+  - **产品前端**：`mayNotIssueToken` / `mustStripSelfReport` / `gatedIsNotFailure`。
+    `gated:true` 是「未获确认」，**不是执行失败、更不是设备故障**，UI 必须严格区分。
+- 写工具名模式来自 `mbdsdr_ai/tool_registry.py: WRITE_TOOL_NAME_PATTERNS`（{len(write_patterns)} 条）。
 - 另有 MCP `tools/list` / `tools/call`（`mbdsdr-core`，协议 `{facts['channels']['mcp']['protocolVersion']}`）
   与 Headless `SDRController`（`docs/headless_api.md`）。三通道行为一致。
 - **不要沿用旧端口**：历史设计稿里的 `7878`、`81` 等 Python 后端已不存在；`7356` 是 rigctl、
   `8000` 是 Python `start_web_server`、`4533` 是 rotctld，都不是 ControlHub。
+
+### 3.1 阶段 B 运行时桥接（仓库 Python 侧）
+
+`mbdsdr_ai/web_bridge.py` 把 `mbdsdr_ai/tool_registry.py` 的工具面映射成产品
+`MB.CONTRACT` 的 8 个方法，`as_bridge_dict()` 给出 `window.mbdsdrBridge` 形状，
+`manifest()` 是可对拍的 JSON 契约；`tests/test_web_bridge.py` 把 Python / JS 契约
+与本页的门事实钉在一起（16 条用例）。**写工具绝不走裸 `registry.call()`**：
+内核的门在 `mcp_server.call_tool` 层，缺 `confirm_token` 返回
+`manual_gate_required`，未接 `confirm_channel` 时恒 gated。宿主注入、
+确认通道接线与真实硬件实测**尚未完成**，见 `manifest().notVerified`。
 
 ## 4. 设计令牌（事实源：`desktop/tokens.py`）
 

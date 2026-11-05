@@ -21,6 +21,49 @@ CAPS = DOMAINS + [dict(p, sample=[], empty=True, group="planned",
                        summary=p["why"], tools=[]) for p in PLANNED]
 BY_ID = {c["id"]: c for c in CAPS}
 
+# 写工具确认门：事实源 gates 由 sync_from_repo.py 从 C++ / Python 内核代码抽取。
+# 文档里的 token 名、自报标记、宿主开关变量一律插值，不手抄，内核改名即同步跟随。
+GATES = FACTS["gates"]
+GH, GM = GATES["controlHub"], GATES["mcp"]
+_TOKEN = GM["tokenFields"][0]
+_ALIAS = GM["tokenFields"][1]
+_SELF = GM["selfReportFields"][0]
+_HUBVAR = GH["stateVar"]
+assert _TOKEN == "confirm_token" and _SELF == "arm_manual" and _HUBVAR == "writeEnabled_", \
+    "内核确认门字段已改名，请复核 docs/build 的门文案（不要静默沿用旧值）"
+
+GATE_ZH = (
+    f"写工具确认门由宿主 / 外部确认通道持有（事实源 `MB.REPO.gates`）：ControlHub 是 C++ "
+    f"宿主写开关 `{_HUBVAR}`，Python 内核是外部签发的一次性 `{_TOKEN}`（别名 `{_ALIAS}`）。"
+    f"**模型自报 `{_SELF}` 无效**；`gated:true` 表示**未获确认**，不是执行失败、更不是设备故障。"
+    f"前端只透传、不签发 token、不自判放行。离线时返回 "
+    '`{"ok":false,"error":"not_connected","suggestion":"..."}`，不伪装成功。'
+)
+GATE_GLOSSARY = (
+    f"宿主写开关 `{_HUBVAR}` / 外部签发的一次性 `{_TOKEN}` 把关；自报 `{_SELF}` 无效，"
+    f"`gated:true` 是未获确认而非执行失败"
+)
+GATE_FAQ = (
+    f"写工具的确认门**不在前端**：ControlHub 由 C++ 宿主写开关 `{_HUBVAR}` 决定，"
+    f"Python 内核只认外部确认通道签发的一次性 `{_TOKEN}`（别名 `{_ALIAS}`）。"
+    f"**模型自报 `{_SELF}` 明确无效**，前端会剥离它；缺 token 时返回 "
+    f"`{GM['errorCode']}` / `gated:true`，UI 显示「未获确认（gated · 非失败）」，"
+    f"与执行失败严格区分。前端不签发 token、不自行放行。"
+)
+GATE_EN = (
+    f"Offline by default: no fake IQ, no fake successes. Writes are gated by the C++ host "
+    f"switch (`{_HUBVAR}`) for ControlHub, or a one-shot `{_TOKEN}` issued by an external "
+    f"confirmation channel for the Python kernel; a model self-reporting `{_SELF}` is rejected. "
+    f"The front end only forwards arguments, never issues tokens, and distinguishes "
+    f"`gated` from a real failure."
+)
+GATE_JA = (
+    f"既定はオフライン：偽の IQ も偽の成功もありません。書き込みは ControlHub では C++ "
+    f"ホストの `{_HUBVAR}`、Python カーネルでは外部確認チャネルが発行する一回限りの "
+    f"`{_TOKEN}` でゲートされます。モデルが `{_SELF}` を自己申告しても拒否されます。"
+    f"フロントエンドは転送のみでトークンを発行せず、`gated` と失敗を厳密に区別します。"
+)
+
 
 def domain_page(d: dict) -> str:
     tools = "、".join(f"`{x}`" for x in d["tools"]) or "**本面无工具（诚实空态）**"
@@ -61,9 +104,7 @@ def domain_page(d: dict) -> str:
 - MCP：`tools/call`（`{FACTS['channels']['mcp']['serverName']}`）
 - Headless：`SDRController` 方法面
 
-写工具一律过 `arm_manual` 人工门；`gated:true` 表示**人工门未确认**，不是执行失败，
-也不是设备故障。离线时返回 `{{"ok":false,"error":"not_connected","suggestion":"..."}}`，
-不伪装成功。
+{GATE_ZH}
 
 ## 现状与 not_verified
 
@@ -186,8 +227,8 @@ glossary = """# 术语表（zh-CN / 日本語 / English）
 | 工具域 | ツールドメイン | Tool domain | `_TOOL_DOMAIN` 的分组；冻结域与 C++ 跨语言钉扎 |
 | ControlHub | ControlHub | ControlHub | C++ 桌面引擎的回环 HTTP 控制通道（无鉴权、只绑 127.0.0.1） |
 | MCP | MCP | Model Context Protocol | 外部 agent 通过 `tools/list` / `tools/call` 调用工具的协议 |
-| 三通道 | 三チャネル | Agent / ControlHub / HTTP | 行为一致、写动作统一过人工门 |
-| arm_manual 人工门 | 人工承認ゲート | Human gate | 写工具未确认返回 `gated:true`，不是执行失败 |
+| 三通道 | 三チャネル | Agent / ControlHub / HTTP | 行为一致、写动作分别由宿主写开关 / 外部确认 token 把关 |
+| 写工具确认门 | 書き込み確認ゲート | Write confirmation gate | <<GATE_GLOSSARY>> |
 | 诚实空态 | 正直な空状態 | Honest empty state | 无硬件/无信号显式报空，绝不 mock 假数据 |
 | 真机实证 | 実機検証 | Real-hardware evidence | 有实测记录才写「已验证」，云测/仿真不算 |
 | 内置 TLE 策略 | 内蔵 TLE 方針 | Built-in TLE policy | 合成/凑整 TLE 仅供离线演示，禁止精确过境 |
@@ -209,7 +250,8 @@ glossary = """# 术语表（zh-CN / 日本語 / English）
 | 数据源契约 | データソース契約 | DataSource contract | UI ↔ 内核唯一接缝 |
 | 灰阶热力 | グレースケールヒートマップ | Greyscale heatmap | .figma 设计语言下的瀑布色彩 |
 """
-(DOCS / "wiki/glossary.md").write_text(glossary, encoding="utf-8")
+(DOCS / "wiki/glossary.md").write_text(
+    glossary.replace("<<GATE_GLOSSARY>>", GATE_GLOSSARY), encoding="utf-8")
 
 faq = """# 常见问题
 
@@ -258,8 +300,7 @@ ControlHub 端口来自 `cpp/src/core/tokens.h`，时间倍率来自 `desktop/rf
 - **宿主注入桥**：Qt/WebEngine 注入 `window.mbdsdrBridge`（`invoke` / `satellites` 等）即可。
 - **MCP**：外部 agent 走 `tools/list` / `tools/call`。
 
-写工具必须带 `arm_manual:true` 才会下发；未确认时 UI 显示
-「人工门未确认（gated · 非失败）」，与执行失败严格区分。
+<<GATE_FAQ>>
 
 ## 为什么界面上找不到「定轨」？
 
@@ -284,7 +325,8 @@ grab-the-sky、加法大气、呼吸指针都是思想层的数学与几何，�
 文档有**独立**语言钮。主文档以中文为主，仅 README 提供英文/日文译本；缺译时文档中心
 显示中文原文并明确标注「暂无该语言译本」，不假装已本地化。界面文案与对话模板是三语全量。
 """
-(DOCS / "wiki/faq.md").write_text(faq, encoding="utf-8")
+(DOCS / "wiki/faq.md").write_text(
+    faq.replace("<<GATE_FAQ>>", GATE_FAQ), encoding="utf-8")
 
 SCENES = [
     ("education", "科教教培", "课堂可复现的天球、频谱与解码演示",
@@ -357,7 +399,7 @@ Orbit determination is deliberately **not a UI feature**: it can only be trigger
 The capability matrix, tool names, satellite catalogue, ControlHub port, time-rate presets and design
 tokens are **generated from the repository source** by `build/sync_from_repo.py` — not hand-copied from
 a design draft. Empty tool domains stay empty; 6DOF / AR / VR are marked planned / unverified.
-Offline by default: no fake IQ, no fake successes. Writes require the `arm_manual` human gate.
+<<GATE_EN>>
 
 - Languages: 中文 / 日本語 / English, switchable at runtime and persisted.
 - Design language: the `.figma` export mapped through `desktop/tokens.py` (pure black, greyscale, MiSans, large radii).
@@ -366,7 +408,7 @@ Offline by default: no fake IQ, no fake successes. Writes require the `arm_manua
 - Verify: `python tests/verify_product.py` and `node tests/verify_runtime.js`.
 
 Full documentation (Chinese original): `README.md`. The in-product Docs Centre marks missing translations honestly.
-""", encoding="utf-8")
+""".replace("<<GATE_EN>>", GATE_EN), encoding="utf-8")
 
 (DOCS / "README.ja.md").write_text("""# MBDSDR 時空コンソール · 製品 README（日本語）
 
@@ -380,7 +422,7 @@ Full documentation (Chinese original): `README.md`. The in-product Docs Centre m
 能力マトリクス・ツール名・衛星カタログ・ControlHub ポート・時間倍率・デザイントークンは
 `build/sync_from_repo.py` が**リポジトリのコードから自動生成**します（設計稿の手写しではありません）。
 ツールのないドメインは空状態のまま。6DOF / AR / VR は「計画・未検証」と明記します。
-既定はオフライン：偽の IQ も偽の成功もありません。書き込みは `arm_manual` 人工ゲート必須。
+<<GATE_JA>>
 
 - 言語：中文 / 日本語 / English、実行時に切り替え・設定を保持。
 - デザイン：`.figma` 書き出しを `desktop/tokens.py` 経由で適用（純黒・グレースケール・MiSans・大きな角丸）。
@@ -389,7 +431,7 @@ Full documentation (Chinese original): `README.md`. The in-product Docs Centre m
 - 検証：`python tests/verify_product.py` / `node tests/verify_runtime.js`。
 
 完全なドキュメントは中国語オリジナル `README.md`。未翻訳は製品内ドキュメントセンターが明示します。
-""", encoding="utf-8")
+""".replace("<<GATE_JA>>", GATE_JA), encoding="utf-8")
 
 print(f"generated: {len(DOMAINS)} domain pages + {len(PLANNED)} planned pages, "
       f"3 scenarios, glossary, faq, wiki index, README.en/ja")

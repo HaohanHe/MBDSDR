@@ -53,7 +53,9 @@
   function callTool(name, args, stateKey) {
     MB.data.invokeTool(name, args || {}).then(res => {
       if (res && res.ok) tool(name + "(…)", t(stateKey || "ai.toolCalled"), "ok");
-      else if (res && res.gated) tool(name + "(…)", t("bridge.gated"), "wait");
+      else if (res && res.gated) tool(name + "(…)",
+        t(res.error === "manual_gate_required" || res.error === "manual_gate_unavailable"
+          ? "bridge.needToken" : "bridge.gated"), "wait");
       else if (res && res.offline) tool(name + "(…)", t("tool.offline"), "off");
       else tool(name + "(…)", t("ai.unavailable"), "off");
     }).catch(() => tool(name + "(…)", t("ai.unavailable"), "off"));

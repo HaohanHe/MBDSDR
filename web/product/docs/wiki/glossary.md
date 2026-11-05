@@ -8,8 +8,8 @@
 | 工具域 | ツールドメイン | Tool domain | `_TOOL_DOMAIN` 的分组；冻结域与 C++ 跨语言钉扎 |
 | ControlHub | ControlHub | ControlHub | C++ 桌面引擎的回环 HTTP 控制通道（无鉴权、只绑 127.0.0.1） |
 | MCP | MCP | Model Context Protocol | 外部 agent 通过 `tools/list` / `tools/call` 调用工具的协议 |
-| 三通道 | 三チャネル | Agent / ControlHub / HTTP | 行为一致、写动作统一过人工门 |
-| arm_manual 人工门 | 人工承認ゲート | Human gate | 写工具未确认返回 `gated:true`，不是执行失败 |
+| 三通道 | 三チャネル | Agent / ControlHub / HTTP | 行为一致、写动作分别由宿主写开关 / 外部确认 token 把关 |
+| 写工具确认门 | 書き込み確認ゲート | Write confirmation gate | 宿主写开关 `writeEnabled_` / 外部签发的一次性 `confirm_token` 把关；自报 `arm_manual` 无效，`gated:true` 是未获确认而非执行失败 |
 | 诚实空态 | 正直な空状態 | Honest empty state | 无硬件/无信号显式报空，绝不 mock 假数据 |
 | 真机实证 | 実機検証 | Real-hardware evidence | 有实测记录才写「已验证」，云测/仿真不算 |
 | 内置 TLE 策略 | 内蔵 TLE 方針 | Built-in TLE policy | 合成/凑整 TLE 仅供离线演示，禁止精确过境 |
