@@ -13,7 +13,7 @@
 | 其中已暴露到设置面板 | **31 条** | 23 条落 DesktopSettings，2 条落 gui_config，5 条落 AI config；去重后 35 个 schema 项 |
 | 判定锁死、不暴露 | **6 类** | 理由见 §4（不是偷懒，每条都有具体消费点缺失或双入口风险） |
 | schema 总条目 | **48** | 35 暴露 + 13 内部键（频率/增益/音量等已有即时控件） |
-| 设置面板新增测试 | **67 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 13 项手改 JSON 非法值矩阵） |
+| 设置面板新增测试 | **72 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 13 项手改 JSON 非法值矩阵 + 5 项内部键消费端实测） |
 | 相关回归 | **96 + 29 个** | 配置/主题/布局/触屏/i18n 96；三栏与面板集成 29 |
 
 **接手时的现状（已在本轮修复，记录备查）**：用户点"设置"当时**不是空面板，而是只有
@@ -381,13 +381,14 @@ from settings import (
 | 卫星与多普勒 | 设置页签 | 5 | 地面站纬度/经度（即时写 `gui_config` 并重算）、过境最低仰角/搜索窗口/显示低仰角（即时保存，过境列表**下次刷新**生效） | 3 |
 | AI | 设置页签 | 5 | 温度/top_p/输出上限/上下文/超时（即时写 `config.json`，下一轮请求即用） | 3 |
 | 存储与日志 | 设置页签（特殊页） | 1 | 录音目录（只影响新录音） | 3 |
-| 服务与远程访问 | **独立「服务设置」页签** | 4 | 启用 RC/Web（即时启停）、RC/Web 端口（即时保存，**服务需重启**） | **4** |
+| 服务与远程访问 | **独立「服务设置」页签** | 4 | 启用 RC/Web（即时启停）、RC/Web 端口（即时保存，**服务需重启**） | 3（主窗口 **2 次点击**，见 §16） |
 
 合计 35 个暴露项（设置面板 31 个，含 AI 与观测站坐标；独立「服务设置」4 个），
 与 §0 口径一致。
 
-**「翻几层」结论**：普通项 3 层（设置入口 → 组页签 → 行）；服务四项 4 层，
-要先切到另一个「服务设置」停靠页签，最容易「在设置里找不到端口」。
+**「翻几层」结论**：普通项 3 层（设置入口 → 组页签 → 行）；服务四项同为 3 层
+（服务设置页签 → 组框 → 行），只是它与「设置」是**同一右栏页签组的另一个页签**，
+从主窗口算 **2 次点击**即可到端口（§16 实测），并不是 4 层。
 
 ### 11.1 错位分组（只记录，视觉冻结不动布局）
 
@@ -397,7 +398,7 @@ from settings import (
 | 2 | `show_waterfall` 在「显示与主题」，`waterfall_depth_rows`/`waterfall_smooth` 在「频谱与解码」 | 同一「瀑布」概念拆两个页签，用户找深度要换页 | 保留现状（瀑布深度属频谱渲染参数）；help 已互相点名 |
 | 3 | `squelch_default_db`/`tuning_step_hz` 在「频谱与解码」，实际控件在顶部控制面板 | 用户可能先去「通用」找静噪/步进 | help 写明「与顶部控件双向同步/换算入口」 |
 | 4 | `observer_lat/lon` 在「卫星与多普勒」，同时驱动星象仪过境列表 | 天空线用户会去「星象仪」找坐标 | help 写明两者共同决定过境；不搬组 |
-| 5 | 服务四项不在设置面板 | 4 层入口，用户找不到端口 | 属于既有设计（单一服务实例）；保持 |
+| 5 | 服务四项不在设置面板 | 与「设置」并列的另一个右栏页签（2 次点击可达，不是 4 层） | 属于既有设计（单一服务实例）；保持 |
 
 ## 12. 依赖约束表（改 A 必须同时改 B 才成立）
 
@@ -454,14 +455,59 @@ from settings import (
 1. **内部键没有上下限**：`frequency_hz` / `gain_db` / `bandwidth_hz` / `sample_rate_hz`
    等 13 个内部键没有 `minimum/maximum`，手改 `frequency_hz: 1e9`、`gain_db: 999`
    会被原样接受（测试 `test_internal_keys_from_hand_edited_json_are_not_bounded` 钉住
-   现状）。它们由控制面板/设备层写入、UI 侧自带范围，但手改 JSON 可绕过——是否在
-   schema 补范围需与设备线确认（补错范围会把合法的频率/带宽夹坏）。
-2. **内部 text 键不收窄**：`demod_mode` / `agc_speed` / `app_mode` 是 text，
-   手改 `"FMX"` 会原样接受；消费点在 `main_window`/后端，本线不越界改。
-   若要做枚举，应先由消费方给出完整合法集合，避免把可用模式误拒。
+   现状）。实测三种输入均由消费方兜底、不崩（§13.1）；是否在 schema 补范围仍需
+   设备线确认（补错范围会把合法的频率/带宽夹坏）。
+2. **内部 text 键不收窄**：`demod_mode` / `agc_speed` / `app_mode` 在 schema 层
+   原样接受（`migration_notes` 为空）；是否有兜底取决于消费方——`demod_mode`
+   无兜底（§13.2，空白下拉），`agc_speed` 有兜底（`set_agc_speed` 未知回
+   `medium`）。若要做枚举，应先由消费方给出完整合法集合，避免把可用模式误拒。
 3. **“拒绝”路径只有跨主版本**：同主版本内一律归一（夹取/回默认），不拒绝单个键；
    这是有意选择——手改一个键不应让整份配置导入失败。跨主版本由
    `parse_import` 整体拒绝并给出原因与替代做法（§10）。
+
+### 13.1 内部键三种输入的实测（`frequency_hz` / `gain_db` / `bandwidth_hz` / `sample_rate_hz`）
+
+方法：手写 JSON → `DesktopSettings.load` → 按主窗口 `_apply_restored_settings`
+的顺序喂给 `ControlPanel` 的恢复 setter（offscreen 实测，测试
+`test_internal_frequency_three_inputs_are_consumer_clamped`、
+`test_internal_gain_bandwidth_sample_rate_consumers_clamp`）。
+
+| 键 | 手改值 | `load` 后磁盘值 | 消费后实际值 | 兜底函数（文件:符号） | 记 `migration_notes` |
+|---|---|---|---|---|---|
+| `frequency_hz` | `1e12` | `1e12` | **6 GHz**（上限） | `control_panel.py:set_frequency_hz`（夹到 `FREQ_MIN_HZ..FREQ_MAX_HZ`） | 否 |
+| `frequency_hz` | `-1` | `-1` | **10 kHz**（下限） | 同上 | 否 |
+| `frequency_hz` | `"abc"` | **98 MHz**（默认） | 98 MHz | `settings.py:_coerce` → `validate_value` | **是** |
+| `gain_db` | `1e12` | `1e12` | **49 dB**（滑杆上限） | `control_panel.py:set_gain` | 否 |
+| `gain_db` | `-1` | `-1` | **0 dB**（滑杆下限） | 同上 | 否 |
+| `gain_db` | `"abc"` | **20 dB**（默认） | 20 dB | `settings.py:_coerce` | **是** |
+| `bandwidth_hz` | `1e12` | `1e12` | **180 kHz**（最近档 WFM） | `control_panel.py:set_vfo_bandwidth`（最近档） | 否 |
+| `bandwidth_hz` | `-1` | `-1` | **12.5 kHz**（模式默认，不覆盖） | `main_window._apply_restored_settings: if bw > 0` | 否 |
+| `bandwidth_hz` | `"abc"` | **0.0**（默认） | 12.5 kHz（同上不覆盖） | `settings.py:_coerce` + `if bw > 0` | **是** |
+| `sample_rate_hz` | `1e12` | `1e12` | **3.2 MS/s**（最高档） | `control_panel.py:set_sample_rate`（最近档） | 否 |
+| `sample_rate_hz` | `-1` | `-1` | **250 kS/s**（最低档，主窗口无 `>0` 守卫） | 同上 | 否 |
+| `sample_rate_hz` | `"abc"` | **2.4 MS/s**（默认） | 2.4 MS/s | `settings.py:_coerce` | **是** |
+
+**结论**：三种输入都**不崩、不显示非法数字**——`frequency_hz` 断连时显示保持
+`"--"`，连接后显示消费端夹过的值；**兜底在消费方**（`ControlPanel` 的四个
+setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮不加 schema
+上下限**（加了反而可能把合法的宽带/频率夹坏，且需要设备线给范围）。
+需要登记的一点：夹取只发生在消费端，**磁盘上的 `1e12` 不会被改写**，下次启动
+仍会再夹一次；等用户改任意设置触发保存才会覆盖。
+
+### 13.2 text 键实测：`demod_mode: "NBEM"`
+
+| 环节 | 实测结果 |
+|---|---|
+| `DesktopSettings.load` | 原样接受 `"NBEM"`，`migration_notes` **为空** |
+| `ControlPanel.set_mode("NBEM")` | `_current_mode = "NBEM"`；模式下拉**非可编辑**、无匹配项 → `currentIndex=-1`、显示**空白** |
+| 带宽 | 未知模式走兜底 → 12.5 kHz |
+| 崩溃 | 无 |
+
+**结论**：这是**唯一一个未兜底的输入**，且用户会看到空白模式下拉（不是合法值，
+但也不是崩溃）。建议由控制线/内核给出合法模式集合后，把 `demod_mode` 在 schema
+里收窄为枚举，非法值回 `FM` 并记 `migration_notes`；本轮不改（集合归属未定，
+且视觉冻结）。对照：同为 text 的 `agc_speed` **已有兜底**——`control_panel.py:
+set_agc_speed` 对未知值回落 `medium`，所以它不需要 schema 收窄。
 
 ## 14. A7 / A8 遗留收尾确认
 
@@ -469,4 +515,34 @@ from settings import (
 |---|---|---|
 | A7 瀑布深度六档枚举的非法值处理 | **已收** | schema `choices=(128,256,512,1024,2048,4096)`，帮助文案写明「非档位值（如 384）回落 256 并在状态栏说明原因」；`test_waterfall_depth_schema_is_six_tier_enum` + 本轮参数化 `384 → 256`（带 `migration_notes`） |
 | A8 消光范围与 `set_extinction` 对齐 | **已收** | schema `minimum=0.0, maximum=0.5`（与 `rf_sky_view.EXTINCTION_K_MIN/MAX` 一致）；`RFSkyView.set_extinction()` 越界夹取并回显，`set_extinction_k()` 是**同一函数对象**的别名（`test_set_extinction_clamps_and_returns_effective_value`）；本轮参数化 `9.0 → 0.5`；端到端星数测试 `test_extinction_setting_end_to_end_changes_visible_star_count` 仍绿 |
+
+## 15. 错位分组待裁定表（视觉冻结期只列表，不动布局）
+
+原型核查口径：`D:\mbdsdr\output\mbdsdr-product\dist\index.html`（955 KB 交互意图基准）、
+仓库 `mbdsdr-ui-mockup/index.html`、`D:\mbdsdr\.figma\284_*`（30 个节点目录，均为
+小组件占位，最大 `284_131/index.jsx` 约 2.8 KB；按「设置/服务/语言/主题/瀑布/消光/
+仰角」检索 0 命中）。**原型没有设置分组面板**，只有入口和标签。
+
+| # | 项/组 | ① 现状页签归属 | ② 建议归属 | ③ 原型参照 |
+|---|---|---|---|---|
+| 1 | `ui_language` + `touch_mode` | 「通用」同组混排（语言行已有「重启后生效」橙色标识） | 保留「通用」；语言固定排组末并保留重启标识，**不建议为单个项开新页签** | **原型无参照**：`dist/index.html:444` 只有侧栏「视图设置」入口（i18n `sidebar.viewSettings`，L1743），没有分组面板；`.figma` 无设置节点 |
+| 2 | `show_waterfall` / `waterfall_depth_rows` / `waterfall_smooth` | 显示与主题 / 频谱与解码（拆两页） | 三项统一到「频谱与解码」，`show_waterfall` 移过去（渲染参数同页） | **原型无参照**：`dist/index.html:579` 只有「频谱 · 瀑布」演示标签，无设置项参照 |
+| 3 | `squelch_default_db` / `tuning_step_hz` | 「频谱与解码」，但实际控件在顶部控制面板 | 保留；help 已写明与顶部控件双向同步/换算入口 | **原型无参照** |
+| 4 | `observer_lat` / `observer_lon` | 「卫星与多普勒」，同时驱动天空图/过境 | 保留；help 已写明两者共同决定过境，缺一为空 | **原型无参照** |
+| 5 | 服务四项（RC/Web 开关与端口） | 独立「服务设置」右栏页签，不在「设置」面板内 | 保留独立页签（避免两个面板各持一套服务实例）；可发现性见 §16 | **原型无参照**：`dist/index.html:967` 仅在能力矩阵提到「音频/服务开关」，不是设置面板 |
+
+## 16. 主窗口 → 远程控制端口的点击路径（实测）
+
+接线：`main_window.py:6455-6461` 用 `_add_right_tab("服务设置", ServiceSettingsPanel, ...)`
+挂载，`6470-6473` 用同样方式挂「设置」——两者是**同一右栏页签组的两个页签**，
+不是父子层级。
+
+| 步 | 动作 | 点击次数 |
+|---|---|---|
+| 1 | 右栏点「服务设置」页签 | 1 |
+| 2 | 「远程控制 (TCP, GQRX/hamlib 风格)」组框内的端口行首屏可见（无组页签/子页） | 0 |
+| 3 | 点端口 `QSpinBox` | 1 |
+
+**结果：2 次点击 / 3 层可见层级（页签 → 组框 → 行）**。按协调方「≥4 步才进
+可发现性线待判清单」的规则，**不列入**；从「设置」页签出发也只多 1 次切页签。
 

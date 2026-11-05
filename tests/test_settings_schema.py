@@ -457,6 +457,103 @@ def test_internal_keys_from_hand_edited_json_are_not_bounded(tmp_path):
     assert not ds.migration_notes
 
 
+def _load_payload(tmp_path, payload):
+    path = tmp_path / "desktop_settings.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return DesktopSettings.load(path=str(path))
+
+
+@pytest.mark.parametrize("raw,expected_panel,notes_expected", [
+    (1e12, 6.0e9, False),      # 高于 6 GHz → ControlPanel 夹到上限
+    (-1.0, 10_000.0, False),   # 负值 → ControlPanel 夹到下限
+    ("abc", 98e6, True),       # 非数字 → settings._coerce 回默认并记原因
+])
+def test_internal_frequency_three_inputs_are_consumer_clamped(
+        tmp_path, qapp, raw, expected_panel, notes_expected):
+    """frequency_hz 手改三种输入：不崩、不显示非法值，由消费方兜底。
+
+    产品顺序 = ``DesktopSettings.load``（归一/记原因）→ 主窗口
+    ``_apply_restored_settings`` → ``ControlPanel.set_frequency_hz``（夹取）。
+    断连时 display 保持 "--"，连接后才显示夹取后的值。
+    """
+    from control_panel import ControlPanel
+
+    ds = _load_payload(tmp_path, {"frequency_hz": raw})
+    cp = ControlPanel()
+    cp.set_frequency_hz(ds.get("frequency_hz"))
+    assert cp._freq_hz == pytest.approx(expected_panel)
+    assert bool(ds.migration_notes) is notes_expected
+
+
+def test_internal_gain_bandwidth_sample_rate_consumers_clamp(tmp_path, qapp):
+    """gain_db / bandwidth_hz / sample_rate_hz 的兜底落在 ControlPanel setter。"""
+    from control_panel import ControlPanel
+
+    cp = ControlPanel()
+
+    # gain：999 → 49 dB 上限；负值 → 0；非数字 → 默认 20 并记原因
+    ds = _load_payload(tmp_path, {"gain_db": 1e12})
+    cp.set_gain(ds.get("gain_db"))
+    assert cp.gain_slider.value() == 49
+    ds = _load_payload(tmp_path, {"gain_db": -1.0})
+    cp.set_gain(ds.get("gain_db"))
+    assert cp.gain_slider.value() == 0
+    ds = _load_payload(tmp_path, {"gain_db": "abc"})
+    assert ds.get("gain_db") == 20.0 and ds.migration_notes
+    cp.set_gain(ds.get("gain_db"))
+    assert cp.gain_slider.value() == 20
+
+    # 带宽：产品路径 ``if bw > 0`` 才显式覆盖（main_window 3260 附近），
+    # 0/负数/非数字都保持「随模式自动」（当前 FM → 12.5 kHz）。
+    ds = _load_payload(tmp_path, {"bandwidth_hz": 1e12})
+    bw = float(ds.get("bandwidth_hz", 0.0) or 0.0)
+    cp.set_vfo_bandwidth(bw)
+    assert cp.vfo_bw_combo.currentData() == 180_000.0   # 最近档：180 kHz (WFM)
+    for bad in (-1.0, "abc"):
+        cp.set_mode("FM")
+        ds = _load_payload(tmp_path, {"bandwidth_hz": bad})
+        bw = float(ds.get("bandwidth_hz", 0.0) or 0.0)
+        if bw > 0:
+            cp.set_vfo_bandwidth(bw)
+        assert cp.vfo_bw_combo.currentData() == 12_500.0, \
+            f"bandwidth_hz={bad!r} 不该覆盖模式默认带宽"
+        if bad == "abc":
+            assert ds.get("bandwidth_hz") == 0.0 and ds.migration_notes
+
+    # 采样率：主窗口没有 >0 守卫，setter 选最近档。
+    ds = _load_payload(tmp_path, {"sample_rate_hz": 1e12})
+    cp.set_sample_rate(ds.get("sample_rate_hz"))
+    assert cp.sample_rate_combo.currentData() == 3_200_000.0  # 最高档
+    ds = _load_payload(tmp_path, {"sample_rate_hz": -1.0})
+    cp.set_sample_rate(ds.get("sample_rate_hz"))
+    assert cp.sample_rate_combo.currentData() == 250_000.0    # 最低档
+    ds = _load_payload(tmp_path, {"sample_rate_hz": "abc"})
+    assert ds.get("sample_rate_hz") == 2_400_000.0 and ds.migration_notes
+    cp.set_sample_rate(ds.get("sample_rate_hz"))
+    assert cp.sample_rate_combo.currentData() == 2_400_000.0
+
+
+def test_hand_edited_demod_mode_known_gap_no_fallback_blank_combo(tmp_path, qapp):
+    """已知缺口：demod_mode 是 text，手改不存在的 "NBEM" 不回默认、不记原因。
+
+    实测产品表现：内部模式变 "NBEM"，非可编辑下拉无匹配项 → 显示空白（index -1），
+    带宽按未知模式的 12.5 kHz 兜底；不崩。
+    """
+    from control_panel import ControlPanel
+
+    ds = _load_payload(tmp_path, {"demod_mode": "NBEM"})
+    assert ds.get("demod_mode") == "NBEM"
+    assert not ds.migration_notes
+
+    cp = ControlPanel()
+    cp.set_mode(ds.get("demod_mode"))
+    assert cp._current_mode == "NBEM"
+    assert cp.mode_combo.isEditable() is False
+    assert cp.mode_combo.currentIndex() == -1
+    assert cp.mode_combo.currentText() == ""
+    assert cp.vfo_bw_combo.currentData() == 12_500.0
+
+
 # ---------------------------------------------------------------------------
 # 3. 损坏 / 写失败可见
 # ---------------------------------------------------------------------------
