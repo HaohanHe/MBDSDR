@@ -47,10 +47,7 @@ def _class_name(call):
 
 
 def _receiver(node):
-    try:
-        return ast.unparse(node)
-    except Exception:  # pragma: no cover - 极老 Python 没有 unparse
-        return ""
+    return ast.unparse(node)
 
 
 def _visible_names(func_node):
