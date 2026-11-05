@@ -41,6 +41,23 @@ def _focus_widget():
     return QApplication.focusWidget()
 
 
+#: 同 key 告警的限流时刻（monotonic 秒）。跟踪环 2 Hz，故障不限期会刷屏。
+_WARN_THROTTLE_LAST: Dict[str, float] = {}
+
+
+def _warn_throttled(key: str, msg: str, *args, interval_s: float = 30.0) -> None:
+    """同一 key 的 warning 在 interval_s 内只落一条。
+
+    限流只压**日志频次**，不压上报：调用方仍要把原因写进状态栏/周期记录，
+    否则就成了另一种静默。
+    """
+    now = time.monotonic()
+    if now - _WARN_THROTTLE_LAST.get(key, -math.inf) < interval_s:
+        return
+    _WARN_THROTTLE_LAST[key] = now
+    logger.warning(msg, *args)
+
+
 def _snr_signal_present(snr_db, was_present: bool,
                         enter_db: float = 8.0, exit_db: float = 5.0) -> bool:
     """星点亮 SNR 回差判定：>=8 dB 点亮，<5 dB 熄灭，中间保持原态不抖动。
@@ -7033,12 +7050,18 @@ class MainWindow(QMainWindow):
         if limiter is not None:
             limiter.reset()
         self._sync_sky_gimbal_btn(False)
+        # 停机失败不能让开关卡死（状态已在上方复位），但原因必须留证并进上报，
+        # 否则用户只看到「已停止」而不知道电机可能还在动。
+        stop_err = ""
         try:
             gc = self._gimbal_controller()
             if gc is not None:
                 gc.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            stop_err = str(e) or e.__class__.__name__
+            _warn_throttled("gimbal_stop", "云台停机指令未确认：%s", stop_err)
+        if stop_err:
+            reason = f"{reason}（云台停机指令未确认：{stop_err}）"
         self.statusBar().showMessage(
             reason, MSG_IMPORTANT if important else MSG_NORMAL)
 
@@ -7047,16 +7070,42 @@ class MainWindow(QMainWindow):
         return dict(self._last_gimbal_cycle) if self._last_gimbal_cycle else None
 
     def gimbal_tracking_report(self) -> Dict:
-        """过境全过程指向误差统计（指令角/实际指向 vs 卫星真角）。"""
+        """过境全过程指向误差统计。
+
+        来源**必须分栏**，不得用一个字段混报：
+        - ``cmd_*``：指令角 vs 卫星真角（只证明死区/限速造成的指令滞后）；
+        - ``pose_*``：**仅真实姿态回读**（IMU / rotctld 回读）vs 真角，
+          这才是机械跟随精度的可用口径；
+        - ``pose_error_by_source``：按来源分桶（readback / simulated / unknown /
+          none）。假后端把「实际指向 = 指令」当回读时归 simulated，不进
+          ``pose_*``，避免把 0.2° 指令残差当成云台机械精度。
+        """
         rec = getattr(self, "_gimbal_error", None)
         rep = rec.stats() if rec is not None else {"samples": 0}
         rep["last_cycle"] = self.last_gimbal_cycle()
         rep["command_mode"] = "absolute_az_el"
+        rep["command_error_source"] = "command_vs_truth"
         limiter = getattr(self, "_gimbal_limiter", None)
         if limiter is not None:
             rep["deadband_deg"] = limiter.deadband_deg
             rep["min_interval_s"] = limiter.min_interval_s
             rep["max_rate_deg_s"] = limiter.max_rate_deg_s
+        by_src = rep.get("pose_error_by_source") or {}
+        readback_n = int((by_src.get("readback") or {}).get("samples", 0))
+        simulated_n = int((by_src.get("simulated") or {}).get("samples", 0))
+        if readback_n > 0:
+            note = "姿态样本来自真实回读，pose_* 才可作为机械跟随精度"
+        elif simulated_n > 0:
+            note = ("姿态样本来自模拟执行（实际指向=指令回声），pose_* 不构成"
+                    "机械精度；本轮只有指令侧滞后可报")
+        else:
+            note = "无姿态回读样本，机械跟随精度未知"
+        rep["pose_source_summary"] = {
+            "readback_samples": readback_n,
+            "simulated_samples": simulated_n,
+            "mechanical_accuracy_claimable": readback_n > 0,
+            "note": note,
+        }
         return rep
 
     def _on_sky_gimbal_follow_toggled(self, on: bool):
@@ -8002,7 +8051,14 @@ class MainWindow(QMainWindow):
                         try:
                             res = gc.point_to_satellite(cmd[0], cmd[1])
                         except Exception as e:  # 后端异常 = 指令未执行
-                            res = {"dispatched": False, "error": str(e)}
+                            # 2 Hz 跟踪环里同一类异常会刷屏：按异常类型限流记日志，
+                            # 但原因必须原样进 res/周期记录/状态栏，不吞。
+                            err_text = f"{e.__class__.__name__}: {e}"
+                            _warn_throttled(
+                                f"gimbal_dispatch:{type(e).__name__}",
+                                "云台指令异常（az=%.1f el=%.1f）：%s",
+                                cmd[0], cmd[1], err_text)
+                            res = {"dispatched": False, "error": err_text}
                         t_dispatch = time.monotonic() - t0
                     res = res if isinstance(res, dict) else {}
                     dispatched = bool(res.get("dispatched", False))
@@ -8016,6 +8072,8 @@ class MainWindow(QMainWindow):
                             "command_az": cmd[0], "command_el": cmd[1],
                             "dispatched": False, "pose_valid": False,
                             "pose_az": None, "pose_el": None,
+                            "pose_source": "",
+                            "error": err,
                             "cmd_error_deg": angular_separation_deg(
                                 az, el, cmd[0], cmd[1]),
                             "pose_error_deg": None,
@@ -8033,8 +8091,13 @@ class MainWindow(QMainWindow):
                     pose_valid = bool(res.get("pose_valid"))
                     pose_az = res.get("current_az") if pose_valid else None
                     pose_el = res.get("current_el") if pose_valid else None
+                    # 姿态来源必须记账：真实回读（imu/rotctld）与假后端的
+                    # 「指令回声」是两种口径，后者的 0° 误差不代表机械精度。
+                    pose_source = str(res.get("pose_source") or (
+                        "unknown" if pose_valid else ""))
                     errs = (rec.record(az, el, effective[0], effective[1],
                                        pose_az=pose_az, pose_el=pose_el,
+                                       pose_source=pose_source,
                                        elapsed_s=0.5)
                             if rec is not None else {})
                     self._gimbal_cycle_seq = getattr(
@@ -8046,6 +8109,7 @@ class MainWindow(QMainWindow):
                         "dispatched": dispatched,
                         "pose_valid": pose_valid,
                         "pose_az": pose_az, "pose_el": pose_el,
+                        "pose_source": pose_source,
                         "cmd_error_deg": errs.get("cmd_error_deg"),
                         "pose_error_deg": errs.get("pose_error_deg"),
                         "pos_ms": (t_pos - t_cycle) * 1000.0,

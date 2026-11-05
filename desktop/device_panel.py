@@ -18,6 +18,7 @@ MBDSDR 设备选择 / 热插拔面板（desktop/device_panel.py）
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional, List, Dict
 
 from PySide6.QtCore import Qt, Signal, QTimer
@@ -243,9 +244,12 @@ class DevicePanel(QWidget):
         if 0 <= idx < len(self._devices):
             from mbdsdr_ai.device_capabilities import summarize_device
             try:
-                self.status_label.setToolTip(summarize_device(self._devices[idx]))
-            except Exception:
-                self.status_label.setToolTip("")
+                tip = summarize_device(self._devices[idx])
+            except Exception as e:
+                # 摘要失败不阻断选择，但 tooltip 要如实说「不可用」而不是留空。
+                tip = f"能力摘要不可用：{e}"
+                logger.warning("设备能力摘要生成失败：%s", e)
+            self.status_label.setToolTip(tip)
 
     def set_connected(self, connected: bool, dev_label: str = "") -> None:
         """主窗口连接成功/断开后调用。"""

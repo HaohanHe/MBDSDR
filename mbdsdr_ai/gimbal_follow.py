@@ -14,13 +14,18 @@ MBDSDR - 云台跟随的速率整形（纯逻辑，无 Qt / 无硬件依赖）
 
 这是整形器，不做「能不能跟随」的判断——硬件可用性与目标有效性由调用方
 （主窗口）负责，缺失时诚实解锁并提示。
+
+误差口径边界（真机之前不得越过）：``cmd_*``（指令角 vs 真角）只证明死区/
+限速带来的指令滞后；``pose_*``（姿态回读 vs 真角）才是机械跟随精度，且
+**只认真实回读**。假后端把「实际指向 = 指令」当作回读时必须标
+``simulated``，其 0° 误差不得计入 ``pose_*``，也不得对外表述为云台精度。
 """
 from __future__ import annotations
 
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def angular_separation_deg(az1: float, el1: float,
@@ -119,57 +124,101 @@ class GimbalFollowLimiter:
 
 @dataclass
 class PointingErrorRecorder:
-    """过境全过程的指向误差记录（指令角 vs 卫星真角，可选姿态回读角）。
+    """过境全过程的指向误差记录。
 
+    **口径分栏（不得混报）**：
     - ``cmd_*``：云台**指令角**与卫星真角的球面角距。整形器限速/死区时
-      指令会滞后，这个值就是可解释的跟踪滞后误差。
-    - ``pose_*``：云台**实际指向**回读角与真角的角距；后端不提供姿态时为 None。
+      指令会滞后，这个值只说明指令侧的跟踪滞后，**不是**机械跟随精度。
+    - ``pose_*``：**仅真实姿态回读**（IMU / rotctld 读回）与真角的角距。
+      这是机械跟随精度的唯一可用口径。
+    - ``pose_error_by_source``：按 ``readback`` / ``simulated`` / ``unknown`` /
+      ``none`` 分桶。假后端（实际指向 = 指令回声）必须标 ``simulated``，
+      其 0° 误差**不进** ``pose_*``——否则会把指令残差当成云台精度。
     """
 
     max_samples: int = 5000
     _cmd_err: List[float] = field(default_factory=list, init=False)
     _pose_err: List[float] = field(default_factory=list, init=False)
+    _pose_src: List[str] = field(default_factory=list, init=False)
     _elapsed_s: float = field(default=0.0, init=False)
 
     def reset(self) -> None:
         self._cmd_err.clear()
         self._pose_err.clear()
+        self._pose_src.clear()
         self._elapsed_s = 0.0
+
+    @staticmethod
+    def pose_bucket(source: Optional[str], has_pose: bool) -> str:
+        """把后端声明的姿态来源归桶：readback / simulated / unknown / none。"""
+        if not has_pose:
+            return "none"
+        s = str(source or "").strip().lower()
+        if s in {"imu", "rotctld", "readback", "pose_provider"}:
+            return "readback"
+        if s in {"simulated", "command_echo", "stub", "fake"}:
+            return "simulated"
+        return "unknown"
 
     def record(self, truth_az: float, truth_el: float,
                cmd_az: float, cmd_el: float,
                pose_az: Optional[float] = None,
                pose_el: Optional[float] = None,
-               elapsed_s: float = 0.0) -> Dict[str, float]:
+               pose_source: Optional[str] = None,
+               elapsed_s: float = 0.0) -> Dict[str, Optional[float]]:
         cmd_err = angular_separation_deg(truth_az, truth_el, cmd_az, cmd_el)
         if len(self._cmd_err) >= self.max_samples:
             self._cmd_err.pop(0)
             if self._pose_err:
                 self._pose_err.pop(0)
+            if self._pose_src:
+                self._pose_src.pop(0)
         self._cmd_err.append(cmd_err)
+        has_pose = pose_az is not None and pose_el is not None
         pose_err: Optional[float] = None
-        if pose_az is not None and pose_el is not None:
+        if has_pose:
             pose_err = angular_separation_deg(
                 truth_az, truth_el, float(pose_az), float(pose_el))
             self._pose_err.append(pose_err)
         else:
             self._pose_err.append(float("nan"))
+        self._pose_src.append(self.pose_bucket(pose_source, has_pose))
         try:
             self._elapsed_s += max(0.0, float(elapsed_s))
         except (TypeError, ValueError):
             pass
         return {"cmd_error_deg": cmd_err, "pose_error_deg": pose_err}
 
-    def stats(self) -> Dict[str, Optional[float]]:
+    def stats(self) -> Dict[str, Any]:
         n = len(self._cmd_err)
+        by_src: Dict[str, List[float]] = {}
+        for err, src in zip(self._pose_err, self._pose_src):
+            if math.isnan(err):
+                continue
+            by_src.setdefault(src, []).append(err)
+        readback = by_src.get("readback", [])
+        source_rows = {
+            k: {"samples": len(v),
+                "max_deg": max(v),
+                "mean_deg": sum(v) / len(v)}
+            for k, v in sorted(by_src.items())
+        }
+        if readback:
+            pose_source = "readback"
+        elif by_src.get("simulated"):
+            pose_source = "simulated"
+        elif by_src.get("unknown"):
+            pose_source = "unknown"
+        else:
+            pose_source = "none"
         if not n:
             return {"samples": 0, "cmd_max_deg": None, "cmd_mean_deg": None,
                     "cmd_rms_deg": None, "pose_max_deg": None,
                     "pose_mean_deg": None, "pose_samples": 0,
+                    "pose_source": "none", "pose_error_by_source": {},
                     "last_cmd_deg": None, "last_pose_deg": None,
                     "elapsed_total_s": 0.0}
         cmds = self._cmd_err
-        poses = [x for x in self._pose_err if not math.isnan(x)]
         cmd_max = max(cmds)
         cmd_mean = sum(cmds) / n
         cmd_rms = math.sqrt(sum(x * x for x in cmds) / n)
@@ -178,10 +227,13 @@ class PointingErrorRecorder:
             "cmd_max_deg": cmd_max,
             "cmd_mean_deg": cmd_mean,
             "cmd_rms_deg": cmd_rms,
-            "pose_max_deg": (max(poses) if poses else None),
-            "pose_mean_deg": (sum(poses) / len(poses) if poses else None),
-            "pose_samples": len(poses),
+            # pose_* 只统计真实回读；模拟/未知来源单列在 pose_error_by_source。
+            "pose_max_deg": (max(readback) if readback else None),
+            "pose_mean_deg": (sum(readback) / len(readback) if readback else None),
+            "pose_samples": len(readback),
+            "pose_source": pose_source,
+            "pose_error_by_source": source_rows,
             "last_cmd_deg": cmds[-1],
-            "last_pose_deg": (poses[-1] if poses else None),
+            "last_pose_deg": (readback[-1] if readback else None),
             "elapsed_total_s": self._elapsed_s,
         }

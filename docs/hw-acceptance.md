@@ -133,6 +133,11 @@ python scripts/hw_acceptance/ring3_demod_audio.py --freq 98.0e6 --out D:\mbdsdr\
 
 - **R1–R4**：本轮无设备，全部 `SKIPPED(no_device)`，无任何实测数字；
 - **R6 月球绝对位置**：缺星历文件，未独立验证；
+- **云台机械跟随精度**：模拟过境的 `cmd_*`（指令角 vs 真角，max 1.946°/mean 0.192°/RMS 0.511°）
+  只证明整形器死区 2°、限速 20°/s 带来的**指令滞后**；假后端「实际指向 = 指令」，
+  姿态误差与指令误差同值，**不得**把 0.2° 当云台精度对外表述。真机前只有
+  `gimbal_tracking_report()["pose_error_by_source"]["readback"].samples > 0`（IMU/rotctld
+  真实回读）才可报机械精度，见 `docs/limitations-register.md` L43；
 - **R7 真实射频发射**：未验证（无发射设备/授权，且套件设计为不发波）；
 - **人耳听感**：R3/R4 的音质与回放听感需操作者放行出声后手动验。
 

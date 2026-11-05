@@ -27,6 +27,10 @@ import os
 import sys
 from typing import Dict, List, Optional
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # 允许从 desktop/ 直接跑，也允许被 main_window import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -379,8 +383,9 @@ class ModulePanel(QWidget):
         try:
             from mbdsdr_ai.device_capabilities import summarize_device
             summary = summarize_device(d)
-        except Exception:
-            summary = "能力未知（能力表不可用）"
+        except Exception as e:
+            summary = f"能力未知（能力表不可用：{e}）"
+            logger.warning("设备能力摘要生成失败：%s", e)
         self.device_info.setText(f"{d.get('driver', '?')}\n{summary}")
 
     def _on_device_selected(self, idx: int) -> None:

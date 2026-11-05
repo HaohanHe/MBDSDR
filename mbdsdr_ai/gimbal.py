@@ -246,6 +246,9 @@ class GimbalController:
         self._rssi_provider: Optional[Callable[[], float]] = None
         # 是否拿到过真实姿态回读；没有则 (0,0) 只是占位，不能当"已对准"依据
         self._pose_valid = False
+        #: 本次姿态从哪来：imu / rotctld / ""（无回读）。上层据此区分
+        #: 「真实回读」与「假后端的指令回声」，禁止把两者混成一个误差字段。
+        self._pose_source = ""
 
     # ---- 后端管理 ----
     def use_manual(self) -> GimbalStatus:
@@ -289,6 +292,7 @@ class GimbalController:
                 pose = self._pose_provider()
                 self.status.current = pose
                 self._pose_valid = True
+                self._pose_source = "imu"
                 return pose
             except Exception:
                 pass
@@ -297,12 +301,14 @@ class GimbalController:
                 pose = self.rotctld.get_position()
                 self.status.current = pose
                 self._pose_valid = True
+                self._pose_source = "rotctld"
                 return pose
             except Exception:
                 pass
         # 本次读姿态失败 → 旧值可能已过期，必须撤销 pose_valid，
         # 否则上层会拿过期的"已对准"当真（假成功）。
         self._pose_valid = False
+        self._pose_source = ""
         return self.status.current or GimbalPose()
 
     # ---- 运动控制 ----
@@ -347,6 +353,8 @@ class GimbalController:
         result["el_error_deg"] = round(el_err, 1)
         # 没有真实姿态回读时 (0,0) 只是占位：绝不能报"已对准"（假成功）
         result["pose_valid"] = self._pose_valid
+        # 姿态来源随结果返回：imu / rotctld = 真实回读；"" = 无回读。
+        result["pose_source"] = self._pose_source if self._pose_valid else ""
         result["aligned"] = bool(cur.aligned(target)) if self._pose_valid else False
         if self._pose_valid:
             result["guidance"] = self._guidance_text(az_err, el_err)

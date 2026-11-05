@@ -74,10 +74,24 @@ class TestPointingErrorRecorder:
         from mbdsdr_ai.gimbal_follow import PointingErrorRecorder
         rec = PointingErrorRecorder()
         rec.record(truth_az=120.0, truth_el=20.0, cmd_az=121.0, cmd_el=20.0,
-                   pose_az=125.0, pose_el=22.0, elapsed_s=0.5)
+                   pose_az=125.0, pose_el=22.0, pose_source="rotctld",
+                   elapsed_s=0.5)
         stats = rec.stats()
         assert stats["pose_max_deg"] is not None
         assert stats["pose_max_deg"] > stats["cmd_max_deg"]
+        assert stats["pose_source"] == "readback"
+
+    def test_simulated_echo_never_counts_as_mechanical_error(self):
+        """假后端「实际指向 = 指令」：误差必须进 simulated 桶，不进 pose_*。"""
+        from mbdsdr_ai.gimbal_follow import PointingErrorRecorder
+        rec = PointingErrorRecorder()
+        rec.record(truth_az=120.0, truth_el=20.0, cmd_az=121.0, cmd_el=20.0,
+                   pose_az=121.0, pose_el=20.0, pose_source="simulated")
+        stats = rec.stats()
+        assert stats["pose_max_deg"] is None, "模拟回声不得产出机械精度读数"
+        assert stats["pose_samples"] == 0
+        assert stats["pose_source"] == "simulated"
+        assert stats["pose_error_by_source"]["simulated"]["samples"] == 1
 
     def test_no_pose_means_pose_stats_none(self):
         from mbdsdr_ai.gimbal_follow import PointingErrorRecorder
@@ -90,9 +104,14 @@ class TestPointingErrorRecorder:
 # 主窗口：模拟过境全程
 # ---------------------------------------------------------------------------
 class FakeGimbal:
-    """模拟云台：记录每条**绝对角**指令，姿态回读 = 指令角（理想执行）。"""
+    """**模拟**云台：记录每条绝对角指令；回读默认是「指令回声」（理想执行）。
 
-    def __init__(self, reply: str = "ok"):
+    pose_source="simulated" 明确标注这不是机械回读；只有传 rotctld/imu 才代表
+    真实回读，用于验证上报口径不会被模拟数据污染。
+    """
+
+    def __init__(self, reply: str = "ok", pose_source: str = "simulated",
+                 pose_offset=(0.0, 0.0)):
         self.status = SimpleNamespace(
             mode=SimpleNamespace(value="board_pwm"), connected=True,
             backend_info="fake board")
@@ -100,6 +119,8 @@ class FakeGimbal:
         self.pointed = []
         self.stopped = 0
         self.reply = reply
+        self.pose_source = pose_source
+        self.pose_offset = pose_offset
 
     def point_to_satellite(self, az, el):
         if self.reply == "timeout":
@@ -110,7 +131,9 @@ class FakeGimbal:
                     "error": "后端未连接"}
         self.pointed.append((az, el))
         return {"dispatched": True, "pose_valid": True,
-                "current_az": az, "current_el": el, "error": ""}
+                "current_az": az + self.pose_offset[0],
+                "current_el": el + self.pose_offset[1],
+                "pose_source": self.pose_source, "error": ""}
 
     def stop(self):
         self.stopped += 1
@@ -137,8 +160,8 @@ def mw():
     yield w
     try:
         w._disconnect()
-    except Exception:
-        pass
+    except Exception as e:  # 清理失败不掩盖主断言，但必须留证
+        print(f"模块清理：断连失败 {e!r}")
     w.close()
 
 
@@ -230,8 +253,31 @@ class TestTrackChainData:
         assert rep["cmd_mean_deg"] > 0.0
         assert rep["command_mode"] == "absolute_az_el"
         assert rep["deadband_deg"] == 2.0
+        src = rep["pose_error_by_source"]
+        assert src.get("simulated", {}).get("samples", 0) >= 5
+        assert rep["pose_max_deg"] is None, "模拟执行不得产出机械精度读数"
+        assert rep["pose_source_summary"]["mechanical_accuracy_claimable"] is False
+        assert "指令侧" in rep["pose_source_summary"]["note"]
         assert g.pointed[-1][0] == pytest.approx(170.0, abs=0.2), \
             "限速器每拍最多走 20°/s × 2s = 40°"
+
+    def test_real_readback_stats_are_separated_from_simulation(
+            self, mw, monkeypatch):
+        """真实回读（rotctld/IMU）才进 pose_*；机械偏差 2° 能被测到。"""
+        g = FakeGimbal(pose_source="rotctld", pose_offset=(2.0, 0.0))
+        _active_tracking(mw, monkeypatch, _pos(123.0, 30.0), g)
+        mw._on_sky_gimbal_follow_toggled(True)
+        mw._poll_satellite_track()
+        cyc = mw.last_gimbal_cycle()
+        assert cyc["pose_source"] == "rotctld"
+        rep = mw.gimbal_tracking_report()
+        assert rep["pose_samples"] == 1
+        # 30° 仰角下方位差 2° 的球面角距 = 2°·cos30°
+        assert rep["pose_max_deg"] == pytest.approx(
+            2.0 * math.cos(math.radians(30.0)), abs=0.08)
+        assert rep["pose_error_by_source"]["readback"]["samples"] == 1
+        assert rep["pose_source_summary"]["mechanical_accuracy_claimable"] is True
+        assert "真实回读" in rep["pose_source_summary"]["note"]
 
 
 class TestFailurePaths:
