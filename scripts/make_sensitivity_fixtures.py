@@ -265,12 +265,11 @@ def main() -> int:
         "honesty": "synthetic / NOT OTA",
         "generated_by": "scripts/make_sensitivity_fixtures.py",
         "regenerate": "python scripts/make_sensitivity_fixtures.py",
-        "bootstrap": ("本目录已随仓入库，clone 后即可读。当前 "
-                      "scripts/decode_sensitivity.py 的六个模式只用 "
-                      "tests/fixtures/decode_pipeline 与仓内编码器；本目录的 "
-                      "navtex/apt/wspr/lrpt 波形是给灵敏度扩模式预留的合成用例，"
-                      "尚未被脚本消费。需要从零重建时，在仓库根依次执行 "
-                      "`python scripts/make_sensitivity_fixtures.py`、"
+        "bootstrap": ("本目录已随仓入库，clone 后即可读。"
+                      "scripts/decode_sensitivity.py 的 pocsag/acars/navtex/apt/"
+                      "ft4/wspr/lrpt 七个模式直接读本目录波形；ais/adsb/aprs 复用 "
+                      "tests/fixtures/decode_pipeline。需要从零重建时，在仓库根"
+                      "依次执行 `python scripts/make_sensitivity_fixtures.py`、"
                       "`python scripts/decode_sensitivity.py`。"),
         "date": TODAY,
         "note": ("全部为仓内编码器合成的 clean 信号；没有任何一条是空中实录。"
