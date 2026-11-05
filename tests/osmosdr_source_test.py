@@ -130,7 +130,7 @@ class TestSampleRateFreqRanges(unittest.TestCase):
     def test_rtl_sample_rates(self):
         self.assertEqual(len(osmo.RTL_SAMPLE_RATES_HZ), 9)
         self.assertIn(1_024_000.0, osmo.RTL_SAMPLE_RATES_HZ)
-        self.assertEqual(osmo.RTL_DEFAULT_SAMPLE_RATE_HZ, 1_024_000.0)
+        self.assertEqual(osmo.RTL_DEFAULT_SAMPLE_RATE_HZ, 2_400_000.0)
 
     def test_rtl_tuner_freq_ranges(self):
         # R820T 24MHz..1766MHz

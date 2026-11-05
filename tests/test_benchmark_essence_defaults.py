@@ -233,7 +233,7 @@ def test_backend_subclass_sample_rates():
         RTLSDRBackend, HackRFBackend, USRPBackend, PlutoSDRBackend,
     )
     rtl = RTLSDRBackend(device_index=0)
-    assert rtl.status.sample_rate_hz == 2_048_000.0
+    assert rtl.status.sample_rate_hz == 2_400_000.0
 
     hackrf = HackRFBackend()
     assert hackrf.status.sample_rate_hz == 8_000_000.0

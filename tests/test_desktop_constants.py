@@ -38,7 +38,7 @@ import panel_registry  # noqa: E402
 
 KERNEL_RATE_MOD = "mbdsdr_ai.sdr_backend"
 #: 项目统一基准采样率（与内核常量逐字一致；此处是钉扎用的期望值）
-BASELINE_RATE_HZ = 2_048_000
+BASELINE_RATE_HZ = 2_400_000
 
 
 def _load_constants_without_kernel():

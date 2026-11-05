@@ -46,6 +46,7 @@ from .sdr_backend import (
     SDRDevice,
     _ThreadedRingReader,
     RTLSDRBackend,
+    DEFAULT_SAMPLE_RATE_HZ,
 )
 from .link_state import (
     DataHealthTracker,
@@ -553,8 +554,9 @@ class RtlTcpBackend(SDRBackend):
             supports_tx=False,
         )
         super().__init__(device)
-        # 默认采样率 2.048M（对齐 RTLSDRBackend.DEFAULT_SAMPLE_RATE，1.024M 整数倍）
-        self.status.sample_rate_hz = 2_048_000.0
+        # 默认采样率走项目统一首选值（2.4 MS/s），不在这里另写一个字面量。
+        # 远端服务端若不支持该档，握手后按其能力回落，status 回报实际值。
+        self.status.sample_rate_hz = float(DEFAULT_SAMPLE_RATE_HZ)
         self._host = host
         self._port = int(port)
         self._ppm = int(ppm)

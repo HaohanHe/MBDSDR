@@ -102,10 +102,12 @@ def parse_rtl_tcp_env(value: str, default_port: int = 1234
     return out
 
 # 项目统一默认采样率（Hz）。
-# 这是项目有意的选择：2.048 MS/s 是 1.024M 的整数倍，便于 ADS-B / 数字链路抽取；
-# 注意 SDR++ rtl_sdr_source 新设备默认其实是 2.4M（main.cpp:202），但本项目按
-# 设计基准统一选 2.048M。desktop / agent 等上层一律引用本常量，不要再写裸字面量。
-DEFAULT_SAMPLE_RATE_HZ = 2_048_000
+# 产品口径（2026-11-05 裁定）：取 RTL-SDR 类上限常见值 2.4 MS/s（SDR++ 新设备
+# 默认也是 2.4M，main.cpp:202）。"默认"只是**首选**，不是保证：设备若不支持该档，
+# 由 nearest_sample_rate() / 各后端能力表回落到最接近的支持值，并把**实际生效值**
+# 如实写进 SDRStatus.sample_rate_hz。desktop / agent 等上层一律引用本常量，
+# 不要再写裸字面量；数字链路（ADS-B 等）自己声明所需采样率，不依赖此默认。
+DEFAULT_SAMPLE_RATE_HZ = 2_400_000
 
 # 实时接收链 + 声卡输出（可选依赖，导入失败时音频路径安全降级，不崩）
 try:
@@ -1369,9 +1371,9 @@ class RTLSDRBackend(SDRBackend):
         3_200_000,    # main.cpp:38
     ]
 
-    # 默认采样率：对齐项目统一基准 2.048 MS/s（模块级 DEFAULT_SAMPLE_RATE_HZ）。
-    # SDR++ main.cpp:202 新设备默认其实是 2.4M，但本项目按设计选 2.048M——
-    # 1.024M 的整数倍，便于 ADS-B/数字链路抽取。类属性保留以向后兼容。
+    # 默认采样率：项目统一首选 2.4 MS/s（模块级 DEFAULT_SAMPLE_RATE_HZ）。
+    # RTL 全系支持 2.4M 档，通常不做回落；若设备能力表不含该档，connect()
+    # 经 nearest_sample_rate() 取最接近支持值并回报实际值。类属性保留以兼容。
     DEFAULT_SAMPLE_RATE = DEFAULT_SAMPLE_RATE_HZ
 
     @classmethod

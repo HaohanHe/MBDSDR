@@ -303,13 +303,13 @@ class TestTC6ConnectAppliesHardwareSettings:
         fake = backend._sdr
         assert isinstance(fake, FakeRtlSdr)
 
-        # ── 1) 采样率：必须下发，且值为 2.048M（SDR++ 离散档） ──
+        # ── 1) 采样率：必须下发，且值为项目首选 2.4M（SDR++ 离散档） ──
         sr_calls = fake.calls_named("sample_rate")
         assert len(sr_calls) >= 1, \
             "connect() 后应对设备调用 set_sample_rate；call_history 中无 sample_rate 写入"
         last_sr = sr_calls[-1][0][0]
-        assert last_sr == pytest.approx(2_048_000.0), \
-            f"采样率应下发 2.048M，实际 {last_sr}"
+        assert last_sr == pytest.approx(2_400_000.0), \
+            f"采样率应下发 2.4M，实际 {last_sr}"
 
         # ── 2) 中心频率：必须下发，且等于默认 98M（不是 0，不是出厂残留） ──
         cf_calls = fake.calls_named("center_freq")

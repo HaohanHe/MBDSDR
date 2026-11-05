@@ -263,7 +263,9 @@ RTL_SAMPLE_RATES_HZ: Tuple[float, ...] = (
     250_000.0, 1_000_000.0, 1_024_000.0, 1_800_000.0, 1_920_000.0,
     2_000_000.0, 2_048_000.0, 2_400_000.0, 2_560_000.0,
 )
-RTL_DEFAULT_SAMPLE_RATE_HZ = 1_024_000.0
+# 与 mbdsdr_ai.sdr_backend.DEFAULT_SAMPLE_RATE_HZ 对齐（2.4 MS/s）。
+# 该档在 RTL_SAMPLE_RATES_HZ 内；旧值 1.024M 是本模块的历史遗留默认。
+RTL_DEFAULT_SAMPLE_RATE_HZ = 2_400_000.0
 RTL_DEFAULT_IF_GAIN_DB = 24.0
 
 #: 各调谐器的标称调谐频率范围。

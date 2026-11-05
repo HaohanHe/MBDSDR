@@ -245,7 +245,7 @@ def test_backend_full_flow():
         backend = RtlTcpBackend("127.0.0.1", port=srv.port, ppm=0)
         assert backend.connect() is True, f"connect 失败: {backend.status.error}"
         assert backend.status.connected is True
-        assert backend.status.sample_rate_hz == pytest.approx(2_048_000.0)
+        assert backend.status.sample_rate_hz == pytest.approx(2_400_000.0)
 
         # setters 走基类封装（连接检查 + 范围钳位 + 失败回滚），都应成功
         assert backend.set_frequency(100_000_000.0) is True
