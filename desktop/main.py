@@ -117,6 +117,107 @@ def _probe_import(name: str) -> bool:
         return False
 
 
+#: 启动自检的**必需项**（模块探针, 人话名称, 缺了会怎样, 怎么修）。
+#: 只列「缺了应用就不能正常工作」的项；可选依赖在 _OPTIONAL_DEPENDENCIES 里只记日志。
+#: 打包版把 scipy 私有子树以 .pyc 落盘（MBDSDR_NOARCHIVE=1），删掉
+#: ``_internal/scipy/_external`` 不会让 ``import scipy`` 失败，却在运行期懒加载时
+#: 报 ModuleNotFoundError——所以必须逐个探针，不能等 ImportError 出口。
+_REQUIRED_DEPENDENCIES = [
+    ("numpy", "NumPy 数值运算库",
+     "所有 DSP / 频谱 / 解调计算都不可用",
+     "pip install numpy（打包版请重新解压完整安装包）"),
+    ("numpy._core._multiarray_umath", "NumPy 核心二进制（_multiarray_umath）",
+     "读取 IQ 样点或做 FFT 时直接崩溃",
+     "重装完整的 numpy wheel；打包版重新解压安装包"),
+    ("scipy", "SciPy 科学计算库",
+     "滤波 / 重采样 / 频谱整条链路不可用",
+     "pip install scipy（打包版请重新解压完整安装包）"),
+    ("scipy._external.array_api_compat.common",
+     "SciPy 私有子树 _external（完整性探针）",
+     "运行期懒加载 scipy 公共子模块时报 ModuleNotFoundError",
+     "安装包解压不完整：重新解压/重装完整包，不要删 _internal 里的文件"),
+    ("scipy._external.array_api_compat.numpy.fft",
+     "SciPy array API 兼容层 numpy.fft（完整性探针）",
+     "FFT / 频谱计算在运行期懒加载时报 ModuleNotFoundError",
+     "安装包解压不完整：重新解压/重装完整包，不要删 _internal 里的文件"),
+    ("scipy.signal", "SciPy 信号处理子包",
+     "滤波器、解调链、重采样不可用",
+     "重装 scipy（pip install --force-reinstall scipy）"),
+    ("PySide6.QtCore", "PySide6 核心二进制", "界面完全无法创建",
+     "pip install PySide6"),
+    ("PySide6.QtGui", "PySide6 GUI 二进制", "界面完全无法创建",
+     "pip install PySide6"),
+    ("PySide6.QtWidgets", "PySide6 控件二进制", "界面完全无法创建",
+     "pip install PySide6"),
+]
+
+#: 必需数据件（相对仓库/安装包的路径, 人话名称, 缺了会怎样, 怎么修）。
+_REQUIRED_DATA_FILES = [
+    ("mbdsdr_ai/data/dso_catalog.json", "深空目标目录 dso_catalog.json",
+     "「深空」页没有可选目标，DSO 观测计划不可用",
+     "重新解压完整安装包（数据文件随包分发，不能只拷 exe）"),
+]
+
+#: 可选依赖：缺失只写日志，不拦启动（缺了只关掉对应功能，不弹窗）。
+_OPTIONAL_DEPENDENCIES = [
+    ("sgp4", "卫星过境预测（SGP4）", "卫星跟踪/过境列表不可用"),
+    ("skyfield", "卫星星历（skyfield）", "卫星跟踪/过境列表不可用"),
+    ("pymap3d", "坐标换算（pymap3d）", "观测站坐标/方位角换算不可用"),
+    ("serial", "串口设备（pyserial）", "串口/Arduino 类硬件不可用"),
+    ("sounddevice", "音频播放（sounddevice）", "无法出声；界面与频谱不受影响"),
+    ("PIL", "图像处理（Pillow）", "部分图像资源/导出不可用"),
+    ("requests", "HTTP 请求（requests）", "在线更新/下载不可用"),
+    ("websockets", "WebSocket 客户端", "MCP/WebSocket 连接不可用"),
+]
+
+
+def _required_data_path(rel: str) -> str:
+    """必需数据件的候选位置：打包 _MEIPASS 优先，其次源码仓库根目录。"""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, rel))
+    candidates.append(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), rel))
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[-1]
+
+
+def _startup_dependency_problems() -> list[str]:
+    """启动自检：返回必需项缺失清单（空列表 = 可正常启动）。
+
+    必需项缺失 → 调用方中止启动并弹「MBDSDR 启动失败 + 缺什么 + 怎么修」，
+    绝不照常开一个半残窗口；可选依赖缺失只写日志。
+    """
+    problems: list[str] = []
+    for module, name, consequence, fix in _REQUIRED_DEPENDENCIES:
+        if not _probe_import(module):
+            problems.append(
+                f"• {name}（{module}）\n"
+                f"  缺了会怎样：{consequence}\n"
+                f"  怎么修：{fix}")
+    for rel, name, consequence, fix in _REQUIRED_DATA_FILES:
+        if not os.path.exists(_required_data_path(rel)):
+            problems.append(
+                f"• {name}（{rel}）\n"
+                f"  缺了会怎样：{consequence}\n"
+                f"  怎么修：{fix}")
+
+    missing_optional = [
+        f"{name}（{module}）：{consequence}"
+        for module, name, consequence in _OPTIONAL_DEPENDENCIES
+        if not _probe_import(module)
+    ]
+    if missing_optional:
+        line = "[selfcheck] 可选依赖缺失（不拦启动）：" + "；".join(missing_optional)
+        _append_startup_log(line)
+        print(line, file=sys.stderr)
+    return problems
+
+
+
 def _packaging_verdict(missing: str) -> "tuple[str, str]":
     """返回 (判定, 子树)：defect=整棵子树缺失；incomplete=只缺单文件；unknown=判不了。"""
     for subtree, siblings in _PACKAGING_SIBLINGS.items():
@@ -396,6 +497,18 @@ def main():
 
     # 启动自检：把 PyInstaller 静态分析易漏的私有模块逐个导入并记日志。
     _run_import_smoke()
+
+    # 启动自检（硬门槛）：必需依赖/数据件逐项探针。缺件立即中止并弹
+    # 「MBDSDR 启动失败 + 缺什么 + 怎么修」，绝不照常开一个半残窗口。
+    # 覆盖「import 成功、运行期懒加载才崩」的场景（如 _internal/scipy/_external 被删）。
+    dep_problems = _startup_dependency_problems()
+    if dep_problems:
+        _report_startup_failure(
+            "启动自检失败：缺少必需组件（已中止启动）",
+            "下面这些是应用正常工作的必需项，缺一项都无法继续：\n\n"
+            + "\n\n".join(dep_problems)
+            + "\n\n请按每项的「怎么修」处理后重新启动。")
+        return 3
 
     # 高 DPI 支持
     QApplication.setHighDpiScaleFactorRoundingPolicy(
