@@ -384,24 +384,34 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
 | 天文金标准 | 24 例 | `celestial_geometry.py` | 文档无声明（仅自动报告 `VERIFY-REPORT.md:19`） |
 
 **产物是否被手改**：`git log -p` 逐提交看，产物变更只随生成器或输入变化。
-`0055dddb` 入库；`16f075f3` 误夹带了一份**落后于输入的旧产物**
-（`generatedAt` 00:42:04、attribution 缺 supplement 段），`a5d062e8` 已撤回。
-未发现「只改产物、不改脚本/输入」的手改；`16f075f3` 那类「产物落后于输入」
-正是下面这条断言要拦的形态。
+未发现「只改产物、不改脚本/输入」的手改。
 
-**长期断言（可复跑，不写死 JSON）**：按 `run_all.py:27-31` 重跑四个生成器后，
-产物与重跑结果比对**只允许三类易变字段变化**：`repo-facts.json` 的
-`generatedAt` 与 `repo.head`、`sky-catalog.json` 的 `meta.generatedAt`；
-其余字段与文本必须零差异（它们是生成时刻与基线戳，不是数据）。
-2026-11-06 实测 10 个输出文件（四个 JSON + `src/05-repo-facts.js`、
-`src/12-sky-catalog.js`、`src/13-sat-tracks.js`、`docs/09-repo-alignment.md`、
-`docs/10-sky-catalog.md`、`data/hygdata_v41.sha256`）除上述字段外全部一致；
-`sat-tracks.json` 与 `astro-golden.json` 无时间戳，字节级一致。
+**单独记一条事故形态**：`16f075f3` 曾把一份**落后于输入的旧产物**入库
+（`generatedAt` 00:42:04、attribution 缺 supplement 段），`a5d062e8` 已撤回。
+「产物落后于输入」是生成物最容易复发的事故：脚本没改、输入改了、产物忘了重跑，
+常规代码走查看不出来，只有重跑比对能发现。
+
+**长期守卫（`--check`，返回码非 0 即漂移）**：
+
+```powershell
+python web/product/tests/verify_build_json.py --check
+```
+
+脚本按 sha256 备份生成器会写的 10 个输出 → 重跑四个生成器（与
+`run_all.py:27-31` 同一条链）→ 把豁免字段替换为占位符后**逐字节比对** →
+无论成败都按原字节恢复工作区。豁免字段只有：`repo-facts.json` 的
+`generatedAt` / `repo.head`、`sky-catalog.json` 的 `meta.generatedAt`，
+以及自动生成文档里的「生成时间 / 仓库基线」（同一戳的文本形态）。
+返回码 `0` = 一致，`1` = 生成器失败或漂移，`2` = 备份/恢复失败；
+**不联网**，星表读本地 `data/hygdata_v41.csv`。
+2026-11-06 实测：正向 10/10 一致（`sat-tracks.json` 与 `astro-golden.json`
+无时间戳，字节级）；手工往 `sat-tracks.json` 注入一个空格后返回 1 并打印
+DRIFT；两次运行后工作区 sha256 均回到原值。
 `tests/verify_product.py` 另钉内容红线：`starCount>10000`、HYG 许可/SHA、
 `notVerified` 条数、`satCount`/`count` 下限、`caseCount≥6` 且事实源为
-`celestial_geometry.py`。审计时 `build/astro-golden.json` 与
-`build/gen_astro_golden.py` 仍是工作区新增（HEAD 未跟踪），入库前这条链在
-CI 里不完整。
+`celestial_geometry.py`。`build/astro-golden.json` 与
+`build/gen_astro_golden.py` 已作为同一笔提交 `f4ef0d13` 入库（两者必须同进
+同出，缺一复现链断裂），入库后重跑产物字节一致。
 
 ---
 
@@ -431,10 +441,7 @@ python scripts/check_data_licenses.py --probe
 python -m pytest tests/test_data_licenses.py -q
 # 3a) 帧布局哨兵口径 + 链路同频并列
 python -m pytest mbdsdr_ai/tests/test_sat_profile.py mbdsdr_ai/tests/test_sat_links.py -q
-# 3b) Web 产物复现：重跑四个生成器，git diff 只应剩 generatedAt / repo.head
-python web/product/build/sync_from_repo.py
-python web/product/build/sync_sky_catalog.py
-python web/product/build/sync_sat_tracks.py
-python web/product/build/gen_astro_golden.py
+# 3b) Web 产物复现：重跑生成器，豁免 generatedAt / repo.head 后逐字节比对
+python web/product/tests/verify_build_json.py --check
 git diff --stat -- web/product/build
 ```
