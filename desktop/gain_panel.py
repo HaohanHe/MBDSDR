@@ -117,6 +117,9 @@ class GainPanel(QWidget):
     """
 
     stage_gain_changed = Signal(str, float)
+    #: 分档增益没落到硬件时发出人话原因（上层必须把它变成可见失败，
+    #: 绝不能把「滑杆动了」当成「增益已生效」）。
+    stage_gain_failed = Signal(str)
     agc_changed = Signal(bool)
     # 向上层 re-emit 原始滑杆值（logical, db），供主窗口同步后端/状态栏。
     value_changed = Signal(str, float)
@@ -206,16 +209,21 @@ class GainPanel(QWidget):
 
     # ------------------------------------------------------------------ 槽
     def _on_stage_changed(self, logical: str, db: float):
-        if self._stager is not None:
-            try:
-                if logical == "LNA":
-                    self._stager.set_lna(db)
-                elif logical == "Mixer":
-                    self._stager.set_mixer(db)
-                elif logical == "VGA":
-                    self._stager.set_vga(db)
-            except Exception:  # noqa: BLE001
-                pass
+        if self._stager is None:
+            self.stage_gain_failed.emit(
+                f"分档增益未生效：设备未提供分档增益（{logical} {db:.1f} dB 未下发）")
+            return
+        try:
+            if logical == "LNA":
+                self._stager.set_lna(db)
+            elif logical == "Mixer":
+                self._stager.set_mixer(db)
+            elif logical == "VGA":
+                self._stager.set_vga(db)
+        except Exception as e:  # noqa: BLE001 - 失败必须上报，不许当成功
+            self.stage_gain_failed.emit(
+                f"分档增益未生效（{logical} {db:.1f} dB）：{e}")
+            return
         self.stage_gain_changed.emit(logical, db)
         self.value_changed.emit(logical, db)
         self._update_total()

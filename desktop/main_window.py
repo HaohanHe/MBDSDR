@@ -5191,25 +5191,35 @@ class MainWindow(QMainWindow):
 
     @Slot(int)
     def _on_ppm_changed(self, ppm: int):
-        """控制面板 PPM 校正 → 后端 set_ppm（RTL-SDR 晶振频偏）。"""
-        if self._active_sdr_backend is None:
+        """控制面板 PPM 校正 → 后端 set_ppm（RTL-SDR 晶振频偏）。
+
+        显式 False 与异常同等算失败：只看异常会把「设备拒绝该 PPM」装成成功。
+        """
+        backend = self._active_sdr_backend
+        if backend is None:
             return
-        try:
-            if hasattr(self._active_sdr_backend, "set_ppm"):
-                self._active_sdr_backend.set_ppm(int(ppm))
-        except Exception as e:
-            self.statusBar().showMessage(f"PPM 设置失败: {e}", MSG_NORMAL)
+        set_ppm = getattr(backend, "set_ppm", None)
+        if not callable(set_ppm):
+            self.statusBar().showMessage(
+                "PPM 未下发：当前后端不支持 PPM 校正", MSG_IMPORTANT)
+            return
+        self._apply_hw_action("设置 PPM", lambda: set_ppm(int(ppm)))
 
     @Slot(bool)
     def _on_offset_tuning_changed(self, enabled: bool):
-        """控制面板 Offset Tuning 开关 → 后端 set_offset_tuning（直流抵消）。"""
-        if self._active_sdr_backend is None:
+        """控制面板 Offset Tuning 开关 → 后端 set_offset_tuning（直流抵消）。
+
+        显式 False 与异常同等算失败（见 ``_apply_hw_action``）。
+        """
+        backend = self._active_sdr_backend
+        if backend is None:
             return
-        try:
-            if hasattr(self._active_sdr_backend, "set_offset_tuning"):
-                self._active_sdr_backend.set_offset_tuning(bool(enabled))
-        except Exception as e:
-            self.statusBar().showMessage(f"Offset tuning 设置失败: {e}", MSG_NORMAL)
+        set_ot = getattr(backend, "set_offset_tuning", None)
+        if not callable(set_ot):
+            self.statusBar().showMessage(
+                "Offset tuning 未下发：当前后端不支持该能力", MSG_IMPORTANT)
+            return
+        self._apply_hw_action("Offset tuning", lambda: set_ot(bool(enabled)))
 
     @Slot(float)
     def _on_vfo_bandwidth_changed(self, bw_hz: float) -> bool:
@@ -7311,8 +7321,9 @@ class MainWindow(QMainWindow):
         if GainPanel is not None:
             try:
                 self.gain_panel = GainPanel()
-                self.gain_panel.stage_gain_changed.connect(
-                    self._on_stage_gain_changed)
+                # 分档增益失败必须可见：滑杆动了不等于硬件已生效
+                self.gain_panel.stage_gain_failed.connect(
+                    self._on_stage_gain_failed)
                 self.gain_panel.agc_changed.connect(self._on_agc_changed)
                 # —— 孤儿接通：增益滑杆实时值 → 同步后端/状态栏 ——
                 self.gain_panel.value_changed.connect(self._on_gain_value_changed)
@@ -7537,17 +7548,12 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _on_stage_gain_changed(self, logical: str, db: float):
-        """分段增益面板改某档 → 兜底走后端 set_gain（总增益）。"""
+    def _on_stage_gain_failed(self, reason: str) -> None:
+        """分档增益未落到硬件：状态栏说清原因，并把读数拉回设备真实值。"""
+        self.statusBar().showMessage(str(reason), MSG_IMPORTANT)
         be = self._active_sdr_backend
-        if be is None:
-            return
-        try:
-            # GainPanel 已直接调 GainStager；这里兜底同步总增益显示
-            if hasattr(be, "set_gain"):
-                pass  # 分档模式下总增益由 GainStager 管
-        except Exception:
-            pass
+        if be is not None:
+            self._show_real_gain(be)
 
     def _on_panel_device_connect(self, dev: dict):
         """设备面板「连接」按钮：构造后端并走通用连接流程。"""
