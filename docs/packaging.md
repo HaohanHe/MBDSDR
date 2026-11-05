@@ -576,7 +576,7 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 | 出现处 | 派生方式 | 判定 |
 |---|---|---|
 | `mbdsdr_ai/VERSION` | 唯一手抄（`0.2.0`） | canonical |
-| `cpp/CMakeLists.txt` | `file(READ .../mbdsdr_ai/VERSION)` → `project(... VERSION ${MBDSDR_VERSION})` | PASS |
+| `cpp/CMakeLists.txt` | `file(READ .../mbdsdr_ai/VERSION)` → 数字段交给 `project(... VERSION ${MBDSDR_VERSION_NUMERIC})`，完整串进 `message(STATUS)` | PASS |
 | `pyproject.toml` | `dynamic = ["version"]` + `version = {file = "mbdsdr_ai/VERSION"}` | PASS |
 | `mbdsdr_ai/version.py` | 读同目录 `VERSION`，导出 `__version__` | PASS |
 | `mbdsdr_ai/__init__.py`、`core/__init__.py` | `from (..).version import __version__` | PASS |
@@ -591,10 +591,32 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 发现即 FAIL（`desktop/main.py` 的 `192.168.4.1` 这类 IP 被正则排除）。README
 首行作为面向读者的版本声明，与 canonical 比对后放行。
 
+**后缀（预发布）口径**：`VERSION` 允许写 `x.y.z` 或 `x.y.z-<后缀>`（发布构建仍应
+用纯 `x.y.z`）。CMake `project(VERSION ...)` 只接受数字段，因此 CMake 把数字前缀交给
+`project()`、完整串保留在 `MBDSDR_VERSION` 并 `message(STATUS)` 打出；PyInstaller
+`VSVersionInfo.filevers/prodvers` 只收 4 个整数，数字段取版本开头，`FileVersion`/
+`ProductVersion` 字符串字段保留完整串；其余派生点原样透传。
+
+证伪记录（干净 checkout `d:\mbdsdr\.tmp\verify-tree`，`VERSION` 临时改
+`0.2.1-verify`，验完还原、`git status` 干净）：
+
+| 派生点 | 实测值 |
+|---|---|
+| CMake `message(STATUS)` / `project()` 数字段 | `0.2.1-verify` / `0.2.1` |
+| `pyproject.toml`（setuptools `read_configuration(expand=True)`） | `0.2.1-verify` |
+| `version.py` / `mbdsdr_ai.__version__` / `core.__version__` | `0.2.1-verify` |
+| `QApplication.applicationVersion()`（离屏回读） | `0.2.1-verify` |
+| `_show_about` 渲染文本 | `版本 v0.2.1-verify` |
+| spec `VSVersionInfo`（stub 求值） | filevers=`(0,2,1,0)`、FileVersion 串=`0.2.1-verify` |
+
+首轮证伪曾实测到两处硬失败（已修）：`project(VERSION 0.2.1-verify)` 直接
+configure 失败（`VERSION "0.2.1-verify" format invalid`）；spec 用 `int(p)` 拆段
+在 `1-verify` 上抛 `ValueError`。这两处正是“单一真值源”最容易被后缀打穿的地方。
+
 复跑：
 
 ```
-python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist13
+python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist14
 ```
 
 ### 9.2 依赖 pin 存在性 — PASS（差集①清空，差集② 29 个全部归因）

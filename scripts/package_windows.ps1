@@ -49,12 +49,13 @@ if (-not (Test-Path $windeployqt)) {
 $buildPath = "$MinGWBin;$(Join-Path $QtRoot 'bin');$env:PATH"
 $env:PATH = $buildPath
 
-# ---- 版本号：解析 cpp/CMakeLists.txt 的 project(mbdsdr VERSION x.y.z) ----
-$cmakeLists = Get-Content (Join-Path $cpp "CMakeLists.txt") -Raw
-if ($cmakeLists -notmatch 'project\(mbdsdr\s+VERSION\s+([0-9.]+)') {
-    throw "无法从 CMakeLists.txt 解析版本号"
+# ---- 版本号：唯一事实源 mbdsdr_ai/VERSION（CMake/pyproject/spec 同源派生） ----
+$versionFile = Join-Path $repo "mbdsdr_ai\VERSION"
+if (-not (Test-Path $versionFile)) { throw "缺少版本单一事实源：$versionFile" }
+$ver = (Get-Content $versionFile -Raw).Trim()
+if ($ver -notmatch '^\d+\.\d+\.\d+') {
+    throw "mbdsdr_ai/VERSION 内容不是 x.y.z 开头：$ver"
 }
-$ver = $Matches[1]
 Write-Host "== MBDSDR $ver Windows 便携包 =="
 
 # ---- RTL-SDR 校验（打包前置）：必须来自 RTLSDR=FOUND 的构建树 ----

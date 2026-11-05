@@ -28,9 +28,15 @@ here = os.path.abspath(os.path.dirname(SPEC))   # desktop/
 root = os.path.dirname(here)                    # 仓库根（mbdsdr_ai 包所在）
 
 # 版本单一事实源：mbdsdr_ai/VERSION（与 CMake / pyproject / Python 同源）
+import re as _re
 with open(os.path.join(root, 'mbdsdr_ai', 'VERSION'), encoding='utf-8') as _fh:
     _version = _fh.read().strip()
-_parts = [int(p) for p in (_version.split('.') + ['0', '0', '0', '0'])[:4]]
+# VSVersionInfo 的 filevers/prodvers 只收 4 个整数：预发布后缀（x.y.z-verify 之类）
+# 只保留在字符串字段里，数字段取版本开头。
+_m = _re.match(r'(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?', _version)
+if not _m:
+    raise SystemExit(f"mbdsdr_ai/VERSION 不是版本号：{_version!r}")
+_parts = [int(part) if part else 0 for part in _m.groups()]
 
 # --- 隐藏导入：避免 PyInstaller 模块图漏掉动态加载的子模块 ---
 hiddenimports = []

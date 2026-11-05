@@ -2,7 +2,15 @@ cmake_minimum_required(VERSION 3.16)
 # 版本单一事实源：mbdsdr_ai/VERSION（Python/打包/EXE 版本资源同源派生）
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../mbdsdr_ai/VERSION" MBDSDR_VERSION)
 string(STRIP "${MBDSDR_VERSION}" MBDSDR_VERSION)
-project(mbdsdr VERSION ${MBDSDR_VERSION} LANGUAGES CXX)
+# project(VERSION) 只接受数字段（major[.minor[.patch[.tweak]]]）。预发布后缀
+# （如 x.y.z-verify）留在 MBDSDR_VERSION 里供显示/打包，交给 project() 的只是
+# 数字前缀；后缀写进 project() 会直接 configure 失败。
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" MBDSDR_VERSION_NUMERIC "${MBDSDR_VERSION}")
+if(NOT MBDSDR_VERSION_NUMERIC)
+    message(FATAL_ERROR "mbdsdr_ai/VERSION 不是 x.y.z 开头：${MBDSDR_VERSION}")
+endif()
+project(mbdsdr VERSION ${MBDSDR_VERSION_NUMERIC} LANGUAGES CXX)
+message(STATUS "MBDSDR_VERSION=${MBDSDR_VERSION} (project VERSION ${MBDSDR_VERSION_NUMERIC})")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
