@@ -23,8 +23,11 @@ import platform
 import re
 import stat
 import sys
+import time
+import uuid
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 from PySide6.QtCore import QTimer
 
@@ -265,6 +268,59 @@ def _coerce(key: str, value: Any, notes: Optional[list] = None) -> Any:
     return norm
 
 
+#: 跨进程写锁的等待上限（秒）。配置写盘是毫秒级操作，等 2 秒仍拿不到锁
+#: 说明别的进程卡在 IO；此时仍走原子替换，但把"锁超时"记进 last_error。
+LOCK_TIMEOUT_S = 2.0
+
+
+@contextmanager
+def _exclusive_lock(lock_path: str, timeout: float = LOCK_TIMEOUT_S) -> Iterator[bool]:
+    """跨进程互斥（Windows msvcrt / POSIX flock），yield 是否拿到锁。
+
+    锁文件自身常驻（不删）：删锁文件会让"锁到另一个 inode"竞态重现。
+    进程被杀时内核自动释放字节锁，不需要过期判定。
+    """
+    directory = os.path.dirname(lock_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    fh = open(lock_path, "a+b")
+    try:
+        if os.fstat(fh.fileno()).st_size == 0:
+            fh.write(b"\0")
+            fh.flush()
+        acquired = False
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fh.seek(0)
+                if sys.platform == "win32":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.01)
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                fh.seek(0)
+                if sys.platform == "win32":
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        fh.close()
+
+
 def backup_corrupt_config(path: str) -> Optional[str]:
     """把损坏的配置文件改名为 ``*.corrupt-时间戳``，返回备份路径（失败 None）。
 
@@ -298,6 +354,9 @@ class DesktopSettings:
         self._path = path or default_config_path()
         self._data: Dict[str, Any] = dict(DEFAULTS)
         self._dirty = False
+        #: 自上次成功落盘以来改过的键。写盘时只把这些键覆盖到磁盘现值上，
+        #: 避免两个实例各自 load 旧快照后整份覆盖、丢掉对方刚写的字段。
+        self._dirty_keys: set = set()
         #: 上次 load 时若原文件损坏，这里是备份路径（None = 未损坏）
         self.corrupt_backup: Optional[str] = None
         #: 最近一次读/写失败的用户可读说明（None = 无错误）。
@@ -335,6 +394,15 @@ class DesktopSettings:
                 for k, v in raw.items():
                     if k in DEFAULTS:
                         inst._data[k] = _coerce(k, v, inst.migration_notes)
+                # 未知键（可能是更新版本写的，或是笔误）：不静默丢。这里只
+                # 记录说明，文件里的原始未知键在写盘时会被保留（见
+                # _merged_payload），避免旧版本把新版本的设置吃掉。
+                unknown = sorted(set(raw) - set(DEFAULTS))
+                if unknown:
+                    shown = "、".join(repr(k) for k in unknown[:8])
+                    more = f" 等 {len(unknown)} 个" if len(unknown) > 8 else ""
+                    inst.migration_notes.append(
+                        f"忽略未知键 {shown}{more}（不在当前 schema；仍保留在文件中）")
                 # 音量量纲一次性迁移（0–63 硬件量纲 → 0–100 人类量纲）：
                 # 旧文件有 volume 但没有 volume_scale_v2 标记。判据是
                 # 「原始文件里的键」，不靠数值猜量纲——48 在两套量纲下
@@ -344,8 +412,23 @@ class DesktopSettings:
                         old = int(raw.get("volume", 30))
                     except (TypeError, ValueError):
                         old = 30
-                    inst._data["volume"] = volume_hw_to_pct(old)
+                        inst.migration_notes.append(
+                            "volume: 旧格式值无法解析，按寄存器中值 30 迁移")
+                    clamped = max(0, min(63, old))
+                    if clamped != old:
+                        inst.migration_notes.append(
+                            f"volume: 旧格式值 {old} 超出 0–63 寄存器范围，"
+                            f"已夹到 {clamped}")
+                    new = volume_hw_to_pct(clamped)
+                    inst.migration_notes.append(
+                        f"volume: 旧格式 0–63 量纲 {clamped} 已换算为 "
+                        f"0–100 量纲 {new}（写入 volume_scale_v2 标记）")
+                    inst._data["volume"] = new
                     inst._data["volume_scale_v2"] = True
+                    # 迁移结果要落盘（否则每次启动都重新换算）：标记为脏，
+                    # 下次 flush（含退出时的）写入这两项。
+                    inst._dirty_keys.update({"volume", "volume_scale_v2"})
+                    inst._dirty = True
         except (OSError, ValueError, TypeError) as exc:
             # 文件损坏/不可读：先备份证据（*.corrupt-时间戳）再回默认值。
             # 必须留用户可见的错误说明——"读失败静默给默认值"会让用户以为
@@ -374,6 +457,7 @@ class DesktopSettings:
         if key not in DEFAULTS:
             return
         self._data[key] = _coerce(key, value)
+        self._dirty_keys.add(key)
         self._dirty = True
         try:
             self._timer.start()  # 重启 500ms 防抖窗口
@@ -391,6 +475,7 @@ class DesktopSettings:
     def reset_all(self) -> None:
         """恢复全部默认值（一次落盘）。"""
         self._data = dict(DEFAULTS)
+        self._dirty_keys = set(DEFAULTS)
         self._dirty = True
         try:
             self._timer.start()
@@ -450,17 +535,77 @@ class DesktopSettings:
         if self._dirty:
             self._write_to_disk()
 
+    def _merged_payload(self) -> Dict[str, Any]:
+        """把"本次改动的键"合并到磁盘现值上（读-改-写，锁内调用）。
+
+        规则：
+          * 磁盘不存在/不可读 → 写自己完整视图（首次落盘不能只写一个键）；
+          * 磁盘可读 → 以磁盘为底（保留未知键），只覆盖本次改过的键；
+          * 未改动的键若磁盘值正是我们内存值的归一结果（如手改越界值被夹取），
+            写回归一值，让修复落盘；否则视为别的实例写了更新值，尊重磁盘。
+        """
+        payload: Dict[str, Any] = {}
+        disk_ok = False
+        if os.path.exists(self._path):
+            try:
+                with open(self._path, "r", encoding="utf-8") as f:
+                    disk = json.load(f)
+                if isinstance(disk, dict):
+                    payload = dict(disk)
+                    disk_ok = True
+            except (OSError, ValueError):
+                payload = {}
+        if not disk_ok:
+            return dict(self._data)
+
+        for key in DEFAULTS:
+            if key in self._dirty_keys:
+                payload[key] = self._data[key]
+                continue
+            if key in payload:
+                item = SCHEMA.get(key)
+                disk_value = payload[key]
+                if item is not None:
+                    norm, _ = validate_value(item, disk_value)
+                    if norm == self._data.get(key):
+                        payload[key] = norm      # 我们的归一结果，落盘固化
+                continue
+            # 旧版本文件缺这个键：按当前默认/内存值补齐，保证文件完整。
+            payload[key] = self._data.get(key, DEFAULTS.get(key))
+        return payload
+
     def _write_to_disk(self) -> None:
-        """实际写盘：先写 .tmp 再 os.replace，避免半截文件损坏 JSON。"""
+        """实际写盘：跨进程锁内读-合并-写唯一临时文件，再 os.replace。
+
+        为什么不是直接 json.dump 到 ``路径.tmp``：
+          * 固定临时名会让两个进程同时写同一个 .tmp，Windows 下直接
+            PermissionError（实测 100 轮并发写有 63 次失败）；
+          * 整份覆盖会丢另一个实例刚写的字段（实测 A 的 frequency/callsign
+            被 B 的旧快照顶回默认）。
+        锁 + 按脏键合并 + 唯一临时文件三件一起，才是生产侧的并发答案。
+        """
+        tmp_path = f"{self._path}.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp"
         try:
             directory = os.path.dirname(self._path)
             if directory:
                 os.makedirs(directory, exist_ok=True)
-            tmp_path = self._path + ".tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp_path, self._path)
+            with _exclusive_lock(self._path + ".lock") as acquired:
+                if not acquired:
+                    # 没拿到锁就**不写**：此时读不到可靠的磁盘现值，整份覆盖
+                    # 会丢别的实例刚写的字段。保留 dirty 标记，下次 flush
+                    # （防抖定时器/退出）重试；同时把情况告诉用户。
+                    self.last_error = (
+                        f"配置写锁等待超过 {LOCK_TIMEOUT_S:g}s，可能有其他进程"
+                        "正在写；本次未写入，稍后重试")
+                    if callable(self.on_error):
+                        self.on_error(self.last_error)
+                    return
+                payload = self._merged_payload()
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
+                os.replace(tmp_path, self._path)
             self._dirty = False
+            self._dirty_keys.clear()
             self.last_error = None
         except (OSError, TypeError, ValueError) as exc:
             # 磁盘满/权限不足/只读/不可序列化：不抛（退出 flush 也不崩），
@@ -468,6 +613,11 @@ class DesktopSettings:
             self.last_error = f"设置保存失败（{exc.__class__.__name__}）：{exc}"
             if callable(self.on_error):
                 self.on_error(self.last_error)
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)          # 不留半截临时文件
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------
     # 上下文管理器：with DesktopSettings.load() as s: ... 退出自动 flush

@@ -459,7 +459,11 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                          _e("medium", "medium"), _e("slow", "slow")),
                 exposed=False),
     SettingItem(key="volume", group="", kind="int", label="", help="",
-                default=48, source="desktop/settings.py:39", exposed=False),
+                default=48, minimum=0, maximum=100,
+                source="desktop/settings.py:39；0–100 人类量纲见 "
+                       "settings.py volume_pct_to_hw/volume_hw_to_pct"
+                       "（0–63 只是硬件寄存器量纲）",
+                exposed=False),
     SettingItem(key="volume_scale_v2", group="", kind="bool", label="", help="",
                 default=True, source="desktop/settings.py:44", exposed=False),
     SettingItem(key="app_mode", group="", kind="enum", label="", help="",
@@ -550,6 +554,10 @@ def validate_value(item: SettingItem, value: Any) -> Tuple[Any, Optional[str]]:
     """
     reason: Optional[str] = None
     if item.kind == "bool":
+        if isinstance(value, bool):
+            return value, None
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value), None
         if isinstance(value, str):
             low = value.strip().lower()
             if low in ("1", "true", "yes", "on"):
@@ -557,7 +565,9 @@ def validate_value(item: SettingItem, value: Any) -> Tuple[Any, Optional[str]]:
             if low in ("0", "false", "no", "off"):
                 return False, None
             return item.default, f"无法识别的布尔值 {value!r}，已回默认"
-        return bool(value), None
+        # 列表/对象/null 不是布尔值：不能按 Python 真值静默转成 True/False。
+        return item.default, (
+            f"布尔字段收到 {type(value).__name__} 类型（{value!r}），已回默认")
 
     if item.kind in ("int", "float"):
         if value is None or (isinstance(value, str) and not value.strip()):
@@ -601,10 +611,14 @@ def validate_value(item: SettingItem, value: Any) -> Tuple[Any, Optional[str]]:
             f"值 {raw!r} 不在可选值 {item.choice_values} 内，"
             f"已回默认 {item.default!r}")
 
-    # text：保持字符串，不接受 None
+    # text：只接受标量；None 视为缺省。列表/对象是类型错误，必须留痕，
+    # 不许 str({'a': 1}) 这种"看起来像文本"的静默转换。
     if value is None:
         return item.default, None
-    return str(value), None
+    if isinstance(value, (str, int, float, bool)):
+        return str(value), None
+    return item.default, (
+        f"文本字段收到 {type(value).__name__} 类型（{value!r}），已回默认")
 
 
 def is_known(key: str) -> bool:

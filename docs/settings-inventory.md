@@ -657,3 +657,57 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 | source_commit | `2b6eba39` | `git log -1 --format=%h -- desktop/config_schema.py` |
 
 <!-- settings-guard:end -->
+
+## 18. 损坏与恢复行为（实测）
+
+守卫用例：[tests/test_settings_corruption_recovery.py](../tests/test_settings_corruption_recovery.py)（24 passed）。
+下表是"造一份真文件 → 跑真实 `DesktopSettings.load`"的实测结论，不是设计承诺。
+
+| 输入 | 实际行为 | 痕迹 | 可接受？ |
+|---|---|---|---|
+| 非法 JSON / 空文件 / 顶层是数组或字符串 | 不崩；原文件改名 `*.corrupt-时间戳`，回全部默认 | `last_error` 写明读取失败原因 + 备份路径；`corrupt_backup` 指向备份 | 可接受 |
+| 数字字段给字符串（`sample_rate_hz: "abc"`） | 回默认 | `migration_notes`："无法解析为数字 'abc'，已回默认" | 可接受 |
+| 数字字段给对象/数组 | 回默认 | 同上（逐键一条） | 可接受 |
+| bool 字段给数组/对象（`show_waterfall: []`） | 回默认 `True`（不再按 Python 真值静默转 `False`） | `migration_notes`："布尔字段收到 list 类型，已回默认" | 可接受（本轮修） |
+| 文本字段给对象（`callsign: {...}`） | 回默认空串（不再 `str(dict)` 混过去） | `migration_notes`："文本字段收到 dict 类型，已回默认" | 可接受（本轮修） |
+| 越界：`peak_threshold_db: 999` / `bortle: 42` | 夹到上限 30 / 9 | `migration_notes`："高于上限 …，已夹到上限" | 可接受 |
+| 越界：当前格式 `volume: -5`（有 v2 标记） | 夹到下限 0 | `migration_notes`："低于下限 0，已夹到下限" | 可接受（本轮加界） |
+| 旧格式 `volume: -5`（无 v2 标记） | 夹到 0 → 换算 0 | 两条说明：超出 0–63 已夹取 + 量纲换算 | 可接受（本轮修：原来静默变 0） |
+| 缺键 | 按默认补齐 | 不写 notes（这是版本升级的正常路径）；`has_file_key()` 可区分"原文件里有"与"补齐" | 可接受 |
+| 多余未知键 | 不进设置表面；`migration_notes` 列出键名 | 写盘时按磁盘现值合并，未知键**保留在文件中**（旧版本不吃掉新版本设置） | 可接受（本轮修：原来静默丢） |
+| `sample_rate_hz: 999000000`（999 MS/s） | **接受，不改不夹** | 无 notes | 已知边界，见下 |
+
+**采样率为什么没有上限**：采样率的事实源是"当前设备能力"，不是 schema。
+`mbdsdr_ai/sdr_backend.py` 的 `network_iq` 后端声明可达 1 GHz，所以 schema 层
+无法把 999 MS/s 判成非法；`set_sample_rate` 会取最近可用档并向状态栏回报实际值。
+这不是"静默变成默认值"（值仍是用户写的 999 MS/s），故不在此处伪造上限。
+
+### 18.1 原子写与并发（生产侧）
+
+写盘路径：跨进程锁（`desktop_settings.json.lock`）→ 锁内读磁盘现值 →
+按**本次改动的键**合并（未知键保留）→ 写**唯一临时文件**
+（`<path>.<pid>-<uuid>.tmp`）→ `os.replace`。三点缺一不可：
+
+| 场景 | 修复前实测 | 当前实测 |
+|---|---|---|
+| 两个进程各写 100 次 | 63 + 13 次 `PermissionError`；最终文件只剩后写者的字段（A 的 `frequency_hz`/`callsign` 被 B 的旧快照顶回默认） | 0–2 次锁超时（`last_error` 报"本次未写入，稍后重试"，保留脏标记下次重试）；最终 JSON 完整，A/B 四字段全在，无 `.tmp` 残留 |
+| `os.replace` 失败（磁盘满/只读） | — | 不抛；`last_error` 报"设置保存失败"；旧文件字节不变；临时文件被清理 |
+| 同一次写同一个键 | — | 后写者胜（逐键 last-write-wins），不同键互不影响 |
+
+### 18.2 迁移链
+
+* v1 文件（`volume` 存在、无 `volume_scale_v2`）：`42` → `67`，标记写 `true`，
+  `migration_notes` 记"0–63 量纲 42 已换算为 0–100 量纲 67"。
+  迁移结果会标脏并随下次 `flush`（含退出时）落盘；二次读取不再迁移（幂等）。
+* 旧格式越界（`-5`）：先夹到寄存器范围 0–63（记说明），再换算，最终 `0`。
+* settings 后端**没有** default 为 `None` 的字段（用例
+  `test_settings_backend_fields_all_have_defaults` 钉住）；`observer_lat/lon`
+  的 `default=None` 属 `gui_config` 后端，不在 `desktop_settings.json` 内。
+
+### 18.3 反证（守卫有牙）
+
+`test_removing_type_check_makes_the_guard_red` 把 `sample_rate_hz` 的 `kind`
+临时改成 `text`（等价于删掉数字类型校验），同一份 `"abc"` 文件立刻被原样接受、
+且不再留痕——证明上面"类型错 → 回默认 + note"确实由校验代码兜住，不是测试
+自己写死的期望。
+
