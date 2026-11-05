@@ -33,6 +33,6 @@
     {"label": "公众对讲机", "start_hz": 409750000, "stop_hz": 409987500, "category": "pmr", "modulation": "FM", "desc": "409 MHz 免执照 20 信道"},
     {"label": "70cm 业余", "start_hz": 430000000, "stop_hz": 440000000, "category": "amateur", "priority": "high", "modulation": "FM/SSB", "desc": "含 435–438 卫星子带"},
     {"label": "业余卫星下行", "start_hz": 435000000, "stop_hz": 438000000, "category": "satellite", "modulation": "FM/SSB/CW", "desc": "CubeSat 下行子带"},
-    {"label": "ADS-B 1090", "start_hz": 1089000000, "stop_hz": 1091000000, "category": "aviation", "modulation": "1090ES", "desc": "机载应答机下行"}
+    {"label": "ADS-B 1090", "start_hz": 1089000000, "stop_hz": 1091000000, "category": "aviation", "modulation": "1090ES", "desc": "机载应答机下行；需覆盖 1090 MHz 的前端（FC0012 类上限约 948.5 MHz，收不到）"}
   ]
 }

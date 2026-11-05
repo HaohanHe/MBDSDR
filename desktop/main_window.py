@@ -3776,6 +3776,8 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._active_sdr_backend = backend
         self._panels_set_sdr_connected(True)
+        # 面板入口连上 ≠ 设备收得到 1090；上限提示必须在连接成功路径同步。
+        self._sync_adsb_tuner_limit()
         try:
             self.conn_label.setText(f"  状态: {backend.device.name}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(True))
@@ -3810,17 +3812,6 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             logger.warning("增益范围动态收放失败（已忽略，滑杆保持兜底范围）: %s", e)
 
-        # 下发设备参数（失败仅 warning，不阻断连接）
-        try:
-            backend.set_sample_rate(float(sample_rate))
-        except Exception as e:
-            self.statusBar().showMessage(f"采样率应用失败: {e}", MSG_NORMAL)
-        # 带宽：0=自动（与后端 bandwidth_hz 语义一致）。此前面板设的带宽
-        # 被静默丢弃——只下发了采样率/增益，用户调了也没用。
-        try:
-            backend.set_bandwidth(float(bandwidth))
-        except Exception as e:
-            self.statusBar().showMessage(f"带宽应用失败: {e}", MSG_NORMAL)
         # 连接后立即下发默认中心频率：切换设备沿用切换前的调谐，
         # 首次连接才退回落 98.5 MHz。
         default_freq = 98_500_000.0
@@ -3831,27 +3822,14 @@ class MainWindow(QMainWindow):
                 default_freq = float(self.control_panel.get_frequency_hz())
             except Exception:
                 default_freq = 98_500_000.0
-        try:
-            backend.set_frequency(default_freq)
-        except Exception as e:
-            self.statusBar().showMessage(f"初始频率下发失败: {e}", MSG_NORMAL)
-        try:
-            backend.set_ppm(int(ppm))
-        except Exception:
-            pass
-        try:
-            backend.set_offset_tuning(bool(offset_tuning))
-        except Exception:
-            pass
-        try:
-            backend.set_agc(bool(agc))
-        except Exception:
-            pass
-        if not agc:
-            try:
-                backend.set_gain(float(gain))
-            except Exception:
-                pass
+
+        # 下发设备参数：False 与异常同等算失败。旧实现只看异常、且两处直接
+        # `except: pass`，会出现「已连接」但采样率/带宽根本没落到位。
+        # 失败项的 warning + 状态栏提示在 _apply_connect_params 内统一发出。
+        self._apply_connect_params(
+            backend, sample_rate=float(sample_rate), bandwidth=float(bandwidth),
+            freq=default_freq, ppm=int(ppm), offset=bool(offset_tuning),
+            agc=bool(agc), gain=float(gain))
         # 设备侧真实读数回填（频率/增益）：拿不到就保持「—」，绝不编造
         try:
             self._backfill_real_rf_readings()
@@ -3882,6 +3860,7 @@ class MainWindow(QMainWindow):
             return False
         self._active_sdr_backend = previous
         self._panels_set_sdr_connected(True)
+        self._sync_adsb_tuner_limit()
         try:
             name = previous.device.name
         except Exception:
@@ -4582,6 +4561,8 @@ class MainWindow(QMainWindow):
             self._link_degraded_code = ""
             # S9：硬件真正就绪才启用调谐/录音等控件（连接中一直保持置灰）
             self._panels_set_sdr_connected(True)
+            # 设备变了 → ADS-B 面板的上限提示跟着设备走（FC0012 收不到 1090）
+            self._sync_adsb_tuner_limit()
             # 硬件就绪：把设备报告的工具 schema 注册进 AI agent
             self._sync_ai_mcp_tools()
         else:
@@ -4639,14 +4620,103 @@ class MainWindow(QMainWindow):
             MSG_IMPORTANT,
         )
 
+    def _apply_connect_params(self, backend, *, sample_rate: float,
+                              bandwidth: float, freq: float, ppm: int,
+                              offset: bool, agc: bool, gain: float) -> list:
+        """连接成功后下发设备参数；返回「未生效项」清单（空=全部生效）。
+
+        False 与异常同等算失败：真实后端用返回值报错（越界/驱动拒绝），
+        ``ok is False`` 是唯一可靠的失败信号；None 视为成功（老实现无返回）。
+        采样率被拒时把下拉回填成设备实际生效值——界面不许停在被拒的请求值。
+        """
+        failures = []
+
+        def _run(label, fn) -> bool:
+            try:
+                ok = fn()
+            except Exception as e:  # noqa: BLE001 - 失败要留证并上报，不静默
+                logger.warning("连接后参数 %s 下发异常: %s: %s",
+                               label, type(e).__name__, e)
+                failures.append(label)
+                return False
+            if ok is False:
+                logger.warning("连接后参数 %s 未生效（后端返回 False）", label)
+                failures.append(label)
+                return False
+            return True
+
+        if not _run("采样率", lambda: backend.set_sample_rate(sample_rate)):
+            try:
+                actual = float(backend.get_sample_rate())
+            except Exception as e:  # noqa: BLE001 - 读不到就保持原显示，但要留证
+                logger.warning("读取设备实际采样率失败（下拉保持原值）: %s: %s",
+                               type(e).__name__, e)
+            else:
+                cp = getattr(self, "control_panel", None)
+                if cp is not None and actual > 0:
+                    cp.set_sample_rate(actual)
+        _run("带宽", lambda: backend.set_bandwidth(bandwidth))
+        _run("初始频率", lambda: backend.set_frequency(freq))
+        _run("PPM", lambda: backend.set_ppm(ppm))
+        _run("Offset Tuning", lambda: backend.set_offset_tuning(offset))
+        _run("AGC", lambda: backend.set_agc(agc))
+        if not agc:
+            _run("增益", lambda: backend.set_gain(gain))
+        if failures:
+            logger.warning("连接后参数未全部生效: %s", "、".join(failures))
+            self.statusBar().showMessage(
+                f"连接后参数未全部生效：{'、'.join(failures)}", MSG_IMPORTANT)
+        return failures
+
     def _apply_hw_action(self, action: str, fn) -> bool:
-        """执行硬件写入；失败只提示并返回 False，不抛、不提交 UI。"""
+        """执行硬件写入；失败只提示并返回 False，不抛、不提交 UI。
+
+        ``fn`` 返回 False 同样算失败：真实后端在频率越界/写频失败时用返回
+        值报告失败，并在 ``status.error`` 留一句人话（例：「当前调谐器
+        FC0012 可调范围 22.000–948.500 MHz，无法调谐到 1090.000 MHz」）。
+        旧实现只看异常，会把 False 当成功继续写 UI 并落盘。
+        """
         try:
-            fn()
+            result = fn()
         except Exception as e:
             self._report_hw_failure(action, e)
             return False
+        if result is False:
+            detail = self._hw_failure_detail()
+            self.statusBar().showMessage(
+                f"{action}未生效：{detail or '设备返回失败（无更多说明）'}。"
+                "界面与已保存配置保持上次成功值。",
+                MSG_IMPORTANT,
+            )
+            return False
         return True
+
+    def _hw_failure_detail(self) -> str:
+        """后端 status.error 里的人话原因（无则空串），失败提示的唯一来源。"""
+        backend = getattr(self, "_active_sdr_backend", None)
+        try:
+            return str(getattr(backend.get_status(), "error", "") or "").rstrip("。")
+        except Exception:  # noqa: BLE001 - 取不到原因时由调用方给通用文案
+            return ""
+
+    def _sync_adsb_tuner_limit(self) -> None:
+        """把当前设备真实可调上界交给 ADS-B 面板。
+
+        低于 1090 MHz 的设备（本机 FC0012 实测上限 948.5 MHz）收不到
+        ADS-B，面板必须如实说明，而不是一直显示「等待 1090MHz 数据」。
+        """
+        backend = getattr(self, "_active_sdr_backend", None)
+        panel = getattr(self, "digital_adsb_panel", None)
+        if backend is None or panel is None:
+            return
+        try:
+            hi_hz = float(backend.get_frequency_bounds()[1])
+        except Exception:
+            return
+        try:
+            panel.set_tuner_max_hz(hi_hz)
+        except Exception:
+            pass
 
     def _revert_tune_ui(self) -> None:
         """把频率/模式显示拉回最后一次真实成功值（失败后不许留在新值）。"""
@@ -4763,6 +4833,24 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _show_real_gain(self, backend) -> None:
+        """把设备真实增益读回标签（成功/失败都读）；读不到保持原值，绝不编造。"""
+        try:
+            real = backend.get_gain()
+            real_db = float(real) if real is not None else None
+        except Exception as e:  # noqa: BLE001 - 读数失败只影响显示，但要留证
+            logger.warning("读取真实增益失败（增益读数保持原值）: %s: %s",
+                           type(e).__name__, e)
+            return
+        if real_db is None:
+            return
+        mp = getattr(self, "module_panel", None)
+        if mp is not None:
+            mp.set_rf_params(gain_db=real_db)
+        cp = getattr(self, "control_panel", None)
+        if cp is not None:
+            cp.set_gain_applied(real_db)
+
     @Slot(int)
     def _on_gain_changed(self, db: int):
         backend = self._active_sdr_backend
@@ -4770,22 +4858,11 @@ class MainWindow(QMainWindow):
             if not self._apply_hw_action(
                     "设置增益", lambda: backend.set_gain(float(db))):
                 # 失败后读数必须回到设备真实值；停在新值就是把失败装成成功。
-                real_db = None
-                try:
-                    real = backend.get_gain()
-                    real_db = float(real) if real is not None else None
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("读取真实增益失败（增益读数保持原值）: %s", e)
-                if real_db is not None:
-                    mp = getattr(self, "module_panel", None)
-                    if mp is not None:
-                        mp.set_rf_params(gain_db=real_db)
-                    cp = getattr(self, "control_panel", None)
-                    # 临时形态：等 P2-C 落库后收紧为直调（同 _backfill_real_rf_readings）
-                    set_applied = getattr(cp, "set_gain_applied", None)
-                    if callable(set_applied):
-                        set_applied(real_db)
+                self._show_real_gain(backend)
                 return
+            # 成功也必须读回：后端会静默夹值（请求 49 dB 实际 33 dB），
+            # 标签要显示硬件真实值，配置仍保留用户意图（下面的落盘是 db）。
+            self._show_real_gain(backend)
         if self._worker:
             try:
                 self._worker.request_tool.emit("sdr_set_gain", {"gain_db": float(db)})
@@ -4876,7 +4953,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _on_mode_changed(self, mode: str):
+    def _on_mode_changed(self, mode: str) -> bool:
         """模式切换（WFM/NFM/AM/USB/LSB/CW）：立刻切解调 + 改 VFO 带宽，音频不断。
 
         - backend.set_demod(mode) 同步下发硬件解调模式；
@@ -4884,6 +4961,8 @@ class MainWindow(QMainWindow):
           声卡流不重建、不中断（对标 SDR++ 切模式音频无缝）；
         - VFO 带宽按 MODE_VFO_BANDWIDTH 逐模式套用（CW 500Hz / SSB 2.4k /
           AM 6k / NBFM 12.5k / WFM 180k），推到已绑定的 DDC。
+
+        返回 False 表示硬件没接受模式（调用方据此决定是否还能说「已应用」）。
         """
         # 真实 SDR 后端：下发解调模式；失败则不提交 UI/不落配置
         backend = self._active_sdr_backend
@@ -4891,7 +4970,7 @@ class MainWindow(QMainWindow):
             if not self._apply_hw_action(
                     "切换解调模式", lambda: backend.set_demod(mode)):
                 self._revert_tune_ui()
-                return
+                return False
         # 同步到解调 worker 共享配置（后台线程下一帧生效，音频不中断）
         if self._demod_cfg is not None:
             self._demod_cfg.mode = str(mode).upper()
@@ -4928,6 +5007,7 @@ class MainWindow(QMainWindow):
             self.dock_mode_label.setText(str(mode).upper())
         except Exception:
             pass
+        return True
 
     @Slot(float)
     def _on_sample_rate_changed(self, rate_hz: float):
@@ -5052,18 +5132,35 @@ class MainWindow(QMainWindow):
 
     @Slot(bool)
     def _on_agc_changed(self, enabled: bool):
-        """控制面板 AGC 开关 → 后端 set_agc。"""
-        # 持久化 AGC 开关（无后端也要存，连接后生效）
-        try:
-            self.settings.set("agc_enabled", bool(enabled))
-        except Exception:
-            pass
-        if self._active_sdr_backend is None:
+        """控制面板 AGC 开关 → 后端 set_agc。
+
+        无后端时照旧落盘（连接后生效）；有后端时失败必须可见，且不落盘、
+        把开关退回原态——失败值一旦落盘，下次连接会「自动启用」一个设备
+        从未接受的设置。
+        """
+        backend = self._active_sdr_backend
+        if backend is None:
+            try:
+                self.settings.set("agc_enabled", bool(enabled))
+            except Exception as e:  # noqa: BLE001 - 配置写失败只影响下次启动，但要留证
+                logger.warning("保存 AGC 开关失败（仅本次会话生效）: %s: %s",
+                               type(e).__name__, e)
+            return
+        before = self.settings.get("agc_enabled", None)
+        if not self._apply_hw_action(
+                "设置 AGC", lambda: backend.set_agc(bool(enabled))):
+            if before is not None:
+                try:
+                    self.control_panel.set_agc(bool(before))
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("AGC 失败后恢复开关原态失败: %s: %s",
+                                   type(e).__name__, e)
             return
         try:
-            self._active_sdr_backend.set_agc(bool(enabled))
-        except Exception as e:
-            self.statusBar().showMessage(f"AGC 设置失败: {e}", MSG_NORMAL)
+            self.settings.set("agc_enabled", bool(enabled))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("保存 AGC 开关失败（仅本次会话生效）: %s: %s",
+                           type(e).__name__, e)
 
     @Slot(str)
     def _on_agc_speed_changed(self, speed: str):
@@ -5102,11 +5199,21 @@ class MainWindow(QMainWindow):
 
     @Slot(float)
     def _on_vfo_bandwidth_changed(self, bw_hz: float):
-        """控制面板 VFO 带宽 → 更新本地 _vfo_bw + 频谱 VFO 带宽（Agent B 接口）。"""
+        """控制面板 VFO 带宽 → 更新本地 _vfo_bw + 频谱 VFO 带宽（Agent B 接口）。
+
+        后端 RF 带宽写在最前面：失败即返回，绝不继续改 UI/落盘——否则
+        「配置里是 2.4 kHz、硬件还是旧带宽」会被下次启动当成用户意图。
+        """
         try:
-            self._vfo_bw = float(bw_hz)
+            bw = float(bw_hz)
         except Exception:
             return
+        backend = self._active_sdr_backend
+        if backend is not None:
+            if not self._apply_hw_action(
+                    "设置带宽", lambda: backend.set_bandwidth(bw)):
+                return
+        self._vfo_bw = bw
         # VFO 已创建则更新其带宽（经 VfoManager.push_bandwidth → set_bandwidth）
         try:
             if self._vfo_mgr is not None:
@@ -7171,6 +7278,7 @@ class MainWindow(QMainWindow):
                     "ADS-B", self.digital_adsb_panel, "adsb_dock")
             except Exception:  # noqa: BLE001
                 self.digital_adsb_panel = None
+            self._sync_adsb_tuner_limit()
 
         # ---- APRS 数据包（右栏页签）----
         if AprsPanel is not None:
@@ -7483,16 +7591,26 @@ class MainWindow(QMainWindow):
                 self.control_panel.set_mode(mode)
         except Exception:
             pass
+        reason = ""
+        ok = True
         try:
-            self._on_mode_changed(mode)
-        except Exception:
-            pass
-        if bandwidth_hz > 0:
+            ok = self._on_mode_changed(mode) is not False
+        except Exception as e:  # noqa: BLE001 - 模式切换异常同样算失败
+            ok = False
+            reason = f"{type(e).__name__}: {e}"
+        if ok and bandwidth_hz > 0:
             try:
                 self._on_vfo_bandwidth_changed_ui("", float(bandwidth_hz))
             except Exception:
                 pass
-        self.statusBar().showMessage(f"已应用解调：{mode}", MSG_NORMAL)
+        if ok:
+            self.statusBar().showMessage(f"已应用解调：{mode}", MSG_NORMAL)
+        else:
+            # 失败时绝不再写「已应用解调」——那会把前一秒的失败提示覆盖成成功。
+            self.statusBar().showMessage(
+                f"应用解调未生效：{reason or self._hw_failure_detail() or '设备返回失败'}。"
+                "界面与已保存配置保持上次成功值。",
+                MSG_IMPORTANT)
 
     def _on_bookmark_tune_requested(self, freq_hz: float, mode: str,
                                     bandwidth_hz: float):
@@ -9326,11 +9444,16 @@ class MainWindow(QMainWindow):
                     reason = "未连接 SDR 设备"
                 else:
                     try:
-                        backend.set_frequency(float(freq_hz))
+                        ok = backend.set_frequency(float(freq_hz))
                     except Exception as e:
                         reason = f"{type(e).__name__}: {e}"
                     else:
-                        tuned = True
+                        if ok is False:
+                            # 后端用返回值报越界/驱动拒绝：不能置 tuned 刷标签。
+                            reason = (self._hw_failure_detail()
+                                      or "设备返回失败（无更多说明）")
+                        else:
+                            tuned = True
             else:
                 reason = "该卫星没有配置下行频率"
 

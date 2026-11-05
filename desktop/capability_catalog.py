@@ -136,12 +136,21 @@ def _panel_area_text(area: str) -> str:
 def _panel_capabilities() -> List[Capability]:
     out: List[Capability] = []
     for spec in _panels().list():
+        status, note = "available", ""
+        if spec.id == "adsb":
+            # 面板入口存在 ≠ 当前设备收得到：ADS-B 在 1090 MHz，FC0012 类
+            # tuner 实测上限 948.5 MHz，需覆盖 1090 的前端才可用。
+            status = "conditional"
+            note = ("需覆盖 1090 MHz 的前端；本机 FC0012 类 tuner 实测上限约 "
+                    "948.5 MHz，在该设备上收不到（面板会如实显示无法接收）")
         out.append(Capability(
             category=PANEL_CATEGORY.get(spec.id, "接收"),
             title=spec.name,
             description=spec.summary or f"{spec.name}面板",
             trigger=f"「面板」菜单 → {spec.name}（勾选显示/隐藏，位置：{_panel_area_text(spec.area)}）",
             source=f"panel_registry:{spec.id}",
+            status=status,
+            note=note,
         ))
     return out
 
@@ -165,6 +174,11 @@ def _digital_capabilities() -> List[Capability]:
     for key in sorted(DIGITAL_MODE_CAPABILITIES):
         cap = DIGITAL_MODE_CAPABILITIES[key]
         note = _EVIDENCE_NOTE.get(cap.evidence, _DEFAULT_EVIDENCE_NOTE)
+        if key == "adsb":
+            # 对拍数据来自 dump1090 官方 OTA 实录：只证明解码/重采样路径，
+            # 不构成「本机前端能覆盖 1090 MHz」的能力证据。
+            note += ("；解码对拍用 dump1090 官方 OTA 实录，只证明重采样/解码"
+                     "路径等价，不代表本机前端能覆盖 1090 MHz")
         status, trigger = "available", ""
         if cap.dependency:
             trigger = (f"命令行：python -m mbdsdr_ai --decode-file <文件> "

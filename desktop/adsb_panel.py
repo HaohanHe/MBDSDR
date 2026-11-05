@@ -62,6 +62,13 @@ _STATION = QColor(_t.COLORS["station_blue"])
 
 # 空态文案（测试据此断言面板进入“无数据”状态）。
 ADSB_WAIT_TEXT = "等待 1090MHz 数据"
+ADSB_CENTER_HZ = 1_090_000_000
+#: 当前设备真实可调上界低于 1090 MHz 时的空态：不许让用户对着
+#: 「等待 1090MHz 数据」空等一台物理上收不到的设备。
+ADSB_UNREACHABLE_TEXT = (
+    "当前设备上限 {max_mhz:.1f} MHz，无法接收 1090 MHz；"
+    "需覆盖 1090 MHz 的前端（如 R820T/R828D）"
+)
 NO_STATION_TEXT = "未设置地面站位置（请在 ~/.mbdsdr/config.json 设置 ground_station_lat/lon）"
 
 # 飞机超时 30 秒未更新即移除。
@@ -226,6 +233,8 @@ class AdsbPanel(QWidget):
         super().__init__(parent)
         self._tracker = AircraftTracker()
         self._sdr_connected = False
+        # 当前设备真实可调上界（Hz）；None = 未知，不替设备下结论。
+        self._tuner_max_hz: Optional[float] = None
         self._station: Tuple[Optional[float], Optional[float]] = _load_station()
         self._build_ui()
 
@@ -270,6 +279,11 @@ class AdsbPanel(QWidget):
         self._sdr_connected = bool(connected)
         self._refresh_header()
 
+    def set_tuner_max_hz(self, max_hz: Optional[float]) -> None:
+        """当前设备真实可调上界；低于 1090 MHz 时如实说明收不到。"""
+        self._tuner_max_hz = float(max_hz) if max_hz else None
+        self._refresh_header()
+
     def feed_iq(self, iq, sample_rate: float) -> None:
         """喂一段 1090MHz 复基带 IQ；内部解码并合并到跟踪表。"""
         if not _HAS_ADSB:
@@ -310,9 +324,15 @@ class AdsbPanel(QWidget):
         if n:
             self.header.setText(f"在视飞机 {n} 架"
                                 + ("" if self._sdr_connected else "（未连接后端）"))
+        elif not self._sdr_connected:
+            self.header.setText("未连接（等待 1090MHz 数据）")
+        elif (self._tuner_max_hz is not None
+              and self._tuner_max_hz < ADSB_CENTER_HZ):
+            # 设备上界 < 1090：物理上收不到，别让用户对着「等待数据」空等。
+            self.header.setText(
+                ADSB_UNREACHABLE_TEXT.format(max_mhz=self._tuner_max_hz / 1e6))
         else:
-            self.header.setText(ADSB_WAIT_TEXT
-                                if self._sdr_connected else "未连接（等待 1090MHz 数据）")
+            self.header.setText(ADSB_WAIT_TEXT)
 
     def _refresh_table(self) -> None:
         acs = self._tracker.all()
