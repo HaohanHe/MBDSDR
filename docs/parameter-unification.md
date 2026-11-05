@@ -189,15 +189,18 @@
 复核结论：与旧 A 表那组数字逐条一致（256,000 / 128,000 / 112,000 / 160,000 / 320,000 全对上）；新增两条 A 表没有的：250k 不再回落（0），2.800M 回落 2.4M（400,000，平局取低）。
 规则与实现口径（与 FFT 8192→4096 同做法）：不在新集合 → `RTLSDRBackend.nearest_sample_rate`（欧氏距离、平局取低）→ `logging.warning("sample_rate_hz=%s 不在支持档位，已回落 %s", requested, applied)` → 下拉回填最近档 → **实际生效值写回配置**；采样率回落还要重建接收流水线（`main_window._on_sample_rate_changed` 已有该路径），提示走状态栏一次性消息。
 
-### C.3 同步面清单（改任一处，其余必须同频；去重共 23 个出现点：代码 15 / 测试 4 / 文档 4）
+### C.3 同步面清单（改任一处，其余必须同频；去重共 28 个出现点：代码 17 / 测试 7 / 文档 4）
 
-| 若改这里（基准） | 必须同步的其余位置 | 数量 |
+> 计数口径（2026-11-06 按 `HEAD 63bf5874` 重数）：只算「自己持有一份档位值 / 顺序 / 默认值」的点，按 `文件:符号` 去重；纯消费点（按表遍历、比对、格式化、UI 绑定变量）不计。**下表「数量」列 = 本行基准 + 归属本行的位置**（跨行不重复），五行相加 = 28。
+> 旧标题写「23（15/4/4）」、旧五行「数量」相加 26：26 是**逐行「其余位置」相加**，其中第 2、3 行共享同一批 8 个 C++ 位置被重复计了一次——这正是标题与表不闭合的原因；现已按去重重算，五行相加等于标题总数。
+
+| 若改这里（基准） | 归属本行的位置（含基准；跨行不重复） | 数量 |
 |---|---|---|
-| `mbdsdr_ai/sdr_backend.py:RTLSDRBackend.SAMPLE_RATES` | 桌面**不持副本**：`desktop/control_panel.py`/`main_window.py` 经 `mbdsdr_ai/device_capabilities.py:sample_rate_options_for_backend` 动态取表（`tests/test_sample_rate_single_source.py` 钉住）；`mobile/lib/app/tokens.dart:AppTokens.sampleRatesHz`（死表，C.12）；`tests/fake_rtl.py`（出厂态 2.048M，不改断言但要确认不假定档位集合）；`docs/hardcoded-parameters.md` §10-3；本账本附录 C | 5 |
-| `cpp/src/core/tokens.h:kSampleRatesHz` | `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz`；`cpp/src/ui/settings_dialog.cpp:srCombo_`（局部 4 档表，应改为引用 tokens）；`cpp/src/ai/tool_schema.cpp`（enum + `"枚举四档"` 描述）；`cpp/src/ai/agent_tools.cpp:execSetSampleRate`（错误文案里的四档字面量）；`cpp/src/control/control_hub.cpp:cmdSetSampleRate`（2026-11-06 起按 `tokens::kSampleRatesHz` 逐档比对、档外显式拒绝，见 C.9）；`cpp/src/ui/main_window.cpp`（`currentIndex()==0 → 2` 的硬编码索引，见风险）；`cpp/tests/test_device_capabilities.cpp`；`cpp/tests/test_tool_schema.cpp`（钉住四档描述） | 8 |
-| `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz` | 同上 C++ 组 + `cpp/tests/test_device_capabilities.cpp` 的 250k/2.4/3.2 断言 | 8 |
-| `mobile/lib/app/tokens.dart:AppTokens.sampleRatesHz` | `mobile/lib/pages/spectrum_page.dart:762-770`（下拉由 `controller.sampleRateOptionsHz` 生成，缺失即「未知」并禁用，**无 `.first` 兜底**）；`mobile/lib/widgets/device_info_card.dart`（仅显示实际值，无需改档位）；移动端相关测试 | 2 |
-| `desktop/config_schema.py:sample_rate_hz` / `desktop/constants.py:DEFAULT_SAMPLE_RATE_HZ` | 只影响默认值，不影响档位集合：`desktop/settings.py:DEFAULTS`、`cpp/src/core/tokens.h:kDefaultSampleRateHz`、`tests/test_settings_schema.py` | 3 |
+| `mbdsdr_ai/sdr_backend.py:RTLSDRBackend.SAMPLE_RATES`（11 档） | `mbdsdr_ai/device_capabilities.py:_BACKEND_RATE_TABLE`；`mbdsdr_ai/rtlsdr_params.py:SUPPORTED_SAMPLE_RATES`（10 档，故意不同）；`mbdsdr_ai/device_manager.py:_RTL_SRATES`（11 档）；`mbdsdr_ai/osmosdr_source.py:RTL_SAMPLE_RATES_HZ`（9 档，另一套集）；`scripts/sample_rate_readback_check.py:RTL_TIERS`（11 档脚本副本）；`tests/test_sample_rate_options.py`。桌面**不持副本**：`desktop/control_panel.py`/`main_window.py` 经 `sample_rate_options_for_backend` 动态取表（属消费点，不计入数量） | 7 |
+| `cpp/src/core/tokens.h:kSampleRatesHz`（4 档白名单） + `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz`（11 档候选） | 白名单 ⊆ 候选，**同一批 C++ 位置只归本行一次**（旧表把 `kCandidateRatesHz` 单列一行，导致这 8 个位置重复计）：`cpp/src/ui/settings_dialog.cpp:srCombo_`（局部 4 档 `kRates[]`，应改为引用 tokens）；`cpp/src/ai/tool_schema.cpp`（enum + `1024000 / 2048000 / 2400000 / 3200000` 描述字面量）；`cpp/src/ai/agent_tools.cpp:execSetSampleRate`（错误文案四档字面量）；`cpp/src/ui/main_window.cpp`（`currentIndex()==0 → 2` 硬编码索引，见风险）；`cpp/tests/test_device_capabilities.cpp`；`cpp/tests/test_tool_schema.cpp`；`cpp/tests/test_control_hub.cpp`（`sample_rate_options_hz` 三态）；`tests/test_sample_rate_single_source.py`（四处逐项相等 + `module_panel` 派生）。`cpp/src/control/control_hub.cpp:cmdSetSampleRate` 是按表比对，属消费点，不计入数量 | 10 |
+| `mobile/lib/app/tokens.dart:AppTokens.sampleRatesHz`（4 档死表） | `mobile/lib/pages/spectrum_page.dart:761-770`（下拉由 `controller.sampleRateOptionsHz` 生成，缺失即「未知」并禁用，**无 `.first` 兜底**）；`mobile/lib/widgets/device_info_card.dart`（仅显示实际值，不计数）；移动端分派测试随 C.12 新增。旧表把后两项算进「数量」，实为 2 个消费点 → 本行只计基准自身 | 1 |
+| `desktop/config_schema.py:sample_rate_hz` / `desktop/constants.py:DEFAULT_SAMPLE_RATE_HZ` | 默认值是**另一物理量**（只影响首选值，不影响档位集合）：`cpp/src/core/tokens.h:kDefaultSampleRateHz`；`mbdsdr_ai/sdr_backend.py:DEFAULT_SAMPLE_RATE_HZ`；`tests/test_settings_schema.py`；`tests/test_desktop_constants.py`；`desktop/settings.py:DEFAULTS` 为消费点，不计数 | 6 |
+| 文档同步面（上述任一处改动后） | `docs/hardcoded-parameters.md`（§10-3 / A10）；`docs/redundancy-register.md`（§B B1–B8）；`docs/limitations-register.md`（L49 / L60）；`docs/settings-inventory.md`（§18 / `:767`）；本账本自身（C.1 / C.9 / C.10 / C.11 / C.12） | 4 |
 
 补充事实：手动切换路径的 bool 返回未校验（`desktop/main_window.py:_on_sample_rate_changed` 调 `set_sample_rate` 不判返回值）——这是 C.0 第 1 条的同频项，落地时必须一并补“返回 False 也走状态栏可见错误并回填实际档”，否则会出现“下拉停在 250k、实际仍是 1.024M”的新分叉（2026-11-06 已落地：`70429a02` — `desktop/main_window.py:4691` — `该采样率未被设备接受（保持`，见 C.10.1）。
 `desktop/settings_panel.py` **没有**独立采样率档位表（grep `sample_rate` 无命中），只经 `control_panel`/设置下发 → 同步面为 0，但它的文案若引用档位需跟随；`cpp/src/core/app_settings.*` **没有** sampleRate 键（grep 无命中），C++ 不持久化采样率，故 C 的旧配置迁移只在 Python 侧发生，C++ 侧按 `kDefaultSampleRateHz` 起档。

@@ -21,6 +21,7 @@
 """
 import os
 import re
+import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -215,3 +216,71 @@ def test_detector_is_not_vacuous_missing_216_must_be_red():
     with pytest.raises(AssertionError, match="不一致"):
         _require_equal("C++ kCandidateRatesHz（实际下发）", _cxx_tiers(),
                        "文档 C.1（变异副本）", mutated_tiers)
+
+
+def _head_text(rel_path: str) -> str:
+    """优先读 HEAD 里的文件文本，避免把别线在途的工作区编辑当成既成事实。
+
+    git 不可用或该文件尚未入库时，回退到磁盘副本（CI 的常规状态）。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"HEAD:{rel_path}"],
+            cwd=str(_ROOT), capture_output=True, text=True,
+            encoding="utf-8", check=True)
+        return proc.stdout
+    except Exception:  # noqa: BLE001 - 任何 git 不可用都退回磁盘
+        return (_ROOT / rel_path).read_text(encoding="utf-8")
+
+
+def _tier_literal_hits(src):
+    """module_panel 里写死的档位数值（任何后端表里的档位都算违规）。"""
+    return re.findall(
+        r"\b(?:1_024_000|1_440_000|1_536_000|1_792_000|1_920_000|2_048_000"
+        r"|2_160_000|2_400_000|2_560_000|2_880_000|3_200_000)\b", src)
+
+
+def _quoted_msps_hits(src):
+    """module_panel 里带引号的本地档位文案（如 "1.440 MS/s"）。"""
+    return re.findall(r"[\"'][^\"'\n]*MS/s[\"']", src)
+
+
+def test_module_panel_derives_from_device_capabilities():
+    """第五处：module_panel 不得持本地档位表，必须经 constants 按设备派生。
+
+    HEAD 现状：`_fill_sample_rate_options` 已改为
+    `sample_rate_combo_items(device)`；本用例锁死这条，防止把 5 档静态表
+    （含任何内核表都没有的 `1.440 MS/s`）加回来。
+    """
+    src = _head_text("desktop/module_panel.py")
+
+    # 1) 必须调用唯一的派生入口，且传入设备（不传设备就拿不到能力表）
+    assert "sample_rate_combo_items(device)" in src, \
+        "module_panel 未按设备能力派生采样率下拉（应调 sample_rate_combo_items(device)）"
+
+    # 2) 不得出现档位数值字面量（任何一份后端表里的档位都不许写死在前端）
+    assert not _tier_literal_hits(src), \
+        f"module_panel 又出现档位字面量（应只经能力表派生）：{_tier_literal_hits(src)}"
+
+    # 3) 不得有带引号的档位文案，也不得引用档位表符号
+    assert not _quoted_msps_hits(src), \
+        f"module_panel 又出现本地档位文案：{_quoted_msps_hits(src)}"
+    for symbol in ("SAMPLE_RATES", "kCandidateRatesHz", "sampleRatesHz"):
+        assert symbol not in src, f"module_panel 引用了本地档位表符号 {symbol}"
+
+    # 4) 派生入口自身必须来自内核能力表（否则「已派生」只是换了个名字）
+    const_src = _head_text("desktop/constants.py")
+    assert "from mbdsdr_ai.device_capabilities import sample_rate_options" \
+        in const_src, "constants.sample_rate_combo_items 未走内核能力表"
+    assert "sample_rate_options(device)" in const_src, \
+        "constants.sample_rate_combo_items 未按设备查询档位"
+
+
+def test_module_panel_derivation_detector_is_not_vacuous():
+    """反证：把已删掉的 5 档静态表片段塞进来，两个检测器都必须报。"""
+    mutated = (
+        'self.sr_combo.addItem("1.440 MS/s", 1_440_000)\n'
+        "items = sample_rate_combo_items(device)\n"
+    )
+    assert _tier_literal_hits(mutated) == ["1_440_000"]
+    assert _quoted_msps_hits(mutated) == ['"1.440 MS/s"']
