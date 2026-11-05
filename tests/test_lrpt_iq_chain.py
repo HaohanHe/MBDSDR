@@ -32,6 +32,14 @@ from mbdsdr_ai.lrpt_vcdu import (  # noqa: E402
     meteor_segments_to_image,
 )
 
+
+@pytest.fixture(autouse=True, scope="module")
+def _isolate_user_config(isolated_profile):
+    """本模块用 MBDSDRAgent 调工具，会构造 DesktopSettings/QSettings；
+    统一重定向到临时 profile，禁止把测试值写回用户真实配置。"""
+    return isolated_profile
+
+
 W, H = 64, 48
 Q_FIELD = 32
 CADU_LEN = 1024
