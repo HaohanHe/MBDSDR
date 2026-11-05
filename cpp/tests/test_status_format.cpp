@@ -55,10 +55,10 @@ void TestStatusFormat::squelch() {
 }
 
 void TestStatusFormat::rssiSnr() {
-    QCOMPARE(mbdsdr::ui::fmtStripRssi(-45.2f), QString("RSSI -45.2"));
+    QCOMPARE(mbdsdr::ui::fmtStripRssi(-45.2f), QString("RSSI -45.2 dBFS"));
     QCOMPARE(mbdsdr::ui::fmtStripRssi(std::numeric_limits<float>::quiet_NaN()),
              QString("--"));
-    QCOMPARE(mbdsdr::ui::fmtStripSnr(12.3f), QString("SNR 12.3"));
+    QCOMPARE(mbdsdr::ui::fmtStripSnr(12.3f), QString("SNR 12.3 dB"));
     QCOMPARE(mbdsdr::ui::fmtStripSnr(std::numeric_limits<float>::quiet_NaN()),
              QString("--"));
 }

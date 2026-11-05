@@ -101,7 +101,7 @@ class DeviceInfoCard extends StatelessWidget {
         _InfoRow(
           label: '采样率',
           value: live
-              ? '${(radio.sampleRateHz / 1e6).toStringAsFixed(2)} Msps'
+              ? '${(radio.sampleRateHz / 1e6).toStringAsFixed(3)} MS/s'
               : '—',
           valueColor: valueColor,
           mono: true,

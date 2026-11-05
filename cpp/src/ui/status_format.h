@@ -61,12 +61,12 @@ inline QString fmtStripSquelch(bool enabled, bool open) {
 
 inline QString fmtStripRssi(float dbfs) {
     return std::isnan(dbfs) ? QString("--")
-                            : QString("RSSI %1").arg(dbfs, 0, 'f', 1);
+                            : QString("RSSI %1 dBFS").arg(dbfs, 0, 'f', 1);
 }
 
 inline QString fmtStripSnr(float db) {
     return std::isnan(db) ? QString("--")
-                          : QString("SNR %1").arg(db, 0, 'f', 1);
+                          : QString("SNR %1 dB").arg(db, 0, 'f', 1);
 }
 
 } // namespace ui

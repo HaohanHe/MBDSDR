@@ -92,3 +92,34 @@ def test_e02_parameter_errors_name_object_and_param():
     assert "录音库字段不合法" in field and "wer" in field
     assert "录音库参数不合法" in lib and "freq" in lib
     assert tool != field and field != lib, "同一段文案不得覆盖两种对象"
+
+
+# ---------------------------------------------------------------------------
+# 批次 1：跨端同一物理量同一单位（C++ 状态条 / 移动端）
+# ---------------------------------------------------------------------------
+_CPP_STATUS = open(os.path.join(_ROOT, "cpp", "src", "ui", "status_format.h"),
+                   encoding="utf-8").read()
+_MOBILE_SPECTRUM = open(os.path.join(_ROOT, "mobile", "lib", "pages",
+                                     "spectrum_page.dart"), encoding="utf-8").read()
+_MOBILE_INFO = open(os.path.join(_ROOT, "mobile", "lib", "widgets",
+                                 "device_info_card.dart"), encoding="utf-8").read()
+
+
+def test_u02_cpp_status_strip_labels_rssi_and_snr_units():
+    """U-02：C++ 状态条与天空信息卡同一物理量、同一单位（dBFS / dB）。"""
+    assert 'QString("RSSI %1 dBFS")' in _CPP_STATUS
+    assert 'QString("SNR %1 dB")' in _CPP_STATUS
+
+
+def test_u02_mobile_rssi_is_dbfs_with_one_decimal():
+    """U-02：移动端 RSSI 与桌面同口径（dBFS、1 位小数）。"""
+    assert "'RSSI ${rssi.toStringAsFixed(1)} dBFS'" in _MOBILE_SPECTRUM
+    assert "toStringAsFixed(0)} dB'" not in _MOBILE_SPECTRUM
+
+
+def test_u03_mobile_sample_rate_is_ms_per_s_three_decimals():
+    """U-03：移动端采样率与桌面/C++ 同口径（MS/s、3 位小数、空格）。"""
+    assert "toStringAsFixed(3)} MS/s" in _MOBILE_SPECTRUM
+    assert "toStringAsFixed(2)}Msps" not in _MOBILE_SPECTRUM
+    assert "toStringAsFixed(2)} Msps" not in _MOBILE_SPECTRUM
+    assert "toStringAsFixed(3)} MS/s" in _MOBILE_INFO

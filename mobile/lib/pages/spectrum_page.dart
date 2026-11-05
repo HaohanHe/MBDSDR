@@ -378,7 +378,7 @@ class _StatusBar extends StatelessWidget {
           ),
           _StatusChip(controller.mode.label),
           _StatusChip(
-            rssi == null ? 'RSSI --' : 'RSSI ${rssi.toStringAsFixed(0)} dB',
+            rssi == null ? 'RSSI --' : 'RSSI ${rssi.toStringAsFixed(1)} dBFS',
           ),
           // 静噪：基于解调音频真实 RMS 电平的门控开合，克制小字。
           _StatusChip(
@@ -386,7 +386,7 @@ class _StatusBar extends StatelessWidget {
                 ? (controller.squelchOpen ? 'SQ OPEN' : 'SQ CLOSED')
                 : 'SQ OFF',
           ),
-          _StatusChip('${(controller.sampleRateHz / 1e6).toStringAsFixed(2)}Msps'),
+          _StatusChip('${(controller.sampleRateHz / 1e6).toStringAsFixed(3)} MS/s'),
           _StatusChip(
             controller.autoGain ? 'AGC' : 'G ${controller.gainDb.toStringAsFixed(1)}dB',
           ),
@@ -764,7 +764,7 @@ class _ControlPanel extends StatelessWidget {
                     items: AppTokens.sampleRatesHz
                         .map((r) => DropdownMenuItem(
                               value: r,
-                              child: Text('${(r / 1e6).toStringAsFixed(2)} Msps'),
+                              child: Text('${(r / 1e6).toStringAsFixed(3)} MS/s'),
                             ))
                         .toList(),
                     onChanged: (v) =>
@@ -878,7 +878,7 @@ class _ControlPanel extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${controller.squelchThresholdDb.toStringAsFixed(0)} dB',
+                  '${controller.squelchThresholdDb.toStringAsFixed(0)} dBFS',
                   style: AppTokens.mono,
                 ),
               ],
