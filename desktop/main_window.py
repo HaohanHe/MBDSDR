@@ -2414,18 +2414,17 @@ class MainWindow(QMainWindow):
         gain = getattr(st, "gain_db", 0.0) if st is not None else 0.0
         dev_name = getattr(getattr(backend, "device", None), "name", "") \
             or backend.__class__.__name__
+        # 0 Hz 的语义是“设备尚未上报真实频点”（重连后常见），不是 0.000 MHz；
+        # 三处读数同源，统一用占位，绝不写假数值。
         try:
-            self.status_freq.setText(f"频率: {f_hz / 1e6:.3f} MHz")
-        except Exception:
-            pass
-        # 顶栏大字号频率显示同步（与底部状态栏同源，均来自 backend.get_frequency()）
-        try:
-            self.toolbar_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
-        except Exception:
-            pass
-        # 底坞 Now Bar 频率同步
-        try:
-            self.dock_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
+            if f_hz > 0:
+                self.status_freq.setText(f"频率: {f_hz / 1e6:.3f} MHz")
+                self.toolbar_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
+                self.dock_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
+            else:
+                self.status_freq.setText("频率: --")
+                self.toolbar_freq_label.setText("-- MHz")
+                self.dock_freq_label.setText("-- MHz")
         except Exception:
             pass
         # 顶栏解调模式下拉同步（blockSignals 防回环；后端未上报则不动，不编造）
