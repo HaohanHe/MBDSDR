@@ -854,12 +854,21 @@ WorkBuddy 台账线（"我这边" UI 原型/产品工程/星象仪）、巡检�
 出现别人的文件 → `git restore --staged <别人文件>`（只动 index，不动别人工作区
 内容）后重提，绝不带着走。
 
-### 6.9 提交机械闸（2026-11-05 17:03 落地）
+### 6.9 提交机械闸（2026-11-05 17:03 落地，23:30 改写源头规矩）
 
-**纪律：禁止 `git add` + `git commit`。** 一律 `git commit --only -m "<msg>" -- <自己的路径...>`
-（`-m` 必须写在 `--` 前面）。`git commit --only` 用工作区内容构造临时 index，
-不会带走别人已 staged 的文件。新文件先 `git add -N <path>` 让 pathspec 认识，
-再 `git commit --only ... -- <path>`。
+**源头规矩（2026-11-05 23:30，比「别用 `--only`」更上游）**
+
+**任何人、任何时候都不许对共享 index 执行 `git add` / `git apply --cached` /
+`git restore --staged`**——唯一例外是清理「自己刚提交过的文件」的陈旧条目（§6.9.4），
+且必须三条件全做。
+
+**不变量：共享 index 任何时刻都应等于 HEAD。** 判据 = `git diff --cached --name-only`
+必须为空。**提交前先查这一条；非空即报警**——先查明是谁写的、通知对方，不许直接提交，
+也不许顺手 `reset` 清掉（§6.9.2）。
+
+提交一律走独立 `GIT_INDEX_FILE`（§6.9.2）：`git read-tree HEAD` → 只打自己的 hunks →
+`git commit`（**不带 `--only`**）。`--only` 是上一代做法，现在只在「独占文件、且确认
+共享 index 为空」时才安全，本仓不再默认使用。
 
 机械闸（`scripts/install_git_hooks.py` 安装，本仓已装）：
 
@@ -951,6 +960,19 @@ Remove-Item $env:GIT_INDEX_FILE; Remove-Item Env:GIT_INDEX_FILE
 git read-tree HEAD                       # 把共享 index 刷新到新 HEAD（原共享 index 须为空）
 ```
 
+**三道闸（每次提交依次通过，任一失败即停）**
+
+1. **共享 index 必须为空**：`git diff --cached --name-only` 无输出。非空 = 有人对共享
+   index 暂存了内容，先查明是谁写的并通知，**不许直接提交、不许 reset 清掉**。
+2. **私有 index 清单精确相等**：在 `$env:GIT_INDEX_FILE` 下，`git diff --cached --name-only`
+   必须**逐字等于**本次要提交的路径清单——多一个、少一个都不许提交。
+3. **提交后零残留**：`git diff --numstat HEAD -- <本次每个文件>` 必须为空；非空即说明
+   提交吃进的是旧快照（事故形态三，§6.9.3），立即报主会话。
+
+**23:30 巡检实测**：共享 index 2658 项与 `git ls-tree -r HEAD` 逐条比对，哈希/模式差异
+**0**，HEAD 有而 index 未收录 **0**；`D:\mbdsdr\.tmp` 与 `output\tmp` 下无 `idx_*` 残留。
+（parity 干净；事故形态三的复发风险点只剩「复用旧私有 index」这一条路径。）
+
 **反例存档（今日实测，行为记在这里、不点名）**
 
 - 参数治理线 23:04 用临时 index 提交**是对的**；但事后 `git reset HEAD` 复位了另一条
@@ -962,7 +984,59 @@ git read-tree HEAD                       # 把共享 index 刷新到新 HEAD（�
   内容覆盖成旧版。提交前 `git diff --cached --name-only` + 提交后 `git diff HEAD`
   这两步对「同文件多人」仍然必须做。
 
-### 6.10 历史改写事件（2026-11-05，主分支两次被 reset）
+#### 6.9.3 事故形态三：陈旧 index 回退已入库内容（2026-11-05 23:30 立条）
+
+前两种形态是「多带别人的」与「漏带自己的」；第三种**不丢文件也不丢行数**，丢的是
+「同一文件里别人刚写进去的段落」——提交把该文件整体写成旧 blob，`git diff --numstat`
+只相对旧 HEAD 显示差异，看上去像一次正常编辑。
+
+**机制**：私有 index 建一次就反复复用；HEAD 前进后，那份旧快照里该文件的 blob 仍是旧版。
+用它提交，就把别人已入库的内容回退。**必要时例外不是「复用旧 index」，而是「清理你
+自己刚提交过的文件的陈旧条目」**（§6.9.4）。
+
+**四条规矩**：
+
+1. 临时 index **每次**从**当前** HEAD `git read-tree HEAD` 重建，不复用上次的 index 文件；
+   用完即 `Remove-Item`，不在 `.tmp` 留 `idx_*` 残骸。
+2. 提交前过 §6.9.2 的**三道闸**（共享 index 空 → 私有清单精确相等）。
+3. 提交后复核：`git diff --numstat HEAD -- <每个文件>` 必须为空；共享文档再加一条
+   `git log -S '<本次新加的关键短语>' -- <文件>`，确认新短语仍在最新提交里。
+4. 同一文件多人写时，**每次提交前重算该文件的索引项**，不继承任何缓存。
+
+**可复现证据（`16f8cd09` 加 → `f664638a` 删 → `4132d46f` 补回）**：
+
+```powershell
+git log -S'前置规矩' --oneline -- docs/COORDINATION.md
+#   4132d46f（补回） / f664638a（删除） / 16f8cd09（新增）
+git show 16f8cd09:docs/COORDINATION.md | git hash-object --stdin   # 487f3598…
+git show f664638a:docs/COORDINATION.md | git hash-object --stdin   # 9563ffff…（=448d465f 版本）
+git show --numstat --stat f664638a -- docs/COORDINATION.md         # +2 / −28
+```
+
+`f664638a` 的提交说明自述「本笔仅含测试文件的 hunk、用临时索引精确装配」，但 stat 里
+带着 `docs/COORDINATION.md | 30 +-`——**说明与实际 stat 矛盾**，唯一解释是私有 index 里
+还留着提交前的 COORDINATION 条目。这就是「陈旧 index」的形状。
+
+#### 6.9.4 必要例外：清理「自己刚提交过的文件」的陈旧条目（2026-11-05 23:30）
+
+共享 index 里出现**你刚提交过的文件**的陈旧条目（例：你 10 分钟前用独立 index 提交了
+`docs/X.md`，共享 index 仍停在提交前的版本）时，**允许且必须由你处理**，但三条件全做：
+
+1. 先把该文件当前 index 内容导出成 patch，落 `D:\mbdsdr\.tmp\<topic>.staged.patch`；
+2. 通知与这些 hunks 相关的 owner 并确认重放（对方不在线就写进本台账并留 patch 路径）；
+3. 汇报里写明「复位了哪几个路径、导出到哪个 patch」。
+
+**不许悄悄做，也不许对别人正在写的、你从未提交过的文件做这件事。**
+
+反例存档（两次都是「陈旧条目」形态，不是「抢别人暂存」）：
+
+- 参数治理线 23:04 用临时 index 提交后，对共享 index 做了 `git reset HEAD -- <自己的 4 个路径>`；
+- 文案审计线在 `ff964183` 之后，对共享 index 做了 `git reset HEAD -- <自己的 4 个文件>`。
+
+两次都落在本例外，但**都没走「导出 patch + 通知 owner」两步**，留痕不足——例外可以，
+流程不许省。
+
+### 6.10 历史改写事件（2026-11-05，主分支被 reset 改写；今日累计 10 次破坏性 reset + 1 次 no-op）
 
 **前置规矩（上游真因，比「禁止 reset」更早一步）**
 
@@ -1061,7 +1135,8 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 
 **23:xx 续（后追加，实测）**：23:09:43 / 23:10:40 / 23:10:55 又 3 次
 `reset: moving to 926280d5`——扫描线把自己 23:09–23:10 的同标题提交回退重打，
-最终以 `aaaa0de2` 入库。**今日累计 10 次破坏性 reset + 1 次 no-op**。
+最终以 `aaaa0de2` 入库。**今日累计 10 次破坏性 reset + 1 次 no-op**
+（= 上表 7 次 + 23:xx 这 3 次）。
 
 **12:xx 三次的定人与形态（补查，23:05）**
 
@@ -1100,3 +1175,42 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 结论：**U-02 一行没丢**；`desktop/main_window.py` 当前工作区 +49/−14 是 ux-basis 的
 窄屏工作（不是文案审计线的 U-02 欠账），何时提交归 ux-basis 决定。
 
+#### 6.10.2 回退事件表（第四类形态：陈旧 index 回退已入库内容，2026-11-05 23:35 补查）
+
+**扫描口径**：6 个共享文档（`COORDINATION.md`、`parameter-unification.md`、
+`limitations-register.md`、`data-inventory.md`、`design-basis.md`、
+`error-code-visibility.md`）各取最近 80 个提交，逐个取 `rev:path` 的 blob，
+判据 `blob[i] == blob[i+2] && blob[i+1] != blob[i]`（写回旧版）。
+
+| 提交 | 文件 | 被抹掉的内容 | 是否已补回 | 定人 |
+|---|---|---|---|---|
+| `f664638a`（23:08:12） | `docs/COORDINATION.md` | §6.10「前置规矩」整段（+2/−28，blob `487f3598` → `9563ffff`） | **已补回**（`4132d46f` 23:18:25） | **操作逻辑线**（置信高，见下） |
+
+- 其余 5 个共享文档**零命中**；`git log -S'前置规矩'` 恰是「`16f8cd09` 加 →
+  `f664638a` 删 → `4132d46f` 加回」，与表一致。
+- 「标题 A 类却改 B 类共享文档」的提交另有若干（`fba509bd`、`f1976784`、`7d04a3de`、
+  `71881a09`、`27b8b69e`、`3938fcf1` 等），逐笔用同一判据复核后**均非回退**——它们是
+  各线在收口时顺带登记本台账（正常编辑），删除行是替换旧措辞而非抹掉他人内容。
+  需注意：这类「顺手改台账」正是陈旧 index 最容易伤到本文件的地方，故纪律上要求
+  **每次改本文件都重读当前 HEAD 版本**（§6.9.3 第 4 条）。
+
+**`f664638a` 定人（由「无法定人」升级）：操作逻辑线**
+
+- 文件集逐一吻合：该提交 14 个文件中 13 个是 `tests/` 下的 fixture/UI 测试，
+  这 13 个文件在台账里**全部**由同一个 owner 于 **20:59:07–20:59:09** claim
+  （`tests/test_agc_speed.py`、`test_app_mode.py`、`test_bookmark_tags.py`、
+  `test_desktop_hotplug_autorecovery.py`、`test_device_switch_flow.py`、
+  `test_gimbal_follow_wiring.py`、`test_mode_switch_preset.py`、
+  `test_record_replay_config.py`、`test_sky_capability_negotiation.py`、
+  `test_sky_track_wiring.py`、`test_three_column_layout.py`、
+  `test_ui_layout_actions.py`、`test_ui_layout_locks.py`）；
+  同 owner 还 hold 着 `tests/test_gimbal_track_chain.py`——正是提交说明里
+  「已由云台线自行收口、本笔不重复改」的那个文件。
+- 时窗成立：该 owner 的 claim 心跳持续到 **22:43:37**，TTL 40 分钟，有效期覆盖
+  **23:08:12**（提交时点）；窗口内无第二个 owner 持有这些文件。
+- 工作流同型：`94063db8`（20:57:45，「fixture 收尾不再静默吞异常，棘轮两文件 E1→E0」）
+  与 `f664638a` 同一件事的续批，claim 恰在 `94063db8` 之后 74 秒建立。
+- 排除项：可发现性线（其两笔为 `3f190dfa`、`a13d1db7`，文件集不交）。
+- 陈旧快照的年龄也可反推：被写回的 blob `9563ffff` **首次出现在 `448d465f`（22:57:55）**，
+  即该私有 index 建于 22:57:55–23:06:52 之间，不是「隔夜缓存」。
+- 作者字段为全仓统一归一身份，**不构成归属证据**（按 AGENTS.md 第 1 条不落字面量）。
