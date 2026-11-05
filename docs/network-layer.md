@@ -483,3 +483,46 @@ desktop/` 无命中），所以真实策略是**断了就放弃**：自动重试
 - **设备恢复后不会自己回来**：必须手动点「连接」，不点就一直停在「未连接」。
 - **手动重连不等于自动恢复**：断开前的解调模式/频率是否在手动路径上保留，
   桌面未实测，本表**不写**「会自动恢复」。
+
+## 9. 接入层四矩阵终局表（2026-11-06，HEAD `fc1f8076`）
+
+同一 HEAD 串行跑完四条矩阵，跑前/跑后 `git rev-parse --short HEAD` 均为 `fc1f8076`
+（无并发提交漂移）。全部断言由命令复跑得出（E2），原始输出落
+`D:\mbdsdr\tmp\access_matrix_20261106\final_m*.txt`（未入库）。
+
+```powershell
+$env:MBDSDR_NO_HW='1'; $env:MBDSDR_OFFLINE='1'; $env:MBDSDR_NULL_AUDIO='1'
+$env:PYTHONPATH='d:\mbdsdr\MBDSDR'
+python -m pytest tests\test_network_layer_matrix.py::TestRtlTcpMatrix -q -s
+python -m pytest tests\test_network_layer_matrix.py::TestSpyServerMatrix -q -s
+python tests\network_hotplug_regression.py
+python -m pytest tests\test_backend_reconnect_stress.py -q
+python -m pytest tests\test_reconnection.py tests\test_reconnection_e2e.py tests\test_reconnect_zero_freq.py -q
+```
+
+| 矩阵 | 子项 | 判定 | 关键数字 | 复跑命令 | 归因桶 |
+|---|---|---|---|---|---|
+| M1 rtl_tcp | 正常断开→重连（3 轮） | PASS | 发现 `0.000s`（EOF）；TCP socket 基线 `1`→3 轮后 `1`；生产者线程 `1`；进程句柄 `324→372`（+48 为首次建链触发 `scipy.signal` 惰性导入的一次性加载，**不是逐轮增长**）；`4 passed in 4.38s` | `pytest tests/test_network_layer_matrix.py::TestRtlTcpMatrix -q -s` | — |
+| M1 rtl_tcp | 后端进程被杀→重启 | PASS | 发现 `0.000s`（reset）；重启后首帧正常（1024 点 complex64） | 同上 `TestRtlTcpMatrix` | — |
+| M1 rtl_tcp | 源停顿 / 半速源 | PASS | stale `0.510s`（`idle=0.5s`）；`rate_ratio=0.30`；`gap_events=1`；`dropped=665,791` | 同上 `TestRtlTcpMatrix` | — |
+| M1 rtl_tcp | 半开连接（服务死、TCP 活） | PASS | stale `0.509s`、硬判 `1.019s`（`idle=0.5s`） | 同上 `TestRtlTcpMatrix` | — |
+| M2 SpyServer | 正常断开 / 进程被杀 / 半开 | PASS | 发现 `0.000s`（EOF / reset）；半开 stale `0.514s`、硬判 `1.027s`（`idle=0.5s`）；握手 `1024B` vs rtl_tcp `12B`；`4 passed in 3.43s` | `pytest tests/test_network_layer_matrix.py::TestSpyServerMatrix -q -s` | — |
+| M3 热插拔 | `usb-unplug` 真机拔线 | **SKIP** | `MBDSDR_NO_HW=1`，拔线需人工；本机三路注入全不通（详见 L61） | `python tests/network_hotplug_regression.py` | **环境**（无管理员/无 VM/`usbipd` 未装），已登记 L61 |
+| M3 热插拔 | `port-switch` 换端口 | PASS | `0.120s`；connect→首帧 `0.042s / 0.021s`，两条首帧均 1024 点 complex64 | `python tests/network_hotplug_regression.py` | — |
+| M3 热插拔 | `backend-crash` 进程被杀 | PASS | `0.112s`；`detect=0.000s`（reset），终态 `disconnected` | `python tests/network_hotplug_regression.py` | — |
+| M3 热插拔 | `half-open` 半开 | PASS | `20.088s`；rtl stale `5.016s`/硬判 `10.031s`，spy `5.006s`/`10.018s`（基准 2×idle=10.0s，容差 +0.9s）；summary `PASS=3 FAIL=0 SKIP=1` | `python tests/network_hotplug_regression.py` | — |
+| M3 热插拔 | 假 USB 10 轮拔插/重连 | PASS | `2 passed in 4.90s`；修正基线后 10 轮句柄 `+0`、线程 `+0`、11 支假棒全部 closed | `pytest tests/test_backend_reconnect_stress.py -q` | — |
+| M4 重连 | 库层重试/恢复/身份校验/取消/零频 | PASS | `18 passed in 3.63s`（含 `_restore_settings` 恢复 `demod_mode`、换设备不下发、半侧可读不判定、`cancel()` 冻结 `connect_calls`） | `pytest tests/test_reconnection.py tests/test_reconnection_e2e.py tests/test_reconnect_zero_freq.py -q` | — |
+
+**失败归因**：终局跑 **FAIL=0**；唯一非 PASS 是 M3 `usb-unplug` 的 `SKIP`，归
+**环境**桶（物理拔线在本机无法程序化注入，产品缺陷与测试取法均不成立），
+复现步骤与升 E2 缺什么已在 `docs/limitations-register.md` L61。
+
+**观察项（未计 FAIL）**：M4 首次运行（同 HEAD）在 teardown 打印过
+`RuntimeError: libshiboken: Internal C++ object (SatTrackPanel) already deleted`
+（`desktop/sat_track_panel.py::_apply_narrow_defaults` 由 QTimer 在对象销毁后回调）。
+终局跑未复现、未致测试失败，归 **产品缺陷（潜在 UI 生命周期）**，待单独复现。
+
+**与 5 号基线修正的关系**：性能线若把 `import scipy.signal` 提前到启动阶段，
+只是把这次一次性加载从“首次建链”挪到“启动”；本测试的基线取法（热身建一次链后
+采样）在预热前后**都成立**，逐轮“基线+2”的断言不变——**预热不影响该判定**。

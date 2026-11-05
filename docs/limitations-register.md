@@ -767,6 +767,13 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | L61 | **真机 USB 拔插**（物理拔线 → 界面断开 → 重插恢复，含六状态文案逐帧核对） | 接入层健壮性线：`tests/test_s8_backend_loss.py`、`tests/test_reconnection.py`（假后端）、`scripts/hw_acceptance/manual_usb_cycle.py`；本机探测（`Get-PnpDevice` / `usbipd` / `pnputil`，2026-11-06） | **E4-with-procedure / `synthetic-only`** —— 硬件**在位**（`USB\VID_0BDA&PID_2832\77771111153705700`，RTL2832U，Status OK），但程序化拔插三路全不通：① `usbipd` 未安装且服务不存在，`winget` 源更新失败（装不上）；② 无 VirtualBox/VMware/Parallels，`HypervisorPresent=True` 但 `vmms` 不存在（没有可挂 USB 的 VM）；③ 非管理员，PnP 禁用被拒——`Disable-PnpDevice` → `常规故障`、`pnputil /disable-device` → `Access is denied.`，设备状态仍 `OK`（无副作用）。**结论：本机无法做程序化拔插，L61 只能到 E4-with-procedure**；`manual_usb_cycle.py --mode usb` 实跑 `SKIPPED(no_operator)`，结果落 `.tmp-tool-results/hw_acceptance/hotplug_usb/result.json` | 升 E2 需：① **管理员权限** + 任选一条注入通道（`usbipd-win` 的 `attach/detach`，或管理员下 `Disable-PnpDevice/Enable-PnpDevice`；Zadig 重绑不做）；② 独占 RTL-SDR（关掉 SDR++/SDR#/rtl_tcp 占用）；③ 注入脚本按时间戳 detach/attach，`manual_usb_cycle.py` 只计时判定；④ 期望值先用 loopback 上界（拔线 stale ≤5.10 s、硬判 ≤10.05 s、重插首帧 ≤1.0 s），真机须重取并落 `result.json`。升 E3 须保留 `result.json` + 时点 + 截图。注入原型未写：三路均不通，写了也无法实跑 |
 | L62 | **真机设备身份校验**（`device_id`/`serial_number`，重连到陌生设备须拒绝下发设置） | `mbdsdr_ai/reconnection.py::_identity_mismatch`、`tests/test_reconnection.py` 三条用例（含半侧可读） | **E4 / `synthetic-only`**，且 **FC0012 无 EEPROM、大概率读不到 SN，真机上这条校验只能落到「不判定」** | 升 E2 需两台带 EEPROM 的 RTL（R820T/R820T2）依次接入同一路径，期望第二台接入时 `gave_up=True` 且 `set_frequency` 调用 0 次；缺 SN 时 `last_error=""` |
 
+> **2026-11-06 修后终局复跑（HEAD `fc1f8076`，接入层四矩阵）**：
+> `python tests/network_hotplug_regression.py` → `usb-unplug SKIP(MBDSDR_NO_HW=1)`，
+> `port-switch` / `backend-crash` / `half-open` 三条 **PASS**（耗时 0.120s / 0.112s / 20.088s）；
+> 同轮 `python -m pytest tests/test_backend_reconnect_stress.py -q` → 2 passed，
+> 10 轮句柄 `+0`（基线改在首次建链后采样）。真机拔线仍**只能人工**按 L61 复跑条件执行，
+> 终局表见 `docs/network-layer.md` §9。
+
 ## 附 S：真机采集链吞吐与丢样（2026-11-06，验收线追加）
 
 > 与 §6.2 导频测法无关：那条已经定了「折叠假峰 + 段数不足」，本附录记的是另一层——
