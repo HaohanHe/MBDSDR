@@ -405,10 +405,23 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     });
     topRow->addWidget(gridCombo);
 
-    topRow->addWidget(new QLabel("门限", this));
-    peakThreshSpin_ = new QSpinBox(this);
-    peakThreshSpin_->setRange(tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
-    peakThreshSpin_->setSuffix(" dB");
+    // U-04: 这个数字的基准是「本帧全部有限 bin 的中位数」，不是 dBFS 绝对
+    // 电平——标签必须自解释，否则读者会拿旁边的 dBFS 纵轴去对照。
+    {
+        auto* peakLabel = new QLabel(QStringLiteral("峰值门(相对本帧中位)"), this);
+        peakLabel->setObjectName("peakGateLabel");
+        const QString tip = QString::fromUtf8(
+            "门限 = 本帧全部有限 bin 的中位数 + 该值（不是 dBFS 绝对电平）。\n"
+            "示例：中位数 −72 dBFS → 门限 −66 dBFS（+6 dB）。");
+        peakLabel->setToolTip(tip);
+        topRow->addWidget(peakLabel);
+        peakThreshSpin_ = new QSpinBox(this);
+        peakThreshSpin_->setObjectName("peakGateSpin");
+        peakThreshSpin_->setRange(tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
+        peakThreshSpin_->setPrefix(QStringLiteral("+"));
+        peakThreshSpin_->setSuffix(QStringLiteral(" dB"));
+        peakThreshSpin_->setToolTip(tip);
+    }
     {
         mbdsdr::core::AppSettings s;
         int saved = s.value("rx/peakThresholdDb",

@@ -35,8 +35,11 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
+#include <QFileInfo>
 #include <QSlider>
 #include <QSpinBox>
+#include <QStatusBar>
+#include <QTemporaryDir>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QToolButton>
@@ -77,6 +80,13 @@ private slots:
     // it so the fresh row is honestly visible (other groups keep their state).
     void bmGroupCollapseToggleHidesRowsKeepsCountAndNewRowVisible();
     void squelchAutoFollowsSameDomainFloor();
+    // U-01: C++ 静噪滑杆数字是绝对音频 RMS dBFS，标签必须写明口径，
+    // 与桌面侧「比噪声底高多少」的余量区分开。
+    void squelchValueLabelStatesAbsoluteDbfs();
+    // U-04: 峰值门限以本帧中位数为基准，文案与数值必须同源（+6 dB）。
+    void peakGateCopyIsRelativeToFrameMedian();
+    // E-01: 导出成功/失败都回到状态栏，失败带原因码（不再只有 qWarning）。
+    void exportFeedbackVisibleOnSuccessAndFailure();
     void vfoCopyDuplicatesSourceParams();
     void vfoDoubleClickSwitchesActive();
     void vfoNamingPersistsRoundTrip();
@@ -1830,6 +1840,72 @@ void TestUiIntegration::guideCardButtonsDriveRealControls() {
     QApplication::processEvents();
     mbdsdr::core::AppSettings s;
     QCOMPARE(s.value(QStringLiteral("ui/onboardingDismissed")).toBool(), true);
+}
+
+void TestUiIntegration::squelchValueLabelStatesAbsoluteDbfs() {
+    MainWindow win;
+    auto* slider = win.findChild<QSlider*>("squelchSlider");
+    auto* label = win.findChild<QLabel*>("squelchValue");
+    QVERIFY(slider && label);
+
+    // 文案 = 绝对门 + dBFS；数字与滑杆值同源（不是另一套换算）。
+    QCOMPARE(label->text(),
+             QStringLiteral("绝对门 %1 dBFS").arg(slider->value()));
+    QVERIFY2(slider->toolTip().contains(QStringLiteral("dBFS")),
+             "滑杆 tooltip 必须写明绝对 dBFS 口径");
+    slider->setValue(slider->value() + 3);
+    QCOMPARE(label->text(),
+             QStringLiteral("绝对门 %1 dBFS").arg(slider->value()));
+}
+
+void TestUiIntegration::peakGateCopyIsRelativeToFrameMedian() {
+    MainWindow win;
+    auto* label = win.findChild<QLabel*>("peakGateLabel");
+    auto* spin = win.findChild<QSpinBox*>("peakGateSpin");
+    QVERIFY(label && spin);
+
+    QVERIFY2(label->text().contains(QString::fromUtf8("相对本帧中位")),
+             "峰值门标签必须写明基准是本帧中位数");
+    QVERIFY2(label->toolTip().contains(QString::fromUtf8("中位数")),
+             "tooltip 必须解释基准");
+    QVERIFY2(label->toolTip().contains(QStringLiteral("dBFS")),
+             "tooltip 必须给出绝对电平示例");
+    QCOMPARE(spin->prefix(), QStringLiteral("+"));
+    QCOMPARE(spin->suffix(), QStringLiteral(" dB"));
+
+    // 数值口径断言：设定 6 → 显示 +6 dB（文案与值同一个来源）。
+    spin->setValue(6);
+    QCOMPARE(spin->text(), QStringLiteral("+6 dB"));
+}
+
+void TestUiIntegration::exportFeedbackVisibleOnSuccessAndFailure() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    QTest::qWait(300);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // 成功：状态栏可见 + 文件真落盘。
+    const QString okPng = dir.filePath(QStringLiteral("snap.png"));
+    QVERIFY(win.exportSpectrumSnapshotTo(okPng));
+    QVERIFY(QFileInfo::exists(okPng));
+    QVERIFY(win.statusBar()->currentMessage().contains(QStringLiteral("已导出[OK]")));
+
+    // 失败：状态栏带原因码（此前只有 qWarning，用户看不到）。
+    const QString badPng = dir.filePath(QStringLiteral("no_such_dir/snap.png"));
+    QVERIFY(!win.exportSpectrumSnapshotTo(badPng));
+    QVERIFY(win.statusBar()->currentMessage().contains(QStringLiteral("E-WRITE")));
+
+    const QString okCsv = dir.filePath(QStringLiteral("peaks.csv"));
+    QVERIFY(win.exportPeaksCsvTo(okCsv));
+    QVERIFY(QFileInfo::exists(okCsv));
+    QVERIFY(win.statusBar()->currentMessage().contains(QStringLiteral("已导出[OK]")));
+
+    const QString badCsv = dir.filePath(QStringLiteral("no_such_dir/peaks.csv"));
+    QVERIFY(!win.exportPeaksCsvTo(badCsv));
+    QVERIFY(win.statusBar()->currentMessage().contains(QStringLiteral("E-OPEN")));
 }
 
 QTEST_MAIN(TestUiIntegration)

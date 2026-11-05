@@ -236,6 +236,10 @@ public:
     void harnessShowConnecting() { setConnState(ConnState::Connecting); }
     bool        harnessGuideCardVisible() const;   // defined in .cpp (QFrame complete there)
     QPushButton*harnessGuideDismissBtn() const { return guideDismissBtn_; }
+    // E-01: 导出 seam（按钮的 QFileDialog 之后调这两个）。成功/失败都写
+    // statusBar，失败带原因码；返回 bool 让离屏测试可观测，不靠 qWarning。
+    bool exportSpectrumSnapshotTo(const QString& path);
+    bool exportPeaksCsvTo(const QString& path);
 
 private slots:
     void onSourceChanged(const QString& name, bool connected);

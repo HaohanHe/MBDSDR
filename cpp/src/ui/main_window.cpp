@@ -37,6 +37,7 @@
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QUrl>
 #include <QDesktopServices>
@@ -945,8 +946,13 @@ MainWindow::MainWindow(QWidget* parent)
     // numbers): more-negative = more sensitive.
     squelchSlider_->setRange(tokens::kSquelchMinDb, tokens::kSquelchMaxDb);
     squelchSlider_->setValue(tokens::kSquelchDefaultDb);
+    // U-01: 这套数字是**绝对音频 RMS dBFS**，不是桌面端「比噪声底高多少」
+    // 的余量。同一个「dB」在两端差约 44 dB 且方向相反，标注必须写清口径。
+    squelchSlider_->setToolTip(QString::fromUtf8(
+        "绝对音频 RMS 门（dBFS）：低于此电平即静音。\n"
+        "桌面端同一个数字是「比噪声底高多少的余量」，两套不是同一物理量。"));
     squelchValue_ = new QLabel(
-        QString("%1 dB").arg(tokens::kSquelchDefaultDb), gSql);
+        QStringLiteral("绝对门 %1 dBFS").arg(tokens::kSquelchDefaultDb), gSql);
     squelchValue_->setObjectName("squelchValue");
     sqlRow->addWidget(squelchSlider_);
     sqlRow->addWidget(squelchValue_);
@@ -1009,11 +1015,8 @@ MainWindow::MainWindow(QWidget* parent)
                 this, QStringLiteral("导出频谱快照"),
                 QStringLiteral("spectrum.png"),
                 QStringLiteral("PNG (*.png)"));
-            if (path.isEmpty() || !spectrum_) return;
-            // Grab the real spectrum widget, not a drawn placeholder.
-            const QPixmap px = spectrum_->grab();
-            if (!px.save(path, "PNG"))
-                qWarning() << "[mbdsdr] 频谱快照写入失败:" << path;
+            if (path.isEmpty()) return;   // 用户取消：不弹失败提示
+            exportSpectrumSnapshotTo(path);
         });
         gToolsLay->addWidget(snapBtn);
         // 峰值表 CSV：把当前峰值列表写成 CSV。
@@ -1025,26 +1028,8 @@ MainWindow::MainWindow(QWidget* parent)
                 this, QStringLiteral("导出峰值表"),
                 QStringLiteral("peaks.csv"),
                 QStringLiteral("CSV (*.csv)"));
-            if (path.isEmpty() || !spectrum_) return;
-            // 读峰值表真实行（peakTable_ 在 SpectrumWidget 里，findChild 取）。
-            auto* table = spectrum_->findChild<QTableWidget*>("peakTable");
-            QFile f(path);
-            if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                qWarning() << "[mbdsdr] 峰值 CSV 写入失败:" << path;
-                return;
-            }
-            QTextStream ts(&f);
-            ts << "index,freq_mhz,strength_dbfs,delta_khz\n";
-            if (table) {
-                for (int r = 0; r < table->rowCount(); ++r) {
-                    const QString idx = table->item(r, 0) ? table->item(r, 0)->text() : QString();
-                    const QString fq  = table->item(r, 1) ? table->item(r, 1)->text() : QString();
-                    const QString db  = table->item(r, 2) ? table->item(r, 2)->text() : QString();
-                    const QString dk  = table->item(r, 3) ? table->item(r, 3)->text() : QString();
-                    ts << idx << ',' << fq << ',' << db << ',' << dk << '\n';
-                }
-            }
-            f.close();
+            if (path.isEmpty()) return;   // 用户取消：不弹失败提示
+            exportPeaksCsvTo(path);
         });
         gToolsLay->addWidget(csvBtn);
         // 数字模式：FT8 / LRPT 开关（引擎直连）。
@@ -3065,7 +3050,8 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(squelchSlider_, &QSlider::valueChanged,
             this, [this](int v) {
-                squelchValue_->setText(QString("%1 dB").arg(v));
+                squelchValue_->setText(
+                    QStringLiteral("绝对门 %1 dBFS").arg(v));
                 // 自动档下滑杆只是"读回显示"：写绝对门会静默
                 // squelchAuto_.store(false)，用户以为在设余量，实际把自动关了。
                 if (squelchAutoBtn_ && squelchAutoBtn_->isChecked()) return;
@@ -5566,7 +5552,8 @@ void MainWindow::restoreUiState() {
     const float sqlThr = s.value("rx/squelchThreshold",
                                 static_cast<float>(tokens::kSquelchDefaultDb)).toFloat();
     squelchSlider_->setValue(static_cast<int>(std::round(sqlThr)));
-    squelchValue_->setText(QString("%1 dB").arg(squelchSlider_->value()));
+    squelchValue_->setText(
+        QStringLiteral("绝对门 %1 dBFS").arg(squelchSlider_->value()));
     // Restore auto-gate arming. Checking it re-applies floor+margin via the
     // toggled handler (once audio blocks have flowed the real floor is ready).
     squelchAutoBtn_->setChecked(s.value("rx/squelchAuto", false).toBool());
@@ -6863,6 +6850,59 @@ void MainWindow::dismissGuideCard() {
 
 bool MainWindow::harnessGuideCardVisible() const {
     return guideCard_ && guideCard_->isVisible();
+}
+
+// E-01: 导出不能被静默吞掉。成功与失败都落到状态栏（用户可见），失败带
+// 原因码，离屏测试可直接断言状态栏文案与返回值；用户取消对话框不算失败。
+bool MainWindow::exportSpectrumSnapshotTo(const QString& path) {
+    if (!spectrum_) {
+        statusBar()->showMessage(QStringLiteral("导出失败[E-NO-PANEL]：频谱组件未就绪"));
+        return false;
+    }
+    // Grab the real spectrum widget, not a drawn placeholder.
+    const QPixmap px = spectrum_->grab();
+    if (px.isNull() || !px.save(path, "PNG")) {
+        statusBar()->showMessage(
+            QStringLiteral("导出失败[E-WRITE]：无法写入 %1（目录不可写或磁盘已满）")
+                .arg(path));
+        return false;
+    }
+    statusBar()->showMessage(
+        QStringLiteral("已导出[OK]：%1").arg(QFileInfo(path).fileName()));
+    return true;
+}
+
+bool MainWindow::exportPeaksCsvTo(const QString& path) {
+    if (!spectrum_) {
+        statusBar()->showMessage(QStringLiteral("导出失败[E-NO-PANEL]：频谱组件未就绪"));
+        return false;
+    }
+    // 读峰值表真实行（peakTable 在 SpectrumWidget 里，findChild 取）。
+    auto* table = spectrum_->findChild<QTableWidget*>(QStringLiteral("peakTable"));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        statusBar()->showMessage(
+            QStringLiteral("导出失败[E-OPEN]：无法打开 %1（%2）")
+                .arg(path, f.errorString()));
+        return false;
+    }
+    QTextStream ts(&f);
+    ts << "index,freq_mhz,strength_dbfs,delta_khz\n";
+    const int rows = table ? table->rowCount() : 0;
+    if (table) {
+        for (int r = 0; r < rows; ++r) {
+            const QString idx = table->item(r, 0) ? table->item(r, 0)->text() : QString();
+            const QString fq  = table->item(r, 1) ? table->item(r, 1)->text() : QString();
+            const QString db  = table->item(r, 2) ? table->item(r, 2)->text() : QString();
+            const QString dk  = table->item(r, 3) ? table->item(r, 3)->text() : QString();
+            ts << idx << ',' << fq << ',' << db << ',' << dk << '\n';
+        }
+    }
+    f.close();
+    statusBar()->showMessage(
+        QStringLiteral("已导出[OK]：%1（%2 行）")
+            .arg(QFileInfo(path).fileName()).arg(rows));
+    return true;
 }
 
 // Switch the onboarding three-step copy to match the active instrument domain.
