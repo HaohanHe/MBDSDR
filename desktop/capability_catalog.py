@@ -41,8 +41,9 @@ from mbdsdr_ai import decoder_registry as _decoders  # noqa: E402
 from mbdsdr_ai.decode_router import (  # noqa: E402
     DIGITAL_MODE_CAPABILITIES, EVIDENCE_REAL, EVIDENCE_PARTIAL,
 )
+from mbdsdr_ai.core import mcp_server as _mcp  # noqa: E402
 from mbdsdr_ai.core.mcp_server import (  # noqa: E402
-    ALL_DOMAIN_NAMES, ALL_DOMAIN_SUMMARIES, _TOOL_DOMAIN,
+    ALL_DOMAIN_NAMES, ALL_DOMAIN_SUMMARIES,
 )
 
 # 目录分类（顺序即界面上的分组顺序）
@@ -212,9 +213,9 @@ def _decoder_registry_capabilities() -> List[Capability]:
 
 
 def _domain_capabilities() -> List[Capability]:
-    tools_by_domain: Dict[str, List[str]] = {n: [] for n in ALL_DOMAIN_NAMES}
-    for name, dom in _TOOL_DOMAIN.items():
-        tools_by_domain.setdefault(dom, []).append(name)
+    # 域内工具名一律从工具表实时取（不读手抄映射直接当事实），
+    # 这样 AI 工具面新增工具时目录跟着变；未登记域的工具单独列成诚实空态。
+    tools_by_domain: Dict[str, List[str]] = _mcp.tool_domain_view()
     out: List[Capability] = []
     for dom in ALL_DOMAIN_NAMES:
         names = sorted(tools_by_domain.get(dom, []))
@@ -237,6 +238,18 @@ def _domain_capabilities() -> List[Capability]:
             source=f"mcp:{dom}",
             status=status,
             note=note,
+        ))
+    stray = _mcp.unmapped_tool_names()
+    if stray:
+        out.append(Capability(
+            category="AI",
+            title="AI 工具域：未归类（注册表有工具未分域）",
+            description="这些工具真实存在于工具注册表，但没有域归属，"
+                        "MCP 客户端按域取工具时看不到它们",
+            trigger="无（需在 mcp_server._TOOL_DOMAIN 补登记域）",
+            source="mcp:unmapped",
+            status="unavailable",
+            note="、".join(stray),
         ))
     return out
 

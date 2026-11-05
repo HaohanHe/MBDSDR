@@ -66,6 +66,54 @@ def test_catalog_sources_come_from_real_registries(catalog):
             == {sid for sid, _c, _d in SHORTCUT_CAPABILITIES})
 
 
+def test_ai_domain_counts_match_live_tool_registry(catalog):
+    """AI 工具域的工具名/数量必须来自工具表实况，不是手抄映射的快照。"""
+    from mbdsdr_ai.core import mcp_server as mcp
+
+    live = [t["name"] for t in mcp._build_tool_table()]
+    buckets = mcp.tool_domain_view()
+    diff = set(buckets) ^ set(mcp.ALL_DOMAIN_NAMES)
+    assert not diff, f"域名表与工具映射分叉: {sorted(diff)}"
+    stray = mcp.unmapped_tool_names()
+    assert not stray, f"工具表里有工具没登记域: {stray}"
+    total = sum(len(v) for v in buckets.values())
+    assert total == len(live), f"域内工具总数 {total} != 工具表实际 {len(live)}"
+
+    rows = _by_prefix(catalog, "mcp:")
+    assert len(rows) == len(mcp.ALL_DOMAIN_NAMES)
+    for dom in mcp.ALL_DOMAIN_NAMES:
+        row = next(x for x in rows if x.source == f"mcp:{dom}")
+        if buckets[dom]:
+            assert f"{len(buckets[dom])} 个工具" in row.trigger
+            assert row.status == "available"
+        else:
+            assert "为空" in row.trigger
+            assert row.status == "unavailable" and row.note
+
+
+def test_new_unmapped_tool_makes_catalog_red(monkeypatch):
+    """反证：工具表多一个未登记域的工具 → 目录如实列出，一致性断言会红。"""
+    from mbdsdr_ai.core import mcp_server as mcp
+
+    original = mcp._build_tool_table
+
+    def fake_table():
+        rows = list(original())
+        rows.append({"name": "zz_probe_unmapped", "description": "",
+                     "inputSchema": {"type": "object"}})
+        return rows
+
+    monkeypatch.setattr(mcp, "_build_tool_table", fake_table)
+    assert mcp.unmapped_tool_names() == ["zz_probe_unmapped"]
+    assert sum(len(v) for v in mcp.tool_domain_view().values()) == len(fake_table()) - 1
+
+    from capability_catalog import build_catalog
+    stray = [x for x in build_catalog() if x.source == "mcp:unmapped"]
+    assert len(stray) == 1
+    assert "zz_probe_unmapped" in stray[0].note
+    assert stray[0].status == "unavailable"
+
+
 def test_every_panel_row_uses_registry_summary(catalog):
     from panel_registry import registry
     specs = {s.id: s for s in registry().list()}

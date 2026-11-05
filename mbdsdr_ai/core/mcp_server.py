@@ -1307,6 +1307,29 @@ _TOOL_DOMAIN: Dict[str, str] = {
 }
 
 
+def tool_domain_view() -> Dict[str, List[str]]:
+    """域 → 实际工具名（唯一事实源 = ``_build_tool_table()``）。
+
+    桌面能力目录（``desktop/capability_catalog.py``）与 MCP ``tools/list``
+    的分组视图都读这里，避免「手抄一份 ``_TOOL_DOMAIN`` 就以为目录是活的」：
+    工具表新增了工具但没登记域时，``unmapped_tool_names()`` 会把它逐条列出，
+    ``tests/test_discoverability_help.py`` 据此变红。
+    """
+    buckets: Dict[str, List[str]] = {n: [] for n in ALL_DOMAIN_NAMES}
+    for t in _build_tool_table():
+        dom = _TOOL_DOMAIN.get(t["name"])
+        if dom is None:
+            continue
+        buckets.setdefault(dom, []).append(t["name"])
+    return buckets
+
+
+def unmapped_tool_names() -> List[str]:
+    """工具表里没有域归属的工具名（空列表 = 目录与注册表一致）。"""
+    return sorted(t["name"] for t in _build_tool_table()
+                  if t["name"] not in _TOOL_DOMAIN)
+
+
 def _resolve_domain(query: str) -> Optional[str]:
     """把 params.domain 容错解析成域名（冻结 10 域 + Python 扩展域）；匹配不到返回 None。"""
     if query in ALL_DOMAIN_NAMES:
