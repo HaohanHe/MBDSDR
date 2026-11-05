@@ -78,25 +78,48 @@ def _analyze_mpx(mpx: np.ndarray) -> tuple[float, float, int] | None:
     return float(f_p), float(neigh_db), k_seg
 
 
-def _pilot(fs: float, iq: np.ndarray) -> tuple[float, float] | None:
-    """信号级 MPX 找 19 kHz 导频，返回 (频率 Hz, 高于邻域 dB)。"""
+def _pilot(fs: float, iq: np.ndarray) -> tuple[float, float, int] | None:
+    """信号级 MPX 找 19 kHz 导频，返回 (频率 Hz, 高于邻域 dB, Welch 段数)。"""
     r = _analyze_mpx(_mpx_200k(iq, fs))
-    return None if r is None else (r[0], r[1])
+    return None if r is None else (r[0], r[1], r[2])
 
 
-def _pilot_from_ctrl(ctrl, fs: float, seconds: float = 2.0) -> tuple[float, float, int] | None:
-    """连读 seconds 秒 IQ 逐块转 MPX，喂给 Welch（约 6 段，段数越多底越稳）。"""
-    parts = []
+def _pilot_from_ctrl(ctrl, fs: float, seconds: float = 6.0) -> dict | None:
+    """连读 seconds 秒 IQ 逐块转 MPX，喂给 Welch；同时给出采集吞吐与丢样率。
+
+    采集是按**墙钟** seconds 秒循环读，而不是「读满 fs×seconds 个样本」：
+    USB 块读跟不上时，块与块之间会有样本被驱动丢弃，于是实际采到的信号
+    时长 < 请求时长。丢样只减少 Welch 段数与统计稳定度，**不改变导频频率**
+    （每块各自鉴频，丢的是块间空隙）。
+    """
+    parts, samples = [], 0
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < seconds:
         blk = ctrl.read_iq(262144)
         if blk is None or len(blk) < 1024:
             break
         parts.append(_mpx_200k(blk, fs))
+        samples += len(blk)
+    wall = time.perf_counter() - t0
     if not parts:
         return None
-    r = _analyze_mpx(np.concatenate(parts))
-    return None if r is None else (r[0], r[1], r[2])
+    mpx = np.concatenate(parts)
+    r = _analyze_mpx(mpx)
+    if r is None:
+        return None
+    captured_s = samples / fs
+    return {
+        "pilot_hz": r[0],
+        "peak_over_neigh_db": r[1],
+        "segments": r[2],
+        "requested_s": round(seconds, 2),
+        "captured_s": round(captured_s, 3),
+        "wall_s": round(wall, 3),
+        "mpx_points": int(len(mpx)),
+        "throughput_msps": round(samples / wall / 1e6, 3) if wall > 0 else None,
+        "drop_pct": round(max(0.0, 1.0 - captured_s / seconds) * 100, 1),
+    }
+
 
 
 
@@ -150,10 +173,11 @@ def _offline(skip_code: str = "NO_HW", why: str = "") -> dict:
         checks.append(common.check("stereo_pilot_19k", False,
                                    "IQ 不足或无导频（单声道台可能合法）", skipped=True))
     else:
-        f_p, snr_p = pilot
+        f_p, snr_p, segs = pilot
         checks.append(common.check("stereo_pilot_19k",
                                    abs(f_p - 19000) < 300 and snr_p > 10,
-                                   f"导频 {f_p:.0f} Hz，高于邻域 {snr_p:.1f} dB"))
+                                   f"导频 {f_p:.0f} Hz，高于邻域 {snr_p:.1f} dB"
+                                   f"（Welch {segs} 段，离线夹具固定时长）"))
 
     wav_path = f"{out}/wfm_audio_replay.wav"
     pcm16 = (np.clip(a, -1.0, 1.0) * 32767).astype(np.int16)
@@ -178,6 +202,7 @@ def _offline(skip_code: str = "NO_HW", why: str = "") -> dict:
         "stereo": bool(dec.get("stereo")),
         "pilot_hz": round(pilot[0], 0) if pilot else None,
         "pilot_snr_db": round(pilot[1], 1) if pilot else None,
+        "pilot_welch_segments": pilot[2] if pilot else None,
         "soundcard_opened": False,
         "replay_note": "产品解调链 decode_stereo 回放真实 OTA 样本；未打开声卡。",
     }
@@ -256,7 +281,7 @@ def run(freq_hz: float) -> dict:
             checks.append(common.check("stereo_pilot_19k", False,
                                        "IQ 不足，无法测导频", skipped=True))
         else:
-            f_p, snr_p, segs = pilot
+            f_p, snr_p, segs = pilot["pilot_hz"], pilot["peak_over_neigh_db"], pilot["segments"]
             ok_p = abs(f_p - 19000) < 100 and snr_p > 10
             weak = snr_p <= 10
             # 单声道台没有 19 kHz 导频是合法状态，不判失败，标 skipped 并写明。
@@ -264,7 +289,9 @@ def run(freq_hz: float) -> dict:
                 "导频过弱，可能为单声道台（不判失败）" if weak else "19 kHz 导频频率异常")
             checks.append(common.check(
                 "stereo_pilot_19k", ok_p,
-                f"导频 {f_p:.1f} Hz，高于邻域 {snr_p:.1f} dB（Welch {segs} 段）；{verdict}",
+                f"导频 {f_p:.1f} Hz，高于邻域 {snr_p:.1f} dB（Welch {segs} 段；"
+                f"实际采集 {pilot['captured_s']:.2f} s / 请求 {pilot['requested_s']:.2f} s，"
+                f"丢样 {pilot['drop_pct']:.1f}%）；{verdict}",
                 skipped=not ok_p and weak))
 
         # 证据：把这段音频写成 wav（不经过声卡，仅落盘）
@@ -283,11 +310,17 @@ def run(freq_hz: float) -> dict:
             "channels": channels,
             "audio_rms": round(rms, 5),
             "energy_ratio_below_15k": round(ratio, 1),
-            "pilot_hz": round(pilot[0], 1) if pilot else None,
-            "pilot_snr_db": round(pilot[1], 1) if pilot else None,
+            "pilot_hz": round(pilot["pilot_hz"], 1) if pilot else None,
+            "pilot_snr_db": round(pilot["peak_over_neigh_db"], 1) if pilot else None,
             "pilot_method": ("Welch 65536/Hann @200kHz（resample_poly 抗混叠），"
                              "18.5–19.5kHz 取峰+抛物线插值；dB=峰/邻域中位数"),
-            "pilot_welch_segments": pilot[2] if pilot else None,
+            "pilot_welch_segments": pilot["segments"] if pilot else None,
+            "pilot_requested_s": pilot["requested_s"] if pilot else None,
+            "pilot_captured_s": pilot["captured_s"] if pilot else None,
+            "pilot_wall_s": pilot["wall_s"] if pilot else None,
+            "pilot_mpx_points": pilot["mpx_points"] if pilot else None,
+            "pilot_throughput_msps": pilot["throughput_msps"] if pilot else None,
+            "pilot_drop_pct": pilot["drop_pct"] if pilot else None,
             "soundcard_opened": False,
         }
         status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL

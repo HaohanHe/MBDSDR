@@ -130,9 +130,42 @@ def test_pilot_measurement_ignores_aliased_spur():
     """断 18841 Hz 是折叠加法产物：带抗混叠重采样后必须读回 19000 Hz。"""
     r = ring3._pilot(FS, _iq_pilot_plus_spur())
     assert r is not None
-    f_p, db = r
+    f_p, db, _segs = r
     assert abs(f_p - 19000.0) < 3.0, f"导频被杂散拽到 {f_p:.1f} Hz"
     assert db > 10.0, f"导频只高出邻域 {db:.1f} dB"
+
+
+def test_pilot_capture_accounting_is_measured_not_faked():
+    """采集记账：captured_s/丢样率必须由真实样本数算出，不能直接等于请求值。
+
+    假控制器只给 6 个块就返回空（模拟「墙钟没读满」）。若有人把
+    pilot_captured_s 直接写成请求时长，这里的恒等式立刻红。
+    """
+    class _FakeCtrl:
+        block = 262144
+
+        def __init__(self):
+            self.got = 0
+
+        def read_iq(self, _n):
+            if self.got >= 6:
+                return np.zeros(0, dtype=np.complex64)
+            self.got += 1
+            rng = np.random.default_rng(20261106 + self.got)
+            return (rng.normal(size=self.block)
+                    + 1j * rng.normal(size=self.block)).astype(np.complex64)
+
+    r = ring3._pilot_from_ctrl(_FakeCtrl(), FS, seconds=6.0)
+    assert r is not None
+    samples = 6 * 262144
+    captured = samples / FS
+    assert r["requested_s"] == 6.0
+    assert abs(r["captured_s"] - captured) < 1e-3, f"captured_s={r['captured_s']}"
+    assert abs(r["drop_pct"] - (1.0 - captured / 6.0) * 100.0) < 0.2, r["drop_pct"]
+    # MPX 点数与采集时长、段数三者自洽（200 kHz，段长 65536；每块重采样最多多出 1 点）
+    assert abs(r["mpx_points"] - captured * 200000) <= 6, r["mpx_points"]
+    assert r["segments"] == r["mpx_points"] // 65536
+    assert r["throughput_msps"] is None or r["throughput_msps"] > 0
 
 
 def test_old_decimation_would_report_the_alias():

@@ -767,3 +767,18 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | L61 | **真机 USB 拔插**（物理拔线 → 界面断开 → 重插恢复，含六状态文案逐帧核对） | 接入层健壮性线：`tests/test_s8_backend_loss.py`、`tests/test_reconnection.py`（假后端）、`scripts/hw_acceptance/manual_usb_cycle.py`；本机探测（`Get-PnpDevice` / `usbipd` / `pnputil`，2026-11-06） | **E4-with-procedure / `synthetic-only`** —— 硬件**在位**（`USB\VID_0BDA&PID_2832\77771111153705700`，RTL2832U，Status OK），但程序化拔插三路全不通：① `usbipd` 未安装且服务不存在，`winget` 源更新失败（装不上）；② 无 VirtualBox/VMware/Parallels，`HypervisorPresent=True` 但 `vmms` 不存在（没有可挂 USB 的 VM）；③ 非管理员，PnP 禁用被拒——`Disable-PnpDevice` → `常规故障`、`pnputil /disable-device` → `Access is denied.`，设备状态仍 `OK`（无副作用）。**结论：本机无法做程序化拔插，L61 只能到 E4-with-procedure**；`manual_usb_cycle.py --mode usb` 实跑 `SKIPPED(no_operator)`，结果落 `.tmp-tool-results/hw_acceptance/hotplug_usb/result.json` | 升 E2 需：① **管理员权限** + 任选一条注入通道（`usbipd-win` 的 `attach/detach`，或管理员下 `Disable-PnpDevice/Enable-PnpDevice`；Zadig 重绑不做）；② 独占 RTL-SDR（关掉 SDR++/SDR#/rtl_tcp 占用）；③ 注入脚本按时间戳 detach/attach，`manual_usb_cycle.py` 只计时判定；④ 期望值先用 loopback 上界（拔线 stale ≤5.10 s、硬判 ≤10.05 s、重插首帧 ≤1.0 s），真机须重取并落 `result.json`。升 E3 须保留 `result.json` + 时点 + 截图。注入原型未写：三路均不通，写了也无法实跑 |
 | L62 | **真机设备身份校验**（`device_id`/`serial_number`，重连到陌生设备须拒绝下发设置） | `mbdsdr_ai/reconnection.py::_identity_mismatch`、`tests/test_reconnection.py` 三条用例（含半侧可读） | **E4 / `synthetic-only`**，且 **FC0012 无 EEPROM、大概率读不到 SN，真机上这条校验只能落到「不判定」** | 升 E2 需两台带 EEPROM 的 RTL（R820T/R820T2）依次接入同一路径，期望第二台接入时 `gave_up=True` 且 `set_frequency` 调用 0 次；缺 SN 时 `last_error=""` |
 
+## 附 S：真机采集链吞吐与丢样（2026-11-06，验收线追加）
+
+> 与 §6.2 导频测法无关：那条已经定了「折叠假峰 + 段数不足」，本附录记的是另一层——
+> **USB 块读跟不上请求速率，块与块之间样本被驱动丢弃**。两者都影响导频读数，
+> 但只有后者能用「请求时长 vs 实际采集时长」量化。
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L63 | **采集链吞吐限制：6 s 请求只采到约 5.0–5.2 s（丢样 12.6–16.3%）** | `scripts/hw_acceptance/ring3_demod_audio.py::_pilot_from_ctrl` 现在记录 `pilot_requested_s / pilot_captured_s / pilot_wall_s / pilot_mpx_points / pilot_throughput_msps / pilot_drop_pct`，判定文案里也打印实际采集时长；同台 93.305 MHz、请求 2.4 MS/s、6 s，连测 5 次：captured **5.134 / 5.243 / 5.134 / 5.134 / 5.024 s**、丢样 **14.4 / 12.6 / 14.4 / 14.4 / 16.3 %**（均值 14.4）、实测吞吐 **1.993–2.061 MS/s** | **已量化（真机、可重复；不是偶发 18%，常态 12.6–16.3%）**。丢的是**块间空隙**，每块各自鉴频，故**不改导频频率**（五次 18999.5–19002.1 Hz，极差 2.6 Hz）。对段数的直接影响：Welch 段数 = ⌊captured_s × 200000 ÷ 65536⌋，5.0–5.2 s → **15 段**（不是 6 s 名义上的 18 段）；段数少会放大「峰/邻域 dB」的估计方差（93.305 MHz：5 段 10.4 dB、14 段 15.2 dB、22–26 段 16.7–20.1 dB），所以采集时长提到 6 s 并把实际值写进 summary，而不是调门限 | `python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6`，看 `result.json` 的 `pilot_requested_s/pilot_captured_s/pilot_drop_pct/pilot_welch_segments`；契约测试 `test_pilot_capture_accounting_is_measured_not_faked`（假控制器只给 6 块）锁住「captured_s/drop 必须由真实样本数算出」，把它写成等于请求值即红 |
+
+> **口径更正（口算作废）**：上一轮用「15 × 65536 = 4.92 s」当实际采集时长，推出「约 18% 丢样」——
+> 4.92 s 只是 **Welch 用掉的整段部分**，不含末尾不足一段的余量。真实 `pilot_mpx_points=1,026,762`
+> → 5.13 s → 丢样 **14.4%**。以后这类数字只从 `result.json` 取，不再口算。
+
+
