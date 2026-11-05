@@ -144,6 +144,49 @@ def test_batch_projection_matches_scalar_projection():
         v.close()
 
 
+def test_star_visual_many_matches_scalar():
+    """批量视觉模型（半径/亮度/辉光/alpha）必须逐星等于标量 `_star_visual`。
+
+    星空层每帧把整批星一次算完；批量版若偏离标量版，就是第二套视觉模型。
+    这里用真实选星结果（含量等极限内的裸眼星与 LOD 放出的暗星）对比。
+    """
+    v = _new_view()
+    try:
+        sel = _selection(v, 120.0)
+        assert sel is not None and len(sel) > 141
+        r, bright, bloom, alpha = v._star_visual_many(
+            sel.eff_mag, sel.limit_mag, v._bortle)
+        step = max(1, len(sel) // 60)
+        for i in range(0, len(sel), step):
+            want = v._star_visual(
+                float(sel.eff_mag[i]), float(sel.limit_mag), int(v._bortle))
+            assert abs(float(r[i]) - want[0]) < 1e-12, (i, r[i], want[0])
+            assert abs(float(bright[i]) - want[1]) < 1e-12, (i, bright[i], want[1])
+            assert abs(float(bloom[i]) - want[2]) < 1e-12, (i, bloom[i], want[2])
+            assert int(alpha[i]) == want[3], (i, alpha[i], want[3])
+        # LOD 分支确实被命中（否则这条断言只是空转）：放大后视场极限高于
+        # 裸眼基线，超基线但仍在极限内的星走 0.5px 最小可辨点。
+        from mbdsdr_ai.skyengine.star_catalog import naked_eye_limit_mag
+        base = float(naked_eye_limit_mag(int(v._bortle)))
+        narrow = _selection(v, 5.0)
+        assert narrow is not None and float(narrow.limit_mag) > base
+        rn, _bn, _ln, an = v._star_visual_many(
+            narrow.eff_mag, narrow.limit_mag, v._bortle)
+        lod_idx = [i for i in range(len(narrow))
+                   if float(narrow.eff_mag[i]) > base
+                   and float(narrow.eff_mag[i]) <= float(narrow.limit_mag) + 1e-9]
+        assert lod_idx, "放大后应存在超出裸眼基线的 LOD 暗星"
+        i = lod_idx[0]
+        assert abs(float(rn[i]) - v.STAR_LOD_MIN_R_PX) < 1e-12
+        assert 0 < int(an[i]) < 255
+        assert v._star_visual(
+            float(narrow.eff_mag[i]), float(narrow.limit_mag),
+            int(v._bortle)) == (float(rn[i]), float(_bn[i]),
+                                float(_ln[i]), int(an[i]))
+    finally:
+        v.close()
+
+
 # --------------------------------------------------------------------------
 # 2. 视场驱动：放大后同一天区必须多出更暗的星
 # --------------------------------------------------------------------------

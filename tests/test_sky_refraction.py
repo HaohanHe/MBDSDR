@@ -124,6 +124,39 @@ def test_pressure_temperature_basis():
     assert sky.DISPLAY_REFRACTION_TEMPERATURE_C == 10.0
 
 
+def test_apparent_alt_many_matches_scalar():
+    """批量折射路径（星空层每帧一次算 1515 颗）必须逐点等于标量事实源。
+
+    覆盖 -90..90° 密集采样（含 -5/-3.54 两个分段边界两侧）、NaN/±Inf，
+    以及自定义气压/温度口径；批量版不允许成为第二套折射模型。
+    """
+    import numpy as np
+
+    from rf_sky_view import display_apparent_alt_many
+
+    for pressure, temp in ((1013.25, 10.0), (1000.0, -10.0), (1030.0, 30.0)):
+        h = np.concatenate([
+            np.arange(-90.0, 90.0001, 0.01),
+            np.array([-5.0001, -5.0, -4.9999,
+                      -3.5401, -3.54, -3.5399,
+                      np.nan, np.inf, -np.inf]),
+        ])
+        got = display_apparent_alt_many(h, pressure, temp)
+        for i, x in enumerate(h):
+            want = display_apparent_alt_deg(float(x), pressure, temp)
+            if math.isnan(want):
+                assert math.isnan(float(got[i]),), (x, got[i])
+            elif math.isinf(want):
+                assert float(got[i]) == want, (x, got[i], want)
+            else:
+                assert float(got[i]) == pytest.approx(want, rel=0.0, abs=1e-12), (
+                    x, got[i], want)
+
+    # 空输入不炸，形状保持一维
+    empty = display_apparent_alt_many([])
+    assert isinstance(empty, np.ndarray) and empty.size == 0
+
+
 def test_view_refraction_switch_and_readout_labels():
     v = _new_view()
     try:

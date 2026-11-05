@@ -274,6 +274,38 @@ def display_apparent_alt_deg(
         geom_alt_deg, pressure_hpa, temperature_c)
 
 
+def display_apparent_alt_many(
+        geom_alt_deg,
+        pressure_hpa: float = DISPLAY_REFRACTION_PRESSURE_HPA,
+        temperature_c: float = DISPLAY_REFRACTION_TEMPERATURE_C) -> np.ndarray:
+    """`display_apparent_alt_deg` 的向量化镜像（标量版是事实源）。
+
+    分段/系数与标量版逐字一致；测试对 -90..90° 密集采样逐点对拍。
+    非有限输入原样返回（标量版对 NaN 也是 h + 0 = h）。
+    """
+    h = np.asarray(geom_alt_deg, dtype=float).reshape(-1)
+    if h.size == 0:
+        return h.copy()
+    finite = np.isfinite(h)
+    hh = np.where(finite, h, 0.0)
+    scale = _refraction_scale(pressure_hpa, temperature_c)
+    # h > -3.54°：Saemundsson。先把入参夹到该段，避免 h≈-5.11 时的极点。
+    h1 = np.maximum(hh, _DISPLAY_REFR_MIN_GEO_ALT_DEG)
+    x = np.radians(h1 + 10.3 / (h1 + 5.11))
+    d_saem = np.maximum(0.0, scale * (1.02 / np.tan(x) + 0.0019279))
+    # -5° < h <= -3.54°：到 0 的线性过渡（两端用与标量同一条公式）。
+    h0 = _DISPLAY_REFR_MIN_GEO_ALT_DEG
+    x0 = math.radians(h0 + 10.3 / (h0 + 5.11))
+    r_h0 = scale * (1.02 / math.tan(x0) + 0.0019279)
+    t = (hh - (h0 - _DISPLAY_REFR_TRANSITION_WIDTH_DEG)) \
+        / _DISPLAY_REFR_TRANSITION_WIDTH_DEG
+    d_lin = np.maximum(0.0, r_h0 * t)
+    delta = np.where(
+        hh > h0, d_saem,
+        np.where(hh > h0 - _DISPLAY_REFR_TRANSITION_WIDTH_DEG, d_lin, 0.0))
+    return np.where(finite, h + delta, h)
+
+
 def format_alt_pair(geom_alt_deg: float,
                     pressure_hpa: float = DISPLAY_REFRACTION_PRESSURE_HPA,
                     temperature_c: float = DISPLAY_REFRACTION_TEMPERATURE_C,
@@ -285,6 +317,44 @@ def format_alt_pair(geom_alt_deg: float,
     if compact:
         return f"{ALT_FRAME_GEOMETRIC} {g}·视 {a}"
     return f"{ALT_FRAME_GEOMETRIC} {g} / {ALT_FRAME_APPARENT} {a}"
+
+
+# ---------------------------------------------------------------------------
+# 星点笔/刷缓存：一帧有 400+ 种样式（颜色 8 步 × 直径 0.5px × alpha 8 步），
+# 实测 QPen/QBrush 的构造占星空层 dots 耗时的一半以上；属性相同即复用。
+# 缓存键完全由已量化的绘制属性构成，因此复用不改变任何像素。
+# ---------------------------------------------------------------------------
+_STAR_STYLE_CACHE_MAX = 4096
+_star_pen_cache: Dict[Tuple[int, int, int, int, int], QPen] = {}
+_star_brush_cache: Dict[Tuple[int, int, int, int], QBrush] = {}
+
+
+def _star_pen(r: int, g: int, b: int, width_x2: int, alpha: int) -> QPen:
+    """按已量化的样式复用 QPen（RoundCap 圆点笔）。"""
+    key = (r, g, b, width_x2, alpha)
+    pen = _star_pen_cache.get(key)
+    if pen is not None:
+        return pen
+    if len(_star_pen_cache) >= _STAR_STYLE_CACHE_MAX:
+        _star_pen_cache.clear()
+    pen = QPen(QColor(r, g, b, alpha))
+    pen.setWidthF(max(1.0, width_x2 / 2.0))
+    pen.setCapStyle(Qt.RoundCap)
+    _star_pen_cache[key] = pen
+    return pen
+
+
+def _star_brush(r: int, g: int, b: int, alpha: int) -> QBrush:
+    """按 (颜色, alpha) 复用亮星辉光刷。"""
+    key = (r, g, b, alpha)
+    brush = _star_brush_cache.get(key)
+    if brush is not None:
+        return brush
+    if len(_star_brush_cache) >= _STAR_STYLE_CACHE_MAX:
+        _star_brush_cache.clear()
+    brush = QBrush(QColor(r, g, b, alpha))
+    _star_brush_cache[key] = brush
+    return brush
 
 
 def _star_label_limit_mag(fov_deg: float) -> float:
@@ -495,11 +565,23 @@ def great_circle_perpendicular_point(az_deg: float, alt_deg: float,
 
 def angular_separation_deg(az1_deg: float, alt1_deg: float,
                            az2_deg: float, alt2_deg: float) -> float:
-    """两天体在地平坐标下的大圆角距（度）。口径与历表无关，纯几何。"""
+    """两天体在地平坐标下的大圆角距（度）。口径与历表无关，纯几何。
+
+    用 atan2(|v1×v2|, v1·v2) 而不是 acos(v1·v2)：后者在 0° 附近条件数极差，
+    单位向量点积的 1 位舍入误差就会放大成 sqrt(2·eps)=2.107e-8 rad，
+    即 **1.207e-6°** 的虚假角距——正是「重复点算角距」在 1e-6° 量级上翻红
+    的量纲来源（反证见 tests/test_sky_fast_time.py 的
+    TestAngularSeparationConditioning + 该文件峰值一致性用例的注释）。叉积模在 0° 与 180°
+    两端都良态，且两点完全相同时叉积恒为 0，返回值精确为 0。
+    """
     v1 = vec_from_azalt(float(az1_deg), float(alt1_deg))
     v2 = vec_from_azalt(float(az2_deg), float(alt2_deg))
     dot = float(v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2])
-    return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
+    cx = v1[1] * v2[2] - v1[2] * v2[1]
+    cy = v1[2] * v2[0] - v1[0] * v2[2]
+    cz = v1[0] * v2[1] - v1[1] * v2[0]
+    cross = math.sqrt(cx * cx + cy * cy + cz * cz)
+    return math.degrees(math.atan2(cross, dot))
 
 
 # ---------------------------------------------------------------------------
@@ -3558,6 +3640,33 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 22..94 /255：暗星可见但不假装和裸眼星一样亮。
         return self.STAR_LOD_MIN_R_PX, 0.0, 0.0, int(255 * (0.09 + 0.28 * fade))
 
+    def _star_visual_many(self, mag_eff, limit_mag: float,
+                          bortle: int) -> Tuple[np.ndarray, ...]:
+        """`_star_visual` 的向量化镜像（标量版是事实源，测试逐点对拍）。"""
+        m = np.asarray(mag_eff, dtype=float).reshape(-1)
+        r, bright, bloom = _stars.star_draw_many(m, int(bortle))
+        alpha = (255.0 * (0.35 + 0.65 * bright)).astype(np.int64)
+        lod = r <= 0.0
+        if bool(np.any(lod)):
+            try:
+                from mbdsdr_ai.skyengine.star_catalog import naked_eye_limit_mag
+                base = float(naked_eye_limit_mag(int(bortle)))
+                lim = float(limit_mag)
+            except Exception:
+                r = np.where(lod, 0.0, r)
+                alpha = np.where(lod, np.int64(0), alpha)
+            else:
+                span = max(1e-6, lim - base)
+                fade = np.clip((lim - m) / span, 0.0, 1.0)
+                hidden = m > lim + 1e-9
+                lod_r = np.where(hidden, 0.0, float(self.STAR_LOD_MIN_R_PX))
+                lod_a = np.where(
+                    hidden, np.int64(0),
+                    (255.0 * (0.09 + 0.28 * fade)).astype(np.int64))
+                r = np.where(lod, lod_r, r)
+                alpha = np.where(lod, lod_a, alpha)
+        return r, bright, bloom, alpha
+
     def _draw_stars(self, painter: QPainter):
         gs = self._ground_station()
         if gs is None:
@@ -3582,66 +3691,77 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 小于 1px 显示精度，视觉上不可辨。
         dot_buckets: Dict[Tuple[int, int, int, int, int], List[QPointF]] = {}
         n = len(sel)
-        # 视高度与屏幕位置一次批量算出（逐星重建旋转矩阵是主要瓶颈）。
-        alt_draw_arr = np.array(
-            [self._display_alt_deg(float(a)) for a in sel.alt_deg], dtype=float)
+        # 视高度、屏幕位置、视觉模型、配色全部整批算完；循环里只做索引与落笔。
+        alt_draw_arr = self._display_alt_many(sel.alt_deg)
         px_arr, py_arr = self._sky_to_screen_many(sel.az_deg, alt_draw_arr)
+        r_arr, bright_arr, bloom_arr, alpha_arr = self._star_visual_many(
+            sel.eff_mag, sel.limit_mag, self._bortle)
+        cr_arr, cg_arr, cb_arr = _stars.bv_to_rgb_many(sel.bv)
+        vmag_arr = np.asarray(sel.vmag, dtype=float)
+        # numpy 标量在 Python 循环里逐次装箱（~0.1µs/次 × 1515 星 × 多字段）；
+        # 一次性转 list 后循环只碰 Python 数值。
+        alt_l = alt_draw_arr.tolist()
+        px_l, py_l = px_arr.tolist(), py_arr.tolist()
+        r_l, bright_l = r_arr.tolist(), bright_arr.tolist()
+        bloom_l, alpha_l = bloom_arr.tolist(), alpha_arr.tolist()
+        vmag_l = vmag_arr.tolist()
+        cr_l, cg_l, cb_l = cr_arr.tolist(), cg_arr.tolist(), cb_arr.tolist()
+        # 只有亮星可能带标签：先按星等阈值收窄索引，避免对 1500+ 颗星
+        # 逐颗做 str() 转换（无名星不编造名字）。
+        label_info: Dict[int, str] = {}
+        names = sel.name
+        if names is not None:
+            for i in np.nonzero(vmag_arr <= float(label_mag))[0].tolist():
+                nm = str(names[i] or "")
+                if nm:
+                    label_info[i] = nm
+        right, bottom = self.width() + 4.0, self.height() + 4.0
         for i in range(n):
-            try:
-                mag_eff = float(sel.eff_mag[i])
-                vmag = float(sel.vmag[i])
-            except Exception:
-                continue
             # 地平门按**视高度**（显示层折射）。星表取数已按几何 alt>=0
             # 裁剪；这里再按视高度确认一次（与历史 141 星路径同一门）。
-            alt_draw = float(alt_draw_arr[i])
+            alt_draw = alt_l[i]
             if alt_draw < 0.0:
                 continue
-            px, py = float(px_arr[i]), float(py_arr[i])
+            px, py = px_l[i], py_l[i]
             if not (math.isfinite(px) and math.isfinite(py)):
                 continue
-            if not (-4.0 <= px <= self.width() + 4.0
-                    and -4.0 <= py <= self.height() + 4.0):
+            if not (-4.0 <= px <= right and -4.0 <= py <= bottom):
                 continue
-            pos = QPointF(px, py)
             # select_for_view 已含消光与极限星等（eff_mag）；不再叠加第二次。
             # 裸眼基线内走 star_draw 原模型，LOD 放出的更暗星走最小可辨点。
-            r, bright, bloom, alpha = self._star_visual(
-                mag_eff, sel.limit_mag, self._bortle)
+            r = r_l[i]
             if r <= 0:
                 continue
-            try:
-                bv = float(sel.bv[i])
-            except Exception:
-                bv = 0.6
-            cr, cg, cb = _stars.bv_to_rgb(bv)
+            pos = QPointF(px, py)
+            cr, cg, cb = cr_l[i], cg_l[i], cb_l[i]
             # 亮星辉光（bloom）：同心圆递减 alpha，由内向外晕开。
             # 只有亮星（r>=_BLOOM_MIN_R）走这条慢路径，数量 <1%。
+            bloom = bloom_l[i]
             if bloom > 0.0:
                 for ring in range(3):
                     rr = r * (1.7 + 0.9 * ring)
                     glow_a = int(70 * bloom * (0.5 ** ring))
-                    painter.setBrush(QBrush(QColor(cr, cg, cb, glow_a)))
+                    painter.setBrush(_star_brush(cr, cg, cb, glow_a))
                     painter.drawEllipse(pos, rr, rr)
-            key = (int(cr) // 8 * 8, int(cg) // 8 * 8, int(cb) // 8 * 8,
-                   max(1, int(round(max(1.0, 2.0 * r) * 2.0))),
-                   max(1, int(alpha) // 8 * 8))
-            dot_buckets.setdefault(key, []).append(pos)
+            dot_buckets.setdefault(
+                (cr // 8 * 8, cg // 8 * 8, cb // 8 * 8,
+                 max(1, int(round(max(1.0, 2.0 * r) * 2.0))),
+                 max(1, alpha_l[i] // 8 * 8)), []).append(pos)
             # 星名标签：只给 named 星，阈值随 FOV 收放（拉远不糊屏；
             # 放大后允许更暗的具名星出现）。无名星不编造名字。
-            name = str(sel.name[i] or "")
-            if name and vmag <= label_mag:
-                self._queue_label(2.0 + vmag,
+            name = label_info.get(i)
+            if name:
+                self._queue_label(2.0 + vmag_l[i],
                                   QPointF(pos.x() + r + 2, pos.y() - r),
                                   _stars.culture_label(name),
-                                  QColor(210, 220, 235, int(200 * bright + 40)))
+                                  QColor(210, 220, 235,
+                                         int(200 * bright_l[i] + 40)))
+        # 每桶一次 drawPoints：setBrush 移到循环外（桶只换 pen），
+        # drawPoints 直接吃 QPointF list（省掉 418 次 QPolygonF 构造）。
+        painter.setBrush(Qt.NoBrush)
         for (cr, cg, cb, dq, aq), pts in dot_buckets.items():
-            pen = QPen(QColor(cr, cg, cb, aq))
-            pen.setWidthF(max(1.0, dq / 2.0))
-            pen.setCapStyle(Qt.RoundCap)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPoints(QPolygonF(pts))
+            painter.setPen(_star_pen(cr, cg, cb, dq, aq))
+            painter.drawPoints(pts)
         painter.restore()
 
     # ------------------------------------------------------------------ #
@@ -4152,6 +4272,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return display_apparent_alt_deg(
             float(geom_alt_deg), self._refraction_pressure_hpa,
             self._refraction_temperature_c)
+
+    def _display_alt_many(self, geom_alt_deg) -> np.ndarray:
+        """`_display_alt_deg` 的批量版（同一开关、气压与温度口径）。"""
+        arr = np.asarray(geom_alt_deg, dtype=float).reshape(-1)
+        if not self._refraction_enabled:
+            return arr
+        return display_apparent_alt_many(
+            arr, self._refraction_pressure_hpa, self._refraction_temperature_c)
 
     def _format_alt_pair(self, geom_alt_deg: float, compact: bool = False,
                          digits: int = 1) -> str:

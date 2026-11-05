@@ -249,6 +249,38 @@ class TestFastRateTrajectory:
 # ---------------------------------------------------------------------------
 # 3. 过境面板与天空视图：同一模拟时刻、同一坐标链、容差内一致
 # ---------------------------------------------------------------------------
+
+
+class TestAngularSeparationConditioning:
+    """角距函数的 float64 条件数守卫（1e-6° 级断言的前提）。
+
+    旧实现 acos(v1·v2)：重复点也会因点积 1 位舍入返回 sqrt(2·eps)=
+    2.107e-8 rad = 1.207e-6° 的虚假角距，使「同一时刻同一坐标链」
+    在 1e-6° 阈值上随机翻红。这不是时刻抖动，容差也不是靠放宽修好的。
+    """
+
+    def test_identical_points_yield_exact_zero(self):
+        # 第一组是实测翻红的坐标（旧实现给 8.538e-7°）
+        for az, el in [(122.10841370007972, 55.75637724015688),
+                       (0.0, 90.0), (0.0, -90.0), (359.999, -89.999),
+                       (180.0, 0.0), (45.0, 44.9)]:
+            assert angular_separation_deg(az, el, az, el) == 0.0
+
+    def test_small_separation_is_not_floored(self):
+        # 1e-6° 级小角距必须真被分辨出来，不能被条件数噪声吃掉
+        for d in (1e-6, 5e-6, 1e-4, 1e-3, 0.01):
+            s = angular_separation_deg(10.0, 20.0, 10.0, 20.0 + d)
+            assert abs(s - d) <= d * 1e-6 + 1e-12, f"d={d} 得 {s}"
+
+    def test_known_separations_unchanged(self):
+        assert abs(angular_separation_deg(0.0, 0.0, 180.0, 0.0)
+                   - 180.0) < 1e-9
+        assert abs(angular_separation_deg(0.0, 0.0, 0.0, 90.0)
+                   - 90.0) < 1e-9
+        assert abs(angular_separation_deg(0.0, 0.0, 90.0, 0.0)
+                   - 90.0) < 1e-9
+
+
 @pytest.fixture
 def tracker(engine, monkeypatch):
     """真实 SatelliteTracker（TLE 加载器替身，避免网络/用户目录依赖）。"""
@@ -274,6 +306,12 @@ class TestFastRatePassPanel:
         # 拨到面板给出的峰值时刻：视图按当前模拟时刻重算天空位置
         engine.set_unix(peak)
         engine.set_rate(300.0)
+        # 不钉时钟：obj 与 _azalt_at 都用当帧同一个 _sat_positions_unix。
+        # 这条断言原先偶发红（1.207e-6° vs 1e-6°），根因不是取时刻抖动，而是
+        # 角距函数的 float64 条件数下限：旧实现用 acos(v1·v2)，重复点也会
+        # 得到 sqrt(2·eps)=2.107e-8 rad = **1.207e-6°** 的虚假角距（与观测值
+        # 逐位吻合；实测同一组 az/el 重复算 8.5e-7~1.207e-6°）。角距已改为
+        # atan2(|v1×v2|, v1·v2)，重复点精确返回 0；阈值维持 1e-6° 不放宽。
         v._on_refresh_tick()
         obj = next(o for o in v._objects if o.name == row["name"])
         t_sky = v._sat_positions_unix

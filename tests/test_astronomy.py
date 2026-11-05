@@ -239,6 +239,74 @@ class TestStarsAndSatMeta(unittest.TestCase):
             cospar_from_tle("1 25338U 98030A   26268.50000000"), "1998-030A")
 
 
+class TestVectorizedStarMirrors(unittest.TestCase):
+    """批量绘制路径的「向量化镜像」必须与标量事实源逐点一致。
+
+    星空层每帧把 1515 颗星整批算完再落笔（`star_draw_many` /
+    `bv_to_rgb_many`）；单一事实源纪律要求批量版只是标量版的镜像，
+    不允许在批量路径里悄悄改公式（改了就成第二套视觉模型）。
+    """
+
+    def test_star_draw_many_matches_scalar(self):
+        import numpy as np
+        from mbdsdr_ai.skyengine.stars import star_draw, star_draw_many
+
+        for bortle in (1, 3, 5, 9):
+            mags = np.arange(-1.5, 8.0001, 0.01)
+            r, b, bl = star_draw_many(mags, bortle)
+            checked = 0
+            for i, m in enumerate(mags):
+                exp = star_draw(float(m), bortle)
+                for got, want in zip((r[i], b[i], bl[i]), exp):
+                    self.assertAlmostEqual(
+                        float(got), want, places=12,
+                        msg=f"vmag={m:.2f} bortle={bortle}")
+                checked += 1
+            self.assertGreater(checked, 900, "扫描必须真跑满星等域")
+        # 空输入与标量不可见极限（Bortle 9 下 5 等星）
+        r, b, bl = star_draw_many([], 9)
+        self.assertEqual((len(r), len(b), len(bl)), (0, 0, 0))
+        r, b, bl = star_draw_many([5.0], 9)
+        self.assertEqual((r[0], b[0], bl[0]), (0.0, 0.0, 0.0))
+
+    def test_star_draw_many_no_nan_or_warning(self):
+        # 半径 <1.2px 的星在 np.where 里也会走 sqrt 分支；负底数若未夹住
+        # 会发 RuntimeWarning 并可能在某些平台变成 nan。这里直接咬死。
+        import warnings
+        import numpy as np
+        from mbdsdr_ai.skyengine.stars import star_draw_many
+
+        mags = np.concatenate([
+            np.arange(-2.0, 9.0, 0.05),
+            np.array([np.nan, np.inf, -np.inf]),
+        ])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            r, b, bl = star_draw_many(mags, 3)
+        self.assertFalse(
+            [w for w in caught if "sqrt" in str(w.message)],
+            f"sqrt 分支仍在报警: {[str(w.message) for w in caught]}")
+        for arr in (r, b, bl):
+            self.assertTrue(np.all(np.isfinite(arr)), "批量模型不得产出 NaN/Inf")
+        self.assertTrue(np.all(np.asarray(r) >= 0.0))
+
+    def test_bv_to_rgb_many_matches_scalar(self):
+        import numpy as np
+        from mbdsdr_ai.skyengine.stars import bv_to_rgb, bv_to_rgb_many
+
+        bvs = np.concatenate([
+            np.arange(-1.0, 2.0001, 0.005),
+            np.array([np.nan, np.inf, -np.inf]),
+        ])
+        r, g, b = bv_to_rgb_many(bvs)
+        for i, x in enumerate(bvs):
+            want = bv_to_rgb(float(x))
+            self.assertEqual((int(r[i]), int(g[i]), int(b[i]),), want,
+                             f"bv={x}")
+        # 采样确实覆盖了全部 6 个色标（不是空转）
+        self.assertGreater(len(bvs), 590)
+
+
 class TestTLEPropagation(unittest.TestCase):
     """用本地缓存的真实 ISS TLE 传播, 已知时间位置可复现。"""
 

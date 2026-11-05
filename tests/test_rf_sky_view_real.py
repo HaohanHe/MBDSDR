@@ -187,13 +187,16 @@ class TestStarExtinctionWiring:
         from mbdsdr_ai.new_spacetime import get_time_engine
 
         captured = []
-        real_star_draw = _stars.star_draw
+        real_star_draw_many = _stars.star_draw_many
 
         def _spy(vmag, bortle=3):
-            captured.append(float(vmag))
-            return real_star_draw(vmag, bortle)
+            # 星空层已改为整批一次算（批量版只是标量版镜像，同一入参口径）：
+            # 抓这里仍是同一事实缝——传进来的必须是星表 eff_mag。
+            for v in vmag:
+                captured.append(float(v))
+            return real_star_draw_many(vmag, bortle)
 
-        monkeypatch.setattr(_stars, "star_draw", _spy)
+        monkeypatch.setattr(_stars, "star_draw_many", _spy)
 
         eng = get_time_engine()
         eng.set_unix(datetime(2026, 9, 27, 12, 0,

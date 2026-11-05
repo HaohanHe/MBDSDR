@@ -28,6 +28,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 R2AS: float = 180.0 / math.pi * 3600.0   # 弧度 -> 角秒 ~ 206265
 
 
@@ -207,16 +209,19 @@ def extinction_delta_mag(alt_deg: float, k: float = EXTINCTION_K) -> float:
     return min(_EXTINCTION_MAX_DM, k / s)
 
 
+_BV_STOPS = (
+    (-0.30, (155, 178, 255)),
+    (0.00, (200, 214, 255)),
+    (0.30, (232, 234, 248)),
+    (0.60, (255, 244, 214)),
+    (1.00, (255, 210, 130)),
+    (1.50, (255, 150, 80)),
+)
+
+
 def bv_to_rgb(bv: float) -> tuple[int, int, int]:
     """B-V 色指数 -> (r,g,b) 0..255（黑体色温分段线性近似）。"""
-    stops = [
-        (-0.30, (155, 178, 255)),
-        (0.00, (200, 214, 255)),
-        (0.30, (232, 234, 248)),
-        (0.60, (255, 244, 214)),
-        (1.00, (255, 210, 130)),
-        (1.50, (255, 150, 80)),
-    ]
+    stops = _BV_STOPS
     if bv <= stops[0][0]:
         return stops[0][1]
     if bv >= stops[-1][0]:
@@ -230,3 +235,60 @@ def bv_to_rgb(bv: float) -> tuple[int, int, int]:
                     int(c0[1] + (c1[1] - c0[1]) * t),
                     int(c0[2] + (c1[2] - c0[2]) * t))
     return (255, 255, 255)
+
+
+def bv_to_rgb_many(bv) -> tuple:
+    """bv_to_rgb 的向量化镜像（标量版是事实源，逐点对拍见测试）。"""
+    arr = np.asarray(bv, dtype=float).reshape(-1)
+    edges = np.array([s[0] for s in _BV_STOPS], dtype=float)
+    cols = np.array([s[1] for s in _BV_STOPS], dtype=float)
+    # 仅 NaN 走兜底色：标量版对 NaN 所有区间判据为 False → (255,255,255)；
+    # 但 ±inf 会命中首/末 stop（`bv >= 1.5` / `bv <= -0.3`），必须保留。
+    bad = np.isnan(arr)
+    # 标量对 NaN 的走向：所有区间判据为 False → 末尾 return (255,255,255)。
+    x = np.where(bad, edges[0], arr)
+    idx = np.clip(np.searchsorted(edges, x, side="right") - 1,
+                  0, len(edges) - 2)
+    lo = edges[idx]
+    hi = edges[idx + 1]
+    t = np.clip((x - lo) / (hi - lo), 0.0, 1.0)
+    rgb = cols[idx] + (cols[idx + 1] - cols[idx]) * t[:, None]
+    rgb = np.trunc(rgb).astype(np.int64)     # 与 int() 一致（值域全非负）
+    rgb[bad] = (255, 255, 255)
+    return rgb[:, 0], rgb[:, 1], rgb[:, 2]
+
+
+def star_draw_many(vmag, bortle: int = 3) -> tuple:
+    """star_draw 的向量化镜像（同一公式；标量版是事实源，测试逐点对拍）。
+
+    NaN 星等按标量的实际走向处理：``max(0.0, nan)`` 得 0 → 半径按
+    ``frac=0`` 计算，故按 6.5 等代入（不可见性判据 ``nan > limit`` 为 False）。
+    """
+    m = np.asarray(vmag, dtype=float).reshape(-1)
+    bad = ~np.isfinite(m)
+    m = np.where(bad, 6.5, m)
+    limit = 6.5 - 0.35 * max(0, int(bortle) - 3)
+    dim = 1.0 - 0.06 * (bortle - 3)
+    visible = (m <= limit) | bad
+    frac = np.maximum(0.0, (6.5 - m) / 8.0)
+    r = (0.6 + 2.0 * frac ** (1.1 / 2.0)) * dim
+    over = r > _SMALL_STAR_R
+    # np.where 两支都会求值：负底数开方会发 RuntimeWarning（结果本身不被取用，
+    # 但会让日志变噪）。先夹到 0 再开方，两支数值仍只在 over 处生效。
+    r = np.where(
+        over, _SMALL_STAR_R + np.maximum(0.0, r - _SMALL_STAR_R) ** 0.5, r)
+    brightness = np.clip(frac, 0.0, 1.0)
+    small = r < _SMALL_STAR_R
+    brightness = np.where(
+        small, np.minimum(1.0, brightness * (r ** 3) / _SMALL_STAR_R3),
+        brightness)
+    bloom = np.where(
+        r >= _BLOOM_MIN_R,
+        np.minimum(1.0, 0.4 + (r - _BLOOM_MIN_R) /
+                   (_BLOOM_MAX_R - _BLOOM_MIN_R)),
+        0.0)
+    r = np.maximum(0.5, r)
+    r = np.where(visible, r, 0.0)
+    brightness = np.where(visible, brightness, 0.0)
+    bloom = np.where(visible, bloom, 0.0)
+    return r, brightness, bloom
