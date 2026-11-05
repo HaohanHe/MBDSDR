@@ -11,7 +11,8 @@
     "hardware": "未设 MBDSDR_NO_HW；RTL-SDR 枚举到 1 台（connect 耗时 27–1029 ms 波动，属硬件/驱动态）",
     "concurrent_load": "测量窗口内同机仍有其它会话（pytest/编译）；绝对值只作参考，结论用交替 A/B",
     "note": "eventFilter 与枚举/connect 的 A/B 均为交替子进程（同一时刻负载对两边等价）。",
-    "concurrent_load_round3": "本轮同机仍有其它会话在跑打包/流水线测试；启动绝对值高于 §8.2 旧观测，只认同一会话交替差值"
+    "concurrent_load_round3": "本轮同机仍有其它会话在跑打包/流水线测试；启动绝对值高于 §8.2 旧观测，只认同一会话交替差值",
+    "real_hw_concurrency_note": "本轮 56 ms 探针与真机线 --mode product 三次复跑并发，违反 hw 独占硬规则；该组只用于 56 是否命中 15.15 的方向判断，定稿前需独占复测"
   },
   "commands": {
     "startup": "python scripts/perf_probe_deep.py --section startup --runs 3 --json docs/perf-evidence/deep_perf_third_20261106.json",
@@ -21,7 +22,9 @@
     "startup_scipy_prewarm": "python scripts/perf_probe_deep.py --section startup --runs 1",
     "spectrum_interval_ab": "$env:SPECTRUM_INTERVAL_MS=66|53; python scripts/perf_probe_deep.py --section spectrum",
     "spectrum_53_long": "$env:SPECTRUM_INTERVAL_MS=53; $env:SPECTRUM_DURATION_MS=300000; python scripts/perf_probe_deep.py --section spectrum",
-    "streams": "python scripts/perf_probe_deep.py --section streams"
+    "streams": "python scripts/perf_probe_deep.py --section streams",
+    "startup_main_selfcheck": "$env:STARTUP_MAIN_SELFCHECK=1; python scripts/perf_probe_deep.py --section startup --runs 1",
+    "spectrum_interval_56": "$env:SPECTRUM_INTERVAL_MS=56; python scripts/perf_probe_deep.py --section spectrum"
   },
   "startup": {
     "generated_at": "2026-11-06T04:24:18",
@@ -3078,6 +3081,1634 @@
         "stop_ms": 226.9
       },
       "note": "MBDSDR_NULL_AUDIO=1：audio_start 只测量打开/降级路径；真实声卡打开耗时另计（受设备/驱动影响）"
+    }
+  },
+  "startup_main_selfcheck": {
+    "generated_at": "2026-11-06T05:21:50",
+    "env": {
+      "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+      "cpu_count": 12,
+      "python": "3.14.0",
+      "platform": "Windows-11-10.0.26200-SP0",
+      "qt_platform": "offscreen"
+    },
+    "startup": {
+      "runs": [
+        {
+          "process_start": 0.0,
+          "qt_import": 185.9,
+          "main_window_import": 1659.2,
+          "qt_app_create": 1670.6,
+          "font_families": 3.6,
+          "font_set": 0.3,
+          "theme_apply": 0.4,
+          "main_window_init": 2228.0,
+          "main_window_init_end": 3903.2,
+          "show_process_events": 4101.1,
+          "grab_first_frame": 74.3,
+          "grab_end": 4175.4,
+          "async_enter_start": 4182.8,
+          "enum_worker_start": 4183.5,
+          "async_enter_end": 4183.6,
+          "build_backend_start": 4305.1,
+          "build_backend_end": 4305.1,
+          "sky_sat_start": 5087.9,
+          "sky_sat_end": 5208.6,
+          "enum_worker_end": 5506.9,
+          "auto_ready_start": 5507.1,
+          "connect_backend_start": 5507.1,
+          "backfill_start": 5583.7,
+          "backfill_end": 5584.0,
+          "start_streams_start": 5586.8,
+          "start_streams_end": 6989.0,
+          "connect_backend_end": 6989.0,
+          "auto_ready_end": 6989.0,
+          "deferred_end": 7975.1,
+          "hb_n": 148,
+          "hb_p50_ms": 10.23,
+          "hb_p95_ms": 35.37,
+          "hb_max_ms": 1489.69,
+          "hb_max_at_ms": 6993.5,
+          "hb_max_after_first_frame_ms": 1489.69,
+          "hb_p95_after_first_frame_ms": 34.92,
+          "ef_after_show_calls": 4275,
+          "ef_after_show_ms": 47.8,
+          "star_load_ms": 38.6,
+          "star_load_calls": 1,
+          "star_catalog_mb": 1.9,
+          "backend_enum_ms": 1349.6,
+          "backend_enum_devices": 1,
+          "backend_connect_ms": 1201.6,
+          "backend_set_sample_rate_ms": 88.3,
+          "backend_set_frequency_ms": 41.1,
+          "backend_set_ppm_ms": 0.1,
+          "backend_set_bandwidth_ms": 21.4,
+          "backend_set_agc_ms": 11.4,
+          "backend_set_offset_tuning_ms": 0.1,
+          "backend_get_frequency_ms": 0.6,
+          "backend_disconnect_ms": 15.6,
+          "eventfilter_ms": 417.7,
+          "eventfilter_calls": 79168,
+          "audio_start_ms": 98.7,
+          "active_read_ms": 0.1,
+          "build_pipeline_ms": 1303.5,
+          "pipe_ctor_ms": 0.3,
+          "pipe_start_ms": 0.8,
+          "vfo_ctor_ms": 1301.9,
+          "vfo_add_ms": 0.0,
+          "vfo_bind_dsp_ms": 0.0,
+          "vfo_set_active_context_ms": 0.0,
+          "vfo_offset_ms": 0.0,
+          "kernel_panels_ms": 427.4,
+          "mode_shell_ms": 600.8,
+          "settings_panel_init_ms": 202.0,
+          "config_load_ms": 0.8
+        }
+      ],
+      "median": {
+        "process_start": 0.0,
+        "qt_import": 185.9,
+        "main_window_import": 1659.2,
+        "qt_app_create": 1670.6,
+        "font_families": 3.6,
+        "font_set": 0.3,
+        "theme_apply": 0.4,
+        "main_window_init": 2228.0,
+        "main_window_init_end": 3903.2,
+        "show_process_events": 4101.1,
+        "grab_first_frame": 74.3,
+        "grab_end": 4175.4,
+        "async_enter_start": 4182.8,
+        "enum_worker_start": 4183.5,
+        "async_enter_end": 4183.6,
+        "build_backend_start": 4305.1,
+        "build_backend_end": 4305.1,
+        "sky_sat_start": 5087.9,
+        "sky_sat_end": 5208.6,
+        "enum_worker_end": 5506.9,
+        "auto_ready_start": 5507.1,
+        "connect_backend_start": 5507.1,
+        "backfill_start": 5583.7,
+        "backfill_end": 5584.0,
+        "start_streams_start": 5586.8,
+        "start_streams_end": 6989.0,
+        "connect_backend_end": 6989.0,
+        "auto_ready_end": 6989.0,
+        "deferred_end": 7975.1,
+        "hb_n": 148,
+        "hb_p50_ms": 10.2,
+        "hb_p95_ms": 35.4,
+        "hb_max_ms": 1489.7,
+        "hb_max_at_ms": 6993.5,
+        "hb_max_after_first_frame_ms": 1489.7,
+        "hb_p95_after_first_frame_ms": 34.9,
+        "ef_after_show_calls": 4275,
+        "ef_after_show_ms": 47.8,
+        "star_load_ms": 38.6,
+        "star_load_calls": 1,
+        "star_catalog_mb": 1.9,
+        "backend_enum_ms": 1349.6,
+        "backend_enum_devices": 1,
+        "backend_connect_ms": 1201.6,
+        "backend_set_sample_rate_ms": 88.3,
+        "backend_set_frequency_ms": 41.1,
+        "backend_set_ppm_ms": 0.1,
+        "backend_set_bandwidth_ms": 21.4,
+        "backend_set_agc_ms": 11.4,
+        "backend_set_offset_tuning_ms": 0.1,
+        "backend_get_frequency_ms": 0.6,
+        "backend_disconnect_ms": 15.6,
+        "eventfilter_ms": 417.7,
+        "eventfilter_calls": 79168,
+        "audio_start_ms": 98.7,
+        "active_read_ms": 0.1,
+        "build_pipeline_ms": 1303.5,
+        "pipe_ctor_ms": 0.3,
+        "pipe_start_ms": 0.8,
+        "vfo_ctor_ms": 1301.9,
+        "vfo_add_ms": 0.0,
+        "vfo_bind_dsp_ms": 0.0,
+        "vfo_set_active_context_ms": 0.0,
+        "vfo_offset_ms": 0.0,
+        "kernel_panels_ms": 427.4,
+        "mode_shell_ms": 600.8,
+        "settings_panel_init_ms": 202.0,
+        "config_load_ms": 0.8,
+        "dur_qt_import": 185.9,
+        "dur_main_window_import": 1473.3,
+        "dur_qt_app_create": 11.4,
+        "dur_main_window_init": 2232.6,
+        "dur_show_first_paint": 197.9,
+        "dur_first_frame": 4175.4
+      },
+      "top3": [
+        [
+          "dur_main_window_import",
+          1473.3
+        ],
+        [
+          "backend_enum_ms",
+          1349.6
+        ],
+        [
+          "mode_shell_ms",
+          600.8
+        ]
+      ],
+      "ef_profile_old": {
+        "by_type": {
+          "ParentChange": [
+            1468,
+            59.8
+          ],
+          "ChildPolished": [
+            1479,
+            56.4
+          ],
+          "Polish": [
+            1924,
+            73.3
+          ],
+          "DynamicPropertyChange": [
+            4401,
+            179.9
+          ],
+          "ChildAdded": [
+            2898,
+            120.1
+          ],
+          "StyleChange": [
+            12340,
+            465.1
+          ],
+          "FontChange": [
+            19346,
+            720.1
+          ],
+          "Create": [
+            1913,
+            82.8
+          ],
+          "ActionChanged": [
+            490,
+            17.6
+          ],
+          "Destroy": [
+            471,
+            17.8
+          ],
+          "PaletteChange": [
+            19682,
+            773.5
+          ],
+          "MouseTrackingChange": [
+            953,
+            36.6
+          ]
+        },
+        "calls": 78553,
+        "total_ms": 2728.6
+      },
+      "ef_profile_new": {
+        "by_type": {
+          "Polish": [
+            1920,
+            10.4
+          ],
+          "PolishRequest": [
+            1460,
+            8.2
+          ],
+          "DynamicPropertyChange": [
+            4389,
+            29.6
+          ],
+          "ChildAdded": [
+            2887,
+            17.1
+          ],
+          "Timer": [
+            573,
+            11.2
+          ],
+          "MetaCall": [
+            1640,
+            16.0
+          ],
+          "StyleChange": [
+            12330,
+            71.8
+          ],
+          "FontChange": [
+            19335,
+            137.9
+          ],
+          "Create": [
+            1909,
+            9.2
+          ],
+          "Move": [
+            1577,
+            10.8
+          ],
+          "PaletteChange": [
+            19663,
+            145.2
+          ],
+          "Paint": [
+            728,
+            10.3
+          ]
+        },
+        "calls": 78469,
+        "total_ms": 536.5
+      },
+      "eventfilter_ab": {
+        "normal_init_ms": [
+          2278.8
+        ],
+        "stubbed_init_ms": [
+          2305.8
+        ],
+        "median_normal_ms": 2278.8,
+        "median_stubbed_ms": 2305.8,
+        "delta_ms": -27.0
+      },
+      "ef_opt_ab": {
+        "old_ms": [
+          {
+            "process_start": 0.0,
+            "qt_import": 224.4,
+            "main_window_import": 1444.0,
+            "qt_app_create": 1460.4,
+            "font_families": 1.1,
+            "font_set": 0.2,
+            "theme_apply": 0.3,
+            "main_window_init": 5884.1,
+            "main_window_init_end": 7346.5
+          }
+        ],
+        "new_ms": [
+          {
+            "process_start": 0.0,
+            "qt_import": 203.4,
+            "main_window_import": 1321.6,
+            "qt_app_create": 1336.6,
+            "font_families": 0.3,
+            "font_set": 0.1,
+            "theme_apply": 0.2,
+            "main_window_init": 2800.6,
+            "main_window_init_end": 4138.2
+          }
+        ],
+        "median_old_ms": 5884.1,
+        "median_new_ms": 2800.6,
+        "delta_ms": -3083.5,
+        "delta_pct": -52.4
+      },
+      "enum_bg_ab_hb_max": {
+        "old_ms": [
+          {
+            "process_start": 0.0,
+            "qt_import": 155.4,
+            "main_window_import": 1322.2,
+            "qt_app_create": 1334.1,
+            "font_families": 0.2,
+            "font_set": 0.1,
+            "theme_apply": 0.2,
+            "main_window_init": 1829.4,
+            "main_window_init_end": 3164.3,
+            "show_process_events": 3359.4,
+            "grab_first_frame": 59.8,
+            "grab_end": 3419.2,
+            "async_enter_start": 3428.0,
+            "enum_worker_start": 3428.0,
+            "build_backend_start": 3544.0,
+            "build_backend_end": 3544.1,
+            "enum_worker_end": 4656.0,
+            "async_enter_end": 4656.0,
+            "sky_sat_start": 4657.0,
+            "sky_sat_end": 4733.9,
+            "auto_ready_start": 4739.5,
+            "connect_backend_start": 4739.5,
+            "backfill_start": 4812.5,
+            "backfill_end": 4812.8,
+            "start_streams_start": 4814.6,
+            "start_streams_end": 6154.5,
+            "connect_backend_end": 6154.5,
+            "auto_ready_end": 6154.5,
+            "deferred_end": 7193.0,
+            "hb_n": 63,
+            "hb_p50_ms": 11.83,
+            "hb_p95_ms": 27.36,
+            "hb_max_ms": 1429.27,
+            "hb_max_at_ms": 6168.5,
+            "hb_max_after_first_frame_ms": 1429.27,
+            "hb_p95_after_first_frame_ms": 25.92,
+            "ef_after_show_calls": 3987,
+            "ef_after_show_ms": 37.7,
+            "star_load_ms": 41.7,
+            "star_load_calls": 1,
+            "star_catalog_mb": 1.9,
+            "backend_enum_ms": 1119.0,
+            "backend_enum_devices": 1,
+            "backend_connect_ms": 1111.8,
+            "backend_set_sample_rate_ms": 88.2,
+            "backend_set_frequency_ms": 41.8,
+            "backend_set_ppm_ms": 0.1,
+            "backend_set_bandwidth_ms": 21.2,
+            "backend_set_agc_ms": 11.7,
+            "backend_set_offset_tuning_ms": 0.1,
+            "backend_get_frequency_ms": 0.7,
+            "backend_disconnect_ms": 13.9,
+            "eventfilter_ms": 345.1,
+            "eventfilter_calls": 78873,
+            "audio_start_ms": 106.3,
+            "active_read_ms": 0.2,
+            "build_pipeline_ms": 1233.5,
+            "pipe_ctor_ms": 0.2,
+            "pipe_start_ms": 0.8,
+            "vfo_ctor_ms": 1232.1,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "kernel_panels_ms": 302.7,
+            "mode_shell_ms": 444.8,
+            "settings_panel_init_ms": 151.2,
+            "config_load_ms": 0.7
+          }
+        ],
+        "new_ms": [
+          {
+            "process_start": 0.0,
+            "qt_import": 199.0,
+            "main_window_import": 1672.2,
+            "qt_app_create": 1687.1,
+            "font_families": 0.3,
+            "font_set": 0.1,
+            "theme_apply": 0.2,
+            "main_window_init": 2755.2,
+            "main_window_init_end": 4443.2,
+            "show_process_events": 4644.6,
+            "grab_first_frame": 79.6,
+            "grab_end": 4724.2,
+            "async_enter_start": 4732.0,
+            "enum_worker_start": 4732.7,
+            "async_enter_end": 4732.9,
+            "build_backend_start": 4895.3,
+            "build_backend_end": 4895.3,
+            "sky_sat_start": 5632.7,
+            "sky_sat_end": 5701.8,
+            "enum_worker_end": 6055.5,
+            "auto_ready_start": 6055.7,
+            "connect_backend_start": 6055.8,
+            "backfill_start": 6133.3,
+            "backfill_end": 6133.6,
+            "start_streams_start": 6135.9,
+            "start_streams_end": 7546.3,
+            "connect_backend_end": 7546.3,
+            "auto_ready_end": 7546.3,
+            "deferred_end": 8492.4,
+            "hb_n": 149,
+            "hb_p50_ms": 10.11,
+            "hb_p95_ms": 41.95,
+            "hb_max_ms": 1497.35,
+            "hb_max_at_ms": 7550.6,
+            "hb_max_after_first_frame_ms": 1497.35,
+            "hb_p95_after_first_frame_ms": 41.22,
+            "ef_after_show_calls": 4352,
+            "ef_after_show_ms": 50.0,
+            "star_load_ms": 45.9,
+            "star_load_calls": 1,
+            "star_catalog_mb": 1.9,
+            "backend_enum_ms": 1302.2,
+            "backend_enum_devices": 1,
+            "backend_connect_ms": 1160.0,
+            "backend_set_sample_rate_ms": 88.5,
+            "backend_set_frequency_ms": 40.7,
+            "backend_set_ppm_ms": 0.1,
+            "backend_set_bandwidth_ms": 21.4,
+            "backend_set_agc_ms": 10.6,
+            "backend_set_offset_tuning_ms": 0.0,
+            "backend_get_frequency_ms": 0.6,
+            "backend_disconnect_ms": 13.8,
+            "eventfilter_ms": 503.2,
+            "eventfilter_calls": 79245,
+            "audio_start_ms": 97.7,
+            "active_read_ms": 0.1,
+            "build_pipeline_ms": 1312.7,
+            "pipe_ctor_ms": 0.3,
+            "pipe_start_ms": 0.7,
+            "vfo_ctor_ms": 1311.4,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "kernel_panels_ms": 571.9,
+            "mode_shell_ms": 649.7,
+            "settings_panel_init_ms": 308.2,
+            "config_load_ms": 0.9
+          }
+        ],
+        "median_old_ms": 1429.3,
+        "median_new_ms": 1497.3,
+        "delta_ms": 68.1,
+        "delta_pct": 4.8
+      },
+      "enum_bg_ab_enum_ms": {
+        "old_ms": [
+          {
+            "process_start": 0.0,
+            "qt_import": 155.4,
+            "main_window_import": 1322.2,
+            "qt_app_create": 1334.1,
+            "font_families": 0.2,
+            "font_set": 0.1,
+            "theme_apply": 0.2,
+            "main_window_init": 1829.4,
+            "main_window_init_end": 3164.3,
+            "show_process_events": 3359.4,
+            "grab_first_frame": 59.8,
+            "grab_end": 3419.2,
+            "async_enter_start": 3428.0,
+            "enum_worker_start": 3428.0,
+            "build_backend_start": 3544.0,
+            "build_backend_end": 3544.1,
+            "enum_worker_end": 4656.0,
+            "async_enter_end": 4656.0,
+            "sky_sat_start": 4657.0,
+            "sky_sat_end": 4733.9,
+            "auto_ready_start": 4739.5,
+            "connect_backend_start": 4739.5,
+            "backfill_start": 4812.5,
+            "backfill_end": 4812.8,
+            "start_streams_start": 4814.6,
+            "start_streams_end": 6154.5,
+            "connect_backend_end": 6154.5,
+            "auto_ready_end": 6154.5,
+            "deferred_end": 7193.0,
+            "hb_n": 63,
+            "hb_p50_ms": 11.83,
+            "hb_p95_ms": 27.36,
+            "hb_max_ms": 1429.27,
+            "hb_max_at_ms": 6168.5,
+            "hb_max_after_first_frame_ms": 1429.27,
+            "hb_p95_after_first_frame_ms": 25.92,
+            "ef_after_show_calls": 3987,
+            "ef_after_show_ms": 37.7,
+            "star_load_ms": 41.7,
+            "star_load_calls": 1,
+            "star_catalog_mb": 1.9,
+            "backend_enum_ms": 1119.0,
+            "backend_enum_devices": 1,
+            "backend_connect_ms": 1111.8,
+            "backend_set_sample_rate_ms": 88.2,
+            "backend_set_frequency_ms": 41.8,
+            "backend_set_ppm_ms": 0.1,
+            "backend_set_bandwidth_ms": 21.2,
+            "backend_set_agc_ms": 11.7,
+            "backend_set_offset_tuning_ms": 0.1,
+            "backend_get_frequency_ms": 0.7,
+            "backend_disconnect_ms": 13.9,
+            "eventfilter_ms": 345.1,
+            "eventfilter_calls": 78873,
+            "audio_start_ms": 106.3,
+            "active_read_ms": 0.2,
+            "build_pipeline_ms": 1233.5,
+            "pipe_ctor_ms": 0.2,
+            "pipe_start_ms": 0.8,
+            "vfo_ctor_ms": 1232.1,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "kernel_panels_ms": 302.7,
+            "mode_shell_ms": 444.8,
+            "settings_panel_init_ms": 151.2,
+            "config_load_ms": 0.7
+          }
+        ],
+        "new_ms": [
+          {
+            "process_start": 0.0,
+            "qt_import": 199.0,
+            "main_window_import": 1672.2,
+            "qt_app_create": 1687.1,
+            "font_families": 0.3,
+            "font_set": 0.1,
+            "theme_apply": 0.2,
+            "main_window_init": 2755.2,
+            "main_window_init_end": 4443.2,
+            "show_process_events": 4644.6,
+            "grab_first_frame": 79.6,
+            "grab_end": 4724.2,
+            "async_enter_start": 4732.0,
+            "enum_worker_start": 4732.7,
+            "async_enter_end": 4732.9,
+            "build_backend_start": 4895.3,
+            "build_backend_end": 4895.3,
+            "sky_sat_start": 5632.7,
+            "sky_sat_end": 5701.8,
+            "enum_worker_end": 6055.5,
+            "auto_ready_start": 6055.7,
+            "connect_backend_start": 6055.8,
+            "backfill_start": 6133.3,
+            "backfill_end": 6133.6,
+            "start_streams_start": 6135.9,
+            "start_streams_end": 7546.3,
+            "connect_backend_end": 7546.3,
+            "auto_ready_end": 7546.3,
+            "deferred_end": 8492.4,
+            "hb_n": 149,
+            "hb_p50_ms": 10.11,
+            "hb_p95_ms": 41.95,
+            "hb_max_ms": 1497.35,
+            "hb_max_at_ms": 7550.6,
+            "hb_max_after_first_frame_ms": 1497.35,
+            "hb_p95_after_first_frame_ms": 41.22,
+            "ef_after_show_calls": 4352,
+            "ef_after_show_ms": 50.0,
+            "star_load_ms": 45.9,
+            "star_load_calls": 1,
+            "star_catalog_mb": 1.9,
+            "backend_enum_ms": 1302.2,
+            "backend_enum_devices": 1,
+            "backend_connect_ms": 1160.0,
+            "backend_set_sample_rate_ms": 88.5,
+            "backend_set_frequency_ms": 40.7,
+            "backend_set_ppm_ms": 0.1,
+            "backend_set_bandwidth_ms": 21.4,
+            "backend_set_agc_ms": 10.6,
+            "backend_set_offset_tuning_ms": 0.0,
+            "backend_get_frequency_ms": 0.6,
+            "backend_disconnect_ms": 13.8,
+            "eventfilter_ms": 503.2,
+            "eventfilter_calls": 79245,
+            "audio_start_ms": 97.7,
+            "active_read_ms": 0.1,
+            "build_pipeline_ms": 1312.7,
+            "pipe_ctor_ms": 0.3,
+            "pipe_start_ms": 0.7,
+            "vfo_ctor_ms": 1311.4,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "kernel_panels_ms": 571.9,
+            "mode_shell_ms": 649.7,
+            "settings_panel_init_ms": 308.2,
+            "config_load_ms": 0.9
+          }
+        ],
+        "median_old_ms": 1119.0,
+        "median_new_ms": 1302.2,
+        "delta_ms": 183.2,
+        "delta_pct": 16.4
+      },
+      "enum_bg_ab_detail": {
+        "sync": [
+          {
+            "hb_max_ms": 1429.27,
+            "hb_max_at_ms": 6168.5,
+            "hb_p95_ms": 27.36,
+            "enum_ms_total": 1119.0,
+            "enum_worker_ms": 1228.0,
+            "connect_backend_ms": 1415.0,
+            "start_streams_ms": 1339.9,
+            "auto_ready_ms": 1415.0,
+            "audio_start_ms": 106.3,
+            "active_read_ms": 0.2,
+            "build_pipeline_ms": 1233.5,
+            "pipe_ctor_ms": 0.2,
+            "pipe_start_ms": 0.8,
+            "vfo_ctor_ms": 1232.1,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "scipy_import_ms": null,
+            "main_selfcheck_ms": null,
+            "backend_connect_ms": 1111.8,
+            "deferred_end": 7193.0
+          }
+        ],
+        "async": [
+          {
+            "hb_max_ms": 1497.35,
+            "hb_max_at_ms": 7550.6,
+            "hb_p95_ms": 41.95,
+            "enum_ms_total": 1302.2,
+            "enum_worker_ms": 1322.8,
+            "connect_backend_ms": 1490.5,
+            "start_streams_ms": 1410.4,
+            "auto_ready_ms": 1490.6,
+            "audio_start_ms": 97.7,
+            "active_read_ms": 0.1,
+            "build_pipeline_ms": 1312.7,
+            "pipe_ctor_ms": 0.3,
+            "pipe_start_ms": 0.7,
+            "vfo_ctor_ms": 1311.4,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "scipy_import_ms": null,
+            "main_selfcheck_ms": null,
+            "backend_connect_ms": 1160.0,
+            "deferred_end": 8492.4
+          }
+        ]
+      },
+      "scipy_prewarm_ab": {
+        "off": [
+          {
+            "hb_max_ms": 1737.64,
+            "hb_max_at_ms": 7811.3,
+            "hb_p95_ms": 48.97,
+            "enum_ms_total": 1436.2,
+            "enum_worker_ms": 1275.2,
+            "connect_backend_ms": 1727.8,
+            "start_streams_ms": 1643.9,
+            "auto_ready_ms": 1727.8,
+            "audio_start_ms": 121.9,
+            "active_read_ms": 0.1,
+            "build_pipeline_ms": 1521.9,
+            "pipe_ctor_ms": 0.3,
+            "pipe_start_ms": 0.7,
+            "vfo_ctor_ms": 1520.6,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "scipy_import_ms": null,
+            "main_selfcheck_ms": null,
+            "backend_connect_ms": 1101.1,
+            "deferred_end": 8658.0
+          }
+        ],
+        "on": [
+          {
+            "hb_max_ms": 372.25,
+            "hb_max_at_ms": 8071.5,
+            "hb_p95_ms": 13.05,
+            "enum_ms_total": 1268.3,
+            "enum_worker_ms": 1321.6,
+            "connect_backend_ms": 358.7,
+            "start_streams_ms": 279.3,
+            "auto_ready_ms": 358.7,
+            "audio_start_ms": 276.7,
+            "active_read_ms": 0.1,
+            "build_pipeline_ms": 2.6,
+            "pipe_ctor_ms": 0.4,
+            "pipe_start_ms": 0.9,
+            "vfo_ctor_ms": 0.9,
+            "vfo_add_ms": 0.0,
+            "vfo_bind_dsp_ms": 0.0,
+            "vfo_set_active_context_ms": 0.0,
+            "vfo_offset_ms": 0.0,
+            "scipy_import_ms": 1676.1,
+            "main_selfcheck_ms": null,
+            "backend_connect_ms": 1184.1,
+            "deferred_end": 10155.9
+          }
+        ],
+        "start_streams": {
+          "old_ms": [
+            {
+              "hb_max_ms": 1737.64,
+              "hb_max_at_ms": 7811.3,
+              "hb_p95_ms": 48.97,
+              "enum_ms_total": 1436.2,
+              "enum_worker_ms": 1275.2,
+              "connect_backend_ms": 1727.8,
+              "start_streams_ms": 1643.9,
+              "auto_ready_ms": 1727.8,
+              "audio_start_ms": 121.9,
+              "active_read_ms": 0.1,
+              "build_pipeline_ms": 1521.9,
+              "pipe_ctor_ms": 0.3,
+              "pipe_start_ms": 0.7,
+              "vfo_ctor_ms": 1520.6,
+              "vfo_add_ms": 0.0,
+              "vfo_bind_dsp_ms": 0.0,
+              "vfo_set_active_context_ms": 0.0,
+              "vfo_offset_ms": 0.0,
+              "scipy_import_ms": null,
+              "main_selfcheck_ms": null,
+              "backend_connect_ms": 1101.1,
+              "deferred_end": 8658.0
+            }
+          ],
+          "new_ms": [
+            {
+              "hb_max_ms": 372.25,
+              "hb_max_at_ms": 8071.5,
+              "hb_p95_ms": 13.05,
+              "enum_ms_total": 1268.3,
+              "enum_worker_ms": 1321.6,
+              "connect_backend_ms": 358.7,
+              "start_streams_ms": 279.3,
+              "auto_ready_ms": 358.7,
+              "audio_start_ms": 276.7,
+              "active_read_ms": 0.1,
+              "build_pipeline_ms": 2.6,
+              "pipe_ctor_ms": 0.4,
+              "pipe_start_ms": 0.9,
+              "vfo_ctor_ms": 0.9,
+              "vfo_add_ms": 0.0,
+              "vfo_bind_dsp_ms": 0.0,
+              "vfo_set_active_context_ms": 0.0,
+              "vfo_offset_ms": 0.0,
+              "scipy_import_ms": 1676.1,
+              "main_selfcheck_ms": null,
+              "backend_connect_ms": 1184.1,
+              "deferred_end": 10155.9
+            }
+          ],
+          "median_old_ms": 1643.9,
+          "median_new_ms": 279.3,
+          "delta_ms": -1364.6,
+          "delta_pct": -83.0
+        },
+        "build_pipeline": {
+          "old_ms": [
+            {
+              "hb_max_ms": 1737.64,
+              "hb_max_at_ms": 7811.3,
+              "hb_p95_ms": 48.97,
+              "enum_ms_total": 1436.2,
+              "enum_worker_ms": 1275.2,
+              "connect_backend_ms": 1727.8,
+              "start_streams_ms": 1643.9,
+              "auto_ready_ms": 1727.8,
+              "audio_start_ms": 121.9,
+              "active_read_ms": 0.1,
+              "build_pipeline_ms": 1521.9,
+              "pipe_ctor_ms": 0.3,
+              "pipe_start_ms": 0.7,
+              "vfo_ctor_ms": 1520.6,
+              "vfo_add_ms": 0.0,
+              "vfo_bind_dsp_ms": 0.0,
+              "vfo_set_active_context_ms": 0.0,
+              "vfo_offset_ms": 0.0,
+              "scipy_import_ms": null,
+              "main_selfcheck_ms": null,
+              "backend_connect_ms": 1101.1,
+              "deferred_end": 8658.0
+            }
+          ],
+          "new_ms": [
+            {
+              "hb_max_ms": 372.25,
+              "hb_max_at_ms": 8071.5,
+              "hb_p95_ms": 13.05,
+              "enum_ms_total": 1268.3,
+              "enum_worker_ms": 1321.6,
+              "connect_backend_ms": 358.7,
+              "start_streams_ms": 279.3,
+              "auto_ready_ms": 358.7,
+              "audio_start_ms": 276.7,
+              "active_read_ms": 0.1,
+              "build_pipeline_ms": 2.6,
+              "pipe_ctor_ms": 0.4,
+              "pipe_start_ms": 0.9,
+              "vfo_ctor_ms": 0.9,
+              "vfo_add_ms": 0.0,
+              "vfo_bind_dsp_ms": 0.0,
+              "vfo_set_active_context_ms": 0.0,
+              "vfo_offset_ms": 0.0,
+              "scipy_import_ms": 1676.1,
+              "main_selfcheck_ms": null,
+              "backend_connect_ms": 1184.1,
+              "deferred_end": 10155.9
+            }
+          ],
+          "median_old_ms": 1521.9,
+          "median_new_ms": 2.6,
+          "delta_ms": -1519.3,
+          "delta_pct": -99.8
+        },
+        "scipy_import_ms": [
+          1676.1
+        ]
+      },
+      "main_selfcheck": {
+        "hb_max_ms": 387.16,
+        "hb_max_at_ms": 7368.1,
+        "hb_p95_ms": 13.22,
+        "enum_ms_total": 1351.7,
+        "enum_worker_ms": 1241.9,
+        "connect_backend_ms": 376.7,
+        "start_streams_ms": 293.1,
+        "auto_ready_ms": 376.7,
+        "audio_start_ms": 289.1,
+        "active_read_ms": 0.1,
+        "build_pipeline_ms": 3.9,
+        "pipe_ctor_ms": 0.4,
+        "pipe_start_ms": 1.5,
+        "vfo_ctor_ms": 1.4,
+        "vfo_add_ms": 0.0,
+        "vfo_bind_dsp_ms": 0.0,
+        "vfo_set_active_context_ms": 0.0,
+        "vfo_offset_ms": 0.1,
+        "scipy_import_ms": null,
+        "main_selfcheck_ms": 1264.8,
+        "backend_connect_ms": 1124.3,
+        "deferred_end": 9536.5
+      },
+      "stderr_note": "子进程 QT_QPA_PLATFORM=offscreen；MBDSDR_NULL_AUDIO=1；无 MBDSDR_NO_HW"
+    }
+  },
+  "spectrum_interval_56": {
+    "interval_66": [
+      {
+        "generated_at": "2026-11-06T05:24:04",
+        "env": {
+          "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+          "cpu_count": 12,
+          "python": "3.14.0",
+          "platform": "Windows-11-10.0.26200-SP0",
+          "qt_platform": "offscreen"
+        },
+        "spectrum": {
+          "config": {
+            "fft_size": 1024,
+            "num_bins": 384,
+            "sample_rate_hz": 2400000.0,
+            "feed_block_samples": 120000,
+            "feed_interval_ms": 50,
+            "curve_timer_ms": 66,
+            "waterfall_timer_ms": 100,
+            "widget": [
+              858,
+              283
+            ]
+          },
+          "measured": {
+            "elapsed_s": 5.989,
+            "paints": 78,
+            "fps": 13.02,
+            "cpu_percent": 21.4,
+            "stability_60s": [
+              {
+                "window_s": 0,
+                "paints": 78,
+                "fps": 12.96,
+                "paint_median_ms": 9.74
+              }
+            ],
+            "paint": {
+              "n": 78,
+              "median_ms": 9.74,
+              "p95_ms": 11.63,
+              "max_ms": 12.19
+            },
+            "push_iq": {
+              "n": 95,
+              "median_ms": 1.62,
+              "p95_ms": 2.39,
+              "max_ms": 15.58
+            },
+            "direct_render": {
+              "n": 100,
+              "median_ms": 9.96,
+              "p95_ms": 11.2,
+              "max_ms": 12.21
+            },
+            "timer_type": "TimerType.CoarseTimer",
+            "timer_gap": {
+              "n": 75,
+              "median_ms": 79.51,
+              "p95_ms": 80.99,
+              "max_ms": 87.17
+            },
+            "paint_gap": {
+              "n": 77,
+              "median_ms": 78.82,
+              "p95_ms": 82.07,
+              "max_ms": 86.43
+            },
+            "paint_latency_from_timeout": {
+              "n": 76,
+              "median_ms": 0.71,
+              "p95_ms": 2.61,
+              "max_ms": 3.34
+            },
+            "heartbeat_gap": {
+              "n": 594,
+              "median_ms": 10.04,
+              "p95_ms": 12.36,
+              "max_ms": 21.31
+            },
+            "heartbeat_gap_gt15ms": 17,
+            "heartbeat_blocked_ms_total": 341.6,
+            "heartbeat_blocked_ms_per_frame": 4.55,
+            "timer_gap_median_minus_interval_ms": 13.51
+          },
+          "profile_top": [
+            {
+              "calls": 400,
+              "tottime_s": 0.94,
+              "cumtime_s": 0.94,
+              "func": "{method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.611,
+              "cumtime_s": 0.611,
+              "func": "{method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.257,
+              "cumtime_s": 1.822,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)"
+            },
+            {
+              "calls": 1600,
+              "tottime_s": 0.076,
+              "cumtime_s": 0.076,
+              "func": "{method 'drawLine' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.056,
+              "cumtime_s": 2.337,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)"
+            },
+            {
+              "calls": 3800,
+              "tottime_s": 0.039,
+              "cumtime_s": 0.039,
+              "func": "{method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}"
+            },
+            {
+              "calls": 400,
+              "tottime_s": 0.039,
+              "cumtime_s": 0.119,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)"
+            },
+            {
+              "calls": 2800,
+              "tottime_s": 0.038,
+              "cumtime_s": 0.038,
+              "func": "{method 'drawText' of 'PySide6.QtGui.QPainter' objects}"
+            }
+          ],
+          "profile_text": "         187009 function calls in 2.360 seconds\n\n   Ordered by: internal time\n   List reduced from 127 to 14 due to restriction <14>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      400    0.940    0.002    0.940    0.002 {method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}\n      200    0.611    0.003    0.611    0.003 {method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}\n      200    0.257    0.001    1.822    0.009 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)\n     1600    0.076    0.000    0.076    0.000 {method 'drawLine' of 'PySide6.QtGui.QPainter' objects}\n      200    0.056    0.000    2.337    0.012 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)\n     3800    0.039    0.000    0.039    0.000 {method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}\n      400    0.039    0.000    0.119    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)\n     2800    0.038    0.000    0.038    0.000 {method 'drawText' of 'PySide6.QtGui.QPainter' objects}\n      400    0.031    0.000    0.031    0.000 {method 'drawRect' of 'PySide6.QtGui.QPainter' objects}\n      200    0.018    0.000    0.084    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1399(_draw_grid)\n      200    0.017    0.000    0.017    0.000 {method 'fill' of 'PySide6.QtGui.QImage' objects}\n    12000    0.017    0.000    0.028    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1070(_band_x_range)\n      200    0.015    0.000    0.135    0.001 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1761(_draw_peaks)\n      200    0.013    0.000    0.031    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1681(_draw_center_cursor)\n\n\n",
+          "microbench": {
+            "mag_db_numpy_ms": 0.007,
+            "mag_db_python_loop_ms": 0.108,
+            "resample_1024to384_python_loop_ms": 1.036,
+            "resample_1024to384_reduceat_ms": 0.02
+          }
+        }
+      },
+      {
+        "generated_at": "2026-11-06T05:24:29",
+        "env": {
+          "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+          "cpu_count": 12,
+          "python": "3.14.0",
+          "platform": "Windows-11-10.0.26200-SP0",
+          "qt_platform": "offscreen"
+        },
+        "spectrum": {
+          "config": {
+            "fft_size": 1024,
+            "num_bins": 384,
+            "sample_rate_hz": 2400000.0,
+            "feed_block_samples": 120000,
+            "feed_interval_ms": 50,
+            "curve_timer_ms": 66,
+            "waterfall_timer_ms": 100,
+            "widget": [
+              858,
+              283
+            ]
+          },
+          "measured": {
+            "elapsed_s": 6.001,
+            "paints": 79,
+            "fps": 13.16,
+            "cpu_percent": 21.4,
+            "stability_60s": [
+              {
+                "window_s": 0,
+                "paints": 79,
+                "fps": 12.95,
+                "paint_median_ms": 9.42
+              }
+            ],
+            "paint": {
+              "n": 79,
+              "median_ms": 9.42,
+              "p95_ms": 10.85,
+              "max_ms": 11.73
+            },
+            "push_iq": {
+              "n": 95,
+              "median_ms": 1.64,
+              "p95_ms": 2.57,
+              "max_ms": 15.83
+            },
+            "direct_render": {
+              "n": 100,
+              "median_ms": 12.41,
+              "p95_ms": 18.66,
+              "max_ms": 29.48
+            },
+            "timer_type": "TimerType.CoarseTimer",
+            "timer_gap": {
+              "n": 76,
+              "median_ms": 79.29,
+              "p95_ms": 80.93,
+              "max_ms": 86.65
+            },
+            "paint_gap": {
+              "n": 78,
+              "median_ms": 78.71,
+              "p95_ms": 83.06,
+              "max_ms": 86.01
+            },
+            "paint_latency_from_timeout": {
+              "n": 77,
+              "median_ms": 0.67,
+              "p95_ms": 2.79,
+              "max_ms": 4.46
+            },
+            "heartbeat_gap": {
+              "n": 599,
+              "median_ms": 10.04,
+              "p95_ms": 12.49,
+              "max_ms": 19.72
+            },
+            "heartbeat_gap_gt15ms": 17,
+            "heartbeat_blocked_ms_total": 323.8,
+            "heartbeat_blocked_ms_per_frame": 4.26,
+            "timer_gap_median_minus_interval_ms": 13.29
+          },
+          "profile_top": [
+            {
+              "calls": 400,
+              "tottime_s": 1.171,
+              "cumtime_s": 1.171,
+              "func": "{method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.702,
+              "cumtime_s": 0.702,
+              "func": "{method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.305,
+              "cumtime_s": 2.195,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)"
+            },
+            {
+              "calls": 1600,
+              "tottime_s": 0.097,
+              "cumtime_s": 0.097,
+              "func": "{method 'drawLine' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.076,
+              "cumtime_s": 2.801,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)"
+            },
+            {
+              "calls": 400,
+              "tottime_s": 0.046,
+              "cumtime_s": 0.143,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)"
+            },
+            {
+              "calls": 3800,
+              "tottime_s": 0.043,
+              "cumtime_s": 0.043,
+              "func": "{method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}"
+            },
+            {
+              "calls": 2800,
+              "tottime_s": 0.043,
+              "cumtime_s": 0.043,
+              "func": "{method 'drawText' of 'PySide6.QtGui.QPainter' objects}"
+            }
+          ],
+          "profile_text": "         187009 function calls in 2.827 seconds\n\n   Ordered by: internal time\n   List reduced from 127 to 14 due to restriction <14>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      400    1.171    0.003    1.171    0.003 {method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}\n      200    0.702    0.004    0.702    0.004 {method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}\n      200    0.305    0.002    2.195    0.011 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)\n     1600    0.097    0.000    0.097    0.000 {method 'drawLine' of 'PySide6.QtGui.QPainter' objects}\n      200    0.076    0.000    2.801    0.014 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)\n      400    0.046    0.000    0.143    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)\n     3800    0.043    0.000    0.043    0.000 {method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}\n     2800    0.043    0.000    0.043    0.000 {method 'drawText' of 'PySide6.QtGui.QPainter' objects}\n      400    0.035    0.000    0.035    0.000 {method 'drawRect' of 'PySide6.QtGui.QPainter' objects}\n      200    0.020    0.000    0.101    0.001 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1399(_draw_grid)\n      200    0.020    0.000    0.020    0.000 {method 'fill' of 'PySide6.QtGui.QImage' objects}\n    12000    0.019    0.000    0.032    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1070(_band_x_range)\n      200    0.017    0.000    0.145    0.001 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1761(_draw_peaks)\n      200    0.015    0.000    0.040    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1681(_draw_center_cursor)\n\n\n",
+          "microbench": {
+            "mag_db_numpy_ms": 0.012,
+            "mag_db_python_loop_ms": 0.204,
+            "resample_1024to384_python_loop_ms": 1.357,
+            "resample_1024to384_reduceat_ms": 0.015
+          }
+        }
+      }
+    ],
+    "interval_56": [
+      {
+        "generated_at": "2026-11-06T05:24:16",
+        "env": {
+          "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+          "cpu_count": 12,
+          "python": "3.14.0",
+          "platform": "Windows-11-10.0.26200-SP0",
+          "qt_platform": "offscreen"
+        },
+        "spectrum": {
+          "config": {
+            "fft_size": 1024,
+            "num_bins": 384,
+            "sample_rate_hz": 2400000.0,
+            "feed_block_samples": 120000,
+            "feed_interval_ms": 50,
+            "curve_timer_ms": 56,
+            "waterfall_timer_ms": 100,
+            "widget": [
+              858,
+              283
+            ]
+          },
+          "measured": {
+            "elapsed_s": 6.0,
+            "paints": 98,
+            "fps": 16.33,
+            "cpu_percent": 27.6,
+            "stability_60s": [
+              {
+                "window_s": 0,
+                "paints": 98,
+                "fps": 16.15,
+                "paint_median_ms": 10.21
+              }
+            ],
+            "paint": {
+              "n": 98,
+              "median_ms": 10.21,
+              "p95_ms": 11.76,
+              "max_ms": 13.38
+            },
+            "push_iq": {
+              "n": 95,
+              "median_ms": 1.68,
+              "p95_ms": 2.79,
+              "max_ms": 13.95
+            },
+            "direct_render": {
+              "n": 100,
+              "median_ms": 10.66,
+              "p95_ms": 12.19,
+              "max_ms": 13.31
+            },
+            "timer_type": "TimerType.CoarseTimer",
+            "timer_gap": {
+              "n": 95,
+              "median_ms": 60.96,
+              "p95_ms": 69.58,
+              "max_ms": 70.63
+            },
+            "paint_gap": {
+              "n": 97,
+              "median_ms": 60.95,
+              "p95_ms": 69.85,
+              "max_ms": 71.39
+            },
+            "paint_latency_from_timeout": {
+              "n": 96,
+              "median_ms": 0.51,
+              "p95_ms": 1.58,
+              "max_ms": 3.99
+            },
+            "heartbeat_gap": {
+              "n": 596,
+              "median_ms": 10.03,
+              "p95_ms": 13.05,
+              "max_ms": 22.72
+            },
+            "heartbeat_gap_gt15ms": 23,
+            "heartbeat_blocked_ms_total": 413.1,
+            "heartbeat_blocked_ms_per_frame": 4.35,
+            "timer_gap_median_minus_interval_ms": 4.96
+          },
+          "profile_top": [
+            {
+              "calls": 400,
+              "tottime_s": 1.014,
+              "cumtime_s": 1.014,
+              "func": "{method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.68,
+              "cumtime_s": 0.68,
+              "func": "{method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.29,
+              "cumtime_s": 1.999,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)"
+            },
+            {
+              "calls": 1600,
+              "tottime_s": 0.086,
+              "cumtime_s": 0.086,
+              "func": "{method 'drawLine' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.068,
+              "cumtime_s": 2.58,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)"
+            },
+            {
+              "calls": 2800,
+              "tottime_s": 0.045,
+              "cumtime_s": 0.045,
+              "func": "{method 'drawText' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 400,
+              "tottime_s": 0.044,
+              "cumtime_s": 0.135,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)"
+            },
+            {
+              "calls": 3800,
+              "tottime_s": 0.044,
+              "cumtime_s": 0.044,
+              "func": "{method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}"
+            }
+          ],
+          "profile_text": "         187009 function calls in 2.606 seconds\n\n   Ordered by: internal time\n   List reduced from 127 to 14 due to restriction <14>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      400    1.014    0.003    1.014    0.003 {method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}\n      200    0.680    0.003    0.680    0.003 {method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}\n      200    0.290    0.001    1.999    0.010 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)\n     1600    0.086    0.000    0.086    0.000 {method 'drawLine' of 'PySide6.QtGui.QPainter' objects}\n      200    0.068    0.000    2.580    0.013 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)\n     2800    0.045    0.000    0.045    0.000 {method 'drawText' of 'PySide6.QtGui.QPainter' objects}\n      400    0.044    0.000    0.135    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)\n     3800    0.044    0.000    0.044    0.000 {method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}\n      400    0.034    0.000    0.034    0.000 {method 'drawRect' of 'PySide6.QtGui.QPainter' objects}\n      200    0.020    0.000    0.091    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1399(_draw_grid)\n    12000    0.019    0.000    0.031    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1070(_band_x_range)\n      200    0.019    0.000    0.019    0.000 {method 'fill' of 'PySide6.QtGui.QImage' objects}\n      200    0.016    0.000    0.144    0.001 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1761(_draw_peaks)\n      200    0.014    0.000    0.040    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1681(_draw_center_cursor)\n\n\n",
+          "microbench": {
+            "mag_db_numpy_ms": 0.011,
+            "mag_db_python_loop_ms": 0.17,
+            "resample_1024to384_python_loop_ms": 1.027,
+            "resample_1024to384_reduceat_ms": 0.012
+          }
+        }
+      },
+      {
+        "generated_at": "2026-11-06T05:24:42",
+        "env": {
+          "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+          "cpu_count": 12,
+          "python": "3.14.0",
+          "platform": "Windows-11-10.0.26200-SP0",
+          "qt_platform": "offscreen"
+        },
+        "spectrum": {
+          "config": {
+            "fft_size": 1024,
+            "num_bins": 384,
+            "sample_rate_hz": 2400000.0,
+            "feed_block_samples": 120000,
+            "feed_interval_ms": 50,
+            "curve_timer_ms": 56,
+            "waterfall_timer_ms": 100,
+            "widget": [
+              858,
+              283
+            ]
+          },
+          "measured": {
+            "elapsed_s": 5.991,
+            "paints": 98,
+            "fps": 16.36,
+            "cpu_percent": 24.5,
+            "stability_60s": [
+              {
+                "window_s": 0,
+                "paints": 98,
+                "fps": 16.17,
+                "paint_median_ms": 9.5
+              }
+            ],
+            "paint": {
+              "n": 98,
+              "median_ms": 9.5,
+              "p95_ms": 11.09,
+              "max_ms": 11.63
+            },
+            "push_iq": {
+              "n": 95,
+              "median_ms": 1.6,
+              "p95_ms": 2.36,
+              "max_ms": 21.96
+            },
+            "direct_render": {
+              "n": 100,
+              "median_ms": 11.39,
+              "p95_ms": 14.56,
+              "max_ms": 21.12
+            },
+            "timer_type": "TimerType.CoarseTimer",
+            "timer_gap": {
+              "n": 95,
+              "median_ms": 60.48,
+              "p95_ms": 70.13,
+              "max_ms": 72.38
+            },
+            "paint_gap": {
+              "n": 97,
+              "median_ms": 60.68,
+              "p95_ms": 69.88,
+              "max_ms": 71.55
+            },
+            "paint_latency_from_timeout": {
+              "n": 96,
+              "median_ms": 0.57,
+              "p95_ms": 1.46,
+              "max_ms": 1.68
+            },
+            "heartbeat_gap": {
+              "n": 595,
+              "median_ms": 10.04,
+              "p95_ms": 12.11,
+              "max_ms": 33.93
+            },
+            "heartbeat_gap_gt15ms": 18,
+            "heartbeat_blocked_ms_total": 341.0,
+            "heartbeat_blocked_ms_per_frame": 3.59,
+            "timer_gap_median_minus_interval_ms": 4.48
+          },
+          "profile_top": [
+            {
+              "calls": 400,
+              "tottime_s": 0.926,
+              "cumtime_s": 0.926,
+              "func": "{method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.604,
+              "cumtime_s": 0.604,
+              "func": "{method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.279,
+              "cumtime_s": 1.823,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)"
+            },
+            {
+              "calls": 1600,
+              "tottime_s": 0.078,
+              "cumtime_s": 0.078,
+              "func": "{method 'drawLine' of 'PySide6.QtGui.QPainter' objects}"
+            },
+            {
+              "calls": 200,
+              "tottime_s": 0.056,
+              "cumtime_s": 2.339,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)"
+            },
+            {
+              "calls": 400,
+              "tottime_s": 0.04,
+              "cumtime_s": 0.12,
+              "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)"
+            },
+            {
+              "calls": 3800,
+              "tottime_s": 0.039,
+              "cumtime_s": 0.039,
+              "func": "{method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}"
+            },
+            {
+              "calls": 2800,
+              "tottime_s": 0.038,
+              "cumtime_s": 0.038,
+              "func": "{method 'drawText' of 'PySide6.QtGui.QPainter' objects}"
+            }
+          ],
+          "profile_text": "         187009 function calls in 2.362 seconds\n\n   Ordered by: internal time\n   List reduced from 127 to 14 due to restriction <14>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      400    0.926    0.002    0.926    0.002 {method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}\n      200    0.604    0.003    0.604    0.003 {method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}\n      200    0.279    0.001    1.823    0.009 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)\n     1600    0.078    0.000    0.078    0.000 {method 'drawLine' of 'PySide6.QtGui.QPainter' objects}\n      200    0.056    0.000    2.339    0.012 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)\n      400    0.040    0.000    0.120    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)\n     3800    0.039    0.000    0.039    0.000 {method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}\n     2800    0.038    0.000    0.038    0.000 {method 'drawText' of 'PySide6.QtGui.QPainter' objects}\n      400    0.031    0.000    0.031    0.000 {method 'drawRect' of 'PySide6.QtGui.QPainter' objects}\n      200    0.018    0.000    0.086    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1399(_draw_grid)\n    12000    0.017    0.000    0.028    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1070(_band_x_range)\n      200    0.017    0.000    0.017    0.000 {method 'fill' of 'PySide6.QtGui.QImage' objects}\n      200    0.014    0.000    0.131    0.001 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1761(_draw_peaks)\n      200    0.013    0.000    0.032    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1681(_draw_center_cursor)\n\n\n",
+          "microbench": {
+            "mag_db_numpy_ms": 0.012,
+            "mag_db_python_loop_ms": 0.203,
+            "resample_1024to384_python_loop_ms": 1.309,
+            "resample_1024to384_reduceat_ms": 0.037
+          }
+        }
+      }
+    ],
+    "interval_56_long": {
+      "generated_at": "2026-11-06T05:25:06",
+      "env": {
+        "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+        "cpu_count": 12,
+        "python": "3.14.0",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "qt_platform": "offscreen"
+      },
+      "spectrum": {
+        "config": {
+          "fft_size": 1024,
+          "num_bins": 384,
+          "sample_rate_hz": 2400000.0,
+          "feed_block_samples": 120000,
+          "feed_interval_ms": 50,
+          "curve_timer_ms": 56,
+          "waterfall_timer_ms": 100,
+          "widget": [
+            858,
+            283
+          ]
+        },
+        "measured": {
+          "elapsed_s": 299.99,
+          "paints": 4802,
+          "fps": 16.01,
+          "cpu_percent": 28.1,
+          "stability_60s": [
+            {
+              "window_s": 0,
+              "paints": 961,
+              "fps": 16.02,
+              "paint_median_ms": 11.3
+            },
+            {
+              "window_s": 60,
+              "paints": 960,
+              "fps": 16.0,
+              "paint_median_ms": 11.08
+            },
+            {
+              "window_s": 120,
+              "paints": 961,
+              "fps": 16.0,
+              "paint_median_ms": 11.15
+            },
+            {
+              "window_s": 180,
+              "paints": 959,
+              "fps": 16.0,
+              "paint_median_ms": 11.3
+            },
+            {
+              "window_s": 240,
+              "paints": 960,
+              "fps": 16.0,
+              "paint_median_ms": 10.14
+            },
+            {
+              "window_s": 300,
+              "paints": 1,
+              "fps": null,
+              "paint_median_ms": 10.09
+            }
+          ],
+          "paint": {
+            "n": 4802,
+            "median_ms": 11.04,
+            "p95_ms": 12.13,
+            "max_ms": 20.96
+          },
+          "push_iq": {
+            "n": 4799,
+            "median_ms": 1.77,
+            "p95_ms": 2.51,
+            "max_ms": 19.18
+          },
+          "direct_render": {
+            "n": 100,
+            "median_ms": 11.11,
+            "p95_ms": 13.1,
+            "max_ms": 20.17
+          },
+          "timer_type": "TimerType.CoarseTimer",
+          "timer_gap": {
+            "n": 4799,
+            "median_ms": 61.21,
+            "p95_ms": 70.14,
+            "max_ms": 74.02
+          },
+          "paint_gap": {
+            "n": 4801,
+            "median_ms": 61.27,
+            "p95_ms": 70.27,
+            "max_ms": 75.19
+          },
+          "paint_latency_from_timeout": {
+            "n": 4800,
+            "median_ms": 0.63,
+            "p95_ms": 1.69,
+            "max_ms": 3.51
+          },
+          "heartbeat_gap": {
+            "n": 29516,
+            "median_ms": 10.05,
+            "p95_ms": 14.33,
+            "max_ms": 25.81
+          },
+          "heartbeat_gap_gt15ms": 1353,
+          "heartbeat_blocked_ms_total": 25483.5,
+          "heartbeat_blocked_ms_per_frame": 5.31,
+          "timer_gap_median_minus_interval_ms": 5.21
+        },
+        "profile_top": [
+          {
+            "calls": 400,
+            "tottime_s": 0.98,
+            "cumtime_s": 0.98,
+            "func": "{method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}"
+          },
+          {
+            "calls": 200,
+            "tottime_s": 0.647,
+            "cumtime_s": 0.647,
+            "func": "{method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}"
+          },
+          {
+            "calls": 200,
+            "tottime_s": 0.287,
+            "cumtime_s": 1.929,
+            "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)"
+          },
+          {
+            "calls": 1600,
+            "tottime_s": 0.079,
+            "cumtime_s": 0.079,
+            "func": "{method 'drawLine' of 'PySide6.QtGui.QPainter' objects}"
+          },
+          {
+            "calls": 200,
+            "tottime_s": 0.059,
+            "cumtime_s": 2.481,
+            "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)"
+          },
+          {
+            "calls": 3800,
+            "tottime_s": 0.048,
+            "cumtime_s": 0.048,
+            "func": "{method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}"
+          },
+          {
+            "calls": 400,
+            "tottime_s": 0.043,
+            "cumtime_s": 0.129,
+            "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)"
+          },
+          {
+            "calls": 2800,
+            "tottime_s": 0.042,
+            "cumtime_s": 0.042,
+            "func": "{method 'drawText' of 'PySide6.QtGui.QPainter' objects}"
+          }
+        ],
+        "profile_text": "         187009 function calls in 2.505 seconds\n\n   Ordered by: internal time\n   List reduced from 127 to 14 due to restriction <14>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      400    0.980    0.002    0.980    0.002 {method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}\n      200    0.647    0.003    0.647    0.003 {method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}\n      200    0.287    0.001    1.929    0.010 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)\n     1600    0.079    0.000    0.079    0.000 {method 'drawLine' of 'PySide6.QtGui.QPainter' objects}\n      200    0.059    0.000    2.481    0.012 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)\n     3800    0.048    0.000    0.048    0.000 {method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}\n      400    0.043    0.000    0.129    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)\n     2800    0.042    0.000    0.042    0.000 {method 'drawText' of 'PySide6.QtGui.QPainter' objects}\n      400    0.032    0.000    0.032    0.000 {method 'drawRect' of 'PySide6.QtGui.QPainter' objects}\n      200    0.019    0.000    0.089    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1399(_draw_grid)\n    12000    0.019    0.000    0.031    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1070(_band_x_range)\n      200    0.018    0.000    0.018    0.000 {method 'fill' of 'PySide6.QtGui.QImage' objects}\n      200    0.016    0.000    0.148    0.001 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1761(_draw_peaks)\n      200    0.013    0.000    0.031    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1681(_draw_center_cursor)\n\n\n",
+        "microbench": {
+          "mag_db_numpy_ms": 0.007,
+          "mag_db_python_loop_ms": 0.175,
+          "resample_1024to384_python_loop_ms": 1.077,
+          "resample_1024to384_reduceat_ms": 0.028
+        }
+      }
     }
   }
 }

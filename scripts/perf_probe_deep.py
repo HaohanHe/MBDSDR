@@ -388,6 +388,16 @@ if PREWARM:
     import scipy.signal  # noqa: F401
     marks["scipy_import_ms"] = round((time.perf_counter() - _tp) * 1000.0, 1)
 
+# 真实产品入口（desktop/main.py）在 QApplication 之前会跑
+# `_run_import_smoke()` + `_startup_dependency_problems()`，两者都 import
+# scipy.signal。这个开关复刻那条路径，用来区分「产品里是否本来就不慢」。
+SELFCHECK = os.environ.get("STARTUP_MAIN_SELFCHECK") == "1"
+if SELFCHECK:
+    _ts = time.perf_counter()
+    import main as _main_mod
+    _main_mod._startup_dependency_problems()
+    marks["main_selfcheck_ms"] = round((time.perf_counter() - _ts) * 1000.0, 1)
+
 t = time.perf_counter(); w = MainWindow()
 marks["main_window_init"] = round((time.perf_counter() - t) * 1000.0, 1)
 mark("main_window_init_end")
@@ -501,6 +511,7 @@ def section_startup(runs=3):
         for _ in range(max(1, runs)):
             pre_off.append(_one())
             pre_on.append(_one(STARTUP_PREWARM_SCIPY=1))
+        pre_main = [_one(STARTUP_MAIN_SELFCHECK=1)]
 
         def _merge_prof(rs):
             types = set()
@@ -576,6 +587,7 @@ def section_startup(runs=3):
             "vfo_set_active_context_ms": r.get("vfo_set_active_context_ms"),
             "vfo_offset_ms": r.get("vfo_offset_ms"),
             "scipy_import_ms": r.get("scipy_import_ms"),
+            "main_selfcheck_ms": r.get("main_selfcheck_ms"),
             "backend_connect_ms": r.get("backend_connect_ms"),
             "deferred_end": r.get("deferred_end"),
         }
@@ -617,6 +629,7 @@ def section_startup(runs=3):
                 "scipy_import_ms": [
                     r.get("scipy_import_ms") for r in pre_on],
             },
+            "main_selfcheck": _enum_detail(pre_main[0]),
             "stderr_note": "子进程 QT_QPA_PLATFORM=offscreen；"
                            "MBDSDR_NULL_AUDIO=1；无 MBDSDR_NO_HW"}
 
