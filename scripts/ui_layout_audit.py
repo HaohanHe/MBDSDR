@@ -147,7 +147,11 @@ def main() -> int:
             print("[ui_layout_audit] 有意几何变更通道：几何 diff 会逐张打印；"
                   "reason 必须点名以下声明之一，且提交说明同样点名：")
             for token, desc in ui_baseline.DESIGN_CHANGES.items():
+                prov = ui_baseline.BASELINE_PROVENANCE.get(token, {})
                 print(f"  - {token}：{desc}")
+                print(f"    provenance: source_commit={prov.get('source_commit')}"
+                      f"；authorized_by={prov.get('authorized_by')}"
+                      f"；formula={prov.get('formula')}")
         print("[ui_layout_audit] 基线更新模式（仅 100% DPI）："
               f"reason={args.reason.strip()}")
         print("[ui_layout_audit] 每张图会打印尺寸/色块/像素差异摘要；"

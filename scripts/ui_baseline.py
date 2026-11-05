@@ -54,6 +54,57 @@ DEFECT_BASELINE_FIXES = {
         "拍前全量重抛光后按真实布局重建",
 }
 
+# 基线期望值的 provenance：每个被点名放行的 token 都必须能回答
+# 「谁授权 / 依据什么算式 / 对应哪个源码提交 / 何时更新 / 当时实测多少」。
+# 缺任一字段即拒绝更新——期望值不许是「人写的」，必须能回溯到提交与算式。
+# 存量项（2026-11-06 补录）无法凭空补造历史，如实写「未留存」而不是编数字。
+_PROVENANCE_FIELDS = ("authorized_by", "formula", "source_commit",
+                      "updated_at", "measured")
+
+BASELINE_PROVENANCE = {
+    "narrow-bottom-dock-74-to-48": {
+        "authorized_by": "用户跨会话裁定：2026-11-05 零折叠优先 + 底坞 74→48；"
+                         "2026-11-06 批准按算式重定标",
+        "formula": "splitter_h = central_h − topBar(56) − dock(48)，"
+                   "dock 74→48 ⇒ Δsplitter=+26；ADS-B 面板宽恒 300（归一化"
+                   "不缩放）⇒ Δ=+26；频谱归一化高=round(320×H/W)，"
+                   "Δ=320×26/W（W=390/670/990/1310 ⇒ +21/+12/+9/+6）；"
+                   "FFT 曲线占纵向分屏 3/5 ⇒ 刻度标签 Δy=26×3/5=15.6→16",
+        "source_commit": "代码 9d5fb92e（底坞 74→48）；基线 0d8e4fe8",
+        "updated_at": "2026-11-06",
+        "measured": "spectrum 320x240→261 / 197→209 / 191→200 / 189→195；"
+                    "adsb_empty 384→410 / 504→530 / 684→710 / 864→890",
+    },
+    "spectrum-axis-nice-steps": {
+        "authorized_by": "未留存原文（存量项，2026-11-06 补录）",
+        "formula": "未留存（存量项）；源码改动见 source_commit",
+        "source_commit": "d602eabb",
+        "updated_at": "未留存（存量项）",
+        "measured": "未留存（存量项）",
+    },
+    "freq-readout-bookmark-blowout": {
+        "authorized_by": "未留存原文（存量项，2026-11-06 补录）",
+        "formula": "未留存（存量项）；缺陷态与真值 278x60 见 token 描述",
+        "source_commit": "eefa0817",
+        "updated_at": "未留存（存量项）",
+        "measured": "320x20（缺陷态）→ 278x60（真实布局）",
+    },
+    "ui-baseline-userdata-isolation": {
+        "authorized_by": "未留存原文（存量项，2026-11-06 补录）",
+        "formula": "未留存（存量项）；隔离口径见 token 描述",
+        "source_commit": "b88c8456",
+        "updated_at": "未留存（存量项）",
+        "measured": "未留存（存量项）",
+    },
+}
+
+
+def provenance_missing(token: str) -> list[str]:
+    """返回 token 缺失的 provenance 字段名；无登记则返回全部字段。"""
+    prov = BASELINE_PROVENANCE.get(token) or {}
+    return [k for k in _PROVENANCE_FIELDS
+            if not str(prov.get(k) or "").strip()]
+
 
 class BaselineUpdateRefused(RuntimeError):
     """基线更新被拒绝（缺原因 / 几何漂移 / 未声明设计变更）。"""
@@ -416,6 +467,18 @@ def guarded_update(path: str, image: QImage, reason: str,
                     + "、".join(f"{k}（{v}）"
                                for k, v in DEFECT_BASELINE_FIXES.items())
                     + f"；当前 reason={reason.strip()!r}")
+            chosen = token or defect
+            missing = provenance_missing(chosen)
+            if missing:
+                raise BaselineUpdateRefused(
+                    f"基线更新缺少 provenance 字段 {missing}（token={chosen}）："
+                    "在 scripts/ui_baseline.py 的 BASELINE_PROVENANCE 补齐 "
+                    "authorized_by / formula / source_commit / updated_at / "
+                    "measured——算不出来、指不到提交的期望值不许写进基线")
+            prov = dict(BASELINE_PROVENANCE[chosen])
+            print(f"[baseline][provenance] {chosen}: "
+                  f"source_commit={prov['source_commit']} "
+                  f"authorized_by={prov['authorized_by']}", flush=True)
             gdiff = geometry_diff(old, image)
             if token is not None:
                 print(f"[baseline][geometry] 已声明 {token}: {gdiff['text']}",
@@ -432,6 +495,7 @@ def guarded_update(path: str, image: QImage, reason: str,
             summary = summarize(old, image, allow_geometry=True)
             summary["geometry"] = gdiff
             summary["labels"] = labels_diff
+            summary["provenance"] = prov
             if token is not None:
                 summary["design_change"] = token
                 summary["defect_baseline"] = None

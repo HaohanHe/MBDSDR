@@ -191,6 +191,7 @@ def test_accept_geometry_with_declared_change_passes(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "[baseline][geometry]" in out and "→" in out
     assert summary["design_change"] == "spectrum-axis-nice-steps"
+    assert summary["provenance"]["source_commit"] == "d602eabb"
     assert summary["geometry"]["size"] == (320, 192, 336, 192)
     assert summary["geometry"]["text"] and "宽高比" in summary["geometry"]["text"]
     assert "几何变更已声明" in summary["text"]
@@ -245,3 +246,35 @@ def test_label_geometry_change_needs_accept_flag(tmp_path):
     assert summary["labels"]["moves"], "标签位置变化必须出现在几何 diff 里"
     assert summary["labels"]["count"] == (2, 2)
     assert "标签 2→2" in summary["labels"]["text"]
+
+
+# ---------------------------------------------------------------------------
+# 第四条硬规则：放行 token 必须带 provenance（谁授权/算式/源码提交/时间/实测）
+# ---------------------------------------------------------------------------
+def test_geometry_change_without_provenance_refused(tmp_path, monkeypatch):
+    """token 未登记 provenance：几何变更同样拒绝（不许「人写期望值」）。"""
+    import ui_baseline
+    monkeypatch.setitem(ui_baseline.DESIGN_CHANGES,
+                        "token-without-provenance", "临时：未登记 provenance")
+    path = str(tmp_path / "panel_1000x600.png")
+    _make(path, 320, 192, "#F5F3EF")
+    wider = _make(str(tmp_path / "new.png"), 336, 192, "#F5F3EF")
+    with pytest.raises(BaselineUpdateRefused, match="provenance"):
+        guarded_update(path, wider, "token-without-provenance: 临时",
+                       accept_geometry_change=True)
+
+
+def test_provenance_missing_field_refused(tmp_path, monkeypatch):
+    """provenance 缺任一字段（这里清空 formula）：同样拒绝。"""
+    import ui_baseline
+    prov = dict(ui_baseline.BASELINE_PROVENANCE["narrow-bottom-dock-74-to-48"])
+    prov["formula"] = ""
+    monkeypatch.setitem(ui_baseline.BASELINE_PROVENANCE,
+                        "narrow-bottom-dock-74-to-48", prov)
+    path = str(tmp_path / "panel_1000x600.png")
+    _make(path, 320, 192, "#F5F3EF")
+    wider = _make(str(tmp_path / "new.png"), 336, 192, "#F5F3EF")
+    with pytest.raises(BaselineUpdateRefused, match="provenance"):
+        guarded_update(path, wider,
+                       "narrow-bottom-dock-74-to-48: 底坞高度变更",
+                       accept_geometry_change=True)
