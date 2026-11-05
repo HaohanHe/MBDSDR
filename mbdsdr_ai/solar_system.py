@@ -11,7 +11,9 @@ MBDSDR AI 内核 - 真实日月行星位置模块
 - 地球位置 = EMB（地月质心） - 月球位置 * mu_m/(1+mu_m)（mu_m≈0.0123）。
 - 月球位置可用 ELP2000-82B 理论。
 - J2000 地心赤道矢量 = (行星日心 - 观测者日心 + 光行差修正)。
-- 被照亮比例 = 0.5 * (1 - cos(日月距角))；月处相位角 ≈ 180° - 距角。
+- 月相被照亮比例 = 0.5 * (1 - cos(日月距角))；月处相位角 ≈ 180° - 距角。
+- 行星被照亮比例 = 0.5 * (1 + cos(相位角))；相位角由日-行星-地球三边
+  余弦定理给出（cos χ = (r_helio² + Δ² - R²) / (2 · r_helio · Δ)）。
 - 光行时修正：lightTimeDays = 距离_AU / (光速_km/s * 86400)，
   再按 t - lightTime 重算位置；光行差修正 = lightTime * 观测者速度。
 
@@ -590,6 +592,55 @@ def _moon_phase_from_elongation(elong_deg: float) -> Tuple[float, float]:
             moon_illum_from_elongation(elong))
 
 
+def _planet_cos_phase(r_helio_au: float, delta_au: float,
+                      r_sun_au: float) -> float:
+    """行星相位角余弦：日-行星-地球三角形的余弦定理。
+
+    三边：SP = ``r_helio_au``（日心到行星）、PE = ``delta_au``（行星到
+    地球/观测者）、SE = ``r_sun_au``（日心到地球）。相位角 χ 是行星处
+    ∠SPE：``cos χ = (r_helio² + Δ² - R²) / (2 · r_helio · Δ)``。
+
+    历史缺陷（2026-11-05 修）：旧实现把 ``r_p`` 与 ``r_geo`` 都填成地心
+    距离，三角形退化成 ``cos χ = R/(2Δ)``——内行星（Δ<R/2）被夹到 1
+    （恒报满相），外行星（Δ>R/2）报 0.53–0.87 的假「半亮」。
+    本函数要求三个边长都为正（退化立即报错，不静默兜底）。
+    这是本仓**唯一**一处行星相位几何，三个历表后端都调它。
+    """
+    for label, value in (("r_helio", r_helio_au), ("delta", delta_au),
+                         ("r_sun", r_sun_au)):
+        if not (float(value) > 0.0):
+            raise ValueError(f"三角形边长必须为正：{label}={value}")
+    cos_chi = (r_helio_au * r_helio_au + delta_au * delta_au
+               - r_sun_au * r_sun_au) / (2.0 * r_helio_au * delta_au)
+    # 三边近共线时余弦可能越界 1e-9，夹到定义域 [-1, 1]（几何定义域，非数值补丁）
+    return max(-1.0, min(1.0, cos_chi))
+
+
+def planet_phase_angle_from_geometry(r_helio_au: float, delta_au: float,
+                                     r_sun_au: float) -> float:
+    """行星相位角（度）：χ = acos(cos χ)，χ=0 全亮、χ=180° 全暗。"""
+    return math.degrees(math.acos(_planet_cos_phase(r_helio_au, delta_au,
+                                                    r_sun_au)))
+
+
+def planet_illum_from_geometry(r_helio_au: float, delta_au: float,
+                               r_sun_au: float) -> float:
+    """行星被照亮比例：``illum = 0.5 * (1 + cos χ)``。
+
+    与月相家族同名同规格：唯一实现，三后端共用。注意符号是 **+cos**——
+    行星相位角 0° 时全亮（如外行星合日/冲日近共线），与月相（距角 0°
+    为新月、用 1-cos）语义相反。
+    """
+    return 0.5 * (1.0 + _planet_cos_phase(r_helio_au, delta_au, r_sun_au))
+
+
+def _planet_phase_from_geometry(r_helio_au: float, delta_au: float,
+                                r_sun_au: float) -> Tuple[float, float]:
+    """三边 → (相位角, 被照亮比例)。三后端共用的唯一换算入口。"""
+    return (planet_phase_angle_from_geometry(r_helio_au, delta_au, r_sun_au),
+            planet_illum_from_geometry(r_helio_au, delta_au, r_sun_au))
+
+
 def _moon_phase_skyfield(t_unix: float, station: GroundStation,
                          moon_pos: BodyPosition) -> Tuple[float, float]:
     """计算（月处相位角, 被照亮比例）：先取日月距角，再走统一换算。
@@ -826,6 +877,85 @@ def _moon_phase_astropy(t_unix: float, station: GroundStation,
     return _moon_phase_from_elongation(elongation)
 
 
+# ── 行星三角形：三后端各取「真实三边」，公式只在上面一份 ──────
+
+def _planet_distances_skyfield(body_key: str,
+                               t_unix: float) -> Optional[Tuple[float, float, float]]:
+    """skyfield：日心距、地心距、日地距（AU），均为真实边长。"""
+    be = _get_backend()
+    if be._engine != "skyfield":
+        return None
+    eph = be._sf_eph
+    body = be._sf_planets.get(body_key)
+    if body is None:
+        return None
+    t = be._sf_ts.utc(datetime.fromtimestamp(t_unix, tz=timezone.utc))
+    earth, sun = eph["earth"], eph["sun"]
+    r_helio = float(sun.at(t).observe(body).distance().au)
+    delta = float(earth.at(t).observe(body).distance().au)
+    r_sun = float(earth.at(t).observe(sun).distance().au)
+    return r_helio, delta, r_sun
+
+
+def _planet_distances_jplephem(body_key: str,
+                               t_unix: float) -> Optional[Tuple[float, float, float]]:
+    """jplephem：由 ICRS 地心矢量（km）取三边，再换算成 AU。"""
+    be = _get_backend()
+    if be._engine != "jplephem":
+        return None
+    body_id = _JPLEPHEM_IDS.get(body_key)
+    if body_id is None:
+        return None
+    spk = be._handle.spk
+    jd = _unix_to_jd(t_unix)
+    planet_geo = _jplephem_geo_vector(spk, body_id, jd)   # 行星 - 地球
+    sun_geo = _jplephem_geo_vector(spk, 10, jd)           # 太阳 - 地球
+
+    def _norm_au(v: Tuple[float, float, float]) -> float:
+        return math.sqrt(sum(c * c for c in v)) / AU_KM
+
+    helio = tuple(p - s for p, s in zip(planet_geo, sun_geo))  # 行星 - 太阳
+    return _norm_au(helio), _norm_au(planet_geo), _norm_au(sun_geo)
+
+
+def _planet_distances_astropy(body_key: str,
+                              t_unix: float) -> Optional[Tuple[float, float, float]]:
+    """astropy builtin：由质心直角坐标取三边（AU）。"""
+    be = _get_backend()
+    if be.kind != "vsop87_astropy":
+        return None
+    ap = be._astropy
+    coord, units, AstropyTime = ap["coord"], ap["units"], ap["Time"]
+    t = AstropyTime(datetime.fromtimestamp(t_unix, tz=timezone.utc))
+
+    with coord.solar_system_ephemeris.set("builtin"):
+        planet = coord.get_body_barycentric(body_key, t)
+        sun = coord.get_body_barycentric("sun", t)
+        earth = coord.get_body_barycentric("earth", t)
+
+    def _norm_au(rep) -> float:
+        xyz = rep.cartesian.xyz.to_value(units.au)
+        return float(math.sqrt(sum(float(c) * float(c) for c in xyz)))
+
+    return (_norm_au(planet - sun), _norm_au(planet - earth),
+            _norm_au(sun - earth))
+
+
+def _planet_illumination(body_key: str,
+                         t_unix: float) -> Optional[Tuple[float, float]]:
+    """按当前后端取三边，再走唯一几何换算；后端取不到边长时返回 None。"""
+    be = _get_backend()
+    if be._engine == "skyfield":
+        distances = _planet_distances_skyfield(body_key, t_unix)
+    elif be._engine == "jplephem":
+        distances = _planet_distances_jplephem(body_key, t_unix)
+    else:
+        distances = _planet_distances_astropy(body_key, t_unix)
+    if distances is None:
+        return None
+    return _planet_phase_from_geometry(*distances)
+
+
 # ── 公共 API ──────────────────────────────────────────
 
 def _compute_position(body_key: str, t_unix: float,
@@ -926,6 +1056,8 @@ def get_planet_position(planet_name: str, time: Any,
     获取行星视位置。
 
     优先 JPL DE4xx 星历，不可用时回退 VSOP87 级数；光行时迭代修正。
+    相位角/照度由日-行星-地球真实三边（日心距、地心距、日地距）算出，
+    换算只在 :func:`planet_illum_from_geometry` 一处。
 
     参数:
         planet_name: mercury/venus/mars/jupiter/saturn（不区分大小写）
@@ -950,34 +1082,13 @@ def get_planet_position(planet_name: str, time: Any,
     if pos is None:
         return None
 
-    # 行星相位角：地心看行星，太阳-行星-地球 夹角
-    # 简化：用 RA/Dec 差估算（精确值需三维矢量，这里给近似）
-    # 相位角由日心矢量三角形余弦定理给出
-    try:
-        sun_pos = get_sun_position(time, station)
-        if sun_pos is not None and pos.distance_au and sun_pos.distance_au:
-            # 角距离 ≈ 太阳与行星的角距
-            ra_diff = math.radians(pos.ra_deg - sun_pos.ra_deg)
-            dec_mean = math.radians(0.5 * (pos.dec_deg + sun_pos.dec_deg))
-            # 近似角距离
-            cos_sep = (math.sin(math.radians(pos.dec_deg)) * math.sin(math.radians(sun_pos.dec_deg))
-                       + math.cos(math.radians(pos.dec_deg)) * math.cos(math.radians(sun_pos.dec_deg))
-                       * math.cos(ra_diff))
-            cos_sep = max(-1.0, min(1.0, cos_sep))
-            elongation = math.degrees(math.acos(cos_sep))
-            # 相位角近似：cos(phase) ≈ -cos(elongation) * (r_planet/r_earth) 修正
-            # 这里用简化公式
-            r_p = pos.distance_au
-            r_sun = sun_pos.distance_au
-            # 地心行星距离
-            r_geo = pos.distance_au  # skyfield/astropy 返回的是地心距离
-            # 相位角余弦
-            cos_chi = (r_geo * r_geo + r_sun * r_sun - r_p * r_p) / (2.0 * r_geo * r_sun)
-            cos_chi = max(-1.0, min(1.0, cos_chi))
-            pos.phase_angle_deg = math.degrees(math.acos(cos_chi))
-            pos.illumination = 0.5 * (1.0 + cos_chi)
-    except Exception:
-        pass
+    # 行星相位角/照度：日-行星-地球真实三角形（三边分别取日心距、
+    # 地心距、日地距），再走唯一几何换算。历史实现把行星日心距填成地心距，
+    # 三角形退化，行星恒为「满相」——2026-11-05 修，详见 _planet_cos_phase。
+    if name != "earth":
+        phase = _planet_illumination(name, t_unix)
+        if phase is not None:
+            pos.phase_angle_deg, pos.illumination = phase
 
     return _stamp_backend(pos)
 
