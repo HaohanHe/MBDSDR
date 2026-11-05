@@ -25,8 +25,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-#: 配置导出格式版本。导入时版本不符即拒绝，绝不"猜着读"。
+#: 配置导出格式版本（导出文件里写这个整数）。
+#: 版本策略：**同主版本允许导入并迁移**（缺字段按默认补齐、多字段列出后忽略），
+#: 只有跨主版本才拒绝——主版本变化意味着字段语义/取值范围可能重定义，
+#: 按旧语义解释会写坏设置。
 CONFIG_SCHEMA_VERSION = 1
+CONFIG_SCHEMA_MAJOR = 1
+CONFIG_SCHEMA_MINOR = 0
 
 #: 分组展示顺序（设置面板页签）。未列分组不会显示。
 GROUP_ORDER: Tuple[str, ...] = (
@@ -129,6 +134,16 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         help="与气压一起决定折射强度；极端高温/低温下地平线附近高度角会有差异。",
         source="desktop/rf_sky_view.py:228 DISPLAY_REFRACTION_TEMPERATURE_C=10.0",
     ),
+    SettingItem(
+        key="bortle", group="星象仪", kind="int",
+        label="光害等级（Bortle）", default=3, minimum=1, maximum=9, step=1,
+        help=("你头顶天空的光害程度：1=极暗乡村（银河照亮地面），"
+              "5=郊外可见银河但无细节，9=市中心（几乎看不到银河）。"
+              "等级越高可见星数越少——同一视场下 Bortle 3 的可见星数约为 "
+              "Bortle 8 的 7 倍（本星表实测 1456 对 194 颗）。"
+              "本模型对 1–3 档统一取裸眼极限 6.5 等，4 档起每档少约 0.35 等。"),
+        source="mbdsdr_ai/skyengine/stars.py:155 DEFAULT_BORTLE=3",
+    ),
 
     # ---------------------------------------------------------------- 频谱与解码
     SettingItem(
@@ -190,6 +205,17 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         label="显示频段彩带", default=True,
         help="按 bandplan.json 在谱面标注短波/航空/业余/卫星等频段。",
         source="desktop/spectrum_widget.py:855 show_bandplan=True",
+    ),
+
+    # ---------------------------------------------------------------- 存储与日志
+    SettingItem(
+        key="record_dir", group="存储与日志", kind="text",
+        label="录音目录", default="",
+        help=("录制的 IQ/音频文件存到这里。留空 = 程序目录旁的 "
+              "recordings（本机即 D:\\mbdsdr\\recordings，默认不写 C 盘用户目录）。"
+              "改目录只影响新录音，已有录音不动。"),
+        source=("desktop/main_window.py:5536 旧写死 ~/mbdsdr_recordings；"
+                "新唯一来源 desktop/settings.py:resolve_record_dir"),
     ),
 
     # ---------------------------------------------------------------- 卫星与多普勒
@@ -301,10 +327,6 @@ EXPOSED_ITEMS: Tuple[SettingItem, ...] = tuple(it for it in ALL_ITEMS if it.expo
 
 #: 设置面板不展示、但确实锁死的条目及原因（文档与 UI 提示共用）。
 LOCKED: Tuple[Tuple[str, str], ...] = (
-    ("Bortle 光害等级 / 肉眼极限星等",
-     "星象仪坐标视图把 _bortle 写死为 3（rf_sky_view.py:1714），"
-     "没有 setter；该文件归坐标视图线，擅自改私有属性会产生两套不同步状态。"
-     "等其提供公开 setter 后再进 schema。"),
     ("星象仪图层（方位网格/赤道网格/罗盘/轨迹）",
      "星象仪底栏已有四个图层开关（rf_sky_view.py:6944-6957），"
      "设置里再开一套会出现两个不同步入口；持久化需坐标视图线在底栏直接写配置。"),
@@ -313,9 +335,6 @@ LOCKED: Tuple[Tuple[str, str], ...] = (
      "设置里再设默认值会被下一次步进覆盖，形成假配置。"),
     ("Max/Min hold、dB 显示范围",
      "它们是测量态临时工具，不是长期偏好；重启清零是预期行为，持久化反而制造困惑。"),
-    ("录音目录",
-     "目前写死 ~/mbdsdr_recordings（main_window.py:5536），消费点在主窗口（归另一条线）。"
-     "本线无权改消费代码，暴露开关只会得到'改了不生效'的假设置。"),
     ("日志级别",
      "桌面端没有 logging.basicConfig/级别开关（仅分散的 getLogger），"
      "没有可改的消费点；先补日志基础设施再谈配置。"),
@@ -414,11 +433,22 @@ class ImportResult:
     unknown: List[str] = field(default_factory=list)
     rejected: List[Tuple[str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    #: 文件里缺失、按当前 schema 默认值补齐的键（同主版本迁移）。
+    filled: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
     @property
     def ok(self) -> bool:
         return self.error is None
+
+    def summary(self) -> str:
+        """人话结果：导入 N 项 / 补齐 N 项 / 忽略 N 项 / 拒绝 N 项。"""
+        parts = [f"已导入 {len(self.accepted)} 项",
+                 f"已按默认补齐 {len(self.filled)} 项",
+                 f"忽略未知 {len(self.unknown)} 项"]
+        if self.rejected:
+            parts.append(f"拒绝 {len(self.rejected)} 项")
+        return "，".join(parts)
 
 
 def build_export(settings_values: Dict[str, Any],
@@ -452,8 +482,34 @@ def build_export(settings_values: Dict[str, Any],
     return payload
 
 
+def _parse_version(raw: Any) -> Tuple[int, int]:
+    """把 1 / "1" / "1.0" / "1.2" 解析成 (主版本, 次版本)；非法抛 ValueError。"""
+    if isinstance(raw, bool):
+        raise ValueError("布尔值不是版本号")
+    if isinstance(raw, int):
+        major, minor = raw, 0
+    elif isinstance(raw, float) and raw.is_integer():
+        major, minor = int(raw), 0
+    else:
+        text = str(raw).strip()
+        if not text:
+            raise ValueError("空版本号")
+        parts = text.split(".")
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+    if major < 0 or minor < 0:
+        raise ValueError("版本号不能为负")
+    return major, minor
+
+
 def parse_import(payload: Any) -> ImportResult:
-    """解析导入 JSON：校验版本与字段；不认识的键**列出来**，不静默丢弃。"""
+    """解析导入 JSON：同主版本迁移，跨主版本拒绝；未知键**列出来**，不静默丢弃。
+
+    迁移口径（用户拿旧导出文件回来不该被拒之门外）：
+      * 同主版本、字段子集变化 → 缺的字段取当前 schema 默认（记入 ``filled``），
+        多的字段列进 ``unknown`` 并忽略；
+      * 跨主版本 → 拒绝，并说明原因与下一步该怎么办。
+    """
     res = ImportResult()
     if not isinstance(payload, dict):
         res.error = "文件顶层不是 JSON 对象"
@@ -462,15 +518,30 @@ def parse_import(payload: Any) -> ImportResult:
         res.error = "缺少 schema_version，无法确认版本兼容性"
         return res
     try:
-        ver = int(payload["schema_version"])
+        major, minor = _parse_version(payload["schema_version"])
     except (TypeError, ValueError):
-        res.error = f"schema_version 不是整数：{payload['schema_version']!r}"
+        res.error = f"schema_version 不是合法版本号：{payload['schema_version']!r}"
         return res
-    if ver != CONFIG_SCHEMA_VERSION:
-        res.error = (f"配置版本 {ver} 与当前 {CONFIG_SCHEMA_VERSION} 不兼容；"
-                     "拒绝导入以免写入未知语义")
+    if major != CONFIG_SCHEMA_MAJOR:
+        res.error = (
+            f"配置版本 {major}.{minor} 的主版本与当前 {CONFIG_SCHEMA_MAJOR} 不同，"
+            "已拒绝导入：跨主版本时字段语义/取值范围可能已重定义，"
+            "按旧语义写入会把设置改坏。"
+            f"怎么办：① 用当前版本重新导出一次作为新基线；"
+            f"② 或手工把旧文件里想保留的少数项抄进新导出；"
+            f"③ 或先用主版本 {major} 对应的程序版本导入。")
         return res
+    if (major, minor) < (CONFIG_SCHEMA_MAJOR, CONFIG_SCHEMA_MINOR):
+        res.warnings.append(
+            f"导入文件版本 {major}.{minor} 较早（当前 "
+            f"{CONFIG_SCHEMA_MAJOR}.{CONFIG_SCHEMA_MINOR}），按当前 schema 迁移")
+    elif (major, minor) > (CONFIG_SCHEMA_MAJOR, CONFIG_SCHEMA_MINOR):
+        res.warnings.append(
+            f"导入文件版本 {major}.{minor} 较新（当前 "
+            f"{CONFIG_SCHEMA_MAJOR}.{CONFIG_SCHEMA_MINOR}），"
+            "不认识的字段会列在“忽略”里")
 
+    seen: set = set()
     for section in ("settings", "gui_config", "ai_config"):
         seg = payload.get(section, {})
         if seg is None:
@@ -479,6 +550,7 @@ def parse_import(payload: Any) -> ImportResult:
             res.error = f"{section} 段不是对象"
             return res
         for key, value in seg.items():
+            seen.add(key)
             item = SCHEMA.get(key)
             if item is None:
                 res.unknown.append(f"{section}.{key}")
@@ -491,4 +563,15 @@ def parse_import(payload: Any) -> ImportResult:
             res.accepted[key] = norm
             if reason:
                 res.warnings.append(f"{key}: {reason}")
+
+    # 同主版本迁移：文件里没有的键按当前默认值补齐（密钥类不参与导入导出）。
+    for item in ALL_ITEMS:
+        if item.secret or item.key in seen:
+            continue
+        res.accepted[item.key] = item.default
+        res.filled.append(item.key)
+    if res.filled:
+        shown = "、".join(res.filled[:12])
+        more = f" 等 {len(res.filled)} 项" if len(res.filled) > 12 else ""
+        res.warnings.append(f"已按默认补齐 {len(res.filled)} 项：{shown}{more}")
     return res

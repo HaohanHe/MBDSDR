@@ -74,6 +74,28 @@ def default_config_path() -> str:
                         "mbdsdr", "desktop_settings.json")
 
 
+def project_root() -> str:
+    """仓库/程序根目录（desktop/ 的上一级）。"""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def default_record_dir() -> str:
+    """录音目录默认值：程序根目录的**同级** ``recordings``。
+
+    本机项目在 ``D:\\mbdsdr\\MBDSDR``，故默认是 ``D:\\mbdsdr\\recordings``——
+    刻意不写 ``C:\\Users\\...`` 用户目录（该目录只放少量配置，不堆大文件）。
+    """
+    return os.path.join(os.path.dirname(project_root()), "recordings")
+
+
+def resolve_record_dir(value: Any) -> str:
+    """把设置里的录音目录归一为绝对路径；留空/None → :func:`default_record_dir`。"""
+    raw = "" if value is None else str(value).strip()
+    if raw:
+        return os.path.expanduser(os.path.expandvars(raw))
+    return default_record_dir()
+
+
 def _coerce(key: str, value: Any) -> Any:
     """按 schema 把读回的 JSON 值归一；越界夹范围、坏值回默认。
 
@@ -222,6 +244,28 @@ class DesktopSettings:
     @property
     def path(self) -> str:
         return self._path
+
+    @property
+    def record_dir(self) -> str:
+        """录音目录的**公开读取入口**（消费方照此取，禁止再写死路径）。
+
+        设置里留空时返回默认位置（程序目录同级 ``recordings``）；是否创建目录
+        由消费方在真正要写文件时调用 :meth:`ensure_record_dir` 决定。
+        """
+        return resolve_record_dir(self.get("record_dir", ""))
+
+    def ensure_record_dir(self) -> "tuple[str, str | None]":  # noqa: F821
+        """确保录音目录存在；返回 ``(路径, 错误说明)``，错误为 None 表示可用。
+
+        失败（权限/磁盘/非法路径）不抛异常、不静默：调用方必须把错误说明
+        显示给用户，而不是假装录音还能继续。
+        """
+        directory = self.record_dir
+        try:
+            os.makedirs(directory, exist_ok=True)
+            return directory, None
+        except OSError as exc:
+            return directory, f"录音目录不可用（{directory}）：{exc}"
 
     # ------------------------------------------------------------------
     # 落盘

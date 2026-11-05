@@ -16,6 +16,7 @@ MBDSDR 服务设置面板（desktop/settings_panel.py）
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -43,9 +44,11 @@ except ImportError:  # pragma: no cover - 包内导入
         validate_value,
     )
 
-try:  # pragma: no cover
+try:  # pragma: no cover - 可选内核：只捕导入缺失（其它异常是要修的 bug）
     from mbdsdr_ai.remote_control import RemoteControl, DEFAULT_RC_PORT
-except Exception:  # noqa: BLE001
+except ImportError:
+    _log.warning("remote_control 内核不可用：服务设置面板降级，启动会如实报失败")
+
     class RemoteControl:  # type: ignore
         def __init__(self, backend=None, host="127.0.0.1", port=7356):
             self._backend = backend
@@ -62,15 +65,22 @@ except Exception:  # noqa: BLE001
 try:  # pragma: no cover
     from mbdsdr_ai.web.server import WebServer
     _WEB_OK = True
-except Exception:  # noqa: BLE001
+except ImportError:
+    _log.warning("Web 服务内核不可用：服务设置面板降级，启动会如实报失败")
     WebServer = None  # type: ignore
     _WEB_OK = False
 
 try:  # pragma: no cover
-    from settings import DesktopSettings, backup_corrupt_config
-except Exception:  # noqa: BLE001
-    DesktopSettings = None  # type: ignore
-    backup_corrupt_config = None  # type: ignore
+    from settings import DesktopSettings, backup_corrupt_config, resolve_record_dir
+except ImportError:  # 包内导入
+    try:
+        from .settings import (
+            DesktopSettings, backup_corrupt_config, resolve_record_dir)
+    except ImportError:
+        _log.warning("settings 模块不可用：设置面板无法持久化，改动只存内存")
+        DesktopSettings = None  # type: ignore
+        backup_corrupt_config = None  # type: ignore
+        resolve_record_dir = None  # type: ignore
 
 #: 端口默认值同样取自 schema（UI 不另写一份默认值）
 DEFAULT_RC_PORT = int(SCHEMA["rc_port"].default)
@@ -112,8 +122,8 @@ class ServiceSettingsPanel(QWidget):
             self.rc_check.blockSignals(False)
             self.rc_port.setEnabled(rc_on)
             self.rc_port.setValue(int(self._settings.get("rc_port", DEFAULT_RC_PORT)))
-        except Exception:  # noqa: BLE001
-            pass
+        except (TypeError, ValueError) as exc:
+            self._notify(f"远程控制设置回填失败（按默认显示）：{exc}")
         try:
             web_on = bool(self._settings.get("web_enabled", False))
             self.web_check.blockSignals(True)
@@ -121,17 +131,18 @@ class ServiceSettingsPanel(QWidget):
             self.web_check.blockSignals(False)
             self.web_port.setEnabled(web_on)
             self.web_port.setValue(int(self._settings.get("web_port", DEFAULT_WEB_PORT)))
-        except Exception:  # noqa: BLE001
-            pass
+        except (TypeError, ValueError) as exc:
+            self._notify(f"Web 服务设置回填失败（按默认显示）：{exc}")
 
     def _persist(self, key: str, value) -> None:
-        """写一项设置；未注入 settings 时静默跳过（不崩、不谎报已保存）。"""
+        """写一项设置；失败必须显示出来（否则用户以为保存了、重启却丢了）。"""
         if self._settings is None:
+            self._notify("未挂载配置存储：本次改动只存在当前会话")
             return
         try:
             self._settings.set(key, value)
-        except Exception:  # noqa: BLE001
-            pass
+        except (TypeError, ValueError) as exc:
+            self._notify(f"{key} 保存失败：{exc}（改动可能重启后丢失）")
 
     def restore_enabled_services(self):
         """按持久化的上次状态恢复服务：仅当用户上次显式启用过才重新监听。
@@ -141,13 +152,10 @@ class ServiceSettingsPanel(QWidget):
         """
         if self._settings is None:
             return
-        try:
-            if bool(self._settings.get("rc_enabled", False)) and self._rc is None:
-                self._start_rc()
-            if bool(self._settings.get("web_enabled", False)) and self._web is None:
-                self._start_web()
-        except Exception:  # noqa: BLE001
-            pass
+        if bool(self._settings.get("rc_enabled", False)) and self._rc is None:
+            self._start_rc()
+        if bool(self._settings.get("web_enabled", False)) and self._web is None:
+            self._start_web()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -202,7 +210,16 @@ class ServiceSettingsPanel(QWidget):
         note.setWordWrap(True)
         note.setObjectName("hintLabel")
         root.addWidget(note)
+        # 保存失败/回填失败的用户可见状态行（不许静默吞掉配置层错误）
+        self.error_label = QLabel("")
+        self.error_label.setWordWrap(True)
+        self.error_label.setObjectName("hintLabel")
+        root.addWidget(self.error_label)
         root.addStretch(1)
+
+    def _notify(self, msg: str):
+        """把失败原因写到面板状态行（用户可见，不是日志里自嗨）。"""
+        self.error_label.setText(msg)
 
     def refresh_from_settings(self):
         """外部（设置面板的恢复默认/导入）改完 settings 后回填本面板控件。"""
@@ -251,7 +268,7 @@ class ServiceSettingsPanel(QWidget):
             self._rc.start()
             self.rc_status.setText(
                 f"状态：监听中  127.0.0.1:{self.rc_port.value()}")
-        except Exception as e:  # noqa: BLE001
+        except (OSError, RuntimeError, ValueError) as e:
             self.rc_status.setText(f"状态：启动失败 ({e})")
             self.rc_check.blockSignals(True)
             self.rc_check.setChecked(False)
@@ -264,8 +281,8 @@ class ServiceSettingsPanel(QWidget):
         if self._rc is not None:
             try:
                 self._rc.stop()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, RuntimeError) as exc:
+                self.rc_status.setText(f"状态：停止失败 ({exc})")
             self._rc = None
 
     # ------------------------------------------------------------ Web 服务
@@ -297,7 +314,7 @@ class ServiceSettingsPanel(QWidget):
             port = getattr(self._web, "port", self.web_port.value())
             self.web_status.setText(f"状态：运行中")
             self.web_url.setText(f"URL：http://127.0.0.1:{port}/")
-        except Exception as e:  # noqa: BLE001
+        except (OSError, RuntimeError, ValueError) as e:
             self.web_status.setText(f"状态：启动失败 ({e})")
             self.web_check.blockSignals(True)
             self.web_check.setChecked(False)
@@ -311,8 +328,8 @@ class ServiceSettingsPanel(QWidget):
         if self._web is not None:
             try:
                 self._web.stop()
-            except Exception:  # noqa: BLE001
-                pass
+            except (OSError, RuntimeError) as exc:
+                self.web_status.setText(f"状态：停止失败 ({exc})")
             self._web = None
 
     # ------------------------------------------------------------ 生命周期
@@ -387,6 +404,9 @@ class SettingsPanel(QWidget):
         self._ai = _load_json_dict(AI_CONFIG_PATH)
         self._build_ui()
         self._refresh_from_storage()
+        # 持久化的 Bortle 在启动时推给天空图（默认 3 与视图内置默认一致；
+        # 用户改过 8 的话重启后仍是 8，不是"改了白改"）。
+        self._apply_initial_state()
 
     # ------------------------------------------------------------ 外部接线
     def attach_settings(self, settings):
@@ -397,6 +417,18 @@ class SettingsPanel(QWidget):
         """注入主窗口（主题/触屏/频谱/星象仪/观测站的应用入口）。"""
         self._host = host
         self._refresh_from_storage()
+        self._apply_initial_state()
+
+    def _apply_initial_state(self):
+        """把需要在启动时同步的持久化项推给天空图（目前是 Bortle）。"""
+        h = self._host
+        sky = getattr(h, "sky_view", None) if h is not None else None
+        if sky is None or not hasattr(sky, "set_bortle"):
+            return
+        try:
+            sky.set_bortle(int(self._current_value(SCHEMA["bortle"])))
+        except (AttributeError, TypeError, ValueError) as exc:
+            self._notify(f"启动时同步光害等级失败（用天空图默认值）：{exc}")
 
     # ------------------------------------------------------------ 取/存
     @staticmethod
@@ -507,8 +539,21 @@ class SettingsPanel(QWidget):
         help_lbl.setWordWrap(True)
         help_lbl.setObjectName("hintLabel")
         v.addWidget(help_lbl)
+        if item.key == "record_dir":
+            tools = QHBoxLayout()
+            btn_browse = QPushButton("选择目录…")
+            btn_browse.clicked.connect(self._browse_record_dir)
+            btn_open = QPushButton("打开目录")
+            btn_open.clicked.connect(self._open_record_dir)
+            tools.addWidget(btn_browse)
+            tools.addWidget(btn_open)
+            tools.addStretch(1)
+            v.addLayout(tools)
         if item.requires_restart:
-            note = QLabel("重启生效：" + (item.restart_note or "该项在启动阶段装载。"))
+            # 就在切换控件下方写明——改完不能让人以为已经生效。
+            text = "重启后生效：" + (item.restart_note or "该项在启动阶段装载。")
+            control.setToolTip(text)
+            note = QLabel(text)
             note.setWordWrap(True)
             note.setStyleSheet("color:#D4956A;")
             v.addWidget(note)
@@ -544,6 +589,14 @@ class SettingsPanel(QWidget):
             w.setValue(int(value) if value is not None else int(item.default or 0))
             w.valueChanged.connect(lambda v, k=item.key: self._on_changed(k, int(v)))
             return w
+        # 文本：录音目录等路径项（留空 = 使用 schema/配置层给出的默认位置）
+        if item.kind == "text":
+            w = QLineEdit()
+            w.setPlaceholderText(self._text_placeholder(item))
+            w.setText("" if value is None else str(value))
+            w.editingFinished.connect(
+                lambda k=item.key, e=w: self._on_changed(k, e.text().strip()))
+            return w
         # float：观测站经纬度默认 None（未设置），用留空行编辑更诚实
         if item.default is None:
             w = QLineEdit()
@@ -563,6 +616,22 @@ class SettingsPanel(QWidget):
         w.setValue(float(value) if value is not None else float(item.default or 0.0))
         w.valueChanged.connect(lambda v, k=item.key: self._on_changed(k, float(v)))
         return w
+
+    def _text_placeholder(self, item) -> str:
+        if item.key == "record_dir":
+            return f"留空 = {self._record_effective_dir()}（只影响新录音）"
+        return ""
+
+    def _record_effective_dir(self) -> str:
+        """当前生效的录音目录（设置留空时用程序旁 recordings 的默认值）。"""
+        if self._settings is not None:
+            try:
+                return str(self._settings.record_dir)
+            except (AttributeError, TypeError, ValueError):
+                pass
+        if resolve_record_dir is not None:
+            return resolve_record_dir("")
+        return ""
 
     # ------------------------------------------------------------ 刷新
     def _refresh_from_storage(self):
@@ -590,6 +659,8 @@ class SettingsPanel(QWidget):
                     w.setCurrentIndex(0)
             elif item.kind == "int":
                 w.setValue(int(value) if value is not None else int(item.default or 0))
+            elif item.kind == "text":
+                w.setText("" if value is None else str(value))
             elif item.default is None:
                 w.setText("" if value is None else f"{float(value):.6f}")
             else:
@@ -607,6 +678,8 @@ class SettingsPanel(QWidget):
         applied = self._apply(item, value)
         self._set_control_value(item, self._current_value(item))
         msg = f"已保存：{item.label}"
+        if key == "record_dir":
+            msg += f"（生效目录 {self._record_effective_dir()}；只影响新录音）"
         if item.requires_restart:
             msg += "（重启后生效）"
         elif not applied:
@@ -652,6 +725,16 @@ class SettingsPanel(QWidget):
                 return True
             if key == "sky_temperature_c":
                 h.sky_view.set_refraction_params(temperature_c=float(value))
+                return True
+            if key == "bortle":
+                # 公开 setter（不直接改 _bortle）：下一帧按新等级重算可见星。
+                setter = getattr(h.sky_view, "set_bortle", None)
+                if setter is None:
+                    return False
+                setter(int(value))
+                return True
+            if key == "record_dir":
+                # 目录只给消费方读；改值不影响已录文件（消费点在主窗口线）。
                 return True
             if key.startswith("observer_"):
                 return True   # _store_value 已写 gui_config 并同步 tracker/天空图
@@ -843,9 +926,7 @@ class SettingsPanel(QWidget):
             item = SCHEMA[key]
             if item.storage != "gui_config":
                 self._apply(item, self._current_value(item))
-        self._notify(
-            f"已导入 {len(res.accepted)} 项；未知 {len(res.unknown)} 项，"
-            f"拒绝 {len(res.rejected)} 项")
+        self._notify("导入完成：" + res.summary())
         return res
 
     # ------------------------------------------------------------ 存储与日志页
@@ -854,6 +935,9 @@ class SettingsPanel(QWidget):
         lay = QVBoxLayout(page)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(6)
+        # 录音目录是真实可配置项（schema 行 + 选择/打开按钮）
+        for item in items_for_group("存储与日志"):
+            lay.addWidget(self._build_row(item))
         settings_path = (self._settings.path if self._settings is not None
                          else "（未挂载 settings）")
         for label, path in (
@@ -861,7 +945,6 @@ class SettingsPanel(QWidget):
                 ("GUI 配置（观测站/窗口）", GUI_CONFIG_PATH),
                 ("AI 配置", AI_CONFIG_PATH),
                 ("布局", os.path.expanduser("~/.config/MBDSDR/layouts.json")),
-                ("录音（只读说明）", os.path.expanduser("~/mbdsdr_recordings")),
                 ("日志（pythonw 无控制台时）",
                  os.path.expanduser("~/.config/MBDSDR/mbdsdr_desktop.log"))):
             row = QLabel(f"{label}：{path}")
@@ -871,8 +954,8 @@ class SettingsPanel(QWidget):
 
         note = QLabel(
             "损坏的配置不会被覆盖：解析失败会先备份为 *.corrupt-时间戳，"
-            "再按默认值启动。录音目录与日志级别当前锁死（原因见 "
-            "docs/settings-inventory.md）。")
+            "再按默认值启动。录音目录的改动只影响新录音，已有录音不动；"
+            "日志级别仍锁死（原因见 docs/settings-inventory.md）。")
         note.setWordWrap(True)
         note.setObjectName("hintLabel")
         lay.addWidget(note)
@@ -911,15 +994,39 @@ class SettingsPanel(QWidget):
         if not res.ok:
             QMessageBox.warning(self, "导入被拒绝", res.error or "未知错误")
             return
-        lines = [f"已导入 {len(res.accepted)} 项。"]
+        lines = [res.summary() + "。"]
+        if res.filled:
+            lines.append("已按默认补齐（旧文件缺少的字段）：" + "、".join(res.filled[:20]))
         if res.unknown:
-            lines.append("未知字段（未导入）：" + "、".join(res.unknown[:20]))
+            lines.append("已忽略（未知字段，不导入）：" + "、".join(res.unknown[:20]))
         if res.rejected:
             lines.append("被拒绝：" + "；".join(
                 f"{k}={r}" for k, r in res.rejected[:20]))
         if res.warnings:
             lines.append("提示：" + "；".join(res.warnings[:20]))
         QMessageBox.information(self, "导入完成", "\n".join(lines))
+
+    def _browse_record_dir(self):
+        """选择录音目录；已录文件不迁移（只影响新录音）。"""
+        current = self._record_effective_dir()
+        path = QFileDialog.getExistingDirectory(self, "选择录音目录", current)
+        if path:
+            self._on_changed("record_dir", path)
+
+    def _open_record_dir(self):
+        """打开当前生效的录音目录；不存在则尝试创建，失败明确提示。"""
+        directory, error = self._record_effective_dir(), None
+        if self._settings is not None and hasattr(self._settings, "ensure_record_dir"):
+            directory, error = self._settings.ensure_record_dir()
+        else:
+            try:
+                os.makedirs(directory, exist_ok=True)
+            except OSError as exc:
+                error = f"录音目录不可用（{directory}）：{exc}"
+        if error:
+            QMessageBox.warning(self, "打开录音目录失败", error)
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
 
     def _on_open_dir_clicked(self):
         directory = os.path.expanduser("~/.mbdsdr")

@@ -120,12 +120,16 @@ class _FakeSky:
     def __init__(self):
         self.pressure = 1013.25
         self.temperature = 10.0
+        self.bortle = 3
 
     def set_refraction_params(self, pressure_hpa=None, temperature_c=None):
         if pressure_hpa is not None:
             self.pressure = float(pressure_hpa)
         if temperature_c is not None:
             self.temperature = float(temperature_c)
+
+    def set_bortle(self, level):
+        self.bortle = int(level)
 
 
 class _FakeHost:
@@ -335,7 +339,7 @@ def test_import_roundtrip_and_unknown_reported(env):
     assert "future_unknown_key" not in ds.values()
 
 
-def test_import_rejects_wrong_version(env):
+def test_import_rejects_cross_major_version(env):
     ds, host, panel, tmp_path = env
     path = tmp_path / "bad.json"
     path.write_text(json.dumps({
@@ -343,8 +347,48 @@ def test_import_rejects_wrong_version(env):
     }), encoding="utf-8")
     res = panel.import_from(str(path))
     assert not res.ok
-    assert "不兼容" in res.error
+    # 跨主版本才拒绝，且必须说明为什么 + 该怎么办
+    assert "主版本" in res.error
+    assert "怎么办" in res.error
     assert ds.get("theme") == "default"
+
+
+def test_import_old_document_migrates_missing_fields(env):
+    """同主版本旧文件（缺字段）→ 允许导入，缺的取默认并报告补齐项数。"""
+    ds, host, panel, tmp_path = env
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps({
+        "schema_version": "1.0",
+        "settings": {"theme": "dark", "fft_size": 4096},
+    }), encoding="utf-8")
+
+    res = panel.import_from(str(path))
+    assert res.ok, res.error
+    assert ds.get("theme") == "dark"
+    assert ds.get("fft_size") == 4096
+    # 文件里缺的字段按 schema 默认补齐，并逐项列出
+    assert "bortle" in res.filled
+    assert "record_dir" in res.filled
+    assert ds.get("bortle") == SCHEMA["bortle"].default
+    assert any("已按默认补齐" in w for w in res.warnings)
+    assert "已按默认补齐" in res.summary()
+    assert len(res.filled) >= 20
+
+    # 未知字段仍在“忽略”里显式列出，不静默丢
+    assert res.unknown == []
+
+
+def test_import_same_major_newer_minor_accepts_and_lists_unknown(env):
+    ds, host, panel, tmp_path = env
+    path = tmp_path / "newer.json"
+    path.write_text(json.dumps({
+        "schema_version": "1.9",
+        "settings": {"theme": "dark", "future_key": 1},
+    }), encoding="utf-8")
+    res = panel.import_from(str(path))
+    assert res.ok
+    assert res.unknown == ["settings.future_key"]
+    assert any("较新" in w for w in res.warnings)
 
 
 def test_parse_import_reports_section_mismatch():
@@ -354,6 +398,123 @@ def test_parse_import_reports_section_mismatch():
     })
     assert res.ok
     assert res.rejected and res.rejected[0][0] == "observer_lat"
+
+
+# ---------------------------------------------------------------------------
+# 5.1 Bortle：必须可设、立即生效、可见星数实测有差
+# ---------------------------------------------------------------------------
+def test_bortle_schema_is_human_and_ranged():
+    item = SCHEMA["bortle"]
+    assert item.exposed, "Bortle 是用户头顶的观测条件，必须暴露"
+    assert item.minimum == 1 and item.maximum == 9
+    assert item.default == 3
+    assert "极暗乡村" in item.help and "市中心" in item.help
+    assert "可见星" in item.help
+    assert "DEFAULT_BORTLE" in item.source
+
+
+def test_bortle_change_takes_effect_immediately(env):
+    ds, host, panel, _ = env
+    # 面板构造时把持久化值推给天空图（默认 3）
+    assert host.sky_view.bortle == 3
+    panel._on_changed("bortle", 8)
+    assert ds.get("bortle") == 8
+    assert host.sky_view.bortle == 8, "改了必须立即生效，不能等重启"
+    panel._on_changed("bortle", 0)          # 越界夹到 1
+    assert ds.get("bortle") == 1
+    assert host.sky_view.bortle == 1
+
+
+def test_bortle_persisted_value_is_applied_on_next_start(env):
+    ds, host, panel, _ = env
+    ds.set("bortle", 8)
+    panel2 = settings_panel.SettingsPanel(settings=ds, host=host)
+    assert host.sky_view.bortle == 8, "重启后仍应是用户设定的 8，不是开发者默认"
+
+
+def test_bortle_visible_star_count_counter_evidence():
+    """同一个 FOV、同一时间：Bortle 3 与 8 的可见星数必须显著不同。"""
+    from mbdsdr_ai.celestial_geometry import GroundStation
+    from mbdsdr_ai.skyengine.star_catalog import get_catalog, select_for_view
+
+    get_catalog()
+    gs = GroundStation(0.0, 0.0, 0.0)
+    jd = 2451545.0
+    n3 = len(select_for_view(gs, jd, 0.0, 60.0, 120.0,
+                             bortle=3, max_count=100000))
+    n8 = len(select_for_view(gs, jd, 0.0, 60.0, 120.0,
+                             bortle=8, max_count=100000))
+    assert n3 > n8, f"Bortle 3 应看到更多星：3={n3}, 8={n8}"
+    assert n3 >= n8 * 3, f"差异不够显著：3={n3}, 8={n8}"
+    assert n3 - n8 >= 200, f"差异不够显著：3={n3}, 8={n8}"
+
+
+def test_sky_view_bortle_setter_clamps_and_rejects_garbage():
+    from rf_sky_view import RFSkyView
+
+    class _View:
+        _bortle = 3
+
+        def __init__(self):
+            self.updated = 0
+
+        def update(self):
+            self.updated += 1
+
+    v = _View()
+    RFSkyView.set_bortle(v, 8)
+    assert v._bortle == 8 and v.updated >= 1
+    RFSkyView.set_bortle(v, 0)
+    assert v._bortle == 1
+    RFSkyView.set_bortle(v, 99)
+    assert v._bortle == 9
+    with pytest.raises(ValueError):
+        RFSkyView.set_bortle(v, "不是数字")
+
+
+# ---------------------------------------------------------------------------
+# 5.2 录音目录：可配置、默认不落 C 盘用户目录、只影响新录音
+# ---------------------------------------------------------------------------
+def test_record_dir_default_is_sibling_of_project_not_user_dir():
+    default = settings_mod.default_record_dir()
+    project = settings_mod.project_root()
+    assert default == os.path.join(os.path.dirname(project), "recordings")
+    assert os.path.basename(default) == "recordings"
+    # 不再使用旧的 ~/mbdsdr_recordings，也不塞进 ~/.mbdsdr 配置目录
+    assert default != os.path.expanduser("~/mbdsdr_recordings")
+    assert not default.startswith(os.path.expanduser("~/.mbdsdr"))
+    if os.name == "nt" and project.startswith("D:"):
+        assert default == r"D:\mbdsdr\recordings"
+
+
+def test_record_dir_blank_means_default_and_ensure_creates(tmp_path):
+    ds = DesktopSettings(path=str(tmp_path / "s.json"))
+    assert ds.get("record_dir") == ""
+    assert ds.record_dir == settings_mod.default_record_dir()
+    ds.set("record_dir", str(tmp_path / "rec"))
+    assert ds.record_dir == str(tmp_path / "rec")
+    path, err = ds.ensure_record_dir()
+    assert err is None and os.path.isdir(path)
+    ds.flush()
+    again = DesktopSettings.load(path=str(tmp_path / "s.json"))
+    assert again.record_dir == str(tmp_path / "rec")
+
+
+def test_record_dir_panel_row_and_buttons(env):
+    from PySide6.QtWidgets import QLineEdit, QPushButton
+
+    ds, host, panel, tmp_path = env
+    editor = panel._rows["record_dir"]
+    assert isinstance(editor, QLineEdit)
+    assert settings_mod.default_record_dir() in editor.placeholderText()
+    texts = {b.text() for b in panel.findChildren(QPushButton)}
+    assert "打开目录" in texts and "选择目录…" in texts
+
+    target = str(tmp_path / "new_recordings")
+    panel._on_changed("record_dir", target)
+    assert ds.get("record_dir") == target
+    assert target in panel.status_label.text()
+    assert "只影响新录音" in panel.status_label.text()
 
 
 # ---------------------------------------------------------------------------
@@ -444,3 +605,51 @@ def test_locked_items_documented():
     for name, reason in config_schema.LOCKED:
         assert name and reason
         assert len(reason) > 20, f"{name} 的锁死理由太敷衍"
+
+
+# ---------------------------------------------------------------------------
+# 7. 服务面板：外部边界失败必须可见（不再静默 pass）
+# ---------------------------------------------------------------------------
+def test_service_panel_shows_save_failure(qapp):
+    class _BadSettings:
+        def get(self, key, default=None):
+            return default
+
+        def set(self, key, value):
+            raise TypeError("模拟序列化失败")
+
+    panel = settings_panel.ServiceSettingsPanel(settings=_BadSettings())
+    panel._persist("rc_port", 7356)
+    assert "保存失败" in panel.error_label.text()
+    assert "重启后丢失" in panel.error_label.text()
+
+
+def test_service_panel_shows_start_failure(qapp, monkeypatch):
+    class _BoomRemote:
+        def __init__(self, backend=None, host="127.0.0.1", port=7356):
+            self.host, self.port = host, port
+
+        def start(self):
+            raise RuntimeError("模拟端口被占用")
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(settings_panel, "RemoteControl", _BoomRemote)
+    panel = settings_panel.ServiceSettingsPanel()
+    panel._start_rc()
+    assert "启动失败" in panel.rc_status.text()
+    assert panel.rc_check.isChecked() is False
+    assert panel._rc is None
+
+
+def test_service_panel_shows_stop_failure(qapp):
+    class _BadStop:
+        def stop(self):
+            raise OSError("模拟句柄已失效")
+
+    panel = settings_panel.ServiceSettingsPanel()
+    panel._rc = _BadStop()
+    panel._stop_rc()
+    assert "停止失败" in panel.rc_status.text()
+    assert panel._rc is None
