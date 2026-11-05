@@ -350,10 +350,22 @@ class TestE4NamingHonest:
             f"控制面板必须叫解调带宽，实际 {cp.vfo_bw_label.text()!r}"
         assert "硬件" in cp.vfo_bw_combo.toolTip(), \
             "解调带宽 tooltip 必须与「硬件带宽」互相区分"
-        mod_src = open(os.path.join(_ROOT, "desktop", "module_panel.py"),
-                       encoding="utf-8").read()
-        assert 'form.addRow("硬件带宽", self.bw_spin)' in mod_src, \
-            "模块面板必须叫「硬件带宽」，不得与 VFO 带宽同名"
+
+        # 模块面板的行标必须真叫「硬件带宽」：直接回读真实表单布局里
+        # bw_spin 所在行的标签，而不是去源码找 addRow(...) 字符串。
+        from PySide6.QtWidgets import QFormLayout
+
+        from module_panel import ModulePanel
+        p = ModulePanel()
+        form = next((lay for lay in p.findChildren(QFormLayout)
+                     if lay.labelForField(p.bw_spin) is not None), None)
+        assert form is not None, "bw_spin 必须放在表单行里（否则没有行标）"
+        row_label = form.labelForField(p.bw_spin)
+        row_text = getattr(row_label, "text", lambda: "")()
+        assert row_text == "硬件带宽", \
+            f"模块面板 bw_spin 行标必须叫「硬件带宽」，实际 {row_text!r}"
+        assert row_text != cp.vfo_bw_label.text(), \
+            "硬件带宽与 VFO 带宽不得同名"
 
     def test_chinese_wording_no_stray_english(self):
         """「自动」「偏移调谐」中文化（Auto/Offset 混排是翻译腔）。"""
