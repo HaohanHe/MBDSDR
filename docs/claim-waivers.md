@@ -9,7 +9,7 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 142 -->
+<!-- waived-total: 138 -->
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -82,7 +82,6 @@
 | 65 | docs/limitations-register.md | 3e1e2396b627 | / 控制台 Ctrl+C（仅 `python desktop/main.py` 开发场景；pythonw/打包版无控制台） / **中，已降为低** / 修前：中断被 PySide 吞，可能吃掉… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 66 | docs/limitations-register.md | 6d439f88d421 | / L46 / **`solar_system` 三个后端把「日月距角」当成「月处相位角」直接套 `0.5*(1+cos)`，照度整条反转**：2026-11-09 13:30 UTC 新月（距… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 67 | docs/limitations-register.md | 93c228e42146 | / L47 / **`get_planet_position` 把行星日心距与地心距都填成 `pos.distance_au`**，日-行星-地球三角形退化为 `cos χ = R/(2Δ)`：… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 68 | docs/limitations-register.md | de963ca61545 | / L50 / **C++ 侧采样率写入失败此前不可见** / 旧形态：`cpp/src/dsp/rtl_sdr_source.cpp` 运行时 `setSampleRate` 调 `rtlsd… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 69 | docs/limitations-register.md | 40bffa49dc65 | / L50 / **TLE 老化后过境仍照算，且看起来和新 TLE 一样** / 30 天：首条预测 20:47:47 / 12.18°（较新鲜首条 +7h12m），真实中天时刻 **-43.3… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 70 | docs/limitations-register.md | fddb5d89bbbc | / L52 / **`station_warning` 的真实可见面（不是「进了日志就算」）** / (0,0) 控制器实测返回 **2 条**并带 `station_warning="null… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 71 | docs/narrow-screen-plan.md | 15fb3ab8e89a | > DPR 1.0 口径，验收线 **1344×700**（1366×768 扣边框/任务栏）。已落地： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
@@ -96,9 +95,7 @@
 | 79 | docs/packaging.md | 2882e4fa8ea4 | / 约束 / 实测行为 / 期望 / 差距 / 已修 / | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 80 | docs/packaging.md | fa864f5bb53e | 4. ACL 级只读（非 Program Files）不再靠启动期同步判断：已改为后台线程试写 + | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 81 | docs/parameter-unification.md | e1906b2ae6d7 | / 1 / 连接对话框 `sr_combo` 能力化 + 逐档回读/显式拒绝 / **已落地** / 删除 11 档直灌 → `_fill_sr_combo(device)` 按设备能力生成；`… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 82 | docs/parameter-unification.md | 211e5373eb86 | / 2 / 移动端档位改后端能力 / **阻塞（待内核字段）** / Dart 侧已改：`RadioApi` 旁挂可选接口 `SampleRateCapabilitySource` + 扩展；`… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 83 | docs/parameter-unification.md | 50a84f50aa61 | / 3 / 逐档回读端到端证据 / **已落地（真机 + 注入双证）** / 新增 `scripts/sample_rate_readback_check.py`：逐档 `set_sample_… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 84 | docs/parameter-unification.md | 965ba9e8bf4f | **结论维持「部分统一」**：第 1、3 项已落地（`70429a02`、`754f64e6`；第 3 项真机复跑 12 档 11 一致 + 1 吸附被抓到）；第 2 项只完成消费侧（`754f… | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 85 | docs/prototype-gap.md | d8d2b47e377a | / 批 2（已完成） / A10 DSO 四步（两型 glyph、中文标签、真实轴比、轴比未知）；状态卡超高滚动 / `pytest tests/test_sky_dso_layer.py te… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 86 | docs/prototype-gap.md | 9f84477f0dae | **OpenNGC v2 换源口径（已落地）**：`dso_catalog.json` 已是 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 87 | docs/prototype-gap.md | dcf687b3939a | P0–P4 顺序未失效。**每档上限已落地（当前实现 `LABEL_TIER_CAPS`）**： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
@@ -143,7 +140,6 @@
 | 126 | docs/reference-mechanisms.md | b1bfa421b026 | / X2 人工确认→一次性 token→审计 / 无参考实现 / 已落地自研：`440424b9` → `tx_guard.py:543-597`（`arm`）、`:599-620`（`revo… | 440424b9 未改动 tx_guard.py；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 127 | docs/reference-mechanisms.md | 620db22963e8 | / X3 能力声明 / `satdump/dev.h:30-36`（静态 `MODE_SINGLE_TX`） / 已落地改良：`1869648b` → `hal.py:139-141`（`sup… | 1869648b 未改动 satdump/dev.h；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 128 | docs/reference-mechanisms.md | b966baad12aa | / 卫星过境缓存与刷新 / gpredict 只实时时间；onair `passes.cpp:296-306` 到点抓取 / 已落地：`8d3ea22c` → `rf_sky_view.py:7… | 8d3ea22c 未改动 passes.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 129 | docs/reference-mechanisms.md | 7799ef9592a3 | / 错误呈现与日志分级 / satdump `flog`、gqrx `qDebug` 分级输出 / 呈现已落地：`90813ad0` → `desktop/error_remedy.py:38`… | git log -S 'flog' 未命中 90813ad0；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 130 | docs/sat-illumination.md | 29be1b8c9337 | - 既有 `sat_passes._is_sunlit_geometric()` 已改为委托本模块，避免第二份地影数学源。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 131 | docs/settings-inventory.md | d97d002af22a | - `desktop/main_window.py` 仅做了**最小停靠接线**（已提交 `49eddcf`，9 insertions / | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 132 | docs/settings-inventory.md | 37bf58072ff7 | / A1 / 过境最低仰角 / **已落地（读取入口）** / `pass_min_elevation_deg` / 10 / 0–45 / 度 / 设置面板写盘；消费方下次刷新调用函数读值 /… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
