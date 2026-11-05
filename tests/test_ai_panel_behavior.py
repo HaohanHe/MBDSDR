@@ -368,6 +368,23 @@ class TestAiFinishedSemantics:
         assert "98.5" in step.args_preview
         assert "（AI 未返回文本内容" in _view_text(panel)
 
+    def test_failed_tools_warn_even_when_model_text_claims_success(self, panel):
+        """模型文字说成功、工具实际失败时，对话区必须出现失败汇总。"""
+        panel._on_ai_finished({
+            "content": "已为你调谐到 145.800 MHz，正在接收。",
+            "latency_ms": 1200.0, "compacted": False,
+            "tool_calls": [{"name": "sdr_tune",
+                            "arguments": '{"freq_mhz": 145.8}'}],
+            "tool_results": [_chat_result('{"ok": false}', success=False,
+                                          error="未连接 SDR 设备")],
+        })
+        view = _view_text(panel)
+        assert "已为你调谐到 145.800 MHz" in view  # 模型原话保留，不篡改
+        assert "本轮有 1 个操作未成功" in view
+        assert "sdr_tune" in view
+        assert "可能没有反映这些失败" in view
+        assert "其中 1 个失败" in view
+
     def test_missing_result_card_is_running_not_invented(self, panel):
         panel._on_ai_finished({
             "content": "ok", "latency_ms": 0, "compacted": False,
@@ -449,6 +466,15 @@ class TestAiFinishedSemantics:
         assert panel._is_processing is False
         assert panel.send_btn.isEnabled() is True
         assert panel.send_btn.text() == panel.tr("发送")
+
+    def test_ai_error_message_states_cause_and_next_step(self, panel):
+        """错误提示必须包含：发生了什么 / 可能原因 / 下一步。"""
+        panel._on_ai_error("TimeoutError: read timeout")
+        view = _view_text(panel)
+        assert "可能原因" in view
+        assert "下一步" in view
+        assert "配置" in view
+        assert "TimeoutError" in view
 
     def test_submit_is_rejected_while_processing(self, panel):
         panel._is_processing = True

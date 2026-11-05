@@ -39,6 +39,14 @@ except Exception:  # noqa: BLE001
 import ai_steps  # noqa: E402  # 步骤卡投影（Qt 无关）
 from tokens import tokens as _tok  # noqa: E402
 
+# AI 调用失败的统一说明：发生了什么 / 可能原因 / 下一步。
+# 不猜具体根因，只给用户可检查的方向；已执行的硬件操作不会自动回滚。
+_AI_FAILURE_GUIDE = (
+    "可能原因：API Key 未配置或无效、网络不可用、服务额度或限流。\n"
+    "下一步：点右上角「配置」检查 API Key 与网络后重试；"
+    "已执行的硬件操作不会自动回滚。"
+)
+
 
 # 快捷指令（这些是提示用户可以说什么，不是直接执行的功能按钮）
 QUICK_COMMANDS = [
@@ -781,8 +789,10 @@ class AIPanel(QWidget):
 
         # 结构化步骤卡：本轮全部工具调用（含 workflow_execute / subagent_execute
         # 多步 JSON 结果的子步骤投影）
+        steps = []
         if tool_calls:
-            for step in ai_steps.steps_from_chat(tool_calls, tool_results):
+            steps = ai_steps.steps_from_chat(tool_calls, tool_results)
+            for step in steps:
                 self._append_step_card(step)
             # 转发链只服务「模型请求但工具环未执行」的硬件调用（MCP 注册名）：
             # 已执行的调用在工具环内已经走 MCP handler 落到硬件，不再事后转发
@@ -810,7 +820,7 @@ class AIPanel(QWidget):
             self._add_system_message("上下文已自动压缩")
 
         if error:
-            self._add_ai_message(f"[错误] {error}\n\n{content}")
+            self._add_ai_message(f"[错误] {error}\n\n{_AI_FAILURE_GUIDE}\n\n{content}")
         elif self._streamed_any:
             # 流式已把 content 打字到对话区，不再重复追加完整内容；
             # 仅在流式内容为空（模型不支持流）时才补一条消息。
@@ -821,7 +831,21 @@ class AIPanel(QWidget):
         else:
             self._add_ai_message("（AI 未返回文本内容，可能只执行了工具调用）")
 
-        self._add_system_message(f"耗时 {latency:.0f}ms，调用 {len(tool_calls)} 个工具")
+        failed = [s for s in steps if s.status == ai_steps.STATUS_FAILED]
+        if failed:
+            names = []
+            for step in failed:
+                if step.tool not in names:
+                    names.append(step.tool)
+            self._add_system_message(
+                f"本轮有 {len(failed)} 个操作未成功：{'、'.join(names)}。"
+                "AI 的文字回复可能没有反映这些失败；"
+                "请按「执行步骤」中的错误原因处理后重试。")
+
+        footer = f"耗时 {latency:.0f}ms，调用 {len(tool_calls)} 个工具"
+        if failed:
+            footer += f"，其中 {len(failed)} 个失败"
+        self._add_system_message(footer)
         self._resolve_pending_sky(tool_calls)
         self.reply_received.emit(content or "")
 
@@ -831,7 +855,7 @@ class AIPanel(QWidget):
         self._is_processing = False
         self.send_btn.setEnabled(True)
         self.send_btn.setText("发送")
-        self._add_ai_message(f"AI 调用出错: {error}")
+        self._add_ai_message(f"AI 调用出错: {error}\n\n{_AI_FAILURE_GUIDE}")
         # 协商轮次失败：主窗口必须把按钮回弹，不留下「假装已执行」的勾选
         self._resolve_pending_sky([])
         self.reply_received.emit(f"[错误] {error}")
