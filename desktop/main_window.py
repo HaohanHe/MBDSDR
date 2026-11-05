@@ -7730,15 +7730,32 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_panel_scan_ended(self):
-        """扫频结束：若仍连接则恢复 IQ 流并调回扫频前频点。"""
+        """扫频结束：若仍连接则恢复 IQ 流并调回扫频前频点。
+
+        恢复失败绝不再静默：用户会以为已回到扫频前频率，而设备仍停在扫频
+        末频点。失败时写明原因 + 界面当前显示值 + 应回到的频点。
+        """
         try:
             if self._active_sdr_backend is not None:
                 prev = getattr(self, "_panel_scan_prev_center", None)
                 if prev:
+                    detail = ""
                     try:
-                        self._active_sdr_backend.set_frequency(prev)
-                    except Exception:
-                        pass
+                        if self._active_sdr_backend.set_frequency(prev) is False:
+                            detail = self._hw_failure_detail() or "设备返回失败"
+                    except Exception as e:  # noqa: BLE001 - 异常同样要可见
+                        detail = f"{type(e).__name__}: {e}"
+                    if detail:
+                        cur = None
+                        try:
+                            cur = float(self.spectrum.generator.center_freq_hz)
+                        except Exception:
+                            pass
+                        shown = ("当前显示为 —" if cur is None
+                                 else f"当前显示为 {cur / 1e6:.6f} MHz")
+                        self.statusBar().showMessage(
+                            f"前端频率恢复失败（{detail}）：{shown}，"
+                            f"设备未回到 {prev / 1e6:.6f} MHz", MSG_IMPORTANT)
                 self._start_iq_streams()
         except Exception:
             pass
@@ -7778,8 +7795,13 @@ class MainWindow(QMainWindow):
 
     def _on_bookmark_tune_requested(self, freq_hz: float, mode: str,
                                     bandwidth_hz: float):
-        """书签点击 → 调谐 + 设模式 + 带宽。"""
-        self._on_tune_sdr(float(freq_hz), mode or "NFM")
+        """书签点击 → 调谐 + 设模式 + 带宽。
+
+        调谐没成功就到此为止：继续下发带宽等于在**另一个频率**上改设备状态，
+        UI 的 VFO 带宽会与设备实际带宽分叉。
+        """
+        if not self._on_tune_sdr(float(freq_hz), mode or "NFM"):
+            return
         if bandwidth_hz and bandwidth_hz > 0:
             self._on_vfo_bandwidth_changed(float(bandwidth_hz))
 

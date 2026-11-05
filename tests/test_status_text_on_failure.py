@@ -10,6 +10,10 @@
    「扫频完成：N 个活动频点」覆盖，用户最后只看到成功。
 3. 收藏按钮：写收藏文件失败被 ``except: pass`` 吞掉，仍然只报「已收藏 …」。
 
+另含两条「失败后不许继续/不许静默」：
+4. 书签调谐失败后仍继续下发带宽（设备会被改到错误频率上）；
+5. 面板扫描结束恢复前端频率失败被 ``except: pass`` 静默。
+
 反证：任一处改回旧行为，对应用例必红。
 """
 import os
@@ -123,3 +127,40 @@ def test_bookmark_persist_failure_is_reported(mw):
     msg = mw.statusBar().currentMessage()
     assert "写入收藏文件失败" in msg, f"写盘失败必须可见：{msg!r}"
     assert "重启后会丢失" in msg, f"必须说清后果：{msg!r}"
+
+
+def test_bookmark_tune_failure_does_not_touch_bandwidth(mw, monkeypatch):
+    """书签调谐失败后不得再下发带宽（否则设备在错误频率上被改带宽）。"""
+    bw_calls = []
+    monkeypatch.setattr(mw, "_on_vfo_bandwidth_changed",
+                        lambda bw: bw_calls.append(bw) or True)
+    mw._active_sdr_backend = _RefusingTuneBackend()
+
+    mw._on_bookmark_tune_requested(145_000_000.0, "NFM", 80_000.0)
+
+    assert bw_calls == [], f"调谐失败后不得改带宽，实际调用 {bw_calls}"
+    assert "未生效" in mw.statusBar().currentMessage()
+
+
+def test_panel_scan_restore_failure_is_visible(qtapp):
+    """扫描结束恢复前端频率失败不再静默，写明原因/当前显示/应回频点。"""
+    msgs = []
+    stub = SimpleNamespace(
+        _active_sdr_backend=_RefusingTuneBackend(),
+        _panel_scan_prev_center=145_800_000.0,
+        spectrum=SimpleNamespace(
+            generator=SimpleNamespace(center_freq_hz=146_500_000.0)),
+        statusBar=lambda: SimpleNamespace(
+            showMessage=lambda msg, sev=0: msgs.append(msg)),
+        _start_iq_streams=lambda: None,
+        _hw_failure_detail=lambda: "设备返回失败",
+    )
+    from main_window import MainWindow
+
+    MainWindow._on_panel_scan_ended(stub)
+
+    assert msgs, "恢复失败必须有可见提示"
+    last = msgs[-1]
+    assert "前端频率恢复失败" in last
+    assert "当前显示为 146.500000 MHz" in last
+    assert "设备未回到 145.800000 MHz" in last
