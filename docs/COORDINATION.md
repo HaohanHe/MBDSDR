@@ -1709,6 +1709,27 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 `waived-total 142 → 138`（6ac58654），rows=138。复跑：3 passed / 1 failed；
 余红 23 条新增/改写未证实断言（清单见 `D:\mbdsdr\output\tmp\r7\claims_final.md`）。
 
+## D. 回放 API：`IQPlayback` 零拷贝视图 use-after-close（owner：解码流水线 P5）
+
+`wfm_broadcast_demod` 长输入 `0xC0000005` 是**错误归因**：同一份 20,316,160
+样本用自有内存整段解调，两次均成功（`audio=476160`、`rms=0.24147`）。崩溃在
+读取侧——`IQPlayback.read_samples` 返回 memmap 视图，`close()` 强制解除映射后
+`np.concatenate` 读悬空页。把长度缩到 1,000 样本、同一顺序仍崩，**与长度无关**；
+不是解调函数的定长缓冲 / `int` 溢出 / fft 尺寸不对齐。
+
+| 项 | 真实成因 | owner | 状态 |
+|---|---|---|---|
+| `wfm_broadcast_demod` 长输入崩溃（误报） | `IQPlayback` 视图所有权：`read_samples` 零拷贝返回 memmap 视图，`close()` 静默 `munmap` | 解码流水线 P5（`mbdsdr_ai/playback.py`、`scripts/hw_acceptance/repro_replay_demod_crash.py`） | 契约：`close()` 在仍有视图时抛 `PlaybackViewsInUseError` — `cdbf3578` — `mbdsdr_ai/playback.py:265` — `PlaybackViewsInUseError` |
+
+两条调用路径：默认零拷贝（视图，必须在 `close()` 前消费）；`read_samples(n, copy=True)`
+返回安全副本（每次 `n*8` 字节，整段累加峰值约 2 倍文件大小——1.85 GB 录音优先零拷贝）。
+`PlaybackSource` 与 `transmit_iq_playback` 的返回值会跨出调用栈，显式走副本。
+
+反证（真实录音 `D:\mbdsdr\tmp\rec_play\fm_10s.sigmf-data`，162,529,280 B）：
+误用现场 `repro` 模式退出码 3 + 「还有 20 个视图未被使用完」，不再出现
+`-1073741819`；`safe-oneshot` 与 `chunked` 退出 0，`audio=476160`，
+`rms=0.24147 / 0.24763`，与修复前逐位一致。
+
 ---
 
 ## 八、UI 多线对接（2026-11-06，ux-basis）
