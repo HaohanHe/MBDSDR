@@ -85,7 +85,7 @@ grep 命中 0 **不等于**没有调用方。本仓库已确认存在以下会�
 | B2 | C++ 设备候选探测表 `cpp/src/dsp/device_capabilities.cpp:36-48 kCandidateRatesHz` | `250k / 1024k / 1536k / 1792k / 1920k / 2048k / 2160k / 2400k / 2560k / 2880k / 3200k`（11 档） | `:128 for (const double r : kCandidateRatesHz)` 按设备实际范围过滤 | **保留 = 候选探测表**。`:46` 已是 `2_880_000`：真机请求 `2,800,000` 被设备吸附到 `2,880,000`（读回 +80,000 Hz，E3，见 `limitations-register` 附 M.4 L60），候选表只列设备实际给出值 |
 | B3 | Python 后端档位 `mbdsdr_ai/sdr_backend.py:1442 RTLSDRBackend.SAMPLE_RATES` | 与 B2 **同 11 档**（含 `2_880_000`） | `mbdsdr_ai/device_capabilities.py:198` 动态 `__import__` 取表 → `sample_rate_options()`；`desktop/control_panel.py:1253` 间接消费 | **保留**：Python 侧后端自报档位，无 C++ 运行时共享，不能"派生自 C++" |
 | B4 | Python AI 参考表 `mbdsdr_ai/rtlsdr_params.py:139-150 SUPPORTED_SAMPLE_RATES` | `250k / 1024k / 1536k / 1800k / 1920k / 2000k / 2048k / 2400k / 2560k / 3200k`（**10 档，与 B2 不同**） | **生产消费方存在**：`mbdsdr_ai/tool_registry.py:2583`、`:2618` 作为 AI 工具 `recommended_rates_hz` 输出；测试 `tests/rtlsdr_params_test.py:101` | **保留 = AI 工具推荐表（故意不同）**：含 1.8M/2.0M 常用收音机档，缺 1.792M/2.16M/2.88M。它不驱动任何 UI 下拉，**不参与"可见档位"** |
-| B5 | 桌面对面板硬编码 `desktop/module_panel.py:305-308` | `1.024 / 1.44 / 2.048 / 2.4 / 3.2 MHz`（5 档） | `:395 selected_sample_rate_hz()` → `:437 dev["_sample_rate"]`；接线 `desktop/main_window.py:1581 connect`、`:7011 _on_module_device_selected` | **待裁定**：唯一会改变用户可见选项的一份，且 **1.44 MHz 不在任何内核表**（B1/B2/B3/B4 均无）。按纪律"热点文件被占只出清单"，`module_panel.py` 当前无 claim，但改动会改可见行为 → **本次只登记不动手**，建议改为读 `sample_rate_options()` |
+| B5 | 桌面对面板硬编码 `desktop/module_panel.py:342-348` | 5 档，标签 `1.024 / 1.440 / 2.048 / 2.400 / 3.200 MS/s`（**已修** — `385d0e15` — `desktop/module_panel.py:345` — `1.440 MS/s`；单位 `MS/s` + 三位小数，档位数值未变） | `:531 selected_sample_rate_hz()` → `:573 dev["_sample_rate"]`；接线 `desktop/main_window.py:1581 connect`、`:7011 _on_module_device_selected` | **已准改能力驱动，代码未落地**：仍是唯一会改变用户可见选项的一份，且 **`1.440 MS/s` 不在任何内核表**（B1/B2/B3/B4 均无）；阻塞于 `main_window.py` 被操作逻辑线占用，规格见 §5.1 |
 | B6 | 桌面默认值回退 `desktop/constants.py:16-20` | `DEFAULT_SAMPLE_RATE_HZ`（优先导入内核值，失败回退 `2_400_000`） | 全桌面共享 | **保留**（安全回退，与内核基准一致，不是新真值） |
 | B7 | 移动端历史默认 `mobile/lib/app/tokens.dart:222-227 sampleRatesHz` | 4 档，已标 `@Deprecated('历史默认，不被任何人读取')` | 全仓 Swift/Dart 代码命中 **0**；仅 `mobile/lib/pages/spectrum_page.dart:761` 一句注释 | **保留**：删除条件写在 `tokens.dart:218-220` = "确认无外部引用且旧版本回滚窗口关闭"。回滚窗口无法从仓库核实 → 不删 |
 | B8 | 真机硬件吸附档 `2,800,000 → 读回 2,880,000` | — | 另一条线真机逐档实测：**11 档一致，仅 2800k 档驱动返回成功但静默吸附到 2880k（+80 kHz）**；`rtl_sdr_source` 侧 `rtlsdr_get_sample_rate` 读回已接上 | **不是冗余，不许删**。任何把 2.88M 当"多余档位"删掉的判断都是错的；该档的价值是"必须靠读回才发现"的负样本 |
@@ -194,12 +194,12 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 
 ## 5. 裁定落地：规格、协调与归档
 
-### 5.1 B5：1.44 MHz 改为能力驱动（已准；代码未落地）
+### 5.1 B5：`1.440 MS/s` 档改为能力驱动（已准；代码未落地）
 
 **现状**（`desktop/module_panel.py`）：
-- `:311-317` 硬编码 5 档（含 1.44 MHz）；
-- `:472-482 selected_sample_rate_hz()` 在 `currentData()` 无效/≤0 时**回退 `DEFAULT_SAMPLE_RATE_HZ`** → 断开时会假装有档位；
-- `:363-390 set_sdr_connected(connected)` 只处理频率/增益，**没处理采样率下拉**。
+- `:342-348` 硬编码 5 档（标签为 `MS/s` + 三位小数，含 `1.440 MS/s`；标签改动见 `385d0e15`）；
+- `:531 selected_sample_rate_hz()` 在 `currentData()` 无效/≤0 时**回退 `DEFAULT_SAMPLE_RATE_HZ`** → 断开时会假装有档位；
+- `:395 set_sdr_connected(connected)` 只处理频率/增益，**没处理采样率下拉**。
 
 **实现规格**（`desktop/module_panel.py`）：
 
@@ -217,7 +217,7 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 2. 连接后 `set_sample_rate_options([1024000, 2048000, 2400000, 3200000])` → 项集合 ⊆ `RTLSDRBackend.SAMPLE_RATES`（与 C++ 11 档候选同集）；
 3. 连接后再断开 → 档位清空 + 禁用 + 占位复原（不能残留连接时档位）。
 
-**1.44 MHz 若产品确需**：必须进 `cpp/src/dsp/device_capabilities.cpp kCandidateRatesHz` + `cpp/src/core/tokens.h kSampleRatesHz` 白名单 + 真机读回；**不能只补前端**。
+**`1.440 MS/s` 若产品确需**：必须进 `cpp/src/dsp/device_capabilities.cpp kCandidateRatesHz` + `cpp/src/core/tokens.h kSampleRatesHz` 白名单 + 真机读回；**不能只补前端**。
 
 **协调下家**：
 
@@ -387,3 +387,4 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 2026-11-06 | （本表更新提交） | 并入账本线 R1–R20（去重后 +10 行，共 40 项）；改判 A6（部分收敛）、A3（已合并）、R6（保留分精度）；修正 §4.3 吞错守卫归属 |
 | 2026-11-06 | （本表更新提交） | 新增 A12（`kDbUpperDefault` 常量复用，owner 内核线）；§4.3 逐文件钉住 6 条吞错越线的引入提交与 owner，补 A/B 重编取证格式；§5 落地 B5 能力驱动规格/测试/协调下家、白名单反证记录、46 个仅测试模块三类归档、4 个零调用方法的具体接线点；R19 文案按 `device_capabilities.cpp:46` 现状更新；共 41 项 |
 | 2026-11-06 | （本次提交） | A12 状态：**已修** — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`；拆分后为 `kDbViewUpperDefault=-20`（默认视野）+ `kDbCeilingMax=0`（0 dBFS 满量程硬上限）；10 个目标全绿、未改期望值；反证改回 -20 红项与修复前逐字一致；原建议 `kDbSpinUpperMax=20` 标注**已否决**（会抹掉满量程物理事实） |
+| 2026-11-06 | （本次提交） | B5 采样率标签口径：**已修** — `385d0e15` — `desktop/module_panel.py:345` — `1.440 MS/s`；五个标签统一为 `MS/s` + 三位小数（`1.024 / 1.440 / 2.048 / 2.400 / 3.200 MS/s`，档位数值未变）；§5.1 的定位同步为 `:342-348` / `:531` / `:395` |
