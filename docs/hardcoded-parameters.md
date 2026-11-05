@@ -513,6 +513,9 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 对拍测试：`tests/test_hardcoded_parameter_registry.py::test_cpp_tokens_match_documented_values`
 把 C++ 侧 15 个 token 的**当前值**冻结；任何一侧改数先红，强制回到本表。
+新增的显示门 `kPeakRelDb=6.0` **尚未纳入冻结表**（`kPeakThresholdDefault`
+仍冻结为 15.0，校准门未变，所以不会红）——建议频谱线提交 `tokens.h` 时
+同批把 `kPeakRelDb` 加进映射，否则这把锁看不到显示门的改动。
 
 ---
 
