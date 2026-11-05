@@ -4794,7 +4794,21 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             illum = None
         if illum is not None and not math.isfinite(illum):
             illum = None
-        cos_alpha = moon_phase_cos_alpha(illum)
+        # cos α 优先取历表自带的相位角 phase_angle_deg（与 illum 同源：
+        # illum = (1+cos α)/2）；只有相位角缺测时才退回 2·illum−1。
+        # 两条都是历表事实的等价换算，**不另算相位模型**。都缺 -> None。
+        cos_alpha: Optional[float] = None
+        phase_raw = m.get("phase_angle_deg")
+        try:
+            if phase_raw is not None:
+                ang = float(phase_raw)
+                if math.isfinite(ang):
+                    cos_alpha = max(-1.0, min(1.0,
+                                              math.cos(math.radians(ang))))
+        except (TypeError, ValueError):
+            pass
+        if cos_alpha is None:
+            cos_alpha = moon_phase_cos_alpha(illum)
 
         try:
             dia_deg = float(m["diameter_deg"])
@@ -4840,6 +4854,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     if dv > 1e-6:
                         rv = dv
 
+        # 限幅口径与 DSO 一致：只有真实视半径超过视口短边 40% 才截断，
+        # 否则按真实视大小画。截断后半径不再等于真实视大小，必须由绘制层
+        # 打「已限幅」标记；拾取半径取同一份 radius_px（画多大点多大）。
+        cap = self.DSO_CLAMP_VIEW_FRAC * float(min(self.width(), self.height()))
+        clamped = False
+        biggest = max(ru, rv)
+        if cap > 0.0 and biggest > cap:
+            k = cap / biggest
+            ru, rv = ru * k, rv * k
+            clamped = True
+
         radius_px = 0.5 * (ru + rv)
         if not self._on_screen(center, margin=4.0 + radius_px):
             return None
@@ -4851,6 +4876,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             "ux": ux, "uy": uy,
             "illum": illum,
             "cos_alpha": cos_alpha,
+            "clamped": clamped,
             "az": az, "alt": alt, "alt_draw": alt_draw,
         }
 
@@ -4888,12 +4914,38 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(col))
             painter.drawPath(transform.map(moon_lit_path(float(cos_alpha))))
+        elif cos_alpha is not None and abs(float(cos_alpha)) >= 0.999:
+            # 满月/新月附近相位图形关于朝向对称：太阳与月亮近对跖/重合时
+            # 切向退化（ux,uy 为 None），但形状仍是整盘（或几乎不亮），
+            # 按精确形状画，不因朝向不可定就把整盘丢掉。
+            painter.setPen(Qt.NoPen)
+            if float(cos_alpha) > 0.0:
+                painter.setBrush(QBrush(col))
+                painter.drawPath(transform.map(full))
+        elif cos_alpha is None:
+            # 月相未知（照度/相位角都缺）：画中性灰盘，不冒充满月也不冒充
+            # 新月；亮区不填。标签与信息卡同步标「月相未知」。
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(col.red(), col.green(),
+                                           col.blue(), 56)))
+            painter.drawPath(transform.map(full))
 
         r = max(ru, rv)
+        if frame.get("clamped"):
+            # 与 DSO 同一条限幅标记（虚线外框 +「已限幅」角标）：截断后的
+            # 半径不再等于真实视大小，不能默默画小。
+            self._draw_dso_clamp_marker(painter, center, r, 200)
+
+        if cos_alpha is None:
+            label = "月亮（月相未知）"
+        elif not orient_known and abs(float(cos_alpha)) < 0.999:
+            label = "月亮（亮缘朝向未知）"
+        else:
+            label = "月亮"
         # 标签只登记，本帧末尾与星名/座名统一避让（不压字）。
         self._queue_label(0.0, QPointF(center.x() + r + 8.0,
                                        center.y() - r - 4.0),
-                          "月亮", self._ink())
+                          label, self._ink())
         painter.restore()
 
     def _draw_selection_crosshair(self, painter: QPainter, pos: QPointF,
@@ -5616,12 +5668,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if key == "moon":
                     # 照度 = 0.5*(1+cos 相位角)，直接从历表已有的相位角导出，
                     # 是月球最直观的一条事实（满/弦/新月），不引入新模型。
-                    illum = 0.5 * (1.0 + math.cos(math.radians(pos.phase_angle_deg)))
-                    info["desc"] = (
-                        f"照度 {format_percent(illum)} · "
-                        f"视直径 {format_arcsec(pos.angular_diameter_arcsec)} · "
-                        f"相位角 {format_angle_deg(pos.phase_angle_deg)} · "
-                        f"Meeus ch.47 月球理论 (J2000 视位置)")
+                    # 相位角缺测时如实写「月相未知」，不拿 0（新月）冒充。
+                    pa = pos.phase_angle_deg
+                    if pa is None or not math.isfinite(float(pa)):
+                        info["desc"] = (
+                            f"月相未知（历表未提供相位角）· "
+                            f"视直径 "
+                            f"{format_arcsec(pos.angular_diameter_arcsec)} · "
+                            f"Meeus ch.47 月球理论 (J2000 视位置)")
+                    else:
+                        illum = 0.5 * (1.0 + math.cos(math.radians(pa)))
+                        info["desc"] = (
+                            f"照度 {format_percent(illum)} · "
+                            f"视直径 "
+                            f"{format_arcsec(pos.angular_diameter_arcsec)} · "
+                            f"相位角 {format_angle_deg(pa)} · "
+                            f"Meeus ch.47 月球理论 (J2000 视位置)")
                 else:
                     info["desc"] = (
                         f"视直径 {format_arcsec(pos.angular_diameter_arcsec)} · "
@@ -7147,10 +7209,12 @@ class SatelliteTracker:
             mp = solar_system.get_moon_position(
                 t_unix, (self.lat, self.lon, self.alt_km * 1000.0))
             if mp is not None:
-                # 照度与视直径原样透传：illum 缺测保持 None（不拿 0=新月冒充），
-                # 视直径（度）供绘制层按真实大小缩放。
+                # 照度、相位角与视直径原样透传：缺测保持 None（不拿 0=新月
+                # 冒充），视直径（度）供绘制层按真实大小缩放。相位角是历表
+                # 已有字段，绘制层的 cos α 优先取它，不另算一套相位模型。
                 moon = {"az": mp.az_deg, "alt": mp.alt_deg,
                         "illum": mp.illumination,
+                        "phase_angle_deg": mp.phase_angle_deg,
                         "diameter_deg": mp.angular_diameter_deg}
         except Exception:
             moon = None

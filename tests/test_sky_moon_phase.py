@@ -10,8 +10,11 @@ tests/test_sky_moon_phase.py
   4. 亮区朝向由「月心→太阳」的 az/alt 切向决定，不是屏幕左右；
   5. 像素半径随视直径与 FOV 缩放（1° FOV 时月面半屏大小合理）；
   6. 绘制门与拾取门同源（alt ≤ 0 不画也不可点）；
-  7. 照度/太阳朝向缺测时不填亮区（不编造方向）；
-  8. 拾取用绘制层同一份位置与半径（窄 FOV 下旧 geocentric 位置会漏）。
+  7. 照度/太阳朝向缺测时不填亮区（不编造方向），月相缺测画中性圆 + 标「月相未知」；
+  8. 拾取用绘制层同一份位置与半径（窄 FOV 下旧 geocentric 位置会漏）；
+  9. 尺寸限幅与 DSO 同一口径（真实视半径 > 视口短边 40% 才截断并标「已限幅」）；
+ 10. 相位角优先取历表 phase_angle_deg（缺测才退回 2·illum−1，不另算模型）；
+ 11. 多工况朝向：蛾眉/上弦/满月/下弦 × 不同时角 × 南半球真实历表。
 
 反证（同一场景，旧实现必红）：
   - 旧绘制恒为 6px 实心圆 → 面积比例恒 1.0，illum=0.25/0.5/0.75 的断言全红；
@@ -35,6 +38,8 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 import math  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 
+import numpy as np  # noqa: E402
+
 import pytest  # noqa: E402
 from PySide6.QtCore import QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QImage, QPainter, QTransform  # noqa: E402
@@ -54,7 +59,8 @@ from rf_sky_view import (  # noqa: E402
 )
 from mbdsdr_ai.astronomy import planets as P  # noqa: E402
 from mbdsdr_ai.celestial_geometry import (  # noqa: E402
-    GroundStation, vec_from_radec, j2000_to_altaz, azalt_from_vec,
+    GroundStation, vec_from_radec, vec_from_azalt, j2000_to_altaz,
+    azalt_from_vec,
 )
 from mbdsdr_ai.skyengine import constellations as _constel  # noqa: E402
 from mbdsdr_ai.new_spacetime import get_time_engine  # noqa: E402
@@ -82,10 +88,11 @@ def _new_view(size: int = 700) -> RFSkyView:
 
 
 def _set_bodies(v, moon_az, moon_alt, sun_az, sun_alt,
-                illum=0.5, dia_deg=0.5):
+                illum=0.5, dia_deg=0.5, phase_angle_deg=None):
     sun = None if sun_az is None else {"az": sun_az, "alt": sun_alt}
     moon = {"az": moon_az, "alt": moon_alt,
-            "illum": illum, "diameter_deg": dia_deg}
+            "illum": illum, "phase_angle_deg": phase_angle_deg,
+            "diameter_deg": dia_deg}
     v.set_celestial_bodies(sun, moon, 0.0)
 
 
@@ -429,3 +436,270 @@ def test_pick_uses_drawn_topocentric_position(monkeypatch):
     # 中心点击必定命中（距离 0），与旧路径无关
     got_center = v._find_body_at(center.x(), center.y())
     assert got_center is not None and got_center.get("key") == "moon"
+
+
+# --------------------------------------------------------------------------
+# 9. 尺寸限幅：与 DSO 同一口径（真实视半径 > 视口短边 40% 才截断）
+# --------------------------------------------------------------------------
+def test_moon_clamp_only_when_disk_exceeds_viewport():
+    v = _new_view(500)
+    try:
+        _set_bodies(v, 180.0, 35.0, 180.0, 60.0, 0.5, 0.5)
+        v.view_state.look_at(180.0, 35.0)
+        cap = RFSkyView.DSO_CLAMP_VIEW_FRAC * 500.0
+
+        v.view_state.fov_deg = 2.0
+        wide = v._moon_screen_frame()
+        assert wide is not None and wide["clamped"] is False
+        assert float(wide["radius_px"]) < cap
+
+        # 0.6° 视场：真实视半径 ~208px > 200px，必须截断到 40% 并标记
+        v.view_state.fov_deg = 0.6
+        narrow = v._moon_screen_frame()
+        assert narrow is not None and narrow["clamped"] is True
+        assert float(narrow["radius_px"]) == pytest.approx(cap)
+    finally:
+        v.close()
+
+
+def _danger_pixels(img):
+    n = 0
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = img.pixelColor(x, y)
+            if c.red() > c.green() + 25 and c.red() > c.blue() + 25:
+                n += 1
+    return n
+
+
+def test_clamped_moon_has_visible_marker():
+    """截断后半径不再等于真实视大小，必须看得见地标「已限幅」。"""
+    v = _new_view(500)
+    try:
+        _set_bodies(v, 180.0, 35.0, 180.0, 60.0, 0.5, 0.5)
+        v.view_state.look_at(180.0, 35.0)
+        v.view_state.fov_deg = 0.6
+        clamped = _render(v, 500, 500)
+        v.view_state.fov_deg = 2.0
+        normal = _render(v, 500, 500)
+    finally:
+        v.close()
+    assert _danger_pixels(clamped) > 20, "限幅月面没有可见标注"
+    assert _danger_pixels(normal) == 0, "未超限的月面不该标已限幅"
+
+
+def test_clamped_moon_pick_radius_follows_drawn_disk():
+    """限幅后拾取半径与画出的月面同一份：盘内命中，盘外不命中。"""
+    v = _new_view(500)
+    try:
+        _set_bodies(v, 180.0, 35.0, 180.0, 60.0, 0.5, 0.5)
+        v.view_state.look_at(180.0, 35.0)
+        v.view_state.fov_deg = 0.6
+        frame = v._moon_screen_frame()
+        assert frame is not None and frame["clamped"] is True
+        c = frame["center"]
+        r = float(frame["radius_px"])
+        got = v._find_body_at(c.x() + 0.6 * r, c.y())
+        assert got is not None and got.get("key") == "moon"
+    finally:
+        v.close()
+
+
+# --------------------------------------------------------------------------
+# 10. 月相缺测：中性圆 +「月相未知」，不猜
+# --------------------------------------------------------------------------
+def test_unknown_phase_draws_neutral_disk_and_labels_unknown():
+    v = _new_view(500)
+    try:
+        _set_bodies(v, 180.0, 35.0, 180.0, 60.0, None, 0.5)
+        v.view_state.look_at(180.0, 35.0)
+        v.view_state.fov_deg = 4.0
+        frame = v._moon_screen_frame()
+        assert frame is not None
+        assert frame["cos_alpha"] is None
+
+        img = _render(v, 500, 500)
+        c = frame["center"]
+        # 中性圆：盘心确实被填（非纯黑），但明显暗于亮面（不冒充满月/新月）
+        pix = img.pixelColor(int(c.x()), int(c.y()))
+        avg = (pix.red() + pix.green() + pix.blue()) / 3.0
+        assert avg > 10.0 and avg < 80.0, (pix.red(), pix.green(), pix.blue())
+
+        texts = [line[0] for _pri, _pos, lines, _col in v._label_items
+                 for line in lines]
+        assert any("月相未知" in t for t in texts), texts
+    finally:
+        v.close()
+
+
+def test_full_illum_draws_disk_even_without_sun_direction():
+    """太阳朝向缺测但照度已知为 1：形状关于方向对称，必须画满盘。
+
+    朝向不可判只说明「亮缘朝哪」不可判，不说明「亮多少」不可判；
+    cos α≈1 时若因 ux/uy 缺失就整盘不填，会把满月画成空心圆。
+    """
+    v = _new_view(400)
+    try:
+        _set_bodies(v, 180.0, 35.0, None, None, 1.0, 0.5)
+        v.view_state.look_at(180.0, 35.0)
+        v.view_state.fov_deg = 2.0
+        frame = v._moon_screen_frame()
+        assert frame is not None
+        assert frame["ux"] is None, "太阳缺测时朝向应为未知（本用例前提）"
+        assert float(frame["cos_alpha"]) == pytest.approx(1.0, abs=1e-9)
+
+        img = _render(v, 400, 400)
+        c = frame["center"]
+        _centroid, count = _bright_stats(img, c.x(), c.y(),
+                                         float(frame["radius_px"]))
+        r = float(frame["radius_px"])
+        lit_frac = count / (math.pi * max(1.0, r - 1.0) ** 2)
+        assert lit_frac > 0.90, f"满月无朝向时没画出整盘：{lit_frac}"
+    finally:
+        v.close()
+
+
+def test_phase_angle_is_the_preferred_ephemeris_source():
+    """cos α 取历表 phase_angle_deg；只有缺相位角才退回 2·illum−1。"""
+    v = _new_view(500)
+    try:
+        _set_bodies(v, 180.0, 35.0, 180.0, 60.0, None, 0.5,
+                    phase_angle_deg=60.0)
+        v.view_state.look_at(180.0, 35.0)
+        v.view_state.fov_deg = 4.0
+        frame = v._moon_screen_frame()
+        assert frame is not None
+        assert frame["cos_alpha"] == pytest.approx(
+            math.cos(math.radians(60.0)), abs=1e-12)
+
+        # 同一天体的照度与相位角是同一事实的两种表达：两者一致时结果不跳变
+        _set_bodies(v, 180.0, 35.0, 180.0, 60.0, 0.75, 0.5,
+                    phase_angle_deg=60.0)
+        frame2 = v._moon_screen_frame()
+        assert frame2["cos_alpha"] == pytest.approx(
+            moon_phase_cos_alpha(0.75), abs=1e-12)
+    finally:
+        v.close()
+
+
+# --------------------------------------------------------------------------
+# 11. 多工况朝向：四相 × 不同时角 × 南半球真实历表
+# --------------------------------------------------------------------------
+def _sunward_screen_dir(v, moon_az, moon_alt, sun_az, sun_alt,
+                        step_deg=0.25):
+    """独立实现「月心→太阳」的切向，并投影回屏幕方向单位向量。
+
+    不调用绘制层的 great_circle_offset_point：这里自己用单位向量做
+    t = normalize(v_sun − (v_sun·v_moon)·v_moon)，再走 step_deg。两条路径
+    只有在「朝向真的由 az/alt 大圆决定」时才一致；按屏幕左右或赤经差
+    偷懒的实现会在这里分叉。
+    """
+    malt = v._display_alt_deg(moon_alt)
+    salt = v._display_alt_deg(sun_alt)
+    v0 = vec_from_azalt(moon_az, malt)
+    vs = vec_from_azalt(sun_az, salt)
+    dot = float(v0[0] * vs[0] + v0[1] * vs[1] + v0[2] * vs[2])
+    t = [vs[i] - dot * v0[i] for i in range(3)]
+    n = math.sqrt(sum(c * c for c in t))
+    assert n > 1e-9, "太阳与月亮重合，切向不唯一"
+    t = [c / n for c in t]
+    s = math.radians(step_deg)
+    p = [math.cos(s) * v0[i] + math.sin(s) * t[i] for i in range(3)]
+    az2, alt2 = azalt_from_vec(np.asarray(p, dtype=float))
+    m = v._sky_to_screen_finite(moon_az, malt)
+    q = v._sky_to_screen_finite(az2, alt2)
+    assert m is not None and q is not None
+    dx, dy = q.x() - m.x(), q.y() - m.y()
+    d = math.hypot(dx, dy)
+    assert d > 0.0
+    return dx / d, dy / d
+
+
+@pytest.mark.parametrize("illum,sun_az,sun_alt", [
+    (0.12, 120.0, 40.0),    # 蛾眉：太阳在西侧偏上（黄昏时角）
+    (0.50, 250.0, 25.0),    # 上弦：太阳在西
+    (1.00, 10.0, -20.0),    # 满月：太阳在地平下（夜半时角）
+    (0.50, 60.0, -10.0),    # 下弦：太阳在东、地平下
+])
+def test_bright_side_faces_sun_across_phases_and_hour_angles(
+        illum, sun_az, sun_alt):
+    v = _new_view(500)
+    try:
+        moon_az, moon_alt = 180.0, 35.0
+        _set_bodies(v, moon_az, moon_alt, sun_az, sun_alt, illum, 0.5)
+        v.view_state.look_at(moon_az, moon_alt)
+        v.view_state.fov_deg = 4.0
+        frame = v._moon_screen_frame()
+        assert frame is not None
+        ux, uy = frame["ux"], frame["uy"]
+        assert ux is not None and uy is not None
+
+        # ① 绘制层的朝向 = 独立单位向量切向的屏幕投影
+        sx, sy = _sunward_screen_dir(v, moon_az, moon_alt, sun_az, sun_alt)
+        assert ux * sx + uy * sy > 0.999
+
+        # ② 像素亮区质心确实落在 ux,uy 一侧
+        img = _render(v, 500, 500)
+        c = frame["center"]
+        centroid, count = _bright_stats(
+            img, c.x(), c.y(), float(frame["radius_px"]))
+        r = float(frame["radius_px"])
+        lit_frac = count / (math.pi * max(1.0, r - 1.0) ** 2)
+        assert lit_frac == pytest.approx(illum, abs=0.07)
+        if 0.1 < illum < 0.95:
+            assert centroid is not None
+            cn = math.hypot(*centroid)
+            assert cn > 0.05 * r, (centroid, r)
+            assert (centroid[0] * ux + centroid[1] * uy) / cn > 0.8
+    finally:
+        v.close()
+
+
+@pytest.mark.parametrize("lat,lon", [
+    (-33.9, 18.4),    # 南半球：开普敦
+    (-23.5, -46.6),   # 南半球：圣保罗
+    (40.0, 116.0),    # 北半球对照
+])
+def test_real_ephemeris_bright_side_faces_sun_in_both_hemispheres(lat, lon):
+    """真实历表：南/北半球都从 az/alt 定朝向，不靠屏幕左右或赤经差。"""
+    v = _new_view(600)
+    try:
+        v.set_observer(lat, lon, 0.0)
+        # 找一个「月亮在地平上 > 20°、且日月不是近满月/近新月」的时刻：
+        # 近对跖/近重合时切向退化，朝向本来就不可判，不能拿来验朝向。
+        from mbdsdr_ai import solar_system as _sol
+        sun = moon = None
+        for day in range(0, 40, 2):
+            for hour in range(0, 24, 2):
+                t = FIXED_UNIX + day * 86400 + hour * 3600
+                mp = _sol.get_moon_position(t, (lat, lon, 0.0))
+                sp = _sol.get_sun_position(t, (lat, lon, 0.0))
+                if mp is None or sp is None or float(mp.alt_deg) <= 20.0:
+                    continue
+                sep = angular_separation_deg(
+                    float(mp.az_deg), float(mp.alt_deg),
+                    float(sp.az_deg), float(sp.alt_deg))
+                if not (45.0 <= sep <= 135.0):
+                    continue
+                sun = {"az": sp.az_deg, "alt": sp.alt_deg}
+                moon = {"az": mp.az_deg, "alt": mp.alt_deg,
+                        "illum": mp.illumination,
+                        "phase_angle_deg": mp.phase_angle_deg,
+                        "diameter_deg": mp.angular_diameter_deg}
+                break
+            if sun is not None:
+                break
+        assert sun is not None and moon is not None
+
+        v.set_celestial_bodies(sun, moon, 0.0)
+        v.view_state.look_at(float(moon["az"]), float(moon["alt"]))
+        v.view_state.fov_deg = 3.0
+        frame = v._moon_screen_frame()
+        assert frame is not None and frame["ux"] is not None
+
+        sx, sy = _sunward_screen_dir(
+            v, float(moon["az"]), float(moon["alt"]),
+            float(sun["az"]), float(sun["alt"]))
+        assert frame["ux"] * sx + frame["uy"] * sy > 0.999
+    finally:
+        v.close()
