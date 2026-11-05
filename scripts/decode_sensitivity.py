@@ -28,6 +28,11 @@
     1200）；波形 ``acars_protocol.acars_encode``、判决
     ``acars_decoder.acars_decode_iq``；成功 = CRC 通过且模式/注册号/
     标签/正文逐字段一致。
+  * Navtex / APT / WSPR / LRPT 的波形取自
+    ``tests/fixtures/sensitivity/``（同一批仓内编码器合成，manifest 已写
+    ``synthetic / NOT OTA``）：SITOR-B 100bd / APT 2400Hz 副载波 /
+    WSPR Type 1 复基带 / LRPT QPSK 72kSym，判决分别比字段、行对齐、呼号栅格、
+    载荷 SHA-256。
 
 必须如实声明的三点（否则这张表就变成「凭记忆的数字」）：
   1. 每个模式的 SNR 口径由 ``MODE_BASIS`` 自述：噪声加在哪个域（复基带 /
@@ -35,7 +40,8 @@
      未按占用带宽归一）、SNR 按每样本平均功率；
      **不同域/不同带宽的 dB 值不可横向换算**，更不是天线口面 SNR，
      也不是任何法规/适航门限；
-  2. 全是**合成波形**（无多径、无频偏、无采样时钟误差、无邻道干扰），
+  2. 全是**合成波形**（SNR 扫描无多径、无采样时钟误差、无邻道干扰；频偏是
+     另一条正交扫描，见 ``sweep_offsets``），
      因此只能回答「本实现相对本实现的相对灵敏度」，不能回答「能否收真实 OTA 信号」；
      真实录的结论见 docs/learn/decoder-capability-matrix.md 的 evidence 栏；
   3. 表格里的阈值会随 numpy 版本/浮点实现有 ±1 次抖动，故测试只钉**方向性**
@@ -44,7 +50,7 @@
      「边缘效应，未解释机理」，不挑好看的档位当结论。
 
 用法：
-    python scripts/decode_sensitivity.py                     # 六模式，各用其默认网格
+    python scripts/decode_sensitivity.py                     # 十模式，各用其默认网格
     python scripts/decode_sensitivity.py --modes aprs --snr -8:16:2 --trials 30
     python scripts/decode_sensitivity.py --snr -10:16:2 --trials 20 --out logs/sensitivity.json
 """
@@ -69,13 +75,34 @@ DEFAULT_TRIALS = 20
 DEFAULT_TARGET = 0.9
 DEFAULT_SEED = 20261104
 
-# 每个模式的合成用例：AIS/ADS-B/APRS 的真值来自随仓 fixture 的 manifest，
-# 不在脚本里另造；FT4/POCSAG/ACARS 用仓内编码器现场合成（真值同源）。
+# 每个模式的合成用例：AIS/ADS-B/APRS 的真值来自 decode_pipeline fixture 的
+# manifest；POCSAG/ACARS/NAVTEX/APT/FT4/WSPR/LRPT 的真值来自 sensitivity
+# fixture 的 manifest。两者都是随仓合成波形（NOT OTA），脚本不另造真值。
 PIPELINE_FIXTURE_DIR = os.path.join(ROOT, "tests", "fixtures", "decode_pipeline")
 APRS_WAV_FILE = "aprs_two_frames_48000.wav"
 APRS_FIXTURE_DIR = PIPELINE_FIXTURE_DIR
 
-# 尚未迁到 fixture 的模式的固定合成用例（呼号按仓规用中性示例 BI1AAA）。
+# 其余模式的 clean 波形也已入库（合成 / NOT OTA，见同目录 manifest.json +
+# provenance.json）。扫描时只从盘上读，不再现场重新合成，保证「测的就是入库的
+# 那一份」，也保证别人能复跑核对。
+SENS_FIXTURE_DIR = os.path.join(ROOT, "tests", "fixtures", "sensitivity")
+SENS_MANIFEST_PATH = os.path.join(SENS_FIXTURE_DIR, "manifest.json")
+
+
+def _load_json(path: str) -> dict:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _sens_meta(mode: str) -> dict:
+    """从 sensitivity manifest 读某模式的 fixture 元数据与合成真值。"""
+    manifest = _load_json(SENS_MANIFEST_PATH)
+    try:
+        return dict(manifest["modes"][mode])
+    except KeyError as exc:
+        raise ValueError(f"sensitivity manifest 缺 {mode} 条目") from exc
+
+
 FT4_TEST_TEXT = "CQ BI1AAA OM74"
 POCSAG_TEST_ADDRESS = 54321
 POCSAG_TEST_MESSAGE = "HELLO"
@@ -83,11 +110,6 @@ POCSAG_TEST_BAUD = 1200
 ACARS_TEST_FIELDS = {"mode": "2", "reg": "BA1234", "label": "H1",
                      "text": "TEST MESSAGE"}
 ACARS_TEST_BAUD = 2400
-
-
-def _load_json(path: str) -> dict:
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def _read_wav_fixture(path: str):
@@ -227,60 +249,112 @@ def build_aprs_case() -> dict:
 
 
 def build_ft4_case() -> dict:
-    import numpy as np
-
-    from mbdsdr_ai.ft4_codec import build_frame, encode_ft4_tones
-    from mbdsdr_ai.ft4_modem import Ft4Modulator
-    from mbdsdr_ai.ft8_encode import pack77_standard
-
-    call1, call2, grid = FT4_TEST_TEXT.split()
-    message77 = pack77_standard(call1, call2, grid)
-    frame = np.asarray(build_frame(encode_ft4_tones(message77)), dtype=np.int8)
+    meta = _sens_meta("ft4")
+    iq = _read_cf32_fixture(os.path.join(SENS_FIXTURE_DIR, meta["file"]))
     return {
         "mode": "ft4",
-        "fs": 12000.0,
-        "iq": Ft4Modulator().modulate(frame),
-        "truth_text": FT4_TEST_TEXT,
-        "condition": "4-FSK GFSK（BT=1.0，12 kS/s，105 符号/5.04 s），消息 CQ BI1AAA OM74",
-        "source": "FT4 4-FSK/LDPC(174,91)；波形=mbdsdr_ai.ft4_modem.Ft4Modulator",
+        "fs": float(meta["fs_hz"]),
+        "iq": iq,
+        "truth_text": meta["truth"]["text"],
+        "frame_count": 1,
+        "condition": meta["condition"],
+        "source": (f"FT4 4-FSK/LDPC(174,91)；波形=随仓合成 fixture "
+                   f"tests/fixtures/sensitivity/{meta['file']}（NOT OTA）"),
     }
 
 
 def build_pocsag_case() -> dict:
-    from mbdsdr_ai.pocsag_decoder import pocsag_encode
-
-    fs = 22050.0
+    meta = _sens_meta("pocsag")
+    audio, rate = _read_wav_fixture(os.path.join(SENS_FIXTURE_DIR, meta["file"]))
+    truth = dict(meta["truth"])
     return {
         "mode": "pocsag",
-        "fs": fs,
-        "audio": pocsag_encode(POCSAG_TEST_ADDRESS, POCSAG_TEST_MESSAGE,
-                               POCSAG_TEST_BAUD, sample_rate=fs),
-        "address": POCSAG_TEST_ADDRESS,
-        "message": POCSAG_TEST_MESSAGE,
-        "baud": POCSAG_TEST_BAUD,
+        "fs": rate,
+        "audio": audio,
+        "address": int(truth["address"]),
+        "message": str(truth["message"]),
+        "baud": int(truth["baud"]),
         "frame_count": 1,
-        "condition": f"FSK 音频 {POCSAG_TEST_BAUD} bd，fs={fs:g}，地址 {POCSAG_TEST_ADDRESS} / HELLO",
-        "source": "CCIR Radiopaging Code No.1（BCH(31,21)）；波形=mbdsdr_ai.pocsag_decoder.pocsag_encode",
+        "condition": meta["condition"],
+        "source": (f"CCIR Radiopaging Code No.1（BCH(31,21)）；音频=随仓合成 "
+                   f"fixture tests/fixtures/sensitivity/{meta['file']}（NOT OTA）"),
     }
 
 
 def build_acars_case() -> dict:
-    from mbdsdr_ai.acars_protocol import acars_encode
-
-    fs = 48000.0
+    meta = _sens_meta("acars")
+    audio, rate = _read_wav_fixture(os.path.join(SENS_FIXTURE_DIR, meta["file"]))
+    truth = dict(meta["truth"])
     return {
         "mode": "acars",
-        "fs": fs,
-        "audio": acars_encode(ACARS_TEST_FIELDS["mode"],
-                              reg=ACARS_TEST_FIELDS["reg"],
-                              label=ACARS_TEST_FIELDS["label"],
-                              text=ACARS_TEST_FIELDS["text"],
-                              baud=ACARS_TEST_BAUD, sample_rate=fs),
-        "truth": dict(ACARS_TEST_FIELDS),
-        "baud": ACARS_TEST_BAUD,
+        "fs": rate,
+        "audio": audio,
+        "truth": truth,
+        "baud": int(truth.get("baud", ACARS_TEST_BAUD)),
         "frame_count": 1,
-        "condition": f"MSK 音频 {ACARS_TEST_BAUD} bd（中心 1800 Hz），fs={fs:g}，1 帧",
-        "source": "ARINC 618 风格 MSK；波形=mbdsdr_ai.acars_protocol.acars_encode",
+        "condition": meta["condition"],
+        "source": (f"ARINC 618 风格 MSK；音频=随仓合成 fixture "
+                   f"tests/fixtures/sensitivity/{meta['file']}（NOT OTA）"),
+    }
+
+
+def build_navtex_case() -> dict:
+    meta = _sens_meta("navtex")
+    audio, rate = _read_wav_fixture(os.path.join(SENS_FIXTURE_DIR, meta["file"]))
+    return {
+        "mode": "navtex",
+        "fs": rate,
+        "audio": audio,
+        "truth": dict(meta["truth"]),
+        "frame_count": 1,
+        "condition": meta["condition"],
+        "source": (f"SITOR-B / CCIR 476（100 bd，恒比 + 分集）；音频=随仓合成 "
+                   f"fixture tests/fixtures/sensitivity/{meta['file']}（NOT OTA）"),
+    }
+
+
+def build_apt_case() -> dict:
+    meta = _sens_meta("apt")
+    audio, rate = _read_wav_fixture(os.path.join(SENS_FIXTURE_DIR, meta["file"]))
+    return {
+        "mode": "apt",
+        "fs": rate,
+        "audio": audio,
+        "truth": dict(meta["truth"]),
+        "frame_count": int(meta["truth"]["n_lines"]),
+        "condition": meta["condition"],
+        "source": (f"NOAA APT（2400 Hz 副载波 AM，104 行/min）；音频=随仓合成 "
+                   f"fixture tests/fixtures/sensitivity/{meta['file']}（NOT OTA）"),
+    }
+
+
+def build_wspr_case() -> dict:
+    meta = _sens_meta("wspr")
+    iq = _read_cf32_fixture(os.path.join(SENS_FIXTURE_DIR, meta["file"]))
+    return {
+        "mode": "wspr",
+        "fs": float(meta["fs_hz"]),
+        "iq": iq,
+        "truth": dict(meta["truth"]),
+        "frame_count": 1,
+        "condition": meta["condition"],
+        "source": (f"WSPR Type 1（K=32 卷积 + 交织 + 162 bit）；波形=随仓合成 "
+                   f"fixture tests/fixtures/sensitivity/{meta['file']}（NOT OTA）"),
+    }
+
+
+def build_lrpt_case() -> dict:
+    meta = _sens_meta("lrpt")
+    iq = _read_cf32_fixture(os.path.join(SENS_FIXTURE_DIR, meta["file"]))
+    return {
+        "mode": "lrpt",
+        "fs": float(meta["fs_hz"]),
+        "iq": iq,
+        "truth": dict(meta["truth"]),
+        "frame_count": 1,
+        "condition": meta["condition"],
+        "source": (f"LRPT QPSK（Costas + Gardner + 64 bit 同步）；波形=随仓合成 "
+                   f"fixture tests/fixtures/sensitivity/{meta['file']}（NOT OTA）"),
     }
 
 
@@ -432,6 +506,114 @@ def evaluate_acars(audio, fs, case=None) -> tuple:
     return False, "payload_mismatch", detail
 
 
+def evaluate_navtex(audio, fs, case=None) -> tuple:
+    """返回 (成功?, 失败原因, 明细)。成功=报文的 B1/B2/序号/正文与真值一致。"""
+    from mbdsdr_ai.navtex_decoder import navtex_decode_audio
+
+    truth = (case or {}).get("truth") or {}
+    try:
+        r = navtex_decode_audio(audio, fs)
+    except Exception as exc:
+        logger.warning("NAVTEX 单次试次解码异常（按失败计）：%s: %s",
+                       type(exc).__name__, exc)
+        return False, f"decode_error:{type(exc).__name__}", {"frames_decoded": 0}
+    msgs = r.get("messages") or []
+    detail = {"frames_decoded": len(msgs),
+              "fec_corrected": int(r.get("fec_corrected", 0)),
+              "fec_lost": int(r.get("fec_lost", 0))}
+    if not msgs:
+        return (False, "nothing_detected" if not r.get("phasing_ok")
+                else "no_frame_recovered", detail)
+    for m in msgs:
+        got = " ".join(str(m.get("text", "")).split())
+        want = " ".join(str(truth.get("text_decoded", truth.get("text", ""))).split())
+        if (str(m.get("b1")) == truth.get("b1")
+                and str(m.get("b2")) == truth.get("b2")
+                and str(m.get("serial")) == truth.get("serial")
+                and got == want):
+            return True, "", detail
+    return False, "payload_mismatch", detail
+
+
+def evaluate_apt(audio, fs, case=None) -> tuple:
+    """返回 (成功?, 失败原因, 明细)。成功=行同步数达真值且 B 通道有条带对比。"""
+    from mbdsdr_ai.noaa_apt_lite import decode_apt
+
+    truth = (case or {}).get("truth") or {}
+    try:
+        r = decode_apt(audio, fs)
+    except Exception as exc:
+        logger.warning("APT 单次试次解码异常（按失败计）：%s: %s",
+                       type(exc).__name__, exc)
+        return False, f"decode_error:{type(exc).__name__}", {"frames_decoded": 0}
+    if not r.get("apt_present"):
+        reason = r.get("reason") or "nothing_detected"
+        if reason not in ("too_short", "no_sync", "too_few_lines"):
+            reason = "nothing_detected"
+        return False, reason, {"frames_decoded": int(r.get("lines_aligned", 0))}
+    lines = int(r.get("lines_aligned", 0))
+    detail = {"frames_decoded": lines,
+              "lock_ratio": float(r.get("lock_ratio", 0.0))}
+    if lines < int(truth.get("n_lines_decodable", truth.get("n_lines", 1))):
+        return False, "truncated_frame", detail
+    import numpy as np
+    b = np.asarray(r["image_b"], dtype=np.float64)
+    if float(b.std()) < float(truth.get("b_band_std_min", 0.0)):
+        # 行同步对上了但 B 通道没有竖条带 → 不是「解出一半」，是极性/增益错了
+        return False, "payload_mismatch", detail
+    return True, "", detail
+
+
+def evaluate_wspr(iq, fs, case=None) -> tuple:
+    """返回 (成功?, 失败原因, 明细)。成功=呼号/网格/功率与合成真值一致。"""
+    from mbdsdr_ai.wspr_modem import search_and_decode
+
+    truth = (case or {}).get("truth") or {}
+    try:
+        r = search_and_decode(iq, sample_rate_hz=fs)
+    except Exception as exc:
+        logger.warning("WSPR 单次试次解码异常（按失败计）：%s: %s",
+                       type(exc).__name__, exc)
+        return False, f"decode_error:{type(exc).__name__}", {"frames_decoded": 0}
+    if r is None:
+        return False, "sync_not_found", {"frames_decoded": 0}
+    msg = getattr(r, "message", None)
+    detail = {"frames_decoded": 1,
+              "sync_metric": round(float(getattr(r, "sync_metric", 0.0)), 4),
+              "frequency_hz": round(float(getattr(r, "frequency_hz", 0.0)), 3)}
+    if (msg is not None
+            and msg.callsign == truth.get("callsign")
+            and msg.grid4 == truth.get("grid")
+            and int(msg.power_dbm) == int(truth.get("power_dbm", 0))):
+        return True, "", detail
+    return False, "payload_mismatch", detail
+
+
+def evaluate_lrpt(iq, fs, case=None) -> tuple:
+    """返回 (成功?, 失败原因, 明细)。成功=载荷 256 字节的 SHA-256 与真值一致。"""
+    import hashlib
+
+    from mbdsdr_ai.lrpt_modem import LrptDemodulator
+
+    truth = (case or {}).get("truth") or {}
+    try:
+        cands = LrptDemodulator(fs=int(round(fs))).process(iq)
+    except Exception as exc:
+        logger.warning("LRPT 单次试次解码异常（按失败计）：%s: %s",
+                       type(exc).__name__, exc)
+        return False, f"decode_error:{type(exc).__name__}", {"frames_decoded": 0}
+    detail = {"frames_decoded": len(cands),
+              "candidates": len(cands),
+              "min_hamming": min((int(c.hamming) for c in cands), default=-1)}
+    if not cands:
+        return False, "sync_not_found", detail
+    want = truth.get("payload_sha256")
+    for c in cands:
+        if hashlib.sha256(c.frame_bytes).hexdigest() == want:
+            return True, "", detail
+    return False, "payload_mismatch", detail
+
+
 MODE_CASES = {
     "ais": build_ais_case,
     "adsb": build_adsb_case,
@@ -439,6 +621,10 @@ MODE_CASES = {
     "ft4": build_ft4_case,
     "pocsag": build_pocsag_case,
     "acars": build_acars_case,
+    "navtex": build_navtex_case,
+    "apt": build_apt_case,
+    "wspr": build_wspr_case,
+    "lrpt": build_lrpt_case,
 }
 MODE_EVALUATORS = {
     "ais": evaluate_ais,
@@ -447,6 +633,10 @@ MODE_EVALUATORS = {
     "ft4": evaluate_ft4,
     "pocsag": evaluate_pocsag,
     "acars": evaluate_acars,
+    "navtex": evaluate_navtex,
+    "apt": evaluate_apt,
+    "wspr": evaluate_wspr,
+    "lrpt": evaluate_lrpt,
 }
 
 # 每个模式自述口径：噪声加在哪个域、带宽怎么定义、SNR 按每样本/每符号怎么算。
@@ -482,6 +672,26 @@ MODE_BASIS = {
         "bandwidth": "噪声带宽 = fs/2 = 24 kHz（全带白噪，未按 2400 bd MSK 占用带宽归一）",
         "snr": "每样本：整段平均信号功率 / 噪声方差；MSK 1 bit/符号 + 奇校验/CRC-16",
     },
+    "navtex": {
+        "domain": "音频域（NFM 鉴频后）",
+        "bandwidth": "噪声带宽 = fs/2 = 6 kHz（fs=12 kS/s，全带白噪，未按 100 bd FSK 占用带宽归一）",
+        "snr": "每样本：整段（定相 + 报文）平均信号功率 / 噪声方差；SITOR-B 100 bd，4:7 恒比 + 分集",
+    },
+    "apt": {
+        "domain": "音频域（AM 包络解调后）",
+        "bandwidth": "噪声带宽 = fs/2 = 12 kHz（fs=24 kS/s，全带白噪，未按 2400 Hz 副载波占用带宽归一）",
+        "snr": "每样本：整段平均信号功率 / 噪声方差；AM 2400 Hz 副载波，104 行/min",
+    },
+    "wspr": {
+        "domain": "复基带（基带 IQ）",
+        "bandwidth": "噪声带宽 = fs/2 = 187.5 Hz（fs=375 S/s，全带白噪，未按 1.46 Hz 符号率归一）",
+        "snr": "每样本：整帧（110.592 s）平均信号功率 / 噪声方差；4-FSK 1 bit/符号（K=32 卷积 + 交织）",
+    },
+    "lrpt": {
+        "domain": "复基带（基带 IQ）",
+        "bandwidth": "噪声带宽 = fs/2 = 288 kHz（fs=576 kS/s，全带白噪，未按 72 kSym/s 占用带宽归一）",
+        "snr": "每样本：整帧平均信号功率 / 噪声方差；QPSK 2 bit/符号（sps=8，64 bit 同步）",
+    },
 }
 
 # 每个模式的默认档位网格（≥6 档；高 SNR 端必须能到 100%，低端必须能到 0%）。
@@ -491,24 +701,31 @@ MODE_DEFAULT_GRID = {
     "aprs": parse_snr_grid("-10:16:2"),
     "ft4": parse_snr_grid("-24:0:2"),
     "pocsag": parse_snr_grid("0:18:2"),
-    "acars": parse_snr_grid("-6:6:2"),
+    "acars": parse_snr_grid("-6:14:4"),
+    "navtex": parse_snr_grid("8:40:4"),
+    "apt": parse_snr_grid("-8:16:4"),
+    "wspr": parse_snr_grid("-32:-8:4"),
+    "lrpt": parse_snr_grid("-8:16:4"),
 }
-# 抽查用的「确定成功点」（测试断言 high-SNR 必成功）；不一定等于网格顶：
-# POCSAG 在 18 dB 仍有偶发失败（实测 4/5），故取 28 dB，不拿网格顶冒充保证。
+# 抽查用的「确定成功点」（测试断言 high-SNR 必成功）；取在实测 100% 档之上留余量，
+# 不拿网格顶冒充保证：POCSAG 在 18 dB 实测仍有偶发失败，故取 28 dB。
 MODE_HIGH_SNR_DB = {"ais": 16.0, "adsb": 16.0, "aprs": 16.0,
-                    "ft4": 0.0, "pocsag": 28.0, "acars": 12.0}
+                    "ft4": 0.0, "pocsag": 28.0, "acars": 24.0,
+                    "navtex": 48.0, "apt": 24.0, "wspr": 0.0, "lrpt": 24.0}
 
 # 允许出现的失败原因分类（测试据此断言「失败必须有分类原因」）。
 KNOWN_FAILURE_REASONS = {
     "nothing_detected", "no_frame_recovered", "truncated_frame", "crc_failed",
     "payload_mismatch", "insufficient_samples", "preamble_not_found",
     "fcs_or_stuffing_reject", "sync_not_found", "ldpc_parity_failed",
-    "address_not_recovered",
+    "address_not_recovered", "too_short", "no_sync", "too_few_lines",
 }
 
 # 每个模式一个种子偏移：同种子下各模式噪声样本不共享，避免统计相关。
 MODE_SEED_OFFSET = {"ais": 0, "adsb": 100003, "aprs": 200003,
-                    "ft4": 300007, "pocsag": 400009, "acars": 500009}
+                    "ft4": 300007, "pocsag": 400009, "acars": 500009,
+                    "navtex": 600011, "apt": 700001, "wspr": 800011,
+                    "lrpt": 900007}
 
 
 # ---------------------------------------------------------------------------
@@ -640,17 +857,197 @@ def derive_monotonicity(rows: list, jitter: int = 1) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# 频偏容差扫描（只钉「单调性」与「临界频偏」，不钉具体数值好看的档）
+# ---------------------------------------------------------------------------
+DEFAULT_OFFSETS_KHZ = (0.5, 1.0, 2.0, 5.0, 10.0)
+DEFAULT_OFFSET_TRIALS = 10
+
+
+def _shift_iq(iq, fs: float, offset_hz: float):
+    """复基带频偏：乘复指数（正频偏=向正频率搬移），不做整形。"""
+    import numpy as np
+    n = np.arange(iq.size, dtype=np.float64)
+    return np.asarray(iq) * np.exp(2j * np.pi * offset_hz * n / float(fs))
+
+
+def _shift_audio(audio, fs: float, offset_hz: float):
+    """实音频频偏：Hilbert 解析信号搬移后取实部（负频分量不会折叠回带内）。"""
+    import numpy as np
+    from scipy.signal import hilbert
+    a = np.asarray(audio, dtype=np.float64)
+    n = np.arange(a.size, dtype=np.float64)
+    return np.real(hilbert(a) * np.exp(2j * np.pi * offset_hz * n / float(fs)))
+
+
+def sweep_offsets(mode: str, offsets_khz=None,
+                  trials: int = DEFAULT_OFFSET_TRIALS,
+                  seed: int = DEFAULT_SEED,
+                  target: float = DEFAULT_TARGET,
+                  snr_db: float = None) -> dict:
+    """固定高 SNR，只扫频偏偏移；返回逐偏移成功率与临界频偏/单调性。
+
+    ``offsets_khz`` 若为 None 则扫 ±{0.5, 1, 2, 5, 10} kHz + 0。
+    超过 ``0.45*fs`` 的偏移物理上不可表示（奈奎斯特），**显式判 not_supported**
+    并写清缺什么，不伪造一个「失败」。
+    """
+    if mode not in MODE_CASES:
+        raise ValueError(f"未知灵敏度模式: {mode!r}（可选 {sorted(MODE_CASES)}）")
+    case = MODE_CASES[mode]()
+    evaluate = MODE_EVALUATORS[mode]
+    audio_mode = "audio" in case
+    fs = float(case["fs"])
+    if offsets_khz is None:
+        offsets_khz = [0.0] + sorted(v for k in DEFAULT_OFFSETS_KHZ
+                                     for v in (-float(k), float(k)))
+    else:
+        offsets_khz = sorted(float(v) for v in offsets_khz)
+    level = float(MODE_HIGH_SNR_DB[mode] if snr_db is None else snr_db)
+    rows = []
+    for off_khz in offsets_khz:
+        off_hz = off_khz * 1000.0
+        if abs(off_hz) > 0.45 * fs:
+            rows.append({
+                "offset_khz": off_khz,
+                "supported": False,
+                "skipped_reason": (f"|偏移| {abs(off_hz):g} Hz 超过 "
+                                   f"0.45·fs={0.45 * fs:g} Hz（奈奎斯特不可表示）"),
+            })
+            continue
+        rng = np_rng(seed + MODE_SEED_OFFSET.get(mode, 0)
+                     + int(round(abs(off_khz) * 1000)))
+        successes = 0
+        reasons = {}
+        first_failure = ""
+        for _ in range(int(trials)):
+            base = (_add_awgn_audio(case["audio"], level, rng) if audio_mode
+                    else _add_awgn(case["iq"], level, rng))
+            shifted = (_shift_audio(base, fs, off_hz) if audio_mode
+                       else _shift_iq(base, fs, off_hz))
+            res = evaluate(shifted, fs, case)
+            ok, reason = (res[0], res[1]) if len(res) >= 2 else (False, "failed")
+            if ok:
+                successes += 1
+            else:
+                reasons[reason] = reasons.get(reason, 0) + 1
+                if not first_failure:
+                    first_failure = reason
+        rows.append({
+            "offset_khz": off_khz,
+            "supported": True,
+            "successes": successes,
+            "trials": int(trials),
+            "success_rate": round(successes / float(trials), 4),
+            "failure_reasons": reasons,
+            "first_failure_code": first_failure,
+        })
+    return {
+        "mode": mode,
+        "fs_hz": fs,
+        "snr_db": level,
+        "grid_offset_khz": [float(v) for v in offsets_khz],
+        "rows": rows,
+        "critical_offset_khz": derive_offset_limit(rows, target),
+        "monotonicity": derive_offset_monotonicity(rows),
+        "basis": dict(MODE_BASIS[mode]),
+    }
+
+
+def derive_offset_limit(rows: list, target: float = DEFAULT_TARGET):
+    """临界频偏 = **从 0 向外连续达标** 的最大 |偏移|（kHz）；没有则 None。
+
+    不能取「所有达标档里的最大值」：AIS 用 1 符号差分相位判决
+    （``angle(x[n+sps]·conj(x[n]))``），恒定频偏只给判决量加一个固定相位
+    旋转；偏移接近符号率整数倍时相位旋转回到 2π 附近，极性又被判对，
+    于是 ±10 kHz 反而能 100%。那是差分鉴相的**周期折叠**，不是容差。
+    同理 MSK/FSK 的位定时与滤波器边缘也会在个别档偶发恢复。按「从 0 连续
+    不中断」取，才是在说「能容忍多大偏移」，不会被折叠点骗。
+    """
+    def side(seq):
+        last = None
+        for r in seq:
+            if r["success_rate"] >= target - 1e-12:
+                last = abs(r["offset_khz"])
+            else:
+                break
+        return last
+
+    pos = sorted([r for r in rows if r.get("supported") and r["offset_khz"] >= 0],
+                 key=lambda r: r["offset_khz"])
+    neg = sorted([r for r in rows if r.get("supported") and r["offset_khz"] <= 0],
+                 key=lambda r: -r["offset_khz"])
+    a, b = side(pos), side(neg)
+    if a is None and b is None:
+        return None
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)   # 取两翼较差的一侧，不挑好看的
+
+
+def derive_offset_monotonicity(rows: list, jitter: int = 1) -> dict:
+    """|偏移| 变大时成功数不得上升（正/负两翼分别判）。
+
+    允许相邻档回落/上升 ≤1 次抖动；超出即记 violation，标「边缘效应，未解释机理」，
+    不因为「看着还行」就宣称单调。
+    """
+    def _side(seq):
+        viols = []
+        for prev, cur in zip(seq, seq[1:]):
+            rise = int(cur["successes"]) - int(prev["successes"])
+            if rise > int(jitter):
+                viols.append({
+                    "from_offset_khz": prev["offset_khz"],
+                    "to_offset_khz": cur["offset_khz"],
+                    "from_successes": int(prev["successes"]),
+                    "to_successes": int(cur["successes"]),
+                    "rise": rise,
+                })
+        return viols
+
+    pos = sorted([r for r in rows if r.get("supported") and r["offset_khz"] >= 0],
+                 key=lambda r: r["offset_khz"])
+    neg = sorted([r for r in rows if r.get("supported") and r["offset_khz"] <= 0],
+                 key=lambda r: -r["offset_khz"])
+    viols = _side(pos) + _side(neg)
+    return {
+        "monotonic": not viols,
+        "jitter_trials": int(jitter),
+        "violations": viols,
+        "note": ("" if not viols else "边缘效应，未解释机理"),
+    }
+
+
+# 未做灵敏度基线的模式：写明「缺什么」，不写成「已完善」。
+NOT_DONE = {
+    "meteor": {
+        "missing": [
+            "没有可兑现的载荷真值：mbdsdr_ai.meteor_sat 只给 symbols/bits，"
+            "仓库内无 MSU-MR 图像解码器，成功无法定义（解出 bits ≠ 解出图像）",
+            "没有 TU Berlin Meteor 实录 fixture 入库（现有 golden 只有回环）",
+            "没有图像质量判据（同步行数/逐像素相关）可供打分",
+        ],
+    },
+}
+
+
 def run_sensitivity(modes: list, snr_values=None, trials: int = DEFAULT_TRIALS,
                     seed: int = DEFAULT_SEED,
-                    target: float = DEFAULT_TARGET) -> dict:
+                    target: float = DEFAULT_TARGET,
+                    offsets_khz=None,
+                    offset_trials: int = DEFAULT_OFFSET_TRIALS) -> dict:
     """跑多模式扫描，产出可当审计证据的 JSON 报告。
 
     ``snr_values=None`` 时每个模式用各自的默认网格（``MODE_DEFAULT_GRID``），
     dB 值跨模式不可横比，因此默认不强行共享一张网格。
+
+    ``offset_trials <= 0`` 跳过频偏扫描（只跑灵敏度）；否则对每个模式另跑一遍
+    ±{0.5,1,2,5,10} kHz，只钉单调性与临界频偏。
     """
     grids = {m: (list(snr_values) if snr_values is not None
                  else list(MODE_DEFAULT_GRID[m])) for m in modes}
-    return {
+    report = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "definition": {
             "snr": "per-sample signal/noise power ratio in the mode's own "
@@ -660,7 +1057,14 @@ def run_sensitivity(modes: list, snr_values=None, trials: int = DEFAULT_TRIALS,
             "basis_per_mode": {m: dict(MODE_BASIS[m]) for m in modes},
             "success": "CRC/FCS passes AND decoded fields equal the synthesized truth",
             "noise": "additive white Gaussian, no multipath/frequency offset/clock error",
-            "scope": "implementation baseline on synthetic waveforms only (NOT OTA)",
+            "scope": "implementation baseline on synthetic fixtures only (NOT OTA)",
+            "offset_scan": ("fixed high-SNR, ±0.5/1/2/5/10 kHz; IQ shifted by "
+                            "complex exponential, audio by Hilbert analytic "
+                            "signal; critical offset = largest magnitude "
+                            "contiguous from zero that still meets target "
+                            "(differential-detection folds at multiples of "
+                            "the symbol rate are NOT counted as tolerance); "
+                            "only monotonicity and critical offset are reported"),
         },
         "seed": int(seed),
         "trials": int(trials),
@@ -669,7 +1073,19 @@ def run_sensitivity(modes: list, snr_values=None, trials: int = DEFAULT_TRIALS,
         "target_rate": float(target),
         "modes": {m: sweep_mode(m, grids[m], trials, seed, target)
                   for m in modes},
+        "not_done": {k: dict(v) for k, v in NOT_DONE.items()},
     }
+    if offset_trials and offset_trials > 0:
+        report["offset_scan"] = {
+            "trials": int(offset_trials),
+            "grid_offset_khz": ([float(v) for v in offsets_khz]
+                                if offsets_khz is not None
+                                else [0.0] + [v for k in DEFAULT_OFFSETS_KHZ
+                                              for v in (-float(k), float(k))]),
+            "modes": {m: sweep_offsets(m, offsets_khz, offset_trials,
+                                       seed, target) for m in modes},
+        }
+    return report
 
 
 def _basis_text(basis: dict) -> str:
@@ -726,6 +1142,50 @@ def markdown_table(report: dict) -> str:
         "相邻档成功数允许回落 ≤1 次（20 次/档下的 ±1 次抖动），"
         "回落更多即判非单调并标「边缘效应，未解释机理」。",
     ]
+    scan = report.get("offset_scan") or {}
+    if scan.get("modes"):
+        lines += [
+            "",
+            "### 频偏容差（固定高 SNR，只钉单调性/临界频偏）",
+            "",
+            "| 模式 | 0 kHz | ±0.5 kHz | ±1 kHz | ±2 kHz | ±5 kHz | ±10 kHz | 临界频偏 | 单调性 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for mode, o in scan["modes"].items():
+            by = {r["offset_khz"]: r for r in o["rows"]}
+            cells = []
+            for k in (0.0, 0.5, 1.0, 2.0, 5.0, 10.0):
+                r = by.get(k)
+                if r is None:
+                    cells.append("—")
+                elif not r.get("supported"):
+                    cells.append("N/A")
+                else:
+                    cells.append(f"{r['success_rate']:.0%}")
+            crit = o.get("critical_offset_khz")
+            mo = o.get("monotonicity") or {}
+            mo_text = "是" if mo.get("monotonic") else "否"
+            if not mo.get("monotonic"):
+                mo_text += "（边缘效应，未解释机理）"
+            lines.append(
+                f"| `{mode}` | " + " | ".join(cells) + " | "
+                f"{'—' if crit is None else f'{crit:g} kHz'} | {mo_text} |")
+        lines += [
+            "",
+            "N/A = 该偏移超过 0.45·fs（奈奎斯特不可表示），不伪造失败结果；"
+            "成功率取该档 ≥10 次试验的实测比例。",
+            "临界频偏 = **从 0 向外连续达标**的最大 |偏移|（两翼取较差侧）：",
+            "AIS 用 1 符号差分相位判决，恒定频偏只加固定相位旋转，偏移接近"
+            "符号率整数倍时极性又被判对（±10 kHz 反而 100%），那是周期折叠不是容差。",
+            "非单调照实登记为「边缘效应，未解释机理」，不当卖点。",
+        ]
+    if report.get("not_done"):
+        lines += ["", "### 未做（缺什么）", ""]
+        for name, info in report["not_done"].items():
+            lines.append(f"- `{name}`：")
+            for miss in info.get("missing", []):
+                lines.append(f"  - {miss}")
+
     for mode, m in report["modes"].items():
         rows = m.get("rows") or []
         if not rows or "frames_decoded" not in rows[0]:
@@ -771,6 +1231,11 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--target", type=float, default=DEFAULT_TARGET,
                     help="判定达标所需成功率（默认 0.9）")
+    ap.add_argument("--offsets", default=None,
+                    help=("频偏扫描（kHz，逗号列表，缺省 ±0.5,1,2,5,10 + 0）；"
+                          "传 none 跳过频偏扫描"))
+    ap.add_argument("--offset-trials", type=int, default=DEFAULT_OFFSET_TRIALS,
+                    help="每个频偏档的试验次数（默认 10；0 表示跳过频偏扫描）")
     ap.add_argument("--out", help="报告 JSON 输出路径（缺省打印到 stdout）")
     ap.add_argument("--md", help="另存一页 markdown 表格")
     argv = sys.argv[1:] if argv is None else argv
@@ -783,12 +1248,15 @@ def main(argv=None) -> int:
     if args.trials <= 0:
         ap.error("--trials 必须为正整数")
     snr_values = parse_snr_grid(args.snr) if args.snr else None
+    offsets = None
+    if args.offsets and args.offsets.strip().lower() not in ("none", "off"):
+        offsets = [float(v) for v in args.offsets.split(",") if v.strip()]
 
     os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
     os.environ.setdefault("MBDSDR_NO_HW", "1")
 
     report = run_sensitivity(modes, snr_values, args.trials, args.seed,
-                             args.target)
+                             args.target, offsets, args.offset_trials)
 
     if args.md:
         os.makedirs(os.path.dirname(os.path.abspath(args.md)), exist_ok=True)

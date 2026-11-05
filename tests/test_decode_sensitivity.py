@@ -30,7 +30,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 SCRIPT = os.path.join(_ROOT, "scripts", "decode_sensitivity.py")
-MODES = ("ais", "adsb", "aprs", "ft4", "pocsag", "acars")
+MODES = ("ais", "adsb", "aprs", "ft4", "pocsag", "acars",
+         "navtex", "apt", "wspr", "lrpt")
 APRS_GRID = [-6.0, -4.0, -2.0, 0.0, 2.0, 6.0]
 APRS_KNOWN_REASONS = {
     "nothing_detected", "no_frame_recovered", "truncated_frame",
@@ -236,7 +237,7 @@ def test_doc_snapshot_matches_live_sweep(sens):
     spec.loader.exec_module(rep)
 
     snap = rep.SENSITIVITY_SNAPSHOT
-    assert set(snap) == set(MODES), "文档快照必须覆盖全部六模式"
+    assert set(snap) == set(MODES), "文档快照必须覆盖全部十模式"
     report = sens.run_sensitivity(
         sorted(snap), None,
         trials=rep.SENSITIVITY_TRIALS, seed=rep.SENSITIVITY_SEED)
@@ -262,3 +263,118 @@ def test_doc_snapshot_matches_live_sweep(sens):
         assert mo["monotonic"] == expected["monotonic"], (
             f"{mode} 单调性实跑 {mo['monotonic']} 与快照 "
             f"{expected['monotonic']} 不一致——非单调必须如实登记")
+
+
+# ---------------------------------------------------------------------------
+# 频偏容差扫描：只钉「覆盖 ± / 不可表示显式 N/A / 临界取连续段 / 非单调标边缘」
+# ---------------------------------------------------------------------------
+def test_offset_scan_covers_both_signs_with_trials(sens):
+    out = sens.sweep_offsets("ais", trials=3)
+    grid = out["grid_offset_khz"]
+    for k in (0.0, 0.5, 1.0, 2.0, 5.0, 10.0):
+        assert k in grid and -k in grid, f"频偏网格缺 ±{k} kHz"
+    supported = [r for r in out["rows"] if r["supported"]]
+    assert supported, "AIS 至少应有可表示的偏移档"
+    for r in supported:
+        assert r["trials"] == 3
+        assert r["successes"] <= r["trials"]
+        assert "failure_reasons" in r
+
+
+def test_offset_scan_marks_nyquist_impossible_as_not_supported(sens):
+    """WSPR fs=375 S/s，±0.5 kHz 已超 0.45·fs：必须显式 N/A，不许伪造失败。"""
+    out = sens.sweep_offsets("wspr", trials=3)
+    nonzero = [r for r in out["rows"] if r["offset_khz"] != 0.0]
+    assert nonzero, "应扫到非零偏移档"
+    for r in nonzero:
+        assert r["supported"] is False
+        assert "奈奎斯特" in r["skipped_reason"]
+
+
+def test_critical_offset_is_contiguous_from_zero(sens):
+    """差分鉴相的周期折叠让远端某档又能达标，临界频偏不能取最大值。"""
+    rows = [
+        {"offset_khz": 0.0, "supported": True, "successes": 10, "success_rate": 1.0},
+        {"offset_khz": 0.5, "supported": True, "successes": 10, "success_rate": 1.0},
+        {"offset_khz": 1.0, "supported": True, "successes": 4, "success_rate": 0.4},
+        {"offset_khz": 10.0, "supported": True, "successes": 10, "success_rate": 1.0},
+        # 实扫总是两翼都扫；这里补负翼对称档，防「只留下好看的半翼」。
+        {"offset_khz": -0.5, "supported": True, "successes": 10, "success_rate": 1.0},
+        {"offset_khz": -1.0, "supported": True, "successes": 4, "success_rate": 0.4},
+        {"offset_khz": -10.0, "supported": True, "successes": 10, "success_rate": 1.0},
+    ]
+    assert sens.derive_offset_limit(rows, 0.9) == 0.5
+    # 两翼取较差侧：负翼在 0.5 就断，则整体只认 0。
+    rows_neg = [
+        {"offset_khz": 0.0, "supported": True, "successes": 10, "success_rate": 1.0},
+        {"offset_khz": 0.5, "supported": True, "successes": 10, "success_rate": 1.0},
+        {"offset_khz": -0.5, "supported": True, "successes": 0, "success_rate": 0.0},
+    ]
+    assert sens.derive_offset_limit(rows_neg, 0.9) == 0.0
+
+
+def test_offset_monotonicity_flags_recovery_as_edge_effect(sens):
+    rows = [
+        {"offset_khz": 0.0, "supported": True, "successes": 10},
+        {"offset_khz": 0.5, "supported": True, "successes": 3},
+        {"offset_khz": 1.0, "supported": True, "successes": 10},   # 回升 7：非单调
+    ]
+    mo = sens.derive_offset_monotonicity(rows)
+    assert mo["monotonic"] is False
+    assert mo["note"] == "边缘效应，未解释机理"
+    assert mo["violations"][0]["rise"] == 7
+
+
+def test_run_sensitivity_includes_offset_scan_and_not_done(sens):
+    report = sens.run_sensitivity(["ais"], [0.0, 16.0], trials=2,
+                                  offset_trials=2)
+    assert set(report["offset_scan"]["modes"]) == {"ais"}
+    assert report["offset_scan"]["trials"] == 2
+    assert "meteor" in report["not_done"], "未做模式必须显式登记缺什么"
+    assert report["not_done"]["meteor"]["missing"]
+    table = sens.markdown_table(report)
+    assert "频偏容差" in table and "临界频偏" in table
+    assert "未做（缺什么）" in table and "`meteor`" in table
+
+
+def test_offset_snapshot_is_self_consistent(sens):
+    """能力矩阵里的频偏快照必须能被同一套判据复算出来（防手改漂移）。
+
+    快照只在磁盘上留结论，不再每轮重跑 11 偏移 × 10 次（那样测试要跑几十分钟）；
+    但「临界频偏按连续段取」「单调性按两翼回升判」这两条必须与实跑同源，
+    否则文档里的 0 kHz / 1 kHz / 10 kHz 就是凭记忆的数字。
+    """
+    rep_path = os.path.join(_ROOT, "scripts", "decoder_capability_report.py")
+    spec = importlib.util.spec_from_file_location("decoder_capability_report_off",
+                                                  rep_path)
+    rep = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rep)
+
+    assert set(rep.OFFSET_SNAPSHOT) == set(MODES), "频偏快照必须覆盖全部十模式"
+    assert rep.SENSITIVITY_OFFSET_TRIALS >= 10, "每偏移至少要 10 次"
+    for mode, snap in rep.OFFSET_SNAPSHOT.items():
+        rates = snap["rates"]
+        assert 0.0 in rates, f"{mode} 缺 0 kHz 基准档"
+        assert rates[0.0] >= 0.9, f"{mode} 0 kHz 必须达标"
+        rows = [
+            {"offset_khz": k, "supported": True, "successes": int(v * 10),
+             "success_rate": v}
+            for k, v in rates.items()
+        ]
+        assert sens.derive_offset_limit(rows, sens.DEFAULT_TARGET) == \
+            snap["critical_offset_khz"], (
+                f"{mode} 临界频偏与快照不符——快照过期请重跑")
+        mo = sens.derive_offset_monotonicity(rows)
+        assert mo["monotonic"] == snap["monotonic"], (
+            f"{mode} 频偏单调性与快照不符——非单调必须如实登记")
+
+    # N/A 只允许出现在「该偏移超过 0.45·fs」的情况，不许随便留空。
+    for mode, snap in rep.OFFSET_SNAPSHOT.items():
+        fs = float(sens.MODE_CASES[mode]()["fs"])
+        for k in rep.SENSITIVITY_OFFSET_GRID_KHZ:
+            for signed in (-k, k):
+                present = signed in snap["rates"]
+                if not present:
+                    assert abs(signed) * 1000.0 > 0.45 * fs, (
+                        f"{mode} 的 {signed:+g} kHz 在 fs={fs:g} 下可表示，"
+                        "不该写 N/A")
