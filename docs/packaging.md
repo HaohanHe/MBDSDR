@@ -906,3 +906,52 @@ python scripts/release_manifest.py --only installer
   同一次运行前后 `%APPDATA%\mbdsdr` 都是 7 个文件、启动日志
   `D:\mbdsdr\logs\mbdsdr_startup.log` mtime 未变（04:51:52），证明**没落配置、没写日志**。
 
+## 10. 产物 ↔ 构建 HEAD 一致性对拍（2026-11-06）
+
+「九步全绿」只证明产物能启动、能自检，**不证明产物里的源与构建 commit 一致**；
+陈旧残留与漏打都能全绿。本节补这条对拍，脚本
+[scripts/check_dist_head_parity.py](../scripts/check_dist_head_parity.py)，一条命令出结论：
+
+```powershell
+python scripts/check_dist_head_parity.py --dist <dist>\MBDSDR --head <构建 commit> --json <out>.json
+```
+
+判据（与脚本头部同文，改判据须两边一起改）：
+
+1. **可读源逐字一致**：两侧都存在的可读文件用 `git hash-object <dist 文件>` 取内容
+   哈希，与 `git ls-tree` 记录的 HEAD blob 哈希比对（等价于 `git cat-file blob`
+   逐字节；文本按 git 内容口径做 CRLF/LF 过滤，不是工作区落盘字节）。
+2. **二进制/编译产物只判「存在且非空」**：`.exe/.dll/.pyd/.pyc/.zip/.npz/.png/.ico/
+   .qm/.pdf/.ttf/...` 不硬比字节（编译器/平台/UPX 下字节必然不同）。
+3. **dist 有而 HEAD 无**（陈旧残留/生成物）：只在项目命名空间 `assets/`、
+   `mbdsdr_ai/`、`third_party_licenses/`、`_internal` 根级文件内报告；第三方顶层目录
+   （numpy/scipy/PySide6/…）不算。
+4. **HEAD 有而 dist 无**（漏打）：只查打包声明覆盖的路径——`desktop/assets/`（spec
+   的 datas 源）、`third_party_licenses/`、根 `LICENSE`/`NOTICE.md`、`mbdsdr_ai/`
+   数据文件，外加 spec 显式声明的 `mbdsdr_ai/astronomy.py`。
+5. **别名映射**：datas 的 dist 目标名与源路径不同时（spec 把 `desktop/assets` 装成
+   `assets/`），仅当 HEAD 里恰好一个路径以 `/<dist 相对路径>` 结尾才配对，且单独
+   列在「别名映射」里；多个候选视为歧义，不自动配对。
+
+豁免：`.pyc`/`__pycache__`；`.py` 不参与「漏打」（默认 `noarchive=False` 时模块在
+`PYZ` 归档里，产物中看不到独立文件属正常）；`mbdsdr_ai/tests/`（spec 明确 excludes）；
+第三方顶层目录与 `_internal` 根级运行库；`MBDSDR.exe`（引导层产物）。退出码：
+0 = 无差异，1 = 有差异，2 = 参数/环境错误。
+
+**实测（产物 `d:\mbdsdr\.tmp\wf2-dist`，HEAD `05674ef5`，4425 个文件）**：可读源直比
+**33 个全部一致**（其中别名映射 6 个：`assets/*` → `desktop/assets/*`，含
+`generate_icon.py` 与 5 个图标）；二进制仅判存在 6 个；第三方包文件 4351 个（28 个
+顶层目录，豁免）；运行库根文件 35 个（豁免）；**dist 有而 HEAD 无 0、HEAD 有而
+dist 无 0、哈希不一致 0 → PASS**。
+**反证**（另造 5 文件探针 dist，不动真产物）：改 `dso_catalog.json` 一个字节 →
+哈希不一致 1；放 `stale.json` → dist-only 1；缺 `VERSION` 等 → HEAD-only；退出码 1。
+
+事实与观察（不是对拍差异，本轮未改打包清单）：
+
+- `collect_data_files('mbdsdr_ai')` 把 `mbdsdr_ai/tests/fixtures/` 的 **5 个文件**也带进
+  包；它们与 HEAD 一致，但属开发期资产，是否随分发包发出需另议。
+- dist 侧 `assets/icon.svg` 1241 B，HEAD blob 1211 B，哈希一致——差异只是 CRLF；
+  判据以内容哈希为准，字节数仅作展示。
+
+发现漏打/陈旧时只出 patch 计划，不擅自改打包清单；也不把本检查塞进九步（构建后单独一条）。
+
