@@ -118,6 +118,10 @@ from mbdsdr_ai.skyengine import constellations as _constel
 from mbdsdr_ai.skyengine import xingguan as _xingguan
 from mbdsdr_ai.skyengine import satellites as _sats
 from mbdsdr_ai.skyengine import jtime as _jtime
+# 过境峰值仰角门：与 sat_tracker / new_spacetime_panel / controller 同一事实源。
+# 注意区分 VISIBLE_MIN_ALT_DEG=5°（当前可见/跟踪门）——本视图过境列表用的是
+# PASS_MIN_ALT_DEG=10°（「这次过境值不值得列出来」），不是 5°。
+from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG
 
 from tokens import tokens
 
@@ -7159,7 +7163,8 @@ class SatelliteTracker:
     PASS_WIN_HOURS = 24.0
     PASS_COARSE_STEP_S = 300.0
     PASS_FINE_STEP_S = 30.0
-    PASS_MIN_ALT_DEG = 10.0
+    # 峰值仰角门来自 mbdsdr_ai.sat_passes.PASS_MIN_ALT_DEG（10°），
+    # 不再持有私有字面量；与 5° 的可见门是两个量，勿混用。
     # 快转下按模拟时间差重算（墙钟下限防止高倍率每帧扫 24h）
     PASS_REFRESH_SIM_S = 300.0
     PASS_REFRESH_WALL_S = 1.0
@@ -7493,7 +7498,7 @@ class SatelliteTracker:
                     e = _el_at(float(sec))
                     if e is not None and e > best_el:
                         best_el, best_t = e, float(sec)
-                if best_el <= self.PASS_MIN_ALT_DEG:
+                if best_el <= PASS_MIN_ALT_DEG:
                     continue
                 # 峰值邻域细化（补回粗采样削掉的峰值）
                 lo = max(0.0, best_t - self.PASS_COARSE_STEP_S)
