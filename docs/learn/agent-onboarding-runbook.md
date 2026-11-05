@@ -4,7 +4,7 @@
 
 > 角色分工：**外部 agent** = 能跑 shell、能调 MCP 工具的智能体，负责一切敲键盘的事；
 > **用户** = 照本宣科做物理操作（插线、手持天线、按确认键）的人。素材：NanoVNA-H（固件 1.2.50，Windows COM 口）+ RTL2832U/FC0012 电视棒 + RH770 拉杆天线，来自 2026-10-13 与 2026-10-23 两次真机会话，命令均可直接复制执行。
-> **证据分级（2026-11-05 复核）**：NanoVNA 扫频与截图有入库采集件（`experiments/nanovna_rh770/`），可离线复算；10-13 当次的 TCXO 回读、435.25MHz PSD、435.274 FM RMS、419.5MHz 谐振**无原始日志/采集件留存，已降级为「未验证」**，见 `docs/limitations-register.md` 附 P。
+> **证据分级（2026-11-05 复核）**：NanoVNA 扫频与截图有入库采集件（`experiments/nanovna_rh770/`），可离线复算；10-13 当次的 TCXO 回读、435.25MHz PSD、435.274 FM RMS、419.5MHz 谐振、串口 PermissionError 复现率、天线 408.2/419.5MHz 标定表**无原始日志/采集件留存，一律按「未验证」引用**，见 `docs/limitations-register.md` 附 P。
 
 ## 0. 边界（先读）
 
@@ -44,11 +44,12 @@ Windows 上形如 `[('COM11', 1155, 22336)]`，Linux 是 `[('/dev/ttyACM0', ...)
 
 ### 2.2 一次打开，把活干完（Windows 串口纪律）
 
-本机实测：Python 侧 Serial close→reopen 后第二次 `connect()` 抛 `PermissionError`
+本机观察（**未验证（no-artifact）**：无串口日志/抓包留存，复跑需 Windows + COM11）：
+Python 侧 Serial close→reopen 后第二次 `connect()` 抛 `PermissionError`
 （CLI 路径 `python -m mbdsdr_ai.nanovna_dump` 复现率 100%；换进程裸开 `serial.Serial()`
 就没事，根因疑与 usbser.sys 独占共享模式相关，见 feature-parity.md 登记）。变通与纪律：
 
-- 进程内**预开 SerialTransport 注入**、跳过重复 `connect()`（当晚 6/6 成功）；
+- 进程内**预开 SerialTransport 注入**、跳过重复 `connect()`（当晚 6/6 成功，同样无会话日志）；
 - 因此一次连接内**按顺序做完 sweep → 读数 → 截图**，不要"连一下、关一下、再连一下"。
 
 ```bash
@@ -68,7 +69,7 @@ python -m mbdsdr_ai.nanovna_dump --port COM11 \
 ### 2.4 --screenshot 与 tcxo_hz
 
 - `--screenshot <path>`：抓设备当前屏幕存 BMP（153600 字节 RGB565 裸帧 → 24bit BMP），失败为诚实错误信封，不影响测量数据；用途是回证"设备上停在哪一发扫描"。
-- `tcxo_hz`：回读晶振频率（本机 `current: 26000000`，即 26.000000MHz）；老固件解析不出时字段缺失，**不伪造 0**。
+- `tcxo_hz`：回读晶振频率（本机 `current: 26000000`，即 26.000000MHz；**未验证（no-artifact）**：无原始回显日志，见附 P）；老固件解析不出时字段缺失，**不伪造 0**。
 
 ### 2.5 校准口径必须显式标注
 
@@ -143,7 +144,7 @@ set_gain(db=20, arm_manual=true)
 get_status                                     -> 回读（读工具不过门）
 ```
 
-当晚实测回读（435.274MHz / FM / 20dB）：
+当晚回读记录（435.274MHz / FM / 20dB；**未验证（no-artifact）**：无原始 MCP/串口日志，仅文档自述）：
 
 ```json
 {"connected": true, "device": "rtl_tcp 127.0.0.1:1234",
@@ -155,11 +156,15 @@ get_status                                     -> 回读（读工具不过门）
 ## 5. 天线测量卫生课（用户操作，agent 口述）
 
 - **手持垂直、悬空、远离金属**：笔记本外壳不算"机箱"，也是金属，同样远离。
-- 反例（真实案例）：拉杆天线**躺平**在桌面测，谐振整个测没——VSWR 从 2.1 恶化到
-  3.3+ 全平。执行顺序：**先修姿势，再怪天线**。
+- 反例（真实案例，**未验证（no-artifact）**：无扫频存档）：拉杆天线**躺平**在桌面测，
+  谐振整个测没——VSWR 从 2.1 恶化到 3.3+ 全平。执行顺序：**先修姿势，再怪天线**。
 - 拉杆天线长度↔谐振标定法（RH770，手持垂直实测）：
 
-| 拉杆状态 | 谐振频率 |
+> **证据级别：未验证（no-artifact + contradicted）**。下表 408.2/419.5 无原始扫频件，
+> 且与入库存档（`experiments/nanovna_rh770/data/rh770.json`，400–455MHz 单调下降、
+> 最优在 400MHz 端）矛盾；只能当历史线索，不得当事实引用。
+
+| 拉杆状态 | 谐振频率（未验证） |
 |---|---|
 | 8 节（缩） | < 380 MHz |
 | 中长 | 408.2 MHz |
