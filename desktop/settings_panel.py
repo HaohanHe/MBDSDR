@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
 )
 
 # 单一事实源：默认值/范围/文案全部来自 config_schema，UI 不写第二份。
+logger = logging.getLogger(__name__)
+
 try:
     from config_schema import (
         CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, GROUP_ORDER, SCHEMA,
@@ -1229,9 +1231,10 @@ class SettingsPanel(QWidget):
             try:
                 bar().showMessage(msg, _MSG_NORMAL)
                 return
-            except Exception:  # noqa: BLE001 - 宿主状态栏异常时回退面板状态行
-                pass
+            except Exception as exc:  # noqa: BLE001 - 宿主状态栏异常时回退面板状态行
+                logger.debug("宿主状态栏不可用，回退面板状态行：%s", exc)
         try:
             self.status_label.setText(msg)
-        except Exception:  # noqa: BLE001 - 面板尚未构建完成时无状态行可写
-            pass
+        except Exception as exc:  # noqa: BLE001 - 面板尚未构建完成时无状态行可写
+            logger.warning("设置面板状态行不可写，反馈丢失：%s（消息：%s）",
+                           exc, msg)
