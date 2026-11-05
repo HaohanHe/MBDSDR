@@ -9,7 +9,7 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 135 -->
+<!-- waived-total: 103 -->
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -105,38 +105,6 @@
 | 94 | docs/reference-mechanisms.md | 0288c1e90a4d | / 卫星地影 / S12（`gpredict/src/sat-vis.c:82-105`） / **已补齐**：`mbdsdr_ai/sat_illumination.py:204-303`；`… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 95 | docs/reference-mechanisms.md | f292eb428cdb | **S12 更正细节**：上一轮记为「无」，本轮核实已实现。`sat_illumination.py:78-80` 定义 `sunlit/umbra/penumbra` 三态，`:204` 起为… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 96 | docs/reference-mechanisms.md | a8b23ef93460 | > - 「决定」三态：**照做**（机制已按参考思路落地，保持）／**改良后做**（路线不同或只落一半，已落地或已排给某条线）／**明确不做**（给理由与可追踪的挂账/验收门）。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 97 | docs/reference-mechanisms.md | 352d301ca9b8 | / S1 摄像机锁定 / `StelMovementMgr.cpp:319-321`（`flagLockEquPos`）；`navigation.c:87-109`（slerp） / 已落地：`… | 587d55da 未改动 StelMovementMgr.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 98 | docs/reference-mechanisms.md | 8a09ecd34379 | / S4 消光公式 / `RefractionExtinction.cpp:35-61`（Rozenberg / Young） / 已落地但双份：`179ce20d` → `skyengine/… | 179ce20d 未改动 RefractionExtinction.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 99 | docs/reference-mechanisms.md | 6aadcf11ebd6 | / S7 标签优先级 / `labels.c:136-154`（priority + 远近排序） / 已落地：`rf_sky_view.py:3147-3150` 按星等/类型分级 / **明确… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 100 | docs/reference-mechanisms.md | 3a9bf1978155 | / S8 星等→半径/亮度 / `StelSkyDrawer.cpp:403-417`（<0.3px 丢弃、1.2px 防闪） / 已落地：`e5ca57ce` → `skyengine/sta… | e5ca57ce 未改动 StelSkyDrawer.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 101 | docs/reference-mechanisms.md | 7b9806c4d084 | / S9 视大小符号 / `Planet.cpp:3904`（`screenRd = angularRadius * pixelPerRad`） / 已落地：`9645d406` → `rf_s… | 9645d406 未改动 Planet.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 102 | docs/reference-mechanisms.md | c8ab08ecb937 | / S10 地平线/地景 / `Landscape.cpp:1030-1046`（ground/decor/fog 顺序） / 已落地：`a4611eae` → `rf_sky_view.py:… | a4611eae 未改动 Landscape.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 103 | docs/reference-mechanisms.md | 50303cb4498d | / S12 卫星地影 / `sat-vis.c:82-105`（`Sat_Eclipsed` + 晨昏门限） / 已落地：`3fc46b98` → `sat_illumination.py:20… | 3fc46b98 未改动 sat-vis.c；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 104 | docs/reference-mechanisms.md | cd2752b63e64 | / S13 卫星 az/el 极图 / `gtk-polar-view.c:202-246`（`r*(1-el/90)` + 方向枚举） / 已落地兼容接口：`rf_sky_view.py:28… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 105 | docs/reference-mechanisms.md | cc6c821a0041 | / S14 时间倍率/暂停/倒放 / `StelCore.cpp:1386-1413` / 已落地：`a7c7e410` → `new_spacetime.py:142-190` / **照做*… | a7c7e410 未改动 StelCore.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 106 | docs/reference-mechanisms.md | 94b84109dbfb | / P16 瀑布环形缓冲 / `sdrpp/core/src/gui/widgets/waterfall.cpp:611-616`（`(i+current)%height`）；`waterfal… | 82e32da2 未改动 sdrpp/core/src/gui/widgets/waterfall.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 107 | docs/reference-mechanisms.md | 9e7f60ee7dbf | / H1 统一信号源注册表 / `sdrpp/core/src/signal_path/source.h:9-31`；`source.cpp:10-60` / 已落地：`d4ebd5bf` → … | d4ebd5bf 未改动 sdrpp/core/src/signal_path/source.h；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 108 | docs/reference-mechanisms.md | 169770a0ddf5 | / H2 注销回落空源 / `source.cpp:19-33`（`nullSource`） / 已落地相反策略：`d4ebd5bf` → `device_manager.py:530` 抛错 … | d4ebd5bf 未改动 source.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 109 | docs/reference-mechanisms.md | 6c1e65043651 | / H3 设备枚举/刷新 / `rtl_sdr_source/src/main.cpp:117-122` 手动 `refresh`、`:394-395` 按钮 / 库层已落地：`d4ebd5bf… | d4ebd5bf 未改动 rtl_sdr_source/src/main.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 110 | docs/reference-mechanisms.md | fda3eaef80f8 | / H4 单设备打开失败隔离 / `rtl main.cpp:185-195`（失败仅 `flog::error`） / 已落地：`d4ebd5bf` → `device_manager.py:… | d4ebd5bf 未改动 main.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 111 | docs/reference-mechanisms.md | 8fcd780709ca | / H5 设备错误要求重启 / `gqrx/src/applications/gqrx/mainwindow.cpp:602-611`、`:364` / 已落地相反策略：`device_watc… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 112 | docs/reference-mechanisms.md | e26b002995bd | / H6 USB 事件式热插拔 / `UsbRadioController.kt:68`、`:104-107` / 已落地替代：`d4ebd5bf` → `device_manager.py:6… | d4ebd5bf 未改动 device_manager.py；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 113 | docs/reference-mechanisms.md | bc5ee50d550e | / H7 设备表 + 歧义抛错 / `satdump/.../dev.h:11-21`、`:30-36`；`dev.cpp:9-31`（>1 实例即 throw） / 已落地：`d4ebd5bf… | d4ebd5bf 未改动 satdump/.../dev.h；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 114 | docs/reference-mechanisms.md | 3cd3eb46cf54 | / D1 CCSDS 质量门 + BER/锁态 / `module_ccsds_conv_concat_decoder.cpp:105-118`、`:180-196`、`:202-213` / … | 7d04a3de 未改动 module_ccsds_conv_concat_decoder.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 115 | docs/reference-mechanisms.md | 19dba571e591 | / D5 全文件同步对齐 / `noaa-apt/src/decode.rs:106-118`（≥5 帧） / 已落地替代：`5d44109c` → `noaa_apt_lite.py:23-5… | 5d44109c 未改动 noaa_apt_lite.py；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 116 | docs/reference-mechanisms.md | 8a9ec3de4b39 | / D6 AGC→Costas→Gardner 闭环 / `meteor_demod/demod.c:8-12`、`:36-40` / 已落地替代：`560f6564` → `lrpt_pipe… | 560f6564 未改动 meteor_demod/demod.c；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 117 | docs/reference-mechanisms.md | 5a1407f69b12 | / D7 FEC API（RS(204,188)） / `onair/.../fec_proto.h:13-20` / 已落地：`fd7359e2` → `lrpt_fec.py:246-350… | fd7359e2 未改动 onair/.../fec_proto.h；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 118 | docs/reference-mechanisms.md | 9f13f8c5b664 | / D8 分级解码器 + 失败计数 / `rtl_433/include/r_device.h:73`、`:85-87`；`r_api.c:443-454`、`:867-874` / 已落地替代… | 390a0f39 未改动 rtl_433/include/r_device.h；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 119 | docs/reference-mechanisms.md | 6250abde3a55 | / T1 过境预测 / `gpredict/predict-tools.c:413-421`；`onair/.../passes.cpp:248-292`；`satdump/.../passes… | 69e2c1d1 未改动 gpredict/predict-tools.c；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 120 | docs/reference-mechanisms.md | aebbcd62effd | / T5 TLE 新鲜度/重试 / `onair/.../passes.cpp:296-306`（1 天/6 小时） / 已落地替代：`f7f1d278` → `tle_integrity.py… | f7f1d278 未改动 onair/.../passes.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 121 | docs/reference-mechanisms.md | af520ffdee49 | / T6 多普勒频移 / `gtk-sat-list.c:626-631`；`onair/.../passes.h:56-57` / 已落地：`357076eb` → `sat_tracker.… | 357076eb 未改动 gtk-sat-list.c；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 122 | docs/reference-mechanisms.md | bccf8ba5c058 | / T7 受晒/地影 / `sat-vis.c:82-105` / 已落地：`3fc46b98` → `sat_illumination.py:204-303`；`sat_passes.py:4… | 3fc46b98 未改动 sat-vis.c；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 123 | docs/reference-mechanisms.md | 0343628b8fde | / C1 坏配置恢复 / `sdrpp/core/src/config.cpp:34-43`（直接覆盖写默认） / 已落地改良：`a96c010f` → `settings.py:350-356… | a96c010f 未改动 sdrpp/core/src/config.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 124 | docs/reference-mechanisms.md | f6fb78056199 | / C2 原子写 / `config.cpp:47-52`（`ofstream` 直接覆盖） / 已落地改良：`357076eb` → `settings.py:454-462`（`.tmp` … | 357076eb 未改动 config.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 125 | docs/reference-mechanisms.md | b62b8c8341be | / C6 版本化迁移 / `gpredict/src/sat-cfg.c:302-330`（1.1→1.4 重写键） / 已落地改良：`605e89da` → `settings.py:250-… | 605e89da 未改动 gpredict/src/sat-cfg.c；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 126 | docs/reference-mechanisms.md | b1bfa421b026 | / X2 人工确认→一次性 token→审计 / 无参考实现 / 已落地自研：`440424b9` → `tx_guard.py:543-597`（`arm`）、`:599-620`（`revo… | 440424b9 未改动 tx_guard.py；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 127 | docs/reference-mechanisms.md | 620db22963e8 | / X3 能力声明 / `satdump/dev.h:30-36`（静态 `MODE_SINGLE_TX`） / 已落地改良：`1869648b` → `hal.py:139-141`（`sup… | 1869648b 未改动 satdump/dev.h；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 128 | docs/reference-mechanisms.md | b966baad12aa | / 卫星过境缓存与刷新 / gpredict 只实时时间；onair `passes.cpp:296-306` 到点抓取 / 已落地：`8d3ea22c` → `rf_sky_view.py:7… | 8d3ea22c 未改动 passes.cpp；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 130 | docs/sat-illumination.md | 29be1b8c9337 | - 既有 `sat_passes._is_sunlit_geometric()` 已改为委托本模块，避免第二份地影数学源。 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 131 | docs/settings-inventory.md | d97d002af22a | - `desktop/main_window.py` 仅做了**最小停靠接线**（已提交 `49eddcf`，9 insertions / | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 132 | docs/settings-inventory.md | 37bf58072ff7 | / A1 / 过境最低仰角 / **已落地（读取入口）** / `pass_min_elevation_deg` / 10 / 0–45 / 度 / 设置面板写盘；消费方下次刷新调用函数读值 /… | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
