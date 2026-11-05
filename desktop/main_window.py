@@ -9118,8 +9118,9 @@ class MainWindow(QMainWindow):
         # 因此这里修复保存顺序而不是加二次确认。
         try:
             self._stop_satellite_tracking()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - 关窗收尾不能因停跟踪失败而中断
+            logger.warning("关窗前停止卫星跟踪失败: %s: %s",
+                           type(exc).__name__, exc)
         # 先停掉远程控制 / Web 服务（daemon 线程，避免端口残留）
         try:
             sp = getattr(self, "service_settings_panel", None)
