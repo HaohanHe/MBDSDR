@@ -202,3 +202,77 @@ def test_index_path_always_printed(tmp_path):
 
     assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
     assert "INDEX 实际读取" in proc.stdout
+
+
+def _stale_private_index(repo, tmp_path, name, old_commit):
+    """按旧 HEAD 建一份私有 index（复现「陈旧私有 index」）。"""
+    private = tmp_path / name
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    env["GIT_INDEX_FILE"] = str(private)
+    _git(repo, "read-tree", old_commit, env=env, check=True)
+    return private, env
+
+
+def test_stale_private_index_phantom_deletions_rejected(tmp_path):
+    """反证：私有 index 基于旧 HEAD 建 → 之后入库的文件变成「删除」，闸门拒。
+
+    事故形态八（文案线实测）：`read-tree` 时的 HEAD 还没包含机制线刚提交的
+    3 个文件，那 3 个文件在它的索引里表现为删除并被计入暂存。
+    """
+    repo = _make_repo(tmp_path)
+    old = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    for name in ("c.txt", "d.txt", "e.txt"):
+        (repo / name).write_text(f"{name}\n", encoding="utf-8")
+    _git(repo, "add", "c.txt", "d.txt", "e.txt", check=True)
+    _git(repo, "commit", "-q", "-m", "later commit", check=True)
+
+    private, env = _stale_private_index(repo, tmp_path, "idx_文案线_20261106_0220", old)
+    (repo / "a.txt").write_text("a3\n", encoding="utf-8")
+    _git(repo, "add", "a.txt", env=env, check=True)
+
+    proc = _run(
+        repo,
+        tmp_path,
+        "--staged",
+        "--expect",
+        "a.txt",
+        env_extra={"GIT_INDEX_FILE": str(private)},
+    )
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, (proc.returncode, out)
+    assert "DELETE" in out
+    assert "幻影删除" in out
+    for name in ("c.txt", "d.txt", "e.txt"):
+        assert name in out
+    assert "read-tree HEAD" in out
+
+
+def test_stale_private_index_rebuilt_from_head_allowed(tmp_path):
+    """反修：基于当前 HEAD 重建私有 index → 幻影删除消失，正常放行。"""
+    repo = _make_repo(tmp_path)
+    old = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    for name in ("c.txt", "d.txt", "e.txt"):
+        (repo / name).write_text(f"{name}\n", encoding="utf-8")
+    _git(repo, "add", "c.txt", "d.txt", "e.txt", check=True)
+    _git(repo, "commit", "-q", "-m", "later commit", check=True)
+
+    private, env = _stale_private_index(repo, tmp_path, "idx_文案线_20261106_0221", old)
+    _git(repo, "read-tree", "HEAD", env=env, check=True)
+    (repo / "a.txt").write_text("a3\n", encoding="utf-8")
+    _git(repo, "add", "a.txt", env=env, check=True)
+
+    proc = _run(
+        repo,
+        tmp_path,
+        "--staged",
+        "--expect",
+        "a.txt",
+        env_extra={"GIT_INDEX_FILE": str(private)},
+    )
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (proc.returncode, out)
+    assert "DELETE" not in out
+    assert "幻影删除" not in out

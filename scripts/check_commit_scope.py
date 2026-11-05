@@ -37,6 +37,10 @@
   「PowerShell `$env:GIT_INDEX_FILE` 没落到子进程」（事故 `16f075f3`：
   计划只提交 10 个文件，闸门读共享 index，一次夹带 26 个别线文件）。
 
+  暂存里的删除条目（`D`）同样受声明清单约束：私有 index 若基于旧 HEAD
+  `read-tree`，旧 HEAD 之后入库的文件会表现为「删除」，闸门对清单外的删除
+  条目直接拒并打印 `DELETE <path>`（未声明清单时只告警）。
+
 退出码：0 无 MULTI；1 发现 MULTI（需人工确认）；2 用法/git 错误。
 """
 from __future__ import annotations
@@ -265,13 +269,17 @@ def check_staged(
     declared_index_arg: Optional[str] = None,
 ) -> int:
     """检查暂存区：①跨线（≥2 个活跃 owner）拒；②超出声明清单的文件拒；
-    ③声明的私有 index 与实际读到的 index 不一致拒。
+    ③声明的私有 index 与实际读到的 index 不一致拒；
+    ④出现「声明清单里没有的删除条目」时拒（陈旧私有 index 的幻影删除）。
 
     第 ② 条是「私有 index 文件名撞车 / 复用旧 index」这类事故的机械闸：
     提交的文件集合必须**全部落在声明清单内**，多一个就拒并打印多出来的路径。
     第 ③ 条是「PowerShell 环境变量没落到子进程」的机械闸：`$env:GIT_INDEX_FILE`
     没生效时，闸门读到的是 `.git/index`；声明了私有 index 就必须拒，
     并打出两个路径对比。
+    第 ④ 条是「陈旧私有 index 制造幻影删除」的机械闸：私有 index 若基于旧 HEAD
+    `read-tree`，旧 HEAD 之后入库的文件在它看来就是删除（`D`），会被计入暂存。
+    删除条目必须逐条落在声明清单内，否则拒；未声明清单时只告警（保持旧行为）。
     """
     import time
 
@@ -285,11 +293,18 @@ def check_staged(
     )
 
     now = time.time()
-    paths = [
-        line.strip()
-        for line in _git("diff", "--cached", "--name-only", "--no-renames").splitlines()
-        if line.strip()
-    ]
+    items: List[tuple] = []
+    for line in _git("diff", "--cached", "--name-status", "--no-renames").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        status = parts[0].strip()
+        path = parts[-1].strip()
+        if path:
+            items.append((status, path))
+    paths = [path for _status, path in items]
+    status_of = {path: status for status, path in items}
+    deletions = [path for status, path in items if status.startswith("D")]
     registry = _load_registry().get("claims", {})
 
     rows: List[Dict[str, Any]] = []
@@ -298,7 +313,9 @@ def check_staged(
         entry = registry.get(_canonical(path), {})
         cur = _active_claim(entry, now) if entry else None
         if cur is None:
-            rows.append({"path": path, "owner": None, "remaining_min": None})
+            rows.append(
+                {"path": path, "status": status_of[path], "owner": None, "remaining_min": None}
+            )
             continue
         owner = str(cur.get("owner", "?"))
         try:
@@ -309,13 +326,22 @@ def check_staged(
         remaining = max(0.0, (heartbeat + ttl_s - now) / 60.0)
         if owner not in owners:
             owners.append(owner)
-        rows.append({"path": path, "owner": owner, "remaining_min": round(remaining, 1)})
+        rows.append(
+            {
+                "path": path,
+                "status": status_of[path],
+                "owner": owner,
+                "remaining_min": round(remaining, 1),
+            }
+        )
 
     declared = _declared_paths(expect)
     extras: List[str] = []
+    unexplained_deletions: List[str] = []
     if declared is not None:
         allowed = set(declared)
         extras = [p for p in paths if _canonical(p) not in allowed]
+        unexplained_deletions = [p for p in deletions if _canonical(p) not in allowed]
 
     multi = len(owners) >= 2
     if as_json:
@@ -323,6 +349,8 @@ def check_staged(
             json.dumps(
                 {
                     "staged": paths,
+                    "deletions": deletions,
+                    "unexplained_deletions": unexplained_deletions,
                     "owners": owners,
                     "multi_owner": multi,
                     "declared": declared,
@@ -336,7 +364,7 @@ def check_staged(
                 indent=2,
             )
         )
-        return 1 if (multi or extras or index_mismatch) else 0
+        return 1 if (multi or extras or index_mismatch or unexplained_deletions) else 0
 
     print(f"INDEX 实际读取 {_index_abs(actual_index)}")
     if declared_index:
@@ -345,9 +373,12 @@ def check_staged(
     print(f"STAGED {len(paths)} 个文件")
     for row in rows:
         if row["owner"]:
-            print(f"  {row['path']:<46} owner={row['owner']} 剩余 TTL {row['remaining_min']}min")
+            print(
+                f"  {row['status']:<2} {row['path']:<44} owner={row['owner']}"
+                f" 剩余 TTL {row['remaining_min']}min"
+            )
         else:
-            print(f"  {row['path']:<46} owner=-（无活跃 claim）")
+            print(f"  {row['status']:<2} {row['path']:<44} owner=-（无活跃 claim）")
     print()
     if declared is not None:
         print(f"声明清单 {len(declared)} 个：{', '.join(declared)}")
@@ -363,6 +394,23 @@ def check_staged(
         print("  改法：私有 index 一律显式传参，禁止依赖 shell 里 export 的变量——")
         print("        `GIT_INDEX_FILE=<path> git commit ...` 或 subprocess.run(env={...})。")
         failed = True
+    if unexplained_deletions:
+        print(
+            f"拒绝：暂存区有 {len(unexplained_deletions)} 条删除，声明清单里没有对应路径"
+            "（陈旧私有 index 制造的幻影删除）："
+        )
+        for path in unexplained_deletions:
+            print(f"  DELETE  {path}")
+        print("  原因：私有 index 基于旧 HEAD `read-tree`——旧 HEAD 之后入库的文件，")
+        print("        在这份索引里表现为删除（D），会被一起计入本次提交。")
+        print("  修法：不要复用旧索引文件；`git read-tree HEAD` 基于当前 HEAD 重建后再 add。")
+        failed = True
+    if not unexplained_deletions and deletions and declared is None:
+        print("WARN 暂存区有删除条目（本次未声明清单，未据此拒绝）：")
+        for path in deletions:
+            print(f"  DELETE  {path}")
+        print("  删除条目必须逐条能解释来源；若是私有 index 基于旧 HEAD 建出的，")
+        print("  先 `git read-tree HEAD` 重建私有 index，再提交。")
     if extras:
         print(f"拒绝：暂存区有 {len(extras)} 个文件不在声明清单内（多一个就拒）：")
         for path in extras:
