@@ -68,6 +68,13 @@ class _RecordingPainter:
             pt, text = args
             self.texts.append((float(pt.x()), float(pt.y()), str(text), self._fm))
 
+    # 峰值圆点 / dB 拖动气泡会用到；仅记录 drawText，图元本身不需要断言。
+    def drawEllipse(self, *_a, **_k):
+        pass
+
+    def drawRoundedRect(self, *_a, **_k):
+        pass
+
 
 def _text_rects(rec):
     out = []
@@ -454,6 +461,82 @@ def test_peak_click_moves_current_vfo_exact_in_normal_mode(qapp):
     _click_at(plot, x, y)
     assert vfo.center_hz == pytest.approx(peak_freq, abs=1e-6), \
         f"normal 模式点峰应精确移 VFO，实际 {vfo.center_hz:.1f} Hz"
+
+
+# ---------------------------------------------------------------------------
+# 4b. 峰值 SNR：基准必须是「本帧全谱有限 bin 的中位数」，标签与命中同值
+# ---------------------------------------------------------------------------
+def _panel_with_known_floor_peak(qapp, floor_db=-100.0, peak_db=-40.0,
+                                 bin_idx=200):
+    panel = _panel(qapp)
+    gen = panel.generator
+    gen.center_freq_hz = 100e6
+    gen.sample_rate_hz = 2.4e6
+    s = np.full(gen.num_bins, floor_db, dtype=np.float32)
+    s[bin_idx] = peak_db
+    gen.spectrum = s
+    gen._has_real_data = True
+    gen.wf_rows_written = 10          # 让峰缓存失效
+    return panel, float(gen.bin_to_freq(bin_idx))
+
+
+def test_counterproof_legacy_peak_has_no_snr(qapp):
+    """旧口径：find_peaks 只回 (freq, db)，没有 SNR；标签也只有频率+dB。"""
+    panel, _peak_freq = _panel_with_known_floor_peak(qapp)
+    old = panel.generator.find_peaks(6.0)
+    assert len(old) == 1 and len(old[0]) == 2, f"旧峰结构变了：{old}"
+    assert not any(field == "SNR" for field in old[0])
+
+
+def test_peak_snr_baseline_is_median_and_shown_on_label(qapp):
+    """SNR = 峰功率 − 本帧全谱中位数；图上的标签与命中返回必须同值。"""
+    import spectrum_widget as sw
+    panel, peak_freq = _panel_with_known_floor_peak(qapp)
+    gen = panel.generator
+    assert gen.noise_floor_db() == pytest.approx(-100.0, abs=0.1), \
+        "SNR 基准不是本帧全谱中位数"
+    detail = gen.find_peaks_with_snr(6.0)
+    assert detail and detail[0][0] == pytest.approx(peak_freq, abs=1.0)
+    assert detail[0][2] == pytest.approx(60.0, abs=0.2), \
+        f"SNR 应为 60 dB：{detail[0]}"
+
+    rect = QRectF(0, 0, panel._plot.width(),
+                  panel._plot.height() - sw._SPEC_BOTTOM_PAD)
+    rec = _RecordingPainter()
+    sw._draw_peaks(rec, panel._state, rect, QColor("white"))
+    labels = [t[2] for t in rec.texts]
+    assert any("SNR" in s for s in labels), f"峰值标签缺 SNR：{labels}"
+    assert any("60" in s for s in labels), f"SNR 数值没上标签：{labels}"
+
+    x, y = _peak_xy(panel, peak_freq)
+    hit = panel._plot._peak_at(x, y)
+    assert hit is not None and len(hit) == 3, f"命中没带 SNR：{hit}"
+    assert hit[2] == pytest.approx(60.0, abs=0.2)
+    # 标签文案必须由同一份数据生成：命中频率与图上标签同源
+    assert any(s.startswith(f"{hit[0] / 1e6:.3f}MHz") for s in labels), \
+        f"图上标签与命中峰不是同一份数据：{labels}"
+
+
+def test_peak_snr_uses_median_not_mean(qapp):
+    """把 20% 的 bin 压到 -120：均值 -104、中位数 -100；SNR 必须按中位数算。"""
+    panel = _panel(qapp)
+    gen = panel.generator
+    gen.center_freq_hz = 100e6
+    gen.sample_rate_hz = 2.4e6
+    s = np.full(gen.num_bins, -100.0, dtype=np.float32)
+    s[:int(gen.num_bins * 0.2)] = -120.0
+    s[200] = -40.0
+    gen.spectrum = s
+    gen._has_real_data = True
+    gen.wf_rows_written = 10
+    mean = float(np.mean(s[np.isfinite(s)]))
+    median = float(np.median(s[np.isfinite(s)]))
+    assert mean < median - 2.0, "反证场景不成立：均值与中位数没拉开"
+    assert gen.noise_floor_db() == pytest.approx(median, abs=0.1)
+    detail = gen.find_peaks_with_snr(6.0)
+    assert detail[0][2] == pytest.approx(-40.0 - median, abs=0.2)
+    assert detail[0][2] != pytest.approx(-40.0 - mean, abs=0.2), \
+        "SNR 按均值算了（基准写错）"
 
 
 # ---------------------------------------------------------------------------

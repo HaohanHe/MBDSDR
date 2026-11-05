@@ -269,6 +269,7 @@ class SpectrumDataGenerator:
         self._prev_wf_row = None
         self.max_hold = None
         self.min_hold = None
+        self._peak_snr_cache = None
         self._reset_average()
 
     # ------------------------------------------------------------------ 状态
@@ -286,6 +287,7 @@ class SpectrumDataGenerator:
         self._prev_wf_row = None
         self.max_hold = None
         self.min_hold = None
+        self._peak_snr_cache = None
         self._reset_average()
 
     # ------------------------------------------------------------------ 窗函数
@@ -438,6 +440,53 @@ class SpectrumDataGenerator:
         v = self.spectrum[self.freq_to_bin(freq_hz)]
         return float(v) if np.isfinite(v) else None
 
+    def noise_floor_db(self) -> Optional[float]:
+        """本帧噪声底（dBFS）= 全部有限 bin 的中位数（median）。
+
+        口径写死在这里，供峰检测门限与峰值 SNR 标注共用：
+          - 不是 min / mean / 绝对 floor，也不是只取带外样本；
+          - 峰值 SNR = 峰功率 − 本帧中位数，与 _detect_peak_bins 的
+            `median + rel_threshold_db` 是同一把尺子。
+        无真实数据或有效 bin 不足 3 个 → None（不编造数值）。
+        """
+        if not self._has_real_data:
+            return None
+        finite = self.spectrum[np.isfinite(self.spectrum)]
+        if finite.size < 3:
+            return None
+        return float(np.median(finite))
+
+    def find_peaks_with_snr(self, rel_threshold_db: float,
+                            max_peaks: int = 8
+                            ) -> List[Tuple[float, float, float]]:
+        """同 find_peaks，但每个峰多带一个 SNR（峰功率 − 本帧中位数）。
+
+        返回 [(freq_hz, power_db, snr_db), ...]，按功率降序；约 10 帧节流。
+        图上的峰值标签与命中测试都读这一份，保证两处数值同源。
+        """
+        if not self._has_real_data:
+            return []
+        s = self.spectrum
+        if len(s) < 3:
+            return []
+        floor = self.noise_floor_db()
+        if floor is None:
+            return []
+        tick = int(self.wf_rows_written // 10)
+        pcache = getattr(self, '_peak_snr_cache', None)
+        if (pcache is not None and pcache[0] == tick
+                and abs(pcache[1] - float(rel_threshold_db)) < 1e-9):
+            return pcache[2]
+        idxs = _detect_peak_bins(s, float(rel_threshold_db))
+        peaks = [(self.bin_to_freq(int(i)),
+                  float(s[i]),
+                  float(s[i]) - floor)
+                 for i in idxs if np.isfinite(s[i])]
+        peaks.sort(key=lambda q: q[1], reverse=True)
+        peaks = peaks[:max_peaks]
+        self._peak_snr_cache = (tick, float(rel_threshold_db), peaks)
+        return peaks
+
     def find_peaks(self, rel_threshold_db: float,
                    max_peaks: int = 8) -> List[Tuple[float, float]]:
         """双通道峰检测：窄峰（原始谱局部极大）+ 平滑后宽峰（gqrx 机制）。
@@ -447,24 +496,10 @@ class SpectrumDataGenerator:
           - 宽峰通道先做窗口平滑，再在平滑曲线上找局部极大；
           - 两路结果按窗口距离合并去重：宽峰吸收邻近窄峰后只留一个代表，
             避免宽带信号被拆成一串小峰，也避免宽峰被窄峰淹没。
-        返回 [(freq_hz, power_db), ...]，按功率降序，约 10 帧（~2Hz）节流复用。"""
-        if not self._has_real_data:
-            return []
-        s = self.spectrum
-        if len(s) < 3:
-            return []
-        tick = int(self.wf_rows_written // 10)
-        pcache = getattr(self, '_peak_cache', None)
-        if (pcache is not None and pcache[0] == tick
-                and abs(pcache[1] - float(rel_threshold_db)) < 1e-9):
-            return pcache[2]
-        idxs = _detect_peak_bins(s, float(rel_threshold_db))
-        peaks = [(self.bin_to_freq(int(i)), float(s[i]))
-                 for i in idxs if np.isfinite(s[i])]
-        peaks.sort(key=lambda q: q[1], reverse=True)
-        peaks = peaks[:max_peaks]
-        self._peak_cache = (tick, float(rel_threshold_db), peaks)
-        return peaks
+        返回 [(freq_hz, power_db), ...]，按功率降序；SNR 见 find_peaks_with_snr。
+        """
+        return [(f, db) for f, db, _snr in
+                self.find_peaks_with_snr(rel_threshold_db, max_peaks)]
 
 
 def _detect_peak_bins(spectrum: np.ndarray,
@@ -484,8 +519,10 @@ def _detect_peak_bins(spectrum: np.ndarray,
     ss = spectrum[finite]
     if ss.size < 3:
         return []
-    floor = float(np.median(ss))
-    thresh = floor + float(rel_threshold_db)
+    # 门限基准 = 全帧中位数（median），与 SpectrumDataGenerator.noise_floor_db
+    # 的 SNR 基准同源；`floor` 只是变量名，不要按 min/mean 理解。
+    median_db = float(np.median(ss))
+    thresh = median_db + float(rel_threshold_db)
 
     left = np.empty_like(spectrum)
     right = np.empty_like(spectrum)
@@ -500,7 +537,7 @@ def _detect_peak_bins(spectrum: np.ndarray,
     # 奇数平滑窗：约 3% 谱宽；宽带的细微起伏被抹平，窄单音仍保留在通道 1。
     win = max(3, (n // 64) * 2 + 1)
     pad = win // 2
-    fill = np.where(finite, spectrum, floor)
+    fill = np.where(finite, spectrum, median_db)
     smooth = np.convolve(np.pad(fill, pad, mode="edge"),
                          np.ones(win, dtype=np.float64) / win, mode="valid")
     sm_left = np.empty_like(smooth)
@@ -856,6 +893,11 @@ class _PlotState:
         self.bandplan_hover: Optional[int] = None      # 悬停频段索引（提亮+气泡）
         self.bandplan_selected: Optional[int] = None   # 点击选中频段（常驻描边）
         self.show_peaks = True
+        # 门限 = 本帧全谱中位数 + 6 dB（本侧默认比 C++ 的 15 dB 敏感）。
+        # 不照抄 C++ tokens.h:352 的 15 dB / 12 峰：那边另有 -100 dBFS 绝对
+        # 门与 kPeakMinSeenFrames=3 的持续门，宽带噪声不会碎成假峰；本侧
+        # 单帧检测没有持续门，抬到 15 dB 会把真实弱载波整条藏掉。
+        # 两边基准同源（均为 median），数值不同是机制差异，不是写错。
         self.peak_rel_db = 6.0
         # ---- 瀑布调色板 / 时间平滑 ----
         self.wf_colors: List[str] = list(WATERFALL_COLORS)   # 当前瀑布色带
@@ -1431,10 +1473,25 @@ def _peak_label_placements(peaks_xy, measure, x_min: float, x_max: float,
     return out
 
 
+def _peak_annotations(state):
+    """峰值标注唯一数据源：[(freq_hz, db, snr_db, label), ...]。
+
+    绘制与命中（_peak_at / 悬停 / 点击提示）都读这一份，标签里的 SNR
+    与命中返回的 SNR 因此不可能分叉。SNR 基准见
+    SpectrumDataGenerator.noise_floor_db（本帧全谱中位数）。
+    """
+    gen = state.panel.generator
+    if not state.show_peaks or not gen.has_data():
+        return []
+    return [(freq_hz, db, snr,
+             f"{freq_hz/1e6:.3f}MHz {db:.1f}dB SNR {snr:.1f}dB")
+            for freq_hz, db, snr in gen.find_peaks_with_snr(state.peak_rel_db)]
+
+
 def _draw_peaks(painter, state, rect, color):
     gen = state.panel.generator
-    peaks = gen.find_peaks(state.peak_rel_db) if state.show_peaks else []
-    if not peaks:
+    ann = _peak_annotations(state)
+    if not ann:
         return
     painter.setPen(QPen(color, 1))
     painter.setBrush(QBrush(color))
@@ -1445,11 +1502,11 @@ def _draw_peaks(painter, state, rect, color):
     view_center = _view_center_hz(state)
     span = gen.sample_rate_hz
     pts = []
-    for freq_hz, db in peaks:
+    for freq_hz, db, _snr, label in ann:
         x = _freq_to_x(rect, view_center, span, freq_hz)
         y = _db_to_y(rect, db, state.db_min, state.db_max)
         painter.drawEllipse(QPointF(x, y), 3, 3)
-        pts.append((x, y, f"{freq_hz/1e6:.3f}MHz {db:.1f}dB"))
+        pts.append((x, y, label))
     # 碰撞剔除（截图叠字事故）：邻近峰标签分行错开，放不下诚实丢弃
     pts.sort(key=lambda p: p[0])
     row_h = fm.height() + 2.0
@@ -2767,7 +2824,8 @@ class _TuningPlotMixin:
                 if peak is not None and hovering:
                     QToolTip.showText(
                         QCursor.pos(),
-                        f"跳到 {peak[0] / 1e6:.4f} MHz（{peak[1]:.1f} dB）",
+                        f"跳到 {peak[0] / 1e6:.4f} MHz"
+                        f"（{peak[1]:.1f} dB · SNR {peak[2]:.1f} dB）",
                         self)
                 else:
                     QToolTip.hideText()
@@ -2857,18 +2915,16 @@ class _TuningPlotMixin:
         self._emit_tuned(freq)
 
     def _peak_at(self, x_px: float, y_px: float):
-        """峰值命中测试：返回 (freq_hz, db) 或 None。
+        """峰值命中测试：返回 (freq_hz, db, snr_db) 或 None。
 
         命中区 = 峰圆点 ±6px + 它自己的标签文字框（与 _draw_peaks 共用
-        同一套 _peak_label_placements）。命中区可以宽（容手抖），落点
-        只认 find_peaks 的 freq_hz，绝不按像素换算。
+        同一套 _peak_label_placements 与 _peak_annotations）。命中区可以
+        宽（容手抖），落点只认测量到的 freq_hz，绝不按像素换算。
         """
         state = self.state
         gen = state.panel.generator
-        if not state.show_peaks or not gen.has_data():
-            return None
-        peaks = gen.find_peaks(state.peak_rel_db)
-        if not peaks:
+        ann = _peak_annotations(state)
+        if not ann:
             return None
         rect = QRectF(0, 0, self.width(),
                       max(1, self._spectrum_height() - _SPEC_BOTTOM_PAD))
@@ -2881,11 +2937,10 @@ class _TuningPlotMixin:
         fm = QFontMetricsF(f)
         row_h = fm.height() + 2.0
         pts = []
-        for freq_hz, db in peaks:
+        for freq_hz, db, snr, label in ann:
             px = _freq_to_x(rect, view_center, span, freq_hz)
             py = _db_to_y(rect, db, state.db_min, state.db_max)
-            pts.append((px, py, f"{freq_hz / 1e6:.3f}MHz {db:.1f}dB",
-                        float(freq_hz), float(db)))
+            pts.append((px, py, label, float(freq_hz), float(db), float(snr)))
         pts.sort(key=lambda p: p[0])
         placed = _peak_label_placements(
             [(p[0], p[1], p[2]) for p in pts], fm.horizontalAdvance,
@@ -2908,7 +2963,7 @@ class _TuningPlotMixin:
             return None
         hits.sort(key=lambda h: h[0])
         best = hits[0][1]
-        return best[3], best[4]
+        return best[3], best[4], best[5]
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -2986,7 +3041,7 @@ class _TuningPlotMixin:
                         self._tune_peak(peak[0])
                         self._show_tune_tip(
                             f"峰值 {peak[0] / 1e6:.4f} MHz"
-                            f"（{peak[1]:.1f} dB）")
+                            f"（{peak[1]:.1f} dB · SNR {peak[2]:.1f} dB）")
                     else:
                         # 空白/刻度轴仍走顺手调谐（带 snap）
                         self._tune_click(self._x_ratio(event))
@@ -3028,7 +3083,8 @@ class _TuningPlotMixin:
         if peak is not None:
             self._tune_peak(peak[0])
             self._show_tune_tip(
-                f"峰值 {peak[0] / 1e6:.4f} MHz（{peak[1]:.1f} dB）")
+                f"峰值 {peak[0] / 1e6:.4f} MHz"
+                f"（{peak[1]:.1f} dB · SNR {peak[2]:.1f} dB）")
         else:
             self._tune_click(self._x_ratio(event))
         self.update()
