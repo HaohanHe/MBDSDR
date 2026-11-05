@@ -605,15 +605,17 @@ def test_tuning_step_reaches_spectrum_and_combo(env):
 def test_squelch_migration_notice_is_visible_on_old_config(tmp_path, qapp):
     path = str(tmp_path / "old_settings.json")
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"volume": 30}, f)
+        json.dump({"theme": "dark"}, f)
     ds = DesktopSettings.load(path=path)
     panel = settings_panel.SettingsPanel(settings=ds, host=_FakeHost())
     text = panel.status_label.text()
     assert "静噪默认值迁移" in text
     assert "-80" in text and "-50" in text
-    # 新文件已有该键 → 不再提示
-    ds.set("squelch_default_db", -50)
+    # 提示同时把新键按默认值写入（旧文件没有该键，不算改用户值）
     ds.flush()
+    assert ds.get("squelch_default_db") == -50
+    assert ds.get("theme") == "dark", "迁移不得覆盖用户已有的值"
+    # 下次启动文件里已有该键 → 不再提示
     ds2 = DesktopSettings.load(path=path)
     panel2 = settings_panel.SettingsPanel(settings=ds2, host=_FakeHost())
     assert "静噪默认值迁移" not in panel2.status_label.text()

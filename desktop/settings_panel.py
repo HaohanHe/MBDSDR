@@ -470,6 +470,9 @@ class SettingsPanel(QWidget):
             "静噪默认值迁移：旧版本滑杆显示 -50、门控实际按 -80 dBFS 生效；"
             "现在统一按 -50 dBFS（没有改动你保存过的任何值）。"
             "若你以前依赖 -80，请在「频谱与解码」把静噪门限改成 -80。")
+        # 写入新键（值就是 schema 默认 -50），让提示真正只出现一次；
+        # 旧文件里本来没有这个键，因此没有覆盖任何用户值。
+        self._settings.set("squelch_default_db", SCHEMA["squelch_default_db"].default)
 
     def _apply_initial_state(self):
         """把需要在启动时同步的持久化项推给消费点。"""
