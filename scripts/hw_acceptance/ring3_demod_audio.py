@@ -251,7 +251,7 @@ def run(freq_hz: float) -> dict:
                          f"<15k/>15k 能量比={ratio:.1f}"),
         ]
 
-        pilot = _pilot_from_ctrl(ctrl, FS, 2.0)
+        pilot = _pilot_from_ctrl(ctrl, FS, 6.0)
         if pilot is None:
             checks.append(common.check("stereo_pilot_19k", False,
                                        "IQ 不足，无法测导频", skipped=True))
