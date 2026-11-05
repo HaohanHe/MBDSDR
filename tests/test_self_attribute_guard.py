@@ -26,15 +26,30 @@ import pytest
 _DESKTOP = pathlib.Path(__file__).resolve().parents[1] / "desktop"
 
 #: 无法从 AST 解析到、但确实存在的属性。key = (文件名, 类名, 属性名)。
-#: 每条都必须写清「谁提供」。只允许跨模块/运行期注入这类 AST 看不到的来源。
+#: 每条必须写三件事，缺一不可：
+#:   provider      谁提供这个属性（源码位置或运行期注入点）；
+#:   why_not_fix   为什么不改成显式定义（「不想动」不是理由）；
+#:   review_when   复核条件：谁改动那段提供方/组合方式，就必须重判并删除本条目。
+#: 白名单不是停车场：提供方一变，条目立即失效（test_whitelist_entries_are_live_and_explained）。
 _WHITELIST = {
-    ("main_window.py", "MainWindow", "app"):
-        "desktop/main.py:612 `window.app = app` 在构造后注入，供 _apply_theme 用；"
-        "MainWindow.__init__ 里没有也不该有第二个 app。",
-    ("spectrum_widget.py", "SpectrumCurveWidget", "init_pinch_zoom"):
-        "touch_helpers.PinchZoomMixin:123 提供；SpectrumCurveWidget 通过动态基类"
-        "元组 `_PinchBases` 组合它，AST 里看不到（PinchZoomMixin 兜底为 object 时"
-        "该守卫本就为假，是刻意写法）。",
+    ("main_window.py", "MainWindow", "app"): {
+        "provider": "desktop/main.py:612 `window.app = app`，构造后从外层应用注入。",
+        "why_not_fix": "app 的生命周期归 desktop/main.py（QApplication 的持有者），"
+                       "MainWindow 只是使用者。在 __init__ 里再定义 app 会造出第二个"
+                       "应用对象，或需要把 main.py 的构造顺序连带未入库的调用点一起改，"
+                       "属跨线改动；这里只保留只读读取。",
+        "review_when": "desktop/main.py 不再注入 window.app，或 MainWindow 改成"
+                       "构造参数显式持有 app → 重判并删掉本条目。",
+    },
+    ("spectrum_widget.py", "SpectrumCurveWidget", "init_pinch_zoom"): {
+        "provider": "touch_helpers.PinchZoomMixin:123；SpectrumCurveWidget 通过动态基类"
+                    "元组 `_PinchBases` 组合它。",
+        "why_not_fix": "PinchZoomMixin 在缺少触控依赖时会兜底成 object，动态基类元组"
+                       "让 AST 看不到；把方法复制进 SpectrumCurveWidget 会造出第二份"
+                       "手势实现，违背单一事实源。守卫在兜底路径下本就为假，是刻意写法。",
+        "review_when": "PinchZoomMixin 改名/移除，或 SpectrumCurveWidget 不再用"
+                       "`_PinchBases` 动态组合 → 重判并删掉本条目。",
+    },
 }
 
 _GUARD_CALLS = ("hasattr", "getattr")
@@ -172,11 +187,19 @@ def test_no_guard_on_missing_self_attribute():
 
 
 def test_whitelist_entries_are_live_and_explained():
-    """白名单不得过期：条目对应的守卫必须还在源码里，且理由非空。"""
+    """白名单不得过期：守卫必须还在源码里，且 provider/why_not_fix/review_when 齐全。
+
+    复核条件（review_when）必须写：哪段提供方代码一旦改动，就必须重新判定并
+    删除本条目。缺任一字段即红，避免白名单退化成「永久豁免停车场」。
+    """
     modules = _load_desktop()
     index = {mod: _module_classes(tree) for mod, tree in modules.items()}
-    for (mod, cls, attr), reason in _WHITELIST.items():
-        assert reason.strip(), f"白名单 {mod}:{cls}.{attr} 没写理由"
+    for (mod, cls, attr), entry in _WHITELIST.items():
+        assert set(entry) == {"provider", "why_not_fix", "review_when"}, \
+            f"白名单 {mod}:{cls}.{attr} 字段不全：{sorted(entry)}"
+        for field in ("provider", "why_not_fix", "review_when"):
+            assert entry[field].strip(), \
+                f"白名单 {mod}:{cls}.{attr} 的 {field} 为空"
         cls_def = index.get(mod, {}).get(cls)
         assert cls_def is not None, f"白名单指向不存在的类 {mod}:{cls}"
         assert any(name == attr for _, name in _guards_in(cls_def)), \
