@@ -13,7 +13,6 @@ import logging
 import math
 import threading
 import time
-import tempfile
 from datetime import datetime
 from typing import Optional
 
@@ -5833,11 +5832,20 @@ class MainWindow(QMainWindow):
             getattr(_dev_obj, "name", "") or backend.__class__.__name__)
         self._record_driver = backend.__class__.__name__
 
-        rec_dir = os.path.expanduser("~/mbdsdr_recordings")
-        try:
-            os.makedirs(rec_dir, exist_ok=True)
-        except Exception:
-            rec_dir = tempfile.gettempdir()
+        # 录音目录唯一来源是设置（settings.record_dir）；目录不可用时绝不
+        # 静默退 tempfile/默认目录——那会让用户以为录到了自己选的盘上。
+        rec_dir, rec_error = self.settings.ensure_record_dir()
+        if rec_error:
+            QMessageBox.warning(self, "录音目录不可用", rec_error)
+            self.statusBar().showMessage(rec_error, 8000)
+            self._recording = False
+            self._record_guard = True
+            try:
+                self.record_btn.setChecked(False)
+                self.control_panel.record_button.setChecked(False)
+            finally:
+                self._record_guard = False
+            return
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = os.path.join(rec_dir, f"baseband_{ts}.iq")
 
@@ -5867,7 +5875,9 @@ class MainWindow(QMainWindow):
             self.control_panel.record_status.setText("录音中... 00:00")
         except Exception:
             pass
-        self.statusBar().showMessage(f"开始录制 baseband: {path}")
+        self.statusBar().showMessage(
+            f"开始录制 baseband: {path}"
+            "（录音目录设置只影响新录音，已有录音不迁移）")
 
     def _write_session_sidecars(self, segments: list, manifest: list,
                                 total_samples: int, session_duration: float):
@@ -7041,7 +7051,7 @@ class MainWindow(QMainWindow):
         self._stop_tx("回放开始", wait=True)  # 安全：回放前必须停波
         path, _ = QFileDialog.getOpenFileName(
             self, "选择录音文件",
-            os.path.expanduser("~/mbdsdr_recordings"),
+            self.settings.record_dir,
             "Baseband IQ (*.iq *.cf32 *.cs16 *.wav);;All Files (*)")
         if not path:
             self.statusBar().showMessage("未选择录音文件", 3000)
