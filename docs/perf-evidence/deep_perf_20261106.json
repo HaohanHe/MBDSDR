@@ -1,0 +1,436 @@
+{
+ "date": "2026-11-06",
+ "generated_at": "2026-11-06T03:56:18",
+ "conditions": {
+  "cpu": "13th Gen Intel Core i5-13420H (12 threads)",
+  "ram_gb": 15.7,
+  "os": "Windows 11 26200",
+  "python": "3.14.0",
+  "qt": "PySide6 offscreen, software raster, DPR=1",
+  "hardware": "未设 MBDSDR_NO_HW；RTL-SDR 枚举到 1 台",
+  "concurrent_load": "测量窗口内同机 pid 1784 python 会话持续运行；系统负载 32-60%",
+  "note": "绝对启动耗时受同机负载支配，只作参考；eventFilter 用交替 A/B 相对值。"
+ },
+ "commands": {
+  "all": "python scripts/perf_probe_deep.py --section all --json docs/perf-evidence/deep_perf_<date>.json",
+  "startup": "python scripts/perf_probe_deep.py --section startup --runs 3",
+  "replay": "python scripts/perf_probe_deep.py --section replay",
+  "spectrum": "python scripts/perf_probe_deep.py --section spectrum",
+  "tle": "python scripts/perf_probe_deep.py --section tle"
+ },
+ "startup": {
+  "generated_at": "2026-11-06T03:54:35",
+  "env": {
+   "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+   "cpu_count": 12,
+   "python": "3.14.0",
+   "platform": "Windows-11-10.0.26200-SP0",
+   "qt_platform": "offscreen"
+  },
+  "startup": {
+   "runs": [
+    {
+     "process_start": 0.0,
+     "qt_import": 147.2,
+     "main_window_import": 1255.4,
+     "qt_app_create": 1266.9,
+     "font_families": 0.3,
+     "font_set": 0.3,
+     "theme_apply": 0.3,
+     "main_window_init": 5705.0,
+     "main_window_init_end": 6973.1,
+     "show_process_events": 7214.5,
+     "grab_first_frame": 100.9,
+     "grab_end": 7315.4,
+     "deferred_end": 11150.8,
+     "star_load_ms": 42.5,
+     "star_load_calls": 1,
+     "star_catalog_mb": 1.9,
+     "backend_enum_ms": 1795.2,
+     "backend_enum_devices": 1,
+     "backend_connect_ms": 0.1,
+     "eventfilter_ms": 3275.1,
+     "eventfilter_calls": 78683,
+     "kernel_panels_ms": 1428.1,
+     "mode_shell_ms": 1334.5,
+     "settings_panel_init_ms": 758.2,
+     "config_load_ms": 1.0
+    },
+    {
+     "process_start": 0.0,
+     "qt_import": 155.0,
+     "main_window_import": 1263.1,
+     "qt_app_create": 1275.4,
+     "font_families": 0.3,
+     "font_set": 0.2,
+     "theme_apply": 0.2,
+     "main_window_init": 5050.3,
+     "main_window_init_end": 6326.5,
+     "show_process_events": 6524.7,
+     "grab_first_frame": 75.7,
+     "grab_end": 6600.5,
+     "deferred_end": 10391.6,
+     "star_load_ms": 36.0,
+     "star_load_calls": 1,
+     "star_catalog_mb": 1.9,
+     "backend_enum_ms": 1561.1,
+     "backend_enum_devices": 1,
+     "backend_connect_ms": 0.1,
+     "eventfilter_ms": 2939.6,
+     "eventfilter_calls": 79780,
+     "kernel_panels_ms": 1124.9,
+     "mode_shell_ms": 1224.0,
+     "settings_panel_init_ms": 683.9,
+     "config_load_ms": 0.9
+    },
+    {
+     "process_start": 0.0,
+     "qt_import": 122.7,
+     "main_window_import": 1070.2,
+     "qt_app_create": 1080.3,
+     "font_families": 0.3,
+     "font_set": 0.1,
+     "theme_apply": 0.2,
+     "main_window_init": 4744.5,
+     "main_window_init_end": 5825.6,
+     "show_process_events": 6021.1,
+     "grab_first_frame": 95.8,
+     "grab_end": 6116.9,
+     "deferred_end": 9911.0,
+     "star_load_ms": 38.2,
+     "star_load_calls": 1,
+     "star_catalog_mb": 1.9,
+     "backend_enum_ms": 1644.3,
+     "backend_enum_devices": 1,
+     "backend_connect_ms": 0.1,
+     "eventfilter_ms": 2809.9,
+     "eventfilter_calls": 80019,
+     "kernel_panels_ms": 1047.9,
+     "mode_shell_ms": 1040.5,
+     "settings_panel_init_ms": 524.6,
+     "config_load_ms": 1.0
+    }
+   ],
+   "median": {
+    "process_start": 0.0,
+    "qt_import": 147.2,
+    "main_window_import": 1255.4,
+    "qt_app_create": 1266.9,
+    "font_families": 0.3,
+    "font_set": 0.2,
+    "theme_apply": 0.2,
+    "main_window_init": 5050.3,
+    "main_window_init_end": 6326.5,
+    "show_process_events": 6524.7,
+    "grab_first_frame": 95.8,
+    "grab_end": 6600.5,
+    "deferred_end": 10391.6,
+    "star_load_ms": 38.2,
+    "star_load_calls": 1,
+    "star_catalog_mb": 1.9,
+    "backend_enum_ms": 1644.3,
+    "backend_enum_devices": 1,
+    "backend_connect_ms": 0.1,
+    "eventfilter_ms": 2939.6,
+    "eventfilter_calls": 79780,
+    "kernel_panels_ms": 1124.9,
+    "mode_shell_ms": 1224.0,
+    "settings_panel_init_ms": 683.9,
+    "config_load_ms": 1.0,
+    "dur_qt_import": 147.2,
+    "dur_main_window_import": 1108.2,
+    "dur_qt_app_create": 11.5,
+    "dur_main_window_init": 5059.6,
+    "dur_show_first_paint": 198.2,
+    "dur_first_frame": 6620.5
+   },
+   "top3": [
+    [
+     "eventfilter_ms",
+     2939.6
+    ],
+    [
+     "backend_enum_ms",
+     1644.3
+    ],
+    [
+     "mode_shell_ms",
+     1224.0
+    ]
+   ],
+   "eventfilter_ab": {
+    "normal_init_ms": [
+     4527.2,
+     3884.4,
+     3260.7
+    ],
+    "stubbed_init_ms": [
+     1334.0,
+     1191.9,
+     1080.7
+    ],
+    "median_normal_ms": 3884.4,
+    "median_stubbed_ms": 1191.9,
+    "delta_ms": 2692.5
+   },
+   "stderr_note": "子进程 QT_QPA_PLATFORM=offscreen；MBDSDR_NULL_AUDIO=1；无 MBDSDR_NO_HW"
+  }
+ },
+ "replay": {
+  "generated_at": "2026-11-06T03:46:43",
+  "env": {
+   "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+   "cpu_count": 12,
+   "python": "3.14.0",
+   "platform": "Windows-11-10.0.26200-SP0",
+   "qt_platform": "offscreen"
+  },
+  "replay": {
+   "file": "D:\\mbdsdr\\.tmp\\replay_1100MiB.cf32",
+   "file_created": true,
+   "cases": [
+    {
+     "mode": "sync",
+     "max_samples": 0,
+     "file_mb": 1100.0,
+     "wall_s": 1.817,
+     "ticks": 3,
+     "gap_p50_ms": 0.63,
+     "gap_p95_ms": 0.63,
+     "gap_max_ms": 1816.44,
+     "progress_events": 138,
+     "samples": 144179200,
+     "file_samples": 144179200,
+     "duration_s": 60.075,
+     "truncated": false,
+     "sample_rate": 2400000.0,
+     "center_freq_hz": 0,
+     "ws_mb": 1157.9,
+     "peak_ws_mb": 1174.3
+    },
+    {
+     "mode": "thread",
+     "max_samples": 0,
+     "file_mb": 1100.0,
+     "wall_s": 1.858,
+     "ticks": 185,
+     "gap_p50_ms": 9.99,
+     "gap_p95_ms": 10.84,
+     "gap_max_ms": 11.84,
+     "progress_events": 138,
+     "samples": 144179200,
+     "file_samples": 144179200,
+     "duration_s": 60.075,
+     "truncated": false,
+     "sample_rate": 2400000.0,
+     "center_freq_hz": 0,
+     "ws_mb": 1158.0,
+     "peak_ws_mb": 1174.5
+    },
+    {
+     "mode": "sync",
+     "max_samples": 24000000,
+     "file_mb": 1100.0,
+     "wall_s": 0.304,
+     "ticks": 3,
+     "gap_p50_ms": 0.67,
+     "gap_p95_ms": 0.67,
+     "gap_max_ms": 304.1,
+     "progress_events": 23,
+     "samples": 24000000,
+     "file_samples": 144179200,
+     "duration_s": 10.0,
+     "truncated": true,
+     "sample_rate": 2400000.0,
+     "center_freq_hz": 0,
+     "ws_mb": 241.1,
+     "peak_ws_mb": 259.9
+    },
+    {
+     "mode": "thread",
+     "max_samples": 24000000,
+     "file_mb": 1100.0,
+     "wall_s": 0.288,
+     "ticks": 28,
+     "gap_p50_ms": 10.02,
+     "gap_p95_ms": 10.75,
+     "gap_max_ms": 10.84,
+     "progress_events": 23,
+     "samples": 24000000,
+     "file_samples": 144179200,
+     "duration_s": 10.0,
+     "truncated": true,
+     "sample_rate": 2400000.0,
+     "center_freq_hz": 0,
+     "ws_mb": 241.3,
+     "peak_ws_mb": 260.0
+    }
+   ]
+  }
+ },
+ "spectrum": {
+  "generated_at": "2026-11-06T03:48:54",
+  "env": {
+   "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+   "cpu_count": 12,
+   "python": "3.14.0",
+   "platform": "Windows-11-10.0.26200-SP0",
+   "qt_platform": "offscreen"
+  },
+  "spectrum": {
+   "config": {
+    "fft_size": 1024,
+    "num_bins": 384,
+    "sample_rate_hz": 2400000.0,
+    "feed_block_samples": 120000,
+    "feed_interval_ms": 50,
+    "curve_timer_ms": 66,
+    "waterfall_timer_ms": 100,
+    "widget": [
+     858,
+     283
+    ]
+   },
+   "measured": {
+    "elapsed_s": 5.999,
+    "paints": 78,
+    "fps": 13.0,
+    "paint": {
+     "n": 78,
+     "median_ms": 10.01,
+     "p95_ms": 11.75,
+     "max_ms": 12.19
+    },
+    "push_iq": {
+     "n": 95,
+     "median_ms": 1.62,
+     "p95_ms": 2.12,
+     "max_ms": 20.27
+    },
+    "direct_render": {
+     "n": 100,
+     "median_ms": 11.07,
+     "p95_ms": 13.54,
+     "max_ms": 18.47
+    }
+   },
+   "profile_top": [
+    {
+     "calls": 400,
+     "tottime_s": 0.958,
+     "cumtime_s": 0.958,
+     "func": "{method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}"
+    },
+    {
+     "calls": 200,
+     "tottime_s": 0.636,
+     "cumtime_s": 0.636,
+     "func": "{method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}"
+    },
+    {
+     "calls": 200,
+     "tottime_s": 0.283,
+     "cumtime_s": 1.89,
+     "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)"
+    },
+    {
+     "calls": 1600,
+     "tottime_s": 0.069,
+     "cumtime_s": 0.069,
+     "func": "{method 'drawLine' of 'PySide6.QtGui.QPainter' objects}"
+    },
+    {
+     "calls": 200,
+     "tottime_s": 0.053,
+     "cumtime_s": 2.375,
+     "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)"
+    },
+    {
+     "calls": 400,
+     "tottime_s": 0.037,
+     "cumtime_s": 0.12,
+     "func": "D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)"
+    },
+    {
+     "calls": 2800,
+     "tottime_s": 0.037,
+     "cumtime_s": 0.037,
+     "func": "{method 'drawText' of 'PySide6.QtGui.QPainter' objects}"
+    },
+    {
+     "calls": 3800,
+     "tottime_s": 0.037,
+     "cumtime_s": 0.037,
+     "func": "{method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}"
+    }
+   ],
+   "profile_text": "         187009 function calls in 2.395 seconds\n\n   Ordered by: internal time\n   List reduced from 127 to 14 due to restriction <14>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      400    0.958    0.002    0.958    0.002 {method 'drawPolygon' of 'PySide6.QtGui.QPainter' objects}\n      200    0.636    0.003    0.636    0.003 {method 'drawPolyline' of 'PySide6.QtGui.QPainter' objects}\n      200    0.283    0.001    1.890    0.009 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1418(_draw_spectrum)\n     1600    0.069    0.000    0.069    0.000 {method 'drawLine' of 'PySide6.QtGui.QPainter' objects}\n      200    0.053    0.000    2.375    0.012 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1305(_render_spectrum)\n      400    0.037    0.000    0.120    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1535(_draw_bandplan)\n     2800    0.037    0.000    0.037    0.000 {method 'drawText' of 'PySide6.QtGui.QPainter' objects}\n     3800    0.037    0.000    0.037    0.000 {method 'horizontalAdvance' of 'PySide6.QtGui.QFontMetrics' objects}\n      400    0.033    0.000    0.033    0.000 {method 'drawRect' of 'PySide6.QtGui.QPainter' objects}\n    12000    0.019    0.000    0.031    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1070(_band_x_range)\n      200    0.017    0.000    0.078    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1399(_draw_grid)\n      200    0.015    0.000    0.015    0.000 {method 'fill' of 'PySide6.QtGui.QImage' objects}\n      200    0.013    0.000    0.121    0.001 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1761(_draw_peaks)\n      200    0.011    0.000    0.026    0.000 D:\\mbdsdr\\MBDSDR\\desktop\\spectrum_widget.py:1681(_draw_center_cursor)\n\n\n",
+   "microbench": {
+    "mag_db_numpy_ms": 0.006,
+    "mag_db_python_loop_ms": 0.1,
+    "resample_1024to384_python_loop_ms": 0.998,
+    "resample_1024to384_reduceat_ms": 0.02
+   }
+  }
+ },
+ "tle": {
+  "generated_at": "2026-11-06T03:49:33",
+  "env": {
+   "cpu": "13th Gen Intel(R) Core(TM) i5-13420H",
+   "cpu_count": 12,
+   "python": "3.14.0",
+   "platform": "Windows-11-10.0.26200-SP0",
+   "qt_platform": "offscreen"
+  },
+  "tle": {
+   "config": {
+    "manager_timeout_s": 10.0,
+    "manager_hard_deadline_s": 15.0,
+    "fetcher_request_timeout_s": 10.0,
+    "fetcher_hard_deadline_s": 15.0,
+    "fetchpolicy_default_request_s": 15.0,
+    "fetchpolicy_default_hard_s": 20.0,
+    "celestrak_base": "https://celestrak.org/NORAD/elements/gp.php"
+   },
+   "celestrak_real": [
+    {
+     "ok": false,
+     "wall_s": 10.016,
+     "error": "URLError: <urlopen error _ssl.c:1059: The handshake operation timed out>"
+    },
+    {
+     "ok": false,
+     "wall_s": 10.044,
+     "error": "URLError: <urlopen error _ssl.c:1059: The handshake operation timed out>"
+    },
+    {
+     "ok": false,
+     "wall_s": 10.004,
+     "error": "URLError: <urlopen error _ssl.c:1059: The handshake operation timed out>"
+    }
+   ],
+   "manager_fetch": [
+    {
+     "ok": true,
+     "wall_s": 10.027,
+     "name": "ISS"
+    },
+    {
+     "ok": true,
+     "wall_s": 0.0,
+     "name": "ISS"
+    }
+   ],
+   "blackhole_timeout": {
+    "ok": false,
+    "wall_s": 10.017,
+    "error": "TimeoutError: timed out"
+   },
+   "blackhole_hard_deadline_1s": {
+    "ok": false,
+    "wall_s": 1.007,
+    "error": "TimeoutError: TLE 下载超时（>1s，含 DNS 解析）：http://127.0.0.1:64311/tle"
+   }
+  }
+ }
+}
