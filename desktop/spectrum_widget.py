@@ -211,8 +211,10 @@ class SpectrumDataGenerator:
     # SDR++ iq_frontend.h:17-21 FFTWindow 枚举仅 RECTANGULAR/BLACKMAN/NUTTALL；
     # main_window.cpp:91 默认 NUTTALL。这里额外补 Hann/Hamming/Flattop/None 便于对比。
     WINDOWS = ("Nuttall", "Hann", "Hamming", "Blackman", "Flattop", "None")
-    # SDR++ main_window.cpp:34 setRawFFTSize(fftSize) 支持大尺寸 FFT，16384 是常用档。
-    FFT_SIZES = (1024, 2048, 4096, 8192, 16384)
+    # 唯一事实源 = desktop/config_schema.py 的 fft_size 三档（C++ settings_dialog
+    # 与 AI 工具同源：1024/2048/4096）。8192/16384 内核不支持，不再暴露——
+    # 旧配置/直接调用给这两个值时由 set_fft_size 回落最近档并记录原因。
+    FFT_SIZES = (1024, 2048, 4096)
     AVG_FRAMES = (1, 4, 8, 16)
 
     def __init__(self, num_bins: int = 512):
@@ -368,11 +370,24 @@ class SpectrumDataGenerator:
             self.window_name = name
             self._reset_average()
 
-    def set_fft_size(self, n: int):
+    def set_fft_size(self, n: int) -> int:
+        """设置 FFT 点数；非法档位回落到最近合法档并记录原因（不静默）。
+
+        返回实际生效的档位——调用方（设置面板）据此同步下拉/提示。
+        旧配置里的 8192/16384（内核不支持）会落到 4096，而不是假装成功；
+        回落只发生在越界值上，合法档位行为不变。
+        """
         n = int(n)
-        if n in self.FFT_SIZES and n != self.fft_size:
+        if n not in self.FFT_SIZES:
+            nearest = min(self.FFT_SIZES, key=lambda s: abs(s - n))
+            _log.warning(
+                "fft_size=%d 不在合法档 %s（C++/AI/schema 只支持三档），"
+                "回落到最近档 %d", n, self.FFT_SIZES, nearest)
+            n = nearest
+        if n != self.fft_size:
             self.fft_size = n
             self._reset_average()
+        return self.fft_size
 
     def set_avg_frames(self, n: int):
         n = int(n)

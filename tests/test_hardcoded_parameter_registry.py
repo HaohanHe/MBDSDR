@@ -299,6 +299,61 @@ def test_waterfall_depth_is_six_tier_enum_everywhere(caplog):
 
 
 @pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
+def test_fft_size_tiers_match_schema_exactly(caplog):
+    """FFT 档位唯一事实源：生成器 ``FFT_SIZES`` == schema ``fft_size.choices``。
+
+    必须逐项相等（值 + 顺序），不能只比集合：任何一侧单方面加 8192/16384
+    立即红。旧配置/直接调用引用已删档位时，必须回落**最近档**并记录原因，
+    不许静默改成 2048 当没事发生。
+    """
+    import logging
+    if str(REPO / "desktop") not in sys.path:
+        sys.path.insert(0, str(REPO / "desktop"))
+    import config_schema
+    import spectrum_widget
+
+    expected = (1024, 2048, 4096)
+    gen_cls = spectrum_widget.SpectrumDataGenerator
+    assert gen_cls.FFT_SIZES == expected
+    item = config_schema.SCHEMA["fft_size"]
+    assert item.kind == "enum"
+    assert item.choice_values == gen_cls.FFT_SIZES, (
+        "FFT 档位必须与 config_schema 逐项相等（含顺序）")
+
+    gen = gen_cls(num_bins=512)
+    with caplog.at_level(logging.WARNING, logger="spectrum_widget"):
+        assert gen.set_fft_size(16384) == 4096   # 最近档，不是默认 2048
+        assert gen.set_fft_size(8192) == 4096
+    assert "回落到最近档 4096" in caplog.text, "删除档位必须记录回落原因"
+    assert gen.set_fft_size(2048) == 2048
+
+
+@pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
+def test_fft_bin_width_identical_at_2_4_msps():
+    """2.4 MS/s 下两端 bin 宽必须一致（此前 146.48 Hz vs 585.94 Hz）。
+
+    16384 档 = 2.4e6/16384 = 146.484 Hz，4096 档 = 585.938 Hz，差 439.45 Hz
+    （4 倍）；删掉 8192/16384 后所有路径都落到 4096，差值为 0。
+    """
+    if str(REPO / "desktop") not in sys.path:
+        sys.path.insert(0, str(REPO / "desktop"))
+    import spectrum_widget
+
+    sr = 2.4e6
+    widths = tuple(sr / s for s in spectrum_widget.SpectrumDataGenerator.FFT_SIZES)
+    assert widths == (2343.75, 1171.875, 585.9375)
+    # 最大档（4096）对应最细 bin：585.9375 Hz 是现在两端共同的下限
+    assert min(widths) == pytest.approx(585.9375)
+
+    gen = spectrum_widget.SpectrumDataGenerator(num_bins=512)
+    gen.sample_rate_hz = sr
+    for legacy in (8192, 16384):
+        assert gen.set_fft_size(legacy) == 4096
+        # 回落后的 bin 宽与合法最大档完全一致：差 = 0 Hz
+        assert (sr / gen.fft_size) - (sr / 4096) == 0.0
+
+
+@pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
 def test_db_default_range_matches_python_and_keeps_minus50_visible():
     """C++ 默认 dB 视窗冻结在 -100..-20（与 Python 一致）。
 
@@ -322,7 +377,6 @@ CROSS_LANGUAGE_DELTAS = {
     # “允许拖到的夹取边界”这一层残留，不是默认值差异。
     "dB 轴下限": ("-160.0", "-140"),
     "dB 轴上限": ("0.0", "20"),
-    "FFT 档位数量": ("5", "3"),
 }
 
 

@@ -913,8 +913,15 @@ class SettingsPanel(QWidget):
         if sp is None or gen is None:
             return False
         if key == "fft_size":
-            gen.set_fft_size(int(value))
-            self._sync_combo(sp, "_fft_combo", str(int(value)))
+            requested = int(value)
+            applied = gen.set_fft_size(requested)
+            # 回落（如旧值 8192/16384）时按实际档位同步下拉，并让用户在状态
+            # 栏看到原因；不能把界面显示成"已切到不存在档位"。
+            self._sync_combo(sp, "_fft_combo", str(applied))
+            if applied != requested:
+                self._notify(
+                    f"FFT {requested} 内核不支持（仅 1024/2048/4096），"
+                    f"已回落到最近档 {applied}")
         elif key == "fft_window":
             gen.set_window(str(value))
             self._sync_combo(sp, "_win_combo", str(value))
