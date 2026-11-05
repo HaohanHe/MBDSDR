@@ -220,7 +220,10 @@ class AprsPanel(QWidget):
         shown = [p for p in self._packets if self._matches(p)]
         self.table.setRowCount(len(shown))
         for row, p in enumerate(shown):
-            ts = time.strftime("%H:%M:%S", time.localtime(p.get("_ts", 0)))
+            # 缺收报时刻时显示「—」：etime 0 会渲染成 1970 年，那是假读数。
+            _ts = p.get("_ts")
+            ts = (time.strftime("%H:%M:%S", time.localtime(_ts))
+                  if isinstance(_ts, (int, float)) and _ts > 0 else "—")
             src = f"{p.get('source','')}-{p.get('source_ssid',0)}"
             dst = f"{p.get('destination','')}-{p.get('destination_ssid',0)}"
             digi = ",".join(p.get("digipeaters", []))

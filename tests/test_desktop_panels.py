@@ -94,6 +94,21 @@ class TestMainWindowIntegration:
         assert hasattr(MainWindow, "_panels_set_sdr_connected")
 
 
+# ----------------------------------------------------------------------
+class TestAprsPanelHonesty:
+    def test_missing_timestamp_renders_dash_not_1970(self):
+        """缺 _ts 时时间列显示「—」，不得用 0 渲染成 1970 年。"""
+        from aprs_panel import AprsPanel
+        panel = AprsPanel()
+        try:
+            panel._packets = [{"source": "N0CALL", "destination": "APRS",
+                               "type": "unknown"}]
+            panel._refresh_table()
+            assert panel.table.item(0, 0).text() == "—"
+        finally:
+            panel.deleteLater()
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main(verbosity=2)

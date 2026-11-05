@@ -105,6 +105,10 @@ class _ActivityTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final mhz = (entry.frequencyHz / 1e6).toStringAsFixed(4);
     final mode = entry.mode.isEmpty ? '—' : entry.mode.toUpperCase();
+    // 电平缺值显示「—」：0 dBFS 是满量程，不能拿 0 冒充「没测到」。
+    final level = entry.levelDbfs == null
+        ? '—'
+        : '${entry.levelDbfs!.toStringAsFixed(1)} dBFS';
     return ListTile(
       dense: true,
       leading: const Icon(
@@ -118,7 +122,7 @@ class _ActivityTile extends StatelessWidget {
       ),
       subtitle: Text(
         '${fmt(entry.observedAt)} · ${entry.sourceLabel}'
-        ' · ${entry.levelDbfs.toStringAsFixed(1)} dBFS',
+        ' · $level',
         style: AppTokens.auxiliary,
       ),
     );

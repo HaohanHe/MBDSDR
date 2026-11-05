@@ -2,6 +2,8 @@
 //
 // 用内存 KvStore 注入，不触碰真实存储。活动日志与书签是两套独立键：
 // 加活动不得影响书签，加书签不得写入活动日志。
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/pages/activity_log_page.dart';
@@ -151,6 +153,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('暂无信号活动'), findsOneWidget);
       expect(s.activities, isEmpty);
+    });
+
+    testWidgets('电平缺值：显示「—」，绝不当成 0 dBFS（满量程）', (tester) async {
+      final kv = _MemKv();
+      // 旧/外部写入的记录可能没有 levelDbfs：读回必须是 null，不是 0。
+      kv.d['activityLog'] = jsonEncode(<Map<String, Object?>>[
+        <String, Object?>{
+          'epochMsUtc': 1700000000000,
+          'frequencyHz': 145800000,
+          'mode': 'wfm',
+          'source': 'squelch',
+        },
+      ]);
+      final s = SettingsService(kv: kv, secure: _MemSecure());
+      await s.load();
+      expect(s.activities.length, 1);
+      expect(s.activities.first.levelDbfs, isNull);
+      await tester.pumpWidget(wrapPage(s));
+      expect(find.textContaining('145.8000 MHz'), findsOneWidget);
+      expect(find.textContaining('0.0 dBFS'), findsNothing);
+      expect(find.textContaining('—'), findsOneWidget);
     });
   });
 }

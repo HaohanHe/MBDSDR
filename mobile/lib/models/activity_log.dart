@@ -24,7 +24,10 @@ class ActivityEntry {
   final int frequencyHz;
 
   /// 真实解调音频 RMS 峰值电平（dBFS），来自静噪门平滑电平。
-  final double levelDbfs;
+  ///
+  /// 缺值一律为 null（未知），**绝不写 0**——0 dBFS 是满量程，会被读成
+  /// 「信号最强」，与「没测到」是两回事。
+  final double? levelDbfs;
 
   /// 观察时解调模式字符串（'nfm' / 'wfm'）；未知为空串。
   final String mode;
@@ -64,7 +67,7 @@ class ActivityEntry {
     return ActivityEntry(
       epochMsUtc: t.toInt(),
       frequencyHz: hz.toInt(),
-      levelDbfs: level is num ? level.toDouble() : 0,
+      levelDbfs: level is num ? level.toDouble() : null,
       mode: mode is String ? mode.trim().toLowerCase() : '',
       source: src is String && src.trim().isNotEmpty ? src.trim() : 'squelch',
     );
