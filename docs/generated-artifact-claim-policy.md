@@ -119,9 +119,21 @@ python scripts/file_claim.py status | findstr /i "<路径>"
 **第 3 步：持有者已 EXPIRED** → 允许接管，但必须先显式 `file_claim.py claim`，
 再提交，并在提交说明里写明接管原因（`status` 输出里的 `EXPIRED(+N min)`）。
 
-**第 4 步：禁止 `--no-verify`。** 唯一例外是「钩子本身坏了」（例如 `check_commit_scope.py`
-报错退出码 2、`hook_ok` 目录不可写）。此时必须：提交后立刻在汇报里点名、
-贴出 bypass 记录的 commit/tree/files，并说明钩子坏在哪一行；不许把例外写成先例。
+**第 4 步：默认禁止 `--no-verify`；确需绕过必须自报事由。**
+2026-11-06 起 `post-commit` 把「无 marker 提交」分成三类落盘，不再用同一句话糊过去：
+
+| 情形 | 落盘位置 | 字段 |
+|---|---|---|
+| 带 `MBDSDR_BYPASS_REASON="事由：…；文件：…；预期 owner：…"` | `git_hook_bypass.log` | `bypass_kind="explicit"`，另记 `declared_files` / `declared_files_mismatch` / `declared_index` |
+| 无该变量，但钩子侧有故障证据（pre-commit 缺失 / 非本仓管理 / 标记目录不可写） | `git_hook_bypass.log` | `bypass_kind="hook_error"` + `hook_evidence` |
+| 无该变量、也无证据（典型：静默 `--no-verify`） | **`D:\mbdsdr\.locks\unaudited_commits.log`** | `bypass_kind="unattributed"`、`audited=false`，**视为未审计** |
+
+所以「绕过」不再是零成本：不自报事由就没有 bypass 记录，只有一条未审计记录。
+唯一例外仍是「钩子本身坏了」，且必须：提交后立刻在汇报里点名、贴出记录、
+说明钩子坏在哪一行；不许把例外写成先例。
+
+> 历史遗留：`558d8b4d` 形成于改动之前，其记录没有 `bypass_kind`，按新口径
+> 应归入**未审计**；不得引用它证明「绕过是合规的」。
 
 **第 5 步：提交说明写清生成命令与数字变化**，例：
 

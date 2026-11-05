@@ -1,10 +1,26 @@
 #!/usr/bin/env python
-"""post-commit：记录未经 pre-commit 闸门的提交（--no-verify 等）。
+"""post-commit：记录未经 pre-commit 闸门的提交，并区分「主动绕过 / 钩子故障 / 未审计」。
 
-pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记；
-没有标记的提交一律追加到 bypass 日志，便于事后定位是谁绕过。
+pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记。没有标记的
+提交分三类落盘（**不再把两类完全不同的事揉成一句**）：
+
+  explicit    主动绕过：环境变量 ``MBDSDR_BYPASS_REASON`` 非空（事由原文必须含
+              「事由 / 要提交的文件 / 预期 owner」）。写入 git_hook_bypass.log，
+              ``bypass_kind="explicit"``；若同设 ``MBDSDR_COMMIT_PATHS`` /
+              ``MBDSDR_DECLARED_INDEX``，一并记录声明与实际提交的差集。
+  hook_error  钩子侧故障：无该变量，且能证明闸门侧坏了（pre-commit 不存在 /
+              不是本仓管理的钩子 / 标记目录不可写）。写入 git_hook_bypass.log，
+              ``bypass_kind="hook_error"`` 并附 ``hook_evidence``。
+  unattributed 未审计：无该变量、也无故障证据（典型 = `git commit --no-verify`
+              静默绕过，或 `--only`/私有 index 使 marker 树失配）。写入独立
+              ``unaudited_commits.log``，``bypass_kind="unattributed"``、``audited=false``。
+
 日志记录附带当时的 claim 台账快照（owner + 文件 + 是否活跃），
 用于事后判断「绕过时到底有没有夹带别人」。
+
+限制（明说）：pre-commit 被杀/未安装时提交也会被中止，故「无 marker 且钩子存在」
+无法机械区分「--no-verify」与「--only 导致的树失配」——这两种一律进未审计日志，
+不假装能分辨。
 
 另做一道提交后自检（只补漏带，不改变提交结果）：对本次提交涉及的
 每个路径跑 `git status --porcelain` / `git diff HEAD`；若工作区仍有
@@ -87,6 +103,57 @@ def _commit_files(head):
         .stdout.splitlines()
         if line.strip()
     ]
+
+
+def _norm(path):
+    return os.path.normcase(str(path).replace("\\", "/")).lstrip("./")
+
+
+def _declared_files():
+    """`MBDSDR_COMMIT_PATHS`（换行 / `;` 分隔）声明的本次提交路径；未声明返回 None。"""
+    raw = (os.environ.get("MBDSDR_COMMIT_PATHS") or "").strip()
+    if not raw:
+        return None
+    items = [_norm(x.strip()) for x in raw.replace(";", "\n").splitlines() if x.strip()]
+    return items or None
+
+
+def _declared_mismatch(declared, actual):
+    """声明的路径集合与实际提交路径集合的对称差；未声明返回 None。"""
+    if declared is None:
+        return None
+    return sorted(set(declared) ^ {_norm(x) for x in actual})
+
+
+def _hook_evidence(root, marker_dir):
+    """返回「钩子侧故障」的可证实证据；空列表 = 不能断言 hook_error。"""
+    evidence = []
+    hooks_raw = _git("rev-parse", "--git-path", "hooks").stdout.strip()
+    if not hooks_raw:
+        evidence.append("无法定位 git hooks 目录")
+    else:
+        pre = Path(hooks_raw)
+        if not pre.is_absolute():
+            pre = root / pre
+        pre = pre / "pre-commit"
+        if not pre.exists():
+            evidence.append("pre-commit 钩子不存在（闸门未安装或被删）")
+        else:
+            try:
+                text = pre.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                evidence.append(f"pre-commit 钩子不可读（{exc.__class__.__name__}）")
+            else:
+                if "MBDSDR-MANAGED-HOOK" not in text:
+                    evidence.append("pre-commit 不是本仓管理的钩子（被替换或未安装）")
+    try:
+        marker_dir.mkdir(parents=True, exist_ok=True)
+        probe = marker_dir / f".write_probe.{os.getpid()}"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+    except OSError as exc:
+        evidence.append(f"闸门标记目录不可写（{exc.__class__.__name__}）")
+    return evidence
 
 
 def _stale_index_suspects(head, files, started_at):
@@ -213,18 +280,74 @@ def main():
 
     author = _git("log", "-1", "--format=%an <%ae>", head).stdout.strip()
     subject = _git("log", "-1", "--format=%s", head).stdout.strip()
-    record = {
+    unaudited_log = Path(
+        os.environ.get("MBDSDR_UNAUDITED_LOG") or r"D:\mbdsdr\.locks\unaudited_commits.log"
+    )
+    base = {
         "ts": datetime.now().isoformat(timespec="seconds"),
         "commit": head,
         "tree": tree,
         "author": author,
         "subject": subject,
         "files": files,
-        "reason": "no pre-commit marker（--no-verify 或钩子未执行）",
-        "claims_snapshot": _claims_snapshot(),
     }
-    _append_records(log_path, [record])
-    print(f"[post-commit] 警告：{head[:8]} 未经 claim 闸门，已记录到 {log_path}", file=sys.stderr)
+    reason = (os.environ.get("MBDSDR_BYPASS_REASON") or "").strip()
+    declared = _declared_files()
+
+    if reason:
+        # 主动绕过：必须自报事由（事由/文件/预期 owner），否则归入未审计。
+        record = dict(
+            base,
+            type="HOOK_BYPASS",
+            bypass_kind="explicit",
+            reason=reason,
+            declared_files=declared,
+            declared_files_mismatch=_declared_mismatch(declared, files),
+            declared_index=os.environ.get("MBDSDR_DECLARED_INDEX") or None,
+            claims_snapshot=_claims_snapshot(),
+        )
+        _append_records(log_path, [record])
+        print(
+            f"[post-commit] 记录主动绕过（explicit）：{head[:8]} → {log_path}",
+            file=sys.stderr,
+        )
+        return 0
+
+    evidence = _hook_evidence(root, marker_dir)
+    if evidence:
+        record = dict(
+            base,
+            type="HOOK_BYPASS",
+            bypass_kind="hook_error",
+            reason="无 pre-commit marker，且钩子侧有故障证据：" + "；".join(evidence),
+            hook_evidence=evidence,
+            claims_snapshot=_claims_snapshot(),
+        )
+        _append_records(log_path, [record])
+        print(
+            f"[post-commit] 警告：钩子故障（hook_error）：{head[:8]} → {log_path}",
+            file=sys.stderr,
+        )
+        return 0
+
+    record = dict(
+        base,
+        type="UNAUDITED_COMMIT",
+        bypass_kind="unattributed",
+        audited=False,
+        reason=(
+            "无 pre-commit marker，且未声明 MBDSDR_BYPASS_REASON：无法区分静默绕过与"
+            "钩子故障，记为未审计。主动绕过必须带 MBDSDR_BYPASS_REASON（含事由、"
+            "要提交的文件、预期 owner）。"
+        ),
+        hook_evidence=[],
+        claims_snapshot=_claims_snapshot(),
+    )
+    _append_records(unaudited_log, [record])
+    print(
+        f"[post-commit] 警告：{head[:8]} 未经审计（无 bypass 声明），已记录到 {unaudited_log}",
+        file=sys.stderr,
+    )
     return 0
 
 
