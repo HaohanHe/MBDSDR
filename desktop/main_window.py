@@ -155,6 +155,53 @@ def format_tx_doppler(note, *, failed_reason=None, replay: bool = False) -> str:
             f" · 标称 {_mhz(nominal)}")
 
 
+def ptt_state(backend) -> tuple[str, bool, bool]:
+    """PTT 常驻能力文案（docs/doppler-compensation.md §3.8.2）。
+
+    返回 ``(文案, 是否可点, 是否带常驻警示)``。唯一文案事实源是
+    ``backend.tx_capability()``；前两步（类上有写流实现 / 设备声明）只用于
+    cap 缺字段时兜底，**绝不据此下「没有 TX 通道」的结论**——「驱动级可发、
+    本路径未接入」与「硬件仅接收」必须分开显示。``verified`` 只读不推。
+    """
+    if backend is None:
+        return "本后端发射：未连接设备（能力未知）", False, False
+
+    impl = callable(getattr(type(backend), "write_tx", None))
+    supports = getattr(backend, "supports_tx", None)
+    declared = bool(supports()) if callable(supports) else False
+    cap: dict = {}
+    get_cap = getattr(backend, "tx_capability", None)
+    if callable(get_cap):
+        try:
+            raw = get_cap()
+        except Exception as e:  # noqa: BLE001 - 能力查询失败按「未知」降级，但要留证
+            logger.warning("读取发射能力矩阵失败: %s", e)
+            raw = None
+        if isinstance(raw, dict):
+            cap = raw
+        elif raw is not None:
+            logger.warning("发射能力矩阵格式异常（应为 dict）: %r", raw)
+
+    impl = bool(cap.get("implemented", impl))
+    declared = bool(cap.get("declared", declared))
+    driver = cap.get("driver_capable")
+    reason = str(cap.get("blocked_reason") or "")
+
+    if impl and bool(cap.get("ready")) and bool(cap.get("verified")):
+        return "本后端发射：驱动级已实现 / 真机已验证", True, False
+    if impl and bool(cap.get("ready")):
+        return "本后端发射：驱动级已实现 / 真机未验证", True, True
+    if declared and not impl:
+        return "本后端发射：仅有声明 / 未实现（不可发射）", False, False
+    if driver is True:
+        return "本后端发射：驱动级可发 / 本路径未接入（不可发射）", False, False
+    if driver is False:
+        return "本后端发射：硬件仅接收（驱动报告 0 个 TX 通道）", False, False
+    if reason == "driver_capability_unknown":
+        return "本后端发射：能力未知（未连接/驱动未报告）", False, False
+    return "本后端发射：未实现", False, False
+
+
 def _is_text_entry_widget(w) -> bool:
     """是否为文本输入类控件（Ctrl+C 应走标准复制语义）。"""
     if w is None:
@@ -2136,6 +2183,15 @@ class MainWindow(QMainWindow):
             "发射频点读数：实际发波频率 / 标称频率 / 预偏状态。"
             "— 表示未连接设备或读数未知，绝不表示 0")
         lay.addWidget(self.tx_readout)
+        # 发射能力常驻声明（docs/doppler-compensation.md §3.8.2）：必须在
+        # PTT 可按下之前就能看见，不许只放 tooltip；「驱动级已实现 / 真机
+        # 未验证」时按钮可点但这行常驻黄色警示。
+        self.tx_capability_label = QLabel("本后端发射：未连接设备（能力未知）")
+        self.tx_capability_label.setObjectName("txCapability")
+        self.tx_capability_label.setToolTip(
+            "发射能力声明：数据源 backend.tx_capability()。"
+            "「驱动级已实现」不等于「真机已验证」")
+        lay.addWidget(self.tx_capability_label)
         # 最小发射面：PTT 按钮（按下=发射，再次按下=停止）。默认置灰；
         # 无设备/无 TX 通道/回放中都会在 tooltip 里写明原因（不出现"点了没反应"）。
         self.tx_button = QToolButton()
@@ -2454,21 +2510,42 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- 最小发射面
     def _tx_block_reason(self) -> str:
-        """不能发射的原因（空串=可以发）。置灰与 tooltip 共用这一个出口。"""
+        """不能发射的原因（空串=可以发）。置灰与 tooltip 共用这一个出口。
+
+        能力判定统一交给 :func:`ptt_state`（唯一事实源是 tx_capability()）：
+        不再按 `write_tx` / `supports_tx()` 的布尔直接说「没有 TX 通道」——
+        Soapy 通用路径没有写流，但驱动能发，把能说成不能同样是假信息。
+        """
         if self._replay_timer is not None:
             return "回放中：保持原频率，不发射"
         backend = getattr(self, "_active_sdr_backend", None)
         if backend is None:
             return "未连接设备：请先连接支持发射的 SDR"
-        if not callable(getattr(backend, "write_tx", None)):
-            return "当前设备不支持发射（后端没有 TX 通道）"
-        try:
-            if not bool(backend.supports_tx()):
-                return "当前设备声明不支持发射"
-        except Exception as e:
-            logger.debug("读取发射能力失败: %s", e)
-            return "无法确认设备是否支持发射"
-        return ""
+        text, clickable, _warn = ptt_state(backend)
+        if clickable:
+            return ""
+        return text.split("：", 1)[-1]
+
+    def _refresh_tx_capability_label(self) -> None:
+        """PTT 常驻能力声明：文案/黄色警示随当前后端刷新（§3.8.2 七行表）。"""
+        lbl = getattr(self, "tx_capability_label", None)
+        if lbl is None:
+            return
+        backend = getattr(self, "_active_sdr_backend", None)
+        text, _clickable, warn = ptt_state(backend)
+        lbl.setText(text)
+        if warn:
+            amber = tokens().COLORS["status_warning"]
+            lbl.setStyleSheet(
+                f"background-color: rgba(200, 160, 64, 0.18);"
+                f" border: 1px solid {amber}; border-radius: 3px;"
+                f" color: {amber}; padding: 0 6px; font-weight: 600;")
+            lbl.setToolTip(text + "：可按下，但发射失败必须按真实错误显示")
+        else:
+            lbl.setStyleSheet("")
+            lbl.setToolTip(
+                "发射能力声明：数据源 backend.tx_capability()。"
+                "「驱动级已实现」不等于「真机已验证」")
 
     def _set_tx_button_checked(self, checked: bool) -> None:
         """程序改选中态（防重入，避免触发 toggled 里的发/停逻辑）。"""
@@ -2486,6 +2563,7 @@ class MainWindow(QMainWindow):
         btn = getattr(self, "tx_button", None)
         if btn is None:
             return
+        self._refresh_tx_capability_label()
         if self._tx_session is not None:
             self._set_tx_button_checked(True)
             btn.setText("停止发射")
