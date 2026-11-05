@@ -6,10 +6,12 @@
 
 口径：
 * **版本号**：``mbdsdr_ai/VERSION`` 是唯一手抄点，CMake / pyproject / ``version.py`` /
-  两个 ``__init__`` / spec / C++ / 关于对话框全部从它派生（清单见
-  ``docs/packaging.md`` §9.1）。每个派生点必须正则命中“读取 VERSION 或引用共享
-  常量”，失配即 FAIL；派生文件里出现 ``x.y.z`` 字面量、或仓库其他位置出现
-  canonical 字面量（豁免清单除外）也 FAIL。
+  两个 ``__init__`` / spec / C++ / 关于对话框 / 两个打包脚本共 **11 个派生点**
+  全部从它派生（清单见 ``docs/packaging.md`` §9.1）。每个派生点必须正则命中
+  “读取 VERSION 或引用共享常量”，失配即 FAIL；派生文件里出现 ``x.y.z`` 字面量、
+  或仓库其他位置（tracked + untracked）出现 canonical 字面量也 FAIL，豁免只能
+  登记在 §9.1 的 5 处（``package_windows.ps1`` 因含 Qt/MinGW 工具链版本，
+  不适用“文件内禁止字面量”）。
 * **依赖**：声明面 = 根 ``requirements.txt`` + ``desktop/requirements.txt``
   的实际依赖行 + spec 里 ``collect_submodules``/datas 明确点名的包。
   产物定位 = ``<dist>/MBDSDR/_internal`` 顶层 + exe 内嵌 ``PYZ.pyz`` 模块表
@@ -114,53 +116,112 @@ VERSION_FILE = ROOT / "mbdsdr_ai" / "VERSION"
 VERSION_LITERAL_RE = re.compile(r"(?<![\d.])(\d+\.\d+\.\d+)(?![\d.])")
 STRICT_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
 
-#: (文件, [(必须命中的正则, 说明)], 用途)。任一处失配 → FAIL
-#: （这是防止「删掉取值点」被当成变绿的唯一手段，不许降级为 WARN）。
+#: (文件, [(必须命中的正则, 说明)], 用途, 是否执行「文件内禁止 x.y.z 字面量」)。
+#: 任一处正则失配 → FAIL（这是防止「删掉取值点」被当成变绿的唯一手段，
+#: 不许降级为 WARN）。最后一个布尔为 False 只用于「文件里合法地写着工具链
+#: 版本」的派生点（package_windows.ps1 的 Qt/MinGW 6.8.2 路径），产品版本仍由
+#: 同文件的两条派生正则 + 全仓 canonical 守卫管住。
 VERSION_DERIVATIONS = (
     ("cpp/CMakeLists.txt", (
         (r"file\(\s*READ\s+[^\n]*mbdsdr_ai/VERSION[^\n]*\)", "从 mbdsdr_ai/VERSION 读版本"),
         (r"project\(\s*mbdsdr\s+VERSION\s+\$\{MBDSDR_VERSION(?:_NUMERIC)?\}", "project() 用派生变量"),
-    ), "CMake 工程版本"),
+    ), "CMake 工程版本", True),
     ("pyproject.toml", (
         (r'^\s*dynamic\s*=\s*\[[^\]]*"version"[^\]]*\]', "[project] version 为 dynamic"),
         (r"\[tool\.setuptools\.dynamic\]", "setuptools 动态版本段"),
         (r'version\s*=\s*\{\s*file\s*=\s*"mbdsdr_ai/VERSION"\s*\}', "版本取自 VERSION 文件"),
-    ), "pyproject 元数据"),
+    ), "pyproject 元数据", True),
     ("mbdsdr_ai/version.py", (
         (r'with_name\("VERSION"\)', "读取 VERSION 文件"),
         (r"__version__\s*=\s*_read_version\(\)", "对外导出 __version__"),
-    ), "版本读取实现"),
+    ), "版本读取实现", True),
     ("mbdsdr_ai/__init__.py", (
         (r"from\s+\.version\s+import\s+__version__", "从 version.py 派生"),
-    ), "AI 包 __version__"),
+    ), "AI 包 __version__", True),
     ("mbdsdr_ai/core/__init__.py", (
         (r"from\s+\.\.version\s+import\s+__version__", "从 version.py 派生"),
-    ), "core 子包 __version__"),
+    ), "core 子包 __version__", True),
     ("desktop/main.py", (
         (r"from\s+mbdsdr_ai\.version\s+import\s+__version__", "导入共享版本"),
         (r"setApplicationVersion\(\s*_app_version\s*\)", "QApplication 版本取共享值"),
-    ), "QApplication 版本"),
+    ), "QApplication 版本", True),
     ("desktop/MBDSDR.spec", (
         (r"os\.path\.join\(root,\s*'mbdsdr_ai',\s*'VERSION'\)", "读取 VERSION 文件"),
         (r"version\s*=\s*VSVersionInfo\(", "EXE 版本资源"),
-    ), "EXE FileVersion"),
+    ), "EXE FileVersion", True),
     ("cpp/src/main.cpp", (
         (r'#include\s+"mbdsdr_version\.h"', "包含 CMake 生成的版本头"),
         (r"setApplicationVersion\(\s*QStringLiteral\(MBDSDR_VERSION\)\s*\)", "C++ QApplication 版本取生成宏"),
-    ), "C++ 应用版本"),
+    ), "C++ 应用版本", True),
     ("cpp/src/ui/about_dialog.cpp", (
         (r'#include\s+"mbdsdr_version\.h"', "包含 CMake 生成的版本头"),
         (r"版本:\s*%1.*MBDSDR_VERSION", "C++ 关于对话框版本取生成宏"),
-    ), "C++ 关于对话框版本"),
+    ), "C++ 关于对话框版本", True),
     ("scripts/real_hw_acceptance.py", (
         (r'os\.path\.join\(REPO_ROOT,\s*"mbdsdr_ai",\s*"VERSION"\)', "读取 VERSION 文件"),
         (r"_portable_version\(\)", "便携包目录名取派生版本"),
-    ), "真机验收便携包路径"),
+    ), "真机验收便携包路径", True),
+    ("scripts/package_windows.ps1", (
+        (r'Join-Path\s+[$]repo\s+"mbdsdr_ai\\VERSION"', "读取 VERSION 文件"),
+        (r"Get-Content\s+[$]versionFile", "版本取自已读取的 VERSION"),
+    ), "C++ 便携包 zip 名", False),
+)
+
+#: 全仓 canonical 字面量守卫的**登记豁免**（路径, 理由）。每条都必须能在
+#: ``docs/packaging.md`` §9.1 找到同名登记；未登记的一律按违规 FAIL，
+#: 不给「现场加白名单」留口子。
+VERSION_LITERAL_EXEMPT = (
+    ("mbdsdr_ai/VERSION", "唯一手抄点：它本身就是 canonical，不是第二处手写"),
+    ("README.md", "用户可见的版本标注：首行与 canonical 逐字比对（本文件 README 检查），"
+                  "不一致即 FAIL，不是免检"),
+    ("docs/learn/nanovna/protocol-study.md", "记的是 NanoVNA **固件**版本阈值"
+                                            "（x.y.z 量级），与本项目版本无关"),
+    ("mobile/pubspec.yaml", "Flutter 移动端独立版本流（带构建号），"
+                            "不随桌面产物派生；要统一需单独立项"),
+    ("docs/packaging.md", "版本口径文档：按设计列出 canonical 与派生清单，"
+                          "说明性文字不是取值点"),
 )
 
 #: 关于对话框：必须显示 QApplication 版本，且块内不得写死版本。
 ABOUT_RE = re.compile(r"def _show_about\(.*?\n(.*?)(?=\n    def |\Z)", re.S)
 ABOUT_VERSION_RE = re.compile(r"applicationVersion\(\)")
+
+
+def _repo_text_files(root: Path) -> list[str]:
+    """tracked + untracked（未忽略）文件；二进制/读不到的在扫描时跳过。"""
+    proc = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others",
+         "--exclude-standard"],
+        capture_output=True, check=False, text=False)
+    if proc.returncode != 0:
+        return []
+    return [p for p in proc.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def scan_version_literals(root: Path, canonical: str,
+                          files: list[str] | None = None) -> list[str]:
+    """全仓手写 canonical 字面量守卫（豁免见 ``VERSION_LITERAL_EXEMPT``）。
+
+    返回 ``path:line`` 列表。派生点文件由逐点规则覆盖，这里跳过以免重复报警；
+    前 4KB 含 NUL 的二进制文件跳过。``files`` 参数供测试传入临时清单。
+    """
+    exempt = {rel for rel, _reason in VERSION_LITERAL_EXEMPT}
+    derived = {rel for rel, _rules, _note, _strict in VERSION_DERIVATIONS}
+    hits: list[str] = []
+    for rel in files if files is not None else _repo_text_files(root):
+        if rel in exempt or rel in derived:
+            continue
+        try:
+            data = (root / rel).read_bytes()
+        except OSError:
+            continue
+        if b"\0" in data[:4096]:
+            continue
+        for lineno, line in enumerate(data.decode("utf-8", "replace").splitlines(), 1):
+            m = VERSION_LITERAL_RE.search(line)
+            if m and m.group(1) == canonical:
+                hits.append(f"{rel}:{lineno}")
+    return hits
 
 
 
@@ -207,7 +268,7 @@ def check_version(dist: Path | None) -> list[dict]:
     _record(PASS, f"canonical = {canonical}（mbdsdr_ai/VERSION，唯一手抄点）", items)
 
     # 各出现处：必须命中派生表达式；任一失配即 FAIL（不许改成正则软匹配）。
-    for rel, rules, note in VERSION_DERIVATIONS:
+    for rel, rules, note, strict_literals in VERSION_DERIVATIONS:
         path = ROOT / rel
         if not path.exists():
             _record(FAIL, f"{rel} 不存在（版本派生点消失）", items)
@@ -218,14 +279,27 @@ def check_version(dist: Path | None) -> list[dict]:
             _record(FAIL, f"{rel} 版本派生失配：未命中「{' / '.join(missed)}」← {note}"
                           f"（正则失配即 FAIL）", items)
             continue
-        literals = [f"第 {i} 行 {m.group(1)}"
-                    for i, line in enumerate(text.splitlines(), 1)
-                    for m in [VERSION_LITERAL_RE.search(line)] if m]
+        literals = []
+        if strict_literals:
+            literals = [f"第 {i} 行 {m.group(1)}"
+                        for i, line in enumerate(text.splitlines(), 1)
+                        for m in [VERSION_LITERAL_RE.search(line)] if m]
         if literals:
             _record(FAIL, f"{rel} 写死版本字面量：{'；'.join(literals[:3])}"
                           f" ← {note}（版本只能来自 mbdsdr_ai/VERSION）", items)
         else:
-            _record(PASS, f"{rel} 版本从 mbdsdr_ai/VERSION 派生 ← {note}", items)
+            _record(PASS, f"{rel} 版本从 mbdsdr_ai/VERSION 派生 ← {note}"
+                          + ("" if strict_literals else "（文件含工具链版本，字面量规则不适用）"),
+                    items)
+
+    # 全仓守卫：除 §9.1 登记的豁免外，任何文件出现 canonical 字面量即 FAIL。
+    hits = scan_version_literals(ROOT, canonical)
+    if hits:
+        _record(FAIL, f"全仓出现手写 canonical 字面量 {len(hits)} 处："
+                      f"{'；'.join(hits[:6])}（豁免仅限 docs/packaging.md §9.1 登记项）", items)
+    else:
+        _record(PASS, f"全仓无手写 canonical 字面量（豁免 {len(VERSION_LITERAL_EXEMPT)} 处，"
+                      f"理由见 docs/packaging.md §9.1）", items)
 
     # 产物 exe：必须有 FileVersion，且与 canonical 一致（x.y.z 允许补 .0）。
     if dist:

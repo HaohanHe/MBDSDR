@@ -563,7 +563,7 @@ python scripts/release_manifest.py --dist d:\mbdsdr\.tmp\pyi-dist13
 | 修复前 `pyi-dist12` | 19 | 7 | 23 | 0 | 6 | FAIL（退出码 1） |
 | 首轮修复后 `pyi-dist13` | **0** | **30** | **52** | 0 | 6 | WARN（退出码 0） |
 | 回填 `pyi-dist14`（WARN 分桶 + 运行时证据） | **0** | **0** | **82** | 0 | 6 | PASS（退出码 0） |
-| 本轮 `pyi-dist14`（SKIP → BY-DESIGN） | **0** | **0** | **85** | **7** | **0** | PASS（退出码 0） |
+| 本轮 `pyi-dist14`（SKIP → BY-DESIGN + 11 点清单 / 字面量守卫） | **0** | **0** | **87** | **7** | **0** | PASS（退出码 0） |
 
 首轮 30 条 WARN 里 29 条是「产物有但没声明」的逐包归因、1 条是汇总行。它们**全部
 属于“已归因可接受”桶**（8 个指到 `Requires-Dist`、21 个指到 xref import 链，见 9.2）。
@@ -574,26 +574,43 @@ python scripts/release_manifest.py --dist d:\mbdsdr\.tmp\pyi-dist13
 
 canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全部派生：
 
-| 出现处 | 派生方式 | 判定 |
-|---|---|---|
-| `mbdsdr_ai/VERSION` | 唯一手抄（`0.2.0`） | canonical |
-| `cpp/CMakeLists.txt` | `file(READ .../mbdsdr_ai/VERSION)` → 数字段交给 `project(... VERSION ${MBDSDR_VERSION_NUMERIC})`，完整串进 `message(STATUS)` | PASS |
-| `pyproject.toml` | `dynamic = ["version"]` + `version = {file = "mbdsdr_ai/VERSION"}` | PASS |
-| `mbdsdr_ai/version.py` | 读同目录 `VERSION`，导出 `__version__` | PASS |
-| `mbdsdr_ai/__init__.py`、`core/__init__.py` | `from (..).version import __version__` | PASS |
-| `desktop/main.py` | 导入共享版本 → `setApplicationVersion(_app_version)` | PASS |
-| `desktop/MBDSDR.spec` | 读 `VERSION` → `VSVersionInfo` | PASS |
-| `cpp/src/main.cpp` | `configure_file` 生成 `mbdsdr_version.h` → `setApplicationVersion(QStringLiteral(MBDSDR_VERSION))` | PASS |
-| `cpp/src/ui/about_dialog.cpp` | 同上生成头 → `版本: %1` 取 `MBDSDR_VERSION` | PASS |
-| `scripts/real_hw_acceptance.py` | `_portable_version()` 读 `mbdsdr_ai/VERSION` 拼便携包目录 | PASS |
-| 产物 `MBDSDR.exe` | `FileVersion = 0.2.0.0`、`ProductVersion = 0.2.0` | PASS |
-| `README.md` 首行 | `# MBDSDR ... v0.2.0` | PASS |
-| `desktop/main_window.py:_show_about` | `QApplication.applicationVersion()` | PASS |
+**11 个派生点**（文件 / 读什么 / 怎么校验），全部由 `scripts/release_manifest.py`
+逐点正则检查，失配即 FAIL；括号里的「禁止字面量」= 该文件内出现任何 `x.y.z`
+即 FAIL：
 
-机检口径：每个派生点必须有「读取 VERSION / 引用共享常量」的**正则命中**，
-失配即 FAIL（防止删掉取值点后静默变绿）；同时扫描这些文件里的 `x.y.z` 字面量，
-发现即 FAIL（`desktop/main.py` 的 `192.168.4.1` 这类 IP 被正则排除）。README
-首行作为面向读者的版本声明，与 canonical 比对后放行。
+| # | 文件 | 读什么 | 怎么校验 |
+|---|---|---|---|
+| 1 | cpp/CMakeLists.txt | `file(READ .../mbdsdr_ai/VERSION)`；数字前缀给 `project(VERSION ${MBDSDR_VERSION_NUMERIC})`，完整串进 `MBDSDR_VERSION` | 两条正则（`file(READ …VERSION)` / `project(... ${MBDSDR_VERSION_NUMERIC})`）；禁止字面量 |
+| 2 | pyproject.toml | `dynamic = ["version"]` + `version = {file = "mbdsdr_ai/VERSION"}` | 三条正则（dynamic 段 / setuptools 段 / `version = {file=…}`）；禁止字面量 |
+| 3 | mbdsdr_ai/version.py | 同目录 `VERSION` → 导出 `__version__` | `with_name("VERSION")` + `__version__ = _read_version()` |
+| 4 | mbdsdr_ai/__init__.py | `from .version import __version__` | 一条正则；禁止字面量 |
+| 5 | mbdsdr_ai/core/__init__.py | `from ..version import __version__` | 一条正则；禁止字面量 |
+| 6 | desktop/main.py | 导入共享 `__version__` → `setApplicationVersion(_app_version)` | 两条正则；另外 `_show_about` 必须调 `applicationVersion()` |
+| 7 | desktop/MBDSDR.spec | 读 `VERSION` → `VSVersionInfo` | 两条正则；产物 exe 的 FileVersion 回读必须等于 canonical（允许补 `.0`） |
+| 8 | cpp/src/main.cpp | CMake `configure_file` 生成的 `mbdsdr_version.h` | `#include "mbdsdr_version.h"` + `setApplicationVersion(QStringLiteral(MBDSDR_VERSION))` |
+| 9 | cpp/src/ui/about_dialog.cpp | 同上生成头 | `#include` + `版本: %1` 取 `MBDSDR_VERSION` |
+| 10 | scripts/real_hw_acceptance.py | `VERSION` → 便携包目录名 | `os.path.join(REPO_ROOT,"mbdsdr_ai","VERSION")` + `_portable_version()` |
+| 11 | scripts/package_windows.ps1 | `VERSION` → 便携包 zip 名 | `Join-Path $repo "mbdsdr_ai\VERSION"` + `Get-Content $versionFile`；该文件合法地写着 Qt/MinGW 工具链版本 `6.8.2`，故**不执行**「禁止字面量」 |
+
+**全仓手写字面量守卫**（`scan_version_literals`）：扫描 tracked + untracked
+（`--exclude-standard`）文本文件，出现 canonical 字面量立即 FAIL；前 4KB 含 NUL
+的二进制跳过。豁免**只能**登记在下表（同时钉在 `tests/test_version_literal_guard.py`，
+新增豁免会先让用例变红，逼你回文档写理由）：
+
+| 豁免位置 | 定性 | 理由 |
+|---|---|---|
+| `mbdsdr_ai/VERSION` | 唯一手抄点 | 它本身就是 canonical，不是第二处手写 |
+| `README.md` 首行 | 面向读者的版本标注 | 首行单独与 canonical 逐字比对，不一致即 FAIL（不是免检） |
+| `docs/learn/nanovna/protocol-study.md` | NanoVNA **固件**版本阈值 | 固件版本与本项目版本无关 |
+| `mobile/pubspec.yaml` | Flutter 移动端独立版本流（`0.2.0+2`，含构建号） | 不随桌面产物派生；要统一需单独立项 |
+| `docs/packaging.md` | 版本口径文档 | 按设计列出 canonical 与派生清单，说明性文字不是取值点 |
+
+**反证**（必须红）：往未跟踪文件 `tests/_reverse_probe_literal.py` 写
+`TEMP_VERSION = "0.2.0"`，机检报
+`FAIL 全仓出现手写 canonical 字面量 1 处：tests/_reverse_probe_literal.py:2`；
+删除后复原 PASS。单测 `tests/test_version_literal_guard.py` 钉住「11 个派生点」、
+「5 处豁免」与「塞字面量必红」。`desktop/main.py` 的 `192.168.4.1` 这类 IP 被
+正则的前后向断言排除。
 
 **后缀（预发布）口径**：`VERSION` 允许写 `x.y.z` 或 `x.y.z-<后缀>`（发布构建仍应
 用纯 `x.y.z`）。CMake `project(VERSION ...)` 只接受数字段，因此 CMake 把数字前缀交给
@@ -613,7 +630,7 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 | `_show_about` 渲染文本 | `版本 v0.2.1-verify` |
 | spec `VSVersionInfo`（stub 求值） | filevers=`(0,2,1,0)`、FileVersion 串=`0.2.1-verify` |
 
-首轮证伪曾实测到两处硬失败（已修）（`52b0f587` — `docs/packaging.md:616` — `MBDSDR_VERSION_NUMERIC`，该提交的 `git show --name-only` 同时列出 `cpp/CMakeLists.txt`/`desktop/MBDSDR.spec`）：`project(VERSION 0.2.1-verify)` 直接
+首轮证伪曾实测到两处硬失败（已修）（`52b0f587` — `docs/packaging.md:583` — `MBDSDR_VERSION_NUMERIC`，该提交的 `git show --name-only` 同时列出 `cpp/CMakeLists.txt`/`desktop/MBDSDR.spec`）：`project(VERSION 0.2.1-verify)` 直接
 configure 失败（`VERSION "0.2.1-verify" format invalid`）；spec 用 `int(p)` 拆段
 在 `1-verify` 上抛 `ValueError`。这两处正是“单一真值源”最容易被后缀打穿的地方。复跑：`python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist14`。
 
