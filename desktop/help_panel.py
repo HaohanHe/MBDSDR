@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import List, Optional
+from typing import List
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:

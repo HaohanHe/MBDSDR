@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:

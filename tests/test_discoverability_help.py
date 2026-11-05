@@ -36,10 +36,6 @@ def catalog():
     return build_catalog()
 
 
-def _sources(items):
-    return {x.source for x in items}
-
-
 def _by_prefix(items, prefix):
     return [x for x in items if x.source.startswith(prefix)]
 
