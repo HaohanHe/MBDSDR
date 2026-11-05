@@ -5,6 +5,12 @@ pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记
 没有标记的提交一律追加到 bypass 日志，便于事后定位是谁绕过。
 日志记录附带当时的 claim 台账快照（owner + 文件 + 是否活跃），
 用于事后判断「绕过时到底有没有夹带别人」。
+
+另做一道提交后自检（只补漏带，不改变提交结果）：对本次提交涉及的
+每个路径跑 `git status --porcelain` / `git diff HEAD`；若工作区仍有
+改动，说明这次提交吃进的是旧索引内容（如 14a6dc7 漏掉自己 11:47 的
+编辑），记 STALE_INDEX_SUSPECT。判断口径是「提交后 5 秒内的剩余改动」，
+只看本次提交的路径、不看别线文件；提交已经发生，本钩子只记录不阻断。
 """
 import json
 import os
@@ -15,6 +21,9 @@ from datetime import datetime
 from pathlib import Path
 
 MANAGED = "MBDSDR-MANAGED-HOOK post-commit"
+
+#: 提交后自检窗口：超过这个窗口的改动可能只是别人随后又改，不能算漏带。
+STALE_CHECK_WINDOW_S = 5.0
 
 
 def _git(*args):
@@ -67,12 +76,77 @@ def _claims_snapshot():
     }
 
 
+def _commit_files(head):
+    return [
+        line
+        for line in _git("show", "--format=", "--name-only", "--no-renames", head)
+        .stdout.splitlines()
+        if line.strip()
+    ]
+
+
+def _stale_index_suspects(head, files, started_at):
+    """提交后自检：本次提交的路径若仍有工作区改动，说明提交用了旧索引。
+
+    只看本次提交涉及的路径（不看别线文件），且只在提交后 5 秒窗口内判断：
+    窗口外出现的改动可能只是别人随后又改了，不能算「这次漏带」。
+    """
+    records = []
+    for path in files:
+        if time.time() - started_at > STALE_CHECK_WINDOW_S:
+            break
+        status = _git("status", "--porcelain", "--", path).stdout.strip()
+        if not status:
+            continue
+        diff = _git("diff", "HEAD", "--", path).stdout.splitlines()
+        records.append(
+            {
+                "type": "STALE_INDEX_SUSPECT",
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "commit": head,
+                "path": path,
+                "status": status,
+                "diff_lines": len(diff),
+                "summary": diff[:10],
+                "reason": (
+                    "提交后工作区仍有改动：本次提交吃进的是旧索引内容"
+                    "（漏带自己的编辑），不是别人随后又改"
+                ),
+            }
+        )
+    return records
+
+
+def _append_records(log_path, records):
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        for rec in records:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 def main():
+    started_at = time.time()
     root = Path(_git("rev-parse", "--show-toplevel").stdout.strip() or ".")
     head = _git("rev-parse", "HEAD").stdout.strip()
     tree = _git("rev-parse", "HEAD^{tree}").stdout.strip()
     if not head or not tree:
         return 0
+
+    files = _commit_files(head)
+    log_path = Path(
+        os.environ.get("MBDSDR_HOOK_LOG") or r"D:\mbdsdr\.locks\git_hook_bypass.log"
+    )
+
+    # 提交后自检：旧索引漏带只记录、不阻断（提交已经发生，回滚不是本钩子的事）。
+    stale = _stale_index_suspects(head, files, started_at)
+    if stale:
+        _append_records(log_path, stale)
+        for rec in stale:
+            print(
+                f"[post-commit] 警告：{rec['path']} 提交后仍有未提交改动"
+                f"（STALE_INDEX_SUSPECT，剩余 diff {rec['diff_lines']} 行）",
+                file=sys.stderr,
+            )
 
     marker_dir = Path(
         os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\mbdsdr\.locks\hook_ok"
@@ -85,18 +159,8 @@ def main():
             print(f"[post-commit] 清理闸门标记失败：{exc}", file=sys.stderr)
         return 0
 
-    log_path = Path(
-        os.environ.get("MBDSDR_HOOK_LOG") or r"D:\mbdsdr\.locks\git_hook_bypass.log"
-    )
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     author = _git("log", "-1", "--format=%an <%ae>", head).stdout.strip()
     subject = _git("log", "-1", "--format=%s", head).stdout.strip()
-    files = [
-        line
-        for line in _git("show", "--format=", "--name-only", "--no-renames", head)
-        .stdout.splitlines()
-        if line.strip()
-    ]
     record = {
         "ts": datetime.now().isoformat(timespec="seconds"),
         "commit": head,
@@ -107,8 +171,7 @@ def main():
         "reason": "no pre-commit marker（--no-verify 或钩子未执行）",
         "claims_snapshot": _claims_snapshot(),
     }
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _append_records(log_path, [record])
     print(f"[post-commit] 警告：{head[:8]} 未经 claim 闸门，已记录到 {log_path}", file=sys.stderr)
     return 0
 
