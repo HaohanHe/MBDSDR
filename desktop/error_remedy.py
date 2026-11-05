@@ -6,8 +6,8 @@
 错误发生的那一刻就要能点到「怎么办」，而不是让用户先想起来去帮助面板搜。
 本模块是唯一的映射事实源：
 
-  * ``REMEDY_BY_CODE``：15 条有帮助条目的错误码（逐条来自
-    ``troubleshooting.CURATED_CODES``，不另抄一份条目内容）；
+  * ``REMEDY_BY_CODE``：有帮助条目的错误码（15 条精选 + 桌面 UI 真会
+    渲染 code 的可见码，条目正文全部来自 ``troubleshooting``，不另抄）；
   * ``NO_ENTRY_REASONS``：其余每个 ``error_catalog`` 错误码都显式登记
     「不出入口 + 原因」——**没有条目就不许出现链接**，宁可没有入口，
     也不让用户点开一个空页；
@@ -43,19 +43,11 @@ REMEDY_BY_CODE: Dict[str, Remedy] = {r.code: r for r in build_remedies()}
 #: 无帮助条目：显式按原因分组登记，每个 error_catalog code 必须落在这里或
 #: 上面的 REMEDY_BY_CODE。新增 code 忘了登记 → mapping_gaps() 非空 → 测试红。
 _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
-    "AI/MCP 工具层错误：桌面状态栏与弹窗不直接展示，入口在 AI 助手的工具结果里": (
-        "tool_not_found", "tool_unavailable", "invalid_arguments_type",
-        "invalid_arguments", "missing_required_params", "param_type_mismatch",
-        "param_out_of_range", "param_not_in_enum", "invalid_json_arguments",
-        "handler_error", "exception", "empty_result_without_reason",
-        "invalid_rs_shape", "empty_taps", "compose_failed",
-        "gimbal_stop_failed", "no_rssi", "subagent_not_found",
-        "recording_not_found", "workflow_executor_missing", "NEED_HW",
-        "unknown_tool", "device_unavailable", "capability_unknown",
-        "offline_or_api_error",
+    "AI/MCP 工具层细项：code 不进入任何桌面 UI 控件（仅工具返回值/服务端响应），不设入口": (
+        "workflow_executor_missing", "unknown_tool",
     ),
-    "设备接入/参数细项：没有对应用户操作路径，帮助不设入口以免落到空页": (
-        "ptt_not_on", "bad_arguments", "bad_command", "bad_config", "bad_json",
+    "设备接入/服务端协议细项：code 仅出现在后端状态、Web JSON 或外部调用返回值，桌面控件不渲染": (
+        "bad_arguments", "bad_command", "bad_config", "bad_json",
         "config_not_found", "unknown_server", "unknown_command", "unsupported",
         "identity_mismatch", "station_untrusted", "no_pass",
         "no_downlink_known", "sdr_error", "invalid_argument",
@@ -65,13 +57,10 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "sdr_set_bandwidth_failed", "doppler_compensation_failed",
         "denied_by_policy", "manual_gate_required", "internal_error",
     ),
-    "解码层错误：结果显示在对应解码面板内，没有桌面级排查入口": (
-        "missing_iq", "unknown_mode", "missing_sample", "unsupported_format",
-        "decode_error", "not_implemented", "invalid_vcdu", "decode_failed",
-        "unknown_device", "unknown_device_type", "empty_input", "bad_hex",
-        "doppler_failed", "ogn_decode_failed", "schedule_failed", "meta_failed",
+    "解码层细项：code 只出现在解码器/服务端返回值，桌面解码卡不渲染该码": (
+        "missing_iq", "unknown_device_type", "empty_input",
     ),
-    "录音库/回放细项：在录音与回放面板内展示，没有独立帮助条目": (
+    "录音库/回放细项：桌面录制走硬件 MCP、回放直接读 IQ 文件；该模块无桌面调用方，code 不进入 UI": (
         "file_missing", "bad_field", "bad_param", "entry_not_found",
         "dest_missing", "not_found", "library_not_found", "library_busy",
         "unsupported_kind", "io", "io_error", "wav_error", "missing",
@@ -80,12 +69,12 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "playback_failed", "bad_parameter", "tx_source_deleted",
         "tx_source_failed",
     ),
-    "TLE 细项（限流/HTTP/解析）：在卫星面板内展示；超时与不可达已有帮助条目": (
+    "TLE 细项（限流/HTTP/解析）：卫星面板只显示通用提示，不渲染 code；超时与不可达已有帮助条目": (
         "rate_limited", "http_4xx", "http_5xx", "network_other",
         "parse_failure", "empty_response", "tle_unknown",
     ),
-    "AI 面板内部错误：在对话里展示，没有独立帮助条目": (
-        "agent_busy", "cancelled", "llm_offline", "llm_rate_limited",
+    "AI 模型调用细项：对话只显示 message 原文，不渲染 code；无按 code 定位入口": (
+        "llm_offline", "llm_rate_limited",
         "llm_http_4xx", "llm_http_5xx", "llm_timeout", "llm_unreachable",
         "llm_unexpected",
     ),

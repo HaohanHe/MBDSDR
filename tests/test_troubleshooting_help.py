@@ -4,7 +4,8 @@
 ========================
 
 钉住的红线：
-  * 15 条条目现象/原因逐字来自 ``mbdsdr_ai.error_catalog``（不是手抄错误清单）；
+  * 15 条精选 + 桌面 UI 可见码条目，现象/原因逐字来自
+    ``mbdsdr_ai.error_catalog``（不是手抄错误清单）；
   * 每条「下一步」≥8 字、不含空话、必须点到具体控件名或设置项键名；
   * 搜「没声音」「静噪」都能命中；面板非模态、可搜索；
   * 反证：塞一条「请检查配置」的假条目 → ``validate_remedies`` 必须返回错误。
@@ -22,7 +23,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 from mbdsdr_ai.error_catalog import ERRORS  # noqa: E402
 from troubleshooting import (  # noqa: E402
-    CURATED_CODES, Remedy, _ui_keys_and_terms, build_remedies,
+    CURATED_CODES, VISIBLE_CODES, Remedy, _ui_keys_and_terms, build_remedies,
     concrete_refs, search_remedies, validate_remedies,
 )
 
@@ -39,10 +40,11 @@ def qapp():
     yield app
 
 
-def test_remedies_are_fifteen_real_catalog_entries(remedies):
-    assert len(remedies) == 15
-    assert len({r.code for r in remedies}) == 15
-    assert {r.code for r in remedies} == set(CURATED_CODES)
+def test_remedies_are_real_catalog_entries(remedies):
+    expected = set(CURATED_CODES) | set(VISIBLE_CODES)
+    assert len(remedies) == len(expected)
+    assert len({r.code for r in remedies}) == len(expected)
+    assert {r.code for r in remedies} == expected
     for r in remedies:
         spec = ERRORS[r.code]
         assert r.symptom == spec.message, (
@@ -91,11 +93,11 @@ def test_help_panel_has_searchable_troubleshooting_tab(qapp, remedies):
     assert not dlg.isModal()
     titles = [dlg.tabs.tabText(i) for i in range(dlg.tabs.count())]
     assert titles == ["三步上手", "能力目录", "怎么办"]
-    assert dlg.visible_remedy_count() == 15
+    assert dlg.visible_remedy_count() == len(remedies)
 
     dlg.tabs.setCurrentIndex(2)
     dlg.trouble_search_edit.setText("没声音")
-    assert 0 < dlg.visible_remedy_count() < 15
+    assert 0 < dlg.visible_remedy_count() < len(remedies)
 
     dlg.trouble_search_edit.setText("静噪")
     assert dlg.visible_remedy_count() >= 1

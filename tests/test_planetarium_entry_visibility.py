@@ -185,3 +185,42 @@ def test_overlay_avoids_ai_bar_only_on_intersection(window, qtapp):
     w._position_planetarium_overlay()
     assert strip.y() == 12, f"回到宽屏必须回上 12，实际 y={strip.y()}"
     assert not strip_rect().intersects(bar_rect())
+
+
+def test_send_controls_clickable_at_every_width(window, qtapp):
+    """任何窗口宽度下发送路径都可点：命令栏输入框/麦克风不被浮层遮挡。
+
+    命令栏本身没有独立「发送」按钮——回车即发送；可点的发送控件是
+    ``cmd_input``（回车）与 ``cmd_mic_btn``。AI 面板另有 ``send_btn``，
+    这里同时钉住它的 enabled（页签可见性由 Dock 布局另测）。
+    """
+    w, mw = window
+    w.set_app_mode("planetarium")
+    qtapp.processEvents()
+    sky = w.sky_view
+    strip = w._planetarium_strip
+    bar = w._ai_cmd_bar
+
+    def strip_rect():
+        return QRect(strip.x(), strip.y(), strip.width(), strip.height())
+
+    for width in (640, 720, 800, 888, 960, 1000, 1120, 1280, 1440, 1600):
+        sky.resize(width, sky.height())
+        bar.setFixedWidth(min(width - 40, 560))
+        bar.move((width - bar.width()) // 2, 16)
+        w._position_planetarium_overlay()
+        qtapp.processEvents()
+
+        assert w.cmd_input.isVisible() and w.cmd_input.isEnabled(), (
+            f"宽 {width}：命令栏输入框（回车发送）必须可点")
+        assert w.cmd_mic_btn.isVisible() and w.cmd_mic_btn.isEnabled(), (
+            f"宽 {width}：命令栏麦克风按钮必须可点")
+        # 浮层不得盖住输入框中心/右端（否则点击会被浮层截走）。
+        for pt in (w.cmd_input.rect().center(),
+                   w.cmd_input.rect().topRight()):
+            sky_pt = sky.mapFromGlobal(w.cmd_input.mapToGlobal(pt))
+            assert strip_rect().contains(sky_pt) is False, (
+                f"宽 {width}：浮层压住了输入框可点区域 {pt.x()},{pt.y()}")
+        btn = getattr(w.ai_panel, "send_btn", None)
+        assert btn is not None and btn.isEnabled(), (
+            f"宽 {width}：AI 助手发送按钮必须可用")

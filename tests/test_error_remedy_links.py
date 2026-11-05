@@ -37,7 +37,8 @@ def test_every_catalog_code_is_registered():
     """每个 error_catalog code：有条目，或显式登记「不出入口 + 原因」。"""
     assert error_remedy.mapping_gaps() == []
     assert error_remedy.mapping_overlaps() == []
-    assert set(error_remedy.REMEDY_BY_CODE) == set(CURATED_CODES)
+    # 精选 15 条必须仍在；其余是「桌面 UI 真会渲染 code」的可见码。
+    assert set(CURATED_CODES) <= set(error_remedy.REMEDY_BY_CODE)
     for code, reason in error_remedy.NO_ENTRY_REASONS.items():
         assert code in ERRORS, f"{code} 不在 error_catalog 里"
         assert reason.strip(), f"{code} 的「不出入口」原因为空"
@@ -60,6 +61,19 @@ def test_remedy_mapping_is_one_to_one():
         assert name
         assert name not in names, f"两个 code 映射到同一条目：{name}"
         names[name] = code
+
+
+def test_visible_catalog_entries_copy_message_and_meaning_verbatim():
+    """可见码新增条目：现象/原因必须逐字取目录，下一步必须点到控件。"""
+    from troubleshooting import (
+        VISIBLE_CODES, build_remedies, validate_remedies,
+    )
+    for code in VISIBLE_CODES:
+        remedy = error_remedy.remedy_for_code(code)
+        assert remedy is not None, f"{code} 登记为可见却没有条目"
+        assert remedy.symptom == ERRORS[code].message
+        assert remedy.cause == ERRORS[code].meaning
+    assert validate_remedies(build_remedies()) == []
 
 
 def test_codes_without_entry_have_no_link(qapp):

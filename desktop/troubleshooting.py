@@ -5,9 +5,11 @@
 
 条目来源不是手写错误清单：现象与原因**逐字取自**
 ``mbdsdr_ai/error_catalog.py`` 的 ``ERRORS[code].message / .meaning``。
-本模块只做两件事：
+本模块只做三件事：
 
   * 挑出 15 条最高频/最高价值的错误码（``CURATED_CODES``）；
+  * 把「桌面 UI 真会渲染 code 字面量」的目录错误码按族补成条目
+    （``VISIBLE_BY_FAMILY``，现象/原因仍逐字取自目录）；
   * 给每条写「下一步」——必须点到具体控件名或设置项键名，禁止
     「请检查配置 / 请排查环境」这类空话（``validate_remedies`` 会红）。
 
@@ -137,6 +139,66 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
     "empty_signal": ("静噪", "静噪太紧", "没声音", "信号太弱"),
 }
 
+#: 「桌面 UI 真会渲染 code 字面量」的目录错误码，按族共享一条具体下一步。
+#:
+#: 判据（逐条链路证据见回报）：AI 助手步骤卡在 ai_panel._append_step_card
+#: 渲染 ``错误 {step.error}``，``step.error`` 就是 ToolResult.error 的 code
+#: 原文；状态面板解码卡在 status_panel.format_decode_result 渲染
+#: ``错误码 {code}: ...``。只有这两条通道会显示 code 字面量，其余 code
+#: 只出现在日志/库 API/服务端返回值，仍登记为「不出入口」。
+VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
+    "工具参数": (
+        "tool_not_found", "tool_unavailable", "invalid_arguments_type",
+        "invalid_arguments", "missing_required_params", "param_type_mismatch",
+        "param_out_of_range", "param_not_in_enum", "invalid_json_arguments",
+        "invalid_rs_shape", "empty_taps",
+    ),
+    "工具执行": (
+        "handler_error", "exception", "empty_result_without_reason",
+        "compose_failed", "gimbal_stop_failed", "no_rssi",
+        "offline_or_api_error", "recording_not_found", "subagent_not_found",
+    ),
+    "AI 会话": ("agent_busy", "cancelled"),
+    "设备能力": (
+        "device_unavailable", "ptt_not_on", "capability_unknown", "NEED_HW",
+    ),
+    "解码工具": (
+        "invalid_vcdu", "decode_failed", "unknown_device", "doppler_failed",
+        "ogn_decode_failed", "schedule_failed", "meta_failed", "bad_hex",
+    ),
+    # 状态面板解码卡显式映射了这 5 个 code（DECODE_ERROR_LABELS）。
+    "解码结果": (
+        "unknown_mode", "missing_sample", "unsupported_format",
+        "decode_error", "not_implemented",
+    ),
+}
+
+#: 每个族一条「下一步」：必须点到具体控件名，禁止空话。
+VISIBLE_NEXT_STEPS: Dict[str, str] = {
+    "工具参数": (
+        "在「AI 助手」页签把任务拆成单个工具调用，按「能力目录」里的参数名、"
+        "类型与取值范围重发；不要原样重复同一组坏参数。"),
+    "工具执行": (
+        "在「AI 助手」页签改用「能力目录」里标记已接线的工具重试；涉及硬件的"
+        "先在「控制」页签点「连接设备...」确认设备在线。"),
+    "AI 会话": (
+        "在「AI 助手」页签等当前这一轮跑完（或先点停止）后再发送同一条指令，"
+        "避免在上一轮未结束时连续追问。"),
+    "设备能力": (
+        "先在「控制」页签用「连接设备...」连上真实设备并核对采样率/增益读数；"
+        "无硬件时改用「能力目录」里标注只读的工具，不要伪造发射或采样。"),
+    "解码工具": (
+        "在「AI 助手」页签改用「能力目录」里已接线的解码工具，并把输入换成"
+        "完整样本；采样率与增益到「控制」页签核对后重试。"),
+    "解码结果": (
+        "在「状态」页签看「解码结果」卡片，换用可用模式或完整样本；采样率与"
+        "输入格式到「控制」页签核对后重试。"),
+}
+
+#: 上述各族的扁平索引（测试与映射完整性检查用）
+VISIBLE_CODES: Tuple[str, ...] = tuple(
+    code for codes in VISIBLE_BY_FAMILY.values() for code in codes)
+
 #: 空话黑名单：出现即视为没给下一步
 BANNED_PHRASES: Tuple[str, ...] = (
     "请检查配置", "请排查环境", "检查一下配置", "排查环境",
@@ -213,7 +275,11 @@ def validate_remedies(remedies: Sequence[Remedy],
 
 
 def build_remedies() -> List[Remedy]:
-    """从真实错误目录生成 15 条「怎么办」（顺序即 CURATED_CODES）。"""
+    """从真实错误目录生成条目：15 条精选 + UI 可见码按族补齐。
+
+    现象/原因一律逐字取 ``ERRORS[code].message / .meaning``；下一步按族
+    复用一条具体指引。精选码若同时出现在可见族，只保留精选条目。
+    """
     out: List[Remedy] = []
     for code in CURATED_CODES:
         spec = ERRORS[code]
@@ -225,6 +291,18 @@ def build_remedies() -> List[Remedy]:
             next_step=NEXT_STEPS[code],
             aliases=ALIASES.get(code, ()),
         ))
+    for group, codes in VISIBLE_BY_FAMILY.items():
+        for code in codes:
+            if code in CURATED_CODES:
+                continue
+            spec = ERRORS[code]
+            out.append(Remedy(
+                code=code,
+                group=group,
+                symptom=spec.message,
+                cause=spec.meaning,
+                next_step=VISIBLE_NEXT_STEPS[group],
+            ))
     return out
 
 
