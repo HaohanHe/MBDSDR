@@ -22,7 +22,8 @@
 运行期间不要有其它线同时修改 `build/*.json` 或 `src/05|12|13-*.js`。
 
 `--simulate-crash` 是测试开关：跑完第一个生成器后 `os._exit(137)`，用于反证
-「中断后备份仍可恢复」，不参与正常发布检查。
+「中断后备份仍可恢复」。**只有显式传该参数才会进入这个分支；日常 `--check`
+路径永不触发 `os._exit`，发布前不会误触。**
 """
 from __future__ import annotations
 
@@ -181,7 +182,8 @@ def main() -> int:
     ap.add_argument("--restore", action="store_true",
                     help="只按 .build-json-backup/ 恢复上次中断留下的产物")
     ap.add_argument("--simulate-crash", action="store_true",
-                    help="测试开关：跑完第一个生成器后硬退出，验证备份可恢复")
+                    help="测试开关：跑完第一个生成器后硬退出，验证备份可恢复"
+                         "（仅显式传参时触发；--check 不会走到该分支）")
     args = ap.parse_args()
 
     if args.restore:

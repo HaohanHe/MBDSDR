@@ -409,9 +409,10 @@ python web/product/tests/verify_build_json.py --check
 留在磁盘；下次运行会先自动恢复再继续检查，也可手工执行
 `python web/product/tests/verify_build_json.py --restore`。
 2026-11-06 实测：正向 10/10 一致，本机约 2 秒；手工往 `sat-tracks.json`
-注入一个空格 → 返回 1 并打印 DRIFT；`--simulate-crash` 在第一个生成器后
-硬退出 → 返回 137、3 个文件已变脏、`READY` 在位；`--restore` 后 10 个文件
-sha 全部回到原值、备份目录清空；再跑 `--check` 也能先自动恢复。
+注入一个空格 → 返回 1 并打印 DRIFT；`--simulate-crash`（仅手工显式传参，
+`--check` 路径不会触发）在第一个生成器后硬退出 → 返回 137、3 个文件已变脏、
+`READY` 在位；`--restore` 后 10 个文件 sha 全部回到原值、备份目录清空；
+再跑 `--check` 也能先自动恢复。
 `tests/verify_product.py` 另钉内容红线：`starCount>10000`、HYG 许可/SHA、
 `notVerified` 条数、`satCount`/`count` 下限、`caseCount≥6` 且事实源为
 `celestial_geometry.py`。`build/astro-golden.json` 与
@@ -433,9 +434,14 @@ horizon / dateHorizon / ofDate / temeToJ2000 四类向量；容差为矩阵 `1e-
 向量 `1e-10`、GMST `1e-8` 度；另钉章动 `|dpsi| ∈ (0.1″, 30″)` 与总矩阵保长
 （`1e-10`）。2026-11-06 实测 `worst 3.33e-16 (horizon 2461500/40.7 ra=300[2])`
 → **一致**，距向量容差还有约 5 个数量级。前端与 selftest 已作为同一笔提交
-`3d0735e5` 入库；但 HEAD 上 `run_all.py` / `scaffold.py` / `index.html` /
-`verify_product.py` 的 astro 接线仍是别线在途（M），所以这条对拍目前需手动跑，
-尚未被全链自动调用。
+`3d0735e5` 入库。
+
+**现行状态（2026-11-06，不是待办）**：这条对拍目前是**手动运行**
+（`node web/product/tests/astro_selftest.js`），因为 `run_all.py` /
+`scaffold.py` / `index.html` / `verify_product.py` 四处接线在工作区仍是别线
+在途（`M`），HEAD 里没有。解除条件：这四处随所属线落库后，改由 `run_all.py`
+的第 4 步（金标准）与第 10 步（selftest）驱动，本节改为「全链自动」；接线细节与
+验收输出见 `docs/pending-patches/2026-11-06-handoff-astro-wiring.md`。
 
 ---
 
