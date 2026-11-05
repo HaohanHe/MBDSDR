@@ -810,6 +810,115 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 - 不静默重试；重试必须可数、可停、可解释。
 - 设备被占用（如 `LIBUSB_ERROR_ACCESS`）必须给用户可执行建议，不循环重连。
 
+### 10.7 健壮性架构（可诊断、可降级、可验证）
+
+> 本节只写**当前代码里存在的机制**，每条给 `文件:符号` 或提交 hash；没实现的写"未接入/待补"，不写"应该有"。
+> 验收判据尽量给可执行命令；做不到自动化的，明确标"待补自动化"并给出可复现的手工步骤。
+
+#### 10.7.1 启动自检与缺件分类
+
+| 机制 | 实现位置 | 实际行为 |
+|---|---|---|
+| 私有模块冒烟 | `desktop/main.py:_RISKY_IMPORTS`（13 项）、`_run_import_smoke` | 在创建 `QApplication` 之前逐项 `importlib.import_module`；结果写成 `[smoke] 私有模块导入自检 n/13 通过`，失败项列名，**不阻断启动** |
+| 缺件归因三分类 | `desktop/main.py:_packaging_verdict`、`_import_error_text` | `defect`（安装包从未打进，属打包问题）/ `incomplete`（安装包里有但被删或被隔离）/ `unknown`（判不了），三类文案与行动建议不同 |
+| Qt 平台插件判定 | `desktop/main.py:_qt_platform_plugin_problem` | 仅 Windows 生效；区分"平台插件缺失"与一般启动失败 |
+| 日志落点策略 | `desktop/startup_paths.py:log_candidates` / `startup_log_path` / `append_startup_log` | 候选顺序：`MBDSDR_STARTUP_LOG` 覆盖 → 各固定/可移动盘 `X:\mbdsdr\logs\` → 程序目录 `logs\` → `%PROGRAMDATA%\MBDSDR\logs\`；**不写用户目录**；全不可写时回退内存环形缓冲（200 行），`startup_log_path()` 返回空串 |
+| 异步可写探测 | `desktop/startup_paths.py:probe_dir_writable_async` | 探针线程 + 回调，避免安装目录/网络盘写入卡 UI |
+| 运行库自检 | `desktop/startup_paths.py:runtime_dll_report`、`desktop/main.py:_report_runtime_dlls` | 查 `_PACKAGED_DLLS=(librtlsdr.dll, libusb-1.0.dll)` 与 `_OPTIONAL_DLLS=(SoapySDR.dll)`；分 `missing_packaged` / `missing_optional` |
+
+**已知限制（必须写进结论）**：`desktop/startup_paths.py:_dll_search_dirs` 把 `PATH` 各目录计入搜索范围，所以报告只能说明"本机某处有"，**不能证明"随包携带"**；系统级 DLL 会掩盖安装包缺件。对外只说"本机缺少"，不说"安装包缺件"。
+
+**验收**
+- AC-R1（已有自动化）：`QT_QPA_PLATFORM=offscreen python -m pytest tests/test_startup_log_policy.py -q` 全绿。`test_runtime_dll_report_finds_and_misses` 用临时目录构造"缺/不缺"两种布局，精确断言两个列表；`test_candidates_never_under_user_profile` 钉住日志不落用户目录。
+- AC-R2（可复跑脚本）：源码启动一次，启动日志出现 `[smoke] 私有模块导入自检 13/13 通过`；人为改名任一私有模块后重启，日志列出该模块名，主窗口仍能打开。
+- AC-R3（已有自动化）：`tests/test_startup_log_policy.py::test_all_unwritable_uses_memory_buffer` 断言三处都不可写时回退内存缓冲且不抛异常。
+- 提交：`c295423`（ProgramData 日志兜底、异步可写探测、运行库 DLL 自检）。
+
+#### 10.7.2 进程/线程边界
+
+**契约**（`desktop/receive_pipeline.py:DemodWorker`）
+- 可预期单帧异常 `_FRAME_ERRORS=(ValueError, IndexError, FloatingPointError)` 与设备边界 `_DEVICE_ERRORS=(OSError, RuntimeError)` → `_report_demod_failure`：**2 秒限流**，一条 warning + 一次 `demod_failed` 信号，然后继续跑。
+- 编程错误（其余 `Exception`）→ `_report_unexpected`：`log.exception` 保留完整栈 + `demod_failed` + `_running=False`，`run()` 干净退出；**不越过 QThread 边界**。
+- 读线程断源：`IqReaderThread.STALL_TIMEOUT_S=1.0` + `read_failed`；按时间判定而非固定次数（Windows `msleep` 粒度约 15ms）。
+
+**已知例外（未收口）**：`desktop/receive_pipeline.py:FftWorker.run` 对 `self._gen.push_iq(...)` 与 `frame_ready.emit` 都是 `except Exception: pass`。频谱计算失败时既无 warning 也无信号，违反红线 2，列为待补。
+
+**验收**
+- AC-R4（已有自动化）：`python -m pytest tests/test_demod_worker_failure_visibility.py -q` 全绿（4 条：恰好 1 次上报且线程继续；helper 层编程错误原样上抛；`run()` 捕获后干净退出；连发 20 块只 1 条 warning）。
+- AC-R5（已有自动化）：`python -m pytest tests/test_s8_backend_loss.py tests/test_backend_resilience.py -q` 全绿。`test_s8_backend_loss.py` 8 条覆盖：后端异常上报为断开、陈旧数据不依赖信号、未连接态、新鲜数据保持、宽限期不误报、未知新鲜度交给信号路径、尚无帧不算丢、短停顿只警告且第三次才断开。
+- AC-R6（待补）：给 `FftWorker` 注入抛异常的 `push_iq` → 应有 1 次可见失败信号；当前无信号、无测试，不算通过。
+- 提交：`52cc888`（接收链单帧失败可见化）；`7f518fe`（掉线如实断开）。
+
+#### 10.7.3 外部接入降级
+
+| 场景 | 已实现 | 未接入 / 限制 |
+|---|---|---|
+| rtl_tcp 断链 | `mbdsdr_ai/rtltcp_client.py:RtlTcpClient.link_state`（`mbdsdr_ai/link_state.py` 五态）、`_mark_stale`（空闲超时）、`_mark_disconnected`（带 category）、`connect()` 重连前先释放旧 socket | 无自动重连循环；断链经 `read_failed` 上报后拆除连接，由用户点"连接" |
+| SpyServer 断链 | `mbdsdr_ai/spyserver_client.py:SpyServerClient.link_state/_mark_stale/read_samples`；`SpyServerBackend.connect` 重连前释放旧 client 与 ring reader | 同上；`_reconnect_count` 只是指标字段，当前未见递增逻辑 |
+| 重连状态机 | `mbdsdr_ai/reconnection.py:ReconnectionManager`、`compute_backoff`：1/2/4/8/16/30s，达上限 `gave_up` | **桌面端未接入**：除 tests/scripts 外没有 import；当前断链 = 拆除 + 手动重连 |
+| 设备热插拔 | `mbdsdr_ai/device_manager.py:DeviceManager.start_monitor` 轮询 + `added/removed` 回调 | **桌面端未调用 `start_monitor`**；现有替代是启动枚举 `_auto_enumerate_and_connect` + 手动刷新 |
+| 无设备横幅 | `desktop/main_window.py:_show_no_rtl_hint` + `_NO_SDR_HINT`；离线 `MBDSDR_OFFLINE=1` 不碰 USB，也走同一文案 | 无 |
+
+**验收**
+- AC-R7（已有自动化）：`python -m pytest tests/test_reconnection.py tests/test_reconnection_e2e.py -q` 全绿；`test_default_reconnect_is_bounded_not_infinite` 断言总等待有上限且必然 `gave_up`。
+- AC-R8（已有自动化）：`python -m pytest tests/test_backend_resilience.py -q` 全绿：loopback 假服务制造拒绝连接/半开/掉线/RST，断言 `link_state` 与真实数据流一致。
+- AC-R9（库层已有，桌面待补）：`python -m pytest tests/test_device_manager.py::test_monitor_callback_no_crash -q` 通过。桌面接入判据：拔掉正在收的设备 → 4s 内横幅/状态栏显示"已断开"并保留最后真实频点；**当前无调用方，故不算通过**。
+- AC-R10（已有自动化）：`python -m pytest tests/test_no_device_onboarding.py::test_no_device_banner_is_plain_and_actionable -q` 通过：横幅含"没找到 SDR 设备"、可能原因、下一步。
+- AC-R11（待补）：自动重连接入后，断网 30s 内状态依次 `retrying → gave_up`；重连成功回填真实频率（不得回填 0 Hz，`4abde1a` 已修假 0 Hz）。
+
+#### 10.7.4 诚实性红线（可执行定义）
+
+| 红线 | 实现 | 被钉死的方式 |
+|---|---|---|
+| 补偿量未知显示"—" | `desktop/main_window.py:format_doppler_status` | `tests/test_doppler_readout.py:test_python_branch_null_amount_shows_dash_not_zero`、`test_empty_status_is_unknown_not_zero` |
+| 哨兵与可测范围不相交 | `desktop/spectrum_widget.py:SpectrumGenerator._resample_max`：空段填 `np.nan`（注释明示"不是 -120 dBFS"） | 代码注释；自动化待补（AC-R13） |
+| 失败不落盘 | `d0445ba`：调谐/增益/模式失败不提交 UI/配置 | `tests/test_tune_failure_no_commit.py` |
+| 未连接不暴露假可控 | `desktop/main_window.py:_panels_set_sdr_connected`：禁用调谐/模式/录音控件、频率显示「—」、频谱上方引导横幅 | `tests/test_no_device_onboarding.py` |
+| 假成功零容忍 | `mbdsdr_ai/agent.py:_ntp`（工具名 `time_sync_ntp`）：`reachable is False` → `ToolResult(False, "NTP 查询失败…")`，不写成功 | 代码路径；自动化待补（AC-R15） |
+| 发射能力不冒充 | `desktop/main_window.py:ptt_state`：`verified` 只读，未验证显示"真机未验证" | `d0b585a` 文案区分未连接/不支持 |
+
+**验收**
+- AC-R12（已有自动化）：`python -m pytest tests/test_doppler_readout.py -q` 全绿（8 条）。
+- AC-R13（待补自动化）：脚本直接调 `SpectrumGenerator._resample_max`，构造"3 个 bin 只有 1 个有样本"→ 输出必须含 `nan`，峰检测不得落 nan。当前只有代码注释。
+- AC-R14（已有自动化）：`python -m pytest tests/test_tune_failure_no_commit.py -q` 全绿（`d0445ba`）。
+- AC-R15（待补）：给 `_ntp` 注入 `reachable=False`，断言 `ToolResult.success is False` 且无"已同步"文案。
+
+#### 10.7.5 测试隔离
+
+| 机制 | 实现位置 | 作用 |
+|---|---|---|
+| 真实配置零写入 | `tests/test_ui_settings_isolation_guard.py`；会话级 `real_config_snapshot` 在 `tests/conftest.py:pytest_configure` / `pytest_unconfigure` 比对 sha256 + mtime_ns + 目录清单 | 任何测试写坏 `%APPDATA%\mbdsdr\desktop_settings.json` 都会让本会话红 |
+| 禁止真模态 | `tests/test_modal_dialog_guard.py`：拦 `QMessageBox.exec` / `QDialog.exec` / 静态文件对话框，默认返回 No/取消并记 `[mbdsdr-modal]` | offscreen/CI 不会挂在无人点的弹窗上 |
+| Qt 全局锁 | `tests/conftest.py` 文件锁，最长等 300s；`MBDSDR_TEST_LOCK=0` 关闭、`MBDSDR_TEST_LOCK_TIMEOUT` 调整 | 两个 pytest 不并行抢 Qt |
+| 内存上限 | `tests/conftest.py` 会话内 RSS 上限（1.8 GB） | 防止用例把整表/整段 IQ 常驻内存 |
+
+**验收**
+- AC-R16（已有自动化）：`python -m pytest tests/test_ui_settings_isolation_guard.py tests/test_modal_dialog_guard.py -q` 全绿。
+- AC-R17（可复跑脚本）：跑完代表性 UI 子集后 `git status --porcelain` 与 `%APPDATA%\mbdsdr` 目录清单均无变化。
+- AC-R18（可复跑脚本）：两个终端并发启动 pytest，第二个进入等待而非并行开 Qt；`MBDSDR_TEST_LOCK=0` 时可并行（反向证明锁生效）。
+- 提交：`7d19ea9`（禁止真模态 + 禁止写真实配置）。
+
+#### 10.7.6 打包可诊断
+
+- 三分类判定：`desktop/main.py:_packaging_verdict` 返回 `defect` / `incomplete` / `unknown`；`_import_error_text` 只在"路径不匹配 / 私有模块缺失 / 杀软隔离"三种特征下判"安装不完整"，其余保持 unknown。
+- 缺件弹窗原文与判定一一对应，不含"启动失败，请重试"这类无信息文案。
+- DLL 报告：`missing_packaged` 触发用户可见提示；`missing_optional` 只提示可选能力（SoapySDR）。
+- 限制：见 10.7.1，`PATH` 计入搜索范围，不能把"本机有"当成"包内有"。
+
+**验收**
+- AC-R19（已有自动化）：`python -m pytest tests/test_startup_log_policy.py::test_runtime_dll_report_finds_and_misses -q` 通过。
+- AC-R20（手工判据 + 待补自动化）：移走 `_internal` 下任一 scipy 私有子模块 → 弹窗走"安装不完整"文案；把随包 DLL 只放到 `PATH` 目录 → 仍报 `missing_packaged`（证明不把 PATH 当随包证据）。
+- AC-R21（可复跑脚本）：打包产物启动后，启动日志可定位且含 `[smoke]` 行；缺失即判失败；`missing_packaged` 非空时必须同时有用户可见提示。
+
+#### 10.7.7 待定项（谁在等什么）
+
+| 待定项 | 当前状态 | 谁在等什么 | 锚点 |
+|---|---|---|---|
+| AC-08.5 真模型回归阈值 | **未拍板，当前不设阈值** | 等用户拍板；需真实 provider key + ≥40 条语料先跑出基线，才有阈值可谈 | §6 AC-08.5 |
+| 真机七环 R6（数字解码） | 6/7 已验，R6 `UNVERIFIABLE` | 等 R820T 系棒（FC0012 上限 948.6 MHz < 1090 MHz）；或等 NOAA/Meteor 窗口 | `docs/real_hw_acceptance_20261103.md` R6 |
+| TX 真机验证 | 部分具备 TX 的后端已有驱动级实现；当前无 `verified=True` 的后端 | 等具备 TX 的设备 + 用户授权 + 假负载；`ptt_state` 持续显示"真机未验证" | `desktop/main_window.py:ptt_state` |
+| 1366×768 布局验收 | 高度差 71px 未解决 | 等用户拍板窄屏方案（是否扣任务栏、是否隐藏菜单栏） | `docs/design-basis.md` 第 6 条、`docs/narrow-screen-plan.md` |
+
 ---
 
 ## 11. 里程碑与风险

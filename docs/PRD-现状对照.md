@@ -142,6 +142,38 @@ python scripts/tool_availability_audit.py
 python scripts/ui_interaction_audit.py
 $env:MBDSDR_OFFLINE=1; python -m pytest mbdsdr_ai/tests/test_offline_behavior_audit.py -q
 python -m pytest tests/test_sky_dual_loops.py tests/test_sky_time_lock.py tests/test_sky_readouts.py -q
+python -m pytest tests/test_startup_log_policy.py tests/test_demod_worker_failure_visibility.py tests/test_backend_resilience.py tests/test_ui_settings_isolation_guard.py tests/test_modal_dialog_guard.py -q
 ```
 
 > 行号随提交浮动；本表引用 2026-11-04 当前工作树。审计文档 `docs/interaction-flows.md` 的缺陷行号可能滞后于已修代码，以本表"证据"列的当前行号为准。
+
+---
+
+## 7. 健壮性架构实现对照（2026-11-05）
+
+> 对应 PRD §10.7。口径：**已实现** = 代码存在且有自动化用例；**已实现（缺测试）** = 代码存在但只算"实现存在"；**未接入** = 库层已实现、桌面端没有调用方；**待定** = 等外部条件或用户拍板。
+
+| 类别 | 判定 | 证据（文件:符号 / hash） | 翻不动的原因 |
+|---|---|---|---|
+| 启动自检、日志落点、DLL 报告 | **已实现** | `desktop/main.py:_RISKY_IMPORTS/_run_import_smoke/_packaging_verdict/_report_runtime_dlls`；`desktop/startup_paths.py:runtime_dll_report`；`tests/test_startup_log_policy.py`；`c295423` | — |
+| 缺件三分类弹窗 | **已实现（缺自动化）** | `main.py:_packaging_verdict`、`_import_error_text` | 三分类无单测，只能按 PRD AC-R20 手工判 |
+| 线程边界：可预期异常限流上报 | **已实现** | `receive_pipeline.py:DemodWorker._report_demod_failure/_report_unexpected`；`tests/test_demod_worker_failure_visibility.py`；`52cc888` | — |
+| 线程边界：编程错误停线程不上抛 | **已实现** | 同上，`_report_unexpected` → `_running=False` | — |
+| 读线程断源上报 | **已实现** | `IqReaderThread.STALL_TIMEOUT_S=1.0/read_failed`；`main_window.py:_on_pipeline_read_failed`；`7f518fe` | — |
+| FFT worker 异常可见 | **未收口** | `receive_pipeline.py:FftWorker.run` 两处 `except Exception: pass` | 无 warning/信号，需先补 `frame_failed` |
+| rtl_tcp / SpyServer 链路状态（stale/disconnected） | **已实现** | `rtltcp_client.py:link_state/_mark_stale/_mark_disconnected`；`spyserver_client.py:link_state/_mark_stale`；`tests/test_backend_resilience.py` | — |
+| 自动重连 | **未接入（库已实现）** | `reconnection.py:ReconnectionManager`；`tests/test_reconnection.py`、`test_reconnection_e2e.py` | 桌面端无 import/调用；断链仍是拆除 + 手动连接 |
+| 设备热插拔 | **未接入（库已实现）** | `device_manager.py:DeviceManager.start_monitor`；`tests/test_device_manager.py` | `main_window.py` 无 `start_monitor` 调用 |
+| 无设备横幅 | **已实现** | `main_window.py:_show_no_rtl_hint/_NO_SDR_HINT`；`tests/test_no_device_onboarding.py` | — |
+| 补偿量未知显示"—" | **已实现** | `main_window.py:format_doppler_status`；`tests/test_doppler_readout.py` | — |
+| 哨兵 NaN 与可测范围不相交 | **已实现（缺测试）** | `spectrum_widget.py:SpectrumGenerator._resample_max` | 无自动化用例 |
+| 失败不落盘 | **已实现** | `d0445ba`；`tests/test_tune_failure_no_commit.py` | — |
+| NTP 不可达不报成功 | **已实现（缺测试）** | `agent.py:_ntp`（`time_sync_ntp`） | 无自动化用例 |
+| 发射能力不冒充 | **已实现** | `main_window.py:ptt_state`；`d0b585a` | 部分 TX 后端有驱动级实现；当前无 `verified=True`，属真机待验 |
+| 测试隔离（真实配置零写入） | **已实现** | `tests/test_ui_settings_isolation_guard.py`、`tests/conftest.py:pytest_configure`；`7d19ea9` | — |
+| 测试隔离（禁止真模态） | **已实现** | `tests/test_modal_dialog_guard.py`；`7d19ea9` | — |
+| 测试隔离（Qt 全局锁） | **已实现** | `tests/conftest.py` 文件锁 + 300s 等待 | 无自动用例，按 AC-R18 脚本判 |
+| AC-08.5 阈值 | **待定** | PRD §6 AC-08.5 | 等用户拍板 |
+| 真机七环 R6 | **待定（UNVERIFIABLE）** | `docs/real_hw_acceptance_20261103.md` R6 | FC0012 上限 948.6 MHz < 1090 MHz |
+| TX 真机验证 | **待定** | `main_window.py:ptt_state` | 等设备 + 授权 + 假负载；当前无 `verified=True` |
+| 1366×768 布局验收 | **待定** | `docs/design-basis.md` 第 6 条 | 等用户拍板窄屏方案 |
