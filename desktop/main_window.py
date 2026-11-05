@@ -4845,9 +4845,6 @@ class MainWindow(QMainWindow):
             return
         if real_db is None:
             return
-        mp = getattr(self, "module_panel", None)
-        if mp is not None:
-            mp.set_rf_params(gain_db=real_db)
         cp = getattr(self, "control_panel", None)
         if cp is not None:
             cp.set_gain_applied(real_db)
