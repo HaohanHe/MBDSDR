@@ -29,6 +29,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
     QDoubleSpinBox, QSlider, QFrame, QMenu, QSplitter, QToolTip, QPushButton,
+    QToolButton, QWidgetAction,
 )
 
 try:
@@ -2180,52 +2181,63 @@ class SpectrumPanel(QWidget):
             lambda t: self.generator.set_fft_size(int(t)))
         bar.addWidget(self._fft_combo)
 
-        bar.addWidget(QLabel("平均:"))
+        # 窄屏重排：自「平均」起不再常驻工具栏，统一收进「更多 ⋯」菜单。
+        # 控件本体不删、信号接线不变；QWidgetAction 直接承载原控件，
+        # 「原来在栏上 → 现在在菜单里」仍可操作，属性名也不变（测试照旧可取）。
+        more_rows: list[QWidget] = []
+
+        def _row(*widgets: QWidget) -> QWidget:
+            holder = QWidget()
+            hl = QHBoxLayout(holder)
+            hl.setContentsMargins(8, 3, 8, 3)
+            hl.setSpacing(6)
+            for w_ in widgets:
+                hl.addWidget(w_)
+            hl.addStretch(1)
+            return holder
+
+        avg_label = QLabel("平均:")
         self._avg_combo = QComboBox()
         self._avg_combo.addItems([str(a) for a in SpectrumDataGenerator.AVG_FRAMES])
         self._avg_combo.setCurrentText("1")
         self._avg_combo.currentTextChanged.connect(
             lambda t: self.generator.set_avg_frames(int(t)))
-        bar.addWidget(self._avg_combo)
+        more_rows.append(_row(avg_label, self._avg_combo))
 
         # 性能模式（高/均衡/低）：切换 FFT 点数 / 谱线数 / 刷新间隔
-        bar.addWidget(QLabel("性能:"))
+        perf_label = QLabel("性能:")
         self._perf_combo = QComboBox()
         self._perf_combo.addItems(["高", "均衡", "低"])
         self._perf_combo.setCurrentIndex(0)
         self._perf_combo.currentIndexChanged.connect(self.set_performance_mode)
-        bar.addWidget(self._perf_combo)
+        more_rows.append(_row(perf_label, self._perf_combo))
 
         # 瀑布调色板（默认低饱和 / SDR++ 经典蓝-青-绿-黄-红）
-        bar.addWidget(QLabel("调色板:"))
+        palette_label = QLabel("调色板:")
         self._palette_combo = QComboBox()
         self._palette_combo.addItems(["默认", "经典SDR++"])
         self._palette_combo.currentIndexChanged.connect(self._on_palette_changed)
-        bar.addWidget(self._palette_combo)
+        more_rows.append(_row(palette_label, self._palette_combo))
 
         # 瀑布时间平滑（IIR，仅影响瀑布显示）
         self._wf_smooth_chk = QCheckBox("瀑布平滑")
         self._wf_smooth_chk.setChecked(False)
         self._wf_smooth_chk.toggled.connect(self._on_wf_smooth_toggled)
-        bar.addWidget(self._wf_smooth_chk)
 
         self._peak_chk = QCheckBox("峰值")
         self._peak_chk.setChecked(True)
         self._peak_chk.toggled.connect(
             lambda on: setattr(self._state, "show_peaks", bool(on)))
-        bar.addWidget(self._peak_chk)
 
         # Max/Min hold 包络（SDR++ maxHold/minHold 复选框签名）
         self._maxhold_chk = QCheckBox("Max保持")
         self._maxhold_chk.setToolTip(
             "Max hold：逐 bin 保留历史最高电平包络（抓瞬时 burst/峰值轮廓）")
         self._maxhold_chk.toggled.connect(self.generator.set_max_hold)
-        bar.addWidget(self._maxhold_chk)
         self._minhold_chk = QCheckBox("Min保持")
         self._minhold_chk.setToolTip(
             "Min hold：逐 bin 保留历史最低电平包络（看噪声底下沿/底噪漂移）")
         self._minhold_chk.toggled.connect(self.generator.set_min_hold)
-        bar.addWidget(self._minhold_chk)
 
         # 书签竖旗开关（gqrx 书签标签；标签本体由主窗口 set_bookmarks 灌入）
         self._bookmark_chk = QCheckBox("书签")
@@ -2235,7 +2247,6 @@ class SpectrumPanel(QWidget):
         self._bookmark_chk.toggled.connect(
             lambda on: (setattr(self._state, "show_bookmarks", bool(on)),
                         self._redraw()))
-        bar.addWidget(self._bookmark_chk)
 
         # 频段彩带开关（SDR++ bandplan 仿妆；条目在 desktop/bandplan.json）
         self._bandplan_chk = QCheckBox("频段")
@@ -2246,7 +2257,12 @@ class SpectrumPanel(QWidget):
         self._bandplan_chk.toggled.connect(
             lambda on: (setattr(self._state, "show_bandplan", bool(on)),
                         self._redraw()))
-        bar.addWidget(self._bandplan_chk)
+
+        # 每行 3 个开关，菜单总高控制在 ~3 行（窄屏纵向也省）
+        more_rows.append(_row(self._wf_smooth_chk, self._peak_chk,
+                              self._maxhold_chk))
+        more_rows.append(_row(self._minhold_chk, self._bookmark_chk,
+                              self._bandplan_chk))
 
         gate_label = QLabel("峰值门(相对本帧中位):")
         gate_label.setObjectName("peakGateLabel")
@@ -2254,7 +2270,6 @@ class SpectrumPanel(QWidget):
             "门限 = 本帧全部有限 bin 的中位数 + 该值（不是 dBFS 绝对电平）。\n"
             "示例：中位数 −72 dBFS → 门限 −66 dBFS（+6.0 dB）。")
         gate_label.setToolTip(gate_tip)
-        bar.addWidget(gate_label)
         self._peak_spin = QDoubleSpinBox()
         self._peak_spin.setObjectName("peakGateSpin")
         self._peak_spin.setRange(1.0, 30.0)
@@ -2266,7 +2281,7 @@ class SpectrumPanel(QWidget):
         self._peak_spin.setToolTip(gate_tip)
         self._peak_spin.valueChanged.connect(
             lambda v: setattr(self._state, "peak_rel_db", float(v)))
-        bar.addWidget(self._peak_spin)
+        more_rows.append(_row(gate_label, self._peak_spin))
 
         # 调谐模式（SDR++ 调谐模式按钮同原语；gqrx 中键 / SDR# Center 亦是）
         self._tune_mode_btn = QPushButton("调谐:中心")
@@ -2276,7 +2291,26 @@ class SpectrumPanel(QWidget):
             "中心模式：点击谱面重调硬件中心频率（画面跟过去）\n"
             "VFO 模式：点击只移动当前 VFO，画面不动（瀑布保留多信号轨迹）")
         self._tune_mode_btn.toggled.connect(self._on_tune_mode_toggled)
-        bar.addWidget(self._tune_mode_btn)
+        more_rows.append(_row(self._tune_mode_btn))
+
+        # 「更多 ⋯」入口：常驻工具栏只多这一个按钮（约 70px），
+        # 换来 ②③ 与 ① 的平均/性能共 11 个控件不再占宽。
+        self._more_btn = QToolButton()
+        self._more_btn.setText("更多")
+        self._more_btn.setObjectName("spectrumMoreButton")
+        self._more_btn.setPopupMode(QToolButton.InstantPopup)
+        self._more_btn.setToolTip(
+            "频谱显示选项：平均 / 性能 / 调色板 / 瀑布平滑 / 峰值 / Max·Min 保持 / "
+            "书签 / 频段 / 峰值门 / 调谐模式")
+        more_menu = QMenu(self._more_btn)
+        more_menu.setToolTipsVisible(True)
+        for row in more_rows:
+            act = QWidgetAction(more_menu)
+            act.setDefaultWidget(row)
+            more_menu.addAction(act)
+        self._more_btn.setMenu(more_menu)
+        self._more_menu = more_menu
+        bar.addWidget(self._more_btn)
 
         bar.addStretch(1)
 

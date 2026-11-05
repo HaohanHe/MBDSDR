@@ -39,7 +39,8 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 from PySide6.QtGui import QFontMetrics  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication, QComboBox, QDoubleSpinBox, QFrame, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QSlider, QToolBar, QToolButton, QWidget,
+    QPushButton, QCheckBox, QSlider, QStyle, QTabWidget, QToolBar, QToolButton,
+    QWidget,
 )
 
 
@@ -251,10 +252,10 @@ def main() -> int:
         spacing = bar.spacing() * max(0, len(items) - 1)
         margins = bar.contentsMargins().left() + bar.contentsMargins().right()
         groups = {
-            "① 窗/FFT/平均/性能": widgets[0:8],
-            "② 调色板/瀑布平滑/峰值/Max/Min/书签/频段": widgets[8:16],
-            "③ 峰值门/调谐": widgets[16:19],
-            "④ 只读读数": widgets[19:],
+            "① 常驻 窗/FFT": widgets[0:4],
+            "更多菜单入口": widgets[4:5],
+            "②③ 已折叠（不在工具栏，见 toolTip）": [],
+            "④ 只读读数": widgets[-4:],
         }
         if not args.json:
             print(f"minimumSizeHint = {spec.minimumSizeHint().width()}"
@@ -325,6 +326,98 @@ def main() -> int:
               f"差 {tb.height() - (max(child_h) if child_h else 0)} = "
               f"QStyle 上下边距；tokens 里没有 toolbar_h 键）")
     result["height"] = h
+
+    # ---------- 4c. 左栏页签拆账（高度主矛盾：514 是谁撑的） ----------
+    lt = getattr(win, "left_tab", None)
+    left_report: dict = {}
+    if lt is not None:
+        tabbar = lt.tabBar()
+        pages = []
+        for i in range(lt.count()):
+            pw = lt.widget(i)
+            rows = []
+            playout = pw.layout()
+            if playout is not None:
+                for j in range(playout.count()):
+                    it = playout.itemAt(j)
+                    cw = it.widget()
+                    if cw is None:
+                        continue
+                    rows.append({"label": _label_of(cw),
+                                 "text": _text_of(cw),
+                                 "min_hint_h": cw.minimumSizeHint().height(),
+                                 "min_h": cw.minimumHeight()})
+            pages.append({
+                "title": lt.tabText(i),
+                "minimum_height": pw.minimumHeight(),
+                "minimum_size_hint": pw.minimumSizeHint().height(),
+                "size_hint": pw.sizeHint().height(),
+                "rows": rows,
+            })
+        left_report = {
+            "tab_bar_height": tabbar.height(),
+            "tab_bar_min_hint": tabbar.minimumSizeHint().height(),
+            "tab_widget_min_hint": lt.minimumSizeHint().height(),
+            "pages": pages,
+        }
+        if not args.json:
+            print(f"  左栏 tabBar 高 {tabbar.height()}（minHint "
+                  f"{tabbar.minimumSizeHint().height()}）｜tabWidget minHint "
+                  f"{lt.minimumSizeHint().height()}")
+            for p in pages:
+                print(f"    页 {p['title']}: minHint {p['minimum_size_hint']}"
+                      f" hint {p['size_hint']}")
+                for r in p["rows"]:
+                    print(f"      行 {r['label']:<24} minHintH={r['min_hint_h']:>4}"
+                          f" minH={r['min_h']:>4} {r['text']!r}")
+    result["leftDock"] = left_report
+
+    # ---------- 4d. 工具栏 icon-only / 页签图标化的实测（只量 sizeHint） ----------
+    probe: dict = {}
+    try:
+        ico = win.style().standardIcon(QStyle.SP_MediaPlay)
+        text_btn = QPushButton("连接")
+        icon_btn = QPushButton()
+        icon_btn.setIcon(ico)
+        icon_btn.setToolTip("连接")
+        cb = QComboBox()
+        cb.addItems(["FM"])
+        text_tabs = QTabWidget()
+        for t in ("天空模式", "卫星跟踪", "频谱"):
+            text_tabs.addTab(QWidget(), t)
+        icon_tabs = QTabWidget()
+        for t in ("天空模式", "卫星跟踪", "频谱"):
+            icon_tabs.addTab(QWidget(), ico, "")
+            icon_tabs.setTabToolTip(icon_tabs.count() - 1, t)
+        probe = {
+            "text_button_hint_h": text_btn.sizeHint().height(),
+            "icon_button_hint_h": icon_btn.sizeHint().height(),
+            "combo_hint_h": cb.sizeHint().height(),
+            "text_tabbar_hint_h": text_tabs.tabBar().sizeHint().height(),
+            "icon_tabbar_hint_h": icon_tabs.tabBar().sizeHint().height(),
+            "icon_tabbar_min_hint_h": icon_tabs.tabBar().minimumSizeHint().height(),
+            "toolbar_current_h": tb.height(),
+        }
+        if not args.json:
+            print(f"  icon-only 实测：文字按钮 {probe['text_button_hint_h']} → "
+                  f"仅图标 {probe['icon_button_hint_h']}（combo "
+                  f"{probe['combo_hint_h']}）；页签文字 "
+                  f"{probe['text_tabbar_hint_h']} → 图标 "
+                  f"{probe['icon_tabbar_hint_h']}")
+    except Exception as exc:  # 探针失败不影响主账
+        probe = {"error": repr(exc)}
+        if not args.json:
+            print(f"  探针失败：{exc!r}")
+    result["probe"] = probe
+
+    # ---------- 4e. 状态栏/菜单栏的下限 ----------
+    result["chrome_floor"] = {
+        "menu_bar_min_hint": win.menuBar().minimumSizeHint().height(),
+        "status_bar_min_hint": win.statusBar().minimumSizeHint().height(),
+    }
+    if not args.json:
+        print(f"  菜单栏 minHint {result['chrome_floor']['menu_bar_min_hint']}"
+              f"｜状态栏 minHint {result['chrome_floor']['status_bar_min_hint']}")
 
     # ---------- 4b. 1625 到底谁撑的（隐藏对照实验） ----------
     def _win_min() -> tuple[int, int]:
