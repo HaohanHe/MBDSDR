@@ -202,7 +202,10 @@ class ControlPanel(QWidget):
         """
         try:
             from touch_helpers import apply_touch_target
-        except Exception:
+        except Exception as exc:
+            # 边界：touch_helpers 属可选平台辅助模块；缺失时按钮保持原尺寸
+            logger.debug("touch_helpers 不可用，跳过触屏目标尺寸: %s: %s",
+                         type(exc).__name__, exc)
             return
         for name in ("tune_button", "bookmark_add_btn", "bookmark_del_btn",
                      "record_button"):
@@ -221,8 +224,10 @@ class ControlPanel(QWidget):
                     if view is not None:
                         view.setVerticalScrollMode(
                             QAbstractItemView.ScrollMode.ScrollPerPixel)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # 边界：Qt 视图滚动模式设置失败不影响触屏可用性
+                    logger.debug("下拉像素滚动设置失败: %s: %s",
+                                 type(exc).__name__, exc)
         for name in ("freq_input",):
             w = getattr(self, name, None)
             if w is not None:
@@ -1022,18 +1027,21 @@ class ControlPanel(QWidget):
         self._bookmark_store = mgr
 
     def _remove_bookmark_persisted(self, name: str) -> None:
-        """把一次删除真正写到磁盘。仓库不可用/删不到时静默跳过，不打断 UI。"""
+        """把一次删除真正写到磁盘。仓库不可用/删不到时只记日志，不打断 UI。"""
         store = getattr(self, "_bookmark_store", None)
         if store is None:
             try:
                 from mbdsdr_ai.frequency_manager import FrequencyManager
                 store = FrequencyManager()
-            except Exception:
+            except Exception as exc:
+                logger.warning("书签仓库初始化失败，本次删除不落盘: %s: %s",
+                               type(exc).__name__, exc)
                 return
         try:
             store.remove(str(name))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("书签删除落盘失败（UI 已移除，重启会复现）: %s: %s",
+                           type(exc).__name__, exc)
 
     @Slot(int)
     def _on_bookmark_selected(self, index: int):
