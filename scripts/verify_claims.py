@@ -8,7 +8,7 @@
 
 三步验证：
 
-  1. ``git cat-file -e <hash>^{commit}``
+  1. ``git cat-file -e <hash>^{commit}``（纯数字 hash 也走这一步；真日期解析失败即丢弃）
   2. ``git show --name-only --format= <hash> -- <path>`` 必须命中声明路径
   3. ``git log -S <字面量> --oneline -- <path>`` 必须命中同一 hash
 
@@ -134,9 +134,21 @@ def _literal_candidates(text: str, hashes: List[str], target: str) -> List[str]:
     return []
 
 
-def _hashes(text: str) -> List[str]:
-    """取候选 commit hash；纯数字是日期/行号（如 20260919），不是提交。"""
-    return [t for t in HASH_RE.findall(text) if any(c in "abcdef" for c in t)]
+def _hashes(text: str, root: Optional[Path] = None) -> List[str]:
+    """取候选 commit hash，并区分「纯数字真 hash」与日期/行号。
+
+    形状无法区分 ``12610725``（真提交）和 ``20261106``（日期），所以纯数字
+    候选一律交给 ``git cat-file -e`` 试解析：能解析成 commit 才收；真日期解析
+    失败即丢弃，仍按「无 hash」判，不会把日期当证据。误报代价是每个纯数字
+    7–40 位候选一次 git 调用（通常每行 0–1 次）。
+    """
+    out: List[str] = []
+    for t in HASH_RE.findall(text):
+        if any(c in "abcdef" for c in t):
+            out.append(t)
+        elif root is not None and _commit_exists(root, t):
+            out.append(t)
+    return out
 
 
 def classify(text: str, root: Path, heading: str = "") -> Claim:
@@ -147,7 +159,7 @@ def classify(text: str, root: Path, heading: str = "") -> Claim:
     只借用标题里的定位，不跨段落借用 hash/字面量。
     """
     c = Claim(doc="", line=0, text=text.strip())
-    hashes = _hashes(text)
+    hashes = _hashes(text, root)
     targets = PATHLINE_RE.findall(text) or PATHLINE_RE.findall(heading)
     if not hashes:
         c.status = NO_HASH

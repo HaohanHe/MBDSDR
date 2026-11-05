@@ -111,6 +111,19 @@ def test_path_may_come_from_nearest_heading(tmp_path):
     assert claims[0].target == "src/foo.py:1"
 
 
+def test_all_digit_hash_is_recognised():
+    """真提交 12610725 全为数字；旧的「纯数字=日期」过滤会把它永久判成无 hash。"""
+    c = vc.classify(
+        "已统一 — `12610725` — `cpp/src/core/tokens.h:301` — `kDefaultSampleRateHz`", ROOT)
+    assert c.commit == "12610725"
+
+
+def test_all_digit_date_is_not_a_hash():
+    """反向：20261106 形状合法但不是 commit，必须仍判「无 hash」，不能当证据。"""
+    c = vc.classify("20261106 已修复", ROOT)
+    assert c.status == vc.NO_HASH
+
+
 def test_repo_docs_have_no_dangling_hash():
     claims = vc.verify_docs(ROOT)
     bad = [c for c in claims if "不存在或不是 commit" in c.reason]
