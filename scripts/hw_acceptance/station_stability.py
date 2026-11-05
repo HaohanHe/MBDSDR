@@ -35,12 +35,30 @@ from pathlib import Path
 import numpy as np
 
 import common
-from ring2_spectrum_waterfall import FLOOR_DRIFT_MAX_DB
 
 FS = 2.4e6
 MPX_FS = 200000
 SEG_N = 65536
 DEFAULT_GAIN = 17.9  # FC0012 的固定档位之一（实测可选 -9.9/-4.0/7.1/17.9/19.2 dB）
+
+
+def _floor_drift_threshold_db() -> float:
+    """取 ring2 当前的噪声底阈值；缺失时给可读原因，不要裸 ImportError。
+
+    该常量在 ``hw: R2 噪声底漂移阈值重定`` 那一笔才引入。``a19f506e`` 单笔
+    checkout 时它还不存在（历史已推送、不改写），所以在使用点做延迟导入：
+    模块本身永远可导入，缺常量时只影响 ``floor`` 的汇总字段。
+    """
+    try:
+        from ring2_spectrum_waterfall import FLOOR_DRIFT_MAX_DB
+    except ImportError as e:
+        raise SystemExit(
+            "station_stability: 读不到 ring2_spectrum_waterfall.FLOOR_DRIFT_MAX_DB。"
+            "该常量在 b2f95ac6（R2 阈值重定）引入；若你在 a19f506e 这类单笔旧提交上"
+            "checkout，请按序 checkout a19f506e → b2f95ac6，或用更新的提交。"
+            f"（原始错误：{e}）"
+        ) from e
+    return FLOOR_DRIFT_MAX_DB
 
 
 def _mpx_chunk(x: np.ndarray, fs: float) -> np.ndarray:
@@ -239,7 +257,7 @@ def cmd_floor(args) -> int:
         "drift_db_range": round(max(drifts) - min(drifts), 2) if drifts else None,
         "drift_db_mean": round(float(np.mean(drifts)), 2) if drifts else None,
         "drift_db_sd": round(float(np.std(drifts, ddof=1)), 2) if len(drifts) > 1 else None,
-        "current_threshold_db": FLOOR_DRIFT_MAX_DB,
+        "current_threshold_db": _floor_drift_threshold_db(),
     }
     if drifts:
         summary["threshold_from_distribution_1p5x_max"] = round(1.5 * max(drifts), 2)

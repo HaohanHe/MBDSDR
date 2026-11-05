@@ -150,14 +150,25 @@ def test_old_decimation_would_report_the_alias():
     assert abs(f_old - 18841.0) < 5.0, f"旧法读数 {f_old:.1f} Hz（预期 18841）"
 
 
-def test_floor_drift_threshold_is_derived_from_distribution():
-    """10 次同台同增益实测 4.22–6.81 dB（mean+3σ=8.14）→ 阈值为 8.5，不许放宽到 1.5×max。"""
+def test_floor_drift_threshold_inside_measured_envelope():
+    """阈值必须落在 (6.81, 1.5×6.81) 内：既不能假红，也不能放宽。
+
+    6.81 是 10 次同台同增益实测的最大极差；1.5×6.81 是「1.5 倍实测最大极差」口径。
+    反证：把 ring2.FLOOR_DRIFT_MAX_DB 临时改成 6.0 → 第一条断言红；
+    改成 10.2 → 第二条断言红。
+    """
     thr = ring2.FLOOR_DRIFT_MAX_DB
-    assert thr == 8.5
-    assert thr > 6.81, "阈值必须覆盖 10 次实测的最大极差"
-    assert thr < 1.5 * 6.81, "阈值比「1.5×实测最大极差」还松，属于为好看放宽"
-    # 旧的 6 dB 会把这批分布里 2 次正常观测判红（反证阈值不是拍的）。
-    assert 6.81 > 6.0 and 6.49 > 6.0
+    assert thr > 6.81, (
+        f"阈值 {thr} dB 没覆盖 10 次实测的最大极差 6.81 dB，正常观测会假红")
+    max_1p5x = round(1.5 * 6.81, 1)  # 10.2：1.5 倍口径的上界（取到 0.1 dB）
+    assert thr < max_1p5x, (
+        f"阈值 {thr} dB ≥ 1.5×实测最大极差 {max_1p5x} dB，属于为好看放宽")
+
+
+def test_floor_drift_threshold_matches_recorded_derivation():
+    """钉住具体值：mean+3σ=8.14 → 取 0.5 dB 粒度上界 8.5（与 docs §6.3 一致）。"""
+    assert ring2.FLOOR_DRIFT_MAX_DB == 8.5
+
 
 
 def test_both_suites_share_the_same_floor_threshold():

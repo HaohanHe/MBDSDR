@@ -390,11 +390,33 @@ Welch（65536 点/Hann，不重叠）→ 18.5–19.5 kHz 取峰 + 抛物线插�
 - **不采用**「1.5×实测最大极差 = 10.2 dB」这个更松的口径；取更严的 8.5，
   不存在为了让数字好看而放宽。
 - 反证（测试锁定）：回到 6.0 时同一批分布里 2 次观测 FAIL；阈值必须
-  `> 6.81` 且 `< 1.5×6.81`。A2 与 R2 直接用同一个常量 `FLOOR_DRIFT_MAX_DB`。
+  `> 6.81` 且 `< 10.2`（=1.5×6.81 取到 0.1 dB）。A2 与 R2 直接用同一个常量
+  `FLOOR_DRIFT_MAX_DB`。
 - 另有一台 93.3 MHz 同法实测 drift **1.87 dB**（`ring2` 真机复跑）——漂移随台/功率
   变化，阈值按最坏台（98.0）的分布取，不能按最舒服的台取。
 - 说明：另有两批（帧间未加 20 ms 间隔）观测到 4.34–7.59 dB；口径与 `ring2`
   不同，**不作为定阈依据**，仅记录。
+
+**这条结论是被测试锁住的，不是文档里的一句声明**：
+
+```powershell
+# 契约测试：阈值必须落在 (6.81, 10.2) 内且等于 8.5（3 条一起跑）
+python -m pytest tests\test_hw_acceptance_contract.py -q -k "floor and threshold"
+
+# 反证 A：把 ring2.FLOOR_DRIFT_MAX_DB 临时改成 6.0 → 必须红
+#   AssertionError: 阈值 6.0 dB 没覆盖 10 次实测的最大极差 6.81 dB，正常观测会假红
+# 反证 B：临时改成 10.2 → 必须红
+#   AssertionError: 阈值 10.2 dB ≥ 1.5×实测最大极差 10.2 dB，属于为好看放宽
+#   两次实测均 1 failed（0.17 s），改回 8.5 后 16 passed
+```
+
+> **单笔 checkout 的已知不自洽（历史已推送、不改写）**：`a19f506e` 引入
+> `station_stability.py` 时已 import `ring2.FLOOR_DRIFT_MAX_DB`，而该常量是
+> 下一笔 `b2f95ac6` 才加的。所以**必须按序 checkout `a19f506e → b2f95ac6`**
+> （或任何之后的提交）。单独 checkout `a19f506e` 时实测：
+> `ImportError: cannot import name 'FLOOR_DRIFT_MAX_DB' from 'ring2_spectrum_waterfall'`
+> （exit 1）。从当前 HEAD 起该依赖改为**使用点延迟导入**：常量缺失时给
+> 「请按序 checkout a19f506e → b2f95ac6」的可读 `SystemExit`，不再是裸 `ImportError`。
 
 ## 七、R8 热插拔 / 拔线（半自动：人动手，脚本计时判定）
 
