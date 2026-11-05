@@ -87,5 +87,14 @@ DeviceCapabilities noDeviceCapabilities();
 // excluded automatically.
 QList<double> buildSampleRateOptions(const DeviceCapabilities& caps);
 
+// Status for the option list above, so an EMPTY array is never mistaken for
+// "the device has zero rates". One of:
+//   "ok"              -- real device, at least one candidate tier in range
+//   "no_device"       -- not connected (no range to filter against)
+//   "range_unknown"   -- connected but the driver did not report a rate range
+//   "no_tier_in_range"-- connected with a real range, but no candidate tier fits
+QString sampleRateOptionsStatus(const DeviceCapabilities& caps,
+                                const QList<double>& options);
+
 } // namespace dsp
 } // namespace mbdsdr

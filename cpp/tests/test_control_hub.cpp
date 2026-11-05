@@ -1372,6 +1372,13 @@ void TestControlHub::capabilitiesAndRecordingStateReadBack() {
     QVERIFY(c.value("tunable_max_hz").isDouble());
     QVERIFY(c.value("sample_rate_min_hz").isDouble());
     QVERIFY(c.value("sample_rate_max_hz").isDouble());
+    // get_capabilities must WIRE the device-range-derived option list, not just
+    // expose the raw min/max. With no hardware the list is empty AND the status
+    // says why -- an empty array alone would read as "zero supported rates".
+    QVERIFY(c.value("sample_rate_options_hz").isArray());
+    QCOMPARE(c.value("sample_rate_options_hz").toArray().size(), 0);
+    QCOMPARE(c.value("sample_rate_options_status").toString(),
+             QStringLiteral("no_device"));
     QVERIFY2(c.value("provenance").toString().contains(QStringLiteral("测试信号")),
              qPrintable("test source must be labelled, got: " +
                         c.value("provenance").toString()));

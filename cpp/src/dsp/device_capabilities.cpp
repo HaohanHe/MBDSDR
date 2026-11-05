@@ -43,7 +43,10 @@ constexpr double kCandidateRatesHz[] = {
     2160000.0,   // standard PLL config the desktop/11-tier list already ships
     2400000.0,
     2560000.0,
-    2880000.0,   // 2.88 MS/s (was 2.8 MS/s here: same physical quantity, -80 kHz)
+    2880000.0,   // 2.88 MS/s：2.8 不是可独立的速率点——真机请求 2,800,000 被硬件
+                 // 吸附到 2,880,000（读回 +80,000 Hz，E3 实测，见
+                 // docs/limitations-register.md 附 M.4 L60），故候选表只列设备
+                 // 实际给出的值，不列虚构的 2.8 档
     3200000.0,
 };
 
@@ -131,6 +134,15 @@ QList<double> buildSampleRateOptions(const DeviceCapabilities& caps) {
         out.push_back(r);
     }
     return out;
+}
+
+QString sampleRateOptionsStatus(const DeviceCapabilities& caps,
+                                const QList<double>& options) {
+    if (!caps.connected) return QStringLiteral("no_device");
+    if (!(caps.sampleRateMaxHz > caps.sampleRateMinHz))
+        return QStringLiteral("range_unknown");
+    if (options.isEmpty()) return QStringLiteral("no_tier_in_range");
+    return QStringLiteral("ok");
 }
 
 } // namespace dsp

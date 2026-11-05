@@ -134,6 +134,8 @@
 
 ## 附录 C：组 4 采样率档位（方案 C 已裁定，实现未落；参数治理线 2026-11-05）
 
+> **11-05 快照，已过时；结论以 C.1 表（11 档，含 2.16M / 2.880M）为准。**
+
 > **裁定**：采纳 **方案 C（C++ 4 档 + 250k = 5 档）**，否决 A。
 > **否决 A 的两条**：① A 把 **250k → 1024k（落回 774,000 Hz）**，砍掉唯一低端窄带档——librtlsdr 合法区间是 `(225k,300k]` 且 300k 有死区，250k 是唯一低档；用户设了窄带却被规则拽到 1.024M，带宽 ×4。② 1.536M → 1.024M 是 512k 的大跳。用户明确意图被改写，不能靠回落规则遮过去。
 > **否决 B 的理由同样写清**：1536/1792/1920/2160/2560/2880 六档都落在 librtlsdr 合法区间 900k–3.2M，技术上可用；为了对齐一个 C++ 枚举而把设备本来能做的事从产品里删掉，方向是反的。**B 不现在拍板**：先出代价表（C.5），由用户决定是否补。
@@ -151,11 +153,21 @@
 | `mbdsdr_ai/sdr_backend.py:RTLSDRBackend.SAMPLE_RATES` | 11 | 0.25 / 1.024 / 1.536 / 1.792 / 1.92 / 2.048 / 2.16 / 2.4 / 2.56 / 2.88 / 3.2 M | 桌面下拉的实际来源 |
 | `desktop/control_panel.py:SAMPLE_RATES` | 11 | 同上（`list(RTLSDRBackend.SAMPLE_RATES)`，导入失败才用同值字面量） | 与 `sdr_backend` 0 差 |
 | `cpp/src/core/tokens.h:kSampleRatesHz` | 4 | 1.024 / 2.048 / 2.4 / 3.2 M | 缺 7 档（250k/1536/1792/1920/2160/2560/2880） |
-| `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz` | 11 | 0.25 / 1.024 / 1.536 / 1.792 / 1.92 / 2.048 / **2.16** / 2.4 / 2.56 / **2.88** / 3.2 M | 与桌面 11 档 0 差（2026-11-06 已补 2.16M、把 2.800M 改正为 2.880M，差 80,000 Hz 清零） |
+| `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz` | 11 | 0.25 / 1.024 / 1.536 / 1.792 / 1.92 / 2.048 / **2.16** / 2.4 / 2.56 / **2.88** / 3.2 M | 与桌面 11 档 0 差（2026-11-06 已补 2.16M；2.8M 档改为 2.88M——依据真机读回：请求 2,800,000 被设备吸附到 2,880,000，候选表只列设备实际给出的值，见附 M.4 L60） |
 | `cpp/src/ui/settings_dialog.cpp:srCombo_`（局部 `kRates` 字面量） | 4 | 1.024 / 2.048 / 2.4 / 3.2 M | 与 `tokens` 0 差，但**未引用 tokens，单写一份** |
 | `mobile/lib/app/tokens.dart:AppTokens.sampleRatesHz` | 4 | 1.024 / 2.048 / 2.4 / 3.2 M | 与 C++ tokens 0 差；移动端 `spectrum_page` 对不在集合的值回落到 `.first`（1.024M） |
 
 > 结论修正：旧提法“Python 11 vs C++ 4”只覆盖枚举面。**真实分叉有三类**：① 枚举/首选 4 档 vs 桌面 11 档；② C++ 设备下拉 11 档 vs 桌面 11 档（2026-11-06 已 0 差）；③ 移动端 4 档。方案 C 的 5 档集合要同时收口这三类。
+
+> **越界改动登记（范围外，单独记账；不计入 F1/F2/F3）**：`dd72ba1c` 声明的范围只有
+> F1（档位校验）、F2（写入失败可见）、F3（硬件读回），但同一笔还改了候选档位表：
+> `cpp/src/dsp/device_capabilities.cpp:43` 插入 `2160000.0`、`:46` 把 `2800000.0`
+> 改为 `2880000.0`，并在 `cpp/tests/test_device_capabilities.cpp:117-122` 补三条断言。
+> 超出声明的三条范围，且没有独立提交与独立验收。值保留，但理由必须按实测：
+> **2.8 不是 2.88 的另一种写法，而是设备从不给出的虚构档**（`2800000.0` 由
+> `30214fac` 引入）；真机请求 `2,800,000` 读回 `2,880,000`（+80,000 Hz，E3，见
+> `limitations-register` 附 M.4 L60），故候选表只列设备实际给出值。原注释把它
+> 写成「同一速率的两种拼写」，不成立，已替换为上述实测依据。
 
 ### C.2 方案 C 的 5 档集合与旧值回落映射（`{250k, 1024k, 2048k, 2400k, 3200k}`）
 
@@ -203,7 +215,7 @@
 |---|---|---|---|---|
 | 档位枚举 | `cpp/src/core/tokens.h:kSampleRatesHz` 4→11；`cpp/src/ai/tool_schema.cpp` enum + 描述；`cpp/src/ai/agent_tools.cpp:execSetSampleRate` 校验文案；`cpp/tests/test_tool_schema.cpp` 钉住四档 | **已核实**（四处都在，测试钉死描述文本） | 0.5–1 人日 | 描述/枚举不同步时 AI 工具先红；`test_tool_schema` 需成对更新 |
 | 设置索引 | `cpp/src/ui/settings_dialog.cpp:srCombo_` 局部 `kRates`（4 档）；`rx/sampleRate` 保存/恢复走“最近距离循环”不依赖索引（**已核实**） | 索引风险**已核实**：保存/恢复很安全 | 0.5 人日 | 若改成引用 tokens 表则零风险；不改则两份数继续漂 |
-| 实时设备下拉 | `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz`（11 档）——**已落地**：补 2.160M，2.800M 改正为 2.880M | **已完成**（`test_device_capabilities` 钉住 2160/2880 存在、2800 不存在） | — | 同一物理量两套数（差 80,000 Hz）已清零；不再两档并存 |
+| 实时设备下拉 | `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz`（11 档）——**已落地**：补 2.160M，2.800M 改正为 2.880M | **已完成**（`test_device_capabilities` 钉住 2160/2880 存在、2800 不存在） | — | 2.8M 不是可独立下发的速率点（真机请求 2.8M 读回 2.88M）；候选表按设备实际给出值列 2.88M，不再两档并存 |
 | 扫描带宽 | `dsp::ScanConfig`（`cpp/src/ui/main_window.cpp` 扫描区、`cpp/src/control/control_hub.cpp:cmdStartScanLink`）只吃起止/步进，**不读采样率** | **已核实**：加档不改扫描逻辑 | 0 | 仅 `start_scan_link` 的半窗固定 200 kHz，与采样率无关（见下条 C 专属风险） |
 | 瀑布最小宽度 | `cpp/src/core/tokens.h:kWaterfallMinH=48` 是**高度**；`kSpectrumMinW=480`、`kComboMinW=120` 与档位无关；瀑布列宽随 FFT/窗口自适应 | **已核实**：无按档位变化的最小宽度约束 | 0 | 无新增风险；不要把“最小宽度”当档位预算 |
 | FFT 预算 | `cpp/src/dsp/spectrum_engine.cpp:setFftSize` 只收 1024/2048/4096；帧窗 = FFT size，**不随采样率变** | **已核实**：FFT 与采样率解耦 | 0 | 加档后 bin 宽 = sr/N 自然变化（1.536M/4096≈375 Hz…），非缺陷 |
@@ -332,9 +344,9 @@ constexpr double kCandidateRatesHz[] = {
 | 1920k | 无 | 有 | 拒（4 档） | **档外拒绝** | 有 | RTL 合法 | 同 1536k |
 | 2160k | 无 | **有**（2026-11-06 补） | 拒（4 档） | **档外拒绝** | **有** | RTL 合法（2.16 MS/s） | **内核支持、AI 故意不暴露**（同 1536k）；候选表/下拉已补，桌面可手选 |
 | 2560k | 无 | 有 | 拒（4 档） | **档外拒绝** | 有 | RTL 合法 | 同 1536k |
-| 2880k | 无 | **有**（2026-11-06 由 2.800M 改正） | 拒（4 档） | **档外拒绝** | **有** | RTL 合法（2.88 MS/s） | 同 1536k；2800 vs 2880 的 **80,000 Hz 差已清零** |
+| 2880k | 无 | **有**（2026-11-06 补；2.8M 是设备从不给出的虚构档，真机请求即吸附到 2.88M） | 拒（4 档） | **档外拒绝** | **有** | RTL 合法（2.88 MS/s） | 同 1536k；档位表只列设备实际读回值 |
 
-结论：**7 档全部有明确去向**——5 档（250k/1536/1792/1920/2560）"内核支持、AI 故意不暴露"，理由如上（4 档已进内核候选表与实时下拉，可由桌面手选；AI 面保持 4 档已验证集）；2160/2880 已补进候选表并改正 2.880M，AI 面同样不暴露。没有任何一档是"被夹到最近档"，也没有一档悬空。
+结论：**7 档全部有明确去向**——5 档（250k/1536/1792/1920/2560）"内核支持、AI 故意不暴露"，理由如上（4 档已进内核候选表与实时下拉，可由桌面手选；AI 面保持 4 档已验证集）；2160/2880 已补进候选表（2.8M 按真机读回改为 2.88M），AI 面同样不暴露。没有任何一档是"被夹到最近档"，也没有一档悬空。
 
 **测试不变式（已落，`tests/test_sample_rate_options.py`）**：
 
@@ -385,7 +397,7 @@ constexpr double kCandidateRatesHz[] = {
 
 | 改动文件 | 端 | 内容 | 状态 |
 |---|---|---|---|
-| `cpp/src/control/control_hub.cpp`（status 快照，约 `:1020` `o["sample_rate_hz"]`） | 桌面内核 | 增加 `sample_rate_options_hz: [..]` 与 `sample_rate_options_status: "probed"/"declared"/"unknown"` | 待内核线 |
+| `cpp/src/control/control_hub.cpp`（`cmdGetCapabilities`） | 桌面内核 | 增加 `sample_rate_options_hz: [..]` 与 `sample_rate_options_status`（实际取值 `no_device`/`range_unknown`/`no_tier_in_range`/`ok`，比原方案多一档「有量程但无候选档」） | 已落地（本轮） |
 | `docs/protocol*.md`（控制面消息表） | 协议 | 登记上述两个可选字段；旧客户端忽略即可 | 待内核线 |
 | `mobile/lib/services/control_hub_client.dart` | 移动 | 解析两个新字段，缺省 `unknown` | 待协议落地 |
 | `mobile/lib/services/radio_controller.dart:53/80/302/797` | 移动 | 暴露 `List<double>? sampleRateOptionsHz`；`setSampleRateHz` 校验并抛明确错误 | 待协议落地 |
@@ -402,10 +414,10 @@ constexpr double kCandidateRatesHz[] = {
 | # | 项 | 状态 | 证据 / 阻塞 | 提交 |
 |---|---|---|---|---|
 | 1 | 连接对话框 `sr_combo` 能力化 + 逐档回读/显式拒绝 | **已落地** | 删除 11 档直灌 → `_fill_sr_combo(device)` 按设备能力生成；`_on_sample_rate_changed` 检查 `set_sample_rate` 返回值与回读值：`False` → 状态栏「未被设备接受」+ 回填下拉 + 不落盘；回读≠请求 → 报实际值；`sdr_backend._resolve_applied_sample_rate` 让 `status.sample_rate_hz` 记生效值 | `70429a02` |
-| 2 | 移动端 / 桌面档位来源 | **阻塞（内核未上报档位列表）** | **核对现状**（HEAD `dd72ba1c`）：`cmdGetStatus` 只报回读 `readback_sample_rate_hz` + `sample_rate_readback_available`/`sample_rate_status`/`sample_rate_error`（`cpp/src/control/control_hub.cpp:1016,1024-1027`）；`cmdGetCapabilities` 只报 `sample_rate_min_hz`/`sample_rate_max_hz`（`:1075-1076`）——**无** `sample_rate_options_hz`。`dsp::buildSampleRateOptions(caps)` 已存在（`cpp/src/dsp/device_capabilities.h:81-88`，按真机量程过滤、未连接返空），但 `cmdGetCapabilities` 未调用 → 内核只需一行即可暴露（交内核线）。**真值口径**：「实际生效值」的真值 = 设备回读（已上报）；「哪些档可选」的真值 = 设备候选表（未上报）。桌面 `RTLSDRBackend.SAMPLE_RATES` 11 档与 C++ `kCandidateRatesHz` 11 档是同源静态拷贝、不随设备变化；RTL 合法区间 225001–3200000 覆盖全部 11 档，故对 RTL **当前无差**，差只出现在「连接前（桌面已列、设备候选为空）」与非 RTL / 量程受限设备。Dart 消费侧已改：档位缺失即「未知」并禁用、`ai_tools` 未报告即失败、`AppTokens.sampleRatesHz` 标 `@Deprecated` | `754f64e6`（Dart 消费侧；档位列表仍缺） |
+| 2 | 移动端 / 桌面档位来源 | **内核侧已落地（移动端待接线）** | **核对现状**（HEAD `dd72ba1c`）：`cmdGetStatus` 只报回读 `readback_sample_rate_hz` + `sample_rate_readback_available`/`sample_rate_status`/`sample_rate_error`（`cpp/src/control/control_hub.cpp:1016,1024-1027`）；`cmdGetCapabilities` 只报 `sample_rate_min_hz`/`sample_rate_max_hz`（`:1075-1076`）——**无** `sample_rate_options_hz`。`dsp::buildSampleRateOptions(caps)` 已存在（`cpp/src/dsp/device_capabilities.h:81-88`，按真机量程过滤、未连接返空），但 `cmdGetCapabilities` 未调用 → 内核只需一行即可暴露（交内核线）。**真值口径**：「实际生效值」的真值 = 设备回读（已上报）；「哪些档可选」的真值 = 设备候选表（未上报）。桌面 `RTLSDRBackend.SAMPLE_RATES` 11 档与 C++ `kCandidateRatesHz` 11 档是同源静态拷贝、不随设备变化；RTL 合法区间 225001–3200000 覆盖全部 11 档，故对 RTL **当前无差**，差只出现在「连接前（桌面已列、设备候选为空）」与非 RTL / 量程受限设备。Dart 消费侧已改：档位缺失即「未知」并禁用、`ai_tools` 未报告即失败、`AppTokens.sampleRatesHz` 标 `@Deprecated` | `754f64e6`（Dart 消费侧；档位列表仍缺） |
 | 3 | 逐档回读端到端证据 | **已落地（真机 + 注入双证）** | 新增 `scripts/sample_rate_readback_check.py`：逐档 `set_sample_rate` → 读回 → 判「一致/不一致/被拒」。真机首轮 `LibUSBError LIBUSB_ERROR_IO (-1)` 不可用；复跑成功 12 档：11 一致 + **1 不一致（2.800M→2.880M，+80,000 Hz，硬件/驱动实际吸附被检查抓到）**。另注入三态自证：honest 12/12 一致、clamp 同上一致/不一致分布、reject 11 一致 + 1 被拒（2.800M 拒绝后保持上一档 2.560M）；注入模式会打印「真机不可复跑，以下为注入验证」 | `754f64e6` |
 
-**结论维持「部分统一」**：第 1、3 项已落地（`70429a02`、`754f64e6`；第 3 项真机复跑 12 档 11 一致 + 1 吸附被抓到）；第 2 项只完成消费侧（`754f64e6`）：内核已补「回读可观测」（`sample_rate_readback_available` / `sample_rate_status` / `sample_rate_error` + `readback_sample_rate_hz`），但**仍未上报档位列表**（`buildSampleRateOptions` 存在却未接进 `get_capabilities`）——在此之前移动端只能显示「未知」并禁用选择，属功能性阻塞，状态如实维持「阻塞」，不写「已统一」。本机无 Flutter 工具链，Dart 改动未跑 `flutter analyze` / `flutter test`，未经验证。另 C++ 侧四项（AI 4 档接线、2160/2880 拒绝路径、2800 vs 2880、硬件读回）已由 `dd72ba1c` 落地；上面「回读可观测」即来自该笔。
+**结论维持「部分统一」**：第 1、3 项已落地（`70429a02`、`754f64e6`；第 3 项真机复跑 12 档 11 一致 + 1 吸附被抓到）；第 2 项内核侧已补（`dd72ba1c` 的「回读可观测」 + 本轮的档位列表）：`cmdGetCapabilities` 现已调用 `dsp::buildSampleRateOptions(caps)`，输出 `sample_rate_options_hz` 与 `sample_rate_options_status`（`no_device` / `range_unknown` / `no_tier_in_range` / `ok`，即空数组绝不冒充「零档位」）。**移动端仍未接线**（Dart 消费侧按「字段缺失 → 未知并禁用」写着，未真正读新字段），故不写「已统一」。本机无 Flutter 工具链，Dart 改动未跑 `flutter analyze` / `flutter test`，未经验证。另 C++ 侧四项（AI 4 档接线、2160/2880 拒绝路径、2800 vs 2880、硬件读回）已由 `dd72ba1c` 落地；上面「回读可观测」即来自该笔。
 
 **三份档位表的用途分工（不是矛盾，供重复治理线登记时分开写）**
 
@@ -414,11 +426,11 @@ constexpr double kCandidateRatesHz[] = {
 | `cpp/src/core/tokens.h:kSampleRatesHz` | 4 | **可下发白名单**：档外显式拒绝 | `cpp/src/ai/agent_tools.cpp:execSetSampleRate`；控制面同口径校验已落（`dd72ba1c`，C.9） |
 | `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz` | 11 | **设备候选探测表**：按 librtlsdr 合法区间过滤后供下拉手选，不是下发白名单 | C++ 设备下拉（`device_capabilities`） |
 | `mbdsdr_ai/sdr_backend.py:RTLSDRBackend.SAMPLE_RATES` | 11 | 桌面后端能力表：控制面板/连接对话框的可见档位来源 | `desktop/control_panel.py`、`desktop/main_window.py`、`mbdsdr_ai/device_capabilities.py` |
-| 移动端档位表 | 0（已删） | 改读控制面 `sample_rate_options_hz`，缺失即「未知」并禁用 | 字段待内核线下发（C.11 第 2 项） |
+| 移动端档位表 | 0（已删） | 改读控制面 `sample_rate_options_hz`，缺失即「未知」并禁用 | 字段已下发（本轮，C.11 第 2 项内核侧）；移动端待接线 |
 
 4 档 ≠ 11 档不是「同一物理量两套数」：前者是**允许 AI/控制面下发的正向列表**，后者是**可让用户手选的候选集合**，关系是「白名单 ⊆ 候选」，不是「应相等」。重复治理线登记时请按这两类用途分开，勿合并成一条矛盾。
 
-**证据级别（供 `limitations-register` 附 M.4 L52 引用；本文件不改那份文档）**
+**证据级别（供 `limitations-register` 附 M.4 L60 引用；本文件不改那份文档）**
 
 - 工件：`scripts/sample_rate_readback_check.py`（已入库，`754f64e6`）；命令 `python scripts/sample_rate_readback_check.py --mode real`（`--mode honest|clamp|reject` 为注入）。
 - 真机 12 档 `set→get`：时点 **2026-11-06 01:05–01:10**（结果入账 `7898c689`）。原始 stdout 当时落 `D:\mbdsdr\.tmp\rb_real.txt`，按临时文件当删纪律**已删除、未入库**（无 SHA256）→ **E3 不可复跑**（按 `docs/evidence-standard.md`：只能作历史线索，引用须带「当时有证据、现不可复跑」）。

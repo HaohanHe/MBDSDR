@@ -546,11 +546,13 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 ### M.4 C++ 内核采样率「失败可见 + 硬件读回」证据（2026-11-06，内核线追加）
 
+> 编号说明（2026-11-06，与限制总账 owner 对齐）：本附表原用 L50–L52，与附 O 的 L50–L52 撞号；按「全表编号唯一」规则改为 **L58–L60**，内容不变。
+
 | 编号 | 条目 | 证据 | 现状 | 边界（必须照实说） |
 | --- | --- | --- | --- | --- |
-| L50 | **C++ 侧采样率写入失败此前不可见** | 旧形态：`cpp/src/dsp/rtl_sdr_source.cpp` 运行时 `setSampleRate` 调 `rtlsdr_set_sample_rate` 不看返回值；`control_hub.cpp:cmdSetSampleRate` 只 `needDbl` 后回填请求值 | **已修**：`RtlSdrSource::pushSampleRate` 检查 rc；rc≠0 **保留原采样率**、记 `sampleRateError_`、`qWarning`，并由 `SpectrumEngine` 发 `sourceError`；`control_hub::set_sample_rate` 按 `tokens::kSampleRatesHz` 逐档比对、档外显式拒绝（与 `agent_tools.cpp:3342-3354` 同文案） | 注入反证：`test_rtl_sdr_tune.cpp:sampleRateRcFailureIsVisible/FailsStart`（假 ops 返回 `-22`）；`test_control_hub.cpp:setSampleRateRejectsOutOfTier` |
-| L51 | **硬件采样率读回此前被当作「不可用」** | 实测：`C:\Users\xxhzb\src\librtlsdr\include\rtl-sdr.h` 声明 `uint32_t rtlsdr_get_sample_rate(rtlsdr_dev_t*)`（注释 “Get actual sample rate the device is configured to”）；`librtlsdr.c` 中 `rtlsdr_set_sample_rate` 末尾把**真实速率**写回 `dev->rate`，`rtlsdr_get_sample_rate` 直接返回它。`build-local/CMakeCache.txt` 锁定该移植树（`C:\Users\xxhzb\src\librtlsdr`） | **已用**：`rtl_sdr_ops.h` 新增 `getSampleRate`（追加在结构体末尾，旧位置初始化自动为 null）；`RtlSdrSource` 写入后读回，不一致时同时报「请求值/读回值」；`get_status` 增加 `sample_rate_readback_available` / `sample_rate_status` / `sample_rate_error` | 读回是**驱动自报值**（已含 PPM 修正、取整），不是独立时钟测量；ops 表无该项（旧假表/无 RTL 后端）时状态串必须是「采样率=请求值，硬件读回不可用」，**禁止**把请求值伪装成读回值。反证：`test_rtl_sdr_tune.cpp:sampleRateReadbackMismatchIsExposed/UnavailableIsHonest` |
-| L52 | **真机逐档读回仍未做** | 同 M.2 步 1/3/4：需直插 RTL 实机逐档 `set → get` 并记 dropped；本轮仅代码与假设备注入验证 | **未核实（真机）** | 11 档候选表 / 4 档 AI 控制面的「驱动接受」可以在假设备上证明，但「硬件真的跑到该速率」只能真机证明；未跑前不得对外称「硬件已读回验证」 |
+| L58 | **C++ 侧采样率写入失败此前不可见** | 旧形态：`cpp/src/dsp/rtl_sdr_source.cpp` 运行时 `setSampleRate` 调 `rtlsdr_set_sample_rate` 不看返回值；`control_hub.cpp:cmdSetSampleRate` 只 `needDbl` 后回填请求值 | **已修**：`RtlSdrSource::pushSampleRate` 检查 rc；rc≠0 **保留原采样率**、记 `sampleRateError_`、`qWarning`，并由 `SpectrumEngine` 发 `sourceError`；`control_hub::set_sample_rate` 按 `tokens::kSampleRatesHz` 逐档比对、档外显式拒绝（与 `agent_tools.cpp:3342-3354` 同文案） | 注入反证：`test_rtl_sdr_tune.cpp:sampleRateRcFailureIsVisible/FailsStart`（假 ops 返回 `-22`）；`test_control_hub.cpp:setSampleRateRejectsOutOfTier` |
+| L59 | **硬件采样率读回此前被当作「不可用」** | 实测：`C:\Users\xxhzb\src\librtlsdr\include\rtl-sdr.h` 声明 `uint32_t rtlsdr_get_sample_rate(rtlsdr_dev_t*)`（注释 “Get actual sample rate the device is configured to”）；`librtlsdr.c` 中 `rtlsdr_set_sample_rate` 末尾把**真实速率**写回 `dev->rate`，`rtlsdr_get_sample_rate` 直接返回它。`build-local/CMakeCache.txt` 锁定该移植树（`C:\Users\xxhzb\src\librtlsdr`） | **已用**：`rtl_sdr_ops.h` 新增 `getSampleRate`（追加在结构体末尾，旧位置初始化自动为 null）；`RtlSdrSource` 写入后读回，不一致时同时报「请求值/读回值」；`get_status` 增加 `sample_rate_readback_available` / `sample_rate_status` / `sample_rate_error` | 读回是**驱动自报值**（已含 PPM 修正、取整），不是独立时钟测量；ops 表无该项（旧假表/无 RTL 后端）时状态串必须是「采样率=请求值，硬件读回不可用」，**禁止**把请求值伪装成读回值。反证：`test_rtl_sdr_tune.cpp:sampleRateReadbackMismatchIsExposed/UnavailableIsHonest` |
+| L60 | **真机逐档读回是 E3 历史产物（当时有证据、现不可复跑）** | 时点 **2026-11-06 01:05–01:10**；脚本 `scripts/sample_rate_readback_check.py`（入库 `754f64e6`，00:55:45），命令 `python scripts/sample_rate_readback_check.py --mode real`；原始 stdout 落 `D:\mbdsdr\.tmp\rb_real.txt`，按临时文件当删纪律已删除、**未入库（无 SHA256）**；结果 **12 档：11 一致 + 1 不一致**（请求 `2,800,000` 读回 `2,880,000`，+80,000 Hz），退出码 1 | **E3 不可复跑**：当前复跑被 `LIBUSB_ERROR_IO (-1)` / `LIBUSB_ERROR_ACCESS (-3)` 挡住（设备被占用/权限不足）。升 E2 还缺：独占 RTL + USB 访问权限，并把 stdout 存 `.log` 入库并钉 SHA256 | 数字只能按 E3 引用，必须带「当时有证据、现不可复跑」；读回是**驱动自报值**（已含 PPM 修正/取整），不是独立时钟测量。可复跑的替代证据：注入三态 `--mode honest\|clamp\|reject`（**E2**：honest 12/12 一致、clamp 在 2.8M 档抓到 +80,000 Hz、reject 保持 2.56M） |
 
 ## 附 N：桌面自动重连 / 热插拔未接入（2026-11-05，接入层线追加）
 
@@ -753,4 +755,15 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 > 其余「已验证」均为测试/静态引用（如 `test_acars_consistency.py`、`network-layer.md` 46 用例、
 > `redsea_real.md` 1024 双射、`protocol_analysis.md` 往返测试、`audit_r2` 源码事实），
 > 属可复跑的软件证据，不列入真机证据链。
+
+## 附 R：接入层健壮性（2026-11-06，接入层线追加）
+
+> 编号说明：委托方原拟 L46/L47，但这两号已被附 J/附 K（天空线）占用（`L46` 见 494 行、
+> `L47` 见 502 行），按「全表唯一」规则改用 L60 之后的两个空闲号 L61/L62；
+> 落位改到文末新节，避免插进附 I（中断/强杀线）造成归属混淆。
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L61 | **真机 USB 拔插**（物理拔线 → 界面断开 → 重插恢复，含六状态文案逐帧核对） | 接入层健壮性线：`tests/test_s8_backend_loss.py`、`tests/test_reconnection.py`（假后端）、`scripts/hw_acceptance/manual_usb_cycle.py` | **E4 / `hardware-absent` + `synthetic-only`** —— 断开/半开/重连判定只在假后端与 loopback 假服务端成立，真机拔插未做 | 升 E2 需：① 独占 RTL-SDR（关掉 SDR++/SDR#/rtl_tcp 占用）；② Windows USB 访问权（Zadig/WinUSB 已装，非 RDP/虚拟机）；③ 人工拔插，脚本只计时 `python scripts/hw_acceptance/manual_usb_cycle.py --backend usb`；④ 期望值先用 loopback 实测并落 `result.json`（参考上界：拔线 stale ≤5.10 s、硬判 ≤10.05 s、重插首帧 ≤1.0 s，真机须重取）。升 E3 须保留 `result.json` + 时点 + 截图。可复跑注入：USB/IP 或虚拟机 USB 透传 + `usbip detach/attach` |
+| L62 | **真机设备身份校验**（`device_id`/`serial_number`，重连到陌生设备须拒绝下发设置） | `mbdsdr_ai/reconnection.py::_identity_mismatch`、`tests/test_reconnection.py` 三条用例（含半侧可读） | **E4 / `synthetic-only`**，且 **FC0012 无 EEPROM、大概率读不到 SN，真机上这条校验只能落到「不判定」** | 升 E2 需两台带 EEPROM 的 RTL（R820T/R820T2）依次接入同一路径，期望第二台接入时 `gave_up=True` 且 `set_frequency` 调用 0 次；缺 SN 时 `last_error=""` |
 

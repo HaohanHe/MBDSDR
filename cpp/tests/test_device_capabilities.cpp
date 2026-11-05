@@ -27,6 +27,7 @@ private slots:
     void optionsFromRange();
     void optionsFilteredByNarrowRange();
     void deadBandExcluded();
+    void optionsStatusNeverFakesZeroTiers();
 };
 
 void TestDeviceCapabilities::tunerNameMapping() {
@@ -115,8 +116,11 @@ void TestDeviceCapabilities::optionsFromRange() {
     QVERIFY(opts.contains(3200000.0));
     QVERIFY(opts.contains(250000.0));
     // 2.16M is a standard PLL config the desktop list already ships; it must not
-    // be missing here (it used to be). 2.88M is the same physical quantity the
-    // desktop uses -- the old 2.8M literal was 80 kHz off and must be gone.
+    // be missing here (it used to be). 2.88M is what the HARDWARE reports:
+    // requesting 2,800,000 comes back as 2,880,000 (+80,000 Hz, real-device
+    // readback, E3 -- docs/limitations-register.md 附 M.4 L60), so the candidate
+    // table lists only rates the device actually delivers. 2.8M is not a second
+    // spelling of the same rate and must NOT be offered.
     QVERIFY(opts.contains(2160000.0));
     QVERIFY(opts.contains(2880000.0));
     QVERIFY(!opts.contains(2800000.0));
@@ -153,6 +157,44 @@ void TestDeviceCapabilities::deadBandExcluded() {
         const bool inDeadBand = (r > 300000.0 && r <= 900000.0);
         QVERIFY2(!inDeadBand, qPrintable(QStringLiteral("rate %1 fell in dead band").arg(r)));
     }
+}
+
+void TestDeviceCapabilities::optionsStatusNeverFakesZeroTiers() {
+    // An EMPTY options array must always carry a status that says WHY, so nobody
+    // reads "zero rates" as "this device supports no sample rate".
+    DeviceCapabilities none = noDeviceCapabilities();
+    QCOMPARE(sampleRateOptionsStatus(none, buildSampleRateOptions(none)),
+             QStringLiteral("no_device"));
+
+    DeviceCapabilities unknown;
+    unknown.connected = true;            // connected, driver reported no range
+    QCOMPARE(sampleRateOptionsStatus(unknown, buildSampleRateOptions(unknown)),
+             QStringLiteral("range_unknown"));
+
+    DeviceCapabilities narrow;
+    narrow.connected = true;
+    narrow.sampleRateMinHz = 1200000.0;  // real range, but no candidate tier fits
+    narrow.sampleRateMaxHz = 1300000.0;
+    const QList<double> narrowOpts = buildSampleRateOptions(narrow);
+    QVERIFY(narrowOpts.isEmpty());
+    QCOMPARE(sampleRateOptionsStatus(narrow, narrowOpts),
+             QStringLiteral("no_tier_in_range"));
+
+    DeviceCapabilities full;
+    full.connected = true;
+    full.sampleRateMinHz = 250000.0;
+    full.sampleRateMaxHz = 3200000.0;
+    const QList<double> fullOpts = buildSampleRateOptions(full);
+    QCOMPARE(sampleRateOptionsStatus(full, fullOpts), QStringLiteral("ok"));
+    // Every rate offered for a real device must be one of the candidate tiers
+    // (the widest-range list is the candidate table itself).
+    DeviceCapabilities narrowReal;
+    narrowReal.connected = true;
+    narrowReal.sampleRateMinHz = 1000000.0;
+    narrowReal.sampleRateMaxHz = 1500000.0;
+    for (double r : buildSampleRateOptions(narrowReal))
+        QVERIFY2(fullOpts.contains(r),
+                 qPrintable(QStringLiteral("option %1 is not a candidate tier").arg(r)));
 }
 
 QTEST_MAIN(TestDeviceCapabilities)

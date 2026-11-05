@@ -1074,6 +1074,15 @@ QJsonObject ControlHub::cmdGetCapabilities(const QJsonObject&) {
     o["tunable_max_hz"] = c.tunableMaxHz;
     o["sample_rate_min_hz"] = c.sampleRateMinHz;
     o["sample_rate_max_hz"] = c.sampleRateMaxHz;
+    // Options DERIVED from the connected device's real range (not a fixed menu).
+    // An empty array must never read as "the device has zero rates": the status
+    // field says WHY it is empty (no_device / range_unknown / no_tier_in_range).
+    const QList<double> srOptions = dsp::buildSampleRateOptions(c);
+    QJsonArray srOptionsArr;
+    for (double r : srOptions) srOptionsArr.append(r);
+    o["sample_rate_options_hz"] = srOptionsArr;
+    o["sample_rate_options_status"] =
+        dsp::sampleRateOptionsStatus(c, srOptions);
     // Real discrete gain steps from the ACTIVE source; EMPTY for rtl_tcp / test /
     // file sources -- never a fabricated step table.
     std::vector<double> gains = engine_->availableGainsDb();

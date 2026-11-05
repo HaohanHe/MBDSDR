@@ -858,8 +858,9 @@ def test_bottom_dock_height_is_locked():
         for timer in getattr(win, "_startup_timers", []):
             try:
                 timer.stop()
-            except Exception:  # noqa: BLE001 - 停定时器失败不阻断本条断言
-                pass
+            except RuntimeError as exc:  # 仅吞「Qt 对象已删除」这一种；其余异常照抛
+                log.warning("test_ui_layout_locks.py 停启动定时器失败（已删除对象）：%s: %s",
+                            type(exc).__name__, exc)
         win.resize(1000, 600)
         win.show()
         _pump(80)
