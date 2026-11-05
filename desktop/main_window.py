@@ -229,9 +229,10 @@ try:
 except Exception:  # pragma: no cover
     BookmarkPanel = None  # type: ignore
 try:
-    from settings_panel import ServiceSettingsPanel
+    from settings_panel import ServiceSettingsPanel, SettingsPanel
 except Exception:  # pragma: no cover
     ServiceSettingsPanel = None  # type: ignore
+    SettingsPanel = None  # type: ignore
 # 新增内核能力面板（多 VFO / ANR / 星座图 / 设备选择 / 分段增益）。
 # try/except 守卫：面板文件缺失时主窗口不崩，对应 dock 不建。
 try:
@@ -5760,6 +5761,13 @@ class MainWindow(QMainWindow):
                 self.service_settings_panel.restore_enabled_services()
             except Exception:  # noqa: BLE001
                 self.service_settings_panel = None
+
+        # 全量设置面板（按 config_schema 渲染；本段只是停靠接线）。
+        if SettingsPanel is not None:
+            self.settings_panel = SettingsPanel(
+                settings=self.settings, host=self)
+            self.settings_dock = self._add_right_tab(
+                "设置", self.settings_panel, "settings_dock")
 
         # 天空视图「调到该星 / 跟踪 / 云台跟随」→ 先走 agent 能力协商，
         # 不再由按钮直连硬件（按钮只表达意图，执行由模型决定后经动作总线落地）
