@@ -133,7 +133,7 @@ class ControlPanel(QWidget):
     record_toggled = Signal(bool)         # 录音开关
     mode_changed = Signal(str)            # 模式改变
     gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
-    squelch_changed = Signal(float)        # 静噪门限（解调后音频 RMS，-100~-20 dBFS）
+    squelch_changed = Signal(float)        # 静噪门限（相对该模式噪声基线的余量刻度，-100~-20）
     auto_squelch_toggled = Signal(bool)  # 自动静噪开关
     sample_rate_changed = Signal(float)    # 采样率改变 (Hz)
 
@@ -581,7 +581,7 @@ class ControlPanel(QWidget):
         rx_layout.addLayout(iq_cal_row)
 
         sq_row = QHBoxLayout()
-        self.squelch_label = QLabel("静噪(音频)")
+        self.squelch_label = QLabel("静噪门限")
         self.squelch_label.setObjectName("statusValue")
         self.squelch_label.setMinimumWidth(30)
         self.squelch_label.setMaximumWidth(100)
@@ -592,10 +592,12 @@ class ControlPanel(QWidget):
                                      int(SQUELCH_MAX_DBFS))
         self.squelch_slider.setValue(int(DEFAULT_SQUELCH_DBFS))
         self.squelch_slider.setToolTip(
-            "静噪门限（解调后音频电平，dBFS）：解调出的声音低于此电平即静音。"
+            "静噪门限：相对该模式噪声基线的余量（不是绝对音频电平）。"
+            f"默认 {int(DEFAULT_SQUELCH_DBFS)} ≈ 6 dB 余量；"
             f"{int(SQUELCH_MIN_DBFS)} ≈ 几乎常开；{int(SQUELCH_MAX_DBFS)} ≈ 只放行强信号。"
-            "这是音频电平，不是射频/中频功率——带宽或增益变化不改变它的含义。"
-            "「自动」勾选时此项置灰")
+            "噪声基线自动标定：FM/WFM/NFM 与 AM 用解调后音频 300–5000 Hz 谱峰/谱中位，"
+            "USB/LSB 用 300–3000 Hz，CW 用 300–5000 Hz；切换模式或增益变化时重测。"
+            "「自动」勾选时此项置灰并使用默认值。")
         self.squelch_slider.valueChanged.connect(self._on_squelch_changed)
         sq_row.addWidget(self.squelch_slider)
         self.squelch_val = QLabel(f"{int(DEFAULT_SQUELCH_DBFS)} dB")
@@ -604,7 +606,8 @@ class ControlPanel(QWidget):
         sq_row.addWidget(self.squelch_val)
         self.auto_squelch_check = QCheckBox("自动")
         self.auto_squelch_check.setToolTip(
-            "自动跟踪噪声底设置门限；关闭时手动拖动静噪滑杆")
+            "自动跟踪噪声底（基线在任何模式下都会自动标定；"
+            "关闭此项后基线锁定在最近一次标定，滑杆余量仍然生效）")
         self.auto_squelch_check.setChecked(True)
         self.auto_squelch_check.toggled.connect(self._on_auto_squelch_toggled)
         sq_row.addWidget(self.auto_squelch_check)
@@ -854,7 +857,7 @@ class ControlPanel(QWidget):
             self.vfo_bandwidth_changed.emit(bw)
 
     def _on_squelch_changed(self, dbfs: int):
-        """静噪门限（解调后音频 dBFS，-100~-20，口径见 mbdsdr_ai/squelch.py）。"""
+        """静噪门限：相对该模式噪声基线的余量刻度（-100~-20）。"""
         self.squelch_val.setText(f"{dbfs} dB")
         self.squelch_changed.emit(float(dbfs))
 
