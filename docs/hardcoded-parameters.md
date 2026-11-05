@@ -465,13 +465,13 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - 未改 `rf_sky_view.py` 的 `_bortle = 3`（在途文件）。→ patch 建议 **P-2**。
 
 **C-2 `DEFAULT_BORTLE`**：`stars` 与 `star_catalog` 的 6 处默认参数统一引用该常量，
-值恒为 3，签名默认值不变（已验证 `inspect.signature` 行为等价）。
+值恒为 3，签名默认值不变（已验证 `inspect.signature` 行为等价）。证据 `e5ca57ce` — `mbdsdr_ai/skyengine/star_catalog.py:224` — `bortle: int = DEFAULT_BORTLE`
 
 ### 6.2 交给对应线的 patch 建议（本线不改）
 
 | # | 文件 | 问题 | 建议 |
 |---|---|---|---|
-| P-1 | `cpp/src/core/tokens.h`（频谱线已改） | Python `6.0` 与 C++ 原 `15.0` 两套显示峰阈值；原"统一到 15 dB"已被实测驳回 | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘`**，两条路径都按这套。Python `6.0` 保留；C++ 新增显示门 `kPeakRelDb = 6.0`（`tokens.h:365`，源码注释已写入 24/24 帧 0 峰、3043 vs 3029 无洪泛证据）。`kPeakThresholdDefault = 15.0` 仍留给**频率校准参考门**，两条门职责不同、禁止合并。数量 `8` vs `12` 登记为"有意差异：UI 显示密度"，不属物理量。 |
+| P-1 | `cpp/src/core/tokens.h`（频谱线已改） | Python `6.0` 与 C++ 原 `15.0` 两套显示峰阈值；原"统一到 15 dB"已被实测驳回 | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘`**，两条路径都按这套。Python `6.0` 保留；C++ 新增显示门 `kPeakRelDb = 6.0`（`cpp/src/core/tokens.h:378`，源码注释已写入 24/24 帧 0 峰、3043 vs 3029 无洪泛证据）。`kPeakThresholdDefault = 15.0` 仍留给**频率校准参考门**，两条门职责不同、禁止合并。数量 `8` vs `12` 登记为"有意差异：UI 显示密度"，不属物理量。 证据 `b8bc5140` — `cpp/src/core/tokens.h:378` — `kPeakRelDb = 6.0` |
 | P-2 | `desktop/rf_sky_view.py` | `_bortle = 3` 私有硬编码；`(4.5-mag)/9.0` 在同文件两处 | `from mbdsdr_ai.skyengine.stars import DEFAULT_BORTLE`；提供 `set_bortle()` 后即可解锁设置项。拾取评分提成一个 `_pick_score(mag)` 函数（两处同式）。 |
 | P-3 | `desktop/main_window.py` | 状态提示时长 `3000/4000/6000/8000` 散落 20+ 处 | 提到 `desktop/constants.py` 的 `TOAST_SHORT_MS / TOAST_INFO_MS / TOAST_WARN_MS / TOAST_ERROR_MS` 四档；`desktop/constants.py` 已有互斥钩子测试，按同法登记。 |
 | P-4 | `desktop/main_window.py` | 刷新周期 `50/150/1000/2000/5000 ms` 散落 | 同上，收成 `UI_FPS`、`BUS_COALESCE_MS`、`STATUS_REFRESH_MS`、`SKY_REFRESH_MS`。 |
@@ -640,14 +640,14 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | AOS/LOS 定义 | 对 `next_pass` 调用按 5° 穿越 | 按 10° 穿越（过境时长相应变短） |
 | 时空面板列表 | 无说明 | 标题旁"列表按峰值 ≥10° 筛选（更低的不列出；可在设置开启低仰角）" |
 | 空状态文案 | "24 小时内无过境" | "24 小时内无过境（峰值仰角 ≥10°）" |
-| 控制器 | 固定 10° / 24 h 字面量 | **已改为显式入参注入**：`get_satellite_pass(min_elevation_deg=None, window_hours=None)`，缺省源 `sat_passes.PASS_MIN_ALT_DEG` / `sat_passes.PASS_WINDOW_HOURS=24.0`，controller 内已无 10/24 字面量 |
+| 控制器 | 固定 10° / 24 h 字面量 | **已改为显式入参注入**：`get_satellite_pass(min_elevation_deg=None, window_hours=None)`，缺省源 `sat_passes.PASS_MIN_ALT_DEG` / `sat_passes.PASS_WINDOW_HOURS=24.0`，controller 内已无 10/24 字面量。证据 `ff219b55` — `mbdsdr_ai/core/controller.py:1096` — `min_elevation_deg` |
 
 证据：`mbdsdr_ai/sat_passes.py:101-102`；`predict_passes:226` 与批量
 `:616` 默认 `PASS_MIN_ALT_DEG`；`sat_tracker.py:118`
 `DEFAULT_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG`、`next_pass` 默认
 `PASS_MIN_ALT_DEG`；`desktop/new_spacetime_panel.py` 筛选标签 +
 `min_elevation=PASS_MIN_ALT_DEG`；`mbdsdr_ai/core/controller.py:990`
-（显式入参，controller 内无 10/24 字面量）。
+（显式入参，controller 内无 10/24 字面量；方法位于 `mbdsdr_ai/core/controller.py:1095`）。
 
 外泄面是 **MCP schema**（`min_elevation_deg` / `window_hours` 入参 + 返回值里
 的生效值）与**验收脚本**，**不是桌面 UI**。实测：5°/24h = 6 条、10°/24h = 5 条、
@@ -753,7 +753,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 | # | 文件:行 | 原文（节选） | 量纲 / 归属 | 处置 |
 |---|---|---|---|---|
-| 1 | `mbdsdr_ai/analog_demod.py:123-131` | `"am" ... sql_db=-40.0` / `"wfm" ... sql_db=-30.0` / `"usb"/"lsb"/"cw" ... sql_db=-60.0` | 信道 **IQ 功率 dBFS**（无头 gqrx 兼容路径，AGC 前） | **保留**（另一概念，不受桌面滑杆驱动）；量纲注释已改为"桌面滑杆 = 相对噪声基线余量"（`:119-122`） |
+| 1 | `mbdsdr_ai/analog_demod.py:123-131` | `"am" ... sql_db=-40.0` / `"wfm" ... sql_db=-30.0` / `"usb"/"lsb"/"cw" ... sql_db=-60.0` | 信道 **IQ 功率 dBFS**（无头 gqrx 兼容路径，AGC 前） | **保留**（另一概念，不受桌面滑杆驱动）；量纲注释已改为"桌面滑杆 = 相对噪声基线余量"（`mbdsdr_ai/analog_demod.py:119-122`）。证据 `17709482` — `mbdsdr_ai/analog_demod.py:120` — `相对该模式噪声基线的余量` |
 | 2 | `mbdsdr_ai/analog_demod.py:230` | `self.squelch_db = -150.0` | 同上；构造初值 = 常开 | **保留**（测试钉 `tests/test_benchmark_essence_defaults.py:204`） |
 | 3 | `mbdsdr_ai/analog_demod.py:236` | `self.last_signal_power_db = -150.0` | 同上；首块功率估计占位 | **保留** |
 | 4 | `mbdsdr_ai/analog_demod.py:365-367` | `if not self._sql_open and self.last_signal_power_db >= self.squelch_db:` / `elif ... < self.squelch_db - self._sql_hyst_db:` | 同上；IF 域滞回门 | **保留**；不读桌面 `SharedDemodConfig.squelch_db` |
