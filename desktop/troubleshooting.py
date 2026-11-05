@@ -139,13 +139,24 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
     "empty_signal": ("静噪", "静噪太紧", "没声音", "信号太弱"),
 }
 
-#: 「桌面 UI 真会渲染 code 字面量」的目录错误码，按族共享一条具体下一步。
+#: 「桌面 UI 真会渲染 code 字面量或目录 message 原文」的目录错误码，按族共享
+#: 一条具体下一步。
 #:
 #: 判据（逐条链路证据见回报）：AI 助手步骤卡在 ai_panel._append_step_card
 #: 渲染 ``错误 {step.error}``，``step.error`` 就是 ToolResult.error 的 code
 #: 原文；状态面板解码卡在 status_panel.format_decode_result 渲染
-#: ``错误码 {code}: ...``。只有这两条通道会显示 code 字面量，其余 code
-#: 只出现在日志/库 API/服务端返回值，仍登记为「不出入口」。
+#: ``错误码 {code}: ...``。这两条显示 code 字面量。
+#:
+#: 2026-11-05 追加两条 message 通道（用户看不到 code，但看得到目录 message
+#: 原文，同样算「用户可见」）：
+#:   * 状态栏：SDRBackend 调谐/采样率/增益/带宽/多普勒失败时把
+#:     ``status.error = user_message(code)``，main_window._on_health_tick
+#:     经 _handle_backend_lost 用状态栏 ``设备已断开：{message}`` 显示原文；
+#:   * AI 对话：model_manager 失败时返回 ``error = user_message(code)``，
+#:     ai_panel._on_ai_response 渲染 ``[错误] {error}``；工具失败且正文为空时
+#:     tool_registry 用 user_message("missing_error_detail") 兜底正文，步骤卡
+#:     摘要显示该 message。
+#: 其余 code 只出现在日志/库 API/服务端返回值/MCP 客户端，仍登记为「不出入口」。
 VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
     "工具参数": (
         "tool_not_found", "tool_unavailable", "invalid_arguments_type",
@@ -171,6 +182,22 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         "unknown_mode", "missing_sample", "unsupported_format",
         "decode_error", "not_implemented",
     ),
+    # 状态栏 message 通道：sdr_backend 设置 status.error = user_message(code)，
+    # main_window._handle_backend_lost 显示「设备已断开：{message}」。
+    "设备调谐": (
+        "sdr_set_frequency_failed", "sdr_set_sample_rate_failed",
+        "sdr_set_gain_failed", "sdr_set_bandwidth_failed",
+        "doppler_compensation_failed",
+    ),
+    # AI 对话 message 通道：model_manager 返回 error=user_message(code)，
+    # ai_panel 在对话区显示「[错误] {error}」。
+    "AI 模型": (
+        "llm_offline", "llm_rate_limited", "llm_http_4xx", "llm_http_5xx",
+        "llm_timeout", "llm_unreachable", "llm_unexpected",
+    ),
+    # AI 步骤卡 message 通道：tool_registry 对「失败且正文为空」用
+    # user_message("missing_error_detail") 补正文，步骤卡摘要显示该 message。
+    "工具结果": ("missing_error_detail",),
 }
 
 #: 每个族一条「下一步」：必须点到具体控件名，禁止空话。
@@ -193,6 +220,15 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
     "解码结果": (
         "在「状态」页签看「解码结果」卡片，换用可用模式或完整样本；采样率与"
         "输入格式到「控制」页签核对后重试。"),
+    "设备调谐": (
+        "先在「控制」页签点「连接设备...」确认设备在线；频率/采样率/增益超出"
+        "设备能力就改回设备支持的值，仍失败则断开重连后再试一次。"),
+    "AI 模型": (
+        "在「AI 助手」页签点「配置」核对 API Key 与模型名；限流或 5xx 等几分钟"
+        "再发同一条指令，4xx 先改模型名或重新填 Key 后重试。"),
+    "工具结果": (
+        "在「AI 助手」页签展开该步骤卡看返回码，按「能力目录」改用同一能力的"
+        "具体工具重发；连续两次空结果就停止重试并记录步骤卡内容。"),
 }
 
 #: 上述各族的扁平索引（测试与映射完整性检查用）

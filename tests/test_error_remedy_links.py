@@ -37,7 +37,7 @@ def test_every_catalog_code_is_registered():
     """每个 error_catalog code：有条目，或显式登记「不出入口 + 原因」。"""
     assert error_remedy.mapping_gaps() == []
     assert error_remedy.mapping_overlaps() == []
-    # 精选 15 条必须仍在；其余是「桌面 UI 真会渲染 code」的可见码。
+    # 精选 15 条必须仍在；其余是「桌面 UI 真会渲染 code 或目录 message」的可见码。
     assert set(CURATED_CODES) <= set(error_remedy.REMEDY_BY_CODE)
     for code, reason in error_remedy.NO_ENTRY_REASONS.items():
         assert code in ERRORS, f"{code} 不在 error_catalog 里"
@@ -76,9 +76,30 @@ def test_visible_catalog_entries_copy_message_and_meaning_verbatim():
     assert validate_remedies(build_remedies()) == []
 
 
+def test_message_channel_codes_are_remedied():
+    """状态栏/AI 对话显示目录 message 原文的码，必须有「怎么办」条目。
+
+    这些 code 用户看不到字面量，但看得到 message 原文（同样算可见）：
+      * 设备调谐：sdr_backend.status.error → main_window._handle_backend_lost
+        → 状态栏「设备已断开：{message}」；
+      * AI 模型：model_manager 返回 error=user_message(code) → ai_panel
+        「[错误] {error}」；
+      * 工具结果：tool_registry 用 user_message("missing_error_detail") 兜底
+        正文 → 步骤卡摘要。
+    删掉任一族都会让这些码退回「没人解释的错」，本用例据此判红。
+    """
+    from troubleshooting import VISIBLE_BY_FAMILY
+    for group in ("设备调谐", "AI 模型", "工具结果"):
+        for code in VISIBLE_BY_FAMILY[group]:
+            assert error_remedy.remedy_for_code(code) is not None, (
+                f"{group}/{code} 的 message 会显示给用户，却没有「怎么办」条目")
+            assert code not in error_remedy.NO_ENTRY_REASONS, (
+                f"{code} 同时登记为可见与不出入口")
+
+
 def test_codes_without_entry_have_no_link(qapp):
     """反证：没有条目的 code 不出现「查看怎么办」。"""
-    code = "llm_rate_limited"  # 真实存在、但登记为不出入口
+    code = "bad_command"  # 真实存在、但登记为不出入口（仅 Web 服务端返回值）
     assert error_remedy.remedy_for_code(code) is None
     assert error_remedy.no_entry_reason(code)
 
@@ -136,7 +157,7 @@ def test_dialog_link_keeps_buttons_and_default_focus(qapp):
     assert any(lab is label for lab in box.findChildren(QLabel))
 
     # 同一弹窗再挂一个无条目 code：不应再出现第二条链接
-    assert error_remedy.attach_remedy_link(box, "llm_timeout") is None
+    assert error_remedy.attach_remedy_link(box, "bad_command") is None
     box.deleteLater()
 
 
@@ -155,16 +176,16 @@ def test_help_panel_locates_entry_by_code(qapp):
     assert dlg.show_remedy_code("empty_signal") is True
     assert dlg.trouble_search_edit.text() == ""
 
-    assert dlg.show_remedy_code("llm_rate_limited") is False
+    assert dlg.show_remedy_code("bad_command") is False
     dlg.deleteLater()
 
 
 def test_open_remedy_refuses_codes_without_entry(qapp):
-    assert error_remedy.open_remedy(None, "llm_rate_limited") is False
+    assert error_remedy.open_remedy(None, "bad_command") is False
     assert error_remedy.open_remedy(None, "") is False
 
 
-def test_main_window_status_link_and_message_clear(qapp):
+def test_main_window_status_link_and_message_clear(qapp, isolated_profile):
     """状态栏入口接到真实主窗口：普通消息一到，旧链接必须消失。"""
     from main_window import MainWindow
 
@@ -179,7 +200,7 @@ def test_main_window_status_link_and_message_clear(qapp):
     assert win._remedy_link.isHidden()
 
     # 无条目的 code：消息照常显示，但不出现链接
-    win._show_error_status("模型限流，请稍后重试", "llm_rate_limited")
+    win._show_error_status("模型限流，请稍后重试", "bad_command")
     assert win._remedy_link.isHidden()
     win.close()
 

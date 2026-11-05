@@ -7,7 +7,8 @@
 本模块是唯一的映射事实源：
 
   * ``REMEDY_BY_CODE``：有帮助条目的错误码（15 条精选 + 桌面 UI 真会
-    渲染 code 的可见码，条目正文全部来自 ``troubleshooting``，不另抄）；
+    渲染 code 字面量或目录 message 原文的可见码，条目正文全部来自
+    ``troubleshooting``，不另抄）；
   * ``NO_ENTRY_REASONS``：其余每个 ``error_catalog`` 错误码都显式登记
     「不出入口 + 原因」——**没有条目就不许出现链接**，宁可没有入口，
     也不让用户点开一个空页；
@@ -52,10 +53,8 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "identity_mismatch", "station_untrusted", "no_pass",
         "no_downlink_known", "sdr_error", "invalid_argument",
         "export_path_out_of_root", "decoder_not_available", "not_available",
-        "spill_write_failed", "sdr_set_frequency_failed",
-        "sdr_set_sample_rate_failed", "sdr_set_gain_failed",
-        "sdr_set_bandwidth_failed", "doppler_compensation_failed",
-        "denied_by_policy", "manual_gate_required", "internal_error",
+        "spill_write_failed", "denied_by_policy", "manual_gate_required",
+        "internal_error",
     ),
     "解码层细项：code 只出现在解码器/服务端返回值，桌面解码卡不渲染该码": (
         "missing_iq", "unknown_device_type", "empty_input",
@@ -73,14 +72,7 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "rate_limited", "http_4xx", "http_5xx", "network_other",
         "parse_failure", "empty_response", "tle_unknown",
     ),
-    "AI 模型调用细项：对话只显示 message 原文，不渲染 code；无按 code 定位入口": (
-        "llm_offline", "llm_rate_limited",
-        "llm_http_4xx", "llm_http_5xx", "llm_timeout", "llm_unreachable",
-        "llm_unexpected",
-    ),
-    "内部错误：只用于日志与开发排查，不面向用户操作": (
-        "unexpected_error", "missing_error_detail",
-    ),
+    "内部错误：只用于日志与开发排查，不面向用户操作": ("unexpected_error",),
 }
 
 #: code → 不出入口的原因（扁平索引，供界面与测试查询）
@@ -102,9 +94,19 @@ def no_entry_reason(code: str) -> Optional[str]:
 
 
 def entry_name(code: str) -> str:
-    """条目的展示名（分组 · 现象原文），用于 tooltip 与回报表。"""
+    """条目的展示名（分组 · 现象原文），用于 tooltip 与回报表。
+
+    目录里有多个码共享同一句 message（如 ``llm_http_4xx`` 与 ``llm_http_5xx``
+    都是「模型接口返回 HTTP {status}：{detail}」）。展示名必须能区分，否则
+    帮助面板会把用户定位到错误的条目，所以同文案的码统一追加 ``（code）``。
+    """
     r = remedy_for_code(code)
-    return "" if r is None else f"{r.group} · {r.symptom}"
+    if r is None:
+        return ""
+    base = f"{r.group} · {r.symptom}"
+    same = [c for c, rr in REMEDY_BY_CODE.items()
+            if f"{rr.group} · {rr.symptom}" == base]
+    return base if len(same) <= 1 else f"{base}（{code}）"
 
 
 def mapping_gaps(catalog: Optional[Dict] = None) -> List[str]:
