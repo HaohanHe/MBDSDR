@@ -8,11 +8,14 @@
   * ``modulate_baseband`` 曾用 ``round(fs/1e6)`` 把 2.4 MS/s 当成 2 MS/s
     合成，波形与采样率元数据不自洽。
 
-这里钉住三件事：
+这里钉住四件事：
   1. 任意 fs 入口必须带限重采样到合法档，并把 ``source_fs_hz`` /
      ``decode_fs_hz`` / ``resample_note`` 放进返回值（下游能看见换过采样率）；
   2. 严格入口仍然拒绝非整数 MHz（它的契约没有被放宽）；
   3. 合成侧拒绝非整数 MHz，不再 ``round()`` 糊过去。
+  4. ADS-B 路径上只允许 ``mbdsdr_ai/adsb.py::resample_to_legal_fs`` 一份
+     自拼重采样实现；实验/脚本侧再冒出 ``Fraction`` + ``resample_poly``
+     副本时守卫测试必须变红（含旁路文件反证）。
 """
 
 from __future__ import annotations
@@ -168,3 +171,116 @@ def test_experiment_wrapper_passthrough_keeps_samples_and_note():
     assert got_iq.size == iq.size
     assert got_fs == pytest.approx(2e6)
     assert got_note == ""
+
+
+# ---------------------------------------------------------------------------
+# 机械闸门：ADS-B 路径上只许有 mbdsdr_ai/adsb.py::resample_to_legal_fs
+# 这一份自拼重采样实现。判据按「函数级」匹配，避免误伤 APT/AIS/音频等
+# 与 ADS-B 无关的 resample_poly 调用点。
+# ---------------------------------------------------------------------------
+_ADSB_PATH_TOKENS = ("adsb", "1090", "decode_baseband", "_find_preamble")
+_SELF_BUILT_RESAMPLER = ("resample_poly", "Fraction", "RESAMPLE_TARGET_HZ")
+
+
+def _resampler_violations(root: str) -> list:
+    """返回 (相对路径:行号, 行文本) 列表；空列表 = 只有唯一实现。"""
+    import ast
+
+    def _call_name(node):
+        fn = node.func
+        return fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
+
+    allow = os.path.abspath(os.path.join(root, "mbdsdr_ai", "adsb.py"))
+    hits: list = []
+    for sub in ("experiments", "scripts", "mbdsdr_ai"):
+        base = os.path.join(root, sub)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d not in ("__pycache__", "tests")]
+            for name in filenames:
+                if not name.endswith(".py") or name.startswith("test_"):
+                    continue           # 测试夹具的采样率改造不算生产实现
+                path = os.path.join(dirpath, name)
+                if os.path.abspath(path) == allow:
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        src = f.read()
+                    tree = ast.parse(src)
+                except (OSError, SyntaxError):
+                    continue           # 语法坏文件自有别的闸门管
+                lines = src.splitlines()
+                func_nodes = [n for n in ast.walk(tree)
+                              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+                scopes = list(func_nodes)
+                covered = set()
+                for fn_node in func_nodes:
+                    covered.update(range(fn_node.lineno,
+                                         getattr(fn_node, "end_lineno", fn_node.lineno) + 1))
+                module_lines = [ln for i, ln in enumerate(lines, 1) if i not in covered]
+                if any(t in "\n".join(module_lines).lower() for t in _ADSB_PATH_TOKENS):
+                    scopes.append(("module", module_lines))
+                for scope in scopes:
+                    if isinstance(scope, tuple):     # 模块级：只看函数体外的调用
+                        for node in ast.walk(tree):
+                            if isinstance(node, ast.Call) and node.lineno not in covered \
+                                    and _call_name(node) in _SELF_BUILT_RESAMPLER:
+                                hits.append((f"{os.path.relpath(path, root)}:{node.lineno}",
+                                             lines[node.lineno - 1].strip()))
+                        continue
+                    start = scope.lineno
+                    end = getattr(scope, "end_lineno", len(lines))
+                    seg = "\n".join(lines[start - 1:end]).lower()
+                    if not any(t in seg for t in _ADSB_PATH_TOKENS):
+                        continue
+                    for node in ast.walk(scope):
+                        if isinstance(node, ast.Call) \
+                                and _call_name(node) in _SELF_BUILT_RESAMPLER:
+                            hits.append((f"{os.path.relpath(path, root)}:{node.lineno}",
+                                         lines[node.lineno - 1].strip()))
+    return hits
+
+
+def test_adsb_resampler_is_single_implementation():
+    """全仓扫：ADS-B 路径上不得再出现第二份 Fraction/resample_poly 自拼实现。"""
+    hits = _resampler_violations(ROOT)
+    assert hits == [], (
+        "ADS-B 路径冒出第二份自拼重采样实现（唯一实现应为 "
+        "mbdsdr_ai/adsb.py::resample_to_legal_fs）：\n"
+        + "\n".join(f"  {p}: {text}" for p, text in hits))
+
+
+def test_adsb_resampler_guard_is_red_on_bypass_copy(tmp_path):
+    """反证：把旧副本（18 行 Fraction + resample_poly + 自拼 note）塞回一个
+    旁路文件，闸门必须变红；跑完立即删掉，不留在工作树里。"""
+    bypass = os.path.join(ROOT, "experiments", "_adsb_bypass_probe_tmp.py")
+    with open(bypass, "w", encoding="utf-8") as f:
+        f.write('''"""临时旁路：复刻旧版 _adsb_decode_iq（反证用，测试结束即删）。"""
+import numpy as np
+
+
+def _adsb_decode_iq(iq: np.ndarray, fs: float):
+    """把录制 IQ 送到 decode_baseband 能接受的采样率档位（旧副本）。"""
+    from fractions import Fraction
+    sps = int(round(fs / 1e6))
+    if fs >= 2e6 and abs(fs / 1e6 - sps) <= 1e-6:
+        return iq, float(fs), ""
+    target_hz = 8_000_000
+    from scipy.signal import resample_poly
+    ratio = Fraction(target_hz, int(round(fs)))
+    out = resample_poly(iq, ratio.numerator, ratio.denominator)
+    note = (f"fs={fs:.0f}Hz 非整数MHz（decode_baseband 不支持），"
+            f"已重采样到 {target_hz / 1e6:.0f}MHz 解码；录制文件未改")
+    return out.astype(np.complex64), float(target_hz), note
+''')
+    try:
+        hits = _resampler_violations(ROOT)
+        assert hits, "旁路文件塞回旧实现后闸门仍然绿——守卫失效"
+        assert any("_adsb_bypass_probe_tmp.py" in p for p, _ in hits), hits
+        assert any("Fraction(" in text for _, text in hits), hits
+        assert any("resample_poly(" in text for _, text in hits), hits
+    finally:
+        os.unlink(bypass)
+    # 删掉后必须恢复绿
+    assert _resampler_violations(ROOT) == []
