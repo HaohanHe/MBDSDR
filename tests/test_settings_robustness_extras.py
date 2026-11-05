@@ -14,6 +14,7 @@
   3. 锁超时那次 flush 跳过写入：脏标记是否保留、下一次 flush 是否
      真的写进去——用人为超时验证"重试成功"。
 """
+import ast
 import inspect
 import json
 import os
@@ -105,16 +106,53 @@ def test_exact_upper_bound_of_network_iq_is_not_flagged(qapp):
 # 1b. 其它数值型恢复项：被替换/被钳位同样必须可见
 # ---------------------------------------------------------------------------
 def _mutated_panel_method(name: str, *replacements: tuple[str, str]):
-    """从 ControlPanel 源码取方法并做字面量变异，返回未绑定的函数副本。
+    """从 ControlPanel 源码取方法并做 AST 变异，返回未绑定的函数副本。
 
     反证用：不改生产文件，只在内存里跑一份去掉守卫的副本，证明守卫"有牙"。
+    定位按 AST 节点文本（if 条件 / 语句），不再用 `src.count(needle)`——
+    后者会把源码文本 pin 带进测试，守卫改写后只能靠人肉更新计数。
     """
     src = dedent(inspect.getsource(getattr(ControlPanel, name)))
+    tree = ast.parse(src)
+
+    def _child_location(parent, child):
+        for field, value in ast.iter_fields(parent):
+            if isinstance(value, list):
+                for index, item in enumerate(value):
+                    if item is child:
+                        return field, index
+            elif value is child:
+                return field, None
+        raise AssertionError("找不到被变异节点的父级字段")
+
     for needle, repl in replacements:
-        assert src.count(needle) == 1, f"守卫写法已变，先更新这条反证: {needle!r}"
-        src = src.replace(needle, repl)
+        matches: list[tuple[ast.AST, ast.AST]] = []
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                if (isinstance(child, ast.If)
+                        and needle.startswith("if ") and needle.endswith(":")):
+                    test_src = ast.get_source_segment(src, child.test) or ""
+                    if test_src.strip() == needle[3:-1].strip():
+                        matches.append((parent, child))
+                elif (isinstance(child, ast.stmt)
+                      and (ast.get_source_segment(src, child) or "").strip()
+                      == needle.strip()):
+                    matches.append((parent, child))
+        assert len(matches) == 1, (
+            f"守卫写法已变，先更新这条反证: {needle!r}（命中 {len(matches)} 次）")
+        parent, node = matches[0]
+        if isinstance(node, ast.If) and needle.startswith("if "):
+            node.test = ast.parse(repl[3:-1].strip(), mode="eval").body
+        else:
+            field, index = _child_location(parent, node)
+            new_nodes = ast.parse(repl).body
+            if index is None:
+                setattr(parent, field, new_nodes[0])
+            else:
+                getattr(parent, field)[index:index + 1] = new_nodes
+    mutated = ast.unparse(tree)
     namespace: dict = {}
-    exec(compile(src, f"<mutated {name}>", "exec"),
+    exec(compile(mutated, f"<mutated {name}>", "exec"),
          vars(control_panel_module), namespace)  # noqa: S102
     return namespace[name]
 

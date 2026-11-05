@@ -69,63 +69,147 @@ def _load_target(call: ast.Call) -> str:
     return ""
 
 
-def _collect_source_vars(tree: ast.AST) -> Dict[str, str]:
-    """反复迭代直到不动点：读文本的变量 + 由它们派生的变量 → 被读文件（可空）。"""
-    tracked: Dict[str, str] = {}
-    changed = True
-    while changed:
-        changed = False
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets: Iterable[ast.AST]
-                if isinstance(node, ast.Assign):
-                    targets = node.targets
-                    value = node.value
-                else:
-                    targets = [node.target]
-                    value = node.value
-                if value is None:
-                    continue
-                if any(isinstance(t, ast.Name) and t.id in tracked for t in targets):
-                    continue
-                call = next(
-                    (
-                        n
-                        for n in ast.walk(value)
-                        if isinstance(n, ast.Call) and _looks_like_source_load(n)
-                    ),
-                    None,
-                )
-                if call is not None:
-                    target = _load_target(call)
-                elif _names_in(value) & set(tracked):
-                    target = ""
-                else:
-                    continue
-                for t in targets:
-                    if isinstance(t, ast.Name) and t.id not in tracked:
-                        tracked[t.id] = target
-                        changed = True
-            elif isinstance(node, ast.With):
-                for item in node.items:
-                    if item.optional_vars is None:
+_SCOPE_TYPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _iter_scope_nodes(scope: ast.AST) -> Iterable[ast.AST]:
+    """遍历 scope 内的语句，但不进入嵌套作用域（函数/类/lambda）。"""
+    stack: List[ast.AST] = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _SCOPE_TYPES) or isinstance(node, ast.Lambda):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _scope_lookup(tree: ast.AST) -> Dict[ast.AST, ast.AST]:
+    parents: Dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    return parents
+
+
+def _scope_params(scope: ast.AST) -> Set[str]:
+    if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return set()
+    args = scope.args
+    names = {a.arg for a in list(args.args) + list(args.kwonlyargs)}
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+    return names
+
+
+def _scope_local_names(scope: ast.AST) -> Set[str]:
+    """本作用域重新绑定的名字：参数 + 赋值/with 目标（不进入嵌套作用域）。"""
+    names = _scope_params(scope)
+    for node in _iter_scope_nodes(scope):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                names.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
+        elif isinstance(node, ast.With):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    names.update(
+                        n.id for n in ast.walk(item.optional_vars)
+                        if isinstance(n, ast.Name))
+    return names
+
+
+def _collect_source_vars(tree: ast.AST) -> Dict[ast.AST, Dict[str, str]]:
+    """按词法作用域跟踪「读文本的变量」及其派生物。
+
+    返回 {作用域节点: {变量名: 被读文件}}。旧实现按文件级变量名做传递闭包：
+    任一函数里的 `raw = read_text()` 会污染所有函数里的同名 `raw`，把运行期
+    值断言误判成「钉源码文本」（2026-11-06 实测 `notes[0]` 误报）。现在：
+    * Module/FunctionDef/AsyncFunctionDef/ClassDef 各自一张表；
+    * 参数与本作用域重新绑定的名字先遮蔽同名外层变量；
+    * 嵌套函数继承外层函数与模块；类体不向方法继承（Python 语义如此）。
+    """
+    parents = _scope_lookup(tree)
+    scopes = [n for n in ast.walk(tree) if isinstance(n, _SCOPE_TYPES)]
+    maps: Dict[ast.AST, Dict[str, str]] = {}
+    busy: Set[ast.AST] = set()
+
+    def compute(scope: ast.AST) -> Dict[str, str]:
+        if scope in maps:
+            return maps[scope]
+        if scope in busy:  # 语法上不应出现环，防御一下
+            return {}
+        busy.add(scope)
+        chain: List[ast.AST] = []
+        cur = parents.get(scope)
+        while cur is not None:
+            if isinstance(cur, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef)):
+                chain.append(cur)
+            cur = parents.get(cur)
+        tracked: Dict[str, str] = {}
+        for ancestor in reversed(chain):
+            tracked.update(compute(ancestor))
+        for name in _scope_local_names(scope):
+            tracked.pop(name, None)
+        changed = True
+        while changed:
+            changed = False
+            for node in _iter_scope_nodes(scope):
+                if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    targets: Iterable[ast.AST]
+                    if isinstance(node, ast.Assign):
+                        targets = node.targets
+                        value = node.value
+                    else:
+                        targets = [node.target]
+                        value = node.value
+                    if value is None:
                         continue
                     call = next(
                         (
                             n
-                            for n in ast.walk(item.context_expr)
+                            for n in ast.walk(value)
                             if isinstance(n, ast.Call) and _looks_like_source_load(n)
                         ),
                         None,
                     )
-                    if call is None:
+                    if call is not None:
+                        target = _load_target(call)
+                    elif _names_in(value) & set(tracked):
+                        target = ""
+                    else:
                         continue
-                    target = _load_target(call)
-                    for n in ast.walk(item.optional_vars):
-                        if isinstance(n, ast.Name) and n.id not in tracked:
-                            tracked[n.id] = target
+                    for t in targets:
+                        if isinstance(t, ast.Name) and t.id not in tracked:
+                            tracked[t.id] = target
                             changed = True
-    return tracked
+                elif isinstance(node, ast.With):
+                    for item in node.items:
+                        if item.optional_vars is None:
+                            continue
+                        call = next(
+                            (
+                                n
+                                for n in ast.walk(item.context_expr)
+                                if isinstance(n, ast.Call) and _looks_like_source_load(n)
+                            ),
+                            None,
+                        )
+                        if call is None:
+                            continue
+                        target = _load_target(call)
+                        for n in ast.walk(item.optional_vars):
+                            if isinstance(n, ast.Name) and n.id not in tracked:
+                                tracked[n.id] = target
+                                changed = True
+        maps[scope] = tracked
+        busy.discard(scope)
+        return tracked
+
+    for scope in scopes:
+        compute(scope)
+    return maps
 
 
 def _snippet(node: ast.AST) -> str:
@@ -193,8 +277,8 @@ def scan_file(path: Path) -> List[dict]:
     for node in ast.walk(tree):
         _SRC_OF[node] = source
 
-    tracked = _collect_source_vars(tree)
-    if not tracked:
+    scope_maps = _collect_source_vars(tree)
+    if not any(scope_maps.values()):
         return []
 
     funcs = [
@@ -210,6 +294,22 @@ def scan_file(path: Path) -> List[dict]:
                 best = (name, start)
         return best[0]
 
+    scopes = [
+        n for n in ast.walk(tree)
+        if isinstance(n, _SCOPE_TYPES) and not isinstance(n, ast.Module)
+    ]
+
+    def _vars_at(line: int) -> Dict[str, str]:
+        """断言所在的最内层作用域（函数/类体），否则模块级；不跨作用域借名。"""
+        best: ast.AST = tree
+        best_start = -1
+        for scope in scopes:
+            start = getattr(scope, "lineno", 0)
+            end = getattr(scope, "end_lineno", start)
+            if start <= line <= end and start > best_start:
+                best, best_start = scope, start
+        return scope_maps.get(best, {})
+
     hits: List[dict] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Assert, ast.Expr)):
@@ -220,6 +320,8 @@ def scan_file(path: Path) -> List[dict]:
             test = node.value
             if not isinstance(test, ast.Call) or _call_name(test) not in {"ok", "fail"}:
                 continue
+        line = getattr(node, "lineno", 0)
+        tracked = _vars_at(line)
         matched = _names_in(test) & set(tracked)
         if not matched:
             continue

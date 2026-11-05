@@ -1,0 +1,1400 @@
+{
+  "schema": 1,
+  "built_at": "2026-11-06",
+  "scanner": "scripts/audit_source_text_pins.py",
+  "built_count": 174,
+  "entries": [
+    {
+      "path": "tests/test_ai_panel_behavior.py",
+      "func": "test_config_roundtrip_and_legacy_key_migration",
+      "pinned": "\"api_base\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_ai_tool_selection_semantics.py",
+      "func": "test_replay_table",
+      "pinned": "\"sdr_spectrum_peaks\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_config_key_migration.py",
+      "func": "test_read_migrates_file_once",
+      "pinned": "\"api_base\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_discoverability_ports_are_findable_from_settings_tab",
+      "pinned": "\"GQRX/hamlib\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_discoverability_ports_are_findable_from_settings_tab",
+      "pinned": "\"HTTP/WS\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_discoverability_ports_are_findable_from_settings_tab",
+      "pinned": "\"Web 8080\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_discoverability_ports_are_findable_from_settings_tab",
+      "pinned": "\"服务开关与端口见「服务设置」页签。\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_discoverability_ports_are_findable_from_settings_tab",
+      "pinned": "\"远程控制 7356\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_discoverability_ports_are_findable_from_settings_tab",
+      "pinned": "\"重启 Web 服务\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_discoverability_ports_are_findable_from_settings_tab",
+      "pinned": "\"重启远程控制服务\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e03_import_rejection_names_reason_and_next_step",
+      "pinned": "\"导入被拒绝：\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e03_import_rejection_names_reason_and_next_step",
+      "pinned": "'res.error or \"未知错误\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"书签初始化失败\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"书签加载失败：\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"已有书签未被改动\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"检查该目录是否可读写\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e06_ntrip_errors_name_next_step_without_internal_jargon",
+      "pinned": "\"请核对地址与端口\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e06_ntrip_errors_name_next_step_without_internal_jargon",
+      "pinned": "'err = \"sourcetable 中未找到 STR 挂载点记录。\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_e06_ntrip_errors_name_next_step_without_internal_jargon",
+      "pinned": "'err = f\"未知错误: {_clean_exc(e)}\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_n01_cpp_status_freq_six_decimals",
+      "pinned": "'QString(\"%1 MHz\").arg(hz / 1e6, 0, \\'f\\', 6)'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_n01_mobile_current_freq_six_decimals",
+      "pinned": "\"toStringAsFixed(6)} MHz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_n01_mobile_current_freq_six_decimals",
+      "pinned": "\"toStringAsFixed(6)} MHz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t01_help_separates_sky_tab_from_planetarium",
+      "pinned": "\"天空模式\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t01_help_separates_sky_tab_from_planetarium",
+      "pinned": "\"打开天空模式\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t01_help_separates_sky_tab_from_planetarium",
+      "pinned": "\"星象仪模式\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t02_help_uses_real_topbar_demod_labels",
+      "pinned": "\"FM / WFM / NFM / AM / USB / LSB / CW\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t02_help_uses_real_topbar_demod_labels",
+      "pinned": "\"顶栏「模式」\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t04_filter_control_is_not_called_vfo_bandwidth",
+      "pinned": "'self.vfo_bw_label = QLabel(\"VFO 带宽\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t04_filter_control_is_not_called_vfo_bandwidth",
+      "pinned": "'self.vfo_bw_label = QLabel(\"解调带宽\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
+      "pinned": "\"'静噪 静音'\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
+      "pinned": "\"SQ OPEN\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
+      "pinned": "'QStringLiteral(\"静噪 有信号\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
+      "pinned": "'QStringLiteral(\"静噪 静音\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
+      "pinned": "'QStringLiteral(\"静噪关闭\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_apt_stats_missing_values_render_dash",
+      "pinned": "\"同步: {'—' if lock is None else f'{lock:.0%}'}\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_apt_stats_missing_values_render_dash",
+      "pinned": "\"行数: {'—' if lines is None else lines}\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_cli_has_no_minus_one_fake_rssi_and_labels_dbuV",
+      "pinned": "\"dBµV\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_cli_has_no_minus_one_fake_rssi_and_labels_dbuV",
+      "pinned": "'status.get(\"rssi\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_cli_has_no_minus_one_fake_rssi_and_labels_dbuV",
+      "pinned": "'status.get(\"rssi\", -1)'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_cpp_status_strip_labels_rssi_and_snr_units",
+      "pinned": "'QString(\"RSSI %1 dBFS\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_cpp_status_strip_labels_rssi_and_snr_units",
+      "pinned": "'QString(\"SNR %1 dB\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_gnss_psd_fields_never_labeled_dbm",
+      "pinned": "\"**不是 dBm**\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_gnss_psd_fields_never_labeled_dbm",
+      "pinned": "\"峰值RSSI: {result['peak_rssi_dbm']}（相对读数 dB，非 dBm）\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_gnss_psd_fields_never_labeled_dbm",
+      "pinned": "\"平均功率: {result.power_dbm:.1f} dB（相对读数，非 dBm）\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_gnss_psd_fields_never_labeled_dbm",
+      "pinned": "\"平均功率（相对读数 dB，非 dBm）\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
+      "pinned": "\"'RSSI ${rssi.toStringAsFixed(1)} dBFS'\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
+      "pinned": "\"'RSSI --'\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
+      "pinned": "\"'RSSI —'\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
+      "pinned": "\"toStringAsFixed(0)} dB'\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero",
+      "pinned": "\"rssi_value.setText(_fmt_rssi_mcp(rssi))\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero",
+      "pinned": "'\" dBm\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero",
+      "pinned": "'\" dBm\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero",
+      "pinned": "'status.get(\"rssi\", 0)'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_same_screen_has_one_rssi_unit_and_never_dBm",
+      "pinned": "\"0-127 dBuV\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_same_screen_has_one_rssi_unit_and_never_dBm",
+      "pinned": "\"0-127 dBµV\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_satellite_form_prefill_uses_empty_placeholder",
+      "pinned": "\"get('freq_mhz', 0)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u02_satellite_form_prefill_uses_empty_placeholder",
+      "pinned": "\"get('symrate_ksps', 0)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s",
+      "pinned": "\".arg(frame.sampleRateHz / 1e6, 0, 'f', 3)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s",
+      "pinned": "\"Fs=%2 MHz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s",
+      "pinned": "'QString(\"%1 Fs=%2 MS/s F0=%3 MHz N=%4\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz",
+      "pinned": "\"1090MHz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz",
+      "pinned": "\"fs ≥ 2 MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz",
+      "pinned": "\"fs ≥ 2 MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz",
+      "pinned": "\"fs ≥ 2 MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz",
+      "pinned": "bad",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
+      "pinned": "\"toStringAsFixed(2)} Msps\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
+      "pinned": "\"toStringAsFixed(2)}Msps\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
+      "pinned": "\"toStringAsFixed(3)} MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
+      "pinned": "\"toStringAsFixed(3)} MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_orchestration_and_advice_copy_use_ms_per_s",
+      "pinned": "\"MSPS\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_orchestration_and_advice_copy_use_ms_per_s",
+      "pinned": "\"MSPS\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_orchestration_and_advice_copy_use_ms_per_s",
+      "pinned": "\"设置采样率 {sample_rate/1e6:.3f} MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_orchestration_and_advice_copy_use_ms_per_s",
+      "pinned": "'\"采样率 (MS/s)\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_orchestration_and_advice_copy_use_ms_per_s",
+      "pinned": "'采样率 2.048 MS/s（ oversample ~16x）'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_orchestration_and_advice_copy_use_ms_per_s",
+      "pinned": "'采样率 2.5 MS/s'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_same_value_renders_identically_on_three_fronts",
+      "pinned": "\"QString(\\\"%1 MS/s\\\").arg(hz / 1e6, 0, 'f', 3)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_same_value_renders_identically_on_three_fronts",
+      "pinned": "\"toStringAsFixed(3)} MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_sample_rate_copy_never_uses_mhz_or_msps",
+      "pinned": "\"Msps\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_sample_rate_is_msps_three_decimals",
+      "pinned": "\"format_sample_rate\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_sample_rate_is_msps_three_decimals",
+      "pinned": "\"format_sample_rate(_rate)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_troubleshooting_error_hint_uses_ms_per_s",
+      "pinned": "\"如 2.048 MHz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_troubleshooting_error_hint_uses_ms_per_s",
+      "pinned": "\"如 2.048 MS/s\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_troubleshooting_next_steps_use_ms_per_s_for_adsb_fs",
+      "pinned": "\"ADS-B 保持 1090MHz 与 fs=2 MS/s 或 4 MS/s。\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_troubleshooting_next_steps_use_ms_per_s_for_adsb_fs",
+      "pinned": "\"（ADS-B 需 fs=2 MS/s 或 4 MS/s）\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u03_troubleshooting_next_steps_use_ms_per_s_for_adsb_fs",
+      "pinned": "bad",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u06_mobile_help_squelch_and_vfo_terms_are_correct",
+      "pinned": "\"-100 为关闭\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u06_mobile_help_squelch_and_vfo_terms_are_correct",
+      "pinned": "\"绝对电平\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u06_mobile_help_squelch_and_vfo_terms_are_correct",
+      "pinned": "\"预存的频率+模式预设\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
+      "pinned": "\"G ${controller.gainDb.toStringAsFixed(1)}dB\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
+      "pinned": "\"增益 ${controller.gainDb.toStringAsFixed(1)} dB\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
+      "pinned": "'\"2.4 kHz (SSB)\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
+      "pinned": "'\"2.4kHz (SSB)\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
+      "pinned": "'QLabel(\"0 dB\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_copy_units_audit.py",
+      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
+      "pinned": "'QLabel(\"0dB\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_decode_pipeline_e2e.py",
+      "func": "test_fixtures_are_in_repo_and_manifest_is_honest",
+      "pinned": "\"not ota\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_decode_pipeline_e2e.py",
+      "func": "test_fixtures_are_in_repo_and_manifest_is_honest",
+      "pinned": "\"synthetic\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_decoder_capability_matrix.py",
+      "func": "test_doc_has_row_per_mode",
+      "pinned": "f\"`{row['mode']}`\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_desktop_constants.py",
+      "func": "test_dock_layout_hardcoded_ids_are_registered",
+      "pinned": "\"tabData\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_desktop_constants.py",
+      "func": "test_dock_layout_hardcoded_ids_are_registered",
+      "pinned": "\"tabText\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_cpp_tokens_match_documented_values",
+      "pinned": "name",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_cross_language_deltas_are_documented",
+      "pinned": "semantic",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
+      "pinned": "\"tokens::kPeakRelDb\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
+      "pinned": "\"tokens::kPeakRelDb\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
+      "pinned": "\"tokens::kPeakRelDb\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
+      "pinned": "\"tokens::kPeakThresholdDefault\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
+      "pinned": "\"tokens::kPeakThresholdDefault\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_tuning_step_tiers_match_cpp_and_schema",
+      "pinned": "\"kFreqCoarseStepHz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hardcoded_parameter_registry.py",
+      "func": "test_tuning_step_tiers_match_cpp_and_schema",
+      "pinned": "\"kFreqFineStepHz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_hw_acceptance_contract.py",
+      "func": "test_suites_still_spell_the_same_ring_names",
+      "pinned": "keyword",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_record_rate_split.py",
+      "func": "test_single_segment_keeps_plain_sidecar",
+      "pinned": "\"segments\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_record_replay_config.py",
+      "func": "test_corrupt_config_backed_up_and_original_bytes_kept",
+      "pinned": "\"window\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_record_replay_config.py",
+      "func": "test_replay_stops_recording_and_saves_sidecar",
+      "pinned": "\"center_freq_hz\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_record_replay_config.py",
+      "func": "test_replay_stops_recording_and_saves_sidecar",
+      "pinned": "\"sample_rate\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_selection_crosshair.py",
+      "func": "test_picked_info_has_no_static_double_ring",
+      "pinned": "\"drawEllipse(pos, 12, 12)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_selection_crosshair.py",
+      "func": "test_picked_info_has_no_static_double_ring",
+      "pinned": "\"drawEllipse(pos, 16, 16)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_settings_convergence.py",
+      "func": "test_gui_config_no_longer_writes_canonical_keys",
+      "pinned": "'\"theme\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_settings_convergence.py",
+      "func": "test_gui_config_no_longer_writes_canonical_keys",
+      "pinned": "f'\"{key}\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_settings_convergence.py",
+      "func": "test_gui_config_no_longer_writes_canonical_keys",
+      "pinned": "f'config[\"{key}\"]'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_settings_convergence.py",
+      "func": "test_gui_config_no_longer_writes_drifting_keys",
+      "pinned": "f'config[\"{key}\"]'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_settings_convergence.py",
+      "func": "test_no_nonexistent_freq_spin_widget",
+      "pinned": "\"freq_spin.setValue\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_settings_schema.py",
+      "func": "test_export_has_version_and_no_secrets",
+      "pinned": "\"sk-secret\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_settings_ui_coverage.py",
+      "func": "test_inventory_table_matches_script",
+      "pinned": "report.source_commit",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_body_card_units",
+      "pinned": "\"Az/Alt (视/几何, Az 0°=N)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_body_card_units",
+      "pinned": "\"Magnitude (mag)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_body_card_units",
+      "pinned": "\"Rise/Set (UTC)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_body_card_units",
+      "pinned": "\"_format_alt_pair(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_body_card_units",
+      "pinned": "\"format_azimuth(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_body_card_units",
+      "pinned": "\"format_dms_deg(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_body_card_units",
+      "pinned": "\"format_hms_ra(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rise_set_shown_in_utc",
+      "pinned": "\"Rise/Set (UTC)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "\"_current_jd(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "\"format_view_axis(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "\"local_sidereal_time_deg(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "\"star_catalog_credit_text(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "\"—（无站址）\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "'\"恒星时\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "'\"星表来源\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_card_rows_use_single_fact_source",
+      "pinned": "'\"视轴(几何)\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_no_ad_hoc_numeric_formatting_left",
+      "pinned": "\":.0f} km\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_no_ad_hoc_numeric_formatting_left",
+      "pinned": "\":.1f}°\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_no_ad_hoc_numeric_formatting_left",
+      "pinned": "\":4.0f} deg\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_no_ad_hoc_numeric_formatting_left",
+      "pinned": "src.count(\"strftime(\")",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_no_ad_hoc_numeric_formatting_left",
+      "pinned": "src.count(':3d}°{m:02d}')",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_pass_panel_labels_and_single_formatter",
+      "pinned": "\"24h\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_pass_panel_labels_and_single_formatter",
+      "pinned": "\":4.0f} deg\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_pass_panel_labels_and_single_formatter",
+      "pinned": "\"_pass_window_hours\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_pass_panel_labels_and_single_formatter",
+      "pinned": "\"format_angle_deg(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_pass_panel_labels_and_single_formatter",
+      "pinned": "\"峰值(几何)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_pass_panel_labels_and_single_formatter",
+      "pinned": "\"未来过境\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"Az/Alt 几何 (Az 0°=N)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"Distance (km)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"Magnitude (mag)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"Rise/Set (UTC)\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"format_angle_deg(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"format_azimuth(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"format_dms_deg(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "\"format_hms_ra(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "'\"°{m:02d}'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_picked_satellite_card_units",
+      "pinned": "'strftime(\"%H:%M\")'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_status_card_states_utc_and_local_offset",
+      "pinned": "\"format_angle_deg(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_status_card_states_utc_and_local_offset",
+      "pinned": "\"format_azimuth(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_status_card_states_utc_and_local_offset",
+      "pinned": "\"format_local_time(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_status_card_states_utc_and_local_offset",
+      "pinned": "\"format_utc_time(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_status_card_states_utc_and_local_offset",
+      "pinned": "'\"本地\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_status_card_states_utc_and_local_offset",
+      "pinned": "'deg\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_ssdv_e2e.py",
+      "func": "test_no_builtin_callsign_in_sources",
+      "pinned": "bad",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"_fmt_squelch(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"squelch_applied_by\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"squelch_threshold_dbfs\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"余量\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "'f\"{squelch:.0f} dBFS\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_tooltip_guard.py",
+      "func": "test_upgraded_tooltips_meet_the_rules",
+      "pinned": "\"失败时状态栏会显示真实错误原因\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_tooltip_guard.py",
+      "func": "test_upgraded_tooltips_meet_the_rules",
+      "pinned": "\"面板：点击显示或隐藏\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    },
+    {
+      "path": "tests/test_web_server.py",
+      "func": "test_index_page_and_404",
+      "pinned": "\"MBDSDR\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "建表前既有源码文本 pin；归属与处置见 docs/source-text-pins-audit.md",
+      "legacy": true
+    }
+  ]
+}
