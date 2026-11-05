@@ -145,6 +145,11 @@ checkout 时 CRLF 改写导致 SHA 分叉。
 | `zh_name` | 83 | 界面回退 `name_en`；中文名覆盖 34/117 | — |
 | `aliases_en` | 107 | 仅 10 条有英文别名，别名搜索覆盖有限 | — |
 
+- `size_source` 分布：`catalog` 115 / `wds` 1 / `lynga` 1（合计 117）。
+- 坐标实测域：RA `[10.0920°, 351.2017°]`、Dec `[−69.1009°, +69.6794°]`，
+  全部落在 RA ∈ [0°, 360°)、Dec ∈ [−90°, 90°]，无越界、无非有限值
+  （实测值，随星表更新需重算）。
+
 补字段口径：**只填 OpenNGC 为 `null` 的字段**，原值来自公开星表快照
 `mbdsdr_ai/data/dso_supplement.json`（含逐条原始行、`fetched_at`、
 `payload_sha256`，由 `scripts/fetch_dso_supplement.py` 生成）；不插值、
@@ -191,7 +196,8 @@ Common names
 
 `NGC.csv` 中不存在 `M == 102` 的非 `Dup` 行。本项目按历史约定把
 `M102` 映射到 `NGC 5866`（`dso_catalog.json` 中 `source_name == "NGC5866"`、
-`cross_ids == (("ngc", 5866), ("m", 102))`），条目数保持 117。
+JSON `cross_ids == {"ngc": 5866, "ic": null, "m": 102}`；API 层
+`DSOEntry.cross_ids == (("ngc", 5866), ("m", 102))`），条目数保持 117。
 
 钉扎测试：`test_m102_raw_addendum_record`（原始行字段）与
 `test_m102_convention_pinned`（目录映射 + `meta.m102_convention`）。

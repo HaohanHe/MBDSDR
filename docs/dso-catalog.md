@@ -32,7 +32,7 @@
 | --- | --- | --- | --- |
 | `NGC.csv` | 3,942,946 | 13,970 | `54abea0b57b0a103831bfc7a8e3a99a23acfbf4bb581fcf3d8af539cbb826c84` |
 | `addendum.csv` | 17,496 | 64 | `c93f983dda6780b76b7b2e9271a856a892627710148a982ee98101a54c642fdd` |
-| `dso_zh_wikidata.json`（Wikidata 快照，CC0） | — | 34 条 | `809168bbe75964558b5ace2102d39cb644841cea5c313506d1bd301085f3611d` |
+| `dso_zh_wikidata.json`（Wikidata 快照，CC0） | — | 117 条（29 条选中中文标签；另 5 条自译见 §4） | `809168bbe75964558b5ace2102d39cb644841cea5c313506d1bd301085f3611d` |
 | `dso_supplement.json`（补字段快照） | — | 9 条 | 见 `meta.source_files.supplement.sha256` |
 
 - **产物**：117 条（Messier 1–110 全量 + 7 个常用亮 NGC：NGC 253/869/884/
