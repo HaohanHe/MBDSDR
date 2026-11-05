@@ -350,6 +350,59 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
    与频段条数无关；`bandplan.json` 历史只有 19 条（`4d23308f`）→ 30 条
    （`a72996fb`）两档，从未有过 38 条。因此两边都不过期，是两件事被混称。
 
+## 3b. Web 产品生成产物（`web/product/build/*.json`）
+
+四个 JSON 都有生成器，不是手写产物；触发链在 `web/product/run_all.py:27-31`
+（`web/product/build/build.py:118-121` 也会重跑前两个）。审计过程只读：
+重跑后已按 sha256 逐文件恢复原字节，产物本身未改。
+
+| 产物 | 生成器 | 输入 |
+|---|---|---|
+| `repo-facts.json` | `build/sync_from_repo.py` | `mbdsdr_ai/core/mcp_server.py`、`tool_registry.py`、`desktop/tokens.py`、`cpp/src/core/tokens.h`、`station.py` 等源码 |
+| `sky-catalog.json` | `build/sync_sky_catalog.py` | `web/product/data/hygdata_v41.csv` + `mbdsdr_ai/skyengine/{stars,constellations}.py` + `mbdsdr_ai/data/dso_catalog.json` + `*_culture.json` |
+| `sat-tracks.json` | `build/sync_sat_tracks.py` | `mbdsdr_ai/sat_tracker.py::_BUILTIN_TLES`（6 条）+ sgp4 2.27 + `celestial_geometry.py` |
+| `astro-golden.json` | `build/gen_astro_golden.py` | `mbdsdr_ai/celestial_geometry.py`（岁差 / 章动 / GMST） |
+
+**生成器输入 → 产物 → 文档**（2026-11-06 实测，只列关键字段；
+`03`/`06`/`07`/`09`/`10` 分别指 `docs/03-architecture.md`、`docs/06-compliance.md`、
+`docs/07-roadmap.md`、`docs/09-repo-alignment.md`、`docs/10-sky-catalog.md`）：
+
+| 字段 | 产物 | 输入复核 | 文档声明 |
+|---|---|---|---|
+| 全天星 | 25,792（V ≤ 7.5） | HYG CSV 逐行复点：119,626 行中 25,792 行 | 一致（`03:159`、`03:176`、`06:41`、`07:66`、`README:89`、`10:10`、`10:37`） |
+| 命名星 | 141 | `stars.py` | 一致（`03:176`、`10:15`） |
+| 星座 / 连线 | 27 座 / 115 段 | `constellations.py::CONSTELLATION_LINES` 27 组 | 一致（`03:160`、`03:176`、`07:70`、`10:16`） |
+| DSO | 117 | `dso_catalog.json.objects` 117 条 | 一致（`03:176`、`07:70`、`10:17`） |
+| HYG SHA | `eb086d46…` | CSV 实测 sha256 与 `data/hygdata_v41.sha256` 三方同值 | 一致 |
+| 工具域 | 14（冻结 10 + Python 扩展 4） | `mcp_server.py` 两个 domain 汇总 dict | **文档无声明**（红线「不硬编码能力数字」，`09:107`；仅 `VERIFY-REPORT.md:6` 自动写出） |
+| 工具→域 | 82 | `mcp_server.py::_TOOL_DOMAIN` 82 条 | 文档无声明（同上） |
+| 写工具模式 | 82 | `tool_registry.py::WRITE_TOOL_NAME_PATTERNS` 82 条 | 一致（`09:79`，自动生成页）；手写页无声明 |
+| ControlHub 端口 | 50732 | `cpp/src/core/tokens.h:1422` | 一致（`09:62` 自动生成；`wiki/faq.md:43`） |
+| 时间倍率 | 5 档 | 仓库时间引擎常量 | 文档无声明（仅自动报告 `VERIFY-REPORT.md:7`） |
+| 默认站点 | 0.0, 0.0 / trusted=false | `station.py` 守卫 | 一致（`09:105`） |
+| 卫星轨迹 | 6 星 × 481 采样 @ 90 s | `_BUILTIN_TLES` 6 条；481 = 2×240+1 | 文档无声明（仅自动报告 `VERIFY-REPORT.md:18`） |
+| 天文金标准 | 24 例 | `celestial_geometry.py` | 文档无声明（仅自动报告 `VERIFY-REPORT.md:19`） |
+
+**产物是否被手改**：`git log -p` 逐提交看，产物变更只随生成器或输入变化。
+`0055dddb` 入库；`16f075f3` 误夹带了一份**落后于输入的旧产物**
+（`generatedAt` 00:42:04、attribution 缺 supplement 段），`a5d062e8` 已撤回。
+未发现「只改产物、不改脚本/输入」的手改；`16f075f3` 那类「产物落后于输入」
+正是下面这条断言要拦的形态。
+
+**长期断言（可复跑，不写死 JSON）**：按 `run_all.py:27-31` 重跑四个生成器后，
+产物与重跑结果比对**只允许三类易变字段变化**：`repo-facts.json` 的
+`generatedAt` 与 `repo.head`、`sky-catalog.json` 的 `meta.generatedAt`；
+其余字段与文本必须零差异（它们是生成时刻与基线戳，不是数据）。
+2026-11-06 实测 10 个输出文件（四个 JSON + `src/05-repo-facts.js`、
+`src/12-sky-catalog.js`、`src/13-sat-tracks.js`、`docs/09-repo-alignment.md`、
+`docs/10-sky-catalog.md`、`data/hygdata_v41.sha256`）除上述字段外全部一致；
+`sat-tracks.json` 与 `astro-golden.json` 无时间戳，字节级一致。
+`tests/verify_product.py` 另钉内容红线：`starCount>10000`、HYG 许可/SHA、
+`notVerified` 条数、`satCount`/`count` 下限、`caseCount≥6` 且事实源为
+`celestial_geometry.py`。审计时 `build/astro-golden.json` 与
+`build/gen_astro_golden.py` 仍是工作区新增（HEAD 未跟踪），入库前这条链在
+CI 里不完整。
+
 ---
 
 ## 4. 已知边界
@@ -378,4 +431,10 @@ python scripts/check_data_licenses.py --probe
 python -m pytest tests/test_data_licenses.py -q
 # 3a) 帧布局哨兵口径 + 链路同频并列
 python -m pytest mbdsdr_ai/tests/test_sat_profile.py mbdsdr_ai/tests/test_sat_links.py -q
+# 3b) Web 产物复现：重跑四个生成器，git diff 只应剩 generatedAt / repo.head
+python web/product/build/sync_from_repo.py
+python web/product/build/sync_sky_catalog.py
+python web/product/build/sync_sat_tracks.py
+python web/product/build/gen_astro_golden.py
+git diff --stat -- web/product/build
 ```
