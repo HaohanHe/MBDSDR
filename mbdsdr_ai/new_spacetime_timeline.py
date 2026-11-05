@@ -38,6 +38,12 @@ except ImportError:  # sgp4 属 satellite 可选依赖组；缺失时用到才�
     jday = None  # type: ignore[assignment]
     _HAS_SGP4 = False
 
+# TLE 新鲜度分级（与 orbit/sat_passes 同一口径，不另立阈值）
+try:
+    from .tle_integrity import freshness, accuracy
+except ImportError:  # 脚本 / 直接运行时
+    from tle_integrity import freshness, accuracy  # type: ignore
+
 
 def _require_sgp4() -> None:
     if not _HAS_SGP4:
@@ -88,7 +94,12 @@ class PassPoint:
 
 @dataclass
 class SatellitePass:
-    """一次完整的卫星过境事件。"""
+    """一次完整的卫星过境事件。
+
+    TLE 老化字段（``tle_age_days`` / ``tle_tier`` / ``accuracy_note``）必须
+    随结果一起返回：用一年前的星历算出的过境看起来和新鲜 TLE 一样，不给
+    年龄就会静默冒充精确结果。
+    """
     name: str
     rise_time: Optional[datetime]
     rise_azimuth: float
@@ -101,6 +112,12 @@ class SatellitePass:
     trajectory: List[PassPoint] = field(default_factory=list)
     frequency_hz: float = 0.0
     max_doppler_hz: float = 0.0
+    tle_epoch_utc: Optional[str] = None
+    tle_age_days: Optional[float] = None
+    tle_tier: str = ""
+    tle_tier_label: str = ""
+    accuracy_risk: str = ""
+    accuracy_note: str = ""
 
 
 @dataclass
@@ -263,6 +280,17 @@ class TimelineEngine:
                 continue
 
             freq_hz = float(frequencies.get(name, 0.0))
+            # TLE 年龄按本次预测起点计算（生产=墙钟，测试可 monkeypatch now）。
+            fresh = freshness(line1, now=now)
+            acc = accuracy(fresh)
+            tle_meta = {
+                "tle_epoch_utc": fresh.get("epoch_utc"),
+                "tle_age_days": fresh.get("age_days"),
+                "tle_tier": fresh.get("tier", ""),
+                "tle_tier_label": fresh.get("label", ""),
+                "accuracy_risk": acc.get("risk", ""),
+                "accuracy_note": acc.get("note", ""),
+            }
 
             current: Optional[SatellitePass] = None
             in_pass = False
@@ -325,6 +353,7 @@ class TimelineEngine:
                             set_azimuth=0.0,
                             duration_sec=0.0,
                             frequency_hz=freq_hz,
+                            **tle_meta,
                         )
                     pt = PassPoint(
                         time_utc=t,
