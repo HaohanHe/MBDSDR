@@ -50,6 +50,25 @@ from mbdsdr_ai.squelch import (
 # 契约与 cpp/src/ui/freq_display_widget.h 一致。
 from freq_display import FreqDisplay
 
+
+class _CapabilitySampleRateCombo(QComboBox):
+    """采样率下拉：每次展开前重新问后端能力，前端不保存档位副本。
+
+    展开时才刷新（而不是连接时一次性写入），是为了让“可见档位”始终等于
+    当前活跃后端的可接受集合；后端还没报告范围时只显示“未知”，不编档位。
+    """
+
+    def __init__(self, refresh, parent=None):
+        super().__init__(parent)
+        self._refresh = refresh
+
+    def showPopup(self):  # noqa: N802 (Qt 虚函数名)
+        try:
+            self._refresh()
+        except Exception:
+            pass
+        super().showPopup()
+
 # 解调模式元数据（默认带宽/显示名/解调函数）已收口到 mode_registry。
 # 这里只取查询函数；旧字典 MODE_VFO_BANDWIDTH 作为向后兼容别名在下方导出。
 from mode_registry import (
@@ -149,23 +168,13 @@ class ControlPanel(QWidget):
     iq_balance_changed = Signal(bool)          # I/Q 不平衡校正开关（默认开）
     bookmark_added = Signal(float, str, str)   # 收藏新增 (freq_hz, name, mode)，供主窗口持久化
 
-    # 采样率档位：与 RTLSDRBackend.SAMPLE_RATES 对齐（11 档离散表）。
-    # 动态导入失败时回退到硬编码表，保证 GUI 不崩。
-    try:
-        from mbdsdr_ai.sdr_backend import RTLSDRBackend
-        SAMPLE_RATES = list(RTLSDRBackend.SAMPLE_RATES)
-    except Exception:
-        SAMPLE_RATES = [
-            250_000, 1_024_000, 1_536_000, 1_792_000, 1_920_000,
-            2_048_000, 2_160_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000,
-        ]
-
     def __init__(self, parent=None):
         super().__init__(parent)
         # 未连接时无模式/无频率真值；连接后由后端或持久化配置回填。
         # 绝不硬编码 98.5 MHz / FM 这类演示默认值伪装成"已在收听某台"。
         self._current_mode = None
         self._freq_hz = None
+        self._sample_rate_options: list[float] = []
         self._step_hz = 10_000.0   # 默认步进 10 kHz
         self._volume = 48
         self._recording = False
@@ -250,6 +259,10 @@ class ControlPanel(QWidget):
         for w in widgets:
             if w is not None:
                 w.setEnabled(self._sdr_connected)
+        # 后端未报告采样率范围时，即便已连接也不能把说明项当成可选项
+        if (self._sdr_connected and self.sample_rate_combo.count()
+                and self.sample_rate_combo.itemData(0) is None):
+            self.sample_rate_combo.setEnabled(False)
         # 连接后恢复频率显示（断连期间 set_frequency_hz 只存内部值不刷显示）
         if self._sdr_connected and self._freq_hz is not None:
             self._update_freq_display()
@@ -449,22 +462,18 @@ class ControlPanel(QWidget):
         smeter_row.addWidget(self.smeter_bar, 1)
         rx_layout.addLayout(smeter_row)
 
-        # 采样率下拉框（11 档离散表，默认 2.048 MHz = 索引 5）
+        # 采样率下拉：档位只在后端能力里取，前端不留副本。
+        # 连接前按默认 RTL 后端的声明区间预填；连接后每次展开按活跃后端刷新。
         sr_row = QHBoxLayout()
         self.sr_label = QLabel("采样率")
         self.sr_label.setObjectName("statusValue")
         self.sr_label.setMinimumWidth(30)
         self.sr_label.setMaximumWidth(100)
         sr_row.addWidget(self.sr_label)
-        self.sample_rate_combo = QComboBox()
-        for _rate in self.SAMPLE_RATES:
-            self.sample_rate_combo.addItem(format_sample_rate(_rate), float(_rate))
-        # 默认选中项目统一基准采样率（2.400 MS/s，索引随档位表定位，不写死索引）
-        try:
-            _default_idx = self.SAMPLE_RATES.index(DEFAULT_SAMPLE_RATE_HZ)
-        except ValueError:
-            _default_idx = 0
-        self.sample_rate_combo.setCurrentIndex(_default_idx)
+        self.sample_rate_combo = _CapabilitySampleRateCombo(
+            self.refresh_sample_rate_options_from_active_backend)
+        self._populate_sample_rate_options(
+            self._default_sample_rate_options(), DEFAULT_SAMPLE_RATE_HZ)
         self.sample_rate_combo.currentIndexChanged.connect(self._on_sample_rate_changed)
         sr_row.addWidget(self.sample_rate_combo)
         rx_layout.addLayout(sr_row)
@@ -1203,11 +1212,89 @@ class ControlPanel(QWidget):
         self.gain_slider.blockSignals(False)
         self.gain_val.setText(f"{db} dB")
 
+    @staticmethod
+    def _default_sample_rate_options() -> list[float]:
+        """连接前预填：仍取自后端能力（RTL 声明区间），不是前端常量表。
+
+        区间常量取 ``mbdsdr_ai/rtlsdr_params.py``（librtlsdr 口径），档位由
+        ``sample_rate_options`` 从 RTL 后端表里过滤。连接成功后
+        ``refresh_sample_rate_options_from_active_backend`` 会按当前活跃后端
+        重新取；后端未报告范围时只显示“未知”，不编档位。
+        """
+        try:
+            from mbdsdr_ai.rtlsdr_params import SAMPLE_RATE_MAX_HZ, SAMPLE_RATE_MIN_HZ
+            from mbdsdr_ai.device_capabilities import sample_rate_options
+            return list(sample_rate_options({
+                "driver": "rtlsdr",
+                "sample_rate_range": (SAMPLE_RATE_MIN_HZ, SAMPLE_RATE_MAX_HZ),
+                "capability_status": {"sample_rate_range": "declared"},
+            }) or [])
+        except Exception:
+            return []
+
+    def _populate_sample_rate_options(self, options, select_hz=None):
+        """用后端可见档位重建下拉；保持“可见 ⊆ 后端可接受”，不补默认档。"""
+        combo = self.sample_rate_combo
+        rates = [float(r) for r in (options or [])]
+        current = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        for _rate in rates:
+            combo.addItem(format_sample_rate(_rate), float(_rate))
+        if not rates:
+            # 未知不是“一档”，给出不可选的说明项；不拿默认采样率凑成假档位。
+            combo.addItem("未知（后端未报告采样率范围）", None)
+            combo.setEnabled(False)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+            return
+        combo.setEnabled(bool(getattr(self, "_sdr_connected", False)))
+        target = select_hz
+        if target is None and current in rates:
+            target = current
+        idx = -1
+        if target is not None:
+            idx = combo.findData(float(target))
+            if idx < 0:
+                # 与 sdr_backend.nearest_sample_rate 同规则：最近档、平局取低
+                idx = min(
+                    range(combo.count()),
+                    key=lambda i: (abs(float(combo.itemData(i)) - float(target)),
+                                   float(combo.itemData(i))))
+        if idx < 0:
+            idx = 0
+        combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+
+    def set_sample_rate_options(self, options, select_hz=None):
+        """由后端能力设置可见档位；``options=None`` 表示未知，显示说明项。"""
+        self._sample_rate_options = [float(r) for r in (options or [])]
+        self._populate_sample_rate_options(self._sample_rate_options, select_hz)
+
+    def refresh_sample_rate_options_from_active_backend(self):
+        """按当前活跃后端刷新可见档位（下拉展开时调用，不依赖前端常量）。"""
+        win = self.window()
+        backend = getattr(win, "_active_sdr_backend", None)
+        if backend is None:
+            return
+        current = None
+        try:
+            current = backend.get_sample_rate()
+        except Exception:
+            current = None
+        try:
+            from mbdsdr_ai.device_capabilities import sample_rate_options_for_backend
+            options = sample_rate_options_for_backend(backend)
+        except Exception:
+            options = None
+        self.set_sample_rate_options(options, current)
+
     def set_sample_rate(self, rate_hz: float):
         """从外部恢复采样率档位；无精确匹配时选最近档，不发射 sample_rate_changed。"""
         rate = float(rate_hz)
         idx = self.sample_rate_combo.findData(rate)
-        if idx < 0 and self.sample_rate_combo.count():
+        if (idx < 0 and self.sample_rate_combo.count()
+                and self.sample_rate_combo.itemData(0) is not None):
             best, best_diff = 0, None
             for i in range(self.sample_rate_combo.count()):
                 d = abs(float(self.sample_rate_combo.itemData(i)) - rate)

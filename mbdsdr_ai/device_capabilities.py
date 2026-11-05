@@ -182,6 +182,73 @@ def _antenna_field(device: Dict[str, Any],
     return _unknown("antenna", notes.get("antenna", ""))
 
 
+#: 后端可枚举离散档位的模块落点。前端**不许**再写自己的档位表；
+#: 可见档位一律经 ``sample_rate_options`` 从后端能力过滤得到。
+_BACKEND_RATE_TABLE = {
+    "rtlsdr": ("mbdsdr_ai.sdr_backend", "RTLSDRBackend", "SAMPLE_RATES"),
+    "hackrf": ("mbdsdr_ai.hackrf_params", "SUPPORTED_SAMPLE_RATES", None),
+    "lime": ("mbdsdr_ai.limesuite_params", "SUPPORTED_SAMPLE_RATES", None),
+}
+
+
+def _backend_rate_table(driver: str) -> Optional[Tuple[float, ...]]:
+    """按 driver 取后端自己的离散档位表；没有表就返回 None（不许编）。"""
+    key = (driver or "").strip().lower().replace("-", "").replace("_", "")
+    entry = None
+    for name, val in _BACKEND_RATE_TABLE.items():
+        if name in key:
+            entry = val
+            break
+    if entry is None:
+        return None
+    try:
+        mod = __import__(entry[0], fromlist=[entry[1]])
+        if entry[2] is None:
+            return tuple(float(x) for x in getattr(mod, entry[1]))
+        obj = getattr(mod, entry[1])
+        return tuple(float(x) for x in getattr(obj, entry[2]))
+    except Exception:
+        return None
+
+
+def sample_rate_options(device: Dict[str, Any]) -> Optional[list]:
+    """把一台设备归一成**可见采样率档位**；未知返回 None（不造假表）。
+
+    规则（与后端能力同源）：
+      * 范围 ``unknown``/缺失 → ``None``；
+      * 后端有离散档位表 → 取表内落在范围里的档；
+      * 后端只有范围（连续可调）→ 只给范围两端（两端按定义可设，不编中间档）；
+      * 过滤后为空 → ``None``（不拿默认值凑数）。
+    """
+    report = build_capability_report(device)
+    field = report.get("sample_rate_range")
+    if field is None or not field.known or field.value is None:
+        return None
+    lo, hi = field.value
+    table = _backend_rate_table(str(device.get("driver") or ""))
+    if table:
+        opts = sorted(int(r) for r in table if lo <= r <= hi)
+        return opts or None
+    # 连续可调后端：两端是设备自己声明的边界，可设；中间不擅自补格。
+    lo_i, hi_i = int(round(lo)), int(round(hi))
+    if lo_i < hi_i:
+        return [lo_i, hi_i]
+    return None
+
+
+def sample_rate_options_for_backend(backend: Any) -> Optional[list]:
+    """从已连接后端取可见档位；后端没报告范围就是 None（界面不得编表）。"""
+    dev = getattr(backend, "device", None)
+    if dev is None:
+        return None
+    raw = {
+        "driver": str(getattr(dev, "device_type", "") or ""),
+        "sample_rate_range": getattr(dev, "sample_rate_range", None),
+        "capability_status": {"sample_rate_range": STATUS_DECLARED},
+    }
+    return sample_rate_options(raw)
+
+
 def build_capability_report(device: Dict[str, Any]) -> Dict[str, CapabilityField]:
     """把设备 dict 归一成 {字段: CapabilityField}；缺失即未知，绝不填默认值。"""
     device = dict(device or {})
