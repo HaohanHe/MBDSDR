@@ -130,12 +130,14 @@ try:
     from settings import (
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
+        effective_pass_window_hours,
         effective_show_low_elevation_passes,
     )
 except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
     from .settings import (  # type: ignore
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
+        effective_pass_window_hours,
         effective_show_low_elevation_passes,
     )
 
@@ -7328,9 +7330,9 @@ class SatelliteTracker:
     TLE 从用户文件或 Celestrak 加载；失败则显示"无 TLE 数据"，不造假。
     """
 
-    # 过境面板：24h 窗口；粗扫/细化步长引用 sat_passes 的公开常量（单一事实源），
-    # 不在本类另写字面量。峰值邻域细化保留（粗采样会系统性削掉峰值）。
-    PASS_WIN_HOURS = 24.0
+    # 过境窗口读 settings.effective_pass_window_hours（默认 24h，范围 1–72h），
+    # 本类不写窗口字面量。粗扫/细化步长引用 sat_passes 的公开常量（单一事实源），
+    # 也不在本类另写字面量。峰值邻域细化保留（粗采样会系统性削掉峰值）。
     PASS_COARSE_STEP_S = _SAT_PASS_COARSE_STEP_S
     PASS_FINE_STEP_S = _SAT_PASS_FINE_STEP_S
     # 峰值仰角门读 settings.effective_pass_*（默认 10°）；与 5° 的可见门是两个量。
@@ -7637,7 +7639,7 @@ class SatelliteTracker:
             return None
 
     def _refresh_passes(self, jd_utc: float):
-        """预测未来 24h 过境，喂入天空图侧栏。失败则清空列表。
+        """按设置窗口（1–72h，默认 24h）预测过境，喂入天空图侧栏。失败则清空列表。
 
         行字段：peak_unix（峰值精确模拟时刻，供面板/天空同刻对拍与过期过滤）、
         rise（HH:MM 显示口径的峰值时刻）、max_alt（峰值仰角）、
@@ -7653,11 +7655,12 @@ class SatelliteTracker:
             gate = effective_pass_visibility_gate_deg(settings)
             user_gate = effective_pass_min_elevation_deg(settings)
             show_low = effective_show_low_elevation_passes(settings)
+            window_hours = effective_pass_window_hours(settings)
             rows = compute_pass_peaks(
                 self._catalog, self.lat, self.lon, self.alt_km, t0_unix,
                 min_peak_deg=gate,
                 low_peak_deg=(user_gate if show_low else None),
-                win_s=self.PASS_WIN_HOURS * 3600.0,
+                win_s=float(window_hours) * 3600.0,
                 coarse_step_s=self.PASS_COARSE_STEP_S,
                 fine_step_s=self.PASS_FINE_STEP_S,
             )

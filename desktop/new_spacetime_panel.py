@@ -84,6 +84,7 @@ try:
         PASS_LOW_ELEVATION_FLOOR_DEG,
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
+        effective_pass_window_hours,
         effective_show_low_elevation_passes,
     )
 except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.path
@@ -91,6 +92,7 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
         PASS_LOW_ELEVATION_FLOOR_DEG,
         effective_pass_min_elevation_deg,
         effective_pass_visibility_gate_deg,
+        effective_pass_window_hours,
         effective_show_low_elevation_passes,
     )
 
@@ -253,6 +255,7 @@ class NewSpacetimePanel(QWidget):
         self._pass_min_elevation_deg = effective_pass_min_elevation_deg(settings)
         self._pass_visibility_gate_deg = effective_pass_visibility_gate_deg(settings)
         self._pass_show_low = effective_show_low_elevation_passes(settings)
+        self._pass_window_hours = effective_pass_window_hours(settings)
 
         # 后端引擎（纯对象，构造不联网）
         self._tle_mgr = TLEManager()
@@ -381,7 +384,8 @@ class NewSpacetimePanel(QWidget):
         # 筛选口径明示：低于峰值门的过境不会出现在表里（用户必须能看见这条规则）
         self.passes_filter_label = QLabel(
             self._pass_filter_text(self._pass_min_elevation_deg,
-                                   self._pass_show_low))
+                                   self._pass_show_low,
+                                   self._pass_window_hours))
         self.passes_filter_label.setObjectName("hintLabel")
         self.passes_filter_label.setWordWrap(True)
         lay.addWidget(self.passes_filter_label)
@@ -544,19 +548,18 @@ class NewSpacetimePanel(QWidget):
         return getattr(self.window(), "settings", None)
 
     @staticmethod
-    def _pass_filter_text(min_elevation_deg: float, show_low: bool) -> str:
+    def _pass_filter_text(min_elevation_deg: float, show_low: bool,
+                          window_hours: int) -> str:
         """列表筛选口径文案（用户必须能一眼看见「按峰值仰角」而非「当前仰角」）。"""
         floor = PASS_LOW_ELEVATION_FLOOR_DEG
+        head = f"未来 {window_hours:g} 小时；列表按峰值仰角 ≥ {min_elevation_deg:g}° 筛选"
         if show_low and min_elevation_deg > floor:
-            return (f"列表按峰值仰角 ≥ {min_elevation_deg:g}° 筛选；"
-                    f"「显示低仰角过境」已开启：额外列出 {floor:g}–"
+            return (f"{head}；「显示低仰角过境」已开启：额外列出 {floor:g}–"
                     f"{min_elevation_deg:g}° 的过境并标注「低仰角」")
         if show_low:
-            return (f"列表按峰值仰角 ≥ {min_elevation_deg:g}° 筛选；"
-                    f"「显示低仰角过境」已开启（当前设置不低于 {floor:g}°，"
+            return (f"{head}；「显示低仰角过境」已开启（当前设置不低于 {floor:g}°，"
                     "没有额外低仰角区间）")
-        return (f"列表按峰值仰角 ≥ {min_elevation_deg:g}° 筛选"
-                f"（峰值低于该值的过境不列出；要列 {floor:g}–"
+        return (f"{head}（峰值低于该值的过境不列出；要列 {floor:g}–"
                 f"{min_elevation_deg:g}° 请打开「显示低仰角过境」）")
 
     def refresh_passes(self) -> None:
@@ -570,9 +573,11 @@ class NewSpacetimePanel(QWidget):
         self._pass_min_elevation_deg = effective_pass_min_elevation_deg(settings)
         self._pass_visibility_gate_deg = effective_pass_visibility_gate_deg(settings)
         self._pass_show_low = effective_show_low_elevation_passes(settings)
+        self._pass_window_hours = effective_pass_window_hours(settings)
         self.passes_filter_label.setText(
             self._pass_filter_text(self._pass_min_elevation_deg,
-                                   self._pass_show_low))
+                                   self._pass_show_low,
+                                   self._pass_window_hours))
 
         lat = self.lat_spin.value()
         lon = self.lon_spin.value()
@@ -596,13 +601,13 @@ class NewSpacetimePanel(QWidget):
         gate = self._pass_visibility_gate_deg
         passes = self._engine.compute_passes(
             observer_lat=lat, observer_lon=lon, observer_alt=alt_km,
-            satellites=sats, hours_ahead=24.0,
+            satellites=sats, hours_ahead=float(self._pass_window_hours),
             min_elevation=gate, step_sec=PASS_COARSE_STEP_S,
         )
         if not passes:
             # 有 TLE 但确实没有过境：别沿用上一轮"没网络"的旧文案
             self.passes_hint.setText(
-                f"24 小时内无过境（峰值仰角 ≥ {gate:g}°"
+                f"{self._pass_window_hours:g} 小时内无过境（峰值仰角 ≥ {gate:g}°"
                 + ("，含低仰角" if self._pass_show_low else "") + "）")
         self._populate_passes(passes)
 
