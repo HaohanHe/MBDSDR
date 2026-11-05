@@ -13,12 +13,12 @@
 
 | 类型 | 项数 | 已处置（删除/合并） | 必须保留 | 待裁定/待修 |
 |---|---|---|---|---|
-| 重复实现 / 常量复用 | 12 | 1（采样率格式化，**已合并** `f529ba62`） | 10（频谱双实现、频率分精度、错误码标签/下一步/常量、ACARS、dBFS/dBµV、路径引导） | 1（`kDbUpperDefault` 一常量两语义，内核线已派修，见 A12） |
+| 重复实现 / 常量复用 | 12 | 2（采样率格式化**已合并** `f529ba62`；`kDbUpperDefault` 常量复用**已拆** `ef07c133`） | 10（频谱双实现、频率分精度、错误码标签/下一步/常量、ACARS、dBFS/dBµV、路径引导） | 0 |
 | 多真值源 | 11 | 0 | 10（采样率白名单/候选/后端表/AI 参考表/回退/移动端/硬件吸附档/默认值分层/配置路径/工具目录快照） | 1（`module_panel` 5 档 → 能力驱动，见 §5.1） |
 | 死代码 | 12 | 2（4 个函数 `c14ac51e`；2 个纯函数 `1c0464b6`） | 9（三录音模块、C++ 同名模块、仅测试模块、未接线方法、触屏控件、两条动态调用误报、测试钉住函数） | 1（46 个 library-only 模块，已三类归档 §5.3） |
 | 死分支/死配置 | 6 | 0 | 6（ACARS 死分支、`not_implemented`、零消费常量、全部在用设置键、无死键结论、legacy 别名） | 0 |
 
-**一句话结论**：真正能动的只有 2 组死函数（已删 6 个）和 1 组逐字相同的格式化函数（已合并）；
+**一句话结论**：真正能动的只有 2 组死函数（已删 6 个）、1 组逐字相同的格式化函数（已合并）和 1 处常量复用（已拆分 `ef07c133`）；
 其余"看起来重复"的，要么是**两种用途**（采样率白名单 vs 候选探测表），要么是
 **两个独立 App 各自的实现**（C++ Qt 与 Python PyQt6 无共享运行时），要么是
 **动态调用/泛化读取导致 grep 假阴性**，都不得按"简洁"合并。
@@ -73,7 +73,7 @@ grep 命中 0 **不等于**没有调用方。本仓库已确认存在以下会�
 | A9 | 解码错误码常量 3 套 | 重复定义（账本 R9） | `mbdsdr_ai/decode_router.py:51-61`、`mbdsdr_ai/decode_pipeline.py:54-64`、`mbdsdr_ai/decoders.py:871/1037` 裸串；catalog 另有同一批码 | **保留待合并**（需先确认无外部脚本按名导入 `ERR_*`/`REASON_*`） | 漏改一处会让路由与管线对同一输入判定分裂（一处接受、一处拒绝） |
 | A10 | ACARS 双实现（账本 R3） | 重复实现（已收敛） | `mbdsdr_ai/acars_protocol.py` 13 命中；`mbdsdr_ai/acars_decoder.py` 33 命中；`mbdsdr_ai/decoder_registry.py` 为唯一入口；`tests/test_acars_consistency.py` 对拍 | **保留，走公开入口** | 绕过入口直调自带状态机会出现自环 CRC `crc_ok=False`，与统一入口结果不一致 |
 | A11 | dBFS / dBµV 两套格式化（账本 R7） | 重复实现（不同量纲） | `desktop/status_panel.py:49/62`；`desktop/main_window.py:87 _fmt_dbfs`（0 生产调用、13 测试引用）；`:105` 1 调用 | 保留量纲两份；`_fmt_dbfs` 另见 C11 | 把 dBµV 当 dBFS 合并会差约 107 dB（50Ω/75Ω 基准不同） |
-| A12 | `cpp/src/core/tokens.h:336 kDbUpperDefault` **一个常量担两个语义** | **常量复用**（不是重复实现，也不是多份表） | 语义①「默认视窗上限」用法合法：`cpp/src/ui/main_window.cpp:5644`、`settings_dialog.cpp:227/432/543`、`spectrum_widget.cpp:308/658`；语义②「显示天花板硬上限」：`spectrum_display.cpp:692`（`clampd(ceilDes, kDbSpinUpperMin, kDbUpperDefault)`）与 `:703-704`（`clampd(dbCeilDb_, manualFloorDb_, kDbUpperDefault)`）。内核线实测：显式 `setDbRange(-100, 0)` 被 `:704` 夹到 -20；同一帧 -10 dB 峰值渲染成 **255（纯白）**，按 -100..0 视窗应为 **229** | **拆常量**：默认值继续叫 `kDbUpperDefault`，另立显式硬上限（候选 `kDbDisplayMax = kDbSpinUpperMax = 20`），`spectrum_display.cpp:692/703-704` 改用新常量；owner = **内核线**（已派修），本线只登记、不动手 | 不拆则所有"手动视窗上限 > -20 dB"的调用都被静默改档，波形顶部白化；拆完必须用 A/B 重编 + 同机同环境同帧对拍确认 255→229（取证格式见 §4.3） |
+| A12 | `cpp/src/core/tokens.h` 原 `kDbUpperDefault` **一个常量担两个语义** | **常量复用**（不是重复实现，也不是多份表） | 语义①「默认视窗上限」→ 现 `kDbViewUpperDefault=-20`（`main_window.cpp:5644`、`settings_dialog.cpp:227/432/543`、`spectrum_widget.cpp:308/658`）；语义②「显示天花板硬上限」→ 现 `kDbCeilingMax=0`（`spectrum_display.cpp:693/705`）。修复前实测：显式 `setDbRange(-100, 0)` 被 `:705` 夹到 -20；同一帧 -10 dB 峰值渲染成 **255（纯白）**，按 -100..0 视窗应为 **229** | **已修（`ef07c133`）**：拆成 `kDbViewUpperDefault=-20`（默认视野）+ `kDbCeilingMax=0`（0 dBFS 满量程硬上限）；2 个 ctest + 全部频谱与 UI 集成共 **10 个目标全绿**，**未改任何期望值**；反证把 `kDbCeilingMax` 改回 -20 → 红项槽级明细与修复前**逐字一致**。**原建议「硬上限 = `kDbSpinUpperMax` = 20」已否决**：上界取 20 会让"超过满量程"与"未超过"的画法不再有区别，等于抹掉 0 dBFS 满量程这个物理事实 | 不拆则所有"手动视窗上限 > -20 dB"的调用都被静默改档、波形顶部白化；拆后须保留 A/B 同帧对拍 255→229 作为回归证据（格式见 §4.3） |
 
 ### B. 多真值源：采样率档位逐份清单
 
@@ -385,4 +385,5 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 2026-11-06 | `f529ba62` | 采样率显示口径上收内核（`sdr_backend.format_sample_rate` 唯一实现），`sdr_tools`/`constants` 改为派生；53 passed（+1，无下降） |
 | 2026-11-06 | `1c0464b6` | 删除 `config_schema.keys_by_storage`/`is_known`（零调用），131→131 |
 | 2026-11-06 | （本表更新提交） | 并入账本线 R1–R20（去重后 +10 行，共 40 项）；改判 A6（部分收敛）、A3（已合并）、R6（保留分精度）；修正 §4.3 吞错守卫归属 |
-| 2026-11-06 | （本次提交） | 新增 A12（`kDbUpperDefault` 常量复用，owner 内核线）；§4.3 逐文件钉住 6 条吞错越线的引入提交与 owner，补 A/B 重编取证格式；§5 落地 B5 能力驱动规格/测试/协调下家、白名单反证记录、46 个仅测试模块三类归档、4 个零调用方法的具体接线点；R19 文案按 `device_capabilities.cpp:46` 现状更新；共 41 项 |
+| 2026-11-06 | （本表更新提交） | 新增 A12（`kDbUpperDefault` 常量复用，owner 内核线）；§4.3 逐文件钉住 6 条吞错越线的引入提交与 owner，补 A/B 重编取证格式；§5 落地 B5 能力驱动规格/测试/协调下家、白名单反证记录、46 个仅测试模块三类归档、4 个零调用方法的具体接线点；R19 文案按 `device_capabilities.cpp:46` 现状更新；共 41 项 |
+| 2026-11-06 | （本次提交） | A12 状态更新为**已修 `ef07c133`**：`kDbViewUpperDefault=-20` + `kDbCeilingMax=0`；10 个目标全绿、未改期望值；反证改回 -20 红项与修复前逐字一致；原建议 `kDbSpinUpperMax=20` 标注**已否决**（会抹掉满量程物理事实） |
