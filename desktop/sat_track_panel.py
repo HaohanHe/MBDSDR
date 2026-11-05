@@ -76,7 +76,9 @@ class SatTrackPanel(QFrame):
         self._build_ui()
         # 面板可能一直藏在非当前页签里（永不触发 showEvent），所以在事件循环
         # 第一次空闲时也判定一次；此时主窗口几何已就绪。
-        QTimer.singleShot(0, self._apply_narrow_defaults)
+        # 三参重载把 receiver 绑到 self：面板的 C++ 对象销毁时定时器自动取消，
+        # 否则「从未 show、在首次空闲前被销毁」会回调到已删除对象。
+        QTimer.singleShot(0, self, self._apply_narrow_defaults)
         # 面板级 setStyleSheet 已删除，由全局 dark_car QSS 接管按钮/分组框/标签样式。
 
     # ------------------------------------------------------------------ UI
