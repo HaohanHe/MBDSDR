@@ -241,6 +241,29 @@ def _run_import_smoke() -> None:
     print(line, file=sys.stderr)
 
 
+def _run_import_probe(spec: str) -> int:
+    """产物解释器内导入自检：``--import-probe A,B`` 逐个 import 并如实报结果。
+
+    发布清单用它给「产物里有、requirements 没声明」的第三方包补运行时证据：
+    静态 import 链只能说明 PyInstaller 为什么收集它，不能说明产物里真的能用。
+    失败返回 2（成功 0），不建窗口、不初始化 Qt。
+    """
+    import importlib
+
+    names = [n.strip() for n in spec.split(",") if n.strip()]
+    failed: list[str] = []
+    for name in names:
+        try:
+            importlib.import_module(name)
+            line = f"[probe] OK {name}"
+        except Exception as exc:  # noqa: BLE001 - 任何导入失败都要如实报出
+            failed.append(name)
+            line = f"[probe] FAIL {name}: {type(exc).__name__}: {exc}"
+        print(line)
+        _append_startup_log(line)
+    return 0 if not failed else 2
+
+
 def _import_error_text(exc: BaseException) -> str:
     """把导入失败翻译成「缺什么 + 是打包缺陷还是解压不全 + 怎么补」。"""
     detail = str(exc).strip() or exc.__class__.__name__
@@ -495,7 +518,12 @@ def main():
     parser.add_argument("--theme", type=str, default=DEFAULT_THEME,
                         choices=["default", "dark", "high_contrast"],
                         help="主题")
+    parser.add_argument("--import-probe", type=str, default=None, metavar="MOD1,MOD2",
+                        help="只做导入自检（逗号分隔模块名），打印结果后退出，不建窗口")
     args = parser.parse_args()
+
+    if args.import_probe:
+        return _run_import_probe(args.import_probe)
 
     # 启动自检：把 PyInstaller 静态分析易漏的私有模块逐个导入并记日志。
     _run_import_smoke()

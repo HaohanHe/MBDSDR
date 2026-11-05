@@ -14,7 +14,10 @@
   产物定位 = ``<dist>/MBDSDR/_internal`` 顶层 + exe 内嵌 ``PYZ.pyz`` 模块表
   （纯 Python 包不在 ``_internal`` 里，这是 PyInstaller 6 onedir 的正常布局，
   只看 ``_internal`` 会假报缺失）。差集分「声明了但产物没有」「产物有但没声明」；
-  后者再用已声明包的 ``Requires-Dist`` 闭包拆成“传递依赖”与“真未声明”。
+  后者只有两种状态：**已归因**（指得到 ``Requires-Dist`` 闭包，或指得到一条
+  从项目/已声明包出发的 import 链，且在产物解释器里 import 成功）→ PASS；
+  **未归因**（两种情况都指不到，或链上的包在产物里其实 import 不起来）→ FAIL。
+  静态 xref 只解释「PyInstaller 为什么收集它」，不能单独作为可发布理由。
 * **许可证**：复用 ``scripts/check_data_licenses.py`` 的既有 GPL 扫描结论
   （不另造一套规则）；再查产物里是否带项目 LICENSE/NOTICE、copyleft 组件
   （GPL/LGPL）的许可证文本与 NOTICE 登记。
@@ -114,7 +117,7 @@ STRICT_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
 VERSION_DERIVATIONS = (
     ("cpp/CMakeLists.txt", (
         (r"file\(\s*READ\s+[^\n]*mbdsdr_ai/VERSION[^\n]*\)", "从 mbdsdr_ai/VERSION 读版本"),
-        (r"project\(\s*mbdsdr\s+VERSION\s+\$\{MBDSDR_VERSION\}", "project() 用派生变量"),
+        (r"project\(\s*mbdsdr\s+VERSION\s+\$\{MBDSDR_VERSION(?:_NUMERIC)?\}", "project() 用派生变量"),
     ), "CMake 工程版本"),
     ("pyproject.toml", (
         (r'^\s*dynamic\s*=\s*\[[^\]]*"version"[^\]]*\]', "[project] version 为 dynamic"),
@@ -472,6 +475,38 @@ def _chain_for(imp: str, reverse: dict[str, set[str]] | None, roots: set[str],
     return []
 
 
+def _runtime_import_probe(dist: Path, modules: list[str]) -> tuple[dict[str, bool], str]:
+    """在产物解释器里逐个 import，给静态归因补运行时证据。
+
+    返回 ``({模块: 是否导入成功}, 失败原因)``；产物不支持 ``--import-probe``
+    （旧产物或没有该入口）时返回空结果 + 原因，调用方据此判 FAIL，不静默放行。
+    """
+    if not modules:
+        return {}, ""
+    exe = dist / "MBDSDR" / "MBDSDR.exe"
+    if not exe.exists():
+        return {}, f"产物 exe 不存在：{exe}"
+    try:
+        proc = subprocess.run(
+            [str(exe), "--import-probe", ",".join(modules)],
+            cwd=str(dist), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=300)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {}, f"运行产物解释器失败：{type(exc).__name__}: {exc}"
+    out = (proc.stdout or "") + (proc.stderr or "")
+    results: dict[str, bool] = {}
+    for line in out.splitlines():
+        m = re.match(r"\[probe\] (OK|FAIL) (\S+)", line.strip())
+        if m:
+            results[m.group(2)] = m.group(1) == "OK"
+    if not results:
+        if "unrecognized arguments" in out:
+            return {}, "产物不支持 --import-probe（旧产物，需重打）"
+        tail = " | ".join(out.strip().splitlines()[-2:]) if out.strip() else "(无输出)"
+        return {}, (f"产物未输出探针结果（exit={proc.returncode}）：{tail[:200]}")
+    return results, ""
+
+
 def check_deps(dist: Path) -> list[dict]:
     items: list[dict] = []
     declared = _declared_requirements()
@@ -525,6 +560,8 @@ def check_deps(dist: Path) -> list[dict]:
             _record(FAIL, f"spec datas → 产物缺 {item}", items)
 
     # 产物差集：每个额外包都要能说清「为什么在产物里」。
+    # 两种状态：已归因（Requires-Dist 闭包，或 import 链 + 产物解释器 import 成功）
+    # → PASS；未归因（指不到上游，或链上的包在产物里根本 import 不起来）→ FAIL。
     artifact_dists = {imp2dist[n] for n in names if n in imp2dist}
     declared_norm = set(declared)
     root_closures = {d: _requires_closure({d}) for d in declared_norm}
@@ -533,27 +570,53 @@ def check_deps(dist: Path) -> list[dict]:
     reverse = _xref_reverse(dist)
     extras = sorted(artifact_dists - declared_norm)
     transitive: list[str] = []
-    undeclared: list[str] = []
+    chain_attributed: list[str] = []
+    unattributed: list[str] = []
+
+    # 运行时证据：一次进程导入所有额外包的 import 名（静态 xref 不能单独作证）。
+    probes: dict[str, bool] = {}
+    probe_error = ""
+    if extras:
+        wanted: list[str] = []
+        for d in extras:
+            for imp_name in sorted(dist2imports.get(d, [])):
+                if imp_name in names and imp_name not in wanted:
+                    wanted.append(imp_name)
+        probes, probe_error = _runtime_import_probe(dist, wanted)
+
     for d in extras:
         owners = sorted(r for r, c in root_closures.items() if d in c and r != d)
         if owners:
             transitive.append(d)
-            _record(WARN, f"差集② {d}：已声明包的传递依赖 ← {', '.join(owners)}", items)
+            _record(PASS, f"差集② {d}：已归因（Requires-Dist 传递依赖 ← {', '.join(owners)}）", items)
             continue
-        undeclared.append(d)
         chat: list[str] = []
         for imp_name in dist2imports.get(d, []):
             chat = _chain_for(imp_name, reverse, roots)
             if chat:
                 break
-        if chat:
-            _record(WARN, f"差集② {d}：由 import 链带入 {' → '.join(chat)}", items)
+        if not chat:
+            unattributed.append(d)
+            _record(FAIL, f"差集② {d}：未归因（不在 Requires-Dist 闭包，xref 也没有给出上游；"
+                          f"需人工确认它是被谁带入产物的）", items)
+            cls = _license_class(d)
+            if cls in {"GPL", "LGPL", "AGPL"}:
+                _record(FAIL, f"未归因且 copyleft 的包混入产物：{d}（{cls}）", items)
+            continue
+        d_names = [n for n in sorted(dist2imports.get(d, [])) if n in names]
+        if d_names and all(probes.get(n) is True for n in d_names):
+            chain_attributed.append(d)
+            _record(PASS, f"差集② {d}：已归因（import 链 {' → '.join(chat)}；"
+                          f"产物解释器 import {', '.join(d_names)} 成功）", items)
+        elif probe_error:
+            unattributed.append(d)
+            _record(FAIL, f"差集② {d}：静态 import 链 {' → '.join(chat)} 无法用运行时证据确认"
+                          f"（{probe_error}）", items)
         else:
-            _record(WARN, f"差集② {d}：不在 Requires-Dist 闭包，xref 也没有给出上游"
-                          f"（多为运行时动态 import / 数据收集带入，需人工确认）", items)
-        cls = _license_class(d)
-        if cls in {"GPL", "LGPL", "AGPL"}:
-            _record(FAIL, f"未声明且 copyleft 的包混入产物：{d}（{cls}）", items)
+            bad = [n for n in d_names if not probes.get(n)] or ["(无已知 import 名)"]
+            unattributed.append(d)
+            _record(FAIL, f"差集② {d}：链 {' → '.join(chat)} 指到它，但产物解释器 import "
+                          f"{', '.join(bad)} 失败", items)
     if not extras:
         _record(PASS, "产物里没有声明面之外的发行包", items)
 
@@ -561,9 +624,16 @@ def check_deps(dist: Path) -> list[dict]:
         _record(FAIL, "差集①「声明了但产物没有」：" + ", ".join(sorted(missing)), items)
     else:
         _record(PASS, "差集①「声明了但产物没有」：空", items)
-    _record(WARN, f"差集②「产物里有但没声明」：{len(extras)} 个"
-                  f"（Requires-Dist 传递 {len(transitive)} / import 链或未归因 {len(undeclared)}，逐包见上）",
-            items)
+    if not extras:
+        pass
+    elif unattributed:
+        _record(FAIL, f"差集②「产物里有但没声明」：{len(extras)} 个，"
+                      f"已归因 {len(transitive) + len(chain_attributed)}"
+                      f" / 未归因 {len(unattributed)}（未归因逐包见上，不可发布）", items)
+    else:
+        _record(PASS, f"差集②「产物里有但没声明」：{len(extras)} 个全部已归因"
+                      f"（Requires-Dist 传递 {len(transitive)} / import 链 {len(chain_attributed)}，"
+                      f"运行时 import 全部成功）", items)
     return items
 
 

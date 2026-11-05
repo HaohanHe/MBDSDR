@@ -561,11 +561,13 @@ python scripts/release_manifest.py --dist d:\mbdsdr\.tmp\pyi-dist13
 | 快照 | FAIL | WARN | PASS | SKIP | 结论 |
 |---|---|---|---|---|---|
 | 修复前 `pyi-dist12` | 19 | 7 | 23 | 6 | FAIL（退出码 1） |
-| 修复后 `pyi-dist13` | **0** | **30** | **52** | 6 | WARN（退出码 0） |
+| 首轮修复后 `pyi-dist13` | **0** | **30** | **52** | 6 | WARN（退出码 0） |
+| 本轮回填 `pyi-dist14`（WARN 分桶 + 运行时证据） | **0** | **0** | **82** | 6 | PASS（退出码 0） |
 
-WARN 从 7 涨到 30 是刻意的：29 个「产物有但没声明」的包原先挤在两条汇总里，
-现在逐包给出 Requires-Dist 归属或 xref import 链。没有 FAIL 不等于可以发布——
-每条 WARN 都带可复核证据。
+首轮 30 条 WARN 里 29 条是「产物有但没声明」的逐包归因、1 条是汇总行。它们**全部
+属于“已归因可接受”桶**（8 个指到 `Requires-Dist`、21 个指到 xref import 链，见 9.2）。
+本轮把这桶改成 PASS、把“未归因”改成 FAIL，并给 21 个只靠静态 xref 的包补了
+**产物解释器里的 import 证据**；WARN 归零不是删位置，是每条都拿到了可复核证据。
 
 ### 9.1 版本号一致性 — PASS（`mbdsdr_ai/VERSION` 单一真值源）
 
@@ -595,7 +597,20 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist13
 ```
 
-### 9.2 依赖 pin 存在性 — WARN（差集①清空，差集②逐包归因）
+### 9.2 依赖 pin 存在性 — PASS（差集①清空，差集② 29 个全部归因）
+
+**WARN 可发布的条件（判定口径，写死在本节）**：产物里每个未在
+`requirements*.txt` 声明的第三方包，必须同时满足两条才算“已归因可接受”——
+
+1. 能指到 **`Requires-Dist` 闭包**（某个已声明包直接或间接依赖它），或能指到
+   **一条从项目模块/已声明包出发的 import 链**（PyInstaller xref 的正向边反转）；
+2. 在**产物解释器里 `import` 成功**（静态 xref 只解释“PyInstaller 为什么收集它”，
+   不证明产物里真的能用）。
+
+两条缺一（指不到上游，或链上的包 import 不起来）即为“未归因”，机检直接 **FAIL**；
+不再以 WARN 形式留待人工判断。两个状态在 `scripts/release_manifest.py` 的
+`check_deps` 里分别是 `PASS`（附链/附 Requires-Dist 来源）和 `FAIL`（附缺哪条证据）。
+
 
 声明面 = 根 `requirements.txt` + `desktop/requirements.txt` 实际依赖行（12 个发行包）
 + spec 点名模块/数据项。产物定位 = `_internal` 顶层 **+ exe 内嵌 `PYZ.pyz` 模块表**；
@@ -644,13 +659,30 @@ python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist
 - `tzdata` ← `pandas.core.dtypes.dtypes → zoneinfo`
 - `xlsxwriter` ← `pandas.io.excel → pandas.io.excel._xlsxwriter`
 
-结论：29 个全部有归属，无一“来路不明”。它们仍是 WARN——要么补声明，要么把这些
-import 路径改成可选延迟导入后裁剪；这是依赖面决策，本轮只登记不删。
+结论：29 个全部落在“已归因可接受”桶（Requires-Dist 8 / import 链 21），无一“来路不明”，
+故差集②整条判 PASS。是否继续裁剪（把这些 import 路径改成可选延迟导入、或补声明）
+属于依赖面决策，本轮不删不改。
+
+运行时证据（`pyi-dist14`，`desktop/main.py` 新增的产物自检入口，不初始化 Qt）：
+
+```
+cd d:\mbdsdr\.tmp\pyi-dist14
+.\MBDSDR\MBDSDR.exe --import-probe "brotli,certifi,cffi,charset_normalizer,contourpy,
+cryptography,cycler,et_xmlfile,fontTools,idna,jplephem,kiwisolver,lxml,matplotlib,
+mpl_toolkits,openpyxl,packaging,pandas,psutil,pycparser,pyparsing,dateutil,
+_distutils_hack,pkg_resources,setuptools,shiboken6,six,typing_extensions,tzdata,
+urllib3,xlsxwriter,zstandard"
+```
+
+实测 32 个 import 名**全部 `[probe] OK`**（退出码 0）。清单的 deps 检查会对产物跑同一
+入口；任一包失败即把该包判“未归因 → FAIL”。旧产物没有该入口时也判 FAIL
+（“产物不支持 --import-probe（旧产物，需重打）”），不会因为“跑不起来”而静默放行——
+`pyi-dist13` 上实测就是 22 条 FAIL（21 包 + 汇总），正是这条闸在起作用。
 
 复跑：
 
 ```
-python scripts/release_manifest.py --only deps --dist d:\mbdsdr\.tmp\pyi-dist13
+python scripts/release_manifest.py --only deps --dist d:\mbdsdr\.tmp\pyi-dist14
 ```
 
 ### 9.3 许可证与合规文件 — PASS（分发底线补齐）
@@ -700,6 +732,7 @@ python scripts/release_manifest.py --only installer
 
 `scripts/release_manifest.py` 三态输出 `PASS/WARN/FAIL/SKIP`，逐项独立汇总，
 任一项 FAIL → 进程退出码 1；`--json` 时 stdout 只有 JSON（无人类可读前缀）。
-`WARN` 表示“缺口存在但不构成取值冲突/不构成本轮判定红”（如 spec 未注入版本资源、
-非 copyleft 的未声明包）；`SKIP` 只用于“对象不存在”（如无安装器），不算绿。
+`WARN` 只用于“缺口存在但不构成取值冲突”的少数检查点；依赖差集②已改成
+**PASS / FAIL 两态**（已归因 / 未归因），不再产生 WARN。
+`SKIP` 只用于“对象不存在”（如无安装器），不算绿。
 
