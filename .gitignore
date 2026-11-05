@@ -37,6 +37,7 @@ env/
 
 # 临时
 .tmp-tool-results/
+.audit_tmp/
 *.tmp
 *.log
 

@@ -30,6 +30,8 @@
   4. review_by   `YYYY-MM`，到期必须复核，否则按不合格处理
 
 棘轮策略：存量不是逐处修完，而是「只许降不许升」。
+  - 只扫 **git tracked** 的 `.py`：untracked 临时脚本/产物不计入，避免
+    `.audit_tmp/` 这类工作副本制造假红线；非 git 环境回退全量遍历。
   - `docs/code-guards-baseline.json` 按文件记录 ERROR/WARN 基线；
   - 任何文件超过基线、或基线里没有的文件出现静默 catch-all → 新红线；
   - 总量超过基线 → 红。
@@ -48,6 +50,7 @@ import argparse
 import ast
 import json
 import re
+import subprocess
 import sys
 import tokenize
 from dataclasses import asdict, dataclass, field
@@ -115,6 +118,7 @@ class ScanReport:
     whitelist_overdue: int = 0
     whitelist_stale: int = 0
     ratchet_violations: List[str] = field(default_factory=list)
+    scope: str = "filesystem"      # git-tracked / filesystem（非 git 环境回退）
     defects: List[Finding] = field(default_factory=list)
     all_findings: List[Finding] = field(default_factory=list)
     parse_errors: List[str] = field(default_factory=list)
@@ -300,6 +304,30 @@ def _iter_py_files(root: Path):
         yield p
 
 
+def _tracked_py_files(root: Path) -> Optional[List[Path]]:
+    """只取 git tracked 的 .py；untracked 临时产物（.audit_tmp/ 等）不进统计。
+
+    非 git 环境（tmp_path 单测、导出的源码包）返回 None，调用方回退到
+    文件系统遍历 —— 门禁不能因为 git 不可用就静默失效。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--", "*.py"],
+            capture_output=True, text=True, check=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    paths: List[Path] = []
+    for rel in proc.stdout.split("\0"):
+        if not rel:
+            continue
+        if any(part in EXCLUDE_DIRS for part in Path(rel).parts):
+            continue
+        p = root / rel
+        if p.is_file():
+            paths.append(p)
+    return sorted(paths)
+
+
 def _relative(path: Path, root: Path) -> str:
     try:
         return path.resolve().relative_to(root.resolve()).as_posix()
@@ -446,7 +474,18 @@ def scan_repo(root: Path = ROOT, whitelist_path: Optional[Path] = None) -> ScanR
     report = ScanReport()
     matched_idx: set[int] = set()
 
-    for path in _iter_py_files(root):
+    tracked = _tracked_py_files(root)
+    if not tracked:
+        # 空列表要么是「git 可用但该目录没跟踪 .py」（如 tmp_path 夹具落在某仓
+        # 的子目录里），要么是 git 不可用；两种情况都回退全量遍历，绝不能让
+        # 门禁因为扫到 0 个文件而假绿。
+        report.scope = "filesystem（git 无 tracked .py，回退全量遍历）"
+        iterator = _iter_py_files(root)
+    else:
+        report.scope = "git-tracked"
+        iterator = tracked
+
+    for path in iterator:
         rel = _relative(path, root)
         try:
             src = _read_source(path)
@@ -577,7 +616,7 @@ def _group_by_file(findings: List[Finding]) -> Dict[str, List[Finding]]:
 
 
 def print_report(report: ScanReport, list_all: bool = False) -> None:
-    print(f"扫描文件：{report.files_scanned}"
+    print(f"扫描文件：{report.files_scanned}（{report.scope}）"
           + (f"（解析失败 {len(report.parse_errors)}）" if report.parse_errors else ""))
     print(f"全仓 catch-all 处理器：{report.total_catch_all}")
     print(f"  静默吞噬（pass/空块/静默 return-continue/无记录降级）：{report.silent}")
@@ -654,6 +693,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.json:
         payload = {
+            "scope": report.scope,
             "files_scanned": report.files_scanned,
             "total_catch_all": report.total_catch_all,
             "silent": report.silent,
