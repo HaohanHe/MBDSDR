@@ -12,6 +12,7 @@ tests/test_sky_label_collision.py
 反证：把 `label_boxes_keep` 换回"全留"（旧实现无剔除）后，第 3 条的像素对比
 必红——旧实现两条标签都画，叠加后与单标签渲染不等。
 """
+import math
 import os
 import sys
 
@@ -253,6 +254,112 @@ def test_flush_labels_uses_tier_cap_before_collision():
     assert "label_tier_keep(" in src
     # 限流必须先于 label_boxes_keep，否则远处标签先占像素位
     assert src.index("label_tier_keep(") < src.index("label_boxes_keep(")
+
+
+# --------------------------------------------------------------------------
+# 4c. 120° 银心场（南半球）回归锁：P1=4 / 20 / 不限 的最终落笔不得压字
+# --------------------------------------------------------------------------
+SOUTH_UNIX = datetime(2026, 7, 15, 14, 0, tzinfo=timezone.utc).timestamp()
+SOUTH_CENTER = (88.05, 65.80)   # Sgr A*
+
+
+def _southern_galactic_view() -> RFSkyView:
+    eng = get_time_engine()
+    eng.set_unix(SOUTH_UNIX)
+    eng.pause()
+    v = RFSkyView()
+    v.resize(700, 700)
+    v.set_observer(-33.0, 151.0, 0.0)
+    v.view_state.fov_deg = 120.0
+    v.view_state.center_az = SOUTH_CENTER[0]
+    v.view_state.center_alt = SOUTH_CENTER[1]
+    v._sky_brightness = 0.0
+    return v
+
+
+def _strict_box_hits(boxes):
+    """严格包围盒相交（不加 pad）的对数与涉及条数。"""
+    pairs = 0
+    involved = set()
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            a, b = boxes[i], boxes[j]
+            if a[1] < b[3] and a[3] > b[1] and a[2] < b[4] and a[4] > b[2]:
+                pairs += 1
+                involved.update((i, j))
+    return pairs, len(involved)
+
+
+def _min_edge_gap(boxes):
+    """最终包围盒边到边最小欧氏距离（与 `_flush_labels` 同口径）。"""
+    best = float("inf")
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            a, b = boxes[i], boxes[j]
+            dx = max(b[1] - a[3], a[1] - b[3])
+            dy = max(b[2] - a[4], a[2] - b[4])
+            if dx < 0 and dy < 0:
+                continue
+            best = min(best, math.hypot(max(dx, 0.0), max(dy, 0.0)))
+    return best
+
+
+def _landed(v, items, caps):
+    kept = label_tier_keep(items, 350.0, 350.0, caps)
+    boxes = _boxes([items[i] for i in kept], {False: v._font, True: v._gnss_label_font})
+    return boxes, label_boxes_keep(boxes)
+
+
+def test_southern_galactic_field_labels_never_overlap():
+    """120° 银心场：P1=4 / 20 / 不限，最终落笔零相交且边距 ≥ pad。
+
+    实测（2026-11-05，窗口 700×700、Bortle 3 档 `_sky_brightness=0.0`）：
+    P1=4 → 26 条、边距 3.836 px；P1=20 → 30 条、边距 3.003 px；两版最终
+    相交对数均 0。断言只锁**不变量**（零相交、边距 ≥ `pad=2.0`、放宽 P1
+    只会多落不会少落），不锁条数——条数随星表/字体/平台会浮动；
+    3.003 px 是观测值，2.0 px 才是 `label_boxes_keep(pad=2.0)` 给出的下界。
+    """
+    v = _southern_galactic_view()
+    try:
+        img = QImage(700, 700, QImage.Format_ARGB32)
+        img.fill(QColor(0, 0, 0))
+        painter = QPainter(img)
+        try:
+            v._label_items = []
+            v._draw_planets(painter)
+            v._draw_stars(painter)
+            v._draw_constellations(painter)
+            v._draw_dso(painter)
+        finally:
+            painter.end()
+        items = list(v._label_items)
+    finally:
+        v.close()
+
+    assert len(items) >= 40, f"银心宽场候选应 ≥40 条，实测 {len(items)}"
+
+    caps4 = (5, 4, 24, 12, 20)
+    caps20 = LABEL_TIER_CAPS
+    caps_inf = (5, 10 ** 9, 24, 12, 20)
+    landed = {}
+    for name, caps in (("P1=4", caps4), ("P1=20", caps20), ("P1=inf", caps_inf)):
+        boxes, final_idx = _landed(v, items, caps)
+        final_boxes = [boxes[i] for i in final_idx]
+        pairs, involved = _strict_box_hits(boxes)
+        final_pairs, _ = _strict_box_hits(final_boxes)
+        gap = _min_edge_gap(final_boxes)
+        landed[name] = (len(boxes), len(final_boxes), final_pairs, gap)
+        print(f"[{name}] 限流后 {len(boxes)} 条（剔除前相交 {pairs} 对 / {involved} 条）；"
+              f"落笔 {len(final_boxes)} 条，最终相交 {final_pairs} 对，边距 {gap:.3f} px")
+        assert final_pairs == 0, \
+            f"{name} 最终仍有 {final_pairs} 对包围盒相交（压字）"
+        assert gap >= 2.0, \
+            f"{name} 最终包围盒边距 {gap:.3f} px < pad 2.0（放置函数漏了 pad？）"
+
+    assert landed["P1=20"][1] > landed["P1=4"][1], \
+        "P1 上限 4→20 必须多落标签，否则上限改动没有意义"
+    assert landed["P1=inf"][1] == landed["P1=20"][1], \
+        "本场 P1 候选 <20，'20' 与'不限'应等价（若不等说明候选数变了，重测文档）"
 
 
 # --------------------------------------------------------------------------
