@@ -13,7 +13,11 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
+import logging  # noqa: E402
+
 import pytest  # noqa: E402
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="module")
@@ -34,7 +38,8 @@ def window(qtapp):
     try:
         w._teardown_connection()
     except Exception:
-        pass
+        # 测试夹具不静默：断开失败要留日志，便于定位残留状态。
+        _LOGGER.exception("MainWindow teardown 失败")
 
 
 def _sat():
