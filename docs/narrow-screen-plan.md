@@ -34,10 +34,13 @@ python scripts/ui_narrow_breakdown.py --json     # 机器对账
 | 字体 | `MiSans`，`10pt`，行高 `13` |
 | 样式 | `QCommonStyle`（offscreen 默认；真屏 Windows 样式会改按钮边距） |
 
+真屏指纹（`QT_QPA_PLATFORM=windows`，同一脚本）：`windows` / DPR **1.5** /
+逻辑 DPI **96.0**（物理 108.05）/ `MiSans` 10pt / **行高 18** / `QCommonStyle`。
+
 > **36 与 39 的差从哪来**：主工具栏实测高 **39** = 子控件最高 `sizeHint` **31** +
 > `QStyle` 上下边距 **8**。`tokens.SIZE` 里**没有 `toolbar_h` 键**，36 不是令牌值；
-> 差异来自字体行高/样式边距（本环境行高 13、QCommonStyle）。换字体或换真屏样式后
-> 这项会变，所以它必须和环境指纹一起报。
+> 差异来自字体行高/样式边距（offscreen 行高 13；真屏行高 18 时是
+> **44 = 36 + 8**）。换字体或换真屏样式后这项会变，所以它必须和环境指纹一起报。
 
 > **旧口径 `1726 / 736` 未复现**：同一脚本在 offscreen 指纹下唯一输出
 > **1625 × 729**；在真屏（`windows`，DPR 1.5、行高 18）输出 **1237 × 799**。
@@ -48,19 +51,25 @@ python scripts/ui_narrow_breakdown.py --json     # 机器对账
 
 ## §1 现状实测（全部由上面的脚本产出）
 
-| 项 | 实测 | 说明 |
-| --- | --- | --- |
-| 窗口 `minimumSizeHint` | **1625 × 729** | `win.minimumSizeHint()` |
-| 窗口 `minimumSize` | 1000 × 600 | 显式硬下限（`setMinimumSize(1000, 600)`） |
-| 归属对照：隐藏 `topBar` | 宽 **1625 → 808** | **1625 是顶栏撑的** |
-| 归属对照：隐藏主工具栏 | 宽 **1625 → 1625（降 0）** | 工具栏溢出只挤压自身，不抬窗口下限 |
-| 菜单栏高 | 24 | |
-| 主工具栏高 | **39** | 31 内容 + 8 样式边距 |
-| 中央页高 | **644** | = 顶栏 56 + 左栏 514 + 底坞 74 |
-| 状态栏高 | 22 | |
-| 频谱工具栏最小宽 | **1941** | 1762（项+spacer）+ 156（spacing 6×26）+ 8（边距）= 1926；实测 1941，差 15 来自 `peakGateSpin` 最小宽随值浮动 140→155 |
-| 1366×768 下频谱实际宽 | 756（右栏常驻）/ 1060（右栏隐藏） | |
-| 1366×768 下绘图区 | 714 × 255 | `_fft_plot` |
+**两种指纹都必须过（见 §4）**；左列是 CI/测试指纹，右列是真机指纹。
+
+| 项 | offscreen（CI/测试） | 真屏 `windows`（DPR 1.5） | 说明 |
+| --- | --- | --- | --- |
+| 窗口 `minimumSizeHint` | **1625 × 729** | **1237 × 799** | `win.minimumSizeHint()` |
+| 窗口 `minimumSize` | 1000 × 600 | 1000 × 600 | 显式硬下限（`setMinimumSize(1000, 600)`） |
+| 归属：隐藏 `topBar` | 宽 1625 → **808**（降 817） | 宽 1237 → **808**（降 429） | 宽度由顶栏撑 |
+| 归属：隐藏主工具栏 | 宽降 **0** | 宽降 **0** | 工具栏溢出只挤压自身 |
+| 菜单栏高 | 24 | 29 | |
+| 主工具栏高 | **39** = 31 + 8 | **44** = 36 + 8 | 行高 13 vs 18 |
+| 中央页高 | **644** = 56 + 514 + 74 | **705** = 56 + 575 + 74 | 顶栏 + 左栏 + 底坞 |
+| 状态栏高 | 22 | 21 | |
+| 频谱工具栏最小宽 | **1941** | **1652** | 1762+156+8=1926，差 15 来自 `peakGateSpin` 140→155 |
+| 1366×768 下频谱实际宽 | 756（右栏常驻）/ 1060（右栏隐藏） | 逻辑布局同左，真屏未逐点复测 | |
+| 1366×768 下绘图区 | 714 × 255 | 待同尺寸复测 | `_fft_plot` |
+
+**判定（1366×768 真机，扣任务栏约 728）**：宽 1237 ≤ 1366（余 129）**够用**；
+高 799 > 728 **溢出 71 px**。因此**首要矛盾是高度，不是宽度**；§2 的宽度重排
+降为次要（宽度只在 offscreen 指纹下超 1360，真机已够）。
 
 ### §1.1 顶栏 `topBar` 逐控件（1625）
 
@@ -120,7 +129,10 @@ python scripts/ui_narrow_breakdown.py --json     # 机器对账
 
 1762 + 156 + 8 = 1926；实测 1941，差 15（`peakGateSpin` 随显示值浮动）。
 
-## §2 宽度重排：逐段折叠（每项带省下的像素）
+## §2 宽度重排：逐段折叠（次要；真机宽度已够，先做 §3 高度）
+
+> 优先级：**§3 高度先做**（真屏溢出 71 px）；本节用于 offscreen 指纹的
+> 1360 验收，以及给内容留余量。不要先做本节再回头砍高度。
 
 ### §2.1 频谱工具栏：1941 → 673（省 1268）
 
@@ -169,46 +181,64 @@ python scripts/ui_narrow_breakdown.py --json     # 机器对账
 | 「卫星跟踪」页 | 最小宽 372 | 右侧按钮组折叠进「更多」 | 估 ~120（**待卫星线出账**） |
 | 左栏页签 | 3 个文字页签 | 窄屏改图标 + tooltip | 估 ≤ 40 |
 
-## §3 高度重排：729 → 643（必须做）
+## §3 高度重排：真屏 799 → 708（首要矛盾）
 
-1366×768 扣任务栏约 **728** 可用，当前 729 已差 1。
+1366×768 扣任务栏约 **728** 可用。真屏 **799 溢出 71**；offscreen 729 溢出 1。
+按 §4 的双指纹最坏值，**至少省 71 px**。
 
 | # | 改什么 | 省下 | 依据 |
 | --- | --- | --- | --- |
-| 1 | 隐藏菜单栏（用已有 `☰` 弹同一套菜单） | **24** | 自拟（行为变化，需拍板） |
+| 1 | 隐藏菜单栏（用已有 `☰` 弹同一套菜单） | **24**（offscreen）/ **29**（真屏） | 自拟（行为变化，需拍板） |
 | 2 | 底坞 74 → 48 | **26** | 自拟 |
 | 3 | 左栏「卫星跟踪」页最小高 496 → 460 | 估 **36** | **待卫星线出账** |
 
-729 − 86 = **643**，1280×720 也放得下。
-不接受隐藏菜单栏时 1366×768（含任务栏）仍差 1px → 判「做不到完整显示」。
+真屏 799 − (29+26+36) = **708 ≤ 728**（余 20）；offscreen 729 − 86 = **643**。
+1280×720 真屏：708 ≤ 720（余 12，紧）；offscreen 643 ≤ 720。
+不接受隐藏菜单栏时真屏仍 799 − 57 = **742 > 728** → 判「做不到完整显示」。
 
 ## §4 验收口径（冻结解除后第一件事按这个改）
 
+**规则（双指纹最坏值，不许挑一个指纹交差）**：
+
+1. 同一组断言必须在**两种指纹**下各跑一次：`offscreen` 与真屏 `windows`；
+2. 两种都必须 **宽 ≤ 1360 且 高 ≤ 728**；
+3. 每次测量输出必须带 `env` 段（platform / DPR / 逻辑 DPI / 字体与行高 /
+   style），**缺一段视为无效**；
+4. 任一指纹失败即不合格，不得用另一指纹的通过来抵。
+
 ```python
-@pytest.mark.parametrize("size,limit_w,limit_h", [
-    ((1366, 728), 1360, 728),   # 1366x768 扣 Windows 任务栏
-    ((1280, 720), 1280, 720),
-])
-def test_narrow_screen_is_fully_usable(main_window, size, limit_w, limit_h):
-    win = main_window
-    _select_left(win, "spectrum")
-    win.resize(*size)
-    _pump(80)
-    assert win.minimumSizeHint().width() <= limit_w, (
-        f"窗口最小宽 {win.minimumSizeHint().width()} > {limit_w}")
-    assert win.minimumSizeHint().height() <= limit_h, (
-        f"窗口最小高 {win.minimumSizeHint().height()} > {limit_h}")
-    assert win.topBar.minimumSizeHint().width() <= limit_w
-    assert win.toolbar_children_min_width() <= limit_w   # 1670 那类
-    assert win.spectrum.minimumSizeHint().width() <= win.spectrum.width()
-    for w in win.findChildren(QWidget):
-        if w.isVisible() and w.parentWidget() is not None:
-            assert w.geometry().right() <= w.parentWidget().width()
-    assert win.spectrum._fft_plot.width() >= 600
-    assert win.spectrum._fft_plot.height() >= 200
+import json, os, subprocess, sys
+
+LIMIT_W, LIMIT_H = 1360, 728
+ENV_KEYS = ("qt_platform", "device_pixel_ratio", "logical_dpi",
+            "font_family", "font_point_size", "font_line_height", "style")
+
+def _measure(platform):
+    env = dict(os.environ, QT_QPA_PLATFORM=platform)
+    out = subprocess.run(
+        [sys.executable, "scripts/ui_narrow_breakdown.py", "--json"],
+        capture_output=True, text=True, env=env, check=True).stdout
+    data = json.loads(out[out.index("{"):])
+    missing = [k for k in ENV_KEYS if k not in data.get("env", {})]
+    assert not missing, f"[{platform}] env 缺 {missing}，测量无效"
+    return data["summary"]
+
+@pytest.mark.parametrize("platform", ["offscreen", "windows"])
+def test_narrow_screen_is_fully_usable(platform):
+    s = _measure(platform)
+    w, h = s["window_minimumSizeHint"]
+    assert w <= LIMIT_W, f"[{platform}] 窗口最小宽 {w} > {LIMIT_W}"
+    assert h <= LIMIT_H, f"[{platform}] 窗口最小高 {h} > {LIMIT_H}"
+    assert s["topBar_width"] <= LIMIT_W, f"[{platform}] topBar {s['topBar_width']}"
+    assert s["mainToolBar_width"] <= LIMIT_W, (
+        f"[{platform}] 主工具栏可用下限 {s['mainToolBar_width']}")
+    assert s["spectrum_width"] <= LIMIT_W, (
+        f"[{platform}] 频谱工具栏 {s['spectrum_width']}")
 ```
 
-新增一档窄屏断言，**不改现有 1000×600 / 1600×900 两条基线**。
+绘图区/控件越界仍按原口径单独断言（`_fft_plot` ≥ 600×200、可见控件不越父边界）；
+它们同样要在两种指纹下跑。新增这一档窄屏断言，**不改现有 1000×600 /
+1600×900 两条基线**。
 
 ## §5 明确不改
 
@@ -222,16 +252,23 @@ def test_narrow_screen_is_fully_usable(main_window, size, limit_w, limit_h):
 ## §6 自拟登记（评审时逐条确认）
 
 - §2.1 的 #4、#5；§2.2 的 #3、#4；§2.3 全部；§2.4 抽屉阈值 1440；§3 的 #1、#2。
-- 由实测得出的：三处最小宽拆账、756/1060 可用宽、714×255 绘图区、729/644/514/74 高度链。
+- 由实测得出的：双指纹最小宽（1625/1237）、三处最小宽拆账（1941/1652 等）、
+  756/1060 可用宽、714×255 绘图区、双指纹高度链（729=24+39+644+22 与
+  799=29+44+705+21；中央 644/705 = 顶栏 56 + 左栏 514/575 + 底坞 74）。
 - **两份基准都没有的**：窄屏形态本身。原型是 1920 宽设计，`.figma` 是 1920 宽车机 HMI，
   `reference/`（satdump / sdrpp / stellarium）也没有 1366 窄屏形态 → 本方案属**自拟**。
 
 ## §7 复跑与清理
 
 ```powershell
+# offscreen 指纹（CI/测试）
 python scripts/ui_narrow_breakdown.py
 python scripts/ui_narrow_breakdown.py --json
+# 真屏指纹（windows，DPR 1.5）
+$env:QT_QPA_PLATFORM='windows'; python scripts/ui_narrow_breakdown.py --json
 ```
+
+两种指纹的 `env` 段必须一起贴出，缺一段视为无效。
 
 早期的一次性探针（`_min_probe*.py`、`_shot_strip.py`）已全部删除，只保留
 `scripts/ui_narrow_breakdown.py` 这一份口径。
