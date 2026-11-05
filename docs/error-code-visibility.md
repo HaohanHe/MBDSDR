@@ -318,3 +318,39 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 | --- | --- | --- | --- | --- |
 | 1 | `desktop/mcp_worker.py:229`、`:288-293` | 注释写「软件工具不二次转发（skipped）」，但 AI 侧软件工具**从不进 mcp_worker**（AI 工具在进程内 `ToolRegistry.execute`，结果直接回写模型上下文），这条链只承载 UI 直操命令 | 措辞改为「非硬件名命令不二次转发」 | 仅注释误导，无功能影响 |
 | 2 | `desktop/mcp_worker.py:296-300` → `desktop/ai_panel.py:614-615` | UI 直操发出 `sdr_set_gain` 时，若固件 `tools/list` 未报该名且别名表未收录（现状未收录），返回 `skipped` 且步骤卡被直接丢弃，用户零反馈 | 归属 MCP/worker 线确认：补别名，或对 skipped 给一条状态栏提示 | 「用户看不到」而非「AI 看不到」，非 AI 链路缺陷 |
+
+## 七、引用出处更正与本文件提交号核对（2026-11-05）
+
+### 7.1 `desktop/troubleshooting.py:92` 的「2.048 MS/s」
+
+- 更正：该行单位由 `2.048 MHz` 改为 `2.048 MS/s` 的是 **`ff964183`**
+  （`fix(copy): 缺值不再渲染 0（APT 统计/卫星表单）与采样率建议改 MS/s`，属**文案审计线**批次），
+  **不是** `70429a02`（参数治理线，清单 4 个文件，不含 `troubleshooting.py`）。
+- 证据命令：
+
+  ```text
+  $ git log -S "2.048 MS/s" --oneline -- desktop/troubleshooting.py
+  ff964183 fix(copy): 缺值不再渲染 0（APT 统计/卫星表单）与采样率建议改 MS/s
+
+  $ git status --porcelain -- desktop/troubleshooting.py
+  （无输出）
+
+  $ git show ff964183 -- desktop/troubleshooting.py
+  -        "在「控制」面板把「采样率」降到设备支持的档位（如 2.048 MHz）；"
+  +        "在「控制」面板把「采样率」降到设备支持的档位（如 2.048 MS/s）；"
+  ```
+
+- 结论：**早已入库、改的人不是参数治理线**；`ff964183` 是 `2b7a71b9` 的祖先
+  （`git merge-base --is-ancestor ff964183 2b7a71b9` 退出码 0），故 `2b7a71b9`
+  不含该行是正常继承，**不是漏改**。参数治理线的 4 个复位路径与此行无关。
+
+### 7.2 本文件其余提交号逐个核对
+
+| 引用处 | 提交号 | 该提交实际内容 | 判定 |
+| --- | --- | --- | --- |
+| 一、四类统计；表 #1–#39 | `e95945bd` | 5 文件：`error_remedy.py`、`troubleshooting.py`（+82）、`test_error_remedy_links.py`、`test_planetarium_entry_visibility.py`、`test_troubleshooting_help.py`；39 个可见码补条目 | 一致 |
+| 一、四类统计；表 #40–#52 | `0e4b9ef6` | 3 文件：`error_remedy.py`、`troubleshooting.py`（+42）、`test_error_remedy_links.py`；13 个只显示 message 的码补条目 | 一致 |
+| —（原误写 `70429a02`，不在本文件正文） | `70429a02` | 4 文件：`main_window.py`、`docs/parameter-unification.md`、`sdr_backend.py`、`test_sample_rate_options.py` | 与 2.048 行无关 |
+
+- 全文件内可核对的提交号共 2 个（`e95945bd`、`0e4b9ef6`），均为 `git show --stat` 实证过的真实提交；
+  无其他凭印象引用。
