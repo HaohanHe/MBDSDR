@@ -878,6 +878,9 @@ class _PlotState:
         self.db_max = -20.0
         # dB 轴拖动中：绘制时叠加当前量程读数（跟手反馈）。
         self.db_drag_active = False
+        # Ctrl+竖拖 = 锚点缩放：光标旁弹数值气泡（与轴区读数同格式）。
+        self.db_drag_zoom = False
+        self.db_drag_cursor_y = 0.0
         self.show_waterfall = True
         self.mouse_x_ratio: Optional[float] = None     # 鼠标悬停 x 比例
         self.mouse_in_spectrum = False
@@ -1718,6 +1721,21 @@ def _draw_db_scale(painter, rect, state, text_color):
         tw = fm.horizontalAdvance(txt)
         tx = max(rect.x() + 4, rect.x() + rect.width() - tw - 4)
         painter.drawText(QPointF(tx, rect.y() + 16), txt)
+        # Ctrl 缩放（以按下处 dB 为锚）时，同一个读数再贴光标弹一次：
+        # 文本与轴区读数完全同源同格式，不另造第二套。
+        if getattr(state, "db_drag_zoom", False):
+            y = float(getattr(state, "db_drag_cursor_y", 0.0))
+            y = max(rect.y() + 10.0,
+                    min(y, rect.y() + rect.height() - 4.0))
+            bx = rect.x() + 44.0
+            bw = tw + 12.0
+            bh = fm.height() + 4.0
+            painter.setPen(QPen(QColor(PAL_GRID), 1))
+            painter.setBrush(QBrush(QColor(PAL_BG)))
+            painter.drawRoundedRect(
+                QRectF(bx, y - bh / 2.0, bw, bh), 4.0, 4.0)
+            painter.setPen(QPen(text_color, 1))
+            painter.drawText(QPointF(bx + 6.0, y + fm.ascent() - 2.0), txt)
 
 
 # ============================================================================
@@ -2307,6 +2325,8 @@ class _TuningPlotMixin:
         self._db_drag_active = True
         self.state.db_drag_active = True
         self._db_drag_zoom = bool(zoom)
+        self.state.db_drag_zoom = bool(zoom)
+        self.state.db_drag_cursor_y = float(y_px)
         self._db_drag_press_y = float(y_px)
         self._db_drag_press_min = float(self.state.db_min)
         self._db_drag_press_max = float(self.state.db_max)
@@ -2317,6 +2337,7 @@ class _TuningPlotMixin:
         """拖动中：平移量程，或 Ctrl 时以按下处 dB 为锚缩放跨度。"""
         if not self._db_drag_active:
             return
+        self.state.db_drag_cursor_y = float(y_px)
         h = max(1.0, float(self._spectrum_height() - _SPEC_BOTTOM_PAD))
         span = self._db_drag_press_max - self._db_drag_press_min
         if self._db_drag_zoom:
@@ -2367,6 +2388,7 @@ class _TuningPlotMixin:
             return
         self._db_drag_active = False
         self.state.db_drag_active = False
+        self.state.db_drag_zoom = False
         self.unsetCursor()
         self.update()
 

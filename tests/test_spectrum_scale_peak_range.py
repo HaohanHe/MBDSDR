@@ -595,6 +595,39 @@ def test_wheel_on_db_axis_zooms_span_not_tune(qapp):
     _assert_single_source(panel)
 
 
+def test_ctrl_db_zoom_shows_value_bubble_at_cursor_and_hides_on_release(qapp):
+    """Ctrl+竖拖缩放时，光标旁要有实时数值气泡；松手即消失。
+
+    气泡内容必须复用现有读数格式（"-120 … -40 dB · 跨度 80 dB"），
+    不许另造一套。普通拖（非 Ctrl）不弹气泡，读数仍在轴区右上。
+    """
+    import spectrum_widget as sw
+    panel = _panel(qapp)
+    plot = panel._plot
+    h = float(plot._spectrum_height() - sw._SPEC_BOTTOM_PAD)
+    press_y = h * 0.55
+    cursor_y = h * 0.80
+    plot.mousePressEvent(
+        _mouse_mod(QEvent.MouseButtonPress, 10, press_y, Qt.ControlModifier))
+    plot.mouseMoveEvent(
+        _mouse_mod(QEvent.MouseMove, 10, cursor_y, Qt.ControlModifier))
+    lo, hi = panel.db_range()
+    txt = f"{lo:.0f} … {hi:.0f} dB · 跨度 {hi - lo:.0f} dB"
+    rect = QRectF(0, 0, plot.width(), plot.height() - sw._SPEC_BOTTOM_PAD)
+    rec = _RecordingPainter()
+    sw._draw_db_scale(rec, rect, panel._state, QColor("white"))
+    near = [t for t in rec.texts
+            if t[2] == txt and abs(t[1] - cursor_y) <= 20.0
+            and t[0] < rect.width() * 0.5]
+    assert near, f"Ctrl 缩放时没有光标旁数值气泡：{rec.texts}"
+
+    plot.mouseReleaseEvent(
+        _mouse(QEvent.MouseButtonRelease, 10, cursor_y, buttons=Qt.NoButton))
+    rec2 = _RecordingPainter()
+    sw._draw_db_scale(rec2, rect, panel._state, QColor("white"))
+    assert not [t for t in rec2.texts if t[2] == txt], "松手后气泡没有消失"
+
+
 def test_db_zoom_clamps_span_and_axis_bounds(qapp):
     panel = _panel(qapp)
     plot = panel._plot
