@@ -41,5 +41,6 @@ if _os.path.isfile(_legacy_path) and _legacy_modname not in _sys.modules:
 from . import refraction  # noqa: E402,F401
 from . import planets  # noqa: E402,F401
 from . import dso  # noqa: E402,F401
+from . import moon_albedo  # noqa: E402,F401
 
-__all__ = ["refraction", "planets", "dso"]
+__all__ = ["refraction", "planets", "dso", "moon_albedo"]

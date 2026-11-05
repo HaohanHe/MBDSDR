@@ -234,6 +234,7 @@ python scripts/check_data_licenses.py --list
 | `mbdsdr_ai/data/dso_catalog.json` | CC-BY-SA-4.0 | OpenNGC |
 | `mbdsdr_ai/data/constellations_iau.json` | CC BY-SA 4.0（连线；中文名 Wikidata CC0，见 `docs/constellations.md` §1.1.1） | Stellarium skyculture modern_iau |
 | `mbdsdr_ai/data/constellation_names_cc0.json` | CC0-1.0 | Wikidata |
+| `mbdsdr_ai/data/moon_albedo_lola_2ppd.npz` | Public Domain (U.S. Government Work) | NASA PDS LRO-L-LOLA-4-GDR-V1.0（`LDAM_4_FLOAT` 法向反照率，1064 nm） |
 | `mbdsdr_ai/tests/fixtures/openngc/NGC.csv` | CC BY-SA 4.0 | OpenNGC NGC.csv |
 | `mbdsdr_ai/tests/fixtures/openngc/addendum.csv` | CC BY-SA 4.0 | OpenNGC addendum.csv |
 | `mbdsdr_ai/tests/fixtures/hyg_v41_reference_sample.csv` | CC BY-SA 4.0 | HYG Database v4.1 sample |
