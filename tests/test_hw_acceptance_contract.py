@@ -112,6 +112,7 @@ def test_missing_a_block_goes_red():
 # ------------------------------------------------- 导频测量法 / 噪声底阈值（同为实测结论）
 import numpy as np  # noqa: E402
 
+import ring2_spectrum_waterfall as ring2  # noqa: E402
 import ring3_demod_audio as ring3  # noqa: E402
 
 FS = 2.4e6
@@ -147,4 +148,20 @@ def test_old_decimation_would_report_the_alias():
     band = (fr > 18500) & (fr < 19500)
     f_old = float(fr[band][int(np.argmax(sp[band]))])
     assert abs(f_old - 18841.0) < 5.0, f"旧法读数 {f_old:.1f} Hz（预期 18841）"
+
+
+def test_floor_drift_threshold_is_derived_from_distribution():
+    """10 次同台同增益实测 4.22–6.81 dB（mean+3σ=8.14）→ 阈值为 8.5，不许放宽到 1.5×max。"""
+    thr = ring2.FLOOR_DRIFT_MAX_DB
+    assert thr == 8.5
+    assert thr > 6.81, "阈值必须覆盖 10 次实测的最大极差"
+    assert thr < 1.5 * 6.81, "阈值比「1.5×实测最大极差」还松，属于为好看放宽"
+    # 旧的 6 dB 会把这批分布里 2 次正常观测判红（反证阈值不是拍的）。
+    assert 6.81 > 6.0 and 6.49 > 6.0
+
+
+def test_both_suites_share_the_same_floor_threshold():
+    """A2 与 R2 量的是同一个统计量，阈值必须是同一个常量（不许两套各拍一个）。"""
+    import acceptance_suite  # noqa: E402
+    assert acceptance_suite.FLOOR_DRIFT_MAX_DB == ring2.FLOOR_DRIFT_MAX_DB
 

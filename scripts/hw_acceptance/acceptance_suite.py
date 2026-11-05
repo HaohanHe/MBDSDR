@@ -45,6 +45,7 @@ if sys_path_dir not in __import__("sys").path:
     __import__("sys").path.insert(0, sys_path_dir)
 
 import common  # noqa: E402  （同目录公共层，负责路径/设备探测/红线）
+from ring2_spectrum_waterfall import FLOOR_DRIFT_MAX_DB  # noqa: E402  同一统计量同一阈值
 
 FS = 2.4e6
 SKIP = common.SKIP
@@ -236,7 +237,8 @@ def ring2() -> dict:
     checks = [
         common.check("first_frame", True, f"{first_frame_ms:.1f} ms"),
         common.check("snr_ge_10db", snr >= 10.0, f"{snr:.2f} dB"),
-        common.check("floor_drift_le_6db", drift <= 6.0, f"{drift:.2f} dB"),
+        common.check("floor_drift_le_8p5db", drift <= FLOOR_DRIFT_MAX_DB,
+                     f"{drift:.2f} dB（阈值 {FLOOR_DRIFT_MAX_DB}）"),
         common.check("no_nan", int(np.isnan(arr).sum()) == 0,
                      f"{int(np.isnan(arr).sum())} 个 NaN"),
     ]
