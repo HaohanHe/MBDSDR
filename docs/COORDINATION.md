@@ -678,6 +678,26 @@
 > `desktop/new_spacetime_panel.py` / `tests/test_new_spacetime_panel_feedback.py`，
 > 锁均已释放。
 
+> 归档：2026-11-05 卫星过境线 `78b990f` 已入库并 release：
+> 站址读写边界拆分。`mbdsdr_ai/station.py` 只有一份判定 `_evaluate`，
+> 新增 `trust_for_calculation()`（显式 gnss/user/config 的 (0,0)/海上坐标
+> 降为 warning + 照常计算）与 `trust_for_tx()`（保持严格）；
+> `evaluate_station()` 与 controller `station_status()` / tracker
+> `current_position()` 对外语义不变（仍严格）。14 个只读消费点改走计算口径，
+> 写/控制点（tune_satellite、多普勒补偿开启、doppler_track、main_window
+> 跟踪轮询）不动。固定夹具下显式 (0,0) user/gnss 各算出 **2 条**过境并带
+> `station_warning`；同坐标 `tune_satellite` 仍 `station_untrusted` +
+> 「拒绝按错误位置做多普勒调谐」。涉及 station/controller/agent/orbit/
+> sdr_tools/sat_tracker/rf_sky_view 与 4 个测试文件，锁均已释放。
+
+> 归档：2026-11-05 卫星过境线 `b7e905f` 已入库并 release：
+> 频率未知不再用 `0.0` 兼任哨兵。`FreqOrbitPoint.frequency_mhz` 改
+> `Optional[float]`（`None`=未知）并加 `has_frequency`；散点图
+> `plottable_points()` 只画已知频点，未知点不再落到坐标 0（全未知显示
+> 「无频率数据」）。涉及 `mbdsdr_ai/new_spacetime_timeline.py` /
+> `desktop/new_spacetime_panel.py` / `tests/test_freq_orbit_unknown.py`，
+> 锁均已释放。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`
