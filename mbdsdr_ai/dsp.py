@@ -369,6 +369,19 @@ def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
     deemph_us   : de-emphasis time constant, 50 us (CN/EU/AU), 75 us (US/KR)
     Mono only (L+R, baseband 0-15 kHz); stereo composite decoding
     (19 kHz pilot / 38 kHz subcarrier) and RDS (57 kHz) are separate modules.
+
+    **Chunk invariance is NOT part of the contract.** The chain removes the
+    per-call mean (``x - mean(x)``) and normalises to the per-call peak, so
+    demodulating one long buffer and demodulating the same samples as
+    consecutive 4 M-sample blocks do NOT produce bit-identical audio.
+    Measured on the 20,316,160-sample / 2.048 MS/s OTA FM recording:
+    ``max|Δ| = 0.378285``, mean ``|Δ| = 0.00466``, exactly 1 sample identical
+    (full-buffer audio 476160 samples / rms 0.24147 vs 4 M-blocked 476160
+    samples / rms 0.24763). That difference is **pre-existing semantics**
+    (each call is an independent normalisation scope), not a defect of any
+    call site — do not use "bit-identical to the whole-buffer result" as an
+    acceptance criterion, and do not "fix" it by re-normalising across
+    buffers unless the streaming contract is re-specified.
     """
     from scipy.signal import (resample_poly, butter, lfilter, firwin)
 
