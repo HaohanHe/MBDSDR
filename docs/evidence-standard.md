@@ -128,3 +128,27 @@
 **与现有三步的关系**：`verify_claims` 现三步只校验「该提交确实改过该路径、且
 `git log -S` 能在同一 hash 命中该字面量」（`cat-file` / `--name-only` / `log -S`），
 **不校验行号内容**；第 4 步（HEAD 第 N 行含字面量）就是补这一环，判红名为「行号失效」。
+
+### 7.8 统计快照的生成方式（2026-11-06 写死）
+
+**规则**：凡对外引用的「断言分布 / 文档统计」快照，必须用 `git archive <HEAD> <dir>` 生成，**禁止**用 `git ls-tree --name-only` 的文本输出自行拼装。违反时数字会静默偏小，且无法复现。
+
+**实证一（少 16 条）**：`core.quotepath=true` 下 `git ls-tree -r --name-only HEAD docs` 把 `docs/PRD-现状对照.md` 输出为 `"docs/PRD-\347..."`（带引号的八进制转义）。按「以 `.md` 结尾且不含子目录」过滤时该行被静默跳过 → 顶层断言数 156 变成 140，差额正好是 `PRD-现状对照.md` 的 16 条（`e4810574` 实测）。
+
+**实证二（多算 / 不可追）**：复用旧临时快照目录（未清空就再抽下一个 HEAD）会把上一轮文档残留带进来，产生重复计行。`b0a440e3` 曾被报成 164（同口径正确值 156），该临时目录已无工件可追，只能作废。
+
+**复现式（唯一口径）**：
+
+```text
+git archive <HEAD> docs | tar -x -C <tmp>
+git show <HEAD>:scripts/verify_claims.py > <tmp>/vc.py
+python <tmp>/vc.py --root <repo> --docs <tmp>/docs
+```
+
+- 范围：`docs/*.md` 顶层、非递归（加 `--recursive` 是 412，不是同一口径）；
+- `EXCLUDE_FILES={claim-waivers.md}`；`audit_r2` 是子目录，顶层本就不含；
+- `CLAIM_RE` 与该 HEAD 提交版逐字一致；豁免条数不参与统计（校验器只整文件跳过 `claim-waivers.md`）；
+- 校验器必须是**该 HEAD 的提交版**（`git show <HEAD>:scripts/verify_claims.py`），不得用工作区在途版。
+
+**已核对的分布**（同口径重跑，引用时带哈希）：`b0a440e3` 156/58/12/86；`d731bdeb` 156/58/12/86；`e4810574` 156/63/12/81；`81cd345a` 156/63/13/80。旧值 `164/58/17/89`、`140/58/12/70` **作废**。
+
