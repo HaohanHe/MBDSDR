@@ -368,6 +368,11 @@ try:
 except Exception:  # pragma: no cover
     ReceivePipeline = None  # type: ignore
     SharedDemodConfig = None  # type: ignore
+try:
+    # 静噪滑杆初值的唯一权威来源（滑杆刻度 -100..-20，-50 ≈ 6 dB 余量）
+    from mbdsdr_ai.squelch import DEFAULT_SQUELCH_DBFS
+except Exception:  # pragma: no cover
+    DEFAULT_SQUELCH_DBFS = None  # type: ignore
 
 
 class _SweepWorker(QThread):
@@ -570,8 +575,12 @@ class MainWindow(QMainWindow):
                 self._audio_player = AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
             except Exception:
                 self._audio_player = None
-        # 静噪门限（dBFS / dBm 估计）：信号低于此值时声卡静音不输出
-        self._squelch_db: float = -80.0
+        # 静噪门限：滑杆刻度 -100..-20，值是「相对该模式噪声基线的余量」，
+        # 不是绝对 dBFS（初值只认 mbdsdr_ai.squelch 的权威常量）。
+        self._squelch_db: float = (
+            float(DEFAULT_SQUELCH_DBFS) if DEFAULT_SQUELCH_DBFS is not None else 0.0)
+        # 回放静噪基线（懒建；每次 _replay_recording 起点重置）
+        self._replay_squelch = None
         # VFO（SDR++ 风格接收链：变频→重采样→低通）。懒加载：连接后根据后端采样率创建。
         # VFO 失败/scipy 不可用时回退到直接鉴频，绝不崩。
         self._vfo = None  # type: Optional[object]
@@ -1810,20 +1819,33 @@ class MainWindow(QMainWindow):
 
         hbox.addWidget(left_col, stretch=1)
 
-        # 右侧 36px 形态窄条（折叠窄条先例 dock_layout_manager.build_collapse_strip）
+        # 右侧形态窄条：36px 只够写 "IDE"，全屏下用户看不出这是出口。
+        # 放宽到 132px，并用完整中文文案 + 触控高度。
         strip = QFrame(page)
         strip.setObjectName("planetariumStrip")
-        strip.setFixedWidth(tokens().SIZE["collapse_strip"])
+        strip.setFixedWidth(132)
         strip_lay = QVBoxLayout(strip)
         strip_lay.setContentsMargins(0, 8, 0, 8)
         strip_lay.setSpacing(4)
-        exit_btn = QPushButton("IDE")
-        exit_btn.setObjectName("stripIcon")
-        exit_btn.setToolTip("切回 IDE 形态 (Esc)")
+        # 录音指示：只读 _recording/_record_seconds，不自起计时
+        rec_indicator = QLabel("")
+        rec_indicator.setObjectName("planetariumRecIndicator")
+        rec_indicator.setAlignment(Qt.AlignCenter)
+        rec_indicator.setWordWrap(True)
+        rec_indicator.setStyleSheet(
+            f"QLabel#planetariumRecIndicator {{ color: "
+            f"{self._tok('danger', '#E5484D')}; font-size: 9pt; }}")
+        rec_indicator.setVisible(False)
+        strip_lay.addWidget(rec_indicator, 0, Qt.AlignHCenter)
+        exit_btn = QPushButton("退出星象仪\n(Esc)")
+        exit_btn.setObjectName("planetariumExit")
+        exit_btn.setToolTip("切回 IDE 形态；按 Esc 同样退出")
+        exit_btn.setMinimumHeight(44)
         exit_btn.clicked.connect(lambda: self.set_app_mode("ide"))
         strip_lay.addWidget(exit_btn, 0, Qt.AlignHCenter)
         strip_lay.addStretch(1)
         self._planetarium_strip = strip
+        self._planetarium_rec_indicator = rec_indicator
         hbox.addWidget(strip)
 
         # AI 回复覆盖卡（天空槽上的半透明卡片；隐藏=无回复，诚实空态不编造）
@@ -1952,6 +1974,7 @@ class MainWindow(QMainWindow):
             self.sky_view.enter_horizon_view()
         self.settings.set("app_mode", "planetarium")
         self._sync_mode_action()
+        self._sync_planetarium_recording()
         # 窗口已显示才联动全屏；启动恢复阶段窗口未 show，交给正常 show 流程。
         if self.isVisible() and not self.isFullScreen():
             self.showFullScreen()
@@ -4779,6 +4802,19 @@ class MainWindow(QMainWindow):
     def _update_record_time(self):
         self._record_seconds += 1
         self.control_panel.update_record_time(self._record_seconds)
+        self._sync_planetarium_recording()
+
+    def _sync_planetarium_recording(self) -> None:
+        """星象仪录音指示：只读 ``_recording`` / ``_record_seconds``，不自起计时。"""
+        rec = getattr(self, "_planetarium_rec_indicator", None)
+        if rec is None:
+            return
+        if not getattr(self, "_recording", False):
+            rec.setVisible(False)
+            return
+        secs = int(getattr(self, "_record_seconds", 0) or 0)
+        rec.setText(f"● 录音中 {secs // 60:02d}:{secs % 60:02d}")
+        rec.setVisible(True)
 
     def _toggle_record(self):
         """菜单 / 工具栏录音按钮统一入口。
@@ -5578,28 +5614,27 @@ class MainWindow(QMainWindow):
         if mode in ("RAW", "DIG"):
             return
 
-        # 静噪门控：信号太弱时渐出静音（不再硬 return 导致咔哒）。
-        # 对照 SDR++ power_squelch.h 门在 IF 域 + 后级 LPF 平滑；我们在
-        # 音频域用 AudioPlayer 的 5ms ramp 等效实现（audio_out.py _callback）。
-        try:
-            p = float(np.mean(np.abs(iq) ** 2))
-            dbfs = 10.0 * math.log10(p + 1e-12)
-            if dbfs < self._squelch_db:
-                player.set_muted(True)
-                return
-            else:
-                player.set_muted(False)
-        except Exception:
-            return
-
         from mbdsdr_ai import dsp as _dsp
+
+        def _emit(audio_in) -> None:
+            """统一出口：解调后先过后处理，再按「相对噪声基线的余量」门控写声卡。
+
+            滑杆值是余量刻度（-50 ≈ 6 dB），旧代码拿 IQ 绝对 dBFS 与它比较，
+            会把 -40 dBFS 的噪声判成信号。静噪状态只由音频存在度决定。
+            """
+            if audio_in is None or len(audio_in) == 0:
+                return
+            processed = self._tap_demod_audio(audio_in)
+            opened = self._replay_squelch_gate(processed, mode)
+            player.set_muted(not opened)
+            if opened:
+                player.write(processed)
 
         # 2) WFM 广播特殊处理：跳过 VFO，直接对原始全带宽 IQ 鉴频（内部已重采样到 48k）
         if mode == "WFM":
             try:
                 audio = _dsp.wfm_broadcast_demod(iq, sample_rate=sr, audio_sr=48000)
-                if audio is not None and audio.size > 0:
-                    player.write(self._tap_demod_audio(audio))
+                _emit(audio)
             except Exception:
                 pass
             return
@@ -5612,7 +5647,7 @@ class MainWindow(QMainWindow):
                 if vfo_out is not None and len(vfo_out) > 16:
                     audio = self._demod_at_48k(_dsp, mode, vfo_out)
                     if audio is not None and audio.size > 0:
-                        player.write(self._tap_demod_audio(audio))
+                        _emit(audio)
                         vfo_ok = True
         except Exception:
             vfo_ok = False
@@ -5625,9 +5660,29 @@ class MainWindow(QMainWindow):
             audio = self._demod_at_native_sr(_dsp, mode, iq, sr)
             if audio is None or audio.size == 0:
                 return
-            player.write(self._tap_demod_audio(audio))
+            _emit(audio)
         except Exception:
             pass
+
+    def _replay_squelch_gate(self, audio: np.ndarray, mode: str) -> bool:
+        """回放静噪判定：与实时同口径（相对该模式噪声基线的余量）。
+
+        回放不经过 ReceivePipeline 的 DemodWorker，这里自建一个
+        ``BaselineSquelch``；滑杆值由 ``margin_threshold_db()`` 归一化，
+        绝不再拿 IQ 绝对 dBFS 与滑杆刻度直接比较。
+        """
+        if audio is None or len(audio) == 0:
+            return False
+        sq = getattr(self, "_replay_squelch", None)
+        if sq is None:
+            from mbdsdr_ai.squelch import BaselineSquelch
+            sq = BaselineSquelch(squelch_db=self._squelch_db, mode=mode,
+                                 sample_rate=48000.0)
+            self._replay_squelch = sq
+        else:
+            sq.set_mode(mode)
+            sq.set_threshold(self._squelch_db)
+        return bool(sq.update(audio))
 
     def _tap_demod_audio(self, audio: np.ndarray) -> np.ndarray:
         """解调后音频的统一后处理 / 分发：ANR 降噪 → tap 给 APRS / 卫星云图面板。
@@ -5914,6 +5969,7 @@ class MainWindow(QMainWindow):
         self._record_segment_index = 1
         self._record_rate_changes = []
         self._recording = True
+        self._sync_planetarium_recording()
         # 流式落盘：边收边写，不再全程攒数组（长录制内存安全）
         self._open_record_segment(
             path, sr, center_hz, self._record_start_time, 1)
@@ -5986,6 +6042,7 @@ class MainWindow(QMainWindow):
     def _stop_recording(self):
         """停止录制：收尾最后一段并写 sidecar；多段时汇总 segments 清单。"""
         self._recording = False
+        self._sync_planetarium_recording()
         if self._record_timer is not None:
             try:
                 self._record_timer.stop()
@@ -7158,6 +7215,8 @@ class MainWindow(QMainWindow):
             self._apply_recording(False)
             self.statusBar().showMessage(
                 "已停止当前录音（文件已保存），开始回放", 8000)
+        # 每段回放都从零标定噪声基线（不把上一段/上一档增益的底带进来）
+        self._replay_squelch = None
         self._replay_resume_poll = self._active_sdr_backend is not None
         self._stop_iq_streams()
         # _stop_iq_streams 会关掉声卡；回放本身要出声，这里重新拉起声卡
