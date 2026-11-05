@@ -793,63 +793,6 @@ def residual_statistics(residuals: np.ndarray) -> Dict[str, float]:
     }
 
 
-def ecef_state_to_keplerian(state_ecef: np.ndarray, unix_s: float) -> Dict[str, float]:
-    """把 7 维 ECEF 状态 [x,y,z,vx,vy,vz,b] 转成经典轨道根数（ECI 下解算）。
-
-    返回 dict：a(km), e, i(deg), raan(deg), argp(deg), M(deg)，以及 r/v。
-    仅作结果展示用；不参与滤波更新。
-    """
-    state_ecef = np.asarray(state_ecef, dtype=float)
-    r_ecef = state_ecef[0:3]
-    v_ecef = state_ecef[3:6]
-    jd = jd_from_unix(unix_s)
-    r_eci, v_eci = ecef_to_eci(r_ecef, v_ecef, jd)
-
-    rm = float(np.linalg.norm(r_eci))
-    vm2 = float(v_eci @ v_eci)
-    energy = vm2 / 2.0 - GM_EARTH / rm
-    a = -GM_EARTH / (2.0 * energy) if abs(energy) > 1e-12 else float("nan")
-
-    h = np.cross(r_eci, v_eci)
-    hm = float(np.linalg.norm(h))
-    incl = math.degrees(math.acos(max(-1.0, min(1.0, h[2] / hm)))) if hm > 0 else float("nan")
-
-    k = np.array([0.0, 0.0, 1.0])
-    n = np.cross(k, h)
-    nm = float(np.linalg.norm(n))
-    if nm > 1e-9:
-        raan = math.degrees(math.atan2(n[1], n[0])) % 360.0
-    else:
-        raan = float("nan")
-
-    e_vec = np.cross(v_eci, h) / GM_EARTH - r_eci / rm
-    e = float(np.linalg.norm(e_vec))
-
-    if nm > 1e-9 and e > 1e-9:
-        argp = math.degrees(math.atan2(
-            float(np.dot(n / nm, e_vec)),
-            float(np.dot(e_vec, r_eci) / (e * rm)))) % 360.0
-    else:
-        argp = float("nan")
-
-    if e > 1e-9:
-        nu = math.atan2(
-            float(np.dot(e_vec, r_eci)) / (e * rm),
-            float(np.dot(r_eci, v_eci)) / (e * hm))
-        nu = (nu + 2.0 * math.pi) % (2.0 * math.pi)
-        E = 2.0 * math.atan2(
-            math.sqrt(1.0 + e) * math.sin(nu / 2.0),
-            math.sqrt(1.0 - e) * math.cos(nu / 2.0))
-        M = math.degrees(E - e * math.sin(E)) % 360.0
-    else:
-        M = float("nan")
-    return {
-        "a_km": float(a), "e": float(e), "i_deg": float(incl),
-        "raan_deg": float(raan), "argp_deg": float(argp), "M_deg": float(M),
-        "r_ecef_km": r_ecef.tolist(), "v_ecef_kmps": v_ecef.tolist(),
-    }
-
-
 def sky_plot(az: np.ndarray, el: np.ndarray,
              save_path: Optional[str] = None, title: str = "Sky Plot") -> np.ndarray:
     """方位/仰角天空图数据（保存 PNG）。返回 az/el 数组本身。"""
