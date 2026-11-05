@@ -40,8 +40,8 @@ def main():
 
     proc = subprocess.run([sys.executable, str(scope), "--staged"], cwd=str(root))
     if proc.returncode == 1:
-        print("[pre-commit] 拒绝提交：暂存区跨线。")
-        print("[pre-commit] 只提交你自己的路径：git commit --only -- <你的文件...>")
+        print("[pre-commit] 拒绝提交：暂存范围不合规（跨线持有，或出现声明清单外的文件）。")
+        print("[pre-commit] 见上方 EXTRA / MULTI 清单：先剔除或补进声明清单，再提交。")
         print("[pre-commit] 确认无在途改动后，可用 git commit --no-verify 绕过（会留痕）。")
         return 1
     if proc.returncode != 0:

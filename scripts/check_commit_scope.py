@@ -27,6 +27,10 @@
   `--staged` 供 pre-commit 钩子调用：读取 `git diff --cached` 的路径，检查这些
   路径当前被几个**仍在 TTL 内**的 owner 持有；≥2 个 owner 即拒绝提交（退出码 1）。
 
+  `--staged --expect <路径...>`（或环境变量 `MBDSDR_COMMIT_PATHS`，换行/`;` 分隔）
+  再加一道：**提交的文件集合必须全部落在声明清单内，多一个就拒**，并把多出来的
+  路径逐条打印。来源清单没声明时不启用这一条（保持旧行为，不假报）。
+
 退出码：0 无 MULTI；1 发现 MULTI（需人工确认）；2 用法/git 错误。
 """
 from __future__ import annotations
@@ -40,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("MBDSDR_REPO_ROOT") or Path(__file__).resolve().parents[1])
 DEFAULT_LOCKS_DIR = Path(r"D:\mbdsdr\.locks")
 LOCKS_DIR = Path(os.environ.get("MBDSDR_LOCKS_DIR") or DEFAULT_LOCKS_DIR)
 REGISTRY_PATH = LOCKS_DIR / "claims.json"
@@ -215,8 +219,31 @@ def _active_claim(entry: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]
     return cur
 
 
-def check_staged(as_json: bool) -> int:
-    """检查暂存区文件是否被 ≥2 个仍在 TTL 内的 owner 持有（pre-commit 闸门）。"""
+def _declared_paths(cli_expect: Optional[List[str]]) -> Optional[List[str]]:
+    """本次提交声明要带的路径清单。
+
+    来源优先级：`--expect` 命令行 > 环境变量 `MBDSDR_COMMIT_PATHS`
+    （换行 / `;` 分隔）。两者都没有 → 返回 None，表示「未声明」，
+    此时不做「多一个就拒」的检查（保持旧行为，不假报）。
+    """
+    raw: List[str] = []
+    if cli_expect:
+        raw = list(cli_expect)
+    else:
+        env_val = os.environ.get("MBDSDR_COMMIT_PATHS", "")
+        if env_val.strip():
+            raw = [x for x in env_val.replace(";", "\n").splitlines()]
+    if not raw:
+        return None
+    return [_canonical(x.strip()) for x in raw if x.strip()]
+
+
+def check_staged(as_json: bool, expect: Optional[List[str]] = None) -> int:
+    """检查暂存区：①跨线（≥2 个活跃 owner）拒；②超出声明清单的文件拒。
+
+    第 ② 条是「私有 index 文件名撞车 / 复用旧 index」这类事故的机械闸：
+    提交的文件集合必须**全部落在声明清单内**，多一个就拒并打印多出来的路径。
+    """
     import time
 
     now = time.time()
@@ -246,6 +273,12 @@ def check_staged(as_json: bool) -> int:
             owners.append(owner)
         rows.append({"path": path, "owner": owner, "remaining_min": round(remaining, 1)})
 
+    declared = _declared_paths(expect)
+    extras: List[str] = []
+    if declared is not None:
+        allowed = set(declared)
+        extras = [p for p in paths if _canonical(p) not in allowed]
+
     multi = len(owners) >= 2
     if as_json:
         print(
@@ -254,13 +287,15 @@ def check_staged(as_json: bool) -> int:
                     "staged": paths,
                     "owners": owners,
                     "multi_owner": multi,
+                    "declared": declared,
+                    "extras": extras,
                     "files": rows,
                 },
                 ensure_ascii=False,
                 indent=2,
             )
         )
-        return 1 if multi else 0
+        return 1 if (multi or extras) else 0
 
     print(f"STAGED {len(paths)} 个文件")
     for row in rows:
@@ -269,10 +304,25 @@ def check_staged(as_json: bool) -> int:
         else:
             print(f"  {row['path']:<46} owner=-（无活跃 claim）")
     print()
+    if declared is not None:
+        print(f"声明清单 {len(declared)} 个：{', '.join(declared)}")
+        print()
+
+    failed = False
+    if extras:
+        print(f"拒绝：暂存区有 {len(extras)} 个文件不在声明清单内（多一个就拒）：")
+        for path in extras:
+            print(f"  EXTRA   {path}")
+        print("  这不是「提交成功」——要么从本次提交里剔除这些路径，")
+        print("  要么把它们补进声明清单（确认确实归你）。")
+        failed = True
     if multi:
         print(f"发现 MULTI：暂存区涉及 {len(owners)} 个仍在 TTL 内的 owner：{', '.join(owners)}")
         print("  拒绝提交。只提交你自己的路径：git commit --only -- <你的文件...>")
+        failed = True
+    if failed:
         return 1
+
     if owners:
         print(f"仅 1 个活跃 owner：{owners[0]}，允许提交。")
     else:
@@ -284,11 +334,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="提交范围检查（claim 台账版）")
     parser.add_argument("ref", nargs="?", help="提交 hash / HEAD / 分支（--staged 时可省略）")
     parser.add_argument("--staged", action="store_true", help="检查暂存区（pre-commit 用）")
+    parser.add_argument(
+        "--expect",
+        nargs="*",
+        default=None,
+        help="本次提交的声明路径清单；暂存区出现清单外的文件即拒绝（多一个就拒）",
+    )
     parser.add_argument("--json", action="store_true", help="JSON 输出")
     args = parser.parse_args(argv)
     try:
         if args.staged:
-            return check_staged(args.json)
+            return check_staged(args.json, expect=args.expect)
         if not args.ref:
             parser.error("需要 ref，或使用 --staged")
         return check(args.ref, args.json)
