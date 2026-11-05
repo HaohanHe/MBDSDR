@@ -607,7 +607,13 @@
 
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
-| `mbdsdr_ai/solar_system.py`、`tests/test_moon_illumination_real_ephemeris.py` | 天空线 | 2026-11-05 17:06 | 待提交（历表照度反转修复） |
+| _（空）_ | | | |
+
+> 归档：2026-11-05 天空线历表照度反转修复已入库 `056e073`
+> （`mbdsdr_ai/solar_system.py` 三后端收敛为 `moon_illum_from_elongation`，
+> 渲染层 `cosα = 2·illum − 1` 未改；新增
+> `tests/test_moon_illumination_real_ephemeris.py`）；
+> 上述两文件锁均已 release。
 
 > 归档：2026-11-05 卫星过境线三笔已入库并 release：
 > `08a4500`（过境仰角设置真正生效：列表门读 settings，低仰角可列出）、
