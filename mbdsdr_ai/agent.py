@@ -17,6 +17,7 @@ MBDSDR AI 内核 - Agent 主循环
 """
 
 import json
+import logging
 import math
 import os
 import time
@@ -56,6 +57,15 @@ from .orchestrator import Orchestrator, Task, TaskPriority
 from .code_editor import CodeEditor, EditRecord, EditStatus
 from .astronomy import Observer, EquatorialCoord, AltAzCoord, AntennaParams, unix_to_jd, jd_to_mjd, jd_to_gmst, jd_to_lst, lst_to_hms, compute_refraction, compute_airmass, compute_pointing_guidance
 from .amr import AMRClassifier, AMRResult, ModulationType
+from .error_catalog import suggestion, user_message
+
+
+logger = logging.getLogger(__name__)
+
+# 子代理不存在属 LLM 传参错误（可预期异常）：同一 id 的日志按 60s 限流，
+# 避免模型反复用错 ID 时把日志刷爆；每次调用仍照常把失败上报给调用方。
+_SUBAGENT_ERR_LOG_INTERVAL_S = 60.0
+_SUBAGENT_ERR_LOG_AT: Dict[str, float] = {}
 
 
 # git clone 常见失败模式 → 中文可操作诊断（按序首个命中）。
@@ -2651,9 +2661,24 @@ class MBDSDRAgent:
         def _subagent_execute_handler(args):
             # 同步真 LLM 循环执行；success/error 如实回传（truncated/error 都不
             # 伪装成 success，partial/失败细节在 content JSON 里可见）
-            res = sm.execute_task(
-                args["subagent_id"], args["goal"], args.get("input_data"),
-                args.get("timeout_s", 120), max_steps=args.get("max_steps"))
+            try:
+                res = sm.execute_task(
+                    args["subagent_id"], args["goal"], args.get("input_data"),
+                    args.get("timeout_s", 120), max_steps=args.get("max_steps"))
+            except ValueError as e:
+                # 子代理不存在属 LLM 传参错误（可预期）：不抛给注册表的宽 catch，
+                # 按次把结构化失败上报给模型；日志按 id 限流，避免反复试错刷屏
+                key = str(args.get("subagent_id") or "")
+                now = time.time()
+                if now - _SUBAGENT_ERR_LOG_AT.get(key, 0.0) >= _SUBAGENT_ERR_LOG_INTERVAL_S:
+                    _SUBAGENT_ERR_LOG_AT[key] = now
+                    logger.warning("subagent_execute 参数错误（子代理不存在）: %s", e)
+                return ToolResult(
+                    False,
+                    user_message("subagent_not_found", name=key or "?"),
+                    error="subagent_not_found",
+                    next_step=suggestion("subagent_not_found"),
+                )
             return ToolResult(
                 success=res.success,
                 content=json.dumps(res.to_dict(), ensure_ascii=False, indent=2),
