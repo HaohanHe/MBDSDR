@@ -149,8 +149,10 @@ class TestManualGate:
         ]
         out = mcp_protocol.annotate_write_gate(tools)
         write_t, read_t = out[0], out[1]
-        assert "arm_manual" in write_t["inputSchema"]["properties"]
-        assert "arm_manual" in write_t["inputSchema"]["required"]
-        assert "手动门" in write_t["description"]
+        assert "confirm_token" in write_t["inputSchema"]["properties"]
+        assert "confirm_token" in write_t["inputSchema"]["required"]
+        assert "arm_manual" not in write_t["inputSchema"]["properties"]
+        assert "confirm_token" in write_t["description"]
         assert "arm_manual" not in read_t["inputSchema"]["properties"]
+        assert "confirm_token" not in read_t["inputSchema"]["properties"]
         assert read_t["description"] == "状态"

@@ -479,11 +479,11 @@ class TestToolForwarding:
         tools = w.fetch_mcp_tools()
         assert [t["name"] for t in tools] == ["tune_fm", "get_status"]
         assert w._mcp_tool_names == {"tune_fm", "get_status"}
-        # 写工具带 arm_manual 人工门，只读工具不带
+        # 写工具带 confirm_token 外部确认门，只读工具不带
         write_t = next(t for t in tools if t["name"] == "tune_fm")
-        assert "arm_manual" in write_t["inputSchema"]["required"]
+        assert "confirm_token" in write_t["inputSchema"]["required"]
         read_t = next(t for t in tools if t["name"] == "get_status")
-        assert "arm_manual" not in read_t["inputSchema"].get("required", [])
+        assert "confirm_token" not in read_t["inputSchema"].get("required", [])
         assert any("2 个硬件工具" in m for m in rec["log_message"].items)
 
     def test_fetch_mcp_tools_failure_registers_nothing(self, monkeypatch, stub):

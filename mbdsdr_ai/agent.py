@@ -3078,20 +3078,23 @@ class MBDSDRAgent:
     def _register_code_editor_tools(self):
         """注册自编程工具（代码编辑器）。
 
-        写工具（modify/modify_section/git_commit/rollback）一律走 arm_manual
-        人工门（AGENTS.md §3；与 set_ppm_correction 同语义）：未显式武装不
-        执行，返回 gated 信封而非假装成功。缺门时 dry-call/幻觉参数即可真实
-        改文件、真实 git add -A 提交（phase64 实测套件跑完 README 被清空、
-        脏工作区被自动提交）。
+        写工具（modify/modify_section/git_commit/rollback）一律走外部确认
+        token 门（AGENTS.md §3；单一事实源 ``mbdsdr_ai.tx_guard``）：未持有效
+        ``confirm_token`` 不执行，返回 gated 信封而非假装成功。**模型自报
+        ``arm_manual=True`` 不构成确认**（S13 红线）。缺门时 dry-call/幻觉
+        参数即可真实改文件、真实 git add -A 提交（phase64 实测套件跑完
+        README 被清空、脏工作区被自动提交）。
         """
         ce = self.code_editor
 
-        def _arm_gate(args, what):
-            if args.get("arm_manual", False) is not True:
+        def _arm_gate(args, tool_name):
+            from .tx_guard import resolve_write_authorization
+            d = resolve_write_authorization(tool_name, args)
+            if not d.allowed:
                 return ToolResult(
                     success=False,
-                    content=f"手动模式：未执行 {what}（写操作需显式传 arm_manual=true）",
-                    data={"gated": True},
+                    content=f"未执行 {tool_name}：{d.reason}",
+                    data={"gated": True, "reason": d.code},
                 )
             return None
 
@@ -3112,13 +3115,13 @@ class MBDSDRAgent:
 
         def _h_modify_file(args):
             gate = _arm_gate(args, "code_modify_file")
-            if gate is not None:
+            if gate is not None:  # 外部确认 token 门；arm_manual 自报不放行
                 return gate
             return ToolResult(success=True, content=json.dumps(ce.modify_file(args["file_path"], args.get("new_content") or args.get("content") or "", args.get("description", "")).to_dict(), ensure_ascii=False, indent=2))
 
         self.tool_registry.register(
             name="code_modify_file",
-            description="修改源代码文件。修改前自动备份，支持一键恢复。这是自编程的核心：模型可以直接修改源代码。写操作，带 arm_manual 手动门（必须显式 arm_manual=true 才真正执行，防误触/防幻觉参数）。修改后建议运行 code_run_tests 验证，然后 code_hot_reload 热加载，最后 code_git_commit 提交。",
+            description="修改源代码文件。修改前自动备份，支持一键恢复。这是自编程的核心：模型可以直接修改源代码。写操作，需外部确认通道签发的一次性 confirm_token（模型自报 arm_manual 不放行，防误触/防幻觉参数）。修改后建议运行 code_run_tests 验证，然后 code_hot_reload 热加载，最后 code_git_commit 提交。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -3126,9 +3129,9 @@ class MBDSDRAgent:
                     "new_content": {"type": "string", "description": "新的完整文件内容（也可用 content 参数）"},
                     "content": {"type": "string", "description": "新的完整文件内容（new_content 的别名）"},
                     "description": {"type": "string", "description": "修改描述", "default": ""},
-                    "arm_manual": {"type": "boolean", "description": "手动确认门：写操作必须显式传 true 才执行"},
+                    "confirm_token": {"type": "string", "description": "外部确认通道签发的一次性 token（绑定本次动作摘要，TTL 内单次有效）；模型自报 arm_manual 不构成确认"},
                 },
-                "required": ["file_path", "arm_manual"],
+                "required": ["file_path", "confirm_token"],
             },
             handler=_h_modify_file,
             category="code_editor",
@@ -3136,13 +3139,13 @@ class MBDSDRAgent:
 
         def _h_modify_section(args):
             gate = _arm_gate(args, "code_modify_section")
-            if gate is not None:
+            if gate is not None:  # 外部确认 token 门；arm_manual 自报不放行
                 return gate
             return ToolResult(success=True, content=json.dumps(ce.modify_section(args["file_path"], args["old_section"], args["new_section"], args.get("description", "")).to_dict(), ensure_ascii=False, indent=2))
 
         self.tool_registry.register(
             name="code_modify_section",
-            description="局部修改源代码文件中的一段内容。比 code_modify_file 更安全，只替换指定的代码段。修改前自动备份。写操作，带 arm_manual 手动门（必须显式 arm_manual=true 才真正执行）。",
+            description="局部修改源代码文件中的一段内容。比 code_modify_file 更安全，只替换指定的代码段。修改前自动备份。写操作，需外部确认通道签发的一次性 confirm_token（模型自报 arm_manual 不放行）。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -3150,9 +3153,9 @@ class MBDSDRAgent:
                     "old_section": {"type": "string", "description": "要替换的旧代码段（必须完全匹配）"},
                     "new_section": {"type": "string", "description": "新代码段"},
                     "description": {"type": "string", "description": "修改描述", "default": ""},
-                    "arm_manual": {"type": "boolean", "description": "手动确认门：写操作必须显式传 true 才执行"},
+                    "confirm_token": {"type": "string", "description": "外部确认通道签发的一次性 token（绑定本次动作摘要，TTL 内单次有效）；模型自报 arm_manual 不构成确认"},
                 },
-                "required": ["file_path", "old_section", "new_section", "arm_manual"],
+                "required": ["file_path", "old_section", "new_section", "confirm_token"],
             },
             handler=_h_modify_section,
             category="code_editor",
@@ -3190,22 +3193,22 @@ class MBDSDRAgent:
 
         def _h_git_commit(args):
             gate = _arm_gate(args, "code_git_commit")
-            if gate is not None:
+            if gate is not None:  # 外部确认 token 门；arm_manual 自报不放行
                 return gate
             return ToolResult(success=True, content=(lambda r: f"{'成功' if r[0] else '失败'}: {r[1]}")(ce.git_commit(args["message"], args.get("files") or None, args.get("edit_id") or None)))
 
         self.tool_registry.register(
             name="code_git_commit",
-            description="Git commit 提交代码修改到版本控制。这是开源协作的核心：修改经过测试验证后提交到 git 仓库，形成可追溯的版本历史。写操作，带 arm_manual 手动门（必须显式 arm_manual=true 才真正执行）；files 缺省为全部修改（git add -A，含未跟踪文件，武装前保持工作区干净）。",
+            description="Git commit 提交代码修改到版本控制。这是开源协作的核心：修改经过测试验证后提交到 git 仓库，形成可追溯的版本历史。写操作，需外部确认通道签发的一次性 confirm_token（模型自报 arm_manual 不放行）；files 缺省为全部修改（git add -A，含未跟踪文件，授权前保持工作区干净）。",
             parameters={
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "commit 信息（描述修改内容）"},
                     "files": {"type": "array", "items": {"type": "string"}, "description": "要提交的文件列表（None=全部修改）", "default": []},
                     "edit_id": {"type": "string", "description": "关联的编辑记录 ID", "default": ""},
-                    "arm_manual": {"type": "boolean", "description": "手动确认门：写操作必须显式传 true 才执行"},
+                    "confirm_token": {"type": "string", "description": "外部确认通道签发的一次性 token（绑定本次动作摘要，TTL 内单次有效）；模型自报 arm_manual 不构成确认"},
                 },
-                "required": ["message", "arm_manual"],
+                "required": ["message", "confirm_token"],
             },
             handler=_h_git_commit,
             category="code_editor",
@@ -3221,20 +3224,20 @@ class MBDSDRAgent:
 
         def _h_rollback(args):
             gate = _arm_gate(args, "code_rollback")
-            if gate is not None:
+            if gate is not None:  # 外部确认 token 门；arm_manual 自报不放行
                 return gate
             return ToolResult(success=True, content=(lambda r: f"{'成功' if r[0] else '失败'}: {r[1]}")(ce.rollback(args["edit_id"])))
 
         self.tool_registry.register(
             name="code_rollback",
-            description="一键恢复：回滚到修改前的状态。防幻觉变砖的最后一道防线：任何代码修改都可以一键撤销。写操作，带 arm_manual 手动门（必须显式 arm_manual=true 才真正执行）。",
+            description="一键恢复：回滚到修改前的状态。防幻觉变砖的最后一道防线：任何代码修改都可以一键撤销。写操作，需外部确认通道签发的一次性 confirm_token（模型自报 arm_manual 不放行）。",
             parameters={
                 "type": "object",
                 "properties": {
                     "edit_id": {"type": "string", "description": "要回滚的编辑记录 ID"},
-                    "arm_manual": {"type": "boolean", "description": "手动确认门：写操作必须显式传 true 才执行"},
+                    "confirm_token": {"type": "string", "description": "外部确认通道签发的一次性 token（绑定本次动作摘要，TTL 内单次有效）；模型自报 arm_manual 不构成确认"},
                 },
-                "required": ["edit_id", "arm_manual"],
+                "required": ["edit_id", "confirm_token"],
             },
             handler=_h_rollback,
             category="code_editor",

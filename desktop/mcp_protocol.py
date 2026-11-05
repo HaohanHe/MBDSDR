@@ -75,13 +75,15 @@ def resolve_mcp_endpoint(host: Optional[str] = None,
     return str(host), port
 
 
-# ── arm_manual 人工门（AGENTS 红线：写工具必走）────────────────────────
+# ── 写工具确认门（AGENTS 红线：写工具必走外部确认）──────────────────────
 #
-# 模型驱动的硬件写操作必须显式 arm_manual=true 才真正下发；只读工具不受限。
+# 模型驱动的硬件写操作由桌面端走真人确认（不看模型自报值）；只读工具不受限。
 # UI 直操（频谱拖动/滑杆）是用户自己的手，等价人工门已满足，不走此判定。
 
-#: arm_manual 是本地门控 token，不透传给设备固件
+#: 旧门控参数名：仅用于从透传参数中剥离（执行层仍是真人确认，不看它的值）
 GATE_PARAM = "arm_manual"
+#: 对外 schema 声明的确认参数：必须由可信外部通道签发的一次性 token
+CONFIRM_PARAM = "confirm_token"
 
 #: 明确只读的工具名（前缀/精确名）；不在表内的硬件工具保守按写操作处理
 READ_ONLY_TOOL_PREFIXES = ("get_", "list_", "check_", "web_")
@@ -99,10 +101,11 @@ def is_write_tool(tool_name: str) -> bool:
 
 
 def annotate_write_gate(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """给写工具的 schema 注入 arm_manual 门（模型可见，同 sdr_tools 先例）。
+    """给写工具的 schema 注入 confirm_token 门（模型可见，同 sdr_tools 先例）。
 
-    写工具：描述追加人工门说明、inputSchema 增加 arm_manual 属性并列入
-    required（缺参即被 ToolRegistry 预校验拦下，附带提示）。只读工具原样返回。
+    写工具：描述追加外部确认说明、inputSchema 增加 confirm_token 属性并列入
+    required（缺参即被预校验拦下，附带提示）。模型自报 ``arm_manual`` 不构成
+    确认，schema 不再暴露该假接口。只读工具原样返回。
     """
     out: List[Dict[str, Any]] = []
     for tool in tools or []:
@@ -112,18 +115,19 @@ def annotate_write_gate(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         t = dict(tool)
         t["description"] = (
             str(t.get("description", "") or "").rstrip()
-            + " 写操作，带 arm_manual 手动门（必须显式 arm_manual=true 才真正下发，防误触）。"
+            + " 写操作，需外部确认通道签发的一次性 confirm_token（须由可信通道签发，"
+              "绑定本次动作摘要；模型自报 arm_manual 不放行）。"
         )
         schema = dict(t.get("inputSchema") or {"type": "object", "properties": {}})
         props = dict(schema.get("properties") or {})
-        props[GATE_PARAM] = {
-            "type": "boolean",
-            "description": "手动确认门：写操作必须显式传 true 才执行",
+        props[CONFIRM_PARAM] = {
+            "type": "string",
+            "description": "外部确认通道签发的一次性 token（绑定本次动作摘要、TTL 内单次有效）；模型自报 arm_manual 不构成确认",
         }
         schema["properties"] = props
         required = list(schema.get("required") or [])
-        if GATE_PARAM not in required:
-            required.append(GATE_PARAM)
+        if CONFIRM_PARAM not in required:
+            required.append(CONFIRM_PARAM)
         schema["required"] = required
         t["inputSchema"] = schema
         out.append(t)
@@ -198,7 +202,8 @@ def normalize_tool_call(tool_name: str, params: Optional[Dict[str, Any]],
 
     def _clean(params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         out = dict(params or {})
-        out.pop(GATE_PARAM, None)  # 门控 token 只在本地判定，不发给设备
+        out.pop(GATE_PARAM, None)  # 旧门控参数只在本地判定，不发给设备
+        out.pop(CONFIRM_PARAM, None)  # 外部确认 token 只在本地判定，不发给设备
         return out
 
     if name in (registered_names or ()):

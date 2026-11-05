@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""code_editor 写工具 arm_manual 门回归（phase64）。
+"""code_editor 写工具外部确认 token 门回归（phase64；S13 迁移）。
 
 背景：docs/audit_r2/38_llm_judge_code_editor.md:21 早已登记
 "code_modify_file required 仅 file_path、new_content 缺省空串 → 清空文件"，
@@ -7,7 +7,9 @@
 phase64 实测坐实：tests/ 根 dry-call 以 file_path="README.md" 调
 code_modify_file（new_content 缺省空串）把 tracked README 清空，随后
 code_git_commit（files 缺省 → git add -A）把破坏连同脏工作区自动提交。
-本测试钉死门的三条行为：schema 声明、未武装拒执行、武装后可穿越。
+S13 后模型自报 ``arm_manual=true`` 不再构成确认：写工具只认外部确认通道
+签发的一次性 ``confirm_token``。本测试钉死门的行为：schema 声明、
+缺 token 拒执行、自报 arm_manual 拒执行、持有效 token 后可穿越。
 """
 from __future__ import annotations
 import os
@@ -24,7 +26,7 @@ _README = os.path.join(_REPO_ROOT, "README.md")
 # 四个写工具：改文件 / 改段 / 提交 / 回滚
 _GATED_TOOLS = ("code_modify_file", "code_modify_section", "code_git_commit", "code_rollback")
 
-# 覆盖四工具所需必填参数的并集（缺 arm_manual 时都应被拒）
+# 覆盖四工具所需必填参数的并集（缺 confirm_token 时都应被拒）
 _ARGS_BASE = {
     "file_path": "README.md",
     "message": "gate-probe",
@@ -39,6 +41,14 @@ def agent():
     return MBDSDRAgent(AgentConfig())
 
 
+@pytest.fixture(autouse=True)
+def _clean_gate():
+    from mbdsdr_ai.tx_guard import reset_tx_gate
+    reset_tx_gate()
+    yield
+    reset_tx_gate()
+
+
 @pytest.fixture(scope="module")
 def readme_bytes():
     with open(_README, "rb") as f:
@@ -50,43 +60,53 @@ def _assert_readme_untouched(readme_bytes):
         assert f.read() == readme_bytes, "tracked README.md 被测试改动"
 
 
-class TestWriteToolArmGate:
-    def test_gated_tools_declare_arm_manual(self, agent):
-        """四个写工具 schema 必须声明 arm_manual 且进 required（缺参即拒）。"""
+class TestWriteToolTokenGate:
+    def test_gated_tools_declare_confirm_token(self, agent):
+        """四个写工具 schema 必须声明 confirm_token 且进 required；
+        ``arm_manual`` 不得再出现在 schema（假接口）。"""
         tr = agent.tool_registry
         for name in _GATED_TOOLS:
             defn = tr.tools[name]["definition"]["function"]
             props = defn["parameters"]["properties"]
-            assert "arm_manual" in props, f"{name} 缺少 arm_manual 参数声明"
-            assert "arm_manual" in defn["parameters"]["required"], \
-                f"{name} 的 arm_manual 未进 required"
+            assert "confirm_token" in props, f"{name} 缺少 confirm_token 参数声明"
+            assert "confirm_token" in defn["parameters"]["required"], \
+                f"{name} 的 confirm_token 未进 required"
+            assert "arm_manual" not in props, f"{name} schema 仍暴露 arm_manual"
+            assert "arm_manual" not in defn["parameters"]["required"]
 
     @pytest.mark.parametrize("tool", _GATED_TOOLS)
-    def test_missing_arm_manual_refused(self, agent, tool, readme_bytes):
-        """缺 arm_manual：registry 预检即拒，不触达 handler；README 不动。"""
+    def test_missing_confirm_token_refused(self, agent, tool, readme_bytes):
+        """缺 confirm_token：registry 预检即拒，不触达 handler；README 不动。"""
         res = agent.tool_registry.call(tool, dict(_ARGS_BASE))
         assert res.success is False
-        assert "arm_manual" in res.content
+        assert "confirm_token" in res.content
         _assert_readme_untouched(readme_bytes)
 
     @pytest.mark.parametrize("tool", _GATED_TOOLS)
-    def test_explicit_false_refused_with_gated_envelope(self, agent, tool, readme_bytes):
-        """显式 arm_manual=false：gated 信封（data.gated），不假装成功。"""
-        args = dict(_ARGS_BASE, arm_manual=False)
+    def test_model_self_reported_arm_manual_refused(self, agent, tool, readme_bytes):
+        """模型自报 arm_manual=true、无有效 token：handler 门拒，gated 信封。"""
+        args = dict(_ARGS_BASE, arm_manual=True, confirm_token="")
         res = agent.tool_registry.call(tool, args)
         assert res.success is False
         assert (res.data or {}).get("gated") is True
+        # 门实现刻意不读 arm_manual（自报不参与判定），因此报 not_armed 而非
+        # untrusted；两者都证明"带 true 也过不去"。
+        assert (res.data or {}).get("reason") in (
+            "gate_not_armed", "gate_arm_manual_untrusted")
         assert "未执行" in res.content
         _assert_readme_untouched(readme_bytes)
 
-    def test_armed_call_passes_gate_editor_contains_path(self, agent, readme_bytes):
-        """armed=true 穿过门到达 editor；editor 自身 containment 兜底——
-        越界路径被拒。证明门拒的是"未武装"，不是把执行路径弄坏。"""
-        res = agent.tool_registry.call("code_modify_file", {
+    def test_token_armed_call_passes_gate_editor_contains_path(self, agent, readme_bytes):
+        """持外部确认 token 穿过门到达 editor；editor 自身 containment 兜底——
+        越界路径被拒。证明门拒的是"无 token"，不是把执行路径弄坏。"""
+        from mbdsdr_ai.tx_guard import issue_confirmation
+        args = {
             "file_path": "../../../../tmp/mbdsdr_gate_probe.txt",
             "new_content": "should never land",
-            "arm_manual": True,
-        })
+        }
+        token = issue_confirmation("code_modify_file", args, ttl_s=10)
+        res = agent.tool_registry.call("code_modify_file",
+                                       dict(args, confirm_token=token))
         assert res.success is False
         assert "越界" in res.content or "安全限制" in res.content
         assert not os.path.exists("/tmp/mbdsdr_gate_probe.txt")
