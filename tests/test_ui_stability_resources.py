@@ -54,8 +54,15 @@ def _pump(app, ms=60):
 
 
 @pytest.fixture(scope="module")
-def mw(qapp):
-    """构造一次 MainWindow（构造代价高，模块内共享）。"""
+def mw(qapp, isolated_profile):
+    """构造一次 MainWindow（构造代价高，模块内共享）。
+
+    **必须走 ``isolated_profile``**：MainWindow 内部 load 真实
+    ``%APPDATA%/mbdsdr/desktop_settings.json`` / QSettings / layout_store，
+    而 settings 的防抖写盘会在 close 时把测试值写回真实配置。现场实测
+    （2026-11-05 会话守卫）：1074 -> 1074 bytes、sha256 不变、mtime 变
+    （+0 bytes 的同内容写入同样不允许）。
+    """
     from main_window import MainWindow
     w = MainWindow()
     w.show()
