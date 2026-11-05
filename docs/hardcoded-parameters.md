@@ -515,7 +515,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | 静噪默认 | `-50`（`squelch.py`） | `-50`（`tokens.h:396`） | ✓ | 见 2.1 二次裁定 |
 | **峰值门限基准** | `median + rel_db`（`spectrum_widget.py:487-488`） | `dB above median`（`tokens.h:365`） | ✓（同一基准） | 统一检测器定义（P-1） |
 | 峰值门限值 | `6.0`（裁定值） | `6.0`（`kPeakRelDb`，显示门；校准门 15 另计） | ✓ | 裁定 `rel 6.0 / abs -100 / 3 帧 / 5 bin / 10 帧`；15 dB 实测 24 帧 0 峰 |
-| 默认采样率 | 2.4 MS/s（`6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`） | 2.4 MS/s（`tokens.h:301`，C++ 常量由 `12610725` 引入 `kDefaultSampleRateHz = 2.4e6`） | ✓ | 已统一；两端都按设备能力回落 |
+| 默认采样率 | 2.4 MS/s（`6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`） | 2.4 MS/s（`tokens.h:301`，C++ 常量由 `12610725` 引入 `kDefaultSampleRateHz = 2.4e6`） | ✓ | 已统一；两端都按设备能力回落（本行 HEAD:518；工作区 :536 是别线未提交插入导致的漂移，不是现状行号） |
 | 默认调谐步进 | 10 kHz | 10 kHz（`kFreqCoarseStepHz`） | ✓（D-2 撤回） | 保持；100 kHz 是扫描步进 |
 | 无数据哨兵 | `-120.0`（待改 NaN） | 无哨兵（`-100` 是真实读数） | ✗ → 待 P-8c | 哨兵必须落在量程外 |
 | 上下文窗口 | 8192 | 32768（×0.75 预算） | ✗（有意） | 按模型能力，登记 |
