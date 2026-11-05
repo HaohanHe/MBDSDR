@@ -4290,12 +4290,22 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_squelch_changed(self, dbfs: float):
-        # 本地声卡门控：信号低于此 dBFS 时静音（不下发硬件）
-        # 用户手动拖动门限即切到固定门限，关闭自动静噪
+        # 滑杆刻度是「相对噪声基线的余量」（-50≈6 dB），不是绝对 dBFS；
+        # 门控在 BaselineSquelch / 解调链内部换算，这里只传刻度。
+        # 用户手动拖动门限即切到固定门限，关闭自动静噪。
         self._squelch_db = float(dbfs)
         if self._demod_cfg is not None:
             self._demod_cfg.squelch_db = float(dbfs)
             self._demod_cfg.auto_squelch = False
+        # 写回后端状态：状态栏据此显示「桌面余量 / C++ 自动 / 手动」；
+        # 不写回时界面会一直挂着旧来源（或 none），用户分不清谁在生效。
+        backend = getattr(self, "_backend", None)
+        set_squelch = getattr(backend, "set_squelch", None)
+        if callable(set_squelch):
+            try:
+                set_squelch(float(dbfs))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("同步静噪到后端失败: %s", exc)
 
     def _on_auto_squelch_toggled(self, on: bool):
         """切换自动/固定静噪。"""
