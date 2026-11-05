@@ -4,8 +4,11 @@
 > 基线：HEAD `fc1f8076` 的 blob（该文件当前被他人占用、工作树有未提交改动，
 > 合并时请 rebase 到其最新提交；本补丁只改两处，冲突面很小）
 > 生成：2026-11-06，解码流水线 P5
-> 配套测试：`tests/test_desktop_sweep_truthfulness.py`（已放根 `tests/`；
-> 补丁未并线前该用例为红，并线后应转绿）
+> 配套测试：同址 `2026-11-06-desktop-sweep-truthfulness-test.py.pending`
+> （后缀 `.pending` 不被 pytest 收集；**不放在根 `tests/`**，避免未合并补丁
+> 让任何人的全量跑看到 1 failed 从而被误「修绿」）。
+> **合并步骤（必须同一提交）**：先把该文件改名为
+> `tests/test_desktop_sweep_truthfulness.py`，再应用本文件内嵌 diff。
 
 ## 1. 问题
 
@@ -31,7 +34,8 @@
 
 ## 3. 行为测试与反证（实测）
 
-- 用例：`tests/test_desktop_sweep_truthfulness.py::test_sweep_never_reports_success_or_moves_marker_when_tuning_refused`
+- 用例（合并后）：`tests/test_desktop_sweep_truthfulness.py::test_sweep_never_reports_success_or_moves_marker_when_tuning_refused`。
+  **当前 HEAD 上预期 1 failed，属未合并补丁的反证证据，禁止放宽断言。**
 - **红（旧行为 = 本仓当前 HEAD）**：`1 failed in 2.10s`，
   断言落点 `assert failed and not ok` → `assert ([])`。
 - **绿（临时 worktree 应用本补丁）**：`1 passed in 1.98s`。
@@ -47,7 +51,7 @@
 $env:MBDSDR_NULL_AUDIO='1'; $env:MBDSDR_NO_HW='1'; $env:QT_QPA_PLATFORM='offscreen'
 $env:HOME='<稳定目录>'; $env:USERPROFILE='<稳定目录>'
 $env:APPDATA='<稳定目录>\AppData\Roaming'; $env:LOCALAPPDATA='<稳定目录>\AppData\Local'
-python -m pytest tests/test_desktop_sweep_truthfulness.py -q
+python -m pytest tests/test_desktop_sweep_truthfulness.py -q   # 先按「配套测试」改名
 ```
 
 预期：补丁未应用 `1 failed`（预期红）；应用后 `1 passed`。
