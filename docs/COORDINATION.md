@@ -461,6 +461,34 @@
    不要往里补 DLL。
 8. **收工必须更新本文件**「当前在途」和「队列」两节——这是下一轮的开工状态。
 
+### 测试纪律（2026-11-05 落地，硬规矩）
+
+1. **测试里禁止真模态**。`tests/conftest.py` 在会话级 autouse 夹具里默认全局
+   打桩 `QDialog` / `QMessageBox` / `QFileDialog` / `QInputDialog` 的 `exec()`
+   与 `QMessageBox.warning/information/critical/question/about`、
+   `QFileDialog.getOpenFileName/getSaveFileName/getExistingDirectory`、
+   `QInputDialog.getText/getInt/getDouble/getItem`：被调到就记一条
+   「测试里出现真模态：<类名>」并立即返回 `QMessageBox.No` / 空路径。
+   需要真弹窗的用例必须显式 `@pytest.mark.allow_modal`，**默认禁止**。
+   自检：`tests/test_modal_dialog_guard.py`。
+   代价：offscreen 下 `QMessageBox.exec()` 永不返回，已两次把整条 Qt 互斥锁
+   占死（第一次 50 分钟：`_show_error_dialog -> box.exec()`；第二次录音用例
+   只打桩 `QMessageBox.warning`，真实路径根本不走 warning）。
+2. **测试禁止写用户真实配置**。直接 `MainWindow()` 的 fixture 必须请求
+   `tests/conftest.py::isolated_profile`——它把 `HOME/USERPROFILE/APPDATA/
+   LOCALAPPDATA`、`QSettings`（IniFormat + 临时 path）与 `layout_store`
+   单例全部重定向到 `tmp_path`。会话级 autouse 守卫在 `pytest_configure`
+   对真实 `desktop_settings.json` 取 `sha256 + mtime_ns + 目录清单`，
+   会话结束有任何变化即失败，并打印文件与字节差。
+   守门：`tests/test_ui_settings_isolation_guard.py::test_session_guard_is_active`。
+   现场：`test_record_dir_consumption.py` 曾把
+   `...pytest-1486\...\rec`、`Z:\nope` 写进用户配置，用户每次启动看到
+   「录音目录不可写」假报警。
+3. **构造 Qt 控件必须声明 `qapp`**（或模块级 `qapp` fixture）。子集单跑没有
+   QApplication 时 Qt 直接 abort `0xC0000409`（`SettingsPanel(...)` 已中过）。
+4. 新增/修改测试后，至少跑一次**目标模块单文件**（不是只跑全量）——顺序依赖
+   与缺 `qapp` 只在子集单跑时暴露。
+
 ---
 
 ## 五、变更日志
