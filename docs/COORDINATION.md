@@ -1343,14 +1343,21 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 `error-code-visibility.md`）各取最近 80 个提交，逐个取 `rev:path` 的 blob，
 判据 `blob[i] == blob[i+2] && blob[i+1] != blob[i]`（写回旧版）。
 
-| 提交 | 文件 | 被抹掉的内容 | 是否已补回 | 定人 |
-|---|---|---|---|---|
-| `f664638a`（23:08:12） | `docs/COORDINATION.md` | §6.10「前置规矩」整段（+2/−28，blob `487f3598` → `9563ffff`） | **已补回**（`4132d46f` 23:18:25） | **操作逻辑线**（置信高，见下） |
-| `09b53221`（01:38:21） | 云台线 4 个文件 + **卷入**解码线 4 个在途文件（`docs/learn/decoder-capability-matrix.md`、`scripts/decode_sensitivity.py`、`scripts/decoder_capability_report.py`、`tests/test_decode_sensitivity.py`） | 反向形态：不是抹掉已入库内容，而是把别人未提交的在途改动卷进本笔 | **已撤回**（`d8b40eb0` 01:40:08，逐文件 revert） | 提交方=云台/操作逻辑线；被卷文件=解码流水线 P5（claim 至 01:37:58） |
-| `16f075f3`（01:55:02） | 数据线 10 个文件 + **卷入**别线 26 个在途文件（`mbdsdr_ai/pose.py`、`tests/test_pose_fusion.py`、`web/product/**` 等） | 反向形态：PowerShell `$env:GIT_INDEX_FILE` 没落到 `git commit` 子进程，闸门读的是共享 index | **已撤回**（`a5d062e8` 01:59:03，26 文件逐条恢复成父提交内容） | 提交方=数据线 |
-| `928bd78f`（01:58:13） | 接入层 3 个文件 + **卷入**他线 4 个在途文件（`desktop/mode_registry.py`、`desktop/shortcuts.py`、`desktop/themes.py`、`mbdsdr_ai/device_capabilities.py`，即 4 个死函数） | 反向形态：私有 index 把别线未提交改动一起带入 | **已撤回**（`e3bd2cd8` 02:08:19，4 文件逐条删回） | 提交方=接入层线；被卷文件=他线在途 |
-| （未提交；`404c5b44` 后新闸门拦截） | 3 个**幻影删除**（机制线 `404c5b44` 刚入库的文件在文案线旧 index 里表现为 `D`） | 形态八：私有 index 基于旧 HEAD `read-tree`，旧 HEAD 之后入库的文件被当成删除计入暂存 | **未入库**（闸门拒绝；`read-tree HEAD` 重建后暂存 5→2，正常放行） | 文案线（私有 index 未重建） |
-| `16f075f3`→`a5d062e8`（形态七清单项：PowerShell 环境变量不落地） | 被卷 26 个（计划 10 + 卷入 26，36 个改动） | `$env:` 未落到子进程；闸门与实际提交都读共享 index | **已撤回**（`a5d062e8`） | 数据线 |
+**本段实际笔数**：本批 4 笔新事故（`09b53221`、`16f075f3`、`928bd78f`、文案线 3 条幻影删除未入库），
+另含 2026-11-05 的一笔 `f664638a`，表共 5 行。**同一笔事故只登记一行**；重复登记等于把笔数报错。
+
+| 提交 | 被卷/被抹文件数 | 文件 | 被抹掉的内容 | 是否已补回 | 定人 |
+|---|---|---|---|---|---|
+| `f664638a`（23:08:12） | 1 | `docs/COORDINATION.md` | §6.10「前置规矩」整段（+2/−28，blob `487f3598` → `9563ffff`） | **已补回**（`4132d46f` 23:18:25） | **操作逻辑线**（置信高，见下） |
+| `09b53221`（01:38:21） | 4 | 云台线 4 个文件 + **卷入**解码线 4 个在途文件（`docs/learn/decoder-capability-matrix.md`、`scripts/decode_sensitivity.py`、`scripts/decoder_capability_report.py`、`tests/test_decode_sensitivity.py`） | 反向形态：不是抹掉已入库内容，而是把别人未提交的在途改动卷进本笔 | **已撤回**（`d8b40eb0` 01:40:08，逐文件 revert） | 提交方=云台/操作逻辑线；被卷文件=解码流水线 P5（claim 至 01:37:58） |
+| `16f075f3`（01:55:02） | 26 | 数据线 10 个文件 + **卷入**别线 26 个在途文件（`mbdsdr_ai/pose.py`、`tests/test_pose_fusion.py`、`web/product/**` 等） | 反向形态：PowerShell `$env:GIT_INDEX_FILE` 没落到 `git commit` 子进程，闸门读的是共享 index | **已撤回**（`a5d062e8` 01:59:03，26 文件逐条恢复成父提交内容） | 提交方=数据线 |
+| `928bd78f`（01:58:13） | 4 | 接入层 3 个文件 + **卷入**他线 4 个在途文件（`desktop/mode_registry.py`、`desktop/shortcuts.py`、`desktop/themes.py`、`mbdsdr_ai/device_capabilities.py`，即 4 个死函数） | 反向形态：私有 index 把别线未提交改动一起带入 | **已撤回**（`e3bd2cd8` 02:08:19，4 文件逐条删回） | 提交方=接入层线；被卷文件=他线在途 |
+| 未提交（`404c5b44` 入库后被文案线旧 index 误当删除） | 3 | 3 个**幻影删除**（机制线 `404c5b44` 刚入库文件） | 形态八：私有 index 基于旧 HEAD `read-tree`，旧 HEAD 之后入库的文件被当成删除计入暂存 | **未入库**（闸门拒绝；`read-tree HEAD` 重建后暂存 5→2，正常放行） | 文案线（私有 index 未重建） |
+
+**机检**：`python scripts/check_rollback_table.py`（可加 `--doc <文件>`）。断言：①提交号唯一；
+②提交号在 `git cat-file` 里真实存在；③撤回提交存在；④「被卷/被抹文件数」等于撤回提交的文件数
+（`git show --name-only` 计数）；⑤被卷数不超过该提交改动总数。`未提交` 行仅核对笔数与计数列，不查提交。
+反证见 `tests/test_rollback_table.py`：把某行提交号改一个字符 / 把计数改错 → 必红。
 
 - 其余 5 个共享文档**零命中**；`git log -S'前置规矩'` 恰是「`16f8cd09` 加 →
   `f664638a` 删 → `4132d46f` 加回」，与表一致。
