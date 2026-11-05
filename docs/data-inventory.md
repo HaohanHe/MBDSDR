@@ -21,42 +21,30 @@
 
 星等分箱边界：`(-∞, 2) [2,4) [4,6) [6,7) [7,+∞)`，左闭右开。
 
-### 1.2 数据文件 vs 加载后（逐箱对账）
+### 1.2 三数对照（每个星等箱一行）
 
-| 星等箱 | 数据文件条数 | 星表加载后条数 | 差 |
-|---|---|---|---|
-| < 2 | 50 | 50 | 0 |
-| 2–4 | 470 | 470 | 0 |
-| 4–6 | 4,499 | 4,499 | 0 |
-| 6–7 | 10,439 | 10,439 | 0 |
-| > 7 | 68,021 | 68,021 | 0 |
-| **合计** | **83,479** | **83,479** | **0** |
+| 星等箱 | 数据文件 | 加载后 | 120°/B3 | 120°/B8 | 160°/B3 | 160°/B8 |
+|---|---|---|---|---|---|---|
+| < 2 | 50 | 50 | 4 | 4 | 11 | 11 |
+| 2–4 | 470 | 470 | 115 | 115 | 178 | 174 |
+| 4–6 | 4,499 | 4,499 | 1,159 | 100 | 1,671 | 112 |
+| 6–7 | 10,439 | 10,439 | 392 | 0 | 405 | 0 |
+| > 7 | 68,021 | 68,021 | 0 | 0 | 0 | 0 |
+| **合计** | **83,479** | **83,479** | **1,670** | **219** | **2,265** | **297** |
 
-来源：
+选择集 `returned` 为 1,672 / 219 / 2,271 / 298；落笔扣减即屏幕边缘裁剪
+2 / 0 / 6 / 1（原因见 1.4），四组 `truncated` 均为 `False`。
+
+**结论：加载层零去重、零截断、零星等筛选。** 数据与加载逐箱相等，
+`npz["meta"].star_count = StarCatalog.count = 83,479`。
+
+### 1.3 数字来源与落笔链路
 
 - 数据文件条数：`mbdsdr_ai/data/full_sky_hyg_v41.npz` 的 `npz["vmag"]` 数组
   （`np.histogram(npz["vmag"], bins=[-inf,2,4,6,7,inf])`）。
 - 星表加载后条数：`mbdsdr_ai/skyengine/star_catalog.py` 的
-  `StarCatalog.vmag`（`load_catalog()` 返回的实例属性，不是方法）。
-- 合计对照 `npz["meta"].star_count = 83,479` 与 `StarCatalog.count = 83,479`。
-
-**结论：加载层零去重、零截断、零星等筛选。** 两份数字逐箱相等，
-不存在「入库时丢条」。
-
-### 1.3 实际落笔条数（Bortle 3 / Bortle 8 × FOV 120° / 160°）
-
-| 星等箱 | 120°/B3 | 120°/B8 | 160°/B3 | 160°/B8 |
-|---|---|---|---|---|
-| < 2 | 4 | 4 | 11 | 11 |
-| 2–4 | 115 | 115 | 178 | 174 |
-| 4–6 | 1,159 | 100 | 1,671 | 112 |
-| 6–7 | 392 | 0 | 405 | 0 |
-| > 7 | 0 | 0 | 0 | 0 |
-| **落笔合计** | **1,670** | **219** | **2,265** | **297** |
-| 选择集 `returned` | 1,672 | 219 | 2,271 | 298 |
-| 其中屏幕边缘裁剪 | 2 | 0 | 6 | 1 |
-
-来源：
+  `StarCatalog.vmag`（`load_catalog()` 返回的实例属性，不是方法）；
+  合计对照 `StarCatalog.count`。
 
 - 选择集：`mbdsdr_ai/skyengine/star_catalog.py::select_for_view`，内部由
   `desktop/rf_sky_view.py::_star_selection`（`:3677`）以
@@ -113,7 +101,7 @@ checkout 时 CRLF 改写导致 SHA 分叉。
 | 总条目 | 14,034 | 两文件数据行相加 | `NGC.csv` + `addendum.csv` |
 | 有坐标 | 14,027 | `RA` 与 `Dec` 均非空 | 同上 |
 | 有轴比 | 11,096 | `MajAx` 与 `MinAx` 均 > 0 | 同上 |
-| 有星等 | 11,519 | `V-Mag` 或 `B-Mag` 非空且非 0 | 同上 |
+| 有星等 | 11,519 | `V-Mag` 或 `B-Mag` 非空 | 同上 |
 | 星系 | 10,522 | `Type == "G"` | 同上 |
 | 星团 | 1,001 | `GCl + OCl + *Ass + Cl+N` | 同上 |
 | 星云 | 234 | `Neb + HII + RfN + EmN + SNR` | 同上 |
@@ -133,7 +121,34 @@ checkout 时 CRLF 改写导致 SHA 分叉。
 `*Ass` 63 · `RfN` 38 · `GTrpl` 26 · `GGroup` 13 · `SNR` 11 · `NonEx` 10 ·
 `EmN` 8 · `Nova` 3 · `DrkN` 2。
 
-### 2.2 列名契约
+### 2.2 字段缺失统计
+
+源文件 14,034 条逐列缺失（空字符串计缺；`Name`/`Type` 零缺失）：
+
+| 字段 | 缺条数 | 后果 |
+|---|---|---|
+| RA / Dec / Const | 7 / 7 / 7 | 无法定位；7 条全是 `NonEx`（不存在的天体），不进入任何可用天体集合 |
+| MajAx | 1,959 | 无长轴 → 不能算轴比、不能按视尺寸分级 |
+| MinAx | 2,938 | 无短轴 → 轴比未知（比 `MajAx` 多缺 979 条），绘制退化为圆 |
+| B-Mag / V-Mag | 2,693 / 9,784 | 两层都缺的 2,515 条无法按亮度排序/推荐；有星等的共 11,519 条 |
+| M / NGC / IC | 13,924 / 13,126 / 13,574 | 仅 110 / 908 / 460 条带对应编号，其余只能用 `Name` 检索 |
+| Common names | 13,882 | 仅 152 条有英文俗名，俗名搜索覆盖有限 |
+
+进入 117 条随包目录后（`mbdsdr_ai/data/dso_catalog.json`）：
+
+| 字段 | 缺条数 | 后果 | 缺的条目 |
+|---|---|---|---|
+| `magnitude` | 7 | 亮度排序/推荐打分缺输入；历史上 `float(None)` 会静默丢候选（L37） | M22/M35/M62/M69/M70/M71/M107（全为球状星团） |
+| `size_arcmin` | 2 | 无角径，FOV 适配与椭圆绘制退化为点 | M40（双星）、M73（星群） |
+| `size_minor_arcmin` | 66 | 无短轴，不能画椭圆 | 与 `axis_ratio` 同一批 |
+| `axis_ratio` | 66 | 按圆形绘制；查询/推荐不读该字段（有钉扎测试） | 30 GCl / 27 OCl / 5 PN / 1 Neb / 1 `**` / 1 Other / 1 RfN |
+| `zh_name` | 83 | 界面回退 `name_en`；中文名覆盖 34/117 | — |
+| `aliases_en` | 107 | 仅 10 条有英文别名，别名搜索覆盖有限 | — |
+
+上表数字由 `test_openngc_field_gap_counts` 与
+`test_catalog_field_gap_counts` 钉扎；数据一变测试先红，文档随后更新。
+
+### 2.3 列名契约
 
 两份文件的表头逐字相同、顺序固定，共 32 列：
 
@@ -156,7 +171,7 @@ Common names
 `test_test_used_columns_exist_in_source_headers`（测试列 ⊆ 真实列）。
 上游改列名/改顺序 → 先在这两条红，不会等到 30 抽样对拍报 `KeyError`。
 
-### 2.3 M102 固定映射
+### 2.4 M102 固定映射
 
 源文件里 `M102` 只有一行，在 `addendum.csv`：
 
@@ -189,9 +204,32 @@ Common names
   不认裸 `GPL` 子串（base64 测试向量里会偶然出现这三个字母，那是误报）。
 - **MIT 主库路径** = `mbdsdr_ai/`。该路径下的 GPL 声明 = **违规**（退出码 1）；
   路径外的同类声明只作提示（`--verbose` 打印），不影响退出码。
-- 构建目录（`build`/`build-local`/`dist`/`__pycache__` 等）不扫。
+- CC BY-SA **不判红**：主库的 HYG 星表、OpenNGC 目录、星座连线本身就是
+  CC BY-SA 4.0 并已在 `NOTICE.md` 署名。若一并禁止，会与「可分发」结论
+  自相矛盾。脚本用 `--list` 把每条数据的许可证列出来，CC BY-SA 同样可见。
+- 构建目录（`build`/`build-local`/`.tmp*`/`dist`/`__pycache__` 等）不扫。
 
 脚本：`scripts/check_data_licenses.py`；测试：`tests/test_data_licenses.py`。
+
+### 3.1a 逐条来源与许可证（`--list`）
+
+```
+python scripts/check_data_licenses.py --list
+```
+
+输出每个数据文件的 `license=` 与 `source=`（从 JSON 的 `*license*` /
+`source*` 键提取；`.npz` 读 `meta`；无内嵌声明的 CSV 用已知出处表）：
+
+| 文件 | license | source |
+|---|---|---|
+| `mbdsdr_ai/data/full_sky_hyg_v41.npz` | CC BY-SA 4.0 | HYG Database v4.1 |
+| `mbdsdr_ai/data/dso_catalog.json` | CC-BY-SA-4.0 | OpenNGC |
+| `mbdsdr_ai/data/constellations_iau.json` | CC BY-SA 4.0（中文名 GPL-2.0-or-later，已豁免） | Stellarium skyculture modern_iau |
+| `mbdsdr_ai/tests/fixtures/openngc/NGC.csv` | CC BY-SA 4.0 | OpenNGC NGC.csv |
+| `mbdsdr_ai/tests/fixtures/openngc/addendum.csv` | CC BY-SA 4.0 | OpenNGC addendum.csv |
+| `mbdsdr_ai/tests/fixtures/hyg_v41_reference_sample.csv` | CC BY-SA 4.0 | HYG Database v4.1 sample |
+
+`--list --json` 机器可读，`files[]` 每项带 `path/license/source/in_mit_package`。
 
 ### 3.2 白名单（显式列出 + 理由）
 
@@ -213,7 +251,27 @@ python scripts/check_data_licenses.py --probe    # 临时写 GPL 探针 -> 必�
 `finally` 删除探针。通过时打印 `PROBE RED OK`，退出码 0；
 未命中打印 `PROBE FAILED`，退出码 2。
 
-当前实测：扫描 400 个数据文件，0 违规，1 条白名单命中；`--probe` 报红成功。
+当前实测（2026-11-05）：
+
+```
+scanned data files: 375
+  WHITELIST: mbdsdr_ai/data/constellations_iau.json (GPL / GPL-2.0-or-later)
+合规检查通过
+```
+
+手工反证：在 `mbdsdr_ai/data/_gpl_red_probe.json` 写入
+`{"meta": {"source": "red-probe", "source_license": "GPL-3.0-or-later"}}`
+后运行，必须且实际得到：
+
+```
+合规检查失败：1 个 GPL 数据文件在 mbdsdr_ai/ 下且未豁免
+scanned data files: 376
+  WHITELIST: mbdsdr_ai/data/constellations_iau.json (GPL / GPL-2.0-or-later)
+  VIOLATION: mbdsdr_ai/data/_gpl_red_probe.json (GPL / GPL-3.0-or-later)
+```
+
+退出码 1；删除探针后复跑恢复「合规检查通过 / 退出码 0」，
+`mbdsdr_ai/data/` 无残留。
 
 ---
 
@@ -236,8 +294,9 @@ python scripts/check_data_licenses.py --probe    # 临时写 GPL 探针 -> 必�
 python -m pytest mbdsdr_ai/tests/test_star_catalog.py -q
 # 2) DSO 完整性 + 列名契约 + M102
 python -m pytest mbdsdr_ai/tests/test_dso_catalog.py -q
-# 3) 许可检查（绿 + 反证红）
+# 3) 许可检查（绿 + 逐条来源 + 反证红）
 python scripts/check_data_licenses.py
+python scripts/check_data_licenses.py --list
 python scripts/check_data_licenses.py --probe
 python -m pytest tests/test_data_licenses.py -q
 ```
