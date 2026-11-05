@@ -70,6 +70,8 @@ private slots:
     void squelchSetLandAndStatusReadsBack();
     // domain=margin/auto 时禁止 threshold_db；applied_by 区分 cpp-auto/manual/none。
     void squelchDomainGuardsAndAppliedBy();
+    // legacy（不带 domain 但带 threshold_db）必须明确拒绝，不能静默关掉 auto。
+    void legacySquelchThresholdWithoutDomainIsRejected();
     void noiseBlankerSetLandAndStatusReadsBack();
     void ctcssSetLandOutOfRangeRejectedAndGate();
     void cdcssSetLandIllegalCodeRejectedAndGate();
@@ -165,7 +167,8 @@ void TestControlHub::commandsDriveEngineAndReadback() {
 
     r = parseObj(hub.execute("set_squelch_enabled", {{"enabled", true}}));
     QVERIFY(r.value("ok").toBool());
-    r = parseObj(hub.execute("set_squelch_threshold", {{"threshold_db", -55.0}}));
+    r = parseObj(hub.execute("set_squelch",
+        {{"domain", "threshold"}, {"threshold_db", -55.0}}));
     QVERIFY(r.value("ok").toBool());
 
     r = parseObj(hub.execute("set_muted", {{"muted", false}}));
@@ -572,7 +575,8 @@ void TestControlHub::squelchSetLandAndStatusReadsBack() {
     hub.setEngine(&eng);
 
     QJsonObject r = parseObj(hub.execute("set_squelch",
-        {{"enabled", true}, {"threshold_db", -70.0}, {"auto", false}}));
+        {{"enabled", true}, {"domain", "threshold"}, {"threshold_db", -70.0},
+         {"auto", false}}));
     QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
     QCOMPARE(r.value("threshold_db").toDouble(), -70.0);
 
@@ -587,7 +591,9 @@ void TestControlHub::squelchSetLandAndStatusReadsBack() {
     QVERIFY(r.value("ok").toBool());
     s = parseObj(hub.execute("get_squelch_status", {}));
     QCOMPARE(s.value("auto").toBool(), true);
-    r = parseObj(hub.execute("set_squelch", {{"threshold_db", -60.0}}));
+    // legacy（不带 domain）已被拒绝；显式 domain=threshold 才允许关 auto。
+    r = parseObj(hub.execute("set_squelch",
+        {{"domain", "threshold"}, {"threshold_db", -60.0}}));
     QVERIFY(r.value("ok").toBool());
     s = parseObj(hub.execute("get_squelch_status", {}));
     QCOMPARE(s.value("auto").toBool(), false);   // manual threshold disarmed auto
@@ -600,7 +606,7 @@ void TestControlHub::squelchDomainGuardsAndAppliedBy() {
 
     // 先落地一个已知的手动绝对门。
     QJsonObject r = parseObj(hub.execute("set_squelch",
-        {{"enabled", true}, {"threshold_db", -60.0}}));
+        {{"enabled", true}, {"domain", "threshold"}, {"threshold_db", -60.0}}));
     QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
     const double before = eng.squelchThresholdDb();
 
@@ -637,6 +643,45 @@ void TestControlHub::squelchDomainGuardsAndAppliedBy() {
     QVERIFY(r.value("ok").toBool());
     s = parseObj(hub.execute("get_squelch_status", {}));
     QCOMPARE(s.value("squelch_applied_by").toString(), QStringLiteral("none"));
+}
+
+// legacy 入口（不带 domain 但带 threshold_db）必须有一条确定的处置：拒绝。
+// 现状是「接受 + 引擎静默 squelchAuto_.store(false)」，而 UI 的自动按钮不会
+// 回读 → 界面显示「自动」、内核已经手动。这里先把它钉成红。
+void TestControlHub::legacySquelchThresholdWithoutDomainIsRejected() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // 先把静噪打开（不带 threshold_db，不触发 legacy 拒绝）。
+    QJsonObject r = parseObj(hub.execute("set_squelch", {{"enabled", true}}));
+    QVERIFY(r.value("ok").toBool());
+
+    // UI 点「自动」：引擎进入自动跟踪。
+    r = parseObj(hub.execute("set_squelch", {{"auto", true}}));
+    QVERIFY(r.value("ok").toBool());
+    QVERIFY(eng.squelchAuto());
+    const double before = eng.squelchThresholdDb();
+
+    // legacy：不带 domain、带 threshold_db。必须明确拒绝，auto 与门限都不许动。
+    r = parseObj(hub.execute("set_squelch", {{"threshold_db", -60.0}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QVERIFY(!r.value("error").toString().isEmpty());
+    QCOMPARE(eng.squelchAuto(), true);
+    QCOMPARE(eng.squelchThresholdDb(), before);
+
+    // 专用 legacy 命令同样不能作为旁路。
+    r = parseObj(hub.execute("set_squelch_threshold", {{"threshold_db", -55.0}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QCOMPARE(eng.squelchAuto(), true);
+
+    // 唯一合法入口：显式 domain=threshold；此时才允许关 auto。
+    r = parseObj(hub.execute("set_squelch",
+        {{"domain", "threshold"}, {"threshold_db", -60.0}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(eng.squelchAuto(), false);
+    QJsonObject s = parseObj(hub.execute("get_squelch_status", {}));
+    QCOMPARE(s.value("squelch_applied_by").toString(), QStringLiteral("cpp-manual"));
 }
 
 // set_noise_blanker really flips the engine switch; get_noise_blanker_status

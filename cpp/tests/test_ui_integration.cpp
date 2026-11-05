@@ -57,6 +57,7 @@
 #include "dsp/frequency_scanner.h"
 #include "dsp/scan_link.h"
 #include "dsp/spectrum_engine.h"
+#include "control/control_hub.h"
 
 using namespace mbdsdr;
 
@@ -80,6 +81,11 @@ private slots:
     // it so the fresh row is honestly visible (other groups keep their state).
     void bmGroupCollapseToggleHidesRowsKeepsCountAndNewRowVisible();
     void squelchAutoFollowsSameDomainFloor();
+    // 自动按钮与 legacy 阈值入口（外部 ControlHub）必须与内核状态一致：
+    // legacy 调用被拒绝时，UI 勾选/滑杆禁用态都不许被带偏。
+    // 两条顺序各自建窗（同一进程内两个 MainWindow 会撞端口单例，故拆 slot）。
+    void squelchLegacyPathKeepsUiAndKernelInSync();
+    void squelchLegacyBeforeAutoKeepsUiAndKernelInSync();
     // U-01: C++ 静噪滑杆数字是绝对音频 RMS dBFS，标签必须写明口径，
     // 与桌面侧「比噪声底高多少」的余量区分开。
     void squelchValueLabelStatesAbsoluteDbfs();
@@ -1840,6 +1846,93 @@ void TestUiIntegration::guideCardButtonsDriveRealControls() {
     QApplication::processEvents();
     mbdsdr::core::AppSettings s;
     QCOMPARE(s.value(QStringLiteral("ui/onboardingDismissed")).toBool(), true);
+}
+
+// 反证（顺序 A / 顺序 B）：legacy threshold_db 入口在外部 ControlHub 上被拒绝，
+// UI 侧的现实读数（按钮勾选态、滑杆禁用态）必须始终等于内核 squelch_auto。
+void TestUiIntegration::squelchLegacyPathKeepsUiAndKernelInSync() {
+    // 本用例会改动 auto / threshold / enabled 三态，窗口析构时它们会经真实
+    // saveUiState() 落盘。起始清空、结束清空，保证不污染后序用例（如 U-01）。
+    mbdsdr::core::AppSettings().remove("rx/squelchAuto");
+    mbdsdr::core::AppSettings().remove("rx/squelchThreshold");
+    mbdsdr::core::AppSettings().remove("rx/squelchEnabled");
+    control::ControlHub hub;
+    {
+        // 顺序 A：UI 先点「自动」→ 再走 legacy 设阈值。
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        hub.setEngine(win.engine());
+        auto* btn = win.findChild<QPushButton*>("squelchAutoBtn");
+        auto* slider = win.findChild<QSlider*>("squelchSlider");
+        auto* check = win.findChild<QCheckBox*>("squelchCheck");
+        QVERIFY(btn && slider && check);
+        QCOMPARE(btn->isChecked(), false);
+        QVERIFY(slider->isEnabled());
+        check->setChecked(true);          // 打开静噪，applied_by 才有语义
+        QCOMPARE(win.engine()->squelchEnabled(), true);
+
+        btn->setChecked(true);
+        QCOMPARE(win.engine()->squelchAuto(), true);
+        QCOMPARE(btn->isChecked(), true);
+        QVERIFY2(!slider->isEnabled(), "自动档滑杆必须禁用（只显示目标值）");
+
+        QJsonObject r = QJsonDocument::fromJson(
+            hub.execute("set_squelch", {{"threshold_db", -60.0}}).toUtf8()).object();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QVERIFY2(!r.value("error").toString().isEmpty(),
+                 "legacy 阈值必须给出明确错误，不能静默接受");
+        // 真实读数：内核仍 auto，UI 仍勾选 + 滑杆仍禁用。
+        QCOMPARE(win.engine()->squelchAuto(), true);
+        QCOMPARE(btn->isChecked(), true);
+        QVERIFY(!slider->isEnabled());
+        QJsonObject s = QJsonDocument::fromJson(
+            hub.execute("get_squelch_status", {}).toUtf8()).object();
+        QCOMPARE(s.value("squelch_applied_by").toString(), QStringLiteral("cpp-auto"));
+    }
+    // 窗口已在块末析构（三态已落盘）；清掉，后序用例从默认态起步。
+    mbdsdr::core::AppSettings().remove("rx/squelchAuto");
+    mbdsdr::core::AppSettings().remove("rx/squelchThreshold");
+    mbdsdr::core::AppSettings().remove("rx/squelchEnabled");
+}
+
+// 顺序 B：新窗口先走 legacy（被拒）→ 再点「自动」。
+void TestUiIntegration::squelchLegacyBeforeAutoKeepsUiAndKernelInSync() {
+    mbdsdr::core::AppSettings().remove("rx/squelchAuto");      // 起始态：手动
+    mbdsdr::core::AppSettings().remove("rx/squelchThreshold");
+    mbdsdr::core::AppSettings().remove("rx/squelchEnabled");
+    control::ControlHub hub;
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        hub.setEngine(win.engine());
+        auto* btn = win.findChild<QPushButton*>("squelchAutoBtn");
+        auto* slider = win.findChild<QSlider*>("squelchSlider");
+        auto* check = win.findChild<QCheckBox*>("squelchCheck");
+        QVERIFY(btn && slider && check);
+        QCOMPARE(btn->isChecked(), false);
+        QVERIFY(slider->isEnabled());
+        check->setChecked(true);          // 打开静噪，applied_by 才有语义
+        QCOMPARE(win.engine()->squelchEnabled(), true);
+
+        QJsonObject r = QJsonDocument::fromJson(
+            hub.execute("set_squelch", {{"threshold_db", -60.0}}).toUtf8()).object();
+        QCOMPARE(r.value("ok").toBool(), false);
+        QCOMPARE(win.engine()->squelchAuto(), false);
+        QCOMPARE(btn->isChecked(), false);
+        QVERIFY(slider->isEnabled());
+
+        btn->setChecked(true);
+        QCOMPARE(win.engine()->squelchAuto(), true);
+        QVERIFY(!slider->isEnabled());
+        QJsonObject s = QJsonDocument::fromJson(
+            hub.execute("get_squelch_status", {}).toUtf8()).object();
+        QCOMPARE(s.value("squelch_applied_by").toString(), QStringLiteral("cpp-auto"));
+    }
+    mbdsdr::core::AppSettings().remove("rx/squelchAuto");
+    mbdsdr::core::AppSettings().remove("rx/squelchThreshold");
+    mbdsdr::core::AppSettings().remove("rx/squelchEnabled");
 }
 
 void TestUiIntegration::squelchValueLabelStatesAbsoluteDbfs() {

@@ -617,16 +617,14 @@ QJsonObject ControlHub::cmdSetSquelchEnabled(const QJsonObject& a) {
     return o;
 }
 
-QJsonObject ControlHub::cmdSetSquelchThreshold(const QJsonObject& a) {
-    double db; QString err;
-    if (!needDbl(a, "threshold_db", db, err)) return errResult(err);
-    const float eff = static_cast<float>(
-        std::clamp(db, double(tokens::kSquelchMinDb), double(tokens::kSquelchMaxDb)));
-    engine_->setSquelchThreshold(eff);
-    QJsonObject o = okBase();
-    o["command"] = "set_squelch_threshold";
-    o["threshold_db"] = eff;
-    return o;
+QJsonObject ControlHub::cmdSetSquelchThreshold(const QJsonObject&) {
+    // 退役：这条命令会把绝对门写进引擎，引擎在 setSquelchThreshold 里静默执行
+    // squelchAuto_.store(false)，而 MainWindow 的自动按钮没有回读 → 界面仍显示
+    // 「自动」、滑杆仍禁用，内核却已是手动。legacy 入口只保留一个合法写法：
+    // set_squelch + domain="threshold"（由 cmdSetSquelch 统一处理）。
+    return errResult(QString::fromUtf8(
+        "set_squelch_threshold 已退役（会静默关闭 auto 且界面无法回读）；"
+        "请改用 set_squelch 并显式带 domain=\"threshold\""));
 }
 
 QJsonObject ControlHub::cmdSetMuted(const QJsonObject& a) {
@@ -1464,6 +1462,15 @@ QJsonObject ControlHub::cmdSetSquelch(const QJsonObject& a) {
         return errResult(QString::fromUtf8(
             "domain=%1 时不允许下发 threshold_db（余量/自动值不是绝对门）")
             .arg(domain));
+    }
+    // legacy：不带 domain 却带 threshold_db。旧行为是「接受 + 引擎静默
+    // squelchAuto_.store(false)」，UI 自动按钮不回读 → 两端状态分叉。
+    // 唯一处置：整条拒绝（不改门限、不动 auto），强制调用方声明语义。
+    if (domain.isEmpty() && a.value(QStringLiteral("threshold_db")).isDouble()) {
+        return errResult(QString::fromUtf8(
+            "set_squelch 带 threshold_db 必须显式声明 domain（threshold=绝对门 / "
+            "margin=余量 / auto=自动跟踪）；不带 domain 的 legacy 阈值会被拒绝，"
+            "因为它会静默关闭 auto 而界面仍显示「自动」"));
     }
     bool has = false;
     const QJsonValue en = a.value(QStringLiteral("enabled"));
