@@ -114,7 +114,8 @@ def _load_ai_config() -> Any:
     try:
         from .config import load_config
         return load_config()
-    except Exception:  # pragma: no cover - 配置损坏/裁剪打包时仍需能落盘
+    except (ImportError, OSError, ValueError, TypeError):  # pragma: no cover
+        # 配置损坏/裁剪打包：默认路径选择不依赖配置，仍需能落盘。
         return None
 
 
