@@ -367,6 +367,47 @@ def test_data_sha_matches_payload():
         assert c.payload_sha256(raw) == raw["meta"]["data_sha256"]
 
 
+# 源快照 SHA 钉：随仓常量，锁住「这份产物是用哪一版上游快照生成的」。
+# 上游快照升级时，必须同笔改这里并说明来源变更，不能只改数据文件里的 meta。
+XG_SOURCE_SHA = {
+    "index": "28121629c86f4ba6e45d89f54b847d946dd724e5c10aae6fd2d375e033a9af8c",
+    "star_names": "11ed413bbf056228166abc6e34af7992ba829b7838f3fb720a2f6f2900f08292",
+    "description": "06130eb52fc52d1f16bf6d3e3f10c9f721ad96bad07037d645bbe94a9bdbd3c5",
+}
+XG_NAMES_SOURCE_SHA = \
+    "11ed413bbf056228166abc6e34af7992ba829b7838f3fb720a2f6f2900f08292"
+
+
+def test_xingguan_source_snapshot_pins_frozen():
+    """记录在产物里的上游快照 SHA 不得被静默改写。"""
+    raw = json.loads(XG_PATH.read_text(encoding="utf-8"))
+    for name, digest in XG_SOURCE_SHA.items():
+        info = raw["meta"]["source_files"][name]
+        assert info["sha256"] == digest, f"{name} 源快照钉被改动"
+        assert info["path"].startswith("reference/stellarium/")
+    names = json.loads(XG_NAMES_PATH.read_text(encoding="utf-8"))
+    assert names["meta"]["source_file_sha256"] == XG_NAMES_SOURCE_SHA
+    assert names["meta"]["source_files"]["star_names"]["sha256"] == \
+        XG_NAMES_SOURCE_SHA
+
+
+def test_xingguan_star_names_members_pin_matches_repo_input():
+    """names 产物的 members 钉必须等于随仓 xingguan_chinese.json 的字节哈希。
+
+    这是不依赖 reference/ 的离线那一段：区域数据改了而 names 没重跑，本测试即红。
+    注意：若有人同时改输入、改 members 钉、再重算 data_sha256 而不重跑产物，
+    本测试会通过——那是残余风险，只有「重跑并逐字节比对」能拦。
+    """
+    from mbdsdr_ai.skyengine.build_xingguan_star_names import canonical_sha256
+
+    names = json.loads(XG_NAMES_PATH.read_text(encoding="utf-8"))
+    pin = names["meta"]["source_files"]["members"]
+    assert pin["path"] == "mbdsdr_ai/data/xingguan_chinese.json"
+    assert pin["sha256"] == _sha256_file(XG_PATH), \
+        "xingguan_chinese.json 已变但 xingguan_star_names_zh.json 未重跑"
+    assert canonical_sha256(names) == names["meta"]["data_sha256"]
+
+
 def _write_with_meta_change(src: Path, dst: Path, mutate) -> None:
     raw = json.loads(src.read_text(encoding="utf-8"))
     mutate(raw)

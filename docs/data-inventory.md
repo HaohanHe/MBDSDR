@@ -443,6 +443,57 @@ horizon / dateHorizon / ofDate / temeToJ2000 四类向量；容差为矩阵 `1e-
 的第 4 步（金标准）与第 10 步（selftest）驱动，本节改为「全链自动」；接线细节与
 验收输出见 `docs/pending-patches/2026-11-06-handoff-astro-wiring.md`。
 
+## 3c. 生成物漂移守卫盘点（2026-11-06）
+
+判定口径：只看「生成器或输入已改、产物没重跑」这类漂移能否被现有守卫抓到；
+手改产物后再跑生成器不算守卫覆盖。
+
+| 生成物 | 生成器 / 触发 | 现有守卫 | 缺口 | 风险 |
+|---|---|---|---|---|
+| `web/product/build/*.json` + `src/05`、`src/12`、`src/13`、`docs/09`、`docs/10`、`data/hyg*.sha256` | `sync_from_repo.py` / `sync_sky_catalog.py` / `sync_sat_tracks.py` / `gen_astro_golden.py`；`run_all.py` 第 1–4 步 | `tests/verify_build_json.py --check`：重跑→归一→逐字节，含备份/恢复 | 无 | 低 |
+| `web/product/index.html` | `build/scaffold.py`（第 5 步） | `verify_product.py` 只查脚本顺序 / DOM id | 手改或未重跑无字节比对 | 中 |
+| `web/product/src/70-docs-data.js`、`dist/index.html` | `build/build.py`（第 7 步） | `verify_product.py` 只查 dist 存在 + DOM | 文档改了没重 build → 70 数据陈旧 | 中 |
+| `web/product/docs/wiki/capabilities/*`、`glossary`、`faq`、`scenarios`、`README.en/ja`、`08` | `build/gen_docs.py`（第 6 步） | `verify_product.py` 只校能力页集合==事实源、断链 | 正文漂移无守卫 | 中高 |
+| `docs/learn/decoder-capability-matrix.md` | `scripts/decoder_capability_report.py --write` | `tests/test_decoder_capability_matrix.py` 逐字比对 | 无；当前工作区因未提交输入改动而红 | 低 |
+| `docs/settings-inventory.md` | `scripts/settings_inventory.py --write` | `--check` + 测试 | 无；当前因桌面线在途输入而红 | 低-中 |
+| `docs/mcp_tools.md` 生成块 | `scripts/gen_mcp_tools_doc.py` | `--check` + `tests/test_mcp_tools_doc.py`（2026-11-06 新增） | 已补 | 低 |
+| `mbdsdr_ai/data/xingguan_chinese.json` | `build_constellation_data.py`（需 `D:\mbdsdr\reference\stellarium`） | `meta.source_files.*.sha256` 快照钉 + `test_xingguan_source_snapshot_pins_frozen`；reference 在机时另有 `test_source_files_sha_traceable` | 不能离线重跑；上游快照变了只能在 reference 在机时发现 | 中 |
+| `mbdsdr_ai/data/xingguan_star_names_zh.json` | `build_xingguan_star_names.py`（输入：上述文件 + `star_names.zh_CN.fab`） | `meta.source_files.members.sha256` 对拍随仓输入（`test_xingguan_star_names_members_pin_matches_repo_input`）+ payload 摘要 + 快照钉 | 见下方残余风险 | 中 |
+| `mbdsdr_ai/data/dso_catalog.json` 等 | `build_dso_catalog.py`（需 `reference/openngc`） | 源 SHA + payload 摘要自洽（`test_dso_catalog.py`） | 不能离线重跑 | 中 |
+| `mbdsdr_ai/data/full_sky_hyg_v41.npz` 等 | 对应 builder | `test_star_catalog.py`：源 SHA + 摘要 + 篡改拒绝 | 不能重跑 | 中 |
+| `docs/perf-evidence/*.json` | `scripts/perf_probe_deep.py` 等（手动测量） | **无，且不应加重跑守卫**：机器/工具链相关，**证据快照，不可确定性复现** | 不适用 | 低 |
+| `docs/source-pin-ratchet-baseline.json` | `scripts/audit_source_text_pins.py` 快照 | `tests/test_source_pin_ratchet.py` 棘轮 | 只抓增长，不抓下降 | 低 |
+
+**挂起项（接手条件写死）**：`gen_docs.py` 正文漂移守卫：待 `scaffold.py` /
+`gen_docs.py` / `index.html` / docs 四处接线落库后补，接手条件=`git status`
+对这四个路径为空且 `run_all.py` 已驱动。接线线在途，别抢。
+
+**xingguan 源快照钉逐项**（本轮补的是「离线可验的那一段」，不是重跑守卫）：
+
+| 产物 | 生成器 | 输入源 | 现文件里的可校验字段 | 缺什么钉 | 补钉后能拦哪类漂移 |
+|---|---|---|---|---|---|
+| `xingguan_chinese.json` | `build_constellation_data.py` | `reference/stellarium/skycultures/chinese/{index.json, star_names.zh_CN.fab, description.md}` + HYG v4.1 | `meta.source_files.{index,star_names,description}.sha256`、`meta.data_sha256`、`region_count` / `yuan_count` / `xiu_count` / 各 mapped 计数 | 上游快照 SHA 只写在产物里，没有随仓常量锁 | 静默改写产物内的快照 SHA、改动 payload（`data_sha256`）、reference 在机时上游文件换版 |
+| `xingguan_star_names_zh.json` | `build_xingguan_star_names.py` | 上述 `xingguan_chinese.json` + `star_names.zh_CN.fab` | `meta.source_file_sha256`、`meta.source_files.members.sha256`、`meta.data_sha256`、计数字段 | `members` 钉此前只记录、无测试对拍（本轮补 `test_xingguan_star_names_members_pin_matches_repo_input`） | **区域输入已变、names 没重跑**（离线可验）、payload 被改、计数与成员集合不一致（loader 抛 `ConstellationIntegrityError`） |
+
+**反证（2026-11-06 实测，三项）**：
+
+- S1 改一个区域数值、names 不重跑 → **红**（`xingguan_chinese.json 已变但 xingguan_star_names_zh.json 未重跑`）。
+- S3 静默改写产物里的上游快照 SHA → **红**（`description 源快照钉被改动`）。
+- S2 同时改输入 + `members` 钉 + `data_sha256`、但不重跑 payload → **绿**。这是**残余风险**：
+  纯 SHA 钉无法区分「一整套钉都一致地改」与「真的重跑」；只有「重跑生成器并逐字节比对」能拦。
+  本线不宣称覆盖 S2；若以后要拦，只能加重跑守卫（需 `reference/` 在机）。
+- 条件覆盖：`test_source_files_sha_traceable` 在 `reference/` 缺失时 skip（只锁产物内记录值，不验上游实体）。
+
+复跑：
+
+```powershell
+python -m pytest mbdsdr_ai/tests/test_constellations_data.py -q -k "source_snapshot_pins or members_pin"
+```
+
+`docs/perf-evidence/*.json` 是带时间/机器/工具链条件的**证据快照**（`conditions` 里写明
+CPU、Qt offscreen、同机负载），不同次运行数值本就不同。**不要**给它加重跑/逐字节守卫，
+否则只会对合法波动报警；验收时只引用，不重算。
+
 ---
 
 ## 4. 已知边界
