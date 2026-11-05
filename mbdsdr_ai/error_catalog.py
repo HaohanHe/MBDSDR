@@ -449,6 +449,12 @@ _SPECS = (
           "设置频率失败",
           "设置频率失败（{detail}），已回滚到原频率。",
           "确认频率在设备可调范围内后重试。"),
+    _spec("sdr_frequency_out_of_range", LAYER_ACCESS, False,
+          "请求频率超出当前设备实际可调范围",
+          "当前{front_end}可调范围 {range_mhz} MHz，无法调谐到 "
+          "{requested_mhz} MHz；未向硬件下发该请求。",
+          "改选范围内的频率；若必须收该频段，需换用覆盖它的前端"
+          "（本机 FC0012 类 tuner 的上限实测约 948.5 MHz）。"),
     _spec("sdr_set_sample_rate_failed", LAYER_ACCESS, True,
           "设置采样率失败",
           "设置采样率失败（{detail}），已回滚到原采样率。",

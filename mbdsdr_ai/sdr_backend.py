@@ -293,7 +293,20 @@ class SDRBackend:
         """设置中心频率。失败时回滚 status，不留"已设置"假状态。"""
         if not self.status.connected:
             return False
-        if freq_hz < self.device.frequency_range[0] or freq_hz > self.device.frequency_range[1]:
+        lo, hi = self._frequency_bounds()
+        if freq_hz < lo or freq_hz > hi:
+            # 超出真实可调范围时绝不把请求下发给硬件：写入会被库拒绝，
+            # 实测 FC0012 在写频失败后句柄进入不可恢复态（后续读回恒 0、
+            # 再写触发 access violation），只能重连恢复。
+            self.status.error = user_message(
+                "sdr_frequency_out_of_range",
+                front_end=self._front_end_label(),
+                range_mhz=f"{lo / 1e6:.3f}–{hi / 1e6:.3f}",
+                requested_mhz=f"{freq_hz / 1e6:.3f}",
+            )
+            logger.warning(
+                "set_frequency(%.3f MHz) 超出实际可调范围 %.3f–%.3f MHz，"
+                "未向硬件下发", freq_hz / 1e6, lo / 1e6, hi / 1e6)
             return False
         old = self.status.frequency_hz
         self.status.error = ""
@@ -316,6 +329,20 @@ class SDRBackend:
         # reset_buffer + ring_reader.clear()，这里再重置链状态，避免旧频残留）
         self._invalidate_rx_chain(rebuild=False)
         return True
+
+    def _frequency_bounds(self) -> Tuple[float, float]:
+        """当前实际可调频率区间（Hz）。默认取设备声明区间；
+        子类应按真实调谐器/硬件回读收窄，别让声明区间替硬件吹牛。"""
+        lo, hi = self.device.frequency_range
+        return float(lo), float(hi)
+
+    def _front_end_label(self) -> str:
+        """错误文案里对前端的称呼；子类可细化到调谐器型号。"""
+        return "设备"
+
+    def get_frequency_bounds(self) -> Tuple[float, float]:
+        """UI/能力协商用：当前设备实际可调区间（Hz），已按真实 tuner 收窄。"""
+        return self._frequency_bounds()
 
     def _apply_frequency(self, freq_hz: float) -> bool:
         """子类覆写：把频率真正写入硬件或回放文件。默认无操作直接成功。"""
@@ -1405,6 +1432,12 @@ class RTLSDRBackend(SDRBackend):
     _TUNER_NAMES = {0: "Unknown", 1: "E4000", 2: "FC0012", 3: "FC0013",
                     4: "FC2580", 5: "R820T", 6: "R828D"}
 
+    #: 调谐器实测可调上界（Hz）。公开规格表 FC0012/FC0013 写 948.6 MHz，
+    #: 但本机 2026-11-06 实测：948.500 MHz 写频回读一致，948.600 MHz 起
+    #: librtlsdr 报 ``[FC0012] no valid PLL combination found``。宁可按实测
+    #: 上界提前拒绝，也不把请求下发给硬件——写频失败会让句柄进入不可恢复态。
+    _MEASURED_TUNER_MAX_HZ = {"FC0012": 948_500_000}
+
     # 调谐器型号是设备的静态属性；每次热插拔轮询都 rtlsdr_open 一次在本机实测
     # 0.2–2.4 s（设备被占用时更长），2 s 一次的轮询会把 GUI 线程吃满。
     # 缓存命中后不再打开设备；设备数变化（插拔）时整表失效。
@@ -1539,6 +1572,9 @@ class RTLSDRBackend(SDRBackend):
         self._sdr = None
         self._direct = 0  # 0=off, 1=I, 2=Q
         self.tuner_name = "Unknown"
+        # 调谐器写频失败后句柄可能已不可再用（实测：失败后回读恒 0，再写触发
+        # access violation）。置位后拒绝继续写硬件，必须重连换新句柄。
+        self._tuner_faulted = False
         # 来源: SDR++ main.cpp:485-494 offsetTuning checkbox —— 默认 False，
         # 开启后 RTL2832 把本振偏移到采样率中央，便于直流抵消。
         self._offset_tuning = False
@@ -1816,14 +1852,18 @@ class RTLSDRBackend(SDRBackend):
                             "请手动启动 rtl_tcp 服务，再设 "
                             "MBDSDR_RTL_TCP=127.0.0.1:1234 重连。" % e) from e
                 else:
+                    # 调谐器型号必须在 pyrtlsdr 打开设备之前探测：本进程已持有
+                    # 该设备句柄时，ctypes 再 rtlsdr_open 会失败、tuner 恒 Unknown，
+                    # 频率上界协商就失去依据（2026-11-06 实测：先开后探 → Unknown；
+                    # 先探后开 → FC0012）。
+                    tcode_hint = self._probe_tuner_type(self._device_index)
                     self._sdr = RtlSdr(self._device_index)
-            # 调谐器型号：本地 USB 走 ctypes 句柄探测（AIO 类无 tuner_type）；
-            # rtl_tcp 网络模式用握手包带回的 tuner_type（rtl_tcp.c:623），
-            # 不再去 ctypes 打开本地 USB 棒。
+            # 调谐器型号：本地 USB 用上面打开前探测到的结果；rtl_tcp 网络模式
+            # 用握手包带回的 tuner_type（rtl_tcp.c:623），不再开本地 USB 棒。
             if self._host is not None:
                 tcode = int(getattr(self._sdr, "tuner_type", 0) or 0)
             else:
-                tcode = self._probe_tuner_type(self._device_index)
+                tcode = tcode_hint
             self.tuner_name = self._TUNER_NAMES.get(tcode, "Unknown")
             # 来源: librtlsdr src/librtlsdr.c:956-1008 rtlsdr_get_tuner_gains ——
             # 按探测到的调谐器型号载入真实离散增益表（dB）。
@@ -1836,6 +1876,8 @@ class RTLSDRBackend(SDRBackend):
             self.status.link_state = "connected"
             self.status.error_category = ""
             self.status.error = ""
+            # 新句柄 = 新硬件会话：上次写频失败留下的故障态清零。
+            self._tuner_faulted = False
             self.status.last_data_age_s = None
             self._start_time = time.time()
             # 兜底：若子类未显式设采样率，用 2.048M 兜底（见 SDRBackend._FALLBACK_SAMPLE_RATE_HZ）
@@ -2085,29 +2127,83 @@ class RTLSDRBackend(SDRBackend):
         self.status.buffer_level = ""
         super().disconnect()
 
+    def _frequency_bounds(self) -> Tuple[float, float]:
+        """按真实调谐器收窄声明区间：声明区间 (0.5–1766 MHz) 是 RTL2832
+        芯片口径，实际能不能到取决于焊的 tuner 型号与实测上界。"""
+        lo, hi = super()._frequency_bounds()
+        if self._direct:
+            # 直接采样绕过 tuner，tuner 频率表不适用。
+            return lo, hi
+        try:
+            from . import rtlsdr_params as _rp
+            tlo, thi = _rp.get_frequency_range(self.tuner_name)
+        except Exception:
+            return lo, hi
+        if thi <= 0.0:
+            # 型号未知（探测失败）：不替它编造范围，只用设备声明区间。
+            return lo, hi
+        measured = self._MEASURED_TUNER_MAX_HZ.get(self.tuner_name)
+        if measured is not None:
+            thi = min(thi, float(measured))
+        return max(lo, tlo), min(hi, thi)
+
+    def _front_end_label(self) -> str:
+        name = str(getattr(self, "tuner_name", "") or "")
+        if name and name != "Unknown":
+            return f"调谐器 {name} "
+        return "设备"
+
     def _apply_frequency(self, freq_hz: float) -> bool:
         if self._sdr is None:
             return True
+        if self._tuner_faulted:
+            # 上次写频失败后句柄已不可恢复：继续写只会触发原生层 access
+            # violation（实测随后整个进程 abort）。必须重连换新句柄。
+            self.status.error = user_message(
+                "sdr_set_frequency_failed",
+                detail="调谐器已进入故障态（上次写频失败后句柄不可恢复），"
+                       "需重新连接设备后才能继续调谐")
+            logger.warning(
+                "调谐器故障态：拒绝继续写频 %d Hz（需重连）", int(freq_hz))
+            return False
         # 来源: SDR++ main.cpp:344-359 tune() —— set 后回读验证，最多重试 3 次
         # （SDR++ 原版 main.cpp:349-352 重试 10 次直到回读匹配；我们 3 次足够）。
         target = int(freq_hz)
+        matched = False
+        last_error = ""
         for attempt in range(1, 4):
             try:
                 self._sdr.center_freq = target
             except Exception as e:
+                last_error = f"{type(e).__name__}: {e}"
                 logger.warning(f"RTL-SDR set_center_freq 第{attempt}次失败: {e}")
                 continue
             try:
                 actual = int(self._sdr.center_freq)
             except Exception:
                 # 回读不可用，直接认为成功（pyrtlsdr 某些后端不支持回读）
+                matched = True
                 break
             if actual == target:
+                matched = True
                 break
+            last_error = f"回读 {actual} Hz ≠ 请求 {target} Hz"
             logger.warning(
                 f"RTL-SDR 调谐第{attempt}次: 请求 {target}Hz, 回读 {actual}Hz, 重试")
-        else:
-            logger.warning(f"RTL-SDR 调谐 {target}Hz 重试3次仍未回读匹配")
+        if not matched:
+            # 重试耗尽 = 硬件确实没生效。绝不 return True 把失败装成成功。
+            self._tuner_faulted = True
+            self.status.error = user_message(
+                "sdr_set_frequency_failed",
+                detail=(f"调谐器未生效（请求 {target / 1e6:.3f} MHz"
+                        + (f"；{last_error}" if last_error else "")
+                        + "）；句柄可能已不可恢复，需重新连接设备"),
+            )
+            logger.warning(f"RTL-SDR 调谐 {target}Hz 重试3次仍未生效，已标记故障态")
+            # 故障态下不再调原生 reset_buffer（句柄已不可信），只清纯 Python 缓冲。
+            if self._ring_reader is not None:
+                self._ring_reader.clear()
+            return False
         # 来源: librtlsdr src/librtlsdr.c:1702 — rtlsdr_reset_buffer；
         # rtl_433 src/sdr.c:1706 — 换频后必须 reset_buffer，否则 USB 队列里
         # 残留的旧频率 URB 会被当成新频数据读出。
