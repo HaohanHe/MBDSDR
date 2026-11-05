@@ -381,6 +381,8 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 上一会话同法复测为 3459.2 → 1431.2（-2028.0 ms / -58.6%）；两次会话的差值比例 -56.0% / -58.6% 一致，绝对值随负载浮动 ±10%。**只摘掉 eventFilter（置空为只调基类）现在只省 315.5 ms（1552.9 → 1237.4），即新实现下过滤器只剩构造总时间的约 20%**。
 
+> **口径说明（分型表 vs A/B 为什么不是同一个数）**：分型表两列都来自**同一会话、同一台机、同一次启动子进程**（旧实现按 HEAD 原样重建），计时方式相同（`eventFilter` 入口的 `perf_counter`）。它与 A/B 的差不是矛盾：分型累计（旧 1955.2 / 新 425.4，差 **-1529.8 ms**）只测**入口内**代码；A/B（-1991.5 ms）测 `MainWindow.__init__` **全程**。旧实现里每调用一次的 `from PySide6.QtCore import QEvent`、4 次 `getattr` 与更长的 `super()` 链，有一部分成本落在入口采样之外，所以分型差小于 A/B 差。**对外只说 A/B 的 -56.0%；分型表只用于定位热点，不可与 A/B 混成一句「省下」**。
+
 **哪些类型不能减、为什么**
 
 - `PaletteChange`/`FontChange`/`StyleChange`（52k 次）**不能从过滤器里摘掉**：`MainWindow` 装的是**应用级**过滤器（`main_window.py:858` `app.installEventFilter(self)`），这三类是 Qt 在 `setStyleSheet`/`setFont`/`setPalette` 后向每个控件递归派发的传播通知。过滤器必须收到并**放行**（返回 `False`），拦截=主题/字体/样式不生效。要少收只能卸掉应用级过滤器，但 `ShortcutOverride`（Ctrl+C 在文本框内放行复制）和 `Resize` 重排都依赖它——所以这 52k 次的成本只剩「过滤器入口本身」，已压到 PySide6 虚函数调用的地板（~3 µs）。
