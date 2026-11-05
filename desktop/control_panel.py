@@ -510,7 +510,7 @@ class ControlPanel(QWidget):
             "连接后随所连设备能力动态收放，实际档位以设备为准（后端钳位）")
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
         gain_row.addWidget(self.gain_slider)
-        self.gain_val = QLabel("0dB")
+        self.gain_val = QLabel("0 dB")
         self.gain_val.setMinimumWidth(36)
         self.gain_val.setMaximumWidth(80)
         gain_row.addWidget(self.gain_val)
@@ -841,7 +841,7 @@ class ControlPanel(QWidget):
         self.volume_changed.emit(value)
 
     def _on_gain_changed(self, db: int):
-        self.gain_val.setText(f"{db}dB")
+        self.gain_val.setText(f"{db} dB")
         self.gain_changed.emit(db)
 
     @Slot(int)
@@ -1201,7 +1201,7 @@ class ControlPanel(QWidget):
         self.gain_slider.blockSignals(True)
         self.gain_slider.setValue(db)
         self.gain_slider.blockSignals(False)
-        self.gain_val.setText(f"{db}dB")
+        self.gain_val.setText(f"{db} dB")
 
     def set_sample_rate(self, rate_hz: float):
         """从外部恢复采样率档位；无精确匹配时选最近档，不发射 sample_rate_changed。"""

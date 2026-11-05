@@ -185,3 +185,28 @@ def test_t06_squelch_states_are_chinese_and_single_vocabulary():
     assert 'QStringLiteral("静噪 静音")' in _CPP_STATUS
     assert "SQ OPEN" not in _MOBILE_SPECTRUM
     assert "'静噪 静音'" in _MOBILE_SPECTRUM
+
+
+# ---------------------------------------------------------------------------
+# 批次 3：单位空格（U-07）与书签失败提示（E-04）
+# ---------------------------------------------------------------------------
+_BOOKMARK = open(os.path.join(_ROOT, "desktop", "bookmark_panel.py"),
+                 encoding="utf-8").read()
+
+
+def test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked():
+    # 带宽档位加空格会把 freq_readout 顶宽 13px（test_ui_layout_locks 4 档全红），
+    # 视觉冻结期间维持原字面量，等解除冻结再统一。
+    assert '"2.4kHz (SSB)"' in _CTRL
+    assert '"2.4 kHz (SSB)"' not in _CTRL
+    assert 'QLabel("0dB")' not in _CTRL
+    assert 'QLabel("0 dB")' in _CTRL
+    assert "G ${controller.gainDb.toStringAsFixed(1)}dB" not in _MOBILE_SPECTRUM
+    assert "增益 ${controller.gainDb.toStringAsFixed(1)} dB" in _MOBILE_SPECTRUM
+
+
+def test_e04_bookmark_failure_says_what_survives_and_what_to_do():
+    assert "书签初始化失败" not in _BOOKMARK
+    assert "书签加载失败：" in _BOOKMARK
+    assert "已有书签未被改动" in _BOOKMARK
+    assert "检查该目录是否可读写" in _BOOKMARK

@@ -150,7 +150,13 @@ class BookmarkPanel(QWidget):
                 if self._config_dir is not None else BookmarkManager()
         except Exception as e:  # noqa: BLE001
             self._mgr = None
-            self.status_label.setText(f"书签初始化失败: {_clean_exc(e)}")
+            where = str(self._config_dir) if self._config_dir is not None \
+                else "用户配置目录"
+            self.status_label.setText(
+                f"书签加载失败：{where}（{_clean_exc(e)}）。"
+                "已有书签未被改动；请检查该目录是否可读写，"
+                "然后关闭并重开「书签」面板重试；"
+                "仍失败请备份后删除书签文件再重启。")
             self._set_ops_enabled(False)
             return
         self.refresh_list()

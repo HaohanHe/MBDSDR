@@ -388,7 +388,9 @@ class _StatusBar extends StatelessWidget {
           ),
           _StatusChip('${(controller.sampleRateHz / 1e6).toStringAsFixed(3)} MS/s'),
           _StatusChip(
-            controller.autoGain ? 'AGC' : 'G ${controller.gainDb.toStringAsFixed(1)}dB',
+            controller.autoGain
+                ? '自动增益'
+                : '增益 ${controller.gainDb.toStringAsFixed(1)} dB',
           ),
         ],
       ),
