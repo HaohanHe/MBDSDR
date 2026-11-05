@@ -6906,13 +6906,25 @@ class MainWindow(QMainWindow):
                 pass
 
     def _on_scanner_segment_chosen(self, seg: dict):
-        """扫频活动段点击 → 确认后调谐到峰值频点并建议解调模式。"""
-        peak = float(seg.get("peak_freq", 0.0))
-        if peak <= 0:
+        """扫频活动段点击 → 确认后调谐到峰值频点并建议解调模式。
+
+        峰值频点/带宽缺值一律按「无读数」处理：显示 — 并跳过调谐，
+        绝不拿 0 Hz 兜底去指挥设备（U-02）。
+        """
+        try:
+            peak = float(seg.get("peak_freq"))
+        except (TypeError, ValueError):
+            peak = None
+        if peak is None or not math.isfinite(peak) or peak <= 0:
+            self.statusBar().showMessage(
+                "活动段峰值频点无读数（—），已跳过调谐", MSG_NORMAL)
             return
         kind = seg.get("kind", "?")
         mode = seg.get("suggested_mode", "NFM")
-        bw = float(seg.get("bandwidth", 0.0))
+        try:
+            bw = float(seg.get("bandwidth"))
+        except (TypeError, ValueError):
+            bw = None
         peak_db = seg.get("peak_db")
         peak_txt = "—" if peak_db is None else f"{float(peak_db):.1f} dB"
         reply = QMessageBox.question(
@@ -6924,7 +6936,8 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         self._on_tune_sdr(peak, mode)
-        if bw > 0 and hasattr(self, "_on_vfo_bandwidth_changed_ui"):
+        if bw is not None and math.isfinite(bw) and bw > 0 \
+                and hasattr(self, "_on_vfo_bandwidth_changed_ui"):
             try:
                 self._on_vfo_bandwidth_changed_ui("", bw)
             except Exception:
