@@ -614,6 +614,8 @@ class MainWindow(QMainWindow):
     # 回放后台读盘线程 → UI 线程（显式 QueuedConnection；worker 绝不碰控件）
     replay_load_progress = Signal(int)       # 0-100，worker emit
     replay_load_finished = Signal(object)    # 结果 dict（含 error/cancelled）
+    # TLE 在线刷新线程 → UI 线程（网络调用最坏数十秒，绝不压 GUI）
+    _tle_update_result = Signal(object)      # (更新数, 失败对象|None)
 
     def __init__(self):
         super().__init__()
@@ -685,6 +687,10 @@ class MainWindow(QMainWindow):
         # loop_tracker 持有选中卫星与实时 az/el/多普勒；_sat_track_timer 500ms 轮询。
         # 与上面的展示型 sat_tracker（rf_sky_view 桥）互不相干。
         self._loop_sat_tracker = None      # mbdsdr_ai.sat_tracker.SatelliteTracker
+        # TLE 在线刷新后台线程（单星 5s 超时、内置最多 10 颗，最坏 50s，不能压 GUI）
+        self._tle_update_thread: Optional[threading.Thread] = None
+        self._tle_update_result.connect(
+            self._on_tle_update_result, Qt.QueuedConnection)
         self._sat_track_timer: Optional[QTimer] = None
         self._sat_track_prev_freq_hz: Optional[float] = None
         self._sat_track_prev_mode: Optional[str] = None
@@ -3722,6 +3728,11 @@ class MainWindow(QMainWindow):
                 backend.set_gain(float(gain))
             except Exception:
                 pass
+        # 设备侧真实读数回填（频率/增益）：拿不到就保持「—」，绝不编造
+        try:
+            self._backfill_real_rf_readings()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("真实频率/增益回填失败（界面保持「—」）: %s", e)
         self._update_status_bar()
         # 设备就绪 → 发射频点读数就位（此后只在频率/目标变化时重算）
         self._refresh_tx_readout()
@@ -4290,6 +4301,43 @@ class MainWindow(QMainWindow):
         if not connected:
             self._last_dbfs = None
             self._update_status_bar()
+        # 模块面板：连接态 + 频率控件是否已接真实后端（P2-A 落库后才传 tune_wired）
+        try:
+            mp = getattr(self, "module_panel", None)
+            if mp is not None:
+                mp.set_sdr_connected(bool(connected), tune_wired=bool(connected))
+        except Exception:
+            pass
+
+    def _backfill_real_rf_readings(self) -> None:
+        """把设备回执的真实频率/增益回填到模块面板与控制面板。
+
+        只在连接成功后（参数已真实下发时）调用；拿不到读数就保持「—」，
+        绝不用 0 / 默认 20 dB 凑数——那不是读数，是编造。
+        """
+        backend = getattr(self, "_active_sdr_backend", None)
+        if backend is None:
+            return
+        freq_hz = float(getattr(backend, "center_freq", 0.0)
+                        or getattr(self, "_backend_center_hz", 0.0) or 0.0)
+        gain_fn = getattr(backend, "get_gain", None)
+        gain_db = None
+        if callable(gain_fn):
+            try:
+                value = gain_fn()
+                gain_db = float(value) if value is not None else None
+            except Exception as e:  # noqa: BLE001
+                logger.warning("读取真实增益失败（界面保持「—」）: %s", e)
+        mp = getattr(self, "module_panel", None)
+        if mp is not None:
+            mp.set_rf_params(freq_hz=freq_hz or None, gain_db=gain_db)
+        cp = getattr(self, "control_panel", None)
+        if cp is not None and gain_db is not None:
+            # 临时形态：P2-C（control_panel.set_gain_applied）尚未落库；
+            # 等 P2-C 落库后收紧为直调，别让 hasattr 守卫变成永久形态。
+            set_applied = getattr(cp, "set_gain_applied", None)
+            if callable(set_applied):
+                set_applied(gain_db)
 
     def _teardown_connection(self, *, stop_tracking: bool = True) -> None:
         """幂等拆除当前连接：停回放/扫频/录制/流水线/跟踪 → 断开硬件 → UI 置未连接。
@@ -4560,7 +4608,17 @@ class MainWindow(QMainWindow):
 
     @Slot(float)
     def _on_module_tune(self, freq_hz: float):
-        """模块面板里改了频率 → 同步到频谱中心频。"""
+        """模块面板改频率 → 真实调谐；失败回滚，绝不只改界面。"""
+        backend = self._active_sdr_backend
+        if backend is not None:
+            if not self._apply_hw_action(
+                    "调谐", lambda: backend.set_frequency(freq_hz)):
+                self._revert_tune_ui()
+                mp = getattr(self, "module_panel", None)
+                last = float(getattr(self, "_backend_center_hz", 0.0) or 0.0)
+                if mp is not None and last > 0:
+                    mp.set_rf_params(freq_hz=last)   # 拉回最后一次真实值
+                return
         self.spectrum.set_center_freq(freq_hz / 1e6)
         self.freq_label.setText(f"{freq_hz / 1e6:.3f} MHz")
         self.status_freq.setText(f"频率: {freq_hz / 1e6:.3f} MHz")
@@ -4587,6 +4645,22 @@ class MainWindow(QMainWindow):
         if backend is not None:
             if not self._apply_hw_action(
                     "设置增益", lambda: backend.set_gain(float(db))):
+                # 失败后读数必须回到设备真实值；停在新值就是把失败装成成功。
+                real_db = None
+                try:
+                    real = backend.get_gain()
+                    real_db = float(real) if real is not None else None
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("读取真实增益失败（增益读数保持原值）: %s", e)
+                if real_db is not None:
+                    mp = getattr(self, "module_panel", None)
+                    if mp is not None:
+                        mp.set_rf_params(gain_db=real_db)
+                    cp = getattr(self, "control_panel", None)
+                    # 临时形态：等 P2-C 落库后收紧为直调（同 _backfill_real_rf_readings）
+                    set_applied = getattr(cp, "set_gain_applied", None)
+                    if callable(set_applied):
+                        set_applied(real_db)
                 return
         if self._worker:
             try:
@@ -5234,10 +5308,11 @@ class MainWindow(QMainWindow):
             self._worker.request_tool.emit("tune_fm", {"freq_mhz": freq})
         # 真实 SDR 后端：频谱拖动/双击 → 真正下发中心频率
         if self._active_sdr_backend is not None:
-            try:
-                self._active_sdr_backend.set_frequency(freq * 1e6)
-            except Exception:
-                pass
+            if not self._apply_hw_action(
+                    "调谐", lambda: self._active_sdr_backend.set_frequency(
+                        freq * 1e6)):
+                self._revert_tune_ui()
+                return      # 之后的状态栏/VFO 一律不动，避免显示成功值
         else:
             # 无设备：频谱交互仍更新显示（预置频率可用），但必须明说没下发，
             # 否则「频率标签变了」会被读成「已经调谐到那里」。
@@ -7061,7 +7136,10 @@ class MainWindow(QMainWindow):
 
     def _on_module_sink_changed(self, sink: str):
         try:
-            self.statusBar().showMessage(f"输出 sink: {sink}", MSG_NORMAL)
+            # sink 下拉尚未接后端切换：状态栏必须明说，别让"选了声卡"被读成
+            # "输出已经切过去"。真正接入后恢复下拉并删掉「仅记录」。
+            self.statusBar().showMessage(
+                f"输出 sink: {sink}（仅记录，后端未切换）", MSG_NORMAL)
         except Exception:
             pass
 
@@ -8551,12 +8629,39 @@ class MainWindow(QMainWindow):
                 self.sat_track_panel.set_downlink_mhz(f / 1e6)
 
     def _on_update_sat_tle(self):
-        """从 Celestrak 在线刷新内置 TLE；失败保留内置，不崩。"""
+        """从 Celestrak 在线刷新内置 TLE；后台线程跑网络，失败保留内置，不崩。"""
+        if (self._tle_update_thread is not None
+                and self._tle_update_thread.is_alive()):
+            self.statusBar().showMessage("TLE 正在更新中…，请稍候", MSG_NORMAL)
+            return
         if self._loop_sat_tracker is None:
             self._init_loop_sat_catalog()
         if self._loop_sat_tracker is None:
             return
-        n = self._loop_sat_tracker.update_tle_from_celestrak()
+        self.statusBar().showMessage("正在更新 TLE…", MSG_NORMAL)
+        tracker = self._loop_sat_tracker
+
+        def _work():
+            n, failure = 0, None
+            try:
+                n = int(tracker.update_tle_from_celestrak() or 0)
+                failure = getattr(tracker, "last_refresh_failure", None)
+            except Exception as e:  # noqa: BLE001 - 失败必须带码+原因回报
+                failure = {"code": "tle_update_exception", "label": "TLE 更新异常",
+                           "reason": str(e), "action": "查看日志后重试"}
+            try:
+                self._tle_update_result.emit((n, failure))
+            except RuntimeError:
+                pass      # 窗口已销毁（daemon 线程收尾）
+
+        self._tle_update_thread = threading.Thread(
+            target=_work, name="tle-update", daemon=True)
+        self._tle_update_thread.start()
+
+    def _on_tle_update_result(self, payload):
+        """后台 TLE 刷新回 GUI：先收线程引用，再刷新面板与状态栏。"""
+        self._tle_update_thread = None
+        n, failure = payload
         names = [s["name"] for s in self._loop_sat_tracker.list_satellites()]
         self.sat_track_panel.populate_satellites(names)
         self.sat_track_panel.set_tle_date(self._loop_sat_tracker.tle_date)

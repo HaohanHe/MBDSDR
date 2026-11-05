@@ -179,8 +179,25 @@ def test_status_bar_renders_failure_code(monkeypatch, tmp_path, case):
     holder._status = _Status()
     holder.statusBar = lambda: holder._status
 
+    # P3 后刷新跑在后台线程：worker emit、UI 槽渲染。这里用"先收 payload
+    # 再手动回槽"模拟 QueuedConnection，保持断言对象仍是最终状态栏文案。
+    sent = []
+
+    class _QueuedSignal:
+        def emit(self, payload):
+            sent.append(payload)
+
+    holder._tle_update_thread = None
+    holder._tle_update_result = _QueuedSignal()
+
     from desktop.main_window import MainWindow
     MainWindow._on_update_sat_tle(holder)
+    worker = holder._tle_update_thread
+    assert worker is not None, "TLE 刷新没起后台线程"
+    worker.join(3.0)          # 假 opener 立即返回，worker 可能已收尾
+    assert not worker.is_alive()
+    assert len(sent) == 1, "后台线程没有把结果发回 UI"
+    MainWindow._on_tle_update_result(holder, sent[0])
     text = holder._status.msg
     _assert_failure_copy(text, case)
 
