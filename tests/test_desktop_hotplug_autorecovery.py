@@ -9,6 +9,7 @@
 本用例按「设备拔掉→再插回→主窗口自动恢复」写期望。当前必红，红即结论：
 桌面没有自动重连/热插拔接入。若未来接线，去掉 xfail 即转为回归保护。
 """
+import logging
 import os
 import sys
 from types import SimpleNamespace
@@ -20,6 +21,8 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="module")
@@ -36,8 +39,9 @@ def window(qtapp, isolated_profile):
     yield w
     try:
         w._teardown_connection()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_desktop_hotplug_autorecovery.py fixture 收尾失败（MainWindow._teardown_connection）：%s: %s",
+                    type(exc).__name__, exc)
 
 
 class _FakeBackend:

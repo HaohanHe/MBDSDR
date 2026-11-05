@@ -26,6 +26,7 @@ tests/test_ui_layout_locks.py
     python scripts/ui_layout_audit.py --update-baselines --reason "..."  # 受控重建
 """
 import json
+import logging
 import os
 import sys
 
@@ -44,6 +45,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 app = QApplication.instance() or QApplication(sys.argv)
+log = logging.getLogger(__name__)
 
 SIZES = [(1000, 600), (1280, 720), (1600, 900), (1920, 1080)]
 BASELINE_DIR = os.path.join(_ROOT, "tests", "baselines")
@@ -213,8 +215,9 @@ def main_window(request):
     yield win
     try:
         win._disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_ui_layout_locks.py fixture 收尾失败（MainWindow._disconnect）：%s: %s",
+                    type(exc).__name__, exc)
     win.close()
     win.deleteLater()
     app.sendPostedEvents(None, QEvent.DeferredDelete)

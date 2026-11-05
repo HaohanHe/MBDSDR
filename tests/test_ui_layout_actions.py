@@ -21,6 +21,7 @@ AI 动态 UI 最小真闭环（模型 → ui_layout_control → 界面真的变�
 运行:
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_ui_layout_actions.py -v
 """
+import logging
 import os
 import sys
 
@@ -31,6 +32,8 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from mbdsdr_ai.ui_actions import (  # noqa: E402
@@ -132,8 +135,9 @@ def mw(qapp):
     yield w
     try:
         w._disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_ui_layout_actions.py fixture 收尾失败（MainWindow._disconnect）：%s: %s",
+                    type(exc).__name__, exc)
     w.close()
     for k, v in backup.items():
         if v is None:

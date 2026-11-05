@@ -15,6 +15,7 @@ P1-5 施工验收：
 
 不依赖硬件 / 声卡 / 真实 IQ。
 """
+import logging
 import os
 import sys
 
@@ -26,6 +27,8 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -172,8 +175,9 @@ def mw(isolated_profile, qapp):
     yield w
     try:
         w._disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_agc_speed.py fixture 收尾失败（MainWindow._disconnect）：%s: %s",
+                    type(exc).__name__, exc)
     # 还原用户默认档，不污染真实配置
     w.settings.set("agc_speed", "medium")
 

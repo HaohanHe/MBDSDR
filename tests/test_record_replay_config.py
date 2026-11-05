@@ -14,6 +14,7 @@ S2：配置损坏（路径 1 / 6）
   修复前探针：把 `_save_gui_config` 改回 `open(...,'w')` 直写、或把
   `_load_gui_config` 的备份分支去掉，本文件断言即红。
 """
+import logging
 import json
 import os
 import sys
@@ -27,6 +28,8 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 
 class _StubBackend:
@@ -81,8 +84,9 @@ def window(qtapp):
     yield w
     try:
         w._teardown_connection()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_record_replay_config.py fixture 收尾失败（MainWindow._teardown_connection）：%s: %s",
+                    type(exc).__name__, exc)
 
 
 def _isolate_home(monkeypatch, tmp_path):

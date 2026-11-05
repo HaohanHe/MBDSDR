@@ -19,6 +19,7 @@ tests/test_gimbal_follow_wiring.py
 运行：
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_gimbal_follow_wiring.py -v
 """
+import logging
 import os
 import sys
 from types import SimpleNamespace
@@ -26,6 +27,8 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
@@ -145,8 +148,9 @@ def mw():
     yield w
     try:
         w._disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_gimbal_follow_wiring.py fixture 收尾失败（MainWindow._disconnect）：%s: %s",
+                    type(exc).__name__, exc)
     w.close()
 
 

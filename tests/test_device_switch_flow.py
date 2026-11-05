@@ -13,6 +13,7 @@
 反证方式：删掉 main_window 里的 `_teardown_connection` 前置拆除、VFO 复用、
 或 `_stop_satellite_tracking` 调用，本文件断言即红。
 """
+import logging
 import os
 import sys
 import time
@@ -27,6 +28,8 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 
 class _StubDevice:
@@ -117,7 +120,7 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(isolated_profile, qtapp):
     """整模块复用同一个窗口：MainWindow 构造很贵，逐测重建会把本文件拖成分钟级。"""
     import main_window as mw
     from PySide6.QtTest import QTest
@@ -126,8 +129,9 @@ def window(qtapp):
     yield w
     try:
         w._teardown_connection()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_device_switch_flow.py fixture 收尾失败（MainWindow._teardown_connection）：%s: %s",
+                    type(exc).__name__, exc)
 
 
 @pytest.mark.usefixtures("qtapp", "window")

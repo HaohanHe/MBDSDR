@@ -11,6 +11,7 @@
 验收：两条路都发出 default_bandwidth(mode)，且 vfo_bw_combo 落到
 对应档位。反向用例：未注册模式进不来（下拉无此项 → 无信号）。
 """
+import logging
 import os
 import sys
 
@@ -21,6 +22,8 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -42,8 +45,9 @@ def mw(isolated_profile, qapp):
     yield w
     try:
         w._disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - 收尾失败必须留证，不静默
+        log.warning("test_mode_switch_preset.py fixture 收尾失败（MainWindow._disconnect）：%s: %s",
+                    type(exc).__name__, exc)
 
 
 @pytest.mark.parametrize("mode", ["AM", "NFM", "FM", "WFM", "CW", "LSB", "USB"])
