@@ -106,6 +106,31 @@ def _three_rings(w, key, value, check_applied):
         f"{key}: 刷新后控件读回 {back!r}，权威源是 {value!r}（保存了但没读回）")
 
 
+# ---------------------------------------------------------------- 面板构建守卫
+def test_enum_controls_position_mapping(window):
+    """枚举下拉只写标签、不写 itemData：数量与位置映射必须和 schema 严丝合缝。
+
+    将来改枚举（加/删一项、换顺序却漏改 choice_values）会立刻红，
+    而不是按位置悄悄把相邻档的值存进 settings。
+    """
+    panel = window.settings_panel
+    checked = 0
+    for key, control in panel._rows.items():
+        item = SCHEMA[key]
+        if item.kind != "enum":
+            continue
+        checked += 1
+        assert control.count() == len(item.choice_values), (
+            f"{key}: 下拉 {control.count()} 项，schema {len(item.choice_values)} 个值"
+            "（只写标签不写 itemData，位置映射会错位）")
+        pos_value = list(item.choice_values)[control.currentIndex()]
+        stored = window.settings.get(key)
+        assert pos_value == stored, (
+            f"{key}: 第 {control.currentIndex()} 项按位置是 {pos_value!r}，"
+            f"settings 存的是 {stored!r}")
+    assert checked >= 1, "设置面板没有渲染任何枚举项（守卫空转）"
+
+
 # ---------------------------------------------------------------- 主题
 def test_theme_save_apply_readback(window):
     w = window
