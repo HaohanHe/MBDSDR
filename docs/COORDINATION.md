@@ -668,6 +668,17 @@
 
 ---
 
+- 2026-11-06 | 日志与书签版本线 | **口径更正：`waived-total` 只能按 HEAD 报**
+  本线落库汇报里曾写「`waived-total` 降到 70」，属**错报**：把工作区快照当成
+  了自己提交的效果。实况三值：提交前 HEAD 135、本线提交 `45d4832f` 后 HEAD
+  **103**、工作区 70（= 135 − 33 他线未提交销账 − 32 本线销账）。70 从未进入
+  任何提交。此后引用一律写「HEAD 103」；工作区数字必须注明「工作区快照，含
+  他线未提交的 33 条销账」。核对命令：`git show HEAD:docs/claim-waivers.md`
+  读 `waived-total` 并数表数据行。附注：该快照随后继续下移（现 57，未提交销账
+  46 条），仍以 HEAD 为准。
+
+---
+
 ## 六、共享文件占用锁（file_claim，2026-11-05 落地）
 
 ### 6.1 当前占用
@@ -1664,6 +1675,31 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 > （`test_ui_wiring_audit.py` 实测 `11 passed`；`test_control_panel_nan_gain_keeps_previous`
 > 实测 1 passed），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽**已修 — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`**
 > （原构建阻塞 `main_window.cpp:5644` 已随本笔消除，见 §B 末）；C 是断言闸门的报告口径，不是新欠账。复跑 `ctest -R "^(spectrum_display|spectrum_autorange)$"`；**2026-11-06 在 `cpp/build` 重新构建后实测：`100% tests passed, 0 tests failed out of 2`（spectrum_display / spectrum_autorange 各 Passed）**。
+
+#### 7.3.2 白名单 stale 6 条：等 owner 书面确认后销账（2026-11-06）
+
+HEAD 白名单 103 行中有 6 行对应的断言**已在 HEAD 真修/真删**，闸门
+`test_waivers_are_not_stale` 因此红（`pytest tests/test_claims_guard.py -q`：
+2 failed / 2 passed）。`docs/claim-waivers.md` 当前持有方＝日志与书签版本线；
+按「只删已修好的、未确认一条不删」处理，逐条用 `git show HEAD:<path>` 复核：
+
+| id | 文件 | owner | HEAD 复核证据 | 结论 | 书面确认 |
+| --- | --- | --- | --- | --- | --- |
+| 77 | `docs/packaging.md` | 打包线 | `:17` 已改写为 `50aa1db0` — `desktop/main.py:74` — … | 已补证 | 待确认 |
+| 78 | `docs/packaging.md` | 打包线 | `:200` 已改写为 `50aa1db0` — `desktop/main.py:350` — … | 已补证 | 待确认 |
+| 79 | `docs/packaging.md` | 打包线 | 原「约束 / 实测行为 / 期望 / 差距 / 已修」表行已不存在 | 已删 | 待确认 |
+| 80 | `docs/packaging.md` | 打包线 | `:566` 已改写为 `c295423e` — `desktop/startup_paths.py:98` — … | 已补证 | 待确认 |
+| 81 | `docs/parameter-unification.md` | 采样率线 | `:423` 已改写为 `70429a02` — `desktop/main_window.py:3963` — … | 已补证 | 待确认 |
+| 83 | `docs/parameter-unification.md` | 采样率线 | `:425` 已改写为 `754f64e6` — `scripts/sample_rate_readback_check.py:156` — … | 已补证 | 待确认 |
+
+其余 40 行（HEAD 有、工作区无，但**在 HEAD 仍是未证实断言**）一律不删：
+`docs/PRD-现状对照.md` 16、`docs/PRD.md` 10、`docs/settings-inventory.md` 9、
+`docs/hardcoded-parameters.md` 4、`docs/reference-mechanisms.md` 1（id 94）。
+等各文件 owner 补齐四元组后再走正常销账。
+
+落库：6 条全部拿到 owner 书面确认后**一次性**提交，说明逐条列 owner 与上述
+复核证据；提交后 `test_claims_guard.py` 必须 5 passed、`verify_claims` 计数
+不得变差。
 
 ## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
 
