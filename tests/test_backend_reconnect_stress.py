@@ -139,9 +139,15 @@ def test_rtlsdr_ten_hotplug_cycles_keep_threads_handles_and_first_frame(monkeypa
     devices, old = _install_fake_rtl(monkeypatch)
     try:
         be = RTLSDRBackend(device_index=0)
-        # 预热一轮：把 numpy/Qt 之外的首次分配排除出基线
+        # 预热一轮：把进程级首次初始化排除出基线。
+        # 只 connect/disconnect 不够：首次 _ensure_receive_chain() 会让
+        # ReceiveChain 内部的 AudioResampler 惰性导入 scipy.signal
+        # （firwin），一次性加载约 37–64 个 DLL/模块句柄并常驻进程。
+        # 不预热这条路径，第 0 轮会把一次性加载误判成每轮泄漏。
+        # 预热后各轮句柄应逐轮持平（见下方 ≤ 基线+2 的断言）。
         be.status.frequency_hz = 100e6
         assert be.connect() is True
+        assert be._ensure_receive_chain() is not None
         be.disconnect()
         base_threads, base_handles = _baseline()
 
