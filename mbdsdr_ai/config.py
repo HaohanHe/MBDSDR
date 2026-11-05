@@ -30,6 +30,12 @@ DEFAULT_CONFIG = {
     "sandbox_enabled": True,
     "auto_recovery": True,              # 一键恢复防幻觉变砖
     "language": "zh-CN",
+    # 发射审计日志（mbdsdr_ai/tx_guard.py 落盘）。路径留空 = 自动选非 C 盘：
+    # D:\mbdsdr\logs\tx_audit.jsonl（无 D 盘则程序所在盘/程序目录 logs）。
+    "tx_audit_path": "",
+    "tx_audit_max_mb": 50,              # 单文件上限（MB）
+    "tx_audit_keep_files": 10,          # 总文件数（当前文件 + 轮转备份）
+    "tx_audit_retention_days": 365,     # 备份最长保留天数（到点即删，不停止写入）
 }
 
 
@@ -88,6 +94,12 @@ class AgentConfig:
     # 其他
     language: str = "zh-CN"
 
+    # 发射审计日志（tx_guard 落盘策略；path 留空 = 自动选非 C 盘路径）
+    tx_audit_path: str = ""
+    tx_audit_max_mb: int = 50
+    tx_audit_keep_files: int = 10
+    tx_audit_retention_days: int = 365
+
     # 运行时状态（不持久化）
     _config_path: Optional[str] = field(default=None, repr=False)
 
@@ -108,6 +120,22 @@ class AgentConfig:
         env_model = os.environ.get("MBDSDR_MODEL")
         if env_model:
             self.model = env_model
+
+        # 发射审计策略：环境变量优先（测试/受信任脚本可临时覆盖），
+        # 其余从 Settings 面板写入的 JSON 键取值。路径为空表示自动选盘。
+        env_audit_path = os.environ.get("MBDSDR_TX_AUDIT_PATH")
+        if env_audit_path:
+            self.tx_audit_path = env_audit_path
+        for env_name, attr in (
+                ("MBDSDR_TX_AUDIT_MAX_MB", "tx_audit_max_mb"),
+                ("MBDSDR_TX_AUDIT_KEEP_FILES", "tx_audit_keep_files"),
+                ("MBDSDR_TX_AUDIT_RETENTION_DAYS", "tx_audit_retention_days")):
+            raw = os.environ.get(env_name)
+            if raw:
+                try:
+                    setattr(self, attr, int(raw))
+                except ValueError:
+                    pass  # 坏值不覆盖，交给 tx_guard 侧夹到合法区间
 
     def to_dict(self) -> Dict[str, Any]:
         """转为字典（排除运行时状态）。"""

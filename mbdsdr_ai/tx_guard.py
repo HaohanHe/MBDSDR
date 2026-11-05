@@ -14,11 +14,16 @@
 * **底层直调同样拦**：脚本绕过工具层直接 ``backend.write_tx()`` 时，没有
   授权上下文一律拒绝（返回 False 并记录 ``last_tx_reject``），不静默发波。
 * **每次判定都落盘可追溯**：签发（``armed``）、放行（``allowed``）、拒绝
-  （``refused``）、过期（``expired``）都写一条 JSONL 到
-  ``D:\\mbdsdr\\logs\\tx_audit.jsonl``（10 MB × 5 轮转，路径可用
-  ``MBDSDR_TX_AUDIT_PATH`` 覆盖），只记 token 前 8 位。审计写失败按
-  **fail-closed** 处理：不签发、不放行，并把原因暴露在
-  :func:`tx_audit_status` 与门快照 ``snapshot()["audit"]``。
+  （``refused``）、过期（``expired``）以及每次发射结果（``tx_ok`` /
+  ``tx_failed``）都写一条 JSONL。默认路径**不写 C 盘用户目录**：
+  ``D:\\mbdsdr\\logs\\tx_audit.jsonl``（无 D 盘则程序所在盘/程序目录 logs），
+  可用设置项 ``tx_audit_path`` 或环境变量 ``MBDSDR_TX_AUDIT_PATH`` 覆盖。
+  单文件上限、保留份数、保留天数由 ``tx_audit_max_mb`` /
+  ``tx_audit_keep_files`` / ``tx_audit_retention_days`` 配置；超限**删最旧**
+  而不是停写（停写会让 TX 变成不可发射）。记录只含 token 前 8 位，任何
+  密钥/API key 在落盘前打码。审计写失败按 **fail-closed** 处理：不签发、
+  不放行，并把原因暴露在 :func:`tx_audit_status` 与门快照
+  ``snapshot()["audit"]``。
 * 工具层、脚本层、驱动层共用本模块，不在别处再写一套门语义。
 """
 from __future__ import annotations
@@ -29,8 +34,8 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -76,30 +81,108 @@ GATE_AUDIT_FAILED = "audit_write_failed"
 
 AUDIT_SOURCES = ("desktop", "test", "script")
 
-#: 单文件上限 10 MB；保留当前文件 + 4 个轮转备份 = 共 5 个文件（约 50 MB）。
-TX_AUDIT_MAX_BYTES = 10 * 1024 * 1024
-TX_AUDIT_BACKUPS = 4
+# ── 落盘策略（默认值都在 docs/limitations-register.md 附 G 记了依据）──────
+#: 单文件上限 50 MB。依据：一次发射约 3 条记录（armed / allowed / tx_ok），
+#: 单条约 600 B；按 1,000 次发射/天估算 ≈ 1.8 MB/天 ≈ 650 MB/年。
+#: 50 MB × 10 份 ≈ 500 MB 可覆盖约 9 个月；配合"删最旧"，磁盘占用有硬上界。
+TX_AUDIT_MAX_MB = 50
+TX_AUDIT_MAX_BYTES = TX_AUDIT_MAX_MB * 1024 * 1024
+#: 保留文件总数（当前文件 + 轮转备份）。10 = 当前 + 9 个备份。
+TX_AUDIT_KEEP_FILES = 10
+TX_AUDIT_BACKUPS = TX_AUDIT_KEEP_FILES - 1
+#: 备份最长保留天数。到点即删（与份数上限取先到者），不会因此停止写入。
+TX_AUDIT_RETENTION_DAYS = 365
 
 #: 同一审计失败错误的最小告警间隔（秒）：发射循环反复失败时不刷屏。
 _AUDIT_LOG_INTERVAL_S = 30.0
 
+#: 程序根目录（本文件在 <root>/mbdsdr_ai/ 下）：程序所在盘兜底用。
+_PROGRAM_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def default_audit_path() -> str:
-    """审计日志默认路径（不落 C 盘）。
 
-    优先 ``MBDSDR_TX_AUDIT_PATH``（测试/受信任脚本可显式指定）；
-    Windows 有 D 盘时落到 ``D:\\mbdsdr\\logs\\tx_audit.jsonl``；
-    无 D 盘（或非 Windows）时退到系统临时目录并**告警**，不静默改写位置。
+def _clamp_int(value: Any, lo: int, hi: int, default: int) -> int:
+    """整数夹取；坏值（None/空串/非数字）回默认，绝不因坏配置崩。"""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, v))
+
+
+def _load_ai_config() -> Any:
+    """读 AI/Settings 配置（读不到返回 None，不影响默认路径选择）。"""
+    try:
+        from .config import load_config
+        return load_config()
+    except Exception:  # pragma: no cover - 配置损坏/裁剪打包时仍需能落盘
+        return None
+
+
+def _first_non_c_drive() -> str:
+    """返回第一个存在的非 C 盘根（D 优先）；机器只有 C 盘时返回 \"\"。"""
+    for letter in "DEFGHIJKLMNOPQRSTUVWXYZAB":
+        if os.path.exists(f"{letter}:\\"):
+            return f"{letter}:"
+    return ""
+
+
+def default_audit_path(cfg: Any = None) -> str:
+    """审计日志默认路径（**不写 C 盘用户目录**）。
+
+    优先级：环境变量 ``MBDSDR_TX_AUDIT_PATH`` > 设置项 ``tx_audit_path`` >
+    ``D:\\mbdsdr\\logs\\tx_audit.jsonl``（有 D 盘） > 程序所在盘/其它非 C 盘
+    ``<盘>:\\mbdsdr\\logs\\tx_audit.jsonl`` > 程序目录 ``<root>\\logs\\``（仅当
+    机器只有 C 盘；仍然不是 C 盘用户目录，且会告警）。
     """
     env = (os.environ.get("MBDSDR_TX_AUDIT_PATH") or "").strip()
     if env:
         return env
+    if cfg is None:
+        cfg = _load_ai_config()
+    cfg_path = (getattr(cfg, "tx_audit_path", "") or "").strip()
+    if cfg_path:
+        return os.path.expanduser(cfg_path)
     if os.name == "nt":
         if os.path.exists("D:\\"):
             return r"D:\mbdsdr\logs\tx_audit.jsonl"
-        logger.warning("未检测到 D 盘：发射审计退到临时目录（重启可能被清理），"
-                       "请用 MBDSDR_TX_AUDIT_PATH 指定持久位置")
-    return os.path.join(tempfile.gettempdir(), "mbdsdr_tx_audit.jsonl")
+        drive = _first_non_c_drive()
+        if drive:
+            return os.path.join(drive + "\\", "mbdsdr", "logs", "tx_audit.jsonl")
+        logger.warning("未检测到非 C 盘：发射审计落到程序目录 logs"
+                       "（仍不写 C 盘用户目录），请用设置项 tx_audit_path "
+                       "指定持久位置")
+        return os.path.join(_PROGRAM_ROOT, "logs", "tx_audit.jsonl")
+    return os.path.join(os.path.expanduser("~"), ".mbdsdr", "logs",
+                        "tx_audit.jsonl")
+
+
+def resolve_audit_settings(cfg: Any = None) -> Dict[str, Any]:
+    """审计落盘策略：环境变量 > 设置项（config.json）> 内置默认。
+
+    数值一律夹到合法区间（坏配置不崩、也不会把磁盘占用放大）。
+    """
+    if cfg is None:
+        cfg = _load_ai_config()
+    max_mb = _clamp_int(
+        os.environ.get("MBDSDR_TX_AUDIT_MAX_MB")
+        or getattr(cfg, "tx_audit_max_mb", None),
+        1, 1024, TX_AUDIT_MAX_MB)
+    keep = _clamp_int(
+        os.environ.get("MBDSDR_TX_AUDIT_KEEP_FILES")
+        or getattr(cfg, "tx_audit_keep_files", None),
+        2, 100, TX_AUDIT_KEEP_FILES)
+    days = _clamp_int(
+        os.environ.get("MBDSDR_TX_AUDIT_RETENTION_DAYS")
+        or getattr(cfg, "tx_audit_retention_days", None),
+        1, 3650, TX_AUDIT_RETENTION_DAYS)
+    return {
+        "path": default_audit_path(cfg),
+        "max_mb": max_mb,
+        "max_bytes": max_mb * 1024 * 1024,
+        "keep_files": keep,
+        "backups": max(1, keep - 1),
+        "retention_days": days,
+    }
 
 
 class TxAuditError(RuntimeError):
@@ -107,19 +190,30 @@ class TxAuditError(RuntimeError):
 
 
 class TxAuditLog:
-    """发射门审计日志（JSONL + 按大小轮转）。
+    """发射门审计日志（JSONL + 按大小/天数轮转，超限删最旧）。
 
-    记录只含 token **前 8 位**，绝不下发/落盘完整 token；动作参数摘要已剔除
-    门参数（arm_manual / confirm_token / tx_token / approve_session）。
+    记录只含 token **前 8 位**，绝不下发/落盘完整 token；动作参数摘要剔除
+    门参数（arm_manual / confirm_token / tx_token / approve_session），
+    且任何密钥/API key 在落盘前打码（见 :func:`_redact_summary`）。
+
+    容量策略：写前若当前文件已达 ``max_bytes``，删掉最旧的 ``.backups``，
+    依次后移并把当前文件改名 ``.1``——**永远不停写**（停写会让 TX 不可发射）。
     """
 
     def __init__(self, path: Optional[str] = None, *,
-                 max_bytes: int = TX_AUDIT_MAX_BYTES,
-                 backups: int = TX_AUDIT_BACKUPS) -> None:
+                 max_bytes: Optional[int] = None,
+                 backups: Optional[int] = None,
+                 retention_days: Optional[int] = None) -> None:
+        settings = resolve_audit_settings()
         self._lock = threading.Lock()
-        self._path = str(path or default_audit_path())
-        self._max_bytes = max(4096, int(max_bytes))
-        self._backups = max(1, int(backups))
+        self._path = str(path or settings["path"])
+        self._max_bytes = max(4096, int(
+            settings["max_bytes"] if max_bytes is None else max_bytes))
+        self._backups = max(1, int(
+            settings["backups"] if backups is None else backups))
+        self._retention_days = max(0, int(
+            settings["retention_days"] if retention_days is None
+            else retention_days))
         self.last_error = ""
         self.write_failures = 0
         self.records_written = 0
@@ -130,6 +224,22 @@ class TxAuditLog:
     @property
     def path(self) -> str:
         return self._path
+
+    @property
+    def max_bytes(self) -> int:
+        return self._max_bytes
+
+    @property
+    def backups(self) -> int:
+        return self._backups
+
+    @property
+    def keep_files(self) -> int:
+        return self._backups + 1
+
+    @property
+    def retention_days(self) -> int:
+        return self._retention_days
 
     def set_path(self, path: str) -> None:
         with self._lock:
@@ -174,21 +284,36 @@ class TxAuditLog:
                 raise TxAuditError(self.last_error) from e
 
     def _rotate(self) -> None:
+        """删最旧 → 依次后移 → 当前 → ``.1``（绝不因容量停写）。"""
         oldest = f"{self._path}.{self._backups}"
         try:
             if os.path.exists(oldest):
-                os.remove(oldest)
+                os.remove(oldest)          # 超限删最旧，而不是停止写入
             for i in range(self._backups - 1, 0, -1):
                 src = f"{self._path}.{i}"
                 if os.path.exists(src):
                     os.replace(src, f"{self._path}.{i + 1}")
             os.replace(self._path, f"{self._path}.1")
+            self._purge_expired()
         except OSError as e:
             self.write_failures += 1
             self.last_error = f"轮转失败 {type(e).__name__}: {e}"
             logger.error("发射审计轮转失败（fail-closed，拒绝发射）: %s",
                          self.last_error)
             raise TxAuditError(self.last_error) from e
+
+    def _purge_expired(self) -> None:
+        """按天数清理备份；当前活动文件永不删除，清理失败不阻断写入。"""
+        if self._retention_days <= 0:
+            return
+        cutoff = time.time() - self._retention_days * 86400
+        for i in range(1, self._backups + 1):
+            p = f"{self._path}.{i}"
+            try:
+                if os.path.exists(p) and os.path.getmtime(p) < cutoff:
+                    os.remove(p)
+            except OSError as e:  # 删旧失败不影响本次写入
+                logger.warning("发射审计过期清理失败（不影响写入）: %s", e)
 
 
 _AUDIT = TxAuditLog()
@@ -200,11 +325,16 @@ def get_tx_audit() -> TxAuditLog:
 
 
 def reset_tx_audit(path: Optional[str] = None, *,
-                   max_bytes: int = TX_AUDIT_MAX_BYTES,
-                   backups: int = TX_AUDIT_BACKUPS) -> TxAuditLog:
-    """测试用：把进程级审计日志指向指定路径（path=None 回到默认路径）。"""
+                   max_bytes: Optional[int] = None,
+                   backups: Optional[int] = None,
+                   retention_days: Optional[int] = None) -> TxAuditLog:
+    """测试用：把进程级审计日志指向指定路径或按当前配置重建。
+
+    ``path=None`` 或任一容量参数为 None 时，读环境变量/设置项/内置默认。
+    """
     global _AUDIT
-    _AUDIT = TxAuditLog(path, max_bytes=max_bytes, backups=backups)
+    _AUDIT = TxAuditLog(path, max_bytes=max_bytes, backups=backups,
+                        retention_days=retention_days)
     return _AUDIT
 
 
@@ -213,6 +343,9 @@ def tx_audit_status() -> Dict[str, Any]:
     a = get_tx_audit()
     return {
         "path": a.path,
+        "max_bytes": int(a.max_bytes),
+        "keep_files": int(a.keep_files),
+        "retention_days": int(a.retention_days),
         "last_error": a.last_error,
         "write_failures": int(a.write_failures),
         "records_written": int(a.records_written),
@@ -236,9 +369,61 @@ def _detect_source(explicit: str = "") -> str:
     return "script"
 
 
+# ── 密钥打码（落盘前最后一道，任何调用方都不能把密钥写进审计）────────────
+#: 键名命中即整值打码（api_key / token / secret / password / 凭证类）。
+_SECRET_NAME_RE = re.compile(
+    r"(?i)(api[-_]?key|access[-_]?key|secret|token|password|passwd|"
+    r"authorization|credential|cookie)")
+#: 自由文本里的密钥形态：key=value / Authorization: Bearer / sk- 开头凭证。
+_SECRET_TEXT_PATTERNS = (
+    (re.compile(
+        r"(?i)((?:api[-_]?key|access[-_]?key|secret|token|password|passwd|"
+        r"authorization|credential|cookie)\s*\"?\s*[:=]\s*)"
+        r"(\"[^\"]*\"|'[^']*'|[^\s,;&}\]]+)"), r"\1***"),
+    (re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"), r"\1***"),
+    (re.compile(r"sk-[A-Za-z0-9_-]{6,}"), "***"),
+)
+
+
+def _redact_text(text: str) -> str:
+    """对自由文本按密钥形态打码（``key=value`` / Bearer / ``sk-`` 凭证）。"""
+    out = str(text or "")
+    for pattern, repl in _SECRET_TEXT_PATTERNS:
+        out = pattern.sub(repl, out)
+    return out
+
+
+def _redact_obj(value: Any, key: str = "") -> Any:
+    """递归打码：键名疑似密钥 → 整值 ``***``；字符串值 → 形态打码。"""
+    if _SECRET_NAME_RE.search(str(key or "")):
+        return "***"
+    if isinstance(value, dict):
+        return {k: _redact_obj(v, str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_obj(v, key) for v in value]
+    if isinstance(value, str):
+        return _redact_text(value)
+    return value
+
+
+def _redact_summary(text: str) -> str:
+    """参数摘要打码：合法 JSON 走结构打码，否则退回文本形态打码。"""
+    raw = str(text or "{}")
+    try:
+        obj = json.loads(raw)
+    except (TypeError, ValueError):
+        return _redact_text(raw)
+    try:
+        return json.dumps(_redact_obj(obj), sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"), default=_json_default)
+    except (TypeError, ValueError):
+        return _redact_text(raw)
+
+
 def _args_summary(args: Optional[Dict[str, Any]], limit: int = 240) -> str:
-    """动作参数摘要（剔除门参数；超长截断），不落完整 token。"""
+    """动作参数摘要（剔除门参数 + 密钥打码；超长截断）。"""
     clean = {k: v for k, v in dict(args or {}).items() if k not in GATE_PARAMS}
+    clean = _redact_obj(clean)
     try:
         text = json.dumps(clean, sort_keys=True, ensure_ascii=False,
                           separators=(",", ":"), default=_json_default)
@@ -255,25 +440,51 @@ def _token_prefix(token: Optional[str]) -> str:
 def _audit_record(*, tool: str, args_summary: str, token: str, ttl_s: float,
                   result: str, code: str, source: str = "",
                   reason: str = "", action: str = "",
-                  note: str = "") -> Dict[str, Any]:
+                  note: str = "", freq_hz: Optional[float] = None
+                  ) -> Dict[str, Any]:
     local = datetime.datetime.now().astimezone()
     utc = datetime.datetime.now(datetime.timezone.utc)
     rec: Dict[str, Any] = {
         "ts_local": local.isoformat(timespec="milliseconds"),
         "ts_utc": utc.isoformat(timespec="milliseconds"),
         "tool": str(tool or "(direct)"),
-        "args_summary": str(args_summary or "{}"),
+        "args_summary": _redact_summary(args_summary),
         "token_prefix": _token_prefix(token),
         "ttl_s": round(float(ttl_s or 0.0), 3),
         "result": result,
         "code": code,
-        "reason": str(reason or ""),
+        "reason": _redact_text(reason),
         "source": _detect_source(source),
         "action": str(action or ""),
     }
+    if freq_hz is not None:
+        rec["freq_hz"] = float(freq_hz)
     if note:
-        rec["note"] = str(note)
+        rec["note"] = _redact_text(note)
     return rec
+
+
+def record_tx_result(*, tool: str, ok: bool, freq_hz: Optional[float] = None,
+                     args_summary: str = "", token: Optional[str] = None,
+                     action: str = "", code: str = "", reason: str = "",
+                     source: str = "") -> bool:
+    """每次真实发射尝试落一条结果（``tx_ok`` / ``tx_failed``）。
+
+    记录时间、工具名、频点、参数摘要、token 前 8 位（签发来源见 ``armed``/
+    ``allowed`` 记录）、结果与失败原因；密钥已由 :func:`_redact_summary` 打码。
+
+    返回是否写入成功。**写失败不抛异常、不阻断调用方**：发射已经发生，事后
+    记录失败无法撤回射频输出，只在 ``tx_audit_status()`` 里如实计数。fail-closed
+    只作用在"发射前"的签发/放行判定（见 :meth:`TxGate.arm` / ``authorize``）。
+    """
+    try:
+        get_tx_audit().write(_audit_record(
+            tool=tool, args_summary=args_summary, token=token or "",
+            ttl_s=0.0, result=("tx_ok" if ok else "tx_failed"), code=code,
+            source=source, reason=reason, action=action, freq_hz=freq_hz))
+        return True
+    except TxAuditError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -1064,6 +1275,9 @@ class TxSession:
         self.stop_calls = 0
         self._duplex_coord: Optional[TxRxCoordinator] = None
         self._duplex_info: Optional[Dict[str, Any]] = None
+        # 结果审计上下文（每次 transmit 开始时写入）
+        self._audit_freq_hz: Optional[float] = None
+        self._audit_args = ""
 
     # ------------------------------------------------------------------
     def cancel(self, reason: str = "用户取消发射") -> None:
@@ -1138,6 +1352,13 @@ class TxSession:
         self._duplex_info = info
         self._duplex_coord = None
 
+    def _record_tx_result(self, ok: bool, code: str, reason: str) -> None:
+        """落一条发射结果审计（``tx_ok`` / ``tx_failed``；写失败不抛）。"""
+        record_tx_result(
+            tool="TxSession.transmit", ok=ok,
+            freq_hz=self._audit_freq_hz, args_summary=self._audit_args,
+            token=self.token, action=self._action, code=code, reason=reason)
+
     def _abort(self, state: str, code: str, reason: str) -> Dict[str, Any]:
         self.state = TX_STOPPING
         self.reason_code = code
@@ -1147,6 +1368,7 @@ class TxSession:
         self.state = state
         logger.warning("TxSession %s(%s): %s（已发 %d/%d 样本）",
                        state, code, reason, self.sent_samples, self.total_samples)
+        self._record_tx_result(False, code, reason)
         return self.status()
 
     # ------------------------------------------------------------------
@@ -1175,6 +1397,11 @@ class TxSession:
         ``arm_manual`` 仅保留参数位，**不参与放行**（模型自报不算确认）。
         """
         ctx = current_tx_decision()
+        audit_args = _args_summary({
+            "freq_hz": freq_hz, "gain_db": gain_db,
+            "bandwidth_hz": bandwidth_hz, "duration_s": duration_s,
+            "backend": type(self.backend).__name__ if self.backend else "",
+        })
         if ctx is not None and ctx.allowed and (
                 tx_token is None or not ctx.token or ctx.token == tx_token):
             decision = ctx
@@ -1182,12 +1409,7 @@ class TxSession:
             decision = self.gate.authorize(
                 arm_manual=False, token=tx_token,
                 action=action if action is not None else None,
-                tool="TxSession.transmit",
-                args_summary=_args_summary({
-                    "freq_hz": freq_hz, "gain_db": gain_db,
-                    "bandwidth_hz": bandwidth_hz, "duration_s": duration_s,
-                    "backend": type(self.backend).__name__ if self.backend else "",
-                }))
+                tool="TxSession.transmit", args_summary=audit_args)
         if not decision.allowed:
             self.state = TX_REJECTED
             self.reason_code = decision.code
@@ -1197,6 +1419,8 @@ class TxSession:
         self._action = decision.action
         self.state = TX_ARMED
         self.sent_samples = 0
+        self._audit_freq_hz = float(freq_hz) if freq_hz else None
+        self._audit_args = audit_args
 
         if self.backend is None or not callable(
                 getattr(self.backend, "write_tx", None)):
@@ -1216,6 +1440,7 @@ class TxSession:
             self.state = TX_REJECTED
             self.reason_code = chk.code
             self.reason = chk.reason
+            self._record_tx_result(False, chk.code, chk.reason)
             return self.status()
 
         # 收发互斥：语义统一在这里，半双工暂停接收并如实报切换耗时。
@@ -1232,6 +1457,7 @@ class TxSession:
             self.state = TX_REJECTED
             self.reason_code = dd.code
             self.reason = dd.reason
+            self._record_tx_result(False, dd.code, dd.reason)
             return self.status()
         self._duplex_coord = coord
 
@@ -1269,6 +1495,7 @@ class TxSession:
         self.reason_code = "ok"
         self.reason = "发射完成"
         self._release_duplex()
+        self._record_tx_result(True, "ok", self.reason)
         return self.status()
 
     @staticmethod

@@ -14,21 +14,28 @@ import logging
 import os
 import sys
 
+import numpy as np
 import pytest
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import mbdsdr_ai.tx_guard as tx_guard_mod  # noqa: E402
+from mbdsdr_ai.config import AgentConfig  # noqa: E402
 from mbdsdr_ai.tx_guard import (  # noqa: E402
     GATE_AUDIT_FAILED,
     GATE_EXPIRED,
     GATE_MANUAL_UNTRUSTED,
     GATE_UNKNOWN_TOKEN,
     TxAuditError,
+    TxCapabilities,
+    TxSession,
     action_digest,
+    default_audit_path,
     get_tx_gate,
     issue_confirmation,
+    record_tx_result,
     reset_tx_audit,
     reset_tx_gate,
     tx_audit_status,
@@ -271,3 +278,182 @@ def test_audit_failure_logs_are_throttled(tmp_path, monkeypatch, caplog):
               if "发射审计写入失败" in r.getMessage()]
     assert len(errors) == 1, f"限流失效，实际 {len(errors)} 条"
     assert tx_audit_status()["write_failures"] == 21, "计数不能因限流丢失"
+
+
+# ── 落地策略：默认路径不在 C 盘 ─────────────────────────────────────────
+def _clear_audit_env(monkeypatch):
+    for name in ("MBDSDR_TX_AUDIT_PATH", "MBDSDR_TX_AUDIT_MAX_MB",
+                 "MBDSDR_TX_AUDIT_KEEP_FILES",
+                 "MBDSDR_TX_AUDIT_RETENTION_DAYS"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_default_path_is_not_c_drive(tmp_path, monkeypatch):
+    """默认审计路径必须落在非 C 盘（本机 D:\\），且不写 C 盘用户目录。"""
+    _clear_audit_env(monkeypatch)
+    monkeypatch.setattr(tx_guard_mod, "_load_ai_config", lambda: None)
+
+    path = default_audit_path()
+    drive = os.path.splitdrive(os.path.abspath(path))[0].upper()
+    assert drive != "C:", f"默认审计路径不得在 C 盘：{path}"
+    home = os.path.abspath(os.path.expanduser("~")).replace("/", "\\").lower()
+    assert not os.path.abspath(path).replace("/", "\\").lower().startswith(home)
+    if os.path.exists("D:\\"):
+        assert path.replace("/", "\\").lower().startswith("d:\\mbdsdr\\logs")
+
+
+def test_config_path_and_limits_are_used(tmp_path, monkeypatch):
+    """设置项（config.json）可改路径/单文件上限/保留份数/保留天数。"""
+    _clear_audit_env(monkeypatch)
+    target = str(tmp_path / "cfg" / "tx_audit.jsonl")
+
+    class _Cfg:
+        tx_audit_path = target
+        tx_audit_max_mb = 3
+        tx_audit_keep_files = 4
+        tx_audit_retention_days = 30
+
+    monkeypatch.setattr(tx_guard_mod, "_load_ai_config", lambda: _Cfg())
+    log = reset_tx_audit()
+    assert log.path == target
+    assert log.max_bytes == 3 * 1024 * 1024
+    assert log.backups == 3 and log.keep_files == 4
+    assert log.retention_days == 30
+
+
+def test_config_defaults_are_declared():
+    """配置数据类自带审计策略默认值（设置面板据此渲染）。"""
+    cfg = AgentConfig()
+    assert cfg.tx_audit_path == ""
+    assert cfg.tx_audit_max_mb == 50
+    assert cfg.tx_audit_keep_files == 10
+    assert cfg.tx_audit_retention_days == 365
+
+
+# ── 轮转：超限删最旧，最新一条完整保留 ────────────────────────────────
+def test_rotation_deletes_oldest_and_keeps_newest(tmp_path):
+    log = reset_tx_audit(str(tmp_path / "rot2.jsonl"),
+                         max_bytes=4096, backups=2, retention_days=3650)
+    reset_tx_gate()
+    for i in range(60):
+        get_tx_gate().arm(ttl_s=10, tool=f"tool-{i}", source="test")
+
+    for suffix in ("", ".1", ".2"):
+        assert os.path.exists(log.path + suffix), f"缺少轮转文件 {suffix}"
+    assert not os.path.exists(log.path + ".3"), "超过保留份数必须删最旧"
+
+    newest = _read_records(log.path)[-1]
+    assert newest["result"] == "armed"
+    assert newest["tool"] == "tool-59", "最新一条必须完整保留"
+
+    all_tools = []
+    for suffix in ("", ".1", ".2"):
+        all_tools += [r["tool"] for r in _read_records(log.path + suffix)]
+    assert "tool-0" not in all_tools, "最旧记录应被删除（不是停止写入）"
+
+
+# ── 密钥打码：文件里绝不出现原始 API key / 凭证 ────────────────────────
+def test_secrets_are_redacted_in_audit_file(_audit_log):
+    api_key = "sk-proj-1234567890abcdef"
+    bearer = "sk-live-ABCDEFGHIJKLMNOP"
+    ok = record_tx_result(
+        tool="sdr_transmit_iq", freq_hz=435_000_000.0,
+        args_summary=json.dumps({"freq_hz": 435_000_000.0,
+                                 "api_key": api_key,
+                                 "Authorization": "Bearer " + bearer}),
+        ok=False, code="tx_write_failed",
+        reason=f"鉴权失败 api_key={api_key} Authorization: Bearer {bearer}",
+        source="test")
+    assert ok
+
+    raw = _raw(_audit_log.path)
+    assert api_key not in raw, "原始 API key 不得落盘"
+    assert bearer not in raw, "原始 Bearer 凭证不得落盘"
+    assert "***" in raw
+
+    rec = _read_records(_audit_log.path)[-1]
+    assert rec["result"] == "tx_failed"
+    assert rec["freq_hz"] == 435_000_000.0
+    summary = json.loads(rec["args_summary"])
+    assert summary["api_key"] == "***"
+    assert summary["Authorization"] == "***"
+    assert api_key not in rec["reason"] and bearer not in rec["reason"]
+
+
+def test_args_summary_redacts_secret_named_keys():
+    """即便调用方忘记剔除，键名疑似密钥的参数值也不会进摘要。"""
+    from mbdsdr_ai.tx_guard import _args_summary
+    text = _args_summary({"freq_hz": 435_000_000.0,
+                          "api_key": "sk-abcdef123456",
+                          "password": "hunter2"})
+    assert "sk-abcdef123456" not in text
+    assert "hunter2" not in text
+    assert "***" in text
+
+
+# ── 发射结果记录：成功/失败都落一条，且写失败不阻断 ────────────────────
+class _FakeTxBackend:
+    def __init__(self, write_ok=True):
+        self.write_ok = write_ok
+        self.freq = None
+
+    def supports_tx(self):
+        return True
+
+    def set_frequency(self, hz):
+        self.freq = hz
+
+    def device_alive(self):
+        return True
+
+    def is_underrun(self):
+        return False
+
+    def stop_tx(self):
+        pass
+
+    def write_tx(self, block):
+        from mbdsdr_ai.tx_guard import tx_authorized
+        return self.write_ok and tx_authorized()
+
+
+_CAPS = TxCapabilities(
+    known=True, freq_range_hz=(1_000_000.0, 6_000_000_000.0),
+    bandwidth_range_hz=(2_000_000.0, 20_000_000.0),
+    gain_range_db=(0.0, 47.0), max_duration_s=600.0,
+    duplex="half", source="测试参数表")
+
+
+def _tx_session_records(_audit_log, backend):
+    tok = get_tx_gate().arm(ttl_s=60, tool="sdr_transmit_iq", source="test")
+    rep = TxSession(backend).transmit(
+        np.ones(12, dtype=np.complex64), freq_hz=435_000_000.0,
+        tx_token=tok, caps=_CAPS, chunk_samples=4)
+    return rep, _read_records(_audit_log.path)[-1]
+
+
+def test_tx_session_records_ok_result(_audit_log):
+    rep, rec = _tx_session_records(_audit_log, _FakeTxBackend())
+    assert rep["state"] == "completed"
+    assert rec["result"] == "tx_ok"
+    assert rec["tool"] == "TxSession.transmit"
+    assert rec["freq_hz"] == 435_000_000.0
+    assert rec["code"] == "ok"
+    assert rec["ts_local"] and rec["ts_utc"]
+    assert len(rec["token_prefix"]) == 8
+
+
+def test_tx_session_records_failed_result(_audit_log):
+    rep, rec = _tx_session_records(_audit_log, _FakeTxBackend(write_ok=False))
+    assert rep["state"] == "failed"
+    assert rec["result"] == "tx_failed"
+    assert rec["code"] == "tx_write_failed"
+    assert "write_tx 返回失败" in rec["reason"]
+
+
+def test_result_record_failure_is_visible_not_raise(tmp_path):
+    """发射后结果记录写不进：不抛异常，只在状态里如实计数。"""
+    reset_tx_audit(_make_broken_path(tmp_path))
+    assert record_tx_result(tool="TxSession.transmit", ok=True) is False
+    assert tx_audit_status()["write_failures"] >= 1
+    assert tx_audit_status()["last_error"]
