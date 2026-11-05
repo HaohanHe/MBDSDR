@@ -636,8 +636,13 @@ void TestControlHub::setSampleRateRejectsOutOfTier() {
     }
 }
 
-// F3 counter-proof: the synthetic/offline backend has no driver readback, so the
-// status must LABEL the rate as a request -- never report it as a readback value.
+// F3 counter-proof: a backend without a driver readback must LABEL the rate as a
+// request -- never pass a request off as a hardware readback. A machine with a
+// real RTL-SDR attached makes the engine open it (readback then EXISTS), so the
+// assertion follows the ACTUAL backend instead of assuming a synthetic one; the
+// readback-less path is pinned deterministically by
+// test_rtl_sdr_tune.cpp:sampleRateReadbackUnavailableIsHonest (fake ops without
+// getSampleRate). Deleting either status field still turns this test red.
 void TestControlHub::sampleRateStatusIsHonestWithoutReadback() {
     SpectrumEngine eng;
     control::ControlHub hub;
@@ -645,9 +650,14 @@ void TestControlHub::sampleRateStatusIsHonestWithoutReadback() {
 
     QJsonObject s = parseObj(hub.execute("get_status", {}));
     QVERIFY(s.value("ok").toBool());
-    QCOMPARE(s.value("sample_rate_readback_available").toBool(), false);
-    QCOMPARE(s.value("sample_rate_status").toString(),
-             QStringLiteral("采样率=请求值，硬件读回不可用"));
+    const QString note = s.value("sample_rate_status").toString();
+    if (s.value("sample_rate_readback_available").toBool()) {
+        // Real device: the note must carry the device value, never the request.
+        QVERIFY2(note.contains(QStringLiteral("硬件读回")), note.toUtf8().constData());
+        QVERIFY2(!note.contains(QStringLiteral("请求值")), note.toUtf8().constData());
+    } else {
+        QCOMPARE(note, QStringLiteral("采样率=请求值，硬件读回不可用"));
+    }
     QVERIFY(!s.contains("sample_rate_error"));
 }
 
