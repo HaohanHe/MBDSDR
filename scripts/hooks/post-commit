@@ -3,6 +3,8 @@
 
 pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记；
 没有标记的提交一律追加到 bypass 日志，便于事后定位是谁绕过。
+日志记录附带当时的 claim 台账快照（owner + 文件 + 是否活跃），
+用于事后判断「绕过时到底有没有夹带别人」。
 """
 import json
 import os
@@ -19,6 +21,50 @@ def _git(*args):
     return subprocess.run(
         ["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
+
+
+def _claims_snapshot():
+    """读取当时 claim 台账，返回 owner 与文件清单（含 active/remaining）。"""
+    registry = (
+        Path(os.environ.get("MBDSDR_LOCKS_DIR") or r"D:\mbdsdr\.locks") / "claims.json"
+    )
+    empty = {"registry": str(registry), "active_owners": [], "claims": []}
+    try:
+        data = json.loads(registry.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        empty["note"] = "台账不存在"
+        return empty
+    except (OSError, json.JSONDecodeError) as exc:
+        empty["error"] = str(exc)
+        return empty
+
+    now = time.time()
+    rows = []
+    for key, entry in (data.get("claims") or {}).items():
+        cur = entry.get("current")
+        if not isinstance(cur, dict):
+            continue
+        try:
+            heartbeat = float(cur.get("heartbeat_at") or cur.get("acquired_at") or 0)
+            ttl_s = float(cur.get("ttl_min") or 0) * 60.0
+        except (TypeError, ValueError):
+            continue
+        active = ttl_s > 0 and now - heartbeat <= ttl_s
+        rows.append(
+            {
+                "path": cur.get("path") or key,
+                "owner": str(cur.get("owner", "?")),
+                "active": active,
+                "remaining_min": round(max(0.0, (heartbeat + ttl_s - now) / 60.0), 1)
+                if active
+                else 0.0,
+            }
+        )
+    return {
+        "registry": str(registry),
+        "active_owners": sorted({r["owner"] for r in rows if r["active"]}),
+        "claims": rows,
+    }
 
 
 def main():
@@ -59,6 +105,7 @@ def main():
         "subject": subject,
         "files": files,
         "reason": "no pre-commit marker（--no-verify 或钩子未执行）",
+        "claims_snapshot": _claims_snapshot(),
     }
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False) + "\n")
