@@ -37,7 +37,12 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from mbdsdr_ai.dsp_stream import PingPongStream
 from mbdsdr_ai.dsp import StreamSplitter, AGC
-from mbdsdr_ai.squelch import AutoSquelch, NoiseSquelch
+from mbdsdr_ai.squelch import (
+    DEFAULT_SQUELCH_DBFS,
+    AutoSquelch,
+    NoiseSquelch,
+    rms_dbfs,
+)
 from mode_registry import get as get_mode, demodulate
 
 log = logging.getLogger(__name__)
@@ -54,7 +59,8 @@ class SharedDemodConfig:
     这里不加锁：最坏情况是某一帧读到刚跨边界的旧/新值，听感无差。
     """
 
-    def __init__(self, mode: str = "FM", squelch_db: float = -80.0,
+    def __init__(self, mode: str = "FM",
+                 squelch_db: float = DEFAULT_SQUELCH_DBFS,
                  auto_squelch: bool = True, agc_speed: str = "medium"):
         self.mode: str = str(mode).upper()
         self.squelch_db: float = float(squelch_db)
@@ -344,19 +350,19 @@ class DemodWorker(QThread):
                     audio = None
                 if audio is None or audio.size == 0:
                     continue
-                # 静噪门控：
-                #  auto → 解调后噪声静噪（连续载波可靠，开机即落在电台上也能开）；
-                #  固定 → 对原始全带宽 IQ 算功率，与 squelch_db 比较。
+                # 静噪门控（统一口径：解调后音频 RMS，dBFS）：
+                #  auto → 音频频谱形态判据（连续载波可靠，开机即落在电台上也能开）；
+                #  固定 → 对**解调后音频**算 RMS，与 squelch_db 比较。
+                # 不再用全带宽 IQ 功率：带宽/增益一变，同一个数字就换意思。
                 try:
                     if self._cfg.auto_squelch:
                         mono = (audio.mean(axis=1) if audio.ndim == 2
                                 else audio)
                         open_g = bool(self._noise_wfm.process_audio(mono))
                     else:
-                        p = float(np.mean(np.abs(iq) ** 2))
-                        dbfs = 10.0 * np.log10(p + 1e-12)
+                        dbfs = rms_dbfs(audio)
                         open_g = self._gate_open(self._auto_wfm, dbfs,
-                                                 int(iq.size))
+                                                 int(audio.shape[0]))
                     # AudioPlayer 内部 5ms ramp 消咔哒
                     player.set_muted(not open_g)
                 except Exception:
@@ -372,8 +378,7 @@ class DemodWorker(QThread):
 
             # ===== 窄带路径（FM/NFM/AM/USB/LSB/CW）=====
             # 先 VFO DDC（NCO 搬频 + 有理重采样 + Nuttall LPF）取出 48k 信道 IQ，
-            # 静噪门控在 VFO 信道输出上算——真在收听带宽内判信号，而不是被全带宽
-            # 邻道噪声/杂散误触发。
+            # 再解调；静噪门控放在**解调后音频**上（统一口径，见 squelch.py 常量段）。
             if self._vfo is None:
                 # VFO 不可用：窄带无法解调，跳过（不造假音频）
                 continue
@@ -384,30 +389,33 @@ class DemodWorker(QThread):
             if vfo_out is None or len(vfo_out) <= 16:
                 continue
 
-            # 静噪门控：对 VFO 信道输出（48k 窄带 IQ）算功率 dBFS，
-            # 低于门限则 player.set_muted(True)，信号回来后 set_muted(False)。
-            if player_ok:
-                try:
-                    p = float(np.mean(np.abs(vfo_out) ** 2))
-                    dbfs = 10.0 * np.log10(p + 1e-12)
-                    open_g = self._gate_open(self._auto_nfm, dbfs,
-                                             int(vfo_out.size))
-                    player.set_muted(not open_g)
-                except Exception:
-                    pass
-
             if not player_ok:
                 # 无设备 / 静音 VFO：上面已跑完 VFO.process 验证 DDC 链路，
-                # 这里不写声卡、也不做静噪门控。
+                # 不写声卡、也不做静噪门控。
                 continue
 
             try:
                 audio = self._demod_48k(_dsp, mode, vfo_out)
-                if audio is not None and audio.size > 0:
-                    audio = self._apply_audio_agc(audio)
-                    if self.audio_tap is not None:
-                        audio = self.audio_tap(audio)
-                    player.write(audio)
+            except Exception:
+                continue
+            if audio is None or audio.size == 0:
+                continue
+
+            # 静噪门控：对解调后音频算 RMS dBFS（AM/FM/USB/WFM 同一测量点），
+            # 低于门限则 player.set_muted(True)，信号回来后 set_muted(False)。
+            try:
+                dbfs = rms_dbfs(audio)
+                open_g = self._gate_open(self._auto_nfm, dbfs,
+                                         int(audio.shape[0]))
+                player.set_muted(not open_g)
+            except Exception:
+                pass
+
+            try:
+                audio = self._apply_audio_agc(audio)
+                if self.audio_tap is not None:
+                    audio = self.audio_tap(audio)
+                player.write(audio)
             except Exception:
                 pass
         self._running = False

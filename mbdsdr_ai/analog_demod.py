@@ -115,6 +115,11 @@ class DeemphasisFilter:
 
 # Per-mode defaults for bandwidth / BFO / squelch threshold, applied together
 # when the mode changes.
+#
+# 量纲警告：本引擎（无头 gqrx 兼容路径）在**信道 IQ 域**门控（AGC 之前），
+# sql_db 是信道 IQ 功率 dBFS；桌面滑杆是**解调后音频 RMS** dBFS
+# （见 squelch.py 的 SQUELCH_* 常量）。两者是两个概念，阈值不可互换，
+# 不要为了"对齐"把这里的数字改成 -50。
 _MODE_DEFAULTS: Dict[str, Dict[str, float]] = {
     #           bw_hz    bfo_hz   squelch_dbfs
     "am":  dict(bw_hz=10_000.0, bfo_hz=0.0,   sql_db=-40.0),

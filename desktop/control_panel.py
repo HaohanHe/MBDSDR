@@ -37,6 +37,14 @@ from tokens import tokens
 
 from constants import DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ
 
+# 静噪门限的唯一口径（解调后音频 RMS dBFS）定义在内核侧，
+# 桌面端不复制数字；见 mbdsdr_ai/squelch.py 的常量段。
+from mbdsdr_ai.squelch import (
+    DEFAULT_SQUELCH_DBFS,
+    SQUELCH_MAX_DBFS,
+    SQUELCH_MIN_DBFS,
+)
+
 # 大字体频率显示（按位编辑，SDR++/gqrx radio dial 手感）；
 # 契约与 cpp/src/ui/freq_display_widget.h 一致。
 from freq_display import FreqDisplay
@@ -125,7 +133,7 @@ class ControlPanel(QWidget):
     record_toggled = Signal(bool)         # 录音开关
     mode_changed = Signal(str)            # 模式改变
     gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
-    squelch_changed = Signal(float)        # 静噪门限 (dBFS, -120~0)
+    squelch_changed = Signal(float)        # 静噪门限（解调后音频 RMS，-100~-20 dBFS）
     auto_squelch_toggled = Signal(bool)  # 自动静噪开关
     sample_rate_changed = Signal(float)    # 采样率改变 (Hz)
 
@@ -573,20 +581,24 @@ class ControlPanel(QWidget):
         rx_layout.addLayout(iq_cal_row)
 
         sq_row = QHBoxLayout()
-        self.squelch_label = QLabel("静噪")
+        self.squelch_label = QLabel("静噪(音频)")
         self.squelch_label.setObjectName("statusValue")
         self.squelch_label.setMinimumWidth(30)
         self.squelch_label.setMaximumWidth(100)
         sq_row.addWidget(self.squelch_label)
         self.squelch_slider = QSlider(Qt.Horizontal)
-        self.squelch_slider.setRange(-120, 0)
-        self.squelch_slider.setValue(-80)
+        # 范围/默认值的唯一口径在 mbdsdr_ai/squelch.py 常量段，这里不写字面量。
+        self.squelch_slider.setRange(int(SQUELCH_MIN_DBFS),
+                                     int(SQUELCH_MAX_DBFS))
+        self.squelch_slider.setValue(int(DEFAULT_SQUELCH_DBFS))
         self.squelch_slider.setToolTip(
-            "静噪门限（dBFS）：信号低于此电平即静音。-120 ≈ 几乎常开，"
-            "越接近 0 越难开噪（只放行强信号）。「自动」勾选时此项置灰")
+            "静噪门限（解调后音频电平，dBFS）：解调出的声音低于此电平即静音。"
+            f"{int(SQUELCH_MIN_DBFS)} ≈ 几乎常开；{int(SQUELCH_MAX_DBFS)} ≈ 只放行强信号。"
+            "这是音频电平，不是射频/中频功率——带宽或增益变化不改变它的含义。"
+            "「自动」勾选时此项置灰")
         self.squelch_slider.valueChanged.connect(self._on_squelch_changed)
         sq_row.addWidget(self.squelch_slider)
-        self.squelch_val = QLabel("-80 dB")
+        self.squelch_val = QLabel(f"{int(DEFAULT_SQUELCH_DBFS)} dB")
         self.squelch_val.setMinimumWidth(36)
         self.squelch_val.setMaximumWidth(80)
         sq_row.addWidget(self.squelch_val)
@@ -842,6 +854,7 @@ class ControlPanel(QWidget):
             self.vfo_bandwidth_changed.emit(bw)
 
     def _on_squelch_changed(self, dbfs: int):
+        """静噪门限（解调后音频 dBFS，-100~-20，口径见 mbdsdr_ai/squelch.py）。"""
         self.squelch_val.setText(f"{dbfs} dB")
         self.squelch_changed.emit(float(dbfs))
 

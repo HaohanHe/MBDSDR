@@ -90,6 +90,18 @@ _FINE_STEP_S = 2.0        # pass 内细采样：找中天/最大仰角
 _BISECT_TOL_S = 0.5       # 二分收敛容差（秒），LEO 仰角变化 ~0.5°/s ⇒ ~0.25° 精度
 
 
+# 仰角门：**两个语义，两个常量**，不许用一个名字两个数
+# ---------------------------------------------------------------------------
+# VISIBLE_MIN_ALT_DEG：当前仰角门——"现在还能不能收/跟不跟"。低仰角仍有可通联
+#   窗口，5° 是业余操作的通行下限；达到它不等于一次值得排班的过境。
+# PASS_MIN_ALT_DEG：过境预测门——"这次过境值不值得列出来"。峰值仰角太低，
+#   大气损耗和多普勒都大、可用时间短，10° 起步。
+# 历史问题：SatelliteTracker.next_pass() 把 5° 传进了默认 10° 的
+# predict_passes()，导致"下一次过境"这条链与直接预测拿到两个门。
+VISIBLE_MIN_ALT_DEG = 5.0
+PASS_MIN_ALT_DEG = 10.0
+
+
 def make_timescale():
     """返回 skyfield 时间系统（缓存，避免重复加载 ephemeris/UT1 表）。"""
     if not hasattr(make_timescale, "_ts"):
@@ -211,7 +223,7 @@ def predict_passes(
     ground_station: GroundStation,
     start_time: Optional[Time] = None,
     hours: float = 24.0,
-    min_alt: float = 10.0,
+    min_alt: float = PASS_MIN_ALT_DEG,
     require_sunlit: bool = False,
     anomalies: Optional[List[Dict[str, Any]]] = None,
     start_unix: Optional[float] = None,
@@ -601,7 +613,7 @@ def predict_upcoming_passes(
     tle_list: Sequence[Sequence[str]],
     ground_station: GroundStation,
     hours: float = 24.0,
-    min_alt: float = 10.0,
+    min_alt: float = PASS_MIN_ALT_DEG,
     max_sats: Optional[int] = None,
     freq_hz: Optional[float] = None,
 ) -> List[Dict]:

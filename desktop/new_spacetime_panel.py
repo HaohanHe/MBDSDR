@@ -66,6 +66,9 @@ except ImportError:  # pragma: no cover - 直接以脚本方式运行时
         TimeSyncStatus, FreqOrbitPoint,
     )
 
+# 过境列表的峰值仰角门（10°）与可见门（5°）是两个语义，见 sat_passes.py。
+from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG  # noqa: E402
+
 
 # 以包方式从仓库根 import（如 import desktop.new_spacetime_panel）时本目录不在
 # sys.path 上，把 desktop/ 补进去，保证 tokens 等兄弟模块可解析（与 main.py 一致）。
@@ -352,6 +355,14 @@ class NewSpacetimePanel(QWidget):
         self.refresh_btn.clicked.connect(self.refresh_passes)
         lay.addWidget(self.refresh_btn)
 
+        # 筛选口径明示：低于峰值门的过境不会出现在表里（用户必须能看见这条规则）
+        self.passes_filter_label = QLabel(
+            f"列表按峰值仰角 ≥ {PASS_MIN_ALT_DEG:g}° 筛选"
+            "（更低的过境不列出；需要低仰角过境请在设置里开启）")
+        self.passes_filter_label.setObjectName("hintLabel")
+        self.passes_filter_label.setWordWrap(True)
+        lay.addWidget(self.passes_filter_label)
+
         # 过境表格
         self.passes_table = QTableWidget(0, 7)
         self.passes_table.setHorizontalHeaderLabels(
@@ -521,11 +532,13 @@ class NewSpacetimePanel(QWidget):
 
         passes = self._engine.compute_passes(
             observer_lat=lat, observer_lon=lon, observer_alt=alt_km,
-            satellites=sats, hours_ahead=24.0, min_elevation=5.0, step_sec=60.0,
+            satellites=sats, hours_ahead=24.0,
+            min_elevation=PASS_MIN_ALT_DEG, step_sec=60.0,
         )
         if not passes:
             # 有 TLE 但确实没有过境：别沿用上一轮"没网络"的旧文案
-            self.passes_hint.setText("24 小时内无过境（仰角 ≥ 5°）")
+            self.passes_hint.setText(
+                f"24 小时内无过境（峰值仰角 ≥ {PASS_MIN_ALT_DEG:g}°）")
         self._populate_passes(passes)
 
         # 顺手刷新频率-轨道散点（无频率数据时频率为 0）

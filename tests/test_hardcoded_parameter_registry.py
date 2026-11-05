@@ -139,6 +139,59 @@ def test_detail_gain_slope_is_locked():
 
 
 # ---------------------------------------------------------------------------
+# 2b. 静噪：一个量纲、一组常量（解调后音频 RMS，-100..-20 dBFS）
+# ---------------------------------------------------------------------------
+def test_squelch_has_one_domain_and_one_constant_set():
+    """滑杆量的唯一事实源：内核 squelch 模块，桌面端不得另写数字。
+
+    历史问题：WFM 比"全带宽 IQ 功率"、窄带比"信道 IQ 功率"，同一根滑杆
+    标定两个测量点。统一到解调后音频 RMS 后，带宽/增益变化不再改变语义。
+    """
+    from mbdsdr_ai.squelch import (
+        DEFAULT_SQUELCH_DBFS,
+        SQUELCH_MAX_DBFS,
+        SQUELCH_MIN_DBFS,
+    )
+
+    assert (SQUELCH_MIN_DBFS, SQUELCH_MAX_DBFS, DEFAULT_SQUELCH_DBFS) == (
+        -100.0, -20.0, -50.0)
+
+
+def test_control_panel_uses_kernel_squelch_constants():
+    """桌面滑杆的范围/默认值必须取自内核常量，不能写字面量。"""
+    src = (REPO / "desktop" / "control_panel.py").read_text(encoding="utf-8")
+    assert "SQUELCH_MIN_DBFS" in src and "SQUELCH_MAX_DBFS" in src
+    assert "DEFAULT_SQUELCH_DBFS" in src
+    code = _code_only(REPO / "desktop" / "control_panel.py")
+    assert "setRange(-120, 0)" not in code
+
+
+# ---------------------------------------------------------------------------
+# 2c. 过境仰角：两个语义、两个常量，next_pass 的默认必须是对外承诺的门
+# ---------------------------------------------------------------------------
+def test_pass_and_visible_elevation_are_named_apart():
+    """过境列表门(10°) 与可见/跟踪退出门(5°) 必须是两个名字。
+
+    历史 bug：next_pass() 默认 5°，却把它传进默认 10° 的 predict_passes()，
+    于是"下一次过境"与直接预测拿到两个门。
+    """
+    import inspect
+
+    from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG, VISIBLE_MIN_ALT_DEG
+    from mbdsdr_ai.sat_tracker import (
+        DEFAULT_MIN_ELEVATION_DEG,
+        SatelliteTracker,
+    )
+
+    assert PASS_MIN_ALT_DEG == pytest.approx(10.0)
+    assert VISIBLE_MIN_ALT_DEG == pytest.approx(5.0)
+    assert DEFAULT_MIN_ELEVATION_DEG == pytest.approx(VISIBLE_MIN_ALT_DEG)
+    default = inspect.signature(SatelliteTracker.next_pass).parameters[
+        "min_alt"].default
+    assert default == pytest.approx(PASS_MIN_ALT_DEG)
+
+
+# ---------------------------------------------------------------------------
 # 3. 跨语言对拍：C++ 侧阈值（tokens.h）与文档记录一致
 # ---------------------------------------------------------------------------
 #: 文档 docs/hardcoded-parameters.md 里登记的 C++ 侧值。任何一侧改了，

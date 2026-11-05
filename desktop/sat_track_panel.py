@@ -26,8 +26,12 @@ from PySide6.QtWidgets import (
 
 from tokens import tokens
 
-# 过境结束阈值（与 sat_tracker.DEFAULT_MIN_ELEVATION_DEG 一致）。
-_MIN_ELEVATION_DEG = 5.0
+# 过境结束阈值 = 可见门（5°），不是过境列表的峰值筛选门（10°）。
+from mbdsdr_ai.sat_passes import (
+    PASS_MIN_ALT_DEG,
+    VISIBLE_MIN_ALT_DEG,
+)
+_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG
 
 
 class SatTrackPanel(QFrame):

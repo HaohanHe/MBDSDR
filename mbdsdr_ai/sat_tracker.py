@@ -47,6 +47,8 @@ from .tle_integrity import accuracy, freshness, verify_identity  # noqa: E402
 from .sat_passes import (
     GroundStation,
     SatellitePass,
+    PASS_MIN_ALT_DEG,
+    VISIBLE_MIN_ALT_DEG,
     predict_passes,
     make_timescale,
     _parse_tle,
@@ -111,8 +113,9 @@ _BUILTIN_TLES: List[List[str]] = [
     ],
 ]
 
-# 默认过境结束阈值（仰角，度）。
-DEFAULT_MIN_ELEVATION_DEG = 5.0
+# 可见/跟踪退出阈值（仰角，度）。**不是过境列表的筛选门**：
+# 列表用 sat_passes.PASS_MIN_ALT_DEG（10°）。见 sat_passes.py 常量段。
+DEFAULT_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG
 
 # TLE 刷新：请求（DNS+连接+读）墙钟硬截止，覆盖 requests timeout 管不到的
 # getaddrinfo 阶段（黑洞网络下 DNS 可无限阻塞）。
@@ -566,10 +569,15 @@ class SatelliteTracker:
         return float(pos["elevation"]) >= min_elevation
 
     # ------------------------------------------------------------- 下一次过境
-    def next_pass(self, min_alt: float = DEFAULT_MIN_ELEVATION_DEG,
+    def next_pass(self, min_alt: float = PASS_MIN_ALT_DEG,
                   hours: float = 24.0,
                   start_unix: Optional[float] = None) -> Optional[SatellitePass]:
         """预测选中卫星未来 ``hours`` 小时内的下一次过境（AOS→中天→LOS）。
+
+        默认门 = 对外承诺的**过境**门 ``PASS_MIN_ALT_DEG``（10°）。要按
+        可见门（5°）算，必须显式传 ``VISIBLE_MIN_ALT_DEG`` 并注明用途——
+        历史 bug 就是这里默认拿了 5° 去调默认 10° 的 ``predict_passes``，
+        使"下一次过境"与直接预测给出两个门。
 
         未选卫星/无观测者位置/无过境返回 None。``start_unix`` 显式钉死起点
         （测试/回放）；缺省取 TimeEngine，与 current_position 同一时间源。

@@ -1018,7 +1018,11 @@ class SDRController:
             return {"error": "not_available", "suggestion": "该 NORAD 编号不在内置表中。"}
         try:
             from ..decoders import BUILTIN_TLE
-            from ..sat_passes import GroundStation, predict_passes
+            from ..sat_passes import (
+                GroundStation,
+                PASS_MIN_ALT_DEG,
+                predict_passes,
+            )
             from ..orbit import fetch_tle_record, tle_epoch_iso
             from ..tle_integrity import accuracy, freshness, verify_identity
 
@@ -1069,9 +1073,12 @@ class SDRController:
             from ..new_spacetime import get_time_engine
             start_unix = get_time_engine().now_unix()
             passes = predict_passes([name, line1, line2], gs, hours=24.0,
-                                    min_alt=10.0, start_unix=start_unix)
+                                    min_alt=PASS_MIN_ALT_DEG,
+                                    start_unix=start_unix)
             if not passes:
-                return {"error": "no_pass", "suggestion": "未来 24h 内无高于 10° 的过境。"}
+                return {"error": "no_pass",
+                        "suggestion":
+                        f"未来 24h 内无高于 {PASS_MIN_ALT_DEG:g}° 的过境。"}
             p = passes[0]
 
             def _fmt(dt) -> str:
