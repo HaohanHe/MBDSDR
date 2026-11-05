@@ -32,6 +32,20 @@ DOC_PATH = os.path.join(ROOT, "docs", "learn", "decoder-capability-matrix.md")
 
 sys.path.insert(0, ROOT)
 
+
+def _load_sensitivity():
+    """同一份口径来源：灵敏度脚本里的 MODE_BASIS / 默认网格，避免两处漂移。"""
+    import importlib.util
+
+    path = os.path.join(ROOT, "scripts", "decode_sensitivity.py")
+    spec = importlib.util.spec_from_file_location("decode_sensitivity", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+SENSITIVITY = _load_sensitivity()
+
 TRUTH_LABELS = {
     "real": "真实",
     "partial": "部分",
@@ -148,18 +162,46 @@ EVIDENCE = {
     ),
 }
 
-# 合成 AWGN 灵敏度基线快照（scripts/decode_sensitivity.py 的实测结果）。
+# 合成 AWGN 灵敏度基线快照（scripts/decode_sensitivity.py 的实测结果，2026-11-06）。
 # 只用于「同实现内相对比较」，不是法规/接收机门限；换机器/换 numpy 版本会
-# 有 ±1 档抖动，故 tests/test_decode_sensitivity.py 只校验快照与实跑结果相差
+# 有 ±1 次抖动，故 tests/test_decode_sensitivity.py 只校验快照与实跑结果相差
 # 不超过 2 dB，并把「以实跑为准、快照过期要刷新」写进文档正文。
-SENSITIVITY_SNAPSHOT_DATE = "2026-11-05"
+# 每模式口径（噪声域/带宽/SNR）与档位网格不在这里重复，统一取自
+# scripts/decode_sensitivity.py 的 MODE_BASIS / MODE_DEFAULT_GRID。
+SENSITIVITY_SNAPSHOT_DATE = "2026-11-06"
 SENSITIVITY_SEED = 20261104
 SENSITIVITY_TRIALS = 20
 SENSITIVITY_SNAPSHOT = {
-    "ais": {"threshold_snr_db": 8.0, "threshold_100pct_snr_db": 10.0},
-    "adsb": {"threshold_snr_db": 6.0, "threshold_100pct_snr_db": 8.0},
-    # APRS 是鉴频后 48k 音频域 SNR，与上面两行的复基带口径不可横向换算。
-    "aprs": {"threshold_snr_db": 0.0, "threshold_100pct_snr_db": 2.0},
+    "ais": {
+        "threshold_snr_db": 8.0, "threshold_100pct_snr_db": 10.0,
+        "first_success_snr_db": 6.0, "critical_band_db": [6.0, 10.0],
+        "first_failure_code": "nothing_detected", "monotonic": True,
+    },
+    "adsb": {
+        "threshold_snr_db": 2.0, "threshold_100pct_snr_db": 2.0,
+        "first_success_snr_db": -2.0, "critical_band_db": [-2.0, 2.0],
+        "first_failure_code": "preamble_not_found", "monotonic": True,
+    },
+    "aprs": {
+        "threshold_snr_db": 0.0, "threshold_100pct_snr_db": 2.0,
+        "first_success_snr_db": -2.0, "critical_band_db": [-2.0, 2.0],
+        "first_failure_code": "crc_failed", "monotonic": True,
+    },
+    "ft4": {
+        "threshold_snr_db": -20.0, "threshold_100pct_snr_db": -20.0,
+        "first_success_snr_db": -22.0, "critical_band_db": [-22.0, -20.0],
+        "first_failure_code": "ldpc_parity_failed", "monotonic": True,
+    },
+    "pocsag": {
+        "threshold_snr_db": 6.0, "threshold_100pct_snr_db": 8.0,
+        "first_success_snr_db": 2.0, "critical_band_db": [2.0, 8.0],
+        "first_failure_code": "address_not_recovered", "monotonic": True,
+    },
+    "acars": {
+        "threshold_snr_db": 2.0, "threshold_100pct_snr_db": 2.0,
+        "first_success_snr_db": 0.0, "critical_band_db": [0.0, 2.0],
+        "first_failure_code": "nothing_detected", "monotonic": True,
+    },
 }
 
 # 不走 decode_router 能力表的独立解码链（同一张矩阵里一并交代）
@@ -320,37 +362,58 @@ def render() -> str:
     out.append("")
     out.append("## 灵敏度基线（合成 AWGN，仅供相对比较）")
     out.append("")
-    out.append("上表回答「是不是真的」；这张小表回答「同一实现里谁更耐噪」。"
-               "AIS/ADS-B 的口径是**复基带突发内平均每样本 SNR**；APRS 是"
-               "**鉴频后 48k 音频域**的每样本 SNR（两者不可横向换算）。"
-               "信号由仓内编码器/fixture 合成、注入白噪声后交给本仓解码器，"
-               "成功 = CRC/FCS 通过且字段与合成真值一致。")
+    out.append("> 全部为**合成 fixture + AWGN，非 OTA**。不同模式的噪声域/带宽口径"
+               "不同，**dB 值不可横向比较**；这张表只钉方向性、90% 档、100% 档、"
+               "临界区间与首个失败码，不钉具体 dB 数值。")
     out.append("")
-    out.append("| 模式 | 90% 成功率所需 SNR | 首次 100% 的 SNR | 采样条件 |")
-    out.append("|---|---|---|---|")
-    out.append(
-        f"| `ais` | {SENSITIVITY_SNAPSHOT['ais']['threshold_snr_db']:g} dB | "
-        f"{SENSITIVITY_SNAPSHOT['ais']['threshold_100pct_snr_db']:g} dB | "
-        "GMSK 9600 bit/s，fs=48000（9600×5），单帧 Type 1 |")
-    out.append(
-        f"| `adsb` | {SENSITIVITY_SNAPSHOT['adsb']['threshold_snr_db']:g} dB | "
-        f"{SENSITIVITY_SNAPSHOT['adsb']['threshold_100pct_snr_db']:g} dB | "
-        "1090ES PPM 1 Mbit/s，fs=4e6（4 样本/bit），DF17 识别帧 |")
-    out.append(
-        f"| `aprs` | {SENSITIVITY_SNAPSHOT['aprs']['threshold_snr_db']:g} dB | "
-        f"{SENSITIVITY_SNAPSHOT['aprs']['threshold_100pct_snr_db']:g} dB | "
-        "Bell 202 AFSK 1200bd，48k 音频，2 帧 AX.25（合成 wav fixture） |")
+    out.append("| 模式 | 口径（噪声域｜带宽｜SNR） | 档位网格 | 90% 档 | 100% 档 "
+               "| 临界区间 | 首个失败码 | 是否单调 |")
+    out.append("|---|---|---|---|---|---|---|---|")
+    for mode in ("ais", "adsb", "aprs", "ft4", "pocsag", "acars"):
+        snap = SENSITIVITY_SNAPSHOT[mode]
+        basis = SENSITIVITY.MODE_BASIS[mode]
+        grid = SENSITIVITY.MODE_DEFAULT_GRID[mode]
+        band = snap["critical_band_db"]
+        mono = ("是" if snap["monotonic"]
+                else "否（边缘效应，未解释机理）")
+        out.append(
+            f"| `{mode}` | {basis['domain']}｜{basis['bandwidth']}｜{basis['snr']} | "
+            f"{grid[0]:g}..{grid[-1]:g} dB（{len(grid)} 档 / "
+            f"{SENSITIVITY_TRIALS} 次） | "
+            f"{snap['threshold_snr_db']:g} dB | "
+            f"{snap['threshold_100pct_snr_db']:g} dB | "
+            f"{band[0]:g}..{band[1]:g} dB | "
+            f"`{snap['first_failure_code']}` | {mono} |"
+        )
+    out.append("")
+    out.append("临界区间 = 「首个成功率 > 0 的档」到「首次 100% 的档」；相邻档成功数"
+               "允许回落 ≤1 次（20 次/档下的 ±1 次抖动），回落更多即判非单调。"
+               "每个模式的噪声域/带宽/SNR 口径由同一份 `MODE_BASIS` 生成，"
+               "改口径必须改 `scripts/decode_sensitivity.py` 并刷新本文件。")
+    out.append("")
+    out.append("**非单调如实登记（不挑好看档位当结论）**：ADS-B 频偏是与 SNR 正交的"
+               "另一维，不在上表档位内。本轮用同一 8 MHz/3 帧 fixture 复测"
+               "（SNR 0 dB、6 次/偏置）：0 kHz 5/6、±2 kHz 5/6、±5 kHz 1/6、"
+               "±10 kHz 5/6、±20 kHz 4/6——**非单调**，标「边缘效应，未解释机理」，"
+               "不拿 ±10 kHz 的恢复当结论（与另一组 3 次/档的小样本观测"
+               "±2 kHz 3/3、±5 kHz 2/3、±10 kHz 3/3 同型）。")
+    out.append("")
+    out.append("**POCSAG 的 fixture 敏感性**：上表固定 1200 bd / 地址 54321 / HELLO。"
+               "探索阶段在同一解码器上换 512/2400 bd 或其他地址时，出现过高速档"
+               "回落（如 25 dB 反而掉到 17/20）与低于 100% 的平台——未解释机理，"
+               "故本表只报这一组固定 fixture 的档位，不外推到其他波特率/地址。")
     out.append("")
     out.append(f"快照日期 {SENSITIVITY_SNAPSHOT_DATE}，种子 {SENSITIVITY_SEED}，"
                f"每档 {SENSITIVITY_TRIALS} 次。**以实跑为准**，过期就重新生成：")
     out.append("")
     out.append("```bash")
-    out.append("python scripts/decode_sensitivity.py --modes ais,adsb,aprs \\")
-    out.append("    --snr -10:16:2 --trials 20 --seed 20261104 --md sensitivity.md")
+    out.append("python scripts/decode_sensitivity.py --trials 20 --seed 20261104 \\")
+    out.append("    --md sensitivity.md")
     out.append("```")
     out.append("")
-    out.append("三条必须一起读的限定：合成波形无多径/无频偏/无采样时钟误差；"
-               "该 SNR 不是天线口面 SNR，也不是任何法规门限；"
+    out.append("三条必须一起读的限定：合成波形无多径/无频偏/无采样时钟误差"
+               "（ADS-B 频偏为另行单列的正交维度）；该 SNR 按各模式自己的域与"
+               "fs/2 噪声带宽定义，不是天线口面 SNR，也不是任何法规门限；"
                "它只证明「本实现相对本实现的耐噪性」，不能证明「能在天上收到」。")
     out.append("")
     out.append("## 离线批处理与结构化审计")
