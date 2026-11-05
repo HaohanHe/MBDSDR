@@ -534,3 +534,16 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 > 与热插拔 10 次基线的关系：`tests/test_backend_reconnect_stress.py`（线程 1→1、句柄 333→333）证明的是 **`SDRBackend`/接收流水线不泄漏**，不是「桌面产品能热插拔」。两者不可互相替代；本条登记的桌面缺口以 L48 的必红用例为准。
 
+## 附 O：卫星过境数据/文案三条实测（2026-11-05，卫星过境线追加）
+
+> 口径：TLE 老化用 ISS 同根数合成 TLE（历元 = 运行时刻 − 0/30/90/365 天，校验和重算），
+> 站址 39.9°N/116.4°E/0 m，24 h 窗口、峰值门 10°；新鲜基准首条中天 13:35:01 UTC / 17.58°。
+> 「真实中天时刻」= 用新鲜 TLE 的首条中天时刻，再用老化 TLE 反算该瞬间仰角。
+> 合成 TLE 只改历元、不含真实 ISS 的机动/大气漂移，故下列偏差是**下界**，不是上限。
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L50 | **TLE 老化后过境仍照算，且看起来和新 TLE 一样** | 30 天：首条预测 20:47:47 / 12.18°（较新鲜首条 +7h12m），真实中天时刻 **-43.38°**（地平线下）。90 天：01:28:54 / 88.55°（+11h53m），真实中天时刻 **-27.95°**。365 天：01:24:20 / 10.87°（+11h49m），真实中天时刻 **-25.30°**。三者 `tier=dead`、`accuracy_risk=unusable`、`time_precision_s=60`。注意 `time_precision_s=60` 是**预测时刻精度**约 60 秒，不是卫星位置精度 | **已修（可见性）**：`SatellitePass` 带 `tle_age_days/tle_tier/accuracy_note`（05f3a6b5）；面板表格追加「（TLE 失效 365 天）」，提示区原文「TLE 提醒：1 颗星的星历已过期/失效（最老 365 天）：ISS (ZARYA)。轨道已不可信，过境时刻仅供占位，必须刷新星历；time_precision_s=60 表示预测时刻精度约 60 秒（不是卫星位置精度）。」（0232887c） | `pytest tests/test_tle_age_visibility.py tests/test_pass_ui_warnings.py`；把老 TLE 的 age/tier 去掉或改回「新鲜」即红 |
+| L51 | **全表 ×72h 预算：面板只能走 TimelineEngine，禁止改回 `sat_passes`** | N=6（`DEFAULT_SATELLITES` **全表**，不是只算选中）：TimelineEngine 60s 步长 总 **0.187s** / 均 **0.028s** / 最慢 ISS **0.038s** / 83 条；N=12 实测 **0.232s** / 164 条。`orbit.predict_passes_report`（60s+2s）**1.311s** / 均 0.218s / 最慢 NOAA19 0.234s。`sat_passes.predict_passes`（单星控制器路径，含细扫）**16.5s** / 均 2.75s / 最慢 NOAA18 3.26s；线性外推 N=12 约 **33s** | **已确认 + 已约束**：面板对 `DEFAULT_SATELLITES` 全表计算；N 翻倍对 TimelineEngine 仍 <0.3s，可接受；`sat_passes` 路径**不可用于 UI 同步**（N=12 约 33s），只允许单星按需（`get_satellite_pass`）。谁把面板引擎换成 `sat_passes` 或改成只算选中，须重测并更新本条 | 按本条数字复跑；面板路径实测 <0.3s、全表条数随 N 翻倍；若改路径后 >1s 或条数不随 N 增长即红 |
+| L52 | **`station_warning` 的真实可见面（不是「进了日志就算」）** | (0,0) 控制器实测返回 **2 条**并带 `station_warning="null_island_0_0（显式输入坐标恰为 0,0（几内亚湾）；照常计算，但位置可疑）"`。可见面：SDR 工具 `_satellite_passes` 首行、agent `_passes` 顶层字段、MCP `get_satellite_pass` 返回字段、控制器返回值、面板提示区（新增）；不可见面：状态栏不展示过境结果（仅天空图 3s 瞬态提醒）；仓库无过境导出功能，MCP JSON 是唯一导出面（含该字段） | **已修（面板 + AI 文本）**：`sdr_tools` 首行「站址提醒：…」（cff501fc）；面板提示区原文「站址提醒：null_island_0_0（…几内亚湾）…」（0232887c）；`orbit.degraded` 中站址条目改到末尾，不再抢 `identity_mismatch`/`tle_dead` 首条（f2c65c46） | `pytest tests/test_station_warning_visibility.py tests/test_pass_ui_warnings.py mbdsdr_ai/tests/test_tle_integrity.py`；删掉首行文案、面板不显示，或站址条目回到 degraded 首位即红 |
+
