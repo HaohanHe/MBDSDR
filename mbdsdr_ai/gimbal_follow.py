@@ -197,12 +197,14 @@ class PointingErrorRecorder:
                 continue
             by_src.setdefault(src, []).append(err)
         readback = by_src.get("readback", [])
-        source_rows = {
-            k: {"samples": len(v),
-                "max_deg": max(v),
-                "mean_deg": sum(v) / len(v)}
-            for k, v in sorted(by_src.items())
-        }
+
+        def _row(v: List[float]) -> Dict[str, Any]:
+            return {"samples": len(v),
+                    "max_deg": max(v),
+                    "mean_deg": sum(v) / len(v),
+                    "rms_deg": math.sqrt(sum(x * x for x in v) / len(v))}
+
+        source_rows = {k: _row(v) for k, v in sorted(by_src.items())}
         if readback:
             pose_source = "readback"
         elif by_src.get("simulated"):
@@ -214,7 +216,7 @@ class PointingErrorRecorder:
         if not n:
             return {"samples": 0, "cmd_max_deg": None, "cmd_mean_deg": None,
                     "cmd_rms_deg": None, "pose_max_deg": None,
-                    "pose_mean_deg": None, "pose_samples": 0,
+                    "pose_mean_deg": None, "pose_rms_deg": None, "pose_samples": 0,
                     "pose_source": "none", "pose_error_by_source": {},
                     "last_cmd_deg": None, "last_pose_deg": None,
                     "elapsed_total_s": 0.0}
@@ -230,6 +232,8 @@ class PointingErrorRecorder:
             # pose_* 只统计真实回读；模拟/未知来源单列在 pose_error_by_source。
             "pose_max_deg": (max(readback) if readback else None),
             "pose_mean_deg": (sum(readback) / len(readback) if readback else None),
+            "pose_rms_deg": (math.sqrt(sum(x * x for x in readback) / len(readback))
+                             if readback else None),
             "pose_samples": len(readback),
             "pose_source": pose_source,
             "pose_error_by_source": source_rows,

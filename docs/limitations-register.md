@@ -31,7 +31,7 @@
 | L4 | 听感验收（链内 AGC、长时音高漂移） | 同上文档「不可验声明」；本轮全程 `MBDSDR_NULL_AUDIO=1` | 未验证 | 用户放行声卡后人工听；数据面（导频/RMS/频谱含量）已另行验证 |
 | L5 | NanoVNA 命令细节（`vbat`/`freqoffset`/`edelay`/`averages`） | `docs/learn/nanovna/protocol-study.md` 逐行标「待真机验证」；SOLT 已于 2026-10-23 真机验过 | 部分真验 | 真机逐条发命令并记录回显；单位/上限语义以实测为准 |
 | L6 | 物理 arm64 Chromebook 启动/USB 直收/rtl_tcp | `docs/CHROMEOS_CROSTINI_SDR.md`（qemu 交叉编译已过，物理机未验） | 未验证 | 真机启动 + `QT_QPA_PLATFORM=offscreen` ctest + USB 直收 |
-| L43 | 云台追踪误差口径：指令侧 vs 机械侧 | 天空/云台线 `25740f82`；`PointingErrorRecorder` + `MainWindow.gimbal_tracking_report()` / `gimbal_accuracy_text()` | 仅自测 | 真 rotator/IMU；`pose_error_by_source.readback.samples > 0` 后 `pose_*` 才可作机械精度；模拟过境的 0.2° 不得对外称云台精度；UI 与文档在不可报时都写原因（tooltip/停机文案），绝不显示 0° |
+| L43 | 云台追踪误差口径：指令侧 vs 机械侧 | 天空/云台线 `25740f82`/`cac5d1a7`；`PointingErrorRecorder` + `MainWindow.gimbal_tracking_report()` / `gimbal_accuracy_text()`；模拟服务器 `scripts/hw_acceptance/rotctld_sim.py` + `ring5_gimbal_sim.py` | 仅自测 | 真 rotator/IMU；`pose_error_by_source.readback.samples > 0` 后 `pose_*` 才可作机械精度；模拟过境的 0.2° 不得对外称云台精度；UI 与文档在不可报时都写原因（tooltip/停机文案），绝不显示 0°。**模拟 rotctld 服务器只给「理想电机 + 传输延迟 + 量化 + 抖动」，不含齿隙/风力/电机曲线；其结论状态恒为 `SIMULATED`，不计 PASS，且 `mechanical_accuracy_claimable` 在模拟下永远 False**（`rotctld_sim` 的姿势样本进 `pose_error_by_source.simulated`，`readback` 桶必须 0 样本） |
 
 ## 2. 待真样本（有链路、无真实信号）
 

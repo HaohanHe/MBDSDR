@@ -115,10 +115,14 @@ class RotctldClient:
       \\chkstop      停止
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 4533, timeout: float = 2.0):
+    def __init__(self, host: str = "127.0.0.1", port: int = 4533, timeout: float = 2.0,
+                 simulated: bool = False):
         self.host = host
         self.port = port
         self.timeout = timeout
+        #: 对端是模拟服务器（scripts/hw_acceptance/rotctld_sim.py）时置 True。
+        #: 协议层仍是 rotctld 读回，但语义是「模拟执行」，不能当机械精度。
+        self.simulated = bool(simulated)
         #: 最近一次命令失败原因（超时/无应答/连接失败），供上层诚实上报
         self.last_error = ""
 
@@ -266,11 +270,14 @@ class GimbalController:
         self.status.backend_info = "板载 ESP32 LEDC：方位 IO14 / 俯仰 IO15"
         return self.status
 
-    def use_rotctld(self, host: str = "127.0.0.1", port: int = 4533) -> GimbalStatus:
-        self.rotctld = RotctldClient(host, port)
+    def use_rotctld(self, host: str = "127.0.0.1", port: int = 4533,
+                    simulated: bool = False) -> GimbalStatus:
+        self.rotctld = RotctldClient(host, port, simulated=simulated)
         self.status.mode = GimbalMode.ROTCTLD
         self.status.connected = self.rotctld.ping()
-        self.status.backend_info = f"Hamlib rotctld {host}:{port}"
+        self.status.backend_info = (
+            f"Hamlib rotctld {host}:{port}"
+            + ("（模拟服务器：指令链模型，非真机）" if simulated else ""))
         return self.status
 
     def set_pose_provider(self, provider: Callable[[], GimbalPose]):
@@ -302,7 +309,10 @@ class GimbalController:
                 pose = self.rotctld.get_position()
                 self.status.current = pose
                 self._pose_valid = True
-                self._pose_source = "rotctld"
+                # 模拟服务器：协议上是 rotctld 读回，但来源必须标 simulated，
+                # 否则会被误当机械精度（见 limitations-register L43）。
+                self._pose_source = ("simulated" if self.rotctld.simulated
+                                     else "rotctld")
                 return pose
             except Exception:
                 pass
