@@ -1,6 +1,6 @@
 {
   "_schema": "mbdsdr frame_layout_spec v1 —— 帧布局库（同步字/字段布局/CRC 一律配置注入）",
-  "_note": "字段定义支持：name/offset(字节)/len(字节)/type(uint8..uint64/int8..int64_be|_le/hex/ascii)/scale/offset_val/unit/bit_offset/bit_len(可选位级)。CRC 由 crc 字段指名（名字必须能在 mbdsdr_ai.crc 预设表里找到）。",
+  "_note": "字段定义支持：name/offset(字节)/len(字节)/type(uint8..uint64/int8..int64_be|_le/hex/ascii)/scale/offset_val/unit/bit_offset/bit_len(可选位级)。CRC 由 crc 字段指名（名字必须能在 mbdsdr_ai.crc 预设表里找到）。len=-1 是哨兵值，含义为「从该 offset 到帧尾的剩余全部字节」，不是「长度未知」也不是「长度非法」；当前解释器（mbdsdr_ai/verify_chain.py::extract_fields）只展开 name=data 的字段，其它字段名写 -1 会按越界报错。实例：ccsds_tc_classic 的 data 字段 offset=5、len=-1 → 从第 6 字节到帧尾；该帧帧尾固定 2 字节 FECF，所以这个「剩余全部」含 FECF，取纯数据需去掉末 2 字节。",
   "astu_1_tm_example": {
     "profile": "astu_1",
     "honesty": "ASRTU-1 教程只给到 CCSDS TM 体制（ASM+卷积+扰码），未公开帧内字段布局——本布局是示例布局，用于验证字段抽取引擎，不是该星真实遥测格式",

@@ -117,6 +117,28 @@ def test_frame_layout_load_fields():
     assert "battery_mv" in names and "callsign" in names
 
 
+def test_negative_len_sentinel_is_documented():
+    """任何 len<0 的字段都必须在 _note 里找到哨兵解释（防无说明的哨兵值）。
+
+    len=-1 不是「长度未知」，而是「从该 offset 到帧尾的剩余全部字节」；
+    解释器（verify_chain.extract_fields）只对 name=data 展开，其它字段名
+    写 -1 会按越界报错。这条口径必须写在文件里，否则读表的人只能猜。
+    """
+    table = json.loads((DATA_DIR / "frame_layouts.json").read_text("utf-8"))
+    note = str(table.get("_note", ""))
+    sentinels = [(layout_name, str(spec.get("name")))
+                 for layout_name, layout in table.items()
+                 if not layout_name.startswith("_")
+                 for spec in layout.get("fields", [])
+                 if int(spec.get("len", 0)) < 0]
+    assert sentinels, "帧布局库里应有 len=-1 哨兵字段（否则本测试失去对象）"
+    assert "len=-1" in note and "帧尾" in note, (
+        f"_note 未写清 len=-1 = 「从该 offset 到帧尾的剩余全部」；"
+        f"存在无说明的哨兵值：{sentinels}")
+    for layout_name, _ in sentinels:
+        assert layout_name in note, f"{layout_name} 的 len=-1 未在 _note 举例"
+
+
 def test_ccsds_tc_layout_matches_official_annex_f_example():
     """TC 布局按官方样例钉住 5 字节主头、数据偏移和 FECF 边界。"""
     layout = SP.load_frame_layout("ccsds_tc_classic")

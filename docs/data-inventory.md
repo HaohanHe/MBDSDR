@@ -309,6 +309,49 @@ scanned data files: 384
 
 ---
 
+## 3a. 非星表配置数据（声明 vs 实测）
+
+`mbdsdr_ai/data/` 除星表外还有 6 份配置表（卫星链路、卫星剖面、帧布局、
+DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段表。
+下面是逐文件实测值与文档/内嵌声明的对拍。
+
+| 文件 | 声明 | 实测 | 差 |
+|---|---|---|---|
+| `sat_links.json` | 无条数声明；每条带 `source`/`culture`，只含下行 | 8 星 / 9 条链路，全部 `direction=downlink`；卫星级 `source` 8/8、`culture` 8/8；频点 137.1–436.795 MHz | 0 |
+| `sat_profiles.json` | 7 剖面，逐条带 `source` | 7 剖面，`source` 7/7；`baud` 缺 5、`coding` 缺 5（DVB-S2/模拟体制本就不适用） | 0 |
+| `frame_layouts.json` | 2 布局，逐条 honesty；`_note` 解释 `len=-1` | 2 布局；字段偏移不重叠；CRC 名均可在 `mbdsdr_ai.crc` 解析 | 0（哨兵说明已补，见下） |
+| `dvbs2_bch.json` | 21 模式码 | normal 11 + short 10；short 的 9/10 标 `unavailable` 并带原因（表 5b 全 NA、表 7b 无 q 条目） | 0 |
+| `dvbs2_ldpc_tables.json` | 21 张表 + `source_files.sha256` | 21 = normal 11 + short 10；`n>k>0`、`q>0` 全部成立；短帧缺 9/10 与 BCH 一致 | 0（外部源不可复核，见下） |
+| `moon_albedo_lola_2ppd.npz` | LRO-L-LOLA-4-GDR-V1.0，Public Domain | `albedo` (360,720) float32，范围 [0.1359, 0.4716] | 0 |
+| `desktop/bandplan.json` | 文档无条数声明 | 30 条 bands | — |
+
+口径要点：
+
+1. **`frame_layouts.json` 的 `len=-1` 是哨兵值**，含义为「从该 `offset` 到
+   帧尾的剩余全部字节」，不是长度未知。当前解释器
+   （`mbdsdr_ai/verify_chain.py::extract_fields`）只展开 `name=data` 的字段，
+   其它字段名写 `-1` 会按越界报错。实例：`ccsds_tc_classic` 的 `data`
+   （`offset=5`）从第 6 字节取到帧尾，因此**含帧尾 2 字节 FECF**，取纯数据
+   需去掉末 2 字节。该口径写在文件 `_note` 里，并由
+   `test_negative_len_sentinel_is_documented` 钉住：新增 `len=-1` 字段而
+   `_note` 不解释即红。
+2. **`dvbs2_ldpc_tables.json` 的 `source_files.sha256` 是生成时记录，
+   外部源文件（`ldpc_normal.json` / `ldpc_short.json`）不随仓分发**：
+   本仓只能验证表内容自洽（21 张 = normal 11 + short 10、`n>k>0` 且
+   `q>0`）以及与 BCH 表的短帧缺 9/10 一致；**不能验证与上游同源**。
+   将来把源文件入库、或让生成脚本在构建时校验，再升级为可复核。
+3. **同频不是重复**：`sat_links.json` 的 137.100 MHz 同属 NOAA-19（APT）与
+   METEOR-M N2（LRPT）；`sat_profiles.json` 的 1697 MHz 同属 FY-4A 与
+   FY-4B（LRIT）。`identify_by_freq` 返回完整命中列表，**只取第一条的调用方
+   会漏**；`mbdsdr_ai/tests/test_sat_links.py::test_identify_by_freq_hits_and_empty`
+   钉住「同频共存，诚实并列，不强行裁决」。
+4. **`bandplan.json` 的 30 条与「38 项」不是同一口径**：38 是
+   `tests/test_spectrum_bandplan.py` 的**用例数**（实测 collect 与 run 均 38），
+   与频段条数无关；`bandplan.json` 历史只有 19 条（`4d23308f`）→ 30 条
+   （`a72996fb`）两档，从未有过 38 条。因此两边都不过期，是两件事被混称。
+
+---
+
 ## 4. 已知边界
 
 - 星表覆盖只到 V ≤ 9.0（`CATALOG_DEPTH_MAG`）。`select_for_view` 收到更深
@@ -333,4 +376,6 @@ python scripts/check_data_licenses.py
 python scripts/check_data_licenses.py --list
 python scripts/check_data_licenses.py --probe
 python -m pytest tests/test_data_licenses.py -q
+# 3a) 帧布局哨兵口径 + 链路同频并列
+python -m pytest mbdsdr_ai/tests/test_sat_profile.py mbdsdr_ai/tests/test_sat_links.py -q
 ```

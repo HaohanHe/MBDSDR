@@ -63,6 +63,10 @@ def identify_by_freq(freq_hz: float, tolerance_hz: float = 3000.0) -> List[Dict[
 
     命中返回条目列表（带 _link_name 与命中的 link）；无命中返回空列表
     （诚实空态，调用方自己决定怎么呈现）。tolerance 必须为正，否则报错。
+
+    同一频点可能被多颗星共用（本表实测：137.100 MHz 同属 NOAA-19 APT 与
+    METEOR-M N2 LRPT），命中按列表**并列返回**、不强行裁决——**只取第一条
+    的调用方会漏掉其余命中**，展示/调谐建议必须遍历整个列表。
     """
     freq = float(freq_hz)
     tol = float(tolerance_hz)
