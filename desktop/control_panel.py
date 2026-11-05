@@ -664,14 +664,23 @@ class ControlPanel(QWidget):
         self.squelch_val.setMinimumWidth(36)
         self.squelch_val.setMaximumWidth(80)
         sq_row.addWidget(self.squelch_val)
+        rx_layout.addLayout(sq_row)
+
+        # 「自动」独立成行（2026-11-06 窄排）：静噪行三项最小宽
+        # 60+84+43 + 两段 spacing 已占满右栏内容宽 242，再把「自动」塞进来
+        # 会把「静噪门限」压到 45、「-50 dB」压到 36（尺寸口径按
+        # sizeHint > width+2 计为挤压）。拆行后两行各自最小宽都 < 242，
+        # 文字不再被压缩；控件本体、信号接线、语义均未变。
+        sq_auto_row = QHBoxLayout()
         self.auto_squelch_check = QCheckBox("自动")
         self.auto_squelch_check.setToolTip(
             "自动跟踪噪声底（基线在任何模式下都会自动标定；"
             "关闭此项后基线锁定在最近一次标定，滑杆余量仍然生效）")
         self.auto_squelch_check.setChecked(True)
         self.auto_squelch_check.toggled.connect(self._on_auto_squelch_toggled)
-        sq_row.addWidget(self.auto_squelch_check)
-        rx_layout.addLayout(sq_row)
+        sq_auto_row.addWidget(self.auto_squelch_check)
+        sq_auto_row.addStretch(1)
+        rx_layout.addLayout(sq_auto_row)
 
         layout.addWidget(rx_group)
 

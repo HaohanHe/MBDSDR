@@ -365,36 +365,38 @@ after 完整可见）。
   `QLineEdit`（251→159 / 149→143，本身就是弹性输入框，最小宽 80，不是文字被截）。
   其余 8 项都在中央区的既有控件（含 `hintLabel` 长文案），非本批引入。
 
-#### §2.3.1 已知偏差：右栏最小宽 278↔356 两态（2026-11-06 实测，已修但计数仍超上限）
+#### §2.3.1 右栏最小宽 278↔356 两态 → 单一 278（2026-11-06 实测定案）
 
-打包线 `overlap` 步在 windows 1000×600 的挤压计数曾出现 **13 ↔ 15** 两态跳变：
-同 commit、同 DPI/字体指纹（windows DPR 1.5/行高 18，offscreen DPR 1.0/行高 13）、
-同命令，9 次里 **13/7 五次、15/9 四次**（5:4）；offscreen 4 次里 30/9 两次、
-36/15 两次。窗口 `minimumSizeHint` 两态恒为 960×633（windows）/1265×618（offscreen），
-跳变不在顶栏，而在右栏 `ControlPanel`：
+历史（修前）：同 commit、同指纹（windows DPR 1.5/行高 18，offscreen DPR 1.0/行高 13）、
+同命令，windows 9 次 = **13/7 五次、15/9 四次（5:4）**；offscreen 4 次 = 30/9 两次、
+36/15 两次。窗口 `minimumSizeHint` 两态恒定（960×633 / 1265×618），跳变在右栏
+`ControlPanel`：`preset_combo` 清空后最小宽缓存 292↔101，右栏随之 356↔278；
+356 那一支右端 **68 px 被裁**（`AlwaysOff` 滚动条不可达）。**修前 13/7 约 4/9
+概率兜不住。**
 
-| 量 | 13 态 | 15 态 |
-| --- | --- | --- |
-| `ControlPanel.minimumSizeHint()` | 356 | 278 |
-| `preset_combo.minimumSizeHint()` | 292 | 101 |
-| 面板内容宽（viewport=288） | 356（右端 68 px 被裁，无滚动条可达） | 288（完整可见） |
+三步处置与实测（每步 windows 9 次 + offscreen 4 次，同命令同指纹）：
 
-根因：`set_mode` / `_on_mode_changed` 把解调模式名（`"FM"`）当频段名传给
-`_populate_presets`，`clear()` 后预设列表为空；`QComboBox` 对占位长文本
-「（无预设：请用“自动扫台”或手动输入频率）」的最小宽缓存（292↔101）是否被
-失效取决于启动时序，右栏最小宽因此在 356↔278 间切换。**修前 13/7 的上限约
-4/9 概率兜不住。**
+| 步骤 | windows（1000×600 / 1344×700） | offscreen | 判定 |
+|---|---|---|---|
+| ① `b0a440e3`：预设跟频段 + 稳定最小宽策略 | **15/9 ×9**（单一） | **37/16 ×4** | 收敛成单一态，但比现行阈值多 **+2/+1**，`overlap` 必然 FAIL → 不结案 |
+| ② A：`setMinimumContentsLength` 16→8 | 15/9 ×9（未变） | **36/15 ×4** | 只把 `sizeHint` 由 280 缩到 176，让「挤压」计数少 1；最长预设文本实测 **416 px** 仍 > 右栏内容 288，文字照样省略 —— 改的是声明宽不是可见宽，**不采用** |
+| ③ B：静噪行把「自动」拆到独立行 | **13/7 ×9**（单一） | **35/14 ×4**（单一） | 真给行内腾出宽，两个被压的标签恢复 `sizeHint` |
 
-处置：已按 patch 修（`b0a440e3`，详见
-`docs/pending-patches/2026-11-06-preset-combo-min-width-stability.md`）：预设跟随
-频段 + `preset_combo` 改 `AdjustToMinimumContentsLengthWithIcon`/`Ignored`。
-修后复测：windows **15/9 九次（9:0 单一态）**、offscreen **37/16 四次（4:0）**。
+定案 = ①+③，`minimumContentsLength` 保持 **16**（与 `bookmark_combo` 同策略）。
+windows **13/7 九次**、offscreen **35/14 四次**，均 ≤ 现行 `TEMPORARY_WIDENED`
+（13/7、36/15）；`clipped` 恒 1（既有口径，在限内）。`ControlPanel.minimumSizeHint()`
+= 278 ≤ 内容宽 288，**右端不再被裁**。
 
-**遗留偏差（需尺寸/打包 owner 决定，本线未动阈值）**：单一态 15/9、37/16 分别比
-现行 `TEMPORARY_WIDENED`（windows 13/7、offscreen 36/15）多 **2 / 1**，`overlap`
-步会确定性 FAIL。旧的 13/7、36/15 只在面板撑到 356、右端 68 px 被裁时成立，是
-「裁字换少挤压项」的假绿。回到 13/7 需要真窄排（静噪行拆两行，释放约 61 px），
-或由 owner 按「内容完整可见」的新口径重定基线；二者落地前，本条按已知偏差登记。
+机制（B 的必要性）：右栏组框内容宽只有 242（windows），静噪行
+`60+84+43+48 + spacing` 需要 253，超出 11 px 全落在两个标签上
+（`静噪门限` 60→45、`-50 dB` 43→36）；拆行后两行各自最小宽 < 242，文字不再被压。
+语义、控件本体与信号接线均未改（`auto_squelch_check` 属性名不变）。
+
+反证：把「自动」放回静噪行即成 ① 的形态 —— 实测回到 **15/9（windows）**、
+**37/16（offscreen）**，与 `b0a440e3` 九次/四次结果逐字一致。
+
+附更正：旧表把 `preset_combo` 的 `sizeHint` 记成了 `minimumSizeHint`。实测两者同值：
+windows N=16 **216** / N=8 **144**；offscreen N=16 **280** / N=8 **176**。
 
 ### §2.4 左右栏（按需）
 

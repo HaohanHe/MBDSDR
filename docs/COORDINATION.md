@@ -693,6 +693,8 @@
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `desktop/control_panel.py` | 参数治理线/59ca04d1（preset_combo 宽策略 + 静噪行拆行；pid 见 claim 记录） | 2026-11-06 06:23 | 待定 |
+| `docs/COORDINATION.md` | 参数治理线/59ca04d1（本文件 §6.1 备忘 + 尺寸登记） | 2026-11-06 06:23 | 同笔 |
 
 > **干净窗口三条件（2026-11-06 立规；三者缺一，不得声称窗口干净）**
 >
@@ -830,6 +832,20 @@
 > `mbdsdr_ai/core/controller.py` / `docs/limitations-register.md` 及
 > `tests/test_{sat_track_copy,tle_age_visibility,station_warning_visibility,pass_ui_warnings}.py`，
 > 锁均已释放（`sat_track_panel.py` 后续由 UX 线窄屏重排接管）。
+
+> 备忘（2026-11-06，参数治理线/59ca04d1）：**claim 的 `--owner` 必须用
+> `线名/会话前 8 位`**（取自真实 session id，如 `参数治理线/59ca04d1`），
+> **禁止复用他线名字，也不要用无会话后缀的裸线名**。
+> 事故一：本线曾以 `owner=参数治理线`（无会话标识）claim 文件，硬编码线三次查
+> `claims.json` 都看不到对应条目、`release --owner 参数治理线` 返回 `RELEASE DENIED`，
+> 并据此**误**判本线在改 `control_panel.py`，白花一轮。
+> 事故二：改用 `owner=参数治理线-6ae85f56`（后缀取了**父会话** id，不是本会话）
+> 后，操作逻辑线接管时看到「心跳 14.2 分钟前、pid 38116 已不存在、但有在途改动」，
+> 无法确认这是谁，又白花一轮。
+> 判据：任何人从 owner 字面量都应能唯一反查到一条会话（`线名/会话前8位`）；
+> `status` 里出现「裸线名」或「后缀与本会话 id 不符」的 owner 即按命名违规处理
+> （不夺锁，先问一句）。`reason`/表内的「线名」列用同一写法，证据（pid、心跳、
+> 改动的文件与段落）一并写进表行或备注。
 
 ### 6.1.1 接管过期 claim 前必须查工作区（2026-11-05 事故后立规）
 
