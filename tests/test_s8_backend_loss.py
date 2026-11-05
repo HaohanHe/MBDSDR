@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import logging
+import threading
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -27,6 +28,7 @@ sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 
 
 class _StubBackend:
@@ -72,7 +74,6 @@ def window(isolated_profile, qtapp):
     desktop_settings.json，必须先把 HOME/APPDATA 重定向到临时目录。
     """
     import main_window as mw
-    from PySide6.QtTest import QTest
     w = mw.MainWindow()
     QTest.qWait(30)
     yield w
@@ -165,3 +166,87 @@ class TestS8BackendLoss:
         w._on_pipeline_read_failed("read_samples 连续无数据")
         assert w._active_sdr_backend is None, "连续三个周期仍无数据必须断开"
         assert w.statusBar().currentMessage().startswith("设备已断开：")
+
+
+class TestS8SelfResidualRisks:
+    """S8 自留风险的三条验收：双形态、标志复位、Timer 生命周期。"""
+
+    def test_planetarium_mode_does_not_false_alarm(self, window):
+        """流正常时进星象仪并保持 5 秒：不得误报掉线、不得写隐藏的 IDE 控件。"""
+        b = _StubBackend(connected=True, error="", age=0.1)
+        w = _prepare(window, b)
+        written = []
+        orig_set_text = w.status_conn.setText
+
+        def spy_set_text(text):
+            written.append(text)
+            orig_set_text(text)
+
+        w.status_conn.setText = spy_set_text
+        w._health_timer.start()          # 真实跑轮询：5 秒内会触发 5 次
+        assert w._health_timer.isActive()
+        try:
+            w.set_app_mode("planetarium")
+            QTest.qWait(5000)
+            assert w._app_mode == "planetarium"
+            assert "设备已断开" not in w.statusBar().currentMessage()
+            assert w._active_sdr_backend is b, "健康数据流不得被星象仪形态误判"
+            assert written == [], f"星象仪下隐藏的 IDE 控件被写文案：{written}"
+        finally:
+            w.status_conn.setText = orig_set_text
+            w.set_app_mode("ide")
+
+    def test_health_flag_resets_when_switching_to_a_silent_backend(self, window):
+        """A 出过帧 → 断开 → 连 B 始终不出帧：新连接必须清零标志且仍判掉线。"""
+        a = _StubBackend(connected=True, error="", age=0.1)
+        w = _prepare(window, a)
+        w._health_has_data = True              # A 确实出过帧
+        w._teardown_connection()
+        assert w._health_has_data is False, \
+            "断开必须清零，不能把 A 的「来过数据」带到 B"
+
+        b = _StubBackend(connected=True, error="", age=None)
+        w._active_sdr_backend = b
+        w._pipeline = _FakePipeline()
+        w._health_grace_until = 0.0
+        w._read_fail_signals = 0
+        for _ in range(3):
+            w._on_pipeline_read_failed("read_samples 连续无数据")
+        assert w._active_sdr_backend is None, \
+            "新设备一直不出帧也必须判掉线，不能被「本段从未出帧」豁免吞掉"
+
+    def test_health_timer_lifecycle_and_resource_baseline(self, window):
+        """停流水线/切设备后定时器必须停；连切 3 次线程与句柄回基线。"""
+        import psutil
+        proc = psutil.Process()
+        base_threads = threading.active_count()
+        base_handles = proc.num_handles()
+        w = _prepare(window, _StubBackend(age=0.1))
+        for i in range(3):
+            w._health_timer.start()
+            assert w._health_timer.isActive(), f"第 {i + 1} 次启动失败"
+            w._teardown_connection()
+            assert not w._health_timer.isActive(), \
+                f"第 {i + 1} 次拆连接后轮询仍在跑"
+            w._active_sdr_backend = _StubBackend(age=0.1)
+            w._pipeline = _FakePipeline()
+            w._health_grace_until = 0.0
+            w._health_has_data = True
+        assert threading.active_count() <= base_threads, \
+            f"线程未回基线：{threading.active_count()} > {base_threads}"
+        assert proc.num_handles() <= base_handles + 4, \
+            f"句柄未回基线：{proc.num_handles()} > {base_handles} + 4"
+
+
+def test_timer_stops_after_window_close(window):
+    """关窗口后轮询不得残留（否则关掉的窗口还会读 status、写状态栏）。
+
+    复用模块级窗口：独立再建一个 MainWindow 会绕过 isolated_profile 的
+    配置重定向（构造/关闭可能写回真实 desktop_settings.json）。
+    本用例定义在文件末尾，关闭后不再有后续用例依赖该窗口。
+    """
+    w = window
+    w._health_timer.start()
+    assert w._health_timer.isActive()
+    w.close()
+    assert not w._health_timer.isActive(), "closeEvent 后轮询仍在跑"
