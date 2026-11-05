@@ -143,6 +143,19 @@ class TestGK2APhysicalLayer(unittest.TestCase):
         self.assertEqual(list(data), list(range(256)))
 
 
+class TestVcduHeader(unittest.TestCase):
+    """CCSDS AOS VCDU 主头位布局：version 必须为 '01'（=1）。"""
+
+    def test_file_to_vcdus_version_is_01(self):
+        frames = file_to_vcdus(b"\x00" * 1000)
+        self.assertGreater(len(frames), 1)
+        for frame in frames:
+            self.assertEqual(len(frame), VCDU_LEN)
+            self.assertEqual((frame[0] >> 6) & 0x3, 1,
+                             "VCDU version 必须是 01")
+            self.assertEqual(((frame[0] & 0x3F) << 2) | (frame[1] >> 6), 0)
+
+
 class TestGK2AEndToEnd(unittest.TestCase):
     """端到端往返：图像 → IQ → 解码 → PNG。"""
 

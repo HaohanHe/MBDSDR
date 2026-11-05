@@ -1189,7 +1189,8 @@ def file_to_vcdus(file_buf: bytes, vcid: int = 10) -> List[bytes]:
 
     # 切 VCDU：每 VCDU 892B，头 6B，M_PDU 头 2B，净荷 884B
     vcdu_hdr = bytearray(6)
-    vcdu_hdr[0] = 0x00              # version=0
+    # CCSDS AOS VCDU 主头 version 固定为 '01'（=1），SCID_high=0。
+    vcdu_hdr[0] = 0x40              # version=01
     vcdu_hdr[1] = vcid & 0x3F       # SCID_low=0, VCID
     # counter 在封装时填
     vcdus = []

@@ -111,7 +111,7 @@ def build_vcdu(vcid: int, counter: int, mpdu_payload: bytes,
     """
     data = bytearray(VCDU_LEN)
     # VCDU 头
-    data[0] = ((0 & 0x03) << 6) | ((scid >> 2) & 0x3F)   # version=0, SCID high
+    data[0] = ((1 & 0x03) << 6) | ((scid >> 2) & 0x3F)   # version=01, SCID high
     data[1] = ((scid & 0x03) << 6) | (vcid & 0x3F)       # SCID low | VCID
     data[2] = (counter >> 16) & 0xFF
     data[3] = (counter >> 8) & 0xFF
@@ -154,6 +154,12 @@ class TestLRITFrameParams(unittest.TestCase):
         frame = frame[:1020]
         d = derandomize(frame)
         self.assertEqual(derandomize(d), frame)
+
+    def test_build_vcdu_header_version_is_01(self):
+        """CCSDS AOS VCDU 主头 version 必须为 '01'（=1）。"""
+        f = build_vcdu(vcid=1, counter=0, mpdu_payload=b"")
+        self.assertEqual((f[0] >> 6) & 0x3, 1)
+        self.assertEqual(((f[0] & 0x3F) << 2) | (f[1] >> 6), 0x10)  # SCID
 
 
 class TestSyncWordDetection(unittest.TestCase):
