@@ -44,7 +44,8 @@ DOCS_DIR = ROOT / "docs"
 SCAN_ROOT = ROOT
 
 FIXED_RE = re.compile(r"已修复|已修|已落地|已解决")
-NOT_VERIFIED_RE = re.compile(r"`not_verified`|未复核")
+# 「未复核」只有落在红项语境里才算状态；「未复核 claim」是协作时序，不是红项未验。
+RED_CONTEXT_RE = re.compile(r"槽|红项|测试|用例|状态|ctest|pytest|test_")
 OPEN_RE = re.compile(r"待修|未修|在途修")
 # 纯数字串（如采样率 3200000）不是提交 hash；要求至少含一个 a-f 字母。
 HASH_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b")
@@ -138,11 +139,13 @@ def _commit_exists(sha: str, cache: Dict[str, bool]) -> bool:
     return cache[sha]
 
 
-def _detect_statuses(text: str) -> List[str]:
+def _detect_statuses(text: str, context: str = "") -> List[str]:
     found: List[str] = []
     if FIXED_RE.search(text):
         found.append("fixed")
-    if NOT_VERIFIED_RE.search(text):
+    if "`not_verified`" in text or (
+        "未复核" in text and RED_CONTEXT_RE.search(context or text)
+    ):
         found.append("not_verified")
     if OPEN_RE.search(text):
         found.append("open")
@@ -155,12 +158,12 @@ def scan_file(path: Path, display: str, hash_cache: Dict[str, bool]) -> Tuple[Li
     lines = list(_iter_lines(path))
     for index, (number, raw) in enumerate(lines):
         text = _strip_quoted(raw)
-        statuses = _detect_statuses(text)
-        if not statuses:
-            continue
         # 原因/复跑命令允许落在相邻两行内（表格单元格会折行）。
         window = "\n".join(item for _n, item in lines[max(0, index - 2): index + 3])
         window_text = _strip_quoted(window)
+        statuses = _detect_statuses(text, window_text)
+        if not statuses:
+            continue
         keys = _item_keys(text)
         for status in statuses:
             hits.append(Hit(display, number, status))
