@@ -80,9 +80,11 @@ from ..celestial_geometry import (
     vec_from_azalt,
 )
 from .stars import (
+    DEFAULT_BORTLE,
     EXTINCTION_K,
     _EXTINCTION_MAX_DM,
     _EXTINCTION_MIN_ALT,
+    naked_eye_limit_mag,
 )
 
 __all__ = [
@@ -192,13 +194,8 @@ def compute_data_sha256(arrays: Dict[str, np.ndarray]) -> str:
 # ---------------------------------------------------------------------------
 # 星等/消光口径
 # ---------------------------------------------------------------------------
-def naked_eye_limit_mag(bortle: int = 3) -> float:
-    """裸眼极限星等基线（与 ``stars.star_draw`` 完全同一公式）。
-
-    ``star_draw`` 用 ``6.5 - 0.35 * max(0, int(bortle) - 3)``；Bortle<=3
-    时都是 6.5。这里保持一致，避免出现两套可见性阈值。
-    """
-    return 6.5 - 0.35 * max(0, int(bortle) - 3)
+# ``naked_eye_limit_mag`` 从 ``stars`` 导入（同一函数对象，不是同式副本）：
+# 绘制门与星表 LOD 门必须共用一条公式，见 stars.py 的"光害可见性口径"段。
 
 
 def detail_gain_mag(fov_deg: float) -> float:
@@ -224,7 +221,7 @@ def detail_gain_mag(fov_deg: float) -> float:
     return min(MAX_DETAIL_GAIN_MAG, max(0.0, gain))
 
 
-def limit_magnitude(fov_deg: float, bortle: int = 3) -> float:
+def limit_magnitude(fov_deg: float, bortle: int = DEFAULT_BORTLE) -> float:
     """给定视场 + Bortle 的极限星等 (天顶方向)。
 
     星体在低仰角还要叠加 ``extinction_delta_mag(alt)``（逐星），
@@ -235,7 +232,8 @@ def limit_magnitude(fov_deg: float, bortle: int = 3) -> float:
     return min(CATALOG_DEPTH_MAG, m)
 
 
-def effective_limit_mag(alt_deg: float, fov_deg: float, bortle: int = 3) -> float:
+def effective_limit_mag(alt_deg: float, fov_deg: float,
+                        bortle: int = DEFAULT_BORTLE) -> float:
     """某仰角处的等效极限星等 = 天顶极限 - 消光增量 Δm(alt)。"""
     return limit_magnitude(fov_deg, bortle) - extinction_delta_mag_array(
         np.asarray([alt_deg], dtype=float))[0]
@@ -399,7 +397,7 @@ class StarCatalog:
         center_az: float,
         center_alt: float,
         fov_deg: float,
-        bortle: int = 3,
+        bortle: int = DEFAULT_BORTLE,
         limit_mag: Optional[float] = None,
         max_count: int = DEFAULT_MAX_COUNT,
         margin_deg: float = 1.0,
@@ -610,7 +608,7 @@ def select_for_view(
     center_alt: float,
     fov_deg: float,
     *,
-    bortle: int = 3,
+    bortle: int = DEFAULT_BORTLE,
     limit_mag: Optional[float] = None,
     max_count: int = DEFAULT_MAX_COUNT,
     margin_deg: float = 1.0,

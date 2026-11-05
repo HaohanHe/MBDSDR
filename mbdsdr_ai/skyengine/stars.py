@@ -144,6 +144,41 @@ def culture_label(name: str) -> str:
     return c["zh"] if c else str(name)
 
 
+# ---------------------------------------------------------------------------
+# 光害可见性口径（**唯一事实源**）
+# ---------------------------------------------------------------------------
+# 裸眼极限星等基线：Bortle<=3（暗空）按 6.5 等，每高一档降 0.35 等
+# （Bortle 9 城市天 ≈ 4.4 等，Stellarium StelSkyDrawer 同语义）。
+# 所有"这颗星画不画/点不点得中"的门都必须走 naked_eye_limit_mag()，
+# 不许在别处复制这条公式（历史上 star_catalog.py 曾自带一份同式副本，
+# 改一处漏一处就会让绘制门与拾取门各说各话）。
+DEFAULT_BORTLE = 3               # 默认光害假设（乡下/近郊暗空）
+NAKED_EYE_LIMIT_SCALE = 6.5      # 等：Bortle<=3 的裸眼极限基线
+NAKED_EYE_BORTLE_SLOPE = 0.35    # 等/Bortle 档：每高一档的极限下降量
+BORTLE_DIM_SLOPE = 0.06          # 亮度压暗系数：每高一档 Bortle 压暗 6%
+# 星等→半径映射的参考跨度：从 6.5 等（frac=0）到 -1.5 等（frac=1）。
+MAG_SPAN_TO_FULL_BRIGHT = 8.0
+
+
+def naked_eye_limit_mag(bortle: int = DEFAULT_BORTLE) -> float:
+    """光害等级 → 裸眼极限星等（天顶方向）。
+
+    Bortle<=3 时恒为 6.5；更高光害按 0.35 等/档递减。这是**唯一**定义，
+    绘制层（``star_draw``/``star_draw_many``）与星表 LOD 层
+    （``star_catalog``）都调用本函数。
+    """
+    return NAKED_EYE_LIMIT_SCALE - NAKED_EYE_BORTLE_SLOPE * max(
+        0, int(bortle) - 3)
+
+
+def bortle_dim_factor(bortle: float) -> float:
+    """光害等级 → 星点亮度压暗系数（Bortle 3 为 1.0，每档 -6%）。
+
+    不夹 Bortle 下限：Bortle<3 视为更暗的天空，系数>1（历史口径，保持不变）。
+    """
+    return 1.0 - BORTLE_DIM_SLOPE * (bortle - 3)
+
+
 # Stellarium StelSkyDrawer.cpp:420 同款小星补偿常数：半径 <1.2px 的星点
 # 按面积比 r³/1.728 补亮度（1.2³ = 1.728），否则亚像素星能量不足、
 # "亮星突兀暗星全灭"。大星则走平方根压缩，避免织女星糊屏。
@@ -155,7 +190,7 @@ _BLOOM_MIN_R = 2.0
 _BLOOM_MAX_R = 8.0
 
 
-def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float, float]:
+def star_draw(vmag: float, bortle: int = DEFAULT_BORTLE) -> tuple[float, float, float]:
     """返回 (屏幕半径 px, 亮度 0..1, 辉光强度 0..1)。不可见星全 0。
 
     - 可见 clamp：vmag 超过光害极限星等 6.5-0.35*(bortle-3) 不画
@@ -165,17 +200,17 @@ def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float, float]:
     - 亮度：小星按 r³/1.728 补偿（StelSkyDrawer.cpp:420）；
     - 辉光：压缩后半径 ≥2px 的亮星按半径线性给强度。
     """
-    limit = 6.5 - 0.35 * max(0, int(bortle) - 3)
+    limit = naked_eye_limit_mag(bortle)
     if vmag > limit:
         return 0.0, 0.0, 0.0
     s_relative = 1.1
-    dim = 1.0 - 0.06 * (bortle - 3)
+    dim = bortle_dim_factor(bortle)
     # frac 不设上限 clamp：饱和交给下面 brightness 的 min(1.0, frac)，半径必须
     # 继续单调。恒星永不触发上限（两张星表最亮 Sirius -1.44/-1.46，未过 -1.5），
     # 但行星会——金星 -4.7、木星 -1.9、满月 -12.8，clamp 会把它们画成一样大
     # 一样亮，视觉编码当场说谎（SWE core_get_point_for_mag 要求所有天体共用
     # 一套单调亮度模型）。
-    frac = max(0.0, (6.5 - vmag) / 8.0)
+    frac = max(0.0, (NAKED_EYE_LIMIT_SCALE - vmag) / MAG_SPAN_TO_FULL_BRIGHT)
     r = (0.6 + 2.0 * frac ** (s_relative / 2.0)) * dim
     if r > _SMALL_STAR_R:
         r = _SMALL_STAR_R + (r - _SMALL_STAR_R) ** 0.5
@@ -258,7 +293,7 @@ def bv_to_rgb_many(bv) -> tuple:
     return rgb[:, 0], rgb[:, 1], rgb[:, 2]
 
 
-def star_draw_many(vmag, bortle: int = 3) -> tuple:
+def star_draw_many(vmag, bortle: int = DEFAULT_BORTLE) -> tuple:
     """star_draw 的向量化镜像（同一公式；标量版是事实源，测试逐点对拍）。
 
     NaN 星等按标量的实际走向处理：``max(0.0, nan)`` 得 0 → 半径按
@@ -266,11 +301,12 @@ def star_draw_many(vmag, bortle: int = 3) -> tuple:
     """
     m = np.asarray(vmag, dtype=float).reshape(-1)
     bad = ~np.isfinite(m)
-    m = np.where(bad, 6.5, m)
-    limit = 6.5 - 0.35 * max(0, int(bortle) - 3)
-    dim = 1.0 - 0.06 * (bortle - 3)
+    m = np.where(bad, NAKED_EYE_LIMIT_SCALE, m)
+    limit = naked_eye_limit_mag(bortle)
+    dim = bortle_dim_factor(bortle)
     visible = (m <= limit) | bad
-    frac = np.maximum(0.0, (6.5 - m) / 8.0)
+    frac = np.maximum(
+        0.0, (NAKED_EYE_LIMIT_SCALE - m) / MAG_SPAN_TO_FULL_BRIGHT)
     r = (0.6 + 2.0 * frac ** (1.1 / 2.0)) * dim
     over = r > _SMALL_STAR_R
     # np.where 两支都会求值：负底数开方会发 RuntimeWarning（结果本身不被取用，
