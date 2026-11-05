@@ -6,7 +6,7 @@
   ① 行号在文档范围内；
   ② 该行确实是 markdown 标题；
   ③ 标题的编号与卡片引用的 §编号一致（如 §6.9.6 ↔ `#### 6.9.6 ...`）；
-  ④ 卡片覆盖 §6.9.5 / §6.9.6 / §6.9.7 / §6.9.8 四节（八形态卡不允许漏节）。
+  ④ 卡片覆盖 §6.9.5–§6.9.9 五节（九形态卡不允许漏节）。
 
 用法：python scripts/check_card_links.py [--card <卡片>] [--doc <长文>]
 退出码：0 全过；1 有漂移；2 解析失败。
@@ -24,7 +24,7 @@ DEFAULT_CARD = ROOT / "docs" / "COMMIT-INCIDENT-CARD.md"
 DEFAULT_DOC = ROOT / "docs" / "COORDINATION.md"
 LINK_RE = re.compile(r"\[§([0-9]+(?:\.[0-9]+)*)\]\(\./COORDINATION\.md#L([0-9]+)\)")
 HEADING_RE = re.compile(r"^#{2,4}\s+([0-9]+(?:\.[0-9]+)*)\s")
-REQUIRED = {"6.9.5", "6.9.6", "6.9.7", "6.9.8"}
+REQUIRED = {"6.9.5", "6.9.6", "6.9.7", "6.9.8", "6.9.9"}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

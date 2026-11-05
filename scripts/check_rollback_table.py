@@ -8,6 +8,8 @@
   ④ 「被卷/被抹文件数」等于修复提交实际改动的文件数；
   ⑤ 被卷数不超过事故提交自身的改动总数。
 `未提交` 行（例如被闸门拦下的幻影删除）只核对计数列是整数，不查提交。
+`不回退` 行（内容复核无误、只登记不撤回，例如 `86fdbd0b`）只核对 ①②⑤，
+不要求「修复提交」存在。
 
 用法：
   python scripts/check_rollback_table.py
@@ -129,6 +131,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             errors.append(f"提交号不存在于仓库：{sha}")
             continue
 
+        total = len(_changed_files(sha))
+        if "不回退" in fix_cell:
+            if count > total:
+                errors.append(f"被卷数超过原提交改动总数：{sha} 记 {count}，原提交共 {total}")
+                continue
+            checked += 1
+            print(f"  OK {sha} 不回退 被卷={count} 原提交={total}")
+            continue
+
         fix_hashes = HASH_RE.findall(fix_cell)
         if len(fix_hashes) != 1:
             errors.append(f"修复列应恰好一个 hash：{sha} -> {fix_hashes}")
@@ -139,7 +150,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
 
         fix_files = len(_changed_files(fix))
-        total = len(_changed_files(sha))
         if fix_files != count:
             errors.append(f"计数不符：{sha} 记 {count} 个，修复提交 {fix} 实改 {fix_files} 个")
         if count > total:

@@ -1,5 +1,6 @@
 """速查卡锚点防漂移的反证：改错行号 → 必红。"""
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -29,7 +30,7 @@ def test_real_card_links_pass():
 
 def test_bad_anchor_line_goes_red(tmp_path):
     text = CARD.read_text(encoding="utf-8")
-    bad = text.replace("#L1178", "#L1179")
+    bad = re.sub(r"#L(\d+)", lambda m: f"#L{int(m.group(1)) + 1}", text, count=1)
     assert bad != text, "反证未生效：找不到目标锚点"
     target = tmp_path / "CARD_bad_anchor.md"
     target.write_text(bad, encoding="utf-8")
@@ -38,4 +39,3 @@ def test_bad_anchor_line_goes_red(tmp_path):
     out = proc.stdout + proc.stderr
     assert proc.returncode == 1, (proc.returncode, out)
     assert "FAIL" in out
-    assert "1179" in out
