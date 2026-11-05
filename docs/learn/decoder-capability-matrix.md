@@ -80,4 +80,7 @@ python scripts/decode_captures.py --mode all --dir captures/ --out report.json
 - 「真实」不等于「现在能在你的设备上收到」：外部真值证明解码链正确，能否收到还取决于天线、增益、过境时间与多普勒补偿。
 - 标 `not_implemented` 的模式（ft8/aprs 通用入口）不会假装解码，调用会得到明确错误码而不是空结果。
 - 缺样本的三种模式（ais/navtex/aprs）在补到真录之前，任何「已解码」的宣称都不成立。
+- **APRS 不得写成「支持」**：仓内只有 AFSK1200 解调器与 AX.25 能力，通用入口未接线；`aprs` 行是「缺样本 + 未接线」，不是可用模式。
+- **本矩阵与 UI 都不声称「实时解码」**：解码是离线/同步处理，实时率与跟不上时的后果见 `mbdsdr_ai.decode_pipeline.performance_summary` / `behind_report`；后者明说积压恒为 0 且观测不到 SDR 缓冲层溢出。
+- **两种「丢」的用词**：`dropped_frames` 只计 FCS/CRC 校验失败，不包含「跟不上导致样本没被处理」——后者不归本模块计数。
 

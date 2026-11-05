@@ -257,6 +257,88 @@ def test_benchmark_failure_is_not_a_success(pipe, tmp_path):
     assert perf["stage"] == "sync"
 
 
+def test_summary_declares_synthetic_not_ota_and_drop_semantics(pipe):
+    m = _manifest()["adsb"]
+    r = pipe.run_adsb_pipeline(
+        str(FIXTURE_DIR / m["file"]), fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]))
+    perf = pipe.performance_summary(r)
+    scope = perf["evidence_scope"].lower()
+    assert "synthetic" in scope and "not ota" in scope
+    assert "空口" in perf["evidence_scope"]
+    assert "FCS/CRC" in perf["drop_accounting"]
+    assert "SDR" in perf["drop_accounting"]
+
+
+def test_behind_consequences_are_observable(pipe):
+    """构造「消费侧慢 4×」的必然跟不上的场景，不能只给一个 bool。"""
+    m = _manifest()["adsb"]
+    r = pipe.run_adsb_pipeline(
+        str(FIXTURE_DIR / m["file"]), fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]))
+    rep = pipe.behind_report(r, speed_factor=0.25)     # 0.25× = 慢 4 倍
+    assert rep["keeps_up"] is False
+    assert rep["bottleneck_stage"] in {
+        "load_iq", "downconvert", "sync", "demod", "frame", "content"}
+    assert rep["bottleneck_share_pct"] > 0
+    # 同步无队列：不积压、观测不到源端溢出——必须是明确数字/布尔，不是形容词
+    assert rep["backlog_samples"] == 0
+    assert rep["source_overflow"] is False
+    assert "本模块不丢样本" in rep["backlog_interpretation"]
+    assert "SDR" in rep["backlog_interpretation"]
+    assert "FCS/CRC" in rep["drop_accounting"]
+    assert set(x["name"] for x in rep["stages"]) == {
+        s["name"] for s in r["stages"]}
+
+
+def test_behind_report_can_say_can_keep_up(pipe):
+    """同一份输入，消费侧快 2× 时必须给出 keeps_up=True（不能恒为 False）。"""
+    m = _manifest()["ais"]
+    r = pipe.run_ais_pipeline(
+        str(FIXTURE_DIR / m["file"]), fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]))
+    rep = pipe.behind_report(r, speed_factor=2.0)
+    assert rep["keeps_up"] is True
+    assert rep["speed_factor"] == 2.0
+
+
+def test_adsb_frequency_offset_tolerance_200_and_1000_hz(pipe):
+    """±200 Hz 应 3/3；±1 kHz 只有 2/3（一帧 CRC 失败）——据实断言，不粉饰。
+
+    实测（8 MS/s fixture，3 帧）：
+      ±200 Hz → 3/3；±1 kHz → 2/3；且偏移增大并不单调
+      （±2 kHz 3/3、±5 kHz 2/3、±10 kHz 3/3）。所以这里只钉
+      「±200 Hz 全解」与「±1 kHz 至少 2 帧且 ok=True」，边界原文写进
+      docs/limitations-register.md。
+    """
+    m = _manifest()["adsb"]
+    rows = pipe.sweep_frequency_offset(
+        "adsb", str(FIXTURE_DIR / m["file"]), fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]),
+        offsets_hz=[-1000.0, -200.0, 0.0, 200.0, 1000.0])
+    assert [r["offset_hz"] for r in rows] == [-1000.0, -200.0, 0.0, 200.0, 1000.0]
+    by_off = {r["offset_hz"]: r for r in rows}
+    for off in (-200.0, 0.0, 200.0):
+        assert by_off[off]["ok"] is True, by_off[off]
+        assert by_off[off]["frames"] == m["frame_count"], by_off[off]
+    for off in (-1000.0, 1000.0):
+        assert by_off[off]["ok"] is True, by_off[off]
+        assert by_off[off]["frames"] >= 2, by_off[off]
+
+
+def test_frequency_offset_sweep_reports_failure_honestly(pipe):
+    """偏到远超信号带外时，必须给 ok=False + reason，而不是 0 帧仍称成功。"""
+    m = _manifest()["adsb"]
+    path = str(FIXTURE_DIR / m["file"])
+    rows = pipe.sweep_frequency_offset(
+        "adsb", path, fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]), offsets_hz=[3.9e6])
+    assert rows[0]["frames"] == 0
+    assert rows[0]["ok"] is False
+    assert rows[0]["reason"] in {"preamble_not_found", "no_frame_recovered",
+                                 "nothing_detected"}
+
+
 def test_realtime_ratio_formula_is_consistent(pipe):
     """实时率 = 输入样本吞吐 / 2.4MS/s；用报告字段反算必须一致（±1%）。"""
     m = _manifest()["ais"]

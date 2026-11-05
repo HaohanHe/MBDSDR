@@ -16,14 +16,21 @@
     → demod（PPM 位判决）→ frame（CRC-24 0xFFF409，丢帧在此计数）
     → content（DF/ICAO/呼号/TC 字段）
 
-诚实边界：
-  * 本模块只对 **.cf32 复基带文件**负责；没有采样时钟恢复、没有多径/频偏
-    估计（downconvert 支持显式混频，但不会猜频偏）。
+诚实边界（每一句都必须能复跑，不靠形容词）：
+  * **证据范围**：`tests/fixtures/decode_pipeline/` 的 fixture 是「已知帧经
+    仓内编码器重新调制」的 **synthetic** 波形，**NOT OTA**——它证明流水线
+    各级与已知真值逐字节一致，**不**证明空口接收；摘要里的
+    `evidence_scope` 字段会把这句话带出去，禁止把摘要截图当空口结论。
+  * 本模块只对 **.cf32 复基带文件**负责；没有采样时钟恢复、没有多径估计。
   * 失败一律 `ok=False` + `content={}`；**绝不允许 ok=True 且 content 为空**。
-  * 性能口径：`performance_summary` 用「输入复样本吞吐 / 2.4 MS/s」算实时率；
-    本链路是同步离线处理，不设内部队列——跟不上时既不卡死，也不伪造丢帧数
-    （`dropped_frames` 只计 FCS/CRC 失败），落后的样本只能由调用方丢弃或
-    降采样。这一点写进 `behavior_when_behind`，不靠使用者猜。
+  * **两种「丢」必须分开说**：
+    - `dropped_frames` / `drop_accounting`：只计 FCS/CRC 校验失败的帧；
+    - `behind_report` 的 `backlog_samples` / `source_overflow`：跟不跟得上
+      导致的样本积压/源端溢出。本模块同步离线处理、无内部队列，按输入样本
+      计的积压恒为 0，也观测不到 SDR 缓冲层的溢出——那发生在源端，
+      **本模块不丢样本，也不伪造该计数**。
+  * 性能口径：`performance_summary` 用「输入复样本吞吐 / 2.4 MS/s」算实时率。
+    实时率 <1 不等于报错，也不等于丢帧；它只表示消费侧变慢。
 """
 
 from __future__ import annotations
@@ -445,6 +452,12 @@ def performance_summary(report: Dict[str, Any],
         "nominal_sample_rate": float(nominal_sample_rate),
         "realtime_ratio_vs_2_4msps": round(ratio, 4),
         "keeps_up_with_2_4msps": bool(ratio >= 1.0),
+        "evidence_scope": (
+            "synthetic fixtures, NOT OTA：这些数字来自仓内编码器重调的已知帧，"
+            "只能证明本实现与已知真值一致，不能当空口接收/天线性能结论。"),
+        "drop_accounting": (
+            "dropped_frames 只计 FCS/CRC 校验失败，不含「跟不上导致样本没被处理」"
+            "的那种丢；后者发生在 SDR 缓冲层，本模块观测不到，也不伪造计数。"),
         "behavior_when_behind": (
             "同步离线处理，无内部队列：耗时超过到达速率时不会卡死，也不会静默"
             "丢帧（dropped_frames 只计 CRC/FCS 失败）；落后的样本只能由调用方"
@@ -497,3 +510,86 @@ def benchmark_pipeline(mode: str, path: str, fs: float,
                 "realtime_ratio_vs_2_4msps"] for r in reports],
     })
     return perf
+
+
+def behind_report(report: Dict[str, Any], nominal_sample_rate: float = 2.4e6,
+                  speed_factor: float = 1.0) -> Dict[str, Any]:
+    """回答「跟不上时会怎样」：瓶颈级、积压样本、源端溢出、两种丢的区分。
+
+    ``speed_factor`` 模拟消费侧限速（1.0=按实测速度跑，<1=更慢）。之所以要
+    这个参数：判定「必然跟不上」不能在真机上靠运气等一个恰好 <1 的采样，
+    而要把「消费侧变慢」显式建模，结果才可复现。
+
+    本模块是**同步、无内部队列**的离线处理，所以：
+      * `backlog_samples` 恒为 0（本模块不积压、也不丢样本）；
+      * `source_overflow` 恒为 False（SDR 缓冲层溢出发生在源端，本模块
+        观测不到，不能编一个数字出来）；
+      * `bottleneck_stage` 指耗时占比最大的级——消费侧变慢时，延迟从这级
+        开始累积，排障先看它。
+    """
+    if speed_factor <= 0:
+        raise ValueError("speed_factor 必须 > 0")
+    stages = report.get("stages") or []
+    total_ms = sum(float(s.get("elapsed_ms", 0.0)) for s in stages)
+    in_samples = int(stages[0].get("output_samples", 0)) if stages else 0
+    scaled_ms = total_ms / float(speed_factor)
+    throughput = (in_samples / (scaled_ms / 1000.0)) if scaled_ms > 0 else 0.0
+    ratio = throughput / float(nominal_sample_rate) if nominal_sample_rate else 0.0
+
+    rows = []
+    for s in stages:
+        ms = float(s.get("elapsed_ms", 0.0))
+        rows.append({
+            "name": s.get("name"),
+            "elapsed_ms": round(ms, 3),
+            "scaled_elapsed_ms": round(ms / float(speed_factor), 3),
+            "share_pct": round((ms / total_ms * 100.0) if total_ms > 0 else 0.0, 2),
+        })
+    bottleneck = max(rows, key=lambda x: x["share_pct"]) if rows else None
+
+    return {
+        "keeps_up": bool(ratio >= 1.0),
+        "realtime_ratio": round(ratio, 4),
+        "nominal_sample_rate": float(nominal_sample_rate),
+        "speed_factor": float(speed_factor),
+        "bottleneck_stage": bottleneck["name"] if bottleneck else "",
+        "bottleneck_share_pct": bottleneck["share_pct"] if bottleneck else 0.0,
+        "stages": rows,
+        "backlog_samples": 0,
+        "source_overflow": False,
+        "backlog_interpretation": (
+            "本模块不丢样本：同步离线处理、无内部队列，按输入样本计的积压为 0；"
+            "丢样本发生在 SDR 缓冲层（源端溢出），本模块观测不到。"),
+        "drop_accounting": (
+            "dropped_frames 只计 FCS/CRC 失败，与「跟不上导致样本没被处理」"
+            "是两种不同的丢，一个词不能覆盖两种丢。"),
+    }
+
+
+def sweep_frequency_offset(mode: str, path: str, fs: float,
+                           target_fs: Optional[float],
+                           offsets_hz: List[float],
+                           nominal_sample_rate: float = 2.4e6) -> List[Dict[str, Any]]:
+    """逐档显式混频（downconvert 的 center_offset_hz）跑同一份输入。
+
+    用途：给「频偏容差」一个可复跑的数，而不是「未覆盖频偏」四个字。
+    注意这里测的是**显式混频后**的容差（包络检波对相位不敏感），
+    不代表自动频偏估计——本模块没有自动频偏估计。
+    """
+    if mode not in ("ais", "adsb"):
+        raise ValueError(f"未知流水线模式: {mode!r}（可选 ais/adsb）")
+    runner = run_ais_pipeline if mode == "ais" else run_adsb_pipeline
+    tfs = target_fs if target_fs is not None else (
+        48000.0 if mode == "ais" else 4e6)
+    rows = []
+    for off in offsets_hz:
+        r = runner(path, fs=fs, target_fs=tfs, center_offset_hz=float(off))
+        rows.append({
+            "offset_hz": float(off),
+            "ok": bool(r.get("ok")),
+            "frames": int(r.get("num_frames", 0)),
+            "reason": r.get("reason", ""),
+            "per_frame_ms": round(performance_summary(
+                r, nominal_sample_rate)["per_frame_ms"], 3),
+        })
+    return rows
