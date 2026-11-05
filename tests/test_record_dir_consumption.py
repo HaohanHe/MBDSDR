@@ -58,9 +58,13 @@ class _DummyBackend:
 def test_missing_record_drive_rejects_recording(window, monkeypatch):
     w = window
     calls = []
+    # 打桩实例方法而非 QMessageBox.warning：_start_recording 走的是
+    # _show_error_dialog -> QMessageBox.exec()，warning 根本不在调用路径上。
+    # offscreen 下 exec() 永不返回（曾挂死 50 分钟，py-spy 栈取证：
+    # _show_error_dialog -> box.exec()）。
     monkeypatch.setattr(
-        "main_window.QMessageBox.warning",
-        lambda *a, **k: calls.append(a))
+        w, "_show_error_dialog",
+        lambda icon, title, text, code=None: calls.append((icon, title, text)))
     monkeypatch.setattr(w, "_open_record_segment", lambda *a, **k: None)
     w._active_sdr_backend = _DummyBackend()
     w.settings.set("record_dir", r"Z:\nope")
@@ -87,9 +91,13 @@ def test_unwritable_record_dir_rejects_recording(window, monkeypatch, tmp_path):
     ro_dir = tmp_path / "readonly"
     ro_dir.mkdir()
     calls = []
+    # 打桩实例方法而非 QMessageBox.warning：_start_recording 走的是
+    # _show_error_dialog -> QMessageBox.exec()，warning 根本不在调用路径上。
+    # offscreen 下 exec() 永不返回（曾挂死 50 分钟，py-spy 栈取证：
+    # _show_error_dialog -> box.exec()）。
     monkeypatch.setattr(
-        "main_window.QMessageBox.warning",
-        lambda *a, **k: calls.append(a))
+        w, "_show_error_dialog",
+        lambda icon, title, text, code=None: calls.append((icon, title, text)))
     monkeypatch.setattr(w, "_open_record_segment", lambda *a, **k: None)
     w.settings.set("record_dir", str(ro_dir))
 
