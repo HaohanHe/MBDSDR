@@ -55,8 +55,10 @@ TEXT_EXT = (".py", ".md", ".cpp", ".h", ".hpp", ".c", ".dart", ".js", ".ts",
             ".json", ".yaml", ".yml", ".sh", ".ps1", ".txt", ".ini", ".cfg",
             ".toml", ".qml", ".ui")
 
+#: RFC 2606 保留域（.invalid / .test / .example 及 example.com/.net/.org）：
+#: 这些域名不可投递、不指向真实身份，测试 fixture 允许使用。
 ALLOWED_EMAIL_DOMAINS = ("example.com", "example.org", "example.net",
-                         "example.invalid",
+                         ".invalid", ".test", ".example",
                          "noreply.github.com", "users.noreply.github.com")
 
 #: 厂商公开支持邮箱（第三方公开联系方式，非作者个人信息）：
