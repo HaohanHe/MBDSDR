@@ -211,6 +211,11 @@ Common names
   `mbdsdr_ai/artifacts/` 不扫。
 - **B1 后白名单为空（空表 = 禁入）**：`mbdsdr_ai/` 下出现 GPL 级数据即红，
   不再提供按文件豁免通道。
+- 现状核对（2026-11-06）：`mbdsdr_ai/` 下 **0 条** GPL 条目（星座中文名
+  已迁 CC0）。`--list` 里仍有 2 条路径外提示
+  `tests/golden/dvbs2_bch_vectors.json`、`tests/golden/dvbs2_ldpc_vectors.json`
+  的 `GPL-3.0-or-later`：它们是仓外运行 GPL 上游工具生成的参考向量，
+  `NOTICE.md` 已登记，不随 MIT 包分发，按上面的规则只作提示、不判红。
 
 脚本：`scripts/check_data_licenses.py`；测试：`tests/test_data_licenses.py`。
 
@@ -267,9 +272,13 @@ python scripts/check_data_licenses.py --probe   # 临时写 GPL 探针 -> 必须
 当前实测（2026-11-06，B1 后）：
 
 ```
-scanned data files: 380
+scanned data files: 383
 合规检查通过
 ```
+
+`scanned data files` 随仓内数据文件增减浮动（其它并行改动线新增 `.json`
+即加一），它只用来确认扫描器真的遍历了全仓，不是固定基线；判据是末行
+「合规检查通过」与退出码 0。
 
 `--probe` 输出 `PROBE RED OK: GPL 探针被检出并拦截`，退出码 0（探针工作正常）。
 
@@ -279,7 +288,7 @@ scanned data files: 380
 
 ```
 合规检查失败：1 个 GPL 数据文件在 mbdsdr_ai/ 下（B1 后无豁免机制）
-scanned data files: 380
+scanned data files: 384
   VIOLATION: mbdsdr_ai/data/_gpl_red_probe.json (GPL / GPL-3.0-or-later)
 ```
 
