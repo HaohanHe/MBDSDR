@@ -411,6 +411,17 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 真可删 | `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | LRPT 主链不复用该交织器 | `tests/apt_meteor_roundtrip.py` 全绿 |
 | 需先补测试再删 | `mbdsdr_ai/orbit_determination.py` | `ecef_state_to_keplerian` | ECEF→开普勒根数换算属数值 API，现有 orbit 测试未钉 | 先补已知向量测试（ISS 单点） |
 
+> **执行结果（2026-11-06，HEAD `86ae9807`）**：8 条删除、2 条入口角色加注释保留。
+> 真可删 5 条：`build_short_frame` `c2058f36`、`grid_resolution_pix_per_deg` `bdfe445c`、
+> `audio_info_from_service` `73e5fa25`、`hard_tones_to_llr` `29f2fbda`、`convolutional_interleave` `46b6d437`。
+> 补测试再删 3 条：`ecef_state_to_keplerian` 基线 `bf7370bc` + 删除 `24d20bba`；
+> `nav_bits_from_corr` 基线 `0703da1b` + 删除 `3c618811`；
+> `load_ground_station_config` 基线 `326c902b` + 删除 `3539e6b9`。
+> 入口角色 2 条：`select_decoder` / `fy4_lrit_pipeline` 保留注释 `e645b781`。
+> 每条删前/删后测试数与「零引用证据」见各提交说明；删后 `git grep -w` 代码命中均为 0。
+> 补测试发现的现状缺陷（`ecef_state_to_keplerian` 的 argp/ν 公式、退化轨道除零；
+> `load_ground_station_config` 的 `MBDSDR_GS_*` 唯一实现）已随删除记录在提交说明中。
+
 #### 5.8.2 动态调用存疑（7 项）——确认手段与结论
 
 确认手段（全部已执行）：① 字符串/配置：扫 `*.json/*.yaml/*.toml/*.ini/*.cfg/*.conf/*.txt`，7 个名字 **0 命中**；② `getattr`/`importlib`/`eval`/`exec`/`globals()[...]`：生产代码中无按这些名字取用的形态；③ Qt 字符串 connect：无 `connect("...")` 形态；④ `git grep -w`：全仓仅定义行。
