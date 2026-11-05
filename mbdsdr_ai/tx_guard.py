@@ -13,14 +13,24 @@
   且拒绝信封不谎报成功。
 * **底层直调同样拦**：脚本绕过工具层直接 ``backend.write_tx()`` 时，没有
   授权上下文一律拒绝（返回 False 并记录 ``last_tx_reject``），不静默发波。
+* **每次判定都落盘可追溯**：签发（``armed``）、放行（``allowed``）、拒绝
+  （``refused``）、过期（``expired``）都写一条 JSONL 到
+  ``D:\\mbdsdr\\logs\\tx_audit.jsonl``（10 MB × 5 轮转，路径可用
+  ``MBDSDR_TX_AUDIT_PATH`` 覆盖），只记 token 前 8 位。审计写失败按
+  **fail-closed** 处理：不签发、不放行，并把原因暴露在
+  :func:`tx_audit_status` 与门快照 ``snapshot()["audit"]``。
 * 工具层、脚本层、驱动层共用本模块，不在别处再写一套门语义。
 """
 from __future__ import annotations
 
 import contextvars
+import datetime
 import hashlib
 import json
 import logging
+import os
+import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -49,6 +59,203 @@ GATE_PARAMS = ("arm_manual", "confirm_token", "tx_token", "approve_session")
 
 #: 单次授权默认有效期（秒）。过期后必须重新 arm（人工再次确认）。
 DEFAULT_TTL_S = 120.0
+
+#: 审计写入失败时的拒绝码（fail-closed：没有可追溯记录就不放行）。
+GATE_AUDIT_FAILED = "audit_write_failed"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# 一、落盘审计（签发 / 放行 / 拒绝 / 过期，重启不清）
+# ═════════════════════════════════════════════════════════════════════════
+#
+# 为什么 fail-closed：审计是发射安全的"事后可追溯"这一半红线。若磁盘写不进
+# 却照常发波，就等于"发过什么、谁批的、什么时候"全部不可查——这正是要防的。
+# 写失败时选择**明确拒绝发射**并把原因暴露在 ``tx_audit_status()`` / 门快照里，
+# 而不是降级为"只打 logger"。代价是磁盘异常时发射不可用；这是可接受的，
+# 因为射频发射是高风险动作，宁可停发也不能留下无法追溯的发射。
+
+AUDIT_SOURCES = ("desktop", "test", "script")
+
+#: 单文件上限 10 MB；保留当前文件 + 4 个轮转备份 = 共 5 个文件（约 50 MB）。
+TX_AUDIT_MAX_BYTES = 10 * 1024 * 1024
+TX_AUDIT_BACKUPS = 4
+
+
+def default_audit_path() -> str:
+    """审计日志默认路径（不落 C 盘）。
+
+    优先 ``MBDSDR_TX_AUDIT_PATH``（测试/受信任脚本可显式指定）；
+    Windows 有 D 盘时落到 ``D:\\mbdsdr\\logs\\tx_audit.jsonl``；
+    无 D 盘（或非 Windows）时退到系统临时目录并**告警**，不静默改写位置。
+    """
+    env = (os.environ.get("MBDSDR_TX_AUDIT_PATH") or "").strip()
+    if env:
+        return env
+    if os.name == "nt":
+        if os.path.exists("D:\\"):
+            return r"D:\mbdsdr\logs\tx_audit.jsonl"
+        logger.warning("未检测到 D 盘：发射审计退到临时目录（重启可能被清理），"
+                       "请用 MBDSDR_TX_AUDIT_PATH 指定持久位置")
+    return os.path.join(tempfile.gettempdir(), "mbdsdr_tx_audit.jsonl")
+
+
+class TxAuditError(RuntimeError):
+    """审计日志写失败（fail-closed，调用方必须终止发射）。"""
+
+
+class TxAuditLog:
+    """发射门审计日志（JSONL + 按大小轮转）。
+
+    记录只含 token **前 8 位**，绝不下发/落盘完整 token；动作参数摘要已剔除
+    门参数（arm_manual / confirm_token / tx_token / approve_session）。
+    """
+
+    def __init__(self, path: Optional[str] = None, *,
+                 max_bytes: int = TX_AUDIT_MAX_BYTES,
+                 backups: int = TX_AUDIT_BACKUPS) -> None:
+        self._lock = threading.Lock()
+        self._path = str(path or default_audit_path())
+        self._max_bytes = max(4096, int(max_bytes))
+        self._backups = max(1, int(backups))
+        self.last_error = ""
+        self.write_failures = 0
+        self.records_written = 0
+
+    @property
+    def path(self) -> str:
+        return self._path
+
+    def set_path(self, path: str) -> None:
+        with self._lock:
+            self._path = str(path)
+            self.last_error = ""
+            self.write_failures = 0
+            self.records_written = 0
+
+    def write(self, record: Dict[str, Any]) -> None:
+        """追加一条记录；失败抛 :class:`TxAuditError`（调用方 fail-closed）。"""
+        line = json.dumps(record, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":"), default=str)
+        with self._lock:
+            try:
+                parent = os.path.dirname(os.path.abspath(self._path))
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                if (os.path.exists(self._path)
+                        and os.path.getsize(self._path) >= self._max_bytes):
+                    self._rotate()
+                with open(self._path, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(line + "\n")
+                self.records_written += 1
+                self.last_error = ""
+            except OSError as e:
+                self.write_failures += 1
+                self.last_error = f"{type(e).__name__}: {e}"
+                logger.error("发射审计写入失败（fail-closed，拒绝发射）: %s",
+                             self.last_error)
+                raise TxAuditError(self.last_error) from e
+
+    def _rotate(self) -> None:
+        oldest = f"{self._path}.{self._backups}"
+        try:
+            if os.path.exists(oldest):
+                os.remove(oldest)
+            for i in range(self._backups - 1, 0, -1):
+                src = f"{self._path}.{i}"
+                if os.path.exists(src):
+                    os.replace(src, f"{self._path}.{i + 1}")
+            os.replace(self._path, f"{self._path}.1")
+        except OSError as e:
+            self.write_failures += 1
+            self.last_error = f"轮转失败 {type(e).__name__}: {e}"
+            logger.error("发射审计轮转失败（fail-closed，拒绝发射）: %s",
+                         self.last_error)
+            raise TxAuditError(self.last_error) from e
+
+
+_AUDIT = TxAuditLog()
+
+
+def get_tx_audit() -> TxAuditLog:
+    """返回进程级审计日志（唯一实例）。"""
+    return _AUDIT
+
+
+def reset_tx_audit(path: Optional[str] = None, *,
+                   max_bytes: int = TX_AUDIT_MAX_BYTES,
+                   backups: int = TX_AUDIT_BACKUPS) -> TxAuditLog:
+    """测试用：把进程级审计日志指向指定路径（path=None 回到默认路径）。"""
+    global _AUDIT
+    _AUDIT = TxAuditLog(path, max_bytes=max_bytes, backups=backups)
+    return _AUDIT
+
+
+def tx_audit_status() -> Dict[str, Any]:
+    """审计写入状态（供 UI/状态面显示；失败不静默）。"""
+    a = get_tx_audit()
+    return {
+        "path": a.path,
+        "last_error": a.last_error,
+        "write_failures": int(a.write_failures),
+        "records_written": int(a.records_written),
+        "fail_closed": True,
+    }
+
+
+def _detect_source(explicit: str = "") -> str:
+    """来源归类：desktop / test / script（显式值优先）。"""
+    src = str(explicit or "").strip().lower()
+    if src in AUDIT_SOURCES:
+        return src
+    if os.environ.get("PYTEST_CURRENT_TEST") or "pytest" in sys.modules:
+        return "test"
+    frame = sys._getframe(1)
+    while frame is not None:
+        fn = (frame.f_code.co_filename or "").replace("\\", "/")
+        if "/desktop/" in fn:
+            return "desktop"
+        frame = frame.f_back
+    return "script"
+
+
+def _args_summary(args: Optional[Dict[str, Any]], limit: int = 240) -> str:
+    """动作参数摘要（剔除门参数；超长截断），不落完整 token。"""
+    clean = {k: v for k, v in dict(args or {}).items() if k not in GATE_PARAMS}
+    try:
+        text = json.dumps(clean, sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"), default=_json_default)
+    except (TypeError, ValueError):
+        text = repr(clean)
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def _token_prefix(token: Optional[str]) -> str:
+    """只取前 8 位（绝不落完整 token）。"""
+    return str(token or "")[:8]
+
+
+def _audit_record(*, tool: str, args_summary: str, token: str, ttl_s: float,
+                  result: str, code: str, source: str = "",
+                  reason: str = "", action: str = "",
+                  note: str = "") -> Dict[str, Any]:
+    local = datetime.datetime.now().astimezone()
+    utc = datetime.datetime.now(datetime.timezone.utc)
+    rec: Dict[str, Any] = {
+        "ts_local": local.isoformat(timespec="milliseconds"),
+        "ts_utc": utc.isoformat(timespec="milliseconds"),
+        "tool": str(tool or "(direct)"),
+        "args_summary": str(args_summary or "{}"),
+        "token_prefix": _token_prefix(token),
+        "ttl_s": round(float(ttl_s or 0.0), 3),
+        "result": result,
+        "code": code,
+        "reason": str(reason or ""),
+        "source": _detect_source(source),
+        "action": str(action or ""),
+    }
+    if note:
+        rec["note"] = str(note)
+    return rec
 
 
 @dataclass(frozen=True)
@@ -105,7 +312,8 @@ class TxGate:
     # ------------------------------------------------------------------
     def arm(self, *, ttl_s: Optional[float] = None, note: str = "",
             action: str = "", single_use: bool = True,
-            now: Optional[float] = None) -> str:
+            now: Optional[float] = None, tool: str = "",
+            args_summary: str = "", source: str = "") -> str:
         """外部确认通道签发一次性 token。
 
         Parameters
@@ -120,14 +328,28 @@ class TxGate:
             成功消费一次后是否作废；默认 True。
         now : float
             测试注入的单调时钟（不读墙钟）。
+        tool / args_summary / source
+            审计字段：工具名、已剔除门参数的参数摘要、来源
+            （``desktop`` / ``test`` / ``script``，留空自动归类）。
+
+        审计写失败（``TxAuditError``）时**不签发**：门保持原状态，调用方必须
+        把失败当签发失败处理（fail-closed）。
         """
         with self._lock:
             ttl = self._ttl_s if ttl_s is None else float(ttl_s)
             if ttl <= 0:
                 raise ValueError("ttl_s 必须为正数（授权必须有有效期）")
+            token = uuid.uuid4().hex
+            armed_at = time.monotonic() if now is None else float(now)
+            # 先落审计再改门状态：写不进就等于没签发，避免"发过但查不到"。
+            get_tx_audit().write(_audit_record(
+                tool=tool, args_summary=args_summary, token=token,
+                ttl_s=ttl, result="armed", code=GATE_OK, source=source,
+                reason="人工确认签发一次性 token", action=str(action or ""),
+                note=note))
             self._state = "armed"
-            self._token = uuid.uuid4().hex
-            self._armed_at = time.monotonic() if now is None else float(now)
+            self._token = token
+            self._armed_at = armed_at
             self._ttl_s = ttl
             self._revoked_reason = ""
             self._action = str(action or "")
@@ -171,7 +393,10 @@ class TxGate:
                   token: Optional[str] = None,
                   action: Optional[str] = None,
                   consume: bool = True,
-                  now: Optional[float] = None) -> GateDecision:
+                  now: Optional[float] = None,
+                  tool: str = "",
+                  args_summary: str = "",
+                  source: str = "") -> GateDecision:
         """判定本次写/发射是否被允许。
 
         只有**外部确认通道签发的 token** 能放行：
@@ -180,6 +405,12 @@ class TxGate:
 
         consume=True 时成功即消费 token（一次性）；传输会话中逐块复核用
         consume=False（同一动作仍在执行，不重复消费）。
+
+        **落盘审计**：每次放行（consume=True）、拒绝、过期都写一条
+        ``result=allowed/refused/expired``。审计写失败时按 fail-closed 处理：
+        本可放行的判定改写为 ``audit_write_failed`` 拒绝，绝不在不可追溯的
+        情况下发波。consume=False 的成功复核不重复落盘（首次放行已记录），
+        避免发射按块刷屏；其失败（撤销/过期）仍然落盘。
         """
         with self._lock:
             now = time.monotonic() if now is None else float(now)
@@ -225,6 +456,27 @@ class TxGate:
                                  "未过人工门：需外部确认通道签发的一次性 token",
                                  state)
 
+            # 审计：允许（消费型）、拒绝、过期都落盘。
+            if not d.allowed or consume:
+                result = ("allowed" if d.allowed
+                          else "expired" if d.code == GATE_EXPIRED
+                          else "refused")
+                try:
+                    get_tx_audit().write(_audit_record(
+                        tool=tool, args_summary=args_summary,
+                        token=token if token else self._token,
+                        ttl_s=self._ttl_s, result=result, code=d.code,
+                        source=source, reason=d.reason,
+                        action=str(action or "")))
+                except TxAuditError as e:
+                    if d.allowed:
+                        # fail-closed：不可追溯的放行一律降级为拒绝。
+                        d = GateDecision(False, GATE_AUDIT_FAILED,
+                                         f"审计写入失败，拒绝发射（fail-closed）: {e}",
+                                         d.state, d.token, d.action,
+                                         d.issued_at, d.expires_at)
+                    logger.error("发射审计写入失败，本次判定按拒绝处理: %s", e)
+
             if not d.allowed:
                 logger.warning("TxGate 拒绝(%s): %s", d.code, d.reason)
             self._last_decision = d
@@ -251,6 +503,7 @@ class TxGate:
                                if self._state == "armed" else 0.0),
                 "last_decision": self._last_decision.to_dict()
                 if self._last_decision else None,
+                "audit": tx_audit_status(),
             }
 
 
@@ -295,18 +548,24 @@ def action_digest(tool_name: str, args: Optional[Dict[str, Any]]) -> str:
 
 def issue_confirmation(tool_name: str, args: Optional[Dict[str, Any]],
                        *, ttl_s: float = DEFAULT_TTL_S, note: str = "",
-                       now: Optional[float] = None) -> str:
+                       now: Optional[float] = None,
+                       source: str = "") -> str:
     """外部确认通道：为一次具体写动作签发一次性 token。
 
     只有真人确认面（桌面弹窗 / 测试注入 / 受信任脚本）可以调用本函数。
     模型永远拿不到调用本函数的能力——它只能拿到 opaque token 字符串。
+    签发成功与失败都会在审计日志留痕（``result=armed``）。
     """
     digest = action_digest(tool_name, args)
-    return get_tx_gate().arm(ttl_s=ttl_s, note=note, action=digest, now=now)
+    return get_tx_gate().arm(ttl_s=ttl_s, note=note, action=digest, now=now,
+                             tool=tool_name,
+                             args_summary=_args_summary(args),
+                             source=source)
 
 
 def resolve_write_authorization(tool_name: str,
-                                args: Optional[Dict[str, Any]]) -> GateDecision:
+                                args: Optional[Dict[str, Any]],
+                                *, source: str = "") -> GateDecision:
     """handler 层复用门判定（单一事实源仍是 :class:`TxGate`）。
 
     优先使用上层 ``ToolCallGate`` 已建立的一次性授权上下文（避免重复消费
@@ -320,7 +579,8 @@ def resolve_write_authorization(tool_name: str,
     token = (args or {}).get("confirm_token") or (args or {}).get("tx_token")
     return get_tx_gate().authorize(
         arm_manual=(args or {}).get("arm_manual") is True,
-        token=token, action=action_digest(tool_name, args))
+        token=token, action=action_digest(tool_name, args),
+        tool=tool_name, args_summary=_args_summary(args), source=source)
 
 
 # ── 授权上下文：底层 write_tx 只认这个，不认调用者口头声明 ─────────────────
@@ -366,7 +626,10 @@ def reject_unless_authorized(backend: Any) -> bool:
     """底层写波入口的统一检查。返回 True 表示可继续写。"""
     if tx_authorized():
         return True
-    d = get_tx_gate().authorize(arm_manual=False)
+    d = get_tx_gate().authorize(
+        arm_manual=False, tool="backend.write_tx",
+        args_summary=json.dumps({"backend": type(backend).__name__},
+                                sort_keys=True))
     note_tx_reject(backend, d.code, d.reason)
     return False
 
@@ -900,7 +1163,13 @@ class TxSession:
         else:
             decision = self.gate.authorize(
                 arm_manual=False, token=tx_token,
-                action=action if action is not None else None)
+                action=action if action is not None else None,
+                tool="TxSession.transmit",
+                args_summary=_args_summary({
+                    "freq_hz": freq_hz, "gain_db": gain_db,
+                    "bandwidth_hz": bandwidth_hz, "duration_s": duration_s,
+                    "backend": type(self.backend).__name__ if self.backend else "",
+                }))
         if not decision.allowed:
             self.state = TX_REJECTED
             self.reason_code = decision.code
