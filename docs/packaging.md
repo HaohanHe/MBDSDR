@@ -416,8 +416,13 @@ narrow 只有一套指纹口径、`overlap` 仍叫 `size1366`，数字不再适�
 （实测同一命令连跑数字跳动）。现在脚本在 `import main_window` **之前**把
 `PySide6.QtCore.QSettings` 换成适配器：两参构造改走 `IniFormat` + `UserScope` +
 每次新建的临时目录。**只改脚本进程内的类名，产品代码一行未动。**
-反证：`reg export HKCU\Software\MBDSDR\Desktop` 在「跑一次拆账脚本」前后
-SHA256 相同（`EFCE39CF…C2FB`），对照组（45s 不跑脚本）也相同。
+反证（2026-11-06 02:56-02:59 实测）：先 `reg export HKCU\Software\MBDSDR\Desktop` 取
+SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（退出码 0），
+跑完后再次导出，两次哈希**逐字节相同**
+（`6DA7FC4D79D2323CC9E9AAFD3B1AFF28260969E7773424154C969280F806F0A3`）；
+另有一对「不跑脚本、间隔 45s」的对照导出也相同（`EFCE39CF…C2FB`），
+证明该键在观测窗口内没有第三方写入。脚本进程内只替换了 `QSettings` 类名，
+产品代码一行未动——这是**脚本侧读数适配，不是产品改动**。
 
 
 ## 6. 私有子包同类风险与冒烟清单
