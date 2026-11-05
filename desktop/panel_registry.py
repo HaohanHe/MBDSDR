@@ -73,7 +73,7 @@ class PanelRegistry:
                       collapsible=False, min_w=center_min,
                       ratio_hint=t.RATIO["splitter_center"],
                       summary="实时频谱与瀑布；拖动谱面改频，滚轮缩放，单键切解调模式"),
-            PanelSpec("rf_sky",     "天空模式",   "◎", AREA_CENTER,
+            PanelSpec("rf_sky",     "星象仪模式", "◎", AREA_CENTER,
                       collapsible=False, min_w=center_min,
                       ratio_hint=t.RATIO["splitter_center"],
                       summary="全天球视图：恒星/行星/深空/卫星；点天体看信息，点卫星调谐收听"),

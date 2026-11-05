@@ -151,7 +151,7 @@ class DockLayoutManager:
         if self._sky_dock is not None:
             return self._sky_dock
         sky = getattr(self.mw, "sky_view", None)
-        dock = QDockWidget("天空模式", self.mw)
+        dock = QDockWidget("星象仪模式", self.mw)
         dock.setObjectName("skyDock")
         dock.setWidget(sky)
         dock.setFeatures(QDockWidget.DockWidgetMovable
@@ -191,7 +191,7 @@ class DockLayoutManager:
         if tab is not None and sky is not None:
             # 插入到"频谱"之后
             idx = 1 if tab.count() > 0 else 0
-            tab.insertTab(idx, sky, "天空模式")
+            tab.insertTab(idx, sky, "星象仪模式")
             # 稳定身份，别用译文（tabData 在 QTabBar 上，不在 QTabWidget）
             tab.tabBar().setTabData(idx, "rf_sky")
         if self._sky_dock is not None:
@@ -349,9 +349,11 @@ class DockLayoutManager:
                                data.get("right_tab_index", 0),
                                data.get("right_panel_visible", {}))
 
-    # 旧译文别名（改名兼容）：2026-11-03「射频天空」→「天空模式」。
-    # 老用户落盘的 order/visible 里存的是旧译文，恢复时必须仍能对上稳定 id。
-    _LEGACY_KEY_ALIAS = {"射频天空": "rf_sky"}
+    # 旧译文别名（改名兼容）：2026-11-03「射频天空」→「天空模式」，
+    # 2026-11-05「天空模式」→「星象仪模式」（按原型取证统一）。
+    # 老用户落盘的 order/visible 里存的是旧译文，恢复时必须仍能对上稳定 id，
+    # 否则升级后布局静默丢失。
+    _LEGACY_KEY_ALIAS = {"射频天空": "rf_sky", "天空模式": "rf_sky"}
 
     @staticmethod
     def _restore_tab_order(tab: Optional[QTabWidget], order, current_index,

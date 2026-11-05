@@ -52,6 +52,21 @@ def test_new_unregistered_code_makes_mapping_red(monkeypatch):
     assert "brand_new_code" in error_remedy.mapping_gaps()
 
 
+def test_deleting_an_existing_entry_makes_mapping_red(monkeypatch):
+    """反证：删掉任一条目而目录 code 仍在 → mapping_gaps() 立刻点名。
+
+    这是「删条目必须红」的直接自检，不依赖新增 code 的间接推导：
+    REMEDY_BY_CODE 少一条、NO_ENTRY_REASONS 也没登记，就会被
+    test_every_catalog_code_is_registered 的 ``== []`` 判红。实测删
+    ``device_busy`` 后 gaps 返回 ``['device_busy']``。
+    """
+    code = "device_busy"
+    assert code in error_remedy.REMEDY_BY_CODE
+    assert code not in error_remedy.NO_ENTRY_REASONS
+    monkeypatch.delitem(error_remedy.REMEDY_BY_CODE, code)
+    assert error_remedy.mapping_gaps() == [code]
+
+
 def test_remedy_mapping_is_one_to_one():
     names = {}
     for code, remedy in error_remedy.REMEDY_BY_CODE.items():
