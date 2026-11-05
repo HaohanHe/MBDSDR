@@ -1,0 +1,226 @@
+# 114 个「无条目」错误码的用户可见性判定
+
+判定对象：`error_catalog` 共 129 个 code 中，扣除 15 条精选条目（`CURATED_CODES`）
+后剩 114 个——它们要么已在 `troubleshooting.VISIBLE_BY_FAMILY` 里补了条目，
+要么在 `error_remedy.NO_ENTRY_REASONS` 里登记「不出入口」。本文逐行给出
+**触发条件 / 是否用户可见 / 可见路径 / 文件:行证据 / 处置**。
+
+三条判据（逐条都问，缺一即判不可见）：
+
+1. 有没有任何路径把 `message` 或 `code` 原文送到用户可见面（状态栏、弹窗、
+   面板文本、AI 回复、步骤卡、导出、tooltip）；日志与 MCP 客户端不算；
+2. 触发条件是否用户可造成（点按钮 / 插拔设备 / 改设置 / 断网 / 磁盘满 /
+   设备状态），还是只有开发者才会遇到的内部错误；
+3. 是否在我们自己的 UI 里被展示过（含间接展示，如把 error 串拼进文案）。
+
+## 一、114 行的四类统计
+
+| 分类 | 行数 | 说明 |
+| --- | --- | --- |
+| 可见-已补 | 52 | 39 个在 `e95945b` 已补，13 个在 `0e4b9ef6` 补（设备调谐 5 + AI 模型 7 + 工具结果 1） |
+| 可见-待补 | 0 | 无 |
+| 不可见-有理由 | 62 | 每行都写了机制证据与不补理由，无空白 |
+| 无法判定 | 0 | 无 |
+| **合计** | **114** | 129 − 15 精选条目 |
+
+补完后的完整性：`error_remedy.mapping_gaps() == []`、`mapping_overlaps() == []`
+（`tests/test_error_remedy_links.py::test_every_catalog_code_is_registered` 断言）。
+
+## 二、反证三条（删条目 → 测试必须红）
+
+做法：临时从 `desktop/troubleshooting.py` 的 `VISIBLE_BY_FAMILY` 删掉一个已在
+映射里的 code，跑同一个用例，贴红原文，再恢复。三次均按此循环，恢复后
+`git status -- desktop/troubleshooting.py` 为空。
+
+### 反证 1：删 `unknown_mode`（解码结果族）
+
+```text
+        """每个 error_catalog code：有条目，或显式登记「不出入口 + 原因」。"""
+>       assert error_remedy.mapping_gaps() == []
+E       AssertionError: assert ['unknown_mode'] == []
+tests\test_error_remedy_links.py:38: AssertionError
+FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered - AssertionError: assert ['unknown_mode'
+] == []
+1 failed in 0.43s
+```
+
+### 反证 2：删 `sdr_set_gain_failed`（设备调谐族）
+
+```text
+        """每个 error_catalog code：有条目，或显式登记「不出入口 + 原因」。"""
+>       assert error_remedy.mapping_gaps() == []
+E       AssertionError: assert ['sdr_set_gain_failed'] == []
+E         Left contains one more item: 'sdr_set_gain_failed'
+E         +     'sdr_set_gain_failed',
+tests\test_error_remedy_links.py:38: AssertionError
+FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered - AssertionError: assert ['sdr_set_gain_
+failed'] == []
+  Left contains one more item: 'sdr_set_gain_failed'
+  +     'sdr_set_gain_failed',
+1 failed in 0.43s
+```
+
+### 反证 3：删 `llm_timeout`（AI 模型族）
+
+```text
+        """每个 error_catalog code：有条目，或显式登记「不出入口 + 原因」。"""
+>       assert error_remedy.mapping_gaps() == []
+E       AssertionError: assert ['llm_timeout'] == []
+tests\test_error_remedy_links.py:38: AssertionError
+FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered - AssertionError: assert ['llm_timeout']
+ == []
+1 failed in 0.44s
+```
+
+恢复后复跑：`13 passed, 2 warnings in 2.71s`（`tests/test_error_remedy_links.py` 整文件）。
+
+## 三、114 行判定总表
+
+可见路径缩写：
+
+- **P1** AI 助手「执行步骤」卡渲染 `错误 {code}`（`desktop/ai_panel.py:581`；
+  `code` 来自 `mbdsdr_ai/tool_registry.py:917` 的 `ToolResult.error`）
+- **P2** 状态面板「解码结果」卡渲染 `错误码 {code}: {message}`
+  （`desktop/status_panel.py:263`，标签映射 `:244`；入口 `:1149 is_decode_tool`）
+- **P3** 状态栏渲染 `设备已断开：{message}`（`desktop/main_window.py:5308`，
+  由 `:5327` 的 health tick 触发；`message` = `sdr_backend` 写入的
+  `status.error = user_message(code)`）
+- **P4** AI 对话区渲染 `[错误] {message}`（`desktop/ai_panel.py:823`）
+- **P5** 步骤卡摘要显示兜底 message（`desktop/ai_panel.py:576-578`，
+  正文由 `mbdsdr_ai/tool_registry.py:967` 用 `user_message("missing_error_detail")` 填入）
+
+| # | code | 触发条件 | 用户可见 | 可见路径 | 判定依据（文件:行） | 处置 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `tool_not_found` | 模型调用未注册的工具名（拼错 / 插件未装载） | 是 | P1 | `mbdsdr_ai/tool_registry.py:917` → `desktop/ai_panel.py:581` | 已补（工具参数族，`e95945b`） |
+| 2 | `tool_unavailable` | 工具已注册但设备未连接 / 功能未启用时被调用 | 是 | P1 | `mbdsdr_ai/tool_registry.py:789,917` → `desktop/ai_panel.py:581` | 已补（工具参数族，`e95945b`） |
+| 3 | `invalid_arguments_type` | 模型把参数发成字符串 / 数组，不是 JSON 对象 | 是 | P1 | `mbdsdr_ai/tool_registry.py:289,917` → `desktop/ai_panel.py:581` | 已补（工具参数族，`e95945b`） |
+| 4 | `invalid_arguments` | 工具 handler 运行期校验判定参数内容不合法 | 是 | P1 | `mbdsdr_ai/tool_registry.py:917,959` → `desktop/ai_panel.py:581` | 已补（工具参数族，`e95945b`） |
+| 5 | `missing_required_params` | 模型漏传必填参数 | 是 | P1 | 同 #4 | 已补（工具参数族，`e95945b`） |
+| 6 | `param_type_mismatch` | 参数类型与声明不符 | 是 | P1 | 同 #4 | 已补（工具参数族，`e95945b`） |
+| 7 | `param_out_of_range` | 参数数值超出声明范围 | 是 | P1 | 同 #4 | 已补（工具参数族，`e95945b`） |
+| 8 | `param_not_in_enum` | 枚举值不在允许集合内 | 是 | P1 | 同 #4 | 已补（工具参数族，`e95945b`） |
+| 9 | `invalid_json_arguments` | 模型输出被截断 / 生成非法 JSON | 是 | P1 | 同 #4 | 已补（工具参数族，`e95945b`） |
+| 10 | `invalid_rs_shape` | AI 传入的 RS 矩阵参数形状不符 | 是 | P1 | 同 #4 | 已补（工具参数族，`e95945b`） |
+| 11 | `empty_taps` | AI 让滤波器使用空 taps 列表 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:3154` → `desktop/ai_panel.py:581` | 已补（工具参数族，`e95945b`） |
+| 12 | `handler_error` | handler 以「错误:」开头返回，或失败但没给码（registry 兜底） | 是 | P1 | `mbdsdr_ai/tool_registry.py:929,955,960` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 13 | `exception` | handler 抛异常，`exception_code()` 生成 `exception:<Type>` | 是 | P1 | `mbdsdr_ai/tool_registry.py:945` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 14 | `empty_result_without_reason` | 工具成功但无内容且未说明原因 | 是 | P1 | `mbdsdr_ai/tool_registry.py:973-977` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 15 | `compose_failed` | AI 调用的报文组装 / 合成工具失败 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:7132` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 16 | `gimbal_stop_failed` | 云台停止指令未被硬件执行 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:7815` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 17 | `no_rssi` | 扫描一轮没有采到任何 RSSI 样本 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:7800` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 18 | `offline_or_api_error` | 联网类工具离线或上游接口无数据 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:7598,7624,7656,7691` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 19 | `recording_not_found` | AI 指定不存在的记录 / 模板名 | 是 | P1 | `mbdsdr_ai/agent.py:2861` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 20 | `subagent_not_found` | AI 指定不存在或已结束的子代理 | 是 | P1 | `mbdsdr_ai/agent.py:2683-2685` → `desktop/ai_panel.py:581` | 已补（工具执行族，`e95945b`） |
+| 21 | `agent_busy` | 上一轮未结束时用户再发一条指令 | 是 | P4 | `mbdsdr_ai/agent.py:3784` → `desktop/ai_panel.py:823` | 已补（AI 会话族，`e95945b`） |
+| 22 | `cancelled` | 用户点停止 / 取消本轮对话 | 是 | P4 | `mbdsdr_ai/agent.py:3900,3953` → `desktop/ai_panel.py:823` | 已补（AI 会话族，`e95945b`） |
+| 23 | `device_unavailable` | 未连接设备时调用需要设备的工具 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:2960` → `desktop/ai_panel.py:581` | 已补（设备能力族，`e95945b`） |
+| 24 | `ptt_not_on` | 未打开 PTT 就让 AI 调发射工具 | 是 | P1 | `mbdsdr_ai/sdr_tools.py:6697` → `desktop/ai_panel.py:581` | 已补（设备能力族，`e95945b`） |
+| 25 | `capability_unknown` | 设备能力未声明，无法判断是否支持该能力（如发射） | 是 | P1 | `mbdsdr_ai/sdr_tools.py:6280,6304-6306` → `desktop/ai_panel.py:581` | 已补（设备能力族，`e95945b`） |
+| 26 | `NEED_HW` | 无硬件 / 离线环境下调用 VNA 等需硬件工具 | 是 | P1 | `mbdsdr_ai/vna_tools.py:175,179` → `desktop/ai_panel.py:581` | 已补（设备能力族，`e95945b`） |
+| 27 | `invalid_vcdu` | FY-4 / GOES 帧解析校验失败（用户可给坏文件 / 弱信号） | 是 | P1、P2 | `mbdsdr_ai/fengyun_sat.py:832,900`、`goes_lrit.py:915` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 28 | `decode_failed` | RTL433 等无线电解码失败（信号质量不足） | 是 | P1、P2 | `mbdsdr_ai/rtl433_decoder.py:803` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 29 | `unknown_device` | AI 指定未知设备名 | 是 | P1、P2 | `mbdsdr_ai/rtl433_decoder.py:798` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 30 | `doppler_failed` | 卫星解码时多普勒补偿计算失败 | 是 | P1、P2 | `mbdsdr_ai/satnogs_adapter.py:373` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 31 | `ogn_decode_failed` | OGN 报文解码失败 | 是 | P1、P2 | `mbdsdr_ai/sdrangel_plugins.py:411` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 32 | `schedule_failed` | 云图排程失败 | 是 | P1、P2 | `mbdsdr_ai/r2cloud_adapter.py:380` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 33 | `meta_failed` | 云图元数据获取失败 | 是 | P1、P2 | `mbdsdr_ai/r2cloud_adapter.py:388` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 34 | `bad_hex` | RDS 工具收到非法十六进制串 | 是 | P1、P2 | `mbdsdr_ai/rds_lite.py:558` → `desktop/ai_panel.py:581`；`desktop/status_panel.py:263` | 已补（解码工具族，`e95945b`） |
+| 35 | `unknown_mode` | 解码卡收到能力表未登记的数字模式 | 是 | P2 | `mbdsdr_ai/decode_router.py:573-578` → `desktop/status_panel.py:244,263` | 已补（解码结果族，`e95945b`） |
+| 36 | `missing_sample` | 解码卡输入的捕获文件不存在或为空 | 是 | P2 | `mbdsdr_ai/decode_router.py:586-591` → `desktop/status_panel.py:244,263` | 已补（解码结果族，`e95945b`） |
+| 37 | `unsupported_format` | 解码卡输入扩展名与模式要求不符 | 是 | P2 | `mbdsdr_ai/decode_router.py:592-601` → `desktop/status_panel.py:244,263` | 已补（解码结果族，`e95945b`） |
+| 38 | `decode_error` | 解码器运行期异常（弱信号 / 坏样本） | 是 | P2 | `mbdsdr_ai/decode_router.py:46,13` → `desktop/status_panel.py:244,263` | 已补（解码结果族，`e95945b`） |
+| 39 | `not_implemented` | 模式能力存在但通用入口未接线，用户仍可点 | 是 | P2 | `mbdsdr_ai/decode_router.py:47,14` → `desktop/status_panel.py:244,263` | 已补（解码结果族，`e95945b`） |
+| 40 | `sdr_set_frequency_failed` | 用户在「控制」面板改频率，设备拒绝 / 底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:283,289` → `desktop/main_window.py:5308` | 已补（设备调谐族，`0e4b9ef6`） |
+| 41 | `sdr_set_sample_rate_failed` | 用户改采样率，设备不支持或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:368,374` → `desktop/main_window.py:5308` | 已补（设备调谐族，`0e4b9ef6`） |
+| 42 | `sdr_set_gain_failed` | 用户改增益，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:402-413` → `desktop/main_window.py:5308` | 已补（设备调谐族，`0e4b9ef6`） |
+| 43 | `sdr_set_bandwidth_failed` | 用户改带宽，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:461,467` → `desktop/main_window.py:5308` | 已补（设备调谐族，`0e4b9ef6`） |
+| 44 | `doppler_compensation_failed` | 接收链多普勒补偿失败（无预测 / 计算异常），该块音频跳过 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:822,862` → `desktop/main_window.py:5308` | 已补（设备调谐族，`0e4b9ef6`） |
+| 45 | `llm_offline` | 用户开 `MBDSDR_OFFLINE` 或离线时点 AI 发送 | 是 | P4 | `mbdsdr_ai/model_manager.py:268,275` → `desktop/ai_panel.py:823` | 已补（AI 模型族，`0e4b9ef6`） |
+| 46 | `llm_rate_limited` | 模型接口返回 429（用户连续发指令 / 额度耗尽） | 是 | P4 | `mbdsdr_ai/model_manager.py:32,37` → `desktop/ai_panel.py:823` | 已补（AI 模型族，`0e4b9ef6`） |
+| 47 | `llm_http_4xx` | API Key 错 / 模型名不存在，接口返回 4xx | 是 | P4 | `mbdsdr_ai/model_manager.py:37` → `desktop/ai_panel.py:823` | 已补（AI 模型族，`0e4b9ef6`） |
+| 48 | `llm_http_5xx` | 模型服务端 5xx | 是 | P4 | `mbdsdr_ai/model_manager.py:37` → `desktop/ai_panel.py:823` | 已补（AI 模型族，`0e4b9ef6`） |
+| 49 | `llm_timeout` | 用户设置超时过小或网络慢，模型请求超时 | 是 | P4 | `mbdsdr_ai/model_manager.py:40` → `desktop/ai_panel.py:823` | 已补（AI 模型族，`0e4b9ef6`） |
+| 50 | `llm_unreachable` | 断网 / 代理错误 / 域名不可达 | 是 | P4 | `mbdsdr_ai/model_manager.py:42` → `desktop/ai_panel.py:823` | 已补（AI 模型族，`0e4b9ef6`） |
+| 51 | `llm_unexpected` | 模型客户端内部异常（用户可触发，如坏响应） | 是 | P4 | `mbdsdr_ai/model_manager.py:44` → `desktop/ai_panel.py:823` | 已补（AI 模型族，`0e4b9ef6`） |
+| 52 | `missing_error_detail` | 工具失败且 handler 没给正文，registry 兜底填 message | 是 | P5 | `mbdsdr_ai/tool_registry.py:967` → `desktop/ai_panel.py:576-578` | 已补（工具结果族，`0e4b9ef6`） |
+| 53 | `workflow_executor_missing` | 工作流引擎未注入执行器（构造顺序错误，开发者态） | 否 | — | `mbdsdr_ai/workflow_engine.py:298-299`；`mbdsdr_ai/agent.py:453` 总会 `set_tool_executor`，用户路径造不出 | 不补：仅开发者构造错误可达，桌面无渲染路径 |
+| 54 | `unknown_tool` | 旧 MCP 服务端收到未注册工具名（外部客户端发起） | 否 | — | `mbdsdr_ai/core/mcp_server.py:2072`；桌面 AI 走 `tool_not_found`（`tool_registry.py`），不读该 envelope | 不补：只有外部 MCP 客户端能看到，我方 UI 不渲染 |
+| 55 | `bad_arguments` | 仓内 `mcp_client` 库 API 的参数校验失败 | 否 | — | `mbdsdr_ai/mcp_client.py:1061,1066`；桌面不 import 该模块（`git grep -- desktop` 仅 `error_remedy.py`） | 不补：桌面零调用，属库 API 返回值 |
+| 56 | `bad_command` | 浏览器 / HTTP 客户端向 Web 服务发非法指令 | 否 | — | `mbdsdr_ai/web/server.py:217,433`；桌面只 `settings_panel.py:73` 启停服务，不读请求回包 | 不补：错误回给 HTTP 客户端，不进桌面 UI |
+| 57 | `bad_config` | MCP 客户端配置缺 `type` / 配置文件损坏 | 否 | — | `mbdsdr_ai/mcp_client.py:748,910,939`；桌面零 import | 不补：属客户端库配置错误，桌面不走该路径 |
+| 58 | `bad_json` | MCP 客户端配置文件 JSON 解析失败 | 否 | — | `mbdsdr_ai/mcp_client.py:934`；桌面零 import | 不补：同上，库 API 级错误 |
+| 59 | `config_not_found` | MCP 客户端指定配置文件不存在 | 否 | — | `mbdsdr_ai/mcp_client.py:925`；桌面零 import | 不补：同上，库 API 级错误 |
+| 60 | `unknown_server` | 客户端调用未登记的 MCP server 名 | 否 | — | `mbdsdr_ai/mcp_client.py:1037`；桌面零 import | 不补：外部客户端调用面 |
+| 61 | `unknown_command` | Web 服务收到未知命令字 | 否 | — | `mbdsdr_ai/web/server.py:463`；桌面不读请求回包 | 不补：HTTP 客户端可见，桌面不可见 |
+| 62 | `unsupported` | Web 服务收到不支持的操作 | 否 | — | `mbdsdr_ai/web/server.py:448,454,460` | 不补：同上 |
+| 63 | `identity_mismatch` | 站控服务端校验站点身份不匹配 | 否 | — | `mbdsdr_ai/core/controller.py:1075`；桌面只 import 其 `VALID_MODES` 常量（`config_schema.py:66`） | 不补：桌面无调用该 dict 返回值的路径 |
+| 64 | `station_untrusted` | 站点不在受控端可信列表 | 否 | — | `mbdsdr_ai/core/controller.py:1043,1217`；桌面零调用 | 不补：服务端协议细项，不进我方 UI |
+| 65 | `no_pass` | 服务端当前时间窗无可用过境 | 否 | — | `mbdsdr_ai/core/controller.py:1122`；桌面零调用 | 不补：同上；桌面卫星面板有独立通用提示 |
+| 66 | `no_downlink_known` | 服务端查不到该卫星下行频点 | 否 | — | `mbdsdr_ai/core/controller.py:1237`；桌面零调用 | 不补：服务端返回值，不进我方 UI |
+| 67 | `sdr_error` | `core.errors.SdrError` 的默认码；异常路径被改写成 `exception:<Type>` | 否 | — | `mbdsdr_ai/core/errors.py:36`；`mbdsdr_ai/tool_registry.py:945` 用 `exception_code(e)` 覆盖 | 不补：兜底类默认码不会作为 UI 文案出现 |
+| 68 | `invalid_argument` | `core.errors` 参数校验异常默认码 | 否 | — | `mbdsdr_ai/core/errors.py:158`；同样被 `exception_code` 覆盖 | 不补：同上，异常码统一改写 |
+| 69 | `export_path_out_of_root` | 导出路径越界（服务端 / MCP envelope） | 否 | — | `mbdsdr_ai/core/errors.py:173`；桌面零 import | 不补：MCP 服务端安全拒绝码，外部客户端可见 |
+| 70 | `decoder_not_available` | 解码器不可用（服务端 envelope） | 否 | — | `mbdsdr_ai/core/errors.py:179`；桌面零 import | 不补：同上 |
+| 71 | `not_available` | 后端 / 模块缺失，`core.controller` 返回 dict | 否 | — | `mbdsdr_ai/core/controller.py:737`；桌面零调用 | 不补：服务端字典，桌面不读 |
+| 72 | `spill_write_failed` | MCP 大字段落盘失败 | 否 | — | `mbdsdr_ai/core/mcp_server.py:1586` | 不补：MCP 服务端 envelope，桌面不渲染 |
+| 73 | `denied_by_policy` | 工具策略拒绝执行（外部 MCP 客户端调用） | 否 | — | `mbdsdr_ai/core/mcp_server.py:1813-1814` | 不补：桌面写操作走自己的确认门，文案自写 |
+| 74 | `manual_gate_required` | MCP 服务端缺外部确认 token | 否 | — | `mbdsdr_ai/core/mcp_server.py:1838-1840,1867` | 不补：桌面确认门文案独立，不显示该码 |
+| 75 | `internal_error` | MCP 服务端内部异常 envelope | 否 | — | `mbdsdr_ai/core/mcp_server.py:1856,2096` | 不补：服务端内部错误，桌面不读 |
+| 76 | `missing_iq` | 解调工具调用未带 `iq_base64` | 否 | — | `mbdsdr_ai/sdr_tools.py:3635-3636`；code 只在 `data`，正文是手写说明，步骤卡摘要（前 200 字，`ai_steps.summarize_result`）取不到 | 不补：桌面无原始结果展开器，摘要不含该码 |
+| 77 | `unknown_device_type` | MCP 服务端收到未知设备类型 | 否 | — | `mbdsdr_ai/core/mcp_server.py:236-239` | 不补：服务端 envelope，桌面不渲染 |
+| 78 | `empty_input` | MCP 解码入口收到空输入 | 否 | — | `mbdsdr_ai/core/mcp_server.py:187,263` | 不补：服务端校验返回，桌面不读 |
+| 79 | `file_missing` | 录音库按条目取文件时文件已被移走 | 否 | — | `mbdsdr_ai/recording_library.py:764`；桌面零 import（`git grep -- desktop` 为 0） | 不补：录音库无桌面调用方，code 不进 UI |
+| 80 | `bad_field` | 录音库更新 / 查询字段名不在白名单 | 否 | — | `mbdsdr_ai/recording_library.py:815` | 不补：同上，库 API 返回值 |
+| 81 | `bad_param` | 录音库参数越界 | 否 | — | `mbdsdr_ai/recording_library.py:821` | 不补：同上 |
+| 82 | `entry_not_found` | 录音库条目 ID 不存在 | 否 | — | `mbdsdr_ai/recording_library.py:833` | 不补：同上 |
+| 83 | `dest_missing` | 录音库移动 / 复制目标不存在 | 否 | — | `mbdsdr_ai/recording_library.py:1400` | 不补：同上 |
+| 84 | `not_found` | 录音库索引文件不存在（空库） | 否 | — | `mbdsdr_ai/recording_library.py:421` | 不补：同上 |
+| 85 | `library_not_found` | 指到的新目录下没有索引 | 否 | — | `mbdsdr_ai/recording_library.py:1410` | 不补：同上 |
+| 86 | `library_busy` | 另一进程占用录音库 | 否 | — | `mbdsdr_ai/recording_library.py:76` | 不补：同上 |
+| 87 | `unsupported_kind` | 录音库记录类型不支持 | 否 | — | `mbdsdr_ai/recording_library.py:1637` | 不补：同上 |
+| 88 | `io` | 录制文件读写异常（`recorder` 按异常类型归类） | 否 | — | `mbdsdr_ai/recorder.py:60`；桌面零 import | 不补：桌面录制走 MCP 硬件，不经该模块 |
+| 89 | `io_error` | 录音库操作 IO 失败 | 否 | — | `mbdsdr_ai/recorder.py:295`；`recording_library.py` 同样无桌面调用方 | 不补：同上 |
+| 90 | `wav_error` | WAV 写入失败 | 否 | — | `mbdsdr_ai/recorder.py:433` | 不补：同上 |
+| 91 | `missing` | 回放打开时数据文件不存在 | 否 | — | `mbdsdr_ai/playback.py:164`；桌面零 import | 不补：回放模块无桌面调用方（桌面回放只读 IQ，`main_window.py:6104` 仅重采样） |
+| 92 | `corrupt` | 回放 SigMF 元数据损坏 | 否 | — | `mbdsdr_ai/playback.py:180` | 不补：同上 |
+| 93 | `truncated` | 回放记录被截断 | 否 | — | `mbdsdr_ai/playback.py:194` | 不补：同上 |
+| 94 | `empty` | 回放数据文件 0 字节 | 否 | — | `mbdsdr_ai/playback.py:191` | 不补：同上 |
+| 95 | `datatype` | SigMF 数据类型不支持 | 否 | — | `mbdsdr_ai/playback.py:74` | 不补：同上 |
+| 96 | `deleted` | 回放文件读取过程中被删除 | 否 | — | `mbdsdr_ai/playback.py:262` | 不补：同上 |
+| 97 | `eof` | 回放读到文件末尾（未循环） | 否 | — | `mbdsdr_ai/playback.py:301` | 不补：同上 |
+| 98 | `open_failed` | 回放文件打开失败 | 否 | — | `mbdsdr_ai/playback.py:497` | 不补：同上 |
+| 99 | `no_data` | 回放源无更多数据 | 否 | — | `mbdsdr_ai/playback.py:513` | 不补：同上 |
+| 100 | `rate_unknown` | 录制文件未声明采样率，拒绝猜测 | 否 | — | `mbdsdr_ai/playback.py:540` | 不补：同上 |
+| 101 | `rate_mismatch` | 回放源固定采样率与请求值冲突 | 否 | — | `mbdsdr_ai/playback.py:544-546` | 不补：同上 |
+| 102 | `playback` | 回放打开失败（`playback:<底层码>`） | 否 | — | `mbdsdr_ai/playback.py:388` | 不补：同上 |
+| 103 | `playback_failed` | 回放运行期失败 | 否 | — | `mbdsdr_ai/playback.py:384` | 不补：同上 |
+| 104 | `bad_parameter` | 发射 / 回放参数不合法 | 否 | — | `mbdsdr_ai/playback.py:396`；桌面发射走 `tx_guard`（`main_window.py:2878`），不经 playback | 不补：桌面发射面不读该模块 |
+| 105 | `tx_source_deleted` | 发射源文件在发射过程中被删除（playback 发射面） | 否 | — | `mbdsdr_ai/playback.py:442`；桌面 `TxSession` 来自 `mbdsdr_ai/tx_guard.py`，且只发载波（`main_window.py:2915-2919`） | 不补：桌面发射无文件源，造不出 |
+| 106 | `tx_source_failed` | 发射源在发射过程中失效（playback 发射面） | 否 | — | `mbdsdr_ai/playback.py:443`；同上 | 不补：同上 |
+| 107 | `rate_limited` | TLE 源 429 限流 | 否 | — | `mbdsdr_ai/tle_fetch.py:85` 分类进 `failure_kind`；桌面状态栏只显示通用「TLE 在线更新失败，使用内置 TLE」（`desktop/main_window.py:7917`） | 不补：code 只进 health / 日志，面板不渲染 |
+| 108 | `http_4xx` | TLE 源 4xx 拒绝 | 否 | — | `mbdsdr_ai/tle_fetch.py:85`；`desktop/main_window.py:7917` | 不补：同上 |
+| 109 | `http_5xx` | TLE 源 5xx | 否 | — | `mbdsdr_ai/tle_fetch.py:85`；`desktop/main_window.py:7917` | 不补：同上 |
+| 110 | `network_other` | TLE 拉取时的其它网络错误 | 否 | — | `mbdsdr_ai/tle_fetch.py:85`；`desktop/main_window.py:7917` | 不补：同上 |
+| 111 | `parse_failure` | TLE 响应不含合法两行根数 | 否 | — | `mbdsdr_ai/tle_fetch.py:145`；`desktop/main_window.py:7917` | 不补：同上 |
+| 112 | `empty_response` | TLE 源返回空响应 | 否 | — | `mbdsdr_ai/tle_fetch.py:86`；`desktop/main_window.py:7917` | 不补：同上 |
+| 113 | `tle_unknown` | TLE 刷新失败且调用方没给状态码 / 异常 | 否 | — | `mbdsdr_ai/tle_fetch.py:86`；`desktop/main_window.py:7917` | 不补：同上，属调用上下文缺失的内部码 |
+| 114 | `unexpected_error` | `error_handler` 结构化信封的默认码（MCP / 启动序列） | 否 | — | `mbdsdr_ai/error_handler.py:240-244`；桌面只 import 具体异常类（`mbdsdr_ai/sdr_backend.py:1860-1865`），不读信封 | 不补：只用于日志与开发排查，用户面不出现 |
+
+## 四、判定口径与复核命令
+
+- 通道取证只看**桌面 UI 真实渲染点**，不看库 API 返回值：
+  `desktop/ai_panel.py:581`、`desktop/status_panel.py:263`、
+  `desktop/main_window.py:5308`、`desktop/ai_panel.py:823`、`desktop/ai_panel.py:576-578`。
+- 「不可见」的机械证据是 `git grep -n <模块> -- desktop` 为 0：
+  `recording_library` / `recorder` / `playback` / `tle_fetch` / `error_handler`（信封）
+  在 `desktop/` 均无业务调用方。
+- 复跑：
+
+```powershell
+$env:QT_QPA_PLATFORM='offscreen'
+python -m pytest tests/test_error_remedy_links.py -q
+python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); import error_remedy; print(error_remedy.mapping_gaps(), error_remedy.mapping_overlaps())"
+```
+
+- 边界：本次只改错误映射表（`desktop/troubleshooting.py`）、帮助文案与测试，
+  UI 布局与像素零改动。
