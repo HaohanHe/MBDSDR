@@ -645,3 +645,68 @@ def test_db_zoom_clamps_span_and_axis_bounds(qapp):
     assert hi - lo >= 10.0
     assert lo >= -160.0 and hi <= 0.0
     _assert_single_source(panel)
+
+
+# ---------------------------------------------------------------------------
+# 6. 瀑布与频谱共用同一 x→频率映射（含 Ctrl 平移偏移）
+# ---------------------------------------------------------------------------
+def _wf_panel_with_bin(qapp, bin_idx=256, offset_hz=0.0):
+    panel = _panel(qapp)
+    gen = panel.generator
+    gen.center_freq_hz = 100e6
+    gen.sample_rate_hz = 2.4e6
+    s = np.full(gen.num_bins, -100.0, dtype=np.float32)
+    s[bin_idx] = -20.0
+    gen.spectrum = s
+    gen._has_real_data = True
+    gen.wf_rows_written = 10
+    panel._state.view_offset_hz = float(offset_hz)
+    return panel
+
+
+def test_counterproof_legacy_waterfall_mapping_ignores_view_offset(qapp):
+    """旧画布 x→bin 是 linspace，不含 view_offset；Ctrl 平移 300 kHz 后，
+    同一 x 在频谱与瀑布上相差整整 300 kHz。"""
+    panel = _wf_panel_with_bin(qapp, offset_hz=300e3)
+    gen = panel.generator
+    x = panel._plot.width() * 0.35
+    legacy_hz = float(gen.bin_to_freq(
+        int(round(x / panel._plot.width() * (gen.num_bins - 1)))))
+    spec_hz = panel._plot._freq_at_x(x)
+    assert abs(spec_hz - legacy_hz) == pytest.approx(300e3, abs=5e3), \
+        f"反证场景不成立：频谱 {spec_hz/1e6}MHz / 旧瀑布 {legacy_hz/1e6}MHz"
+
+
+def test_waterfall_and_spectrum_map_same_x_to_same_freq(qapp):
+    """同一 x 像素在两区必须映射到同一频率；Ctrl 平移后依然一致。"""
+    panel = _wf_panel_with_bin(qapp)
+    plot = panel._plot
+    wf = panel._wf_plot
+    wf.resize(plot.width(), 200)
+    for offset in (0.0, 300e3, -500e3):
+        panel._state.view_offset_hz = offset
+        for x in (0.0, plot.width() * 0.25, plot.width() * 0.5,
+                  plot.width() - 1):
+            assert wf.freq_at_x(x) == pytest.approx(
+                plot._freq_at_x(x), abs=1.0), \
+                f"offset={offset} x={x}: 瀑布 {wf.freq_at_x(x)} ≠ 频谱 {plot._freq_at_x(x)}"
+
+
+def test_waterfall_canvas_pixel_follows_view_offset(qapp):
+    """画布里的 bin 必须落在频谱同一频率的 x 上，而不是固定画在中间。"""
+    import spectrum_widget as sw
+    panel = _wf_panel_with_bin(qapp, offset_hz=300e3)
+    gen = panel.generator
+    sw._wf_build_lut(panel._state)
+    w = 800
+    dst = np.zeros((w, 4), dtype=np.uint8)
+    row = np.full(gen.num_bins, -100.0, dtype=np.float32)
+    row[256] = -20.0
+    sw._wf_paint_row_into(panel._state, row, dst)
+    top = panel._state._wf_lut[255]
+    cols = np.nonzero(np.all(dst[:, :3] == top, axis=1))[0]
+    want = int(round(sw._freq_to_x(
+        QRectF(0, 0, w, 1), gen.center_freq_hz + 300e3,
+        gen.sample_rate_hz, gen.bin_to_freq(256))))
+    assert cols.size and abs(int(cols[0]) - want) <= 3, \
+        f"瀑布 bin 落在 {cols[:3]}px，频谱对应 {want}px"
