@@ -101,6 +101,41 @@ class TestTrackToggleSignals:
         view._track_btn.setChecked(True)  # 应被诚实拒绝并弹回
         assert not view._track_btn.isChecked()
         assert events == []
+        # 回弹不产生「假可点」：按钮必须同时置灰。
+        # 判据（无 TLE / 观测站缺失时的真实时序）：按钮先在上一次刷新里
+        # 处于 enabled，TLE 在点击前失效；若只回弹不置灰，用户看到的是
+        # 「能点但点了必弹」的按钮，会把数据缺失读成操作方式错误。
+        assert not view._track_btn.isEnabled(), "回弹后必须置灰，不留假可点态"
+        assert "无法跟踪" in view._track_notice, "置灰必须附可执行的下一步说明"
+
+    def test_track_bounce_disables_stale_enabled_button(self):
+        """TLE 在两次刷新之间消失：按钮残留 enabled 时点击，必须回弹 + 置灰。"""
+        view = _make_view_with("NOAA 19")
+        assert view._track_btn.isEnabled()
+        view.set_satellite_catalog([])      # TLE 目录清空，但按钮尚未被刷新
+        assert view._track_btn.isEnabled(), "前提：此刻按钮仍是 enabled（真实时序）"
+
+        view._track_btn.setChecked(True)    # 模拟用户此刻点击
+
+        assert not view._track_btn.isChecked(), "回弹不得残留勾选"
+        assert not view._track_btn.isEnabled(), "回弹后必须置灰"
+        assert "TLE" in view._track_notice, "原因要写清是缺 TLE"
+
+    def test_track_reenabled_after_catalog_returns(self):
+        """重新选中带 TLE 的星后按钮恢复可用（置灰不是永久死锁）。"""
+        view = _make_view_with("NOAA 19")
+        view.set_satellite_catalog([])
+        view._track_btn.setChecked(True)
+        assert not view._track_btn.isEnabled()
+
+        obj = view._objects[0]
+        view.set_satellite_catalog([{
+            "name": obj.name, "line1": TLE_L1, "line2": TLE_L2,
+            "freq_mhz": 0.0, "kind": "weather",
+        }])
+        view.on_object_picked(obj)
+
+        assert view._track_btn.isEnabled(), "目录恢复后必须重新可点"
 
     def test_reselect_stops_tracking(self):
         view = _make_view_with("NOAA 19")

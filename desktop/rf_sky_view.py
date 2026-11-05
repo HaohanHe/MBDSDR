@@ -3207,10 +3207,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         res = self._compute_tune()
         if res is None:
-            # 目录外卫星/无观测站：诚实拒绝，按钮弹回
+            # 目录外卫星/无观测站：诚实拒绝，按钮弹回**并置灰**。
+            # 只回弹不置灰会留下一个「看着能点、点了必弹」的按钮：
+            # 用户读成操作方式不对，而不是数据缺失。置灰把原因钉在按钮上，
+            # 并在 HUD 写一句可执行的下一步（TLE 放哪 / 观测站怎么设）。
             self._track_btn.blockSignals(True)
             self._track_btn.setChecked(False)
             self._track_btn.blockSignals(False)
+            self._track_btn.setEnabled(False)
+            if self._selected_sat_tle() is None:
+                why = ("选中目标缺少 TLE（放到 ~/.mbdsdr/tle/ "
+                       "或联网获取后再试）")
+            else:
+                why = "观测站位置未设置，无法计算跟踪频点（先设 observer_lat/lon）"
+            self._track_notice = f"无法跟踪：{why}"
+            self._track_notice_until = time.time() + 4.0
+            self.update()
             return
         name = str(res.get("satellite") or self._tune_sat_name or "")
         self._track_target_name = name
