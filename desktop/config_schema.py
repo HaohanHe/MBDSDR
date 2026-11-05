@@ -456,7 +456,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(key="sample_rate_hz", group="", kind="float", label="", help="",
                 default=float(_DEFAULT_SAMPLE_RATE_HZ),
                 source="desktop/constants.py: DEFAULT_SAMPLE_RATE_HZ"
-                       "（派生自 mbdsdr_ai/sdr_backend.py:110，2.4 MS/s）",
+                       "（派生自 mbdsdr_ai/sdr_backend.DEFAULT_SAMPLE_RATE_HZ，2.4 MS/s）",
                 exposed=False),
     SettingItem(key="callsign", group="", kind="text", label="", help="",
                 default="", source="desktop/settings.py:34", exposed=False),
@@ -464,7 +464,7 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 default="", source="desktop/settings.py:35", exposed=False),
     SettingItem(key="gnss_baudrate", group="", kind="enum", label="", help="",
                 default=9600,
-                source="desktop/main_window.py:8426 GNSS 波特率下拉"
+                source="desktop/main_window.py 的 GNSS 波特率下拉 baud_combo 构建处"
                        "（9600/19200/38400/57600/115200）",
                 choices=tuple(_e(b, str(b)) for b in
                               (9600, 19200, 38400, 57600, 115200)),
