@@ -86,6 +86,8 @@ class DSOEntry:
     aliases_zh: Tuple[str, ...] = ()
     catalog_type: str = ""
     size_minor_arcmin: Optional[float] = None
+    axis_ratio: Optional[float] = None
+    axis_ratio_source: str = "unknown"
     cross_ids: Tuple[Tuple[str, int], ...] = ()
     source_row: int = 0
     source_file: str = ""
@@ -197,6 +199,34 @@ def _check_entry(rec: dict, meta: dict) -> None:
         minor = float(minor)
         if not math.isfinite(minor) or minor <= 0.0:
             raise DSOIntegrityError(f"{name} 短轴尺寸非法: {minor}")
+    ratio = rec.get("axis_ratio")
+    ratio_source = rec.get("axis_ratio_source")
+    if size is not None and minor is not None:
+        expected_ratio = minor / size
+        if ratio is None:
+            raise DSOIntegrityError(f"{name} 两轴齐全却缺 axis_ratio")
+        try:
+            ratio = float(ratio)
+        except (TypeError, ValueError) as exc:
+            raise DSOIntegrityError(f"{name} axis_ratio 非法") from exc
+        if not math.isfinite(ratio) or abs(ratio - expected_ratio) > 1e-6:
+            raise DSOIntegrityError(
+                f"{name} axis_ratio 与短轴/长轴不一致: {ratio}")
+        if ratio_source != "catalog":
+            raise DSOIntegrityError(
+                f"{name} 两轴齐全时 axis_ratio_source 必须为 catalog: "
+                f"{ratio_source!r}")
+    else:
+        if ratio is not None:
+            raise DSOIntegrityError(
+                f"{name} 缺轴却给出 axis_ratio: {ratio!r}")
+        if ratio_source != "unknown":
+            raise DSOIntegrityError(
+                f"{name} 缺轴时 axis_ratio_source 必须为 unknown: "
+                f"{ratio_source!r}")
+    if ratio_source == "estimated":
+        raise DSOIntegrityError(
+            f"{name} 数据层不得出现 axis_ratio_source=estimated（估计属视图）")
     catalog_type = rec.get("catalog_type")
     expected_render = (meta.get("type_mapping") or {}).get(catalog_type)
     if expected_render != rec.get("dso_type") or expected_render not in _RENDER_TYPES:
@@ -367,6 +397,9 @@ def _entry_from_record(rec: dict) -> DSOEntry:
         catalog_type=rec.get("catalog_type") or "",
         size_minor_arcmin=(None if rec.get("size_minor_arcmin") is None
                            else float(rec["size_minor_arcmin"])),
+        axis_ratio=(None if rec.get("axis_ratio") is None
+                    else float(rec["axis_ratio"])),
+        axis_ratio_source=rec.get("axis_ratio_source") or "unknown",
         cross_ids=cross,
         source_row=int(rec.get("source_row") or 0),
         source_file=rec.get("source_file") or "",

@@ -247,6 +247,48 @@ def test_missing_fields_are_null_and_counted(cat, payload):
             assert obj["size_minor_arcmin"] > 0
 
 
+def test_axis_ratio_is_derived_or_unknown(payload):
+    """轴比只在两轴齐全时由数据层给出；缺短轴一律 null + unknown。"""
+    for obj in payload["objects"]:
+        if obj["size_arcmin"] is not None and obj["size_minor_arcmin"] is not None:
+            assert obj["axis_ratio"] == pytest.approx(
+                obj["size_minor_arcmin"] / obj["size_arcmin"], rel=1e-9)
+            assert obj["axis_ratio_source"] == "catalog"
+        else:
+            assert obj["axis_ratio"] is None
+            assert obj["axis_ratio_source"] == "unknown"
+        assert obj["axis_ratio_source"] != "estimated"
+
+
+def test_axis_ratio_counts_match_known_axes(payload):
+    counts = payload["meta"]["counts"]
+    known = counts["with_size_minor_arcmin"]
+    assert sum(1 for o in payload["objects"]
+               if o["axis_ratio_source"] == "catalog") == known
+    assert sum(1 for o in payload["objects"]
+               if o["axis_ratio_source"] == "unknown") == 117 - known
+
+
+def test_guard_axis_ratio_mismatch_and_estimated_rejected(payload):
+    clone = json.loads(json.dumps(payload, ensure_ascii=False))
+    target = next(o for o in clone["objects"] if o["axis_ratio"] is not None)
+    target["axis_ratio"] = target["axis_ratio"] + 0.25
+    with pytest.raises(dso.DSOIntegrityError):
+        dso._validate_payload(clone)
+
+    clone = json.loads(json.dumps(payload, ensure_ascii=False))
+    target = next(o for o in clone["objects"] if o["axis_ratio"] is not None)
+    target["axis_ratio_source"] = "estimated"
+    with pytest.raises(dso.DSOIntegrityError):
+        dso._validate_payload(clone)
+
+    clone = json.loads(json.dumps(payload, ensure_ascii=False))
+    target = next(o for o in clone["objects"] if o["axis_ratio"] is None)
+    target["axis_ratio"] = 0.55
+    with pytest.raises(dso.DSOIntegrityError):
+        dso._validate_payload(clone)
+
+
 def test_30_sample_matches_independent_source(cat):
     for name in SAMPLE_30:
         row, _dup = _source_row(name)

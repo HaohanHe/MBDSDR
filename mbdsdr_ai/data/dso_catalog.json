@@ -559,7 +559,7 @@
       "星等优先 V-Mag，缺失时用 B-Mag 并以 magnitude_band 标注波段；两者皆缺写 null。",
       "cross_ids 取 OpenNGC Name 中的编号；NGC/IC 列仅作交叉引用，在 Dup 行附近可能与 Name 互换，故不采用。"
     ],
-    "generated_at": "2026-11-04T15:55:06+00:00",
+    "generated_at": "2026-11-05T02:10:02+00:00",
     "generator": "mbdsdr_ai.astronomy.build_dso_catalog",
     "reproduction": {
       "commands": [
@@ -570,7 +570,7 @@
       ],
       "wikidata_query": "SELECT ?item ?cat ?zh ?zhcn ?zhhans ?zhhant ?en ?typeLabel WHERE {\n  VALUES ?cat { \"M 1\" \"M 10\" \"M 100\" \"M 101\" \"M 103\" \"M 104\" \"M 105\" \"M 106\" \"M 107\" \"M 108\" \"M 109\" \"M 11\" \"M 110\" \"M 12\" \"M 13\" \"M 14\" \"M 15\" \"M 16\" \"M 17\" \"M 18\" \"M 19\" \"M 2\" \"M 20\" \"M 21\" \"M 22\" \"M 23\" \"M 24\" \"M 25\" \"M 26\" \"M 27\" \"M 28\" \"M 29\" \"M 3\" \"M 30\" \"M 31\" \"M 32\" \"M 33\" \"M 34\" \"M 35\" \"M 36\" \"M 37\" \"M 38\" \"M 39\" \"M 4\" \"M 40\" \"M 41\" \"M 42\" \"M 43\" \"M 44\" \"M 45\" \"M 46\" \"M 47\" \"M 48\" \"M 49\" \"M 5\" \"M 50\" \"M 51\" \"M 52\" \"M 53\" \"M 54\" \"M 55\" \"M 56\" \"M 57\" \"M 58\" \"M 59\" \"M 6\" \"M 60\" \"M 61\" \"M 62\" \"M 63\" \"M 64\" \"M 65\" \"M 66\" \"M 67\" \"M 68\" \"M 69\" \"M 7\" \"M 70\" \"M 71\" \"M 72\" \"M 73\" \"M 74\" \"M 75\" \"M 76\" \"M 77\" \"M 78\" \"M 79\" \"M 8\" \"M 80\" \"M 81\" \"M 82\" \"M 83\" \"M 84\" \"M 85\" \"M 86\" \"M 87\" \"M 88\" \"M 89\" \"M 9\" \"M 90\" \"M 91\" \"M 92\" \"M 93\" \"M 94\" \"M 95\" \"M 96\" \"M 97\" \"M 98\" \"M 99\" \"M1\" \"M10\" \"M100\" \"M101\" \"M103\" \"M104\" \"M105\" \"M106\" \"M107\" \"M108\" \"M109\" \"M11\" \"M110\" \"M12\" \"M13\" \"M14\" \"M15\" \"M16\" \"M17\" \"M18\" \"M19\" \"M2\" \"M20\" \"M21\" \"M22\" \"M23\" \"M24\" \"M25\" \"M26\" \"M27\" \"M28\" \"M29\" \"M3\" \"M30\" \"M31\" \"M32\" \"M33\" \"M34\" \"M35\" \"M36\" \"M37\" \"M38\" \"M39\" \"M4\" \"M40\" \"M41\" \"M42\" \"M43\" \"M44\" \"M45\" \"M46\" \"M47\" \"M48\" \"M49\" \"M5\" \"M50\" \"M51\" \"M52\" \"M53\" \"M54\" \"M55\" \"M56\" \"M57\" \"M58\" \"M59\" \"M6\" \"M60\" \"M61\" \"M62\" \"M63\" \"M64\" \"M65\" \"M66\" \"M67\" \"M68\" \"M69\" \"M7\" \"M70\" \"M71\" \"M72\" \"M73\" \"M74\" \"M75\" \"M76\" \"M77\" \"M78\" \"M79\" \"M8\" \"M80\" \"M81\" \"M82\" \"M83\" \"M84\" \"M85\" \"M86\" \"M87\" \"M88\" \"M89\" \"M9\" \"M90\" \"M91\" \"M92\" \"M93\" \"M94\" \"M95\" \"M96\" \"M97\" \"M98\" \"M99\" \"NGC 2070\" \"NGC 253\" \"NGC 5139\" \"NGC 5866\" \"NGC 7000\" \"NGC 7293\" \"NGC 869\" \"NGC 884\" \"NGC2070\" \"NGC253\" \"NGC5139\" \"NGC5866\" \"NGC7000\" \"NGC7293\" \"NGC869\" \"NGC884\" }\n  ?item wdt:P528 ?cat .\n  OPTIONAL { ?item rdfs:label ?zh FILTER(lang(?zh)=\"zh\") }\n  OPTIONAL { ?item rdfs:label ?zhcn FILTER(lang(?zhcn)=\"zh-cn\") }\n  OPTIONAL { ?item rdfs:label ?zhhans FILTER(lang(?zhhans)=\"zh-hans\") }\n  OPTIONAL { ?item rdfs:label ?zhhant FILTER(lang(?zhhant)=\"zh-hant\") }\n  OPTIONAL { ?item rdfs:label ?en FILTER(lang(?en)=\"en\") }\n  OPTIONAL { ?item wdt:P31 ?type . ?type rdfs:label ?typeLabel FILTER(lang(?typeLabel)=\"en\") }\n}"
     },
-    "data_sha256": "4648ca716de1b44957c1605b3918764bfe34c5cfd03631f6519e97f22dc26956"
+    "data_sha256": "aee650e6ea239c47409785089306dad109b55a92ea197a855ea6a40dc27d2d05"
   },
   "objects": [
     {
@@ -589,6 +589,8 @@
       "magnitude_band": "V",
       "size_arcmin": 8.0,
       "size_minor_arcmin": 4.0,
+      "axis_ratio": 0.5,
+      "axis_ratio_source": "catalog",
       "constellation": "Tau",
       "cross_ids": {
         "ngc": 1952,
@@ -615,6 +617,8 @@
       "magnitude_band": "V",
       "size_arcmin": 8.4,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Aqr",
       "cross_ids": {
         "ngc": 7089,
@@ -641,6 +645,8 @@
       "magnitude_band": "V",
       "size_arcmin": 16.2,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "CVn",
       "cross_ids": {
         "ngc": 5272,
@@ -667,6 +673,8 @@
       "magnitude_band": "V",
       "size_arcmin": 28.2,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sco",
       "cross_ids": {
         "ngc": 6121,
@@ -693,6 +701,8 @@
       "magnitude_band": "V",
       "size_arcmin": 15.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Ser",
       "cross_ids": {
         "ngc": 5904,
@@ -719,6 +729,8 @@
       "magnitude_band": "V",
       "size_arcmin": 15.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sco",
       "cross_ids": {
         "ngc": 6405,
@@ -745,6 +757,8 @@
       "magnitude_band": "V",
       "size_arcmin": 22.2,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sco",
       "cross_ids": {
         "ngc": 6475,
@@ -771,6 +785,8 @@
       "magnitude_band": "V",
       "size_arcmin": 45.0,
       "size_minor_arcmin": 30.0,
+      "axis_ratio": 0.6666666666666666,
+      "axis_ratio_source": "catalog",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6523,
@@ -797,6 +813,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.9,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Oph",
       "cross_ids": {
         "ngc": 6333,
@@ -823,6 +841,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.3,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Oph",
       "cross_ids": {
         "ngc": 6254,
@@ -851,6 +871,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sct",
       "cross_ids": {
         "ngc": 6705,
@@ -877,6 +899,8 @@
       "magnitude_band": "V",
       "size_arcmin": 11.1,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Oph",
       "cross_ids": {
         "ngc": 6218,
@@ -903,6 +927,8 @@
       "magnitude_band": "V",
       "size_arcmin": 16.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Her",
       "cross_ids": {
         "ngc": 6205,
@@ -929,6 +955,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.9,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Oph",
       "cross_ids": {
         "ngc": 6402,
@@ -955,6 +983,8 @@
       "magnitude_band": "V",
       "size_arcmin": 11.1,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Peg",
       "cross_ids": {
         "ngc": 7078,
@@ -981,6 +1011,8 @@
       "magnitude_band": "V",
       "size_arcmin": 120.0,
       "size_minor_arcmin": 25.0,
+      "axis_ratio": 0.20833333333333334,
+      "axis_ratio_source": "catalog",
       "constellation": "Ser",
       "cross_ids": {
         "ngc": 6611,
@@ -1011,6 +1043,8 @@
       "magnitude_band": "V",
       "size_arcmin": 12.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6618,
@@ -1037,6 +1071,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6613,
@@ -1063,6 +1099,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Oph",
       "cross_ids": {
         "ngc": 6273,
@@ -1089,6 +1127,8 @@
       "magnitude_band": "V",
       "size_arcmin": 28.0,
       "size_minor_arcmin": 28.0,
+      "axis_ratio": 1.0,
+      "axis_ratio_source": "catalog",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6514,
@@ -1115,6 +1155,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6531,
@@ -1141,6 +1183,8 @@
       "magnitude_band": "",
       "size_arcmin": 12.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6656,
@@ -1167,6 +1211,8 @@
       "magnitude_band": "V",
       "size_arcmin": 16.8,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6494,
@@ -1193,6 +1239,8 @@
       "magnitude_band": "V",
       "size_arcmin": 120.0,
       "size_minor_arcmin": 60.0,
+      "axis_ratio": 0.5,
+      "axis_ratio_source": "catalog",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": null,
@@ -1219,6 +1267,8 @@
       "magnitude_band": "V",
       "size_arcmin": 14.1,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": null,
@@ -1245,6 +1295,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sct",
       "cross_ids": {
         "ngc": 6694,
@@ -1271,6 +1323,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.7,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Vul",
       "cross_ids": {
         "ngc": 6853,
@@ -1297,6 +1351,8 @@
       "magnitude_band": "V",
       "size_arcmin": 5.1,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6626,
@@ -1323,6 +1379,8 @@
       "magnitude_band": "V",
       "size_arcmin": 3.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cyg",
       "cross_ids": {
         "ngc": 6913,
@@ -1349,6 +1407,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cap",
       "cross_ids": {
         "ngc": 7099,
@@ -1375,6 +1435,8 @@
       "magnitude_band": "V",
       "size_arcmin": 177.83,
       "size_minor_arcmin": 69.66,
+      "axis_ratio": 0.3917224315357363,
+      "axis_ratio_source": "catalog",
       "constellation": "And",
       "cross_ids": {
         "ngc": 224,
@@ -1401,6 +1463,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.74,
       "size_minor_arcmin": 4.86,
+      "axis_ratio": 0.627906976744186,
+      "axis_ratio_source": "catalog",
       "constellation": "And",
       "cross_ids": {
         "ngc": 221,
@@ -1429,6 +1493,8 @@
       "magnitude_band": "V",
       "size_arcmin": 62.09,
       "size_minor_arcmin": 36.73,
+      "axis_ratio": 0.591560637783862,
+      "axis_ratio_source": "catalog",
       "constellation": "Tri",
       "cross_ids": {
         "ngc": 598,
@@ -1455,6 +1521,8 @@
       "magnitude_band": "V",
       "size_arcmin": 22.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Per",
       "cross_ids": {
         "ngc": 1039,
@@ -1481,6 +1549,8 @@
       "magnitude_band": "",
       "size_arcmin": 24.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Gem",
       "cross_ids": {
         "ngc": 2168,
@@ -1507,6 +1577,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.2,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Aur",
       "cross_ids": {
         "ngc": 1960,
@@ -1533,6 +1605,8 @@
       "magnitude_band": "V",
       "size_arcmin": 11.4,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Aur",
       "cross_ids": {
         "ngc": 2099,
@@ -1559,6 +1633,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Aur",
       "cross_ids": {
         "ngc": 1912,
@@ -1585,6 +1661,8 @@
       "magnitude_band": "V",
       "size_arcmin": 19.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cyg",
       "cross_ids": {
         "ngc": 7092,
@@ -1611,6 +1689,8 @@
       "magnitude_band": "V",
       "size_arcmin": null,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "UMa",
       "cross_ids": {
         "ngc": null,
@@ -1637,6 +1717,8 @@
       "magnitude_band": "V",
       "size_arcmin": 12.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "CMa",
       "cross_ids": {
         "ngc": 2287,
@@ -1665,6 +1747,8 @@
       "magnitude_band": "V",
       "size_arcmin": 90.0,
       "size_minor_arcmin": 60.0,
+      "axis_ratio": 0.6666666666666666,
+      "axis_ratio_source": "catalog",
       "constellation": "Ori",
       "cross_ids": {
         "ngc": 1976,
@@ -1691,6 +1775,8 @@
       "magnitude_band": "V",
       "size_arcmin": 20.0,
       "size_minor_arcmin": 15.0,
+      "axis_ratio": 0.75,
+      "axis_ratio_source": "catalog",
       "constellation": "Ori",
       "cross_ids": {
         "ngc": 1982,
@@ -1719,6 +1805,8 @@
       "magnitude_band": "V",
       "size_arcmin": 108.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cnc",
       "cross_ids": {
         "ngc": 2632,
@@ -1745,6 +1833,8 @@
       "magnitude_band": "V",
       "size_arcmin": 150.0,
       "size_minor_arcmin": 150.0,
+      "axis_ratio": 1.0,
+      "axis_ratio_source": "catalog",
       "constellation": "Tau",
       "cross_ids": {
         "ngc": null,
@@ -1771,6 +1861,8 @@
       "magnitude_band": "V",
       "size_arcmin": 21.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Pup",
       "cross_ids": {
         "ngc": 2437,
@@ -1797,6 +1889,8 @@
       "magnitude_band": "V",
       "size_arcmin": 19.8,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Pup",
       "cross_ids": {
         "ngc": 2422,
@@ -1823,6 +1917,8 @@
       "magnitude_band": "V",
       "size_arcmin": 28.2,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Hya",
       "cross_ids": {
         "ngc": 2548,
@@ -1849,6 +1945,8 @@
       "magnitude_band": "V",
       "size_arcmin": 10.21,
       "size_minor_arcmin": 8.38,
+      "axis_ratio": 0.8207639569049952,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4472,
@@ -1875,6 +1973,8 @@
       "magnitude_band": "V",
       "size_arcmin": 14.1,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Mon",
       "cross_ids": {
         "ngc": 2323,
@@ -1901,6 +2001,8 @@
       "magnitude_band": "V",
       "size_arcmin": 13.71,
       "size_minor_arcmin": 11.67,
+      "axis_ratio": 0.8512035010940918,
+      "axis_ratio_source": "catalog",
       "constellation": "CVn",
       "cross_ids": {
         "ngc": 5194,
@@ -1927,6 +2029,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.9,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cas",
       "cross_ids": {
         "ngc": 7654,
@@ -1953,6 +2057,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 5024,
@@ -1979,6 +2085,8 @@
       "magnitude_band": "V",
       "size_arcmin": 5.1,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6715,
@@ -2005,6 +2113,8 @@
       "magnitude_band": "V",
       "size_arcmin": 12.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6809,
@@ -2031,6 +2141,8 @@
       "magnitude_band": "V",
       "size_arcmin": 5.8,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Lyr",
       "cross_ids": {
         "ngc": 6779,
@@ -2057,6 +2169,8 @@
       "magnitude_band": "V",
       "size_arcmin": 1.27,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Lyr",
       "cross_ids": {
         "ngc": 6720,
@@ -2083,6 +2197,8 @@
       "magnitude_band": "V",
       "size_arcmin": 5.01,
       "size_minor_arcmin": 3.84,
+      "axis_ratio": 0.7664670658682635,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4579,
@@ -2109,6 +2225,8 @@
       "magnitude_band": "V",
       "size_arcmin": 4.55,
       "size_minor_arcmin": 3.21,
+      "axis_ratio": 0.7054945054945055,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4621,
@@ -2135,6 +2253,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.78,
       "size_minor_arcmin": 5.45,
+      "axis_ratio": 0.803834808259587,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4649,
@@ -2161,6 +2281,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.89,
       "size_minor_arcmin": 6.56,
+      "axis_ratio": 0.9521044992743106,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4303,
@@ -2187,6 +2309,8 @@
       "magnitude_band": "",
       "size_arcmin": 7.8,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Oph",
       "cross_ids": {
         "ngc": 6266,
@@ -2213,6 +2337,8 @@
       "magnitude_band": "V",
       "size_arcmin": 11.83,
       "size_minor_arcmin": 7.16,
+      "axis_ratio": 0.6052409129332207,
+      "axis_ratio_source": "catalog",
       "constellation": "CVn",
       "cross_ids": {
         "ngc": 5055,
@@ -2241,6 +2367,8 @@
       "magnitude_band": "V",
       "size_arcmin": 10.52,
       "size_minor_arcmin": 5.33,
+      "axis_ratio": 0.5066539923954373,
+      "axis_ratio_source": "catalog",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 4826,
@@ -2267,6 +2395,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.64,
       "size_minor_arcmin": 1.97,
+      "axis_ratio": 0.25785340314136124,
+      "axis_ratio_source": "catalog",
       "constellation": "Leo",
       "cross_ids": {
         "ngc": 3623,
@@ -2293,6 +2423,8 @@
       "magnitude_band": "V",
       "size_arcmin": 10.28,
       "size_minor_arcmin": 4.61,
+      "axis_ratio": 0.44844357976653704,
+      "axis_ratio_source": "catalog",
       "constellation": "Leo",
       "cross_ids": {
         "ngc": 3627,
@@ -2319,6 +2451,8 @@
       "magnitude_band": "V",
       "size_arcmin": 33.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cnc",
       "cross_ids": {
         "ngc": 2682,
@@ -2345,6 +2479,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Hya",
       "cross_ids": {
         "ngc": 4590,
@@ -2371,6 +2507,8 @@
       "magnitude_band": "",
       "size_arcmin": 5.7,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6637,
@@ -2397,6 +2535,8 @@
       "magnitude_band": "",
       "size_arcmin": 6.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6681,
@@ -2423,6 +2563,8 @@
       "magnitude_band": "",
       "size_arcmin": 6.9,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sge",
       "cross_ids": {
         "ngc": 6838,
@@ -2449,6 +2591,8 @@
       "magnitude_band": "V",
       "size_arcmin": 4.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Aqr",
       "cross_ids": {
         "ngc": 6981,
@@ -2475,6 +2619,8 @@
       "magnitude_band": "V",
       "size_arcmin": null,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Aqr",
       "cross_ids": {
         "ngc": 6994,
@@ -2501,6 +2647,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.89,
       "size_minor_arcmin": 9.33,
+      "axis_ratio": 0.9433771486349848,
+      "axis_ratio_source": "catalog",
       "constellation": "Psc",
       "cross_ids": {
         "ngc": 628,
@@ -2527,6 +2675,8 @@
       "magnitude_band": "V",
       "size_arcmin": 3.6,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sgr",
       "cross_ids": {
         "ngc": 6864,
@@ -2556,6 +2706,8 @@
       "magnitude_band": "V",
       "size_arcmin": 1.12,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Per",
       "cross_ids": {
         "ngc": 650,
@@ -2582,6 +2734,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.11,
       "size_minor_arcmin": 5.61,
+      "axis_ratio": 0.9181669394435352,
+      "axis_ratio_source": "catalog",
       "constellation": "Cet",
       "cross_ids": {
         "ngc": 1068,
@@ -2608,6 +2762,8 @@
       "magnitude_band": "V",
       "size_arcmin": 4.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Ori",
       "cross_ids": {
         "ngc": 2068,
@@ -2634,6 +2790,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.2,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Lep",
       "cross_ids": {
         "ngc": 1904,
@@ -2660,6 +2818,8 @@
       "magnitude_band": "V",
       "size_arcmin": 5.7,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Sco",
       "cross_ids": {
         "ngc": 6093,
@@ -2686,6 +2846,8 @@
       "magnitude_band": "V",
       "size_arcmin": 21.63,
       "size_minor_arcmin": 11.25,
+      "axis_ratio": 0.5201109570041609,
+      "axis_ratio_source": "catalog",
       "constellation": "UMa",
       "cross_ids": {
         "ngc": 3031,
@@ -2712,6 +2874,8 @@
       "magnitude_band": "V",
       "size_arcmin": 10.99,
       "size_minor_arcmin": 5.11,
+      "axis_ratio": 0.46496815286624205,
+      "axis_ratio_source": "catalog",
       "constellation": "UMa",
       "cross_ids": {
         "ngc": 3034,
@@ -2738,6 +2902,8 @@
       "magnitude_band": "V",
       "size_arcmin": 13.61,
       "size_minor_arcmin": 13.21,
+      "axis_ratio": 0.9706098457016901,
+      "axis_ratio_source": "catalog",
       "constellation": "Hya",
       "cross_ids": {
         "ngc": 5236,
@@ -2764,6 +2930,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.41,
       "size_minor_arcmin": 6.44,
+      "axis_ratio": 0.8690958164642375,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4374,
@@ -2790,6 +2958,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.95,
       "size_minor_arcmin": 5.35,
+      "axis_ratio": 0.7697841726618704,
+      "axis_ratio_source": "catalog",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 4382,
@@ -2816,6 +2986,8 @@
       "magnitude_band": "V",
       "size_arcmin": 11.53,
       "size_minor_arcmin": 8.43,
+      "axis_ratio": 0.7311361665221162,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4406,
@@ -2842,6 +3014,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.11,
       "size_minor_arcmin": 6.67,
+      "axis_ratio": 0.9381153305203938,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4486,
@@ -2868,6 +3042,8 @@
       "magnitude_band": "V",
       "size_arcmin": 8.65,
       "size_minor_arcmin": 4.38,
+      "axis_ratio": 0.5063583815028901,
+      "axis_ratio_source": "catalog",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 4501,
@@ -2894,6 +3070,8 @@
       "magnitude_band": "V",
       "size_arcmin": 8.13,
       "size_minor_arcmin": 8.0,
+      "axis_ratio": 0.9840098400984009,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4552,
@@ -2920,6 +3098,8 @@
       "magnitude_band": "V",
       "size_arcmin": 9.12,
       "size_minor_arcmin": 3.82,
+      "axis_ratio": 0.41885964912280704,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4569,
@@ -2946,6 +3126,8 @@
       "magnitude_band": "V",
       "size_arcmin": 5.55,
       "size_minor_arcmin": 4.52,
+      "axis_ratio": 0.8144144144144143,
+      "axis_ratio_source": "catalog",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 4548,
@@ -2972,6 +3154,8 @@
       "magnitude_band": "V",
       "size_arcmin": 14.4,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Her",
       "cross_ids": {
         "ngc": 6341,
@@ -2998,6 +3182,8 @@
       "magnitude_band": "V",
       "size_arcmin": 15.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Pup",
       "cross_ids": {
         "ngc": 2447,
@@ -3024,6 +3210,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.74,
       "size_minor_arcmin": 6.68,
+      "axis_ratio": 0.8630490956072351,
+      "axis_ratio_source": "catalog",
       "constellation": "CVn",
       "cross_ids": {
         "ngc": 4736,
@@ -3050,6 +3238,8 @@
       "magnitude_band": "V",
       "size_arcmin": 7.23,
       "size_minor_arcmin": 4.45,
+      "axis_ratio": 0.6154910096818811,
+      "axis_ratio_source": "catalog",
       "constellation": "Leo",
       "cross_ids": {
         "ngc": 3351,
@@ -3076,6 +3266,8 @@
       "magnitude_band": "V",
       "size_arcmin": 8.26,
       "size_minor_arcmin": 5.51,
+      "axis_ratio": 0.6670702179176755,
+      "axis_ratio_source": "catalog",
       "constellation": "Leo",
       "cross_ids": {
         "ngc": 3368,
@@ -3102,6 +3294,8 @@
       "magnitude_band": "V",
       "size_arcmin": 3.58,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "UMa",
       "cross_ids": {
         "ngc": 3587,
@@ -3128,6 +3322,8 @@
       "magnitude_band": "V",
       "size_arcmin": 11.04,
       "size_minor_arcmin": 2.66,
+      "axis_ratio": 0.2409420289855073,
+      "axis_ratio_source": "catalog",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 4192,
@@ -3156,6 +3352,8 @@
       "magnitude_band": "V",
       "size_arcmin": 5.04,
       "size_minor_arcmin": 4.74,
+      "axis_ratio": 0.9404761904761905,
+      "axis_ratio_source": "catalog",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 4254,
@@ -3182,6 +3380,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.1,
       "size_minor_arcmin": 5.62,
+      "axis_ratio": 0.9213114754098362,
+      "axis_ratio_source": "catalog",
       "constellation": "Com",
       "cross_ids": {
         "ngc": 4321,
@@ -3208,6 +3408,8 @@
       "magnitude_band": "V",
       "size_arcmin": 23.99,
       "size_minor_arcmin": 23.07,
+      "axis_ratio": 0.9616506877865778,
+      "axis_ratio_source": "catalog",
       "constellation": "UMa",
       "cross_ids": {
         "ngc": 5457,
@@ -3234,6 +3436,8 @@
       "magnitude_band": "V",
       "size_arcmin": 6.31,
       "size_minor_arcmin": 2.72,
+      "axis_ratio": 0.4310618066561015,
+      "axis_ratio_source": "catalog",
       "constellation": "Dra",
       "cross_ids": {
         "ngc": 5866,
@@ -3260,6 +3464,8 @@
       "magnitude_band": "V",
       "size_arcmin": 4.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cas",
       "cross_ids": {
         "ngc": 581,
@@ -3286,6 +3492,8 @@
       "magnitude_band": "V",
       "size_arcmin": 8.45,
       "size_minor_arcmin": 4.91,
+      "axis_ratio": 0.5810650887573965,
+      "axis_ratio_source": "catalog",
       "constellation": "Vir",
       "cross_ids": {
         "ngc": 4594,
@@ -3312,6 +3520,8 @@
       "magnitude_band": "V",
       "size_arcmin": 4.89,
       "size_minor_arcmin": 4.25,
+      "axis_ratio": 0.869120654396728,
+      "axis_ratio_source": "catalog",
       "constellation": "Leo",
       "cross_ids": {
         "ngc": 3379,
@@ -3338,6 +3548,8 @@
       "magnitude_band": "V",
       "size_arcmin": 16.98,
       "size_minor_arcmin": 7.24,
+      "axis_ratio": 0.42638398115429915,
+      "axis_ratio_source": "catalog",
       "constellation": "CVn",
       "cross_ids": {
         "ngc": 4258,
@@ -3364,6 +3576,8 @@
       "magnitude_band": "",
       "size_arcmin": 7.8,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Oph",
       "cross_ids": {
         "ngc": 6171,
@@ -3390,6 +3604,8 @@
       "magnitude_band": "V",
       "size_arcmin": 3.98,
       "size_minor_arcmin": 1.66,
+      "axis_ratio": 0.41708542713567837,
+      "axis_ratio_source": "catalog",
       "constellation": "UMa",
       "cross_ids": {
         "ngc": 3556,
@@ -3416,6 +3632,8 @@
       "magnitude_band": "V",
       "size_arcmin": 8.07,
       "size_minor_arcmin": 5.64,
+      "axis_ratio": 0.6988847583643122,
+      "axis_ratio_source": "catalog",
       "constellation": "UMa",
       "cross_ids": {
         "ngc": 3992,
@@ -3442,6 +3660,8 @@
       "magnitude_band": "V",
       "size_arcmin": 16.22,
       "size_minor_arcmin": 9.59,
+      "axis_ratio": 0.5912453760789149,
+      "axis_ratio_source": "catalog",
       "constellation": "And",
       "cross_ids": {
         "ngc": 205,
@@ -3470,6 +3690,8 @@
       "magnitude_band": "V",
       "size_arcmin": 26.79,
       "size_minor_arcmin": 4.58,
+      "axis_ratio": 0.17095931317655844,
+      "axis_ratio_source": "catalog",
       "constellation": "Scl",
       "cross_ids": {
         "ngc": 253,
@@ -3496,6 +3718,8 @@
       "magnitude_band": "V",
       "size_arcmin": 14.4,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Per",
       "cross_ids": {
         "ngc": 869,
@@ -3522,6 +3746,8 @@
       "magnitude_band": "V",
       "size_arcmin": 10.5,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Per",
       "cross_ids": {
         "ngc": 884,
@@ -3550,6 +3776,8 @@
       "magnitude_band": "V",
       "size_arcmin": 16.0,
       "size_minor_arcmin": 16.0,
+      "axis_ratio": 1.0,
+      "axis_ratio_source": "catalog",
       "constellation": "Dor",
       "cross_ids": {
         "ngc": 2070,
@@ -3576,6 +3804,8 @@
       "magnitude_band": "V",
       "size_arcmin": 27.0,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Cen",
       "cross_ids": {
         "ngc": 5139,
@@ -3602,6 +3832,8 @@
       "magnitude_band": "B",
       "size_arcmin": 120.0,
       "size_minor_arcmin": 30.0,
+      "axis_ratio": 0.25,
+      "axis_ratio_source": "catalog",
       "constellation": "Cyg",
       "cross_ids": {
         "ngc": 7000,
@@ -3628,6 +3860,8 @@
       "magnitude_band": "V",
       "size_arcmin": 16.33,
       "size_minor_arcmin": null,
+      "axis_ratio": null,
+      "axis_ratio_source": "unknown",
       "constellation": "Aqr",
       "cross_ids": {
         "ngc": 7293,

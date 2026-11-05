@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 """确定性单测：DSO 目录 —— 加载、按类型过滤、位置查询。"""
+import inspect
+
 import pytest
 
 from mbdsdr_ai.astronomy import dso
@@ -72,6 +74,29 @@ def test_m102_maps_to_ngc5866(cat):
     assert dict(m102.cross_ids)["ngc"] == 5866
     assert m102.source_name == "NGC5866"
     assert len([e for e in cat if e.name.startswith("M")]) == 110
+
+
+def test_axis_ratio_known_and_unknown(cat):
+    """轴比：两轴齐全用 catalog 值，缺短轴必须是 None/unknown（不许 0.55）。"""
+    m31 = cat.get("M31")
+    assert m31.axis_ratio == pytest.approx(
+        m31.size_minor_arcmin / m31.size_arcmin)
+    assert m31.axis_ratio_source == "catalog"
+    for name in ("M40", "M73"):
+        entry = cat.get(name)
+        assert entry.axis_ratio is None
+        assert entry.axis_ratio_source == "unknown"
+    for entry in cat:
+        assert entry.axis_ratio_source in ("catalog", "unknown")
+        if entry.size_minor_arcmin is None:
+            assert entry.axis_ratio is None
+            assert entry.axis_ratio_source == "unknown"
+
+
+def test_axis_ratio_not_used_by_query_or_recommend():
+    """轴比只用于渲染形态，不得进入 near/推荐排序。"""
+    for fn in (dso.DSOCatalog.near, dso.recommend_dso):
+        assert "axis_ratio" not in inspect.getsource(fn)
 
 
 def test_unknown_name_returns_none():

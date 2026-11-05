@@ -307,6 +307,8 @@ def _record(key: str, rec: dict, snapshot: dict) -> dict:
     magnitude, band = _magnitude(rec)
     size = _size(rec, "MajAx")
     minor = _size(rec, "MinAx")
+    axis_ratio = None if size is None or minor is None else minor / size
+    axis_ratio_source = "catalog" if axis_ratio is not None else "unknown"
     ra_deg = _parse_ra(rec["RA"])
     dec_deg = _parse_dec(rec["Dec"])
     if not (0.0 <= ra_deg < 360.0 and -90.0 <= dec_deg <= 90.0):
@@ -354,6 +356,8 @@ def _record(key: str, rec: dict, snapshot: dict) -> dict:
         "magnitude_band": band,
         "size_arcmin": size,
         "size_minor_arcmin": minor,
+        "axis_ratio": axis_ratio,
+        "axis_ratio_source": axis_ratio_source,
         "constellation": constellation,
         "cross_ids": cross,
         "source_file": rec["_file"],

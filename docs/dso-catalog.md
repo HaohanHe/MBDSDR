@@ -82,6 +82,11 @@ NGC 5866，故条目数保持 117。**
   常用名列为空，故 `name_en`/`zh_name` 也为空。渲染类型为 `double_star`。
 - **M73（NGC 6994）**：OpenNGC 为 `Other`（星群），无尺寸；渲染类型按
   `cluster` 映射。
+- **轴比 `axis_ratio`**：仅当长轴与短轴都有时由数据层给出
+  `axis_ratio = size_minor_arcmin / size_arcmin`，并标
+  `axis_ratio_source="catalog"`（51 条）；缺短轴一律 `axis_ratio=null` +
+  `axis_ratio_source="unknown"`（66 条）。**数据层不产生 `estimated`**：
+  估计是视图的事，必须单独标注「估计」，不能让默认 0.55 看起来像实测。
 
 ## 4. 中文名：Wikidata（CC0）优先，自译逐条标注
 
