@@ -26,12 +26,15 @@ BOOKMARK_NAME_MAX_CHARS = 64
 # 本目录（desktop/）下的兄弟模块（tokens / mode_registry 等）在以包方式从
 # 仓库根 import（如 import desktop.control_panel）时不在 sys.path 上，
 # 这里把脚本所在目录补进 sys.path，与 main.py / main_window.py 的引导方式一致。
+import logging
 import math
 import os as _os
 import sys as _sys
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
 if _HERE not in _sys.path:
     _sys.path.insert(0, _HERE)
+
+logger = logging.getLogger(__name__)
 
 from tokens import tokens
 
@@ -65,8 +68,10 @@ class _CapabilitySampleRateCombo(QComboBox):
     def showPopup(self):  # noqa: N802 (Qt 虚函数名)
         try:
             self._refresh()
-        except Exception:
-            pass
+        except Exception as exc:
+            # 刷新失败不能让下拉变成空的：保留既有档位，并留下可查原因
+            logger.warning("采样率档位刷新失败，沿用当前列表: %s: %s",
+                           type(exc).__name__, exc)
         super().showPopup()
 
 # 解调模式元数据（默认带宽/显示名/解调函数）已收口到 mode_registry。
@@ -1229,7 +1234,10 @@ class ControlPanel(QWidget):
                 "sample_rate_range": (SAMPLE_RATE_MIN_HZ, SAMPLE_RATE_MAX_HZ),
                 "capability_status": {"sample_rate_range": "declared"},
             }) or [])
-        except Exception:
+        except Exception as exc:
+            # 预填失败 → 下游显示“未知”说明项；原因写日志，不静默
+            logger.warning("预填采样率档位失败，按未知处理: %s: %s",
+                           type(exc).__name__, exc)
             return []
 
     def _populate_sample_rate_options(self, options, select_hz=None):
@@ -1280,12 +1288,16 @@ class ControlPanel(QWidget):
         current = None
         try:
             current = backend.get_sample_rate()
-        except Exception:
+        except Exception as exc:
+            logger.warning("读取后端当前采样率失败，保持原选中档: %s: %s",
+                           type(exc).__name__, exc)
             current = None
         try:
             from mbdsdr_ai.device_capabilities import sample_rate_options_for_backend
             options = sample_rate_options_for_backend(backend)
-        except Exception:
+        except Exception as exc:
+            logger.warning("获取后端采样率档位失败，按未知处理: %s: %s",
+                           type(exc).__name__, exc)
             options = None
         self.set_sample_rate_options(options, current)
 
