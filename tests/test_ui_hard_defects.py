@@ -41,10 +41,25 @@ from freq_display import FreqDisplay  # noqa: E402
 
 
 @pytest.fixture
-def clean_window_settings():
-    """隔离窗口几何持久化（QSettings + gui_config.json 双通道）：
-    备份→清空→跑→还原。既不读旧存量（几何/分栏比例/最大化标志会
-    盖过测试 resize），也不把测试几何写进用户真实配置。"""
+def clean_window_settings(tmp_path):
+    """隔离窗口几何与顶层形态持久化（QSettings + gui_config.json +
+    DesktopSettings 三通道）：备份→清空→跑→还原，并把 ``%APPDATA%``
+    重定向到临时目录——测试绝不碰用户真实的 ``desktop_settings.json``。
+
+    为什么必须隔离 ``app_mode``（2026-11-05 实测，P0）：星象仪形态会把
+    ``app_mode=planetarium`` 持久化到 ``%APPDATA%/mbdsdr/desktop_settings.json``；
+    下次启动 ``_restore_app_mode()`` 切到星象仪页后，IDE root（含
+    ``_main_splitter``）是隐藏的，两档 resize 都不再布局，三栏比例恒为
+    ``[211, 211, 210]``，``d_left`` 从 600 掉到 0。这不是测试不稳定，而是
+    测试曾经在改用户真的配置文件（同族守门见
+    ``tests/test_ui_settings_isolation_guard.py``）。
+
+    注意：**不要用 PowerShell 直接改这个 JSON**（``Set-Content -Encoding
+    UTF8`` 在 PS 5.1 会写 BOM，应用会把它当损坏文件改名备份）。
+    """
+    appdata_backup = os.environ.get("APPDATA")
+    os.environ["APPDATA"] = str(tmp_path / "appdata")
+    os.makedirs(os.environ["APPDATA"], exist_ok=True)
     s = QSettings("MBDSDR", "Desktop")
     keys = ("window_geometry", "three_column_sizes",
             "three_column_layout_version")
@@ -76,6 +91,10 @@ def clean_window_settings():
     if cfg_backup is not None:
         with open(gui_cfg, "w", encoding="utf-8") as f:
             f.write(cfg_backup)
+    if appdata_backup is None:
+        os.environ.pop("APPDATA", None)
+    else:
+        os.environ["APPDATA"] = appdata_backup
 
 
 def _stop_startup_timers(win):
