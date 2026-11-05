@@ -113,3 +113,19 @@ def test_repo_has_no_sample_rate_formatted_as_mhz():
         rel = path.relative_to(ROOT).as_posix()
         hits.extend(_scan_text(rel, text))
     assert hits == [], "\n".join(hits)
+
+
+def test_default_sample_rate_advice_matches_project_default():
+    """建议文案里的「默认采样率」必须来自 `DEFAULT_SAMPLE_RATE_HZ`。
+
+    2.048 MS/s 只是 RTL-SDR 的一个可用档，不是项目默认值（当前 2.400 MS/s）；
+    建议文案若手写一份数值，会随常量漂移而不自知。
+    """
+    from mbdsdr_ai.error_handler import SampleRateNotSupportedError
+    from mbdsdr_ai.sdr_backend import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
+
+    err = SampleRateNotSupportedError()
+    expected = format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)
+    assert expected in err.suggestion, err.suggestion
+    assert "2.048 MS/s" not in err.suggestion, (
+        "2.048 是可用档、不是项目默认；建议文案不得把它写成默认值")

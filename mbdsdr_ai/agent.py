@@ -1986,7 +1986,8 @@ class MBDSDRAgent:
     def _register_baseband_tools(self):
         """Baseband 录制/回放。"""
         from mbdsdr_ai.baseband_io import save_iq
-        # 统一默认采样率（修复#8：项目有意选 2.048M）。局部导入避免循环依赖。
+        # 统一默认采样率（修复#8）：值取自项目常量，当前 2.400 MS/s。
+        # 局部导入避免循环依赖。
         from mbdsdr_ai.sdr_backend import DEFAULT_SAMPLE_RATE_HZ
 
         def _save(args):

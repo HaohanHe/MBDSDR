@@ -196,7 +196,12 @@ class SampleRateNotSupportedError(SDRUserError):
                 pretty = ", ".join(f"{int(round(r))} Hz" for r in supported_rates)
                 suggestion = f"该设备支持的采样率：{pretty}"
             else:
-                suggestion = "请改用设备默认采样率（通常 2.048 MS/s）"
+                # 项目默认采样率是唯一真值源（``sdr_backend.DEFAULT_SAMPLE_RATE_HZ``，
+                # 当前 2.400 MS/s）；建议文案按同一格式化口径生成，不再手写第二份数值。
+                from .sdr_backend import (DEFAULT_SAMPLE_RATE_HZ,
+                                          format_sample_rate)
+                suggestion = ("请改用设备默认采样率"
+                              f"（通常 {format_sample_rate(DEFAULT_SAMPLE_RATE_HZ)}）")
         super().__init__(message, technical_detail, suggestion)
         self.supported_rates = list(supported_rates or [])
 
