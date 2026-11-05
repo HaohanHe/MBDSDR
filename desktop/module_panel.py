@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # 允许从 desktop/ 直接跑，也允许被 main_window import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer, \
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer, QSignalBlocker, \
     QObject, QRunnable, QThreadPool
 from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QFontMetricsF, QPainterPath,
@@ -244,6 +244,13 @@ class ModulePanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._devices: List[Dict] = []
+        # 连接/调谐的真实状态：只有后端回执过的值才允许出现在控件里。
+        self._sdr_connected = False
+        # 模块面板调谐是否已接入后端（_apply_hw_action）。未接入时频率控件禁用，
+        # 绝不发"看起来生效"的假调谐。
+        self._tune_wired = False
+        self._confirmed_freq_hz: Optional[float] = None
+        self._confirmed_gain_db: Optional[float] = None
         self._enum_signals = _ModuleEnumSignals()
         self._enum_signals.finished.connect(self._on_devices_enumerated)
         self._enum_inflight = False
@@ -312,7 +319,8 @@ class ModulePanel(QWidget):
         self.freq_spin.setSuffix(" MHz")
         self.freq_spin.setDecimals(4)   # 0.0001 MHz = 100 Hz 步进
         self.freq_spin.setToolTip(
-            "设备中心频率（MHz）；改完立即生效，实际可调范围看左侧设备信息")
+            "设备中心频率（MHz）；改完立即生效，实际可调范围看左侧设备信息。"
+            "当前调谐未接入后端时控件禁用，显示值不是设备读数")
         self.freq_spin.valueChanged.connect(
             lambda v: self.tune_requested.emit(round(v * 1e6)))
         form.addRow("频率", self.freq_spin)
@@ -322,9 +330,9 @@ class ModulePanel(QWidget):
         self.gain_slider.setRange(0, 50)
         self.gain_slider.setValue(20)
         self.gain_slider.setToolTip(
-            "增益（dB）。未连接时按通用 0–50 显示；连接后随所连设备能力"
-            "动态收放，实际档位以设备为准（设备不支持的值由后端钳位）")
-        self.gain_val = QLabel("20 dB")
+            "增益（dB）。未连接时无真实读数（显示「—」且禁用）；连接后随所连"
+            "设备能力动态收放，实际档位以设备为准（设备不支持的值由后端钳位）")
+        self.gain_val = QLabel("—")
         self.gain_slider.valueChanged.connect(
             lambda v: self.gain_val.setText(f"{v} dB"))
         grow = QHBoxLayout()
@@ -349,6 +357,12 @@ class ModulePanel(QWidget):
             "设备射频带宽（硬件滤波），0 = 自动（跟随后端默认）。"
             "注意与 VFO 信道带宽（控制面板「VFO 带宽」）不同")
         form.addRow("硬件带宽", self.bw_spin)
+
+        # 参数区的诚实说明：为什么禁用、哪个值不是真实读数。
+        self.params_hint = QLabel()
+        self.params_hint.setStyleSheet(f"color:{MUTED.name()};")
+        self.params_hint.setWordWrap(True)
+        form.addRow(self.params_hint)
         row.addWidget(right, 2)
 
         # ===== 底：sink 选择（跨整行）=====
@@ -358,15 +372,78 @@ class ModulePanel(QWidget):
         self.sink_combo = QComboBox()
         # 对应 sink_modules/audio_sink | recorder(file) | network_sink
         self.sink_combo.addItems(["Audio (扬声器)", "File (IQ 落盘)", "Network (UDP)"])
+        self.sink_combo.setToolTip(
+            "当前仅记录选择：后端 sink 切换尚未接入，不会改变音频/落盘/UDP 输出")
+        self.sink_combo.setEnabled(False)
         self.sink_combo.currentTextChanged.connect(
             lambda t: self.sink_changed.emit(t))
         bh.addWidget(self.sink_combo)
+        self.sink_note = QLabel("仅记录（未接入后端 sink 切换）")
+        self.sink_note.setStyleSheet(f"color:{MUTED.name()};")
+        bh.addWidget(self.sink_note)
         bh.addStretch()
 
         outer.addLayout(row, 1)
         outer.addWidget(bottom)
 
         self._refresh_flow()
+        self.set_sdr_connected(False)
+
+    # ------------------------------------------------------------------
+    # 真实状态回填（连接状态 / 设备回执的频率与增益）
+    # ------------------------------------------------------------------
+    def set_sdr_connected(self, connected: bool, *, tune_wired: bool = False) -> None:
+        """把连接状态同步到参数区。
+
+        ``tune_wired`` 只有主窗口把 ``tune_requested`` 接到真实后端
+        （``_apply_hw_action``）后才允许传 True；未接入时频率控件保持禁用，
+        避免「拖了频率、界面变了、硬件没动」的假调谐。
+        """
+        self._sdr_connected = bool(connected)
+        self._tune_wired = bool(connected and tune_wired)
+        self.freq_spin.setEnabled(self._tune_wired)
+        self.gain_slider.setEnabled(self._sdr_connected)
+        if not self._sdr_connected:
+            self.gain_val.setText("—")
+            self.params_hint.setText(
+                "设备未连接：频率/增益没有真实读数，控件禁用（不显示假 0 / 假 20 dB）")
+            return
+        if self._confirmed_gain_db is None:
+            self.gain_val.setText("—")
+        else:
+            self.gain_val.setText(f"{int(round(self._confirmed_gain_db))} dB")
+        if self._tune_wired:
+            self.params_hint.setText(
+                "频率已接入后端：改频率走真实调谐（失败会回滚到上次成功值）")
+        else:
+            self.params_hint.setText(
+                "频率不可调：模块面板调谐尚未接入后端（已禁用，避免假调谐）；"
+                "增益滑块只在连接时随设备下发")
+
+    def set_rf_params(self, freq_hz: Optional[float] = None,
+                      gain_db: Optional[float] = None) -> None:
+        """用设备真实回执的频率/增益回填（不发 tune_requested，避免回环调谐）。"""
+        if freq_hz is not None:
+            try:
+                value_hz = float(freq_hz)
+            except (TypeError, ValueError):
+                value_hz = 0.0
+            if value_hz > 0:
+                self._confirmed_freq_hz = value_hz
+                blocker = QSignalBlocker(self.freq_spin)
+                self.freq_spin.setValue(value_hz / 1e6)
+                del blocker
+        if gain_db is not None:
+            try:
+                value_db = float(gain_db)
+            except (TypeError, ValueError):
+                value_db = None
+            if value_db is not None:
+                self._confirmed_gain_db = value_db
+                blocker = QSignalBlocker(self.gain_slider)
+                self.gain_slider.setValue(int(round(value_db)))
+                del blocker
+                self.gain_val.setText(f"{int(round(value_db))} dB")
 
     # ------------------------------------------------------------------
     def refresh_devices(self):
