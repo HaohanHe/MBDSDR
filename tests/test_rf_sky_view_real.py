@@ -13,6 +13,7 @@ tests/test_rf_sky_view_real.py
 运行：
     QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_rf_sky_view_real.py -v
 """
+import json
 import os
 import sys
 
@@ -293,6 +294,73 @@ class TestPaintingRobust:
         v.set_data_source("none")
         v.set_antenna(AntennaPointing(azimuth_deg=120, elevation_deg=40))
         v.repaint()
+
+
+# ----------------------------------------------------------------------
+class TestGroundStationConfigLoader:
+    """load_ground_station_config 的现状行为（删除前基线）。
+
+    优先级：gui_config.json(observer_lat/lon) → config.json(ground_station_*)
+    → 环境变量 MBDSDR_GS_*；未配置/坐标非法/非数值一律 None（不造假）。
+    """
+
+    @staticmethod
+    def _isolate(monkeypatch, tmp_path):
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        for k in ("MBDSDR_GS_LAT", "MBDSDR_GS_LON", "MBDSDR_GS_ALT_M"):
+            monkeypatch.delenv(k, raising=False)
+        d = tmp_path / ".mbdsdr"
+        d.mkdir()
+        return d
+
+    def test_unconfigured_returns_none(self, monkeypatch, tmp_path):
+        from desktop.rf_sky_view import load_ground_station_config
+        self._isolate(monkeypatch, tmp_path)
+        assert load_ground_station_config() is None
+
+    def test_gui_config_valid_returns_coords(self, monkeypatch, tmp_path):
+        from desktop.rf_sky_view import load_ground_station_config
+        d = self._isolate(monkeypatch, tmp_path)
+        (d / "gui_config.json").write_text(
+            json.dumps({"observer_lat": 39.9, "observer_lon": 116.4}),
+            encoding="utf-8")
+        assert load_ground_station_config() == {
+            "lat": 39.9, "lon": 116.4, "alt_m": 0.0}
+
+    def test_config_json_fallback_with_alt(self, monkeypatch, tmp_path):
+        from desktop.rf_sky_view import load_ground_station_config
+        d = self._isolate(monkeypatch, tmp_path)
+        (d / "config.json").write_text(
+            json.dumps({"ground_station_lat": 31.2, "ground_station_lon": 121.5,
+                        "ground_station_alt_m": 12.0}),
+            encoding="utf-8")
+        assert load_ground_station_config() == {
+            "lat": 31.2, "lon": 121.5, "alt_m": 12.0}
+
+    def test_env_overrides_file(self, monkeypatch, tmp_path):
+        from desktop.rf_sky_view import load_ground_station_config
+        d = self._isolate(monkeypatch, tmp_path)
+        (d / "gui_config.json").write_text(
+            json.dumps({"observer_lat": 39.9, "observer_lon": 116.4}),
+            encoding="utf-8")
+        monkeypatch.setenv("MBDSDR_GS_LAT", "10.0")
+        monkeypatch.setenv("MBDSDR_GS_LON", "20.0")
+        monkeypatch.setenv("MBDSDR_GS_ALT_M", "500")
+        assert load_ground_station_config() == {
+            "lat": 10.0, "lon": 20.0, "alt_m": 500.0}
+
+    def test_invalid_or_non_numeric_returns_none(self, monkeypatch, tmp_path):
+        from desktop.rf_sky_view import load_ground_station_config
+        d = self._isolate(monkeypatch, tmp_path)
+        (d / "gui_config.json").write_text(
+            json.dumps({"observer_lat": 95.0, "observer_lon": 116.4}),
+            encoding="utf-8")
+        assert load_ground_station_config() is None
+        (d / "gui_config.json").write_text(
+            json.dumps({"observer_lat": "abc", "observer_lon": 116.4}),
+            encoding="utf-8")
+        assert load_ground_station_config() is None
 
 
 if __name__ == "__main__":
