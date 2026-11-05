@@ -85,6 +85,68 @@ def format_doppler_status(st) -> str:
     return txt + (f" · {reason}" if reason else "")
 
 
+def _tx_unapplied_reason(note) -> str:
+    """把 resolve_tx_doppler 的 reason 归成读数里的短标签（只做措辞，不算 Δ）。"""
+    reason = str((note or {}).get("reason") or "").strip()
+    if "已关闭" in reason:
+        return "已关闭"
+    if "无目标" in reason:
+        return "无目标"
+    if "后端补偿已接管" in reason:
+        return "后端补偿已接管"
+    if "未开启" in reason:
+        return "补偿未开启"
+    return reason or "原因未知"
+
+
+def format_tx_doppler(note, *, failed_reason=None, replay: bool = False) -> str:
+    """把 resolve_tx_doppler 的 note 渲染成发射频点读数（纯展示，零 Δ 计算）。
+
+    契约：``resolve_tx_doppler(nominal_hz, None) -> (freq_hz, note)``；
+    note 里的 nominal_hz / freq_hz / delta_hz / target 是唯一真相源，
+    本函数只排版，绝不用 UI 侧再算一遍偏移（否则两套数学必然分叉）。
+
+    红线：null（未知）一律显示「—」，绝不渲染成 0；发射失败只出
+    「未发射（原因）」，不得残留「已预偏」。
+    MHz 用 6 位小数（1 kHz 级预偏否则看不见），Δ 保留 0.1 Hz。
+    """
+    if replay:
+        return "未预偏（回放，保持原频率）"
+    failed = str(failed_reason or "").strip()
+    if failed:
+        return f"未发射（{failed}）"
+    if not isinstance(note, dict) or not note:
+        return "—"
+
+    def _mhz(value) -> str:
+        try:
+            return f"{float(value) / 1e6:.6f} MHz"
+        except (TypeError, ValueError):
+            return "—"
+
+    nominal = note.get("nominal_hz")
+    freq = note.get("freq_hz")
+    if nominal is None or freq is None:
+        return "—"
+
+    if bool(note.get("applied")):
+        delta = note.get("delta_hz")
+        try:
+            delta_txt = f"{float(delta):+.1f} Hz"
+        except (TypeError, ValueError):
+            delta_txt = "—"  # 未知偏移不编造成 0
+        mode_txt = "显式" if str(note.get("mode") or "") == "on" else "自动"
+        head = f"发波 {_mhz(freq)}（已预偏 {delta_txt}，{mode_txt}）"
+        tail = f"标称 {_mhz(nominal)}"
+        target = str(note.get("target") or "").strip()
+        if target:
+            tail += f"，目标 {target}"
+        return f"{head} · {tail}"
+
+    return (f"发波 {_mhz(freq)}（未预偏：{_tx_unapplied_reason(note)}）"
+            f" · 标称 {_mhz(nominal)}")
+
+
 def _is_text_entry_widget(w) -> bool:
     """是否为文本输入类控件（Ctrl+C 应走标准复制语义）。"""
     if w is None:
@@ -2016,6 +2078,14 @@ class MainWindow(QMainWindow):
             "多普勒补偿读数：— 表示不是本机施加或施加量未知；"
             "0 Hz 才表示确实算出 0")
         lay.addWidget(self.doppler_readout)
+        # 发射频点常驻读数（与接收多普勒读数列）：实际发波/标称/预偏状态。
+        # 只在频率变化/目标切换/设备就绪时刷新，不做每帧轮询。
+        self.tx_readout = QLabel("发射: —")
+        self.tx_readout.setObjectName("statusValue")
+        self.tx_readout.setToolTip(
+            "发射频点读数：实际发波频率 / 标称频率 / 预偏状态。"
+            "— 表示未连接设备或读数未知，绝不表示 0")
+        lay.addWidget(self.tx_readout)
         lay.addStretch(1)
 
         # 呼号（全局可编辑，持久化）
@@ -2204,6 +2274,7 @@ class MainWindow(QMainWindow):
                 pass
             try:
                 self.doppler_readout.setText("多普勒: —")
+                self.tx_readout.setText("发射: —")
             except Exception:
                 pass
             return
@@ -2280,6 +2351,46 @@ class MainWindow(QMainWindow):
                 self.doppler_readout.setText("多普勒: 补偿失败")
             except Exception:
                 pass
+
+    # ---------------------------------------------------------------- 发射读数
+    def _schedule_tx_readout(self) -> None:
+        """发射频点读数防抖刷新：连续调谐/拖动只算最后一次。
+
+        契约要求只在频率变化/面板打开/目标切换时算，不做每帧轮询；
+        resolve_tx_doppler 在跟踪中会跑一次 SGP4，拖动时不能每个事件都算。
+        """
+        timer = getattr(self, "_tx_readout_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(250)
+            timer.timeout.connect(self._refresh_tx_readout)
+            self._tx_readout_timer = timer
+        timer.start()
+
+    def _refresh_tx_readout(self) -> None:
+        """重算发射频点读数。Δ 只由 resolve_tx_doppler 裁决，UI 不自己算。"""
+        lbl = getattr(self, "tx_readout", None)
+        if lbl is None:
+            return
+        if self._replay_timer is not None:
+            lbl.setText("发射: " + format_tx_doppler(None, replay=True))
+            return
+        if getattr(self, "_active_sdr_backend", None) is None:
+            lbl.setText("发射: —")  # 无设备 = 无发射频点，不展示旧值
+            return
+        nominal_hz = float(getattr(self, "_vfo_center_hz", 0.0) or 0.0)
+        if nominal_hz <= 0.0:
+            lbl.setText("发射: —")
+            return
+        try:
+            from mbdsdr_ai.sdr_tools import resolve_tx_doppler
+            _freq_hz, note = resolve_tx_doppler(nominal_hz, None)
+        except Exception as e:  # 后端契约不可用：读数退回「—」，不编造
+            logger.debug("发射频点读数不可用: %s", e)
+            lbl.setText("发射: —")
+            return
+        lbl.setText("发射: " + format_tx_doppler(note))
 
     # ========================================================================
     # 主题
@@ -2888,6 +2999,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._update_status_bar()
+        # 设备就绪 → 发射频点读数就位（此后只在频率/目标变化时重算）
+        self._refresh_tx_readout()
         # 启动真实 IQ 流：频谱/录制/声卡全部接通
         self._start_iq_streams()
         return True
@@ -3478,6 +3591,7 @@ class MainWindow(QMainWindow):
         self.status_conn.setText("未连接")
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
+        self._refresh_tx_readout()  # 无设备 → 发射读数回 "—"，不留旧频点
 
     def _disconnect(self):
         """断开连接（用户点"断开"）：幂等拆除 + 未连接时如实说明。"""
@@ -3516,6 +3630,7 @@ class MainWindow(QMainWindow):
                 self.connect_btn.setEnabled(True)
             except Exception:
                 pass
+            self._refresh_tx_readout()
 
     @Slot(dict)
     def _on_status_for_ui(self, status: dict):
@@ -3603,6 +3718,8 @@ class MainWindow(QMainWindow):
             self.settings.set("demod_mode", str(mode))
         except Exception:
             pass
+        # 频率变化 → 发射预偏读数重算（契约唯一真相源，UI 不算 Δ）
+        self._schedule_tx_readout()
 
     @Slot(float)
     def _on_module_tune(self, freq_hz: float):
@@ -3614,6 +3731,7 @@ class MainWindow(QMainWindow):
         self._vfo_center_hz = freq_hz
         self._backend_center_hz = freq_hz
         self._update_main_vfo_offset()
+        self._schedule_tx_readout()
 
     @Slot(str)
     def _on_ai_command(self, text: str):
@@ -4160,6 +4278,7 @@ class MainWindow(QMainWindow):
         self._vfo_center_hz = freq * 1e6
         self._backend_center_hz = freq * 1e6
         self._update_main_vfo_offset()
+        self._schedule_tx_readout()
 
     # ========================================================================
     # 其他操作
@@ -4495,6 +4614,7 @@ class MainWindow(QMainWindow):
                 self.control_panel.set_freq_fm(v.center_hz / 1e6)
                 self._vfo_center_hz = float(v.center_hz)
                 self._update_main_vfo_offset()
+                self._schedule_tx_readout()
             except Exception:
                 pass
         tag = "主听" if vfo_id in workers else "次听-未解调"
@@ -6402,6 +6522,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"回放中: {os.path.basename(path)}  "
             f"0.0/{self._replay_total/sr:.1f}s", 0)
+        self._refresh_tx_readout()  # 回放不预偏：读数显式说明保持原频率
 
     def _replay_tick(self):
         """回放定时器：按采样率把下一块真实 IQ 推给频谱 + 解调链出声。
@@ -6461,6 +6582,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._replay_resume_poll = False
+        self._refresh_tx_readout()
 
     def _open_ntrip_dialog(self):
         """打开 NTRIP 配置对话框（非模态）。
@@ -6683,6 +6805,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"开始跟踪 {sat_name}（下行 {downlink_freq_hz/1e6:.4f} MHz）", 4000)
         self._poll_satellite_track()  # 立即先调谐一次
+        self._refresh_tx_readout()    # 目标切换 → 发射预偏读数立即重算
 
     def _poll_satellite_track(self):
         """500ms 轮询：取实时 az/el/多普勒 -> 自动调谐 SDR -> 刷新面板。"""
@@ -6801,7 +6924,9 @@ class MainWindow(QMainWindow):
             self.doppler_chip.setChecked(False)
             self.doppler_chip.blockSignals(False)
             self.statusBar().showMessage(comp.state.reason, 5000)
+            self._refresh_tx_readout()
             return
+        self._refresh_tx_readout()
         if not checked and self._loop_sat_tracker is not None:
             try:
                 self._on_tune_sdr(
@@ -6821,6 +6946,7 @@ class MainWindow(QMainWindow):
         if not active and not self._gimbal_follow:
             self._sync_sky_track_btn(False)
             self._sync_tracking_ui(False)
+            self._refresh_tx_readout()
             return
         if self._sat_track_timer is not None:
             self._sat_track_timer.stop()
@@ -6864,6 +6990,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self.statusBar().showMessage("卫星跟踪已停止", 3000)
+        self._refresh_tx_readout()
 
     def _update_sky_satellites(self):
         """天空图周期任务：仅刷新新时空授时信息。

@@ -317,6 +317,48 @@ class TestUiFlowGuards:
         w._update_status_bar()
         assert w.doppler_readout.text() == "多普勒: —"
 
+    def test_tx_readout_wired_to_resolve_contract(self, window, monkeypatch):
+        """TX 读数必须原样渲染 resolve_tx_doppler 的 note（UI 不得自己算 Δ）。"""
+        w = self._window(window)
+        import mbdsdr_ai.sdr_tools as sdr_tools
+
+        note = {
+            "requested": None, "mode": "auto", "applied": True,
+            "nominal_hz": 145_800_000.0, "freq_hz": 145_799_027.0,
+            "delta_hz": -973.0, "predicted_hz": 973.0,
+            "target": "ISS (ZARYA)", "reason": "",
+        }
+        calls = []
+
+        def fake_resolve(nominal_hz, requested=None):
+            calls.append((nominal_hz, requested))
+            return note["freq_hz"], dict(note)
+
+        monkeypatch.setattr(sdr_tools, "resolve_tx_doppler", fake_resolve)
+        w._active_sdr_backend = object()  # 已连接（本用例不碰硬件）
+        w._vfo_center_hz = 145_800_000.0
+        w._refresh_tx_readout()
+
+        text = w.tx_readout.text()
+        assert text.startswith("发射: 发波 145.799027 MHz（已预偏 -973.0 Hz，自动）")
+        assert "标称 145.800000 MHz，目标 ISS (ZARYA)" in text
+        assert calls == [(145_800_000.0, None)], "必须走契约入口且 requested=None"
+        w._active_sdr_backend = None
+
+    def test_tx_readout_replay_and_no_device(self, window):
+        """无设备回 — 不留旧频点；回放显式「未预偏」且不渲染成 0。"""
+        w = self._window(window)
+        w._active_sdr_backend = None
+        w._vfo_center_hz = 145_800_000.0
+        w._refresh_tx_readout()
+        assert w.tx_readout.text() == "发射: —"
+        assert "0.000000" not in w.tx_readout.text()
+
+        w._replay_timer = object()  # 非 None = 回放中
+        w._refresh_tx_readout()
+        assert w.tx_readout.text() == "发射: 未预偏（回放，保持原频率）"
+        w._replay_timer = None
+
 
 def test_about_dialog_contains_dso_attribution(monkeypatch):
     """许可义务：关于框必须保留 OpenNGC / CC BY-SA 4.0 署名，且文案不被截断。"""
