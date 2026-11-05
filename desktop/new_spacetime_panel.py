@@ -264,6 +264,8 @@ class NewSpacetimePanel(QWidget):
 
         self._analyzing = False
         self._gnss_nmea: Optional[str] = None
+        # 过境刷新是同步阻塞调用：重入保护 + 加载期间按钮置灰，避免连点叠加
+        self._refreshing = False
 
         self._build_ui()
         self._apply_styles()
@@ -565,9 +567,21 @@ class NewSpacetimePanel(QWidget):
     def refresh_passes(self) -> None:
         """同步拉取 DEFAULT_SATELLITES 的 TLE 并计算过境 / 频率-轨道关系。
 
-        会阻塞若干秒（TLE fetch 带超时），仅由按钮点击触发。
+        会阻塞若干秒（TLE fetch 带超时），仅由按钮点击触发。阻塞期间按钮
+        置灰并拒绝重入，避免连点叠加网络请求。
         峰值筛选门读 settings.effective_pass_*（与天空图过境列表同一组入口）。
         """
+        if self._refreshing:
+            return
+        self._refreshing = True
+        self.refresh_btn.setEnabled(False)
+        try:
+            self._run_refresh_passes()
+        finally:
+            self._refreshing = False
+            self.refresh_btn.setEnabled(True)
+
+    def _run_refresh_passes(self) -> None:
         # 每次刷新重读设置：设置面板点「应用」后立即调用本方法，必须生效。
         settings = self._resolved_settings()
         self._pass_min_elevation_deg = effective_pass_min_elevation_deg(settings)
@@ -583,6 +597,15 @@ class NewSpacetimePanel(QWidget):
         lon = self.lon_spin.value()
         alt_km = self.alt_spin.value()
 
+        # 观测站是过境的必要条件：0,0 是本面板的「未设置」哨兵（与控制器
+        # 站址可信度口径一致），先给明确反馈，不白跑一次网络请求
+        if lat == 0.0 and lon == 0.0:
+            self.passes_hint.setText(
+                "未配置观测站位置：请在纬度/经度输入框填写地面站坐标")
+            self._populate_passes([])
+            self.chart.set_data([])
+            return
+
         # 拉 TLE（失败的卫星跳过，绝不伪造）
         sats: List[tuple] = []
         for name, catnr in DEFAULT_SATELLITES:
@@ -593,7 +616,7 @@ class NewSpacetimePanel(QWidget):
         if not sats:
             # 诚实说明"为什么没有"：TLE 拉取失败（离线/无网络/被限流）
             self.passes_hint.setText(
-                "未获取到卫星 TLE（离线或无网络），无法计算过境")
+                "未获取 TLE：请先更新卫星星历（离线或无网络时无法拉取）")
             self._populate_passes([])
             self.chart.set_data([])
             return
@@ -607,8 +630,10 @@ class NewSpacetimePanel(QWidget):
         if not passes:
             # 有 TLE 但确实没有过境：别沿用上一轮"没网络"的旧文案
             self.passes_hint.setText(
-                f"{self._pass_window_hours:g} 小时内无过境（峰值仰角 ≥ {gate:g}°"
-                + ("，含低仰角" if self._pass_show_low else "") + "）")
+                f"未来 {self._pass_window_hours:g} 小时内无过境"
+                f"（门限 {gate:g}°"
+                + ("，含低仰角" if self._pass_show_low else "")
+                + f"，窗口 {self._pass_window_hours:g} 小时）")
         self._populate_passes(passes)
 
         # 顺手刷新频率-轨道散点（无频率数据时频率为 0）

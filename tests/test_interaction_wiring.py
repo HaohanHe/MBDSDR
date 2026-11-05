@@ -137,6 +137,8 @@ def _make_item(panel):
 def test_refresh_passes_explains_missing_tle(main_window):
     """拿不到 TLE 时不能说"无数据"了事，必须说清楚是离线/无网络。"""
     panel = main_window.new_spacetime_panel
+    # 站址已配置，才能真正走到「拿不到 TLE」这一分支（未配站址会先报站址）
+    panel.set_observer(39.9, 116.4, 0.0)
     panel._tle_mgr.fetch = lambda *_a, **_k: None
     panel.refresh_passes()
     app.processEvents()
