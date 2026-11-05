@@ -341,6 +341,10 @@ class HackRFBackend:
         self._tx_running: bool = False
         self._tx_underrun: bool = False
         self._tx_queue: "queue.Queue[bytes]" = queue.Queue()
+        self.last_tx_error = ""
+        self.tx_error_count = 0
+        self.last_rx_callback_error = ""
+        self.rx_callback_error_count = 0
         self._c_tx_callback = self._make_tx_callback()
 
     # ── 库加载 ─────────────────────────────────────────────────────────
@@ -430,8 +434,9 @@ class HackRFBackend:
         if self._lib is not None and self._dev is not None:
             try:
                 self._lib.hackrf_close(self._dev)
-            except Exception:
-                pass
+            except (OSError, RuntimeError, ValueError, TypeError,
+                    AttributeError, ctypes.ArgumentError) as e:
+                logger.warning("hackrf_close 失败: %s", e)
         self._dev = None
         self.connected = False
 
@@ -533,7 +538,10 @@ class HackRFBackend:
                     transfer.contents.buffer,
                     ctypes.POINTER(ctypes.c_uint8 * n)).contents
                 self._rx_queue.put(bytes(buf))
-            except Exception:
+            except (AttributeError, TypeError, ValueError) as e:
+                # libusb 异步线程里不能抛：记状态+计数，调用方可查。
+                self.last_rx_callback_error = f"{type(e).__name__}: {e}"
+                self.rx_callback_error_count += 1
                 return 0
             return 0  # 返回 0 继续流；返回非 0 停止（hackrf.h:283）
 
@@ -617,12 +625,20 @@ class HackRFBackend:
 
         HackRF USB 流是交织的有符号 8-bit I/Q（hackrf.h:965），
         因此 complex64（[-1,1]）→ 乘 127 → int8 交织。
+
+        失败不静默：``last_tx_error`` 给出原因，``tx_error_count`` 给出计数，
+        上层据此把"没发出去"如实报给用户。
         """
+        self.last_tx_error = ""
         if not self.connected or self._lib is None:
+            self.last_tx_error = "HackRF 未连接"
             return False
         try:
             arr = np.asarray(iq_samples, dtype=np.complex64)
-        except Exception:  # noqa: BLE001 - 非样本输入
+        except (TypeError, ValueError, AttributeError) as e:
+            self.last_tx_error = f"IQ 样本无法转为 complex64: {type(e).__name__}: {e}"
+            self.tx_error_count += 1
+            logger.warning("HackRF write_tx 拒绝输入: %s", self.last_tx_error)
             return False
         if arr.size == 0:
             return True
@@ -636,7 +652,11 @@ class HackRFBackend:
         for start in range(0, int(inter.size), step):
             self._tx_queue.put(inter[start:start + step].tobytes())
         if not self._tx_running:
-            return self.start_tx()
+            ok = self.start_tx()
+            if not ok:
+                self.last_tx_error = "hackrf_start_tx 失败"
+                self.tx_error_count += 1
+            return ok
         return True
 
     def is_underrun(self) -> bool:

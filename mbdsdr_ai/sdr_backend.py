@@ -2645,7 +2645,9 @@ class HackRFBackend(SDRBackend):
             self.status.error = f"[TX] HackRF 写波异常: {type(e).__name__}: {e}"
             return False
         if not ok:
-            self.status.error = "[TX] HackRF 写流失败（libhackrf 返回失败/欠载）"
+            detail = getattr(self._hackrf, "last_tx_error", "")
+            self.status.error = (f"[TX] HackRF 写流失败: {detail}" if detail
+                                 else "[TX] HackRF 写流失败（libhackrf 返回失败/欠载）")
         return bool(ok)
 
 

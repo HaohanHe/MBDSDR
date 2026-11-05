@@ -2,7 +2,7 @@
   "version": 1,
   "snapshot": "2026-11-05",
   "policy": "棘轮基线：任何文件的 ERROR/WARN 不得超过此处计数；新文件出现静默 catch-all 即红。只许降不许升。",
-  "total": 1398,
+  "total": 1347,
   "whitelisted": 1,
   "forbidden": 0,
   "files": {
@@ -411,8 +411,8 @@
       "WARN": 1
     },
     "mbdsdr_ai/hackrf_params.py": {
-      "ERROR": 1,
-      "WARN": 1
+      "ERROR": 0,
+      "WARN": 0
     },
     "mbdsdr_ai/hal.py": {
       "ERROR": 2,
@@ -651,8 +651,8 @@
       "WARN": 62
     },
     "mbdsdr_ai/sdr_tools.py": {
-      "ERROR": 17,
-      "WARN": 32
+      "ERROR": 0,
+      "WARN": 0
     },
     "mbdsdr_ai/sdrangel_plugins.py": {
       "ERROR": 0,

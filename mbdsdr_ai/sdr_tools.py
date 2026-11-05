@@ -24,6 +24,7 @@ AI 可以通过 tool calling 直接调用，也可以通过工作流组合调用
 共 38 个 SDR 专用工具。
 """
 
+import logging
 import os
 import time
 import json
@@ -59,6 +60,8 @@ from .decoders import (
 )
 from .multimon_decoders import register_multimon_tools
 
+logger = logging.getLogger(__name__)
+
 
 def _get_ground_station_latlon() -> tuple:
     """从 ~/.mbdsdr/config.json 读取地面站坐标 (lat, lon)。
@@ -73,7 +76,10 @@ def _get_ground_station_latlon() -> tuple:
                 cfg = json.load(f)
         else:
             return (None, None)
-    except Exception:
+    except (OSError, ValueError, TypeError) as e:
+        # 外部边界：配置文件可能损坏/无权限。降级为"未配置"，但要留证据，
+        # 否则下游只会报"站址不可信"而不知道是配置读不出来。
+        logger.warning("读取地面站配置失败（%s）: %s；按未配置处理", cfg_path, e)
         return (None, None)
     try:
         lat = cfg.get("ground_station_lat")
@@ -126,7 +132,9 @@ def _physics_now(args) -> float:
         from new_spacetime import get_time_engine
     try:
         return float(get_time_engine().now_unix())
-    except Exception:
+    except (RuntimeError, ValueError, TypeError, AttributeError, OSError) as e:
+        # 时间基准切换会改变天空视图/多普勒/过境的时间语义，必须留证据。
+        logger.warning("时间引擎不可用，回退墙钟: %s", e)
         import time as _time
         return _time.time()
 
@@ -149,7 +157,9 @@ def _tle_provenance_lines(names) -> list:
         from builtin_tle_meta import builtin_provenance_table, trust_label
     try:
         table = builtin_provenance_table(include_real=True)
-    except Exception:  # noqa: BLE001 - 元数据不可得不阻断主功能
+    except (OSError, ValueError, TypeError, KeyError) as e:
+        # TLE 元数据缺失不应阻断主功能，但"没有可信度告警"本身要留证据。
+        logger.warning("TLE 元数据不可用，无法生成可信度告警: %s", e)
         return []
     out = []
     for name in names:
@@ -177,6 +187,30 @@ def _tr_pair(pair) -> ToolResult:
     """
     content, data = pair
     return ToolResult(success=True, content=content, data=data or {})
+
+
+def _restore_tuning(backend, old, default_demod: str) -> str:
+    """恢复工具临时调谐前的 (频率, 采样率, 解调模式)。
+
+    返回空串表示恢复成功；否则返回一行可展示的警告。恢复失败意味着设备
+    可能停留在临时调谐状态，后续工具会读到错误频率——必须让用户看见，
+    不能像以前那样 `except: pass` 后继续声称"已回到原频率"。
+    """
+    try:
+        backend.set_frequency(int(old[0]))
+        if hasattr(backend, "set_sample_rate"):
+            backend.set_sample_rate(old[1])
+        backend.set_demod(old[2] or default_demod)
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
+        logger.warning("恢复调谐状态失败（freq=%s sr=%s demod=%s）: %s",
+                       old[0], old[1], old[2], e)
+        return f"恢复原调谐状态失败: {e}；设备可能停留在临时频率/采样率。"
+    return ""
+
+
+def _append_warning(text: str, warning: str) -> str:
+    """把设备状态警告追加到工具返回文本（无警告时原样返回）。"""
+    return f"{text}\n警告: {warning}" if warning else text
 
 
 def register_sdr_tools(agent):
@@ -658,8 +692,8 @@ def register_sdr_tools(agent):
                 if player.sample_rate != sample_rate:
                     try:
                         player.stop()
-                    except Exception:
-                        pass
+                    except (RuntimeError, OSError, AttributeError) as e:
+                        logger.warning("重配采样率前停止旧音频流失败: %s", e)
                     player = AudioPlayer(sample_rate=sample_rate)
                     agent._audio_player = player
                 player.set_gain(gain)
@@ -691,7 +725,8 @@ def register_sdr_tools(agent):
                          f"采样率={player.sample_rate} Hz，"
                          f"声道={player.channels}，增益={player.gain}。"),
             )
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
+            logger.warning("音频播放操作失败: %s", e)
             return ToolResult(success=False, content=f"音频播放操作失败：{e!r}")
 
     agent.tool_registry.register(
@@ -3085,6 +3120,7 @@ def _sweep_scan_tool(mgr, args) -> "ToolResult":
 
     saved_freq = backend.get_frequency()
     saved_sr = backend.get_sample_rate()
+    restore_error = ""
     try:
         if hasattr(backend, "set_sample_rate"):
             backend.set_sample_rate(sr)
@@ -3105,17 +3141,19 @@ def _sweep_scan_tool(mgr, args) -> "ToolResult":
 
         res = sweep_scan(acquire, f0, f1, sr, overlap=overlap,
                          dwell_samples=dwell, margin_db=margin)
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
         return ToolResult(success=False, content=f"扫频失败: {e}")
     finally:
-        # 无论成功与否，恢复扫描前的频率/采样率
+        # 无论成功与否，恢复扫描前的频率/采样率；恢复失败必须让用户知道，
+        # 不能一边恢复失败一边打印"已自动回到扫描前频率"。
         try:
             if hasattr(backend, "set_sample_rate") and saved_sr:
                 backend.set_sample_rate(saved_sr)
             if hasattr(backend, "set_frequency") and saved_freq:
                 backend.set_frequency(int(saved_freq))
-        except Exception:
-            pass
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            restore_error = f"恢复扫描前频率/采样率失败: {e}"
+            logger.warning("扫频收尾 %s", restore_error)
 
     lines = [
         f"=== 扫频 {f0/1e6:.2f}-{f1/1e6:.2f} MHz ===",
@@ -3132,7 +3170,8 @@ def _sweep_scan_tool(mgr, args) -> "ToolResult":
         )
     if len(res.activities) > 20:
         lines.append(f"  …另有 {len(res.activities)-20} 个，缩小范围或提高门限可细看")
-    lines.append("已自动回到扫描前频率。")
+    lines.append("已自动回到扫描前频率。" if not restore_error else
+                 f"警告: {restore_error}；设备可能仍停留在扫描频段，请重新 sdr_set_frequency。")
     return ToolResult(success=True, content="\n".join(lines))
 
 
@@ -3178,21 +3217,25 @@ def _bookmark_goto(mgr, fm, args) -> "ToolResult":
 
     freq = b.center_hz
     actions = [f"频率 {freq/1e6:.4f} MHz"]
+    skipped = []
     if b.mode and hasattr(backend, "set_demod"):
         try:
             backend.set_demod(b.mode)
             actions.append(f"模式 {b.mode}")
-        except Exception:
-            pass
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            logger.warning("书签跳转设置解调模式失败: %s", e)
+            skipped.append(f"模式 {b.mode} 未生效（{e}）")
     if b.bandwidth_hz and hasattr(backend, "set_bandwidth"):
         try:
             backend.set_bandwidth(b.bandwidth_hz)
             actions.append(f"带宽 {b.bandwidth_hz/1e3:g}k")
-        except Exception:
-            pass
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            logger.warning("书签跳转设置带宽失败: %s", e)
+            skipped.append(f"带宽 {b.bandwidth_hz/1e3:g}k 未生效（{e}）")
     try:
         backend.set_frequency(int(freq))
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
+        logger.warning("书签跳转设置频率失败: %s", e)
         return ToolResult(success=False, content=f"设置频率失败: {e}")
 
     tip = ""
@@ -3200,8 +3243,9 @@ def _bookmark_goto(mgr, fm, args) -> "ToolResult":
         tip = (f"\n这是频段书签（{b.start_hz/1e6:.3f}-{b.end_hz/1e6:.3f}MHz），"
                f"已跳到中央；用 sdr_sweep_scan 在该范围找具体活动频点。")
     note = f"\n说明：{b.note}" if b.note else ""
+    skipped_line = f"\n未生效: {'；'.join(skipped)}" if skipped else ""
     return ToolResult(success=True,
-                      content=f"已跳转到 {b.name}\n  " + "，".join(actions) + tip + note)
+                      content=f"已跳转到 {b.name}\n  " + "，".join(actions) + skipped_line + tip + note)
 
 
 def _bookmark_add(fm, args) -> str:
@@ -3248,7 +3292,8 @@ def _watch_capture_tool(mgr, fm, args) -> "ToolResult":
             backend.set_demod(bm.mode)
         if bm and bm.bandwidth_hz and hasattr(backend, "set_bandwidth"):
             backend.set_bandwidth(bm.bandwidth_hz)
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
+        logger.warning("设置守听频率失败: %s", e)
         return ToolResult(success=False, content=f"设置守听频率失败: {e}")
 
     sr = float(backend.get_sample_rate())
@@ -3325,6 +3370,7 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
     duration = min(float(args.get("duration_s", 8.0)), 30.0)
     k = float(args.get("threshold_sigma", 4.0))
     dev_type = getattr(backend.device, "device_type", "")
+    restore_warn = ""
 
     if dev_type == "iq_file":
         sr = float(backend.get_sample_rate())
@@ -3364,16 +3410,11 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
                 if x is None or len(x) == 0:
                     break
                 chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            logger.warning("ADS-B 采集失败: %s", e)
             return ToolResult(success=False, content=f"采集 ADS-B 失败: {e}")
         finally:
-            try:
-                backend.set_frequency(int(old[0]))
-                if hasattr(backend, "set_sample_rate"):
-                    backend.set_sample_rate(old[1])
-                backend.set_demod(old[2] or "FM")
-            except Exception:
-                pass
+            restore_warn = _restore_tuning(backend, old, "FM")
         if not chunks:
             return ToolResult(success=False, content="未采集到 IQ 数据")
         iq = np.concatenate(chunks)
@@ -3381,10 +3422,10 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
         src = f"实时采集 {freq/1e6:.1f}MHz / {sr/1e6:.1f}Msps / {duration:.0f}s"
 
     if res["crc_ok"] == 0:
-        return ToolResult(success=True, content=(
+        return ToolResult(success=True, content=_append_warning(
             f"{src}：未解码到 CRC 有效的 Mode S 帧（候选 preamble {res['candidates']}，"
             f"CRC 失败 {res['crc_failed']}）。可靠近窗户/室外、检查 1090MHz 天线、"
-            f"或减小 threshold_sigma 后延长 duration_s 重试。"))
+            f"或减小 threshold_sigma 后延长 duration_s 重试。", restore_warn))
 
     lines = [f"{src}：解码 {res['crc_ok']} 个 CRC 有效帧，去重 {len(res['aircraft'])} 架飞机："]
     for icao, a in sorted(res["aircraft"].items()):
@@ -3393,6 +3434,8 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
         lines.append(f"  ICAO {icao}：{tag}{extra}")
     lines.append(f"候选 {res['candidates']}，CRC 剔除 {res['crc_failed']}。"
                  f"CPR 经纬度/弱信号多帧合并为后续（可接 dump1090 后端）。")
+    if restore_warn:
+        lines.append(f"警告: {restore_warn}")
     return ToolResult(success=True, content="\n".join(lines))
 
 
@@ -3421,6 +3464,7 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
 
     duration = min(float(args.get("duration_s", 5.0)), 15.0)
     dev_type = getattr(backend.device, "device_type", "")
+    restore_warn = ""
 
     if dev_type == "iq_file":
         sr = float(backend.get_sample_rate())
@@ -3460,33 +3504,29 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
                 if x is None or len(x) == 0:
                     break
                 chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            logger.warning("FM/RDS 采集失败: %s", e)
             return ToolResult(success=False, content=f"采集 FM/RDS 失败: {e}")
         finally:
-            try:
-                backend.set_frequency(int(old[0]))
-                if hasattr(backend, "set_sample_rate"):
-                    backend.set_sample_rate(old[1])
-                backend.set_demod(old[2] or "WFM")
-            except Exception:
-                pass
+            restore_warn = _restore_tuning(backend, old, "WFM")
         if not chunks:
-            return ToolResult(success=False, content="未采集到 IQ 数据")
+            return ToolResult(success=False, content=_append_warning("未采集到 IQ 数据", restore_warn))
         iq = np.concatenate(chunks)
         src = f"实时采集 {backend.get_frequency()/1e6:.2f}MHz / {sr/1e3:.0f}kHz / {duration:.0f}s"
 
     if sr < 140000:
-        return ToolResult(success=False, content=(
+        return ToolResult(success=False, content=_append_warning((
             f"{src}：采样率 {sr/1e3:.0f}kHz 低于 140kHz，无法保留 57kHz RDS 副载波，"
-            f"请用 ≥200kHz 采样率重新采集 FM IQ。"))
+            f"请用 ≥200kHz 采样率重新采集 FM IQ。"), restore_warn))
 
     mpx = _fm_composite_baseband(iq, sr)
     res = decode_rds(mpx, sr)
     if not res.get("rds_present"):
-        return ToolResult(success=True, content=(
+        return ToolResult(success=True, content=_append_warning((
             f"{src}：未解码到有效 RDS 组（同步块 {res.get('blocks_synced', 0)}、"
             f"完整组 {res.get('groups_partial', 0)}）。可能该台不发 RDS、信号弱/多径、"
-            f"频偏过大或天线不佳；可对准更强的本地 FM 台、延长 duration_s 后重试。"))
+            f"频偏过大或天线不佳；可对准更强的本地 FM 台、延长 duration_s 后重试。"),
+            restore_warn))
 
     pty = int(res.get("pty", 0))
     pty_name = _RDS_PTY.get(pty, f"类型{pty}")
@@ -3495,6 +3535,8 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
              f"  PI 识别码：{res['pi_hex']}　PTY：{pty_name}",
              f"  同步块 {res['blocks_synced']}，完整组 {res['groups_decoded']}。"
              f"RT 电台文本/AF 频率表为后续。"]
+    if restore_warn:
+        lines.append(f"警告: {restore_warn}")
     return ToolResult(success=True, content="\n".join(lines))
 
 
@@ -3537,7 +3579,8 @@ def _noaa_apt_decode_fn_tool(args) -> "ToolResult":
         return ToolResult(success=False, content=f"错误: wav 不存在: {path}")
     try:
         sr, audio = _read_wav_mono(path)
-    except Exception as e:
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
+        logger.warning("NOAA APT WAV 读取失败（%s）: %s", path, e)
         return ToolResult(success=False, content=f"读取 WAV 失败: {e}")
     res = lite_decode_apt(audio, sr, polarity=int(args.get("polarity", 1)))
     out = {k: v for k, v in res.items() if k not in ("image_a", "image_b")}
@@ -3612,7 +3655,8 @@ def _meteor_lrpt_decode_iq_fn_tool(args) -> "ToolResult":
             if arr.size % 2:
                 arr = arr[:-1]
             iq = (arr[0::2] + 1j * arr[1::2]).astype(np.complex64)
-    except Exception as e:  # noqa: BLE001
+    except (OSError, ValueError, TypeError) as e:  # noqa: BLE001
+        logger.warning("Meteor LRPT 读取 IQ 失败: %s", e)
         return ToolResult(success=False,
                           content=f"读取 IQ 失败：{type(e).__name__}: {e}")
     if iq.size == 0:
@@ -3638,7 +3682,8 @@ def _meteor_lrpt_decode_iq_fn_tool(args) -> "ToolResult":
         _raw_syms = _dem.get("symbols")
         _syms = np.asarray(_raw_syms if _raw_syms is not None else [],
                            dtype=complex)
-    except Exception as e:  # noqa: BLE001
+    except (ImportError, ValueError, TypeError, RuntimeError) as e:  # noqa: BLE001
+        logger.warning("Meteor LRPT QPSK 解调失败: %s", e)
         return ToolResult(success=False,
                           content=f"QPSK 解调失败：{type(e).__name__}: {e}")
     if _syms.size == 0:
@@ -3674,7 +3719,8 @@ def _meteor_lrpt_decode_iq_fn_tool(args) -> "ToolResult":
                 frames = cand
                 rot_used = k
                 break
-    except Exception as e:  # noqa: BLE001
+    except (ImportError, ValueError, TypeError, RuntimeError) as e:  # noqa: BLE001
+        logger.warning("Meteor LRPT 译码失败: %s", e)
         return ToolResult(success=False,
                           content=f"LRPT 译码失败：{type(e).__name__}: {e}")
     if not frames:
@@ -3709,6 +3755,7 @@ def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
     duration = min(float(args.get("duration_s", 60.0)), 900.0)
     input_path = args.get("input_path") or args.get("audio_path")
     AUDIO_SR = 24000
+    restore_warn = ""
 
     if input_path:
         if not os.path.exists(input_path):
@@ -3717,7 +3764,8 @@ def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
         if ext == ".wav":
             try:
                 a_sr, audio = _read_wav_mono(input_path)
-            except Exception as e:
+            except (OSError, ValueError, TypeError, RuntimeError) as e:
+                logger.warning("读取 NOAA APT WAV 失败: %s", e)
                 return ToolResult(success=False, content=f"读取 WAV 失败: {e}")
             src = f"音频 {os.path.basename(input_path)}（{a_sr/1000:.1f}kHz/{len(audio)/a_sr:.1f}s）"
         else:
@@ -3741,7 +3789,8 @@ def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
                 audio = _wfm_audio_from_iq(np.concatenate(chunks), sr)
                 a_sr = AUDIO_SR
                 src = f"IQ 文件 {os.path.basename(input_path)}（{fb.get_frequency()/1e6:.3f}MHz）"
-            except Exception as e:
+            except (OSError, ValueError, TypeError, RuntimeError) as e:
+                logger.warning("读取 NOAA APT IQ 文件失败: %s", e)
                 return ToolResult(success=False, content=f"读取 IQ 文件失败: {e}")
     else:
         backend = _get_backend(mgr)
@@ -3786,18 +3835,13 @@ def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
                     if x is None or len(x) == 0:
                         break
                     chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError, TypeError) as e:
+                logger.warning("NOAA APT 实时采集失败: %s", e)
                 return ToolResult(success=False, content=f"采集 NOAA APT 失败: {e}")
             finally:
-                try:
-                    backend.set_frequency(int(old[0]))
-                    if hasattr(backend, "set_sample_rate"):
-                        backend.set_sample_rate(old[1])
-                    backend.set_demod(old[2] or "WFM")
-                except Exception:
-                    pass
+                restore_warn = _restore_tuning(backend, old, "WFM")
             if not chunks:
-                return ToolResult(success=False, content="未采集到 IQ 数据")
+                return ToolResult(success=False, content=_append_warning("未采集到 IQ 数据", restore_warn))
             audio = _wfm_audio_from_iq(np.concatenate(chunks), sr)
             a_sr = AUDIO_SR
             src = f"实时采集 {backend.get_frequency()/1e6:.3f}MHz / {duration:.0f}s"
@@ -3809,9 +3853,9 @@ def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
             "too_short": "音频太短，至少需数秒（每行 0.5s）。",
             "too_few_lines": "仅对齐极少数行，信号不稳定。",
         }.get(res.get("reason"), "未解码到 APT")
-        return ToolResult(success=True, content=(
+        return ToolResult(success=True, content=_append_warning((
             f"{src}：{hint}（对齐行 {res.get('lines_aligned', 0)}，"
-            f"锁定率 {res.get('lock_ratio', 0)}）"))
+            f"锁定率 {res.get('lock_ratio', 0)}）"), restore_warn))
 
     out_dir = os.path.join(os.getcwd(), "experiments", "noaa_apt")
     os.makedirs(out_dir, exist_ok=True)
@@ -3824,6 +3868,8 @@ def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
              f"  通道A：{paths['a']}",
              f"  通道B：{paths['b']}",
              "  若黑白颠倒请用 polarity=-1 重解；通道温度定标/地图投影为后续。"]
+    if restore_warn:
+        lines.append(f"警告: {restore_warn}")
     return ToolResult(success=True, content="\n".join(lines))
 
 
@@ -3895,8 +3941,11 @@ def _spectrum_screenshot(mgr, spec, args):
             fig.savefig(save_path, dpi=100)
             plt.close(fig)
             return f"频谱截图已保存: {save_path}\n峰值: {spectrum.peak_freq/1e6:.3f} MHz @ {spectrum.peak_power_db:.1f} dB"
-        except Exception as e:
-            return f"截图生成失败（matplotlib 不可用）: {e}\n可使用 sdr_spectrum_text 查看文本频谱"
+        except (ImportError, OSError, RuntimeError, ValueError, TypeError) as e:
+            # 失败原因可能不是"没装 matplotlib"（也可能是字体/写盘/渲染），
+            # 原样报出来，别把真实原因藏在一句固定文案后面。
+            logger.warning("频谱截图生成失败: %s", e)
+            return f"截图生成失败: {e}\n可使用 sdr_spectrum_text 查看文本频谱"
     return "该设备不支持 IQ 输出，无法生成频谱截图"
 
 def _spectrum_find_signals(mgr, spec, args):
@@ -3983,14 +4032,18 @@ def _recordings_list(args):
                 try:
                     with open(meta_path) as mf:
                         meta = json.load(mf)
-                except Exception:
-                    pass
+                except (OSError, ValueError, TypeError) as e:
+                    # sidecar 坏了不等于文件坏了：降级为"无元数据"，但把原因
+                    # 带到输出里，避免用户以为这段录制本来就没记频率。
+                    logger.warning("录制 sidecar 解析失败（%s）: %s", meta_path, e)
+                    meta = {"_meta_error": f"sidecar 无法解析: {e}"}
             files.append({
                 "filename": f,
                 "size_kb": round(stat.st_size / 1024, 1),
                 "modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
                 "frequency_mhz": meta.get("frequency_hz", 0) / 1e6 if meta.get("frequency_hz") else None,
                 "sample_rate_mhz": meta.get("sample_rate_hz", 0) / 1e6 if meta.get("sample_rate_hz") else None,
+                "meta_error": meta.get("_meta_error"),
             })
     files.sort(key=lambda x: x["modified"], reverse=True)
     limit = args.get("limit", 20)
@@ -4003,6 +4056,7 @@ def _wfm_stereo_tool(mgr, args) -> "ToolResult":
     duration = min(float(args.get("duration_s", 8.0)), 120.0)
     deemph = float(args.get("deemph_us", 50.0))
     chunks, src = [], ""
+    restore_warn = ""
 
     if input_path:
         try:
@@ -4022,7 +4076,8 @@ def _wfm_stereo_tool(mgr, args) -> "ToolResult":
                 return ToolResult(success=False, content="IQ 文件无数据")
             iq = np.concatenate(chunks)
             src = f"IQ 文件 {os.path.basename(input_path)}（{fb.get_frequency()/1e6:.3f}MHz）"
-        except Exception as e:
+        except (OSError, ValueError, TypeError, RuntimeError) as e:
+            logger.warning("WFM 立体声读取 IQ 文件失败: %s", e)
             return ToolResult(success=False, content=f"读取 IQ 文件失败: {e}")
     else:
         backend = _get_backend(mgr)
@@ -4044,18 +4099,13 @@ def _wfm_stereo_tool(mgr, args) -> "ToolResult":
                 if x is None or len(x) == 0:
                     break
                 chunks.append(np.asarray(x, dtype=np.complex64))
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            logger.warning("WFM 立体声实时采集失败: %s", e)
             return ToolResult(success=False, content=f"实时采集 FM 失败: {e}")
         finally:
-            try:
-                backend.set_frequency(int(old[0]))
-                if hasattr(backend, "set_sample_rate"):
-                    backend.set_sample_rate(old[1])
-                backend.set_demod(old[2] or "WFM")
-            except Exception:
-                pass
+            restore_warn = _restore_tuning(backend, old, "WFM")
         if not chunks:
-            return ToolResult(success=False, content="未采集到 IQ 数据")
+            return ToolResult(success=False, content=_append_warning("未采集到 IQ 数据", restore_warn))
         iq = np.concatenate(chunks)
         src = f"实时采集 {backend.get_frequency()/1e6:.3f}MHz / {duration:.0f}s"
 
@@ -4074,6 +4124,8 @@ def _wfm_stereo_tool(mgr, args) -> "ToolResult":
         f"制式: {mode}　导频 SNR: {r['pilot_snr_db']} dB　时长: {r['duration_s']}s",
         f"双声道 WAV(48k): {out}",
     ]
+    if restore_warn:
+        lines.append(f"警告: {restore_warn}")
     return ToolResult(success=True, content="\n".join(lines))
 
 
@@ -4101,6 +4153,7 @@ def _decode_sstv(args):
     mode = args.get("mode", "auto")
 
     # 优先使用内置 sstv_decoder（支持 Martin M1/Scottie S1/Robot 36）
+    fallback_reason = ""
     try:
         from .sstv_decoder import decode_sstv as decode_sstv_new
         result = decode_sstv_new(input_path, output_path=output_path, mode=mode)
@@ -4115,8 +4168,11 @@ def _decode_sstv(args):
             if "note" in result:
                 output += f"说明: {result['note']}\n"
             return output
-    except Exception:
-        pass  # fallback 到旧实现
+    except (ImportError, OSError, ValueError, TypeError, RuntimeError) as e:
+        # 回退旧实现是降级，不是无事发生：把原因带给用户，否则两种实现的
+        # 解码差异无从解释。
+        logger.warning("内置 SSTV 解码器异常，回退旧实现: %s", e)
+        fallback_reason = f"内置解码器异常，已回退旧实现: {e}"
 
     # fallback 到旧实现
     result = decode_sstv(input_path)
@@ -4130,6 +4186,8 @@ def _decode_sstv(args):
         output += f"输出: {result['output_path']}\n"
     if "note" in result:
         output += f"说明: {result['note']}\n"
+    if fallback_reason:
+        output += f"降级说明: {fallback_reason}\n"
     return output
 
 def _decode_cw(args):
@@ -4160,7 +4218,8 @@ def _decode_cw(args):
         if res["chars"]:
             out += "逐字符: " + " ".join(f"{c['char']}({c['code']})" for c in res["chars"]) + "\n"
         return out
-    except Exception as e:
+    except (ImportError, OSError, ValueError, TypeError, RuntimeError) as e:
+        logger.warning("CW 解码失败（%s）: %s", input_path, e)
         return f"CW 解码失败: {e}"
 
 
@@ -4186,7 +4245,8 @@ def _decode_ft8(args):
             out += f"检测到 FT8：中心 {res['center_hz']}Hz，SNR {res['snr_est_db']}dB\n"
             out += f"原始符号 {res['num_symbols']} 个，判决裕度 {res['avg_margin']}\n"
             out += "呼号文本还原需 jt9/wsjtx（LDPC 译码）\n"
-    except Exception as e:
+    except (ImportError, OSError, ValueError, TypeError, RuntimeError) as e:
+        logger.warning("FT8 内置分析异常（%s）: %s", input_path, e)
         out += f"内置分析异常: {e}\n"
     return out
 
@@ -4480,6 +4540,7 @@ def _satellite_doppler_track(mgr, args):
            getattr(backend.status, "demod_mode", demod))
     track, n_samples, tune_count = [], 0, 0
     t_start = _time.time()
+    restore_warn = ""
     try:
         if hasattr(backend, "set_sample_rate"):
             backend.set_sample_rate(sr)
@@ -4516,19 +4577,15 @@ def _satellite_doppler_track(mgr, args):
                 dt = _time.time() - t_rd
                 if dt < interval:
                     _time.sleep(max(0.0, interval - dt))
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
+        logger.warning("多普勒跟踪录制失败: %s", e)
         return ToolResult(success=False, content=f"多普勒跟踪录制失败: {e}")
     finally:
-        try:
-            backend.set_frequency(int(old[0]))
-            if hasattr(backend, "set_sample_rate"):
-                backend.set_sample_rate(old[1])
-            backend.set_demod(old[2] or demod)
-        except Exception:
-            pass
+        restore_warn = _restore_tuning(backend, old, demod)
 
     if n_samples == 0:
-        return ToolResult(success=False, content="跟踪期间未采集到样本")
+        return ToolResult(success=False,
+                          content=_append_warning("跟踪期间未采集到样本", restore_warn))
     sidecar = {
         "format": "cf32", "sample_rate": sr, "center_freq": nominal,
         "satellite": sat, "demod": demod,
@@ -4553,6 +4610,8 @@ def _satellite_doppler_track(mgr, args):
         f"轨迹 sidecar: {out}.json",
         "下一步：把该 cf32 交给 sdr_decode_noaa_apt（input_path）即可出云图。",
     ]
+    if restore_warn:
+        lines.append(f"警告: {restore_warn}")
     return ToolResult(success=True, content="\n".join(lines))
 
 
@@ -4564,8 +4623,9 @@ def _get_gps(mgr):
         return "GPS 定位: 未连接（请在工具菜单连接 GNSS 串口）"
     try:
         d = gnss.status()
-    except Exception:
-        return "GPS 定位: 未连接（GNSS 串口未就绪）"
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as e:
+        logger.warning("GNSS 状态读取失败: %s", e)
+        return f"GPS 定位: 读取失败（{e}）；GNSS 串口可能已断开"
     if not d or not d.get("fix"):
         return "GPS 定位: 搜索中（未定位，无卫星 fix）"
     return (
@@ -4581,8 +4641,9 @@ def _get_imu(mgr):
         return "IMU 姿态: 未连接（未检测到九轴硬件）"
     try:
         d = imu.status()
-    except Exception:
-        return "IMU 姿态: 未连接（IMU 硬件未就绪）"
+    except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as e:
+        logger.warning("IMU 状态读取失败: %s", e)
+        return f"IMU 姿态: 读取失败（{e}）；IMU 硬件可能已断开"
     if not d:
         return "IMU 姿态: 未连接（无数据）"
     return (
@@ -4861,8 +4922,11 @@ def _demodulate(mgr, args):
             r = rds_decode_from_wfm(samples, sample_rate)
             rds_line = (f"RDS 57kHz 副载波: {'检测到' if r['rds_present'] else '未检测到'} "
                         f"({r['carrier_db']} dB)\n")
-        except Exception:
-            rds_line = ""
+        except (RuntimeError, ValueError, TypeError, OSError) as e:
+            # RDS 是附加信息：失败不拖垮主解调，但不能让"这一行消失了"
+            # 被当成"该台没有 RDS"。
+            logger.warning("WFM RDS 副载波解码失败: %s", e)
+            rds_line = f"RDS 57kHz 副载波: 解码失败（{e}）\n"
     else:
         raw_audio = demodulate(samples, mode=mode, sample_rate=sample_rate, deviation=deviation)
         # 窄带模式也整理为 48k 可播放音频（航空 AM 4.5k / NFM 3.5k / SSB 3k / CW 1.2k）
@@ -4905,7 +4969,8 @@ def _demodulate(mgr, args):
             audio_int16 = np.clip(audio * scale, -1, 1) * 32767
             wf.writeframes(audio_int16.astype(np.int16).tobytes())
         result += f"\n音频已保存: {tmp_path}\n"
-    except Exception as e:
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
+        logger.warning("解调音频保存失败: %s", e)
         result += f"\n音频保存失败: {e}\n"
 
     return result
@@ -4927,8 +4992,11 @@ def _analyze_recording(args):
         try:
             with open(sidecar_path) as f:
                 metadata = json.load(f)
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError) as e:
+            # 缺元数据会导致下面按默认采样率/0Hz 中心分析；必须明说，
+            # 否则用户会把"频率 0 / 默认 2.4MHz"当成真实录制参数。
+            logger.warning("分析 sidecar 解析失败（%s）: %s", sidecar_path, e)
+            metadata = {"_read_error": f"sidecar 无法解析: {e}"}
 
     # 读取 IQ 数据
     ext = os.path.splitext(file_path)[1].lower()
@@ -4962,7 +5030,8 @@ def _analyze_recording(args):
             samples = rows[:, 0].astype(np.float32) + 1j * rows[:, 1].astype(np.float32)
         else:
             return f"错误: 不支持的格式: {ext}（支持 .cf32/.cs16/.cu8/.wav/.csv）"
-    except Exception as e:
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
+        logger.warning("读取录制文件失败（%s）: %s", file_path, e)
         return f"错误: 读取文件失败: {e}"
 
     if len(samples) == 0:
@@ -4989,6 +5058,8 @@ def _analyze_recording(args):
     result = f"=== 录制文件分析报告 ===\n"
     result += f"文件: {file_path}\n"
     result += f"格式: {ext}\n"
+    if metadata.get("_read_error"):
+        result += f"警告: {metadata['_read_error']}；以下采样率/中心频率为默认值，不代表真实录制参数。\n"
     result += f"样本数: {len(samples)}\n"
     result += f"采样率: {sample_rate/1e6:.3f} MHz\n"
     if center_freq > 0:
@@ -5448,8 +5519,10 @@ def _kiss_decode(args):
             try:
                 info = frame.info.decode('latin-1', errors='replace')
                 result += f"信息: {info[:80]}\n"
-            except Exception:
-                pass
+            except (AttributeError, TypeError) as e:
+                # frame.info 非 bytes 时才可能失败；不能静默丢掉信息字段。
+                logger.warning("KISS 帧信息字段解码失败: %s", e)
+                result += f"信息: （无法解码: {e}）\n"
         result += f"\n"
 
     return {"content": result,
@@ -7158,7 +7231,8 @@ def _set_ppm_correction(mgr, args):
     if callable(set_ppm):
         try:
             ok = bool(set_ppm(ppm_int))
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            logger.warning("ppm 校正下发失败（%s，走 set_ppm）: %s", dev_name, e)
             return ToolResult(success=False, content=f"ppm 校正下发失败（{dev_name}）: {e!r}")
         if not ok:
             return ToolResult(success=False, content=f"ppm 校正下发失败（{dev_name}）：后端 set_ppm 返回失败")
@@ -7170,7 +7244,8 @@ def _set_ppm_correction(mgr, args):
     if sdr is not None and isinstance(getattr(type(sdr), "freq_correction", None), property):
         try:
             setattr(sdr, "freq_correction", ppm_int)
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
+            logger.warning("ppm 校正下发失败（%s，走 freq_correction）: %s", dev_name, e)
             return ToolResult(success=False, content=f"ppm 校正下发失败（{dev_name}）: {e!r}")
         return _ppm_applied_result(dev_name, raw, applied, clamped, ppm_int,
                                    "RtlTcpDeviceAdapter.freq_correction setter", connected)
@@ -7292,7 +7367,10 @@ def _current_iq_samples(agent, n: int):
         if backend is None:
             return None
         return backend.read_samples(n)
-    except Exception:
+    except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as e:
+        # 调用方会把 None 当"无实时 IQ"并回退演示信号；读失败原因必须留痕，
+        # 否则硬件故障会被误判成"没接设备"。
+        logger.warning("读取当前后端 IQ 失败: %s", e)
         return None
 
 
@@ -7834,7 +7912,8 @@ def _wsjtx_read_decodes(args):
                 msgs.append(line)
             if len(msgs) >= limit:
                 break
-    except Exception as e:
+    except (OSError, UnicodeError, ValueError) as e:
+        logger.warning("读取 WSJT-X 日志失败（%s）: %s", log_path, e)
         return f"读取日志失败: {e}"
 
     if not msgs:
@@ -7866,12 +7945,14 @@ def _fm_make_acquire(mgr, sample_rate_hz):
         # 离线 IQ 文件是单段固定录制，不能步进调谐
         return None
 
-    saved_sr = backend.get_sample_rate()
     try:
         if hasattr(backend, "set_sample_rate"):
             backend.set_sample_rate(sample_rate_hz)
-    except Exception:
-        pass
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
+        # 扫频依赖正确采样率：静默沿用旧采样率会让噪声底/门限判断全部失真。
+        raise RuntimeError(f"把采样率切到 {sample_rate_hz/1e3:.0f}kHz 失败: {e}") from e
+
+    state = {"failures": 0, "last_error": ""}
 
     def _hw_acquire(center_hz, sr, n):
         try:
@@ -7888,10 +7969,15 @@ def _fm_make_acquire(mgr, sample_rate_hz):
                 need -= len(part)
             if got:
                 return np.concatenate(got)[:n]
-        except Exception:
-            pass
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            # 单点失败不炸整次扫频，但必须计数+留原因，否则"没检出电台"
+            # 会被误读成"这个频段真的没有电台"。
+            state["failures"] += 1
+            state["last_error"] = str(e)
+            logger.warning("FM 搜台调谐/采集失败 @ %.3fMHz: %s", center_hz / 1e6, e)
         return None
 
+    _hw_acquire.state = state
     return _hw_acquire
 
 
@@ -7908,7 +7994,10 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
     if f_stop <= f_start:
         return ToolResult(success=False, content="错误: 结束频率必须大于起始频率")
 
-    acquire = _fm_make_acquire(mgr, sr)
+    try:
+        acquire = _fm_make_acquire(mgr, sr)
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
+        return ToolResult(success=False, content=f"FM 搜台无法配置设备: {e}")
     if acquire is None:
         return ToolResult(success=False, content=(
             "当前无可用的实时 SDR 设备（离线 IQ 回放源是单段固定录制，也不能步进调谐扫频）。"
@@ -7918,12 +8007,18 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
     hw_connected = backend is not None and getattr(backend, "status", None) and backend.status.connected
     saved_freq = None
     saved_sr = None
+    restore_warn = ""
     if hw_connected:
         try:
             saved_freq = backend.get_frequency()
             saved_sr = backend.get_sample_rate()
-        except Exception:
-            pass
+        except (RuntimeError, OSError, ValueError, TypeError) as e:
+            # 读不到原调谐就无法保证扫完能恢复；宁可取消，也不把设备留在
+            # 扫描频段。之前这里静默跳过，设备状态会被无声改变。
+            logger.warning("FM 搜台前读取当前调谐失败: %s", e)
+            return ToolResult(success=False, content=(
+                f"无法读取设备当前频率/采样率，为避免扫描后设备被留在错误调谐状态，"
+                f"已取消扫描: {e}"))
 
     try:
         result = scan_fm_band(
@@ -7931,17 +8026,13 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
             step_khz=step_khz, sample_rate_hz=sr, dwell_samples=dwell,
             carrier_threshold_db=threshold,
         )
-    except Exception as e:
+    except (RuntimeError, OSError, ValueError, TypeError) as e:
+        logger.warning("FM 扫频失败: %s", e)
         return ToolResult(success=False, content=f"FM 扫频失败: {e}")
     finally:
         if hw_connected and saved_freq is not None:
-            try:
-                if hasattr(backend, "set_frequency"):
-                    backend.set_frequency(int(saved_freq))
-                if hasattr(backend, "set_sample_rate") and saved_sr:
-                    backend.set_sample_rate(saved_sr)
-            except Exception:
-                pass
+            restore_warn = _restore_tuning(
+                backend, (saved_freq, saved_sr, getattr(backend.status, "demod_mode", "WFM")), "WFM")
 
     # 保存最近一次扫描结果到 mgr（供 sdr_fm_preset save 使用）
     stations_dicts = [s.to_dict() for s in result.stations]
@@ -7992,6 +8083,12 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
                      ", ".join(f"{s['freq_mhz']:.1f}" for s in comparison["gone"][:10]))
     if saved_path:
         lines.append(f"已保存到预设: {saved_path}")
+    acquire_state = getattr(acquire, "state", None) or {}
+    if acquire_state.get("failures"):
+        lines.append(f"警告: {acquire_state['failures']} 个频点调谐/采集失败"
+                     f"（最近原因: {acquire_state.get('last_error')}），检出结果可能不完整。")
+    if restore_warn:
+        lines.append(f"警告: {restore_warn}")
     lines.append("")
     lines.append("JSON 数据:")
     lines.append(json.dumps(stations_dicts, ensure_ascii=False))
