@@ -56,6 +56,7 @@ TEXT_EXT = (".py", ".md", ".cpp", ".h", ".hpp", ".c", ".dart", ".js", ".ts",
             ".toml", ".qml", ".ui")
 
 ALLOWED_EMAIL_DOMAINS = ("example.com", "example.org", "example.net",
+                         "example.invalid",
                          "noreply.github.com", "users.noreply.github.com")
 
 #: 厂商公开支持邮箱（第三方公开联系方式，非作者个人信息）：
