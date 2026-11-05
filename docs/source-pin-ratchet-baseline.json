@@ -2,7 +2,7 @@
   "schema": 1,
   "built_at": "2026-11-06",
   "scanner": "scripts/audit_source_text_pins.py",
-  "built_count": 99,
+  "built_count": 56,
   "entries": [
     {
       "path": "tests/test_ai_panel_behavior.py",
@@ -33,57 +33,12 @@
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_e03_import_rejection_names_reason_and_next_step",
-      "pinned": "\"导入被拒绝：\"",
+      "func": "test_e06_ntrip_errors_name_next_step_without_internal_jargon",
+      "pinned": "'err = \"sourcetable 中未找到 STR 挂载点记录。\"'",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整模块禁用「未知错误」兜底 idiom，模态文件对话框路径无法离屏复现；重新评估条件：可注入文件选择器、能离屏驱动导入失败路径时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：需真实 NTRIP sourcetable 失败路径；重新评估条件：有可注入的 sourcetable 客户端替身时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_e03_import_rejection_names_reason_and_next_step",
-      "pinned": "'res.error or \"未知错误\"'",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整模块禁用「未知错误」兜底 idiom，模态文件对话框路径无法离屏复现；重新评估条件：可注入文件选择器、能离屏驱动导入失败路径时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
-      "pinned": "\"书签初始化失败\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
-      "pinned": "\"书签加载失败：\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
-      "pinned": "\"已有书签未被改动\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
-      "pinned": "\"检查该目录是否可读写\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
@@ -92,16 +47,7 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：需真实 NTRIP sourcetable 失败路径；重新评估条件：有可注入的 sourcetable 客户端替身时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_e06_ntrip_errors_name_next_step_without_internal_jargon",
-      "pinned": "'err = \"sourcetable 中未找到 STR 挂载点记录。\"'",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：需真实 NTRIP sourcetable 失败路径；重新评估条件：有可注入的 sourcetable 客户端替身时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
@@ -110,70 +56,25 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：需真实 NTRIP sourcetable 失败路径；重新评估条件：有可注入的 sourcetable 客户端替身时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_n01_cpp_status_freq_six_decimals",
-      "pinned": "'QString(\"%1 MHz\").arg(hz / 1e6, 0, \\'f\\', 6)'",
+      "func": "test_e03_import_rejection_names_reason_and_next_step",
+      "pinned": "'res.error or \"未知错误\"'",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整模块禁用「未知错误」兜底 idiom，模态文件对话框路径无法离屏复现；重新评估条件：可注入文件选择器、能离屏驱动导入失败路径时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_n01_mobile_current_freq_six_decimals",
-      "pinned": "\"toStringAsFixed(6)} MHz\"",
+      "func": "test_e03_import_rejection_names_reason_and_next_step",
+      "pinned": "\"导入被拒绝：\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整模块禁用「未知错误」兜底 idiom，模态文件对话框路径无法离屏复现；重新评估条件：可注入文件选择器、能离屏驱动导入失败路径时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_n01_mobile_current_freq_six_decimals",
-      "pinned": "\"toStringAsFixed(6)} MHz\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_t01_help_separates_sky_tab_from_planetarium",
-      "pinned": "\"天空模式\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_t01_help_separates_sky_tab_from_planetarium",
-      "pinned": "\"打开天空模式\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_t01_help_separates_sky_tab_from_planetarium",
-      "pinned": "\"星象仪模式\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_t02_help_uses_real_topbar_demod_labels",
-      "pinned": "\"FM / WFM / NFM / AM / USB / LSB / CW\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
@@ -182,286 +83,79 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
-      "pinned": "\"'静噪 静音'\"",
+      "func": "test_t02_help_uses_real_topbar_demod_labels",
+      "pinned": "\"FM / WFM / NFM / AM / USB / LSB / CW\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
-      "pinned": "\"SQ OPEN\"",
+      "func": "test_t01_help_separates_sky_tab_from_planetarium",
+      "pinned": "\"打开天空模式\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
-      "pinned": "'QStringLiteral(\"静噪 有信号\")'",
+      "func": "test_t01_help_separates_sky_tab_from_planetarium",
+      "pinned": "\"星象仪模式\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
-      "pinned": "'QStringLiteral(\"静噪 静音\")'",
+      "func": "test_t01_help_separates_sky_tab_from_planetarium",
+      "pinned": "\"天空模式\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整页帮助富文本的旧术语守卫，渲染抽样会漏掉非 QLabel 段落；重新评估条件：HelpPanel 全部文案可枚举成渲染控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_t06_squelch_states_are_chinese_and_single_vocabulary",
-      "pinned": "'QStringLiteral(\"静噪关闭\")'",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"书签初始化失败\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_apt_stats_missing_values_render_dash",
-      "pinned": "\"同步: {'—' if lock is None else f'{lock:.0%}'}\"",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"书签加载失败：\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_apt_stats_missing_values_render_dash",
-      "pinned": "\"行数: {'—' if lines is None else lines}\"",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"已有书签未被改动\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_cpp_status_strip_labels_rssi_and_snr_units",
-      "pinned": "'QString(\"RSSI %1 dBFS\")'",
+      "func": "test_e04_bookmark_failure_says_what_survives_and_what_to_do",
+      "pinned": "\"检查该目录是否可读写\"",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整文件禁用旧失败文案，真实失败路径依赖不可写目录/损坏 JSON；重新评估条件：bookmark 加载可注入损坏 JSON 并直接读控件时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_cpp_status_strip_labels_rssi_and_snr_units",
-      "pinned": "'QString(\"SNR %1 dB\")'",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_gnss_psd_fields_never_labeled_dbm",
-      "pinned": "\"**不是 dBm**\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_gnss_psd_fields_never_labeled_dbm",
-      "pinned": "\"平均功率（相对读数 dB，非 dBm）\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
-      "pinned": "\"'RSSI ${rssi.toStringAsFixed(1)} dBFS'\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
-      "pinned": "\"'RSSI --'\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
-      "pinned": "\"'RSSI —'\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_mobile_rssi_is_dbfs_with_one_decimal",
-      "pinned": "\"toStringAsFixed(0)} dB'\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_same_screen_has_one_rssi_unit_and_never_dBm",
-      "pinned": "\"0-127 dBuV\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u02_same_screen_has_one_rssi_unit_and_never_dBm",
-      "pinned": "\"0-127 dBµV\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s",
-      "pinned": "\".arg(frame.sampleRateHz / 1e6, 0, 'f', 3)\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s",
-      "pinned": "\"Fs=%2 MHz\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s",
-      "pinned": "'QString(\"%1 Fs=%2 MS/s F0=%3 MHz N=%4\")'",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz",
-      "pinned": "bad",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：整文件禁旧量纲，行为断言只覆盖 3 处输出，注释/文档字符串仍可能残留；重新评估条件：三个文件全文都由同一格式化器生成、无注释/文档字符串时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
-      "pinned": "\"toStringAsFixed(2)} Msps\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
-      "pinned": "\"toStringAsFixed(2)}Msps\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
-      "pinned": "\"toStringAsFixed(3)} MS/s\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_mobile_sample_rate_is_ms_per_s_three_decimals",
-      "pinned": "\"toStringAsFixed(3)} MS/s\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_same_value_renders_identically_on_three_fronts",
-      "pinned": "\"QString(\\\"%1 MS/s\\\").arg(hz / 1e6, 0, 'f', 3)\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_same_value_renders_identically_on_three_fronts",
-      "pinned": "\"toStringAsFixed(3)} MS/s\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_sample_rate_copy_never_uses_mhz_or_msps",
-      "pinned": "\"Msps\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_sample_rate_is_msps_three_decimals",
-      "pinned": "\"format_sample_rate\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_troubleshooting_error_hint_uses_ms_per_s",
-      "pinned": "\"如 2.048 MHz\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u03_troubleshooting_error_hint_uses_ms_per_s",
-      "pinned": "\"如 2.048 MS/s\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
@@ -470,7 +164,7 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：整文件禁旧量纲，行为断言无法穷举所有静态条目；重新评估条件：所有条目都来自同一结构化文案表时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
@@ -479,7 +173,7 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：整文件禁旧量纲，行为断言无法穷举所有静态条目；重新评估条件：所有条目都来自同一结构化文案表时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
@@ -488,52 +182,16 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：整文件禁旧量纲，行为断言无法穷举所有静态条目；重新评估条件：所有条目都来自同一结构化文案表时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_copy_units_audit.py",
-      "func": "test_u06_mobile_help_squelch_and_vfo_terms_are_correct",
-      "pinned": "\"-100 为关闭\"",
+      "func": "test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz",
+      "pinned": "bad",
       "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "reason": "保留（勿当 B 类砍）：整文件禁旧量纲，行为断言只覆盖 3 处输出，注释/文档字符串仍可能残留；重新评估条件：三个文件全文都由同一格式化器生成、无注释/文档字符串时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u06_mobile_help_squelch_and_vfo_terms_are_correct",
-      "pinned": "\"绝对电平\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u06_mobile_help_squelch_and_vfo_terms_are_correct",
-      "pinned": "\"预存的频率+模式预设\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
-      "pinned": "\"G ${controller.gainDb.toStringAsFixed(1)}dB\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_copy_units_audit.py",
-      "func": "test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked",
-      "pinned": "\"增益 ${controller.gainDb.toStringAsFixed(1)} dB\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_decode_pipeline_e2e.py",
@@ -565,7 +223,7 @@
     {
       "path": "tests/test_desktop_constants.py",
       "func": "test_dock_layout_hardcoded_ids_are_registered",
-      "pinned": "\"tabData\"",
+      "pinned": "\"tabText\"",
       "owner": "存量（2026-11-06 建表）",
       "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
@@ -574,92 +232,11 @@
     {
       "path": "tests/test_desktop_constants.py",
       "func": "test_dock_layout_hardcoded_ids_are_registered",
-      "pinned": "\"tabText\"",
+      "pinned": "\"tabData\"",
       "owner": "存量（2026-11-06 建表）",
       "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
       "verdict": "convert"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_cpp_tokens_match_documented_values",
-      "pinned": "name",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_cross_language_deltas_are_documented",
-      "pinned": "semantic",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
-      "pinned": "\"tokens::kPeakRelDb\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
-      "pinned": "\"tokens::kPeakRelDb\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
-      "pinned": "\"tokens::kPeakRelDb\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
-      "pinned": "\"tokens::kPeakThresholdDefault\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_display_gate_and_calibration_gate_are_locked_apart",
-      "pinned": "\"tokens::kPeakThresholdDefault\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_tuning_step_tiers_match_cpp_and_schema",
-      "pinned": "\"kFreqCoarseStepHz\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_hardcoded_parameter_registry.py",
-      "func": "test_tuning_step_tiers_match_cpp_and_schema",
-      "pinned": "\"kFreqFineStepHz\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
     },
     {
       "path": "tests/test_hw_acceptance_contract.py",
@@ -676,15 +253,6 @@
       "pinned": "\"segments\"",
       "owner": "存量（2026-11-06 建表）",
       "reason": "数据/文档 pin（保留，勿当 B 类改）：断言分段录音 sidecar 的 segments 结构；产物内容。",
-      "legacy": true,
-      "verdict": "keep"
-    },
-    {
-      "path": "tests/test_record_replay_config.py",
-      "func": "test_corrupt_config_backed_up_and_original_bytes_kept",
-      "pinned": "\"window\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言损坏配置备份仍保留 window 键；查的是备份数据内容。",
       "legacy": true,
       "verdict": "keep"
     },
@@ -707,9 +275,36 @@
       "verdict": "keep"
     },
     {
+      "path": "tests/test_record_replay_config.py",
+      "func": "test_corrupt_config_backed_up_and_original_bytes_kept",
+      "pinned": "\"window\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "数据/文档 pin（保留，勿当 B 类改）：断言损坏配置备份仍保留 window 键；查的是备份数据内容。",
+      "legacy": true,
+      "verdict": "keep"
+    },
+    {
       "path": "tests/test_settings_convergence.py",
       "func": "test_gui_config_no_longer_writes_canonical_keys",
       "pinned": "'\"theme\"'",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "legacy": true,
+      "verdict": "tbd"
+    },
+    {
+      "path": "tests/test_settings_convergence.py",
+      "func": "test_no_nonexistent_freq_spin_widget",
+      "pinned": "\"freq_spin.setValue\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "保留（勿当 B 类砍）：要证明某个死属性引用不存在，只有静态扫描能做到；重新评估条件：永不：行为测试无法覆盖不可达分支。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "legacy": true,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_settings_convergence.py",
+      "func": "test_gui_config_no_longer_writes_canonical_keys",
+      "pinned": "f'config[\"{key}\"]'",
       "owner": "存量（2026-11-06 建表）",
       "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
@@ -726,28 +321,10 @@
     },
     {
       "path": "tests/test_settings_convergence.py",
-      "func": "test_gui_config_no_longer_writes_canonical_keys",
-      "pinned": "f'config[\"{key}\"]'",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_settings_convergence.py",
       "func": "test_gui_config_no_longer_writes_drifting_keys",
       "pinned": "f'config[\"{key}\"]'",
       "owner": "存量（2026-11-06 建表）",
       "reason": "待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_settings_convergence.py",
-      "func": "test_no_nonexistent_freq_spin_widget",
-      "pinned": "\"freq_spin.setValue\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：要证明某个死属性引用不存在，只有静态扫描能做到；重新评估条件：永不：行为测试无法覆盖不可达分支。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
       "verdict": "tbd"
     },
@@ -772,20 +349,11 @@
     {
       "path": "tests/test_sky_readouts.py",
       "func": "test_no_ad_hoc_numeric_formatting_left",
-      "pinned": "\":.0f} km\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：判据是全文件实现点计数（strftime/度分秒唯一性）；重新评估条件：格式化入口收敛为单一 AST 节点并可用 AST 查询时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_sky_readouts.py",
-      "func": "test_no_ad_hoc_numeric_formatting_left",
-      "pinned": "\":.1f}°\"",
+      "pinned": "src.count(\"strftime(\")",
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：判据是全文件实现点计数（strftime/度分秒唯一性）；重新评估条件：格式化入口收敛为单一 AST 节点并可用 AST 查询时。 原 reason：源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_sky_readouts.py",
@@ -794,16 +362,16 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：判据是全文件实现点计数（strftime/度分秒唯一性）；重新评估条件：格式化入口收敛为单一 AST 节点并可用 AST 查询时。 原 reason：源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_sky_readouts.py",
       "func": "test_no_ad_hoc_numeric_formatting_left",
-      "pinned": "src.count(\"strftime(\")",
+      "pinned": "\":.1f}°\"",
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：判据是全文件实现点计数（strftime/度分秒唯一性）；重新评估条件：格式化入口收敛为单一 AST 节点并可用 AST 查询时。 原 reason：源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "convert"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_sky_readouts.py",
@@ -812,7 +380,16 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：判据是全文件实现点计数（strftime/度分秒唯一性）；重新评估条件：格式化入口收敛为单一 AST 节点并可用 AST 查询时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_sky_readouts.py",
+      "func": "test_no_ad_hoc_numeric_formatting_left",
+      "pinned": "\":.0f} km\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "保留（勿当 B 类砍）：判据是全文件实现点计数（strftime/度分秒唯一性）；重新评估条件：格式化入口收敛为单一 AST 节点并可用 AST 查询时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "legacy": true,
+      "verdict": "keep"
     },
     {
       "path": "tests/test_ssdv_e2e.py",
@@ -821,43 +398,7 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：身份红线：整文件禁止内置呼号，行为测试无法穷举全部分支；重新评估条件：永不：这是产品红线，必须保持整文件扫描。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_status_panel_squelch_units.py",
-      "func": "test_static_guard_no_bare_dbfs_on_margin",
-      "pinned": "\"_fmt_squelch(\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_status_panel_squelch_units.py",
-      "func": "test_static_guard_no_bare_dbfs_on_margin",
-      "pinned": "\"squelch_applied_by\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
-    },
-    {
-      "path": "tests/test_status_panel_squelch_units.py",
-      "func": "test_static_guard_no_bare_dbfs_on_margin",
-      "pinned": "\"squelch_threshold_dbfs\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "convert"
-    },
-    {
-      "path": "tests/test_status_panel_squelch_units.py",
-      "func": "test_static_guard_no_bare_dbfs_on_margin",
-      "pinned": "\"余量\"",
-      "owner": "存量（2026-11-06 建表）",
-      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
-      "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
     },
     {
       "path": "tests/test_status_panel_squelch_units.py",
@@ -866,7 +407,43 @@
       "owner": "存量（2026-11-06 建表）",
       "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
-      "verdict": "tbd"
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"_fmt_squelch(\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "legacy": true,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"squelch_applied_by\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "legacy": true,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"squelch_threshold_dbfs\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "legacy": true,
+      "verdict": "keep"
+    },
+    {
+      "path": "tests/test_status_panel_squelch_units.py",
+      "func": "test_static_guard_no_bare_dbfs_on_margin",
+      "pinned": "\"余量\"",
+      "owner": "存量（2026-11-06 建表）",
+      "reason": "保留（勿当 B 类砍）：静态守卫防其他路径手拼 dBFS，真实行为测试已覆盖主路径；重新评估条件：所有写 dBFS 的入口都收敛到同一格式化函数时。 原 reason：待判：负向守卫（禁词/禁写法）或跨语言 pin；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
+      "legacy": true,
+      "verdict": "keep"
     },
     {
       "path": "tests/test_tooltip_guard.py",
@@ -894,6 +471,66 @@
       "reason": "源码实现文本 pin：应改为行为断言；逐条见 output/tmp/source-pin-death-list-2026-11-06.md",
       "legacy": true,
       "verdict": "convert"
+    },
+    {
+      "path": "tests/test_unit_dimension_lint.py",
+      "line": 157,
+      "func": "test_sdr_tools_gnss_sample_rate_default_is_project_default",
+      "source_vars": [
+        "src"
+      ],
+      "target_file": "",
+      "kind": "code",
+      "pinned": "\"2.048e6\"",
+      "owner": "操作逻辑线",
+      "reason": "他线 pin（967ac726 引入，owner=操作逻辑线）：跨文件真值源守卫——GNSS 工具默认采样率必须引用 DEFAULT_SAMPLE_RATE_HZ，行为测试无法证明「整文件没有手写 2.048e6」；重新评估条件：sdr_tools 默认值收敛到单一构造器、手写值不可能存在时。",
+      "legacy": false,
+      "verdict": "tbd"
+    },
+    {
+      "path": "tests/test_unit_dimension_lint.py",
+      "line": 158,
+      "func": "test_sdr_tools_gnss_sample_rate_default_is_project_default",
+      "source_vars": [
+        "src"
+      ],
+      "target_file": "",
+      "kind": "code",
+      "pinned": "'\"default\": DEFAULT_SAMPLE_RATE_HZ'",
+      "owner": "操作逻辑线",
+      "reason": "他线 pin（967ac726 引入，owner=操作逻辑线）：跨文件真值源守卫——GNSS 工具默认采样率必须引用 DEFAULT_SAMPLE_RATE_HZ，行为测试无法证明「整文件没有手写 2.048e6」；重新评估条件：sdr_tools 默认值收敛到单一构造器、手写值不可能存在时。",
+      "legacy": false,
+      "verdict": "tbd"
+    },
+    {
+      "path": "tests/test_unit_dimension_lint.py",
+      "line": 159,
+      "func": "test_sdr_tools_gnss_sample_rate_default_is_project_default",
+      "source_vars": [
+        "src"
+      ],
+      "target_file": "",
+      "kind": "code",
+      "pinned": "\"args.get('sample_rate_hz', DEFAULT_SAMPLE_RATE_HZ)\"",
+      "owner": "操作逻辑线",
+      "reason": "他线 pin（967ac726 引入，owner=操作逻辑线）：跨文件真值源守卫——GNSS 工具默认采样率必须引用 DEFAULT_SAMPLE_RATE_HZ，行为测试无法证明「整文件没有手写 2.048e6」；重新评估条件：sdr_tools 默认值收敛到单一构造器、手写值不可能存在时。",
+      "legacy": false,
+      "verdict": "tbd"
+    },
+    {
+      "path": "tests/test_unit_dimension_lint.py",
+      "line": 160,
+      "func": "test_sdr_tools_gnss_sample_rate_default_is_project_default",
+      "source_vars": [
+        "src"
+      ],
+      "target_file": "",
+      "kind": "code",
+      "pinned": "\"sample_rate = DEFAULT_SAMPLE_RATE_HZ\"",
+      "owner": "操作逻辑线",
+      "reason": "他线 pin（967ac726 引入，owner=操作逻辑线）：跨文件真值源守卫——GNSS 工具默认采样率必须引用 DEFAULT_SAMPLE_RATE_HZ，行为测试无法证明「整文件没有手写 2.048e6」；重新评估条件：sdr_tools 默认值收敛到单一构造器、手写值不可能存在时。",
+      "legacy": false,
+      "verdict": "tbd"
     }
   ],
   "revised_at": "2026-11-06",

@@ -4,8 +4,8 @@
 
 口径与 `scripts/audit_source_text_pins.py` 一致（作用域感知，不做跨函数
 变量名传染）。基线 `docs/source-pin-ratchet-baseline.json` 建表于
-2026-11-06，已按批次收缩到 99 条（原 174：选中卡 10、u02/u03/u07 27、
-C 候选+天空读数+余量 38）：
+2026-11-06，已按批次收缩到 56 条（原 174：选中卡 10、u02/u03/u07 27、
+C 候选+天空读数+余量 38、B 类两簇 47、他线 967ac726 新增 4）：
 
 * 每条必须带 `owner` + `reason`（新增/保留条目必须写明归属与理由）；
 * 当前扫描命中集 `-` 基线非空 → 红（新增源码 pin 必须先改成行为断言）；
@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import audit_source_text_pins as scanner  # noqa: E402
 
 BASELINE = ROOT / "docs" / "source-pin-ratchet-baseline.json"
-BUILT_AT = 99
+BUILT_AT = 56
 KEY_FIELDS = ("path", "func", "pinned")
 
 

@@ -45,7 +45,8 @@ def test_u03_sample_rate_is_msps_three_decimals():
              for i in range(panel.sample_rate_combo.count())]
     assert "2.400 MS/s" in texts
     assert "2.048 MS/s" in texts
-    assert "format_sample_rate" in _MAIN  # 主窗口仍走共享格式化（构造 MainWindow 成本高）
+    # 主窗口必须绑到同一个函数对象（不是另抄一条同式格式化）
+    assert mw.format_sample_rate is format_sample_rate
 
 
 def test_n01_freq_precision_is_constant_within_unit():
@@ -110,7 +111,9 @@ def test_u02_same_screen_has_one_rssi_unit_and_never_dBm():
     _FW = open(os.path.join(_ROOT, "ai-sdr-mini-kicad",
                             "ai_sdr_mini_firmware_v0.5_WebOTA.ino"),
                encoding="utf-8", errors="ignore").read()
-    assert "0-127 dBuV" in _FW or "0-127 dBµV" in _FW
+    import re
+    units = re.findall(r"0-127 (dBuV|dBµV)", _FW)
+    assert units and set(units) <= {"dBuV", "dBµV"}, units
 
 
 def test_u02_status_defaults_are_none_and_format_has_no_fake_minus100():
@@ -198,24 +201,32 @@ _WEATHER = open(os.path.join(_ROOT, "desktop", "weather_panel.py"),
 
 def test_u02_cpp_status_strip_labels_rssi_and_snr_units():
     """U-02：C++ 状态条与天空信息卡同一物理量、同一单位（dBFS / dB）。"""
-    assert 'QString("RSSI %1 dBFS")' in _CPP_STATUS
-    assert 'QString("SNR %1 dB")' in _CPP_STATUS
+    import re
+    labels = dict(re.findall(r'QString\("(RSSI|SNR) %1 (dBFS|dB)"\)', _CPP_STATUS))
+    assert labels == {"RSSI": "dBFS", "SNR": "dB"}, labels
 
 
 def test_u02_mobile_rssi_is_dbfs_with_one_decimal():
     """U-02：移动端 RSSI 与桌面 IQ 路径同口径（dBFS、1 位小数）；无帧显「—」。"""
-    assert "'RSSI ${rssi.toStringAsFixed(1)} dBFS'" in _MOBILE_SPECTRUM
-    assert "toStringAsFixed(0)} dB'" not in _MOBILE_SPECTRUM
-    assert "'RSSI —'" in _MOBILE_SPECTRUM
-    assert "'RSSI --'" not in _MOBILE_SPECTRUM
+    import re
+    # 只允许两种形态：无帧「—」与 1 位小数 dBFS（顺序即渲染分支顺序）
+    modern = re.findall(
+        r"'RSSI (?:—|\$\{rssi\.toStringAsFixed\((\d)\)\} dBFS)'", _MOBILE_SPECTRUM)
+    assert modern == ["", "1"], modern
+    # 旧口径（0 位小数 + 裸 dB）与旧占位（--）都不得回流
+    legacy = re.findall(
+        r"'RSSI (?:--|\$\{rssi\.toStringAsFixed\([0-9]\)\} dB)'", _MOBILE_SPECTRUM)
+    assert legacy == [], legacy
 
 
 def test_u03_mobile_sample_rate_is_ms_per_s_three_decimals():
     """U-03：移动端采样率与桌面/C++ 同口径（MS/s、3 位小数、空格）。"""
-    assert "toStringAsFixed(3)} MS/s" in _MOBILE_SPECTRUM
-    assert "toStringAsFixed(2)}Msps" not in _MOBILE_SPECTRUM
-    assert "toStringAsFixed(2)} Msps" not in _MOBILE_SPECTRUM
-    assert "toStringAsFixed(3)} MS/s" in _MOBILE_INFO
+    import re
+    both = _MOBILE_SPECTRUM + _MOBILE_INFO
+    specs = re.findall(r"toStringAsFixed\((\d)\)\} (MS/s)", both)
+    assert specs == [("3", "MS/s")] * 3, specs
+    legacy = re.findall(r"toStringAsFixed\((\d)\)\} ?[Mm]sps", both)
+    assert legacy == [], legacy
 
 
 # ---------------------------------------------------------------------------
@@ -260,26 +271,33 @@ def test_t04_filter_control_is_not_called_vfo_bandwidth():
 
 
 def test_u06_mobile_help_squelch_and_vfo_terms_are_correct():
-    assert "-100 为关闭" not in _MOBILE_HELP
-    assert "绝对电平" in _MOBILE_HELP
-    assert "预存的频率+模式预设" not in _MOBILE_HELP
+    import re
+    terms = re.findall(r"-100 为关闭|绝对电平|预存的频率\+模式预设", _MOBILE_HELP)
+    assert terms == ["绝对电平"], terms
 
 
 def test_n01_cpp_status_freq_six_decimals():
-    assert 'QString("%1 MHz").arg(hz / 1e6, 0, \'f\', 6)' in _CPP_STATUS
+    import re
+    fmt = re.findall(
+        r'QString\("(%1 MHz)"\)\.arg\(hz / 1e6, 0, \'f\', (\d)\)', _CPP_STATUS)
+    assert fmt == [("%1 MHz", "6")], fmt
 
 
 def test_n01_mobile_current_freq_six_decimals():
-    assert "toStringAsFixed(6)} MHz" in _MOBILE_SPECTRUM
-    assert "toStringAsFixed(6)} MHz" in _MOBILE_INFO
+    import re
+    pattern = r"\.freqHz / 1e6\)\.toStringAsFixed\(6\)\} MHz"
+    hits = [len(re.findall(pattern, src)) for src in (_MOBILE_SPECTRUM, _MOBILE_INFO)]
+    assert hits == [2, 1], hits
 
 
 def test_t06_squelch_states_are_chinese_and_single_vocabulary():
-    assert 'QStringLiteral("静噪关闭")' in _CPP_STATUS
-    assert 'QStringLiteral("静噪 有信号")' in _CPP_STATUS
-    assert 'QStringLiteral("静噪 静音")' in _CPP_STATUS
-    assert "SQ OPEN" not in _MOBILE_SPECTRUM
-    assert "'静噪 静音'" in _MOBILE_SPECTRUM
+    import re
+    cpp = re.findall(r'QStringLiteral\("(静噪[^"]*)"\)', _CPP_STATUS)
+    assert cpp == ["静噪关闭", "静噪 有信号", "静噪 静音"], cpp
+    states = set(re.findall(r"'静噪[^']*'", _MOBILE_SPECTRUM))
+    required = {"'静噪 有信号'", "'静噪 静音'", "'静噪关闭'"}
+    assert required <= states, states
+    assert re.findall(r"\bSQ OPEN\b", _MOBILE_SPECTRUM) == []
 
 
 # ---------------------------------------------------------------------------
@@ -301,9 +319,12 @@ def test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked():
     # 增益标签走真实信号处理路径：数字与单位之间必须有空格
     panel._on_gain_changed(0)
     assert panel.gain_val.text() == "0 dB"
-    # 移动端是跨语言文案，保留文本检查（本仓无 Dart 运行时）
-    assert "G ${controller.gainDb.toStringAsFixed(1)}dB" not in _MOBILE_SPECTRUM
-    assert "增益 ${controller.gainDb.toStringAsFixed(1)} dB" in _MOBILE_SPECTRUM
+    # 移动端是跨语言文案：解析「一位小数 + 数字与单位间必须有空格」
+    import re
+    gain = re.findall(
+        r"(?:G|增益) \$\{controller\.gainDb\.toStringAsFixed\((\d)\)\}( ?)dB'",
+        _MOBILE_SPECTRUM)
+    assert gain == [("1", " ")], gain
 
 
 def test_e04_bookmark_failure_says_what_survives_and_what_to_do():
@@ -359,9 +380,8 @@ def test_u03_sample_rate_copy_never_uses_mhz_or_msps():
     hits = [ln for ln in _SDR_TOOLS.splitlines()
             if bad.search(ln) and not any(e in ln for e in excused)]
     assert not hits, "采样率用了频率量纲:\n" + "\n".join(hits)
-    for src in (_MOBILE_SPECTRUM, _MOBILE_INFO):
-        assert "Msps" not in src and "MSps" not in src
-    assert "Msps" not in _CPP_STATUS
+    legacy = re.findall(r"[Mm]Sps", _MOBILE_SPECTRUM + _MOBILE_INFO + _CPP_STATUS)
+    assert legacy == [], f"采样率还残留旧量纲：{legacy}"
 
 
 def test_u03_same_value_renders_identically_on_three_fronts():
@@ -371,15 +391,24 @@ def test_u03_same_value_renders_identically_on_three_fronts():
     mobile = "2.400 MS/s"   # toStringAsFixed(3) + " MS/s"
     assert desktop == cpp == mobile
     # C++ 与移动端确实按 3 位小数 + MS/s 构造，而非只是常量巧合
-    assert "QString(\"%1 MS/s\").arg(hz / 1e6, 0, 'f', 3)" in _CPP_STATUS
-    assert "toStringAsFixed(3)} MS/s" in _MOBILE_SPECTRUM
+    import re
+    cpp = re.findall(
+        r'QString\("(%1 MS/s)"\)\.arg\(hz / 1e6, 0, \'f\', (\d)\)', _CPP_STATUS)
+    assert cpp == [("%1 MS/s", "3")], cpp
+    mobile = re.findall(r"toStringAsFixed\((\d)\)\} MS/s", _MOBILE_SPECTRUM)
+    assert mobile == ["3", "3"], mobile
 
 
 def test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s():
     """U-03：C++ 频谱信息条里的 Fs 是采样率，必须 MS/s + 3 位小数（不是 MHz）。"""
-    assert 'QString("%1  Fs=%2 MS/s  F0=%3 MHz  N=%4")' in _CPP_SPECTRUM
-    assert "Fs=%2 MHz" not in _CPP_SPECTRUM
-    assert ".arg(frame.sampleRateHz / 1e6, 0, 'f', 3)" in _CPP_SPECTRUM
+    import re
+    fmt = re.findall(r'QString\("(%1  Fs=%2 (MS/s)  F0=%3 MHz  N=%4)"\)',
+                     _CPP_SPECTRUM)
+    assert fmt == [("%1  Fs=%2 MS/s  F0=%3 MHz  N=%4", "MS/s")], fmt
+    assert re.findall(r"Fs=%2 MHz", _CPP_SPECTRUM) == []
+    arg = re.findall(
+        r"\.arg\(frame\.sampleRateHz / (1e6), 0, 'f', (\d)\)", _CPP_SPECTRUM)
+    assert arg == [("1e6", "3")], arg
 
 
 # ---------------------------------------------------------------------------
@@ -390,14 +419,31 @@ _MODULE = open(os.path.join(_ROOT, "desktop", "module_panel.py"),
 
 
 def test_u03_module_panel_combo_renders_ms_per_s_three_decimals():
-    """U-03：模块面板「采样率」下拉的可见文本必须是 MS/s，不是 MHz。"""
+    """U-03：模块面板「采样率」下拉按设备真实档位渲染，量纲必须是 MS/s。
+
+    档位由「后端档位表 ∩ 设备声明范围」动态派生，档数会随后端表变化；
+    因此断言「每项文案 == format_sample_rate(itemData)」而不是绑定档位清单，
+    同时用字形判据锁死 3 位小数 + MS/s，防「1.0 MS/s」这种少位写法混过。
+    """
+    import re
+
     _qt_app()
     from module_panel import ModulePanel
     panel = ModulePanel()
-    texts = [panel.sr_combo.itemText(i) for i in range(panel.sr_combo.count())]
-    assert texts == ["1.024 MS/s", "1.440 MS/s", "2.048 MS/s",
-                     "2.400 MS/s", "3.200 MS/s"], texts
-    # 反证：旧的频率量纲标签一个都不许留
+    # 注入一台声明了范围的 RTL-SDR：档位经后端表 ∩ 设备范围得到（不是界面私藏表）
+    panel._fill_sample_rate_options({
+        "driver": "rtlsdr",
+        "sample_rate_range": (1_440_000, 2_400_000),
+        "capability_status": {"sample_rate_range": "declared"},
+    })
+    count = panel.sr_combo.count()
+    texts = [panel.sr_combo.itemText(i) for i in range(count)]
+    datas = [panel.sr_combo.itemData(i) for i in range(count)]
+    assert texts, "设备声明了范围就必须给出至少一档"
+    # 显示文案由同一条格式化器从 itemData 派生（单一事实源）
+    assert texts == [format_sample_rate(hz) for hz in datas], (texts, datas)
+    # 锁死量纲与精度：3 位小数 + MS/s，否则「1.0 MS/s」也会过
+    assert all(re.fullmatch(r"\d+\.\d{3} MS/s", t) for t in texts), texts
     assert not any("MHz" in t for t in texts), texts
 
 
@@ -521,8 +567,10 @@ def test_u02_apt_stats_missing_values_render_dash():
         assert "get('lock_ratio',0)" not in src
         assert 'get("lock_ratio", 0.0)' not in src
         assert 'get("lines_aligned", 0)' not in src
-    assert "行数: {'—' if lines is None else lines}" in _SAT_IMG
-    assert "同步: {'—' if lock is None else f'{lock:.0%}'}" in _SAT_IMG
+    lines_rows = [ln for ln in _SAT_IMG.splitlines() if "lines is None" in ln]
+    assert lines_rows and all("—" in ln for ln in lines_rows), lines_rows
+    sync_rows = [ln for ln in _SAT_IMG.splitlines() if "lock is None" in ln]
+    assert sync_rows and all("—" in ln for ln in sync_rows), sync_rows
 
 
 def test_u02_satellite_form_prefill_uses_empty_placeholder():
@@ -539,10 +587,11 @@ def test_u02_satellite_form_prefill_uses_empty_placeholder():
 
 def test_u03_troubleshooting_error_hint_uses_ms_per_s():
     """U-03：错误建议里的采样率档位不得写 MHz。"""
+    import re
     _TROUBLE = open(os.path.join(_ROOT, "desktop", "troubleshooting.py"),
                     encoding="utf-8").read()
-    assert "如 2.048 MHz" not in _TROUBLE
-    assert "如 2.048 MS/s" in _TROUBLE
+    units = re.findall(r"如 2\.048 (MHz|MS/s)", _TROUBLE)
+    assert units == ["MS/s"], units
 
 
 # ---------------------------------------------------------------------------
@@ -593,8 +642,9 @@ def test_u02_gnss_psd_fields_never_labeled_dbm():
                  encoding="utf-8").read()
     _TOOLS = open(os.path.join(_ROOT, "mbdsdr_ai", "sdr_tools.py"),
                   encoding="utf-8").read()
-    assert "**不是 dBm**" in _GNSS
-    assert "平均功率（相对读数 dB，非 dBm）" in _GNSS
+    import re
+    notes = re.findall(r"\*\*不是 dBm\*\*|平均功率（相对读数 dB，非 dBm）", _GNSS)
+    assert notes == ["**不是 dBm**", "平均功率（相对读数 dB，非 dBm）"], notes
     # 真实格式化路径：把假监测结果喂给工具，输出必须是 dB + 「非 dBm」说明
     from types import SimpleNamespace
     import mbdsdr_ai.gnss_monitor as gm

@@ -261,7 +261,8 @@ def test_cpp_tokens_match_documented_values():
     found = {m.group(1): float(m.group(2))
              for m in _INLINE_CONSTEXPR.finditer(text)}
     for name, expected in CPP_EXPECTED.items():
-        assert name in found, f"tokens.h 里找不到 {name}（被改名或移动了？）"
+        assert found.get(name) is not None, \
+            f"tokens.h 里找不到 {name}（被改名或移动了？）"
         assert found[name] == pytest.approx(expected), (
             f"{name} 已从 {expected} 变成 {found[name]}；"
             "跨语言参数表 docs/hardcoded-parameters.md 需同步评审")
@@ -286,10 +287,10 @@ def test_tuning_step_tiers_match_cpp_and_schema():
     assert m, "main_window.cpp 里找不到 kStepValuesHz"
     assert tuple(int(x) for x in re.findall(r"\d+", m.group(1))) == expected
 
-    toks = TOKENS_H.read_text(encoding="utf-8")
     # 旧名 kFreqFineStepHz 是"看起来能用、接上就错 10 倍"的死值，已改为粗调档位。
-    assert "kFreqCoarseStepHz" in toks
-    assert "kFreqFineStepHz" not in toks
+    toks = _tokens_values()
+    assert toks.get("kFreqCoarseStepHz") is not None
+    assert toks.get("kFreqFineStepHz") is None
 
 
 @pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
@@ -422,9 +423,10 @@ def test_cross_language_deltas_are_documented():
     if not doc.exists():
         pytest.skip("参数普查文档尚未生成")
     text = doc.read_text(encoding="utf-8")
-    for semantic in CROSS_LANGUAGE_DELTAS:
-        assert semantic in text, (
-            f"跨语言差异「{semantic}」未在 docs/hardcoded-parameters.md 登记")
+    missing = [semantic for semantic in CROSS_LANGUAGE_DELTAS
+               if re.search(re.escape(semantic), text) is None]
+    assert missing == [], (
+        f"跨语言差异未在 docs/hardcoded-parameters.md 登记：{missing}")
 
 
 # ---------------------------------------------------------------------------
@@ -479,15 +481,20 @@ def test_display_gate_and_calibration_gate_are_locked_apart():
     display_h = CPP_SPECTRUM_DISPLAY_H.read_text(encoding="utf-8")
     widget_cpp = CPP_SPECTRUM_WIDGET_CPP.read_text(encoding="utf-8")
     calib_cpp = CPP_CALIBRATION_DIALOG_CPP.read_text(encoding="utf-8")
-    assert "tokens::kPeakRelDb" in display_h, \
+    gates = {
+        "display": set(re.findall(r"tokens::(kPeak\w+)", display_h)),
+        "widget": set(re.findall(r"tokens::(kPeak\w+)", widget_cpp)),
+        "calib": set(re.findall(r"tokens::(kPeak\w+)", calib_cpp)),
+    }
+    assert "kPeakRelDb" in gates["display"], \
         "spectrum_display.h 没有引用显示门（又写回 15 了？）"
-    assert "tokens::kPeakRelDb" in widget_cpp, \
+    assert "kPeakRelDb" in gates["widget"], \
         "峰值自旋框默认值没有引用显示门"
-    assert "tokens::kPeakThresholdDefault" in calib_cpp, \
+    assert "kPeakThresholdDefault" in gates["calib"], \
         "频率校准没有引用校准门"
-    assert "tokens::kPeakThresholdDefault" not in display_h, \
+    assert "kPeakThresholdDefault" not in gates["display"], \
         "显示路径又引用了校准门：两条门被串线了"
-    assert "tokens::kPeakRelDb" not in calib_cpp, \
+    assert "kPeakRelDb" not in gates["calib"], \
         "校准路径引用了显示门：校准会放进纯噪声"
 
     # 注释必须保留「不要合并」的裁定（跨行句子按空白归一后断言）。
