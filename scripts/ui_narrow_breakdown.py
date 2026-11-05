@@ -1,0 +1,381 @@
+# SPDX-License-Identifier: MIT
+"""窄屏最小宽/高的逐控件拆账（只读，不改产品、不写用户配置）。
+
+用途：把「窗口最小宽 1625 / 最小高 729」拆到具体控件，供
+``docs/narrow-screen-plan.md`` 的数字来源与另一条线复跑对账。
+
+纪律：
+* 只读——不调用任何 set/flush/save，不改文件；
+* ``HOME/USERPROFILE/APPDATA/LOCALAPPDATA`` 一律重定向到临时目录，
+  真实 ``%APPDATA%/mbdsdr/desktop_settings.json`` 一个字节都不碰；
+* offscreen 与真屏都能跑，但**数字依赖字体/DPI**，输出头部会打印环境指纹，
+  两边对账必须同一指纹。
+
+运行::
+
+    python scripts/ui_narrow_breakdown.py
+    python scripts/ui_narrow_breakdown.py --json      # 只输出 JSON，便于机器比对
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import tempfile
+
+_HOME = tempfile.mkdtemp(prefix="narrow-breakdown-home-")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+for _k in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"):
+    os.environ[_k] = _HOME
+os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
+os.environ.setdefault("MBDSDR_NO_HW", "1")
+os.environ.setdefault("MBDSDR_OFFLINE", "1")
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+sys.path.insert(0, os.path.join(_ROOT, "desktop"))
+
+from PySide6.QtGui import QFontMetrics  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication, QComboBox, QDoubleSpinBox, QFrame, QLabel, QLineEdit,
+    QPushButton, QCheckBox, QSlider, QToolBar, QToolButton, QWidget,
+)
+
+
+def _pump(app, n: int = 60) -> None:
+    for _ in range(n):
+        app.processEvents()
+
+
+def _text_of(w: QWidget) -> str:
+    if isinstance(w, QLabel):
+        return w.text()
+    if isinstance(w, QComboBox):
+        return w.currentText()
+    if isinstance(w, QPushButton):
+        return w.text()
+    if isinstance(w, QCheckBox):
+        return w.text()
+    if isinstance(w, QToolButton):
+        return w.text() or w.accessibleName()
+    if isinstance(w, QLineEdit):
+        return w.text() or w.placeholderText()
+    if isinstance(w, QSlider):
+        return "slider"
+    if isinstance(w, QFrame) and w.frameShape() in (QFrame.VLine, QFrame.HLine):
+        return "separator"
+    return ""
+
+
+def _label_of(w: QWidget) -> str:
+    return f"{type(w).__name__}({w.objectName() or '-'})"
+
+
+def _rows_for_layout(layout) -> list[tuple[QWidget, int, int, int]]:
+    """(控件, 布局实际采用的最小宽, minimumSizeHint 宽, sizeHint 宽)。
+
+    布局实际采用值取 ``QWidgetItem.minimumSize()`` —— 它按 sizePolicy 的
+    Shrink 位在 minimumSize 与 minimumSizeHint 之间取舍，是唯一能对上
+    ``layout.minimumSize()`` 的口径；直接用 minimumSizeHint 会差几十像素。
+    """
+    out = []
+    for i in range(layout.count()):
+        it = layout.itemAt(i)
+        if it is None:
+            continue
+        w = it.widget()
+        if w is None:
+            continue
+        out.append((w, max(0, it.minimumSize().width()),
+                    max(0, w.minimumSizeHint().width()),
+                    w.sizeHint().width()))
+    return out
+
+
+def _layout_spacers(layout) -> list[int]:
+    """布局里的 spacer（addStretch/addSpacing）各自最小宽，漏掉它们就对不上账。"""
+    out = []
+    for i in range(layout.count()):
+        it = layout.itemAt(i)
+        if it is None or it.widget() is not None:
+            continue
+        sp = it.spacerItem()
+        out.append(sp.sizeHint().width() if sp is not None else 0)
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--json", action="store_true", help="只输出 JSON 汇总")
+    args = ap.parse_args()
+
+    app = QApplication.instance() or QApplication([])
+    import main_window as mw
+
+    win = mw.MainWindow()
+    win.resize(1000, 600)
+    win.show()
+    _pump(app)
+
+    screen = app.primaryScreen()
+    font = app.font()
+    fm = QFontMetrics(font)
+    env = {
+        "qt_platform": app.platformName(),
+        "device_pixel_ratio": round(screen.devicePixelRatio(), 4),
+        "logical_dpi": round(screen.logicalDotsPerInch(), 2),
+        "physical_dpi": round(screen.physicalDotsPerInch(), 2),
+        "font_family": font.family(),
+        "font_point_size": font.pointSizeF(),
+        "font_line_height": fm.height(),
+        "style": type(app.style()).__name__,
+        "appdata_redirected_to": _HOME,
+    }
+
+    result: dict = {"env": env}
+
+    def emit(title: str) -> None:
+        if not args.json:
+            print(f"\n== {title} ==")
+
+    # ---------- 1. 顶栏 ----------
+    top = win.findChild(QWidget, "topBar")
+    top_rows = _rows_for_layout(top.layout())
+    top_spacers = _layout_spacers(top.layout())
+    top_item_count = top.layout().count()
+    top_sum = sum(r[1] for r in top_rows) + sum(top_spacers)
+    # 布局 spacing：QHBoxLayout
+    top_spacing = top.layout().spacing() * max(0, top_item_count - 1)
+    top_margins = (top.layout().contentsMargins().left()
+                   + top.layout().contentsMargins().right())
+    emit("顶栏 topBar（按布局采用的最小宽降序）")
+    if not args.json:
+        print(f"minimumSizeHint = {top.minimumSizeHint().width()}"
+              f" | layout minimumSize 宽 = {top.layout().minimumSize().width()}"
+              f" | 子控件+spacer 最小宽合计 {top_sum}"
+              f" | spacing {top.layout().spacing()}×{max(0, top_item_count - 1)}"
+              f"={top_spacing}"
+              f" | 左右边距 {top_margins}"
+              f" | 校验 {top_sum + top_spacing + top_margins}"
+              f"（与 layout minimumSize 的差额见残差说明）")
+    for w, lm, mh, sh in sorted(top_rows, key=lambda r: -r[1]):
+        if not args.json:
+            print(f"  {_label_of(w):<28} layout_min={lm:>4} "
+                  f"minHint={mh:>4} hint={sh:>4} {_text_of(w)!r}")
+    cum = 0
+    if not args.json:
+        print("  贡献排序（按布局采用的最小宽；累计 = 到该行为止的宽度和）：")
+        for w, lm, mh, sh in sorted(top_rows, key=lambda r: -r[1]):
+            if lm <= 0:
+                continue
+            cum += lm
+            print(f"    {_label_of(w):<28} 自身={mh:>4} 布局采用={lm:>4} "
+                  f"累计={cum:>4}")
+    result["topBar"] = {
+        "minimumSizeHint": top.minimumSizeHint().width(),
+        "children_sum": top_sum,
+        "spacing": top_spacing,
+        "children": [{"label": _label_of(w), "layout_min": lm,
+                      "min_hint": mh, "hint": sh, "text": _text_of(w)}
+                     for w, lm, mh, sh in sorted(top_rows, key=lambda r: -r[1])],
+    }
+
+    # ---------- 2. 主工具栏 ----------
+    tb = win.findChild(QToolBar, "mainToolBar")
+    tb_rows = []
+    for a in tb.actions():
+        w = tb.widgetForAction(a)
+        if w is None:
+            continue
+        tb_rows.append((w, max(0, w.minimumSizeHint().width(),
+                               w.minimumSize().width()),
+                        w.sizeHint().width()))
+    tb_sum = sum(r[1] for r in tb_rows)
+    emit("主工具栏 mainToolBar（按自身最小宽降序）")
+    if not args.json:
+        print(f"minimumSizeHint = {tb.minimumSizeHint().width()}"
+              f"（QToolBar 自报的最小值只算「可放一个按钮」，不是可用下限）"
+              f" | hint {tb.sizeHint().width()}"
+              f" | 子控件最小宽合计 {tb_sum}（这才是可用下限）"
+              f" | 实际高 {tb.height()}")
+    for w, mw_, sh in sorted(tb_rows, key=lambda r: -r[1]):
+        if not args.json:
+            print(f"  {_label_of(w):<28} min={mw_:>4} hint={sh:>4} {_text_of(w)!r}")
+    result["mainToolBar"] = {
+        "minimumSizeHint": tb.minimumSizeHint().width(),
+        "sizeHint": tb.sizeHint().width(),
+        "children_sum": tb_sum,
+        "height": tb.height(),
+        "children": [{"label": _label_of(w), "min": mw_, "hint": sh,
+                      "text": _text_of(w)} for w, mw_, sh in
+                     sorted(tb_rows, key=lambda r: -r[1])],
+    }
+
+    # ---------- 3. 频谱工具栏 ----------
+    spec = win.spectrum
+    for i in range(win.left_tab.count()):
+        if win.left_tab.tabText(i).strip() == "频谱":
+            win.left_tab.setCurrentIndex(i)
+            break
+    _pump(app, 80)
+    root = spec.layout()
+    bar = None
+    for i in range(root.count()):
+        it = root.itemAt(i)
+        if it.layout() is not None and type(it.layout()).__name__ in (
+                "QHBoxLayout", "QBoxLayout"):
+            bar = it.layout()
+            break
+    emit("频谱工具栏（按段拆）")
+    if bar is None:
+        if not args.json:
+            print("  未找到频谱工具栏 QHBoxLayout")
+        result["spectrumToolbar"] = {"error": "no_hbox_layout"}
+    else:
+        items = []
+        for i in range(bar.count()):
+            it = bar.itemAt(i)
+            w = it.widget()
+            if w is None:
+                sp = it.spacerItem()
+                items.append({"kind": "spacer",
+                              "min": sp.sizeHint().width() if sp else 0,
+                              "label": "<spacer>", "text": ""})
+                continue
+            items.append({"kind": "widget", "label": _label_of(w),
+                          "min": w.minimumSizeHint().width(),
+                          "hint": w.sizeHint().width(), "text": _text_of(w)})
+        widgets = [it for it in items if it["kind"] == "widget"]
+        sizes = sum(it["min"] for it in items)
+        spacing = bar.spacing() * max(0, len(items) - 1)
+        margins = bar.contentsMargins().left() + bar.contentsMargins().right()
+        groups = {
+            "① 窗/FFT/平均/性能": widgets[0:8],
+            "② 调色板/瀑布平滑/峰值/Max/Min/书签/频段": widgets[8:16],
+            "③ 峰值门/调谐": widgets[16:19],
+            "④ 只读读数": widgets[19:],
+        }
+        if not args.json:
+            print(f"minimumSizeHint = {spec.minimumSizeHint().width()}"
+                  f" | 项最小宽合计 {sizes} + spacing {spacing} + 边距 {margins}"
+                  f" = {sizes + spacing + margins}")
+        group_report = {}
+        for name, g in groups.items():
+            gs = sum(it["min"] for it in g)
+            gsp = bar.spacing() * max(0, len(g) - 1)
+            group_report[name] = {"sum": gs, "spacing": gsp, "total": gs + gsp}
+            if not args.json:
+                print(f"  {name}: min={gs} + spacing={gsp} -> {gs + gsp}")
+        if not args.json:
+            print("  逐项：")
+            for it in items:
+                if it["kind"] == "widget":
+                    print(f"    {it['label']:<28} min={it['min']:>4} "
+                          f"hint={it.get('hint', 0):>4} {it['text']!r}")
+                else:
+                    print(f"    {'<spacer>':<28} min={it['min']:>4}")
+        result["spectrumToolbar"] = {
+            "minimumSizeHint": spec.minimumSizeHint().width(),
+            "items_sum": sizes, "spacing": spacing, "margins": margins,
+            "total": sizes + spacing + margins,
+            "groups": group_report,
+            "items": items,
+        }
+
+    # ---------- 4. 高度构成 ----------
+    emit("高度构成")
+    central = win.centralWidget()
+    page0 = central.widget(0) if hasattr(central, "widget") else central
+    h = {
+        "menuBar": win.menuBar().height(),
+        "mainToolBar": tb.height(),
+        "central_page0_min": page0.minimumSizeHint().height(),
+        "statusBar": win.statusBar().height(),
+        "sum": (win.menuBar().height() + tb.height()
+                + page0.minimumSizeHint().height() + win.statusBar().height()),
+        "central_page0": {},
+    }
+    page_items = []
+    lay = page0.layout()
+    if lay is not None:
+        for i in range(lay.count()):
+            it = lay.itemAt(i)
+            w = it.widget()
+            if w is None:
+                continue
+            page_items.append((w, w.minimumHeight(),
+                               w.minimumSizeHint().height()))
+    h["central_page0"] = {_label_of(w): {"minimumHeight": mh, "minimumSizeHint": msh}
+                          for w, mh, msh in page_items}
+    if not args.json:
+        print(f"  菜单栏 {h['menuBar']} + 主工具栏 {h['mainToolBar']} + 中央 "
+              f"{h['central_page0_min']} + 状态栏 {h['statusBar']} = {h['sum']}")
+        for w, mh, msh in page_items:
+            print(f"  中央行 {_label_of(w):<24} minimumHeight={mh:>4} "
+                  f"minimumSizeHint={msh:>4}")
+        if lay is not None:
+            print(f"  中央布局 minimumSize 高 = {lay.minimumSize().height()}"
+                  f" | spacing {lay.spacing()}"
+                  f" | 上下边距 {lay.contentsMargins().top()}/"
+                  f"{lay.contentsMargins().bottom()}")
+        child_h = sorted({w.sizeHint().height() for w, _, _ in tb_rows})
+        print(f"  主工具栏高 {tb.height()}｜子控件 sizeHint 高 {child_h}"
+              f"（最大 {max(child_h) if child_h else 0}，"
+              f"差 {tb.height() - (max(child_h) if child_h else 0)} = "
+              f"QStyle 上下边距；tokens 里没有 toolbar_h 键）")
+    result["height"] = h
+
+    # ---------- 4b. 1625 到底谁撑的（隐藏对照实验） ----------
+    def _win_min() -> tuple[int, int]:
+        _pump(app, 40)
+        ms = win.minimumSizeHint()
+        return ms.width(), ms.height()
+
+    baseline = _win_min()
+    top.hide()
+    top_hidden = _win_min()
+    top.show()
+    tb.hide()
+    tb_hidden = _win_min()
+    tb.show()
+    _pump(app, 40)
+    emit("归属对照（隐藏谁，窗口最小宽降到多少）")
+    attribution = {
+        "both_shown": list(baseline),
+        "topBar_hidden": list(top_hidden),
+        "mainToolBar_hidden": list(tb_hidden),
+    }
+    result["attribution"] = attribution
+    if not args.json:
+        print(f"  两者都在: {baseline}")
+        print(f"  隐藏 topBar: {top_hidden}  → 降 {baseline[0] - top_hidden[0]}")
+        print(f"  隐藏 mainToolBar: {tb_hidden}  → 降 {baseline[0] - tb_hidden[0]}")
+
+    # ---------- 5. 汇总 ----------
+    summary = {
+        "window_minimumSizeHint": list(baseline),
+        "window_minimumSize": [win.minimumSize().width(),
+                               win.minimumSize().height()],
+        "topBar_width": top.minimumSizeHint().width(),
+        "mainToolBar_width": tb_sum,
+        "spectrum_width": spec.minimumSizeHint().width(),
+        "height": h["sum"],
+    }
+    result["summary"] = summary
+    if not args.json:
+        print("\n== 环境指纹 ==")
+        for k, v in env.items():
+            print(f"  {k}: {v}")
+        print("\n== 汇总（对账用这 6 个数） ==")
+        for k, v in summary.items():
+            print(f"  {k}: {v}")
+    else:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    win.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
