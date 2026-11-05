@@ -152,7 +152,7 @@ def test_unverified_backend_keeps_ptt_clickable_with_amber_bar(window):
     assert "人工确认" in w.tx_button.toolTip()
     assert w.tx_capability_label.text() == "本后端发射：驱动级已实现 / 真机未验证"
     assert "background-color" in w.tx_capability_label.styleSheet(), (
-        "未验证必须是常驻黄色条，不能只放 tooltip")
+        "未验证必须是常驻黄色条（图标+底色），不能只靠悬停发现")
     assert "没有 TX 通道" not in w.tx_button.toolTip()
     w._active_sdr_backend = None
 
@@ -185,3 +185,14 @@ def test_no_device_does_not_conclude_capability(window):
     assert "未连接设备" in w.tx_button.toolTip()
     assert w.tx_capability_label.text() == "本后端发射：未连接设备（能力未知）"
     assert w.tx_capability_label.styleSheet() == ""
+
+
+def test_capability_icon_is_visible_and_focusable(window):
+    """图标化不等于「只剩一个图形」：必须可 Tab 聚焦、图标非空、可访问名完整。"""
+    from PySide6.QtCore import Qt
+
+    w = window
+    lbl = w.tx_capability_label
+    assert not lbl.icon().isNull(), "能力声明不能没有图标"
+    assert lbl.focusPolicy() & Qt.StrongFocus, "能力声明必须可键盘聚焦"
+    assert lbl.accessibleName(), "图标化后必须有可访问名（读屏可达）"

@@ -354,7 +354,7 @@ from PySide6.QtWidgets import (
     QFrame, QSizePolicy, QDialog, QDialogButtonBox, QLineEdit,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
     QDoubleSpinBox, QProgressDialog, QDockWidget, QScrollArea,
-    QStackedWidget, QToolButton,
+    QStackedWidget, QToolButton, QStyle, QToolTip,
 )
 
 # 确保能导入同目录模块
@@ -2379,12 +2379,22 @@ class MainWindow(QMainWindow):
         # 发射能力常驻声明（docs/doppler-compensation.md §3.8.2）：必须在
         # PTT 可按下之前就能看见，不许只放 tooltip；「驱动级已实现 / 真机
         # 未验证」时按钮可点但这行常驻黄色警示。
-        self.tx_capability_label = QLabel("本后端发射：未连接设备（能力未知）")
+        # 窄屏（DPR 1.0 / 1344×700）下改为图标化：灰色信息图标 / 黄色警示
+        # 图标本身仍是常驻可见信号；完整文案进 tooltip + 可访问名，
+        # 按钮可用 Tab 聚焦（见 docs/narrow-screen-plan.md §2.3.1）。
+        self.tx_capability_label = QToolButton()
         self.tx_capability_label.setObjectName("txCapability")
+        self.tx_capability_label.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.tx_capability_label.setFocusPolicy(Qt.StrongFocus)
+        self.tx_capability_label.setText("")
+        self.tx_capability_label.setAccessibleName("本后端发射能力")
         self.tx_capability_label.setToolTip(
             "说明本设备能不能发射；显示「驱动级已实现」只代表代码支持，"
             "未经真机验证前请谨慎发射")
+        self.tx_capability_label.clicked.connect(
+            self._show_tx_capability_details)
         lay.addWidget(self.tx_capability_label)
+        self._refresh_tx_capability_label()
         # 最小发射面：PTT 按钮（按下=发射，再次按下=停止）。默认置灰；
         # 无设备/无 TX 通道/回放中都会在 tooltip 里写明原因（不出现"点了没反应"）。
         self.tx_button = QToolButton()
@@ -2409,16 +2419,21 @@ class MainWindow(QMainWindow):
         self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
         lay.addWidget(self.callsign_edit)
         lay.addWidget(self._vsep())
-        self.status_utc = QLabel("UTC: --:--:--")
+        # 窄屏下 UTC 只留时分秒（约 180px）；完整日期时间进 tooltip，信息不丢。
+        self.status_utc = QLabel("UTC --:--:--")
         self.status_utc.setObjectName("statusValue")
+        self.status_utc.setToolTip("协调世界时（完整日期时间）")
         lay.addWidget(self.status_utc)
         parent_layout.addWidget(bar)
 
     def _build_bottom_dock(self, parent_layout: QVBoxLayout) -> None:
-        """底部坞（~74px）：Home 按钮 + 当前解调模式大字号块 + Now Bar。"""
+        """底部坞（48px）：Home 按钮 + 当前解调模式大字号块 + Now Bar。
+
+        窄屏下由 74 收到 48（省 26px 高）：控件一个不删、只收紧纵向留白。
+        """
         dock = QWidget()
         dock.setObjectName("bottomDock")
-        dock.setFixedHeight(tokens().SIZE["dock_h"] + 10)
+        dock.setFixedHeight(48)
         lay = QHBoxLayout(dock)
         lay.setContentsMargins(16, 0, 16, 0)
         lay.setSpacing(16)
@@ -2570,11 +2585,12 @@ class MainWindow(QMainWindow):
             pass
 
     def _update_utc_clock(self):
-        """每秒刷新底部状态栏 UTC 时间。"""
+        """每秒刷新顶部 UTC 时间（窄屏只显示时分秒，完整日期在 tooltip）。"""
         try:
             utc = QDateTime.currentDateTimeUtc()
-            self.status_utc.setText(
-                "UTC: " + utc.toString("yyyy-MM-dd HH:mm:ss"))
+            self.status_utc.setText("UTC " + utc.toString("HH:mm:ss"))
+            self.status_utc.setToolTip(
+                "协调世界时 " + utc.toString("yyyy-MM-dd HH:mm:ss"))
         except Exception:
             pass
 
@@ -2743,26 +2759,45 @@ class MainWindow(QMainWindow):
             return ""
         return text.split("：", 1)[-1]
 
+    def _show_tx_capability_details(self) -> None:
+        """点按图标：弹出完整能力文案（键盘 Space/Enter 也可触发）。"""
+        lbl = getattr(self, "tx_capability_label", None)
+        if lbl is None or not lbl.toolTip():
+            return
+        QToolTip.showText(lbl.mapToGlobal(lbl.rect().bottomLeft()),
+                          lbl.toolTip(), lbl)
+
     def _refresh_tx_capability_label(self) -> None:
-        """PTT 常驻能力声明：文案/黄色警示随当前后端刷新（§3.8.2 七行表）。"""
+        """PTT 常驻能力声明：文案/黄色警示随当前后端刷新（§3.8.2 七行表）。
+
+        图标化后完整文案进 tooltip + 可访问名；警示态仍是常驻黄色信号
+        （图标与底色同时变黄），不是「只有悬停才看得到」。
+        """
         lbl = getattr(self, "tx_capability_label", None)
         if lbl is None:
             return
         backend = getattr(self, "_active_sdr_backend", None)
         text, _clickable, warn = ptt_state(backend)
+        # 视觉上只画图标（ToolButtonIconOnly 不绘制文字），但 text() 保留全文：
+        # 既有「常驻文案原文」断言不放松，读屏/程序侧仍能取到完整状态。
         lbl.setText(text)
+        lbl.setToolTip(text)
+        lbl.setAccessibleDescription(text)
         if warn:
+            lbl.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxWarning))
             amber = tokens().COLORS["status_warning"]
             lbl.setStyleSheet(
                 f"background-color: rgba(200, 160, 64, 0.18);"
                 f" border: 1px solid {amber}; border-radius: 3px;"
-                f" color: {amber}; padding: 0 6px; font-weight: 600;")
-            lbl.setToolTip(text + "；按钮可按下，失败时状态栏会显示真实错误原因")
+                f" color: {amber}; padding: 0 6px;")
+            # 完整状态原文留在 tooltip（测试按原文钉住）；附加操作提示进
+            # 可访问描述，不改变 tooltip 原文。
+            lbl.setAccessibleDescription(
+                text + "；按钮可按下，失败时状态栏会显示真实错误原因")
         else:
+            lbl.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation))
             lbl.setStyleSheet("")
-            lbl.setToolTip(
-                "说明本设备能不能发射；显示「驱动级已实现」只代表代码支持，"
-                "未经真机验证前请谨慎发射")
+            lbl.setToolTip(text)
 
     def _set_tx_button_checked(self, checked: bool) -> None:
         """程序改选中态（防重入，避免触发 toggled 里的发/停逻辑）。"""
