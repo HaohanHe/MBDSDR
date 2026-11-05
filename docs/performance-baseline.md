@@ -434,7 +434,7 @@ GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backe
 
 **残余大头**：改后 GUI 仍占 **1006 ms**，其中 `_start_iq_streams` **844.0–1013.5 ms（中位 928.8）**，占 92%。本轮已拆账：真因是 GUI 线程首次 `import scipy.signal`（`VFO.__init__` 触发，空载 1016.5 ms），**不是** pipeline 构建或音频设备所有权；方案与 A/B 见 §8.6，**未落库**。
 
-**已补：自动连接期间的状态栏提示（2026-11-06）**：`_auto_enumerate_and_connect_async()` 在起线程前写 `statusBar().showMessage("正在连接设备…", MSG_NORMAL)`（非阻塞；成功/失败/无设备提示会覆盖它）。手动连接路径不变。测试钉住：`tests/test_desktop_ui_responsiveness.py::TestAutoEnumerateNoDevice::test_async_auto_connect_shows_status_hint`（1 passed；后台 worker 运行期间断言 `statusBar().currentMessage()` 含「正在连接设备」）。**落库状态**：该 hunk 与 `_auto_enumerate_and_connect_async` 同属 `desktop/main_window.py`，本轮检查时该文件被 `操作逻辑线` 持有（pid 26256，05:02:37 起，90 min TTL），按纪律不夺取、不夹带；hunk 与测试留在工作树，待该文件释放后落库（提交边界见 §8.5）。
+**已补：自动连接期间的状态栏提示（2026-11-06）**：`_auto_enumerate_and_connect_async()` 在起线程前写 `statusBar().showMessage("正在连接设备…", MSG_NORMAL)`（非阻塞；成功/失败/无设备提示会覆盖它）。手动连接路径不变。测试钉住：`tests/test_desktop_ui_responsiveness.py::TestAutoEnumerateNoDevice::test_async_auto_connect_shows_status_hint`（1 passed；后台 worker 运行期间断言 `statusBar().currentMessage()` 含「正在连接设备」）。**落库状态**：该 hunk 与 `_auto_enumerate_and_connect_async` 同属 `desktop/main_window.py`，本轮检查时该文件被 `操作逻辑线` 持有（2026-11-06 05:10:31 起，pid 33008，60 min TTL；05:18 取证剩余 53.7 min），按纪律不夺取、不夹带；hunk 与测试留在工作树，待该文件释放后落库（提交边界见 §8.5）。
 
 **行为验证**：设备列表填充/切换/失败回滚 = `test_device_switch_flow` 6 PASSED；断开清理 = `TestCleanDisconnect` 3 PASSED；无设备空态 = `TestAutoEnumerateNoDevice` 3 + `test_no_device_onboarding` 4 PASSED；自动连接/热插拔 = 热插拔严格 `XFAIL`（产品未接入自动重连，非本改动引入）。合计见 8.1 的 67 passed。
 
@@ -506,7 +506,7 @@ GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backe
 - 合并源（临时产物，已删除）：`.tmp\startup_v3.json` + `.tmp\spectrum_v3.json` + `.tmp\spectrum_precise.json`；探针脚本自身的 A/B 开关是 `STARTUP_EF_PROFILE` / `STARTUP_OLD_EF` / `STARTUP_SYNC_ENUM` / `SPECTRUM_PRECISE`。
 - 提交边界：`desktop/main_window.py` 只提交本线 9 个 hunk（Qt 导入、`_auto_enum_ready` 信号、`__init__` 线程字段、启动定时器目标、`eventFilter`、`_auto_enumerate_and_connect*` 系列、`_connect_backend(already_connected=)`）；**同文件里他人未落库的 hunk 不进本次提交**（用私有 `GIT_INDEX_FILE` + `check_commit_scope.py --staged --expect` 精确核对）。
 - 本轮（2026-11-06 05:xx）新增证据：`startup`（`scipy_prewarm_ab`、`_build_pipeline` 子调用拆账）、`spectrum` 66/53 交替与 300 s 长跑、`streams`（同进程 3 次 VFO/pipe 构造）。合并源 `.tmp\startup_v8.json` + `.tmp\sp66_0/1.json` + `.tmp\sp53_0/1.json` + `.tmp\spectrum_53_long.json` + `.tmp\streams_v1.json`（合并后删除）。
-- 本轮 `desktop/main_window.py` 的状态栏提示 hunk **未落库**：文件被 `操作逻辑线` 持有（pid 26256，05:02:37 起），按纪律不夺取；`tests/test_desktop_ui_responsiveness.py` 的新用例同样留在工作树（依赖该 hunk，单独提交会让干净检出变红）。
+- 本轮 `desktop/main_window.py` 的状态栏提示 hunk **未落库**：文件被 `操作逻辑线` 持有（2026-11-06 05:10:31 起，pid 33008，60 min TTL），按纪律不夺取；`tests/test_desktop_ui_responsiveness.py` 的新用例同样留在工作树（依赖该 hunk，单独提交会让干净检出变红）。
 
 ### 8.6 下一刀：`_start_iq_streams` 844–1013 ms 的真因（未落库）
 
@@ -559,7 +559,7 @@ GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backe
 | 录音/回放启动 | `tests/test_record_streaming.py` + `tests/test_playback.py` + `tests/test_replay_load_async.py` | **16 passed**（本轮实测） |
 | 自动连接状态栏提示 | `TestAutoEnumerateNoDevice::test_async_auto_connect_shows_status_hint` | 1 passed |
 
-**claim**：`desktop/main_window.py` 在 05:02:37 起由 `操作逻辑线` 持有（pid 26256，90 min TTL），本轮不夺取、不夹带；方案 A 若落在 `desktop/main.py`，该文件的过期 claim 需先按 `scripts/file_claim.py claim` 走一遍再落库。
+**claim**：`desktop/main_window.py` 在 05:10:31 起由 `操作逻辑线` 持有（pid 33008，60 min TTL；05:18 取证剩余 53.7 min），本轮不夺取、不夹带；方案 A 若落在 `desktop/main.py`，该文件的 claim 已过期（05:18 取证 EXPIRED +30.7 min），落库前需先按 `scripts/file_claim.py claim` 走一遍。
 
 ### 8.7 53 ms 取舍：先测后定，默认值不动
 
