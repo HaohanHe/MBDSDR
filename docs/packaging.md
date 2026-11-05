@@ -338,7 +338,7 @@ overlap 两次数字不同属**已记录的抖动**（见 `SIZE_LIMITS` 注释�
 会让同一命令的数字跳动），本轮**未改上限、未改产品代码**；上限仍是
 `TEMPORARY_WIDENED`，等 UI 收口后专门重测收紧。
 
-**2026-11-06 05:10–05:21 最终结论（干净树 HEAD `385d0e15`）**：产物用
+**上一轮结论（2026-11-06 05:10–05:21，干净树 HEAD `385d0e15`；已被下方终局结论取代）**：产物用
 `git worktree` 按 HEAD 全新检出后构建（`d:\mbdsdr\.tmp\wf-dist1`，4425 文件 /
 815.7 MiB），**不含**性能线留在主工作区的那 10 行未提交改动（`desktop/main_window.py`
 在主工作区仍是 `M`，HEAD 内没有这些行）。九步：build 185.2s、smoke 6.3s（13/13）、
@@ -347,6 +347,35 @@ qt 2.1s（175）、narrow 33.9s（`1265×618` / `960×633`）、**overlap FAIL**
 （offscreen 36/1、15/1 均在上限内；windows 15>13、9>7）、log 194.6s；
 汇总 **PASS 8 / FAIL 1**，总耗时 617.4s。overlap 按 `TEMPORARY_WIDENED` 口径交
 UI 布局线重测，本线**不改阈值、不改产品代码**。
+
+**2026-11-06 05:37 终局结论（干净树 HEAD `05674ef5`）**：`git worktree add
+d:\mbdsdr\.tmp\wt-final2 05674ef5 --detach` 检出，`git status --porcelain` **0 行**
+（主工作树未入库改动不参与构建）；产物 `d:\mbdsdr\.tmp\wf2-dist`，**4425 文件 /
+815.7 MiB**。该 HEAD 内的 `desktop/main_window.py` 含：操作逻辑线收口 `7bea149a`
+（带宽接线 / `hasattr` 机械守卫 / 采样率单一真值源），同一提交并入**性能线**遗留
+hunk（`_auto_enumerate_and_connect_async` 的 docstring 与 `:3524` 的
+`statusBar().showMessage("正在连接设备…", MSG_NORMAL)`）与本线录音目录三处接线
+（`:6834` `_confirm_record_dir_safe`、`:6915` `_start_recording` 前置门）；
+`3d2879ed`（`_show_real_gain` 不再调用他线在途方法）；性能线 TLE 刷新失败可视化
+`f4f12d3a` / `fe94e278`（`:8933` 与 `:8956` 的 `last_refresh_failure`）。
+**产物包含**性能线这处改动——上一轮「不含」的结论作废，原因是当时它还没被
+`7bea149a` 并入主分支，不是构建方式的问题。
+九步：build **PASS 178.2s**、smoke **PASS 5.8s**（13/13）、subtree **PASS 160.5s**
+（标题/正文逐字匹配 643 字符）、single **PASS 1.5s**（387 字符）、optional
+**PASS 7.2s**（134 字符）、qt **PASS 2.1s**（175 字符）、narrow **PASS 35.1s**
+（offscreen `1265×618`、windows `960×633`）、overlap **PASS**（offscreen 30/1、9/1；
+windows **13/1、7/1**，四组均 ≤ `TEMPORARY_WIDENED` 上限）、log **PASS 67.0s**
+（`C:\Users` 全盘 909,790 个文件无本次写入；实际落点
+`D:\mbdsdr\logs\mbdsdr_startup.log`）；汇总 **PASS 9 / FAIL 0 / SKIP 0**，总耗时
+**457.4s**，退出码 **0**。
+overlap 的 windows 两格这次正好**压在上限**（13 ≤ 13、7 ≤ 7），属已记录的抖动
+区间而非收口结论；上限仍由 UI 布局线按 `TEMPORARY_WIDENED` 口径复测收紧，本线
+**不改阈值、不改布局代码**。构建期间 HEAD 继续前进（如 `25739f74` 调谐被拒不再
+伪报扫频结果），**产物不含这些后续提交**；若它们要进发布，须按新 HEAD 重跑同一条
+命令。命令（cwd = 该 worktree）：
+`python scripts/release_check.py --keep-going --dist-dir d:\mbdsdr\.tmp\wf2-dist
+--work-dir d:\mbdsdr\.tmp\wf2-work --diag-dist-dir d:\mbdsdr\.tmp\wf2-diag-dist
+--diag-work-dir d:\mbdsdr\.tmp\wf2-diag-work`。
 
 **子树回归已修复**：`c72896c4` — `desktop/main.py:190` — `_startup_dependency_problems`
 （`git show --name-only c72896c4` 命中 `desktop/main.py` 与 `scripts/release_check.py`；
