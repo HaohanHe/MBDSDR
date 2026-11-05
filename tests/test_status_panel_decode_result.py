@@ -144,14 +144,19 @@ class TestMessageLanding:
         assert "真实" in view["summary"]
 
     def test_router_result_feeds_view(self, tmp_path):
-        """真实路由结果（P5.2）→ 面板视图，跨层字段对得上。"""
+        """真实路由结果（P5.2）→ 面板视图，跨层字段对得上。
+
+        2048 样本 @12kHz 只有 0.17s，连一个 NAVTEX 定相+报文都不够：
+        现在必须显式 insufficient_samples，而不是 ok=true + 0 条。
+        """
         from mbdsdr_ai.decoders import decode_digital_mode
         f = _write_wav(tmp_path / "silence.wav", np.zeros(2048))
         res = decode_digital_mode(f, "navtex", output_dir=str(tmp_path / "o"))
         view = format_decode_result("sdr_decode_navtex", res)
         assert res["evidence_level"] == "no_sample"
         assert "真实度: 缺样本" in view["summary"]
-        assert view["error_code"] == ""
+        assert view["error_code"] == "insufficient_samples"
+        assert "样本不足一帧" in view["summary"]
 
 
 # ---------------------------------------------------------------------------

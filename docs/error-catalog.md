@@ -60,18 +60,27 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `unknown_tool` | tool | 工具名未知 | 未知工具 '{tool}'。 | 用 list_tools 确认工具名后重试。 | 否 |
 | `workflow_executor_missing` | tool | 工作流执行器未接线 | 工作流执行器未设置，无法执行工具步骤。 | 先调用 set_tool_executor() 完成接线。 | 否 |
 | `bad_hex` | decode | 十六进制输入非法 | 十六进制输入不合法：{detail} | 确认只含 0-9/a-f 且长度为偶数后重试。 | 否 |
+| `crc_failed` | decode | 校验失败 | {mode} 校验失败（CRC/FCS）：{detail} | 确认信号质量与调制参数后重试。 | 否 |
 | `decode_error` | decode | 解码失败 | 解码失败：{detail} | 检查样本完整性与参数；同一输入原样重试无用。 | 否 |
 | `decode_failed` | decode | 无线电解码失败 | 解码失败（{detail}）；可能是信号质量不足。 | 改善天线/增益/频率后重试。 | 是 |
 | `doppler_failed` | decode | 多普勒补偿失败 | 多普勒补偿计算失败：{detail} | 确认 TLE、时刻与频点有效后重试。 | 是 |
 | `empty_input` | decode | 输入为空 | 输入为空：{detail} | 提供非空输入后重试。 | 否 |
+| `insufficient_samples` | decode | 输入样本不足一帧 | {mode} 输入太短：{rule} 需要 ≥ {required} 样本，实际 {actual}。 | 补足至少一帧的采样后重试（样本长度不足，不是解码失败）。 | 否 |
+| `invalid_input` | decode | 输入或参数非法 | 输入或参数不合法：{detail} | 按错误信息修正参数或换用合规输入后重试。 | 否 |
 | `invalid_vcdu` | decode | VCDU 帧非法 | VCDU 帧校验/长度不合法：{detail} | 确认输入为完整 CADU/VCDU 帧后重试。 | 否 |
+| `invalid_wav` | decode | WAV 不可解析 | WAV 无法作为单声道音频读取：{detail} | 换用 16-bit PCM 单声道 WAV，或修复容器后重试。 | 否 |
 | `meta_failed` | decode | 云图元数据获取失败 | 元数据获取失败：{detail} | 检查产品编号后重试。 | 否 |
 | `missing_dependency` | decode | 缺少内置依赖模块 | 缺少内置依赖模块 {module}（实现文件 {impl} 不可导入）。 | 安装/恢复该依赖模块后重试。 | 否 |
 | `missing_iq` | decode | 缺少 IQ 输入 | 缺少 iq_base64 输入，无法解调。 | 提供 iq_base64 后重试。 | 否 |
 | `missing_sample` | decode | 缺少输入样本 | 输入样本不存在或为空：{path}（这是缺样本，不是解码失败）。 | 先录制或指定存在的样本文件后重试。 | 否 |
+| `no_frame_recovered` | decode | 未能恢复完整帧 | {mode} 未能恢复完整帧：{detail} | 补足样本或改善信噪比后重试。 | 否 |
 | `not_implemented` | decode | 能力未接线 | {mode} 的通用入口未接线（实现文件 {impl}）。 | 改用已接线入口或外部工具；不要宣称已完成解码。 | 否 |
+| `nothing_detected` | decode | 未检测到帧 | {mode} 未检测到帧：{detail} | 检查频点、增益与调制参数后重试。 | 否 |
 | `ogn_decode_failed` | decode | OGN 报文解码失败 | OGN 报文解码失败：{detail} | 检查信号质量与增益后重试。 | 是 |
+| `preamble_not_found` | decode | 未找到前导 | {mode} 未找到前导/同步模板：{detail} | 确认频点与采样率正确、信号存在后重试。 | 否 |
+| `sample_rate_mismatch` | decode | 采样率不满足整数倍约束 | {mode} 要求 {rule}，收到 fs={actual} Hz（按当前采样率取整为 sps={sps}，拒绝静默取整）。 | 按解码器要求的整数倍采样率重新录制或重采样后重试。 | 否 |
 | `schedule_failed` | decode | 云图排程失败 | 排程失败：{detail} | 检查时间与卫星参数后重试。 | 否 |
+| `truncated_frame` | decode | 帧被截断 | {mode} 帧被截断：{detail} | 延长采集时长后重试。 | 否 |
 | `unknown_device` | decode | 未知设备 | 未知设备 '{device}'。 | 从支持的设备列表中选择后重试。 | 否 |
 | `unknown_device_type` | decode | 未知设备类型 | 未知设备类型 '{device}'。 | 从支持的设备类型中选择后重试。 | 否 |
 | `unknown_mode` | decode | 未知数字模式 | 未知数字模式 '{mode}'；可用模式：{available} | 从可用模式中选择后重试。 | 否 |

@@ -505,10 +505,20 @@ def ais_modulate_iq(wire_bits: Sequence[int], fs: float) -> np.ndarray:
 
 
 def ais_demodulate_iq(iq: np.ndarray, fs: float) -> List[int]:
-    """GMSK 复基带 → 线路位流（1-bit 差分 + 位定时扫描 + NRZI 解码）。"""
+    """GMSK 复基带 → 线路位流（1-bit 差分 + 位定时扫描 + NRZI 解码）。
+
+    采样率必须是 9600 的整数倍且 ≥19200：否则 ``round(fs/9600)`` 会把
+    fs=20000 静默取整成 sps=2，解出的位流与真实符号边界错位。这里显式
+    拒绝，并把实际取整结果写进错误信息（不假装解出来了）。
+    """
     sps = int(round(fs / AIS_BIT_RATE))
-    if sps < 2 or len(iq) < 4 * sps:
-        raise ValueError("IQ 过短或采样率非法")
+    if sps < 2 or abs(sps * AIS_BIT_RATE - fs) > 1e-6:
+        raise ValueError(
+            f"AIS 要求采样率为 9600 的整数倍且 ≥19200 Hz，收到 fs={fs:g} Hz"
+            f"（按当前采样率取整为 sps={sps}，拒绝静默取整）"
+        )
+    if len(iq) < 4 * sps:
+        raise ValueError(f"IQ 过短：至少需要 4 个符号（{4 * sps} 样本），实际 {len(iq)}")
     x = np.asarray(iq, dtype=np.complex128)
     dphi = np.angle(x[sps:] * np.conj(x[:-sps]))   # 1 符号延迟差分
     # 位定时：扫描符号相位 offset，取判决置信度（|dphi| 均值）最大者

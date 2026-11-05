@@ -622,37 +622,81 @@ def _find_preamble(env: np.ndarray, sps: int) -> Optional[int]:
 
 
 def decode_baseband(iq: np.ndarray, fs: float = 4e6,
-                    long_frame: bool = True) -> Dict[str, Any]:
-    """从复基带样本解码单个最强 Mode-S 报文并做 ME 级解析。"""
+                    long_frame: bool = True,
+                    max_frames: int = 1) -> Dict[str, Any]:
+    """从复基带样本按前导模板扫描 Mode-S 报文并做 ME 级解析。
+
+    `max_frames > 1` 时真正做多帧扫描：每找到一个前导就独立判决 112/56 bit、
+    独立算 CRC-24，再把该前导窗口置零后继续搜索；CRC 失败的候选保留在
+    `frames` 里（`crc_ok=False`），不计入 `num_frames`。默认 `max_frames=1`
+    与旧接口的「只解最强一帧」完全一致。
+    """
+    # 采样率硬约束在解码侧也要拦：非 1MHz 整数倍会让 sps 静默取整，
+    # 0.5µs 的前导脉冲宽度随之失真。宁可显式报错，不返回「解出来了」。
     sps = int(round(fs / 1e6))
+    if fs < 2e6 or abs(fs / 1e6 - sps) > 1e-6:
+        raise ValueError(
+            f"ADS-B 要求 fs ≥ 2MHz 且为 1MHz 整数倍，收到 fs={fs:g} Hz"
+            f"（按当前采样率取整为 sps={sps}，拒绝静默取整）"
+        )
     chip = max(sps // 2, 1)
     env = np.abs(iq) ** 2
     env = env / max(float(env.max()), 1e-12)
-    k = _find_preamble(env, sps)
-    if k is None:
-        return {"found": False, "crc_ok": False, "reason": "preamble_not_found"}
-    data_start = k + int(PREAMBLE_LEN_US * sps)
     nbits = DATA_BITS_LONG if long_frame else DATA_BITS_SHORT
-    bits: List[int] = []
-    for i in range(nbits):
-        s = data_start + i * sps
-        front = env[s:s + chip].sum()
-        back = env[s + chip:s + 2 * chip].sum()
-        bits.append(1 if front > back else 0)
-    raw = bits_to_bytes(bits)
-    crc_ok = (mode_s_crc24(bits) == 0)
+    search_env = env.copy()
+    attempts: List[Dict[str, Any]] = []
+    for _ in range(max(1, int(max_frames))):
+        k = _find_preamble(search_env, sps)
+        if k is None:
+            break
+        data_start = k + int(PREAMBLE_LEN_US * sps)
+        if data_start + nbits * sps > env.size:
+            # 尾部不足一帧：不拿截断样本硬解，避免把半帧当成整帧。
+            break
+        bits: List[int] = []
+        for i in range(nbits):
+            s = data_start + i * sps
+            front = env[s:s + chip].sum()
+            back = env[s + chip:s + 2 * chip].sum()
+            bits.append(1 if front > back else 0)
+        raw = bits_to_bytes(bits)
+        item: Dict[str, Any] = {
+            "preamble_index": int(k),
+            "crc_ok": bool(mode_s_crc24(bits) == 0),
+            "raw_bytes": raw.hex(),
+            "bits": bits,
+        }
+        frame = decode_frame(raw)
+        if frame is not None:
+            item["frame"] = frame.to_dict()
+            item["df"] = frame.df
+            item["icao"] = frame.icao_hex
+            item["tc"] = frame.tc
+            if frame.callsign:
+                item["callsign"] = frame.callsign
+        attempts.append(item)
+        # 只置零本前导窗口，避免同一前导被重复命中；数据区保留给下一帧搜索。
+        search_env[k:k + int(PREAMBLE_LEN_US * sps)] = 0.0
+
+    if not attempts:
+        return {
+            "found": False, "crc_ok": False, "reason": "preamble_not_found",
+            "frames": [], "num_frames": 0, "num_preamble_candidates": 0,
+        }
+    best = next((a for a in attempts if a["crc_ok"]), attempts[0])
     result: Dict[str, Any] = {
-        "found": True, "crc_ok": bool(crc_ok), "preamble_index": int(k),
-        "bits": bits, "raw_bytes": raw.hex(),
+        "found": True,
+        "crc_ok": bool(best["crc_ok"]),
+        "preamble_index": int(best["preamble_index"]),
+        "raw_bytes": best["raw_bytes"],
+        "bits": best.get("bits", []),
+        "frames": attempts,
+        "num_frames": sum(1 for a in attempts if a["crc_ok"]),
+        "num_preamble_candidates": len(attempts),
     }
-    frame = decode_frame(raw)
-    if frame is not None:
-        result["frame"] = frame.to_dict()
-        result["df"] = frame.df
-        result["icao"] = frame.icao_hex
-        result["tc"] = frame.tc
-        if frame.callsign:
-            result["callsign"] = frame.callsign
+    for key in ("frame", "df", "icao", "tc", "callsign"):
+        if key in best:
+            result[key] = best[key]
     return result
 
 

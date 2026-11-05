@@ -876,6 +876,19 @@ def _decode_ft4_wav(input_path: str, ext: str, result: Dict[str, Any],
     if error:
         return _narrowband_reject(result, "ft4", "invalid_wav", error)
     result["audio_sample_rate_hz"] = float(audio_rate)
+    # 运行期最短样本：不足一个 FT4 帧就显式拒绝，不返回「成功但 0 帧」。
+    from .ft4_modem import FS_HZ, FRAME_SAMPLES
+    required = int(round(FRAME_SAMPLES * audio_rate / FS_HZ))
+    if audio.size < required:
+        rejected = _narrowband_reject(
+            result, "ft4", "insufficient_samples",
+            f"FT4 音频不足一帧：需要 ≥ {required} 样本"
+            f"（{FRAME_SAMPLES} 样 @ {FS_HZ:g}Hz 折算 {audio_rate:g}Hz），"
+            f"实际 {audio.size}",
+        )
+        rejected["required_samples"] = required
+        rejected["actual_samples"] = int(audio.size)
+        return rejected
 
     try:
         center = float(center_frequency_hz)
@@ -1029,6 +1042,18 @@ def _decode_wspr_wav(input_path: str, ext: str, result: Dict[str, Any],
     if error:
         return _narrowband_reject(result, "wspr", "invalid_wav", error)
     result["audio_sample_rate_hz"] = float(audio_rate)
+    # 运行期最短样本：不足一次完整 WSPR 传输就显式拒绝。
+    from .wspr_modem import WSPR_TRANSMISSION_SECONDS
+    required = int(round(WSPR_TRANSMISSION_SECONDS * audio_rate))
+    if audio.size < required:
+        rejected = _narrowband_reject(
+            result, "wspr", "insufficient_samples",
+            f"WSPR 音频不足一次传输：需要 ≥ {required} 样本"
+            f"（110.6s @ {audio_rate:g}Hz），实际 {audio.size}",
+        )
+        rejected["required_samples"] = required
+        rejected["actual_samples"] = int(audio.size)
+        return rejected
 
     try:
         from .wspr_modem import (
@@ -1115,7 +1140,7 @@ def decode_digital_mode(
     input_path: str,
     mode: str,
     output_dir: str = None,
-    sample_rate: float = 1e6,
+    sample_rate: Optional[float] = None,
     baud: int = 512,
     center_frequency_hz: float = 1500.0,
     frequency_search_hz: Optional[Tuple[float, float]] = None,

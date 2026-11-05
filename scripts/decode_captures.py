@@ -84,7 +84,7 @@ def _summarize(results: list) -> dict:
     return summary
 
 
-def decode_file(path: str, mode: str, sample_rate: float = 1e6) -> dict:
+def decode_file(path: str, mode: str, sample_rate: float = None) -> dict:
     """单个文件解码（转调 P5.2 能力表路由，不复制任何解码逻辑）。"""
     from mbdsdr_ai.decode_router import run_digital_mode
 
@@ -109,12 +109,12 @@ def decode_file(path: str, mode: str, sample_rate: float = 1e6) -> dict:
     return entry
 
 
-def build_report(files: list, mode: str, sample_rate: float = 1e6) -> dict:
+def build_report(files: list, mode: str, sample_rate: float = None) -> dict:
     results = [decode_file(p, mode, sample_rate) for p in files]
     return {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "mode": mode,
-        "sample_rate_hz": float(sample_rate),
+        "sample_rate_hz": (float(sample_rate) if sample_rate is not None else None),
         "environment": {
             "null_audio": os.environ.get("MBDSDR_NULL_AUDIO", ""),
             "no_hw": os.environ.get("MBDSDR_NO_HW", ""),
@@ -154,7 +154,8 @@ def main(argv=None) -> int:
                     help="数字模式（见 decode_router.supported_modes()）或 all")
     ap.add_argument("--file", help="单个捕获文件")
     ap.add_argument("--dir", help="捕获目录（与 --file 二选一）")
-    ap.add_argument("--fs", type=float, default=1e6, help="IQ 采样率 Hz")
+    ap.add_argument("--fs", type=float, default=None,
+                    help="IQ 采样率 Hz（缺省按模式取合法值）")
     ap.add_argument("--out", help="报告 JSON 输出路径")
     ap.add_argument("--audit-dir", help="另写结构化审计日志 decode_audit.jsonl")
     argv = sys.argv[1:] if argv is None else argv

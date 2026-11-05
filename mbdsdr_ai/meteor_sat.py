@@ -579,7 +579,14 @@ def meteor_lrpt_demod(iq: np.ndarray, sample_rate: float) -> Dict:
     → Viterbi(0x79,0x5F) → LRPT 帧同步。
     返回 dict：symbols/bit_count/frames 摘要；供工具层调用。
     """
-    sps = max(1, int(round(sample_rate / METEOR_SYM_RATE)))
+    # 采样率硬约束：fs < 2×符号率时 sps 会被静默压到 1，QPSK 符号边界
+    # 与 RRC 匹配滤波都不成立；非整数倍则 round 后符号率偏移。显式拒绝。
+    sps = int(round(sample_rate / METEOR_SYM_RATE))
+    if sps < 2 or abs(sps * METEOR_SYM_RATE - sample_rate) > 1e-6:
+        raise ValueError(
+            f"Meteor LRPT 要求 fs ≥ 144000 且为 72k 符号率的整数倍，收到 "
+            f"fs={sample_rate:g} Hz（按当前采样率取整为 sps={sps}，拒绝静默取整）"
+        )
     q = QPSKDemodulator(sps=sps)
     symbols = q.demodulate(np.asarray(iq, dtype=complex))
     bits = qpsk_symbols_to_dqpsk_bits(symbols).astype(np.float64)

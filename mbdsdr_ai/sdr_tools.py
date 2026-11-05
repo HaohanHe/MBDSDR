@@ -4315,7 +4315,8 @@ def _decode_aprs(args):
 def _decode_adsb(args):
     """ADS-B 飞机广播解码（内置纯 numpy Mode-S DF17，已与 pyModeS 交叉验证）。"""
     input_path = args["input_path"]
-    sample_rate = float(args.get("sample_rate", 1e6))
+    # ADS-B 需要 fs ≥ 2MHz 且为 1MHz 整数倍；默认用合法值，不再用 1MHz。
+    sample_rate = float(args.get("sample_rate", 2e6))
     result = decode_digital_mode(input_path, mode="adsb", sample_rate=sample_rate)
     if "error" in result:
         return f"解码失败: {result['error']}"
@@ -4323,8 +4324,9 @@ def _decode_adsb(args):
     output += f"输入: {input_path}\n"
     output += f"采样率: {_fmt_sample_rate(sample_rate)}\n"
     if result.get("found"):
-        output += f"前导检测: 命中（样本索引 {result.get('preamble_index')}）\n"
-        output += f"CRC-24 校验: {'通过' if result.get('crc_ok') else '失败'}\n"
+        output += f"前导检测: 命中 {result.get('num_preamble_candidates', 1)} 个候选\n"
+        output += f"CRC-24 校验: {'通过' if result.get('crc_ok') else '失败'}，"
+        output += f"解出 {result.get('num_frames', 0)} 帧\n"
         output += f"ICAO 地址: {result.get('icao_hex')}\n"
         if result.get("callsign"):
             output += f"航班呼号: {result.get('callsign')}\n"

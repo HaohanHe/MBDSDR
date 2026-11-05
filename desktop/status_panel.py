@@ -190,6 +190,11 @@ DECODE_ERROR_LABELS = {
     "unsupported_format": "格式不支持",
     "decode_error": "解码失败",
     "not_implemented": "未接线（能力存在，通用入口未接）",
+    "sample_rate_mismatch": "采样率不满足整数倍约束",
+    "insufficient_samples": "样本不足一帧",
+    "invalid_wav": "WAV 不可解析",
+    "invalid_input": "输入或参数非法",
+    "param_not_in_enum": "参数不在允许取值内",
 }
 
 # 证据等级 → 人话（与 P2 真样本盘点口径一致）

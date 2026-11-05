@@ -45,7 +45,8 @@ EVIDENCE = {
         "；tests/test_adsb_consistency.py（合成链）；"
         "本机 1090MHz 真录 2026-10-29 三次 0 CRC 帧 = 负证据（如实保留）",
         "python -m pytest tests/test_adsb_dump1090_golden.py tests/test_adsb_consistency.py -q",
-        "真（外部真值）：dump1090 官方样本两条帧逐字命中；但本机 OTA 真录尚未破零",
+        "真（外部真值）：dump1090 官方样本两条帧逐字命中；通用入口已做多帧扫描"
+        "（每个前导独立 CRC），但本机 OTA 真录尚未破零",
     ),
     "ft8": (
         "tests/test_ft8_wsjtx_golden.py（WSJT-X 官方 210703_133430.wav，"
@@ -95,7 +96,8 @@ EVIDENCE = {
     "meteor": (
         "tests/test_meteor_lrpt.py（合成向量）；真录证据在 LRPT 链见下一行",
         "python -m pytest tests/test_meteor_lrpt.py -q",
-        "半个真：通用入口只到解调骨架；图像链真录证据在 LRPT 真录链",
+        "半个真：通用入口只到解调骨架（输出 symbols/bits，不产图像）；"
+        "图像链真录证据在 LRPT 真录链",
     ),
 }
 
@@ -277,6 +279,21 @@ def render() -> str:
     out.append("- 退出码只表示「报告是否生成成功」，不表示「解出东西没有」。")
     out.append("- 另设 `MBDSDR_DECODE_AUDIT_DIR=logs/` 后，每次解码追加一行 "
                "`decode_audit.jsonl`（只记元数据与输入指纹，**不抄报文正文**）。")
+    out.append("")
+    out.append("## 死分支与可达性登记")
+    out.append("")
+    out.append("- **ACARS handler 内的 `unsupported_format` 是死分支**：路由层中央格式门"
+               "（`decode_router` 的 `input_formats` 检查）先拦，handler 里的 else 分支"
+               "在当前能力表下不可达；保留只为防御，不计入实际失败路径。")
+    out.append("- **`not_implemented` 仅 ft8 通用入口可达**：能力表 `dependency=\"\"`，"
+               "handler 直接返回该码；其余模式均已接线。")
+    out.append("- **`missing_dependency` 现在有真实可达路径**：路由先 `find_spec`，再"
+               "`importlib.import_module`；环境缺 numpy/scipy 等第三方库时模块文件存在但"
+               "导入抛 `ImportError`，走该码（不再只能靠 monkeypatch 复现）。")
+    out.append("- **路由层运行期校验**：IQ 模式先校验采样率整数倍"
+               "（ADS-B 1MHz / AIS 9600 / Meteor 72k），再校验「最短一帧」样本量；"
+               "不足返回 `sample_rate_mismatch` / `insufficient_samples`，"
+               "绝不 `ok=true` + 0 条。")
     out.append("")
     out.append("## 诚实边界")
     out.append("")
