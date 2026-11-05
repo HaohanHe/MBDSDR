@@ -92,7 +92,7 @@ STATIC_CAPABILITIES: Tuple[Tuple[str, str, str, str, str, str, str], ...] = (
     ("天空", "搜索天体",
      "按名称、别名、NORAD 编号或梅西耶编号搜索恒星/行星/卫星/深空天体，"
      "选中即居中并弹出信息卡",
-     "天空模式顶部搜索框（输入 ISS / Vega / M42）",
+     "星象仪模式顶部搜索框（输入 ISS / Vega / M42）",
      "available", "", "module:desktop/rf_sky_view.py:_build_search_widgets"),
     ("发射", "发射 / PTT",
      "按下开始发射，再次按下停止；只有具备发射能力的设备才会亮起",

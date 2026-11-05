@@ -21,9 +21,10 @@ inline QString fmtStripSampleRate(double hz) {
                     : QString("--");
 }
 
-// VFO / centre-frequency read-out.
+// VFO / centre-frequency read-out. 6 decimals = 1 Hz resolution, matching the
+// desktop frequency read-outs (3 decimals would hide 1 Hz tuning steps).
 inline QString fmtStripVfoFreq(double hz) {
-    return hz > 0.0 ? QString("%1 MHz").arg(hz / 1e6, 0, 'f', 3)
+    return hz > 0.0 ? QString("%1 MHz").arg(hz / 1e6, 0, 'f', 6)
                     : QString("--");
 }
 
@@ -52,11 +53,11 @@ inline QString fmtStripSource(const QString& name, bool connected) {
 }
 
 // Squelch gate read-out. The engine reports gate-open even when the squelch is
-// disabled, so `enabled` comes from the real checkbox state -- OFF is shown
-// honestly instead of a misleading OPEN.
+// disabled, so `enabled` comes from the real checkbox state -- a disabled gate
+// is shown as 「静噪关闭」 instead of a misleading 「静噪 有信号」.
 inline QString fmtStripSquelch(bool enabled, bool open) {
-    if (!enabled) return QStringLiteral("静噪 OFF");
-    return open ? QStringLiteral("静噪 OPEN") : QStringLiteral("静噪 CLOSED");
+    if (!enabled) return QStringLiteral("静噪关闭");
+    return open ? QStringLiteral("静噪 有信号") : QStringLiteral("静噪 静音");
 }
 
 inline QString fmtStripRssi(float dbfs) {

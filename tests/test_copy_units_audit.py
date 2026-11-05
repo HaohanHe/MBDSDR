@@ -123,3 +123,65 @@ def test_u03_mobile_sample_rate_is_ms_per_s_three_decimals():
     assert "toStringAsFixed(2)}Msps" not in _MOBILE_SPECTRUM
     assert "toStringAsFixed(2)} Msps" not in _MOBILE_SPECTRUM
     assert "toStringAsFixed(3)} MS/s" in _MOBILE_INFO
+
+
+# ---------------------------------------------------------------------------
+# 批次 2：术语、错误提示、数字格式
+# ---------------------------------------------------------------------------
+_HELP = open(os.path.join(_ROOT, "desktop", "help_panel.py"), encoding="utf-8").read()
+_NTRIP = open(os.path.join(_ROOT, "desktop", "ntrip_panel.py"), encoding="utf-8").read()
+_SETTINGS = open(os.path.join(_ROOT, "desktop", "settings_panel.py"),
+                 encoding="utf-8").read()
+_MOBILE_HELP = open(os.path.join(_ROOT, "mobile", "lib", "pages", "help_page.dart"),
+                    encoding="utf-8").read()
+_CTRL = open(os.path.join(_ROOT, "desktop", "control_panel.py"), encoding="utf-8").read()
+
+
+def test_e06_ntrip_errors_name_next_step_without_internal_jargon():
+    assert 'err = "sourcetable 中未找到 STR 挂载点记录。"' not in _NTRIP
+    assert "请核对地址与端口" in _NTRIP
+    assert 'err = f"未知错误: {_clean_exc(e)}"' not in _NTRIP
+
+
+def test_e03_import_rejection_names_reason_and_next_step():
+    assert 'res.error or "未知错误"' not in _SETTINGS
+    assert "导入被拒绝：" in _SETTINGS
+
+
+def test_t02_help_uses_real_topbar_demod_labels():
+    assert "顶栏「模式」" not in _HELP
+    assert "FM / WFM / NFM / AM / USB / LSB / CW" in _HELP
+
+
+def test_t01_help_separates_sky_tab_from_planetarium():
+    assert "打开天空模式" not in _HELP
+    assert "星象仪模式" in _HELP
+    assert "天空模式" not in _HELP
+
+
+def test_t04_filter_control_is_not_called_vfo_bandwidth():
+    assert 'self.vfo_bw_label = QLabel("VFO 带宽")' not in _CTRL
+    assert 'self.vfo_bw_label = QLabel("解调带宽")' in _CTRL
+
+
+def test_u06_mobile_help_squelch_and_vfo_terms_are_correct():
+    assert "-100 为关闭" not in _MOBILE_HELP
+    assert "绝对电平" in _MOBILE_HELP
+    assert "预存的频率+模式预设" not in _MOBILE_HELP
+
+
+def test_n01_cpp_status_freq_six_decimals():
+    assert 'QString("%1 MHz").arg(hz / 1e6, 0, \'f\', 6)' in _CPP_STATUS
+
+
+def test_n01_mobile_current_freq_six_decimals():
+    assert "toStringAsFixed(6)} MHz" in _MOBILE_SPECTRUM
+    assert "toStringAsFixed(6)} MHz" in _MOBILE_INFO
+
+
+def test_t06_squelch_states_are_chinese_and_single_vocabulary():
+    assert 'QStringLiteral("静噪关闭")' in _CPP_STATUS
+    assert 'QStringLiteral("静噪 有信号")' in _CPP_STATUS
+    assert 'QStringLiteral("静噪 静音")' in _CPP_STATUS
+    assert "SQ OPEN" not in _MOBILE_SPECTRUM
+    assert "'静噪 静音'" in _MOBILE_SPECTRUM

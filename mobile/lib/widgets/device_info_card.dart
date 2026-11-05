@@ -110,7 +110,7 @@ class DeviceInfoCard extends StatelessWidget {
         _InfoRow(
           label: '频率',
           value: live
-              ? '${(radio.freqHz / 1e6).toStringAsFixed(4)} MHz'
+              ? '${(radio.freqHz / 1e6).toStringAsFixed(6)} MHz'
               : '—',
           valueColor: valueColor,
           mono: true,

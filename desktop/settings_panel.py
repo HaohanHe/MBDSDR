@@ -1174,7 +1174,10 @@ class SettingsPanel(QWidget):
             return
         res = self.import_from(path)
         if not res.ok:
-            QMessageBox.warning(self, "导入被拒绝", res.error or "未知错误")
+            detail = res.error or "没有返回具体原因"
+            QMessageBox.warning(
+                self, "导入被拒绝",
+                f"导入被拒绝：{detail}。请修正该字段后重试，或点「恢复默认」重新导入。")
             return
         lines = [res.summary() + "。"]
         if res.filled:

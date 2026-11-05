@@ -31,8 +31,8 @@ void TestStatusFormat::sampleRate() {
 }
 
 void TestStatusFormat::vfoFreq() {
-    QCOMPARE(mbdsdr::ui::fmtStripVfoFreq(98.5e6), QString("98.500 MHz"));
-    QCOMPARE(mbdsdr::ui::fmtStripVfoFreq(137.1e6), QString("137.100 MHz"));
+    QCOMPARE(mbdsdr::ui::fmtStripVfoFreq(98.5e6), QString("98.500000 MHz"));
+    QCOMPARE(mbdsdr::ui::fmtStripVfoFreq(137.1e6), QString("137.100000 MHz"));
     QCOMPARE(mbdsdr::ui::fmtStripVfoFreq(0.0), QString("--"));
 }
 
@@ -49,9 +49,9 @@ void TestStatusFormat::sourceTag() {
 }
 
 void TestStatusFormat::squelch() {
-    QCOMPARE(mbdsdr::ui::fmtStripSquelch(false, true),  QString("静噪 OFF"));
-    QCOMPARE(mbdsdr::ui::fmtStripSquelch(true, true),   QString("静噪 OPEN"));
-    QCOMPARE(mbdsdr::ui::fmtStripSquelch(true, false),  QString("静噪 CLOSED"));
+    QCOMPARE(mbdsdr::ui::fmtStripSquelch(false, true),  QString("静噪关闭"));
+    QCOMPARE(mbdsdr::ui::fmtStripSquelch(true, true),   QString("静噪 有信号"));
+    QCOMPARE(mbdsdr::ui::fmtStripSquelch(true, false),  QString("静噪 静音"));
 }
 
 void TestStatusFormat::rssiSnr() {

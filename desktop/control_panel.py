@@ -469,16 +469,16 @@ class ControlPanel(QWidget):
         sr_row.addWidget(self.sample_rate_combo)
         rx_layout.addLayout(sr_row)
 
-        # VFO 带宽选择（采样率下方一行）
+        # 解调带宽选择（采样率下方一行）
         bw_row = QHBoxLayout()
-        self.vfo_bw_label = QLabel("VFO 带宽")
+        self.vfo_bw_label = QLabel("解调带宽")
         self.vfo_bw_label.setObjectName("statusValue")
         self.vfo_bw_label.setMinimumWidth(30)
         self.vfo_bw_label.setMaximumWidth(100)
         bw_row.addWidget(self.vfo_bw_label)
         self.vfo_bw_combo = QComboBox()
         self.vfo_bw_combo.setToolTip(
-            "解调信道带宽（滤波器宽度），随模式自动套默认。"
+            "解调带宽（中频滤波宽度），随模式自动套默认。"
             "注意与模块面板的「硬件带宽」（设备射频带宽）不同")
         # 档位与 MODE_VFO_BANDWIDTH 对齐：2.4 kHz(SSB) / 12.5 kHz(NBFM) 必须在列，
         # 避免切到 USB/LSB/NFM 时 findData 落空、回退到错误带宽。

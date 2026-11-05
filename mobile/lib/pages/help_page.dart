@@ -97,8 +97,9 @@ class HelpPage extends StatelessWidget {
               _Row(term: 'IQ', desc: '同相/正交两路采样，SDR 的原始数据形态。'),
               _Row(term: '采样率', desc: '每秒采样数，决定可见带宽上限（约为采样率八成）。'),
               _Row(term: '带宽', desc: '解调低通滤波器宽度，按信号类型选。'),
-              _Row(term: '静噪', desc: '低于门限静音。门限为相对电平 dBFS，-100 为关闭。'),
-              _Row(term: 'VFO', desc: '预存的频率+模式预设，可快速切换守听。'),
+              _Row(term: '静噪', desc: '低于门限静音。门限是解调后音频 RMS 的绝对电平（dBFS），'
+                  '数值越低越灵敏；要关闭静噪请用上方开关。'),
+              _Row(term: 'VFO', desc: '可独立调谐的一列频率切片；预存频率+模式请用「书签」。'),
               _Row(term: '多普勒', desc: '卫星高速运动引起的频移，过境时需持续跟踪补偿。'),
               _Row(term: 'TLE', desc: '卫星轨道根数，过境预测的输入；随轨道摄动逐渐失准。'),
             ],

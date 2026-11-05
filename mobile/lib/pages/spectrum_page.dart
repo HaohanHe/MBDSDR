@@ -373,7 +373,7 @@ class _StatusBar extends StatelessWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           _StatusChip(
-            '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
+            '${(controller.freqHz / 1e6).toStringAsFixed(6)} MHz',
             primary: true,
           ),
           _StatusChip(controller.mode.label),
@@ -383,8 +383,8 @@ class _StatusBar extends StatelessWidget {
           // 静噪：基于解调音频真实 RMS 电平的门控开合，克制小字。
           _StatusChip(
             controller.squelchEnabled
-                ? (controller.squelchOpen ? 'SQ OPEN' : 'SQ CLOSED')
-                : 'SQ OFF',
+                ? (controller.squelchOpen ? '静噪 有信号' : '静噪 静音')
+                : '静噪关闭',
           ),
           _StatusChip('${(controller.sampleRateHz / 1e6).toStringAsFixed(3)} MS/s'),
           _StatusChip(
@@ -700,7 +700,7 @@ class _ControlPanel extends StatelessWidget {
                   child: Center(
                     widthFactor: 1.0,
                     child: Text(
-                      '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
+                      '${(controller.freqHz / 1e6).toStringAsFixed(6)} MHz',
                       style: AppTokens.freqReadout,
                     ),
                   ),

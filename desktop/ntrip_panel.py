@@ -269,13 +269,14 @@ class NtripConfigDialog(QDialog):
             text = raw.decode("latin-1", "ignore")
             mounts = parse_sourcetable(text)
             if not mounts:
-                err = "sourcetable 中未找到 STR 挂载点记录。"
+                err = ("NTRIP 服务器没有返回可用的挂载点（数据流列表为空）。"
+                       "请核对地址与端口，或换一个 CORS 源后重试。")
         except urllib.error.HTTPError as e:
-            err = f"HTTP {e.code} {e.reason}"
+            err = f"NTRIP 连接失败：HTTP {e.code} {e.reason}。请核对地址与端口后重试。"
         except (urllib.error.URLError, OSError, TimeoutError) as e:
-            err = f"网络错误: {_clean_exc(e)}"
+            err = f"NTRIP 连接失败：{_clean_exc(e)}。请核对地址与网络后重试。"
         except Exception as e:  # 兜底：拉取失败绝不崩
-            err = f"未知错误: {_clean_exc(e)}"
+            err = f"NTRIP 拉取失败：{_clean_exc(e)}。请核对地址与网络后重试。"
 
         # 回主线程更新 UI
         def _apply():

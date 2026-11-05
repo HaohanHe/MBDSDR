@@ -967,7 +967,7 @@ MainWindow::MainWindow(QWidget* parent)
     squelchAutoBtn_->setToolTip(
         QString("门限 = 实测音频噪声底 + %1 dB（同域）").arg(tokens::kSquelchAutoMarginDb));
     gSqlLay->addWidget(squelchAutoBtn_);
-    squelchState_ = new QLabel("状态: CLOSED", gSql);
+    squelchState_ = new QLabel("状态: 静音", gSql);
     squelchState_->setObjectName("squelchState");
     gSqlLay->addWidget(squelchState_);
     leftLay->addWidget(gSql);
@@ -2825,7 +2825,7 @@ MainWindow::MainWindow(QWidget* parent)
     // the GNSS field stays EMPTY until a genuine fix (never a fabricated one).
     sbRssi_  = new QLabel("--", this);
     sbSnr_   = new QLabel("--", this);
-    sbSquelch_ = new QLabel("静噪 OFF", this);
+    sbSquelch_ = new QLabel("静噪关闭", this);
     sbGnss_  = new QLabel("", this);
     // Real-time sound-card link health (声卡正常 / 欠载 / 断开重连中 / 不可用),
     // fed from the engine audio sink's worker-thread observations. "--" until the
@@ -3061,7 +3061,7 @@ MainWindow::MainWindow(QWidget* parent)
         bool en = (st != Qt::Unchecked);
         squelchOn_ = en;
         engine_->setSquelchEnabled(en);
-        if (!en) squelchState_->setText("状态: CLOSED");
+        if (!en) squelchState_->setText("状态: 关闭");
         // B5: immediately reflect OFF when the user disables the gate.
         if (sbSquelch_ && !en) sbSquelch_->setText(ui::fmtStripSquelch(false, false));
     });
@@ -6446,7 +6446,7 @@ void MainWindow::updateNetAudioStatus() {
 }
 
 void MainWindow::onSquelchState(bool open) {
-    squelchState_->setText(open ? "状态: OPEN" : "状态: CLOSED");
+    squelchState_->setText(open ? "状态: 有信号" : "状态: 静音");
     // B5: gate strip readout. The engine reports gate-open when squelch is
     // disabled too, so we OR it with the real checkbox enabled state to show
     // OFF honestly rather than a misleading OPEN.

@@ -192,10 +192,10 @@ class TestE2UnitsPresent:
         assert m.bw_spin.suffix().strip() == "Hz"
         c = ControlPanel()
         assert "dB" in c.gain_val.text()
-        # 采样率档位文本自带单位
+        # 采样率档位文本自带单位（采样率量纲是 MS/s，不是 MHz）
         for i in range(c.sample_rate_combo.count()):
             txt = c.sample_rate_combo.itemText(i)
-            assert ("MHz" in txt) or ("kHz" in txt), f"采样率档位缺单位: {txt!r}"
+            assert "MS/s" in txt, f"采样率档位单位必须是 MS/s: {txt!r}"
 
 
 # ======================================================================
@@ -346,10 +346,10 @@ class TestE4NamingHonest:
         _app()
         from control_panel import ControlPanel
         cp = ControlPanel()
-        assert cp.vfo_bw_label.text() == "VFO 带宽", \
-            f"控制面板必须叫 VFO 带宽，实际 {cp.vfo_bw_label.text()!r}"
+        assert cp.vfo_bw_label.text() == "解调带宽", \
+            f"控制面板必须叫解调带宽，实际 {cp.vfo_bw_label.text()!r}"
         assert "硬件" in cp.vfo_bw_combo.toolTip(), \
-            "VFO 带宽 tooltip 必须与「硬件带宽」互相区分"
+            "解调带宽 tooltip 必须与「硬件带宽」互相区分"
         mod_src = open(os.path.join(_ROOT, "desktop", "module_panel.py"),
                        encoding="utf-8").read()
         assert 'form.addRow("硬件带宽", self.bw_spin)' in mod_src, \

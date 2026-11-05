@@ -217,7 +217,7 @@ def _shortcut_commands(window, existing: Sequence[Command]) -> List[Command]:
             run = lambda w=window: _focus_spectrum(w)
         elif s.scope == "planetarium":
             status = "conditional"
-            reason = "只在星象仪形态下生效；先进入星象仪模式（Ctrl+Shift+P）"
+            reason = "只在星象仪模式下生效；先按 Ctrl+Shift+P 进入"
             run = lambda w=window, t=s.label: _open_shortcut_entry(w, t)
         else:
             status, reason = "available", ""
