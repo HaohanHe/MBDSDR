@@ -639,3 +639,21 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 **结果：2 次点击 / 3 层可见层级（页签 → 组框 → 行）**。按协调方「≥4 步才进
 可发现性线待判清单」的规则，**不列入**；从「设置」页签出发也只多 1 次切页签。
 
+## 17. schema ↔ UI 双向一致性守卫（脚本生成，手改即红）
+
+`tests/test_settings_ui_coverage.py` 钉住：正向（每个字段有 UI 入口或明确理由）、反向（desktop/ 的 settings 字面键都在 schema）、往返（每字段 `set → flush → load`，且归一说明留痕）。下表由
+`python scripts/settings_inventory.py --write` 生成；手改块内数字会被
+`test_inventory_table_matches_script` 判红。
+
+<!-- settings-guard:begin -->
+
+| 指标 | 数值 | 口径 |
+|---|---|---|
+| schema 字段数 | **48** | `config_schema.ALL_ITEMS` 全量 |
+| 有 UI 入口 | **47** | 设置面板渲染 + 服务页签控件 + 内部键控件锚点 |
+| 无 UI 但有明确理由 | **1** | 理由见「字段 → 位置」表的「说明」列 |
+| 缺失（无入口且无理由） | **0** | >0 即守卫红 |
+| 幽灵键（未在 schema 声明） | **0** | 扫描 desktop/*.py 的 settings 字面键 |
+| source_commit | `2b6eba39` | `git log -1 --format=%h -- desktop/config_schema.py` |
+
+<!-- settings-guard:end -->
