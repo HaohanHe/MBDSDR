@@ -16,6 +16,16 @@
   4. ADS-B 路径上只允许 ``mbdsdr_ai/adsb.py::resample_to_legal_fs`` 一份
      自拼重采样实现；实验/脚本侧再冒出 ``Fraction`` + ``resample_poly``
      副本时守卫测试必须变红（含旁路文件反证）。
+
+对拍数据来源与边界（重要，别误读）：
+  本模块的「真实录音」对拍用的是 **dump1090 官方 OTA 实录**
+  （``antirez/dump1090`` 的 ``testfiles/modes1.bin``，2 MS/s u8，0.178 s，
+  SHA-256 ``3a33e160…3094``），**不是本机录制**；2.4 MS/s 用例是由同一实录
+  离线 2→2.4 上采样派生（为压重采样分支，非 OTA）。
+  它能证明：any-fs 重采样路径与旧副本逐位等价（2 MS/s 356868→356868、
+  CRC 通过 127；2.4 MS/s 428242→1427474、``max|Δ|=0``、CRC 通过 168）。
+  它**不能**证明：本机具备 1090 MHz 接收能力（本机 FC0012 实测 948.6 MHz
+  起报 ``no valid PLL combination``，1090 物理不可达）。
 """
 
 from __future__ import annotations
