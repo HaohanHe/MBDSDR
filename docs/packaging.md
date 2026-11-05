@@ -203,7 +203,7 @@ Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹�
 
 | 约束 | 实测行为 | 期望 | 差距 / 已修（证据：`c295423e` — `desktop/startup_paths.py:59` — `def startup_log_path() -> str:`） |
 |---|---|---|---|
-| ① 机器没有 D 盘 | 启动日志按裁定顺序：环境变量 → 非 C 盘盘符 → 安装根 `logs`（实际可创建）→ `%PROGRAMDATA%\MBDSDR\logs`；全不可写则进内存环形缓冲（200 行）。审计日志 `default_audit_path()` 落 `<程序根>\logs\tx_audit.jsonl` 并告警；录音默认目录：非 C 盘不可用 → `%LOCALAPPDATA%\MBDSDR\recordings` | 绝不写 C 盘用户目录的日志；能看到明确告警 | 日志已按裁定落地，`%LOCALAPPDATA%` / `~/.config` / `%TEMP%` 全部不在候选内。**录音**是用户数据不是日志，仍按原设计在只有 C 盘时落 `%LOCALAPPDATA%`；复跑：`python scripts/release_check.py`（九步全量含日志落点与冷启动） |
+| ① 机器没有 D 盘 | 启动日志按裁定顺序：环境变量 → 非 C 盘盘符 → 安装根 `logs`（实际可创建）→ `%PROGRAMDATA%\MBDSDR\logs`；全不可写则进内存环形缓冲（200 行）。审计日志 `default_audit_path()` 落 `<程序根>\logs\tx_audit.jsonl` 并告警；录音默认目录：用户目录 `MBDSDR\recordings`，与盘符无关 | 绝不写 C 盘用户目录的日志；能看到明确告警 | 日志已按裁定落地，`%LOCALAPPDATA%` / `~/.config` / `%TEMP%` 全部不在候选内。**录音**是用户数据不是日志，已与程序目录/盘符解耦：默认落用户目录 `MBDSDR\recordings`，只有 C 盘的机器照常可用；复跑：`python scripts/release_check.py`（九步全量含日志落点与冷启动） |
 | ② 目标目录只读/无写权限 | 设置写盘失败：`设置保存失败（PermissionError）：[WinError 5] 拒绝访问。: '…\readonly_appdata\mbdsdr'`；录音写盘失败：`录音目录不可用（…\readonly_root\recordings）：[WinError 5] 拒绝访问。…`。启动期改为后台线程试写 0 字节文件（不阻塞主线程），失败进状态栏 + 日志（见 §5.1） | 明确说明「哪不可写、下一步怎么办」，不裸崩 | 提示达预期；启动期不再用 `tempfile.mkstemp`（ACL deny-write 目录实测会卡 >6s） |
 | ③ 安装路径含中文 | 冻结版整包移到 `d:\mbdsdr\.tmp\clean_test\中文 安装 目录\MBDSDR 打包版` 后启动：窗口标题 `MBDSDR - AI 定义无线电`，hwnd `9440640`，`[smoke] 私有模块导入自检 13/13 通过`；源码副本在中文目录下运行只打印 SoapySDR 缺失告警，无编码异常 | 中文路径可用 | 无差距 |
 | ④ 用户目录被重定向 | `APPDATA` 指到 `D:\mbdsdr\.tmp\clean_test\appdata_redirected` 后启动冻结版：该目录里出现 `desktop_settings.json.corrupt-20261105-175724`（损坏配置被备份，证明读的是重定向目录）；同时 `C:\Users\xxhzb\AppData\Roaming\mbdsdr\desktop_settings.json` 的 mtime 保持 `17:53:52` 不变 | 跟随重定向，不写真实用户目录 | 无差距 |
@@ -337,6 +337,16 @@ windows 回到 **13/1、7/1**，四组均在上限内；log **PASS 202.1s**，`C
 overlap 两次数字不同属**已记录的抖动**（见 `SIZE_LIMITS` 注释：控件存活/启动时序
 会让同一命令的数字跳动），本轮**未改上限、未改产品代码**；上限仍是
 `TEMPORARY_WIDENED`，等 UI 收口后专门重测收紧。
+
+**2026-11-06 05:10–05:21 最终结论（干净树 HEAD `385d0e15`）**：产物用
+`git worktree` 按 HEAD 全新检出后构建（`d:\mbdsdr\.tmp\wf-dist1`，4425 文件 /
+815.7 MiB），**不含**性能线留在主工作区的那 10 行未提交改动（`desktop/main_window.py`
+在主工作区仍是 `M`，HEAD 内没有这些行）。九步：build 185.2s、smoke 6.3s（13/13）、
+subtree PASS 178.0s（逐字 643 字符）、single 1.7s（387）、optional 15.6s（134）、
+qt 2.1s（175）、narrow 33.9s（`1265×618` / `960×633`）、**overlap FAIL**
+（offscreen 36/1、15/1 均在上限内；windows 15>13、9>7）、log 194.6s；
+汇总 **PASS 8 / FAIL 1**，总耗时 617.4s。overlap 按 `TEMPORARY_WIDENED` 口径交
+UI 布局线重测，本线**不改阈值、不改产品代码**。
 
 **子树回归已修复**：`c72896c4` — `desktop/main.py:190` — `_startup_dependency_problems`
 （`git show --name-only c72896c4` 命中 `desktop/main.py` 与 `scripts/release_check.py`；
@@ -806,7 +816,7 @@ python scripts/release_manifest.py --only license --dist d:\mbdsdr\.tmp\pyi-dist
 4. `desktop/build_windows.bat` 只调 `pyinstaller` 出 onedir 目录，无 install/uninstall 目标。
 5. 卸载残留无对象可查：没有安装器写注册表/快捷方式。用户数据落点见
    `docs/release-notes.md` §2——配置在 `%APPDATA%`（删目录不丢），**录音默认在
-   程序目录内的 `recordings`（删目录会一并删除，发布说明要求先移走）**，
+   用户目录 `MBDSDR/recordings`（删目录不丢；手选到程序目录内并确认过的除外）**，
    日志按 `MBDSDR_STARTUP_LOG` → 非 C 盘 → 程序目录 `logs` → `%PROGRAMDATA%` 落点。
 6. 「装 → 启动」的后半段由 `scripts/release_check.py` 的 `smoke` 步替代覆盖：
    便携包解压后启动到窗口标题 `MBDSDR - AI 定义无线电` 出现即通过。

@@ -1253,18 +1253,21 @@ def test_squelch_migration_notice_is_visible_on_old_config(tmp_path, qapp):
 
 
 # ---------------------------------------------------------------------------
-# 5.2 录音目录：可配置、默认不落 C 盘用户目录、只影响新录音
+# 5.2 录音目录：可配置、默认落用户目录（不随程序目录删除）、只影响新录音
 # ---------------------------------------------------------------------------
-def test_record_dir_default_is_sibling_of_project_not_user_dir():
+def test_record_dir_default_is_in_user_dir():
     default = settings_mod.default_record_dir()
     project = settings_mod.project_root()
-    assert default == os.path.join(os.path.dirname(project), "recordings")
+    assert default == os.path.join(os.path.expanduser("~"), "MBDSDR",
+                                   "recordings")
     assert os.path.basename(default) == "recordings"
     # 不再使用旧的 ~/mbdsdr_recordings，也不塞进 ~/.mbdsdr 配置目录
     assert default != os.path.expanduser("~/mbdsdr_recordings")
     assert not default.startswith(os.path.expanduser("~/.mbdsdr"))
-    if os.name == "nt" and project.startswith("D:"):
-        assert default == r"D:\mbdsdr\recordings"
+    # 关键红线：绿色包「删目录即卸载」不能连带删除录音
+    assert not settings_mod.record_dir_inside_program(default)
+    assert settings_mod.record_dir_inside_program(
+        os.path.join(settings_mod.program_install_dir(), "recordings"))
 
 
 def test_record_dir_blank_means_default_and_ensure_creates(tmp_path):

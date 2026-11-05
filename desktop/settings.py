@@ -21,8 +21,6 @@ import logging
 import math
 import os
 import platform
-import re
-import stat
 import sys
 import time
 import uuid
@@ -92,87 +90,61 @@ def project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-#: 受保护安装根目录：普通用户默认写不进去（Program Files / Windows / ProgramData）。
-_PROTECTED_INSTALL_ROOT = re.compile(
-    r"^[A-Za-z]:\\(?:Program Files(?: \(x86\))?|Windows|ProgramData)(?:\\|$)",
-    re.IGNORECASE)
+def program_install_dir() -> str:
+    """程序安装根：冻结版 = 含 exe 的 ``<dist>/MBDSDR``；源码直跑 = 仓库根。
 
-
-def _dir_writable(directory: str) -> bool:
-    """启动期可写性判断（**不做真实写入探测**）。
-
-    不用 ``tempfile.mkstemp`` 试写：在 ACL 显式 deny-write 的目录上，
-    Windows 的创建文件调用会卡住数十秒（实测 faulthandler 停在
-    ``tempfile._mkstemp_inner``），启动期不能冒这个风险。
-    这里只看「已存在目录的只读属性」+「是否位于受保护安装根」。
-    ACL 级只读（非 Program Files 的自定义目录）由 ensure_record_dir
-    在真正写盘时给出可行动错误，而不是在启动期猜。
+    PyInstaller onedir 下 ``sys._MEIPASS = <dist>/MBDSDR/_internal``，
+    :func:`project_root` 正好就是它，上一级才是「用户会整个删掉」的目录。
     """
-    parent = directory if os.path.isdir(directory) else os.path.dirname(directory)
-    if not os.path.isdir(parent):
-        return False
-    if _PROTECTED_INSTALL_ROOT.match(os.path.abspath(parent)):
-        return False
+    root = project_root()
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(root)
+    return root
+
+
+def _is_under(path: str, root: str) -> bool:
     try:
-        mode = os.stat(parent).st_mode
-    except OSError:
+        p = os.path.normcase(os.path.abspath(path))
+        r = os.path.normcase(os.path.abspath(root))
+        return os.path.commonpath([p, r]) == r
+    except ValueError:  # Windows 跨盘符
         return False
-    return bool(mode & stat.S_IWRITE)
 
 
-def _first_writable_record_dir(primary: str) -> str:
-    """默认目录不可写时的回退顺序：非 C 盘 → %LOCALAPPDATA% → 家目录。"""
-    for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
-        root = f"{letter}:\\"
-        if os.path.isdir(root):
-            candidate = os.path.join(root, "mbdsdr", "recordings")
-            if _dir_writable(candidate):
-                return candidate
-    appdata = os.path.expandvars("%LOCALAPPDATA%")
-    if appdata and not appdata.startswith("%"):
-        candidate = os.path.join(appdata, "MBDSDR", "recordings")
-        if _dir_writable(candidate):
-            return candidate
-    candidate = os.path.join(os.path.expanduser("~"), ".mbdsdr", "recordings")
-    if _dir_writable(candidate):
-        return candidate
-    return primary
+def record_dir_inside_program(directory: str) -> bool:
+    """该目录是否位于程序目录内（删/升级程序目录会连录音一起删）。"""
+    return _is_under(directory, program_install_dir())
 
 
-#: 默认录音目录按程序根目录缓存：安装目录只读时不必每次调用都做写探测。
-_DEFAULT_RECORD_DIR_CACHE: Dict[str, str] = {}
+def record_dir_needs_confirmation(directory: str, acked: bool) -> bool:
+    """程序目录内的录音目录且从未确认过 → 首次录音必须先弹窗。"""
+    return (not acked) and record_dir_inside_program(directory)
 
 
 def default_record_dir() -> str:
-    """录音目录默认值：程序根目录的**同级** ``recordings``。
+    """录音目录默认值：用户目录下 ``MBDSDR/recordings``。
 
-    本机项目在 ``D:\\mbdsdr\\MBDSDR``，故默认是 ``D:\\mbdsdr\\recordings``——
-    刻意不写 ``C:\\Users\\...`` 用户目录（该目录只放少量配置，不堆大文件）。
-
-    例外：程序装在 ``C:\\Program Files`` 等只读目录、且机器上没有非 C 盘时，
-    同级 ``recordings`` 永远写不进去。此时（且仅在用户**没手选**目录时）
-    回退到第一个可写位置，避免「一装好就默认不能录音」。
+    历史（0.2.0 及更早）默认是「程序目录同级 ``recordings``」——便携包按
+    「删目录即卸载」分发时，删程序目录会把用户录音一起删掉。改为用户目录后，
+    删/升级程序目录不再影响录音；旧配置的迁移见 :func:`resolve_record_dir`。
     """
-    primary = os.path.join(os.path.dirname(project_root()), "recordings")
-    cached = _DEFAULT_RECORD_DIR_CACHE.get(primary)
-    if cached:
-        return cached
-    chosen = primary
-    if not _dir_writable(primary):
-        chosen = _first_writable_record_dir(primary)
-        if chosen != primary:
-            print(f"[settings] 程序目录不可写，录音默认目录回退到 {chosen}",
-                  file=sys.stderr)
-    _DEFAULT_RECORD_DIR_CACHE[primary] = chosen
-    return chosen
+    return os.path.join(os.path.expanduser("~"), "MBDSDR", "recordings")
 
 
 def resolve_record_dir(value: Any) -> str:
-    """把设置里的录音目录归一为绝对路径；留空/None → :func:`default_record_dir`。"""
+    """把设置里的录音目录归一为绝对路径；留空/None → :func:`default_record_dir`。
+
+    旧配置可能存相对路径（旧语义 = 程序目录旁 ``recordings``）。相对路径一律
+    按旧根（程序目录的上一级）解析，不随进程 cwd 漂移；解析结果仍可能落在
+    程序目录内，由 :func:`record_dir_needs_confirmation` 在首次录音时拦一次。
+    """
     raw = "" if value is None else str(value).strip()
-    if raw:
-        return os.path.expanduser(os.path.expandvars(raw))
-    return default_record_dir()
+    if not raw:
+        return default_record_dir()
+    expanded = os.path.expanduser(os.path.expandvars(raw))
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(os.path.dirname(project_root()), expanded)
+    return expanded
 
 
 # ----------------------------------------------------------------------

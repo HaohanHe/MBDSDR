@@ -328,11 +328,20 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(
         key="record_dir", group="存储与日志", kind="text",
         label="录音目录", default="",
-        help=("录制的 IQ/音频文件存到这里。留空 = 程序目录旁的 "
-              "recordings（本机即 D:\\mbdsdr\\recordings，默认不写 C 盘用户目录）。"
+        help=("录制的 IQ/音频文件存到这里。留空 = 用户目录下的 "
+              "MBDSDR/recordings（删/升级程序目录不会连带删除录音）。"
               "改目录只影响新录音，已有录音不动。"),
         source=("desktop/main_window.py:5536 旧写死 ~/mbdsdr_recordings；"
                 "新唯一来源 desktop/settings.py:resolve_record_dir"),
+    ),
+    SettingItem(
+        key="record_dir_inside_program_ack", group="存储与日志", kind="bool",
+        label="已确认允许录音写进程序目录", default=False,
+        help=("内部键：只有用户把录音目录手选到程序目录内、并在首次录音弹窗里"
+              "选「仍用当前目录」时才置真。置真后不再重复提示；目录一旦移出"
+              "程序目录即失效（判定见 settings.record_dir_inside_program）。"),
+        source="desktop/main_window.py:_start_recording 前置确认",
+        exposed=False,
     ),
     SettingItem(
         key="log_level", group="存储与日志", kind="enum",

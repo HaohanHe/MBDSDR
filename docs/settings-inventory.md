@@ -91,7 +91,7 @@
 | 24 | 星象仪图层四开关 | `rf_sky_view.py:6944-6957` | 底栏即时，不持久 | **锁死**（双入口） |
 | 25 | 调谐吸附步进 | 旧 `spectrum_widget.py:921` `snap_interval=10_000`；控制面板步进下拉 | 控制面板即时；本轮起也持久化 | **暴露** `tuning_step_hz`（与顶部「步进」双向同步，改哪边都落盘） |
 | 26 | Max/Min hold、dB 范围 | `spectrum_widget.py` 会话态 | 工具栏 | **锁死**（测量态非偏好） |
-| 27 | 录音目录 | `main_window.py:5749` 旧值 `~/mbdsdr_recordings`；新默认由 `settings.py:default_record_dir()` 给出 | 设置面板可改 + 选择/打开目录 | **暴露** `record_dir`（默认 `D:\mbdsdr\recordings`，只影响新录音） |
+| 27 | 录音目录 | `main_window.py:5749` 旧值 `~/mbdsdr_recordings`；新默认由 `settings.py:default_record_dir()` 给出 | 设置面板可改 + 选择/打开目录 | **暴露** `record_dir`（默认 `<用户目录>\MBDSDR\recordings`，删/升级程序目录不丢；手选到程序目录内时首次录音弹窗确认，见 `record_dir_inside_program_ack`，前者只影响新录音） |
 | 28 | 日志级别 | 无 `basicConfig`，只有分散 `getLogger` | 不能 | **锁死**（没有消费点） |
 | 29 | 采样率/带宽/增益/解调/音量 | 旧 `settings.py` + 设备/控制面板 | 面板即时且已持久 | **锁死**（已有单一入口） |
 | 30 | AI provider/model/key/base_url | `ai_panel.py` 配置对话框 | 已有 UI | **锁死**（避免密钥双入口） |
@@ -144,7 +144,7 @@
 | 大气压 | 高原/低压天气 | 1013.25：标准大气（`rf_sky_view` 常量） | 800–1100，越界夹住并提示；即时 `set_refraction_params` |
 | 气温 | 冬夏/高低温 | 10 ℃：该常量注释的标准大气 | -50–50，越界夹住；即时 |
 | 光害等级（Bortle） | 换观测地（城里/乡下/山顶） | 3：`stars.py DEFAULT_BORTLE=3`（城郊） | 1–9，越界夹住；即时 `set_bortle`；同一 120° 视场实测可见星 Bortle 3=1456 颗、Bortle 8=194 颗 |
-| 录音目录 | 换盘符/避免写满系统盘 | 留空 = 程序目录同级 `recordings`（本机 `D:\mbdsdr\recordings`），不写 C 盘用户目录 | 文本路径；留空回默认；选择/打开目录失败弹可读原因；只影响新录音 |
+| 录音目录 | 换盘符/避免写满系统盘 | 留空 = 用户目录下 `MBDSDR\recordings`（删/升级程序目录不会连带删除录音）；旧配置相对路径按旧根解析；手选到程序目录内会首次弹窗确认 | 文本路径；留空回默认；选择/打开目录失败弹可读原因；只影响新录音 |
 | FFT 点数 | 找弱信号/看细节 vs 要流畅 | 2048：现有默认；档位与 C++ `settings_dialog` 对齐 | 1024/2048/4096 三档枚举；未知/8192/16384 回 2048 并记原因；即时 `set_fft_size` |
 | 窗函数 | 测幅度（Flattop）/低旁瓣（Nuttall） | Nuttall：现有默认 | 6 种枚举；未知回 Nuttall；即时 |
 | 平均帧数 | 弱信号平滑 vs 快速响应 | 1：现有默认 | 1/4/8/16；未知回 1；即时 |
@@ -268,9 +268,10 @@
 - **`gain_db` 一行接线**：已派给操作逻辑线，位置 `main_window.py::_on_gain_changed`
   （增益改动写回 `SharedDemodConfig.gain_db`，变化才触发静噪基线重标）。本线只登记
   契约，不改该文件。
-- 录音目录消费点仍是 `desktop/main_window.py:5749` 的 `~/mbdsdr_recordings` 与
-  `:6957` 回放对话框（归操作逻辑线）。本线已提供 `settings.record_dir` /
-  `ensure_record_dir()` 读取入口，**未改消费代码**；接入说明见 §8.1。
+- 录音目录消费点：`desktop/main_window.py::_start_recording` 走
+  `settings.ensure_record_dir()`，默认由 `settings.default_record_dir()` 给
+  用户目录 `MBDSDR/recordings`（2026-11-06 起，删/升级程序目录不再连带删录音）；
+  回放对话框仍归操作逻辑线。旧值 `~/mbdsdr_recordings` 不再出现。
 - 现场另有他人未提交改动（`desktop/spectrum_widget.py` 峰值检测重写归频谱线、
   `desktop/rf_sky_view.py` 标签分级归天空线、`desktop/receive_pipeline.py` 等），
   本线**只提交自己的 hunk**：共享文件先用 `git hash-object` 构造「HEAD + 本线改动」
