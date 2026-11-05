@@ -538,4 +538,158 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
 - `tests/test_startup_log_policy.py`（新）：日志落点/内存缓冲/用户目录禁令断言。
 - `tests/test_settings_schema.py`：给录音目录错误文案用例补 `qapp` fixture，
   使 `-k record_dir` 子集可独立运行（原顺序依赖缺 QApplication 会 abort）。
+- `scripts/release_manifest.py`（新，2026-11-06）：发布清单四件机检
+  （版本号 / 依赖存在性 / 许可证 / 安装器），只读、失败非零退出；见 §9。
 - `docs/packaging.md`：本文。
+
+## 9. 发布清单四件机检（2026-11-06 实测）
+
+> **产物快照口径**：本节实测对象是 `d:\mbdsdr\.tmp\pyi-dist12`
+> （目录时间 `2026-11-06 02:33:45`，Python 3.14.0 / PyInstaller 6.16.0）。
+> 该快照早于 02:36–03:11 的若干产品提交，且工作树里 `desktop/main.py`、
+> `desktop/main_window.py` 等有别线未提交改动——**结论只对这份产物成立，
+> 重建后必须重跑**。`TEMPORARY_WIDENED` 的收紧按约定等 UI 收口后单独重测，
+> 本轮不涉及（`release_check.py` 的窄屏/overlap 阈值未动）。
+
+一次跑完四项（任一项 FAIL → 退出码 1；`--json` 输出纯 JSON）：
+
+```
+python scripts/release_manifest.py --dist d:\mbdsdr\.tmp\pyi-dist12
+```
+
+本次总判：`FAIL=19 WARN=7 PASS=23 SKIP=6 -> FAIL`（退出码 1）。
+逐项命令与实测如下。
+
+### 9.1 版本号一致性 — FAIL（3 处取值打架）
+
+逐处实际值（本脚本 `--only version` 的输出）：
+
+| 出现处 | 实际值 | 判定 |
+|---|---|---|
+| `cpp/CMakeLists.txt`（`project(mbdsdr VERSION …)`） | `0.2.0` | canonical（打包单一事实源） |
+| `pyproject.toml`（`version = …`） | `0.2.0` | PASS |
+| `mbdsdr_ai/__init__.py`（`__version__`） | `0.8.0` | **FAIL ≠ 0.2.0** |
+| `mbdsdr_ai/core/__init__.py`（`__version__`） | `0.1.0` | **FAIL ≠ 0.2.0** |
+| `desktop/main.py`（`setApplicationVersion(...)`） | `0.1.0` | **FAIL ≠ 0.2.0** |
+| `desktop/MBDSDR.spec` | 未声明 `version`/`version_file` | WARN：EXE 无版本资源 |
+| 产物 `MBDSDR.exe` | `FileVersion`/`ProductVersion` 均为空 | WARN（与 spec 一致） |
+| `README.md` 首行 | 无版本号（`# MBDSDR · AI 定义无线电…`） | WARN |
+| `desktop/main_window.py:_show_about` | 未显示版本号 | WARN |
+| 安装器脚本 | 无安装器（见 §9.4） | SKIP |
+
+机检口径：以 `cpp/CMakeLists.txt` 为 canonical，其余出现处用正则**必须命中**
+（文件被删/正则失配会 FAIL，防止“取值点消失后静默变绿”）；命中值不同即 FAIL；
+“确实没有版本号”的缺口报 WARN。复跑：
+
+```
+python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist12
+```
+
+要转绿需先裁定：产品版本是 `0.2.0` 还是 `0.8.0`，然后把
+`mbdsdr_ai/__init__.py`、`mbdsdr_ai/core/__init__.py`、`desktop/main.py`
+三处对齐；spec 若要 EXE 文件属性带版本，需加 `version=` 资源并在关于对话框/文档首行
+同步展示。**本轮只报不修**：改版本号等于改产品对外口径，不能在发布清单里顺手做。
+
+### 9.2 依赖 pin 存在性 — FAIL（1 个声明包不在产物里）
+
+声明面 = 根 `requirements.txt` + `desktop/requirements.txt` 实际依赖行（12 个发行包）
++ spec 点名模块/数据项。产物定位 = `_internal` 顶层 **+ exe 内嵌 `PYZ.pyz` 模块表**；
+纯 Python 包（requests、pyserial、sgp4…）本来就不在 `_internal` 目录里，
+这是 PyInstaller 6 onedir 的正常布局，只扫 `_internal` 会假报“全缺”。
+
+| 声明 | import 名 | 产物定位 | 判定 |
+|---|---|---|---|
+| numpy | numpy | `_internal/` + `PYZ.pyz` | PASS |
+| Pillow | PIL | `_internal/` + `PYZ.pyz` | PASS |
+| pymap3d | pymap3d | **无**（`_internal` 与 PYZ 都没有） | **FAIL** |
+| pyserial | serial | `PYZ.pyz` | PASS |
+| PySide6 | PySide6 | `_internal/` + `PYZ.pyz` | PASS |
+| requests | requests | `PYZ.pyz` | PASS |
+| scipy | scipy | `_internal/` + `PYZ.pyz` | PASS |
+| sgp4 | sgp4 | `PYZ.pyz` | PASS |
+| skyfield | skyfield | `PYZ.pyz` | PASS |
+| sounddevice | `_sounddevice` | `PYZ.pyz` | PASS |
+| websocket-client | websocket | `PYZ.pyz` | PASS |
+| websockets | websockets | `_internal/` + `PYZ.pyz` | PASS |
+| spec `collect_submodules('PySide6')` | — | 产物有 PySide6 | PASS |
+| spec `collect_submodules('mbdsdr_ai')` | — | 产物有 mbdsdr_ai | PASS |
+| spec `collect_submodules('scipy._external')` | — | 88 个模块 | PASS |
+| spec datas `mbdsdr_ai/astronomy.py` | — | `_internal/mbdsdr_ai/astronomy.py` | PASS |
+
+两个差集：
+
+- **差集①「声明了但产物没有」**：`pymap3d`。
+  证据：`requirements.txt` 与 `desktop/requirements.txt` 都写了 `pymap3d>=2.9.0`，
+  但源码里没有任何 `import pymap3d`（该名字只出现在 `desktop/main.py` 的缺件提示
+  字符串与文档，不构成静态导入），PyInstaller 自然不会收。它同时是**死声明**：
+  要么删声明，要么先补真实调用再进 `hiddenimports`；两种都得改产品/依赖口径，本轮只报。
+- **差集②「产物里有但没声明」**（35 个）。按 `Requires-Dist` 闭包可归因为已声明包
+  传递依赖的 8 个：`certifi, cffi, charset-normalizer, idna, jplephem, pycparser,
+  shiboken6, urllib3`；不在声明面也不在闭包的 27 个：
+  `brotli, colorama, contourpy, cryptography, cycler, et-xmlfile, fonttools,
+  iniconfig, kiwisolver, lxml, matplotlib, openpyxl, packaging, pandas, pluggy,
+  psutil, pygments, pyparsing, pyrtlsdr, pytest, python-dateutil, setuptools, six,
+  typing-extensions, tzdata, xlsxwriter, zstandard`
+  （完整名单以脚本 `差集②` 行为准）。其中 `pytest`/`pygments`/`iniconfig`/`pluggy`
+  属测试框架泄漏，`pyrtlsdr` 属 GPL 合规问题（见 §9.3）。
+
+复跑：
+
+```
+python scripts/release_manifest.py --only deps --dist d:\mbdsdr\.tmp\pyi-dist12
+```
+
+### 9.3 许可证与合规文件 — FAIL（项目声明没进包 + GPL 陈述与产物相反）
+
+实测（`--only license`）：
+
+- **PASS**：仓库既有数据 GPL 扫描（`scripts/check_data_licenses.py --check`）
+  `scanned data files: 392 | 合规检查通过`——沿用该结论，未另写一套数据许可规则。
+- **PASS**：仓库侧 `LICENSE`、`NOTICE.md`、`LICENSING.md` 三件都在位。
+- **FAIL**：产物缺项目自身 `LICENSE` 与 `NOTICE.md`。构建只打 `datas`，
+  没有把这两件收进包根/`_internal`。产物里现有 21 个许可证类文件全是第三方 wheel
+  自带（numpy/cryptography/websockets/setuptools 等），不能替代项目声明。
+- **FAIL（GPL 陈述与产物相反）**：`NOTICE.md`/`LICENSING.md` 写 `pyrtlsdr`
+  “用户自行安装、不随包分发”，但 `_internal` 里有 `pyrtlsdr-0.2.93.dist-info`，
+  `PYZ.pyz` 顶部模块表里有 `rtlsdr`（GPL-3.0），且 `_internal` 随包
+  `rtlsdr.dll`/`librtlsdr.dll`（上游 osmocom rtl-sdr，GPL-2.0）。
+  `librtlsdr` 在 `NOTICE.md` 里完全没有登记。
+- **FAIL**：`PySide6`/`shiboken6`（LGPL-3.0）在产物里，但找不到 Qt/PySide6 的
+  LGPL 许可证文本；`shiboken6` 也未在 `NOTICE.md` 登记。LGPL 要求随分发附许可证
+  文本与可重新链接说明。
+- **PASS**：产物里带 `attribution` 的 CC BY-SA 数据文件 3 个（署名随数据走）。
+
+复跑：
+
+```
+python scripts/release_manifest.py --only license --dist d:\mbdsdr\.tmp\pyi-dist12
+```
+
+### 9.4 安装器冒烟 — SKIP（无安装器，本条不适用）
+
+依据（脚本逐条打印，可复现）：
+
+- 全仓 glob `*.iss`（Inno Setup）/ `*.nsi`（NSIS）/ `*.wxs`（WiX）/ `*.msix`/
+  `*.appxmanifest`/`*.pkgproj` **0 命中**；
+- `scripts/package_windows.ps1` 自述“本脚本只做构建+收集+打包，不做安装器
+  （无注册表/快捷方式）”，产物是 zip 便携包 + SHA256；
+- `desktop/build_windows.bat` 只调 `pyinstaller` 出 onedir 目录，无 install/uninstall 目标。
+
+因此“装 → 启动到窗口出现 → 卸载后残留检查”没有安装器对象可跑；便携包启动这一半
+已由 `scripts/release_check.py` 的 `smoke` 步覆盖（窗口标题 `MBDSDR - AI 定义无线电`
+出现即通过），卸载残留没有注册表/快捷方式可查。若以后新增安装器描述文件，
+本脚本会 FAIL 提示“必须补配套安装/启动/卸载冒烟”，不会静默跳过。
+
+复跑：
+
+```
+python scripts/release_manifest.py --only installer
+```
+
+### 9.5 四项的机检契约
+
+`scripts/release_manifest.py` 三态输出 `PASS/WARN/FAIL/SKIP`，逐项独立汇总，
+任一项 FAIL → 进程退出码 1；`--json` 时 stdout 只有 JSON（无人类可读前缀）。
+`WARN` 表示“缺口存在但不构成取值冲突/不构成本轮判定红”（如 spec 未注入版本资源、
+非 copyleft 的未声明包）；`SKIP` 只用于“对象不存在”（如无安装器），不算绿。
+
