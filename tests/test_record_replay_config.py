@@ -32,6 +32,19 @@ import pytest  # noqa: E402
 log = logging.getLogger(__name__)
 
 
+def _wait_replay_started(window, timeout_ms=3000):
+    """回放读盘已后台化（P1）：轮询等 _replay_timer 起来。
+
+    offscreen 下 queued 信号靠事件循环派发，不能像同步实现那样返回即断言。
+    """
+    from PySide6.QtTest import QTest
+    waited = 0
+    while waited < timeout_ms and window._replay_timer is None:
+        QTest.qWait(50)
+        waited += 50
+    return window._replay_timer is not None
+
+
 class _StubBackend:
     """只提供录音/回放路径需要的最小后端接口。"""
 
@@ -138,6 +151,7 @@ def test_replay_stops_recording_and_saves_sidecar(window, monkeypatch, tmp_path)
                         lambda *a, **k: (iq_path, ""))
 
     window._replay_recording()
+    assert _wait_replay_started(window), "S5：读盘完成后没有进入回放"
 
     assert window._recording is False, "S5：回放开始后录音仍为 True"
     assert window._record_stream_fh is None, "S5：回放开始后录音文件句柄仍开着"
@@ -164,7 +178,7 @@ def test_start_recording_stops_replay_first(window, monkeypatch, tmp_path):
                         lambda *a, **k: (iq_path, ""))
     window._active_sdr_backend = _StubBackend()
     window._replay_recording()
-    assert window._replay_timer is not None
+    assert _wait_replay_started(window), "S5：读盘完成后没有进入回放"
 
     window._start_recording()
     assert window._replay_timer is None, "S5：开录时没有先停回放"

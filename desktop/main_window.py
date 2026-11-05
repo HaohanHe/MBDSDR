@@ -38,6 +38,10 @@ DATA_STALE_S = 2.0
 DATA_LOST_S = 10.0
 HEALTH_GRACE_S = 3.0
 
+#: 回放单次载入上限：2.4 MHz 下约 10 s、192 MB complex64。
+#: 超限即截断并在界面明确告知——不静默丢样本，也不让一次回放吃掉数 GB。
+REPLAY_MAX_SAMPLES = 24_000_000
+
 #: 云台指令在后台线程执行。GUI 线程每拍最多等这么久收结果（快速后端仍在
 #: 同一拍落地）；超过就本拍先放过，下一拍再收——绝不让云台把界面冻住。
 GIMBAL_DISPATCH_GRACE_S = 0.05
@@ -607,6 +611,9 @@ class MainWindow(QMainWindow):
     _human_approval_requested = Signal(object)
     # 发射线程 → UI 线程的收尾（TxSession.status() 字典），跨线程改按钮必须走信号
     _tx_finished = Signal(object)
+    # 回放后台读盘线程 → UI 线程（显式 QueuedConnection；worker 绝不碰控件）
+    replay_load_progress = Signal(int)       # 0-100，worker emit
+    replay_load_finished = Signal(object)    # 结果 dict（含 error/cancelled）
 
     def __init__(self):
         super().__init__()
@@ -788,6 +795,17 @@ class MainWindow(QMainWindow):
         self._replay_total: int = 0
         self._replay_block: int = 0
         self._replay_resume_poll: bool = False
+        # 读盘 worker：只负责 baseband_io.load_iq + emit；控件全留在 GUI 线程
+        self._replay_load_thread: Optional[threading.Thread] = None
+        self._replay_load_cancel = threading.Event()
+        self._replay_load_path = ""
+        self._replay_progress_dialog: Optional[QProgressDialog] = None
+        # 显式 QueuedConnection：回调必须落在 GUI 线程（DirectConnection 会在
+        # worker 线程里改 QProgressDialog，Qt 直接断言/崩溃）
+        self.replay_load_progress.connect(
+            self._on_replay_load_progress, Qt.QueuedConnection)
+        self.replay_load_finished.connect(
+            self._on_replay_loaded, Qt.QueuedConnection)
 
         # ---- 最小发射面（PTT）：真人确认 + 一次性 token + TxSession 状态机 ----
         # 只有「设备有 write_tx 通道 + 人工确认通过」才允许发波；无硬件时按钮置灰。
@@ -8095,7 +8113,15 @@ class MainWindow(QMainWindow):
         用 QFileDialog 选文件 → baseband_io.load_iq() 读回真实 IQ →
         QTimer 按原始采样率把样本分块推给 spectrum.update_iq() 做离线回放。
         文件里有什么就播什么，绝不造假。回放期间暂停实时 SDR 轮询，结束后恢复。
+
+        **读盘在后台线程，进度可见、可取消；GUI 线程只做播放器起停。**
         """
+        if (self._replay_load_thread is not None
+                and self._replay_load_thread.is_alive()):
+            # 正在读盘：再点「回放」= 取消读取（录音/实时接收都不受影响）。
+            self._replay_load_cancel.set()
+            self.statusBar().showMessage("正在取消读取录音…", MSG_NORMAL)
+            return
         if self._replay_timer is not None:
             # 回放中再点「回放」= 停止当前回放，**不再弹文件框**。
             # 旧行为是先 _stop_replay 再 getOpenFileName：用户取消选择就等于
@@ -8118,15 +8144,109 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "回放失败", f"baseband_io 不可用：\n{e}")
             return
+        self._start_replay_load(path)
+
+    def _start_replay_load(self, path: str) -> None:
+        """后台读盘：worker 只读文件 + emit，控件一律留在 GUI 线程。"""
+        if (self._replay_load_thread is not None
+                and self._replay_load_thread.is_alive()):
+            # 已在读盘：再点「回放」= 取消读取（不打断录音），状态栏说明。
+            self._replay_load_cancel.set()
+            self.statusBar().showMessage("正在取消读取录音…", MSG_NORMAL)
+            return
         try:
-            rec = baseband_io.load_iq(path)
+            from mbdsdr_ai import baseband_io
         except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "回放失败", f"读取文件失败：\n{e}")
+            QMessageBox.warning(self, "回放失败", f"baseband_io 不可用：\n{e}")
+            return
+
+        self._replay_load_cancel.clear()
+        self._replay_load_path = path
+        dlg = QProgressDialog("正在读取录音…", "取消", 0, 100, self)
+        # NonModal：主窗口保持可拖动，进度框只是提示，不夺输入焦点。
+        # 不用 WindowModal/ApplicationModal——那会让人以为窗口又卡住了。
+        dlg.setWindowModality(Qt.NonModal)
+        dlg.setMinimumDuration(0)     # 立即显示，不等 4 秒后才冒出来
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.canceled.connect(self._replay_load_cancel.set)
+        dlg.setValue(0)
+        self._replay_progress_dialog = dlg
+
+        def _work():
+            # 铁律：worker 里只允许碰 load_iq / Event / 两个 Signal 的 emit。
+            try:
+                rec = baseband_io.load_iq(
+                    path,
+                    max_samples=REPLAY_MAX_SAMPLES,
+                    chunk_samples=1 << 20,
+                    progress=lambda done, total: self._emit_replay_progress(
+                        done, total),
+                    should_cancel=self._replay_load_cancel.is_set,
+                )
+            except Exception as e:  # noqa: BLE001
+                rec = {"error": f"{type(e).__name__}: {e}"}
+            try:
+                self.replay_load_finished.emit(rec)
+            except RuntimeError:
+                pass      # 窗口已销毁（关窗后 daemon 线程收尾）
+
+        self._replay_load_thread = threading.Thread(
+            target=_work, name="replay-load", daemon=True)
+        self._replay_load_thread.start()
+
+    def _emit_replay_progress(self, done: int, total: int) -> None:
+        """worker 侧进度：只发整数百分比，失败（窗口已关）就放弃。"""
+        pct = int(100 * done / max(1, total))
+        try:
+            self.replay_load_progress.emit(max(0, min(100, pct)))
+        except RuntimeError:
+            pass
+
+    def _on_replay_load_progress(self, pct: int) -> None:
+        dlg = self._replay_progress_dialog
+        if dlg is not None:
+            dlg.setValue(max(0, min(100, int(pct))))
+
+    def _on_replay_loaded(self, rec: dict) -> None:
+        """worker 结果回 GUI：先收进度框，再走原有的起播/取消/失败路径。"""
+        dlg = self._replay_progress_dialog
+        self._replay_progress_dialog = None
+        if dlg is not None:
+            try:
+                dlg.close()
+            finally:
+                dlg.deleteLater()
+        self._replay_load_thread = None
+        if rec.get("cancelled"):
+            # 取消不打断录音：原实现是"文件确认可播后才停录"，这里直接返回。
+            self.statusBar().showMessage(
+                "已取消读取录音（录音与实时接收未受影响）", MSG_NORMAL)
             return
         if rec.get("error"):
             QMessageBox.warning(self, "回放失败", str(rec["error"]))
             return
+        self._begin_replay_from_rec(rec, self._replay_load_path)
+
+    def _begin_replay_from_rec(self, rec: dict, path: str):
+        """读盘完成后在 GUI 线程起播（原同步正文整体搬来，只多 path 参数）。"""
+        if rec.get("error"):
+            QMessageBox.warning(self, "回放失败", str(rec["error"]))
+            return
         iq = np.asarray(rec["iq"], dtype=np.complex64)
+        if rec.get("truncated"):
+            # 截断必须先说出来再起播：把「只载入前 N 个」装成「回放完成」
+            # 等于把 17% 的播放伪装成 100%，是另一种假读数。
+            total = int(rec.get("file_samples") or iq.size)
+            secs = rec.get("file_duration_s")
+            tail = (f"，约 {secs:.1f} s"
+                    if isinstance(secs, (int, float)) else "（时长未知）")
+            QMessageBox.information(
+                self, "回放说明",
+                f"文件共 {total:,} 个样本{tail}；本次只载入前 {int(iq.size):,} 个"
+                f"（上限 {REPLAY_MAX_SAMPLES:,}）。\n"
+                "原因：整文件读入需要数 GB 内存。\n"
+                "下一步：分段录音回放；完整回放的分块流式播放在后续版本提供。")
         if iq.size < 64:
             QMessageBox.information(self, "回放", "文件中有效样本太少，无法回放。")
             return
@@ -8239,6 +8359,10 @@ class MainWindow(QMainWindow):
         下面 _start_iq_streams() 会继续复用同一条 OutputStream（start 幂等）；
         若后端未连接，声卡留空跑也无害（无数据入队即静音）。
         """
+        if (self._replay_load_thread is not None
+                and self._replay_load_thread.is_alive()):
+            # 关窗/停止走同一处：先把读盘 worker 叫停，避免窗口销毁后还在读文件。
+            self._replay_load_cancel.set()
         if self._replay_timer is not None:
             try:
                 self._replay_timer.stop()
@@ -9047,6 +9171,10 @@ class MainWindow(QMainWindow):
 
         全部 RuntimeError 兜底：C++ 侧已销毁时不再重复清理。
         """
+        # 回放读盘 worker 是 daemon 线程：窗口销毁前先叫停，避免它继续读大文件。
+        if (getattr(self, "_replay_load_thread", None) is not None
+                and self._replay_load_thread.is_alive()):
+            self._replay_load_cancel.set()
         for attr in ("_sky_update_timer", "_utc_timer", "_sat_track_timer",
                      "_gnss_timer", "_iq_poll_timer", "_record_timer",
                      "_replay_timer", "_repaint_timer"):
