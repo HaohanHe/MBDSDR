@@ -1,0 +1,130 @@
+{
+  "schema": "mbdsdr.sensitivity.fixtures/1",
+  "directory": "tests/fixtures/sensitivity",
+  "provenance": "self-generated",
+  "honesty": "synthetic / NOT OTA",
+  "generated_by": "scripts/make_sensitivity_fixtures.py",
+  "regenerate": "python scripts/make_sensitivity_fixtures.py",
+  "bootstrap": "本目录已随仓入库，clone 后即可读。当前 scripts/decode_sensitivity.py 的六个模式只用 tests/fixtures/decode_pipeline 与仓内编码器；本目录的 navtex/apt/wspr/lrpt 波形是给灵敏度扩模式预留的合成用例，尚未被脚本消费。需要从零重建时，在仓库根依次执行 `python scripts/make_sensitivity_fixtures.py`、`python scripts/decode_sensitivity.py`。",
+  "date": "2026-11-06",
+  "note": "全部为仓内编码器合成的 clean 信号；没有任何一条是空中实录。SNR 口径由 scripts/decode_sensitivity.py 的 MODE_BASIS 自述，跨模式不可横比。",
+  "reused": {
+    "ais": {
+      "fixture_dir": "tests/fixtures/decode_pipeline",
+      "file": "ais_two_frames.cf32",
+      "note": "仓内既有合成 fixture；manifest 见 decode_pipeline/manifest.json"
+    },
+    "adsb": {
+      "fixture_dir": "tests/fixtures/decode_pipeline",
+      "file": "adsb_three_frames.cf32",
+      "note": "仓内既有合成 fixture；manifest 见 decode_pipeline/manifest.json"
+    },
+    "aprs": {
+      "fixture_dir": "tests/fixtures/decode_pipeline",
+      "file": "aprs_two_frames_48000.wav",
+      "note": "仓内既有合成 fixture；manifest 见 decode_pipeline/manifest.json"
+    }
+  },
+  "modes": {
+    "pocsag": {
+      "file": "pocsag.wav",
+      "domain": "audio",
+      "fs_hz": 22050,
+      "samples": 20580,
+      "truth": {
+        "address": 54321,
+        "message": "HELLO",
+        "baud": 1200
+      },
+      "condition": "FSK 音频 1200 bd，地址 54321 / HELLO",
+      "generation": "mbdsdr_ai.pocsag_decoder.pocsag_encode",
+      "sha256": "8e6158dd1e2a2d8003c00ce474f1e9f6efcff0fa54f0637aa9fdff53fbd02a80"
+    },
+    "acars": {
+      "file": "acars.wav",
+      "domain": "audio",
+      "fs_hz": 48000,
+      "samples": 9920,
+      "truth": {
+        "mode": "2",
+        "reg": "BA1234",
+        "label": "H1",
+        "text": "TEST MESSAGE",
+        "baud": 2400
+      },
+      "condition": "MSK 音频 2400 bd（中心 1800 Hz），1 帧",
+      "generation": "mbdsdr_ai.acars_protocol.acars_encode",
+      "sha256": "33f32b507251647126a70af289f899b08f6556aec4ae214a82e83ecf9166659a"
+    },
+    "navtex": {
+      "file": "navtex.wav",
+      "domain": "audio",
+      "fs_hz": 12000,
+      "samples": 114240,
+      "truth": {
+        "b1": "C",
+        "b2": "A",
+        "serial": "12",
+        "text": "SENSITIVITY BASELINE TEST MESSAGE",
+        "text_decoded": "\r\nSENSITIVITY BASELINE TEST MESSAGE\r\nN"
+      },
+      "condition": "SITOR-B / CCIR 476，100 bd，中心 1000 Hz，单条 ZCZC 报文",
+      "generation": "mbdsdr_ai.navtex_decoder.navtex_encode_audio",
+      "sha256": "c77f80eb19b342f18ad26c7b03620b77baddbf16caeb8c82abc38b42dff11e10"
+    },
+    "apt": {
+      "file": "apt.wav",
+      "domain": "audio",
+      "fs_hz": 24000,
+      "samples": 240000,
+      "truth": {
+        "n_lines": 20,
+        "n_lines_decodable": 19,
+        "b_band_std_min": 30.0
+      },
+      "condition": "APT AM 2400 Hz 副载波，20 行（A=水平灰阶/B=竖条带）",
+      "generation": "mbdsdr_ai.noaa_apt_lite.synthesize_apt_audio",
+      "sha256": "a0f28926f29f036730713ec847f41a2d641c1e3685ee9c881b7afd4b59162151"
+    },
+    "ft4": {
+      "file": "ft4.cf32",
+      "domain": "iq",
+      "fs_hz": 12000,
+      "samples": 60480,
+      "truth": {
+        "text": "CQ BI1AAA OM74"
+      },
+      "condition": "4-FSK GFSK（BT=1.0，12 kS/s，105 符号/5.04 s）",
+      "generation": "mbdsdr_ai.ft4_modem.Ft4Modulator.modulate",
+      "sha256": "d3ad80347aa06c64563027211810fcd7924342fd6c10737290e90ffa73d66616"
+    },
+    "wspr": {
+      "file": "wspr.cf32",
+      "domain": "iq",
+      "fs_hz": 375.0,
+      "samples": 41472,
+      "truth": {
+        "callsign": "BI1AAA",
+        "grid": "OM74",
+        "power_dbm": 10
+      },
+      "condition": "WSPR Type 1，4-FSK 162 符号 / 110.592 s，375 Hz 复基带",
+      "generation": "mbdsdr_ai.wspr_modem.encode_audio",
+      "sha256": "89682d9d19e57992535ed4c40de7c5a93488ac475a83093382184f49599d2b73"
+    },
+    "lrpt": {
+      "file": "lrpt.cf32",
+      "domain": "iq",
+      "fs_hz": 576000,
+      "samples": 8448,
+      "truth": {
+        "payload_sha256": "6d68ea40c272f9d537054287e5fb7c7cd2f66d11b845329c05e120d4d28753f9",
+        "payload_bytes": 256,
+        "frame_bits": 2112
+      },
+      "condition": "LRPT QPSK/Costas，72 kSym/s，64 bit 同步 + 2048 bit 载荷，sps=4",
+      "generation": "mbdsdr_ai.lrpt_modem.LrptModulator.modulate",
+      "sha256": "9c066abdb4e5f521b29d75d24b30c113ad01207f9de543b18ec9fa490de4b543"
+    }
+  }
+}

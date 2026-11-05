@@ -1,0 +1,65 @@
+{
+  "schema": "mbdsdr.provenance/1",
+  "directory": "tests/fixtures/sensitivity",
+  "provenance": "self-generated",
+  "date": "2026-11-06",
+  "note": "合成灵敏度基线 fixture。由 scripts/make_sensitivity_fixtures.py 生成，NOT OTA；逐文件 SHA-256 见 files。",
+  "files": {
+    "pocsag.wav": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.pocsag_decoder.pocsag_encode",
+      "sha256": "8e6158dd1e2a2d8003c00ce474f1e9f6efcff0fa54f0637aa9fdff53fbd02a80",
+      "derivation": "python scripts/make_sensitivity_fixtures.py；FSK 音频 1200 bd，地址 54321 / HELLO；synthetic / NOT OTA",
+      "date": "2026-11-06"
+    },
+    "acars.wav": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.acars_protocol.acars_encode",
+      "sha256": "33f32b507251647126a70af289f899b08f6556aec4ae214a82e83ecf9166659a",
+      "derivation": "python scripts/make_sensitivity_fixtures.py；MSK 音频 2400 bd（中心 1800 Hz），1 帧；synthetic / NOT OTA",
+      "date": "2026-11-06"
+    },
+    "navtex.wav": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.navtex_decoder.navtex_encode_audio",
+      "sha256": "c77f80eb19b342f18ad26c7b03620b77baddbf16caeb8c82abc38b42dff11e10",
+      "derivation": "python scripts/make_sensitivity_fixtures.py；SITOR-B / CCIR 476，100 bd，中心 1000 Hz，单条 ZCZC 报文；synthetic / NOT OTA",
+      "date": "2026-11-06"
+    },
+    "apt.wav": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.noaa_apt_lite.synthesize_apt_audio",
+      "sha256": "a0f28926f29f036730713ec847f41a2d641c1e3685ee9c881b7afd4b59162151",
+      "derivation": "python scripts/make_sensitivity_fixtures.py；APT AM 2400 Hz 副载波，20 行（A=水平灰阶/B=竖条带）；synthetic / NOT OTA",
+      "date": "2026-11-06"
+    },
+    "ft4.cf32": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.ft4_modem.Ft4Modulator.modulate",
+      "sha256": "d3ad80347aa06c64563027211810fcd7924342fd6c10737290e90ffa73d66616",
+      "derivation": "python scripts/make_sensitivity_fixtures.py；4-FSK GFSK（BT=1.0，12 kS/s，105 符号/5.04 s）；synthetic / NOT OTA",
+      "date": "2026-11-06"
+    },
+    "wspr.cf32": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.wspr_modem.encode_audio",
+      "sha256": "89682d9d19e57992535ed4c40de7c5a93488ac475a83093382184f49599d2b73",
+      "derivation": "python scripts/make_sensitivity_fixtures.py；WSPR Type 1，4-FSK 162 符号 / 110.592 s，375 Hz 复基带；synthetic / NOT OTA",
+      "date": "2026-11-06"
+    },
+    "lrpt.cf32": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.lrpt_modem.LrptModulator.modulate",
+      "sha256": "9c066abdb4e5f521b29d75d24b30c113ad01207f9de543b18ec9fa490de4b543",
+      "derivation": "python scripts/make_sensitivity_fixtures.py；LRPT QPSK/Costas，72 kSym/s，64 bit 同步 + 2048 bit 载荷，sps=4；synthetic / NOT OTA",
+      "date": "2026-11-06"
+    },
+    "manifest.json": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_sensitivity_fixtures.py",
+      "sha256": "d718e6c05055abf613e9d6b0ea8a4adcab257cdc070ce06f6de5fd56b3ac3c0c",
+      "derivation": "脚本写出的 fixture 清单（合成真值与 SHA-256）",
+      "date": "2026-11-06"
+    }
+  }
+}

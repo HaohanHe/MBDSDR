@@ -10,3 +10,8 @@ tests/golden/** -text
 # 测试参考数据按字节冻结：OpenNGC 源与 HYG 样本以原始字节/SHA 为准，
 # 禁止 autocrlf 在 checkout 时改写行尾（否则干净 clone 的 SHA 与 meta 分叉）。
 mbdsdr_ai/tests/fixtures/** -text
+
+# 合成 IQ/音频 fixture 按字节冻结：二进制里的 0x0D0A 是数据不是行尾，
+# autocrlf 在 checkout 时改写会损坏波形（sensitivity/lrpt.cf32 曾被判成文本）。
+tests/fixtures/**/*.wav -text
+tests/fixtures/**/*.cf32 -text

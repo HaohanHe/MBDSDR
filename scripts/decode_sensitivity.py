@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import os
 import sys
@@ -60,6 +61,8 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SNR_RANGE = (-10.0, 16.0, 2.0)
 DEFAULT_TRIALS = 20
@@ -358,6 +361,9 @@ def evaluate_ft4(iq, fs, case=None) -> tuple:
     try:
         r = Ft4Receiver(fs=int(round(fs))).decode(iq)
     except Exception as exc:
+        # 单次试次异常按失败计，但不许静默：异常类型 + 原文落日志，原因码进报告。
+        logger.warning("FT4 单次试次解码异常（按失败计）：%s: %s",
+                       type(exc).__name__, exc)
         return False, f"decode_error:{type(exc).__name__}"
     if r.get("ok") and r.get("crc_ok") and r.get("text") == truth:
         return True, ""
@@ -379,7 +385,11 @@ def evaluate_pocsag(audio, fs, case=None) -> tuple:
     try:
         res = pocsag_decode(audio, fs, case.get("baud", POCSAG_TEST_BAUD))
     except Exception as exc:
-        return False, f"decode_error:{type(exc).__name__}", {"frames_decoded": 0}
+        logger.warning("POCSAG 单次试次解码异常（按失败计）：%s: %s",
+                       type(exc).__name__, exc)
+        detail = {"error": f"{type(exc).__name__}: {exc}",
+                  "frames_decoded": 0}
+        return False, f"decode_error:{type(exc).__name__}", detail
     detail = {"frames_decoded": len(res)}
     if not res:
         return False, "nothing_detected", detail
@@ -400,7 +410,11 @@ def evaluate_acars(audio, fs, case=None) -> tuple:
         res = acars_decode_iq(audio, sample_rate=fs,
                               baud_rate=case.get("baud", ACARS_TEST_BAUD))
     except Exception as exc:
-        return False, f"decode_error:{type(exc).__name__}", {"frames_decoded": 0}
+        logger.warning("ACARS 单次试次解码异常（按失败计）：%s: %s",
+                       type(exc).__name__, exc)
+        detail = {"error": f"{type(exc).__name__}: {exc}",
+                  "frames_decoded": 0}
+        return False, f"decode_error:{type(exc).__name__}", detail
     detail = {"frames_decoded": len(res)}
     if not res:
         return False, "nothing_detected", detail
