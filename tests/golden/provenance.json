@@ -1,0 +1,100 @@
+{
+  "schema": "mbdsdr-golden-provenance/v1",
+  "directory": "tests/golden",
+  "provenance": "mixed",
+  "date": "2026-11-06",
+  "note": "逐个文件的来历声明。provenance 三类：external-truth = 外部真值/标准原文/第三方实现输出；self-generated = 仓内编码器或脚本产出；synthetic-loopback = 仓内编码→仓内解码的自洽回环。sha256 为文件内容指纹，tests/test_golden_provenance.py 逐字节校验。",
+  "files": {
+    "astu1_tm_synthetic_golden.json": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.astu1_tm（仓内编码器）+ scripts/make_astu1_golden",
+      "sha256": "2426e51f7d92414ffd50e900e062929bbf5bdfa508618729c181c6140445b8cb",
+      "derivation": "按 frame_layouts.json 的 astu_1_tm_example 打包，CRC16-CCITT-FALSE 由仓内 crc 内核计算；无外部帧样本",
+      "date": "2026-11-01"
+    },
+    "ccsds_cltu_golden.json": {
+      "provenance": "external-truth",
+      "source_name": "CCSDS 230.1-G-3 Annex F Example 10（官方 PDF 转录）",
+      "sha256": "1e20200d4096d527a477994cf2b2826cf206ecf3c9dbb4457440b765bf1cfe0a",
+      "derivation": "https://public.ccsds.org/Pubs/230x1g3e1.pdf（SHA-256 2ce64320ef8cad6fb8d5a2a80c48ffdf1f2584e5773f0c48eb255bb8b2f04ae7）Annex F Example 10；人工转录，非 mbdsdr_ai.tc_cltu 生成",
+      "date": "2026-11-02"
+    },
+    "ccsds_tc_frame_golden.json": {
+      "provenance": "external-truth",
+      "source_name": "CCSDS 230.1-G-3 Annex F Example 10 + CCSDS 232.0-B-4 §4.1",
+      "sha256": "530d6a2964b3236aaa8a385e181dc261709db678bc4d302547a8688830fa897b",
+      "derivation": "https://public.ccsds.org/Pubs/230x1g3e1.pdf（SHA-256 2ce64320…）Annex F Example 10 逐字段转录；主头/FECF 规则按 232.0-B-4 原文核对",
+      "date": "2026-11-01"
+    },
+    "cross_decode_vectors.json": {
+      "provenance": "self-generated",
+      "source_name": "Python mbdsdr_ai 参考端（跨语言自洽 golden）",
+      "sha256": "f855f4c2a9aadc358c0752ce225f93fd2bf3b86d224302dc8662dd94ebffa033",
+      "derivation": "文件 note 自述「Python mbdsdr_ai 生成自洽」，C++ 与 Python 测试钉同一文件；无外部真值",
+      "date": "2026-10-21"
+    },
+    "dump1090_modes1_reference.txt": {
+      "provenance": "external-truth",
+      "source_name": "dump1090（modes1.bin 官方样本解码输出）",
+      "sha256": "a284af54901b435f4947e79d36dd64a47a16fd2b035443b421d7b8c68160ca5f",
+      "derivation": "dump1090 对官方 modes1.bin 的解码输出转录；样本按需下载、SHA-256 钉真值",
+      "date": "2026-11-03"
+    },
+    "dvbs2_bch_vectors.json": {
+      "provenance": "external-truth",
+      "source_name": "drmpeg/gr-dvbs2 @99a2ac5（第三方独立编码器）",
+      "sha256": "803bbb3b78c0c4c08fd64d5aab0a520874d77e3772300bc9311c9e664ea1ad6a",
+      "derivation": "https://github.com/drmpeg/gr-dvbs2/archive/99a2ac5592fa41e9c0f8f757995f3451ab8184a6.tar.gz（SHA-256 a0dc9e5d…）；非 MBDSDR 编码器输出，非 ETSI 官方向量",
+      "date": "2026-11-03"
+    },
+    "dvbs2_fec_parameters.json": {
+      "provenance": "external-truth",
+      "source_name": "ETSI EN 302 307-1 V1.4.1 Table 5a/5b、6a/6b、7a/7b",
+      "sha256": "982b26f3166ccf35237d6a4bbfbda00a932b6a99d155095ddbb8071c62011330",
+      "derivation": "标准 PDF en_30230701v010401p.pdf（SHA-256 19077f80420eb17519fcf6f83e2847d7a877940b134c5306814b8c6f60d8475d）逐表转录；NA 保持 null 不推算",
+      "date": "2026-11-03"
+    },
+    "dvbs2_ldpc_vectors.json": {
+      "provenance": "external-truth",
+      "source_name": "drmpeg/gr-dvbs2 @99a2ac5（第三方独立实现输出）",
+      "sha256": "d614c3572136938c556cac458f78873658c753073686c0e95b0b94cdb30c637f",
+      "derivation": "https://github.com/drmpeg/gr-dvbs2/archive/99a2ac5592fa41e9c0f8f757995f3451ab8184a6.tar.gz；truth_class 字段自述「independent-third-party-implementation-output」",
+      "date": "2026-11-03"
+    },
+    "gps_ca_prn_vectors.json": {
+      "provenance": "self-generated",
+      "source_name": "仓内 gps_ca 生成器（delay 形式）产出，对拍 gps-sdr-sim",
+      "sha256": "e8973415cb4f8c30c9a5ab9c22f3b543fc060203f3ff53ee958fc24cc2f2cfb1",
+      "derivation": "taps/delay/octal 三列从 IS-GPS-200E Table 3-I 官方 PDF 提取；全 1023 chip 序列由仓内生成器产生，再与 gps-sdr-sim codegen() PRN1-32 比特级对拍——序列本身非外部产出，故不归 external-truth",
+      "date": "2026-11-04"
+    },
+    "gps_lnav_golden.json": {
+      "provenance": "self-generated",
+      "source_name": "mbdsdr_ai.gps_nav.ephemeris_to_nav_bits（仓内编码侧单源）",
+      "sha256": "4b6456677de5a20c0ebc53e4ae363a94c25459f1ede5ea87d3d29b368a8eae9f",
+      "derivation": "仓内编码器生成 nav_bits 与 expected_decoded；解码侧只做自洽回读，无外部星历样本",
+      "date": "2026-11-01"
+    },
+    "lrpt_meteor_real_soft_0.f32": {
+      "provenance": "external-truth",
+      "source_name": "TU Berlin lar-tech/satellite-decoder meteor_m2_72k.wav（真录派生软比特）",
+      "sha256": "3353bd9fc45481718b2830cd9f5d399fa7e71c37d6ace9f7463a6c0db081a9be",
+      "derivation": "https://raw.githubusercontent.com/lar-tech/satellite-decoder/main/data/meteor_m2_72k.wav（SHA-256 c8be339e69db2b192f852c8ab5d2cb7c7b547552bab41fadd584e0296df0cdf8）真录过境导出软比特",
+      "date": "2026-11-03"
+    },
+    "lrpt_meteor_real_soft_1.f32": {
+      "provenance": "external-truth",
+      "source_name": "TU Berlin lar-tech/satellite-decoder meteor_m2_72k.wav（真录派生软比特）",
+      "sha256": "38bd96067b9f31608eb3b471fe4d5e391d428020da3c83c0e25857fd8b536f17",
+      "derivation": "同上真录；第二帧候选（candidate=5, variant=swap+inv），见 lrpt_meteor_real_soft_manifest.json",
+      "date": "2026-11-03"
+    },
+    "lrpt_meteor_real_soft_manifest.json": {
+      "provenance": "self-generated",
+      "source_name": "仓内脚本对 TU Berlin 真录软比特生成的清单",
+      "sha256": "05d526d7d5a994b4881ed07be5cfb35958747ff08ea87baafe75ff4cc5bf679a",
+      "derivation": "由真录导出的软比特之后，仓内生成的元数据清单（n_soft/candidate/variant/rs_errors）；描述外部真值，但文件本身非外部产出",
+      "date": "2026-11-03"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "mbdsdr-golden-provenance/v1",
+  "directory": "mbdsdr_ai/tests/fixtures",
+  "provenance": "external-truth",
+  "date": "2026-11-06",
+  "note": "星表摘录（HYG / OpenNGC 子集）来自上游公开数据集，仅截取供测试用；子目录 openngc 有自己的 provenance.json。",
+  "files": {
+    "hyg_v41_reference_sample.csv": {
+      "provenance": "external-truth",
+      "source_name": "HYG Database v4.1（Astronomy Nexus，CC BY-SA 4.0）",
+      "sha256": "c6e72b18bb84c379a3bf0b516ef70df653182e286b166546942940b06447c960",
+      "derivation": "https://github.com/astronexus/HYG-Database 上游 CSV 的参考摘录（文件头注明来源与许可证），未由本仓生成",
+      "date": "2026-11-04"
+    }
+  }
+}

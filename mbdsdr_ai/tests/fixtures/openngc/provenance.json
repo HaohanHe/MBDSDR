@@ -1,0 +1,23 @@
+{
+  "schema": "mbdsdr-golden-provenance/v1",
+  "directory": "mbdsdr_ai/tests/fixtures/openngc",
+  "provenance": "external-truth",
+  "date": "2026-11-06",
+  "note": "OpenNGC 上游数据集的两个 CSV 文件，供深空天体目录测试使用；非本仓生成。",
+  "files": {
+    "NGC.csv": {
+      "provenance": "external-truth",
+      "source_name": "OpenNGC（mattiaverga/OpenNGC，CC BY-SA 4.0）",
+      "sha256": "54abea0b57b0a103831bfc7a8e3a99a23acfbf4bb581fcf3d8af539cbb826c84",
+      "derivation": "https://github.com/mattiaverga/OpenNGC 的 NGC.csv 原样入库",
+      "date": "2026-11-04"
+    },
+    "addendum.csv": {
+      "provenance": "external-truth",
+      "source_name": "OpenNGC（mattiaverga/OpenNGC，CC BY-SA 4.0）",
+      "sha256": "c93f983dda6780b76b7b2e9271a856a892627710148a982ee98101a54c642fdd",
+      "derivation": "https://github.com/mattiaverga/OpenNGC 的 addendum.csv 原样入库",
+      "date": "2026-11-04"
+    }
+  }
+}

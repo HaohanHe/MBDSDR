@@ -1,0 +1,30 @@
+{
+  "schema": "mbdsdr-golden-provenance/v1",
+  "directory": "tests/fixtures",
+  "provenance": "self-generated",
+  "date": "2026-11-06",
+  "note": "本目录直接存放的 JSON 均为仓内人工整理的评测语料（不是外部真值）；二进制捕获见各子目录自己的 provenance.json。",
+  "files": {
+    "ai_intent_corpus.json": {
+      "provenance": "self-generated",
+      "source_name": "仓内人工整理（P7.1 工具选择基准集）",
+      "sha256": "3f8167bf81f0b1fe82d958a050d07f5d8ca18bdba4f00af026318e487e94cd18",
+      "derivation": "按工具 schema 手工编写的中文请求与期望候选，无外部标注集来源",
+      "date": "2026-11-04"
+    },
+    "ai_tool_selection_replay.json": {
+      "provenance": "self-generated",
+      "source_name": "仓内人工整理（P12 工具选择因果探针录制表）",
+      "sha256": "0fdae6d861bd47631261e291c04e2958b3a4c6c28c2ea135d0b8ab64bbb6354c",
+      "derivation": "按规则替身行为手工编写的探针表，不是准确率打分基准，无外部来源",
+      "date": "2026-11-05"
+    },
+    "star_intent_corpus.json": {
+      "provenance": "self-generated",
+      "source_name": "仓内人工整理（AC-08.5 收星意图观测语料）",
+      "sha256": "c2ab2cf665133012c9ce58e4a12ee2ada4f94b3cce8b0e3e3ea52c224078d12a",
+      "derivation": "6 类 42 条中文说法由仓内人工编写，只做长期趋势观测，不设通过阈值",
+      "date": "2026-11-05"
+    }
+  }
+}

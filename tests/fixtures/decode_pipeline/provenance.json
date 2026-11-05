@@ -1,0 +1,72 @@
+{
+  "schema": "mbdsdr-golden-provenance/v1",
+  "directory": "tests/fixtures/decode_pipeline",
+  "provenance": "self-generated",
+  "date": "2026-11-06",
+  "note": "整目录由 scripts/make_decode_fixtures.py 用仓内编码器重新调制生成：合成波形，NOT OTA。ADS-B 帧 hex 复用 tests/golden/dump1090_modes1_reference.txt 的外部真值，波形仍为仓内调制，故归类 self-generated。",
+  "files": {
+    "adsb_three_frames.cf32": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（仓内 PPM 调制器）",
+      "sha256": "17b3b8b770fbc43991fc3d5f8275758001b3fc08e86c129f051ad646986d1e66",
+      "derivation": "帧 hex 取自 tests/golden/dump1090_modes1_reference.txt（外部真值），波形由仓内调制器生成",
+      "date": "2026-11-05"
+    },
+    "ais_two_frames.cf32": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（仓内 GMSK 调制器）",
+      "sha256": "c79d7dbd4a14b8c5251685430ff1b033ec0b81cf1b3b9a9bc1946b82810f4ce3",
+      "derivation": "仓内 AIS GMSK 编码器合成 2 帧复基带（fs=240k），无 OTA 样本",
+      "date": "2026-11-05"
+    },
+    "aprs_crc_fail.cf32": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（仓内 AFSK 调制器）",
+      "sha256": "6ffe20929f5f22f7c43dbd981d96d645a2cec370c60943d5d698f998da4f47f0",
+      "derivation": "完整 AX.25 帧但 info 字节翻转，用于 CRC 失败路径的反证",
+      "date": "2026-11-05"
+    },
+    "aprs_noise.cf32": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（噪声种子 19）",
+      "sha256": "97353032a9369a2958a8b58aa8dde9657c28c9c30d7d1bd7bac7a4db8a9e3b12",
+      "derivation": "纯噪声段，生成器逐 seed 校验无 HDLC 标志，用于 nothing_detected 反证",
+      "date": "2026-11-05"
+    },
+    "aprs_truncated.cf32": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（仓内 AFSK 调制器）",
+      "sha256": "d3b056de5e36fec9e4fac3e6e10283989bcff67c9427b3915307b7d5d4671d2a",
+      "derivation": "有效帧音频截到 55%，缺结束 0x7E 标志，用于 truncated_frame 反证",
+      "date": "2026-11-05"
+    },
+    "aprs_two_frames.cf32": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（仓内 AFSK 调制器）",
+      "sha256": "b1416fe24d023d518938c314ab581f08236881d8ef57269b06cd90fe0e3c70c4",
+      "derivation": "仓内 Bell202 AFSK 调制 2 帧 AX.25 复基带（fs=96k），无 OTA 样本",
+      "date": "2026-11-05"
+    },
+    "aprs_two_frames_44100.wav": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（aprs_two_frames.cf32 鉴频派生）",
+      "sha256": "346fdb9728e7df092141bcd4fd463282d97bc1f14786e273949b5b76067afd72",
+      "derivation": "从同一 cf32 复基带 FM 鉴频 + 4.5kHz 低通，重采样到 44100Hz 并量化 16-bit PCM 单声道",
+      "date": "2026-11-05"
+    },
+    "aprs_two_frames_48000.wav": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py（aprs_two_frames.cf32 鉴频派生）",
+      "sha256": "388ef367f79cd31e835dae7edbbdcb0973b8d9dc8a682b6e5f0bb889a24ba66b",
+      "derivation": "从同一 cf32 复基带 FM 鉴频 + 4.5kHz 低通，重采样到 48000Hz 并量化 16-bit PCM 单声道",
+      "date": "2026-11-05"
+    },
+    "manifest.json": {
+      "provenance": "self-generated",
+      "source_name": "scripts/make_decode_fixtures.py",
+      "sha256": "7ee585dcfdf4771a2c91cf80886d0360e90f0ab5729dbde935aee23b33950e17",
+      "derivation": "生成器写出的期望值清单（帧 hex / 采样率 / 失败原因），provenance 字段自述 self-generated",
+      "date": "2026-11-05"
+    }
+  }
+}

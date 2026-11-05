@@ -79,6 +79,12 @@ class DigitalModeCapability:
     sample_rate_rule: str     # 采样率/带宽要求（人读）
     evidence: str             # real / partial / no_sample
     min_sample_condition: str # 最小采样条件（补真样本时按此取数）
+    # 这条证据的来历（三类，事实口径见 docs/learn/decoder-capability-matrix.md）：
+    #   external-truth    = 外部真值/标准原文/第三方实现输出；
+    #   self-generated    = 仓内编码器或脚本产出；
+    #   synthetic-loopback= 仓内编码→仓内解码自洽回环（无外部真值）。
+    # evidence=real 的行必须是 external-truth，由 tests/test_golden_provenance.py 守卫。
+    truth_source: str = "synthetic-loopback"
     external_tools: Tuple[str, ...] = ()   # 可选外部增强，不虚构其解码结果
     # True = 格式校验由 handler 自己做（窄带入口有自己的 rejected 契约），
     # 路由层不再重复拦截，避免同一错误两套文案。
@@ -99,6 +105,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         output_kind="frames",
         sample_rate_rule="fs ≥ 2MHz 且为 1MHz 整数倍（Mode-S 1Mbit/s 前导 8us）",
         evidence=EVIDENCE_REAL,
+        truth_source="external-truth",   # dump1090 官方样本逐帧对拍
         min_sample_condition=(
             "1090MHz 下行 .cf32，fs=2MHz 或 4MHz，≥ 3 个干净 DF17 前导"
             "（CRC-24 通过与 dump1090 对拍；多帧扫描见 adsb.decode_baseband）"
@@ -139,6 +146,7 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         output_kind="note",
         sample_rate_rule="实音频 12kHz 单声道（通用入口未接线，参数不生效）",
         evidence=EVIDENCE_REAL,
+        truth_source="external-truth",   # WSJT-X 官方样本 + 参考解码结果
         min_sample_condition=(
             "真录已在 test_ft8_* 中对拍；通用 WAV 入口未接线，需调用"
             "ft8_lite.decode_ft8_audio 或走专用工具"
@@ -624,6 +632,7 @@ def capability_matrix() -> List[Dict[str, Any]]:
             "output_kind": cap.output_kind,
             "sample_rate_rule": cap.sample_rate_rule,
             "evidence": cap.evidence,
+            "truth_source": cap.truth_source,
             "min_sample_condition": cap.min_sample_condition,
             "external_tools": list(cap.external_tools),
             "failure_codes": list(cap.failure_codes),

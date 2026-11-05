@@ -1,0 +1,23 @@
+{
+  "schema": "mbdsdr-golden-provenance/v1",
+  "directory": "tests/fixtures/real_fm_88m1",
+  "provenance": "external-truth",
+  "date": "2026-11-06",
+  "note": "本机 RTL-SDR 空口实录（88.1MHz FM 广播，2026-10-28）。真实 OTA，不是合成波形；SigMF 元数据内 mbdsdr:provenance=real_ota。",
+  "files": {
+    "capture.sigmf-data": {
+      "provenance": "external-truth",
+      "source_name": "RTL-SDR RTL2832U + FC0012（SN 77771111153705700）空口采集",
+      "sha256": "df29c075e99fd26a72ff6921259c2482dead178e1c488974c89c43c388c6cb0b",
+      "derivation": "rtl_sdr CLI 直接 USB 采集，增益 17.9dB，中心 88.1MHz，fs=1.024MHz，2^19 复样本（cu8）",
+      "date": "2026-10-28"
+    },
+    "capture.sigmf-meta": {
+      "provenance": "external-truth",
+      "source_name": "RTL-SDR 空口采集的 SigMF 元数据",
+      "sha256": "6814ae668a723d17efe21d28e35870a1437a42fc1c9cea4e3658074b62acaf08",
+      "derivation": "采集时同步写出的 SigMF 元数据（datatype/采样率/频点/增益/时间戳），非事后补写",
+      "date": "2026-10-28"
+    }
+  }
+}

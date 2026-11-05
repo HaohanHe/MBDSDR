@@ -1,0 +1,23 @@
+{
+  "schema": "mbdsdr-golden-provenance/v1",
+  "directory": "tests/fixtures/iridium107",
+  "provenance": "external-truth",
+  "date": "2026-11-06",
+  "note": "公开培训材料《赛前培训-定轨》的示例数据集（IRIDIUM 107 多普勒观测序列 + 对应 TLE），非本仓生成。",
+  "files": {
+    "observations.csv": {
+      "provenance": "external-truth",
+      "source_name": "公开培训材料《赛前培训-定轨》示例数据集（IRIDIUM 107）",
+      "sha256": "75292f06b3f2100e07c9430c1ca55b39f4c8b2a8b63283a48c33ab7a74e30fd4",
+      "derivation": "材料给出的 1626.270833MHz 下行多普勒频移观测序列（timestamp,frequency），原样入库",
+      "date": "2026-10-21"
+    },
+    "tle.txt": {
+      "provenance": "external-truth",
+      "source_name": "同一培训材料附带的 IRIDIUM 107 TLE",
+      "sha256": "5482ac4d05e58570bd5ce979bd78b78fef80217359fc77be3b972c92705bc8f2",
+      "derivation": "材料给定的 TLE 两行根数，原样入库（未用本仓 TLE 获取链路刷新）",
+      "date": "2026-10-21"
+    }
+  }
+}

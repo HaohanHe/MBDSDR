@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -36,6 +37,52 @@ TRUTH_LABELS = {
     "partial": "部分",
     "no_sample": "缺样本",
 }
+
+# 证据来历：三类，互斥。external-truth 才允许出现在「真实」栏。
+TRUTH_SOURCE_LABELS = {
+    "external-truth": "外部真值",
+    "self-generated": "自生成",
+    "synthetic-loopback": "合成回环",
+}
+
+#: 全仓 golden/fixture 的 provenance.json（逐文件来历声明）。
+PROVENANCE_GLOBS = ("tests", "mbdsdr_ai/tests")
+
+#: 没有入仓 golden、但属于「自生成/回环」的链，单独登记（文件必须存在）。
+LOOPBACK_CHAINS = [
+    {
+        "name": "M17（C++ 侧）",
+        "truth_source": "synthetic-loopback",
+        "evidence": "cpp/tests/test_m17_decoder.cpp",
+        "note": "仓内编码→仓内解码回环，无入仓 golden；不得写成外部对拍",
+    },
+    {
+        "name": "CCSDS RX 链",
+        "truth_source": "synthetic-loopback",
+        "evidence": "mbdsdr_ai/tests/test_ccsds_rx.py",
+        "note": "仓内卷积编码→Viterbi 回环；CCSDS TC/CLTU 的黄金向量是官方 PDF 转录（见资产表）",
+    },
+]
+
+
+def load_provenance() -> list:
+    """读取全仓 provenance.json，返回 [(相对目录, 声明 dict)]。"""
+    found = []
+    for top in PROVENANCE_GLOBS:
+        base = os.path.join(ROOT, top)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            if "provenance.json" not in filenames:
+                continue
+            path = os.path.join(dirpath, "provenance.json")
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            rel = os.path.relpath(dirpath, ROOT).replace(os.sep, "/")
+            found.append((rel, data))
+    return sorted(found)
+
 
 # mode -> (证据位置, 复跑命令, 一句话结论)
 # 只写仓内能直接复跑的东西；外部第三方样本按需下载，离线诚实 skip。
@@ -121,6 +168,7 @@ EXTRA_CHAINS = [
         "mode": "lrpt（LRPT 图像链）",
         "truth": "real",
         "truth_label": "真实",
+        "truth_source": "external-truth",
         "evidence": (
             "tests/test_lrpt_meteor_real_golden.py（TU Berlin 79MB Meteor-M2 真录，"
             "SHA-256 钉真值）；tests/test_lrpt_iq_chain.py；"
@@ -137,6 +185,7 @@ EXTRA_CHAINS = [
         "mode": "dvbs2-sof（DVB-S2 SOF 同步层）",
         "truth": "partial",
         "truth_label": "部分",
+        "truth_source": "synthetic-loopback",
         "evidence": (
             "tests/test_dvbs2_sof_sync.py（ETSI EN 302 307-1 §5.1.2 同步字/π 旋转，"
             "合成链 + 标准原文口径）"
@@ -149,6 +198,7 @@ EXTRA_CHAINS = [
         "mode": "dvbs2-vcdu（DATAFIELD→VCDU 重组）",
         "truth": "partial",
         "truth_label": "部分",
+        "truth_source": "synthetic-loopback",
         "evidence": (
             "tests/test_dvbs2_datafield_vcdu.py（BBHEADER CRC-8/DFL/SYNCD + VCDU 主头，"
             "合成链自洽 + 编码侧互逆对拍）"
@@ -175,6 +225,7 @@ def build_rows() -> list:
             "mode": mode,
             "truth": cap.evidence,
             "truth_label": TRUTH_LABELS[cap.evidence],
+            "truth_source": cap.truth_source,
             "evidence": evidence,
             "rerun": rerun,
             "condition": cap.min_sample_condition,
@@ -204,17 +255,54 @@ def render() -> str:
     out.append("- **真实度 = 缺样本**：连一段真录都没有，只有协议数学性质；"
                "「最小采样条件」列写明补到什么样一段信号才能破零。")
     out.append("")
+    out.append("**「来历」列是硬约束**：只有 `external-truth`（外部真值/标准原文/第三方"
+               "实现输出）才允许出现在「真实」栏；`self-generated`（自家编码器产出）与"
+               "`synthetic-loopback`（自家编码→自家解码回环）一律不得算作验证。"
+               "由 `tests/test_golden_provenance.py` 守卫。")
+    out.append("")
     out.append("## 能力矩阵")
     out.append("")
-    out.append("| 模式 | 真实度 | 证据位置 | 复跑方式 | 最小采样条件 | 结论 |")
-    out.append("|---|---|---|---|---|---|")
+    out.append("| 模式 | 真实度 | 来历 | 证据位置 | 复跑方式 | 最小采样条件 | 结论 |")
+    out.append("|---|---|---|---|---|---|---|")
     for r in rows:
         out.append(
-            "| `{mode}` | **{truth}** | {evidence} | `{rerun}` | {cond} | {verdict} |".format(
-                mode=r["mode"], truth=r["truth_label"], evidence=r["evidence"],
+            "| `{mode}` | **{truth}** | {src} | {evidence} | `{rerun}` | {cond} | {verdict} |".format(
+                mode=r["mode"], truth=r["truth_label"],
+                src=TRUTH_SOURCE_LABELS[r["truth_source"]],
+                evidence=r["evidence"],
                 rerun=r["rerun"], cond=r["condition"], verdict=r["verdict"],
             )
         )
+    out.append("")
+    out.append("## 资产来历（golden / fixture）")
+    out.append("")
+    out.append("每个 `provenance.json` 逐文件声明来历、来源名称、SHA-256 与日期；"
+               "缺声明或把 `self-generated` 标成外部真值都会被守卫测试拦下。"
+               "**自生成的黄金值只能证明「代码与自己的编码器一致」，不能算验证。**")
+    out.append("")
+    out.append("| 目录 | 整目录类型 | 文件数 | 三类分布 |")
+    out.append("|---|---|---|---|")
+    for rel, data in load_provenance():
+        files = data.get("files", {})
+        counts = {}
+        for item in files.values():
+            counts[item.get("provenance", "?")] = counts.get(
+                item.get("provenance", "?"), 0) + 1
+        dist = "、".join(
+            f"{TRUTH_SOURCE_LABELS.get(k, k)} {v}" for k, v in sorted(counts.items())
+        ) or "—"
+        out.append(
+            f"| `{rel}` | {TRUTH_SOURCE_LABELS.get(data.get('provenance'), data.get('provenance'))} "
+            f"| {len(files)} | {dist} |")
+    out.append("")
+    out.append("没有入仓 golden、但属于「自家编码→自家解码回环」的链：")
+    out.append("")
+    out.append("| 链 | 来历 | 证据 | 说明 |")
+    out.append("|---|---|---|---|")
+    for item in LOOPBACK_CHAINS:
+        out.append(
+            f"| {item['name']} | {TRUTH_SOURCE_LABELS[item['truth_source']]} "
+            f"| `{item['evidence']}` | {item['note']} |")
     out.append("")
     out.append("## 复跑整张表")
     out.append("")
