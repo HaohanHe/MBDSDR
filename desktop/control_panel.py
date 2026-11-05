@@ -1324,20 +1324,48 @@ class ControlPanel(QWidget):
         self.set_sample_rate_options(options, current)
 
     def set_sample_rate(self, rate_hz: float):
-        """从外部恢复采样率档位；无精确匹配时选最近档，不发射 sample_rate_changed。"""
+        """从外部恢复采样率档位；无精确匹配时选最近档，不发射 sample_rate_changed。
+
+        **能力前置校验**：请求值不在当前可见档位（= 当前设备能力）时，不许
+        静默吸附。这里保留"最近档显示"，同时在采样率标签上打 ⚠、把完整
+        原因写进两个 tooltip 并 logger.warning；合法值会清掉提示。
+        配置文件里的原值不回写（用户意图保留，失败对用户可见）。
+        """
         rate = float(rate_hz)
-        idx = self.sample_rate_combo.findData(rate)
-        if (idx < 0 and self.sample_rate_combo.count()
-                and self.sample_rate_combo.itemData(0) is not None):
+        combo = self.sample_rate_combo
+        idx = combo.findData(rate)
+        if (idx < 0 and combo.count()
+                and combo.itemData(0) is not None):
             best, best_diff = 0, None
-            for i in range(self.sample_rate_combo.count()):
-                d = abs(float(self.sample_rate_combo.itemData(i)) - rate)
+            for i in range(combo.count()):
+                d = abs(float(combo.itemData(i)) - rate)
                 if best_diff is None or d < best_diff:
                     best_diff, best = d, i
             idx = best
-        self.sample_rate_combo.blockSignals(True)
-        self.sample_rate_combo.setCurrentIndex(idx)
-        self.sample_rate_combo.blockSignals(False)
+        combo.blockSignals(True)
+        combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+
+        if idx < 0 or combo.itemData(idx) is None:
+            return None
+        applied = float(combo.itemData(idx))
+        if abs(applied - rate) > 1e-9:
+            rates = [float(combo.itemData(i)) for i in range(combo.count())
+                     if combo.itemData(i) is not None]
+            hint = (
+                f"配置请求 {format_sample_rate(rate)} 超出当前设备能力 "
+                f"[{format_sample_rate(min(rates))}, "
+                f"{format_sample_rate(max(rates))}]，"
+                f"已按最近档 {format_sample_rate(applied)} 显示（配置文件未改）")
+            logger.warning("%s", hint)
+            self.sr_label.setText("采样率 ⚠")
+            self.sr_label.setToolTip(hint)
+            combo.setToolTip(hint)
+        else:
+            self.sr_label.setText("采样率")
+            self.sr_label.setToolTip("")
+            combo.setToolTip("")
+        return applied
 
     def set_vfo_bandwidth(self, bw_hz: float):
         """从外部恢复 VFO 带宽；无精确匹配选最近档，不发射 vfo_bandwidth_changed。"""

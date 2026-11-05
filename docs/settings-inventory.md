@@ -654,7 +654,7 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 | 无 UI 但有明确理由 | **1** | 理由见「字段 → 位置」表的「说明」列 |
 | 缺失（无入口且无理由） | **0** | >0 即守卫红 |
 | 幽灵键（未在 schema 声明） | **0** | 扫描 desktop/*.py 的 settings 字面键 |
-| source_commit | `6089dd6d` | `git log -1 --format=%h -- desktop/config_schema.py` |
+| source_commit | `33f3b1d7` | `git log -1 --format=%h -- desktop/config_schema.py` |
 
 <!-- settings-guard:end -->
 
@@ -675,12 +675,28 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 | 旧格式 `volume: -5`（无 v2 标记） | 夹到 0 → 换算 0 | 两条说明：超出 0–63 已夹取 + 量纲换算 | 可接受（本轮修：原来静默变 0） |
 | 缺键 | 按默认补齐 | 不写 notes（这是版本升级的正常路径）；`has_file_key()` 可区分"原文件里有"与"补齐" | 可接受 |
 | 多余未知键 | 不进设置表面；`migration_notes` 列出键名 | 写盘时按磁盘现值合并，未知键**保留在文件中**（旧版本不吃掉新版本设置） | 可接受（本轮修：原来静默丢） |
-| `sample_rate_hz: 999000000`（999 MS/s） | **接受，不改不夹** | 无 notes | 已知边界，见下 |
+| `sample_rate_hz: 999000000`（999 MS/s） | 配置层**接受，不改不夹**；控制面板显示时按设备能力打 ⚠ | `migration_notes` 无记录；控制面板 `sr_label` 变"采样率 ⚠"、双 tooltip 写原因并 `logger.warning` | 可接受（不拦是设计，失败可见） |
 
 **采样率为什么没有上限**：采样率的事实源是"当前设备能力"，不是 schema。
 `mbdsdr_ai/sdr_backend.py` 的 `network_iq` 后端声明可达 1 GHz，所以 schema 层
-无法把 999 MS/s 判成非法；`set_sample_rate` 会取最近可用档并向状态栏回报实际值。
-这不是"静默变成默认值"（值仍是用户写的 999 MS/s），故不在此处伪造上限。
+无法把 999 MS/s 判成非法。**实测（2026-11-06，offscreen）**：把
+`sample_rate_hz: 1000000000` 写进配置文件、以 RTL 11 档（0.250–3.200 MS/s）
+启动，修复前的真实 `MainWindow` 会**静默吸附**到 3.200 MS/s：磁盘仍是
+1 GHz、状态栏无提示、UI 与磁盘不一致。修复后（`ControlPanel.set_sample_rate`
+能力前置校验）：
+
+```
+applied= 3200000.0
+label= '采样率 ⚠'
+combo_text= '3.200 MS/s'
+label_tip= 配置请求 1000.000 MS/s 超出当前设备能力 [0.250 MS/s, 3.200 MS/s]，
+           已按最近档 3.200 MS/s 显示（配置文件未改）
+combo_tip= 同上
+```
+
+即：**不静默接受，也不回写配置**——用户意图（1 GHz）留在文件里，界面用
+⚠ + tooltip 说明"当前设备做不到、显示的是最近档"。选回合法档位时提示自动
+清除。断言见 `tests/test_settings_robustness_extras.py::test_out_of_capability_sample_rate_is_flagged`。
 
 ### 18.1 原子写与并发（生产侧）
 
@@ -692,7 +708,7 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 |---|---|---|
 | 两个进程各写 100 次 | 63 + 13 次 `PermissionError`；最终文件只剩后写者的字段（A 的 `frequency_hz`/`callsign` 被 B 的旧快照顶回默认） | 0–2 次锁超时（`last_error` 报"本次未写入，稍后重试"，保留脏标记下次重试）；最终 JSON 完整，A/B 四字段全在，无 `.tmp` 残留 |
 | `os.replace` 失败（磁盘满/只读） | — | 不抛；`last_error` 报"设置保存失败"；旧文件字节不变；临时文件被清理 |
-| 同一次写同一个键 | — | 后写者胜（逐键 last-write-wins），不同键互不影响 |
+| 同一次写同一个键 | — | 后写者胜（逐键 last-write-wins），不同键互不影响；**输的那次留痕**：赢了但看到磁盘现值偏离自己基线时 `logger.warning("设置键 X 被并发写入覆盖：磁盘值 <输家值> → 本次值 <赢家值>")` |
 
 ### 18.2 迁移链
 
@@ -710,4 +726,33 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 临时改成 `text`（等价于删掉数字类型校验），同一份 `"abc"` 文件立刻被原样接受、
 且不再留痕——证明上面"类型错 → 回默认 + note"确实由校验代码兜住，不是测试
 自己写死的期望。
+
+### 18.4 锁超时后重试是否真的发生（实测）
+
+`test_lock_timeout_keeps_dirty_and_next_flush_writes` 用 monkeypatch 让第一次
+`_exclusive_lock` 返回"未拿到锁"，实测序列：
+
+1. 第一次 `flush()`：`last_error` = "配置写锁等待超过 2s … 本次未写入，稍后重试"，
+   `_dirty` 仍为 `True`、`_dirty_keys == {"theme"}`，配置文件**未被创建**；
+2. 第二次 `flush()`：同一份内存状态重试，文件出现且 `theme == "dark"`，
+   `_dirty == False`、`_dirty_keys` 清空、`last_error == None`。
+
+即：脏标记不是摆设，下一次 flush（防抖定时器或退出）**确实会把那次没写进去的
+改动落盘**。另有 `test_single_instance_edit_is_not_a_false_overwrite` 反证
+并发告警不会把"自己改自己的值"误判成覆盖。
+
+### 18.5 同名键并发覆盖：谁赢、有没有留痕（两进程实测）
+
+探针：两个独立 Python 进程各自 `load`（基线都是 SEED）→ 同一时刻各写
+`callsign` → `flush`，跑 20 轮。
+
+| 指标 | 实测（20 轮） |
+|---|---|
+| 谁赢 | 后拿到写锁并落盘者：A 13 / B 7（随机分布，没有固定赢家） |
+| 覆盖留痕 | **20/20 轮**出现一条 `被并发写入覆盖` warning，且文案里带**输家的值**（`磁盘值 STATION-A → 本次值 STATION-B`） |
+| 是否引入冲突解决 | 否（无法判断谁"对"；后写者胜，只保证失败可见） |
+
+补充：若第二个进程是在第一个进程**写完之后**才 `load`，它读到的是对方的
+新值、再改成自己的值——这属于"看到现值后的正常编辑"，不产生告警；只有
+"我们 load 之后、flush 之前磁盘被别人改过"（真正的丢更新）才告警。
 

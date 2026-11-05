@@ -17,6 +17,7 @@ AGC/主题）以**明文 JSON** 落到磁盘，下次启动读回。设计取舍
 """
 
 import json
+import logging
 import math
 import os
 import platform
@@ -40,6 +41,11 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
 #: 全部可持久化字段及其默认值——**唯一来源是 config_schema.py**。
 #: 这里只做派生，不再手写第二份默认值（防 UI/配置层默认值漂移）。
 DEFAULTS: Dict[str, Any] = defaults("settings")
+
+logger = logging.getLogger(__name__)
+
+#: 区分"磁盘上没有这个键"与"键的值是 None"（JSON 里 None 是合法值）。
+_MISSING = object()
 
 #: 类型分组由 schema.kind 派生，避免手写清单漏登记（漏登记会被 _coerce 落成
 #: 字符串，下游 int() 再炸一次）。
@@ -357,6 +363,12 @@ class DesktopSettings:
         #: 自上次成功落盘以来改过的键。写盘时只把这些键覆盖到磁盘现值上，
         #: 避免两个实例各自 load 旧快照后整份覆盖、丢掉对方刚写的字段。
         self._dirty_keys: set = set()
+        #: 本实例最近一次"看到"的磁盘值（load 读回 / 上次成功写入）。只有
+        #: 磁盘现值偏离这个基线、且不是本次要写的值，才说明**别的实例**动过
+        #: 这个键；单实例自己改自己的值不算并发覆盖。
+        self._disk_snapshot: Dict[str, Any] = {}
+        #: 已就哪些键报过"被并发覆盖"，避免每轮防抖写盘都刷同一条 warning。
+        self._overwrite_warned: set = set()
         #: 上次 load 时若原文件损坏，这里是备份路径（None = 未损坏）
         self.corrupt_backup: Optional[str] = None
         #: 最近一次读/写失败的用户可读说明（None = 无错误）。
@@ -394,6 +406,11 @@ class DesktopSettings:
                 for k, v in raw.items():
                     if k in DEFAULTS:
                         inst._data[k] = _coerce(k, v, inst.migration_notes)
+                # 并发覆盖告警的基线：load 时磁盘上真实存在的、归一后的值。
+                # 必须取在音量迁移**之前**——迁移改的是内存值，磁盘还是旧值，
+                # 落盘时不该被误判成"别的实例覆盖了我们"。
+                inst._disk_snapshot = {k: inst._data[k] for k in raw
+                                       if k in DEFAULTS}
                 # 未知键（可能是更新版本写的，或是笔误）：不静默丢。这里只
                 # 记录说明，文件里的原始未知键在写盘时会被保留（见
                 # _merged_payload），避免旧版本把新版本的设置吃掉。
@@ -560,6 +577,25 @@ class DesktopSettings:
 
         for key in DEFAULTS:
             if key in self._dirty_keys:
+                disk_value = payload.get(key, _MISSING)
+                if disk_value is not _MISSING:
+                    item = SCHEMA.get(key)
+                    disk_norm = (validate_value(item, disk_value)[0]
+                                 if item is not None else disk_value)
+                    baseline = self._disk_snapshot.get(key, _MISSING)
+                    # 只有"磁盘现值偏离我们上次看到的基线"才说明别的实例写过；
+                    # 单实例把值从 A 改成 B 时磁盘仍是 A，属于正常编辑，不是覆盖。
+                    changed_by_other = (
+                        baseline is _MISSING
+                        or disk_norm != baseline)
+                    if (changed_by_other and disk_norm != self._data[key]
+                            and key not in self._overwrite_warned):
+                        # 同名键并发写：本次赢，但对方刚写的值被覆盖。不引入
+                        # 冲突解决（无法判断谁"对"），至少把覆盖事实记下来。
+                        logger.warning(
+                            "设置键 %s 被并发写入覆盖：磁盘值 %r → 本次值 %r",
+                            key, disk_value, self._data[key])
+                        self._overwrite_warned.add(key)
                 payload[key] = self._data[key]
                 continue
             if key in payload:
@@ -589,7 +625,7 @@ class DesktopSettings:
             directory = os.path.dirname(self._path)
             if directory:
                 os.makedirs(directory, exist_ok=True)
-            with _exclusive_lock(self._path + ".lock") as acquired:
+            with _exclusive_lock(self._path + ".lock", LOCK_TIMEOUT_S) as acquired:
                 if not acquired:
                     # 没拿到锁就**不写**：此时读不到可靠的磁盘现值，整份覆盖
                     # 会丢别的实例刚写的字段。保留 dirty 标记，下次 flush
@@ -606,6 +642,10 @@ class DesktopSettings:
                 os.replace(tmp_path, self._path)
             self._dirty = False
             self._dirty_keys.clear()
+            self._overwrite_warned.clear()
+            # 落盘成功后磁盘现值就是刚写的 payload：刷新并发检测基线。
+            self._disk_snapshot = {
+                k: _coerce(k, payload[k]) for k in DEFAULTS if k in payload}
             self.last_error = None
         except (OSError, TypeError, ValueError) as exc:
             # 磁盘满/权限不足/只读/不可序列化：不抛（退出 flush 也不崩），
