@@ -1,5 +1,7 @@
 # 卫星受晒 / 地影判定（sat_illumination）
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 面向天空视图、过境预报与链路预算的后端物理判据。实现位于
 `mbdsdr_ai/sat_illumination.py`，行为测试在
 `mbdsdr_ai/tests/test_sat_illumination.py`。

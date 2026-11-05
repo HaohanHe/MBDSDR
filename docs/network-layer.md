@@ -1,5 +1,7 @@
 # 网络接入层实测：rtl_tcp / SpyServer 中断矩阵
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 > 口径：**本机 loopback 假服务端 + 真实 socket**，不连公网、不碰真硬件。
 > 复跑命令（PowerShell）：
 >

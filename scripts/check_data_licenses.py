@@ -116,8 +116,8 @@ def _text_of(path: Path) -> str:
         try:
             import numpy as np
             return str(np.load(path, allow_pickle=False).item())
-        except Exception:
-            return ""
+        except Exception as exc:  # 与 npz 同口径：读不出来就报错，不能当「没有许可声明」
+            raise ScanError(f"{path}: npy 读取失败: {exc}") from exc
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:

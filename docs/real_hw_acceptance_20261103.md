@@ -1,5 +1,7 @@
 # 真机七环验收报告（2026-11-03）
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 > 执行脚本：[scripts/real_hw_acceptance.py](../scripts/real_hw_acceptance.py)
 > 硬件：RTL-SDR（RTL2832U + **Fitipower FC0012**，序列 77771111153705700，调谐范围约 22–948.6 MHz）
 > 环境：Windows 11 + Python 3.14 + pyrtlsdr（无 SoapySDR）+ rtl-sdr 官方工具集（`C:\rtl-sdr\bin`）

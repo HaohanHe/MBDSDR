@@ -1,5 +1,7 @@
 # §1 补充（天空线提交）：Figma 与 index.html 的基准边界
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 > 用途：供 UX 线并入 `docs/design-basis.md` §1。结论均可按文末命令复跑。
 > 核查日期：2026-11-05；核查对象：`D:\mbdsdr\.figma`（30 个节点文件夹）、
 > `D:\mbdsdr\output\mbdsdr-product\dist\index.html`。

@@ -1,5 +1,7 @@
 # python.exe 原生崩溃取证（2026-11-05）
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 **结论一句话**：不是单条用例的确定性崩溃，也不是显卡/平台插件问题；直接崩溃点是 PySide6 绑定层空指针解引用（`pyside6.abi3.dll+0x1c91e`，落在导出符号 `PySide::SignalManager::retrieveMetaObject(PyObject*)` 的 +0xAA 处）；同一时段反复伴随**系统级提交内存耗尽**（WER 2004：python.exe 单进程 17–28 GB、同一时刻两个 python.exe 合计 28.8 GB，本机 commit 上限 38.1 GB）——因果链"OOM→空指针"是机制推断，未证实。隔离条件下复现率 **0/44**（未复现）。防线（Qt 测试跨进程互斥锁 + 提交内存看门狗）已落地并**逐项验证生效**。
 
 ---

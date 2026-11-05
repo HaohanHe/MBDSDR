@@ -1,5 +1,7 @@
 # 全天星表与视场 LOD（`star_catalog`）
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 > 结论先行：本机已有完整可用的 **HYG Database v4.1** 源表；已生成随仓
 > 分发的衍生星表 **83,479 颗（V ≤ 9.0）**，许可 **CC BY-SA 4.0**。
 > 星体是固定的天球数据，动的是视场；`mbdsdr_ai/skyengine/star_catalog.py`

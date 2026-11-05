@@ -1,5 +1,7 @@
 # 参数统一账本（Parameter Unification Ledger）
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 > **本文件是「同一物理量多套数」的唯一事实源。**
 > 各组改完只改本表「状态」列，并在文末「变更记录」追加一行；**不许在别处另写一份清单**。
 > 参数取值/裁定背景仍记在 `docs/hardcoded-parameters.md`，本文件只维护"是否统一、谁来改、还剩什么风险"。

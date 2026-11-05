@@ -1,5 +1,7 @@
 # 多智能体协作台账（WorkBuddy × TRAE）
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 > **本文件是并行干活的唯一协调面。开工第一件事读它，收工前更新它。**
 > 谁办啥事、手上在途什么、下一件干什么、边界在哪——全在这，别靠猜。
 >
@@ -477,6 +479,14 @@
    已布防运行库，直跑零弹窗；`.tmp/dll_audit/sandbox` 是审计道具（故意裸奔），
    不要往里补 DLL。
 8. **收工必须更新本文件**「当前在途」和「队列」两节——这是下一轮的开工状态。
+9. **「已知红」必须有 owner 和期限；写进提交说明不算处理**（2026-11-06 立的
+   第六种形态）。守卫/棘轮已经报红的条目，只在 commit message 里写「改前
+   即高于基线/属他线漂移」= **红被记录后没人接**，比没发现更危险：
+   下一轮看到绿就以为已修。硬口径：任何红要么当天转绿并留下复跑命令，
+   要么进 §七「未清红清单」并挂 owner + 到期日；两条都没做，按未处理算。
+   实例：`f664638a` 的提交说明自认 `tests/test_ui_layout_locks.py`「改前已
+   高于基线 3」，此后无人接，直到 2026-11-06 全量守卫实测仍是
+   `1633 > 1347 / FAILED 20.93s`。
 
 ### 测试纪律（2026-11-05 落地，硬规矩）
 
@@ -1320,3 +1330,95 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
   的 4 个路径内，与本次复位无关。
 - 请 discoverability-line 复核两点：`troubleshooting.py` 是否有本笔 17 行之外的
   未入库 hunk；若有，用 `b5-otherline-troubleshooting-17lines.patch` 对照重放。
+
+---
+
+## 七、未清红清单（守卫 / 棘轮，2026-11-06 建立）
+
+口径：**红不进清单不算处理**（§四 规则 9）。每行必须有 owner + 到期日；
+转绿后用同一命令复跑，并把「今日实测」改成 0。
+
+复跑命令（唯一口径）：
+
+```powershell
+python scripts/lint_swallow_all.py --no-fail --json D:\mbdsdr\output\tmp\scan3.json
+python -m pytest tests/test_swallow_guard.py -q
+```
+
+2026-11-06 实测：ERROR 505 / WARN 780 / INFO 610，静默 1285，缺陷 1284，
+基线 total 1284（按实测重写），`[棘轮越线] 0 项`，守卫 21 passed。
+
+### 7.1 原 4 个超基线文件（owner 自修，已全部回到基线内）
+
+| 文件 | owner | 当时红 | 今日实测 | 修回提交 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| `desktop/control_panel.py` | 参数治理线 | 基线 E2/W3 之上（`0592b519`） | 0 ERROR / 0 WARN | `3f95e2c5` + `e82a6fa5` | 清零，基线条目已删 |
+| `scripts/decode_sensitivity.py` | 解码流水线 P5 | 基线 E0/W2 之上（`b9b9cff2`） | 0 ERROR / 2 WARN | `59823405` | 回到基线，按实测冻结 |
+| `scripts/ui_interaction_audit.py` | UI 操作逻辑线 | WARN 7 > 基线 3（`52a7b91e`） | 0 ERROR / 0 WARN | `79932b5d` | 清零，基线条目已删 |
+| `tests/test_ui_layout_locks.py` | UI 操作逻辑线 | ERROR 4 > 基线 3（`f664638a`） | 0 ERROR / 0 WARN | `79932b5d` | 清零，基线条目已删 |
+
+### 7.2 原 10 个基线外文件（本轮逐条判定；9 个按实测冻结进基线，1 个当场归零）
+
+判定只有两种：**属边界**（错误原地转成显式结果 / 「未知」，不造假）与
+**属吞错**（当场改掉，改完计数归零）。每条都写在这里，禁止只登记不判。
+
+冻结合计 21 处（`decode_router` 1 + `acceptance_suite` 7 + `common` 3 +
+`ring1` 3 + `ring5` 2 + `ring6` 1 + `ring7` 1 + `run_all` 1 + `network_hotplug` 2）。
+
+| 文件 | owner | 冻结值（E/W） | 判定 |
+| --- | --- | --- | --- |
+| `mbdsdr_ai/decode_router.py` | 解码流水线 P5 | 0 / 1 | 边界 1：`_input_sample_count` WAV 头读不出返回 None，交给 handler 报 `invalid_wav`（docstring 已写明，不是静默成功） |
+| `mbdsdr_ai/device_capabilities.py` | 参数治理线 | 0 / 0 | 边界 1（原 0/1）：后端档位表导入失败返回 None =「未知」，界面不编造档位；该处已由 `835efdce` 改为带记录，现计数归零、不进基线 |
+| `scripts/hw_acceptance/acceptance_suite.py` | 打包线（真机验收） | 0 / 7 | 吞错当场修 3 处（R2/R3/R4 的 `ctrl.disconnect()` 的 `pass` 改为写 `metrics["disconnect_error"]`）；边界 7（返回 `fail_result` / `skip_result` / 失败 `check` 且带原因串，扫描器不认结果信封，按边界留） |
+| `scripts/hw_acceptance/common.py` | 打包线（真机验收） | 0 / 3 | 边界 3：枚举失败 → `0` / `[]` / 部分 `out`，下游 `require_device` 出 `SKIP(no_device)` 并写明「无设备或驱动缺失」 |
+| `scripts/hw_acceptance/ring1_connection.py` | 打包线（真机验收） | 0 / 3 | 边界 3：异常转成 `check(False, str(e))`，原因进结果信封 |
+| `scripts/hw_acceptance/ring5_satellite_passes.py` | 打包线（真机验收） | 0 / 2 | 边界 2：异常转成 `FAIL` 结果并带原因 |
+| `scripts/hw_acceptance/ring6_sky_mode.py` | 打包线（真机验收） | 0 / 1 | 边界 1：无站点 `st=None` → 走「诚实空态」判定并渲染原因 |
+| `scripts/hw_acceptance/ring7_tx_gate.py` | 打包线（真机验收） | 0 / 1 | 边界 1：JSONL 解析失败置 `parse_ok=False` → `audit_parseable` 判失败 |
+| `scripts/hw_acceptance/run_all.py` | 打包线（真机验收） | 0 / 1 | 边界 1：单环异常转成该环 `FAIL` 信封 |
+| `tests/network_hotplug_regression.py` | 网络回归 | 0 / 2 | 边界 2：环境缺失 → `SKIP` 并带原因，不冒充 PASS |
+
+另：`scripts/check_data_licenses.py` 原也在「基线外」名单里，实测 **属吞错** 并
+当场改掉——`.npy` 读取失败原本静默 `return ""`（等于「没有许可声明」，可放过
+GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出码 2）。
+改完该文件静默项归零，**不进基线**。
+
+### 7.3 仍欠账（未清）
+
+- `desktop/main_window.py` 假成功——**本线不改**，owner = 操作逻辑线，
+  到期 2026-11-07。可执行条目（照做即可）：
+
+  1. 证据：`:1772` 取 `float(res.get("tuned_freq_hz", 0.0))`；`:1776` 无条件
+     `return {"ok": True, "status": "DONE"}`；`:7078` 频率 `<= 0` 时直接
+     `return`；`:4390` `_on_tune_sdr` 在 `_apply_hw_action` 失败后只
+     `_revert_tune_ui()`，**不返回值**。
+  2. 改 `_on_tune_sdr` 为返回 bool：两处 `_apply_hw_action` 失败分支改
+     `return False`，正常结尾 `return True`。
+  3. 改 `_on_sky_tune_satellite` 为返回 bool：`freq <= 0` 时先
+     `statusBar().showMessage("调谐未生效：无可用频率", MSG_IMPORTANT)`
+     再 `return False`；`_on_tune_sdr` 返回 False 时同样 `return False`。
+  4. 调用处把写入结果回传给上层：`if not self._on_sky_tune_satellite({...}):
+     return {"ok": False, "status": "UNAVAILABLE", "reason": "调谐未生效：
+     频率未知或硬件写入失败"}`，成功才 `DONE`。
+  5. 验收：mock `backend.set_frequency` 抛异常 → 动作返回 `UNAVAILABLE` 且
+     `ok=False`；`tuned_freq_hz` 缺失 → `UNAVAILABLE`；成功路径仍 `DONE`。
+     复跑 `python -m pytest tests/test_sky_track_wiring.py tests/test_main_window.py -q`。
+- `mbdsdr_ai/frequency_manager.py:208` + `NetworkIQBackend.set_frequency`
+  网络源假成功——owner = 网络/后端线，到期 2026-11-07。可执行条目：
+  1. 证据：`frequency_manager.py:208` 把缺字段读成 `0.0`，`:214-215`
+     把 `FileNotFoundError/JSONDecodeError/KeyError/TypeError` 吞成 `pass`；
+     `sdr_backend.py:4524` `NetworkIQBackend.set_frequency` 只记
+     `self._center_freq_hz = float(hz)` 并 `return None`，与基类
+     `-> bool` 契约不一致。
+  2. 改：`set_frequency` 返回 `bool`（范围非法返回 False 并记录原因）；
+     `frequency_manager` 缺字段/坏文件不再落 `0.0`，返回 `None` 或抛，
+     由调用方出 `UNAVAILABLE`；吞异常处至少写日志并把原因带进返回值。
+  3. 验收：坏 `bookmarks.json` 不再产生 `freq_hz=0.0` 书签；网络后端
+     `set_frequency(0)` 返回 False 且上游不是 `DONE`。
+- 顶层 docs 的存量「无 hash」断言：已在 20 个文档文首加
+  「本篇结论未经 commit 取证，引用前须复核」；`tests/test_claims_guard.py`
+  只锁增量（基线 `docs/claims-baseline.json`，按文件只许降），存量由各文档
+  owner 逐篇补 hash 或删断言。
+- 增量漂移登记：`docs/narrow-screen-plan.md:463`「宽度收口」那段是新写的
+  无 hash 断言（UI 操作逻辑线，到期 2026-11-07），本轮已计入基线 5；该行
+  补上 hash 与字面量后，把本文件的基线计数改回 4。

@@ -1,5 +1,7 @@
 # 原型差异清单（prototype-gap）
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 > 验收基准：`D:/mbdsdr/output/mbdsdr-product/dist/index.html`
 > 955 KB 自包含原型，2026-11-04 23:03 生成，3,774 行。
 > 本清单只把原型当**交互意图基准**；原型里的演示数据、固定星数、示意卫星方位、

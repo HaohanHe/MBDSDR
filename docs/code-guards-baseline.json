@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "snapshot": "2026-11-05",
+  "snapshot": "2026-11-06",
   "policy": "棘轮基线：任何文件的 ERROR/WARN 不得超过此处计数；新文件出现静默 catch-all 即红。只许降不许升。",
-  "total": 1347,
+  "total": 1284,
   "whitelisted": 1,
   "forbidden": 0,
   "files": {
@@ -38,10 +38,6 @@
       "ERROR": 0,
       "WARN": 1
     },
-    "desktop/control_panel.py": {
-      "ERROR": 2,
-      "WARN": 3
-    },
     "desktop/device_panel.py": {
       "ERROR": 0,
       "WARN": 5
@@ -58,13 +54,9 @@
       "ERROR": 0,
       "WARN": 3
     },
-    "desktop/main.py": {
-      "ERROR": 2,
-      "WARN": 2
-    },
     "desktop/main_window.py": {
-      "ERROR": 239,
-      "WARN": 102
+      "ERROR": 227,
+      "WARN": 96
     },
     "desktop/mcp_worker.py": {
       "ERROR": 1,
@@ -87,12 +79,12 @@
       "WARN": 3
     },
     "desktop/receive_pipeline.py": {
-      "ERROR": 18,
-      "WARN": 3
+      "ERROR": 13,
+      "WARN": 1
     },
     "desktop/rf_sky_view.py": {
-      "ERROR": 21,
-      "WARN": 51
+      "ERROR": 19,
+      "WARN": 47
     },
     "desktop/satellite_image_panel.py": {
       "ERROR": 1,
@@ -100,14 +92,6 @@
     },
     "desktop/scanner_panel.py": {
       "ERROR": 0,
-      "WARN": 5
-    },
-    "desktop/settings.py": {
-      "ERROR": 1,
-      "WARN": 1
-    },
-    "desktop/settings_panel.py": {
-      "ERROR": 6,
       "WARN": 5
     },
     "desktop/spectrum_widget.py": {
@@ -306,6 +290,10 @@
       "ERROR": 0,
       "WARN": 3
     },
+    "mbdsdr_ai/decode_router.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
     "mbdsdr_ai/decoders.py": {
       "ERROR": 0,
       "WARN": 10
@@ -410,13 +398,9 @@
       "ERROR": 1,
       "WARN": 1
     },
-    "mbdsdr_ai/hackrf_params.py": {
-      "ERROR": 0,
-      "WARN": 0
-    },
     "mbdsdr_ai/hal.py": {
       "ERROR": 2,
-      "WARN": 6
+      "WARN": 5
     },
     "mbdsdr_ai/hal_enhanced.py": {
       "ERROR": 4,
@@ -648,11 +632,7 @@
     },
     "mbdsdr_ai/sdr_backend.py": {
       "ERROR": 50,
-      "WARN": 62
-    },
-    "mbdsdr_ai/sdr_tools.py": {
-      "ERROR": 0,
-      "WARN": 0
+      "WARN": 55
     },
     "mbdsdr_ai/sdrangel_plugins.py": {
       "ERROR": 0,
@@ -699,7 +679,7 @@
       "WARN": 3
     },
     "mbdsdr_ai/solar_system.py": {
-      "ERROR": 3,
+      "ERROR": 2,
       "WARN": 7
     },
     "mbdsdr_ai/spacetime_predict.py": {
@@ -830,6 +810,34 @@
       "ERROR": 0,
       "WARN": 2
     },
+    "scripts/hw_acceptance/acceptance_suite.py": {
+      "ERROR": 0,
+      "WARN": 7
+    },
+    "scripts/hw_acceptance/common.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "scripts/hw_acceptance/ring1_connection.py": {
+      "ERROR": 0,
+      "WARN": 3
+    },
+    "scripts/hw_acceptance/ring5_satellite_passes.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
+    "scripts/hw_acceptance/ring6_sky_mode.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "scripts/hw_acceptance/ring7_tx_gate.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
+    "scripts/hw_acceptance/run_all.py": {
+      "ERROR": 0,
+      "WARN": 1
+    },
     "scripts/real_hw_acceptance.py": {
       "ERROR": 0,
       "WARN": 2
@@ -850,29 +858,17 @@
       "ERROR": 1,
       "WARN": 2
     },
-    "scripts/ui_interaction_audit.py": {
-      "ERROR": 3,
-      "WARN": 3
-    },
     "tests/conftest.py": {
       "ERROR": 0,
       "WARN": 1
     },
+    "tests/network_hotplug_regression.py": {
+      "ERROR": 0,
+      "WARN": 2
+    },
     "tests/test_adsb_dump1090_golden.py": {
       "ERROR": 0,
       "WARN": 1
-    },
-    "tests/test_agc_speed.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
-    "tests/test_app_mode.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
-    "tests/test_bookmark_tags.py": {
-      "ERROR": 1,
-      "WARN": 0
     },
     "tests/test_clean_exc.py": {
       "ERROR": 0,
@@ -886,10 +882,6 @@
       "ERROR": 1,
       "WARN": 0
     },
-    "tests/test_device_switch_flow.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
     "tests/test_ft8_wsjtx_golden.py": {
       "ERROR": 0,
       "WARN": 1
@@ -897,10 +889,6 @@
     "tests/test_full_integration.py": {
       "ERROR": 0,
       "WARN": 1
-    },
-    "tests/test_gimbal_follow_wiring.py": {
-      "ERROR": 1,
-      "WARN": 0
     },
     "tests/test_gk2a_jp2.py": {
       "ERROR": 0,
@@ -926,15 +914,7 @@
       "ERROR": 0,
       "WARN": 5
     },
-    "tests/test_main_window.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
     "tests/test_mcp_server.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
-    "tests/test_mode_switch_preset.py": {
       "ERROR": 1,
       "WARN": 0
     },
@@ -943,10 +923,6 @@
       "WARN": 2
     },
     "tests/test_orphan_connection.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
-    "tests/test_record_replay_config.py": {
       "ERROR": 1,
       "WARN": 0
     },
@@ -962,27 +938,11 @@
       "ERROR": 0,
       "WARN": 1
     },
-    "tests/test_sky_capability_negotiation.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
     "tests/test_sky_daylight_stars.py": {
       "ERROR": 0,
       "WARN": 1
     },
-    "tests/test_sky_track_wiring.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
-    "tests/test_three_column_layout.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
     "tests/test_touch_adaptation.py": {
-      "ERROR": 1,
-      "WARN": 0
-    },
-    "tests/test_ui_flow_guards.py": {
       "ERROR": 1,
       "WARN": 0
     },
@@ -995,11 +955,7 @@
       "WARN": 0
     },
     "tests/test_ui_layout_actions.py": {
-      "ERROR": 3,
-      "WARN": 0
-    },
-    "tests/test_ui_layout_locks.py": {
-      "ERROR": 3,
+      "ERROR": 2,
       "WARN": 0
     },
     "tests/test_ui_vfo_constellation.py": {

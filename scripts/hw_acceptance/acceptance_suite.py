@@ -221,8 +221,8 @@ def ring2() -> dict:
     ]
     try:
         ctrl.disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # 释放失败不改变已采到的指标，但必须留痕
+        metrics["disconnect_error"] = f"{type(exc).__name__}: {exc}"
     return common.result("R2", "频谱与首帧",
                          common.PASS if all(c["ok"] for c in checks) else common.FAIL,
                          metrics, checks, common.USER_MSG["no_signal"], [], True, [],
@@ -281,8 +281,8 @@ def ring3() -> dict:
     ]
     try:
         ctrl.disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # 释放失败不改变已采到的指标，但必须留痕
+        metrics["disconnect_error"] = f"{type(exc).__name__}: {exc}"
     return common.result("R3", "流稳定性",
                          common.PASS if all(c["ok"] for c in checks) else common.FAIL,
                          metrics, checks, common.USER_MSG["device_busy"], [], True, [],
@@ -347,8 +347,8 @@ def ring4() -> dict:
     }
     try:
         ctrl.disconnect()
-    except Exception:
-        pass
+    except Exception as exc:  # 释放失败不改变已采到的指标，但必须留痕
+        metrics["disconnect_error"] = f"{type(exc).__name__}: {exc}"
     return common.result("R4", "解调与音频输出",
                          common.PASS if all(c["ok"] for c in checks) else common.FAIL,
                          metrics, checks, common.USER_MSG["no_signal"],

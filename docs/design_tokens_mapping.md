@@ -1,5 +1,7 @@
 # `.figma` 设计语言 → Qt 主题令牌映射表
 
+> 本篇结论未经 commit 取证，引用前须复核（判据见 `scripts/verify_claims.py`；补齐四元组 `<结论> — <hash> — <path>:<line> — <改动后字面量>` 后可摘除本行）。
+
 来源：`D:\mbdsdr\.figma\284_119…284_644` 共 30 个 `index.module.scss`
 （Figma 单屏导出，画布 1920×1200）。Qt 侧事实源：
 `desktop/tokens.py`（`THEME_COLORS` / `RADIUS` / `FONT` / `SPACING` / `SIZE`），
