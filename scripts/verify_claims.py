@@ -98,17 +98,40 @@ def _log_s_hits(root: Path, h: str, literal: str, path: str) -> bool:
     return any(ln.split()[0].startswith(h[:7]) for ln in proc.stdout.splitlines() if ln.strip())
 
 
-def _literal_of(text: str, hashes: List[str], target: str) -> str:
-    """从反引号片段里取「改动后唯一字面量」；排除 hash 与 path:line 本身。"""
-    for tok in TICK_RE.findall(text):
-        t = tok.strip()
-        if not t or t in hashes or t in target:
-            continue
-        if PATHLINE_RE.fullmatch(t) or HASH_RE.fullmatch(t):
-            continue
-        if len(t) >= 3 and not t.isdigit():
-            return t
-    return ""
+def _is_literal_token(t: str, hashes: List[str], target: str) -> bool:
+    """能否作为「改动后唯一字面量」候选。"""
+    if not t or t in hashes or t in target:
+        return False
+    if PATHLINE_RE.fullmatch(t) or HASH_RE.fullmatch(t):
+        return False
+    return len(t) >= 3 and not t.isdigit()
+
+
+def _literal_candidates(text: str, hashes: List[str], target: str) -> List[str]:
+    """列出候选字面量，按可信度排序。
+
+    旧实现假设行内第一个合格反引号 token 就是字面量；但表格行/带前缀的
+    断言会先出现文件名或符号名，``git log -S`` 就比对了错对象。改为：
+
+    1. 四元组 ``<hash> — <path>:<line> — <literal>`` 中紧跟在 path:line
+       后面的那个 token（可能不止一个四元组）；
+    2. 行内没有这种位置时，退回旧的「第一个合格 token」。
+
+    调用方对候选逐个 ``git log -S``，命中即算；不再要求唯一。
+    """
+    tokens = [raw.strip() for raw in TICK_RE.findall(text)]
+    preferred: List[str] = []
+    for index, token in enumerate(tokens[:-1]):
+        follow = tokens[index + 1]
+        if PATHLINE_RE.fullmatch(token) and _is_literal_token(follow, hashes, target):
+            if follow not in preferred:
+                preferred.append(follow)
+    if preferred:
+        return preferred
+    for token in tokens:
+        if _is_literal_token(token, hashes, target):
+            return [token]
+    return []
 
 
 def _hashes(text: str) -> List[str]:
@@ -156,17 +179,18 @@ def classify(text: str, root: Path, heading: str = "") -> Claim:
         c.action = "换成真正改到该文件的 hash（多半是另一条线的提交）"
         return c
 
-    literal = _literal_of(text, hashes, target)
-    c.literal = literal
-    if not literal:
+    candidates = _literal_candidates(text, hashes, target)
+    if not candidates:
         c.status = STALE
         c.reason = "缺「改动后唯一字面量」，git log -S 无法定位"
         c.action = "补反引号字面量（改动后代码里真实存在的那一段）"
         return c
 
-    if not _log_s_hits(root, h, literal, path):
+    literal = next((t for t in candidates if _log_s_hits(root, h, t, path)), "")
+    c.literal = literal
+    if not literal:
         c.status = STALE
-        c.reason = f"git log -S '{literal}' 未命中 {h}"
+        c.reason = f"git log -S 候选 {candidates} 均未命中 {h}"
         c.action = "改字面量为该提交真实引入/删除的文本；对不上就判未证实并删断言"
         return c
 
