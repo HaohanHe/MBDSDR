@@ -7675,9 +7675,13 @@ class MainWindow(QMainWindow):
                 self._apply_observer_location()
 
     def _on_sky_object_clicked(self, obj):
-        """天空对象点击处理：显示详情，可选跟踪，并调用 MCP 工具调谐频率。"""
+        """天空对象点击处理：显示详情，可选跟踪，并调用 MCP 工具调谐频率。
+
+        诚实口径：只有真实后端 set_frequency 成功才写频率标签/控制面板，
+        才说“已调谐”；无设备或下发失败必须明说“未调谐”并给下一步。
+        """
         if obj.obj_type == "satellite":
-            # 切换天线指向该卫星
+            # 切换天线指向该卫星（纯界面指向，不代表已开始跟踪或已调谐）
             antenna = AntennaPointing(
                 azimuth_deg=obj.azimuth_deg,
                 elevation_deg=obj.elevation_deg,
@@ -7688,35 +7692,66 @@ class MainWindow(QMainWindow):
             )
             self.sky_view.set_antenna(antenna)
 
-            # 如果是气象卫星，真正调用 MCP 工具调谐到其频率
+            tuned = False
+            reason = ""
             if obj.frequency_hz > 0:
+                backend = self._active_sdr_backend
+                if backend is None:
+                    reason = "未连接 SDR 设备"
+                else:
+                    try:
+                        backend.set_frequency(float(obj.frequency_hz))
+                    except Exception as e:
+                        reason = f"{type(e).__name__}: {e}"
+                    else:
+                        tuned = True
+            else:
+                reason = "该卫星没有配置下行频率"
+
+            if tuned:
                 freq_mhz = obj.frequency_hz / 1e6
                 self.freq_label.setText(f"{freq_mhz:.1f} MHz")
                 self.status_freq.setText(f"频率: {freq_mhz:.1f} MHz")
 
-                # 调用 MCP 工具设置频率（频谱-天空联动）
+                # 调用 MCP 工具设置频率（频谱-天空联动，异步旁路）
                 if self._worker:
                     try:
-                        self._worker.request_tool.emit("sdr_set_frequency", {"frequency_hz": int(obj.frequency_hz)})
+                        self._worker.request_tool.emit(
+                            "sdr_set_frequency",
+                            {"frequency_hz": int(obj.frequency_hz)})
                     except Exception:
                         pass
 
-                # 同时更新控制面板的频率显示。
-                # 此前写的是 control_panel.freq_spin（该属性不存在，真实控件是
-                # freq_input，QLineEdit），异常被 except pass 吞掉，联动后控制面板
-                # 频率显示永不更新（死路径）。正确入口是 set_frequency_hz
-                # （专用恢复 setter，自己处理单位与显示）。
+                # 控制面板的频率显示：只有真实成功后才回填。
+                # 正确入口是 set_frequency_hz（专用恢复 setter）。
                 if hasattr(self, 'control_panel'):
                     try:
-                        self.control_panel.set_frequency_hz(float(obj.frequency_hz))
+                        self.control_panel.set_frequency_hz(
+                            float(obj.frequency_hz))
                     except Exception:
                         pass
 
-            # 状态栏提示
-            self.statusBar().showMessage(
-                f"已跟踪 {obj.name} (AZ {obj.azimuth_deg:.1f}°, EL {obj.elevation_deg:.1f}°) - 已自动调谐",
-                5000,
-            )
+                # VFO 收听频率跟随 → DDC 重算 offset
+                self._vfo_center_hz = float(obj.frequency_hz)
+                self._backend_center_hz = float(obj.frequency_hz)
+                self._update_main_vfo_offset()
+                self.statusBar().showMessage(
+                    f"已指向 {obj.name} (AZ {obj.azimuth_deg:.1f}°, "
+                    f"EL {obj.elevation_deg:.1f}°) · "
+                    f"已调谐到 {freq_mhz:.3f} MHz",
+                    5000,
+                )
+            else:
+                next_step = (
+                    "下一步：连接 SDR 后重新点此卫星。"
+                    if obj.frequency_hz > 0
+                    else "下一步：可在「AI」面板询问该卫星的下行频率。")
+                self.statusBar().showMessage(
+                    f"已指向 {obj.name} (AZ {obj.azimuth_deg:.1f}°, "
+                    f"EL {obj.elevation_deg:.1f}°) · "
+                    f"未调谐频率：{reason}。{next_step}",
+                    6000,
+                )
         elif obj.obj_type == "interferer":
             self.statusBar().showMessage(
                 f"干扰源 {obj.name}: AZ {obj.azimuth_deg:.1f}°, EL {obj.elevation_deg:.1f}°, "
