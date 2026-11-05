@@ -202,6 +202,11 @@ HORIZON_ALT_DEG = 0.0
 # 历表缺失视直径时只画最小位置标记（不编造角直径）。
 MOON_UNKNOWN_DIAMETER_RADIUS_PX = 2.0
 
+# 大气消光系数 k 的取值域（单一定义，设置面板 schema 同口径）：
+# 0=无消光；0.2=晴朗海平面（stars.EXTINCTION_K 默认）；0.5=雾霾。
+EXTINCTION_K_MIN = 0.0
+EXTINCTION_K_MAX = 0.5
+
 
 def moon_visible(alt_deg: Optional[float]) -> bool:
     """月球是否应出现在天空图中（绘制与拾取同一判据）。"""
@@ -648,13 +653,40 @@ def moon_lit_path(cos_alpha: float) -> QPainterPath:
     return path
 
 
+# 亮星名优先级：数值越小越先占位。亮星名（0.5）必须压过星座名（1.0），
+# 普通星名（2.0 + vmag）最后。判定只走 is_prominent_star 一处。
+LABEL_PRIORITY_PROMINENT_STAR = 0.5
+LABEL_PRIORITY_CONSTELLATION = 1.0
+LABEL_PRIORITY_NORMAL_STAR = 2.0
+# 亮星门槛：V ≤ 2.0 或带专名（HYG proper）。阈值只此一处。
+PROMINENT_STAR_VMAG = 2.0
+
+
+def is_prominent_star(vmag, proper) -> bool:
+    """是否亮星（单一判据）：视星等 ≤ PROMINENT_STAR_VMAG 或带专名。
+
+    专名以星表 ``proper`` 字段为准（空串=无名）；无名暗星不因缺数据被当成
+    亮星。非有限星等不参与「够亮」判定，但仍可凭专名入选。
+    """
+    try:
+        m = float(vmag)
+    except (TypeError, ValueError):
+        m = math.inf
+    if math.isfinite(m) and m <= PROMINENT_STAR_VMAG:
+        return True
+    return bool(str(proper or "").strip())
+
+
 # 每档标签数量上限（P0..P4）。依据：160° B3 实测队列 55 条、避让保留 40，
 # 座名 33 条是最大占用；一屏可读座名约 24，其余名额留给 DSO/星名。
-LABEL_TIER_CAPS = (5, 4, 24, 12, 20)
+# P1 由卫星/信号/干扰等操作对象与亮星名共用：亮星名实测最多 13 条
+# （南半球 120° B3 银心场），旧的 4 条会把 9 条亮星名当卫星限额砍掉，
+# 因此放到 20（与普通星名同额）。
+LABEL_TIER_CAPS = (5, 20, 24, 12, 20)
 
 
 def label_tier(priority: float) -> int:
-    """标签优先级 -> 档位 P0..P4（0.0 行星 / 0.5 卫星 / 1.0 星座 / 1.5 DSO / ≥2 星名）。"""
+    """标签优先级 -> 档位 P0..P4（0.0 行星 / 0.5 卫星+亮星名 / 1.0 星座 / 1.5 DSO / ≥2 普通星名）。"""
     p = float(priority)
     if p < 0.5:
         return 0
@@ -1716,6 +1748,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._show_eqgrid: bool = False     # 赤道网格 (RA 时圈 + 赤纬圈)
         self._show_azgrid: bool = True      # 方位网格 (self._show_grid 同步)
         self._bortle: int = 3
+        # 大气消光系数 k：Δm = k / sin(alt)，逐星按各自仰角算（0=无消光）。
+        # 与 Bortle 独立：Bortle 定天顶极限星等，k 只压低低仰角天体。
+        self._extinction_k: float = float(_stars.EXTINCTION_K)
         # 全天星表取数结果（绘制与拾取共用同一份；None=白天/无站/星表不可用）
         self._star_sel = None
         self._star_catalog_error: str = ""
@@ -3616,6 +3651,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 float(self.view_state.center_alt),
                 float(self.view_state.fov_deg),
                 bortle=int(self._bortle),
+                extinction_k=float(self._extinction_k),
                 max_count=self.STAR_MAX_DRAW,
             )
         except Exception as exc:
@@ -3761,7 +3797,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # 放大后允许更暗的具名星出现）。无名星不编造名字。
             name = label_info.get(i)
             if name:
-                self._queue_label(2.0 + vmag_l[i],
+                prominent = is_prominent_star(vmag_l[i], names[i])
+                prio = (LABEL_PRIORITY_PROMINENT_STAR if prominent
+                        else LABEL_PRIORITY_NORMAL_STAR + vmag_l[i])
+                self._queue_label(prio,
                                   QPointF(pos.x() + r + 2, pos.y() - r),
                                   _stars.culture_label(name),
                                   QColor(210, 220, 235,
@@ -3901,7 +3940,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 r_star, bright = 1.0, 0.35
             else:
                 r_star, bright, _bloom = _stars.star_draw(
-                    mag + _stars.extinction_delta_mag(alt), self._bortle)
+                    mag + _stars.extinction_delta_mag(alt, self._extinction_k), self._bortle)
                 if r_star <= 0:
                     continue            # 与恒星同一亮度门（看不清的不画）
             r, clamped = self._dso_symbol_geometry(az, alt_draw, dso_size_arcmin(e))
@@ -4208,7 +4247,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 else:
                     text = _xingguan.xingguan_label(
                         key, with_system_tag=multi)
-                self._queue_label(1.0, QPointF(pos.x() + 8, pos.y() - 8),
+                self._queue_label(LABEL_PRIORITY_CONSTELLATION,
+                                  QPointF(pos.x() + 8, pos.y() - 8),
                                   text, col, small=True)
 
 
@@ -4241,6 +4281,31 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             raise ValueError(f"Bortle 等级必须是整数：{level!r}") from exc
         self._bortle = max(1, min(9, lv))
         self.update()
+
+    def set_extinction(self, k: float) -> float:
+        """设置大气消光系数 k（星等/airmass），返回实际生效值。
+
+        这是**唯一**公开写入 ``_extinction_k`` 的入口。消光按每颗星各自仰角
+        Δm = k/sin(alt) 逐星叠加，与 Bortle 无关：Bortle 只决定天顶极限星等。
+        下一帧星表选择与绘制都会用新 k，调用后立即生效；不改观测站/图层。
+
+        取值域 ``[EXTINCTION_K_MIN, EXTINCTION_K_MAX]``（默认 0.2）：越界**夹住**
+        而不是报错（设置面板滑杆/持久化可能送来边界外的旧值），返回夹取后的
+        实际值供调用方回显。非数字/非有限数仍拒绝——那是调用方错误，不猜。
+        """
+        try:
+            kv = float(k)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"消光系数必须是数字：{k!r}") from exc
+        if not math.isfinite(kv):
+            raise ValueError(f"消光系数必须是有限数：{k!r}")
+        self._extinction_k = max(EXTINCTION_K_MIN, min(EXTINCTION_K_MAX, kv))
+        self.update()
+        return self._extinction_k
+
+    # 兼容设置线的既有调用名（config_schema 消费点写的是 set_extinction_k）。
+    # 两个名字写同一个状态、走同一条夹取逻辑，不形成第二套入口。
+    set_extinction_k = set_extinction
 
     # -- 星座/星官图层开关（每套体系可单独开关） --------------------------
     def set_constellation_layer_visible(self, system_id: str,
@@ -5354,7 +5419,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if mag is None:
                 continue        # 历表没给星等就不画，不拿默认值冒充亮度
             r, bright, bloom = _stars.star_draw(
-                float(mag) + _stars.extinction_delta_mag(alt), self._bortle)
+                float(mag) + _stars.extinction_delta_mag(alt, self._extinction_k), self._bortle)
             if r <= 0:
                 continue        # 裸眼极限外：如实不可见（搜索/信息卡仍可查到）
             cr, cg, cb = style["color"]  # type: ignore[misc]
@@ -5499,7 +5564,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             if alt_draw < 0.0 or mag is None:
                 continue
             r_pick, _, _ = _stars.star_draw(
-                float(mag) + _stars.extinction_delta_mag(alt), self._bortle)
+                float(mag) + _stars.extinction_delta_mag(alt, self._extinction_k), self._bortle)
             if r_pick <= 0:
                 continue
             scr = self._sky_to_screen_finite(az, alt_draw)

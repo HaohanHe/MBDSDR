@@ -233,10 +233,11 @@ def limit_magnitude(fov_deg: float, bortle: int = DEFAULT_BORTLE) -> float:
 
 
 def effective_limit_mag(alt_deg: float, fov_deg: float,
-                        bortle: int = DEFAULT_BORTLE) -> float:
+                        bortle: int = DEFAULT_BORTLE,
+                        extinction_k: float = EXTINCTION_K) -> float:
     """某仰角处的等效极限星等 = 天顶极限 - 消光增量 Δm(alt)。"""
     return limit_magnitude(fov_deg, bortle) - extinction_delta_mag_array(
-        np.asarray([alt_deg], dtype=float))[0]
+        np.asarray([alt_deg], dtype=float), k=extinction_k)[0]
 
 
 def extinction_delta_mag_array(alt_deg: np.ndarray,
@@ -402,6 +403,7 @@ class StarCatalog:
         max_count: int = DEFAULT_MAX_COUNT,
         margin_deg: float = 1.0,
         jd_tt: Optional[float] = None,
+        extinction_k: float = EXTINCTION_K,
     ) -> StarSelection:
         """返回该视场/时刻应画的星集合（地平以上 + 视锥内 + 极限星等内）。
 
@@ -414,6 +416,8 @@ class StarCatalog:
             max_count: 单次预算；超出时保留最亮的 N 颗并置 ``truncated``。
             margin_deg: 视锥余量（默认 1°，给标签/星点边缘留空间）。
             jd_tt: 力学时儒略日；None 时与既有链一致取 ``jd_ut1``。
+            extinction_k: 大气消光系数 k（Δm=k/sin(alt)，逐星按各自仰角算）；
+                与 Bortle 相互独立——Bortle 定天顶极限星等，k 只压低低仰角星。
 
         Returns:
             ``StarSelection``；数组按有效星等从暗到亮排序（亮星后画）。
@@ -483,7 +487,7 @@ class StarCatalog:
         alt = alt[mask]
         az = az[mask]
         zero = np.zeros(0)
-        eff = m + extinction_delta_mag_array(alt)
+        eff = m + extinction_delta_mag_array(alt, k=extinction_k)
         keep = eff <= limit
         cand = cand[keep]
         m = m[keep]
@@ -614,6 +618,7 @@ def select_for_view(
     margin_deg: float = 1.0,
     jd_tt: Optional[float] = None,
     catalog: Optional[StarCatalog] = None,
+    extinction_k: float = EXTINCTION_K,
 ) -> StarSelection:
     """模块级入口：用单例星表返回该视场应画的星集合。
 
@@ -638,4 +643,5 @@ def select_for_view(
         max_count=max_count,
         margin_deg=margin_deg,
         jd_tt=jd_tt,
+        extinction_k=extinction_k,
     )

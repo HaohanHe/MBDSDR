@@ -31,8 +31,12 @@ app = QApplication.instance() or QApplication(sys.argv)
 
 import rf_sky_view  # noqa: E402
 from rf_sky_view import (  # noqa: E402
+    LABEL_PRIORITY_CONSTELLATION,
+    LABEL_PRIORITY_NORMAL_STAR,
+    LABEL_PRIORITY_PROMINENT_STAR,
     LABEL_TIER_CAPS,
     RFSkyView,
+    is_prominent_star,
     label_boxes_keep,
     label_tier,
     label_tier_keep,
@@ -180,9 +184,42 @@ def test_flush_paints_only_higher_priority_of_overlapping_pair():
 # 4. 每档上限 + 丢弃规则：远处先丢，不是按队列/目录顺序随机截断
 # --------------------------------------------------------------------------
 def test_tier_caps_are_the_agreed_numbers():
-    assert LABEL_TIER_CAPS == (5, 4, 24, 12, 20)
+    # P1 与亮星名共用：4→20，避免 5 条以上亮星名被当成卫星限额砍掉。
+    assert LABEL_TIER_CAPS == (5, 20, 24, 12, 20)
     assert [label_tier(p) for p in (0.0, 0.5, 1.0, 1.5, 2.0, 3.5)] \
         == [0, 1, 2, 3, 4, 4]
+
+
+# --------------------------------------------------------------------------
+# 4b. 亮星判定与优先级：亮星名（0.5）必须压过星座名（1.0）
+# --------------------------------------------------------------------------
+def test_is_prominent_star_by_magnitude_or_proper_name():
+    assert is_prominent_star(2.0, "") is True          # 门槛含等号
+    assert is_prominent_star(2.05, "") is False        # 暗且无名
+    assert is_prominent_star(5.1, "Vega") is True      # 暗但有专名
+    assert is_prominent_star(5.1, "  ") is False       # 空白名不算专名
+    assert is_prominent_star(float("nan"), "") is False
+    assert is_prominent_star(float("nan"), "Vega") is True
+
+
+def test_prominent_star_label_beats_constellation():
+    # 框格式 (优先级, x0, y0, x1, y1)：心宿二（0.5）与暗星座名（1.0）全重叠。
+    prominent = (LABEL_PRIORITY_PROMINENT_STAR, 0.0, 0.0, 60.0, 14.0)
+    constellation = (LABEL_PRIORITY_CONSTELLATION, 0.0, 0.0, 120.0, 14.0)
+    assert label_boxes_keep([constellation, prominent]) == [1]
+    # 普通星名（2.0+vmag）仍然让位给星座名（保持旧行为）。
+    normal = (LABEL_PRIORITY_NORMAL_STAR + 3.2, 0.0, 0.0, 40.0, 14.0)
+    assert label_boxes_keep([normal, constellation]) == [1]
+
+
+def test_prominent_stars_survive_tier_cap():
+    # 13 条亮星名（南半球 120° B3 实测条数）必须全部留下。
+    from PySide6.QtCore import QPointF
+    items = [(LABEL_PRIORITY_PROMINENT_STAR, QPointF(float(i * 5), 0.0),
+              [("星名", False, 0.0)], QColor(255, 255, 255))
+             for i in range(13)]
+    kept = label_tier_keep(items, 0.0, 0.0)
+    assert len(kept) == 13
 
 
 def test_constellation_cap_drops_farthest_not_queue_order():
@@ -203,11 +240,11 @@ def test_constellation_cap_drops_farthest_not_queue_order():
 def test_tier_caps_apply_per_tier_independently():
     from PySide6.QtCore import QPointF
     items = []
-    for p, n in ((0.0, 10), (0.5, 6), (1.0, 30), (1.5, 13), (2.0, 21)):
+    for p, n in ((0.0, 10), (0.5, 25), (1.0, 30), (1.5, 13), (2.0, 21)):
         items.extend((p, QPointF(float(j), 0.0), [("x", False, 0.0)],
                       QColor(255, 255, 255)) for j in range(n))
     kept = label_tier_keep(items, 0.0, 0.0)
-    assert len(kept) == 5 + 4 + 24 + 12 + 20
+    assert len(kept) == 5 + 20 + 24 + 12 + 20
 
 
 def test_flush_labels_uses_tier_cap_before_collision():
