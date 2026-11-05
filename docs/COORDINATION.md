@@ -1783,13 +1783,13 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 
 | 文件:行 | 声称 hash | 冲突点 | 修法 | 建议 owner | 截止 | 现状 |
 |---|---|---|---|---|---|---|
-| `docs/learn/capability-map.md:436` | `fcafa80` | 本条没有可比的改动对象 | 补文件名/符号或删断言 | WorkBuddy | 2026-11-13 | open |
-| `docs/learn/settings-surface-audit.md:51` | `4cd0881` | 引用 `docs/learn/cpp-tool-ui-reverse-audit.md`，提交改的是 `desktop/*.py` | 改引用为实际 desktop 文件 + 复跑 | WorkBuddy | 2026-11-13 | open |
-| `docs/learn/settings-surface-audit.md:199` | `451073e` | 本条没有可比的改动对象 | 补文件名/符号或删断言 | WorkBuddy | 2026-11-13 | open |
-| `docs/learn/ui_operation_logic_real.md:60` | `7d3fa3f` | 引用 Python 对象，提交改的是 C++ | 拆开两条或换正确 hash | WorkBuddy | 2026-11-13 | open |
-| `docs/PRD.md:869` | `4abde1a` | 引用测试文件，提交改的是 `desktop/main_window.py` | 改引用 + 复跑 | WorkBuddy | 2026-11-13 | open |
+| `docs/learn/capability-map.md:436` | `fcafa80` | 本条没有可比的改动对象 | 补文件名/符号或删断言 | WorkBuddy | 2026-11-13 | done：hash 确实填错——`fcafa80` 只是「Linux 红属环境差异」的猜测提交，真实修复是 `8e794505`（`.github/workflows/ci.yml:274` 固定 `-j4`） |
+| `docs/learn/settings-surface-audit.md:51` | `4cd0881` | 引用 `docs/learn/cpp-tool-ui-reverse-audit.md`，提交改的是 `desktop/*.py` | 改引用为实际 desktop 文件 + 复跑 | WorkBuddy | 2026-11-13 | done：hash 未错（该提交确实做了那 23 处）；R6 红是窗口把上一行文档路径串进来，补 `clean_exc`（该提交 10 个 desktop 文件均含）作对象 |
+| `docs/learn/settings-surface-audit.md:199` | `451073e` | 本条没有可比的改动对象 | 补文件名/符号或删断言 | WorkBuddy | 2026-11-13 | done：hash 未错（module_panel 旋钮 + clean_exc 同笔）；原句只有裸 hash，补 `desktop/module_panel.py:315` — `round(v * 1e6)` |
+| `docs/learn/ui_operation_logic_real.md:60` | `7d3fa3f` | 引用 Python 对象，提交改的是 C++ | 拆开两条或换正确 hash | WorkBuddy | 2026-11-13 | done：hash 未错（C++ panel id 修复）；原句把无提交的 Python `_raise_center_tab` 与 C++ 混写，已拆——Python 半边标〔推断〕，C++ 半边补 `cpp/src/ui/main_window.cpp` |
+| `docs/PRD.md:869` | `4abde1a` | 引用测试文件，提交改的是 `desktop/main_window.py` | 改引用 + 复跑 | WorkBuddy | 2026-11-13 | done：hash 未错（删假 0 Hz 回填）；补 `desktop/main_window.py:4213` — `绝不用 0 Hz`（R11 本体仍是「待补」） |
 
-机检复跑：`python scripts/check_red_lifecycle.py` → 期望 `R1 实修 53 条 / SNAPSHOT 0 条 / 历史横幅 123 条`（截至 2026-11-06 基线）；派发完成后总账里的 `SNAPSHOT` 必须上升、`FAIL` 必须相应下降，不允许两边都不动。
+机检复跑：`python scripts/check_red_lifecycle.py` → 本轮实测 `R1 实修 69 条 / SNAPSHOT 0 条 / 历史横幅 123 条`（2026-11-06 派发表落库时为 53，两数随各线提交浮动，以复跑为准）；派发完成后总账里的 `SNAPSHOT` 必须上升、`FAIL` 必须相应下降，不允许两边都不动。
 
 ---
 
