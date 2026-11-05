@@ -72,6 +72,7 @@ DE421 月球精度约 1″ 量级 + 本仓 Meeus 截断级数余量，实测偏�
 | `python scripts\hw_acceptance\acceptance_suite.py` | **21.2 s** | R1–R4：librtlsdr + RTL-SDR；R5：rotctld `127.0.0.1:4533`（或板载云台）；R6：COM 口 GNSS；R7：PySide6 + skyfield + `de421.bsp` | `summary.json` + 逐环 `result.json`；SKIP 带 `no_device/no_gimbal/no_gnss` 原因码 |
 | `python scripts\hw_acceptance\run_all.py --only r5,r6,r7` | **39.4 s** | TLE 缓存（离线需先有缓存，或允许联网）；skyfield；D 盘 TX 审计目录可写 | 上一版分环脚本（卫星过境/天空/发射闸），`PASS 3 / FAIL 0` |
 | `python scripts\hw_acceptance\acceptance_suite.py --hw` | **3.9 s** | R1–R4：librtlsdr + RTL-SDR | 只跑硬件四环；无设备 → `PASS 0 / FAIL 0 / SKIP 4`，逐条 `no_device`；**SKIP 计数可见**，不会因 0 个 PASS 而报“通过” |
+| `python scripts\hw_acceptance\manual_usb_cycle.py --mode usb`（无 `--interactive`） | **7.0 s**（SKIP） | 无（`no_operator`）；真跑需人工 + 设备/链路 | `result.json`；`SKIPPED(no_operator)`，**不产生任何拔线耗时数字** |
 | `python -m pytest tests\test_moon_reference_acceptance.py -q` | **0.36 s** | `de421.bsp` + skyfield（缺则 skip） | 月球对拍 + 1h 反证：`3 passed` |
 
 > `scripts/release_check.py` 本轮**未改动**：该文件工作区含机制线未提交的
@@ -119,7 +120,10 @@ python scripts\hw_acceptance\manual_usb_cycle.py --mode rtl-tcp --port 1234 --cu
 非全零），不能拿「TCP 连上了」当恢复成功；USB 是本地枚举路径（librtlsdr
 重新 open），与网络心跳无关，拔出后由生产者读错误直接 `_mark_link_lost`。
 
-**本轮实跑（无操作者）**：三个模式均 `SKIPPED(no_operator)`，未产生数字，见下节记录。
+**本轮实跑（无操作者）**：`usb`、`rtl-tcp`（cut=cable）、`spyserver`（cut=server）
+三个模式均输出 `status=SKIPPED(no_operator) code=no_operator`，退出码 0，
+`result.json` 分别落在 `.tmp-tool-results/hw_acceptance/hotplug_{usb,rtl-tcp,spyserver}/`；
+未执行任何拔插动作，也**没有**产生可引用的耗时数字。
 
 ### 只能条件复跑 / 永久不可复跑
 

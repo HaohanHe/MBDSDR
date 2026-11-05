@@ -842,46 +842,54 @@ def _run_weak_cell(idle: float, duration: float, seed: int,
     return stats
 
 
-#: (名称, 劣化参数, idle=3s 时预期的 stale 次数)。idle=5s 一列全部预期 0。
+#: (名称, 劣化参数, idle=3s 时预期的 stale 次数, idle=2s 时预期次数)。
+#: idle=5s 一列全部预期 0。
 _WEAK_CASES = [
-    ("loss-1%", dict(loss=0.01), 0),
-    ("loss-5%", dict(loss=0.05), 0),
-    ("loss-10%", dict(loss=0.10), 0),
-    ("delay-200ms", dict(delay_s=0.2, jitter_s=0.3), 0),
-    ("delay-1s", dict(delay_s=1.0, jitter_s=0.3), 0),
-    # 3s 延迟在 3s 阈值下必然触发一次 stale；5s 阈值下 3.05~3.30s 仍有余量
-    ("delay-3s", dict(delay_s=3.0, jitter_s=0.3), 1),
-    ("reorder-5%", dict(reorder=0.05), 0),
-    ("reorder-10%", dict(reorder=0.10), 0),
-    ("reorder-20%", dict(reorder=0.20), 0),
+    ("loss-1%", dict(loss=0.01), 0, 0),
+    ("loss-5%", dict(loss=0.05), 0, 0),
+    ("loss-10%", dict(loss=0.10), 0, 0),
+    ("delay-200ms", dict(delay_s=0.2, jitter_s=0.3), 0, 0),
+    # 1s 级停发占用 2s 阈值的 57%，但仍不越线（实测 max_gap 1.141s）
+    ("delay-1s", dict(delay_s=1.0, jitter_s=0.3), 0, 0),
+    # 3s 延迟在 3s/2s 阈值下必然触发一次 stale；5s 阈值下 3.05~3.30s 仍有余量
+    ("delay-3s", dict(delay_s=3.0, jitter_s=0.3), 1, 1),
+    ("reorder-5%", dict(reorder=0.05), 0, 0),
+    ("reorder-10%", dict(reorder=0.10), 0, 0),
+    ("reorder-20%", dict(reorder=0.20), 0, 0),
     # 拥塞窗口塌陷：周期 4×stall（停发占空比 25%），客户端在 stall 窗口内
     # 收不到任何字节。周期必须 > 窗口，否则窗口末尾的读会跨进下一轮停发，
     # 把「窗口外的新事件」误记成「窗口内的误判」。
-    ("bwjit-200ms", dict(stall_s=0.2, period_s=0.8), 0),
-    ("bwjit-1s", dict(stall_s=1.0, period_s=4.0), 0),
-    ("bwjit-3.2s", dict(stall_s=3.2, period_s=12.8), 1),
+    ("bwjit-200ms", dict(stall_s=0.2, period_s=0.8), 0, 0),
+    ("bwjit-1s", dict(stall_s=1.0, period_s=4.0), 0, 0),
+    ("bwjit-3.2s", dict(stall_s=3.2, period_s=12.8), 1, 1),
     # 匀速涓流（标称 1 MS/s 的 0.13%）：字节一直在流，心跳不该响
-    ("bwjit-trickle", dict(chunk=256, interval=0.2), 0),
+    ("bwjit-trickle", dict(chunk=256, interval=0.2), 0, 0),
 ]
 
 _WEAK_CASE_IDS = [c[0] for c in _WEAK_CASES]
 
 
 class TestWeakNetworkMatrix:
-    """四类弱网 × 两种阈值：窗口取 2×idle + 0.8s。
+    """四类弱网 × 三种阈值（5s / 3s / 2s）：窗口取 2×idle + 0.8s。
 
     窗口必须覆盖「连续 2 次心跳超时」的时间尺度，否则 5s 一列根本不可能
-    触发升级，测出来的 0 次是结构性的、没有意义。3s 一列同样覆盖 6s。
+    触发升级，测出来的 0 次是结构性的、没有意义。3s/2s 一列同样覆盖
+    2×idle 的硬判尺度。
     """
 
-    @pytest.mark.parametrize("idle", [5.0, 3.0])
-    @pytest.mark.parametrize("name,impair,expect_stale_3s", _WEAK_CASES,
-                             ids=_WEAK_CASE_IDS)
+    @pytest.mark.parametrize("idle", [5.0, 3.0, 2.0])
+    @pytest.mark.parametrize("name,impair,expect_stale_3s,expect_stale_2s",
+                             _WEAK_CASES, ids=_WEAK_CASE_IDS)
     def test_weak_cell_stale_and_gap(self, idle, name, impair,
-                                     expect_stale_3s):
+                                     expect_stale_3s, expect_stale_2s):
         duration = 2 * idle + 0.8
         stats = _run_weak_cell(idle, duration, seed=7, **impair)
-        expected = 0 if idle == 5.0 else expect_stale_3s
+        if idle == 5.0:
+            expected = 0
+        elif idle == 3.0:
+            expected = expect_stale_3s
+        else:
+            expected = expect_stale_2s
 
         assert stats["samples"] > 0, "档位把数据流彻底掐死了，不是弱网"
         assert stats["disconnected"] == 0, (
@@ -905,18 +913,18 @@ class TestWeakNetworkMatrix:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 5. 真实阈值下的半开硬判：5s/10s 与 3s/6s，两种客户端
+# 5. 真实阈值下的半开硬判：5s/10s、3s/6s 与 2s/4s，两种客户端
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestRealThresholdLatency:
-    """不缩短超时：直接用产品候选阈值 5.0s 与 3.0s 跑半开连接。
+    """不缩短超时：直接用产品候选阈值 5.0s / 3.0s / 2.0s 跑半开连接。
 
     假服务先真实吐数据，然后保留 TCP、停止转发；客户端必须
     在 ``idle`` 内转 stale、在 ``2×idle`` 内硬判 disconnected。
     """
 
     @pytest.mark.parametrize("kind", ["rtl", "spy"])
-    @pytest.mark.parametrize("idle", [5.0, 3.0])
+    @pytest.mark.parametrize("idle", [5.0, 3.0, 2.0])
     def test_half_open_hard_disconnect_within_two_heartbeats(self, kind, idle):
         alive = threading.Event()
         alive.set()
@@ -1019,23 +1027,31 @@ class TestWeakThresholdDecisionLock:
         assert rtl._idle_timeout * rtl._STALE_ESCALATE_AFTER == pytest.approx(10.0)
         assert spy.idle_timeout * spy._STALE_ESCALATE_AFTER == pytest.approx(10.0)
 
-        # 3s/6s 只是「同一公式的另一个入参」，不是另一套机制：
+        # 3s/6s 与 2s/4s 只是「同一公式的另一个入参」，不是另一套机制：
         alt = RtlTcpClient("127.0.0.1", 1, idle_timeout=3.0)
         assert alt._idle_timeout * alt._STALE_ESCALATE_AFTER == pytest.approx(6.0)
-        print("[lock] hard-disconnect: idle=5s → 10.0s (2×heartbeat); "
-              "idle=3s → 6.0s")
+        alt2 = RtlTcpClient("127.0.0.1", 1, idle_timeout=2.0)
+        assert alt2._idle_timeout * alt2._STALE_ESCALATE_AFTER == pytest.approx(4.0)
+        print("[lock] hard-disconnect: idle=5s → 10.0s; idle=3s → 6.0s; "
+              "idle=2s → 4.0s (2×heartbeat)")
 
     def test_measured_evidence_still_supports_five_seconds(self):
-        """把「5s 0/13、3s 2/13（15.4%）」的档位证据钉在测试里。"""
+        """把「5s 0/13、3s 2/13、2s 2/13」的档位证据钉在测试里。"""
         assert len(_WEAK_CASES) == 13, (
             f"弱网档位数变了：{len(_WEAK_CASES)}，实测结论按 13 档记录，"
             f"改档位必须重跑矩阵并同步更新 docs/network-layer.md §0")
-        positives = [(name, expect) for name, _impair, expect in _WEAK_CASES
-                     if expect]
+        positives = [(name, e3) for name, _impair, e3, _e2 in _WEAK_CASES
+                     if e3]
         assert [name for name, _e in positives] == ["delay-3s", "bwjit-3.2s"], (
             "3s 档的误判档位与实测记录不一致："
             f"{[name for name, _e in positives]}")
-        assert sum(expect for _n, _i, expect in _WEAK_CASES) == 2
+        assert sum(e3 for _n, _i, e3, _e2 in _WEAK_CASES) == 2
+
+        # 2s 档与 3s 档在本矩阵上同档位误判（2/13），没有额外误报
+        positives_2s = [(name, e2) for name, _impair, _e3, e2 in _WEAK_CASES
+                        if e2]
+        assert [name for name, _e in positives_2s] == ["delay-3s", "bwjit-3.2s"]
+        assert sum(e2 for _n, _i, _e3, e2 in _WEAK_CASES) == 2
 
         # 决策边界：最坏空档 3.212s 对 5s 是 64% 占用，对 3s 是 107% 越线
         assert _RECORDED_WORST_GAP_S < 5.0
@@ -1046,13 +1062,14 @@ class TestWeakThresholdDecisionLock:
 
         print(f"[lock] measured: 13 档 idle=5s → 0/13 stale、0 hard-disconnect; "
               f"idle=3s → 2/13 (15.4%): delay-3s、bwjit-3.2s; "
+              f"idle=2s → 2/13 (15.4%): 同两档（无额外误报）; "
               f"worst_gap={_RECORDED_WORST_GAP_S:.3f}s; "
               f"half-open hard={_RECORDED_HALF_OPEN_HARD_S[0]:.3f}s/"
               f"{_RECORDED_HALF_OPEN_HARD_S[1]:.3f}s (rtl/spy)")
 
     def test_three_second_config_would_be_red_on_two_cells(self):
         """反证：若默认改成 3s，13 档里有 2 档会转 stale —— 这就是报红的依据。"""
-        with_3s = sum(expect for _n, _i, expect in _WEAK_CASES)
+        with_3s = sum(e3 for _n, _i, e3, _e2 in _WEAK_CASES)
         assert with_3s == 2
         assert with_3s / len(_WEAK_CASES) == pytest.approx(0.153846, abs=1e-6)
         print(f"[lock] counter-evidence: 3s/6s = {with_3s}/{len(_WEAK_CASES)} "
