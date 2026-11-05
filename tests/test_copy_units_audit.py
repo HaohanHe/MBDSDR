@@ -163,6 +163,10 @@ _MOBILE_INFO = open(os.path.join(_ROOT, "mobile", "lib", "widgets",
                                  "device_info_card.dart"), encoding="utf-8").read()
 _CPP_SPECTRUM = open(os.path.join(_ROOT, "cpp", "src", "ui",
                                   "spectrum_widget.cpp"), encoding="utf-8").read()
+_ORCH = open(os.path.join(_ROOT, "mbdsdr_ai", "orchestrator.py"),
+             encoding="utf-8").read()
+_WEATHER = open(os.path.join(_ROOT, "desktop", "weather_panel.py"),
+                encoding="utf-8").read()
 
 
 def test_u02_cpp_status_strip_labels_rssi_and_snr_units():
@@ -333,6 +337,16 @@ def test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s():
     assert 'QString("%1  Fs=%2 MS/s  F0=%3 MHz  N=%4")' in _CPP_SPECTRUM
     assert "Fs=%2 MHz" not in _CPP_SPECTRUM
     assert ".arg(frame.sampleRateHz / 1e6, 0, 'f', 3)" in _CPP_SPECTRUM
+
+
+def test_u03_orchestration_and_advice_copy_use_ms_per_s():
+    """U-03：编排任务标题与 SDR 采样率建议串不得写 MSPS；天气面板采样率行标单位。"""
+    assert "设置采样率 {sample_rate/1e6:.3f} MS/s" in _ORCH
+    assert "MSPS" not in _ORCH
+    assert '采样率 2.048 MS/s（ oversample ~16x）' in _SDR_TOOLS
+    assert '采样率 2.5 MS/s' in _SDR_TOOLS
+    assert "MSPS" not in _SDR_TOOLS
+    assert '"采样率 (MS/s)"' in _WEATHER
 
 
 def test_u03_status_output_uses_ms_per_s_for_sample_rate():

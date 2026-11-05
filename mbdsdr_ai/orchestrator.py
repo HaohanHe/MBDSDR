@@ -417,7 +417,7 @@ class Orchestrator:
 
         # 2. 设置参数（依赖连接）
         t2 = self.add_task("设置频率", f"设置中心频率 {frequency_hz/1e6:.3f} MHz", "sdr_set_frequency", {"frequency_hz": frequency_hz}, dependencies=[t1], priority=TaskPriority.HIGH)
-        t3 = self.add_task("设置采样率", f"设置采样率 {sample_rate/1e6:.2f} MSPS", "sdr_set_sample_rate", {"sample_rate": sample_rate}, dependencies=[t1], priority=TaskPriority.HIGH)
+        t3 = self.add_task("设置采样率", f"设置采样率 {sample_rate/1e6:.3f} MS/s", "sdr_set_sample_rate", {"sample_rate": sample_rate}, dependencies=[t1], priority=TaskPriority.HIGH)
         t4 = self.add_task("设置增益", f"设置增益 {gain_db} dB", "sdr_set_gain", {"gain_db": gain_db}, dependencies=[t1], priority=TaskPriority.HIGH)
 
         # 3. 频谱分析（依赖参数设置）

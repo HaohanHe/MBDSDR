@@ -6854,10 +6854,10 @@ def _meteor_demod_setup(args):
     lines.append("")
     lines.append("【SDR采样率建议】")
     if sdr_type == 'rtlsdr':
-        lines.append(f"  RTL-SDR: 采样率 2.048 MSPS（ oversample ~16x）")
+        lines.append(f"  RTL-SDR: 采样率 2.048 MS/s（ oversample ~16x）")
         lines.append(f"  RTL-SDR: 增益 30-40 dB（按需调整）")
     elif sdr_type == 'plutosdr':
-        lines.append(f"  PlutoSDR: 采样率 2.5 MSPS")
+        lines.append(f"  PlutoSDR: 采样率 2.5 MS/s")
         lines.append(f"  PlutoSDR: 带宽 1.5 MHz")
     lines.append("")
     lines.append("【天线指向】")
