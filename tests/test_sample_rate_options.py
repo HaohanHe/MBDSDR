@@ -138,6 +138,21 @@ def test_rtlsdr_every_visible_rate_reads_back_as_requested(qapp):
         assert float(fake.sample_rate) == float(rate), f"{rate} 硬件侧未生效"
 
 
+def test_visible_options_all_selectable_and_read_back(qapp):
+    """可见档位（由能力函数生成）每档都真能选中，且回读 == 请求 == 硬件实收。
+
+    加强版：不只断言「可见 ⊆ 可接受」的集合关系，而是逐档走真实
+    `set_sample_rate` 路径下发并读回（可注入假棒，不是只断言下拉文本）。
+    """
+    visible = sample_rate_options(_device("rtlsdr", (225_001, 3_200_000)))
+    assert_visible_subset(visible, RTLSDRBackend.SAMPLE_RATES)
+    backend, fake = _fake_rtl_backend()
+    for rate in visible:
+        assert backend.set_sample_rate(float(rate)) is True, f"{rate} 未被接受"
+        assert backend.get_sample_rate() == float(rate), f"{rate} 回读不一致"
+        assert float(fake.sample_rate) == float(rate), f"{rate} 硬件侧未生效"
+
+
 def test_rtlsdr_offtable_rate_reports_applied_not_requested(qapp):
     """档外请求被吸附时必须报实际生效值（2.800M → 2.880M），不许谎报请求值。"""
     backend, fake = _fake_rtl_backend()
@@ -207,6 +222,20 @@ def test_window_every_visible_rate_applies_and_reads_back(window):
         window._on_sample_rate_changed(float(rate))
         assert backend.get_sample_rate() == float(rate)
         assert float(fake.sample_rate) == float(rate)
+        assert window._record_sr == float(rate)
+        assert window.settings.get("sample_rate_hz") == float(rate)
+
+
+def test_window_visible_options_all_apply_and_persist(window):
+    """主窗口槽：可见档位逐档选中 → 生效值 = 请求值 = 硬件侧，且落盘同值。"""
+    visible = sample_rate_options(_device("rtlsdr", (225_001, 3_200_000)))
+    backend, fake = _fake_rtl_backend()
+    window._active_sdr_backend = backend
+    for rate in visible:
+        window.control_panel.set_sample_rate(float(rate))
+        window._on_sample_rate_changed(float(rate))
+        assert backend.get_sample_rate() == float(rate), f"{rate} 回读不一致"
+        assert float(fake.sample_rate) == float(rate), f"{rate} 硬件侧未生效"
         assert window._record_sr == float(rate)
         assert window.settings.get("sample_rate_hz") == float(rate)
 
