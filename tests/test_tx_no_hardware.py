@@ -35,6 +35,7 @@ class FakeHalBackend:
         self.writes = 0
         self.stopped = 0
         self.freq = None
+        self.tune_fail = False      # True 时 set_frequency 显式返回 False
         self.rx_active = False
         self.paused = False
         self.pause_calls = 0
@@ -49,7 +50,10 @@ class FakeHalBackend:
         return True
 
     def set_frequency(self, hz):
+        if self.tune_fail:
+            return False
         self.freq = hz
+        return True
 
     def device_alive(self):
         if self.alive_after is None:
@@ -170,6 +174,86 @@ def test_every_entry_point_works_when_armed(mgr, recording):
                                chunk_samples=32)
     assert rep["state"] == "completed"
     assert fake.writes >= 1
+
+
+def test_cw_refuses_when_tuning_fails(mgr):
+    """写频未落到硬件时：不得进入发射态、不得写波。"""
+    manager, fake = mgr
+    fake.tune_fail = True
+    assert manager.transmit_cw(145e6, 0.1, 0.01, tx_token=_arm_token()) is False
+    assert manager.last_tx_code == "tx_set_frequency_failed"
+    assert "未落到硬件" in manager.last_tx_error
+    assert fake.freq is None, "失败的写频不得被记成已调谐"
+    assert fake.writes == 0, "写频失败后不得调用 write_tx"
+
+
+def test_modulated_refuses_when_tuning_fails(mgr):
+    manager, fake = mgr
+    fake.tune_fail = True
+    assert manager.transmit_modulated(
+        145e6, np.ones(8, dtype=np.complex64), 0.1,
+        tx_token=_arm_token()) is False
+    assert manager.last_tx_code == "tx_set_frequency_failed"
+    assert fake.writes == 0
+
+
+def test_iq_tool_and_playback_refuse_when_tuning_fails(mgr, recording):
+    """工具/回放两条入口同样在写频失败时中止，绝不发旧频。"""
+    _, fake = mgr
+    fake.tune_fail = True
+    r = _tool_iq(fake, tx_token=_arm_token())
+    assert r.success is False
+    assert r.data["reason_code"] == "tx_set_frequency_failed"
+    assert fake.writes == 0
+
+    from mbdsdr_ai.playback import transmit_iq_playback
+    rep = transmit_iq_playback(recording, backend=fake, tx_token=_arm_token())
+    assert rep["state"] == "failed"
+    assert rep["reason_code"] == "tx_set_frequency_failed"
+    assert fake.writes == 0
+
+
+def test_soapy_setters_report_failure(monkeypatch):
+    """HAL 的 Soapy 后端必须把驱动失败变成 False，否则上层无从拒绝发射。"""
+    import mbdsdr_ai.hal as hal
+
+    class _Dev:
+        def setFrequency(self, *a):
+            raise RuntimeError("LIBUSB_ERROR_IO")
+
+    class _Soapy:
+        SOAPY_SDR_RX = "RX"
+
+    b = hal.SoapySDRBackend()
+    b._device = _Dev()
+    monkeypatch.setattr(hal, "_import_soapy", lambda: _Soapy)
+    assert b.set_frequency(145e6) is False
+    assert b.set_sample_rate(1e6) is False
+    assert b.set_gain(10.0) is False
+
+
+def test_soapy_setters_return_true_on_success(monkeypatch):
+    import mbdsdr_ai.hal as hal
+
+    class _Dev:
+        def setFrequency(self, *a):
+            pass
+
+        def setSampleRate(self, *a):
+            pass
+
+        def setGain(self, *a):
+            pass
+
+    class _Soapy:
+        SOAPY_SDR_RX = "RX"
+
+    b = hal.SoapySDRBackend()
+    b._device = _Dev()
+    monkeypatch.setattr(hal, "_import_soapy", lambda: _Soapy)
+    assert b.set_frequency(145e6) is True
+    assert b.set_sample_rate(1e6) is True
+    assert b.set_gain(10.0) is True
 
 
 def test_revoked_gate_blocks_every_entry_point(mgr, recording):

@@ -1464,7 +1464,13 @@ class TxSession:
 
         setter = getattr(self.backend, "set_frequency", None)
         if callable(setter):
-            setter(float(freq_hz))
+            applied = setter(float(freq_hz))
+            if applied is False:
+                reason = (
+                    getattr(getattr(self.backend, "status", None), "error", "")
+                    or f"发射频率 {float(freq_hz) / 1e6:.6f} MHz 未落到硬件，已拒绝发射"
+                )
+                return self._abort(TX_FAILED, "tx_set_frequency_failed", reason)
 
         blocks = self._iter_blocks(iq_blocks, chunk_samples)
         self.state = TX_TRANSMITTING

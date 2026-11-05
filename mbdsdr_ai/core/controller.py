@@ -156,8 +156,7 @@ class _RCShim:
         return int(self._c.get_frequency())
 
     def set_freq(self, hz: int) -> bool:
-        self._c.set_frequency(float(hz))
-        return True
+        return bool(self._c.set_frequency(float(hz)))
 
     def get_mode(self) -> str:
         return self._c.get_demod()
@@ -167,11 +166,10 @@ class _RCShim:
         return True
 
     def get_gain(self) -> float:
-        return self._c._gain_db
+        return float(self._c.get_gain())
 
     def set_gain(self, db: float) -> bool:
-        self._c.set_gain(float(db))
-        return True
+        return bool(self._c.set_gain(float(db)))
 
 
 # ======================================================================
@@ -379,19 +377,42 @@ class SDRController:
     # ==================================================================
     # 接收参数
     # ==================================================================
-    def set_frequency(self, hz: float) -> None:
-        """调谐到中心频率（Hz）。未连接时仅记录目标值，不造假。"""
+    def _backend_truth(self, name: str, fallback: float) -> float:
+        """优先返回后端的真实回读；读不到才退回本地缓存。"""
+        if self._connected and self._backend is not None:
+            fn = getattr(self._backend, name, None)
+            if callable(fn):
+                try:
+                    value = fn()
+                    if value is not None:
+                        return float(value)
+                except Exception as e:
+                    logger.warning("%s 读取失败: %s", name, e)
+        return fallback
+
+    def _setter_failure_text(self, what: str) -> str:
+        status = getattr(self._backend, "status", None)
+        err = getattr(status, "error", "") if status is not None else ""
+        return err or f"{what}未生效（后端返回 False）"
+
+    def set_frequency(self, hz: float) -> bool:
+        """调谐到中心频率（Hz）。成功才更新本地缓存；未连接时仅记录目标值。"""
         hz = float(hz)
-        self._freq_hz = hz
         if self._connected and self._backend is not None:
             try:
-                self._backend.set_frequency(hz)
+                ok = self._backend.set_frequency(hz)
             except Exception as e:
                 logger.warning("set_frequency 失败: %s", e)
+                return False
+            if ok is False:
+                logger.warning("set_frequency 未生效: %s", self._setter_failure_text("调谐"))
+                return False
+        self._freq_hz = hz
+        return True
 
     def get_frequency(self) -> float:
-        """当前中心频率（Hz）。"""
-        return self._freq_hz
+        """当前中心频率（Hz）；已连接时以后端回读为准。"""
+        return self._backend_truth("get_frequency", self._freq_hz)
 
     def set_demod(self, mode: str) -> None:
         """设置解调模式（AM/DSB/FM/WFM/NFM/USB/LSB/CW）。"""
@@ -407,18 +428,42 @@ class SDRController:
         """当前解调模式。"""
         return self._demod
 
-    def set_bandwidth(self, hz: float) -> None:
-        """设置信道带宽（Hz）。"""
-        self._bandwidth_hz = float(hz)
+    def set_bandwidth(self, hz: float) -> bool:
+        """设置信道带宽（Hz）。已连接时下发后端，失败不更新本地缓存。"""
+        hz = float(hz)
+        if self._connected and self._backend is not None:
+            fn = getattr(self._backend, "set_bandwidth", None)
+            if callable(fn):
+                try:
+                    ok = fn(hz)
+                except Exception as e:
+                    logger.warning("set_bandwidth 失败: %s", e)
+                    return False
+                if ok is False:
+                    logger.warning("set_bandwidth 未生效: %s",
+                                   self._setter_failure_text("带宽"))
+                    return False
+        self._bandwidth_hz = hz
+        return True
 
-    def set_gain(self, db: float) -> None:
-        """设置总增益（dB）。"""
-        self._gain_db = float(db)
+    def set_gain(self, db: float) -> bool:
+        """设置总增益（dB）。成功才更新本地缓存。"""
+        db = float(db)
         if self._connected and self._backend is not None:
             try:
-                self._backend.set_gain(self._gain_db)
+                ok = self._backend.set_gain(db)
             except Exception as e:
                 logger.warning("set_gain 失败: %s", e)
+                return False
+            if ok is False:
+                logger.warning("set_gain 未生效: %s", self._setter_failure_text("增益"))
+                return False
+        self._gain_db = db
+        return True
+
+    def get_gain(self) -> float:
+        """当前总增益（dB）；已连接时以后端回读为准。"""
+        return self._backend_truth("get_gain", self._gain_db)
 
     def set_gain_stage(self, stage: str, db: float) -> None:
         """设置某一增益级（如 'LNA'/'VGA'）。后端不支持时静默记录。"""
@@ -430,17 +475,27 @@ class SDRController:
                 except Exception as e:
                     logger.warning("set_gain_stage(%s) 失败: %s", stage, e)
 
-    def set_sample_rate(self, sr: float) -> None:
-        """设置基带采样率（Hz）。"""
+    def set_sample_rate(self, sr: float) -> bool:
+        """设置基带采样率（Hz）。成功才更新本地缓存；失败明确抛错。"""
         sr = float(sr)
-        self._sample_rate = sr
         if self._connected and self._backend is not None:
             try:
-                self._backend.set_sample_rate(sr)
+                ok = self._backend.set_sample_rate(sr)
             except Exception as e:
                 raise SampleRateNotSupportedError(
                     f"设备不支持采样率 {sr}", technical_detail=e
                 ) from e
+            if ok is False:
+                raise SampleRateNotSupportedError(
+                    f"设备未接受采样率 {sr}",
+                    technical_detail=self._setter_failure_text("采样率"),
+                )
+        self._sample_rate = sr
+        return True
+
+    def get_sample_rate(self) -> float:
+        """当前基带采样率（Hz）；已连接时以后端回读为准。"""
+        return self._backend_truth("get_sample_rate", self._sample_rate)
 
     def set_squelch(self, db: float) -> None:
         """设置静噪门限（dB，负值）。"""
@@ -1557,10 +1612,10 @@ class SDRController:
             connected=self._connected,
             device=self._device_name or None,
             is_debug_source=self._is_debug,
-            frequency_hz=self._freq_hz,
-            sample_rate_hz=self._sample_rate,
+            frequency_hz=self.get_frequency(),
+            sample_rate_hz=self.get_sample_rate(),
             demod=self._demod,
-            gain_db=self._gain_db,
+            gain_db=self.get_gain(),
             audio_running=self._audio_running,
             recording=self._recorder is not None,
             remote_control=(

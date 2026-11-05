@@ -227,6 +227,13 @@ def _append_warning(text: str, warning: str) -> str:
     return f"{text}\n警告: {warning}" if warning else text
 
 
+def _setter_refusal_reason(backend, what: str) -> str:
+    """把后端「显式返回 False」翻成人话；优先用后端自己的 status.error。"""
+    status = getattr(backend, "status", None)
+    err = getattr(status, "error", "") if status is not None else ""
+    return err or f"{what}未生效（设备拒绝该设置）"
+
+
 def register_sdr_tools(agent):
     """
     把所有 SDR 工具注册到 Agent 中。
@@ -3253,23 +3260,34 @@ def _bookmark_goto(mgr, fm, args) -> "ToolResult":
     skipped = []
     if b.mode and hasattr(backend, "set_demod"):
         try:
-            backend.set_demod(b.mode)
-            actions.append(f"模式 {b.mode}")
+            if backend.set_demod(b.mode) is False:
+                skipped.append(f"模式 {b.mode} 未生效"
+                               f"（{_setter_refusal_reason(backend, '模式')}）")
+            else:
+                actions.append(f"模式 {b.mode}")
         except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.warning("书签跳转设置解调模式失败: %s", e)
             skipped.append(f"模式 {b.mode} 未生效（{e}）")
     if b.bandwidth_hz and hasattr(backend, "set_bandwidth"):
         try:
-            backend.set_bandwidth(b.bandwidth_hz)
-            actions.append(f"带宽 {b.bandwidth_hz/1e3:g}k")
+            if backend.set_bandwidth(b.bandwidth_hz) is False:
+                skipped.append(f"带宽 {b.bandwidth_hz/1e3:g}k 未生效"
+                               f"（{_setter_refusal_reason(backend, '带宽')}）")
+            else:
+                actions.append(f"带宽 {b.bandwidth_hz/1e3:g}k")
         except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.warning("书签跳转设置带宽失败: %s", e)
             skipped.append(f"带宽 {b.bandwidth_hz/1e3:g}k 未生效（{e}）")
     try:
-        backend.set_frequency(int(freq))
+        ok = backend.set_frequency(int(freq))
     except (RuntimeError, OSError, ValueError, TypeError) as e:
         logger.warning("书签跳转设置频率失败: %s", e)
         return ToolResult(success=False, content=f"设置频率失败: {e}")
+    if ok is False:
+        reason = _setter_refusal_reason(backend, "频率")
+        logger.warning("书签跳转设置频率未生效: %s", reason)
+        return ToolResult(success=False,
+                          content=f"跳转到 {b.name} 失败：{reason}；未改变当前调谐。")
 
     tip = ""
     if b.is_range:
@@ -3319,17 +3337,28 @@ def _watch_capture_tool(mgr, fm, args) -> "ToolResult":
     else:
         freq = backend.get_frequency()
 
+    soft = []
     try:
-        backend.set_frequency(int(freq))
+        ok = backend.set_frequency(int(freq))
+        if ok is False:
+            reason = _setter_refusal_reason(backend, "守听频率")
+            logger.warning("设置守听频率未生效: %s", reason)
+            return ToolResult(success=False, content=f"设置守听频率失败：{reason}")
         if bm and bm.mode and hasattr(backend, "set_demod"):
-            backend.set_demod(bm.mode)
+            if backend.set_demod(bm.mode) is False:
+                soft.append(f"模式 {bm.mode} 未生效"
+                            f"（{_setter_refusal_reason(backend, '模式')}）")
         if bm and bm.bandwidth_hz and hasattr(backend, "set_bandwidth"):
-            backend.set_bandwidth(bm.bandwidth_hz)
+            if backend.set_bandwidth(bm.bandwidth_hz) is False:
+                soft.append(f"带宽 {bm.bandwidth_hz/1e3:g}k 未生效"
+                            f"（{_setter_refusal_reason(backend, '带宽')}）")
     except (RuntimeError, OSError, ValueError, TypeError) as e:
         logger.warning("设置守听频率失败: %s", e)
         return ToolResult(success=False, content=f"设置守听频率失败: {e}")
 
     sr = float(backend.get_sample_rate())
+    if soft:
+        logger.warning("守听参数部分未生效: %s", "；".join(soft))
 
     def acquire(n):
         parts, need = [], n
@@ -3354,6 +3383,8 @@ def _watch_capture_tool(mgr, fm, args) -> "ToolResult":
 
     head = (f"守听 {freq/1e6:.4f} MHz：噪声底 {res['noise_floor_db']:.1f}dB，"
             f"门限 {res['threshold_db']:.1f}dB，等待 {res['waited_s']:.1f}s")
+    if soft:
+        head += "\n未生效: " + "；".join(soft)
     if res["status"] != "triggered":
         return ToolResult(success=True, content=head +
                           f"\n未抓到持续活动（{res.get('reason','')}）。"
@@ -3431,23 +3462,33 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
         sr = float(args.get("sample_rate_mhz", 2.4)) * 1e6
         old = (backend.get_frequency(), backend.get_sample_rate(),
                getattr(backend.status, "demod_mode", "FM"))
+        fail_reason = ""
+        restore_warn = ""
         try:
-            backend.set_frequency(int(freq))
-            if hasattr(backend, "set_sample_rate"):
-                backend.set_sample_rate(sr)
-            backend.set_demod("RAW")
-            target = int(sr * duration)
-            chunks, got = [], 0
-            while got < target:
-                x = backend.read_samples(min(target - got, 262144))
-                if x is None or len(x) == 0:
-                    break
-                chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+            if backend.set_frequency(int(freq)) is False:
+                fail_reason = _setter_refusal_reason(backend, "ADS-B 采集频率")
+            elif hasattr(backend, "set_sample_rate") and backend.set_sample_rate(sr) is False:
+                fail_reason = _setter_refusal_reason(backend, "ADS-B 采样率")
+            elif backend.set_demod("RAW") is False:
+                fail_reason = _setter_refusal_reason(backend, "ADS-B 解调模式")
+            if not fail_reason:
+                target = int(sr * duration)
+                chunks, got = [], 0
+                while got < target:
+                    x = backend.read_samples(min(target - got, 262144))
+                    if x is None or len(x) == 0:
+                        break
+                    chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
         except (RuntimeError, OSError, ValueError, TypeError) as e:
             logger.warning("ADS-B 采集失败: %s", e)
-            return ToolResult(success=False, content=f"采集 ADS-B 失败: {e}")
+            fail_reason = f"采集 ADS-B 失败: {e}"
         finally:
             restore_warn = _restore_tuning(backend, old, "FM")
+        if fail_reason:
+            logger.warning("ADS-B 中止: %s", fail_reason)
+            return ToolResult(success=False, content=_append_warning(
+                f"ADS-B 采集未开始：{fail_reason}；未在旧频率/旧模式下采样。",
+                restore_warn))
         if not chunks:
             return ToolResult(success=False, content="未采集到 IQ 数据")
         iq = np.concatenate(chunks)
@@ -8257,16 +8298,23 @@ class _FMListener:
         self._stop.clear()
         self.blocks_played = 0
         self.error = None
-        # 调谐
+        # 调谐：任一项未落到硬件都必须中止，绝不启动音频线程播旧频。
         try:
             if hasattr(self.backend, "set_frequency"):
-                self.backend.set_frequency(int(self.freq_mhz * 1e6))
+                if self.backend.set_frequency(int(self.freq_mhz * 1e6)) is False:
+                    self.error = _setter_refusal_reason(self.backend, "收听频率")
+                    return False
             if hasattr(self.backend, "set_sample_rate"):
-                self.backend.set_sample_rate(self.sample_rate_hz)
+                if self.backend.set_sample_rate(self.sample_rate_hz) is False:
+                    self.error = _setter_refusal_reason(self.backend, "收听采样率")
+                    return False
             if hasattr(self.backend, "set_demod"):
-                self.backend.set_demod("WFM")
+                if self.backend.set_demod("WFM") is False:
+                    self.error = _setter_refusal_reason(self.backend, "WFM 解调")
+                    return False
         except Exception as e:
             self.error = str(e)
+            return False
         # 启动音频
         self.player.start()
         self._thread = threading.Thread(target=self._run, daemon=True)

@@ -18,18 +18,26 @@ from mbdsdr_ai import hackrf_params, sdr_tools as st
 
 
 class _OkBackend:
-    """最小后端桩：记录调用，可按需让某个方法抛错。"""
+    """最小后端桩：记录调用，可按需让某个方法抛错或显式返回 False。"""
 
-    def __init__(self, fail: str | None = None):
+    def __init__(self, fail: str | None = None, refuse: set | None = None):
         self.fail = fail
+        self.refuse = set(refuse or ())
         self.status = types.SimpleNamespace(connected=True, demod_mode="WFM", error="")
         self.device = types.SimpleNamespace(device_type="hackrf")
         self._freq = 100e6
         self.calls = []
+        self.reads = 0
 
     def _maybe_fail(self, name):
         if self.fail == name:
             raise RuntimeError(f"{name} 失败（模拟驱动错误）")
+
+    def _maybe_refuse(self, name):
+        if name in self.refuse:
+            self.status.error = f"{name} 未落到硬件（模拟拒绝）"
+            return False
+        return None
 
     def get_frequency(self):
         self._maybe_fail("get_frequency")
@@ -41,27 +49,36 @@ class _OkBackend:
 
     def set_frequency(self, f):
         self._maybe_fail("set_frequency")
+        if self._maybe_refuse("set_frequency") is False:
+            return False
         self._freq = f
         self.calls.append(("set_frequency", f))
         return True
 
     def set_sample_rate(self, sr):
         self._maybe_fail("set_sample_rate")
+        if self._maybe_refuse("set_sample_rate") is False:
+            return False
         self.calls.append(("set_sample_rate", sr))
         return True
 
     def set_demod(self, mode):
         self._maybe_fail("set_demod")
+        if self._maybe_refuse("set_demod") is False:
+            return False
         self.calls.append(("set_demod", mode))
         return True
 
     def set_bandwidth(self, hz):
         self._maybe_fail("set_bandwidth")
+        if self._maybe_refuse("set_bandwidth") is False:
+            return False
         self.calls.append(("set_bandwidth", hz))
         return True
 
     def read_samples(self, n):
         self._maybe_fail("read_samples")
+        self.reads += 1
         return np.zeros(n, dtype=np.complex64)
 
 
@@ -145,6 +162,85 @@ def test_fm_acquire_counts_read_failures():
     assert acquire(100e6, 1e6, 1024) is None
     assert acquire.state["failures"] == 1
     assert "read_samples 失败" in acquire.state["last_error"]
+
+
+def test_bookmark_goto_aborts_on_explicit_refusal():
+    """后端显式返回 False（不是抛异常）时也只能失败，不得报"已跳转"。"""
+    backend = _OkBackend(refuse={"set_frequency"})
+    fm = types.SimpleNamespace(find=lambda target: types.SimpleNamespace(
+        name="测试台", center_hz=145e6, mode="FM", bandwidth_hz=200e3, note="",
+        is_range=False))
+    res = st._bookmark_goto(_Mgr(backend), fm, {"target": "测试台"})
+
+    assert res.success is False
+    assert "未落到硬件" in res.content
+    assert "已跳转到" not in res.content
+
+
+def test_adsb_aborts_before_sampling_when_tuning_refused():
+    """FC0012 类设备请求 1090：必须中止，不得在旧频采样后报"0 帧"。"""
+    backend = _OkBackend(refuse={"set_frequency"})
+    backend._freq = 98e6
+    res = st._adsb_decode_tool(_Mgr(backend), {"duration_s": 0.1})
+
+    assert res.success is False
+    assert "ADS-B 采集未开始" in res.content
+    assert "未在旧频率" in res.content
+    assert backend.reads == 0, "失败后不得继续读 IQ"
+
+
+def test_adsb_aborts_when_sample_rate_or_demod_refused():
+    for name in ("set_sample_rate", "set_demod"):
+        backend = _OkBackend(refuse={name})
+        res = st._adsb_decode_tool(_Mgr(backend), {"duration_s": 0.1})
+        assert res.success is False
+        assert backend.reads == 0
+
+
+def test_watch_aborts_when_tuning_refused():
+    backend = _OkBackend(refuse={"set_frequency"})
+    fm = types.SimpleNamespace(find=lambda target: None)
+    res = st._watch_capture_tool(_Mgr(backend), fm, {"freq_mhz": 100.0})
+
+    assert res.success is False
+    assert "守听频率失败" in res.content
+    assert backend.reads == 0
+
+
+def test_fm_listener_does_not_start_when_tuning_refused(monkeypatch):
+    """失败时既不能起音频线程，也不能让播放器开始"放旧频"。"""
+
+    class _Player:
+        def __init__(self):
+            self.started = False
+            self.written = 0
+
+        def start(self):
+            self.started = True
+
+        def stop(self):
+            pass
+
+        def write(self, data):
+            self.written += len(data)
+            return len(data)
+
+    players = []
+
+    def _make_player(**kw):
+        p = _Player()
+        players.append(p)
+        return p
+
+    monkeypatch.setattr(st, "AudioPlayer", _make_player)
+    backend = _OkBackend(refuse={"set_frequency"})
+    listener = st._FMListener(backend, sample_rate_hz=1e6)
+
+    assert listener.start(100.0) is False
+    assert "未落到硬件" in (listener.error or "")
+    assert listener._thread is None
+    assert players and players[0].started is False
+    assert backend.reads == 0
 
 
 def test_hackrf_write_tx_invalid_input_records_reason():

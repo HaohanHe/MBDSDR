@@ -270,44 +270,59 @@ class SoapySDRBackend(SDRBackendBase):
         self._running = False
         logger.info("设备已断开")
 
-    def set_frequency(self, freq_hz: float):
+    def set_frequency(self, freq_hz: float) -> bool:
+        """下发接收频率；返回硬件是否真的接受（未连接时只记目标值）。"""
+        if not self._device:
+            self._center_freq = freq_hz
+            return True
+        SoapySDR = _import_soapy()
+        if SoapySDR is None:
+            logger.warning("SoapySDR 未安装，无法下发频率")
+            return False
+        try:
+            self._device.setFrequency(SoapySDR.SOAPY_SDR_RX, 0, freq_hz)
+        except Exception as e:
+            logger.warning(f"设置频率失败: {e}")
+            return False
         self._center_freq = freq_hz
-        if self._device:
-            SoapySDR = _import_soapy()
-            if SoapySDR is None:
-                logger.warning("SoapySDR 未安装，无法下发频率")
-                return
-            try:
-                self._device.setFrequency(SoapySDR.SOAPY_SDR_RX, 0, freq_hz)
-            except Exception as e:
-                logger.warning(f"设置频率失败: {e}")
+        return True
 
-    def set_sample_rate(self, rate_hz: float):
+    def set_sample_rate(self, rate_hz: float) -> bool:
+        """下发采样率；返回硬件是否真的接受。"""
+        if not self._device:
+            self._sample_rate = rate_hz
+            return True
+        SoapySDR = _import_soapy()
+        if SoapySDR is None:
+            logger.warning("SoapySDR 未安装，无法下发采样率")
+            return False
+        try:
+            self._device.setSampleRate(SoapySDR.SOAPY_SDR_RX, 0, rate_hz)
+        except Exception as e:
+            logger.warning(f"设置采样率失败: {e}")
+            return False
         self._sample_rate = rate_hz
-        if self._device:
-            SoapySDR = _import_soapy()
-            if SoapySDR is None:
-                logger.warning("SoapySDR 未安装，无法下发采样率")
-                return
-            try:
-                self._device.setSampleRate(SoapySDR.SOAPY_SDR_RX, 0, rate_hz)
-            except Exception as e:
-                logger.warning(f"设置采样率失败: {e}")
+        return True
 
-    def set_gain(self, gain_db: float, stage: str = ""):
+    def set_gain(self, gain_db: float, stage: str = "") -> bool:
+        """下发增益；返回硬件是否真的接受。"""
+        if not self._device:
+            self._gain = gain_db
+            return True
+        SoapySDR = _import_soapy()
+        if SoapySDR is None:
+            logger.warning("SoapySDR 未安装，无法下发增益")
+            return False
+        try:
+            if stage:
+                self._device.setGain(SoapySDR.SOAPY_SDR_RX, 0, gain_db, stage)
+            else:
+                self._device.setGain(SoapySDR.SOAPY_SDR_RX, 0, gain_db)
+        except Exception as e:
+            logger.warning(f"设置增益失败: {e}")
+            return False
         self._gain = gain_db
-        if self._device:
-            SoapySDR = _import_soapy()
-            if SoapySDR is None:
-                logger.warning("SoapySDR 未安装，无法下发增益")
-                return
-            try:
-                if stage:
-                    self._device.setGain(SoapySDR.SOAPY_SDR_RX, 0, gain_db, stage)
-                else:
-                    self._device.setGain(SoapySDR.SOAPY_SDR_RX, 0, gain_db)
-            except Exception as e:
-                logger.warning(f"设置增益失败: {e}")
+        return True
 
     def setupStream(self, direction: str = "RX", format: str = "CF32",
                     channels: Optional[List[int]] = None) -> bool:
@@ -733,7 +748,14 @@ class HardwareManager:
             self.last_tx_error = "采样率未知，无法生成 CW 时间轴"
             self.last_tx_code = "capability_unknown"
             return False
-        self._active_backend.set_frequency(freq_hz)
+        applied = self._active_backend.set_frequency(freq_hz)
+        if applied is False:
+            self.last_tx_error = (
+                getattr(getattr(self._active_backend, "status", None), "error", "")
+                or f"发射频率 {freq_hz / 1e6:.6f} MHz 未落到硬件，已拒绝发射"
+            )
+            self.last_tx_code = "tx_set_frequency_failed"
+            return False
         n = int(rate * duration_sec)
         t = np.arange(n) / rate
         iq = amplitude * np.exp(2j * np.pi * 0 * t)  # 零中频CW
@@ -772,7 +794,14 @@ class HardwareManager:
             self.last_tx_error = "当前设备不支持 TX 或未连接"
             self.last_tx_code = "no_tx_backend"
             return False
-        self._active_backend.set_frequency(freq_hz)
+        applied = self._active_backend.set_frequency(freq_hz)
+        if applied is False:
+            self.last_tx_error = (
+                getattr(getattr(self._active_backend, "status", None), "error", "")
+                or f"发射频率 {freq_hz / 1e6:.6f} MHz 未落到硬件，已拒绝发射"
+            )
+            self.last_tx_code = "tx_set_frequency_failed"
+            return False
         peak = float(np.max(np.abs(iq_samples))) + 1e-12
         scaled = amplitude * iq_samples / peak
         with tx_authorization(gate):

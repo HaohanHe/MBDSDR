@@ -252,7 +252,7 @@ class TestAudioPlayerDegrade:
 # ---------------------------------------------------------------------------
 # (E) MainWindow 录制/断开流程（offscreen + 确定性后端）
 # ---------------------------------------------------------------------------
-@pytest.mark.usefixtures("qtapp")
+@pytest.mark.usefixtures("qtapp", "isolated_profile")
 class TestMainWindowRecordingFlow:
     def _make_window(self):
         import main_window as mw
