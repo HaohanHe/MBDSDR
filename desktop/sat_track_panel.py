@@ -92,8 +92,8 @@ class SatTrackPanel(QFrame):
         self.freq_spin.setSuffix(" MHz")
         self.freq_spin.setValue(137.620)
         self.freq_spin.setToolTip(
-            "下行频率（MHz）。可输范围 0.01–6000 MHz，"
-            "实际可调范围以设备为准")
+            "跟踪时调谐到的下行频率（MHz）；先用所选制式的默认值，"
+            "通联确认后再微调")
         form.addRow("下行频率:", self.freq_spin)
         root.addWidget(sel_box)
 

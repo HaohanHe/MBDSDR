@@ -108,11 +108,13 @@ class DevicePanel(QWidget):
 
         # 参数
         self.sr_edit = QLineEdit(str(DEFAULT_SAMPLE_RATE_HZ))
-        self.sr_edit.setToolTip("采样率 Hz")
+        self.sr_edit.setToolTip(
+            "每秒采集的样本数；越高能看的带宽越宽，默认值通常够用")
         form.addRow("采样率(Hz)", self.sr_edit)
 
         self.gain_edit = QLineEdit("30")
-        self.gain_edit.setToolTip("总增益 dB（AGC 关闭时生效）")
+        self.gain_edit.setToolTip(
+            "接收放大倍数；信号弱就调大，过强出现削顶就调小，开启硬件 AGC 时此项不生效")
         form.addRow("增益(dB)", self.gain_edit)
 
         self.ppm_edit = QLineEdit("0")

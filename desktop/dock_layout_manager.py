@@ -124,7 +124,8 @@ class DockLayoutManager:
             btn.setObjectName("stripIcon")
             btn.setFixedSize(self.t.RADIUS["circle_sm"] - 28,
                              self.t.RADIUS["circle_sm"] - 28)
-            btn.setToolTip(spec.name if spec else pid)
+            btn.setToolTip((f"{spec.name}面板：点击显示或隐藏"
+                            if spec else f"{pid} 面板：点击显示或隐藏"))
             btn.setCheckable(True)
             btn.clicked.connect(lambda checked, p=pid: self._on_strip_icon(p, checked))
             lay.addWidget(btn, 0, Qt.AlignHCenter)

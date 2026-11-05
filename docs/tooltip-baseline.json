@@ -1,0 +1,9 @@
+{
+  "purpose": "tooltip 文案守门基线（docs/discoverability.md 三条规矩）。只降不升：改好一项就从这里删掉；新增项不许加进来。",
+  "entries": [
+    {"file": "desktop/bookmark_panel.py", "text": "先在列表里选中一条书签", "reason": "too_short"},
+    {"file": "desktop/bookmark_panel.py", "text": "先在列表里选中一条书签", "reason": "too_short"},
+    {"file": "desktop/bookmark_panel.py", "text": "找当前频率附近的书签", "reason": "too_short"},
+    {"file": "desktop/main_window.py", "text": "回到频谱主页", "reason": "too_short"}
+  ]
+}

@@ -415,7 +415,8 @@ class WeatherPanel(QWidget):
         self.file_label = QLabel("未选择文件")
         self.file_label.setStyleSheet(f"color:{self._c['text_secondary']};")
         self.file_btn = QPushButton("选择录制文件...")
-        self.file_btn.setToolTip("complex64 raw .iq/.cfile/.raw，或 NOAA APT 的 .wav")
+        self.file_btn.setToolTip(
+            "选择要解码的录制文件：IQ 录制用 .iq/.cfile/.raw，NOAA APT 录音用 .wav")
         self.file_btn.clicked.connect(self._on_pick_file)
         file_row.addWidget(self.file_label, 1)
         file_row.addWidget(self.file_btn)
@@ -424,13 +425,16 @@ class WeatherPanel(QWidget):
 
         # 频率/符号率/采样率（可编辑）
         self.freq_edit = QLineEdit()
-        self.freq_edit.setToolTip("下行中心频率 MHz")
+        self.freq_edit.setToolTip(
+            "卫星下行信号的中心频率（MHz）；选好制式会自动填入，手动改动前先确认")
         form.addRow("中心频率", self.freq_edit)
         self.sym_edit = QLineEdit()
-        self.sym_edit.setToolTip("符号率 ksps")
+        self.sym_edit.setToolTip(
+            "卫星信号的符号率（ksps）；要与所选制式匹配，不确定就用制式默认值")
         form.addRow("符号率", self.sym_edit)
         self.sr_edit = QLineEdit()
-        self.sr_edit.setToolTip("采样率 Msps（complex64 录制）")
+        self.sr_edit.setToolTip(
+            "录制文件的采样率（Msps）；必须与录制时一致，不一致会解码失败")
         form.addRow("采样率", self.sr_edit)
         cl.addLayout(form)
 
@@ -438,11 +442,13 @@ class WeatherPanel(QWidget):
         btn_row = QHBoxLayout()
         self.start_btn = QPushButton("开始解码")
         self.start_btn.setObjectName("recordButton")
-        self.start_btn.setToolTip("后台线程调用 mbdsdr_ai 真实解码链出图")
+        self.start_btn.setToolTip(
+            "开始解码当前文件或实时信号；完成后右侧出图，失败时下方会写明原因")
         self.start_btn.clicked.connect(self.start_decode)
         btn_row.addWidget(self.start_btn)
         self.stop_btn = QPushButton("停止")
-        self.stop_btn.setToolTip("停止接收/解码")
+        self.stop_btn.setToolTip(
+            "停止当前解码；已经生成的图会保留，想重来再点「开始解码」")
         self.stop_btn.clicked.connect(self.stop_decode)
         self.stop_btn.setEnabled(False)
         btn_row.addWidget(self.stop_btn)

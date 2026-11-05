@@ -520,7 +520,8 @@ class ControlPanel(QWidget):
 
         # AGC 自动增益开关（增益滑杆下方）
         self.agc_check = QCheckBox("AGC 自动增益")
-        self.agc_check.setToolTip("硬件 AGC：交给射频前端的自动增益")
+        self.agc_check.setToolTip(
+            "勾选后由设备自动调增益；信号忽强忽弱时开，想手动控增益就关")
         self.agc_check.toggled.connect(self._on_agc_changed)
         rx_layout.addWidget(self.agc_check)
 

@@ -974,7 +974,9 @@ class MainWindow(QMainWindow):
         # 跟踪未运行时置灰：点下去走空闲早退、界面毫无变化＝假活。
         # 状态统一由 _sync_tracking_ui 出口刷新（不另存第二份布尔）。
         sat_stop_action.setEnabled(False)
-        sat_stop_action.setToolTip("当前无跟踪目标")
+        sat_stop_action.setToolTip(
+            "现在没有正在跟踪的卫星，所以此项目前不可用；"
+            "先到「卫星跟踪」页签选一颗卫星再开始跟踪")
         tools_menu.addAction(sat_stop_action)
         self._sat_stop_action = sat_stop_action
 
@@ -1056,7 +1058,8 @@ class MainWindow(QMainWindow):
         self.toolbar_mode_combo.addItems(
             [m for m in ["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"] if get_mode(m)])
         self.toolbar_mode_combo.setMinimumHeight(28)
-        self.toolbar_mode_combo.setToolTip("解调模式")
+        self.toolbar_mode_combo.setToolTip(
+            "切换当前信号的解调方式；听模拟语音用 FM/NFM，听短波/航空用 AM")
         self.toolbar_mode_combo.currentTextChanged.connect(
             self._on_toolbar_mode_selected)
         toolbar.addWidget(self.toolbar_mode_combo)
@@ -1135,7 +1138,8 @@ class MainWindow(QMainWindow):
         self.toolbar_volume.setMaximumWidth(200)
         self.toolbar_volume.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar_volume.setMinimumHeight(28)
-        self.toolbar_volume.setToolTip("音量（映射到控制面板 0-63）")
+        self.toolbar_volume.setToolTip(
+            "拖动调节收听音量；与控制面板的音量是同一个值，需要静音可按 Ctrl+M")
         self._toolbar_vol_prev = 48
         self.toolbar_volume.setValue(48)  # 先定值再接线，避免构造期误触发
         self.toolbar_volume.valueChanged.connect(self._on_toolbar_volume_changed)
@@ -2188,8 +2192,8 @@ class MainWindow(QMainWindow):
         self.tx_capability_label = QLabel("本后端发射：未连接设备（能力未知）")
         self.tx_capability_label.setObjectName("txCapability")
         self.tx_capability_label.setToolTip(
-            "发射能力声明：数据源 backend.tx_capability()。"
-            "「驱动级已实现」不等于「真机已验证」")
+            "说明本设备能不能发射；显示「驱动级已实现」只代表代码支持，"
+            "未经真机验证前请谨慎发射")
         lay.addWidget(self.tx_capability_label)
         # 最小发射面：PTT 按钮（按下=发射，再次按下=停止）。默认置灰；
         # 无设备/无 TX 通道/回放中都会在 tooltip 里写明原因（不出现"点了没反应"）。
@@ -2241,7 +2245,9 @@ class MainWindow(QMainWindow):
         # 模式块：当前解调模式大字号
         self.dock_mode_label = QLabel("FM")
         self.dock_mode_label.setObjectName("dockMode")
-        self.dock_mode_label.setToolTip("当前解调模式")
+        self.dock_mode_label.setToolTip(
+            "现在使用的解调方式；要切换可用顶栏下拉，"
+            "频谱获焦时按 A/N/F/W/C 更直接")
         lay.addWidget(self.dock_mode_label)
 
         lay.addWidget(self._vsep())
@@ -2539,12 +2545,12 @@ class MainWindow(QMainWindow):
                 f"background-color: rgba(200, 160, 64, 0.18);"
                 f" border: 1px solid {amber}; border-radius: 3px;"
                 f" color: {amber}; padding: 0 6px; font-weight: 600;")
-            lbl.setToolTip(text + "：可按下，但发射失败必须按真实错误显示")
+            lbl.setToolTip(text + "；按钮可按下，失败时状态栏会显示真实错误原因")
         else:
             lbl.setStyleSheet("")
             lbl.setToolTip(
-                "发射能力声明：数据源 backend.tx_capability()。"
-                "「驱动级已实现」不等于「真机已验证」")
+                "说明本设备能不能发射；显示「驱动级已实现」只代表代码支持，"
+                "未经真机验证前请谨慎发射")
 
     def _set_tx_button_checked(self, checked: bool) -> None:
         """程序改选中态（防重入，避免触发 toggled 里的发/停逻辑）。"""

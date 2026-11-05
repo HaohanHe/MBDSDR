@@ -149,13 +149,14 @@ class NtripConfigDialog(QDialog):
         self.host_edit = QLineEdit()
         self.host_edit.setPlaceholderText("ntrip.example.com")
         self.host_edit.setToolTip(
-            "Caster = NTRIP 差分数据服务器的主机名或 IP")
+            "填差分数据服务器的主机名或 IP；不清楚就问服务商，端口通常是 2101")
         form.addRow("Caster 主机:", self.host_edit)
 
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         self.port_spin.setValue(NTRIP_DEFAULT_PORT)  # 默认 2101
-        self.port_spin.setToolTip("Caster 端口（NTRIP 标准端口 2101）")
+        self.port_spin.setToolTip(
+            "服务器端口；NTRIP 服务默认 2101，服务商另有说明时按说明填")
         form.addRow("端口:", self.port_spin)
 
         # mountpoint 下拉（可编辑，允许手输）

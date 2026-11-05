@@ -274,8 +274,7 @@ class ModulePanel(QWidget):
         self.freq_spin.setSuffix(" MHz")
         self.freq_spin.setDecimals(4)   # 0.0001 MHz = 100 Hz 步进
         self.freq_spin.setToolTip(
-            "中心频率（MHz 显示，下发仍为 Hz）。项目可调范围 10 kHz – 6 GHz，"
-            "实际以设备能力为准（见左侧设备信息）")
+            "设备中心频率（MHz）；改完立即生效，实际可调范围看左侧设备信息")
         self.freq_spin.valueChanged.connect(
             lambda v: self.tune_requested.emit(round(v * 1e6)))
         form.addRow("频率", self.freq_spin)
