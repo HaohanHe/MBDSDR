@@ -26,8 +26,12 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
+import logging  # noqa: E402
+
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+
+_log = logging.getLogger(__name__)
 
 app = QApplication.instance() or QApplication(sys.argv)
 
@@ -200,8 +204,10 @@ def window(isolated_profile):
     w._tx_session = None
     try:
         w._teardown_connection()
-    except Exception:  # noqa: BLE001 - 用例收尾失败不静默
-        pass
+    except Exception as exc:  # noqa: BLE001 - Qt 对象可能已随 app 销毁；
+        # 收尾失败必须留证，不静默（用例主体结果已定，这里只记录清理异常）
+        _log.warning("用例收尾失败（断开连接）：%s: %s",
+                     type(exc).__name__, exc)
 
 
 def test_disconnect_button_while_tx_cancel_keeps_transmitting(window,
