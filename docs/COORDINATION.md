@@ -967,7 +967,9 @@ git read-tree HEAD                       # 把共享 index 刷新到新 HEAD（�
 2. **私有 index 清单精确相等**：在 `$env:GIT_INDEX_FILE` 下，`git diff --cached --name-only`
    必须**逐字等于**本次要提交的路径清单——多一个、少一个都不许提交。
 3. **提交后零残留**：`git diff --numstat HEAD -- <本次每个文件>` 必须为空；非空即说明
-   提交吃进的是旧快照（事故形态三，§6.9.3），立即报主会话。
+   提交吃进的是旧快照（事故形态三，§6.9.3），立即报主会话。随后跑
+   `python scripts/git_sync_index.py --paths <本次每个文件>`，把共享 index 中这些路径
+   同步到新 HEAD（§6.9.5）——不同步就会留下一批「反向暂存」。
 
 **23:30 巡检实测**：共享 index 2658 项与 `git ls-tree -r HEAD` 逐条比对，哈希/模式差异
 **0**，HEAD 有而 index 未收录 **0**；`D:\mbdsdr\.tmp` 与 `output\tmp` 下无 `idx_*` 残留。
@@ -1035,6 +1037,49 @@ git show --numstat --stat f664638a -- docs/COORDINATION.md         # +2 / −28
 
 两次都落在本例外，但**都没走「导出 patch + 通知 owner」两步**，留痕不足——例外可以，
 流程不许省。
+
+#### 6.9.5 提交后必须同步共享 index（第五种形态：私有 index 提交的副作用，2026-11-06 00:15）
+
+**结构性后果（月相线实测）**：用私有 `GIT_INDEX_FILE` 提交后，共享 index 仍停在旧 HEAD，
+于是本次提交的**每一个文件**都会在共享 index 里变成「反向暂存」——`git status` 显示
+`M ` / `MM`，`git diff --cached` 列出 N 个文件（N = 本次提交文件数），看上去像有人要把
+这些文件退回旧版。今天全员改用私有 index，所以这个脏是**必然发生**、且随提交量线性增长；
+如果下一道闸只喊「`git diff --cached` 必须为空」，它会天天报红，最后被当成噪音忽略，
+规矩作废。
+
+**规矩：提交完成后，必须把共享 index 中本次提交的路径同步到新 HEAD。**
+`git read-tree HEAD` 只重写 index，不动工作区、不动历史，**不是** `git reset`
+（后者是被 §6.10 明令禁止的那条路径）；但**默认只按本次提交的路径精确改写**
+（`update-index --cacheinfo`），别人的条目一个不动——全量 `read-tree` 会抹掉别线
+正在准备的暂存内容，那是 §6.9.2 禁止的动作。
+
+**可复跑（不靠自觉）**：
+
+```powershell
+python scripts/git_sync_index.py --paths <本次每个文件>   # 默认：按路径同步并校验
+python scripts/git_sync_index.py --all                   # 共享 index 为空时全量 read-tree
+python scripts/git_sync_index.py --check                 # 只校验，不改 index
+```
+
+- `post-commit` 钩子已接：每次提交后自动跑（剥掉 `GIT_INDEX_FILE` 确保同步的是**共享**
+  index，不是刚用完的私有 index）；失败只打印醒目警告、不阻塞；若发现**他人暂存条目**，
+  只报警不动（exit 2，交由 owner 按 §6.9.2 处理）。
+- 安装/更新：`python scripts/install_git_hooks.py`；校验：`--check`。
+
+**「共享 index 干净」的唯一判据（两条都要满足）**：
+
+1. `git diff --cached --name-only` 为空；
+2. `git ls-files -s` 与 `git ls-tree -r HEAD` 逐条比对，**模式与哈希一致**、条目数一致。
+
+只看第 1 条不够：路径集合相同的「内容级反向暂存」要靠第 2 条兜住。
+
+**00:15 巡检实测**：共享 index 2658 项 / HEAD 2658 项，`staged=0`、`parity_diff=0`——
+月相线手工对齐的 3 条已清零，其他线也没有残留反向暂存。`.tmp` 与 `output\tmp` 下无
+`idx_*` 私有余留。
+
+**反例存档（本形态首次实测）**：月相线用私有 index 提交后，共享 index 对这 3 个文件
+出现反向暂存 `MM`，它只能用 `git update-index --cacheinfo` 手工对齐；钩子接上后，
+这一步由 `git_sync_index.py` 自动完成，不再依赖自觉。
 
 ### 6.10 历史改写事件（2026-11-05，主分支被 reset 改写；今日累计 10 次破坏性 reset + 1 次 no-op）
 
@@ -1214,3 +1259,37 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 - 陈旧快照的年龄也可反推：被写回的 blob `9563ffff` **首次出现在 `448d465f`（22:57:55）**，
   即该私有 index 建于 22:57:55–23:06:52 之间，不是「隔夜缓存」。
 - 作者字段为全仓统一归一身份，**不构成归属证据**（按 AGENTS.md 第 1 条不落字面量）。
+
+#### 6.10.3 文案审计线 4 文件 index 复位通告（2026-11-05 23:36 补流程）
+
+按 §6.9.4 的三条件，把 `ff964183` 之后那次 `git reset HEAD -- <4 路径>` 的留痕补齐。
+**复位执行方**：文案审计线；**复位时间**：`ff964183`（23:20 前后）之后、`a13d1db7` 之前。
+
+**① 复位了哪几个路径（4 个）**
+
+`desktop/troubleshooting.py`、`desktop/satellite_image_panel.py`、
+`desktop/weather_panel.py`、`tests/test_copy_units_audit.py`。
+
+复位后复核：`git diff --cached --name-only` 为空；4 个路径的工作区
+`git diff --numstat` 为空；**未触碰任何「本线从未提交过」的他人文件**。
+
+**② patch 落点（均在 `D:\mbdsdr\.tmp\`）**
+
+| patch | 内容 | 生成命令 |
+|---|---|---|
+| `b5-index-before-reset.patch`（6654 B） | 复位前共享 index 持有的 4 文件快照（= 本线提交前的旧 blob） | `git diff ff964183 8ddf0f60 -- <4 路径>` |
+| `b5-otherline-troubleshooting-17lines.patch`（4504 B） | `troubleshooting.py` 帮助路径文案那 17 行 | `git show 2b7a71b9 -- desktop/troubleshooting.py` |
+
+**③ owner 通知（本台账即通知通道）**
+
+- 那 17 行的 owner 经证据判为 **可发现性线（discoverability-line）**，**不是**扫描线 /
+  操作逻辑线：该内容由 `2b7a71b9`（`docs(help): 帮助条目的操作路径与真实控件对齐`）
+  **已入库**，其配套守门 `tests/test_help_path_truthfulness.py` 的 claim 持有者为
+  discoverability-line（23:12:30 起）。
+- 该线已**无需重放**：`2b7a71b9` 提交说明明写「同文件内并行的 `2.048 MHz → 2.048 MS/s`
+  单位修正原样带入」，当前 worktree 该文件零 diff。上方第二个 patch 仅作为
+  「万一需要重放」的可执行凭据保留。
+- 操作逻辑线排除：其 23:15:51 起的 claim 在 `desktop/main_window.py`，**不在**本次复位
+  的 4 个路径内，与本次复位无关。
+- 请 discoverability-line 复核两点：`troubleshooting.py` 是否有本笔 17 行之外的
+  未入库 hunk；若有，用 `b5-otherline-troubleshooting-17lines.patch` 对照重放。

@@ -11,6 +11,10 @@ pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记
 改动，说明这次提交吃进的是旧索引内容（如 14a6dc7 漏掉自己 11:47 的
 编辑），记 STALE_INDEX_SUSPECT。判断口径是「提交后 5 秒内的剩余改动」，
 只看本次提交的路径、不看别线文件；提交已经发生，本钩子只记录不阻断。
+
+最后把共享 index 同步到新 HEAD（`scripts/git_sync_index.py`）：私有
+GIT_INDEX_FILE 提交后，共享 index 仍停在旧 HEAD，本次提交的每个文件都会
+显示成「反向暂存」。同步失败只打印警告，不阻塞。
 """
 import json
 import os
@@ -124,6 +128,53 @@ def _append_records(log_path, records):
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
+def _sync_shared_index(root, files):
+    """把共享 index 中「本次提交的路径」同步到新 HEAD。
+
+    私有 GIT_INDEX_FILE 提交后，共享 index 仍停在旧 HEAD，本次提交的每个文件
+    都会变成「反向暂存」（条目数 = 本次提交文件数）。只按这些路径精确改写
+    （`update-index --cacheinfo`），别人的暂存条目一个不动——全量 read-tree
+    会抹掉别线正在准备的提交意图。脚本缺失（如临时测试仓）静默跳过，
+    失败只警告、不阻塞提交结果。
+    """
+    script = root / "scripts" / "git_sync_index.py"
+    if not script.exists() or not files:
+        return
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    proc = subprocess.run(
+        [sys.executable, str(script), "--paths", *files],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    out = (proc.stdout or "").strip().splitlines()
+    err = (proc.stderr or "").strip().splitlines()
+    if proc.returncode == 0:
+        print(f"[post-commit] 共享 index 已同步（{out[-1] if out else 'ok'}）")
+        return
+    if proc.returncode == 2:
+        print(
+            "[post-commit] 本次提交路径已同步；共享 index 另有他人暂存条目（未动，"
+            "按 §6.9.2 交由 owner 处理）",
+            file=sys.stderr,
+        )
+        for line in err[:6]:
+            if line.strip():
+                print(f"    {line}", file=sys.stderr)
+        return
+    print(
+        "[post-commit] 警告：共享 index 同步失败，下一笔提交前必须手工处理！",
+        file=sys.stderr,
+    )
+    for line in (out + err)[:12]:
+        if line.strip():
+            print(f"    {line}", file=sys.stderr)
+
+
 def main():
     started_at = time.time()
     root = Path(_git("rev-parse", "--show-toplevel").stdout.strip() or ".")
@@ -133,6 +184,7 @@ def main():
         return 0
 
     files = _commit_files(head)
+    _sync_shared_index(root, files)
     log_path = Path(
         os.environ.get("MBDSDR_HOOK_LOG") or r"D:\mbdsdr\.locks\git_hook_bypass.log"
     )
