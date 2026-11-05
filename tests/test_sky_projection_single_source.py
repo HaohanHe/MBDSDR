@@ -124,12 +124,34 @@ def test_scalar_and_batch_match_point_by_point(projection):
         assert py[i] == pytest.approx(sy, abs=1e-9)
 
 
-def test_view_layer_delegates_projection_to_single_core():
-    src = inspect.getsource(RFSkyView._sky_to_screen_many)
-    assert "sky_to_screen_many(" in src
-    for banned in ("screen_scale", "vv[:, 2]", "build_view_rotation",
-                   "x_n =", "py = cy"):
-        assert banned not in src, f"视图层仍有第二套投影公式: {banned}"
+def test_view_layer_delegates_projection_to_single_core(monkeypatch):
+    """视图层批量投影必须真的调用唯一核心（而不是自己再算一套）。
+
+    行为断言：在模块里装 spy，批量投影一次，spy 必须被调用且收到原始
+    方位/仰角数组；若视图层还留着第二套公式，spy 根本不会被触发。
+    """
+    calls = []
+    real = rf_sky_view.sky_to_screen_many
+
+    def spy(az, alt, view, projection, size):
+        calls.append((np.array(az, copy=True), np.array(alt, copy=True),
+                      projection, size))
+        return real(az, alt, view, projection, size)
+
+    monkeypatch.setattr(rf_sky_view, "sky_to_screen_many", spy)
+
+    v = RFSkyView()
+    v.resize(700, 700)
+    v.set_observer(40.0, 116.0, 0.0)
+    az = np.array([180.0, 120.0, 240.0])
+    alt = np.array([45.0, 10.0, 10.0])
+    px, py = v._sky_to_screen_many(az, alt)
+
+    assert len(calls) == 1, \
+        "视图层批量投影没走唯一核心（疑似第二套公式仍在）"
+    np.testing.assert_allclose(calls[0][0], az)
+    np.testing.assert_allclose(calls[0][1], alt)
+    assert len(px) == len(az) and len(py) == len(alt)
 
 
 # --------------------------------------------------------------------------

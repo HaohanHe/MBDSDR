@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 from datetime import datetime, timezone  # noqa: E402
 
+import pytest  # noqa: E402
 from PySide6.QtCore import Qt, QPointF  # noqa: E402
 from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -135,11 +136,25 @@ class TestExtStarsDrawn:
 
 
 class TestObserverWiring:
-    def test_main_window_sets_observer(self):
-        src = open(os.path.join(_ROOT, "desktop", "main_window.py"),
-                   encoding="utf-8").read()
-        i = src.index("def _apply_observer_location")
-        j = src.index("def ", i + 10)
-        body = src[i:j]
-        assert "self.sky_view.set_observer(lat, lon)" in body, \
-            "手动站址必须真调 set_observer（此前只标 real 未注入）"
+    def test_main_window_sets_observer(self, isolated_profile):
+        """手动站址必须真的注入天空图（此前只标 real 未调 set_observer）。"""
+        from main_window import MainWindow
+        w = MainWindow()
+        try:
+            w._observer_lat, w._observer_lon = 39.9, 116.4
+            w._apply_observer_location()
+            obs = w.sky_view._observer
+            assert obs is not None, "站址没注入天空视图（恒星/行星层拿不到站址）"
+            assert obs["lat"] == pytest.approx(39.9)
+            assert obs["lon"] == pytest.approx(116.4)
+
+            # 反向：站址清空必须回到空状态，而不是留着旧坐标
+            w._observer_lat = w._observer_lon = None
+            w._apply_observer_location()
+            assert w.sky_view._observer is None, "站址清除后天空图仍显示旧坐标"
+        finally:
+            try:
+                w._disconnect()
+            except Exception:  # noqa: BLE001 - 收尾失败不拖垮用例
+                pass
+            w.close()

@@ -94,19 +94,48 @@ class _CapturePlayer:
         self.writes.append(np.asarray(audio))
 
 
-def test_initial_squelch_uses_authoritative_default(window):
-    """-80.0 是旧量纲残留：初值必须引用 mbdsdr_ai.squelch 的权威常量。"""
-    import inspect
+def test_initial_squelch_uses_authoritative_default(qtapp, isolated_profile,
+                                                    monkeypatch):
+    """初值必须取自权威常量，而不是任何残留字面量。
 
+    行为断言：把权威常量在消费模块里改成可辨识值 -37（设置面板的「启动
+    回推」同时暂时关掉，否则持久化默认值会盖掉初值），新建窗口的滑杆、
+    标签与门限必须跟着变成 -37；解调配置的默认来自内核常量，保持不变。
+    若产品代码里还留着 ``-80.0`` 字面量，下面三条相等断言当场红。
+    """
+    import control_panel as cp
     import main_window as mw
+    import settings_panel as sp
     from mbdsdr_ai.squelch import DEFAULT_SQUELCH_DBFS
 
-    assert window._squelch_db == DEFAULT_SQUELCH_DBFS
-    assert window._demod_cfg.squelch_db == DEFAULT_SQUELCH_DBFS
-    src = inspect.getsource(mw.MainWindow.__init__)
-    assert "self._squelch_db: float = -80.0" not in src, (
-        "滑杆是余量口径，初值不许留旧绝对 dBFS 字面量")
-    assert "DEFAULT_SQUELCH_DBFS" in src
+    for mod in (mw, cp):
+        assert mod.DEFAULT_SQUELCH_DBFS == DEFAULT_SQUELCH_DBFS, (
+            f"{mod.__name__} 引用的常量与 mbdsdr_ai.squelch 不是同一个值："
+            f"{mod.DEFAULT_SQUELCH_DBFS!r}")
+    monkeypatch.setattr(sp.SettingsPanel, "_apply_initial_state",
+                        lambda self: None)
+    monkeypatch.setattr(mw, "DEFAULT_SQUELCH_DBFS", -37.0)
+    monkeypatch.setattr(cp, "DEFAULT_SQUELCH_DBFS", -37.0)
+
+    w = mw.MainWindow()
+    try:
+        assert w.control_panel.squelch_slider.value() == -37, (
+            "静噪滑杆初值没跟权威常量走（疑似残留 -80/-50 字面量），实际 "
+            f"{w.control_panel.squelch_slider.value()}")
+        assert w.control_panel.squelch_val.text() == "-37 dB", (
+            "静噪标签初值没跟权威常量走，实际 "
+            f"{w.control_panel.squelch_val.text()!r}")
+        assert w._squelch_db == -37.0, (
+            "窗口静噪初值没跟权威常量走（疑似残留 -80 字面量），实际 "
+            f"{w._squelch_db!r}")
+        assert w._demod_cfg.squelch_db == float(DEFAULT_SQUELCH_DBFS), (
+            "解调配置初值没跟内核权威常量走（疑似残留 -80 字面量），实际 "
+            f"{w._demod_cfg.squelch_db!r}")
+    finally:
+        try:
+            w._teardown_connection()
+        except Exception:
+            _LOGGER.exception("临时窗口 teardown 失败")
 
 
 def test_margin_gate_beats_absolute_dbfs_on_same_iq(window):

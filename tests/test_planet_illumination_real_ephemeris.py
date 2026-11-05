@@ -237,19 +237,33 @@ def _meeus_planet(name: str, when: datetime):
     return _p.compute_planet(name, jd)
 
 
-def test_planets_module_delegates_phase_geometry():
-    """独立模型只算星历三边，余弦定理必须调 solar_system 的唯一入口。
+def test_planets_module_delegates_phase_geometry(monkeypatch):
+    """独立模型只算星历三边，余弦定理必须走 solar_system 的唯一入口。
 
-    这条是结构守卫：谁想在 planets.py 里再写一份 ``(r²+Δ²-R²)/(2rΔ)``，
-    这里立刻红（数值交叉校验在两边都正确时抓不到「悄悄新增第二份」）。
+    行为断言：在 planets 模块里装 spy，算一颗行星，spy 必须收到真实三边；
+    谁想在这里再写一份 ``(r²+Δ²-R²)/(2rΔ)``，spy 就不会被调用，当场红。
     """
-    import inspect
     from mbdsdr_ai.astronomy import planets as _p
-    src = inspect.getsource(_p.compute_planet)
-    assert "planet_phase_angle_from_geometry(" in src, \
-        "planets.py 必须委托 solar_system.planet_phase_angle_from_geometry"
-    assert "r_e * r_e" not in src, "旧余弦定理片段仍在（第二份实现）"
-    assert "math.acos" not in src, "acos 也应归一到唯一入口"
+
+    calls = []
+    real = _p.planet_phase_angle_from_geometry
+
+    def spy(r_helio, r_geo, r_sun):
+        calls.append((float(r_helio), float(r_geo), float(r_sun)))
+        return real(r_helio, r_geo, r_sun)
+
+    monkeypatch.setattr(_p, "planet_phase_angle_from_geometry", spy)
+
+    when = MARS_QUADRATURE
+    jd = when.timestamp() / 86400.0 + 2440587.5
+    out = _p.compute_planet("mars", jd)
+
+    assert len(calls) == 1, \
+        "planets.compute_planet 没走唯一相位几何入口（第二份余弦定理？）"
+    r_helio, r_geo, r_sun = calls[0]
+    assert r_helio > 0.0 and r_geo > 0.0 and r_sun > 0.0, f"三边非法：{calls[0]}"
+    assert abs(r_sun - 1.0) < 0.02, f"第三边应是日地距 ~1AU，实际 {r_sun}"
+    assert out.phase_angle_deg == pytest.approx(real(*calls[0]))
 
 
 CROSS_CHECK_EVENTS = [
