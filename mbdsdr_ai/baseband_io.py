@@ -282,7 +282,9 @@ def load_iq(path: str, sample_rate: float = None) -> Dict:
     total = int(len(iq))
     result = {
         "path": path,
-        "iq": iq.tolist(),
+        # numpy 数组直接返回：.tolist() 会为每个样本造一个 Python complex，
+        # 12 万样本即可放大到几十 MB，长录音在回放线程里就是 OOM（S6）。
+        "iq": iq,
         "sample_rate": float(sample_rate),
         "center_freq_hz": meta.get("center_freq_hz", 0),
         "start_time": meta.get("start_time", ""),
@@ -561,7 +563,8 @@ def read_ziq(path: str) -> Dict:
         iq = iq / 127.0
     elif bits == 16:
         iq = iq / 32767.0
-    return {"iq": iq.tolist(), "sample_rate": float(sample_rate),
+    # 同 load_iq：返回 numpy 数组，不逐样本转 Python complex（S6）
+    return {"iq": iq, "sample_rate": float(sample_rate),
             "bits": bits, "compressed": bool(is_compressed),
             "annotation": annotation, "samples": int(n)}
 

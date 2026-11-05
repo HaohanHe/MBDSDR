@@ -52,6 +52,14 @@ def test_stop_recording_uses_sidecar_when_streamed():
     i = src.index("def _stop_recording")
     j = src.index("def ", i + 10)
     body = src[i:j]
-    assert "write_sidecar" in body
-    assert "_record_stream_fh.close" not in body or True
-    assert "_record_rate_changes" in body
+    # S4 起收尾走统一段落收尾（_finalize_record_segment），sidecar 由它落盘；
+    # 这里跟着契约走，仍然钉住「流式路径必须写 sidecar」，不是放宽。
+    assert "_finalize_record_segment" in body, (
+        "流式收尾必须走统一的段落收尾，不能再自己 concatenate")
+    helper = src[src.index("def _finalize_record_segment"):]
+    helper = helper[:helper.index("\n    def ", 1)]
+    assert "write_sidecar" in helper, "段落收尾必须写 sidecar"
+    # 多段会话清单由 _write_session_sidecars 回写（S4 取代了 _stop_recording
+    # 里的 concatenate / 手工 sidecar 拼接）
+    assert "_write_session_sidecars" in body
+    assert "session_duration_s" in body
