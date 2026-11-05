@@ -91,6 +91,9 @@ except ImportError:  # 包内导入
 DEFAULT_RC_PORT = int(SCHEMA["rc_port"].default)
 DEFAULT_WEB_PORT = int(SCHEMA["web_port"].default)
 
+# 面板内反馈时长沿用状态栏三档口径（docs/status-message-durations.md）。
+_MSG_NORMAL = 4000
+
 
 class ServiceSettingsPanel(QWidget):
     """远程控制 / Web 服务开关面板。"""
@@ -231,12 +234,22 @@ class ServiceSettingsPanel(QWidget):
         self._restore_from_settings()
 
     def reset_defaults(self):
-        """本组恢复默认：4 个键回 schema 默认，正在监听的服务随之停止。"""
+        """本组恢复默认：4 个键回 schema 默认，正在监听的服务随之停止。
+
+        幂等不是「没反应」（交互审计）：已经是默认值时明确提示，不装成
+        刚做完一次恢复；非默认时确实回退并给出反馈。
+        """
         if self._settings is None:
             return
-        for key in ("rc_enabled", "rc_port", "web_enabled", "web_port"):
+        keys = ("rc_enabled", "rc_port", "web_enabled", "web_port")
+        already = all(self._settings.get(k) == SCHEMA[k].default for k in keys)
+        if already:
+            self._notify("当前已是默认值")
+            return
+        for key in keys:
             self._settings.reset(key)
         self._restore_from_settings()
+        self._notify("已恢复本组默认值")
         self._stop_rc()
         self._stop_web()
         self.rc_port.setEnabled(False)
@@ -1181,24 +1194,44 @@ class SettingsPanel(QWidget):
             self._on_changed("record_dir", path)
 
     def _open_record_dir(self):
-        """打开当前生效的录音目录；不存在则尝试创建，失败明确提示。"""
-        directory, error = self._record_effective_dir(), None
-        if self._settings is not None and hasattr(self._settings, "ensure_record_dir"):
-            directory, error = self._settings.ensure_record_dir()
-        else:
-            try:
-                os.makedirs(directory, exist_ok=True)
-            except OSError as exc:
-                error = f"录音目录不可用（{directory}）：{exc}"
-        if error:
-            QMessageBox.warning(self, "打开录音目录失败", error)
+        """打开当前生效的录音目录；不存在时明确说「不存在」，不建空窗口。
+
+        可观察性（交互审计）：成功/失败都留一条用户可见反馈——优先主窗口
+        状态栏，面板单独使用时写本面板状态行（测试两者都能断言）。
+        """
+        directory = self._record_effective_dir()
+        if not directory:
+            self._show_status("录音目录不存在：未设置（请先选择目录并保存）")
             return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
+        if not os.path.isdir(directory):
+            self._show_status(f"录音目录不存在：{directory}")
+            return
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(directory)):
+            self._show_status(f"已打开目录：{directory}")
+        else:
+            self._show_status(f"无法打开目录（系统拒绝请求）：{directory}")
 
     def _on_open_dir_clicked(self):
         directory = os.path.expanduser("~/.mbdsdr")
+        if not os.path.isdir(directory):
+            self._show_status(f"配置目录不存在：{directory}")
+            return
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(directory)):
+            self._show_status(f"已打开目录：{directory}")
+        else:
+            self._show_status(f"无法打开目录（系统拒绝请求）：{directory}")
+
+    def _show_status(self, msg: str):
+        """设置面板的可观察反馈：优先宿主状态栏，回退面板状态行。"""
+        win = self.window()
+        bar = getattr(win, "statusBar", None)
+        if callable(bar):
+            try:
+                bar().showMessage(msg, _MSG_NORMAL)
+                return
+            except Exception:  # noqa: BLE001 - 宿主状态栏异常时回退面板状态行
+                pass
         try:
-            os.makedirs(directory, exist_ok=True)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(directory))
-        except OSError as e:
-            QMessageBox.warning(self, "打开目录失败", str(e))
+            self.status_label.setText(msg)
+        except Exception:  # noqa: BLE001 - 面板尚未构建完成时无状态行可写
+            pass
