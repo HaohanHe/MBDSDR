@@ -37,7 +37,7 @@ from tokens import tokens
 
 from constants import DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ
 
-# 静噪门限的唯一口径（解调后音频 RMS dBFS）定义在内核侧，
+# 静噪门限的唯一口径（相对该模式噪声基线的余量）定义在内核侧，
 # 桌面端不复制数字；见 mbdsdr_ai/squelch.py 的常量段。
 from mbdsdr_ai.squelch import (
     DEFAULT_SQUELCH_DBFS,

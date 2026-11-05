@@ -39,17 +39,251 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 静噪门限的唯一口径：**解调后音频 RMS**（dBFS，满量程正弦 = 0 dBFS）
+# 静噪门限的唯一口径：**相对该模式噪声基线的余量**（2026-11-05 二次裁定）
 # ---------------------------------------------------------------------------
-# 绝对门限只有在同一测量点上才可比：带宽每翻一倍，噪声功率 +3 dB，
-# 同一个数字换模式就换意思。历史上前端拿"全带宽 IQ 功率"当门限（WFM）、
-# 引擎拿"信道 IQ 功率"当门限（窄带），于是同一根滑杆标定了两个测量点。
-# 统一到音频域后，AM/FM/USB/WFM 的 -50 才有相同含义。
+# 绝对电平不能跨模式比较：带宽每翻一倍噪声功率 +3 dB，同一数字换模式就换意思；
+# 更致命的是纯噪声下绝对音频 RMS 永远高于固定门限（FM 纯噪声 -14.54 dBFS、
+# NFM +8.98 dBFS，默认 -50 永不关门）——那等于没有静噪。
+#
+# 现在滑杆仍只有一个、刻度仍是 -100..-20（默认 -50），但语义是"余量"：
+# 内部按 ``margin_threshold_db()`` 归一化为 dB 余量，再与该模式实测噪声基线比。
+# 基线由 ``BaselineSquelch`` 自动标定（模式切换/重建时重测），标定失败可见。
+#
 # 注意：``NarrowbandReceiver``（无头 gqrx 兼容路径）仍在 IF 域门控，
 # 那是**另一个概念**，不得复用本组常量——它的阈值单位不是这里的 dBFS。
 SQUELCH_MIN_DBFS = -100.0
 SQUELCH_MAX_DBFS = -20.0
 DEFAULT_SQUELCH_DBFS = -50.0
+
+# 默认 -50 对应的余量（dB）：实测 6 模式弱可读信号余量 +6.9 ~ +42 dB，
+# FM 最紧（阈值效应，20 dB CNR 时约 +7 dB），取 6 dB 保证弱可读能开；
+# 噪声帧单帧毛刺用"连续 2 帧确认"压掉。-20（最严）对应 16 dB。
+SQUELCH_DEFAULT_MARGIN_DB = 6.0
+SQUELCH_MAX_MARGIN_DB = 16.0
+
+# 固定门限的"音频存在度"测量带。判据 = 带内谱峰 / 谱中位（dB）：
+#   纯噪声的谱是平坦的，峰/中位通常只有 3~8 dB 的统计起伏；
+#   可读信号（语音/音乐/单音）会集中在某几个 bin，峰/中位迅速拉开。
+# 该比值**尺度无关**：RF 增益整体抬 6 dB，峰与中位同时抬 6 dB，余量不变。
+# 实测反证（见 docs/hardcoded-parameters.md §10-1）：
+#   - FM 音频高通段（>3 kHz）噪声占比不可分（噪声 -0.73 vs 弱 -0.12 dB）；
+#   - 音频 RMS 在 NFM 反向（噪声 +8.98 > 弱可读 +8.62 dBFS）；
+#   因此 6 模式统一用峰/中位，仅按调制族收窄分析带（下表的 mode→band）。
+AUDIO_PRESENCE_LO_HZ = 300.0
+AUDIO_PRESENCE_HI_HZ = 5000.0
+
+# 各调制族的噪声基线分析带（谱峰/谱中位都在这个带内取）。
+# SSB/CW 的分析带按各自音频带宽收窄，噪声基线因此按模式各自标定。
+_MODE_PRESENCE_BAND = {
+    "WFM": (300.0, 5000.0),
+    "FM": (300.0, 5000.0),
+    "NFM": (300.0, 5000.0),
+    "AM": (300.0, 5000.0),
+    "USB": (300.0, 3000.0),
+    "LSB": (300.0, 3000.0),
+    "CW": (300.0, 5000.0),
+}
+
+
+def audio_presence_db(audio: np.ndarray,
+                      sample_rate: float = 48000.0,
+                      lo_hz: float = AUDIO_PRESENCE_LO_HZ,
+                      hi_hz: float = AUDIO_PRESENCE_HI_HZ) -> float:
+    """解调后音频的「存在度」：带内谱峰比谱中位高多少 dB。
+
+    返回 NaN 表示本块不可判（太短/全零/无有效 bin），调用方不得把它当
+    默认值静默处理，必须进入"标定失败"状态。
+    """
+    x = np.asarray(audio, dtype=np.float64)
+    if x.ndim == 2:
+        x = x.mean(axis=1)
+    x = x.ravel()
+    n = x.size
+    if n < 32:
+        return float("nan")
+    if not np.isfinite(x).all():
+        return float("nan")
+    spec = np.abs(np.fft.rfft(x * np.hanning(n))) ** 2
+    freqs = np.fft.rfftfreq(n, 1.0 / float(sample_rate))
+    hi = min(float(hi_hz), float(sample_rate) / 2.0 - 1.0)
+    band = (freqs >= float(lo_hz)) & (freqs <= hi)
+    p = spec[band]
+    p = p[p > 1e-20]
+    if p.size < 8:
+        return float("nan")
+    peak = float(np.max(p))
+    med = float(np.median(p))
+    if med <= 0.0:
+        return float("nan")
+    return float(10.0 * np.log10(peak / med))
+
+
+def demod_presence_db(audio: np.ndarray, mode: str,
+                      sample_rate: float = 48000.0) -> float:
+    """按调制族选分析带，返回该模式的音频存在度（dB）。"""
+    lo, hi = _MODE_PRESENCE_BAND.get(
+        str(mode).upper(), (AUDIO_PRESENCE_LO_HZ, AUDIO_PRESENCE_HI_HZ))
+    return audio_presence_db(audio, sample_rate, lo, hi)
+
+
+def margin_threshold_db(squelch_db: float) -> float:
+    """把用户滑杆刻度（-100..-20）归一化为「相对噪声基线余量」（dB）。
+
+    分段线性，常数只在这里定义一处：
+      -100 → 0 dB（几乎常开；基线本身即噪声，余量为 0）
+       -50 → 6 dB（默认，标准静噪余量）
+       -20 → 16 dB（只放行强信号）
+    """
+    s = float(squelch_db)
+    lo = SQUELCH_MIN_DBFS
+    hi = SQUELCH_MAX_DBFS
+    s = min(max(s, lo), hi)
+    if s <= DEFAULT_SQUELCH_DBFS:
+        span = DEFAULT_SQUELCH_DBFS - lo
+        return (s - lo) / span * SQUELCH_DEFAULT_MARGIN_DB
+    span = hi - DEFAULT_SQUELCH_DBFS
+    return SQUELCH_DEFAULT_MARGIN_DB + \
+        (s - DEFAULT_SQUELCH_DBFS) / span * (
+            SQUELCH_MAX_MARGIN_DB - SQUELCH_DEFAULT_MARGIN_DB)
+
+
+class BaselineSquelch:
+    """按「相对该模式噪声基线的余量」门控（不是绝对音频电平）。
+
+    口径（2026-11-05 二次裁定）：
+      - 用户滑杆仍是 -100..-20、默认 -50；
+      - 内部把滑杆值分段线性归一化为"相对该模式噪声基线的余量"（dB）；
+      - 基线 = 标定窗口内 ``calib_frames`` 帧存在度的中位数（自动标定），
+        模式切换/管线重建时重测；
+      - 标定未完成时门保持打开并暴露 ``calibrating=True``（可见状态），
+        失败（持续 NaN）时 ``calibration_failed=True``，不静默套默认值；
+      - 只有关门时才继续跟踪噪声底：开门时基线冻结，避免把持续信号
+        学进基线后自己把门关上。
+      - ``track=False``（UI 的"自动"关闭）表示基线锁定在最近一次标定。
+
+    这样 FM 纯噪声（存在度低）与可读信号（存在度高）在同一刻度上可比，
+    且 +6 dB 增益不会移动读数（存在度是比值，尺度无关）。
+    """
+
+    def __init__(self, squelch_db: float = DEFAULT_SQUELCH_DBFS,
+                 mode: str = "FM",
+                 sample_rate: float = 48000.0,
+                 calib_frames: int = 8,
+                 hang_ms: float = 250.0,
+                 confirm_frames: int = 2,
+                 track: bool = True) -> None:
+        self.squelch_db = float(squelch_db)
+        self.mode = str(mode).upper()
+        self.sample_rate = float(sample_rate)
+        self.calib_frames = max(2, int(calib_frames))
+        self.hang_ms = float(hang_ms)
+        self._confirm_frames = max(1, int(confirm_frames))
+        self.track = bool(track)
+        self._samples: list = []
+        self._floor_db: Optional[float] = None
+        self._open = True          # 标定期保持开门，不静默改变可听性
+        self._hang_remaining_ms = 0.0
+        self._above_streak = 0
+        self._nan_streak = 0
+        self.calibration_failed = False
+        self.last_margin_db: Optional[float] = None
+
+    def reset(self) -> None:
+        """模式/增益/采样率变化时重测噪声基线。"""
+        self._samples.clear()
+        self._floor_db = None
+        self._open = True
+        self._hang_remaining_ms = 0.0
+        self._above_streak = 0
+        self._nan_streak = 0
+        self.calibration_failed = False
+        self.last_margin_db = None
+
+    def set_mode(self, mode: str) -> None:
+        """切模式：分析带与噪声基线都换，必须重测。"""
+        m = str(mode).upper()
+        if m != self.mode:
+            self.mode = m
+            self.reset()
+
+    def set_threshold(self, squelch_db: float) -> None:
+        """只改余量门限，不重标基线（基线是模式属性，与滑杆无关）。"""
+        self.squelch_db = float(squelch_db)
+
+    @property
+    def margin_threshold_db(self) -> float:
+        """滑杆值 → 余量门限（dB）。-50（默认）落在 6 dB 余量。"""
+        return margin_threshold_db(self.squelch_db)
+
+    @property
+    def calibrating(self) -> bool:
+        return self._floor_db is None and not self.calibration_failed
+
+    @property
+    def floor_db(self) -> Optional[float]:
+        return self._floor_db
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    def state_label(self) -> str:
+        """给 UI/日志的可见状态文案。"""
+        if self.calibration_failed:
+            return "静噪基线标定失败（音频块不可判）"
+        if self.calibrating:
+            return "静噪基线标定中"
+        return f"静噪基线已标定（{self.mode}，{self._floor_db:.1f} dB）"
+
+    def update(self, audio: np.ndarray,
+               block_samples: Optional[int] = None) -> bool:
+        """喂一块解调音频，返回门是否打开。"""
+        arr = np.asarray(audio)
+        presence = demod_presence_db(arr, self.mode, self.sample_rate)
+        n = (int(block_samples) if block_samples is not None
+             else int(arr.shape[0] if arr.ndim else 1))
+        block_ms = 1000.0 * n / max(self.sample_rate, 1e-9)
+
+        if not np.isfinite(presence):
+            self._nan_streak += 1
+            if (self._floor_db is None
+                    and self._nan_streak >= self.calib_frames
+                    and not self.calibration_failed):
+                # 持续不可判：明确失败，不猜默认值；门保持打开以免误静音。
+                self.calibration_failed = True
+                logger.warning("静噪基线标定失败：音频块持续不可判（%d 帧）",
+                               self._nan_streak)
+            return self._open
+
+        self._nan_streak = 0
+        if self._floor_db is None:
+            self._samples.append(presence)
+            if len(self._samples) >= self.calib_frames:
+                self._floor_db = float(np.median(self._samples))
+            return self._open   # 标定期间保持当前状态，不静默改变可听性
+
+        margin = presence - self._floor_db
+        self.last_margin_db = float(margin)
+        if margin >= self.margin_threshold_db:
+            self._above_streak += 1
+        else:
+            self._above_streak = 0
+        if self._above_streak >= self._confirm_frames:
+            self._open = True
+            self._hang_remaining_ms = self.hang_ms
+        elif self._open:
+            self._hang_remaining_ms -= block_ms
+            if self._hang_remaining_ms <= 0.0:
+                self._open = False
+
+        # 噪声底跟踪：只在关门时跟随（对称慢速）；开门时冻结基线，
+        # 否则持续语音会被当成噪声底，余量被自己吃掉。
+        if self._open:
+            if presence < self._floor_db:
+                self._floor_db += 0.25 * (presence - self._floor_db)
+        elif self.track:
+            self._floor_db += 0.05 * (presence - self._floor_db)
+        return self._open
 
 
 def rms_dbfs(x: np.ndarray) -> float:

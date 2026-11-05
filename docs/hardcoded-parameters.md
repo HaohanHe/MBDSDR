@@ -66,6 +66,22 @@
 所有模式（含 WFM）共有的测量点。落地见 §10-1；`NarrowbandReceiver` 的 IF 域门控
 是**另一个概念**（无头 gqrx 兼容路径，不被这根滑杆驱动），保留并显式注释。
 
+**二次裁定（2026-11-05，决策人，取代上条的口径语义）**：上条把"一根杆"改成
+"音频 RMS"后，FM 纯噪声实测 `-14.54 dBFS`、NFM 纯噪声 `+8.98 dBFS`，
+固定 `-50` **永远不关**——一个不关的静噪等于没有静噪。所以滑杆保留
+一个、刻度保留 `-100..-20`（默认 `-50`），但**值的语义改为"相对该模式噪声
+基线的余量"**，不是绝对音频电平：
+
+- 基线按调制族各自测：FM/WFM/NFM 与 AM 用解调后音频 300–5000 Hz 谱峰/谱中位，
+  USB/LSB 用 300–3000 Hz，CW 用 300–5000 Hz；全部归一化成"存在度余量 dB"再比较；
+- 基线**自动标定**（模式切换/增益变化/采样率变化时重测），标定失败必须有可见状态；
+- 实测反证：FM 音频高通段（>3 kHz）噪声占比不可分（噪声 `-0.73` vs 弱 `-0.12` dB），
+  NFM 音频 RMS 反向（噪声 `+8.98` > 弱可读 `+8.62` dBFS），因此统一用峰/中位
+  （尺度无关，`+6 dB` 增益读数变化 `0.00 dB`）；
+- **不得**把 FM 拉回 IQ 功率（那会退化成"一根杆两个测量点"）。
+
+细化与验收矩阵见 §10-1。
+
 
 ### 2.2 卫星"下一次过境"的最低仰角：5° 与 10° 🔴 P1
 
@@ -321,7 +337,7 @@ spin `-140..20`）才是 B 类锁死项，各写清理由。
 | A2 | `pass_window_hours` | 过境预测时长 | `24` | 1–72 | 小时 | 卫星与多普勒 | "往后算多久的过境；调大更耗 CPU，但能提前安排通联。" | 业余卫星操作常提前数天排计划。 |
 | A3 | `recording_retention_total_gb` | 录音库容量上限 | `不限（0）` | 0–2000，步进 5 | GB | 存储与日志 | "超过上限时按最旧优先清理；0 表示不自动清理。" | 磁盘是用户真实约束；`RetentionPolicy` 已支持，只是没默认值。 |
 | A4 | `recording_retention_days` | 录音保留天数 | `不限（0）` | 0–3650 | 天 | 存储与日志 | "早于 N 天的录音可被清理；0 表示不按时间清理。" | 同上。 |
-| A5 | `squelch_default_db` | 静噪门限默认值 | `-50` | `-100..-20` | dBFS（解调后音频） | 频谱与解码 | "静噪门限（解调后音频电平）：声音低于此值即静音；不是射频功率。" | **已裁定并落库到内核常量**（§10-1）；设置线只需持久化 + 旧值迁移提示。 |
+| A5 | `squelch_default_db` | 静噪门限默认值 | `-50` | `-100..-20` | 余量刻度（-50 ≈ 8 dB 余量） | 频谱与解码 | "静噪门限：相对该模式噪声基线的余量；数值越大越只放行强信号。基线自动标定。" | **已裁定并落库到内核常量**（§10-1）；设置线只需持久化 + 旧值迁移提示。 |
 | A6 | `ai_tool_timeout_s` | AI 工具执行超时 | `120` | 10–600 | 秒 | AI | "单个工具（如扫频/抓取）最多等多久；慢设备可调大。" | 与请求超时 `ai_timeout` 不同层；已有代码常量 `agent.py:630`。 |
 | A7 | `waterfall_depth_rows` | 瀑布历史行数 | `256` | 128–4096（2 的幂） | 行 | 频谱与解码 | "瀑布能回看多久；越大越吃内存。" | C++ 侧已可选（`tokens.h:698`），Python 固定 256，建议对齐。 |
 | A8 | `sky_extinction_k` | 大气消光系数 | `0.2` | 0.0–0.5 | mag/airmass | 星象仪（高级） | "低仰角星光被大气削弱的程度；城郊 0.2–0.3，高山 0.15。" | 影响地平附近恒星的可见性判断；有物理定义的合理默认。**低优先**（Bortle 尚被锁，先解锁 Bortle 更值）。 |
@@ -424,7 +440,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | P-2 | `desktop/rf_sky_view.py` | `_bortle = 3` 私有硬编码；`(4.5-mag)/9.0` 在同文件两处 | `from mbdsdr_ai.skyengine.stars import DEFAULT_BORTLE`；提供 `set_bortle()` 后即可解锁设置项。拾取评分提成一个 `_pick_score(mag)` 函数（两处同式）。 |
 | P-3 | `desktop/main_window.py` | 状态提示时长 `3000/4000/6000/8000` 散落 20+ 处 | 提到 `desktop/constants.py` 的 `TOAST_SHORT_MS / TOAST_INFO_MS / TOAST_WARN_MS / TOAST_ERROR_MS` 四档；`desktop/constants.py` 已有互斥钩子测试，按同法登记。 |
 | P-4 | `desktop/main_window.py` | 刷新周期 `50/150/1000/2000/5000 ms` 散落 | 同上，收成 `UI_FPS`、`BUS_COALESCE_MS`、`STATUS_REFRESH_MS`、`SKY_REFRESH_MS`。 |
-| P-5 | `desktop/receive_pipeline.py` | `-80.0` 固定静噪默认 | **已完成**（§10-1）：改为 `DEFAULT_SQUELCH_DBFS`，WFM 与窄带均按解调后音频 RMS 门控。 |
+| P-5 | `desktop/receive_pipeline.py` | `-80.0` 固定静噪默认 | **已完成**（§10-1 二次裁定）：改为 `DEFAULT_SQUELCH_DBFS`，WFM 与窄带统一走 `BaselineSquelch`（相对该模式噪声基线的余量，不回 IQ 功率）。 |
 | P-6 | `cpp/src/dsp/spectrum_engine.cpp` | `kChunk = 8192` 在两处函数里各写一次 | 提到文件级 `constexpr std::size_t kReadChunk`。 |
 | P-7 | `mbdsdr_ai/skyengine/star_catalog.py` | `0.5 * log2(...)` 的斜率字面量 | 提成 `DETAIL_GAIN_SLOPE = 0.5`（与 `MAX_DETAIL_GAIN_MAG` 同段）。 |
 | P-2b | `desktop/rf_sky_view.py` | 私有 `PASS_MIN_ALT_DEG = 10.0` 字面量 | 改为 `from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG`；与 `sat_track_panel` / `new_spacetime_panel` 共用同一常量。星象仪的 `PASS_COARSE_STEP_S/FINE_STEP_S` 属 D-6，**不要**顺手合并。 |
@@ -432,7 +448,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | P-8a | `desktop/main_window.py` | `_squelch_db = -80.0`（约 507 行）是权威初值，滑杆已显示 -50 | 改为 `DEFAULT_SQUELCH_DBFS`（一行）。**必须与 P-8d 迁移提示同批**：否则旧配置读入后仍按 -80 门控，UI 显示与行为继续分裂。 |
 | P-8b | `mbdsdr_ai/sdr_backend.py` + `osmosdr_source.py` + `rtltcp_client.py` | RTL 基线三套（2.048 / 1.024 / 2.048 硬编码） | **已完成**（§10-3）：统一为 2.4 MS/s 首选 + `nearest_sample_rate()` 回落 + 状态回报实际值；三处不再各写字面量。相关测试期望已成对更新（100 passed）。 |
 | P-8c | `desktop/spectrum_widget.py:419` | 无数据哨兵 `-120.0` 落在可显示量程内 | 改为 `float("nan")`（绘制/重采样对 NaN 显式判空）。C++ `rssiDbfs_{-100.0f}` 是**真实安静读数**，不得当哨兵；若要哨兵请用量程外的 `-999` 并注释。 |
-| P-8d | 设置线（`desktop/config_schema.py`） | 旧配置静噪值按新口径解释 | 读入旧 key 时若值落在 `-120..-101`（旧量纲域外沿）或明显偏离新域，弹一次提示："此静噪值按旧量纲（IQ 功率）保存，已按新口径（解调后音频电平）重新解释；请复核。"**不许静默改意思**。 |
+| P-8d | 设置线（`desktop/config_schema.py`） | 旧配置静噪值按新口径解释 | 读入旧 key 时若值落在 `-120..-101`（旧量纲域外沿）或明显偏离新域，弹一次提示："此静噪值按旧量纲（IQ 功率）保存，现在滑杆表示'相对该模式噪声基线的余量'；请复核。"**不许静默改意思**。 |
 
 ### 6.3 暂缓（需要跨线决策，本线不动）
 
@@ -460,8 +476,8 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | **dB 默认下限** | `-100.0`（`spectrum_widget.py:840`） | `-45`（`tokens.h:329`） | ✗（基准相同） | 视窗默认交自动量程（§2.4 D-4 结论）；夹取边界各自锁死 |
 | **FFT 档位数量** | 5 | 3 | ✗ | UI 从能力派生（P-1 关联） |
 | 默认 FFT | 2048 | 2048（`spectrum_engine.h:884`） | ✓ | 保持 |
-| 静噪范围 | `-100..-20`（`squelch.py`） | `-100..-20`（`tokens.h:375-376`） | ✓（同量纲：解调后音频 RMS） | 见 2.1，已统一 |
-| 静噪默认 | `-50`（`squelch.py`） | `-50`（`tokens.h:377`） | ✓ | 见 2.1，已统一 |
+| 静噪范围 | `-100..-20`（`squelch.py`） | `-100..-20`（`tokens.h:375-376`） | ✓（量纲不同：C++ 仍是绝对 dB） | 见 2.1 二次裁定 |
+| 静噪默认 | `-50`（`squelch.py`） | `-50`（`tokens.h:377`） | ✓ | 见 2.1 二次裁定 |
 | **峰值门限基准** | `median + rel_db`（`spectrum_widget.py:487-488`） | `dB above median`（`tokens.h:352`） | ✓（同一基准） | 默认统一 15 dB（P-1） |
 | 峰值门限值 | `6.0`（待改 15） | `15.0` | ✗ → 待 P-1 | 已裁定取 15 |
 | 默认采样率 | 2.4 MS/s | 2.4 MS/s（`tokens.h:301`） | ✓ | 已统一；两端都按设备能力回落 |
@@ -478,7 +494,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 | # | 议题 | 状态 |
 |---|---|---|
-| 1 | 静噪门限统一到解调后音频 RMS（`-100..-20`，默认 `-50`） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a）。 |
+| 1 | 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 8 dB 余量） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a），`gain_db` 写入需设置线接 1 行。 |
 | 2 | 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° | **已落地**（§10-2）。剩余：`rf_sky_view` 的 `PASS_MIN_ALT_DEG` 改引用常量（P-2b）。 |
 | 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 |
 | 3b | 调谐步进统一 10 kHz | **前提不成立，撤回**（§D-2）：C++ 调谐步进本就是 `kFreqFineStepHz=10 kHz`；100 kHz 是扫描步进。 |
@@ -493,8 +509,8 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 已做（本线，可提交）：
 - `mbdsdr_ai/skyengine/stars.py`、`star_catalog.py`：公式单一事实源（C-1、C-2）。
 - `mbdsdr_ai/squelch.py` + `desktop/receive_pipeline.py` +
-  `desktop/control_panel.py` + `mbdsdr_ai/analog_demod.py`（仅注释）：
-  静噪统一到解调后音频 RMS（§10-1）。
+  `desktop/control_panel.py`：
+  静噪统一到「相对该模式噪声基线的余量」+ 自动标定 + 失败可见（§10-1 二次裁定）。
 - `mbdsdr_ai/sat_passes.py` + `sat_tracker.py` + `desktop/sat_track_panel.py` +
   `desktop/new_spacetime_panel.py` + `mbdsdr_ai/core/controller.py`：
   过境仰角两常量 + `next_pass()` 默认 10° + 列表筛选提示（§10-2）。
@@ -516,37 +532,62 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 ## 10. 落地记录：口径变了什么 / 没变什么
 
-### 10-1 静噪统一到「解调后音频 RMS」
+### 10-1 静噪重做：从「绝对音频 RMS」到「相对噪声基线余量」
+
+**背景（决策人反证）**：上一版把滑杆统一到解调后音频 RMS 后，纯噪声下固定
+`-50` 永远不关（FM 纯噪声 `-14.54 dBFS`、NFM `+8.98 dBFS`）。一个不关的静噪
+等于没有静噪，所以「音频 RMS」不能当跨调制族的同一标定量。
 
 **口径变了（有意改变行为，非等价收口）**
 
-| 项 | 改前 | 改后 |
+| 项 | 改前（首版） | 改后（二次裁定） |
 |---|---|---|
-| 测量点（WFM） | 全带宽 IQ 功率 `10*log10(mean(|iq|²))` | 解调后音频 RMS（`rms_dbfs(audio)`） |
-| 测量点（窄带） | VFO 信道 IQ 功率 | 解调后音频 RMS |
-| 默认值 | `-80.0` | `-50.0`（`squelch.py: DEFAULT_SQUELCH_DBFS`） |
-| 范围 | `-120..0`（滑杆 `setRange(-120, 0)`） | `-100..-20`（`SQUELCH_MIN_DBFS/MAX_DBFS`） |
-| UI 文案 | "静噪"（未标量纲） | "静噪(音频)" + tooltip 写明"解调后音频电平 dBFS，不是射频/中频功率" |
-| 门控时机 | 窄带：VFO 之后、解调之前 | 先解调 → 算音频 RMS → 门控 → AGC |
-| 权威初值 | `main_window._squelch_db = -80.0` | **尚未改**（P-8a；改了会与旧配置迁移提示脱节） |
+| 滑杆语义 | 绝对音频 RMS（dBFS） | **相对该模式噪声基线的余量**（刻度不变：`-100..-20`，默认 `-50`） |
+| 刻度换算 | 直接比较 dBFS | `-100→0 dB`、`-50→6 dB`、`-20→16 dB`（`margin_threshold_db`） |
+| 噪声基线 | 无（固定门限）/ `AutoSquelch` 跟踪 | `BaselineSquelch` 自动标定（`calib_frames=8` 帧中位数） |
+| 各模式测法 | 全部音频 RMS | 带内**谱峰/谱中位**：FM/WFM/NFM/AM 用 300–5000 Hz，USB/LSB 用 300–3000 Hz，CW 用 300–5000 Hz |
+| 标定时机 | 无 | 模式切换、`SharedDemodConfig.gain_db` 变化、管线重建（采样率变化） |
+| 失败状态 | 无 | `calibration_failed` + `squelch_state` 信号 + `log.warning`（不套默认值） |
+| WFM | 全带宽 IQ 功率 / NoiseSquelch | 与窄带同一套音频存在度口径（**不回 IQ 功率**） |
+| UI 文案 | "静噪(音频)"、dBFS | "静噪门限"，写明"相对噪声基线余量 / 基线自动标定" |
 
-证据：`desktop/receive_pipeline.py:363`（WFM `dbfs = rms_dbfs(audio)`）、
-`:407`（窄带同一行）；`_gate_open`（`:281-285`）只比较传入的 `power_db`；
-`desktop/control_panel.py` 三常量 + 量纲 tooltip。
+**为什么不用裁定里举例的两条测法**（实测反证，不是口味）：
+
+| 候选 | 噪声 | 弱可读 | 结论 |
+|---|---|---|---|
+| FM 音频高通段（>3 kHz）占比 | `-0.73 dB` | `-0.12 dB` | 不可分（差 0.6 dB） |
+| NFM 音频 RMS | `+8.98 dBFS` | `+8.62 dBFS` | **反向**（噪声比弱信号还高） |
+| 带内谱峰/谱中位 | `+5.6~19.6 dB` | 余量 `+6.9~+41.9 dB` | 可用，且尺度无关 |
+
+**验收矩阵实测**（`tests/test_squelch_baseline.py`，默认 `-50`＝6 dB 余量；
+合成源 48 kHz、块长 384 样本；FM 弱可读取 20 dB CNR——10 dB 时 FM 解调音频
+本身不可读，余量仅 `+4.5 dB`）：
+
+| 模式 | 纯噪声（开门帧占比） | 弱可读（开门帧占比） | 强信号（开门帧占比） | 弱可读余量读数 1×→2×（+6 dB） |
+|---|---|---|---|---|
+| AM | **0 %** | 100 % | 100 % | `+14.53 → +14.53`（Δ`0.00`） |
+| USB | **0 %** | 100 % | 100 % | `+18.96 → +18.96`（Δ`0.00`） |
+| LSB | **0 %** | 100 % | 100 % | `+19.09 → +19.09`（Δ`0.00`） |
+| NFM | **0 %** | 100 % | 100 % | `+41.86 → +41.86`（Δ`0.00`） |
+| FM | **0 %** | 75 %（`+7.42` 余量，边缘可读） | 100 % | `+7.42 → +7.42`（Δ`0.00`） |
+| CW | **0 %** | 100 % | 100 % | `+19.37 → +19.37`（Δ`0.00`） |
+
+- 纯噪声那条（含 FM）全部 **0 %**：反证由红转绿（旧口径 FM 纯噪声判"开"，
+  新口径判"关"）。
+- 单帧毛刺用「连续 2 帧确认」压掉；弱可读帧间抖动由生产环境的 250 ms hang 保持。
+- 增益 +6 dB：6 模式读数变化均 `0.00 dB`（存在度是比值，尺度无关），
+  保持首版那档指标；`gain_db` 变化仍触发重标定（设置线写入时生效）。
 
 **口径没变**
 
-- 自动静噪（`AutoSquelch`）仍是"相对实测噪声底"，未动；
-- 音频链（解调 → AGC → `audio_tap` → `player.write`）顺序与内容未动，
-  只是把门控比较点后移到音频；
+- 音频链（解调 → 门控 → AGC → `audio_tap` → `player.write`）顺序与内容未动；
 - `mbdsdr_ai/analog_demod.py` 的无头 IF 域门控（`_MODE_DEFAULTS` 的
-  `-40/-30/-60`、构造初值 `-150.0`）**保留不动**——那是 gqrx 兼容路径的
-  另一个测量点，已加注释禁止与本组常量"对齐";
+  `-40/-30/-60`、构造初值 `-150.0`）**保留不动**——gqrx 兼容路径的另一个测量点；
 - C++ 侧 `kSquelchMinDb/-100`、`kSquelchMaxDb/-20`、`kSquelchDefaultDb/-50`
-  本来就与裁定一致，**未改 C++**，对拍测试继续冻结它们。
+  **未改**（C++ 仍是绝对 dB 域，量纲差异已登记 §7）；对拍测试继续冻结它们。
 
 **行为差异说明（必须让用户知道）**：同一段信号，旧值 `-80` 在新口径下
-不再等价；迁移仅做"读入 + 提示"，不自动换算（IQ 功率↔音频 RMS 的差值
+不再等价；迁移仅做"读入 + 提示"，不自动换算（IQ 功率↔音频域存在度的差值
 取决于增益/带宽/解调器，无法可靠换算）。→ P-8d。
 
 ### 10-2 过境仰角：`VISIBLE_MIN_ALT_DEG=5` / `PASS_MIN_ALT_DEG=10`
@@ -646,6 +687,6 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - 差分探针（星等收口）`242,011` 点 `array_equal` 全等（§6.1）——那是
   **唯一**一处"口径未变"的集中，本轮 10-1/10-2 是**有意改口径**，
   不用等价性伪装。静噪改口的影响用差分读数给出：同一合成源 `gain ×2` 时
-  旧 WFM/窄带读数各涨 `+6.02 dB`，新音频 RMS 两路均为 `0.00 dB`；
-  纯噪声源旧两端差 `21.64 dB`（≈ 10log10(2.048M/15k)），新口径不再随带宽
-  改变含义。
+  旧 WFM/窄带读数各涨 `+6.02 dB`；二次裁定后的存在度余量 6 模式均为
+  `0.00 dB`；旧口径纯噪声两端差 `21.64 dB`（≈ 10log10(2.048M/15k)），
+  新口径不再随带宽改变含义。静噪验收矩阵见 §10-1（6 模式 × 3 场景全绿）。

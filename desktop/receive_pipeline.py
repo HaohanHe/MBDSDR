@@ -37,12 +37,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from mbdsdr_ai.dsp_stream import PingPongStream
 from mbdsdr_ai.dsp import StreamSplitter, AGC
-from mbdsdr_ai.squelch import (
-    DEFAULT_SQUELCH_DBFS,
-    AutoSquelch,
-    NoiseSquelch,
-    rms_dbfs,
-)
+from mbdsdr_ai.squelch import BaselineSquelch, DEFAULT_SQUELCH_DBFS
 from mode_registry import get as get_mode, demodulate
 
 log = logging.getLogger(__name__)
@@ -61,13 +56,17 @@ class SharedDemodConfig:
 
     def __init__(self, mode: str = "FM",
                  squelch_db: float = DEFAULT_SQUELCH_DBFS,
-                 auto_squelch: bool = True, agc_speed: str = "medium"):
+                 auto_squelch: bool = True, agc_speed: str = "medium",
+                 gain_db: float = 0.0):
         self.mode: str = str(mode).upper()
         self.squelch_db: float = float(squelch_db)
-        # 自动静噪：相对实测噪声底门控，无载波时静音；False 时用固定 squelch_db。
+        # 自动静噪：True = 持续跟踪噪声底；False = 基线锁定在最近一次标定。
+        # 两种情况下滑杆值都是"相对噪声基线的余量"。
         self.auto_squelch: bool = bool(auto_squelch)
         # 解调后音频 AGC 档位：fast / medium / slow / off（gqrx 式三档+关）。
         self.agc_speed: str = str(agc_speed).lower()
+        # 前端增益（dB）：变化时重打噪声基线（设置线/操作逻辑线负责写入）。
+        self.gain_db: float = float(gain_db)
 
 
 # ======================================================================
@@ -220,6 +219,11 @@ class DemodWorker(QThread):
     不做静噪门控——供第二 VFO 静音并行解调使用。
     """
 
+    #: 单帧解调失败（可预期数据异常）：供状态栏/日志如实提示，不静默吞掉
+    demod_failed = Signal(str)
+    #: 静噪基线标定状态（标定中/完成/失败）：失败必须用户可见
+    squelch_state = Signal(str)
+
     def __init__(self, in_stream: PingPongStream,
                  vfo_dsp, player,
                  config: SharedDemodConfig,
@@ -238,15 +242,17 @@ class DemodWorker(QThread):
         self.audio_tap = None
         # 记录本次实际用的解调模式（调试/测试断言）
         self.last_demod_mode: str = "FM"
+        # 解调失败日志限流时间戳（monotonic）
+        self._last_demod_fail_ts = 0.0
         # 有状态 WFM 接收器（WFM 模式下懒创建一次）
         self._wfm_rx = None
-        # 自动静噪：窄带在 48k 信道功率上判，WFM 在原生率全带宽功率上判
-        self._auto_nfm = AutoSquelch(margin_db=8.0, hang_ms=250.0,
-                                     sample_rate=48000.0)
-        self._auto_wfm = AutoSquelch(margin_db=5.0, hang_ms=300.0,
-                                     sample_rate=self._sr)
-        # WFM 连续载波改用解调后噪声静噪（输入为 48k 单声道音频）
-        self._noise_wfm = NoiseSquelch(sample_rate=48000.0)
+        # 静噪：唯一滑杆刻度（-100..-20，默认 -50）= 相对该模式噪声基线的余量。
+        # 基线自动标定（模式/增益/采样率变化时重置），测法见 mbdsdr_ai/squelch.py。
+        self._squelch = BaselineSquelch(squelch_db=self._cfg.squelch_db,
+                                        mode=self._cfg.mode,
+                                        sample_rate=48000.0)
+        self._last_squelch_label = ""
+        self._last_gain_db = float(self._cfg.gain_db)
         # 解调后音频 AGC（gqrx 式三档+关）：每档一个实例，档位各自保留
         # 增益状态，来回切换不跳变；off 直通。
         self._audio_agc: Dict[str, AGC] = {}
@@ -278,11 +284,39 @@ class DemodWorker(QThread):
                              for c in range(audio.shape[1])], axis=1)
         return agc.process(audio)
 
-    def _gate_open(self, auto, power_db: float, n: int) -> bool:
-        """按当前配置返回静噪门是否打开：auto 走 AutoSquelch，否则固定门限。"""
-        if self._cfg.auto_squelch:
-            return bool(auto.update(power_db, n))
-        return power_db >= self._cfg.squelch_db
+    def _squelch_open(self, audio: np.ndarray) -> bool:
+        """静噪门决策的唯一入口：相对噪声基线的余量（不是绝对电平）。
+
+        滑杆值统一由 ``margin_threshold_db`` 归一化为 dB 余量；噪声基线按
+        当前模式自动标定，模式/增益/采样率变化时重测。标定状态变化会发
+        ``squelch_state``（失败可见，不默默套默认值）。
+        """
+        self._squelch.set_threshold(self._cfg.squelch_db)
+        self._squelch.track = bool(self._cfg.auto_squelch)
+        open_g = bool(self._squelch.update(audio, int(audio.shape[0])))
+        label = self._squelch.state_label()
+        if label != self._last_squelch_label:
+            self._last_squelch_label = label
+            log.info("%s", label)
+            self.squelch_state.emit(label)
+        return open_g
+
+    def recalibrate(self) -> None:
+        """重打噪声基线：增益变化 / 采样率变化 / 用户手动重标时调用。"""
+        self._squelch.reset()
+
+    def _report_demod_failure(self, mode: str, exc: BaseException) -> None:
+        """单帧解调失败：限流记录 + 发信号，不静默跳过。
+
+        限流 2 秒：坏块通常成串出现，逐帧刷日志既淹没证据又拖慢线程。
+        """
+        now = time.monotonic()
+        if now - self._last_demod_fail_ts < 2.0:
+            return
+        self._last_demod_fail_ts = now
+        detail = f"{exc.__class__.__name__}: {exc}"
+        log.warning("解调失败（mode=%s）：%s", mode, detail)
+        self.demod_failed.emit(f"解调失败（{mode}）：{detail}")
 
     def set_audio_enabled(self, on: bool) -> None:
         """运行时切换本 VFO 是否把解调结果写声卡（主听/次听切换）。
@@ -324,11 +358,14 @@ class DemodWorker(QThread):
 
             mode = self._cfg.mode
             if mode != self.last_demod_mode:
-                # 切模式：清空噪声底估计，避免旧模式功率污染门限
-                self._auto_nfm.reset()
-                self._auto_wfm.reset()
-                self._noise_wfm.reset()
+                # 切模式：分析带与噪声基线都换，重新标定
+                self._squelch.set_mode(mode)
             self.last_demod_mode = mode
+            # 增益变化：噪声底整体平移，必须重打基线
+            gain_now = float(self._cfg.gain_db)
+            if gain_now != self._last_gain_db:
+                self._last_gain_db = gain_now
+                self.recalibrate()
             if mode in ("RAW", "DIG"):
                 continue
 
@@ -350,19 +387,10 @@ class DemodWorker(QThread):
                     audio = None
                 if audio is None or audio.size == 0:
                     continue
-                # 静噪门控（统一口径：解调后音频 RMS，dBFS）：
-                #  auto → 音频频谱形态判据（连续载波可靠，开机即落在电台上也能开）；
-                #  固定 → 对**解调后音频**算 RMS，与 squelch_db 比较。
-                # 不再用全带宽 IQ 功率：带宽/增益一变，同一个数字就换意思。
+                # 静噪门控（唯一刻度）：相对该模式噪声基线的余量。
+                # WFM 与窄带用同一判定，差别只在分析带/标定（见 squelch.py）。
                 try:
-                    if self._cfg.auto_squelch:
-                        mono = (audio.mean(axis=1) if audio.ndim == 2
-                                else audio)
-                        open_g = bool(self._noise_wfm.process_audio(mono))
-                    else:
-                        dbfs = rms_dbfs(audio)
-                        open_g = self._gate_open(self._auto_wfm, dbfs,
-                                                 int(audio.shape[0]))
+                    open_g = self._squelch_open(audio)
                     # AudioPlayer 内部 5ms ramp 消咔哒
                     player.set_muted(not open_g)
                 except Exception:
@@ -396,17 +424,18 @@ class DemodWorker(QThread):
 
             try:
                 audio = self._demod_48k(_dsp, mode, vfo_out)
-            except Exception:
+            except (ValueError, IndexError, FloatingPointError) as exc:
+                # 单帧数据可预期异常（形状/索引/数值边界）：记录并上报，
+                # 本帧跳过继续收；编程错误（TypeError/AttributeError 等）不在此列，
+                # 必须上抛，否则"频谱有信号、没有声音、没有提示"。
+                self._report_demod_failure(mode, exc)
                 continue
             if audio is None or audio.size == 0:
                 continue
 
-            # 静噪门控：对解调后音频算 RMS dBFS（AM/FM/USB/WFM 同一测量点），
-            # 低于门限则 player.set_muted(True)，信号回来后 set_muted(False)。
+            # 静噪门控（唯一刻度）：相对该模式噪声基线的余量（与 WFM 同口径）。
             try:
-                dbfs = rms_dbfs(audio)
-                open_g = self._gate_open(self._auto_nfm, dbfs,
-                                         int(audio.shape[0]))
+                open_g = self._squelch_open(audio)
                 player.set_muted(not open_g)
             except Exception:
                 pass
@@ -495,6 +524,10 @@ class ReceivePipeline(QObject):
     frame_ready = Signal(object, float)
     #: 读线程连续无数据（≈1s）：上层应查询后端 status 并如实更新 UI
     read_failed = Signal(str)
+    #: 单帧解调失败（限流后上报）：状态栏/日志据此给用户提示，不静默
+    demod_failed = Signal(str)
+    #: 静噪基线标定状态（标定中/完成/失败）：失败必须可见
+    squelch_state = Signal(str)
 
     def __init__(self, read_fn: Callable[[int], Optional[np.ndarray]],
                  sr: float,
@@ -535,6 +568,10 @@ class ReceivePipeline(QObject):
         self._demod2 = (DemodWorker(self._vfo2_stream, vfo2_dsp, player,
                                     config, self._sr, audio_enabled=False)
                         if vfo2_dsp is not None else None)
+        # 解调失败 / 静噪标定失败：如实转发布线（UI 侧可选择接状态栏）
+        for w in (x for x in (self._demod1, self._demod2) if x is not None):
+            w.demod_failed.connect(self.demod_failed)
+            w.squelch_state.connect(self.squelch_state)
         self._record = RecordTap(self._record_stream, on_record_iq)
 
         self._started = False
