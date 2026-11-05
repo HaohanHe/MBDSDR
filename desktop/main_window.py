@@ -8001,6 +8001,21 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """关闭时断开连接并保存配置。"""
+        # 录音中关窗必须先确认：不告知保存路径就停录、关窗，用户会以为录音丢了。
+        if getattr(self, "_recording", False):
+            if not self._confirm_stop_recording_for_close():
+                event.ignore()
+                return
+            try:
+                self._apply_recording(False)
+            except Exception as exc:
+                QMessageBox.warning(
+                    self, "录音保存失败",
+                    f"停止录音时出错：{exc}。"
+                    "可能原因：磁盘已满、录音目录无写权限或文件被占用。"
+                    "下一步：先不要关闭窗口，检查磁盘与目录后点「停止录音」重试。")
+                event.ignore()
+                return
         # 先停掉远程控制 / Web 服务（daemon 线程，避免端口残留）
         try:
             sp = getattr(self, "service_settings_panel", None)
@@ -8035,6 +8050,22 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         event.accept()
+
+    def _confirm_stop_recording_for_close(self) -> bool:
+        """录音中关窗确认；返回 True 表示用户选择保存并退出。"""
+        path = getattr(self, "_record_file_path", "") or "（文件名尚未生成）"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("正在录音")
+        box.setText(
+            "正在录音。关闭窗口会停止录音并保存到：\n"
+            f"{path}\n\n要停止并保存后退出吗？")
+        box.setStandardButtons(QMessageBox.Save | QMessageBox.Cancel)
+        box.button(QMessageBox.Save).setText("保存录音并退出")
+        box.button(QMessageBox.Cancel).setText("取消（继续录音）")
+        box.setDefaultButton(QMessageBox.Cancel)
+        return (QMessageBox.StandardButton(box.exec())
+                == QMessageBox.StandardButton.Save)
 
     def _read_ntrip_from_disk(self) -> Optional[dict]:
         """读取 gui_config.json 里的 ntrip 段（不存在/损坏返回 None）。
