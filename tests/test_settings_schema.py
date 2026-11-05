@@ -304,6 +304,27 @@ def test_sample_rate_default_is_single_source_and_combo_matches(qapp):
         SCHEMA["sample_rate_hz"].default
 
 
+def test_fft_size_exposes_only_kernel_supported_tiers():
+    """档位与 C++/AI 工具对齐：只允许 1024/2048/4096。"""
+    assert SCHEMA["fft_size"].choice_values == (1024, 2048, 4096)
+    assert "不支持" in SCHEMA["fft_size"].help
+    for bad in (8192, 16384):
+        value, reason = validate_value(SCHEMA["fft_size"], bad)
+        assert value == 2048 and reason, f"{bad} 必须回落 2048 并给原因"
+
+
+def test_old_fft_size_falls_back_with_recorded_reason(tmp_path):
+    """旧配置存了非法档位：启动回落 2048，并留下可读原因（不静默）。"""
+    path = tmp_path / "desktop_settings.json"
+    path.write_text(json.dumps({"fft_size": 8192, "theme": "dark"}),
+                    encoding="utf-8")
+    ds = DesktopSettings.load(path=str(path))
+    assert ds.get("fft_size") == SCHEMA["fft_size"].default == 2048
+    assert ds.get("theme") == "dark"          # 其他用户值不受影响
+    assert ds.migration_notes, "非法档位回落必须记录原因"
+    assert any("fft_size" in n and "回默认" in n for n in ds.migration_notes)
+
+
 def test_schema_keys_unique_and_sourced():
     keys = [it.key for it in config_schema.ALL_ITEMS]
     assert len(keys) == len(set(keys))

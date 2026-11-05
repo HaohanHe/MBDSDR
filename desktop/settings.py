@@ -178,18 +178,21 @@ def effective_pass_visibility_gate_deg(settings: Any = None) -> float:
     return gate
 
 
-def _coerce(key: str, value: Any) -> Any:
+def _coerce(key: str, value: Any, notes: Optional[list] = None) -> Any:
     """按 schema 把读回的 JSON 值归一；越界夹范围、坏值回默认。
 
     ``validate_value`` 本身是纯函数且已全类型兜底（永不抛），这里不再套
     catch-all——配置层最忌"静默吞编程错误"，多一层兜底只会掩盖 schema 缺陷。
 
     未知键保持旧行为（原样返回），避免把调用方的临时值意外转成字符串。
+    传入 ``notes`` 时把回落原因记进去（旧配置里的非法档位不许静默消失）。
     """
     item = SCHEMA.get(key)
     if item is None:
         return value
-    norm, _reason = validate_value(item, value)
+    norm, reason = validate_value(item, value)
+    if reason and notes is not None:
+        notes.append(f"{key}: {reason}")
     return norm
 
 
@@ -235,6 +238,8 @@ class DesktopSettings:
         self.on_error: Optional[Any] = None
         #: 上次文件里**真实出现**的键（用于一次性迁移提示：缺键 ≠ 用户选择了默认值）
         self._file_keys: set = set()
+        #: 启动读回时因越界/非法档位而回落的字段及原因（不静默丢改动）
+        self.migration_notes: Optional[list] = None
         # 防抖写盘定时器：singleShot 语义，每次 set() 都重启，连续改动只写最后一次。
         # 挂在主线程（QTimer 必须在创建它的线程里 start），与 set() 同源，无需加锁。
         self._timer = QTimer(parent)
@@ -257,9 +262,10 @@ class DesktopSettings:
                 if not isinstance(raw, dict):
                     raise ValueError("顶层不是 JSON 对象")
                 inst._file_keys = set(raw)
+                inst.migration_notes = []
                 for k, v in raw.items():
                     if k in DEFAULTS:
-                        inst._data[k] = _coerce(k, v)
+                        inst._data[k] = _coerce(k, v, inst.migration_notes)
                 # 音量量纲一次性迁移（0–63 硬件量纲 → 0–100 人类量纲）：
                 # 旧文件有 volume 但没有 volume_scale_v2 标记。判据是
                 # 「原始文件里的键」，不靠数值猜量纲——48 在两套量纲下

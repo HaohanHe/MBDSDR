@@ -175,10 +175,13 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     SettingItem(
         key="fft_size", group="频谱与解码", kind="enum",
         label="频谱分辨率（FFT 点数）", default=2048,
-        help="点数越大，频率分得越细但刷新越慢；2048 是速度与细节的平衡点。",
-        source="desktop/spectrum_widget.py:151 默认 2048；档位同 SDR++ main_window.cpp:34",
+        help=("点数越大，频率分得越细但刷新越慢；2048 是速度与细节的平衡点。"
+              "更大的点数（8192/16384）当前内核不支持：C++ 侧与 AI 工具只认 "
+              "1024/2048/4096，越界会被回退 2048（分辨率骤降 4×/8×），"
+              "因此这里只暴露三档。"),
+        source="desktop/spectrum_widget.py:151 默认 2048；档位与 C++ settings_dialog 对齐",
         choices=(_e(1024, "1024（快）"), _e(2048, "2048（均衡）"),
-                 _e(4096, "4096"), _e(8192, "8192"), _e(16384, "16384（最细）")),
+                 _e(4096, "4096")),
     ),
     SettingItem(
         key="fft_window", group="频谱与解码", kind="enum",
