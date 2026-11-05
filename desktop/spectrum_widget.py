@@ -1746,7 +1746,8 @@ def _peak_annotations(state):
     if not state.show_peaks or not gen.has_data():
         return []
     return [(freq_hz, db, snr,
-             f"{freq_hz/1e6:.3f}MHz {db:.1f}dB SNR {snr:.1f}dB")
+             f"{freq_hz/1e6:.3f}MHz {db:.1f}{_DBFS_UNIT} "
+             f"SNR({_REL_BASE}) {snr:.1f}dB")
             for freq_hz, db, snr in gen.find_peaks_with_snr(state.peak_rel_db)]
 
 
@@ -1779,6 +1780,30 @@ def _draw_peaks(painter, state, rect, color):
         painter.drawText(QPointF(tx, ty), label)
 
 
+#: 绝对电平的统一单位：悬停、峰值提示、纵轴共用同一个口径（U-05）。
+_DBFS_UNIT = "dBFS"
+#: 相对量的统一基准写法：门限/SNR/余量都必须注明「相对什么」。
+_REL_BASE = "相对本帧中位"
+
+
+def _fmt_abs_db(db: float) -> str:
+    """绝对电平（dBFS）唯一格式化出口。"""
+    return f"{db:.1f} {_DBFS_UNIT}"
+
+
+def _fmt_axis_tick(db: float) -> str:
+    """纵轴刻度带单位，避免读者把 dBFS 当成任意 dB。"""
+    return f"{db:.0f} {_DBFS_UNIT}"
+
+
+def _fmt_peak_text(freq_hz: float, power_db: float, snr_db: float,
+                   verb: str = "峰值") -> str:
+    """峰值提示唯一出口：绝对量标 dBFS，SNR 标「相对本帧中位」。"""
+    return (f"{verb} {freq_hz / 1e6:.4f} MHz"
+            f"（{power_db:.1f} {_DBFS_UNIT} · "
+            f"SNR（{_REL_BASE}）{snr_db:.1f} dB）")
+
+
 def _draw_hover_readout(painter, state, rect, text_color, line_color):
     if state.mouse_x_ratio is None or not state.mouse_in_spectrum:
         return
@@ -1795,7 +1820,7 @@ def _draw_hover_readout(painter, state, rect, text_color, line_color):
     f = QFont()
     f.setPointSize(9)
     painter.setFont(f)
-    db_txt = f"{val:.1f} dBFS" if val is not None else "--"
+    db_txt = _fmt_abs_db(val) if val is not None else "--"
     painter.drawText(QPointF(rect.x() + 6, rect.y() + 14),
                      f"{freq_hz/1e6:.4f} MHz   {db_txt}")
 
@@ -1813,7 +1838,7 @@ def _draw_fixed_markers(painter, state, rect, color):
         painter.drawLine(QPointF(x, rect.y()),
                          QPointF(x, rect.y() + rect.height()))
         painter.setFont(f)
-        db_txt = f"{val:.1f}dB" if val is not None else "--"
+        db_txt = f"{val:.1f}{_DBFS_UNIT}" if val is not None else "--"
         painter.drawText(QPointF(x + 4, rect.y() + 26),
                          f"{freq_hz/1e6:.3f}MHz {db_txt}")
 
@@ -2024,13 +2049,13 @@ def _draw_db_scale(painter, rect, state, text_color):
         # 4%…96% 内缩：与旧实现同几何，顶部/底部刻度不被边界裁半。
         y = rect.y() + rect.height() * (
             0.04 + 0.92 * (state.db_max - db) / max(1e-9, span_db))
-        painter.drawText(QPointF(rect.x() + 4, y + 4), f"{db:.0f}")
+        painter.drawText(QPointF(rect.x() + 4, y + 4), _fmt_axis_tick(db))
     # 拖动时读数跟手：把当前量程直接画在轴区右上，位置不随值移动，
     # 内容随每一帧重算（几何断言 + 离屏截图可验，不靠肉眼）。
     if getattr(state, "db_drag_active", False):
         span_now = state.db_max - state.db_min
-        txt = (f"{state.db_min:.0f} … {state.db_max:.0f} dB"
-               f" · 跨度 {span_now:.0f} dB")
+        txt = (f"{state.db_min:.0f} … {state.db_max:.0f} {_DBFS_UNIT}"
+               f" · 跨度 {span_now:.0f} dB（相对）")
         tw = fm.horizontalAdvance(txt)
         tx = max(rect.x() + 4, rect.x() + rect.width() - tw - 4)
         painter.drawText(QPointF(tx, rect.y() + 16), txt)
@@ -2223,11 +2248,22 @@ class SpectrumPanel(QWidget):
                         self._redraw()))
         bar.addWidget(self._bandplan_chk)
 
-        bar.addWidget(QLabel("阈值dB:"))
+        gate_label = QLabel("峰值门(相对本帧中位):")
+        gate_label.setObjectName("peakGateLabel")
+        gate_tip = (
+            "门限 = 本帧全部有限 bin 的中位数 + 该值（不是 dBFS 绝对电平）。\n"
+            "示例：中位数 −72 dBFS → 门限 −66 dBFS（+6.0 dB）。")
+        gate_label.setToolTip(gate_tip)
+        bar.addWidget(gate_label)
         self._peak_spin = QDoubleSpinBox()
+        self._peak_spin.setObjectName("peakGateSpin")
         self._peak_spin.setRange(1.0, 30.0)
         self._peak_spin.setValue(self._state.peak_rel_db)
         self._peak_spin.setSingleStep(1.0)
+        self._peak_spin.setDecimals(1)   # U-04 文案口径：+6.0 dB（一位小数）
+        self._peak_spin.setPrefix("+")
+        self._peak_spin.setSuffix(" dB")
+        self._peak_spin.setToolTip(gate_tip)
         self._peak_spin.valueChanged.connect(
             lambda v: setattr(self._state, "peak_rel_db", float(v)))
         bar.addWidget(self._peak_spin)
@@ -3193,8 +3229,8 @@ class _TuningPlotMixin:
                 if peak is not None and hovering:
                     QToolTip.showText(
                         QCursor.pos(),
-                        f"跳到 {peak[0] / 1e6:.4f} MHz"
-                        f"（{peak[1]:.1f} dB · SNR {peak[2]:.1f} dB）",
+                        _fmt_peak_text(peak[0], peak[1], peak[2],
+                                       verb="跳到"),
                         self)
                 else:
                     QToolTip.hideText()
@@ -3409,8 +3445,7 @@ class _TuningPlotMixin:
                         # 点中峰：落点取测量值，1 Hz 直下发（不吸附）
                         self._tune_peak(peak[0])
                         self._show_tune_tip(
-                            f"峰值 {peak[0] / 1e6:.4f} MHz"
-                            f"（{peak[1]:.1f} dB · SNR {peak[2]:.1f} dB）")
+                            _fmt_peak_text(peak[0], peak[1], peak[2]))
                     else:
                         # 空白/刻度轴仍走顺手调谐（带 snap）
                         self._tune_click(self._x_ratio(event))
@@ -3452,8 +3487,7 @@ class _TuningPlotMixin:
         if peak is not None:
             self._tune_peak(peak[0])
             self._show_tune_tip(
-                f"峰值 {peak[0] / 1e6:.4f} MHz"
-                f"（{peak[1]:.1f} dB · SNR {peak[2]:.1f} dB）")
+                _fmt_peak_text(peak[0], peak[1], peak[2]))
         else:
             self._tune_click(self._x_ratio(event))
         self.update()
