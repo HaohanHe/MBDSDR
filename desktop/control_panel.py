@@ -147,6 +147,18 @@ _PANEL_MODE_ORDER = ["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"]
 # _set_freq_hz 对越界输入做钳位并在 freq_input tooltip 里事先声明钳位行为。
 
 
+def _format_frequency_hz(hz: float) -> str:
+    """频率的人读口径（提示文案用）：按量级选 GHz/MHz/kHz/Hz，``:g`` 去尾零。"""
+    v = float(hz)
+    if abs(v) >= 1e9:
+        return f"{v / 1e9:g} GHz"
+    if abs(v) >= 1e6:
+        return f"{v / 1e6:g} MHz"
+    if abs(v) >= 1e3:
+        return f"{v / 1e3:g} kHz"
+    return f"{v:g} Hz"
+
+
 class ControlPanel(QWidget):
     """调谐控制面板。"""
 
@@ -343,6 +355,8 @@ class ControlPanel(QWidget):
             "实际范围以设备为准）")
         self.freq_input.setMinimumHeight(28)
         self.freq_input.returnPressed.connect(self._on_freq_input)
+        # 恢复 setter 在这里追加/还原"配置请求被替换"的运行期提示，保留原静态说明
+        self._freq_input_base_tip = self.freq_input.toolTip()
         mode_freq_row.addWidget(self.freq_input)
 
         self.tune_button = QPushButton("调谐")
@@ -500,6 +514,7 @@ class ControlPanel(QWidget):
         self.vfo_bw_combo.setToolTip(
             "解调带宽（中频滤波宽度），随模式自动套默认。"
             "注意与模块面板的「硬件带宽」（设备射频带宽）不同")
+        self._vfo_bw_base_tip = self.vfo_bw_combo.toolTip()
         # 档位与 MODE_VFO_BANDWIDTH 对齐：2.4 kHz(SSB) / 12.5 kHz(NBFM) 必须在列，
         # 避免切到 USB/LSB/NFM 时 findData 落空、回退到错误带宽。
         for txt, hz in [("500Hz (CW)", 500.0), ("2.4kHz (SSB)", 2_400.0),
@@ -528,6 +543,8 @@ class ControlPanel(QWidget):
         self.gain_slider.setToolTip(
             "LNA 增益（dB）。未连接时按 RTL-SDR 典型 0–49 显示；"
             "连接后随所连设备能力动态收放，实际档位以设备为准（后端钳位）")
+        # 恢复/收放时追加"配置请求被替换"的运行期提示，保留原静态说明
+        self._gain_base_tip = self.gain_slider.toolTip()
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
         gain_row.addWidget(self.gain_slider)
         self.gain_val = QLabel("0 dB")
@@ -714,6 +731,8 @@ class ControlPanel(QWidget):
             return
         freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, freq_hz))
         self._freq_hz = freq_hz
+        # 用户手动调谐即采纳新频率，清掉恢复期"配置请求被钳位"的提示
+        self.freq_input.setToolTip(self._freq_input_base_tip)
         self._update_freq_display()
         self._emit_tune(freq_hz)
 
@@ -875,6 +894,8 @@ class ControlPanel(QWidget):
 
     def _on_gain_changed(self, db: int):
         self.gain_val.setText(f"{db} dB")
+        # 用户手动调增益即采纳当前值，清掉恢复/收放期"配置请求被替换"提示
+        self.gain_slider.setToolTip(self._gain_base_tip)
         self.gain_changed.emit(db)
 
     @Slot(int)
@@ -889,6 +910,8 @@ class ControlPanel(QWidget):
         """VFO 带宽档位切换 → emit vfo_bandwidth_changed(bw_hz)。"""
         bw = float(self.vfo_bw_combo.itemData(index) or 0.0)
         if bw > 0:
+            # 用户手动选档即采纳当前档位，清掉恢复期"配置被替换"提示
+            self.vfo_bw_combo.setToolTip(self._vfo_bw_base_tip)
             self.vfo_bandwidth_changed.emit(bw)
 
     def _on_squelch_changed(self, dbfs: int):
@@ -1170,12 +1193,25 @@ class ControlPanel(QWidget):
             return
         if hi <= lo:
             return
+        requested = self.gain_slider.value()
+        # setRange 会把超界值一并夹到新上限并触发 valueChanged；这里必须
+        # 屏蔽信号，否则 _on_gain_changed 会把"设备能力夹出来的值"写回配置，
+        # 用户原值（配置意图）被静默改写。
+        self.gain_slider.blockSignals(True)
         self.gain_slider.setRange(lo, hi)
-        if self.gain_slider.value() > hi:
-            self.gain_slider.setValue(hi)
-        self.gain_slider.setToolTip(
-            f"LNA 增益 {lo}–{hi} dB（按所连设备能力动态收放；"
-            "实际档位以设备为准，后端钳位）")
+        applied = self.gain_slider.value()
+        self.gain_slider.blockSignals(False)
+        base = (f"LNA 增益 {lo}–{hi} dB（按所连设备能力动态收放；"
+                "实际档位以设备为准，后端钳位）")
+        # 静态说明随设备能力更新；用户后续手动调增益时还原的就是这一版
+        self._gain_base_tip = base
+        self.gain_slider.setToolTip(base)
+        if applied != requested:
+            self.gain_val.setText(f"{applied} dB")
+            hint = (f"当前增益 {requested} dB 超出所连设备能力 [{lo}, {hi}] dB，"
+                    f"已按 {applied} dB 显示（配置文件未改）")
+            logger.warning("%s", hint)
+            self.gain_slider.setToolTip(f"{base}\n⚠ {hint}")
 
     # ========================================================================
     # 启动恢复用 setter（持久化参数回填）
@@ -1197,8 +1233,21 @@ class ControlPanel(QWidget):
         freq_hz = float(freq_hz)
         if not math.isfinite(freq_hz):
             return
+        requested = freq_hz
         freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, freq_hz))
         self._freq_hz = freq_hz
+        if freq_hz != requested:
+            # 恢复值被全局边界钳位：显示按边界，但必须让用户看见"请求没照做"；
+            # 配置文件原值不回写（用户意图保留）。
+            side = "低于" if requested < FREQ_MIN_HZ else "高于"
+            hint = (f"配置请求 {_format_frequency_hz(requested)} {side}全局调谐范围 "
+                    f"[{_format_frequency_hz(FREQ_MIN_HZ)}, "
+                    f"{_format_frequency_hz(FREQ_MAX_HZ)}]，已按边界 "
+                    f"{_format_frequency_hz(freq_hz)} 显示（配置文件未改）")
+            logger.warning("%s", hint)
+            self.freq_input.setToolTip(f"{self._freq_input_base_tip}\n⚠ {hint}")
+        else:
+            self.freq_input.setToolTip(self._freq_input_base_tip)
         if self._sdr_connected:
             self._update_freq_display()
 
@@ -1222,6 +1271,8 @@ class ControlPanel(QWidget):
         if idx >= 0:
             self.vfo_bw_combo.setCurrentIndex(idx)
         self.vfo_bw_combo.blockSignals(False)
+        # 模式切换会改写带宽档位：旧的"配置请求被替换"提示已不成立
+        self.vfo_bw_combo.setToolTip(self._vfo_bw_base_tip)
 
     def set_gain(self, db: float):
         """从外部恢复 LNA 增益 (dB)，不发射 gain_changed。
@@ -1233,11 +1284,19 @@ class ControlPanel(QWidget):
         db = float(db)
         if not math.isfinite(db):
             return
+        requested = db          # 保留请求原值（浮点），提示里如实显示
         db = int(max(0, min(49, db)))
         self.gain_slider.blockSignals(True)
         self.gain_slider.setValue(db)
         self.gain_slider.blockSignals(False)
         self.gain_val.setText(f"{db} dB")
+        if abs(requested - db) > 1e-9:
+            hint = (f"配置请求 {requested:g} dB 超出未连接时的显示范围 [0, 49] dB，"
+                    f"已按 {db} dB 显示（配置文件未改）")
+            logger.warning("%s", hint)
+            self.gain_slider.setToolTip(f"{self._gain_base_tip}\n⚠ {hint}")
+        else:
+            self.gain_slider.setToolTip(self._gain_base_tip)
 
     @staticmethod
     def _default_sample_rate_options() -> list[float]:
@@ -1374,19 +1433,38 @@ class ControlPanel(QWidget):
         return applied
 
     def set_vfo_bandwidth(self, bw_hz: float):
-        """从外部恢复 VFO 带宽；无精确匹配选最近档，不发射 vfo_bandwidth_changed。"""
+        """从外部恢复 VFO 带宽；无精确匹配选最近档，不发射 vfo_bandwidth_changed。
+
+        替换必须可见：配置请求不在当前可见档位时，按最近档显示并在下拉
+        tooltip 追加原因 + logger.warning；精确命中则还原静态说明。
+        配置文件原值不回写（用户意图保留）。
+        """
         bw = float(bw_hz)
-        idx = self.vfo_bw_combo.findData(bw)
-        if idx < 0 and self.vfo_bw_combo.count():
+        if not math.isfinite(bw):
+            return          # 无值不是"最接近的档"：保持控件原值，不伪造 500 Hz
+        combo = self.vfo_bw_combo
+        idx = combo.findData(bw)
+        applied = bw
+        if idx < 0 and combo.count():
             best, best_diff = 3, None
-            for i in range(self.vfo_bw_combo.count()):
-                d = abs(float(self.vfo_bw_combo.itemData(i)) - bw)
+            for i in range(combo.count()):
+                d = abs(float(combo.itemData(i)) - bw)
                 if best_diff is None or d < best_diff:
                     best_diff, best = d, i
             idx = best
-        self.vfo_bw_combo.blockSignals(True)
-        self.vfo_bw_combo.setCurrentIndex(idx)
-        self.vfo_bw_combo.blockSignals(False)
+            applied = float(combo.itemData(idx))
+        combo.blockSignals(True)
+        combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        if idx < 0:
+            return
+        if abs(applied - bw) > 1e-9:
+            hint = (f"配置请求 {bw:g} Hz 解调带宽不在当前可见档位，"
+                    f"已按最近档 {applied:g} Hz 显示（配置文件未改）")
+            logger.warning("%s", hint)
+            combo.setToolTip(f"{self._vfo_bw_base_tip}\n⚠ {hint}")
+        else:
+            combo.setToolTip(self._vfo_bw_base_tip)
 
     def set_agc(self, enabled: bool):
         """从外部恢复 AGC 开关，不发射 agc_changed。"""

@@ -14,10 +14,13 @@
   3. 锁超时那次 flush 跳过写入：脏标记是否保留、下一次 flush 是否
      真的写进去——用人为超时验证"重试成功"。
 """
+import inspect
 import json
 import os
 import sys
+import types
 from contextlib import contextmanager
+from textwrap import dedent
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -29,6 +32,8 @@ import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import settings as settings_module  # noqa: E402
+import control_panel as control_panel_module  # noqa: E402
+from constants import FREQ_MAX_HZ  # noqa: E402
 from control_panel import ControlPanel  # noqa: E402
 from settings import DesktopSettings  # noqa: E402
 
@@ -92,6 +97,189 @@ def test_exact_upper_bound_of_network_iq_is_not_flagged(qapp):
         assert panel.sr_label.text() == "采样率"
         assert panel.sr_label.toolTip() == ""
         assert panel.sample_rate_combo.toolTip() == ""
+    finally:
+        panel.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# 1b. 其它数值型恢复项：被替换/被钳位同样必须可见
+# ---------------------------------------------------------------------------
+def _mutated_panel_method(name: str, *replacements: tuple[str, str]):
+    """从 ControlPanel 源码取方法并做字面量变异，返回未绑定的函数副本。
+
+    反证用：不改生产文件，只在内存里跑一份去掉守卫的副本，证明守卫"有牙"。
+    """
+    src = dedent(inspect.getsource(getattr(ControlPanel, name)))
+    for needle, repl in replacements:
+        assert src.count(needle) == 1, f"守卫写法已变，先更新这条反证: {needle!r}"
+        src = src.replace(needle, repl)
+    namespace: dict = {}
+    exec(compile(src, f"<mutated {name}>", "exec"),
+         vars(control_panel_module), namespace)  # noqa: S102
+    return namespace[name]
+
+
+def test_out_of_global_range_frequency_is_flagged(qapp, caplog):
+    panel = ControlPanel()
+    try:
+        with caplog.at_level("WARNING"):
+            panel.set_frequency_hz(1e12)
+
+        assert panel.get_frequency_hz() == FREQ_MAX_HZ, "全局边界钳位行为保持不变"
+        tip = panel.freq_input.toolTip()
+        assert "⚠" in tip, "恢复值被钳位却没有任何可见提示"
+        assert "1000 GHz" in tip, tip
+        assert "6 GHz" in tip, tip
+        assert "配置文件未改" in tip, tip
+        assert any("全局调谐范围" in r.getMessage() for r in caplog.records)
+
+        # 合法值必须还原静态说明，不能留下永久 ⚠
+        panel.set_frequency_hz(98e6)
+        assert "⚠" not in panel.freq_input.toolTip()
+        assert panel.get_frequency_hz() == 98e6
+    finally:
+        panel.deleteLater()
+
+
+def test_out_of_visible_gear_bandwidth_is_flagged(qapp, caplog):
+    panel = ControlPanel()
+    try:
+        with caplog.at_level("WARNING"):
+            panel.set_vfo_bandwidth(100_000)
+
+        assert panel.vfo_bw_combo.currentData() == 180_000.0, "应落到最近可见档"
+        tip = panel.vfo_bw_combo.toolTip()
+        assert "⚠" in tip, "带宽被静默换成最近档"
+        assert "100000 Hz" in tip and "180000 Hz" in tip, tip
+        assert "配置文件未改" in tip, tip
+        assert any("不在当前可见档位" in r.getMessage() for r in caplog.records)
+
+        # 精确命中档位：还原静态说明
+        panel.set_vfo_bandwidth(12_500)
+        assert "⚠" not in panel.vfo_bw_combo.toolTip()
+
+        # 用户手动选档 = 采纳当前值，提示必须消失
+        panel.set_vfo_bandwidth(100_000)
+        assert "⚠" in panel.vfo_bw_combo.toolTip()
+        idx = panel.vfo_bw_combo.findData(12_500.0)
+        panel.vfo_bw_combo.setCurrentIndex(idx)     # 触发 _on_vfo_bw_changed
+        assert "⚠" not in panel.vfo_bw_combo.toolTip()
+
+        # NaN = 没有带宽值：保持当前档与提示，绝不按"最近档"伪造成 500 Hz
+        panel.set_vfo_bandwidth(100_000)
+        assert "⚠" in panel.vfo_bw_combo.toolTip()
+        before = panel.vfo_bw_combo.currentData()
+        panel.set_vfo_bandwidth(float("nan"))
+        assert panel.vfo_bw_combo.currentData() == before
+        assert "⚠" in panel.vfo_bw_combo.toolTip(), "NaN 不应改写既有提示"
+    finally:
+        panel.deleteLater()
+
+
+def test_out_of_rtl_gain_range_restore_is_flagged(qapp, caplog):
+    panel = ControlPanel()
+    try:
+        with caplog.at_level("WARNING"):
+            panel.set_gain(80.0)
+
+        assert panel.gain_slider.value() == 49, "未连接时仍按 RTL 典型上限显示"
+        assert panel.gain_val.text() == "49 dB"
+        tip = panel.gain_slider.toolTip()
+        assert "⚠" in tip, "配置请求 80 dB 被夹到 49 dB 却没有任何可见提示"
+        assert "80 dB" in tip and "49 dB" in tip, tip
+        assert "配置文件未改" in tip, tip
+
+        panel.set_gain(20.0)
+        assert "⚠" not in panel.gain_slider.toolTip()
+
+        # 用户手动拖滑杆 = 采纳当前值，提示必须消失
+        panel.set_gain(80.0)
+        assert "⚠" in panel.gain_slider.toolTip()
+        panel.gain_slider.setValue(30)              # 触发 _on_gain_changed
+        assert "⚠" not in panel.gain_slider.toolTip()
+    finally:
+        panel.deleteLater()
+
+
+def test_capability_gain_clamp_does_not_write_back_and_is_flagged(qapp, caplog):
+    """连接后按设备能力收放滑杆：夹出来的值不许经信号回写配置。"""
+    panel = ControlPanel()
+    try:
+        emitted = []
+        panel.gain_changed.connect(emitted.append)
+        panel.set_gain(45.0)
+        assert panel.gain_slider.value() == 45
+
+        with caplog.at_level("WARNING"):
+            panel.set_gain_range(0.0, 30.0)
+
+        assert panel.gain_slider.value() == 30, "滑杆按设备上限收放"
+        assert panel.gain_val.text() == "30 dB"
+        assert emitted == [], "夹出来的值不许发 gain_changed（否则会回写配置）"
+        tip = panel.gain_slider.toolTip()
+        assert "⚠" in tip and "超出所连设备能力" in tip, tip
+        assert "配置文件未改" in tip, tip
+        assert any("超出所连设备能力" in r.getMessage() for r in caplog.records)
+    finally:
+        panel.deleteLater()
+
+
+def test_removing_substitution_guards_makes_the_cases_red(qapp):
+    """反证：去掉"值被替换"的判定分支后，同一输入不再产生任何提示。
+
+    变异只发生在内存里的函数副本；正向用例里对 ⚠ / 文案的断言会因此变红，
+    证明这些断言确实钉住了守卫而不是碰巧通过。
+    """
+    panel = ControlPanel()
+    try:
+        freq = types.MethodType(
+            _mutated_panel_method(
+                "set_frequency_hz", ("if freq_hz != requested:", "if False:")),
+            panel)
+        bw = types.MethodType(
+            _mutated_panel_method(
+                "set_vfo_bandwidth", ("if abs(applied - bw) > 1e-9:", "if False:")),
+            panel)
+        gain = types.MethodType(
+            _mutated_panel_method(
+                "set_gain", ("if abs(requested - db) > 1e-9:", "if False:")),
+            panel)
+        gain_range = types.MethodType(
+            _mutated_panel_method(
+                "set_gain_range", ("if applied != requested:", "if False:")),
+            panel)
+
+        # 先落到合法值，再分别跑变异副本，确保最后留在控件上的是变异结果
+        panel.set_gain(45.0)
+        freq(1e12)
+        bw(100_000)
+        gain(80.0)
+        gain_range(0.0, 30.0)
+
+        assert "⚠" not in panel.freq_input.toolTip(), "变异后仍提示 = 反证失效"
+        assert "⚠" not in panel.vfo_bw_combo.toolTip(), "变异后仍提示 = 反证失效"
+        assert "⚠" not in panel.gain_slider.toolTip(), "变异后仍提示 = 反证失效"
+    finally:
+        panel.deleteLater()
+
+
+def test_removing_gain_range_signal_block_writes_back(qapp):
+    """反证：去掉 setRange 前后的 blockSignals，设备夹值会经信号回写配置。"""
+    panel = ControlPanel()
+    try:
+        emitted = []
+        panel.gain_changed.connect(emitted.append)
+        panel.set_gain(45.0)
+        mutated = types.MethodType(
+            _mutated_panel_method(
+                "set_gain_range",
+                ("self.gain_slider.blockSignals(True)", "pass"),
+                ("self.gain_slider.blockSignals(False)", "pass")),
+            panel)
+        mutated(0.0, 30.0)
+
+        assert emitted == [30], \
+            "去掉信号屏蔽后夹值应外发（对应正向用例的 emitted==[] 断言会因此变红）"
     finally:
         panel.deleteLater()
 
