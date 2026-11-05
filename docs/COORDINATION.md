@@ -178,8 +178,12 @@
   `gps_ca.ca_code`，官方 PDF 脚本提取 + gps-sdr-sim 比特级对拍 + octal 37/37
   + Gold 指纹，金样 `tests/golden/gps_ca_prn_vectors.json`；材料
   GPScacodes.py 裁决更正（标准码的反极性版本，原"非标准"判词有误）；
-  ④健壮性与长跑＝**已备好待启动**：`scripts/soak_truth_battery.py`
-  （真值电池 15 文件 174 测试/轮，单轮试跑全绿，JSONL 落 output/soak/）。
+  ④健壮性与长跑＝**已收口（2026-11-06 06:10 督办登记）**：
+  `scripts/soak_truth_battery.py --rounds 20`（真值电池 15 文件 174 测试/轮）
+  于 11-06 02:09:33–03:50:07 跑满 **20/20 轮全绿**（逐轮 rc=0、
+  174 passed，末轮 03:50），JSONL 证据 `output/soak/soak_20261106_020933.jsonl`
+  末行 `"done", rounds_run=20, failures=0`。
+  **至此无人值守流水线四段全部收尾，无待派发阶段。**
 - **第四段启动前提（派单）**：工作区无他人在途编辑真值线文件时，
   `python scripts/soak_truth_battery.py --rounds 20` 起长跑去；长跑期间
   勿动 tests/golden/** 与 mbdsdr_ai/{gps_ca,lrpt_*,dvbs2_*}——当前天空/
