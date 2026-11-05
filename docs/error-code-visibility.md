@@ -311,3 +311,10 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 - **判定翻转：0 行；新增条目：0；修正依据/理由：36 行**。
 - `mapping_gaps() == []`，`mapping_overlaps() == []`。
+
+## 六、待归属（本轮只查不改，归属待确认）
+
+| # | 位置 | 现状 | 建议 | 影响 |
+| --- | --- | --- | --- | --- |
+| 1 | `desktop/mcp_worker.py:229`、`:288-293` | 注释写「软件工具不二次转发（skipped）」，但 AI 侧软件工具**从不进 mcp_worker**（AI 工具在进程内 `ToolRegistry.execute`，结果直接回写模型上下文），这条链只承载 UI 直操命令 | 措辞改为「非硬件名命令不二次转发」 | 仅注释误导，无功能影响 |
+| 2 | `desktop/mcp_worker.py:296-300` → `desktop/ai_panel.py:614-615` | UI 直操发出 `sdr_set_gain` 时，若固件 `tools/list` 未报该名且别名表未收录（现状未收录），返回 `skipped` 且步骤卡被直接丢弃，用户零反馈 | 归属 MCP/worker 线确认：补别名，或对 skipped 给一条状态栏提示 | 「用户看不到」而非「AI 看不到」，非 AI 链路缺陷 |
