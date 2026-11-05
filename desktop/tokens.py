@@ -316,6 +316,9 @@ class DesignTokens:
             "splitter_handle": 4,     # QSplitter handle 厚度
             "collapse_strip":  36,    # 副窗折叠窄条宽度
             "min_dock_w":      300,   # 停靠面板最小宽
+            # 星象仪形态浮层窄条：外边距 6×2 + 按钮 sizeHint 136 + 边框 2，
+            # 再留 2px 余量；用 collapse_strip(36) 会把「退出星象仪」裁掉。
+            "planetarium_strip_w": 152,
         }
 
         # ---- 比例约束（流体布局：用 stretch/min-max，不写死像素）----

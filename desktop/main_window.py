@@ -1899,9 +1899,9 @@ class MainWindow(QMainWindow):
         # 永久吃掉 96px 天空宽度（764→668，面积 -12.6%），浮层只遮右上角一隅。
         strip = QFrame(self.sky_view)
         strip.setObjectName("planetariumStrip")
-        # 152px：内容外边距 6×2 + 按钮 sizeHint 136 + 边框 2，留 2px 余量；
-        # 132px 会把「退出星象仪」裁掉右缘。
-        strip.setFixedWidth(152)
+        # 宽度走令牌 152px（内容外边距 6×2 + 按钮 sizeHint 136 + 边框 2，
+        # 留 2px 余量）；collapse_strip(36) 会把「退出星象仪」裁掉右缘。
+        strip.setFixedWidth(tokens().SIZE["planetarium_strip_w"])
         strip.setAttribute(Qt.WA_StyledBackground, True)
         strip.setStyleSheet(
             "QFrame#planetariumStrip {"
