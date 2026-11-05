@@ -29,7 +29,7 @@
 | L4 | 听感验收（链内 AGC、长时音高漂移） | 同上文档「不可验声明」；本轮全程 `MBDSDR_NULL_AUDIO=1` | 未验证 | 用户放行声卡后人工听；数据面（导频/RMS/频谱含量）已另行验证 |
 | L5 | NanoVNA 命令细节（`vbat`/`freqoffset`/`edelay`/`averages`） | `docs/learn/nanovna/protocol-study.md` 逐行标「待真机验证」；SOLT 已于 2026-10-23 真机验过 | 部分真验 | 真机逐条发命令并记录回显；单位/上限语义以实测为准 |
 | L6 | 物理 arm64 Chromebook 启动/USB 直收/rtl_tcp | `docs/CHROMEOS_CROSTINI_SDR.md`（qemu 交叉编译已过，物理机未验） | 未验证 | 真机启动 + `QT_QPA_PLATFORM=offscreen` ctest + USB 直收 |
-| L43 | 云台追踪误差口径：指令侧 vs 机械侧 | 天空/云台线 `25740f82`；`PointingErrorRecorder` + `MainWindow.gimbal_tracking_report()` | 仅自测 | 真 rotator/IMU；`pose_error_by_source.readback.samples > 0` 后 `pose_*` 才可作机械精度；模拟过境的 0.2° 不得对外称云台精度 |
+| L43 | 云台追踪误差口径：指令侧 vs 机械侧 | 天空/云台线 `25740f82`；`PointingErrorRecorder` + `MainWindow.gimbal_tracking_report()` / `gimbal_accuracy_text()` | 仅自测 | 真 rotator/IMU；`pose_error_by_source.readback.samples > 0` 后 `pose_*` 才可作机械精度；模拟过境的 0.2° 不得对外称云台精度；UI 与文档在不可报时都写原因（tooltip/停机文案），绝不显示 0° |
 
 ## 2. 待真样本（有链路、无真实信号）
 
@@ -474,6 +474,15 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 3. 不要再把“`KeyboardInterrupt` 越过 Qt 边界”当根因：PySide6 6.12 会吞掉回调内的 `KeyboardInterrupt`，**实测 0 次崩溃**；它只造成“中断吃掉退出回调 → 事件循环不退出（卡住）”。
 4. 正常关窗（含录音/回放/拔设备/发射中收尾）实测 5/5 退出码 0、无残留线程；出现异常退出码时先按 1–2 对照，不要从业务改动找。
 
+| 用户可执行的退出方式 | 风险等级 | 实测 / 依据 | 能否修 | 给用户的建议 |
+| --- | --- | --- | --- | --- |
+| 关闭窗口（空闲 / 录音中 / 回放解码中 / 设备已拔出 / 发射中） | **低** | 5/5 路径退出码 0、无残留线程；录音空文件按 S7 删除，状态栏无报错 | 无需修 | 正常使用；收尾时等状态栏提示消失再关机 |
+| 文件菜单「退出」 | **低** | `exit_action.triggered.connect(self.close)`，与关窗同一 `closeEvent` 路径 | 无需修 | 等同关窗 |
+| 控制台 Ctrl+C（仅 `python desktop/main.py` 开发场景；pythonw/打包版无控制台） | **中，已降为低** | 修前：中断被 PySide 吞，可能吃掉退出回调 → 事件循环不退出（卡住）；修后（`10efa40c`）：2/2 退出码 0、无残留线程、override 报错 0 条 | **已修**（`desktop/main.py::_install_sigint_graceful_quit`） | 用户侧遇不到；开发时按一次 Ctrl+C 即优雅退出 |
+| 任务管理器结束进程 / CI 看门狗强杀 | **中（不可修）** | 20 次强退：**11 次 `0xC0000005`（`shiboken6.abi3.dll+0x2fe08`）**，9 次正常（55%，CI 34–74%）；裸 `QWidget` 8/8 不崩；无 PDB，无法定位到函数 | **不能修**：Windows `ExitProcess` 期间 PySide/shiboken 活对象收尾竞态 | 尽量用关窗/菜单退出；强杀出现 0xC0000005 属已知家族，**不代表数据损坏或新回归** |
+| 断电 / 蓝屏 / 系统崩溃 | 不可评估 | 无数据 | 无法修 | 不属于本项 |
+
+
 
 
 ## 附 J：历表月相照度反转（已修，2026-11-05，天空线追加）
@@ -585,4 +594,34 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 > 已由 `tests/test_moon_illumination_real_ephemeris.py` 锁住，本轮不改。
 > 上面 Q1–Q4 全是**表面真实度**（纹理/暗化/合成），当前一律为「已知未做」，不得在汇报里
 > 写成「已实现」或「接近真实」。
+
+## 附 P：真机证据链复核（2026-11-05，只核查未改实现）
+
+> 口径：按「原始证据」（命令输出/日志/二进制采集件/截图）逐条判定。只有文档叙述、
+> 没有留存采集件的，一律降级为「未验证（证据不足）」，不再保留「已验证」表述。
+> 复核方式：对已入库采集件做离线复算（不接硬件），并对无硬件环做现场重跑。
+
+| 结论 | 数字 | 证据类型 | 证据位置 | 可否复跑 | 判定 |
+| --- | --- | --- | --- | --- | --- |
+| NanoVNA RH770 半拉谐振（深坑） | 408MHz / -28dB | 文档自述（侦察细扫，未入 24 平均存档） | `experiments/nanovna_rh770/README.md:32,50,53` | 否：无原始单扫数据，且需 VNA+手持 | **未验证（证据不足）** |
+| NanoVNA RH770 全展谐振 | ≈419.5MHz | 文档自述，无采集件 | `docs/learn/agent-onboarding-runbook.md:192`；`docs/learn/sdr-rtltcp-agent-path.md:48` | 否 | **未验证**；且与存档 24 平均扫频矛盾（见下行） |
+| RH770 430 段回损（全展，24 平均存档） | 400MHz 15.0dB；419MHz 10.3dB；435MHz 6.7dB（400–455 单调下降） | 入库扫频 JSON | `experiments/nanovna_rh770/data/rh770.json`（seg1，101 点/1MHz） | 是（离线复算） | **有证据**（不支持 419.5MHz 谐振） |
+| 馈线 TDR 单程时延 | 4.89ns（复算 4.885–4.886ns） | 入库 S11 相位斜率 + 分析脚本 | `experiments/nanovna_rh770/data/cable_open.json`；`scripts/vna_cable_analyze.py` | 是（`python scripts/vna_cable_analyze.py` 实测电气长度 1.459/1.556m、435MHz 1.53dB） | **有证据（时延本体）**；长度换算两口径矛盾，见下注 |
+| 相位残差 | 0.033rad | 无脚本、无输出记录 | 仅见于论文/说明文档 | 部分：复核复算 max 0.037rad / std 0.0155rad（段1） | **未核实** |
+| NanoVNA TCXO 回读 | 26000000Hz | 文档自述 + 回放夹具 | `docs/learn/nanovna/feature-parity.md:674,705`；`mbdsdr_ai/nanovna_dump.py:247`（夹具） | 否：无原始串口日志 | **未验证（证据不足）**（夹具不算真机证据） |
+| 设备抓帧 | 4 帧 320×240、每帧 153600B | 二进制采集件 + PNG | `experiments/nanovna_rh770/data/vna_screen_{live,detail,wide,2m}.{rgb,png}` | 是（离线校验尺寸/非空白） | **有证据** |
+| RGB565→BMP 字节数 | 230454B | 由帧尺寸推导（54+320×240×3） | `docs/learn/nanovna/feature-parity.md:707` | 是（可由 rgb 离线生成） | **有证据（推导值）** |
+| RTL-SDR 435.25MHz Welch PSD 窄带载波数 | 9 个 | 文档自述，无 PSD 图/IQ/脚本输出 | `docs/learn/agent-onboarding-runbook.md:192`；`sdr-rtltcp-agent-path.md:49` | 否 | **未验证（无证据）** |
+| 435.274MHz 窄带 FM 解调 RMS | 0.49（噪声底 0.09） | 同上 | 同上 | 否 | **未验证（无证据）** |
+| MCP 链 `list_devices→connect→set_frequency→set_demod→get_status` | 435274000 / FM / 20dB | 文档转述，无请求响应原始日志 | `docs/learn/sdr-rtltcp-agent-path.md:36-46` | 部分：`pytest mbdsdr_ai/tests/test_sdr_rtltcp_registration.py` 实测 14 passed / 2 skipped（活体用例无 rtl_tcp 时诚实跳过） | **未验证（文档级）** |
+| RTL-SDR 七环 R1–R5/R7（2026-11-03） | results.json 内各值 | results.json + wav + SigMF + PNG | `.tmp-tool-results/hw_acceptance/20261103_191805/`（未入库，现存） | 需硬件；当前 `device_count=0` | **有证据（当时）**；本机不可复跑（缺设备） |
+| hw-acceptance R5/R6/R7（无硬件环） | 仰角误差 0.03–0.05°、太阳 0.005°、7 门判定全过 | 现场重跑输出 | 本次重跑 `.tmp-tool-results/hw_acceptance/20261105_235725/summary.json` | 是（已实跑 PASS 3/FAIL 0） | **有证据** |
+
+> 长度换算注：`4.89ns` 是单程时延（Γ_open 相位斜率 = −4πfL/v）。电气长度 `Le = c·τ`
+> 是「空气等效长度」，物理长度 `L = Le·VF`。按 VF≈0.687 得 L≈1.00m，与「1 米」标签
+> 相符；`experiments/nanovna_rh770/README.md:38-39` 用 `VF = Le/L = 1.46` 后反推
+> 「实际 1.7–2.2m 或标签不准」，方向算反了，该结论**未核实**。两种表述不得同时对外引用。
+>
+> 本次重跑原始输出（R5/R6/R7）：PASS 3 / FAIL 0 / SKIPPED 0 / UNVERIFIED 0；
+> 证据目录 `D:\mbdsdr\MBDSDR\.tmp-tool-results\hw_acceptance\20261105_235725\`。
 
