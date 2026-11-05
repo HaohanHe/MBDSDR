@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import math
 import os
+import queue
+import threading
 import time
 import wave
 
@@ -22,6 +24,8 @@ FS = 2.4e6
 AUDIO_FS = 48000
 PILOT_MPX_FS = 200000
 PILOT_SEG = 65536
+PILOT_BLOCK = 262144          # 读线程每次 USB 块读的复样本数（实测吞吐最好）
+PILOT_QUEUE_MAX = 6           # 队列上限 6 块 ≈ 12 MB，满则读线程阻塞，内存有界
 
 
 def _mpx_200k(x: np.ndarray, fs: float) -> np.ndarray:
@@ -87,19 +91,60 @@ def _pilot(fs: float, iq: np.ndarray) -> tuple[float, float, int] | None:
 def _pilot_from_ctrl(ctrl, fs: float, seconds: float = 6.0) -> dict | None:
     """连读 seconds 秒 IQ 逐块转 MPX，喂给 Welch；同时给出采集吞吐与丢样率。
 
-    采集是按**墙钟** seconds 秒循环读，而不是「读满 fs×seconds 个样本」：
-    USB 块读跟不上时，块与块之间会有样本被驱动丢弃，于是实际采到的信号
-    时长 < 请求时长。丢样只减少 Welch 段数与统计稳定度，**不改变导频频率**
-    （每块各自鉴频，丢的是块间空隙）。
+    采集用**独立读线程 + 有界队列**：读线程只做 USB 块读，主线程做鉴频与
+    抗混叠抽取（实测约 13 ms/块）。若把转换放回读循环里，转换期间没有在途
+    传输，设备 FIFO 溢出——6 s 请求实测只采到 5.13 s（丢 12.6–16.3%），
+    分解为「转换占 11–12% + 同步块读传输间死区 1–3%」。读线程让 USB 连续
+    供给后，实测丢样降到 1.7%，残差来自同步块读速率 2.32–2.37 MS/s 低于
+    请求的 2.4 MS/s（异步读实测 2.393–2.399 MS/s、丢样 0，但异步要绕开
+    controller 直接调 pyrtlsdr，对 rtl_tcp 源不可用，故不在此处采用）。
+
+    队列上限 6 块（6×262144 complex64 ≈ 12 MB），满则读线程阻塞在 ``put``，
+    因此内存有界、不会随时间堆积。丢样只减少 Welch 段数与统计稳定度，
+    **不改变导频频率**（每块各自鉴频，丢的是块间空隙）。
     """
+    # 预热：resample_poly 的滤波设计 + scipy 首次导入约 0.7 s；若落在采集窗口
+    # 内会被记成丢样（2 s 窗口实测因此虚高到 39.9%）。预热在 t0 之前，只一次。
+    _mpx_200k(np.zeros(PILOT_BLOCK, dtype=np.complex64), fs)
+
+    q: queue.Queue = queue.Queue(maxsize=PILOT_QUEUE_MAX)
+    stop = threading.Event()
+    errors: list[str] = []
+
+    def _reader():
+        try:
+            while not stop.is_set():
+                blk = ctrl.read_iq(PILOT_BLOCK)
+                if blk is None or len(blk) < 1024:
+                    errors.append("read_iq 返回空块")
+                    break
+                q.put(blk)
+        except Exception as e:  # noqa: BLE001 - 读线程异常必须带回主线程
+            errors.append(f"{type(e).__name__}: {e}")
+
+    th = threading.Thread(target=_reader, name="r3-iq-reader", daemon=True)
     parts, samples = [], 0
     t0 = time.perf_counter()
-    while time.perf_counter() - t0 < seconds:
-        blk = ctrl.read_iq(262144)
-        if blk is None or len(blk) < 1024:
-            break
-        parts.append(_mpx_200k(blk, fs))
-        samples += len(blk)
+    th.start()
+    try:
+        while time.perf_counter() - t0 < seconds:
+            try:
+                blk = q.get(timeout=0.2)
+            except queue.Empty:
+                if errors:
+                    break
+                continue
+            parts.append(_mpx_200k(blk, fs))
+            samples += len(blk)
+    finally:
+        stop.set()
+        # 读线程可能阻塞在 q.put（队列满）；先排空让它看到 stop 后退出再 join。
+        while th.is_alive():
+            try:
+                q.get_nowait()
+            except queue.Empty:
+                break
+        th.join(timeout=3.0)
     wall = time.perf_counter() - t0
     if not parts:
         return None
@@ -118,9 +163,9 @@ def _pilot_from_ctrl(ctrl, fs: float, seconds: float = 6.0) -> dict | None:
         "mpx_points": int(len(mpx)),
         "throughput_msps": round(samples / wall / 1e6, 3) if wall > 0 else None,
         "drop_pct": round(max(0.0, 1.0 - captured_s / seconds) * 100, 1),
+        "reader_error": "; ".join(errors) or None,
+        "queue_left": q.qsize(),
     }
-
-
 
 
 def _offline(skip_code: str = "NO_HW", why: str = "") -> dict:
@@ -321,6 +366,7 @@ def run(freq_hz: float) -> dict:
             "pilot_mpx_points": pilot["mpx_points"] if pilot else None,
             "pilot_throughput_msps": pilot["throughput_msps"] if pilot else None,
             "pilot_drop_pct": pilot["drop_pct"] if pilot else None,
+            "pilot_reader_error": pilot["reader_error"] if pilot else None,
             "soundcard_opened": False,
         }
         status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL

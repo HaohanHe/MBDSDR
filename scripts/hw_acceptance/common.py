@@ -118,14 +118,34 @@ def rtl_device_strings() -> list[dict]:
 
 
 def real_devices() -> list:
-    """非 debug 的真实设备列表（debug 调试源永远不算硬件）。"""
-    try:
-        from mbdsdr_ai.device_manager import DeviceManager
+    """非 debug 的真实设备列表（debug 调试源永远不算硬件）。
 
-        return [d for d in DeviceManager().list_devices()
-                if str(getattr(d, "driver", "")).lower() != "debug"]
-    except Exception:
-        return []
+    上一进程刚释放 USB 句柄时，pyrtlsdr 可能读不到字符串描述符，DeviceManager
+    会退化成占位序列号 ``rtl-0``；拿这个 id 去 connect 必报 DeviceNotFound
+    （本轮实测两次：一次在探针第 22 轮，一次在 ring3 首开）。遇到占位号时
+    短暂重试枚举（0.3/0.6/0.9/1.2 s），拿不到真序列号就原样返回——
+    由 open_controller 重试或环判 FAIL，绝不伪造设备。
+    """
+    from mbdsdr_ai.device_manager import DeviceManager
+
+    last: list = []
+    for i in range(5):
+        try:
+            last = [d for d in DeviceManager().list_devices()
+                    if str(getattr(d, "driver", "")).lower() != "debug"]
+        except Exception:
+            return last
+        placeholder = [
+            d for d in last
+            if str(getattr(d, "driver", "")) == "rtlsdr"
+            and str(getattr(d, "serial", "")).startswith("rtl-")
+            and str(getattr(d, "serial", ""))[4:].isdigit()
+        ]
+        if not placeholder:
+            return last
+        if i < 4:
+            time.sleep(0.3 * (i + 1))
+    return last
 
 
 def _exception_chain_text(e: BaseException) -> str:

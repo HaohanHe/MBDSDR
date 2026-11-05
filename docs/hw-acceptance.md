@@ -226,7 +226,8 @@ python scripts\hw_acceptance\check_ring_labels.py
 | `python scripts\hw_acceptance\acceptance_suite.py --hw` | **13–14 s**（连续两次 PASS 4/4） | A1–A4：librtlsdr + RTL-SDR | 只跑 A1–A4；无设备 → `PASS 0 / SKIP 4`，SKIP 计数可见 |
 | `python scripts\hw_acceptance\negative_control.py` | **29.5 s**（R5 基线占 25 s） | TLE + skyfield + `de421.bsp` + 真实 OTA 夹具 | 4 个反证必须 `RED_AS_EXPECTED`；否则退出码 1 |
 | `python -m pytest tests\test_moon_reference_acceptance.py -q` | **0.5 s**（3 passed） | `de421.bsp` + skyfield | 月球对拍 + 1h 反证回归 |
-| `python -m pytest tests\test_hw_acceptance_contract.py -q` | **0.5 s**（11 passed） | 无（纯契约） | 锁四码、锁 `skip_result` 永不 PASS、锁 `UNVERIFIED→SKIP(NO_DATA)`、锁 R/A 编号不同义 |
+| `python -m pytest tests\test_hw_acceptance_contract.py -q` | **1.9 s**（18 passed） | 无（纯契约） | 锁四码、锁 `skip_result` 永不 PASS、锁 `UNVERIFIED→SKIP(NO_DATA)`、锁 R/A 编号不同义、锁导频测法与采集记账、锁噪声底阈值区间、锁占位序列号重试 |
+| `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 65536,262144,1048576 --modes sync,sync_only,thread,async` | 约 **3.5 min**（24 次 6 s 采集） | RTL-SDR；async 模式直连 pyrtlsdr | `throughput.json`：逐块读/转换耗时、captured/wall/吞吐/丢样；用于 §6.2.1 的归因 |
 | `python scripts\hw_acceptance\check_ring_labels.py` | **0.1 s** | 无（纯文本） | 文档编号闸；`--selftest` 是它的反证（4 种改坏法必须红） |
 | `python scripts\hw_acceptance\ring{1..7}_*.py --out D:\...` | R1 17.4 / R2 8.8 / R3 8.0 / R4 12.0 / R5 25.0 / R6 4.6 / R7 4.2 s | 见上表 | 单环排障；每环独立 `result.json` |
 
@@ -366,6 +367,84 @@ Welch（65536 点/Hann，不重叠）→ 18.5–19.5 kHz 取峰 + 抛物线插�
 **幅度口径**：37.7 dB 是「峰/邻域中位数」，与产品链 `pilot_snr_db`
 （导频 RMS / MPX 总 RMS，典型 −20 dB）不是一个口径，不可互比；
 10 dB 门限只对前者成立。
+
+> 采集时长本身「实得多少」由丢样决定，见 §6.2.1：修复前 6 s 只采到 5.0–5.2 s，
+> 段数因此是 15；读线程修好后回到 17–18 段。门限未动。
+
+#### 6.2.1 采集链丢样：请求 6 s 实得 5.0–5.2 s → 读线程修复后 1.7–3.5%
+
+仪器：[capture_throughput.py](file:///d:/mbdsdr/MBDSDR/scripts/hw_acceptance/capture_throughput.py)
+（同台同参数逐块记录「读耗时 / 转换耗时」，四种读法对照）。
+数据源：[ring3_demod_audio.py](file:///d:/mbdsdr/MBDSDR/scripts/hw_acceptance/ring3_demod_audio.py)
+的 `pilot_*` 字段。
+
+**修复前（旧 ring3：读一块 → 立刻转一块 → 再读）**：93.305 MHz / 2.4 MS/s /
+请求 6.0 s / 块 262144，5 次：
+
+| # | captured_s | wall_s | mpx_points | 吞吐 MS/s | 丢样 | Welch 段数 | 导频 Hz | 高于邻域 dB |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 5.243 | 6.105 | 1,048,608 | 2.061 | 12.6% | 16 | 19002.1 | 13.1 |
+| 2 | 5.134 | 6.077 | 1,026,762 | 2.043 | 14.4% | 15 | 18999.5 | 15.2 |
+| 3 | 5.134 | 6.058 | 1,026,762 | 2.034 | 14.4% | 15 | 19001.9 | 13.4 |
+| 4 | 5.134 | 6.032 | 1,026,762 | 2.043 | 14.4% | 15 | 19000.3 | 12.5 |
+| 5 | 5.024 | 6.011 | 1,004,916 | 2.006 | 16.3% | 15 | 19000.2 | 16.2 |
+
+均值 14.4%。注意「15×65536 = 4.92 s」只是 Welch 用掉的整段部分，不是实际
+采集时长；真实值看 `pilot_mpx_points`（5.13 s）。
+
+**归因（每格 3 次，块 65536 / 262144 / 1048576，请求 6 s，丢样取三次范围）**：
+
+| 读法 | 65536 | 262144 | 1048576 | 每块读耗时中位 | 每块转换耗时中位 |
+|---|---|---|---|---|---|
+| sync+conv（旧 ring3） | 14.9 / 15.3 / 15.3% | 16.3 / 14.4 / 14.4% | 12.6 / 12.6 / 12.6% | 27.7 / 112.9 / 451 ms | 4.4 / 14.9 / 54 ms |
+| sync_only（只读不转） | 1.2% | 1.7% | 0.0%（跨窗多算 1 块） | 同上 | — |
+| thread+queue（现 ring3） | 0.3 / 0.8 / 0.3% | 1.7 / 3.5 / 3.5% | 5.3 / 5.3 / 5.3% | 同上 | 3.4 / 14.9 / 62 ms |
+| async+queue（librtlsdr 异步） | 0.0% | 0.0% | 0.0% | — | 4.1 / 15.1 / 54 ms |
+
+三条判据：
+
+1. **不是 USB 带宽不够**：异步读吞吐 **2.370–2.398 MS/s**（请求的 98.8–99.9%），
+   丢样 0；纯同步读也有 **2.317–2.361 MS/s**。
+2. **主体是「转换占住读循环」**：每格转换总耗时 0.63–0.92 s / 6 s（占 10.5–15.3%），
+   与 sync+conv 的丢样 12.6–16.3% 同阶——转换期间没有任何在途传输，设备 FIFO
+   溢出。块越大单次空档越长，但每 6 s 的转换总量不变，所以三种块大小的丢样
+   都在 12.6–16.3%。
+3. **同步块读另有 1.3–3% 传输间死区**：262144 时读耗时 112.9 ms ≈ 109.2 ms
+   信号 + 3.7 ms 固定开销；异步读（多缓冲在途）能补掉这部分。
+
+**修复（已落地）**：`_pilot_from_ctrl` 改为**独立读线程 + 有界队列**（6 块 ≈
+12 MB，满则读线程阻塞，内存有界），主线程只做鉴频/抗混叠；窗口前预热 0.7 s
+（scipy 首次滤波设计），不把一次性成本算成丢样。同台同参数 4 次有效：
+
+| # | captured_s | wall_s | 吞吐 MS/s | 丢样 | Welch 段数 | 导频 Hz / dB |
+|---|---|---|---|---|---|---|
+| 1 | 5.898 | 6.195 | 2.285 | 1.7% | 18 | 19000.6 / 15.7 |
+| 2 | 5.789 | 6.115 | 2.272 | 3.5% | 17 | 19000.2 / 15.4 |
+| 3 | 5.898 | 6.195 | 2.285 | 1.7% | 18 | 18999.2 / 14.8 |
+| 4 | 5.789 | 6.114 | 2.272 | 3.5% | 17 | 19000.3 / 14.4 |
+
+（1.7% 与 3.5% 交替来自块粒度：53 或 54 个整块，1 块 = 1.8%。）
+
+残差不是修法没生效：① 同步块读 2.27–2.32 MS/s < 请求 2.4，6 s 墙钟最多拿到
+约 5.9 s；② 块粒度 1 块 = 1.8%，窗口末尚未转换的 1 块不计入 captured，
+所以 3.5% 是上界。**这是本机 USB/驱动边界**（异步读可达 2.37–2.40 MS/s，
+但要绕开 controller 直接调 pyrtlsdr，rtl_tcp 源不可用，故不采用）。
+块 65536 实测 0.3–0.8% 更低，但队列弹性只有 0.16 s（262144 是 0.65 s）且
+读调用多 4 倍，取 262144。
+
+未选更激进的口径：读满 `fs×seconds` 个样本（captured 恒等于 6.0、drop 恒为 0）
+会把墙钟拖到约 6.3 s，掩盖「请求 6 s」的真实供给差；因此保留「墙钟窗口 +
+如实记账」。
+
+复跑：
+
+```powershell
+python scripts\hw_acceptance\capture_throughput.py --seconds 6 `
+  --blocks 65536,262144,1048576 --modes sync,sync_only,thread,async `
+  --mode-runs sync=3,sync_only=1,thread=3,async=1 --out D:\mbdsdr\tmp\throughput.json
+python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
+# 看 result.json 的 pilot_captured_s / pilot_drop_pct / pilot_mpx_points / pilot_welch_segments
+```
 
 重采样比算式（音频链，`decode_stereo → _resample_to`）：
 `gcd(2048000, 48000) = 16000` → `up = 3`、`down = 128` → 有效比 128/3 = 42.6667，

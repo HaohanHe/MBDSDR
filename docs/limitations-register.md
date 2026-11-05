@@ -770,15 +770,17 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 ## 附 S：真机采集链吞吐与丢样（2026-11-06，验收线追加）
 
 > 与 §6.2 导频测法无关：那条已经定了「折叠假峰 + 段数不足」，本附录记的是另一层——
-> **USB 块读跟不上请求速率，块与块之间样本被驱动丢弃**。两者都影响导频读数，
-> 但只有后者能用「请求时长 vs 实际采集时长」量化。
+> **采集链供给能力**。本轮已把它摊开查清：**不是 USB 带宽不足**（异步读 2.370–2.398 MS/s、
+> 丢样 0），主体是「MPX 转换占住读循环」（每 6 s 0.63–0.92 s，占 10.5–15.3%），
+> 再加同步块读的传输间死区 1.3–3%。已用独立读线程 + 有界队列修复到 1.7–3.5%。
 
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
 | --- | --- | --- | --- | --- |
-| L63 | **采集链吞吐限制：6 s 请求只采到约 5.0–5.2 s（丢样 12.6–16.3%）** | `scripts/hw_acceptance/ring3_demod_audio.py::_pilot_from_ctrl` 现在记录 `pilot_requested_s / pilot_captured_s / pilot_wall_s / pilot_mpx_points / pilot_throughput_msps / pilot_drop_pct`，判定文案里也打印实际采集时长；同台 93.305 MHz、请求 2.4 MS/s、6 s，连测 5 次：captured **5.134 / 5.243 / 5.134 / 5.134 / 5.024 s**、丢样 **14.4 / 12.6 / 14.4 / 14.4 / 16.3 %**（均值 14.4）、实测吞吐 **1.993–2.061 MS/s** | **已量化（真机、可重复；不是偶发 18%，常态 12.6–16.3%）**。丢的是**块间空隙**，每块各自鉴频，故**不改导频频率**（五次 18999.5–19002.1 Hz，极差 2.6 Hz）。对段数的直接影响：Welch 段数 = ⌊captured_s × 200000 ÷ 65536⌋，5.0–5.2 s → **15 段**（不是 6 s 名义上的 18 段）；段数少会放大「峰/邻域 dB」的估计方差（93.305 MHz：5 段 10.4 dB、14 段 15.2 dB、22–26 段 16.7–20.1 dB），所以采集时长提到 6 s 并把实际值写进 summary，而不是调门限 | `python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6`，看 `result.json` 的 `pilot_requested_s/pilot_captured_s/pilot_drop_pct/pilot_welch_segments`；契约测试 `test_pilot_capture_accounting_is_measured_not_faked`（假控制器只给 6 块）锁住「captured_s/drop 必须由真实样本数算出」，把它写成等于请求值即红 |
+| L63 | **采集链吞吐/丢样：已归因并修复（12.6–16.3% → 1.7–3.5%）；本机同步块读边界 2.27–2.36 MS/s** | 归因仪器 `scripts/hw_acceptance/capture_throughput.py`：同台 93.305 MHz / 2.4 MS/s / 请求 6 s，块 65536/262144/1048576 各 3 次——sync+conv（旧 ring3）丢 **14.9–15.3 / 16.3–14.4 / 12.6 %**（三种块大小同阶，因为每 6 s 转换总量恒为 0.63–0.92 s）；sync_only（只读）丢 **1.2–1.7 %**、吞吐 **2.317–2.361 MS/s**；async（librtlsdr 异步）丢 **0.0 %**、吞吐 **2.370–2.398 MS/s**；逐块读耗时中位 27.7 / 112.9 / 451 ms，262144 的 112.9 ms = 109.2 ms 信号 + 3.7 ms 固定开销。修复前 ring3 5 次：captured **5.243/5.134/5.134/5.134/5.024 s**、丢 **12.6–16.3 %**（均值 14.4）。修复后 4 次有效：captured **5.898/5.789/5.898/5.789 s**、丢 **1.7/3.5/1.7/3.5 %**、吞吐 **2.272–2.285**、段数 **17–18**。`_pilot_from_ctrl` 记录 `pilot_requested_s / pilot_captured_s / pilot_wall_s / pilot_mpx_points / pilot_throughput_msps / pilot_drop_pct / pilot_reader_error`，判定文案打印实际采集时长 | **已量化、已修复（真机、可重复）**。修法：独立读线程 + 有界队列（6×262144 complex64 ≈ 12 MB，满则读线程阻塞，内存不随时间堆积；窗口仍是 6 s 墙钟，不引入额外延迟），窗口前预热 0.7 s（scipy 首次滤波设计），不把一次性成本算成丢样。**残留边界**：同步块读 2.27–2.36 MS/s < 请求 2.4（异步多缓冲可达 2.37–2.40，但需绕开 controller 直连 pyrtlsdr，rtl_tcp 源不可用），所以 6 s 墙钟最多拿约 5.9 s；再加 1 块量化（1.8%），3.5% 是上界。**对段数的直接影响**：修复前 15 段、修复后 17–18 段，dB 估计方差随之下降（93.305 MHz：5 段 10.4 dB、14 段 15.2 dB、22–26 段 16.7–20.1 dB），10 dB 门限未动。丢样不改变导频频率（每块各自鉴频，修复前后 18999.2–19002.1 Hz，极差 <3 Hz） | `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 65536,262144,1048576 --modes sync,sync_only,thread,async --mode-runs sync=3,sync_only=1,thread=3,async=1`；`python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6`，看 `pilot_captured_s/pilot_drop_pct/pilot_welch_segments`；契约测试 `test_pilot_capture_accounting_is_measured_not_faked`（假控制器只给 6 块）锁住「captured_s/drop 必须由真实样本数算出」，写成等于请求值即红 |
 
 > **口径更正（口算作废）**：上一轮用「15 × 65536 = 4.92 s」当实际采集时长，推出「约 18% 丢样」——
 > 4.92 s 只是 **Welch 用掉的整段部分**，不含末尾不足一段的余量。真实 `pilot_mpx_points=1,026,762`
 > → 5.13 s → 丢样 **14.4%**。以后这类数字只从 `result.json` 取，不再口算。
+
 
 
