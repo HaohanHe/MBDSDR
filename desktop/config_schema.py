@@ -543,10 +543,6 @@ def defaults(storage: Optional[str] = None) -> Dict[str, Any]:
     return out
 
 
-def keys_by_storage(storage: str) -> List[str]:
-    return [it.key for it in ALL_ITEMS if it.storage == storage]
-
-
 def items_for_group(group: str) -> Tuple[SettingItem, ...]:
     """该分组全部暴露项（含 gui_config / ai_config 存储后端）。"""
     return tuple(it for it in EXPOSED_ITEMS if it.group == group)
@@ -627,10 +623,6 @@ def validate_value(item: SettingItem, value: Any) -> Tuple[Any, Optional[str]]:
         return str(value), None
     return item.default, (
         f"文本字段收到 {type(value).__name__} 类型（{value!r}），已回默认")
-
-
-def is_known(key: str) -> bool:
-    return key in SCHEMA
 
 
 # ---------------------------------------------------------------------------
