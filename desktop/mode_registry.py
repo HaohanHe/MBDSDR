@@ -200,11 +200,6 @@ def mode_names(category: Optional[str] = None) -> List[str]:
     return [m.mode for m in list_modes(category)]
 
 
-def display_names(category: Optional[str] = None) -> List[str]:
-    """返回显示名列表（用于填充 QComboBox，用户可读）。"""
-    return [m.display_name for m in list_modes(category)]
-
-
 def default_bandwidth(mode: str) -> float:
     """获取模式的默认 VFO 带宽，未知模式回退 12.5kHz。"""
     m = get(mode)

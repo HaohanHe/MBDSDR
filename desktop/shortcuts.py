@@ -128,6 +128,3 @@ def bind(shortcut_id: str) -> Optional[str]:
     return BY_ID[shortcut_id].key
 
 
-def registered_keys() -> Tuple[str, ...]:
-    """所有已配置的键序列（不含 key=None 的条目）。"""
-    return tuple(s.key for s in SHORTCUTS if s.key)
