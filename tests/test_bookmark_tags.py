@@ -148,14 +148,14 @@ def mw(isolated_profile, qapp):
 
 def test_main_window_add_syncs_tag(mw):
     mw._on_bookmark_added(98.5e6, "同步测试", "AM")
-    assert (98.5e6, "同步测试", "AM") in mw._bookmarks
+    assert (98.5e6, "同步测试", "AM", False) in mw._bookmarks
     tags = mw.spectrum._state.bookmarks
     assert any(abs(hz - 98.5e6) < 1 and name == "同步测试"
                for hz, name in tags)
 
 
 def test_main_window_tag_activation_tunes_with_mode(mw):
-    mw._bookmarks.append((145.0e6, "激活测试", "NFM"))
+    mw._bookmarks.append((145.0e6, "激活测试", "NFM", False))
     mw._sync_spectrum_bookmarks()
     before = mw.spectrum.generator.center_freq_hz
     mw._on_bookmark_activated(145.0e6)
