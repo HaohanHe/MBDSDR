@@ -835,6 +835,22 @@ WorkBuddy 台账线（"我这边" UI 原型/产品工程/星象仪）、巡检�
 → 放行；`--no-verify` → bypass 日志 1 条；旧索引提交 → `STALE_INDEX_SUSPECT`
 1 条，正常 `--only` 提交 → 0 条（`tests/test_git_hooks_stale_index.py` 2 passed）。
 
+**闸门边界（2026-11-05 实测，不能假装能拦）**：闸门只拦「一次提交里出现
+≥2 个仍在 TTL 内的 owner」，其余漏网按设计放行。
+
+| 场景 | 闸门行为 | 留痕 |
+|---|---|---|
+| 文件不在台账（NONE），两个会话同时在改 | **放行**（`owner=-（无活跃 claim）`） | 无 bypass 记录 |
+| claim 提交瞬间超时并被他人盗走 | **放行**（只剩 1 个 owner，`owner=线B`） | 无 bypass；事后归属看起来像盗走方，要配合台账 `history` 才能还原 |
+| claim 超时但无人接手 | **放行**（视同无 claim） | 无 bypass |
+| 3 个 owner 的文件用 `--only` 拆 3 笔 | 三笔全放行，每笔只含 1 个文件 | 各自输出 `owner=线A/线B/线C`；无 bypass |
+| 3 个 owner 的文件一次提交 | **拒绝**（MULTI，提示 `--only` / `--no-verify`） | 提交未发生，无 bypass |
+
+结论：能拦的只有最后一行；前三种是机制边界，**不能假装能拦**——靠「claim 先于
+动手 + 提交前贴 name-only + 提交后查 `git diff HEAD`」三条纪律兜底。
+`--no-verify` 绕过仍会写 bypass 记录（含当时 claim 快照），事后可核对有没有夹带。
+
+
 #### 6.9.1 提交说明一律走 stdin（禁止往 C 盘落临时文件，2026-11-05 追加）
 
 用户点过的铁律：**提交说明不落文件**。`-F <临时文件>` 会在 `%TEMP%`（C 盘）留下
