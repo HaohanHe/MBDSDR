@@ -285,6 +285,39 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
 新构建实测：`C:\Users\xxhzb\.config\MBDSDR\mbdsdr_desktop.log` mtime 停在
 `17:50:11`（旧构建时间），新构建的 stderr 内容出现在 `D:\mbdsdr\logs\mbdsdr_startup.log`。
 
+### 5.3 发布前自检脚本（`scripts/release_check.py`）
+
+`python scripts/release_check.py` 按序执行 build → smoke → dll → scipy → qt →
+narrow → log；每步打印 PASS/FAIL 与耗时，末行汇总，任一步 FAIL 退出码 1。
+`--workpath/--distpath` 与 `PYINSTALLER_CONFIG_DIR` 全在 D 盘，脚本对 C 盘产物落点直接判失败。
+
+实测（2026-11-05，产出 `pyi-dist12`）：build 225.9s（4429 文件 / 820.8 MiB，
+对 dist11 `+0 -0 ~1`）、smoke 14.4s（13/13）、dll 17.0s、scipy 2.5s、qt 3.1s、
+narrow 7.4s、log 61.3s；汇总 **PASS 6 / FAIL 1**。
+
+- scipy 场景：发布包的纯模块在 PYZ 归档里，删不到目录；spec 增加
+  `MBDSDR_NOARCHIVE=1` 开关（默认 False，发布行为不变）生成诊断包，删除整棵
+  `_internal/scipy/_external` 后原文匹配到 `No module named 'scipy._external'`
+  + `这是打包缺陷，不是你的操作问题`。
+- narrow：`ui_narrow_breakdown.py --json` 实测 `window_minimumSizeHint=1625×729`，
+  超过 1360×728 → **FAIL 属实**，产品代码未动。
+- log：只把「日志类文件」计入 FAIL（路径含 mbdsdr 且 `*.log`/startup）；
+  全盘扫 `C:\Users\<user>` 1,106,587 个文件，本次运行 0 条日志写入；
+  `gui_config.json`/`desktop_settings.json` 是用户数据，不在本项范围。
+
+### 5.4 1366×768 实测（含替代方案）
+
+本机显示器支持 37 种模式，`EnumDisplaySettings` 枚举 **没有 1366×768**，无法真机切换，
+如实标注为「替代方案」：
+
+| 方式 | 结果 |
+|---|---|
+| 源码窗口 + `QT_SCALE_FACTOR=1` 强制 1366×768 | `minimum_size_hint=1670×989`；**40 个控件越界、8 个文本被压缩**；截图右侧面板、顶部 UTC、底部提示均被裁 |
+| 冻结版 dist12 + `QT_SCALE_FACTOR=1`，Win32 压到 1366×768 | 窗口 1366×768、进程存活；客户端 1344×712，右侧星图缩放/顶部工具条被裁 |
+| 启动日志噪声 | 新增 2 行，1 条 `[dll] 未发现 SoapySDR.dll`（可选依赖告警），**无 `[record]`** |
+
+结论：1366×768 下窗口不能完整显示，控件被裁是产品现状。
+
 ## 6. 私有子包同类风险与冒烟清单
 
 启动自检 `_RISKY_IMPORTS` 当前 13 项（每次启动跑一遍，冻结版新构建日志 13/13 通过）；
@@ -375,10 +408,16 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
    fixture 直接 `mw.MainWindow()`，用的是默认 `%APPDATA%\mbdsdr\desktop_settings.json`；
    用例 `record_dir` 写入 tmp 路径后落盘，把真实配置改成 `…\pytest-…\rec`。
    本机残留已清理，但该 fixture 未隔离配置路径（属测试隔离线），下次整跑仍会再脏。
+9. **1366×768 红线未修**：发布自检的 narrow 步骤实测 `1625×729`（要求 ≤1360×728），
+   且 1366×768 下实际裁切 40 个控件；这属于 UI 布局线的待办，本线只做测量与如实报红，
+   没有为了脚本变绿去改 `main_window` 的最小尺寸/布局。
 
 ## 8. 本轮改动的文件
 
-- `desktop/MBDSDR.spec`：scipy 命名空间子树收集 + `astronomy.py` 数据文件。
+- `desktop/MBDSDR.spec`：scipy 命名空间子树收集 + `astronomy.py` 数据文件 +
+  `MBDSDR_NOARCHIVE=1` 诊断构建开关（默认关闭）。
+- `scripts/release_check.py`（新）：构建/冒烟/三类缺件原文匹配/窄屏/日志落点的
+  可重复发布自检。
 - `desktop/main.py`：启动自检、缺件分类文案、Qt 插件前置检查、运行库 DLL 检查、
   异步录音目录探测接线；catch-all 收窄到 `ImportError`/`OSError` 等。
 - `desktop/startup_paths.py`（新）：日志落点策略 + 内存缓冲 + 异步可写探测 +

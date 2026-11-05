@@ -79,6 +79,11 @@ datas += collect_data_files('mbdsdr_ai')
 # 必须把源文件当数据文件带进 _internal/mbdsdr_ai/。
 datas.append((os.path.join(root, 'mbdsdr_ai', 'astronomy.py'), 'mbdsdr_ai'))
 
+# 诊断构建开关：noarchive=True 时纯 Python 模块以 .pyc 落盘，
+# scripts/release_check.py 才能“删整棵 scipy/_external”复现缺件对话框；
+# 发布构建（默认）保持归档，体积/加载行为不变。
+noarchive = os.environ.get('MBDSDR_NOARCHIVE') == '1'
+
 a = Analysis(
     [os.path.join(here, 'main.py')],
     pathex=[here, root],
@@ -92,7 +97,7 @@ a = Analysis(
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
-    noarchive=False,
+    noarchive=noarchive,
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
