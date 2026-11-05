@@ -18,6 +18,14 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# 状态栏提示时长登记档（唯一口径，见 tests/test_status_message_durations.py）：
+# QUICK   一眼读完的瞬时反馈（模式切换/已清空/扫频进度）
+# NORMAL  普通结果（已保存/已应用/一般失败）
+# IMPORTANT 需要用户注意（失败/断开/注意事项）
+MSG_QUICK = 2000
+MSG_NORMAL = 4000
+MSG_IMPORTANT = 8000
+
 
 def _focus_widget():
     """当前焦点控件（便于单测打桩）。"""
@@ -858,7 +866,7 @@ class MainWindow(QMainWindow):
         self.settings.set("touch_mode", mode)
         touch_manager().set_from_settings(mode)
         label = {"auto": "自动检测", "on": "强制触屏", "off": "强制鼠标"}[mode]
-        self.statusBar().showMessage(f"触屏模式：{label}")
+        self.statusBar().showMessage(f"触屏模式：{label}", MSG_QUICK)
 
     # ========================================================================
     # UI 构建
@@ -1702,7 +1710,7 @@ class MainWindow(QMainWindow):
         ctx = self._sky_action_context("tune")
         if ctx is None:
             self.statusBar().showMessage(
-                "无法发起调谐：缺少卫星/观测站/链路数据", 4000)
+                "无法发起调谐：缺少卫星/观测站/链路数据", MSG_NORMAL)
             return
         self._request_sky_action("tune", ctx)
 
@@ -1715,7 +1723,7 @@ class MainWindow(QMainWindow):
         ctx = self._sky_action_context("track")
         if ctx is None:
             self.statusBar().showMessage(
-                "无法发起跟踪：缺少卫星/观测站/链路数据", 4000)
+                "无法发起跟踪：缺少卫星/观测站/链路数据", MSG_NORMAL)
             self._sync_sky_track_btn(False)
             return
         self._request_sky_action("track", ctx)
@@ -1728,7 +1736,7 @@ class MainWindow(QMainWindow):
         ctx = self._sky_action_context("gimbal_follow")
         if ctx is None:
             self.statusBar().showMessage(
-                "无法发起云台跟随：缺少卫星/观测站数据", 4000)
+                "无法发起云台跟随：缺少卫星/观测站数据", MSG_NORMAL)
             self._sync_sky_gimbal_btn(False)
             return
         self._request_sky_action("gimbal_follow", ctx)
@@ -1738,7 +1746,7 @@ class MainWindow(QMainWindow):
         panel = getattr(self, "ai_panel", None)
         if panel is None or not hasattr(panel, "request_sky_action"):
             self.statusBar().showMessage(
-                "AI 对话面板不可用，天空动作未执行（不退回直连硬件）", 5000)
+                "AI 对话面板不可用，天空动作未执行（不退回直连硬件）", MSG_NORMAL)
             self._reset_sky_pending_ui(action)
             return False
         ok = bool(panel.request_sky_action(context))
@@ -1750,7 +1758,7 @@ class MainWindow(QMainWindow):
                 "（可能未配置 API Key、正忙或需要先确认硬件）。"
                 "下一步：打开右侧「AI」面板查看原因后重试，"
                 "或在天空页手动操作。")
-            self.statusBar().showMessage(text, 8000)
+            self.statusBar().showMessage(text, MSG_IMPORTANT)
             if getattr(self, "_app_mode", "ide") == "planetarium":
                 self._on_planetarium_ai_reply(text)
         return ok
@@ -1774,13 +1782,13 @@ class MainWindow(QMainWindow):
             self._sync_sky_track_btn(active)
             if not active:
                 self.statusBar().showMessage(
-                    "AI 本轮尚未执行跟踪（可能在确认硬件，详见对话）", 6000)
+                    "AI 本轮尚未执行跟踪（可能在确认硬件，详见对话）", MSG_IMPORTANT)
         elif action == "gimbal_follow":
             self._sync_sky_gimbal_btn(self._gimbal_follow)
             if not self._gimbal_follow:
                 self.statusBar().showMessage(
                     "AI 本轮尚未启动云台跟随（可能在确认硬件，详见对话）",
-                    6000)
+                    MSG_IMPORTANT)
 
     # ------------------------------------------------------------------
     # 双形态壳层：IDE 形态 / 星象仪形态
@@ -2211,7 +2219,7 @@ class MainWindow(QMainWindow):
 
     def _on_cmd_mic(self) -> None:
         """麦克风按钮：无语音识别后端时仅提示，不造假。"""
-        self.statusBar().showMessage("语音输入未配置（接麦克风后可用）", 3000)
+        self.statusBar().showMessage("语音输入未配置（接麦克风后可用）", MSG_NORMAL)
 
     # ------------------------------------------------------------------
     # 顶栏（细状态栏）/ 底坞（Home + 模式块 + Now Bar）
@@ -2380,7 +2388,7 @@ class MainWindow(QMainWindow):
         status_bar.messageChanged.connect(
             lambda _text: self._remedy_link.clear_code())
 
-    def _show_error_status(self, text: str, code=None, timeout: int = 6000):
+    def _show_error_status(self, text: str, code=None, timeout: int = MSG_IMPORTANT):
         """状态栏错误消息 + 可点的「查看怎么办」入口（无条目则不出链接）。"""
         self.statusBar().showMessage(text, timeout)  # 先触发 messageChanged 清旧链接
         if code:
@@ -2692,12 +2700,12 @@ class MainWindow(QMainWindow):
         reason = self._tx_block_reason()
         if reason:
             self._set_tx_button_checked(False)
-            self.statusBar().showMessage(f"无法发射：{reason}", 6000)
+            self.statusBar().showMessage(f"无法发射：{reason}", MSG_IMPORTANT)
             return
         nominal_hz = float(getattr(self, "_vfo_center_hz", 0.0) or 0.0)
         if nominal_hz <= 0.0:
             self._set_tx_button_checked(False)
-            self.statusBar().showMessage("无法发射：当前没有标称频率", 6000)
+            self.statusBar().showMessage("无法发射：当前没有标称频率", MSG_IMPORTANT)
             return
         # 契约唯一真相源：发波频率与读数用同一次裁决结果，UI 不算 Δ
         try:
@@ -2708,7 +2716,7 @@ class MainWindow(QMainWindow):
             self._set_tx_button_checked(False)
             self.tx_readout.setText("发射: " + format_tx_doppler(
                 None, failed_reason=f"预偏裁决失败：{e}"))
-            self.statusBar().showMessage(f"未发射（预偏裁决失败：{e}）", 6000)
+            self.statusBar().showMessage(f"未发射（预偏裁决失败：{e}）", MSG_IMPORTANT)
             return
         self.tx_readout.setText("发射: " + format_tx_doppler(note))
         args = {"nominal_hz": round(nominal_hz, 3),
@@ -2723,7 +2731,7 @@ class MainWindow(QMainWindow):
             self._set_tx_button_checked(False)
             self.tx_readout.setText("发射: " + format_tx_doppler(
                 None, failed_reason="人工确认未通过"))
-            self.statusBar().showMessage("未发射（人工确认未通过）", 6000)
+            self.statusBar().showMessage("未发射（人工确认未通过）", MSG_IMPORTANT)
             return
         self._start_tx(self._active_sdr_backend, freq_hz, args)
 
@@ -2737,7 +2745,7 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             logger.warning("发射安全网关不可用: %s", e)
             self._set_tx_button_checked(False)
-            self.statusBar().showMessage(f"未发射（安全网关不可用：{e}）", 8000)
+            self.statusBar().showMessage(f"未发射（安全网关不可用：{e}）", MSG_IMPORTANT)
             return
         # desktop 后端的能力源是 SDRDevice；hal 后端才用 hal 版推导
         caps = (capabilities_from_device(getattr(backend, "device", None))
@@ -2748,7 +2756,7 @@ class MainWindow(QMainWindow):
             self.tx_readout.setText("发射: " + format_tx_doppler(
                 None, failed_reason=f"设备发射能力未知（{caps.source}）"))
             self.statusBar().showMessage(
-                f"未发射（设备能力未知：{caps.source}）", 8000)
+                f"未发射（设备能力未知：{caps.source}）", MSG_IMPORTANT)
             return
         try:
             token = issue_confirmation("desktop_transmit", args,
@@ -2757,7 +2765,7 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             logger.warning("签发发射 token 失败: %s", e)
             self._set_tx_button_checked(False)
-            self.statusBar().showMessage(f"未发射（签发授权失败：{e}）", 8000)
+            self.statusBar().showMessage(f"未发射（签发授权失败：{e}）", MSG_IMPORTANT)
             return
         session = TxSession(backend)
         self._tx_session = session
@@ -2795,7 +2803,7 @@ class MainWindow(QMainWindow):
             self._refresh_tx_button_state()
             return
         session.cancel(reason)
-        self.statusBar().showMessage("正在停止发射…", 3000)
+        self.statusBar().showMessage("正在停止发射…", MSG_NORMAL)
         if wait and self._tx_thread is not None:
             self._tx_thread.join(timeout=2.0)
 
@@ -2812,21 +2820,21 @@ class MainWindow(QMainWindow):
                 self._start_iq_streams()
         except Exception as e:  # noqa: BLE001
             logger.warning("发射结束后恢复接收失败: %s", e)
-            self.statusBar().showMessage(f"恢复接收失败：{e}", 8000)
+            self.statusBar().showMessage(f"恢复接收失败：{e}", MSG_IMPORTANT)
         state = str(info.get("state") or "")
         reason = str(info.get("reason") or "")
         if state == "cancelled":
-            self.statusBar().showMessage("发射已停止", 4000)
+            self.statusBar().showMessage("发射已停止", MSG_NORMAL)
             self._refresh_tx_readout()
         elif state == "completed":
-            self.statusBar().showMessage("发射完成", 4000)
+            self.statusBar().showMessage("发射完成", MSG_NORMAL)
             self._refresh_tx_readout()
         elif state in ("rejected", "failed"):
             self.tx_readout.setText("发射: " + format_tx_doppler(
                 None, failed_reason=reason or "发射被拒"))
-            self.statusBar().showMessage(f"未发射（{reason}）", 8000)
+            self.statusBar().showMessage(f"未发射（{reason}）", MSG_IMPORTANT)
         else:  # aborted / stopping：发过波但被中止，不谎报「未发射」
-            self.statusBar().showMessage(f"发射中止（{reason}）", 8000)
+            self.statusBar().showMessage(f"发射中止（{reason}）", MSG_IMPORTANT)
             self._refresh_tx_readout()
         self._refresh_tx_button_state()
 
@@ -2885,7 +2893,7 @@ class MainWindow(QMainWindow):
         self.settings.set("ui_language", l10n.normalize_ui_language(tag))
         # 翻译器只在启动时装载（与 C++ 桌面端同口径）——不做假实时切换。
         try:
-            self.statusBar().showMessage(self.tr("更改语言后重启应用生效"), 5000)
+            self.statusBar().showMessage(self.tr("更改语言后重启应用生效"), MSG_NORMAL)
         except Exception:
             pass
 
@@ -2951,7 +2959,7 @@ class MainWindow(QMainWindow):
                 self.layout_combo.setCurrentIndex(idx)
                 self.layout_combo.blockSignals(False)
             self._update_layout_delete_btn()
-            self.statusBar().showMessage(f"已保存布局「{name}」", 3000)
+            self.statusBar().showMessage(f"已保存布局「{name}」", MSG_NORMAL)
         else:
             QMessageBox.warning(self, "保存失败", "无法保存布局，请重试。")
 
@@ -3028,7 +3036,7 @@ class MainWindow(QMainWindow):
         g = scr.availableGeometry()
         self.move(g.x() + max(0, (g.width() - self.width()) // 2),
                   g.y() + max(0, (g.height() - self.height()) // 2))
-        self.statusBar().showMessage("窗口已重置到主屏中央", 4000)
+        self.statusBar().showMessage("窗口已重置到主屏中央", MSG_NORMAL)
 
     # ------------------------------------------------------------------
     # 「面板」菜单：列出所有注册面板，checkable 控制页签显示/隐藏
@@ -3406,7 +3414,7 @@ class MainWindow(QMainWindow):
                 self._no_device_hint.setVisible(False)
         except Exception:
             pass
-        self.statusBar().showMessage(f"已连接 {backend.device.name}", 4000)
+        self.statusBar().showMessage(f"已连接 {backend.device.name}", MSG_NORMAL)
 
         # 增益动态范围：按所连设备能力收放面板滑杆（此前 0-49/0-50 硬编码
         # 是"RTL-SDR 典型"占位，接到别的设备也不动）。失败仅忽略——滑杆
@@ -3426,13 +3434,13 @@ class MainWindow(QMainWindow):
         try:
             backend.set_sample_rate(float(sample_rate))
         except Exception as e:
-            self.statusBar().showMessage(f"采样率应用失败: {e}", 4000)
+            self.statusBar().showMessage(f"采样率应用失败: {e}", MSG_NORMAL)
         # 带宽：0=自动（与后端 bandwidth_hz 语义一致）。此前面板设的带宽
         # 被静默丢弃——只下发了采样率/增益，用户调了也没用。
         try:
             backend.set_bandwidth(float(bandwidth))
         except Exception as e:
-            self.statusBar().showMessage(f"带宽应用失败: {e}", 4000)
+            self.statusBar().showMessage(f"带宽应用失败: {e}", MSG_NORMAL)
         # 连接后立即下发默认中心频率（从控制面板读回，否则 98.5MHz）
         default_freq = 98_500_000.0
         try:
@@ -3442,7 +3450,7 @@ class MainWindow(QMainWindow):
         try:
             backend.set_frequency(default_freq)
         except Exception as e:
-            self.statusBar().showMessage(f"初始频率下发失败: {e}", 4000)
+            self.statusBar().showMessage(f"初始频率下发失败: {e}", MSG_NORMAL)
         try:
             backend.set_ppm(int(ppm))
         except Exception:
@@ -3481,7 +3489,7 @@ class MainWindow(QMainWindow):
         if not ok:
             self.statusBar().showMessage(
                 f"切换失败（{reason}），原设备也无法重新连接；请检查后手动连接。",
-                10000)
+                MSG_IMPORTANT)
             return False
         self._active_sdr_backend = previous
         self._panels_set_sdr_connected(True)
@@ -3503,7 +3511,7 @@ class MainWindow(QMainWindow):
         self.disconnect_btn.setEnabled(True)
         self._start_iq_streams()
         self.statusBar().showMessage(
-            f"切换失败（{reason}），已恢复原设备 {name}", 8000)
+            f"切换失败（{reason}），已恢复原设备 {name}", MSG_IMPORTANT)
         return True
 
     def _connect_dialog(self):
@@ -4086,7 +4094,7 @@ class MainWindow(QMainWindow):
         """断开连接（用户点"断开"）：幂等拆除 + 未连接时如实说明。"""
         if self._active_sdr_backend is None and not self._recording:
             # 点了没反应是最糟的体验：没连上也说清楚
-            self.statusBar().showMessage("当前未连接 SDR，没有可断开的设备")
+            self.statusBar().showMessage("当前未连接 SDR，没有可断开的设备", MSG_NORMAL)
         self._teardown_connection()
 
     # ========================================================================
@@ -4133,13 +4141,13 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_error(self, error: str):
-        self.statusBar().showMessage(f"错误: {error}", 5000)
+        self.statusBar().showMessage(f"错误: {error}", MSG_NORMAL)
 
     @Slot(str)
     def _on_log(self, msg: str):
         # 写入状态栏
         try:
-            self.statusBar().showMessage(str(msg), 5000)
+            self.statusBar().showMessage(str(msg), MSG_NORMAL)
         except Exception:
             pass
 
@@ -4154,7 +4162,7 @@ class MainWindow(QMainWindow):
             "可能原因：SDR 已断开、被其他程序占用或驱动异常。"
             "下一步：点工具栏「连接」重连后重试；"
             "界面与已保存配置保持上次成功值。",
-            8000,
+            MSG_IMPORTANT,
         )
 
     def _apply_hw_action(self, action: str, fn) -> bool:
@@ -4267,7 +4275,7 @@ class MainWindow(QMainWindow):
             # S10：忙锁由 _call_ai 统一把关（命令栏不能绕过）
             if self.ai_panel._call_ai(text) is False:
                 self.statusBar().showMessage(
-                    "上一条 AI 指令还在执行，本次指令未提交", 4000)
+                    "上一条 AI 指令还在执行，本次指令未提交", MSG_NORMAL)
         except Exception:
             pass
 
@@ -4456,7 +4464,7 @@ class MainWindow(QMainWindow):
                         next_index)
                     self._start_iq_streams()
                     self.statusBar().showMessage(
-                        f"采样率切换失败，继续按 {old_sr:g} Hz 录制: {e}", 8000)
+                        f"采样率切换失败，继续按 {old_sr:g} Hz 录制: {e}", MSG_IMPORTANT)
                     return
             try:
                 center_hz = float(self._active_sdr_backend.get_frequency())
@@ -4483,7 +4491,7 @@ class MainWindow(QMainWindow):
             self._update_status_bar()
             self.statusBar().showMessage(
                 f"采样率 {old_sr:g} → {rate:g} Hz，录音已分到新文件段: "
-                f"{os.path.basename(new_path)}", 8000)
+                f"{os.path.basename(new_path)}", MSG_IMPORTANT)
         else:
             # 非录音：下发后端 + 重建流水线；后端拒绝就如实报错，不改 UI 读数
             if self._active_sdr_backend is not None:
@@ -4492,7 +4500,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     logger.warning("设备切换采样率失败（非录音态）: %s", e)
                     self.statusBar().showMessage(
-                        f"采样率切换失败（保持原速率）: {e}", 6000)
+                        f"采样率切换失败（保持原速率）: {e}", MSG_IMPORTANT)
                     return
             self._record_sr = rate
             self._stop_iq_streams()
@@ -4519,7 +4527,7 @@ class MainWindow(QMainWindow):
         try:
             self._active_sdr_backend.set_agc(bool(enabled))
         except Exception as e:
-            self.statusBar().showMessage(f"AGC 设置失败: {e}", 4000)
+            self.statusBar().showMessage(f"AGC 设置失败: {e}", MSG_NORMAL)
 
     @Slot(str)
     def _on_agc_speed_changed(self, speed: str):
@@ -4543,7 +4551,7 @@ class MainWindow(QMainWindow):
             if hasattr(self._active_sdr_backend, "set_ppm"):
                 self._active_sdr_backend.set_ppm(int(ppm))
         except Exception as e:
-            self.statusBar().showMessage(f"PPM 设置失败: {e}", 4000)
+            self.statusBar().showMessage(f"PPM 设置失败: {e}", MSG_NORMAL)
 
     @Slot(bool)
     def _on_offset_tuning_changed(self, enabled: bool):
@@ -4554,7 +4562,7 @@ class MainWindow(QMainWindow):
             if hasattr(self._active_sdr_backend, "set_offset_tuning"):
                 self._active_sdr_backend.set_offset_tuning(bool(enabled))
         except Exception as e:
-            self.statusBar().showMessage(f"Offset tuning 设置失败: {e}", 4000)
+            self.statusBar().showMessage(f"Offset tuning 设置失败: {e}", MSG_NORMAL)
 
     @Slot(float)
     def _on_vfo_bandwidth_changed(self, bw_hz: float):
@@ -4619,7 +4627,7 @@ class MainWindow(QMainWindow):
                     pass
             self._sync_spectrum_bookmarks()
             self.statusBar().showMessage(
-                f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}", 3000)
+                f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}", MSG_NORMAL)
         except Exception:
             pass
 
@@ -4975,7 +4983,7 @@ class MainWindow(QMainWindow):
                 ok = self._audio_player.start()
                 if not ok:
                     self.statusBar().showMessage(
-                        "无音频输出设备（声卡已禁用，不影响频谱/录制）", 5000)
+                        "无音频输出设备（声卡已禁用，不影响频谱/录制）", MSG_NORMAL)
             except Exception:
                 pass
         # 注意：桌面端不在此调用 backend.start_audio()。后端自带的 ReceiveChain +
@@ -5143,7 +5151,7 @@ class MainWindow(QMainWindow):
             pass
         self._read_fail_signals += 1
         if not error and connected and self._read_fail_signals < 3:
-            self.statusBar().showMessage(f"数据流中断，正在重试：{reason}", 6000)
+            self.statusBar().showMessage(f"数据流中断，正在重试：{reason}", MSG_IMPORTANT)
             return
         if self._backend_lost_handled:
             return
@@ -5154,7 +5162,10 @@ class MainWindow(QMainWindow):
             self._teardown_connection()
         finally:
             self._backend_lost_handled = False
-        self.statusBar().showMessage(f"设备已断开：{msg}", 15000)
+        # 原为 15 s：想让"掉线"在状态栏停久一点。现在连接状态由顶栏/状态面板
+        # 持续反映，且 15 s 会压住随后 1–3 s 的新提示（用户只看得到旧消息），
+        # 8 s 足够读完且不再盖住后续动态。
+        self.statusBar().showMessage(f"设备已断开：{msg}", MSG_IMPORTANT)
 
     def _update_main_vfo_offset(self):
         """把每个已绑定 DSP 的 VFO 收听频率搬到各自 DDC：offset = vfo_center - backend_center。
@@ -5190,7 +5201,7 @@ class MainWindow(QMainWindow):
         v = mgr.add(center, self._vfo_bw, mode, inherit_last=False)
         mgr.set_active_context(v, temporary=False)
         self.statusBar().showMessage(
-            f"新建 VFO {v.vfo_id} @ {center/1e6:.3f} MHz", 3000)
+            f"新建 VFO {v.vfo_id} @ {center/1e6:.3f} MHz", MSG_NORMAL)
         # 新建后立即把 offset 推给已绑定 DSP（若有）
         self._update_main_vfo_offset()
         self.spectrum._plot.update()
@@ -5210,7 +5221,7 @@ class MainWindow(QMainWindow):
         # Shift 拖拽新建的 VFO 已由频谱组件 add() 进 mgr；这里补 offset 推送
         self._update_main_vfo_offset()
         self.statusBar().showMessage(
-            f"新建 VFO {vfo_id} @ {center_hz/1e6:.3f} MHz", 3000)
+            f"新建 VFO {vfo_id} @ {center_hz/1e6:.3f} MHz", MSG_NORMAL)
 
     def _on_vfo_moved(self, vfo_id: str, center_hz: float):
         """VFO 被拖拽移动：更新该 VFO 的 DDC offset。"""
@@ -5267,7 +5278,7 @@ class MainWindow(QMainWindow):
                 pass
         tag = "主听" if vfo_id in workers else "次听-未解调"
         self.statusBar().showMessage(
-            f"主听切换 → {vfo_id}（{tag}）", 3000)
+            f"主听切换 → {vfo_id}（{tag}）", MSG_NORMAL)
 
     def _on_vfo_removed(self, vfo_id: str):
         """频谱右键删除 VFO：清掉 worker 映射并切主听到剩余 VFO。"""
@@ -5278,7 +5289,7 @@ class MainWindow(QMainWindow):
             cur = self._vfo_mgr.active_vfo_id
             if cur is not None:
                 self._apply_primary_vfo(cur)
-        self.statusBar().showMessage(f"已删除 VFO {vfo_id}", 3000)
+        self.statusBar().showMessage(f"已删除 VFO {vfo_id}", MSG_NORMAL)
 
     @Slot(object, float)
     def _on_pipeline_frame_ready(self, iq: np.ndarray, sr: float):
@@ -5924,7 +5935,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.warning("录制流打开失败（退回内存缓冲）: %s", e)
             self.statusBar().showMessage(
-                f"录制流打开失败（退回内存缓冲）: {e}", 4000)
+                f"录制流打开失败（退回内存缓冲）: {e}", MSG_NORMAL)
             self._record_stream_fh = None
 
     def _record_segment_meta(self) -> dict:
@@ -5983,7 +5994,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     logger.warning("录制 sidecar 写盘失败: %s", e)
                     self.statusBar().showMessage(
-                        f"录制 sidecar 写盘失败: {e}", 5000)
+                        f"录制 sidecar 写盘失败: {e}", MSG_NORMAL)
                     info = {"path": path, "samples": n,
                             "sample_rate": float(self._record_sr),
                             "duration_s": round(n / (self._record_sr or 1), 3),
@@ -6013,7 +6024,7 @@ class MainWindow(QMainWindow):
                             "sidecar": saved.get("sidecar")}
             except Exception as e:
                 logger.warning("录制存盘失败: %s", e)
-                self.statusBar().showMessage(f"录制存盘失败: {e}", 5000)
+                self.statusBar().showMessage(f"录制存盘失败: {e}", MSG_NORMAL)
                 info = None
         self._record_iq_buffer = []
         if info is not None:
@@ -6026,7 +6037,7 @@ class MainWindow(QMainWindow):
         # 回放与录音互斥：回放中按录音＝先停回放再录，语义确定且用户可见
         if self._replay_timer is not None:
             self._stop_replay()
-            self.statusBar().showMessage("已停止回放，开始录音", 6000)
+            self.statusBar().showMessage("已停止回放，开始录音", MSG_IMPORTANT)
         backend = self._active_sdr_backend
         if backend is None or not callable(getattr(backend, "read_samples", None)):
             QMessageBox.warning(
@@ -6115,7 +6126,7 @@ class MainWindow(QMainWindow):
             pass
         self.statusBar().showMessage(
             f"开始录制 baseband: {path}"
-            "（录音目录设置只影响新录音，已有录音不迁移）")
+            "（录音目录设置只影响新录音，已有录音不迁移）", MSG_IMPORTANT)
 
     def _write_session_sidecars(self, segments: list, manifest: list,
                                 total_samples: int, session_duration: float):
@@ -6159,7 +6170,7 @@ class MainWindow(QMainWindow):
                                os.path.basename(seg["path"]), e)
                 self.statusBar().showMessage(
                     f"会话 sidecar 写盘失败（{os.path.basename(seg['path'])}）: {e}",
-                    5000)
+                    MSG_NORMAL)
 
     def _stop_recording(self):
         """停止录制：收尾最后一段并写 sidecar；多段时汇总 segments 清单。"""
@@ -6233,7 +6244,7 @@ class MainWindow(QMainWindow):
                 self.control_panel.record_status.setText("未录音")
             except Exception:
                 pass
-        self.statusBar().showMessage(msg, 8000)
+        self.statusBar().showMessage(msg, MSG_IMPORTANT)
 
     def _toggle_waterfall(self):
         self.spectrum.toggle_waterfall()
@@ -6498,13 +6509,13 @@ class MainWindow(QMainWindow):
             conf = float(getattr(result, "confidence", 0.0) or (
                 result.get("confidence", 0.0) if isinstance(result, dict) else 0.0))
             self.statusBar().showMessage(
-                f"识别完成：{mod}（置信度 {conf*100:.0f}%）", 5000)
+                f"识别完成：{mod}（置信度 {conf*100:.0f}%）", MSG_NORMAL)
         except Exception:
             pass
 
     def _on_modulation_failed(self, msg: str):
         try:
-            self.statusBar().showMessage(f"识别失败: {msg}", 5000)
+            self.statusBar().showMessage(f"识别失败: {msg}", MSG_NORMAL)
         except Exception:
             pass
 
@@ -6514,20 +6525,20 @@ class MainWindow(QMainWindow):
             return
         try:
             self.statusBar().showMessage(
-                f"扫频中 {int(frac*100)}% @ {center_hz/1e6:.3f} MHz", 1500)
+                f"扫频中 {int(frac*100)}% @ {center_hz/1e6:.3f} MHz", MSG_QUICK)
         except Exception:
             pass
 
     def _on_scanner_done(self, segments: list):
         try:
             self.statusBar().showMessage(
-                f"扫频完成：{len(segments or [])} 个活动段", 5000)
+                f"扫频完成：{len(segments or [])} 个活动段", MSG_NORMAL)
         except Exception:
             pass
 
     def _on_scanner_failed(self, msg: str):
         try:
-            self.statusBar().showMessage(f"扫频失败: {msg}", 6000)
+            self.statusBar().showMessage(f"扫频失败: {msg}", MSG_IMPORTANT)
         except Exception:
             pass
 
@@ -6548,13 +6559,13 @@ class MainWindow(QMainWindow):
 
     def _on_module_sink_changed(self, sink: str):
         try:
-            self.statusBar().showMessage(f"输出 sink: {sink}", 3000)
+            self.statusBar().showMessage(f"输出 sink: {sink}", MSG_NORMAL)
         except Exception:
             pass
 
     def _on_module_node_selected(self, name: str, ntype: str):
         try:
-            self.statusBar().showMessage(f"模块节点: {name} ({ntype})", 2000)
+            self.statusBar().showMessage(f"模块节点: {name} ({ntype})", MSG_QUICK)
         except Exception:
             pass
 
@@ -6576,7 +6587,7 @@ class MainWindow(QMainWindow):
             anr = getattr(anr_p, "anr", None) if anr_p is not None else None
             if anr is not None and hasattr(anr, "set_mode"):
                 anr.set_mode(mode)
-            self.statusBar().showMessage(f"降噪模式: {mode}", 3000)
+            self.statusBar().showMessage(f"降噪模式: {mode}", MSG_NORMAL)
         except Exception:
             pass
 
@@ -6585,7 +6596,7 @@ class MainWindow(QMainWindow):
         try:
             self._last_dbfs = 0.0
             self.status_rssi.setText("信号: --")
-            self.statusBar().showMessage("星座图已清空，统计已重置", 2000)
+            self.statusBar().showMessage("星座图已清空，统计已重置", MSG_QUICK)
         except Exception:
             pass
 
@@ -6595,7 +6606,7 @@ class MainWindow(QMainWindow):
             dp = getattr(self, "device_panel", None)
             if dp is not None and hasattr(dp, "refresh_devices"):
                 dp.refresh_devices()
-            self.statusBar().showMessage(f"检测到新设备: {label}", 5000)
+            self.statusBar().showMessage(f"检测到新设备: {label}", MSG_NORMAL)
         except Exception:
             pass
 
@@ -6671,10 +6682,10 @@ class MainWindow(QMainWindow):
             from mbdsdr_ai.sdr_backend import build_backend_for_device
             backend = build_backend_for_device(dev)
         except Exception as e:  # noqa: BLE001
-            self.statusBar().showMessage(f"构造后端失败: {e}", 5000)
+            self.statusBar().showMessage(f"构造后端失败: {e}", MSG_NORMAL)
             return
         if backend is None:
-            self.statusBar().showMessage("无法构造该设备后端", 5000)
+            self.statusBar().showMessage("无法构造该设备后端", MSG_NORMAL)
             return
         ok = self._connect_backend(
             backend,
@@ -6762,7 +6773,7 @@ class MainWindow(QMainWindow):
                 self._on_vfo_bandwidth_changed_ui("", float(bandwidth_hz))
             except Exception:
                 pass
-        self.statusBar().showMessage(f"已应用解调：{mode}", 3000)
+        self.statusBar().showMessage(f"已应用解调：{mode}", MSG_NORMAL)
 
     def _on_bookmark_tune_requested(self, freq_hz: float, mode: str,
                                     bandwidth_hz: float):
@@ -6784,7 +6795,7 @@ class MainWindow(QMainWindow):
         self._on_tune_sdr(freq, mode)
         self.statusBar().showMessage(
             f"已调谐 {info.get('name','卫星')}：{freq/1e6:.4f} MHz "
-            f"(多普勒 {dop:+.0f} Hz)", 5000)
+            f"(多普勒 {dop:+.0f} Hz)", MSG_NORMAL)
 
     def _on_sky_track_toggled(self, on: bool, sat_name: str,
                               downlink_hz: float):
@@ -6797,7 +6808,7 @@ class MainWindow(QMainWindow):
         """
         if on:
             if not sat_name or downlink_hz <= 0.0:
-                self.statusBar().showMessage("跟踪失败：缺少卫星名或下行频点", 4000)
+                self.statusBar().showMessage("跟踪失败：缺少卫星名或下行频点", MSG_NORMAL)
                 self._sync_sky_track_btn(False)
                 return
             before = self._sat_track_timer is not None and \
@@ -6891,14 +6902,14 @@ class MainWindow(QMainWindow):
         if not (self._sat_track_timer is not None
                 and self._sat_track_timer.isActive()):
             self.statusBar().showMessage(
-                "先按「🎯 跟踪」开始闭环跟踪，再开云台跟随", 4000)
+                "先按「🎯 跟踪」开始闭环跟踪，再开云台跟随", MSG_NORMAL)
             self._sync_sky_gimbal_btn(False)
             return
         gc = self._activate_gimbal_if_needed()
         if gc is None:
             self.statusBar().showMessage(
                 "无可用云台后端：连接 ai-sdr-mini 或在 AI 对话里配置 rotctld",
-                5000)
+                MSG_NORMAL)
             self._sync_sky_gimbal_btn(False)
             return
         self._gimbal_follow = True
@@ -6907,7 +6918,7 @@ class MainWindow(QMainWindow):
             limiter.reset()  # 新会话首拍给完整指向，不做插值
         self._sync_sky_gimbal_btn(True)
         self.statusBar().showMessage(
-            f"云台跟随已开启（{gc.status.backend_info}）", 4000)
+            f"云台跟随已开启（{gc.status.backend_info}）", MSG_NORMAL)
 
     # ------------------------------------------------------------------
     # 全天模式（天空视图独立 ViewState / 立体投影 160°）
@@ -7013,11 +7024,11 @@ class MainWindow(QMainWindow):
         if sv is not None and bool(getattr(sv, "all_sky_active", False)):
             sv.set_all_sky_mode(False)
             self.statusBar().showMessage(
-                "已退出全天模式（Esc 再按一次退出天空模式）", 3000)
+                "已退出全天模式（Esc 再按一次退出天空模式）", MSG_NORMAL)
             return True
         if getattr(self, "_app_mode", "ide") == "planetarium":
             self._exit_planetarium()
-            self.statusBar().showMessage("已退出天空模式", 3000)
+            self.statusBar().showMessage("已退出天空模式", MSG_NORMAL)
             return True
         return False
 
@@ -7118,7 +7129,7 @@ class MainWindow(QMainWindow):
         if backend is None or not callable(getattr(backend, "read_samples", None)) \
                 or not callable(getattr(backend, "set_frequency", None)):
             self.statusBar().showMessage(
-                "扫频需要连接本地 SDR 硬件（请先用工具栏「连接」选 USB 设备）", 5000)
+                "扫频需要连接本地 SDR 硬件（请先用工具栏「连接」选 USB 设备）", MSG_NORMAL)
             QMessageBox.information(
                 self, "无法扫频",
                 "扫频找台需要真实 SDR 硬件步进调谐并逐段接收 IQ。\n"
@@ -7241,7 +7252,7 @@ class MainWindow(QMainWindow):
         except Exception:
             nf = 0.0; f0 = 0.0; f1 = 0.0
         self.statusBar().showMessage(
-            f"扫频完成：{n} 个活动频点（噪声底 {nf:.1f} dB）", 10000)
+            f"扫频完成：{n} 个活动频点（噪声底 {nf:.1f} dB）", MSG_IMPORTANT)
         # AI 面板输出完整峰值列表
         try:
             rows = ["<b>扫频找台结果（实测）</b><br>"
@@ -7268,12 +7279,12 @@ class MainWindow(QMainWindow):
 
     def _on_sweep_failed(self, msg: str):
         self._sweep_cleanup()
-        self.statusBar().showMessage(f"扫频失败：{msg}", 8000)
+        self.statusBar().showMessage(f"扫频失败：{msg}", MSG_IMPORTANT)
         QMessageBox.warning(self, "扫频失败", f"扫频过程出错：\n{msg}")
 
     def _on_sweep_cancelled(self):
         self._sweep_cleanup()
-        self.statusBar().showMessage("扫频已取消", 4000)
+        self.statusBar().showMessage("扫频已取消", MSG_NORMAL)
 
     # ------------------------------------------------------------------
     # baseband 离线回放（任务 4）
@@ -7293,7 +7304,7 @@ class MainWindow(QMainWindow):
             self.settings.record_dir,
             "Baseband IQ (*.iq *.cf32 *.cs16 *.wav);;All Files (*)")
         if not path:
-            self.statusBar().showMessage("未选择录音文件", 3000)
+            self.statusBar().showMessage("未选择录音文件", MSG_NORMAL)
             return
         try:
             from mbdsdr_ai import baseband_io
@@ -7320,7 +7331,7 @@ class MainWindow(QMainWindow):
         if segments and len(segments) > 1:
             self.statusBar().showMessage(
                 f"该录音共 {len(segments)} 段（录制中改过采样率）；"
-                f"本次回放第 {rec.get('segment_index', 1)} 段", 8000)
+                f"本次回放第 {rec.get('segment_index', 1)} 段", MSG_IMPORTANT)
         elif self._replay_unknown_duration:
             QMessageBox.warning(
                 self, "回放说明",
@@ -7336,7 +7347,7 @@ class MainWindow(QMainWindow):
         if self._recording:
             self._apply_recording(False)
             self.statusBar().showMessage(
-                "已停止当前录音（文件已保存），开始回放", 8000)
+                "已停止当前录音（文件已保存），开始回放", MSG_IMPORTANT)
         # 每段回放都从零标定噪声基线（不把上一段/上一档增益的底带进来）
         self._replay_squelch = None
         self._replay_resume_poll = self._active_sdr_backend is not None
@@ -7367,7 +7378,7 @@ class MainWindow(QMainWindow):
         self._replay_timer.start()
         self.statusBar().showMessage(
             f"回放中: {os.path.basename(path)}  "
-            f"0.0/{self._replay_total/sr:.1f}s", 0)
+            f"0.0/{self._replay_total/sr:.1f}s", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
         self._refresh_tx_readout()  # 回放不预偏：读数显式说明保持原频率
         # 回放保持原频率：自动预偏开关置灰 + PTT 置灰（tooltip 说明原因）
         self.doppler_chip.setEnabled(False)
@@ -7403,16 +7414,16 @@ class MainWindow(QMainWindow):
         tot_s = self._replay_total / self._replay_sr
         if getattr(self, "_replay_unknown_duration", False):
             self.statusBar().showMessage(
-                f"回放中: {cur_s:.1f}s（总时长未知：录制中改过采样率）", 0)
+                f"回放中: {cur_s:.1f}s（总时长未知：录制中改过采样率）", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
         else:
             self.statusBar().showMessage(
-                f"回放中: {min(cur_s, tot_s):.1f}/{tot_s:.1f}s", 0)
+                f"回放中: {min(cur_s, tot_s):.1f}/{tot_s:.1f}s", 0)  # 常驻：回放进度每帧覆盖，直到用户停止
         if self._replay_pos >= self._replay_total:
             done = ("回放完成（时长未知：录制中改过采样率）"
                     if getattr(self, "_replay_unknown_duration", False)
                     else f"回放完成（{tot_s:.1f}s）")
             self._stop_replay()
-            self.statusBar().showMessage(done, 5000)
+            self.statusBar().showMessage(done, MSG_NORMAL)
 
     def _stop_replay(self):
         """停止回放并恢复实时状态。
@@ -7614,9 +7625,9 @@ class MainWindow(QMainWindow):
         self.sat_track_panel.populate_satellites(names)
         self.sat_track_panel.set_tle_date(self._loop_sat_tracker.tle_date)
         if n > 0:
-            self.statusBar().showMessage(f"TLE 已更新（{n} 颗刷新）", 4000)
+            self.statusBar().showMessage(f"TLE 已更新（{n} 颗刷新）", MSG_NORMAL)
         else:
-            self.statusBar().showMessage("TLE 在线更新失败，使用内置 TLE", 4000)
+            self.statusBar().showMessage("TLE 在线更新失败，使用内置 TLE", MSG_NORMAL)
 
     def _menu_start_sat_track(self):
         """菜单项触发：等价于点面板上的开始按钮。"""
@@ -7647,13 +7658,13 @@ class MainWindow(QMainWindow):
           - 无观测者位置时拒绝跟踪并提示。
         """
         if LoopSatTracker is None:
-            self.statusBar().showMessage("卫星跟踪不可用（缺 skyfield 依赖）", 4000)
+            self.statusBar().showMessage("卫星跟踪不可用（缺 skyfield 依赖）", MSG_NORMAL)
             return
         if self._observer_lat is None or self._observer_lon is None:
             self._sync_tracking_ui(False)
             self.statusBar().showMessage(
                 "需要观测者位置：连接 GNSS 或在 gui_config.json 配置 observer_lat/lon",
-                6000)
+                MSG_IMPORTANT)
             return
 
         from mbdsdr_ai.sat_passes import GroundStation
@@ -7667,7 +7678,7 @@ class MainWindow(QMainWindow):
             self._loop_sat_tracker.ground_station = gs
 
         if not self._loop_sat_tracker.select_satellite(sat_name):
-            self.statusBar().showMessage(f"无法选中卫星 {sat_name}", 4000)
+            self.statusBar().showMessage(f"无法选中卫星 {sat_name}", MSG_NORMAL)
             return
         self._loop_sat_tracker.set_downlink_freq(downlink_freq_hz)
 
@@ -7694,7 +7705,7 @@ class MainWindow(QMainWindow):
         self._sat_track_timer.start()
         self._sync_tracking_ui(True)
         self.statusBar().showMessage(
-            f"开始跟踪 {sat_name}（下行 {downlink_freq_hz/1e6:.4f} MHz）", 4000)
+            f"开始跟踪 {sat_name}（下行 {downlink_freq_hz/1e6:.4f} MHz）", MSG_NORMAL)
         self._poll_satellite_track()  # 立即先调谐一次
         self._refresh_tx_readout()    # 目标切换 → 发射预偏读数立即重算
 
@@ -7724,14 +7735,14 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
                 self.statusBar().showMessage(
-                    "目标位置失效，云台跟随已停止并解锁（保持最后指向）", 5000)
+                    "目标位置失效，云台跟随已停止并解锁（保持最后指向）", MSG_NORMAL)
             return
         el = float(pos["elevation"])
         # 仰角 < 5°：过境结束，停止闭环
         if el < 5.0:
             self._stop_satellite_tracking()
             self.statusBar().showMessage(
-                f"卫星过境结束（仰角 {el:.1f}° < 5°）", 6000)
+                f"卫星过境结束（仰角 {el:.1f}° < 5°）", MSG_IMPORTANT)
             return
         # 核心：调谐频率 = 下行频率 + 多普勒偏移（补偿开启时）；
         # 用户关闭补偿 → 调谐标称下行（诚实不补偿，不沿用过期偏移）。
@@ -7769,7 +7780,7 @@ class MainWindow(QMainWindow):
                     if limiter is not None:
                         limiter.reset()
                     self._sync_sky_gimbal_btn(False)
-                    self.statusBar().showMessage("云台后端已离线，跟随关闭", 4000)
+                    self.statusBar().showMessage("云台后端已离线，跟随关闭", MSG_NORMAL)
                 else:
                     az = float(pos.get("azimuth") or 0.0)
                     limiter = getattr(self, "_gimbal_limiter", None)
@@ -7814,7 +7825,7 @@ class MainWindow(QMainWindow):
             self.doppler_chip.blockSignals(True)
             self.doppler_chip.setChecked(False)
             self.doppler_chip.blockSignals(False)
-            self.statusBar().showMessage(comp.state.reason, 5000)
+            self.statusBar().showMessage(comp.state.reason, MSG_NORMAL)
             self._refresh_tx_readout()
             return
         self._refresh_tx_readout()
@@ -7880,7 +7891,7 @@ class MainWindow(QMainWindow):
                     sv.set_sat_signal(str(name), False)
             except Exception:
                 pass
-        self.statusBar().showMessage("卫星跟踪已停止", 3000)
+        self.statusBar().showMessage("卫星跟踪已停止", MSG_NORMAL)
         self._refresh_tx_readout()
 
     def _update_sky_satellites(self):
@@ -7969,11 +7980,11 @@ class MainWindow(QMainWindow):
             ok = False
         if ok:
             self.statusBar().showMessage(
-                f"GNSS 已连接: {port or '自动检测'} @ {baud}，正在搜星…", 5000)
+                f"GNSS 已连接: {port or '自动检测'} @ {baud}，正在搜星…", MSG_NORMAL)
         else:
             self.statusBar().showMessage(
                 f"GNSS 连接失败: {port or '自动检测'} @ {baud}"
-                f"（检查串口/波特率/接线，端口是否被占用）", 10000)
+                f"（检查串口/波特率/接线，端口是否被占用）", MSG_IMPORTANT)
         try:
             self._save_gui_config()
         except Exception:
@@ -7987,7 +7998,7 @@ class MainWindow(QMainWindow):
             self._gnss.stop()
         except Exception:
             pass
-        self.statusBar().showMessage("GNSS 已断开", 3000)
+        self.statusBar().showMessage("GNSS 已断开", MSG_NORMAL)
 
     @Slot()
     def _poll_gnss(self):
@@ -8131,7 +8142,7 @@ class MainWindow(QMainWindow):
                     f"已指向 {obj.name} (AZ {obj.azimuth_deg:.1f}°, "
                     f"EL {obj.elevation_deg:.1f}°) · "
                     f"已调谐到 {freq_mhz:.3f} MHz",
-                    5000,
+                    MSG_NORMAL,
                 )
             else:
                 next_step = (
@@ -8142,13 +8153,13 @@ class MainWindow(QMainWindow):
                     f"已指向 {obj.name} (AZ {obj.azimuth_deg:.1f}°, "
                     f"EL {obj.elevation_deg:.1f}°) · "
                     f"未调谐频率：{reason}。{next_step}",
-                    6000,
+                    MSG_IMPORTANT,
                 )
         elif obj.obj_type == "interferer":
             self.statusBar().showMessage(
                 f"干扰源 {obj.name}: AZ {obj.azimuth_deg:.1f}°, EL {obj.elevation_deg:.1f}°, "
                 f"信号 {obj.signal_strength_db:.1f} dB",
-                5000,
+                MSG_NORMAL,
             )
 
     def _release_runtime_resources(self) -> None:
@@ -8406,7 +8417,7 @@ class MainWindow(QMainWindow):
         try:
             self.statusBar().showMessage(
                 f"配置文件损坏（{why}），已备份为 {os.path.basename(backup)}；"
-                "本次按默认值启动，原文件未删除。", 20000)
+                "本次按默认值启动，原文件未删除。", MSG_IMPORTANT)
         except Exception:
             pass
         return backup
