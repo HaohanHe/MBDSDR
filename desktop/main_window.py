@@ -92,6 +92,21 @@ def _record_segment_path(base_path: str, index: int) -> str:
     return f"{stem}_part{index}{ext}"
 
 
+def _planetarium_overlay_pos(sky_w: int, sky_h: int, strip_w: int,
+                             strip_h: int, bar_rect: QRect,
+                             margin: int = 12, gap: int = 8) -> tuple[int, int]:
+    """浮层坐标：默认贴右上角 ``margin``；仅当真的压到 AI 命令栏时才下移。
+
+    下移后再也不会自动回弹，所以判定必须基于当前几何而不是一次性开关：
+    窗口变宽、浮层与命令栏不再相交时，下一次重排（resize 事件）回到上 12。
+    """
+    x = max(margin, sky_w - strip_w - margin)
+    y = margin
+    if bar_rect.isValid() and QRect(x, y, strip_w, strip_h).intersects(bar_rect):
+        y = bar_rect.bottom() + 1 + gap
+    return x, y
+
+
 def _tx_unapplied_reason(note) -> str:
     """把 resolve_tx_doppler 的 reason 归成读数里的短标签（只做措辞，不算 Δ）。"""
     reason = str((note or {}).get("reason") or "").strip()
@@ -227,6 +242,7 @@ import numpy as np
 
 from PySide6.QtCore import (
     Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings, QRect,
+    QPoint,
 )
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QFont, QShortcut, QGuiApplication,
@@ -2151,6 +2167,7 @@ class MainWindow(QMainWindow):
         bar.setFixedWidth(max(w, 280))
         bar.move((parent.width() - bar.width()) // 2, 16)
         bar.raise_()
+        self._position_planetarium_overlay()
 
     def _handle_shortcut_override(self, event) -> bool:
         """Ctrl+C 焦点感知：文本输入控件上放行标准复制，返回 True 表示已接管。
@@ -4876,13 +4893,25 @@ class MainWindow(QMainWindow):
         self._position_planetarium_overlay()
 
     def _position_planetarium_overlay(self) -> None:
-        """浮层贴天空视图右上角 12px；不参与布局，随天空尺寸重排。"""
+        """浮层贴天空视图右上角 12px；与 AI 命令栏相交时下移避让。
+
+        必须用当前几何现算：窗口变宽后自然回到上 12，不存在“下移一次就永久
+        下移”的状态位。
+        """
         strip = getattr(self, "_planetarium_strip", None)
         sky = getattr(self, "sky_view", None)
         if strip is None or sky is None:
             return
         strip.adjustSize()
-        strip.move(max(12, sky.width() - strip.width() - 12), 12)
+        bar = getattr(self, "_ai_cmd_bar", None)
+        bar_rect = QRect()
+        if bar is not None and bar.isVisible():
+            # 命令栏与天空同属一个槽但不同父链，用全局坐标换算到天空坐标系。
+            top_left = sky.mapFromGlobal(bar.mapToGlobal(QPoint(0, 0)))
+            bar_rect = QRect(top_left, bar.size())
+        x, y = _planetarium_overlay_pos(
+            sky.width(), sky.height(), strip.width(), strip.height(), bar_rect)
+        strip.move(x, y)
         strip.raise_()
 
     def _set_planetarium_strip_hover(self, on: bool) -> None:
