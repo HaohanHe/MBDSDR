@@ -28,11 +28,6 @@ def qtapp():
 
 @pytest.fixture(scope="module")
 def window(qtapp):
-    import spectrum_widget
-    if not hasattr(spectrum_widget, "owns_local_shortcuts"):
-        # 上游 main_window 已引用该符号、spectrum_widget 尚未导出（他线在途）；
-        # 仅测试垫片，避免未完成提交阻断本批验证。
-        spectrum_widget.owns_local_shortcuts = lambda *a, **k: False
     import main_window as mw
     from PySide6.QtTest import QTest
     w = mw.MainWindow()
