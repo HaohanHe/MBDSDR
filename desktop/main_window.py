@@ -4851,16 +4851,22 @@ class MainWindow(QMainWindow):
             pass
 
     def _show_real_gain(self, backend) -> None:
-        """把设备真实增益读回标签（成功/失败都读）；读不到保持原值，绝不编造。"""
+        """把设备真实增益读回标签（成功/失败都读）；读不到退回最后一次读回值。"""
         try:
             real = backend.get_gain()
             real_db = float(real) if real is not None else None
         except Exception as e:  # noqa: BLE001 - 读数失败只影响显示，但要留证
-            logger.warning("读取真实增益失败（增益读数保持原值）: %s: %s",
+            logger.warning("读取真实增益失败（回退到最后一次读回值）: %s: %s",
                            type(e).__name__, e)
-            return
+            real_db = None
         if real_db is None:
-            return
+            # 读不到设备真实值：用最后一次成功读回的值，绝不把用户刚拖的新值
+            # 留在标签上——那正是「显示一个从未生效的数」。
+            real_db = getattr(self, "_last_gain_applied", None)
+            if real_db is None:
+                return
+        else:
+            self._last_gain_applied = real_db
         cp = getattr(self, "control_panel", None)
         if cp is not None:
             cp.set_gain_applied(real_db)
@@ -5051,6 +5057,8 @@ class MainWindow(QMainWindow):
                     applied_sr = float(self._active_sdr_backend.get_sample_rate())
                 except Exception as e:
                     logger.warning("设备切换采样率失败: %s", e)
+                    # 下拉回到实际速率：继续按旧速录制时，界面不能停在新请求上
+                    self.control_panel.set_sample_rate(old_sr)
                     # 后端速率没变：用旧速率续录新段，绝不让 _recording=True
                     # 却没有任何段可写（否则停止时会覆盖已收尾的旧文件）。
                     next_index = len(self._record_segments) + 1
@@ -5117,6 +5125,12 @@ class MainWindow(QMainWindow):
                     logger.warning("设备切换采样率失败（非录音态）: %s", e)
                     self.statusBar().showMessage(
                         f"采样率切换失败（保持原速率）: {e}", MSG_IMPORTANT)
+                    # 下拉必须回到设备真实值：停在新请求上就是显示一个从未生效的数
+                    try:
+                        actual = float(self._active_sdr_backend.get_sample_rate())
+                    except Exception:  # noqa: BLE001 - 回读也失败时用最后一次已知值
+                        actual = float(self._record_sr)
+                    self.control_panel.set_sample_rate(actual)
                     return
                 if ok is False:
                     logger.warning("设备拒绝采样率 %s，保持 %s", rate, applied)
@@ -5163,12 +5177,14 @@ class MainWindow(QMainWindow):
         before = self.settings.get("agc_enabled", None)
         if not self._apply_hw_action(
                 "设置 AGC", lambda: backend.set_agc(bool(enabled))):
-            if before is not None:
-                try:
-                    self.control_panel.set_agc(bool(before))
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("AGC 失败后恢复开关原态失败: %s: %s",
-                                   type(e).__name__, e)
+            # 读不到历史值时按连接默认（AGC 开）回退：绝不把失败值留在开关上，
+            # 否则界面显示着一个设备从未接受的 AGC 状态。
+            revert = True if before is None else bool(before)
+            try:
+                self.control_panel.set_agc(revert)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("AGC 失败后恢复开关原态失败: %s: %s",
+                               type(e).__name__, e)
             return
         try:
             self.settings.set("agc_enabled", bool(enabled))
