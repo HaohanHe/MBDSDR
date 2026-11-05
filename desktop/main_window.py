@@ -593,12 +593,24 @@ class _SweepWorker(QThread):
 
         backend = self._backend
 
+        # 调谐失败（异常或显式 False）必须中止整次扫频：继续采样只会得到
+        # "旧频率上的样本"，最后产出"该频段无电台"的伪结论。
+        refused = {}
+
         def acquire(center_hz, sample_rate_hz, n):
             if self._cancel:
                 return None
             try:
-                backend.set_frequency(float(center_hz))
-            except Exception:
+                applied = backend.set_frequency(float(center_hz))
+            except Exception as e:
+                refused.setdefault(
+                    "reason", f"调谐到 {center_hz / 1e6:.3f} MHz 失败：{e}")
+                return None
+            if applied is False:
+                status = getattr(backend, "status", None)
+                reason = getattr(status, "error", "") or (
+                    f"调谐到 {center_hz / 1e6:.3f} MHz 未落到硬件（设备拒绝该频率）")
+                refused.setdefault("reason", reason)
                 return None
             # 调谐后短暂驻留，让 AGC/滤波器稳定（SDR++ scanner 换频后也会等）
             _time.sleep(0.04)
@@ -620,6 +632,10 @@ class _SweepWorker(QThread):
             return
         if self._cancel:
             self.cancelled.emit()
+        elif refused:
+            # 不能用剩余频点的"0 台"结果冒充扫频成功。
+            self.failed.emit(
+                f"扫频中止：{refused['reason']}；未在旧频率继续采样，结果不可信")
         else:
             self.finished_ok.emit(result)
 
@@ -8421,11 +8437,22 @@ class MainWindow(QMainWindow):
             pass
         # 调谐到最强活动台，让第一个 marker 立即可见
         if activities and backend is not None:
+            target_hz = float(activities[0].center_hz)
+            tune_error = ""
             try:
-                backend.set_frequency(float(activities[0].center_hz))
-                self.spectrum.generator.center_freq_hz = float(activities[0].center_hz)
-            except Exception:
-                pass
+                if backend.set_frequency(target_hz) is False:
+                    status = getattr(backend, "status", None)
+                    tune_error = getattr(status, "error", "") or "设备拒绝该频率"
+            except Exception as e:
+                tune_error = str(e)
+            if tune_error:
+                # 调谐没生效就不能把 marker 基准搬过去，否则图上标着新频率、
+                # 实际仍收旧频，是另一种状态撒谎。
+                self.statusBar().showMessage(
+                    f"扫频完成，但未能调谐到最强台 {target_hz / 1e6:.3f} MHz："
+                    f"{tune_error}；频谱仍停留在原频率", MSG_IMPORTANT)
+            else:
+                self.spectrum.generator.center_freq_hz = target_hz
         self._sweep_cleanup()
 
         # 状态栏摘要

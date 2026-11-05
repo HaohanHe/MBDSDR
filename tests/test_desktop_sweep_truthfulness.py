@@ -1,13 +1,8 @@
 # SPDX-License-Identifier: MIT
-"""桌面扫频诚实性测试（**未合并补丁配套件，本文件后缀 .pending 不被 pytest 收集**）。
+"""桌面扫频诚实性：调谐被拒不得产出「该频段无电台」伪结论。
 
-合并方法（须与补丁同一个提交）：
-  1. 把本文件改名为 ``tests/test_desktop_sweep_truthfulness.py``；
-  2. 同时对 ``desktop/main_window.py`` 应用同目录补丁
-     ``2026-11-06-desktop-sweep-tuning-refusal.md`` 的内嵌 diff。
-
-**当前 HEAD 上本用例预期 1 failed**——这是未合并补丁的反证证据，不是回归，
-**禁止为了让全量跑变绿而放宽/删除任何断言**。
+（原为 docs/pending-patches/2026-11-06-desktop-sweep-truthfulness-test.py.pending，
+随补丁 2026-11-06-desktop-sweep-tuning-refusal.md 合并，2026-11-06 移入本目录。）
 """
 import os
 import sys
