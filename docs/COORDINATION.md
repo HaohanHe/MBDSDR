@@ -668,7 +668,7 @@
 
 ---
 
-- 2026-11-06 | 日志与书签版本线 | **口径更正：`waived-total` 只能按 HEAD 报**
+- 2026-11-06 | 日志与书签版本线 | **口径修正：`waived-total` 只能按 HEAD 报**
   本线落库汇报里曾写「`waived-total` 降到 70」，属**错报**：把工作区快照当成
   了自己提交的效果。实况三值：提交前 HEAD 135、本线提交 `45d4832f` 后 HEAD
   **103**、工作区 70（= 135 − 33 他线未提交销账 − 32 本线销账）。70 从未进入
@@ -1681,16 +1681,16 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 HEAD 白名单 103 行中有 6 行对应的断言**已在 HEAD 真修/真删**，闸门
 `test_waivers_are_not_stale` 因此红（`pytest tests/test_claims_guard.py -q`：
 2 failed / 2 passed）。`docs/claim-waivers.md` 当前持有方＝日志与书签版本线；
-按「只删已修好的、未确认一条不删」处理，逐条用 `git show HEAD:<path>` 复核：
+按「只删核对为真修好的、未确认一条不删」处理，逐条用 `git show HEAD:<path>` 复核：
 
 | id | 文件 | owner | HEAD 复核证据 | 结论 | 书面确认 |
 | --- | --- | --- | --- | --- | --- |
-| 77 | `docs/packaging.md` | 打包线 | `:17` 已改写为 `50aa1db0` — `desktop/main.py:74` — … | 已补证 | 待确认 |
-| 78 | `docs/packaging.md` | 打包线 | `:200` 已改写为 `50aa1db0` — `desktop/main.py:350` — … | 已补证 | 待确认 |
-| 79 | `docs/packaging.md` | 打包线 | 原「约束 / 实测行为 / 期望 / 差距 / 已修」表行已不存在 | 已删 | 待确认 |
-| 80 | `docs/packaging.md` | 打包线 | `:566` 已改写为 `c295423e` — `desktop/startup_paths.py:98` — … | 已补证 | 待确认 |
-| 81 | `docs/parameter-unification.md` | 采样率线 | `:423` 已改写为 `70429a02` — `desktop/main_window.py:3963` — … | 已补证 | 待确认 |
-| 83 | `docs/parameter-unification.md` | 采样率线 | `:425` 已改写为 `754f64e6` — `scripts/sample_rate_readback_check.py:156` — … | 已补证 | 待确认 |
+| 77 | `docs/packaging.md` | 打包线 | `:17` 现为 `50aa1db0` — `desktop/main.py:74` — … | 已补证 | 待确认 |
+| 78 | `docs/packaging.md` | 打包线 | `:200` 现为 `50aa1db0` — `desktop/main.py:350` — … | 已补证 | 待确认 |
+| 79 | `docs/packaging.md` | 打包线 | 原「约束 / 实测行为 / 期望 / 差距 / 完成」表行不再存在 | 已删 | 待确认 |
+| 80 | `docs/packaging.md` | 打包线 | `:566` 现为 `c295423e` — `desktop/startup_paths.py:98` — … | 已补证 | 待确认 |
+| 81 | `docs/parameter-unification.md` | 采样率线 | `:423` 现为 `70429a02` — `desktop/main_window.py:3963` — … | 已补证 | 待确认 |
+| 83 | `docs/parameter-unification.md` | 采样率线 | `:425` 现为 `754f64e6` — `scripts/sample_rate_readback_check.py:156` — … | 已补证 | 待确认 |
 
 其余 40 行（HEAD 有、工作区无，但**在 HEAD 仍是未证实断言**）一律不删：
 `docs/PRD-现状对照.md` 16、`docs/PRD.md` 10、`docs/settings-inventory.md` 9、
