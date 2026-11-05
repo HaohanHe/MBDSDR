@@ -467,3 +467,9 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 **残留线程归因（实测+代码普查）**：产品代码里所有 14 处 `threading.Thread(` 创建点均为 `daemon=True`（`audio_device_manager.py:321`、`core/controller.py:568/796/865/1310`、`device_manager.py:242/244/642`、`mcp_client.py:304/307`、`remote_control.py:190`、`usb_watchdog.py:172`、`reconnection.py:355`、`scheduler.py:343`、`dsp.py:1294`）；正常构造/关闭路径实测无任何残留线程。因此复现里出现的 `Thread-1` **不是产品的非守护线程**：`DemodWorker` 与 rtlsdr 回调都是 native/QThread 线程，不出现在 `threading.enumerate()`；该 `Thread-1` 只能是复现脚本/宿主 harness 自己创建且未 join 的线程。也就是说，**不存在「产品非守护线程没 join 导致退不出」这一条**；卡住的原因是 Qt 事件循环没有返回（中断没被转成 `app.quit()`），而不是 Python 线程阻塞解释器退出。
 
+
+## 附 J：历表月相照度反转（已修，2026-11-05，天空线追加）
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L46 | **`solar_system` 三个后端把「日月距角」当成「月处相位角」直接套 `0.5*(1+cos)`，照度整条反转**：2026-11-09 13:30 UTC 新月（距角 6.05°）历表给 `illum=0.997`，渲染成满月；满月时刻给 0.003 | 天空线：旧矩阵「蛾眉」格真实距角 121.8–143.1°（物理是凸月）却被标成 0.10–0.24；同一旧 `phase_angle_deg` 字段实际存的是距角，字段名与语义也错位 | **已修**：换算收敛到 `moon_illum_from_elongation` 一处（`illum = 0.5*(1-cos 距角)`，月处相位角 `≈180°-距角`），skyfield/jplephem/astropy 三后端共用；渲染层 `cos α = 2·illum-1` 未改。顺带修好 jplephem 段方向（`spk[center, target]` 曾写反，后端整条不可用） | `pytest tests/test_moon_illumination_real_ephemeris.py`：新月 ≤0.02、满月 ≥0.98、上下弦 0.5±0.03、单调递增、skyfield/jplephem 差 ≤0.01、新月亮区面积 ≤0.02（旧值 0.997 必红）；astropy 未安装按环境 skip |

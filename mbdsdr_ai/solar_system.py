@@ -11,7 +11,7 @@ MBDSDR AI 内核 - 真实日月行星位置模块
 - 地球位置 = EMB（地月质心） - 月球位置 * mu_m/(1+mu_m)（mu_m≈0.0123）。
 - 月球位置可用 ELP2000-82B 理论。
 - J2000 地心赤道矢量 = (行星日心 - 观测者日心 + 光行差修正)。
-- 被照亮比例 = 0.5 * |1 + cos(相位角)|；相位角由三角形余弦定理给出。
+- 被照亮比例 = 0.5 * (1 - cos(日月距角))；月处相位角 ≈ 180° - 距角。
 - 光行时修正：lightTimeDays = 距离_AU / (光速_km/s * 86400)，
   再按 t - lightTime 重算位置；光行差修正 = lightTime * 观测者速度。
 
@@ -567,9 +567,36 @@ def _position_skyfield(body_key: str, t_unix: float,
     )
 
 
+def moon_illum_from_elongation(elong_deg: float) -> float:
+    """月相被照亮比例：illum = 0.5 * (1 - cos(日月距角))。
+
+    距角 = 从地球看「太阳—月球」的角距：0°=新月，90°=上下弦，180°=满月。
+    月处相位角 ≈ 180° - 距角（三角近似；月球距离变化带来的误差远小于 0.1°）。
+    这是本仓**唯一**一处月相照度实现，三个历表后端都调用它。
+    """
+    elong = max(0.0, min(180.0, float(elong_deg)))
+    return 0.5 * (1.0 - math.cos(math.radians(elong)))
+
+
+def moon_phase_angle_from_elongation(elong_deg: float) -> float:
+    """月处相位角（度）≈ 180° - 日月距角。"""
+    return 180.0 - max(0.0, min(180.0, float(elong_deg)))
+
+
+def _moon_phase_from_elongation(elong_deg: float) -> Tuple[float, float]:
+    """距角 → (月处相位角, 被照亮比例)。三个后端共用的唯一换算入口。"""
+    elong = max(0.0, min(180.0, float(elong_deg)))
+    return (moon_phase_angle_from_elongation(elong),
+            moon_illum_from_elongation(elong))
+
+
 def _moon_phase_skyfield(t_unix: float, station: GroundStation,
                          moon_pos: BodyPosition) -> Tuple[float, float]:
-    """计算月相角和照亮比例（被照亮比例 = 0.5*(1+cos_phase)）。"""
+    """计算（月处相位角, 被照亮比例）：先取日月距角，再走统一换算。
+
+    注意：地心太阳/月球矢量夹角是**距角**（0°=新月、180°=满月），
+    不是月处相位角；两者相差 180°，照度方向不能拿距角直接套 (1+cos)/2。
+    """
     be = _get_backend()
     ts = be._sf_ts
     eph = be._sf_eph
@@ -587,16 +614,13 @@ def _moon_phase_skyfield(t_unix: float, station: GroundStation,
     moon_geo = earth.at(t).observe(moon).apparent()
     moon_vec = moon_geo.position.au  # 地心→月球 (AU)
 
-    # 相位角：太阳-月球-观测者(地心) 夹角
-    # cos(phase) = (moon_vec · sun_vec) / (|moon_vec| * |sun_vec|)
+    # 日月距角：地心看太阳与月球的角距（0°=新月，180°=满月）。
     dot = sum(a * b for a, b in zip(moon_vec, sun_vec))
     moon_norm = math.sqrt(sum(a * a for a in moon_vec))
     sun_norm = math.sqrt(sum(a * a for a in sun_vec))
-    cos_phase = dot / (moon_norm * sun_norm)
-    cos_phase = max(-1.0, min(1.0, cos_phase))
-    phase_angle = math.degrees(math.acos(cos_phase))
-    illumination = 0.5 * (1.0 + cos_phase)
-    return phase_angle, illumination
+    cos_elong = max(-1.0, min(1.0, dot / (moon_norm * sun_norm)))
+    elongation = math.degrees(math.acos(cos_elong))
+    return _moon_phase_from_elongation(elongation)
 
 
 # ── jplephem 后端实现（skyfield 不可用时的 .bsp 直接读取）───
@@ -644,31 +668,41 @@ def _radec_to_altaz(ra_deg: float, dec_deg: float, jd_ut: float,
 
 
 def _jplephem_geo_vector(spk: Any, body_id: int, jd: float) -> Tuple[float, float, float]:
-    """返回 body 相对地心的 ICRS 矢量（km）。自动处理 EMB/地球链。"""
+    """返回 body 相对地心的 ICRS 矢量（km）。自动处理 EMB/地球链。
+
+    jplephem 的下标语义是 ``spk[center, target].compute(jd) = target - center``；
+    DE421 的段 (3,301)/(3,399) 表示月球/地球相对 EMB，写成 ``spk[301, 3]``
+    会直接 KeyError（历史实现把 center/target 写反，jplephem 后端因此整条
+    不可用）。
+    """
     earth_id = 399
-    # 优先直接段
-    def _try(a: int, b: int):
+    ssb = 0
+    emb_id = 3
+
+    def _try(center: int, target: int):
         try:
-            return spk[a, b].compute(jd)
+            return spk[center, target].compute(jd)
         except Exception:
             return None
 
     if body_id == earth_id:
         return (0.0, 0.0, 0.0)
-    v = _try(body_id, earth_id)
+    v = _try(earth_id, body_id)          # target(body) - center(earth)
     if v is not None:
         return tuple(float(c) for c in v)  # type: ignore[return-value]
-    # 链：body wrt SSB - earth wrt SSB
-    body_ssb = _try(body_id, 0)
-    earth_ssb = _try(earth_id, 0)
+    # 链：(body - EMB) + (EMB - SSB) - (earth - SSB)
+    body_ssb = _try(ssb, body_id)
+    earth_ssb = _try(ssb, earth_id)
+    emb = _try(ssb, emb_id)
+    if earth_ssb is None:
+        e_emb = _try(emb_id, earth_id)
+        if emb is None:
+            raise ValueError("无法定位地球（既无 0→399 也无 0→3 段）")
+        earth_ssb = tuple(a + b for a, b in zip(emb, e_emb)) if e_emb is not None else emb
     if body_ssb is None:
-        # 经 EMB(3) 链
-        emb = _try(3, 0)
-        e_emb = _try(earth_id, 3)
-        b_emb = _try(body_id, 3)
+        b_emb = _try(emb_id, body_id)
         if emb is None or b_emb is None:
             raise ValueError(f"无法定位天体 {body_id}")
-        earth_ssb = tuple(a + b for a, b in zip(emb, e_emb)) if e_emb is not None else emb
         body_ssb = tuple(a + b for a, b in zip(emb, b_emb))
     return tuple(float(b - e) for b, e in zip(body_ssb, earth_ssb))  # type: ignore[return-value]
 
@@ -700,7 +734,7 @@ def _position_jplephem(body_key: str, t_unix: float,
 
 def _moon_phase_jplephem(t_unix: float, station: GroundStation,
                          moon_pos: BodyPosition) -> Tuple[float, float]:
-    """jplephem 引擎月相：用真实地心太阳/月球矢量算相位角。"""
+    """jplephem 引擎月相：用真实地心太阳/月球矢量取距角，再走统一换算。"""
     be = _get_backend()
     spk = be._handle.spk
     jd = _unix_to_jd(t_unix)
@@ -709,8 +743,9 @@ def _moon_phase_jplephem(t_unix: float, station: GroundStation,
     dot = sum(a * b for a, b in zip(sun_v, moon_v))
     mn = math.sqrt(sum(a * a for a in moon_v))
     sn = math.sqrt(sum(a * a for a in sun_v))
-    cos_phase = max(-1.0, min(1.0, dot / (mn * sn)))
-    return math.degrees(math.acos(cos_phase)), 0.5 * (1.0 + cos_phase)
+    cos_elong = max(-1.0, min(1.0, dot / (mn * sn)))
+    elongation = math.degrees(math.acos(cos_elong))
+    return _moon_phase_from_elongation(elongation)
 
 
 # ── astropy builtin 后端实现 ───────────────────────────
@@ -757,7 +792,7 @@ def _position_astropy(body_key: str, t_unix: float,
 
 def _moon_phase_astropy(t_unix: float, station: GroundStation,
                         moon_pos: BodyPosition) -> Tuple[float, float]:
-    """astropy 后端月相。"""
+    """astropy 后端月相：单位矢量夹角即日月距角，再走统一换算。"""
     be = _get_backend()
     ap = be._astropy
     coord = ap["coord"]
@@ -787,9 +822,8 @@ def _moon_phase_astropy(t_unix: float, station: GroundStation,
     moon_v = _unit_vec(moon)
     dot = sum(a * b for a, b in zip(sun_v, moon_v))
     dot = max(-1.0, min(1.0, dot))
-    phase_angle = math.degrees(math.acos(dot))
-    illumination = 0.5 * (1.0 + dot)
-    return phase_angle, illumination
+    elongation = math.degrees(math.acos(dot))
+    return _moon_phase_from_elongation(elongation)
 
 
 # ── 公共 API ──────────────────────────────────────────
@@ -859,7 +893,7 @@ def get_moon_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
     """
     获取月球视位置（含相位、照度、角直径）。
 
-    月球位置用 ELP2000-82B 理论；被照亮比例 = 0.5*(1+cos_phase)。
+    月球位置用 ELP2000-82B 理论；被照亮比例 = 0.5*(1-cos(日月距角))。
 
     返回:
         BodyPosition（含 phase_angle_deg, illumination, angular_diameter_deg）
