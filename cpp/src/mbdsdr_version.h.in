@@ -1,0 +1,3 @@
+// 由 CMake configure_file 从 mbdsdr_ai/VERSION 生成，不要手改，也不要提交生成物。
+#pragma once
+#define MBDSDR_VERSION "@MBDSDR_VERSION@"

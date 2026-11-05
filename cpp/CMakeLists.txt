@@ -12,6 +12,12 @@ endif()
 project(mbdsdr VERSION ${MBDSDR_VERSION_NUMERIC} LANGUAGES CXX)
 message(STATUS "MBDSDR_VERSION=${MBDSDR_VERSION} (project VERSION ${MBDSDR_VERSION_NUMERIC})")
 
+# C++ 侧的版本只能来自这里：generate 一个头文件，源码里不许再手抄版本字面量。
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/mbdsdr_version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/mbdsdr_version.h"
+    @ONLY)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -322,7 +328,7 @@ set(HEADERS
 set(CORE_SRCS ${SOURCES})
 list(REMOVE_ITEM CORE_SRCS src/main.cpp)
 add_library(mbdsdr_core STATIC ${CORE_SRCS} ${HEADERS})
-target_include_directories(mbdsdr_core PUBLIC src)
+target_include_directories(mbdsdr_core PUBLIC src "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(mbdsdr_core PUBLIC
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent
     ${SQLite3_LIBRARY})

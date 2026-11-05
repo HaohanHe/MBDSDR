@@ -540,13 +540,19 @@ def pick_fm_reference():
     return best_f
 
 
+def _portable_version() -> str:
+    """便携包目录名里的版本段：唯一事实源 mbdsdr_ai/VERSION，不手抄。"""
+    with open(os.path.join(REPO_ROOT, "mbdsdr_ai", "VERSION"), encoding="utf-8") as fh:
+        return fh.read().strip()
+
+
 def main():
     ap = argparse.ArgumentParser(description="MBDSDR 真机七环验收")
     ap.add_argument("--ring", type=int, default=0, help="只跑某一环（1-7），0=全跑")
     ap.add_argument("--aprs-seconds", type=int, default=45)
     ap.add_argument("--portable-exe", default=os.path.join(
         REPO_ROOT, "cpp", "build-local", "dist",
-        "mbdsdr-0.2.0-win64-portable", "bin", "mbdsdr.exe"))
+        f"mbdsdr-{_portable_version()}-win64-portable", "bin", "mbdsdr.exe"))
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 

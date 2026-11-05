@@ -19,6 +19,7 @@
 #include "core/tokens.h"
 #include "core/l10n.h"
 #include "heap_probe.h"
+#include "mbdsdr_version.h"
 #include "ui/main_window.h"
 
 #include <QFile>
@@ -120,7 +121,7 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
     QApplication::setApplicationName("mbdsdr");
-    QApplication::setApplicationVersion("0.2.0");
+    QApplication::setApplicationVersion(QStringLiteral(MBDSDR_VERSION));
 
     // MBDSDR_LOG_FILE=<path>: timestamped all-thread message log for post-mortem
     // freeze diagnosis (the tail names the last thread still talking).

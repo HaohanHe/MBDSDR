@@ -142,6 +142,18 @@ VERSION_DERIVATIONS = (
         (r"os\.path\.join\(root,\s*'mbdsdr_ai',\s*'VERSION'\)", "读取 VERSION 文件"),
         (r"version\s*=\s*VSVersionInfo\(", "EXE 版本资源"),
     ), "EXE FileVersion"),
+    ("cpp/src/main.cpp", (
+        (r'#include\s+"mbdsdr_version\.h"', "包含 CMake 生成的版本头"),
+        (r"setApplicationVersion\(\s*QStringLiteral\(MBDSDR_VERSION\)\s*\)", "C++ QApplication 版本取生成宏"),
+    ), "C++ 应用版本"),
+    ("cpp/src/ui/about_dialog.cpp", (
+        (r'#include\s+"mbdsdr_version\.h"', "包含 CMake 生成的版本头"),
+        (r"版本:\s*%1.*MBDSDR_VERSION", "C++ 关于对话框版本取生成宏"),
+    ), "C++ 关于对话框版本"),
+    ("scripts/real_hw_acceptance.py", (
+        (r'os\.path\.join\(REPO_ROOT,\s*"mbdsdr_ai",\s*"VERSION"\)', "读取 VERSION 文件"),
+        (r"_portable_version\(\)", "便携包目录名取派生版本"),
+    ), "真机验收便携包路径"),
 )
 
 #: 关于对话框：必须显示 QApplication 版本，且块内不得写死版本。

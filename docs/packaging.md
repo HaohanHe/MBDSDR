@@ -582,6 +582,9 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 | `mbdsdr_ai/__init__.py`、`core/__init__.py` | `from (..).version import __version__` | PASS |
 | `desktop/main.py` | 导入共享版本 → `setApplicationVersion(_app_version)` | PASS |
 | `desktop/MBDSDR.spec` | 读 `VERSION` → `VSVersionInfo` | PASS |
+| `cpp/src/main.cpp` | `configure_file` 生成 `mbdsdr_version.h` → `setApplicationVersion(QStringLiteral(MBDSDR_VERSION))` | PASS |
+| `cpp/src/ui/about_dialog.cpp` | 同上生成头 → `版本: %1` 取 `MBDSDR_VERSION` | PASS |
+| `scripts/real_hw_acceptance.py` | `_portable_version()` 读 `mbdsdr_ai/VERSION` 拼便携包目录 | PASS |
 | 产物 `MBDSDR.exe` | `FileVersion = 0.2.0.0`、`ProductVersion = 0.2.0` | PASS |
 | `README.md` 首行 | `# MBDSDR ... v0.2.0` | PASS |
 | `desktop/main_window.py:_show_about` | `QApplication.applicationVersion()` | PASS |
@@ -612,6 +615,22 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 首轮证伪曾实测到两处硬失败（已修）：`project(VERSION 0.2.1-verify)` 直接
 configure 失败（`VERSION "0.2.1-verify" format invalid`）；spec 用 `int(p)` 拆段
 在 `1-verify` 上抛 `ValueError`。这两处正是“单一真值源”最容易被后缀打穿的地方。
+
+**全仓 `0.2.0` 字面量盘点**（`git grep -n -- "0\\.2\\.0"`，逐条定性）：
+
+| 位置 | 定性 | 处理 |
+|---|---|---|
+| `mbdsdr_ai/VERSION` | canonical（唯一手抄点） | 保留 |
+| `cpp/src/main.cpp`、`cpp/src/ui/about_dialog.cpp` | 曾是第二处手抄（C++ 应用/关于框） | 已改为 `configure_file` 生成头，纳入机检 |
+| `scripts/real_hw_acceptance.py` | 曾是第二处手抄（便携包目录名） | 已改为读 `VERSION`，纳入机检 |
+| `README.md` 首行 | 面向读者的版本声明（手写，非派生） | manifest 与 canonical 逐字比对，不一致即 FAIL |
+| `docs/packaging.md` | 说明文字里的示例/canonical 引用 | 说明性，不是取值点 |
+| `docs/learn/nanovna/protocol-study.md` | NanoVNA **固件**版本阈值，与本项目版本无关 | 不处理 |
+| `mobile/pubspec.yaml` | Flutter 移动端**独立版本流**（`0.2.0+2`，构建号），不随桌面产物派生 | 登记；如要统一需单独立项，不在本轮 |
+
+C++ 侧验证：`cmake -S cpp -B .tmp/verify-cmake-main` 生成
+`generated/mbdsdr_version.h` → `#define MBDSDR_VERSION "0.2.0"`；用导出的
+`compile_commands.json` 对 `main.cpp`、`about_dialog.cpp` 跑 `-fsyntax-only`，均 exit 0。
 
 复跑：
 
