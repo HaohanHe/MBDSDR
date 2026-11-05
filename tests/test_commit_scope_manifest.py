@@ -24,6 +24,8 @@ PRE_COMMIT = ROOT / "scripts" / "hooks" / "pre-commit"
 def _run(repo, tmp, *args, env_extra=None, check=False):
     env = os.environ.copy()
     env.pop("GIT_INDEX_FILE", None)
+    env.pop("MBDSDR_DECLARED_INDEX", None)
+    env.pop("MBDSDR_COMMIT_PATHS", None)
     env["MBDSDR_REPO_ROOT"] = str(repo)
     env["MBDSDR_LOCKS_DIR"] = str(tmp / "locks")
     if env_extra:
@@ -135,3 +137,68 @@ def test_pre_commit_blocks_extra_file(tmp_path):
     assert "EXTRA" in output
     after = _git(repo, "rev-parse", "HEAD").stdout.strip()
     assert after == before, "提交被拒时 HEAD 不能前进"
+
+
+def test_declared_private_index_but_shared_index_rejected(tmp_path):
+    """反证：声明了私有 index，但 `$env:` 没落到子进程，闸门读到共享 index。
+
+    事故 `16f075f3`：计划只提交 10 个文件，闸门读共享 index，一次夹带
+    26 个别线文件。闸门必须拒绝，并把 DECLARED / ACTUAL 两个路径打出来。
+    """
+    repo = _make_repo(tmp_path)
+    _git(repo, "add", "a.txt", "b.txt", check=True)
+    private = tmp_path / "idx_机制线_20261106_0300"
+
+    # 只声明，不给 GIT_INDEX_FILE —— 模拟 PowerShell 变量没落到子进程
+    proc = _run(
+        repo,
+        tmp_path,
+        "--staged",
+        "--declared-index",
+        str(private),
+        env_extra={"MBDSDR_DECLARED_INDEX": str(private)},
+    )
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, (proc.returncode, out)
+    assert "DECLARED" in out
+    assert "ACTUAL" in out
+    assert "idx_机制线_20261106_0300" in out
+    assert ".git" in out and "index" in out
+    assert "GIT_INDEX_FILE" in out
+
+
+def test_declared_index_matching_actual_allowed(tmp_path):
+    """声明与实际一致（GIT_INDEX_FILE 真落到子进程）→ 放行。"""
+    repo = _make_repo(tmp_path)
+    private = tmp_path / "idx_机制线_20261106_0301"
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    env["GIT_INDEX_FILE"] = str(private)
+    env["MBDSDR_REPO_ROOT"] = str(repo)
+    _git(repo, "add", "a.txt", "b.txt", env=env, check=True)
+
+    proc = _run(
+        repo,
+        tmp_path,
+        "--staged",
+        "--declared-index",
+        str(private),
+        env_extra={"GIT_INDEX_FILE": str(private)},
+    )
+
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (proc.returncode, out)
+    assert "INDEX 实际读取" in out
+    assert ".git" not in out.split("INDEX 实际读取", 1)[1].splitlines()[0]
+
+
+def test_index_path_always_printed(tmp_path):
+    """未声明私有 index 时也要打印实际读到的 index 路径（便于事后取证）。"""
+    repo = _make_repo(tmp_path)
+    _git(repo, "add", "a.txt", "b.txt", check=True)
+
+    proc = _run(repo, tmp_path, "--staged")
+
+    assert proc.returncode == 0, (proc.returncode, proc.stdout, proc.stderr)
+    assert "INDEX 实际读取" in proc.stdout

@@ -40,8 +40,10 @@ def main():
 
     proc = subprocess.run([sys.executable, str(scope), "--staged"], cwd=str(root))
     if proc.returncode == 1:
-        print("[pre-commit] 拒绝提交：暂存范围不合规（跨线持有，或出现声明清单外的文件）。")
-        print("[pre-commit] 见上方 EXTRA / MULTI 清单：先剔除或补进声明清单，再提交。")
+        print("[pre-commit] 拒绝提交：暂存范围不合规（跨线持有、出现声明清单外的文件，")
+        print("[pre-commit] 或声明的私有 index 与实际读取的 index 不一致）。")
+        print("[pre-commit] 见上方 MULTI / EXTRA / DECLARED-ACTUAL：先剔除文件或改对 index 传参。")
+        print("[pre-commit] 私有 index 不要依赖 shell 变量，用 `GIT_INDEX_FILE=<path> git commit ...`。")
         print("[pre-commit] 确认无在途改动后，可用 git commit --no-verify 绕过（会留痕）。")
         return 1
     if proc.returncode != 0:

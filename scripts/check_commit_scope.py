@@ -31,6 +31,12 @@
   再加一道：**提交的文件集合必须全部落在声明清单内，多一个就拒**，并把多出来的
   路径逐条打印。来源清单没声明时不启用这一条（保持旧行为，不假报）。
 
+  `--staged --declared-index <路径>`（或环境变量 `MBDSDR_DECLARED_INDEX`）
+  再加一道：会打印**实际读到的 index 路径**；若声明了私有 index 而实际读到的是
+  共享 `.git/index`，直接拒并打印 DECLARED / ACTUAL 两个路径。这一条专治
+  「PowerShell `$env:GIT_INDEX_FILE` 没落到子进程」（事故 `16f075f3`：
+  计划只提交 10 个文件，闸门读共享 index，一次夹带 26 个别线文件）。
+
 退出码：0 无 MULTI；1 发现 MULTI（需人工确认）；2 用法/git 错误。
 """
 from __future__ import annotations
@@ -238,13 +244,45 @@ def _declared_paths(cli_expect: Optional[List[str]]) -> Optional[List[str]]:
     return [_canonical(x.strip()) for x in raw if x.strip()]
 
 
-def check_staged(as_json: bool, expect: Optional[List[str]] = None) -> int:
-    """检查暂存区：①跨线（≥2 个活跃 owner）拒；②超出声明清单的文件拒。
+def _index_abs(path: str) -> str:
+    """把 index 路径归一成绝对路径（只用于显示与比较，不改大小写）。"""
+    raw = (path or "").strip()
+    if not raw:
+        return ""
+    if not os.path.isabs(raw):
+        raw = str(ROOT / raw)
+    return os.path.abspath(raw)
+
+
+def _normalize_index_path(path: str) -> str:
+    """比较用的归一：Windows 上大小写与分隔符不敏感。"""
+    return os.path.normcase(_index_abs(path))
+
+
+def check_staged(
+    as_json: bool,
+    expect: Optional[List[str]] = None,
+    declared_index_arg: Optional[str] = None,
+) -> int:
+    """检查暂存区：①跨线（≥2 个活跃 owner）拒；②超出声明清单的文件拒；
+    ③声明的私有 index 与实际读到的 index 不一致拒。
 
     第 ② 条是「私有 index 文件名撞车 / 复用旧 index」这类事故的机械闸：
     提交的文件集合必须**全部落在声明清单内**，多一个就拒并打印多出来的路径。
+    第 ③ 条是「PowerShell 环境变量没落到子进程」的机械闸：`$env:GIT_INDEX_FILE`
+    没生效时，闸门读到的是 `.git/index`；声明了私有 index 就必须拒，
+    并打出两个路径对比。
     """
     import time
+
+    actual_index = _git("rev-parse", "--git-path", "index").strip()
+    declared_index = (
+        declared_index_arg
+        or os.environ.get("MBDSDR_DECLARED_INDEX", "")
+    ).strip()
+    index_mismatch = bool(declared_index) and (
+        _normalize_index_path(actual_index) != _normalize_index_path(declared_index)
+    )
 
     now = time.time()
     paths = [
@@ -289,14 +327,21 @@ def check_staged(as_json: bool, expect: Optional[List[str]] = None) -> int:
                     "multi_owner": multi,
                     "declared": declared,
                     "extras": extras,
+                    "actual_index": _index_abs(actual_index),
+                    "declared_index": _index_abs(declared_index),
+                    "index_mismatch": index_mismatch,
                     "files": rows,
                 },
                 ensure_ascii=False,
                 indent=2,
             )
         )
-        return 1 if (multi or extras) else 0
+        return 1 if (multi or extras or index_mismatch) else 0
 
+    print(f"INDEX 实际读取 {_index_abs(actual_index)}")
+    if declared_index:
+        print(f"INDEX 声明     {_index_abs(declared_index)}")
+    print()
     print(f"STAGED {len(paths)} 个文件")
     for row in rows:
         if row["owner"]:
@@ -309,6 +354,15 @@ def check_staged(as_json: bool, expect: Optional[List[str]] = None) -> int:
         print()
 
     failed = False
+    if index_mismatch:
+        print("拒绝：声明了私有 index，但闸门实际读到的是另一个 index（多为此类事故）：")
+        print(f"  DECLARED {_index_abs(declared_index)}")
+        print(f"  ACTUAL   {_index_abs(actual_index)}")
+        print("  原因：PowerShell 里 `$env:GIT_INDEX_FILE` 没落到子进程（子进程读到共享 index），")
+        print("        于是闸门检查的是别人的暂存区，提交会按共享 index 走。")
+        print("  改法：私有 index 一律显式传参，禁止依赖 shell 里 export 的变量——")
+        print("        `GIT_INDEX_FILE=<path> git commit ...` 或 subprocess.run(env={...})。")
+        failed = True
     if extras:
         print(f"拒绝：暂存区有 {len(extras)} 个文件不在声明清单内（多一个就拒）：")
         for path in extras:
@@ -340,11 +394,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=None,
         help="本次提交的声明路径清单；暂存区出现清单外的文件即拒绝（多一个就拒）",
     )
+    parser.add_argument(
+        "--declared-index",
+        default=None,
+        help="操作者声明的私有 index 路径；与实际读到的 index 不一致即拒绝"
+        "（也可用环境变量 MBDSDR_DECLARED_INDEX）",
+    )
     parser.add_argument("--json", action="store_true", help="JSON 输出")
     args = parser.parse_args(argv)
     try:
         if args.staged:
-            return check_staged(args.json, expect=args.expect)
+            return check_staged(
+                args.json, expect=args.expect, declared_index_arg=args.declared_index
+            )
         if not args.ref:
             parser.error("需要 ref，或使用 --staged")
         return check(args.ref, args.json)
