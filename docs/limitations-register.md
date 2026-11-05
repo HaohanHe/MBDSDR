@@ -185,3 +185,10 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
   `tests/test_main_window.py::TestPlanetariumSkyVisibility::test_planetarium_sky_paints_not_black_void`
   （持久化 `three_column_sizes` 使天空视图变高，底边落在 `ground_near_night` 地景层，
   与受晒无关，本线不碰 `main_window.py`）。
+
+## 附 E：发射可见性与真机未验证（2026-11-05，追加）
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L43 | **三后端发射全部 `tx_verified=False`**：HackRF / USRP / Pluto 都是「驱动级已实现、真机未验证」。PTT 按下前必须显示「本后端发射：驱动级已实现 / 真机未验证」，不得显示「支持发射」 | `SDRDevice.tx_verified`（`mbdsdr_ai/sdr_backend.py`）；`backend.tx_capability()` 四态 `declared/implemented/ready/verified`；`tests/test_backend_tx_capability.py::test_tx_capability_marks_all_three_unverified`；UI 契约见 `docs/doppler-compensation.md` §3.8.1 | 仅自测（mock 驱动 + 假后端真调 `write_tx`，无真机发波） | 每后端各备一台真机 + 衰减器/假负载 + 接收机，按 §3.8.1 先在 PTT 前显示「真机未验证」，再真发并核对频点/波形；通过后才可把该后端 `tx_verified` 置 True |
+| L44 | **SoapySDR 通用路径的「把能说成不能」**：`supports_tx()` 恒为 False（本类无 `write_tx`），而 HAL `getNumTxChannels()` 对 HackRF/USRP/Pluto 常 >0。桌面现有 PTT 文案按 `supports_tx()` 显示「当前设备不支持发射（后端没有 TX 通道）」，会把「本路径未接写流」误报成「硬件不能发」 | `mbdsdr_ai/sdr_backend.py::SoapySDRBackend.tx_capability()` 新增 `driver_tx_channels` / `driver_capable` / `blocked_reason` / `notice`；`tests/test_backend_tx_capability.py::test_soapy_generic_reports_driver_capable_third_state`；旧文案在 `desktop/main_window.py`（属操作逻辑线，本线不改） | 后端已能给出第三种状态「驱动级可发 / 本路径未接入（不可发射）」；**UI 仍显示旧文案**，属已知假信息缺口 | 操作逻辑线把 PTT 置灰文案改读 `tx_capability()` 的 `blocked_reason/notice`（按 `docs/doppler-compensation.md` §3.8.1 文案表），用 Soapy 路径接一台能发的 HackRF/USRP 复测：显示「驱动级可发 / 本路径未接入」，而不是「没有 TX 通道」 |

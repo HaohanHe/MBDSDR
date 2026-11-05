@@ -273,6 +273,40 @@ switch_on = bool(st["enabled"])          # 只由 enabled 驱动
   `未预偏（回放，保持原频率）`，并置灰/隐藏自动预偏开关，避免误改录音频率。
 - 预览调用时机：发射频率变化、面板打开、目标切换时，不做每帧轮询。
 
+#### 3.8.1 发射能力与验证状态（PTT 按下前必须可见）
+
+**事实（2026-11-05）**：HackRF / USRP / Pluto 三个后端都是「驱动级已实现、
+真机未验证」——`SDRDevice.tx_verified=False`，测试只在 mock/假后端上真调过
+`write_tx`。界面不能把「代码路径存在」显示成「支持发射」。
+
+- **位置**：发射控制区（PTT/发射/回放按钮所在面板）常驻一行能力声明，
+  **在 PTT 可按下之前就必须显示**；不得只放 tooltip、toast 或日志。
+- **数据源**：统一读 `backend.tx_capability()`，禁止 UI 自己拼
+  `supports_tx()` 的布尔值（布尔会把「驱动可发但本路径未接」压成「不能发」）。
+  字段：`declared` / `implemented` / `ready` / `verified`；Soapy 通用另带
+  `driver_capable` / `driver_tx_channels` / `blocked_reason` / `notice`。
+- **文案表（不得省略「真机未验证」）**：
+
+| `tx_capability()` | 必须显示 |
+| --- | --- |
+| `ready=true, verified=false` | `本后端发射：驱动级已实现 / 真机未验证` |
+| `ready=true, verified=true` | `本后端发射：驱动级已实现 / 真机已验证` |
+| `declared=true, implemented=false` | `本后端发射：仅有声明 / 未实现（不可发射）` |
+| `driver_capable=true, blocked_reason=driver_capable_path_not_implemented`（Soapy 通用） | `本后端发射：驱动级可发 / 本路径未接入（不可发射）` |
+| `driver_capable=false, blocked_reason=no_tx_channels` | `本后端发射：硬件仅接收（驱动报告 0 个 TX 通道）` |
+| `driver_capable=null, blocked_reason=driver_capability_unknown` | `本后端发射：能力未知（未连接/驱动未报告）` |
+| `declared=false, implemented=false, driver_capable=null` | `本后端发射：未实现` |
+
+- 未验证时按钮可用不代表「已验证可发」：按下后失败必须按真实错误显示
+  （`status.error` / 工具信封），不得用「已发射」占位。
+- **桌面现状**：`desktop/main_window.py` 的 PTT 置灰文案仍只按
+  `supports_tx()` 显示「当前设备不支持发射（后端没有 TX 通道）」，且 Soapy
+  通用路径没有 `write_tx`，会走到这一句——对「HackRF/USRP 经 Soapy 打开、
+  驱动能发」的场景是**把能说成不能**。该文件属操作逻辑线，本线只写契约、
+  不改代码；替换后按上表文案取值。
+- 契约测试锚点：`tests/test_backend_tx_capability.py`（三后端 verified=False；
+  Soapy 第三态三种取值）。
+
 ### 3.9 C++ → Python `backend_comp_active` 状态桥接：可做，但现在不能接
 
 **结论：技术上可做，现有通道够用；现在接的是死代码，所以不接——但出事条件

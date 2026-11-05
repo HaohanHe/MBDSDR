@@ -85,7 +85,7 @@ python -m mbdsdr_ai --config /path/to/configdir --list-bookmarks
 - **谁能签发**：只有本机、进程内走“外部确认通道”的调用方——桌面真人确认面（`desktop/main_window.py` 调 `tx_guard.issue_confirmation`）、测试注入、受信任本地脚本。模型 / MCP 客户端 / 远端调用只能持有 opaque token，**不能签发**（否则模型自报即放行）。
 - **签发条件**：为**一次具体动作**签发；token 绑定 `tool_name + 参数摘要`（`arm_manual/confirm_token/tx_token/approve_session` 等门参数不计入摘要），换工具/换参数重放即 `gate_action_mismatch`；TTL 必须为正；默认一次性消费，消费/过期/撤销后分别返回 `gate_token_used / gate_expired / gate_revoked`。
 - **有效期**：默认 **120 秒**（`tx_guard.DEFAULT_TTL_S`），签发时可显式传 `ttl_s`。
-- **记录落在哪**：进程内 `TxGate._last_decision`（`snapshot()` 可读）+ 标准日志 `logger.info("TxGate armed: ttl=… single_use=… action=… note=…")`；**没有持久化审计文件**，进程重启即清空。
+- **记录落在哪**：**落盘审计** `D:\mbdsdr\logs\tx_audit.jsonl`（JSONL，单文件 10 MB × 保留 5 个文件轮转；路径可用 `MBDSDR_TX_AUDIT_PATH` 覆盖）。每次签发/放行/拒绝/过期落一条：本地+UTC 时间戳、工具名、已剔除门参数的参数摘要、token **前 8 位**（不落全串）、TTL、结果（`armed`/`allowed`/`refused`/`expired`）、原因码、来源（`desktop`/`test`/`script`）。审计写失败按 **fail-closed** 处理：不签发、不放行，失败原因见 `tx_guard.tx_audit_status()` 与 `get_tx_gate().snapshot()["audit"]`。
 - **缺口的实际影响**：无头/CLI 用户今天无法自己签发 token，发射必须由桌面确认面或受信任脚本代签。补齐形态应是受信任的 CLI 子命令（绑定动作摘要、TTL、写审计日志），且该签发能力不得暴露到模型工具面。
 
 ## 退出码
