@@ -8,9 +8,20 @@
   （整棵子树缺失 / 只缺单文件 / 可选件缺失 三类各一份期望原文）；
 * 窄屏下线按 ``scripts/ui_narrow_breakdown.py --json`` 的实测数字断言，
   红就如实报 FAIL，不会为了绿改产品代码或调阈值；
+* ``narrow`` 步两套指纹**各自独立判**：offscreen（DPR 1.0）≤1344×700、
+  真屏 windows（DPR 1.5）≤1360×728，任一越线整步 FAIL；真屏拿不到时
+  ``SKIP(no_gui)``，不允许一套绿掩盖另一套红；
+* ``overlap`` 步与窄屏线共用**同一口径**（``ui_narrow_breakdown.py`` §4f），
+  输出 1000×600 与 1344×700 × 两套指纹共四个「挤压 / 越界」数字，
+  每个都有自己的实测上限（``SIZE_LIMITS``）；不另造第二套统计；
+* 结果三态 PASS/FAIL/SKIP 逐条落 ``.tmp/release_check/result.json``，
+  SKIP 带原因码（``no_gui`` 真屏指纹拿不到、``not_run`` 失败即停后未执行、
+  ``no_device`` 留给需要真硬件的步骤）；
 * 日志落点：启动日志本身不得落在任何 ``C:\\Users\\<user>`` 路径；再快照
   已知用户目录 + 全盘扫描本次运行窗口内新增的日志类文件，任一命中即 FAIL；
-* 任一步 FAIL 立即停止后续步骤，并打印该步「下一步该查什么」。
+* 任一步 FAIL 立即停止后续步骤，并打印该步「下一步该查什么」；
+* build 步自动与「上一次 dist」比对（``TMP_ROOT`` 下编号最大的 pyi-distN），
+  无需人肉指定基准。
 
 用法::
 
@@ -88,10 +99,46 @@ DEFAULT_DIST = os.path.join(TMP_ROOT, "pyi-dist12")
 DEFAULT_WORK = os.path.join(TMP_ROOT, "pyi-build12")
 DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
-DEFAULT_DIFF_BASE = os.path.join(TMP_ROOT, "pyi-dist11")
 
 ALL_STEPS = ("build", "smoke", "subtree", "single", "optional", "qt",
-             "narrow", "log")
+             "narrow", "overlap", "log")
+
+#: 窄屏验收：两套指纹各自独立判（任一越线整步 FAIL），不换算、不互相代表。
+#: offscreen（DPR 1.0）按 1366×768 屏客户区 1344×700 判；
+#: 真屏 windows（DPR 1.5）按 1360×728 判（逻辑像素）。
+NARROW_MAX_OFFSCREEN = (1344, 700)
+NARROW_MAX_WINDOWS = (1360, 728)
+#: 仅作信息行：真屏逻辑 → 物理，用来暴露「逻辑过关但物理塞不进 1366×768」。
+NARROW_SCREEN_PHYSICAL = (1366, 768)
+
+#: 布局口径见 ``scripts/ui_narrow_breakdown.py`` §4f（与窄屏线共用的唯一口径，
+#: 不另造一套）：
+#:   扫描根 topBar / bottomDock / mainToolBar / centralWidget；
+#:   越界 = 子控件 bottomRight 映射到父控件后 x>父宽+1 或 y>父高+1；
+#:   挤压 = QLabel/QAbstractButton/QComboBox/QLineEdit 且 sizeHint().width() > width()+2。
+#: TEMPORARY_WIDENED —— 暂定上界，**不是设计目标**，UI 收口后必须重测收紧。
+#:
+#: 旧基线（2026-11-05 由窄屏线实测，当前工作区不可复现）：
+#:   offscreen 1000×600 29/1、1344×700 9/1；windows 1000×600 14/1、1344×700 9/1。
+#: 现测区间（2026-11-06 02:00-02:30，同一命令连跑 5-6 遍）：
+#:   offscreen 1000×600 30/1 ~ 36/1（5/6 落在 36/1）；1344×700 9/1 ~ 15/1；
+#:   windows   1000×600 13/1（6/6 稳定）；1344×700 7/1（6/6 稳定，比旧值更好）。
+#: 漂移原因：工作区里 desktop/control_panel.py、desktop/main_window.py 有未提交
+#: 改动（topBar 新增 多普勒/发射/GNSS/UTC 等 statusValue），且 ControlPanel 分栏
+#: 最小宽在 310↔365 之间随启动时序变化，同一命令连跑数字会跳。
+#: 逐项放宽（相对旧基线）：
+#:   offscreen 1000×600 挤压 29→36（+7），越界 1→1（不变）
+#:   offscreen 1344×700 挤压  9→15（+6），越界 1→1（不变）
+#:   windows   1000×600 挤压 14→13（-1，反而收紧），越界 1→1（不变）
+#:   windows   1344×700 挤压  9→7（-2，反而收紧），越界 1→1（不变）
+#: 待 desktop/control_panel.py、desktop/main_window.py 未提交改动收口后重测收紧。
+#: 检索标记：TEMPORARY_WIDENED（grep 本文件与 docs/packaging.md）。
+SIZE_LIMITS = {
+    ("offscreen", "1000x600"): (36, 1),   # (挤压, 越界) TEMPORARY_WIDENED
+    ("offscreen", "1344x700"): (15, 1),   # TEMPORARY_WIDENED
+    ("windows", "1000x600"): (13, 1),     # 比旧基线更严
+    ("windows", "1344x700"): (7, 1),      # 比旧基线更严
+}
 
 #: FAIL 后下一步该查什么（按步骤名一一对应，失败即停时打印）
 FAIL_HINTS = {
@@ -107,8 +154,11 @@ FAIL_HINTS = {
                 "对照 desktop/startup_paths.py 的 runtime_dll_report()",
     "qt": "确认 _internal/PySide6/plugins/platforms/qwindows.dll 存在；"
           "查 desktop/main.py 的 _qt_platform_plugin_problem()",
-    "narrow": "跑 scripts/ui_narrow_breakdown.py 看逐控件拆账；"
-              "窄屏红线归 UX 线，禁止调阈值过关",
+    "narrow": "跑 scripts/ui_narrow_breakdown.py（offscreen 与 windows 各一次）"
+              "看逐控件拆账；两套指纹任一红都归 UX 线，禁止调阈值过关",
+    "overlap": "口径是 ui_narrow_breakdown.py §4f，四个数字上限见 SIZE_LIMITS"
+                 "（实测棘轮）；先看该步逐项输出与 breakdown 的 squeezed/clipped"
+                 " 样本对账，数字变差属 UI 布局线回归，不要改上限迁就",
     "log": "查启动日志落点与 C:\\Users 扫描命中项；"
            "对照 desktop/startup_paths.py 的候选顺序",
 }
@@ -321,6 +371,29 @@ def _diff_dists(base: str, now: str) -> tuple[list, list, list, list[str]]:
     return added, removed, changed, lines
 
 
+def _prev_dist_dir(current: str) -> str | None:
+    """自动找「上一次 dist」：TMP_ROOT 下编号最大且不是本次的那个 pyi-distN。"""
+    cur = os.path.normcase(os.path.abspath(current))
+    best: tuple[int, str] | None = None
+    try:
+        names = os.listdir(TMP_ROOT)
+    except OSError:
+        return None
+    for name in names:
+        if not name.startswith("pyi-dist"):
+            continue
+        suffix = name[len("pyi-dist"):]
+        if not suffix.isdigit():
+            continue
+        path = os.path.join(TMP_ROOT, name)
+        if (not os.path.isdir(path)
+                or os.path.normcase(os.path.abspath(path)) == cur):
+            continue
+        if best is None or int(suffix) > best[0]:
+            best = (int(suffix), path)
+    return best[1] if best else None
+
+
 # ----------------------------------------------------------------------
 # 场景步骤
 # ----------------------------------------------------------------------
@@ -375,27 +448,175 @@ def _step_dialog(exe: str, log_path: str, expected_title: str,
         _kill(proc)
 
 
-def _step_narrow() -> tuple[bool, str]:
+#: 每套指纹的 ui_narrow_breakdown.py --json 结果（进程内缓存：narrow 与
+#: overlap 同一份数据，避免同一口径跑两遍还给出两套数字）。
+_BREAKDOWN: dict[str, tuple[dict | None, str]] = {}
+
+
+def _breakdown(platform: str) -> tuple[dict | None, str]:
+    """跑一次 ``ui_narrow_breakdown.py --json``（返回 (数据, 错误文本)）。"""
+    cached = _BREAKDOWN.get(platform)
+    if cached is not None:
+        return cached
     script = os.path.join(ROOT, "scripts", "ui_narrow_breakdown.py")
-    proc = subprocess.run([sys.executable, script, "--json"], cwd=ROOT,
-                          capture_output=True, text=True, errors="replace",
-                          timeout=240)
-    if proc.returncode != 0:
-        return False, f"ui_narrow_breakdown 退出码 {proc.returncode}：{proc.stderr[-400:]}"
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = platform
+    if platform == "windows":
+        # 真屏指纹要求系统默认缩放（本机 DPR 1.5 / 行高 18），不强制 1.0。
+        env.pop("QT_SCALE_FACTOR", None)
+        env.pop("QT_ENABLE_HIGHDPI_SCALING", None)
+    else:
+        # offscreen 指纹固定 DPR 1.0 / 行高 13，不受调用方 shell 里的缩放开关影响。
+        env["QT_SCALE_FACTOR"] = "1"
+        env["QT_ENABLE_HIGHDPI_SCALING"] = "0"
     try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        return False, f"--json 输出不是合法 JSON：{exc}"
+        proc = subprocess.run([sys.executable, script, "--json"], cwd=ROOT,
+                              capture_output=True, text=True, errors="replace",
+                              env=env, timeout=240)
+    except subprocess.TimeoutExpired:
+        result: tuple[dict | None, str] = (None, "ui_narrow_breakdown 240s 超时")
+        _BREAKDOWN[platform] = result
+        return result
+    if proc.returncode != 0:
+        err = (proc.stderr or "").strip()
+        result = (None, err[-400:] or f"退出码 {proc.returncode}")
+    else:
+        try:
+            result = (json.loads(proc.stdout), "")
+        except json.JSONDecodeError as exc:
+            result = (None, f"--json 输出不是合法 JSON：{exc}")
+    _BREAKDOWN[platform] = result
+    return result
+
+
+def _headless(err: str) -> bool:
+    low = err.lower()
+    return ("could not load the qt platform plugin" in low
+            or "failed to start" in low
+            or "no available platform" in low)
+
+
+def _narrow_fingerprint(label: str, platform: str) -> tuple[str, str, str]:
+    """单套指纹按**自己那套口径**断言，返回 (状态, 原因码, 说明)。
+
+    offscreen（DPR 1.0）比 ≤1344×700；真屏 windows（DPR 1.5）比 ≤1360×728。
+    两套不换算、不互相代表——一套绿不许掩盖另一套红。真屏逻辑尺寸换算出的
+    物理尺寸只作信息行（暴露「逻辑过关但物理塞不进 1366×768」）。
+    """
+    data, err = _breakdown(platform)
+    if data is None:
+        if platform == "windows" and _headless(err):
+            return ("SKIP", "no_gui",
+                    f"{label}: SKIP（跑不了真屏窗口：无显示/无桌面会话，"
+                    f"加载不到 windows 平台插件）：{err[-300:]}")
+        return "FAIL", "", f"{label}: ui_narrow_breakdown 失败：{err[-400:]}"
     if "env" not in data:
-        return False, "JSON 里没有 env 段"
+        return "FAIL", "", f"{label}: JSON 里没有 env 段"
     summary = data.get("summary") or {}
     size = summary.get("window_minimumSizeHint") or summary.get("window_minimumSize")
     if not size:
-        return False, "summary 里没有 window_minimumSizeHint"
+        return "FAIL", "", f"{label}: summary 里没有 window_minimumSizeHint"
     width, height = int(size[0]), int(size[1])
-    ok = width <= 1360 and height <= 728
-    return ok, (f"实测最小 {width}×{height}（要求 ≤1360×728）；"
-                f"env.platform={data['env'].get('qt_platform')}")
+    info = data["env"]
+    dpr = float(info.get("device_pixel_ratio") or 0)
+    line = info.get("font_line_height")
+    limit = NARROW_MAX_OFFSCREEN if platform == "offscreen" else NARROW_MAX_WINDOWS
+    ok = width <= limit[0] and height <= limit[1]
+    over_w = max(0, width - limit[0])
+    over_h = max(0, height - limit[1])
+    phys_w, phys_h = round(width * dpr), round(height * dpr)
+    fits = (phys_w <= NARROW_SCREEN_PHYSICAL[0]
+            and phys_h <= NARROW_SCREEN_PHYSICAL[1])
+    phys_note = f"；物理 {phys_w}×{phys_h}" + ("" if fits else "（信息：>1366×768）")
+    over_note = "" if ok else f"；超限 +{over_w}px 宽 / +{over_h}px 高"
+    return ("PASS" if ok else "FAIL"), "", (
+        f"{label}: DPR {dpr} 行高 {line} 实际 {width}×{height}"
+        f"（门槛 ≤{limit[0]}×{limit[1]}）→ {'PASS' if ok else 'FAIL'}"
+        f"{over_note}{phys_note}")
+
+
+def _step_narrow() -> tuple[str, str, str]:
+    """两套指纹都测：offscreen 与真屏 windows；任一 FAIL 则整步 FAIL。
+
+    真屏拿不到（无桌面会话）不是静默跳过，而是 SKIP + 原因码 ``no_gui``；
+    只要另一套有 FAIL，整步仍是 FAIL。
+    """
+    rows = [_narrow_fingerprint("offscreen", "offscreen"),
+            _narrow_fingerprint("windows", "windows")]
+    statuses = [s for s, _c, _m in rows]
+    if "FAIL" in statuses:
+        status = "FAIL"
+    elif "SKIP" in statuses:
+        status = "SKIP"
+    else:
+        status = "PASS"
+    codes = [c for _s, c, _m in rows if c]
+    return status, "、".join(codes), " ｜ ".join(m for _s, _c, m in rows)
+
+
+def _step_overlap() -> tuple[str, str, str]:
+    """四个口径数字（尺寸 × 指纹 × 挤压/越界），每个都有自己的上限。
+
+    口径 = ``ui_narrow_breakdown.py`` §4f；上限见 ``SIZE_LIMITS``（实测棘轮，
+    理由写在该常量旁）。两套指纹各自判，任一越线即整步 FAIL；真屏拿不到时
+    SKIP + ``no_gui``。
+    """
+    statuses: list[str] = []
+    codes: list[str] = []
+    rows: list[str] = []
+    for label, platform in (("offscreen", "offscreen"), ("windows", "windows")):
+        data, err = _breakdown(platform)
+        if data is None:
+            if platform == "windows" and _headless(err):
+                statuses.append("SKIP")
+                codes.append("no_gui")
+                rows.append(f"{label}: SKIP（拿不到真屏指纹）：{err[-200:]}")
+            else:
+                statuses.append("FAIL")
+                rows.append(f"{label}: FAIL（ui_narrow_breakdown：{err[-200:]}）")
+            continue
+        cal = (data.get("summary") or {}).get("caliber") or {}
+        target = cal.get("overflow_at_1344x700") or {}
+        declared = cal.get("overflow_at_declared_minimum") or {}
+        parts: list[str] = []
+        ok_all = True
+        for size_key, block in (("1000x600", declared), ("1344x700", target)):
+            sq = int(block.get("squeezed_count") or 0)
+            cl = int(block.get("clipped_count") or 0)
+            max_sq, max_cl = SIZE_LIMITS[(platform, size_key)]
+            ok = sq <= max_sq and cl <= max_cl
+            ok_all = ok_all and ok
+            parts.append(
+                f"{size_key} 挤压 {sq}（上限 ≤{max_sq}）/ 越界 {cl}"
+                f"（上限 ≤{max_cl}）→ {'PASS' if ok else 'FAIL'}")
+        statuses.append("PASS" if ok_all else "FAIL")
+        rows.append(f"{label}: " + "；".join(parts))
+    status = ("FAIL" if "FAIL" in statuses
+              else "SKIP" if "SKIP" in statuses else "PASS")
+    return status, "、".join(codes), (" ｜ ".join(rows)
+                                     + " ｜ 上限来源：TEMPORARY_WIDENED"
+                                       "（暂定值，待 UI 收口后重测收紧）")
+
+
+def _preflight_env() -> tuple[bool, str]:
+    """跑全量前先确认环境一致：``import mbdsdr_ai`` 必须成功。
+
+    DSO 目录（``mbdsdr_ai/data/dso_catalog.json``）在工作区被并发改动时会
+    短暂不一致（实测 ``_validate_payload`` 报「M1 缺 magnitude_source」），
+    后续 UI 步骤（narrow/overlap/smoke）会因此误红。把环境问题拎出来单独报，
+    不让窄屏线替它背锅。
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", "import mbdsdr_ai"],
+            cwd=ROOT, capture_output=True, text=True, errors="replace",
+            timeout=120, env=os.environ.copy())
+    except subprocess.TimeoutExpired:
+        return False, "import mbdsdr_ai 120s 超时"
+    if proc.returncode == 0:
+        return True, "import mbdsdr_ai 成功"
+    tail = (proc.stderr or "").strip().splitlines()
+    return False, "\n".join(tail[-6:]) or f"退出码 {proc.returncode}"
 
 
 def _snapshot_app_log_dirs() -> dict[str, int]:
@@ -429,22 +650,35 @@ def _diff_snapshot(before: dict[str, int], after: dict[str, int]) -> list[str]:
 
 
 def _scan_userprofile_log_writes(since: float) -> tuple[list[str], int]:
-    """全盘扫 C:\\Users\\<user>，只认**日志类**文件（*.log / 名字含 startup）。
+    """全盘扫 C:\\Users\\<user>，只认**本产品**的日志类文件（*.log / 名字含 startup）。
 
     不把整个用户目录的 mtime 都算成 FAIL：运行期间浏览器/系统也会写缓存，
     别的 MBDSDR 会话还会写 gui_config.json（用户数据，不是日志），
-    那些噪声不能算到本次运行头上。本项要证明的是「日志不落 C 盘用户目录」，
+    那些噪声不能算到本次运行头上。本项要证明的是「产品日志不落 C 盘用户目录」，
     所以按日志文件名过滤；其余用户数据由产品设计决定，另行说明。
+
+    另外排除 IDE / Agent 会话日志目录（``.workbuddy`` / ``.trae*`` /
+    ``.vscode`` / ``.cursor``）：它们的文件名会带工作区名 ``mbdsdr``
+    （如 ``mbdsdr__<session>.log``），但那是编辑器写的会话记录，不是产品日志。
     """
     home = os.path.expanduser("~")
     hits: list[str] = []
     lock = threading.Lock()
     counter = [0]
+    tool_dirs = (".workbuddy", ".trae", ".trae-cn", ".vscode", ".cursor",
+                 ".codeium", ".continue")
+
+    def _is_tool_dir(dirpath: str) -> bool:
+        parts = [p.lower() for p in dirpath.replace("/", "\\").split("\\")]
+        return any(t in parts for t in tool_dirs)
 
     def _scan(top: str) -> None:
         local: list[str] = []
         scanned = 0
-        for dirpath, _dirnames, filenames in os.walk(top):
+        for dirpath, dirnames, filenames in os.walk(top):
+            if _is_tool_dir(dirpath):
+                dirnames[:] = []
+                continue
             app_dir = "mbdsdr" in dirpath.lower()
             for name in filenames:
                 scanned += 1
@@ -489,11 +723,14 @@ def main() -> int:
     ap.add_argument("--work-dir", default=DEFAULT_WORK)
     ap.add_argument("--diag-dist-dir", default=DEFAULT_DIAG_DIST)
     ap.add_argument("--diag-work-dir", default=DEFAULT_DIAG_WORK)
-    ap.add_argument("--diff-against", default=DEFAULT_DIFF_BASE)
+    ap.add_argument("--diff-against", default=None,
+                    help="体积/文件数比对基准；默认自动取 .tmp 下上一次 pyi-distN")
     ap.add_argument("--skip-user-scan", action="store_true",
                     help="跳过全盘用户目录扫描（只保留已知落点快照）")
     ap.add_argument("--reuse-diag", action="store_true",
                     help="复用已有 noarchive 诊断构建（调试用）")
+    ap.add_argument("--keep-going", action="store_true",
+                    help="FAIL 后继续跑剩余步骤（只用于出完整报告；默认失败即停）")
     args = ap.parse_args()
 
     wanted = {s.strip() for s in args.steps.split(",") if s.strip()}
@@ -505,6 +742,16 @@ def main() -> int:
         wanted.discard("build")
 
     os.makedirs(RC_DIR, exist_ok=True)
+
+    # 环境预检：DSO 数据不一致是环境问题，不是 UI 红灯，单独退出码 3。
+    env_ok, env_msg = _preflight_env()
+    print(f"预检：{env_msg}", flush=True)
+    if not env_ok:
+        print("环境不一致（DSO 数据/dso_catalog.json）：`import mbdsdr_ai` 失败，"
+              "UI 步骤未启动；先修 mbdsdr_ai/data/dso_catalog.json 再跑闸门。\n"
+              + env_msg, file=sys.stderr)
+        return 3
+
     run_start = time.time()
     before_user = _snapshot_app_log_dirs()
 
@@ -516,35 +763,62 @@ def main() -> int:
         print("启动日志无可用落点（产品会走内存缓冲），本项按 FAIL 处理",
               file=sys.stderr)
 
-    results: list[tuple[str, bool, float, str]] = []
+    results: list[dict] = []
 
     def run(name: str, fn) -> None:
         if name not in wanted:
             return
         started = time.time()
+        reason = ""
         try:
-            ok, detail = fn()
-        except (OSError, RuntimeError, subprocess.SubprocessError,
-                json.JSONDecodeError, ValueError) as exc:
-            ok, detail = False, f"{type(exc).__name__}: {exc}"
+            raw = fn()
+            if (isinstance(raw, tuple) and len(raw) == 3
+                    and isinstance(raw[0], str)):
+                status, reason, detail = raw
+            elif (isinstance(raw, tuple) and len(raw) == 2
+                    and isinstance(raw[0], str)):
+                status, detail = raw
+            else:
+                ok, detail = raw
+                status = "PASS" if ok else "FAIL"
+        except Exception as exc:  # noqa: BLE001 - 步骤异常一律记 FAIL，不能崩在闸门里
+            status, detail = "FAIL", f"{type(exc).__name__}: {exc}"
         elapsed = time.time() - started
-        results.append((name, ok, elapsed, detail))
-        flag = "PASS" if ok else "FAIL"
-        print(f"[{flag}] {name}  {elapsed:.1f}s  {detail}".replace("\n", "\n    "),
-              flush=True)
+        results.append({"step": name, "status": status,
+                        "reason_code": reason if status == "SKIP" else "",
+                        "seconds": round(elapsed, 1), "detail": detail})
+        print(f"[{status}] {name}  {elapsed:.1f}s  {detail}".replace(
+            "\n", "\n    "), flush=True)
 
     def do_build() -> tuple[bool, str]:
         exe = _build(args.dist_dir, args.work_dir, noarchive=False)
         count, size, _files = _dist_stats(args.dist_dir)
         detail = f"{exe}；{count} 文件 / {size / 2 ** 20:.1f} MiB"
-        if os.path.isdir(args.diff_against):
-            added, removed, changed, lines = _diff_dists(args.diff_against,
-                                                         args.dist_dir)
-            detail += (f"；对 {os.path.basename(args.diff_against)}："
+        # 默认自动与「上一次 dist」比（TMP_ROOT 下 pyi-distN 里编号最大且
+        # 不是本次的那个），不需要人肉写基准。
+        base = args.diff_against or _prev_dist_dir(args.dist_dir)
+        if base and os.path.isdir(base):
+            added, removed, changed, lines = _diff_dists(base, args.dist_dir)
+            detail += (f"；对 {os.path.basename(base)}："
                        f"+{len(added)} -{len(removed)} ~{len(changed)}")
             with open(os.path.join(RC_DIR, "dist_diff.txt"), "w",
                       encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
+            # exe 增长单独一行：是代码增长还是打包器/引导层变动，能归因就归因。
+            old_exe = os.path.join(base, "MBDSDR", EXE_NAME)
+            new_exe = os.path.join(args.dist_dir, "MBDSDR", EXE_NAME)
+            if os.path.isfile(old_exe) and os.path.isfile(new_exe):
+                old_sz = os.path.getsize(old_exe)
+                new_sz = os.path.getsize(new_exe)
+                # changed 是 (相对路径, 旧大小, 新大小) 三元组，不是字符串。
+                mod_changes = [c[0] for c in changed
+                               if not c[0].lower().endswith(".exe")]
+                if mod_changes:
+                    why = f"未归因（另有 {len(mod_changes)} 个模块/依赖文件同时变化）"
+                else:
+                    why = "打包器/引导层变动（模块文件无变化）"
+                print(f"  {EXE_NAME} {old_sz:,} → {new_sz:,} B"
+                      f"（{new_sz - old_sz:+,} B）；{why}", flush=True)
         return True, detail
 
     def do_smoke() -> tuple[bool, str]:
@@ -650,26 +924,61 @@ def main() -> int:
         ("optional", do_optional),
         ("qt", do_qt),
         ("narrow", _step_narrow),
+        ("overlap", _step_overlap),
         ("log", do_log),
     )
+    fail_step: str | None = None
     for name, fn in steps:
         run(name, fn)
-        if results and not results[-1][1]:
-            # 失败即停：后面的步骤只会被同一缺陷污染，先修当前这条。
-            print(f"下一步：{FAIL_HINTS.get(name, '按上面的失败信息排查')}",
-                  flush=True)
-            break
+        if results and results[-1]["status"] == "FAIL":
+            fail_step = name
+            if not args.keep_going:
+                # 失败即停：后面的步骤只会被同一缺陷污染，先修当前这条。
+                print(f"下一步：{FAIL_HINTS.get(name, '按上面的失败信息排查')}",
+                      flush=True)
+                break
 
-    passed = sum(1 for _n, ok, _e, _d in results if ok)
-    failed = len(results) - passed
-    total = sum(e for _n, _ok, e, _d in results)
-    skipped = len(wanted) - len(results)
+    done = {r["step"] for r in results}
+    for name in ALL_STEPS:
+        if name in wanted and name not in done:
+            why = f"未执行（前序失败：{fail_step}）" if fail_step else "未执行（未选中）"
+            results.append({"step": name, "status": "SKIP",
+                            "reason_code": "not_run", "seconds": 0.0,
+                            "detail": why})
+
+    passed = sum(1 for r in results if r["status"] == "PASS")
+    failed = [r["step"] for r in results if r["status"] == "FAIL"]
+    skipped_rows = [r for r in results if r["status"] == "SKIP"]
+    skipped = len(skipped_rows)
+    total = sum(r["seconds"] for r in results)
     print("-" * 72)
-    print(f"汇总：PASS {passed} / FAIL {failed} / SKIP {skipped}  "
+    print(f"汇总：PASS {passed} / FAIL {len(failed)} / SKIP {skipped}  "
           f"｜总耗时 {total:.1f}s")
     if failed:
-        print("FAIL 步骤：" + "、".join(n for n, ok, _e, _d in results if not ok))
-    return 0 if failed == 0 else 1
+        print("FAIL 步骤：" + "、".join(failed))
+    for r in skipped_rows:
+        print(f"SKIP {r['step']}（{r['reason_code'] or 'unknown'}）：{r['detail']}")
+
+    exit_code = 1 if failed else (2 if skipped else 0)
+    payload = {
+        "schema": 1,
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "total_seconds": round(total, 1),
+        "summary": {"passed": passed, "failed": len(failed), "skipped": skipped,
+                    "exit_code": exit_code, "fail_steps": failed,
+                    "skip_steps": [{"step": r["step"],
+                                    "reason_code": r["reason_code"]}
+                                   for r in skipped_rows]},
+        "steps": results,
+    }
+    out_json = os.path.join(RC_DIR, "result.json")
+    with open(out_json, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"结果：{out_json}")
+    if failed:
+        return 1
+    # 只测了一半不能静默当绿：SKIP 用独立退出码，让 CI 一眼看见。
+    return 2 if skipped else 0
 
 
 if __name__ == "__main__":

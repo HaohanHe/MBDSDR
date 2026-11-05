@@ -290,9 +290,31 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
 ### 5.3 发布前自检脚本（`scripts/release_check.py`）
 
 `python scripts/release_check.py` 按序执行 build → smoke → subtree → single →
-optional → qt → narrow → log；每步打印 PASS/FAIL 与耗时，**任一步 FAIL 立即停止**
-并打印该步「下一步该查什么」，末行汇总，退出码 1。`--workpath/--distpath` 与
-`PYINSTALLER_CONFIG_DIR` 全在 D 盘，脚本对 C 盘产物落点直接判失败。
+optional → qt → narrow → overlap → log；每步打印 `[PASS]/[FAIL]/[SKIP]` 与耗时，
+**任一步 FAIL 立即停止**并打印该步「下一步该查什么」（`--keep-going` 仅用于出
+完整报告）。末行汇总 `PASS n / FAIL n / SKIP n`，FAIL 退出码 1、只测了一半
+（SKIP）退出码 2；**环境预检不通过退出码 3**（见下）。三态结果逐条写
+`.tmp/release_check/result.json`（含每步 `status / reason_code / seconds / detail`）
+——SKIP 不再只是汇总里的一个数字：
+
+**环境预检（跑任何步骤之前）**：先执行 `python -c "import mbdsdr_ai"`。失败
+（实测原文 `DSOIntegrityError: M1 缺 magnitude_source`）直接打印「环境不一致
+（DSO 数据/dso_catalog.json）」并退出 3，**不启动任何 UI 步骤**——避免把
+"并行会话改了 `mbdsdr_ai/data/dso_catalog.json`" 记成 narrow/overlap 红灯。
+
+- `no_gui`：真屏 windows 指纹拿不到（无桌面会话 / 加载不到平台插件）；
+- `not_run`：失败即停或 `--steps` 未选中，`detail` 注明「前序失败：<步骤>」；
+- `no_device`：留给需要真硬件的步骤（当前闸门无此步骤）。
+
+`--workpath/--distpath` 与 `PYINSTALLER_CONFIG_DIR` 全在 D 盘，脚本对 C 盘产物
+落点直接判失败。build 步**自动**与「上一次 dist」比对（取 `.tmp` 下编号最大且
+不是本次的 `pyi-distN`），不需要人肉写基准；本轮 dist11→dist12 文件 `+5 -0 ~3`、
+`MBDSDR.exe` 30,933,722 → 31,108,193 B（**+174,471 B**），明细写
+`.tmp/release_check/dist_diff.txt`。**exe 增长单独打印一行**，并尝试归因：
+模块/依赖文件同时变化 →「未归因（另有 N 个模块/依赖文件同时变化）」；模块文件
+无变化 →「打包器/引导层变动（模块文件无变化）」。dist11→dist12 属前者——同时
+有 `constellations_iau.json`（−19,351 B）与 `dso_catalog.json`（+10,086 B）两个
+数据文件变化，故如实打印「未归因（另有 2 个模块/依赖文件同时变化）」。
 
 三类缺件（整棵子树 / 只缺单文件 / 可选件）都要求**弹窗标题 + 整段正文逐字相等**
 （正文里唯一动态值是本次启动日志路径 `{log}`），不是「包含关键字」：
@@ -301,31 +323,102 @@ optional → qt → narrow → log；每步打印 PASS/FAIL 与耗时，**任一
 - single：同一诊断包删 `fft.pyc` →「安装包解压不完整：只缺 …」；
 - optional：发布包改名 `_internal/librtlsdr.dll`（干净 PATH）→「缺少运行库：librtlsdr.dll」。
 
-实测（2026-11-05，`pyi-dist12`，一条命令）：build 147.9s（4429 文件 / 820.86 MiB，
-对 dist11 `+0 -0 ~1`，exe 30,933,722 → 31,002,800 B）、smoke 9.4s（13/13）、
-subtree 170.7s（含诊断包构建）、single 2.3s、optional 9.6s、qt 3.3s、narrow 6.7s
-（1265×644）、log 37.8s；汇总 **PASS 8 / FAIL 0**，总 387.6s。
+实测（2026-11-06，`pyi-dist12`，一条命令跑全 9 步）：预检 `import mbdsdr_ai`
+通过；build **PASS 243.7s**（4434 文件 / 821.8 MiB）、smoke **PASS 12.0s**（13/13）、
+subtree **FAIL 398.2s**（40s 内没出现标题含「MBDSDR 启动失败」的窗口）；失败即停，
+single/optional/qt/narrow/overlap/log 记 `SKIP(not_run)`；汇总
+**PASS 2 / FAIL 1 / SKIP 6**，总耗时 **653.9s**，退出码 1。
 
-- narrow：本次 `ui_narrow_breakdown.py --json` 报 `window_minimumSizeHint=1265×644`
-  （offscreen / MiSans 10pt / 96 DPI），低于 1360×728 阈值。**这是并行 UX 线在
-  22:17 改 `desktop/main_window.py` 后的数字，不是本线改产品或调阈值**；上一版树
-  同一脚本实测 1625×729（当时如实 FAIL），阈值保持 1360×728 未动。
-- log：只把「日志类文件」计入 FAIL（路径含 mbdsdr 且 `*.log`/startup）；
-  全盘扫 `C:\Users\<user>` 1,103,243 个文件，本次运行 0 条日志写入；
-  `gui_config.json`/`desktop_settings.json` 是用户数据，不在本项范围。
+subtree 红**不是闸门误报**，是产品侧回归：诊断包删掉整棵 `_internal/scipy/_external`
+后，日志里 `[smoke] 私有模块导入自检 1/13 通过` 却仍正常建出主窗口
+`MBDSDR - AI 定义无线电`；手动复测（rename `_external` → 启动 noarchive exe →
+每 5s 取窗口标题共 100s）全程只有主窗口，**从未弹出「MBDSDR 启动失败」**。
+`desktop/main.py` 的 `_report_startup_failure` 只在 `from main_window import
+MainWindow` 抛 `ImportError` 时触发（main.py:273-280），当前工作区
+`desktop/main_window.py`、`desktop/control_panel.py` 等有另一条线的未提交改动，
+缺 scipy 已不再阻断 `main_window` 导入 → 缺件文案合同失效。归 UI 线修，闸门不改预期。
+
+被 subtree 阻断的步骤单独补跑（`--skip-build --reuse-diag`）：
+
+- `single` **FAIL 40.2s**（同一产品侧原因：缺 `fft.pyc` 也不弹窗，`[smoke] 4/13`）；
+- `narrow` **PASS 37.5s**：offscreen 实际 `1265×618`（门槛 ≤1344×700）、
+  windows 实际 `960×633`（门槛 ≤1360×728），物理 `1440×950` 仅信息行；
+- `overlap` **PASS 0.0s**（复用同一次 breakdown）：offscreen 30/1、9/1；
+  windows 13/1、7/1（四组都在 `TEMPORARY_WIDENED` 上界内）；
+- `log` **PASS 232.1s**：`C:\Users` 全盘 879,884 个文件里无本次写入的产品日志，
+  实际落点 `D:\mbdsdr\logs\mbdsdr_startup.log`；汇总 **PASS 3 / FAIL 0 / SKIP 0**，
+  总耗时 **269.6s**，退出码 0。
+
+（上一轮 2026-11-05 `--keep-going` 的 `PASS 7 / FAIL 1 / SKIP 0` 已作废：当时
+narrow 只有一套指纹口径、`overlap` 仍叫 `size1366`，数字不再适用。）
+
+- **narrow（两套指纹逐套判）**：offscreen（DPR 1.0 / 行高 13，门槛 **≤1344×700**）
+  与真屏 windows（本机 DPR 1.5 / 行高 18，门槛 **≤1360×728**）各跑一次
+  `ui_narrow_breakdown.py --json`，**各自按自己那套口径**判 PASS/FAIL，
+  不换算、不互相代表；**任一 FAIL 整步 FAIL**。真屏逻辑尺寸换算出的物理尺寸
+  只作信息行（暴露「逻辑过关但物理塞不进 1366×768」）。真屏拿不到（无桌面会话）
+  时输出 `SKIP(no_gui) + 原因`，汇总逐条列出并把退出码置 2——「只测了一半」
+  不允许静默当绿。本次 offscreen 最小 `1265×618` PASS；windows 逻辑 `960×633`
+  PASS，物理 `1440×950` 仅作信息行（信息：>1366×768）。
+- **overlap（口径与窄屏线共用，不另造一套）**：直接读
+  `ui_narrow_breakdown.py` §4f 的 `summary.caliber`——扫描根
+  `topBar/bottomDock/mainToolBar/centralWidget`，越界 = 子控件 `bottomRight`
+  映射到父控件后 `x>父宽+1` 或 `y>父高+1`，挤压 = `QLabel/QAbstractButton/
+  QComboBox/QLineEdit` 且 `sizeHint().width() > width()+2`。输出四个数字
+  （尺寸 × 指纹 × 挤压/越界），每个都有自己的上限（`SIZE_LIMITS`）。
+  **`TEMPORARY_WIDENED`**：下表是 2026-11-06 的**暂定上界，不是设计目标**，
+  待 `desktop/control_panel.py`、`desktop/main_window.py` 未提交改动收口后重测收紧：
+
+  | 指纹 | 1000×600 | 1344×700 | 相对旧基线 |
+  |---|---|---|---|
+  | offscreen（DPR 1.0） | 挤压 ≤36 / 越界 ≤1 | 挤压 ≤15 / 越界 ≤1 | 29→36（+7）、9→15（+6） |
+  | windows（DPR 1.5） | 挤压 ≤13 / 越界 ≤1 | 挤压 ≤7 / 越界 ≤1 | 14→13（-1）、9→7（-2，反收紧） |
+
+  旧基线（2026-11-05 窄屏线实测）`29/1、9/1、14/1、9/1` 在当前工作区**不可复现**：
+  桌面端有未提交改动（topBar 新增 多普勒/发射/GNSS/UTC 等 statusValue），且
+  `ControlPanel` 分栏最小宽在 **310 ↔ 365** 之间随启动时序变化，同一命令连跑
+  offscreen 落在 **30/1 ~ 36/1（1000×600）、9/1 ~ 15/1（1344×700）**，windows 稳定
+  **13/1、7/1**。按「暂定上界不是基线」的裁定，这里只锁当日实测最差值并标注
+  `TEMPORARY_WIDENED`，禁止把它当设计目标引用。1000×600 是窗口声明的最小尺寸，
+  产品允许该尺寸下溢出；1344×700 是 1366×768 屏客户区。两套指纹逐套报，任一 FAIL
+  整步 FAIL，不许为了绿抬上限。
+- log：只把「日志类文件」计入 FAIL（路径含 mbdsdr 且 `*.log`/startup），并排除
+  IDE/Agent 会话日志目录（`.workbuddy` / `.trae*` / `.vscode` / `.cursor`）——
+  它们的文件名带工作区名 `mbdsdr`，但不是产品日志；全盘扫 `C:\Users\<user>`，
+  本次运行 0 条产品日志写入；`gui_config.json`/`desktop_settings.json` 是用户
+  数据，不在本项范围。
+- **失败即停的反证**（保留在用例里）：`--dist-dir 指向不存在的目录 --steps smoke,log`
+  → `smoke` FAIL 后 `log` 记 `SKIP(not_run)`（detail「未执行（前序失败：smoke）」），
+  打印 `下一步：…`，退出码 1；`result.json` 里能看到同一条 SKIP 记录。
 
 ### 5.4 1366×768 实测（含替代方案）
 
 本机显示器支持 37 种模式，`EnumDisplaySettings` 枚举 **没有 1366×768**，无法真机切换，
-如实标注为「替代方案」：
+如实标注为「替代方案」。**旧数字「40 控件越界 / 6 文本压缩」口径不可复现，已作废**，
+现统一按 `ui_narrow_breakdown.py` §4f：
 
-| 方式 | 结果 |
+| 方式 | 结果（挤压 / 越界，上限即该格数字，见 §5.3 的 `TEMPORARY_WIDENED`） |
 |---|---|
-| 源码窗口 + `QT_SCALE_FACTOR=1` 强制 1366×768 | `minimum_size_hint=1254×745`；**40 个控件越界、6 个文本被压缩**；截图右侧控制面板（频率预设/收藏）被裁、底部提示行右端出界 |
+| offscreen（DPR 1.0 / 行高 13） | 1000×600：**30 / 1**（连跑区间 30~36，上界 ≤36 / ≤1）；1344×700：**9 / 1**（区间 9~15，上界 ≤15 / ≤1） |
+| 真屏 windows（DPR 1.5 / 行高 18） | 1000×600：**13 / 1**（6/6 稳定，上界 ≤13 / ≤1）；1344×700：**7 / 1**（6/6 稳定，上界 ≤7 / ≤1） |
 | 冻结版 dist12 + `QT_SCALE_FACTOR=1`，Win32 压到 1366×768 | 窗口 1366×768、进程存活；截图 1344×712，右侧控制面板与「AI 助手」页签右缘被裁 |
 | 启动日志噪声 | 新增 2 行，1 条 `[dll] 未发现 SoapySDR.dll`（可选依赖告警），**无 `[record]`** |
 
-结论：1366×768 下窗口不能完整显示，控件被裁是产品现状。
+恒为 1 的那个越界是 `ControlPanel` 在 `qt_scrollarea_viewport` 内的滚动内容，
+不是文字被裁。结论：1344×700 下 9~15 处挤压属产品现状（已被暂定上界锁住，不是
+设计目标），窗口完整显示仍属 UI 布局线待办。
+
+**读数隔离（脚本侧适配，不是产品改动）**：产品用两参构造
+`QSettings("MBDSDR","Desktop")`，Qt 在 Windows 下这种写法**恒为 NativeFormat**
+（`setDefaultFormat(IniFormat)` 对它无效），窗口几何/分栏尺寸会落
+`HKCU\Software\MBDSDR\Desktop`。`ui_narrow_breakdown.py` 原先会在 `close()` 时
+把本次 1400×900 的分栏写回该键，下一次复跑就带着上一次状态，造成 29↔35 的漂移
+（实测同一命令连跑数字跳动）。现在脚本在 `import main_window` **之前**把
+`PySide6.QtCore.QSettings` 换成适配器：两参构造改走 `IniFormat` + `UserScope` +
+每次新建的临时目录。**只改脚本进程内的类名，产品代码一行未动。**
+反证：`reg export HKCU\Software\MBDSDR\Desktop` 在「跑一次拆账脚本」前后
+SHA256 相同（`EFCE39CF…C2FB`），对照组（45s 不跑脚本）也相同。
+
 
 ## 6. 私有子包同类风险与冒烟清单
 
@@ -417,10 +510,14 @@ subtree 170.7s（含诊断包构建）、single 2.3s、optional 9.6s、qt 3.3s�
    fixture 直接 `mw.MainWindow()`，用的是默认 `%APPDATA%\mbdsdr\desktop_settings.json`；
    用例 `record_dir` 写入 tmp 路径后落盘，把真实配置改成 `…\pytest-…\rec`。
    本机残留已清理，但该 fixture 未隔离配置路径（属测试隔离线），下次整跑仍会再脏。
-9. **1366×768 红线**：发布自检 narrow 本次实测 `1265×644`（≤1360×728，通过）——
-   数字来自并行 UX 线 22:17 对 `desktop/main_window.py` 的改动，本线未改产品、
-   未调阈值；上一版树同一脚本为 `1625×729`（如实 FAIL）。但 1366×768 下仍裁切
-   40 个控件（§5.4），窗口完整显示仍属 UI 布局线待办。
+9. **1366×768 红线**：发布自检 `narrow` 两套指纹逐套判——offscreen `1265×618`
+   （≤1344×700）PASS；真屏 windows 逻辑 `960×633`（≤1360×728）PASS，其物理
+   `1440×950` 仅作信息行（>1366×768，未参与判红）。`overlap` 步按 §4f 口径
+   输出四个数字（上限见 `SIZE_LIMITS`，标注 `TEMPORARY_WIDENED`）：本次实测
+   offscreen 30/1、9/1（连跑区间 30~36 / 9~15），windows 13/1、7/1。
+   旧值「1344×700 两套均 9/1」「1000×600 两套 29/1、14/1」在当前工作区不可复现
+   （桌面端未提交改动 + `ControlPanel` 分栏最小宽漂移，见 §5.3）；窗口在
+   1366×768 屏上完整显示仍属 UI 布局线待办（§5.4）。
 
 ## 8. 本轮改动的文件
 

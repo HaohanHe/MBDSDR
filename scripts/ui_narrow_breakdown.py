@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 _HOME = tempfile.mkdtemp(prefix="narrow-breakdown-home-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -44,9 +45,51 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 
+def _isolate_qsettings() -> None:
+    """把产品对 QSettings 的调用重定向到临时目录下的 ini（不读也不写用户注册表）。
+
+    产品用两参构造 ``QSettings("MBDSDR", "Desktop")``，Qt 在 Windows 下这种写法
+    **恒为 NativeFormat**（实测 ``setDefaultFormat(IniFormat)`` 后
+    ``defaultFormat()==IniFormat``，但实例 ``format()`` 仍是 NativeFormat、
+    ``fileName()`` 仍是 ``\\HKEY_CURRENT_USER\\Software\\MBDSDR\\Desktop``）。
+    MainWindow 会 restore/save ``window_geometry`` 与 ``three_column_sizes``，
+    于是上一次真实运行的窗口/分栏状态会漏进本次测量：同一命令连跑会在
+    29/1 与 35/1 之间跳（35 态右栏被 restored 比例压窄约 55px）。
+
+    对策：在 ``import main_window`` **之前**把 ``PySide6.QtCore.QSettings``
+    换成一个适配器——两参构造改走 ``IniFormat`` + ``UserScope`` + 临时目录。
+    产品里 ``from PySide6.QtCore import QSettings`` 取到的就是这个适配器，
+    其余 Qt API 不受影响。
+    """
+    import PySide6.QtCore as qtcore
+
+    real = qtcore.QSettings
+    real.setPath(real.IniFormat, real.UserScope,
+                 os.path.join(_HOME, "settings"))
+
+    class _IniQSettings:
+        def __new__(cls, *args, **kwargs):
+            if (len(args) == 2 and isinstance(args[0], str)
+                    and isinstance(args[1], str)):
+                return real(real.IniFormat, real.UserScope, args[0], args[1])
+            return real(*args, **kwargs)
+
+    qtcore.QSettings = _IniQSettings
+
+
 def _pump(app, n: int = 60) -> None:
+    """按墙钟排空事件：``n`` 是事件次数下限，实际至少等 1.0s。
+
+    固定次数的 ``processEvents`` 在不同机器/平台上耗时不同，实测同一条命令
+    连跑两次会在 29/1 与 35/1 之间跳——差别来自产品里 700ms 的定时器是否已
+    触发。这里按墙钟等待，保证每次测量都落在同一个稳态。
+    """
+    end = time.monotonic() + 1.0
     for _ in range(n):
         app.processEvents()
+    while time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.01)
 
 
 def _text_of(w: QWidget) -> str:
@@ -112,6 +155,7 @@ def main() -> int:
     args = ap.parse_args()
 
     app = QApplication.instance() or QApplication([])
+    _isolate_qsettings()
     import main_window as mw
 
     win = mw.MainWindow()
@@ -486,11 +530,34 @@ def main() -> int:
         return {"squeezed_count": len(squeezed), "clipped_count": len(clipped),
                 "squeezed": squeezed[:60], "clipped": clipped[:60]}
 
+    def _scan_stable(timeout_s: float = 4.0) -> dict:
+        """等到挤压/越界计数连续两帧不变再取数。
+
+        状态栏文本和 700ms 定时器会异步改写控件内容，固定等待时间在不同机器上
+        仍会让同一命令的数字跳（实测 29/1 ↔ 35/1）。这里以「计数稳定」为准，
+        而不是以「等了多少毫秒」为准。
+        """
+        last = _scan_overflow()
+        end = time.monotonic() + timeout_s
+        stable = 0
+        while time.monotonic() < end:
+            _pump(app, 3)
+            cur = _scan_overflow()
+            if ((cur["squeezed_count"], cur["clipped_count"])
+                    == (last["squeezed_count"], last["clipped_count"])):
+                stable += 1
+                if stable >= 2:
+                    return cur
+            else:
+                stable = 0
+            last = cur
+        return last
+
     _pump(app, 20)
-    overflow_at_declared = _scan_overflow()
+    overflow_at_declared = _scan_stable()
     win.resize(1344, 700)
     _pump(app, 40)
-    overflow_at_target = _scan_overflow()
+    overflow_at_target = _scan_stable()
     win.resize(1400, 900)
     _pump(app, 40)
     result["caliber"] = {
