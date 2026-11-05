@@ -444,11 +444,15 @@ class SettingsPanel(QWidget):
         # 持久化的 Bortle/静噪/步进在启动时推给消费点（默认值与内置默认一致；
         # 用户改过的话重启后仍是用户值，不是"改了白改"）。
         self._apply_initial_state()
+        # 读回时被归一（越界/非法档位/非法模式）的项必须给出原因；
+        # demod_mode 是内部键没有独立行，原因统一落在面板状态行。
+        self._announce_migration_notes()
 
     # ------------------------------------------------------------ 外部接线
     def attach_settings(self, settings):
         self._settings = settings
         self._refresh_from_storage()
+        self._announce_migration_notes()
 
     def attach_host(self, host):
         """注入主窗口（主题/触屏/频谱/星象仪/观测站的应用入口）。"""
@@ -810,6 +814,22 @@ class SettingsPanel(QWidget):
         if reason:
             msg += f"；{reason}"
         self._notify(msg)
+
+    def _announce_migration_notes(self):
+        """把启动读回的归一原因显示到面板状态行（不静默）。
+
+        ``DesktopSettings.load`` 会把越界/未知枚举回落并写 ``migration_notes``；
+        面板若不说，用户只会看到值「自己变了」。内部键（如 demod_mode）没有
+        独立行，所以统一落在状态行，而不是只写日志。
+        """
+        notes = getattr(self._settings, "migration_notes", None) or []
+        if not notes:
+            return
+        msg = "启动时已修正配置：" + "；".join(notes)
+        prev = self.status_label.text().strip()
+        if msg in prev:
+            return
+        self.status_label.setText((prev + " " if prev else "") + msg)
 
     def _notify(self, msg: str):
         """状态栏提示（保存成功/失败、降级原因）。方法名含 notify，是扫描器

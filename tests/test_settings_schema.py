@@ -533,25 +533,65 @@ def test_internal_gain_bandwidth_sample_rate_consumers_clamp(tmp_path, qapp):
     assert cp.sample_rate_combo.currentData() == 2_400_000.0
 
 
-def test_hand_edited_demod_mode_known_gap_no_fallback_blank_combo(tmp_path, qapp):
-    """已知缺口：demod_mode 是 text，手改不存在的 "NBEM" 不回默认、不记原因。
+def test_demod_mode_choices_are_ui_backend_intersection_exact(qapp):
+    """合法集合 = 注册表 analog 模式 ∩ 后端 VALID_MODES，且与下拉项逐项相等。
 
-    实测产品表现：内部模式变 "NBEM"，非可编辑下拉无匹配项 → 显示空白（index -1），
-    带宽按未知模式的 12.5 kHz 兜底；不崩。
+    多一项（如只在后端的 DSB）或少一项都会红：多出的项落盘后 UI 无对应项、
+    `set_mode` 后下拉又会空白，正是本次要消灭的入口。
     """
+    from control_panel import ControlPanel
+    from mode_registry import mode_names
+    from mbdsdr_ai.core.controller import VALID_MODES
+
+    expected = {m for m in mode_names("analog") if m in VALID_MODES}
+    item = SCHEMA["demod_mode"]
+    assert item.kind == "enum"
+    assert set(item.choice_values) == expected
+    assert len(item.choice_values) == len(expected)
+
+    cp = ControlPanel()
+    dropdown = {cp.mode_combo.itemText(i)
+                for i in range(cp.mode_combo.count())}
+    assert dropdown == expected, f"下拉项与合法集合不一致：{dropdown} vs {expected}"
+    assert cp.mode_combo.isEditable() is False
+
+
+def test_hand_edited_demod_mode_falls_back_to_fm_with_reason(tmp_path, qapp):
+    """手改不存在的 "NBEM" → 落 FM、migration_notes 写明原值与回落值、下拉可选。"""
     from control_panel import ControlPanel
 
     ds = _load_payload(tmp_path, {"demod_mode": "NBEM"})
-    assert ds.get("demod_mode") == "NBEM"
-    assert not ds.migration_notes
+    assert ds.get("demod_mode") == "FM"
+    notes = ds.migration_notes or []
+    assert any("demod_mode" in n and "NBEM" in n and "FM" in n for n in notes), \
+        f"回落原因必须含原值与回落值，实际 notes={notes!r}"
 
     cp = ControlPanel()
     cp.set_mode(ds.get("demod_mode"))
-    assert cp._current_mode == "NBEM"
+    assert cp._current_mode == "FM"
     assert cp.mode_combo.isEditable() is False
-    assert cp.mode_combo.currentIndex() == -1
-    assert cp.mode_combo.currentText() == ""
-    assert cp.vfo_bw_combo.currentData() == 12_500.0
+    assert cp.mode_combo.currentText() == "FM"
+    assert cp.mode_combo.currentIndex() == 0
+
+
+def test_legal_demod_mode_is_not_rewritten_and_has_no_note(tmp_path, qapp):
+    """合法值（含顺序不敏感的大小写一致项）原样保留，不产生 migration_notes。"""
+    for mode in ("FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"):
+        ds = _load_payload(tmp_path, {"demod_mode": mode})
+        assert ds.get("demod_mode") == mode
+        assert not ds.migration_notes, f"{mode} 不该产生回落原因"
+
+
+def test_settings_panel_shows_demod_migration_reason(tmp_path, qapp):
+    """用户可见：设置面板状态行显示修复原因（该键无独立行，走面板状态行）。"""
+    from settings_panel import SettingsPanel
+
+    ds = _load_payload(tmp_path, {"demod_mode": "NBEM"})
+    panel = SettingsPanel(settings=ds)
+    text = panel.status_label.text()
+    assert "demod_mode" in text and "NBEM" in text and "FM" in text, \
+        f"设置面板未显示修复原因：{text!r}"
+    panel.deleteLater()
 
 
 # ---------------------------------------------------------------------------

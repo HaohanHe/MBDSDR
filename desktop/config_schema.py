@@ -51,6 +51,28 @@ except ImportError:  # desktop 目录直接上 sys.path（脚本/测试）时
     except ImportError:  # 常量模块也不可用时退回同值，保证 schema 仍可导入
         _DEFAULT_SAMPLE_RATE_HZ = 2_400_000
 
+#: 合法解调模式 = 「UI 能选中」∩「后端接受」，不手写第二份清单：
+#:   * desktop/mode_registry.py 的 analog 模式（下拉项见 desktop/control_panel.py:314，
+#:     由 _PANEL_MODE_ORDER 过滤注册表，两者集合相等）；
+#:   * mbdsdr_ai/core/controller.py:43 VALID_MODES（set_demod 的校验集合）。
+#: decode_router 的 DIGITAL_MODE_CAPABILITIES 是 adsb/ft8 等数字解码器，
+#: 与模拟解调模式不是同一概念，故不并入。
+try:
+    from mode_registry import mode_names as _mode_names
+except ImportError:  # 包内导入
+    from .mode_registry import mode_names as _mode_names
+
+try:
+    from mbdsdr_ai.core.controller import VALID_MODES as _BACKEND_VALID_MODES
+except ImportError:  # 裁剪打包没有后端控制器时，以 UI 可选项为准
+    _BACKEND_VALID_MODES = ()
+
+_UI_DEMOD_MODES = tuple(_mode_names("analog"))
+_LEGAL_DEMOD_MODES = (
+    tuple(m for m in _UI_DEMOD_MODES if m in _BACKEND_VALID_MODES)
+    if _BACKEND_VALID_MODES else _UI_DEMOD_MODES
+)
+
 #: 配置导出格式版本（导出文件里写这个整数）。
 #: 版本策略：**同主版本允许导入并迁移**（缺字段按默认补齐、多字段列出后忽略），
 #: 只有跨主版本才拒绝——主版本变化意味着字段语义/取值范围可能重定义，
@@ -402,8 +424,13 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 default=98_000_000.0, source="desktop/settings.py:29", exposed=False),
     SettingItem(key="gain_db", group="", kind="float", label="", help="",
                 default=20.0, source="desktop/settings.py:30", exposed=False),
-    SettingItem(key="demod_mode", group="", kind="text", label="", help="",
-                default="FM", source="desktop/settings.py:31", exposed=False),
+    SettingItem(key="demod_mode", group="", kind="enum", label="", help="",
+                default="FM",
+                source="desktop/mode_registry.py 的 analog 模式 ∩ "
+                       "mbdsdr_ai/core/controller.py:43 VALID_MODES"
+                       "（下拉项见 desktop/control_panel.py:314）",
+                choices=tuple(_e(m, m) for m in _LEGAL_DEMOD_MODES),
+                exposed=False),
     SettingItem(key="bandwidth_hz", group="", kind="float", label="", help="",
                 default=0.0, source="desktop/settings.py:32", exposed=False),
     SettingItem(key="sample_rate_hz", group="", kind="float", label="", help="",
@@ -540,7 +567,9 @@ def validate_value(item: SettingItem, value: Any) -> Tuple[Any, Optional[str]]:
         for v in item.choice_values:
             if isinstance(v, int) and str(value) == str(v):
                 return v, None
-        return item.default, f"不在可选值 {item.choice_values} 内，已回默认"
+        return item.default, (
+            f"值 {value!r} 不在可选值 {item.choice_values} 内，"
+            f"已回默认 {item.default!r}")
 
     # text：保持字符串，不接受 None
     if value is None:

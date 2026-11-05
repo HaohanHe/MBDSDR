@@ -13,7 +13,7 @@
 | 其中已暴露到设置面板 | **31 条** | 23 条落 DesktopSettings，2 条落 gui_config，5 条落 AI config；去重后 35 个 schema 项 |
 | 判定锁死、不暴露 | **6 类** | 理由见 §4（不是偷懒，每条都有具体消费点缺失或双入口风险） |
 | schema 总条目 | **48** | 35 暴露 + 13 内部键（频率/增益/音量等已有即时控件） |
-| 设置面板新增测试 | **72 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 13 项手改 JSON 非法值矩阵 + 5 项内部键消费端实测） |
+| 设置面板新增测试 | **75 个** | `tests/test_settings_schema.py`，全绿（含 10 对联动提示钉扎 + 14 项手改 JSON 非法值矩阵 + 5 项内部键消费端实测 + 4 项 demod_mode 枚举收口） |
 | 相关回归 | **96 + 29 个** | 配置/主题/布局/触屏/i18n 96；三栏与面板集成 29 |
 
 **接手时的现状（已在本轮修复，记录备查）**：用户点"设置"当时**不是空面板，而是只有
@@ -446,6 +446,7 @@ from settings import (
 | `ui_language` | `"fr"` | `"zh"` | 未知枚举回默认 | 是 |
 | `tuning_step_hz` | `5000` | `10000` | 非档位值回默认（七档枚举） | 是 |
 | `show_low_elevation_passes` | `"maybe"` | `False` | 无法识别布尔 → 回默认 | 是 |
+| `demod_mode`（内部键） | `"NBEM"` | `"FM"` | 不在合法模式集合 → 回默认（§13.2） | 是 |
 | `show_waterfall` | `"yes"` | `True` | 合法别名（`1/true/yes/on`），**不记原因** | 否（预期） |
 | `record_dir` | `123` | `"123"` | text 强制转字符串 | 否（预期） |
 | 枚举字符串 `"2048"` | `"2048"`（fft_size） | `2048`（int） | 容忍数字字符串，不记原因 | 否（预期） |
@@ -457,10 +458,10 @@ from settings import (
    会被原样接受（测试 `test_internal_keys_from_hand_edited_json_are_not_bounded` 钉住
    现状）。实测三种输入均由消费方兜底、不崩（§13.1）；是否在 schema 补范围仍需
    设备线确认（补错范围会把合法的频率/带宽夹坏）。
-2. **内部 text 键不收窄**：`demod_mode` / `agc_speed` / `app_mode` 在 schema 层
-   原样接受（`migration_notes` 为空）；是否有兜底取决于消费方——`demod_mode`
-   无兜底（§13.2，空白下拉），`agc_speed` 有兜底（`set_agc_speed` 未知回
-   `medium`）。若要做枚举，应先由消费方给出完整合法集合，避免把可用模式误拒。
+2. **其余内部 text 键仍不收窄**：`agc_speed` / `app_mode` 在 schema 层原样接受
+   （`migration_notes` 为空），但消费端有兜底——`control_panel.py:set_agc_speed`
+   对未知值回落 `medium`；`main_window._restore_app_mode` 只认 `"planetarium"`，
+   其余落 `ide`。`demod_mode` 已于本轮收窄为枚举（§13.2），不再属于本条。
 3. **“拒绝”路径只有跨主版本**：同主版本内一律归一（夹取/回默认），不拒绝单个键；
    这是有意选择——手改一个键不应让整份配置导入失败。跨主版本由
    `parse_import` 整体拒绝并给出原因与替代做法（§10）。
@@ -494,20 +495,39 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 需要登记的一点：夹取只发生在消费端，**磁盘上的 `1e12` 不会被改写**，下次启动
 仍会再夹一次；等用户改任意设置触发保存才会覆盖。
 
-### 13.2 text 键实测：`demod_mode: "NBEM"`
+### 13.2 `demod_mode`：已收窄为枚举（2026-11-05 收口）
 
-| 环节 | 实测结果 |
-|---|---|
-| `DesktopSettings.load` | 原样接受 `"NBEM"`，`migration_notes` **为空** |
-| `ControlPanel.set_mode("NBEM")` | `_current_mode = "NBEM"`；模式下拉**非可编辑**、无匹配项 → `currentIndex=-1`、显示**空白** |
-| 带宽 | 未知模式走兜底 → 12.5 kHz |
-| 崩溃 | 无 |
+**合法集合来源（不手写清单）**：`desktop/mode_registry.py` 的 analog 模式 ∩
+`mbdsdr_ai/core/controller.py:43 VALID_MODES`。
 
-**结论**：这是**唯一一个未兜底的输入**，且用户会看到空白模式下拉（不是合法值，
-但也不是崩溃）。建议由控制线/内核给出合法模式集合后，把 `demod_mode` 在 schema
-里收窄为枚举，非法值回 `FM` 并记 `migration_notes`；本轮不改（集合归属未定，
-且视觉冻结）。对照：同为 text 的 `agc_speed` **已有兜底**——`control_panel.py:
-set_agc_speed` 对未知值回落 `medium`，所以它不需要 schema 收窄。
+* 下拉项事实：`desktop/control_panel.py:314` 用 `_PANEL_MODE_ORDER` 过滤注册表，
+  集合与注册表 analog 模式相同（7 项）。
+* 为什么取**交集**而不是并集：并集会放进 `DSB`（后端接受、UI 下拉没有 → 落盘后
+  下拉又会空白）、`RAW`/`DIG`（注册表有、下拉不列，用户选不到）；`decode_router`
+  的 `DIGITAL_MODE_CAPABILITIES` 是 adsb/ft8 等**数字解码器**，不是解调模式，不并入。
+* 集合内容（7 项，逐项由测试钉住）：`FM` / `WFM` / `NFM` / `AM` / `USB` / `LSB` / `CW`。
+* 实现位置：`desktop/config_schema.py` 的 `_LEGAL_DEMOD_MODES` 在导入时从两处事实源
+  求交，`demod_mode` 的 `SettingItem(kind="enum")` 直接用它，没有第二份清单。
+
+**处置前后对照**：
+
+| 输入 `demod_mode` | 收窄前（2026-11-05 上午实测） | 收窄后 |
+|---|---|---|
+| `"NBEM"` | 原样接受；`migration_notes` 空；`_current_mode="NBEM"`；下拉空白（index -1）；带宽 12.5 kHz | 落 `FM`；`migration_notes` = `demod_mode: 值 'NBEM' 不在可选值 (...) 内，已回默认 'FM'`；下拉恢复 index 0；设置面板状态行显示原因 |
+| `"USB"` 等 7 个合法值 | 原样 | 原样，`migration_notes` 为空 |
+| 大小写不一致（如 `"fm"`） | 原样接受 | 不在集合 → 回 `FM` 并记原因（下拉只写大写，不做别名） |
+
+**用户可见**：`demod_mode` 是内部键，没有独立设置行；修复原因由
+`SettingsPanel._announce_migration_notes` 显示在设置面板**状态行**
+（“启动时已修正配置：…”），不静默写日志。视觉冻结：只加文本，不碰布局/颜色/尺寸。
+
+**测试（红 → 绿）**：
+
+* `test_demod_mode_choices_are_ui_backend_intersection_exact`（与注册表∩后端逐项
+  相等，且与下拉项相等；多一项/少一项都红）
+* `test_hand_edited_demod_mode_falls_back_to_fm_with_reason`（`"NBEM"` → `FM` 且 notes 非空）
+* `test_legal_demod_mode_is_not_rewritten_and_has_no_note`（7 个合法值不被改写、无 notes）
+* `test_settings_panel_shows_demod_migration_reason`（面板状态行含 `demod_mode`/`NBEM`/`FM`）
 
 ## 14. A7 / A8 遗留收尾确认
 
