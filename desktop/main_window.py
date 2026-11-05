@@ -26,6 +26,14 @@ MSG_QUICK = 2000
 MSG_NORMAL = 4000
 MSG_IMPORTANT = 8000
 
+# S8 断源感知：读线程卡死时 read_failed 可能永远发不出来（read_samples 阻塞在
+# 驱动/套接字里），所以 UI 侧还要独立按数据新鲜度轮询后端 health。
+# 轮询间隔 1s；超过 DATA_STALE_S 无真实数据即判掉线（AC-06.7「断源 2s 内可见」）；
+# 刚建流水线的 HEALTH_GRACE_S 内不判，避免首帧延迟被误报成掉线。
+HEALTH_POLL_MS = 1000
+DATA_STALE_S = 2.0
+HEALTH_GRACE_S = 3.0
+
 
 def _focus_widget():
     """当前焦点控件（便于单测打桩）。"""
@@ -580,6 +588,9 @@ class MainWindow(QMainWindow):
         # 后端掉线处置（读线程空读 + status 核实/持续空读升级）
         self._backend_lost_handled = False
         self._read_fail_signals = 0
+        # S8 轮询只在"本段连接确实来过数据"之后才判掉线：首帧前的空窗交给
+        # read_failed 信号与宽限期处理，避免把"还没开始出数"误报成掉线。
+        self._health_has_data = False
         # 损坏配置的处置状态：已备份才允许写回；备份失败则拒绝覆盖原文件
         self._gui_config_corrupt = False
         self._gui_config_corrupt_backup = None
@@ -674,6 +685,11 @@ class MainWindow(QMainWindow):
                            else None)
         # 当前运行的流水线对象（连接后建，断开时拆）
         self._pipeline = None  # type: Optional[object]
+        # S8：数据流健康轮询（只在流水线运行期间启动，拆流水线即停）
+        self._health_timer = QTimer(self)
+        self._health_timer.setInterval(HEALTH_POLL_MS)
+        self._health_timer.timeout.connect(self._on_health_tick)
+        self._health_grace_until = 0.0
         # VfoManager 里主/第二 VFO 的 id（None = 未建）
         self._main_vfo_id: Optional[str] = None
         self._vfo2_id: Optional[str] = None
@@ -5168,6 +5184,10 @@ class MainWindow(QMainWindow):
         pipe.read_failed.connect(self._on_pipeline_read_failed)
         pipe.start()
         self._pipeline = pipe
+        # 首帧到来前给设备一段宽限，之后再按数据新鲜度判掉线（S8）
+        self._health_grace_until = time.monotonic() + HEALTH_GRACE_S
+        self._health_has_data = False
+        self._health_timer.start()
         # 主听路走统一音频后处理（ANR 降噪 + tap 分发），此前绕过 _tap_demod_audio
         try:
             pipe._demod1.audio_tap = self._tap_demod_audio
@@ -5197,31 +5217,67 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is None or self._pipeline is None:
             return
-        error = ""
-        connected = True
-        try:
-            st = backend.get_status()
-            error = str(getattr(st, "error", "") or "")
-            connected = bool(getattr(st, "connected", True))
-        except Exception:
-            pass
+        error, connected, _age = self._backend_status_facts(backend)
         self._read_fail_signals += 1
         if not error and connected and self._read_fail_signals < 3:
             self.statusBar().showMessage(f"数据流中断，正在重试：{reason}", MSG_IMPORTANT)
             return
+        self._handle_backend_lost(error or reason or "设备已断开")
+
+    def _backend_status_facts(self, backend) -> tuple[str, bool, "float | None"]:
+        """读后端 status 的三个事实：错误说明、是否仍连接、最后一帧数据距今秒数。
+
+        读不到 status（异常/无该方法）时按"仍连接、无年龄"处理，绝不据此断连。
+        """
+        error = ""
+        connected = True
+        age = None
+        try:
+            st = backend.get_status()
+            error = str(getattr(st, "error", "") or "")
+            connected = bool(getattr(st, "connected", True))
+            age = getattr(st, "last_data_age_s", None)
+            age = None if age is None else float(age)
+        except Exception:
+            pass
+        return error, connected, age
+
+    def _handle_backend_lost(self, msg: str) -> None:
+        """统一掉线收尾：拆连接（禁用依赖控件 + 清频谱 + 停流水线）+ 状态栏说明。"""
         if self._backend_lost_handled:
             return
         self._backend_lost_handled = True
-        msg = error or reason or "设备已断开"
         logger.warning("后端掉线，按未连接收尾: %s", msg)
         try:
             self._teardown_connection()
         finally:
             self._backend_lost_handled = False
-        # 原为 15 s：想让"掉线"在状态栏停久一点。现在连接状态由顶栏/状态面板
-        # 持续反映，且 15 s 会压住随后 1–3 s 的新提示（用户只看得到旧消息），
-        # 8 s 足够读完且不再盖住后续动态。
         self.statusBar().showMessage(f"设备已断开：{msg}", MSG_IMPORTANT)
+
+    def _on_health_tick(self) -> None:
+        """S8：每秒按后端真实 health 判掉线（读线程卡死时信号永远不来的兜底）。
+
+        只在流水线运行期间由 _health_timer 触发；首帧前 HEALTH_GRACE_S 内不判。
+        判据先硬后软：status.error → 未连接 → last_data_age_s 超过阈值。
+        年龄为 None（后端不报新鲜度）时不动手，交给 read_failed 那条路径。
+        """
+        backend = self._active_sdr_backend
+        if backend is None or self._pipeline is None:
+            return
+        if not self._health_has_data:
+            # 本段连接还没出过一帧：空窗由 read_failed + 宽限期负责
+            return
+        if time.monotonic() < self._health_grace_until:
+            return
+        error, connected, age = self._backend_status_facts(backend)
+        if error:
+            self._handle_backend_lost(error)
+            return
+        if not connected:
+            self._handle_backend_lost("后端报告未连接")
+            return
+        if age is not None and age > DATA_STALE_S:
+            self._handle_backend_lost(f"超过 {age:.1f}s 未收到 IQ 数据（数据流中断）")
 
     def _update_main_vfo_offset(self):
         """把每个已绑定 DSP 的 VFO 收听频率搬到各自 DDC：offset = vfo_center - backend_center。
@@ -5355,6 +5411,7 @@ class MainWindow(QMainWindow):
         """
         # 收到真实数据 = 链路恢复，清零掉线计数
         self._read_fail_signals = 0
+        self._health_has_data = True
         # 频谱状态文字（重绘由 30fps 定时器统一驱动，避免逐帧重画）
         try:
             self.spectrum._refresh_status_labels()
@@ -5474,6 +5531,10 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         # 停流水线（reader + splitter + FFT/demod/record workers），join 回收
+        # 同时停掉数据流健康轮询：没有流水线就没有"数据新鲜度"可判（S8）
+        self._health_timer.stop()
+        self._health_grace_until = 0.0
+        self._health_has_data = False
         if self._pipeline is not None:
             try:
                 self._pipeline.shutdown()
