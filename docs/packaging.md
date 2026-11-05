@@ -323,13 +323,36 @@ optional → qt → narrow → overlap → log；每步打印 `[PASS]/[FAIL]/[SK
 - single：同一诊断包删 `fft.pyc` →「安装包解压不完整：只缺 …」；
 - optional：发布包改名 `_internal/librtlsdr.dll`（干净 PATH）→「缺少运行库：librtlsdr.dll」。
 
-实测（2026-11-06，`pyi-dist12`，一条命令跑全 9 步）：预检 `import mbdsdr_ai`
-通过；build **PASS 243.7s**（4434 文件 / 821.8 MiB）、smoke **PASS 12.0s**（13/13）、
-subtree **FAIL 398.2s**（40s 内没出现标题含「MBDSDR 启动失败」的窗口）；失败即停，
-single/optional/qt/narrow/overlap/log 记 `SKIP(not_run)`；汇总
-**PASS 2 / FAIL 1 / SKIP 6**，总耗时 **653.9s**，退出码 1。
+**2026-11-06 04:52–05:06 复跑（新产物 `pyi-dist15`/`pyi-dist16`）：九步全 PASS**。
+预检通过；`pyi-dist15` 一条命令跑前 8 步：build **PASS 145.6s**（4445 文件 /
+815.9 MiB）、smoke **PASS 4.5s**（13/13）、subtree **PASS 132.4s**（标题/正文逐字
+匹配 643 字符）、single **PASS 1.2s**（387 字符）、optional **PASS 6.1s**（134 字符）、
+qt **PASS 1.7s**（175 字符）、narrow **PASS 31.4s**（offscreen `1265×618`、
+windows `960×633`）、overlap **FAIL**（windows 1000×600 挤压 15>13、1344×700 挤压
+9>7；offscreen 30/1、9/1 在上限内）；`log` 单独补跑 **PASS 246.4s**。
+同一条命令加 `--keep-going` 重建 `pyi-dist16` 再跑一次：**PASS 9 / FAIL 0 / SKIP 0**，
+总耗时 **519.8s**，退出码 0（subtree 仍逐字匹配 643 字符；narrow 同上；overlap
+windows 回到 **13/1、7/1**，四组均在上限内；log **PASS 202.1s**，`C:\Users` 全盘
+900,795 个文件无本次写入）。
+overlap 两次数字不同属**已记录的抖动**（见 `SIZE_LIMITS` 注释：控件存活/启动时序
+会让同一命令的数字跳动），本轮**未改上限、未改产品代码**；上限仍是
+`TEMPORARY_WIDENED`，等 UI 收口后专门重测收紧。
 
-subtree 红**不是闸门误报**，是产品侧回归：诊断包删掉整棵 `_internal/scipy/_external`
+**子树回归已修复**：`c72896c4` — `desktop/main.py:190` — `_startup_dependency_problems`
+（`git show --name-only c72896c4` 命中 `desktop/main.py` 与 `scripts/release_check.py`；
+`git log -S _startup_dependency_problems -- desktop/main.py` 只命中该提交）。修法是把
+缺件判定改成启动期逐项必需依赖探针，不再依赖「`from main_window import MainWindow`
+抛 `ImportError`」这唯一出口；删整棵 `_internal/scipy/_external` 后 40 s 内即弹
+「启动失败 + 缺什么 + 怎么修」，正文与闸门期望逐字相等。复跑：
+`python scripts/release_check.py`（subtree 步）。
+
+历史记录（2026-11-06 02:33，`pyi-dist12`，**上面的复跑已转绿**）：预检
+`import mbdsdr_ai` 通过；build **PASS 243.7s**（4434 文件 / 821.8 MiB）、smoke
+**PASS 12.0s**（13/13）、subtree **FAIL 398.2s**（40s 内没出现标题含
+「MBDSDR 启动失败」的窗口）；失败即停，single/optional/qt/narrow/overlap/log 记
+`SKIP(not_run)`；汇总 **PASS 2 / FAIL 1 / SKIP 6**，总耗时 **653.9s**，退出码 1。
+
+（历史）subtree 红**不是闸门误报**，是产品侧回归：诊断包删掉整棵 `_internal/scipy/_external`
 后，日志里 `[smoke] 私有模块导入自检 1/13 通过` 却仍正常建出主窗口
 `MBDSDR - AI 定义无线电`；手动复测（rename `_external` → 启动 noarchive exe →
 每 5s 取窗口标题共 100s）全程只有主窗口，**从未弹出「MBDSDR 启动失败」**。
@@ -833,4 +856,10 @@ python scripts/release_manifest.py --only installer
   都是 None，此时只返回退出码、不输出（清单/CI 用管道启动，不受影响）。
 - **既有入口**：无参数启动、`--help`、`--host`/`--port`/`--theme` 保持原样；
   `--import-probe` 缺值或未知开关仍由 argparse 以退出码 2 报错。
+- **产物实测**（`pyi-dist16`，windowed + 重定向管道，`Start-Process -Wait` 取退出码）：
+  `--import-probe=json` → 退出 0、stdout `[probe] OK json`；
+  `--import-probe=no_such_module_mbdsdr` → 退出 2、stdout 带 `[probe] FAIL … ModuleNotFoundError`；
+  `--help` → 退出 0 且打印 usage；`--bogus` 与 `--import-probe` 缺值 → 退出 2。
+  同一次运行前后 `%APPDATA%\mbdsdr` 都是 7 个文件、启动日志
+  `D:\mbdsdr\logs\mbdsdr_startup.log` mtime 未变（04:51:52），证明**没落配置、没写日志**。
 
