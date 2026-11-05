@@ -445,15 +445,84 @@ def main() -> int:
         print(f"  隐藏 topBar: {top_hidden}  → 降 {baseline[0] - top_hidden[0]}")
         print(f"  隐藏 mainToolBar: {tb_hidden}  → 降 {baseline[0] - tb_hidden[0]}")
 
+    # ---------- 4f. 口径核对：声明最小宽 = 1000（硬墙），内容最小宽 = ?
+    # minimumSizeHint() 只是「内容想要多宽」；真正挡住窗口的是
+    # setMinimumSize(1000, 600)。两者必须分开报，别把 hint 当最小宽。
+    # 顺带统计「按声明最小宽 1000 摆开时」有多少控件被压/越界。
+    declared = [win.minimumWidth(), win.minimumHeight()]
+    content_hint = list(baseline)
+
+    def _scan_overflow() -> dict:
+        from PySide6.QtWidgets import (
+            QLabel, QAbstractButton, QComboBox, QLineEdit, QWidget, QToolBar,
+        )
+        roots = [(top.objectName() or "topBar", top),
+                 ("bottomDock", win.findChild(QWidget, "bottomDock")),
+                 ("mainToolBar", tb), ("central", win.centralWidget())]
+        squeezed, clipped = [], []
+        for root_name, root in roots:
+            if root is None:
+                continue
+            for child in root.findChildren(QWidget):
+                if not child.isVisible() or child.width() <= 0:
+                    continue
+                par = child.parentWidget()
+                if par is None:
+                    continue
+                p = child.mapTo(par, child.rect().bottomRight())
+                if p.x() > par.width() + 1 or p.y() > par.height() + 1:
+                    clipped.append(f"{root_name}:"
+                                   f"{par.objectName() or type(par).__name__}>"
+                                   f"{child.objectName() or type(child).__name__}")
+                if isinstance(child, (QLabel, QAbstractButton, QComboBox,
+                                      QLineEdit)):
+                    need = child.sizeHint().width()
+                    if need > child.width() + 2:
+                        txt = child.text() if hasattr(child, "text") else ""
+                        squeezed.append(
+                            f"{root_name}:"
+                            f"{child.objectName() or type(child).__name__}"
+                            f"「{txt[:12]}」{need}→{child.width()}")
+        return {"squeezed_count": len(squeezed), "clipped_count": len(clipped),
+                "squeezed": squeezed[:60], "clipped": clipped[:60]}
+
+    _pump(app, 20)
+    overflow_at_declared = _scan_overflow()
+    win.resize(1344, 700)
+    _pump(app, 40)
+    overflow_at_target = _scan_overflow()
+    win.resize(1400, 900)
+    _pump(app, 40)
+    result["caliber"] = {
+        "declared_minimum": declared,
+        "content_minimumSizeHint": content_hint,
+        "overflow_at_declared_minimum": overflow_at_declared,
+        "overflow_at_1344x700": overflow_at_target,
+    }
+    if not args.json:
+        print("\n== 口径核对（声明最小 vs 内容最小） ==")
+        print(f"  声明最小（setMinimumSize 硬墙）: {declared[0]}×{declared[1]}")
+        print(f"  内容最小（minimumSizeHint）: {content_hint[0]}×{content_hint[1]}"
+              f"  ← 这是「内容想要」，不是窗口地板")
+        print(f"  按 1000×600 摆开：挤压 {overflow_at_declared['squeezed_count']}"
+              f" / 越界 {overflow_at_declared['clipped_count']}")
+        print(f"  按 1344×700 摆开：挤压 {overflow_at_target['squeezed_count']}"
+              f" / 越界 {overflow_at_target['clipped_count']}")
+
     # ---------- 5. 汇总 ----------
+    # 键名沿用（release_check.py 消费 window_minimumSizeHint），但语义必须读清：
+    #   window_minimumSizeHint = 内容最小（minimumSizeHint，会被字体度量放大/缩小）
+    #   window_minimumWidth    = 声明最小（setMinimumSize 硬墙，真正挡住窗口的那个）
     summary = {
         "window_minimumSizeHint": list(baseline),
+        "window_minimumWidth": declared,
         "window_minimumSize": [win.minimumSize().width(),
                                win.minimumSize().height()],
         "topBar_width": top.minimumSizeHint().width(),
         "mainToolBar_width": tb_sum,
         "spectrum_width": spec.minimumSizeHint().width(),
         "height": h["sum"],
+        "caliber": result["caliber"],
     }
     result["summary"] = summary
     if not args.json:
