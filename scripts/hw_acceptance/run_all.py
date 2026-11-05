@@ -68,14 +68,36 @@ def run_one(key: str, name: str, script: str, timeout: int, out_root: str) -> di
     return res
 
 
+def _normalize(r: dict) -> dict:
+    """旧口径 UNVERIFIED → SKIP(NO_DATA)，并保证每个 SKIP 都有原因码。"""
+    if r.get("status") == common.UNVERIFIED:
+        r["status"] = common.SKIP
+        r["skip_code"] = r.get("skip_code") or "NO_DATA"
+        r["notes"] = "UNVERIFIED→SKIP(NO_DATA)：" + str(r.get("notes", ""))
+    elif r.get("status") == common.SKIP and r.get("skip_code") not in common.SKIP_CODES:
+        r["skip_code"] = "NO_DATA"
+        r["notes"] = "SKIP 未带原因码，按 NO_DATA 记账：" + str(r.get("notes", ""))
+    return r
+
+
 def summarize(results: list[dict], out_root: str) -> dict:
-    counts = {common.PASS: 0, common.FAIL: 0, common.SKIPPED: 0, common.UNVERIFIED: 0}
+    results = [_normalize(r) for r in results]
+    counts = {common.PASS: 0, common.FAIL: 0, common.SKIP: 0}
     for r in results:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
+    skips = [{"ring": r["ring"], "code": r.get("skip_code", ""),
+              "reason": str(r.get("notes", "")).split("：", 1)[-1]}
+             for r in results if r["status"] == common.SKIP]
     summary = {
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "artifact_root": out_root,
         "counts": counts,
+        "skip_reasons": skips,
+        "skip_codes": sorted({s["code"] for s in skips}),
+        "offline_substitute": [{"ring": r["ring"],
+                                "result": r.get("metrics", {}).get("offline_substitute")}
+                               for r in results
+                               if r.get("metrics", {}).get("offline_substitute")],
         "red_line": common.RED_LINE,
         "rings": results,
     }
@@ -86,16 +108,23 @@ def summarize(results: list[dict], out_root: str) -> dict:
              f"- 时间：{summary['time']}",
              f"- 产物：`{out_root}`",
              f"- 结果：PASS {counts[common.PASS]} / FAIL {counts[common.FAIL]} / "
-             f"SKIPPED {counts[common.SKIPPED]} / UNVERIFIED {counts[common.UNVERIFIED]}",
+             f"SKIP {counts[common.SKIP]}",
              f"- {common.RED_LINE}", "",
-             "| 环 | 状态 | 关键实测 | 失败时用户看到 |",
-             "|---|---|---|---|"]
+             "| 环 | 状态 | 原因码 | 关键实测 | 离线替代 | 失败时用户看到 |",
+             "|---|---|---|---|---|---|"]
     for r in results:
         metrics = r.get("metrics", {})
-        key = ", ".join(f"{k}={v}" for k, v in list(metrics.items())[:3]) \
+        key = ", ".join(f"{k}={v}" for k, v in list(metrics.items())[:4]) \
             if isinstance(metrics, dict) else str(metrics)
-        lines.append(f"| {r['ring']} {r['name']} | {r['status']} | "
-                     f"{key.replace('|', '/')[:120]} | {r.get('user_message_on_failure', '')[:80]} |")
+        lines.append(
+            f"| {r['ring']} {r['name']} | {r['status']} | {r.get('skip_code', '') or '-'} | "
+            f"{key.replace('|', '/')[:120]} | "
+            f"{metrics.get('offline_substitute', '-') if isinstance(metrics, dict) else '-'} | "
+            f"{r.get('user_message_on_failure', '')[:80]} |")
+    if skips:
+        lines += ["", "## SKIP 原因明细（SKIP 不是通过）", ""]
+        lines += [f"- `{s['ring']}` → **{s['code']}**：{s['reason'][:160]}"
+                  for s in skips]
     with open(os.path.join(out_root, "summary.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return summary
@@ -132,9 +161,16 @@ def main() -> int:
 
     summary = summarize(results, out_root)
     print("\n===== 汇总 =====")
-    for k, v in summary["counts"].items():
-        print(f"  {k}: {v}")
+    print(f"  PASS {summary['counts'][common.PASS]} / "
+          f"FAIL {summary['counts'][common.FAIL]} / "
+          f"SKIP {summary['counts'][common.SKIP]}")
+    for s in summary["skip_reasons"]:
+        print(f"  SKIP {s['ring']} → {s['code']}：{s['reason'][:140]}")
+    for item in summary["offline_substitute"]:
+        print(f"  离线项 {item['ring']}: {item['result']}"
+              "（R2/R3=真实样本回放替代；R5–R7=纯计算环；均不代表真机链路）")
     print(f"  summary.json: {os.path.join(out_root, 'summary.json')}")
+    print("  注意：SKIP 不是通过；离线替代 PASS 只证明数据面，不证明真机链路。")
     return 1 if summary["counts"][common.FAIL] else 0
 
 

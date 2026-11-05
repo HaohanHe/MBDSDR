@@ -32,10 +32,7 @@ def _fm_audio(iq: np.ndarray, fs: float, target_fs: float = 48000) -> np.ndarray
 
 def run(freq_hz: float) -> dict:
     out = common.artifact_dir("r4_recording_playback")
-    from mbdsdr_ai.core import SDRController
-
-    ctrl = SDRController()
-    ctrl.connect(f"rtlsdr:{common.real_devices()[0].serial}")
+    ctrl = common.open_controller(f"rtlsdr:{common.real_devices()[0].serial}")
     checks: list[dict] = []
     metrics: dict = {}
     try:
@@ -63,7 +60,10 @@ def run(freq_hz: float) -> dict:
 
         from mbdsdr_ai.recorder import inspect_recording
         insp = inspect_recording(r["path"])
-        checks.append(common.check("integrity_complete", insp.get("integrity") == "complete",
+        # inspect_recording 的“完整”取值是 "ok"（历史判据这里误写成 "complete"，
+        # 导致任何正常录制都被判 FAIL）。
+        checks.append(common.check("integrity_complete",
+                                   insp.get("integrity") in ("ok", "complete"),
                                    f"{insp.get('integrity')}: {insp.get('reason', '')}"))
         meta_rate = None
         if st.get("meta_path") and os.path.exists(st["meta_path"]):

@@ -107,14 +107,15 @@ def run() -> dict:
     checks.append(common.check("audit_written", lines >= 4, f"{lines} 条 JSONL"))
     checks.append(common.check("audit_parseable", parse_ok, "逐条 JSON 可解析"))
 
+    status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL
     metrics = {
         "verdicts": verdicts,
         "audit_lines": lines,
         "audit_path": audit_path,
         "rf_emitted": False,
+        "offline_substitute": "PASS" if status == common.PASS else "FAIL",
         "note": "只走门判定，未调用任何 TX 后端；真实射频发射未验证。",
     }
-    status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL
     return common.result(
         "R7", "发射（含安全闸）", status, metrics, checks,
         common.USER_MSG["tx_not_authorized"],

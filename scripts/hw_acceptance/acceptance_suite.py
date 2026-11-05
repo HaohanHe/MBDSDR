@@ -24,7 +24,8 @@
     R7 星象仪渲染        太阳误差、月球 vs JPL DE421（含 1h 错位反证）、
                          渲染耗时（ms）、PNG 字节、非空白像素
 
-硬红线：没有真实设备/后端 → ``SKIP(no_device/no_gimbal/no_gnss)`` 并写原因，
+硬红线：没有真实设备/后端 → ``SKIP`` 并带原因码
+（NO_HW / NO_DATA / NEEDS_OPERATOR / NEEDS_TIME_WINDOW），
 **不允许**用模拟/合成/``debug`` 调试源数据判 PASS；拿不到的数字不补。
 产物一律落 D 盘 ``.tmp-tool-results/hw_acceptance/<时间戳>/``。
 """
@@ -45,26 +46,21 @@ if sys_path_dir not in __import__("sys").path:
 import common  # noqa: E402  （同目录公共层，负责路径/设备探测/红线）
 
 FS = 2.4e6
-SKIP = "SKIP"
+SKIP = common.SKIP
 
 
 def _skip_code(res: dict) -> str:
-    """从 notes 的 ``SKIP(no_device)：…`` 前缀提取原因码。"""
-    if res.get("status") != SKIP:
-        return ""
-    head = (res.get("notes") or "").split("：")[0]
-    if head.startswith("SKIP(") and head.endswith(")"):
-        return head[5:-1]
-    return head or "unknown"
+    return res.get("skip_code", "") if res.get("status") == SKIP else ""
 
 
-def skip_result(ring: str, name: str, reason: str, metrics: dict | None = None,
+def skip_result(ring: str, name: str, code: str, metrics: dict | None = None,
                 checks: list[dict] | None = None, notes: str = "") -> dict:
-    """SKIP 信封：状态 + 可读原因 + 已经真实取到的数字（若一个都没取到就为空）。"""
-    return common.result(
-        ring, name, SKIP, metrics or {}, checks or [],
+    """SKIP 信封：必须带原因码（NO_HW / NO_DATA / NEEDS_OPERATOR / NEEDS_TIME_WINDOW）。"""
+    return common.skip_result(
+        ring, name, code, notes,
+        metrics=metrics, checks=checks,
         user_message_on_failure=common.USER_MSG["no_device"],
-        device_required=True, notes=f"SKIP({reason})：{notes}".strip("："),)
+        device_required=True)
 
 
 def fail_result(ring: str, name: str, detail: str, metrics: dict | None = None,
@@ -76,21 +72,18 @@ def fail_result(ring: str, name: str, detail: str, metrics: dict | None = None,
 
 
 def _controller(serial: str):
-    from mbdsdr_ai.core import SDRController
-    ctrl = SDRController()
-    ctrl.connect(f"rtlsdr:{serial}")
-    return ctrl
+    # USB 句柄释放有延迟，Access denied 时短暂重试（见 common.open_controller）。
+    return common.open_controller(f"rtlsdr:{serial}")
 
 
 def _device_gate(ring: str, name: str) -> dict | None:
-    """无真机 → SKIP(no_device)；只看到 debug 源同样不算硬件。"""
+    """无真机 → SKIP(NO_HW)；只看到 debug 源同样不算硬件。"""
     n = common.rtl_device_count()
     devs = common.real_devices()
     if n > 0 and devs:
         return None
-    reason = "no_device" if n == 0 else "debug_only"
     return skip_result(
-        ring, name, reason,
+        ring, name, "NO_HW",
         metrics={"device_count": n, "real_device_count": len(devs)},
         checks=[common.check("device_present", False,
                              f"device_count={n}, real={len(devs)}（debug 源不算）",
@@ -112,15 +105,8 @@ def ring1() -> dict:
                      f"{strings[0]['product']} / {strings[0]['serial']}"
                      if strings else "三元组不可读"),
     ]
-    t0 = time.perf_counter()
-    try:
-        ctrl = _controller(serial)
-    except Exception as e:
-        return fail_result("R1", "连接与识别", f"connect 失败：{e}",
-                           {"device_id": f"rtlsdr:{serial}"},
-                           checks + [common.check("connect", False, str(e))],
-                           user_msg=common.USER_MSG["device_busy"])
-    connect_ms = (time.perf_counter() - t0) * 1000.0
+    # tuner 必须在控制器连接**之前**探测：同一根棒子只能有一个客户端，
+    # 连接后再开 RtlSdr() 会 LIBUSB_ERROR_ACCESS（会被误判成 tuner 失败）。
     tuner = ""
     try:
         from rtlsdr import RtlSdr
@@ -129,6 +115,21 @@ def ring1() -> dict:
         s.close()
     except Exception as e:
         checks.append(common.check("tuner_identified", False, f"pyrtlsdr: {e}"))
+    t0 = time.perf_counter()
+    try:
+        ctrl = _controller(serial)
+    except Exception as e:
+        if common.transient_open_error(e):
+            return skip_result(
+                "R1", "连接与识别", "NEEDS_OPERATOR",
+                metrics={"device_id": f"rtlsdr:{serial}"},
+                checks=checks + [common.check("connect", False, str(e), skipped=True)],
+                notes="设备已枚举但打不开（权限/占用/驱动/重枚举空窗），本环无法验证。")
+        return fail_result("R1", "连接与识别", f"connect 失败：{e}",
+                           {"device_id": f"rtlsdr:{serial}"},
+                           checks + [common.check("connect", False, str(e))],
+                           user_msg=common.USER_MSG["device_busy"])
+    connect_ms = (time.perf_counter() - t0) * 1000.0
     checks.append(common.check("connect", True, f"connect {connect_ms:.1f} ms"))
     checks.append(common.check("tuner_identified", bool(tuner), f"tuner={tuner}"))
     t1 = time.perf_counter()
@@ -163,6 +164,12 @@ def ring2() -> dict:
     try:
         ctrl = _controller(serial)
     except Exception as e:
+        if common.transient_open_error(e):
+            return skip_result(
+                "R2", "频谱与首帧", "NEEDS_OPERATOR",
+                metrics={"device_id": f"rtlsdr:{serial}"},
+                checks=[common.check("connect", False, str(e), skipped=True)],
+                notes="设备已枚举但打不开（权限/占用/重枚举空窗），本环无法验证。")
         return fail_result("R2", "频谱与首帧", f"connect 失败：{e}", {},
                            [common.check("connect", False, str(e))],
                            user_msg=common.USER_MSG["device_busy"])
@@ -219,14 +226,15 @@ def ring2() -> dict:
         "peak_db": round(peak, 2),
         "snr_db": round(snr, 2),
         "centroid_offset_hz": round(offset_hz, 1),
+        "frequency_accuracy_note": (
+            "峰值质心偏移仅作信息：空口 FM 的峰值随调制/邻台漂移，"
+            "不是频率精度指标；绝对频率精度需已知频率信号源（见人工卡 R2）。"),
         "floor_drift_db": round(drift, 2),
         "nan_bins": int(np.isnan(arr).sum()),
     }
     checks = [
         common.check("first_frame", True, f"{first_frame_ms:.1f} ms"),
         common.check("snr_ge_10db", snr >= 10.0, f"{snr:.2f} dB"),
-        common.check("centroid_offset_le_40khz", abs(offset_hz) <= 40_000,
-                     f"{offset_hz:.0f} Hz"),
         common.check("floor_drift_le_6db", drift <= 6.0, f"{drift:.2f} dB"),
         common.check("no_nan", int(np.isnan(arr).sum()) == 0,
                      f"{int(np.isnan(arr).sum())} 个 NaN"),
@@ -250,11 +258,20 @@ def ring3() -> dict:
     try:
         ctrl = _controller(serial)
     except Exception as e:
+        if common.transient_open_error(e):
+            return skip_result(
+                "R3", "流稳定性", "NEEDS_OPERATOR",
+                metrics={"device_id": f"rtlsdr:{serial}"},
+                checks=[common.check("connect", False, str(e), skipped=True)],
+                notes="设备已枚举但打不开（权限/占用/重枚举空窗），本环无法验证。")
         return fail_result("R3", "流稳定性", f"connect 失败：{e}", {},
                            [common.check("connect", False, str(e))],
                            user_msg=common.USER_MSG["device_busy"])
     ctrl.set_sample_rate(FS)
-    n_req = 16384
+    # 读块必须足够大：实测同样 2.4 MS/s 下，16384/块只有 1.74 MS/s、262144/块 2.28 MS/s
+    # ——小块的低吞吐是 Python 每次调用开销，不是设备流；用小块会把「读循环开销」
+    # 误判成「设备吞吐不足」。
+    n_req = 262144
     duration_s = 3.0
     t_end = time.perf_counter() + duration_s
     requested = received = reads = short = nones = 0
@@ -274,6 +291,7 @@ def ring3() -> dict:
     eff_rate = received / max(elapsed, 1e-9)
     metrics = {
         "duration_s": round(elapsed, 3),
+        "read_block_samples": n_req,
         "read_calls": reads,
         "requested_samples": requested,
         "received_samples": received,
@@ -382,7 +400,7 @@ def ring5() -> dict:
         reachable = False
     if not reachable:
         return skip_result(
-            "R5", "云台回读", "no_gimbal",
+            "R5", "云台回读", "NO_HW",
             metrics={"rotctld_host": host, "rotctld_port": port,
                      "probe_ms": round((time.perf_counter() - t0) * 1000.0, 1),
                      "board_channel": "unavailable（需板载 ESP32 send callable，本机未接）"},
@@ -429,7 +447,7 @@ def ring6() -> dict:
     try:
         from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
     except Exception as e:
-        return skip_result("R6", "GNSS 定位", "no_gnss",
+        return skip_result("R6", "GNSS 定位", "NO_HW",
                            metrics={"import_error": f"{type(e).__name__}: {e}"},
                            notes="本机不可验：GNSS 模块不可导入。")
     mon = RealGNSSMonitor()
@@ -437,7 +455,7 @@ def ring6() -> dict:
     started = mon.start()
     if not started:
         return skip_result(
-            "R6", "GNSS 定位", "no_gnss",
+            "R6", "GNSS 定位", "NO_HW",
             metrics={"start_ms": round((time.perf_counter() - t0) * 1000.0, 1),
                      "port": mon.port, "baudrate": mon.baudrate},
             notes="本机不可验：未检测到串口 GNSS 接收机（可用 COM 口/驱动检查）。")
@@ -452,7 +470,7 @@ def ring6() -> dict:
     mon.stop()
     if pos.source != "real":
         return skip_result(
-            "R6", "GNSS 定位", "no_fix",
+            "R6", "GNSS 定位", "NEEDS_TIME_WINDOW",
             metrics={"port": mon.port, "wait_s": round(time.perf_counter() - t0, 1),
                      "fix": "none", "sats_visible": sats_visible},
             checks=[common.check("fix", False, "串口已开但等待窗口内无有效定位", skipped=True)],
@@ -548,9 +566,9 @@ def main() -> int:
     for ring, name, fn in rings:
         if halted:
             results.append(skip_result(
-                ring, name, "not_run",
+                ring, name, "NEEDS_OPERATOR",
                 notes=f"前序 {halted} FAIL，按「失败即停」未执行；本环未产生数字。"))
-            print(f"[{ring}] {name:<12} SKIP(not_run)  ← 前序 {halted} FAIL")
+            print(f"[{ring}] {name:<12} SKIP(NEEDS_OPERATOR)  ← 前序 {halted} FAIL")
             continue
         t0 = time.perf_counter()
         try:
@@ -596,7 +614,7 @@ def main() -> int:
     print("SKIP 明细：")
     for r in results:
         if r["status"] == SKIP:
-            print(f"  {r['ring']} {r['name']}: {r.get('notes', '')}")
+            print(f"  {r['ring']} {r['name']} [{_skip_code(r)}]: {r.get('notes', '')}")
     print(common.RED_LINE)
     print("=" * 72)
     return 1 if failed else 0

@@ -601,6 +601,9 @@ def _predict_passes_impl(
                        "max_hz": round(max(shifts), 1)}
             passes.append({
                 "satellite": name,
+                # 内部排序键：rise_time 只有 HH:MM:SS，跨午夜按字符串排序会把
+                # 明天 05:34 排到今晚 20:48 前面。按真实 epoch 排序，输出前删除。
+                "_rise_epoch": t_rise,
                 "rise_time": time.strftime(tfmt, time.localtime(t_rise)),
                 "rise_azimuth": round(s_rise["azimuth"], 1),
                 "culmination_time": time.strftime(tfmt, time.localtime(t_cul)),
@@ -628,7 +631,9 @@ def _predict_passes_impl(
                 "time_precision_s": acc["time_precision_s"],
             })
             i = j
-    passes.sort(key=lambda p: p["rise_time"])
+    passes.sort(key=lambda p: p["_rise_epoch"])
+    for p in passes:
+        p.pop("_rise_epoch", None)
     return passes, degraded
 
 

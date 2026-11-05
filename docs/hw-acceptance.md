@@ -1,90 +1,247 @@
-# 真机七环验收（单命令可复跑）
+# 真机七环验收（可复跑 + 离线替代 + 人工验收卡）
 
-一条命令跑完七环：逐环执行、逐环 PASS/FAIL/SKIP、**失败即停**、末尾汇总
-`PASS n / FAIL n / SKIP n` 并逐条列出 SKIP 原因。
+三个入口，职责分开：
 
 ```powershell
+# 主口径：七环（R1–R7），每环独立子进程，汇总 PASS / FAIL / SKIP + 原因码
+python scripts\hw_acceptance\run_all.py
+
+# 设备链视角：R1–R4 硬件、R5 云台、R6 GNSS、R7 星象仪渲染；失败即停
 python scripts\hw_acceptance\acceptance_suite.py
-python scripts\hw_acceptance\acceptance_suite.py --out D:\mbdsdr\tmp\hw_suite
+python scripts\hw_acceptance\acceptance_suite.py --hw      # 只跑 R1–R4
+
+# 反证：故意改坏判据，环必须 FAIL；否则说明判据形同虚设
+python scripts\hw_acceptance\negative_control.py
 ```
 
-- 退出码：任一环 `FAIL` → 1；`PASS`/`SKIP` → 0。
-- 证据：`D:\mbdsdr\MBDSDR\.tmp-tool-results\hw_acceptance\suite_<时间戳>\`
-  每环 `result.json` + `summary.json` + 渲染/音频产物。**全部落 D 盘。**
+- 退出码：任一环 `FAIL` → 1；`PASS` / `SKIP` → 0（**SKIP 不是通过**）。
+- 证据全部落 D 盘：`.tmp-tool-results/hw_acceptance/`，可用 `--out` 指定。
 - 环境变量（可选）：`MBDSDR_ROTCTLD_HOST/PORT`、`MBDSDR_GNSS_WAIT_S`、
   `MBDSDR_OBS_LAT/LON`、`MBDSDR_HW_ACCEPTANCE_DIR`。
+- `MBDSDR_HW_FORCE_OFFLINE=1`：只把硬件环降级为 `SKIP + 离线替代`，用于演练
+  SKIP 明细；**不可能**把硬件环判 PASS。
 
-## 硬红线（写进脚本启动横幅与每条结果）
+## 硬红线
 
-1. 没有真实设备/后端 → `SKIP(no_device | no_gimbal | no_gnss)`，并写明原因；
-2. **严禁**用模拟/合成/`debug` 调试源数据判 PASS（`debug` 源不计入真机）；
-3. 拿不到的数字不补，标 `UNVERIFIED` 或直接不输出；
+1. 没有真实设备/后端 → `SKIP`，且原因码可见：
+   `NO_HW` / `NO_DATA` / `NEEDS_OPERATOR` / `NEEDS_TIME_WINDOW`；
+2. **严禁**用模拟/合成/`debug` 调试源数据把硬件环判 PASS；
+3. 拿不到的数字不补：不输出，或标 `skipped` 并写明原因；
 4. 全程静音（不打开声卡）、不下发云台运动指令、不产生射频；
 5. 任何产物不得落 C 盘用户目录。
 
-## 当前状态（2026-11-06 00:56 实跑）
+> 离线替代即使 PASS，也只能说明「数据面」成立，**不能**把硬件环判 PASS。
+> 硬件环的真实状态始终是 `SKIP(NO_HW)` 或真实实测。
 
-命令：`python scripts\hw_acceptance\acceptance_suite.py`
-证据：`.tmp-tool-results/hw_acceptance/suite_20261106_005623/`
-总耗时：**21.2 s**（其中 R6 串口扫描 15.4 s 占大头）
+## 一、七环逐环：测什么 / 需要什么 / 能否离线替代 / 现状
 
-| 环 | 名称 | 状态 | 关键实测 / SKIP 原因 | 本环耗时 |
-|---|---|---|---|---|
-| R1 | 连接与识别 | **SKIP(no_device)** | `device_count=0`；本机未插 RTL-SDR，无连接耗时可报 | 3.7 s（含导入库） |
-| R2 | 频谱与首帧 | **SKIP(no_device)** | 同上；无第一帧时间/噪声底/SNR 数字 | 0.07 s |
-| R3 | 流稳定性 | **SKIP(no_device)** | 同上；无请求/实收样本、短读计数 | 0.08 s |
-| R4 | 解调与音频输出 | **SKIP(no_device)** | 同上；无音频 RMS/导频数字 | 0.07 s |
-| R5 | 云台回读 | **SKIP(no_gimbal)** | `127.0.0.1:4533` 探测 613.3 ms 无应答；未下发任何运动指令 | 0.61 s |
-| R6 | GNSS 定位 | **SKIP(no_gnss)** | 串口自动扫描 15420.9 ms 未找到 GNSS 接收机 | 15.4 s |
-| R7 | 星象仪渲染 | **PASS** | 太阳误差 **0.0054°**；月球 vs **JPL DE421** 偏差 **26.5″**、视直径差 **4.7″**；1h 错位反证 **1981.4″** → 拨回 **26.5″**；渲染 **577.8 ms**；PNG **91,560 B** 非空白 | 0.58 s |
+状态取自 **2026-11-06 01:45 真机实跑**（`D:\mbdsdr\tmp\final_hw_014420`）与
+**强制无硬件实跑**（`D:\mbdsdr\tmp\final_nohw_014552`）。两列都不合并、不取平均。
 
-> 汇总：`PASS 1 / FAIL 0 / SKIP 6`。R1–R6 属**本机不可验**（缺真机/云台/GNSS），
-> 不是产品失败；没有用任何模拟数据顶替。
-
-## 七环判据与实测口径
-
-| 环 | 前置 | 动作 | 期望（可量化） | 自动 / 人眼 | 失败时用户看到 |
+| 环 | 测的物理量 / 数据面 | 需要什么（设备/数据/时间窗） | 能否离线替代 | 真机现状 | 无硬件现状 / 原因码 |
 |---|---|---|---|---|---|
-| R1 | RTL-SDR 已插、无他进程占用 | librtlsdr 枚举 → `SDRController.connect` → 释放 | 枚举 ≥1；三元组可读；tuner 可识别；打印 `connect_ms`/`disconnect_ms` | 全自动 | 无设备：`未检测到 SDR 设备。请插入 RTL-SDR 后点「重新枚举」…`；占用：`设备被其他程序占用。请关闭 SDR++ / SDR# / rtl_tcp…`；缺库：`找不到 SDR 运行库（librtlsdr）…` |
-| R2 | 设备可用；天线接入 | 连接后立即读首帧 → 扫 88–108 MHz 找强台 → 连读 32 帧 | `first_frame_ms` 实测；SNR ≥10 dB；质心峰偏 ≤40 kHz；噪声底漂移 ≤6 dB；0 NaN | 帧率/数字全自动；瀑布观感人眼 | `当前频点没有足够强的信号。请换已知强台（FM 广播）或接天线后重试。` |
-| R3 | 设备可用 | 2.4 MS/s 连续读 IQ 3 s，统计请求/实收/短读/None | 吞吐比 ≥0.90；有效率 2.4±0.24 MS/s；短读 0；None 读 0 | 全自动 | 同上；另：`pyrtlsdr 无 overflow 计数，丢样本只能由吞吐比间接体现，不伪造数字` |
-| R4 | 设备可用；有 FM 强台 | WFM 解调 → `read_audio` → 写 WAV（**不进声卡**） | ≥4096 帧；RMS ∈ (1e-4, 1.0)；<15k/>15k 能量比 >2；打印声道数/WAV 字节 | 数据面自动；音质人眼/人耳 | `当前频点没有足够强的信号…`；脚本永不打开声卡，无声卡报错 |
-| R5 | rotctld 已启动或板载云台在线 | **只读**：TCP 探测 → `get_position()` 两次 | 打印 `connect_ms`/`read_ms`、方位/仰角、两次回读差 ≤1° | 全自动；机械精度另需授权运动测试 | `云台无应答。请确认 rotctld 已启动（默认 127.0.0.1:4533）或板载云台通道已连接。` |
-| R6 | 串口 GNSS 接收机 | `RealGNSSMonitor.start()` → 等待 fix | 打印首次定位耗时 `ttff_s`、经纬度、星数、HDOP；坐标来自真实 NMEA | 全自动 | `未获得 GNSS 定位。请检查 GNSS 接收机串口/天线，或在户外重试。` |
-| R7 | PySide6 + `de421.bsp` + skyfield | 天文计算 → 太阳独立 Meeus 对拍 → **月球 vs JPL DE421** → 1h 错位反证 → `RFSkyView.grab()` | 太阳 ≤0.5°；月球赤道坐标 ≤120″、视直径 ≤12″；1h 错位必须 ≥600″（反证）；渲染 ≤3 s；PNG 非空白 | 数据/渲染自动；星空布局与手感人眼 | `星象仪模式数据异常：请检查观测站坐标与系统时间（时间/坐标错会导致星位全错）。` |
+| R1 连接与识别 | librtlsdr 枚举数、USB 三元组、tuner 型号、`connect_ms`/`disconnect_ms`、5 次开关是否泄漏句柄 | RTL-SDR + WinUSB/Zadig + 无他进程占用 | **不能**：USB 枚举、驱动绑定、开句柄耗时都是物理过程 | **PASS**：Generic RTL2832U / SN 77771111153705700，tuner=2(FC0012)，5/5 次开关成功（瞬时重试 0 次），断开后新句柄可开 | **SKIP** / `NO_HW`（未枚举到真实设备） |
+| R2 频谱与瀑布 | 第一帧耗时、32 帧噪声底/SNR、噪声底漂移、NaN、瀑布矩阵 | RTL-SDR + 天线 + 88–108 MHz 已知强台 | **部分**：用真实 OTA 录音回放可验 DSP 数据面（SNR/漂移/NaN）；**不能**验实时流、第一帧、调谐精度 | **PASS**：94.30 MHz 台，SNR 22.02 dB、噪声底 −48.61 dB、漂移 4.79 dB、32/32 帧、NaN=0 | **SKIP** / `NO_HW`；离线替代 **PASS**：SNR 36.31 dB、漂移 3.68 dB |
+| R3 解调与音频 | 音频帧数、声道、RMS、<15k/>15k 能量比、19 kHz 导频 | RTL-SDR + 强台；听感需声卡/人耳（脚本不出声） | **部分**：真实 OTA → 产品解调链可验数据面；**不能**验声卡、实时流、听感 | **PASS**：7680 帧/2 声道、RMS 0.6334、能量比 34.7；导频 19006 Hz/7.3 dB 过弱 → 记 `skipped`（单声道台合法） | **SKIP** / `NO_HW`；离线替代 **PASS**：RMS 0.2306、能量比 57.4、导频 19000 Hz/31.8 dB |
+| R4 录音与回放 | 流式写盘字节增长、样本数、SigMF `integrity`、文件回放/实时 RMS 比、改采样率后 sidecar | RTL-SDR + D 盘可写 | **不能**：要真实实时流、写盘时钟与 SigMF 落盘 | **PASS**：2,359,296→4,718,592 B、598,016 样本、integrity=ok、回放比 0.46、改速后 1.2 MS/s 写入 sidecar | **SKIP** / `NO_HW`（无替代样本可证实时写盘） |
+| R5 卫星追踪与过境 | 过境升起时刻/峰值仰角、TLE 完整性、跨午夜排序、仰角门 | TLE + skyfield（**不需要射频硬件**） | **可以**：纯计算，离线可复跑 | **PASS**：32 条过境；NOAA15/18/19/ISS 峰值仰角误差 0.00–0.05°，升起时刻差 0.3–5.3 s；TLE 校验和全部合法；排序升序 | **PASS**（离线纯算）；缺 TLE → `NO_DATA` |
+| R6 星象仪模式 | 太阳 RA/Dec、月球 RA/Dec 与视直径、1 h 错位反证、offscreen 渲染字节/非空白 | skyfield + `de421.bsp`（**不需要射频硬件**） | **可以**：纯计算 + 离屏渲染，离线可复跑 | **PASS**：太阳误差 0.0054°；月球 vs JPL DE421 **26.2″**、视直径差 **4.5″**；1 h 反证 **1980.1″** → 拨回 26.2″；PNG 94,414 B | **PASS**（离线纯算）；缺星历 → `NO_DATA` |
+| R7 发射（含安全闸） | 7 种门语义（手工 arm、伪造 token、一次性 token、动作不符、过期、撤销）、审计 JSONL | 纯软件；**不产生射频** | **可以**：门逻辑离线可复跑 | **PASS**：7 种判定全部符合预期，审计 11 条 JSONL，`rf_emitted=false` | **PASS**（离线纯算）；**真实发射**见「永久不可复跑」 |
 
-**月球阈值口径**：120″ 是**外部星历真值**阈值（JPL DE421 经 skyfield 读取；
-DE421 月球精度约 1″ 量级 + 本仓 Meeus 截断级数余量，实测偏差 26.6″），
-**不是**「两套自家实现的最大分歧」。缺 `de421.bsp`/skyfield 时该子项标
-`UNVERIFIED` 并 `skipped`，不补数字。
+> 原因码只允许这四个；`run_all.py` 的汇总行逐条打印
+> `SKIP <环> → <原因码>：<原因>`，`summary.md` 也有独立的「SKIP 原因明细」表。
 
-反证可复跑：`python -m pytest tests\test_moon_reference_acceptance.py -q`
-（含 1 小时错位必须红、拨回必须绿）；手工演示脚本在
-`D:\mbdsdr\.tmp-tool-results\hw_acceptance\negctl_moon.py`（D 盘临时件，不入库）。
+## 二、离线替代与参考值出处（不写出处 = 自己给自己判卷）
 
-失败即停：任一环 `FAIL` 后，后续环标 `SKIP(not_run)` 并注明「前序 R? FAIL」，
-不继续执行、不掩盖。
-
-## 可复跑命令表
-
-| 命令 | 实测耗时 | 依赖 | 产物 / 判据 |
+| 项 | 参考/夹具 | 出处 | 属于哪种 |
 |---|---|---|---|
-| `python scripts\hw_acceptance\acceptance_suite.py` | **21.2 s** | R1–R4：librtlsdr + RTL-SDR；R5：rotctld `127.0.0.1:4533`（或板载云台）；R6：COM 口 GNSS；R7：PySide6 + skyfield + `de421.bsp` | `summary.json` + 逐环 `result.json`；SKIP 带 `no_device/no_gimbal/no_gnss` 原因码 |
-| `python scripts\hw_acceptance\run_all.py --only r5,r6,r7` | **39.4 s** | TLE 缓存（离线需先有缓存，或允许联网）；skyfield；D 盘 TX 审计目录可写 | 上一版分环脚本（卫星过境/天空/发射闸），`PASS 3 / FAIL 0` |
-| `python scripts\hw_acceptance\acceptance_suite.py --hw` | **3.9 s** | R1–R4：librtlsdr + RTL-SDR | 只跑硬件四环；无设备 → `PASS 0 / FAIL 0 / SKIP 4`，逐条 `no_device`；**SKIP 计数可见**，不会因 0 个 PASS 而报“通过” |
-| `python scripts\hw_acceptance\manual_usb_cycle.py --mode usb`（无 `--interactive`） | **7.0 s**（SKIP） | 无（`no_operator`）；真跑需人工 + 设备/链路 | `result.json`；`SKIPPED(no_operator)`，**不产生任何拔线耗时数字** |
-| `python -m pytest tests\test_moon_reference_acceptance.py -q` | **0.36 s** | `de421.bsp` + skyfield（缺则 skip） | 月球对拍 + 1h 反证：`3 passed` |
+| R2/R3 数据面回放 | `tests/fixtures/real_fm_88m1/`（88.1 MHz 空口实录） | `provenance.json` 声明 `external-truth / real_ota`，含采集设备（RTL2832U+FC0012）、时间、sha256；每次运行重新校验 sha256 | **真实外部数据**（不是合成波形） |
+| R6 月球绝对位置 | JPL DE421 | `de421.bsp`（仓库根，约 17 MB，**不入库**）经 skyfield 读取；DE421 月球星历精度约 1″ 量级 | **外部星历真值** |
+| R6 太阳位置 | Meeus《Astronomical Algorithms》(1998) 第 25 章低精度太阳公式 | `ring6_sky_mode.py::_sun_reference` 独立实现 | **外部公开算法**，不是本仓同一实现 |
+| R5 TLE 完整性 | NORAD TLE 校验和（数字相加、`-` 记 1、模 10） | 公开 TLE 格式规范；见 `_tle_checksum` | **外部标准** |
+| R5 过境误差 | skyfield 对**同一份 TLE** 递推 | 与 `mbdsdr_ai.orbit` 共用 sgp4 内核 | **实现一致性，不是外部星历真值**；只证明两条代码路径一致 |
+| R2/R3 指标 | 无绝对参考 | — | 只做「真实数据回归」：阈值是工程判据，不是计量真值 |
 
-> `scripts/release_check.py` 本轮**未改动**：该文件工作区含机制线未提交的
-> `narrow/size1366/三态 run` 改动，按纪律不把他人工作夹带进本次提交。
-> `--hw` 是等价的可嵌入闸门入口（退出码只在 FAIL 时为 1；SKIP 仍逐条计数）。
-> 机制线合入后，可把 `acceptance_suite.py --hw` 直接挂到其步骤表。
+**月球阈值口径**：120″ 是**外部星历真值**阈值（DE421），不是「两套自家实现的最大分歧」。
+缺 `de421.bsp`/skyfield 时，R6 返回 `SKIP(NO_DATA)`，太阳与渲染子项照跑但不据此判 PASS。
 
+## 三、人工验收卡（无硬件/需人时照着做）
 
-### R8 热插拔 / 拔线（半自动：人动手，脚本计时判定）
+每张卡都可一页打印。**只填实测值；拿不到就写「未测」，不要补数。**
+
+### 卡 R1 连接与识别（需设备）
+前置：RTL-SDR 已插；关闭 SDR++/SDR#/rtl_tcp；已装 WinUSB/Zadig。
+步骤：
+1. `python scripts\hw_acceptance\ring1_connection.py`；
+2. 拔插 USB 三次，每次重跑；
+3. 打开另一个程序（如 SDR++）确认能接手设备，再关掉。
+
+| 记录项 | 第 1 次 | 第 2 次 | 第 3 次 | 合格判据 |
+|---|---|---|---|---|
+| 枚举数 | | | | ≥1 |
+| USB 三元组 | | | | 可读（允许为空字符串的老克隆棒） |
+| tuner | | | | 非空 |
+| connect_ms / disconnect_ms | | | | 只记录，不设上限 |
+| 5 次开关成功率 | | | | 5/5 |
+| 断开后新句柄可开 | | | | 是 |
+
+### 卡 R2 频谱与瀑布（需设备 + 人眼；绝对频率精度需信号源）
+前置：天线接入；已知强台（FM 88–108 MHz）。
+步骤：
+1. `python scripts\hw_acceptance\ring2_spectrum_waterfall.py`；
+2. 观察瀑布 10 s：滚动是否连续、有无整屏跳变/撕裂；
+3. （可选，校准）信号源输出 100.000 MHz / −60 dBm，记录峰值偏差。
+
+| 记录项 | 实测 | 合格判据 |
+|---|---|---|
+| SNR | | ≥10 dB |
+| 32 帧噪声底漂移 | | ≤6 dB |
+| 帧数 / NaN | | 32/32、0 |
+| 瀑布观感 | 连续 / 跳变 / 撕裂 | 无整屏跳变 |
+| （校准）100 MHz 峰偏 | | ≤5 kHz（仅在有信号源时判） |
+
+> 绝对频率精度没有已知频率源就无法判；空口 FM 台的峰值会随调制漂移，不能当频率基准。
+
+### 卡 R3 解调与音频（需设备 + 人耳）
+步骤：
+1. `python scripts\hw_acceptance\ring3_demod_audio.py`；
+2. 打开产物 `wfm_audio.wav` 播放 30 s；
+3. 记录是否有周期性爆音/金属声/静音段。
+
+| 记录项 | 实测 | 合格判据 |
+|---|---|---|
+| 音频帧数 / 声道 | | ≥4096 / 1 或 2 |
+| RMS | | 1e-4 – 1.0 |
+| <15k/>15k 能量比 | | >2 |
+| 19 kHz 导频 | | 有则 19000±100 Hz；无则记「单声道」 |
+| 听感 | 清晰 / 爆音 / 金属声 | 可懂、无周期性爆音 |
+
+### 卡 R4 录音与回放（需设备 + 人耳）
+步骤：
+1. `python scripts\hw_acceptance\ring4_recording_playback.py`；
+2. 播放产物 `rec_2p4m.sigmf-data`（或同名 WAV 导出）；
+3. 记录文件增长、完整性、回放声音。
+
+| 记录项 | 实测 | 合格判据 |
+|---|---|---|
+| 写盘字节增长 | | 单调增长且 >0 |
+| 样本数 | | >0 |
+| SigMF `integrity` | | `ok` |
+| 回放/实时 RMS 比 | | 0.2 – 0.8 |
+| 改采样率后 sidecar | | 与新采样率一致 |
+| 回放听感 | | 与实时一致，无断音 |
+
+### 卡 R5 过境（离线纯算 + 真实接收另算）
+离线部分（无需硬件）：
+1. `python scripts\hw_acceptance\ring5_satellite_passes.py`；
+2. 记录各星 `elevation_error_deg` / `rise_error_s` / TLE 校验和 / 是否升序。
+
+| 记录项 | 实测 | 合格判据 |
+|---|---|---|
+| TLE 校验和 | | 全部合法 |
+| 过境条数与排序 | | 升序（含跨午夜） |
+| 峰值仰角误差 | | ≤1.0° |
+| 升起时刻误差 | | ≤60 s |
+| 仰角门 | | 全部 ≥ 设定门限 |
+
+真实接收（需时间窗+天线，**半永久人工**）：按星历在过境窗口内守听，记录
+实际首帧时刻与预测升起时刻差、实际峰值仰角（用云台回读或外部量角器）。
+
+### 卡 R6 星象仪（离线纯算 + 观感）
+步骤：
+1. `python scripts\hw_acceptance\ring6_sky_mode.py`；
+2. 打开 `sky_render.png`，检查星空布局、地平线、方位标注；
+3. 若在桌面端，实际操作缩放/拖动/切换时间。
+
+| 记录项 | 实测 | 合格判据 |
+|---|---|---|
+| 太阳误差 | | ≤0.5° |
+| 月球 vs DE421 | | ≤120″ |
+| 月球视直径差 | | ≤12″ |
+| 1 h 错位反证 | | ≥600″，拨回 ≤120″ |
+| 渲染耗时 / PNG 字节 | | ≤3 s / 非空白 |
+| 观感 | 布局/方位/交互 | 方位正确、无错位（人眼判） |
+
+### 卡 R7 发射安全闸（纯软件）与真实发射（永久人工授权）
+门语义（离线）：`python scripts\hw_acceptance\ring7_tx_gate.py`；7 种判定必须
+全部符合预期，审计 JSONL 可逐条解析，`rf_emitted=false`。
+
+真实发射（**永久不可自动复跑**）：
+1. 操作者持证并确认频率/功率/时间/地点合规；
+2. 在界面由真人点击确认，生成一次性 token；
+3. 记录：授权人、频率、功率、开始/结束时刻、SWR/驻波、实际发射时长；
+4. 任何一项缺记录 → 该次发射不算验收。
+
+## 四、可复跑命令表
+
+| 命令 | 实测耗时 | 依赖（设备/数据/端口） | 产物 / 口径 |
+|---|---|---|---|
+| `python scripts\hw_acceptance\run_all.py` | **80.4 s**（真机 7/7 PASS）；**56.1 s**（强制无硬件：PASS 3 / SKIP 4） | R1–R4：RTL-SDR；R5：TLE 缓存 + skyfield；R6：`de421.bsp` + PySide6；R7：纯软件 | `summary.json` / `summary.md` / 逐环 `result.json`；SKIP 必带原因码 |
+| `python scripts\hw_acceptance\run_all.py --only r5,r6,r7` | 约 **34 s**（本机实测 25.0+4.6+4.2，串行） | TLE + skyfield + `de421.bsp` + PySide6；无射频硬件 | 只跑三个离线纯算环；用于快速回归 |
+| `python scripts\hw_acceptance\acceptance_suite.py` | **36.7 s**（真机：PASS 5 / FAIL 0 / SKIP 2）；无设备时全 SKIP（约 6 s） | R1–R4：RTL-SDR；R5：rotctld `127.0.0.1:4533`；R6：COM 口 GNSS；R7：PySide6 + `de421.bsp` | 设备链视角；失败即停；SKIP 带原因码 |
+| `python scripts\hw_acceptance\acceptance_suite.py --hw` | **13–14 s**（连续两次 PASS 4/4） | R1–R4：librtlsdr + RTL-SDR | 只跑硬件四环；无设备 → `PASS 0 / SKIP 4`，SKIP 计数可见 |
+| `python scripts\hw_acceptance\negative_control.py` | **29.5 s**（R5 基线占 25 s） | TLE + skyfield + `de421.bsp` + 真实 OTA 夹具 | 4 个反证必须 `RED_AS_EXPECTED`；否则退出码 1 |
+| `python -m pytest tests\test_moon_reference_acceptance.py -q` | **0.5 s**（3 passed） | `de421.bsp` + skyfield | 月球对拍 + 1h 反证回归 |
+| `python -m pytest tests\test_hw_acceptance_contract.py -q` | **0.2 s**（6 passed） | 无（纯契约） | 锁四码、锁 `skip_result` 永不 PASS、锁 `UNVERIFIED→SKIP(NO_DATA)` |
+| `python scripts\hw_acceptance\ring{1..7}_*.py --out D:\...` | R1 17.4 / R2 8.8 / R3 8.0 / R4 12.0 / R5 25.0 / R6 4.6 / R7 4.2 s | 见上表 | 单环排障；每环独立 `result.json` |
+
+> 耗时口径：以上均为 **2026-11-06 01:44–02:00 本机实测**（RTL2832U + FC0012，
+> 串行跑，未与其他采集进程并发）。设备被其他进程并发占用时，硬件环会
+> `SKIP(NEEDS_OPERATOR)` 而不是 FAIL——串行跑多环时上一句柄的 USB 释放有
+> 延迟，`common.transient_open_error()` 会做 4 次（≈1.8 s）瞬时重试，
+> R1 的五次开关另记 `cycle_transient_retries`，重试次数不隐藏。
+
+> `scripts/release_check.py` 本轮仍未改动（该文件工作区含机制线未提交改动）。
+> 可用等价闸门 `acceptance_suite.py --hw`（或 `run_all.py`）挂到其步骤表：
+> 退出码只在 FAIL 时为 1，SKIP 仍逐条计数。
+
+## 五、永久不可复跑 / 半自动 / 条件复跑
+
+| 项 | 类别 | 原因 |
+|---|---|---|
+| 真实射频发射 | **永久不可自动复跑** | 需持证设备、频率授权、真人一次性 token；脚本 R7 只验门语义 |
+| 真实扬声器出声 | **永久人工** | 验收纪律要求静音；脚本只落 WAV |
+| 云台机械指向精度 | **永久需人工授权** | 需物理转动 + 外部量角器；只读回读≠机械精度 |
+| 星空/瀑布/音质观感 | **永久人眼/人耳** | 数据面可自动，观感不可断言 |
+| 真实卫星接收/GNSS 首次定位 | **需时间窗/天空视野** | 过境窗口、室外天空；无 window → `NEEDS_TIME_WINDOW` |
+| 拔线/驱动故障注入 | **半自动（按下节 R8）** | 人做物理拔插，脚本计时判定 |
+| R1–R4 硬件链 | **条件复跑** | 接上 RTL-SDR、关掉占用进程即可复跑；当前设备可被其他进程间歇占用 → `NEEDS_OPERATOR` |
+
+## 六、当前状态（诚实版）
+
+基准时点：**2026-11-06 01:44–02:00**（RTL2832U / SN 77771111153705700，FC0012）。
+
+- **真机**：`run_all.py` → **`PASS 7 / FAIL 0 / SKIP 0`**，总耗时 **80.4 s**；
+  R1–R4 为真实设备实测，R5–R7 为离线纯算。七环全部跑过且判据成立。
+- **无硬件（`MBDSDR_HW_FORCE_OFFLINE=1`）**：**`PASS 3 / FAIL 0 / SKIP 4`**，
+  总耗时 **56.1 s**；4 个 SKIP 全部 `NO_HW`（R1/R2/R3/R4），
+  R2/R3 的离线替代单独标 PASS。**不把 3 个 PASS 当七环通过。**
+- **设备被占用时**：硬件环返回 `SKIP(NEEDS_OPERATOR)`，不是 FAIL、
+  也不是 PASS；用户侧原文见 `common.USER_MSG["device_access_denied"]`。
+- **反证**：`negative_control.py` 4 个注入全部 `RED_AS_EXPECTED`，29.5 s
+  （R7 门放行、R5 仰角门 95°、R6 月球容差 −1″、R2 真实样本换全零）。
+- **设备链视角**：`acceptance_suite.py` → `PASS 5 / FAIL 0 / SKIP 2`
+  （R5 云台、R6 串口 GNSS 均 `NO_HW`），36.7 s；`--hw` → `PASS 4 / FAIL 0 / SKIP 0`
+  （连续两次，13–14 s）。
+
+本轮实测发现并修掉的三处**判据口径问题**（都属于「量错了」而不是「放宽」）：
+
+1. `acceptance_suite` R2 的 `centroid_offset_le_40khz`：空口 FM 的峰值随调制/邻台
+   漂移，不是频率精度指标（与 `ring2` 同一理由）。改为信息字段 + 明确注明
+   「绝对频率精度需已知频率源」，与人工卡 R2 对齐。
+2. `acceptance_suite` R3 用 16384 样本/次读流：同样 2.4 MS/s 下实测
+   16384/块 **1.74 MS/s**、65536/块 **2.15 MS/s**、262144/块 **2.28 MS/s**——
+   小块低吞吐是 **Python 每次调用开销**，不是设备流。改为 262144 样本/块后
+   吞吐 2.27 MS/s，判据才在量设备而不是量解释器。
+3. R1 五次开关与跨环串行打开：上一句柄 USB 释放有延迟，会瞬时「枚举不到设备」。
+   新增 `common.transient_open_error()`（device-not-found / access-denied 统一按瞬时处理），
+   最多 4 次 ≈1.8 s 重试；重试次数记入 `cycle_transient_retries` 与注释，
+   **不是**把失败藏起来——真拔线时重试耗尽仍会 FAIL/SKIP。
+
+## 七、R8 热插拔 / 拔线（半自动：人动手，脚本计时判定）
 
 脚本：`scripts/hw_acceptance/manual_usb_cycle.py`。**人工只做物理动作**
-（拔/插 USB、拔网线、停/启服务端），计时与 PASS/FAIL 由脚本完成，避免人眼判读。
+（拔/插 USB、拔网线、停/启服务端），计时与 PASS/FAIL 由脚本完成。
 
 ```powershell
 # 只看判据、不作任何动作（无操作者时的实跑口径）
@@ -97,68 +254,17 @@ python scripts\hw_acceptance\manual_usb_cycle.py --mode rtl-tcp --port 1234 --cu
 ```
 
 - 证据：`.tmp-tool-results/hw_acceptance/hotplug_<mode>/result.json`（全部 D 盘）。
-- 计时口径：**以最后一帧真实数据为 T0**，`detect_s`/`stale_s` 是静默持续时长，
-  操作者晚按几秒不会污染数字；插回首帧用**重连成功→首帧**的软件延迟，另记
-  `human_wait_s` 供参考。
-- SKIP 原因码：`no_operator`（没加 `--interactive` / 非终端）、`no_hw_env`
-  （`MBDSDR_NO_HW=1`）、`no_device`（枚举不到 RTL-SDR）、`no_endpoint`
-  （建连失败）、`no_stream`（建连但 5s 无首帧）、`operator_cancel`（人工中断）。
-  SKIP 不算通过，且不产生任何耗时数字。
+- 计时口径：**以最后一帧真实数据为 T0**，`detect_s`/`stale_s` 是静默持续时长；
+  插回首帧用**重连成功→首帧**的软件延迟，另记 `human_wait_s` 供参考。
+- SKIP 原因码（R8 专用，不进七环汇总）：`no_operator` / `no_hw_env` / `no_device` /
+  `no_endpoint` / `no_stream` / `operator_cancel`。SKIP 不产生任何耗时数字。
 
 三种后端路径不同，必须分开验（数值来源：`docs/network-layer.md` §0/§2/§7 本机实测）：
 
 | 后端 / 拔法 | 步骤与观察点 | 上限 | 数字来源 |
 |---|---|---|---|
-| **本地 USB**（`--mode usb`） | ① 拔 USB → `connected=False`、`link_state=disconnected`；② 插回 → 重连并出首帧 | ① **≤0.5s**；② **≤1.0s** | `UNVERIFIED_EXT`：本机无真机，沿用网络源 RST **0.000s** / FIN **0.103s** 实测的 0.5s 上限（≈5× 余量）；首帧沿用换端口 **0.022s** 的 1.0s 上限（≈45× 余量）。第一次真机跑后用实测值校准 |
-| **rtl_tcp · 拔网线**（`--cut cable`） | ① 半开：TCP 保活、停止转发 → `stale` → 硬判 `disconnected`；② 重插 → 重新建连 → 首帧 | ① stale **≤5.5s**、硬判 **≤11.0s**；② **≤1.0s** | 实测 stale **5.004s**、硬判 **10.034s**（`TestRealThresholdLatency`, idle=5s）；首帧实测换端口 **0.022s**（`UNVERIFIED_EXT` 重插路径） |
-| **rtl_tcp · 停服务端**（`--cut server`） | ① 杀进程 → RST/FIN → `disconnected`，`error_category ∈ eof/reset`；② 重启 → 重连 → 首帧 | ① **≤0.5s**；② **≤1.0s** | 实测 RST **0.000s** / FIN **0.103s**（§2）；首帧同换端口 0.022s |
-| **SpyServer · 拔网线**（`--cut cable`） | ① 半开 → stale → 硬判；② 重插 → 重新握手 → 首帧 | ① stale **≤5.5s**、硬判 **≤11.0s**；② **≤1.0s** | 实测 stale **5.010s**、硬判 **10.027s**（§0）；首帧沿用 rtl 0.020s 的 1.0s 上限（spy 未单独计时，`UNVERIFIED_EXT`） |
-| **SpyServer · 停服务端**（`--cut server`） | ① 停进程 → RST/FIN；② 重启 → 重新握手 → 首帧 | ① **≤0.5s**；② **≤1.0s** | 实测 RST **0.000s** / FIN **0.098s**（§3）；首帧同上 |
-
-**为什么不能合并成一版**：rtl_tcp 重连只需 socket + 12 字节 `RTL0` 头；SpyServer
-重连要重新走设备/采样率/streaming 协商，首帧必须校验真实 `ndarray`（长度 4096、
-非全零），不能拿「TCP 连上了」当恢复成功；USB 是本地枚举路径（librtlsdr
-重新 open），与网络心跳无关，拔出后由生产者读错误直接 `_mark_link_lost`。
-
-**本轮实跑（无操作者）**：`usb`、`rtl-tcp`（cut=cable）、`spyserver`（cut=server）
-三个模式均输出 `status=SKIPPED(no_operator) code=no_operator`，退出码 0，
-`result.json` 分别落在 `.tmp-tool-results/hw_acceptance/hotplug_{usb,rtl-tcp,spyserver}/`；
-未执行任何拔插动作，也**没有**产生可引用的耗时数字。
-
-### 只能条件复跑 / 永久不可复跑
-
-| 项 | 状态 | 原因 |
-|---|---|---|
-| R1–R4 连接/频谱/流/音频 | **接上 RTL-SDR 即可复跑** | 当前 `device_count=0` |
-| R5 云台回读 | **接上 rotctld/板载云台即可复跑** | 当前端口无应答 |
-| R6 GNSS 定位 | **接上串口 GNSS 即可复跑** | 当前无接收机 |
-| 真实射频发射 | **永久不可自动复跑** | 需持证设备、频率授权与真人一次性 token；脚本 R7 只验门语义、不产生射频 |
-| 真实扬声器出声 | **永久人工** | 验收纪律要求静音，脚本只落 WAV |
-| 云台机械指向精度 | **永久需人工授权** | 需物理转动 + 外部量角器；只读回读不代表机械精度 |
-| 拔线/驱动未装等故障注入 | **半自动（R8）** | 人做物理拔插，`manual_usb_cycle.py` 计时并判定；无操作者时 `SKIP(no_operator)`，不产生数字 |
-| 星空/瀑布/音质观感 | **永久人眼/人耳** | 渲染与数据面可自动，观感不可断言 |
-
-
-## 未验证项（如实列出）
-
-- **R1–R4**：本机无 RTL-SDR，全部 `SKIP(no_device)`，**零实测数字**；
-- **R5**：本机无 rotctld/板载云台，`SKIP(no_gimbal)`；机械跟随精度需真 rotator/IMU，
-  且 `pose_error_by_source.readback.samples > 0` 前不得把指令误差当机械精度；UI
-  在云台按钮 tooltip 与停机文案里原样写「指向精度：不可报（原因）」，**不显示 0°**；
-- **R6**：本机无串口 GNSS，`SKIP(no_gnss)`；坐标未产生，未用任何默认站址冒充；
-- **R7 月球绝对位置**：已对拍 JPL DE421（偏差 26.6″、视直径 4.8″），不再是未验证项；
-  依赖 `de421.bsp`（本机在仓库根，约 17 MB，**不入库**）；换机缺星历时该子项自动
-  `UNVERIFIED`，不会静默变绿；
-- **人耳听感**：R4 数据面已验证，音质/爆音需操作者放行出声后手动验；
-- **R7 人眼手感**：offscreen 渲染仅证明能出图，星空布局/交互需真实显示环境；
-- **R8 拔线**：本轮只跑过无操作者 `SKIP(no_operator)`，**没有任何真机拔插数字**；
-  表中 USB 的 0.5s/1.0s 是 `UNVERIFIED_EXT`（沿用网络源实测上限），网络拔线的
-  5s/10s 数字来自本机回环半开，**真实网线/NAT/驱动重枚举未验证**。第一次真机
-  跑完后，用实测值校准这两档上限，而不是把本表当已验证。
-
-## 与旧脚本的关系
-
-- `scripts/real_hw_acceptance.py`（2026-11-03 单体七环）保留可复跑；
-- `scripts/hw_acceptance/ring1_connection.py` … `ring7_tx_gate.py`（上一版按环拆分，
-  覆盖频谱/录音/卫星/天空/发射）保留；本文件的 `acceptance_suite.py` 是**单命令入口**，
-  以本文件的状态表为当前口径。
+| **本地 USB**（`--mode usb`） | ① 拔 USB → `connected=False`、`link_state=disconnected`；② 插回 → 重连并出首帧 | ① **≤0.5s**；② **≤1.0s** | `UNVERIFIED_EXT`：沿用网络源 RST **0.000s** / FIN **0.103s** 实测的 0.5s 上限；首帧沿用换端口 **0.022s** 的 1.0s 上限 |
+| **rtl_tcp · 拔网线**（`--cut cable`） | ① 半开 → `stale` → 硬判 `disconnected`；② 重插 → 重新建连 → 首帧 | ① stale **≤5.5s**、硬判 **≤11.0s**；② **≤1.0s** | 实测 stale **5.004s**、硬判 **10.034s**（`TestRealThresholdLatency`, idle=5s） |
+| **rtl_tcp · 停服务端**（`--cut server`） | ① 杀进程 → RST/FIN → `disconnected`；② 重启 → 重连 → 首帧 | ① **≤0.5s**；② **≤1.0s** | 实测 RST **0.000s** / FIN **0.103s**（§2） |
+| **SpyServer · 拔网线**（`--cut cable`） | ① 半开 → stale → 硬判；② 重插 → 重新握手 → 首帧 | ① stale **≤5.5s**、硬判 **≤11.0s**；② **≤1.0s** | 实测 stale **5.010s**、硬判 **10.027s**（§0） |
+| **SpyServer · 停服务端**（`--cut server`） | ① 停进程 → RST/FIN；② 重启 → 重新握手 → 首帧 | ① **≤0.5s**；② **≤1.0s** | 实测 RST **0.000s** / FIN **0.098s**（§3） |

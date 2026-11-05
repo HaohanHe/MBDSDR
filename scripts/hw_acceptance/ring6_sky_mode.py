@@ -164,10 +164,11 @@ def run(lat: float, lon: float) -> dict:
     # -- 月球绝对位置：JPL DE421 外部星历真值对拍 + 1 小时反证 --
     moon_ref = _moon_reference(jd)
     moon_metrics: dict = {}
-    if moon_ref is None:
+    moon_missing = moon_ref is None
+    if moon_missing:
         checks.append(common.check(
             "moon_ephemeris_match", False,
-            "缺 de421.bsp 或 skyfield，月球绝对位置 UNVERIFIED（未补数）",
+            "缺 de421.bsp 或 skyfield，月球绝对位置未验证（SKIP(NO_DATA)，不补数）",
             skipped=True))
     else:
         sep = _separation_arcsec(moon.ra_deg, moon.dec_deg,
@@ -232,14 +233,25 @@ def run(lat: float, lon: float) -> dict:
         "station_warning": reason,
     }
     metrics.update(moon_metrics)
+    metrics["ephemeris"] = _ephemeris_path() or "缺 de421.bsp"
     status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL
+    metrics["offline_substitute"] = "SKIP" if moon_missing else (
+        "PASS" if status == common.PASS else "FAIL")
+    note = ("月球绝对位置对拍 JPL DE421（外部星历真值，非自家分歧）；"
+            "含 1 小时错位反证。本环完全离线可复跑（不需射频硬件）。")
+    if moon_missing:
+        return common.skip_result(
+            "R6", "星象仪模式", "NO_DATA",
+            "缺 de421.bsp / skyfield：月球绝对位置无法对拍外部真值；"
+            "太阳/渲染子项已跑但不构成「月球已验证」。",
+            metrics, checks,
+            "星象仪模式数据异常：请检查观测站坐标与系统时间（时间/坐标错会导致星位全错）。",
+            ["星空布局、卫星标记与交互手感（观感）"], False, [png])
     return common.result(
         "R6", "星象仪模式", status, metrics, checks,
         "星象仪模式数据异常：请检查观测站坐标与系统时间（时间/坐标错会导致星位全错）。",
         ["星空布局、卫星标记与交互手感（观感）"], False,
-        [png],
-        "月球绝对位置对拍 JPL DE421（外部星历真值，非自家分歧）；"
-        "含 1 小时错位反证。")
+        [png], note)
 
 
 if __name__ == "__main__":

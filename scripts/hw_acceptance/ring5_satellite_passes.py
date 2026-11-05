@@ -79,6 +79,21 @@ def _skyfield_pass(l1: str, l2: str, name: str, lat: float, lon: float,
     }
 
 
+def _tle_checksum(line: str) -> int:
+    """NORAD TLE 校验和（标准算法：数字相加，'-' 记 1，其余记 0，取模 10）。"""
+    total = 0
+    for ch in line[:68]:
+        if ch.isdigit():
+            total += int(ch)
+        elif ch == "-":
+            total += 1
+    return total % 10
+
+
+def _tle_line_ok(line: str) -> bool:
+    return len(line) >= 69 and line[68].isdigit() and int(line[68]) == _tle_checksum(line)
+
+
 def _pass_epoch(hhmmss: str, start_unix: float) -> float:
     """rise_time 只有 HH:MM:SS（本地时），按起始本地日期补全；跨午夜则 +1 天。"""
     y, m, d = time.localtime(start_unix)[:3]
@@ -105,15 +120,15 @@ def run(lat: float, lon: float, alt_m: float) -> dict:
             tle_errors[norad] = f"{type(e).__name__}: {e}"
 
     if not tle_recs:
-        return common.result(
-            "R5", "卫星追踪与过境", common.UNVERIFIED,
+        return common.skip_result(
+            "R5", "卫星追踪与过境", "NO_DATA",
+            "全部目标 TLE 不可用（离线无缓存/下载失败）；不使用内置近似值冒充实测过境，"
+            "本环不产出过境数字。",
             {"tle_errors": tle_errors,
              "observer": {"lat": lat, "lon": lon, "alt_m": alt_m}},
             [common.check("tle_available", False, "全部目标 TLE 不可用", skipped=True)],
-            "TLE 数据不可用：请联网刷新，或确认 orbit TLE 缓存存在后重试。"
-            "（不使用内置近似值冒充实测过境。）",
-            [], False, [],
-            "没有可用 TLE，本环不产出过境数字。")
+            "TLE 数据不可用：请联网刷新，或确认 orbit TLE 缓存存在后重试。",
+            [], False)
 
     try:
         passes = _with_timeout(
@@ -137,22 +152,28 @@ def run(lat: float, lon: float, alt_m: float) -> dict:
 
         ref = _with_timeout(sky_all, 120.0)
     except Exception as e:
-        return common.result(
-            "R5", "卫星追踪与过境", common.UNVERIFIED,
+        return common.skip_result(
+            "R5", "卫星追踪与过境", "NO_DATA",
+            f"缺 skyfield 独立递推参考（{e}），无法量化过境误差；"
+            "过境列表仍可由面板复看，但本环不判 PASS。",
             {"tle_source": {n: r.get("source") for n, r in tle_recs.items()},
              "error": str(e)},
             [common.check("skyfield_reference", False, f"独立参考不可用：{e}", skipped=True)],
-            "缺少 skyfield 独立递推参考，无法量化误差；过境列表仍可由面板复看。",
-            [], False, [], "有 TLE 但无独立参考，误差未量化。")
+            "缺少 skyfield 独立递推参考，无法量化误差。", [], False)
 
     epochs = [_pass_epoch(p["rise_time"], now) for p in passes]
     chrono = all(epochs[i] <= epochs[i + 1] for i in range(len(epochs) - 1))
+    # TLE 校验和是**外部可验证**的完整性证据（NORAD 标准算法），不是自家口径。
+    cs_ok = all(_tle_line_ok(rec["line1"]) and _tle_line_ok(rec["line2"])
+                for rec in tle_recs.values())
     checks = [common.check("tle_available", True,
                            f"{len(tle_recs)}/{len(TARGETS)} 颗 TLE 可用"),
+              common.check("tle_checksums_valid", cs_ok,
+                           "全部 TLE 行校验和符合 NORAD 标准" if cs_ok
+                           else "有 TLE 行校验和不符（数据被截断/篡改）"),
               common.check("passes_sorted", chrono,
                            f"{len(passes)} 条过境按补全日期后的升起时刻"
-                           f"{'升序' if chrono else '非升序：按 HH:MM:SS 字符串排序，跨午夜顺序失真（已知缺陷，待修）'}",
-                           skipped=not chrono),
+                           f"{'升序' if chrono else '非升序：跨午夜顺序失真（按 HH:MM:SS 字符串排序的缺陷）'}"),
               common.check("elevation_ge_gate",
                            all(float(p["max_elevation"]) >= MIN_EL for p in passes),
                            f"全部 >= {MIN_EL}°")]
@@ -191,19 +212,21 @@ def run(lat: float, lon: float, alt_m: float) -> dict:
         "pass_count": len(passes),
         "satellites": findings,
         "tle_errors": tle_errors,
-        "known_issue": (None if chrono else
-                        "过境列表按 HH:MM:SS 字符串排序（orbit.py passes.sort 键），"
-                        "跨午夜时明天 05:34 会排在今晚 20:48 之前；建议按 t_rise 数值排序。"),
+        "tle_checksums_valid": cs_ok,
+        "reference_note": ("独立参考=skyfield 对**同一份 TLE** 递推；两者共用 sgp4 内核，"
+                           "因此误差是「实现一致性」，不是外部星历真值。"),
     }
     measured = [f for f in findings if "elevation_error_deg" in f]
     checks.append(common.check("measured_sats", len(measured) >= 2,
                                f"{len(measured)} 颗完成误差量化"))
     status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL
+    metrics["offline_substitute"] = "PASS" if status == common.PASS else "FAIL"
     return common.result(
         "R5", "卫星追踪与过境", status, metrics, checks,
         "过境预报与独立参考不一致：先刷新 TLE（过期轨道会放大误差），再复跑。",
         [], False, [],
-        "独立参考使用 skyfield 对同一份 TLE 递推；误差=实现一致性，不是绝对星历精度。")
+        "离线可复跑（不依赖射频硬件，只依赖 TLE+skyfield）。独立参考使用 skyfield "
+        "对同一份 TLE 递推；误差=实现一致性，不是外部星历真值。")
 
 
 if __name__ == "__main__":
