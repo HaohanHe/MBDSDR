@@ -224,7 +224,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         dbMaxSlider_->setRange(tokens::kDbSpinUpperMin, tokens::kDbSpinUpperMax);
         dbMaxSlider_->setSingleStep(tokens::kDbSliderStep);
         dbMaxValue_ = new QLabel(QStringLiteral("%1 dB")
-                                     .arg(tokens::kDbUpperDefault), dbMaxRow);
+                                     .arg(tokens::kDbViewUpperDefault), dbMaxRow);
         dbMaxValue_->setMinimumWidth(tokens::scaled(64));
         dbMaxLay->addWidget(dbMaxSlider_, 1);
         dbMaxLay->addWidget(dbMaxValue_);
@@ -429,7 +429,7 @@ void SettingsDialog::loadFromConfig(const ai::AiConfig& cfg) {
                 static_cast<float>(tokens::kDbLowerDefault)).toFloat())));
     dbMaxSlider_->setValue(static_cast<int>(std::round(
         s.value(tokens::kSettingsKeyDbMax,
-                static_cast<float>(tokens::kDbUpperDefault)).toFloat())));
+                static_cast<float>(tokens::kDbViewUpperDefault)).toFloat())));
     {
         const double z = s.value(tokens::kSettingsKeyZoomFactor, 1.0).toDouble();
         const int tick = static_cast<int>(std::round(
@@ -540,7 +540,7 @@ int SettingsDialog::displayDbMin() const {
 }
 
 int SettingsDialog::displayDbMax() const {
-    return dbMaxSlider_ ? dbMaxSlider_->value() : tokens::kDbUpperDefault;
+    return dbMaxSlider_ ? dbMaxSlider_->value() : tokens::kDbViewUpperDefault;
 }
 
 double SettingsDialog::displayZoom() const {

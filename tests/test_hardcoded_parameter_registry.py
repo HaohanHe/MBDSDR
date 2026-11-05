@@ -202,7 +202,8 @@ CPP_EXPECTED = {
     "kDbSpinUpperMin": -40,
     "kDbSpinUpperMax": 20,
     "kDbLowerDefault": -100,
-    "kDbUpperDefault": -20,
+    "kDbViewUpperDefault": -20,   # 默认视窗上限（对齐 Python）
+    "kDbCeilingMax": 0,           # 显示天花板硬上限（0 dBFS，满量程）
     # 两条峰门**分开记账**：显示门 6.0 / 校准门 15.0（见 3b 节）。
     "kPeakRelDb": 6.0,
     "kPeakThresholdDefault": 15.0,
@@ -363,10 +364,16 @@ def test_db_default_range_matches_python_and_keeps_minus50_visible():
     found = {m.group(1): float(m.group(2))
              for m in _INLINE_CONSTEXPR.finditer(
                  TOKENS_H.read_text(encoding="utf-8"))}
-    lo, hi = found["kDbLowerDefault"], found["kDbUpperDefault"]
+    lo, hi = found["kDbLowerDefault"], found["kDbViewUpperDefault"]
     assert (lo, hi) == (-100.0, -20.0), (
         f"C++ 默认 dB 量程应为 -100..-20，实际 {lo:g}..{hi:g}")
     assert lo <= -50.0 <= hi, "-50 dBFS 的常见信号必须落在默认视窗内"
+    # 天花板硬上限是另一个量：0 dBFS（满量程），不是默认视窗上限。
+    # 合并这两者会让显式 setDbRange(-100, 0) 被夹成 -20，-10 dB 峰值越过天花板
+    # 画成纯白（255）而不是色表顶端（229）。
+    ceiling = found["kDbCeilingMax"]
+    assert ceiling == 0.0, f"显示天花板硬上限应为 0 dBFS，实际 {ceiling:g}"
+    assert ceiling > hi, "天花板硬上限必须高于默认视窗上限（0 > -20）"
 
 
 #: 已知且**有意**的跨语言差异（不是 bug，但必须登记）。若某天两侧统一了，

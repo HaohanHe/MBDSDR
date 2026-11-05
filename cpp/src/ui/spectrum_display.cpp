@@ -685,11 +685,12 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
                 ceilDes = std::round(ceilDes / kAutoCeilSnapDb) * kAutoCeilSnapDb;
                 // Anti-clip: keep at least headroom above the real peak.
                 ceilDes = std::max(ceilDes, pwin + kAutoPeakHeadroomDb);
-                // Bounds: never above the manual top, never tighter than the
-                // spinbox's lowest allowed ceiling, and never above the floor.
+                // Bounds: never above the full-scale display ceiling (0 dBFS,
+                // not the -20 default view), never tighter than the spinbox's
+                // lowest allowed ceiling, and never above the floor.
                 ceilDes = static_cast<float>(clampd(ceilDes,
                                                     tokens::kDbSpinUpperMin,
-                                                    tokens::kDbUpperDefault));
+                                                    tokens::kDbCeilingMax));
                 ceilDes = std::max(ceilDes, manualFloorDb_ + kAutoCeilSnapDb);
                 ceilTargetDb_ = ceilDes;
                 goal = ceilTargetDb_;
@@ -701,7 +702,7 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
                                                      kAutoEasePerFrameDb));
         dbCeilDb_ += step;
         dbCeilDb_ = static_cast<float>(clampd(dbCeilDb_, manualFloorDb_,
-                                               tokens::kDbUpperDefault));
+                                               tokens::kDbCeilingMax));
         dbFloorDb_ = manualFloorDb_;   // floor is the stable manual reference
     }
 

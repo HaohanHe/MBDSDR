@@ -305,7 +305,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     dbMaxSpin_ = new QSpinBox(this);
     dbMaxSpin_->setObjectName("dbMaxSpin");
     dbMaxSpin_->setRange(tokens::kDbSpinUpperMin, tokens::kDbSpinUpperMax);
-    dbMaxSpin_->setValue(tokens::kDbUpperDefault);
+    dbMaxSpin_->setValue(tokens::kDbViewUpperDefault);
     topRow->addWidget(dbMaxSpin_);
     auto applyDb = [this]() {
         int lo = dbMinSpin_->value();
@@ -655,7 +655,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         addRailSlider(QStringLiteral("edgeRailDbMax"), QString::fromUtf8("上限"),
                       QString::fromUtf8("显示上限 dB：谱线顶到哪（信号高度上端）"),
                       dbMaxSlider_, dbMaxValue_, tokens::kDbSpinUpperMin,
-                      tokens::kDbSpinUpperMax, tokens::kDbUpperDefault);
+                      tokens::kDbSpinUpperMax, tokens::kDbViewUpperDefault);
         addRailSlider(QStringLiteral("edgeRailDbMin"), QString::fromUtf8("下限"),
                       QString::fromUtf8("显示下限 dB：噪底落在哪（信号高度下端）"),
                       dbMinSlider_, dbMinValue_, tokens::kDbSpinLowerMin,

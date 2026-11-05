@@ -5641,7 +5641,7 @@ void MainWindow::restoreUiState() {
     }
 
     const float dbMin = s.value(tokens::kSettingsKeyDbMin, static_cast<float>(tokens::kDbLowerDefault)).toFloat();
-    const float dbMax = s.value(tokens::kSettingsKeyDbMax, static_cast<float>(tokens::kDbUpperDefault)).toFloat();
+    const float dbMax = s.value(tokens::kSettingsKeyDbMax, static_cast<float>(tokens::kDbViewUpperDefault)).toFloat();
     spectrum_->setDbSpinValues(static_cast<int>(std::round(dbMin)),
                                static_cast<int>(std::round(dbMax)));
 

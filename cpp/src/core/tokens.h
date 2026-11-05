@@ -333,7 +333,14 @@ inline constexpr int    kDbSpinUpperMax = 20;     // upper spinbox allowed max
 // 残留（未统一）：滑杆夹取边界仍是 Python -160..0 / C++ spin -140..20，
 // 属"允许拖到的动态范围"，不是默认视窗，本轮不动。
 inline constexpr int    kDbLowerDefault = -100;
-inline constexpr int    kDbUpperDefault = -20;
+// 默认视窗上限 = -20（对齐 Python `_PlotState.db_max`）：只决定「未显式设置时
+// 的视野」，不是显示能画到的最高 dB 值。
+inline constexpr int    kDbViewUpperDefault = -20;
+// 显示天花板硬上限 = 0 dBFS（满量程）：显式 `setDbRange(-100, 0)` 与自动量程
+// 的上限都夹到它；超过满量程的信号顶在色表最上端，而不是被夹回默认视窗后
+// 越过天花板画成纯白。这两个语义曾共用同一个常量，导致显式 0 被夹成
+// -20（`test_spectrum_display` / `test_spectrum_autorange` 共 8 个槽红）。
+inline constexpr int    kDbCeilingMax = 0;
 // dB reference gridline spacing (dB between horizontal grid lines + y labels).
 // Selectable from the spectrum toolbar (格线 combo): denser (10 dB) for a finer
 // y-axis ruler, sparser (40 dB) for a cleaner plot. Only the named tiers below
