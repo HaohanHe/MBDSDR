@@ -365,6 +365,26 @@ def test_aprs_wav_44100_and_48000_decode_identically(pipe):
     assert results[44100.0] == results[48000.0]
 
 
+def test_aprs_wav_8k_downsampled_from_48k_stays_byte_identical(pipe, tmp_path):
+    """8k 也在支持范围内：从 48k fixture 抽取得到 8k，仍须逐字节一致。"""
+    from scipy.signal import resample_poly
+    import wave
+
+    src = FIXTURE_DIR / _aprs_wav_metas()[48000.0]["file"]
+    with wave.open(str(src), "rb") as w:
+        audio = (np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")
+                 .astype(np.float64) / 32768.0)
+    eight = resample_poly(audio, 1, 6)
+    path = _write_pcm16_mono(tmp_path / "aprs_8000.wav",
+                             np.round(eight * 32767.0), rate=8000)
+    r = pipe.run_aprs_wav_pipeline(str(path), target_fs=48000.0)
+    assert r["ok"] is True, r["reason"]
+    assert r["stages"][1]["note"].startswith("PCM audio 重采样 8000→48000")
+    got = [(f["frame_hex"], f["info_hex"]) for f in r["content"]["frames"]]
+    assert got == [(f["frame_hex"], f["info_hex"])
+                   for f in _aprs_wav_metas()[48000.0]["frames"]]
+
+
 def _write_pcm16_mono(path, samples, rate=48000):
     import wave
     pcm = np.asarray(samples, dtype=np.int16)
