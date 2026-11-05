@@ -435,7 +435,7 @@ class WeatherPanel(QWidget):
         form.addRow("符号率", self.sym_edit)
         self.sr_edit = QLineEdit()
         self.sr_edit.setToolTip(
-            "录制文件的采样率（Msps）；必须与录制时一致，不一致会解码失败")
+            "录制文件的采样率（MS/s）；必须与录制时一致，不一致会解码失败")
         form.addRow("采样率", self.sr_edit)
         cl.addLayout(form)
 

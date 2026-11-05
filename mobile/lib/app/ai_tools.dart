@@ -213,7 +213,7 @@ List<AiTool> buildRadioTools(
       name: 'set_sample_rate',
       description: '设置采样率（Hz），只能取支持的档位之一。'
           '前置条件: 接收机必须已连接。'
-          '失败恢复: 传入非档位值时返回四个合法档位列表（1.02 / 2.05 / 2.40 / 3.20 MHz）'
+          '失败恢复: 传入非档位值时返回四个合法档位列表（1.024 / 2.048 / 2.400 / 3.200 MS/s）'
           '——按列表重试，不要重发同一非法值。'
           '副作用: 改变采样率会重建数据流，并决定可见带宽上限（约为采样率八成）。'
           '能力边界: 只能取四个固定档位，不能任意设定。',
@@ -239,7 +239,7 @@ List<AiTool> buildRadioTools(
               .any((r) => (r - rate).abs() < AppTokens.freqStepHz);
           if (!ok) {
             return _err('采样率必须取以下档位之一: '
-                '${AppTokens.sampleRatesHz.map((r) => '${(r / 1e6).toStringAsFixed(2)} MHz').join(' / ')}');
+                '${AppTokens.sampleRatesHz.map((r) => '${(r / 1e6).toStringAsFixed(3)} MS/s').join(' / ')}');
           }
           await radio.setSampleRateHz(rate);
           return jsonEncode(<String, dynamic>{

@@ -414,7 +414,7 @@ class SpectrumProcessor:
         p_range = p_max - p_min if p_max > p_min else 1.0
 
         lines = []
-        lines.append(f"频谱图 (中心 {spectrum.center_freq/1e6:.2f} MHz, 采样率 {spectrum.sample_rate/1e6:.2f} MHz)")
+        lines.append(f"频谱图 (中心 {spectrum.center_freq/1e6:.2f} MHz, 采样率 {spectrum.sample_rate/1e6:.3f} MS/s)")
         lines.append(f"峰值: {spectrum.peak_freq/1e6:.3f} MHz @ {spectrum.peak_power_db:.1f} dB, 噪声底: {spectrum.noise_floor_db:.1f} dB")
         lines.append("")
 

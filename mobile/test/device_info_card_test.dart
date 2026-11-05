@@ -2,7 +2,7 @@
 //
 // 用内存 FakeRadioApi（实现 RadioApi）脚本化 status / sampleRateHz / freqHz /
 // errorMessage，不触碰真实网络。覆盖：
-//   * 已连接 → 渲染真实采样率（Msps）、当前频率（MHz）、后端 rtl_tcp、状态「已连接」；
+//   * 已连接 → 渲染真实采样率（MS/s）、当前频率（MHz）、后端 rtl_tcp、状态「已连接」；
 //   * 未连接 → 状态「未连接」，后端/采样率/频率一律空态「—」，不拿上次配置冒充；
 //   * 失败 → 透出真实 errorMessage（socket 错误）；
 //   * 等待重连 → 透出 RadioController 指数退避真实秒数（Ns 后第 N 次自动重连）；
@@ -57,10 +57,10 @@ void main() {
 
     expect(find.text('已连接'), findsOneWidget);
     expect(find.text('rtl_tcp'), findsOneWidget);
-    // 2.048 MHz → toStringAsFixed(2) = 2.05
-    expect(find.text('2.05 Msps'), findsOneWidget);
-    // 144.0 MHz → toStringAsFixed(4) = 144.0000
-    expect(find.text('144.0000 MHz'), findsOneWidget);
+    // 2.048 MHz 采样率 → 统一口径 3 位小数 + MS/s（U-03）
+    expect(find.text('2.048 MS/s'), findsOneWidget);
+    // 144.0 MHz → toStringAsFixed(6) = 144.000000
+    expect(find.text('144.000000 MHz'), findsOneWidget);
     // 已连接时不应出现空态占位。
     expect(find.text('—'), findsNothing);
   });
@@ -76,8 +76,8 @@ void main() {
 
     expect(find.text('未连接'), findsOneWidget);
     expect(find.text('rtl_tcp'), findsNothing);
-    expect(find.text('2.05 Msps'), findsNothing);
-    expect(find.text('144.0000 MHz'), findsNothing);
+    expect(find.text('2.048 MS/s'), findsNothing);
+    expect(find.text('144.000000 MHz'), findsNothing);
     // 后端/采样率/频率三行均为空态占位。
     expect(find.text('—'), findsNWidgets(3));
   });
@@ -139,8 +139,8 @@ void main() {
 
     expect(find.text('已连接'), findsOneWidget);
     expect(find.textContaining('2s 后第 1 次自动重连'), findsNothing);
-    expect(find.text('2.05 Msps'), findsOneWidget);
-    expect(find.text('144.0000 MHz'), findsOneWidget);
+    expect(find.text('2.048 MS/s'), findsOneWidget);
+    expect(find.text('144.000000 MHz'), findsOneWidget);
     expect(find.text('—'), findsNothing);
   });
 }

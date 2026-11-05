@@ -2523,7 +2523,7 @@ class HackRFBackend(SDRBackend):
     硬件量程/增益档全部来自 mbdsdr_ai/hackrf_params.HackRFParams（依据 HackRF One
     官方数据手册与公开 API 头文件独立整理）：
       - 频率 1-6000 MHz
-      - 采样率 2-20 MHz
+      - 采样率 2-20 MS/s
       - LNA(RX IF) 0-40 dB（步进 8 dB）
       - VGA(RX BB) 0-62 dB（步进 2 dB）
       - TXVGA 0-47 dB（步进 1 dB）

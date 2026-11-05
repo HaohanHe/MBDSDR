@@ -29,7 +29,7 @@ void main() {
       expect(cmd[4], 0xC8);
     });
 
-    test('设采样率 2.048 MHz 大端', () {
+    test('设采样率 2.048 MS/s 大端', () {
       // 2_048_000 = 0x001F4000。
       final cmd = RtlTcpClient.buildCommand(0x02, 2048000);
       expect(cmd[1], 0x00);

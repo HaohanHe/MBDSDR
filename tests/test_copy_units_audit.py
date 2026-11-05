@@ -44,7 +44,7 @@ def test_n01_freq_precision_is_constant_within_unit():
 
 
 def test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero():
-    """U-02：RSSI 一律 dBFS；缺值/NaN 显「—」，绝不用 0 兜底。"""
+    """U-02：引擎/IQ 路径 dBFS；缺值/NaN 显「—」，绝不用 0 兜底。"""
     assert sp._fmt_dbfs(None) == "—"
     assert sp._fmt_dbfs(float("nan")) == "—"
     assert sp._fmt_dbfs(12.34) == "12.3 dBFS"
@@ -279,3 +279,56 @@ def test_discoverability_ports_are_findable_from_settings_tab():
     assert "Web 8080" in _SETTINGS and "HTTP/WS" in _SETTINGS
     assert "重启远程控制服务" in _SETTINGS
     assert "重启 Web 服务" in _SETTINGS
+
+
+# ---------------------------------------------------------------------------
+# 批次 4：U-03 全仓采样率量纲收口
+# ---------------------------------------------------------------------------
+_SDR_TOOLS = open(os.path.join(_ROOT, "mbdsdr_ai", "sdr_tools.py"),
+                  encoding="utf-8").read()
+
+
+def test_u03_core_sample_rate_formatter_is_ms_per_s_and_missing_dash():
+    """U-03：核心工具采样率也走 MS/s、3 位小数；缺值「—」。"""
+    from mbdsdr_ai.sdr_tools import _fmt_sample_rate
+    assert _fmt_sample_rate(2_400_000) == "2.400 MS/s"
+    assert _fmt_sample_rate(2_048_000) == "2.048 MS/s"
+    assert _fmt_sample_rate(250_000) == "0.250 MS/s"
+    assert _fmt_sample_rate(None) == "—"
+    assert _fmt_sample_rate(float("nan")) == "—"
+
+
+def test_u03_sample_rate_copy_never_uses_mhz_or_msps():
+    """U-03：任何「采样率 + 数字单位」不得出现 MHz/Msps/kHz。
+
+    豁免同行的带宽值（如滤波带宽 12.5kHz）、音频采样率（音频惯例 kHz）
+    与 RDS 副载波偏移（57 kHz，是频率不是采样率）。
+    """
+    import re
+    bad = re.compile(r"采样率[^\n]{0,40}\d(?:[^\n]{0,8})(MHz|Msps|kHz)")
+    excused = ("带宽", "音频", "副载波")
+    hits = [ln for ln in _SDR_TOOLS.splitlines()
+            if bad.search(ln) and not any(e in ln for e in excused)]
+    assert not hits, "采样率用了频率量纲:\n" + "\n".join(hits)
+    for src in (_MOBILE_SPECTRUM, _MOBILE_INFO):
+        assert "Msps" not in src and "MSps" not in src
+    assert "Msps" not in _CPP_STATUS
+
+
+def test_u03_same_value_renders_identically_on_three_fronts():
+    """U-03：同一采样率在桌面 / C++ / 移动端写法一致（2.400 MS/s）。"""
+    desktop = format_sample_rate(2_400_000)
+    cpp = "2.400 MS/s"      # fmtStripSampleRate: hz/1e6, f, 3 + " MS/s"
+    mobile = "2.400 MS/s"   # toStringAsFixed(3) + " MS/s"
+    assert desktop == cpp == mobile
+    # C++ 与移动端确实按 3 位小数 + MS/s 构造，而非只是常量巧合
+    assert "QString(\"%1 MS/s\").arg(hz / 1e6, 0, 'f', 3)" in _CPP_STATUS
+    assert "toStringAsFixed(3)} MS/s" in _MOBILE_SPECTRUM
+
+
+def test_u03_status_output_uses_ms_per_s_for_sample_rate():
+    from mbdsdr_ai.sdr_backend import SDRStatus
+    from mbdsdr_ai.sdr_tools import _format_status
+    txt = _format_status(SDRStatus(sample_rate_hz=2_048_000.0))
+    assert "采样率: 2.048 MS/s" in txt
+    assert "采样率: 2.048 MHz" not in txt

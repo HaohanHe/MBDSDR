@@ -80,7 +80,7 @@ LIMESDR_DEFAULT_SR_HZ: int = 5_000_000          # 常用默认值（手册/工�
 # 合法过采样比（LimeSuite.h:197）
 SUPPORTED_OVERSAMPLE: List[int] = [0, 1, 2, 4, 8, 16, 32]
 
-# 推荐常用主机采样率档（均落在 100k-61.44 MHz 合法区间内）。
+# 推荐常用主机采样率档（均落在 0.100-61.44 MS/s 合法区间内）。
 SUPPORTED_SAMPLE_RATES: List[int] = [
     100_000,
     200_000,

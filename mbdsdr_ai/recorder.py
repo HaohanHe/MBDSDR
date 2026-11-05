@@ -148,7 +148,7 @@ class IQRecorder:
         self.state = "recording"
         self.last_error = ""
         self.error_code = ""
-        logger.info("IQRecorder 开始录制: %s (%.3f MSps, %.3f MHz)",
+        logger.info("IQRecorder 开始录制: %s (%.3f MS/s, %.3f MHz)",
                     self.data_path, self.sample_rate / 1e6,
                     self.center_freq_hz / 1e6)
         return True

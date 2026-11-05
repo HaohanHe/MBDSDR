@@ -190,7 +190,7 @@ def scan_fm_band(
     step_khz : float
         步进，默认 100kHz。
     sample_rate_hz : float
-        每个频点的 IQ 采样率，默认 1MHz（FM 信道 150kHz，需 >3x 才有带外噪声底）。
+        每个频点的 IQ 采样率，默认 1.000 MS/s（FM 信道 150kHz，需 >3x 才有带外噪声底）。
     dwell_samples : int
         每个频点采集样本数，默认 16384（≈16ms @1M）。
     carrier_threshold_db : float

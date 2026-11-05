@@ -136,7 +136,7 @@ class SampleRateNotSupportedError(SDRUserError):
     code = "sample_rate_not_supported"
 
     def _default_suggestion(self) -> str:
-        return "请改用设备枚举时给出的 sample_rates 列表中的值（如 RTL-SDR 常用 2.4 MSps）。"
+        return "请改用设备枚举时给出的 sample_rates 列表中的值（如 RTL-SDR 常用 2.400 MS/s）。"
 
 
 class FrequencyOutOfRangeError(SDRUserError):

@@ -196,7 +196,7 @@ class SampleRateNotSupportedError(SDRUserError):
                 pretty = ", ".join(f"{int(round(r))} Hz" for r in supported_rates)
                 suggestion = f"该设备支持的采样率：{pretty}"
             else:
-                suggestion = "请改用设备默认采样率（通常 2.048 MHz）"
+                suggestion = "请改用设备默认采样率（通常 2.048 MS/s）"
         super().__init__(message, technical_detail, suggestion)
         self.supported_rates = list(supported_rates or [])
 

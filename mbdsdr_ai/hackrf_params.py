@@ -79,7 +79,7 @@ HACKRF_DEFAULT_SAMPLE_RATE_HZ: int = 10_000_000  # hackrf.h:1794,1813 默认 10 
 HACKRF_MIN_CLOCK_DIVIDER: int = 1          # hackrf.h:1801
 HACKRF_MAX_CLOCK_DIVIDER: int = 31         # hackrf.h:1801
 
-# 推荐常用采样率档（手册/工具常用值，均落在 2-20 MHz 合法区间内）。
+# 推荐常用采样率档（手册/工具常用值，均落在 2-20 MS/s 合法区间内）。
 SUPPORTED_SAMPLE_RATES: List[int] = [
     2_000_000,
     4_000_000,
@@ -199,7 +199,7 @@ class HackRFParams:
         return self.min_freq_hz <= float(freq_hz) <= self.max_freq_hz
 
     def is_valid_sample_rate(self, rate_hz: float) -> bool:
-        """采样率是否落在 2-20 MHz（hackrf.h:247,1794）。"""
+        """采样率是否落在 2-20 MS/s（hackrf.h:247,1794）。"""
         return self.min_sr_hz <= float(rate_hz) <= self.max_sr_hz
 
     def clamp_lna_gain(self, db: float) -> int:

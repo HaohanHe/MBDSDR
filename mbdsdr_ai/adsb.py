@@ -74,7 +74,7 @@ CHARSET = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !\"#$%&'()*+,-./0123456789:;<=>?"
 
 # —— Mode S 载频 1090 MHz
 MODES_DEFAULT_FREQ_HZ = 1_090_000_000
-# —— 默认采样率 2.4 Msps（dump1090 常用输入档）
+# —— 默认采样率 2.400 MS/s（dump1090 常用输入档）
 MODES_DEFAULT_SPS = 2_400_000
 # —— 哨兵值 999999 表示 AGC（自动增益）
 MODES_DEFAULT_GAIN_DB = 999_999
@@ -741,7 +741,7 @@ def register_adsb_tools(agent) -> None:
             "type": "object",
             "properties": {
                 "sample_rate_hz": {"type": "integer",
-                                   "description": "IQ 采样率 Hz，默认 2MHz",
+                                   "description": "IQ 采样率 Hz，默认 2.000 MS/s",
                                    "default": 2_000_000},
             },
             "required": [],

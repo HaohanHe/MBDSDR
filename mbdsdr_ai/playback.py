@@ -216,7 +216,7 @@ class IQPlayback:
         self.state = "open"
         self.last_error = ""
         self.error_code = ""
-        logger.info("IQPlayback 打开: %s (%d samples, %.3f MSps, %.3f MHz)",
+        logger.info("IQPlayback 打开: %s (%d samples, %.3f MS/s, %.3f MHz)",
                     data_path, self._n_samples,
                     self.sample_rate / 1e6, self.center_freq_hz / 1e6)
         return True

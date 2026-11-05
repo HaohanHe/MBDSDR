@@ -2740,7 +2740,7 @@ class ToolRegistry:
           - VGA(RX BB) 0-62/2dB   host/libhackrf/src/hackrf.c:2049-2074 ; firmware/common/max2837.c:373-381
           - TXVGA 0-47/1dB       host/libhackrf/src/hackrf.c:2076-2100 ; firmware/common/max2837.c:383-395
           - 频率 1-6000MHz       host/libhackrf/src/hackrf.h:235,662,670
-          - 采样率 2-20MHz       host/libhackrf/src/hackrf.h:247,1794
+          - 采样率 2-20 MS/s      host/libhackrf/src/hackrf.h:247,1794
         """
         from . import hackrf_params as hp
 
@@ -2828,7 +2828,7 @@ class ToolRegistry:
 
         参考: mbdsdr_ai/limesuite_params.py（依据 LimeSDR 公开数据手册整理）
           - 频率 100k-3.8GHz(USB)   src/API/lms7_device.cpp:1384
-          - 采样率 100k-61.44MHz    src/API/lms7_device.cpp:690
+          - 采样率 0.100-61.44 MS/s  src/API/lms7_device.cpp:690
           - 组合增益 0-73dB         src/lime/LimeSuite.h:382
           - LNA 0-30dB(15档)        src/lms7002m/LMS7002M.cpp:789-837
           - TIA 0-12dB(3档)         src/lms7002m/LMS7002M.cpp:890-914
@@ -2995,7 +2995,7 @@ class ToolRegistry:
                 "把目标 RXVGA1/RXVGA2 增益与采样率/带宽/频率吸附/校验到 bladeRF 真实支持的档位，"
                 "返回可直接下发的参数。RXVGA1 钳到 5-30dB(bladeRF1.h:154,160)，"
                 "RXVGA2 钳到 0-30dB(bladeRF1.h:166,172)，"
-                "采样率校验 520834-61.44MHz(bladerf2_common.h:518-523)，"
+                "采样率校验 0.520834-61.44 MS/s(bladerf2_common.h:518-523)，"
                 "带宽校验 200kHz-56MHz(bladerf2_common.h:542-547)。"
             ),
             parameters={"type": "object", "properties": {

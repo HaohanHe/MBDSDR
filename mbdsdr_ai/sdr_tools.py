@@ -544,7 +544,7 @@ def register_sdr_tools(agent):
                               content="采样率设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
         ok = b.set_sample_rate(args["sample_rate_hz"])
         return ToolResult(success=bool(ok),
-                          content=(f"采样率已设置: {args['sample_rate_hz']/1e6:.3f} MHz"
+                          content=(f"采样率已设置: {_fmt_sample_rate(args['sample_rate_hz'])}"
                                    if ok else "采样率设置失败"))
 
     agent.tool_registry.register(
@@ -553,7 +553,7 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "sample_rate_hz": {"type": "integer", "description": "采样率，单位 Hz。例如 2400000 = 2.4MHz"},
+                "sample_rate_hz": {"type": "integer", "description": "采样率，单位 Hz。例如 2400000 = 2.400 MS/s"},
             },
             "required": ["sample_rate_hz"],
         },
@@ -960,7 +960,7 @@ def register_sdr_tools(agent):
         name="sdr_adsb_decode",
         description=(
             "解码 1090MHz 航空 ADS-B / Mode S 信号（飞机广播位置/速度/呼号）。"
-            "实时设备会自动调到 1090MHz、原始 IQ 模式、2.4MHz 采样率，采集 duration_s 秒后解码；"
+            "实时设备会自动调到 1090MHz、原始 IQ 模式、2.400 MS/s 采样率，采集 duration_s 秒后解码；"
             "也可对已打开的 IQ 录制文件（FileIQBackend）离线解码。内置 lite 解码器做 "
             "preamble 同步 + PPM 位判决 + CRC-24 严格校验，输出 CRC 有效帧、去重后的飞机 "
             "ICAO24 地址、DF17 消息类型与呼号（callsign）。城市开阔环境通常几秒即可收到多架飞机；"
@@ -971,7 +971,7 @@ def register_sdr_tools(agent):
             "properties": {
                 "duration_s": {"type": "number", "description": "采集时长秒，默认 8（飞机每秒多帧）"},
                 "freq_mhz": {"type": "number", "description": "频率 MHz，默认 1090"},
-                "sample_rate_mhz": {"type": "number", "description": "采样率 MHz，默认 2.4（RTL 棒推荐）"},
+                "sample_rate_mhz": {"type": "number", "description": "采样率（MS/s），默认 2.4（RTL 棒推荐）"},
                 "threshold_sigma": {"type": "number", "description": "检测门限系数（噪声底+kσ），默认 4；漏检调小、虚警调大"},
             },
             "required": [],
@@ -985,7 +985,7 @@ def register_sdr_tools(agent):
         description=(
             "解码 FM 广播（WFM，87.5-108MHz）的 RDS 数据：电台名 PS（Program Service）、"
             "PI 台站识别码、PTY 节目类型。实时设备会调到指定 FM 频率、WFM 模式并以足够高的"
-            "采样率（默认240kHz，保留57kHz RDS 副载波）采集 duration_s 秒后解码；也可对已打开的"
+            "采样率（默认 0.240 MS/s，保留 57 kHz RDS 副载波）采集 duration_s 秒后解码；也可对已打开的"
             " FM 频段 IQ 录制文件离线解码。内置 lite 解码器做 57kHz BPSK 副载波恢复、双相码判决、"
             "(26,16) 循环码块同步与 A/B/C/D offset 校验、0A 组 PS 字符重组。用于回答“这个电台叫"
             "什么/现在播的台名”。RT 电台文本/AF 频率表为后续。无 RDS 的台或信号弱会明确提示。"
@@ -995,7 +995,7 @@ def register_sdr_tools(agent):
             "properties": {
                 "freq_mhz": {"type": "number", "description": "FM 频率 MHz，如 98.0；缺省用当前频点"},
                 "duration_s": {"type": "number", "description": "采集时长秒，默认 5（PS 每组约88ms，几秒即可收全8字符）"},
-                "sample_rate_khz": {"type": "number", "description": "采样率 kHz，默认 240，必须 >140 以保留57k副载波"},
+                "sample_rate_khz": {"type": "number", "description": "采样率（kS/s），默认 240，必须 >140 以保留 57k 副载波"},
             },
             "required": [],
         },
@@ -1099,7 +1099,7 @@ def register_sdr_tools(agent):
                     "前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file），否则返回'设备未连接'。"
                     "录制文件自动保存到 ~/.mbdsdr/recordings/（save_path 可覆盖）。"
                     "duration=0 表示持续录制直到调用 sdr_record_stop。"
-                    "副作用: 按采样率×格式持续写盘（cf32 每秒约 4×采样率 字节，如 2MS/s 约 8MB/s），"
+                    "副作用: 按采样率×格式持续写盘（cf32 每秒约 4×采样率 字节，如 2 MS/s 约 8MB/s），"
                     "长录制前确认磁盘余量，必要时先调低 sdr_set_sample_rate 或设置 duration。"
                     "失败恢复: 若返回'设备未连接'，改用 sdr_list_devices + sdr_connect 后再试;"
                     "若磁盘写入失败，检查 save_path 目录权限与磁盘空间。"
@@ -1172,7 +1172,7 @@ def register_sdr_tools(agent):
                 "input_path": {"type": "string", "description": "录制文件路径：.wav 解调音频或 .cf32/.cu8/.cfile 原始 IQ；不给则实时采集"},
                 "freq_mhz": {"type": "number", "description": "实时模式下行频率 MHz，如 137.100/137.620/137.9125；缺省用当前频点"},
                 "duration_s": {"type": "number", "description": "实时采集/解码时长秒，默认 60（每行0.5s，60s≈120行），上限 900"},
-                "sample_rate_khz": {"type": "number", "description": "实时 IQ 采样率 kHz，默认 240"},
+                "sample_rate_khz": {"type": "number", "description": "实时 IQ 采样率（kS/s），默认 240"},
                 "polarity": {"type": "integer", "description": "灰度极性，1 默认；黑白颠倒用 -1"},
                 "channel": {"type": "string", "description": "兼容旧参数：A/both（默认 both 输出 A/B 双通道）"},
             },
@@ -1299,7 +1299,7 @@ def register_sdr_tools(agent):
                 "input_path": {"type": "string", "description": "原始 IQ 文件路径（.cf32/.cu8/.cfile）；不给则实时采集"},
                 "freq_mhz": {"type": "number", "description": "实时模式广播频率 MHz，如 98.0"},
                 "duration_s": {"type": "number", "description": "实时采集时长秒，默认 8，上限 120"},
-                "sample_rate_khz": {"type": "number", "description": "实时 IQ 采样率 kHz，默认 240"},
+                "sample_rate_khz": {"type": "number", "description": "实时 IQ 采样率（kS/s），默认 240"},
                 "deemph_us": {"type": "number", "description": "去加重时间常数 µs：中国/欧洲 50（默认），美国 75"},
             },
             "required": [],
@@ -1374,12 +1374,12 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_decode_adsb",
-        description="解码 ADS-B 飞机广播信号。输入录制文件，输出 ICAO 地址、呼号、CRC 校验结果（内置纯 numpy Mode-S DF17 解码器，已与 pyModeS 交叉验证）。ADS-B 频率 1090MHz，需 2MHz 以上采样率；内置解码器要求采样率为 1MHz 整数倍。",
+        description="解码 ADS-B 飞机广播信号。输入录制文件，输出 ICAO 地址、呼号、CRC 校验结果（内置纯 numpy Mode-S DF17 解码器，已与 pyModeS 交叉验证）。ADS-B 频率 1090MHz，需 2 MS/s 以上采样率；内置解码器要求采样率为 1 MS/s 的整数倍。",
         parameters={
             "type": "object",
             "properties": {
                 "input_path": {"type": "string", "description": "输入录制文件路径（cf32 格式）"},
-                "sample_rate": {"type": "number", "description": "采样率 Hz，必须为 1MHz 整数倍（如 2000000/4000000），默认 1000000"},
+                "sample_rate": {"type": "number", "description": "采样率 Hz，必须为 1 MS/s 的整数倍（如 2000000/4000000），默认 1000000"},
                 "duration": {"type": "number", "description": "持续解码时长（可选，实时模式）"},
             },
             "required": ["input_path"],
@@ -1468,7 +1468,7 @@ def register_sdr_tools(agent):
                 "satellite_name": {"type": "string", "description": "内置卫星名，如 'NOAA 15'/'NOAA 18'/'NOAA 19'/'ISS (ZARYA)'/'METEOR M2'"},
                 "frequency_mhz": {"type": "number", "description": "标称下行频率 MHz，如 NOAA APT 137.100/137.620/137.9125"},
                 "duration_s": {"type": "number", "description": "跟踪录制时长秒，默认 300（典型过境 10-15 分钟）"},
-                "sample_rate_khz": {"type": "number", "description": "IQ 采样率 kHz，默认 240"},
+                "sample_rate_khz": {"type": "number", "description": "IQ 采样率（kS/s），默认 240"},
                 "demod": {"type": "string", "description": "录制期间解调模式标记，APT 用 WFM（默认），原始分析用 RAW"},
                 "latitude": {"type": "number", "description": "地面站纬度 (°N)；未传则从配置读取"},
                 "longitude": {"type": "number", "description": "地面站经度 (°E)；未传则从配置读取"},
@@ -2880,7 +2880,7 @@ def register_sdr_tools(agent):
                 "f_start_mhz": {"type": "number", "description": "起始频率 MHz，默认 87.0"},
                 "f_stop_mhz": {"type": "number", "description": "结束频率 MHz，默认 108.0"},
                 "step_khz": {"type": "number", "description": "步进 kHz，默认 100"},
-                "sample_rate_hz": {"type": "number", "description": "每频点采样率 Hz，默认 1000000（1MHz）"},
+                "sample_rate_hz": {"type": "number", "description": "每频点采样率 Hz，默认 1000000（1.000 MS/s）"},
                 "dwell_samples": {"type": "integer", "description": "每频点采集样本数，默认 16384"},
                 "threshold_db": {"type": "number", "description": "电台检出门限 dB，默认 2.0"},
                 "save": {"type": "boolean", "description": "是否保存结果到预设文件，默认 false"},
@@ -3054,6 +3054,22 @@ def _disconnect_sdr(mgr):
         return f"已断开: {name}"
     return "没有已连接的设备"
 
+def _fmt_sample_rate(hz) -> str:
+    """采样率唯一口径：MS/s、固定 3 位小数、空格；None/NaN → 「—」（U-03）。
+
+    采样率是每秒样本数，量纲是 MS/s（样本/秒），不是 MHz（频率/带宽）。
+    """
+    if hz is None:
+        return "—"
+    try:
+        v = float(hz)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    return f"{v / 1e6:.3f} MS/s"
+
+
 def _fmt_readout(value, digits: int = 1, unit: str = "") -> str:
     """读数格式化：None/NaN → 「—」，绝不用 0/-100 兜底（U-02）。"""
     if value is None:
@@ -3074,7 +3090,7 @@ def _format_status(status: Optional[SDRStatus]) -> str:
         "=== SDR 状态 ===",
         f"连接: {'是' if status.connected else '否'}",
         f"频率: {status.frequency_hz/1e6:.3f} MHz",
-        f"采样率: {status.sample_rate_hz/1e6:.3f} MHz",
+        f"采样率: {_fmt_sample_rate(status.sample_rate_hz)}",
         f"增益: {status.gain_db:.1f} dB ({'AGC开' if status.agc_enabled else '手动'})",
         f"解调: {status.demod_mode}",
         f"带宽: {status.bandwidth_hz if status.bandwidth_hz > 0 else '自动'} Hz",
@@ -3114,7 +3130,7 @@ def _tool_open_iq_file(mgr, args) -> "ToolResult":
         content=(
             f"已切换到 IQ 文件回放源: {os.path.basename(path)}\n"
             f"时长: {info['duration_s']:.2f}s，总样本: {info['total_samples']:,}\n"
-            f"采样率: {info['sample_rate']/1e6:.3f} MHz，中心频率: {info['center_freq']/1e6:.3f} MHz\n"
+            f"采样率: {_fmt_sample_rate(info['sample_rate'])}，中心频率: {info['center_freq']/1e6:.3f} MHz\n"
             f"循环回放: {'是' if info['loop'] else '否'}。现可对其调用频谱/解调/CW/FT8/SSTV/ADS-B 等工具。"
         ),
     )
@@ -3447,7 +3463,7 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
             return ToolResult(success=False, content="未采集到 IQ 数据")
         iq = np.concatenate(chunks)
         res = decode_adsb(iq, sr, threshold_sigma=k)
-        src = f"实时采集 {freq/1e6:.1f}MHz / {sr/1e6:.1f}Msps / {duration:.0f}s"
+        src = f"实时采集 {freq/1e6:.1f}MHz / {_fmt_sample_rate(sr)} / {duration:.0f}s"
 
     if res["crc_ok"] == 0:
         return ToolResult(success=True, content=_append_warning(
@@ -3513,7 +3529,7 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
         if not chunks:
             return ToolResult(success=False, content="IQ 文件已读到末尾，无数据")
         iq = np.concatenate(chunks)
-        src = f"IQ 文件回放（中心 {backend.get_frequency()/1e6:.1f}MHz / {sr/1e3:.0f}kHz）"
+        src = f"IQ 文件回放（中心 {backend.get_frequency()/1e6:.1f}MHz / {_fmt_sample_rate(sr)}）"
     else:
         req_sr = float(args.get("sample_rate_khz", 240.0)) * 1e3
         old = (backend.get_frequency(), backend.get_sample_rate(),
@@ -3540,12 +3556,12 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
         if not chunks:
             return ToolResult(success=False, content=_append_warning("未采集到 IQ 数据", restore_warn))
         iq = np.concatenate(chunks)
-        src = f"实时采集 {backend.get_frequency()/1e6:.2f}MHz / {sr/1e3:.0f}kHz / {duration:.0f}s"
+        src = f"实时采集 {backend.get_frequency()/1e6:.2f}MHz / {_fmt_sample_rate(sr)} / {duration:.0f}s"
 
     if sr < 140000:
         return ToolResult(success=False, content=_append_warning((
-            f"{src}：采样率 {sr/1e3:.0f}kHz 低于 140kHz，无法保留 57kHz RDS 副载波，"
-            f"请用 ≥200kHz 采样率重新采集 FM IQ。"), restore_warn))
+            f"{src}：采样率 {_fmt_sample_rate(sr)} 低于 0.140 MS/s，无法保留 57kHz RDS 副载波，"
+            f"请用 ≥0.200 MS/s 采样率重新采集 FM IQ。"), restore_warn))
 
     mpx = _fm_composite_baseband(iq, sr)
     res = decode_rds(mpx, sr)
@@ -4031,7 +4047,7 @@ def _record_start(mgr, args):
     save_path = args.get("save_path") or os.path.join(save_dir, f"mbdsdr_{freq_mhz}MHz_{timestamp}.{fmt}")
     backend.start_recording(save_path, duration, fmt=fmt, gain=gain, decimation=decimation)
     text = (f"开始录制\n格式: {fmt}\n路径: {save_path}\n时长: {'持续' if duration == 0 else f'{duration}秒'}\n"
-            f"频率: {backend.get_frequency()/1e6:.3f} MHz\n采样率: {backend.get_sample_rate()/1e6:.3f} MHz\n"
+            f"频率: {backend.get_frequency()/1e6:.3f} MHz\n采样率: {_fmt_sample_rate(backend.get_sample_rate())}\n"
             f"抽取: {decimation}x\n增益: {gain}")
     # D6 sidecar：把录制路径吐给工作流 {{recording_path}} 模板（解码步骤的 input_path）
     return text, {"recording_path": save_path, "format": fmt, "duration": duration}
@@ -4305,7 +4321,7 @@ def _decode_adsb(args):
         return f"解码失败: {result['error']}"
     output = f"=== ADS-B 解码 ===\n"
     output += f"输入: {input_path}\n"
-    output += f"采样率: {sample_rate/1e6:g} MHz\n"
+    output += f"采样率: {_fmt_sample_rate(sample_rate)}\n"
     if result.get("found"):
         output += f"前导检测: 命中（样本索引 {result.get('preamble_index')}）\n"
         output += f"CRC-24 校验: {'通过' if result.get('crc_ok') else '失败'}\n"
@@ -4640,7 +4656,7 @@ def _satellite_doppler_track(mgr, args):
         json.dump(sidecar, f, ensure_ascii=False, indent=1)
     lines = [
         f"=== {sat} 多普勒跟踪录制完成 ===",
-        f"标称频率: {nominal/1e6:.6f} MHz　解调标记: {demod}　采样率: {sr/1e3:.0f} kHz",
+        f"标称频率: {nominal/1e6:.6f} MHz　解调标记: {demod}　采样率: {_fmt_sample_rate(sr)}",
         f"录制: {sidecar['duration_recorded_s']:.1f}s，{n_samples} 样本，调谐 {tune_count} 次（每 {interval:.1f}s 补偿）",
         f"多普勒范围: {sidecar['doppler_min_hz']:.0f} ~ {sidecar['doppler_max_hz']:.0f} Hz",
         f"仰角: {sidecar['elevation_start_deg']:.1f}° → {sidecar['elevation_end_deg']:.1f}°",
@@ -4995,7 +5011,7 @@ def _demodulate(mgr, args):
     result += f"模式: {mode}" + ("（宽带广播，含去加重/降采样）" if is_broadcast_fm else "") + "\n"
     result += f"输入样本: {len(samples)} IQ 样本\n"
     result += f"输出音频: {len(audio)} 样本 ({audio_duration:.3f} 秒, {audio_sr} Hz)\n"
-    result += f"采样率: {sample_rate/1e6:.3f} MHz\n"
+    result += f"采样率: {_fmt_sample_rate(sample_rate)}\n"
     if mode_u in ("FM", "WFM", "NFM"):
         result += f"频偏: {deviation/1000:.1f} kHz\n"
     if rds_line:
@@ -5111,7 +5127,7 @@ def _analyze_recording(args):
     if metadata.get("_read_error"):
         result += f"警告: {metadata['_read_error']}；以下采样率/中心频率为默认值，不代表真实录制参数。\n"
     result += f"样本数: {len(samples)}\n"
-    result += f"采样率: {sample_rate/1e6:.3f} MHz\n"
+    result += f"采样率: {_fmt_sample_rate(sample_rate)}\n"
     if center_freq > 0:
         result += f"中心频率: {center_freq/1e6:.3f} MHz\n"
     result += f"时长: {len(samples)/sample_rate:.3f} 秒\n\n"
@@ -6530,10 +6546,10 @@ def _platform_info(args):
     lines.append("--- 优化建议 ---")
     if info.get("is_embedded"):
         lines.append("- 嵌入式平台: 建议使用QPainter软件渲染降级，禁用OpenGL")
-        lines.append("- 树莓派: 建议使用硬件编解码，限制采样率≤2MHz")
+        lines.append("- 树莓派: 建议使用硬件编解码，限制采样率≤2 MS/s")
         lines.append("- Jetson: 可启用GPU加速频谱处理")
     else:
-        lines.append("- 桌面平台: 可启用OpenGL硬件加速，采样率可到20MHz+")
+        lines.append("- 桌面平台: 可启用OpenGL硬件加速，采样率可到20 MS/s+")
 
     if info.get("platform_name") == "windows_on_arm":
         lines.append("- Windows ARM: 必须使用QPainter软件渲染降级（OpenGL可能不可用）")
@@ -7406,7 +7422,7 @@ def _signal_detect(mgr, spec, args):
     signals = spec.find_signals(spectrum, threshold_db=abs_threshold, min_bandwidth_hz=min_bw)
 
     lines = ["=== 频谱信号检测 ===",
-             f"中心频率: {spectrum.center_freq/1e6:.3f} MHz，采样率: {spectrum.sample_rate/1e6:.3f} MHz",
+             f"中心频率: {spectrum.center_freq/1e6:.3f} MHz，采样率: {_fmt_sample_rate(spectrum.sample_rate)}",
              f"噪声底: {spectrum.noise_floor_db:.1f} dB，检测门限: 噪声底+{rel_threshold_db:.0f} dB = {abs_threshold:.1f} dB",
              f"最小带宽: {min_bw/1e3:.1f} kHz",
              f"检测到 {len(signals)} 个信号："]
@@ -8014,7 +8030,7 @@ def _fm_make_acquire(mgr, sample_rate_hz):
             backend.set_sample_rate(sample_rate_hz)
     except (RuntimeError, OSError, ValueError, TypeError) as e:
         # 扫频依赖正确采样率：静默沿用旧采样率会让噪声底/门限判断全部失真。
-        raise RuntimeError(f"把采样率切到 {sample_rate_hz/1e3:.0f}kHz 失败: {e}") from e
+        raise RuntimeError(f"把采样率切到 {_fmt_sample_rate(sample_rate_hz)} 失败: {e}") from e
 
     state = {"failures": 0, "last_error": ""}
 
@@ -8126,7 +8142,7 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
     # 格式化输出
     lines = [
         f"=== FM 搜台 {result.f_start_mhz:.1f}-{result.f_stop_mhz:.1f} MHz ===",
-        f"步进 {result.step_khz:.0f}kHz，采样率 {result.sample_rate_hz/1e3:.0f}kHz，"
+        f"步进 {result.step_khz:.0f}kHz，采样率 {_fmt_sample_rate(result.sample_rate_hz)}，"
         f"每点 {result.dwell_samples} 样本，噪声底 {result.noise_floor_db:.1f}dB",
         f"门限 {threshold}dB，检出 {len(result.stations)} 个电台（按强度排序），耗时 {result.scan_time_s:.1f}s",
     ]
@@ -8369,7 +8385,7 @@ def _listen_fm_tool(mgr, args) -> "ToolResult":
     mode = "实时播放" if audio_avail else "解调运行中（无 sounddevice，音频输出已降级）"
     lines = [
         f"=== 开始收听 FM {freq_mhz:.1f} MHz ===",
-        f"采样率 {sr/1e3:.0f}kHz → 音频 {audio_sr/1e3:.0f}kHz，增益 {gain}",
+        f"采样率 {_fmt_sample_rate(sr)} → 音频 {audio_sr/1e3:.1f} kHz，增益 {gain}",
         f"状态: {mode}",
         f"用 sdr_listen_fm action=stop 停止收听。",
     ]

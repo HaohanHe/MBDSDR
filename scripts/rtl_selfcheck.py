@@ -145,7 +145,7 @@ def acquire_and_analyze(backend, args, have):
     rate = args.rate
     freq = args.freq
     if not backend.set_sample_rate(rate):
-        warn(f"采样率 {rate} 设置失败，尝试 2.048MHz")
+        warn(f"采样率 {rate} 设置失败，尝试 2.048 MS/s")
         rate = 2048000
         backend.set_sample_rate(rate)
     backend.set_frequency(freq)
@@ -157,7 +157,7 @@ def acquire_and_analyze(backend, args, have):
         ds = backend.set_direct_sampling("q")
         if ds:
             warn("频率低于 24MHz，已尝试开启 direct sampling(Q)；若无信号可改 --branch i 或需上变频器")
-    ok(f"中心频率 {freq/1e6:.3f} MHz，采样率 {rate/1e6:.3f} MHz，AGC 开，ppm={args.ppm}")
+    ok(f"中心频率 {freq/1e6:.3f} MHz，采样率 {rate/1e6:.3f} MS/s，AGC 开，ppm={args.ppm}")
 
     n = args.samples
     print(f"  采集 {n} 个 IQ 样本 ...")
@@ -247,7 +247,7 @@ def acquire_and_analyze(backend, args, have):
 def main():
     ap = argparse.ArgumentParser(description="RTL-SDR 一键硬件自检")
     ap.add_argument("--freq", type=float, default=98_000_000, help="中心频率 Hz，默认 98MHz(FM)")
-    ap.add_argument("--rate", type=float, default=2_400_000, help="采样率 Hz，默认 2.4MHz")
+    ap.add_argument("--rate", type=float, default=2_400_000, help="采样率 Hz，默认 2.400 MS/s")
     ap.add_argument("--ppm", type=int, default=0, help="晶振频偏校正 ppm")
     ap.add_argument("--index", type=int, default=0, help="设备序号")
     ap.add_argument("--tcp", type=str, default="", help="rtl_tcp 地址 host:port，例如 127.0.0.1:1234")

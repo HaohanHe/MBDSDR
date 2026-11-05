@@ -46,7 +46,7 @@ def acquire(args):
     be.set_agc(True)
     # FM 广播段不需要 direct sampling
     n = int(sr * args.duration)
-    print(f"[..] 调谐 {args.freq:.2f} MHz，采样率 {sr/1e6:.3f} MHz，采集 {args.duration:.1f}s ...")
+    print(f"[..] 调谐 {args.freq:.2f} MHz，采样率 {sr/1e6:.3f} MS/s，采集 {args.duration:.1f}s ...")
     t0 = time.time()
     chunks = []
     got = 0

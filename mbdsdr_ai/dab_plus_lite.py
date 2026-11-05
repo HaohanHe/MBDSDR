@@ -112,7 +112,7 @@ class DABParams:
     fsync1: int = 0xF8C549          # fsync0 的按位取反(24bit)，奇偶帧交替
     err_ok: int = 0xFF              # [ ] ERR==0xFF 表示无传输错误
 
-    sample_rate_hz: int = 2048000   # DAB 模式 I 采样率参考 2.048 MHz
+    sample_rate_hz: int = 2048000   # DAB 模式 I 采样率参考 2.048 MS/s
     fic_rate_mbps: float = 2.048    # FIC 速率 2.048 Mbps 参考值
 
 
