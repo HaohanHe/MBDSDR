@@ -23,9 +23,11 @@
 红线：不碰真网络/真服务。RemoteControl 用假类注入验证**面板调用链**，
 不启动真实 TCP 监听；断言的是"面板调了 start/stop 与持久化"，不是服务可用。
 """
+import ast
 import os
-import re
 import sys
+from textwrap import dedent
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -249,15 +251,139 @@ def test_volume_and_waterfall_now_persist_through_settings():
     assert 'settings.set("show_waterfall"' in _MAIN_WINDOW_SRC
 
 
-def test_satellite_tune_updates_control_panel():
-    """卫星跟踪调谐必须真的更新控制面板频率（修前写 freq_spin——属性不存在，
-    异常被 pass 吞掉 = 联动显示永不更新的死路径）。"""
-    assert "freq_spin.setValue" not in _MAIN_WINDOW_SRC, \
-        "freq_spin 不存在（真实控件是 freq_input），不许再调用它"
-    assert re.search(
-        r"self\.control_panel\.set_frequency_hz\(\s*float\(obj\.frequency_hz\)\s*\)",
-        _MAIN_WINDOW_SRC,
-    ), "卫星调谐没有走 control_panel.set_frequency_hz = 联动显示不更新"
+def _sky_obj(freq_hz):
+    """天空图里的一颗卫星（只带联动需要的字段）。"""
+    return SimpleNamespace(obj_type="satellite", azimuth_deg=210.0,
+                           elevation_deg=35.0, name="ISS",
+                           frequency_hz=freq_hz)
+
+
+@pytest.fixture(scope="module")
+def sky_main_window(isolated_profile):
+    """真实 MainWindow（offscreen）：把频率联动当行为测，而不是正则钉源码。"""
+    _app()  # QWidget 必须先有 QApplication，否则 Qt 直接 abort
+    from main_window import MainWindow
+    w = MainWindow()
+    yield w
+    try:
+        w._disconnect()
+    except Exception:  # noqa: BLE001 - 收尾失败不该拖垮用例
+        pass
+    w.close()
+
+
+def test_satellite_tune_updates_control_panel(sky_main_window, monkeypatch):
+    """调谐成功后，调谐后的真值必须回填控制面板。
+
+    旧写法用正则钉 `float(obj.frequency_hz)` 字面量，天空线把中间变量改成
+    局部 `freq_hz` + None 守卫就误红（语义没退化）。这里改成行为断言。
+    """
+    w = sky_main_window
+    tuned = []
+
+    class _Backend:
+        def set_frequency(self, hz):
+            tuned.append(hz)
+
+    monkeypatch.setattr(w, "_active_sdr_backend", _Backend(), raising=False)
+    monkeypatch.setattr(w, "_worker", None, raising=False)
+    monkeypatch.setattr(w, "_update_main_vfo_offset", lambda: None)
+
+    w._on_sky_object_clicked(_sky_obj(435_000_000.0))
+
+    assert tuned == [435_000_000.0], "后端没收到调谐命令"
+    assert w.control_panel.get_frequency_hz() == 435_000_000.0, \
+        "调谐成功后控制面板没有回填（联动显示不更新）"
+    assert "已调谐到 435.000 MHz" in w.statusBar().currentMessage()
+
+
+def test_satellite_without_frequency_does_not_tune(sky_main_window, monkeypatch):
+    """未登记下行频率：不许下发调谐，控制面板保持原值，状态栏如实说原因。"""
+    w = sky_main_window
+    tuned = []
+
+    class _Backend:
+        def set_frequency(self, hz):
+            tuned.append(hz)
+
+    monkeypatch.setattr(w, "_active_sdr_backend", _Backend(), raising=False)
+    monkeypatch.setattr(w, "_worker", None, raising=False)
+    monkeypatch.setattr(w, "_update_main_vfo_offset", lambda: None)
+
+    before = w.control_panel.get_frequency_hz()
+    w._on_sky_object_clicked(_sky_obj(None))
+
+    assert tuned == [], "没有频率时仍下发了调谐"
+    assert w.control_panel.get_frequency_hz() == before, "无频率时控制面板被改了"
+    msg = w.statusBar().currentMessage()
+    assert "未调谐频率" in msg and "没有配置下行频率" in msg, msg
+
+
+class _FakeSkyWindow:
+    """只承载 `_on_sky_object_clicked` 所需属性，用于跑变异后的函数副本。"""
+
+    def __init__(self):
+        self.tuned = []
+        self.messages = []
+        self.sky_view = SimpleNamespace(set_antenna=lambda a: None)
+        self._worker = None
+        self._vfo_center_hz = 0.0
+        self._backend_center_hz = 0.0
+        self.freq_label = SimpleNamespace(setText=lambda t: None)
+        self.status_freq = SimpleNamespace(setText=lambda t: None)
+        self.control_panel = SimpleNamespace(
+            set_frequency_hz=lambda hz: self.tuned.append(hz))
+        self._active_sdr_backend = SimpleNamespace(
+            set_frequency=lambda hz: self.tuned.append(hz))
+
+    def _update_main_vfo_offset(self):
+        pass
+
+    def statusBar(self):
+        window = self
+        return SimpleNamespace(
+            showMessage=lambda text, *a: window.messages.append(text))
+
+
+def _mutated_sky_handler(remove_guard: bool):
+    """从 main_window 源码取 `_on_sky_object_clicked`（可选去掉 None 守卫）。
+
+    反证用：不改生产文件，在内存里跑一份变异副本，证明守卫是"有牙"的。
+    """
+    tree = ast.parse(_MAIN_WINDOW_SRC)
+    node = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "_on_sky_object_clicked")
+    src = dedent(ast.get_source_segment(_MAIN_WINDOW_SRC, node))
+    if remove_guard:
+        guard = "if freq_hz is not None and freq_hz > 0:"
+        assert src.count(guard) == 1, "None 守卫写法已变，先更新这条反证"
+        src = src.replace(guard, "if True:  # MUTATED")
+    import main_window as mw
+    ns = {}
+    exec(compile(src, "<sky-handler>", "exec"), vars(mw), ns)  # noqa: S102
+    return ns["_on_sky_object_clicked"]
+
+
+def test_removing_none_guard_breaks_the_unregistered_frequency_case():
+    """反证：去掉 None 守卫后，同一场景不再给出「没有配置下行频率」的正确解释。
+
+    正确实现里 `frequency_hz=None` 走 else 分支；变异后强行走调谐分支，
+    报的是 float(None) 的 TypeError——test_satellite_without_frequency_does_not_tune
+    里对这句文案的断言会因此变红，证明该断言确实钉住了守卫。
+    """
+    handler = _mutated_sky_handler(remove_guard=True)
+    fake = _FakeSkyWindow()
+    handler(fake, _sky_obj(None))
+    assert fake.messages, "变异后连状态栏都没写"
+    assert "没有配置下行频率" not in fake.messages[-1], \
+        "去掉守卫后仍给出正确解释 = 反证失效"
+    assert "TypeError" in fake.messages[-1]
+
+
+def test_no_nonexistent_freq_spin_widget():
+    """修前写 `freq_spin.setValue`——属性不存在，异常被 pass 吞掉 = 死路径。"""
+    assert "freq_spin.setValue" not in _MAIN_WINDOW_SRC
 
 
 # ------------------------------------------- 音量量纲收敛（0-100 人类量纲，2026-10-30）

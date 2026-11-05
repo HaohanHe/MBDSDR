@@ -68,6 +68,34 @@ def test_out_of_capability_sample_rate_is_flagged(qapp, caplog):
         panel.deleteLater()
 
 
+def test_in_range_rate_outside_visible_gears_is_not_called_over_capability(qapp):
+    """连续可调后端只暴露范围两端：范围内但非精确档 ≠ 超出能力。"""
+    panel = ControlPanel()
+    try:
+        panel.set_sample_rate_options([1, 1_000_000_000])
+        applied = panel.set_sample_rate(999_000_000)
+        assert applied == 1_000_000_000.0
+        tip = panel.sr_label.toolTip()
+        assert "不在当前可见档位" in tip, tip
+        assert "超出当前设备能力" not in tip, "999 MS/s 在 network_iq 能力范围内，不能诬称超出"
+    finally:
+        panel.deleteLater()
+
+
+def test_exact_upper_bound_of_network_iq_is_not_flagged(qapp):
+    """1 GHz 恰好是 network_iq 的上界档位：合法，不该打 ⚠。"""
+    panel = ControlPanel()
+    try:
+        panel.set_sample_rate_options([1, 1_000_000_000])
+        applied = panel.set_sample_rate(1_000_000_000)
+        assert applied == 1_000_000_000.0
+        assert panel.sr_label.text() == "采样率"
+        assert panel.sr_label.toolTip() == ""
+        assert panel.sample_rate_combo.toolTip() == ""
+    finally:
+        panel.deleteLater()
+
+
 # ---------------------------------------------------------------------------
 # 2. 同名键并发覆盖：后写者胜，但覆盖事实必须进日志
 # ---------------------------------------------------------------------------

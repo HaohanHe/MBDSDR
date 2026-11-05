@@ -1352,10 +1352,16 @@ class ControlPanel(QWidget):
         if abs(applied - rate) > 1e-9:
             rates = [float(combo.itemData(i)) for i in range(combo.count())
                      if combo.itemData(i) is not None]
+            lo, hi = min(rates), max(rates)
+            # 超出范围与"范围内但不精确"是两回事：连续可调后端（如 network_iq）
+            # 只暴露范围两端，中间值是设备支持的，不能诬称"超出能力"。
+            cause = (f"超出当前设备能力 [{format_sample_rate(lo)}, "
+                     f"{format_sample_rate(hi)}]"
+                     if rate < lo or rate > hi else
+                     f"不在当前可见档位 [{format_sample_rate(lo)}, "
+                     f"{format_sample_rate(hi)}]")
             hint = (
-                f"配置请求 {format_sample_rate(rate)} 超出当前设备能力 "
-                f"[{format_sample_rate(min(rates))}, "
-                f"{format_sample_rate(max(rates))}]，"
+                f"配置请求 {format_sample_rate(rate)} {cause}，"
                 f"已按最近档 {format_sample_rate(applied)} 显示（配置文件未改）")
             logger.warning("%s", hint)
             self.sr_label.setText("采样率 ⚠")
