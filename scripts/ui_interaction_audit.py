@@ -119,6 +119,16 @@ SKIP_LIVE: dict[str, str] = {
         "`tests/test_planetarium_entry_visibility.py::test_overlay_exit_button_is_clickable` 覆盖",
 }
 
+#: 幂等按钮：点击前必须先把同组的值扰动成非默认，否则前后快照必然一致。
+#: 键 = "种类|名称|*"（与 SKIP_LIVE 同口径），值 = 扰动口径说明。
+PERTURB_BEFORE: dict[str, str] = {
+    "按钮|恢复本组默认|*":
+        "该按钮把同组的 rc_enabled/rc_port/web_enabled/web_port 写回 schema "
+        "默认；在默认值上直接点必然零变化（这是审计口径问题，不是产品缺陷）。"
+        "先就近把同组 spin 改成另一个合法值；spin 都置灰时退回翻转 checkbox"
+        "（blockSignals，避免真的起监听/写用户数据），再点。",
+}
+
 #: 已确认是问题、但修复点不在本线文件权限内的条目（白名单必须给理由）。
 FALSE_ALIVE_WHITELIST: dict[str, str] = {
     "按钮|刷新|DevicePanel":
@@ -260,9 +270,9 @@ def collect_controls(win) -> list[dict]:
 def _snapshot(win) -> dict:
     """控件状态快照：只取"用户看得见"的字段，做前后 diff。"""
     from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import (QAbstractButton, QComboBox, QDialog,
-                                   QDockWidget, QLabel, QLineEdit, QStackedWidget,
-                                   QTabWidget, QWidget)
+    from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QComboBox,
+                                   QDialog, QDockWidget, QLabel, QLineEdit,
+                                   QStackedWidget, QTabWidget, QWidget)
 
     snap: dict[str, str] = {}
     for w in win.findChildren(QWidget):
@@ -279,6 +289,10 @@ def _snapshot(win) -> dict:
                 snap[key] = f"text={w.text()[:80]!r}"
             elif isinstance(w, QComboBox):
                 snap[key] = f"idx={w.currentIndex()} text={w.currentText()[:60]!r}"
+            elif isinstance(w, QAbstractSpinBox):
+                # 数值控件也是用户看得见的状态：「恢复本组默认」把端口写回去，
+                # 不采集它就只能看到"零变化"。
+                snap[key] = f"value={w.text()!r}"
             elif isinstance(w, QTabWidget):
                 snap[key] = f"idx={w.currentIndex()}"
             elif isinstance(w, QStackedWidget):
@@ -315,15 +329,50 @@ def _is_telemetry(old, new) -> bool:
                 and _TELEMETRY.match(str(new)))
 
 
-def _diff(before: dict, after: dict, limit=5, exclude=()) -> list[str]:
-    """只认「既有控件的值变化」：定时器重建列表造成的增删不算按钮效果。"""
+def _widget_key(w) -> str:
+    return f"{type(w).__name__}({w.objectName()})#{id(w)}"
+
+
+def _live_widgets(win) -> dict:
+    """key → 控件对象：供 _diff 判定「整键消失」是真销毁还是重排/隐藏。"""
+    from PySide6.QtWidgets import QWidget
+    return {_widget_key(w): w for w in win.findChildren(QWidget)}
+
+
+def _still_alive(obj) -> bool:
+    """C++ 对象是否还活着（PySide 删对象后 Python wrapper 仍在，isValid 才可靠）。"""
+    try:
+        import shiboken6
+        return bool(shiboken6.isValid(obj))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _diff(before: dict, after: dict, limit=5, exclude=(),
+          before_widgets=None) -> list[str]:
+    """控件状态前后差异。
+
+    两类变化都算按钮效果：
+      * 同键值变化（可见性/勾选/文本/索引）；
+      * **整键消失且 C++ 对象已销毁**——`WA_DeleteOnClose` 的对话框点「关闭」
+        后所有键消失，过去被当成「无变化」，于是正常关闭被误判为假活。
+    仍不算：键消失但对象还活着（列表重排/换父/移出窗口）、新增控件（懒加载）。
+    """
     out = []
     for k in before.keys() | after.keys():
         if k in exclude:
             continue
         old, new = before.get(k), after.get(k)
-        if old is None or new is None:
-            continue        # 增删控件 = 列表重排/懒加载噪音，不作证据
+        if old is None:
+            continue        # 新增控件 = 列表重排/懒加载噪音，不作证据
+        if new is None:
+            obj = (before_widgets or {}).get(k)
+            if obj is not None and not _still_alive(obj):
+                name = re.sub(r"#\d+", "", str(k))   # 报告里去掉 id
+                out.append(f"{name}: {old} -> <已销毁（关闭/删除）>")
+                if len(out) >= limit:
+                    break
+            continue        # 对象还活着 = 重排/换父，不作证据
         if old == new or _is_telemetry(old, new):
             continue
         name = re.sub(r"#\d+", "", str(k))      # 报告里去掉 id，保留可读名
@@ -331,6 +380,69 @@ def _diff(before: dict, after: dict, limit=5, exclude=()) -> list[str]:
         if len(out) >= limit:
             break
     return out
+
+
+def _perturb_container(btn) -> str:
+    """点幂等按钮前，把同组输入先改成非默认值（否则「点了等于没点」）。
+
+    「恢复本组默认」读同组控件回写默认值：审计若在默认值上直接点，前后快照
+    必然一致，会被误判成假活——这是**审计口径问题**，不是产品缺陷。
+    优先级：spin（数值可见）→ combo（换索引）→ checkbox（blockSignals 翻转，
+    避免真的起监听/写用户数据）。
+    """
+    from PySide6.QtWidgets import QAbstractSpinBox, QCheckBox, QComboBox
+
+    ancestors = []
+    p = btn.parent()
+    while p is not None and len(ancestors) < 4:
+        ancestors.append(p)
+        p = p.parent()
+    if not ancestors:
+        return ""
+
+    # 就近的「同组」优先（不要把设置页里无关的 FFT/采样率一起扰动）：
+    # 数值 → 下拉 → 勾选。置灰的 spin 也照改：reset 一样会把它的值写回默认，
+    # 禁用的控件照样能程序化改值，快照也照样看得到。
+    for p in ancestors:
+        for w in p.findChildren(QAbstractSpinBox):
+            if w is btn:
+                continue
+            try:
+                step = w.singleStep() or 1
+                cur, lo, hi = w.value(), w.minimum(), w.maximum()
+                nxt = cur + step * 2
+                if nxt > hi:
+                    nxt = cur - step * 2
+                if nxt < lo or nxt == cur:
+                    continue
+                w.setValue(nxt)
+                return (f"扰动 {w.objectName() or type(w).__name__}: "
+                        f"{cur} -> {nxt}")
+            except Exception:  # noqa: BLE001
+                continue
+
+        for w in p.findChildren(QComboBox):
+            if w is btn or w.count() < 2:
+                continue
+            try:
+                old = w.currentIndex()
+                w.setCurrentIndex((old + 1) % w.count())
+                return (f"扰动 {w.objectName() or type(w).__name__}: "
+                        f"idx {old} -> {w.currentIndex()}")
+            except Exception:  # noqa: BLE001
+                continue
+
+        for w in p.findChildren(QCheckBox):
+            try:
+                old = w.isChecked()
+                w.blockSignals(True)            # 只改显示态，不触发启停服务
+                w.setChecked(not old)
+                w.blockSignals(False)
+                return (f"扰动 {w.objectName() or type(w).__name__}: "
+                        f"checked {int(old)} -> {int(w.isChecked())}")
+            except Exception:  # noqa: BLE001
+                continue
+    return ""
 
 
 class _ExceptionCatcher:
@@ -448,6 +560,8 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
     volatile = {k for k in quiet1.keys() | quiet2.keys()
                 if quiet1.get(k) != quiet2.get(k)}
     before = quiet2
+    # key → 控件：_diff 靠它区分「整键消失 = 面板销毁」与「重排/换父」。
+    before_widgets = _live_widgets(win)
     for key in ("msg", "dialog", "file", "stat", "close", "new_top"):
         evidence[key].clear()
     # 非模态对话框是 show() 出来的（如 NTRIP 设置），exec 打桩抓不到，
@@ -474,7 +588,8 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
     catcher.restore()
 
     after = _snapshot(win)
-    changed = _diff(before, after, exclude=volatile | set(volatile_global))
+    changed = _diff(before, after, exclude=volatile | set(volatile_global),
+                    before_widgets=before_widgets)
     for d in win.findChildren(QDialog):
         if d.isVisible() and id(d) not in visible_before:
             evidence["dialog"].append(d.windowTitle() or type(d).__name__)
@@ -656,6 +771,11 @@ def _probe_rows(win, rows, evidence, volatile=()) -> None:
         if skip:
             row["skipped"] = skip
             continue
+        if PERTURB_BEFORE.get(loc_key) or PERTURB_BEFORE.get(key):
+            desc = _perturb_container(row["obj"])
+            if desc:
+                row["pre"].append(desc)     # 前置动作，不算"按钮有效果"
+                QApplication.processEvents()
         print(f"[probe] {row['kind']} {row['name']} @ {row['panel']}",
               flush=True)
         _probe(win, row, evidence, volatile)
@@ -875,6 +995,11 @@ def setup_isolated_environment() -> str:
     os.makedirs(home, exist_ok=True)
     os.environ["USERPROFILE"] = home
     os.environ["HOME"] = home
+    # DesktopSettings.default_config_path() 在 Windows 上走 %APPDATA%：
+    # 不重定向的话，审计点一次设置面板按钮就会把真实用户配置写脏
+    # （tests/test_ui_settings_isolation_guard.py 正是守这条）。
+    for var in ("APPDATA", "LOCALAPPDATA"):
+        os.environ[var] = home
     return home
 
 
