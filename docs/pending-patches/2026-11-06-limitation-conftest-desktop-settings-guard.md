@@ -1,10 +1,11 @@
-# 限制登记补充：conftest 真实配置守卫在「重定向 HOME」下被既有用例误红
+# 限制登记补充：conftest 真实配置守卫在「重定向 HOME」下被既有用例误红（已修）
 
 > 目标文件：`docs/limitations-register.md` · 文末追加「附 T」（本文件**不直接改**
 > 共享台账，交由限制总账 owner 合并）。
-> 生成时间：2026-11-06；执行人：解码流水线 P5。
+> 生成时间：2026-11-06；执行人：解码流水线 P5；状态：**已修**。
 > 归属：这是 `tests/test_sdr_pipeline.py` 既有的 fixture 使用缺口，与同日
-> FC0012 写频上界修复无关，请勿按产品缺陷或本轮回归销账。
+> FC0012 写频上界修复无关；已按测试卫生问题直接修复（commit `f55ff6d4`），
+> 不是产品缺陷，也不算本轮改动回归。
 
 ## 1. 结论与判据
 
@@ -17,17 +18,27 @@
   `usefixtures("qtapp")`，却直接 `mw.MainWindow()`；构造期会
   `DesktopSettings.load()`、建 `QSettings("MBDSDR","Desktop")` 与全局
   `layout_store()`，后续 `settings.set(...)` 防抖写盘落到真实 `%APPDATA%`。
-- **判据**：
-  1. 报错路径是 `$APPDATA/mbdsdr/desktop_settings.json`（及 `.lock`），
-     属用户配置面，不是仓库内文件；
-  2. 用例 `0 failed`，唯一 ERROR 挂在 session fixture teardown；
-  3. 单独跑不构造 `MainWindow` 的本线测试（`tests/test_sdr_tuner_limit.py`）不红；
-  4. 只给该类补 `isolated_profile`、不删任何断言，同命令转绿且配置目录零新增。
-- **实测（2026-11-06，本机）**：未补 fixture `13 passed, 1 error`；
-  补 `isolated_profile` 后 `13 passed, 0 error`。验证用的临时 pytest 插件
-  放在仓库外，未入库。
+- **修法（已落地）**：`tests/test_sdr_pipeline.py` 的
+  `TestMainWindowRecordingFlow` 类装饰器补 `isolated_profile`：
 
-## 2. 复现命令（PowerShell，路径按本机替换）
+  ```python
+  @pytest.mark.usefixtures("qtapp", "isolated_profile")
+  class TestMainWindowRecordingFlow:
+  ```
+
+  守卫本身未改——它是「测试禁止写用户真实配置」的机械护栏
+  （纪律见 `docs/COORDINATION.md`「测试纪律」）。
+
+- **修复后判据**：
+  1. 同命令输出 `13 passed`，会话末不再出现 `_real_config_guard_fixture`
+     的 ERROR；
+  2. `$APPDATA/mbdsdr/desktop_settings.json`（及 `.lock`）不再被创建/变更；
+  3. 反证：把 `isolated_profile` 从类装饰器去掉，同命令回到
+     `13 passed, 1 error`。
+- **实测（2026-11-06，本机）**：未补 fixture `13 passed, 1 error`；
+  补 `isolated_profile` 后 `13 passed, 0 error`，配置目录零新增。
+
+## 2. 复跑命令（PowerShell，路径按本机替换）
 
 ```powershell
 $env:MBDSDR_NULL_AUDIO='1'; $env:MBDSDR_NO_HW='1'; $env:QT_QPA_PLATFORM='offscreen'
@@ -37,35 +48,30 @@ $env:APPDATA='<稳定目录>\AppData\Roaming'; $env:LOCALAPPDATA='<稳定目录>
 python -m pytest tests/test_sdr_pipeline.py -q
 ```
 
-## 3. 建议修法（测试侧一行，不动产品代码）
+预期 `13 passed`（会话末无 ERROR）。
 
-```python
-@pytest.mark.usefixtures("qtapp", "isolated_profile")
-class TestMainWindowRecordingFlow:
-```
-
-不要改守卫本身——它是「测试禁止写用户真实配置」的机械护栏。
-
-## 4. 统一 diff（可直接 `git apply`，行号以当次文件末尾为准）
+## 3. 统一 diff（可直接 `git apply`，行号以当次文件末尾为准）
 
 > 用四反引号包裹，避免补丁内的 ``` 代码围栏提前闭合；提取时取 ` ````diff `
-> 到行首 ` ```` ` 之间的内容。
+> 到行首 ` ```` ` 之间的内容。本条已按「已修」改写，附 T 内含复跑命令与反证。
 
 ````diff
 diff --git a/docs/limitations-register.md b/docs/limitations-register.md
-index a6413ac..56e0df4 100644
+index 8a2e392..7a0bd29 100644
 --- a/docs/limitations-register.md
 +++ b/docs/limitations-register.md
-@@ -788,3 +788,74 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
+@@ -791,3 +791,59 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
  
  
  
 +
 +
-+## 附 T：conftest 真实配置守卫在「重定向 HOME」下被 TestMainWindowRecordingFlow 误红（既有测试卫生问题，2026-11-06 解码流水线 P5 追加）
++## 附 T：conftest 真实配置守卫在「重定向 HOME」下被 TestMainWindowRecordingFlow 误红（已修，2026-11-06 解码流水线 P5）
 +
 +> 归属说明：本条与 2026-11-06 的 FC0012 写频上界修复无关，是该测试文件既有的
-+> fixture 使用缺口。登记目的是让后来人不要把它当成产品缺陷或本轮改动回归。
++> fixture 使用缺口；已按测试卫生问题直接修复，不是产品缺陷，也不算本轮改动回归。
++
++**状态：已修（2026-11-06，commit f55ff6d4）**。
 +
 +**现象**：`python -m pytest tests/test_sdr_pipeline.py -q` 的 13 条用例全部 passed，
 +但会话结束时另报 1 条 ERROR，断言来自 `tests/conftest.py::_real_config_guard_fixture`
@@ -79,39 +85,6 @@ index a6413ac..56e0df4 100644
 +  <APPDATA>/mbdsdr: 新增=['desktop_settings.json', 'desktop_settings.json.lock'] 消失=[]
 +```
 +
-+**复现条件**（需同时满足）：
-+
-+1. 会话级守卫已启用——`settings.default_config_path()` 能定位到
-+   Windows `%APPDATA%/mbdsdr/desktop_settings.json`（Linux/macOS 为
-+   `~/.config/mbdsdr/desktop_settings.json`）。
-+2. 跑测前把 `HOME/USERPROFILE/APPDATA/LOCALAPPDATA` 重定向到一个**稳定目录**
-+   （不是 pytest 的 `tmp_path`），且该目录下 `mbdsdr/desktop_settings.json`
-+   跑前**不存在**（存在时则须与结束时字节不同，否则守卫未必触发）。
-+3. 按定向测试纪律设环境：`MBDSDR_NULL_AUDIO=1`、`MBDSDR_NO_HW=1`、
-+   `QT_QPA_PLATFORM=offscreen`。
-+4. 执行（PowerShell，路径按本机替换）：
-+
-+```powershell
-+$env:MBDSDR_NULL_AUDIO='1'; $env:MBDSDR_NO_HW='1'; $env:QT_QPA_PLATFORM='offscreen'
-+$env:HOME='<稳定目录>'; $env:USERPROFILE='<稳定目录>'
-+$env:APPDATA='<稳定目录>\AppData\Roaming'; $env:LOCALAPPDATA='<稳定目录>\AppData\Local'
-+python -m pytest tests/test_sdr_pipeline.py -q
-+```
-+
-+**判据**（如何确认这是测试卫生问题，而不是产品缺陷/本轮回归）：
-+
-+- 报错路径是 `$APPDATA/mbdsdr/desktop_settings.json`（及 `.lock`），属用户配置面，
-+  不是仓库内文件；
-+- 用例本身 `13 passed`、`0 failed`，唯一 ERROR 挂在 session fixture 的 teardown，
-+  收集与执行阶段无异常；
-+- 单独跑不构造 `MainWindow` 的本线测试（如 `tests/test_sdr_tuner_limit.py`）不红；
-+- 只给该类补 `isolated_profile`、不删任何断言，同命令转绿，且
-+  `$APPDATA/mbdsdr/desktop_settings.json` 不再被创建。
-+
-+> 2026-11-06 实测（解码流水线 P5）：未补 fixture 时 `13 passed, 1 error`；
-+> 补 `isolated_profile` 后 `13 passed, 0 error`，配置目录零新增。验证用临时
-+> pytest 插件放在仓库外，未入库。
-+
 +**根因**：`tests/conftest.py::isolated_profile` 是 **module 级可选 fixture**，
 +不是 autouse。`MainWindow()` 构造期会 `DesktopSettings.load()`、建
 +`QSettings("MBDSDR","Desktop")` 与全局 `layout_store()`，`settings.set(...)`
@@ -119,22 +92,41 @@ index a6413ac..56e0df4 100644
 +`TestMainWindowRecordingFlow` 只声明了 `usefixtures("qtapp")`，直接
 +`mw.MainWindow()` 却未请求 `isolated_profile`，因此必然污染真实配置。
 +
-+**建议修法**（测试侧一行，不动产品代码）：
++**修法**（测试侧一行，不动产品代码、不动守卫本身）：
 +
 +```python
 +@pytest.mark.usefixtures("qtapp", "isolated_profile")
 +class TestMainWindowRecordingFlow:
 +```
 +
-+不要改守卫本身——它是「测试禁止写用户真实配置」的机械护栏
++守卫保持原样——它是「测试禁止写用户真实配置」的机械护栏
 +（纪律见 `docs/COORDINATION.md`「测试纪律」）。
 +
-+**为什么本轮不直接改**：`tests/test_sdr_pipeline.py` 不属本线文件，按
-+`AGENTS.md` 与协调台账的边界原则只登记、不代改。
++**复跑命令**（PowerShell，路径按本机替换）：
++
++```powershell
++$env:MBDSDR_NULL_AUDIO='1'; $env:MBDSDR_NO_HW='1'; $env:QT_QPA_PLATFORM='offscreen'
++$env:HOME='<稳定目录>'; $env:USERPROFILE='<稳定目录>'
++$env:APPDATA='<稳定目录>\AppData\Roaming'; $env:LOCALAPPDATA='<稳定目录>\AppData\Local'
++# 前置：删掉 <稳定目录>/AppData/Roaming/mbdsdr/desktop_settings.json 及其 .lock
++python -m pytest tests/test_sdr_pipeline.py -q
++```
++
++**修复后判据**：
++
++- 同命令输出 `13 passed`，会话末不再出现 `_real_config_guard_fixture` 的 ERROR；
++- `<稳定目录>/AppData/Roaming/mbdsdr/desktop_settings.json` 不再被创建/变更；
++- 反证：把 `isolated_profile` 从类装饰器去掉，同命令回到 `13 passed, 1 error`。
++
++> 2026-11-06 实测（解码流水线 P5）：未补 fixture 时 `13 passed, 1 error`；
++> 补后 `13 passed, 0 error`，配置目录零新增。
 ````
 
-## 5. 验证记录
+## 4. 验证记录
 
-- `git apply --check` 在干净副本（同名相对路径）上 `rc=0`。
-- 追加内容统一 LF；补丁上下文保留原文第 790 行（该行本身是 CRLF 空行），
-  合并时若该文件已被其他会话追加内容，请按文末上下文重新定位。
+- 2026-11-06 实际修复：`mbdsdr_ai` 侧未改，仅 `tests/test_sdr_pipeline.py`
+  一行 fixture 声明；同命令 `13 passed, 0 error`。
+- 本补丁的「统一 diff」在 `core.autocrlf=true` 的临时副本上
+  `git apply --check` `rc=0`（同名相对路径 `docs/limitations-register.md`）。
+- 合并时若 `docs/limitations-register.md` 已被其它会话在文末追加内容，
+  请按文末上下文重新定位；hunk 只追加、不修改任何既有行。
