@@ -102,10 +102,7 @@ def owns_local_shortcuts(widget) -> bool:
     while widget is not None:
         if getattr(widget, LOCAL_SHORTCUT_SCOPE_ATTR, False):
             return True
-        try:
-            widget = widget.parentWidget()
-        except Exception:  # pragma: no cover - 防御非 QWidget 对象
-            return False
+        widget = widget.parentWidget()
     return False
 
 

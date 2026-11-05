@@ -69,10 +69,8 @@ def main_window(qapp):
     w.activateWindow()
     qapp.processEvents()
     yield w
-    try:
+    if hasattr(w, "_disconnect"):
         w._disconnect()
-    except Exception:
-        pass
     w.close()
 
 
