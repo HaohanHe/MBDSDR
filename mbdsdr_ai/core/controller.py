@@ -797,11 +797,16 @@ class SDRController:
         self._scans[handle] = state
         return handle
 
-    def stop_scan(self, handle: str) -> None:
-        """请求停止一次扫描。"""
+    def stop_scan(self, handle: str) -> bool:
+        """请求停止一次扫描。句柄不存在返回 False（不再静默成功）。"""
         st = self._scans.get(handle)
-        if st is not None:
-            st["stop"].set()
+        if st is None:
+            return False
+        st["stop"].set()
+        return True
+
+    def has_scan(self, handle: str) -> bool:
+        return handle in self._scans
 
     def get_scan_results(self, handle: str) -> List[dict]:
         """获取扫描结果（活动段列表）。未完成时返回当前已收集结果。"""
@@ -887,11 +892,16 @@ class SDRController:
             return None
         return None
 
-    def stop_decoder(self, handle: str) -> None:
-        """停止解码器并释放句柄。"""
+    def stop_decoder(self, handle: str) -> bool:
+        """停止解码器并释放句柄。句柄不存在返回 False（不再静默成功）。"""
         st = self._decoders.pop(handle, None)
-        if st is not None:
-            st["stop"].set()
+        if st is None:
+            return False
+        st["stop"].set()
+        return True
+
+    def has_decoder(self, handle: str) -> bool:
+        return handle in self._decoders
 
     def get_decoder_messages(self, handle: str) -> List[dict]:
         """取走解码器累积的报文（队列被清空）。无报文返回 []。"""
@@ -1475,12 +1485,16 @@ class SDRController:
         """用当前音频学习一次噪声底。"""
         audio = self.read_audio(2048)
         if audio is None:
-            return {"error": "not_connected"}
+            return {"error": "not_connected",
+                    "suggestion": "请先 connect() 一台设备并 start_audio，"
+                                  "再学习噪声底。"}
         try:
             self._get_anr().learn_noise(np.asarray(audio, dtype=np.float64))
             return {"learned": True, "samples": int(audio.size)}
         except Exception as e:
-            return {"error": "not_available", "technical_detail": str(e)}
+            return {"error": "not_available", "technical_detail": str(e),
+                    "suggestion": "检查 ANR 模块依赖是否可用（numpy），"
+                                  "或先确认音频正在输出。"}
 
     # ==================================================================
     # 多 VFO

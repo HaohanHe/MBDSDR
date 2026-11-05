@@ -263,7 +263,15 @@ def _lt_fst4_encode(text: str) -> Any:
         return {"error": "empty_input",
                 "suggestion": "text 形如 'CQ BI1AAA OM74'。"}
     from mbdsdr_ai.fst4_encode import encode_fst4_text
-    tones = encode_fst4_text(text)
+    try:
+        tones = encode_fst4_text(text)
+    except (IndexError, ValueError, KeyError):
+        # "AUDIT" 这类缺呼号/网格的文本会让 pack77 下标越界；不是环境缺陷，
+        # 但也绝不让裸异常漏给调用方——按格式错误如实拒绝。
+        return {"error": "invalid_text",
+                "message": "FST4 文本格式无法解析：%r" % text,
+                "suggestion": "text 形如 'CQ BI1AAA OM74'"
+                              "（CQ/呼号 + 网格，空格分隔）。"}
     return {"tones": [int(t) for t in tones],
             "n_tones": len(tones),
             "real_hardware_verified": False}  # PENDING
@@ -376,6 +384,22 @@ def _aigui_render_preview(op: str, components: Any, data_model: Any = None,
                     "事实源仍是 C++ renderer。"}
 
 
+def _start_audio_reply(ctrl: SDRController,
+                       args: Dict[str, Any]) -> Any:
+    """start_audio 的诚实回执：失败必须带可行动文案，不能只回 {'ok': False}。"""
+    if not ctrl.is_connected():
+        return {"ok": False, "code": "not_connected",
+                "error": "未连接 SDR，音频没有 IQ 可解调",
+                "suggestion": "先 connect() 一台设备或调试信号源，"
+                              "再 start_audio。"}
+    if not ctrl.start_audio():
+        return {"ok": False, "code": "audio_start_failed",
+                "error": "音频启动失败（无声卡/驱动不可用或采样率不支持）",
+                "suggestion": "检查系统音频输出与 PortAudio/sounddevice，"
+                              "或先用 list_audio_outputs 选定设备。"}
+    return {"ok": True, "audio_running": True}
+
+
 def _qa_ask(store: QuestionStore, question: str, options: Any,
             context: str = "", question_id: str = "") -> Any:
     """结构化提问（不阻塞）：立即返回 pending 信封，答案经 answer_question 回落。"""
@@ -399,7 +423,9 @@ def _qa_answer(store: QuestionStore, question_id: str, answer: str,
         q = store.answer(question_id, answer, free_text=free_text,
                          override=override)
     except QuestionError as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e),
+                "suggestion": "先用 ask_question 取 question_id；默认答案必须"
+                              "命中选项，确需自由文本带 free_text=true。"}
     return {"ok": True, "outcome": "answered", "question": q.to_dict()}
 
 
@@ -409,7 +435,9 @@ def _qa_status(store: QuestionStore, question_id: str = "") -> Any:
         if question_id:
             return {"ok": True, "question": store.get(question_id).to_dict()}
     except QuestionError as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e),
+                "suggestion": "question_id 不存在：先 ask_question 创建，"
+                              "或 question_status 不带参数查看全部未决。"}
     pending = store.pending_envelopes()
     answered = len(store.list(status="answered"))
     return {"ok": True, "pending": pending, "pending_count": len(pending),
@@ -488,6 +516,23 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
             "write": write,   # write tools require an externally issued confirm_token
         })
 
+    def ack(c: SDRController, note: Optional[str] = None,
+            **extra) -> Dict[str, Any]:
+        """写操作回执：未连接时不把「本地记录」说成「硬件已应用」。
+
+        2026-11-05 工具诚实性全扫：12 个设值工具在无设备时只返回
+        ``{"ok": true}``，模型会据此报告「已调谐/已设增益」，属静默假成功。
+        这里统一补 ``connected/applied/stored/note``，**不改写值本身的记录语义**
+        （未连接仍保存目标值，桌面预配置依赖它）。
+        """
+        if c.is_connected():
+            return {"ok": True, **extra}
+        return {
+            "ok": True, "connected": False, "applied": False, "stored": True,
+            "note": note or "未连接 SDR：仅记录本地配置，未下发硬件",
+            **extra,
+        }
+
     # ---- 设备 ----
     add("list_devices", "枚举可见 SDR 设备（无硬件返回空，含 debug 调试源）。",
         _schema({}), lambda c, a: [d.to_dict() if hasattr(d, "to_dict") else {
@@ -509,34 +554,52 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
     # ---- 接收参数 ----
     add("set_frequency", "调谐中心频率（Hz）。",
         _schema({"hz": _NUM}, ["hz"]),
-        lambda c, a: (c.set_frequency(float(a["hz"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_frequency(float(a["hz"])),
+                      ack(c, requested_hz=float(a["hz"])))[1], write=True)
 
     add("get_frequency", "读取当前中心频率（Hz）。", _schema({}),
-        lambda c, a: {"frequency_hz": c.get_frequency()})
+        lambda c, a: {
+            "frequency_hz": c.get_frequency(),
+            "connected": c.is_connected(),
+            "source": "backend" if c.is_connected() else "configured-target",
+            **({} if c.is_connected() else {
+                "note": "未连接 SDR：frequency_hz 是本地目标值，不是硬件回读"}),
+        })
 
     add("set_demod", "设置解调模式（AM/DSB/FM/WFM/NFM/USB/LSB/CW）。DSB="
         "抑制载波双边带乘积检波。",
         _schema({"mode": _STR}, ["mode"]),
-        lambda c, a: (c.set_demod(a["mode"]), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_demod(a["mode"]),
+                      ack(c, requested_mode=a["mode"]))[1], write=True)
 
     add("get_demod", "读取当前解调模式。", _schema({}),
-        lambda c, a: {"demod": c.get_demod()})
+        lambda c, a: {
+            "demod": c.get_demod(),
+            "connected": c.is_connected(),
+            "source": "backend" if c.is_connected() else "configured-target",
+            **({} if c.is_connected() else {
+                "note": "未连接 SDR：demod 是本地目标值，不是硬件回读"}),
+        })
 
     add("set_gain", "设置总增益（dB）。",
         _schema({"db": _NUM}, ["db"]),
-        lambda c, a: (c.set_gain(float(a["db"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_gain(float(a["db"])),
+                      ack(c, requested_db=float(a["db"])))[1], write=True)
 
     add("set_sample_rate", "设置基带采样率（Hz）。",
         _schema({"sr": _NUM}, ["sr"]),
-        lambda c, a: (c.set_sample_rate(float(a["sr"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_sample_rate(float(a["sr"])),
+                      ack(c, requested_sr_hz=float(a["sr"])))[1], write=True)
 
     add("set_bandwidth", "设置信道带宽（Hz）。",
         _schema({"hz": _NUM}, ["hz"]),
-        lambda c, a: (c.set_bandwidth(float(a["hz"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_bandwidth(float(a["hz"])),
+                      ack(c, requested_hz=float(a["hz"])))[1], write=True)
 
     add("set_squelch", "设置静噪门限（dB）。",
         _schema({"db": _NUM}, ["db"]),
-        lambda c, a: (c.set_squelch(float(a["db"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_squelch(float(a["db"])),
+                      ack(c, requested_db=float(a["db"])))[1], write=True)
 
     add("set_deemphasis",
         "设置去加重（de-emphasis）档位：none/22us/50us/75us（sdrpp WFM/NFM "
@@ -557,21 +620,31 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
 
     add("set_audio_output", "选择音频输出设备索引。",
         _schema({"index": _INT}, ["index"]),
-        lambda c, a: {"ok": c.set_audio_output(int(a["index"]))}, write=True)
+        lambda c, a: (
+            {"ok": True, **({} if c.is_connected() else {
+                "connected": False, "note": "未连接 SDR：仅切换本地音频设备"})}
+            if c.set_audio_output(int(a["index"])) else
+            {"ok": False, "code": "audio_output_unavailable",
+             "error": "无法切换到该音频输出设备",
+             "suggestion": "先确认设备索引存在（list_audio_outputs），"
+                           "或检查 PortAudio 是否可用"}), write=True)
 
     add("start_audio", "启动音频播放。", _schema({}),
-        lambda c, a: {"ok": c.start_audio()}, write=True)
+        _start_audio_reply, write=True)
 
     add("stop_audio", "停止音频播放。", _schema({}),
-        lambda c, a: (c.stop_audio(), {"ok": True})[1], write=True)
+        lambda c, a: (c.stop_audio(),
+                      ack(c, audio_running=False))[1], write=True)
 
     add("set_volume", "设置播放音量（dB）。",
         _schema({"db": _NUM}, ["db"]),
-        lambda c, a: (c.set_volume(float(a["db"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_volume(float(a["db"])),
+                      ack(c, requested_db=float(a["db"])))[1], write=True)
 
     add("set_mute", "静音/取消静音。",
         _schema({"muted": _BOOL}, ["muted"]),
-        lambda c, a: (c.set_mute(bool(a["muted"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_mute(bool(a["muted"])),
+                      ack(c, muted=bool(a["muted"])))[1], write=True)
 
     # ---- DSP ----
     add("read_spectrum", "读一帧功率谱（dB 数组，长度 nfft）。",
@@ -806,31 +879,75 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
     add("start_scan", "启动步进扫频，返回扫描句柄。",
         _schema({"start_hz": _NUM, "stop_hz": _NUM, "step_hz": _NUM},
                 ["start_hz", "stop_hz", "step_hz"]),
-        lambda c, a: {"handle": c.start_scan(float(a["start_hz"]),
-                                             float(a["stop_hz"]),
-                                             float(a["step_hz"]))}, write=True)
+        lambda c, a: (
+            {"ok": False, "code": "not_connected",
+             "error": "未连接 SDR，扫频无法启动",
+             "suggestion": "先 connect 一台真实设备"}
+            if not c.is_connected() else
+            {"ok": True, "handle": c.start_scan(float(a["start_hz"]),
+                                                float(a["stop_hz"]),
+                                                float(a["step_hz"]))}), write=True)
 
     add("stop_scan", "停止扫描。",
         _schema({"handle": _STR}, ["handle"]),
-        lambda c, a: (c.stop_scan(a["handle"]), {"ok": True})[1], write=True)
+        lambda c, a: (
+            {"ok": True, "handle": a["handle"]}
+            if c.stop_scan(a["handle"]) else
+            {"ok": False, "code": "scan_not_found",
+             "error": f"扫描句柄不存在：{a['handle']}",
+             "suggestion": "用 start_scan 返回的 handle，或先 get_scan_results 核对"}
+        ), write=True)
+
+    def _scan_results(c: SDRController, a: Dict[str, Any]) -> Dict[str, Any]:
+        h = a["handle"]
+        if not c.has_scan(h):
+            return {"ok": False, "code": "scan_not_found",
+                    "error": f"扫描句柄不存在：{h}",
+                    "suggestion": "用 start_scan 返回的 handle"}
+        rows = c.get_scan_results(h)
+        return {"ok": True, "handle": h, "segments": rows, "count": len(rows),
+                **({} if rows else {
+                    "note": "扫描仍在进行或尚未发现活动段，当前结果为空"})}
 
     add("get_scan_results", "获取扫描活动段结果。",
-        _schema({"handle": _STR}, ["handle"]),
-        lambda c, a: c.get_scan_results(a["handle"]))
+        _schema({"handle": _STR}, ["handle"]), _scan_results)
 
     # ---- 解码 ----
     add("start_decoder", "启动解码器（adsb/aprs/noaa_apt/meteor），返回句柄。",
         _schema({"decoder_type": _STR, "params": {"type": "object"}},
                 ["decoder_type"]),
-        lambda c, a: {"handle": c.start_decoder(a["decoder_type"], a.get("params"))}, write=True)
+        lambda c, a: (
+            {"ok": False, "code": "not_connected",
+             "error": "未连接 SDR，解码器收不到 IQ",
+             "suggestion": "先 connect 一台真实设备"}
+            if not c.is_connected() else
+            {"ok": True,
+             "handle": c.start_decoder(a["decoder_type"], a.get("params"))}
+        ), write=True)
 
     add("stop_decoder", "停止解码器。",
         _schema({"handle": _STR}, ["handle"]),
-        lambda c, a: (c.stop_decoder(a["handle"]), {"ok": True})[1], write=True)
+        lambda c, a: (
+            {"ok": True, "handle": a["handle"]}
+            if c.stop_decoder(a["handle"]) else
+            {"ok": False, "code": "decoder_not_found",
+             "error": f"解码器句柄不存在：{a['handle']}",
+             "suggestion": "用 start_decoder 返回的 handle"}
+        ), write=True)
+
+    def _decoder_messages(c: SDRController,
+                          a: Dict[str, Any]) -> Dict[str, Any]:
+        h = a["handle"]
+        if not c.has_decoder(h):
+            return {"ok": False, "code": "decoder_not_found",
+                    "error": f"解码器句柄不存在：{h}",
+                    "suggestion": "用 start_decoder 返回的 handle"}
+        rows = c.get_decoder_messages(h)
+        return {"ok": True, "handle": h, "messages": rows, "count": len(rows),
+                **({} if rows else {"note": "当前无累积报文（解码器可能仍在等待信号）"})}
 
     add("get_decoder_messages", "取走解码器累积报文。",
-        _schema({"handle": _STR}, ["handle"]),
-        lambda c, a: c.get_decoder_messages(a["handle"]))
+        _schema({"handle": _STR}, ["handle"]), _decoder_messages)
 
     # ---- 卫星 ----
     add("list_satellites", "列出内置可接收卫星。", _schema({}),
@@ -933,7 +1050,12 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         lambda c, a: c.start_recording(a["path"]), write=True)
 
     add("stop_recording", "停止录制。", _schema({}),
-        lambda c, a: c.stop_recording(), write=True)
+        lambda c, a: {
+            **c.stop_recording(),
+            **({} if c.is_connected() else {
+                "connected": False,
+                "note": "未连接 SDR：只清理本地录制状态，无 IQ 落盘"}),
+        }, write=True)
 
     add("get_recording_status", "录制状态。", _schema({}),
         lambda c, a: c.get_recording_status())
@@ -959,11 +1081,13 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
     # ---- ANR ----
     add("set_anr_enabled", "开关自适应降噪。",
         _schema({"enabled": _BOOL}, ["enabled"]),
-        lambda c, a: (c.set_anr_enabled(bool(a["enabled"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_anr_enabled(bool(a["enabled"])),
+                      ack(c, enabled=bool(a["enabled"])))[1], write=True)
 
     add("set_anr_strength", "设置降噪强度 0-10。",
         _schema({"level": _INT}, ["level"]),
-        lambda c, a: (c.set_anr_strength(int(a["level"])), {"ok": True})[1], write=True)
+        lambda c, a: (c.set_anr_strength(int(a["level"])),
+                      ack(c, level=int(a["level"])))[1], write=True)
 
     add("learn_noise_floor", "用当前音频学习噪声底。", _schema({}),
         lambda c, a: c.learn_noise_floor(), write=True)
@@ -972,17 +1096,25 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
     add("add_vfo", "新建 VFO，返回 id。",
         _schema({"freq_hz": _NUM, "mode": _STR, "bw_hz": _NUM},
                 ["freq_hz"]),
-        lambda c, a: {"vfo_id": c.add_vfo(float(a["freq_hz"]),
-                                          a.get("mode", "FM"),
-                                          float(a.get("bw_hz", 12500.0)))}, write=True)
+        lambda c, a: ack(c, vfo_id=c.add_vfo(float(a["freq_hz"]),
+                                              a.get("mode", "FM"),
+                                              float(a.get("bw_hz", 12500.0))),
+                         note="未连接 SDR：VFO 只是本地配置，未接到 IQ 流"
+                         ), write=True)
 
     add("remove_vfo", "删除 VFO。",
         _schema({"vfo_id": _STR}, ["vfo_id"]),
-        lambda c, a: (c.remove_vfo(a["vfo_id"]), {"ok": True})[1], write=True)
+        lambda c, a: (c.remove_vfo(a["vfo_id"]),
+                      ack(c, removed_vfo_id=a["vfo_id"]))[1], write=True)
 
     add("set_primary_vfo", "设为主听 VFO。",
         _schema({"vfo_id": _STR}, ["vfo_id"]),
-        lambda c, a: {"ok": c.set_primary_vfo(a["vfo_id"])}, write=True)
+        lambda c, a: (
+            {"ok": False, "code": "vfo_not_found",
+             "error": f"VFO 不存在：{a['vfo_id']}",
+             "suggestion": "先 list_vfos 确认 vfo_id"}
+            if not c.set_primary_vfo(a["vfo_id"]) else
+            ack(c, primary_vfo_id=a["vfo_id"])), write=True)
 
     add("list_vfos", "列出全部 VFO。", _schema({}),
         lambda c, a: [v.to_dict() for v in c.list_vfos()])

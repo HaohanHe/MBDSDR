@@ -77,7 +77,11 @@ def test_call_with_debug_backend(toolset):
     tok = issue_confirmation("set_frequency", {"hz": 98_500_000})
     out = ts.call_tool("set_frequency",
                        {"hz": 98_500_000, "confirm_token": tok})
-    assert out == {"ok": True}
+    # 已连接时回执带 requested_hz 等元数据（2026-11-05 诚实性批次），
+    # 但必须仍是成功且真的下发。
+    assert out["ok"] is True
+    assert out.get("requested_hz") == 98_500_000
+    assert c.get_frequency() == 98_500_000
     spec = ts.call_tool("read_spectrum", {"nfft": 128})
     assert spec["length"] == 128
     status = ts.call_tool("get_status", {})
@@ -127,7 +131,9 @@ def test_jsonrpc_tools_call(toolset):
                    "arguments": {"mode": "FM", "confirm_token": tok}},
     })
     text = resp["result"]["content"][0]["text"]
-    assert json.loads(text) == {"ok": True}
+    # 已连接时回执带 requested_mode 元数据（2026-11-05 诚实性批次）。
+    assert json.loads(text)["ok"] is True
+    assert c.get_demod() == "FM"
 
 
 def test_notification_has_no_response(toolset):
