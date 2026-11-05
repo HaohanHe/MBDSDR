@@ -248,12 +248,84 @@ def test_tier_caps_apply_per_tier_independently():
     assert len(kept) == 5 + 20 + 24 + 12 + 20
 
 
+class _RecordingPainter:
+    """假画家：不落像素，只记录 `_flush_labels` 真正画出的文本。"""
+
+    def __init__(self):
+        self.texts = []
+
+    def save(self):
+        pass
+
+    def restore(self):
+        pass
+
+    def setRenderHint(self, *args, **kwargs):  # noqa: N802 (Qt 命名)
+        pass
+
+    def setPen(self, *args, **kwargs):  # noqa: N802
+        pass
+
+    def setFont(self, *args, **kwargs):  # noqa: N802
+        pass
+
+    def drawText(self, pos, text):  # noqa: N802
+        self.texts.append(text)
+
+
+def _ring_item(center, radius: float, prefix: str, index: int, deg: float):
+    return (1.5, rf_sky_view.QPointF(
+        center[0] + radius * math.cos(math.radians(deg)),
+        center[1] - radius * math.sin(math.radians(deg))),
+        [(f"{prefix}{index}", False, 0.0)], QColor(255, 255, 255))
+
+
 def test_flush_labels_uses_tier_cap_before_collision():
-    import inspect
-    src = inspect.getsource(RFSkyView._flush_labels)
-    assert "label_tier_keep(" in src
-    # 限流必须先于 label_boxes_keep，否则远处标签先占像素位
-    assert src.index("label_tier_keep(") < src.index("label_boxes_keep(")
+    """限流必须先于碰撞剔除：远处标签不能先占像素位把近处名字挤没。
+
+    行为断言（不读源码）：12 条近处标签（半径 100，档位 1.5 上限 12）+
+    8 条远处标签（半径 112，各自与自己那条近处框压字），远处先入队。
+    先限流 → 远处整批被档位上限丢弃，落笔恰好是 12 条近处文本；
+    若顺序颠倒（先避让）→ 远处先占位，近处被挤掉，落笔文本集不同。
+    用例同时自检两种顺序结果确实不同，避免输入退化成顺序无关。
+    """
+    v = _new_view(600)
+    v.resize(600, 300)                     # 高度受控件最小尺寸约束，按实际取心
+    cx, cy = v.width() / 2.0, v.height() / 2.0
+    fonts = {False: v._font, True: v._gnss_label_font}
+
+    angles_near = [i * 30.0 for i in range(12)]
+    near = [_ring_item((cx, cy), 100.0, "N", i, deg)
+            for i, deg in enumerate(angles_near)]
+    far = [_ring_item((cx, cy), 112.0, "F", i, deg)
+           for i, deg in enumerate(angles_near[:8])]
+    items = far + near                     # 远处先入队（仅作干扰顺序）
+
+    try:
+        # 期望结果：先按档限流，再做二维避让。
+        capped = label_tier_keep(items, cx, cy)
+        capped_items = [items[i] for i in capped]
+        kept = label_boxes_keep(_boxes(capped_items, fonts))
+        expected = [capped_items[i][2][0][0] for i in kept]
+
+        # 自检：顺序颠倒（先避让后限流）必须给出不同文本集。
+        pre = label_boxes_keep(_boxes(items, fonts))
+        pre_items = [items[i] for i in pre]
+        capped2 = label_tier_keep(pre_items, cx, cy)
+        alt_items = [pre_items[i] for i in capped2]
+        alt = [alt_items[i][2][0][0]
+               for i in label_boxes_keep(_boxes(alt_items, fonts))]
+        assert set(alt) != set(expected), (
+            "本用例对「限流/避让」顺序不敏感，无法抓住顺序颠倒")
+
+        rec = _RecordingPainter()
+        v._label_items = list(items)
+        v._flush_labels(rec)
+        assert rec.texts == expected, (
+            "落笔文本与「先限流后避让」的结果不一致："
+            f"实际 {rec.texts}，期望 {expected}")
+    finally:
+        v.close()
 
 
 # --------------------------------------------------------------------------
