@@ -331,12 +331,13 @@ class ControlPanel(QWidget):
         step_row = QHBoxLayout()
         step_row.addWidget(QLabel("步进:"))
         self.step_combo = QComboBox()
-        for txt, hz in [("10Hz", 10.0), ("100Hz", 100.0), ("1kHz", 1_000.0),
-                        ("10kHz", 10_000.0), ("100kHz", 100_000.0), ("1MHz", 1_000_000.0)]:
+        for txt, hz in [("1Hz", 1.0), ("10Hz", 10.0), ("100Hz", 100.0),
+                        ("1kHz", 1_000.0), ("10kHz", 10_000.0),
+                        ("100kHz", 100_000.0), ("1MHz", 1_000_000.0)]:
             self.step_combo.addItem(txt, hz)
         # 默认选中 10kHz
         _def_step = self.step_combo.findData(10_000.0)
-        self.step_combo.setCurrentIndex(_def_step if _def_step >= 0 else 3)
+        self.step_combo.setCurrentIndex(_def_step if _def_step >= 0 else 4)
         self.step_combo.currentIndexChanged.connect(self._on_step_combo_changed)
         step_row.addWidget(self.step_combo, 1)
 

@@ -837,8 +837,10 @@ inline constexpr int kCalibMinWExtra = 180;  // calibration-dialog width beyond 
 inline constexpr int kCalibMinH      = 420;  // calibration-dialog min height
 inline constexpr int kCalibReadoutMinH = 120; // calibration guide/compare label min height
 
-// Fine tuning step (keyboard nudge)
-inline constexpr double kFreqFineStepHz = 10000.0;
+// 粗调档位（不是 ↑↓ 细调！）：等于 Python 的默认 snap_interval（10 kHz），
+// 即顶部「步进」下拉的默认格。键盘 ↑↓ 细调 = 0.1×此值 = 默认 1 kHz——
+// 谁把它直接接进细调，默认步进会错 10 倍。调谐落点仍按当前档位吸附。
+inline constexpr double kFreqCoarseStepHz = 10000.0;
 
 // Recent-tune history (最近频率快速回跳). The list records only REAL centre
 // frequencies read back by the ~1 Hz telemetry tick; kTuneHistoryMax caps the

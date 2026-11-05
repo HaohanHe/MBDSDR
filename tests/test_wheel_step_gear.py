@@ -50,6 +50,38 @@ def _wheel(plot, dy, mods):
     plot.wheelEvent(ev)
 
 
+def _key(plot, key, mods=None):
+    """合成一次按键并派发给 plot（与真实快捷键走同一 keyPressEvent）。"""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    ev = QKeyEvent(QEvent.KeyPress, key, mods if mods is not None else Qt.NoModifier)
+    plot.keyPressEvent(ev)
+
+
+def test_tuning_step_100k_arrow_is_snap_interval_end_to_end(qapp):
+    """tuning_step_hz 端到端：切到 100 kHz，按一次 → Δfreq == snap 且落点在网格。
+
+    反证：若吸附没跟上档位（仍是默认 10 kHz），Δ 会是 10 kHz（应跳的 1/10），
+    且落点按 10 kHz 网格吸附——本测试立即红。
+    """
+    from PySide6.QtCore import Qt
+    panel = _panel(qapp)
+    panel.set_snap_interval(100_000.0)
+    plot = panel._plot
+    gen = panel._state.panel.generator
+    snap = panel._state.snap_interval
+    assert snap == 100_000.0
+    gen.center_freq_hz = round(gen.center_freq_hz / snap) * snap
+    before = gen.center_freq_hz
+
+    _key(plot, Qt.Key_Right)
+
+    after = gen.center_freq_hz
+    assert after - before == snap, \
+        f"100 kHz 档按一次应跳 {snap} Hz，实际 {after - before}"
+    assert after % snap == 0, f"落点 {after} 未吸附到 {snap} 网格"
+
+
 def test_plain_wheel_steps_by_snap_interval(qapp):
     from PySide6.QtCore import Qt
     panel = _panel(qapp)

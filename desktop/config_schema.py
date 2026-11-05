@@ -255,12 +255,14 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         key="tuning_step_hz", group="频谱与解码", kind="enum",
         label="调谐步进", default=10_000,
         help=("滚轮/方向键与频谱吸附网格按这个步进走，与顶部「步进」下拉框同值。"
-              "10 kHz 是默认平衡点；细调选 10/100 Hz，快速跨越选 1 MHz。"),
+              "10 kHz 是默认平衡点；细调选 1/10/100 Hz，快速跨越选 1 MHz。"
+              "七档与 C++ kStepValuesHz 一致（含 1 Hz）。"),
         source="desktop/spectrum_widget.py:921 snap_interval=10_000；"
-               "档位同 desktop/control_panel.py:331-332",
-        choices=(_e(10, "10 Hz"), _e(100, "100 Hz"), _e(1_000, "1 kHz"),
-                 _e(10_000, "10 kHz"), _e(100_000, "100 kHz"),
-                 _e(1_000_000, "1 MHz")),
+               "档位同 desktop/control_panel.py:331-332；"
+               "cpp/src/ui/main_window.cpp kStepValuesHz（七档）",
+        choices=(_e(1, "1 Hz"), _e(10, "10 Hz"), _e(100, "100 Hz"),
+                 _e(1_000, "1 kHz"), _e(10_000, "10 kHz"),
+                 _e(100_000, "100 kHz"), _e(1_000_000, "1 MHz")),
     ),
 
     SettingItem(

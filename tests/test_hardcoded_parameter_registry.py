@@ -238,6 +238,31 @@ def test_cpp_tokens_match_documented_values():
 
 
 @pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
+def test_tuning_step_tiers_match_cpp_and_schema():
+    """调谐步进七档（含 1 Hz）在 C++/Python schema 逐值一致；死 token 已改名。"""
+    if str(REPO / "desktop") not in sys.path:
+        sys.path.insert(0, str(REPO / "desktop"))
+    import config_schema
+
+    expected = (1, 10, 100, 1_000, 10_000, 100_000, 1_000_000)
+    item = config_schema.SCHEMA["tuning_step_hz"]
+    assert item.kind == "enum"
+    assert tuple(item.choice_values) == expected, (
+        "Python 侧缺 1 Hz 档会让 1 Hz 配置导入回默认 10 kHz（差 10,000 倍）")
+    assert config_schema.validate_value(item, 1)[0] == 1
+
+    cpp = (REPO / "cpp/src/ui/main_window.cpp").read_text(encoding="utf-8")
+    m = re.search(r"kStepValuesHz\[\]\s*=\s*\{([^}]*)\}", cpp)
+    assert m, "main_window.cpp 里找不到 kStepValuesHz"
+    assert tuple(int(x) for x in re.findall(r"\d+", m.group(1))) == expected
+
+    toks = TOKENS_H.read_text(encoding="utf-8")
+    # 旧名 kFreqFineStepHz 是"看起来能用、接上就错 10 倍"的死值，已改为粗调档位。
+    assert "kFreqCoarseStepHz" in toks
+    assert "kFreqFineStepHz" not in toks
+
+
+@pytest.mark.skipif(not TOKENS_H.exists(), reason="C++ 源码不在当前检出")
 def test_waterfall_depth_is_six_tier_enum_everywhere(caplog):
     """瀑布深度六档：C++ / Python 生成器 / 设置 schema 三者逐值一致。
 
