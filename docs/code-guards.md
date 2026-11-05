@@ -136,28 +136,91 @@ WARN 多数是 `return ToolResult(success=False, content=...)`（用户/模型�
 
 ### D. 三条长输入挂死：实测曲线与处置
 
-单位：秒；`>91.7` 表示 90s 预算外被异步异常中止；rtty 各长度均返回 `handler_error`（往返结果不匹配，独立于耗时）。
+**这不只是「慢」，还是内存炸弹。** 2026-11-05 崩溃取证：`scripts/tool_param_fuzz.py`
+的 `long_string` 用例把 `feldhell_decode` / `psk31_decode` / `rtty_decode` 的进程吃到
+**17.2 GB** commit，叠加打满系统 38.1 GB 上限后进程被拖死（WER 2004）。所以这三个
+工具的挂死阈值和内存阈值必须一起定。
 
-| 字符数 | feldhell_decode | psk31_decode | rtty_decode |
+测量方法：每个长度独立子进程，父进程每 30ms 采样 RSS/Private，超过 2.5 GB 立即强杀
+（保护测量机）；两张表都走完整 handler（注册表 → 调制 → 解调 → 字符匹配），口径一致。
+输入为 `A` 重复 n 次。
+
+**优化前（Python `list` 存波形；括注失败 = 往返不匹配返回 `handler_error`）**
+
+| 字符数 | feldhell 耗时 / RSS | psk31 耗时 / RSS | rtty 耗时 / RSS |
 | --- | --- | --- | --- |
-| 2,000 | 4.74 | 1.93 | 1.45（失败） |
-| 5,000 | 11.86 | 4.02 | 3.70（失败） |
-| 10,000 | 24.22 | 7.86 | 7.46（失败） |
-| 20,000 | 65.49 | 14.83 | 15.11（失败） |
-| 40,000 | >91.7 | 28.73 | 50.91（失败） |
-| 80,000 | — | 58.75 | — |
-| 100,000 | P13 实测 >60s 挂死 | P13 实测 >60s 挂死 | P13 实测 >60s 挂死 |
+| 500 | 1.10s / 365MB | 0.37s / 164MB | 0.38s / 255MB |
+| 1,000 | 2.19s / 611MB | 0.75s / 209MB | 0.76s / 389MB（失败） |
+| 2,000 | 4.52s / 1,102MB | 1.48s / 297MB | 1.49s / 659MB（失败） |
+| 4,000 | 9.10s / 2,153MB | 2.95s / 504MB | 2.99s / 1,198MB（失败） |
+| 8,000 | **被 2.5GB 闸强杀** | 5.91s / 915MB | 5.98s / 2,274MB（失败） |
+| 100,000 | 事故现场 17.2GB | 超 60s | 超 60s |
 
-诊断：
+**优化后（`array('d')` 存波形 + 包络/FSK 能量流式累加）**
 
-- **psk31**：严格线性，约 **0.7 ms/字符 + 0.9s 固定开销**；10 万字符 58.7s，正好卡在 60s 预算边缘。
-- **rtty**：2 万字符前线性（约 0.75 ms/字符）；4 万时升到 1.27 ms/字符，是纯 Python 大列表与 GC 的超线性抬升，不是算法 O(n²)。
-- **feldhell**：每字符 14 列 × 每列约 457 样本（8kHz / 17.5 列/秒），逐样本 `math.cos` 在 Python 循环里生成；2 万前约 2.4 ms/字符，2 万后因 900 万级浮点列表的内存/GC 抬到 3.3 ms/字符。本质是**按音频样本数线性**，不是 O(n²)。
-- 换算：FeldHell 1 字符 = 0.8 秒音频，1 万字符 = 2.2 小时音频；10 万字符要在内存里生成约 5.1 GB 样本。真实业余文本远小于此。
+| 字符数 | feldhell 耗时 / RSS | psk31 耗时 / RSS | rtty 耗时 / RSS |
+| --- | --- | --- | --- |
+| 500 | 1.32s / 146MB | 0.40s / 130MB | 0.32s / 125MB |
+| 1,000 | 2.60s / 208MB | 0.81s / 138MB | 0.65s / 131MB |
+| 2,000 | 5.26s / 250MB | 1.65s / 155MB | 1.29s / 141MB |
+| 4,000 | 10.55s / 498MB | 3.24s / 228MB | 2.64s / 179MB |
+| 8,000（超上限） | 0.00006s / 118MB（结构化拒绝） | 同左 | 同左 |
 
-处置（限流，但不是“砍功能”）：`MAX_ROUNDTRIP_TEXT = 10000`，超限在 handler 入口返回结构化 `param_out_of_range`（带 `length/limit/param`），不做调制解调。选 1 万的理由：实测最慢的 feldhell 10k 为 24.2s，仍低于 60s 单次预算；再往上 20k 已 65.5s，必然挂死。回归锁：`tests/test_tool_param_fuzz_guard.py::test_long_text_roundtrip_is_bounded`（10 万字符必须 <5s 返回结构化错误）。
+同长度对比（4,000 字符）：RSS feldhell **2,153 → 498MB**、psk31 **504 → 228MB**、
+rtty **1,198 → 179MB**；耗时 feldhell +16%、psk31 +10%，rtty 反而 -12%
 
-未做向量化优化：把 `math.cos` 改成 numpy 只改变常数，不改变“单次输出是数小时音频”的事实；真要长文本应按段落分块调用，而不是把整个波形塞进一次调用。
+诊断（含优化前数据）：
+
+- **耗时按音频样本数线性，不是 O(n²)**：feldhell 每字符 14 列 × 约 457 采样
+  （8kHz / 17.5 列/秒）；psk31 每字符约 11 bit × 256 采样；rtty 每字符约 8.5 bit ×
+  176 采样。48000 与 8000 采样率下斜率随样本数同比变化。
+- **内存曾经也是线性但常数极大**：每个采样是一个独立 Python `float` 对象
+  （约 24 字节对象 + 8 字节指针 ≈ 32 字节/采样），而 `array('d')` 是 8 字节/采样。
+  feldhell 每字符 6,400 采样，10 万字符就是 6.4 亿个 float —— 这正是 17.2GB 的来源。
+- 优化前「2 万以后每字符耗时变高」是内存/GC 抬升，不是算法复杂度变化。
+- 优化后 feldhell 仍是三者最慢（每字符约 2.6ms）；因为它每字符要生成 6,400 个
+  采样点，且逐样本 `math.cos`。
+
+处置：
+
+1. **先优化，再限流**。波形从 `list[float]` 改为 `array('d')`；FeldHell 的包络检波
+   去掉整段 `[abs(s)]` 列表，改为同一次扫描求峰值、分列求和；RTTY 的 4 条
+   正交基带能量数组改为按 bit 窗口流式累加（每个 bit 只需 4 个累加器）。
+   RSS 降到原来的 1/2～1/7（feldhell 4.3×、psk31 2.2×、rtty 6.7×）；耗时
+   feldhell/psk31 增加 10～16%（`array` 逐项 append 比 `list` 慢），
+   rtty 因去掉 4 条与波形等长的数组反而快 12%。这是刻意的取舍：用一点
+   线性常数换掉 GB 级内存峰值。
+2. **上限 3,000 字符**，写死在 `MAX_ROUNDTRIP_TEXT`，并**写入三个工具的 schema
+   描述**（模型和用户调用前就能看到「单次上限 3000 字符，超出直接结构化拒绝」）。
+   依据：最慢的 feldhell 3,000 字符约 7.9s，仍在单次 10s 闸内；3,000 字符在
+   RTTY 45.45 baud 下约 9 分钟连续发射、FeldHell 约 40 分钟，远超真实业余报文
+   （通常几百字符）。没有为了迁就某个测试用例去卡阈值。
+3. 超限在 handler 入口秒回 `param_out_of_range`（带 `param/length/limit`），
+   不做调制解调、不截断。
+4. **模糊测试自身加内存闸**：每个用例独立监控本进程 commit 增长，超过
+   `DEFAULT_MEM_CAP_MB = 1536` 立即注入异步异常中止并判 `MEMORY`，证据里带
+   case 名、输入规模、峰值与增量；`--mem-cap-mb` 可改。验证方式：
+   `tests/test_tool_param_fuzz_guard.py::test_fuzz_memory_cap_aborts_case`
+   用「分配 64MB 后睡 0.6s」的 handler 在 16MB 闸下必须判 `MEMORY`。
+5. **长输入分档串行**：`long_string` 按 2,000 / 20,000 / 100,000 三档，
+   `array_long` 按 5,000 / 50,000 两档，逐档跑、逐档打印
+   `输入 / rss_peak / commit_peak / 增量 / 耗时 / 结论`，不再一次性把最大档喂进去。
+
+回归锁：
+
+- `tests/test_tool_param_fuzz_guard.py::test_long_text_roundtrip_is_bounded`
+  （10 万字符必须 <5s 返回结构化错误）。
+- `tests/test_tool_param_fuzz_guard.py::test_text_roundtrip_limit_is_declared_in_schema`
+  （上限必须出现在工具 schema 描述里，不能偷偷截断）。
+- `tests/test_tool_param_fuzz_guard.py::test_over_limit_boundary_is_rejected_instantly`
+  （`limit + 1` 字符即拒绝，`data.limit` 等于常量）。
+- `tests/fldigi_roundtrip.py`（优化前后往返结果仍然正确）。
+
+遗留（属解码器线，与本轮内存收口无关）：`rtty_decode` 从 1,000 字符起往返结果
+不匹配，注册表最终回 `handler_error`（非具体错误码）。实测 500 通过、1,000/2,000/
+3,000 均失败；疑为 `spb` 取整与实际 baud 的长期相位/帧同步漂移，需解码器线按
+`rtty` 专项复核。模糊测试把这类「handler 明确返回失败」归为 OK，不会掩盖该缺陷
+——它已单列在此。
 
 ## 附录 A：按文件分布（256 个文件）
 

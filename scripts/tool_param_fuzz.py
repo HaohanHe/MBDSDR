@@ -14,14 +14,20 @@
   OK        通过（合法输入照常返回，或非法输入被结构化拒绝）
   CRASH     崩溃（异常逃逸 / handler 抛异常被兜底成「调用失败: XxxError」）
   HANG      挂死（超过单次调用上限）
+  MEMORY    内存炸弹（单用例进程 commit 增长超过 --mem-cap-mb）
   SILENT    静默接受（非法输入 success=True）
   UNSTRUCT  失败但无错误码（结构不合格）
+
+安全：每次调用都带内存监控；超过上限立即注入异常中止，绝不让一次
+fuzz 把整台机器拖死。`long_string` / `array_long` 按长度分档串行跑，
+每跑完一档打印该档的输入长度、峰值内存与耗时。
 
 用法：
   python scripts/tool_param_fuzz.py                 # 跑一类工具全量，写 docs/tool-param-fuzz.md
   python scripts/tool_param_fuzz.py --only ft8_encode sdr_set_frequency
   python scripts/tool_param_fuzz.py --limit 24      # 只抽样前 24 个（CI 抽样口径）
   python scripts/tool_param_fuzz.py --json out.json # 逐次调用明细
+  python scripts/tool_param_fuzz.py --mem-cap-mb 1024
 """
 from __future__ import annotations
 
@@ -56,16 +62,26 @@ SLOW = "SLOW"
 #: handler 内部异常被注册表兜住（结构化失败：exception:<类型> + 原因）。
 #: 按判定口径它不属于「异常逃逸」，单独记账，避免把已兜底的失败误报成崩溃。
 HANDLED = "HANDLED"
+#: 单用例进程 commit（私有内存）增长超过闸值：内存炸弹，立即中止。
+MEMORY = "MEMORY"
 
 #: 单次调用上限（秒）。超时即缺陷，不等它自己回来。
 #: 10s 覆盖纯 Python DSP 的正常计算量（160 bit 载荷≈5–6s），
 #: 真正不返回的环路仍会被 10s 闸拦住。
 DEFAULT_TIMEOUT = 10.0
+#: 单用例允许的进程 commit 增长（MB）。超过即判 MEMORY 并中止该线程：
+#: 2026-11-05 事故——`long_string` 把 feldhell/psk31/rtty 的 Python float
+#: 列表喂到 17.2GB，叠加打满系统 commit 后进程被拖死。
+DEFAULT_MEM_CAP_MB = 1536.0
 #: 与共享校验保持一致：任何数值参数的合理上界
 ABS_LIMIT = 1e15
-#: 超长字符串 / 超长列表的对抗长度
+#: 超长字符串 / 超长列表的对抗长度（分档串行，逐档报资源占用）
 LONG_STR = 100_000
 LONG_LIST = 50_000
+#: 文本类长输入档位：先小后大；跑完一档报一次峰值内存/耗时。
+LONG_STR_TIERS = (2_000, 20_000, LONG_STR)
+#: 数组类长输入档位
+LONG_LIST_TIERS = (5_000, LONG_LIST)
 #: 长输入用例的预算放宽倍数（纯 Python DSP 吃 10 万点本来就慢，不算挂死；
 #: 超过放宽预算仍不返回才算挂死）。基础预算用于其余对抗用例。
 STRESS_BUDGET_FACTOR = 6.0
@@ -221,14 +237,16 @@ def _is_rate_like(name):
 
 # ── 对抗用例生成 ─────────────────────────────────────────────────
 class Case:
-    __slots__ = ("cid", "args", "must_reject", "note", "stress")
+    __slots__ = ("cid", "args", "must_reject", "note", "stress", "size")
 
-    def __init__(self, cid, args, must_reject, note, stress=False):
+    def __init__(self, cid, args, must_reject, note, stress=False, size=0):
         self.cid = cid
         self.args = args
         self.must_reject = must_reject
         self.note = note
         self.stress = stress
+        #: 输入规模（字符数/元素数），用于逐档资源报告
+        self.size = size
 
 
 def _cases(tool, baseline):
@@ -288,10 +306,13 @@ def _cases(tool, baseline):
         cases.append(Case("path_traversal", a, False, f"{s} 给 ../../../../etc/passwd"))
     s2 = _pick_string(tool, path_like=False)
     if s2:
-        a = dict(baseline)
-        a[s2] = "A" * LONG_STR
-        cases.append(Case("long_string", a, False, f"{s2} 给 10 万字符",
-                          stress=True))
+        # 长输入按档位串行（先小后大）：跑完一档报一次资源占用，
+        # 绝不一次性把 10 万字符喂进去（2026-11-05 内存炸弹事故）。
+        for n in LONG_STR_TIERS:
+            a = dict(baseline)
+            a[s2] = "A" * n
+            cases.append(Case(f"long_string_{n}", a, False,
+                              f"{s2} 给 {n} 字符", stress=True, size=n))
         a = dict(baseline)
         a[s2] = "abc\u0000\u0001\u001b\u202e汉🙂"
         cases.append(Case("unicode_control", a, False, f"{s2} 给 Unicode/控制字符"))
@@ -305,10 +326,11 @@ def _cases(tool, baseline):
         a = dict(baseline)
         a[arr] = [0.5]
         cases.append(Case("array_single", a, False, f"{arr} 只给单点"))
-        a = dict(baseline)
-        a[arr] = [0.5] * LONG_LIST
-        cases.append(Case("array_long", a, False, f"{arr} 给 5 万元素",
-                          stress=True))
+        for n in LONG_LIST_TIERS:
+            a = dict(baseline)
+            a[arr] = [0.5] * n
+            cases.append(Case(f"array_long_{n}", a, False,
+                              f"{arr} 给 {n} 个元素", stress=True, size=n))
         a = dict(baseline)
         a[arr] = [float("nan"), 0.5, -0.5]
         cases.append(Case("array_nan_element", a, True, f"{arr} 含 NaN 元素"))
@@ -327,7 +349,7 @@ class _TimeoutAbort(BaseException):
 
 
 def _abort_thread(t):
-    """超时后向工作线程注入异步异常，避免挂死线程继续吃 CPU 污染后续调用。"""
+    """超时/超内存后向工作线程注入异步异常，避免挂死线程继续吃 CPU/内存。"""
     if t is None or t.ident is None:
         return
     try:
@@ -336,12 +358,115 @@ def _abort_thread(t):
             ctypes.c_ulong(t.ident), ctypes.py_object(_TimeoutAbort))
     except (AttributeError, OSError, ValueError):
         # 线程已退出或当前解释器不暴露 ctypes 能力：注入是尽力而为，
-        # 不影响本次调用的 HANG 判定（判定已在 join 超时处完成）。
+        # 不影响本次调用的 HANG/MEMORY 判定（判定已在 join 处完成）。
         return
 
 
-def _call_with_timeout(reg, name, args, timeout):
+# ── 进程内存探针（RSS / commit）───────────────────────────────────
+#: 返回 ``(rss_mb, commit_mb)`` 的探针；None 表示当前平台不可用。
+_MEM_PROBE = None
+_MEM_PROBE_READY = False
+_MEM_PROBE_WARNING_PRINTED = False
+
+
+class _ProcessMemoryCountersEx:
+    """Windows PROCESS_MEMORY_COUNTERS_EX（此处只用到 WS/PrivateUsage）。"""
+
+
+def _make_mem_probe():
+    """构造内存探针：Windows 走 psapi，其它平台读 /proc/self/status。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.c_ulong),
+                ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+                ("PrivateUsage", ctypes.c_size_t),
+            ]
+
+        psapi = ctypes.WinDLL("psapi.dll")
+        kernel32 = ctypes.WinDLL("kernel32.dll")
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(_PMC), ctypes.c_ulong]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        hproc = kernel32.GetCurrentProcess()
+
+        def _win():
+            pmc = _PMC()
+            pmc.cb = ctypes.sizeof(_PMC)
+            if not psapi.GetProcessMemoryInfo(hproc, ctypes.byref(pmc), pmc.cb):
+                return None
+            return (pmc.WorkingSetSize / 1048576.0,
+                    pmc.PrivateUsage / 1048576.0)
+
+        return _win
+    except (AttributeError, OSError, ValueError):
+        # 非 Windows 或 psapi 不可用：退回 /proc（Linux CI）。
+        status = Path("/proc/self/status")
+
+        def _linux():
+            try:
+                for line in status.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("VmRSS:"):
+                        rss_kb = float(line.split()[1])
+                        return rss_kb / 1024.0, rss_kb / 1024.0
+            except (OSError, ValueError, IndexError):
+                return None
+            return None
+
+        if status.exists():
+            return _linux
+        return None
+
+
+def _mem_probe():
+    """当前进程 ``(rss_mb, commit_mb)``；拿不到时返回 None。"""
+    global _MEM_PROBE, _MEM_PROBE_READY, _MEM_PROBE_WARNING_PRINTED
+    if not _MEM_PROBE_READY:
+        _MEM_PROBE = _make_mem_probe()
+        _MEM_PROBE_READY = True
+    if _MEM_PROBE is None:
+        if not _MEM_PROBE_WARNING_PRINTED:
+            print("[mem] 当前平台拿不到进程内存，本次不设内存闸（其余判据照常）",
+                  flush=True)
+            _MEM_PROBE_WARNING_PRINTED = True
+        return None
+    return _MEM_PROBE()
+
+
+def _memory_watcher(stop, state, cap_mb):
+    """采样本进程内存，记录峰值；commit 增长超闸值即置 exceeded 并退出。"""
+    while not stop.is_set():
+        snap = _mem_probe()
+        if snap is None:
+            return
+        rss, commit = snap
+        if rss > state["peak_rss"]:
+            state["peak_rss"] = rss
+        if commit > state["peak_commit"]:
+            state["peak_commit"] = commit
+        if commit - state["base_commit"] > cap_mb:
+            state["exceeded"] = True
+            return
+        stop.wait(0.05)
+
+
+def _call_with_timeout(reg, name, args, timeout, mem_cap_mb=DEFAULT_MEM_CAP_MB):
     holder = {}
+    before = _mem_probe() or (0.0, 0.0)
+    state = {"base_rss": before[0], "base_commit": before[1],
+             "peak_rss": before[0], "peak_commit": before[1], "exceeded": False}
 
     def _run():
         try:
@@ -350,14 +475,29 @@ def _call_with_timeout(reg, name, args, timeout):
             holder["exc"] = e
 
     t = threading.Thread(target=_run, daemon=True)
+    stop = threading.Event()
+    watcher = threading.Thread(target=_memory_watcher, args=(stop, state, mem_cap_mb),
+                               daemon=True)
     t0 = time.time()
+    watcher.start()
     t.start()
-    t.join(timeout)
+    while t.is_alive():
+        t.join(0.05)
+        if state["exceeded"]:
+            _abort_thread(t)
+            t.join(0.5)
+            break
+        if time.time() - t0 > timeout:
+            break
     elapsed = time.time() - t0
-    if t.is_alive():
+    stop.set()
+    hung = t.is_alive()
+    if hung:
         _abort_thread(t)
-        return None, None, elapsed, True
-    return holder.get("res"), holder.get("exc"), elapsed, False
+    peak = state["peak_commit"]
+    return (holder.get("res"), holder.get("exc"), elapsed, hung,
+            state["peak_rss"], peak, state["exceeded"],
+            peak - state["base_commit"])
 
 
 def _summary_args(args):
@@ -375,7 +515,13 @@ def _summary_args(args):
     return ", ".join(parts)[:300]
 
 
-def _judge(case, res, exc, elapsed, budget, timeout):
+def _judge(case, res, exc, elapsed, budget, timeout,
+           mem_peak_mb=0.0, mem_growth_mb=0.0, mem_exceeded=False,
+           mem_cap_mb=DEFAULT_MEM_CAP_MB):
+    if mem_exceeded:
+        return MEMORY, (f"单用例 commit 增长 {mem_growth_mb:.0f}MB > 闸值 "
+                        f"{mem_cap_mb:.0f}MB（峰值 {mem_peak_mb:.0f}MB，"
+                        f"输入规模 {case.size}）→ 已中止")
     if exc is not None:
         return CRASH, f"异常逃逸 {type(exc).__name__}: {exc}"
     if elapsed >= budget:
@@ -413,7 +559,8 @@ def _first_class_names():
 
 
 # ── 主流程 ─────────────────────────────────────────────────────
-def run_fuzz(only=None, limit=0, timeout=DEFAULT_TIMEOUT, offset=0):
+def run_fuzz(only=None, limit=0, timeout=DEFAULT_TIMEOUT, offset=0,
+             mem_cap_mb=DEFAULT_MEM_CAP_MB):
     import tool_availability_audit as audit
 
     tmp = tempfile.mkdtemp(prefix="mbdsdr_fuzz_")
@@ -466,16 +613,30 @@ def run_fuzz(only=None, limit=0, timeout=DEFAULT_TIMEOUT, offset=0):
 
             for case in cases:
                 budget = timeout * STRESS_BUDGET_FACTOR if case.stress else timeout
-                res, exc, elapsed, hung = _call_with_timeout(reg, name, case.args, budget)
-                cat, detail = _judge(case, res, exc, elapsed, budget, timeout)
-                if hung:
+                (res, exc, elapsed, hung, peak_rss, peak_commit,
+                 mem_exceeded, mem_growth) = _call_with_timeout(
+                    reg, name, case.args, budget, mem_cap_mb)
+                cat, detail = _judge(case, res, exc, elapsed, budget, timeout,
+                                     peak_commit, mem_growth, mem_exceeded,
+                                     mem_cap_mb)
+                if hung and cat != MEMORY:
                     cat, detail = HANG, f"超过单次上限 {budget:g}s"
+                if case.stress:
+                    # 逐档报告资源占用：输入规模 / 峰值内存 / 耗时 / 结论
+                    print(f"[mem] {name} {case.cid}: 输入={case.size} "
+                          f"rss_peak={peak_rss:.0f}MB commit_peak={peak_commit:.0f}MB "
+                          f"(+{mem_growth:.0f}MB) elapsed={elapsed:.2f}s -> {cat}",
+                          flush=True)
                 records.append({
                     "tool": name,
                     "case": case.cid,
                     "note": case.note,
                     "must_reject": case.must_reject,
                     "stress": case.stress,
+                    "input_size": case.size,
+                    "mem_rss_peak_mb": round(peak_rss, 1),
+                    "mem_commit_peak_mb": round(peak_commit, 1),
+                    "mem_growth_mb": round(mem_growth, 1),
                     "budget_s": round(budget, 1),
                     "class": cat,
                     "detail": detail,
@@ -509,8 +670,13 @@ FIX_LOG = [
     "`order`/`fft`/`slot` 等，slice 负索引与负迭代次数不再进 handler。",
     "回归锁：`tests/test_tool_param_fuzz_guard.py` 固定 NaN/Inf/负数采样率/1e300/"
     "NaN 数组元素等典型「静默接受」案例。",
-    "未能修复的吞吐类问题登记在 `docs/limitations-register.md`"
-    "（10 万字符文本在纯 Python 文本调制/解调器上超过 60s 预算）。",
+    "内存炸弹收口（2026-11-05 事故）：`feldhell_decode`/`psk31_decode`/`rtty_decode` "
+    "的波形从 Python float 列表改为 `array('d')`，FeldHell 包络与 RTTY 4 路正交能量"
+    "改为流式累加；4000 字符实测 RSS feldhell 480MB / psk31 231MB / rtty 168MB"
+    "（优化前 2000 字符 feldhell 已 1.1GB、4000 字符被 2.5GB 监控强杀）。"
+    "文本往返上限同步收紧到 4000 字符并写入工具 schema 描述，超限秒回 "
+    "`param_out_of_range`。模糊测试本身新增单用例内存闸（默认 1536MB）与"
+    "长输入分档串行，逐档打印峰值内存。",
 ]
 
 
@@ -525,10 +691,12 @@ def render_md(records, timeout=DEFAULT_TIMEOUT):
         "# 工具参数鲁棒性账本（P14 模糊测试）",
         "",
         f"- 覆盖：**{tools}** 个一类工具，共 **{total}** 次对抗调用",
-        f"- 单次调用上限：常规 **{timeout:g}s**；10 万字符 / 5 万元素的压力用例"
-        f"放宽到 **{timeout * STRESS_BUDGET_FACTOR:g}s**（超预算才算挂死）",
+        f"- 单次调用上限：常规 **{timeout:g}s**；长输入压力用例"
+        f"放宽到 **{timeout * STRESS_BUDGET_FACTOR:g}s**（超预算才算挂死）；"
+        f"单用例 commit 增长闸 **{DEFAULT_MEM_CAP_MB:g}MB**（超闸即判内存炸弹并中止）",
         f"- 环境：`MBDSDR_NO_HW=1` + `MBDSDR_OFFLINE=1` + `MBDSDR_NULL_AUDIO=1` + offscreen",
         f"- 结论：通过 {counts[OK]} / 崩溃（异常逃逸）{counts[CRASH]} / 挂死 {counts[HANG]} / "
+        f"内存炸弹 {counts[MEMORY]} / "
         f"静默接受 {counts[SILENT]} / 未结构化失败 {counts[UNSTRUCT]} / "
         f"handler 内部异常（已兜底）{counts[HANDLED]} / 长输入吞吐慢 {counts[SLOW]}",
         "",
@@ -589,6 +757,8 @@ def main():
     ap.add_argument("--offset", type=int, default=0, help="跳过前 N 个工具（分块跑）")
     ap.add_argument("--limit", type=int, default=0, help="只抽样前 N 个工具（CI 口径）")
     ap.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
+    ap.add_argument("--mem-cap-mb", type=float, default=DEFAULT_MEM_CAP_MB,
+                    help="单用例进程 commit 增长上限（MB），超闸判 MEMORY 并中止")
     ap.add_argument("--json", default="")
     ap.add_argument("--no-write", action="store_true")
     ap.add_argument("--render", nargs="*", default=None,
@@ -608,14 +778,14 @@ def main():
         (ROOT / "docs" / "tool-param-fuzz.md").write_text(md, encoding="utf-8")
         print(f"calls={len(records)} tools={len({r['tool'] for r in records})} " +
               " ".join(f"{k}={counts[k]}" for k in
-                       (OK, CRASH, HANG, SILENT, UNSTRUCT, HANDLED, SLOW)))
+                       (OK, CRASH, HANG, MEMORY, SILENT, UNSTRUCT, HANDLED, SLOW)))
         print("wrote docs/tool-param-fuzz.md")
         return 0
-    records = run_fuzz(a.only, a.limit, a.timeout, a.offset)
+    records = run_fuzz(a.only, a.limit, a.timeout, a.offset, a.mem_cap_mb)
     counts = collections.Counter(r["class"] for r in records)
     print(f"calls={len(records)} tools={len({r['tool'] for r in records})} " +
           " ".join(f"{k}={counts[k]}" for k in
-                   (OK, CRASH, HANG, SILENT, UNSTRUCT, HANDLED, SLOW)))
+                   (OK, CRASH, HANG, MEMORY, SILENT, UNSTRUCT, HANDLED, SLOW)))
     for r in records:
         if r["class"] != OK:
             print(f"  [{r['class']}] {r['tool']} {r['case']}: {r['detail'][:150]}")

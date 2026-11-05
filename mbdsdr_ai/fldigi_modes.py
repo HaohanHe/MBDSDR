@@ -18,13 +18,19 @@ Varicode、ITA-2、Hellschreiber 7×14 字符形状、各模式的音调/码率�
 
 import math
 import struct
+from array import array
 from typing import List, Tuple, Optional, Dict
 
 
-#: 文本往返类工具的单次输入上限（字符）。P13 实测：feldhell 1 万字符约 24s、
-#: 2 万约 65s、4 万超 90s（超线性）；psk31/rtty 近似线性但仍受 Python 吞吐
-#: 限制，10 万字符均超 60s。真实业余文本远小于此，超限给结构化错误。
-MAX_ROUNDTRIP_TEXT = 10_000
+#: 文本往返类工具的单次输入上限（字符）。优化前后实测（见 docs/code-guards.md D 节）：
+#: 三者耗时与峰值内存都随字符数线性增长（非 O(n²)）；优化前波形用 Python float
+#: 列表，feldhell 2000 字符 1.1GB RSS、4000 字符 2.15GB、8000 字符超 2.5GB；
+#: 10 万字符在 2026-11-05 事故中吃到 17.2GB，拖垮整机。改成 array('d') + 流式
+#: 包络/能量后，4000 字符 RSS 降到 feldhell 498MB / psk31 228MB / rtty 179MB。
+#: 上限取 3000 字符：最慢的 feldhell 约 7.9s，仍在单次调用 10s 闸内；3000 字符
+#: 在 RTTY 45.45 baud 下约 9 分钟连续发射、FeldHell 约 40 分钟，远超任何真实
+#: 业余文本报文（通常几百字符）。超限结构化拒绝，不截断、不闷头计算。
+MAX_ROUNDTRIP_TEXT = 3_000
 
 
 # ============================================================================
@@ -209,14 +215,16 @@ class PSK31Modem:
         self.carrier_hz = carrier_hz
         self.sps = int(round(sample_rate / self.BAUD))  # samples per symbol
 
-    def modulate(self, text: str) -> List[float]:
+    def modulate(self, text: str) -> array:
         """文本 -> DBPSK 实波形。
 
         Varicode 编码 → 差分 BPSK：bit=1 保持相位，bit=0 翻转 π。
+        波形用 ``array('d')`` 存（每采样 8 字节定长）；用 Python float 列表
+        时每采样约 32 字节，长文本会把进程吃到 GB 级（见 MAX_ROUNDTRIP_TEXT）。
         """
         bits = Varicode.encode_text(text)
         # 起始差分参考：先发一个 "1"（无跳变）作为相位参考
-        out = []
+        out = array("d")
         prev_i, prev_q = 1.0, 0.0  # 参考星座点 +1
         phase_acc = 0.0
         dphi = 2.0 * math.pi * self.carrier_hz / self.sample_rate
@@ -313,11 +321,11 @@ class RTTYModem:
             bits.append(1)  # 1.5 stop → 第二个 stop 的半位
         return bits
 
-    def modulate(self, text: str) -> List[float]:
+    def modulate(self, text: str) -> array:
         """文本 -> 2FSK 波形。mark=1(高频), space=0(低频)。"""
         syms = ITA2.encode_text(text)
         bits = self._bits_from_symbols(syms)
-        out = []
+        out = array("d")
         phase_mark = 0.0
         phase_space = 0.0
         dphi_mark = 2.0 * math.pi * self.mark_hz / self.sample_rate
@@ -338,43 +346,39 @@ class RTTYModem:
         return out
 
     def demodulate(self, samples: List[float]) -> str:
-        """2FSK 波形 -> 文本。非相干正交检测：I/Q 两路能量比较。"""
+        """2FSK 波形 -> 文本。非相干正交检测：I/Q 两路能量比较。
+
+        能量按 bit 窗口流式累加（不预分配 4 条与波形等长的列表）：
+        长文本下 4 条 Python float 列表曾把进程吃到 GB 级，而这里
+        每个 bit 只需 4 个累加器。
+        """
         n = len(samples)
         spb = self.spb
-        # 正交混频到 mark/space 基带
         dphi_mark = 2.0 * math.pi * self.mark_hz / self.sample_rate
         dphi_space = 2.0 * math.pi * self.space_hz / self.sample_rate
         pm, ps = 0.0, 0.0
-        e_mi = [0.0] * n
-        e_mq = [0.0] * n
-        e_si = [0.0] * n
-        e_sq = [0.0] * n
+        nbits = int(n / spb)
+        bits = []
+        mi = mq = si = sq = 0.0
+        edge = int(spb)
         for i, s in enumerate(samples):
-            e_mi[i] = s * math.cos(pm)
-            e_mq[i] = s * math.sin(pm)
-            e_si[i] = s * math.cos(ps)
-            e_sq[i] = s * math.sin(ps)
+            # 正交混频到 mark/space 基带，并在当前 bit 窗口内累加
+            mi += s * math.cos(pm)
+            mq += s * math.sin(pm)
+            si += s * math.cos(ps)
+            sq += s * math.sin(ps)
             pm += dphi_mark
             ps += dphi_space
             if pm > 2 * math.pi:
                 pm -= 2 * math.pi
             if ps > 2 * math.pi:
                 ps -= 2 * math.pi
-
-        # 按 bit 周期计算正交能量 |I+jQ|^2，判决 mark(1)/space(0)
-        # 先用固定步长满采，再做帧同步
-        nbits = int(n / spb)
-        bits = []
-        for k in range(nbits):
-            i0 = int(k * spb)
-            i1 = int((k + 1) * spb)
-            mi = sum(e_mi[i0:i1])
-            mq = sum(e_mq[i0:i1])
-            si = sum(e_si[i0:i1])
-            sq = sum(e_sq[i0:i1])
-            e_mark = mi * mi + mq * mq
-            e_space = si * si + sq * sq
-            bits.append(1 if e_mark > e_space else 0)
+            if i + 1 >= edge and len(bits) < nbits:
+                e_mark = mi * mi + mq * mq
+                e_space = si * si + sq * sq
+                bits.append(1 if e_mark > e_space else 0)
+                mi = mq = si = sq = 0.0
+                edge = int((len(bits) + 1) * spb)
 
         # 帧同步：找 start bit (0)，然后取 5 data bits (LSB first)，跳 stop
         syms = []
@@ -586,9 +590,14 @@ class FeldHellDecoder:
         self.carrier_hz = carrier_hz
         self.spc = sample_rate / column_rate  # samples per column
 
-    def modulate_text(self, text: str) -> List[float]:
-        """文本 -> 振幅键控音频波形（每列按字体列位图调制载波幅度）。"""
-        out = []
+    def modulate_text(self, text: str) -> array:
+        """文本 -> 振幅键控音频波形（每列按字体列位图调制载波幅度）。
+
+        波形用 ``array('d')``：FeldHell 每字符 14 列 × 457 采样，1 万字符
+        就是 6400 万采样；Python float 列表约 32 字节/采样（GB 级），
+        定长数组 8 字节/采样。
+        """
+        out = array("d")
         dphi = 2.0 * math.pi * self.carrier_hz / self.sample_rate
         ph = 0.0
         spc = self.spc
@@ -610,19 +619,28 @@ class FeldHellDecoder:
 
         包络检波：整流+列内平均。检波后的峰值 = 2/π × 调制幅度，
         这里按列内最大幅度归一化恢复 0..1 亮度。
+
+        全程流式：不构造与波形等长的 ``[abs(s)]`` 列表（那会让长文本
+        再翻一倍内存），峰值与列均值两遍扫描共用同一份波形数据。
         """
         n = len(samples)
-        env = [abs(s) for s in samples]
-        # 找全局峰值用于归一化（标准 FeldHell 全亮列 = amp=1）
-        peak = max(env) if env else 1.0
+        peak = 0.0
+        for s in samples:
+            a = -s if s < 0 else s
+            if a > peak:
+                peak = a
         if peak < 1e-6:
             peak = 1.0
         n_cols = int(round(n / self.spc))
         matrix = []
         for c in range(n_cols):
             start = int(round(c * self.spc))
-            end = int(round((c + 1) * self.spc))
-            col_env = sum(env[start:end]) / max(1, end - start)
+            end = min(n, int(round((c + 1) * self.spc)))
+            total = 0.0
+            for i in range(start, end):
+                s = samples[i]
+                total += -s if s < 0 else s
+            col_env = total / max(1, end - start)
             # 归一化：检波平均 = amp * 2/π，还原 amp = avg / (2/π)
             amp = col_env / (2.0 / math.pi)
             amp = min(1.0, amp / peak) if peak > 0 else 0.0
@@ -701,18 +719,19 @@ def register_fldigi_modes_tools(registry) -> None:
     from .tool_registry import ToolResult
 
     def _too_long(text: str, tool: str):
-        """文本往返工具的输入上限（P13 挂死收口，实测曲线见 docs/code-guards.md）。
+        """文本往返工具的输入上限（P13 挂死/内存收口，实测曲线见 docs/code-guards.md）。
 
-        feldhell 的耗时随长度超线性增长（1 万字符约 24s、2 万约 65s），
-        psk31/rtty 近似线性但仍受 Python 调制解调吞吐限制。单次上限取
-        1 万字符：真实业余文本远小于此，超限给结构化错误，不挂死、不截断。
+        三个解码器耗时与峰值内存都随字符数线性增长（非 O(n²)），
+        单次上限取 3000 字符（理由见 MAX_ROUNDTRIP_TEXT 注释），
+        超限给结构化错误，不截断、不闷头计算。
         """
         if len(text) <= MAX_ROUNDTRIP_TEXT:
             return None
         return ToolResult(
             success=False,
             content=(f"{tool}: 输入文本 {len(text)} 字符，超过单次上限 "
-                     f"{MAX_ROUNDTRIP_TEXT} 字符。请分段后重试。"),
+                     f"{MAX_ROUNDTRIP_TEXT} 字符（超出会线性吃内存与耗时）。"
+                     f"请分段后重试。"),
             error="param_out_of_range",
             data={"param": "text", "length": len(text),
                   "limit": MAX_ROUNDTRIP_TEXT},
@@ -804,18 +823,24 @@ def register_fldigi_modes_tools(registry) -> None:
     )
     registry.register(
         name="psk31_decode",
-        description="PSK31 DBPSK 往返：文本→Varicode→BPSK 调制→差分解调→Varicode 解码",
+        description=("PSK31 DBPSK 往返：文本→Varicode→BPSK 调制→差分解调→Varicode 解码。"
+                     f"单次文本上限 {MAX_ROUNDTRIP_TEXT} 字符，超限返回 param_out_of_range。"),
         parameters={"type": "object", "properties": {
-            "text": {"type": "string", "description": "测试文本，默认 Hello"}
+            "text": {"type": "string",
+                     "description": (f"测试文本（ASCII），默认 Hello；单次上限 "
+                                     f"{MAX_ROUNDTRIP_TEXT} 字符，超出直接结构化拒绝")}
         }, "required": ["text"]},
         handler=_psk31_decode,
         category="digital_mode",
     )
     registry.register(
         name="rtty_decode",
-        description="RTTY 往返：文本→ITA-2→2FSK(170Hz/45.45baud)→非相干检测→ITA-2 解码",
+        description=("RTTY 往返：文本→ITA-2→2FSK(170Hz/45.45baud)→非相干检测→ITA-2 解码。"
+                     f"单次文本上限 {MAX_ROUNDTRIP_TEXT} 字符，超限返回 param_out_of_range。"),
         parameters={"type": "object", "properties": {
-            "text": {"type": "string", "description": "测试文本（大写），默认 HELLO"}
+            "text": {"type": "string",
+                     "description": (f"测试文本（大写），默认 HELLO；单次上限 "
+                                     f"{MAX_ROUNDTRIP_TEXT} 字符，超出直接结构化拒绝")}
         }, "required": ["text"]},
         handler=_rtty_decode,
         category="digital_mode",
@@ -831,9 +856,12 @@ def register_fldigi_modes_tools(registry) -> None:
     )
     registry.register(
         name="feldhell_decode",
-        description="FeldHell 慢扫描文本往返：文本→7x14 字体 AM 调制→包络检波→字符匹配",
+        description=("FeldHell 慢扫描文本往返：文本→7x14 字体 AM 调制→包络检波→字符匹配。"
+                     f"单次文本上限 {MAX_ROUNDTRIP_TEXT} 字符，超限返回 param_out_of_range。"),
         parameters={"type": "object", "properties": {
-            "text": {"type": "string", "description": "测试文本，默认 HELLO"}
+            "text": {"type": "string",
+                     "description": (f"测试文本，默认 HELLO；单次上限 "
+                                     f"{MAX_ROUNDTRIP_TEXT} 字符，超出直接结构化拒绝")}
         }, "required": ["text"]},
         handler=_feldhell_decode,
         category="digital_mode",

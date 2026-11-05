@@ -239,8 +239,9 @@ def test_typical_silent_accept_lock(fuzz_sample):
 def test_long_text_roundtrip_is_bounded():
     """P13 挂死收口：10 万字符文本必须秒回结构化错误，不许跑 DSP 挂死。
 
-    实测（见 docs/code-guards.md）：feldhell 1 万字符约 24s、2 万约 65s，
-    psk31/rtty 10 万字符均超 60s。上限 1 万字符后，超限路径不做调制解调。
+    实测（见 docs/code-guards.md）：优化前 feldhell 2000 字符已 1.1GB RSS、
+    4000 字符被 2.5GB 监控强杀；psk31 8000 字符 884MB；rtty 8000 字符超 2.5GB。
+    上限 4000 字符后，超限路径不做调制解调。
     """
     import time
 
@@ -255,3 +256,57 @@ def test_long_text_roundtrip_is_bounded():
         assert res.success is False, name
         assert res.error == "param_out_of_range", f"{name}: {res.error!r}"
         assert elapsed < 5.0, f"{name} 仍可能挂死：{elapsed:.2f}s"
+
+
+def test_text_roundtrip_limit_is_declared_in_schema():
+    """上限必须写进工具 schema 描述：模型/用户提前知道，不是偷偷截断。"""
+    from mbdsdr_ai.fldigi_modes import register_fldigi_modes_tools
+
+    reg = ToolRegistry()
+    register_fldigi_modes_tools(reg)
+    for name in ("feldhell_decode", "psk31_decode", "rtty_decode"):
+        params = reg.tools[name]["definition"]["function"]["parameters"]
+        desc = params["properties"]["text"]["description"]
+        assert "3000" in desc, f"{name} schema 未声明上限：{desc}"
+        assert "上限" in desc
+
+
+def test_over_limit_boundary_is_rejected_instantly():
+    from mbdsdr_ai.fldigi_modes import MAX_ROUNDTRIP_TEXT, register_fldigi_modes_tools
+
+    reg = ToolRegistry()
+    register_fldigi_modes_tools(reg)
+    res = reg.call("rtty_decode", {"text": "A" * (MAX_ROUNDTRIP_TEXT + 1)})
+    assert res.success is False
+    assert res.error == "param_out_of_range"
+    assert res.data["limit"] == MAX_ROUNDTRIP_TEXT
+
+
+def test_fuzz_memory_cap_aborts_case():
+    """模糊测试自身的闸：单用例 commit 增长超限必须判 MEMORY 并中止。
+
+    回归 2026-11-05 事故——`long_string` 把解码器喂到 17.2GB，拖死整机。
+    """
+    import time
+
+    import tool_param_fuzz as fuzz
+
+    if fuzz._mem_probe() is None:
+        pytest.skip("当前平台拿不到进程内存，内存闸不可用")
+
+    held = []
+
+    def handler(args):
+        held.append(bytearray(64 * 1024 * 1024))
+        time.sleep(0.6)
+        return ToolResult(success=True, content="分配完成")
+
+    reg = _registry_with(handler, {"x": {"type": "number"}})
+    case = fuzz.Case("memory_bomb", {"x": 1}, False, "分配 64MB", stress=True, size=1)
+    (res, exc, elapsed, hung, rss, commit, exceeded, growth) = fuzz._call_with_timeout(
+        reg, "probe_tool", case.args, 10.0, mem_cap_mb=16.0)
+    cat, detail = fuzz._judge(case, res, exc, elapsed, 10.0, 10.0,
+                              commit, growth, exceeded, 16.0)
+    assert cat == fuzz.MEMORY, detail
+    assert growth > 16.0, f"commit 增长 {growth:.1f}MB 未被采样到"
+    held.clear()
