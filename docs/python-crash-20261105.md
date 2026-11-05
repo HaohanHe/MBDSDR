@@ -301,3 +301,107 @@ python -u scripts\tool_param_fuzz.py --only feldhell_decode psk31_decode rtty_de
 - **安全阀**：不要无上限跑（本机 commit 上限 38.1 GB，跑满会连累同机其它 python 进程崩溃）。建议给子进程套 4 GB 的 Windows Job Object 内存上限，或外部 RSS 采样到 8 GB 即 kill；复跑时也不要同时跑 pytest Qt 用例。
 - 环境：`QT_QPA_PLATFORM=offscreen`、`MBDSDR_NULL_AUDIO=1`、`MBDSDR_NO_HW=1`、`MBDSDR_OFFLINE=1`；`MBDSDR_FUZZ_VERBOSE=1` 可看每工具进度。
 - 已知登记：`docs/limitations-register.md` 已记"10 万字符文本在纯 Python 文本调制/解调器上超过 60s 预算"。
+
+## 10. 中断/强杀 0xC0000005 归因复核（2026-11-05 第二轮，全部实测）
+
+**一句话**：附 I 的因果（“`KeyboardInterrupt` 越过 Qt 边界 → 0xC0000005”）**无法复现、且与实测相反**；能稳定复现的 0xC0000005 是“**进程被强制结束（或在此刻 dump 栈）时 PySide/shiboken 仍持有活对象**”，与 Ctrl+C 无关。两者 WER 偏移也不同，不能混为一谈。
+
+环境：Python 3.14.0 / PySide6(Qt) 6.12.0；每次实验都设 `QT_QPA_PLATFORM=offscreen`、`MBDSDR_NULL_AUDIO=1`、`MBDSDR_NO_HW=1`、`MBDSDR_OFFLINE=1`。
+
+### 10.1 实验 1：把中断扔进 Qt 回调——一次也没有崩
+
+| 注入方式（信号） | Qt 边界 | 次数 | 退出码 | 现象 |
+| --- | --- | --- | --- | --- |
+| `_thread.interrupt_main()`（槽直指 C 函数，避免 Python 包装帧先接管） | `MainWindow.eventFilter` | 3 | 0 / 0 / 0 | PySide 打印一行 `Error calling Python override of QMainWindow::eventFilter(): KeyboardInterrupt`，事件循环继续跑 |
+| 同上 | 裸 `QWidget.eventFilter` | 2 | 0 / 0 | 同上或被静默吞掉，进程继续 |
+| `signal.raise_signal(SIGINT)`（进程内等价 Ctrl+C 送达） | `eventFilter` | 2 | 0 / 0 | 同上 |
+| `raise KeyboardInterrupt` | `QTimer` 槽 | 2 | 0 / 0 | 同上 |
+| 中断恰好打在**唯一的退出回调**（单次 `singleShot(quit)`） | `QTimer` 槽 | 2 | 进程 15 s 不退出，外部强杀 | 中断把 `app.quit()` 吃掉，事件循环永不返回——**这是“Ctrl+C 看起来没反应”的真实原因**，不是崩溃 |
+
+结论：PySide6 6.12 在 Python 覆盖点上会捕获异常并打印，**不会越过 C++ 边界**；`KeyboardInterrupt` 不构成 0xC0000005 的触发条件。
+
+### 10.2 实验 2：0xC0000005 的真实可复现触发（与中断无关）
+
+| 场景 | 次数 | 结果 |
+| --- | --- | --- |
+| `MainWindow` 存活（空闲）→ 另一个线程 `os._exit(7)` | 6 | **4 次 0xC0000005**，2 次 7 |
+| 裸 `QWidget` 存活 → `os._exit(7)`（含带 QThread 的变体） | 8 | 全部 7，无崩溃 |
+| `MainWindow` 存活 → 另一线程循环 `faulthandler.dump_traceback()` | 3 | **2 次 0xC0000005**（dump 打印完才崩） |
+| 同上，但**完全不注入中断**（KI=0） | 2 | **1 次 0xC0000005** |
+| 旧探针 4（dump + `os._exit(4)`） | 1 | 0xC0000005 |
+| 旧探针 5（仅 `os._exit(4)`，无 dump） | 1 | 4（正常） |
+
+即：**强退本身就会崩（约 2/3 概率）**，`faulthandler.dump_traceback()` 只是更早踩中同一时刻；KI 加不加都不影响结果。
+
+### 10.3 WER 签名：两个不同的崩溃点
+
+`Get-WinEvent -LogName Application -ProviderName "Application Error"`（近 8 h，python.exe）：
+
+| 时间 | 模块 + 偏移 | 代码 | 归属 |
+| --- | --- | --- | --- |
+| 15:54–16:39（6 次） | `pyside6.abi3.dll +0x1c91e` | c0000005 | 附 I 记录的旧签名 |
+| 16:20–17:31（4 次）+ 20:09–20:24（13 次） | `shiboken6.abi3.dll +0x2fe08` | c0000005 | 本轮“强退/dump”复现出来的签名 |
+
+**本轮没有复现出 `pyside6 +0x1c91e`**。所以“同一步骤在 `bbc46e1` 复现出完全相同的退出码与栈”这句话只对“退出码=0xC0000005”成立，**模块/偏移并不相同**，不能当作同一根因证据。
+
+### 10.4 触发条件三要素（修正版）
+
+| 要素 | 附 I 的原判 | 本轮实测 |
+| --- | --- | --- |
+| 哪个信号 | SIGINT / KeyboardInterrupt | **不需要信号**：KI=0 也崩；注入 KI 反而不崩 |
+| 哪个 Qt 边界 | `QObject::eventFilter` 的 Python 覆盖点，异常出栈 | **进程级强制结束**（`ExitProcess`/`os._exit`/`TerminateProcess`/看门狗 kill）；或在该时刻做 `faulthandler.dump_traceback()` 遍历线程 |
+| 哪个 Python 栈帧 | `desktop/main_window.py::eventFilter` | **没有稳定栈帧**。faulthandler 把“当前线程= dump 线程”却列出 MainThread 的 `eventFilter` 帧，是**错帧**，不能作归因证据 |
+
+### 10.5 用户侧关窗路径实测（5 条，全部干净）
+
+每行都是真实构造 `MainWindow()` → 进入状态 → 关窗 → `app.exec()` 返回后检查 `threading.enumerate()`。
+硬件缺失，录音/发射用**合成后端/假会话**（不产生真实射频），只验证关窗拆路径。
+
+| 关闭时用户场景 | 模拟方式 | 退出码 | 残留非主线程 |
+| --- | --- | --- | --- |
+| 空闲 | 直接 `close()` | 0 | 无 |
+| 正在录音 | 合成后端 + `_apply_recording(True)`（真实打开流句柄），模拟点“保存并退出” | 0 | 无 |
+| 正在回放/解码文件 | 合成 1 MB cf32 + `_replay_recording()`（`_replay_timer` 在跑） | 0 | 无 |
+| 设备已拔出 | 录制中后端 `connected=False` → `_teardown_connection()` | 0 | 无 |
+| 正在发射 | 假 `_tx_session` + 运行中的 `_tx_thread`，关窗走 `_stop_tx(wait=True)` | 0 | 无（取消原因“断开连接”，线程已 join） |
+
+录音行说明：合成后端没有数据流，全程 0 样本，收尾按 S7 规则删除空文件（不残留空 .iq），状态栏无报错。
+**未测**：真实硬件拔插、真实发射（需要设备 + `MBDSDR_TX_BANDS`）；本轮不把“用户路径干净”外推到真机。
+
+### 10.6 修法候选（各实测 2 轮）
+
+| 候选 | 做法 | 退出码 | 残留线程 | “Error calling Python override” | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 基线 | 无 | 0 | 无 | **1 条** | 中断被吞，事件循环继续；退出靠别的回调 |
+| ① | `eventFilter` 外层 `try/except BaseException: return False` | 0 | 无 | 1 条（最小控件上 0 条） | 机制可行（异常不再出界），但**只覆盖 `eventFilter`**，覆盖不到其它回调；且本轮**未落地**——`desktop/main_window.py` 是另一条线的未提交改动，按纪律不动 |
+| ② | `desktop/main.py::_install_sigint_graceful_quit()`：`signal.SIGINT` 只置标志 + 0.2 s `QTimer` 调 `app.quit()` | **0** | **无** | **0 条** | **已落地**（仅入口文件）；同时消除“中断吃掉退出回调 → Ctrl+C 没反应/卡死” |
+
+②的其它行为：`pythonw`/打包版无控制台 → 收不到 SIGINT，行为不变；只在 `python desktop/main.py` 的开发场景生效。
+
+### 10.7 最小复现脚本（任何人可跑；本轮用完已删）
+
+```python
+# repro_forced_exit_mw.py —— 期望：连跑 6 次，≥3 次退出码 0xC0000005
+import os, sys, threading, time
+os.environ.update(QT_QPA_PLATFORM="offscreen", MBDSDR_NULL_AUDIO="1",
+                 MBDSDR_NO_HW="1", MBDSDR_OFFLINE="1")
+sys.path[:0] = [r"d:\mbdsdr\MBDSDR", r"d:\mbdsdr\MBDSDR\desktop"]
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
+app = QApplication(sys.argv[:1])
+from main_window import MainWindow
+w = MainWindow(); w.show()
+threading.Thread(target=lambda: (time.sleep(3.0), os._exit(7)), daemon=True).start()
+QTimer.singleShot(30000, app.quit)
+app.exec()
+```
+
+判读：单次不保证崩（实测 4/6），**不能用“某一次跑出 0”判定不存在**；Windows: `$LASTEXITCODE` / `ERRORLEVEL` 为 `-1073741819`（= 0xC0000005）。
+对照脚本（不应崩）：把 `MainWindow()` 换成 `QWidget()`，8/8 退出 7。
+
+### 10.8 未验证 / 边界（不得当结论）
+
+- **真实控制台 Ctrl+C 未能自动送达**：`CREATE_NEW_CONSOLE` + `AttachConsole` + `GenerateConsoleCtrlEvent` 返回成功，但连一个普通 `for` 循环脚本都没被打断（子进程继续打印）。本机/当前会话限制，真实 Ctrl+C 只能用人工在窗口按；本轮的“SIGINT”结论来自 `_thread.interrupt_main()` 与 `signal.raise_signal(SIGINT)` 两种进程内等价路径。
+- **`pyside6 +0x1c91e` 的原始触发条件仍未还原**（15:54–16:39 的 6 次事件）：没有留下当时的命令行/脚本，不能用现有探针反推。
+- `shiboken6 +0x2fe08` 与 `pyside6 +0x1c91e` 是否同一根因**未证实**；只证实两者都是“Qt/PySide 活对象在进程收尾期被访问”的外观。
+

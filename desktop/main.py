@@ -343,6 +343,43 @@ def _check_record_dir_async(window) -> None:
     probe_dir_writable_async(record_dir, _on_result)
 
 
+def _install_sigint_graceful_quit(app):
+    """把控制台 Ctrl+C（SIGINT）转成优雅退出，而不是抛进 Qt 回调里。
+
+    默认行为是 KeyboardInterrupt 在某个 Python 回调（eventFilter/定时器槽）里
+    抛出：PySide 只打印一行 "Error calling Python override ..."，事件循环继续跑，
+    看上去 Ctrl+C 没反应；若恰好打断的是"退出"回调，退出动作也会被吃掉。
+    这里注册自定义处理器，只置标志，由 0.2s 轮询的 QTimer 调 app.quit()，
+    让中断不以异常形式越过任何 Qt/Python 边界。
+    """
+    import signal
+
+    from PySide6.QtCore import QTimer
+
+    pending = {"flag": False}
+
+    def _on_sigint(signum, frame):
+        pending["flag"] = True
+        print("\n[mbdsdr] 收到 Ctrl+C，正在优雅退出…", file=sys.stderr)
+
+    try:
+        signal.signal(signal.SIGINT, _on_sigint)
+    except (ValueError, OSError):
+        return  # 非主线程/不支持信号：保持原行为
+
+    timer = QTimer(app)
+    timer.setInterval(200)
+
+    def _poll():
+        if pending["flag"]:
+            timer.stop()
+            app.quit()
+
+    timer.timeout.connect(_poll)
+    timer.start()
+    app._sigint_graceful_timer = timer  # 保活：避免被回收后轮询消失
+
+
 def main():
     # pythonw.exe 无控制台：必须在任何 print / argparse --help 之前兜底 stdio
     _ensure_stdio_for_pythonw()
@@ -439,6 +476,10 @@ def main():
         QTimer.singleShot(500, lambda: window._connect_real(mcp_host, mcp_port))
 
     window.show()
+
+    # 控制台 Ctrl+C 走优雅退出（SIGINT→退出标志→QTimer 收口），
+    # 不让 KeyboardInterrupt 抛进 Qt 回调里被吞掉。
+    _install_sigint_graceful_quit(app)
 
     # 启动自检：运行期 DLL（缺件给「缺运行库：x」而不是 0xC0000135），
     # 以及录音目录的后台可写探测（不阻塞主线程，失败进状态栏）。
