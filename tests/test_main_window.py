@@ -45,7 +45,48 @@ def _pump(app, ms=60):
 
 
 @pytest.fixture(scope="module")
-def main_window(qapp):
+def isolated_persisted_state(tmp_path_factory):
+    """隔离跨运行持久化状态，保证本模块在任何机器/任何跑测顺序下同构。
+
+    以前这里直接吃用户真机的 ``three_column_sizes``/``window_geometry``：
+    天空槽尺寸随用户上次保存的布局变化（敌对环境实测 1164×536），而天空
+    视图底部是否被地景剪影覆盖又取决于用户持久化的观测站坐标——于是
+    "单独跑绿、跟前面用例一起跑红"。
+
+    两处都重定向/清空：
+      * QSettings 布局三键（窗口几何 + 三栏比例）→ 清空，teardown 还原；
+      * DesktopSettings（app_mode 等）→ 指向临时文件，不再继承真机
+        ``app_mode=planetarium`` 等状态。
+    """
+    from PySide6.QtCore import QSettings
+    import settings as settings_mod
+
+    qs = QSettings("MBDSDR", "Desktop")
+    keys = ("window_geometry", "three_column_sizes",
+            "three_column_layout_version")
+    backup = {k: qs.value(k) for k in keys}
+    for k in keys:
+        qs.remove(k)
+    qs.sync()
+
+    mp = pytest.MonkeyPatch()
+    tmp_settings = (tmp_path_factory.mktemp("desktop_settings")
+                    / "desktop_settings.json")
+    mp.setattr(settings_mod, "default_config_path", lambda: str(tmp_settings))
+    try:
+        yield
+    finally:
+        mp.undo()
+        for k, v in backup.items():
+            if v is None:
+                qs.remove(k)
+            else:
+                qs.setValue(k, v)
+        qs.sync()
+
+
+@pytest.fixture(scope="module")
+def main_window(qapp, isolated_persisted_state):
     from main_window import MainWindow
     w = MainWindow()
     w.show()
@@ -211,9 +252,11 @@ class TestRoadBCInterfaces:
 class TestPersistence:
     """QSettings 持久化窗口几何 + splitter 比例。"""
 
-    def test_save_and_restore_window_state(self, main_window, tmp_path, monkeypatch):
+    def test_save_and_restore_window_state(self, main_window):
+        # 隔离由 isolated_persisted_state 负责（清空三键、模块结束还原）；
+        # 以前这里 monkeypatch.setenv("HOME") 在 Windows 上对 QSettings
+        # 注册表无效，看起来隔离了其实没有。
         from PySide6.QtCore import QSettings
-        monkeypatch.setenv("HOME", str(tmp_path))
         s = QSettings("MBDSDR", "Desktop")
         main_window._main_splitter.setSizes([280, 600, 380])
         main_window._save_window_state()
@@ -225,6 +268,17 @@ class TestPersistence:
 # ---------------------------------------------------------------------------
 class TestPlanetariumSkyVisibility:
     """星象仪形态：从非当前页签进形态，天空不得整片黑（hidden 标记须清）。"""
+
+    # 地景剪影色（夜三层 ground_far/mid/near + 昼 ground_shadow_day）。
+    # 星象仪入口 enter_horizon_view() 朝地平看，_draw_landscape 从剪影轮廓
+    # 一直填到控件底边——底部出现这些颜色是正常构图，不是"黑边"缺陷。
+    _GROUND_RGB = ((12, 19, 32), (7, 12, 21), (3, 6, 12), (58, 74, 90))
+
+    @classmethod
+    def _is_ground(cls, color) -> bool:
+        rgb = (color.red(), color.green(), color.blue())
+        return any(max(abs(rgb[i] - g[i]) for i in range(3)) <= 2
+                   for g in cls._GROUND_RGB)
 
     def test_enter_from_non_sky_tab_clears_hidden(self, main_window, qapp):
         lt = main_window.left_tab
@@ -248,23 +302,63 @@ class TestPlanetariumSkyVisibility:
         assert lt.indexOf(main_window.sky_view) >= 0, "退出后天空应归位左栏"
 
     def test_planetarium_sky_paints_not_black_void(self, main_window, qapp):
-        """像素级守卫：星象仪天空必须真画出夜空渐变，而非纯黑空槽。"""
+        """像素级守卫：星象仪天空必须真画出夜空，而非纯黑空槽。
+
+        产品口径：天空槽尺寸由用户保存的三栏比例决定（任何比例都合法，
+        视图按比例自适应）；星象仪入口朝地平看，底部被地景剪影覆盖属
+        设计构图。所以断言分两支：
+          * 底部是地景 → 只要证明中段天空确实亮于地景（天空层画了）；
+          * 底部是天空 → 保留"地平方向比天顶亮"的夜景渐变判据。
+        """
         lt = main_window.left_tab
         sky_idx = lt.indexOf(main_window.sky_view)
         other = next(i for i in range(lt.count()) if i != sky_idx)
         lt.setCurrentIndex(other)
         _pump(qapp, 50)
+        # 钉住几何（窗口尺寸 + 三栏比例）与中性示例观测站：这两项以前都
+        # 来自用户持久化状态（布局尺寸 / gui_config 观测站），导致跑测顺序
+        # 与个人环境决定"底部是天空还是地景"。
+        main_window.resize(1200, 792)
+        main_window._main_splitter.setSizes([392, 300, 300])
+        sky = main_window.sky_view
+        old_observer = getattr(sky, "_observer", None)
+        sky.set_observer(0.0, 0.0)  # 中性示例站点，不写死真实坐标
+        _pump(qapp, 50)
         try:
             main_window.set_app_mode("planetarium")
             _pump(qapp, 50)
-            img = main_window.sky_view.grab().toImage()
-            assert img.width() > 50 and img.height() > 50
-            top = img.pixelColor(img.width() // 2, 4)
-            bot = img.pixelColor(img.width() // 2, img.height() - 4)
-            # 夜空渐变本质：地平方向比天顶亮；纯黑空槽两者相等且为 0。
-            assert bot.lightness() > top.lightness(), \
-                f"星象仪天空疑似黑空槽: top={top.getRgb()} bot={bot.getRgb()}"
+            img = sky.grab().toImage()
+            w, h = img.width(), img.height()
+            assert w > 50 and h > 50
+            top = img.pixelColor(w // 2, 4)
+            mid = img.pixelColor(w // 2, h // 2)
+            bot = img.pixelColor(w // 2, h - 4)
+
+            # 1) 真·黑空槽（hidden 标记未清的旧 bug）：整片没有任何被绘制的像素
+            grid = [img.pixelColor(int(w * fx), int(h * fy))
+                    for fx in (0.1, 0.5, 0.9)
+                    for fy in (0.05, 0.3, 0.6, 0.95)]
+            assert any(c.lightness() > 0 for c in grid), \
+                "星象仪天空疑似纯黑空槽（整片无像素被绘制）"
+
+            # 2) 底部是地景还是天空，都要求"天空层真的画出来"
+            if self._is_ground(bot) or self._is_ground(
+                    img.pixelColor(w // 2, h - 1)):
+                assert mid.lightness() > bot.lightness() + 2, \
+                    ("底部已是地景剪影，但中段与地景同色 → 疑似空槽: "
+                     f"mid={mid.getRgb()} bot={bot.getRgb()}")
+            else:
+                # 无地景时，夜空渐变本质：地平方向比天顶亮。
+                assert bot.lightness() > top.lightness(), \
+                    (f"星象仪天空疑似黑空槽: top={top.getRgb()} "
+                     f"bot={bot.getRgb()}")
         finally:
+            if old_observer:
+                sky.set_observer(old_observer.get("lat"),
+                                 old_observer.get("lon"),
+                                 old_observer.get("alt_m", 0.0))
+            else:
+                sky.set_observer(None, None)
             main_window.set_app_mode("ide")
             main_window.showNormal()
             main_window.show()
