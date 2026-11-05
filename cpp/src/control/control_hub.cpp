@@ -1455,6 +1455,16 @@ QJsonObject ControlHub::cmdGetScanLinkStatus(const QJsonObject&) {
 QJsonObject ControlHub::cmdSetSquelch(const QJsonObject& a) {
     QJsonObject o = okBase();
     o["command"] = "set_squelch";
+    // domain 表示这个请求值的语义：margin=余量刻度、auto=自动跟踪，
+    // 两者都不是绝对门。若同时带 threshold_db，会把余量值当绝对门下发
+    // （Python 侧刚修好的病会被复制到这条路径），因此显式拒绝。
+    const QString domain = a.value(QStringLiteral("domain")).toString();
+    if ((domain == QStringLiteral("margin") || domain == QStringLiteral("auto"))
+        && a.value(QStringLiteral("threshold_db")).isDouble()) {
+        return errResult(QString::fromUtf8(
+            "domain=%1 时不允许下发 threshold_db（余量/自动值不是绝对门）")
+            .arg(domain));
+    }
     bool has = false;
     const QJsonValue en = a.value(QStringLiteral("enabled"));
     if (en.isBool()) { engine_->setSquelchEnabled(en.toBool()); o["enabled"] = en.toBool(); has = true; }
@@ -1481,6 +1491,12 @@ QJsonObject ControlHub::cmdGetSquelchStatus(const QJsonObject&) {
     o["threshold_db"] = engine_->squelchThresholdDb();
     o["auto"] = engine_->squelchAuto();
     o["open"] = engine_->squelchOpen();
+    // 让界面知道"现在是哪套在生效"：关闭= none；自动跟踪= cpp-auto；
+    // 手动绝对门= cpp-manual。与 Python 侧 desktop-margin 区分来源。
+    o["squelch_applied_by"] = !engine_->squelchEnabled()
+        ? QStringLiteral("none")
+        : (engine_->squelchAuto() ? QStringLiteral("cpp-auto")
+                                  : QStringLiteral("cpp-manual"));
     return o;
 }
 

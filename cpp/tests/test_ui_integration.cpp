@@ -603,6 +603,18 @@ void TestUiIntegration::squelchAutoFollowsSameDomainFloor() {
         double(tokens::kSquelchMinDb), double(tokens::kSquelchMaxDb));
     QVERIFY2(std::abs(v - int(std::round(expected))) <= 2,
              "auto gate must set slider to floor(real audio-RMS domain) + margin");
+
+    // 勾自动后：引擎真处于 auto，滑杆禁用；程序化改滑杆值不得关掉 auto
+    // （旧实现 valueChanged 会 setSquelchThreshold，静默把 auto 置 false）。
+    QVERIFY(win.engine()->squelchAuto());
+    QVERIFY2(!slider->isEnabled(), "自动档下滑杆必须禁用，避免误以为在设余量");
+    slider->setValue(slider->value() + 1);
+    QVERIFY2(win.engine()->squelchAuto(), "自动档下改滑杆值不得关闭 auto");
+
+    // 切回手动：auto 关闭、滑杆恢复可用。
+    autoBtn->setChecked(false);
+    QVERIFY(!win.engine()->squelchAuto());
+    QVERIFY(slider->isEnabled());
 }
 
 // Wait until the engine's VFO snapshot has `n` channels. The UI refresh runs on

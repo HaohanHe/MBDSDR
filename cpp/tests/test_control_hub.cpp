@@ -68,6 +68,8 @@ private slots:
     // ---- Phase26: 21 newly tool-ized capabilities ------------------------
     void fftParamsLandAndSpectrumStatusReadsBack();
     void squelchSetLandAndStatusReadsBack();
+    // domain=margin/auto 时禁止 threshold_db；applied_by 区分 cpp-auto/manual/none。
+    void squelchDomainGuardsAndAppliedBy();
     void noiseBlankerSetLandAndStatusReadsBack();
     void ctcssSetLandOutOfRangeRejectedAndGate();
     void cdcssSetLandIllegalCodeRejectedAndGate();
@@ -589,6 +591,52 @@ void TestControlHub::squelchSetLandAndStatusReadsBack() {
     QVERIFY(r.value("ok").toBool());
     s = parseObj(hub.execute("get_squelch_status", {}));
     QCOMPARE(s.value("auto").toBool(), false);   // manual threshold disarmed auto
+}
+
+void TestControlHub::squelchDomainGuardsAndAppliedBy() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // 先落地一个已知的手动绝对门。
+    QJsonObject r = parseObj(hub.execute("set_squelch",
+        {{"enabled", true}, {"threshold_db", -60.0}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    const double before = eng.squelchThresholdDb();
+
+    // domain=margin 是余量刻度，不是绝对门；带 threshold_db 必须拒绝且不改门。
+    r = parseObj(hub.execute("set_squelch",
+        {{"domain", "margin"}, {"threshold_db", -30.0}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QVERIFY(!r.value("error").toString().isEmpty());
+    QCOMPARE(eng.squelchThresholdDb(), before);
+
+    // domain=auto 同理：自动值不得被当成绝对门下发给引擎。
+    r = parseObj(hub.execute("set_squelch",
+        {{"domain", "auto"}, {"threshold_db", -20.0}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QCOMPARE(eng.squelchThresholdDb(), before);
+
+    // domain=threshold 是绝对门语义，允许。
+    r = parseObj(hub.execute("set_squelch",
+        {{"domain", "threshold"}, {"threshold_db", -58.0}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+
+    // 手动门 → cpp-manual。
+    QJsonObject s = parseObj(hub.execute("get_squelch_status", {}));
+    QCOMPARE(s.value("squelch_applied_by").toString(), QStringLiteral("cpp-manual"));
+
+    // 自动跟踪 → cpp-auto。
+    r = parseObj(hub.execute("set_squelch", {{"auto", true}}));
+    QVERIFY(r.value("ok").toBool());
+    s = parseObj(hub.execute("get_squelch_status", {}));
+    QCOMPARE(s.value("squelch_applied_by").toString(), QStringLiteral("cpp-auto"));
+
+    // 关闭静噪 → none（无论是自动还是手动）。
+    r = parseObj(hub.execute("set_squelch", {{"enabled", false}}));
+    QVERIFY(r.value("ok").toBool());
+    s = parseObj(hub.execute("get_squelch_status", {}));
+    QCOMPARE(s.value("squelch_applied_by").toString(), QStringLiteral("none"));
 }
 
 // set_noise_blanker really flips the engine switch; get_noise_blanker_status

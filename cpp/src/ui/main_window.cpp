@@ -3066,6 +3066,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(squelchSlider_, &QSlider::valueChanged,
             this, [this](int v) {
                 squelchValue_->setText(QString("%1 dB").arg(v));
+                // 自动档下滑杆只是"读回显示"：写绝对门会静默
+                // squelchAuto_.store(false)，用户以为在设余量，实际把自动关了。
+                if (squelchAutoBtn_ && squelchAutoBtn_->isChecked()) return;
                 engine_->setSquelchThreshold(static_cast<float>(v));
             });
     connect(squelchCheck_, &QCheckBox::stateChanged, this, [this](int st) {
@@ -3093,6 +3096,10 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(squelchAutoBtn_, &QPushButton::toggled, this,
             [this, applyAutoThreshold](bool on) {
+        // 自动 = 引擎自己跟踪，滑杆只显示目标值，必须禁用以免用户误拖；
+        // 同时显式把 auto 交回引擎，否则勾选只是挪动滑杆、引擎并未自动。
+        if (engine_) engine_->setSquelchAuto(on);
+        if (squelchSlider_) squelchSlider_->setEnabled(!on);
         if (on) applyAutoThreshold();   // sample the current floor immediately
         scheduleSave();
     });
@@ -5844,7 +5851,12 @@ void MainWindow::restoreUiState() {
     engine_->setBandwidth(bwHz);
     engine_->onSetGain(static_cast<double>(gainSlider_->value()));
     engine_->setSquelchEnabled(sqlEn);
-    engine_->setSquelchThreshold(static_cast<float>(squelchSlider_->value()));
+    // 自动档恢复时不要写绝对门（setSquelchThreshold 会关掉 auto），
+    // 只把 auto 开关交给引擎；滑杆同步禁用。
+    squelchSlider_->setEnabled(!squelchAutoBtn_->isChecked());
+    if (!squelchAutoBtn_->isChecked())
+        engine_->setSquelchThreshold(static_cast<float>(squelchSlider_->value()));
+    engine_->setSquelchAuto(squelchAutoBtn_->isChecked());
 
     engine_->setDirectSampling(dsCombo_->currentIndex());
     engine_->setOffsetTuning(offsetChk_->isChecked());
