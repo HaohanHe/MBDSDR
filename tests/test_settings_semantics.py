@@ -191,6 +191,9 @@ class TestE2UnitsPresent:
         assert m.freq_spin.suffix().strip() == "MHz"
         assert m.bw_spin.suffix().strip() == "Hz"
         c = ControlPanel()
+        assert c.gain_val.text() == "—", "未连接时没有真实增益读数"
+        c.set_sdr_connected(True)
+        assert c.set_gain_applied(20.0) is True
         assert "dB" in c.gain_val.text()
         # 采样率档位文本自带单位（采样率量纲是 MS/s，不是 MHz）
         for i in range(c.sample_rate_combo.count()):

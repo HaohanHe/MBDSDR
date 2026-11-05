@@ -379,11 +379,12 @@ class TestNanIsEmptyNotFabricated:
     def test_control_panel_nan_gain_keeps_previous(self, mw, qapp):
         """回归钉扎：修复前 int(max(0, min(49, nan))) == 49，NaN 增益被显示成满增益。"""
         mw.control_panel.set_gain(20.0)
-        before = mw.control_panel.gain_val.text()
-        assert before.replace(" dB", "") == "20", "增益数值应按输入显示"
+        assert mw.control_panel.gain_slider.value() == 20, "增益意图应进滑杆"
+        assert mw.control_panel.gain_val.text() == "—", "未连接时不许人造读数"
         mw.control_panel.set_gain(NAN)
-        assert mw.control_panel.gain_val.text() == before, \
-            "NaN 增益必须保持原值，绝不静默夹到 49 dB"
+        assert mw.control_panel.gain_slider.value() == 20, \
+            "NaN 增益必须保持原滑杆值，绝不静默夹到 49 dB"
+        assert mw.control_panel.gain_val.text() == "—"
 
     def test_control_panel_nan_frequency_keeps_previous(self, mw, qapp):
         """回归钉扎：修复前 max(FREQ_MIN, min(FREQ_MAX, nan)) == FREQ_MAX(6 GHz)。"""

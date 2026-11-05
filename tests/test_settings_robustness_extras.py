@@ -221,7 +221,7 @@ def test_out_of_rtl_gain_range_restore_is_flagged(qapp, caplog):
             panel.set_gain(80.0)
 
         assert panel.gain_slider.value() == 49, "未连接时仍按 RTL 典型上限显示"
-        assert panel.gain_val.text() == "49 dB"
+        assert panel.gain_val.text() == "—", "未连接没有真实读数，不许写成 49 dB"
         tip = panel.gain_slider.toolTip()
         assert "⚠" in tip, "配置请求 80 dB 被夹到 49 dB 却没有任何可见提示"
         assert "80 dB" in tip and "49 dB" in tip, tip
@@ -245,6 +245,7 @@ def test_capability_gain_clamp_does_not_write_back_and_is_flagged(qapp, caplog):
     try:
         emitted = []
         panel.gain_changed.connect(emitted.append)
+        panel.set_sdr_connected(True)
         panel.set_gain(45.0)
         assert panel.gain_slider.value() == 45
 

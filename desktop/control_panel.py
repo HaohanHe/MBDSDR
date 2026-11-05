@@ -281,6 +281,14 @@ class ControlPanel(QWidget):
         for w in widgets:
             if w is not None:
                 w.setEnabled(self._sdr_connected)
+        # 读数标签：断开即清（不让上一个数字冒充当前增益）；连接后等真实回执。
+        # 滑杆位置保留配置意图，不随连接态归零。
+        self.gain_val.setText("—")
+        if self._sdr_connected:
+            self.gain_val.setToolTip("已连接：等待增益下发（滑杆位置=配置意图）")
+        else:
+            self.gain_val.setToolTip(
+                "未连接：没有真实增益读数；滑杆位置是上次配置，未施加")
         # 后端未报告采样率范围时，即便已连接也不能把说明项当成可选项
         if (self._sdr_connected and self.sample_rate_combo.count()
                 and self.sample_rate_combo.itemData(0) is None):
@@ -547,9 +555,11 @@ class ControlPanel(QWidget):
         self._gain_base_tip = self.gain_slider.toolTip()
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
         gain_row.addWidget(self.gain_slider)
-        self.gain_val = QLabel("0 dB")
+        self.gain_val = QLabel("—")
         self.gain_val.setMinimumWidth(36)
         self.gain_val.setMaximumWidth(80)
+        self.gain_val.setToolTip(
+            "未连接：没有真实增益读数；滑杆位置是上次配置，未施加")
         gain_row.addWidget(self.gain_val)
         rx_layout.addLayout(gain_row)
 
@@ -894,6 +904,7 @@ class ControlPanel(QWidget):
 
     def _on_gain_changed(self, db: int):
         self.gain_val.setText(f"{db} dB")
+        self.gain_val.setToolTip("已连接：增益请求已下发，等待设备回执")
         # 用户手动调增益即采纳当前值，清掉恢复/收放期"配置请求被替换"提示
         self.gain_slider.setToolTip(self._gain_base_tip)
         self.gain_changed.emit(db)
@@ -1207,11 +1218,14 @@ class ControlPanel(QWidget):
         self._gain_base_tip = base
         self.gain_slider.setToolTip(base)
         if applied != requested:
-            self.gain_val.setText(f"{applied} dB")
             hint = (f"当前增益 {requested} dB 超出所连设备能力 [{lo}, {hi}] dB，"
                     f"已按 {applied} dB 显示（配置文件未改）")
             logger.warning("%s", hint)
             self.gain_slider.setToolTip(f"{base}\n⚠ {hint}")
+            # 标签是读数：已连接才写设备真实值；未连接保持「—」，不编造。
+            if self._sdr_connected:
+                self.gain_val.setText(f"{applied} dB")
+                self.gain_val.setToolTip(f"⚠ {hint}")
 
     # ========================================================================
     # 启动恢复用 setter（持久化参数回填）
@@ -1289,7 +1303,12 @@ class ControlPanel(QWidget):
         self.gain_slider.blockSignals(True)
         self.gain_slider.setValue(db)
         self.gain_slider.blockSignals(False)
-        self.gain_val.setText(f"{db} dB")
+        # 滑杆=配置意图，标签=读数。恢复值还没真实施加，一律不写成读数。
+        self.gain_val.setText("—")
+        if self._sdr_connected:
+            self.gain_val.setToolTip("已连接：等待增益下发（滑杆位置=配置意图）")
+        else:
+            self.gain_val.setToolTip(f"未连接：上次配置 {db} dB（未施加）")
         if abs(requested - db) > 1e-9:
             hint = (f"配置请求 {requested:g} dB 超出未连接时的显示范围 [0, 49] dB，"
                     f"已按 {db} dB 显示（配置文件未改）")
@@ -1297,6 +1316,35 @@ class ControlPanel(QWidget):
             self.gain_slider.setToolTip(f"{self._gain_base_tip}\n⚠ {hint}")
         else:
             self.gain_slider.setToolTip(self._gain_base_tip)
+
+    def set_gain_applied(self, db: float) -> bool:
+        """回填设备真实增益读数；只改标签，不动滑杆。
+
+        与 :meth:`set_gain` 的分工：``set_gain`` 写配置意图（滑杆位置），
+        本方法写读数（标签）。未连接、非数值或非有限值一律拒绝渲染，
+        返回 ``False``；成功显示返回 ``True``。
+
+        后端夹值或写入失败时，调用方回读 ``get_gain()`` 后传给本方法：
+        标签显示真实值并追加 ⚠ 提示，滑杆仍停在用户意图，配置文件不改。
+        """
+        if not self._sdr_connected:
+            return False
+        try:
+            value = float(db)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+        self.gain_val.setText(f"{value:g} dB")
+        requested = self.gain_slider.value()
+        if abs(value - requested) > 1e-9:
+            hint = (f"设备实际增益 {value:g} dB，配置意图 {requested} dB 未生效"
+                    "（配置文件未改）")
+            logger.warning("%s", hint)
+            self.gain_val.setToolTip(f"⚠ {hint}")
+        else:
+            self.gain_val.setToolTip("已连接：读数来自设备回执")
+        return True
 
     @staticmethod
     def _default_sample_rate_options() -> list[float]:

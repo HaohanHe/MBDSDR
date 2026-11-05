@@ -158,11 +158,18 @@ def test_gain_failure_rolls_back_real_value(window):
     w.module_panel.set_sdr_connected(True, tune_wired=True)
     be = _Backend(gain=20.0, fail_gain=True)
     w._active_sdr_backend = be
+    # 用户意图：滑杆 25，配置里也记着 25（上一次成功值）
+    w.control_panel.set_gain(25.0)
+    w.settings.set("gain_db", 25.0)
 
     w._on_gain_changed(25)
 
     assert be.calls == [("set_gain", 25.0)]
     assert w.module_panel.gain_val.text() == "20 dB"
+    assert w.control_panel.gain_val.text() == "20 dB", "控制面板必须显示真实读数"
+    assert w.control_panel.gain_slider.value() == 25, "配置意图必须留在滑杆上"
+    assert w.settings.get("gain_db") == 25.0, \
+        "失败后不许把真实值 20 回写配置（配置仍是用户意图）"
     assert "未生效" in w.statusBar().currentMessage()
     w._active_sdr_backend = None
 
