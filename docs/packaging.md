@@ -287,22 +287,29 @@ stdio_sink           D:\mbdsdr\logs\mbdsdr_startup.log
 
 ### 5.3 发布前自检脚本（`scripts/release_check.py`）
 
-`python scripts/release_check.py` 按序执行 build → smoke → dll → scipy → qt →
-narrow → log；每步打印 PASS/FAIL 与耗时，末行汇总，任一步 FAIL 退出码 1。
-`--workpath/--distpath` 与 `PYINSTALLER_CONFIG_DIR` 全在 D 盘，脚本对 C 盘产物落点直接判失败。
+`python scripts/release_check.py` 按序执行 build → smoke → subtree → single →
+optional → qt → narrow → log；每步打印 PASS/FAIL 与耗时，**任一步 FAIL 立即停止**
+并打印该步「下一步该查什么」，末行汇总，退出码 1。`--workpath/--distpath` 与
+`PYINSTALLER_CONFIG_DIR` 全在 D 盘，脚本对 C 盘产物落点直接判失败。
 
-实测（2026-11-05，产出 `pyi-dist12`）：build 225.9s（4429 文件 / 820.8 MiB，
-对 dist11 `+0 -0 ~1`）、smoke 14.4s（13/13）、dll 17.0s、scipy 2.5s、qt 3.1s、
-narrow 7.4s、log 61.3s；汇总 **PASS 6 / FAIL 1**。
+三类缺件（整棵子树 / 只缺单文件 / 可选件）都要求**弹窗标题 + 整段正文逐字相等**
+（正文里唯一动态值是本次启动日志路径 `{log}`），不是「包含关键字」：
 
-- scipy 场景：发布包的纯模块在 PYZ 归档里，删不到目录；spec 增加
-  `MBDSDR_NOARCHIVE=1` 开关（默认 False，发布行为不变）生成诊断包，删除整棵
-  `_internal/scipy/_external` 后原文匹配到 `No module named 'scipy._external'`
-  + `这是打包缺陷，不是你的操作问题`。
-- narrow：`ui_narrow_breakdown.py --json` 实测 `window_minimumSizeHint=1625×729`，
-  超过 1360×728 → **FAIL 属实**，产品代码未动。
+- subtree：noarchive 诊断包删整棵 `_internal/scipy/_external` →「这是打包缺陷…」；
+- single：同一诊断包删 `fft.pyc` →「安装包解压不完整：只缺 …」；
+- optional：发布包改名 `_internal/librtlsdr.dll`（干净 PATH）→「缺少运行库：librtlsdr.dll」。
+
+实测（2026-11-05，`pyi-dist12`，一条命令）：build 147.9s（4429 文件 / 820.86 MiB，
+对 dist11 `+0 -0 ~1`，exe 30,933,722 → 31,002,800 B）、smoke 9.4s（13/13）、
+subtree 170.7s（含诊断包构建）、single 2.3s、optional 9.6s、qt 3.3s、narrow 6.7s
+（1265×644）、log 37.8s；汇总 **PASS 8 / FAIL 0**，总 387.6s。
+
+- narrow：本次 `ui_narrow_breakdown.py --json` 报 `window_minimumSizeHint=1265×644`
+  （offscreen / MiSans 10pt / 96 DPI），低于 1360×728 阈值。**这是并行 UX 线在
+  22:17 改 `desktop/main_window.py` 后的数字，不是本线改产品或调阈值**；上一版树
+  同一脚本实测 1625×729（当时如实 FAIL），阈值保持 1360×728 未动。
 - log：只把「日志类文件」计入 FAIL（路径含 mbdsdr 且 `*.log`/startup）；
-  全盘扫 `C:\Users\<user>` 1,106,587 个文件，本次运行 0 条日志写入；
+  全盘扫 `C:\Users\<user>` 1,103,243 个文件，本次运行 0 条日志写入；
   `gui_config.json`/`desktop_settings.json` 是用户数据，不在本项范围。
 
 ### 5.4 1366×768 实测（含替代方案）
@@ -312,8 +319,8 @@ narrow 7.4s、log 61.3s；汇总 **PASS 6 / FAIL 1**。
 
 | 方式 | 结果 |
 |---|---|
-| 源码窗口 + `QT_SCALE_FACTOR=1` 强制 1366×768 | `minimum_size_hint=1670×989`；**40 个控件越界、8 个文本被压缩**；截图右侧面板、顶部 UTC、底部提示均被裁 |
-| 冻结版 dist12 + `QT_SCALE_FACTOR=1`，Win32 压到 1366×768 | 窗口 1366×768、进程存活；客户端 1344×712，右侧星图缩放/顶部工具条被裁 |
+| 源码窗口 + `QT_SCALE_FACTOR=1` 强制 1366×768 | `minimum_size_hint=1254×745`；**40 个控件越界、6 个文本被压缩**；截图右侧控制面板（频率预设/收藏）被裁、底部提示行右端出界 |
+| 冻结版 dist12 + `QT_SCALE_FACTOR=1`，Win32 压到 1366×768 | 窗口 1366×768、进程存活；截图 1344×712，右侧控制面板与「AI 助手」页签右缘被裁 |
 | 启动日志噪声 | 新增 2 行，1 条 `[dll] 未发现 SoapySDR.dll`（可选依赖告警），**无 `[record]`** |
 
 结论：1366×768 下窗口不能完整显示，控件被裁是产品现状。
@@ -408,9 +415,10 @@ narrow 7.4s、log 61.3s；汇总 **PASS 6 / FAIL 1**。
    fixture 直接 `mw.MainWindow()`，用的是默认 `%APPDATA%\mbdsdr\desktop_settings.json`；
    用例 `record_dir` 写入 tmp 路径后落盘，把真实配置改成 `…\pytest-…\rec`。
    本机残留已清理，但该 fixture 未隔离配置路径（属测试隔离线），下次整跑仍会再脏。
-9. **1366×768 红线未修**：发布自检的 narrow 步骤实测 `1625×729`（要求 ≤1360×728），
-   且 1366×768 下实际裁切 40 个控件；这属于 UI 布局线的待办，本线只做测量与如实报红，
-   没有为了脚本变绿去改 `main_window` 的最小尺寸/布局。
+9. **1366×768 红线**：发布自检 narrow 本次实测 `1265×644`（≤1360×728，通过）——
+   数字来自并行 UX 线 22:17 对 `desktop/main_window.py` 的改动，本线未改产品、
+   未调阈值；上一版树同一脚本为 `1625×729`（如实 FAIL）。但 1366×768 下仍裁切
+   40 个控件（§5.4），窗口完整显示仍属 UI 布局线待办。
 
 ## 8. 本轮改动的文件
 

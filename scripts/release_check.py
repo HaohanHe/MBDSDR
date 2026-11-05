@@ -4,25 +4,27 @@
 
 设计口径：
 * 所有产物（build/dist/config/日志 diff）只落 D 盘；落点若在 C 盘直接判 FAIL；
-* 缺件场景不是「看有没有弹窗」，而是**原文匹配**标题 + 关键句；
+* 缺件场景不是「看有没有弹窗」，而是**弹窗标题 + 正文逐字全匹配**
+  （整棵子树缺失 / 只缺单文件 / 可选件缺失 三类各一份期望原文）；
 * 窄屏下线按 ``scripts/ui_narrow_breakdown.py --json`` 的实测数字断言，
-  红就如实报 FAIL，不会为了绿去改产品代码；
-* 日志落点：快照本机已知用户目录 + 全盘扫描 ``C:\\Users\\<user>`` 下
-  路径名含 mbdsdr 且 mtime 落在本次运行窗口内的文件/目录，任一命中即 FAIL。
+  红就如实报 FAIL，不会为了绿改产品代码或调阈值；
+* 日志落点：启动日志本身不得落在任何 ``C:\\Users\\<user>`` 路径；再快照
+  已知用户目录 + 全盘扫描本次运行窗口内新增的日志类文件，任一命中即 FAIL；
+* 任一步 FAIL 立即停止后续步骤，并打印该步「下一步该查什么」。
 
 用法::
 
     python scripts/release_check.py
-    python scripts/release_check.py --skip-build --steps smoke,dll,qt,log
+    python scripts/release_check.py --skip-build --steps smoke,optional,log
 """
 
 from __future__ import annotations
 
 import argparse
 import ctypes
+import difflib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -38,13 +40,78 @@ PYI_CONFIG = os.path.join(TMP_ROOT, "pyi-config")
 EXE_NAME = "MBDSDR.exe"
 WINDOW_TITLE = "MBDSDR - AI 定义无线电"
 
+#: 三类缺件的期望弹窗原文（逐字全匹配；{log} 是本次启动日志的已知落点）。
+EXPECT_TITLE_FAIL = "MBDSDR 启动失败"
+EXPECT_TITLE_DLL = "MBDSDR 运行库缺失"
+EXPECT_SUBTREE_BODY = (
+    "无法加载界面依赖：No module named 'scipy._external'\n"
+    "\n"
+    "No module named 'scipy._external'\n"
+    "这是打包缺陷，不是你的操作问题：\n"
+    "  安装包里整棵 scipy._external 子树都没打进去"
+    "（同一子包里的兄弟模块也导入失败）。\n"
+    "请获取最新构建版本；如果这就是最新版，请把日志发给维护者。\n"
+    "\n"
+    "日志：{log}"
+)
+EXPECT_SINGLE_BODY = (
+    "无法加载界面依赖：No module named "
+    "'scipy._external.array_api_compat.numpy.fft'\n"
+    "\n"
+    "No module named 'scipy._external.array_api_compat.numpy.fft'\n"
+    "安装包解压不完整：\n"
+    "  只缺 scipy._external.array_api_compat.numpy.fft，"
+    "同包其它模块可以正常导入。\n"
+    "请整包重新解压/重新安装（不要只拷贝 exe，也不要删 _internal 里的文件）。\n"
+    "\n"
+    "日志：{log}"
+)
+EXPECT_OPTIONAL_BODY = (
+    "缺少运行库：librtlsdr.dll\n"
+    "\n"
+    "这些 DLL 应随安装包放在 _internal 目录（或 exe 同目录）。\n"
+    "请重新安装完整包，不要手工删 _internal 里的文件；"
+    "若使用外部 SDR 驱动，也可安装对应驱动后重试；"
+    "若杀毒软件隔离了它们，请恢复后重试。"
+)
+EXPECT_QT_BODY = (
+    "Qt 平台插件缺失，未能创建窗口\n"
+    "\n"
+    "缺少 Qt 平台插件 platforms/qwindows.dll（当前平台 windows）。\n"
+    "常见原因：安装包没解压完整，或只拷贝了 MBDSDR.exe。\n"
+    "修复：重新解压完整安装包，_internal 目录必须与 exe 放在一起。\n"
+    "\n"
+    "日志：{log}"
+)
+
 DEFAULT_DIST = os.path.join(TMP_ROOT, "pyi-dist12")
 DEFAULT_WORK = os.path.join(TMP_ROOT, "pyi-build12")
 DEFAULT_DIAG_DIST = os.path.join(TMP_ROOT, "pyi-dist12-noarchive")
 DEFAULT_DIAG_WORK = os.path.join(TMP_ROOT, "pyi-build12-noarchive")
 DEFAULT_DIFF_BASE = os.path.join(TMP_ROOT, "pyi-dist11")
 
-ALL_STEPS = ("build", "smoke", "dll", "scipy", "qt", "narrow", "log")
+ALL_STEPS = ("build", "smoke", "subtree", "single", "optional", "qt",
+             "narrow", "log")
+
+#: FAIL 后下一步该查什么（按步骤名一一对应，失败即停时打印）
+FAIL_HINTS = {
+    "build": "查 PyInstaller 输出与 --workpath 下的 warn-MBDSDR.txt；"
+             "对照 desktop/MBDSDR.spec 的 datas/hiddenimports",
+    "smoke": "看启动日志 [smoke] 行的失败模块名；"
+             "私有子树漏收对照 docs/packaging.md §3.1",
+    "subtree": "确认 noarchive 诊断包里有 _internal/scipy/_external；"
+               "查 Analysis-00.toc 的 scipy._external.* 条目",
+    "single": "确认诊断包里存在 fft.pyc；"
+              "查 _packaging_verdict 是否把单文件缺失判成「解压不完整」",
+    "optional": "确认 _internal/librtlsdr.dll 存在；"
+                "对照 desktop/startup_paths.py 的 runtime_dll_report()",
+    "qt": "确认 _internal/PySide6/plugins/platforms/qwindows.dll 存在；"
+          "查 desktop/main.py 的 _qt_platform_plugin_problem()",
+    "narrow": "跑 scripts/ui_narrow_breakdown.py 看逐控件拆账；"
+              "窄屏红线归 UX 线，禁止调阈值过关",
+    "log": "查启动日志落点与 C:\\Users 扫描命中项；"
+           "对照 desktop/startup_paths.py 的候选顺序",
+}
 
 USER32 = ctypes.WinDLL("user32", use_last_error=True)
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
@@ -116,10 +183,19 @@ def _wait_window(pid: int, title_part: str, timeout: float) -> tuple[int, str] |
     return None
 
 
-def _dialog_text(hwnd: int) -> str:
-    lines = [f"title: {_window_text(hwnd)}"]
-    lines.extend(_child_texts(hwnd))
-    return "\n".join(lines)
+def _dialog_body(hwnd: int) -> str:
+    """弹窗正文：MessageBox 的正文在唯一的 Static 子控件里（按钮不算）。"""
+    bodies = [t.split("] ", 1)[1] for t in _child_texts(hwnd)
+              if t.startswith("[Static] ")]
+    return max(bodies, key=len) if bodies else ""
+
+
+def _normalize_text(text: str) -> str:
+    """逐字比对前的唯一归一：CRLF→LF、去行尾空白、去首尾空行。"""
+    return "\n".join(
+        line.rstrip()
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ).strip()
 
 
 def _read_log(path: str) -> list[str]:
@@ -224,17 +300,25 @@ def _dist_stats(path: str) -> tuple[int, int, dict[str, int]]:
     return count, total, files
 
 
-def _diff_dists(base: str, now: str) -> tuple[int, int, int, list[str]]:
+def _diff_dists(base: str, now: str) -> tuple[list, list, list, list[str]]:
+    """与基线包逐个文件比对，三类各自按大小降序，报告只留 top 10。"""
     _b_count, _b_size, base_files = _dist_stats(base)
     _n_count, _n_size, now_files = _dist_stats(now)
-    added = sorted(set(now_files) - set(base_files))
-    removed = sorted(set(base_files) - set(now_files))
-    changed = sorted(k for k in (set(base_files) & set(now_files))
-                     if base_files[k] != now_files[k])
-    lines = ([f"+ {k} ({now_files[k]} B)" for k in added[:20]]
-             + [f"- {k} ({base_files[k]} B)" for k in removed[:20]]
-             + [f"~ {k} {base_files[k]} -> {now_files[k]} B" for k in changed[:20]])
-    return len(added), len(removed), len(changed), lines
+    added = sorted(((k, now_files[k]) for k in set(now_files) - set(base_files)),
+                   key=lambda kv: kv[1], reverse=True)
+    removed = sorted(((k, base_files[k]) for k in set(base_files) - set(now_files)),
+                     key=lambda kv: kv[1], reverse=True)
+    changed = sorted(((k, base_files[k], now_files[k])
+                      for k in set(base_files) & set(now_files)
+                      if base_files[k] != now_files[k]),
+                     key=lambda kv: abs(kv[2] - kv[1]), reverse=True)
+    lines = ["新增 top 10："] + [f"  + {k} ({s} B)" for k, s in added[:10]]
+    lines += ["删除 top 10："] + [f"  - {k} ({s} B)" for k, s in removed[:10]]
+    lines += ["大小变化 top 10："] + [
+        f"  ~ {k} {a} -> {b} B（{b - a:+d}）" for k, a, b in changed[:10]]
+    if not (added or removed or changed):
+        lines = ["无差异（文件数/大小逐文件一致）"]
+    return added, removed, changed, lines
 
 
 # ----------------------------------------------------------------------
@@ -261,7 +345,13 @@ def _step_smoke(exe: str, log_path: str) -> tuple[bool, str]:
 
 
 def _step_dialog(exe: str, log_path: str, expected_title: str,
-                 sentences: tuple[str, ...], extra_env: dict[str, str] | None) -> tuple[bool, str]:
+                 expected_body: str,
+                 extra_env: dict[str, str] | None) -> tuple[bool, str]:
+    """启动缺件弹窗：标题与**整段正文逐字**相等，不是「包含关键字」。
+
+    ``expected_body`` 里唯一的动态值是 ``{log}``（本次启动日志落点），
+    由调用方传入唯一的 ``log_path``；除它以外不允许任何模糊匹配。
+    """
     before = _read_log(log_path)
     proc = _launch(exe, extra_env)
     try:
@@ -269,11 +359,18 @@ def _step_dialog(exe: str, log_path: str, expected_title: str,
         if found is None:
             tail = "\n".join(_read_log(log_path)[len(before):][-8:])
             return False, f"40s 内没出现标题含「{expected_title}」的窗口；日志尾部：\n{tail}"
-        text = _dialog_text(found[0])
-        missing = [s for s in sentences if s not in text]
-        if missing:
-            return False, f"窗口在，但缺少关键句：{missing}\n实际文本：\n{text}"
-        return True, f"标题/关键句匹配：{expected_title}｜" + "；".join(sentences)
+        actual_title = _window_text(found[0])
+        if actual_title != expected_title:
+            return False, (f"标题不符：期望「{expected_title}」"
+                           f"实际「{actual_title}」")
+        actual = _normalize_text(_dialog_body(found[0]))
+        expected = _normalize_text(expected_body.format(log=log_path))
+        if actual != expected:
+            diff = "\n".join(difflib.unified_diff(
+                expected.splitlines(), actual.splitlines(),
+                fromfile="期望原文", tofile="实际弹窗", lineterm=""))
+            return False, "正文不是逐字匹配：\n" + diff
+        return True, f"标题/正文逐字匹配：{expected_title}｜{len(expected)} 字符"
     finally:
         _kill(proc)
 
@@ -441,9 +538,10 @@ def main() -> int:
         count, size, _files = _dist_stats(args.dist_dir)
         detail = f"{exe}；{count} 文件 / {size / 2 ** 20:.1f} MiB"
         if os.path.isdir(args.diff_against):
-            added, removed, changed, lines = _diff_dists(args.diff_against, args.dist_dir)
+            added, removed, changed, lines = _diff_dists(args.diff_against,
+                                                         args.dist_dir)
             detail += (f"；对 {os.path.basename(args.diff_against)}："
-                       f"+{added} -{removed} ~{changed}")
+                       f"+{len(added)} -{len(removed)} ~{len(changed)}")
             with open(os.path.join(RC_DIR, "dist_diff.txt"), "w",
                       encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
@@ -454,29 +552,20 @@ def main() -> int:
             return False, "启动日志无落点"
         return _step_smoke(_exe_of(args.dist_dir), log_path)
 
-    def do_dll() -> tuple[bool, str]:
-        exe = _exe_of(args.dist_dir)
-        target = os.path.join(args.dist_dir, "MBDSDR", "_internal", "librtlsdr.dll")
-        if not os.path.isfile(target):
-            return False, f"找不到 {target}"
-        backup = _rename_away(target)
-        try:
-            return _step_dialog(
-                exe, log_path, "MBDSDR 运行库缺失",
-                ("缺少运行库：librtlsdr.dll", "请重新安装完整包"),
-                _clean_path_env())
-        finally:
-            _restore(backup, target)
-            if not os.path.isfile(target):
-                raise RuntimeError(f"复原失败：{target}")
+    diag_cache: dict[str, str] = {}
 
-    def do_scipy() -> tuple[bool, str]:
+    def diag_exe() -> str:
         # 发布构建的纯模块在 PYZ 归档里，删不到目录；用 noarchive 诊断构建
         # （同一 spec，仅 MBDSDR_NOARCHIVE=1）把 scipy/_external 变成落盘文件。
-        diag_exe = _exe_of(args.diag_dist_dir)
-        if not (args.reuse_diag and os.path.isfile(diag_exe)):
-            diag_exe = _build(args.diag_dist_dir, args.diag_work_dir,
-                              noarchive=True)
+        if args.reuse_diag and os.path.isfile(_exe_of(args.diag_dist_dir)):
+            return _exe_of(args.diag_dist_dir)
+        if "exe" not in diag_cache:
+            diag_cache["exe"] = _build(args.diag_dist_dir, args.diag_work_dir,
+                                       noarchive=True)
+        return diag_cache["exe"]
+
+    def do_subtree() -> tuple[bool, str]:
+        exe = diag_exe()
         subtree = os.path.join(args.diag_dist_dir, "MBDSDR", "_internal",
                                "scipy", "_external")
         if not os.path.isdir(subtree):
@@ -484,14 +573,43 @@ def main() -> int:
                            f"{subtree}，无法模拟整棵子树缺失")
         backup = _rename_away(subtree)
         try:
-            return _step_dialog(
-                diag_exe, log_path, "MBDSDR 启动失败",
-                ("No module named 'scipy._external'",
-                 "这是打包缺陷，不是你的操作问题"), None)
+            return _step_dialog(exe, log_path, EXPECT_TITLE_FAIL,
+                                EXPECT_SUBTREE_BODY, None)
         finally:
             _restore(backup, subtree)
             if not os.path.isdir(subtree):
                 raise RuntimeError(f"复原失败：{subtree}")
+
+    def do_single() -> tuple[bool, str]:
+        exe = diag_exe()
+        target = os.path.join(args.diag_dist_dir, "MBDSDR", "_internal",
+                              "scipy", "_external", "array_api_compat",
+                              "numpy", "fft.pyc")
+        if not os.path.isfile(target):
+            return False, f"找不到 {target}"
+        backup = _rename_away(target)
+        try:
+            return _step_dialog(exe, log_path, EXPECT_TITLE_FAIL,
+                                EXPECT_SINGLE_BODY, None)
+        finally:
+            _restore(backup, target)
+            if not os.path.isfile(target):
+                raise RuntimeError(f"复原失败：{target}")
+
+    def do_optional() -> tuple[bool, str]:
+        exe = _exe_of(args.dist_dir)
+        target = os.path.join(args.dist_dir, "MBDSDR", "_internal",
+                              "librtlsdr.dll")
+        if not os.path.isfile(target):
+            return False, f"找不到 {target}"
+        backup = _rename_away(target)
+        try:
+            return _step_dialog(exe, log_path, EXPECT_TITLE_DLL,
+                                EXPECT_OPTIONAL_BODY, _clean_path_env())
+        finally:
+            _restore(backup, target)
+            if not os.path.isfile(target):
+                raise RuntimeError(f"复原失败：{target}")
 
     def do_qt() -> tuple[bool, str]:
         exe = _exe_of(args.dist_dir)
@@ -501,11 +619,8 @@ def main() -> int:
             return False, f"找不到 {target}"
         backup = _rename_away(target)
         try:
-            return _step_dialog(
-                exe, log_path, "MBDSDR 启动失败",
-                ("Qt 平台插件缺失，未能创建窗口",
-                 "缺少 Qt 平台插件 platforms/qwindows.dll",
-                 "重新解压完整安装包"), None)
+            return _step_dialog(exe, log_path, EXPECT_TITLE_FAIL,
+                                EXPECT_QT_BODY, None)
         finally:
             _restore(backup, target)
             if not os.path.isfile(target):
@@ -527,13 +642,23 @@ def main() -> int:
         return True, (f"C:\\Users 全盘 {scanned} 个文件里无本次写入的日志"
                       f"（*.log/startup，mtime 过滤）；日志={log_path}")
 
-    run("build", do_build)
-    run("smoke", do_smoke)
-    run("dll", do_dll)
-    run("scipy", do_scipy)
-    run("qt", do_qt)
-    run("narrow", _step_narrow)
-    run("log", do_log)
+    steps = (
+        ("build", do_build),
+        ("smoke", do_smoke),
+        ("subtree", do_subtree),
+        ("single", do_single),
+        ("optional", do_optional),
+        ("qt", do_qt),
+        ("narrow", _step_narrow),
+        ("log", do_log),
+    )
+    for name, fn in steps:
+        run(name, fn)
+        if results and not results[-1][1]:
+            # 失败即停：后面的步骤只会被同一缺陷污染，先修当前这条。
+            print(f"下一步：{FAIL_HINTS.get(name, '按上面的失败信息排查')}",
+                  flush=True)
+            break
 
     passed = sum(1 for _n, ok, _e, _d in results if ok)
     failed = len(results) - passed
