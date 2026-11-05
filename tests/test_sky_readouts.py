@@ -479,6 +479,21 @@ class TestSpacetimeReadouts:
 # ---------------------------------------------------------------------------
 # 8. 状态卡超高滚动（批 2：卡片只占视口高度，不无限长挡住天空）
 # ---------------------------------------------------------------------------
+class _RoundedRectRecorder:
+    """假画家：除记录 drawRoundedRect(QRectF, ...) 外全部是空操作。"""
+
+    def __init__(self):
+        self.rects = []
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+    def drawRoundedRect(self, *args):  # noqa: N802 (Qt 命名)
+        from PySide6.QtCore import QRectF
+        if args and isinstance(args[0], QRectF):
+            self.rects.append(QRectF(args[0]))
+
+
 class TestStatusCardScroll:
     """内容 330px 但窗口更矮时，卡片收缩并滚动；滚轮在卡内只滚卡不缩放。"""
 
@@ -561,17 +576,40 @@ class TestStatusCardScroll:
         finally:
             v.close()
 
-    def test_scrollbar_drawn_only_when_content_overflows(self):
-        """滚动条受 max_scroll 门控（绘制源单点核查 + 短/高窗口两侧）。"""
-        src = inspect.getsource(RFSkyView._draw_info_overlay)
-        assert "if max_scroll > 0.0:" in src
-        assert "track_x" in src and "thumb_y" in src
-        v = RFSkyView()
+    @staticmethod
+    def _scrollbar_rects(v):
+        """用假画家跑一次状态卡绘制，只返回滚动条的 QRectF（宽 3px）。"""
+        rec = _RoundedRectRecorder()
+        v._draw_info_overlay(rec)
+        return [r for r in rec.rects if abs(r.width() - 3.0) < 1e-6]
+
+    def test_scrollbar_drawn_only_when_content_overflows(self, monkeypatch):
+        """滚动条受 max_scroll 门控：不超高不画；超高画轨+拇指且随滚动移动。"""
+        v = self._short_view(monkeypatch)      # 内容 600px、窗口 400px
         try:
-            v.resize(900, 900)
-            v.set_observer(LAT, LON, 0.0)
-            self._render(v)
-            assert v._status_card_max_scroll() == 0.0
+            assert v._status_card_max_scroll() > 0.0
+            rects = self._scrollbar_rects(v)
+            assert len(rects) == 2, \
+                f"内容超高时必须画轨道+拇指两个滚动条矩形，实际 {rects}"
+            track, thumb = rects
+            assert track.x() == pytest.approx(
+                v._status_card_rect.right() - 7.0), \
+                "轨道没贴在状态卡右缘"
+            v._scroll_status_card(40.0)
+            moved = self._scrollbar_rects(v)
+            assert len(moved) == 2
+            assert moved[1].y() > thumb.y(), \
+                f"滚动后拇指没下移：{thumb.y()} -> {moved[1].y()}"
         finally:
             v.close()
+
+        tall = RFSkyView()
+        try:
+            tall.resize(900, 900)
+            tall.set_observer(LAT, LON, 0.0)
+            assert tall._status_card_max_scroll() == 0.0
+            assert self._scrollbar_rects(tall) == [], \
+                "内容不超高时不许画滚动条"
+        finally:
+            tall.close()
 
