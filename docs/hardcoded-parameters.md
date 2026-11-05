@@ -162,8 +162,8 @@ rel 6.0 dB / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘
 | # | 语义 | 两套值 | 位置 |
 |---|---|---|---|
 | D-1 | 默认采样率 | `2.048 MS/s` vs `2.4 MS/s` | `config_schema.py:260` vs `tokens.h:301` |
-| D-2 | ~~调谐步进默认 10 kHz vs 100 kHz~~ **已撤回（见下）** | Python 10 kHz；C++ `kFreqFineStepHz = 10000` | `control_panel.py:323` vs `tokens.h:816` |
-| D-3 | FFT 档位数量 | 5 档（含 512/8192/16384） vs 3 档 | `spectrum_widget.py:141,1977-1979` vs `spectrum_engine.cpp:163` |
+| D-2 | ~~调谐步进默认 10 kHz vs 100 kHz~~ **已撤回（见下）** | Python 10 kHz；C++ `kFreqCoarseStepHz = 10000` | `control_panel.py:323` vs `tokens.h:816` |
+| D-3 | ~~FFT 档位数量~~ **已统一（2026-11-05，见下）** | 两端均三档 `1024/2048/4096`（Python `FFT_SIZES` == schema `fft_size.choices`） | `spectrum_widget.py`（`FFT_SIZES`） vs `config_schema.py:176` / `settings_dialog.cpp:250` |
 | D-4 | dB 默认量程 | `-100..-20` vs `-45..0` | `spectrum_widget.py:916-917` + 默认值 vs `tokens.h:329-330` |
 | D-5 | 瀑布行数 | 固定 `256` vs 可选 `128..4096` | `spectrum_widget.py:161` vs `tokens.h:698` |
 | D-6 | 过境预测采样 | 粗 `60 s` / 细 `2 s` vs 粗 `300 s` / 细 `30 s` | `sat_passes.py:88-90` vs `rf_sky_view`（`PASS_COARSE_STEP_S`/`PASS_FINE_STEP_S`） |
@@ -174,13 +174,19 @@ rel 6.0 dB / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘
 | D-10 | AI 上下文 | Python 8192（`max_context_tokens`） vs C++ `32768×0.75` | `config.py:20` / `config_schema.py:237` vs `tokens.h:1321-1322` |
 
 D-9 **不是**同一语义：Python 是"工具调用可重试判定"，C++ 是"LLM 请求瞬时错误退避"。
-两者都合理，只需在文档写清（已写）。其余 9 组是真·同一语义两套数。
+两者都合理，只需在文档写清（已写）。其余 8 组是真·同一语义两套数。
 
 **D-2 撤回（本线自我纠错）**：先把 `tokens.h:283 kFreqStepHz = 100e3` 当成"调谐步进"，
 这是错的——它只被 `control_hub.cpp:1422` 用作 **`start_scan_link` 的扫描步进**。
-C++ 真正的调谐步进是 `kFreqFineStepHz = 10000`（`tokens.h:816`），与 Python 的
+C++ 真正的调谐步进是 `kFreqCoarseStepHz = 10000`（`tokens.h:816`），与 Python 的
 10 kHz **本来就一致**，也与频谱吸附网格 10 kHz 一致。
 → **决策人裁定 3 的"调谐步进两套数"前提不成立，无需改动**（扫描步进 100 kHz 是另一语义，保留）。
+
+**D-3 收口（2026-11-05，往少的收）**：`SpectrumDataGenerator.FFT_SIZES` 删除
+8192/16384 两档，与 `config_schema.fft_size.choices` / C++ `settings_dialog` /
+AI 工具的三档逐项相等（含顺序）。旧配置引用已删档位时回落最近档 **4096**
+并记录原因（不静默改成 2048）。2.4 MS/s 下 bin 宽实测 **585.9375 Hz**；
+删除前 16384 档为 **146.484 Hz**（差 **439.453 Hz** / 4 倍），删除后差值 = 0。
 
 **D-7 结论（诚实性红线）**：Python 的 `-120.0` 落在可显示量程 `-160..0` **之内**，
 所以"真实的 -120 dB 读数"和"无数据"长得一模一样，用户无法分辨。
@@ -238,7 +244,7 @@ spin `-140..20`）才是 B 类锁死项，各写清理由。
 
 | # | 值 | 位置 | 语义 | 依赖 | 已集中 | 裁定 |
 |---|---|---|---|---|---|---|
-| P-1 | `(1024,2048,4096,8192,16384)` | `spectrum_widget.py:141` | FFT 档位 | 下拉、生成器 | △ | A（已暴露） |
+| P-1 | `(1024,2048,4096)` | `spectrum_widget.py`（`FFT_SIZES`） | FFT 档位 | 下拉、生成器 | ✓ | A（已暴露；与 schema 逐项一致） |
 | P-2 | `2048` | `spectrum_widget.py:151`；`cpp/.../spectrum_engine.h:884` | 默认 FFT | 生成器 / C++ 引擎 | △（两侧同值） | A |
 | P-3 | `(1,4,8,16)` / `1` | `spectrum_widget.py:142,152` | 平均帧档位/默认 | 生成器 | ✓ | A（已暴露） |
 | P-4 | 6 种窗 / 默认 Nuttall | `spectrum_widget.py:139,150` | 窗函数 | 生成器 | ✓ | A（已暴露） |
@@ -478,9 +484,9 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 ### 6.3 暂缓（需要跨线决策，本线不动）
 
-- **D-3 FFT 档位**：Python UI 会给 C++ 引擎不接受的 `8192/16384`。若同一 UI 可切后端，
-  这是"选了不生效"的真 bug；若两个前端各自独立，则只需文档登记。
-  建议 `spectrum_widget.py` 的档位从后端能力查询派生，而不是硬编码 5 档。
+- ~~**D-3 FFT 档位**~~ **已收口（2026-11-05）**：`FFT_SIZES` 已删掉 8192/16384，
+  与 schema / C++ / AI 三档逐项一致；旧值回落最近档 4096 并记录原因
+  （§2.4 D-3）。
 - **D-6 过境预测两套采样**：`rf_sky_view` 为 UI 流畅用 300 s/30 s，
   `sat_passes` 为精度用 60 s/2 s。**不许合并成一个数**——正确做法是
   `sat_passes` 暴露 `coarse_step_s` 参数，星象仪显式传 300，并在文档写清
@@ -507,7 +513,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | **峰值门限基准** | `median + rel_db`（`spectrum_widget.py:487-488`） | `dB above median`（`tokens.h:365`） | ✓（同一基准） | 统一检测器定义（P-1） |
 | 峰值门限值 | `6.0`（裁定值） | `6.0`（`kPeakRelDb`，显示门；校准门 15 另计） | ✓ | 裁定 `rel 6.0 / abs -100 / 3 帧 / 5 bin / 10 帧`；15 dB 实测 24 帧 0 峰 |
 | 默认采样率 | 2.4 MS/s | 2.4 MS/s（`tokens.h:301`） | ✓ | 已统一；两端都按设备能力回落 |
-| 默认调谐步进 | 10 kHz | 10 kHz（`kFreqFineStepHz`） | ✓（D-2 撤回） | 保持；100 kHz 是扫描步进 |
+| 默认调谐步进 | 10 kHz | 10 kHz（`kFreqCoarseStepHz`） | ✓（D-2 撤回） | 保持；100 kHz 是扫描步进 |
 | 无数据哨兵 | `-120.0`（待改 NaN） | 无哨兵（`-100` 是真实读数） | ✗ → 待 P-8c | 哨兵必须落在量程外 |
 | 上下文窗口 | 8192 | 32768（×0.75 预算） | ✗（有意） | 按模型能力，登记 |
 
@@ -526,7 +532,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | 1 | 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 6 dB 余量） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a），`gain_db` 写入需设置线接 1 行。 |
 | 2 | 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° | **已落地**（§10-2）。剩余：`rf_sky_view` 的 `PASS_MIN_ALT_DEG` 改引用常量（P-2b）。 |
 | 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 |
-| 3b | 调谐步进统一 10 kHz | **前提不成立，撤回**（§D-2）：C++ 调谐步进本就是 `kFreqFineStepHz=10 kHz`；100 kHz 是扫描步进。 |
+| 3b | 调谐步进统一 10 kHz | **前提不成立，撤回**（§D-2）：C++ 调谐步进本就是 `kFreqCoarseStepHz=10 kHz`；100 kHz 是扫描步进。 |
 | 4 | 峰值 6 dB vs 15 dB | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧 / 5 bin / 10 帧`**；Python 6.0 保留，C++ 显示门新增 `kPeakRelDb=6.0`（校准参考门 15 保留不合并）。15 dB + 绝对底 = -85 dBFS，+8 dB 弱载波 -92 dBFS → 24 帧 0 峰，故不取 15。 |
 | 5 | "无数据"哨兵 | **结论：改用 NaN/None，禁止用落在量程内的 dB 数**；改 Python 侧 → P-8c。C++ `-100` 是真实安静读数，加注释区分。 |
 
@@ -667,7 +673,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - 各后端自己的"甜点"默认未动（HackRF 8M、USRP 1M、Pluto 2M，测试仍钉住）；
 - `SAMPLE_RATES` 11 档明细未动（2.4M 本来就在档内，RTL 全系支持，故通常不触发回落）；
 - 数字链路（ADS-B 等）按自己声明的采样率工作，不读这个默认；
-- 调谐步进：**本来就没有缺口**——Python 10 kHz、C++ `kFreqFineStepHz=10000`、
+- 调谐步进：**本来就没有缺口**——Python 10 kHz、C++ `kFreqCoarseStepHz=10000`、
   频谱吸附 `snap_interval=10_000` 三方一致（D-2 撤回）；`kFreqStepHz=100 kHz`
   是 `start_scan_link` 的扫描步进，另一个概念，未动。
 
