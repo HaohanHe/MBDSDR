@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import audit_source_text_pins as scanner  # noqa: E402
 
 BASELINE = ROOT / "docs" / "source-pin-ratchet-baseline.json"
-BUILT_AT = 174
+BUILT_AT = 164
 KEY_FIELDS = ("path", "func", "pinned")
 
 

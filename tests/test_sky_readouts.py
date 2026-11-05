@@ -44,7 +44,8 @@ from rf_sky_view import (  # noqa: E402
     RFSkyView, format_angle_deg, format_azimuth, format_arcmin, format_arcsec,
     format_distance_au, format_distance_km, format_magnitude, format_percent,
     format_speed_kms, format_utc_time, format_local_time, format_hms_ra,
-    format_view_axis, local_sidereal_time_deg, star_catalog_credit_text,
+    format_dms_deg, format_view_axis, local_sidereal_time_deg,
+    star_catalog_credit_text,
     format_satellite_description, compass_point,
 )
 from mbdsdr_ai.decoders import BUILTIN_TLE  # noqa: E402
@@ -385,21 +386,69 @@ class TestPassPanelReadouts:
 
 
 # ---------------------------------------------------------------------------
-# 6. 单位标注 + 格式化单点实现（绘制源核查）
+# 6. 单位标注 + 格式化单点实现（按渲染结果核查）
 # ---------------------------------------------------------------------------
+class _TextRecorder:
+    """假画家：记录所有 drawText 的字符串，其余绘制调用空操作。"""
+
+    def __init__(self):
+        self.texts = []
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+    def drawText(self, *args):  # noqa: N802 (Qt 命名)
+        for arg in args:
+            if isinstance(arg, str):
+                self.texts.append(arg)
+                return
+
+
 class TestSingleFormatterAndUnitLabels:
-    def test_picked_satellite_card_units(self):
-        src = inspect.getsource(RFSkyView._draw_picked_info)
-        assert "Magnitude (mag)" in src
-        assert "Distance (km)" in src
-        assert "Rise/Set (UTC)" in src
-        assert "Az/Alt 几何 (Az 0°=N)" in src
-        assert "format_azimuth(" in src
-        assert "format_angle_deg(" in src
-        assert "format_hms_ra(" in src and "format_dms_deg(" in src
-        # 不再有本地拼的度分秒/秒级 UTC
-        assert '"°{m:02d}' not in src
-        assert 'strftime("%H:%M")' not in src
+    def test_picked_satellite_card_units(self, sky):
+        """渲染选中卫星卡，逐行核对「标签 + 与格式化函数一致的显示值」。"""
+        v, _trk = sky
+        obj = next(o for o in v._objects if o.name == ISS)
+        v._build_selected_info(obj)
+        info = v._selected_info
+        assert info["rise"] is not None and info["set"] is not None
+        # 用可控读数钉住每一行的显示值，避免依赖后端偶然数值
+        info["mag"] = 1.23
+        info["ra"] = 123.456
+        info["dec"] = -45.678
+        v._hovered_object = obj
+
+        rec = _TextRecorder()
+        v._draw_picked_info(rec)
+        texts = rec.texts
+
+        rise_u = _jtime.jd_to_unix(info["rise"])
+        set_u = _jtime.jd_to_unix(info["set"])
+        expect = {
+            "Magnitude (mag)": format_magnitude(info["mag"]),
+            "Distance (km)": format_distance_km(info["dist_km"]),
+            "Rise/Set (UTC)": f"Rise {format_utc_time(rise_u)}   "
+                             f"Set {format_utc_time(set_u)}",
+            "Ra/Dec (hms / °′″)": f"{format_hms_ra(info['ra'])}  "
+                                  f"{format_dms_deg(info['dec'])}",
+            "Az/Alt 几何 (Az 0°=N)": f"{format_azimuth(obj.azimuth_deg)}  "
+                                     f"{format_angle_deg(obj.elevation_deg)}",
+        }
+        for label, value in expect.items():
+            assert label in texts, f"信息卡缺少行标签: {label!r}"
+            assert value in texts, (
+                f"信息卡 {label!r} 的显示值不是格式化函数的输出: "
+                f"期望 {value!r}，实际文本 {texts!r}")
+
+        # 方位同时给 16 方位名，高度走统一 ° 格式
+        az_line = expect["Az/Alt 几何 (Az 0°=N)"]
+        assert compass_point(obj.azimuth_deg) in az_line
+        assert az_line.endswith(format_angle_deg(obj.elevation_deg))
+        # 赤经/赤纬各自走 hms/dms 单点实现（不是本地拼的 °′″）
+        assert "h " in expect["Ra/Dec (hms / °′″)"]
+        assert '"' in expect["Ra/Dec (hms / °′″)"]
+        # 升降时刻按 UTC 显示（本地时刻不应出现在卡里）
+        assert format_local_time(rise_u) not in texts
 
     def test_body_card_units(self):
         src = inspect.getsource(RFSkyView._draw_body_info)
