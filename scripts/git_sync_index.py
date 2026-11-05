@@ -89,7 +89,7 @@ def _index_vs_head(root: Path):
         if path not in tree:
             diff.append((path, "NOT-IN-HEAD", sha))
         elif tree[path][1] != sha or tree[path][0] != mode:
-            diff.append((path, f"{mode} {sha[:8]} != HEAD {tree[path][0]} {tree[path][1][:8]}"))
+            diff.append((path, f"{mode} {sha[:8]} != HEAD {tree[path][0]} {tree[path][1][:8]}", sha))
     for path in tree:
         if path not in index:
             diff.append((path, "IN-HEAD-NOT-IN-INDEX", ""))
@@ -130,7 +130,7 @@ def _report(root: Path, sync_all: bool, paths) -> int:
     print(f"[git-sync-index] index={n_index} head={n_head} staged={len(staged)} parity_diff={len(diff)}")
     for path in staged:
         print(f"  STAGED  {path}")
-    for path, why in diff[:50]:
+    for path, why, _sha in diff[:50]:
         print(f"  DIFF    {path}  {why}")
     if len(diff) > 50:
         print(f"  ... 另有 {len(diff) - 50} 条")
