@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "core/spectrum_frame.h"
+#include "core/tokens.h"
 #include "dsp/peak_detector.h"
 #include "dsp/vfo_manager.h"
 #include "ui/spectrum_render.h"   // pure waterfall arithmetic (decimate/lut/ticks/json)
@@ -504,7 +505,7 @@ private:
     // Peak tracking state.
     QList<mbdsdr::dsp::PeakInfo> peaks_;
     QList<int> peakIds_;
-    float peakThresholdDb_ = 15.0f;
+    float peakThresholdDb_ = static_cast<float>(tokens::kPeakRelDb);
     int   highlightedPeak_ = -1;
     QString lastPeakSig_;
     struct TrackedBlip {

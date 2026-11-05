@@ -349,6 +349,25 @@ inline constexpr double kZoomMin = 1.0;
 inline constexpr double kZoomMax = 16.0;
 
 // Peak detection (relative to the spectral median / noise floor)
+//
+// Spectrum DISPLAY gate: 6 dB, not 15. The acceptance counterproof requires a
+// carrier at median+8 dBFS to be marked. With a 15 dB relative gate that
+// carrier (median+8) is mathematically below the candidate gate, so no
+// persistence rule can recover it -- measured with the compiled
+// detectPeaks/rescanPeaks: 24/24 frames produced zero peaks at 15 dB, while
+// 6 dB matured it on the third frame. On the 256-frame 88.1 MHz OTA recording
+// 6 dB produced 3043 vs 3029 peak instances at 15 dB (same zero-peak frames,
+// no flooding under the 12-peak cap), so the lower gate is a definition
+// change, not a noise gate.
+// Known cost: a recurring noise bump can satisfy 6 dB often enough for the
+// 10-frame tracker to promote it to a persistent label (e.g. the
+// 87.700 MHz line on that recording); that is accepted, not a bug.
+inline constexpr double kPeakRelDb = 6.0;            // display detector gate
+// Frequency-calibration reference gate, deliberately kept separate: calibration
+// must reject a noise-only capture and a tone buried in noise (pinned by
+// test_frequency_calibrator), so it keeps the stricter 15 dB. Do NOT merge the
+// two: the display's 6 dB counterproof and calibration's noise-only honesty
+// pull in opposite directions.
 inline constexpr double kPeakThresholdDefault = 15.0; // dB above median
 inline constexpr int    kPeakThresholdMin = 5;
 inline constexpr int    kPeakThresholdMax = 40;

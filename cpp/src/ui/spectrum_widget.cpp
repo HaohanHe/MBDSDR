@@ -412,7 +412,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     {
         mbdsdr::core::AppSettings s;
         int saved = s.value("rx/peakThresholdDb",
-                            static_cast<int>(tokens::kPeakThresholdDefault)).toInt();
+                            static_cast<int>(tokens::kPeakRelDb)).toInt();
         saved = std::clamp(saved, tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
         peakThreshSpin_->setValue(saved);
     }
