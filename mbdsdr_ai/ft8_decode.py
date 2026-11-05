@@ -127,16 +127,6 @@ def decode_ft8_payload(tone_energies: Sequence[Sequence[float]],
     }
 
 
-def hard_tones_to_llr(tones: Sequence[int], confidence: float = 8.0) -> List[float]:
-    """硬判决 tone 序列（58 个 0-7）转 LLR，便于接已有硬判决解调。"""
-    energies = []
-    for t in tones:
-        e = [0.0] * 8
-        e[t] = confidence
-        energies.append(e)
-    return soft_tones_to_llr(energies)
-
-
 # CRC14 多项式 0x6757（wsjtx get_crc14.f90），15 bit
 _CRC_P = [1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1]
 
