@@ -348,6 +348,32 @@ def _fsk_discriminator(audio: np.ndarray,
     return df
 
 
+def _baseband_slicer(audio: np.ndarray,
+                     sample_rate: float,
+                     baud: int) -> np.ndarray:
+    """NRZ 基带前端（真实 NFM/FM 鉴频输出）。
+
+    POCSAG 在 VHF 上是直接 FSK，FM 鉴频后得到 ±频偏的 NRZ 方波，
+    **没有** 1200/2400 Hz AFSK 音调。这里去直流（接收机频偏/鉴频零点）
+    → 归一化 → 半码元滑动平均，输出口径与 `_fsk_discriminator` 一致：
+    正 = 逻辑 0（高频/标记），负 = 逻辑 1（低频/空号）。
+    """
+    x = np.asarray(audio, dtype=np.float64)
+    if x.size == 0:
+        return x
+    # 判决门限取两电平中点（不是均值/中位数）：POCSAG 位流可能长期偏 0 或偏 1，
+    # 用统计均值会把门限拖到某一电平上，整段切成同一符号。
+    lo, hi = np.percentile(x, [5.0, 95.0])
+    mid = 0.5 * (float(lo) + float(hi))
+    amp = 0.5 * (float(hi) - float(lo))
+    if amp < 1e-9:
+        return np.zeros_like(x)
+    x = (x - mid) / amp
+    width = max(3, int(round(0.5 * sample_rate / baud)))
+    kernel = np.ones(width, dtype=np.float64) / width
+    return np.convolve(x, kernel, mode="same")
+
+
 def _bitsync_candidates(df: np.ndarray,
                        sample_rate: float,
                        baud: int) -> List[Tuple[List[int], int, int]]:
@@ -498,11 +524,14 @@ def _decode_alpha(buf: bytes, numnibbles: int) -> str:
 
 def pocsag_decode(audio: np.ndarray,
                   sample_rate: float,
-                  baud: int) -> List[dict]:
+                  baud: int,
+                  baseband: bool = False) -> List[dict]:
     """解码 POCSAG 音频。
 
     参数:
-        audio: 一维浮点音频（FSK 音调 1200/2400 Hz）
+        audio: 一维浮点音频。baseband=False 时是 1200/2400 Hz AFSK 音调；
+            baseband=True 时是 FM 鉴频后的 NRZ 基带（真实 VHF POCSAG 的下行
+            形态，`.cf32` 路由走这一条）。
         sample_rate: 采样率
         baud: 512 / 1200 / 2400
 
@@ -512,7 +541,10 @@ def pocsag_decode(audio: np.ndarray,
     if baud not in SUPPORTED_BAUDS:
         raise ValueError(f"不支持的波特率 {baud}")
 
-    df = _fsk_discriminator(audio, sample_rate, baud)
+    if baseband:
+        df = _baseband_slicer(audio, sample_rate, baud)
+    else:
+        df = _fsk_discriminator(audio, sample_rate, baud)
     candidates = _bitsync_candidates(df, sample_rate, baud)
     if not candidates:
         return []

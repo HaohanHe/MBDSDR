@@ -59,6 +59,8 @@ ERR_NOT_IMPLEMENTED = "not_implemented"
 ERR_SAMPLE_RATE_MISMATCH = "sample_rate_mismatch"
 ERR_INSUFFICIENT_SAMPLES = "insufficient_samples"
 ERR_INVALID_WAV = "invalid_wav"
+# 有信号能量却解出 0 帧：不许把「调制/前导不匹配」伪装成 ok=True 的空成功。
+ERR_SIGNAL_PRESENT_NO_FRAME = "signal_present_no_frame"
 
 # ---- 证据等级（真实度）--------------------------------------------------
 EVIDENCE_REAL = "real"            # 真录/真值对拍
@@ -79,6 +81,13 @@ class DigitalModeCapability:
     sample_rate_rule: str     # 采样率/带宽要求（人读）
     evidence: str             # real / partial / no_sample
     min_sample_condition: str # 最小采样条件（补真样本时按此取数）
+    # 真实世界调制（协议依据）与 `.cf32/.cfile` 路由实际调用的解调入口：
+    # modulation_kind 供机器校验（am/nfm/gmsk/ppm/qpsk/ssb_audio），
+    # iq_demod 必须与 tests/test_iq_modulation_consistency.py 的映射一致；
+    # "" 表示该模式不接受 IQ（只有音频入口），不得声称 IQ 能力。
+    modulation_kind: str = ""
+    modulation: str = ""
+    iq_demod: str = ""
     # 这条证据的来历（三类，事实口径见 docs/learn/decoder-capability-matrix.md）：
     #   external-truth    = 外部真值/标准原文/第三方实现输出；
     #   self-generated    = 仓内编码器或脚本产出；
@@ -103,6 +112,9 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.adsb",
         input_formats=(".cf32", ".cfile"),
         output_kind="frames",
+        modulation_kind="ppm",
+        modulation="PPM/OOK（Mode-S 1090MHz 脉冲位置，非调频/调幅音频）",
+        iq_demod="decode_baseband_any_fs",
         sample_rate_rule=("fs ≥ 2 MS/s；严格入口 decode_baseband 要求 1 MS/s "
                           "整数倍，路由走 decode_baseband_any_fs 带限重采样到 "
                           "8 MS/s 并回报 decode_fs_hz / resample_note"),
@@ -130,6 +142,8 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.ft4_modem",
         input_formats=(".wav",),
         output_kind="messages",
+        modulation_kind="ssb_audio",
+        modulation="4-FSK 音频音调（USB 发射，接收端音频入口；无 IQ 电流解调）",
         sample_rate_rule=(
             "实音频任意 fs（4-FSK 20.833 baud、105 符号/5.04s、四音间隔"
             "≈20.833Hz；解码前重采样到 12kHz，默认搜索中心 1500Hz）"
@@ -151,6 +165,8 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="",       # 通用入口未接线：只说事实，不假装能解
         input_formats=("*",),
         output_kind="note",
+        modulation_kind="ssb_audio",
+        modulation="8-FSK 音频音调（USB 发射；通用 IQ 入口未接线）",
         sample_rate_rule="实音频 12kHz 单声道（通用入口未接线，参数不生效）",
         evidence=EVIDENCE_REAL,
         truth_source="external-truth",   # WSJT-X 官方样本 + 参考解码结果
@@ -167,6 +183,9 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.decode_pipeline",
         input_formats=(".wav", ".cf32", ".cfile"),
         output_kind="frames",
+        modulation_kind="nfm",
+        modulation="NFM + Bell 202 AFSK（1200 bd，mark 1200/space 2200 Hz）",
+        iq_demod="run_aprs_pipeline",
         sample_rate_rule=(
             ".wav：16-bit PCM 单声道，任意 fs ≥ 4800Hz（44.1k/48k/8k 均可），"
             "解码前重采样到 48kHz；.cf32：NFM 复基带 fs ≥ 16000Hz，解码前鉴频"
@@ -192,11 +211,16 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.pocsag_decoder",
         input_formats=(".wav", ".cf32", ".cfile"),
         output_kind="messages",
-        sample_rate_rule="音频任意 fs；.cf32 走宽带 FM 鉴频（fs ≥ 2×占用带宽）",
+        modulation_kind="nfm",
+        modulation="NFM FSK（±4.5 kHz 偏移，512/1200/2400 bd）",
+        iq_demod="_demod_iq_to_audio",
+        sample_rate_rule=("音频任意 fs（1200/2400 Hz AFSK 音调）；.cf32 走 FM "
+                          "鉴频后按 NRZ 基带切片（fs ≥ 2×占用带宽）"),
         evidence=EVIDENCE_PARTIAL,
         min_sample_condition=(
-            "137/153/466MHz NFM 下行音频 ≥ 10s，含 ≥ 2 条 POCSAG 批"
-            "（1200bd、±4.5kHz 偏移、BCH(31,21) 可纠）"
+            "137/153/466MHz NFM 下行 .cf32 ≥ 10s（fs ≥ 2×占用带宽），含 ≥ 2 条 "
+            "POCSAG 批（1200bd、±4.5kHz 偏移、BCH(31,21) 可纠）；仓内已用真实 "
+            "NFM-FSK 合成 IQ 端到端验证，无 OTA 真录"
         ),
         failure_codes=(
             ERR_UNSUPPORTED_FORMAT, "param_not_in_enum",
@@ -212,6 +236,9 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.acars_decoder",
         input_formats=(".wav", ".cf32", ".cfile"),
         output_kind="messages",
+        modulation_kind="am",
+        modulation="AM-MSK（VHF 1200 bd，mark 2400/space 1200 Hz）",
+        iq_demod="_demod_am_to_audio",
         sample_rate_rule="音频任意 fs（内部 12.5kHz 走带）；.cf32 走 AM 包络检波",
         evidence=EVIDENCE_PARTIAL,
         min_sample_condition=(
@@ -232,6 +259,8 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.wspr_modem",
         input_formats=(".wav",),
         output_kind="messages",
+        modulation_kind="ssb_audio",
+        modulation="4-FSK 音频音调（USB 发射，接收端音频入口）",
         sample_rate_rule=(
             "实音频 12kHz 单声道（1.4648 baud、四音间隔 1.464Hz、162 符号 / "
             "110.592s；内部下变频到 375Hz 网格）"
@@ -257,6 +286,9 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.ais_decoder",
         input_formats=(".cf32", ".cfile"),
         output_kind="messages",
+        modulation_kind="gmsk",
+        modulation="GMSK 9600 bd（BT=0.4，恒包络；差分相位解调）",
+        iq_demod="ais_decode_iq",
         sample_rate_rule="fs 为 9600 整数倍且 ≥ 19200（GMSK BT=0.4、9600bd）",
         evidence=EVIDENCE_NO_SAMPLE,
         min_sample_condition=(
@@ -277,6 +309,8 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.navtex_decoder",
         input_formats=(".wav",),
         output_kind="messages",
+        modulation_kind="ssb_audio",
+        modulation="SITOR-B FSK 100 bd（±85 Hz 频移，接收端音频入口）",
         sample_rate_rule="音频任意 fs（100bd FSK，中心 1000Hz，±85Hz）",
         evidence=EVIDENCE_NO_SAMPLE,
         min_sample_condition=(
@@ -297,6 +331,9 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.meteor_sat",
         input_formats=(".cf32", ".cfile"),
         output_kind="symbols/bits",
+        modulation_kind="qpsk",
+        modulation="OQPSK 72k baud LRPT（恒包络，QPSK 相干解调）",
+        iq_demod="meteor_lrpt_demod",
         sample_rate_rule=(
             "fs ≥ 144000 且为 72k 符号率整数倍（LRPT QPSK），"
             "推荐 288000/576000"
@@ -470,10 +507,15 @@ def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
             allowed="512/1200/2400", actual=str(ctx.baud))
         return result
     baud = int(ctx.baud)
+    baseband = False
     if ctx.ext == ".wav":
         audio, a_sr, err = _read_wav_audio(ctx.input_path)
     elif ctx.ext in (".cf32", ".cfile"):
         audio, a_sr, err = _demod_iq_to_audio(ctx.input_path, ctx.sample_rate)
+        # 真实 POCSAG 是 NFM FSK：FM 鉴频输出是 NRZ 基带（±频偏的方波），
+        # 不是 1200/2400 Hz AFSK 音调。按音调前端解真实 IQ 会静默 0 帧，
+        # 所以 .cf32 必须走基带切片（与 ACARS 的 AM 包络同类修正）。
+        baseband = True
     else:
         audio, a_sr = None, 0.0
         err = f"POCSAG 需 .wav 音频或 .cf32 IQ，收到 {ctx.ext}"
@@ -482,7 +524,7 @@ def _route_pocsag(ctx: _Ctx) -> Dict[str, Any]:
         result["error"] = err
     else:
         try:
-            msgs = pocsag_decode(audio, a_sr, baud)
+            msgs = pocsag_decode(audio, a_sr, baud, baseband=baseband)
             result["messages"] = msgs
             result["num_messages"] = len(msgs)
             result["baud"] = baud
@@ -792,6 +834,27 @@ def _input_sample_count(path: str, ext: str, fs: Optional[float]):
 # =========================================================================
 # 路由（原先的 if/elif 链收敛到这里：查表 → 前置校验 → handler）
 # =========================================================================
+def _decoded_total(result: Dict[str, Any]) -> int:
+    """解出的「条数」（messages/frames）；symbols/bits 类有输出即算 1。
+
+    有些 handler 同时带 ``num_messages`` 与 ``num_frames``（APRS 的
+    ``num_messages`` 恒为 0，真实产出在 frames），按最大值取，不能用
+    先命中 0 的那个键。
+    """
+    counts: List[int] = []
+    for key in ("num_messages", "num_frames"):
+        if key in result:
+            try:
+                counts.append(int(result.get(key) or 0))
+            except (TypeError, ValueError):
+                counts.append(0)
+    if counts:
+        return max(counts)
+    if result.get("lrpt"):
+        return 1
+    return 0
+
+
 def run_digital_mode(
     input_path: str,
     mode: str,
@@ -949,11 +1012,13 @@ def _run_digital_mode(
     result.setdefault("error_code", "")
 
     # 简化频谱特征（.cf32 才做；窄带入口显式拒绝时不补频谱，维持原契约）
+    iq_rms = 0.0
     try:
-        if ext == ".cf32" and result.get("status") != "rejected":
+        if ext in (".cf32", ".cfile") and result.get("status") != "rejected":
             raw = np.fromfile(input_path, dtype=np.float32, count=100000)
             if len(raw) >= 2:
                 iq = raw[0::2] + 1j * raw[1::2]
+                iq_rms = float(np.sqrt(np.mean(np.abs(iq) ** 2)))
                 spectrum = np.fft.fft(iq[:1024])
                 powers = np.abs(spectrum) ** 2
                 result["spectral_peak"] = float(np.max(powers))
@@ -961,5 +1026,18 @@ def _run_digital_mode(
                 result["samples_analyzed"] = len(iq)
     except Exception as e:
         result["analysis_error"] = str(e)
+
+    # 「有信号能量但 0 帧」不是成功：ACARS 之前的静默 0 帧正是这样伪装的。
+    if (ext in (".cf32", ".cfile") and result.get("ok") is True
+            and result.get("status") != "rejected"
+            and _decoded_total(result) == 0
+            and iq_rms > 1e-3):
+        result["ok"] = False
+        result["status"] = "error"
+        result["error_code"] = ERR_SIGNAL_PRESENT_NO_FRAME
+        result["error"] = (
+            "输入 IQ 有信号能量但解出 0 帧：调制/前导与本模式不符，"
+            "或解码器未锁定；不把 0 帧当作成功"
+        )
 
     return result
