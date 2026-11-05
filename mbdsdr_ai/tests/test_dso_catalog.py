@@ -28,7 +28,8 @@ from mbdsdr_ai.astronomy import dso
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DSO_PATH = DATA_DIR / "dso_catalog.json"
 ZH_PATH = DATA_DIR / "dso_zh_wikidata.json"
-REFERENCE = Path(r"D:\mbdsdr\reference\openngc")
+# 随仓副本（干净 clone 也能独立对拍）；生成器仍默认读仓库外 reference/openngc。
+REFERENCE = Path(__file__).resolve().parent / "fixtures" / "openngc"
 NGC_CSV = REFERENCE / "NGC.csv"
 ADDENDUM_CSV = REFERENCE / "addendum.csv"
 DOC_PATH = Path(__file__).resolve().parents[2] / "docs" / "dso-catalog.md"
