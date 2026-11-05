@@ -46,7 +46,8 @@ SCAN_ROOT = ROOT
 FIXED_RE = re.compile(r"已修复|已修|已落地|已解决")
 NOT_VERIFIED_RE = re.compile(r"`not_verified`|未复核")
 OPEN_RE = re.compile(r"待修|未修|在途修")
-HASH_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+# 纯数字串（如采样率 3200000）不是提交 hash；要求至少含一个 a-f 字母。
+HASH_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b")
 CMD_RE = re.compile(
     r"`?(?:python\s+-m\s+)?pytest\b|`?ctest\s+-R|`?python\s+scripts/|`?\./scripts/"
 )
