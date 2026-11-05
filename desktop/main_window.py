@@ -32,6 +32,10 @@ MSG_IMPORTANT = 8000
 # 刚建流水线的 HEALTH_GRACE_S 内不判，避免首帧延迟被误报成掉线。
 HEALTH_POLL_MS = 1000
 DATA_STALE_S = 2.0
+#: 后端已报 stale 但迟迟不升级时，UI 侧最后的硬兜底（2 × 5s 心跳）。
+#: 优先信后端 link_state=disconnected；这个值只用于「后端不报 link_state」
+#: 的旧实现，避免界面永远停在「数据流中断」。
+DATA_LOST_S = 10.0
 HEALTH_GRACE_S = 3.0
 
 #: 云台指令在后台线程执行。GUI 线程每拍最多等这么久收结果（快速后端仍在
@@ -656,6 +660,12 @@ class MainWindow(QMainWindow):
         # S8 轮询只在"本段连接确实来过数据"之后才判掉线：首帧前的空窗交给
         # read_failed 信号与宽限期处理，避免把"还没开始出数"误报成掉线。
         self._health_has_data = False
+        # 链路降级态（stale：连接仍在但无数据）在界面上的呈现状态。
+        # 不能把它当掉线拆连接，也不能继续显示「已连接」。
+        self._link_degraded = False
+        self._link_degraded_announced = False
+        self._link_degraded_code = ""
+        self._link_normal_text = ""
         # 损坏配置的处置状态：已备份才允许写回；备份失败则拒绝覆盖原文件
         self._gui_config_corrupt = False
         self._gui_config_corrupt_backup = None
@@ -3587,10 +3597,19 @@ class MainWindow(QMainWindow):
             # 切换失败：回滚到拆掉的旧后端，绝不留"未连接"却以为还连着
             if previous is not None:
                 self._restore_backend_after_failed_switch(previous, friendly)
+            else:
+                # 没有可回滚的旧设备：必须把「连接中」收回「未连接」，
+                # 不许让一次失败的连接把标签永久停在连接中。
+                self.conn_label.setText("  状态: 未连接  ")
+                self.status_conn.setText("未连接")
             return False
 
         # 连接成功：停掉旧 worker，切换到真实后端
         self._last_connect_code = None
+        # 新连接从「正常」开始，清掉上一条链路留下的降级态标记
+        self._link_degraded = False
+        self._link_degraded_announced = False
+        self._link_degraded_code = ""
         self._worker_manager.stop()
         self._worker = None
         self._active_sdr_backend = backend
@@ -4305,6 +4324,9 @@ class MainWindow(QMainWindow):
         self.conn_label.setText("  状态: 未连接  ")
         self.conn_label.setStyleSheet("font-weight: 600;")
         self.status_conn.setText("未连接")
+        self._link_degraded = False
+        self._link_degraded_announced = False
+        self._link_degraded_code = ""
         self.connect_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
         self._refresh_tx_readout()  # 无设备 → 发射读数回 "—"，不留旧频点
@@ -4347,6 +4369,9 @@ class MainWindow(QMainWindow):
             self.conn_label.setText(f"  状态: {message}  ")
             self.conn_label.setStyleSheet(self._conn_label_qss(True))
             self.status_conn.setText(message)
+            self._link_degraded = False
+            self._link_degraded_announced = False
+            self._link_degraded_code = ""
             # S9：硬件真正就绪才启用调谐/录音等控件（连接中一直保持置灰）
             self._panels_set_sdr_connected(True)
             # 硬件就绪：把设备报告的工具 schema 注册进 AI agent
@@ -5445,32 +5470,81 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is None or self._pipeline is None:
             return
-        error, connected, _age = self._backend_status_facts(backend)
+        error, connected, age, link, code = self._backend_status_facts(backend)
         self._read_fail_signals += 1
+        if link == "stale":
+            # 后端明确说「连接仍在、只是没数据」：这是等待态，不是掉线
+            self._show_link_degraded(age, error or reason, code)
+            return
         if not error and connected and self._read_fail_signals < 3:
             self.statusBar().showMessage(f"数据流中断，正在重试：{reason}", MSG_IMPORTANT)
             return
-        self._handle_backend_lost(error or reason or "设备已断开")
+        self._handle_backend_lost(error or reason or "设备已断开", code)
 
-    def _backend_status_facts(self, backend) -> tuple[str, bool, "float | None"]:
-        """读后端 status 的三个事实：错误说明、是否仍连接、最后一帧数据距今秒数。
+    def _backend_status_facts(self, backend) -> tuple[
+            str, bool, "float | None", str, str]:
+        """读后端 status 的五个事实：错误说明、是否连接、数据年龄、链路状态、错误码。
 
-        读不到 status（异常/无该方法）时按"仍连接、无年龄"处理，绝不据此断连。
+        读不到 status（异常/无该方法）时按"仍连接、无年龄/无链路状态"处理，
+        绝不据此断连。
         """
         error = ""
         connected = True
         age = None
+        link = ""
+        code = ""
         try:
             st = backend.get_status()
             error = str(getattr(st, "error", "") or "")
             connected = bool(getattr(st, "connected", True))
             age = getattr(st, "last_data_age_s", None)
             age = None if age is None else float(age)
+            link = str(getattr(st, "link_state", "") or "")
+            code = str(getattr(st, "error_code", "") or "")
         except Exception:
             pass
-        return error, connected, age
+        return error, connected, age, link, code
 
-    def _handle_backend_lost(self, msg: str) -> None:
+    def _show_link_degraded(self, age, error: str, code: str) -> None:
+        """连接仍在但数据流中断：界面显式降级，不拆连接、也不冒充已连接。
+
+        标签每秒更新数据年龄（用户能看见「等了多久」）；状态栏只在第一次
+        进入降级或错误码变化时写，避免 1Hz 重置 8s 显示计时。
+        """
+        try:
+            if not self._link_degraded:
+                self._link_normal_text = self.status_conn.text()
+            self._link_degraded = True
+            age_txt = f"{float(age):.1f}s" if age is not None else "超过阈值"
+            self.status_conn.setText(f"数据流中断 {age_txt}（连接仍在）")
+            self.conn_label.setText("  状态: 数据流中断（连接仍在）  ")
+            if (not self._link_degraded_announced) or (
+                    code and code != self._link_degraded_code):
+                self._link_degraded_announced = True
+                self._link_degraded_code = code
+                msg = f"数据流中断：{age_txt} 未收到 IQ 数据，连接仍在，等待恢复"
+                if code:
+                    msg += f"（错误码 {code}）"
+                self.statusBar().showMessage(msg, MSG_IMPORTANT)
+        except Exception:
+            pass
+
+    def _restore_link_display(self) -> None:
+        """数据恢复：把降级文案还原成连接态；只恢复一次，不每拍刷屏。"""
+        if not self._link_degraded:
+            return
+        self._link_degraded = False
+        self._link_degraded_announced = False
+        self._link_degraded_code = ""
+        name = self._link_normal_text or "未连接"
+        try:
+            self.status_conn.setText(name)
+            self.conn_label.setText(f"  状态: {name}  ")
+            self.statusBar().showMessage("数据流已恢复", MSG_NORMAL)
+        except Exception:
+            pass
+
+    def _handle_backend_lost(self, msg: str, code: str = "") -> None:
         """统一掉线收尾：拆连接（禁用依赖控件 + 清频谱 + 停流水线）+ 状态栏说明。"""
         if self._backend_lost_handled:
             return
@@ -5480,13 +5554,19 @@ class MainWindow(QMainWindow):
             self._teardown_connection()
         finally:
             self._backend_lost_handled = False
-        self.statusBar().showMessage(f"设备已断开：{msg}", MSG_IMPORTANT)
+        final = f"{msg}（错误码 {code}）" if code else msg
+        # 桌面端没有自动重连（ReconnectionManager 未接线），必须明说，
+        # 否则用户会以为界面正在后台重试。
+        self.statusBar().showMessage(
+            f"设备已断开：{final}（不会自动重连，请点工具栏「连接」重试）",
+            MSG_IMPORTANT)
 
     def _on_health_tick(self) -> None:
-        """S8：每秒按后端真实 health 判掉线（读线程卡死时信号永远不来的兜底）。
+        """S8：每秒按后端真实 health 判链路状态（读线程卡死时的兜底）。
 
-        只在流水线运行期间由 _health_timer 触发；首帧前 HEALTH_GRACE_S 内不判。
-        判据先硬后软：status.error → 未连接 → last_data_age_s 超过阈值。
+        状态阶梯：connected → stale（5s 无数据，连接仍在，界面降级可见）
+        → disconnected/failed（10s 硬判，拆连接并上浮错误码）。UI 侧在 2s
+        就先降级可见（AC-06.7），但只到 10s 仍无 link_state 才硬兜底断开。
         年龄为 None（后端不报新鲜度）时不动手，交给 read_failed 那条路径。
         """
         backend = self._active_sdr_backend
@@ -5497,15 +5577,29 @@ class MainWindow(QMainWindow):
             return
         if time.monotonic() < self._health_grace_until:
             return
-        error, connected, age = self._backend_status_facts(backend)
-        if error:
-            self._handle_backend_lost(error)
+        error, connected, age, link, code = self._backend_status_facts(backend)
+        if link in ("failed", "disconnected") or not connected:
+            self._handle_backend_lost(error or "后端报告未连接", code)
             return
-        if not connected:
-            self._handle_backend_lost("后端报告未连接")
+        if link == "stale":
+            self._show_link_degraded(age, error, code)
             return
+        if not link:
+            # 旧后端不报 link_state：保留 error 优先的旧判据，但把 2s..10s
+            # 这段从「已断开」改成可见的数据流中断（仍不拆连接）。
+            if error:
+                self._handle_backend_lost(error)
+                return
+            if age is not None and age > DATA_LOST_S:
+                self._handle_backend_lost(
+                    f"超过 {age:.1f}s 未收到 IQ 数据（数据流中断）")
+                return
         if age is not None and age > DATA_STALE_S:
-            self._handle_backend_lost(f"超过 {age:.1f}s 未收到 IQ 数据（数据流中断）")
+            # 后端还标 connected 但真实数据已断 2s：先降级可见（AC-06.7），
+            # 等后端 5s stale / 10s disconnected 再升级，不提前拆连接。
+            self._show_link_degraded(age, error, code)
+            return
+        self._restore_link_display()
 
     def _update_main_vfo_offset(self):
         """把每个已绑定 DSP 的 VFO 收听频率搬到各自 DDC：offset = vfo_center - backend_center。

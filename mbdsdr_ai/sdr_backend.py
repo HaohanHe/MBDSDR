@@ -191,6 +191,7 @@ class SDRStatus:
     # link_state: connecting / connected / stale / disconnected / failed，空串=未接入观测
     link_state: str = ""
     error_category: str = ""       # 与 link_state.py 的错误词表一致（refused/timeout/reset/idle/...）
+    error_code: str = ""           # error_catalog 稳定码（link_timeout/link_refused/link_half_open/link_reset/buffer_overflow）
     dropped_samples: int = 0       # 环形缓冲覆盖/流速率不足导致的丢样估计
     buffer_fill: int = 0           # 环形缓冲当前未读样点数（缓冲水位）
     buffer_capacity: int = 0       # 环形缓冲容量（样点），0=未知/无环形缓冲
@@ -564,7 +565,9 @@ class SDRBackend:
         rr = getattr(self, "_ring_reader", None)
         if rr is not None:
             try:
-                from .link_state import classify_buffer_level
+                from .link_state import (
+                    classify_buffer_level, error_code_for_buffer_level,
+                )
                 self.status.buffer_fill = rr.available()
                 self.status.buffer_capacity = rr.capacity()
                 self.status.underruns = rr.underruns_total()
@@ -572,6 +575,12 @@ class SDRBackend:
                 level = classify_buffer_level(
                     self.status.buffer_fill, self.status.buffer_capacity)
                 self.status.buffer_level = level["level"]
+                # 环形缓冲积压到 high（旧样本将被覆盖）是独立于断链的失败：
+                # 只有在没有更具体的链路码时才补 buffer_overflow，避免覆盖
+                # link_timeout/link_half_open 这类更该优先展示的根因。
+                if not self.status.error_code:
+                    self.status.error_code = error_code_for_buffer_level(
+                        level["level"])
             except Exception:
                 pass
         # 最后一次真实数据距今时间（有 ring 的后端在生产者成功读到时刷新）。

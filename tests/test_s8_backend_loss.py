@@ -106,12 +106,24 @@ class TestS8BackendLoss:
         assert msg.startswith("设备已断开："), msg
         assert "连接已被对端关闭" in msg, msg
 
-    def test_stale_data_marks_lost_without_any_signal(self, window):
-        """读线程卡死时没有任何 read_failed：只能靠 1s 轮询兜底。"""
+    def test_stale_data_visible_as_degraded_then_lost_at_10s(self, window):
+        """读线程卡死时没有任何 read_failed：只能靠 1s 轮询兜底。
+
+        5s（后端 idle 阈值）是「连接仍在、数据流中断」的等待态：界面必须
+        显式降级可见，但不能拆连接——否则用户会看到假的「已断开」，而且
+        后端仍有机会恢复。到 10s（两倍心跳）仍无数据才按掉线收尾。
+        """
         b = _StubBackend(connected=True, error="", age=5.0)
         w = _prepare(window, b)
         w._on_health_tick()
-        assert w._active_sdr_backend is None, "5s 没数据必须判掉线"
+        assert w._active_sdr_backend is b, "5s 只是 stale，连接仍在，不能拆"
+        txt = w.status_conn.text()
+        assert "数据流中断" in txt and "连接仍在" in txt, txt
+        assert "设备已断开" not in w.statusBar().currentMessage()
+
+        b.age = 10.5
+        w._on_health_tick()
+        assert w._active_sdr_backend is None, "10s（2×心跳）仍无数据必须判掉线"
         msg = w.statusBar().currentMessage()
         assert msg.startswith("设备已断开："), msg
         assert "未收到 IQ 数据" in msg, msg

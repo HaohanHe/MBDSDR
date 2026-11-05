@@ -375,3 +375,44 @@ python tests/network_hotplug_regression.py
 `usb-unplug` 只有「人工拔线后观察 connected→False、link_state→disconnected、
 重连首帧正常」这一条路；脚本把人工步骤如实标 SKIP，不拿网络源的断开代替真机
 拔线结论。
+
+## 8. 界面状态阶梯：用户到底看到什么（2026-11-06）
+
+回归文件：`tests/test_link_state_visibility.py`（六状态表本身写在文件头注释里）。
+判据一律取后端 `get_status()` 的真实字段，UI 不另算：
+
+| 状态 | 后端事实 | 界面文案（修复后） | 修复前 |
+|---|---|---|---|
+| 连接中 | `connect()` 尚未返回（远端最长 5s） | `连接中 <设备>`（`QApplication.processEvents()` 后可见） | 远端/本地路径**没有**连接中，标签停在上一状态；只有 ai-sdr worker 路径有 |
+| 已连接 | `link_state=connected` 且数据年龄 ≤2s | `<设备名>` | 诚实 |
+| 静默超时 5s | `link_state=stale`，`connected=True` | `数据流中断 5.2s（连接仍在）`；状态栏只报一次，附 `link_half_open` | **看不到**：health tick 先看 `error`（stale 会写 error）或 2s 年龄，直接按掉线收尾 |
+| 升级断开 10s | `link_state=disconnected/failed` 或 `connected=False` | `未连接` + `设备已断开：…（错误码 link_reset）（不会自动重连，请点工具栏「连接」重试）` | 已经在 2s 被提前判死，10s 这一刻没有独立文案 |
+| 自动重连中 | 桌面端**未接线** `ReconnectionManager` | 不显示（不伪造） | 同样不存在 |
+| 重连成功 / 放弃 | 只能用户手动点「连接」 | 手动连接成功后回到「已连接」 | 不存在自动成功/放弃 |
+
+用户最初假设「中间 5 秒显示还连着」与实测代码不符：`_on_health_tick` 的旧判据是
+`status.error` 优先、其次 `last_data_age_s > 2s`，两处都会直接 `_handle_backend_lost`。
+所以真实假状态是**跳过 stale、提前说「已断开」**，而不是 stale 期间冒充已连接。
+修复后 2s 起就显式降级（满足 AC-06.7 可见性），5s/10s 由后端 `link_state` 驱动。
+
+反证：删除 `_on_health_tick` 里的 `if link == "stale"` 分支后，
+`test_stale_is_visible_not_disconnected` 立刻红，实际标签是 `FakeSDR |`（仍在冒充
+已连接）；恢复分支后 6 条全绿。
+
+### 重连策略实测（桌面 vs 库层）
+
+桌面端没有把 `ReconnectionManager` 接到 `MainWindow`（`grep ReconnectionManager
+desktop/` 无命中），所以真实策略是**断了就放弃**：自动重试 0 次、间隔 N/A、不会
+自动恢复、也不会自动误连。`tests/test_link_state_visibility.py::test_no_auto_reconnect_policy`
+把这条现状钉死。
+
+库层（若将来接线）用假后端实测：
+
+| 场景 | 实测数字 | 结论 |
+|---|---|---|
+| ① 对端彻底不回来 | 6 次，时刻 0.505/1.513/3.524/7.527/15.537/31.575s，间隔 1/2/4/8/16s，放弃总耗时 61.60s | 有上限，不会永远转圈 |
+| ② 3s 后回来 | 第 3 次（3.52s）恢复；频率 100MHz、采样率 2.4MHz、增益 30dB 恢复；**解调模式 NFM→WFM 未恢复** | 自动恢复；模式不保持（`_restore_settings` 未下发 `demod_mode`） |
+| ③ 回来但换了设备 | 首连即成功，`device_id=dev-B`，仍把 100MHz 设置下发到陌生设备 | **会误连**；无设备身份校验 |
+
+场景 ②/③ 是库层行为，桌面端当前根本不会自动走到那里；报告里不得把它当成
+桌面体验。真机/真实网络仍未验证。

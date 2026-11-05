@@ -61,6 +61,7 @@ from .link_state import (
     CATEGORY_RESET,
     classify_handshake_reason,
     classify_network_error,
+    error_code_for_category,
     suggestion_for,
 )
 
@@ -111,6 +112,8 @@ class RtlTcpClient:
         self.error: str = ""
         # 可区分错误类别与下一步建议（见 link_state.py 词表）
         self.error_category: str = ""
+        # error_catalog 稳定码（link_timeout/link_refused/link_half_open/link_reset）
+        self.error_code: str = ""
         self.suggestion: str = ""
         # 链路状态机：connecting / connected / stale / disconnected / failed
         self.state: str = STATE_DISCONNECTED
@@ -152,6 +155,7 @@ class RtlTcpClient:
     def _mark_failed(self, category: str, message: str, suggestion: str = "") -> None:
         self.state = STATE_FAILED
         self.error_category = category
+        self.error_code = error_code_for_category(category)
         self.error = message
         self.suggestion = suggestion or suggestion_for(category)
         self._stale_streak = 0
@@ -162,6 +166,7 @@ class RtlTcpClient:
         if self.state == STATE_CONNECTED:
             self.state = STATE_STALE
         self.error_category = CATEGORY_IDLE
+        self.error_code = error_code_for_category(CATEGORY_IDLE)
         self.error = message or (
             f"超过 {self.idle_timeout:g}s 未收到 IQ 数据（心跳缺失），"
             "连接仍在但数据流已中断")
@@ -171,6 +176,7 @@ class RtlTcpClient:
                            suggestion: str = "") -> None:
         self.state = STATE_DISCONNECTED
         self.error_category = category
+        self.error_code = error_code_for_category(category)
         self.error = message
         self.suggestion = suggestion or suggestion_for(category)
         self._stale_streak = 0
@@ -179,6 +185,7 @@ class RtlTcpClient:
     def _mark_connected(self) -> None:
         self.state = STATE_CONNECTED
         self.error_category = ""
+        self.error_code = ""
         self.error = ""
         self.suggestion = ""
         self._stale_streak = 0
@@ -191,6 +198,7 @@ class RtlTcpClient:
         self.state = STATE_CONNECTING
         self.error = ""
         self.error_category = ""
+        self.error_code = ""
         self.suggestion = ""
         # socket.create_connection((host, port), timeout=5)：
         # 连接阶段 5 秒超时，避免 server 半开连接把客户端永久挂起。
@@ -398,6 +406,7 @@ class RtlTcpClient:
                 "host": self.host,
                 "port": self.port,
                 "category": self.error_category,
+                "code": self.error_code,
                 "message": self.error,
                 "suggestion": self.suggestion,
                 "connected": self.connected,
@@ -610,6 +619,7 @@ class RtlTcpBackend(SDRBackend):
             self.status.connected = False
             self.status.link_state = "failed"
             self.status.error_category = client.error_category
+            self.status.error_code = client.error_code
             # 确保 error 一定含"连接失败"硬红线关键字
             msg = (client.error
                    or user_message("missing_error_detail", context="RTL-TCP"))
@@ -622,6 +632,7 @@ class RtlTcpBackend(SDRBackend):
         self.status.link_state = "connected"
         self.status.error = ""
         self.status.error_category = ""
+        self.status.error_code = ""
         self._start_time = time.time()
 
         # 对照 RTLSDRBackend.connect：打开后逐项显式下发设置，不停在出厂默认。
@@ -660,6 +671,7 @@ class RtlTcpBackend(SDRBackend):
                 # socket 仍在：显式降级，不翻 connected，但不许显示"正常在线"
                 self.status.link_state = STATE_STALE
                 self.status.error_category = self._client.error_category
+                self.status.error_code = self._client.error_code
                 self.status.error = self._client.error
                 health = self._client.data_health()
                 self.status.last_data_age_s = health.get("last_data_age_s")
@@ -667,6 +679,7 @@ class RtlTcpBackend(SDRBackend):
                 self.status.connected = False
                 self.status.link_state = STATE_DISCONNECTED
                 self.status.error_category = self._client.error_category
+                self.status.error_code = self._client.error_code
                 self.status.error = (
                     self._client.error or "读取 IQ 失败：连接已断开"
                 )
@@ -675,6 +688,7 @@ class RtlTcpBackend(SDRBackend):
             self.status.link_state = STATE_CONNECTED
             self.status.error = ""
             self.status.error_category = ""
+            self.status.error_code = ""
         self._last_ring_data_time = time.time()
         self.status.last_data_age_s = 0.0
         return out
@@ -688,6 +702,7 @@ class RtlTcpBackend(SDRBackend):
             "state": st.link_state or "disconnected",
             "connected": bool(st.connected),
             "category": st.error_category,
+            "code": st.error_code,
             "message": st.error,
             "suggestion": base.get("suggestion", ""),
             "samples_total": int(st.samples_read),

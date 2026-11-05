@@ -119,6 +119,11 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `unknown_server` | access | 未知服务器 | 未知服务器 '{detail}'。 | 从已配置服务器列表中选择。 | 否 |
 | `unsupported` | access | 不支持的操作 | 不支持的操作：{detail} | 改用受支持的操作。 | 否 |
 | `usb_disconnected` | access | USB 已断开 | USB 设备已断开：{detail} | 重新插拔设备并重新连接。 | 是 |
+| `buffer_overflow` | access | 环形缓冲积压丢样 | 环形缓冲积压接近上限，旧样本被覆盖：{detail} | 降低采样率或减少订阅者，让读侧跟上；积压不降时会持续丢样。 | 否 |
+| `link_half_open` | access | 链路半开 | 链路半开（连接仍在但没有 IQ 数据）：{detail} | 确认对端仍在采数、网络未丢包；连续两倍心跳仍无数据会自动断开，届时重新连接。 | 是 |
+| `link_refused` | access | 远端拒绝连接 | 远端 SDR 拒绝连接：{detail} | 确认 rtl_tcp/SpyServer 服务已启动、地址与端口正确后重试。 | 否 |
+| `link_reset` | access | 链路被对端重置 | 远端重置了连接：{detail} | 确认服务端未重启/未踢出本机后重新连接。 | 是 |
+| `link_timeout` | access | 链路超时（连接/握手） | 与远端 SDR 的连接超时：{detail} | 检查网络、防火墙与对端服务是否在监听；对端无响应时不要反复立即重试。 | 是 |
 | `bad_field` | recorder | 字段不合法 | 字段不合法：{detail} | 按字段说明修正后重试。 | 否 |
 | `bad_param` | recorder | 参数不合法（录音库） | 参数不合法：{detail} | 修正参数后重试。 | 否 |
 | `bad_parameter` | recorder | 参数不合法 | 参数不合法：{detail} | 修正参数后重试。 | 否 |

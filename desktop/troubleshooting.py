@@ -201,6 +201,12 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
     # AI 步骤卡 message 通道：tool_registry 对「失败且正文为空」用
     # user_message("missing_error_detail") 补正文，步骤卡摘要显示该 message。
     "工具结果": ("missing_error_detail",),
+    # 状态栏错误码通道：main_window 在「设备已断开 / 数据流中断」时同时显示
+    # status.error_code（rtl_tcp/SpyServer 由 link_state 类别映射得到）。
+    "接入链路": (
+        "link_timeout", "link_refused", "link_half_open", "link_reset",
+        "buffer_overflow",
+    ),
 }
 
 #: 每个族一条「下一步」：必须点到具体控件名，禁止空话。
@@ -232,19 +238,23 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
     "工具结果": (
         "在「AI 助手」页签展开该步骤卡看返回码，按「能力目录」改用同一能力的"
         "具体工具重发；连续两次空结果就停止重试并记录步骤卡内容。"),
+    "接入链路": (
+        "先在顶栏点「连接」重连；rtl_tcp 确认启动命令 `rtl_tcp -a <本机IP> -p <端口>` "
+        "仍在跑、SpyServer 确认端口号；防火墙放行本机 IP。数据流中断但连接未断时"
+        "先等两倍心跳（10s）看是否自动恢复，仍无数据再重连。"),
 }
 
 #: 解码结果族里原因码各异，「下一步」逐码写具体动作（族级一条盖不住：
 #: 采样率档位、样本长度、CRC 是三种完全不同的修法）。
 CODE_NEXT_STEPS: Dict[str, str] = {
     "crc_failed": (
-        "「控制」页签降低符号速率/带宽并提高增益，改善天线后重录；"
-        "APRS 类至少录 5s，ADS-B 保持 1090MHz 与 fs=2/4MHz。"),
+        "「控制」页签降低解调带宽并提高增益，改善天线后重录；"
+        "APRS 类录满一整帧（实战建议 ≥5s），ADS-B 保持 1090MHz 与 fs=2/4MHz。"),
     "insufficient_samples": (
-        "点顶栏「开始/停止录音」延长录制时长到至少一整帧再重试"
-        "（APRS ≥ 5s、FT4 75s 整帧）。"),
+        "点「工具」菜单的「开始/停止录音」（Ctrl+R）延长录制时长到至少一整帧再"
+        "重试（代码按最短一帧校验：APRS 0.2s，FT4 75s 整帧）。"),
     "invalid_input": (
-        "按步骤卡返回的错误信息修正参数，再到「控制」页签核对模式与符号速率后重试，"
+        "按步骤卡返回的错误信息修正参数，再到「控制」页签核对解调模式后重试，"
         "不要原样重复同一组参数。"),
     "invalid_wav": (
         "换用 16-bit PCM 单声道 WAV（或先修复容器）后重新解码，"

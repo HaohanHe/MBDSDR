@@ -49,9 +49,11 @@ from .link_state import (
     STATE_FAILED,
     STATE_STALE,
     CATEGORY_EOF,
+    CATEGORY_IDLE,
     CATEGORY_RESET,
     classify_handshake_reason,
     classify_network_error,
+    error_code_for_category,
     suggestion_for,
 )
 
@@ -123,6 +125,7 @@ class SpyServerClient:
         self.state: str = STATE_DISCONNECTED
         self.error: str = ""
         self.error_category: str = ""
+        self.error_code: str = ""
         self.suggestion: str = ""
         self.sample_rate_hz: Optional[float] = None
 
@@ -139,6 +142,7 @@ class SpyServerClient:
         self.state = STATE_CONNECTING
         self.error = ""
         self.error_category = ""
+        self.error_code = ""
         self.suggestion = ""
 
         # 1) 建 socket
@@ -215,6 +219,7 @@ class SpyServerClient:
     def _fail(self, category: str, message: str, suggestion: str = "") -> None:
         self.state = STATE_FAILED
         self.error_category = category
+        self.error_code = error_code_for_category(category)
         self.error = message
         self.suggestion = suggestion or suggestion_for(category)
         self._running = False
@@ -229,13 +234,15 @@ class SpyServerClient:
     def _mark_stale(self, message: str) -> None:
         if self.state == STATE_CONNECTED:
             self.state = STATE_STALE
-        self.error_category = "idle"
+        self.error_category = CATEGORY_IDLE
+        self.error_code = error_code_for_category(CATEGORY_IDLE)
         self.error = message
-        self.suggestion = suggestion_for("idle")
+        self.suggestion = suggestion_for(CATEGORY_IDLE)
 
     def _mark_disconnected(self, category: str, message: str) -> None:
         self.state = STATE_DISCONNECTED
         self.error_category = category
+        self.error_code = error_code_for_category(category)
         self.error = message
         self.suggestion = suggestion_for(category)
         self._running = False
@@ -367,6 +374,7 @@ class SpyServerClient:
             self.state = STATE_CONNECTED
             self.error = ""
             self.error_category = ""
+            self.error_code = ""
             self.suggestion = ""
             self._stale_streak = 0
         self._health.on_data(n, n_bytes=len(raw))
@@ -392,6 +400,7 @@ class SpyServerClient:
                 "host": self.host,
                 "port": self.port,
                 "category": self.error_category,
+                "code": self.error_code,
                 "message": self.error,
                 "suggestion": self.suggestion,
                 "connected": self.connected,
@@ -489,6 +498,7 @@ class SpyServerBackend(SDRBackend):
             self.status.connected = False
             self.status.link_state = STATE_FAILED
             self.status.error_category = client.error_category
+            self.status.error_code = client.error_code
             msg = (str(e) or client.error
                    or user_message("missing_error_detail", context="SpyServer"))
             self.status.error = (
@@ -502,6 +512,7 @@ class SpyServerBackend(SDRBackend):
         self.status.link_state = STATE_CONNECTED
         self.status.error = ""
         self.status.error_category = ""
+        self.status.error_code = ""
         self._start_time = time.time()
 
         # 初始化下发（失败不掩盖：set_* 会把原因写进 status.error）
@@ -529,6 +540,7 @@ class SpyServerBackend(SDRBackend):
         except SpyServerError:
             state = self._client.state
             self.status.error_category = self._client.error_category
+            self.status.error_code = self._client.error_code
             self.status.error = self._client.error
             if state == STATE_STALE:
                 self.status.link_state = STATE_STALE
@@ -541,12 +553,14 @@ class SpyServerBackend(SDRBackend):
         if out is None or len(out) == 0:
             self.status.connected = False
             self.status.link_state = STATE_DISCONNECTED
+            self.status.error_code = self._client.error_code
             self.status.error = "读取 IQ 失败：无数据（连接已断开）"
             return None
         if self.status.link_state in (STATE_STALE, STATE_DISCONNECTED, STATE_FAILED):
             self.status.link_state = STATE_CONNECTED
             self.status.error = ""
             self.status.error_category = ""
+            self.status.error_code = ""
         self._last_ring_data_time = time.time()
         self.status.last_data_age_s = 0.0
         return out
@@ -590,6 +604,7 @@ class SpyServerBackend(SDRBackend):
             "state": st.link_state or "disconnected",
             "connected": bool(st.connected),
             "category": st.error_category,
+            "code": st.error_code,
             "message": st.error,
             "suggestion": base.get("suggestion", ""),
             "samples_total": int(st.samples_read),

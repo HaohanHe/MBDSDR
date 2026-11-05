@@ -52,7 +52,19 @@ CATEGORY_HANDSHAKE = "handshake"      # 不是目标服务 / 握手不完整
 CATEGORY_AUTH = "auth"                # 鉴权/访问控制拒绝
 CATEGORY_IDLE = "idle"                # 连接在但长时间无数据（心跳缺失）
 CATEGORY_BUSY = "busy"                # 设备/端口被占用
+CATEGORY_OVERFLOW = "overflow"        # 环形缓冲积压覆盖旧样本（丢样）
 CATEGORY_UNKNOWN = "unknown"
+
+#: 链路错误类别 → error_catalog 错误码。用户要求在状态栏/帮助里看到稳定的
+#: code，而不是只看到一句「断开了」；没有对应码的类别如实留空（不硬套）。
+ERROR_CODE_BY_CATEGORY = {
+    CATEGORY_TIMEOUT: "link_timeout",
+    CATEGORY_REFUSED: "link_refused",
+    CATEGORY_RESET: "link_reset",
+    CATEGORY_EOF: "link_half_open",
+    CATEGORY_IDLE: "link_half_open",
+    CATEGORY_OVERFLOW: "buffer_overflow",
+}
 
 _REFUSED_CODES = {61, 111, 10061}      # macOS / Linux / Windows
 _RESET_CODES = {54, 104, 10054, 32, 10053}
@@ -74,6 +86,16 @@ _SUGGESTIONS = {
 def suggestion_for(category: str) -> str:
     """按类别给出可操作建议（未知类别回退到通用建议）。"""
     return _SUGGESTIONS.get(category, _SUGGESTIONS[CATEGORY_UNKNOWN])
+
+
+def error_code_for_category(category: str) -> str:
+    """链路类别 → error_catalog 码；未登记的类别返回空串（不硬套码）。"""
+    return ERROR_CODE_BY_CATEGORY.get(str(category or ""), "")
+
+
+def error_code_for_buffer_level(level: str) -> str:
+    """缓冲水位 high（积压将覆盖旧样本）→ ``buffer_overflow``；其余为空。"""
+    return "buffer_overflow" if str(level or "") == BUFFER_LEVEL_HIGH else ""
 
 
 def classify_network_error(
@@ -409,7 +431,11 @@ __all__ = [
     "CATEGORY_AUTH",
     "CATEGORY_IDLE",
     "CATEGORY_BUSY",
+    "CATEGORY_OVERFLOW",
     "CATEGORY_UNKNOWN",
+    "ERROR_CODE_BY_CATEGORY",
+    "error_code_for_category",
+    "error_code_for_buffer_level",
     "BUFFER_LEVEL_EMPTY",
     "BUFFER_LEVEL_LOW",
     "BUFFER_LEVEL_OK",
