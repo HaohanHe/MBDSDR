@@ -6,7 +6,7 @@ MBDSDR 设备状态面板
 SDR 设备信息、UTC 时钟。
 
 所有数值字段均从真实后端（mbdsdr_ai.sdr_backend.SDRBackend）读取；
-无数据时一律显 "--"，绝不显示 0 或默认值伪装成有效读数。
+无数据时一律显 "—"，绝不显示 0 或默认值伪装成有效读数。
 """
 
 import datetime
@@ -21,6 +21,35 @@ from PySide6.QtGui import QFont
 
 from tokens import tokens
 from mbdsdr_ai.squelch import margin_threshold_db
+from constants import format_sample_rate
+
+# 空态唯一记号（N-03）：不可用/未测到一律「—」，不再混用两套横线。
+_EMPTY = "—"
+
+
+def _fmt_number(value, digits: int, unit: str = "") -> str:
+    """固定小数位 + 负零归零 + 缺失/NaN 显式空态（N-02/N-03）。
+
+    同一控件的精度只由 ``digits`` 决定，不随数值大小改变；``-0.0``、``-0 Hz``
+    这类「负零」先按半个末位归零，避免用户误读成反向偏移。
+    """
+    if value is None:
+        return _EMPTY
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return _EMPTY
+    if not math.isfinite(v):
+        return _EMPTY
+    if abs(v) < 0.5 * 10 ** (-digits):
+        v = 0.0
+    return f"{v:.{digits}f}{unit}"
+
+
+def _fmt_dbfs(value) -> str:
+    """RSSI/电平唯一口径：dBFS、1 位小数，缺值「—」（从不拿 0 兜底）。"""
+    txt = _fmt_number(value, 1)
+    return _EMPTY if txt == _EMPTY else txt + " dBFS"
 
 
 # ---------------------------------------------------------------------------
@@ -38,41 +67,37 @@ _LEVEL_MAX = 0.0
 
 
 def _fmt_freq(hz):
-    """把 Hz 格式化为易读频率字符串。无值返回 '--'。"""
+    """把 Hz 格式化为易读频率字符串（N-01：≥1 MHz 固定 6 位小数）。"""
     if hz is None:
-        return "--"
+        return _EMPTY
     try:
         hz = float(hz)
     except (TypeError, ValueError):
-        return "--"
+        return _EMPTY
+    if not math.isfinite(hz):
+        return _EMPTY
     if hz >= 1e6:
-        return f"{hz / 1e6:.3f} MHz"
+        return f"{hz / 1e6:.6f} MHz"
     if hz >= 1e3:
         return f"{hz / 1e3:.3f} kHz"
     return f"{hz:.0f} Hz"
 
 
 def _fmt_rate(hz):
-    """采样率格式化。"""
-    if hz is None:
-        return "--"
-    try:
-        hz = float(hz)
-    except (TypeError, ValueError):
-        return "--"
-    if hz >= 1e6:
-        return f"{hz / 1e6:.3f} MHz"
-    return f"{hz / 1e3:.0f} kHz"
+    """采样率显示：唯一口径「MS/s」固定 3 位小数（U-03）。"""
+    return format_sample_rate(hz)
 
 
 def _fmt_bw(hz):
     """解调带宽格式化。0/None 视为自动。"""
     if hz is None:
-        return "--"
+        return _EMPTY
     try:
         hz = float(hz)
     except (TypeError, ValueError):
-        return "--"
+        return _EMPTY
+    if not math.isfinite(hz):
+        return _EMPTY
     if hz <= 0:
         return "自动"
     if hz >= 1e6:
@@ -99,11 +124,11 @@ def _fmt_squelch(squelch_db, applied_by="none", threshold_dbfs=None):
         return "C++ 手动门（门限未回读）"
     if by != "desktop-margin" or squelch_db is None:
         # 非桌面余量、或从未设置过来源：不给数字戴任何单位帽子
-        return "--"
+        return "—"
     try:
         s = float(squelch_db)
     except (TypeError, ValueError):
-        return "--"
+        return "—"
     return f"{s:.0f}（{margin_threshold_db(s):.0f} dB 余量，桌面生效）"
 
 
@@ -115,13 +140,13 @@ def _dbfs_to_smeter(dbfs):
     S9+xx，等于把"没测出电平"伪装成"信号爆表"。两者都违反诚实红线。
     """
     if dbfs is None:
-        return "--"
+        return "—"
     try:
         dbfs = float(dbfs)
     except (TypeError, ValueError):
-        return "--"
+        return "—"
     if not math.isfinite(dbfs):
-        return "--"
+        return "—"
     if dbfs >= _S9_DBFS:
         extra = dbfs - _S9_DBFS
         return f"S9 +{extra:.0f} dB"
@@ -290,28 +315,28 @@ class StatusPanel(QWidget):
         signal_layout = QGridLayout(self.signal_group)
 
         signal_layout.addWidget(QLabel("RSSI:"), 0, 0)
-        self.rssi_value = QLabel("--")
+        self.rssi_value = QLabel("—")
         self.rssi_value.setObjectName("statusValue")
         signal_layout.addWidget(self.rssi_value, 0, 1)
 
         signal_layout.addWidget(QLabel("SNR:"), 0, 2)
-        self.snr_value = QLabel("--")
+        self.snr_value = QLabel("—")
         self.snr_value.setObjectName("statusValue")
         signal_layout.addWidget(self.snr_value, 0, 3)
 
         signal_layout.addWidget(QLabel("模式:"), 1, 0)
-        self.mode_value = QLabel("--")
+        self.mode_value = QLabel("—")
         self.mode_value.setObjectName("statusValue")
         signal_layout.addWidget(self.mode_value, 1, 1)
 
         signal_layout.addWidget(QLabel("频率:"), 1, 2)
-        self.freq_value = QLabel("--")
+        self.freq_value = QLabel("—")
         self.freq_value.setObjectName("statusValue")
         signal_layout.addWidget(self.freq_value, 1, 3)
 
         # S-meter 读数
         signal_layout.addWidget(QLabel("S表:"), 2, 0)
-        self.smeter_value = QLabel("--")
+        self.smeter_value = QLabel("—")
         self.smeter_value.setObjectName("statusValue")
         signal_layout.addWidget(self.smeter_value, 2, 1)
         signal_layout.addWidget(QLabel("电平:"), 2, 2)
@@ -335,52 +360,52 @@ class StatusPanel(QWidget):
 
         # 每行两个字段：标签 | 值 | 标签 | 值
         rx_layout.addWidget(QLabel("中心频率:"), 0, 0)
-        self.rx_freq = QLabel("--")
+        self.rx_freq = QLabel("—")
         self.rx_freq.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_freq, 0, 1)
 
         rx_layout.addWidget(QLabel("采样率:"), 0, 2)
-        self.rx_srate = QLabel("--")
+        self.rx_srate = QLabel("—")
         self.rx_srate.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_srate, 0, 3)
 
         rx_layout.addWidget(QLabel("解调带宽:"), 1, 0)
-        self.rx_bw = QLabel("--")
+        self.rx_bw = QLabel("—")
         self.rx_bw.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_bw, 1, 1)
 
         rx_layout.addWidget(QLabel("解调模式:"), 1, 2)
-        self.rx_demod = QLabel("--")
+        self.rx_demod = QLabel("—")
         self.rx_demod.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_demod, 1, 3)
 
         rx_layout.addWidget(QLabel("射频增益:"), 2, 0)
-        self.rx_gain = QLabel("--")
+        self.rx_gain = QLabel("—")
         self.rx_gain.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_gain, 2, 1)
 
         rx_layout.addWidget(QLabel("AGC:"), 2, 2)
-        self.rx_agc = QLabel("--")
+        self.rx_agc = QLabel("—")
         self.rx_agc.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_agc, 2, 3)
 
         rx_layout.addWidget(QLabel("静噪:"), 3, 0)
-        self.rx_squelch = QLabel("--")
+        self.rx_squelch = QLabel("—")
         self.rx_squelch.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_squelch, 3, 1)
 
         rx_layout.addWidget(QLabel("音量:"), 3, 2)
-        self.rx_volume = QLabel("--")
+        self.rx_volume = QLabel("—")
         self.rx_volume.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_volume, 3, 3)
 
         rx_layout.addWidget(QLabel("PPM:"), 4, 0)
-        self.rx_ppm = QLabel("--")
+        self.rx_ppm = QLabel("—")
         self.rx_ppm.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_ppm, 4, 1)
 
         rx_layout.addWidget(QLabel("Offset:"), 4, 2)
-        self.rx_offset = QLabel("--")
+        self.rx_offset = QLabel("—")
         self.rx_offset.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_offset, 4, 3)
 
@@ -397,40 +422,40 @@ class StatusPanel(QWidget):
         gps_layout.addWidget(self.gps_fix, 0, 1)
 
         gps_layout.addWidget(QLabel("卫星:"), 0, 2)
-        self.gps_sats = QLabel("--")
+        self.gps_sats = QLabel("—")
         self.gps_sats.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_sats, 0, 3)
 
         gps_layout.addWidget(QLabel("纬度:"), 1, 0)
-        self.gps_lat = QLabel("--")
+        self.gps_lat = QLabel("—")
         self.gps_lat.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_lat, 1, 1, 1, 3)
 
         gps_layout.addWidget(QLabel("经度:"), 2, 0)
-        self.gps_lon = QLabel("--")
+        self.gps_lon = QLabel("—")
         self.gps_lon.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_lon, 2, 1, 1, 3)
 
         gps_layout.addWidget(QLabel("高度:"), 3, 0)
-        self.gps_alt = QLabel("--")
+        self.gps_alt = QLabel("—")
         self.gps_alt.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_alt, 3, 1)
 
         gps_layout.addWidget(QLabel("HDOP:"), 3, 2)
-        self.gps_hdop = QLabel("--")
+        self.gps_hdop = QLabel("—")
         self.gps_hdop.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_hdop, 3, 3)
 
         # 数据时间戳（来源/更新时间）
         gps_layout.addWidget(QLabel("更新:"), 4, 0)
-        self.gps_timestamp = QLabel("--")
+        self.gps_timestamp = QLabel("—")
         self.gps_timestamp.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_timestamp, 4, 1, 1, 3)
 
         # 卫星信号强度（可选）：fix_dict 带 satellite_signals 时显示最强 5 颗 SNR；
-        # 无该字段时保持 "--"，不报错。
+        # 无该字段时保持 "—"，不报错。
         gps_layout.addWidget(QLabel("信号:"), 5, 0)
-        self.gps_signals = QLabel("--")
+        self.gps_signals = QLabel("—")
         self.gps_signals.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_signals, 5, 1, 1, 3)
 
@@ -442,13 +467,13 @@ class StatusPanel(QWidget):
 
         # 加速度
         imu_layout.addWidget(QLabel("加速度:"), 0, 0)
-        self.acc_x = QLabel("--")
+        self.acc_x = QLabel("—")
         self.acc_x.setObjectName("statusValue")
         imu_layout.addWidget(self.acc_x, 0, 1)
-        self.acc_y = QLabel("--")
+        self.acc_y = QLabel("—")
         self.acc_y.setObjectName("statusValue")
         imu_layout.addWidget(self.acc_y, 0, 2)
-        self.acc_z = QLabel("--")
+        self.acc_z = QLabel("—")
         self.acc_z.setObjectName("statusValue")
         imu_layout.addWidget(self.acc_z, 0, 3)
 
@@ -456,13 +481,13 @@ class StatusPanel(QWidget):
 
         # 陀螺仪
         imu_layout.addWidget(QLabel("陀螺仪:"), 1, 0)
-        self.gyr_x = QLabel("--")
+        self.gyr_x = QLabel("—")
         self.gyr_x.setObjectName("statusValue")
         imu_layout.addWidget(self.gyr_x, 1, 1)
-        self.gyr_y = QLabel("--")
+        self.gyr_y = QLabel("—")
         self.gyr_y.setObjectName("statusValue")
         imu_layout.addWidget(self.gyr_y, 1, 2)
-        self.gyr_z = QLabel("--")
+        self.gyr_z = QLabel("—")
         self.gyr_z.setObjectName("statusValue")
         imu_layout.addWidget(self.gyr_z, 1, 3)
 
@@ -470,13 +495,13 @@ class StatusPanel(QWidget):
 
         # 磁力计
         imu_layout.addWidget(QLabel("磁力计:"), 2, 0)
-        self.mag_x = QLabel("--")
+        self.mag_x = QLabel("—")
         self.mag_x.setObjectName("statusValue")
         imu_layout.addWidget(self.mag_x, 2, 1)
-        self.mag_y = QLabel("--")
+        self.mag_y = QLabel("—")
         self.mag_y.setObjectName("statusValue")
         imu_layout.addWidget(self.mag_y, 2, 2)
-        self.mag_z = QLabel("--")
+        self.mag_z = QLabel("—")
         self.mag_z.setObjectName("statusValue")
         imu_layout.addWidget(self.mag_z, 2, 3)
 
@@ -484,14 +509,14 @@ class StatusPanel(QWidget):
 
         # 温度
         imu_layout.addWidget(QLabel("温度:"), 3, 0)
-        self.imu_temp = QLabel("--")
+        self.imu_temp = QLabel("—")
         self.imu_temp.setObjectName("statusValue")
         imu_layout.addWidget(self.imu_temp, 3, 1)
         imu_layout.addWidget(QLabel("C"), 3, 2)
 
         # 数据时间戳
         imu_layout.addWidget(QLabel("更新:"), 4, 0)
-        self.imu_timestamp = QLabel("--")
+        self.imu_timestamp = QLabel("—")
         self.imu_timestamp.setObjectName("statusValue")
         imu_layout.addWidget(self.imu_timestamp, 4, 1, 1, 3)
 
@@ -509,48 +534,48 @@ class StatusPanel(QWidget):
         info_layout.addWidget(self.dev_name, 0, 1, 1, 3)
 
         info_layout.addWidget(QLabel("驱动:"), 1, 0)
-        self.dev_type = QLabel("--")
+        self.dev_type = QLabel("—")
         self.dev_type.setObjectName("statusValue")
         info_layout.addWidget(self.dev_type, 1, 1)
 
         info_layout.addWidget(QLabel("调谐器:"), 1, 2)
-        self.dev_tuner = QLabel("--")
+        self.dev_tuner = QLabel("—")
         self.dev_tuner.setObjectName("statusValue")
         info_layout.addWidget(self.dev_tuner, 1, 3)
 
         info_layout.addWidget(QLabel("序列号:"), 2, 0)
-        self.dev_serial = QLabel("--")
+        self.dev_serial = QLabel("—")
         self.dev_serial.setObjectName("statusValue")
         info_layout.addWidget(self.dev_serial, 2, 1, 1, 3)
 
         info_layout.addWidget(QLabel("连接时长:"), 3, 0)
-        self.dev_uptime = QLabel("--")
+        self.dev_uptime = QLabel("—")
         self.dev_uptime.setObjectName("statusValue")
         info_layout.addWidget(self.dev_uptime, 3, 1)
 
         info_layout.addWidget(QLabel("已采样:"), 3, 2)
-        self.dev_samples = QLabel("--")
+        self.dev_samples = QLabel("—")
         self.dev_samples.setObjectName("statusValue")
         info_layout.addWidget(self.dev_samples, 3, 3)
 
         # 原有 ai-sdr Mini 字段（on_tool_result 仍会写入，保留接口）
         info_layout.addWidget(QLabel("固件:"), 4, 0)
-        self.fw_version = QLabel("--")
+        self.fw_version = QLabel("—")
         self.fw_version.setObjectName("statusValue")
         info_layout.addWidget(self.fw_version, 4, 1)
 
         info_layout.addWidget(QLabel("SDR:"), 4, 2)
-        self.sdr_chip = QLabel("--")
+        self.sdr_chip = QLabel("—")
         self.sdr_chip.setObjectName("statusValue")
         info_layout.addWidget(self.sdr_chip, 4, 3)
 
         info_layout.addWidget(QLabel("MCU:"), 5, 0)
-        self.mcu_chip = QLabel("--")
+        self.mcu_chip = QLabel("—")
         self.mcu_chip.setObjectName("statusValue")
         info_layout.addWidget(self.mcu_chip, 5, 1)
 
         info_layout.addWidget(QLabel("运行:"), 5, 2)
-        self.uptime = QLabel("--")
+        self.uptime = QLabel("—")
         self.uptime.setObjectName("statusValue")
         info_layout.addWidget(self.uptime, 5, 3)
 
@@ -597,7 +622,7 @@ class StatusPanel(QWidget):
     def update_from_backend(self, backend):
         """从 SDRBackend 读取全部可用字段并刷新本面板。
 
-        backend 为 None 或任意属性缺失时，对应字段显 "--"，绝不抛异常。
+        backend 为 None 或任意属性缺失时，对应字段显 "—"，绝不抛异常。
         主窗口应在 IQ 轮询周期 / 状态变化时调用本方法。
         """
         # ---- SDR 接收参数 ----
@@ -608,23 +633,23 @@ class StatusPanel(QWidget):
             status = None
 
         if status is None:
-            self.rx_freq.setText("--")
-            self.rx_srate.setText("--")
-            self.rx_bw.setText("--")
-            self.rx_demod.setText("--")
-            self.rx_gain.setText("--")
-            self.rx_agc.setText("--")
-            self.rx_squelch.setText("--")
-            self.rx_volume.setText("--")
+            self.rx_freq.setText("—")
+            self.rx_srate.setText("—")
+            self.rx_bw.setText("—")
+            self.rx_demod.setText("—")
+            self.rx_gain.setText("—")
+            self.rx_agc.setText("—")
+            self.rx_squelch.setText("—")
+            self.rx_volume.setText("—")
         else:
             self.rx_freq.setText(_fmt_freq(self._safe_get(status, "frequency_hz")))
             self.rx_srate.setText(_fmt_rate(self._safe_get(status, "sample_rate_hz")))
             self.rx_bw.setText(_fmt_bw(self._safe_get(status, "bandwidth_hz")))
-            self.rx_demod.setText(self._safe_get(status, "demod_mode") or "--")
+            self.rx_demod.setText(self._safe_get(status, "demod_mode") or "—")
             gain = self._safe_get(status, "gain_db")
-            self.rx_gain.setText(f"{gain:.1f} dB" if gain is not None else "--")
+            self.rx_gain.setText(f"{gain:.1f} dB" if gain is not None else "—")
             agc = self._safe_get(status, "agc_enabled")
-            self.rx_agc.setText("开" if agc else ("关" if agc is False else "--"))
+            self.rx_agc.setText("开" if agc else ("关" if agc is False else "—"))
             squelch = self._safe_get(status, "squelch_db")
             self.rx_squelch.setText(_fmt_squelch(
                 squelch,
@@ -633,13 +658,13 @@ class StatusPanel(QWidget):
             vol = self._safe_get(status, "volume")
             # volume: 后端 0.0~1.0；按 0-63 量程显示（GQRX 风格）
             if vol is None:
-                self.rx_volume.setText("--")
+                self.rx_volume.setText("—")
             else:
                 try:
                     v63 = max(0, min(63, int(round(float(vol) * 63))))
                     self.rx_volume.setText(str(v63))
                 except (TypeError, ValueError):
-                    self.rx_volume.setText("--")
+                    self.rx_volume.setText("—")
 
             # SNR（从 status 读取，保持信号质量组同步）
             snr = self._safe_get(status, "snr_db")
@@ -657,35 +682,35 @@ class StatusPanel(QWidget):
         # PPM / Offset（后端可选属性）
         ppm = self._safe_get(backend, "ppm") if backend is not None else None
         if ppm is None:
-            self.rx_ppm.setText("--")
+            self.rx_ppm.setText("—")
         else:
             try:
                 self.rx_ppm.setText(f"{float(ppm):+.0f} ppm")
             except (TypeError, ValueError):
-                self.rx_ppm.setText("--")
+                self.rx_ppm.setText("—")
 
         offset = self._safe_get(backend, "offset_tuning") if backend is not None else None
         if offset is None:
-            self.rx_offset.setText("--")
+            self.rx_offset.setText("—")
         else:
             self.rx_offset.setText("开" if bool(offset) else "关")
 
         # ---- SDR 设备信息 ----
         if backend is None:
             self.dev_name.setText("未连接")
-            self.dev_type.setText("--")
-            self.dev_tuner.setText("--")
-            self.dev_serial.setText("--")
-            self.dev_uptime.setText("--")
-            self.dev_samples.setText("--")
+            self.dev_type.setText("—")
+            self.dev_tuner.setText("—")
+            self.dev_serial.setText("—")
+            self.dev_uptime.setText("—")
+            self.dev_samples.setText("—")
             return
 
         device = self._safe_get(backend, "device")
         name = self._safe_get(device, "name")
         self.dev_name.setText(name if name else "未连接")
-        self.dev_type.setText(self._safe_get(device, "device_type") or "--")
-        self.dev_tuner.setText(self._safe_get(backend, "tuner_name") or "--")
-        self.dev_serial.setText(self._safe_get(device, "device_id") or "--")
+        self.dev_type.setText(self._safe_get(device, "device_type") or "—")
+        self.dev_tuner.setText(self._safe_get(backend, "tuner_name") or "—")
+        self.dev_serial.setText(self._safe_get(device, "device_id") or "—")
 
         # 连接时长：优先用 status.uptime_seconds（基类 get_status 会更新）
         uptime_s = None
@@ -699,7 +724,7 @@ class StatusPanel(QWidget):
                 except Exception:
                     uptime_s = None
         if uptime_s is None or uptime_s <= 0:
-            self.dev_uptime.setText("--")
+            self.dev_uptime.setText("—")
         else:
             h, rem = divmod(int(uptime_s), 3600)
             m, s = divmod(rem, 60)
@@ -712,7 +737,7 @@ class StatusPanel(QWidget):
         if samples is None:
             samples = self._safe_get(backend, "_samples_read")
         if samples is None:
-            self.dev_samples.setText("--")
+            self.dev_samples.setText("—")
         else:
             try:
                 s = float(samples)
@@ -723,37 +748,37 @@ class StatusPanel(QWidget):
                 else:
                     self.dev_samples.setText(f"{int(s)}")
             except (TypeError, ValueError):
-                self.dev_samples.setText("--")
+                self.dev_samples.setText("—")
 
     def update_signal_level(self, dbfs: float):
         """由主窗口用 IQ 功率估计的 dBFS 驱动 RSSI / S-meter / 电平条。
 
-        dbfs=None 时全部 "--"，电平条置零。
+        dbfs=None 时全部 "—"，电平条置零。
         """
         if dbfs is None:
-            self.rssi_value.setText("--")
-            self.smeter_value.setText("--")
+            self.rssi_value.setText(_EMPTY)
+            self.smeter_value.setText(_EMPTY)
             self.level_bar.setValue(0)
             self._set_level_bar_color(tokens().COLORS["gray_300"])
             return
         try:
             dbfs = float(dbfs)
         except (TypeError, ValueError):
-            self.rssi_value.setText("--")
-            self.smeter_value.setText("--")
+            self.rssi_value.setText(_EMPTY)
+            self.smeter_value.setText(_EMPTY)
             self.level_bar.setValue(0)
             self._set_level_bar_color(tokens().COLORS["gray_300"])
             return
         if not math.isfinite(dbfs):
             # NaN/Inf = 没测出电平：显式空态，绝不夹成满刻度（会把空值伪装成
             # 强信号），也绝不抛 ValueError 打断刷新链。
-            self.rssi_value.setText("--")
-            self.smeter_value.setText("--")
+            self.rssi_value.setText(_EMPTY)
+            self.smeter_value.setText(_EMPTY)
             self.level_bar.setValue(0)
             self._set_level_bar_color(tokens().COLORS["gray_300"])
             return
 
-        self.rssi_value.setText(f"{dbfs:.1f} dBFS")
+        self.rssi_value.setText(_fmt_dbfs(dbfs))
         self.smeter_value.setText(_dbfs_to_smeter(dbfs))
 
         # 电平条映射：[-120, 0] -> [0, 120]
@@ -779,7 +804,7 @@ class StatusPanel(QWidget):
             self.rssi_value.setStyleSheet("color: " + _t.COLORS["danger"] + ";")
 
     def set_sdr_connected(self, connected: bool):
-        """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "--" 并整组置灰。"""
+        """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "—" 并整组置灰。"""
         self._sdr_connected = bool(connected)
         if connected:
             # 连接：恢复信号质量 / 接收参数 / GPS / 设备信息四组的可用视觉
@@ -787,28 +812,28 @@ class StatusPanel(QWidget):
                 self._set_card_enabled(grp, True)
             return
         # 断开：清空 SDR 接收参数 / 设备 / 信号电平
-        self.rx_freq.setText("--")
-        self.rx_srate.setText("--")
-        self.rx_bw.setText("--")
-        self.rx_demod.setText("--")
-        self.rx_gain.setText("--")
-        self.rx_agc.setText("--")
-        self.rx_squelch.setText("--")
-        self.rx_volume.setText("--")
-        self.rx_ppm.setText("--")
-        self.rx_offset.setText("--")
+        self.rx_freq.setText("—")
+        self.rx_srate.setText("—")
+        self.rx_bw.setText("—")
+        self.rx_demod.setText("—")
+        self.rx_gain.setText("—")
+        self.rx_agc.setText("—")
+        self.rx_squelch.setText("—")
+        self.rx_volume.setText("—")
+        self.rx_ppm.setText("—")
+        self.rx_offset.setText("—")
 
         self.dev_name.setText("未连接")
-        self.dev_type.setText("--")
-        self.dev_tuner.setText("--")
-        self.dev_serial.setText("--")
-        self.dev_uptime.setText("--")
-        self.dev_samples.setText("--")
+        self.dev_type.setText("—")
+        self.dev_tuner.setText("—")
+        self.dev_serial.setText("—")
+        self.dev_uptime.setText("—")
+        self.dev_samples.setText("—")
 
         self.update_signal_level(None)
-        self.snr_value.setText("--")
-        self.mode_value.setText("--")
-        self.freq_value.setText("--")
+        self.snr_value.setText("—")
+        self.mode_value.setText("—")
+        self.freq_value.setText("—")
 
         # 视觉置灰：conn_group 始终可用（它本身就是连接状态指示器）；
         # imu_group 始终隐藏（无九轴硬件不占位）。
@@ -880,7 +905,7 @@ class StatusPanel(QWidget):
 
     @Slot(dict)
     def on_status_updated(self, status: dict):
-        """SDR 状态更新。字段缺失一律显 "--"，绝不默认 0 伪造数值。
+        """SDR 状态更新。字段缺失一律显 "—"，绝不默认 0 伪造数值。
 
         硬红线：只有真实后端回包才更新。凡携带 simulated/fake/demo 等
         "模拟/演示数据"标记的字典一律整体忽略，不刷新任何字段。
@@ -899,10 +924,11 @@ class StatusPanel(QWidget):
         freq = status.get("freq_display")
         uptime = status.get("uptime", 0)
 
-        self.rssi_value.setText(f"{rssi} dBm" if rssi is not None else "--")
-        self.snr_value.setText(f"{snr} dB" if snr is not None else "--")
-        self.mode_value.setText(mode if mode else "--")
-        self.freq_value.setText(freq if freq else "--")
+        # U-02：RSSI 一律 dBFS、1 位小数；缺键/None/NaN 显「—」，绝不用 0 兜底。
+        self.rssi_value.setText(_fmt_dbfs(rssi))
+        self.snr_value.setText(_fmt_number(snr, 1, " dB"))
+        self.mode_value.setText(mode if mode else _EMPTY)
+        self.freq_value.setText(freq if freq else _EMPTY)
 
         # 运行时间
         try:
@@ -934,7 +960,7 @@ class StatusPanel(QWidget):
         """GPS 数据更新。
 
         两要素：来源（real/none）、定位状态、数据时间戳。
-        source=="none" 或无 fix 时一律显示 "--"，绝不用 0 伪装。
+        source=="none" 或无 fix 时一律显示 "—"，绝不用 0 伪装。
         """
         source = gps.get("source", "real")
         fix = gps.get("fix", False)
@@ -943,14 +969,14 @@ class StatusPanel(QWidget):
         self._update_timestamp(self.gps_timestamp, gps.get("timestamp"))
 
         if source == "none" or not fix:
-            # 未连接 / 未定位：灰色，全部 "--"
+            # 未连接 / 未定位：灰色，全部 "—"
             self.gps_fix.setText("未连接")
             self.gps_fix.setStyleSheet("color: " + tokens().text("tertiary") + ";")
-            self.gps_sats.setText("--")
-            self.gps_lat.setText("--")
-            self.gps_lon.setText("--")
-            self.gps_alt.setText("--")
-            self.gps_hdop.setText("--")
+            self.gps_sats.setText("—")
+            self.gps_lat.setText("—")
+            self.gps_lon.setText("—")
+            self.gps_alt.setText("—")
+            self.gps_hdop.setText("—")
             self.gps_group.setTitle("GPS / 北斗")
         else:
             # source=="real" 且 fix==True：绿色"已定位"，真实坐标
@@ -962,10 +988,10 @@ class StatusPanel(QWidget):
             alt = gps.get("alt")
             hdop = gps.get("hdop")
             self.gps_sats.setText(str(gps.get("sats", 0)))
-            self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "--")
-            self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "--")
-            self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "--")
-            self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "--")
+            self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "—")
+            self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "—")
+            self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "—")
+            self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "—")
 
     def update_gnss(self, fix_dict: dict):
         """由真实串口 GNSS（mbdsdr_ai.serial_gnss.get_fix）驱动 GPS 组。
@@ -987,12 +1013,12 @@ class StatusPanel(QWidget):
             # 未连接 / 无定位：灰色，坐标一律空，绝不保留旧值
             self.gps_fix.setText("未连接")
             self.gps_fix.setStyleSheet("color: " + tokens().text("tertiary") + ";")
-            self.gps_sats.setText("--")
-            self.gps_lat.setText("--")
-            self.gps_lon.setText("--")
-            self.gps_alt.setText("--")
-            self.gps_hdop.setText("--")
-            self.gps_signals.setText("--")
+            self.gps_sats.setText("—")
+            self.gps_lat.setText("—")
+            self.gps_lon.setText("—")
+            self.gps_alt.setText("—")
+            self.gps_hdop.setText("—")
+            self.gps_signals.setText("—")
             self.gps_group.setTitle("GPS / 北斗")
             return
 
@@ -1005,11 +1031,11 @@ class StatusPanel(QWidget):
         alt = fix_dict.get("altitude_m")
         hdop = fix_dict.get("hdop")
         sats = fix_dict.get("satellites")
-        self.gps_sats.setText(str(sats) if sats is not None else "--")
-        self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "--")
-        self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "--")
-        self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "--")
-        self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "--")
+        self.gps_sats.setText(str(sats) if sats is not None else "—")
+        self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "—")
+        self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "—")
+        self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "—")
+        self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "—")
         # 可选：最强 5 颗卫星 SNR（无 satellite_signals 字段时显示 '--'，不报错）
         self._update_signal_strength(fix_dict.get("satellite_signals"))
 
@@ -1020,7 +1046,7 @@ class StatusPanel(QWidget):
         绝不抛错。当前串口 GNSS 暂未上报该字段，故平时保持 '--'（前向兼容）。
         """
         if not signals:
-            self.gps_signals.setText("--")
+            self.gps_signals.setText("—")
             return
         try:
             ranked = sorted(
@@ -1029,10 +1055,10 @@ class StatusPanel(QWidget):
                 reverse=True,
             )[:5]
         except Exception:
-            self.gps_signals.setText("--")
+            self.gps_signals.setText("—")
             return
         if not ranked:
-            self.gps_signals.setText("--")
+            self.gps_signals.setText("—")
             return
         parts = [f"#{s.get('id', '?')} {float(s['snr_db']):.0f}dB" for s in ranked]
         self.gps_signals.setText("  ".join(parts))
@@ -1042,24 +1068,24 @@ class StatusPanel(QWidget):
         """IMU 数据更新。
 
         source=="none" 或 acc 为 None（无九轴硬件/未连接）时：
-        所有数值 label 一律 "--"，标题打 [未连接]，绝不显示任何姿态数值。
+        所有数值 label 一律 "—"，标题打 [未连接]，绝不显示任何姿态数值。
         """
         source = imu.get("source", "real")
         acc = imu.get("acc")
 
         if source == "none" or acc is None:
-            # 未连接：全部 "--"，时间戳也清空（不伪造更新时间）
-            self.acc_x.setText("--")
-            self.acc_y.setText("--")
-            self.acc_z.setText("--")
-            self.gyr_x.setText("--")
-            self.gyr_y.setText("--")
-            self.gyr_z.setText("--")
-            self.mag_x.setText("--")
-            self.mag_y.setText("--")
-            self.mag_z.setText("--")
-            self.imu_temp.setText("--")
-            self.imu_timestamp.setText("--")
+            # 未连接：全部 "—"，时间戳也清空（不伪造更新时间）
+            self.acc_x.setText("—")
+            self.acc_y.setText("—")
+            self.acc_z.setText("—")
+            self.gyr_x.setText("—")
+            self.gyr_y.setText("—")
+            self.gyr_z.setText("—")
+            self.mag_x.setText("—")
+            self.mag_y.setText("—")
+            self.mag_z.setText("—")
+            self.imu_temp.setText("—")
+            self.imu_timestamp.setText("—")
             self.imu_group.setTitle("IMU 9 轴姿态 [未连接]")
             self.imu_group.setVisible(False)
             return
@@ -1075,7 +1101,7 @@ class StatusPanel(QWidget):
         temp = imu.get("temp")
 
         def _fmt(v, nd):
-            return f"{v:.{nd}f}" if v is not None else "--"
+            return f"{v:.{nd}f}" if v is not None else "—"
 
         self.acc_x.setText(_fmt(acc[0], 2))
         self.acc_y.setText(_fmt(acc[1], 2))
@@ -1094,13 +1120,13 @@ class StatusPanel(QWidget):
     def _update_timestamp(self, label: QLabel, ts):
         """把 unix 时间戳格式化为 '更新于 HH:MM:SS'；无值时显示 '--'。"""
         if ts is None:
-            label.setText("--")
+            label.setText("—")
             return
         try:
             dt = datetime.datetime.fromtimestamp(float(ts))
             label.setText(f"更新于 {dt.strftime('%H:%M:%S')}")
         except Exception:
-            label.setText("--")
+            label.setText("—")
 
     @Slot(str, dict)
     def on_tool_result(self, tool_name: str, result: dict):
@@ -1108,9 +1134,9 @@ class StatusPanel(QWidget):
         if is_decode_tool(tool_name):
             self.render_decode_result(tool_name, result)
         if tool_name == "get_version":
-            self.fw_version.setText(result.get("firmware", "--"))
-            self.sdr_chip.setText(result.get("sdr", "--"))
-            self.mcu_chip.setText(result.get("mcu", "--"))
+            self.fw_version.setText(result.get("firmware", "—"))
+            self.sdr_chip.setText(result.get("sdr", "—"))
+            self.mcu_chip.setText(result.get("mcu", "—"))
 
     def render_decode_result(self, tool_name: str, result: dict) -> None:
         """解码类工具结果 → 「解码结果」卡片（摘要 + 详情 + 诚实错误态）。

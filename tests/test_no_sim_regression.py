@@ -308,18 +308,18 @@ def test_offscreen_no_hardware_zero_fake(qapp, monkeypatch, tmp_path):
         f"天空图数据源应为 none，实际: {w.sky_view._data_source!r}"
     assert w.sky_view._gnss_connected is False, "无硬件不应显示任何卫星"
 
-    # 3.4 status_panel GPS 组：定位"未连接"，经纬度高度 "--"
+    # 3.4 status_panel GPS 组：定位"未连接"，经纬度高度 "—"
     sp = w.status_panel
     assert sp.gps_fix.text() == "未连接", f"GPS 定位应未连接，实际: {sp.gps_fix.text()!r}"
-    assert sp.gps_lat.text() == "--", f"纬度应 '--'，实际: {sp.gps_lat.text()!r}"
-    assert sp.gps_lon.text() == "--", f"经度应 '--'，实际: {sp.gps_lon.text()!r}"
-    assert sp.gps_alt.text() == "--", f"高度应 '--'，实际: {sp.gps_alt.text()!r}"
+    assert sp.gps_lat.text() == "—", f"纬度应 '—'，实际: {sp.gps_lat.text()!r}"
+    assert sp.gps_lon.text() == "—", f"经度应 '—'，实际: {sp.gps_lon.text()!r}"
+    assert sp.gps_alt.text() == "—", f"高度应 '—'，实际: {sp.gps_alt.text()!r}"
 
-    # 3.5 status_panel IMU 组：所有数值 "--"
+    # 3.5 status_panel IMU 组：所有数值 "—"
     for lbl in (sp.acc_x, sp.acc_y, sp.acc_z,
                 sp.gyr_x, sp.gyr_y, sp.gyr_z,
                 sp.mag_x, sp.mag_y, sp.mag_z, sp.imu_temp):
-        assert lbl.text() == "--", f"IMU 数值应 '--'，实际 {lbl.text()!r}"
+        assert lbl.text() == "—", f"IMU 数值应 '—'，实际 {lbl.text()!r}"
     assert "[未连接]" in sp.imu_group.title(), \
         f"IMU 组标题应含[未连接]，实际: {sp.imu_group.title()!r}"
 

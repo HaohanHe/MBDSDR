@@ -35,7 +35,8 @@ if _HERE not in _sys.path:
 
 from tokens import tokens
 
-from constants import DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ
+from constants import (
+    DEFAULT_SAMPLE_RATE_HZ, FREQ_MIN_HZ, FREQ_MAX_HZ, format_sample_rate)
 
 # 静噪门限的唯一口径（相对该模式噪声基线的余量）定义在内核侧，
 # 桌面端不复制数字；见 mbdsdr_ai/squelch.py 的常量段。
@@ -457,12 +458,8 @@ class ControlPanel(QWidget):
         sr_row.addWidget(self.sr_label)
         self.sample_rate_combo = QComboBox()
         for _rate in self.SAMPLE_RATES:
-            if _rate >= 1_000_000:
-                _txt = f"{_rate / 1e6:.3f} MHz"
-            else:
-                _txt = f"{_rate / 1e3:.0f} kHz"
-            self.sample_rate_combo.addItem(_txt, float(_rate))
-        # 默认选中项目统一基准采样率（2.048 MHz，索引随档位表定位，不写死索引）
+            self.sample_rate_combo.addItem(format_sample_rate(_rate), float(_rate))
+        # 默认选中项目统一基准采样率（2.400 MS/s，索引随档位表定位，不写死索引）
         try:
             _default_idx = self.SAMPLE_RATES.index(DEFAULT_SAMPLE_RATE_HZ)
         except ValueError:

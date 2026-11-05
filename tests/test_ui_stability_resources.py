@@ -280,13 +280,13 @@ class TestCloseReleasesGlobalHooks:
 class TestNoBackendAndExtremeInputs:
 
     def test_status_bar_refresh_without_backend_shows_dash(self, mw, qapp):
-        """后端为 None：状态栏全部回落 '--'，不抛异常、不保留旧值。"""
+        """后端为 None：状态栏全部回落 '—'，不抛异常、不保留旧值。"""
         mw._active_sdr_backend = None
         mw._update_status_bar()
         qapp.processEvents()
         for attr in ("status_freq", "status_sr", "status_bw",
                      "status_gain", "status_dev", "status_rssi"):
-            assert "--" in getattr(mw, attr).text(), attr
+            assert "—" in getattr(mw, attr).text(), attr
 
     def test_iq_sky_gnss_poll_paths_without_backend(self, mw, qapp):
         """无后端/无串口时各条轮询回调直接跑也必须不崩。"""
@@ -346,10 +346,10 @@ class TestNanIsEmptyNotFabricated:
         """回归钉扎：修复前 int(round(nan)) 抛 ValueError，整条 S-meter 刷新被打断。"""
         from status_panel import _dbfs_to_smeter
 
-        assert _dbfs_to_smeter(NAN) == "--"
-        assert _dbfs_to_smeter(INF) == "--"
-        assert _dbfs_to_smeter(-INF) == "--"
-        assert _dbfs_to_smeter(None) == "--"
+        assert _dbfs_to_smeter(NAN) == "—"
+        assert _dbfs_to_smeter(INF) == "—"
+        assert _dbfs_to_smeter(-INF) == "—"
+        assert _dbfs_to_smeter(None) == "—"
         # 有效值不受影响（口径不变，不放宽比较）
         assert _dbfs_to_smeter(-73.0) == "S9 +0 dB"
         assert _dbfs_to_smeter(-127.0) == "S0"
@@ -357,8 +357,8 @@ class TestNanIsEmptyNotFabricated:
     def test_status_panel_nan_dbfs_shows_empty(self, mw, qapp):
         mw.status_panel.update_signal_level(NAN)
         qapp.processEvents()
-        assert mw.status_panel.rssi_value.text() == "--"
-        assert mw.status_panel.smeter_value.text() == "--"
+        assert mw.status_panel.rssi_value.text() == "—"
+        assert mw.status_panel.smeter_value.text() == "—"
         assert mw.status_panel.level_bar.value() == 0, \
             "NaN 电平不得被夹成满刻度（会把空值伪装成爆表信号）"
 

@@ -48,6 +48,24 @@ def _snr_signal_present(snr_db, was_present: bool,
     return bool(was_present)
 
 
+def _fmt_dbfs(value) -> str:
+    """RSSI/电平唯一口径：dBFS、1 位小数；缺失/NaN 显「—」（U-02/N-03）。
+
+    绝不把缺值渲染成 0——0 dBFS 是满量程，会被读成「信号很强」。
+    """
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    if abs(v) < 0.05:          # 负零归零（N-02）
+        v = 0.0
+    return f"{v:.1f} dBFS"
+
+
 def format_doppler_status(st) -> str:
     """把 get_doppler_compensation_status()/doppler_status() 的读数渲染成一行。
 
@@ -62,9 +80,12 @@ def format_doppler_status(st) -> str:
 
     def _hz(value, digits=0):
         try:
-            return f"{float(value):+.{digits}f} Hz"
+            v = float(value)
         except (TypeError, ValueError):
             return "—"
+        if abs(v) < 0.5 * 10 ** (-digits):
+            v = 0.0          # N-02：不显示「-0 Hz」
+        return f"{v:+.{digits}f} Hz"
 
     applied_by = str(st.get("applied_by") or "none").lower()
     applied = st.get("applied_hz")
@@ -157,9 +178,14 @@ def format_tx_doppler(note, *, failed_reason=None, replay: bool = False) -> str:
 
     def _mhz(value) -> str:
         try:
-            return f"{float(value) / 1e6:.6f} MHz"
+            v = float(value)
         except (TypeError, ValueError):
             return "—"
+        if not math.isfinite(v):
+            return "—"
+        if abs(v) < 0.5:      # N-02：负零/亚 Hz 残差不写成「-0.000000」
+            v = 0.0
+        return f"{v / 1e6:.6f} MHz"
 
     nominal = note.get("nominal_hz")
     freq = note.get("freq_hz")
@@ -169,7 +195,12 @@ def format_tx_doppler(note, *, failed_reason=None, replay: bool = False) -> str:
     if bool(note.get("applied")):
         delta = note.get("delta_hz")
         try:
-            delta_txt = f"{float(delta):+.1f} Hz"
+            dv = float(delta)
+            if not math.isfinite(dv):
+                raise ValueError
+            if abs(dv) < 0.05:
+                dv = 0.0       # N-02：不显示「-0.0 Hz」
+            delta_txt = f"{dv:+.1f} Hz"
         except (TypeError, ValueError):
             delta_txt = "—"  # 未知偏移不编造成 0
         mode_txt = "显式" if str(note.get("mode") or "") == "on" else "自动"
@@ -214,21 +245,39 @@ def ptt_state(backend) -> tuple[str, bool, bool]:
     impl = bool(cap.get("implemented", impl))
     declared = bool(cap.get("declared", declared))
     driver = cap.get("driver_capable")
+    ready = bool(cap.get("ready"))
+    verified = bool(cap.get("verified"))
     reason = str(cap.get("blocked_reason") or "")
+    if "connected" in cap:
+        connected = cap.get("connected")
+    else:
+        st = getattr(backend, "status", None)
+        connected = getattr(st, "connected", None)
 
-    if impl and bool(cap.get("ready")) and bool(cap.get("verified")):
+    # 判定顺序是显式的（F2）：先按「实现」分叉，再看「就绪」；
+    # 不允许「声明 / 驱动可发」这些旁证把已实现的路径说成未实现。
+    if not impl:
+        if declared:
+            return "本后端发射：仅有声明 / 未实现（不可发射）", False, False
+        if driver is True:
+            return "本后端发射：驱动级可发 / 本路径未接入（不可发射）", False, False
+        if driver is False:
+            # F3：硬件真不能发（换设备）与软件没实现（等版本）是两条行动建议
+            return "本后端发射：本设备硬件不支持发射（驱动报告 0 个 TX 通道）", False, False
+        if reason == "driver_capability_unknown":
+            return "本后端发射：能力未知（未连接/驱动未报告）", False, False
+        return "本后端发射：本后端尚未实现发射（该驱动没有 TX 代码路径）", False, False
+
+    if not ready:
+        # F1：HackRF/USRP/Pluto 有 write_tx，只是没连设备——插上就能发，
+        # 不能显示成「未实现」，否则用户会以为这台机器根本不能发射。
+        if connected is False:
+            return "本后端发射：已实现，但设备未连接（连上即可发射）", False, False
+        return "本后端发射：已实现，但当前不可发射（未就绪）", False, False
+
+    if verified:
         return "本后端发射：驱动级已实现 / 真机已验证", True, False
-    if impl and bool(cap.get("ready")):
-        return "本后端发射：驱动级已实现 / 真机未验证", True, True
-    if declared and not impl:
-        return "本后端发射：仅有声明 / 未实现（不可发射）", False, False
-    if driver is True:
-        return "本后端发射：驱动级可发 / 本路径未接入（不可发射）", False, False
-    if driver is False:
-        return "本后端发射：硬件仅接收（驱动报告 0 个 TX 通道）", False, False
-    if reason == "driver_capability_unknown":
-        return "本后端发射：能力未知（未连接/驱动未报告）", False, False
-    return "本后端发射：未实现", False, False
+    return "本后端发射：驱动级已实现 / 真机未验证", True, True
 
 
 def _is_text_entry_widget(w) -> bool:
@@ -298,7 +347,7 @@ from module_panel import ModulePanel
 from tokens import tokens
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
-from constants import DEFAULT_SAMPLE_RATE_HZ
+from constants import DEFAULT_SAMPLE_RATE_HZ, format_sample_rate
 # 气象云图面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
 # 在用户首次点解码时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
@@ -373,11 +422,7 @@ from touch_manager import touch_manager
 from touch_helpers import (enable_touch_events, apply_touch_target,
                            apply_touch_targets)
 
-# 真实 baseband 存盘 + 声卡实时输出（可选依赖，导入失败也不拖垮 GUI）
-try:
-    from mbdsdr_ai.baseband_io import save_iq as _save_iq
-except Exception:  # pragma: no cover
-    _save_iq = None
+# 声卡实时输出（可选依赖，导入失败也不拖垮 GUI）
 try:
     from mbdsdr_ai.audio_out import AudioPlayer
 except Exception:  # pragma: no cover
@@ -1309,7 +1354,7 @@ class MainWindow(QMainWindow):
         self.freq_label = QLabel("-- MHz")
         self.freq_label.setObjectName("statusValue")
         header_layout.addWidget(self.freq_label)
-        self.rssi_label = QLabel("RSSI: --")
+        self.rssi_label = QLabel("RSSI: —")
         self.rssi_label.setObjectName("statusValue")
         header_layout.addWidget(self.rssi_label)
         spectrum_layout.addWidget(spectrum_header)
@@ -2236,11 +2281,11 @@ class MainWindow(QMainWindow):
         self.status_conn = QLabel("未连接")
         lay.addWidget(self.status_conn)
         lay.addWidget(self._vsep())
-        self.status_freq = QLabel("频率: --")
+        self.status_freq = QLabel("频率: —")
         self.status_freq.setObjectName("statusValue")
         lay.addWidget(self.status_freq)
         lay.addWidget(self._vsep())
-        self.status_sr = QLabel("采样率: --")
+        self.status_sr = QLabel("采样率: —")
         self.status_sr.setObjectName("statusValue")
         lay.addWidget(self.status_sr)
         lay.addWidget(self._vsep())
@@ -2345,19 +2390,19 @@ class MainWindow(QMainWindow):
         self.dock_freq_label.setObjectName("dockNow")
         lay.addWidget(self.dock_freq_label)
         lay.addWidget(self._vsep())
-        self.status_gain = QLabel("增益: --")
+        self.status_gain = QLabel("增益: —")
         self.status_gain.setObjectName("statusValue")
         lay.addWidget(self.status_gain)
         lay.addWidget(self._vsep())
-        self.status_bw = QLabel("带宽: --")
+        self.status_bw = QLabel("带宽: —")
         self.status_bw.setObjectName("statusValue")
         lay.addWidget(self.status_bw)
         lay.addWidget(self._vsep())
-        self.status_dev = QLabel("设备: --")
+        self.status_dev = QLabel("设备: —")
         self.status_dev.setObjectName("statusValue")
         lay.addWidget(self.status_dev)
         lay.addWidget(self._vsep())
-        self.status_rssi = QLabel("信号: --")
+        self.status_rssi = QLabel("信号: —")
         self.status_rssi.setObjectName("statusValue")
         lay.addWidget(self.status_rssi)
         lay.addStretch(1)
@@ -2485,12 +2530,12 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is None:
             for lbl, txt in (
-                (self.status_freq, "频率: --"),
-                (self.status_sr, "采样率: --"),
-                (self.status_bw, "带宽: --"),
-                (self.status_gain, "增益: --"),
-                (self.status_dev, "设备: --"),
-                (self.status_rssi, "信号: --"),
+                (self.status_freq, "频率: —"),
+                (self.status_sr, "采样率: —"),
+                (self.status_bw, "带宽: —"),
+                (self.status_gain, "增益: —"),
+                (self.status_dev, "设备: —"),
+                (self.status_rssi, "信号: —"),
             ):
                 try:
                     lbl.setText(txt)
@@ -2530,7 +2575,7 @@ class MainWindow(QMainWindow):
                 self.toolbar_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
                 self.dock_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
             else:
-                self.status_freq.setText("频率: --")
+                self.status_freq.setText("频率: —")
                 self.toolbar_freq_label.setText("-- MHz")
                 self.dock_freq_label.setText("-- MHz")
         except Exception:
@@ -3573,13 +3618,14 @@ class MainWindow(QMainWindow):
         try:
             from mbdsdr_ai.sdr_backend import RTLSDRBackend
             for _r in RTLSDRBackend.SAMPLE_RATES:
-                sr_combo.addItem(f"{_r / 1e6:.3f} MS/s", _r)
-            # 默认 2.048 MS/s（与后端 DEFAULT_SAMPLE_RATE 对齐）
+                sr_combo.addItem(format_sample_rate(_r), _r)
+            # 默认档与后端 DEFAULT_SAMPLE_RATE 对齐（U-03：唯一 MS/s 口径）
             _idx = sr_combo.findData(DEFAULT_SAMPLE_RATE_HZ)
             if _idx >= 0:
                 sr_combo.setCurrentIndex(_idx)
         except Exception:
-            sr_combo.addItem("2.048 MS/s", DEFAULT_SAMPLE_RATE_HZ)
+            sr_combo.addItem(format_sample_rate(DEFAULT_SAMPLE_RATE_HZ),
+                             DEFAULT_SAMPLE_RATE_HZ)
         param_form.addRow("采样率", sr_combo)
 
         gain_spin = QSpinBox()
@@ -3959,11 +4005,11 @@ class MainWindow(QMainWindow):
                 sp.set_backend(be)
         except Exception:
             pass
-        # 频谱标题栏频率/RSSI：未连接时显 "--"
+        # 频谱标题栏频率/RSSI：未连接时显「—」
         try:
             if not connected:
-                self.freq_label.setText("-- MHz")
-                self.rssi_label.setText("RSSI: --")
+                self.freq_label.setText("— MHz")
+                self.rssi_label.setText("RSSI: —")
         except Exception:
             pass
         # 无设备引导横幅：未连接时显示
@@ -4132,12 +4178,13 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def _on_status_for_ui(self, status: dict):
-        freq = status.get("freq_display", "--")
-        rssi = status.get("rssi", 0)
+        freq = status.get("freq_display") or "—"
+        # U-02：RSSI 一律 dBFS、1 位小数；缺键/None/NaN 显「—」，绝不用 0 兜底。
+        rssi = _fmt_dbfs(status.get("rssi"))
         self.freq_label.setText(freq)
         self.rssi_label.setText(f"RSSI: {rssi}")
         self.status_freq.setText(f"频率: {freq}")
-        self.status_rssi.setText(f"RSSI: {rssi} dBm")
+        self.status_rssi.setText(f"RSSI: {rssi}")
 
     @Slot(str)
     def _on_error(self, error: str):
@@ -4182,7 +4229,7 @@ class MainWindow(QMainWindow):
             self.status_freq.setText(f"频率: {last_hz / 1e6:.3f} MHz")
         else:
             self.freq_label.setText("-- MHz")
-            self.status_freq.setText("频率: --")
+            self.status_freq.setText("频率: —")
         cp = getattr(self, "control_panel", None)
         if cp is not None:
             if last_hz > 0:
@@ -4458,13 +4505,16 @@ class MainWindow(QMainWindow):
                     new_path = _record_segment_path(
                         self._record_session_path or self._record_file_path or "",
                         next_index)
-                    self._open_record_segment(
-                        new_path, old_sr, float(self._record_center_hz),
-                        datetime.now().isoformat(timespec="seconds"),
-                        next_index)
+                    if not self._open_record_segment(
+                            new_path, old_sr, float(self._record_center_hz),
+                            datetime.now().isoformat(timespec="seconds"),
+                            next_index):
+                        # 新段打不开：录音已被 S7 收口停止，接收链仍需继续
+                        self._start_iq_streams()
+                        return
                     self._start_iq_streams()
                     self.statusBar().showMessage(
-                        f"采样率切换失败，继续按 {old_sr:g} Hz 录制: {e}", MSG_IMPORTANT)
+                        f"采样率切换失败，继续按 {format_sample_rate(old_sr)} 录制: {e}", MSG_IMPORTANT)
                     return
             try:
                 center_hz = float(self._active_sdr_backend.get_frequency())
@@ -4475,9 +4525,12 @@ class MainWindow(QMainWindow):
             next_index = len(self._record_segments) + 1
             new_path = _record_segment_path(
                 self._record_session_path or self._record_file_path or "", next_index)
-            self._open_record_segment(
-                new_path, rate, center_hz,
-                datetime.now().isoformat(timespec="seconds"), next_index)
+            if not self._open_record_segment(
+                    new_path, rate, center_hz,
+                    datetime.now().isoformat(timespec="seconds"), next_index):
+                # 新段打不开：录音已被 S7 收口停止，接收链仍需继续
+                self._start_iq_streams()
+                return
             # 5) 变更表保留精确边界（供只读 sidecar 的读者按段还原）
             if info is not None:
                 self._record_rate_changes.append({
@@ -4490,7 +4543,8 @@ class MainWindow(QMainWindow):
             self._start_iq_streams()
             self._update_status_bar()
             self.statusBar().showMessage(
-                f"采样率 {old_sr:g} → {rate:g} Hz，录音已分到新文件段: "
+                f"采样率 {format_sample_rate(old_sr)} → "
+                f"{format_sample_rate(rate)}，录音已分到新文件段: "
                 f"{os.path.basename(new_path)}", MSG_IMPORTANT)
         else:
             # 非录音：下发后端 + 重建流水线；后端拒绝就如实报错，不改 UI 读数
@@ -5369,20 +5423,26 @@ class MainWindow(QMainWindow):
             pass
 
     def _record_write_chunk(self, iq: np.ndarray) -> None:
-        """录制写一块：有流句柄就直写磁盘（内存不累积），否则退回内存缓冲。"""
+        """录制写一块：直写磁盘；写失败立即停录并报错（S7）。
+
+        绝不退回内存缓冲：攒在 RAM 里的样本既不保证写得出去，又会让停止时
+        的 samples/字节数与磁盘实际内容对不上。失败时已写部分原样保留。
+        """
         if not self._recording:
             return
         fh = getattr(self, "_record_stream_fh", None)
-        if fh is not None:
-            try:
-                np.asarray(iq, dtype=np.complex64).tofile(fh)
-                self._record_samples_total = \
-                    getattr(self, "_record_samples_total", 0) + int(len(iq))
-                return
-            except Exception:
-                pass
-        if self._record_iq_buffer is not None:
-            self._record_iq_buffer.append(iq)
+        if fh is None:
+            self._report_record_abort("录音流句柄丢失（本段未成功打开）")
+            return
+        try:
+            # 用 write(bytes) 而不是 ndarray.tofile：后者只认真实 fd/文件名，
+            # 写失败（磁盘满/句柄失效）要能被这一层捕获并收口。
+            fh.write(np.asarray(iq, dtype=np.complex64).tobytes())
+        except (OSError, ValueError) as exc:
+            self._report_record_abort(f"写入录音文件失败: {exc}")
+            return
+        self._record_samples_total = \
+            getattr(self, "_record_samples_total", 0) + int(len(iq))
 
     def _on_pipeline_record_iq(self, iq: np.ndarray):
         """录制 tap：RecordTap 线程把每帧 IQ（已是独立副本）交给 UI 累积。"""
@@ -5920,8 +5980,13 @@ class MainWindow(QMainWindow):
             self._stop_recording()
 
     def _open_record_segment(self, path: str, sr: float, center_hz: float,
-                             start_time: str, index: int) -> None:
-        """打开一个录制文件段（每段速率恒定），初始化该段计数。"""
+                             start_time: str, index: int) -> bool:
+        """打开一个录制文件段（每段速率恒定），初始化该段计数。
+
+        打不开就**不录**（S7）：绝不退回内存缓冲——内存里的样本不是落盘
+        数据，停止时再写出去会让用户以为整场都录在盘上。返回是否成功；
+        失败时已经 ``_report_record_abort`` 报错并停止录音。
+        """
         self._record_file_path = path
         self._record_segment_index = int(index)
         self._record_segment_start_time = start_time or ""
@@ -5932,11 +5997,23 @@ class MainWindow(QMainWindow):
         self._record_stream_fh = None
         try:
             self._record_stream_fh = open(path, "wb")
-        except Exception as e:
-            logger.warning("录制流打开失败（退回内存缓冲）: %s", e)
-            self.statusBar().showMessage(
-                f"录制流打开失败（退回内存缓冲）: {e}", MSG_NORMAL)
-            self._record_stream_fh = None
+        except OSError as exc:
+            self._report_record_abort(f"录音文件打不开（{path}）: {exc}")
+            return False
+        return True
+
+    def _report_record_abort(self, reason: str) -> None:
+        """写盘失败/文件打不开的统一收口：报错 + 停止录音 + 保留已写部分（S7）。
+
+        sidecar 只按**已成功写入**的样本数收尾（其 samples 就是磁盘上真实的
+        样本数）；内存缓冲里的任何东西都不参与落盘，也不冒充已录数据。
+        """
+        written = int(getattr(self, "_record_samples_total", 0)) * 8
+        path = self._record_file_path or ""
+        logger.error("录音中止：%s（已写 %d 字节 → %s）", reason, written, path)
+        self._stop_recording(
+            error=f"{reason}（已写 {written} 字节"
+                  f"{('，文件 ' + os.path.basename(path)) if path else ''}）")
 
     def _record_segment_meta(self) -> dict:
         """当前段的 sidecar 元数据（速率/样本/时长严格自洽）。"""
@@ -6002,30 +6079,8 @@ class MainWindow(QMainWindow):
                             "segment_index": int(self._record_segment_index),
                             "size_bytes": n * 8, "sidecar": None}
         else:
-            # 流打开失败 → 保留既有内存缓冲降级（S7 单独收口）
-            try:
-                buf = getattr(self, "_record_iq_buffer", None) or []
-                iq = np.concatenate(buf) if buf else np.zeros(0, dtype=np.complex64)
-                if iq.size > 0 and path and _save_iq is not None:
-                    saved = _save_iq(
-                        iq, path, sample_rate=self._record_sr,
-                        center_freq_hz=self._record_center_hz,
-                        start_time=self._record_segment_start_time or None,
-                        gain_db=self._record_gain_db,
-                        device=self._record_device,
-                        driver=self._record_driver,
-                        note="MBDSDR baseband recording (float32 interleaved I/Q)")
-                    info = {"path": path, "samples": int(iq.size),
-                            "sample_rate": float(self._record_sr),
-                            "duration_s": saved.get("duration_s"),
-                            "start_time": self._record_segment_start_time,
-                            "segment_index": int(self._record_segment_index),
-                            "size_bytes": saved.get("size_bytes", 0),
-                            "sidecar": saved.get("sidecar")}
-            except Exception as e:
-                logger.warning("录制存盘失败: %s", e)
-                self.statusBar().showMessage(f"录制存盘失败: {e}", MSG_NORMAL)
-                info = None
+            # 流从未成功打开（S7）：没有落盘数据可记，不得拿内存缓冲冒充存盘
+            info = None
         self._record_iq_buffer = []
         if info is not None:
             self._record_segments.append(info)
@@ -6051,11 +6106,6 @@ class MainWindow(QMainWindow):
                 self.control_panel.record_button.setChecked(False)
             finally:
                 self._record_guard = False
-            return
-
-        if _save_iq is None:
-            QMessageBox.warning(self, "无法录音", "baseband_io 不可用，无法存盘。")
-            self._recording = False
             return
 
         try:
@@ -6103,9 +6153,11 @@ class MainWindow(QMainWindow):
         self._record_rate_changes = []
         self._recording = True
         self._sync_planetarium_recording()
-        # 流式落盘：边收边写，不再全程攒数组（长录制内存安全）
-        self._open_record_segment(
-            path, sr, center_hz, self._record_start_time, 1)
+        # 流式落盘：边收边写，不再全程攒数组（长录制内存安全）。
+        # S7：文件打不开＝直接不录（_report_record_abort 已复位 UI 并报错）。
+        if not self._open_record_segment(
+                path, sr, center_hz, self._record_start_time, 1):
+            return
 
         # 1s 计时 UI（沿用原有 _record_timer）
         self._record_seconds = 0
@@ -6172,8 +6224,12 @@ class MainWindow(QMainWindow):
                     f"会话 sidecar 写盘失败（{os.path.basename(seg['path'])}）: {e}",
                     MSG_NORMAL)
 
-    def _stop_recording(self):
-        """停止录制：收尾最后一段并写 sidecar；多段时汇总 segments 清单。"""
+    def _stop_recording(self, error: Optional[str] = None):
+        """停止录制：收尾最后一段并写 sidecar；多段时汇总 segments 清单。
+
+        ``error`` 非空表示因写盘失败而中止（S7）：已写部分照常收尾，最终
+        提示以错误开头，绝不把中止说成「录制完成」。
+        """
         self._recording = False
         self._sync_planetarium_recording()
         if self._record_timer is not None:
@@ -6244,6 +6300,8 @@ class MainWindow(QMainWindow):
                 self.control_panel.record_status.setText("未录音")
             except Exception:
                 pass
+        if error:
+            msg = f"{error}；{msg}"
         self.statusBar().showMessage(msg, MSG_IMPORTANT)
 
     def _toggle_waterfall(self):
@@ -6595,7 +6653,7 @@ class MainWindow(QMainWindow):
     def _on_constellation_cleared(self):
         try:
             self._last_dbfs = 0.0
-            self.status_rssi.setText("信号: --")
+            self.status_rssi.setText("信号: —")
             self.statusBar().showMessage("星座图已清空，统计已重置", MSG_QUICK)
         except Exception:
             pass

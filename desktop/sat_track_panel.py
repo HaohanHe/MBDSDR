@@ -222,8 +222,10 @@ class SatTrackPanel(QFrame):
 
         self.az_label.setText(f"{az:6.1f}°")
         self.el_label.setText(f"{el:6.1f}°")
+        if abs(dop) < 0.5:      # N-02：负零归零，避免「-0 Hz」误读成反向偏移
+            dop = 0.0
         self.dop_label.setText(f"{dop:+8.0f} Hz")
-        self.corr_label.setText(f"{corr/1e6:9.4f} MHz")
+        self.corr_label.setText(f"{corr/1e6:9.6f} MHz")
         self.range_label.setText(f"{rng:7.0f} km")
 
         # 仰角条：钳到 0..90

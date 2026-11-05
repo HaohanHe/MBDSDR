@@ -12,7 +12,7 @@ dBFS。旧实现把它渲染成 "-50 dBFS"，等于把两套语义混成一个�
   2. desktop-margin → "-50（6 dB 余量，桌面生效）"；
   3. cpp-auto → "自动（底噪 +8 dB，C++ 内核）"；
   4. cpp-manual → 有回读门限才标 dBFS，否则明确「门限未回读」；
-  5. none/未知来源 → "--"，不给数字戴任何单位帽子。
+  5. none/未知来源 → "—"，不给数字戴任何单位帽子。
 """
 import ast
 import os
@@ -54,9 +54,9 @@ def test_cpp_auto_and_manual():
 def test_no_source_never_gets_a_unit():
     f = _fmt()
     for applied_by in ("none", None, "", "foo"):
-        assert f(-50.0, applied_by, None) == "--", applied_by
-    assert f(None, "desktop-margin", None) == "--"
-    assert f("bad", "desktop-margin", None) == "--"
+        assert f(-50.0, applied_by, None) == "—", applied_by
+    assert f(None, "desktop-margin", None) == "—"
+    assert f("bad", "desktop-margin", None) == "—"
 
 
 def test_static_guard_no_bare_dbfs_on_margin():

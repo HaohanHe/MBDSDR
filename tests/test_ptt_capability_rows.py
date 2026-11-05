@@ -57,14 +57,19 @@ _CASES = [
      {"implemented": False, "declared": False, "ready": False, "verified": False,
       "driver_capable": False, "driver_tx_channels": 0,
       "blocked_reason": "no_tx_channels"},
-     "本后端发射：硬件仅接收（驱动报告 0 个 TX 通道）", False, False),
+     "本后端发射：本设备硬件不支持发射（驱动报告 0 个 TX 通道）", False, False),
     ("row6_unknown",
      {"implemented": False, "declared": False, "ready": False, "verified": False,
       "driver_capable": None, "blocked_reason": "driver_capability_unknown"},
      "本后端发射：能力未知（未连接/驱动未报告）", False, False),
     ("row7_not_implemented",
      {"implemented": False, "declared": False, "ready": False, "verified": False},
-     "本后端发射：未实现", False, False),
+     "本后端发射：本后端尚未实现发射（该驱动没有 TX 代码路径）", False, False),
+    # F1：implemented=true / ready=false（HackRF/USRP/Pluto 未连接时的真实状态）
+    ("row8_implemented_not_connected",
+     {"implemented": True, "declared": True, "ready": False, "verified": False,
+      "connected": False},
+     "本后端发射：已实现，但设备未连接（连上即可发射）", False, False),
 ]
 
 
@@ -84,6 +89,33 @@ def test_only_hardware_limitation_says_no_tx_capability():
     texts = {c[2] for c in _CASES}
     assert not any("没有 TX 通道" in t for t in texts)
     assert "TX 通道" in _CASES[4][2], "第 5 行必须给出驱动报告的真实原因"
+
+
+def test_failure_branches_are_distinct_and_actionable():
+    """F3：硬件不支持 / 软件没实现 / 本路径未接入必须是三句不同的行动建议。"""
+    rows = {c[0]: c[2] for c in _CASES}
+    hw = rows["row5_no_tx_channels"]
+    sw = rows["row7_not_implemented"]
+    path = rows["row4_path_not_implemented"]
+    assert len({hw, sw, path}) == 3, "三种失败原因不得压成同一句"
+    assert "硬件不支持发射" in hw and "尚未实现发射" not in hw
+    assert "尚未实现发射" in sw and "硬件不支持" not in sw
+
+
+def test_implemented_but_not_ready_is_not_reported_as_unimplemented():
+    """F1：有 write_tx、只是没连设备——不能说成「未实现」。"""
+    from main_window import ptt_state
+
+    for cap in (
+        {"implemented": True, "declared": True, "ready": False,
+         "verified": False, "connected": False},
+        {"implemented": True, "declared": True, "ready": False,
+         "verified": False},
+    ):
+        text, clickable, warn = ptt_state(_CapBackend(cap))
+        assert "已实现" in text, f"实现被抹掉：{text}"
+        assert "未实现" not in text, f"能发被说成不能：{text}"
+        assert clickable is False and warn is False
 
 
 @pytest.fixture(scope="module")
