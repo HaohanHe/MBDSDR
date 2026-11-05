@@ -35,8 +35,8 @@ def main():
     if marker.exists() and (time.time() - marker.stat().st_mtime) <= 900:
         try:
             marker.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            print(f"[post-commit] 清理闸门标记失败：{exc}", file=sys.stderr)
         return 0
 
     log_path = Path(
