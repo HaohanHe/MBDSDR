@@ -305,18 +305,66 @@ class DemodWorker(QThread):
         """重打噪声基线：增益变化 / 采样率变化 / 用户手动重标时调用。"""
         self._squelch.reset()
 
-    def _report_demod_failure(self, mode: str, exc: BaseException) -> None:
-        """单帧解调失败：限流记录 + 发信号，不静默跳过。
+    def _report_demod_failure(self, mode: str, exc: BaseException,
+                              stage: str = "解调") -> None:
+        """单帧可预期失败：限流记录 + 发信号，不静默跳过。
 
         限流 2 秒：坏块通常成串出现，逐帧刷日志既淹没证据又拖慢线程。
+        解调 / VFO / 静噪 / 写卡共用一个上报通道（同一时刻只留最近一条）。
         """
         now = time.monotonic()
         if now - self._last_demod_fail_ts < 2.0:
             return
         self._last_demod_fail_ts = now
         detail = f"{exc.__class__.__name__}: {exc}"
-        log.warning("解调失败（mode=%s）：%s", mode, detail)
-        self.demod_failed.emit(f"解调失败（{mode}）：{detail}")
+        log.warning("%s失败（mode=%s）：%s", stage, mode, detail)
+        self.demod_failed.emit(f"{stage}失败（{mode}）：{detail}")
+
+    #: 单帧可预期异常：坏数据/边界，不是编程错误（TypeError/AttributeError 等上抛）
+    _FRAME_ERRORS = (ValueError, IndexError, FloatingPointError)
+    #: 外部设备类异常：声卡拔出/驱动拒绝，属可预期边界
+    _DEVICE_ERRORS = (OSError, RuntimeError)
+
+    def _vfo_ddc(self, iq):
+        """VFO DDC：单帧坏数据限流上报后返回 None；编程错误原样上抛。"""
+        try:
+            return self._vfo.process(iq)
+        except self._FRAME_ERRORS as exc:
+            self._report_demod_failure(f"VFO/{self._cfg.mode}", exc, stage="VFO 处理")
+            return None
+
+    def _wfm_audio(self, iq):
+        """WFM 鉴频：单帧坏数据限流上报后返回 None；编程错误原样上抛。"""
+        try:
+            return self._wfm_rx.process(iq)
+        except self._FRAME_ERRORS as exc:
+            self._report_demod_failure("WFM", exc, stage="WFM 鉴频")
+            return None
+
+    def _squelch_gate(self, audio, player, mode: str) -> None:
+        """静噪门控：判定失败限流上报（保持上次静音状态）；编程错误上抛。"""
+        try:
+            open_g = self._squelch_open(audio)
+            player.set_muted(not open_g)
+        except self._FRAME_ERRORS as exc:
+            self._report_demod_failure(mode, exc, stage="静噪判定")
+
+    def _push_audio(self, audio, player, mode: str) -> None:
+        """AGC → tap → 写卡：设备/数据异常限流上报；编程错误原样上抛。"""
+        try:
+            audio = self._apply_audio_agc(audio)
+            if self.audio_tap is not None:
+                audio = self.audio_tap(audio)
+            player.write(audio)
+        except self._DEVICE_ERRORS + self._FRAME_ERRORS as exc:
+            self._report_demod_failure(mode, exc, stage="音频处理/写卡")
+
+    def _report_unexpected(self, exc: BaseException, mode: str) -> None:
+        """编程错误：保留完整栈并上报，然后停止本 VFO（不在 QThread.run 边界外抛）。"""
+        log.exception("解调线程未预期异常（mode=%s）：%s", mode, exc)
+        self.demod_failed.emit(
+            f"解调线程内部错误（{mode}）：{exc.__class__.__name__}: {exc}")
+        self._running = False
 
     def set_audio_enabled(self, on: bool) -> None:
         """运行时切换本 VFO 是否把解调结果写声卡（主听/次听切换）。
@@ -377,34 +425,30 @@ class DemodWorker(QThread):
                 if not player_ok:
                     # 无设备 / 静音 VFO：仍跑鉴频验证链路，但不写声卡、不做静噪门控
                     try:
-                        self._wfm_rx.process(iq)
-                    except Exception:
-                        pass
+                        self._wfm_audio(iq)
+                    except Exception as exc:  # noqa: BLE001
+                        self._report_unexpected(exc, mode)
+                        break
                     continue
                 try:
-                    audio = self._wfm_rx.process(iq)
-                except Exception:
-                    audio = None
+                    audio = self._wfm_audio(iq)
+                except Exception as exc:  # noqa: BLE001
+                    self._report_unexpected(exc, mode)
+                    break
                 if audio is None or audio.size == 0:
                     continue
                 # 静噪门控（唯一刻度）：相对该模式噪声基线的余量。
                 # WFM 与窄带用同一判定，差别只在分析带/标定（见 squelch.py）。
                 try:
-                    open_g = self._squelch_open(audio)
-                    # AudioPlayer 内部 5ms ramp 消咔哒
-                    player.set_muted(not open_g)
-                except Exception:
-                    pass
+                    self._squelch_gate(audio, player, mode)
+                except Exception as exc:  # noqa: BLE001
+                    self._report_unexpected(exc, mode)
+                    break
                 try:
-                    audio = self._apply_audio_agc(audio)
-                    if self.audio_tap is not None:
-                        audio = self.audio_tap(audio)
-                    player.write(audio)
-                except Exception as e:
-                    # 这一段混合了内部后处理（AGC/tap）和外部写卡；后者会因
-                    # 设备拔出而失败，前者出错则是真 bug。静默吞掉两者都会
-                    # 让"没声音"无从定位，所以留一行带上下文的日志。
-                    log.warning("WFM 音频后处理/写卡失败: %s", e)
+                    self._push_audio(audio, player, mode)
+                except Exception as exc:  # noqa: BLE001
+                    self._report_unexpected(exc, mode)
+                    break
                 continue
 
             # ===== 窄带路径（FM/NFM/AM/USB/LSB/CW）=====
@@ -414,9 +458,10 @@ class DemodWorker(QThread):
                 # VFO 不可用：窄带无法解调，跳过（不造假音频）
                 continue
             try:
-                vfo_out = self._vfo.process(iq)
-            except Exception:
-                continue
+                vfo_out = self._vfo_ddc(iq)
+            except Exception as exc:  # noqa: BLE001
+                self._report_unexpected(exc, mode)
+                break
             if vfo_out is None or len(vfo_out) <= 16:
                 continue
 
@@ -433,23 +478,24 @@ class DemodWorker(QThread):
                 # 必须上抛，否则"频谱有信号、没有声音、没有提示"。
                 self._report_demod_failure(mode, exc)
                 continue
+            except Exception as exc:  # noqa: BLE001
+                self._report_unexpected(exc, mode)
+                break
             if audio is None or audio.size == 0:
                 continue
 
             # 静噪门控（唯一刻度）：相对该模式噪声基线的余量（与 WFM 同口径）。
             try:
-                open_g = self._squelch_open(audio)
-                player.set_muted(not open_g)
-            except Exception:
-                pass
+                self._squelch_gate(audio, player, mode)
+            except Exception as exc:  # noqa: BLE001
+                self._report_unexpected(exc, mode)
+                break
 
             try:
-                audio = self._apply_audio_agc(audio)
-                if self.audio_tap is not None:
-                    audio = self.audio_tap(audio)
-                player.write(audio)
-            except Exception:
-                pass
+                self._push_audio(audio, player, mode)
+            except Exception as exc:  # noqa: BLE001
+                self._report_unexpected(exc, mode)
+                break
         self._running = False
 
     def shutdown(self):
