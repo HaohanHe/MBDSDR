@@ -176,7 +176,11 @@ def evaluate_aprs(audio, fs, case=None) -> tuple:
     try:
         r = decode_aprs_audio(audio, target_fs=fs)
     except Exception as exc:
-        return False, f"decode_error:{type(exc).__name__}", {}
+        # 边界：单次试次解码异常不该中断整轮扫描，但必须留下可查原因
+        # （异常类型 + 原文进 detail，随逐档 / JSON 报告落地），不是静默降级。
+        detail = {"error": f"{type(exc).__name__}: {exc}",
+                  "frames_decoded": 0, "frames_dropped": 0}
+        return False, f"decode_error:{type(exc).__name__}", detail
     frames = r.get("content", {}).get("frames", []) if r.get("ok") else []
     detail = {
         "frames_decoded": len(frames),
