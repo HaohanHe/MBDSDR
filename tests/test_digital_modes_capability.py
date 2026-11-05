@@ -62,8 +62,8 @@ class TestTableRegistration:
     def test_dependency_modules_importable(self):
         for key, cap in dm.DIGITAL_MODE_CAPABILITIES.items():
             if not cap.dependency:
-                # 空依赖 = 通用入口未接线（ft8/aprs），必须显式声明
-                assert key in {"ft8", "aprs"}, f"{key} 缺 dependency 但不在豁免名单"
+                # 空依赖 = 通用入口未接线（仅 ft8），必须显式声明
+                assert key in {"ft8"}, f"{key} 缺 dependency 但不在豁免名单"
                 continue
             assert dm._find_spec(cap.dependency) is not None, (
                 f"{key} 声明的依赖 {cap.dependency} 导不进来")
@@ -172,12 +172,30 @@ class TestFormatGate:
         assert out["error_code"] == dm.ERR_UNSUPPORTED_FORMAT
         assert "spectral_peak" not in out
 
-    def test_unrestricted_mode_accepts_any_format(self, tmp_path):
-        f = _write_wav(tmp_path / "aprs.wav", np.zeros(480))
-        out = decode_digital_mode(f, "aprs")
+    def test_unwired_mode_still_reports_not_implemented(self, tmp_path):
+        """FT8 通用入口仍未接线：如实报 not_implemented，不装成解出来了。"""
+        f = _write_wav(tmp_path / "ft8.wav", np.zeros(480))
+        out = decode_digital_mode(f, "ft8")
         assert out["error_code"] == dm.ERR_NOT_IMPLEMENTED
         assert out["ok"] is False
         assert out["note"]
+
+    def test_aprs_now_rejects_wav_and_decodes_cf32(self, tmp_path):
+        """APRS 已接线：格式门收紧到 cf32/cfile，cf32 走真实流水线。"""
+        wav = _write_wav(tmp_path / "aprs.wav", np.zeros(480))
+        out = decode_digital_mode(wav, "aprs")
+        assert out["error_code"] == dm.ERR_UNSUPPORTED_FORMAT
+        assert "cf32" in out["error"]
+
+        fixture = os.path.join(_ROOT, "tests", "fixtures", "decode_pipeline",
+                               "aprs_two_frames.cf32")
+        res = decode_digital_mode(fixture, "aprs", sample_rate=96000.0,
+                                  output_dir=str(tmp_path / "out"))
+        assert res["ok"] is True and res["status"] == "decoded"
+        assert res["num_frames"] == 2
+        assert len(res["stages"]) == 6
+        assert res["frames"][0]["source"] == "BI1AAA"
+        assert res["frames"][0]["digipeaters"]
 
 
 # ---------------------------------------------------------------------------

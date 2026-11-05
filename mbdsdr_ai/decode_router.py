@@ -11,7 +11,11 @@
   * `missing_dependency`  —— 表里登记的内置实现模块导不进来；
   * `missing_sample`      —— 输入捕获文件不存在（缺样本，不是解码失败）。
 其余：`unsupported_format`（格式不匹配）、`decode_error`（解码异常）、
-`not_implemented`（能力未接线，例如 ft8/aprs 通用入口）。
+`not_implemented`（能力未接线，例如 ft8 通用入口）。APRS 已接线到
+`decode_pipeline.run_aprs_pipeline`（NFM 鉴频 → Bell202 AFSK → NRZI →
+HDLC → CRC-16 → AX.25），失败原因码沿用流水线
+（`nothing_detected`/`truncated_frame`/`crc_failed`/`insufficient_samples`/
+`sample_rate_mismatch`）。
 
 证据等级（`evidence`）口径与 P2 真样本盘点一致：
   real      = 有真实 OTA/真值对拍（LRPT/FT8/ADS-B）
@@ -116,15 +120,19 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
     ),
     "aprs": DigitalModeCapability(
         mode="aprs",
-        impl="ax25.py",
-        dependency="",       # AFSK 路由未接线
-        input_formats=("*",),
-        output_kind="note",
-        sample_rate_rule="NFM 解调后 48kHz 音频（通用入口未接线，参数不生效）",
-        evidence=EVIDENCE_NO_SAMPLE,
+        impl="decode_pipeline.py",
+        dependency="mbdsdr_ai.decode_pipeline",
+        input_formats=(".cf32", ".cfile"),
+        output_kind="frames",
+        sample_rate_rule=(
+            "NFM 复基带 fs ≥ 16000Hz（dev≈3kHz + Bell202 1200/2200Hz 音调）；"
+            "解码前鉴频并重采样到 48kHz（40 样/bit）"
+        ),
+        evidence=EVIDENCE_PARTIAL,
         min_sample_condition=(
-            "144.640/144.390/144.800MHz NFM 下行解调音频 ≥ 5s，含至少 1 个"
-            "1200bd Bell202 AX.25 帧（CRC-16 通过）"
+            "现有证据仅为**合成验证**（仓内调制 2 帧、逐字节对拍），**无 OTA "
+            "证据**；补真录条件：144.640/144.390/144.800MHz NFM 下行复基带 "
+            "≥ 5s，含至少 1 个 1200bd Bell202 AX.25 帧（CRC-16 通过）"
         ),
         external_tools=("direwolf", "aprs"),
     ),
@@ -282,13 +290,47 @@ def _route_ft8(ctx: _Ctx) -> Dict[str, Any]:
 
 
 def _route_aprs(ctx: _Ctx) -> Dict[str, Any]:
+    """APRS：真接到 `decode_pipeline.run_aprs_pipeline`，不伪造结果。"""
     result = ctx.result
-    result["note"] = (
-        "APRS 为 1200 波特 AFSK(Bell202) over AX.25；内置 ax25.py 已具备 "
-        "FM 鉴频+数字 PLL+CRC-16 能力（见 exp_ax25_performance），direwolf 为可选增强。"
-    )
-    result.update({"ok": False, "status": ERR_NOT_IMPLEMENTED,
-                   "error_code": ERR_NOT_IMPLEMENTED})
+    if ctx.ext not in (".cf32", ".cfile"):
+        result["error"] = user_message(
+            "unsupported_format", mode="APRS",
+            allowed=".cf32/.cfile（NFM 复基带；AFSK 音频请先调制/录制为 cf32）",
+            actual=ctx.ext)
+        result["error_code"] = ERR_UNSUPPORTED_FORMAT
+        return result
+
+    from .decode_pipeline import run_aprs_pipeline
+
+    try:
+        rep = run_aprs_pipeline(ctx.input_path, fs=float(ctx.sample_rate),
+                                target_fs=48000.0)
+    except Exception as exc:
+        result["error"] = f"APRS 流水线异常: {type(exc).__name__}: {exc}"
+        result["error_code"] = ERR_DECODE_ERROR
+        return result
+
+    for key in ("ok", "status", "error_code", "reason", "stage", "detail",
+                "stages", "content"):
+        result[key] = rep.get(key)
+    frames = rep.get("content", {}).get("frames", [])
+    result["frames"] = frames
+    result["num_frames"] = int(rep.get("num_frames", 0))
+    result["dropped_frames"] = int(rep.get("dropped_frames", 0))
+    result["truncated_fragments"] = int(rep.get("truncated_fragments", 0))
+    result["messages"] = []
+    result["num_messages"] = 0
+    if rep.get("ok"):
+        result["note"] = (
+            "APRS/AX.25 逐级解码：NFM 鉴频 → Bell202 AFSK 1200bd → NRZI → "
+            "HDLC 0x7E/去位填充 → CRC-16 → AX.25；"
+            f"解出 {len(frames)} 帧（证据为合成 fixture，非 OTA）。"
+        )
+    else:
+        result["note"] = (
+            f"APRS 解码失败于 {rep.get('stage')} 级：{rep.get('detail')}"
+            "（合成 fixture 验证；无 OTA 证据）"
+        )
     return result
 
 

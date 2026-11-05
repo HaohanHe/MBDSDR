@@ -56,5 +56,79 @@
         "tc": 4
       }
     ]
+  },
+  "aprs": {
+    "file": "aprs_two_frames.cf32",
+    "fs_hz": 96000.0,
+    "target_fs_hz": 48000.0,
+    "frame_count": 2,
+    "samples": 117440,
+    "signal": "Bell 202 AFSK 1200bd (mark 1200Hz / space 2200Hz) NFM dev≈3000Hz",
+    "frames": [
+      {
+        "source": "BI1AAA",
+        "source_ssid": 1,
+        "destination": "APRS",
+        "dest_ssid": 0,
+        "digipeaters": [
+          [
+            "WIDE1",
+            1,
+            false
+          ],
+          [
+            "WIDE2",
+            2,
+            false
+          ]
+        ],
+        "control": 3,
+        "pid": 240,
+        "info_hex": "21333730302e30304e2f31323230302e3030572d73796e7468657469632061783235206f6e65",
+        "frame_hex": "82a0a4a64040e084926282828262ae92888a624062ae92888a64406503f021333730302e30304e2f31323230302e3030572d73796e7468657469632061783235206f6e6599d5"
+      },
+      {
+        "source": "BI1BBB",
+        "source_ssid": 9,
+        "destination": "APRS",
+        "dest_ssid": 0,
+        "digipeaters": [],
+        "control": 3,
+        "pid": 240,
+        "info_hex": "21333935342e30304e2f31313632342e3030452d73796e74686574696320617832352074776f",
+        "frame_hex": "82a0a4a64040e08492628484847303f021333935342e30304e2f31313632342e3030452d73796e74686574696320617832352074776f257f"
+      }
+    ],
+    "honesty": "synthetic remodulation; NOT OTA"
+  },
+  "aprs_failures": {
+    "aprs_noise.cf32": {
+      "file": "aprs_noise.cf32",
+      "fs_hz": 96000.0,
+      "target_fs_hz": 48000.0,
+      "expected_reason": "nothing_detected",
+      "expected_stage": "sync",
+      "note": "noise-only segment；生成器逐 seed 校验无 HDLC 标志",
+      "samples": 57600,
+      "seed": 19
+    },
+    "aprs_truncated.cf32": {
+      "file": "aprs_truncated.cf32",
+      "fs_hz": 96000.0,
+      "target_fs_hz": 48000.0,
+      "expected_reason": "truncated_frame",
+      "expected_stage": "frame",
+      "note": "有效帧音频截到 55%，缺结束 0x7E 标志",
+      "samples": 33440
+    },
+    "aprs_crc_fail.cf32": {
+      "file": "aprs_crc_fail.cf32",
+      "fs_hz": 96000.0,
+      "target_fs_hz": 48000.0,
+      "expected_reason": "crc_failed",
+      "expected_stage": "frame",
+      "note": "完整帧但 info 字节翻转、FCS 不匹配",
+      "samples": 60800
+    }
   }
 }

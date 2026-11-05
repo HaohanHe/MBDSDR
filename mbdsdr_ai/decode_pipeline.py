@@ -4,7 +4,7 @@
 **输入样本数 / 输出样本数 / 丢帧数 / 耗时**，失败时给**明确的失败级+原因**，
 成功时给可与已知真值逐字节对拍的内容。
 
-两级链路：
+三条链路：
 
   AIS（ITU-R M.1371）：
     .cf32 → load_iq → downconvert（混频+多相抽取）→ demod（GMSK 1-bit 差分
@@ -15,6 +15,13 @@
     .cf32 → load_iq → downconvert → sync（8µs 四脉冲前导模板匹配）
     → demod（PPM 位判决）→ frame（CRC-24 0xFFF409，丢帧在此计数）
     → content（DF/ICAO/呼号/TC 字段）
+
+  APRS / AX.25（TAPR AX.25 + Bell 202 AFSK 1200bd）：
+    .cf32 NFM 复基带 → load_iq → downconvert（FM 鉴频 + 4.5kHz 低通 + 重采样
+    到 48kHz）→ demod（Bell 202 正交相关 + PLL 位定时 + NRZI 差分）→ sync
+    （HDLC 0x7E 标志 + 去位填充，候选帧在此切出）→ frame（CRC-16/X.25 FCS，
+    CRC 失败在此计数）→ content（AX.25 地址/控制/PID/信息字段 = 源呼号、
+    目的、digipeater 路径、payload）
 
 诚实边界（每一句都必须能复跑，不靠形容词）：
   * **证据范围**：`tests/fixtures/decode_pipeline/` 的 fixture 是「已知帧经
@@ -52,14 +59,22 @@ REASON_MISSING_DEPENDENCY = "missing_dependency"
 REASON_PREAMBLE_NOT_FOUND = "preamble_not_found"
 REASON_NOTHING_DETECTED = "nothing_detected"
 REASON_NO_FRAME_RECOVERED = "no_frame_recovered"
+REASON_TRUNCATED_FRAME = "truncated_frame"
+REASON_CRC_FAILED = "crc_failed"
 REASON_DECODE_ERROR = "decode_error"
 
 # AIS 最短真帧：168 bit 报文 + 16 bit FCS + 16 bit 首尾标志（不含填充）。
 AIS_MIN_FRAME_BITS = 200
 
-# 流水线级名（两种模式共用这组语义；ADS-B 把前导同步放在 demod 之前）。
+# APRS/AX.25 最短 HDLC 帧：15 字节（7 目的 + 7 源 + 1 控制 + 2 FCS）
+# + 首尾两个 0x7E 标志（各 8 bit）。
+APRS_MIN_FRAME_BYTES = 15
+APRS_MIN_HDLC_BITS = APRS_MIN_FRAME_BYTES * 8 + 16
+
+# 流水线级名（三种模式共用这组语义；ADS-B 把前导同步放在 demod 之前）。
 AIS_STAGE_NAMES = ("load_iq", "downconvert", "demod", "sync", "frame", "content")
 ADSB_STAGE_NAMES = ("load_iq", "downconvert", "sync", "demod", "frame", "content")
+APRS_STAGE_NAMES = ("load_iq", "downconvert", "demod", "sync", "frame", "content")
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +433,237 @@ def run_adsb_pipeline(path: str, fs: float, target_fs: float = 4e6,
         "frames": content_frames,
         "frames_hex": [f["hex"] for f in content_frames],
     }, {"num_frames": len(content_frames), "dropped_frames": int(crc_fail)})
+
+
+# ---------------------------------------------------------------------------
+# APRS / AX.25 流水线
+# ---------------------------------------------------------------------------
+def _aprs_nrzi_decode(levels: np.ndarray) -> List[int]:
+    """NRZI 电平 → HDLC 原始位：0 = 电平切换，1 = 电平保持。"""
+    raw: List[int] = []
+    prev = 1
+    for b in levels:
+        cur = int(b)
+        raw.append(0 if cur != prev else 1)
+        prev = cur
+    return raw
+
+
+def _aprs_flag_positions(bits: List[int]) -> List[int]:
+    """扫描 HDLC 标志 0x7E（LSB-first：0,1,1,1,1,1,1,0）。"""
+    out: List[int] = []
+    for i in range(max(0, len(bits) - 7)):
+        if (bits[i] == 0 and bits[i + 7] == 0
+                and all(bits[i + k] == 1 for k in range(1, 7))):
+            out.append(i)
+    return out
+
+
+def _aprs_frame_candidates(raw_bits: List[int]) -> Tuple[List[int], List[List[int]], List[int]]:
+    """按 0x7E 标志切候选帧；返回 (标志位置, 候选位段, 末尾残段)。"""
+    flags = _aprs_flag_positions(raw_bits)
+    candidates: List[List[int]] = []
+    for start, end in zip(flags, flags[1:]):
+        seg = raw_bits[start + 8:end]
+        if len(seg) >= 8:
+            candidates.append(seg)
+    tail = raw_bits[flags[-1] + 8:] if flags else []
+    return flags, candidates, tail
+
+
+def run_aprs_pipeline(path: str, fs: float, target_fs: float = 48000.0,
+                      center_offset_hz: float = 0.0) -> Dict[str, Any]:
+    """APRS：NFM 复基带 → 鉴频/低通 → AFSK → NRZI → HDLC → CRC-16 → AX.25。
+
+    输入是 1200bd Bell 202 AFSK（mark 1200Hz / space 2200Hz）调制的 NFM
+    复基带；所有内容来自随仓合成 fixture（synthetic, NOT OTA）。
+    """
+    from .ax25 import AX25Frame, bits_to_bytes, unstuff_bits
+
+    trace = _Trace()
+    iq, err = _load_cf32(trace, path)
+    if err:
+        return err
+
+    # --- 第 2 级：FM 鉴频 + 低通 + 重采样到音频 ---------------------------
+    t0 = time.perf_counter()
+    n_in = int(iq.size)
+    if fs < 16000.0:
+        ms = (time.perf_counter() - t0) * 1000
+        trace.add("downconvert", "complex_samples", n_in, "audio_samples", 0,
+                  elapsed_ms=ms, note=f"采样率不合规: {fs:g} Hz")
+        return _fail(trace, "downconvert", REASON_SAMPLE_RATE_MISMATCH,
+                     "APRS NFM 复基带要求 fs ≥ 16000 Hz（dev≈3kHz + 2.2kHz 音调）；"
+                     f"收到 fs={fs:g} Hz",
+                     {"sample_rate_hz": float(fs),
+                      "target_sample_rate_hz": float(target_fs)})
+    sps = target_fs / 1200.0
+    required_audio = int(math.ceil(APRS_MIN_HDLC_BITS * sps))
+    required_input = int(math.ceil(required_audio * fs / target_fs)) + 1
+    if n_in < required_input:
+        # 过短输入连滤波器都喂不饱：不抛 scipy padlen 异常，交给 demod 级报
+        # insufficient_samples（与 AIS/ADS-B 的短路口径一致）。
+        audio = np.zeros(0, dtype=np.float64)
+        ms = (time.perf_counter() - t0) * 1000
+        trace.add("downconvert", "complex_samples", n_in, "audio_samples", 0,
+                  elapsed_ms=ms,
+                  note=(f"输入过短（{n_in} < {required_input} 复样本），"
+                        "跳过 FM 鉴频"))
+    else:
+        try:
+            from scipy.signal import butter, resample_poly, sosfiltfilt
+            z = np.asarray(iq, dtype=np.complex128)
+            if abs(center_offset_hz) > 1e-9:
+                n = np.arange(z.size, dtype=np.float64)
+                z = z * np.exp(-2.0j * math.pi * center_offset_hz * n / fs)
+            z = z - z.mean()
+            inst = np.angle(z[1:] * np.conj(z[:-1])) * (fs / (2.0 * math.pi))
+            sos = butter(4, min(4500.0, fs / 2.0 - 1.0) / (fs / 2.0),
+                         btype="low", output="sos")
+            audio = sosfiltfilt(sos, inst)
+            if abs(fs - target_fs) > 1e-6:
+                src, dst = int(round(fs)), int(round(target_fs))
+                from math import gcd
+                g = gcd(src, dst)
+                audio = resample_poly(audio, dst // g, src // g,
+                                      window=("kaiser", 5.0))
+        except ImportError:
+            trace.add("downconvert", "complex_samples", n_in, "audio_samples", 0,
+                      elapsed_ms=(time.perf_counter() - t0) * 1000,
+                      note="scipy 缺失")
+            return _fail(trace, "downconvert", REASON_MISSING_DEPENDENCY,
+                         "APRS 鉴频需要 scipy.signal（butter/resample_poly），当前环境缺失")
+        except Exception as exc:
+            trace.add("downconvert", "complex_samples", n_in, "audio_samples", 0,
+                      elapsed_ms=(time.perf_counter() - t0) * 1000,
+                      note=f"异常 {type(exc).__name__}")
+            return _fail(trace, "downconvert", REASON_DECODE_ERROR,
+                         f"APRS FM 鉴频异常: {type(exc).__name__}: {exc}")
+        audio = np.asarray(audio, dtype=np.float64)
+        ms = (time.perf_counter() - t0) * 1000
+        trace.add("downconvert", "complex_samples", n_in, "audio_samples",
+                  int(audio.size), elapsed_ms=ms,
+                  note=(f"FM 鉴频 + 4.5kHz 低通 + 重采样 {fs:g}→{target_fs:g} Hz "
+                        f"(offset={center_offset_hz:g} Hz)"))
+
+    # --- 第 3 级：Bell 202 正交相关 + PLL 位定时 + NRZI ---------------------
+    t0 = time.perf_counter()
+    if audio.size < required_audio:
+        ms = (time.perf_counter() - t0) * 1000
+        trace.add("demod", "audio_samples", int(audio.size), "bits", 0,
+                  elapsed_ms=ms, note="不足一个 HDLC 帧")
+        return _fail(trace, "demod", REASON_INSUFFICIENT_SAMPLES,
+                     f"音频长度不足一个 HDLC 帧：需要 ≥ {required_audio} 样本"
+                     f"（{APRS_MIN_HDLC_BITS} bit × {sps:g} 样本/bit），"
+                     f"实际 {audio.size}",
+                     {"required_samples": int(required_audio),
+                      "required_input_samples": int(required_input)})
+    try:
+        from .multimon_decoders import AFSK1200Demod
+        levels = AFSK1200Demod(sample_rate=float(target_fs)).demodulate(audio)
+        raw_bits = _aprs_nrzi_decode(levels)
+    except Exception as exc:
+        ms = (time.perf_counter() - t0) * 1000
+        trace.add("demod", "audio_samples", int(audio.size), "bits", 0,
+                  elapsed_ms=ms, note=f"异常 {type(exc).__name__}")
+        return _fail(trace, "demod", REASON_DECODE_ERROR,
+                     f"AFSK 1200bd 解调异常: {type(exc).__name__}: {exc}")
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("demod", "audio_samples", int(audio.size), "bits", len(raw_bits),
+              elapsed_ms=ms,
+              note="Bell 202 正交相关 + PLL 位定时 + NRZI 差分")
+
+    # --- 第 4 级：HDLC 0x7E 标志 + 去位填充（候选帧在此切出） -------------
+    t0 = time.perf_counter()
+    flags, candidates, tail = _aprs_frame_candidates(raw_bits)
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("sync", "bits", len(raw_bits), "frame_candidates",
+              len(candidates), elapsed_ms=ms,
+              note=f"HDLC 0x7E 标志 {len(flags)} 个；去填充后按标志切帧")
+    if not flags:
+        return _fail(trace, "sync", REASON_NOTHING_DETECTED,
+                     f"位流 {len(raw_bits)} bit 中没有 HDLC 0x7E 标志"
+                     "（纯噪声/无 AFSK 信号都会落到这里）",
+                     {"wire_bits": len(raw_bits), "flag_count": 0})
+    if not candidates and (len(tail) < 8 or 0 not in tail):
+        return _fail(trace, "sync", REASON_NOTHING_DETECTED,
+                     f"只看到 {len(flags)} 个 HDLC 标志/空闲位，没有帧数据",
+                     {"wire_bits": len(raw_bits), "flag_count": len(flags),
+                      "tail_bits": len(tail)})
+
+    # --- 第 5 级：去填充 + CRC-16/X.25（失败帧在此计数） -------------------
+    t0 = time.perf_counter()
+    valid_raw: List[bytes] = []
+    valid_frames: List[Any] = []
+    crc_fail = 0
+    short_fragments = 0
+    for seg in candidates:
+        unstuffed = unstuff_bits(seg)
+        n_bits = (len(unstuffed) // 8) * 8
+        raw = bits_to_bytes(unstuffed[:n_bits])
+        if len(raw) < APRS_MIN_FRAME_BYTES:
+            short_fragments += 1
+            continue
+        frame = AX25Frame.from_bytes(raw)
+        if frame is None:
+            short_fragments += 1
+        elif frame.fcs_valid:
+            valid_frames.append(frame)
+            valid_raw.append(raw)
+        else:
+            crc_fail += 1
+    truncated = bool(tail) and len(tail) >= 8 and 0 in tail
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("frame", "frame_candidates", len(candidates), "frames",
+              len(valid_raw), dropped=crc_fail, elapsed_ms=ms,
+              note=(f"CRC-16/X.25 FCS；CRC 失败丢弃 {crc_fail}，"
+                    f"非帧碎片 {short_fragments}，尾部残段 {len(tail)} bit"))
+    if not valid_raw:
+        extra = {"candidate_frames": len(candidates),
+                 "dropped_frames": int(crc_fail),
+                 "truncated_fragments": int(short_fragments),
+                 "tail_bits": int(len(tail))}
+        if crc_fail:
+            return _fail(trace, "frame", REASON_CRC_FAILED,
+                         f"{len(candidates)} 个候选帧全部 CRC-16 失败"
+                         f"（丢弃 {crc_fail}）", extra)
+        if truncated or short_fragments:
+            return _fail(trace, "frame", REASON_TRUNCATED_FRAME,
+                         "看到帧起始标志，但没有凑够一个完整 AX.25 帧"
+                         f"（碎片 {short_fragments} 个，尾部残段 {len(tail)} bit）",
+                         extra)
+        return _fail(trace, "frame", REASON_NO_FRAME_RECOVERED,
+                     f"{len(candidates)} 个候选帧都未通过 CRC-16 校验", extra)
+
+    # --- 第 6 级：AX.25 地址/控制/PID/信息字段 ----------------------------
+    t0 = time.perf_counter()
+    frames: List[Dict[str, Any]] = []
+    for frame, raw in zip(valid_frames, valid_raw):
+        frames.append({
+            "source": frame.source,
+            "source_ssid": int(frame.source_ssid),
+            "destination": frame.destination,
+            "dest_ssid": int(frame.dest_ssid),
+            "digipeaters": [[c, int(s), bool(r)]
+                            for c, s, r in frame.digipeaters],
+            "control": int(frame.control),
+            "pid": int(frame.pid),
+            "info_hex": frame.info.hex(),
+            "info_text": frame.info.decode("latin-1", errors="replace"),
+            "info_len": len(frame.info),
+            "frame_hex": raw.hex(),
+            "fcs": int(frame.fcs),
+            "fcs_valid": bool(frame.fcs_valid),
+        })
+    ms = (time.perf_counter() - t0) * 1000
+    trace.add("content", "frames", len(valid_raw), "frames", len(frames),
+              elapsed_ms=ms,
+              note="AX.25 源/目的/digipeater 路径 + 控制/PID + payload")
+    return _ok(trace, {
+        "frames": frames,
+        "payloads_hex": [f["info_hex"] for f in frames],
+    }, {"num_frames": len(frames), "dropped_frames": int(crc_fail),
+        "truncated_fragments": int(short_fragments)})
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@
 | `acars` | **部分** | tests/test_acars_roundtrip.py / tests/test_acars_consistency.py（2400baud MSK 往返 + 字段一致性） | `python -m pytest tests/test_acars_roundtrip.py tests/test_acars_consistency.py -q` | 131.55MHz AM 下行解调音频 ≥ 5s，含 ≥ 1 条 2400baud MSK ACARS报文且 CRC 通过 | 半个真：合成链自洽，缺真实航司报文真录 |
 | `adsb` | **真实** | tests/test_adsb_dump1090_golden.py（dump1090 官方 modes1.bin 逐帧对拍）；tests/test_adsb_consistency.py（合成链）；本机 1090MHz 真录 2026-10-29 三次 0 CRC 帧 = 负证据（如实保留） | `python -m pytest tests/test_adsb_dump1090_golden.py tests/test_adsb_consistency.py -q` | 1090MHz 下行 .cf32，fs=2MHz 或 4MHz，≥ 3 个干净 DF17 前导（CRC-24 通过与 dump1090 对拍） | 真（外部真值）：dump1090 官方样本两条帧逐字命中；但本机 OTA 真录尚未破零 |
 | `ais` | **缺样本** | tests/test_ais_decoder.py（GMSK→HDLC→FCS-16→M.1371 字段，合成链） | `python -m pytest tests/test_ais_decoder.py -q` | 161.975/162.025MHz 信道化复基带 .cf32，fs=192000 或 96000，≥ 5s 且含 ≥ 3 条 FCS 通过的 AIS 报文（含 Type 1 位置） | 尚不算真：无 AIS 信道真录，只有协议性质钉扎 |
-| `aprs` | **缺样本** | mbdsdr_ai/ax25.py 能力测试（exp_ax25_performance）；通用入口未接线 | `python -m pytest mbdsdr_ai/tests/test_digital_modes_behavior.py -q` | 144.640/144.390/144.800MHz NFM 下行解调音频 ≥ 5s，含至少 1 个1200bd Bell202 AX.25 帧（CRC-16 通过） | 尚不算真：AX.25 能力存在但 AFSK 入口未接线，无真录 |
+| `aprs` | **部分** | tests/test_decode_pipeline_e2e.py（合成 2 帧：NFM 鉴频→Bell202 AFSK→NRZI→HDLC→CRC-16→AX.25，呼号/digipeater 路径/payload 逐字节对拍；噪声/截断/CRC 三条失败原因码） | `python -m pytest tests/test_decode_pipeline_e2e.py -q` | 现有证据仅为**合成验证**（仓内调制 2 帧、逐字节对拍），**无 OTA 证据**；补真录条件：144.640/144.390/144.800MHz NFM 下行复基带 ≥ 5s，含至少 1 个 1200bd Bell202 AX.25 帧（CRC-16 通过） | 合成验证（synthetic, NOT OTA）：链路已接线，但只有仓内调制 fixture 逐字节对拍，无 OTA 证据 |
 | `ft4` | **部分** | mbdsdr_ai/tests/test_decoders_ft4_wspr.py（自体往返 + 窄带拒绝契约） | `python -m pytest mbdsdr_ai/tests/test_decoders_ft4_wspr.py -q` | SSB 解调后 12kHz PCM16 单声道 .wav，含完整 FT4 75s 帧且SNR ≥ 0dB（官方样例库可作真值） | 半个真：算法链自洽，缺 OTA 真录对拍 |
 | `ft8` | **真实** | tests/test_ft8_wsjtx_golden.py（WSJT-X 官方 210703_133430.wav，5/14 精确命中、零假接受）；tests/test_ft8_cross_impl_fixture.py | `python -m pytest tests/test_ft8_wsjtx_golden.py tests/test_ft8_cross_impl_fixture.py -q` | 真录已在 test_ft8_* 中对拍；通用 WAV 入口未接线，需调用ft8_lite.decode_ft8_audio 或走专用工具 | 真（外部真值）：官方样本 5/14 命中；通用 WAV 入口未接线（not_implemented） |
 | `meteor` | **部分** | tests/test_meteor_lrpt.py（合成向量）；真录证据在 LRPT 链见下一行 | `python -m pytest tests/test_meteor_lrpt.py -q` | Meteor-M2 137.9MHz 下行 .cf32 ≥ 20s，Viterbi 可锁且 RS 全纠帧 ≥ 2（本仓 LRPT 真录链可作真值） | 半个真：通用入口只到解调骨架；图像链真录证据在 LRPT 真录链 |
@@ -78,9 +78,9 @@ python scripts/decode_captures.py --mode all --dir captures/ --out report.json
 ## 诚实边界
 
 - 「真实」不等于「现在能在你的设备上收到」：外部真值证明解码链正确，能否收到还取决于天线、增益、过境时间与多普勒补偿。
-- 标 `not_implemented` 的模式（ft8/aprs 通用入口）不会假装解码，调用会得到明确错误码而不是空结果。
-- 缺样本的三种模式（ais/navtex/aprs）在补到真录之前，任何「已解码」的宣称都不成立。
-- **APRS 不得写成「支持」**：仓内只有 AFSK1200 解调器与 AX.25 能力，通用入口未接线；`aprs` 行是「缺样本 + 未接线」，不是可用模式。
+- 标 `not_implemented` 的模式（仅 ft8 通用入口）不会假装解码，调用会得到明确错误码而不是空结果。
+- 缺真录的模式（ais/navtex/aprs）在补到真录之前，任何「空口已解码」的宣称都不成立。
+- **APRS 已接线但不等于「空口支持」**：`run_aprs_pipeline` 真实执行 NFM 鉴频→Bell202 AFSK→NRZI→HDLC→CRC-16→AX.25，但现有证据仅为仓内合成 fixture（synthetic, NOT OTA）逐字节对拍；不得写成「OTA 验证通过」。失败时给 `nothing_detected` / `truncated_frame` / `crc_failed` 等具体原因码。
 - **本矩阵与 UI 都不声称「实时解码」**：解码是离线/同步处理，实时率与跟不上时的后果见 `mbdsdr_ai.decode_pipeline.performance_summary` / `behind_report`；后者明说积压恒为 0 且观测不到 SDR 缓冲层溢出。
 - **两种「丢」的用词**：`dropped_frames` 只计 FCS/CRC 校验失败，不包含「跟不上导致样本没被处理」——后者不归本模块计数。
 

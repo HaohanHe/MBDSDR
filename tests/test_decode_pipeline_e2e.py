@@ -3,17 +3,19 @@
 要证的不是「能跑」，而是每一级输入/输出都可量、内容逐字节对得上、失败有
 明确原因、耗时能换算成实时率。
 
-信号链（两级都从**随仓的 .cf32 fixture** 起读，不引用仓外绝对路径）：
+信号链（三条都从**随仓的 .cf32 fixture** 起读，不引用仓外绝对路径）：
 
-    raw IQ (.cf32) → load_iq → downconvert（混频+多相抽取）
-        → demod（GMSK 差分/位定时 或 PPM 位判决）
-        → sync（AIS HDLC 标志+FCS 或 ADS-B 8µs 前导）
-        → frame（payload/字节+CRC）→ content（字段/NMEA）
+    raw IQ (.cf32) → load_iq → downconvert（混频+多相抽取 或 FM 鉴频）
+        → demod（GMSK 差分/位定时、PPM 位判决 或 Bell202 AFSK+NRZI）
+        → sync（AIS HDLC 标志+FCS、ADS-B 8µs 前导 或 AX.25 0x7E 标志）
+        → frame（payload/字节+CRC）→ content（字段/NMEA/AX.25 地址+payload）
 
 事实来源：
   * AIS 链路层 ITU-R M.1371（9600bd GMSK、HDLC 标志、FCS-16、NRZI）；
   * ADS-B 1090ES ICAO Annex 10 Vol IV / RTCA DO-260（8µs 前导、PPM、
-    CRC-24 0xFFF409）。
+    CRC-24 0xFFF409）；
+  * APRS/AX.25 TAPR AX.25 + Bell 202 AFSK 1200bd（mark 1200Hz、space 2200Hz、
+    NRZI、HDLC 0x7E、位填充、CRC-16/X.25）。
 
 fixture 的诚实声明：`tests/fixtures/decode_pipeline/manifest.json` 里写明
 「已知帧经仓内编码器重新调制，非 OTA 实录」；它证明的是**流水线各级与已知
@@ -67,10 +69,14 @@ def _assert_stage_shape(stages, names):
 # ---------------------------------------------------------------------------
 def test_fixtures_are_in_repo_and_manifest_is_honest():
     m = _manifest()
-    for key in ("ais", "adsb"):
+    for key in ("ais", "adsb", "aprs"):
         p = FIXTURE_DIR / m[key]["file"]
         assert p.exists() and p.stat().st_size > 0
         assert str(p).startswith(str(FIXTURE_DIR))
+    for key, meta in m["aprs_failures"].items():
+        p = FIXTURE_DIR / meta["file"]
+        assert p.exists() and p.stat().st_size > 0
+        assert meta["expected_reason"]
     text = MANIFEST_PATH.read_text(encoding="utf-8").lower()
     assert "synthetic" in text and "not ota" in text
 
@@ -104,6 +110,47 @@ def test_adsb_pipeline_reports_every_stage(pipe):
     assert sync["output_samples"] == m["frame_count"], \
         "sync 级输出应等于 fixture 里独立前导的个数"
     assert r["stages"][-1]["output_samples"] == m["frame_count"]
+
+
+def test_aprs_pipeline_reports_every_stage(pipe):
+    m = _manifest()["aprs"]
+    r = pipe.run_aprs_pipeline(
+        str(FIXTURE_DIR / m["file"]), fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]))
+    assert r["ok"] is True
+    _assert_stage_shape(r["stages"],
+                        ["load_iq", "downconvert", "demod", "sync",
+                         "frame", "content"])
+    dc = r["stages"][1]
+    assert "FM 鉴频" in dc["note"], "APRS 的 downconvert 必须是真鉴频+重采样"
+    assert dc["unit_in"] == "complex_samples"
+    assert dc["unit_out"] == "audio_samples"
+    assert r["stages"][2]["unit_out"] == "bits"
+    assert r["stages"][3]["unit_out"] == "frame_candidates"
+    assert r["stages"][-1]["output_samples"] == m["frame_count"]
+
+
+def test_aprs_content_matches_expected_bytes(pipe):
+    """呼号、digipeater 路径、payload、整帧字节都必须逐字节对上。"""
+    m = _manifest()["aprs"]
+    r = pipe.run_aprs_pipeline(
+        str(FIXTURE_DIR / m["file"]), fs=float(m["fs_hz"]),
+        target_fs=float(m["target_fs_hz"]))
+    assert r["content"]["payloads_hex"] == [f["info_hex"] for f in m["frames"]]
+    got = r["content"]["frames"]
+    assert len(got) == m["frame_count"]
+    for g, e in zip(got, m["frames"]):
+        assert g["frame_hex"] == e["frame_hex"], "整帧字节（含 FCS）必须一致"
+        assert g["info_hex"] == e["info_hex"], "payload 必须逐字节一致"
+        assert (g["source"], g["source_ssid"]) == (e["source"], e["source_ssid"])
+        assert (g["destination"], g["dest_ssid"]) == \
+            (e["destination"], e["dest_ssid"])
+        assert g["digipeaters"] == e["digipeaters"], "digipeater 路径必须一致"
+        assert g["control"] == e["control"] and g["pid"] == e["pid"]
+        assert g["fcs_valid"] is True
+    # 至少 1 帧真的带 digipeater 路径，另 1 帧为空路径（不是恒有/恒无）
+    paths = [g["digipeaters"] for g in got]
+    assert any(p for p in paths) and any(not p for p in paths), paths
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +255,54 @@ def test_empty_file_is_explicit(pipe, tmp_path):
     assert r["ok"] is False and r["content"] == {}
     assert r["reason"] == "iq_empty"
     assert r["stage"] == "load_iq"
+
+
+@pytest.mark.parametrize("case,filename,reason,stage", [
+    ("noise", "aprs_noise.cf32", "nothing_detected", "sync"),
+    ("truncated", "aprs_truncated.cf32", "truncated_frame", "frame"),
+    ("crc", "aprs_crc_fail.cf32", "crc_failed", "frame"),
+])
+def test_aprs_failure_paths_have_explicit_reason_codes(
+        pipe, case, filename, reason, stage):
+    """三条失败路径各给具体原因码；失败时 content 必须为空且 ok=False。"""
+    m = _manifest()
+    meta = m["aprs_failures"][filename]
+    assert meta["expected_reason"] == reason, "manifest 与测试契约不一致"
+    r = pipe.run_aprs_pipeline(
+        str(FIXTURE_DIR / meta["file"]), fs=float(meta["fs_hz"]),
+        target_fs=float(meta["target_fs_hz"]))
+    assert r["ok"] is False
+    assert r["status"] == "error"
+    assert r["error_code"] == reason
+    assert r["reason"] == reason
+    assert r["stage"] == stage
+    assert r["content"] == {}, f"{case}: 失败不允许带伪造 content"
+    assert r["detail"], f"{case}: 必须有可读 detail"
+
+    if case == "noise":
+        assert r["flag_count"] == 0, "噪声 fixture 不应出现 HDLC 标志"
+        assert r["content"] == {}
+    elif case == "truncated":
+        assert r["truncated_fragments"] >= 1 or r["tail_bits"] > 0
+        assert r["dropped_frames"] == 0, "截断不是 CRC 失败，不能混计"
+    else:
+        assert r["dropped_frames"] >= 1
+        frame_stage = [s for s in r["stages"] if s["name"] == "frame"][0]
+        assert frame_stage["dropped_frames"] >= 1
+
+
+def test_aprs_short_input_and_bad_rate_are_explicit(pipe, tmp_path):
+    p = tmp_path / "aprs_short.cf32"
+    _write_cf32(p, np.zeros(8, dtype=np.complex128))
+    r = pipe.run_aprs_pipeline(str(p), fs=96000.0, target_fs=48000.0)
+    assert r["ok"] is False and r["content"] == {}
+    assert r["reason"] == "insufficient_samples"
+    assert r["stage"] == "demod"
+
+    r2 = pipe.run_aprs_pipeline(str(p), fs=8000.0, target_fs=48000.0)
+    assert r2["ok"] is False and r2["content"] == {}
+    assert r2["reason"] == "sample_rate_mismatch"
+    assert r2["stage"] == "downconvert"
 
 
 # ---------------------------------------------------------------------------
