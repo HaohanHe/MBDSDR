@@ -206,24 +206,44 @@ class ReconnectionManager:
                 snap[attr] = getattr(backend, attr)
         return snap
 
-    def _restore_settings(self, backend: Any, snap: Dict[str, Any]) -> None:
-        """把抓拍的设置下发回新连接的后端。"""
+    def _restore_settings(self, backend: Any, snap: Dict[str, Any]) -> str:
+        """把抓拍的设置下发回新连接的后端。返回空串=全部生效，否则是失败原因。
+
+        后端 setter 显式返回 False（不抛异常）同样算失败：只认异常会把
+        「设备拒绝恢复」当成「已恢复」，重连后用户拿到的仍是默认设置。
+        """
         if backend is None or not snap:
-            return
-        try:
-            if "frequency_hz" in snap and snap["frequency_hz"] is not None:
-                if hasattr(backend, "set_frequency"):
-                    backend.set_frequency(float(snap["frequency_hz"]))
-            if snap.get("sample_rate_hz") and hasattr(backend, "set_sample_rate"):
-                backend.set_sample_rate(float(snap["sample_rate_hz"]))
-            if "gain_db" in snap and hasattr(backend, "set_gain"):
-                backend.set_gain(float(snap["gain_db"]))
-            # 解调模式漏恢复曾是实测缺口：重连后 NFM 掉回 WFM，
-            # 用户听到的是另一套解调链，必须与断开前一致。
-            if snap.get("demod_mode") is not None and hasattr(backend, "set_demod_mode"):
-                backend.set_demod_mode(str(snap["demod_mode"]))
-        except Exception as exc:
-            logger.warning("恢复设置失败: %s", exc)
+            return ""
+        failed: List[str] = []
+
+        def _apply(what: str, setter: str, value: Any, cast) -> None:
+            fn = getattr(backend, setter, None)
+            if not callable(fn):
+                return
+            try:
+                applied = fn(cast(value))
+            except Exception as exc:
+                failed.append(f"{what}下发失败（{exc}）")
+                return
+            if applied is False:
+                failed.append(self._read_backend_error()
+                              or f"{what}未落到硬件（设备拒绝）")
+
+        if snap.get("frequency_hz") is not None:
+            _apply("恢复频率", "set_frequency", snap["frequency_hz"], float)
+        if snap.get("sample_rate_hz"):
+            _apply("恢复采样率", "set_sample_rate", snap["sample_rate_hz"], float)
+        if snap.get("gain_db") is not None:
+            _apply("恢复增益", "set_gain", snap["gain_db"], float)
+        # 解调模式漏恢复曾是实测缺口：重连后 NFM 掉回 WFM，
+        # 用户听到的是另一套解调链，必须与断开前一致。
+        if snap.get("demod_mode") is not None:
+            _apply("恢复解调模式", "set_demod_mode", snap["demod_mode"], str)
+        if failed:
+            reason = "；".join(failed)
+            logger.warning("恢复设置未完全生效: %s", reason)
+            return reason
+        return ""
 
     def _identity_of(self, backend: Any) -> Dict[str, str]:
         """读重连后后端自己报告的设备身份（读不到就返回空，不猜）。"""
@@ -329,13 +349,15 @@ class ReconnectionManager:
                     logger.error("%s。%s", mismatch, self.give_up_suggestion())
                     _safe_callback(self.on_give_up)
                     return False
-                self._restore_settings(backend, self._settings_snapshot)
+                restore_warn = self._restore_settings(backend, self._settings_snapshot)
                 _safe_callback(self._start_audio)
                 self._gave_up = False
                 self._state = STATE_CONNECTED
                 self._attempt = 0
                 self._next_retry_in = 0.0
-                self._last_error = ""
+                self._last_error = (
+                    f"重连成功但设置未完全恢复: {restore_warn}"
+                    if restore_warn else "")
                 self._reconnects_total += 1
                 # 后端 status 上也暴露累计重连次数（UI/agent 工具可直接读）
                 try:

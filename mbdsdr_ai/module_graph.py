@@ -188,13 +188,24 @@ class SoapySourceModule(SourceModule):
         self.backend = build_backend_for_device(self.device_info)
         if self.backend is None or not self.backend.connect():
             raise RuntimeError(f"打开设备失败: {self.device_info.get('label')}")
+
+        def _apply(what: str, setter: str, value: Any) -> None:
+            """下发启动参数；设备显式返回 False 即中止启动，不能假装已运行。"""
+            fn = getattr(self.backend, setter, None)
+            if not callable(fn):
+                return  # 后端不支持该设置：沿用设备默认值，不伪造
+            if fn(value) is False:
+                self.running = False
+                raise RuntimeError(
+                    f"SoapySource 启动失败: {what}={value} 未被设备接受，已中止")
+
         # 对齐 SDR++ soapy_source 启动顺序
-        self.backend.set_sample_rate(self.sample_rate)
+        _apply("采样率", "set_sample_rate", self.sample_rate)
         if self.antenna is not None:
-            self.backend.set_antenna(self.antenna) if hasattr(self.backend, "set_antenna") else None
+            _apply("天线", "set_antenna", self.antenna)
         if self.bandwidth:
-            self.backend.set_bandwidth(self.bandwidth)
-        self.backend.set_frequency(self.frequency)
+            _apply("带宽", "set_bandwidth", self.bandwidth)
+        _apply("中心频率", "set_frequency", self.frequency)
         self.running = True
 
     def stop(self) -> None:

@@ -67,6 +67,8 @@ class FakeBackend:
         self.connect_calls = 0
         # 前 N 次 connect 失败（模拟设备还没插回）
         self.fail_connect_times = 0
+        #: 重连后哪些 setter 显式返回 False（模拟设备拒收该设置）
+        self.refuse_settings = set()
 
     def get_status(self):
         return FakeStatus(self)
@@ -87,10 +89,29 @@ class FakeBackend:
             setattr(self, key, value)
         return True
 
-    def set_frequency(self, f): self.freq = f
-    def set_sample_rate(self, s): self.sr = s
-    def set_gain(self, g): self.gain = g
-    def set_demod_mode(self, mode): self.demod = mode
+    def set_frequency(self, f):
+        if "set_frequency" in self.refuse_settings:
+            return False
+        self.freq = f
+        return True
+
+    def set_sample_rate(self, s):
+        if "set_sample_rate" in self.refuse_settings:
+            return False
+        self.sr = s
+        return True
+
+    def set_gain(self, g):
+        if "set_gain" in self.refuse_settings:
+            return False
+        self.gain = g
+        return True
+
+    def set_demod_mode(self, mode):
+        if "set_demod_mode" in self.refuse_settings:
+            return False
+        self.demod = mode
+        return True
 
 
 def _make_manager(**kw):
@@ -133,6 +154,32 @@ def test_disconnect_then_reconnect_restores_settings():
         assert backend.gain == pytest.approx(20.0)
         assert backend.demod == "NFM", "重连后解调模式必须与断开前一致"
         assert backend.connected is True
+    finally:
+        mgr.stop()
+
+
+def test_reconnect_reports_when_restored_setting_was_refused():
+    """setter 显式返回 False 不能当成已恢复：必须进 last_error，且设备保持默认。"""
+    backend = FakeBackend()
+    backend.demod = "NFM"
+    backend.refuse_settings = {"set_frequency"}
+
+    reconnected = threading.Event()
+    mgr = _make_manager(on_reconnected=reconnected.set)
+    mgr.start(backend)
+    try:
+        backend.connected = False
+        assert reconnected.wait(3.0), "未在超时内完成重连"
+
+        # 调谐被拒：设备不该被"安慰式"写成 98MHz，必须保持在重连后的默认值
+        assert backend.freq == pytest.approx(100_000_000.0)
+        assert backend.demod == "NFM", "其余设置仍应正常恢复"
+
+        snap = mgr.snapshot()
+        assert snap["state"] == "connected"
+        assert "设置未完全恢复" in snap["last_error"]
+        assert "恢复频率" in snap["last_error"]
+        assert "设备拒绝" in snap["last_error"]
     finally:
         mgr.stop()
 

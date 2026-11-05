@@ -126,6 +126,43 @@ def test_soapy_source_refuses_start_without_device_info():
     assert s.is_running() is False
 
 
+class _FakeSoapyBackend:
+    """记录启动参数下发；refuse 里的 setter 显式返回 False（模拟设备拒收）。"""
+
+    def __init__(self, refuse=()):
+        self.refuse = set(refuse)
+        self.calls = []
+
+    def _set(self, name, value):
+        self.calls.append((name, value))
+        return name not in self.refuse
+
+    def connect(self): return True
+    def disconnect(self): pass
+    def set_sample_rate(self, v): return self._set("set_sample_rate", v)
+    def set_antenna(self, v): return self._set("set_antenna", v)
+    def set_bandwidth(self, v): return self._set("set_bandwidth", v)
+    def set_frequency(self, v): return self._set("set_frequency", v)
+
+
+def test_soapy_start_aborts_when_setter_refused(monkeypatch):
+    """setter 返回 False 必须让 start() 抛错且 running=False（修复前仍报已运行）。"""
+    from mbdsdr_ai import sdr_backend
+
+    be = _FakeSoapyBackend(refuse={"set_frequency"})
+    monkeypatch.setattr(sdr_backend, "build_backend_for_device", lambda info: be)
+    s = SoapySourceModule("soapy", {"label": "fake-device"})
+    try:
+        with pytest.raises(RuntimeError, match="未被设备接受"):
+            s.start()
+        assert s.is_running() is False
+        # 失败点之前的启动参数确实已按顺序下发，失败点是中心频率
+        assert ("set_sample_rate", s.sample_rate) in be.calls
+        assert be.calls[-1] == ("set_frequency", s.frequency)
+    finally:
+        s.stop()
+
+
 def test_soapy_read_block_when_not_running_returns_empty():
     s = SoapySourceModule("soapy")
     got = s.read_block(1024)
