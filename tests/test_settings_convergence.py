@@ -26,7 +26,6 @@
 import ast
 import os
 import sys
-from textwrap import dedent
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -41,17 +40,30 @@ import pytest  # noqa: E402
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from settings import DEFAULTS, DesktopSettings, _coerce  # noqa: E402
+from settings import (DEFAULTS, DesktopSettings, _coerce,  # noqa: E402
+                      volume_hw_to_pct, volume_pct_to_hw)
 
+# 仅剩「负向守卫」类用例（不许出现某写法）仍需扫源码，见 V2 判定。
 _MAIN_WINDOW_SRC = open(
     os.path.join(_ROOT, "desktop", "main_window.py"), encoding="utf-8").read()
-_SETTINGS_PANEL_SRC = open(
-    os.path.join(_ROOT, "desktop", "settings_panel.py"), encoding="utf-8").read()
 
 
 def _app():
     app = QApplication.instance()
     return app if app is not None else QApplication([])
+
+
+def _gui_config_path(home):
+    """隔离 profile 下的 gui_config.json（HOME 已重定向到 tmp，不碰用户真实文件）。"""
+    return os.path.join(str(home), ".mbdsdr", "gui_config.json")
+
+
+def _write_gui_config(home, payload):
+    path = _gui_config_path(home)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    return path
 
 
 class FakeRemoteControl:
@@ -118,20 +130,85 @@ def test_gui_config_no_longer_writes_canonical_keys():
         "_save_gui_config 双写 theme：改了重启会回退"
 
 
-def test_gui_config_legacy_values_migrate_into_settings():
-    """旧 gui_config 残留值必须一次性迁移回写 settings（读旧键→迁→回写）。"""
-    load_block = _MAIN_WINDOW_SRC.split("def _load_gui_config", 1)[1]
-    assert 'settings.set("gnss_port"' in load_block
-    assert 'settings.set("gnss_baudrate"' in load_block
-    assert 'settings.set("theme"' in load_block
+def _reset_canonical_settings(w):
+    """把 settings 打回默认态，模拟「用户从未设置过」（迁移只在该前提发生）。"""
+    for key, val in (("gnss_port", ""), ("gnss_baudrate", 9600),
+                     ("theme", "default")):
+        w.settings.set(key, val)
 
 
-def test_gnss_dialog_persists_through_settings():
-    """GNSS 对话框改完必须写 settings（只写内存/gui_config 等于改了白改）。"""
-    dlg_block = _MAIN_WINDOW_SRC.split("def _open_gnss_dialog", 1)[1] \
-        .split("def _disconnect_gnss", 1)[0]
-    assert 'settings.set("gnss_port"' in dlg_block
-    assert 'settings.set("gnss_baudrate"' in dlg_block
+def test_gui_config_legacy_values_migrate_into_settings(main_window, isolated_profile):
+    """旧 gui_config 残留值必须一次性迁移回写 settings（读旧键→迁→回写）。
+
+    行为断言：喂一份真实旧配置给 `_load_gui_config()`，看 settings 与窗口成员
+    是否真被迁移值接管；再次加载不重复覆盖（幂等）。
+    """
+    w = main_window
+    _write_gui_config(isolated_profile, {
+        "gnss_port": "COM7", "gnss_baudrate": 115200, "theme": "dark",
+    })
+    _reset_canonical_settings(w)
+    w._load_gui_config()
+
+    assert w.settings.get("gnss_port") == "COM7", \
+        "旧 gui_config 的 gnss_port 没进 settings（改了重启仍读旧值）"
+    assert w.settings.get("gnss_baudrate") == 115200, \
+        "旧 gui_config 的 gnss_baudrate 没进 settings"
+    assert w.settings.get("theme") == "dark", "旧 gui_config 的 theme 没进 settings"
+    assert w._gnss_port == "COM7" and w._gnss_baudrate == 115200, \
+        "迁移只写了 settings，窗口运行态没接管（连接时会退回默认口）"
+
+    # 一次性：settings 已非默认后，旧键不许再覆盖
+    _write_gui_config(isolated_profile, {
+        "gnss_port": "COM8", "gnss_baudrate": 57600, "theme": "figma",
+    })
+    w._load_gui_config()
+    assert w.settings.get("gnss_port") == "COM7", "迁移不幂等：第二次加载又覆盖了"
+    assert w.settings.get("gnss_baudrate") == 115200
+    assert w.settings.get("theme") == "dark"
+
+
+def test_gnss_dialog_persists_through_settings(main_window, monkeypatch):
+    """GNSS 对话框改完必须写 settings（只写内存/gui_config 等于改了白改）。
+
+    行为断言：真构造对话框（拦下真模态，直接替 exec 填表单），确定后检查
+    settings 落值 + 新串口参数真的下发给了 GNSS 驱动。
+    """
+    from PySide6.QtWidgets import QComboBox, QDialog, QLineEdit
+    w = main_window
+
+    class _FakeGnss:
+        def __init__(self):
+            self.started = None
+
+        def stop(self):
+            pass
+
+        def start(self, port, baud):
+            self.started = (port, baud)
+            return True
+
+    gnss = _FakeGnss()
+    monkeypatch.setattr(w, "_gnss", gnss, raising=False)
+
+    def _accept_with_values(dlg):
+        edits = dlg.findChildren(QLineEdit)
+        combos = dlg.findChildren(QComboBox)
+        assert edits and combos, "GNSS 对话框缺少串口/波特率控件"
+        edits[0].setText("COM9")
+        idx = combos[0].findData(115200)
+        assert idx >= 0, "波特率下拉里没有 115200 档"
+        combos[0].setCurrentIndex(idx)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(QDialog, "exec", _accept_with_values, raising=False)
+    w._open_gnss_dialog()
+
+    assert w.settings.get("gnss_port") == "COM9", \
+        "对话框确定后没写 settings（重启丢串口）"
+    assert w.settings.get("gnss_baudrate") == 115200
+    assert gnss.started == ("COM9", 115200), \
+        f"新串口参数没下发到 GNSS 驱动：{gnss.started}"
 
 
 # ---------------------------------------------------------------- 面板行为
@@ -201,20 +278,66 @@ def test_panel_without_settings_does_not_crash():
 
 
 # ---------------------------------------------------------------- 触屏入口
-def test_touch_mode_ui_entry_exists():
-    """touch_mode 三态必须有 UI 入口；没有入口 = 用户只能手改 JSON（反人类）。"""
-    assert "触屏模式" in _MAIN_WINDOW_SRC
-    assert "def _set_touch_mode" in _MAIN_WINDOW_SRC
-    assert '_set_touch_mode(m)' in _MAIN_WINDOW_SRC or \
-           "_set_touch_mode(m)" in _MAIN_WINDOW_SRC
+def test_touch_mode_ui_entry_exists(main_window, monkeypatch):
+    """touch_mode 三态必须有可点 UI 入口（没有入口 = 用户只能手改 JSON）。
+
+    行为断言：扫菜单里互斥可勾选项，逐个触发并看 settings/touch_manager 是否
+    真的被切到 auto/on/off —— 不再钉菜单文案与 `_set_touch_mode` 字面量。
+    """
+    from touch_manager import touch_manager
+    w = main_window
+    monkeypatch.setattr(w, "_restoring_settings", False, raising=False)
+
+    groups = {}
+    for top in w.menuBar().actions():
+        menu = top.menu()
+        if menu is None:
+            continue
+        for act in menu.actions():
+            sub = act.menu()
+            if sub is None:
+                continue
+            for leaf in sub.actions():
+                grp = leaf.actionGroup()
+                if leaf.isCheckable() and grp is not None and grp.isExclusive():
+                    groups.setdefault(id(grp), (grp, []))[1].append(leaf)
+
+    switched = {}
+    for grp, leaves in groups.values():
+        if len(leaves) != 3:
+            continue
+        for leaf in leaves:
+            leaf.trigger()
+            after = str(w.settings.get("touch_mode"))
+            switched[after] = touch_manager().is_touch_mode()
+    assert set(switched) == {"auto", "on", "off"}, (
+        "视图菜单里没有完整的三态触屏模式入口，实际切换到的值："
+        f"{sorted(switched)}")
+    assert switched["on"] is True and switched["off"] is False, \
+        f"触屏入口只写了 settings，没作用到 TouchManager：{switched}"
+    w._set_touch_mode("auto")   # 复位，不影响同模块其它用例
 
 
-def test_panel_has_no_dead_slots():
-    """面板里定义的槽必须都接了线（防再出现"槽写好没 connect"的死槽）。"""
-    for slot in ("_on_rc_port_changed", "_on_web_port_changed"):
-        assert f"def {slot}" in _SETTINGS_PANEL_SRC
-        assert f"connect(self.{slot})" in _SETTINGS_PANEL_SRC, \
-            f"{slot} 是死槽（定义了但没 connect）"
+def test_panel_has_no_dead_slots(tmp_path, monkeypatch):
+    """端口槽必须真的接上线：改控件值 → settings 落盘（死槽则什么都不发生）。
+
+    旧写法扫 `connect(self._on_rc_port_changed)` 字面量；这里直接点控件，
+    用「值有没有落到 settings」证明信号确实连到了槽。
+    """
+    _app()
+    import settings_panel as sp
+    monkeypatch.setattr(sp, "RemoteControl", FakeRemoteControl)
+    s = DesktopSettings(path=str(tmp_path / "s.json"))
+    panel = sp.ServiceSettingsPanel(settings=s)
+    try:
+        panel.rc_port.setValue(9001)
+        panel.web_port.setValue(8123)
+        assert s.get("rc_port") == 9001, \
+            "_on_rc_port_changed 是死槽：端口控件改了却没落盘"
+        assert s.get("web_port") == 8123, \
+            "_on_web_port_changed 是死槽：端口控件改了却没落盘"
+    finally:
+        panel.shutdown_all()
 
 
 # ---------------------------------------------------------------- 配置键漂移收敛
@@ -235,20 +358,52 @@ def test_gui_config_no_longer_writes_drifting_keys():
             f"_save_gui_config 双写 {key}：gui_config 恢复会覆盖 settings 值"
 
 
-def test_drifting_keys_migrate_into_settings_once():
-    """旧 gui_config 残留键迁移进 settings（含 MHz→Hz 单位转换）。"""
-    load_block = _MAIN_WINDOW_SRC.split("def _load_gui_config", 1)[1]
-    assert 'settings.set("frequency_hz"' in load_block
-    assert "* 1e6" in load_block, "current_freq_mhz 是 MHz，必须换算成 Hz"
-    assert 'settings.set("demod_mode"' in load_block
-    assert 'settings.set("volume"' in load_block
-    assert 'settings.set("show_waterfall"' in load_block
+def test_drifting_keys_migrate_into_settings_once(main_window, isolated_profile):
+    """旧 gui_config 残留键迁移进 settings（含 MHz→Hz 单位转换），且只迁一次。"""
+    w = main_window
+    _write_gui_config(isolated_profile, {
+        "current_freq_mhz": 145.5, "current_mode": "USB",
+        "volume": 42, "show_waterfall": False,
+    })
+    for key, val in (("frequency_hz", 98_000_000.0), ("demod_mode", "FM"),
+                     ("volume", 48), ("show_waterfall", True)):
+        w.settings.set(key, val)
+    w._load_gui_config()
+
+    assert w.settings.get("frequency_hz") == pytest.approx(145_500_000.0), (
+        "current_freq_mhz 没有按 MHz→Hz 换算迁移，实际 "
+        f"{w.settings.get('frequency_hz')}")
+    assert w.settings.get("demod_mode") == "USB"
+    assert w.settings.get("volume") == volume_hw_to_pct(42), \
+        "旧 0-63 量纲 volume 没有换算成 0-100 人类量纲"
+    assert w.settings.get("show_waterfall") is False
+
+    # 一次性：settings 已非默认后，旧键不许再覆盖
+    _write_gui_config(isolated_profile, {
+        "current_freq_mhz": 433.0, "current_mode": "LSB",
+        "volume": 0, "show_waterfall": True,
+    })
+    w._load_gui_config()
+    assert w.settings.get("frequency_hz") == pytest.approx(145_500_000.0), \
+        "迁移不幂等：第二次加载又覆盖了 frequency_hz"
+    assert w.settings.get("demod_mode") == "USB"
 
 
-def test_volume_and_waterfall_now_persist_through_settings():
+def test_volume_and_waterfall_now_persist_through_settings(main_window, monkeypatch):
     """音量/瀑布改动必须写 settings（只写内存=改了重启丢）。"""
-    assert 'settings.set("volume"' in _MAIN_WINDOW_SRC
-    assert 'settings.set("show_waterfall"' in _MAIN_WINDOW_SRC
+    w = main_window
+    monkeypatch.setattr(w, "_restoring_settings", False, raising=False)
+
+    w._on_volume_changed(37)
+    assert w.settings.get("volume") == 37, "音量改动没写 settings（重启丢失）"
+
+    before = bool(getattr(w.spectrum._state, "show_waterfall", None))
+    w._toggle_waterfall()
+    after = bool(getattr(w.spectrum._state, "show_waterfall", None))
+    assert after is not before, "瀑布没真的切换（无法验证持久化）"
+    assert w.settings.get("show_waterfall") is after, \
+        "瀑布可见性改动没写 settings（重启回退）"
+    w._toggle_waterfall()   # 复位
 
 
 def _sky_obj(freq_hz):
@@ -259,8 +414,8 @@ def _sky_obj(freq_hz):
 
 
 @pytest.fixture(scope="module")
-def sky_main_window(isolated_profile):
-    """真实 MainWindow（offscreen）：把频率联动当行为测，而不是正则钉源码。"""
+def main_window(isolated_profile):
+    """真实 MainWindow（offscreen）：把接线/持久化当行为测，而不是正则钉源码。"""
     _app()  # QWidget 必须先有 QApplication，否则 Qt 直接 abort
     from main_window import MainWindow
     w = MainWindow()
@@ -270,6 +425,12 @@ def sky_main_window(isolated_profile):
     except Exception:  # noqa: BLE001 - 收尾失败不该拖垮用例
         pass
     w.close()
+
+
+@pytest.fixture(scope="module")
+def sky_main_window(main_window):
+    """天空图联动复用同一个窗口（构造一次，整模块共享）。"""
+    return main_window
 
 
 def test_satellite_tune_updates_control_panel(sky_main_window, monkeypatch):
@@ -349,16 +510,27 @@ def _mutated_sky_handler(remove_guard: bool):
     """从 main_window 源码取 `_on_sky_object_clicked`（可选去掉 None 守卫）。
 
     反证用：不改生产文件，在内存里跑一份变异副本，证明守卫是"有牙"的。
+    守卫定位走 AST（找到含 `is not None` 比较的 if 分支），不再钉字面量
+    `src.count(guard)`——那会在守卫换写法时假红（本段已栽过三次）。
     """
     tree = ast.parse(_MAIN_WINDOW_SRC)
     node = next(n for n in ast.walk(tree)
                 if isinstance(n, ast.FunctionDef)
                 and n.name == "_on_sky_object_clicked")
-    src = dedent(ast.get_source_segment(_MAIN_WINDOW_SRC, node))
     if remove_guard:
-        guard = "if freq_hz is not None and freq_hz > 0:"
-        assert src.count(guard) == 1, "None 守卫写法已变，先更新这条反证"
-        src = src.replace(guard, "if True:  # MUTATED")
+        guards = [
+            sub for sub in ast.walk(node)
+            if isinstance(sub, ast.If) and any(
+                isinstance(cmp, ast.Compare)
+                and any(isinstance(op, ast.IsNot) for op in cmp.ops)
+                for cmp in ast.walk(sub.test))
+        ]
+        assert len(guards) == 1, (
+            "找不到唯一的 None 守卫 if 分支（实际 %d 个）："
+            "反证需要按新的控制流重新定位" % len(guards))
+        guards[0].test = ast.Constant(value=True)
+        ast.fix_missing_locations(node)
+    src = ast.unparse(node)
     import main_window as mw
     ns = {}
     exec(compile(src, "<sky-handler>", "exec"), vars(mw), ns)  # noqa: S102
@@ -411,16 +583,101 @@ def test_volume_legacy_scale_migrates_once(tmp_path):
     assert s2.get("volume") == 67, "迁移必须幂等（二次加载不许再换算）"
 
 
-def test_volume_wire_conversion_isolated_at_boundary():
-    """main_window 不许再散写 63/100 公式——换算走 settings 纯函数。"""
-    assert "volume_pct_to_hw" in _MAIN_WINDOW_SRC
-    assert "volume_hw_to_pct" in _MAIN_WINDOW_SRC
-    assert "volume / 63.0" not in _MAIN_WINDOW_SRC, \
-        "音频增益换算已改 0-100 基准（volume/100*2.0），不得回退 0-63 公式"
+class _FakeWorker:
+    """只记录 `request_tool.emit(name, args)` 的假 worker。"""
+
+    def __init__(self):
+        self.calls = []
+        self.request_tool = SimpleNamespace(
+            emit=lambda name, args: self.calls.append((name, dict(args))))
 
 
-def test_gain_dynamic_range_wired_on_connect():
-    """增益滑杆范围必须在连接成功后按设备能力收放（不再是死硬编码）。"""
-    assert "set_gain_range" in _MAIN_WINDOW_SRC, \
-        "_connect_backend 必须调 set_gain_range 按 backend.device.max_gain 收放"
-    assert "max_gain" in _MAIN_WINDOW_SRC
+class _FakeAudioPlayer:
+    def __init__(self):
+        self.gains = []
+
+    def set_gain(self, gain):
+        self.gains.append(gain)
+
+
+def test_volume_wire_conversion_isolated_at_boundary(main_window, monkeypatch):
+    """0-100 人类量纲只在 settings 两个纯函数里换算；下发/回填两端都验真值。"""
+    w = main_window
+    worker = _FakeWorker()
+    audio = _FakeAudioPlayer()
+    monkeypatch.setattr(w, "_worker", worker, raising=False)
+    monkeypatch.setattr(w, "_audio_player", audio, raising=False)
+    monkeypatch.setattr(w, "_restoring_settings", False, raising=False)
+
+    w._on_volume_changed(30)
+    assert worker.calls == [("set_volume", {"volume": volume_pct_to_hw(30)})], (
+        "下发边界的 0-100→0-63 换算错误：" f"{worker.calls}（应为 19）")
+    assert audio.gains[-1] == pytest.approx(30 / 100.0 * 2.0), (
+        "声卡增益没按 0-100 基准（volume/100*2.0），实际 "
+        f"{audio.gains[-1]}（0-63 旧式会给 {30 / 63.0 * 2.0:.4f}）")
+
+    # 反向边界：硬件 0-63 量纲回填 UI 必须转回 0-100
+    w.control_panel.set_volume(0)
+    w._sync_ui_for_tool("set_volume", {"volume": 63})
+    assert w.control_panel.volume_slider.value() == 100, \
+        "硬件量纲 63 回填 UI 没换算成 100（0-100 人类量纲被破坏）"
+
+
+class _ConnectBackend:
+    """连接流程用的最小假后端（只记录下发，不开线程）。"""
+
+    def __init__(self, name, max_gain):
+        self.device = SimpleNamespace(name=name, max_gain=max_gain)
+        self.status = SimpleNamespace(error="")
+        self.calls = []
+
+    def connect(self):
+        return True
+
+    def disconnect(self):
+        pass
+
+    def get_status(self):
+        return SimpleNamespace(error="")
+
+    def set_sample_rate(self, r):
+        self.calls.append(("sample_rate", float(r)))
+
+    def set_bandwidth(self, b):
+        self.calls.append(("bandwidth", float(b)))
+
+    def set_frequency(self, f):
+        self.calls.append(("frequency", float(f)))
+
+    def set_ppm(self, p):
+        pass
+
+    def set_offset_tuning(self, b):
+        pass
+
+    def set_agc(self, a):
+        pass
+
+    def set_gain(self, g):
+        pass
+
+
+def test_gain_dynamic_range_wired_on_connect(main_window, monkeypatch):
+    """增益滑杆范围必须在连接成功后按设备能力收放（不再是死硬编码 0-49）。"""
+    w = main_window
+    monkeypatch.setattr(w, "_start_iq_streams", lambda: None, raising=False)
+    monkeypatch.setattr(w, "_teardown_connection", lambda *a, **k: None)
+
+    backend = _ConnectBackend("FakeSDR", 33.0)
+    assert w._connect_backend(backend) is True
+
+    assert w.control_panel.gain_slider.maximum() == 33, (
+        "连接后控制面板增益上限没按 backend.device.max_gain 收放，实际 "
+        f"{w.control_panel.gain_slider.maximum()}")
+    assert w.module_panel.gain_slider.maximum() == 33, (
+        "连接后模块面板增益上限没按 backend.device.max_gain 收放，实际 "
+        f"{w.module_panel.gain_slider.maximum()}")
+
+    # 复位到未连接兜底范围，避免影响后续用例
+    w.control_panel.set_gain_range(0.0, 49.0)
+    w.module_panel.set_gain_range(0.0, 49.0)

@@ -27,6 +27,7 @@
 import ast
 import os
 import sys
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -49,6 +50,19 @@ def _process_events(_unused=None):
     断言的都是同步信号（不跨线程），processEvents 足够。
     """
     app.processEvents()
+
+
+@pytest.fixture(scope="module")
+def mw_window(isolated_profile):
+    """真实 MainWindow（隔离 profile）：接线类断言走行为，不扫源码文本。"""
+    from main_window import MainWindow
+    w = MainWindow()
+    yield w
+    try:
+        w._disconnect()
+    except Exception:  # noqa: BLE001 - 收尾失败不拖垮用例
+        pass
+    w.close()
 
 
 # ===========================================================================
@@ -134,8 +148,13 @@ class TestBookmarkDeletePersisted:
     """修前：_on_bookmark_del 只删 self._bookmarks，FrequencyManager 里的
     记录还在，下次启动 load_bookmarks_from_list 会把删掉的书签原样读回来。"""
 
-    def test_delete_writes_to_store(self):
+    def test_delete_writes_to_store(self, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
         from control_panel import ControlPanel
+        # 产品已加"删除确认"二次确认（默认 No）；测试里只桩确认结果，
+        # 两条落盘断言保持原样（不放宽比较）。
+        monkeypatch.setattr(QMessageBox, "question",
+                            staticmethod(lambda *a, **k: QMessageBox.Yes))
         cp = ControlPanel()
         store = _FakeBookmarkStore()
         cp.set_bookmark_store(store)
@@ -160,9 +179,12 @@ class TestBookmarkDeletePersisted:
         cp._on_bookmark_del()
         assert store.removed == []
 
-    def test_store_unavailable_does_not_raise(self):
+    def test_store_unavailable_does_not_raise(self, monkeypatch):
         """仓库不可用（内核缺失 / 磁盘只读）时删除 UI 仍要完成，不抛异常。"""
+        from PySide6.QtWidgets import QMessageBox
         from control_panel import ControlPanel
+        monkeypatch.setattr(QMessageBox, "question",
+                            staticmethod(lambda *a, **k: QMessageBox.Yes))
         cp = ControlPanel()
 
         class _Boom:
@@ -206,7 +228,6 @@ ALLOWED_UNCONNECTED = {
     "ai_panel.py:api_key_edit": "配置对话框：Accepted 后统一读 text()",
     "ai_panel.py:base_url_edit": "配置对话框：Accepted 后统一读 text()",
     "ai_panel.py:model_edit": "配置对话框：Accepted 后统一读 text()",
-    "device_panel.py:self.dev_combo": "连接按钮 _on_connect_clicked 读 currentIndex()",
     "device_panel.py:self.sr_edit": "连接按钮读 text() → dev['_sample_rate']",
     "device_panel.py:self.gain_edit": "连接按钮读 text() → dev['_gain']",
     "device_panel.py:self.ppm_edit": "连接按钮读 text() → dev['_ppm']",
@@ -221,8 +242,6 @@ ALLOWED_UNCONNECTED = {
     "scanner_panel.py:self.thr_sp": "_on_start_clicked 读 value()",
     "sat_track_panel.py:self.freq_spin": "下行频率 getter 读 value()",
     "satellite_image_panel.py:self.sat_combo": "开始解码读 currentText()",
-    "new_spacetime_panel.py:self.lat_spin": "刷新过境读 value()",
-    "new_spacetime_panel.py:self.lon_spin": "刷新过境读 value()",
     "new_spacetime_panel.py:self.alt_spin": "刷新过境读 value()",
     "weather_panel.py:self.freq_edit": "开始解码读 text()",
     "weather_panel.py:self.sym_edit": "开始解码读 text()",
@@ -284,15 +303,21 @@ def _scan_file(path):
                 d = _dotted(tgt)
                 if d:
                     widgets[d] = node.lineno
+        # 接线判定：connect 与 setMenu 都算接线——QToolButton 挂菜单即"按下有动作"
+        # （菜单项自身在别处 connect；此前的扫描器不认 setMenu，把菜单按钮误报成死控件）。
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                and node.func.attr == "connect" and node.args:
+                and node.func.attr in ("connect", "setMenu") and node.args:
             sig_node = node.func.value
-            if isinstance(sig_node, ast.Subscript):
-                sig_node = sig_node.value
-            if isinstance(sig_node, ast.Attribute):
-                owner = _dotted(sig_node.value)
-                if owner:
-                    connected.add(owner)
+            if node.func.attr == "setMenu":
+                # 菜单直接挂在控件本体上：self._more_btn.setMenu(menu) → owner 是本控件
+                owner = _dotted(sig_node)
+            else:
+                if isinstance(sig_node, ast.Subscript):
+                    sig_node = sig_node.value
+                owner = _dotted(sig_node.value) \
+                    if isinstance(sig_node, ast.Attribute) else None
+            if owner:
+                connected.add(owner)
         if isinstance(node, ast.Attribute) and node.attr in READ_METHODS:
             owner = _dotted(node.value)
             if owner:
@@ -350,41 +375,116 @@ def test_allowlist_entries_still_unconnected():
 # ===========================================================================
 # 4. 台账哨兵：本轮"只报未修"的项（改修后请同步更新断言与理由）
 # ===========================================================================
-def test_module_bandwidth_now_reaches_backend():
-    """带宽旋钮（bw_spin）必须真的进连接载荷并被下发到后端 set_bandwidth。
+class _RecBackend:
+    """只记录下发的假后端（不开线程、不碰硬件）。"""
 
-    2026-10-30 修复前（C 类"改了不下发"）：dev 载荷只有 _sample_rate/_gain，
-    main_window._connect_backend 也不接受 bandwidth —— 用户调带宽被静默丢弃，
-    连接永远走后端默认（0=自动）。本条由"已知未修"哨兵随修复更新而来
-    （AGENTS.md：不许删断言，只许随修复更新）。"""
+    def __init__(self, name="FakeSDR", max_gain=33.0):
+        self.device = SimpleNamespace(name=name, max_gain=max_gain)
+        self.calls = []
+
+    def connect(self):
+        return True
+
+    def disconnect(self):
+        pass
+
+    def get_status(self):
+        return SimpleNamespace(error="")
+
+    def set_sample_rate(self, r):
+        self.calls.append(("sample_rate", float(r)))
+
+    def set_bandwidth(self, b):
+        self.calls.append(("bandwidth", float(b)))
+
+    def set_frequency(self, f):
+        self.calls.append(("frequency", float(f)))
+
+    def set_ppm(self, p):
+        pass
+
+    def set_offset_tuning(self, b):
+        pass
+
+    def set_agc(self, a):
+        pass
+
+    def set_gain(self, g):
+        pass
+
+
+def test_module_bandwidth_now_reaches_backend(monkeypatch, mw_window):
+    """带宽旋钮必须真的走完「面板 → 载荷 → 通用连接 → backend.set_bandwidth」。
+
+    2026-10-30 修复前：dev 载荷只有 _sample_rate/_gain，_connect_backend 也不收
+    bandwidth —— 用户调带宽被静默丢弃。这里用假后端记录下发，端到端验行为。
+    """
+    from PySide6.QtWidgets import QMessageBox
     from module_panel import ModulePanel
+    import mbdsdr_ai.sdr_backend as sb
+
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda *a, **k: QMessageBox.Ok)
     p = ModulePanel()
-    assert p.bw_spin is not None
-    mod_src = open(os.path.join(_ROOT, "desktop", "module_panel.py"),
-                   encoding="utf-8").read()
-    mw_src = open(os.path.join(_ROOT, "desktop", "main_window.py"),
-                  encoding="utf-8").read()
-    assert 'dev["_bandwidth"] = float(self.bw_spin.value())' in mod_src, \
-        "带宽没进连接载荷（用户设了白设）"
-    assert "bandwidth: float = 0.0" in mw_src, \
-        "_connect_backend 必须接受 bandwidth 参数"
-    assert "backend.set_bandwidth(float(bandwidth))" in mw_src, \
-        "带宽必须下发到后端 set_bandwidth"
-    assert 'dev.get("_bandwidth"' in mw_src, \
-        "_on_panel_device_connect 必须把 _bandwidth 传下去"
+    p._devices = [{"label": "FakeSDR", "driver": "fake"}]
+    p.device_combo.clear()
+    p.device_combo.addItem("FakeSDR")
+    p.device_combo.setCurrentIndex(0)
+    p.sr_combo.setCurrentIndex(0)
+    p.gain_slider.setValue(42)
+    p.bw_spin.setValue(200_000.0)
+
+    got = []
+    p.device_selected.connect(lambda d: got.append(dict(d)))
+    p._on_connect()
+    assert got and got[0]["_bandwidth"] == pytest.approx(200_000.0), \
+        f"带宽旋钮没进连接载荷：{got[:1]}（用户设了白设）"
+
+    be = _RecBackend()
+    monkeypatch.setattr(sb, "build_backend_for_device", lambda dev: be)
+    monkeypatch.setattr(mw_window, "_start_iq_streams", lambda: None,
+                        raising=False)
+    monkeypatch.setattr(mw_window, "_teardown_connection", lambda *a, **k: None)
+
+    mw_window._on_panel_device_connect(got[0])
+    assert ("bandwidth", 200_000.0) in be.calls, \
+        f"带宽没下发到后端 set_bandwidth：{be.calls}"
+
+    # 复位增益范围，避免影响同模块其它用例
+    mw_window.control_panel.set_gain_range(0.0, 49.0)
+    mw_window.module_panel.set_gain_range(0.0, 49.0)
 
 
 def test_anr_strength_applies_through_panel_internal_write():
-    """ANR 强度滑杆实际是生效的，不是死控件（更正审计误判）。
+    """ANR 强度滑杆实际生效（面板内部直接写 cfg.alpha），不是死控件。
 
     AnrPanel._on_strength_changed 内部直接写 `self._anr.cfg.alpha = alpha`；
-    main_window._on_anr_strength 的 pass 只是冗余通知槽，不影响生效。
-    2026-10-30 更正：原记"改了完全没反应"只看了主窗口槽为 pass，没看面板
-    内部已写 cfg.alpha —— 属误判。这里钉住真实生效路径不许回退。"""
-    anr_src = open(os.path.join(_ROOT, "desktop", "anr_panel.py"),
-                   encoding="utf-8").read()
-    assert "self._anr.cfg.alpha = alpha" in anr_src, \
-        "ANR 强度生效路径（面板写 cfg.alpha）不许回退"
-    src = open(os.path.join(_ROOT, "desktop", "main_window.py"),
-               encoding="utf-8").read()
-    assert "def _on_anr_strength" in src, "ANR 强度槽消失请核对台账"
+    main_window._on_anr_strength 的 pass 只是冗余通知槽。这里注入假 ANR，
+    拨滑杆看 cfg.alpha 是否真的被写——不用再钉源码字面量。
+    """
+    from types import SimpleNamespace
+
+    from anr_panel import AnrPanel
+    from main_window import MainWindow
+
+    class _FakeAnr:
+        def __init__(self):
+            self.cfg = SimpleNamespace(alpha=0.0)
+            self.enabled = False
+
+    panel = AnrPanel()
+    emitted = []
+    panel.strength_changed.connect(emitted.append)
+    fake = _FakeAnr()
+    panel._anr = fake
+    panel.strength_slider.setValue(55)
+
+    assert fake.cfg.alpha == pytest.approx(5.5), (
+        "ANR 强度滑杆没写进 anr.cfg.alpha（滑杆白调），实际 "
+        f"{fake.cfg.alpha}")
+    assert emitted and emitted[-1] == pytest.approx(5.5), \
+        f"strength_changed 没发出正确 α：{emitted}"
+
+    slot = getattr(MainWindow, "_on_anr_strength", None)
+    assert callable(slot), "主窗口 _on_anr_strength 通知槽消失（请核对台账）"
+    slot(object(), 5.5)   # 冗余通知槽必须能被调用且不崩
