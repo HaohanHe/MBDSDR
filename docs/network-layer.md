@@ -516,12 +516,47 @@ python -m pytest tests\test_reconnection.py tests\test_reconnection_e2e.py tests
 
 **失败归因**：终局跑 **FAIL=0**；唯一非 PASS 是 M3 `usb-unplug` 的 `SKIP`，归
 **环境**桶（物理拔线在本机无法程序化注入，产品缺陷与测试取法均不成立），
-复现步骤与升 E2 缺什么已在 `docs/limitations-register.md` L61。
+登记在 `docs/limitations-register.md` L61，人工复跑步骤见下。
 
-**观察项（未计 FAIL）**：M4 首次运行（同 HEAD）在 teardown 打印过
-`RuntimeError: libshiboken: Internal C++ object (SatTrackPanel) already deleted`
-（`desktop/sat_track_panel.py::_apply_narrow_defaults` 由 QTimer 在对象销毁后回调）。
-终局跑未复现、未致测试失败，归 **产品缺陷（潜在 UI 生命周期）**，待单独复现。
+### M3 `usb-unplug` 人工复跑步骤（约 3–5 分钟）
+
+前置（两项都干净才动手，禁止假定设备空闲）：
+
+```powershell
+Get-Process | Where-Object { $_.ProcessName -match 'rtl|sdr|gqrx|hdsdr|MBDSDR' } |
+  Select-Object Id,ProcessName
+Get-PnpDevice -InstanceId 'USB\VID_0BDA&PID_2832\77771111153705700' | Select-Object Status
+rtl_test -t        # 期望枚举到 1 支，且无 LIBUSB_ERROR_IO/-3（-3 表示被别的进程占着）
+```
+
+| 步骤 | 操作 | 该看什么 | 记录 |
+|---|---|---|---|
+| 1 基线 | 记录插入态；`rtl_test -t` + 产品界面连接并出频谱 | 枚举数应为 `1`；频谱有帧、状态“已连接” | 时间戳、枚举数、首帧是否出数 |
+| 2 拔线 | 物理拔掉 USB，**不要关任何进程** | 界面状态依次：正常 → `stale`（数据旧）→ `断开`；库层日志出现 `EOF`/`reset` 类断开原因 | 拔线时刻、进入 stale 的秒数、进入断开的秒数 |
+| 3 拔后 | `rtl_test -t`；再点一次“连接” | 枚举数应为 `0`；连接必须失败并**明确报错**（不得显示“已连接”或空转） | 枚举数、错误文案原文、耗时 |
+| 4 插回 | 重新插入并等 5 s，再 `rtl_test -t` | 枚举数回到 `1`；PnP `Status=OK` | 枚举数、时刻 |
+| 5 重连 | 在界面点“连接”（桌面端**不自动重连**） | 连接成功 → 首帧在 1 s 内到达；首帧为 1024 点 complex64 且非全零 | 点击时刻、首帧耗时、首帧是否非零 |
+| 6 收尾 | 关闭连接，复查步骤 0 的两条命令 | 无残留进程；设备可被新句柄打开 | 空进程列表、可重开 |
+
+**判定标准（全满足才算 PASS）**：
+
+1. 拔线后 **≤10 s** 进入“断开”（stale 应更早出现，约 2 s 量级；超过 10 s 记 FAIL 并附日志）；
+2. 断开期间界面**不得**仍显示“已连接/正在出数”，不得有幽灵“已连接”；
+3. 拔线后枚举数 `0`、插回后 `1`；插回后点连接能在 **1 s 内**出首帧且非全零；
+4. 失败路径必须给出可读错误（`LIBUSB_ERROR_IO`/设备不存在类文案），不许静默。
+
+**证据留存**：拔线/插回时刻、上述各秒数、错误文案原文、日志片段；写入
+`docs/evidence/`（`.txt`/`.json`，按 §2 第 9 条白名单）并把结论登记到 L61
+（当前 E4-with-procedure；跑通后按 E2 补哈希与命令）。
+
+**已定位的产品缺陷（不计入矩阵 FAIL）**：M4 首次运行（同 HEAD）在 teardown 打印过
+`RuntimeError: libshiboken: Internal C++ object (SatTrackPanel) already deleted`。
+独立夹具已稳定复现（**未 show 的面板 10/10 次报错**；已 show 的 0/10），根因是
+`desktop/sat_track_panel.py:79` 的 `QTimer.singleShot(0, self._apply_narrow_defaults)`
+**未绑定 receiver 生命周期**，对象销毁后回调到已删除的 C++ 对象（第 218 行
+`self.window()`）。修法与验收/反证见
+[`docs/pending-patches/2026-11-06-desktop-satpanel-timer-after-delete.md`](pending-patches/2026-11-06-desktop-satpanel-timer-after-delete.md)，
+owner：UI 操作逻辑线（本线未改产品代码）。
 
 **与 5 号基线修正的关系**：性能线若把 `import scipy.signal` 提前到启动阶段，
 只是把这次一次性加载从“首次建链”挪到“启动”；本测试的基线取法（热身建一次链后
