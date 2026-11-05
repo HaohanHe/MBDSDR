@@ -776,7 +776,10 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 > 产品主路径另测（`capture_throughput.py --modes product`，开产品类 `RTLSDRBackend`）：
 > 6 s 丢 **0.0–1.7%**（ring 供给 2.355–2.403 MS/s），audio/fft 订阅者 dropped **0.0 s**
 > ——产品本来就是 ring 生产者 + 独立 worker，本次修复属验收仪器，不是产品性能证据
-> （见 `docs/hw-acceptance.md` §6.2.2）。
+> （见 `docs/hw-acceptance.md` §6.2.2）。该探针是**非门限可选证据项**（不计入七环
+> PASS/FAIL，判据见 §6.2.4）。`ring.dropped_total()` 的记账口径同轮改为
+> 「Σ 各订阅者 `dropped`」，不再跟单消费者 `_count` 记账；旧口径会把订阅者读走的
+> 整段误报成丢弃（假数字实例见 §6.2.2 判据 4）。
 
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
 | --- | --- | --- | --- | --- |

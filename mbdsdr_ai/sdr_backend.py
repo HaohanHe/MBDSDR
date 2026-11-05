@@ -1289,13 +1289,10 @@ class _ThreadedRingReader:
         self._write_idx = 0       # 下一个写入位置（0..R-1）
         self._produced = 0        # 已写入的绝对样点总数
         self._subs: Dict[str, _FanOutSub] = {}
-        # 对照 SDR++ ring_buffer.h:131-160 write() 的丢旧保新语义（监控用）：
-        #   _count   = 当前环形缓冲里"默认消费者视角"未读的样点数（backlog）；
-        #   _dropped = 累计因缓冲写满而丢弃的样点数（换频 clear() 不清零，供监控）。
-        # 这是 SDR++ 单消费者语义的读者级统计；多订阅者各自的落后丢样仍由
-        # 各 _FanOutSub.dropped 独立记录（见 subscriber_dropped()）。
-        self._count = 0
-        self._dropped = 0
+        # 丢样**只按订阅者各自记账**（各 _FanOutSub.dropped，见 dropped_total()）。
+        # 不再保留 SDR++ ring_buffer.h:131-160 那套单消费者 _count/_dropped：
+        # 它只跟默认 read() 记账，fan-out 订阅者读走的量不回填，会把整段流
+        # 误报成丢弃（旧口径实例见 docs/hw-acceptance.md §6.2.2 判据 4）。
         # 读侧因缓冲空而超时返回 None 的次数（真实欠读，监控用）
         self._underruns = 0
 
@@ -1356,12 +1353,6 @@ class _ThreadedRingReader:
                 self._buf[0:n - first] = chunk[first:]
             self._write_idx = (self._write_idx + n) % R
             self._produced = new_produced
-            # SDR++ ring_buffer.h:131-160 write() 丢旧保新：backlog 超过 R 时，
-            # 溢出的样点即被丢弃（老数据被覆盖），累计到 _dropped；_count 钳在 R。
-            self._count += n
-            if self._count > R:
-                self._dropped += self._count - R
-                self._count = R
             self._cond.notify_all()
 
     # -------------------------------------------------- 默认订阅者（向后兼容）
@@ -1369,31 +1360,45 @@ class _ThreadedRingReader:
         return self.subscribe("default")
 
     def read(self, n: int, timeout: float = 1.0):
-        out = self._default_sub().read(n, timeout)
-        # 默认消费者实际取走 out 个样点，释放对应 backlog（保持 _count 真实）。
-        if out is not None and len(out):
-            with self._lock:
-                self._count = max(0, self._count - len(out))
-        return out
+        return self._default_sub().read(n, timeout)
 
     def available(self) -> int:
-        return self._default_sub().available()
+        """环形缓冲的未读样点数（最慢订阅者视角）。
+
+        **不再为状态查询创建隐式 "default" 订阅者**：那个消费者从不读，
+        却会在写侧被当成落后订阅者持续累加 dropped，把状态读数变成假数字。
+        无订阅者时返回当前保留量（min(produced, ring_size)），即整段都未读。
+        """
+        with self._lock:
+            if self._subs:
+                return int(max(0, self._produced
+                               - min(s.read_seq for s in self._subs.values())))
+            return int(min(self._produced, self._ring_size))
 
     def clear(self):
         """换频/换采样率：所有订阅者跳到当前，丢弃旧频数据。"""
         with self._lock:
             for sub in self._subs.values():
                 sub.read_seq = self._produced
-            # 清空当前 backlog；历史丢包计数 _dropped 保留（监控用，不清零）。
-            self._count = 0
+            # 各订阅者的历史 dropped 保留（监控用，不清零）。
 
     def producer_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
     def dropped_total(self) -> int:
-        """累计因环形缓冲写满而丢掉的样点数（监控用，不清零）。"""
+        """各订阅者累计丢弃样点数之和（监控用，不清零）。
+
+        口径固定为「订阅者视角的丢失量」：
+
+        - 生产者覆盖旧区域前，落后超过 ring_size 的订阅者把自己的游标跳到
+          保留起点，跳过的样点记进该订阅者的 ``dropped``；本值 = 各订阅者
+          ``dropped`` 之和（同一样点被 N 个订阅者各跳过一次会计 N 次）。
+        - 它**不表示设备少产了多少样点**；供给差看 ``_produced`` /
+          ``underruns_total()``。
+        - ``clear()`` 只把游标跳到当前，不重置历史计数。
+        """
         with self._lock:
-            return int(self._dropped)
+            return int(sum(s.dropped for s in self._subs.values()))
 
     def underruns_total(self) -> int:
         """累计读侧"缓冲空、等到超时"的次数（真实欠读，不清零）。"""

@@ -331,6 +331,7 @@ def run_product(block, seconds, freq, gain):
         threads = [threading.Thread(target=f, name=f"probe-{f.__name__}", daemon=True)
                    for f in (demod_loop, fft_loop, gui_loop, sampler)]
         under0 = ring.underruns_total()
+        dropped0 = ring.dropped_total()
         sub_drop0 = {s.name: s.dropped for s in (audio_sub, fft_sub, gui_sub)}
         for t in threads:
             t.start()
@@ -348,10 +349,14 @@ def run_product(block, seconds, freq, gain):
         row = _summary("product", block, seconds, n_audio[0], wall, read_t, conv_t,
                        produced_s=round(produced / FS, 3),
                        produced_msps=round(produced / wall / 1e6, 3),
-                       # 只看每个订阅者自己的 dropped：ring.dropped_total() 只跟默认 read()
-                       # 的 _count 记账，fan-out 订阅者读走的量不回填，整段都会被算成丢弃。
+                       # 分项：每个订阅者各自的 dropped。20 fps 快照订阅者只读
+                       # 13.6–13.8%，它自己的 dropped 不混进解调/录制口径。
                        sub_dropped_s={s.name: round((s.dropped - sub_drop0[s.name]) / FS, 3)
                                       for s in (audio_sub, fft_sub, gui_sub)},
+                       # 合计口径：dropped_total() = Σ 各订阅者 dropped（修好后的
+                       # 记账，见 mbdsdr_ai/sdr_backend.py）。它应与上面的分项之和
+                       # 一致；不一致说明有未登记订阅者或记账又被改坏。
+                       ring_dropped_total_s=round((ring.dropped_total() - dropped0) / FS, 3),
                        underruns_delta=ring.underruns_total() - under0,
                        backlog=_stats(backlog),
                        fft_captured_s=round(n_fft[0] / FS, 3),

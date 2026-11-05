@@ -453,8 +453,8 @@ class TestTC7ModeBandwidthNotHardcoded:
 # ═══════════════════════════════════════════════════════
 
 class TestTC8ReadLoopBlockSizeAndDrops:
-    """验收标准 3：_ThreadedRingReader 有明确 block_size，缓冲满时丢旧保新
-    并累计 _dropped 计数。对照 SDR++ ring_buffer.h:131-160 write()。"""
+    """验收标准 3：_ThreadedRingReader 有明确 block_size；丢样按订阅者各自
+    记账（dropped_total() = Σ 各订阅者 dropped），不再用单消费者 _count 口径。"""
 
     def test_ring_reader_block_size(self):
         from mbdsdr_ai.sdr_backend import _ThreadedRingReader
@@ -465,10 +465,10 @@ class TestTC8ReadLoopBlockSizeAndDrops:
         )
         assert reader._block_size == 8192
         assert reader._ring_size == 1_000_000
-        assert reader._dropped == 0
+        assert reader.dropped_total() == 0
 
     def test_ring_reader_drops_old_when_full(self):
-        """生产者持续写、消费者不读 → 缓冲满后丢最旧，_dropped 递增。"""
+        """订阅者不读、生产者持续写 → 该订阅者游标被跳过，dropped 递增。"""
         from mbdsdr_ai.sdr_backend import _ThreadedRingReader
         # 小缓冲（1024 样点），每次写 512，写 4 次就溢出
         reader = _ThreadedRingReader(
@@ -476,31 +476,86 @@ class TestTC8ReadLoopBlockSizeAndDrops:
             block_size=512,
             ring_size=1024,
         )
+        sub = reader.subscribe("slow")
         # 直接调 _write 模拟生产者写入，不启动线程
         reader._write(np.ones(512, dtype=np.complex64))  # 512/1024
         reader._write(np.ones(512, dtype=np.complex64))  # 1024/1024 满
-        assert reader._count == 1024
-        assert reader._dropped == 0
-        # 再写 512 → 必须丢 512 旧数据才能腾出空间
+        assert reader.dropped_total() == 0
+        assert sub.dropped == 0
+        # 再写 512 → 必须跳过最旧 512 点才能腾出空间
         reader._write(np.ones(512, dtype=np.complex64))
-        assert reader._dropped >= 512, \
-            f"缓冲满后应丢旧数据，_dropped={reader._dropped}"
-        assert reader._count == 1024  # 仍满
+        assert reader.dropped_total() == 512, \
+            f"缓冲满后应跳过旧数据，dropped_total={reader.dropped_total()}"
+        assert sub.dropped == 512
 
     def test_ring_reader_clear_resets(self):
-        """换频后 clear() 应清空缓冲和计数。"""
+        """换频后 clear() 让订阅者跳到当前，但不清历史 dropped。"""
         from mbdsdr_ai.sdr_backend import _ThreadedRingReader
         reader = _ThreadedRingReader(
             read_fn=lambda n: np.ones(n, dtype=np.complex64),
             block_size=512,
             ring_size=1024,
         )
+        reader.subscribe("slow")
         reader._write(np.ones(1024, dtype=np.complex64))
         reader._write(np.ones(512, dtype=np.complex64))  # 触发丢包
-        assert reader._dropped > 0
+        assert reader.dropped_total() > 0
         reader.clear()
-        assert reader._count == 0
-        assert reader._dropped > 0  # clear 不清历史丢包计数（监控用）
+        assert reader.available() == 0
+        assert reader.dropped_total() > 0  # clear 不清历史丢包计数（监控用）
+
+    def test_two_subscribers_each_read_half_no_drop(self):
+        """两个订阅者各读一半、无人落后时 dropped_total() 必须为 0。
+
+        旧口径只跟默认 read() 的 _count 记账，fan-out 订阅者读走的量不回填，
+        写满 ring_size 之后每个新块都会被算成丢弃（本用例旧口径会报 4096）。
+        """
+        from mbdsdr_ai.sdr_backend import _ThreadedRingReader
+        ring_size, block = 8192, 512
+        reader = _ThreadedRingReader(
+            read_fn=lambda n: np.ones(n, dtype=np.complex64),
+            block_size=block,
+            ring_size=ring_size,
+        )
+        a = reader.subscribe("half-a")
+        b = reader.subscribe("half-b")
+        # 写 1.5×ring_size（> R，能触发旧口径的假丢样）；每块 A/B 各读一半，
+        # 落后量随块数线性增长但始终 < ring_size，谁都没被跳过。
+        n_blocks = 3 * ring_size // (2 * block)
+        assert n_blocks * block > ring_size
+        for _ in range(n_blocks):
+            reader._write(np.ones(block, dtype=np.complex64))
+            ra = a.read(block // 2)
+            rb = b.read(block // 2)
+            assert ra is not None and rb is not None
+            assert len(ra) == block // 2 and len(rb) == block // 2
+        assert a.dropped == 0 and b.dropped == 0
+        assert reader.dropped_total() == 0, (
+            "两个订阅者都在跟读、无人落后，dropped_total() 必须为 0；"
+            f"实际 {reader.dropped_total()}（旧 _count 口径会报 "
+            f"{n_blocks * block - ring_size}）")
+
+    def test_following_subscriber_not_counted_as_dropped(self):
+        """单订阅者全程跟读、写满 4 倍 ring_size → dropped_total() 仍为 0。
+
+        这是旧口径的假数字现场：ring 4096、写 16384，默认 read() 未被调用，
+        _count 涨满后每块都计入 _dropped（旧口径会报 16384 − 4096 = 12288）。
+        """
+        from mbdsdr_ai.sdr_backend import _ThreadedRingReader
+        ring_size, block = 4096, 512
+        reader = _ThreadedRingReader(
+            read_fn=lambda n: np.ones(n, dtype=np.complex64),
+            block_size=block,
+            ring_size=ring_size,
+        )
+        sub = reader.subscribe("follower")
+        for _ in range(4 * ring_size // block):
+            reader._write(np.ones(block, dtype=np.complex64))
+            assert sub.read(block) is not None
+        assert sub.dropped == 0
+        assert reader.dropped_total() == 0
+        assert reader.available() == 0
+
 
     def test_backend_read_samples_returns_from_ring(self):
         """connect 后 read_samples 走环形缓冲，能读到生产者写入的数据。"""

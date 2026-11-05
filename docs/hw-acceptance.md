@@ -228,7 +228,7 @@ python scripts\hw_acceptance\check_ring_labels.py
 | `python -m pytest tests\test_moon_reference_acceptance.py -q` | **0.5 s**（3 passed） | `de421.bsp` + skyfield | 月球对拍 + 1h 反证回归 |
 | `python -m pytest tests\test_hw_acceptance_contract.py -q` | **1.9 s**（18 passed） | 无（纯契约） | 锁四码、锁 `skip_result` 永不 PASS、锁 `UNVERIFIED→SKIP(NO_DATA)`、锁 R/A 编号不同义、锁导频测法与采集记账、锁噪声底阈值区间、锁占位序列号重试 |
 | `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 65536,262144,1048576 --modes sync,sync_only,thread,async` | 约 **3.5 min**（24 次 6 s 采集） | RTL-SDR；async 模式直连 pyrtlsdr | `throughput.json`：逐块读/转换耗时、captured/wall/吞吐/丢样；用于 §6.2.1 的归因 |
-| `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 --modes product --mode-runs product=3` | 约 **20 s** | RTL-SDR；开的是产品类 `RTLSDRBackend`（ring 生产者），不是验收用的 OpenDevice | `product_path.json`：ring 供给、解调 consumed、各订阅者 dropped、ring 积压、CPU/RSS；用于 §6.2.2 |
+| `python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 --modes product --mode-runs product=3` | 约 **20 s** | RTL-SDR；开的是产品类 `RTLSDRBackend`（ring 生产者），不是验收用的 OpenDevice | `product_path.json`：ring 供给、解调 consumed、各订阅者 dropped、Σ 订阅者 `dropped_total`、ring 积压、CPU/RSS；**非门限可选证据项，不计入七环 PASS/FAIL**（判据与口径见 §6.2.4） |
 | `python scripts\hw_acceptance\check_ring_labels.py` | **0.1 s** | 无（纯文本） | 文档编号闸；`--selftest` 是它的反证（4 种改坏法必须红） |
 | `python scripts\hw_acceptance\ring{1..7}_*.py --out D:\...` | R1 17.4 / R2 8.8 / R3 8.0 / R4 12.0 / R5 25.0 / R6 4.6 / R7 4.2 s | 见上表 | 单环排障；每环独立 `result.json` |
 
@@ -489,9 +489,19 @@ python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
 3. **20 fps 频谱快照只覆盖 13.6–13.8% 是有意为之**：每 50 ms 取最新 16384 点做
    一帧快照，本来就不承诺连续消费；跳过记在它自己的 `sub_dropped`，不参与
    音频/录制路径。**不能把这 14% 读成「产品丢样」**。
-4. **`ring.dropped_total()` 不能当产品丢样指标**：它只跟默认 `read()` 的
-   `_count` 记账，fan-out 订阅者读走的量不回填，整段都会被算成丢弃；本探针
-   因此只报每个订阅者自己的 `dropped`。（记账口径的已知缺陷，未改产品代码。）
+4. **`ring.dropped_total()` 按订阅者记账，可以当产品丢样指标**：口径是
+   「Σ 各订阅者 `dropped`」（`mbdsdr_ai/sdr_backend.py::dropped_total()`），
+   写侧覆盖旧区域前给每个落后订阅者独立跳游标、只记它自己跳过的样点；
+   `SDRStatus.dropped_samples` 读的就是这个合计，`clear()` 不清历史。
+   **旧口径的假数字**（`_count` 只跟默认 `read()` 记账）：product 探针第一版
+   在 2 s 窗口报 `ring_dropped_total_s=1.908 s`，而解调实际消费 1.959 s、
+   三个订阅者 dropped 全 0。换成 6 s / 2.4 MS/s 更好算：窗口内写 14.4 M 样点，
+   默认 `read()` 一次没调，`_count` 涨满 1 M 之后其余 **13.4 M 样点
+   （≈5.6 s，占窗口约 93%）全被记成丢弃**。新口径下同一场景为 0
+   （`tests/test_fake_rtl_chain.py::test_following_subscriber_not_counted_as_dropped`
+   与 `test_two_subscribers_each_read_half_no_drop` 钉住）。
+   注意合计口径的边界：同一样点被 N 个订阅者各跳过一次会计 N 次，它回答
+   「订阅者视角丢了多少」，不是「设备少产了多少」——供给差看 `produced_s`。
 
 结论：**产品没有这个病**。验收脚本会踩，是因为它用 `DeviceManager.open()` 返回的
 `OpenDevice`（裸 pyrtlsdr，一次调用一次同步 bulk 读，没有常驻读线程），旧
@@ -528,6 +538,43 @@ python scripts\hw_acceptance\ring3_demod_audio.py --freq 93.305e6
 3. `mbdsdr_ai/sdr_backend.py` 的 claim owner 同意并承担回归。
 
 在此之前，不得把异步读的 2.37–2.40 MS/s 写进产品指标；它只是本机「带宽够」的证据。
+
+#### 6.2.4 `product` 模式：非门限的可选证据项（**不计入七环 PASS/FAIL**）
+
+`capture_throughput.py --modes product` 是**可选证据**，不是验收门限。七环
+（R1–R7）的 PASS/FAIL 完全由 `run_all.py` 判定；本条不参与、不加分、不卡合并，
+失败只写进证据文件，不改变任何环的状态。
+
+跑它只有一个目的：以后有人改 `_ThreadedRingReader`、ring 的 `read_fn` 或桌面
+读循环（`desktop/receive_pipeline.py::IqReaderThread`）时，能在约 20 s 内确认
+「读与处理仍不在同一线程、订阅者没有被迫丢样」。
+
+命令（先按 §四 的跑前自检确认设备空闲）：
+
+```powershell
+python scripts\hw_acceptance\capture_throughput.py --seconds 6 --blocks 16384 `
+  --modes product --mode-runs product=3 --out D:\mbdsdr\tmp\product_path.json
+```
+
+参数：`--seconds 6` 采集窗口；`--blocks 16384` 消费块大小（与桌面读线程一致）；
+`--mode-runs product=3` 独立采集 3 次；`--freq/--gain` 用默认值（93.305 MHz /
+17.9 dB，与 §6.2.2 同台同源）。约 **20 s** 完成，产物字段：`produced_s` /
+`produced_msps`、`captured_s` / `drop_pct`、`sub_dropped_s`（按订阅者分项）、
+`ring_dropped_total_s`（Σ 订阅者口径）、`backlog`（`max_ms`）、`cpu_s`、
+`rss_peak_mb`。
+
+判据（三条同时成立才算「证据成立」；不成立只记「不成立」，不改环状态）：
+
+1. **解调丢样 ≤1.7%**：`drop_pct`，沿用 `max(0, 1 − captured/6)`，把 USB
+   供给差如实记账，不掩盖成 0；
+2. **订阅者 dropped = 0**：`sub_dropped_s["probe-audio"]` 与
+   `sub_dropped_s["probe-fft"]` 都必须是 0.0 s；`probe-gui`（20 fps 快照）按
+   设计本就只读 13–14%，它自己的 dropped **不计入**本条；
+3. **ring 积压 ≤10 ms**：`backlog.max_ms`，即解调订阅者落后生产者不超过 10 ms。
+
+复跑口径：3 次里任一次满足即可（本机 8 次实测 0.0–1.7%，见 §6.2.2 表）。
+`ring_dropped_total_s` 应与 `sub_dropped_s` 三项之和一致；不一致说明丢样记账
+又被改坏或有未登记订阅者——按缺陷处理，**不要把它当成性能门限数字**。
 
 重采样比算式（音频链，`decode_stereo → _resample_to`）：
 `gcd(2048000, 48000) = 16000` → `up = 3`、`down = 128` → 有效比 128/3 = 42.6667，
