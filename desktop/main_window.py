@@ -1338,7 +1338,7 @@ class MainWindow(QMainWindow):
         self.sky_view = self._create_sky_widget()
         if hasattr(self.sky_view, "object_clicked"):
             self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
-        left_tab.addTab(self.sky_view, "天空模式")
+        left_tab.addTab(self.sky_view, "星象仪模式")
         left_tab.tabBar().setTabData(left_tab.count() - 1, "rf_sky")
         # 天空页左下角（那一排 sky 按钮上方）的全天模式开关
         self._build_all_sky_toggle()
@@ -1376,7 +1376,7 @@ class MainWindow(QMainWindow):
         spectrum_layout.addWidget(spectrum_header)
 
         self._no_device_hint = QLabel(
-            "正在查找 SDR 设备…没有设备也可以先看天空模式和 AI 对话。")
+            "正在查找 SDR 设备…没有设备也可以先看星象仪模式和 AI 对话。")
         self._no_device_hint.setObjectName("hintLabel")
         # 单行不换行：wordWrap 会随窗口宽度变成 2~3 行，把下方频谱压到
         # 320x228（基线 320x240，见 test_ui_layout_locks 频谱基线）。
@@ -2039,7 +2039,7 @@ class MainWindow(QMainWindow):
         lt = getattr(self, "left_tab", None)
         if kind == "tab" and lt is not None:
             idx = max(0, min(int(info.get("index", 0)), lt.count()))
-            lt.insertTab(idx, sky, "天空模式")
+            lt.insertTab(idx, sky, "星象仪模式")
             lt.tabBar().setTabData(idx, "rf_sky")
         elif kind == "dock" and info.get("dock") is not None:
             info["dock"].setWidget(sky)
@@ -2366,7 +2366,7 @@ class MainWindow(QMainWindow):
         self.callsign_edit.setMinimumWidth(80)
         self.callsign_edit.setMaximumWidth(200)
         self.callsign_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在天空模式图）")
+        self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在星象仪模式图）")
         self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
         lay.addWidget(self.callsign_edit)
         lay.addWidget(self._vsep())
@@ -7145,11 +7145,11 @@ class MainWindow(QMainWindow):
         if sv is not None and bool(getattr(sv, "all_sky_active", False)):
             sv.set_all_sky_mode(False)
             self.statusBar().showMessage(
-                "已退出全天模式（Esc 再按一次退出天空模式）", MSG_NORMAL)
+                "已退出全天模式（Esc 再按一次退出星象仪模式）", MSG_NORMAL)
             return True
         if getattr(self, "_app_mode", "ide") == "planetarium":
             self._exit_planetarium()
-            self.statusBar().showMessage("已退出天空模式", MSG_NORMAL)
+            self.statusBar().showMessage("已退出星象仪模式", MSG_NORMAL)
             return True
         return False
 
