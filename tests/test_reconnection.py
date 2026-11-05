@@ -27,6 +27,14 @@ def test_backoff_clamps_attempt_lt_one():
     assert compute_backoff(0) == compute_backoff(1)
 
 
+def test_default_give_up_total_wait_is_61_seconds():
+    """默认参数下用户最迟多久看到"放弃"：1+2+4+8+16+30 = 61s（不含单次 connect 耗时）。"""
+    total = sum(compute_backoff(i) for i in range(1, 7))
+    assert total == pytest.approx(61.0), (
+        f"默认总退避等待变为 {total}s；文档与用户预期必须同步更新"
+    )
+
+
 # ----------------------------------------------------------------------
 # 后端 mock
 # ----------------------------------------------------------------------
@@ -133,18 +141,26 @@ def test_give_up_after_max_attempts():
         mgr.stop()
 
 
-def test_infinite_reconnect_default_no_give_up_event():
+def test_default_reconnect_is_bounded_not_infinite():
+    """默认策略必须有上限：禁止"永远重试"让用户永远等不到结论。"""
     backend = FakeBackend()
     backend.fail_connect_times = 999
     backend.connected = True
-    mgr = _make_manager(max_attempts=None)  # 默认无限
+    gave_up = threading.Event()
+    mgr = ReconnectionManager(
+        poll_interval=0.02, base_delay=0.001, max_delay=0.005,
+        on_give_up=gave_up.set,
+    )
     mgr.start(backend)
     try:
         backend.connected = False
-        time.sleep(0.3)  # 让它重试几轮
-        # 无限重试：不抛、不 give_up
-        assert mgr.gave_up is False
-        assert backend.connect_calls >= 2
+        assert gave_up.wait(3.0), "默认策略未在有限时间内放弃重连"
+        assert mgr.gave_up is True
+        snap = mgr.snapshot()
+        # 默认上限与默认总等待时间都是对外承诺，钉死防止被悄悄改回无限
+        assert snap["max_attempts"] == 6
+        assert snap["attempts_total"] <= 6
+        assert backend.connect_calls <= 6
     finally:
         mgr.stop()
 

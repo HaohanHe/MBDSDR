@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_DELAY = 1.0
 DEFAULT_MAX_DELAY = 30.0
 DEFAULT_POLL_INTERVAL = 0.5
+#: 默认最多连续重试次数。禁止默认无限重试：用户必须在有限时间内拿到
+#: "已放弃"的结论和下一步动作，而不是永远转圈。
+#: 默认总退避等待 = 1+2+4+8+16+30 = 61s（另加每次 connect 自身耗时）。
+DEFAULT_MAX_ATTEMPTS = 6
 
 #: 重连状态机（供 UI / agent 工具展示；绝不出现"假装已连接"的中间态）
 STATE_STOPPED = "stopped"
@@ -107,7 +111,8 @@ class ReconnectionManager:
     base_delay, max_delay : float
         指数退避基数/上限（秒）。
     max_attempts : int, optional
-        最大重试次数；None = 无限重试（默认）。
+        最大连续重试次数；默认 6（有上限）。显式传 ``None`` 也会被归一到默认
+        上限——不再提供"无限重试"路径，避免用户永远看不到结论。
     """
 
     def __init__(
@@ -121,7 +126,7 @@ class ReconnectionManager:
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         base_delay: float = DEFAULT_BASE_DELAY,
         max_delay: float = DEFAULT_MAX_DELAY,
-        max_attempts: Optional[int] = None,
+        max_attempts: Optional[int] = DEFAULT_MAX_ATTEMPTS,
         source_kind: str = "unknown",
     ) -> None:
         self.on_disconnected = on_disconnected
@@ -134,7 +139,11 @@ class ReconnectionManager:
         self._poll_interval = max(0.01, float(poll_interval))
         self._base_delay = float(base_delay)
         self._max_delay = float(max_delay)
-        self._max_attempts = max_attempts
+        # 归一：None 也落到默认上限。无限重试是历史缺陷（用户永远等不到
+        # 放弃结论），这里不再保留逃生口。
+        self._max_attempts = (
+            DEFAULT_MAX_ATTEMPTS if max_attempts is None else max(1, int(max_attempts))
+        )
         self._source_kind = source_kind if source_kind in _GIVE_UP_TIPS else "unknown"
 
         self._backend: Any = None
@@ -227,8 +236,7 @@ class ReconnectionManager:
         self._next_retry_in = 0.0
         while not self._stop.is_set():
             self._attempt += 1
-            self._attempts_total += 1
-            if self._max_attempts is not None and self._attempt > self._max_attempts:
+            if self._attempt > self._max_attempts:
                 self._gave_up = True
                 self._state = STATE_GAVE_UP
                 self._next_retry_in = 0.0
@@ -243,6 +251,8 @@ class ReconnectionManager:
                 _safe_callback(self.on_give_up)
                 return False
 
+            # 只有真正发起一次 connect 才计入累计尝试次数（放弃那次不算）
+            self._attempts_total += 1
             self._state = STATE_RETRYING
             _safe_callback(self.on_reconnecting, self._attempt)
             ok = False
@@ -324,11 +334,17 @@ class ReconnectionManager:
                 self._was_connected = False
                 self._state = STATE_DISCONNECTED
 
+            # 已放弃：不再自动发起任何 connect。历史上这里会"再来一轮"，
+            # 效果是每隔一段时间又重试 6 次并重复 on_give_up——本质仍是无限
+            # 重试。现在只有用户显式 retry_now() / start() 才重新开始。
+            if self._gave_up:
+                if self._stop.wait(self._poll_interval):
+                    break
+                continue
+
             # 进入重连退避循环（阻塞到重连成功 / give_up / stop）
             self._retry_loop(backend)
 
-            # give_up 后继续周期性探测（用户可能随时插回设备），
-            # 但不再重复 on_give_up / on_disconnected。
             if self._stop.wait(self._poll_interval):
                 break
 
@@ -384,6 +400,25 @@ class ReconnectionManager:
     def state(self) -> str:
         return self._state
 
+    def retry_now(self, backend: Any = None) -> None:
+        """用户在"已放弃"后主动重连：重置放弃状态并开启新的一轮有上限重试。
+
+        这是放弃提示里"手动重连"的具体入口；不调用它就不会有任何自动重试，
+        避免后台永远转圈。
+        """
+        if backend is not None:
+            self._backend = backend
+        self._gave_up = False
+        self._attempt = 0
+        self._next_retry_in = 0.0
+        self._last_error = ""
+        if self._thread is not None and self._thread.is_alive():
+            # 后台线程只用 _gave_up 标志判断是否继续，置 False 即进入新一轮
+            self._state = STATE_DISCONNECTED
+            return
+        if self._backend is not None:
+            self.start(self._backend)
+
     def give_up_suggestion(self) -> str:
         """放弃重连时给用户的可操作下一步。"""
         return _GIVE_UP_TIPS[self._source_kind]
@@ -416,6 +451,7 @@ class ReconnectionManager:
 __all__ = [
     "ReconnectionManager",
     "compute_backoff",
+    "DEFAULT_MAX_ATTEMPTS",
     "STATE_STOPPED",
     "STATE_CONNECTED",
     "STATE_DISCONNECTED",

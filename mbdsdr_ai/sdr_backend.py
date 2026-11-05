@@ -1178,9 +1178,10 @@ class _FanOutSub:
                     return None
                 now = time.time()
                 if now >= deadline:
-                    # 缓冲空直到超时：记一次真实欠读（不是丢包、也不是网络故障）
-                    with r._lock:
-                        r._underruns += 1
+                    # 缓冲空直到超时：记一次真实欠读（不是丢包、也不是网络故障）。
+                    # 注意此处已持有 r._lock（Condition 用的是同一把非可重入锁），
+                    # 再嵌套 with r._lock 会自死锁，读侧永远等不到超时返回。
+                    r._underruns += 1
                     return None
                 r._cond.wait(timeout=max(0.001, deadline - now))
             R = r._ring_size

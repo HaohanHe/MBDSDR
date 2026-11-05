@@ -599,6 +599,23 @@ class TestReconnectionStateMachine:
         finally:
             mgr.stop()
 
+    def test_give_up_does_not_auto_retry_again(self):
+        """放弃后必须停手：不许每隔一段时间又偷偷重试一轮。"""
+        be = _FlakyBackend(fail_remaining=99)
+        mgr = ReconnectionManager(
+            base_delay=0.01, max_delay=0.02,
+            max_attempts=2, poll_interval=0.02, source_kind="network")
+        mgr.start(be)
+        try:
+            assert _wait_until(lambda: mgr.state == STATE_GAVE_UP, 3.0)
+            calls_at_give_up = be.connect_calls
+            time.sleep(0.4)   # 超过几倍 poll_interval
+            assert be.connect_calls == calls_at_give_up, (
+                "放弃后仍在自动重试：用户会永远看到设备在刷重连")
+            assert mgr.state == STATE_GAVE_UP
+        finally:
+            mgr.stop()
+
     def test_recovery_after_give_up_when_device_returns(self):
         be = _FlakyBackend(fail_remaining=99)
         mgr = ReconnectionManager(
@@ -607,8 +624,9 @@ class TestReconnectionStateMachine:
         mgr.start(be)
         try:
             assert _wait_until(lambda: mgr.state == STATE_GAVE_UP, 3.0)
-            # 用户重新插回设备：后续 connect 应成功
+            # 放弃后不自动重试；用户重新插回设备并点"重连"才恢复
             be.fail_remaining = 0
+            mgr.retry_now(be)
             assert _wait_until(lambda: mgr.state == STATE_CONNECTED, 3.0)
             snap = mgr.snapshot()
             assert snap["gave_up"] is False

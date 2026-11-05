@@ -94,6 +94,9 @@ class SpyServerClient:
     _HANDSHAKE_BYTES = 1024
     # 单次 read_samples 最大字节数（防止无限阻塞）
     _DEFAULT_CHUNK = 8192
+    #: 连续多少次 idle 超时才把"半开连接"硬判为断开（与 rtl_tcp 同口径）：
+    #: 1 次=stale（网络抖动仍可能恢复）；2 次=累计 2×idle_timeout 无数据。
+    _STALE_ESCALATE_AFTER = 2
 
     def __init__(
         self,
@@ -113,6 +116,8 @@ class SpyServerClient:
         self._lock = threading.Lock()
         # 空闲超时：超过则判"心跳缺失"(stale)，不再无限阻塞 recv
         self.idle_timeout = max(0.5, float(timeout))
+        # 连续 idle 超时次数（收到真实数据即清零）；达到阈值升级成硬断开
+        self._stale_streak = 0
         self._health = DataHealthTracker(
             sample_rate_hz=None, stale_after=self.idle_timeout)
         self.state: str = STATE_DISCONNECTED
@@ -213,6 +218,7 @@ class SpyServerClient:
         self.error = message
         self.suggestion = suggestion or suggestion_for(category)
         self._running = False
+        self._stale_streak = 0
         self._health.on_disconnect()
 
     def _fail_from_network(self, exc: BaseException, phase: str) -> None:
@@ -233,6 +239,7 @@ class SpyServerClient:
         self.error = message
         self.suggestion = suggestion_for(category)
         self._running = False
+        self._stale_streak = 0
         self._health.on_disconnect()
 
     @staticmethod
@@ -301,8 +308,19 @@ class SpyServerClient:
             except (TimeoutError, socket.timeout) as e:
                 if phase == "handshake":
                     raise e
+                self._stale_streak += 1
                 self._mark_stale(
                     f"超过 {self.idle_timeout:g}s 未收到 IQ 数据（心跳缺失）")
+                if self._stale_streak >= self._STALE_ESCALATE_AFTER:
+                    # 半开连接兜底：连续 2×idle_timeout 无任何数据 → 关闭
+                    # socket 并如实断开，不能永远显示"已连接"。
+                    hard = self.idle_timeout * self._STALE_ESCALATE_AFTER
+                    self._mark_disconnected(
+                        "idle",
+                        f"连续 {hard:g}s 未收到任何数据（判定为半开连接，"
+                        f"已关闭 socket）",
+                    )
+                    self._close_sock()
                 raise SpyServerError(self.error) from e
             except OSError as e:
                 if phase == "handshake":
@@ -350,6 +368,7 @@ class SpyServerClient:
             self.error = ""
             self.error_category = ""
             self.suggestion = ""
+            self._stale_streak = 0
         self._health.on_data(n, n_bytes=len(raw))
         return (real + 1j * imag).astype(np.complex64)
 

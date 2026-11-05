@@ -91,6 +91,13 @@ class RtlTcpClient:
     # dongle_info_t 固定 12 字节（rtl_tcp.c:79-83）。
     _DONGLE_INFO_LEN = 12
     _MAGIC = b"RTL0"
+    #: TCP 建连阶段超时（秒）。与 idle_timeout 分开：建连失败要 5s 内给出
+    #: refused/timeout 结论，不能把用户永久挂在 connect 里。
+    CONNECT_TIMEOUT = 5.0
+    #: 连续多少次 idle 超时才把"半开连接"硬判为断开。1 次=只降级 stale
+    #: （网络抖动仍可能恢复）；2 次=累计 2×idle_timeout 无任何数据，
+    #: 视为对端已死（socket 关闭，交给重连管理器/用户重连）。
+    _STALE_ESCALATE_AFTER = 2
 
     def __init__(self, host: str, port: int = 1234,
                  idle_timeout: float = 5.0):
@@ -109,6 +116,8 @@ class RtlTcpClient:
         self.state: str = STATE_DISCONNECTED
         # 连续多久没有 IQ 数据判为"心跳缺失"（不再无限阻塞 recv）
         self._idle_timeout = max(0.5, float(idle_timeout))
+        # 连续 idle 超时次数（收到真实数据即清零）；达到阈值升级成硬断开
+        self._stale_streak = 0
         self._health = DataHealthTracker(
             sample_rate_hz=None, stale_after=self._idle_timeout)
         # 本次会话请求的采样率（用于吞吐/带宽不匹配判断）
@@ -145,6 +154,7 @@ class RtlTcpClient:
         self.error_category = category
         self.error = message
         self.suggestion = suggestion or suggestion_for(category)
+        self._stale_streak = 0
         self._health.on_disconnect()
 
     def _mark_stale(self, message: str = "") -> None:
@@ -163,6 +173,7 @@ class RtlTcpClient:
         self.error_category = category
         self.error = message
         self.suggestion = suggestion or suggestion_for(category)
+        self._stale_streak = 0
         self._health.on_disconnect()
 
     def _mark_connected(self) -> None:
@@ -170,6 +181,7 @@ class RtlTcpClient:
         self.error_category = ""
         self.error = ""
         self.suggestion = ""
+        self._stale_streak = 0
 
     # ── 连接 / 握手 ──────────────────────────────────────────────────────
     def connect(self) -> bool:
@@ -184,7 +196,7 @@ class RtlTcpClient:
         # 连接阶段 5 秒超时，避免 server 半开连接把客户端永久挂起。
         try:
             self._sock = socket.create_connection(
-                (self.host, self.port), timeout=5)
+                (self.host, self.port), timeout=self.CONNECT_TIMEOUT)
         except OSError as e:
             cat, msg, sug = classify_network_error(
                 e, phase="connect", host=self.host, port=self.port)
@@ -307,8 +319,21 @@ class RtlTcpClient:
             except (TimeoutError, socket.timeout) as e:
                 if phase == "handshake":
                     raise e
+                self._stale_streak += 1
                 self._mark_stale(
                     f"超过 {self.idle_timeout:g}s 未收到 IQ 数据（心跳缺失）")
+                if self._stale_streak >= self._STALE_ESCALATE_AFTER:
+                    # 半开连接兜底：连续 2×idle_timeout 一个字节都没有，
+                    # 不能再永远显示"已连接"。关闭 socket，状态如实断开，
+                    # 由重连管理器/用户决定下一步。
+                    hard = self._idle_timeout * self._STALE_ESCALATE_AFTER
+                    self._mark_disconnected(
+                        CATEGORY_IDLE,
+                        f"连续 {hard:g}s 未收到任何数据（判定为半开连接，"
+                        f"已关闭 socket）",
+                        suggestion_for(CATEGORY_IDLE),
+                    )
+                    self.close()
                 return None
             except OSError as e:
                 if phase == "handshake":
