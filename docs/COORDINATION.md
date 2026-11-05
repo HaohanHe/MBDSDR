@@ -1683,44 +1683,60 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 #### 7.3.2 白名单 stale 销账清单（2026-11-06，按 HEAD 内容判定）
 
 判定口径：**只认 `git show HEAD:<path>` 的实际内容**，工作区在途编辑不作为删除依据。
-HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **11** 条
-（`docs/hardcoded-parameters.md` 5 + `docs/packaging.md` 4 +
-`docs/parameter-unification.md` 2）。他线随后把 hardcoded 的 5 条修复提交进了 HEAD，
-工作区那 13 条里只有 id 51 随之转绿；其余 12 条在 HEAD 仍未证实，故本期不删。
+`tests/test_claims_guard.py` 读的是**工作区**（`WAIVERS = ROOT/"docs"/"claim-waivers.md"`，
+`vc.verify_docs(ROOT)` 默认扫工作区 docs），所以它跑出的条数不是 HEAD 条数；
+HEAD 条数用 HEAD 文档快照跑同一套 `verify_claims` 判据得出。
+
+测量快照 HEAD `e4810574`：白名单 103 行 / cap 103，docs 未证实 93，
+`test_waivers_are_not_stale` 红 **15** 条
+（`docs/hardcoded-parameters.md` 9 + `docs/packaging.md` 4 + `docs/parameter-unification.md` 2）。
 
 **A. 可在 HEAD 销账（等 owner 书面确认，11 条）**
 
-| id | 文件 | owner | HEAD 复核（`git show HEAD:<path>`，均为 `verify_claims` 三步全过） |
+| id | 文件 | owner | HEAD 复核（`git show HEAD:<path>`，`verify_claims` 三步全过） |
 | --- | --- | --- | --- |
-| 51 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:380` 现为 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` |
-| 53 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:474` 现为 `b8bc5140` — `cpp/src/core/tokens.h:378` |
-| 54 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:490` 现为 `e883a62b` — `desktop/spectrum_widget.py:218` |
-| 58 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:643` 现为 `ff219b55` — `mbdsdr_ai/core/controller.py:1096` |
-| 59 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:756` 现为 `17709482` — `mbdsdr_ai/analog_demod.py:123` |
-| 77 | `docs/packaging.md` | 打包线 | 原句不再存在（表行已删） |
-| 78 | `docs/packaging.md` | 打包线 | `:200` 现为 `50aa1db0` — `desktop/main.py:350` |
-| 79 | `docs/packaging.md` | 打包线 | 原「约束 / 实测行为 / 期望 / 差距 / 完成」表行不再存在 |
-| 80 | `docs/packaging.md` | 打包线 | `:570` 现为 `c295423e` — `desktop/startup_paths.py:98` |
-| 81 | `docs/parameter-unification.md` | 采样率线 | `:423` 现为 `70429a02` — `desktop/main_window.py:3963` |
-| 83 | `docs/parameter-unification.md` | 采样率线 | `:425` 现为 `754f64e6` — `scripts/sample_rate_readback_check.py:156` |
+| 51 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:380` — `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
+| 53 | 同上 | 同上 | `:474` — `b8bc5140` — `cpp/src/core/tokens.h:378` — `kPeakRelDb = 6.0` |
+| 54 | 同上 | 同上 | `:490` — `e883a62b` — `desktop/spectrum_widget.py:218` — `FFT_SIZES = (1024, 2048, 4096)` |
+| 58 | 同上 | 同上 | `:643` — `ff219b55` — `mbdsdr_ai/core/controller.py:1096` — `min_elevation_deg` |
+| 59 | 同上 | 同上 | `:756` — `17709482` — `mbdsdr_ai/analog_demod.py:123-131` — `相对该模式噪声基线的余量` |
+| 77 | `docs/packaging.md` | 打包线 | `:17` — `50aa1db0` — `desktop/main.py:74` — `scipy._external.array_api_compat.numpy.fft` |
+| 78 | 同上 | 同上 | `:200` — `50aa1db0` — `desktop/main.py:350` — `缺少 Qt 平台插件 platforms/` |
+| 79 | 同上 | 同上 | `:204` — `c295423e` — `desktop/startup_paths.py:59` — `def startup_log_path() -> str:` |
+| 80 | 同上 | 同上 | `:570` — `c295423e` — `desktop/startup_paths.py:98` — `probe_dir_writable_async` |
+| 81 | `docs/parameter-unification.md` | 采样率线 | `:444` — `70429a02` — `desktop/main_window.py:3963` — `_fill_sr_combo` |
+| 83 | 同上 | 同上 | `:446` — `754f64e6` — `scripts/sample_rate_readback_check.py:156` — `真机不可复跑，以下为注入验证` |
 
-**B. 先前提到的 13 条在 HEAD 的复核结果**
+**B. 不可销账（4 条，文档侧没补证）**
 
-- 只有 id 51 与 HEAD 的 stale 重合，已并入 A 组；
-- `docs/settings-inventory.md` id 132–140（9 条）与 `docs/hardcoded-parameters.md`
-  id 55/56/57（3 条）在 HEAD 仍是**无四元组的未证实断言**（`verify_claims` 计入），
-  本期**不删**，等其修复随提交进入 HEAD 后再销。
+| id | 文件 | owner | HEAD 实况 |
+| --- | --- | --- | --- |
+| 55/56/57 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:535`–`:537` 同名句仍在，整行无 hash → `verify_claims` 判未证实（无 hash） |
+| 60 | 同上 | 同上 | `:764` 同名句仍在，整行无 hash |
 
-**C. 其余 27 行**（`docs/PRD-现状对照.md` 16、`docs/PRD.md` 10、
-`docs/reference-mechanisms.md` 1）在 HEAD 同样仍是未证实断言，不删。
+这 4 条**不删**：删掉只是把红从 stale 闸门挪进 `measured - waived`，白名单的销账语义没有兑现。
 
-**D. 实测（快照 HEAD `2f83f482`）**：白名单 103 行，`test_waivers_are_not_stale`
-红 **11** 条；按 A 组删 11 行（cap 103→92）对 HEAD 文档模拟 → **删前 11 → 删后 0**。
-`measured − waived` 另残留 `docs/evidence-standard.md:44`（真机证据线）与
-`docs/COORDINATION.md:181`（他线新写的完成态句），二者都不是白名单行，
-故 `test_no_new_or_modified_unverified_claims` 仍会红。
+**C. 采样率线报的「HEAD 13 条」对不上 HEAD 实测**
 
-落库：A 组 11 条拿到 owner 书面确认后**一次性**提交；B/C 组未确认一条不删。
+- `docs/settings-inventory.md` id 132–140（9 条）在 HEAD 均**不 stale**（白名单仍覆盖），
+  既不在 A 组也不在 B 组；
+- 那 13 条里能与 HEAD 对上的只有 id 51（A 组）与 55/56/57（B 组）；
+- 差异来源：`test_claims_guard.py` 读工作区，别线在途编辑把条数推到了 13。
+  按「只认 HEAD」的口径，本期不按 13 条删任何行。
+
+**D. 实测（快照 HEAD `e4810574`）**
+
+- 方案 A（只删 A 组 11 条）：白名单 103 → 92 行，cap 103 → 92，
+  `test_waivers_are_not_stale` **15 → 4**（余下即 B 组 4 条）；
+  `measured - waived` 残留 5 条不变（`docs/COORDINATION.md:181`、
+  `docs/evidence-standard.md:44`、`docs/hardcoded-parameters.md:535/536/537`）。
+- 方案 B（15 条全删）：stale 15 → 0，但 `measured - waived` 残留仍是 5 条，
+  B 组 4 条的红只是换了闸门，不算销账。
+- 采用方案 A。**「删前 N → 删后 0」本期做不到**：要归零需先把 B 组 4 条在
+  `docs/hardcoded-parameters.md` 里补齐四元组，属硬编码线的右侧工作。
+
+落库：A 组 11 条拿到 owner 书面确认后**一次性**提交（含 cap 103→92）；
+B 组 4 条与 C 组 settings-inventory 132–140 未确认，一条不删。
 
 ## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
 
