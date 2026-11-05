@@ -241,7 +241,7 @@ def test_long_text_roundtrip_is_bounded():
 
     实测（见 docs/code-guards.md）：优化前 feldhell 2000 字符已 1.1GB RSS、
     4000 字符被 2.5GB 监控强杀；psk31 8000 字符 884MB；rtty 8000 字符超 2.5GB。
-    上限 4000 字符后，超限路径不做调制解调。
+    上限 3000 字符后，超限路径不做调制解调。
     """
     import time
 

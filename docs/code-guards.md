@@ -84,6 +84,14 @@ python scripts/lint_swallow_all.py --write-baseline docs/code-guards-baseline.js
 python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不越线）
 ```
 
+### 复核记录（2026-11-05，HEAD `9b803d0`，工作区含他线在途改动）
+
+- 扫描：1,069 文件 / catch-all 1,896 / 静默 1,392 / 须修 1,391（基线 1,398，总量仍**只降**）。
+- 越线 1 项（**干净 HEAD 也红**）：`mbdsdr_ai/hackrf_params.py` `WARN 2 > 基线 1`。基线提交 `7332b95`（10:23）之后落地的 `9b803d0`（10:57，TX 流）新增了 `write_tx` 的 `except Exception: return False`（HEAD 第 625 行）。**不得靠调高该文件基线消化**：交后端线补日志/错误状态字段，或按标准修法登记白名单三问 + `review_by`。
+- 越线 1 项（**仅工作区在途**）：`desktop/settings.py` `WARN 3 > 基线 1`（新增 2）；该文件 HEAD 版本扫描仍为 1/1，属未提交改动，提交前必须收掉，不能顺手抬基线。
+- 其余文件未越线；`main_window.py` 239/102、`sdr_tools.py` 17/32 与基线逐项一致，`rf_sky_view.py` 仍在 21/51 以内。
+- 复核口径固定：先跑扫描器比基线，再跑 `tests/test_swallow_guard.py`；有人声称「某文件修了 N 处」时，看须修总数与单文件计数**只降不升**，并确认基线文件本身的改动是随修复同步下降，而不是被调高。
+
 ## 标准修法（修一处就是这三步）
 
 1. 能收窄异常类型的直接收窄（`except ValueError` / `except (OSError, RuntimeError)`），不吞编程错误；
@@ -94,39 +102,45 @@ python -m pytest tests/test_swallow_guard.py -q            # 全绿（棘轮不�
 
 ### A1. `desktop/main_window.py`：连接/录制/设备路径的 EMPTY（48 处）
 
-`main_window.py` 本轮不碰，交桌面/操作逻辑线。快照行号：
+`main_window.py` 本轮不碰，交桌面/操作逻辑线。行号已按当前 HEAD 提交树
+（`26fb3d7`）重新核对；该文件无在途改动，工作区与 HEAD 一致：
 
 | 方法（用户动作） | ERROR 行号 |
 | --- | --- |
-| `_connect_backend`（连接后端） | 2792, 2799, 2806, 2822, 2829, 2834, 2875, 2879, 2883, 2888 |
-| `_connect_real`（连接真实设备） | 3270 |
-| `_panels_set_sdr_connected`（连接后启用面板） | 3299, 3308, 3315, 3328, 3334, 3340, 3353, 3360, 3366, 3373, 3392, 3397, 3405 |
-| `_teardown_connection`（断开/清理） | 3424, 3432, 3438, 3446, 3459, 3464, 3470 |
-| `_on_connection_for_ui` / `_on_module_device_selected` | 3511, 3517, 5596 |
-| `_on_device_plugged` / `_on_panel_device_connect` | 5656, 5753 |
-| `_on_record_toggled` / `_record_write_chunk` / `_on_pipeline_record_iq` | 3696, 4603, 4613 |
-| `_start_recording` / `_stop_recording`（录音） | 5209, 5219, 5229, 5283, 5292, 5298 |
-| `_replay_recording`（回放） | 6384, 6388 |
-| `_disconnect_gnss` | 6970 |
+| `_connect_backend`（连接后端） | 3119, 3126, 3133, 3149, 3156, 3161, 3202, 3206, 3210, 3215 |
+| `_connect_real`（连接真实设备） | 3600 |
+| `_panels_set_sdr_connected`（连接后启用面板） | 3629, 3638, 3645, 3658, 3664, 3670, 3683, 3690, 3696, 3703, 3722, 3727, 3735 |
+| `_teardown_connection`（断开/清理） | 3756, 3764, 3770, 3778, 3791, 3796, 3802 |
+| `_on_connection_for_ui` / `_on_module_device_selected` | 3845, 3851, 5944 |
+| `_on_device_plugged` / `_on_panel_device_connect` | 6004, 6101 |
+| `_on_record_toggled` / `_record_write_chunk` / `_on_pipeline_record_iq` | 4035, 4951, 4961 |
+| `_start_recording` / `_stop_recording`（录音） | 5557, 5567, 5577, 5631, 5640, 5646 |
+| `_replay_recording`（回放） | 6733, 6737 |
+| `_disconnect_gnss` | 7335 |
+
+合计 48 处，与扫描计数一致。定位以方法名为锚，文件一旦有在途改动先按方法重扫再改行号。
 
 判定：这些吞一次就是「点了没反应」；修的时候必须断言用户看到的状态（状态栏、按钮、提示），不能只补日志。
 
 ### A2. `desktop/rf_sky_view.py::_find_body_at`（6 处，含 DSO 事故）
 
-| 行号 | 类别 | 现状 |
-| --- | --- | --- |
-| 5318 | ERROR/EMPTY | `float(None)` 类失败被 `pass`（事故点） |
-| 5332 | ERROR/EMPTY | `pass` |
-| 5378 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
-| 5438 | WARN/SILENT_FALLBACK | `px_arr = py_arr = alt_draw_arr = None` |
-| 5456 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
-| 5473 | WARN/SILENT_FALLBACK | `hyg = 0` |
+| 行号（当前工作区） | 行号（HEAD `26fb3d7`） | 类别 | 现状 |
+| --- | --- | --- | --- |
+| 5393 | 5341 | ERROR/EMPTY | `float(None)` 类失败被 `pass`（事故点） |
+| 5407 | 5355 | ERROR/EMPTY | `pass` |
+| 5453 | 5401 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
+| 5513 | 5461 | WARN/SILENT_FALLBACK | `px_arr = py_arr = alt_draw_arr = None` |
+| 5531 | 5479 | WARN/SILENT_CONTROL | `continue`（该天体不画） |
+| 5548 | 5496 | WARN/SILENT_FALLBACK | `hyg = 0` |
+
+天空线当前工作区已在该函数之前新增约 75 行，故两套行号并列；定位一律以
+`RFSkyView._find_body_at` + 片段为锚，不要只认行号。命中数仍为 6（2 ERROR + 4 WARN）。
 
 要求：每处修复都要有「天体出现在图层 / 点击命中返回该天体」的断言；`_find_body_at` 至少要区分「星表无此目标」与「解析失败」。
 
 ### A3. `mbdsdr_ai/sdr_tools.py`：AI 工具面（49 处，17 ERROR + 32 WARN）
 
-ERROR（`pass`，模型会当成成功继续编解释）行号：661, 3117, 3185, 3191, 3375, 3471, 3797, 3986, 4055, 4118, 4527, 4930, 5451, 7873, 7891, 7925, 7943。
+ERROR（`pass`，模型会当成成功继续编解释）行号（已按 HEAD `26fb3d7` 复核，17 处逐一命中）：661, 3117, 3185, 3191, 3375, 3471, 3797, 3986, 4055, 4118, 4527, 4930, 5451, 7873, 7891, 7925, 7943。
 
 WARN 多数是 `return ToolResult(success=False, content=...)`（用户/模型能看到失败文本，但没有日志与错误码）。这 32 处至少要补错误码/日志，不能让模型只拿到一句自由文本。
 
