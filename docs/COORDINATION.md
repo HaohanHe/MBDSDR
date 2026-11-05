@@ -740,11 +740,22 @@ WorkBuddy 台账线（"我这边" UI 原型/产品工程/星象仪）、巡检�
   **≥2 个仍在 TTL 内的 claim owner** 时直接拒绝提交，并提示
   `git commit --only -- <paths>`。
 - `pre-commit` 同时打印 `git diff --cached --name-only`，事后可核对。
+- `post-commit` 提交后 5 秒内对本次提交的每个路径跑 `git status --porcelain` /
+  `git diff HEAD`：工作区仍有改动 = 这次吃进的是旧索引内容（漏带自己的编辑），
+  记一条 `STALE_INDEX_SUSPECT`（commit、路径、剩余 diff 行数 + 前 10 行）。
+  只记录不阻断（提交已发生），且只看本次提交的路径、不看别线文件。
 - 放行时写 `D:\mbdsdr\.locks\hook_ok\<tree>.json` 标记；`post-commit` 消费标记。
 - `git commit --no-verify` 仍可用（不隐藏），但 `post-commit` 会把
   commit/tree/author/files 追加到 `D:\mbdsdr\.locks\git_hook_bypass.log`。
 - 校验：`python scripts/install_git_hooks.py --check`；卸载 `--uninstall`。
 
+**两头都要，不能只防一半**：提交前贴 `git diff --cached --name-only` 防夹带
+别人的改动；提交后查 `git diff HEAD -- <本次提交的路径>` 防漏带自己的改动。
+今天两种事故都发生过——`d4b2a80`/`2614c7f`（多带别人）、`14a6dc7`（自己的
+11:47 编辑没被 11:48 的提交吃进，用旧索引漏掉）。
+
+
 实测（临时仓、D 盘）：两 owner 暂存 → 拒绝；单 owner → 放行；`--only` 单路径
-→ 放行；`--no-verify` → bypass 日志 1 条。
+→ 放行；`--no-verify` → bypass 日志 1 条；旧索引提交 → `STALE_INDEX_SUSPECT`
+1 条，正常 `--only` 提交 → 0 条（`tests/test_git_hooks_stale_index.py` 2 passed）。
 
