@@ -44,6 +44,11 @@ except ImportError:  # pragma: no cover - 包内导入
         validate_value,
     )
 
+try:  # 静噪刻度→余量的唯一换算入口；缺失时按钮仍可用，只是不显示换算后缀
+    from mbdsdr_ai.squelch import margin_threshold_db as _margin_threshold_db
+except ImportError:  # pragma: no cover - 裁剪打包
+    _margin_threshold_db = None
+
 try:  # pragma: no cover - 可选内核：只捕导入缺失（其它异常是要修的 bug）
     from mbdsdr_ai.remote_control import RemoteControl, DEFAULT_RC_PORT
 except ImportError:
@@ -457,7 +462,7 @@ class SettingsPanel(QWidget):
             self._settings.set("squelch_default_db", int(round(float(dbfs))))
 
     def _announce_squelch_migration(self):
-        """旧行为是滑杆 -50、门控实际 -80；只在旧配置文件上提示一次。"""
+        """旧配置值按 IQ 功率保存；新口径是相对噪声基线余量。只提示一次。"""
         if self._settings is None:
             return
         checker = getattr(self._settings, "has_file_key", None)
@@ -467,9 +472,10 @@ class SettingsPanel(QWidget):
         if checker("squelch_default_db"):
             return
         self._notify(
-            "静噪默认值迁移：旧版本滑杆显示 -50、门控实际按 -80 dBFS 生效；"
-            "现在统一按 -50 dBFS（没有改动你保存过的任何值）。"
-            "若你以前依赖 -80，请在「频谱与解码」把静噪门限改成 -80。")
+            "静噪默认值迁移：你原来保存的值按 IQ 音频功率（绝对电平）记录；"
+            "新滑杆改为「相对该模式噪声基线的余量」——-100≈0 dB、-50≈6 dB、"
+            "-20≈16 dB。请复核当前值是否仍符合你的习惯"
+            "（没有改动你保存过的任何值）。")
         # 写入新键（值就是 schema 默认 -50），让提示真正只出现一次；
         # 旧文件里本来没有这个键，因此没有覆盖任何用户值。
         self._settings.set("squelch_default_db", SCHEMA["squelch_default_db"].default)
@@ -643,6 +649,14 @@ class SettingsPanel(QWidget):
             if item.step:
                 w.setSingleStep(int(item.step))
             w.setValue(int(value) if value is not None else int(item.default or 0))
+            if item.key == "squelch_default_db" and callable(_margin_threshold_db):
+                # 滑块数字是旧刻度，旁边必须把真实含义（相对噪声基线余量）显示出来，
+                # 例：-50（≈6 dB 余量）。换算只在内核 margin_threshold_db 一处定义。
+                def _squelch_suffix(v):
+                    w.setSuffix(f"（≈{_margin_threshold_db(v):g} dB 余量）")
+
+                _squelch_suffix(w.value())
+                w.valueChanged.connect(_squelch_suffix)
             w.valueChanged.connect(lambda v, k=item.key: self._on_changed(k, int(v)))
             return w
         # 文本：录音目录等路径项（留空 = 使用 schema/配置层给出的默认位置）

@@ -148,7 +148,7 @@
 | 显示书签 | 小屏省空间 | True：既有默认 | 布尔；即时 |
 | 显示频段彩带 | 只想看谱 | True：既有默认 | 布尔；即时 |
 | 调谐步进 | 细调弱信号 vs 快速跨段 | 10 kHz：`spectrum_widget.py` 既有 `snap_interval`，档位同控制面板 | 10 Hz–1 MHz 六档枚举；未知回 10 kHz；即时推 `step_combo` + `set_snap_interval`；顶部改动反写设置 |
-| 静噪门限 | 底噪大 / 弱信号被切断 | -50 dBFS：直接取 `mbdsdr_ai.squelch DEFAULT_SQUELCH_DBFS`（schema 不写第二份） | -100～-20 dBFS（取 `SQUELCH_MIN/MAX_DBFS`），越界夹住；即时推滑杆 + `_on_squelch_changed`；滑杆改动反写设置 |
+| 静噪门限 | 底噪大 / 弱信号被切断 | -50（≈6 dB 余量）：直接取 `mbdsdr_ai.squelch DEFAULT_SQUELCH_DBFS`，换算走 `margin_threshold_db()` | 刻度 -100～-20（相对余量 0～16 dB，非绝对 dBFS），越界夹住；即时推滑杆 + `_on_squelch_changed`；滑杆改动反写设置 |
 | 观测站纬度 | 换城市/设台 | None：未配置就保持空状态，不编造位置 | -90–90，越界夹住；空白=未设置；即时写 gui_config + 重算过境 |
 | 观测站经度 | 同上 | None | -180–180，同上 |
 | AI 温度 | 要稳定操作建议/要发散 | 0.7：`DEFAULT_CONFIG` | 0–2，越界夹住；写 config.json + 现有 agent 即时生效 |
@@ -210,7 +210,8 @@
   状态栏与弹窗同时可见、面板行与"选择/打开目录"按钮；
   **A5 静噪** schema 默认/范围与 `mbdsdr_ai.squelch` 常量逐值相等 + 改设置后
   滑杆与门控都变 + 滑杆反写设置 + 旧配置迁移提示（提示同时把新键按默认值落盘，
-  下次启动不再重复；不覆盖旧文件里已有的键）；**A11 调谐步进**改设置后
+  下次启动不再重复；不覆盖旧文件里已有的键）；**A5 二次裁定**文案含「余量」、
+  -50 显示为 ≈6 dB 余量、不再出现旧绝对 dBFS/ -80 解释；**A11 调谐步进**改设置后
   `snap_interval` 与下拉框都变 + 下拉反写设置；
   服务面板保存/启动/停止失败都在状态行可见。
 - 回归：`test_settings_convergence` / `test_settings_semantics` / `test_theme_switch` /
@@ -268,7 +269,7 @@
 | A2 | 过境搜索窗口 | **暂不暴露**（消费点在卫星线） | 拟 `pass_window_hours` / 24 / 1–72 / 小时 | 接入后即时 | `new_spacetime_panel.py:533 compute_passes`；本线未改 |
 | A3 | 录音总容量保留上限 | **不做**（无消费点） | 拟 `recording_retention_total_gb` / 0–2000 / GB | — | `RetentionPolicy` 存在但 desktop 无调用者；加了也没人执行 |
 | A4 | 录音保留天数 | **不做**（无消费点） | 拟 `recording_retention_days` / 0–3650 / 天 | — | 同上 |
-| A5 | 静噪门限默认值 | **已落地** | `squelch_default_db` / `int(DEFAULT_SQUELCH_DBFS)`=-50 / `int(SQUELCH_MIN_DBFS)`=-100 ～ `int(SQUELCH_MAX_DBFS)`=-20 / dBFS | **即时**：滑杆 + 门控；滑杆反写设置 | `control_panel.squelch_slider` → `main_window._on_squelch_changed`；默认/范围取自 `mbdsdr_ai/squelch.py`，schema 无第二份字面量 |
+| A5 | 静噪门限 | **已落地** | `squelch_default_db` / `int(DEFAULT_SQUELCH_DBFS)`=-50 / `int(SQUELCH_MIN_DBFS)`=-100 ～ `int(SQUELCH_MAX_DBFS)`=-20 / 刻度=**相对噪声基线余量**（-100≈0、-50≈6、-20≈16 dB），不是绝对 dBFS | **即时**：滑杆 + 门控；滑杆反写设置 | `control_panel.squelch_slider` → `main_window._on_squelch_changed`；默认/范围/换算取自 `mbdsdr_ai/squelch.py`，schema 无第二份字面量 |
 | A6 | AI 工具超时 | **不做**（无消费点） | 拟 `ai_tool_timeout_s` / 120 / 10–600 / 秒 | — | `mbdsdr_ai/agent.py:630` 为常量，无配置字段可读，改了不生效 |
 | A7 | 瀑布深度行数 | **不做**（Python 无 setter） | 拟 `waterfall_depth_rows` / 256 / 128–4096 / 行 | — | `cpp/tokens.h:698` 可选，Python `spectrum_widget` 固定且无 `set_waterfall_depth` |
 | A8 | 大气消光系数 | **不做**（无 setter） | 拟 `sky_extinction_k` / 0.2 / 0–0.5 / 星等 | — | `stars.py` 有 `k` 参数但视图不传，无公开入口 |

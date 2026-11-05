@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
 import pytest  # noqa: E402
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QSpinBox  # noqa: E402
 
 import config_schema  # noqa: E402
 import settings as settings_mod  # noqa: E402
@@ -573,6 +573,21 @@ def test_squelch_schema_range_comes_from_kernel_constants():
     assert item.maximum == int(SQUELCH_MAX_DBFS)
 
 
+def test_squelch_copy_is_margin_not_absolute_dbfs(env):
+    """A5 二次裁定：文案必须说「相对噪声基线的余量」，不能再讲绝对 dBFS 音频电平。"""
+    ds, host, panel, _ = env
+    help_text = SCHEMA["squelch_default_db"].help
+    assert "余量" in help_text
+    assert "dBFS 是音频电平" not in help_text
+    assert "-50 ≈ 6 dB" in help_text and "-20 ≈ 16 dB" in help_text
+    # 控件旁必须把旧刻度 -50 换算成「≈6 dB 余量」，用户才看得到真实含义
+    spins = [w for w in panel.findChildren(QSpinBox) if "余量" in w.suffix()]
+    assert spins, "静噪控件没有显示余量换算"
+    w = spins[0]
+    assert w.value() == -50
+    assert "6" in w.suffix() and "余量" in w.suffix()
+
+
 def test_squelch_setting_reaches_slider_and_gate(env):
     ds, host, panel, _ = env
     panel._on_changed("squelch_default_db", -70)
@@ -610,7 +625,8 @@ def test_squelch_migration_notice_is_visible_on_old_config(tmp_path, qapp):
     panel = settings_panel.SettingsPanel(settings=ds, host=_FakeHost())
     text = panel.status_label.text()
     assert "静噪默认值迁移" in text
-    assert "-80" in text and "-50" in text
+    assert "余量" in text and "6 dB" in text
+    assert "-80" not in text, "旧绝对口径的解释已废弃，不许再出现"
     # 提示同时把新键按默认值写入（旧文件没有该键，不算改用户值）
     ds.flush()
     assert ds.get("squelch_default_db") == -50
