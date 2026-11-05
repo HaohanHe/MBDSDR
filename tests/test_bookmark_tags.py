@@ -129,7 +129,9 @@ def test_tag_render_smoke_no_data(qapp):
 # 主窗口接线
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def mw(qapp):
+def mw(isolated_profile, qapp):
+    # isolated_profile 见 tests/conftest.py：本夹具写 app_mode 与书签，
+    # 不隔离就会写进用户真实配置 / 书签库。
     from main_window import MainWindow
     w = MainWindow()
     w.settings.set("app_mode", "ide")
