@@ -2317,7 +2317,7 @@ class SpectrumPanel(QWidget):
         # 只读状态显示：当前中心频率 / span / SNR（无数据时显 --）
         # 对标 SDR++ main_window.cpp 顶部频率读数；这里只读展示，由 _refresh_status_labels 刷新。
         self._freq_label = QLabel("--")
-        self._span_label = QLabel("--")
+        self._span_label = QLabel("跨度 --")
         self._snr_label = QLabel("SNR --")
         _lbl_color = _c["gray_200"]
         self._freq_label.setStyleSheet(f"color:{_lbl_color};")
@@ -2636,7 +2636,12 @@ class SpectrumPanel(QWidget):
         """刷新顶部中心频率/span/SNR 只读读数并触发重绘。无数据时显 --。"""
         if self.generator.has_data():
             self._freq_label.setText(f"{self.generator.center_freq_hz/1e6:.3f} MHz")
-            self._span_label.setText(f"{self.generator.sample_rate_hz/1e6:.3f} MHz")
+            # 这一格是「显示的频率跨度」，不是采样率读数：同一个 sample_rate_hz
+            # 在本文件里就是 span（f0 = center − sr/2、RBW = sr/fft_size，
+            # Ctrl+滚轮/捏合还会把 new_span 直接写回它）。单位是带宽 MHz；
+            # 裸数字会被读成第二个频率，故显式标「跨度」。
+            self._span_label.setText(
+                f"跨度 {self.generator.sample_rate_hz/1e6:.3f} MHz")
             snr = self.compute_snr_db()
             self._snr_label.setText(
                 f"SNR {snr:.1f} dB" if snr is not None else "SNR --")
@@ -2648,7 +2653,7 @@ class SpectrumPanel(QWidget):
                 f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s")
         else:
             self._freq_label.setText("--")
-            self._span_label.setText("--")
+            self._span_label.setText("跨度 --")
             self._snr_label.setText("SNR --")
             self._fft_info_label.setText("RBW --")
         self._redraw()

@@ -137,3 +137,33 @@ def test_fft_info_empty_state(qapp):
     panel = SpectrumPanel()
     panel._refresh_status_labels()
     assert panel._fft_info_label.text() == "RBW --"
+
+
+# ---------------------------------------------------------------------------
+# 顶部 span 读数：带含义与单位，不是裸数字
+# ---------------------------------------------------------------------------
+def test_span_label_has_meaning_and_unit_not_bare_number(qapp):
+    """反证：顶部 span 读数必须带含义+单位，不能是裸数字。
+
+    上游：该格取 ``generator.sample_rate_hz``；同一个变量在本文件里就是
+    显示跨度——频率轴 ``f0 = center − sr/2``、``RBW = sr/fft_size``，
+    Ctrl+滚轮/捏合还会把 ``new_span`` 直接写回 ``sample_rate_hz``。
+    所以单位是带宽的 MHz，而不是采样率 MS/s；裸 ``2.400 MHz`` 会被
+    读成第二个频率。
+    """
+    from spectrum_widget import SpectrumPanel
+    panel = _panel(qapp)                       # update_iq(..., 100e6, 2.4e6)
+    text = panel._span_label.text()
+    assert text == "跨度 2.400 MHz"
+    assert text != "2.400 MHz"                 # 裸数字会被误读成第二个频率
+    assert "跨度" in text and "MHz" in text
+
+    # 缩放会直接改写 sample_rate_hz（此处它就是显示跨度），读数仍是带含义的串。
+    panel.generator.sample_rate_hz = 1.2e6
+    panel._refresh_status_labels()
+    assert panel._span_label.text() == "跨度 1.200 MHz"
+
+    # 无数据态同样不许出现裸占位符。
+    empty = SpectrumPanel()
+    empty._refresh_status_labels()
+    assert empty._span_label.text() == "跨度 --"
