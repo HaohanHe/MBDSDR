@@ -650,6 +650,18 @@
 > 已同时冻结 `kPeakThresholdDefault=15` 与 `kPeakRelDb=6.0`，设置线只读复核通过，
 > 未改动该文件（归频谱线）。
 
+> 归档：2026-11-05 卫星过境线 `ff219b5` 已入库并 release：
+> AI/MCP 工具面 `controller.get_satellite_pass` 去掉写死 10°/24h，改为显式注入
+> `min_elevation_deg` / `window_hours`，缺省回落 `sat_passes.PASS_MIN_ALT_DEG` /
+> `PASS_WINDOW_HOURS`（AI 侧单一默认源，不反向依赖 desktop settings）；
+> MCP 工具 schema 同步暴露两参数并返回 `passes_in_window`；`rf_sky_view` 过境
+> 标题窗口随设置显示。实测同一工具调用 5°=6 条 vs 10°=5 条、24h=5 条 vs 72h=14 条。
+> 涉及 `mbdsdr_ai/core/controller.py` / `mbdsdr_ai/core/mcp_server.py` /
+> `mbdsdr_ai/sat_passes.py` / `desktop/rf_sky_view.py` /
+> `tests/test_controller_pass_gate.py` / `tests/test_pass_window_hours.py` /
+> `tests/test_sky_readouts.py` / `docs/mcp_tools.md` / `docs/parameter-unification.md`，
+> 锁均已释放。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`
