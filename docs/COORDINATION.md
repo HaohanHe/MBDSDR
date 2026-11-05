@@ -1660,7 +1660,7 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
   `:210` 四条是本轮新写/改写的无 hash 断言，属他线在途改动（前者 claim 属
   discoverability-line 且已过期，后者未见 claim）→ 补齐四元组或删断言；
   本线未替它们开白名单。
-- 顶层 docs 的存量断言：白名单 `docs/claim-waivers.md`（142 条，逐条附指纹 +
+- 顶层 docs 的存量断言：白名单 `docs/claim-waivers.md`（HEAD 103 条，逐条附指纹 +
   原因，只许往下减）；门禁 `tests/test_claims_guard.py` 只锁增量——新增或
   改写的断言四元组不全即红，存量由各文档 owner 逐条补 hash 或删断言。
 - 增量漂移登记：`docs/narrow-screen-plan.md:463`「宽度收口」那段是新写的
