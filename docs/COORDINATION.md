@@ -917,6 +917,30 @@
 - (b) `pid` 活着（创建时间一致）+ 心跳过期 → 退出码 2，打印 `[FAIL] pid 已死/被复用`，
   不产生成功日志。
 
+### 6.1.3 `pid` 已死 ≠ 可接管（2026-11-06 实测）
+
+**机制事实**：claim 记录里的 `pid` 是执行 `claim` **那条 CLI 进程**，跑完
+即退出——所以事后读台账，`pid` 几乎恒为「已死」。`pid_dead_or_reused`
+只解开第一道闸，不构成可接管。
+
+**可接管判据**：只能是「TTL 过期」或「该路径 `git status` 为空」，两者至少
+满足一条（外加 `pid_dead_or_reused` 硬前提，见 §6.1.2）：
+
+1. `expired`：`now - heartbeat_at > ttl_min`；
+2. `no_inflight`：`git status --porcelain -- <该路径>` 为空。
+
+日志与状态输出必须同时打印三个字段：`owner`、持有起点（`acquired_at`）、
+`held` 与剩余 TTL。只给 `pid` 的日志无法区分「孤儿」与「正在写」。
+
+**`file_claim.py status` 改动建议**：`_describe()`（`scripts/file_claim.py:757`）
+每行补一列「可接管?」，单路径分支直接复用 `_orphan_criteria()` 的判定
+（`pid_dead_or_reused` + `expired`/`no_inflight` 之一）；全量列表为免逐文件跑
+`git status`，只标「过期 PASS，需查在途」。字段与判据不许另算一套。
+
+**实例**：`docs/COORDINATION.md` 本轮被占时 pid 已死，但 TTL 未过且文件有
+在途改动 → 拒绝接管（1/3）；`desktop/control_panel.py` 则 pid 已死 + 文件干净
+→ 接管成功。两例只差「过期/无在途」这一条，凭 pid 判会两次都判反。
+
 ### 6.2 共享文件清单（今天实际撞过的）
 
 - `desktop/main_window.py`

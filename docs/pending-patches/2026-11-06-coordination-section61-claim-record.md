@@ -1,9 +1,10 @@
 # COORDINATION.md §6.1 追加草稿：claim 实例与展示字段
 
 > 提出：操作逻辑线/6ae85f56，2026-11-06
-> 状态：**待落地**。`docs/COORDINATION.md` 当前有他线在途改动，见文末证据；
-> 本次不能写。TTL 到期（07:53）或持有方释放后，用私有 index 只提交本段
-> hunk，避免卷走他人的在途改动。
+> 状态：**待落地**。`docs/COORDINATION.md` 当前有他线在途改动（takeover
+> 实测 1/3，拒绝理由见「二」）；不硬抢。TTL 到期（07:53）或持有方释放后，
+> 用私有 index 只提交 §6.1 机制节那一段 hunk，避免卷走他人的在途改动。
+> 2026-11-06 追加「四」：`file_claim.py status` 的「可接管?」列 + 三字段建议。
 
 ## 一、实例：`desktop/control_panel.py` 的 takeover
 
@@ -64,3 +65,53 @@
 - 反例：COORDINATION.md 在途改动未提交时，即使 pid 已死也拒绝 takeover；
   不得 checkout/覆盖他人的在途改动，应等 TTL 到期或持有方释放。
 ```
+
+## 四、`file_claim.py status` 的改动建议（待持有方释放后随 §6.1 一起落）
+
+现状（`scripts/file_claim.py:757-760` `_describe()`）每行只有：
+
+```
+<path> owner=<owner> held=<held>/<ttl>min 剩余 <remain>min pid=<pid> since=<acquired_at>
+```
+
+缺的正是「30 秒判断」需要的那一列——**「可接管?」**。建议补成：
+
+```
+<path> owner=<owner> held=<held>/<ttl>min 剩余 <remain>min 起点=<acquired_at>
+        pid=<pid>(已不存在|号被复用|仍存活) 可接管=否(过期 FAIL / 无在途改动 FAIL)
+```
+
+字段口径（与 `_orphan_criteria` 同源，别另算一套）：
+
+| 字段 | 来源 | 说明 |
+|---|---|---|
+| `owner` | `payload["owner"]` | 必须带会话标识 |
+| `起点` | `acquired_at`（不是 `heartbeat_at`） | 首次 claiming 时刻；与 TTL 比出 `held`/剩余 |
+| `held` / `剩余` | `now - heartbeat_at` vs `ttl_min` | 已持有分钟数 / TTL 剩余分钟数 |
+| `pid(状态)` | `_proc_snapshot(pid)` | 明确标注「已不存在 / 号被复用 / 仍存活」 |
+| `可接管` | `_orphan_criteria()` 三判据 | **单路径** `status` 直接算；全量列表为免逐文件跑 `git status`，只标 `可接管?=过期 PASS 需查在途` |
+
+**判词红线**（本次机制发现，必须写进形态表）：
+
+> `pid` 是执行 `claim` 的那条 CLI 进程，跑完即退——单看 pid 几乎恒为
+> 「已死」。可接管判据只能是「TTL 过期」**或**「该路径 `git status` 为空」，
+> 两者至少满足一条；`pid` 已死只解开第一道闸，不构成可接管。
+> 日志里必须同时打印 owner、持有起点、held/剩余 TTL 三字段，否则后来的人
+> 无法判断「它是孤儿还是正在写」。
+
+```python
+# 建议实现（单路径分支）
+crit = _orphan_criteria(payload, display, now)
+verdict = "可接管" if (crit["pid_dead_or_reused"]["ok"] and
+                       (crit["expired"]["ok"] or crit["no_inflight"]["ok"])) else "不可接管"
+```
+
+## 五、给机制线（会话 `3eda2b30`）的交接
+
+请在形态表（`docs/reference-mechanisms.md`）记一条：
+
+> **「pid 已死 ≠ 可接管」**——`file_claim.py` 的 `pid` 是执行 claim 的
+> CLI 进程，跑完即退，单看 pid 几乎恒为「已死」；可接管判据只能是
+> 「TTL 过期」或「该路径 `git status` 为空」，两者至少满足一条，
+> 且日志必须同时打印 owner、持有起点、held/剩余 TTL。
+
