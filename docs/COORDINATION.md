@@ -925,7 +925,54 @@ $msg | git commit --only -F - -- <自己的路径...>
 - 清理 `%TEMP%` 时只按前缀 + 时间筛选（`mbdsdr_*`、mtime 早于 2 小时），
   不动目录、不动非本前缀文件；删除被占用而失败的不强删，列出文件名与占用情况。
 
+#### 6.9.2 共享 index 必须保持干净：一律用独立 `GIT_INDEX_FILE`（2026-11-05 23:20 追加）
+
+**结构性要求**（比「别用 `--only`」更根治）：
+
+- 所有线一律用独立 `GIT_INDEX_FILE` 提交：`git read-tree HEAD` → `git apply --cached`
+  （或 `git diff ... --output` 出 patch 再 `git apply --cached`）只打自己要提交的
+  hunks → 用该 index `git commit`。**共享 index（仓库默认 `.git/index`）里不许出现
+  任何人的暂存内容**。这样「提交被卷走」与「要不要 reset 别人的 index」这两个问题
+  都不再存在。
+- **发现别人在共享 index 里有暂存内容时**：不得 `git reset` / `git restore --staged`
+  清掉别人的暂存状态——内容虽在工作区没丢，但对方的**提交意图被抹掉**，会引发重复
+  造改动或误提交。正确做法是：不动共享 index，用自己的临时 index 提交；然后把对方的
+  暂存内容导出成 patch（落 `D:\mbdsdr\.tmp\`），通知对方 owner 并确认重放。
+- 参考操作（PowerShell，临时 index 落 D 盘，提交说明走 stdin）：
+
+```powershell
+$env:GIT_INDEX_FILE = 'D:\mbdsdr\.tmp\idx_<线名>'
+git read-tree HEAD
+git diff --output=D:\mbdsdr\.tmp\me.patch -- <自己的路径...>
+git apply --cached D:\mbdsdr\.tmp\me.patch
+git diff --cached --name-only            # 核对：只有自己的路径
+$msg | git commit -F -                   # 不带 --only
+Remove-Item $env:GIT_INDEX_FILE; Remove-Item Env:GIT_INDEX_FILE
+git read-tree HEAD                       # 把共享 index 刷新到新 HEAD（原共享 index 须为空）
+```
+
+**反例存档（今日实测，行为记在这里、不点名）**
+
+- 参数治理线 23:04 用临时 index 提交**是对的**；但事后 `git reset HEAD` 复位了另一条
+  在共享 index 里的 **23 行暂存**（U-02 扫描器缺值保护）——这是不该做的那半步。对方
+  的改动还在工作区，但「已暂存、准备提交」的意图被抹掉。
+- **不碰别人 index 也可能伤人**：23:08:12 `f664638a`（test(fixtures)）用旧索引提交，
+  把本文件里刚入库的 §6.10「前置规矩」整段写回 `448d465f` 的旧版本（blob `9563ffff`），
+  只能重新补回。同类事故的另一种表现：没动别人的 index，却把别人**已入库**的同文件
+  内容覆盖成旧版。提交前 `git diff --cached --name-only` + 提交后 `git diff HEAD`
+  这两步对「同文件多人」仍然必须做。
+
 ### 6.10 历史改写事件（2026-11-05，主分支两次被 reset）
+
+**前置规矩（上游真因，比「禁止 reset」更早一步）**
+
+误用 `git commit --only <paths>` 卷走他人改动后，自行 `git reset` 回退重打属违规。
+`--only` 提交的是这些路径在**工作区**的内容，不是暂存区内容；只要文件里还有他人
+未提交的改动，`--only` 必然一起扫走。正确做法：把要提交的 hunks 单独进 index
+（`git apply --cached` 或独立 `GIT_INDEX_FILE`），然后**不带 `--only`** 直接
+`git commit`。今天 7 次破坏性 reset 中**至少 4 次**是「`--only` 扫走别线内容 →
+reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59）；16:35:59
+形态相同（重提漏掉 `main_window.py`），但「扫走了谁的内容」无法证明，只按无法定人记。
 
 **铁律（立即生效，不是建议）**
 
@@ -1010,8 +1057,28 @@ $msg | git commit --only -F - -- <自己的路径...>
 | 12:05:13 | HEAD~1 | 破坏性 |
 
 即 **7 次破坏性 reset + 1 次 no-op**；22:33:31 / 22:34:00 / 22:39:59 同秒的
-`moving to HEAD` 与重复目标均为 no-op，不计。（12:54:09 / 12:24:39 / 12:05:13
-三次的逐笔去向本轮未取证，需回溯时另开一笔。）
+`moving to HEAD` 与重复目标均为 no-op，不计。
+
+**23:xx 续（后追加，实测）**：23:09:43 / 23:10:40 / 23:10:55 又 3 次
+`reset: moving to 926280d5`——扫描线把自己 23:09–23:10 的同标题提交回退重打，
+最终以 `aaaa0de2` 入库。**今日累计 10 次破坏性 reset + 1 次 no-op**。
+
+**12:xx 三次的定人与形态（补查，23:05）**
+
+- **三次均「无法定人」**：claim 台账首条记录是 12:49:06，`12:05:13` / `12:24:39`
+  时点完全无记录；`12:54:09` 时点相关文件（`config_schema.py` / `rf_sky_view.py` /
+  `settings_panel.py` / `spectrum_widget.py` / `docs/settings-inventory.md`）的
+  claim 最早也到 12:56:54 之后。**没有台账证据就不写人名**，只能按提交内容猜归属。
+- **三次同一形态**：提交后 4–34 秒 `reset: moving to HEAD~1`，随即以同标题重提
+  （`a59f98f8→db87425d`、`9798ece0→95087ccc`、`ceb086b9→fba509bd`），且**重提都
+  比原提交少了内容**——原提交扫进了别线的在途改动，重提把它剥掉：
+  - 12:05 那次：`spectrum_widget.py` 重提相对原提交 −84/+27（剥掉他人快捷符号绑定）；
+  - 12:24 那次：`main_window.py` −15/+9（剥掉他人 tooltip 文案改动）；
+  - 12:54 那次：跨 8 文件 −414/+53（`config_schema.py`、`rf_sky_view.py`、
+    `settings_panel.py`、`spectrum_widget.py`、`docs/settings-inventory.md`、
+    `star_catalog.py`、两个测试）。
+  这正是本节「前置规矩」的实例：真正的错在 `--only`/宽索引扫走他人内容，reset 只是事后补救，
+  但补救方式选择了改写历史。
 
 **处置要求**
 
