@@ -8980,7 +8980,6 @@ class MainWindow(QMainWindow):
         # 状态栏只渲染抓取链路给出的 code/label/reason/action：
         # 失败时必须有码和原因，绝不回落到与 code 无关的固定句子。
         from mbdsdr_ai.tle_fetch import tle_refresh_status_text
-        failure = self._loop_sat_tracker.last_refresh_failure
         msg = tle_refresh_status_text(n, failure)
         ok = n > 0 and not failure
         self.statusBar().showMessage(msg, MSG_NORMAL if ok else MSG_IMPORTANT)
