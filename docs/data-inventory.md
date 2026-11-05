@@ -397,21 +397,45 @@ DVB-S2 BCH/LDPC 表、月面反照率），另有 `desktop/bandplan.json` 频段
 python web/product/tests/verify_build_json.py --check
 ```
 
-脚本按 sha256 备份生成器会写的 10 个输出 → 重跑四个生成器（与
-`run_all.py:27-31` 同一条链）→ 把豁免字段替换为占位符后**逐字节比对** →
-无论成败都按原字节恢复工作区。豁免字段只有：`repo-facts.json` 的
-`generatedAt` / `repo.head`、`sky-catalog.json` 的 `meta.generatedAt`，
-以及自动生成文档里的「生成时间 / 仓库基线」（同一戳的文本形态）。
-返回码 `0` = 一致，`1` = 生成器失败或漂移，`2` = 备份/恢复失败；
-**不联网**，星表读本地 `data/hygdata_v41.csv`。
-2026-11-06 实测：正向 10/10 一致（`sat-tracks.json` 与 `astro-golden.json`
-无时间戳，字节级）；手工往 `sat-tracks.json` 注入一个空格后返回 1 并打印
-DRIFT；两次运行后工作区 sha256 均回到原值。
+脚本先把 10 个输出按 sha256 备份到 `.build-json-backup/`（manifest + 原字节 +
+`READY` 哨兵，目录已 gitignore）→ 重跑四个生成器（与 `run_all.py:27-31`
+同一条链）→ 把豁免字段替换为占位符后**逐字节比对** → `finally` 按备份写回并
+校验 sha。豁免字段只有：`repo-facts.json` 的 `generatedAt` / `repo.head`、
+`sky-catalog.json` 的 `meta.generatedAt`，以及自动生成文档里的
+「生成时间 / 仓库基线」（同一戳的文本形态）。返回码 `0` = 一致，
+`1` = 生成器失败或漂移，`2` = 备份/恢复失败；**不联网**，星表读本地
+`data/hygdata_v41.csv`。
+**进程级恢复**：若中途被 kill（`finally` 不会执行），备份目录会连同 `READY`
+留在磁盘；下次运行会先自动恢复再继续检查，也可手工执行
+`python web/product/tests/verify_build_json.py --restore`。
+2026-11-06 实测：正向 10/10 一致，本机约 2 秒；手工往 `sat-tracks.json`
+注入一个空格 → 返回 1 并打印 DRIFT；`--simulate-crash` 在第一个生成器后
+硬退出 → 返回 137、3 个文件已变脏、`READY` 在位；`--restore` 后 10 个文件
+sha 全部回到原值、备份目录清空；再跑 `--check` 也能先自动恢复。
 `tests/verify_product.py` 另钉内容红线：`starCount>10000`、HYG 许可/SHA、
 `notVerified` 条数、`satCount`/`count` 下限、`caseCount≥6` 且事实源为
 `celestial_geometry.py`。`build/astro-golden.json` 与
 `build/gen_astro_golden.py` 已作为同一笔提交 `f4ef0d13` 入库（两者必须同进
 同出，缺一复现链断裂），入库后重跑产物字节一致。
+
+**天文框架跨语言对拍（JS ↔ Python）**：
+
+```powershell
+node web/product/tests/astro_selftest.js
+```
+
+纯 Node（无 npm 依赖、不联网、不需要浏览器）。它与 Python 生成器读**同一份**
+`build/astro-golden.json`；样本是 `gen_astro_golden.py` 里固定的
+6 JD × 4 站 × 6 个 RA/Dec 参考方向 = 24 case / 144 向量
+（**固定参考方向，不是 HYG 星表行抽样**；两侧吃同一批输入，不存在各挑各的
+样本）。断言：GMST、P/N/Mpn/Rf/M/Pinv 与 dpsi/deps/eps，以及
+horizon / dateHorizon / ofDate / temeToJ2000 四类向量；容差为矩阵 `1e-11`、
+向量 `1e-10`、GMST `1e-8` 度；另钉章动 `|dpsi| ∈ (0.1″, 30″)` 与总矩阵保长
+（`1e-10`）。2026-11-06 实测 `worst 3.33e-16 (horizon 2461500/40.7 ra=300[2])`
+→ **一致**，距向量容差还有约 5 个数量级。前端与 selftest 已作为同一笔提交
+`3d0735e5` 入库；但 HEAD 上 `run_all.py` / `scaffold.py` / `index.html` /
+`verify_product.py` 的 astro 接线仍是别线在途（M），所以这条对拍目前需手动跑，
+尚未被全链自动调用。
 
 ---
 

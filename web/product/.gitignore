@@ -22,3 +22,6 @@ data/parts/
 
 # 其他临时探针
 *.log
+
+# verify_build_json.py 的进程级备份（可重建；被 kill 后靠它恢复）
+.build-json-backup/
