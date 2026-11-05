@@ -199,8 +199,86 @@ SENSITIVITY_SNAPSHOT = {
     },
     "acars": {
         "threshold_snr_db": 2.0, "threshold_100pct_snr_db": 2.0,
-        "first_success_snr_db": 0.0, "critical_band_db": [0.0, 2.0],
+        "first_success_snr_db": -2.0, "critical_band_db": [-2.0, 2.0],
         "first_failure_code": "nothing_detected", "monotonic": True,
+    },
+    "navtex": {
+        "threshold_snr_db": 36.0, "threshold_100pct_snr_db": 36.0,
+        "first_success_snr_db": 32.0, "critical_band_db": [32.0, 36.0],
+        "first_failure_code": "nothing_detected", "monotonic": True,
+    },
+    "apt": {
+        "threshold_snr_db": 4.0, "threshold_100pct_snr_db": 8.0,
+        "first_success_snr_db": 4.0, "critical_band_db": [4.0, 8.0],
+        "first_failure_code": "no_sync", "monotonic": True,
+    },
+    "wspr": {
+        "threshold_snr_db": -12.0, "threshold_100pct_snr_db": -12.0,
+        "first_success_snr_db": -16.0, "critical_band_db": [-16.0, -12.0],
+        "first_failure_code": "sync_not_found", "monotonic": True,
+    },
+    "lrpt": {
+        "threshold_snr_db": 16.0, "threshold_100pct_snr_db": 16.0,
+        "first_success_snr_db": 12.0, "critical_band_db": [12.0, 16.0],
+        "first_failure_code": "sync_not_found", "monotonic": True,
+    },
+}
+
+# 频偏容差快照（同一轮实测，2026-11-06；每档 10 次，固定各模式高 SNR 档）。
+# rates 的键是 kHz，负/正各一档；缺失键 = 该偏移超过 0.45·fs（奈奎斯特不可
+# 表示），文档里显式写 N/A，不伪造失败。临界频偏按「从 0 向外连续达标」定义，
+# 不是「所有达标档的最大值」——差分鉴相的周期折叠会在远端档位假恢复。
+SENSITIVITY_OFFSET_TRIALS = 10
+SENSITIVITY_OFFSET_GRID_KHZ = (0.5, 1.0, 2.0, 5.0, 10.0)
+OFFSET_SNAPSHOT = {
+    "ais": {
+        "critical_offset_khz": 1.0, "monotonic": False,
+        "rates": {-10.0: 1.0, -5.0: 0.0, -2.0: 0.0, -1.0: 1.0, -0.5: 1.0,
+                  0.0: 1.0, 0.5: 1.0, 1.0: 1.0, 2.0: 0.0, 5.0: 0.0, 10.0: 1.0},
+    },
+    "adsb": {
+        "critical_offset_khz": 10.0, "monotonic": True,
+        "rates": {-10.0: 1.0, -5.0: 1.0, -2.0: 1.0, -1.0: 1.0, -0.5: 1.0,
+                  0.0: 1.0, 0.5: 1.0, 1.0: 1.0, 2.0: 1.0, 5.0: 1.0, 10.0: 1.0},
+    },
+    "aprs": {
+        "critical_offset_khz": 0.0, "monotonic": True,
+        "rates": {-10.0: 0.0, -5.0: 0.0, -2.0: 0.0, -1.0: 0.0, -0.5: 0.0,
+                  0.0: 1.0, 0.5: 0.0, 1.0: 0.0, 2.0: 0.0, 5.0: 0.0, 10.0: 0.0},
+    },
+    "ft4": {
+        "critical_offset_khz": 0.0, "monotonic": True,
+        "rates": {-5.0: 0.0, -2.0: 0.0, -1.0: 0.0, -0.5: 0.0,
+                  0.0: 1.0, 0.5: 0.0, 1.0: 0.0, 2.0: 0.0, 5.0: 0.0},
+    },
+    "pocsag": {
+        "critical_offset_khz": 0.0, "monotonic": False,
+        "rates": {-5.0: 1.0, -2.0: 0.0, -1.0: 0.0, -0.5: 0.0,
+                  0.0: 1.0, 0.5: 0.0, 1.0: 0.0, 2.0: 0.0, 5.0: 0.0},
+    },
+    "acars": {
+        "critical_offset_khz": 0.0, "monotonic": False,
+        "rates": {-10.0: 0.0, -5.0: 0.0, -2.0: 0.0, -1.0: 0.0, -0.5: 0.0,
+                  0.0: 1.0, 0.5: 0.0, 1.0: 0.0, 2.0: 0.0, 5.0: 1.0, 10.0: 0.0},
+    },
+    "navtex": {
+        "critical_offset_khz": 0.0, "monotonic": True,
+        "rates": {-5.0: 0.0, -2.0: 0.0, -1.0: 0.0, -0.5: 0.0,
+                  0.0: 1.0, 0.5: 0.0, 1.0: 0.0, 2.0: 0.0, 5.0: 0.0},
+    },
+    "apt": {
+        "critical_offset_khz": 1.0, "monotonic": False,
+        "rates": {-10.0: 1.0, -5.0: 0.0, -2.0: 0.0, -1.0: 1.0, -0.5: 1.0,
+                  0.0: 1.0, 0.5: 1.0, 1.0: 1.0, 2.0: 0.0, 5.0: 0.0, 10.0: 0.2},
+    },
+    "wspr": {
+        "critical_offset_khz": 0.0, "monotonic": True,
+        "rates": {0.0: 1.0},
+    },
+    "lrpt": {
+        "critical_offset_khz": 10.0, "monotonic": True,
+        "rates": {-10.0: 1.0, -5.0: 1.0, -2.0: 1.0, -1.0: 1.0, -0.5: 1.0,
+                  0.0: 1.0, 0.5: 1.0, 1.0: 1.0, 2.0: 1.0, 5.0: 1.0, 10.0: 1.0},
     },
 }
 
@@ -369,7 +447,7 @@ def render() -> str:
     out.append("| 模式 | 口径（噪声域｜带宽｜SNR） | 档位网格 | 90% 档 | 100% 档 "
                "| 临界区间 | 首个失败码 | 是否单调 |")
     out.append("|---|---|---|---|---|---|---|---|")
-    for mode in ("ais", "adsb", "aprs", "ft4", "pocsag", "acars"):
+    for mode in SENSITIVITY_SNAPSHOT:
         snap = SENSITIVITY_SNAPSHOT[mode]
         basis = SENSITIVITY.MODE_BASIS[mode]
         grid = SENSITIVITY.MODE_DEFAULT_GRID[mode]
@@ -391,30 +469,86 @@ def render() -> str:
                "每个模式的噪声域/带宽/SNR 口径由同一份 `MODE_BASIS` 生成，"
                "改口径必须改 `scripts/decode_sensitivity.py` 并刷新本文件。")
     out.append("")
-    out.append("**非单调如实登记（不挑好看档位当结论）**：ADS-B 频偏是与 SNR 正交的"
-               "另一维，不在上表档位内。本轮用同一 8 MHz/3 帧 fixture 复测"
-               "（SNR 0 dB、6 次/偏置）：0 kHz 5/6、±2 kHz 5/6、±5 kHz 1/6、"
-               "±10 kHz 5/6、±20 kHz 4/6——**非单调**，标「边缘效应，未解释机理」，"
-               "不拿 ±10 kHz 的恢复当结论（与另一组 3 次/档的小样本观测"
-               "±2 kHz 3/3、±5 kHz 2/3、±10 kHz 3/3 同型）。")
+    out.append("### 频偏容差（与 SNR 正交的另一维）")
+    out.append("")
+    out.append(f"固定各模式自己的高 SNR 档，每偏移 {SENSITIVITY_OFFSET_TRIALS} 次；"
+               "负/正两翼都扫。`N/A` = 该偏移超过 `0.45·fs`（奈奎斯特不可表示），"
+               "**不伪造失败**（WSPR fs=375 S/s 只可能扫 0；FT4/NavTex fs=12 kS/s "
+               "扫不到 ±10 kHz；POCSAG fs=22.05 kS/s 同理）。")
+    out.append("")
+    out.append("| 模式 | 0 kHz | ±0.5 kHz | ±1 kHz | ±2 kHz | ±5 kHz | ±10 kHz "
+               "| 临界频偏 | 是否单调 |")
+    out.append("|---|---|---|---|---|---|---|---|---|")
+
+    def _rate_cell(rates, k):
+        if k is None:
+            v = rates.get(0.0)
+            return "—" if v is None else f"{v * 100:.0f}%"
+        neg, pos = rates.get(-float(k)), rates.get(float(k))
+        if neg is None or pos is None:
+            return "N/A"
+        if neg == pos:
+            return f"{neg * 100:.0f}%"
+        return f"{neg * 100:.0f}%/{pos * 100:.0f}%"
+
+    for mode in OFFSET_SNAPSHOT:
+        snap = OFFSET_SNAPSHOT[mode]
+        cells = [_rate_cell(snap["rates"], None)]
+        cells += [_rate_cell(snap["rates"], k) for k in SENSITIVITY_OFFSET_GRID_KHZ]
+        crit = snap["critical_offset_khz"]
+        crit_txt = ("—" if crit is None
+                    else (f"{crit:g} kHz（扫描上界）"
+                          if crit == SENSITIVITY_OFFSET_GRID_KHZ[-1]
+                          else f"{crit:g} kHz"))
+        mono = ("是" if snap["monotonic"] else "否（边缘效应，未解释机理）")
+        out.append(f"| `{mode}` | " + " | ".join(cells)
+                   + f" | {crit_txt} | {mono} |")
+    out.append("")
+    out.append("临界频偏 = **从 0 向外连续达标**的最大 |偏移|（两翼取较差侧），"
+               "不是「所有达标档里的最大值」。AIS 用 1 符号差分相位判决"
+               "（`angle(x[n+sps]·conj(x[n]))`），恒定频偏只给判决量加一个固定"
+               "相位旋转；偏移接近符号率整数倍时旋转回到 2π 附近、极性又被判对，"
+               "于是 ±10 kHz 反而 100%——**那是周期折叠，不是容差**。POCSAG / "
+               "ACARS / APT 在个别档位也看到同型恢复（-5 kHz 或 +5 kHz 突然回到 "
+               "100%），一律判非单调、标「边缘效应，未解释机理」，不挑好看档位当"
+               "结论。")
+    out.append("")
+    out.append("**ADS-B 的两种观测并存**：本表用库内合成 8 MS/s / 3 帧 fixture"
+               "（`decode_pipeline/adsb_three_frames.cf32`），固定该模式高 SNR 档"
+               "（2 dB）、每偏移 10 次，±10 kHz 全过（10/10）。另一组用**同一** "
+               "fixture、SNR 0 dB、6 次/偏置，则出现 0 kHz 5/6、±2 kHz 5/6、"
+               "±5 kHz 1/6、±10 kHz 5/6、±20 kHz 4/6 的**非单调**（包络检波 + "
+               "抽取滤波/位定时边缘效应）。两组只差 SNR 与样本量：临界附近 6 次"
+               "样本本就抖，**不拿任一组的「恢复」当卖点**，只钉「高 SNR 下容差"
+               "≥10 kHz、临界附近不稳」。")
     out.append("")
     out.append("**POCSAG 的 fixture 敏感性**：上表固定 1200 bd / 地址 54321 / HELLO。"
                "探索阶段在同一解码器上换 512/2400 bd 或其他地址时，出现过高速档"
                "回落（如 25 dB 反而掉到 17/20）与低于 100% 的平台——未解释机理，"
                "故本表只报这一组固定 fixture 的档位，不外推到其他波特率/地址。")
     out.append("")
+    out.append("### 未做灵敏度基线的模式（缺什么写清楚，不写「已完善」）")
+    out.append("")
+    for mode, item in SENSITIVITY.NOT_DONE.items():
+        out.append(f"- `{mode}`：" + "；".join(item["missing"]))
+    out.append("")
     out.append(f"快照日期 {SENSITIVITY_SNAPSHOT_DATE}，种子 {SENSITIVITY_SEED}，"
-               f"每档 {SENSITIVITY_TRIALS} 次。**以实跑为准**，过期就重新生成：")
+               f"每档 {SENSITIVITY_TRIALS} 次、每偏移 {SENSITIVITY_OFFSET_TRIALS} 次。"
+               "**以实跑为准**，过期就重新生成：")
     out.append("")
     out.append("```bash")
     out.append("python scripts/decode_sensitivity.py --trials 20 --seed 20261104 \\")
-    out.append("    --md sensitivity.md")
+    out.append("    --offset-trials 10 \\")
+    out.append("    --out paper/experiments/decode_sensitivity.json \\")
+    out.append("    --md paper/experiments/decode_sensitivity.md")
     out.append("```")
     out.append("")
-    out.append("三条必须一起读的限定：合成波形无多径/无频偏/无采样时钟误差"
-               "（ADS-B 频偏为另行单列的正交维度）；该 SNR 按各模式自己的域与"
+    out.append("三条必须一起读的限定：合成波形无多径/无采样时钟误差"
+               "（频偏是另行单列的正交维度，见上表）；该 SNR 按各模式自己的域与"
                "fs/2 噪声带宽定义，不是天线口面 SNR，也不是任何法规门限；"
-               "它只证明「本实现相对本实现的耐噪性」，不能证明「能在天上收到」。")
+               "它只证明「本实现相对本实现的耐噪性」，不能证明「能在天上收到」。"
+               "**全部结论的输入都是仓内编码器合成的 fixture（synthetic, NOT OTA）**，"
+               "不是 OTA 实测。")
     out.append("")
     out.append("## 离线批处理与结构化审计")
     out.append("")

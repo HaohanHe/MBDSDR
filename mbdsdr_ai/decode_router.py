@@ -130,11 +130,15 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.ft4_modem",
         input_formats=(".wav",),
         output_kind="messages",
-        sample_rate_rule="实音频任意 fs（内部重采样到 375Hz/sym，中心 ~1500Hz）",
+        sample_rate_rule=(
+            "实音频任意 fs（4-FSK 20.833 baud、105 符号/5.04s、四音间隔"
+            "≈20.833Hz；解码前重采样到 12kHz，默认搜索中心 1500Hz）"
+        ),
         evidence=EVIDENCE_PARTIAL,
         min_sample_condition=(
-            "SSB 解调后 12kHz PCM16 单声道 .wav，含完整 FT4 75s 帧且"
-            "SNR ≥ 0dB（官方样例库可作真值）"
+            "SSB 解调后 12kHz PCM16 单声道 .wav，含完整 FT4 帧"
+            "（105 符号 / 5.04s）；本实现**无 FT4 官方样例对拍**，"
+            "真值仅为仓内合成帧（provenance: self-generated）"
         ),
         delegate_format_check=True,
         failure_codes=(ERR_UNSUPPORTED_FORMAT, ERR_INVALID_WAV,
@@ -228,11 +232,15 @@ DIGITAL_MODE_CAPABILITIES: Dict[str, DigitalModeCapability] = {
         dependency="mbdsdr_ai.wspr_modem",
         input_formats=(".wav",),
         output_kind="messages",
-        sample_rate_rule="实音频 375Hz/sym 网格（参考 12kHz），四音间隔 1.464Hz",
+        sample_rate_rule=(
+            "实音频 12kHz 单声道（1.4648 baud、四音间隔 1.464Hz、162 符号 / "
+            "110.592s；内部下变频到 375Hz 网格）"
+        ),
         evidence=EVIDENCE_PARTIAL,
         min_sample_condition=(
-            "USB 解调后 12kHz PCM16 .wav，含完整 110.6s WSPR 传输且"
-            "SNR ≥ -28dB（官方 wsprd 结果可作真值）"
+            "USB 解调后 12kHz PCM16 .wav，含完整 110.592s WSPR 传输；"
+            "本实现**未做 OTA/弱信号灵敏度验收**，不声明 dB 门限"
+            "（wsprd/wsjtx 仅作外部工具登记，不代表已对拍）"
         ),
         external_tools=("wsprd", "wsjtx"),
         delegate_format_check=True,
