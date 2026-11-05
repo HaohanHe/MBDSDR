@@ -303,3 +303,6 @@ def check_range(report: Dict[str, CapabilityField], key: str,
     return True, ""
 
 
+def unknown_values(report: Dict[str, CapabilityField]) -> Dict[str, str]:
+    """未知字段 → 原因（供 UI/AI 明确说「不知道什么」）。"""
+    return {k: f.reason for k, f in report.items() if not f.known}

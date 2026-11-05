@@ -38,13 +38,14 @@ from PySide6.QtTest import QTest  # noqa: E402
 
 class _StubStatus:
     def __init__(self, connected=True, error="", age=None, link_state="",
-                 error_category="", error_code=""):
+                 error_category="", error_code="", buffer_level=""):
         self.connected = connected
         self.error = error
         self.last_data_age_s = age
         self.link_state = link_state
         self.error_category = error_category
         self.error_code = error_code
+        self.buffer_level = buffer_level
 
 
 class _StubBackend:
@@ -192,6 +193,18 @@ def test_recovery_restores_connected_label(window):
     w._on_health_tick()
     assert w._active_sdr_backend is b
     assert w.status_conn.text() == "FakeSDR", w.status_conn.text()
+
+
+def test_buffer_overflow_code_is_visible_without_disconnect(window):
+    """环形缓冲积压 high：数据还在流，只提示 buffer_overflow，不拆连接。"""
+    b = _StubBackend(connected=True, error="", age=0.3,
+                     link_state="connected", buffer_level="high",
+                     error_code="buffer_overflow")
+    w = _prepare(window, b)
+    w._on_health_tick()
+    assert w._active_sdr_backend is b, "缓冲积压不是断链，不能拆连接"
+    assert "buffer_overflow" in w.statusBar().currentMessage()
+    assert w.status_conn.text() == "FakeSDR", "数据仍在流，不能降级成中断"
 
 
 def test_no_auto_reconnect_policy(window):

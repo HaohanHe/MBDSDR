@@ -390,6 +390,12 @@ python tests/network_hotplug_regression.py
 | 自动重连中 | 桌面端**未接线** `ReconnectionManager` | 不显示（不伪造） | 同样不存在 |
 | 重连成功 / 放弃 | 只能用户手动点「连接」 | 手动连接成功后回到「已连接」 | 不存在自动成功/放弃 |
 
+错误码上浮：顶栏在 stale / 断开时显示 `link_half_open` / `link_reset` 等码；
+环形缓冲积压到 `high`（数据还在流、但旧样本会被覆盖）单独提示
+`buffer_overflow`，限流 30s，且**不拆连接**（`test_buffer_overflow_code_is_visible_without_disconnect`）。
+`link_timeout` / `link_refused` / `link_half_open` / `link_reset` / `buffer_overflow`
+均登记在 `error_catalog` 与 troubleshooting 的「接入链路」族。
+
 用户最初假设「中间 5 秒显示还连着」与实测代码不符：`_on_health_tick` 的旧判据是
 `status.error` 优先、其次 `last_data_age_s > 2s`，两处都会直接 `_handle_backend_lost`。
 所以真实假状态是**跳过 stale、提前说「已断开」**，而不是 stale 期间冒充已连接。

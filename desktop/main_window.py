@@ -5470,7 +5470,7 @@ class MainWindow(QMainWindow):
         backend = self._active_sdr_backend
         if backend is None or self._pipeline is None:
             return
-        error, connected, age, link, code = self._backend_status_facts(backend)
+        error, connected, age, link, code, _buf = self._backend_status_facts(backend)
         self._read_fail_signals += 1
         if link == "stale":
             # 后端明确说「连接仍在、只是没数据」：这是等待态，不是掉线
@@ -5482,8 +5482,8 @@ class MainWindow(QMainWindow):
         self._handle_backend_lost(error or reason or "设备已断开", code)
 
     def _backend_status_facts(self, backend) -> tuple[
-            str, bool, "float | None", str, str]:
-        """读后端 status 的五个事实：错误说明、是否连接、数据年龄、链路状态、错误码。
+            str, bool, "float | None", str, str, str]:
+        """读后端 status 的六个事实：错误说明、是否连接、数据年龄、链路状态、错误码、缓冲水位。
 
         读不到 status（异常/无该方法）时按"仍连接、无年龄/无链路状态"处理，
         绝不据此断连。
@@ -5493,6 +5493,7 @@ class MainWindow(QMainWindow):
         age = None
         link = ""
         code = ""
+        buffer_level = ""
         try:
             st = backend.get_status()
             error = str(getattr(st, "error", "") or "")
@@ -5501,9 +5502,10 @@ class MainWindow(QMainWindow):
             age = None if age is None else float(age)
             link = str(getattr(st, "link_state", "") or "")
             code = str(getattr(st, "error_code", "") or "")
+            buffer_level = str(getattr(st, "buffer_level", "") or "")
         except Exception:
             pass
-        return error, connected, age, link, code
+        return error, connected, age, link, code, buffer_level
 
     def _show_link_degraded(self, age, error: str, code: str) -> None:
         """连接仍在但数据流中断：界面显式降级，不拆连接、也不冒充已连接。
@@ -5577,7 +5579,8 @@ class MainWindow(QMainWindow):
             return
         if time.monotonic() < self._health_grace_until:
             return
-        error, connected, age, link, code = self._backend_status_facts(backend)
+        error, connected, age, link, code, buffer_level = \
+            self._backend_status_facts(backend)
         if link in ("failed", "disconnected") or not connected:
             self._handle_backend_lost(error or "后端报告未连接", code)
             return
@@ -5600,6 +5603,20 @@ class MainWindow(QMainWindow):
             self._show_link_degraded(age, error, code)
             return
         self._restore_link_display()
+        if buffer_level == "high":
+            # 缓冲积压不是链路故障（数据还在流），但会覆盖旧样本导致丢样：
+            # 独立提示 + buffer_overflow 码，限流 30s，绝不拆连接。
+            self._warn_buffer_overflow()
+
+    def _warn_buffer_overflow(self) -> None:
+        """环形缓冲积压到 high：限流提示，避免每秒刷屏。"""
+        now = time.monotonic()
+        if now - getattr(self, "_buffer_warn_last", -math.inf) < 30.0:
+            return
+        self._buffer_warn_last = now
+        self.statusBar().showMessage(
+            "环形缓冲积压，旧样本被覆盖（错误码 buffer_overflow）："
+            "降低采样率或减少订阅者，让读侧跟上", MSG_IMPORTANT)
 
     def _update_main_vfo_offset(self):
         """把每个已绑定 DSP 的 VFO 收听频率搬到各自 DDC：offset = vfo_center - backend_center。

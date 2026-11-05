@@ -38,6 +38,21 @@ def get_app_font() -> QFont:
     return font
 
 
+def get_monospace_font() -> QFont:
+    """等宽字体（频率显示、日志）。"""
+    font = QFont()
+    font.setFamilies([
+        "JetBrains Mono",
+        "Fira Code",
+        "Source Code Pro",
+        "Menlo",
+        "Consolas",
+        "monospace",
+    ])
+    font.setPointSize(11)
+    return font
+
+
 # ============================================================================
 # 主题定义
 # ============================================================================
