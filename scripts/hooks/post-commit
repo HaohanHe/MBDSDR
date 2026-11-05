@@ -1,0 +1,70 @@
+#!/usr/bin/env python
+"""post-commit：记录未经 pre-commit 闸门的提交（--no-verify 等）。
+
+pre-commit 通过时会在 hook_ok/<tree>.json 留标记，本钩子消费标记；
+没有标记的提交一律追加到 bypass 日志，便于事后定位是谁绕过。
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+MANAGED = "MBDSDR-MANAGED-HOOK post-commit"
+
+
+def _git(*args):
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+
+
+def main():
+    root = Path(_git("rev-parse", "--show-toplevel").stdout.strip() or ".")
+    head = _git("rev-parse", "HEAD").stdout.strip()
+    tree = _git("rev-parse", "HEAD^{tree}").stdout.strip()
+    if not head or not tree:
+        return 0
+
+    marker_dir = Path(
+        os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\mbdsdr\.locks\hook_ok"
+    )
+    marker = marker_dir / f"{tree}.json"
+    if marker.exists() and (time.time() - marker.stat().st_mtime) <= 900:
+        try:
+            marker.unlink()
+        except OSError:
+            pass
+        return 0
+
+    log_path = Path(
+        os.environ.get("MBDSDR_HOOK_LOG") or r"D:\mbdsdr\.locks\git_hook_bypass.log"
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    author = _git("log", "-1", "--format=%an <%ae>", head).stdout.strip()
+    subject = _git("log", "-1", "--format=%s", head).stdout.strip()
+    files = [
+        line
+        for line in _git("show", "--format=", "--name-only", "--no-renames", head)
+        .stdout.splitlines()
+        if line.strip()
+    ]
+    record = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "commit": head,
+        "tree": tree,
+        "author": author,
+        "subject": subject,
+        "files": files,
+        "reason": "no pre-commit marker（--no-verify 或钩子未执行）",
+    }
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    print(f"[post-commit] 警告：{head[:8]} 未经 claim 闸门，已记录到 {log_path}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

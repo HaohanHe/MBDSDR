@@ -1,0 +1,72 @@
+#!/usr/bin/env python
+"""pre-commit 机械闸：提交涉及 ≥2 个仍在 TTL 内的 claim owner 时拒绝提交。
+
+安装：python scripts/install_git_hooks.py
+绕过：git commit --no-verify（会由 post-commit 写入 bypass 日志）
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+MANAGED = "MBDSDR-MANAGED-HOOK pre-commit"
+
+
+def _git(*args):
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+
+
+def _root():
+    proc = _git("rev-parse", "--show-toplevel")
+    return Path(proc.stdout.strip()) if proc.returncode == 0 else Path.cwd()
+
+
+def main():
+    root = _root()
+    scope = Path(os.environ.get("MBDSDR_SCOPE_SCRIPT") or root / "scripts" / "check_commit_scope.py")
+    staged = _git("diff", "--cached", "--name-only", "--no-renames")
+    names = [line for line in staged.stdout.splitlines() if line.strip()]
+    print(f"[pre-commit] 暂存文件 {len(names)} 个：")
+    for name in names:
+        print(f"  {name}")
+
+    if not scope.exists():
+        print(f"[pre-commit] 拒绝：找不到 {scope}，无法执行 claim 闸门。")
+        return 1
+
+    proc = subprocess.run([sys.executable, str(scope), "--staged"], cwd=str(root))
+    if proc.returncode == 1:
+        print("[pre-commit] 拒绝提交：暂存区跨线。")
+        print("[pre-commit] 只提交你自己的路径：git commit --only -- <你的文件...>")
+        print("[pre-commit] 确认无在途改动后，可用 git commit --no-verify 绕过（会留痕）。")
+        return 1
+    if proc.returncode != 0:
+        print(f"[pre-commit] claim 检查失败，退出码 {proc.returncode}，按失败关闭。")
+        return proc.returncode
+
+    tree = _git("write-tree")
+    if tree.returncode != 0:
+        print("[pre-commit] git write-tree 失败，无法登记闸门通过标记。")
+        return 1
+    marker_dir = Path(
+        os.environ.get("MBDSDR_HOOK_MARKER_DIR") or r"D:\mbdsdr\.locks\hook_ok"
+    )
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker = marker_dir / f"{tree.stdout.strip()}.json"
+    marker.write_text(
+        json.dumps(
+            {"at": time.time(), "files": names, "pid": os.getpid()},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    print(f"[pre-commit] 通过，标记 {marker.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

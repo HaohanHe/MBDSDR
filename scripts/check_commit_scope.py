@@ -22,6 +22,10 @@
 用法：
   python scripts/check_commit_scope.py HEAD
   python scripts/check_commit_scope.py <hash> [--json]
+  python scripts/check_commit_scope.py --staged [--json]
+
+  `--staged` 供 pre-commit 钩子调用：读取 `git diff --cached` 的路径，检查这些
+  路径当前被几个**仍在 TTL 内**的 owner 持有；≥2 个 owner 即拒绝提交（退出码 1）。
 
 退出码：0 无 MULTI；1 发现 MULTI（需人工确认）；2 用法/git 错误。
 """
@@ -196,12 +200,97 @@ def check(ref: str, as_json: bool) -> int:
     return 1 if multi else 0
 
 
+def _active_claim(entry: Dict[str, Any], now: float) -> Optional[Dict[str, Any]]:
+    """返回仍在 TTL 内的 current claim；已过期或已释放返回 None。"""
+    cur = entry.get("current")
+    if not isinstance(cur, dict):
+        return None
+    try:
+        heartbeat = float(cur.get("heartbeat_at") or cur.get("acquired_at") or 0)
+        ttl_s = float(cur.get("ttl_min") or 0) * 60.0
+    except (TypeError, ValueError):
+        return None
+    if ttl_s <= 0 or now - heartbeat > ttl_s:
+        return None
+    return cur
+
+
+def check_staged(as_json: bool) -> int:
+    """检查暂存区文件是否被 ≥2 个仍在 TTL 内的 owner 持有（pre-commit 闸门）。"""
+    import time
+
+    now = time.time()
+    paths = [
+        line.strip()
+        for line in _git("diff", "--cached", "--name-only", "--no-renames").splitlines()
+        if line.strip()
+    ]
+    registry = _load_registry().get("claims", {})
+
+    rows: List[Dict[str, Any]] = []
+    owners: List[str] = []
+    for path in paths:
+        entry = registry.get(_canonical(path), {})
+        cur = _active_claim(entry, now) if entry else None
+        if cur is None:
+            rows.append({"path": path, "owner": None, "remaining_min": None})
+            continue
+        owner = str(cur.get("owner", "?"))
+        try:
+            heartbeat = float(cur.get("heartbeat_at") or cur.get("acquired_at") or now)
+            ttl_s = float(cur.get("ttl_min") or 0) * 60.0
+        except (TypeError, ValueError):
+            heartbeat, ttl_s = now, 0.0
+        remaining = max(0.0, (heartbeat + ttl_s - now) / 60.0)
+        if owner not in owners:
+            owners.append(owner)
+        rows.append({"path": path, "owner": owner, "remaining_min": round(remaining, 1)})
+
+    multi = len(owners) >= 2
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "staged": paths,
+                    "owners": owners,
+                    "multi_owner": multi,
+                    "files": rows,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 1 if multi else 0
+
+    print(f"STAGED {len(paths)} 个文件")
+    for row in rows:
+        if row["owner"]:
+            print(f"  {row['path']:<46} owner={row['owner']} 剩余 TTL {row['remaining_min']}min")
+        else:
+            print(f"  {row['path']:<46} owner=-（无活跃 claim）")
+    print()
+    if multi:
+        print(f"发现 MULTI：暂存区涉及 {len(owners)} 个仍在 TTL 内的 owner：{', '.join(owners)}")
+        print("  拒绝提交。只提交你自己的路径：git commit --only -- <你的文件...>")
+        return 1
+    if owners:
+        print(f"仅 1 个活跃 owner：{owners[0]}，允许提交。")
+    else:
+        print("暂存区没有活跃 claim，允许提交（NONE 不等于归属正确，请自行确认）。")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="提交范围检查（claim 台账版）")
-    parser.add_argument("ref", help="提交 hash / HEAD / 分支")
+    parser.add_argument("ref", nargs="?", help="提交 hash / HEAD / 分支（--staged 时可省略）")
+    parser.add_argument("--staged", action="store_true", help="检查暂存区（pre-commit 用）")
     parser.add_argument("--json", action="store_true", help="JSON 输出")
     args = parser.parse_args(argv)
     try:
+        if args.staged:
+            return check_staged(args.json)
+        if not args.ref:
+            parser.error("需要 ref，或使用 --staged")
         return check(args.ref, args.json)
     except SystemExit as exc:
         print(str(exc), file=sys.stderr)
