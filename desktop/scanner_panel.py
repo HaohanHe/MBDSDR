@@ -280,6 +280,16 @@ class ScannerPanel(QWidget):
         if f1 <= f0:
             QMessageBox.warning(self, "参数错误", "结束频率必须大于起始频率。")
             return
+        # 防呆：开始新扫描会丢弃上一次的 N 条结果，必须先确认。
+        # 结果虽可重扫，但用户可能正对着某条活动段在看（误点一下全没了）。
+        if self.result_list.count() > 0:
+            ans = QMessageBox.question(
+                self, "开始新扫描？",
+                f"当前有 {self.result_list.count()} 条扫描结果，"
+                "开始新扫描会清空它们。是否继续？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ans != QMessageBox.Yes:
+                return
         self.result_list.clear()
         self._segments = []
         self.progress_bar.setValue(0)

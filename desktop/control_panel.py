@@ -338,8 +338,9 @@ class ControlPanel(QWidget):
         self.freq_input.setToolTip(
             "输入频率：支持 M/MHz/k/kHz/G/GHz/Hz 后缀；纯数字按模式解析"
             "（FM/WFM/未选模式 = MHz，AM/其它 = kHz，绝对值 >10000 = Hz）。"
-            f"可调范围 {FREQ_MIN_HZ/1e3:.0f} kHz – {FREQ_MAX_HZ/1e9:.0f} GHz，"
-            "超出将限制到边界（实际范围以设备为准）")
+            f"可调范围 {FREQ_MIN_HZ/1e3:.0f} kHz – {FREQ_MAX_HZ/1e9:.0f} GHz；"
+            "键入超出范围会拒绝调谐并提示（内部自动值仍限制到边界，"
+            "实际范围以设备为准）")
         self.freq_input.setMinimumHeight(28)
         self.freq_input.returnPressed.connect(self._on_freq_input)
         mode_freq_row.addWidget(self.freq_input)
@@ -808,6 +809,19 @@ class ControlPanel(QWidget):
             self.freq_input.setStyleSheet(
                 "background-color:" + tokens().COLORS["danger"] + ";")
             QTimer.singleShot(700, self._restore_freq_input)
+            return
+        # 防呆：键入值超出可调范围时**拒绝下发**并明确告知，而不是
+        # 静默夹到边界再调谐（那样 7 GHz 会被伪装成 6 GHz 的“调谐成功”）。
+        # 程序内部路径（步进/预设/回填）仍走 _set_freq_hz 的边界钳位。
+        if not (FREQ_MIN_HZ <= freq_hz <= FREQ_MAX_HZ):
+            self.freq_input.setStyleSheet(
+                "background-color:" + tokens().COLORS["danger"] + ";")
+            QTimer.singleShot(700, self._restore_freq_input)
+            QMessageBox.warning(
+                self, "频率超出可调范围",
+                f"输入 {text.strip()} = {freq_hz / 1e6:.6f} MHz，超出可调范围 "
+                f"{FREQ_MIN_HZ / 1e3:.0f} kHz – {FREQ_MAX_HZ / 1e9:.0f} GHz。\n"
+                "未下发调谐。请检查单位后缀（M/MHz、k/kHz、G/GHz）后重试。")
             return
         self.freq_input.setStyleSheet("")
         self._set_freq_hz(freq_hz)
