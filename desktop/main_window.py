@@ -164,6 +164,27 @@ def _record_segment_path(base_path: str, index: int) -> str:
     return f"{stem}_part{index}{ext}"
 
 
+def _unique_record_path(path: str) -> str:
+    """同名录音（.iq 或其 .json sidecar）已存在时换名，绝不覆盖旧录音。
+
+    文件名只精确到秒；停止后同一秒内再次开始会命中同一路径，旧实现的
+    ``open(path, "wb")`` 会把上一段直接截断。这里只换名、不弹窗——
+    弹窗会打断正在进行的录音，静默换名既不丢数据也不阻塞。
+    """
+    def _taken(p: str) -> bool:
+        return os.path.exists(p) or os.path.exists(p + ".json")
+
+    if not _taken(path):
+        return path
+    stem, ext = os.path.splitext(path)
+    idx = 2
+    while True:
+        cand = f"{stem}_{idx}{ext}"
+        if not _taken(cand):
+            return cand
+        idx += 1
+
+
 def _planetarium_overlay_pos(sky_w: int, sky_h: int, strip_w: int,
                              strip_h: int, bar_rect: QRect,
                              margin: int = 12, gap: int = 8) -> tuple[int, int]:
@@ -1191,7 +1212,7 @@ class MainWindow(QMainWindow):
 
         self.disconnect_btn = QPushButton(self.tr("断开"))
         self.disconnect_btn.setMinimumHeight(28)
-        self.disconnect_btn.clicked.connect(self._disconnect)
+        self.disconnect_btn.clicked.connect(self._on_disconnect_clicked)
         self.disconnect_btn.setEnabled(False)
         toolbar.addWidget(self.disconnect_btn)
 
@@ -3500,6 +3521,12 @@ class MainWindow(QMainWindow):
         # 同一根棒子被自己占着，新 connect 直接 ACCESS(-3) 失败。
         previous = self._active_sdr_backend
         if previous is not None:
+            # 防呆：发射中切换设备会立即停波并释放设备，先确认；
+            # 取消则整条切换都不做，保持当前设备与发射。
+            if (self._tx_session is not None
+                    and not self._confirm_stop_tx("切换设备")):
+                self.statusBar().showMessage("已取消切换（发射继续）", MSG_NORMAL)
+                return False
             self._teardown_connection()
         try:
             ok = backend.connect()
@@ -4252,6 +4279,26 @@ class MainWindow(QMainWindow):
         self.disconnect_btn.setEnabled(False)
         self._refresh_tx_readout()  # 无设备 → 发射读数回 "—"，不留旧频点
         self._refresh_tx_button_state()  # 无硬件 → 发射按钮置灰并说明原因
+
+    def _confirm_stop_tx(self, action: str) -> bool:
+        """动作会停波时先确认；返回 True 表示用户选择继续。
+
+        发射是唯一「点错一下就断了别人通联」的操作，断开/切设备/关窗
+        三条路径都必须先问一句；默认按钮是「否」，误触不会直接停波。
+        """
+        ans = QMessageBox.question(
+            self, f"正在发射，仍要{action}？",
+            f"{action}会立即停止当前发射并释放设备。\n是否继续？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return ans == QMessageBox.Yes
+
+    def _on_disconnect_clicked(self):
+        """工具栏「断开」按钮：发射中先确认，误点不直接断波。"""
+        if self._tx_session is not None \
+                and not self._confirm_stop_tx("断开连接"):
+            self.statusBar().showMessage("已取消断开（发射继续）", MSG_NORMAL)
+            return
+        self._disconnect()
 
     def _disconnect(self):
         """断开连接（用户点"断开"）：幂等拆除 + 未连接时如实说明。"""
@@ -6359,7 +6406,8 @@ class MainWindow(QMainWindow):
                 self._record_guard = False
             return
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(rec_dir, f"baseband_{ts}.iq")
+        # 防呆：同名 .iq/.json 已存在则换名，绝不覆盖上一段录音（L3）
+        path = _unique_record_path(os.path.join(rec_dir, f"baseband_{ts}.iq"))
 
         self._record_session_path = path
         self._record_segments = []
@@ -8752,6 +8800,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """关闭时断开连接并保存配置。"""
+        # 发射中关窗必须先确认：窗口一关就断波，误触即中止别人的通联。
+        if self._tx_session is not None \
+                and not self._confirm_stop_tx("退出程序"):
+            event.ignore()
+            return
         # 录音中关窗必须先确认：不告知保存路径就停录、关窗，用户会以为录音丢了。
         if getattr(self, "_recording", False):
             if not self._confirm_stop_recording_for_close():

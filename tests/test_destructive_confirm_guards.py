@@ -26,6 +26,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
+import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -185,3 +186,178 @@ def test_rf_controls_disabled_without_device():
     cp.set_sdr_connected(True)
     assert cp.freq_input.isEnabled() is True
     assert cp.agc_check.isEnabled() is True
+
+
+# ======================================================================
+# M 组：MainWindow 破坏性动作（发射中断开/切设备/关窗）
+#       + 录音文件同名不覆盖
+# ======================================================================
+@pytest.fixture(scope="module")
+def window(isolated_profile):
+    import main_window as mw
+    w = mw.MainWindow()
+    yield w, mw
+    w._tx_session = None
+    try:
+        w._teardown_connection()
+    except Exception:  # noqa: BLE001 - 用例收尾失败不静默
+        pass
+
+
+def test_disconnect_button_while_tx_cancel_keeps_transmitting(window,
+                                                              monkeypatch):
+    """发射中点「断开」→ 必须确认；选「否」不拆连接、不停波。"""
+    w, mw = window
+    asked = []
+    monkeypatch.setattr(
+        mw.QMessageBox, "question",
+        lambda *a, **k: (asked.append(a), mw.QMessageBox.No)[1])
+    torn = []
+    monkeypatch.setattr(w, "_teardown_connection",
+                        lambda **k: torn.append(1))
+    w._tx_session = object()
+    try:
+        w._on_disconnect_clicked()
+        assert asked, "发射中断开必须先确认"
+        assert "发射" in str(asked[0][1] + asked[0][2])
+        assert torn == [], "取消后不得拆连接/停波"
+    finally:
+        w._tx_session = None
+
+
+def test_disconnect_button_while_tx_confirmed_tears_down(window, monkeypatch):
+    """确认断开后走原拆除路径（停波由 _teardown_connection 负责）。"""
+    w, mw = window
+    monkeypatch.setattr(
+        mw.QMessageBox, "question",
+        lambda *a, **k: mw.QMessageBox.Yes)
+    torn = []
+    monkeypatch.setattr(w, "_teardown_connection",
+                        lambda **k: torn.append(1))
+    w._tx_session = object()
+    try:
+        w._on_disconnect_clicked()
+        assert torn == [1], "确认后必须真正断开"
+    finally:
+        w._tx_session = None
+
+
+def test_close_while_tx_cancel_keeps_window(window, monkeypatch):
+    """发射中关窗 → 必须确认；选「否」窗口保持打开。"""
+    from PySide6.QtGui import QCloseEvent
+    w, mw = window
+    asked = []
+    monkeypatch.setattr(
+        mw.QMessageBox, "question",
+        lambda *a, **k: (asked.append(a), mw.QMessageBox.No)[1])
+    w._tx_session = object()
+    try:
+        event = QCloseEvent()
+        w.closeEvent(event)
+        assert asked, "发射中关窗必须先确认"
+        assert event.isAccepted() is False, "取消后窗口必须保持打开"
+    finally:
+        w._tx_session = None
+
+
+def test_close_while_tx_confirmed_exits(window, monkeypatch):
+    """确认关窗后继续原退出流程（断开路径会停波）。"""
+    from PySide6.QtGui import QCloseEvent
+    w, mw = window
+    monkeypatch.setattr(
+        mw.QMessageBox, "question",
+        lambda *a, **k: mw.QMessageBox.Yes)
+    monkeypatch.setattr(w, "_release_runtime_resources", lambda: None)
+    monkeypatch.setattr(w, "_save_window_state", lambda: None)
+    monkeypatch.setattr(w, "_save_gui_config", lambda: None)
+    monkeypatch.setattr(w, "settings", type("S", (), {"flush": lambda self: None})())
+    torn = []
+    monkeypatch.setattr(w, "_teardown_connection",
+                        lambda **k: torn.append(1))
+    w._tx_session = object()
+    try:
+        event = QCloseEvent()
+        w.closeEvent(event)
+        assert event.isAccepted() is True
+        assert torn == [1], "确认关窗后必须走断开路径（停波）"
+    finally:
+        w._tx_session = None
+
+
+def test_switch_device_while_tx_cancel_keeps_current(window, monkeypatch):
+    """发射中切设备 → 确认选「否」时不拆旧连接、不连新设备。"""
+    w, mw = window
+    asked = []
+    monkeypatch.setattr(
+        mw.QMessageBox, "question",
+        lambda *a, **k: (asked.append(a), mw.QMessageBox.No)[1])
+    torn = []
+    monkeypatch.setattr(w, "_teardown_connection",
+                        lambda **k: torn.append(1))
+
+    class _OldBackend:
+        pass
+
+    class _NewBackend:
+        def connect(self):
+            raise AssertionError("取消切换后不得连接新设备")
+
+    w._active_sdr_backend = _OldBackend()
+    w._tx_session = object()
+    try:
+        ok = w._connect_backend(_NewBackend())
+        assert ok is False, "取消切换必须返回失败"
+        assert asked, "发射中切设备必须先确认"
+        assert torn == [], "取消后不得拆旧连接"
+    finally:
+        w._tx_session = None
+        w._active_sdr_backend = None
+
+
+class _FixedDateTime:
+    _fixed = __import__("datetime").datetime(2026, 11, 6, 1, 23, 45)
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls._fixed
+
+
+def test_record_filename_collision_does_not_overwrite(window, monkeypatch,
+                                                      tmp_path):
+    """同一秒内再次开录：换名保存，旧 .iq 内容一个字节都不能少。"""
+    import numpy as np
+    w, mw = window
+    monkeypatch.setattr(mw, "datetime", _FixedDateTime)
+    monkeypatch.setattr(w.settings, "ensure_record_dir",
+                        lambda: (str(tmp_path), None))
+    existing = tmp_path / "baseband_20261106_012345.iq"
+    existing.write_bytes(b"OLD-RECORDING")
+
+    class _Backend:
+        status = type("St", (), {"gain_db": 10.0})()
+        device = type("Dev", (), {"name": "stub"})()
+
+        def read_samples(self, n):
+            return np.zeros(n, dtype=np.complex64)
+
+        def get_sample_rate(self):
+            return 1024000.0
+
+        def get_frequency(self):
+            return 145000000.0
+
+    w._active_sdr_backend = _Backend()
+    w._recording = False
+    try:
+        w._start_recording()
+        assert w._recording is True
+        new_path = w._record_file_path
+        assert os.path.basename(new_path) == "baseband_20261106_012345_2.iq", \
+            f"同名录音必须换名，实际 {new_path}"
+        assert existing.read_bytes() == b"OLD-RECORDING", \
+            "旧录音被覆盖（open('wb') 截断）"
+        w._record_write_chunk(np.ones(64, dtype=np.complex64))
+        w._apply_recording(False)
+    finally:
+        w._active_sdr_backend = None
+        w._recording = False
