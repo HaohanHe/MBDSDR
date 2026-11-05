@@ -154,9 +154,11 @@ def test_build_directories_are_skipped(tmp_path):
         "mbdsdr_ai/build-local/AutogenInfo.json": '{"license": "GPL"}',
         "mbdsdr_ai/build/AutogenInfo.json": '{"license": "GPL"}',
         "mbdsdr_ai/data/real.json": '{"license": "GPL"}',
+        ".tmp-tool-results/commit_msg.txt": '{"license": "GPL"}',
     })
     result = checker.scan(root)
     assert _paths(result) == {"mbdsdr_ai/data/real.json"}
+    assert {item["path"] for item in result["warnings"]} == set()
 
 
 def test_npz_meta_is_scanned(tmp_path):
@@ -167,6 +169,43 @@ def test_npz_meta_is_scanned(tmp_path):
              meta=np.array(json.dumps({"source_license": "GPL-3.0"})))
     result = checker.scan(root)
     assert _paths(result) == {"mbdsdr_ai/data/cat.npz"}
+
+
+# ── 逐条来源与许可证（--list）────────────────────────────────────────
+
+def test_declarations_extract_license_and_source():
+    decl = checker._declarations(
+        '{"meta": {"source": "OpenNGC", "source_license": "CC-BY-SA-4.0",'
+        ' "source_license_url": "https://example.invalid"}}')
+    assert decl["license"] == "CC-BY-SA-4.0"
+    assert decl["source"] == "OpenNGC"
+
+
+def test_declarations_ignore_non_json():
+    assert checker._declarations("Name;Type\nNGC1;G\n") == {}
+
+
+def test_provenance_override_for_silent_csv(tmp_path):
+    root = _fake_repo(tmp_path, {
+        "mbdsdr_ai/tests/fixtures/openngc/NGC.csv": "Name;Type\nNGC1;G\n",
+    })
+    files = checker.scan(root, include_provenance=True)["files"]
+    assert files[0]["license"] == "CC BY-SA 4.0"
+    assert files[0]["source"] == "OpenNGC NGC.csv"
+
+
+def test_list_mode_reports_shipped_data_provenance(capsys):
+    assert checker.main(["--root", str(REPO_ROOT), "--list", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    by_path = {item["path"]: item for item in payload["files"]}
+    assert by_path["mbdsdr_ai/data/constellations_iau.json"]["license"] == \
+        "CC BY-SA 4.0"
+    assert by_path["mbdsdr_ai/data/full_sky_hyg_v41.npz"]["source"].startswith(
+        "HYG")
+    assert by_path["mbdsdr_ai/data/dso_catalog.json"]["source"] == "OpenNGC"
+    assert "mbdsdr_ai/README.md" not in by_path      # 非数据扩展名不扫
+    assert by_path["mbdsdr_ai/tests/fixtures/openngc/addendum.csv"] \
+        ["license"] == "CC BY-SA 4.0"
 
 
 # ── CLI 契约 ─────────────────────────────────────────────────────────

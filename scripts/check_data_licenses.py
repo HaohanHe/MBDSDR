@@ -50,14 +50,26 @@ SKIP_DIRS = {
     "scratch", ".mypy_cache", ".pytest_cache", ".audit_tmp",
 }
 # 构建目录（build/build-local/…）里全是 CMake 自动生成物，不属随仓数据。
-SKIP_PREFIXES = ("build",)
+SKIP_PREFIXES = ("build", ".tmp")
 GPL_PATTERNS = [
-    re.compile(r"(?i)\bGPL(?:-|\s*v|v)?[-\s]?[0-9]"),          # GPL-3.0 / GPLv2 / GPL 3
+    # GPL-3.0 / GPL-3.0-or-later / GPLv2 / GPL 3
+    re.compile(r"(?i)\bGPL(?:-|\s*v|v)?[-\s]?[0-9]+(?:\.[0-9]+)?"
+               r"(?:-or-later|-only)?"),
     re.compile(r"(?i)\bGNU\s+(?:General\s+Public\s+License|GPL)"),
     re.compile(r"(?i)General\s+Public\s+License"),
-    re.compile(r"(?i)((?:source_?)?licen[cs]e[\"'\s:=]{1,8})GPL"),  # "license": "GPL"
+    re.compile(r"(?i)(?:source_?)?licen[cs]e[\"'\s:=]{1,8}(GPL)"),  # bare "GPL"
     re.compile(r"(?i)SPDX-License-Identifier\s*[:=]\s*GPL"),
 ]
+
+# 无内嵌许可声明的纯数据文件（CSV 等）的已知出处；值与上游随仓来源一致。
+PROVENANCE_OVERRIDES = {
+    "mbdsdr_ai/tests/fixtures/openngc/NGC.csv":
+        ("CC BY-SA 4.0", "OpenNGC NGC.csv"),
+    "mbdsdr_ai/tests/fixtures/openngc/addendum.csv":
+        ("CC BY-SA 4.0", "OpenNGC addendum.csv"),
+    "mbdsdr_ai/tests/fixtures/hyg_v41_reference_sample.csv":
+        ("CC BY-SA 4.0", "HYG Database v4.1 sample"),
+}
 
 # path -> 理由。空理由视为配置错误。
 WHITELIST: Dict[str, str] = {
@@ -117,20 +129,58 @@ def _hits(text: str) -> List[str]:
     found = set()
     for pat in GPL_PATTERNS:
         for m in pat.finditer(text):
-            found.add(m.group(0).strip())
+            token = m.group(m.lastindex) if m.lastindex else m.group(0)
+            found.add(token.strip())
     return sorted(found)
 
 
-def scan(root: Path = REPO_ROOT) -> dict:
-    """返回 {scanned, hits, violations, warnings}；不回显全文，只回显命中词。"""
+def _declarations(text: str) -> dict:
+    """从 JSON/JSON 元数据里提取许可与来源声明（键名含 license 或 source）。"""
+    try:
+        doc = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    found: dict = {}
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                lk = key.lower()
+                if isinstance(value, str) and value.strip():
+                    if "license" in lk and "url" not in lk:
+                        found.setdefault("license", value.strip())
+                    elif lk in ("source", "source_name", "source_url"):
+                        found.setdefault("source", value.strip()[:160])
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(doc)
+    return found
+
+
+def scan(root: Path = REPO_ROOT, include_provenance: bool = False) -> dict:
+    """返回 {scanned, hits, violations, warnings[, files]}；只回显命中词。"""
     root = Path(root)
     scanned = 0
     hits: List[dict] = []
+    files: List[dict] = []
     for path in _iter_data_files(root):
         scanned += 1
         rel = _rel(path, root)
-        for word in _hits(_text_of(path)):
-            hits.append({"path": rel, "matched": word,
+        text = _text_of(path)
+        if include_provenance:
+            decl = _declarations(text)
+            known = PROVENANCE_OVERRIDES.get(rel, (None, None))
+            files.append({"path": rel,
+                          "license": decl.get("license") or known[0],
+                          "source": decl.get("source") or known[1],
+                          "in_mit_package": rel.startswith("mbdsdr_ai/")})
+        found = _hits(text)
+        if found:
+            # 同一文件的多条声明合并成一条，避免白名单在输出里重复。
+            hits.append({"path": rel, "matched": " / ".join(found),
                          "in_mit_package": rel.startswith("mbdsdr_ai/")})
     violations = []
     warnings = []
@@ -146,8 +196,11 @@ def scan(root: Path = REPO_ROOT) -> dict:
     bad_whitelist = [p for p, why in WHITELIST.items() if not why.strip()]
     if bad_whitelist:
         raise ScanError(f"WHITELIST 条目缺理由: {bad_whitelist}")
-    return {"root": str(root), "scanned": scanned, "hits": hits,
-            "violations": violations, "warnings": warnings}
+    result = {"root": str(root), "scanned": scanned, "hits": hits,
+              "violations": violations, "warnings": warnings}
+    if include_provenance:
+        result["files"] = files
+    return result
 
 
 def _probe(root: Path) -> int:
@@ -175,12 +228,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--verbose", action="store_true",
                     help="列出路径外的 GPL 来源标注（仅提示，不算违规）")
+    ap.add_argument("--list", action="store_true",
+                    help="逐条列出每个数据文件的来源与许可证")
     ap.add_argument("--probe", action="store_true", help="反证：必须报红")
     args = ap.parse_args(argv)
     try:
         if args.probe:
             return _probe(args.root)
-        result = scan(args.root)
+        result = scan(args.root, include_provenance=args.list)
     except ScanError as exc:
         print(f"SCAN ERROR: {exc}", file=sys.stderr)
         return 2
@@ -193,6 +248,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     else:
         print(f"scanned data files: {result['scanned']}")
+        for item in result.get("files", []):
+            print(f"  {item['path']}\tlicense={item['license'] or '(none)'}"
+                  f"\tsource={item['source'] or '(none)'}")
         for item in result["warnings"]:
             if item.get("whitelisted"):
                 print(f"  WHITELIST: {item['path']} ({item['matched']})")
