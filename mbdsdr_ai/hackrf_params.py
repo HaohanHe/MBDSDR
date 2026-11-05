@@ -44,6 +44,8 @@ import logging
 import os
 import threading
 import queue
+
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -292,6 +294,7 @@ class HackRFBackend:
       set_lna_gain()/set_vga_gain()/set_txvga_gain()
       set_bias_tee()/set_amp_enable()
       start_rx()/stop_rx()/read_samples()
+      start_tx()/write_tx()/stop_tx()
 
     真实 C API 调用对应关系（来源: host/libhackrf/src/hackrf.c）：
       connect      → hackrf_init + hackrf_open           (hackrf.c:512,838)
@@ -334,6 +337,11 @@ class HackRFBackend:
         self._rx_queue: "queue.Queue[bytes]" = queue.Queue()
         # 回调必须常驻引用，否则被 GC 后崩溃
         self._c_callback = self._make_rx_callback()
+        # ── TX 流（同一 libhackrf 句柄，半双工；hackrf_start_tx 回调填缓冲）──
+        self._tx_running: bool = False
+        self._tx_underrun: bool = False
+        self._tx_queue: "queue.Queue[bytes]" = queue.Queue()
+        self._c_tx_callback = self._make_tx_callback()
 
     # ── 库加载 ─────────────────────────────────────────────────────────
     def _load_lib(self) -> Optional[ctypes.CDLL]:
@@ -379,6 +387,12 @@ class HackRFBackend:
         lib.hackrf_start_rx.restype = ctypes.c_int
         lib.hackrf_stop_rx.argtypes = [ctypes.c_void_p]
         lib.hackrf_stop_rx.restype = ctypes.c_int
+        # hackrf_start_tx(dev, hackrf_sample_block_cb_fn cb, void* tx_ctx)
+        # 来源: host/libhackrf/src/hackrf.h:2339/2382 附近，与 start_rx 同原型。
+        lib.hackrf_start_tx.argtypes = [ctypes.c_void_p, CALLBACK, ctypes.c_void_p]
+        lib.hackrf_start_tx.restype = ctypes.c_int
+        lib.hackrf_stop_tx.argtypes = [ctypes.c_void_p]
+        lib.hackrf_stop_tx.restype = ctypes.c_int
         lib.hackrf_close.argtypes = [ctypes.c_void_p]
         lib.hackrf_close.restype = ctypes.c_int
         lib.hackrf_exit.restype = ctypes.c_int
@@ -411,6 +425,8 @@ class HackRFBackend:
     def disconnect(self) -> None:
         if self._rx_running:
             self.stop_rx()
+        if self._tx_running:
+            self.stop_tx()
         if self._lib is not None and self._dev is not None:
             try:
                 self._lib.hackrf_close(self._dev)
@@ -548,6 +564,84 @@ class HackRFBackend:
         rc = self._lib.hackrf_stop_rx(self._dev)
         self._rx_running = False
         return rc == HACKRF_SUCCESS
+
+    # ── TX 流 ──────────────────────────────────────────────────────────
+    def _make_tx_callback(self):
+        """构造 TX 回调：把队列里的 int8 交织样本拷进 transfer.buffer。
+
+        libhackrf 的 TX 是回调驱动（hackrf.h:1135 与 start_rx 同原型）：
+        回调在 libusb 异步线程里被反复调用，每次要填满 valid_length 字节。
+        队列空 = 供数不足，置欠载标志并返回非 0 停止流——**不填零假装还在发**。
+        """
+        def _cb(transfer):
+            try:
+                n = int(transfer.contents.valid_length)
+                data = self._tx_queue.get_nowait()
+            except queue.Empty:
+                self._tx_underrun = True
+                return -1
+            except Exception:  # noqa: BLE001 - 回调内不能抛回 ctypes
+                self._tx_underrun = True
+                return -1
+            if n <= 0 or len(data) < n:
+                self._tx_underrun = True
+                return -1
+            ctypes.memmove(transfer.contents.buffer, data[:n], n)
+            return 0  # 0 = 继续流（hackrf.h:283）
+
+        CALLBACK = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(_HackrfTransfer))
+        return CALLBACK(_cb)
+
+    def start_tx(self) -> bool:
+        """真实启动发送流（hackrf_start_tx）。"""
+        if not self.connected or self._lib is None:
+            return False
+        rc = self._lib.hackrf_start_tx(self._dev, self._c_tx_callback, None)
+        if rc == HACKRF_SUCCESS:
+            self._tx_running = True
+            self._tx_underrun = False
+            return True
+        logger.warning("hackrf_start_tx 失败 rc=%d", rc)
+        return False
+
+    def stop_tx(self) -> bool:
+        """停止发送流（hackrf_stop_tx）。"""
+        if not self.connected or self._lib is None:
+            return False
+        rc = self._lib.hackrf_stop_tx(self._dev)
+        self._tx_running = False
+        return rc == HACKRF_SUCCESS
+
+    def write_tx(self, iq_samples) -> bool:
+        """把 IQ 块转成 int8 交织字节入队，并确保 TX 流已启动。
+
+        HackRF USB 流是交织的有符号 8-bit I/Q（hackrf.h:965），
+        因此 complex64（[-1,1]）→ 乘 127 → int8 交织。
+        """
+        if not self.connected or self._lib is None:
+            return False
+        try:
+            arr = np.asarray(iq_samples, dtype=np.complex64)
+        except Exception:  # noqa: BLE001 - 非样本输入
+            return False
+        if arr.size == 0:
+            return True
+        i = (np.clip(arr.real, -1.0, 1.0) * 127.0).astype(np.int8)
+        q = (np.clip(arr.imag, -1.0, 1.0) * 127.0).astype(np.int8)
+        inter = np.empty(arr.size * 2, dtype=np.int8)
+        inter[0::2] = i
+        inter[1::2] = q
+        # 每块 SAMPLES_PER_BLOCK=8192 复采样=16384 字节（hackrf.h:511,517）。
+        step = 8192 * 2
+        for start in range(0, int(inter.size), step):
+            self._tx_queue.put(inter[start:start + step].tobytes())
+        if not self._tx_running:
+            return self.start_tx()
+        return True
+
+    def is_underrun(self) -> bool:
+        """发送缓冲是否发生过欠载（供上层立即停发并如实上报）。"""
+        return bool(self._tx_underrun)
 
     def read_samples(self, num_samples: int) -> Optional[bytes]:
         """读取 num_samples 个复采样（= 2*num_samples 字节，交织 int8 I/Q）。

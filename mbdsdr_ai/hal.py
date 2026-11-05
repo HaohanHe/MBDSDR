@@ -388,15 +388,21 @@ class SoapySDRBackend(SDRBackendBase):
             return False
 
     def supports_tx(self) -> bool:
-        """检查当前设备是否支持TX。"""
+        """检查当前设备是否支持TX。
+
+        SoapySDR 的能力查询用 ``getNumTxChannels()``（C++ 公共 API）；
+        旧写法 ``hasTxChannel(direction, 0)`` 在 Python 绑定里不存在，
+        会让所有设备都被判成"不支持发射"——这是假否定，同样是在骗人。
+        """
         if not self._device:
             return False
         SoapySDR = _import_soapy()
         if SoapySDR is None:
             return False
         try:
-            return self._device.hasTxChannel(SoapySDR.SOAPY_SDR_TX, 0)
-        except Exception:
+            return int(self._device.getNumTxChannels()) > 0
+        except Exception as e:
+            logger.warning(f"查询 TX 通道数失败: {e}")
             return False
 
     def get_info(self) -> DeviceInfo:

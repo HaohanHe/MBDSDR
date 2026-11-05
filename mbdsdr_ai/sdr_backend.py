@@ -131,6 +131,9 @@ class SDRDevice:
     max_gain: float  # dB
     supports_iq: bool = True
     supports_tx: bool = False
+    # 发射能力是否在真实硬件上验证过。声明 True 只代表"设备+代码路径存在"，
+    # 没上过真机就必须保持 False，UI/工具面据此标「未验证」而不是「支持」。
+    tx_verified: bool = False
     connected: bool = False
 
 
@@ -523,6 +526,50 @@ class SDRBackend:
         if last_ts is not None:
             self.status.last_data_age_s = max(0.0, time.time() - last_ts)
         return self.status
+
+    # ── 发射能力：单一事实源 ───────────────────────────────────────────
+    def _note_tx_reject(self) -> None:
+        """把 tx_guard 的拒绝原因同步到 status.error，让 UI/用户看到为什么没发。"""
+        info = getattr(self, "last_tx_reject", None) or {}
+        code = info.get("code", "")
+        reason = info.get("reason", "未过人工确认通道")
+        self.status.error = f"[TX] 发射被拒({code}): {reason}"
+
+    def _tx_ready(self) -> bool:
+        """运行时就绪性（驱动/发送流是否真的可写）。子类按真实句柄覆写。"""
+        return callable(getattr(type(self), "write_tx", None))
+
+    def supports_tx(self) -> bool:
+        """是否真的能发波 = 设备声明 ∧ 本类确有 write_tx ∧ 运行时就绪。
+
+        只有声明没有实现的设备一律 False：「支持发射」必须能落到真实写流，
+        不是一句文案。UI/PTT 的置灰只看这一个出口。
+        """
+        if not bool(getattr(self.device, "supports_tx", False)):
+            return False
+        try:
+            return bool(self._tx_ready())
+        except Exception as e:  # noqa: BLE001 - 能力查询失败按不可用处理
+            logger.debug("%s 发射就绪检查异常: %s", self.__class__.__name__, e)
+            return False
+
+    def tx_capability(self) -> Dict[str, Any]:
+        """能力矩阵行：声明 / 实现 / 运行时就绪 / 真机验证（供工具面/UI 展示）。"""
+        implemented = callable(getattr(type(self), "write_tx", None))
+        try:
+            ready = bool(self._tx_ready())
+            note = ""
+        except Exception as e:  # noqa: BLE001
+            ready = False
+            note = f"就绪检查异常: {type(e).__name__}: {e}"
+        return {
+            "backend": self.__class__.__name__,
+            "declared": bool(getattr(self.device, "supports_tx", False)),
+            "implemented": implemented,
+            "ready": ready,
+            "verified": bool(getattr(self.device, "tx_verified", False)),
+            "note": note,
+        }
 
     # ==================================================================
     # 实时接收链 + 声卡输出（UI / 录音 / 声卡消费面）
@@ -2419,18 +2466,23 @@ class HackRFBackend(SDRBackend):
     """
     HackRF One 后端。
 
-    使用 hackrf 库（libhackrf + Python 绑定）。
-    支持 1 MHz - 6 GHz，最大 20 MS/s，半双工收发。
-    需要安装：pip install hackrf 以及 libhackrf 系统库。
+    驱动走 libhackrf 的 ctypes 直连（``hackrf_params.HackRFBackend``），
+    与 ``hackrf_transfer`` 命令同一套 C API：
+      - 接收：hackrf_start_rx + 回调队列（int8 交织 I/Q）
+      - 发射：hackrf_start_tx + 回调队列（int8 交织 I/Q），见 ``write_tx``
+    需要系统安装 libhackrf（hackrf 主机工具包）；缺库/缺设备时 connect 返回
+    False 并写 status.error，绝不假成功。
 
     硬件量程/增益档全部来自 mbdsdr_ai/hackrf_params.HackRFParams（依据 HackRF One
-    官方数据手册与公开 API 头文件独立整理；libhackrf 上游仅作技术参考，本仓未包含其源代码）：
+    官方数据手册与公开 API 头文件独立整理）：
       - 频率 1-6000 MHz
       - 采样率 2-20 MHz
       - LNA(RX IF) 0-40 dB（步进 8 dB）
       - VGA(RX BB) 0-62 dB（步进 2 dB）
       - TXVGA 0-47 dB（步进 1 dB）
-    更完整的 ctypes 直连后端见 mbdsdr_ai/hackrf_params.py:HackRFBackend。
+
+    TX 说明：写流路径是真实 libhackrf 调用，但**未在真机上验证**（见
+    ``device.tx_verified=False``），UI/工具面必须标「未验证」而非「支持」。
     """
 
     def __init__(self, device_index: int = 0):
@@ -2446,10 +2498,12 @@ class HackRFBackend(SDRBackend):
             max_gain=float(self._params.lna_max_db),  # RX 路径最大前端增益档
             supports_iq=True,
             supports_tx=True,
+            tx_verified=False,  # 尚未在真机验证过发射链路
         )
         super().__init__(device)
         self._device_index = device_index
         self._hackrf = None
+        self._rx_started = False
         self._lna_db = 8
         self._vga_db = 16
         # 来源: gqrx/src/qtgui/ioconfig.cpp:279-302 —— HackRF 默认 8 MS/s 甜点档
@@ -2457,56 +2511,52 @@ class HackRFBackend(SDRBackend):
         self.status.sample_rate_hz = 8_000_000.0
 
     def connect(self) -> bool:
-        try:
-            import hackrf
-            self._hackrf = hackrf.HackRF()
-            self.status.connected = True
-            self._start_time = time.time()
-            if self.status.sample_rate_hz is None:
-                self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
-            return True
-        except Exception:
+        from .hackrf_params import HackRFBackend as _CtlsBackend
+        if self._hackrf is None:
+            self._hackrf = _CtlsBackend(self._device_index, self._params)
+        if not self._hackrf.connect():
             self.status.connected = False
+            self.status.error = ("[未连接-libhackrf缺失或未插HackRF] "
+                                 "请安装 hackrf 主机工具包（libhackrf）并检查 USB 设备。")
+            logger.warning(self.status.error)
             return False
+        self._rx_started = False
+        self.status.connected = True
+        self.status.error = ""
+        self._start_time = time.time()
+        if self.status.sample_rate_hz is None:
+            self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
+        return True
 
     def disconnect(self):
+        self._rx_started = False
         if self._hackrf:
             try:
-                self._hackrf.close()
-            except Exception:
-                pass
+                self._hackrf.disconnect()
+            except Exception as e:
+                logger.debug("HackRF 关闭失败(忽略): %s", e)
             self._hackrf = None
         super().disconnect()
 
     def _apply_frequency(self, freq_hz: float) -> bool:
         if self._hackrf is None:
             return True
-        try:
-            self._hackrf.frequency = int(freq_hz)
-        except Exception:
-            return False
-        return True
+        ok = self._hackrf.set_frequency(freq_hz)
+        if not ok:
+            self.status.error = f"[RX] hackrf_set_freq({int(freq_hz)}) 失败"
+        return ok
 
     def _apply_sample_rate(self, rate_hz: float) -> bool:
         if self._hackrf is None:
             return True
-        try:
-            self._hackrf.sample_rate = int(rate_hz)
-        except Exception:
-            return False
-        return True
+        ok = self._hackrf.set_sample_rate(rate_hz)
+        if not ok:
+            self.status.error = f"[RX] hackrf_set_sample_rate({int(rate_hz)}) 失败"
+        return ok
 
     def _apply_gain(self, gain_db: float) -> bool:
         """默认总增益映射到 VGA(基带) 档，自动吸附到偶数 dB（hackrf.c:2058）。"""
-        if self._hackrf is None:
-            return True
-        try:
-            v = self._params.clamp_vga_gain(gain_db)
-            self._hackrf.vga_gain = v
-            self._vga_db = v
-        except Exception:
-            return False
-        return True
+        return self.set_vga_gain(gain_db)
 
     def set_lna_gain(self, db: int) -> bool:
         """真实设置 RX IF(LNA) 增益，吸附到 8dB 档（hackrf.c:2031）。
@@ -2516,12 +2566,11 @@ class HackRFBackend(SDRBackend):
         if not self.status.connected or self._hackrf is None:
             return False
         v = self._params.clamp_lna_gain(db)
-        try:
-            self._hackrf.lna_gain = v
-            self._lna_db = v
-            return True
-        except Exception:
+        if not self._hackrf.set_lna_gain(v):
+            self.status.error = f"[RX] hackrf_set_lna_gain({v}) 失败"
             return False
+        self._lna_db = v
+        return True
 
     def set_vga_gain(self, db: int) -> bool:
         """真实设置 RX 基带(VGA) 增益，吸附到偶数 dB 档（hackrf.c:2058）。
@@ -2531,43 +2580,73 @@ class HackRFBackend(SDRBackend):
         if not self.status.connected or self._hackrf is None:
             return False
         v = self._params.clamp_vga_gain(db)
-        try:
-            self._hackrf.vga_gain = v
-            self._vga_db = v
-            return True
-        except Exception:
+        if not self._hackrf.set_vga_gain(v):
+            self.status.error = f"[RX] hackrf_set_vga_gain({v}) 失败"
             return False
+        self._vga_db = v
+        return True
 
     def set_txvga_gain(self, db: int) -> bool:
         """真实设置 TX IF 增益，钳到 0-47 dB（hackrf.c:2081）。"""
         if not self.status.connected or self._hackrf is None:
             return False
         v = self._params.clamp_txvga_gain(db)
-        try:
-            self._hackrf.txvga_gain = v
-            return True
-        except Exception:
+        if not self._hackrf.set_txvga_gain(v):
+            self.status.error = f"[TX] hackrf_set_txvga_gain({v}) 失败"
             return False
+        return True
 
     def set_bias_tee(self, on: bool) -> bool:
         """开关天线偏置 3.3V/50mA（hackrf.c:2102）。"""
         if not self.status.connected or self._hackrf is None:
             return False
-        try:
-            self._hackrf.antenna_power = bool(on)
-            return True
-        except Exception:
+        if not self._hackrf.set_bias_tee(bool(on)):
+            self.status.error = "[RX] hackrf_set_antenna_enable 失败"
             return False
+        return True
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._hackrf:
             return None
+        if not self._rx_started:
+            if not self._hackrf.start_rx():
+                self.status.error = "[RX] hackrf_start_rx 失败（设备被占用或固件异常）"
+                return None
+            self._rx_started = True
+        raw = self._hackrf.read_samples(num_samples)
+        if raw is None:
+            return None  # 未收齐就是未收齐，不填假样本
+        arr = np.frombuffer(raw, dtype=np.int8).astype(np.float32) / 128.0
+        samples = (arr[0::2] + 1j * arr[1::2]).astype(np.complex64)
+        self._samples_read += len(samples)
+        return samples
+
+    # ── 发射 ──────────────────────────────────────────────────────────
+    def _tx_ready(self) -> bool:
+        return self._hackrf is not None and callable(
+            getattr(self._hackrf, "write_tx", None))
+
+    def write_tx(self, iq_samples: np.ndarray) -> bool:
+        """真实写 TX 流（hackrf_start_tx → 回调队列 → USB 流）。
+
+        未过人工确认授权的直调一律拒绝；写流失败把原因落到 status.error，
+        不返回"看似成功"的 True。
+        """
+        from .tx_guard import reject_unless_authorized
+        if not reject_unless_authorized(self):
+            self._note_tx_reject()
+            return False
+        if not self.status.connected or self._hackrf is None:
+            self.status.error = "[TX] HackRF 未连接，无法发射"
+            return False
         try:
-            samples = self._hackrf.read_samples(num_samples)
-            self._samples_read += num_samples
-            return samples
-        except Exception:
-            return None
+            ok = self._hackrf.write_tx(np.asarray(iq_samples, dtype=np.complex64))
+        except Exception as e:  # noqa: BLE001 - 驱动异常必须转为如实失败
+            self.status.error = f"[TX] HackRF 写波异常: {type(e).__name__}: {e}"
+            return False
+        if not ok:
+            self.status.error = "[TX] HackRF 写流失败（libhackrf 返回失败/欠载）"
+        return bool(ok)
 
 
 class SoapySDRBackend(SDRBackend):
@@ -3094,9 +3173,14 @@ class USRPBackend(SDRBackend):
     """
     USRP 后端（Ettus Research / NI）。
 
-    使用 UHD 库（uhd Python 绑定）。
+    使用 UHD 库（uhd Python 绑定）。收发都走 UHD：
+      - 接收：``recv_num_samps``（现有路径）
+      - 发射：``get_tx_stream`` + ``tx_streamer.send``，真实写 UHD 发送流
     支持多种 USRP 型号（B200/B210/X300/X310/N200/N210 等）。
     需要安装：pip install uhd 以及 libuhd 系统库。
+
+    TX 说明：发送流路径按 UHD Python API 实现，但**未在真机验证**；
+    ``device.tx_verified=False``，UI/工具面须标「未验证」。
     """
 
     def __init__(self, device_args: str = ""):
@@ -3109,11 +3193,13 @@ class USRPBackend(SDRBackend):
             max_gain=76.0,
             supports_iq=True,
             supports_tx=True,
+            tx_verified=False,  # 尚未在真机验证过发射链路
         )
         super().__init__(device)
         self._device_args = device_args
         self._usrp = None
         self._rx_stream = None
+        self._tx_streamer = None
         # 来源: gqrx/src/qtgui/ioconfig.cpp:279-302 —— USRP 默认 1 MS/s 起步档
         # （GQRX ioconfig 里 USRP start_sample_rate=1e6）。
         self.status.sample_rate_hz = 1_000_000.0
@@ -3139,6 +3225,7 @@ class USRPBackend(SDRBackend):
                 pass
         if self._usrp:
             self._usrp = None
+        self._tx_streamer = None
         super().disconnect()
 
     def _apply_frequency(self, freq_hz: float) -> bool:
@@ -3181,6 +3268,63 @@ class USRPBackend(SDRBackend):
             return None
         except Exception:
             return None
+
+    # ── 发射 ──────────────────────────────────────────────────────────
+    def _tx_ready(self) -> bool:
+        return self._usrp is not None and callable(
+            getattr(self._usrp, "get_tx_stream", None))
+
+    def _ensure_tx_stream(self) -> bool:
+        """惰性建立 UHD 发送流（get_tx_stream），失败如实报错。"""
+        if self._tx_streamer is not None:
+            return True
+        if not self.status.connected or self._usrp is None:
+            return False
+        try:
+            import uhd
+            args = uhd.usrp.StreamArgs("fc32", "sc16")
+            args.channels = [0]
+            self._tx_streamer = self._usrp.get_tx_stream(args)
+            self._usrp.set_tx_rate(float(self.status.sample_rate_hz or 1e6))
+            self._usrp.set_tx_gain(float(self.status.gain_db))
+        except Exception as e:  # noqa: BLE001 - 驱动异常转为如实失败
+            self.status.error = f"[TX] 建立 UHD 发送流失败: {type(e).__name__}: {e}"
+            self._tx_streamer = None
+            return False
+        return True
+
+    def write_tx(self, iq_samples: np.ndarray) -> bool:
+        """真实写 UHD 发送流（tx_streamer.send）。
+
+        未过人工确认授权的直调一律拒绝；写失败落 status.error 并返回 False。
+        """
+        from .tx_guard import reject_unless_authorized
+        if not reject_unless_authorized(self):
+            self._note_tx_reject()
+            return False
+        if not self._ensure_tx_stream():
+            return False
+        try:
+            import uhd
+            buff = np.asarray(iq_samples, dtype=np.complex64).ravel()
+            if buff.size == 0:
+                return True
+            # 频点跟随当前后端状态（TxSession 在每次发波前 set_frequency）。
+            self._usrp.set_tx_freq(uhd.libpyuhd.types.tune_request(
+                float(self.status.frequency_hz)))
+            md = uhd.types.TXMetadata()
+            md.start_of_burst = False
+            md.end_of_burst = False
+            md.has_time_spec = False
+            ret = self._tx_streamer.send(md, buff)
+            n = int(ret[0]) if isinstance(ret, tuple) else int(ret)
+            if n <= 0:
+                self.status.error = f"[TX] UHD send 返回 {n}（未写入样本）"
+                return False
+            return True
+        except Exception as e:  # noqa: BLE001
+            self.status.error = f"[TX] UHD 写波异常: {type(e).__name__}: {e}"
+            return False
 
 
 class PlutoSDRBackend(SDRBackend):
@@ -3251,6 +3395,7 @@ class PlutoSDRBackend(SDRBackend):
             max_gain=self.GAIN_MAX_DB,
             supports_iq=True,
             supports_tx=True,  # AD9361 半双工收发
+            tx_verified=False,  # 发射链路尚未在真机验证
         )
         super().__init__(device)
         self._uri = uri
@@ -3266,6 +3411,11 @@ class PlutoSDRBackend(SDRBackend):
         self._soapy = None         # SoapySDR.Device（备用路径）
         self._soapy_stream = None
         self._backend_lib = None   # "iio" / "soapy" / None
+        # TX 句柄（iio: cf-ad9361-dds-core-lpc + TX_LO altvoltage1；soapy: TX 流）
+        self._tx_stream_dev = None
+        self._tx_lo_chan = None
+        self._tx_phy_chan = None
+        self._tx_dir = None
         # 默认参数（未连接时也记录，便于上层查询）
         self.status.sample_rate_hz = 2_000_000.0
         self.status.frequency_hz = 1_690_000_000.0  # GK-2A LR-M 默认
@@ -3470,11 +3620,16 @@ class PlutoSDRBackend(SDRBackend):
         # 找 ad9361-phy
         phy = None
         stream = None
+        tx_stream = None
         for dev in self._ctx.devices:
             name = (dev.name or "").lower()
             if "ad9361-phy" in name or "ad9364" in name:
                 phy = dev
-            elif "cf-ad9361" in name and ("lpc" in name or "dds" in name):
+            elif "cf-ad9361" in name and "dds" in name:
+                # TX DMA：cf-ad9361-dds-core-lpc（上变频输入）
+                tx_stream = dev
+            elif "cf-ad9361" in name and "lpc" in name:
+                # RX DMA：cf-ad9361-lpc（不要把 TX 设备当 RX 流）
                 stream = dev
         if phy is None:
             raise RuntimeError(f"{uri} 上未找到 ad9361-phy 设备")
@@ -3502,6 +3657,14 @@ class PlutoSDRBackend(SDRBackend):
 
         # 创建 RX buffer（4 MSamples，16-bit I/Q 交错 = 16 MB）
         self._create_iio_buffer(4_000_000)
+
+        # TX 路径：cf-ad9361-dds-core-lpc 输出通道 + TX_LO altvoltage1。
+        # 打不开只影响发射，不影响接收（PTT 由 supports_tx() 如实置灰）。
+        try:
+            self._open_tx_iio(phy, tx_stream)
+        except Exception as e:
+            logger.warning("[TX] PlutoSDR IIO 发送路径不可用: %s", e)
+            self._tx_stream_dev = None
 
         self._backend_lib = "iio"
         self.status.connected = True
@@ -3537,6 +3700,32 @@ class PlutoSDRBackend(SDRBackend):
         # samples_count 是"每个通道的样本数"；16-bit I/Q 交错
         self._buffer = self._stream_dev.create_buffer(num_samples, circular=False)
 
+    def _open_tx_iio(self, phy, tx_dev) -> bool:
+        """配置 IIO 发送路径：TX DMA 设备 + TX_LO(altvoltage1) + TX 采样率。
+
+        来源: AD9361 IIO 设备树 —— TX 流走 ``cf-ad9361-dds-core-lpc`` 的
+        output 通道 voltage0/voltage1；TX 本振是 ``altvoltage1``。
+        """
+        if tx_dev is None:
+            raise RuntimeError("未找到 cf-ad9361-dds-core-lpc（TX DMA 设备）")
+        for ch in tx_dev.channels:
+            if ch.output and ch.id in ("voltage0", "voltage1"):
+                ch.enabled = True
+        self._tx_stream_dev = tx_dev
+        self._tx_lo_chan = self._find_channel(phy, "altvoltage1", is_output=True)
+        # TX 采样率/带宽走 ad9361-phy 的 output voltage0 通道
+        self._tx_phy_chan = self._find_channel(phy, "voltage0", is_output=True)
+        if self._tx_phy_chan is not None:
+            try:
+                self._tx_phy_chan.attrs["sampling_frequency"].value = str(
+                    int(self.status.sample_rate_hz))
+            except Exception as e:
+                logger.warning("[TX] 写 Pluto TX sampling_frequency 失败: %s", e)
+        if self._tx_lo_chan is not None:
+            self._tx_lo_chan.attrs["frequency"].value = str(
+                int(self.status.frequency_hz))
+        return True
+
     def _open_via_soapy(self, SoapySDR, uri: str) -> bool:
         """通过 SoapySDR + SoapyPlutoSDR 打开。"""
         args = {"driver": "plutosdr"}
@@ -3549,6 +3738,15 @@ class PlutoSDRBackend(SDRBackend):
         self._rx = getattr(SoapySDR, "SOAPY_SDR_RX", 1)
         self._stream = self._soapy.setupStream(self._rx, "CF32", [0])
         self._soapy.activateStream(self._stream)
+        # TX 流：SoapySDR 的 TX 与 RX 共用同一 writeStream 面。
+        # 打不开只关掉发射能力，不影响 RX（supports_tx() 会如实返回 False）。
+        self._tx_dir = getattr(SoapySDR, "SOAPY_SDR_TX", 2)
+        try:
+            self._tx_stream = self._soapy.setupStream(self._tx_dir, "CF32", [0])
+            self._soapy.activateStream(self._tx_stream)
+        except Exception as e:
+            logger.warning("[TX] Soapy PlutoSDR 发送流不可用: %s", e)
+            self._tx_stream = None
         self._backend_lib = "soapy"
         self.status.connected = True
         self.status.error = ""
@@ -3573,6 +3771,14 @@ class PlutoSDRBackend(SDRBackend):
                 self._soapy.closeStream(self._soapy_stream)
         except Exception:
             pass
+        try:
+            tx_stream = getattr(self, "_tx_stream", None)
+            if tx_stream is not None and self._soapy is not None:
+                self._soapy.deactivateStream(tx_stream)
+                self._soapy.closeStream(tx_stream)
+        except Exception:
+            pass
+        self._tx_stream = None
         self._soapy_stream = None
         self._soapy = None
         self._ctx = None
@@ -3580,6 +3786,9 @@ class PlutoSDRBackend(SDRBackend):
         self._rx_chan = None
         self._rx_lo_chan = None
         self._stream_dev = None
+        self._tx_stream_dev = None
+        self._tx_lo_chan = None
+        self._tx_phy_chan = None
         self._backend_lib = None
         super().disconnect()
 
@@ -3605,6 +3814,9 @@ class PlutoSDRBackend(SDRBackend):
                 else:
                     # 兜底：写 phy 直接属性
                     self._phy.attrs["out_altvoltage0_RX_LO_frequency"].value = str(int(freq_hz))
+                # TX 本振跟随（半双工共用同一 center 设定）
+                if self._tx_lo_chan is not None:
+                    self._tx_lo_chan.attrs["frequency"].value = str(int(freq_hz))
                 return True
             except Exception as e:
                 self.status.error = f"[iio] set frequency 失败: {e}"
@@ -3612,6 +3824,8 @@ class PlutoSDRBackend(SDRBackend):
         if self._backend_lib == "soapy" and self._soapy is not None:
             try:
                 self._soapy.setFrequency(self._rx, 0, float(freq_hz))
+                if getattr(self, "_tx_stream", None) is not None:
+                    self._soapy.setFrequency(self._tx_dir, 0, float(freq_hz))
                 return True
             except Exception as e:
                 self.status.error = f"[soapy] setFrequency 失败: {e}"
@@ -3625,6 +3839,8 @@ class PlutoSDRBackend(SDRBackend):
             try:
                 if self._rx_chan is not None:
                     self._rx_chan.attrs["sampling_frequency"].value = str(int(rate_hz))
+                if self._tx_phy_chan is not None:
+                    self._tx_phy_chan.attrs["sampling_frequency"].value = str(int(rate_hz))
                 return True
             except Exception as e:
                 self.status.error = f"[iio] set sampling_frequency 失败: {e}"
@@ -3632,6 +3848,8 @@ class PlutoSDRBackend(SDRBackend):
         if self._backend_lib == "soapy" and self._soapy is not None:
             try:
                 self._soapy.setSampleRate(self._rx, 0, float(rate_hz))
+                if getattr(self, "_tx_stream", None) is not None:
+                    self._soapy.setSampleRate(self._tx_dir, 0, float(rate_hz))
                 return True
             except Exception as e:
                 self.status.error = f"[soapy] setSampleRate 失败: {e}"
@@ -3777,6 +3995,71 @@ class PlutoSDRBackend(SDRBackend):
             return None
         self._samples_read += n_read
         return buff[:n_read].copy()
+
+    # ── 发射 ──────────────────────────────────────────────────────────
+    def _tx_ready(self) -> bool:
+        if self._backend_lib == "iio":
+            return self._tx_stream_dev is not None
+        if self._backend_lib == "soapy":
+            return getattr(self, "_tx_stream", None) is not None
+        return False
+
+    def _write_tx_iio(self, iq: np.ndarray) -> bool:
+        """IIO 发送：创建非循环 buffer → write(I/Q int16 交织) → push。
+
+        来源: pylibiio ``Buffer.write(array)`` / ``Buffer.push(samples_count)``；
+        libiio 输出设备提交后即可复用 buffer（非 cyclic 模式）。
+        """
+        if self._tx_stream_dev is None:
+            return False
+        inter = np.empty(iq.size * 2, dtype=np.int16)
+        inter[0::2] = (np.clip(iq.real, -1.0, 1.0) * 32767.0).astype(np.int16)
+        inter[1::2] = (np.clip(iq.imag, -1.0, 1.0) * 32767.0).astype(np.int16)
+        buf = self._tx_stream_dev.create_buffer(int(iq.size), cyclic=False)
+        buf.write(inter)
+        buf.push()
+        return True
+
+    def _write_tx_soapy(self, iq: np.ndarray) -> bool:
+        """SoapySDR 发送：writeStream（与 readStream 对称的真实写流面）。"""
+        tx_stream = getattr(self, "_tx_stream", None)
+        if tx_stream is None or self._soapy is None:
+            return False
+        self._soapy.setFrequency(self._tx_dir, 0, float(self.status.frequency_hz))
+        self._soapy.setSampleRate(self._tx_dir, 0, float(self.status.sample_rate_hz))
+        status = self._soapy.writeStream(
+            tx_stream, [iq], int(iq.size), 0, 0, timeoutUs=500_000)
+        n = int(getattr(status, "ret", status if isinstance(status, int) else 0))
+        if n <= 0:
+            self.status.error = f"[TX] Soapy writeStream 返回 {n}（未写入样本）"
+            return False
+        return True
+
+    def write_tx(self, iq_samples: np.ndarray) -> bool:
+        """真实写 PlutoSDR 发送流（IIO buffer push 或 Soapy writeStream）。"""
+        from .tx_guard import reject_unless_authorized
+        if not reject_unless_authorized(self):
+            self._note_tx_reject()
+            return False
+        if not self.status.connected:
+            self.status.error = "[TX] PlutoSDR 未连接，无法发射"
+            return False
+        try:
+            iq = np.asarray(iq_samples, dtype=np.complex64).ravel()
+            if iq.size == 0:
+                return True
+            if self._backend_lib == "iio":
+                ok = self._write_tx_iio(iq)
+            elif self._backend_lib == "soapy":
+                ok = self._write_tx_soapy(iq)
+            else:
+                ok = False
+        except Exception as e:  # noqa: BLE001 - 驱动异常必须转为如实失败
+            self.status.error = f"[TX] PlutoSDR 写波异常: {type(e).__name__}: {e}"
+            return False
+        if not ok:
+            self.status.error = self.status.error or "[TX] PlutoSDR 写流失败"
+        return bool(ok)
 
 
 class FileIQBackend(SDRBackend):
@@ -4144,14 +4427,17 @@ class SDRBackendManager:
             # 无硬件/缺 pyrtlsdr 环境下启动是正常的；用 debug 记录原因，不静默也不弹错
             logger.debug(f"RTL-SDR 发现失败(忽略，无硬件环境正常): {e}")
 
-        # 尝试发现 HackRF
+        # 尝试发现 HackRF（驱动是 libhackrf 的 ctypes 直连：libhackrf 可加载
+        # 才登记；真正缺设备/被占用由 connect() 如实报错）
         try:
-            import hackrf
+            from .hackrf_params import HackRFBackend as _CtlsBackend
+            if _CtlsBackend(0)._load_lib() is None:
+                raise RuntimeError("libhackrf 不可用")
             hf = HackRFBackend(0)
             # 不实际连接，只注册（用户手动连接）
             self.backends[hf.device.device_id] = hf
         except Exception:
-            pass  # 没有 HackRF 库
+            pass  # 没有 libhackrf
 
         # 尝试发现 USRP
         try:
@@ -4208,6 +4494,10 @@ class SDRBackendManager:
                 "sample_rate_range": list(b.device.sample_rate_range),
                 "max_gain": b.device.max_gain,
                 "supports_iq": b.device.supports_iq,
+                # 声明（硬件/代码路径存在）与真机验证分开报，避免 UI 把
+                # 「未验证」直接画成「支持」。
+                "supports_tx": bool(b.device.supports_tx),
+                "tx_capability": b.tx_capability(),
                 "connected": b.status.connected,
                 "active": b == self.active_backend,
             }
@@ -4466,7 +4756,8 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
       - SoapySDRBackend.list_devices() —— SoapySDR 总线识别的所有前端
         （RTL-SDR/HackRF/USRP/BladeRF/Airspy...），来源: lib/Factory.cpp:41。
       - RTLSDRBackend.list_devices() —— pyrtlsdr 原生 USB 枚举（见本文件 RTLSDRBackend）。
-      - HackRFBackend —— 无专用枚举接口，靠 import 探测（本函数只做 best-effort 标识）。
+      - HackRFBackend —— 无专用枚举接口；只在 SoapySDR 总线或 gr-osmosdr 探测到
+        设备时（步骤 1/5）出现，不靠"装了库"就伪造一条设备。
 
     去重键：优先 serial，其次 label。SoapySDR 条目信息更全（含真实范围），
     已覆盖到同 serial 的原生条目时优先保留 SoapySDR 条目。
