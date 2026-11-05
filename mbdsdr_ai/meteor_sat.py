@@ -349,28 +349,6 @@ LRPT_DEINT_BRANCHES = 36   # I = INTER_BRANCH_COUNT，去交织分支数
 LRPT_DEINT_DELAY = 2048    # J = INTER_BRANCH_DELAY，相邻分支的符号延迟
 
 
-def convolutional_interleave(data: np.ndarray,
-                              num_branches: int = LRPT_DEINT_BRANCHES,
-                              branch_delay: int = LRPT_DEINT_DELAY) -> np.ndarray:
-    """Forney 卷积交织器（发射端）。
-
-    输入符号按 num_branches 轮询分发到各分支；第 k 个分支的 FIFO 深度为
-    k*branch_delay，因此第 k 路相对第 0 路多延迟 k*branch_delay 个符号。
-    与 convolutional_deinterleave 互逆，级联总时延 = num_branches*(num_branches-1)*branch_delay。
-
-    Forney 卷积交织（CCSDS 131.0-B）。
-    """
-    data = np.asarray(data)
-    # 分支 k 的延迟线深度 = k*branch_delay（预填零，模拟初始时延）
-    bufs = [collections.deque([0] * (k * branch_delay)) for k in range(num_branches)]
-    out = np.empty_like(data)
-    for n, sym in enumerate(data):
-        b = n % num_branches
-        bufs[b].append(sym)        # 压入当前符号
-        out[n] = bufs[b].popleft()  # 弹出延迟后的符号
-    return out
-
-
 def convolutional_deinterleave(data: np.ndarray,
                                num_branches: int = LRPT_DEINT_BRANCHES,
                                branch_delay: int = LRPT_DEINT_DELAY) -> np.ndarray:
