@@ -1122,6 +1122,81 @@ python scripts/git_sync_index.py --check                 # 只校验，不改 in
 出现反向暂存 `MM`，它只能用 `git update-index --cacheinfo` 手工对齐；钩子接上后，
 这一步由 `git_sync_index.py` 自动完成，不再依赖自觉。
 
+#### 6.9.6 私有 index 文件名撞车（第六种形态，2026-11-06 01:55）
+
+**事故经过（今晨实测）**：两个会话各自建私有 `GIT_INDEX_FILE`，但用了**同名 / 无会话标识**
+的文件名。一方先 `read-tree` 装配自己的 hunk，另一方随后往**同一个文件**里 add 自己的文件；
+先提交的那一方把后者的内容一起卷走——`09b53221`（01:38:21，云台/操作逻辑线）因此带进
+解码线 4 个在途文件（`docs/learn/decoder-capability-matrix.md`、`scripts/decode_sensitivity.py`、
+`scripts/decoder_capability_report.py`、`tests/test_decode_sensitivity.py`），只能靠
+`d8b40eb0`（01:40:08）逐文件 revert 补（见 §6.10.2 表）。
+
+**物证**：`D:\mbdsdr\.tmp\idx-a`、`idx-b`、`idx-c`、`idx-d` 与
+`D:\mbdsdr\output\tmp\idx_private`、`idx_round5*`——都是无会话标识的固定名，
+同尺寸同时间，可复用即会撞。
+
+**规矩**：
+
+1. 私有 index 文件名必须**含会话标识 + 时间戳**（例 `idx_机制线_20261106_0155`），
+   禁止 `idx_a` / `idx-b` / `idx_private` 这类固定名。建名前先确认该文件不存在，
+   已存在就换名，**绝不共用**。
+2. 用完立即 `Remove-Item`，不得留在 `.tmp` 供下一个人复用（这是 §6.9.3 陈旧条目的温床）。
+3. **提交前必须确认「本次提交的文件集合是可解释的」**：每个路径都能对应到自己的本次
+   工作或明确的声明清单；出现解释不了的文件先停下查来源，不许「反正是暂存区就提交」。
+4. 机械闸（已接入 pre-commit）：`scripts/check_commit_scope.py --staged --expect <路径...>`，
+   或环境变量 `MBDSDR_COMMIT_PATHS`（换行 / `;` 分隔）。暂存集合必须**全部落在声明清单内**，
+   **多一个就拒**，并把多出来的路径逐条打印为 `EXTRA <path>`；未声明清单时不启用这一条
+   （保持旧行为，不假报）。反证见 `tests/test_commit_scope_manifest.py`：干净私有 index
+   只装配 `a.txt`，再 `git add b.txt` → 提交被拒、打印 `EXTRA b.txt`、HEAD 不前进。
+
+#### 6.9.7 PowerShell 环境变量没落到子进程（第七种形态，2026-11-06 02:20）
+
+**事故经过（数据线实测）**：`16f075f3` 计划只提交 DSO 10 个文件（36 个改动里其余 26 个
+属别线），操作者在 PowerShell 里设了 `$env:GIT_INDEX_FILE`，但该变量没落到 `git commit`
+的子进程——闸门与实际提交读到的都是**共享 index**，一次夹带 26 个别线文件；事后靠
+`a5d062e8` 逐条恢复成父提交内容（见 §6.10.2 表）。
+
+**根因**：`$env:` 只对**当前 PowerShell 进程及其正常子进程**生效；跨过一层（计划任务、
+不同 shell、`Start-Process`、某些包装脚本/工具再 spawn 的进程）就不会继承。把「设了
+变量」当成「变量到位」是这条事故的认知错误。
+
+**规矩**：
+
+1. 私有 index 一律**显式传参**，禁止依赖 shell 里 export 的变量：
+   - `GIT_INDEX_FILE=<path> git commit ...`（同一条命令行内给变量）；
+   - 或 `subprocess.run([...], env={**os.environ, "GIT_INDEX_FILE": path})`。
+2. 闸门恒打印它**实际读到的 index 路径**（`INDEX 实际读取 …`）；可用
+   `--declared-index <path>` 或环境变量 `MBDSDR_DECLARED_INDEX` 声明私有 index。
+   声明与实际不一致 → **直接拒**，打印 `DECLARED` / `ACTUAL` 两个路径对比。
+3. 声明通道本身也必须显式：推荐在**同一条提交命令**里写
+   `GIT_INDEX_FILE=<path> MBDSDR_DECLARED_INDEX=<path> git commit ...`，
+   不要指望先在 PowerShell 里设好两个变量。
+4. 反证（`tests/test_commit_scope_manifest.py`）：
+   - 只声明私有 index、不给 `GIT_INDEX_FILE` → 闸门拒绝，打印两个路径；
+   - `GIT_INDEX_FILE` 真落到子进程且与声明一致 → 放行。
+
+#### 6.9.8 陈旧私有 index 制造幻影删除（第八种形态，2026-11-06 02:30）
+
+**事故经过（文案线实测，新闸门第一次拦住）**：文案线的私有 index 基于**旧 HEAD** 建——
+`read-tree` 时的 HEAD 还没包含机制线刚提交的 3 个文件（`404c5b44`）。于是那 3 个文件
+在它的索引里表现为**删除**（`D`），被计入暂存；闸门报「暂存 5 个文件 · 跨线」并拒绝。
+重建私有 index（`read-tree` 当前 HEAD）后暂存变 2 个，正常放行。
+
+**根因**：私有 index 是**快照**，不是视图。它只记录「建它那一刻的树 + 你 add 的内容」；
+之后别人入库的文件不会自动出现在你的索引里——相对新 HEAD 就成了删除。
+
+**规矩**：
+
+1. 私有 index **每次**都基于**当前 HEAD** `read-tree HEAD` 起底，**不许复用上一次的
+   索引文件**（复用 = 把上一轮的树状态带进本轮）。
+2. 暂存里出现 `D`（删除）条目时，必须**逐条能解释来源**：确实是你本次要删的文件；
+   解释不了的删除一律当作「陈旧 index 的幻影删除」，停下来重建索引。
+3. 机械闸：删除条目同样受声明清单约束——`check_commit_scope.py --staged --expect ...`
+   对清单外的 `D` 条目直接拒并打印 `DELETE <path>`，附带「基于旧 HEAD read-tree」的
+   归因与修法；未声明清单时只告警（不假报）。反证见
+   `tests/test_commit_scope_manifest.py`：按旧提交 `read-tree` 建私有 index，再 add
+   自己的文件 → 提交被拒、打印幻影删除；`read-tree HEAD` 重建后放行。
+
 ### 6.10 历史改写事件（2026-11-05，主分支被 reset 改写；今日累计 10 次破坏性 reset + 1 次 no-op）
 
 **前置规矩（上游真因，比「禁止 reset」更早一步）**
@@ -1271,6 +1346,11 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 | 提交 | 文件 | 被抹掉的内容 | 是否已补回 | 定人 |
 |---|---|---|---|---|
 | `f664638a`（23:08:12） | `docs/COORDINATION.md` | §6.10「前置规矩」整段（+2/−28，blob `487f3598` → `9563ffff`） | **已补回**（`4132d46f` 23:18:25） | **操作逻辑线**（置信高，见下） |
+| `09b53221`（01:38:21） | 云台线 4 个文件 + **卷入**解码线 4 个在途文件（`docs/learn/decoder-capability-matrix.md`、`scripts/decode_sensitivity.py`、`scripts/decoder_capability_report.py`、`tests/test_decode_sensitivity.py`） | 反向形态：不是抹掉已入库内容，而是把别人未提交的在途改动卷进本笔 | **已撤回**（`d8b40eb0` 01:40:08，逐文件 revert） | 提交方=云台/操作逻辑线；被卷文件=解码流水线 P5（claim 至 01:37:58） |
+| `16f075f3`（01:55:02） | 数据线 10 个文件 + **卷入**别线 26 个在途文件（`mbdsdr_ai/pose.py`、`tests/test_pose_fusion.py`、`web/product/**` 等） | 反向形态：PowerShell `$env:GIT_INDEX_FILE` 没落到 `git commit` 子进程，闸门读的是共享 index | **已撤回**（`a5d062e8` 01:59:03，26 文件逐条恢复成父提交内容） | 提交方=数据线 |
+| `928bd78f`（01:58:13） | 接入层 3 个文件 + **卷入**他线 4 个在途文件（`desktop/mode_registry.py`、`desktop/shortcuts.py`、`desktop/themes.py`、`mbdsdr_ai/device_capabilities.py`，即 4 个死函数） | 反向形态：私有 index 把别线未提交改动一起带入 | **已撤回**（`e3bd2cd8` 02:08:19，4 文件逐条删回） | 提交方=接入层线；被卷文件=他线在途 |
+| （未提交；`404c5b44` 后新闸门拦截） | 3 个**幻影删除**（机制线 `404c5b44` 刚入库的文件在文案线旧 index 里表现为 `D`） | 形态八：私有 index 基于旧 HEAD `read-tree`，旧 HEAD 之后入库的文件被当成删除计入暂存 | **未入库**（闸门拒绝；`read-tree HEAD` 重建后暂存 5→2，正常放行） | 文案线（私有 index 未重建） |
+| `16f075f3`→`a5d062e8`（形态七清单项：PowerShell 环境变量不落地） | 被卷 26 个（计划 10 + 卷入 26，36 个改动） | `$env:` 未落到子进程；闸门与实际提交都读共享 index | **已撤回**（`a5d062e8`） | 数据线 |
 
 - 其余 5 个共享文档**零命中**；`git log -S'前置规矩'` 恰是「`16f8cd09` 加 →
   `f664638a` 删 → `4132d46f` 加回」，与表一致。
