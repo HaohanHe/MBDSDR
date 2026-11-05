@@ -44,6 +44,8 @@ class FakeStatus:
         self.frequency_hz = backend.freq
         self.sample_rate_hz = backend.sr
         self.gain_db = backend.gain
+        self.demod_mode = backend.demod
+        self.device_id = backend.device_id
 
 
 class FakeBackend:
@@ -52,6 +54,10 @@ class FakeBackend:
         self.freq = 98_000_000.0
         self.sr = 2_048_000.0
         self.gain = 20.0
+        self.demod = "WFM"
+        self.device_id = "dev-A"
+        #: 重连后若改成别的 id，模拟「插回来的是另一台设备」
+        self.device_id_after_reconnect = None
         self.connect_calls = 0
         # 前 N 次 connect 失败（模拟设备还没插回）
         self.fail_connect_times = 0
@@ -63,16 +69,20 @@ class FakeBackend:
         self.connect_calls += 1
         if self.connect_calls <= self.fail_connect_times:
             return False
-        # 物理重连 = 一个"新设备"实例：频率/增益回到默认，
+        # 物理重连 = 一个"新设备"实例：频率/模式回到默认，
         # 用来验证重连管理器是否恢复了断开前的设置
         self.connected = True
         self.freq = 100_000_000.0
         self.gain = 0.0
+        self.demod = "WFM"
+        if self.device_id_after_reconnect is not None:
+            self.device_id = self.device_id_after_reconnect
         return True
 
     def set_frequency(self, f): self.freq = f
     def set_sample_rate(self, s): self.sr = s
     def set_gain(self, g): self.gain = g
+    def set_demod_mode(self, mode): self.demod = mode
 
 
 def _make_manager(**kw):
@@ -83,6 +93,7 @@ def _make_manager(**kw):
 
 def test_disconnect_then_reconnect_restores_settings():
     backend = FakeBackend()
+    backend.demod = "NFM"
     backend.fail_connect_times = 1  # 第一次重连失败，第二次成功
 
     events = {"disconnected": 0, "reconnecting": [], "reconnected": 0}
@@ -109,10 +120,63 @@ def test_disconnect_then_reconnect_restores_settings():
         assert events["reconnected"] == 1
         assert audio_started == [1]          # 重连后重启了音频
 
-        # 关键：恢复了断开前的设置（98M/20dB），而非新设备默认的 100M/0dB
+        # 关键：恢复了断开前的设置（98M/20dB/NFM），而非新设备默认的 100M/0dB/WFM
         assert backend.freq == pytest.approx(98_000_000.0)
         assert backend.gain == pytest.approx(20.0)
+        assert backend.demod == "NFM", "重连后解调模式必须与断开前一致"
         assert backend.connected is True
+    finally:
+        mgr.stop()
+
+
+def test_reconnect_does_not_apply_settings_to_a_different_device():
+    """场景③：插回来的是另一台设备 → 不下发任何设置，显式报错并停止重试。"""
+    backend = FakeBackend()
+    backend.device_id_after_reconnect = "dev-B"
+
+    events = {"reconnected": 0}
+    audio_started = []
+    gave_up = threading.Event()
+
+    mgr = _make_manager(
+        on_reconnected=lambda: events.__setitem__("reconnected", 1),
+        on_give_up=gave_up.set,
+        start_audio=lambda: audio_started.append(1),
+    )
+    mgr.start(backend)
+    try:
+        backend.connected = False
+        assert gave_up.wait(3.0), "身份不匹配应给出放弃结论，而不是继续重试"
+
+        # 一个设置都不许下发：新设备保持 connect() 后的默认值
+        assert backend.freq == pytest.approx(100_000_000.0)
+        assert backend.demod == "WFM"
+        assert audio_started == [], "身份不匹配时不能重启音频"
+        assert events["reconnected"] == 0
+
+        snap = mgr.snapshot()
+        assert snap["gave_up"] is True
+        assert "身份不匹配" in snap["last_error"]
+        assert "dev-A" in snap["last_error"] and "dev-B" in snap["last_error"]
+        assert snap["suggestion"], "放弃必须带下一步动作"
+    finally:
+        mgr.stop()
+
+
+def test_reconnect_without_identity_does_not_false_positive():
+    """后端不报告身份时不猜：没有可比字段就照常恢复设置。"""
+    backend = FakeBackend()
+    backend.device_id = ""  # 断开前后都读不到身份
+
+    reconnected = threading.Event()
+    mgr = _make_manager(on_reconnected=reconnected.set)
+    mgr.start(backend)
+    try:
+        backend.connected = False
+        assert reconnected.wait(3.0)
+        assert backend.freq == pytest.approx(98_000_000.0)
+        assert mgr.gave_up is False
+        assert mgr.snapshot()["last_error"] == ""
     finally:
         mgr.stop()
 

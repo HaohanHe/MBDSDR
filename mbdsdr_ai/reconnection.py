@@ -44,6 +44,9 @@ DEFAULT_POLL_INTERVAL = 0.5
 #: 默认总退避等待 = 1+2+4+8+16+30 = 61s（另加每次 connect 自身耗时）。
 DEFAULT_MAX_ATTEMPTS = 6
 
+#: 后端 status 上可能出现的设备身份字段（按优先级取第一个可比的）
+IDENTITY_KEYS = ("device_id", "serial_number", "sn")
+
 #: 重连状态机（供 UI / agent 工具展示；绝不出现"假装已连接"的中间态）
 STATE_STOPPED = "stopped"
 STATE_CONNECTED = "connected"
@@ -188,7 +191,7 @@ class ReconnectionManager:
         try:
             status = backend.get_status()
             for key in ("frequency_hz", "sample_rate_hz", "gain_db",
-                        "demod_mode", "squelch_db", "volume"):
+                        "demod_mode", "squelch_db", "volume", *IDENTITY_KEYS):
                 if hasattr(status, key):
                     snap[key] = getattr(status, key)
         except Exception:
@@ -211,8 +214,45 @@ class ReconnectionManager:
                 backend.set_sample_rate(float(snap["sample_rate_hz"]))
             if "gain_db" in snap and hasattr(backend, "set_gain"):
                 backend.set_gain(float(snap["gain_db"]))
+            # 解调模式漏恢复曾是实测缺口：重连后 NFM 掉回 WFM，
+            # 用户听到的是另一套解调链，必须与断开前一致。
+            if snap.get("demod_mode") is not None and hasattr(backend, "set_demod_mode"):
+                backend.set_demod_mode(str(snap["demod_mode"]))
         except Exception as exc:
             logger.warning("恢复设置失败: %s", exc)
+
+    def _identity_of(self, backend: Any) -> Dict[str, str]:
+        """读重连后后端自己报告的设备身份（读不到就返回空，不猜）。"""
+        identity: Dict[str, str] = {}
+        try:
+            status = backend.get_status()
+        except Exception:
+            return identity
+        for key in IDENTITY_KEYS:
+            value = getattr(status, key, None)
+            if value:
+                identity[key] = str(value)
+        return identity
+
+    def _identity_mismatch(self, backend: Any) -> str:
+        """身份比对：同一字段前后都读到且不同 → 返回错误文案；否则返回空串。
+
+        只在**可比**时判定：断开前没抓到身份、或新设备不报告身份，
+        都不能据此报错（不伪造结论）。字段逐个比，不跨字段拼接。
+        """
+        before = {
+            key: str(self._settings_snapshot[key])
+            for key in IDENTITY_KEYS
+            if self._settings_snapshot.get(key)
+        }
+        after = self._identity_of(backend)
+        for key in IDENTITY_KEYS:
+            if key in before and key in after and before[key] != after[key]:
+                return (
+                    f"重连后的设备身份不匹配（{key}：断开前 {before[key]}，"
+                    f"现在 {after[key]}）；已拒绝下发频率/采样率/增益/解调模式"
+                )
+        return ""
 
     # ------------------------------------------------------------------
     # 重连重试循环
@@ -269,6 +309,18 @@ class ReconnectionManager:
                     self._last_error = "后端未返回失败原因"
 
             if ok:
+                mismatch = self._identity_mismatch(backend)
+                if mismatch:
+                    # 连上了但不是原来的设备：不下发任何设置、不重启音频、
+                    # 不回调 on_reconnected，直接给出结论并停止自动重试。
+                    self._last_error = mismatch
+                    self._gave_up = True
+                    self._state = STATE_GAVE_UP
+                    self._attempt = 0
+                    self._next_retry_in = 0.0
+                    logger.error("%s。%s", mismatch, self.give_up_suggestion())
+                    _safe_callback(self.on_give_up)
+                    return False
                 self._restore_settings(backend, self._settings_snapshot)
                 _safe_callback(self._start_audio)
                 self._gave_up = False
