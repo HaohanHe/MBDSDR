@@ -69,6 +69,7 @@ MBDSDR Project - AI定义无线电 - MIT License（独立实现）
 呼号由用户在状态栏设置（未设置时角标显“呼号：未设置”），不写死。
 """
 
+import logging
 import math
 import os
 import re
@@ -119,6 +120,8 @@ from mbdsdr_ai.skyengine import satellites as _sats
 from mbdsdr_ai.skyengine import jtime as _jtime
 
 from tokens import tokens
+
+_log = logging.getLogger(__name__)
 
 # 触屏手势：双指捏合缩放 FOV + 单指拖动平移视角（Surface/平板）。
 try:
@@ -1712,6 +1715,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 全天星表取数结果（绘制与拾取共用同一份；None=白天/无站/星表不可用）
         self._star_sel = None
         self._star_catalog_error: str = ""
+        # 拾取降级状态位：仅当某次 _find_body_at 在外部数据边界上降级时写入，
+        # 由状态卡「拾取」行如实展示；编程错误不写这里（让它抛出去）。
+        self._pick_degrade: str = ""
 
         # 星座/星官图层：只存“开哪些体系”，数据、名称空间全部来自
         # skyengine.constellations / xingguan 的 overlay_layers()，本视图
@@ -5381,31 +5387,41 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         jd = self._current_jd()
         from mbdsdr_ai.celestial_geometry import azalt_from_vec
 
+        self._pick_degrade = ""
         candidates: List[Tuple[str, str, float, float, float,
                                 Optional[float]]] = []
         # (kind, key, ra, dec, mag, 角直径°) — 位置/尺寸统一在这里算一次
+        # 历表外部边界：数据/时段不可用时只降级「行星候选」，记日志与状态位，
+        # 恒星/DSO 候选照常。AttributeError/IndexError 这类编程错误不接，
+        # 直接抛出去（宁可测试红，也不再被 catch-all 吞掉）。
         try:
             for key_p, eph in self._planet_positions(jd).items():
                 dia = getattr(eph, "angular_diameter_arcsec", None)
                 candidates.append(("planet", key_p, eph.ra_deg, eph.dec_deg,
                                    eph.magnitude,
                                    float(dia) / 3600.0 if dia else None))
-        except Exception:
-            pass
+        except (ValueError, TypeError) as exc:
+            self._pick_degrade = f"行星历表不可用（{type(exc).__name__}）"
+            _log.warning("拾取降级：%s", self._pick_degrade, exc_info=True)
         # 恒星候选改由当帧 select_for_view 集合直接给出（见循环尾部）；
         # 不再从 merged_star_index 另取一套坐标。
         # DSO 图层已画 → 星表里画得出来的都能点（与绘制层同一门：白天/地平/
         # 星等亮度三条都在下面循环里统一判）。
         if not self._stars_hidden_by_daylight():
+            # DSO 目录是可选模块（外部边界）：缺模块只记日志 + 状态位，
+            # 不把整个星球候选清空；目录内单条数据的编程错误照常抛出。
             try:
                 from mbdsdr_ai.astronomy import dso as _dso
+            except ImportError as exc:
+                _dso = None
+                self._pick_degrade = f"DSO 目录不可用（{type(exc).__name__}）"
+                _log.warning("拾取降级：%s", self._pick_degrade, exc_info=True)
+            if _dso is not None:
                 for e in _dso.BUILTIN_CATALOG:
                     size = dso_size_arcmin(e)
                     candidates.append(("dso", e.name, e.ra_deg, e.dec_deg,
                                        dso_magnitude(e),
                                        None if size is None else size / 60.0))
-            except Exception:
-                pass
         # 已选 DSO 有标记环, 可再点中（星表内条目用真实星等；目录外不给点）
         pb = self._picked_body
         if pb and pb.get("kind") == "dso":
@@ -5447,10 +5463,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     best_score = dist
                     best = {"kind": "planet", "key": "moon", "zh": "月亮"}
                 continue
+            # 单条候选坐标换算：只降级这一条（星表数据异常 = 外部边界），
+            # 记日志与状态位后跳过；不吞 AttributeError 等编程错误。
             try:
                 v = j2000_to_altaz(vec_from_radec(ra_b, dec_b), gs, jd)
                 az, alt = azalt_from_vec(v)
-            except Exception:
+            except (TypeError, ValueError) as exc:
+                self._pick_degrade = (
+                    f"候选 {key_b} 坐标换算失败（{type(exc).__name__}）")
+                _log.warning("拾取降级：%s", self._pick_degrade, exc_info=True)
                 continue
             # 与绘制层同一条可见性门：画不出来的不给点。否则点空白天区
             # 会弹出肉眼看不见的天体信息卡（Bortle 3 的海王星 r<=0 不画），
@@ -5504,13 +5525,18 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # numpy 先按「点击点 ±tolerance」裁到几个候选，再逐候选做精确评分。
             # 拾取半径 limit = max(tolerance, r_pick)，r_pick 不会超过 tolerance
             # 之外，所以 box 预筛与逐星判决等价，不改变任何命中结果。
+            # 星表批量换算（星表数据异常 = 外部边界）：失败时记日志 + 状态位，
+            # 并降级为逐颗换算（慢但等价），不静默让整帧星表不可点。
+            azs = alts = None
             try:
                 azs = np.asarray(sel.az_deg, dtype=float)
                 alts = np.asarray(sel.alt_deg, dtype=float)
                 alt_draw_arr = np.array(
                     [self._display_alt_deg(float(a)) for a in alts], dtype=float)
                 px_arr, py_arr = self._sky_to_screen_many(azs, alt_draw_arr)
-            except Exception:
+            except (TypeError, ValueError) as exc:
+                self._pick_degrade = f"星表批量换算失败（{type(exc).__name__}）"
+                _log.warning("拾取降级：%s", self._pick_degrade, exc_info=True)
                 px_arr = py_arr = alt_draw_arr = None
             if px_arr is not None:
                 w = float(self.width())
@@ -5522,22 +5548,40 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     & (px_arr >= -4.0) & (px_arr <= w + 4.0) \
                     & (py_arr >= -4.0) & (py_arr <= h + 4.0)
                 star_idx = np.flatnonzero(box)
+            elif azs is not None and alts is not None:
+                # 批量路径不可用：逐颗落屏判定（与上面 box 预筛同一门）。
+                star_idx = range(len(sel))
             else:
                 star_idx = []
             for i in star_idx:
+                # 单条星表行数据异常（外部边界）：跳过该星并记录，不让
+                # 一颗坏行拖垮整次拾取；AttributeError 等编程错误照常抛出。
                 try:
                     mag_eff = float(sel.eff_mag[i])
                     vmag = float(sel.vmag[i])
-                except Exception:
+                except (TypeError, ValueError) as exc:
+                    self._pick_degrade = f"星表行数据异常（{type(exc).__name__}）"
+                    _log.warning("拾取降级：%s", self._pick_degrade,
+                                 exc_info=True)
                     continue
-                alt_draw = float(alt_draw_arr[i])
+                if px_arr is None:
+                    alt_draw = self._display_alt_deg(float(alts[i]))
+                    if alt_draw < 0.0:
+                        continue
+                    scr_i = self._sky_to_screen_finite(float(azs[i]), alt_draw)
+                    if scr_i is None:
+                        continue
+                    px_i, py_i = scr_i.x(), scr_i.y()
+                else:
+                    alt_draw = float(alt_draw_arr[i])
+                    px_i, py_i = float(px_arr[i]), float(py_arr[i])
                 # 与 _draw_stars 同一份 _star_visual（含 LOD 放出的暗星）。
                 r_pick = self._star_visual(
                     mag_eff, sel.limit_mag, self._bortle)[0]
                 if r_pick <= 0:
                     continue
                 limit = max(float(tolerance), r_pick)
-                dist = math.hypot(float(px_arr[i]) - x, float(py_arr[i]) - y)
+                dist = math.hypot(px_i - x, py_i - y)
                 if dist >= limit:
                     continue
                 norm = max(0.0, min(1.0, (4.5 - vmag) / 9.0))
@@ -5545,8 +5589,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if best_score is None or score < best_score:
                     try:
                         hyg = int(sel.hyg_id[i])
-                    except Exception:
-                        hyg = 0
+                    except (TypeError, ValueError) as exc:
+                        # 缺 HYG id（数据异常）：不再用 0 冒充一个看似可信的
+                        # 编号，hyg=-1 并在 key 上退化为行号，避免多颗星撞 key。
+                        hyg = -1
+                        self._pick_degrade = (
+                            f"HYG id 缺失（{type(exc).__name__}）")
+                        _log.warning("拾取降级：%s", self._pick_degrade,
+                                     exc_info=True)
                     name = str(sel.name[i] or "")
                     best_score = score
                     # key 保持旧的「具名星用名」契约（星座/白昼等既有测试与
@@ -5554,7 +5604,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     # 当帧 select_for_view 行，不另存第二套。
                     best = {
                         "kind": "star",
-                        "key": name if name else f"HYG{hyg}",
+                        "key": (name if name
+                                else (f"HYG{hyg}" if hyg >= 0
+                                      else f"star@{i}")),
                         "name": name,
                         "hyg_id": hyg,
                         "ra_deg": float(sel.ra_deg[i]),
@@ -6355,6 +6407,17 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         else:
             painter.setPen(ink)
         painter.drawText(card_x + 52, y, constel_txt)
+
+        # 拾取降级：只在本次会话真的发生过降级时出现（不占常驻行），
+        # 写明是外部数据边界上的哪一步退化，不把「点不中」当正常。
+        if self._pick_degrade:
+            y += 18
+            painter.setFont(self._font)
+            painter.setPen(label_col)
+            painter.drawText(card_x + 12, y, "拾取")
+            painter.setFont(self._gnss_label_font)
+            painter.setPen(self._colors["warning"])
+            painter.drawText(card_x + 52, y, self._pick_degrade)
 
         y += 18
         painter.setFont(self._font)
