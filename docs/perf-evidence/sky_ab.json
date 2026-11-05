@@ -1,0 +1,143 @@
+{
+  "fixed_unix": 1793887200.0,
+  "cases": {
+    "700_120": {
+      "cpu_ms_before": 26.56,
+      "cpu_ms_after": 26.56,
+      "changed_pct": 2.678,
+      "gt8_pct": 0.353,
+      "max_diff": 24,
+      "layers": {
+        "after._draw_az_grid": {
+          "ms_per_frame": 2.58,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_constellations": {
+          "ms_per_frame": 4.98,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_dso": {
+          "ms_per_frame": 2.63,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_info_overlay": {
+          "ms_per_frame": 1.33,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_planets": {
+          "ms_per_frame": 1.62,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_stars": {
+          "ms_per_frame": 12.27,
+          "calls_per_frame": 1.1
+        },
+        "after._flush_labels": {
+          "ms_per_frame": 0.87,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_az_grid": {
+          "ms_per_frame": 2.66,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_constellations": {
+          "ms_per_frame": 4.87,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_dso": {
+          "ms_per_frame": 2.7,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_info_overlay": {
+          "ms_per_frame": 1.2,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_planets": {
+          "ms_per_frame": 1.64,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_stars": {
+          "ms_per_frame": 15.67,
+          "calls_per_frame": 1.1
+        },
+        "before._flush_labels": {
+          "ms_per_frame": 0.86,
+          "calls_per_frame": 1.1
+        },
+        "before._star_selection": {
+          "ms_per_frame": 2.54,
+          "calls_per_frame": 1.1
+        }
+      }
+    },
+    "1000_60": {
+      "cpu_ms_before": 27.6,
+      "cpu_ms_after": 25.0,
+      "changed_pct": 0.438,
+      "gt8_pct": 0.063,
+      "max_diff": 12,
+      "layers": {
+        "after._draw_az_grid": {
+          "ms_per_frame": 3.93,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_constellations": {
+          "ms_per_frame": 5.56,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_dso": {
+          "ms_per_frame": 2.51,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_info_overlay": {
+          "ms_per_frame": 1.69,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_planets": {
+          "ms_per_frame": 1.43,
+          "calls_per_frame": 1.1
+        },
+        "after._draw_stars": {
+          "ms_per_frame": 5.71,
+          "calls_per_frame": 1.1
+        },
+        "after._flush_labels": {
+          "ms_per_frame": 0.6,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_az_grid": {
+          "ms_per_frame": 3.76,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_constellations": {
+          "ms_per_frame": 5.44,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_dso": {
+          "ms_per_frame": 2.35,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_info_overlay": {
+          "ms_per_frame": 1.46,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_planets": {
+          "ms_per_frame": 1.49,
+          "calls_per_frame": 1.1
+        },
+        "before._draw_stars": {
+          "ms_per_frame": 8.17,
+          "calls_per_frame": 1.1
+        },
+        "before._flush_labels": {
+          "ms_per_frame": 0.59,
+          "calls_per_frame": 1.1
+        },
+        "before._star_selection": {
+          "ms_per_frame": 2.03,
+          "calls_per_frame": 1.1
+        }
+      }
+    }
+  }
+}

@@ -344,6 +344,8 @@ def test_device_panel_unknown_range_does_not_block_and_records_unknown(monkeypat
     monkeypatch.setattr(dp, "enumerate_all_sdr_devices",
                         lambda: [{"driver": "fake", "label": "Fake"}])
     panel = dp.DevicePanel()
+    # 启动枚举已挪到后台（首帧不再等 1 s），测试用同步入口显式取一次列表
+    panel.refresh_devices()
     seen = []
     panel.connect_requested.connect(lambda d: seen.append(d))
     panel.sr_edit.setText("2048000")
@@ -366,6 +368,8 @@ def test_device_panel_known_range_rejects_out_of_range(monkeypatch):
                                   "capability_status": {
                                       "sample_rate_range": "probed"}}])
     panel = dp.DevicePanel()
+    # 启动枚举已挪到后台（首帧不再等 1 s），测试用同步入口显式取一次列表
+    panel.refresh_devices()
     seen = []
     panel.connect_requested.connect(lambda d: seen.append(d))
     warned = []

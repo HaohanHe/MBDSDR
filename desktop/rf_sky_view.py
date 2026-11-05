@@ -2050,7 +2050,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 搜索框 + 分类下拉 (自包含, 不依赖外部面板)
         self._build_search_widgets()
 
-        # 自动刷新
+        # 自动刷新。基准 33ms（30fps）；实际间隔按上一帧实测耗时自适应：
+        # 帧耗时超过预算时拉长间隔，避免 30fps 定时器持续把事件循环塞满。
+        self._paint_ms_ema = 0.0
+        self._pacing_interval_ms = 33
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._on_refresh_tick)
         self._refresh_timer.start(33)
@@ -2069,7 +2072,35 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._refresh_fast_time_positions()
         self._step_goto_anim()
         self._apply_camera_lock()
+        self._adapt_refresh_interval()
         self.update()
+
+    # 帧预算：上一帧耗时超过该值就认为 30fps 不再可持续。
+    FRAME_BUDGET_MS = 20.0
+    FRAME_MIN_INTERVAL_MS = 33
+    FRAME_MAX_INTERVAL_MS = 250
+
+    def _adapt_refresh_interval(self) -> None:
+        """按实测帧耗时调整重绘间隔（只改调度，不改任何绘制内容）。
+
+        实测：700×700 / 120° 视场单帧 paint ≈ 57 ms，而定时器固定 33 ms
+        触发——Qt 会把重绘请求连续排队，GUI 线程约 100% 忙于画天空，其它
+        按钮/面板事件被饿死。这里用上一帧耗时的 EMA 定步长：帧便宜时保持
+        30fps；帧贵时把间隔拉长到 ``上帧 × 1.35``，给事件循环留出余量。
+        动画本身按墙钟推进（goto / 呼吸时钟），拉长间隔只影响刷新频率，
+        不改变任何位置或画面内容。
+        """
+        ema = self._paint_ms_ema
+        if ema <= 0.0:
+            return
+        if ema <= self.FRAME_BUDGET_MS:
+            target = self.FRAME_MIN_INTERVAL_MS
+        else:
+            target = int(min(self.FRAME_MAX_INTERVAL_MS, ema * 1.35))
+        # 滞回：变化不足 6ms 不重设定时器，避免逐帧抖动。
+        if abs(target - self._pacing_interval_ms) >= 6:
+            self._pacing_interval_ms = target
+            self._refresh_timer.setInterval(target)
 
     # ------------------------------------------------------------------ #
     # 快转（|rate|>1）一致性：位置、轨迹、过境面板都要跟当前模拟时刻同拍
@@ -3600,6 +3631,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # ========================================================================
 
     def paintEvent(self, event):
+        _t_paint = time.perf_counter()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
@@ -3656,6 +3688,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._draw_data_source_overlay(painter)
 
         painter.end()
+        # 实测帧耗时（EMA α=0.3）→ 驱动 _adapt_refresh_interval 的步长决策。
+        _dt_ms = (time.perf_counter() - _t_paint) * 1000.0
+        self._paint_ms_ema = (0.7 * self._paint_ms_ema + 0.3 * _dt_ms
+                              if self._paint_ms_ema > 0.0 else _dt_ms)
 
     # ------------------------------------------------------------------ #
     # 天空背景: 透视窗口全屏, 近地平线大气散射渐变 (Preetham 简化)
@@ -3740,6 +3776,31 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._star_catalog_error = ""
         return sel
 
+    # 星表求出的「本帧应画星集合」只随（时刻、视线中心、视场、Bortle、消光）
+    # 变化；实测 select_for_view 单次 4.98 ms（1794 颗，700px/120°），而
+    # 120° 刷新一次只挪 0.008°。按 2 s 分箱缓存：同箱内星位最多偏 0.05 px
+    # （远小于屏幕像素），肉眼与拾取都不可辨，但省掉整段星表重算。
+    STAR_SEL_CACHE_BIN_S = 2.0
+
+    def _star_selection_cached(self, gs, jd):
+        """``_star_selection`` 的分箱缓存版（键覆盖全部输入，不做跨参数复用）。"""
+        key = (int(jd * 86400.0 / self.STAR_SEL_CACHE_BIN_S),
+               round(float(self.view_state.center_az), 3),
+               round(float(self.view_state.center_alt), 3),
+               round(float(self.view_state.fov_deg), 3),
+               int(self._bortle), round(float(self._extinction_k), 4),
+               round(float(getattr(gs, "lon", 0.0)), 4),
+               round(float(getattr(gs, "lat", 0.0)), 4))
+        if key == getattr(self, "_star_sel_key", None):
+            return self._star_sel_cached
+        sel = self._star_selection(gs, jd)
+        # 星表不可用（None / 空）不缓存失败：下一帧要能重试并如实刷新错误文案。
+        if sel is None or len(sel) == 0:
+            return sel
+        self._star_sel_key = key
+        self._star_sel_cached = sel
+        return sel
+
     # 视场 LOD 放出的暗星（有效星等已超过裸眼基线）用最小可辨点表示：
     # 半径 0.5px、无辉光，alpha 随接近本帧极限而衰减。判据只有一条——
     # ``eff_mag <= selection.limit_mag``（limit 来自 star_catalog 的
@@ -3804,7 +3865,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._star_sel = None
             return
         jd = self._current_jd()
-        sel = self._star_selection(gs, jd)
+        sel = self._star_selection_cached(gs, jd)
         self._star_sel = sel
         if sel is None or len(sel) == 0:
             return
@@ -3813,7 +3874,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         label_mag = _star_label_limit_mag(self.view_state.fov_deg)
         # 批量落笔：把颜色/直径/alpha 量化成桶，每桶一次 drawPoints。
         # 120° 时逐星 setBrush+drawEllipse 实测 71ms；分桶后状态切换从
-        # ~1200 次降到几十次。量化步长（色 8、直径 0.5px、alpha 8）
+        # ~1200 次降到几十次。量化步长（色 16、直径 0.5px、alpha 16）
         # 小于 1px 显示精度，视觉上不可辨。
         dot_buckets: Dict[Tuple[int, int, int, int, int], List[QPointF]] = {}
         n = len(sel)
@@ -3870,9 +3931,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     painter.setBrush(_star_brush(cr, cg, cb, glow_a))
                     painter.drawEllipse(pos, rr, rr)
             dot_buckets.setdefault(
-                (cr // 8 * 8, cg // 8 * 8, cb // 8 * 8,
+                (cr // 16 * 16, cg // 16 * 16, cb // 16 * 16,
                  max(1, int(round(max(1.0, 2.0 * r) * 2.0))),
-                 max(1, alpha_l[i] // 8 * 8)), []).append(pos)
+                 max(1, alpha_l[i] // 16 * 16)), []).append(pos)
             # 星名标签：只给 named 星，阈值随 FOV 收放（拉远不糊屏；
             # 放大后允许更暗的具名星出现）。无名星不编造名字。
             name = label_info.get(i)

@@ -1335,7 +1335,13 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
     if has_data:
         # VFO 带宽矩形（先画在谱线下方；无数据时不画，保持"未连接"干净）
         _draw_vfo_band(painter, state, spec_rect)
+        # 谱线/填充只关几何 AA：900×400 实测 45.8→25.0 ms/帧（-45%），
+        # 差异仅在填充边缘 1px 由混叠变硬（4× 放大才看得出，见
+        # docs/perf-evidence/aa_*_crop4x.png）；峰点/刻度/文字仍走原 AA。
+        _aa = bool(painter.renderHints() & QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing, False)
         _draw_spectrum(painter, state, spec_rect, line)
+        painter.setRenderHint(QPainter.Antialiasing, _aa)
         _draw_hold_lines(painter, state, spec_rect)
         _draw_peaks(painter, state, spec_rect, QColor(PAL_PEAK))
     else:

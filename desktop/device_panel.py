@@ -118,7 +118,19 @@ class DevicePanel(QWidget):
         # 用轮询历史而不是下拉框快照，避免 serial/tuner 抖动被误判成插拔。
         self._last_poll_locs: set = set()
         self._build_ui()
-        self.refresh_devices()
+        # 首次枚举延后到首帧之后：enumerate_all_sdr_devices 本机实测 1.0–1.8 s
+        # （rtlsdr_open + Pluto 网络探测 0.5 s），压在构造函数里等于让首帧等它。
+        # 期间界面如实显示「正在枚举」，不假装「未检测到设备」。
+        # 刷新（含启动首次）也走后台：枚举 1.0–1.8 s，延后到首帧之后仍会在
+        # 首帧后立刻冻住 GUI；这里只派发，结果回主线程再更新下拉框。
+        self._refresh_signals = _DeviceEnumSignals()
+        self._refresh_signals.finished.connect(self._on_devices_refreshed)
+        self._refresh_inflight = False
+        # 枚举完成前 dropdown 如实写「正在枚举」、连接按钮置灰：
+        # 不假装「未检测到设备」，也不允许对着占位项点连接。
+        self.dev_combo.addItem("正在枚举设备…")
+        self.connect_btn.setEnabled(False)
+        QTimer.singleShot(400, self.refresh_devices_async)
 
         # 热插拔轮询：每 2 秒派发一次后台枚举（枚举本身不在这条 GUI 线程里跑）
         self._enum_signals = _DeviceEnumSignals()
@@ -145,7 +157,7 @@ class DevicePanel(QWidget):
         self.dev_combo.currentIndexChanged.connect(self._on_device_selected)
         dev_row.addWidget(self.dev_combo, stretch=1)
         self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.clicked.connect(self.refresh_devices)
+        self.refresh_btn.clicked.connect(self.refresh_devices_async)
         dev_row.addWidget(self.refresh_btn)
         form.addRow("设备", dev_row)
 
@@ -195,14 +207,44 @@ class DevicePanel(QWidget):
 
     # ------------------------------------------------------------------ 设备枚举
     def refresh_devices(self) -> None:
-        """重新枚举 SDR 设备并刷新下拉框。"""
+        """同步枚举 SDR 设备（同步调用入口，测试与显式请求用）。"""
+        if not _ENUM_OK or enumerate_all_sdr_devices is None:
+            self._apply_devices([])
+            return
+        try:
+            devices = list(enumerate_all_sdr_devices())
+        except Exception:  # noqa: BLE001 - 失败按空列表处理，不造假
+            devices = []
+        self._apply_devices(devices)
+
+    def refresh_devices_async(self) -> None:
+        """派发一次后台设备枚举（只派发，不等结果）。
+
+        枚举里有同步 USB open 与 0.5 s 网络超时，实测 1.0–1.8 s；在 GUI 线程
+        同步跑等于冻住界面。真实结果在 ``_on_devices_refreshed`` 里落到控件。
+        """
+        if not _ENUM_OK or enumerate_all_sdr_devices is None:
+            self._apply_devices([])
+            return
+        if self._refresh_inflight or self._enum_inflight:
+            return  # 上一拍还没回来，不堆积任务
+        self._refresh_inflight = True
+        if not self._devices:
+            self.status_label.setText("正在枚举设备…")
+        QThreadPool.globalInstance().start(_DeviceEnumTask(self._refresh_signals))
+
+    def _on_devices_refreshed(self, devices, err: str) -> None:
+        """后台刷新回来了：GUI 线程里更新下拉框（失败按空列表处理，不造假）。"""
+        self._refresh_inflight = False
+        if err or devices is None:
+            self._apply_devices([])
+            return
+        self._apply_devices(devices)
+
+    def _apply_devices(self, devices) -> None:
+        """把一份已枚举到的设备列表落到控件上（不触发重新枚举）。"""
+        self._devices = list(devices or [])
         self.dev_combo.clear()
-        self._devices = []
-        if _ENUM_OK and enumerate_all_sdr_devices is not None:
-            try:
-                self._devices = list(enumerate_all_sdr_devices())
-            except Exception:  # noqa: BLE001
-                self._devices = []
         if not self._devices:
             self.dev_combo.addItem("未检测到 SDR 设备")
             self.status_label.setText("未检测到 SDR 设备")
@@ -234,7 +276,7 @@ class DevicePanel(QWidget):
         """
         if not _ENUM_OK or enumerate_all_sdr_devices is None:
             return
-        if self._enum_inflight:
+        if self._enum_inflight or self._refresh_inflight:
             return
         self._enum_inflight = True
         QThreadPool.globalInstance().start(_DeviceEnumTask(self._enum_signals))
@@ -270,7 +312,8 @@ class DevicePanel(QWidget):
                     label = d.get("label", "新设备")
                     self.device_plugged.emit(label)
                     break
-            self.refresh_devices()
+            # 本轮枚举刚拿到的列表直接落控件，不再触发第二次枚举。
+            self._apply_devices(now)
 
     @staticmethod
     def _key_of(d: Dict) -> str:

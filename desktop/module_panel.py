@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 # 允许从 desktop/ 直接跑，也允许被 main_window import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QTimer, \
+    QObject, QRunnable, QThreadPool
 from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QFontMetricsF, QPainterPath,
     QLinearGradient,
@@ -204,6 +205,31 @@ class FlowCanvas(QWidget):
 # ======================================================================
 #  模块面板主体
 # ======================================================================
+class _ModuleEnumSignals(QObject):
+    """跨线程设备枚举结果（不挂父对象，生命周期由在跑的任务持有）。"""
+
+    finished = Signal(object, object)  # (devices: list | None, error_text | None)
+
+
+class _ModuleEnumTask(QRunnable):
+    """后台枚举 SDR 设备，避免 GUI 线程付 1 s 枚举成本。"""
+
+    def __init__(self, signals: _ModuleEnumSignals):
+        super().__init__()
+        self._signals = signals
+
+    def run(self):  # noqa: D102 - Qt 接口
+        try:
+            from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
+            devices, err = list(enumerate_all_sdr_devices()), None
+        except Exception as exc:  # noqa: BLE001 - 失败必须回传，不静默
+            devices, err = None, _clean_exc(exc)
+        try:
+            self._signals.finished.emit(devices, err)
+        except RuntimeError:
+            pass  # 面板已销毁，结果无人接收
+
+
 class ModulePanel(QWidget):
     """SDR++ 式模块面板。对外只发信号，不直接碰硬件（与 control_panel 解耦）。"""
 
@@ -216,8 +242,13 @@ class ModulePanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._devices: List[Dict] = []
+        self._enum_signals = _ModuleEnumSignals()
+        self._enum_signals.finished.connect(self._on_devices_enumerated)
+        self._enum_inflight = False
         self._build_ui()
-        self.refresh_devices()
+        # 设备枚举放到后台：实测本机 enumerate_all_sdr_devices 1.03 s
+        # （含 rtlsdr_open + 0.5 s 网络探测），压在 GUI 线程里首帧得等它。
+        self.refresh_devices_async()
 
     # ------------------------------------------------------------------
     def _build_ui(self):
@@ -237,7 +268,7 @@ class ModulePanel(QWidget):
         lv.addWidget(self.device_combo)
         btn_row = QHBoxLayout()
         self.refresh_btn = QPushButton("刷新")
-        self.refresh_btn.clicked.connect(self.refresh_devices)
+        self.refresh_btn.clicked.connect(self.refresh_devices_async)
         btn_row.addWidget(self.refresh_btn)
         self.connect_btn = QPushButton("连接")
         self.connect_btn.clicked.connect(self._on_connect)
@@ -338,18 +369,45 @@ class ModulePanel(QWidget):
 
     # ------------------------------------------------------------------
     def refresh_devices(self):
-        """真实枚举 SDR 设备。无设备 → 下拉显示'未发现SDR设备'。
+        """同步枚举 SDR 设备（同步调用入口，测试与显式请求用）。
 
-        对应 SDR++ soapy_source refresh()（main.cpp:83-99）：
-          devList = SoapySDR::Device::enumerate(); 空就只画 Refresh。
+        对应 SDR++ soapy_source refresh()（main.cpp:83-99）：空列表就只画 Refresh。
+        启动与「刷新」按钮走 ``refresh_devices_async``，避免 1 s 枚举压在 GUI 线程。
         """
         try:
             from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
             self._devices = enumerate_all_sdr_devices()
             enum_err = None
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 枚举失败要如实回传
             self._devices = []
             enum_err = _clean_exc(e)
+
+        self._apply_devices(self._devices, enum_err)
+
+    def refresh_devices_async(self):
+        """派发一次后台设备枚举（本函数只做派发，不等结果）。
+
+        真实结果在 ``_on_devices_enumerated`` 里落到界面上；枚举失败与"没插设备"
+        仍然是两件事，分别如实显示（旧实现先 setText(异常) 再被空态文案覆盖）。
+        """
+        if self._enum_inflight:
+            return  # 上一拍还没回来，不堆积任务
+        self._enum_inflight = True
+        self.refresh_btn.setEnabled(False)
+        self.device_info.setText("正在枚举设备…")
+        if self.device_combo.count() == 0:
+            self.device_combo.addItem("正在枚举设备…")
+        QThreadPool.globalInstance().start(_ModuleEnumTask(self._enum_signals))
+
+    def _on_devices_enumerated(self, devices, enum_err):
+        """后台枚举回来了：在 GUI 线程里更新下拉框与提示。"""
+        self._enum_inflight = False
+        self.refresh_btn.setEnabled(True)
+        self._apply_devices(devices, enum_err)
+
+    def _apply_devices(self, devices, enum_err=None):
+        """把一份设备列表落到界面（同步/异步/测试共用同一套显示规则）。"""
+        self._devices = list(devices) if devices else []
 
         self.device_combo.clear()
         if not self._devices:

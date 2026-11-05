@@ -1,0 +1,12 @@
+{
+  "size": [
+    900,
+    400
+  ],
+  "ms_per_frame_aa_on": 40.1,
+  "ms_per_frame_aa_off": 19.79,
+  "changed_pct": 2.498,
+  "gt8_pct": 1.074,
+  "gt32_pct": 0.533,
+  "max_diff": 127
+}
