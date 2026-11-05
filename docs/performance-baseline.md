@@ -225,7 +225,10 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 **前三名（可归因叶子块）**：① `eventFilter` **2566.4 ms**（占构造 59%；80.5k 次事件，每次 4 个 `getattr` + 一次 `from PySide6.QtCore import QEvent`）；② 首帧后后端枚举 **1543.5 ms**（仍在 GUI 线程）；③ `_build_kernel_panels` **1138.8 ms**（其中 `SettingsPanel` 625.0 ms）。
 
-**eventFilter A/B（交替跑，n=3，只测构造）**：正常中位 **4198.4 ms** → 把 `eventFilter` 换成只调 `QMainWindow.eventFilter` **1180.9 ms**，差 **3017.5 ms**。两条独立口径（包装计时 2566.4 / A/B 3017.5）同量级，说明这是真实开销，不是采样噪声。热点在 `desktop/main_window.py:2355-2379`；该文件归「操作逻辑线」，**本节是改前快照**——2026-11-06 第三刀已落地，见 §8.1（旧/新 A/B -2028.0 ms / -58.6%，事件回归 67 passed）。
+**eventFilter A/B（交替跑，n=3，只测构造）**：正常中位 **4198.4 ms** → 把 `eventFilter` 换成只调 `QMainWindow.eventFilter` **1180.9 ms**，差 **3017.5 ms**。两条独立口径（包装计时 2566.4 / A/B 3017.5）同量级，说明这是真实开销，不是采样噪声。热点在 `desktop/main_window.py:2355-2379`；该文件归「操作逻辑线」，**本节是改前快照**。落库状态按 2026-11-06 实际核对，分两条：
+
+- **已落库**（eventFilter 早退分派 + 启动枚举/连接后台化）：`f4422ca9081f739299cc33d0ef16eb0802f04895` — `desktop/main_window.py:2367` — `def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)`；`desktop/main_window.py:3488` — `def _auto_enumerate_and_connect_async(self)`。`git show --name-only f4422ca9` 含 `desktop/main_window.py`，见 §8.1/§8.2。
+- **未落地 / 计划中**：`_start_iq_streams` 的 844–1013 ms。本轮只完成归因（GUI 线程首次 `import scipy.signal` 1016.5 ms，见 §8.6），不得读作「已优化」。
 
 **可后台化边界（按实测大小判断）**
 
@@ -330,41 +333,53 @@ tracemalloc delta **+342 KB**、gc 对象 **+2**、pen 缓存 397 条、brush �
 
 ### 8.1 eventFilter：按事件类型分型 + A/B + 行为回归
 
-**分型（一次完整启动，`STARTUP_EF_PROFILE=1`；计数为改后实现，A/B 三次总事件数 78,002–81,445 与之同量级）**
+**口径先对齐（2026-11-06 05:20 补测）**
 
-| 事件类型 | 次数 | 累计 ms | 单次 µs | 说明 |
-|---|---:|---:|---:|---|
-| `PaletteChange` | 19,945 | 63.7 | 3.19 | 样式表传播 |
-| `FontChange` | 19,499 | 61.3 | 3.14 | 字体传播 |
-| `StyleChange` | 12,477 | 37.8 | 3.03 | 样式传播 |
-| `DynamicPropertyChange` | 4,545 | 15.8 | 3.48 | 动态属性（主题/QSS 副作用） |
-| `ChildAdded` | 2,992 | 10.0 | 3.34 | 控件树生长 |
-| `Timer` | 906 | 9.7 | **10.71** | 含真实定时器回调 |
-| `MetaCall` | 1,916 | 8.5 | 4.44 | 跨线程信号投递 |
-| `Polish` | 1,987 | 6.3 | 3.17 | 控件抛光 |
-| `Create` | 1,976 | 5.4 | 2.73 | 控件创建 |
-| `Paint` | 826 | 5.1 | 6.17 | 首帧前绘制 |
-| `ChildPolished` | 1,542 | 4.7 | 3.05 | 子控件抛光 |
-| `Move` | 1,585 | 4.7 | 2.97 | 布局移动 |
-| 其余类型合计 | 7,844 | 47.4 | 6.04 | 共 78,040 次 / 280.4 ms |
+§8 初稿把「改后口径的分型表（78,040 次 / 280.4 ms）」和「改前→改后 A/B 省下 2028 ms」并列，这两个数**不同口径、不能互相校验**：280.4 ms 是**只统计新实现**的一次运行，2028 ms 是**新旧两套实现**在同一会话交替跑出的构造差。现已补跑同口径对照：旧/新实现**交替**各 3 次（同一台机、同一次探针会话、同一 `STARTUP_EF_PROFILE` 计时方式），每类取中位；A/B 为同一批子进程。
 
-前三类**样式传播事件 51,921 次（66.5% 的调用量）但只占 162.8 ms（58.1% 的时间）**——它们的单次成本（3.0–3.2 µs）低于平均值 3.59 µs。真正贵的是 `Timer`（10.7 µs，因为要真的进基类派发）和 `Paint`（6.2 µs）。
+| 事件类型 | 旧 次数 | 旧 累计 ms | 旧 单次 µs | 新 次数 | 新 累计 ms | 新 单次 µs |
+|---|---:|---:|---:|---:|---:|---:|
+| `PaletteChange` | 19,510 | 520.3 | 26.67 | 19,510 | 109.6 | 5.62 |
+| `FontChange` | 19,379 | 513.2 | 26.48 | 19,379 | 108.2 | 5.58 |
+| `StyleChange` | 12,247 | 335.5 | 27.39 | 12,247 | 58.8 | 4.80 |
+| `DynamicPropertyChange` | 4,188 | 134.6 | 32.14 | 4,188 | 24.2 | 5.78 |
+| `ChildAdded` | 2,855 | 89.7 | 31.42 | 2,855 | 13.1 | 4.59 |
+| `Create` | 1,876 | 57.5 | 30.65 | 1,876 | 7.1 | 3.78 |
+| `Polish` | 1,887 | 56.8 | 30.10 | 1,887 | 8.8 | 4.66 |
+| `ChildPolished` | 1,442 | 42.1 | 29.20 | 1,442 | 6.7 | 4.65 |
+| `Timer` | 1,066 | 18.5 | 17.36 | 1,068 | 18.5 | 17.32 |
+| **合计（全部类型）** | **78,066** | **1955.2** | **25.04** | **78,099** | **425.4** | **5.45** |
+
+上表 9 类覆盖 82.6% 调用量、90.4% 计时；其余是 `ParentChange`/`Destroy`/`ActionChanged`/`MouseTrackingChange` 等一次性类型，两次会话的归属不稳定（同一次启动里此消彼长），不拿来对比。**同口径结论：旧 25.04 → 新 5.45 µs/次（-78.2%），eventFilter 段 1955.2 → 425.4 ms（-78.2%）。** 该表与 A/B 的 1991.5 ms 同量级（分型只覆盖过滤器本身，A/B 覆盖整段构造）；表内绝对值含 `QEvent.Type(...).name` 的采样开销（约 +1 µs/次），所以**不要拿 425.4 ms 与 §8 旧稿的 280.4 ms 比较**——那是另一次运行、同一实现的非采样统计，差异来自机器负载（见下）。
+
+前三类样式传播事件 51,136 次（65.5% 调用量、69.5% 旧耗时），单次旧 26.5–27.4 µs、新 4.8–5.6 µs。真正贵的是 `Timer`（17.3 µs，两种实现都一样——它要真的进基类派发，本改动对它无效）。
+
+**三个构造基准数字为什么打架（4314.3 / 3459.2 / 1431.2）**
+
+| 数字 | 来源 | 同代码复测 | 归因 |
+|---|---|---|---|
+| 4314.3 ms | §7.1 中位（4054.2–4483.1），04:10 前后 | — | **机器负载**：当时打包线在跑 PyInstaller（`claims.json` 有 15 条过期 claim、`.tmp` 下 `pyi-build2..14`），同会话导入也偏慢 |
+| 3459.2 ms | §8 初稿 A/B 的「旧实现」中位，04:50 | 3555.4 ms（**+2.8%**） | 与本节同代码，差 2.8% = 正常抖动 |
+| 1431.2 ms | §8 初稿 A/B 的「新实现」中位，04:50 | 1563.9 ms（**+9.6%**） | 同上；new 段本身更短，相对抖动更大 |
+| 3555.4 / 1563.9 ms | 本节同口径 A/B（05:20） | — | 同一会话交替，**唯一可比的改前/改后数** |
+
+即：4314.3 → 3459.2 的 855 ms **不是谁的代码改动**（3459.2 与现在的 3555.4 是同一份 HEAD 代码，只差 2.8%）；它是 04:10 那轮被并行打包构建挤出来的。**结论：跨会话的绝对构造时间只能看趋势，改前/改后只认同一会话交替 A/B。**
 
 **减负做了什么（`desktop/main_window.py` `eventFilter`）**
 
-1. `from PySide6.QtCore import QEvent` 从**每次调用内**提到模块顶部（旧实现 80,522 次调用 = 80,522 次 `import` 语句）；
+1. `from PySide6.QtCore import QEvent` 从**每次调用内**提到模块顶部（旧实现 7.8 万次调用 = 7.8 万次 `import` 语句）；
 2. `event.type()` 从**最多 6 次**降为 **1 次**，先按类型分派；
 3. 旧实现无论什么事件都要做 **4 次 `getattr` + 4 次身份比较**；新实现只在 `Resize` / `Enter` / `Leave` 分支里做身份比较，样式类事件直接落到 `super().eventFilter()` 的早退路径；`Enter`/`Leave` 合并为一次 `etype == QEvent.Enter or etype == QEvent.Leave`。
 
-**A/B（交替子进程，n=3，只测 `MainWindow.__init__` 到构造结束）**
+**A/B（同会话交替子进程，n=3，只测 `MainWindow.__init__` 到构造结束）**
 
 | | 第 1 次 | 第 2 次 | 第 3 次 | 中位 |
 |---|---:|---:|---:|---:|
-| 改前（按 HEAD 原样重建的旧 `eventFilter`） | 3324.2 | 3459.2 | 3666.9 | **3459.2 ms** |
-| 改后 | 1431.2 | 1526.2 | 1395.3 | **1431.2 ms** |
-| 差值 | | | | **-2028.0 ms（-58.6%）** |
+| 改前（按 HEAD 原样重建的旧 `eventFilter`） | 3555.4 | 4292.2 | 3199.3 | **3555.4 ms** |
+| 改后 | 2226.4 | 1563.9 | 1541.5 | **1563.9 ms** |
+| 差值 | | | | **-1991.5 ms（-56.0%）** |
 
-三条独立口径同向：旧实现包装计时 **2566.4 ms**（§7.1，80,522 次 → **31.9 µs/次**）→ 新实现包装计时 **280.4 ms**（78,040 次 → **3.59 µs/次**，**-88.7%**）；A/B 构造差值 **2028.0 ms**。
+上一会话同法复测为 3459.2 → 1431.2（-2028.0 ms / -58.6%）；两次会话的差值比例 -56.0% / -58.6% 一致，绝对值随负载浮动 ±10%。**只摘掉 eventFilter（置空为只调基类）现在只省 315.5 ms（1552.9 → 1237.4），即新实现下过滤器只剩构造总时间的约 20%**。
 
 **哪些类型不能减、为什么**
 
@@ -417,9 +432,9 @@ GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backe
 
 > 心跳只作旁证：`_connect_backend` 内部会调 `QApplication.processEvents()`，被它服务的心跳会低估阻塞，所以主指标用相位时间戳。
 
-**残余大头**：改后 GUI 仍占 **1006 ms**，其中 `_start_iq_streams` **844.0–1013.5 ms（中位 928.8）**，占 92%。它构建 `ReceiveChain`/`AudioPlayer`（QObject + 音频设备），跨线程要改所有权与信号边界——属下一刀，本轮不动。
+**残余大头**：改后 GUI 仍占 **1006 ms**，其中 `_start_iq_streams` **844.0–1013.5 ms（中位 928.8）**，占 92%。本轮已拆账：真因是 GUI 线程首次 `import scipy.signal`（`VFO.__init__` 触发，空载 1016.5 ms），**不是** pipeline 构建或音频设备所有权；方案与 A/B 见 §8.6，**未落库**。
 
-**已知差异（未改，留档）**：启动自动连接路径不再显示「状态: 连接中」，因为 `connect()` 已在后台；GUI 在探测/连接期间显示的是「未连接」，完成后直接跳到已连接或失败提示。手动连接路径行为不变（仍先写「连接中」再 `processEvents`）。若要补提示，最小改动 = 在 `_auto_enumerate_and_connect_async` 起线程前写一条 `MSG_QUICK` 状态栏文案。
+**已补：自动连接期间的状态栏提示（2026-11-06）**：`_auto_enumerate_and_connect_async()` 在起线程前写 `statusBar().showMessage("正在连接设备…", MSG_NORMAL)`（非阻塞；成功/失败/无设备提示会覆盖它）。手动连接路径不变。测试钉住：`tests/test_desktop_ui_responsiveness.py::TestAutoEnumerateNoDevice::test_async_auto_connect_shows_status_hint`（1 passed；后台 worker 运行期间断言 `statusBar().currentMessage()` 含「正在连接设备」）。**落库状态**：该 hunk 与 `_auto_enumerate_and_connect_async` 同属 `desktop/main_window.py`，本轮检查时该文件被 `操作逻辑线` 持有（pid 26256，05:02:37 起，90 min TTL），按纪律不夺取、不夹带；hunk 与测试留在工作树，待该文件释放后落库（提交边界见 §8.5）。
 
 **行为验证**：设备列表填充/切换/失败回滚 = `test_device_switch_flow` 6 PASSED；断开清理 = `TestCleanDisconnect` 3 PASSED；无设备空态 = `TestAutoEnumerateNoDevice` 3 + `test_no_device_onboarding` 4 PASSED；自动连接/热插拔 = 热插拔严格 `XFAIL`（产品未接入自动重连，非本改动引入）。合计见 8.1 的 67 passed。
 
@@ -490,3 +505,82 @@ GUI 线程「忙」区间定义：同步版 `enum_worker_start → connect_backe
 - `docs/perf-evidence/deep_perf_third_20261106.json`：本轮三份原始输出的合并快照——`startup`（EF 分型、旧/新 EF A/B、sync/async 枚举 A/B、全部相位时间戳）、`spectrum`（CoarseTimer）、`spectrum_precise`（PreciseTimer 对照）。顶层带 `conditions`/`commands`。
 - 合并源（临时产物，已删除）：`.tmp\startup_v3.json` + `.tmp\spectrum_v3.json` + `.tmp\spectrum_precise.json`；探针脚本自身的 A/B 开关是 `STARTUP_EF_PROFILE` / `STARTUP_OLD_EF` / `STARTUP_SYNC_ENUM` / `SPECTRUM_PRECISE`。
 - 提交边界：`desktop/main_window.py` 只提交本线 9 个 hunk（Qt 导入、`_auto_enum_ready` 信号、`__init__` 线程字段、启动定时器目标、`eventFilter`、`_auto_enumerate_and_connect*` 系列、`_connect_backend(already_connected=)`）；**同文件里他人未落库的 hunk 不进本次提交**（用私有 `GIT_INDEX_FILE` + `check_commit_scope.py --staged --expect` 精确核对）。
+- 本轮（2026-11-06 05:xx）新增证据：`startup`（`scipy_prewarm_ab`、`_build_pipeline` 子调用拆账）、`spectrum` 66/53 交替与 300 s 长跑、`streams`（同进程 3 次 VFO/pipe 构造）。合并源 `.tmp\startup_v8.json` + `.tmp\sp66_0/1.json` + `.tmp\sp53_0/1.json` + `.tmp\spectrum_53_long.json` + `.tmp\streams_v1.json`（合并后删除）。
+- 本轮 `desktop/main_window.py` 的状态栏提示 hunk **未落库**：文件被 `操作逻辑线` 持有（pid 26256，05:02:37 起），按纪律不夺取；`tests/test_desktop_ui_responsiveness.py` 的新用例同样留在工作树（依赖该 hunk，单独提交会让干净检出变红）。
+
+### 8.6 下一刀：`_start_iq_streams` 844–1013 ms 的真因（未落库）
+
+**结论先行**：这笔时间不是 pipeline 构建，也不是音频设备所有权问题。拆账后 **92–99.9% 落在 `VFO.__init__`**，而 `VFO.__init__` 慢的唯一原因是 **GUI 线程第一次 `import scipy.signal`（1016.5 ms）**。
+
+**同会话拆账（真机，`--section startup --runs 1`）**
+
+| 子项 | 未预热（本次） | 预热 `scipy.signal` 后 | 旧观测（§8.2） | 说明 |
+|---|---:|---:|---:|---|
+| `_start_iq_streams` 整段 | 1214.0 ms | **119.5 ms** | 844.0–1013.5 | 含声卡打开 |
+| `AudioPlayer.start()` | 99.8 ms | 116.3 ms | — | 真实声卡打开；`MBDSDR_NULL_AUDIO` 下约 60 ms |
+| `_build_pipeline()` | 1114.2 ms | **3.1 ms** | — | 差值 1111.1 ms |
+| 　└ `VFO.__init__` | **1112.9 ms** | **1.1 ms** | — | 占 build 的 99.9% |
+| 　└ `ReceivePipeline.__init__` | 0.3 ms | 0.4 ms | — | 创建 4 个 QThread + 5 个乒乓流 |
+| 　└ `ReceivePipeline.start()` | 0.6 ms | 0.9 ms | — | 只启动线程，不 join |
+| 　└ `_update_main_vfo_offset` | 0.0 ms | 0.1 ms | — | `push_offset` |
+| `import scipy.signal`（预热线程） | — | 1381.7 ms（后台） | — | 空载微基准 1016.5 ms |
+
+旁证一（同一进程内 3 次 VFO 构造，`.tmp\streams_v1.json`）：1264.8 → 0.6 → 0.5 ms。若慢在 pipeline/线程，三次应该同量级；只有第一次慢，说明是**一次性导入**。
+旁证二（空载微基准）：`import scipy.signal` 1016.5 ms、首次 `firwin` 0.3 ms、预热后 `VFO(...)` 0.5 ms、后续 0.38–0.45 ms。
+旁证三（同会话预热 A/B）：`hb_max_ms` 1298.6 → 209.9 ms，连接阶段的 1 s 阻塞随预热消失。
+
+**方案（按收益/风险排序）**
+
+| 方案 | 做法 | 收益 | 风险/成本 | 结论 |
+|---|---|---|---|---|
+| **A（推荐）** | 启动早期起一个 daemon 线程只做 `import scipy.signal`，与枚举/连接并行（`desktop/main.py` 或启动定时器处，1 处 + 1 线程） | `_start_iq_streams` -90.2%、`_build_pipeline` -99.7%、GUI 忙区间 -1.09 s | 纯模块导入，**不碰任何 QObject/信号**；失败 `ImportError` 直接忽略，VFO 首次构造回落到懒加载，行为与现状等价 | 落库候选 |
+| B（不推荐） | 把 `ReceivePipeline` 构建搬 worker 线程 | 预热后只剩 3.1 ms | `ReceivePipeline` 是 `QObject`，`__init__` 里创建的 4 个 QThread 随父对象亲和；搬到 worker 后 `start()/shutdown()` 必须在 worker 线程调用，GUI 侧持有的 `self._pipeline` 变成跨线程对象。要安全就得把 pipeline 留在 GUI、只回传纯 numpy 的 `taps`/`resamp_window`（信号 object），失败回滚 = 保持懒加载；断开清理顺序仍为 `_health_timer.stop()` → `reader.shutdown()` → `splitter.stop()` → 下游 shutdown → `wait(2000)` → 解绑 VFO → `audio.stop()` | 风险/收益倒挂 |
+| C（不推荐） | 把 `import scipy.signal` 提到 `dsp.py` 模块顶层 | 无 | 1 s 只是从「连接后」移到「导入时」，首帧更晚，总启动不变 | 用户感知更差 |
+
+**音频设备的所有权**：`AudioPlayer` 是普通类（不是 `QObject`），`start()` 内部只有 `sounddevice.OutputStream` + `stream.start()`，回调线程不碰 Qt；理论上可在 worker 调用并把 `ok` 写回 GUI。但预热后它只剩 99.8–116.3 ms（`MBDSDR_NULL_AUDIO=1` 下约 60 ms），且现有失败分支已经是「返回 False → 状态栏说明」，后台化收益小、要新增一条回写信号，**本轮不做**。
+
+**A/B 数字（同会话交替子进程）**
+
+| | 未预热 | 预热 `scipy.signal` | 变化 |
+|---|---:|---:|---:|
+| `_start_iq_streams` | 1214.0 ms | **119.5 ms** | **-1094.5 ms（-90.2%）** |
+| `_build_pipeline` | 1114.2 ms | **3.1 ms** | **-1111.1 ms（-99.7%）** |
+| 心跳最大间隔 | 1298.6 ms | **209.9 ms** | -1088.7 ms |
+
+> 口径：预热在子进程 `MainWindow()` 构造前执行，等价于「预热线程已先完成」。真实方案里这 1–1.4 s 在后台线程与枚举（1.1–1.4 s）/connect（0.02–1.1 s）并行，不占 GUI；绝对值随机器负载浮动（本轮同机仍有其它会话跑测），**只认同一会话交替差值**。
+
+**行为回归（本项未落库，沿用现有基线）**
+
+| 路径 | 测试 | 结果 |
+|---|---|---|
+| 设备切换/失败回滚 | `tests/test_device_switch_flow.py` | 6 PASSED |
+| 断开清理 | `tests/test_desktop_ui_responsiveness.py::TestCleanDisconnect` | 3 PASSED |
+| 无设备空态 | `TestAutoEnumerateNoDevice` + `tests/test_no_device_onboarding.py` | 7 PASSED |
+| 录音/回放启动 | `tests/test_record_streaming.py` + `tests/test_playback.py` + `tests/test_replay_load_async.py` | **16 passed**（本轮实测） |
+| 自动连接状态栏提示 | `TestAutoEnumerateNoDevice::test_async_auto_connect_shows_status_hint` | 1 passed |
+
+**claim**：`desktop/main_window.py` 在 05:02:37 起由 `操作逻辑线` 持有（pid 26256，90 min TTL），本轮不夺取、不夹带；方案 A 若落在 `desktop/main.py`，该文件的过期 claim 需先按 `scripts/file_claim.py claim` 走一遍再落库。
+
+### 8.7 53 ms 取舍：先测后定，默认值不动
+
+**复跑**：`$env:SPECTRUM_INTERVAL_MS=66` 或 `53`；`python scripts/perf_probe_deep.py --section spectrum`；长跑加 `$env:SPECTRUM_DURATION_MS=300000`。
+
+**交替 A/B（66 / 53 各 2 次，取中位）**
+
+| | 66 ms | 53 ms | 差 |
+|---|---:|---:|---:|
+| fps | 13.10 | **16.34** | +3.24 |
+| CPU%（进程） | 18.1% | **22.15%** | +4.05 pt（+22.4%） |
+| paint p50 | 8.43 ms | 7.96 ms | -0.47 ms |
+| paint p95 | 9.86 ms | 9.76 ms | -0.10 ms |
+| 心跳阻塞/帧 | 3.56 ms | 2.80 ms | -0.76 ms |
+| 实测周期 | 79.20 ms | 61.09 ms | -18.11 ms |
+
+**连续 5 分钟（53 ms，`spectrum_53_long`）**：300.002 s / 4802 帧 = **16.01 fps**，CPU 22.5%，paint p50 8.59 / p95 10.23 / max 17.85 ms。按 60 s 分桶：fps **16.02 / 16.00 / 16.00 / 16.00 / 16.00**，paint 中位 **8.45 / 8.16 / 9.30 / 8.69 / 8.55 ms** → 无退化、无爬升、无内存/定时器漂移迹象。
+
+**结论**
+
+1. **13.16 fps 是定时器语义决定的**（周期 = interval + handler，见 §8.3）；53 ms 把周期压到 61 ms，帧率过冲到 16.3，超过名义 15.15 fps。
+2. 若目标是 15.15 fps（周期 66 ms），按实测线性关系 `周期 ≈ interval + 8（paint）+ 3（其余）`，应取 **约 56 ms**，不是 53 ms。53 ms 多出的 3 fps 换来 CPU +22.4%，**单位帧成本反而变差**（paint 只从 8.43 降到 7.96）。
+3. **默认值本轮不改**（仍是 66 ms）。不建议把 53 ms 做成无条件默认。
+4. 若日后做「性能档自适应」，门槛用 **实测 paint 中位 ≤ 6 ms** 才切到 56 ms（目标 15 fps）；本机 paint 中位 8.59 ms（5 分钟）→ **不满足**，应保持 66 ms。用 53 ms 作为自适应档也需同时满足「paint 中位 ≤ 6 ms」且「CPU 预算允许 +22%」，否则收益是虚的。

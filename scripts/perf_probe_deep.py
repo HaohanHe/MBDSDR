@@ -279,6 +279,82 @@ for _label, _name in (("async_enter", "_auto_enumerate_and_connect_async"),
                       ("backfill", "_backfill_real_rf_readings"),
                       ("sky_sat", "_update_sky_satellites")):
     _wrap(_label, _name)
+
+# _start_iq_streams 内部拆账（只测不改）：声卡打开 / IQ 读流初始化 / 流水线组装
+_orig_ars = MainWindow._active_read_samples
+def _ars(self, *a, **k):
+    t = time.perf_counter(); r = _orig_ars(self, *a, **k)
+    box["active_read_ms"] = box.get("active_read_ms", 0.0) \
+        + (time.perf_counter() - t) * 1000.0
+    return r
+MainWindow._active_read_samples = _ars
+_orig_bp = MainWindow._build_pipeline
+def _bp(self, *a, **k):
+    t = time.perf_counter()
+    try:
+        return _orig_bp(self, *a, **k)
+    finally:
+        box["build_pipeline_ms"] = box.get("build_pipeline_ms", 0.0) \
+            + (time.perf_counter() - t) * 1000.0
+MainWindow._build_pipeline = _bp
+
+# _build_pipeline 内部子调用拆账：真机下 build 966 ms，stub 下只 1.5 ms，
+# 到底落在 pipe 构造 / pipe.start / VFO offset 哪一步（全部只测不改）。
+def _add_ms(key, t):
+    box[key] = box.get(key, 0.0) + (time.perf_counter() - t) * 1000.0
+
+import receive_pipeline as _rp
+_rp_ctor = _rp.ReceivePipeline.__init__
+def _rp_init(self, *a, **k):
+    t = time.perf_counter(); _rp_ctor(self, *a, **k); _add_ms("pipe_ctor_ms", t)
+_rp.ReceivePipeline.__init__ = _rp_init
+_rp_start = _rp.ReceivePipeline.start
+def _rp_st(self):
+    t = time.perf_counter()
+    try:
+        return _rp_start(self)
+    finally:
+        _add_ms("pipe_start_ms", t)
+_rp.ReceivePipeline.start = _rp_st
+
+import mbdsdr_ai.dsp as _dsp
+_dsp_vfo_ctor = _dsp.VFO.__init__
+def _dsp_vfo(self, *a, **k):
+    t = time.perf_counter(); _dsp_vfo_ctor(self, *a, **k); _add_ms("vfo_ctor_ms", t)
+_dsp.VFO.__init__ = _dsp_vfo
+
+import mbdsdr_ai.vfo_manager as _vm
+for _vn in ("add", "bind_dsp", "set_active_context"):
+    _vo = getattr(_vm.VfoManager, _vn)
+    def _vmk(n, o):
+        def _vw(self, *a, **k):
+            t = time.perf_counter()
+            try:
+                return o(self, *a, **k)
+            finally:
+                _add_ms("vfo_" + n + "_ms", t)
+        return _vw
+    setattr(_vm.VfoManager, _vn, _vmk(_vn, _vo))
+
+_upd_orig = MainWindow._update_main_vfo_offset
+def _upd(self, *a, **k):
+    t = time.perf_counter()
+    try:
+        return _upd_orig(self, *a, **k)
+    finally:
+        _add_ms("vfo_offset_ms", t)
+MainWindow._update_main_vfo_offset = _upd
+
+import mbdsdr_ai.audio_out as _ao
+_oa_start = _ao.AudioPlayer.start
+def _audio_start(self):
+    t = time.perf_counter()
+    try:
+        return _oa_start(self)
+    finally:
+        box["audio_start_ms"] = box.get("audio_start_ms", 0.0) \
+            + (time.perf_counter() - t) * 1000.0
+_ao.AudioPlayer.start = _audio_start
 # 后端构造 vs 硬件 connect 的拆分（build 只 new 对象，connect 才碰 USB）
 import mbdsdr_ai.sdr_backend as _sb
 _build_orig = _sb.build_backend_for_device
@@ -288,7 +364,7 @@ def _build_marked(dev):
     marks["build_backend_end"] = round((time.perf_counter() - t_all) * 1000.0, 1)
     for _n in ("connect", "set_sample_rate", "set_bandwidth", "set_frequency",
                "set_ppm", "set_offset_tuning", "set_agc", "set_gain",
-               "start_stream", "stop_stream", "disconnect"):
+               "start_stream", "stop_stream", "disconnect", "get_frequency"):
         _o = getattr(b, _n, None)
         if callable(_o):
             def _mk(n, o):
@@ -302,6 +378,15 @@ def _build_marked(dev):
             setattr(b, _n, _mk(_n, _o))
     return b
 _sb.build_backend_for_device = _build_marked
+
+# 「预热度」A/B：真实下一刀的最小候选是启动早期后台 import scipy.signal。
+# 这里在构造前显式导入，等价于「预热线程已先完成」，用来量
+# _start_iq_streams 里还剩多少真实工作（不含首次导入的 1 s）。
+PREWARM = os.environ.get("STARTUP_PREWARM_SCIPY") == "1"
+if PREWARM:
+    _tp = time.perf_counter()
+    import scipy.signal  # noqa: F401
+    marks["scipy_import_ms"] = round((time.perf_counter() - _tp) * 1000.0, 1)
 
 t = time.perf_counter(); w = MainWindow()
 marks["main_window_init"] = round((time.perf_counter() - t) * 1000.0, 1)
@@ -362,6 +447,11 @@ for _k, _v in box.items():
         marks[_k] = round(_v, 1)
 marks["eventfilter_ms"] = round(box["ef_ms"], 1)
 marks["eventfilter_calls"] = box["ef_calls"]
+for _k in ("audio_start_ms", "active_read_ms", "build_pipeline_ms",
+           "pipe_ctor_ms", "pipe_start_ms", "vfo_ctor_ms",
+           "vfo_add_ms", "vfo_bind_dsp_ms", "vfo_set_active_context_ms",
+           "vfo_offset_ms"):
+    marks[_k] = round(box.get(_k, 0.0), 1)
 marks["kernel_panels_ms"] = round(box["kernel_ms"], 1)
 marks["mode_shell_ms"] = round(box["mode_shell_ms"], 1)
 marks["settings_panel_init_ms"] = round(box["settings_init_ms"], 1)
@@ -399,7 +489,39 @@ def section_startup(runs=3):
         for _ in range(max(1, runs)):
             en_sync.append(_one(STARTUP_SYNC_ENUM=1))
             en_async.append(_one())
-        ef_profile = _one(STARTUP_EF_PROFILE=1)
+        # 同口径分型：旧/新实现交替跑（同一会话、同一负载窗口），各 runs 次，
+        # 每类取中位。否则「改后分型表」与「改前/改后 A/B」不是一个口径。
+        prof_runs = {"old": [], "new": []}
+        for _ in range(max(1, runs)):
+            prof_runs["old"].append(_one(STARTUP_EF_PROFILE=1, STARTUP_OLD_EF=1))
+            prof_runs["new"].append(_one(STARTUP_EF_PROFILE=1))
+        # scipy.signal 预热 A/B：交替跑（未预热 / 预热），看
+        # _start_iq_streams 里的 1 s 是否全部来自首次 import。
+        pre_off, pre_on = [], []
+        for _ in range(max(1, runs)):
+            pre_off.append(_one())
+            pre_on.append(_one(STARTUP_PREWARM_SCIPY=1))
+
+        def _merge_prof(rs):
+            types = set()
+            for r in rs:
+                types |= set(r.get("ef_by_type", {}))
+            merged = {}
+            for t in types:
+                calls = [r.get("ef_by_type", {}).get(t, [0, 0.0])[0] for r in rs]
+                mss = [r.get("ef_by_type", {}).get(t, [0, 0.0])[1] for r in rs]
+                merged[t] = [int(statistics.median(calls)),
+                             round(statistics.median(mss), 1)]
+            return {
+                "by_type": merged,
+                "calls": int(statistics.median(
+                    [r.get("eventfilter_calls", 0) for r in rs])),
+                "total_ms": round(statistics.median(
+                    [r.get("eventfilter_ms", 0.0) for r in rs]), 1),
+            }
+
+        ef_profile_old = _merge_prof(prof_runs["old"])
+        ef_profile_new = _merge_prof(prof_runs["new"])
         if not each:
             raise RuntimeError("startup child 没有输出 PHASES_JSON")
         keys = [k for k in each[0] if isinstance(each[0][k], (int, float))]
@@ -443,6 +565,17 @@ def section_startup(runs=3):
             "connect_backend_ms": _span(r, "connect_backend_start", "connect_backend_end"),
             "start_streams_ms": _span(r, "start_streams_start", "start_streams_end"),
             "auto_ready_ms": _span(r, "auto_ready_start", "auto_ready_end"),
+            "audio_start_ms": r.get("audio_start_ms"),
+            "active_read_ms": r.get("active_read_ms"),
+            "build_pipeline_ms": r.get("build_pipeline_ms"),
+            "pipe_ctor_ms": r.get("pipe_ctor_ms"),
+            "pipe_start_ms": r.get("pipe_start_ms"),
+            "vfo_ctor_ms": r.get("vfo_ctor_ms"),
+            "vfo_add_ms": r.get("vfo_add_ms"),
+            "vfo_bind_dsp_ms": r.get("vfo_bind_dsp_ms"),
+            "vfo_set_active_context_ms": r.get("vfo_set_active_context_ms"),
+            "vfo_offset_ms": r.get("vfo_offset_ms"),
+            "scipy_import_ms": r.get("scipy_import_ms"),
             "backend_connect_ms": r.get("backend_connect_ms"),
             "deferred_end": r.get("deferred_end"),
         }
@@ -455,8 +588,12 @@ def section_startup(runs=3):
                 "delta_ms": round(mn - mo, 1),
                 "delta_pct": round((mn - mo) / mo * 100.0, 1) if mo else None}
 
+    pre_off_d = [_enum_detail(r) for r in pre_off]
+    pre_on_d = [_enum_detail(r) for r in pre_on]
+
     return {"runs": each, "median": med, "top3": top3,
-            "ef_profile": ef_profile.get("ef_by_type", {}),
+            "ef_profile_old": ef_profile_old,
+            "ef_profile_new": ef_profile_new,
             "eventfilter_ab": {
                 "normal_init_ms": ab_normal,
                 "stubbed_init_ms": ab_stub,
@@ -471,6 +608,14 @@ def section_startup(runs=3):
             "enum_bg_ab_detail": {
                 "sync": [_enum_detail(r) for r in en_sync],
                 "async": [_enum_detail(r) for r in en_async],
+            },
+            "scipy_prewarm_ab": {
+                "off": pre_off_d,
+                "on": pre_on_d,
+                "start_streams": _ab(pre_off_d, pre_on_d, "start_streams_ms"),
+                "build_pipeline": _ab(pre_off_d, pre_on_d, "build_pipeline_ms"),
+                "scipy_import_ms": [
+                    r.get("scipy_import_ms") for r in pre_on],
             },
             "stderr_note": "子进程 QT_QPA_PLATFORM=offscreen；"
                            "MBDSDR_NULL_AUDIO=1；无 MBDSDR_NO_HW"}
@@ -676,6 +821,10 @@ app.processEvents()
 # 1024 点档：schema 合法三档之一，性能档 1 同时把谱线 bin 调到 384
 panel.generator.set_fft_size(1024)
 panel.set_performance_mode(1)
+_ivl = os.environ.get("SPECTRUM_INTERVAL_MS")
+if _ivl:
+    # 对照实验：只改节拍（默认 66 ms 是性能档），其余绘制/数据不变
+    panel._plot._timer.setInterval(int(_ivl))
 if os.environ.get("SPECTRUM_PRECISE") == "1":
     # 对照实验：只改定时器精度，不改绘制，量化 CoarseTimer 的 5% 抖动
     panel._plot._timer.setTimerType(Qt.PreciseTimer)
@@ -713,9 +862,12 @@ hb_timer = QTimer(); hb_timer.setInterval(10)
 hb_timer.timeout.connect(_hb); hb_timer.start()
 
 t0 = time.perf_counter()
-QTimer.singleShot(6000, app.quit)
+cpu0 = time.process_time()
+dur_ms = int(os.environ.get("SPECTRUM_DURATION_MS") or 6000)
+QTimer.singleShot(dur_ms, app.quit)
 app.exec()
 elapsed = time.perf_counter() - t0
+cpu_s = time.process_time() - cpu0
 feed.stop()
 hb_timer.stop()
 n_paint = len(paint_ms)
@@ -735,6 +887,25 @@ for p in paint_ts:
         paint_latency.append((p - timer_ts[j]) * 1000.0)
 # 心跳间隔超出节拍（10ms）的部分 = GUI 线程被别的活占住的时间
 hb_block_total = sum(max(0.0, g - 10.0) for g in hb_gaps)
+
+# 长时间稳定性：按 60 s 窗口切 fps 与 paint 中位，看是否随时间退化
+win = {}
+if paint_ts:
+    for p, d in zip(paint_ts, paint_ms):
+        k = int((p - paint_ts[0]) // 60.0)
+        win.setdefault(k, ([], []))
+        win[k][0].append(p)
+        win[k][1].append(d)
+stability = []
+for k in sorted(win):
+    ts_k, d_k = win[k]
+    dur = (ts_k[-1] - ts_k[0]) if len(ts_k) > 1 else 0.0
+    stability.append({
+        "window_s": k * 60,
+        "paints": len(ts_k),
+        "fps": round((len(ts_k) - 1) / dur, 2) if dur > 0 else None,
+        "paint_median_ms": round(statistics.median(d_k), 2),
+    })
 
 def st(xs):
     if not xs:
@@ -834,6 +1005,8 @@ out = {
         "elapsed_s": round(elapsed, 3),
         "paints": n_paint,
         "fps": round(n_paint / elapsed, 2),
+        "cpu_percent": round(cpu_s / max(elapsed, 1e-9) * 100.0, 1),
+        "stability_60s": stability,
         "paint": st(paint_ms),
         "push_iq": st(push_ms),
         "direct_render": st(frame_ms),
@@ -864,11 +1037,135 @@ def section_spectrum():
     with open(probe, "w", encoding="utf-8") as f:
         f.write(_SPECTRUM_CHILD)
     try:
-        p = _run([PY, probe], env=_child_env(), timeout=300)
+        p = _run([PY, probe], env=_child_env(),
+                 timeout=180 + int(os.environ.get("SPECTRUM_DURATION_MS") or 6000) // 1000)
         for ln in p.stdout.splitlines():
             if ln.startswith("SPEC_JSON "):
                 return json.loads(ln[len("SPEC_JSON "):])
         raise RuntimeError("spectrum child 没有输出 SPEC_JSON")
+    finally:
+        try:
+            os.remove(probe)
+        except OSError:
+            pass
+
+
+# =========================================================================== #
+# 3b) 接收流水线启动拆账：_start_iq_streams 的 844–1013 ms 花在哪
+# =========================================================================== #
+_STREAMS_CHILD = r"""
+import json, os, statistics, sys, time
+ROOT = os.environ["MBDSDR_ROOT"]
+sys.path.insert(0, ROOT); sys.path.insert(0, os.path.join(ROOT, "desktop"))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("MBDSDR_NULL_AUDIO", "1")
+os.environ["MBDSDR_OFFLINE"] = "1"      # 启动定时器不碰真实硬件
+import numpy as np
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QTimer
+
+box = {k: 0.0 for k in ("audio_start_ms", "vfo_ctor_ms", "vfo_mgr_ms",
+                        "pipe_ctor_ms", "pipe_start_ms", "build_ms",
+                        "start_ms", "stop_ms")}
+
+def add(key, t):
+    box[key] += (time.perf_counter() - t) * 1000.0
+
+app = QApplication.instance() or QApplication([])
+from main_window import MainWindow
+
+# 只测不改：在子进程里包住各构造点，定位 844–1013 ms 的组成
+import mbdsdr_ai.dsp as _dsp
+_ov = _dsp.VFO.__init__
+def _vfo_init(self, *a, **k):
+    t = time.perf_counter(); _ov(self, *a, **k); add("vfo_ctor_ms", t)
+_dsp.VFO.__init__ = _vfo_init
+import mbdsdr_ai.audio_out as _ao
+_oa = _ao.AudioPlayer.start
+def _audio_start(self):
+    t = time.perf_counter()
+    try:
+        return _oa(self)
+    finally:
+        add("audio_start_ms", t)
+_ao.AudioPlayer.start = _audio_start
+import receive_pipeline as _rp
+_op = _rp.ReceivePipeline.__init__
+def _pipe_init(self, *a, **k):
+    t = time.perf_counter(); _op(self, *a, **k); add("pipe_ctor_ms", t)
+_rp.ReceivePipeline.__init__ = _pipe_init
+_ops = _rp.ReceivePipeline.start
+def _pipe_start(self):
+    t = time.perf_counter()
+    try:
+        return _ops(self)
+    finally:
+        add("pipe_start_ms", t)
+_rp.ReceivePipeline.start = _pipe_start
+import mbdsdr_ai.vfo_manager as _vm
+_oadd = _vm.VfoManager.add
+def _vfo_add(self, *a, **k):
+    t = time.perf_counter(); r = _oadd(self, *a, **k); add("vfo_mgr_ms", t); return r
+_vm.VfoManager.add = _vfo_add
+
+mw = MainWindow()
+mw.show()
+QTimer.singleShot(300, app.quit)
+app.exec()
+
+class _StubBackend:
+    class _Dev:
+        name = "stub-rtl"
+    device = _Dev()
+    def __init__(self):
+        self._f = 100e6
+        self._blk = (0.02 * np.random.randn(131072)
+                     + 0.02j * np.random.randn(131072)).astype(np.complex64)
+    def read_samples(self, n):
+        return self._blk[:min(n, len(self._blk))]
+    def get_frequency(self):
+        return self._f
+
+mw._active_sdr_backend = _StubBackend()
+runs = []
+for i in range(3):
+    for k in box:
+        box[k] = 0.0
+    t = time.perf_counter()
+    mw._start_iq_streams()
+    box["start_ms"] = (time.perf_counter() - t) * 1000.0
+    box["build_ms"] = box["start_ms"] - box["audio_start_ms"]
+    time.sleep(0.15)                     # 让读线程真跑一拍
+    t = time.perf_counter()
+    mw._stop_iq_streams()
+    box["stop_ms"] = (time.perf_counter() - t) * 1000.0
+    runs.append({k: round(v, 1) for k, v in box.items()})
+mw.close()
+
+def med(k):
+    return round(statistics.median([r[k] for r in runs]), 1)
+
+out = {
+    "runs": runs,
+    "median": {k: med(k) for k in runs[0]},
+    "note": "MBDSDR_NULL_AUDIO=1：audio_start 只测量打开/降级路径；"
+            "真实声卡打开耗时另计（受设备/驱动影响）",
+}
+print("STREAMS_JSON " + json.dumps(out, ensure_ascii=False))
+"""
+
+
+def section_streams():
+    probe = os.path.join(TMP, "perf_probe_deep_streams.py")
+    os.makedirs(TMP, exist_ok=True)
+    with open(probe, "w", encoding="utf-8") as f:
+        f.write(_STREAMS_CHILD)
+    try:
+        p = _run([PY, probe], env=_child_env(), timeout=300)
+        for ln in p.stdout.splitlines():
+            if ln.startswith("STREAMS_JSON "):
+                return json.loads(ln[len("STREAMS_JSON "):])
+        raise RuntimeError("streams child 没有输出 STREAMS_JSON")
     finally:
         try:
             os.remove(probe)
@@ -1066,13 +1363,20 @@ def _markdown(result: dict) -> str:
                + json.dumps(t["blackhole_timeout"], ensure_ascii=False),
                "硬截止 1 s 验证 → "
                + json.dumps(t["blackhole_hard_deadline_1s"], ensure_ascii=False), ""]
+    s = result.get("streams")
+    if s:
+        md += ["## 3b) 流水线启动拆账（_start_iq_streams）", "",
+               _md_table([(k, v) for k, v in s["median"].items()],
+                         ["项", "中位 ms"]), "",
+               s.get("note", ""), ""]
     return "\n".join(md)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--section", default="all",
-                    choices=["all", "startup", "replay", "spectrum", "tle"])
+                    choices=["all", "startup", "replay", "spectrum", "streams",
+                             "tle"])
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--replay-file",
                     default=os.path.join(TMP, "replay_1100MiB.cf32"))
@@ -1091,6 +1395,8 @@ def main():
         result["replay"] = section_replay(a.replay_file, a.keep_replay_file)
     if a.section in ("all", "spectrum"):
         result["spectrum"] = section_spectrum()
+    if a.section in ("all", "streams"):
+        result["streams"] = section_streams()
     if a.section in ("all", "tle"):
         result["tle"] = section_tle()
 
