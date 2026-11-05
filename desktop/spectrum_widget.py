@@ -1216,6 +1216,9 @@ def _render_wf_only(painter: QPainter, state: _PlotState, w: int, h: int):
     bg = QColor(panel.color_bg)
     painter.fillRect(0, 0, w, h, bg)
     if h > 0:
+        # 瀑布不再单独画一条频率轴：谱面底部那条轴就在两区之间，是二者
+        # 共用的唯一刻度；瀑布画布按同一 _px_to_freq 落列（见
+        # _wf_paint_row_into），Ctrl 平移后仍与上方刻度对齐。
         wf_rect = QRectF(0, 0, w, h)
         if state.show_waterfall:
             _draw_waterfall(painter, wf_rect, state)
