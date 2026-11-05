@@ -623,7 +623,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - `mbdsdr_ai/analog_demod.py` 的无头 IF 域门控（`_MODE_DEFAULTS` 的
   `-40/-30/-60`、构造初值 `-150.0`）**保留不动**——gqrx 兼容路径的另一个测量点；
 - C++ 侧 `kSquelchMinDb/-100`、`kSquelchMaxDb/-20`、`kSquelchDefaultDb/-50`
-  **未改**（C++ 仍是绝对 dB 域，量纲差异已登记 §7）；对拍测试继续冻结它们。
+  **未改**（C++ 仍是绝对 dB 域）。本行为登记声明，无可引提交；对应实现在 `cpp/src/core/tokens.h:407-409` 由内核线维护；量纲差异见 §7，对拍测试继续冻结它们。
 
 **行为差异说明（必须让用户知道）**：同一段信号，旧值 `-80` 在新口径下
 不再等价；迁移仅做"读入 + 提示"，不自动换算（IQ 功率↔音频域存在度的差值
@@ -660,7 +660,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - 显式传 `min_alt=5` 的调用方行为不变（只是默认值变了）；
 - 星象仪 `PASS_MIN_ALT_DEG=10.0` 数值不变（仍是私有字面量 → P-2b）。
 
-**残留（已登记，未改）**：`mbdsdr_ai/sat_consistency.py:141`
+**残留（登记声明，无可引提交；对应实现在 `mbdsdr_ai/sat_consistency.py:141` 由他线维护）**：
 `check_next_pass_consistency(min_alt=5.0)` 仍是"5 传进默认 10"的形态。
 → P-2c。诊断工具不先对齐，它对"下一次过境"的对拍结论就不可信。
 
@@ -758,7 +758,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | 3 | `mbdsdr_ai/analog_demod.py:236` | `self.last_signal_power_db = -150.0` | 同上；首块功率估计占位 | **保留** |
 | 4 | `mbdsdr_ai/analog_demod.py:365-367` | `if not self._sql_open and self.last_signal_power_db >= self.squelch_db:` / `elif ... < self.squelch_db - self._sql_hyst_db:` | 同上；IF 域滞回门 | **保留**；不读桌面 `SharedDemodConfig.squelch_db` |
 | 5 | `mbdsdr_ai/analog_demod.py:458-459` | `chain.set_squelch_db(-150.0)` | 同上；一次性工具调用全开 | **保留** |
-| 6 | `cpp/src/core/tokens.h:394-396` | `kSquelchMinDb=-100` / `kSquelchMaxDb=-20` / `kSquelchDefaultDb=-50`，注释 "AUDIO-BLOCK RMS dBFS domain" | C++ 48 kHz **解调音频块 RMS 绝对 dBFS** | **保留**；auto 门 = 同域噪声底 + `kSquelchAutoMarginDb=8.0`（`spectrum_engine.cpp:1892-1896`），是"绝对底+余量"，与 Python 滑杆余量不同量纲（§7 已登记） |
+| 6 | `cpp/src/core/tokens.h:407-409` | `kSquelchMinDb=-100` / `kSquelchMaxDb=-20` / `kSquelchDefaultDb=-50`，注释 "AUDIO-BLOCK RMS dBFS domain" | C++ 48 kHz **解调音频块 RMS 绝对 dBFS** | **保留**；auto 门 = 同域噪声底 + `kSquelchAutoMarginDb=8.0`（`spectrum_engine.cpp:1892-1896`），是"绝对底+余量"，与 Python 滑杆余量不同量纲（本行为登记声明，无可引提交；对应实现在 `cpp/src/core/tokens.h:407-409` 由内核线维护；口径见 §7） |
 | 7 | `cpp/src/dsp/spectrum_engine.h:951` | `float squelchThreshold_ = -50.0f;` | 同上；token 默认值的缓存镜像 | **保留** |
 | 8 | `desktop/main_window.py:567` | `self._squelch_db: float = -80.0` | 旧单线程演示路径的**绝对 IQ dBFS** 门 | **P-8a**（操作逻辑线，本线不动） |
 | 9 | `desktop/main_window.py:5534-5535` | `dbfs = 10.0 * math.log10(p + 1e-12)` / `if dbfs < self._squelch_db:` | 同上（全带宽 IQ 功率） | **P-8a**；多线程 `ReceivePipeline` 路径已改余量 |
