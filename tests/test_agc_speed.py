@@ -162,7 +162,9 @@ def test_panel_agc_speed_disabled_when_disconnected(qapp):
 # MainWindow 接线（槽 → 共享配置 + 持久化；恢复 → 共享配置）
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def mw(qapp):
+def mw(isolated_profile, qapp):
+    # isolated_profile 见 tests/conftest.py：本夹具写 agc_speed/app_mode，
+    # 不隔离就会写进用户真实配置。
     from main_window import MainWindow
     w = MainWindow()
     w.settings.set("app_mode", "ide")

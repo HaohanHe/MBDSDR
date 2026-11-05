@@ -44,7 +44,9 @@ def _pump(app, ms=80):
 
 
 @pytest.fixture(scope="module")
-def mw(qapp):
+def mw(isolated_profile, qapp):
+    # isolated_profile 见 tests/conftest.py：本夹具会 set_app_mode/写 settings，
+    # 不做隔离就会把 app_mode 写进用户真实配置。
     from main_window import MainWindow
     w = MainWindow()
     # 测试全程从 IDE 形态出发，且结束后回 IDE，不污染真实用户配置。

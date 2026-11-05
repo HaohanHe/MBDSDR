@@ -60,7 +60,9 @@ def qapp():
 
 
 @pytest.fixture()
-def window(qapp):
+def window(isolated_profile, qapp):
+    # isolated_profile 见 tests/conftest.py：MainWindow 默认读写真实
+    # %APPDATA%/mbdsdr/desktop_settings.json（会话级守卫实测 mtime 被改）。
     from main_window import MainWindow
     w = MainWindow()
     w.settings = _Settings()

@@ -27,7 +27,8 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(isolated_profile, qtapp):
+    """隔离夹具见 tests/conftest.py::isolated_profile。"""
     import main_window as mw
     from PySide6.QtTest import QTest
     w = mw.MainWindow()

@@ -30,7 +30,9 @@ from mbdsdr_ai import baseband_io  # noqa: E402
 
 
 @pytest.fixture()
-def window():
+def window(isolated_profile):
+    # isolated_profile 见 tests/conftest.py：MainWindow 默认读写真实
+    # %APPDATA%/mbdsdr/desktop_settings.json（会话级守卫实测 mtime 被改）。
     w = MainWindow()
     w._active_sdr_backend = None
     w._recording = False

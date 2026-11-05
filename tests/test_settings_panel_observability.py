@@ -6,10 +6,20 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
+import pytest  # noqa: E402
+
 import settings_panel as sp  # noqa: E402
 from config_schema import SCHEMA  # noqa: E402
 
 _ENV_KEYS = ("rc_enabled", "rc_port", "web_enabled", "web_port")
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    """面板是 QWidget：子集单跑没有 QApplication 时 Qt 会直接 abort 0xC0000409。"""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+    yield app
 
 
 class _StubSettings:
@@ -36,7 +46,7 @@ class _FakeDesktopServices:
         return self.result
 
 
-def test_open_record_dir_missing_shows_path_and_never_opens(monkeypatch):
+def test_open_record_dir_missing_shows_path_and_never_opens(qapp, monkeypatch):
     panel = sp.SettingsPanel(settings=None)
     panel._record_effective_dir = lambda: "Z:\\no-such-record-dir"
     fake = _FakeDesktopServices()
@@ -49,7 +59,7 @@ def test_open_record_dir_missing_shows_path_and_never_opens(monkeypatch):
     assert "Z:\\no-such-record-dir" in panel.status_label.text()
 
 
-def test_open_record_dir_success_reports_what_was_opened(tmp_path, monkeypatch):
+def test_open_record_dir_success_reports_what_was_opened(qapp, tmp_path, monkeypatch):
     panel = sp.SettingsPanel(settings=None)
     panel._record_effective_dir = lambda: str(tmp_path)
     fake = _FakeDesktopServices(result=True)
@@ -62,7 +72,7 @@ def test_open_record_dir_success_reports_what_was_opened(tmp_path, monkeypatch):
     assert str(tmp_path) in panel.status_label.text()
 
 
-def test_open_config_dir_missing_is_observable(tmp_path, monkeypatch):
+def test_open_config_dir_missing_is_observable(qapp, tmp_path, monkeypatch):
     panel = sp.SettingsPanel(settings=None)
     fake = _FakeDesktopServices()
     monkeypatch.setattr(sp, "QDesktopServices", fake)
@@ -75,7 +85,7 @@ def test_open_config_dir_missing_is_observable(tmp_path, monkeypatch):
     assert "配置目录不存在" in panel.status_label.text()
 
 
-def test_reset_defaults_already_default_says_so():
+def test_reset_defaults_already_default_says_so(qapp):
     defaults = {k: SCHEMA[k].default for k in _ENV_KEYS}
     stub = _StubSettings(defaults, defaults)
     panel = sp.ServiceSettingsPanel(settings=stub)
@@ -86,7 +96,7 @@ def test_reset_defaults_already_default_says_so():
     assert panel.error_label.text() == "当前已是默认值"
 
 
-def test_reset_defaults_really_restores_when_dirty():
+def test_reset_defaults_really_restores_when_dirty(qapp):
     defaults = {k: SCHEMA[k].default for k in _ENV_KEYS}
     dirty = dict(defaults)
     dirty["rc_port"] = 9999

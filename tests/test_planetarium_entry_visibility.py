@@ -23,7 +23,9 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(isolated_profile, qtapp):
+    # 本模块 set_app_mode 会持久化 app_mode；不隔离就会重写用户真实
+    # %APPDATA%/mbdsdr/desktop_settings.json（会话级守卫实测抓到 mtime 变化）。
     import main_window as mw
     w = mw.MainWindow()
     w.resize(1280, 800)

@@ -27,11 +27,19 @@ sessionfinish 钩子被硬退出抢跑会把汇总与失败详情整批吞掉（
 """
 import ctypes
 import gc
+import hashlib
 import os
 import sys
 import time
 
 import pytest
+
+# 让会话级守卫能直接定位 desktop/settings.py（各测试文件各自加 path 前先垫一层）。
+_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DESKTOP_DIR = os.path.join(_ROOT_DIR, "desktop")
+for _p in (_ROOT_DIR, _DESKTOP_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 # 网络隔离（与 MBDSDR_SETTINGS_DIR 同族的测试环境隔离）：
 # 默认禁网，让全量套件天然离线、绝不因联网挂死。orbit.fetch_tle 等
@@ -203,6 +211,8 @@ def _commit_mb():
 
 
 def pytest_runtest_setup(item):
+    # 真模态开关按用例的 marker 翻转：默认禁止，只有显式 allow_modal 才放行。
+    _MODAL_GUARD["allow"] = item.get_closest_marker("allow_modal") is not None
     limit = int(os.environ.get("MBDSDR_TEST_COMMIT_LIMIT_MB", "4096"))
     if limit <= 0:
         return
@@ -216,6 +226,231 @@ def pytest_runtest_setup(item):
             returncode=3,
         )
 
+
+
+# ---------------------------------------------------------------------------
+# 防线 3：测试里禁止真模态（2026-11-05 两次整锁挂死后的设施规矩）
+#
+# 现场：QMessageBox.exec() 在 offscreen 下永不返回——第一次挂死 50 分钟
+# （py-spy 栈 _start_recording -> _show_error_dialog -> box.exec()）；第二次
+# 两条录音用例只打桩了 QMessageBox.warning，真实路径根本不走 warning，整条
+# Qt 互斥锁又被占死。
+#
+# 因此默认全局拦下所有真模态：QDialog/QMessageBox/QFileDialog/QInputDialog
+# 的 exec() 与 QMessageBox 的静态便捷方法、QFileDialog 的静态取路径方法，
+# 被调到就记一条「测试里出现真模态：<类名>」并立即返回「取消」/空路径。
+# 需要真弹窗的用例显式标 @pytest.mark.allow_modal（默认禁止）。
+# ---------------------------------------------------------------------------
+_MODAL_GUARD = {"allow": False, "hits": [], "reported": set()}
+
+
+def _record_modal(owner: str, method: str) -> None:
+    key = f"{owner}.{method}"
+    _MODAL_GUARD["hits"].append(key)
+    if key not in _MODAL_GUARD["reported"]:
+        _MODAL_GUARD["reported"].add(key)
+        sys.stderr.write(
+            f"[mbdsdr-modal] 测试里出现真模态：{owner}（{method} 已拦下，"
+            f"立即返回取消）\n")
+
+
+def _install_modal_guard():
+    """返回 (类, 方法名, 原实现) 列表，供 session 结束时还原。"""
+    from PySide6.QtWidgets import (
+        QDialog, QFileDialog, QInputDialog, QMessageBox,
+    )
+
+    classes = {
+        "QDialog": QDialog, "QFileDialog": QFileDialog,
+        "QInputDialog": QInputDialog, "QMessageBox": QMessageBox,
+    }
+    originals = []
+
+    def _wrap(owner, method, fallback):
+        cls = classes[owner]
+        orig = getattr(cls, method)
+
+        def _stub(*args, **kwargs):
+            if _MODAL_GUARD["allow"]:
+                return orig(*args, **kwargs)
+            _record_modal(owner, method)
+            return fallback() if callable(fallback) else fallback
+
+        setattr(cls, method, _stub)
+        originals.append((cls, method, orig))
+
+    # exec()：模态事件循环本体（挂死现场就是这里）
+    _wrap("QMessageBox", "exec", lambda: QMessageBox.No)
+    _wrap("QDialog", "exec", lambda: QDialog.Rejected)
+    _wrap("QFileDialog", "exec", lambda: QDialog.Rejected)
+    _wrap("QInputDialog", "exec", lambda: QDialog.Rejected)
+    # 静态便捷方法内部同样开 exec()
+    for name in ("warning", "information", "critical", "question",
+                 "about", "aboutQt"):
+        _wrap("QMessageBox", name, lambda: QMessageBox.No)
+    _wrap("QFileDialog", "getOpenFileName", lambda: ("", ""))
+    _wrap("QFileDialog", "getOpenFileNames", lambda: ([], ""))
+    _wrap("QFileDialog", "getSaveFileName", lambda: ("", ""))
+    _wrap("QFileDialog", "getExistingDirectory", lambda: "")
+    _wrap("QInputDialog", "getText", lambda: ("", False))
+    _wrap("QInputDialog", "getInt", lambda: (0, False))
+    _wrap("QInputDialog", "getDouble", lambda: (0.0, False))
+    _wrap("QInputDialog", "getItem", lambda: ("", False))
+    return originals
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _modal_guard_session():
+    originals = _install_modal_guard()
+    yield
+    for cls, method, orig in originals:
+        setattr(cls, method, orig)
+
+
+@pytest.fixture(scope="session")
+def modal_guard(_modal_guard_session):
+    """暴露拦下的真模态记录：{"hits": [...], "allow": bool}。"""
+    return _MODAL_GUARD
+
+
+def pytest_runtest_teardown(item, nextitem):
+    _MODAL_GUARD["allow"] = False
+
+
+# ---------------------------------------------------------------------------
+# 防线 4：测试会话禁止写用户真实配置（2026-11-05 打包线实测）
+#
+# 现场：tests/test_record_dir_consumption.py 的 window fixture 直接
+# MainWindow()，走真实 %APPDATA%/mbdsdr/desktop_settings.json；用例里
+# settings.set("record_dir", ...) 被防抖定时器写回真实文件，用户下次启动
+# 看到「录音目录不可写」假报警（实测残留 ...\pytest-1486\...\rec、Z:\nope）。
+#
+# 因此：pytest_configure 在收集前取快照，会话结束比对 sha256 + mtime_ns +
+# 目录清单，任何变化都失败并打印哪个文件、差多少字节。测试侧必须把
+# HOME/USERPROFILE/APPDATA/LOCALAPPDATA 重定向到 tmp_path，见
+# docs/COORDINATION.md「测试纪律」。
+# ---------------------------------------------------------------------------
+_REAL_CONFIG_GUARD = {"path": None, "dir": None, "before": None,
+                      "before_listing": None, "error": None}
+
+
+def _file_state(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {"exists": False, "size": 0, "mtime_ns": 0, "sha256": None}
+    digest = None
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        digest = h.hexdigest()
+    except OSError:
+        pass
+    return {"exists": True, "size": st.st_size,
+            "mtime_ns": st.st_mtime_ns, "sha256": digest}
+
+
+def _dir_names(path):
+    try:
+        return sorted(os.listdir(path))
+    except OSError:
+        return []
+
+
+def _snapshot_real_config():
+    try:
+        from settings import default_config_path
+        path = default_config_path()
+    except Exception as exc:  # noqa: BLE001
+        _REAL_CONFIG_GUARD["error"] = f"{type(exc).__name__}: {exc}"
+        sys.stderr.write(
+            "[mbdsdr-guard] 无法定位真实配置路径，会话级配置守卫未启用："
+            f"{exc}\n")
+        return
+    _REAL_CONFIG_GUARD["path"] = path
+    _REAL_CONFIG_GUARD["dir"] = os.path.dirname(path)
+    _REAL_CONFIG_GUARD["before"] = _file_state(path)
+    _REAL_CONFIG_GUARD["before_listing"] = _dir_names(os.path.dirname(path))
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "allow_modal: 允许该用例弹真模态（默认全局拦下；offscreen 下真 exec "
+        "可能永不返回，只有确需验证模态行为的用例才可 opt-in）")
+    _snapshot_real_config()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_config_guard_fixture():
+    yield
+    path = _REAL_CONFIG_GUARD["path"]
+    if not path:
+        return
+    before = _REAL_CONFIG_GUARD["before"]
+    after = _file_state(path)
+    added = sorted(set(_dir_names(_REAL_CONFIG_GUARD["dir"])
+                       ) - set(_REAL_CONFIG_GUARD["before_listing"]))
+    removed = sorted(set(_REAL_CONFIG_GUARD["before_listing"]
+                         ) - set(_dir_names(_REAL_CONFIG_GUARD["dir"])))
+    problems = []
+    if after != before:
+        delta = after["size"] - before["size"]
+        problems.append(
+            f"  {path}: 大小 {before['size']} -> {after['size']} "
+            f"({delta:+d} bytes)；sha256 {before['sha256']} -> "
+            f"{after['sha256']}；mtime_ns {before['mtime_ns']} -> "
+            f"{after['mtime_ns']}")
+    if added or removed:
+        problems.append(
+            f"  {_REAL_CONFIG_GUARD['dir']}: 新增={added} 消失={removed}")
+    assert not problems, (
+        "[mbdsdr-guard] 测试会话改动了用户真实配置，必须把 "
+        "HOME/USERPROFILE/APPDATA/LOCALAPPDATA 重定向到 tmp_path：\n"
+        + "\n".join(problems)
+        + "\n纪律见 docs/COORDINATION.md「测试纪律」。")
+
+
+@pytest.fixture(scope="session")
+def real_config_snapshot(_real_config_guard_fixture):
+    """暴露会话级配置守卫的快照，供守门用例确认守卫真的在跑。"""
+    return _REAL_CONFIG_GUARD
+
+
+@pytest.fixture(scope="module")
+def isolated_profile(tmp_path_factory):
+    """把 HOME/USERPROFILE/APPDATA/LOCALAPPDATA/QSettings/layout_store 全部
+    重定向到本模块专属临时目录。
+
+    直接 ``MainWindow()`` 的用例必须显式请求它：MainWindow 内部会
+    ``DesktopSettings.load()``（真实 ``%APPDATA%/mbdsdr/desktop_settings.json``）、
+    ``QSettings("MBDSDR", "Desktop")`` 与全局 ``layout_store()``；
+    ``settings.set(...)`` 的防抖写盘会把测试值写进用户真实配置
+    （实测残留 ``...pytest-xxx\\...\\rec`` / ``Z:\\nope``，用户下次启动即见
+    「录音目录不可写」假报警）。
+    """
+    home = tmp_path_factory.mktemp("profile")
+    mp = pytest.MonkeyPatch()
+    for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA"):
+        mp.setenv(key, str(home))
+
+    from PySide6.QtCore import QSettings
+    old_format = QSettings.defaultFormat()
+    QSettings.setDefaultFormat(QSettings.IniFormat)
+    for scope in (QSettings.UserScope, QSettings.SystemScope):
+        QSettings.setPath(QSettings.IniFormat, scope, str(home / "qsettings"))
+
+    import layout_store as ls
+    ls.reset_layout_store_singleton()
+    ls._default_store = ls.LayoutStore(str(home / "layouts.json"))  # noqa: SLF001
+
+    yield home
+
+    ls.reset_layout_store_singleton()
+    QSettings.setDefaultFormat(old_format)
+    mp.undo()
 
 
 @pytest.fixture(autouse=True, scope="module")
