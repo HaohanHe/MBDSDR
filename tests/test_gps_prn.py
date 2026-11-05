@@ -295,34 +295,3 @@ def test_tool_acquire_uses_standard_family_by_default(reg, tmp_path):
     assert r.success, (r.content or "")[:300]
     assert r.data["codes_source"] == "is-gps-200e-table-3I"
     assert r.data["best"] == "PRN7", r.data.get("best")
-
-
-# ----------------------------------------------------------------------
-# nav_bits_from_corr 现状基线（删除前钉住）
-# ----------------------------------------------------------------------
-def test_nav_bits_from_corr_chunks_and_thresholds():
-    """逐 chip 相关值按 20ms/bit（20460 chips）取均值，>0 记 1，否则 0。"""
-    from mbdsdr_ai.gps_ca import NAV_BIT_RATE, nav_bits_from_corr
-
-    chips = int(round(CA_CHIP_RATE / NAV_BIT_RATE))     # 20460
-    assert chips == 20460
-    seq = np.concatenate([
-        np.full(chips, 1.0),                             # 均值 +1 -> 1
-        np.full(chips, -1.0),                            # 均值 -1 -> 0
-        np.concatenate([np.full(chips // 2, 1.0),        # 均值 0   -> 0
-                        np.full(chips - chips // 2, -1.0)]),
-        np.full(7, 1.0),                                 # 不足一位，丢弃
-    ])
-    bits = nav_bits_from_corr(seq)
-    assert bits.dtype == np.uint8
-    assert bits.tolist() == [1, 0, 0]
-
-
-def test_nav_bits_from_corr_empty_and_custom_chip_rate():
-    from mbdsdr_ai.gps_ca import nav_bits_from_corr
-
-    empty = nav_bits_from_corr(np.zeros(0))
-    assert empty.size == 0 and empty.dtype == np.uint8
-    # chip_rate 参数决定每比特芯片数（2046/50 -> 41 chips/bit）
-    seq = np.concatenate([np.full(41, 1.0), np.full(41, -1.0)])
-    assert nav_bits_from_corr(seq, chip_rate=2046.0).tolist() == [1, 0]

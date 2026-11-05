@@ -316,23 +316,6 @@ def correlate_codes(iq: np.ndarray, sample_rate: float,
     }
 
 
-def nav_bits_from_corr(corr_seq: np.ndarray, chip_rate: float = CA_CHIP_RATE,
-                        sample_rate: float = 1.0) -> np.ndarray:
-    """把相关峰序列按 20ms/bit 积分出导航比特（50 bps）。
-
-    corr_seq : 逐 chip 的相关值（已按码相位对齐到 0）
-    """
-    if corr_seq.size == 0:
-        return np.zeros(0, dtype=np.uint8)
-    chips_per_bit = max(1, int(round(chip_rate / NAV_BIT_RATE)))
-    nbits = corr_seq.size // chips_per_bit
-    out = np.zeros(nbits, dtype=np.uint8)
-    for i in range(nbits):
-        chunk = corr_seq[i * chips_per_bit:(i + 1) * chips_per_bit]
-        out[i] = 1 if float(np.mean(chunk)) > 0 else 0
-    return out
-
-
 # ============================================================================
 # 工具注册
 # ============================================================================
