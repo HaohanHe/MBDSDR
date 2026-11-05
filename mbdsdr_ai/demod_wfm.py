@@ -18,8 +18,21 @@ MPX 复合基带结构：
 """
 from __future__ import annotations
 import numpy as np
-from scipy.signal import butter, sosfilt, hilbert
 from mbdsdr_ai.demod_nfm import DeemphasisIIR
+
+
+# scipy.signal 导入很贵（本机实测 ~2.8 s）。本模块只在真正构造/处理 WFM 时才
+# 需要它，改为首次使用时导入——计算内容与结果完全不变，只是把导入成本从
+# "进程启动"挪到"第一次解调 WFM"。桌面端启动导入实测因此少约 1.8 s。
+_SCIPY_SIGNAL = None
+
+
+def _sig():
+    global _SCIPY_SIGNAL
+    if _SCIPY_SIGNAL is None:
+        from scipy import signal as _s
+        _SCIPY_SIGNAL = _s
+    return _SCIPY_SIGNAL
 
 
 class DemodWFM:
@@ -52,11 +65,12 @@ class DemodWFM:
         self.deemph_r = DeemphasisIIR(deemph_tau, self.if_sr)
 
         nyq = self.if_sr / 2.0
+        _s = _sig()
 
-        self._bp = butter(5, [self.PILOT_LO / nyq, self.PILOT_HI / nyq],
-                          btype="bandpass", output="sos")
+        self._bp = _s.butter(5, [self.PILOT_LO / nyq, self.PILOT_HI / nyq],
+                             btype="bandpass", output="sos")
 
-        self._lp = butter(7, self.AUDIO_LP / nyq, btype="low", output="sos")
+        self._lp = _s.butter(7, self.AUDIO_LP / nyq, btype="low", output="sos")
 
         # pilot 带通群延迟补偿
         # pilot 路径经过带通（有群延迟），而 MPX 直采路径没有——必须把 MPX
@@ -64,7 +78,7 @@ class DemodWFM:
         # 差信号提取幅度暴跌、立体声声道串音。用冲激响应峰值测群延迟。
         imp = np.zeros(4096)
         imp[0] = 1.0
-        self._pilot_gd = int(np.argmax(np.abs(sosfilt(self._bp, imp))))
+        self._pilot_gd = int(np.argmax(np.abs(_s.sosfilt(self._bp, imp))))
         self._mpx_delay = np.zeros(self._pilot_gd) if self._pilot_gd > 0 else None
 
     def reset(self) -> None:
@@ -103,13 +117,14 @@ class DemodWFM:
         else:
             mpx_delayed = mpx
         # mono 主信道 (L+R)：低通 15k
-        M = sosfilt(self._lp, mpx_delayed)
+        _s = _sig()
+        M = _s.sosfilt(self._lp, mpx_delayed)
 
         if not self.stereo or n < 64:
             L = R = M
         else:
             # 3) pilot 带通提取
-            pilot = sosfilt(self._bp, mpx)
+            pilot = _s.sosfilt(self._bp, mpx)
             pilot_rms = float(np.sqrt(np.mean(pilot ** 2)))
             mpx_rms = float(np.sqrt(np.mean(mpx ** 2))) + 1e-12
 
@@ -118,12 +133,12 @@ class DemodWFM:
                 L = R = M
             else:
                 # 4) Hilbert 解析信号取 pilot 相位 θ
-                z_p = hilbert(pilot)
+                z_p = _s.hilbert(pilot)
                 theta = np.angle(z_p)
                 # 5) 再生 38k 副载波 cos(2θ)
                 car38 = np.cos(2.0 * theta)
                 # 6) mpx_delayed·cos(2θ) → 差信号 (L-R)，低通 15k
-                D = sosfilt(self._lp, mpx_delayed * car38)
+                D = _s.sosfilt(self._lp, mpx_delayed * car38)
                 D = 2.0 * D
                 # 7) L = M + D, R = M - D
                 L = M + D

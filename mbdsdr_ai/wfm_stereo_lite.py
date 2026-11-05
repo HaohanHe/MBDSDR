@@ -21,19 +21,31 @@
 """
 from __future__ import annotations
 import numpy as np
-from scipy.signal import butter, sosfilt, sosfiltfilt, hilbert, resample_poly, lfilter
 from math import gcd
 
 PILOT_HZ = 19000.0
 CARRIER_HZ = 38000.0
 AF_CUTOFF = 15000.0
 
+# scipy.signal 的导入成本本机实测约 2.8 s（首个子模块导入时一次性付出）。
+# 本模块只在真正做重采样/滤波时才用到它，改为首次使用时导入：计算结果不变，
+# 只是把成本从"进程启动"挪到"第一次真正跑立体声解码"。
+_SCIPY_SIGNAL = None
+
+
+def _sig():
+    global _SCIPY_SIGNAL
+    if _SCIPY_SIGNAL is None:
+        from scipy import signal as _s
+        _SCIPY_SIGNAL = _s
+    return _SCIPY_SIGNAL
+
 
 def _resample_to(x: np.ndarray, sr_in: float, sr_out: float) -> np.ndarray:
     if int(round(sr_in)) == int(sr_out):
         return x
     g = gcd(int(round(sr_in)), int(sr_out))
-    return resample_poly(x, int(sr_out) // g, int(round(sr_in)) // g)
+    return _sig().resample_poly(x, int(sr_out) // g, int(round(sr_in)) // g)
 
 
 def synthesize_stereo_iq(
@@ -89,14 +101,15 @@ def decode_stereo(
     mpx = ph * (sample_rate / (2.0 * np.pi))  # Hz 单位瞬时频偏
     mpx = mpx - np.mean(mpx)
     nyq = sample_rate / 2.0
+    _s = _sig()
 
     # 2) 窄带提取 19kHz pilot
     # 用 sos（二阶级联）而非 ba 系数：19k±800Hz 在 1MHz 采样率下归一化带宽
     # 仅 1.5e-3，5 阶 butter 的 ba 系数数值条件极差，真实大动态信号上
     # lfilter 会溢出（pilot_band**2 → inf → rms=nan → 立体声判定失效）。
-    b19 = butter(5, [(PILOT_HZ - 800) / nyq, (PILOT_HZ + 800) / nyq],
-                 btype="band", output="sos")
-    pilot_band = sosfilt(b19, mpx)
+    b19 = _s.butter(5, [(PILOT_HZ - 800) / nyq, (PILOT_HZ + 800) / nyq],
+                    btype="band", output="sos")
+    pilot_band = _s.sosfilt(b19, mpx)
     p_rms = float(np.sqrt(np.mean(np.square(pilot_band))))
     m_rms = float(np.sqrt(np.mean(np.square(mpx)))) + 1e-9
     if not (np.isfinite(p_rms) and np.isfinite(m_rms)):
@@ -107,15 +120,15 @@ def decode_stereo(
     is_stereo = p_rms > 0.02 * m_rms
 
     # 3) 和信号 (L+R)：低通 15kHz（同样走 sos，避免真实信号下数值劣化）
-    low = butter(5, AF_CUTOFF / nyq, btype="low", output="sos")
-    S = sosfilt(low, mpx)
+    low = _s.butter(5, AF_CUTOFF / nyq, btype="low", output="sos")
+    S = _s.sosfilt(low, mpx)
 
     if is_stereo:
         # 4) pilot 解析信号相位 θ，二倍频 38kHz 载波
-        z = hilbert(pilot_band)
+        z = _s.hilbert(pilot_band)
         theta = np.angle(z)
         car = np.cos(2.0 * theta)  # 与合成时 cos(2π38kt) 同相
-        D = sosfilt(low, 2.0 * mpx * car)  # (L-R)/2；2× 补偿 cos² 检波 ½ 衰减，否则差信号幅度只有和信号一半，L/R 串扰
+        D = _s.sosfilt(low, 2.0 * mpx * car)  # (L-R)/2；2× 补偿 cos² 检波 ½ 衰减，否则差信号幅度只有和信号一半，L/R 串扰
         Lraw = 0.5 * (S + D)
         Rraw = 0.5 * (S - D)
     else:
@@ -128,8 +141,8 @@ def decode_stereo(
     # 6) 去加重（一阶 RC 低通）
     if deemph_us and deemph_us > 0:
         a = float(np.exp(-1.0 / (deemph_us * 1e-6 * out_sr)))
-        Lr = lfilter([1.0 - a], [1.0, -a], Lr)
-        Rr = lfilter([1.0 - a], [1.0, -a], Rr)
+        Lr = _s.lfilter([1.0 - a], [1.0, -a], Lr)
+        Rr = _s.lfilter([1.0 - a], [1.0, -a], Rr)
 
     # 7) 归一化（L/R 统一幅度，避免削波）
     peak = max(float(np.max(np.abs(Lr))), float(np.max(np.abs(Rr))), 1e-9)

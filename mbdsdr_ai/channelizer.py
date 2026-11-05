@@ -31,13 +31,25 @@ rms≈3e-6，等于"无声"。
 """
 from __future__ import annotations
 import numpy as np
-from scipy.signal import resample_poly
 from math import gcd
 
 from .decimating_fir import DecimatingFIR
 
 
 __all__ = ["XlatingFIR", "lowpass_taps"]
+
+# scipy.signal 是重量级导入（本机实测 2.8 s，占桌面端启动导入税的大头）。
+# 本模块只在 ``process()`` 的有理重采样分支用到它，改为首次使用时导入：
+# 不改变任何计算结果，只是把 2.8 s 从"进程启动"挪到"第一次真正跑重采样"。
+_resample_poly = None
+
+
+def _get_resample_poly():
+    global _resample_poly
+    if _resample_poly is None:
+        from scipy.signal import resample_poly as _rp
+        _resample_poly = _rp
+    return _resample_poly
 
 
 def _nuttall(M: int) -> np.ndarray:
@@ -177,7 +189,7 @@ class XlatingFIR:
         if self._up == 1 and self._down == 1:
             dec = y
         else:
-            dec = resample_poly(y, self._up, self._down)
+            dec = _get_resample_poly()(y, self._up, self._down)
 
         # 4) 信道 LPF（rx_vfo.h:97 filter.process），状态跨块连续。
         m = len(self._lpf)

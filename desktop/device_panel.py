@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, List, Dict
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QObject, QRunnable, QThreadPool
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QLineEdit, QGroupBox, QFormLayout, QMessageBox,
@@ -48,6 +48,39 @@ def _list_audio_output_devices() -> List[Dict]:
         return out
     except Exception:
         return []
+
+
+class _DeviceEnumSignals(QObject):
+    """跨线程枚举结果信号（不挂父对象，生命周期由运行中的任务持有）。"""
+
+    finished = Signal(object, str)  # (devices | None, error_text)
+
+
+class _DeviceEnumTask(QRunnable):
+    """后台枚举 SDR 设备。
+
+    本机实测：``rtlsdr_open`` 探测调谐器在设备被占用时要 0.2–2.4 s，Pluto 网络
+    探测固定 0.5 s 超时——2 s 一次的热插拔轮询若在 GUI 线程同步跑，界面会被
+    吃满（实测 10 s 内 63% 的 GUI 线程时间耗在轮询里）。这里把整段枚举丢到
+    QThreadPool：存在性判断结果不变，只是不再阻塞事件循环。
+    """
+
+    def __init__(self, signals: _DeviceEnumSignals):
+        super().__init__()
+        self._signals = signals
+
+    def run(self):  # noqa: D102 - Qt 接口
+        try:
+            devices = list(enumerate_all_sdr_devices()) if (
+                _ENUM_OK and enumerate_all_sdr_devices is not None) else []
+            err = ""
+        except Exception as exc:  # noqa: BLE001
+            devices, err = None, f"{type(exc).__name__}: {exc}"
+        try:
+            self._signals.finished.emit(devices, err)
+        except RuntimeError:
+            # 面板已销毁、接收端已自动断开：结果无人接收，安静丢弃。
+            pass
 
 
 class DevicePanel(QWidget):
@@ -81,10 +114,16 @@ class DevicePanel(QWidget):
         self._current_dev_locator: Optional[tuple] = None
         self._last_capability_report: Dict = {}
         self._last_verdict: tuple = (None, "尚未连接")
+        # 热插拔判定基准：上一拍枚举的稳定定位符集合。
+        # 用轮询历史而不是下拉框快照，避免 serial/tuner 抖动被误判成插拔。
+        self._last_poll_locs: set = set()
         self._build_ui()
         self.refresh_devices()
 
-        # 热插拔轮询：每 2 秒
+        # 热插拔轮询：每 2 秒派发一次后台枚举（枚举本身不在这条 GUI 线程里跑）
+        self._enum_signals = _DeviceEnumSignals()
+        self._enum_signals.finished.connect(self._on_hotplug_devices)
+        self._enum_inflight = False
         self._hotplug_timer = QTimer(self)
         self._hotplug_timer.setInterval(2000)
         self._hotplug_timer.timeout.connect(self._on_hotplug_poll)
@@ -168,12 +207,15 @@ class DevicePanel(QWidget):
             self.dev_combo.addItem("未检测到 SDR 设备")
             self.status_label.setText("未检测到 SDR 设备")
             self.connect_btn.setEnabled(False)
+            self._last_poll_locs = set()
             return
         for d in self._devices:
             label = d.get("label") or d.get("driver") or "未知设备"
             self.dev_combo.addItem(label)
         self.status_label.setText(f"检测到 {len(self._devices)} 台设备")
         self.connect_btn.setEnabled(not self._connected)
+        # 手动刷新/初始刷新后，轮询基准同步到最新列表：刷新本身不算“新插入”。
+        self._last_poll_locs = {self._locator_of(d) for d in self._devices}
 
     def _refresh_audio_devices(self) -> None:
         self.audio_combo.blockSignals(True)
@@ -185,16 +227,28 @@ class DevicePanel(QWidget):
 
     # ------------------------------------------------------------------ 热插拔
     def _on_hotplug_poll(self):
-        """每 2 秒轮询设备列表变化。"""
+        """每 2 秒派发一次后台设备枚举。
+
+        枚举里有同步 USB open 与 0.5 s 网络超时，必须在 GUI 线程之外跑：
+        上一拍还没回来就跳过本拍，避免任务堆积。
+        """
         if not _ENUM_OK or enumerate_all_sdr_devices is None:
             return
-        try:
-            now = enumerate_all_sdr_devices()
-        except Exception:  # noqa: BLE001
+        if self._enum_inflight:
+            return
+        self._enum_inflight = True
+        QThreadPool.globalInstance().start(_DeviceEnumTask(self._enum_signals))
+
+    def _on_hotplug_devices(self, now, err: str):
+        """后台枚举回来了：在 GUI 线程里做插入/拔出判定（结果语义与原来一致）。"""
+        self._enum_inflight = False
+        if err or now is None:
             return
         now_keys = {self._key_of(d) for d in now}
         old_keys = {self._key_of(d) for d in self._devices}
         now_locs = {self._locator_of(d) for d in now}
+        old_locs = self._last_poll_locs
+        self._last_poll_locs = set(now_locs)
 
         # 拔出：设备打开（占用）后再次枚举读不到 USB 字符串，serial 会变空、
         # tuner 变 Unknown，key 随之改变，但这并不代表拔出。因此连接中的设备
@@ -206,11 +260,13 @@ class DevicePanel(QWidget):
             self.device_unplugged.emit()
             self.set_connected(False)
 
-        # 插入
-        new_keys = now_keys - old_keys
-        if new_keys and not self._connected:
+        # 插入：以稳定的 (driver, index) 定位符为准。key 里含 serial/tuner，
+        # 设备被占用再释放时这两项会在 Unknown ↔ 实值之间跳变（不是插拔），
+        # 用 key 判定会误报“检测到新设备”并覆盖掉掉线提示。
+        new_locs = now_locs - old_locs
+        if new_locs and not self._connected:
             for d in now:
-                if self._key_of(d) in new_keys:
+                if self._locator_of(d) in new_locs:
                     label = d.get("label", "新设备")
                     self.device_plugged.emit(label)
                     break

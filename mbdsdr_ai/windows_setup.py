@@ -107,16 +107,13 @@ def discover_dll_dirs_windows(max_depth: int = 3) -> tuple:
 
 
 
-def default_candidate_dirs() -> List[str]:
-    """返回 DLL 搜索候选目录（顺序敏感，去重保留首次出现）。
+def _cheap_candidate_dirs() -> List[str]:
+    """常规候选目录（不触碰文件系统递归，代价是几十次 ``isfile``）。
 
-    覆盖任务要求的全部位置：
-    - 当前工作目录
-    - 本文件所在目录（随包分发时 DLL 可放在 mbdsdr_ai/ 旁）
-    - ``lib/`` 相对目录
-    - PATH 环境变量里的每个目录
-    - ``C:\\rtl-sdr\\bin``
-    - ``%USERPROFILE%\\rtl-sdr\\bin``
+    与 :func:`default_candidate_dirs` 的前半段一致，去掉「Downloads/Desktop/
+    Program Files 等递归发现」。实测（2026-11-06，本机）这段递归在包导入时
+    固定花 1.5 s（``%LOCALAPPDATA%`` 4700+ 目录占 1.19 s），而常规位置通常
+    已经能命中 ``C:\\rtl-sdr\\bin\\rtlsdr.dll``——没必要每个进程都付这笔钱。
     """
     dirs: List[str] = []
 
@@ -153,14 +150,10 @@ def default_candidate_dirs() -> List[str]:
     if userprofile:
         dirs.append(os.path.join(userprofile, "rtl-sdr", "bin"))
 
-    # SDR++/SDR# 等解压到 Downloads/Desktop 的情况：有限深度自动发现
-    if sys.platform == "win32":
-        try:
-            dirs.extend(discover_dll_dirs_windows())
-        except Exception as exc:
-            logger.debug("自动发现 DLL 目录失败: %s", exc)
+    return _dedupe_keep_order(dirs)
 
-    # 去重、保序
+
+def _dedupe_keep_order(dirs: List[str]) -> List[str]:
     seen = set()
     out: List[str] = []
     for d in dirs:
@@ -168,6 +161,44 @@ def default_candidate_dirs() -> List[str]:
             seen.add(d)
             out.append(d)
     return out
+
+
+def default_candidate_dirs() -> List[str]:
+    """返回 DLL 搜索候选目录（顺序敏感，去重保留首次出现）。
+
+    覆盖任务要求的全部位置：
+    - 当前工作目录
+    - 本文件所在目录（随包分发时 DLL 可放在 mbdsdr_ai/ 旁）
+    - ``lib/`` 相对目录
+    - PATH 环境变量里的每个目录
+    - ``C:\\rtl-sdr\\bin``
+    - ``%USERPROFILE%\\rtl-sdr\\bin``
+    - 递归发现的 SDR++/SDR# 解压目录（贵，仅在常规位置都没命中时才用）
+    """
+    dirs: List[str] = _cheap_candidate_dirs()
+
+    # SDR++/SDR# 等解压到 Downloads/Desktop 的情况：有限深度自动发现
+    if sys.platform == "win32":
+        try:
+            dirs.extend(discover_dll_dirs_windows())
+        except Exception as exc:
+            logger.debug("自动发现 DLL 目录失败: %s", exc)
+
+    return _dedupe_keep_order(dirs)
+
+
+def _find_dll(filename: str,
+              extra_dirs: Optional[List[str]],
+              exists: Callable[[str], bool]) -> Optional[str]:
+    """先查常规目录，都没命中才做递归发现（懒惰求值）。"""
+    head = list(extra_dirs or []) + _cheap_candidate_dirs()
+    hit = _search_dll(filename, head, exists)
+    if hit:
+        return hit
+    dirs = default_candidate_dirs()
+    if extra_dirs:
+        dirs = list(extra_dirs) + dirs
+    return _search_dll(filename, dirs, exists)
 
 
 def _search_dll(
@@ -222,10 +253,7 @@ def find_rtlsdr_dll(
     str or None
         命中路径或 None。
     """
-    dirs = default_candidate_dirs()
-    if extra_dirs:
-        dirs = list(extra_dirs) + dirs
-    return _search_dll(RTLSDR_DLL_NAME, dirs, exists)
+    return _find_dll(RTLSDR_DLL_NAME, extra_dirs, exists)
 
 
 def find_libusb_dll(
@@ -233,10 +261,7 @@ def find_libusb_dll(
     exists: Callable[[str], bool] = os.path.isfile,
 ) -> Optional[str]:
     """搜索 ``libusb-1.0.dll``（rtlsdr.dll 的运行时依赖）。"""
-    dirs = default_candidate_dirs()
-    if extra_dirs:
-        dirs = list(extra_dirs) + dirs
-    return _search_dll(LIBUSB_DLL_NAME, dirs, exists)
+    return _find_dll(LIBUSB_DLL_NAME, extra_dirs, exists)
 
 
 def _register_dll_dir(dll_path: str) -> Dict[str, Any]:
