@@ -74,7 +74,7 @@ def _snr_signal_present(snr_db, was_present: bool,
 
 
 def _fmt_dbfs(value) -> str:
-    """RSSI/电平唯一口径：dBFS、1 位小数；缺失/NaN 显「—」（U-02/N-03）。
+    """引擎/IQ 路径电平：dBFS、1 位小数；缺失/NaN 显「—」（U-02/N-03）。
 
     绝不把缺值渲染成 0——0 dBFS 是满量程，会被读成「信号很强」。
     """
@@ -89,6 +89,24 @@ def _fmt_dbfs(value) -> str:
     if abs(v) < 0.05:          # 负零归零（N-02）
         v = 0.0
     return f"{v:.1f} dBFS"
+
+
+def _fmt_rssi_mcp(value) -> str:
+    """MCP 固件状态里的 RSSI：SI4732 的 dBµV（0–127，整数）。
+
+    数据源：ai-sdr-mini-kicad/ai_sdr_mini_firmware_v0.5_WebOTA.ino:336
+    ``state.si4732_rssi = resp[4];  // RSSI (0-127 dBuV)``。它与引擎 IQ 的
+    dBFS 不是同一物理量，不得共用「dBFS」标签；缺值一律「—」。
+    """
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    return f"{v:.0f} dBµV"
 
 
 def format_doppler_status(st) -> str:
@@ -756,8 +774,8 @@ class MainWindow(QMainWindow):
             self._freq_mgr = None
         # status_panel.update_from_backend 节流计数（每 ~10 帧 ≈ 500ms 刷一次）
         self._backend_status_tick: int = 0
-        # 最近一次 IQ 功率估计（dBFS），供状态栏/S-meter 复用
-        self._last_dbfs: float = 0.0
+        # 最近一次 IQ 功率估计（dBFS），供状态栏/S-meter 复用；None=还没测到
+        self._last_dbfs: Optional[float] = None
         # 无设备时频谱上方引导提示标签（_build_central_widget 中创建）
         self._no_device_hint: Optional[QLabel] = None
 
@@ -2648,9 +2666,12 @@ class MainWindow(QMainWindow):
             self.status_dev.setText(f"设备: {dev_name}")
         except Exception:
             pass
-        # 信号电平：用最近一次 IQ 功率估计（_poll_sdr_iq 写入 _last_dbfs）
+        # 信号电平：用最近一次 IQ 功率估计（_poll_sdr_iq 写入 _last_dbfs）；
+        # 还没测到就显「—」，绝不把 0 dBFS（满量程）画成真实读数。
         try:
-            self.status_rssi.setText(f"信号: {self._last_dbfs:.1f} dBFS")
+            self.status_rssi.setText(
+                "信号: —" if self._last_dbfs is None
+                else f"信号: {self._last_dbfs:.1f} dBFS")
         except Exception:
             pass
         # 多普勒补偿读数：直接照后端/接收链的真值渲染，没有就不编
@@ -4098,7 +4119,7 @@ class MainWindow(QMainWindow):
             pass
         # 断连后刷新底部状态栏（全部回落到 "--"）
         if not connected:
-            self._last_dbfs = 0.0
+            self._last_dbfs = None
             self._update_status_bar()
 
     def _teardown_connection(self, *, stop_tracking: bool = True) -> None:
@@ -4218,8 +4239,8 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def _on_status_for_ui(self, status: dict):
         freq = status.get("freq_display") or "—"
-        # U-02：RSSI 一律 dBFS、1 位小数；缺键/None/NaN 显「—」，绝不用 0 兜底。
-        rssi = _fmt_dbfs(status.get("rssi"))
+        # U-02：MCP 固件 RSSI 是 SI4732 dBµV（0–127），不是 dBFS；缺值显「—」。
+        rssi = _fmt_rssi_mcp(status.get("rssi"))
         self.freq_label.setText(freq)
         self.rssi_label.setText(f"RSSI: {rssi}")
         self.status_freq.setText(f"频率: {freq}")
@@ -6736,7 +6757,7 @@ class MainWindow(QMainWindow):
     # —— 7. 星座图 cleared → 重置统计 ——
     def _on_constellation_cleared(self):
         try:
-            self._last_dbfs = 0.0
+            self._last_dbfs = None
             self.status_rssi.setText("信号: —")
             self.statusBar().showMessage("星座图已清空，统计已重置", MSG_QUICK)
         except Exception:
@@ -6857,10 +6878,12 @@ class MainWindow(QMainWindow):
         kind = seg.get("kind", "?")
         mode = seg.get("suggested_mode", "NFM")
         bw = float(seg.get("bandwidth", 0.0))
+        peak_db = seg.get("peak_db")
+        peak_txt = "—" if peak_db is None else f"{float(peak_db):.1f} dB"
         reply = QMessageBox.question(
             self, "检测到信号",
             f"检测到 {kind} 信号（{peak/1e6:.3f} MHz，"
-            f"峰值 {seg.get('peak_db', 0):.1f} dB），\n"
+            f"峰值 {peak_txt}），\n"
             f"是否切换到 {mode} 模式调谐到该频率？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if reply != QMessageBox.Yes:

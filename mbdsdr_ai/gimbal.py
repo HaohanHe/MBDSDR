@@ -242,7 +242,8 @@ class GimbalController:
         self.board = BoardGimbalClient()
         # 姿态回读源（由 pose.py 的 IMU+磁力计融合结果注入）
         self._pose_provider: Optional[Callable[[], GimbalPose]] = None
-        # RSSI 回读源（SDR 后端注入，返回当前信号强度 dBm）
+        # RSSI 回读源（SDR 后端注入，返回当前信号强度读数，单位随后端：
+        # IQ 链为 dBFS，ai-sdr mini 为 dBµV；不是 dBm）
         self._rssi_provider: Optional[Callable[[], float]] = None
         # 是否拿到过真实姿态回读；没有则 (0,0) 只是占位，不能当"已对准"依据
         self._pose_valid = False
@@ -277,7 +278,7 @@ class GimbalController:
         self._pose_provider = provider
 
     def set_rssi_provider(self, provider: Callable[[], float]):
-        """注入 RSSI 回读函数（返回当前信号强度 dBm），用于测向扫描。"""
+        """注入 RSSI 回读函数（返回当前信号强度读数，单位随后端，不是 dBm）。"""
         self._rssi_provider = provider
 
     # ---- 读姿态 ----
@@ -389,7 +390,8 @@ class GimbalController:
         - manual：不自动转，返回每步人工引导清单（RSSI 留空，由人/AI 补采）。
 
         返回 {samples:[{az,el,rssi}], peak_az, manual, guidance_steps}。
-        RSSI 单位 dBm，值越大（越接近0）信号越强。
+        RSSI 为相对读数（dB，单位随后端：dBFS 或 dBµV），值越大信号越强。
+        它不是 dBm：没有接收链/天线增益校准就不得标 dBm。
         """
         provider = rssi_provider or self._rssi_provider
         if not (step > 0):

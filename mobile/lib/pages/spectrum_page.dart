@@ -378,7 +378,7 @@ class _StatusBar extends StatelessWidget {
           ),
           _StatusChip(controller.mode.label),
           _StatusChip(
-            rssi == null ? 'RSSI --' : 'RSSI ${rssi.toStringAsFixed(1)} dBFS',
+            rssi == null ? 'RSSI —' : 'RSSI ${rssi.toStringAsFixed(1)} dBFS',
           ),
           // 静噪：基于解调音频真实 RMS 电平的门控开合，克制小字。
           _StatusChip(

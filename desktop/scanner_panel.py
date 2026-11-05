@@ -308,9 +308,11 @@ class ScannerPanel(QWidget):
         self.result_list.clear()
         for seg in self._segments:
             icon = _KIND_ICON.get(seg.get("kind", "UNKNOWN"), "•")
+            peak_db = seg.get("peak_db")
+            peak_txt = "—" if peak_db is None else f"{float(peak_db):.1f} dB"
             text = (f"{icon} {seg['start_freq']/1e6:.3f}–"
                     f"{seg['end_freq']/1e6:.3f} MHz   "
-                    f"峰值 {seg.get('peak_db', 0):.1f} dB   "
+                    f"峰值 {peak_txt}   "
                     f"{seg.get('kind', '?')} → {seg.get('suggested_mode', '?')}")
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, seg)

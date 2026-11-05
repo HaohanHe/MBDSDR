@@ -52,8 +52,66 @@ def test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero():
     assert mw._fmt_dbfs(float("nan")) == "—"
     assert mw._fmt_dbfs(12.34) == "12.3 dBFS"
     assert 'status.get("rssi", 0)' not in _MAIN, "缺键不得默认成 0 造假读数"
-    assert "rssi_value.setText(_fmt_dbfs(rssi))" in _PANEL
+    # 桌面 MCP 路径是 SI4732 dBµV，不是 dBFS；缺值仍是「—」。
+    assert "rssi_value.setText(_fmt_rssi_mcp(rssi))" in _PANEL
     assert '" dBm"' not in _PANEL and '" dBm"' not in _MAIN
+
+
+def test_u02_mcp_rssi_is_dbuV_and_missing_has_no_digits():
+    """U-02：MCP 固件 RSSI = dBµV（0–127，整数）；无读数不得出现数字。"""
+    assert sp._fmt_rssi_mcp(None) == "—"
+    assert sp._fmt_rssi_mcp(float("nan")) == "—"
+    assert sp._fmt_rssi_mcp(42) == "42 dBµV"
+    assert mw._fmt_rssi_mcp(None) == "—"
+    assert mw._fmt_rssi_mcp(42.4) == "42 dBµV"
+    # 无读数输出里不许有阿拉伯数字（0 / 0.0 都会被读成真实读数）
+    for dash in (sp._fmt_rssi_mcp(None), sp._fmt_dbfs(None),
+                 mw._fmt_rssi_mcp(None), mw._fmt_dbfs(None)):
+        assert not any(ch.isdigit() for ch in dash), dash
+
+
+def test_u02_same_screen_has_one_rssi_unit_and_never_dBm():
+    """U-02：单次渲染只出现一种 RSSI 单位；任何 RSSI 文案不得写 dBm。"""
+    mcp_out = sp._fmt_rssi_mcp(42)
+    engine_out = sp._fmt_dbfs(-45.2)
+    assert "dBµV" in mcp_out and "dBFS" not in mcp_out
+    assert "dBFS" in engine_out and "dBµV" not in engine_out
+    for out in (mcp_out, engine_out):
+        units = [u for u in ("dBFS", "dBµV", "dBm") if u in out]
+        assert len(units) == 1, f"同屏混用单位: {out}"
+        assert "dBm" not in out
+    # 固件证据：SI4732 RSSI 单位注释必须留在数据源旁
+    _FW = open(os.path.join(_ROOT, "ai-sdr-mini-kicad",
+                            "ai_sdr_mini_firmware_v0.5_WebOTA.ino"),
+               encoding="utf-8", errors="ignore").read()
+    assert "0-127 dBuV" in _FW or "0-127 dBµV" in _FW
+
+
+def test_u02_status_defaults_are_none_and_format_has_no_fake_minus100():
+    """U-02：SDRStatus 默认不是 -100.0；状态输出缺值显「—」。"""
+    from mbdsdr_ai.sdr_backend import SDRStatus
+    from mbdsdr_ai.sdr_tools import _format_status
+    st = SDRStatus(sample_rate_hz=2_400_000.0)
+    assert st.rssi_db is None and st.snr_db is None
+    txt = _format_status(st)
+    assert "RSSI: —" in txt and "SNR: —" in txt
+    assert "-100.0" not in txt
+    assert 'self.status.rssi_unit = "dBµV"' in open(
+        os.path.join(_ROOT, "mbdsdr_ai", "sdr_backend.py"),
+        encoding="utf-8").read()
+
+
+def test_u02_cli_has_no_minus_one_fake_rssi_and_labels_dbuV():
+    """U-02：CLI 扫描缺值存 None 显「—」，并标 dBµV。"""
+    import mbdsdr_mcp_client as cli
+    _CLI = open(os.path.join(_ROOT, "mbdsdr_mcp_client.py"),
+                encoding="utf-8").read()
+    assert 'status.get("rssi", -1)' not in _CLI
+    assert 'status.get("rssi")' in _CLI
+    assert "dBµV" in _CLI
+    assert cli._fmt_mcp_readout(None, 0, "dBµV") == "—"
+    assert cli._fmt_mcp_readout(42, 0, "dBµV") == "42 dBµV"
+    assert not any(ch.isdigit() for ch in cli._fmt_mcp_readout(None, 0, "dBµV"))
 
 
 def test_n02_negative_zero_displays_as_zero():
@@ -112,9 +170,11 @@ def test_u02_cpp_status_strip_labels_rssi_and_snr_units():
 
 
 def test_u02_mobile_rssi_is_dbfs_with_one_decimal():
-    """U-02：移动端 RSSI 与桌面同口径（dBFS、1 位小数）。"""
+    """U-02：移动端 RSSI 与桌面 IQ 路径同口径（dBFS、1 位小数）；无帧显「—」。"""
     assert "'RSSI ${rssi.toStringAsFixed(1)} dBFS'" in _MOBILE_SPECTRUM
     assert "toStringAsFixed(0)} dB'" not in _MOBILE_SPECTRUM
+    assert "'RSSI —'" in _MOBILE_SPECTRUM
+    assert "'RSSI --'" not in _MOBILE_SPECTRUM
 
 
 def test_u03_mobile_sample_rate_is_ms_per_s_three_decimals():

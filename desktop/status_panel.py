@@ -47,9 +47,22 @@ def _fmt_number(value, digits: int, unit: str = "") -> str:
 
 
 def _fmt_dbfs(value) -> str:
-    """RSSI/电平唯一口径：dBFS、1 位小数，缺值「—」（从不拿 0 兜底）。"""
+    """引擎/IQ 路径电平：dBFS、1 位小数，缺值「—」（从不拿 0 兜底）。"""
     txt = _fmt_number(value, 1)
     return _EMPTY if txt == _EMPTY else txt + " dBFS"
+
+
+# MCP 固件状态里的 RSSI 是 SI4732 的 dBµV（0–127），不是 dBFS：
+# ai-sdr-mini-kicad/ai_sdr_mini_firmware_v0.5_WebOTA.ino:336
+#   state.si4732_rssi = resp[4];  // RSSI (0-127 dBuV)
+# 该值是整数，固定 0 位小数；缺值一律「—」，不拿 0 冒充读数。
+_MCP_RSSI_UNIT = "dBµV"
+
+
+def _fmt_rssi_mcp(value) -> str:
+    """MCP 固件 RSSI：dBµV、0 位小数，缺值「—」。"""
+    txt = _fmt_number(value, 0)
+    return _EMPTY if txt == _EMPTY else txt + " " + _MCP_RSSI_UNIT
 
 
 # ---------------------------------------------------------------------------
@@ -922,10 +935,11 @@ class StatusPanel(QWidget):
         snr = status.get("snr")
         mode = status.get("mode_name")
         freq = status.get("freq_display")
-        uptime = status.get("uptime", 0)
+        uptime = status.get("uptime")
 
-        # U-02：RSSI 一律 dBFS、1 位小数；缺键/None/NaN 显「—」，绝不用 0 兜底。
-        self.rssi_value.setText(_fmt_dbfs(rssi))
+        # U-02：此路径是 MCP 固件 get_status，RSSI 为 SI4732 dBµV（0–127）；
+        # 缺键/None/NaN 显「—」，绝不用 0 兜底。引擎 IQ 路径仍是 dBFS。
+        self.rssi_value.setText(_fmt_rssi_mcp(rssi))
         self.snr_value.setText(_fmt_number(snr, 1, " dB"))
         self.mode_value.setText(mode if mode else _EMPTY)
         self.freq_value.setText(freq if freq else _EMPTY)
@@ -987,7 +1001,8 @@ class StatusPanel(QWidget):
             lon = gps.get("lon")
             alt = gps.get("alt")
             hdop = gps.get("hdop")
-            self.gps_sats.setText(str(gps.get("sats", 0)))
+            sats = gps.get("sats")
+            self.gps_sats.setText(str(sats) if sats is not None else "—")
             self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "—")
             self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "—")
             self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "—")

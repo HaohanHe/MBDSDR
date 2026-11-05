@@ -25,6 +25,7 @@ AI 可以通过 tool calling 直接调用，也可以通过工作流组合调用
 """
 
 import logging
+import math
 import os
 import time
 import json
@@ -2279,7 +2280,7 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "rssi_by_azimuth": {"type": "object", "description": "方位角(度)到RSSI(dBm)的映射，如 {\"0\": -60, \"45\": -55, \"90\": -70}"},
+                "rssi_by_azimuth": {"type": "object", "description": "方位角(度)到 RSSI（相对读数，dB；单位随 SDR 后端：dBFS 或 dBµV）的映射，如 {\"0\": -60, \"45\": -55, \"90\": -70}"},
             },
             "required": ["rssi_by_azimuth"],
         },
@@ -3053,6 +3054,19 @@ def _disconnect_sdr(mgr):
         return f"已断开: {name}"
     return "没有已连接的设备"
 
+def _fmt_readout(value, digits: int = 1, unit: str = "") -> str:
+    """读数格式化：None/NaN → 「—」，绝不用 0/-100 兜底（U-02）。"""
+    if value is None:
+        return "—"
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(v):
+        return "—"
+    return f"{v:.{digits}f}" + (f" {unit}" if unit else "")
+
+
 def _format_status(status: Optional[SDRStatus]) -> str:
     if not status:
         return "没有已连接的设备"
@@ -3064,7 +3078,8 @@ def _format_status(status: Optional[SDRStatus]) -> str:
         f"增益: {status.gain_db:.1f} dB ({'AGC开' if status.agc_enabled else '手动'})",
         f"解调: {status.demod_mode}",
         f"带宽: {status.bandwidth_hz if status.bandwidth_hz > 0 else '自动'} Hz",
-        f"RSSI: {status.rssi_db:.1f} dB, SNR: {status.snr_db:.1f} dB",
+        f"RSSI: {_fmt_readout(status.rssi_db, 1, status.rssi_unit)}"
+        f", SNR: {_fmt_readout(status.snr_db, 1, 'dB')}",
         f"静噪: {status.squelch_db} dB, 音量: {status.volume:.0%}",
         f"录制: {'是' if status.recording else '否'}" + (f" ({status.recording_path})" if status.recording else ""),
         f"运行时间: {status.uptime_seconds:.0f} 秒",
@@ -4766,7 +4781,7 @@ def _ai_sweep(mgr, spec, args):
     auto_tune = args.get("auto_tune", True)
 
     results = []
-    strongest = {"freq": freq_start, "power": -200}
+    strongest = {"freq": freq_start, "power": -math.inf}
     current = freq_start
     while current <= freq_end:
         backend.set_frequency(current)
@@ -4777,10 +4792,17 @@ def _ai_sweep(mgr, spec, args):
             power = spectrum.peak_power_db
         else:
             power = backend.status.rssi_db
+            if power is None:
+                # 没有 IQ、状态里也没有 RSSI：不造点、不拿 0 冒充读数
+                current += step
+                continue
         results.append({"freq_mhz": round(current / 1e6, 3), "power_db": round(power, 1)})
         if power > strongest["power"]:
             strongest = {"freq": current, "power": power}
         current += step
+
+    if not results:
+        return "AI 扫频未得到任何读数：设备没有返回 IQ，状态里也没有 RSSI。请确认设备已连接且数据流正常后重试。"
 
     if auto_tune and strongest["freq"] != freq_start:
         backend.set_frequency(strongest["freq"])
@@ -4804,7 +4826,7 @@ def _ai_find_center(mgr, spec, args):
     auto_correct = args.get("auto_correct", True)
     step = search_range / num_steps
 
-    strongest = {"freq": current_freq, "power": -200}
+    strongest = {"freq": None, "power": -math.inf}
     for i in range(num_steps):
         test_freq = current_freq - search_range / 2 + i * step
         backend.set_frequency(test_freq)
@@ -4815,9 +4837,14 @@ def _ai_find_center(mgr, spec, args):
             power = spectrum.peak_power_db
         else:
             power = backend.status.rssi_db
+            if power is None:
+                # 无读数：跳过该步，不拿 0/-100 冒充功率
+                continue
         if power > strongest["power"]:
             strongest = {"freq": test_freq, "power": power}
 
+    if strongest["freq"] is None:
+        return "AI 找中心失败：设备没有返回 IQ，状态里也没有 RSSI，无法判定中心频点。请确认设备已连接且数据流正常后重试。"
     offset = strongest["freq"] - current_freq
     ppm = offset / current_freq * 1e6 if current_freq > 0 else 0
 
@@ -6072,7 +6099,7 @@ def _gnss_direction_find(args):
     rssi_dict = args.get('rssi_by_azimuth') if isinstance(args, dict) else None
     # 弱模型可能传空、传列表或漏传；这里要优雅报错而不是抛 KeyError
     if not rssi_dict or not isinstance(rssi_dict, dict):
-        return ("错误: 需要提供 rssi_by_azimuth，即 {方位角度: RSSI(dBm)} 的映射，"
+        return ("错误: 需要提供 rssi_by_azimuth，即 {方位角度: RSSI（相对读数 dB）} 的映射，"
                 "例如 {\"0\": -82, \"30\": -75, \"60\": -68, \"90\": -74}。"
                 "请先用定向天线方位扫描工具（gimbal/gp 扫描）采集各方位 RSSI，再把结果交给本工具做质心定位。"), {}
 
@@ -6082,7 +6109,7 @@ def _gnss_direction_find(args):
 
     lines = ["=== 干扰源方向估算（八木天线RSSI扫描）==="]
     lines.append(f"估算方向: {result['estimated_direction_deg']}°")
-    lines.append(f"峰值RSSI: {result['peak_rssi_dbm']} dBm")
+    lines.append(f"峰值RSSI: {result['peak_rssi_dbm']}（相对读数 dB）")
     lines.append(f"置信度: {result['confidence']}")
     lines.append(f"说明: {result['note']}")
     lines.append(f"验证: {result['symmetric_check']}")
@@ -7834,7 +7861,7 @@ def _gimbal_rssi_sweep(args, agent=None):
         lines.append("")
         lines.append("采完各方位 RSSI 后，用 gnss_direction_find 传入 {方位:RSSI} 做质心定位。")
     else:
-        lines.append(f"{'方位(°)':8s}{'RSSI(dBm)':12s}")
+        lines.append(f"{'方位(°)':8s}{'RSSI(读数 dB)':16s}")
         for s in r["samples"]:
             v = f"{s['rssi']:.1f}" if s["rssi"] is not None else "无读数"
             bar = ""

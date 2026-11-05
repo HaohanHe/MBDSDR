@@ -173,8 +173,13 @@ class SDRStatus:
     # 推导）；Python 路径按余量口径门控时保持 None。
     squelch_threshold_dbfs: Optional[float] = None
     volume: float = 0.5
-    rssi_db: float = -100.0
-    snr_db: float = 0.0
+    # 信号强度：None=从未采到，**不许拿 0/-100 冒充读数**（U-02）。
+    # 物理量随后端而定，读 rssi_db 时必须连 rssi_unit 一起读：
+    #   - 本地 IQ 链（RTL/HackRF/USRP…）：dBFS（相对 ADC 满量程）
+    #   - ai-sdr mini（SI4732，MCP get_status）：dBµV（0–127）
+    rssi_db: Optional[float] = None
+    rssi_unit: str = "dBFS"
+    snr_db: Optional[float] = None
     recording: bool = False
     recording_path: str = ""
     recording_duration: float = 0.0
@@ -2439,6 +2444,9 @@ class AISDRMiniBackend(SDRBackend):
                 self.status.frequency_hz = float(result["freq"]) * 1000000 if result.get("mode_name") == "FM" else float(result["freq"]) * 1000
             if "rssi" in result:
                 self.status.rssi_db = float(result["rssi"])
+                # 固件 SI4732 RSQ RSSI 原始值：0–127 dBµV，不是 dBFS。
+                # 依据 ai-sdr-mini-kicad/ai_sdr_mini_firmware_v0.5_WebOTA.ino:336
+                self.status.rssi_unit = "dBµV"
             if "snr" in result:
                 self.status.snr_db = float(result["snr"])
             if "volume" in result:

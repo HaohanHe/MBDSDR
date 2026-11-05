@@ -76,6 +76,19 @@ def _unwrap(resp: Dict):
     return {} if result is None else result
 
 
+def _rssi_sort_key(item: Dict):
+    """排序键：None/非数值视为 -inf，不参与「最强」比较（U-02）。"""
+    v = item.get("rssi")
+    return v if isinstance(v, (int, float)) else float("-inf")
+
+
+def _fmt_mcp_readout(value, digits: int, unit: str) -> str:
+    """MCP 固件读数：缺值「—」，有值带单位；绝不渲染 0 冒充缺值。"""
+    if not isinstance(value, (int, float)):
+        return "—"
+    return f"{value:.{digits}f} {unit}"
+
+
 class MBDSDRClient:
     """ai-sdr Mini WebSocket MCP 客户端。
 
@@ -335,8 +348,10 @@ class MBDSDRClient:
             status = self.get_status()
             results.append({
                 "freq_mhz": round(freq, 1),
-                "rssi": status.get("rssi", -1),
-                "snr": status.get("snr", -1),
+                # 固件 get_status 的 rssi 是 SI4732 原始 dBµV（0–127）；
+                # 缺键就是没读数，存 None，不拿 -1 冒充信号强度。
+                "rssi": status.get("rssi"),
+                "snr": status.get("snr"),
             })
             freq += step
         return results
@@ -351,7 +366,10 @@ class MBDSDRClient:
         results = self.scan_fm(start, end, step)
         if not results:
             return {}
-        strongest = max(results, key=lambda x: x.get("rssi", -1))
+        strongest = max(results, key=_rssi_sort_key)
+        if strongest.get("rssi") is None:
+            # 一次 RSSI 都没采到：不把首个频点冒充成「最强台」
+            return {}
         # 调谐到最强频点
         self.tune_fm(strongest["freq_mhz"])
         return strongest
@@ -793,12 +811,14 @@ def main():
             print(f"FM 扫频: {args.start}-{args.end} MHz, 步进 {args.step} MHz...")
             results = client.scan_fm(args.start, args.end, args.step, args.dwell)
             print(json.dumps(results, ensure_ascii=False, indent=2))
-            # 找最强的 5 个
-            sorted_results = sorted(results, key=lambda x: x.get("rssi", -1),
+            # 找最强的 5 个（None=没读数，排最后且不渲染数字）
+            sorted_results = sorted(results, key=_rssi_sort_key,
                                     reverse=True)
             print("\n信号最强的 5 个频点:")
             for r in sorted_results[:5]:
-                print(f"  {r['freq_mhz']:6.1f} MHz  RSSI={r['rssi']:4d}  SNR={r['snr']}")
+                rssi_txt = _fmt_mcp_readout(r.get("rssi"), 0, "dBµV")
+                snr_txt = _fmt_mcp_readout(r.get("snr"), 1, "dB")
+                print(f"  {r['freq_mhz']:6.1f} MHz  RSSI={rssi_txt}  SNR={snr_txt}")
 
         elif cmd == "find_strongest_fm":
             print(f"在 {args.start}-{args.end} MHz 找信号最强的电台...")
@@ -806,7 +826,10 @@ def main():
             print(json.dumps(strongest, ensure_ascii=False, indent=2))
             if strongest:
                 print(f"\n已调谐到最强电台: {strongest['freq_mhz']} MHz "
-                      f"(RSSI={strongest['rssi']})")
+                      f"(RSSI={_fmt_mcp_readout(strongest.get('rssi'), 0, 'dBµV')})")
+            else:
+                print("\n未采到 RSSI：设备没有返回读数，无法判定最强电台。"
+                      "请确认硬件已连接、天线已接好后重试。")
 
         else:
             print(f"未知命令: {cmd}", file=sys.stderr)

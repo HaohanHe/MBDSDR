@@ -322,7 +322,7 @@ def interference_direction_finding(
     （GP全向天线检测到干扰 → 切换八木天线扫描 → RSSI最强方向即干扰源方向）
 
     参数：
-        rssi_by_azimuth: {方位角度: RSSI dBm}
+        rssi_by_azimuth: {方位角度: RSSI 相对读数（dB，单位随 SDR 后端）}
 
     返回：
         干扰源方向估算
