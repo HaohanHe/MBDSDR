@@ -397,27 +397,35 @@ constexpr double kCandidateRatesHz[] = {
 
 **组 4 状态维持「部分统一」**：桌面两处已能力化，剩移动端一项（阻塞于协议字段）与 C++ 四项派单；三项未全落地前不改字。
 
-
 ### C.11 组 4 三项剩余逐条状态（2026-11-06）
 
 | # | 项 | 状态 | 证据 / 阻塞 | 提交 |
 |---|---|---|---|---|
 | 1 | 连接对话框 `sr_combo` 能力化 + 逐档回读/显式拒绝 | **已落地** | 删除 11 档直灌 → `_fill_sr_combo(device)` 按设备能力生成；`_on_sample_rate_changed` 检查 `set_sample_rate` 返回值与回读值：`False` → 状态栏「未被设备接受」+ 回填下拉 + 不落盘；回读≠请求 → 报实际值；`sdr_backend._resolve_applied_sample_rate` 让 `status.sample_rate_hz` 记生效值 | `70429a02` |
-| 2 | 移动端档位改后端能力 | **阻塞（待内核字段）** | Dart 侧已改：`RadioApi` 旁挂可选接口 `SampleRateCapabilitySource` + 扩展；`spectrum_page` 下拉档位来自 `sampleRateOptionsHz`，`null`/空 → 单项「未知（设备未报告采样率范围）」且 `onChanged: null`（禁用）；`ai_tools.set_sample_rate` 去掉 `enum` 与本地 4 档校验，改为「未报告即失败」；`AppTokens.sampleRatesHz` 标 `@Deprecated('历史默认，不被任何人读取')`。但字段 `sample_rate_options_hz` / `sample_rate_options_status` 仍待 `control_hub.cpp` 下发 → RTL 直连路径只能是 unknown | `754f64e6`（Dart 消费侧；协议字段仍缺） |
+| 2 | 移动端 / 桌面档位来源 | **阻塞（内核未上报档位列表）** | **核对现状**（HEAD `dd72ba1c`）：`cmdGetStatus` 只报回读 `readback_sample_rate_hz` + `sample_rate_readback_available`/`sample_rate_status`/`sample_rate_error`（`cpp/src/control/control_hub.cpp:1016,1024-1027`）；`cmdGetCapabilities` 只报 `sample_rate_min_hz`/`sample_rate_max_hz`（`:1075-1076`）——**无** `sample_rate_options_hz`。`dsp::buildSampleRateOptions(caps)` 已存在（`cpp/src/dsp/device_capabilities.h:81-88`，按真机量程过滤、未连接返空），但 `cmdGetCapabilities` 未调用 → 内核只需一行即可暴露（交内核线）。**真值口径**：「实际生效值」的真值 = 设备回读（已上报）；「哪些档可选」的真值 = 设备候选表（未上报）。桌面 `RTLSDRBackend.SAMPLE_RATES` 11 档与 C++ `kCandidateRatesHz` 11 档是同源静态拷贝、不随设备变化；RTL 合法区间 225001–3200000 覆盖全部 11 档，故对 RTL **当前无差**，差只出现在「连接前（桌面已列、设备候选为空）」与非 RTL / 量程受限设备。Dart 消费侧已改：档位缺失即「未知」并禁用、`ai_tools` 未报告即失败、`AppTokens.sampleRatesHz` 标 `@Deprecated` | `754f64e6`（Dart 消费侧；档位列表仍缺） |
 | 3 | 逐档回读端到端证据 | **已落地（真机 + 注入双证）** | 新增 `scripts/sample_rate_readback_check.py`：逐档 `set_sample_rate` → 读回 → 判「一致/不一致/被拒」。真机首轮 `LibUSBError LIBUSB_ERROR_IO (-1)` 不可用；复跑成功 12 档：11 一致 + **1 不一致（2.800M→2.880M，+80,000 Hz，硬件/驱动实际吸附被检查抓到）**。另注入三态自证：honest 12/12 一致、clamp 同上一致/不一致分布、reject 11 一致 + 1 被拒（2.800M 拒绝后保持上一档 2.560M）；注入模式会打印「真机不可复跑，以下为注入验证」 | `754f64e6` |
 
-**结论维持「部分统一」**：第 1、3 项已落地（`70429a02`、`754f64e6`；第 3 项真机复跑 12 档 11 一致 + 1 吸附被抓到）；第 2 项只完成消费侧（`754f64e6`），档位来源仍等内核线 `sample_rate_options_hz` / `sample_rate_options_status` 落地下发——在此之前移动端只能显示「未知」并禁用选择，属功能性阻塞，不写「已统一」。本机无 Flutter 工具链，Dart 改动未跑 `flutter analyze` / `flutter test`，未经验证。另 C++ 侧四项（AI 4 档接线、2160/2880 拒绝路径、2800 vs 2880、硬件读回）仍在审阅线工作区（本笔结束时未提交），同样不改「已统一」。
+**结论维持「部分统一」**：第 1、3 项已落地（`70429a02`、`754f64e6`；第 3 项真机复跑 12 档 11 一致 + 1 吸附被抓到）；第 2 项只完成消费侧（`754f64e6`）：内核已补「回读可观测」（`sample_rate_readback_available` / `sample_rate_status` / `sample_rate_error` + `readback_sample_rate_hz`），但**仍未上报档位列表**（`buildSampleRateOptions` 存在却未接进 `get_capabilities`）——在此之前移动端只能显示「未知」并禁用选择，属功能性阻塞，状态如实维持「阻塞」，不写「已统一」。本机无 Flutter 工具链，Dart 改动未跑 `flutter analyze` / `flutter test`，未经验证。另 C++ 侧四项（AI 4 档接线、2160/2880 拒绝路径、2800 vs 2880、硬件读回）已由 `dd72ba1c` 落地；上面「回读可观测」即来自该笔。
 
 **三份档位表的用途分工（不是矛盾，供重复治理线登记时分开写）**
 
 | 表 | 档数 | 用途 | 谁读 |
 |---|---|---|---|
-| `cpp/src/core/tokens.h:kSampleRatesHz` | 4 | **可下发白名单**：档外显式拒绝 | `cpp/src/ai/agent_tools.cpp:execSetSampleRate`；控制面同口径校验在审阅线工作区（C.9） |
+| `cpp/src/core/tokens.h:kSampleRatesHz` | 4 | **可下发白名单**：档外显式拒绝 | `cpp/src/ai/agent_tools.cpp:execSetSampleRate`；控制面同口径校验已落（`dd72ba1c`，C.9） |
 | `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz` | 11 | **设备候选探测表**：按 librtlsdr 合法区间过滤后供下拉手选，不是下发白名单 | C++ 设备下拉（`device_capabilities`） |
 | `mbdsdr_ai/sdr_backend.py:RTLSDRBackend.SAMPLE_RATES` | 11 | 桌面后端能力表：控制面板/连接对话框的可见档位来源 | `desktop/control_panel.py`、`desktop/main_window.py`、`mbdsdr_ai/device_capabilities.py` |
 | 移动端档位表 | 0（已删） | 改读控制面 `sample_rate_options_hz`，缺失即「未知」并禁用 | 字段待内核线下发（C.11 第 2 项） |
 
 4 档 ≠ 11 档不是「同一物理量两套数」：前者是**允许 AI/控制面下发的正向列表**，后者是**可让用户手选的候选集合**，关系是「白名单 ⊆ 候选」，不是「应相等」。重复治理线登记时请按这两类用途分开，勿合并成一条矛盾。
+
+**证据级别（供 `limitations-register` 附 M.4 L52 引用；本文件不改那份文档）**
+
+- 工件：`scripts/sample_rate_readback_check.py`（已入库，`754f64e6`）；命令 `python scripts/sample_rate_readback_check.py --mode real`（`--mode honest|clamp|reject` 为注入）。
+- 真机 12 档 `set→get`：时点 **2026-11-06 01:05–01:10**（结果入账 `7898c689`）。原始 stdout 当时落 `D:\mbdsdr\.tmp\rb_real.txt`，按临时文件当删纪律**已删除、未入库**（无 SHA256）→ **E3 不可复跑**（按 `docs/evidence-standard.md`：只能作历史线索，引用须带「当时有证据、现不可复跑」）。
+- E3 的当前不可复跑原因：首轮 `LIBUSB_ERROR_IO (-1)`、复跑 `LIBUSB_ERROR_ACCESS (-3)`（设备被占用/权限不足）。恢复到 E2 需：释放 RTL 独占 + USB 访问权限，并把 stdout 存 `.log` 入库并钉 SHA256。
+- 注入三态（`--mode honest|clamp|reject`）：**E2 可复跑**（无需硬件，确定性）。期望：honest 12 一致；clamp 11 一致 + 1 不一致（2.800M→2.880M，+80,000 Hz，退出码 1）；reject 11 一致 + 1 被拒（保持 2.560M）。
+- 数字口径：「12 档 11 一致 + 1 不一致」当前只能按 E3 引用；「clamp 必红」按 E2 引用。
+
 
 ## 变更记录
 
@@ -446,6 +454,7 @@ constexpr double kCandidateRatesHz[] = {
 | 2026-11-06 | `754f64e6` | 组 4 三项收口：①`sr_combo` 能力化 + 逐档回读/显式拒绝（`70429a02`）；②移动端消费侧改「档位缺失 → 未知并禁用」，`AppTokens.sampleRatesHz` 降为历史默认（`754f64e6`，协议字段仍待内核 `sample_rate_options_hz`）；③`scripts/sample_rate_readback_check.py` 逐档回读（honest 12/12 一致、clamp 抓到 2.800M→2.880M 不一致、reject 1 被拒；真机 `LibUSBError -1` 不可复跑，为注入验证）；组 4 维持「部分统一」；另写「4 档白名单 vs 11 档候选」用途分工，供重复治理线登记 | 参数治理线 |
 | 2026-11-06 | 本笔 | C.11 第 3 项补真机复跑：12 档 11 一致 + 1 不一致（2.800M→2.880M，+80,000 Hz）；首轮 LibUSBError -1 不可用已如实保留；组 4 仍「部分统一」 | 参数治理线 |
 | 2026-11-06 | 本笔 | C++ 内核 F1/F2/F3 落地（审阅线）：①`cmdSetSampleRate` 按 `tokens::kSampleRatesHz` 逐档比对、档外显式拒绝（与 `agent_tools.cpp` 同口径，不再回填请求值）；②`rtl_sdr_source.cpp:pushSampleRate` 检查 `set_sample_rate` 返回码，rc≠0 保留原采样率并上报 `sourceError`，`start()` 直接失败；③`rtl_sdr_ops.h:getSampleRate` 接 `rtlsdr_get_sample_rate` 读回，不一致报请求/读回两值，无读回入口时状态串「采样率=请求值，硬件读回不可用」；`get_status` 增 `sample_rate_readback_available`/`sample_rate_status`/`sample_rate_error`；④候选表 10→11 档（补 2.160M、2.800M→2.880M，差 80,000 Hz 清零）；7 档差集全部定稿「内核支持、AI 故意不暴露」；反证测试 6 条 + Python 14 passed | 审阅线 |
+| 2026-11-06 | 本笔 | 核对 control_hub 现状：只有回读（readback_sample_rate_hz / sample_rate_readback_available / sample_rate_status / sample_rate_error）与量程（sample_rate_min_hz / sample_rate_max_hz），无 sample_rate_options_hz；buildSampleRateOptions 存在但未接进 get_capabilities。组 4 第 2 项维持「阻塞」；C.11 补证据级别（真机 12 档 = E3，注入三态 = E2） | 参数治理线 |
 
 ## 附录 D：C++/Python 峰值独有口径（作废数 / 现行数）
 
