@@ -9,13 +9,13 @@
 
 ## 0. 结论速览
 
-共登记 **40 项**，分四类：
+共登记 **41 项**，分四类：
 
-| 类型 | 项数 | 已处置（删除/合并） | 必须保留 | 待裁定 |
+| 类型 | 项数 | 已处置（删除/合并） | 必须保留 | 待裁定/待修 |
 |---|---|---|---|---|
-| 重复实现 | 11 | 1（采样率格式化，**已合并** `f529ba62`） | 10（频谱双实现、频率分精度、错误码标签/下一步/常量、ACARS、dBFS/dBµV、路径引导） | 0 |
-| 多真值源 | 11 | 0 | 10（采样率白名单/候选/后端表/AI 参考表/回退/移动端/硬件吸附档/默认值分层/配置路径/工具目录快照） | 1（`module_panel` 5 档） |
-| 死代码 | 12 | 2（4 个函数 `c14ac51e`；2 个纯函数 `1c0464b6`） | 9（三录音模块、C++ 同名模块、仅测试模块、未接线方法、触屏控件、两条动态调用误报、测试钉住函数） | 1（约 32 个 library-only 模块） |
+| 重复实现 / 常量复用 | 12 | 1（采样率格式化，**已合并** `f529ba62`） | 10（频谱双实现、频率分精度、错误码标签/下一步/常量、ACARS、dBFS/dBµV、路径引导） | 1（`kDbUpperDefault` 一常量两语义，内核线已派修，见 A12） |
+| 多真值源 | 11 | 0 | 10（采样率白名单/候选/后端表/AI 参考表/回退/移动端/硬件吸附档/默认值分层/配置路径/工具目录快照） | 1（`module_panel` 5 档 → 能力驱动，见 §5.1） |
+| 死代码 | 12 | 2（4 个函数 `c14ac51e`；2 个纯函数 `1c0464b6`） | 9（三录音模块、C++ 同名模块、仅测试模块、未接线方法、触屏控件、两条动态调用误报、测试钉住函数） | 1（46 个 library-only 模块，已三类归档 §5.3） |
 | 死分支/死配置 | 6 | 0 | 6（ACARS 死分支、`not_implemented`、零消费常量、全部在用设置键、无死键结论、legacy 别名） | 0 |
 
 **一句话结论**：真正能动的只有 2 组死函数（已删 6 个）和 1 组逐字相同的格式化函数（已合并）；
@@ -73,6 +73,7 @@ grep 命中 0 **不等于**没有调用方。本仓库已确认存在以下会�
 | A9 | 解码错误码常量 3 套 | 重复定义（账本 R9） | `mbdsdr_ai/decode_router.py:51-61`、`mbdsdr_ai/decode_pipeline.py:54-64`、`mbdsdr_ai/decoders.py:871/1037` 裸串；catalog 另有同一批码 | **保留待合并**（需先确认无外部脚本按名导入 `ERR_*`/`REASON_*`） | 漏改一处会让路由与管线对同一输入判定分裂（一处接受、一处拒绝） |
 | A10 | ACARS 双实现（账本 R3） | 重复实现（已收敛） | `mbdsdr_ai/acars_protocol.py` 13 命中；`mbdsdr_ai/acars_decoder.py` 33 命中；`mbdsdr_ai/decoder_registry.py` 为唯一入口；`tests/test_acars_consistency.py` 对拍 | **保留，走公开入口** | 绕过入口直调自带状态机会出现自环 CRC `crc_ok=False`，与统一入口结果不一致 |
 | A11 | dBFS / dBµV 两套格式化（账本 R7） | 重复实现（不同量纲） | `desktop/status_panel.py:49/62`；`desktop/main_window.py:87 _fmt_dbfs`（0 生产调用、13 测试引用）；`:105` 1 调用 | 保留量纲两份；`_fmt_dbfs` 另见 C11 | 把 dBµV 当 dBFS 合并会差约 107 dB（50Ω/75Ω 基准不同） |
+| A12 | `cpp/src/core/tokens.h:336 kDbUpperDefault` **一个常量担两个语义** | **常量复用**（不是重复实现，也不是多份表） | 语义①「默认视窗上限」用法合法：`cpp/src/ui/main_window.cpp:5644`、`settings_dialog.cpp:227/432/543`、`spectrum_widget.cpp:308/658`；语义②「显示天花板硬上限」：`spectrum_display.cpp:692`（`clampd(ceilDes, kDbSpinUpperMin, kDbUpperDefault)`）与 `:703-704`（`clampd(dbCeilDb_, manualFloorDb_, kDbUpperDefault)`）。内核线实测：显式 `setDbRange(-100, 0)` 被 `:704` 夹到 -20；同一帧 -10 dB 峰值渲染成 **255（纯白）**，按 -100..0 视窗应为 **229** | **拆常量**：默认值继续叫 `kDbUpperDefault`，另立显式硬上限（候选 `kDbDisplayMax = kDbSpinUpperMax = 20`），`spectrum_display.cpp:692/703-704` 改用新常量；owner = **内核线**（已派修），本线只登记、不动手 | 不拆则所有"手动视窗上限 > -20 dB"的调用都被静默改档，波形顶部白化；拆完必须用 A/B 重编 + 同机同环境同帧对拍确认 255→229（取证格式见 §4.3） |
 
 ### B. 多真值源：采样率档位逐份清单
 
@@ -98,7 +99,7 @@ grep 命中 0 **不等于**没有调用方。本仓库已确认存在以下会�
 | C3 | 桌面"直接写盘 + `baseband_io.load_iq` 回放" vs `recorder`/`playback` 并行链路 | 重复实现（功能重叠、行为不同） | 桌面直写：`desktop/main_window.py:6468`、`:6598`（`baseband_io.write_sidecar`）；桌面回放：`:8093-8098`（`baseband_io.load_iq`）。`playback` 真实消费方：`tools/onboarding/onboard.py:471`、`experiments/common/datasource.py:101`、`experiments/exp_ota_run.py:198`、`experiments/demo_spacetime.py:49`、`tools/onboarding/test_onboarding.py:142` + 多测试 | **保留两条，登记为并行实现**；不合并、不接线 | `playback` **不是死代码**（原计划判"三模块全死"已改判）。两条链路对元数据/SigMF 处理不同，合并会改桌面回放行为 |
 | C4 | C++ `cpp/src/ui/recording_library.cpp` | 同名不同物 | 被 `cpp/src/ui/main_window.h` 引用；`cpp/CMakeLists.txt` 构建；测试 `cpp/tests/test_recording_library.cpp`、`test_playback_loopback.cpp` | **保留** | 与 Python C1 同名但无任何关系；按名字判冗余会误删在用的 C++ UI 模块 |
 | C5 | 4 个全仓零调用函数：`themes.get_monospace_font()`、`shortcuts.registered_keys()`、`mode_registry.display_names()`、`device_capabilities.unknown_values()` | 死代码 | 删除前全仓代码命中 0（含字符串/`getattr` 形态）；删除后仅 `docs/audit_r2/43_ui_status_themes_mcp.md:81-84/279`、`FINAL_REPORT_R2.md:393` 这些**历史审计报告**提及 | **已删除**，提交 `c14ac51e`（4 files, 26 deletions） | 无。删除前后测试 91→91（见 §4） |
-| C6 | 约 32 个 `mbdsdr_ai` 模块仅被自身测试引用（`aigui_demo`、`background_decoder`、`block_stream`、`channel_analyzer`、`flowgraph_runtime`、`gain_calibration`、`gps_tracking`、`hal_enhanced`、`multi_user`、`nanovna_v2_proto`、`protocol_analyzer`、`remote_control_v2`、`spacetime_predict`、`spectrum_accumulator`、`tc_cltu`、`webspectra`、`ysf_demod`、`janvna2_proto`、`marker_math`、`mimo_v2`、`module_graph`、`module_system`、`feature_manager`、`frequency_manager_v2`、`sat_calibration`、`position_service`、`recorder_enhanced`、`optional_deps`、`sdrpp_decoders`、`lrpt_image`、`mobile_server` 等） | 死代码（library-only） | 每个模块全仓非测试、非自身包内命中 0；无 `register_tool_registry`、无 `pkgutil` 扫描 | **保留，需产品裁定** | 删一个模块会让对应测试整批消失，通过项数必然下降（违反"通过项数不许下降"）；且可能是对外 API 面 |
+| C6 | **46 个** `mbdsdr_ai` 模块仅被自身测试引用（原记"约 32"，复核后更正；逐文件清单见 §5.3） | 死代码（library-only） | 口径：`git ls-files` 代码文件（`.py/.dart/.cpp/.h/.ps1/.bat/.sh`）全形态 import（`mbdsdr_ai.X`、`from mbdsdr_ai import X`、`from .X import`、`from ..X import`、`from . import X`）非测试路径命中 0；且自身无 `register_tool_registry`（否则 `mbdsdr_ai/core/cli.py:264-269` 的 `pkgutil.iter_modules` 会在生产 CLI 自动发现）；裸名命中已逐条人工核实（`device_watchdog`/`vna_calio`/`web_bridge` 均为注释/docstring，非导入） | **不删；按三类归档**（§5.3） | 删一个模块会让对应测试整批消失，通过项数必然下降（违反"通过项数不许下降"）；且可能是对外 API 面 |
 | C7 | 8 个桌面面板零调用公开方法：`set_disconnected`、`set_observer_ready`、`is_anr_enabled`、`submit_frame`、`set_default_params`、`attach_host`、`clear_objects`、`last_capability_report` | 疑似死代码 | 全仓调用命中 0；均定义在 `desktop/` 面板类内 | **保留** | 更像"功能未接线"而非冗余；删除等于消灭待接的接口，且可能被未来 `connect` 使用 |
 | C8 | `desktop/touch_helpers.py:214/236` 两个触屏控件类 | 死代码 | 零实例化（全仓 `TouchFriendlyScrollArea(` / `TouchFriendlyListWidget(` 命中 0） | **只登记，不删** | 文档红线明确"不碰触屏（touch_manager/touch_helpers）"，属他人领域 |
 | C9 | `dock_layout_manager._preset_focus/_preset_analysis/_preset_grid` | 死代码（**误报**） | 静态零引用，但 `:225 getattr(self, f"_preset_{method_suffix}")()` 动态调用（定义 `:464/478/497`） | **保留** | 按静态 grep 删掉会让"恢复预设布局"直接 `AttributeError` |
@@ -168,30 +169,160 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 本线改动文件（`desktop/constants.py`、`mbdsdr_ai/sdr_backend.py`、`mbdsdr_ai/sdr_tools.py`、
 `desktop/config_schema.py`、`tests/test_desktop_constants.py`）**不在清单内**，也没有新增 `try/except`。
 
-| 越线文件 | 越线计数 | 归属 |
-|---|---|---|
-| `mbdsdr_ai/reconnection.py` | WARN 3 > 基线 2（+1） | 他线（HEAD 已提交） |
-| `scripts/hw_acceptance/common.py` | ERROR 1 > 基线 0（+1） | 他线（HEAD 已提交） |
-| `scripts/hw_acceptance/manual_usb_cycle.py` | 基线无此文件（2 ERROR / 4 WARN） | 他线新增（HEAD 已提交） |
-| `scripts/perf_probe.py` | 基线无此文件（1 ERROR / 2 WARN） | 他线新增（HEAD 已提交） |
-| `tests/test_link_state_visibility.py` | 基线无此文件（1 ERROR） | 他线新增（HEAD 已提交） |
-| `desktop/main_window.py` | 首轮 ERROR 228 > 227，次轮消失 | 他线**未提交**改动，随其保存波动 |
+| 越线文件 | 越线计数 | 引入提交 | 该刷新基线的 owner（只出清单，不动手） |
+|---|---|---|---|
+| `mbdsdr_ai/reconnection.py` | WARN 3 > 基线 2（+1） | `1f96cfe2`「修复(重连): 增加立即取消入口…」 | 接入层 / 重连线（作者） |
+| `scripts/hw_acceptance/common.py` | ERROR 1 > 基线 0（+1） | `4187ae4f`「验收(hw): 七环 SKIP 原因码落地」 | `claims.json` 该文件归 **操作逻辑线**；提交作者按验收线口径 |
+| `scripts/hw_acceptance/manual_usb_cycle.py` | 基线无此文件（2 ERROR / 4 WARN） | `4694f425`「test(network): 2s/4s 阈值实测 + 拔线半自动验收」 | 验收线（作者） |
+| `scripts/perf_probe.py` | 基线无此文件（1 ERROR / 2 WARN） | `3abdd772`「perf(startup): 桌面启动导入降 75%…」 | 性能线（作者） |
+| `tests/test_link_state_visibility.py` | 基线无此文件（1 ERROR） | `928bd78f`「接入层：环形缓冲积压错误码可见」 | 接入层（作者） |
+| `desktop/main_window.py` | ERROR **228 > 227**（已定钉，不再随保存波动） | **未提交** hunk（工作区当前 `3668-3671`，原 `3659-3663`）：`default_freq = float(self.control_panel.get_frequency_hz())` 外包 `except Exception: default_freq = 98_500_000.0` | **操作逻辑线**（该文件 claim ACTIVE）；要求其提交时同批刷新基线 |
 
 总量 `1293~1294 > 基线 1284`（+9~+10）。**不得为此上调基线**；基线刷新归造成越线的线路，
-本线只做登记。此前"未提交的新文件"表述不准确，已按上表更正为"已提交但基线未更新 + 一条未提交波动"。
+本线只做登记。`desktop/main_window.py` 那条已定钉为**一次具体未提交改动**（连接后默认频率读回包 `except`），
+不是"保存即波动"；此前"未提交的新文件"表述不准确，已按上表更正。
+
+**本类问题（静默吞噬/常量复用）的标准取证格式**（内核线 A/B 实测先例，建议后续沿用）：
+
+1. **A/B 两次构建**：A = 改前常量/旧代码，B = 拆分后/修复后；两次都用同一编译配置（同 CMake preset、同 Qt 版本）。
+2. **同机同环境**：同一台机器、同一 GPU/驱动、同一显示缩放；记录构建号与 `git rev-parse HEAD`。
+3. **同一输入**：固定同一帧 `frame.dbfs`（或同一 `setDbRange(-100, 0)` 调用），不靠"看起来不一样"。
+4. **可量化断言**：记录像素/数值（本次为峰值 `255` vs `229`、`dbCeilDb_ 0 → -20`），并写进测试或登记表。
+5. **反证结论**：只有 B 侧数值回到期望且 A 侧可复现缺陷，才算修复成立；否则视为环境差异，不结案。
 
 ---
 
-## 5. 待裁定项：本线推荐 + 理由
+## 5. 裁定落地：规格、协调与归档
 
-| 项 | 推荐 | 理由 | 采纳后的验证 |
-|---|---|---|---|
-| B5 `desktop/module_panel.py:305-308` 的 1.44 MHz 档 | **删除硬编码 5 档，改读 `sample_rate_options()` 能力驱动**；1.44M 只有产品明确需要时才补进 C++ 候选表 + 后端 `SAMPLE_RATES` 并做真机读回 | 1.44M 不在 B1/B2/B3/B4 任何一张表，是唯一"前端自造档位"：连接后校验可能被 `control_hub` 白名单拒绝，或设备根本不支持。能力驱动后可见档=设备真实可锁档，并天然继承 2800/2880 吸附读回 | 同一 RTL-SDR 连接后，下拉项集合 == `sample_rate_options(device)`；截图基线确认可见项变化 |
-| C6 约 32 个仅测试引用模块 | **不删，按三类归档**：①对外 API（`webspectra`、`mobile_server`、`remote_control_v2`、`protocol_analyzer`）→ 保留 + 补外部入口说明；②纯实验（`aigui_demo`、`flowgraph_runtime`、`spacetime_predict`、`mimo_v2`、`module_graph`、`module_system`）→ 移 `experiments/` 或标 `@experimental`；③领域解码（`ysf_demod`、`tc_cltu`、`lrpt_image`、`sdrpp_decoders`）→ 保留待能力表接线 | 删除会整批减少测试（违反"通过项不许下降"）；这些模块承载协议解析/错误码，真正问题是"未接线"而非"重复" | 归档只改目录/标记，测试数与 import 路径不变 |
-| C7 8 个零调用面板方法 | **保留并贴标签，分两批**：`set_disconnected`、`set_observer_ready`、`last_capability_report`、`is_anr_enabled` → 下迭代**接线**（连接状态/观测者/能力报告是已有功能缺口）；`submit_frame`、`set_default_params`、`attach_host`、`clear_objects` → 两个版本内无调用方再删 | 它们是接口不是重复实现，删掉等于抹掉待接功能；先标记既能避免误删，也不会谎报"已清理" | 接线后每个方法至少 1 个生产调用；未接线项保持"待接线"标签 |
-| A3 采样率格式化合并 | **已完成**（`f529ba62`） | 逐字相同，方向"内核→桌面"；桌面保留打包安全回退 | `constants.format_sample_rate is sdr_backend.format_sample_rate`；53 passed |
-| C3 桌面写盘 vs `recorder`/`playback` | 不删不接线（录音/回放线持线） | 两条链路产物不同（裸 IQ vs 带 meta） | 由该线决定 |
-| A1 频谱双实现 | 维持双实现 | 两个独立 App，8 条定义差异会改可见峰值 | 统一前须跑 D.7 对拍 |
+### 5.1 B5：1.44 MHz 改为能力驱动（已准；代码未落地）
+
+**现状**（`desktop/module_panel.py`）：
+- `:311-317` 硬编码 5 档（含 1.44 MHz）；
+- `:472-482 selected_sample_rate_hz()` 在 `currentData()` 无效/≤0 时**回退 `DEFAULT_SAMPLE_RATE_HZ`** → 断开时会假装有档位；
+- `:363-390 set_sdr_connected(connected)` 只处理频率/增益，**没处理采样率下拉**。
+
+**实现规格**（`desktop/module_panel.py`）：
+
+| 场景 | `sr_combo` 行为 | `selected_sample_rate_hz()` |
+|---|---|---|
+| 未连接 / 无能力报告（传 `None`） | `QSignalBlocker` 后清空；只放一条占位「未连接，档位随设备」（`itemData=None`）；`setEnabled(False)`；tooltip 同步 | 返回 `None` |
+| 已连接但设备未上报（空列表） | 清空 + 占位「设备未上报档位」+ 禁用；**绝不显示旧表/空数组冒充档位** | 返回 `None` |
+| 已连接且有档位 | 用 `constants.format_sample_rate` 生成文本（不新增第二套格式化），`setEnabled(True)`；当前值仍在集合则保留，否则选首项 | 返回当前 `float`；`≤0`/非数值 → `None` |
+
+- `selected_sample_rate_hz()` 返回类型改为 `Optional[float]`，**删除 `DEFAULT_SAMPLE_RATE_HZ` 回退**；`_on_connect()` 见 `None` 时不发 `device_selected` 假载荷（提示"未选择采样率"）。
+- 档位来源只认后端/内核上报：Python 桌面用 `mbdsdr_ai.device_capabilities.sample_rate_options_for_backend(...)`（等价于 C++ `sample_rate_options_hz`；**Python 桌面没有 C++ control_hub 客户端**）。**不许在桌面侧再写候选表。**
+
+**必补测试**（新文件 `tests/test_module_panel_sample_rate_capability.py`）：
+1. 未连接 → combo 无真实 Hz 项、`isEnabled() is False`、`selected_sample_rate_hz() is None`、占位含「未连接，档位随设备」；
+2. 连接后 `set_sample_rate_options([1024000, 2048000, 2400000, 3200000])` → 项集合 ⊆ `RTLSDRBackend.SAMPLE_RATES`（与 C++ 11 档候选同集）；
+3. 连接后再断开 → 档位清空 + 禁用 + 占位复原（不能残留连接时档位）。
+
+**1.44 MHz 若产品确需**：必须进 `cpp/src/dsp/device_capabilities.cpp kCandidateRatesHz` + `cpp/src/core/tokens.h kSampleRatesHz` 白名单 + 真机读回；**不能只补前端**。
+
+**协调下家**：
+
+| 文件 | owner（claims 现状） | 动作 |
+|---|---|---|
+| `desktop/module_panel.py` | `ux-basis`（claim 已释放，`current=null`） | 实现 `set_sample_rate_options` + 断连禁用/占位 + 上述测试 |
+| `desktop/main_window.py` | `操作逻辑线`（claim ACTIVE，age 6.9min / TTL 60） | 连接成功后把 `device_panel.last_capability_report()` 的 `sample_rate_options` 喂给 module panel；`_on_module_device_selected` 接受 `Optional[float]` |
+| C++ 下发侧 | `采样率真值线` | 确认 `sample_rate_options_hz` 已下发：`cpp/src/control/control_hub.cpp:1083`，测试 `cpp/tests/test_control_hub.cpp:1378-1379`；修正 `docs/parameter-unification.md:467` 仍写"未接进 get_capabilities"的旧记录 |
+
+**阻塞**：`desktop/main_window.py` 仍被 `操作逻辑线` 占用 → 本轮**只落规格与协调清单，不改代码**。
+
+### 5.2 常量白名单反证（已完成）
+
+| 步骤 | 操作 | 结果 |
+|---|---|---|
+| 1 | `desktop/constants.py` 临时加 `DEAD_PROBE_CONSTANT = 42`（无人使用） | `python -m pytest tests/test_desktop_constants.py -q` → **`1 failed, 11 passed`**，失败信息 `Extra items in the left set: 'DEAD_PROBE_CONSTANT'` |
+| 2 | 删除该常量 | 复跑 → **`12 passed`**（含 Qt 测试互斥锁等待 81.1s） |
+
+结论：白名单是**活的锁**，不是文档；任何新公开名都会立刻变红。
+
+### 5.3 C6：46 个仅测试模块的三类归档（不删）
+
+**复核口径**（替代原"约 32"）：`git ls-files` 的代码文件（`.py/.dart/.cpp/.h/.ps1/.bat/.sh`）中，全形态 import（`mbdsdr_ai.X`、`from mbdsdr_ai import X`、`from .X import`、`from ..X import`、`from . import X`）在**非测试路径命中 0**；自身无 `register_tool_registry`（否则 `mbdsdr_ai/core/cli.py:264-269` 的 `pkgutil.iter_modules` 会在生产 CLI 自动发现）；裸名命中逐条人工核实（`device_watchdog`/`vna_calio`/`web_bridge` 均为注释/docstring）。原 32 少算是因为漏了 `from mbdsdr_ai import X` 与 `from . import X` 两种形态。
+
+**处置**：不删、不移目录。测试全部按 `mbdsdr_ai.X` 模块路径 import（含 `from mbdsdr_ai import X`），移目录会改导入路径、让测试直接红；因此三类都优先**只加 `@experimental` 标记**，不移动。
+
+**① 对外 API / 服务面（10 个；保留 + 补外部入口说明）**
+
+| 文件 | 当前唯一引用点 | 保留理由 |
+|---|---|---|
+| `web_bridge.py` | `tests/test_web_bridge.py` | web 产品契约入口；`web/product/*` 文档已引用 |
+| `webspectra.py` | `tests/test_webspectra.py` | 对外频谱服务面 |
+| `remote_control_v2.py` | `tests/test_remote_control_v2.py` | 远程控制协议面 |
+| `mobile_server.py` | `mbdsdr_ai/tests/test_mobile_server.py` | 移动端服务端协议面 |
+| `multi_user.py` | `tests/test_multi_user.py` | 多用户会话面 |
+| `protocol_analyzer.py` | `tests/test_protocol_analyzer.py` | 协议分析对外工具面 |
+| `position_service.py` | `mbdsdr_ai/tests/test_position_service.py` | 位置服务面（GNSS/观测者） |
+| `hal_enhanced.py` | `tests/test_hal_enhanced.py` | 增强 HAL 面（设备族差异） |
+| `module_system.py` | `tests/test_module_system.py` | 模块/插件系统公开面 |
+| `feature_manager.py` | `mbdsdr_ai/tests/test_feature_manager.py` | 特性插件管理器公开面 |
+
+**② 实验 / 原型 / 兼容垫片（15 个；保留 + 标 `@experimental`，不移动）**
+
+| 文件 | 当前唯一引用点 | 保留理由 |
+|---|---|---|
+| `aigui_demo.py` | `mbdsdr_ai/tests/test_aigui_render.py` | AI GUI 渲染原型 |
+| `flowgraph_runtime.py` | `tests/test_flowgraph_runtime.py` | 流图运行时原型 |
+| `frequency_manager_v2.py` | `tests/test_frequency_manager_v2.py` | 频率管理 v2 原型 |
+| `gain_calibration.py` | `tests/test_gain_calibration.py` | 增益校准实验 |
+| `janvna2_proto.py` | `mbdsdr_ai/tests/test_janvna2_proto.py` | JanVNA2 协议原型 |
+| `nanovna_v2_proto.py` | `mbdsdr_ai/tests/test_nanovna_v2_proto.py` | NanoVNA v2 协议原型 |
+| `mimo_v2.py` | `mbdsdr_ai/tests/test_mimo_v2.py` | MIMO v2 原型 |
+| `module_graph.py` | `mbdsdr_ai/tests/test_module_graph.py` | 模块图原型 |
+| `marker_math.py` | `mbdsdr_ai/tests/test_marker_math.py` | 标记数学实验 |
+| `spectrum_accumulator.py` | `tests/test_spectrum_accumulator.py` | 频谱累积实验 |
+| `vfo_enhanced.py` | `tests/test_vfo_enhanced.py` | VFO 增强原型（`desktop/vfo_panel.py:6` 仅注释提及） |
+| `device_watchdog.py` | `mbdsdr_ai/tests/test_optional_deps_fallback.py`、`tests/test_adsb_map_extras.py` | 设备看门狗实验（`reconnection.py:18-19` 仅注释对比） |
+| `optional_deps.py` | `mbdsdr_ai/tests/test_optional_deps.py` | 可选依赖垫片 |
+| `s_meter.py` | `tests/test_s_meter.py` | Python S 表实验（C++/Flutter 另有同名实现，与本模块无关） |
+| `startup_sequence.py` | `tests/test_audio_selection_e2e.py`、`tests/test_startup_sequence.py` | 启动序列实验 |
+
+**③ 领域解码 / DSP（21 个；保留待能力表/工具面接线）**
+
+| 文件 | 当前唯一引用点 | 保留理由 |
+|---|---|---|
+| `anr_iq.py` | `tests/test_anr.py` | IQ 域降噪算法 |
+| `background_decoder.py` | `tests/test_background_decoder.py` | 后台解码器 |
+| `block_stream.py` | `tests/test_block_stream.py` | 块流处理 |
+| `channel_analyzer.py` | `tests/test_channel_analyzer.py` | 信道分析 |
+| `dvbs2_datafield.py` | `tests/test_dvbs2_datafield_vcdu.py` | DVB-S2 数据域（风云卫星链） |
+| `gated_recorder.py` | `tests/test_gated_recorder.py` | 门控录制 |
+| `gps_tracking.py` | `mbdsdr_ai/tests/test_gps_tracking.py` | GPS 跟踪环 |
+| `lrpt_image.py` | `tests/test_lrpt_meteor_real_golden.py` | LRPT 图像解码 |
+| `lrpt_pipeline.py` | `mbdsdr_ai/tests/test_lrpt_pipeline.py` | LRPT 处理链 |
+| `lrpt_render.py` | `mbdsdr_ai/tests/test_lrpt_render.py`、`test_optional_deps_fallback.py` | LRPT 渲染 |
+| `polyphase_resampler.py` | `tests/test_dsp_frontend_polyphase_resampler.py` | 多相重采样 |
+| `recorder_enhanced.py` | `tests/test_recorder_enhanced.py` | 增强录制（`recorder.py:28` 为其依赖） |
+| `recording_library.py` | 6 个 recording_library 测试（见 C1） | 录音库（见 C1） |
+| `sat_calibration.py` | `mbdsdr_ai/tests/test_sat_calibration.py` | 卫星定标 |
+| `sat_pipeline_runner.py` | `tests/test_sat_pipeline.py` | 卫星流水线执行器 |
+| `sdrpp_decoders.py` | `mbdsdr_ai/tests/test_sdrpp_decoders.py` | SDR++ 解码器移植 |
+| `tc_cltu.py` | `mbdsdr_ai/tests/test_tc_cltu.py` | TC CLTU 编码 |
+| `usb_watchdog.py` | `tests/test_reconnection_e2e.py`、`tests/test_usb_watchdog.py` | USB 看门狗 |
+| `vna_avg.py` | `mbdsdr_ai/tests/test_vna_avg.py`、`test_vna_property.py` | VNA 平均 |
+| `vna_calio.py` | `mbdsdr_ai/tests/test_vna_calio.py`、`test_vna_e2e.py` | VNA 校准 IO（`core/mcp_server.py:802` 仅注释） |
+| `ysf_demod.py` | `tests/test_ysf_demod_roundtrip.py` | YSF 数字解调 |
+
+### 5.4 C7：8 个零调用面板方法——4 个定下家，4 个贴标签
+
+| 方法 | 定义位置 | 下家（线） | 具体功能点（接线位置） | 接线后验证 |
+|---|---|---|---|---|
+| `set_disconnected()` | `desktop/status_panel.py:866` | **操作逻辑线** | `main_window._panels_set_sdr_connected`（`:4137`）的 status_panel 分支（当前 `:4220-4222` 调 `set_sdr_connected(bool)`）改调 `sp.set_disconnected()`；断开路径 `:837/:4324/:4393` | 断开后状态卡整组禁用；该方法生产调用 ≥1 |
+| `set_observer_ready(ready)` | `desktop/sat_track_panel.py:254` | **操作逻辑线 + 卫星跟踪/星象线** | `main_window._apply_observer_location`（`:8356-8379`）设置观测者后调 `set_observer_ready(True)`；GNSS 自动填坐标路径 `:8919-8923` 同调；无坐标时 `False` | 面板显示"观测者就绪/未就绪"，跟踪按钮按就绪态门控 |
+| `is_anr_enabled()` | `desktop/anr_panel.py:156` | **操作逻辑线** | `main_window._on_anr_enabled`（`:7098-7100`）改为读 `anr_p.is_anr_enabled()`，删除影子标志 `self._anr_enabled`；音频回调 ANR 分支（`:6306` 附近）同源查询 | 单一真值：面板开关与音频路径行为一致 |
+| `last_capability_report()` | `desktop/device_panel.py:296` | **冗余线 + ux-basis + 操作逻辑线** | 与 §5.1 同批：`_panels_set_sdr_connected(True)` / `dp.set_connected` 后取 `dp.last_capability_report()` 的 `sample_rate_options` 喂 `module_panel.set_sample_rate_options(...)` | 面板档位来自真实报告；断连清空禁用 |
+
+其余 4 个（`submit_frame`、`set_default_params`、`attach_host`、`clear_objects`）**保留并贴"待接线"标签**；两个版本内仍无生产调用再评估删除，删除须单独提交并附测试前后数。
+
+### 5.5 其余既定项（不变）
+
+| 项 | 结论 |
+|---|---|
+| A3 采样率格式化合并 | **已完成**（`f529ba62`）；`constants.format_sample_rate is sdr_backend.format_sample_rate`，53 passed |
+| C3 桌面写盘 vs `recorder`/`playback` | 不删不接线（录音/回放线持线） |
+| A1 频谱双实现 | 维持双实现；统一前须跑 D.7 对拍 |
 
 ---
 
@@ -242,7 +373,7 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | R6 频率格式化"4 套、可合并" | 4 套，前置为视觉冻结解除 | 实际 5 份：状态栏（≥1MHz 6 位）、VFO（3 位）、`rf_sky_view`（1 位）、`device_capabilities.format_hz`（自适应）、C++ `status_format.h` 三函数；精度不同是功能差异 | **保留分精度，不计入"安全合并"**；只有"视觉冻结解除 + 重跑截图基线"后才可议 |
 | R8 错误码"3 套" vs A6"已收敛" | 3 套文案，`error_catalog` 为语义源 | `error_catalog` 含标题/详情/remedy；`status_panel` 短标签与 `troubleshooting` 下一步是**独立文案**，同码不同措辞 | A6 改判为"**部分收敛**"；拆出 A7/A8，保留但登记漂移风险 |
 | R1 Python 生产调用 `:613` vs A1 `:1752` | 账本记 `:613` | `:613 advance_peak_tracks` 与 `:1752` 标签生成都在用；`:628` 调 `_detect_peak_bins` | 两者都对，A1 补成**生产 2 处** |
-| R19 2800k | 账本已记 2,880,000 | `cpp/src/dsp/device_capabilities.cpp:46` 已为 `2_880_000`，注释"was 2.8 MS/s, same physical quantity, -80 kHz"（`dd72ba1c`） | B8 维持：档位表写 **2880k**；2800k 只作真机实验请求值 |
+| R19 2800k | 账本已记 2,880,000 | `cpp/src/dsp/device_capabilities.cpp:46` 已为 `2_880_000`，注释写明「真机请求 2,800,000 被设备吸附到 2,880,000（读回 +80,000 Hz）」并指附 M.4 L60（`dd72ba1c` 起，本轮换理由） | B8 维持：档位表写 **2880k**；2800k 只作真机实验请求值 |
 
 ---
 
@@ -254,3 +385,4 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 2026-11-06 | `f529ba62` | 采样率显示口径上收内核（`sdr_backend.format_sample_rate` 唯一实现），`sdr_tools`/`constants` 改为派生；53 passed（+1，无下降） |
 | 2026-11-06 | `1c0464b6` | 删除 `config_schema.keys_by_storage`/`is_known`（零调用），131→131 |
 | 2026-11-06 | （本表更新提交） | 并入账本线 R1–R20（去重后 +10 行，共 40 项）；改判 A6（部分收敛）、A3（已合并）、R6（保留分精度）；修正 §4.3 吞错守卫归属 |
+| 2026-11-06 | （本次提交） | 新增 A12（`kDbUpperDefault` 常量复用，owner 内核线）；§4.3 逐文件钉住 6 条吞错越线的引入提交与 owner，补 A/B 重编取证格式；§5 落地 B5 能力驱动规格/测试/协调下家、白名单反证记录、46 个仅测试模块三类归档、4 个零调用方法的具体接线点；R19 文案按 `device_capabilities.cpp:46` 现状更新；共 41 项 |
