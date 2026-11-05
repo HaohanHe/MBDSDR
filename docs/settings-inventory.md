@@ -654,7 +654,7 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 | 无 UI 但有明确理由 | **1** | 理由见「字段 → 位置」表的「说明」列 |
 | 缺失（无入口且无理由） | **0** | >0 即守卫红 |
 | 幽灵键（未在 schema 声明） | **0** | 扫描 desktop/*.py 的 settings 字面键 |
-| source_commit | `2b6eba39` | `git log -1 --format=%h -- desktop/config_schema.py` |
+| source_commit | `6089dd6d` | `git log -1 --format=%h -- desktop/config_schema.py` |
 
 <!-- settings-guard:end -->
 
