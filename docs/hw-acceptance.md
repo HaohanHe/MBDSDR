@@ -1,18 +1,48 @@
 # 真机七环验收（可复跑 + 离线替代 + 人工验收卡）
 
-三个入口，职责分开：
+入口与编号闸，职责分开：
 
 ```powershell
-# 主口径：七环（R1–R7），每环独立子进程，汇总 PASS / FAIL / SKIP + 原因码
+# 主口径：七环（文档里记作 R1–R7），每环独立子进程，汇总 PASS / FAIL / SKIP + 原因码
 python scripts\hw_acceptance\run_all.py
 
-# 设备链视角：R1–R4 硬件、R5 云台、R6 GNSS、R7 星象仪渲染；失败即停
+# 设备链视角：文档里记作 A1–A7（A1–A4 硬件、A5 云台、A6 GNSS、A7 星象仪渲染）；失败即停
 python scripts\hw_acceptance\acceptance_suite.py
-python scripts\hw_acceptance\acceptance_suite.py --hw      # 只跑 R1–R4
+python scripts\hw_acceptance\acceptance_suite.py --hw      # 只跑 A1–A4
 
 # 反证：故意改坏判据，环必须 FAIL；否则说明判据形同虚设
 python scripts\hw_acceptance\negative_control.py
+
+# 编号闸：两套套件不许同号不同义（改坏编号必须判红）
+python scripts\hw_acceptance\check_ring_labels.py
 ```
+
+- **编号口径（两套套件各自有 R1–R7，含义不同）**：本文档统一用
+  `R<n>` 指 `run_all.py` 七环，用 `A<n>` 指 `acceptance_suite.py` 设备链视角。
+  两套运行时输出仍然是各自的 `R<n>`（`summary.json` 的 `ring` 字段原样），
+  引用时请按下面的对照表加前缀，不要写成同一个 `R5`。
+
+| 编号 | 环的语义 | 属于哪个套件 | 运行时输出 |
+|---|---|---|---|
+| R1 | 连接与识别 | run_all | `R1` |
+| R2 | 频谱与瀑布 | run_all | `R2` |
+| R3 | 解调与音频 | run_all | `R3` |
+| R4 | 录音与回放 | run_all | `R4` |
+| R5 | 卫星追踪与过境 | run_all | `R5` |
+| R6 | 星象仪模式 | run_all | `R6` |
+| R7 | 发射安全闸 | run_all | `R7` |
+| A1 | 连接与识别 | acceptance_suite | `R1` |
+| A2 | 频谱与首帧 | acceptance_suite | `R2` |
+| A3 | 流稳定性 | acceptance_suite | `R3` |
+| A4 | 解调与音频输出 | acceptance_suite | `R4` |
+| A5 | 云台回读 | acceptance_suite | `R5` |
+| A6 | GNSS 定位 | acceptance_suite | `R6` |
+| A7 | 星象仪渲染 | acceptance_suite | `R7` |
+
+> 最容易串的两处：**主口径的 5 号是卫星过境，设备链的 5 号是云台**；
+> **主口径的 6 号是星象仪，设备链的 6 号是串口 GNSS**。
+> `check_ring_labels.py` 会把「同号但语义不同」的写法直接判红，
+> 例如把设备链的云台环写成主口径的编号。
 
 - 退出码：任一环 `FAIL` → 1；`PASS` / `SKIP` → 0（**SKIP 不是通过**）。
 - 证据全部落 D 盘：`.tmp-tool-results/hw_acceptance/`，可用 `--out` 指定。
@@ -178,11 +208,12 @@ python scripts\hw_acceptance\negative_control.py
 |---|---|---|---|
 | `python scripts\hw_acceptance\run_all.py` | **80.4 s**（真机 7/7 PASS）；**56.1 s**（强制无硬件：PASS 3 / SKIP 4） | R1–R4：RTL-SDR；R5：TLE 缓存 + skyfield；R6：`de421.bsp` + PySide6；R7：纯软件 | `summary.json` / `summary.md` / 逐环 `result.json`；SKIP 必带原因码 |
 | `python scripts\hw_acceptance\run_all.py --only r5,r6,r7` | 约 **34 s**（本机实测 25.0+4.6+4.2，串行） | TLE + skyfield + `de421.bsp` + PySide6；无射频硬件 | 只跑三个离线纯算环；用于快速回归 |
-| `python scripts\hw_acceptance\acceptance_suite.py` | **36.7 s**（真机：PASS 5 / FAIL 0 / SKIP 2）；无设备时全 SKIP（约 6 s） | R1–R4：RTL-SDR；R5：rotctld `127.0.0.1:4533`；R6：COM 口 GNSS；R7：PySide6 + `de421.bsp` | 设备链视角；失败即停；SKIP 带原因码 |
-| `python scripts\hw_acceptance\acceptance_suite.py --hw` | **13–14 s**（连续两次 PASS 4/4） | R1–R4：librtlsdr + RTL-SDR | 只跑硬件四环；无设备 → `PASS 0 / SKIP 4`，SKIP 计数可见 |
+| `python scripts\hw_acceptance\acceptance_suite.py` | **36.7 s**（真机：PASS 5 / FAIL 0 / SKIP 2）；无设备时全 SKIP（约 6 s） | A1–A4：RTL-SDR；A5：rotctld `127.0.0.1:4533`；A6：COM 口 GNSS；A7：PySide6 + `de421.bsp` | 设备链视角；失败即停；SKIP 带原因码 |
+| `python scripts\hw_acceptance\acceptance_suite.py --hw` | **13–14 s**（连续两次 PASS 4/4） | A1–A4：librtlsdr + RTL-SDR | 只跑 A1–A4；无设备 → `PASS 0 / SKIP 4`，SKIP 计数可见 |
 | `python scripts\hw_acceptance\negative_control.py` | **29.5 s**（R5 基线占 25 s） | TLE + skyfield + `de421.bsp` + 真实 OTA 夹具 | 4 个反证必须 `RED_AS_EXPECTED`；否则退出码 1 |
 | `python -m pytest tests\test_moon_reference_acceptance.py -q` | **0.5 s**（3 passed） | `de421.bsp` + skyfield | 月球对拍 + 1h 反证回归 |
-| `python -m pytest tests\test_hw_acceptance_contract.py -q` | **0.2 s**（6 passed） | 无（纯契约） | 锁四码、锁 `skip_result` 永不 PASS、锁 `UNVERIFIED→SKIP(NO_DATA)` |
+| `python -m pytest tests\test_hw_acceptance_contract.py -q` | **0.5 s**（11 passed） | 无（纯契约） | 锁四码、锁 `skip_result` 永不 PASS、锁 `UNVERIFIED→SKIP(NO_DATA)`、锁 R/A 编号不同义 |
+| `python scripts\hw_acceptance\check_ring_labels.py` | **0.1 s** | 无（纯文本） | 文档编号闸；`--selftest` 是它的反证（4 种改坏法必须红） |
 | `python scripts\hw_acceptance\ring{1..7}_*.py --out D:\...` | R1 17.4 / R2 8.8 / R3 8.0 / R4 12.0 / R5 25.0 / R6 4.6 / R7 4.2 s | 见上表 | 单环排障；每环独立 `result.json` |
 
 > 耗时口径：以上均为 **2026-11-06 01:44–02:00 本机实测**（RTL2832U + FC0012，
@@ -211,7 +242,9 @@ python scripts\hw_acceptance\negative_control.py
 
 基准时点：**2026-11-06 01:44–02:00**（RTL2832U / SN 77771111153705700，FC0012）。
 
-- **真机**：`run_all.py` → **`PASS 7 / FAIL 0 / SKIP 0`**，总耗时 **80.4 s**；
+- **真机（两次）**：
+  - 01:45（`D:\mbdsdr\tmp\final_hw_014420`）：`PASS 7 / FAIL 0 / SKIP 0`，80.4 s；
+  - 02:57（`.tmp-tool-results/hw_acceptance/20261106_025741`）：`PASS 7 / FAIL 0 / SKIP 0`；
   R1–R4 为真实设备实测，R5–R7 为离线纯算。七环全部跑过且判据成立。
 - **无硬件（`MBDSDR_HW_FORCE_OFFLINE=1`）**：**`PASS 3 / FAIL 0 / SKIP 4`**，
   总耗时 **56.1 s**；4 个 SKIP 全部 `NO_HW`（R1/R2/R3/R4），
@@ -221,15 +254,54 @@ python scripts\hw_acceptance\negative_control.py
 - **反证**：`negative_control.py` 4 个注入全部 `RED_AS_EXPECTED`，29.5 s
   （R7 门放行、R5 仰角门 95°、R6 月球容差 −1″、R2 真实样本换全零）。
 - **设备链视角**：`acceptance_suite.py` → `PASS 5 / FAIL 0 / SKIP 2`
-  （R5 云台、R6 串口 GNSS 均 `NO_HW`），36.7 s；`--hw` → `PASS 4 / FAIL 0 / SKIP 0`
+  （A5 云台、A6 串口 GNSS 均 `NO_HW`），36.7 s；`--hw` → `PASS 4 / FAIL 0 / SKIP 0`
   （连续两次，13–14 s）。
+
+### 6.1 两次真机复跑对照（01:45 vs 02:57）
+
+同机同棒（RTL2832U / SN 77771111153705700，FC0012），两次都是真实设备。
+
+| 环 | 检查项 | 01:45 | 02:57 | 判据 | 结论 |
+|---|---|---|---|---|---|
+| R1 | 枚举 / tuner / 5 次开关 / 释放 | 1 台 / 2(FC0012) / 5/5 / 是 | 同左 | ≥1 / 非空 / 5/5 / 是 | 两次一致，可复现 |
+| R1 | 单环耗时 | 17.4 s | 29.6 s | 无上限 | 差异来自 USB 时序，不作判据 |
+| R2 | 目标台 | 94.30 MHz | 93.25 MHz | 自动选最强台 | 不同台，不可逐点比 |
+| R2 | SNR | 22.02 dB | 33.37 dB | ≥10 dB | 两次都远高于阈值 |
+| R2 | 噪声底漂移 | 4.79 dB | 2.27 dB | ≤6 dB | 01:45 更贴近阈值（79%），02:57 宽松 |
+| R2 | 峰值偏移（仅信息） | 87,782 Hz | 143,772 Hz | 不判 | **不能当频率精度** |
+| R3 | RMS / 能量比 | 0.6334 / 34.7 | 0.2023 / 22.9 | 1e-4–1.0 / >2 | 两次都过 |
+| R3 | 19 kHz 导频 | 19006 Hz / 7.3 dB | 18841 Hz / 8.9 dB | >10 dB 才算 | **两次都 `skipped`**：02:57 差 1.1 dB 没到门限，且频率偏 19000±100 Hz 规格 159 Hz；只能记「单声道合法」，**不能当立体声证据** |
+| R4 | 写盘 / 样本 / integrity | +2.36 MB / 598,016 / ok | +2.49 MB / 589,824 / ok | 增长>0 / >0 / ok | 两次一致 |
+| R4 | 回放比 | 0.46 | 0.61 | 0.2–0.8 | 均通过；02:57 更靠近上限 |
+| R5 | 过境条数 / 升起误差 | 32 / 0.3–5.3 s | 33 / 2.2–3.2 s | ≤60 s | 两次一致（时段不同故条数不同） |
+| R5 | 仰角误差 | 0.00–0.05° | 0.01–0.05° | ≤1.0° | 两次一致 |
+| R6 | 月球 vs DE421 / 视直径 | 26.2″ / 4.5″ | 25.8″ / 4.2″ | ≤120″ / ≤12″ | 两次一致 |
+| R6 | 1 h 反证 | 1980.1″ | 1978.2″ | ≥600″ | 两次都红得预期 |
+| R7 | 7 种门语义 / `rf_emitted` | 全符合 / false | 全符合 / false | 全符合 / false | 两次一致 |
+
+**因此可以升级的结论**
+
+- R1–R4 从「单次真机实测」升级为「两次独立真机复跑、同机同棒、判据两次都成立」；
+  R1 的枚举/tuner/5 次开关、R4 的落盘完整性在两次之间完全一致。
+  注意：R2/R3 的 SNR、RMS 绝对值随所选电台变化（22 vs 33 dB），
+  不构成「数值可重复」，只保证判据两次成立。
+- R6 的月球绝对位置两次都落在 DE421 的 26″ 量级，说明不是偶然抖动。
+
+**仍不能当硬件证据的结论**
+
+- R3 的**立体声/19 kHz 导频**：两次导频都弱到 `skipped`，只能证明「单声道合法」，
+  不能证明立体声解调正确。
+- R2 的**绝对频率精度**：峰值偏移两次差 56 kHz，空口 FM 无频率基准，不能判。
+- R5 的「误差」是和**同一份 TLE + 同一个 sgp4 内核**比，属实现一致性，
+  不是外部星历真值；R5/R6/R7 本身也不需要射频硬件，不能算「硬件链证据」。
+- R1 的单环耗时、R2 的目标台频率都随环境变化，只做记录，不做判据。
 
 本轮实测发现并修掉的三处**判据口径问题**（都属于「量错了」而不是「放宽」）：
 
-1. `acceptance_suite` R2 的 `centroid_offset_le_40khz`：空口 FM 的峰值随调制/邻台
+1. `acceptance_suite` A2 的 `centroid_offset_le_40khz`：空口 FM 的峰值随调制/邻台
    漂移，不是频率精度指标（与 `ring2` 同一理由）。改为信息字段 + 明确注明
    「绝对频率精度需已知频率源」，与人工卡 R2 对齐。
-2. `acceptance_suite` R3 用 16384 样本/次读流：同样 2.4 MS/s 下实测
+2. `acceptance_suite` A3 用 16384 样本/次读流：同样 2.4 MS/s 下实测
    16384/块 **1.74 MS/s**、65536/块 **2.15 MS/s**、262144/块 **2.28 MS/s**——
    小块低吞吐是 **Python 每次调用开销**，不是设备流。改为 262144 样本/块后
    吞吐 2.27 MS/s，判据才在量设备而不是量解释器。

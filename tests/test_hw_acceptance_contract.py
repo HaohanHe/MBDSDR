@@ -63,3 +63,47 @@ def test_normalize_keeps_pass_and_fail():
     assert run_all._normalize(
         {"ring": "R1", "status": common.FAIL, "metrics": {}, "checks": []}
     )["status"] == common.FAIL
+
+
+# ---------------------------------------------------------------- 编号闸（R/A）
+import check_ring_labels as labels  # noqa: E402
+
+DOC = ROOT / "docs" / "hw-acceptance.md"
+
+
+def test_doc_has_no_same_number_different_meaning():
+    assert labels.check_text(DOC.read_text(encoding="utf-8")) == []
+
+
+def test_suites_still_spell_the_same_ring_names():
+    """口径漂移守卫：环改名后，文档里的 R/A 对照必须跟着改。"""
+    for n, keyword in labels.RUN_ALL_RINGS.items():
+        assert keyword in run_all.RINGS[n - 1][1], f"run_all R{n} 改了名？"
+    src = (ROOT / "scripts" / "hw_acceptance" / "acceptance_suite.py").read_text(
+        encoding="utf-8")
+    for keyword in labels.ACCEPTANCE_RINGS.values():
+        assert keyword in src, f"acceptance_suite 里找不到「{keyword}」"
+
+
+def test_same_numbering_written_identically_goes_red():
+    """反证：设备链也写成 R5/R6（与主口径同号同字），必须判红。"""
+    bad = DOC.read_text(encoding="utf-8") + "\n设备链视角：R5 云台、R6 串口 GNSS。\n"
+    problems = labels.check_text(bad)
+    assert any("R5" in p for p in problems), problems
+    assert any("R6" in p for p in problems), problems
+
+
+def test_row_meaning_swapped_goes_red():
+    """反证：把 R5 那一行写成云台，必须判红。"""
+    text = DOC.read_text(encoding="utf-8").replace(
+        "| R5 | 卫星追踪与过境 | run_all |", "| R5 | 云台回读 | run_all |")
+    problems = labels.check_text(text)
+    assert problems, "R5 被写成云台却没判红"
+
+
+def test_missing_a_block_goes_red():
+    """反证：把 A 段整段删掉（两套合并成一套编号），必须判红。"""
+    text = "\n".join(line for line in DOC.read_text(encoding="utf-8").splitlines()
+                     if not line.startswith("| A"))
+    problems = labels.check_text(text)
+    assert problems, "A 段缺失却没判红"
