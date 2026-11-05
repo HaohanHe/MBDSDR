@@ -112,6 +112,13 @@ QString RtlSdrSource::rtlOptionsSummary() const {
 // gain is just the stored (passthrough) value and availableGainsDb() is empty.
 double RtlSdrSource::gain() const { return gainDb_; }
 
+double RtlSdrSource::sampleRate() const {
+    // Report the rate the DEVICE is configured to when the driver can tell us
+    // (rtlsdr_get_sample_rate); otherwise the request is all we honestly have
+    // and sampleRateStatusNote() says so. Never echo the request as a readback.
+    return sampleRateReadbackValid_ ? static_cast<double>(sampleRateReadback_) : fs_;
+}
+
 std::vector<double> RtlSdrSource::availableGainsDb() const {
     return gainTable_.availableGainsDb();
 }
@@ -144,6 +151,12 @@ uint32_t advGetCenterFreq(void* dev) {
 }
 int      advSetSampleRate(void* dev, uint32_t rate) {
     return rtlsdr_set_sample_rate(reinterpret_cast<rtlsdr_dev_t*>(dev), rate);
+}
+uint32_t advGetSampleRate(void* dev) {
+    // "Get actual sample rate the device is configured to" (rtl-sdr.h:269-274):
+    // the driver stores the REAL rate after crystal/PPM rounding, so this is a
+    // genuine device-side readback -- not an echo of our request. 0 = error.
+    return rtlsdr_get_sample_rate(reinterpret_cast<rtlsdr_dev_t*>(dev));
 }
 int      advSetTunerBandwidth(void* dev, int bw) {
     return rtlsdr_set_tuner_bandwidth(reinterpret_cast<rtlsdr_dev_t*>(dev), bw);
@@ -205,7 +218,8 @@ const RtlLibOps g_realOps{
     &advSetOffsetTuning,  &advSetBiasTee,
     &advSetFreqCorrection,&advResetBuffer,
     &advCancelAsync,      &advReadSync,
-    &advGetTunerType
+    &advGetTunerType,
+    &advGetSampleRate
 };
 #endif  // HAVE_RTLSDR
 
@@ -311,7 +325,22 @@ bool RtlSdrSource::start() {
 
     // Order matters: center freq / sample rate first, then tuner mode, then
     // the optional front-end features, finally reset the endpoint buffer.
-    checkRtl("set_sample_rate", ops->setSampleRate(dev_, static_cast<uint32_t>(fs_)));
+    // Sample rate is CHECKED (was a blind write): an API refusal is fatal here
+    // -- better to fail start() and let the engine fall back than to stream at
+    // an assumed rate the DSP axis never agreed to. A readback mismatch (rc ok,
+    // driver parked elsewhere) is already recorded/warned by pushSampleRate and
+    // is not fatal: sampleRate() then reports the real device rate.
+    const bool srPushed = pushSampleRate(fs_);
+    if (!srPushed && (sampleRateRc_ != 0 || !ops->setSampleRate)) {
+        qWarning() << "[RtlSdrSource] sample rate" << fs_
+                   << "Hz NOT applied (set_sample_rate rc=" << sampleRateRc_
+                   << "); start() fails instead of assuming a rate";
+        if (ops->cancelAsync) ops->cancelAsync(dev_);
+        if (ops->close) ops->close(dev_);
+        dev_ = nullptr;
+        running_ = false;
+        return false;
+    }
     // Center freq goes through the retry+readback path (was a blind single
     // write): if it does not converge here we already warned loudly.
     pushCenterFreq(f0_);
@@ -392,6 +421,11 @@ void RtlSdrSource::stop() {
         if (ops->close) ops->close(dev_);
         dev_ = nullptr;
     }
+    // The device is gone: a previously read-back rate is stale now, so stop
+    // reporting it as a live hardware readback (falls back to the request).
+    sampleRateReadbackValid_ = false;
+    sampleRateReadback_ = 0;
+    sampleRateConverged_ = false;
     running_ = false;
     readWatchdog_.reset();
 }
@@ -443,10 +477,64 @@ void RtlSdrSource::setCenterFreq(double freqHz) {
 }
 
 void RtlSdrSource::setSampleRate(double rateHz) {
-    fs_ = rateHz;
+    // Only an OPEN device can be pushed; before start() this is just the
+    // remembered request start() will replay (same as setCenterFreq).
+    if (!dev_) { fs_ = rateHz; return; }
+    // Runtime push with a checked return code + driver readback. On failure the
+    // PREVIOUS rate stays in effect and in fs_ -- we report the refusal instead
+    // of pretending the new rate was applied.
+    pushSampleRate(rateHz);
+}
+
+bool RtlSdrSource::pushSampleRate(double rateHz) {
     const RtlLibOps* ops = rtlLibOps();
-    if (dev_ && ops && ops->setSampleRate)
-        ops->setSampleRate(dev_, static_cast<uint32_t>(fs_));
+    sampleRateRc_ = 0;
+    sampleRateApplied_ = false;
+    sampleRateConverged_ = false;
+    sampleRateReadbackValid_ = false;
+    sampleRateReadback_ = 0;
+    sampleRateError_.clear();
+    if (!ops || !dev_ || !ops->setSampleRate) {
+        // Nothing was pushed (no device / stub build): owning up is the only
+        // honest answer; the caller decides what the effective rate is.
+        return false;
+    }
+
+    const uint32_t want = static_cast<uint32_t>(rateHz);
+    sampleRateRc_ = ops->setSampleRate(dev_, want);
+    if (sampleRateRc_ != 0) {
+        // API refused the rate (rtl-sdr.h: "0 on success, -EINVAL on invalid
+        // rate"). Keep the previous rate in fs_ (no fake success), say both the
+        // refused request and what is still running; engine surfaces it.
+        sampleRateError_ = QStringLiteral(
+            "set_sample_rate rc=%1（请求 %2 Hz 未生效，保留原采样率 %3 Hz）")
+            .arg(sampleRateRc_)
+            .arg(static_cast<qlonglong>(want))
+            .arg(static_cast<qlonglong>(fs_));
+        qWarning() << "[RtlSdrSource]" << sampleRateError_;
+        return false;
+    }
+
+    // The driver accepted the write: that IS the new effective rate (the
+    // readback may still differ after PPM rounding, which is reported below).
+    fs_ = rateHz;
+    sampleRateApplied_ = true;
+    if (ops->getSampleRate) {
+        sampleRateReadback_ = ops->getSampleRate(dev_);
+        sampleRateReadbackValid_ = (sampleRateReadback_ != 0);
+    }
+    if (sampleRateReadbackValid_ && sampleRateReadback_ != want) {
+        // API said ok but the driver parked elsewhere (PPM rounding / tuner
+        // limits). Report BOTH values; never pass the request off as applied.
+        sampleRateError_ = QStringLiteral(
+            "采样率=请求值 %1 Hz，硬件读回 %2 Hz（不一致）")
+            .arg(static_cast<qlonglong>(want))
+            .arg(static_cast<qlonglong>(sampleRateReadback_));
+        qWarning() << "[RtlSdrSource]" << sampleRateError_;
+        return false;
+    }
+    sampleRateConverged_ = sampleRateReadbackValid_ && sampleRateReadback_ == want;
+    return true;
 }
 
 QString RtlSdrSource::name() const {

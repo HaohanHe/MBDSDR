@@ -40,9 +40,10 @@ constexpr double kCandidateRatesHz[] = {
     1792000.0,
     1920000.0,
     2048000.0,
+    2160000.0,   // standard PLL config the desktop/11-tier list already ships
     2400000.0,
     2560000.0,
-    2800000.0,
+    2880000.0,   // 2.88 MS/s (was 2.8 MS/s here: same physical quantity, -80 kHz)
     3200000.0,
 };
 

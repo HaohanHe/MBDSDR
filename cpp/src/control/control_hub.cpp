@@ -494,6 +494,23 @@ QJsonObject ControlHub::cmdTune(const QJsonObject& a) {
 QJsonObject ControlHub::cmdSetSampleRate(const QJsonObject& a) {
     double sr; QString err;
     if (!needDbl(a, "rate_hz", sr, err)) return errResult(err);
+    // Capability tiers, not a continuous band: compare against the SAME token
+    // list the rest of the stack uses and reject anything outside it outright.
+    // Silently accepting (and echoing back) an unsupported rate made the device
+    // run at a rate the DSP axis never agreed to; same wording as
+    // ai/agent_tools.cpp's set_sample_rate so both surfaces say the same thing.
+    bool knownTier = false;
+    for (double cand : tokens::kSampleRatesHz)
+        if (sr == cand) { knownTier = true; break; }
+    if (!knownTier) {
+        QStringList tiers;
+        for (double cand : tokens::kSampleRatesHz)
+            tiers << QString::number(static_cast<qlonglong>(cand));
+        return errResult(QStringLiteral(
+            "采样率不在能力档内（%1），收到 %2——未生效")
+            .arg(tiers.join(QLatin1Char('/')))
+            .arg(sr));
+    }
     engine_->onSetSampleRate(sr);
     QJsonObject o = okBase();
     o["command"] = "set_sample_rate";
@@ -999,6 +1016,15 @@ QJsonObject ControlHub::cmdGetStatus(const QJsonObject&) {
         o["readback_sample_rate_hz"] = snap.sampleRateHz;
         o["readback_gain_db"] = snap.gainDb;
     }
+    // F3: say WHERE the rate came from. RTL can query the driver
+    // (rtlsdr_get_sample_rate) and then reports the device value; every backend
+    // that cannot must read "采样率=请求值，硬件读回不可用" instead of passing a
+    // request off as a readback. sample_rate_error is the F2 failure (refused
+    // rc or request/readback mismatch), sticky until the next successful push.
+    o["sample_rate_readback_available"] = engine_->sampleRateReadbackAvailable();
+    o["sample_rate_status"] = engine_->sampleRateStatusNote();
+    const QString srError = engine_->lastSampleRateError();
+    if (!srError.isEmpty()) o["sample_rate_error"] = srError;
     return o;
 }
 

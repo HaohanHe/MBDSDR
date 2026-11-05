@@ -68,6 +68,12 @@ private slots:
     // ---- Phase26: 21 newly tool-ized capabilities ------------------------
     void fftParamsLandAndSpectrumStatusReadsBack();
     void squelchSetLandAndStatusReadsBack();
+    // F1: sample rate is a discrete capability list -- an in-range-looking value
+    // that is NOT one of the tiers must be rejected, never silently echoed.
+    void setSampleRateRejectsOutOfTier();
+    // F3: a backend without a driver readback must say "request only" instead of
+    // letting the requested value pose as a hardware readback.
+    void sampleRateStatusIsHonestWithoutReadback();
     // domain=margin/auto 时禁止 threshold_db；applied_by 区分 cpp-auto/manual/none。
     void squelchDomainGuardsAndAppliedBy();
     // legacy（不带 domain 但带 threshold_db）必须明确拒绝，不能静默关掉 auto。
@@ -597,6 +603,52 @@ void TestControlHub::squelchSetLandAndStatusReadsBack() {
     QVERIFY(r.value("ok").toBool());
     s = parseObj(hub.execute("get_squelch_status", {}));
     QCOMPARE(s.value("auto").toBool(), false);   // manual threshold disarmed auto
+}
+
+// F1 counter-proof: before the fix `set_sample_rate 1500000` returned ok:true and
+// echoed the request back. Now an out-of-tier value must be refused outright with
+// the same wording as agent_tools (tiers listed + received value + 未生效), while
+// the four capability tiers still land.
+void TestControlHub::setSampleRateRejectsOutOfTier() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject r = parseObj(hub.execute("set_sample_rate", {{"rate_hz", 1500000.0}}));
+    QVERIFY2(!r.value("ok").toBool(), "档外采样率必须显式拒绝，不能静默接受并回填");
+    const QString err = r.value("error").toString();
+    QVERIFY2(err.contains(QStringLiteral(
+                 "采样率不在能力档内（1024000/2048000/2400000/3200000）"),
+                 Qt::CaseSensitive),
+             err.toUtf8().constData());
+    QVERIFY2(err.contains(QStringLiteral("未生效"), Qt::CaseSensitive),
+             err.toUtf8().constData());
+    // Rejection must NOT leave a bogus sample-rate error behind (nothing was tried).
+    QJsonObject s = parseObj(hub.execute("get_status", {}));
+    QVERIFY(!s.contains("sample_rate_error"));
+
+    // Every declared tier is still accepted and echoed as the requested rate.
+    for (double tier : {1024000.0, 2048000.0, 2400000.0, 3200000.0}) {
+        r = parseObj(hub.execute("set_sample_rate", {{"rate_hz", tier}}));
+        QVERIFY2(r.value("ok").toBool(),
+                 QStringLiteral("tier %1 rejected").arg(tier).toUtf8().constData());
+        QCOMPARE(r.value("sample_rate_hz").toDouble(), tier);
+    }
+}
+
+// F3 counter-proof: the synthetic/offline backend has no driver readback, so the
+// status must LABEL the rate as a request -- never report it as a readback value.
+void TestControlHub::sampleRateStatusIsHonestWithoutReadback() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject s = parseObj(hub.execute("get_status", {}));
+    QVERIFY(s.value("ok").toBool());
+    QCOMPARE(s.value("sample_rate_readback_available").toBool(), false);
+    QCOMPARE(s.value("sample_rate_status").toString(),
+             QStringLiteral("采样率=请求值，硬件读回不可用"));
+    QVERIFY(!s.contains("sample_rate_error"));
 }
 
 void TestControlHub::squelchDomainGuardsAndAppliedBy() {

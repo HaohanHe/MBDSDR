@@ -114,6 +114,12 @@ void TestDeviceCapabilities::optionsFromRange() {
     QVERIFY(opts.contains(2400000.0));
     QVERIFY(opts.contains(3200000.0));
     QVERIFY(opts.contains(250000.0));
+    // 2.16M is a standard PLL config the desktop list already ships; it must not
+    // be missing here (it used to be). 2.88M is the same physical quantity the
+    // desktop uses -- the old 2.8M literal was 80 kHz off and must be gone.
+    QVERIFY(opts.contains(2160000.0));
+    QVERIFY(opts.contains(2880000.0));
+    QVERIFY(!opts.contains(2800000.0));
     for (int i = 1; i < opts.size(); ++i)
         QVERIFY(opts[i] > opts[i - 1]);   // ascending
 }

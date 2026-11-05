@@ -33,6 +33,12 @@ struct FakeRtl {
     int      lastBW = -999999;
     bool     openSucceeds = true;
     int      closeCalls = 0;
+    // ---- sample rate (F2/F3) ----
+    uint32_t lastSR = 0;           // rate handed to set_sample_rate
+    uint32_t readbackSR = 0;       // what get_sample_rate reports (0 = unknown)
+    int      setSRRc = 0;          // rc handed back by set_sample_rate
+    int      setSRCalls = 0;       // how many pushes were really attempted
+    bool     srReadbackDiffers = false;  // rc ok but driver parks 1 kHz lower
 
     static FakeRtl& inst() { static FakeRtl f; return f; }
 
@@ -54,7 +60,15 @@ struct FakeRtl {
         return s.setCFRc;
     }
     static uint32_t getCF(void*) { return inst().parkedFreq; }
-    static int setSR(void*, uint32_t) { return 0; }
+    static int setSR(void*, uint32_t rate) {
+        FakeRtl& s = inst();
+        ++s.setSRCalls;
+        s.lastSR = rate;
+        if (s.setSRRc != 0) return s.setSRRc;   // API refuses the rate
+        s.readbackSR = s.srReadbackDiffers ? rate - 1000 : rate;
+        return 0;
+    }
+    static uint32_t getSR(void*) { return inst().readbackSR; }
     static int setBW(void*, int bw) {
         ++inst().setBWCalls;
         inst().lastBW = bw;
@@ -76,6 +90,22 @@ struct FakeRtl {
 };
 
 const RtlLibOps g_fakeOps{
+    &FakeRtl::open,             &FakeRtl::close,
+    &FakeRtl::setCF,            &FakeRtl::getCF,
+    &FakeRtl::setSR,            &FakeRtl::setBW,
+    &FakeRtl::setGainMode,      &FakeRtl::setGain,
+    &FakeRtl::getGains,        &FakeRtl::getGain,
+    &FakeRtl::setAgc,           &FakeRtl::setDS,
+    &FakeRtl::setOffT,          &FakeRtl::setBias,
+    &FakeRtl::setPpm,           &FakeRtl::resetBuf,
+    &FakeRtl::cancelAsync,      &FakeRtl::readSync,
+    &FakeRtl::getTunerType,     &FakeRtl::getSR
+};
+
+// Same fake minus the appended getSampleRate entry: an older positional init
+// compiles with the tail zero-filled. There is NO readback then -- the source
+// must say "采样率=请求值，硬件读回不可用" instead of echoing the request.
+const RtlLibOps g_fakeOpsNoSampleRateReadback{
     &FakeRtl::open,             &FakeRtl::close,
     &FakeRtl::setCF,            &FakeRtl::getCF,
     &FakeRtl::setSR,            &FakeRtl::setBW,
@@ -125,6 +155,11 @@ private slots:
     void capabilitiesReportRealIdentity();
     void capabilitiesWithoutTunerTypeQueryAreHonest();
     void capabilitiesNoDeviceIsEmpty();
+    // ---- F2/F3: sample-rate push is checked, readback is honest -----------
+    void sampleRateRcFailureIsVisible();      // runtime push refuses (rc != 0)
+    void sampleRateRcFailureFailsStart();     // first push refuses -> start fails
+    void sampleRateReadbackMismatchIsExposed();// rc ok, device parked elsewhere
+    void sampleRateReadbackUnavailableIsHonest();// no getSampleRate -> request only
 };
 
 // L3: the first two runtime writes are lost (rc ok, but the PLL parks 1 kHz
@@ -235,6 +270,84 @@ void TestRtlSdrTune::capabilitiesNoDeviceIsEmpty() {
     QVERIFY(!src.capabilities().connected);
     QVERIFY(src.capabilities().deviceName.isEmpty()
            || src.capabilities().deviceName.contains(QStringLiteral("未连接")));
+}
+
+// F2 counter-proof: before the fix setSampleRate() ignored the driver rc, so a
+// refused rate looked applied. Now the rc is recorded, the failure is loud, the
+// request stays for the next retry, and no readback is invented.
+void TestRtlSdrTune::sampleRateRcFailureIsVisible() {
+    RtlSdrSource src;
+    QVERIFY(src.start());
+    FakeRtl::inst().setSRRc = -22;                    // -EINVAL from rtl-sdr.h
+    src.setSampleRate(3200000.0);
+
+    QCOMPARE(FakeRtl::inst().lastSR, 3200000u);        // the write was really tried
+    QCOMPARE(FakeRtl::inst().setSRCalls, 2);           // start's 2.4 MS/s + this push
+    QCOMPARE(src.lastSampleRateRc(), -22);
+    QVERIFY(!src.lastSampleRateApplied());
+    QVERIFY(!src.lastSampleRateError().isEmpty());
+    QVERIFY(src.lastSampleRateError().contains(QStringLiteral("rc=-22")));
+    QVERIFY(src.lastSampleRateError().contains(QStringLiteral("未生效")));
+    QVERIFY(src.lastSampleRateError().contains(QStringLiteral("保留原采样率 2400000")));
+    QCOMPARE(src.sampleRate(), 2400000.0);             // previous rate kept, not 3.2 MS/s
+    QVERIFY(!src.sampleRateReadbackAvailable());       // nothing applied -> no readback
+    QVERIFY(src.sampleRateStatusNote().contains(QStringLiteral("硬件读回不可用")));
+    src.stop();
+}
+
+// F2 at start(): a refused first push must fail start() (there is no honest way
+// to stream at an assumed rate); the device is closed again and nothing pretends.
+void TestRtlSdrTune::sampleRateRcFailureFailsStart() {
+    FakeRtl::inst().setSRRc = -22;
+    RtlSdrSource src;
+    QVERIFY(!src.start());
+    QVERIFY(!src.isConnected());
+    QVERIFY(src.lastSampleRateError().contains(QStringLiteral("rc=-22")));
+    QCOMPARE(FakeRtl::inst().closeCalls, 1);           // opened then closed
+    QCOMPARE(FakeRtl::inst().setBWCalls, 0);           // aborted before later steps
+}
+
+// F3 counter-proof: rc ok but the driver parks 1 kHz lower. Both values must be
+// reported (never the request posing as applied), and sampleRate() must expose
+// the DEVICE value so the DSP axis uses what is really running.
+void TestRtlSdrTune::sampleRateReadbackMismatchIsExposed() {
+    FakeRtl::inst().srReadbackDiffers = true;
+    RtlSdrSource src;
+    QVERIFY(src.start());                              // rc ok -> start still succeeds
+    QVERIFY(src.sampleRateReadbackAvailable());
+    QCOMPARE(src.sampleRateReadbackHz(), 2399000.0);   // 2.4 MS/s parked at -1 kHz
+    QCOMPARE(src.sampleRate(), 2399000.0);             // device value, not the request
+    QVERIFY(src.lastSampleRateError().contains(QStringLiteral("不一致")));
+    QVERIFY(src.lastSampleRateError().contains(QStringLiteral("请求值 2400000")));
+    QVERIFY(src.lastSampleRateError().contains(QStringLiteral("读回 2399000")));
+    QVERIFY(!src.lastSampleRateConverged());
+
+    src.setSampleRate(2048000.0);
+    QCOMPARE(src.sampleRateReadbackHz(), 2047000.0);
+    QCOMPARE(src.sampleRate(), 2047000.0);
+    QVERIFY(src.sampleRateStatusNote().contains(QStringLiteral("硬件读回")));
+    src.stop();
+    QVERIFY(!src.sampleRateReadbackAvailable());       // stale readback dropped
+    QCOMPARE(src.sampleRate(), 2048000.0);             // back to the honest request
+}
+
+// F3 counter-proof: an ops table without getSampleRate (older positional init /
+// stub build) has NO readback. The status must label the request as a request.
+void TestRtlSdrTune::sampleRateReadbackUnavailableIsHonest() {
+    rtlSetLibOpsForTesting(&g_fakeOpsNoSampleRateReadback);
+    RtlSdrSource src;
+    QVERIFY(src.start());
+    QVERIFY(!src.sampleRateReadbackAvailable());
+    QCOMPARE(src.sampleRateReadbackHz(), 0.0);
+    QCOMPARE(src.sampleRate(), 2400000.0);             // the request, honestly labelled
+    QCOMPARE(src.sampleRateStatusNote(),
+             QStringLiteral("采样率=请求值，硬件读回不可用"));
+
+    src.setSampleRate(2048000.0);
+    QVERIFY(!src.sampleRateReadbackAvailable());
+    QCOMPARE(src.sampleRate(), 2048000.0);
+    QVERIFY(src.lastSampleRateError().isEmpty());      // rc ok, no fake mismatch
+    src.stop();
 }
 
 QTEST_MAIN(TestRtlSdrTune)

@@ -53,6 +53,27 @@ public:
     virtual double sampleRate() const = 0;
     virtual double gain() const = 0;
 
+    // ---- Optional hardware sample-rate readback (default: unavailable) ----
+    /// The rate the DEVICE reports after the last setSampleRate(): 0 = the
+    /// backend cannot read it back (honest unknown, never a copy of the request).
+    /// Hardware backends that can query the driver override this.
+    virtual double sampleRateReadbackHz() const { return 0.0; }
+    virtual bool sampleRateReadbackAvailable() const { return false; }
+    /// Result of the last sample-rate push: empty = no failure. A non-empty
+    /// value is surfaced by the engine via sourceError so a refused rate is
+    /// never silent; the request itself is kept by the source for a retry.
+    virtual QString lastSampleRateError() const { return {}; }
+
+    /// Honest one-line status for the UI / agent surfaces: hardware readback
+    /// when available, otherwise the request is LABELLED as a request -- no
+    /// backend may pass a requested rate off as a hardware readback value.
+    QString sampleRateStatusNote() const {
+        if (sampleRateReadbackAvailable())
+            return QStringLiteral("采样率=%1 Hz（硬件读回）")
+                .arg(sampleRateReadbackHz(), 0, 'f', 0);
+        return QStringLiteral("采样率=请求值，硬件读回不可用");
+    }
+
     /// Display name shown in the UI, e.g. "RTL-SDR" or "Test Signal".
     virtual QString name() const = 0;
     /// True only when a real hardware device is actually connected.

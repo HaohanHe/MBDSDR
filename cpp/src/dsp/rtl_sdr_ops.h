@@ -48,6 +48,13 @@ struct RtlLibOps {
     // positionally keep compiling and simply report "未知调谐器" instead of
     // crashing -- the honest unknown, not a placeholder.
     int      (*getTunerType)(void* dev) = nullptr;
+    // Actual rate the driver reports after the last set_sample_rate
+    // (rtlsdr_get_sample_rate; 0 = driver could not report). Appended at the
+    // END for the same reason getTunerType is: positional test fakes keep
+    // compiling and honestly report "no readback", instead of letting the
+    // requested rate masquerade as a hardware value. Null pointer == no
+    // readback: status must say "采样率=请求值，硬件读回不可用".
+    uint32_t (*getSampleRate)(void* dev) = nullptr;
 };
 
 // Active ops table: a test-installed fake wins, otherwise the real librtlsdr

@@ -609,6 +609,16 @@ public:
     bool isSynthetic() const;
     bool hasData() const;
 
+    // ---- Sample-rate honesty (device readback vs request) ------------------
+    // F3: only an ACTIVE backend that can query its driver (RTL:
+    // rtlsdr_get_sample_rate) reports a hardware readback. Everything else
+    // reports "采样率=请求值，硬件读回不可用" -- a request is never echoed as a
+    // readback. sampleRateStatusNote() returns that exact one-liner for the
+    // status surfaces; F2 failures come through lastSampleRateError().
+    bool    sampleRateReadbackAvailable() const;
+    QString sampleRateStatusNote() const;
+    QString lastSampleRateError() const;
+
     // ---- SpyServer IQ tap (read-only, push) --------------------------------
     // When `on` is true the engine re-emits each freshly-read real IQ block
     // (rtl_tcp source, or the honestly-labelled offline test signal) as the

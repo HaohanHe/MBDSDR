@@ -865,6 +865,23 @@ bool SpectrumEngine::isSynthetic() const {
     return dynamic_cast<TestSignalSource*>(source_.get()) != nullptr;
 }
 
+bool SpectrumEngine::sampleRateReadbackAvailable() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return source_ && source_->sampleRateReadbackAvailable();
+}
+
+QString SpectrumEngine::sampleRateStatusNote() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    // No source at all: say exactly that instead of borrowing a rate.
+    if (!source_) return QStringLiteral("无数据源");
+    return source_->sampleRateStatusNote();
+}
+
+QString SpectrumEngine::lastSampleRateError() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return source_ ? source_->lastSampleRateError() : QString();
+}
+
 void SpectrumEngine::installIdleSourceLocked() {
     // Caller holds sourceMutex_. After a real source is gone (open failed,
     // dropped, or manually disconnected) install the idle source: the explicitly
@@ -1385,7 +1402,14 @@ void SpectrumEngine::applyControlCommandsLocked() {
         vfoChanged = true;
     }
     if (p.dSampleRate) {
-        if (source_) source_->setSampleRate(p.sampleRateHz);
+        if (source_) {
+            source_->setSampleRate(p.sampleRateHz);
+            // F2: a refused rate (driver rc != 0) or a request/readback
+            // mismatch must not vanish. The source records the precise reason;
+            // surface it on the event channel so the UI/agent see it too.
+            const QString srErr = source_->lastSampleRateError();
+            if (!srErr.isEmpty()) emit sourceError(srErr);
+        }
         vfoManager_.sourceRateChanged();
         needDemodReset_.store(true);
     }
