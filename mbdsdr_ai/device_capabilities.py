@@ -207,7 +207,10 @@ def _backend_rate_table(driver: str) -> Optional[Tuple[float, ...]]:
             return tuple(float(x) for x in getattr(mod, entry[1]))
         obj = getattr(mod, entry[1])
         return tuple(float(x) for x in getattr(obj, entry[2]))
-    except Exception:
+    except Exception as exc:
+        # 后端模块缺失/属性名变更 → 按未知处理（不编档位），原因必须可查
+        logger.warning("读取后端 %s 采样率档位表失败，按未知处理: %s: %s",
+                       entry[0], type(exc).__name__, exc)
         return None
 
 
