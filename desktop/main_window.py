@@ -106,6 +106,13 @@ def _tx_unapplied_reason(note) -> str:
     return reason or "原因未知"
 
 
+#: 无 SDR 设备时的统一引导（横幅/状态栏同一份：发生了什么 + 可能原因 + 下一步）。
+_NO_SDR_HINT = (
+    "没找到 SDR 设备。可能原因：USB 没插好、缺驱动，或被其他程序占用。"
+    "下一步：接好设备后点工具栏「连接」重试；"
+    "RTL-SDR 需先用 Zadig 安装 WinUSB 驱动，远端设备可用 rtl_tcp。")
+
+
 def format_tx_doppler(note, *, failed_reason=None, replay: bool = False) -> str:
     """把 resolve_tx_doppler 的 note 渲染成发射频点读数（纯展示，零 Δ 计算）。
 
@@ -1007,6 +1014,15 @@ class MainWindow(QMainWindow):
         shortcuts_action.triggered.connect(self._show_shortcuts_panel)
         help_menu.addAction(shortcuts_action)
 
+        # 全局命令面板：一个搜索框定位菜单命令/页签/能力/快捷键。
+        palette_action = QAction("命令面板", self)
+        palette_action.setShortcut(QKeySequence(_key("help.command_palette")))
+        palette_action.setToolTip(
+            "用一个搜索框找到菜单命令、面板页签、能力和快捷键；"
+            "想不起入口在哪时按 Ctrl+K")
+        palette_action.triggered.connect(self._show_command_palette)
+        help_menu.addAction(palette_action)
+
     def _build_tool_bar(self):
         """构建工具栏（SDR++ 风格：大触控目标，前置频率/模式/音量，右侧折叠坞菜单）。"""
         toolbar = QToolBar("主工具栏")
@@ -1261,8 +1277,9 @@ class MainWindow(QMainWindow):
         spectrum_layout.addWidget(spectrum_header)
 
         self._no_device_hint = QLabel(
-            "  正在枚举 SDR 设备…若未自动连接，请点击工具栏「连接」或按 Ctrl+C  ")
+            "正在查找 SDR 设备…没有设备也可以先看天空模式和 AI 对话。")
         self._no_device_hint.setObjectName("hintLabel")
+        self._no_device_hint.setWordWrap(True)
         self._no_device_hint.setAlignment(Qt.AlignCenter)
         _hint_bg = self._tok("light_hint_bg", "#F0E8DC")
         _hint_fg = self._tok("light_hint_text", "#8A6D4A")
@@ -2933,6 +2950,27 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 「面板」菜单：列出所有注册面板，checkable 控制页签显示/隐藏
     # ------------------------------------------------------------------
+    def select_tab(self, tab_key: str) -> dict:
+        """按页签身份（tabBar tabData，如 ``settings_dock`` / ``spectrum``）切页。
+
+        命令面板的「页签定位」走这里：先确保页签可见（曾从「面板」菜单隐藏
+        的也能救回来），再切前并聚焦。找不到就诚实返回 ERROR，不假装切了。
+        """
+        for area, tab in (("左栏", getattr(self, "left_tab", None)),
+                          ("右栏", getattr(self, "right_tab", None))):
+            if tab is None:
+                continue
+            for i in range(tab.count()):
+                if tab.tabBar().tabData(i) != tab_key:
+                    continue
+                tab.setTabVisible(i, True)
+                tab.setCurrentIndex(i)
+                tab.setFocus()
+                return {"ok": True, "status": "DONE",
+                        "reason": f"已切到{area}「{tab.tabText(i)}」页签"}
+        return {"ok": False, "status": "ERROR",
+                "reason": f"没有身份为 {tab_key!r} 的页签"}
+
     def _find_panel_tab(self, spec):
         """按注册表 spec.name 在前/右栏 QTabWidget 里找对应页签。返回 (tab, idx)。"""
         for tab in (getattr(self, "left_tab", None),
@@ -3128,9 +3166,7 @@ class MainWindow(QMainWindow):
         if os.environ.get("MBDSDR_OFFLINE") == "1":
             # 不枚举硬件，但状态栏提示必须与"无设备"口径一致（含排查关键词）：
             # 离线态同样没有连上后端，用户需要知道怎么排查，不能只说"跳过"。
-            self._show_no_rtl_hint(
-                "离线模式（未枚举硬件）：未连接 RTL-SDR——检查 Zadig WinUSB 驱动，"
-                "或装 SoapySDR(SoapyRTLSDR)；远端棒用 rtl_tcp。pyrtlsdr 为可选自装")
+            self._show_no_rtl_hint("离线模式（未枚举硬件）。" + _NO_SDR_HINT)
             return
         try:
             from mbdsdr_ai.sdr_backend import (
@@ -3158,9 +3194,7 @@ class MainWindow(QMainWindow):
         if chosen is None:
             # 真的没设备：明确提示，不弹对话框、不造假。
             # 默认 USB 走 SoapySDR（无 GPL）；pyrtlsdr 仅可选自装。
-            self._show_no_rtl_hint(
-                "未找到 RTL-SDR：检查 Zadig WinUSB 驱动，或装 SoapySDR(SoapyRTLSDR)；"
-                "远端棒用 rtl_tcp。pyrtlsdr 为可选 GPL-3.0，用户自装")
+            self._show_no_rtl_hint(_NO_SDR_HINT)
             return
 
         # 构造后端并连接（默认参数：2.048MS/s、AGC 开、PPM 0、offset 关）
@@ -3170,9 +3204,7 @@ class MainWindow(QMainWindow):
             self._show_no_rtl_hint(f"构造后端失败：{e}")
             return
         if backend is None:
-            self._show_no_rtl_hint(
-                "未找到 RTL-SDR：检查 Zadig WinUSB 驱动，或装 SoapySDR(SoapyRTLSDR)；"
-                "远端棒用 rtl_tcp。pyrtlsdr 为可选 GPL-3.0，用户自装")
+            self._show_no_rtl_hint(_NO_SDR_HINT)
             return
 
         ok = self._connect_backend(
@@ -3405,9 +3437,9 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("检测到的 SDR 设备："))
         combo = QComboBox()
-
-        # 远程 rtl_tcp 源：连局域网/公网已跑 rtl_tcp 服务的机器，复用参数区
-        combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
+        # 就地显示枚举结果/进行中，失败不再只写在主窗口状态栏
+        result_label = QLabel("")
+        result_label.setObjectName("deviceResultLabel")
 
         def _dev_label(dev):
             """设备下拉框显示名：在枚举 label 后追加来源/驱动标签，
@@ -3425,16 +3457,8 @@ class MainWindow(QMainWindow):
                 tag = ""
             return f"{base} ({tag})" if tag else base
 
-        if devices:
-            for dev in devices:
-                combo.addItem(_dev_label(dev), dev)
-        else:
-            # 无真实设备：显式提示，且不可选（data=None）
-            none_item = "未发现 SDR 设备（请接好 USB/安装 SoapySDR 驱动后点刷新）"
-            combo.addItem(none_item, None)
-            idx = combo.count() - 1
-            combo.model().item(idx).setEnabled(False)
         layout.addWidget(combo)
+        layout.addWidget(result_label)
 
         # 刷新按钮：重新枚举并重建下拉框内容
         refresh_btn = QPushButton("刷新设备列表")
@@ -3487,12 +3511,17 @@ class MainWindow(QMainWindow):
         buttons.rejected.connect(dlg.reject)
         layout.addWidget(buttons)
 
+        ok_btn = buttons.button(QDialogButtonBox.Ok)
+        busy = {"on": False}
+
         def _update_param_state():
-            """根据当前选中项启用/置灰参数区（WebSocket/无设备时不可调）。"""
+            """根据当前选中项启用/置灰参数区与 OK（无设备时 OK 不可点）。"""
             d = combo.currentData()
             enabled = d is not None
             # 远程 rtl_tcp 源也支持采样率/增益/PPM 参数，参数区保持启用。
             param_group.setEnabled(enabled)
+            # OK 只认真实数据：占位项 data=None，连“确认”都不该可点。
+            ok_btn.setEnabled(enabled and not busy["on"])
             # PPM 晶振频偏校正只对 RTL-SDR 类设备有意义（廉价棒典型 20~50ppm）；
             # HackRF/Pluto/Airspy/USRP 等 Soapy 前端无 ppm 概念，置灰该输入。
             # 远程 rtl_tcp 源后端本质也是 RTL-SDR 棒，PPM 同样有效，一并启用。
@@ -3502,37 +3531,51 @@ class MainWindow(QMainWindow):
             )
             ppm_spin.setEnabled(is_rtl)
 
-        combo.currentIndexChanged.connect(lambda _i: _update_param_state())
-        _update_param_state()
-
-        def _reload_devices():
-            """点刷新：重新枚举，保留已选。"""
-            try:
-                new_devices = enumerate_all_sdr_devices()
-            except Exception:
-                new_devices = []
-            prev = combo.currentData()
+        def _fill_combo(device_list, select_prev=None):
+            """真实设备优先、rtl_tcp 殿后；无设备时不可选占位项置顶且默认选中。"""
             combo.blockSignals(True)
             combo.clear()
-            combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
-            if new_devices:
-                for dev in new_devices:
+            if device_list:
+                for dev in device_list:
                     combo.addItem(_dev_label(dev), dev)
+                combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
+                result_label.setText(f"检测到 {len(device_list)} 台 SDR 设备")
             else:
-                combo.addItem("未发现 SDR 设备（请接好 USB/安装 SoapySDR 驱动后点刷新）", None)
-                combo.model().item(combo.count() - 1).setEnabled(False)
-            # 尽量恢复之前的选择
-            match = combo.findData(prev)
-            combo.setCurrentIndex(match if match >= 0 else 0)
+                combo.addItem(
+                    "未发现 SDR 设备（请接好 USB/安装驱动后点「刷新设备列表」）", None)
+                combo.model().item(0).setEnabled(False)
+                combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
+                result_label.setText("未发现 SDR 设备（检查 USB/驱动后点刷新）")
+            idx = 0
+            if select_prev is not None:
+                match = combo.findData(select_prev)
+                if match >= 0:
+                    idx = match
+            combo.setCurrentIndex(idx)
             combo.blockSignals(False)
             _update_param_state()
-            # 刷新要有可观察结果：设备集合没变时也不能"点了什么都不发生"
-            if new_devices:
-                self.statusBar().showMessage(
-                    f"检测到 {len(new_devices)} 台 SDR 设备", 3000)
-            else:
-                self.statusBar().showMessage(
-                    "未发现 SDR 设备（请检查 USB/驱动后点刷新）", 5000)
+
+        def _set_busy(on):
+            busy["on"] = on
+            refresh_btn.setEnabled(not on)
+            if on:
+                result_label.setText("正在查找设备…")
+            ok_btn.setEnabled((not on) and combo.currentData() is not None)
+
+        _fill_combo(devices)
+        combo.currentIndexChanged.connect(lambda _i: _update_param_state())
+
+        def _reload_devices():
+            """点刷新：重新枚举；期间禁用刷新/OK 并就地显示进行中。"""
+            _set_busy(True)
+            try:
+                try:
+                    new_devices = enumerate_all_sdr_devices()
+                except Exception:
+                    new_devices = []
+                _fill_combo(new_devices, select_prev=combo.currentData())
+            finally:
+                _set_busy(False)
 
         refresh_btn.clicked.connect(_reload_devices)
 
@@ -3541,7 +3584,13 @@ class MainWindow(QMainWindow):
 
         data = combo.currentData()
         if data is None:
-            return  # "未发现设备"项不可选；兜底
+            # 占位项不可选；万一被键盘路径确认了，也要说清为什么没继续。
+            QMessageBox.information(
+                self, "未选择设备",
+                "当前没有可连接的 SDR 设备。"
+                "下一步：接好 USB/安装驱动后重新打开此窗口，"
+                "或选择「远程 rtl_tcp 源」。")
+            return
 
         # 收集对话框参数（WebSocket 路径不用）
         chosen_sr = float(sr_combo.currentData() or DEFAULT_SAMPLE_RATE_HZ)
@@ -7261,6 +7310,16 @@ class MainWindow(QMainWindow):
         dlg.raise_()
         dlg.activateWindow()
         self._shortcuts_dialog = dlg
+
+    def _show_command_palette(self) -> None:
+        """打开全局命令面板（非模态；索引由 command_palette 实时生成）。"""
+        from command_palette import CommandPalette
+        dlg = CommandPalette(window=self, parent=self)
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        self._command_palette_dialog = dlg
 
     def _show_about(self):
         QMessageBox.about(
