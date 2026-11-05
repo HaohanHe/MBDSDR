@@ -38,9 +38,11 @@ class FakeRtlSdr:
       - set_manual_gain_mode / set_agc_mode / set_direct_sampling /
         set_bias_tee / set_offset_tuning / reset_buffer / close
 
-    参数与真实棒一致：
+    参数（夹具固定值，真实棒同样接受这几档）：
       center_freq=98.5 MHz（FM 广播段，一上来就有"台"），
-      sample_rate=2.048 MS/s（RTLSDRBackend.DEFAULT_SAMPLE_RATE），
+      sample_rate=2.048 MS/s（伪设备自身默认，与产品默认
+        `DEFAULT_SAMPLE_RATE_HZ` = 2.400 MS/s 解耦：夹具固定用这一档，
+        不代表产品默认；产品默认值以常量名为准），
       gain=20 dB，调制音 1 kHz，频偏 75 kHz（广播 FM 标准）。
 
     signal_offset_hz：可选的发射频偏。真实场景里 RTL-SDR 只 tune 到一个中心
