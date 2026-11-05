@@ -259,3 +259,121 @@ def test_hackrf_write_tx_invalid_input_records_reason():
     assert h.write_tx("不是 IQ 样本") is False
     assert h.last_tx_error
     assert h.tx_error_count == 1
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 调谐显式返回 False 的「失败当成功」：扫描/找中心/卫星跟踪
+# ─────────────────────────────────────────────────────────────────────
+
+class _Spec:
+    """按中心频率给峰值的频谱桩，避免测试依赖真实 FFT。"""
+
+    def __init__(self, peaks):
+        self.peaks = peaks
+
+    def compute_spectrum(self, samples, center_hz, sample_rate, fft_size=None):
+        return types.SimpleNamespace(
+            peak_power_db=self.peaks.get(int(round(center_hz)), -60.0),
+            noise_floor_db=-80.0)
+
+
+class _TuningScriptBackend(_OkBackend):
+    """第 ``refuse_after`` 次之后的 set_frequency 显式拒绝（模拟设备拒收）。"""
+
+    def __init__(self, refuse_after=None):
+        super().__init__()
+        self._tune_calls = 0
+        self.refuse_after = refuse_after
+
+    def set_frequency(self, f):
+        self._tune_calls += 1
+        if self.refuse_after is not None and self._tune_calls > self.refuse_after:
+            self.status.error = "设备拒绝该频率（调谐未落到硬件）"
+            return False
+        return super().set_frequency(f)
+
+
+def test_ai_sweep_does_not_sample_when_tuning_refused():
+    """修复前：调谐返回 False 仍读 IQ，旧频样本被算成该频点功率。"""
+    backend = _TuningScriptBackend(refuse_after=0)
+    out = st._ai_sweep(_Mgr(backend), _Spec({}), {
+        "freq_start_hz": 100e6, "freq_end_hz": 100.2e6, "step_hz": 0.1e6,
+        "auto_tune": False})
+
+    assert backend.reads == 0, "调谐未生效时不得读 IQ"
+    assert "AI 扫频完成" not in out
+    assert "所有频点调谐均被设备拒绝" in out
+    assert "未落到硬件" in out
+
+
+def test_ai_sweep_does_not_claim_auto_tune_when_refused():
+    """扫描点正常、自动调谐那一步被拒：不得写「已自动调谐到最强台」。"""
+    backend = _TuningScriptBackend(refuse_after=3)
+    peaks = {100000000: -50.0, 100100000: -10.0, 100200000: -60.0}
+    out = st._ai_sweep(_Mgr(backend), _Spec(peaks), {
+        "freq_start_hz": 100e6, "freq_end_hz": 100.2e6, "step_hz": 0.1e6,
+        "auto_tune": True})
+
+    assert backend.reads == 3
+    assert "已自动调谐" not in out
+    assert "自动调谐失败" in out
+    assert "未落到硬件" in out
+
+
+def test_ai_find_center_does_not_sample_when_tuning_refused():
+    """修复前：所有探测频点被拒仍读 IQ，把旧频功率当成中心频点。"""
+    backend = _TuningScriptBackend(refuse_after=0)
+    out = st._ai_find_center(_Mgr(backend), _Spec({}), {"num_steps": 4})
+
+    assert backend.reads == 0
+    assert "所有探测频点调谐均被设备拒绝" in out
+
+
+def test_ai_find_center_does_not_claim_auto_correct_when_refused():
+    """探测正常、自动修正被拒：不得写「已自动修正到精确中心频率」。"""
+    backend = _TuningScriptBackend(refuse_after=20)
+    peaks = {100090000: -10.0}
+    out = st._ai_find_center(_Mgr(backend), _Spec(peaks), {
+        "search_range_hz": 200000, "num_steps": 20, "auto_correct": True})
+
+    assert backend.reads == 20
+    assert "已自动修正" not in out
+    assert "自动修正失败" in out
+    assert "未落到硬件" in out
+
+
+def test_fm_acquire_skips_sampling_when_tuning_refused():
+    """修复前：调谐 False 仍读 IQ，旧频样本被当成该频点的噪声底/电台。"""
+    backend = _OkBackend(refuse={"set_frequency"})
+    acquire = st._fm_make_acquire(_Mgr(backend), 1e6)
+
+    assert acquire(100e6, 1e6, 1024) is None
+    assert backend.reads == 0, "调谐被拒后不得读 IQ"
+    assert acquire.state["failures"] == 1
+    assert "未落到硬件" in acquire.state["last_error"]
+
+
+def test_satellite_doppler_track_aborts_when_tuning_refused(tmp_path, monkeypatch):
+    """修复前：调谐 False 仍录样本并写 tuned_hz，谎称已完成多普勒跟踪。"""
+    backend = _OkBackend(refuse={"set_frequency"})
+    monkeypatch.setattr(
+        st, "_resolve_station_args",
+        lambda args, alt_key="altitude_m": (
+            types.SimpleNamespace(lat=0.0, lon=0.0, alt_m=0.0), {"trusted": True}))
+    monkeypatch.setattr(
+        st.orbit, "compute_satellite_state",
+        lambda *a, **kw: {"elevation": 30.0, "azimuth": 120.0,
+                          "range_rate_kms": -2.0})
+    out = tmp_path / "track.cf32"
+    res = st._satellite_doppler_track(_Mgr(backend), {
+        "satellite_name": "NOAA 15", "frequency_mhz": 137.1,
+        "duration_s": 0.2, "output": str(out), "min_elevation": -90,
+        "update_interval_s": 0.05})
+
+    assert res.success is False
+    assert "多普勒跟踪录制中止" in res.content
+    assert "未落到硬件" in res.content
+    assert "录制完成" not in res.content
+    assert backend.reads == 0, "调谐未生效时不得继续采集"
+    assert not (tmp_path / "track.cf32.json").exists(), \
+        "未生效的调谐不得写入轨迹 sidecar"

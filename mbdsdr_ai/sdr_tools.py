@@ -4655,6 +4655,7 @@ def _satellite_doppler_track(mgr, args):
     track, n_samples, tune_count = [], 0, 0
     t_start = _time.time()
     restore_warn = ""
+    tune_refused = ""
     try:
         if hasattr(backend, "set_sample_rate"):
             backend.set_sample_rate(sr)
@@ -4669,7 +4670,13 @@ def _satellite_doppler_track(mgr, args):
                 if st is None:
                     break
                 shift = -nominal * st["range_rate_kms"] / orbit.C_LIGHT
-                backend.set_frequency(int(nominal + shift))
+                if backend.set_frequency(int(nominal + shift)) is False:
+                    # 调谐没落到硬件：后续样本仍属于旧频率，继续录会把
+                    # "未补偿的 IQ"记成"已按多普勒跟踪"的轨迹。
+                    tune_refused = _setter_refusal_reason(
+                        backend, f"多普勒调谐到 {int(nominal + shift)} Hz")
+                    logger.warning("卫星多普勒跟踪调谐被拒: %s", tune_refused)
+                    break
                 tune_count += 1
                 track.append({"t_s": round(elapsed, 2),
                               "elevation_deg": round(st["elevation"], 2),
@@ -4696,6 +4703,13 @@ def _satellite_doppler_track(mgr, args):
         return ToolResult(success=False, content=f"多普勒跟踪录制失败: {e}")
     finally:
         restore_warn = _restore_tuning(backend, old, demod)
+
+    if tune_refused:
+        return ToolResult(success=False, content=_append_warning(
+            f"多普勒跟踪录制中止: {tune_refused}；"
+            f"调谐生效 {tune_count} 次后停止，已记录 {n_samples} 样本"
+            f"（{out}）。设备停在最后一次生效的频率，未写入轨迹 sidecar。",
+            restore_warn))
 
     if n_samples == 0:
         return ToolResult(success=False,
@@ -4858,9 +4872,16 @@ def _ai_sweep(mgr, spec, args):
 
     results = []
     strongest = {"freq": freq_start, "power": -math.inf}
+    refused = []
     current = freq_start
     while current <= freq_end:
-        backend.set_frequency(current)
+        # 调谐被设备显式拒绝时不能再读 IQ：那批样本属于旧频率，拿来算功率
+        # 会变成「这个频段没有电台」的伪结论。跳过该点并留下原因。
+        if backend.set_frequency(current) is False:
+            refused.append(_setter_refusal_reason(
+                backend, f"调谐到 {current/1e6:.3f} MHz"))
+            current += step
+            continue
         time.sleep(dwell_ms / 1000.0)
         samples = backend.read_samples(512)
         if samples is not None:
@@ -4878,14 +4899,36 @@ def _ai_sweep(mgr, spec, args):
         current += step
 
     if not results:
+        if refused:
+            return ("AI 扫频未得到任何读数：所有频点调谐均被设备拒绝"
+                    f"（最近原因: {refused[-1]}）。请确认设备的可用频率范围后重试。")
         return "AI 扫频未得到任何读数：设备没有返回 IQ，状态里也没有 RSSI。请确认设备已连接且数据流正常后重试。"
 
+    auto_error = ""
     if auto_tune and strongest["freq"] != freq_start:
-        backend.set_frequency(strongest["freq"])
+        if backend.set_frequency(strongest["freq"]) is False:
+            auto_error = _setter_refusal_reason(
+                backend, f"自动调谐到 {strongest['freq']/1e6:.3f} MHz")
 
-    result = f"AI 扫频完成\n范围: {freq_start/1e6:.3f} - {freq_end/1e6:.3f} MHz, 步进 {step/1e3:.0f} kHz\n扫描点数: {len(results)}\n最强台: {strongest['freq']/1e6:.3f} MHz @ {strongest['power']:.1f} dB\n"
+    if refused:
+        head = (f"AI 扫频未完成：{len(refused)} 个频点调谐被拒（未采样），"
+                f"最强台只在成功调谐的频点中比较")
+    else:
+        head = "AI 扫频完成"
+    result = f"{head}\n范围: {freq_start/1e6:.3f} - {freq_end/1e6:.3f} MHz, 步进 {step/1e3:.0f} kHz\n扫描点数: {len(results)}\n最强台: {strongest['freq']/1e6:.3f} MHz @ {strongest['power']:.1f} dB\n"
     if auto_tune:
-        result += f"已自动调谐到最强台\n"
+        if auto_error:
+            result += (f"自动调谐失败: {auto_error}；设备仍停留在扫描时"
+                       f"最后成功调谐的频率\n")
+        elif strongest["freq"] != freq_start:
+            result += "已自动调谐到最强台\n"
+        else:
+            result += "最强台即起始频率，无需移动\n"
+    if refused:
+        shown = "；".join(refused[:3])
+        if len(refused) > 3:
+            shown += f"；…另有 {len(refused) - 3} 个"
+        result += f"调谐被拒（未采样）: {shown}\n"
     result += "\n扫描结果（前10个最强点）:\n"
     sorted_results = sorted(results, key=lambda x: x["power_db"], reverse=True)[:10]
     for r in sorted_results:
@@ -4903,9 +4946,14 @@ def _ai_find_center(mgr, spec, args):
     step = search_range / num_steps
 
     strongest = {"freq": None, "power": -math.inf}
+    refused = []
     for i in range(num_steps):
         test_freq = current_freq - search_range / 2 + i * step
-        backend.set_frequency(test_freq)
+        # 调谐被拒时读 IQ 会拿到旧频率的样本，必须跳过该点并留原因。
+        if backend.set_frequency(test_freq) is False:
+            refused.append(_setter_refusal_reason(
+                backend, f"调谐到 {test_freq/1e6:.6f} MHz"))
+            continue
         time.sleep(0.02)
         samples = backend.read_samples(1024)
         if samples is not None:
@@ -4920,16 +4968,29 @@ def _ai_find_center(mgr, spec, args):
             strongest = {"freq": test_freq, "power": power}
 
     if strongest["freq"] is None:
+        if refused:
+            return ("AI 找中心失败：所有探测频点调谐均被设备拒绝"
+                    f"（最近原因: {refused[-1]}），无法判定中心频点。")
         return "AI 找中心失败：设备没有返回 IQ，状态里也没有 RSSI，无法判定中心频点。请确认设备已连接且数据流正常后重试。"
     offset = strongest["freq"] - current_freq
     ppm = offset / current_freq * 1e6 if current_freq > 0 else 0
 
+    auto_error = ""
     if auto_correct and abs(offset) > 100:
-        backend.set_frequency(strongest["freq"])
+        if backend.set_frequency(strongest["freq"]) is False:
+            auto_error = _setter_refusal_reason(
+                backend, f"自动修正到 {strongest['freq']/1e6:.6f} MHz")
 
-    result = f"AI 找中心频点完成\n当前频率: {current_freq/1e6:.6f} MHz（{int(round(current_freq))} Hz）\n精确中心: {strongest['freq']/1e6:.6f} MHz（{int(round(strongest['freq']))} Hz）\n偏移: {offset:.1f} Hz ({ppm:.2f} ppm)\n峰值功率: {strongest['power']:.1f} dB\n"
+    if refused:
+        head = (f"AI 找中心频点未完成（{len(refused)} 个频点调谐被拒、未采样）\n")
+    else:
+        head = "AI 找中心频点完成\n"
+    result = head + f"当前频率: {current_freq/1e6:.6f} MHz（{int(round(current_freq))} Hz）\n精确中心: {strongest['freq']/1e6:.6f} MHz（{int(round(strongest['freq']))} Hz）\n偏移: {offset:.1f} Hz ({ppm:.2f} ppm)\n峰值功率: {strongest['power']:.1f} dB\n"
     if auto_correct and abs(offset) > 100:
-        result += f"已自动修正到精确中心频率\n"
+        if auto_error:
+            result += f"自动修正失败: {auto_error}；设备频率设定未改变\n"
+        else:
+            result += "已自动修正到精确中心频率\n"
     return result
 
 
@@ -8095,9 +8156,21 @@ def _fm_make_acquire(mgr, sample_rate_hz):
     state = {"failures": 0, "last_error": ""}
 
     def _hw_acquire(center_hz, sr, n):
+        def _fail(msg):
+            # 单点失败不炸整次扫频，但必须计数+留原因，否则"没检出电台"
+            # 会被误读成"这个频段真的没有电台"。
+            state["failures"] += 1
+            state["last_error"] = msg
+            logger.warning("FM 搜台调谐/采集失败 @ %.3fMHz: %s", center_hz / 1e6, msg)
+
         try:
             if hasattr(backend, "set_frequency"):
-                backend.set_frequency(int(center_hz))
+                if backend.set_frequency(int(center_hz)) is False:
+                    # 调谐没落到硬件：此时读 IQ 拿到的是旧频率样本，
+                    # 若继续算功率/噪声底，会产出"该频点无台"的伪结论。
+                    _fail(_setter_refusal_reason(
+                        backend, f"调谐到 {center_hz/1e6:.3f} MHz"))
+                    return None
                 time.sleep(0.02)
             got = []
             need = n
@@ -8110,11 +8183,7 @@ def _fm_make_acquire(mgr, sample_rate_hz):
             if got:
                 return np.concatenate(got)[:n]
         except (RuntimeError, OSError, ValueError, TypeError) as e:
-            # 单点失败不炸整次扫频，但必须计数+留原因，否则"没检出电台"
-            # 会被误读成"这个频段真的没有电台"。
-            state["failures"] += 1
-            state["last_error"] = str(e)
-            logger.warning("FM 搜台调谐/采集失败 @ %.3fMHz: %s", center_hz / 1e6, e)
+            _fail(str(e))
         return None
 
     _hw_acquire.state = state
