@@ -9,7 +9,7 @@ MBDSDR 卫星闭环跟踪面板
   - "开始跟踪 / 停止跟踪"按钮（触发 main_window 的 500ms 自动调谐闭环）；
   - "更新 TLE"按钮（从 Celestrak 在线刷新）；
   - 实时显示：方位角 / 仰角 / 多普勒偏移 / 校正后接收频率 / 斜距；
-  - 仰角指示器（0-90° 进度条）：仰角 < 5° 变红并提示"过境结束"。
+  - 仰角指示器（0-90° 进度条）：仰角低于跟踪门限时变红并提示"跟踪已停止"。
 
 本面板只负责 UI 展示与发信号，真正的轨道计算与 SDR 调谐闭环在
 main_window（持有 mbdsdr_ai.sat_tracker.SatelliteTracker）。
@@ -106,8 +106,8 @@ class SatTrackPanel(QFrame):
         self.freq_spin.setSuffix(" MHz")
         self.freq_spin.setValue(137.620)
         self.freq_spin.setToolTip(
-            "跟踪时调谐到的下行频率（MHz）；先用所选制式的默认值，"
-            "通联确认后再微调")
+            "跟踪时调谐到的下行频率（MHz）；实际可调范围以当前 SDR 设备为准；"
+            "先用所选制式的默认值，通联确认后再微调")
         form.addRow("下行频率:", self.freq_spin)
         root.addWidget(sel_box)
 
@@ -224,7 +224,7 @@ class SatTrackPanel(QFrame):
         self.el_label.setText(f"{el:6.1f}°")
         if abs(dop) < 0.5:      # N-02：负零归零，避免「-0 Hz」误读成反向偏移
             dop = 0.0
-        self.dop_label.setText(f"{dop:+8.0f} Hz")
+        self.dop_label.setText(f"{dop:+8.1f} Hz")
         self.corr_label.setText(f"{corr/1e6:9.6f} MHz")
         self.range_label.setText(f"{rng:7.0f} km")
 
@@ -238,7 +238,9 @@ class SatTrackPanel(QFrame):
             # 25° 时卫星仍可跟踪，不能因为用户想少列过境就假装跟踪结束。
             _t = tokens()
             self._set_el_color(_t.COLORS["danger"])
-            self.state_label.setText(f"过境结束 (仰角<{VISIBLE_MIN_ALT_DEG:g}°)")
+            self.state_label.setText(
+                f"跟踪已停止（仰角低于设定门限 {VISIBLE_MIN_ALT_DEG:g}°；"
+                "卫星尚未落下）")
             self.state_label.setStyleSheet("color:" + _t.COLORS["danger"]
                                            + "; font-weight:600;")
         else:
