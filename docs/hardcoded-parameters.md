@@ -92,7 +92,7 @@
 | `mbdsdr_ai/sat_passes.py:214`（及 `:604`） | `min_alt: float = 10.0` | 预测器自身默认 |
 | `desktop/rf_sky_view.py`（`PASS_MIN_ALT_DEG`） | `10.0` | 星象仪过境列表的**峰值仰角**门 |
 | `desktop/new_spacetime_panel.py:524` | `5.0` | 时空面板过境时间线 |
-| `mbdsdr_ai/core/controller.py:1072` | `min_alt=10.0` | 控制器 |
+| `mbdsdr_ai/core/controller.py:990` | `get_satellite_pass(min_elevation_deg=None, window_hours=None)` | 控制器（显式入参，缺省回落 `PASS_MIN_ALT_DEG` / `PASS_WINDOW_HOURS`） |
 | `mbdsdr_ai/agent.py:1554` | `min_elevation=10` | AI 工具默认 |
 
 这不是"两个合理默认"，而是**同一功能两条调用链拿到两个门**：
@@ -637,13 +637,18 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | AOS/LOS 定义 | 对 `next_pass` 调用按 5° 穿越 | 按 10° 穿越（过境时长相应变短） |
 | 时空面板列表 | 无说明 | 标题旁"列表按峰值 ≥10° 筛选（更低的不列出；可在设置开启低仰角）" |
 | 空状态文案 | "24 小时内无过境" | "24 小时内无过境（峰值仰角 ≥10°）" |
-| 控制器 | 已是 10°（字面量） | 改为引用 `PASS_MIN_ALT_DEG`，值不变 |
+| 控制器 | 固定 10° / 24 h 字面量 | **已改为显式入参注入**：`get_satellite_pass(min_elevation_deg=None, window_hours=None)`，缺省源 `sat_passes.PASS_MIN_ALT_DEG` / `sat_passes.PASS_WINDOW_HOURS=24.0`，controller 内已无 10/24 字面量 |
 
 证据：`mbdsdr_ai/sat_passes.py:101-102`；`predict_passes:226` 与批量
 `:616` 默认 `PASS_MIN_ALT_DEG`；`sat_tracker.py:118`
 `DEFAULT_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG`、`next_pass` 默认
 `PASS_MIN_ALT_DEG`；`desktop/new_spacetime_panel.py` 筛选标签 +
-`min_elevation=PASS_MIN_ALT_DEG`；`mbdsdr_ai/core/controller.py:1076`。
+`min_elevation=PASS_MIN_ALT_DEG`；`mbdsdr_ai/core/controller.py:990`
+（显式入参，controller 内无 10/24 字面量）。
+
+外泄面是 **MCP schema**（`min_elevation_deg` / `window_hours` 入参 + 返回值里
+的生效值）与**验收脚本**，**不是桌面 UI**。实测：5°/24h = 6 条、10°/24h = 5 条、
+10°/72h = 14 条。
 
 **口径没变**
 
