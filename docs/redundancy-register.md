@@ -36,6 +36,11 @@ rg -c "<symbol>" D:\mbdsdr\MBDSDR
 ```
 
 - 统计范围显式包含 `scripts/`、`tests/`、`docs/`、`cpp/`、`mobile/`、`tools/`、`experiments/`。
+- **数字引用规矩**：任何 `verify_claims` 数字必须带口径 + HEAD 短哈希，两种口径不可混比：
+  - `HEAD <hash>（提交态）`：用 `git archive HEAD docs` 抽到临时目录后跑 `--docs`，只算已落库文档；
+  - `HEAD <hash> + 工作区在途（WT）`：直接跑工作区，含他线未提交改动。
+  - 例（2026-11-06 实测）：`HEAD e4810574（提交态）156 / 63 / 12 / 81`（`git archive HEAD docs` 抽测）；`HEAD e4810574 + WT 128 / 70 / 12 / 46`。**禁止裸报一个总数。**
+  - 他线自测数字（如采样率线的 `164 / 58 / 17 / 89`）只在其自身 HEAD 快照下成立，引用时必须带其 hash 与统计范围，不得与本表两组混比。
 - 删除前后各跑同一组测试并对比通过项数（见 §4）。
 - 采样率真机事实来自另一条线的实测记录（见 §3）。
 
@@ -385,38 +390,42 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 
 ### 5.8 死代码扫描：全仓公开函数/类（2026-11-06，**只登记不删**）
 
-扫描口径（HEAD `ce561bcb`，工作区含他线在途改动）：
+扫描口径（基线 HEAD `ce561bcb` 的工作区快照，含他线在途改动）。2026-11-06 按 HEAD `e4810574` 复核：17 条零命中符号 `git grep -w` 仍仅定义行 1 处；对 `ce561bcb..e4810574` 的 16 个变更 `.py` 做增量核对，新增公开定义均有引用、无净删除，116 计数不变。
 - 范围：`mbdsdr_ai/`、`desktop/` 的顶层公开 `def`/`class`（不含 `_` 前缀）；`scripts/`、`tools/`、`experiments/`、`tests/` 内的定义不计入候选（脚本入口/测试夹具）。
 - 引用判定：全仓（`.py`/`.dart`/`.cpp`/`.h`/`.md`/配置文件）整词匹配，排除定义行自身；零命中项再用 `git grep -n -w <symbol> HEAD` 复核，必须全仓只有定义一行。
 - 已排除：`__all__` 导出（候选里 `all=1` 为 0 条）；生产代码中按名取用的 `getattr`/`importlib`（未发现能命中这些符号名的形态，§1.2 那几类动态调用已单独核过）；`connect(self.x)` 这类信号槽属正常标识符引用，已计入。
 - 结果：候选 **116** 项 = 确认无用 10 / 动态调用存疑 7 / 上游 API 保留 99。**本清单不计入 §0 的 41 项，处置一律"登记待批"，不删任何代码。**
 
-#### 5.8.1 确认无用（10 项，全仓仅定义行 1 处）
+#### 5.8.1 确认无用（10 项）——分级与 patch 计划见 `docs/pending-patches/2026-11-06-deadcode-unused-symbols.md`
 
-| 位置 | 符号 | 备注 |
-|---|---|---|
-| `desktop/rf_sky_view.py` | `load_ground_station_config` | 配置读取辅助，无调用 |
-| `mbdsdr_ai/adsb_lite.py` | `build_short_frame` | 帧构造辅助，无调用 |
-| `mbdsdr_ai/astronomy/moon_albedo.py` | `grid_resolution_pix_per_deg` | 换算辅助，无调用 |
-| `mbdsdr_ai/dab_plus_lite.py` | `audio_info_from_service` | DAB 服务信息辅助，无调用 |
-| `mbdsdr_ai/decoder_registry.py` | `select_decoder` | 注册表选择入口；删前需确认无按模式名派发 |
-| `mbdsdr_ai/fengyun_sat.py` | `fy4_lrit_pipeline` | 流水线入口；删前需确认无按卫星/产品名派发 |
-| `mbdsdr_ai/ft8_decode.py` | `hard_tones_to_llr` | 算法辅助，无调用 |
-| `mbdsdr_ai/gps_ca.py` | `nav_bits_from_corr` | 导航比特提取辅助，无调用 |
-| `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | 卷积交织辅助，无调用 |
-| `mbdsdr_ai/orbit_determination.py` | `ecef_state_to_keplerian` | 轨道根数换算辅助，无调用 |
+| 分级 | 位置 | 符号 | 删了谁可能受影响 | 删除判据（摘要） |
+|---|---|---|---|---|
+| 需先补测试再删 | `desktop/rf_sky_view.py` | `load_ground_station_config` | 环境变量+配置回退的地面站策略；当前"有写入、无人读"，直接删会抹掉该集成缺口 | 先补"未配置/非法坐标→`None`"行为测试，并核对写入侧口径 |
+| 真可删 | `mbdsdr_ai/adsb_lite.py` | `build_short_frame` | 无调用方；短帧不在 `decode_baseband` 主链 | adsb 3 个测试文件全绿 |
+| 真可删 | `mbdsdr_ai/astronomy/moon_albedo.py` | `grid_resolution_pix_per_deg` | 一行委托 `albedo_meta`，月面几何走 `screen_to_disc`/`albedo_at_disc` | `tests/test_moon_albedo.py` 全绿 |
+| 真可删 | `mbdsdr_ai/dab_plus_lite.py` | `audio_info_from_service` | 未接线的音频信息构造入口，FIC 解析链不受影响 | `tests/dab_plus_test.py` 全绿 |
+| 入口角色不动 | `mbdsdr_ai/decoder_registry.py` | `select_decoder` | 注册表"按模式选择"公开入口；可能被外部/CLI 按名调用 | 不删（零命中不构成删除许可） |
+| 入口角色不动 | `mbdsdr_ai/fengyun_sat.py` | `fy4_lrit_pipeline` | FY-4 LRIT 流水线入口；零件有测试 ≠ 入口可删 | 不删 |
+| 真可删 | `mbdsdr_ai/ft8_decode.py` | `hard_tones_to_llr` | FT8 主链用 `soft_tones_to_llr`，硬判决仅离线实验 | 3 个 FT8 测试文件全绿 |
+| 需先补测试再删 | `mbdsdr_ai/gps_ca.py` | `nav_bits_from_corr` | 导航比特提取（含门限策略）无测试钉扎 | 先补已知 C/A 相关向量对拍 |
+| 真可删 | `mbdsdr_ai/meteor_sat.py` | `convolutional_interleave` | LRPT 主链不复用该交织器 | `tests/apt_meteor_roundtrip.py` 全绿 |
+| 需先补测试再删 | `mbdsdr_ai/orbit_determination.py` | `ecef_state_to_keplerian` | ECEF→开普勒根数换算属数值 API，现有 orbit 测试未钉 | 先补已知向量测试（ISS 单点） |
 
-#### 5.8.2 动态调用存疑（7 项，无生产引用但有测试/文档引用）
+#### 5.8.2 动态调用存疑（7 项）——确认手段与结论
 
-| 位置 | 符号 | 依据 |
-|---|---|---|
-| `mbdsdr_ai/ax25.py` | `APRSWeather` | 1 份文档引用，无代码/测试引用 |
-| `mbdsdr_ai/ft8_ldpc.py` | `get_colorder` | 2 份文档引用，无代码/测试引用 |
-| `mbdsdr_ai/new_spacetime.py` | `GNSSDataSource` | 2 份文档引用；数据源类，可能按名注入 |
-| `mbdsdr_ai/new_spacetime.py` | `SDRDataSource` | 1 份文档引用；数据源类，可能按名注入 |
-| `mbdsdr_ai/new_spacetime.py` | `format_dms` | 1 份文档引用 |
-| `mbdsdr_ai/new_spacetime.py` | `parse_nmea_sentence` | 1 份文档引用 |
-| `mbdsdr_ai/new_spacetime.py` | `web_mercator_project` | 1 份文档引用 |
+确认手段（全部已执行）：① 字符串/配置：扫 `*.json/*.yaml/*.toml/*.ini/*.cfg/*.conf/*.txt`，7 个名字 **0 命中**；② `getattr`/`importlib`/`eval`/`exec`/`globals()[...]`：生产代码中无按这些名字取用的形态；③ Qt 字符串 connect：无 `connect("...")` 形态；④ `git grep -w`：全仓仅定义行。
+
+| 位置 | 符号 | 结论 | 依据 |
+|---|---|---|---|
+| `mbdsdr_ai/ax25.py` | `APRSWeather` | **确认无用** | 仅 `docs/audit_r2/14_ax25_aprs.md` 描述"能发不能收"，类未被实例化；无字符串/配置引用 |
+| `mbdsdr_ai/ft8_ldpc.py` | `get_colorder` | **确认无用** | `docs/learn/wsjtx.md:244` 记"读了 colorder 文件但没人用"；`docs/audit_r2/08_ft8_full.md:36` 称 `reorder_to_ldpc` 调用它，但 HEAD `mbdsdr_ai/ft8_decode.py:74 reorder_to_ldpc` 已不调用（`git grep -w` 无命中），该审计记述已过期；主链不用 |
+| `mbdsdr_ai/new_spacetime.py` | `GNSSDataSource` | **保留（无法确认）** | `docs/audit_r2/28_astronomy_gnss.md` 记为空壳，但 `docs/learn/serial_gnss_ntrip.md` 声明串口 GNSS 接入；`desktop/new_spacetime_panel.py` 仍在途（§5.7） |
+| `mbdsdr_ai/new_spacetime.py` | `SDRDataSource` | **保留（无法确认）** | 数据源插件，存在按名注册的可能；等他线面板落库后再判 |
+| `mbdsdr_ai/new_spacetime.py` | `format_dms` | **确认无用** | `docs/audit_r2/26_new_spacetime.md:174-175` 明记全仓无人调用；纯显示辅助 |
+| `mbdsdr_ai/new_spacetime.py` | `parse_nmea_sentence` | **保留（无法确认）** | `docs/learn/serial_gnss_ntrip.md:43` 声明为串口 GNSS 分发入口，接线未落地 |
+| `mbdsdr_ai/new_spacetime.py` | `web_mercator_project` | **确认无用** | `docs/audit_r2/26_new_spacetime.md:174-175` 明记全仓无人调用；纯投影辅助 |
+
+> 结论：4 条落"确认无用"（`APRSWeather`、`get_colorder`、`format_dms`、`web_mercator_project`），可并入删除 backlog；3 条落"保留"（GNSS/SDR 数据源与 NMEA 入口），等 `new_spacetime_panel` 落库后重判。删除 `format_dms`/`web_mercator_project` 前须确认落库版本的面板未新增调用。
 
 #### 5.8.3 上游 API 保留（99 项，按文件分组）
 
@@ -485,6 +494,21 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 
 > 说明：本清单只给"谁没有调用方"，**不给删除许可**。删除须另开 patch + 回滚窗口结论；`select_decoder`/`fy4_lrit_pipeline`/`GNSSDataSource`/`SDRDataSource` 这四项属"入口/按名注入"角色，即便零命中也不得直接删。
 
+### 5.9 棘轮提案「未引用公开符号只降不升」：**本轮不实施**
+
+**判断：现在加会天天误红，先不加。** 理由三条：
+
+1. 口径不稳：116 项里 99 项是"上游 API 保留"（library-only 模块/适配器/测试钉住）；是否把 `docs/`、配置、字符串算引用，一改口径数字就跳变，棘轮会变成"改基线"比赛。
+2. 在途未接线是常态：`desktop/new_spacetime_panel.py` 仍在工作区 M，§5.8.2 的 3 个符号会被它接线；§5.7 A 表还有 6 项等他线落库。此时"只降不升"会惩罚正常的先写后接。
+3. 新函数天然先有定义后接线：若每次新增都上调基线，棘轮就失去约束力。
+
+**若将来要加，最低设计（三条必须同时满足）：**
+- 只对"确认无用"类计数（不含 API 保留/存疑），基线 `docs/deadcode-baseline.json` 记 `{head, count, entries}`；
+- 豁免通道：定义处 `# deadcode: pending-wire <owner>` 注释（脚本跳过），或能力表/注册表里的登记字符串；**只有无标注的新符号才报警**；
+- 过渡期：允许同提交上调基线，但 commit message 必须写明新增符号与接线计划；CI 只拦"基线未更新且计数上升"。
+
+**结论**：等 §5.7 A 表清零、`new_spacetime_panel` 落库后重新评估；在此之前 §5.8 只作为人工清单维护。
+
 ## 6. 账本线登记行并入（R1–R20）
 
 > 来源：`D:\mbdsdr\.tmp\account_redundancy_rows.md`（账本线导出 20 行，不是 16 行）。
@@ -549,5 +573,6 @@ python -m pytest tests/test_theme_switch.py tests/test_theme_tokens.py \
 | 2026-11-06 | `7bea149a` | B5 **已改**能力驱动（已落库）：`7bea149a` — `desktop/module_panel.py:541` — `sample_rate_combo_items(device)`；`_fill_sample_rate_options`（`desktop/module_panel.py:534`）的档位来自 `desktop/constants.py:51` → `sample_rate_options(device)`，全文件无档位字面量；标签仍走 `format_sample_rate`（`MS/s` 三位小数）。原「5 档硬编码、代码未落地」判定作废。历史：`385d0e15` 的五标签 `MS/s` 文案改动已被派生链取代（`1.440 MS/s` 已不在 HEAD） |
 | 2026-11-06 | （本次提交） | A10 `:74` 补四元组 `8213a3d7 — mbdsdr_ai/decode_router.py:499 — ACARSDecoder`（`git show --name-only` 触及 + `log -S` 命中）；R8 `:398` 补可点开实现位置（`desktop/status_panel.py:185 DECODE_ERROR_LABELS` 四元组 `90f5eccc`、`desktop/troubleshooting.py:249 CODE_NEXT_STEPS`、`mbdsdr_ai/error_catalog.py:704 ERRORS`）；§5.7 的 B5/C2 行按 `7bea149a` 落库结果收口 |
 | 2026-11-06 | （本次提交） | B1–B4/B6–B8 按 HEAD 逐条复核：行号校正（B2 `:128→:131`、B3 `1442→1501`/`198→205`/`1253→1360`、B4 测试 `:101→:102`、B6 `:16-20→:19-26`、B7 `218-220→217-220`、B8 补 `cpp/src/dsp/device_capabilities.cpp:46`），每条补证据三元组（7 个 hash 均先经 `show --name-only` 反查归属）；新增 §5.8 死代码扫描（116 候选 = 无用 10 / 存疑 7 / API 保留 99，只登记不删）；B 表前补"本账本不引用 23/26"一句 |
+| 2026-11-06 | （本次提交） | §5.8.1 十条无用符号分三级（真可删 5 / 需先补测试再删 3 / 入口角色不动 2），patch 计划落 `docs/pending-patches/2026-11-06-deadcode-unused-symbols.md`；§5.8.2 七条存疑跑完四种确认手段后落"确认无用 4 / 保留 3"；§1.1 加数字引用规矩（必须带口径 + HEAD 短哈希）；§5.9 棘轮提案评估结论为"本轮不实施"并写明过渡期豁免设计 |
 | 2026-11-06 | （本次提交） | A10 改判：**两实现并存、入口不止一个、退休条件未满足**（`decoder_registry.py:78` 只是一个入口；CLI 生产路径 `decode_router.py:517` 仍走 `acars_decoder` 状态机）；新增 §5.6 差异表（模式/链路/质量/测试/调用方）+ 5 条退休判据，不出 patch、不删生产路径；清单 2 的 A3/C5/C12 摘要行补「见 §X」指针；A3 的 `53 passed` 标注为 2026-11-06 02:21 实跑记录（本轮未复跑） |
 | 2026-11-06 | （本次提交） | 新增 §5.7 落库依赖表：A 表 6 项等「操作逻辑线」提交 `main_window.py`/`module_panel.py` 后按 HEAD 校正（B5、C2、C3、A11、§5.4、§4.3）；B 表 6 项无他线依赖（C7 其余 4 方法、A9、A7/A8、B7、§5.3、A3 历史位置）；C 表 `device_panel.py:296`→HEAD `366` 可即改；明确「claim 到期但没提交不算落库」 |
