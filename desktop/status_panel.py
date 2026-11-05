@@ -195,6 +195,11 @@ DECODE_ERROR_LABELS = {
     "invalid_wav": "WAV 不可解析",
     "invalid_input": "输入或参数非法",
     "param_not_in_enum": "参数不在允许取值内",
+    "preamble_not_found": "未找到前导/同步模板",
+    "nothing_detected": "未检测到帧",
+    "no_frame_recovered": "未能恢复完整帧",
+    "truncated_frame": "帧被截断",
+    "crc_failed": "校验失败（CRC/FCS）",
 }
 
 # 证据等级 → 人话（与 P2 真样本盘点口径一致）

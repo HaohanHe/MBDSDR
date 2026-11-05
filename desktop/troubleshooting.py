@@ -177,10 +177,13 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
         "invalid_vcdu", "decode_failed", "unknown_device", "doppler_failed",
         "ogn_decode_failed", "schedule_failed", "meta_failed", "bad_hex",
     ),
-    # 状态面板解码卡显式映射了这 5 个 code（DECODE_ERROR_LABELS）。
+    # 状态面板解码卡显式映射了这 14 个 code（DECODE_ERROR_LABELS）。
     "解码结果": (
         "unknown_mode", "missing_sample", "unsupported_format",
         "decode_error", "not_implemented",
+        "crc_failed", "insufficient_samples", "invalid_input", "invalid_wav",
+        "no_frame_recovered", "nothing_detected", "preamble_not_found",
+        "sample_rate_mismatch", "truncated_frame",
     ),
     # 状态栏 message 通道：sdr_backend 设置 status.error = user_message(code)，
     # main_window._handle_backend_lost 显示「设备已断开：{message}」。
@@ -229,6 +232,36 @@ VISIBLE_NEXT_STEPS: Dict[str, str] = {
     "工具结果": (
         "在「AI 助手」页签展开该步骤卡看返回码，按「能力目录」改用同一能力的"
         "具体工具重发；连续两次空结果就停止重试并记录步骤卡内容。"),
+}
+
+#: 解码结果族里原因码各异，「下一步」逐码写具体动作（族级一条盖不住：
+#: 采样率档位、样本长度、CRC 是三种完全不同的修法）。
+CODE_NEXT_STEPS: Dict[str, str] = {
+    "crc_failed": (
+        "「控制」页签降低符号速率/带宽并提高增益，改善天线后重录；"
+        "APRS 类至少录 5s，ADS-B 保持 1090MHz 与 fs=2/4MHz。"),
+    "insufficient_samples": (
+        "点顶栏「开始/停止录音」延长录制时长到至少一整帧再重试"
+        "（APRS ≥ 5s、FT4 75s 整帧）。"),
+    "invalid_input": (
+        "按步骤卡返回的错误信息修正参数，再到「控制」页签核对模式与符号速率后重试，"
+        "不要原样重复同一组参数。"),
+    "invalid_wav": (
+        "换用 16-bit PCM 单声道 WAV（或先修复容器）后重新解码，"
+        "结果在「状态」页签的「解码结果」卡里看。"),
+    "no_frame_recovered": (
+        "补足样本并提高信噪比（「控制」页签加增益、换更好的天线）后重试。"),
+    "nothing_detected": (
+        "「控制」页签核对频点与增益，确认真有信号后再重试；"
+        "没有信号时不要继续重试。"),
+    "preamble_not_found": (
+        "在「控制」页签核对频点与采样率（ADS-B 需 fs=2MHz 或 4MHz），"
+        "确认信号存在后再重试。"),
+    "sample_rate_mismatch": (
+        "在「控制」页签把采样率改成解码器要求的整数倍档位（如 ADS-B 用 "
+        "2.048 MS/s）后重新录制，不要让它静默取整。"),
+    "truncated_frame": (
+        "点「开始/停止录音」延长采集时长，保证覆盖完整的一帧后再重试。"),
 }
 
 #: 上述各族的扁平索引（测试与映射完整性检查用）
@@ -337,7 +370,8 @@ def build_remedies() -> List[Remedy]:
                 group=group,
                 symptom=spec.message,
                 cause=spec.meaning,
-                next_step=VISIBLE_NEXT_STEPS[group],
+                next_step=(CODE_NEXT_STEPS.get(code)
+                           or VISIBLE_NEXT_STEPS[group]),
             ))
     return out
 

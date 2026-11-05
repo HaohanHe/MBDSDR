@@ -357,7 +357,9 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 - 全文件内可核对的提交号共 2 个（`e95945bd`、`0e4b9ef6`），均为 `git show --stat` 实证过的真实提交；
   无其他凭印象引用。
 
-## 八、新增登记的 6 个存量野码（`mbdsdr_ai/core/mcp_server.py`）
+## 八、新增登记的存量野码（15 个）
+
+### 8.1 遗留 stdio MCP 壳（`mbdsdr_ai/core/mcp_server.py`，6 码，不可见）
 
 `tests/test_error_catalog_guard.py::test_no_wild_codes` 报 **8 处引用 / 6 个码**
 （`scan_not_found` 与 `decoder_not_found` 各 2 处，其余各 1 处）。
@@ -375,9 +377,32 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 | 119 | `decoder_not_found` | `stop_decoder` / `get_decoder_messages` 传入不存在或已过期的 handle（2 处引用） | 否 | 无 | `mbdsdr_ai/core/mcp_server.py:928-936`、`:938-944` | 同上 |
 | 120 | `vfo_not_found` | `set_primary_vfo` 传入不存在的 `vfo_id` | 否 | 无 | `mbdsdr_ai/core/mcp_server.py:1110-1117` | 同上 |
 
-- 可达性：6 个都在正常参数路径上可直接触发（错 handle / 错索引 / 非法文本 / 无音频设备），**非死分支**。
-- 计数不手写：目录总数以 `len(error_catalog.ERRORS)` 为唯一真相源（本轮 +6）。
-  同期 `1e813902`（decode 线）另入库 9 个解码原因码且尚未登记帮助条目，
-  故 `mapping_gaps()` 当前非空，缺的正是那 9 个，**不含本节 6 个**。
-- 本节 6 个均已登记目录并进 `NO_ENTRY_REASONS`「遗留 stdio MCP 壳」；新增条目 0。
+### 8.2「解码结果」族：`1e813902` 的 9 个原因码（可见-已补）
+
+这 9 个是 `decode_pipeline` 的 `reject_reason` 经 `decode_router.py:910-912`
+提升成 `error_code` 后，由状态面板解码卡渲染（`status_panel.py:247-249`
+取 `error_code`，`:267-268` 输出 `错误码 {code}: {error}`）——**P2 真可见**。
+补法：全部进 `troubleshooting.VISIBLE_BY_FAMILY["解码结果"]`，
+`DECODE_ERROR_LABELS` 补齐 5 个原先没有中文标签的码（`status_panel.py:198-202`），
+「下一步」逐码写具体动作（`troubleshooting.CODE_NEXT_STEPS`）。
+
+| # | code | 触发分支 | 可见路径 | 判定依据（文件:行） | 处置 |
+| --- | --- | --- | --- | --- | --- |
+| 121 | `crc_failed` | AX.25 帧 CRC-16 不过（弱信号/速率不匹配） | P2 | 抛出：`decode_pipeline.py:563`；提升：`decode_router.py:910-912`；渲染：`status_panel.py:247-249,267-268` | 已补（解码结果族 + 具体建议） |
+| 122 | `truncated_frame` | 帧尾不完整、采集提前结束 | P2 | 抛出：`decode_pipeline.py:567`；同上渲染 | 已补 |
+| 123 | `no_frame_recovered` | 有同步但恢复不出完整帧（丢帧占多数） | P2 | 抛出：`decode_pipeline.py:289-290,405,571` | 已补 |
+| 124 | `nothing_detected` | 鉴频后无任何同步候选（多半没信号/频点错） | P2 | 抛出：`decode_pipeline.py:520,525`（及 `:289-290`） | 已补 |
+| 125 | `preamble_not_found` | ADS-B/APRS 找不到前导模板 | P2 | 抛出：`decode_pipeline.py:369`、`adsb.py:683`、`decode_router.py:344-345` | 已补 |
+| 126 | `sample_rate_mismatch` | IQ 采样率低于下限或非整数倍（拒绝静默取整） | P2 | 抛出：`decode_router.py:840-844`、`decode_pipeline.py:210,626,805` | 已补（建议改整数倍档位） |
+| 127 | `insufficient_samples` | 样本不足「最短一帧」 | P2 | 抛出：`decode_router.py:845-860`、`decode_pipeline.py:265,344,493` | 已补 |
+| 128 | `invalid_wav` | WAV 容器/编码不可解析（非 PCM16 单声道） | P2 | 抛出：`decoders.py:877,1043`；经 `decode_router.py:910-912` 提升 | 已补 |
+| 129 | `invalid_input` | 输入/参数组合非法（FT4/WSPR 参数错误） | P2 | 抛出：`decoders.py:973,1091` | 已补 |
+
+- 这 9 个都**可达且可见**（不是「有码不需要建议」），故一个都没进 `NO_ENTRY_REASONS`；
+  `NO_ENTRY_REASONS` 本轮只新增了 8.1 那 6 个只走 MCP 协议壳的码。
+
+- 计数不手写：目录总数以 `len(error_catalog.ERRORS)` 为唯一真相源（本轮共 +15）。
+- `mapping_gaps() == []`、`mapping_overlaps() == []`；`tests/test_error_remedy_links.py` 转绿。
+- 8.1 的 6 个进 `NO_ENTRY_REASONS`「遗留 stdio MCP 壳」；8.2 的 9 个进「解码结果」族
+  （各自带具体建议），无一条用笼统理由糊过去。
 - 未修改 `mbdsdr_ai/core/mcp_server.py`（没有需要删除的不可达码，故不启用该例外）。
