@@ -544,125 +544,135 @@ SHA256，再**真跑一次** `python scripts/ui_narrow_breakdown.py --json`（�
 
 ## 9. 发布清单四件机检（2026-11-06 实测）
 
-> **产物快照口径**：本节实测对象是 `d:\mbdsdr\.tmp\pyi-dist12`
-> （目录时间 `2026-11-06 02:33:45`，Python 3.14.0 / PyInstaller 6.16.0）。
-> 该快照早于 02:36–03:11 的若干产品提交，且工作树里 `desktop/main.py`、
-> `desktop/main_window.py` 等有别线未提交改动——**结论只对这份产物成立，
-> 重建后必须重跑**。`TEMPORARY_WIDENED` 的收紧按约定等 UI 收口后单独重测，
-> 本轮不涉及（`release_check.py` 的窄屏/overlap 阈值未动）。
+> **产物快照口径**：修复前 `d:\mbdsdr\.tmp\pyi-dist12`（目录时间
+> `2026-11-06 02:33:45`）；修复后 `d:\mbdsdr\.tmp\pyi-dist13`（`2026-11-06 03:39:28`
+> 起构建，Python 3.14.0 / PyInstaller 6.16.0）。**结论只对这份产物成立，重建后必须
+> 重跑**。`TEMPORARY_WIDENED` 的收紧按约定等 UI 收口后单独重测，本轮不涉及
+> （`release_check.py` 的窄屏/overlap 阈值未动）。
 
 一次跑完四项（任一项 FAIL → 退出码 1；`--json` 输出纯 JSON）：
 
 ```
-python scripts/release_manifest.py --dist d:\mbdsdr\.tmp\pyi-dist12
+python scripts/release_manifest.py --dist d:\mbdsdr\.tmp\pyi-dist13
 ```
 
-本次总判：`FAIL=19 WARN=7 PASS=23 SKIP=6 -> FAIL`（退出码 1）。
-逐项命令与实测如下。
+总判前后：
 
-### 9.1 版本号一致性 — FAIL（3 处取值打架）
+| 快照 | FAIL | WARN | PASS | SKIP | 结论 |
+|---|---|---|---|---|---|
+| 修复前 `pyi-dist12` | 19 | 7 | 23 | 6 | FAIL（退出码 1） |
+| 修复后 `pyi-dist13` | **0** | **30** | **52** | 6 | WARN（退出码 0） |
 
-逐处实际值（本脚本 `--only version` 的输出）：
+WARN 从 7 涨到 30 是刻意的：29 个「产物有但没声明」的包原先挤在两条汇总里，
+现在逐包给出 Requires-Dist 归属或 xref import 链。没有 FAIL 不等于可以发布——
+每条 WARN 都带可复核证据。
 
-| 出现处 | 实际值 | 判定 |
+### 9.1 版本号一致性 — PASS（`mbdsdr_ai/VERSION` 单一真值源）
+
+canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全部派生：
+
+| 出现处 | 派生方式 | 判定 |
 |---|---|---|
-| `cpp/CMakeLists.txt`（`project(mbdsdr VERSION …)`） | `0.2.0` | canonical（打包单一事实源） |
-| `pyproject.toml`（`version = …`） | `0.2.0` | PASS |
-| `mbdsdr_ai/__init__.py`（`__version__`） | `0.8.0` | **FAIL ≠ 0.2.0** |
-| `mbdsdr_ai/core/__init__.py`（`__version__`） | `0.1.0` | **FAIL ≠ 0.2.0** |
-| `desktop/main.py`（`setApplicationVersion(...)`） | `0.1.0` | **FAIL ≠ 0.2.0** |
-| `desktop/MBDSDR.spec` | 未声明 `version`/`version_file` | WARN：EXE 无版本资源 |
-| 产物 `MBDSDR.exe` | `FileVersion`/`ProductVersion` 均为空 | WARN（与 spec 一致） |
-| `README.md` 首行 | 无版本号（`# MBDSDR · AI 定义无线电…`） | WARN |
-| `desktop/main_window.py:_show_about` | 未显示版本号 | WARN |
-| 安装器脚本 | 无安装器（见 §9.4） | SKIP |
+| `mbdsdr_ai/VERSION` | 唯一手抄（`0.2.0`） | canonical |
+| `cpp/CMakeLists.txt` | `file(READ .../mbdsdr_ai/VERSION)` → `project(... VERSION ${MBDSDR_VERSION})` | PASS |
+| `pyproject.toml` | `dynamic = ["version"]` + `version = {file = "mbdsdr_ai/VERSION"}` | PASS |
+| `mbdsdr_ai/version.py` | 读同目录 `VERSION`，导出 `__version__` | PASS |
+| `mbdsdr_ai/__init__.py`、`core/__init__.py` | `from (..).version import __version__` | PASS |
+| `desktop/main.py` | 导入共享版本 → `setApplicationVersion(_app_version)` | PASS |
+| `desktop/MBDSDR.spec` | 读 `VERSION` → `VSVersionInfo` | PASS |
+| 产物 `MBDSDR.exe` | `FileVersion = 0.2.0.0`、`ProductVersion = 0.2.0` | PASS |
+| `README.md` 首行 | `# MBDSDR ... v0.2.0` | PASS |
+| `desktop/main_window.py:_show_about` | `QApplication.applicationVersion()` | PASS |
 
-机检口径：以 `cpp/CMakeLists.txt` 为 canonical，其余出现处用正则**必须命中**
-（文件被删/正则失配会 FAIL，防止“取值点消失后静默变绿”）；命中值不同即 FAIL；
-“确实没有版本号”的缺口报 WARN。复跑：
+机检口径：每个派生点必须有「读取 VERSION / 引用共享常量」的**正则命中**，
+失配即 FAIL（防止删掉取值点后静默变绿）；同时扫描这些文件里的 `x.y.z` 字面量，
+发现即 FAIL（`desktop/main.py` 的 `192.168.4.1` 这类 IP 被正则排除）。README
+首行作为面向读者的版本声明，与 canonical 比对后放行。
+
+复跑：
 
 ```
-python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist12
+python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist13
 ```
 
-要转绿需先裁定：产品版本是 `0.2.0` 还是 `0.8.0`，然后把
-`mbdsdr_ai/__init__.py`、`mbdsdr_ai/core/__init__.py`、`desktop/main.py`
-三处对齐；spec 若要 EXE 文件属性带版本，需加 `version=` 资源并在关于对话框/文档首行
-同步展示。**本轮只报不修**：改版本号等于改产品对外口径，不能在发布清单里顺手做。
-
-### 9.2 依赖 pin 存在性 — FAIL（1 个声明包不在产物里）
+### 9.2 依赖 pin 存在性 — WARN（差集①清空，差集②逐包归因）
 
 声明面 = 根 `requirements.txt` + `desktop/requirements.txt` 实际依赖行（12 个发行包）
 + spec 点名模块/数据项。产物定位 = `_internal` 顶层 **+ exe 内嵌 `PYZ.pyz` 模块表**；
 纯 Python 包（requests、pyserial、sgp4…）本来就不在 `_internal` 目录里，
 这是 PyInstaller 6 onedir 的正常布局，只扫 `_internal` 会假报“全缺”。
 
-| 声明 | import 名 | 产物定位 | 判定 |
-|---|---|---|---|
-| numpy | numpy | `_internal/` + `PYZ.pyz` | PASS |
-| Pillow | PIL | `_internal/` + `PYZ.pyz` | PASS |
-| pymap3d | pymap3d | **无**（`_internal` 与 PYZ 都没有） | **FAIL** |
-| pyserial | serial | `PYZ.pyz` | PASS |
-| PySide6 | PySide6 | `_internal/` + `PYZ.pyz` | PASS |
-| requests | requests | `PYZ.pyz` | PASS |
-| scipy | scipy | `_internal/` + `PYZ.pyz` | PASS |
-| sgp4 | sgp4 | `PYZ.pyz` | PASS |
-| skyfield | skyfield | `PYZ.pyz` | PASS |
-| sounddevice | `_sounddevice` | `PYZ.pyz` | PASS |
-| websocket-client | websocket | `PYZ.pyz` | PASS |
-| websockets | websockets | `_internal/` + `PYZ.pyz` | PASS |
-| spec `collect_submodules('PySide6')` | — | 产物有 PySide6 | PASS |
-| spec `collect_submodules('mbdsdr_ai')` | — | 产物有 mbdsdr_ai | PASS |
-| spec `collect_submodules('scipy._external')` | — | 88 个模块 | PASS |
-| spec datas `mbdsdr_ai/astronomy.py` | — | `_internal/mbdsdr_ai/astronomy.py` | PASS |
+修复项：
 
-两个差集：
+- `pymap3d` 两条死声明已删（源码零 `import pymap3d`），**差集①为空**。
+- `pyrtlsdr==0.2.93` 显式声明：产物确实随包 `rtlsdr` 模块 +
+  `pyrtlsdr-0.2.93.dist-info`（GPL-3.0），不能再写成“用户自装”。
+- 测试框架闭包：spec 过滤 `mbdsdr_ai.tests` 并
+  `excludes=['pytest','_pytest','pluggy','iniconfig']`；产物三处
+  （顶层模块 / `PYZ.pyz` / `dist-info`）均无命中，机检**任一命中即 FAIL**。
 
-- **差集①「声明了但产物没有」**：`pymap3d`。
-  证据：`requirements.txt` 与 `desktop/requirements.txt` 都写了 `pymap3d>=2.9.0`，
-  但源码里没有任何 `import pymap3d`（该名字只出现在 `desktop/main.py` 的缺件提示
-  字符串与文档，不构成静态导入），PyInstaller 自然不会收。它同时是**死声明**：
-  要么删声明，要么先补真实调用再进 `hiddenimports`；两种都得改产品/依赖口径，本轮只报。
-- **差集②「产物里有但没声明」**（35 个）。按 `Requires-Dist` 闭包可归因为已声明包
-  传递依赖的 8 个：`certifi, cffi, charset-normalizer, idna, jplephem, pycparser,
-  shiboken6, urllib3`；不在声明面也不在闭包的 27 个：
-  `brotli, colorama, contourpy, cryptography, cycler, et-xmlfile, fonttools,
-  iniconfig, kiwisolver, lxml, matplotlib, openpyxl, packaging, pandas, pluggy,
-  psutil, pygments, pyparsing, pyrtlsdr, pytest, python-dateutil, setuptools, six,
-  typing-extensions, tzdata, xlsxwriter, zstandard`
-  （完整名单以脚本 `差集②` 行为准）。其中 `pytest`/`pygments`/`iniconfig`/`pluggy`
-  属测试框架泄漏，`pyrtlsdr` 属 GPL 合规问题（见 §9.3）。
+差集② 29 个，分两类（脚本逐包输出）：
+
+| 归因 | 包 |
+|---|---|
+| Requires-Dist 传递（8） | `certifi` ← requests, skyfield；`cffi` ← sounddevice；`charset-normalizer`、`idna`、`urllib3` ← requests；`jplephem` ← skyfield；`pycparser` ← cffi；`shiboken6` ← pyside6 |
+| xref import 链（21） | 见下 |
+
+四个重点包（按 PyInstaller xref 指名链，来自 `pyi-build13/MBDSDR/xref-MBDSDR.html`）：
+
+| 包 | import 链 |
+|---|---|
+| matplotlib | `mbdsdr_ai.orbit_determination → matplotlib`（`mbdsdr_ai.sdr_tools` 同） |
+| pandas | `mbdsdr_ai.orbit_determination → matplotlib.pyplot → pandas` |
+| lxml | `mbdsdr_ai.orbit_determination → matplotlib.pyplot → pandas → pandas.io.api → pandas.io.xml → lxml` |
+| openpyxl | `mbdsdr_ai.orbit_determination → matplotlib.pyplot → pandas → pandas.io.api → pandas.io.excel → pandas.io.excel._openpyxl → openpyxl` |
+
+其余 import 链（实测，均为 xref 直接边）：
+
+- `brotli` ← `requests → urllib3.response`；`cryptography` ← `requests`
+- `contourpy` ← `matplotlib.contour`；`cycler` ← `matplotlib.pyplot`
+- `et-xmlfile` ← `... → openpyxl.descriptors.serialisable → openpyxl.xml.functions`
+- `fonttools` ← `matplotlib.dviread → fontTools.agl`
+- `kiwisolver` ← `matplotlib._constrained_layout → matplotlib._layoutgrid`
+- `packaging` ← `rtlsdr → pkg_resources`
+- `psutil` ← `mbdsdr_ai.core.controller`；`zstandard` ← `mbdsdr_ai.baseband_io`
+- `pyparsing` ← `matplotlib._mathtext`
+- `python-dateutil` ← `scipy.cluster.hierarchy._hierarchy_impl → matplotlib.pylab → matplotlib.dates`
+- `six` ← 同上链 → `dateutil.relativedelta`
+- `setuptools` ← `pyi_rth_setuptools.py → _distutils_hack`
+- `typing-extensions` ← `PySide6.QtAsyncio.events`
+- `tzdata` ← `pandas.core.dtypes.dtypes → zoneinfo`
+- `xlsxwriter` ← `pandas.io.excel → pandas.io.excel._xlsxwriter`
+
+结论：29 个全部有归属，无一“来路不明”。它们仍是 WARN——要么补声明，要么把这些
+import 路径改成可选延迟导入后裁剪；这是依赖面决策，本轮只登记不删。
 
 复跑：
 
 ```
-python scripts/release_manifest.py --only deps --dist d:\mbdsdr\.tmp\pyi-dist12
+python scripts/release_manifest.py --only deps --dist d:\mbdsdr\.tmp\pyi-dist13
 ```
 
-### 9.3 许可证与合规文件 — FAIL（项目声明没进包 + GPL 陈述与产物相反）
+### 9.3 许可证与合规文件 — PASS（分发底线补齐）
 
-实测（`--only license`）：
-
+- **PASS**：产物 `_internal/` 现在带项目 `LICENSE`、`NOTICE.md`，以及
+  `third_party_licenses/{GPL-2.0,GPL-3.0,LGPL-3.0}.txt`（spec `datas` 落盘）。
+- **PASS（陈述改成事实）**：`NOTICE.md`/`LICENSING.md` 已登记
+  `pyrtlsdr 0.2.93`（GPL-3.0，产物内确有 `rtlsdr` 模块 +
+  `pyrtlsdr-0.2.93.dist-info`）、`librtlsdr`/`rtlsdr.dll`（GPL-2.0）、
+  `PySide6`/`shiboken6`（LGPL-3.0），并指向产物内许可证全文。
+- **PASS（机检断言）**：对产物内每个 copyleft 包，`NOTICE.md` 必须有登记、
+  产物内必须有对应许可证全文；`rtlsdr.dll`/`librtlsdr.dll` 若随包而 `NOTICE`
+  未登记、或没有 GPL-2.0 全文，直接 FAIL；“pyrtlsdr 不随包/用户自装”的旧话术
+  也会 FAIL。
 - **PASS**：仓库既有数据 GPL 扫描（`scripts/check_data_licenses.py --check`）
   `scanned data files: 392 | 合规检查通过`——沿用该结论，未另写一套数据许可规则。
-- **PASS**：仓库侧 `LICENSE`、`NOTICE.md`、`LICENSING.md` 三件都在位。
-- **FAIL**：产物缺项目自身 `LICENSE` 与 `NOTICE.md`。构建只打 `datas`，
-  没有把这两件收进包根/`_internal`。产物里现有 21 个许可证类文件全是第三方 wheel
-  自带（numpy/cryptography/websockets/setuptools 等），不能替代项目声明。
-- **FAIL（GPL 陈述与产物相反）**：`NOTICE.md`/`LICENSING.md` 写 `pyrtlsdr`
-  “用户自行安装、不随包分发”，但 `_internal` 里有 `pyrtlsdr-0.2.93.dist-info`，
-  `PYZ.pyz` 顶部模块表里有 `rtlsdr`（GPL-3.0），且 `_internal` 随包
-  `rtlsdr.dll`/`librtlsdr.dll`（上游 osmocom rtl-sdr，GPL-2.0）。
-  `librtlsdr` 在 `NOTICE.md` 里完全没有登记。
-- **FAIL**：`PySide6`/`shiboken6`（LGPL-3.0）在产物里，但找不到 Qt/PySide6 的
-  LGPL 许可证文本；`shiboken6` 也未在 `NOTICE.md` 登记。LGPL 要求随分发附许可证
-  文本与可重新链接说明。
 - **PASS**：产物里带 `attribution` 的 CC BY-SA 数据文件 3 个（署名随数据走）。
 
 复跑：
 
 ```
-python scripts/release_manifest.py --only license --dist d:\mbdsdr\.tmp\pyi-dist12
+python scripts/release_manifest.py --only license --dist d:\mbdsdr\.tmp\pyi-dist13
 ```
 
 ### 9.4 安装器冒烟 — SKIP（无安装器，本条不适用）
