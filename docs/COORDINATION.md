@@ -1197,6 +1197,28 @@ python scripts/git_sync_index.py --check                 # 只校验，不改 in
    `tests/test_commit_scope_manifest.py`：按旧提交 `read-tree` 建私有 index，再 add
    自己的文件 → 提交被拒、打印幻影删除；`read-tree HEAD` 重建后放行。
 
+#### 6.9.9 改测试销红（第九种形态，2026-11-06 03:20）
+
+**现象**：同一用例在 `HEAD` 稳定红、在工作区绿，唯一差异是**测试文件被未提交改写**
+（改断言、改期望值、加桩），产品代码没动。
+
+**判据（可机检）**：`python scripts/check_test_version.py <test>`
+把 HEAD 版本放进临时 `git worktree` 跑一遍，再跑工作区版本：
+
+- HEAD 红 + 工作区绿 → `WARN 被测版本不同，绿的结论无效`，退出码 1；
+- 两版同红 / 同绿 → 结论一致，退出码 0；
+- HEAD 绿 + 工作区红 → 工作区更严，只提示。
+
+反证见 `tests/test_check_test_version.py`：把工作区测试改绿 → 脚本报警；改回 HEAD → 该用例重新变红、
+脚本不再报警。
+
+**规矩**：
+
+1. 销红只能靠**产品修复**或**单独提交**的测试修正；测试修正的提交说明必须写清改断言的理由。
+2. 不允许「改产品 + 改断言」混在同一笔提交里，然后对外声称「已清」。
+3. 基线红转绿必须给出 HEAD 版本复跑证据（本脚本，或 `git show HEAD:<test>` 对照），
+   否则一律按「被测版本不同」驳回。
+
 ### 6.10 历史改写事件（主分支被 reset 改写；按批次登记，跨日后继续累计）
 
 **批次划分（时间限定一律换成批次号，避免跨日后统计口径自动失效）**
@@ -1374,8 +1396,8 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 `error-code-visibility.md`）各取最近 80 个提交，逐个取 `rev:path` 的 blob，
 判据 `blob[i] == blob[i+2] && blob[i+1] != blob[i]`（写回旧版）。
 
-**本段实际笔数**：本批 4 笔新事故（`09b53221`、`16f075f3`、`928bd78f`、文案线 3 条幻影删除未入库），
-另含 2026-11-05 的一笔 `f664638a`，表共 5 行。**同一笔事故只登记一行**；重复登记等于把笔数报错。
+**本段实际笔数**：本批 5 笔新事故（`09b53221`、`16f075f3`、`928bd78f`、文案线 3 条幻影删除未入库、
+`86fdbd0b`），另含 2026-11-05 的一笔 `f664638a`，表共 6 行。**同一笔事故只登记一行**；重复登记等于把笔数报错。
 
 | 提交 | 被卷/被抹文件数 | 文件 | 被抹掉的内容 | 是否已补回 | 定人 |
 |---|---|---|---|---|---|
@@ -1384,11 +1406,25 @@ reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59�
 | `16f075f3`（01:55:02） | 26 | 数据线 10 个文件 + **卷入**别线 26 个在途文件（`mbdsdr_ai/pose.py`、`tests/test_pose_fusion.py`、`web/product/**` 等） | 反向形态：PowerShell `$env:GIT_INDEX_FILE` 没落到 `git commit` 子进程，闸门读的是共享 index | **已撤回**（`a5d062e8` 01:59:03，26 文件逐条恢复成父提交内容） | 提交方=数据线 |
 | `928bd78f`（01:58:13） | 4 | 接入层 3 个文件 + **卷入**他线 4 个在途文件（`desktop/mode_registry.py`、`desktop/shortcuts.py`、`desktop/themes.py`、`mbdsdr_ai/device_capabilities.py`，即 4 个死函数） | 反向形态：私有 index 把别线未提交改动一起带入 | **已撤回**（`e3bd2cd8` 02:08:19，4 文件逐条删回） | 提交方=接入层线；被卷文件=他线在途 |
 | 未提交（`404c5b44` 入库后被文案线旧 index 误当删除） | 3 | 3 个**幻影删除**（机制线 `404c5b44` 刚入库文件） | 形态八：私有 index 基于旧 HEAD `read-tree`，旧 HEAD 之后入库的文件被当成删除计入暂存 | **未入库**（闸门拒绝；`read-tree HEAD` 重建后暂存 5→2，正常放行） | 文案线（私有 index 未重建） |
+| `86fdbd0b`（03:07:30） | 1 | `tests/test_ui_wiring_audit.py`（体验线 ux-basis 的测试侧修复：书签确认框加桩、扫描器认 `setMenu`、删 3 条过期白名单） | **「内容正确但提交说明不实」**：message 只写「settings/UI 接线/ANR 三类源码字面量断言改为行为断言」，未提夹带的他线改动 | **不回退**（双方复核内容无误；复跑 `11 passed`） | 提交方=脆断言清理线（claim 03:03:08 起，pid 30068）；被夹带=体验线 ux-basis 工作区改动 |
 
 **机检**：`python scripts/check_rollback_table.py`（可加 `--doc <文件>`）。断言：①提交号唯一；
 ②提交号在 `git cat-file` 里真实存在；③撤回提交存在；④「被卷/被抹文件数」等于撤回提交的文件数
 （`git show --name-only` 计数）；⑤被卷数不超过该提交改动总数。`未提交` 行仅核对笔数与计数列，不查提交。
+`不回退` 行（内容双方复核无误、只登记不撤回，如 `86fdbd0b`）只核对 ①②⑤，不要求修复提交存在；
+「为何不回退」必须写在「是否已补回」列里。
 反证见 `tests/test_rollback_table.py`：把某行提交号改一个字符 / 把计数改错 → 必红。
+
+**机检思路：「提交说明声称范围」vs「`--stat` 实际范围」（`86fdbd0b` 形态，脚本待落）**
+
+判据不是「有没有改别线文件」（可能是合法协作），而是**说明与实际不一致**：
+提交 message 声称的文件数/范围，与 `git show --stat --name-only` 实际文件集求差；
+差值里出现「提交时 claim 属于别线」的文件，即报警
+`SCOPE-MISMATCH <path> owner=<当时持有者>`。数据源：message 首行声称的类别/数量 +
+`claims.json` 的 claim 时窗（`acquired_at` ≤ 提交时间 ≤ TTL 到期）。
+它**只报警不改提交**——内容可能正确，错的是说明；是否回退由双方复核决定
+（`86fdbd0b` 判定不回退：体验线测试侧修复，双方复核无误，复跑 `11 passed`）。
+
 
 **结构性结论：reflog 找不到「陈旧 index 把旧 blob 写回」这一类**
 
@@ -1570,3 +1606,64 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 - 增量漂移登记：`docs/narrow-screen-plan.md:463`「宽度收口」那段是新写的
   无 hash 断言（UI 操作逻辑线，到期 2026-11-07），已收进 claim-waivers；
   补上 hash 与字面量后从白名单销账。
+
+#### 7.3.1 红项账本（诚实工程线 `0d7e433e` 草稿并入，2026-11-06）
+
+> 来源：`D:\mbdsdr\output\tmp\r7\red-ledger-draft.md`（03:05），按原格式并入，
+> **未改写其已有段落**；本说明只加在正文之前。
+> **并入时复核（2026-11-06）**：A 的 4 条与 A2 的 1 条**当前已转绿**
+> （`test_ui_wiring_audit.py` 实测 `11 passed`；`test_control_panel_nan_gain_keeps_previous`
+> 实测 `1 passed`），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽因构建阻塞
+> `main_window.cpp:5644` **未复核**（`not_verified`）；C 是断言闸门的报告口径，不是新欠账。
+
+## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
+
+| 用例 | 断言 | 真实成因 | 引入者 | owner | 下一步 |
+|---|---|---|---|---|---|
+| `TestBookmarkDeletePersisted::test_delete_writes_to_store` | 删后 `cp._bookmarks == []`、`store.removed == ["98.500MHz FM"]` | `desktop/control_panel.py:1046-1052` 删除前 `QMessageBox.question`，无头返回 No → 早退，`del` 不执行 | `34b792a8` 11-05 12:17 | 操作逻辑线 | 测试 monkeypatch question→Yes（或抽钩子） |
+| `TestBookmarkDeletePersisted::test_store_unavailable_does_not_raise` | store 抛错时内存仍清空 | 同上（与 store 异常无关，确认框早退） | `34b792a8` | 操作逻辑线 | 同上，一并修 |
+| `test_no_new_dead_interactive_widgets` | 无「建了但无 connect / 无人读值」控件 | `desktop/spectrum_widget.py:2298` `self._more_btn` 未 connect | `6ee726b7` 11-05 19:57 | 操作逻辑线（文件无 claim） | 接 `clicked`；或登记 ALLOWED_UNCONNECTED 并写理由 |
+| `test_allowlist_entries_still_unconnected` | 白名单不得含已接线项 | `desktop/device_panel.py:145`、`desktop/new_spacetime_panel.py:401` 等 3 条已接线 | `25740f82` / `e6ff34bd` | 操作逻辑线 | 删 3 行白名单（只删不增） |
+
+### A2. `tests/test_ui_stability_resources.py::TestNanIsEmptyNotFabricated::test_control_panel_nan_gain_keeps_previous` — 基线红（1 failed）
+
+| 用例 | 断言 | 真实成因 | 引入者 | owner | 下一步 |
+|---|---|---|---|---|---|
+| `test_control_panel_nan_gain_keeps_previous` | `set_gain(20.0)` 后 `gain_val.text() == "20dB"`，NaN 后仍 `"20dB"` | 产品文案早已是 `f"{db} dB"`（[control_panel.py:896](file:///d:/mbdsdr/MBDSDR/desktop/control_panel.py#L896)），测试仍钉 `"20dB"`；实测 `AssertionError: assert '20 dB' == '20dB'`。**文案改了没跟测试**，不是测试先写错 | 测试 `6cbd0fa2`（10-29 02:25，当时文案无空格）；文案 `b64fe10d`（11-05 20:07 `fix(copy): gain unit spacing`）未同步改测试 | 设置架构线（核对时发现，现持 `control_panel.py`） | **改断言，不改文案**：改为验不变式——`before = text(); set_gain(NAN); assert text() == before`，并另断言单位（`endswith("dB")`）或由 `format_gain(20)` 派生，不硬编码空格 |
+
+## B. C++：8 槽（`test_spectrum_display` 3 + `test_spectrum_autorange` 5）
+
+| 用例 | 断言 | 成因 | 引入者 | owner | 下一步 |
+|---|---|---|---|---|---|
+| display::reRenderHistoryOnPaletteSwitch | 灰阶 t=0.9 → 229 | HEAD `spectrum_display.cpp:692/704` 用 `tokens::kDbUpperDefault` 当显示上限硬夹，`tokens.h:336` 已是 **-20** → `setDbRange(-100,0)` 被夹成 -20，t=1.125 饱和 255 | `65163cf6` 11-05 16:05 | 采样率真值线 | 在途修（工作区已拆 `kDbViewUpperDefault=-20` + `kDbCeilingMax=0`，未提交） |
+| display::loadColormapFileRoundTrip | 同上 229 | 同上 | 同上 | 同上 | 同上 |
+| display::manualRangeChangeRecoloursWholeHistory | 改量程后历史必须变色 | 两量程同被夹到 -20，结果相同 → 像素不变（:1400） | 同上 | 同上 | 同上 |
+| autorange::defaultCeilingStaysAtFullScale | `currentDbCeil()==0` | auto 目标 `clamp(...,-40,kDbUpperDefault)` 落 -20 | 同上 | 同上 | 同上 |
+| autorange::strongSignalPullsCeilingDownSmoothly | 单帧 ≤1.5 dB | 目标钉边界后步长超限（:140） | 同上 | 同上 | 同上 |
+| autorange::ceilingRecoversWhenSignalFalls | 回 0 | 同上（:158） | 同上 | 同上 | 同上 |
+| autorange::freezeThenWeakFrameDoesNotMoveCeiling | `> -15` | 冻结值 -20（:212） | 同上 | 同上 | 同上 |
+| autorange::freezeHonestEmptyState | 冻结值一致 | 同上（:240） | 同上 | 同上 | 同上 |
+
+构建阻塞：`cmake --build` 报 `main_window.cpp:5644: 'kDbUpperDefault' is not a member of 'mbdsdr::tokens'`
+——他线 tokens.h 改名后未同步 main_window.cpp，8 槽未修完，不能算已清。
+
+## C. 断言闸门
+
+`waived-total 142 → 138`（6ac58654），rows=138。复跑：3 passed / 1 failed；
+余红 23 条新增/改写未证实断言（清单见 `D:\mbdsdr\output\tmp\r7\claims_final.md`）。
+
+---
+
+## 八、UI 多线对接（2026-11-06，ux-basis）
+
+| 交接项 | 收件线 | 文档 |
+|---|---|---|
+| P1 回放读盘移后台（`_replay_recording` 仍冻 GUI 4.9 s） | 操作逻辑线（`desktop/main_window.py` 持有中） | `docs/pending-patches/2026-11-06-handoff-p1-replay-main-window.md` |
+| P2-C `control_panel` 未连接增益标「—」 | 设置架构线（该文件工作树有在途改动） | `docs/pending-patches/2026-11-06-handoff-p2c-control-panel-gain.md` |
+| `test_ui_wiring_audit` 4 条基线红 + 1 条连带红 | 已修 4 条（ux-basis，测试侧）；#5 留给 P2-C | `docs/pending-patches/2026-11-06-baseline-red-owners.md` |
+
+其余待落库项（P2-A/B/D/E、P3）仍在
+`docs/pending-patches/2026-11-06-ux-basis-main-window.md`，每条附反证用例。
+**持有线请只取自己文件里的改动，不要整文件覆盖**。
+
+
