@@ -532,9 +532,9 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 | # | 议题 | 状态 |
 |---|---|---|
-| 1 | 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 6 dB 余量） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a），`gain_db` 写入需设置线接 1 行。 待他线落库后回填取证。 |
-| 2 | 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° | **已落地**（§10-2）。剩余：`rf_sky_view` 的 `PASS_MIN_ALT_DEG` 改引用常量（P-2b）。 待他线落库后回填取证。 |
-| 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 待他线落库后回填取证。 |
+| 1 | 静噪门限统一到「相对该模式噪声基线的余量」（刻度 `-100..-20`，默认 `-50` ≈ 6 dB 余量） | **已落地**（§10-1）。剩余：`main_window` 初值 `-80` 需 1 行 patch（P-8a），`gain_db` 写入需设置线接 1 行。 取证 `12a43a00` — `mbdsdr_ai/squelch.py:56` — `DEFAULT_SQUELCH_DBFS = -50.0` |
+| 2 | 过境仰角拆成 `VISIBLE=5°` / `PASS=10°`，`next_pass()` 用 10° | **已落地**（§10-2）。剩余：`rf_sky_view` 的 `PASS_MIN_ALT_DEG` 改引用常量（P-2b）。 取证 `12a43a00` — `mbdsdr_ai/sat_passes.py:111` — `PASS_MIN_ALT_DEG = 10.0` |
+| 3 | 默认采样率 2.4 MS/s（按设备能力回落） | **已落地**（§10-3）：内核默认 2.4M + `nearest_sample_rate()` 回落 + 状态回报实际值；三套 RTL 基线收口；`test` 100 passed。 取证 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
 | 3b | 调谐步进统一 10 kHz | **前提不成立，撤回**（§D-2）：C++ 调谐步进本就是 `kFreqCoarseStepHz=10 kHz`；100 kHz 是扫描步进。 |
 | 4 | 峰值 6 dB vs 15 dB | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧 / 5 bin / 10 帧`**；Python 6.0 保留，C++ 显示门新增 `kPeakRelDb=6.0`（校准参考门 15 保留不合并）。15 dB + 绝对底 = -85 dBFS，+8 dB 弱载波 -92 dBFS → 24 帧 0 峰，故不取 15。 |
 | 5 | "无数据"哨兵 | **结论：改用 NaN/None，禁止用落在量程内的 dB 数**；改 Python 侧 → P-8c。C++ `-100` 是真实安静读数，加注释区分。 |
