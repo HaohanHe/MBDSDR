@@ -22,6 +22,13 @@ _CTRL = open(os.path.join(_ROOT, "desktop", "control_panel.py"),
              encoding="utf-8").read()
 
 
+def _qt_app():
+    """离屏 GUI 断言用：只在行为用例里创建 QApplication。"""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication(sys.argv)
+
+
 def test_u03_sample_rate_is_msps_three_decimals():
     """U-03：采样率一律 MS/s、3 位小数，缺失显「—」。"""
     assert format_sample_rate(2_400_000) == "2.400 MS/s"
@@ -30,8 +37,15 @@ def test_u03_sample_rate_is_msps_three_decimals():
     assert format_sample_rate(None) == "—"
     assert format_sample_rate(float("nan")) == "—"
     assert sp._fmt_rate(2_400_000) == format_sample_rate(2_400_000)
-    assert "format_sample_rate(_rate)" in _CTRL
-    assert "format_sample_rate" in _MAIN
+    # 真实控件：下拉档位直接显示 format_sample_rate 的输出
+    _qt_app()
+    from control_panel import ControlPanel
+    panel = ControlPanel()
+    texts = [panel.sample_rate_combo.itemText(i)
+             for i in range(panel.sample_rate_combo.count())]
+    assert "2.400 MS/s" in texts
+    assert "2.048 MS/s" in texts
+    assert "format_sample_rate" in _MAIN  # 主窗口仍走共享格式化（构造 MainWindow 成本高）
 
 
 def test_n01_freq_precision_is_constant_within_unit():
@@ -51,10 +65,22 @@ def test_u02_rssi_is_dbfs_and_missing_is_dash_not_zero():
     assert mw._fmt_dbfs(None) == "—"
     assert mw._fmt_dbfs(float("nan")) == "—"
     assert mw._fmt_dbfs(12.34) == "12.3 dBFS"
-    assert 'status.get("rssi", 0)' not in _MAIN, "缺键不得默认成 0 造假读数"
-    # 桌面 MCP 路径是 SI4732 dBµV，不是 dBFS；缺值仍是「—」。
-    assert "rssi_value.setText(_fmt_rssi_mcp(rssi))" in _PANEL
-    assert '" dBm"' not in _PANEL and '" dBm"' not in _MAIN
+    # 真实面板：缺键显「—」而不是 0；MCP 路径写 dBµV；引擎路径写 dBFS；
+    # 屏上任何读数都不得出现 dBm。
+    _qt_app()
+    from PySide6.QtWidgets import QLabel
+    from status_panel import StatusPanel
+    panel = StatusPanel()
+    panel.on_status_updated({})
+    assert panel.rssi_value.text() == "—", "缺键不得默认成 0 造假读数"
+    panel.on_status_updated({"rssi": 42})
+    assert panel.rssi_value.text() == "42 dBµV"
+    panel.update_signal_level(-45.2)
+    assert panel.rssi_value.text() == "-45.2 dBFS"
+    labels = [w.text() for w in panel.findChildren(QLabel)]
+    assert all("dBm" not in t for t in labels), labels
+    for out in (mw._fmt_rssi_mcp(42), mw._fmt_dbfs(-45.2)):
+        assert "dBm" not in out
 
 
 def test_u02_mcp_rssi_is_dbuV_and_missing_has_no_digits():
@@ -226,8 +252,10 @@ def test_t01_help_separates_sky_tab_from_planetarium():
 
 
 def test_t04_filter_control_is_not_called_vfo_bandwidth():
-    assert 'self.vfo_bw_label = QLabel("VFO 带宽")' not in _CTRL
-    assert 'self.vfo_bw_label = QLabel("解调带宽")' in _CTRL
+    _qt_app()
+    from control_panel import ControlPanel
+    panel = ControlPanel()
+    assert panel.vfo_bw_label.text() == "解调带宽"
 
 
 def test_u06_mobile_help_squelch_and_vfo_terms_are_correct():
@@ -261,12 +289,18 @@ _BOOKMARK = open(os.path.join(_ROOT, "desktop", "bookmark_panel.py"),
 
 
 def test_u07_gain_unit_has_a_space_but_combo_stays_layout_locked():
-    # 带宽档位加空格会把 freq_readout 顶宽 13px（test_ui_layout_locks 4 档全红），
-    # 视觉冻结期间维持原字面量，等解除冻结再统一。
-    assert '"2.4kHz (SSB)"' in _CTRL
-    assert '"2.4 kHz (SSB)"' not in _CTRL
-    assert 'QLabel("0dB")' not in _CTRL
-    assert 'QLabel("0 dB")' in _CTRL
+    # 真实控件：带宽档位字面量与增益标签都必须按冻结版式显示。
+    _qt_app()
+    from control_panel import ControlPanel
+    panel = ControlPanel()
+    bw = [panel.vfo_bw_combo.itemText(i)
+          for i in range(panel.vfo_bw_combo.count())]
+    assert "2.4kHz (SSB)" in bw
+    assert not any("2.4 kHz (SSB)" in t for t in bw), bw
+    # 增益标签走真实信号处理路径：数字与单位之间必须有空格
+    panel._on_gain_changed(0)
+    assert panel.gain_val.text() == "0 dB"
+    # 移动端是跨语言文案，保留文本检查（本仓无 Dart 运行时）
     assert "G ${controller.gainDb.toStringAsFixed(1)}dB" not in _MOBILE_SPECTRUM
     assert "增益 ${controller.gainDb.toStringAsFixed(1)} dB" in _MOBILE_SPECTRUM
 
@@ -280,11 +314,19 @@ def test_e04_bookmark_failure_says_what_survives_and_what_to_do():
 
 def test_discoverability_ports_are_findable_from_settings_tab():
     """「设置」页签必须指向服务端口所在页；两处端口框必须有用途 tooltip。"""
-    assert "服务开关与端口见「服务设置」页签。" in _SETTINGS
-    assert "远程控制 7356" in _SETTINGS and "GQRX/hamlib" in _SETTINGS
-    assert "Web 8080" in _SETTINGS and "HTTP/WS" in _SETTINGS
-    assert "重启远程控制服务" in _SETTINGS
-    assert "重启 Web 服务" in _SETTINGS
+    _qt_app()
+    from PySide6.QtWidgets import QGroupBox, QLabel, QWidget
+    from settings_panel import ServiceSettingsPanel, SettingsPanel
+    panels = (SettingsPanel(), ServiceSettingsPanel())
+    blob = "\n".join(
+        [w.text() for p in panels for w in p.findChildren(QLabel)]
+        + [w.title() for p in panels for w in p.findChildren(QGroupBox)]
+        + [w.toolTip() for p in panels for w in p.findChildren(QWidget)])
+    for needle in ("服务开关与端口见「服务设置」页签。",
+                   "远程控制 7356", "GQRX/hamlib",
+                   "Web 8080", "HTTP/WS",
+                   "重启远程控制服务", "重启 Web 服务"):
+        assert needle in blob, needle
 
 
 # ---------------------------------------------------------------------------
@@ -341,11 +383,20 @@ def test_u03_cpp_spectrum_info_strip_labels_fs_as_ms_per_s():
 
 def test_u03_orchestration_and_advice_copy_use_ms_per_s():
     """U-03：编排任务标题与 SDR 采样率建议串不得写 MSPS；天气面板采样率行标单位。"""
-    assert "设置采样率 {sample_rate/1e6:.3f} MS/s" in _ORCH
-    assert "MSPS" not in _ORCH
-    assert '采样率 2.048 MS/s（ oversample ~16x）' in _SDR_TOOLS
-    assert '采样率 2.5 MS/s' in _SDR_TOOLS
-    assert "MSPS" not in _SDR_TOOLS
+    from mbdsdr_ai.orchestrator import Orchestrator
+    from mbdsdr_ai.sdr_tools import _meteor_demod_setup
+    orch = Orchestrator()
+    orch.create_sdr_pipeline(145_800_000, sample_rate=2_400_000)
+    descs = "\n".join(t.description for t in orch.tasks.values())
+    assert "设置采样率 2.400 MS/s" in descs
+    assert "MSPS" not in descs
+    out_rtl = _meteor_demod_setup(
+        {"satellite": "meteor_m2_hrpt", "sdr_type": "rtlsdr"})
+    out_pluto = _meteor_demod_setup(
+        {"satellite": "meteor_m2_hrpt", "sdr_type": "plutosdr"})
+    assert "采样率 2.048 MS/s（ oversample ~16x）" in out_rtl
+    assert "采样率 2.5 MS/s" in out_pluto
+    assert "MSPS" not in out_rtl + out_pluto
     assert '"采样率 (MS/s)"' in _WEATHER
 
 
@@ -400,18 +451,27 @@ def test_u03_decoder_rule_copy_uses_ms_per_s_not_mhz():
         src = open(os.path.join(_ROOT, "mbdsdr_ai", name), encoding="utf-8").read()
         for bad in ("fs ≥ 2MHz", "fs=2MHz", "fs=2/4MHz", "2MHz 或 4MHz"):
             assert bad not in src, f"{name}: 仍写 {bad}"
-    _ADSB = open(os.path.join(_ROOT, "mbdsdr_ai", "adsb.py"), encoding="utf-8").read()
-    _ROUTER = open(os.path.join(_ROOT, "mbdsdr_ai", "decode_router.py"),
-                   encoding="utf-8").read()
-    _PIPE = open(os.path.join(_ROOT, "mbdsdr_ai", "decode_pipeline.py"),
-                 encoding="utf-8").read()
-    # 只钉不变式（采样率必须以 MS/s 表达），不钉整句：规则正文会被 ADS-B 线
-    # 正常改写（如 8c95b227 换成「fs ≥ 2 MS/s；严格入口…」），钉整句就会误报。
-    assert "fs ≥ 2 MS/s" in _ADSB
-    assert "fs ≥ 2 MS/s" in _ROUTER
-    assert "fs ≥ 2 MS/s" in _PIPE
+    # 真实路径：用低采样率触发 ADS-B 校验/降采样失败，读返回的规则文案；
+    # 能力目录读运行时导出的 sample_rate_rule / min_sample_condition。
+    import pytest
+
+    from mbdsdr_ai.adsb import _validate_tx_fs
+    with pytest.raises(ValueError) as exc:
+        _validate_tx_fs(2.4e6)
+    assert "fs ≥ 2 MS/s" in str(exc.value)
+
+    from mbdsdr_ai.decode_router import capability_matrix
+    adsb = next(r for r in capability_matrix() if r["mode"] == "adsb")
+    assert "fs ≥ 2 MS/s" in adsb["sample_rate_rule"]
     # 频率仍用 MHz（1090MHz 是频点，不是采样率）
-    assert "1090MHz" in _ROUTER
+    assert "1090MHz" in adsb["min_sample_condition"]
+
+    import numpy as np
+
+    from mbdsdr_ai.decode_pipeline import _Trace, _downconvert
+    _, fail = _downconvert(_Trace(), np.zeros(1024, dtype=np.complex64),
+                           1e6, 8e6, 0, "adsb")
+    assert fail and "fs ≥ 2 MS/s" in fail["detail"]
 
 
 def test_u03_troubleshooting_next_steps_use_ms_per_s_for_adsb_fs():

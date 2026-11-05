@@ -4,11 +4,11 @@
 
 口径与 `scripts/audit_source_text_pins.py` 一致（作用域感知，不做跨函数
 变量名传染）。基线 `docs/source-pin-ratchet-baseline.json` 建表于
-2026-11-06，共 174 条：
+2026-11-06，已按批次收缩到 137 条（原 174，选中卡 10 + 本批 27）：
 
 * 每条必须带 `owner` + `reason`（新增/保留条目必须写明归属与理由）；
 * 当前扫描命中集 `-` 基线非空 → 红（新增源码 pin 必须先改成行为断言）；
-* 基线条目数只许减，不允许超过建表时 `BUILT_AT`；
+* 基线条目数必须与 `BUILT_AT` 相等：删条目后不同步下调上限 → 红；
 * 删除基线条目（pin 已被改成行为断言）是允许的，删后仍绿。
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import audit_source_text_pins as scanner  # noqa: E402
 
 BASELINE = ROOT / "docs" / "source-pin-ratchet-baseline.json"
-BUILT_AT = 164
+BUILT_AT = 137
 KEY_FIELDS = ("path", "func", "pinned")
 
 
@@ -60,11 +60,12 @@ def test_baseline_is_well_formed():
         assert entry["path"].startswith("tests/"), entry["path"]
 
 
-def test_baseline_never_grows():
+def test_baseline_count_matches_ceiling():
     entries = _entries()
-    assert len(entries) <= BUILT_AT, (
-        f"基线只许减：现有 {len(entries)} 条，建表时 {BUILT_AT} 条。"
-        " 新增源码 pin 应改成行为断言；确需保留必须由 owner 写明理由并评审。")
+    assert len(entries) == BUILT_AT, (
+        f"基线条数与 BUILT_AT 不一致：entries={len(entries)}，BUILT_AT={BUILT_AT}。"
+        " 删条目（pin 已改行为断言）后必须同步下调 BUILT_AT（只减不增）；"
+        " 只删条目不改 BUILT_AT 会让闸门失去上限，必须红。")
 
 
 def test_no_new_source_text_pins():
