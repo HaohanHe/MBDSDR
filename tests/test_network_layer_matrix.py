@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import random
 import socket
 import struct
 import subprocess
@@ -738,6 +739,234 @@ class TestTimeoutRetryBudget:
             assert snap["last_error"]
         finally:
             mgr.stop()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 4. 弱网矩阵：四类劣化 × 两种心跳阈值，数「误判次数」与「最大空档」
+# ═══════════════════════════════════════════════════════════════════════
+
+def _impaired_stream(conn, stop, *, loss: float = 0.0,
+                     delay_s: float = 0.0, jitter_s: float = 0.0,
+                     reorder: float = 0.0, reorder_hold_s: float = 0.05,
+                     stall_s: float = 0.0, period_s: float = 0.0,
+                     seed: int = 1, chunk: int = 1024,
+                     interval: float = 0.005) -> None:
+    """在本机假服务上制造四类弱网，只改「数据到达时间」，不改数据内容。
+
+    - ``loss``：按概率整块丢弃。TCP 层等价于一次丢包重传，客户端只看到
+      该块晚到，字节序与总量最终仍是完整的。
+    - ``delay_s + jitter_s``：固定管道延迟（首个字节晚到，之后每 ``interval``
+      匀速到达）。``jitter_s`` 取 [0.05, jitter_s] 的一次性偏移，避免实测点
+      正好压在阈值边界上（3s 档实测落在 3.05~3.30s，必然 >3s 且远小于 5s）。
+    - ``reorder``：按比例触发一次「等重传」停顿 ``reorder_hold_s``。TCP 保证
+      字节序，客户端**观测不到**真正的乱序；乱序在客户端可观测的后果就是
+      缺片等待重传造成的短停顿，这里按这个后果等价模拟。同一 0.5s 内最多
+      触发一次，避免把吞吐压成黑洞（那是带宽档的事）。
+    - ``stall_s / period_s``：周期性完全停发（拥塞窗口塌陷 / 重传退避的极端
+      形态），停发期不补发，客户端在该窗口内收不到任何字节。
+    """
+    conn.sendall(_RTL_HEADER)
+    rng = random.Random(seed)
+    t0 = time.perf_counter()
+    offset = delay_s + (rng.uniform(0.05, jitter_s) if jitter_s > 0 else 0.0)
+    next_due = t0 + offset
+    last_reorder = 0.0
+    nonce = 0
+    while not stop.is_set():
+        now = time.perf_counter()
+        if period_s > 0.0 and (now - t0) % period_s < stall_s:
+            time.sleep(0.02)
+            next_due = max(next_due, time.perf_counter() + interval)
+            continue
+        if now < next_due:
+            time.sleep(max(0.001, min(next_due - now, 0.005)))
+            continue
+        next_due = now + interval
+        payload = _iq_bytes(chunk, seed=seed + nonce)
+        nonce += 1
+        if loss > 0.0 and rng.random() < loss:
+            continue
+        if (reorder > 0.0 and rng.random() < reorder
+                and now - last_reorder >= 0.5):
+            last_reorder = now
+            time.sleep(reorder_hold_s)      # 等重传：整条流一起停
+            continue
+        conn.sendall(payload)
+
+
+def _run_weak_cell(idle: float, duration: float, seed: int,
+                   **impair) -> dict:
+    """跑一档弱网：统计 stale / disconnected 转换次数、最大空档与真实耗时。"""
+    stats = {"stale": 0, "disconnected": 0, "reads": 0, "samples": 0,
+             "max_gap_s": 0.0, "elapsed": 0.0, "rate_ratio": None}
+
+    def handler(conn, idx, srv_stop):
+        _impaired_stream(conn, srv_stop, seed=seed, **impair)
+
+    with _tcp_server_loop(handler, accept_count=1) as (port, stop, _t):
+        c = RtlTcpClient("127.0.0.1", port, idle_timeout=idle)
+        try:
+            assert c.connect() is True
+            c.set_sample_rate(1_000_000)   # 只设期望速率，供 rate_ratio 观测
+            prev = c.state
+            t0 = time.perf_counter()
+            last_ok = t0
+            while time.perf_counter() - t0 < duration:
+                frame = c.read_samples(2048)
+                now = time.perf_counter()
+                if frame is not None:
+                    # 相邻两次读成功的间隔是「无字节」的上界：静默期内不可能
+                    # 读出整帧。首帧把「连接建立起就一直没有数据」也算进去，
+                    # 否则 3s 延迟档的初始空档会被首个成功读隐藏掉。
+                    stats["max_gap_s"] = max(stats["max_gap_s"],
+                                             now - (last_ok if stats["reads"]
+                                                    else t0))
+                    stats["reads"] += 1
+                    stats["samples"] += len(frame)
+                    last_ok = now
+                state = c.state
+                if state != prev:
+                    if state == link_state.STATE_STALE:
+                        stats["stale"] += 1
+                    elif state == link_state.STATE_DISCONNECTED:
+                        stats["disconnected"] += 1
+                    prev = state
+                if state == link_state.STATE_DISCONNECTED:
+                    break
+            stats["elapsed"] = time.perf_counter() - t0
+            stats["rate_ratio"] = c.data_health().get("rate_ratio")
+        finally:
+            c.close()
+            stop.set()
+    return stats
+
+
+#: (名称, 劣化参数, idle=3s 时预期的 stale 次数)。idle=5s 一列全部预期 0。
+_WEAK_CASES = [
+    ("loss-1%", dict(loss=0.01), 0),
+    ("loss-5%", dict(loss=0.05), 0),
+    ("loss-10%", dict(loss=0.10), 0),
+    ("delay-200ms", dict(delay_s=0.2, jitter_s=0.3), 0),
+    ("delay-1s", dict(delay_s=1.0, jitter_s=0.3), 0),
+    # 3s 延迟在 3s 阈值下必然触发一次 stale；5s 阈值下 3.05~3.30s 仍有余量
+    ("delay-3s", dict(delay_s=3.0, jitter_s=0.3), 1),
+    ("reorder-5%", dict(reorder=0.05), 0),
+    ("reorder-10%", dict(reorder=0.10), 0),
+    ("reorder-20%", dict(reorder=0.20), 0),
+    # 拥塞窗口塌陷：周期 4×stall（停发占空比 25%），客户端在 stall 窗口内
+    # 收不到任何字节。周期必须 > 窗口，否则窗口末尾的读会跨进下一轮停发，
+    # 把「窗口外的新事件」误记成「窗口内的误判」。
+    ("bwjit-200ms", dict(stall_s=0.2, period_s=0.8), 0),
+    ("bwjit-1s", dict(stall_s=1.0, period_s=4.0), 0),
+    ("bwjit-3.2s", dict(stall_s=3.2, period_s=12.8), 1),
+    # 匀速涓流（标称 1 MS/s 的 0.13%）：字节一直在流，心跳不该响
+    ("bwjit-trickle", dict(chunk=256, interval=0.2), 0),
+]
+
+_WEAK_CASE_IDS = [c[0] for c in _WEAK_CASES]
+
+
+class TestWeakNetworkMatrix:
+    """四类弱网 × 两种阈值：窗口取 2×idle + 0.8s。
+
+    窗口必须覆盖「连续 2 次心跳超时」的时间尺度，否则 5s 一列根本不可能
+    触发升级，测出来的 0 次是结构性的、没有意义。3s 一列同样覆盖 6s。
+    """
+
+    @pytest.mark.parametrize("idle", [5.0, 3.0])
+    @pytest.mark.parametrize("name,impair,expect_stale_3s", _WEAK_CASES,
+                             ids=_WEAK_CASE_IDS)
+    def test_weak_cell_stale_and_gap(self, idle, name, impair,
+                                     expect_stale_3s):
+        duration = 2 * idle + 0.8
+        stats = _run_weak_cell(idle, duration, seed=7, **impair)
+        expected = 0 if idle == 5.0 else expect_stale_3s
+
+        assert stats["samples"] > 0, "档位把数据流彻底掐死了，不是弱网"
+        assert stats["disconnected"] == 0, (
+            f"{name} idle={idle}s 不该触发硬断开（"
+            f"max_gap={stats['max_gap_s']:.3f}s）")
+        assert stats["stale"] == expected, (
+            f"{name} idle={idle}s 误判 {stats['stale']} 次（预期 {expected}）")
+        # 硬断开要求连续 2×idle 无字节；实测最大空档必须低于这条线
+        assert stats["max_gap_s"] < 2 * idle, (
+            f"{name} idle={idle}s 最大空档 {stats['max_gap_s']:.3f}s ≥ "
+            f"{2 * idle:.1f}s")
+        assert stats["elapsed"] >= duration - 0.05, (
+            f"{name} idle={idle}s 只跑了 {stats['elapsed']:.2f}s，"
+            f"窗口未覆盖 {duration:.1f}s")
+        rate = stats["rate_ratio"]
+        print(f"[weak] case={name:<14} idle={idle:.0f}s "
+              f"stale={stats['stale']} disc={stats['disconnected']} "
+              f"max_gap={stats['max_gap_s']:.3f}s "
+              f"elapsed={stats['elapsed']:.2f}s reads={stats['reads']} "
+              f"rate_ratio={rate if rate is None else round(rate, 4)}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 5. 真实阈值下的半开硬判：5s/10s 与 3s/6s，两种客户端
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestRealThresholdLatency:
+    """不缩短超时：直接用产品候选阈值 5.0s 与 3.0s 跑半开连接。
+
+    假服务先真实吐数据，然后保留 TCP、停止转发；客户端必须
+    在 ``idle`` 内转 stale、在 ``2×idle`` 内硬判 disconnected。
+    """
+
+    @pytest.mark.parametrize("kind", ["rtl", "spy"])
+    @pytest.mark.parametrize("idle", [5.0, 3.0])
+    def test_half_open_hard_disconnect_within_two_heartbeats(self, kind, idle):
+        alive = threading.Event()
+        alive.set()
+        header = _RTL_HEADER if kind == "rtl" else _SPY_HANDSHAKE
+
+        def handler(conn, idx, stop):
+            conn.sendall(header)
+            while not stop.is_set():
+                if not alive.is_set():
+                    time.sleep(0.02)   # 保持 TCP，不转发任何 IQ
+                    continue
+                conn.sendall(_iq_bytes(2048, seed=71))
+                time.sleep(0.05)       # 40.9 kS/s：不撑满 1M 样点的环
+
+        with _tcp_server_loop(handler, accept_count=1) as (port, stop, _t):
+            if kind == "rtl":
+                be = _make_rtl_backend(port, idle=idle)
+            else:
+                be = SpyServerBackend("127.0.0.1", port, idle_timeout=idle)
+            try:
+                assert be.connect() is True
+                assert _read_frame_until(be, 1024, 4.0) is not None
+                alive.clear()
+                t0 = time.perf_counter()
+                t_stale = _measure(
+                    lambda: be.status.link_state == link_state.STATE_STALE,
+                    idle + 2.0)
+                assert t_stale is not None, (
+                    f"{kind} idle={idle}s：半开连接没有任何心跳兜底")
+                t_hard = _measure(
+                    lambda: be.status.connected is False, idle + 2.0)
+                assert t_hard is not None, (
+                    f"{kind} idle={idle}s：stale 之后没有硬判，永远停在半开")
+                total = t_stale + t_hard
+                assert total <= 2 * idle + 0.9, (
+                    f"{kind} idle={idle}s 硬判过慢：{total:.2f}s "
+                    f"（应 ≤ {2 * idle + 0.9:.1f}s）")
+                assert total >= 2 * idle - 0.5, (
+                    f"{kind} idle={idle}s 硬判过早：{total:.2f}s "
+                    f"（应 ≥ {2 * idle - 0.5:.1f}s，次数不足就是放宽了断言）")
+                assert be.status.link_state == link_state.STATE_DISCONNECTED
+                assert be.status.connected is False
+                assert be.status.error, "硬判必须给可读原因"
+                assert be.status.error_category == link_state.CATEGORY_IDLE
+                assert be.data_health()["connected"] is False
+                print(f"[weak] half-open kind={kind} idle={idle:.0f}s "
+                      f"stale={t_stale:.3f}s hard={total:.3f}s "
+                      f"category={be.status.error_category}")
+            finally:
+                be.disconnect()
+                stop.set()
 
 
 __all__ = []
