@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
 
-SIZES = [(800, 600), (1000, 600), (1280, 720), (1600, 900), (1920, 1080)]
+SIZES = [(1000, 600), (1280, 720), (1600, 900), (1920, 1080)]
 BASELINE_DIR = os.path.join(_ROOT, "tests", "baselines")
 
 
@@ -253,6 +253,55 @@ def test_window_size_is_run_order_independent(main_window):
     assert f"{main_window.width()}x{main_window.height()}" == expected, (
         f"{requested}: 当前窗口 {main_window.width()}x{main_window.height()} "
         f"已偏离声明尺寸 {expected}")
+
+
+def test_request_800_is_clamped_to_declared_1000():
+    """请求 800x600 会被产品声明的最小尺寸夹成 1000x600，且不产出基线。
+
+    历史：``SIZES`` 里的 ``(800, 600)`` 参数实际跑出来是 1000x600（产品
+    ``setMinimumSize(1000, 600)``），与 ``[1000x600]`` 共用同一张基线，
+    用例名却在说 800。现从 ``SIZES`` 移除，只保留这条真正验夹取行为的
+    断言：名字说实话、不占基线、不重复跑同一窗口。
+    """
+    import tempfile
+    from themes import DEFAULT_THEME
+    from main_window import MainWindow
+
+    tmp_dir = tempfile.mkdtemp(prefix="mbdsdr_ui_clamp_")
+    restore = _isolate_environment(tmp_dir)
+    win = None
+    try:
+        win = MainWindow()
+        for t in getattr(win, "_startup_timers", []):
+            try:
+                t.stop()
+            except Exception:
+                pass
+        _clear_user_bookmarks(win)
+        if getattr(win, "_current_theme", None) != DEFAULT_THEME:
+            win._apply_theme(DEFAULT_THEME)
+            _pump(80)
+        win.resize(800, 600)
+        win.show()
+        _pump(200)
+        app.setStyleSheet(app.styleSheet())
+        _pump(150)
+        win.layout().activate()
+        assert win.minimumWidth() == 1000, (
+            f"产品声明的最小宽度变成 {win.minimumWidth()}；本用例的前提是 1000")
+        assert (win.width(), win.height()) == (1000, 600), (
+            f"请求 800x600 实际得到 {win.width()}x{win.height()}，"
+            f"应被声明最小尺寸夹成 1000x600")
+    finally:
+        if win is not None:
+            try:
+                win._disconnect()
+            except Exception:
+                pass
+            win.close()
+            win.deleteLater()
+            app.sendPostedEvents(None, QEvent.DeferredDelete)
+        restore()
 
 
 def _select_left(win, key: str) -> None:

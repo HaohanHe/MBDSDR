@@ -482,3 +482,9 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | --- | --- | --- | --- | --- |
 | L47 | **`get_planet_position` 把行星日心距与地心距都填成 `pos.distance_au`**，日-行星-地球三角形退化为 `cos χ = R/(2Δ)`：内行星下合余弦被夹到 1（金星下合报告 1.000，物理应 0.006），外行星恒报 0.53–0.87 的假「半亮」（木星方照 0.549，实应 0.991） | 天空线：DE421 逐日扫描地心距角极值定位的真实时刻（2026-10-25 金星下合、2027-05-26 火星方照等）；外行星「合日」被误当新月处理（物理上仍接近满相，最小照度在方照） | **已修**：三边分别取日心距 / 地心距 / 日地距，唯一换算入口 `planet_illum_from_geometry`（`illum = 0.5*(1+cos χ)`），三后端共用；退化三角形直接报错，不静默兜底。天空视图经 `astronomy/planets.py`（Meeus，本就用真实日心距）未受此缺陷影响；该模块现也不再自写余弦定理，改为调用同一入口（交叉校验 9 时刻最大照度差 2.43×10⁻⁵） | `pytest tests/test_planet_illumination_real_ephemeris.py`：金星下合 ≤0.02、上合 ≥0.99 且严格 <1，水星上下合两极端，火星冲日 ≥0.99 / 方照 <0.95，木星土星方照 ≥0.98 且与 1 的差 ≥0.002（证明不是夹值），三后端同刻差 ≤0.01（astropy 未安装按环境 skip） |
 
+## 附 L：频谱面板几何漂移（既有，冻结期不修；2026-11-05，可发现性线追加）
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L48 | **频谱面板比基线矮 12px：320×228 vs 320×240，宽高比 1.4035 vs 1.3333** | 可发现性线：`pytest tests/test_ui_layout_locks.py -k "1000x600 or 1600x900"` 与整文件顺序跑均复现；断言原文 `AssertionError: spectrum 几何漂移: 当前 320x228 基线 320x240（Δw=+0 Δh=-12，像素容差 ±2px；宽高比 1.4035 vs 1.3333 Δ=+0.0702，比例容差 ±0.0194）`；同尺寸的 `adsb_empty` / `freq_readout` 均通过 | **未修**：既有布局问题，2026-11-05 UI 冻结期（等 index.html / Figma 基准对照）不修，基准图不动 | `pytest tests/test_ui_layout_locks.py -k spectrum`；修好后应回到 320×240，不得靠改 `tests/baselines/` 掩盖 |
+
