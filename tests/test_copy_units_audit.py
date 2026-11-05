@@ -210,3 +210,12 @@ def test_e04_bookmark_failure_says_what_survives_and_what_to_do():
     assert "书签加载失败：" in _BOOKMARK
     assert "已有书签未被改动" in _BOOKMARK
     assert "检查该目录是否可读写" in _BOOKMARK
+
+
+def test_discoverability_ports_are_findable_from_settings_tab():
+    """「设置」页签必须指向服务端口所在页；两处端口框必须有用途 tooltip。"""
+    assert "服务开关与端口见「服务设置」页签。" in _SETTINGS
+    assert "远程控制 7356" in _SETTINGS and "GQRX/hamlib" in _SETTINGS
+    assert "Web 8080" in _SETTINGS and "HTTP/WS" in _SETTINGS
+    assert "重启远程控制服务" in _SETTINGS
+    assert "重启 Web 服务" in _SETTINGS

@@ -172,6 +172,13 @@ class ServiceSettingsPanel(QWidget):
         root.setContentsMargins(8, 6, 8, 6)
         root.setSpacing(6)
 
+        ports_hint = QLabel(
+            "端口用途：远程控制 7356 供 GQRX/hamlib 等客户端；"
+            "Web 8080 供浏览器 HTTP/WS。默认关闭，勾选「启用」后才监听。")
+        ports_hint.setWordWrap(True)
+        ports_hint.setObjectName("hintLabel")
+        root.addWidget(ports_hint)
+
         # ---- 远程控制 TCP ----
         rc_box = QGroupBox("远程控制 (TCP, GQRX/hamlib 风格)")
         rc_form = QFormLayout(rc_box)
@@ -182,6 +189,9 @@ class ServiceSettingsPanel(QWidget):
                               int(SCHEMA["rc_port"].maximum))
         self.rc_port.setValue(int(DEFAULT_RC_PORT))
         self.rc_port.setEnabled(False)
+        self.rc_port.setToolTip(
+            "远程控制监听端口：GQRX/hamlib 等客户端连这里。"
+            "修改后需重启远程控制服务才生效。")
         self.rc_port.valueChanged.connect(self._on_rc_port_changed)
         self.rc_status = QLabel("状态：未监听")
         self.rc_addr = QLabel("127.0.0.1")
@@ -201,6 +211,9 @@ class ServiceSettingsPanel(QWidget):
                                int(SCHEMA["web_port"].maximum))
         self.web_port.setValue(DEFAULT_WEB_PORT)
         self.web_port.setEnabled(False)
+        self.web_port.setToolTip(
+            "Web 服务 HTTP/WS 端口：浏览器从这里访问。"
+            "修改后需重启 Web 服务才生效。")
         self.web_port.valueChanged.connect(self._on_web_port_changed)
         self.web_status = QLabel("状态：未启动")
         self.web_url = QLabel("URL：--")
@@ -563,6 +576,10 @@ class SettingsPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 4, 6, 4)
         root.setSpacing(4)
+        nav_hint = QLabel("服务开关与端口见「服务设置」页签。")
+        nav_hint.setWordWrap(True)
+        nav_hint.setObjectName("hintLabel")
+        root.addWidget(nav_hint)
         self.tabs = QTabWidget()
         for group in GROUP_ORDER:
             # 服务开关保留在独立的「服务设置」页签（避免两个 ServiceSettingsPanel
