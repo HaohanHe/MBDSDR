@@ -519,7 +519,7 @@ def _route_acars(ctx: _Ctx) -> Dict[str, Any]:
             result["num_messages"] = len(msgs)
             result["crc_ok_count"] = sum(1 for m in msgs if m.crc_ok)
             result["note"] = (
-                f"内置 MSK 解调+帧同步+解析（2400 baud），解出 {len(msgs)} 条 ACARS 消息"
+                f"内置 MSK 解调+帧同步+解析（1200 baud），解出 {len(msgs)} 条 ACARS 消息"
                 f"（CRC 通过 {sum(1 for m in msgs if m.crc_ok)} 条）。"
             )
         except Exception as e:
