@@ -5,6 +5,7 @@
 用法::
 
     python scripts/hw_acceptance/acceptance_suite.py
+    python scripts/hw_acceptance/acceptance_suite.py --hw      # 只跑 R1–R4，SKIP 计数可见
     python scripts/hw_acceptance/acceptance_suite.py --out D:\\mbdsdr\\tmp\\hw_suite
 
 行为：逐环执行 → 逐环 PASS/FAIL/SKIP → **失败即停**（后续环标 SKIP「未执行」）
@@ -20,7 +21,8 @@
     R4 解调与音频输出    音频帧数、RMS、声道、19 kHz 导频、WAV 字节（不出声）
     R5 云台回读          rotctld/板载回读延迟（ms）、方位/仰角、读回一致性
     R6 GNSS 定位         首次定位耗时（s）、经纬度、星数、HDOP
-    R7 星象仪渲染        太阳位置误差、渲染耗时（ms）、PNG 字节、非空白像素
+    R7 星象仪渲染        太阳误差、月球 vs JPL DE421（含 1h 错位反证）、
+                         渲染耗时（ms）、PNG 字节、非空白像素
 
 硬红线：没有真实设备/后端 → ``SKIP(no_device/no_gimbal/no_gnss)`` 并写原因，
 **不允许**用模拟/合成/``debug`` 调试源数据判 PASS；拿不到的数字不补。
@@ -44,6 +46,16 @@ import common  # noqa: E402  （同目录公共层，负责路径/设备探测/�
 
 FS = 2.4e6
 SKIP = "SKIP"
+
+
+def _skip_code(res: dict) -> str:
+    """从 notes 的 ``SKIP(no_device)：…`` 前缀提取原因码。"""
+    if res.get("status") != SKIP:
+        return ""
+    head = (res.get("notes") or "").split("：")[0]
+    if head.startswith("SKIP(") and head.endswith(")"):
+        return head[5:-1]
+    return head or "unknown"
 
 
 def skip_result(ring: str, name: str, reason: str, metrics: dict | None = None,
@@ -507,7 +519,12 @@ RINGS = [
 def main() -> int:
     ap = argparse.ArgumentParser(description="真机七环验收（单命令，失败即停）")
     ap.add_argument("--out", default="", help="证据根目录（必须 D 盘）")
+    ap.add_argument("--hw", action="store_true",
+                    help="只跑硬件四环 R1–R4：有设备逐环实测数字，"
+                         "无设备 SKIP 并给原因码（SKIP 仍计数可见）")
     args = ap.parse_args()
+    rings = [(r, n, f) for r, n, f in RINGS if not args.hw or r in
+             ("R1", "R2", "R3", "R4")]
     root = args.out or os.path.join(
         common.ARTIFACT_ROOT,
         "suite_" + datetime.now().strftime("%Y%m%d_%H%M%S"))
@@ -521,13 +538,14 @@ def main() -> int:
 
     print("=" * 72)
     print("真机七环验收（单命令，失败即停）")
+    print(f"模式：{'--hw（仅 R1–R4 硬件四环）' if args.hw else '全七环'}")
     print(f"证据目录：{root}")
     print(common.RED_LINE)
     print("=" * 72)
 
     results: list[dict] = []
     halted = ""
-    for ring, name, fn in RINGS:
+    for ring, name, fn in rings:
         if halted:
             results.append(skip_result(
                 ring, name, "not_run",
@@ -562,11 +580,11 @@ def main() -> int:
     summary = {
         "when": datetime.now().isoformat(timespec="seconds"),
         "root": root,
+        "mode": "hw" if args.hw else "all",
         "red_line": common.RED_LINE,
         "counts": {"pass": passed, "fail": failed, "skip": skipped},
         "rings": [{"ring": r["ring"], "name": r["name"], "status": r["status"],
-                   "skip_reason": (r["notes"].split("：")[0]
-                                   if r["status"] == SKIP else ""),
+                   "skip_reason": _skip_code(r),
                    "elapsed_ms": r.get("elapsed_ms")}
                   for r in results],
     }

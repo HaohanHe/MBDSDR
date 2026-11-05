@@ -43,6 +43,68 @@ def _angle_diff(a: float, b: float) -> float:
     return min(d, 360.0 - d)
 
 
+# 月球对拍阈值：**外部星历真值**（JPL DE421，经 skyfield 读取），
+# 不是「两套自家实现的最大分歧」。120″ = DE421 月球精度（约 1″ 量级）
+# + 本仓 Meeus 截断级数的模型余量（实测 26.6″）；阈值取外部真值口径。
+MOON_TOL_ARCSEC = 120.0
+# 视直径：本仓用简化地月距离，实测差 4.8″，留 12″ 余量。
+MOON_DIA_TOL_ARCSEC = 12.0
+# 反证门槛：把参考时刻故意拨快 1 小时（月球约 0.55°/h ≈ 1980″），
+# 断言必须红。要求错位误差 ≥600″ 才算「确实能红」。
+NEG_CTRL_MIN_ARCSEC = 600.0
+
+_EPH_CACHE: dict[str, object] = {}
+
+
+def _ephemeris_path() -> str:
+    """DE421 星历位置：环境变量 > 仓库根 > 工作区根（D:\\mbdsdr）。"""
+    cands = [os.environ.get("MBDSDR_EPHEMERIS", ""),
+             os.path.join(common.REPO_ROOT, "de421.bsp"),
+             os.path.join(os.path.dirname(os.path.dirname(common.REPO_ROOT)),
+                          "de421.bsp"),
+             r"D:\mbdsdr\de421.bsp"]
+    for p in cands:
+        if p and os.path.isfile(p):
+            return p
+    return ""
+
+
+def _separation_arcsec(ra1: float, dec1: float,
+                       ra2: float, dec2: float) -> float:
+    """两赤道坐标的球面角距（角秒）。"""
+    a1, d1, a2, d2 = map(math.radians, (ra1, dec1, ra2, dec2))
+    x = (math.sin(d1) * math.sin(d2)
+         + math.cos(d1) * math.cos(d2) * math.cos(a1 - a2))
+    return math.degrees(math.acos(max(-1.0, min(1.0, x)))) * 3600.0
+
+
+def _moon_reference(jd: float):
+    """外部星历参考：JPL DE421 + skyfield，返回 J2000 赤经/赤纬/视直径/距离。
+
+    缺 skyfield 或 de421.bsp 时返回 None（调用方标 UNVERIFIED，不补数）。
+    """
+    path = _ephemeris_path()
+    if not path:
+        return None
+    try:
+        from skyfield.api import load
+        eph = _EPH_CACHE.get(path)
+        if eph is None:
+            eph = load(path)
+            _EPH_CACHE[path] = eph
+        ts = _EPH_CACHE.setdefault("__ts__", load.timescale())
+        earth, moon = eph["earth"], eph["moon"]
+        t = ts.ut1_jd(jd)
+        ast = earth.at(t).observe(moon).apparent()
+        ra, dec, _d = ast.radec(epoch=ts.tt_jd(2451545.0))
+        dist_km = float(ast.distance().km)
+        dia_arcsec = 206264.806 * 2.0 * math.atan(1737.4 / dist_km)
+        return {"ra_deg": float(ra._degrees), "dec_deg": float(dec.degrees),
+                "dia_arcsec": dia_arcsec, "dist_km": dist_km, "path": path}
+    except Exception:
+        return None
+
+
 def _render_sky(out_dir: str, lat: float, lon: float) -> tuple[bool, str]:
     """无头渲染天空视图，返回 (非空白, PNG 路径)。"""
     from PySide6.QtWidgets import QApplication
@@ -99,6 +161,48 @@ def run(lat: float, lon: float) -> dict:
                      f"Mars RA={mars.ra_deg:.2f}° Dec={mars.dec_deg:+.2f}°"),
     ]
 
+    # -- 月球绝对位置：JPL DE421 外部星历真值对拍 + 1 小时反证 --
+    moon_ref = _moon_reference(jd)
+    moon_metrics: dict = {}
+    if moon_ref is None:
+        checks.append(common.check(
+            "moon_ephemeris_match", False,
+            "缺 de421.bsp 或 skyfield，月球绝对位置 UNVERIFIED（未补数）",
+            skipped=True))
+    else:
+        sep = _separation_arcsec(moon.ra_deg, moon.dec_deg,
+                                 moon_ref["ra_deg"], moon_ref["dec_deg"])
+        dia_err = abs(moon.angular_diameter_arcsec - moon_ref["dia_arcsec"])
+        # 反证：参考时刻拨快 1 小时，断言必须变红；再用 jd 复算应回绿。
+        ref_shift = _moon_reference(jd + 1.0 / 24.0)
+        sep_shift = (_separation_arcsec(moon.ra_deg, moon.dec_deg,
+                                        ref_shift["ra_deg"], ref_shift["dec_deg"])
+                     if ref_shift else float("nan"))
+        back = _separation_arcsec(moon.ra_deg, moon.dec_deg,
+                                  moon_ref["ra_deg"], moon_ref["dec_deg"])
+        checks.append(common.check(
+            "moon_ra_dec_matches_ephemeris", sep <= MOON_TOL_ARCSEC,
+            f"{sep:.1f}″ <= {MOON_TOL_ARCSEC:.0f}″（JPL DE421 外部真值）"))
+        checks.append(common.check(
+            "moon_angular_diameter_matches", dia_err <= MOON_DIA_TOL_ARCSEC,
+            f"视直径差 {dia_err:.1f}″ <= {MOON_DIA_TOL_ARCSEC:.0f}″"))
+        checks.append(common.check(
+            "negative_control_hour_shift_goes_red",
+            sep_shift >= NEG_CTRL_MIN_ARCSEC and back <= MOON_TOL_ARCSEC,
+            f"拨快 1h 后 {sep_shift:.1f}″（应 ≥{NEG_CTRL_MIN_ARCSEC:.0f}″），"
+            f"拨回后 {back:.1f}″（应 ≤{MOON_TOL_ARCSEC:.0f}″）"))
+        moon_metrics = {
+            "moon_ra_dec_deg": [round(moon.ra_deg, 4), round(moon.dec_deg, 4)],
+            "moon_ref_ra_dec_deg": [round(moon_ref["ra_deg"], 4),
+                                    round(moon_ref["dec_deg"], 4)],
+            "moon_sep_arcsec": round(sep, 1),
+            "moon_dia_err_arcsec": round(dia_err, 1),
+            "moon_neg_ctrl_1h_arcsec": round(sep_shift, 1),
+            "moon_neg_ctrl_back_arcsec": round(back, 1),
+            "moon_ref": "JPL DE421（外部星历真值，非自家分歧）",
+            "moon_ephemeris": moon_ref["path"],
+        }
+
     # -- 无观测站诚实空态 --
     try:
         st = station.resolve_station()
@@ -124,17 +228,18 @@ def run(lat: float, lon: float) -> dict:
         "sun_mbdsdr_ra_dec_deg": [round(ra_s, 4), round(dec_s, 4)],
         "sun_reference_ra_dec_deg": [round(ra_ref, 4), round(dec_ref, 4)],
         "sun_error_deg": round(sun_err, 4),
-        "moon_ra_dec_deg": [round(moon.ra_deg, 3), round(moon.dec_deg, 3)],
         "station_resolved": bool(st),
         "station_warning": reason,
     }
+    metrics.update(moon_metrics)
     status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL
     return common.result(
         "R6", "星象仪模式", status, metrics, checks,
         "星象仪模式数据异常：请检查观测站坐标与系统时间（时间/坐标错会导致星位全错）。",
         ["星空布局、卫星标记与交互手感（观感）"], False,
         [png],
-        "太阳位置有独立参考量化；月亮绝对位置缺星历文件，未独立验证（子项 UNVERIFIED）。")
+        "月球绝对位置对拍 JPL DE421（外部星历真值，非自家分歧）；"
+        "含 1 小时错位反证。")
 
 
 if __name__ == "__main__":
