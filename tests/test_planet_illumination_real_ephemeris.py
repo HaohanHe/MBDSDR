@@ -292,6 +292,13 @@ COS_GRID_EVENTS = (
 )
 COS_GRID_PLANETS = ("mercury", "venus", "mars", "saturn")
 
+# 跨模型带宽：Meeus ch.31 低精度 vs DE421 的星历差上限（实测 2.900e-4 / 1.450e-4）。
+# 这是**模型差**的封顶，不是公式错误的容差——公式错误量级 1e-2~1e0（见下方变异测试）。
+MODEL_BAND_COS = 5e-4
+MODEL_BAND_ILLUM = 3e-4
+# 同一星历、同一三边的精确网：调用点传错边长顺序时，输出与直接重算的差 ~1e-5~1e0，
+MODEL_SAME_SOURCE_TOL = 1e-12
+
 
 def test_meeus_and_ephemeris_cos_phase_agree_within_model_tolerance():
     """4 时刻 × 4 行星：两条路径的 cos χ 与 illum 差必须落在「模型精度带」内。
@@ -301,6 +308,15 @@ def test_meeus_and_ephemeris_cos_phase_agree_within_model_tolerance():
     ``|Δcos χ| = 2.900e-4``、``|Δillum| = 1.450e-4``（均出现在
     mercury @ 2026-10-25，即「水星 + 金星下合时刻」这组最不利几何）。
     因此 1e-6 不可达；这里是**显式约束**，谁把任一侧悄悄改出模型精度就红。
+
+    为什么保持硬阈值（2.900e-4 对 5e-4 只有 1.72 倍，看起来窄）：
+    两条路径在固定时刻、固定星历下是**确定性**的——2.900e-4 是常量，
+    不是抽样，1.72 倍不是统计裕度。带宽要防的是「传错边长/写错公式」
+    这类 1e-2~1e0 量级的错（见下方变异测试，最小也有 8.48e-3）；
+    真发生「有意外层升级」（换 DE440、换高精度级数）时，带宽理应报警，
+    处理方式是重测后同时改阈值与文档，**不许为了绿放宽**。
+    另外本测试不是唯一网：``test_ephemeris_illum_matches_same_source_triangle``
+    用同一星历同一三边做 1e-12 精确对拍，那条对「边长顺序错误」零容忍。
     """
     worst_cos = (0.0, "")
     worst_illum = (0.0, "")
@@ -318,12 +334,107 @@ def test_meeus_and_ephemeris_cos_phase_agree_within_model_tolerance():
                 worst_cos = (d_cos, tag)
             if d_illum > worst_illum[0]:
                 worst_illum = (d_illum, tag)
-            assert d_cos <= 5e-4, \
-                f"{tag} |Δcos χ|={d_cos:.3e} 超出模型精度带 5e-4（公式或星历被改？）"
-            assert d_illum <= 3e-4, \
-                f"{tag} |Δillum|={d_illum:.3e} 超出模型精度带 3e-4（公式或星历被改？）"
+            assert d_cos <= MODEL_BAND_COS, \
+                f"{tag} |Δcos χ|={d_cos:.3e} 超出模型精度带 {MODEL_BAND_COS:.0e}（公式或星历被改？"\
+                "若为有意外层升级，重测后同步改阈值与本测试 docstring / limitations-register）"
+            assert d_illum <= MODEL_BAND_ILLUM, \
+                f"{tag} |Δillum|={d_illum:.3e} 超出模型精度带 {MODEL_BAND_ILLUM:.0e}（公式或星历被改？"\
+                "若为有意外层升级，重测后同步改阈值与本测试 docstring / limitations-register）"
     print(f"4×4 最大 |Δcos χ|={worst_cos[0]:.3e}（{worst_cos[1]}）；"
           f"最大 |Δillum|={worst_illum[0]:.3e}（{worst_illum[1]}）")
+
+
+def test_ephemeris_illum_matches_same_source_triangle():
+    """同一星历、同一三边：输出必须与「按正确入参顺序直接重算」一致（≤1e-12）。
+
+    这条是**精确网**，专抓调用点传错边长顺序。跨模型带宽对这类错的灵敏度
+    取决于行星距离（外行星 r_helio≈delta，互换几乎是零扰动），抓不住；
+    这里从 ``_planet_distances_skyfield`` 取同一组三边重算，差应精确为 0。
+    """
+    checked = 0
+    for when in COS_GRID_EVENTS:
+        for name in COS_GRID_PLANETS:
+            dist = sol._planet_distances_skyfield(name, when.timestamp())
+            if dist is None:
+                pytest.skip("skyfield 后端不可用，无法取真实三边")
+            pos = _planet(name, when)
+            expected = sol.planet_illum_from_geometry(*dist)
+            diff = abs(float(pos.illumination) - expected)
+            assert diff <= MODEL_SAME_SOURCE_TOL, \
+                f"{name} {when.date()} 输出与同源三边重算差 {diff:.3e}（边长顺序被改？）"
+            checked += 1
+    print(f"同源精确网 {checked} 例，容差 {MODEL_SAME_SOURCE_TOL:.0e}")
+
+
+def test_model_band_and_exact_net_catch_geometry_arg_mutations():
+    """反向变异：传错三边必须被约束抓住，而不是「宽到能过」。
+
+    变异 A：``r_geo`` 填进 ``r_helio`` 位（旧缺陷的真实形态）；
+    变异 B：``r_sun`` 与 ``delta`` 互换。
+    实测（4×4 网格，skyfield 三边）：
+
+    - 变异 B 全部 16 例都远超带宽（最小 8.48e-3，约带宽的 28 倍）；
+    - 变异 A 对水星/金星/火星远超带宽，但 **saturn @ 2026-12-30 只有
+      2.24e-5**——外行星 ``r_helio ≈ delta``，把 delta 填进 r_helio 位几乎
+      是零扰动，带宽在几何上就看不见它（不是阈值宽，是三边本身近似相等）。
+      这类误差由上面 1e-12 的精确网兜住。
+
+    所以本测试断言：每个变异都改变结果 >1e-9（精确网必抓），且变异 B
+    全部 > 带宽；变异 A 只在三边可分离时要求 > 带宽。
+    """
+    worst_b = (float("inf"), "")
+    worst_a_exact = (float("inf"), "")
+    band_misses = []
+    for when in COS_GRID_EVENTS:
+        for name in COS_GRID_PLANETS:
+            r_helio, delta, r_sun = sol._planet_distances_skyfield(name, when.timestamp())
+            correct = sol.planet_illum_from_geometry(r_helio, delta, r_sun)
+            mutated_a = sol.planet_illum_from_geometry(delta, delta, r_sun)
+            mutated_b = sol.planet_illum_from_geometry(r_helio, r_sun, delta)
+            d_a = abs(correct - mutated_a)
+            d_b = abs(correct - mutated_b)
+            tag = f"{name} {when.date()}"
+
+            # 精确网（1e-12）对两种变异都必抓，这里用 1e-9 留 3 个数量级余量
+            assert d_a > 1e-9, f"{tag} 变异 A 只改变 {d_a:.3e}，精确网看不见"
+            assert d_b > 1e-9, f"{tag} 变异 B 只改变 {d_b:.3e}，精确网看不见"
+            worst_a_exact = min(worst_a_exact, (d_a, tag))
+            worst_b = min(worst_b, (d_b, tag))
+
+            assert d_b > MODEL_BAND_ILLUM, \
+                f"{tag} 变异 B 只差 {d_b:.3e}，带宽盖住了错误（阈值已失效？）"
+            if d_a <= MODEL_BAND_ILLUM:
+                band_misses.append((tag, d_a, abs(r_helio - delta)))
+    print(f"变异 B 最小差 {worst_b[0]:.3e}（{worst_b[1]}）；"
+          f"变异 A 最小差 {worst_a_exact[0]:.3e}（{worst_a_exact[1]}）")
+    for tag, d_a, gap in band_misses:
+        print(f"带宽未覆盖变异 A：{tag} 差 {d_a:.2e}，|r_helio-delta|={gap:.3f} AU（精确网兜住）")
+
+
+LEGACY_WRONG_ILLUM = (
+    ("mercury", MERCURY_INFERIOR, 0.86697),
+    ("venus", VENUS_INFERIOR, 1.00000),
+    ("mars", MARS_CONJUNCTION, 0.60227),
+)
+
+
+def test_model_band_rejects_historical_wrong_illumination_values():
+    """历史缺陷的实际输出（0.86697 / 1.00000 / 0.60227）必须被带宽抓住。
+
+    ``_legacy_illum`` 复原旧实现，先断言它复现这三个历史值，再断言当前
+    正确值与历史值之差远超带宽——把「旧缺陷会被抓住」钉在可复跑的数字上，
+    不是推理。
+    """
+    for name, when, historical in LEGACY_WRONG_ILLUM:
+        legacy_now = _legacy_illum(name, when)
+        assert abs(legacy_now - historical) <= 1e-5, \
+            f"{name} {when.date()} 旧公式复现 {legacy_now:.5f} ≠ 历史值 {historical:.5f}"
+        true_illum = float(_planet(name, when).illumination)
+        diff = abs(true_illum - historical)
+        print(f"{name} {when.date()}：历史错误 {historical:.5f} / 当前 {true_illum:.6f} / "
+              f"差 {diff:.3e}（带宽 {MODEL_BAND_ILLUM:.0e}）")
+        assert diff > MODEL_BAND_ILLUM, \
+            f"{name} {when.date()} 历史错误只差 {diff:.3e}，带宽盖住了"
 
 
 def test_phase_angle_zero_basis_is_identical_between_models():
