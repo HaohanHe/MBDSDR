@@ -75,6 +75,11 @@ python scripts/audit_source_text_pins.py --report docs/source-text-pins-audit.md
 判定（本段）不会被重生成覆盖：脚本只刷新 `manual` 段之外的统计与逐条清单。
 局限：只扫 `tests/*.py`；动态拼装路径（f-string 拼文件名、子进程读源码）会漏检；
 `unknown` 类别需人读上下文后才能归类。
+
+**已知漏检（必须人工计入）**：`test_settings_convergence.py::test_satellite_tune_updates_control_panel`
+—— 它先 `read_text()` 取整份 `main_window.py`，再用 `_innermost_function_with()` 截取函数体后
+`re.search`，扫描器只认「直接对文件文本断言」的变量，故未命中。这是本段栽的第二次事故
+（`36607bbaa` 把 `float(obj.frequency_hz)` 改成局部 `freq_hz` 后误红），归 V1。
 <!-- manual:end -->
 
 ## 统计
