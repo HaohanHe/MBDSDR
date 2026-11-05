@@ -151,7 +151,7 @@
 | 出现点（文件:符号） | 档数 | 集合 | 与其他处的差 |
 |---|---|---|---|
 | `mbdsdr_ai/sdr_backend.py:RTLSDRBackend.SAMPLE_RATES` | 11 | 0.25 / 1.024 / 1.536 / 1.792 / 1.92 / 2.048 / 2.16 / 2.4 / 2.56 / 2.88 / 3.2 M | 桌面下拉的实际来源 |
-| `desktop/control_panel.py:SAMPLE_RATES` | 11 | 同上（`list(RTLSDRBackend.SAMPLE_RATES)`，导入失败才用同值字面量） | 与 `sdr_backend` 0 差 |
+| `desktop/control_panel.py:_CapabilitySampleRateCombo/_populate_sample_rate_options` 与 `desktop/main_window.py:_fill_sr_combo` | 0（**不持有档位表**） | 展开/选中设备时经 `mbdsdr_ai/device_capabilities.py:sample_rate_options_for_backend`（控制面板）或 `sample_rate_options(device)`（连接对话框）动态取「后端表 ∩ 设备量程」；后端无离散表只给量程两端，量程未知给单项「未知」并禁用 | 与 `sdr_backend` 0 差（无副本；`tests/test_sample_rate_single_source.py:test_desktop_holds_no_local_tier_copy` 断言 `desktop/*.py` 不含 `SAMPLE_RATES`） |
 | `cpp/src/core/tokens.h:kSampleRatesHz` | 4 | 1.024 / 2.048 / 2.4 / 3.2 M | 缺 7 档（250k/1536/1792/1920/2160/2560/2880） |
 | `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz` | 11 | 0.25 / 1.024 / 1.536 / 1.792 / 1.92 / 2.048 / **2.16** / 2.4 / 2.56 / **2.88** / 3.2 M | 与桌面 11 档 0 差（2026-11-06 已补 2.16M；2.8M 档改为 2.88M——依据真机读回：请求 2,800,000 被设备吸附到 2,880,000，候选表只列设备实际给出的值，见附 M.4 L60） |
 | `cpp/src/ui/settings_dialog.cpp:srCombo_`（局部 `kRates` 字面量） | 4 | 1.024 / 2.048 / 2.4 / 3.2 M | 与 `tokens` 0 差，但**未引用 tokens，单写一份** |
@@ -201,7 +201,7 @@
 
 补充事实：手动切换路径的 bool 返回未校验（`desktop/main_window.py:_on_sample_rate_changed` 调 `set_sample_rate` 不判返回值）——这是 C.0 第 1 条的同频项，落地时必须一并补“返回 False 也走状态栏可见错误并回填实际档”，否则会出现“下拉停在 250k、实际仍是 1.024M”的新分叉（2026-11-06 已落地：`70429a02` — `desktop/main_window.py:4691` — `该采样率未被设备接受（保持`，见 C.10.1）。
 `desktop/settings_panel.py` **没有**独立采样率档位表（grep `sample_rate` 无命中），只经 `control_panel`/设置下发 → 同步面为 0，但它的文案若引用档位需跟随；`cpp/src/core/app_settings.*` **没有** sampleRate 键（grep 无命中），C++ 不持久化采样率，故 C 的旧配置迁移只在 Python 侧发生，C++ 侧按 `kDefaultSampleRateHz` 起档。
-**文案审计线口径（别撞车）**：桌面 `desktop/constants.py:30` 已统一 `MS/s`、3 位小数（取证 `d0b585a0` — `desktop/constants.py:33` — `0.250 MS/s`；回归锁 `ebc897fa` — `tests/test_copy_units_audit.py:28` — `0.250 MS/s`）；移动端 `d543c87d` — `mobile/lib/pages/spectrum_page.dart:389` — `toStringAsFixed(3)} MS/s`（同字面量亦在 `mobile/lib/widgets/device_info_card.dart:104`）。新增 250k 时**必须显示 `0.250 MS/s`，不得写 `250 kHz`**；`docs/copy-audit.md` 的 U-03 已是这条口径，文档里不要另立单位。
+**文案审计线口径（别撞车）**：桌面 `desktop/constants.py:33` 已统一 `MS/s`、3 位小数（取证 `d0b585a0` — `desktop/constants.py:33` — `0.250 MS/s`；回归锁 `ebc897fa` — `tests/test_copy_units_audit.py:28` — `0.250 MS/s`）；移动端 `d543c87d` — `mobile/lib/pages/spectrum_page.dart:389` — `toStringAsFixed(3)} MS/s`（同字面量亦在 `mobile/lib/widgets/device_info_card.dart:104`）。新增 250k 时**必须显示 `0.250 MS/s`，不得写 `250 kHz`**；`docs/copy-audit.md` 的 U-03 已是这条口径，文档里不要另立单位。
 
 ### C.4 250k 证据分级（细则见 `docs/limitations-register.md` 附 M）
 
@@ -426,7 +426,7 @@ constexpr double kCandidateRatesHz[] = {
 | `cpp/src/core/tokens.h:kSampleRatesHz` | 4 | **可下发白名单**：档外显式拒绝 | `cpp/src/ai/agent_tools.cpp:execSetSampleRate`；控制面同口径校验已落（`dd72ba1c`，C.9） |
 | `cpp/src/dsp/device_capabilities.cpp:kCandidateRatesHz` | 11 | **设备候选探测表**：按 librtlsdr 合法区间过滤后供下拉手选，不是下发白名单 | C++ 设备下拉（`device_capabilities`） |
 | `mbdsdr_ai/sdr_backend.py:RTLSDRBackend.SAMPLE_RATES` | 11 | 桌面后端能力表：控制面板/连接对话框的可见档位来源 | `desktop/control_panel.py`、`desktop/main_window.py`、`mbdsdr_ai/device_capabilities.py` |
-| 移动端档位表 | 0（已删） | 改读控制面 `sample_rate_options_hz`，缺失即「未知」并禁用 | 字段已下发（本轮，C.11 第 2 项内核侧）；移动端待接线 |
+| 移动端档位表 | 0（已删） | 改读控制面 `sample_rate_options_hz`，缺失即「未知」并禁用 | 字段已下发（本轮，C.11 第 2 项内核侧）；移动端未解析（待办见 C.12） |
 
 4 档 ≠ 11 档不是「同一物理量两套数」：前者是**允许 AI/控制面下发的正向列表**，后者是**可让用户手选的候选集合**，关系是「白名单 ⊆ 候选」，不是「应相等」。重复治理线登记时请按这两类用途分开，勿合并成一条矛盾。
 
@@ -438,6 +438,17 @@ constexpr double kCandidateRatesHz[] = {
 - 注入三态（`--mode honest|clamp|reject`）：**E2 可复跑**（无需硬件，确定性）。期望：honest 12 一致；clamp 11 一致 + 1 不一致（2.800M→2.880M，+80,000 Hz，退出码 1）；reject 11 一致 + 1 被拒（保持 2.560M）。
 - 数字口径：「12 档 11 一致 + 1 不一致」当前只能按 E3 引用；「clamp 必红」按 E2 引用。
 
+
+### C.12 待办：移动端解析 `sample_rate_options_hz`（内核已下发 / 客户端未解析）
+
+**这是一条独立待办，不是组 4 状态列的脚注。** 组 4 现处「部分统一」，唯一未收口项即本条。
+
+| 项 | 内容 |
+|---|---|
+| 现状（2026-11-06 已核实） | **内核已下发**：`cmdGetCapabilities` 调用 `dsp::buildSampleRateOptions(caps)`（`cpp/src/control/control_hub.cpp:1080`），输出 `sample_rate_options_hz`（`:1083`）与 `sample_rate_options_status`（`:1084-1085`，取证 `f0a19376` — `cpp/src/control/control_hub.cpp:1083` — `sample_rate_options_hz`）。**客户端未解析**：`mobile/lib/services/radio_controller.dart:_sampleRateOptionsHz` 只在声明（`:233`）、getter（`:323`）、页面读取（`:819`）出现，**全文件无赋值语句**，故 `spectrum_page.dart:762-766` 恒走「未知（设备未报告采样率范围）」并禁用下拉；`AppTokens.sampleRatesHz` 虽已 `@Deprecated`（`mobile/lib/app/tokens.dart:216-227`），死表仍在且仍有回落 `.first` 路径 |
+| 责任线 | 移动端线（`mobile/`） |
+| 完成判据 | ① `mobile/lib/services/control_hub_client.dart` 解析 `sample_rate_options_hz` / `sample_rate_options_status`；② `radio_controller` 把解析结果赋给 `_sampleRateOptionsHz`，getter 返回真实档位（不再恒 null）；③ 下拉项由该字段生成，`status != ok` 或字段缺失 → 单项「未知」并禁用，**不得回落 `.first`**；④ 删除 `AppTokens.sampleRatesHz`；⑤ 单测覆盖 `ok` / `unknown` / `no_tier_in_range` 三态，并断言档位逐项等于 C++ `kCandidateRatesHz`（与 `tests/test_sample_rate_single_source.py` 同口径） |
+| 阻塞 / 未验证 | 本机无 Flutter 工具链，Dart 改动未跑 `flutter analyze` / `flutter test`；完成前组 4 不得写「已统一」 |
 
 ## 变更记录
 
@@ -468,6 +479,7 @@ constexpr double kCandidateRatesHz[] = {
 | 2026-11-06 | 本笔 | C++ 内核 F1/F2/F3 落地（审阅线）：①`cmdSetSampleRate` 按 `tokens::kSampleRatesHz` 逐档比对、档外显式拒绝（与 `agent_tools.cpp` 同口径，不再回填请求值）；②`rtl_sdr_source.cpp:pushSampleRate` 检查 `set_sample_rate` 返回码，rc≠0 保留原采样率并上报 `sourceError`，`start()` 直接失败；③`rtl_sdr_ops.h:getSampleRate` 接 `rtlsdr_get_sample_rate` 读回，不一致报请求/读回两值，无读回入口时状态串「采样率=请求值，硬件读回不可用」；`get_status` 增 `sample_rate_readback_available`/`sample_rate_status`/`sample_rate_error`；④候选表 10→11 档（补 2.160M、2.800M→2.880M，差 80,000 Hz 清零）；7 档差集全部定稿「内核支持、AI 故意不暴露」；反证测试 6 条 + Python 14 passed | 审阅线 |
 | 2026-11-06 | 本笔 | 核对 control_hub 现状：只有回读（readback_sample_rate_hz / sample_rate_readback_available / sample_rate_status / sample_rate_error）与量程（sample_rate_min_hz / sample_rate_max_hz），无 sample_rate_options_hz；buildSampleRateOptions 存在但未接进 get_capabilities。组 4 第 2 项维持「阻塞」；C.11 补证据级别（真机 12 档 = E3，注入三态 = E2） | 参数治理线 |
 | 2026-11-06 | 本笔 | 修订组 4 旧口径残留：`cmdGetCapabilities` 档位面（取证 `f0a19376` — `cpp/src/control/control_hub.cpp:1083` — `sample_rate_options_hz`）——调用 `dsp::buildSampleRateOptions(caps)` 于 `cpp/src/control/control_hub.cpp:1080`，字段 `:1083`、状态 `:1084-1085`；C.11 第 2 项与结论行补 `path:line`；C.0/C.1/C.3/C.7/C.8/C.10.2 的「10 档 / 候选表 2.8M / 控制面不校验 / 无读回 / 待内核下发」按 `dd72ba1c` 后事实改写或标注「改前」；组 4 状态列改为「剩移动端接线（内核已下发，Dart 尚未解析）」 | 采样率真值线 |
+| 2026-11-06 | 本笔 | 新增档位单一真值源机检 `tests/test_sample_rate_single_source.py`：C++ `kCandidateRatesHz` / Python `RTLSDRBackend.SAMPLE_RATES` / 桌面 `sample_rate_options_for_backend` / 本文 C.1 行四处逐项相等（含顺序），不等即打印两侧 11 档清单与差集；2.8M 吸附单独断言（四处均无 2.800M、请求 2,800,000 → 假棒实收 2,880,000，差 80,000，C++ 注释与 C.10.2 实测行同口径）；变异反证删 C.1 的 `**2.16**` → `1 failed`（仅 C++ 有 2160000），复位 `5 passed`。C.1 第 2 行由旧 `SAMPLE_RATES` 副本改为动态取表；C.12 新增「移动端解析 `sample_rate_options_hz`」独立待办（内核已下发 / 客户端未解析） | 采样率真值线 |
 
 ## 附录 D：C++/Python 峰值独有口径（作废数 / 现行数）
 
