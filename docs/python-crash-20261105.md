@@ -12,7 +12,7 @@
 | (b) 显卡驱动 / Qt RHI（D3D） | **排除** | 崩溃进程模块表无任何厂商驱动 DLL（无 `nvoglv64/igd*/atio*`）；`d3d11.dll / dxgi.dll / D3D12.dll` 只是系统组件随 Qt 载入；故障模块是 `pyside6.abi3.dll`，不是 GL/D3D 模块 |
 | (c) 多进程并发跑 Qt 测试的资源冲突 | **部分成立（作为放大器，不是直接成因）** | 51 个崩溃进程中有 14 个 5 分钟窗口内出现 2–4 个不同 PID 同时崩溃；WER 2004 记录 20:00:50 时 `python.exe(2936) 17.2 GB` + `python.exe(192) 11.6 GB` 同时存在。但 5 轮"双进程并发跑 Qt 用例"隔离实验 0 崩溃 → 并发本身不足以复现 |
 | (d) C++ 扩展（librtlsdr/DLL） | **排除** | 崩溃进程确实载入 `rtlsdr.dll`，但故障模块、异常地址、栈帧都在 PySide6/Qt 侧，rtlsdr 未出现在栈上 |
-| (e) 内存耗尽 | **成立（现场的关键条件），但巨无霸进程未复现** | 5 条 WER 2004「虚拟内存不足」：python.exe 单进程 24.3 / 17.2+11.6 / 28.4 / 28.7 / 24.7 GB；本机 commit 上限 38.1 GB、物理内存 15.7 GB。但本次全量套件单进程峰值仅 1.9 GB（§6.1）→ 17–28 GB 的 python 进程不是这套 pytest 负载，**未定位** |
+| (e) 内存耗尽 | **成立（现场的关键条件）；巨无霸已在 §9 定位到 fuzz 长字符串用例** | 5 条 WER 2004「虚拟内存不足」：python.exe 单进程 24.3 / 17.2+11.6 / 28.4 / 28.7 / 24.7 GB；本机 commit 上限 38.1 GB、物理内存 15.7 GB。全量套件单进程峰值仅 1.9 GB（§6.1）→ 17–28 GB 的 python 进程不是 pytest 负载，是 `scripts/tool_param_fuzz.py` 的 `long_string` 用例（§9） |
 
 **为什么把 (e) 与 PySide 空指针绑定**：崩溃点读到的是"接近 NULL 的小偏移/0"（`0x0`、`0x6B8`），不是野指针大地址——提交耗尽时分配失败、容器/表结构处于半初始化状态，正好产生这种形态；且崩溃在隔离环境（≤1.9 GB 峰值、44 次运行）**一次都复现不出来**，只在真实高压力窗口出现。**但这是机制推断，不是直接证据**（无 cdb 符号、无当时命令行），故标注"强相关、机理未证实"。
 
@@ -100,7 +100,7 @@ python.exe (34872) 使用了 869,482,496 字节。
 
 **位置**：`%LOCALAPPDATA%\CrashDumps`（10 个 minidump，各 8.2 MB，23:26–00:11）；WER 归档在 `C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_python.exe_45fe2c9a…`（目录 ACL 拒绝读取，未强改权限）。本机没有 `cdb/windbg`，因此用自写 minidump 解析器直接读异常流（ExceptionStream）、模块表（ModuleListStream）与栈内存（MemoryListStream / Memory64ListStream）——解析器为一次性工具，已清理，方法可复现。
 
-**取证产物脱敏规则**：日志/转储解析出的长数字写入文档前统一按千分位书写（如 `17,208,483,840`），既保留精确值，又避免连续的 11 位数字被身份红线门误判为手机号（§3.3 的 `17,208,483,840` 原文即 python.exe(2936) 的提交字节数，并非手机号）；提交前对 `docs/**` 与解析输出跑一遍手机号/邮箱/证件号正则扫描。
+**取证产物脱敏规则**：红线门命中时**先判断"真 PII 还是普通长数字"**，再决定是否动文件（本次 `17208483840` 实为 WER 2004 中 python.exe(2936) 的提交字节数，不是手机号）。日志/转储解析出的长数字写入文档前统一按千分位书写（如 `17,208,483,840`），既保留精确值，又避免连续的 11 位数字再次被误判；提交前对 `docs/**` 与解析输出跑一遍手机号/邮箱/证件号正则扫描。
 
 **异常记录（`python.exe.41600.dmp`，即 00:11:19）**
 
@@ -152,7 +152,7 @@ rsp+0x00E8  shiboken6.abi3.dll+0x2CBC9
 - 崩溃栈有 `Qt6Widgets` 帧 → 触发发生在 Qt 控件属性/信号回调里；
 - `qt` 用例模块（源码含 `QApplication` 的 102 个文件）**整批在单进程跑完 95%（约 3400 用例）也 0 崩溃**，峰值仅约 1.6 GB。
 
-因此**未能把崩溃钉到某一条用例**（GPU/符号/命令行证据均不足：URL 会话日志拿不到当时的命令行，Security 4688 审计未开启）。这一项明确标注 **未验证 / 未定位**。
+因此**未能把崩溃钉到某一条用例**（GPU/符号/命令行证据均不足：URL 会话日志拿不到当时的命令行，Security 4688 审计未开启）。这一项明确标注 **未验证 / 未定位**。（§9 追加：触发负载已定位到 fuzz `long_string`，不在 pytest 用例侧；具体解码器分配点仍未定位。）
 
 ---
 
@@ -241,7 +241,63 @@ EXITCODE=3
 ## 8. 建议的后续动作
 
 1. 先按 `MBDSDR_TEST_COMMIT_LIMIT_MB` 默认值跑一段时间：它在用例边界带 nodeid 报越限，能直接抓到"哪条用例在涨内存"（本报告尚未抓到，全量套件峰值仅 1.9 GB）。
-2. **重点排查长期驻留的 python 进程**：WER 2004 里 17–28 GB 的 python.exe 不是 pytest 负载，最可能是被挂着的桌面端/GUI/采集进程（其转储里 `qoffscreen.dll`+`Qt6OpenGLWidgets`+`rtlsdr.dll` 都在）。建议给桌面端加一处周期性 `PrivateUsage` 日志（10 分钟一行），下次再出现 2004 时直接对得上 PID 与代码路径。
+2. **长期驻留进程的资源观测**：WER 2004 里 17–28 GB 的 python.exe 不是 pytest 负载。§9 已把它定位到 `scripts/tool_param_fuzz.py` 的 `long_string` 用例；本条保留为通用观测建议（给桌面端/长跑脚本加周期性 `PrivateUsage` 日志，下次再出现 2004 时能直接对上 PID 与代码路径）。
 3. 若要能事后定位命令行，可临时开启进程创建审计（Security 4688，含命令行）——本次因为没有它，才只能到"python.exe"粒度。
 4. PySide6 绑定层空指针属上游缺陷：把 `0x1C91E`（`SignalManager::retrieveMetaObject`）+ 两个 minidump 上报 PySide6 issue，附 Qt 6.12.0 / PySide6 6.12.0 / Python 3.14.0。
 5. 保留 `tests/conftest.py` 的退出期 `TerminateProcess` 规避不动——它是 exit 期 segfault 的唯一有效规避（phase64 结论），与本次运行期崩溃是两件事。
+
+---
+
+## 9. 17–28 GB 元凶：`tool_param_fuzz.py` 的 `long_string`（2026-11-05 追加）
+
+> 本节只追加事实与复跑口径，不改前文判定。前文"巨无霸未定位"以本节为准更新为"已定位到 fuzz 负载，具体分配点待审计线"。
+
+### 9.1 实测链（直接证据）
+
+```
+2026-11-05 01:49:13  Trae CN 会话经 PowerShell 拉起（执行器 id 41c2e899…）：
+  python -u scripts\tool_param_fuzz.py --only rtty_decode --json %TEMP%\ov_rtty.json --no-write
+01:52:23  python.exe PID 37016（父进程 17504 = powershell.exe）
+  PrivateUsage = 19,093 MB；WorkingSet = 3,354 MB；全机可用物理内存 219 MB
+01:54:10  该命令被停止（执行器 status=stopped，terminalReason=user_stop，时长 296.9 s）
+输出：calls=6 tools=1 OK=5 HANG=1
+  [HANG] rtty_decode long_string: 超过单次上限 60s
+```
+
+- `long_string` 用例 = 把 **10 万字符 `"A"`** 灌进文本类工具的字符串参数（`LONG_STR = 100_000`，`stress=True`；stress 档预算 = `--timeout × 6`，默认 10 s → 60 s）。
+- 同脚本的历史运行（执行器只存 cwd/pid/时间，不存命令行；下列命令由输出预算与明细**反推**）：
+
+| 运行窗口（实测） | 输出（实测） | 同窗口 WER 2004（实测） |
+|---|---|---|
+| 22:29:20–22:40:32（671.8 s，执行器 id 7c5b8280，wrapper pid 32508） | `calls=33 tools=4 OK=30 HANDLED=1 SLOW=1 HANG=1`；`feldhell_decode long_string` → `exception:MemoryError`；`psk31_decode long_string` 102.7 s（长输入预算 360 s）；`rtty_decode long_string` 超 360 s | **22:35:05 `python.exe(34888)` 28,739,452,928 B（28.7 GB）**，落在该运行区间内 |
+| 00:11:10–00:14:32（201.8 s，执行器 id af27ceae，wrapper pid 38432） | `calls=33 tools=4 HANDLED=2 SLOW=1 HANG=1`（含 feldhell/psk31 长字符串 MemoryError） | **00:13:10 `python.exe(37796)` 24,715,304,960 B（24.7 GB）**，落在该运行区间内；同批次 `ov_longtxt.json` 于 00:13:17 落盘 |
+| 20:00:50 / 20:05:00（无命令记录） | —（该时段没有 Trae 执行器目录） | `python.exe(2936)` 17,208,483,840 B + `python.exe(192)` 11,609,010,176 B（合计 28.8 GB）；随后同 PID 2936 涨到 28,398,059,520 B |
+
+- 增长率实测（20:00:50 → 20:05:00，同 PID 2936）：`28,398,059,520 − 17,208,483,840 = 11,189,575,680 B / 250 s ≈ 44.8 MB/s`。
+- 崩溃侧对照：本次导出 56 条 `python.exe` 事件 1000（含 3 天窗口外的早期记录；3 天窗口内为 51 条），进程 uptime 中位数 **0.4 min**、最长 **15.7 min**；5 个 2004 PID（41316/2936/192/34888/37796）**都不在** 1000 里——巨无霸结束方式是外部停止/被杀或自行退出，不是弹"应用程序错误"的那个进程。
+- 22:35:06 还伴随一个 `VCRUNTIME140+0x11a89` 崩溃（PID 35608，uptime 1.2 min），是另一个短命进程，不是巨无霸。
+
+### 9.2 推断与未验证（不要当结论）
+
+- **超时注杀不保证停住分配**：`_call_with_timeout` 把工具调用放进 daemon 线程，超时用 `PyThreadState_SetAsyncExc` 注入 `_TimeoutAbort`。该机制只在 Python 字节码边界生效；若工具正处在 C/numpy 分配循环里，线程不会立刻停止（脚本在 `_abort_thread` 注释里也写明"注入是尽力而为"）。→ "HANG 之后内存仍继续涨"是**机制推断**，未用插桩证实。
+- **历史 PID 的父子对应**：执行器只记录 wrapper PID（32508 / 38432 / 17504），2004 记录的是 python 子进程 PID；只有 01:49 那次是**直接**观测到子进程 37016。历史两次是"区间包含 + 同批次输出含 MemoryError + 无其它长跑 python"的**强推断**，不是 PID 直证。
+- **20:00/20:05 那轮**：没有命令行与执行器记录，只能确认"python.exe 长跑且持续增长"，不能确认就是本脚本（**未验证**）。
+- **具体分配点**（哪个解码器、哪一行按字符数线性开数组）**未定位**，由工具审计线处理（内存上限 + 输入长度前置拒绝）。
+- **"OOM → PySide6 空指针"仍是推断**：23:01–23:55 的 13 次崩溃窗口内没有 2004 事件，不能写成"每次崩溃都由 OOM 触发"。
+- conftest 的互斥锁**只覆盖 pytest 进程**，管不到 fuzz/长跑脚本；本类事故的防线必须在工具注册层（输入长度/内存上限），不在测试基建层。
+
+### 9.3 复跑口径（供别人验证）
+
+```bat
+:: 最小档：单工具、默认预算（stress = 60 s）
+python -u scripts\tool_param_fuzz.py --only rtty_decode --json %TEMP%\ov_rtty.json --no-write
+
+:: 历史 28.7 GB 档：4 个文本类工具、stress 预算 360 s（整轮约 11 分钟）
+python -u scripts\tool_param_fuzz.py --only feldhell_decode psk31_decode rtty_decode bell103_modulate_text --timeout 60 --json %TEMP%\ov_text.json --no-write
+```
+
+- 期望输出：`calls=33 tools=4 …`，明细含 `feldhell_decode long_string … exception:MemoryError`、`rtty_decode long_string … 超过单次上限 360s`。
+- 期望资源曲线：最小档**实测 3 分钟内 PrivateUsage 涨到 19 GB**。
+- **安全阀**：不要无上限跑（本机 commit 上限 38.1 GB，跑满会连累同机其它 python 进程崩溃）。建议给子进程套 4 GB 的 Windows Job Object 内存上限，或外部 RSS 采样到 8 GB 即 kill；复跑时也不要同时跑 pytest Qt 用例。
+- 环境：`QT_QPA_PLATFORM=offscreen`、`MBDSDR_NULL_AUDIO=1`、`MBDSDR_NO_HW=1`、`MBDSDR_OFFLINE=1`；`MBDSDR_FUZZ_VERBOSE=1` 可看每工具进度。
+- 已知登记：`docs/limitations-register.md` 已记"10 万字符文本在纯 Python 文本调制/解调器上超过 60s 预算"。
