@@ -165,12 +165,12 @@ rel 6.0 dB / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘
 |---|---|---|---|
 | D-1 | 默认采样率 | `2.048 MS/s` vs `2.4 MS/s` | `config_schema.py:260` vs `tokens.h:301` |
 | D-2 | ~~调谐步进默认 10 kHz vs 100 kHz~~ **已撤回（见下）** | Python 10 kHz；C++ `kFreqCoarseStepHz = 10000` | `control_panel.py:323` vs `tokens.h:816` |
-| D-3 | ~~FFT 档位数量~~ **已统一（2026-11-05，见下）** | 两端均三档 `1024/2048/4096`（Python `FFT_SIZES` == schema `fft_size.choices`） | `spectrum_widget.py`（`FFT_SIZES`） vs `config_schema.py:176` / `settings_dialog.cpp:250` |
+| D-3 | ~~FFT 档位数量~~ **已统一（2026-11-05，见下）** | 两端均三档 `1024/2048/4096`（Python `FFT_SIZES` == schema `fft_size.choices`） | `e883a62b` — `desktop/spectrum_widget.py:218` — `FFT_SIZES = (1024, 2048, 4096)`；两端对照 `config_schema.py:176` / `settings_dialog.cpp:250` |
 | D-4 | dB 默认量程 | `-100..-20` vs `-45..0` | `spectrum_widget.py:916-917` + 默认值 vs `tokens.h:329-330` |
 | D-5 | 瀑布行数 | 固定 `256` vs 可选 `128..4096` | `spectrum_widget.py:161` vs `tokens.h:698` |
 | D-6 | 过境预测采样 | 粗 `60 s` / 细 `2 s` vs 粗 `300 s` / 细 `30 s` | `sat_passes.py:88-90` vs `rf_sky_view`（`PASS_COARSE_STEP_S`/`PASS_FINE_STEP_S`） |
 | D-7 | "光谱空值"哨兵 | `-120.0` vs 无哨兵 | `spectrum_widget.py:419` vs C++ 用 `-100` 只作**安静带默认读数**（真实值） |
-| D-7b | RTL 设备基线采样率 | 三套：`2.048` / `1.024` / `2.048` 硬编码 | `sdr_backend.py` / `osmosdr_source.py` / `rtltcp_client.py`。**已统一为 2.4 MS/s 首选**（§10-3） |
+| D-7b | RTL 设备基线采样率 | 三套：`2.048` / `1.024` / `2.048` 硬编码 | `sdr_backend.py` / `osmosdr_source.py` / `rtltcp_client.py`。**已统一为 2.4 MS/s 首选**（§10-3）；证据 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`（2.048 只作基类最后兜底 `_FALLBACK_SAMPLE_RATE_HZ`） |
 | D-8 | 状态提示时长 | `3000/4000/6000/8000 ms` 散落 20+ 处 | `main_window.py:2061,2490-2624` 等 |
 | D-9 | AI 工具重试 | 2 次 / 0.4 s vs 3 次 / 1 s→8 s | `agent.py:4050-4061` vs `tokens.h:1335-1337` |
 | D-10 | AI 上下文 | Python 8192（`max_context_tokens`） vs C++ `32768×0.75` | `config.py:20` / `config_schema.py:237` vs `tokens.h:1321-1322` |
@@ -515,7 +515,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | 静噪默认 | `-50`（`squelch.py`） | `-50`（`tokens.h:396`） | ✓ | 见 2.1 二次裁定 |
 | **峰值门限基准** | `median + rel_db`（`spectrum_widget.py:487-488`） | `dB above median`（`tokens.h:365`） | ✓（同一基准） | 统一检测器定义（P-1） |
 | 峰值门限值 | `6.0`（裁定值） | `6.0`（`kPeakRelDb`，显示门；校准门 15 另计） | ✓ | 裁定 `rel 6.0 / abs -100 / 3 帧 / 5 bin / 10 帧`；15 dB 实测 24 帧 0 峰 |
-| 默认采样率 | 2.4 MS/s | 2.4 MS/s（`tokens.h:301`） | ✓ | 已统一；两端都按设备能力回落 |
+| 默认采样率 | 2.4 MS/s（`6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000`） | 2.4 MS/s（`tokens.h:301`，C++ 常量由 `12610725` 引入 `kDefaultSampleRateHz = 2.4e6`） | ✓ | 已统一；两端都按设备能力回落 |
 | 默认调谐步进 | 10 kHz | 10 kHz（`kFreqCoarseStepHz`） | ✓（D-2 撤回） | 保持；100 kHz 是扫描步进 |
 | 无数据哨兵 | `-120.0`（待改 NaN） | 无哨兵（`-100` 是真实读数） | ✗ → 待 P-8c | 哨兵必须落在量程外 |
 | 上下文窗口 | 8192 | 32768（×0.75 预算） | ✗（有意） | 按模型能力，登记 |
