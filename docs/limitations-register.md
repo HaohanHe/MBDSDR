@@ -480,11 +480,48 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
 | --- | --- | --- | --- | --- |
-| L47 | **`get_planet_position` 把行星日心距与地心距都填成 `pos.distance_au`**，日-行星-地球三角形退化为 `cos χ = R/(2Δ)`：内行星下合余弦被夹到 1（金星下合报告 1.000，物理应 0.006），外行星恒报 0.53–0.87 的假「半亮」（木星方照 0.549，实应 0.991） | 天空线：DE421 逐日扫描地心距角极值定位的真实时刻（2026-10-25 金星下合、2027-05-26 火星方照等）；外行星「合日」被误当新月处理（物理上仍接近满相，最小照度在方照） | **已修**：三边分别取日心距 / 地心距 / 日地距，唯一换算入口 `planet_illum_from_geometry`（`illum = 0.5*(1+cos χ)`），三后端共用；退化三角形直接报错，不静默兜底。天空视图经 `astronomy/planets.py`（Meeus，本就用真实日心距）未受此缺陷影响；该模块现也不再自写余弦定理，改为调用同一入口（交叉校验 9 时刻最大照度差 2.43×10⁻⁵；另加 4 时刻 × 4 行星的模型精度带约束：`|Δcos χ| ≤ 5×10⁻⁴`、`|Δillum| ≤ 3×10⁻⁴`，实测最坏 2.900×10⁻⁴ / 1.450×10⁻⁴，均出现在 mercury @ 2026-10-25。**1×10⁻⁶ 不可达**——公式已单源，剩余差只来自 Meeus ch.31 与 DE421 的星历精度；谁把任一侧改出该带宽，测试即红） | `pytest tests/test_planet_illumination_real_ephemeris.py`：金星下合 ≤0.02、上合 ≥0.99 且严格 <1，水星上下合两极端，火星冲日 ≥0.99 / 方照 <0.95，木星土星方照 ≥0.98 且与 1 的差 ≥0.002（证明不是夹值），三后端同刻差 ≤0.01（astropy 未安装按环境 skip） |
+| L47 | **`get_planet_position` 把行星日心距与地心距都填成 `pos.distance_au`**，日-行星-地球三角形退化为 `cos χ = R/(2Δ)`：内行星下合余弦被夹到 1（金星下合报告 1.000，物理应 0.006），外行星恒报 0.53–0.87 的假「半亮」（木星方照 0.549，实应 0.991） | 天空线：DE421 逐日扫描地心距角极值定位的真实时刻（2026-10-25 金星下合、2027-05-26 火星方照等）；外行星「合日」被误当新月处理（物理上仍接近满相，最小照度在方照） | **已修**：三边分别取日心距 / 地心距 / 日地距，唯一换算入口 `planet_illum_from_geometry`（`illum = 0.5*(1+cos χ)`），三后端共用；退化三角形直接报错，不静默兜底。天空视图经 `astronomy/planets.py`（Meeus，本就用真实日心距）未受此缺陷影响；该模块现也不再自写余弦定理，改为调用同一入口（交叉校验 9 时刻最大照度差 2.43×10⁻⁵；另加 4 时刻 × 4 行星的模型精度带约束：`|Δcos χ| ≤ 5×10⁻⁴`、`|Δillum| ≤ 3×10⁻⁴`，实测最坏 2.900×10⁻⁴ / 1.450×10⁻⁴，均出现在 mercury @ 2026-10-25。**1×10⁻⁶ 不可达**——公式已单源，剩余差只来自 Meeus ch.31 与 DE421 的星历精度；谁把任一侧改出该带宽，测试即红。**带宽不是「宽到能过」**：两条路径在固定时刻/固定星历下是确定性的，2.900×10⁻⁴ 是常量而非抽样，1.72 倍不是统计裕度；带宽要防的是 1e-2~1e0 量级的传参/公式错——反向变异实测最小 8.48×10⁻³（`r_sun`/`delta` 互换），`r_geo` 填进 `r_helio` 位有一个近退化例 2.24×10⁻⁵（土星 2026-12-30，r_helio≈delta），由同源 1e-12 精确网 `test_ephemeris_illum_matches_same_source_triangle` 兜住；历史错误值 0.86697 / 1.00000 / 0.60227 与当前正确值差 8.66×10⁻¹ / 9.94×10⁻¹ / 3.98×10⁻¹，带宽必红。**若有意升级星历或模型**（换 DE440、换高精度级数），重测后同时更新阈值与本条文档，不许为绿放宽） | `pytest tests/test_planet_illumination_real_ephemeris.py`：金星下合 ≤0.02、上合 ≥0.99 且严格 <1，水星上下合两极端，火星冲日 ≥0.99 / 方照 <0.95，木星土星方照 ≥0.98 且与 1 的差 ≥0.002（证明不是夹值），三后端同刻差 ≤0.01（astropy 未安装按环境 skip） |
 
 ## 附 L：频谱面板几何漂移（既有，冻结期不修；2026-11-05，可发现性线追加）
 
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
 | --- | --- | --- | --- | --- |
 | L48 | **频谱面板比基线矮 12px：320×228 vs 320×240，宽高比 1.4035 vs 1.3333** | 可发现性线：`pytest tests/test_ui_layout_locks.py -k "1000x600 or 1600x900"` 与整文件顺序跑均复现；断言原文 `AssertionError: spectrum 几何漂移: 当前 320x228 基线 320x240（Δw=+0 Δh=-12，像素容差 ±2px；宽高比 1.4035 vs 1.3333 Δ=+0.0702，比例容差 ±0.0194）`；同尺寸的 `adsb_empty` / `freq_readout` 均通过 | **未修**：既有布局问题，2026-11-05 UI 冻结期（等 index.html / Figma 基准对照）不修，基准图不动 | `pytest tests/test_ui_layout_locks.py -k spectrum`；修好后应回到 320×240，不得靠改 `tests/baselines/` 掩盖 |
+
+## 附 M：采样率 0.250 MS/s 证据分级与真机验证（2026-11-05，参数治理线追加）
+
+| 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
+| --- | --- | --- | --- | --- |
+| L49 | **250 kHz 档位：驱动合法区间有依据，真机稳定性未核实** | 驱动依据：librtlsdr 合法区间 `(225000,300000] ∪ (900000,3200000]`、`(300000,900000]` 为死区（本仓落点 `mbdsdr_ai/sdr_backend.py:_clamp_sample_rate`，规则来源 librtlsdr.c）；250k 是低段唯一档（SDR++ `main.cpp:27-39` 名单）。C++ 侧早已在用：`cpp/src/dsp/device_capabilities.cpp:kRtlsdrSrMinHz=250000.0`、`kCandidateRatesHz` 首项 250k、`cpp/tests/test_device_capabilities.cpp` 断言 `opts.contains(250000.0)`。真机依据**缺**：仓内无真机 `get_sample_rate()` 读回、无 10 s 丢样计数；`tests/fake_rtl.py` 接受任意 rate、不校验区间，**测试通过不等于硬件通过** | **未核实（真机）**；驱动侧“合法”已核实。处置已裁定：**不做默认值**；测试不得假定 `set_sample_rate(250_000)` 一定成功；失败必须回落 **1.024 MS/s** 并给可读错误，不许静默吞 | 按 M.2 清单在真机跑一次；通过前 250k 只能作为“可选档 + 失败可回落”，不得进默认、不得进验收基线 |
+
+### M.1 实现约束（写进验收，不写进实现细节）
+
+1. **不做默认**：`mbdsdr_ai/sdr_backend.py:DEFAULT_SAMPLE_RATE_HZ`、`desktop/config_schema.py:sample_rate_hz`、`cpp/src/core/tokens.h:kDefaultSampleRateHz` 一律保持 `2_400_000`；250k 只作为下拉可选档。
+2. **测试不得假设 set 成功**：测试必须写成两分支——
+   - 成功：`set_sample_rate(250_000) is True` 且 `get_sample_rate() == 250_000`（允许驱动读回 ±1 Hz，超出即红）；
+   - 失败：返回 `False` 或抛异常时，必须走回落，**不得**把 `status.sample_rate_hz` 或配置写成 250k；断言最终 `get_sample_rate() == 1_024_000` 且错误文本含“0.250 MS/s”。
+3. **失败回落目标固定 1.024 MS/s，不是“最近档”**：请求值本身是 250k 时，`nearest_sample_rate` 仍会返回 250k；因此失败回退必须是显式 `250k → 1.024M`，不能复用最近档（否则会一直在 250k 上重试）。
+4. **可读错误**：桌面状态栏/日志必须写清“设备不接受 0.250 MS/s（回读 <实际>），已回落到 1.024 MS/s”；只记 `logger.info`、界面不提示 = 不合格。
+5. **回填与写回**：下拉回填到 1.024M，并把实际生效值写回配置，避免每次启动重复回落。
+6. **单位**：一律 `0.250 MS/s`（`desktop/constants.py:format_sample_rate`、移动端 3 位小数 `MS/s`），**不写 `250 kHz`**（文案审计线 U-03 口径）。
+
+### M.2 可执行真机验证清单（RTL-SDR / R820T2，直插 USB，关闭其他占用进程）
+
+| 步 | 操作（可直接复制） | 通过判据 | 失败记录 |
+|---|---|---|---|
+| 0 | `python -c "from mbdsdr_ai.sdr_backend import RTLSDRBackend; b=RTLSDRBackend(0); print(b.connect())"` | `True`，无 USB 权限错误 | 记设备型号/driver/libusb 版本 |
+| 1 | 设 250k 并**立即读回**：`b.set_sample_rate(250_000)` → `b.get_sample_rate()` | 返回 `True`；读回 `250000`（±1 Hz）；`status.sample_rate_hz` 同步 | 记返回值、读回值、`status.last_error` |
+| 2 | 跑 10 s 看丢样：`s0=b.get_status().dropped_samples; time.sleep(10); s1=b.get_status().dropped_samples` | `s1-s0 == 0` 记通过；`>0` 记“高频丢样”并附数值，**不判通过** | 记 `dropped_delta` / `samples_read` / TSC 负载 |
+| 3 | 切回 2.4M：`b.set_sample_rate(2_400_000)` → `b.get_sample_rate()` | `True` 且读回 `2400000` | 记返回值/读回/异常栈 |
+| 4 | 再切 250k 一次 → 读回 | 仍能 `250000`，**不锁死** | 记第几次失败 |
+| 5 | 250k 下 span 观察谱线/瀑布 60 s，并记录 bin 宽 | 不卡死、谱线随频点变化；`250000/2048 ≈ 122.07 Hz`（FFT 2048） | 记截图/卡死时刻/CPU |
+| 6 | 250k 下切一个 tuner 频点（如 88.1M → 145.0M） | 切频后仍返回 250k、无 overflow 激增 | 记读回与 `retune_dropped_samples` |
+
+结果表模板：`设备型号 | 步1 读回 | 步2 dropped_delta | 步3 读回 | 步4 是否锁死 | 步5 bin 宽 | 结论（通过/未通过/部分）`。
+
+### M.3 已知边界（250k 专属，验收时必须写清）
+
+- `cpp/src/control/control_hub.cpp:kScanHalfWindowHz = 200e3`：半窗 200 kHz → 全窗 400 kHz，**超过 250k 档的奈奎斯特 125 kHz**。250k 档下 `start_scan_link` 不能按现参数工作；实现 C 时要么在该档禁用链路扫描并给可读原因，要么把半窗按采样率夹到 `< sr/2`（本项目前未裁定，登记为待办，不得静默给出空扫描结果）。
+- 250k 档的 waterfall/谱线列宽按 FFT 自然变化，无额外最小宽度约束（见账本附录 C.5“瀑布最小宽度”）。
+- 移动端若同时开放 250k，`mobile/lib/pages/spectrum_page.dart` 的“值不在集合回 `.first`”会把 250k 兜底成 1.024M；改档必须先改兜底。
 
