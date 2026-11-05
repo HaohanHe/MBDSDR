@@ -427,7 +427,7 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 > 42 = 37 条「仅行号漂移」+ 5 条「行号漂移 + 操作结果不符」；
 > 10 + 42 = 52，无重叠漏计。
 
-### 9.1 操作结果不符（5 条，已改文案）
+### 9.1 操作结果不符（5 条，文案改法）
 
 | # | code | 原文案 | 问题 | 改法 |
 | --- | --- | --- | --- | --- |
@@ -437,8 +437,10 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 | 38 | `decode_error` | 同上 | 同上 | 同上 |
 | 39 | `not_implemented` | 同上 | 同上 | 同上 |
 
-改法：`desktop/troubleshooting.py` 的 `VISIBLE_NEXT_STEPS["解码结果"]` 已改为
-「采样率到「控制」页签核对后重试」，不再提输入格式。
+改法：`desktop/troubleshooting.py` 的 `VISIBLE_NEXT_STEPS["解码结果"]` 应写为
+「采样率到「控制」页签核对后重试」，不再提输入格式。该文件此刻由
+`接入层健壮性线` 持有 claim，本线这几处改动仍在工作区（未提交），
+故本节不给 hash——等该文件落库后按 9.5 复跑即可核对。
 
 ### 9.2 行号漂移逐条（42 条）
 
@@ -515,7 +517,8 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 另：`insufficient_samples` / `crc_failed` 里的「APRS ≥5s」不是代码阈值——
 `decode_router` 的 APRS `min_duration_seconds=0.2`（最短一帧），5s 是实战余量；
-文案已改为「录满一整帧（实战建议 ≥5s）」，不再把 5s 说成硬性门槛。
+工作区文案写的是「录满一整帧（实战建议 ≥5s）」，不把 5s 说成硬性门槛；
+该改动随 `desktop/troubleshooting.py` 一起未提交，hash 待补。
 
 ### 9.5 复跑
 
