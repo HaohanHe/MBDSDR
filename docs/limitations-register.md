@@ -544,6 +544,14 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 - 250k 档的 waterfall/谱线列宽按 FFT 自然变化，无额外最小宽度约束（见账本附录 C.5“瀑布最小宽度”）。
 - 移动端若同时开放 250k，`mobile/lib/pages/spectrum_page.dart` 的“值不在集合回 `.first`”会把 250k 兜底成 1.024M；改档必须先改兜底。
 
+### M.4 C++ 内核采样率「失败可见 + 硬件读回」证据（2026-11-06，内核线追加）
+
+| 编号 | 条目 | 证据 | 现状 | 边界（必须照实说） |
+| --- | --- | --- | --- | --- |
+| L50 | **C++ 侧采样率写入失败此前不可见** | 旧形态：`cpp/src/dsp/rtl_sdr_source.cpp` 运行时 `setSampleRate` 调 `rtlsdr_set_sample_rate` 不看返回值；`control_hub.cpp:cmdSetSampleRate` 只 `needDbl` 后回填请求值 | **已修**：`RtlSdrSource::pushSampleRate` 检查 rc；rc≠0 **保留原采样率**、记 `sampleRateError_`、`qWarning`，并由 `SpectrumEngine` 发 `sourceError`；`control_hub::set_sample_rate` 按 `tokens::kSampleRatesHz` 逐档比对、档外显式拒绝（与 `agent_tools.cpp:3342-3354` 同文案） | 注入反证：`test_rtl_sdr_tune.cpp:sampleRateRcFailureIsVisible/FailsStart`（假 ops 返回 `-22`）；`test_control_hub.cpp:setSampleRateRejectsOutOfTier` |
+| L51 | **硬件采样率读回此前被当作「不可用」** | 实测：`C:\Users\xxhzb\src\librtlsdr\include\rtl-sdr.h` 声明 `uint32_t rtlsdr_get_sample_rate(rtlsdr_dev_t*)`（注释 “Get actual sample rate the device is configured to”）；`librtlsdr.c` 中 `rtlsdr_set_sample_rate` 末尾把**真实速率**写回 `dev->rate`，`rtlsdr_get_sample_rate` 直接返回它。`build-local/CMakeCache.txt` 锁定该移植树（`C:\Users\xxhzb\src\librtlsdr`） | **已用**：`rtl_sdr_ops.h` 新增 `getSampleRate`（追加在结构体末尾，旧位置初始化自动为 null）；`RtlSdrSource` 写入后读回，不一致时同时报「请求值/读回值」；`get_status` 增加 `sample_rate_readback_available` / `sample_rate_status` / `sample_rate_error` | 读回是**驱动自报值**（已含 PPM 修正、取整），不是独立时钟测量；ops 表无该项（旧假表/无 RTL 后端）时状态串必须是「采样率=请求值，硬件读回不可用」，**禁止**把请求值伪装成读回值。反证：`test_rtl_sdr_tune.cpp:sampleRateReadbackMismatchIsExposed/UnavailableIsHonest` |
+| L52 | **真机逐档读回仍未做** | 同 M.2 步 1/3/4：需直插 RTL 实机逐档 `set → get` 并记 dropped；本轮仅代码与假设备注入验证 | **未核实（真机）** | 215 档/11 档的「驱动接受」可以在假设备上证明，但「硬件真的跑到该速率」只能真机证明；未跑前不得对外称「硬件已读回验证」 |
+
 ## 附 N：桌面自动重连 / 热插拔未接入（2026-11-05，接入层线追加）
 
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
@@ -632,11 +640,11 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 | --- | --- | --- | --- | --- | --- |
 | NanoVNA RH770 半拉谐振（深坑） | 408MHz / -28dB | 文档自述（侦察细扫，未入 24 平均存档） | `experiments/nanovna_rh770/README.md:32,50,53` | 否：无原始单扫数据，且需 VNA+手持 | **未验证（证据不足）** |
 | NanoVNA RH770 全展谐振 | ≈419.5MHz | 文档自述，无采集件 | `docs/learn/agent-onboarding-runbook.md:192`；`docs/learn/sdr-rtltcp-agent-path.md:48` | 否 | **与存档矛盾**：存档 400–455MHz 总体单调下降（|S11| 全局最小在 400.0MHz 端 = 0.1786，RL 14.96dB；455MHz 最差 RL 4.94dB），仅 418–419MHz 有 0.1dB 级浅平台（418.0MHz |S11|=0.3046、RL 10.32dB、VSWR≈1.86），未见 419.5MHz 谐振；1MHz 步长也无法分辨 419.5 |
-| RH770 430 段回损（全展，24 平均存档） | 400MHz 14.96dB；418MHz 10.32dB；419MHz 10.32dB；435MHz 6.66dB；455MHz 4.94dB | 入库扫频 JSON | `experiments/nanovna_rh770/data/rh770.json`（seg1，400–500MHz，101 点/1MHz，前 56 点 400–455） | 是（离线复算：`np.argmin(abs(s11))`） | **有证据**（不支持 419.5MHz 谐振） |
-| 馈线 TDR 单程时延 | 4.89ns（复算 4.885–4.886ns） | 入库 S11 相位斜率 + 分析脚本 | `experiments/nanovna_rh770/data/cable_open.json`；`scripts/vna_cable_analyze.py` | 是（`python scripts/vna_cable_analyze.py` 实测电气长度 1.459/1.556m、435MHz 1.53dB） | **有证据（时延本体）**；长度换算两口径矛盾，见下注 |
+| RH770 430 段回损（全展，24 平均存档） | 400MHz 14.96dB；418MHz 10.32dB；419MHz 10.32dB；435MHz 6.66dB；455MHz 4.94dB | 入库扫频 JSON | `experiments/nanovna_rh770/data/rh770.json`（seg1，400–500MHz，101 点/1MHz，前 56 点 400–455） | 是（自动化：`pytest experiments/tests/test_measured_archive_evidence.py::test_rh770_419_5mhz_resonance_is_untrusted`；容差由数据二阶差分 MAD 推出） | **有证据**（不支持 419.5MHz 谐振） |
+| 馈线 TDR 单程时延 | 4.89ns（复算 4.885–4.886ns） | 入库 S11 相位斜率 + 分析脚本 | `experiments/nanovna_rh770/data/cable_open.json`；`scripts/vna_cable_analyze.py` | 是（`python -m experiments.nanovna_rh770.scripts.vna_cable_analyze`；自动化 `…::test_cable_tau_electrical_and_physical_length`，τ=4.866ns→Le=1.459m→L=0.963–1.021m） | **有证据（时延本体）**；长度换算两口径矛盾，见下注 |
 | 相位残差 | 0.033rad | 无脚本、无输出记录 | 仅见于论文/说明文档 | 部分：复核复算 max 0.037rad / std 0.0155rad（段1） | **未核实** |
 | NanoVNA TCXO 回读 | 26000000Hz | 文档自述 + 回放夹具 | `docs/learn/nanovna/feature-parity.md:674,705`；`mbdsdr_ai/nanovna_dump.py:247`（夹具） | 否：无原始串口日志 | **未验证（证据不足）**（夹具不算真机证据） |
-| 设备抓帧 | 4 帧 320×240、每帧 153600B | 二进制采集件 + PNG | `experiments/nanovna_rh770/data/vna_screen_{live,detail,wide,2m}.{rgb,png}` | 是（离线校验尺寸/非空白） | **有证据** |
+| 设备抓帧 | 4 帧 320×240、每帧 153600B | 二进制采集件 + PNG | `experiments/nanovna_rh770/data/vna_screen_{live,detail,wide,2m}.{rgb,png}` | 是（自动化：`…::test_capture_frames_size_content_and_bmp_derivation`；尺寸/非空白比例/BMP=54+W·H·3） | **有证据** |
 | RGB565→BMP 字节数 | 230454B | 由帧尺寸推导（54+320×240×3） | `docs/learn/nanovna/feature-parity.md:707` | 是（可由 rgb 离线生成） | **有证据（推导值）** |
 | RTL-SDR 435.25MHz Welch PSD 窄带载波数 | 9 个 | 文档自述，无 PSD 图/IQ/脚本输出 | `docs/learn/agent-onboarding-runbook.md:192`；`sdr-rtltcp-agent-path.md:49` | 否 | **未验证（无证据）** |
 | 435.274MHz 窄带 FM 解调 RMS | 0.49（噪声底 0.09） | 同上 | 同上 | 否 | **未验证（无证据）** |
