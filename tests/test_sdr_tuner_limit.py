@@ -98,6 +98,33 @@ def test_in_range_hardware_failure_is_reported_and_faults_tuner():
     assert "故障态" in b.status.error
 
 
+def test_out_of_range_rejection_does_not_brick_same_instance():
+    """越界只拒绝当次请求，不能把设备打成永久故障（900 / 948.5 仍可用）。
+
+    回归背景：``_tuner_faulted`` 的置位只属于「范围内写频重试耗尽」；
+    越界预检在 ``_apply_frequency`` 之前就返回，绝不该顺手置位。否则一次
+    1090 MHz 请求就会让同一后端实例后续所有调谐都报「故障态」，用户只能
+    重连——即「一次越界永久废掉设备」。
+    """
+    sdr = _FakeSdr()
+    b = _mk_backend(sdr=sdr)
+
+    for out_of_range in (1090e6, 948.6e6):
+        assert b.set_frequency(out_of_range) is False
+        assert b._tuner_faulted is False, (
+            f"{out_of_range / 1e6:.3f} MHz 越界被拒后不得进入故障态")
+    assert sdr.set_values == [], "越界请求不得触达硬件"
+
+    # 同一实例继续正常调谐：实测上界以下都应按真实写入返回 True。
+    assert b.set_frequency(900e6) is True
+    assert b.status.frequency_hz == 900e6
+    assert b.set_frequency(948.5e6) is True
+    assert b.status.frequency_hz == 948.5e6
+    assert b.status.error == ""
+    assert b._tuner_faulted is False
+    assert sdr.set_values == [900_000_000, 948_500_000]
+
+
 def test_readback_mismatch_is_not_reported_as_success():
     """写入没抛错但回读不匹配 → 仍是失败，不许把没生效装成生效。"""
     sdr = _FakeSdr(readback_delta_hz=1_000_000)
