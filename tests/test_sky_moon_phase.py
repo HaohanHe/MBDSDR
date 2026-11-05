@@ -14,7 +14,9 @@ tests/test_sky_moon_phase.py
   8. 拾取用绘制层同一份位置与半径（窄 FOV 下旧 geocentric 位置会漏）；
   9. 尺寸限幅与 DSO 同一口径（真实视半径 > 视口短边 40% 才截断并标「已限幅」）；
  10. 相位角优先取历表 phase_angle_deg（缺测才退回 2·illum−1，不另算模型）；
- 11. 多工况朝向：蛾眉/上弦/满月/下弦 × 不同时角 × 南半球真实历表。
+ 11. 多工况朝向：蛾眉/上弦/满月/下弦 × 不同时角 × 南半球真实历表；
+ 12. 像素亮区质心偏心率：蛾眉明显偏离圆心（有方向性），满月/均匀圆盘
+     接近 0（同一条度量能把「固定圆点」与「真实形状」区分开）。
 
 反证（同一场景，旧实现必红）：
   - 旧绘制恒为 6px 实心圆 → 面积比例恒 1.0，illum=0.25/0.5/0.75 的断言全红；
@@ -42,7 +44,7 @@ import numpy as np  # noqa: E402
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QImage, QPainter, QTransform  # noqa: E402
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QTransform  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -651,6 +653,77 @@ def test_bright_side_faces_sun_across_phases_and_hour_angles(
             cn = math.hypot(*centroid)
             assert cn > 0.05 * r, (centroid, r)
             assert (centroid[0] * ux + centroid[1] * uy) / cn > 0.8
+    finally:
+        v.close()
+
+
+def _uniform_disk_eccentricity(size=400, radius=40.0):
+    """反证基线：旧实现「固定圆点/均匀圆盘」在同一度量下的偏心率。
+
+    这不是模拟「旧代码能跑」——旧代码的绘制调用就是一次实心圆。用同一
+    份 `_bright_stats` 度量均匀圆盘，得到的质心偏心率必然 ≈0，才能证明
+    下面的新月断言确实来自「形状」而不是度量本身的偏差。
+    """
+    img = QImage(size, size, QImage.Format_ARGB32)
+    img.fill(QColor(0, 0, 0))
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(MOON_COLOR))
+    p.drawEllipse(QPointF(size / 2.0, size / 2.0), radius, radius)
+    p.end()
+    centroid, count = _bright_stats(img, size / 2.0, size / 2.0, radius)
+    assert centroid is not None
+    ecc = math.hypot(*centroid) / radius
+    lit_frac = count / (math.pi * max(1.0, radius - 1.0) ** 2)
+    return ecc, lit_frac
+
+
+@pytest.mark.parametrize("illum,sun_az,sun_alt,min_ecc", [
+    (0.12, 120.0, 40.0, 0.40),   # 蛾眉：亮区挤在一侧，质心明显离圆心
+    (0.50, 250.0, 25.0, 0.25),   # 弦月：半盘质心 ≈ 4r/(3π) ≈ 0.42r
+    (1.00, 10.0, -20.0, 0.00),   # 满月：对称整盘，质心 ≈ 圆心
+])
+def test_bright_region_eccentricity_separates_shape_from_dot(
+        illum, sun_az, sun_alt, min_ecc):
+    """像素亮区质心偏心率：真实形状 vs 固定圆点。
+
+    - 旧实现（固定 6px/均匀圆盘）：偏心率 ≈0、亮区占比 ≈1；
+    - 新实现蛾眉/弦月：偏心率显著 >0 且方向与「月心→太阳」一致；
+    - 新月（illum≈0.12）的亮区占比还会显著偏离 0.5（不是半盘）。
+    """
+    ecc_disk, lit_disk = _uniform_disk_eccentricity()
+    assert ecc_disk < 0.02, "均匀圆盘的质心偏心率应为 0（度量自检）"
+    assert lit_disk > 0.95
+
+    v = _new_view(400)
+    try:
+        moon_az, moon_alt = 180.0, 35.0
+        _set_bodies(v, moon_az, moon_alt, sun_az, sun_alt, illum, 0.5)
+        v.view_state.look_at(moon_az, moon_alt)
+        v.view_state.fov_deg = 3.0
+        frame = v._moon_screen_frame()
+        assert frame is not None and frame["ux"] is not None
+        ux, uy = float(frame["ux"]), float(frame["uy"])
+
+        img = _render(v, 400, 400)
+        c = frame["center"]
+        r = float(frame["radius_px"])
+        centroid, count = _bright_stats(img, c.x(), c.y(), r)
+        assert centroid is not None
+        ecc = math.hypot(*centroid) / max(1.0, r)
+        lit_frac = count / (math.pi * max(1.0, r - 1.0) ** 2)
+
+        assert lit_frac == pytest.approx(illum, abs=0.07)
+        if illum < 0.95:
+            assert ecc > min_ecc, f"亮区质心偏心率 {ecc:.3f} 未超过 {min_ecc}"
+            assert math.hypot(*centroid) > 0.05 * r
+            dot = (centroid[0] * ux + centroid[1] * uy) / math.hypot(*centroid)
+            assert dot > 0.8, f"亮区质心不朝太阳方向：dot={dot:.3f}"
+            if illum <= 0.2:
+                assert abs(lit_frac - 0.5) > 0.25, "蛾眉亮区占比应显著偏离半盘"
+        else:
+            assert ecc < 0.05, f"满月亮区质心应居中：ecc={ecc:.3f}"
     finally:
         v.close()
 
