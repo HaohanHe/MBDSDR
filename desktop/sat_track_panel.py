@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional, Dict
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QComboBox,
     QDoubleSpinBox, QPushButton, QProgressBar, QGroupBox, QMessageBox,
@@ -68,9 +68,15 @@ class SatTrackPanel(QFrame):
         self.setObjectName("satTrackPanel")
         self.setFrameShape(QFrame.StyledPanel)
         self._tracking = False
+        # 窄屏「可折叠面板」：收起的是分组框正文，标题行与指示符始终可见。
+        self._collapsible_boxes: list[QGroupBox] = []
+        self._collapse_applied = False
         # 过境列表筛选门从这里读（不是当前可见门，见模块顶部注释）。
         self._settings = settings
         self._build_ui()
+        # 面板可能一直藏在非当前页签里（永不触发 showEvent），所以在事件循环
+        # 第一次空闲时也判定一次；此时主窗口几何已就绪。
+        QTimer.singleShot(0, self._apply_narrow_defaults)
         # 面板级 setStyleSheet 已删除，由全局 dark_car QSS 接管按钮/分组框/标签样式。
 
     # ------------------------------------------------------------------ UI
@@ -91,6 +97,7 @@ class SatTrackPanel(QFrame):
 
         # ---- 卫星选择 + 下行频率 ----
         sel_box = QGroupBox("目标卫星")
+        self._make_collapsible(sel_box, "目标卫星", 2, "satSelBox")
         form = QFormLayout(sel_box)
         self.sat_combo = QComboBox()
         self.sat_combo.setMinimumWidth(220)
@@ -128,6 +135,7 @@ class SatTrackPanel(QFrame):
 
         # ---- 实时数据 ----
         data_box = QGroupBox("实时状态")
+        self._make_collapsible(data_box, "实时状态", 6, "satDataBox")
         dform = QFormLayout(data_box)
         self.az_label = QLabel("--")
         self.el_label = QLabel("--")
@@ -146,6 +154,7 @@ class SatTrackPanel(QFrame):
 
         # ---- 仰角指示器（0-90° 进度条）----
         el_box = QGroupBox("仰角指示器")
+        self._make_collapsible(el_box, "仰角指示器", 2, "satElBox")
         el_layout = QVBoxLayout(el_box)
         self.el_bar = QProgressBar()
         self.el_bar.setRange(0, 90)
@@ -164,6 +173,55 @@ class SatTrackPanel(QFrame):
         root.addWidget(el_box)
 
         root.addStretch(1)
+
+    # ------------------------------------------------------- 窄屏可折叠
+    def _make_collapsible(self, box: QGroupBox, label: str, count: int,
+                          object_name: str) -> None:
+        """把分组框改成「可折叠」：收起只留标题行 + 指示符，正文隐藏。
+
+        可达性口径（docs/narrow-screen-plan.md §2.6）：
+        * 标题行始终可见，且写出「里面有什么」与条目数；
+        * 指示符 ▼=已展开 / ▶=已收起，tooltip 写清点击后的动作；
+        * 控件一个不删——收起只是 ``setChecked(False)``，子控件仍可按属性名取到。
+        """
+        box.setObjectName(object_name)
+        box.setCheckable(True)
+        box.setChecked(True)
+        self._collapsible_boxes.append(box)
+
+        def _sync(checked: bool) -> None:
+            box.setTitle(f"{'▼' if checked else '▶'} {label} · {count} 项")
+            box.setToolTip("点击标题收起" if checked
+                           else "已收起，点击标题展开")
+            # 收起必须真的隐藏正文：Qt 的可勾选 QGroupBox 只置灰不隐藏，
+            # 高度不会降。控件本身保留（不删），只是 setVisible(False)。
+            lay = box.layout()
+            if lay is not None:
+                for i in range(lay.count()):
+                    it = lay.itemAt(i)
+                    w = it.widget() if it is not None else None
+                    if w is not None:
+                        w.setVisible(checked)
+
+        box.toggled.connect(_sync)
+        _sync(True)
+
+    def _apply_narrow_defaults(self) -> None:
+        """窄屏（<1440）首次判定：默认收起「实时状态」「仰角指示器」。
+
+        目标卫星分组保持展开（开始跟踪要先选卫星）；只判定一次，避免窗口
+        拖动来回抖动。宽屏保持全展开。默认态**不持久化**（见 plan §2.6）。
+        """
+        if self._collapse_applied:
+            return
+        self._collapse_applied = True
+        if self.window().width() < 1440:
+            for box in self._collapsible_boxes[1:]:
+                box.setChecked(False)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_narrow_defaults()
 
     # ------------------------------------------------------------ 对外接口
     def populate_satellites(self, names):
