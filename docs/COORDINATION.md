@@ -927,6 +927,16 @@ $msg | git commit --only -F - -- <自己的路径...>
 
 ### 6.10 历史改写事件（2026-11-05，主分支两次被 reset）
 
+**前置规矩（上游真因，比「禁止 reset」更早一步）**
+
+误用 `git commit --only <paths>` 卷走他人改动后，自行 `git reset` 回退重打属违规。
+`--only` 提交的是这些路径在**工作区**的内容，不是暂存区内容；只要文件里还有他人
+未提交的改动，`--only` 必然一起扫走。正确做法：把要提交的 hunks 单独进 index
+（`git apply --cached` 或独立 `GIT_INDEX_FILE`），然后**不带 `--only`** 直接
+`git commit`。今天 7 次破坏性 reset 中**至少 4 次**是「`--only` 扫走别线内容 →
+reset --mixed 回退 → 同标题重打」（12:05 / 12:24 / 12:54 / 22:39:59）；16:35:59
+形态相同（重提漏掉 `main_window.py`），但「扫走了谁的内容」无法证明，只按无法定人记。
+
 **铁律（立即生效，不是建议）**
 
 1. **禁止用 `git reset` 移动 `main`**：含 `--soft` / `--mixed` / `--hard`，也含无参数
@@ -1010,8 +1020,24 @@ $msg | git commit --only -F - -- <自己的路径...>
 | 12:05:13 | HEAD~1 | 破坏性 |
 
 即 **7 次破坏性 reset + 1 次 no-op**；22:33:31 / 22:34:00 / 22:39:59 同秒的
-`moving to HEAD` 与重复目标均为 no-op，不计。（12:54:09 / 12:24:39 / 12:05:13
-三次的逐笔去向本轮未取证，需回溯时另开一笔。）
+`moving to HEAD` 与重复目标均为 no-op，不计。
+
+**12:xx 三次的定人与形态（补查，23:05）**
+
+- **三次均「无法定人」**：claim 台账首条记录是 12:49:06，`12:05:13` / `12:24:39`
+  时点完全无记录；`12:54:09` 时点相关文件（`config_schema.py` / `rf_sky_view.py` /
+  `settings_panel.py` / `spectrum_widget.py` / `docs/settings-inventory.md`）的
+  claim 最早也到 12:56:54 之后。**没有台账证据就不写人名**，只能按提交内容猜归属。
+- **三次同一形态**：提交后 4–34 秒 `reset: moving to HEAD~1`，随即以同标题重提
+  （`a59f98f8→db87425d`、`9798ece0→95087ccc`、`ceb086b9→fba509bd`），且**重提都
+  比原提交少了内容**——原提交扫进了别线的在途改动，重提把它剥掉：
+  - 12:05 那次：`spectrum_widget.py` 重提相对原提交 −84/+27（剥掉他人快捷符号绑定）；
+  - 12:24 那次：`main_window.py` −15/+9（剥掉他人 tooltip 文案改动）；
+  - 12:54 那次：跨 8 文件 −414/+53（`config_schema.py`、`rf_sky_view.py`、
+    `settings_panel.py`、`spectrum_widget.py`、`docs/settings-inventory.md`、
+    `star_catalog.py`、两个测试）。
+  这正是本节「前置规矩」的实例：真正的错在 `--only`/宽索引扫走他人内容，reset 只是事后补救，
+  但补救方式选择了改写历史。
 
 **处置要求**
 
