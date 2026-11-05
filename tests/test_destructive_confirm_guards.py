@@ -314,6 +314,100 @@ def test_switch_device_while_tx_cancel_keeps_current(window, monkeypatch):
         w._active_sdr_backend = None
 
 
+def test_switch_device_keeps_current_tuning(window, monkeypatch):
+    """切换设备沿用切换前的调谐，不得退回落 98.5 MHz 默认。"""
+    w, mw = window
+    w.control_panel.set_sdr_connected(True)
+    w.control_panel._freq_hz = 144_390_000.0
+    captured = {}
+
+    class _OldBackend:
+        pass
+
+    class _NewBackend:
+        device = type("Dev", (), {"name": "new-dev", "max_gain": 40.0})()
+        status = type("St", (), {"connected": True, "error": "",
+                                 "gain_db": 0.0})()
+
+        def connect(self):
+            return True
+
+        def get_status(self):
+            return self.status
+
+        def set_sample_rate(self, v):
+            captured["sr"] = v
+
+        def set_bandwidth(self, v):
+            captured["bw"] = v
+
+        def set_frequency(self, v):
+            captured["freq"] = v
+
+        def set_ppm(self, v):
+            pass
+
+        def set_offset_tuning(self, v):
+            pass
+
+        def set_agc(self, v):
+            pass
+
+        def set_gain(self, v):
+            pass
+
+        def disconnect(self):
+            pass
+
+    # 模拟真实 teardown：连接态清零（频率真值随之清空）
+    monkeypatch.setattr(
+        w, "_teardown_connection",
+        lambda: w.control_panel.set_connected(False))
+    for name in ("_panels_set_sdr_connected", "_start_iq_streams",
+                 "_update_status_bar", "_refresh_tx_readout",
+                 "_refresh_tx_button_state", "_show_error_status"):
+        monkeypatch.setattr(w, name, lambda *a, **k: None)
+
+    w._active_sdr_backend = _OldBackend()
+    try:
+        assert w._connect_backend(_NewBackend()) is True
+        assert captured["freq"] == 144_390_000.0, \
+            f"切换设备后频率回落到 {captured.get('freq')}"
+    finally:
+        w._active_sdr_backend = None
+        w.control_panel.set_sdr_connected(False)
+        w.control_panel._freq_hz = None
+
+
+def test_record_toggle_is_idempotent(window, monkeypatch):
+    """连点两次「录音」只起一次/停一次（重复点击不得重入）。"""
+    w, mw = window
+    calls = []
+
+    def _fake_start():
+        if not w._recording:      # 与真实 _start_recording 相同的状态副作用
+            w._recording = True
+            calls.append("start")
+
+    def _fake_stop():
+        if w._recording:
+            w._recording = False
+            calls.append("stop")
+
+    monkeypatch.setattr(w, "_start_recording", _fake_start)
+    monkeypatch.setattr(w, "_stop_recording", _fake_stop)
+    w._recording = False
+    try:
+        w._apply_recording(True)
+        w._apply_recording(True)
+        assert calls == ["start"], f"重复开始录音被重入: {calls}"
+        w._apply_recording(False)
+        w._apply_recording(False)
+        assert calls == ["start", "stop"], f"重复停止录音被重入: {calls}"
+    finally:
+        w._recording = False
+
+
 class _FixedDateTime:
     _fixed = __import__("datetime").datetime(2026, 11, 6, 1, 23, 45)
 

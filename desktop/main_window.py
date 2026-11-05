@@ -3519,6 +3519,15 @@ class MainWindow(QMainWindow):
         # B1：切换设备必须先幂等拆除旧连接（停读线程/释放硬件/清 UI 连接态）。
         # 不拆旧后端会出现两种坏状态：旧后端继续供数（界面换了、数据还是旧的）；
         # 同一根棒子被自己占着，新 connect 直接 ACCESS(-3) 失败。
+        # 切换设备前先抓住当前调谐：teardown 会 set_connected(False) 清空
+        # 频率真值，不先存就会退回落 98.5 MHz 默认——用户切个设备就被换台。
+        carried_freq = None
+        if self._active_sdr_backend is not None:
+            try:
+                carried_freq = float(self.control_panel.get_frequency_hz())
+            except Exception as exc:  # noqa: BLE001 - 读不到就退回默认，但要留证
+                logger.warning("切换设备前读取当前频率失败: %s: %s",
+                               type(exc).__name__, exc)
         previous = self._active_sdr_backend
         if previous is not None:
             # 防呆：发射中切换设备会立即停波并释放设备，先确认；
@@ -3528,6 +3537,16 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("已取消切换（发射继续）", MSG_NORMAL)
                 return False
             self._teardown_connection()
+        # 连接是同步阻塞调用（远端后端默认 5s 超时）：先把「连接中」写上并
+        # 冲一次事件循环，否则用户在最长 5s 内看到的仍是旧标签（假状态）。
+        try:
+            name = getattr(getattr(backend, "device", None), "name", "") or "设备"
+            self.conn_label.setText(f"  状态: 连接中 {name}  ")
+            self.status_conn.setText(f"连接中 {name}")
+            self.statusBar().showMessage(f"正在连接 {name} ...", MSG_QUICK)
+            QApplication.processEvents()
+        except Exception:
+            pass
         try:
             ok = backend.connect()
         except Exception as e:
