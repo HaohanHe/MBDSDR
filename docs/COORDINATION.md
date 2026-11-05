@@ -1684,17 +1684,25 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 
 | 用例 | 断言 | 成因 | 引入者 | owner | 下一步 |
 |---|---|---|---|---|---|
-| display::reRenderHistoryOnPaletteSwitch | 灰阶 t=0.9 → 229 | HEAD `spectrum_display.cpp:692/704` 用 `tokens::kDbUpperDefault` 当显示上限硬夹，`tokens.h:336` 已是 **-20** → `setDbRange(-100,0)` 被夹成 -20，t=1.125 饱和 255 | `65163cf6` 11-05 16:05 | 采样率真值线 | 在途修（工作区已拆 `kDbViewUpperDefault=-20` + `kDbCeilingMax=0`，未提交） |
+| display::reRenderHistoryOnPaletteSwitch | 灰阶 t=0.9 → 229 | HEAD `spectrum_display.cpp:692/704` 用 `tokens::kDbUpperDefault` 当显示上限硬夹，`tokens.h:336` 已是 **-20** → `setDbRange(-100,0)` 被夹成 -20，t=1.125 饱和 255 | `65163cf6` 11-05 16:05 | 采样率真值线 | **已修 `ef07c133`**（拆分常量，未改期望值；复跑与反证见本节末） |
 | display::loadColormapFileRoundTrip | 同上 229 | 同上 | 同上 | 同上 | 同上 |
 | display::manualRangeChangeRecoloursWholeHistory | 改量程后历史必须变色 | 两量程同被夹到 -20，结果相同 → 像素不变（:1400） | 同上 | 同上 | 同上 |
-| autorange::defaultCeilingStaysAtFullScale | `currentDbCeil()==0` | auto 目标 `clamp(...,-40,kDbUpperDefault)` 落 -20 | 同上 | 同上 | 同上 |
+| autorange::defaultCeilingStaysAtFullScale | `currentDbCeil()==0` | auto 目标 `clamp(...,-40,kDbUpperDefault)` 落 -20 | 同上 | 同上 | **已修 `ef07c133`**（复跑与反证见本节末） |
 | autorange::strongSignalPullsCeilingDownSmoothly | 单帧 ≤1.5 dB | 目标钉边界后步长超限（:140） | 同上 | 同上 | 同上 |
 | autorange::ceilingRecoversWhenSignalFalls | 回 0 | 同上（:158） | 同上 | 同上 | 同上 |
 | autorange::freezeThenWeakFrameDoesNotMoveCeiling | `> -15` | 冻结值 -20（:212） | 同上 | 同上 | 同上 |
 | autorange::freezeHonestEmptyState | 冻结值一致 | 同上（:240） | 同上 | 同上 | 同上 |
 
-构建阻塞：`cmake --build` 报 `main_window.cpp:5644: 'kDbUpperDefault' is not a member of 'mbdsdr::tokens'`
-——他线 tokens.h 改名后未同步 main_window.cpp，8 槽未修完，不能算已清。
+**状态：已修 `ef07c133`**（2026-11-06 03:28:30，8 文件 +35/−19）。根因是
+`tokens::kDbUpperDefault` 一个常量同时承担「默认视窗上限」与「显示天花板硬上限」两种语义，
+拆为 `kDbViewUpperDefault=-20` / `kDbCeilingMax=0`，并同步 `main_window.cpp`、
+`settings_dialog.cpp`、`spectrum_display.cpp`、`spectrum_widget.cpp`。**未改任何期望值**。
+（原构建阻塞 `main_window.cpp:5644: 'kDbUpperDefault' is not a member of 'mbdsdr::tokens'`
+已随本笔同步消除。）
+
+复跑：`ctest -R "^(spectrum_display|spectrum_autorange)$"`（两个目标；连同全部频谱与 UI
+集成共 10 个 ctest 全绿）。
+反证：把 `kDbCeilingMax` 改回 `-20` → 红项槽级明细与修复前逐字一致。
 
 ## C. 断言闸门
 
