@@ -1744,8 +1744,8 @@ void SpectrumEngine::run() {
         for (auto c : iq) rssi += std::norm(c);
         rssi = 10 * std::log10(rssi / iq.size() + 1e-10);
         // Snapshot for the decoupled band-scan driver (rssiDbfs()). Only reachable
-        // when a real block was read (got>0 above), so the honest empty source
-        // leaves it at the -100 dBFS quiet default -- no fabricated busy level.
+        // when a real block was read (got>0 above); before the first block the
+        // header keeps rssiDbfs_ at NaN (unknown), not a -100 dBFS quiet default.
         rssiDbfs_.store(static_cast<float>(rssi));
         emit rssiLevel(static_cast<float>(rssi));
 
