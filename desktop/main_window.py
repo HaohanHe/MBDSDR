@@ -8452,6 +8452,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "关于 MBDSDR",
             "<h3>MBDSDR - AI 定义无线电</h3>"
+            f"<p>版本 v{QApplication.applicationVersion()}</p>"
             "<p>开源 MIT 许可的软件定义无线电平台（独立实现）</p>"
             "<p>呼号：在「设置」中配置</p>"
             "<p>对标 GNU Radio / SDR++ / SatDump 等开源项目能力，独立实现（未包含其源代码）</p>"
