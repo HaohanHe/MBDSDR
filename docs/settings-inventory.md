@@ -841,4 +841,101 @@ last-write-wins。故本轮只登记、不实现。
 我方后 load"）不可见。即便无痕，也不会丢"多份配置"：每次写入都是完整 payload，
 丢的是被覆盖的那个键的旧值，磁盘上仍有赢家的完整配置。
 
+### 18.9 数值型恢复项的逐个审计（除采样率外，2026-11-06）
+
+口径与 §18.6 的采样率一致：**恢复 setter 只改控件显示，不向 main_window 发
+变更信号，因此不直接下发后端**；真正的下发发生在 `_connect_backend`（连接时
+参数）或用户再次操作控件时。逐项判"会不会塞进后端做不到的值 / 有没有可见
+提示 / 缺口在哪"：
+
+| 项名（settings 键） | 恢复路径 | 现在会不会塞进后端做不到的值 | 有没有可见提示 | 缺口在哪 |
+|---|---|---|---|---|
+| `frequency_hz` | `_apply_restored_settings` → `control_panel.set_frequency_hz`（全局钳位 10 kHz–6 GHz）；连接时 `_connect_backend` 把 `control_panel.get_frequency_hz()` 交给 `backend.set_frequency` | 恢复本身不下发；连接时会把钳位后的值下发。若超出 `backend.device.frequency_range`，基类 `set_frequency` 直接 `return False`（不设 `status.error`），调用处只 catch 异常、不检查返回值 → **后端未生效、界面仍显示配置值** | 本轮补：恢复被全局钳位时 `freq_input` tooltip 追加「⚠ 配置请求 X 低于/高于全局调谐范围 […]，已按边界 Y 显示（配置文件未改）」+ `logger.warning`；合法值还原静态说明。**设备能力层越界下发仍无提示** | 设备能力校验缺在 `main_window._connect_backend`（该文件被操作逻辑线持有，补丁口径见 §18.10 末尾）。本行其余部分已修 |
+| `sample_rate_hz` | `control_panel.set_sample_rate`（最近档 + ⚠/tooltip/warning） | 恢复值不下发；连接时下发的是对话框档位（`device_panel.sr_edit` 已有 `check_range`）或自动连接常量 2.048 MS/s | 有（§18.6 已修） | 无（"恢复值不参与连接"见 §18.10 的 `status_sr` 口径） |
+| `gain_db` | `control_panel.set_gain`（未连接按 [0, 49] dB 钳位）；连接后 `main_window` 调 `control_panel.set_gain_range(0, device.max_gain)` 收放滑杆 | 恢复值不下发（连接用 `gain` 参数=对话框值/常量 20；AGC 开时更不下发）。连接后收放滑杆时，QSlider.setRange 会把超界值夹到设备上限并触发 `valueChanged`——此前会经 `_on_gain_changed` 写回 `settings` | 本轮补：`set_gain` 被钳位时 `gain_slider` tooltip 追加「⚠ 配置请求 X dB 超出未连接时的显示范围 [0, 49] dB，已按 Y dB 显示（配置文件未改）」；`set_gain_range` 夹值时追加「⚠ 当前增益 X dB 超出所连设备能力 […] dB，已按 Y dB 显示（配置文件未改）」，并 **blockSignals 防回写** | 无能力越界缺口；"恢复值不参与连接下发"属 main_window 面（行为与 `agc_enabled` 同：恢复的是界面意图，不是连接参数） |
+| `bandwidth_hz` | `control_panel.set_vfo_bandwidth`（无精确档位时选最近可见档） | 恢复本身不下发；连接时 `_connect_backend(bandwidth=…)` 默认 0.0（自动），恢复值不下发。用户之后再选档才走 `_on_vfo_bandwidth_changed` → `backend.set_bandwidth` | 本轮补：替换时 `vfo_bw_combo` tooltip 追加「⚠ 配置请求 X Hz 解调带宽不在当前可见档位，已按最近档 Y Hz 显示（配置文件未改）」+ `logger.warning`；精确命中/用户选档/切模式时还原静态说明 | 静默替换已修；"恢复值不下发"在 main_window 面（与之相对，用户手动选档的值是下发的） |
+| `ppm` | **无 settings 键**（`config_schema.py` 无此键），无恢复路径 | 否：只有连接对话框 `ppm_spin`（控件范围 -1000–1000）与 rtl_tcp 构造参数 | 不适用 | 无 |
+| `offset_tuning` / `dc_removal` / `iq_balance` | **无 settings 键**，无恢复路径（`set_offset_tuning` 等只在用户操作时下发） | 否（每次启动回到默认） | 不适用 | 无（如需持久化，属功能缺口而非能力缺口） |
+| `agc_enabled` | `control_panel.set_agc`（bool） | 否（无越界概念）；恢复值不参与连接下发 | 静态 tooltip 说明勾选语义 | 无能力缺口；"恢复值不下发"同上 |
+| `agc_speed` | `control_panel.set_agc_speed`（枚举归一，非法回落 medium） | 否（音频 AGC 档位，非硬件能力） | 下拉自解释 | 无 |
+| `volume` | `main_window` 恢复 → `control_panel.set_volume`；schema 0–100、slider 0–100 | 否（音频增益，非 SDR 后端能力） | 滑块即时读数 | 无 |
+| `squelch_default_db` | 桌面 DSP 默认余量；schema [-100, -20] | 否（不下发 SDR 硬件；语义为余量刻度） | 滑块即时读数 | 无 |
+
+**落库状态（2026-11-06 03:00）**：`desktop/control_panel.py` 被 `采样率真值线`
+claim（pid=7052，acquired 02:49，TTL 至 03:49）。表中标注「本轮补」的
+control_panel 改动**已完成并本地验证**，但按占用纪律不在持有期内提交；等释放后
+与 `tests/test_settings_robustness_extras.py` 同一提交落库，交接说明见
+`docs/pending-patches/2026-11-06-restore-capability-hints.md`。`frequency_hz` 的
+设备能力层与 `status_sr` 仍按 §18.10 转给 `main_window.py` 持有线。
+
+**不在本表**：`sky_pressure_hpa`、`sky_temperature_c`、`bortle`、`peak_threshold_db`、
+`sky_extinction_k`、`pass_min_elevation_deg`、`pass_window_hours`、`rc_port`、
+`web_port` —— 这些是本地天文计算/服务端口项，**不向 SDR 后端下发**，schema
+边界即校验，不适用"设备能力"判定。
+
+**本轮修复的共同做法**（与 §18.6 采样率一致）：恢复值被替换/钳位时——
+① 控件 tooltip 追加「⚠ 配置请求 … 已按 … 显示（配置文件未改）」，保留原静态说明；
+② `logger.warning` 留痕；③ **不把替换后的值写回 `desktop_settings.json`**（用户
+原始意图保留）；④ 请求值与显示值相等时不得添加任何字符（用户再次操作后提示清除）。
+`set_gain_range` 还额外 `blockSignals`，阻断 QSlider 夹值经 `_on_gain_changed`
+写回配置。
+
+### 18.10 `status_sr`（`main_window.py:2710`）判定口径（转操作逻辑线）
+
+**目标**：状态栏的采样率读数必须能回答"配置请求的采样率到底生效了没有"，
+且**不得**给正常情况添加任何修饰。
+
+**比对对象**
+- 请求值：`self.settings.get("sample_rate_hz")`（配置文件原值，不做归一）；
+- 生效值：当前活跃后端的真实值 `backend.get_sample_rate()`（等价于
+  `SDRStatus.sample_rate_hz`，各后端在 `connect()`/`set_sample_rate()` 后写入
+  实际生效档，不保证等于请求值）。
+
+**判定规则**
+1. 无活跃后端、或生效值为 `None`/NaN/≤0（后端未报告）→ **不比较**，保持现状
+   （`采样率: —`），不追加任何字符；
+2. 请求值缺失/非法（`None`/NaN/≤0）→ **不比较**，不追加；
+3. 否则按浮点近似比较：`math.isclose(requested, effective, rel_tol=1e-6,
+   abs_tol=1.0)`（采样率是整数 Hz，1 Hz 以内视为相等；禁止逐字符串比较）；
+4. 相等 → 文本必须是 `采样率: {format_sample_rate(effective)}`，**不得**追加
+   括号、空格、星号或任何字符；
+5. 不等 → 在既有读数后追加固定格式：
+   `采样率: {format_sample_rate(effective)}（配置请求 {format_sample_rate(requested)} 未生效）`
+   （两个数值都走 `format_sample_rate`，即 `MS/s`、3 位小数，与 §18.6/§U-03
+   同一口径；中文全角括号，前后无额外空格）。
+
+**为什么是"追加"而不是"替换"**：状态栏的主读数永远是**后端实际生效值**，
+配置请求只作为括号里的解释；绝不能把请求值伪装成生效值。
+
+**反证设想**（给持有线的验收用例）
+- 配置 `sample_rate_hz = 1_000_000_000`（1 GHz），假后端 `get_sample_rate()`
+  返回 `3_200_000`（3.2 MS/s）→ `_update_status_bar` 后 `status_sr.text()`
+  必须包含 `未生效`，且同时出现 `3.200 MS/s` 与 `1000.000 MS/s`；
+- 配置 1 GHz、后端生效 1 GHz（如 network_iq 真实支持该档）→ 文本**不得**包含
+  `未生效`，且与"不比较"分支输出逐字符相同（例如
+  `采样率: 1000.000 MS/s`）——用 `==` 断言整串，防止偷偷加空格/符号。
+
+**与恢复链的关系（已知设计缺口，一并转交）**：目前启动自动连接固定用
+`sample_rate=DEFAULT_SAMPLE_RATE_HZ`，手动连接用对话框档位；`_apply_restored_settings`
+恢复的 `sample_rate_hz` 并不参与连接下发。因此上述口径一旦落地，只要配置文件
+与连接参数不同，状态栏就会持续显示「未生效」——这是**如实反映**，不是误报。
+两条出路由持有线裁定：(a) 连接时把恢复值作为首选档下发（先过 §18.7 的设备
+能力校验，后端不支持则由后端按最近档回落）；(b) 保留现状，把持续「未生效」
+作为可观测的已知限制。无论选哪条，**不得**通过改写配置文件来消除这句提示。
+
+**同批转交：`frequency_hz` 连接下发缺口补丁口径**
+- 位置：`_connect_backend` 中 `backend.set_frequency(default_freq)`（约 3673 行）；
+- 改法：记录返回值 `ok = backend.set_frequency(default_freq)`；调用前用
+  `backend.device.frequency_range` 判定，越界或 `ok is False` 时向状态栏追加
+  `初始频率 {请求值} 超出设备能力 [{lo}, {hi}]，未下发`，并**保留配置原值**
+  （不写回、不把界面显示改成钳位值之外的值）；基类 `set_frequency` 越界时
+  只是 `return False`，不写 `status.error`，所以调用处必须自己检查返回值；
+- 反证：假设备 `frequency_range=(24e6, 1766e6)` + 配置 `frequency_hz=2.4e9`
+  → 连接后状态栏必须出现「超出设备能力 / 未下发」；配置落在范围内且
+  `set_frequency` 返回 True → 不得出现。
+- 同位置如要一并修 `bandwidth_hz` 恢复值不下发：把调用处
+  `backend.set_bandwidth(float(bandwidth))` 的实参改为"恢复后可见档位"
+  （当前 `_connect_backend` 默认 `bandwidth=0.0`），取值来源必须是
+  `control_panel` 的当前解调带宽，不得直接读配置原值（原值可能不在可见档位）。
+
 
