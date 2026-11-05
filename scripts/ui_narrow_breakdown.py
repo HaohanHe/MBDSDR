@@ -383,10 +383,10 @@ def main() -> int:
         cb = QComboBox()
         cb.addItems(["FM"])
         text_tabs = QTabWidget()
-        for t in ("天空模式", "卫星跟踪", "频谱"):
+        for t in ("星象仪模式", "卫星跟踪", "频谱"):
             text_tabs.addTab(QWidget(), t)
         icon_tabs = QTabWidget()
-        for t in ("天空模式", "卫星跟踪", "频谱"):
+        for t in ("星象仪模式", "卫星跟踪", "频谱"):
             icon_tabs.addTab(QWidget(), ico, "")
             icon_tabs.setTabToolTip(icon_tabs.count() - 1, t)
         probe = {

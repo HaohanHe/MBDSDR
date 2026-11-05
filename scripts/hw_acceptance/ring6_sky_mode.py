@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""R6 天空模式 —— 天象数据面 + 无观测站诚实空态 + 无头渲染冒烟。
+"""R6 星象仪模式 —— 天象数据面 + 无观测站诚实空态 + 无头渲染冒烟。
 
 判据（自动断言，无需射频硬件）：
   * 太阳赤经/赤纬与脚本内独立 Meeus 低精度算法对拍，误差 <= 0.5°
@@ -130,8 +130,8 @@ def run(lat: float, lon: float) -> dict:
     }
     status = common.PASS if all(c["ok"] for c in checks if not c["skipped"]) else common.FAIL
     return common.result(
-        "R6", "天空模式", status, metrics, checks,
-        "天空模式数据异常：请检查观测站坐标与系统时间（时间/坐标错会导致星位全错）。",
+        "R6", "星象仪模式", status, metrics, checks,
+        "星象仪模式数据异常：请检查观测站坐标与系统时间（时间/坐标错会导致星位全错）。",
         ["星空布局、卫星标记与交互手感（观感）"], False,
         [png],
         "太阳位置有独立参考量化；月亮绝对位置缺星历文件，未独立验证（子项 UNVERIFIED）。")
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     import argparse
     import os
 
-    ap = argparse.ArgumentParser(description="R6 天空模式")
+    ap = argparse.ArgumentParser(description="R6 星象仪模式")
     ap.add_argument("--lat", type=float, default=43.88)
     ap.add_argument("--lon", type=float, default=125.32)
     ap.add_argument("--out", default="")
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     if args.out:
         os.environ["MBDSDR_HW_ACCEPTANCE_DIR"] = args.out
     out = common.artifact_dir("r6_sky_mode")
-    res = common.guarded("R6", "天空模式", lambda: run(args.lat, args.lon),
+    res = common.guarded("R6", "星象仪模式", lambda: run(args.lat, args.lon),
                          device_required=False,
                          human_required=["星空布局/交互观感"])
     raise SystemExit(common.emit(res, out))

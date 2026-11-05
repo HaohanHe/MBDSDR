@@ -7,7 +7,7 @@ MainWindow 三栏「平行视界」布局 offscreen 测试
 守护路A 桌面 UI 的新交付点（替代旧 QDockWidget 三坞断言）：
   1. 中央 = QSplitter(Horizontal) 三栏：左(天空) / 中(地图) / 右(App 页签)；
   2. handle 厚度 = tokens(4px)，三栏可 setSizes 拖宽；
-  3. 左栏 QTabWidget 含：天空模式 / 卫星跟踪 / 频谱（定轨已去功能化，
+  3. 左栏 QTabWidget 含：星象仪模式 / 卫星跟踪 / 频谱（定轨已去功能化，
      不作为页签；本测试兼作 iron-rule 守卫，任何页签都不得含"定轨"）；
   4. 右栏 QTabWidget 含：控制 / 状态 / AI 助手 / 扫频 / 调制识别 / 设备 / 增益 ...；
   5. 中栏全出血 AdsbMapPanel + 悬浮胶囊 AI 命令栏（输入框 + 麦克风按钮）；
@@ -127,7 +127,7 @@ class TestThreeColumnSplitter:
         texts = [main_window.left_tab.tabText(i)
                  for i in range(main_window.left_tab.count())]
         # 定轨去功能化（iron rule）：左栏只有这三个页签。
-        for expected in ("天空模式", "卫星跟踪", "频谱"):
+        for expected in ("星象仪模式", "卫星跟踪", "频谱"):
             assert expected in texts, f"左栏缺页签 {expected}: {texts}"
         # 守卫：任何页签文本都不得含"定轨"——定轨只能由用户开口触发，
         # 绝不在 UI 上作为功能位/页签出现（用户明确要求，最高优先级）。

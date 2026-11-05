@@ -1317,7 +1317,7 @@ class MainWindow(QMainWindow):
         布局（行：顶栏 / 三栏 / 底坞）：
           * 顶栏：细状态栏（连接/频率/采样率/GPS/UTC），见 _build_top_bar；
           * 左栏（~300px）：沉浸天空/轨道极坐标——QTabWidget 页签
-            （天空模式 / 卫星跟踪 / 频谱）；
+            （星象仪模式 / 卫星跟踪 / 频谱）；
           * 中栏（flex）：暗色地图世界铺满（AdsbMapPanel 全出血），上方悬浮
             胶囊形 AI 命令栏（半透明毛玻璃，输入框 + 麦克风，路由到 ai_panel）；
           * 右栏（~360px）：当前 App——QTabWidget 页签
@@ -1334,7 +1334,7 @@ class MainWindow(QMainWindow):
         left_tab.setTabPosition(QTabWidget.North)
         left_tab.setMinimumWidth(260)  # 左栏沉浸天空最小宽（tokens 无此键，弹性下限）
 
-        # Tab: 天空模式（主）
+        # Tab: 星象仪模式（主）
         self.sky_view = self._create_sky_widget()
         if hasattr(self.sky_view, "object_clicked"):
             self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
@@ -2509,7 +2509,7 @@ class MainWindow(QMainWindow):
         return "font-weight: 600;"
 
     def _create_sky_widget(self):
-        """创建天空模式 widget：路B工厂 create_sky_widget() 优先，回退 RFSkyView。
+        """创建星象仪模式 widget：路B工厂 create_sky_widget() 优先，回退 RFSkyView。
 
         路B（星空组，负责 rf_sky_view.py）会产出自包含天空 widget 并在模块里
         暴露 ``create_sky_widget()`` 工厂。这里用 hasattr/try 守卫：
@@ -3396,7 +3396,7 @@ class MainWindow(QMainWindow):
             if self._no_device_hint is not None:
                 self._no_device_hint.setText(f"  {message}  ")
                 self._no_device_hint.setVisible(True)
-                # S1：横幅在「频谱」页里，而首启默认页是「天空模式」——不切页
+                # S1：横幅在「频谱」页里，而首启默认页是「星象仪模式」——不切页
                 # 用户根本看不到（状态栏 8 秒后也消失）。提示出现即把该页带到
                 # 前台；这是"没有设备"的唯一引导，优先级高于保留上次页签。
                 page = getattr(self, "_spectrum_page", None)
@@ -7202,7 +7202,7 @@ class MainWindow(QMainWindow):
         sv.set_all_sky_mode(bool(checked))
 
     def _handle_escape_layer(self) -> bool:
-        """Esc 分层：先退全天（仍在天空模式），再退天空模式。"""
+        """Esc 分层：先退全天（仍在星象仪模式），再退星象仪模式。"""
         sv = getattr(self, "sky_view", None)
         if sv is not None and bool(getattr(sv, "all_sky_active", False)):
             sv.set_all_sky_mode(False)
@@ -7704,7 +7704,7 @@ class MainWindow(QMainWindow):
             "<p>呼号：在「设置」中配置</p>"
             "<p>对标 GNU Radio / SDR++ / SatDump 等开源项目能力，独立实现（未包含其源代码）</p>"
             "<p>支持 MCP 工具调用，任意 AI IDE 可直接控制硬件</p>"
-            "<p>天空模式视图借鉴 Stellarium 设计理念</p>"
+            "<p>星象仪模式视图借鉴 Stellarium 设计理念</p>"
             "<hr>"
             "<p>深空数据来自 OpenNGC（CC BY-SA 4.0）；中文名来自 Wikidata（CC0）。"
             "许可说明见 docs/dso-catalog.md。</p>"
@@ -7715,7 +7715,7 @@ class MainWindow(QMainWindow):
         )
 
     # ========================================================================
-    # 天空模式视图
+    # 星象仪模式视图
     # ========================================================================
 
     def _init_sky_view(self):

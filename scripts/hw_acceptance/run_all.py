@@ -32,7 +32,7 @@ RINGS = [
     ("r3", "R3 解调与音频", "ring3_demod_audio.py", 180),
     ("r4", "R4 录音与回放", "ring4_recording_playback.py", 180),
     ("r5", "R5 卫星追踪与过境", "ring5_satellite_passes.py", 240),
-    ("r6", "R6 天空模式", "ring6_sky_mode.py", 120),
+    ("r6", "R6 星象仪模式", "ring6_sky_mode.py", 120),
     ("r7", "R7 发射安全闸", "ring7_tx_gate.py", 90),
 ]
 

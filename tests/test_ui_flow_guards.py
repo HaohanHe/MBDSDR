@@ -5,7 +5,7 @@
 
 - B2：恢复的窗口坐标必须校验屏幕可见性；外接屏拔掉后不得把窗口放到屏幕外，
   并提供「重置窗口位置」入口。
-- S1：无设备引导横幅原先挂在「频谱」页，而首启默认页是「天空模式」——用户
+- S1：无设备引导横幅原先挂在「频谱」页，而首启默认页是「星象仪模式」——用户
   看不到。首启提示必须切到横幅所在页并保持可见。
 - S9：连接失败/掉线后控件必须回到"未连接"（调谐/录音置灰、频谱清空）；
   连接进行中不得提前启用控件。
@@ -36,9 +36,12 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(isolated_profile, qtapp):
     """整模块复用同一个窗口：MainWindow 构造很贵，逐测重建会把文件拖成分钟级。
 
+    isolated_profile（见 conftest.py）把 HOME/APPDATA/QSettings/layout_store
+    重定向到临时目录：本文件的窗口会 load/flush 真实 desktop_settings.json，
+    不隔离就会写进用户配置（会话级守卫已实测报红）。
     等 350ms 让启动定时器（100ms 读配置 / 200ms 枚举并提示）跑完，
     避免它们插进用例中间改几何或页签。
     """
@@ -106,9 +109,9 @@ class TestUiFlowGuards:
 
     # ---------------------------------------------------------------- S1
     def test_no_device_hint_is_on_visible_page(self, window):
-        """S1：首启无设备提示必须落在当前可见页，而不是隐藏的「天空模式」页。"""
+        """S1：首启无设备提示必须落在当前可见页，而不是隐藏的「星象仪模式」页。"""
         w = self._window(window)
-        # 首启默认页：天空模式（index 0）
+        # 首启默认页：星象仪模式（index 0）
         w.left_tab.setCurrentIndex(0)
         w._show_no_rtl_hint("未找到 RTL-SDR：检查 Zadig WinUSB 驱动")
         assert w.left_tab.currentWidget() is w._spectrum_page, \
@@ -218,7 +221,7 @@ class TestUiFlowGuards:
         assert abs(float(sv.ALL_SKY_FOV_DEG) - 160.0) < 0.5
 
     def test_escape_layers_all_sky_then_sky_mode(self, window):
-        """Esc 分层：先退全天（仍在天空模式），再退天空模式。"""
+        """Esc 分层：先退全天（仍在星象仪模式），再退星象仪模式。"""
         from PySide6.QtCore import QEvent, Qt
         from PySide6.QtGui import QKeyEvent
 
@@ -235,14 +238,14 @@ class TestUiFlowGuards:
         # 视图自身处理第一层（分焦点在天空图上）
         sv.keyPressEvent(esc())
         assert sv.all_sky_active is False, "Esc 第一层应先退出全天"
-        assert w._app_mode == "planetarium", "第一层 Esc 不得退出天空模式"
+        assert w._app_mode == "planetarium", "第一层 Esc 不得退出星象仪模式"
 
-        # 窗口层再按一次：退出天空模式
+        # 窗口层再按一次：退出星象仪模式
         w.keyPressEvent(esc())
-        assert w._app_mode == "ide", "第二层 Esc 应退出天空模式"
+        assert w._app_mode == "ide", "第二层 Esc 应退出星象仪模式"
 
     def test_escape_window_layer_keeps_order_without_view_focus(self, window):
-        """焦点不在天空图时，窗口层 Esc 也必须先退全天再退天空模式。"""
+        """焦点不在天空图时，窗口层 Esc 也必须先退全天再退星象仪模式。"""
         from PySide6.QtCore import QEvent, Qt
         from PySide6.QtGui import QKeyEvent
 
@@ -477,5 +480,8 @@ def test_about_dialog_contains_dso_attribution(monkeypatch):
     assert "OpenNGC" in text and "CC BY-SA 4.0" in text
     assert "github.com/mattiaverga/OpenNGC" in text
     assert "creativecommons.org/licenses/by-sa/4.0/" in text
+    # 口径：全屏唯一说法是「星象仪模式」，关于框不得再出现旧称「天空模式」
+    assert "星象仪模式视图借鉴 Stellarium 设计理念" in text
+    assert "天空模式" not in text, "关于框仍用旧称「天空模式」"
     # 不写死版本号：正文里不应出现 "版本 vX.Y" 之类硬编码
     assert "v1." not in text and "version" not in text.lower()
