@@ -163,3 +163,25 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
   白名单必须指向真实控件且带理由），本轮 3 passed。
 - 复跑：`MBDSDR_OFFLINE=1 MBDSDR_NO_HW=1 python scripts/ui_interaction_audit.py`
   （刷新 `docs/interaction-audit.md`）；`python -m pytest tests/test_ui_interaction_guard.py -q`。
+
+## 附 D：L34 受晒接线复核（2026-11-05）
+
+- **后端已接入，L34「待后端」一句已过期**：`mbdsdr_ai/orbit.py::_state_from_satrec`
+  （`fd3574d`「卫星状态快照透传受晒三态，统一过境口径」）已输出
+  `sunlit` / `sunlit_status` / `illumination_model` / `boundary_uncertainty_s`，
+  与 `mbdsdr_ai/sat_passes.py::_is_sunlit_geometric` 共用
+  `sat_illumination.evaluate_illumination` 唯一口径（不再各算一套）。
+- **视图侧只消费快照字段，不自算几何**：`desktop/rf_sky_view.py` 的
+  `_sat_positions` 原样透传 `state.get("sunlit"/"sunlit_status"/"boundary_uncertainty_s")`；
+  状态文案优先级 status > sunlit：`umbra`/`sunlit=False` → 「地影」并画压暗 + 暗色虚线描边；
+  `penumbra` → 「半影（部分受照）」且**不画阴影**；`unknown`/`None` → 「未知（无受晒数据）」
+  且**不画阴影**；非卫星 → 「—」。
+- **如实缺口**：`illumination_model` 未进 `SkyObject`（渲染不需要该字符串；
+  若将来要在卡上展示模型名，需加字段并透传，属可选扩展，不是数据造假）。
+  `boundary_uncertainty_s` 只在 `SkyObject`/`_build_selected_info` 保留、不渲染，
+  用于解释刚进/出影时的三态跳变。
+- **证据**：`tests/test_sky_sunlit_state.py` 9 条；`mbdsdr_ai/tests/test_orbit_sunlit_snapshot.py`。
+  2026-11-05 全量 `pytest tests -k sky`：443 passed / 1 failed；唯一红是跨线的
+  `tests/test_main_window.py::TestPlanetariumSkyVisibility::test_planetarium_sky_paints_not_black_void`
+  （持久化 `three_column_sizes` 使天空视图变高，底边落在 `ground_near_night` 地景层，
+  与受晒无关，本线不碰 `main_window.py`）。
