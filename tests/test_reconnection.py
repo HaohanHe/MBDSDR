@@ -46,6 +46,8 @@ class FakeStatus:
         self.gain_db = backend.gain
         self.demod_mode = backend.demod
         self.device_id = backend.device_id
+        self.serial_number = backend.serial_number
+        self.sn = backend.sn
 
 
 class FakeBackend:
@@ -56,8 +58,12 @@ class FakeBackend:
         self.gain = 20.0
         self.demod = "WFM"
         self.device_id = "dev-A"
+        self.serial_number = ""
+        self.sn = ""
         #: 重连后若改成别的 id，模拟「插回来的是另一台设备」
         self.device_id_after_reconnect = None
+        #: 重连后要改写的身份字段（模拟另一台设备 / 只剩一个字段可读）
+        self.fields_after_reconnect = {}
         self.connect_calls = 0
         # 前 N 次 connect 失败（模拟设备还没插回）
         self.fail_connect_times = 0
@@ -77,6 +83,8 @@ class FakeBackend:
         self.demod = "WFM"
         if self.device_id_after_reconnect is not None:
             self.device_id = self.device_id_after_reconnect
+        for key, value in self.fields_after_reconnect.items():
+            setattr(self, key, value)
         return True
 
     def set_frequency(self, f): self.freq = f
@@ -177,6 +185,93 @@ def test_reconnect_without_identity_does_not_false_positive():
         assert backend.freq == pytest.approx(98_000_000.0)
         assert mgr.gave_up is False
         assert mgr.snapshot()["last_error"] == ""
+    finally:
+        mgr.stop()
+
+
+def test_identity_half_side_readable_is_not_a_mismatch():
+    """断开前只有 serial_number、重连后只有 device_id → 不可比，必须不判定。
+
+    这条钉住「半侧可读」：两个字段始终没有在同一侧同时出现，
+    既不能判"同一台"，也不能判"换了设备"。
+    """
+    backend = FakeBackend()
+    backend.device_id = ""
+    backend.serial_number = "SN-1"
+    # 重连后 serial 读不到，只报告 device_id
+    backend.fields_after_reconnect = {"serial_number": "", "device_id": "dev-C"}
+
+    reconnected = threading.Event()
+    mgr = _make_manager(on_reconnected=reconnected.set)
+    mgr.start(backend)
+    try:
+        backend.connected = False
+        assert reconnected.wait(3.0), "半侧可读不应阻断重连"
+        assert mgr.gave_up is False, "半侧可读被误判成换了设备"
+        assert mgr.snapshot()["last_error"] == ""
+        assert backend.freq == pytest.approx(98_000_000.0)
+    finally:
+        mgr.stop()
+
+
+def test_worst_case_give_up_is_91_seconds():
+    """默认参数下界面上要写的"最坏约 91 秒"：61s 退避 + 6×5s 建连。"""
+    mgr = ReconnectionManager()  # 默认 base=1/max=30/attempts=6
+    assert mgr.worst_case_give_up_s() == pytest.approx(91.0)
+
+
+def test_cancel_stops_retry_immediately():
+    """能立刻放弃：cancel() 后不再发起新的 connect，状态直接 gave_up。"""
+    backend = FakeBackend()
+    backend.fail_connect_times = 10_000  # 永远连不上，保证停在重试循环里
+
+    gave_up = threading.Event()
+    mgr = ReconnectionManager(
+        poll_interval=0.02, on_give_up=gave_up.set,
+        base_delay=0.05, max_delay=0.2, max_attempts=6,
+    )
+    mgr.start(backend)
+    try:
+        backend.connected = False
+        # 等到真正进入 retrying（且至少发起过一次 connect）
+        deadline = threading.Event()
+        for _ in range(200):
+            if mgr.state == "retrying" and backend.connect_calls >= 1:
+                break
+            deadline.wait(0.01)
+        assert mgr.state == "retrying", "未进入重试态，用例前提不成立"
+
+        calls_before = backend.connect_calls
+        mgr.cancel()
+        assert gave_up.wait(1.0), "cancel() 必须回调 on_give_up 让界面更新"
+        assert mgr.gave_up is True
+        assert mgr.running is False
+        assert mgr.snapshot()["last_error"] == "用户取消重连"
+        # 取消后不再发起任何 connect（退避等待被唤醒）
+        threading.Event().wait(0.3)
+        assert backend.connect_calls == calls_before
+    finally:
+        mgr.stop()
+
+
+def test_retry_hint_tells_user_worst_case_and_how_to_stop():
+    backend = FakeBackend()
+    backend.fail_connect_times = 10_000
+    mgr = ReconnectionManager(
+        poll_interval=0.02, base_delay=0.2, max_delay=0.8, max_attempts=6,
+    )
+    mgr.start(backend)
+    try:
+        backend.connected = False
+        for _ in range(200):
+            if mgr.state == "retrying" and mgr.snapshot()["next_retry_in"] > 0:
+                break
+            threading.Event().wait(0.01)
+        hint = mgr.snapshot()["hint"]
+        assert "正在重试" in hint
+        assert "最坏约" in hint and "停止" in hint
+        # 最坏估值按本次参数换算：退避 0.2+0.4+0.8×4=3.8s，另加 6×5s 建连
+        assert mgr.snapshot()["worst_case_s"] == pytest.approx(33.8)
     finally:
         mgr.stop()
 

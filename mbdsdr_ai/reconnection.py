@@ -44,6 +44,10 @@ DEFAULT_POLL_INTERVAL = 0.5
 #: 默认总退避等待 = 1+2+4+8+16+30 = 61s（另加每次 connect 自身耗时）。
 DEFAULT_MAX_ATTEMPTS = 6
 
+#: 单次 connect 的典型硬超时（rtl_tcp / SpyServer 建连都是 5s），只用于给
+#: 用户估「最坏要等多久」；真实耗时由后端决定，不拿它当结果。
+ASSUMED_CONNECT_TIMEOUT_S = 5.0
+
 #: 后端 status 上可能出现的设备身份字段（按优先级取第一个可比的）
 IDENTITY_KEYS = ("device_id", "serial_number", "sn")
 
@@ -308,6 +312,10 @@ class ReconnectionManager:
                 elif not self._last_error:
                     self._last_error = "后端未返回失败原因"
 
+            # 用户点了取消：即使这次 connect 刚好成功也不再下发设置/重启音频。
+            if self._stop.is_set():
+                return False
+
             if ok:
                 mismatch = self._identity_mismatch(backend)
                 if mismatch:
@@ -437,6 +445,52 @@ class ReconnectionManager:
             self._state = STATE_STOPPED
         self._next_retry_in = 0.0
 
+    def cancel(self, reason: str = "用户取消重连") -> None:
+        """立即放弃本次重连（界面上「× 停止」按钮的入口）。
+
+        立刻停的：退避等待被唤醒（下一次 ``connect`` 不再发起）；状态转
+        ``gave_up``，``last_error`` 写成 ``reason``，并回调一次 ``on_give_up``。
+        若此刻正卡在某次 ``connect`` 的硬超时里，最坏要等这次 connect 返回
+        （rtl_tcp/SpyServer 各 ≤5s），之后不再有任何重试。
+        保持不变的：音频仍是停止态（取消不会自动重启）；后端对象不被关闭
+        （不替用户关别人的连接）；设置快照保留到下次 ``retry_now()`` 为止
+        （``retry_now()`` 走 ``start()``，会重置快照与计数器）。
+        """
+        if self._state == STATE_GAVE_UP:
+            return
+        if not self.running and self._state != STATE_RETRYING:
+            return
+        self._gave_up = True
+        self._state = STATE_GAVE_UP
+        self._last_error = reason
+        self._attempt = 0
+        self._next_retry_in = 0.0
+        self.stop()
+        logger.info("重连已取消：%s", reason)
+        _safe_callback(self.on_give_up)
+
+    def worst_case_give_up_s(self) -> float:
+        """从开始重试到放弃的最坏秒数（退避合计 + 每次 connect 的典型超时）。
+
+        默认参数下 = 61s 退避 + 6×5s = **91s**；这是给用户看的估值，
+        不是实测结果（真实 connect 耗时由后端决定）。
+        """
+        backoff = sum(
+            compute_backoff(i, self._base_delay, self._max_delay)
+            for i in range(1, self._max_attempts + 1)
+        )
+        return round(backoff + self._max_attempts * ASSUMED_CONNECT_TIMEOUT_S, 1)
+
+    def retry_hint(self) -> str:
+        """界面文案：正在重试、最坏多久、怎么立刻停。不在重试态返回空串。"""
+        if self._state != STATE_RETRYING:
+            return ""
+        return (
+            f"正在重试（第 {self._attempt}/{self._max_attempts} 次，"
+            f"{self._next_retry_in:.0f}s 后重试；最坏约 "
+            f"{self.worst_case_give_up_s():.0f} 秒放弃，可点 × 立即停止）"
+        )
+
     # ------------------------------------------------------------------
     # 查询
     # ------------------------------------------------------------------
@@ -493,6 +547,8 @@ class ReconnectionManager:
             "gave_up": self._gave_up,
             "suggestion": self.give_up_suggestion() if self._gave_up else "",
             "source_kind": self._source_kind,
+            "worst_case_s": self.worst_case_give_up_s(),
+            "hint": self.retry_hint(),
         }
 
     def get_state(self) -> Dict[str, Any]:
