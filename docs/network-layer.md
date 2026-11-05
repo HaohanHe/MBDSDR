@@ -209,7 +209,7 @@ python -m pytest -q -s tests/test_network_layer_matrix.py::TestWeakNetworkMatrix
 
 ## 5. 已验证 / 未验证
 
-**已验证（假源、可复跑，41 个用例）**
+**已验证（假源、可复跑）**
 
 - rtl_tcp：正常断开 / 进程被杀 / 源变慢+停发 / 半开（代理保 TCP）；恢复首帧、
   静噪链重建、TCP socket 回基线、生产者线程不累积。
@@ -219,6 +219,9 @@ python -m pytest -q -s tests/test_network_layer_matrix.py::TestWeakNetworkMatrix
 - 弱网矩阵（§0）：四类 13 档 × 5s/3s 两阈值，逐档数 stale/disconnected 次数；
   半开在 5s/10s 与 3s/6s 两种真实阈值下各测 rtl_tcp / SpyServer。
   结论「保持 5s/10s」只对**本机假服务 + 本机回环**成立。
+- 阈值决策锁（`TestWeakThresholdDecisionLock`）：默认 5.0s / 2×心跳=10.0s 与
+  13 档实测证据钉成断言；改成 3s/6s 会直接报红（不是文档口头约定）。
+- 读侧超时自死锁回归（§5.1）：超时路径重入会红；修复后 `underruns` 正常累加。
 
 **未验证（必须真机/真实网络，未放宽断言）**
 
@@ -229,8 +232,104 @@ python -m pytest -q -s tests/test_network_layer_matrix.py::TestWeakNetworkMatrix
   句柄，实测 371→382 有噪声；因此泄漏判据用的是**存活 TCP socket 数**
   （基线 1 → 3 轮重连后 1），不是进程句柄总数。真实环境请用外部句柄工具复核。
 
+### 5.1 读侧超时自死锁：faulthandler 定位过程
+
+**症状**：矩阵用例首跑即卡死 **70s+ 不返回**，不是断言失败，而是纯挂起；
+`Ctrl+C` 也只打印「KeyboardInterrupt」而没有栈——因为卡在 C 层 `Lock.acquire`。
+
+**定位过程**（按顺序做，三步就能收敛）：
+
+1. 先排除「假服务没起 / 端口占用」：同一假服务单独用裸 socket 能正常收数据，
+   说明阻塞在**客户端读侧**。
+2. 用 `faulthandler` 定时抓栈（等价于 `pytest -X faulthandler` 的效果）：
+
+   ```python
+   import faulthandler
+   faulthandler.dump_traceback_later(2.0, repeat=True)   # 2s 后 dump 全部线程
+   ```
+
+   栈显示读线程停在 `mbdsdr_ai/sdr_backend.py` → `_FanOutSub.read` 的**超时分支**，
+   且该帧的行正是 `with r._lock`；主线程停在 `join`/等待。也就是说：
+   `read()` 外层已经持有 `r._lock`，超时分支又拿同一把锁。
+3. 用「等价形态」最小复现（同一把 `Lock` + 同一个 `Condition`，已持有锁时再
+   `with lock:`），确认自锁与业务无关：
+
+   ```python
+   lock = threading.Lock()
+   cond = threading.Condition(lock)
+   def read_old_timeout_branch():
+       with lock:                     # ← _FanOutSub.read 已持有 r._lock
+           deadline = time.time() + 0.2
+           while True:
+               now = time.time()
+               if now >= deadline:
+                   with lock:         # ← 旧代码：超时分支再嵌套 with r._lock
+                       pass
+                   return
+               cond.wait(timeout=max(0.001, deadline - now))
+   ```
+
+   该复现的 faulthandler 实抓栈（本机，Python 3.14，2s 超时；线程名已改）：
+
+   ```
+   Thread 0x000072b4 (most recent call first):
+     File "dl_probe.py", line 17 in read_old_timeout_branch
+     File ".../threading.py", line 1023 in run
+     File ".../threading.py", line 1081 in _bootstrap_inner
+     File ".../threading.py", line 1043 in _bootstrap
+   Thread 0x00006b30 (most recent call first):
+     File ".../threading.py", line 1132 in join
+     File "dl_probe.py", line 26 in <module>
+   probe stuck=True after 3.0s join
+   ```
+
+   第 17 行就是内层 `with lock:`；主线程卡在 `join`。原首跑日志已随临时文件
+   清理，这段栈是今天用同一形态重新抓取，行号对应上面的复现片段。
+
+**根因**：`_ThreadedRingReader` 用 `threading.Lock()` 构造
+`threading.Condition(self._lock)`。`Condition` 的默认锁是 `RLock`，但这里显式
+传入**非可重入** `Lock`；`_FanOutSub.read` 在 `with r._lock` 内等待条件，超时
+分支再 `with r._lock` 就是同线程二次加锁 → 永久阻塞。
+
+**修复**：超时分支不再进锁，直接 `r._underruns += 1` 后返回 `None`
+（`mbdsdr_ai/sdr_backend.py` `_FanOutSub.read`，注释在 1198-1199 行）。
+
+**回归**：`TestRingReaderTimeoutDeadlock::test_timeout_branch_returns_instead_of_self_deadlocking`
+让读线程走超时分支，`join(2.0)` 后必须已退出，并检查 `underruns=1`、锁已释放；
+若把嵌套锁加回去，线程会永远停在 `with r._lock`，该用例直接报红（daemon 线程
++ 失败时不碰锁，保证红的时候不会把 pytest 挂死）。复跑：
+
+```powershell
+python -m pytest -q -s tests/test_network_layer_matrix.py::TestRingReaderTimeoutDeadlock `
+  tests/test_network_layer_matrix.py::TestWeakThresholdDecisionLock -p no:cacheprovider
+```
+
 ## 6. 已知无关失败
 
 `tests/test_orphan_connection.py::test_constellation_cleared_resets_stats` 在本次
 定向回归中失败：期望 `信号: --`，实际 `信号: —`。该文案改动来自桌面线
 （`desktop/main_window.py`，本线未触碰），不计入本主题结论。
+
+## 7. 热插拔/重连回归脚本（`tests/network_hotplug_regression.py`）
+
+一条命令跑四条路径，非 `test_` 前缀，不进 pytest 收集；直接执行：
+
+```powershell
+$env:MBDSDR_NO_HW='1'; $env:MBDSDR_OFFLINE='1'; $env:MBDSDR_NULL_AUDIO='1'
+$env:PYTHONPATH='d:\mbdsdr\MBDSDR'
+python tests/network_hotplug_regression.py
+```
+
+每行输出 `case=... verdict=PASS|FAIL|SKIP elapsed=...s detail=...`，
+退出码 0 = 无 FAIL（SKIP 不算通过），1 = 有 FAIL。
+
+| 路径 | 实测口径 | 本轮结果 |
+|---|---|---|
+| `usb-unplug`（真机拔线） | 需物理拔插；`MBDSDR_NO_HW=1` 或无设备时 SKIP 并写原因 | **SKIP**（本进程禁止碰真硬件；不伪造 PASS） |
+| `port-switch`（换端口） | 服务端 A 口 → B 口，新后端连 B 取首帧 | PASS，connect→首帧 0.022s / 0.020s |
+| `backend-crash`（进程被杀） | `TerminateProcess`，默认 `idle_timeout=5s` | PASS，detect=0.000s、`error_category=reset` |
+| `half-open`（保 TCP 不转发） | rtl 与 spy 各一遍，默认 5s | PASS，rtl stale 5.018s / hard 10.031s；spy 5.009s / 10.023s |
+
+`usb-unplug` 只有「人工拔线后观察 connected→False、link_state→disconnected、
+重连首帧正常」这一条路；脚本把人工步骤如实标 SKIP，不拿网络源的断开代替真机
+拔线结论。

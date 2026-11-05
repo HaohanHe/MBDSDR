@@ -40,6 +40,7 @@ from mbdsdr_ai.reconnection import (
     compute_backoff,
 )
 from mbdsdr_ai.rtltcp_client import RtlTcpBackend, RtlTcpClient
+from mbdsdr_ai.sdr_backend import _ThreadedRingReader
 from mbdsdr_ai.spyserver_client import SpyServerBackend, SpyServerClient
 
 _RTL_HEADER = b"RTL0" + struct.pack(">II", 5, 29)
@@ -967,6 +968,153 @@ class TestRealThresholdLatency:
             finally:
                 be.disconnect()
                 stop.set()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 6. 阈值决策回归锁：常量一旦被改成 3s/6s 必须在这里报红
+# ═══════════════════════════════════════════════════════════════════════
+
+#: 弱网矩阵一次实测的极值（docs/network-layer.md §0.2，2026-11-05 本机回环）。
+#: 这里只**引用**实测结果做决策边界，不在单测里重跑 13 档（约 4.5 分钟）；
+#: 档位与预期次数的结构性证据钉在 ``_WEAK_CASES`` 上（见下）。
+_RECORDED_WORST_GAP_S = 3.212        # bwjit-3.2s / delay-3s 档的最大空档
+_RECORDED_HALF_OPEN_HARD_S = (10.024, 10.027)   # 5s 档 rtl / spy 硬判实测
+
+
+class TestWeakThresholdDecisionLock:
+    """把「保持 5s/10s、不改 3s/6s」钉成会失败的断言。
+
+    依据（本机假服务 + 本机回环，13 档弱网各跑 ``2×idle + 0.8s`` 窗口）：
+
+    - ``idle=5s``：13/13 档 stale 次数 0、硬断开 0 次；
+    - ``idle=3s``：2/13 档（15.4%）各误判 1 次 stale —— ``delay-3s`` 与
+      ``bwjit-3.2s``；其余 11 档 0 次。
+    - 半开连接（保 TCP 不转发）实测硬判 10.024s / 10.027s（rtl / spy）。
+
+    因此默认值改为 3.0s（或 ``_STALE_ESCALATE_AFTER`` 改成别的倍数）时，
+    下面的等值断言与档位计数会直接报红，而不是靠文档口头约定。
+    """
+
+    def test_default_idle_timeout_is_five_seconds(self):
+        rtl_sig = inspect.signature(RtlTcpClient.__init__).parameters
+        spy_sig = inspect.signature(SpyServerClient.__init__).parameters
+        rtl_be_sig = inspect.signature(RtlTcpBackend.__init__).parameters
+        spy_be_sig = inspect.signature(SpyServerBackend.__init__).parameters
+
+        assert rtl_sig["idle_timeout"].default == pytest.approx(5.0)
+        assert spy_sig["timeout"].default == pytest.approx(5.0)
+        assert rtl_be_sig["idle_timeout"].default == pytest.approx(5.0)
+        assert spy_be_sig["idle_timeout"].default == pytest.approx(5.0)
+        assert RtlTcpClient.CONNECT_TIMEOUT == pytest.approx(5.0)
+
+        print("[lock] defaults: rtl idle=5.0s spy timeout=5.0s "
+              "rtl_backend=5.0s spy_backend=5.0s connect_timeout=5.0s")
+
+    def test_hard_verdict_is_two_heartbeats(self):
+        assert RtlTcpClient._STALE_ESCALATE_AFTER == 2
+        assert SpyServerClient._STALE_ESCALATE_AFTER == 2
+
+        rtl = RtlTcpClient("127.0.0.1", 1)
+        spy = SpyServerClient("127.0.0.1", 1)
+        assert rtl._idle_timeout * rtl._STALE_ESCALATE_AFTER == pytest.approx(10.0)
+        assert spy.idle_timeout * spy._STALE_ESCALATE_AFTER == pytest.approx(10.0)
+
+        # 3s/6s 只是「同一公式的另一个入参」，不是另一套机制：
+        alt = RtlTcpClient("127.0.0.1", 1, idle_timeout=3.0)
+        assert alt._idle_timeout * alt._STALE_ESCALATE_AFTER == pytest.approx(6.0)
+        print("[lock] hard-disconnect: idle=5s → 10.0s (2×heartbeat); "
+              "idle=3s → 6.0s")
+
+    def test_measured_evidence_still_supports_five_seconds(self):
+        """把「5s 0/13、3s 2/13（15.4%）」的档位证据钉在测试里。"""
+        assert len(_WEAK_CASES) == 13, (
+            f"弱网档位数变了：{len(_WEAK_CASES)}，实测结论按 13 档记录，"
+            f"改档位必须重跑矩阵并同步更新 docs/network-layer.md §0")
+        positives = [(name, expect) for name, _impair, expect in _WEAK_CASES
+                     if expect]
+        assert [name for name, _e in positives] == ["delay-3s", "bwjit-3.2s"], (
+            "3s 档的误判档位与实测记录不一致："
+            f"{[name for name, _e in positives]}")
+        assert sum(expect for _n, _i, expect in _WEAK_CASES) == 2
+
+        # 决策边界：最坏空档 3.212s 对 5s 是 64% 占用，对 3s 是 107% 越线
+        assert _RECORDED_WORST_GAP_S < 5.0
+        assert _RECORDED_WORST_GAP_S > 3.0
+        # 半开硬判实测值落在 2×5s 的 ±0.5s 内（不是推演）
+        for t in _RECORDED_HALF_OPEN_HARD_S:
+            assert 9.5 <= t <= 10.5
+
+        print(f"[lock] measured: 13 档 idle=5s → 0/13 stale、0 hard-disconnect; "
+              f"idle=3s → 2/13 (15.4%): delay-3s、bwjit-3.2s; "
+              f"worst_gap={_RECORDED_WORST_GAP_S:.3f}s; "
+              f"half-open hard={_RECORDED_HALF_OPEN_HARD_S[0]:.3f}s/"
+              f"{_RECORDED_HALF_OPEN_HARD_S[1]:.3f}s (rtl/spy)")
+
+    def test_three_second_config_would_be_red_on_two_cells(self):
+        """反证：若默认改成 3s，13 档里有 2 档会转 stale —— 这就是报红的依据。"""
+        with_3s = sum(expect for _n, _i, expect in _WEAK_CASES)
+        assert with_3s == 2
+        assert with_3s / len(_WEAK_CASES) == pytest.approx(0.153846, abs=1e-6)
+        print(f"[lock] counter-evidence: 3s/6s = {with_3s}/{len(_WEAK_CASES)} "
+              f"= {with_3s / len(_WEAK_CASES) * 100:.1f}% 档位误判 (vs 5s/10s 0%)")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 7. 环形缓冲读超时自死锁：复现旧形态即红
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestRingReaderTimeoutDeadlock:
+    """``_FanOutSub.read`` 超时分支不得重入 ``r._lock``。
+
+    历史 bug：``Condition`` 绑定的是非可重入 ``threading.Lock``；``read`` 外层
+    已持有该锁，超时分支若再 ``with r._lock`` 就自锁 —— 表现是「缓冲暂时空，
+    读永远不返回」（矩阵用例首跑卡死 70s+，faulthandler 栈见
+    ``docs/network-layer.md`` §5.1）。修复是直接 ``r._underruns += 1``。
+
+    本用例让读线程走超时分支，它必须按时返回；若有人把嵌套锁加回去，
+    线程会永久停在 ``with r._lock``，``join(2.0)`` 后仍存活 → 断言报红。
+    用 daemon 线程 + 失败时不碰锁，保证红的时候不会把 pytest 挂死。
+    """
+
+    def test_timeout_branch_returns_instead_of_self_deadlocking(self):
+        def _no_data(_n):
+            return None
+
+        ring = _ThreadedRingReader(_no_data, block_size=1024, ring_size=4096)
+        # 前提：Condition 用的就是这把非可重入 Lock（不是 RLock）
+        assert ring._cond._lock is ring._lock
+        assert not isinstance(ring._lock, type(threading.RLock()))
+
+        sub = ring.subscribe("deadlock-probe")
+        result: dict = {}
+
+        def _reader():
+            result["value"] = sub.read(256, timeout=0.2)
+            result["done"] = True
+
+        t = threading.Thread(target=_reader, name="fanout-deadlock-probe",
+                             daemon=True)
+        t0 = time.perf_counter()
+        t.start()
+        t.join(2.0)
+        stuck = t.is_alive()
+        if not stuck:
+            ring.stop()            # 只有线程退出后才安全拿这把锁
+
+        assert not stuck, (
+            "读超时路径自死锁：线程 2s 内未返回，"
+            f"卡在 {getattr(t, 'name', '?')}；"
+            "超时分支不许再 with r._lock（见 docs/network-layer.md §5.1）")
+        assert result.get("done") is True
+        assert result.get("value") is None
+        assert ring.underruns_total() == 1
+
+        # 超时后锁必须已释放：主线程再读一次仍能按时返回（不是只解开一次）
+        t1 = time.perf_counter()
+        assert sub.read(256, timeout=0.05) is None
+        assert time.perf_counter() - t1 < 1.0
+        print(f"[deadlock] timeout-branch returned in "
+              f"{time.perf_counter() - t0:.3f}s, underruns=2, lock released")
 
 
 __all__ = []
