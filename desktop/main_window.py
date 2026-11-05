@@ -4784,17 +4784,22 @@ class MainWindow(QMainWindow):
             self._worker.request_tool.emit("tune_am", {"freq_khz": freq})
 
     @Slot(float, str)
-    def _on_tune_sdr(self, freq_hz: float, mode: str):
+    def _on_tune_sdr(self, freq_hz: float, mode: str) -> bool:
+        """调谐 + 解调模式。返回是否真的下发成功（False=界面已回滚）。
+
+        调用方（天空视图「调到该星」等）必须据此决定能不能报「已调谐」；
+        旧实现返回 None，调用方无条件写成功文案，把上一行失败提示覆盖掉。
+        """
         backend = self._active_sdr_backend
         if backend is not None:
             if not self._apply_hw_action(
                     "调谐", lambda: backend.set_frequency(freq_hz)):
                 self._revert_tune_ui()
-                return
+                return False
             if not self._apply_hw_action(
                     "切换解调模式", lambda: backend.set_demod(mode)):
                 self._revert_tune_ui()
-                return
+                return False
         if self._worker:
             self._worker.request_tool.emit("tune_sdr",
                                    {"freq_hz": freq_hz, "mode": mode})
@@ -4816,6 +4821,7 @@ class MainWindow(QMainWindow):
             pass
         # 频率变化 → 发射预偏读数重算（契约唯一真相源，UI 不算 Δ）
         self._schedule_tx_readout()
+        return True
 
     @Slot(float)
     def _on_module_tune(self, freq_hz: float):
@@ -5299,16 +5305,25 @@ class MainWindow(QMainWindow):
         try:
             self._bookmarks.append(
                 (float(freq_hz), str(name), str(mode), False))
+            persist_error = ""
             if self._freq_mgr is not None:
                 try:
                     self._freq_mgr.add(
                         str(name), float(freq_hz), mode=str(mode),
                         category="自定义")
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001 - 写收藏文件失败不能再报「已收藏」了事
+                    persist_error = f"{type(e).__name__}: {e}"
+                    logger.warning(
+                        "收藏写入收藏文件失败（本次会话仍可见）: %s", persist_error)
             self._sync_spectrum_bookmarks()
-            self.statusBar().showMessage(
-                f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}", MSG_NORMAL)
+            if persist_error:
+                self.statusBar().showMessage(
+                    f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}"
+                    f"（仅本次会话：写入收藏文件失败 {persist_error}，重启后会丢失）",
+                    MSG_IMPORTANT)
+            else:
+                self.statusBar().showMessage(
+                    f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}", MSG_NORMAL)
         except Exception:
             pass
 
@@ -7710,7 +7725,10 @@ class MainWindow(QMainWindow):
             return
         mode = info.get("mode", "NFM")
         dop = float(info.get("doppler_shift_hz", 0.0))
-        self._on_tune_sdr(freq, mode)
+        if not self._on_tune_sdr(freq, mode):
+            # 失败文案已由 `_apply_hw_action` 写出且界面已回滚；这里再补一句
+            # 「已调谐」就会把上一秒的失败覆盖成成功。
+            return
         self.statusBar().showMessage(
             f"已调谐 {info.get('name','卫星')}：{freq/1e6:.4f} MHz "
             f"(多普勒 {dop:+.0f} Hz)", MSG_NORMAL)
@@ -8458,23 +8476,20 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         # 调谐到最强活动台，让第一个 marker 立即可见
+        tune_error = ""
+        target_hz = 0.0
         if activities and backend is not None:
             target_hz = float(activities[0].center_hz)
-            tune_error = ""
             try:
                 if backend.set_frequency(target_hz) is False:
                     status = getattr(backend, "status", None)
                     tune_error = getattr(status, "error", "") or "设备拒绝该频率"
             except Exception as e:
                 tune_error = str(e)
-            if tune_error:
-                # 调谐没生效就不能把 marker 基准搬过去，否则图上标着新频率、
-                # 实际仍收旧频，是另一种状态撒谎。
-                self.statusBar().showMessage(
-                    f"扫频完成，但未能调谐到最强台 {target_hz / 1e6:.3f} MHz："
-                    f"{tune_error}；频谱仍停留在原频率", MSG_IMPORTANT)
-            else:
+            if not tune_error:
                 self.spectrum.generator.center_freq_hz = target_hz
+            # 调谐没生效就不能把 marker 基准搬过去，否则图上标着新频率、
+            # 实际仍收旧频，是另一种状态撒谎。
         self._sweep_cleanup()
 
         # 状态栏摘要
@@ -8485,8 +8500,13 @@ class MainWindow(QMainWindow):
             f1 = float(result.freqs_hz[-1]) / 1e6
         except Exception:
             nf = 0.0; f0 = 0.0; f1 = 0.0
-        self.statusBar().showMessage(
-            f"扫频完成：{n} 个活动频点（噪声底 {nf:.1f} dB）", MSG_IMPORTANT)
+        summary = f"扫频完成：{n} 个活动频点（噪声底 {nf:.1f} dB）"
+        if tune_error:
+            # 失败必须留在**最后这一句**里：先报一次再被本句覆盖，用户只看得到
+            # 「扫频完成」，看不到「最强台没调过去」。
+            summary += (f"；未能调谐到最强台 {target_hz / 1e6:.3f} MHz："
+                        f"{tune_error}，频谱仍停留在原频率")
+        self.statusBar().showMessage(summary, MSG_IMPORTANT)
         # AI 面板输出完整峰值列表
         try:
             rows = ["<b>扫频找台结果（实测）</b><br>"
