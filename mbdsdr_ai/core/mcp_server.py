@@ -38,6 +38,7 @@ from .errors import (ExportPathOutOfRootError, InvalidArgumentError,
                      SDRUserError)
 from ..questions import QuestionError, QuestionStore
 from ..hooks import Event, EventType, HookManager
+from ..version import __version__
 from ..hook_commands import HookCommandRunner
 from ..error_catalog import suggestion, user_message
 from ..tool_policy import ToolPolicy, normalize_key
@@ -2128,7 +2129,7 @@ class MCPToolSet(ToolCallGate):
             # 服务端不会主动发该通知；未来动态注册时再发。
             return ok({"protocolVersion": "2024-11-05",
                        "capabilities": {"tools": {"listChanged": True}},
-                       "serverInfo": {"name": "mbdsdr-core", "version": "0.1.0"}})
+                       "serverInfo": {"name": "mbdsdr-core", "version": __version__}})
         if method == "notifications/initialized":
             return None  # 通知无需回复
         if method == "notifications/tools/list_changed":

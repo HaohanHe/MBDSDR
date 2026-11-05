@@ -69,6 +69,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mbdsdr_ai import MBDSDRAgent, AgentConfig
 from mbdsdr_ai.core.mcp_server import ToolCallGate
 from mbdsdr_ai.tx_guard import tx_authorization
+from mbdsdr_ai.version import __version__
 
 
 # ============================================================================
@@ -293,7 +294,7 @@ class MBSDRAIMCPServer:
             },
             "serverInfo": {
                 "name": "mbdsdr-ai",
-                "version": "0.8.0",
+                "version": __version__,
             },
         }
 

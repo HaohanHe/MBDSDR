@@ -35,6 +35,8 @@ from startup_paths import (  # noqa: E402  (先修 sys.path 再导入同目录�
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from mbdsdr_ai.version import __version__ as _app_version  # noqa: E402
+
 _STARTUP_LOG_NAME = "mbdsdr_startup.log"
 
 #: 缺硬依赖时给出的下一步命令（模块名 → pip 包名）。
@@ -529,7 +531,7 @@ def main():
     app.setApplicationName("MBDSDR")
     app.setApplicationDisplayName("MBDSDR - AI 定义无线电")
     app.setOrganizationName("MBDSDR Project")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion(_app_version)
 
     # 设置默认字体
     app.setFont(get_app_font())
@@ -607,7 +609,7 @@ def main():
 
     print("=" * 60)
     print("  MBDSDR - AI 定义无线电桌面端")
-    print("  版本: 0.1.0 | MIT License")
+    print(f"  版本: {_app_version} | MIT License")
     print(f"  主题: {theme.display_name}")
     if args.host:
         print(f"  模式: 网络硬件 {mcp_host}:{mcp_port}")

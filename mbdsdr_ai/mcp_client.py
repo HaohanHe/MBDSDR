@@ -104,6 +104,8 @@ from collections import deque
 from enum import Enum
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
+from .version import __version__
+
 #: 覆盖配置路径的环境变量（对齐 tool_policy.POLICY_ENV 约定）。
 MCP_SERVERS_ENV = "MBDSDR_MCP_SERVERS"
 #: 配置文件默认位置（``~`` 会 expanduser）。
@@ -112,7 +114,7 @@ DEFAULT_MCP_SERVERS_PATH = "~/.mbdsdr/mcp_servers.json"
 #: MCP 协议版本（与 mbdsdr 两侧 server 的 initialize 返回值一致）。
 PROTOCOL_VERSION = "2024-11-05"
 #: 客户端自报信息（initialize 的 clientInfo）。
-CLIENT_INFO: Dict[str, str] = {"name": "mbdsdr-mcp-client", "version": "0.1.0"}
+CLIENT_INFO: Dict[str, str] = {"name": "mbdsdr-mcp-client", "version": __version__}
 
 #: 默认单次请求超时（秒）；可被 server 条目的 ``timeout_s`` 覆盖。
 DEFAULT_TIMEOUT_S = 15.0

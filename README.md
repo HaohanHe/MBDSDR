@@ -1,4 +1,4 @@
-# MBDSDR · AI 定义无线电（AI-defined SDR）
+# MBDSDR · AI 定义无线电（AI-defined SDR） v0.2.0
 
 > **30 秒读懂**：这是一套把示波器/矢网/软件无线电（SDR）的每个动作封装成
 > LLM 可调用工具的系统——外部 AI agent 通过 MCP 协议直接遥控真实硬件：

@@ -4,15 +4,16 @@
 # 等独立入口脚本与 tests/ 不进包。硬依赖只列主包导入链必需（numpy/scipy/
 # requests），其余第三方按功能面进 optional-dependencies 分组，
 # 依赖对账由 tests/test_pyproject_packaging.py 双向钉住。
-# 版本与 cpp/CMakeLists.txt 的 project(mbdsdr VERSION x.y.z) 对齐，
-# tests/test_pyproject_packaging.py 钉住一致性与依赖对账。
+# 版本单一事实源为 mbdsdr_ai/VERSION：本文件用 setuptools dynamic 读取，
+# cpp/CMakeLists.txt 用 file(READ) 读取，Python 侧由 mbdsdr_ai/version.py 读取。
+# tests/test_pyproject_packaging.py 钉住派生关系，禁止再写死版本字面量。
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbdsdr-ai"
-version = "0.2.0"
+dynamic = ["version"]
 description = "MBDSDR AI 智能体内核：LLM 工具面 / 工作流引擎 / 协议解码（AI-defined SDR）"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -57,4 +58,7 @@ include = ["mbdsdr_ai*"]
 exclude = ["mbdsdr_ai.tests*"]
 
 [tool.setuptools.package-data]
-mbdsdr_ai = ["locale/*.json", "data/*.json", "data/*.npz"]
+mbdsdr_ai = ["locale/*.json", "data/*.json", "data/*.npz", "VERSION"]
+
+[tool.setuptools.dynamic]
+version = {file = "mbdsdr_ai/VERSION"}

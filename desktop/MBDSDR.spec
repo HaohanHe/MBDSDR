@@ -17,11 +17,20 @@ MBDSDR PyInstaller 打包配置（onedir 模式，无控制台窗口）。
 
 import os
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.win32.versioninfo import (
+    VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, StringStruct,
+    VarFileInfo, VarStruct,
+)
 
 block_cipher = None
 
 here = os.path.abspath(os.path.dirname(SPEC))   # desktop/
 root = os.path.dirname(here)                    # 仓库根（mbdsdr_ai 包所在）
+
+# 版本单一事实源：mbdsdr_ai/VERSION（与 CMake / pyproject / Python 同源）
+with open(os.path.join(root, 'mbdsdr_ai', 'VERSION'), encoding='utf-8') as _fh:
+    _version = _fh.read().strip()
+_parts = [int(p) for p in (_version.split('.') + ['0', '0', '0', '0'])[:4]]
 
 # --- 隐藏导入：避免 PyInstaller 模块图漏掉动态加载的子模块 ---
 hiddenimports = []
@@ -66,7 +75,7 @@ def _collect_namespace_submodules(package, subdir):
 
 hiddenimports += _collect_namespace_submodules('scipy', '_external')
 
-# --- 数据文件：图标资源 + mbdsdr_ai 包内数据（如有） ---
+# --- 数据文件：图标资源 + 项目合规文件 + mbdsdr_ai 包内数据（如有） ---
 datas = [
     (os.path.join(here, 'assets'), 'assets'),
 ]
@@ -114,6 +123,24 @@ exe = EXE(
     upx=True,
     console=False,  # --windowed：无控制台
     icon=os.path.join(here, 'assets', 'icon.ico'),
+    version=VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=tuple(_parts), prodvers=tuple(_parts),
+            mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0,
+            date=(0, 0)),
+        kids=[
+            StringFileInfo([StringTable('080404B0', [
+                StringStruct('CompanyName', 'MBDSDR Project'),
+                StringStruct('FileDescription', 'MBDSDR - AI 定义无线电'),
+                StringStruct('FileVersion', _version),
+                StringStruct('InternalName', 'MBDSDR'),
+                StringStruct('OriginalFilename', 'MBDSDR.exe'),
+                StringStruct('ProductName', 'MBDSDR'),
+                StringStruct('ProductVersion', _version),
+                StringStruct('LegalCopyright', 'MIT License'),
+            ])]),
+            VarFileInfo([VarStruct('Translation', [2052, 1200])]),
+        ]),
 )
 
 coll = COLLECT(

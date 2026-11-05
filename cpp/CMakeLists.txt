@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(mbdsdr VERSION 0.2.0 LANGUAGES CXX)
+# 版本单一事实源：mbdsdr_ai/VERSION（Python/打包/EXE 版本资源同源派生）
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../mbdsdr_ai/VERSION" MBDSDR_VERSION)
+string(STRIP "${MBDSDR_VERSION}" MBDSDR_VERSION)
+project(mbdsdr VERSION ${MBDSDR_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

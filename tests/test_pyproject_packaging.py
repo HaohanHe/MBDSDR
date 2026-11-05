@@ -80,21 +80,33 @@ def _declared() -> set[str]:
     return out
 
 
+def _version() -> str:
+    """版本单一事实源：mbdsdr_ai/VERSION。"""
+    return (PKG_DIR / "VERSION").read_text(encoding="utf-8").strip()
+
+
 def test_metadata_present():
     meta = _meta()["project"]
     assert meta["name"] == "mbdsdr-ai"
-    assert re.fullmatch(r"\d+\.\d+\.\d+", meta["version"]), meta["version"]
+    assert "version" not in meta, "版本不许在 pyproject 再手抄一份"
+    assert "version" in meta["dynamic"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", _version()), _version()
     assert meta["requires-python"].startswith(">=")
     assert meta["license"]["text"] == "MIT"
 
 
 def test_version_matches_cpp_project():
-    """打包版本与 C++ 桌面端 project() 版本同号，不许各说各话。"""
-    py_ver = _meta()["project"]["version"]
+    """CMake 的 project 版本必须从 mbdsdr_ai/VERSION 派生，不许各说各话。"""
     cm = (ROOT / "cpp" / "CMakeLists.txt").read_text(encoding="utf-8")
-    m = re.search(r"project\(mbdsdr\s+VERSION\s+([0-9.]+)", cm)
-    assert m, "cpp/CMakeLists.txt 找不到 project(mbdsdr VERSION ...)"
-    assert py_ver == m.group(1), f"版本漂移: pyproject={py_ver} cpp={m.group(1)}"
+    assert re.search(
+        r"file\(READ.*mbdsdr_ai/VERSION.*MBDSDR_VERSION\)", cm
+    ), "cpp/CMakeLists.txt 没有从 mbdsdr_ai/VERSION 读取版本"
+    m = re.search(r"project\(mbdsdr\s+VERSION\s+\$\{([A-Za-z0-9_]+)\}", cm)
+    assert m, "cpp/CMakeLists.txt 的 project 版本没有引用读取结果"
+    assert not re.search(r"project\(mbdsdr\s+VERSION\s+[0-9]", cm), \
+        "cpp/CMakeLists.txt 仍写死版本字面量"
+    dyn = _meta()["tool"]["setuptools"]["dynamic"]["version"]
+    assert dyn == {"file": "mbdsdr_ai/VERSION"}
 
 
 def test_declared_deps_cover_imports():

@@ -43,6 +43,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse, unquote
 
 from .streamer import AudioStreamer, SpectrumStreamer
+from ..version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -412,7 +413,7 @@ class WebServer:
         mode = getattr(be, "mode", None)
         return {
             "service": "mbdsdr_ai.web",
-            "version": "0.1.0",
+            "version": __version__,
             "connected": connected,
             "center_freq_hz": float(freq) if isinstance(freq, (int, float)) else None,
             "mode": mode if isinstance(mode, str) else None,

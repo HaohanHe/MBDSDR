@@ -47,7 +47,7 @@ except Exception:
 
 import importlib as _importlib
 
-__version__ = "0.8.0"
+from .version import __version__
 
 # 公开符号 → 所属子模块。惰性导出表；新增导出时在这里登记即可。
 _EXPORTS = {
