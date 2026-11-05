@@ -1680,30 +1680,41 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 > 实测 1 passed），下表是**历史快照**，不得计入当前红数；B 的 8 个 C++ 槽**已修 — `ef07c133` — `cpp/src/core/tokens.h:338` — `kDbViewUpperDefault`**
 > （原构建阻塞 `main_window.cpp:5644` 已随本笔消除，见 §B 末）；C 是断言闸门的报告口径，不是新欠账。复跑 `ctest -R "^(spectrum_display|spectrum_autorange)$"`；**2026-11-06 在 `cpp/build` 重新构建后实测：`100% tests passed, 0 tests failed out of 2`（spectrum_display / spectrum_autorange 各 Passed）**。
 
-#### 7.3.2 白名单 stale 6 条：等 owner 书面确认后销账（2026-11-06）
+#### 7.3.2 白名单 stale 销账清单（2026-11-06，按 HEAD 内容判定）
 
-HEAD 白名单 103 行中有 6 行对应的断言**已在 HEAD 真修/真删**，闸门
-`test_waivers_are_not_stale` 因此红（`pytest tests/test_claims_guard.py -q`：
-2 failed / 2 passed）。`docs/claim-waivers.md` 当前持有方＝日志与书签版本线；
-按「只删核对为真修好的、未确认一条不删」处理，逐条用 `git show HEAD:<path>` 复核：
+判定口径：**只认 `git show HEAD:<path>` 的实际内容**，工作区在途编辑不作为删除依据。
+HEAD `957c4144` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **6** 条
+（`docs/packaging.md` 4 + `docs/parameter-unification.md` 2）。工作区另有 13 条红
+（`docs/settings-inventory.md` 9 + `docs/hardcoded-parameters.md` 4），来源是他线
+未提交的文档改动；**这些句子在 HEAD 仍是无四元组的未证实断言，故本期不删**。
 
-| id | 文件 | owner | HEAD 复核证据 | 结论 | 书面确认 |
+**A. 可在 HEAD 销账（等 owner 书面确认）**
+
+| id | 文件 | owner | HEAD 复核 | 结论 | 书面确认 |
 | --- | --- | --- | --- | --- | --- |
-| 77 | `docs/packaging.md` | 打包线 | `:17` 现为 `50aa1db0` — `desktop/main.py:74` — … | 已补证 | 待确认 |
-| 78 | `docs/packaging.md` | 打包线 | `:200` 现为 `50aa1db0` — `desktop/main.py:350` — … | 已补证 | 待确认 |
+| 77 | `docs/packaging.md` | 打包线 | 原句不再存在 | 已删 | 待确认 |
+| 78 | `docs/packaging.md` | 打包线 | `:200` 现为 `50aa1db0` — `desktop/main.py:350` — … | 补证完成 | 待确认 |
 | 79 | `docs/packaging.md` | 打包线 | 原「约束 / 实测行为 / 期望 / 差距 / 完成」表行不再存在 | 已删 | 待确认 |
-| 80 | `docs/packaging.md` | 打包线 | `:566` 现为 `c295423e` — `desktop/startup_paths.py:98` — … | 已补证 | 待确认 |
-| 81 | `docs/parameter-unification.md` | 采样率线 | `:423` 现为 `70429a02` — `desktop/main_window.py:3963` — … | 已补证 | 待确认 |
-| 83 | `docs/parameter-unification.md` | 采样率线 | `:425` 现为 `754f64e6` — `scripts/sample_rate_readback_check.py:156` — … | 已补证 | 待确认 |
+| 80 | `docs/packaging.md` | 打包线 | `:570` 现为 `c295423e` — `desktop/startup_paths.py:98` — … | 补证完成 | 待确认 |
+| 81 | `docs/parameter-unification.md` | 采样率线 | `:423` 现为 `70429a02` — `desktop/main_window.py:3963` — `_fill_sr_combo` | 补证完成 | 待确认 |
+| 83 | `docs/parameter-unification.md` | 采样率线 | `:425` 现为 `754f64e6` — `scripts/sample_rate_readback_check.py:156` — … | 补证完成 | 待确认 |
 
-其余 40 行（HEAD 有、工作区无，但**在 HEAD 仍是未证实断言**）一律不删：
-`docs/PRD-现状对照.md` 16、`docs/PRD.md` 10、`docs/settings-inventory.md` 9、
-`docs/hardcoded-parameters.md` 4、`docs/reference-mechanisms.md` 1（id 94）。
-等各文件 owner 补齐四元组后再走正常销账。
+**B. 在 HEAD 仍未修好 → 本期不删（13 条，等修复进 HEAD 后再销）**
 
-落库：6 条全部拿到 owner 书面确认后**一次性**提交，说明逐条列 owner 与上述
-复核证据；提交后 `test_claims_guard.py` 必须 5 passed、`verify_claims` 计数
-不得变差。
+| id | 文件 | owner | HEAD 实测 |
+| --- | --- | --- | --- |
+| 51 / 55 / 56 / 57 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | 原句仍在、无四元组，仍被 `verify_claims` 计为未证实 |
+| 132–140 | `docs/settings-inventory.md` | 机制线 | 同上（9 条） |
+
+**C. 其余 27 行**（`docs/PRD-现状对照.md` 16、`docs/PRD.md` 10、
+`docs/reference-mechanisms.md` 1）在 HEAD 同样仍是未证实断言，不删。
+
+**D. 实测（对 HEAD 文档 + 97 行白名单模拟）**：白名单红条数 **删前 6 → 删后 0**；
+`measured − waived` 残留仅 `docs/evidence-standard.md:44`（真机证据线，不是白名单行，
+故 `test_no_new_or_modified_unverified_claims` 仍会红一条）。
+
+落库：A 组 6 条拿到 owner 书面确认后**一次性**提交，`waived-total` 103 → 97；B/C
+组未确认一条不删。
 
 ## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
 
