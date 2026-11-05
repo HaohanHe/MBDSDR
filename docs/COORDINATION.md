@@ -1418,8 +1418,8 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
   验收「`set_frequency(0)` 返回 False 且上游不是 DONE」。
 - `desktop/main_window.py:1772` 假 `DONE` —— 文件由操作逻辑线持有（claim
   剩余 18 min），本线不动；改法见本节第 4-5 条。
-- 守卫复跑剩余必须修（2026-11-06 01:3x，`D:\mbdsdr\output\tmp\scan_r5.json`，
-  越线 7 项全部来自他线在途，本线登记项无越线）：
+- 守卫复跑剩余必须修（2026-11-06 01:5x，`D:\mbdsdr\output\tmp\scan_r6.json`：
+  总量 1284→1297 / 越线 7 项；本线新增文件 0 处，13 处增量全部来自他线在途）：
   - `scripts/decode_sensitivity.py`（0/5 > 基线 0/2，+3）：P5 线在途新增的
     `except Exception` 分支；owner = 解码流水线 P5，到期 2026-11-07。
   - `scripts/hw_acceptance/common.py`（1/4 > 基线 0/3）：操作逻辑线在途
