@@ -80,6 +80,9 @@ AUDIT_SOURCES = ("desktop", "test", "script")
 TX_AUDIT_MAX_BYTES = 10 * 1024 * 1024
 TX_AUDIT_BACKUPS = 4
 
+#: 同一审计失败错误的最小告警间隔（秒）：发射循环反复失败时不刷屏。
+_AUDIT_LOG_INTERVAL_S = 30.0
+
 
 def default_audit_path() -> str:
     """审计日志默认路径（不落 C 盘）。
@@ -120,6 +123,9 @@ class TxAuditLog:
         self.last_error = ""
         self.write_failures = 0
         self.records_written = 0
+        # 失败告警限流：同一条错误在 _LOG_INTERVAL_S 内只打一次（错误变化立即打）。
+        self._last_log_ts = 0.0
+        self._last_log_msg = ""
 
     @property
     def path(self) -> str:
@@ -131,6 +137,19 @@ class TxAuditLog:
             self.last_error = ""
             self.write_failures = 0
             self.records_written = 0
+            self._last_log_ts = 0.0
+            self._last_log_msg = ""
+
+    def _log_failure(self) -> None:
+        """失败日志限流：同一错误 30s 内只打一次，避免发射循环把日志刷爆。"""
+        now = time.monotonic()
+        if (self.last_error == self._last_log_msg
+                and now - self._last_log_ts < _AUDIT_LOG_INTERVAL_S):
+            return
+        self._last_log_ts = now
+        self._last_log_msg = self.last_error
+        logger.error("发射审计写入失败（fail-closed，拒绝发射）: %s",
+                     self.last_error)
 
     def write(self, record: Dict[str, Any]) -> None:
         """追加一条记录；失败抛 :class:`TxAuditError`（调用方 fail-closed）。"""
@@ -151,8 +170,7 @@ class TxAuditLog:
             except OSError as e:
                 self.write_failures += 1
                 self.last_error = f"{type(e).__name__}: {e}"
-                logger.error("发射审计写入失败（fail-closed，拒绝发射）: %s",
-                             self.last_error)
+                self._log_failure()
                 raise TxAuditError(self.last_error) from e
 
     def _rotate(self) -> None:

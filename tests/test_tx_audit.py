@@ -10,6 +10,7 @@
 fail-closed（不签发 / 不放行，状态可见）。
 """
 import json
+import logging
 import os
 import sys
 
@@ -208,3 +209,65 @@ def test_source_defaults_are_classified(tmp_path, monkeypatch):
     get_tx_gate().arm(ttl_s=10)
     rec = _read_records(log.path)[-1]
     assert rec["source"] == "test"
+
+
+# ── 写不进：环境变量指到不可写路径，签发失败且可见 ─────────────────────
+def test_unwritable_env_path_blocks_arm_and_status_visible(
+        tmp_path, monkeypatch):
+    bad = _make_broken_path(tmp_path)
+    monkeypatch.setenv("MBDSDR_TX_AUDIT_PATH", bad)
+    log = reset_tx_audit()          # 不传 path，按环境变量解析
+    reset_tx_gate()
+    assert log.path == bad
+
+    with pytest.raises(TxAuditError) as ei:
+        get_tx_gate().arm(ttl_s=10, source="test")
+    assert "blocker" in str(ei.value), "失败原因必须指向不可写路径"
+
+    snap = get_tx_gate().snapshot()
+    assert snap["state"] == "disarmed", "审计不可写时不得武装"
+    assert snap["audit"]["fail_closed"] is True
+    assert snap["audit"]["last_error"]
+    assert snap["audit"]["path"] == bad
+    assert snap["audit"]["write_failures"] >= 1
+
+
+def test_unwritable_env_path_refuses_allowed_not_silent_allow(
+        tmp_path, monkeypatch):
+    """门已用正常路径武装后，审计变不可写：放行必须降级为拒绝，不许静默发波。"""
+    good = reset_tx_audit(str(tmp_path / "ok.jsonl"))
+    gate = reset_tx_gate()
+    tok = gate.arm(ttl_s=60, source="test")
+    assert _read_records(good.path)[-1]["result"] == "armed"
+
+    bad = _make_broken_path(tmp_path)
+    reset_tx_audit(bad)
+    d = gate.authorize(token=tok, tool="sdr_transmit_iq", source="test")
+    assert d.allowed is False
+    assert d.code == "audit_write_failed"
+    assert "审计写入失败" in d.reason
+
+    snap = gate.snapshot()
+    assert snap["audit"]["path"] == bad
+    assert snap["audit"]["last_error"]
+    # 没有产生任何 allowed 记录（旧路径里只有 armed）
+    assert [r["result"] for r in _read_records(good.path)] == ["armed"]
+
+
+def test_audit_failure_logs_are_throttled(tmp_path, monkeypatch, caplog):
+    """连续失败 21 次只打 1 条 ERROR：发射循环不会把日志刷爆，但计数仍如实累加。"""
+    bad = _make_broken_path(tmp_path)
+    reset_tx_audit(bad)
+    reset_tx_gate()
+
+    with caplog.at_level(logging.ERROR, logger="mbdsdr_ai.tx_guard"):
+        with pytest.raises(TxAuditError):
+            get_tx_gate().arm(ttl_s=10, source="test")
+        for _ in range(20):
+            with pytest.raises(TxAuditError):
+                get_tx_gate().arm(ttl_s=10, source="test")
+
+    errors = [r for r in caplog.records
+              if "发射审计写入失败" in r.getMessage()]
+    assert len(errors) == 1, f"限流失效，实际 {len(errors)} 条"
+    assert tx_audit_status()["write_failures"] == 21, "计数不能因限流丢失"
