@@ -560,9 +560,34 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 | 编号 | 条目 | 来源线 / 证据 | 现状 | 复跑条件 |
 | --- | --- | --- | --- | --- |
-| L50 | **TLE 老化后过境仍照算，且看起来和新 TLE 一样** | 30 天：首条预测 20:47:47 / 12.18°（较新鲜首条 +7h12m），真实中天时刻 **-43.38°**（地平线下）。90 天：01:28:54 / 88.55°（+11h53m），真实中天时刻 **-27.95°**。365 天：01:24:20 / 10.87°（+11h49m），真实中天时刻 **-25.30°**。三者 `tier=dead`、`accuracy_risk=unusable`、`time_precision_s=60`。注意 `time_precision_s=60` 是**预测时刻精度**约 60 秒，不是卫星位置精度 | **已修（可见性）**：`SatellitePass` 带 `tle_age_days/tle_tier/accuracy_note`（05f3a6b5）；面板表格追加「（TLE 失效 365 天）」，提示区原文「TLE 提醒：1 颗星的星历已过期/失效（最老 365 天）：ISS (ZARYA)。轨道已不可信，过境时刻仅供占位，必须刷新星历；time_precision_s=60 表示预测时刻精度约 60 秒（不是卫星位置精度）。」（0232887c） | `pytest tests/test_tle_age_visibility.py tests/test_pass_ui_warnings.py`；把老 TLE 的 age/tier 去掉或改回「新鲜」即红 |
+| L50 | **TLE 老化后过境仍照算，且看起来和新 TLE 一样** | 30 天：首条预测 20:47:47 / 12.18°（较新鲜首条 +7h12m），真实中天时刻 **-43.38°**（地平线下）。90 天：01:28:54 / 88.55°（+11h53m），真实中天时刻 **-27.95°**。365 天：01:24:20 / 10.87°（+11h49m），真实中天时刻 **-25.30°**。三者 `tier=dead`、`accuracy_risk=unusable`、`time_precision_s=60`。注意 `time_precision_s=60` 是**预测时刻精度**约 60 秒，不是卫星位置精度 | **已修（可见性）**：`SatellitePass` 带 `tle_age_days/tle_tier/accuracy_note`（05f3a6b5）；面板表格追加「（TLE 失效 365 天）」，提示区按**年龄判定表**分级给文案（2026-11-06 补 `age_band`/`band_note`），365 天原文「TLE 提醒：1 颗（ISS (ZARYA)，逐条年龄见卫星名后标注）。TLE 已失效（365 天，超过 90 天）：轨道已严重不可信，过境时刻仅供占位，禁止用于跟踪/调谐，必须刷新星历（time_precision_s=60 是预测时刻精度约 60 秒，不是卫星位置精度）。」 | `pytest tests/test_tle_age_visibility.py tests/test_pass_ui_warnings.py`；把老 TLE 的 age/tier 去掉或改回「新鲜」即红；365 天不落到 dead 档即红 |
 | L51 | **全表 ×72h 预算：面板只能走 TimelineEngine，禁止改回 `sat_passes`** | N=6（`DEFAULT_SATELLITES` **全表**，不是只算选中）：TimelineEngine 60s 步长 总 **0.187s** / 均 **0.028s** / 最慢 ISS **0.038s** / 83 条；N=12 实测 **0.232s** / 164 条。`orbit.predict_passes_report`（60s+2s）**1.311s** / 均 0.218s / 最慢 NOAA19 0.234s。`sat_passes.predict_passes`（单星控制器路径，含细扫）**16.5s** / 均 2.75s / 最慢 NOAA18 3.26s；线性外推 N=12 约 **33s** | **已确认 + 已约束**：面板对 `DEFAULT_SATELLITES` 全表计算；N 翻倍对 TimelineEngine 仍 <0.3s，可接受；`sat_passes` 路径**不可用于 UI 同步**（N=12 约 33s），只允许单星按需（`get_satellite_pass`）。谁把面板引擎换成 `sat_passes` 或改成只算选中，须重测并更新本条 | 按本条数字复跑；面板路径实测 <0.3s、全表条数随 N 翻倍；若改路径后 >1s 或条数不随 N 增长即红 |
 | L52 | **`station_warning` 的真实可见面（不是「进了日志就算」）** | (0,0) 控制器实测返回 **2 条**并带 `station_warning="null_island_0_0（显式输入坐标恰为 0,0（几内亚湾）；照常计算，但位置可疑）"`。可见面：SDR 工具 `_satellite_passes` 首行、agent `_passes` 顶层字段、MCP `get_satellite_pass` 返回字段、控制器返回值、面板提示区（新增）；不可见面：状态栏不展示过境结果（仅天空图 3s 瞬态提醒）；仓库无过境导出功能，MCP JSON 是唯一导出面（含该字段） | **已修（面板 + AI 文本）**：`sdr_tools` 首行「站址提醒：…」（cff501fc）；面板提示区原文「站址提醒：null_island_0_0（…几内亚湾）…」（0232887c）；`orbit.degraded` 中站址条目改到末尾，不再抢 `identity_mismatch`/`tle_dead` 首条（f2c65c46） | `pytest tests/test_station_warning_visibility.py tests/test_pass_ui_warnings.py mbdsdr_ai/tests/test_tle_integrity.py`；删掉首行文案、面板不显示，或站址条目回到 degraded 首位即红 |
+
+> **TLE 年龄分级判定表（单一事实源：`mbdsdr_ai/tle_integrity.py` 的 `age_band()` /
+> `band_note()`；面板、SDR 文本、AI/控制器返回与本文档同源，禁止各处另写一版）**
+>
+> `tier` 只有 4 档（fresh/usable/expired/dead），展示层把 dead 再拆成
+> 「31–90 天」与「>90 天」两档：31 天和 365 天不能共用一句。
+
+| 档位 | 年龄 | tier | accuracy_risk | time_precision_s | 确切文案（`band_note()` 原文） |
+| --- | --- | --- | --- | --- | --- |
+| fresh | ≤24 小时 | fresh | low | 1 | TLE 新鲜（N 天，≤24 小时）：过境时刻按秒级精度给出。 |
+| usable | >24 小时，≤7 天 | usable | moderate | 1 | TLE 可用（N 天，≤7 天）：过境时刻可能有数十秒级漂移，临近时建议刷新 TLE。 |
+| expired | >7 天，≤30 天 | expired | high | 60 | TLE 已过期（N 天）：传播误差可达数分钟，过境时刻仅按分钟级给出，不可默认用于精确跟踪（time_precision_s=60 是预测时刻精度约 60 秒，不是卫星位置精度）。 |
+| stale | >30 天，≤90 天 | dead | unusable | 60 | TLE 已失效（N 天，31–90 天档）：轨道已不可信，过境时刻仅供占位，必须刷新星历后才能跟踪（time_precision_s=60 是预测时刻精度约 60 秒，不是卫星位置精度）。 |
+| dead | >90 天（含 365 天） | dead | unusable | 60 | TLE 已失效（N 天，超过 90 天）：轨道已严重不可信，过境时刻仅供占位，禁止用于跟踪/调谐，必须刷新星历（time_precision_s=60 是预测时刻精度约 60 秒，不是卫星位置精度）。 |
+| unknown | 历元不可解析 | unknown | unusable | 60 | TLE 年龄未知（历元无法解析）：无法判断星历是否新鲜，轨道不可信，必须刷新星历后才能跟踪（time_precision_s=60 是预测时刻精度约 60 秒，不是卫星位置精度）。 |
+
+> **过境时刻的三条路径与精度（凡用户可见的时刻必须标来源；同屏不许混用两种精度而不标注）**
+
+| 路径 | 用户可见面 | 采样/细化 | 实测偏差 | 界面标注 |
+| --- | --- | --- | --- | --- |
+| `TimelineEngine`（`new_spacetime_timeline`） | 新时空面板表格 + 提示区 | **60 秒网格，无细扫** | 相对 2 秒细扫（24 h / 28 条过境）：峰值时刻 **≤30 秒**、升落 **≤58 秒**、峰值仰角最大差 **7.6°** | 面板提示区原文：「时刻来源：本面板 TimelineEngine（60 秒网格，未细扫）；峰值时刻偏差 ≤30 秒、升落 ≤58 秒、峰值仰角最大差 7.6°（不是卫星位置精度）。」 |
+| `sat_passes.predict_passes` | SDR 工具文本 / controller / MCP `get_satellite_pass` / agent `_passes` | 60 秒粗扫 + **2 秒细扫** + 0.5 秒二分 | 升落二分容差 0.5 秒；中天为 2 秒细采样的一格（≤1 秒） | SDR 文本「时刻来源：sat_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分；…不是卫星位置精度）」；controller/MCP 带 `pass_time_source` 与 `pass_time_sampling_precision_s=1.0`；agent `_passes` 同名字段 |
+| `compute_pass_peaks`（`rf_sky_view`） | 天空图「未来过境」列表 | 60 秒粗扫 + 2 秒细扫（无二分） | 同 sat_passes 细扫口径（无 0.5 秒升落二分） | 列表标题追加「· 2s采样」；完整口径见本表与面板提示区 |
+
+---
 
 ## 附 P：解码流水线（P5 续，2026-11-05 增补）
 

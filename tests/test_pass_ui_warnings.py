@@ -69,10 +69,14 @@ def test_panel_shows_expired_tle_warning(panel, monkeypatch):
         f"表格里看不到 TLE 老化：{name!r}")
     label = panel.passes_filter_label.text()
     assert "TLE 提醒" in label, f"提示区没有 TLE 老化文案：{label!r}"
-    assert "轨道已不可信" in label and "必须刷新" in label, (
-        f"dead 必须给「不可信/必须刷新」原话：{label!r}")
-    assert "60" in label and "时刻" in label, (
-        f"必须说明 time_precision_s=60 是时刻精度：{label!r}")
+    assert "轨道已严重不可信" in label and "必须刷新星历" in label, (
+        f"365 天必须命中最强警示句：{label!r}")
+    assert "禁止用于跟踪/调谐" in label
+    assert "预测时刻精度" in label and "不是卫星位置精度" in label, (
+        f"必须说明 time_precision_s=60 是预测时刻精度：{label!r}")
+    assert "365" in label, f"必须带上年龄天数：{label!r}"
+    # 同一界面必须标时刻来源与采样精度，不许混用两种精度而不标注
+    assert "时刻来源" in label and "TimelineEngine" in label, label
 
 
 def test_panel_shows_null_island_warning(panel, monkeypatch):
@@ -96,3 +100,5 @@ def test_panel_shows_null_island_warning(panel, monkeypatch):
     assert "站址提醒" in label, f"(0,0) 时用户看不到站址 warning：{label!r}"
     assert "null_island_0_0" in label, f"warning 必须带原因码：{label!r}"
     assert "几内亚湾" in label, f"warning 必须说清位置含义：{label!r}"
+    assert "时刻来源" in label and "TimelineEngine" in label, (
+        f"过境时刻必须标来源：{label!r}")

@@ -1155,6 +1155,12 @@ class SDRController:
             out["passes_in_window"] = len(passes)
             out["min_elevation_deg"] = gate_deg
             out["window_hours"] = hours_ahead
+            # 用户看到的时刻必须带来源与精度：time_precision_s 是星历年龄
+            # 决定的精度，这里补「采样路径」与采样本身带来的偏差（两者
+            # 不是一回事，混着说会让用户以为 60 秒是轨道位置精度）。
+            out["pass_time_source"] = (
+                "sat_passes.predict_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分）")
+            out["pass_time_sampling_precision_s"] = 1.0
             # 显式 (0,0)/海上坐标被计算口径放行时，把可疑位置原因原样带给
             # 用户，不许静默算完。
             if st.get("station_warning"):

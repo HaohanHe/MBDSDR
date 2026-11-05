@@ -1577,7 +1577,12 @@ class MBDSDRAgent:
                 return ToolResult(False, f"过境预测失败: {e}")
             return ToolResult(True, json.dumps(
                 {"passes": ps, "count": len(ps),
-                 "station_warning": ev.get("station_warning") or ""},
+                 "station_warning": ev.get("station_warning") or "",
+                 # 时刻来源与采样精度：AI 回答里贴出的时刻必须能追问出处，
+                 # 不能与面板的 60 秒网格（±30 秒）混为一谈。
+                 "pass_time_source": (
+                     "sat_passes.predict_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分）"),
+                 "pass_time_sampling_precision_s": 1.0},
                 ensure_ascii=False, default=str))
 
         self.tool_registry.register(

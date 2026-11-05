@@ -118,6 +118,10 @@ class SatellitePass:
     tle_tier_label: str = ""
     accuracy_risk: str = ""
     accuracy_note: str = ""
+    # 本引擎的采样步长（秒）。用户看到的时刻必须能区分「星历精度」与
+    # 「采样精度」：sat_passes 走 2 s 细扫，本引擎面板走 60 s 网格，
+    # 实测峰值时刻偏差见 docs/limitations-register.md 附 O。
+    sampling_step_s: float = 0.0
 
 
 @dataclass
@@ -353,6 +357,7 @@ class TimelineEngine:
                             set_azimuth=0.0,
                             duration_sec=0.0,
                             frequency_hz=freq_hz,
+                            sampling_step_s=step_sec,
                             **tle_meta,
                         )
                     pt = PassPoint(

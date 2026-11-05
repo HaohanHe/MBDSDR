@@ -4452,7 +4452,9 @@ def _satellite_passes(args):
     if not passes:
         return (out + f"未来 {hours}h 内没有仰角 >= {min_elev}° 的卫星过境"
                        "（可用的真实 TLE 不足时不会拿错轨道凑数）。")
-    out += f"=== 未来 {hours}h 卫星过境预测 (仰角>={min_elev}°) ===\n共 {len(passes)} 次\n\n"
+    out += f"=== 未来 {hours}h 卫星过境预测 (仰角>={min_elev}°) ===\n共 {len(passes)} 次\n"
+    out += ("时刻来源：sat_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分；"
+            "升落时刻偏差 ≤0.5 秒、中天采样偏差 ≤1 秒；不是卫星位置精度）\n\n")
     for i, p in enumerate(passes):
         out += f"{i+1}. {p['satellite']}\n"
         out += f"   升: {p['rise_time']} (方位 {p['rise_azimuth']}°)\n"

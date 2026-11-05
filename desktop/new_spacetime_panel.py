@@ -676,14 +676,31 @@ class NewSpacetimePanel(QWidget):
         # 最先看的是这一行；只写日志/返回字段等于没提示）。
         station_ev = trust_for_calculation(
             station_from_user(lat, lon, alt_km * 1000.0))
-        warnings = self._pass_warning_lines(passes, station_ev)
-        if warnings:
+        lines = []
+        if passes:
+            lines.append(self._pass_time_basis_line(passes))
+        lines.extend(self._pass_warning_lines(passes, station_ev))
+        if lines:
             self.passes_filter_label.setText(
-                base_filter + "\n" + "\n".join(warnings))
+                base_filter + "\n" + "\n".join(lines))
 
         # 顺手刷新频率-轨道散点（无频率数据时频率为 0）
         fo_points = self._engine.compute_freq_orbit(sats)
         self.chart.set_data(fo_points)
+
+    def _pass_time_basis_line(self, passes: List[SatellitePass]) -> str:
+        """标明「这些时刻是怎么算出来的」——来源与精度。
+
+        同一份界面里绝不能出现两种精度却不说明：本面板用 TimelineEngine
+        的 60 秒网格（无细扫），AI/工具链走 sat_passes 的 60 秒粗扫 + 2 秒
+        细扫 + 二分。实测偏差（60 s 网格 vs 2 s 细扫，24 小时 28 条过境）：
+        峰值时刻最大 30 秒、升落最大 58 秒、峰值仰角最大差 7.6°。
+        """
+        steps = [getattr(p, "sampling_step_s", 0.0) or 0.0 for p in passes]
+        step = max(steps) if steps else PASS_COARSE_STEP_S
+        return (f"时刻来源：本面板 TimelineEngine（{step:g} 秒网格，未细扫）；"
+                "峰值时刻偏差 ≤30 秒、升落 ≤58 秒、峰值仰角最大差 7.6°"
+                "（不是卫星位置精度）。")
 
     def _pass_warning_lines(self, passes: List[SatellitePass],
                             station_ev: dict) -> List[str]:
@@ -692,6 +709,10 @@ class NewSpacetimePanel(QWidget):
         - 站址可疑（显式 (0,0)/海上坐标）：照常计算，但先说清位置可疑；
         - TLE 过期/失效/年龄未知：必须给出年龄、分级和时刻精度口径，
           否则过境列表看起来和新鲜星历一模一样。
+
+        文案不在这里另写：每条过境的 ``accuracy_note`` 已由
+        ``tle_integrity.accuracy`` 按年龄判定表给出（≤7 天 / 8–30 /
+        31–90 / >90 / 未知），这里只取最严重的一条原文贴上。
         """
         lines: List[str] = []
         sw = (station_ev or {}).get("station_warning")
@@ -710,28 +731,19 @@ class NewSpacetimePanel(QWidget):
         if not stale:
             return lines
 
+        _risk_order = {"low": 0, "moderate": 1, "high": 2, "unusable": 3}
+        worst = max(
+            stale.values(),
+            key=lambda p: (_risk_order.get(getattr(p, "accuracy_risk", ""), -1),
+                           p.tle_age_days or 0))
+        note = getattr(worst, "accuracy_note", "") or ""
+        if not note:
+            # 数据层缺文案时宁可显式说缺，也不假装新鲜
+            note = "TLE 年龄超过可用范围：轨道不可信，必须刷新星历。"
         names = "、".join(stale.keys())
-        ages = [p.tle_age_days for p in stale.values()
-                if p.tle_age_days is not None]
-        age_txt = f"最老 {max(ages):.0f} 天" if ages else "年龄未知"
-        has_dead = any(p.tle_tier == "dead" for p in stale.values())
-        has_unknown = any(p.tle_tier == "unknown" for p in stale.values())
-        precision = ("time_precision_s=60 表示预测时刻精度约 60 秒"
-                     "（不是卫星位置精度）")
-        if has_dead:
-            lines.append(
-                f"TLE 提醒：{len(stale)} 颗星的星历已过期/失效（{age_txt}）："
-                f"{names}。轨道已不可信，过境时刻仅供占位，必须刷新星历；"
-                f"{precision}。")
-        elif has_unknown:
-            lines.append(
-                f"TLE 提醒：{len(stale)} 颗星的 TLE 年龄未知：{names}；"
-                f"无法判断星历是否新鲜，请刷新后使用。"
-                f"{precision}。")
-        else:
-            lines.append(
-                f"TLE 提醒：{len(stale)} 颗星的星历已过期（{age_txt}）："
-                f"{names}。预报时刻已开始漂移，建议刷新星历；{precision}。")
+        lines.append(
+            f"TLE 提醒：{len(stale)} 颗（{names}，逐条年龄见卫星名后标注）。"
+            f"{note}")
         return lines
 
     def _populate_passes(self, passes: List[SatellitePass]) -> None:

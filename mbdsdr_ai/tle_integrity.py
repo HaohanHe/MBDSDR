@@ -34,7 +34,12 @@ __all__ = [
     "FRESH_MAX_HOURS",
     "USABLE_MAX_DAYS",
     "EXPIRED_MAX_DAYS",
+    "DEAD_STALE_MAX_DAYS",
     "TIER_LABELS",
+    "AGE_BAND_LABELS",
+    "AGE_BAND_SEVERITY",
+    "age_band",
+    "band_note",
     "normalize_name",
     "names_match",
     "verify_identity",
@@ -58,6 +63,8 @@ __all__ = [
 FRESH_MAX_HOURS = 24.0
 USABLE_MAX_DAYS = 7.0
 EXPIRED_MAX_DAYS = 30.0
+# 失效再分两档：31–90 天 / >90 天（>90 天是最强警示档；365 天必须命中它）
+DEAD_STALE_MAX_DAYS = 90.0
 
 TIER_LABELS: Dict[str, str] = {
     "fresh": "新鲜",
@@ -66,6 +73,78 @@ TIER_LABELS: Dict[str, str] = {
     "dead": "失效",
     "unknown": "未知",
 }
+
+# 年龄判定表：tier 只有 4 档（fresh/usable/expired/dead），展示需要把 dead
+# 拆成「31–90 天」与「>90 天」两档——轨道误差随年龄单调放大，用户看到的
+# 话必须随之升级，不能 31 天和 365 天说同一句。
+AGE_BAND_LABELS: Dict[str, str] = {
+    "fresh": "新鲜（≤24 小时）",
+    "usable": "可用（≤7 天）",
+    "expired": "过期（7–30 天）",
+    "stale": "失效（31–90 天档）",
+    "dead": "失效（超过 90 天）",
+    "unknown": "失效/年龄未知",
+}
+
+# 严重度：给调用方排序用（越大越严重），不随文案变化。
+AGE_BAND_SEVERITY: Dict[str, int] = {
+    "fresh": 0, "usable": 1, "expired": 2, "stale": 3,
+    "dead": 4, "unknown": 4,
+}
+
+_TIME_PRECISION_NOTE = (
+    "time_precision_s=60 是预测时刻精度约 60 秒，不是卫星位置精度")
+
+
+def _age_text(age_days: Optional[float]) -> str:
+    """年龄人话（<1 天保留一位小数，否则取整）。"""
+    if age_days is None:
+        return ""
+    if age_days < 1.0:
+        return f"{age_days:.1f} 天"
+    return f"{age_days:.0f} 天"
+
+
+def age_band(age_days: Optional[float]) -> str:
+    """年龄 → 展示档位（唯一判定表）。
+
+    ≤24h fresh / ≤7d usable / ≤30d expired / ≤90d stale / >90d dead /
+    无法解析 unknown。tier 语义不变（stale 与 dead 的 tier 都是 ``dead``），
+    展示层据本函数升级文案。
+    """
+    if age_days is None:
+        return "unknown"
+    if age_days <= FRESH_MAX_HOURS / 24.0:
+        return "fresh"
+    if age_days <= USABLE_MAX_DAYS:
+        return "usable"
+    if age_days <= EXPIRED_MAX_DAYS:
+        return "expired"
+    if age_days <= DEAD_STALE_MAX_DAYS:
+        return "stale"
+    return "dead"
+
+
+def band_note(band: str, age_days: Optional[float] = None) -> str:
+    """每个档位的**确切文案**（面板/文档/测试共用，不许各处另写一份）。"""
+    age = _age_text(age_days)
+    if band == "fresh":
+        return f"TLE 新鲜（{age}，≤24 小时）：过境时刻按秒级精度给出。"
+    if band == "usable":
+        return (f"TLE 可用（{age}，≤7 天）：过境时刻可能有数十秒级漂移，"
+                "临近时建议刷新 TLE。")
+    if band == "expired":
+        return (f"TLE 已过期（{age}）：传播误差可达数分钟，过境时刻仅按"
+                f"分钟级给出，不可默认用于精确跟踪（{_TIME_PRECISION_NOTE}）。")
+    if band == "stale":
+        return (f"TLE 已失效（{age}，31–90 天档）：轨道已不可信，过境时刻"
+                f"仅供占位，必须刷新星历后才能跟踪（{_TIME_PRECISION_NOTE}）。")
+    if band == "dead":
+        return (f"TLE 已失效（{age}，超过 90 天）：轨道已严重不可信，过境"
+                "时刻仅供占位，禁止用于跟踪/调谐，必须刷新星历"
+                f"（{_TIME_PRECISION_NOTE}）。")
+    return (f"TLE 年龄未知（历元无法解析）：无法判断星历是否新鲜，轨道"
+            f"不可信，必须刷新星历后才能跟踪（{_TIME_PRECISION_NOTE}）。")
 
 # 默认允许用于过境/跟踪的分级
 _DEFAULT_USABLE_TIERS = ("fresh", "usable")
@@ -246,29 +325,29 @@ def accuracy(fresh: Dict[str, Any]) -> Dict[str, Any]:
 
     过期/失效时调用方必须降精度（默认到分钟）并显式告警，不许照常输出
     精确到秒的时刻——TLE 的历元年龄直接决定传播误差的量级。
+
+    文案来自 :func:`band_note` 的判定表（fresh/usable/expired/stale/dead/
+    unknown），调用方不要再各写一份。
     """
     tier = str(fresh.get("tier", "unknown"))
     age = fresh.get("age_days")
-    if tier == "fresh":
-        risk, precision, note = "low", 1, "TLE 新鲜（≤24h），过境时刻按秒级精度给出"
-    elif tier == "usable":
-        risk, precision, note = (
-            "moderate", 1,
-            "TLE 可用（≤7d）：过境时刻可能有数十秒级漂移，临近时建议刷新 TLE")
-    elif tier == "expired":
-        risk, precision, note = (
-            "high", 60,
-            f"TLE 已过期（{age} 天）：传播误差可达数分钟，时刻仅按分钟级给出，"
-            "不可默认用于精确跟踪")
+    band = age_band(age)
+    if band == "fresh":
+        risk, precision = "low", 1
+    elif band == "usable":
+        risk, precision = "moderate", 1
+    elif band == "expired":
+        risk, precision = "high", 60
     else:
-        risk, precision, note = (
-            "unusable", 60,
-            "TLE 失效/未知：轨道已不可信，时刻仅作占位参考，必须刷新后才能跟踪")
+        risk, precision = "unusable", 60
     return {
         "risk": risk,
         "time_precision_s": precision,
-        "note": note,
+        "note": band_note(band, age),
         "tier": tier,
+        "band": band,
+        "band_label": AGE_BAND_LABELS[band],
+        "band_severity": AGE_BAND_SEVERITY[band],
         "age_days": age,
         "epoch_utc": fresh.get("epoch_utc"),
         "pass_eligible": bool(fresh.get("pass_eligible")),

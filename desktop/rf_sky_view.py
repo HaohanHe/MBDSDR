@@ -6658,6 +6658,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             title = f"未来过境{(' ' + span) if span else ''} UTC · 峰值(几何)"
         if self._pass_show_low:
             title += " · 低仰角已标"
+        # 时刻来源与采样精度：角标秒看着像精密值，实际是 60 秒粗扫 + 2 秒
+        # 细扫采到的（无 sat_passes 的 0.5 秒升落二分）。不标就是同屏混用
+        # 两种精度却让人以为都是同一口径。
+        title += f" · {_SAT_PASS_FINE_STEP_S:g}s采样"
         painter.drawText(panel_x + 10, panel_y + 16, title)
 
         painter.setFont(self._mono_font)
