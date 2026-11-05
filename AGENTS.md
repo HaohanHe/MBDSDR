@@ -55,6 +55,12 @@ tracked 文件（含 commit message）中：
 - 推送用 `git -c http.extraHeader="Authorization: Basic <b64>"`（token 不落
   config/URL）；token 属用户信任面，用完提醒吊销；
 - 批量文本替换先写一次性脚本到 %TEMP%\kilo\（不进仓库），再跑全量测试。
+- 私有 `GIT_INDEX_FILE` 文件名必须带**唯一前缀**：`idx_<会话标识>_<YYYYMMDD_HHMM>`，
+  禁止 `idx_a` / `idx-b` / `idx_private` 这类固定名；建名前先确认该文件不存在，
+  用完立即 `Remove-Item`。同名私有 index 会让两条线往同一份 index 里 add，
+  先提交的一方把对方内容一起卷走（实测事故：`09b53221` 卷进他线 4 个文件，
+  只能靠 `d8b40eb0` 逐文件还原）；提交清单再用
+  `scripts/check_commit_scope.py --staged --expect <路径...>` 兜底。
 
 ## 5. 基线
 
