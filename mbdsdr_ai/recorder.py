@@ -106,7 +106,8 @@ class IQRecorder:
                  device: str = "",
                  driver: str = "",
                  author: str = "MBDSDR",
-                 description: str = ""):
+                 description: str = "",
+                 overwrite: bool = False):
         paths = _sigmf_paths(data_path)
         self.data_path = paths["data"]
         self.meta_path = paths["meta"]
@@ -117,6 +118,11 @@ class IQRecorder:
         self.driver = str(driver)
         self.author = str(author)
         self.description = str(description)
+        # 录制是证据，不是缓存：默认绝不覆盖上一段录音。主窗口工具栏有
+        # `_unique_record_path` 防呆，但 MCP/CLI 走的 controller.start_recording
+        # 直接把调用方给的路径传进来，同名会把上一段证据静默抹掉。
+        # 只有显式 overwrite=True 才允许，且 meta 与 data 一并判断。
+        self.overwrite = bool(overwrite)
 
         self._fp = None            # 数据文件句柄
         self._n_samples: int = 0   # 已写 complex 样本数
@@ -132,6 +138,21 @@ class IQRecorder:
         """打开数据文件准备写。已打开则幂等返回 True。"""
         if self._fp is not None:
             return True
+        if not self.overwrite:
+            existing = [p for p in (self.data_path, self.meta_path)
+                        if os.path.exists(p)]
+            if existing:
+                # 不是 OSError，但同样是"打不开"：给出可操作的人话，
+                # 不借用 io 码去假装是系统错误再让上层显示"写入失败"。
+                self._fp = None
+                self.state = "failed"
+                self.error_code = "already_exists"
+                self.last_error = (
+                    "同名录制已存在，拒绝覆盖（" + "、".join(
+                        os.path.basename(p) for p in existing)
+                    + "）；请换一个路径，或显式指定 overwrite=True")
+                logger.error("IQRecorder 拒绝覆盖: %s", existing)
+                return False
         try:
             os.makedirs(os.path.dirname(self.data_path) or ".", exist_ok=True)
             self._fp = open(self.data_path, "wb")
@@ -401,7 +422,8 @@ class AudioRecorder:
     _BIT_DEPTHS = {8: 1, 16: 2, 24: 3, 32: 4}
 
     def __init__(self, path: str, sample_rate: int = 48000,
-                 channels: int = 1, bit_depth: int = 16):
+                 channels: int = 1, bit_depth: int = 16,
+                 overwrite: bool = False):
         if bit_depth not in self._BIT_DEPTHS:
             raise ValueError(
                 f"不支持的位宽 {bit_depth}，可用：{sorted(self._BIT_DEPTHS)}")
@@ -409,6 +431,8 @@ class AudioRecorder:
         self.sample_rate = int(sample_rate)
         self.channels = int(channels)
         self.bit_depth = int(bit_depth)
+        # 与 IQRecorder 同口径：录音是证据，默认不覆盖已有 wav。
+        self.overwrite = bool(overwrite)
         self._wf = None        # wave.Wave_write 句柄
         self._n_frames: int = 0
         self.closed = True
@@ -419,6 +443,14 @@ class AudioRecorder:
     def open(self) -> bool:
         if self._wf is not None:
             return True
+        if not self.overwrite and os.path.exists(self.path):
+            self.state = "failed"
+            self.error_code = "already_exists"
+            self.last_error = (
+                f"同名录音已存在，拒绝覆盖（{os.path.basename(self.path)}）；"
+                "请换一个路径，或显式指定 overwrite=True")
+            logger.error("AudioRecorder 拒绝覆盖: %s", self.path)
+            return False
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             self._wf = _wave.open(self.path, "wb")
@@ -461,7 +493,13 @@ class AudioRecorder:
             i24 = np.round(clipped * 8388607.0).astype(np.int32)
             pcm = self._to_int24(i24)
         else:  # 32bit 定点 PCM
-            pcm = (clipped * 2147483647.0).astype(np.int32)
+            # float32 尾数只有 24 bit：2^31−1 在 float32 里被舍成 2^31，
+            # +1.0 满幅样本再 cast 到 int32 直接溢出成 −2^31（正满幅变
+            # 最小负数 = 爆音，且 numpy 会发 invalid value 警告）。
+            # 升到 float64 再乘，并显式夹进 int32 定义域。
+            pcm = np.clip(clipped.astype(np.float64) * 2147483647.0,
+                          np.iinfo(np.int32).min,
+                          np.iinfo(np.int32).max).astype(np.int32)
         # wave.writeframes 要交错 bytes
         try:
             self._wf.writeframes(pcm.tobytes())

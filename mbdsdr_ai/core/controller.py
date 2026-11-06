@@ -1437,7 +1437,13 @@ class SDRController:
                 device=self._device_name,
             )
             if not rec.open():
-                return {"error": "open_failed", "suggestion": f"无法打开 {path} 写入。"}
+                # 旧实现把所有打不开的情形一律写成"无法打开 {path} 写入"：
+                # 磁盘满 / 无权限 / 同名证据会相互冒充，AI 与 CLI 拿不到
+                # 可操作原因。现在把录制器分类后的真实原因透传。
+                return {"error": "open_failed",
+                        "suggestion": rec.last_error
+                        or f"无法打开 {path} 写入。",
+                        "error_code": rec.error_code}
         except Exception as e:
             return {"error": "not_available", "technical_detail": str(e)}
 

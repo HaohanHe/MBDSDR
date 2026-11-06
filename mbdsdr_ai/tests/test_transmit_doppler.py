@@ -45,6 +45,8 @@ class _FakeTxBackend:
         self.rx_active = False
         self.device_args = "soapyhackrf"
         self.sent_freqs = []
+        self.gains = []            # tx_guard 的"校验过必须真下发"门
+        self.bandwidths = []
         self.writes = 0
 
     def get_info(self):
@@ -55,6 +57,20 @@ class _FakeTxBackend:
 
     def set_frequency(self, hz):
         self.sent_freqs.append(float(hz))
+
+    def set_gain(self, gain_db):
+        """2026-11-06 补桩：tx_guard 1477 起要求 gain/bandwidth 真下发，
+        缺 setter 一律判 `tx_set_gain_failed` 拒绝发射。旧假后端没有这两个
+        方法，3 条 IQ 回放用例在 HEAD 就红成 KeyError('doppler')——不是
+        多普勒算错，是测试夹具落后于产品的"不能只校验不下发"红线。
+        返回 True 表示已落到（假）硬件，断言一字未放宽。
+        """
+        self.gains.append(float(gain_db))
+        return True
+
+    def set_bandwidth(self, bw_hz):
+        self.bandwidths.append(float(bw_hz))
+        return True
 
     def write_tx(self, block):
         self.writes += 1

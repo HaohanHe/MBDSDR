@@ -29,6 +29,26 @@ def test_bit_depth_roundtrip(tmp_path, bd):
         assert w.getnframes() == 4
 
 
+def test_32bit_full_scale_does_not_wrap_to_min_int(tmp_path):
+    """+1.0 满幅必须是正满幅，不许溢出成 int32 最小值（32bit 爆音）。
+
+    旧式 `clipped(float32) * 2147483647.0` 里标量被降成 float32 并舍入到
+    2^31，cast 到 int32 回绕成 −2147483648，numpy 同时报
+    `invalid value encountered in cast`。修法是先升 float64 再夹定义域。
+    """
+    p = tmp_path / "full32.wav"
+    rec = AudioRecorder(str(p), sample_rate=48000, bit_depth=32)
+    assert rec.open() is True
+    rec.write(np.array([1.0, -1.0, 0.0], dtype=np.float32))
+    rec.close()
+    with wave.open(str(p), "rb") as w:
+        raw = w.readframes(3)
+    vals = np.frombuffer(raw, dtype="<i4")
+    assert vals[0] == 2147483647, f"+1.0 溢出成 {vals[0]}"
+    assert vals[1] == -2147483647, f"-1.0 得 {vals[1]}"
+    assert vals[2] == 0
+
+
 def test_8bit_is_unsigned_offset(tmp_path):
     """8bit WAV 为无符号 PCM，0.0 -> 128，满幅正 -> 255。"""
     p = tmp_path / "u8.wav"
