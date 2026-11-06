@@ -1,8 +1,8 @@
 # MBDSDR Web 产品 · 一键复现验收报告
 
-- 生成时间：2026-11-06T03:05:12
+- 生成时间：2026-11-06T19:03:45
 - 事实源：D:\mbdsdr\MBDSDR（只读，未修改）
-- 单文件产物：`dist/index.html` 1047624 bytes · sha256 `7eb6f0306387d4fa392152fdf4a7d93c9ce63cdcc58a41161d3fd71c443949bb`
+- 单文件产物：`dist/index.html` 1048033 bytes · sha256 `65138ad8638e45ee465989d7233eedd073eb66fe6f312a6fcbbe50cb4945834e`
 - 工具域 14 个 · 工具→域映射 82 条 · 写工具模式 82 条
 - ControlHub 端口 `50732` · 时间倍率 5 档 · 中性站点 0.0, 0.0（trusted=False）
 - **全天星表 HYG v4.1**：25,792 颗（V ≤ 7.5），J2000，CC BY-SA 4.0 · sha256 `eb086d463456ba8c…`
@@ -15,17 +15,17 @@
 |---|---|---|
 | 仓库事实源同步 | PASS | `synced: 14 domains, 82 tool->domain entries, 82 write patterns, 5 time rates, ControlHub :50732, themes from desktop/tokens.py · THEME_COLORS['figma'] / RADIUS / FONT / TEXT_ALPHA ` |
 | 全天星表同步 | PASS | `synced: HYG 25,792 stars (mag<=7.5), named 141, 27 constellations, 117 DSO` |
-| 卫星轨迹同步 | PASS | `[sat-tracks] 6 sats x 481 samples @ 90s, TLE 2026-09-25, sgp4 2.27, frame J2000 ICRS geocentric RA/Dec (degrees, x100 integer encoded), js 33294 bytes` |
+| 卫星轨迹同步 | PASS | `[sat-tracks] 6 sats x 481 samples @ 90s, TLE 2026-09-25, sgp4 2.27, frame J2000 ICRS geocentric RA/Dec (degrees, x100 integer encoded), js 33249 bytes` |
 | 天文框架金标准 | PASS | `[astro-golden] 24 cases -> D:\mbdsdr\MBDSDR\web\product\build\astro-golden.json (128185 bytes), from repo MBDSDR` |
 | 骨架与样式 | PASS | `style.css bytes: 24168 / index.html bytes: 9547 / scripts: 00-core.js, 05-repo-facts.js, 10-data.js, 12-sky-catalog.js, 13-sat-tracks.js, 14-astro-frame.js, 20-i18n.js, 31-celestia` |
 | 文档/wiki 生成 | PASS | `generated: 14 domain pages + 3 planned pages, 3 scenarios, glossary, faq, wiki index, README.en/ja` |
 | 单文件构建 | PASS | `scripts: 00-core.js, 05-repo-facts.js, 10-data.js, 12-sky-catalog.js, 13-sat-tracks.js, 14-astro-frame.js, 20-i18n.js, 31-celestial.js, 30-sky.js, 40-workbench.js, 50-dialog.js, 70` |
 | 静态守卫 | PASS | `WARN [i18n] zh 反查冲突：lang.current / lang.zhLabel（后者胜出，需人工确认译文可接受） / WARN [i18n] zh 反查冲突：cap.stack.name / pro.stack（后者胜出，需人工确认译文可接受） / WARN [i18n] zh 反查冲突：sidebar.docs / docs.openTit` |
-| 性能基准 | PASS | `{"stars":25792,"starProjection":[{"fov":22,"ms":1.962,"stars":196},{"fov":60,"ms":4.575,"stars":464},{"fov":100,"ms":4.048,"stars":704},{"fov":158,"ms":4.285,"stars":678}],"landsca` |
+| 性能基准 | PASS | `{"stars":25792,"starProjection":[{"fov":22,"ms":1.021,"stars":191},{"fov":60,"ms":1.159,"stars":448},{"fov":100,"ms":1.283,"stars":698},{"fov":158,"ms":1.317,"stars":682}],"landsca` |
 | 天文框架跨语言自检 | PASS | `astro-frame cross-language OK · 24 cases / 144 vectors / worst 3.33e-16 (horizon 2461500/40.7 ra=300[2])` |
 | 天球投影自检 | PASS | `horizon straight under perspective OK (spread 0.00 px over ±30° az) / horizon curved under stereographic OK (spread 28.9 px) / corners unprojectable at 158°: 4/4 / ALL PROJECTION C` |
 | 无头运行时 | PASS | `RUNTIME {"modules":14,"docs":35,"locale":"zh-CN","caps":17,"i18nKeys":270,"textNodes":84,"framesRendered":37,"edgeUnproject":8558} / RESULT: RUNTIME-OK ✅` |
-| 视觉夹具 | PASS | `fixture: D:\mbdsdr\MBDSDR\web\product\tests\visual_check.html 948417 bytes / standalone fixtures: visual_{sky,pro,ja,en,docs,ai,caps}.html / fixture inject script: node --check OK` |
+| 视觉夹具 | PASS | `fixture: D:\mbdsdr\MBDSDR\web\product\tests\visual_check.html 948668 bytes / standalone fixtures: visual_{sky,pro,ja,en,docs,ai,caps}.html / fixture inject script: node --check OK` |
 
 ## 视觉态
 

@@ -53,7 +53,9 @@
 ============================================================================
 not_verified（勿当作已上线）
 ============================================================================
-* 宿主注入（QWebChannel / JS 全局）尚未实现；本模块只定义可注入的形状。
+* Qt WebChannel 注入尚未实现（需操作逻辑线放行 `desktop/main_window.py`）；
+  非 Qt 的本地回环注入见 `mbdsdr_ai/web_bridge_host.py`（可运行、有同源与
+  一次性 token 校验，且**不注入 confirm_channel**，写工具仍恒 gated）。
 * ``confirm_channel`` 尚未接到 ``mcp_server.call_tool``；未接时写工具恒 gated。
 * 未做真实硬件逐工具实测；回执口径以运行时 ``tools/list`` 为准。
 """

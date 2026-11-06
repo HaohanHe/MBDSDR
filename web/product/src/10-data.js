@@ -204,8 +204,16 @@
         return fallback;
       }
     },
-    sourceName() { return "bridge.online"; },
-    isLive() { return !!(this._bridge && typeof this._bridge.invoke === "function"); },
+    sourceName() { return this._call("sourceName", "bridge.online"); },
+    /* 桥挂上 ≠ 内核可用：本地 host 可能连着一个空注册表，此时每个工具都会
+       回 not_connected。宿主若提供 isLive()，以它为准，不拿「有 invoke 方法」
+       冒充在线（否则 UI 会报「已连内核」而工具全是空回执）。 */
+    isLive() {
+      const b = this._bridge;
+      if (!b || typeof b.invoke !== "function") return false;
+      if (typeof b.isLive === "function") return !!this._call("isLive", false);
+      return true;
+    },
     listSatellites() {
       const b = this._bridge;
       return (b && Array.isArray(b.satellites)) ? b.satellites : MB.SATS.slice();
