@@ -38,7 +38,35 @@
 
 ## 二、当前在途（2026-11-03 22:40 更新）
 
-### 我这边（2026-11-06 深夜 追加：基线红销账 / LRPT 假接线 / 录制证据保护）
+### 我这边（2026-11-06 深夜 追加：GNSS 失锁 / ADS-B 空态 / 取证复核）
+
+- **`7fd495c0` GNSS 失锁不许拿旧站址冒充当前定位**：
+  `NMEAParser._parse_rmc` 在 status=V（导航数据不可信）时仍吐字段里的旧
+  经纬度、空速度算成 0 节；`SerialGNSSReader._merge` 只在"新值非 None"时
+  覆盖坐标、**从不清除**，而 GSV/GSA/ZDA 任意合法语句都会刷新 timestamp
+  让 10s 过期判定续命。上游 `rf_sky_view.set_gnss_position` 只判
+  `source=="real"` 且经纬度非空 → 旧站址被当当前位置，整张星图/过境/多普勒
+  按错位置算且用户看不出来。现在 V / quality=0 一律显式清空 lat/lon/alt，
+  只有 quality>0 且坐标齐全才写入；正常周期不被误清。
+  新测试 `tests/test_serial_gnss_fix_invalid.py`（8 条，含端到端"清空后
+  喂 RFSkyView 必须走站址丢失"）。GNSS 全域 47 passed，原断言未改。
+
+- **`98f40cdf` ADS-B 空态说清"为什么没飞机"**：`adsb_lite.decode_adsb`
+  给的完整诊断（前导候选 / CRC 通过·失败 / 门限 / 噪声底 / 时长）被
+  `AdsbMapPanel` 全丢，界面只有一句「无 ADS-B 飞机」；没信号、信号弱、
+  频段不符、解码器异常四种状态长得一样，`except: return 0` 还把解码器
+  坏了伪装成"没信号"。现在画布空态第二行画真实诊断（不改布局、不改主
+  文案），异常/频段不符/模块缺失各自有话说，同文案不重复排重绘。
+  新测试 `tests/test_adsb_map_diagnostics.py`（9 条，含录制 painter 取证
+  "诊断真的被画出来"）。ADS-B 相关 32 passed。
+
+- **`3594087f` 真机截图复核后收掉重复入口**：`15add04c` 接 LRPT 时同时
+  挂了「选择录制 IQ 解码」和独立的「从录制 IQ 解码 (Meteor LRPT)」两个
+  几乎同名按钮 —— 测试全绿但真机截图里用户不知道点哪个。删掉独立按钮，
+  唯一入口是随模式变语义的 start_btn，测试加 `not hasattr(p,"iq_btn")` 钉死。
+  **方法教训：测试绿不等于产品对，改动 UI 后必须真机渲染肉眼看一遍。**
+  取证图（仓库外 `D:/mbdsdr/output/evidence/`，零个人信息不入库）：
+  `adsb_empty_diagnostics.png`、`sat_image_lrpt_mode.png`。
 
 - **`0cb413aa` 销 4 条基线红**（全是断言过期，非产品缺陷）：
   `dcc71e9f` 把量程读数统一到 dBFS + 「（相对）」，`test_spectrum_scale_peak_range`
