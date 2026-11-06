@@ -242,6 +242,12 @@ class SpectrumDataGenerator:
         self._wf_count = 0         # 已写入的有效行数（<= max_waterfall_lines）
         self._wf_base = 0          # 槽位 0 对应的绝对行号（改变深度后重算）
         self.wf_rows_written = 0   # 单调递增计数，供瀑布画布做增量同步
+        # 瀑布**实测**行率（行/秒）：读数与"可回看时长"必须用它算。
+        # 行是每个 IQ 帧写一行（2.4 MS/s ÷ 16384 ≈ 146 行/s），与 FFT 重绘
+        # 定时器（50 ms）无关——按定时器算会把 1.75 s 说成 12.8 s（差 7 倍）。
+        self._wf_rate_t0: Optional[float] = None
+        self._wf_rate_n0: int = 0
+        self._wf_row_rate_hz: float = 0.0
         self._has_real_data = False
         # ---- 跨帧峰跟踪（C++ rescanPeaks 同款语义）----
         # 每数据帧推进一次（push_iq 内），不随瀑布行号节流。
@@ -415,6 +421,9 @@ class SpectrumDataGenerator:
         self._wf_count = 0
         self._wf_base = 0
         self.wf_rows_written = 0
+        self._wf_rate_t0 = None
+        self._wf_rate_n0 = 0
+        self._wf_row_rate_hz = 0.0
         self._prev_wf_row = None
         self.max_hold = None
         self.min_hold = None
@@ -434,6 +443,9 @@ class SpectrumDataGenerator:
         self._wf_count = 0
         self._wf_base = 0
         self.wf_rows_written = 0
+        self._wf_rate_t0 = None
+        self._wf_rate_n0 = 0
+        self._wf_row_rate_hz = 0.0
         self._prev_wf_row = None
         self.max_hold = None
         self.min_hold = None
@@ -552,6 +564,42 @@ class SpectrumDataGenerator:
         self._wf_head = (self._wf_head + 1) % self.max_waterfall_lines
         self._wf_count = min(self._wf_count + 1, self.max_waterfall_lines)
         self.wf_rows_written += 1
+        self._wf_tick_rate()
+
+    def _wf_tick_rate(self) -> None:
+        """按实测行数/墙钟估瀑布行率（每 0.25 s 更新一次，EMA 平滑）。
+
+        读数方（``wf_row_rate_hz()``）在拿到第一个样本前返回 0.0，调用方
+        必须显示「--」而不是编一个秒数。
+        """
+        now = time.monotonic()
+        if self._wf_rate_t0 is None:
+            self._wf_rate_t0 = now
+            self._wf_rate_n0 = self.wf_rows_written
+            return
+        dt = now - self._wf_rate_t0
+        n = self.wf_rows_written - self._wf_rate_n0
+        if dt < 0.25 or n <= 0:
+            return
+        inst = n / dt
+        self._wf_row_rate_hz = (inst if self._wf_row_rate_hz <= 0.0
+                                else 0.8 * self._wf_row_rate_hz + 0.2 * inst)
+        self._wf_rate_t0 = now
+        self._wf_rate_n0 = self.wf_rows_written
+
+    def wf_row_rate_hz(self) -> float:
+        """瀑布实测行率（行/秒）；未测到返回 0.0。"""
+        return float(self._wf_row_rate_hz)
+
+    def wf_span_seconds(self) -> Optional[float]:
+        """当前深度（max_waterfall_lines 行）对应的**真实**可回看时长（秒）。
+
+        行率未测到（刚启动/无数据）时返回 None —— 不拿定时器间隔冒充。
+        """
+        rate = self._wf_row_rate_hz
+        if rate <= 0.0:
+            return None
+        return self.max_waterfall_lines / rate
 
     def _resample_max(self, spec: np.ndarray) -> np.ndarray:
         """谱线抽取：每 bin 取区间最大值（窄脉冲不被平均抹平）。
@@ -588,8 +636,17 @@ class SpectrumDataGenerator:
         return max(0, min(self.num_bins - 1, idx))
 
     def value_at_freq(self, freq_hz: float) -> Optional[float]:
-        """返回该频率的功率(dBFS)；无数据返回 None。读取真实频谱数组。"""
+        """返回该频率的功率(dBFS)；无数据返回 None。读取真实频谱数组。
+
+        2026-11-06：越出采集带宽一律返回 None。此前 `freq_to_bin` 会把越界
+        频率**夹到边缘 bin**，Ctrl 平移让半屏落在带外后，悬停仍显示一个
+        数字——而且它是"另一个频率的功率"，比显示「--」更具欺骗性。
+        """
         if not self._has_real_data:
+            return None
+        half = self.sample_rate_hz / 2.0
+        if not (self.center_freq_hz - half <= float(freq_hz)
+                <= self.center_freq_hz + half):
             return None
         v = self.spectrum[self.freq_to_bin(freq_hz)]
         return float(v) if np.isfinite(v) else None
@@ -1959,8 +2016,14 @@ def _draw_waterfall(painter, rect, state):
 
     # x→频率映射变化（Ctrl 平移 / 改调谐中心 / 换采样率）时，旧画布是按老
     # 映射画成的，必须按环形缓冲全量重绘，否则瀑布与上方光谱会横向错开。
+    #
+    # 2026-11-06：键里补上 dB 量程。此前只含几何与频率映射，拖动 Min/Max
+    # 后 LUT 虽已重建，但已画进 buf 的历史行仍是旧配色 —— 瀑布上出现一条
+    # 永久的水平色带断层，直到平移/改深度才消失。回看键（_wf_hist_key）与
+    # 改配色处（_on_palette_changed）本来就是含配色的，这里属于漏项。
     map_key = (round(_view_center_hz(state), 3),
-               float(gen.sample_rate_hz), int(gen.num_bins), w, h)
+               float(gen.sample_rate_hz), int(gen.num_bins), w, h,
+               float(state.db_min), float(state.db_max))
     if state._wf_map_key != map_key:
         state._wf_map_key = map_key
         buf[:, :, 0] = bg.red()
@@ -2440,7 +2503,11 @@ class SpectrumPanel(QWidget):
         # (fft_size, num_bins, refresh_ms)
         (2048, 512, 50),
         (1024, 384, 66),
-        (512, 256, 100),
+        # 2026-11-06：低档原为 512 点，而 FFT_SIZES 白名单只有 1024/2048/4096
+        # （C++/AI/schema 同口径）。512 绕过校验生效后，非可编辑下拉框
+        # setCurrentText("512") 找不到项、静默无效 → 下拉显示 2048、实际 512、
+        # RBW 又按 512 算，三处互相矛盾。低档改用合法档 1024（仍比高档省 4 倍）。
+        (1024, 256, 100),
     )
 
     def set_performance_mode(self, level: int):
@@ -2452,14 +2519,27 @@ class SpectrumPanel(QWidget):
         if not (0 <= level < len(self._PERF_LEVELS)):
             return
         fft_size, num_bins, refresh_ms = self._PERF_LEVELS[level]
+        # 档位点数必须落在 FFT_SIZES 白名单内：越档会让下方下拉同步静默失效
+        # （非可编辑 QComboBox.setCurrentText 找不到项时什么都不做）。
+        legal = self.generator.FFT_SIZES
+        if fft_size not in legal:
+            nearest = min(legal, key=lambda s: abs(s - fft_size))
+            _log.warning("性能档 %d 的 fft_size=%d 不在合法档 %s，改用 %d",
+                         level, fft_size, legal, nearest)
+            fft_size = nearest
         self.generator.reconfigure(fft_size, num_bins)
         # 调整绘图定时器刷新间隔（QTimer.setInterval 即时生效）
         timer = getattr(self._plot, "_timer", None)
         if timer is not None:
             timer.setInterval(refresh_ms)
-        # 同步 FFT 下拉（512 不在 FFT_SIZES 列表时保持原显示，不报错）
+        # 同步 FFT 下拉：用 findText 校验，找不到就留日志（不再静默）
         self._fft_combo.blockSignals(True)
-        self._fft_combo.setCurrentText(str(fft_size))
+        idx = self._fft_combo.findText(str(fft_size))
+        if idx >= 0:
+            self._fft_combo.setCurrentIndex(idx)
+        else:
+            _log.warning("FFT 下拉缺少 %d 这一档（当前项 %s），无法同步",
+                         fft_size, self._fft_combo.currentText())
         self._fft_combo.blockSignals(False)
         self._refresh_status_labels()
 
@@ -2660,11 +2740,13 @@ class SpectrumPanel(QWidget):
             self._snr_label.setText(
                 f"SNR {snr:.1f} dB" if snr is not None else "SNR --")
             rbw = self.generator.sample_rate_hz / max(1, self.generator.fft_size)
-            timer = getattr(self._plot, "_timer", None)
-            ms = timer.interval() if timer is not None else 50
-            wf_s = self.generator.max_waterfall_lines * ms / 1000.0
+            # 可回看时长必须用**实测行率**算：行是每 IQ 帧一行（≈146 行/s），
+            # 与 FFT 重绘定时器（50 ms）无关。按定时器算会把 256 行说成
+            # 12.8 s，实际只有 1.75 s（差 7 倍）。未测到行率就写「--」。
+            wf_span = self.generator.wf_span_seconds()
+            wf_txt = "瀑布 -- s" if wf_span is None else f"瀑布 {wf_span:g} s"
             self._fft_info_label.setText(
-                f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s")
+                f"RBW {rbw:g} Hz · {wf_txt}")
         else:
             self._freq_label.setText("--")
             self._span_label.setText("跨度 --")
