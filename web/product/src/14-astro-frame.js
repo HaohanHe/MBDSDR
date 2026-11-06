@@ -50,6 +50,10 @@
     const c = Math.cos(a), s = Math.sin(a);
     return new Float64Array([c, s, 0, -s, c, 0, 0, 0, 1]);
   }
+  function rotY(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return new Float64Array([c, 0, -s, 0, 1, 0, s, 0, c]);
+  }
   function matVec(m, x, y, z) {
     return { x: m[0] * x + m[1] * y + m[2] * z,
              y: m[3] * x + m[4] * y + m[5] * z,
@@ -84,8 +88,18 @@
                - 0.0000002904 * T5) * ARCSEC;
     const theta = (2004.191903 * T - 0.4269350 * T2 - 0.04183110 * T3
                    - 0.000006059 * T4 - 0.00000014543 * T5) * ARCSEC;
-    // P = Rz(z_A) · Rx(-theta_A) · Rz(-zeta_A)
-    return mul(rotZ(z), mul(rotX(-theta), rotZ(-zeta)));
+    /* 2026-11-06 修：与仓库 celestial_geometry.precession_matrix 同一处——
+     * θ_A 是"赤道与黄道夹角"，在标准式里绕 **y** 轴（Ry），不是绕 x；
+     * 且 ζ_A 的符号随本文件 rot_* 的负角约定一起翻转。总式：
+     *   P_std = Rz_std(z_A) · Ry_std(−θ_A) · Rz_std(ζ_A)
+     * 本文件 rotZ(a)=Rz_std(−a)、rotY(a)=Ry_std(−a)，代入后即下一行。
+     * 【为什么还要再乘 Q/Qᵀ】本函数对外必须返回**仓库基**下的 P（和 Python 的
+     * 同名字段逐元素对拍）；仓库赤道基是左手系(y=NCP, -z=春分点)，标准式算出来的
+     * 是右手基下的矩阵，两者差一次基变换 P_mod = Sᵀ·P_std·S，而 Sᵀ 正是本文件的
+     * Q、S 是 Qᵀ。漏掉这一步会让 P 与仓库差 3e-6 量级（对拍直接红），
+     * 天狼星 of-date 赤经再偏 2349"。 */
+    const P_std = mul(rotZ(-z), mul(rotY(theta), rotZ(-zeta)));
+    return mul(Q, mul(P_std, QT));
   }
 
   function obliquity(jdTT) {

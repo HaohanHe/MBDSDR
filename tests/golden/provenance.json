@@ -95,6 +95,13 @@
       "sha256": "05d526d7d5a994b4881ed07be5cfb35958747ff08ea87baafe75ff4cc5bf679a",
       "derivation": "由真录导出的软比特之后，仓内生成的元数据清单（n_soft/candidate/variant/rs_errors）；描述外部真值，但文件本身非外部产出",
       "date": "2026-11-03"
+    },
+    "celestial_ofdate_golden.json": {
+      "provenance": "external-truth",
+      "source_name": "skyfield 1.54 · precessionlib.compute_precession（IAU 2006 四角度式）",
+      "sha256": "e911e252285ad269d67da94d180810d5bd2ebd78fcbb2068d79f15ff9b5a46d4",
+      "derivation": "对 Skyfield 的 precessionlib.compute_precession(jd_tt) 逐元素取矩阵，并把它左乘 5 颗恒星的 ICRS 单位向量后换成 of-date 赤经/赤纬（纯岁差，不含章动/自行/光行差），与仓库 precession_matrix 的职责严格对齐。生成脚本 D:/mbdsdr/output/tmp/gen_ofdate_golden.py（仓库外，不进版本控制）。用途：tests/test_celestial_precession_truth.py 的绝对位置回归——2026-11-06 修掉了岁差矩阵转轴(rot_x→rot_y)+左手基缺变换，旧值偏差 0.31°。",
+      "date": "2026-11-06"
     }
   }
 }

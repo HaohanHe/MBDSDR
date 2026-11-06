@@ -9,7 +9,10 @@ celestial_geometry.py — Celestial sphere projection & coordinate transform sys
 
 坐标约定:
   - 所有方向向量均为单位球面上的 Vec3d = np.array([x, y, z])
-  - J2000 赤道惯性系 (ICRS): +x 指向春分点, +y 指向赤经 6h, +z 指向北天极
+  - J2000 赤道惯性系 (ICRS): **+y 指向北天极, +x 指向春分点, -z 指向赤经 6h**
+    （与 ``vec_from_radec`` 的实际公式一致；这组基的行列式为 -1，是**左手系**，
+      2026-11-06 更正：旧注释写成 "+y=赤经6h, +z=北天极"（右手系），与代码相反，
+      正是岁差矩阵误用右手式 rot_x 的根源）
   - 地平系 (alt/az): +x=北, +y=东, +z=天底 (nadir); 投影视方向为 -z (天顶)
     -> az = atan2(y, x), alt = asin(-z / |v|)
 
@@ -225,15 +228,38 @@ def gmst(jd_ut1: float) -> float:
 
 # ---------------------------------------------------------------------------
 # 岁差: IAU 2006 / P03 模型 (Capitaine et al. 2003)
-#   rotLocalToParent = Rz(-psi_A) * Rx(-omega_A) * Rz(chi_A)
-# 这里用 Montenbruck & Pfleger / Explanatory Supplement 标准 zeta_A, z_A, theta_A
-# 多项式 (arcsec), 构造 J2000 -> 当前赤道 的岁差矩阵 P。
+#   标准形式 (右手系, z=NCP): P_std = Rz(z_A) · Ry(-θ_A) · Rz(ζ_A)
+# 绕**天极**的两次旋转是 Rz、中间的倾角是绕 y 轴（不是绕 x —— 见函数注释里
+# 2026-11-06 的修正记录）。本模块基 y=NCP 是左手系，故还要做一次基变换。
 # ---------------------------------------------------------------------------
+
+# 标准天球基 (x=RA0h, y=RA6h, z=NCP, 右手) <- 本模块基 (x=RA0h, y=NCP, z=-RA6h, 左手)
+#   v_std = S @ v_mod  ⇒  P_mod = Sᵀ · P_std · S
+# 本矩阵行列式为 -1（两个基的手性不同，不是纯旋转）。用 det=+1 的近似置换
+# 去代换会让天狼星 of-date 赤经再偏 2349" —— 已实测，别改成"看起来更正交"的写法。
+_S_STD_FROM_MOD = np.array([[0.0, 0.0, -1.0],
+                            [1.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0]])
+
+
 def precession_matrix(jd_tt: float) -> np.ndarray:
     """J2000 (ICRS) -> 赤道坐标(当前春分点/赤道) 的岁差矩阵 P。
 
-    采用 IAU 2006 P03 岁差角 (Montenbruck & Pfleger, Astronomy on the Personal Computer)。
+    采用 IAU 2006 P03 岁差角 (Capitaine et al. 2003, eqs. 4/37/39 的三角度形式)。
     返回 3x3 旋转矩阵, v_date = P @ v_j2000。
+
+    2026-11-06 修正（转轴错 + 基变换缺失）：此前写作
+    ``rot_z(z_A) @ rot_x(-theta_A) @ rot_z(-zeta_A)``，两处错：
+      1. θ_A 是**赤道与黄道的夹角**，在标准式里绕 y 轴（``Ry``），旧码用了 ``rot_x``；
+      2. 本模块基 (y=NCP, -z=春分点) 行列式为 -1，是左手系，标准右手矩阵不能直接
+         拿来左乘本模块向量，必须先做基变换 ``Sᵀ·P_std·S``。
+    旧码在 J2000 时刻恰好等于单位阵，所以往返一致性测试查不出它；实测 2026 年
+    Sirius 的 of-date 赤经偏 **+1112"（0.31°）**、赤纬偏 -628"，即整张恒星系相对
+    日月/卫星/地平线转过约 0.35°（≈ 2/3 个月面直径），且随年代线性增长。
+
+    现行实现与 skyfield 1.54 的 ``precessionlib.compute_precession``（IAU 2006 四角度
+    式）对拍，1850–2132 区间最大偏差 **0.005"**；见
+    ``tests/test_celestial_precession_truth.py``。
     """
     T = (jd_tt - J2000) / 36525.0
 
@@ -258,8 +284,13 @@ def precession_matrix(jd_tt: float) -> np.ndarray:
                 - 0.000006059 * T**4
                 - 0.00000014543 * T**5)) * DEG / 3600.0
 
-    # P = Rz(z_A) * Rx(-theta_A) * Rz(-zeta_A)  (标准 IAU 2006 形式)
-    P = rot_z(z_a) @ rot_x(-theta_a) @ rot_z(-zeta_a)
+    # 标准 IAU 2006 三角度式（右手基：x=RA0h, y=RA6h, z=NCP）：
+    #   P_std = Rz(z_A) · Ry(-θ_A) · Rz(ζ_A)
+    # 本模块的 rot_* 自身即右手矩阵的转置（左手系），故 Rz_std(a)=rot_z(-a)、
+    # Ry_std(a)=rot_y(-a)；代入后 ζ_A 与 z_A 的符号都已吸收进调用里。
+    P_std = rot_z(-z_a) @ rot_y(theta_a) @ rot_z(-zeta_a)
+    # 基变换：左手系模块基 ← 标准右手基
+    P = _S_STD_FROM_MOD.T @ P_std @ _S_STD_FROM_MOD
     return P
 
 
