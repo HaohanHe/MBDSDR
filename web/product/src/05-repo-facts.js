@@ -3,10 +3,10 @@
   "use strict";
   const MB = global.MBDSDR = global.MBDSDR || {};
   MB.REPO = {
-  "generatedAt": "2026-11-06T19:03:01+08:00",
+  "generatedAt": "2026-11-06T19:13:53+08:00",
   "repo": {
     "root": "D:\\mbdsdr\\MBDSDR",
-    "head": "f7e717f5",
+    "head": "2ca19a79",
     "note": "只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线"
   },
   "domains": [

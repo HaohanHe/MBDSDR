@@ -31,10 +31,12 @@ Qt/WebEngine 那条路要碰 `desktop/main_window.py`（操作逻辑线在途，
    `cross-site`，直接 403 —— 否则任意网页都能把桥挂到自己页面上。
 4. **一次性随机 token**：`/bridge.js` 内嵌 `X-MBDSDR-Bridge` 令牌，写请求必须
    带对；令牌每次启动重新生成，不落盘、不进日志。
-5. **写工具仍然恒 gated**：本模块**不注入 `confirm_channel`**。即使有人拿到
-   token 直连 `/bridge/invokeTool` 调写工具，`WebBridge` 也只会返回
-   `manual_gate_required` / `manual_gate_unavailable`。本地 host 不是
-   「打开写开关」的后门——这是本模块最重要的不变量，有测试钉死。
+5. **写工具要真人确认，token 永不出宿主**：`POST /bridge/confirm` 只登记
+   「用户在同源页面上确认了这个动作」（绑定动作摘要、一次性、TTL 60s）；
+   真正的授权仍是 `tx_guard.issue_confirmation()` 在**宿主进程内**签发的一次性
+   token，前端拿不到、也伪造不了。没有这次登记，`/bridge/invokeTool` 调写工具
+   只会回 `manual_gate_required`——本地 host 不是「打开写开关」的后门。
+   `MBDSDR_BRIDGE_CONFIRM=deny` 可整体关掉确认端点（只读模式）。
 
 ============================================================================
 诚实口径 / not_verified
@@ -53,6 +55,8 @@ Qt/WebEngine 那条路要碰 `desktop/main_window.py`（操作逻辑线在途，
 用法：
     python -m mbdsdr_ai.web_bridge_host --port 8770 --open
     python -m mbdsdr_ai.web_bridge_host --port 0        # 随机端口，打印 URL
+    python -m mbdsdr_ai.web_bridge_host --no-mcp        # 强制离线（诚实空态演示）
+    MBDSDR_BRIDGE_CONFIRM=deny python -m mbdsdr_ai.web_bridge_host   # 只读模式
 """
 from __future__ import annotations
 
@@ -68,13 +72,16 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 from mbdsdr_ai.web_bridge import WebBridge
+from mbdsdr_ai.web_bridge_mcp import (CONFIRM_ENV, DEFAULT_CONFIRM_TTL_S,
+                                      PendingConfirms, build_default_backend,
+                                      confirm_enabled)
 
 logger = logging.getLogger("mbdsdr.web_bridge_host")
 
 #: 允许的方法名（白名单；不做反射调用）
 ALLOWED_METHODS: Sequence[str] = (
     "invokeTool", "getTle", "getPasses", "readSpectrum",
-    "getCapabilities", "sourceName", "isLive",
+    "getCapabilities", "sourceName", "isLive", "confirm",
 )
 
 #: 需要在 `/bridge.js` 里预取、同步返回的方法（前端按同步值消费）
@@ -105,10 +112,21 @@ class BridgeHost:
         dist: Optional[Path] = None,
         host: str = "127.0.0.1",
         port: int = 0,
+        mcp: bool = True,
+        pending: Optional[PendingConfirms] = None,
     ) -> None:
         if host not in ("127.0.0.1", "localhost", "::1"):
             raise ValueError(f"只能绑回环地址，拒绝 {host!r}")
-        self.bridge = bridge if bridge is not None else WebBridge()
+        if bridge is None:
+            # 默认接**真实内核工具面**（MCPToolSet：82 工具 / 43 写工具）；
+            # 构造失败才退回离线桥，并在 /health 与 /bridge.js 里如实反映。
+            bridge, registry, pending_default = build_default_backend(mcp=mcp)
+            self.registry = registry
+            self.pending = pending if pending is not None else pending_default
+        else:
+            self.registry = None
+            self.pending = pending if pending is not None else PendingConfirms()
+        self.bridge = bridge
         self.dist = Path(dist) if dist is not None else _default_dist()
         self.host = host
         self.port = int(port)
@@ -187,6 +205,10 @@ class BridgeHost:
                 "sourceName": self.bridge.source_name(),
                 # 桥挂上 ≠ 内核可用：前端用这个真值决定是否切到 BridgeSource
                 "live": bool(self.bridge.is_live()),
+                # 前端据此决定写工具回执里给不给「确认执行」按钮
+                "canConfirm": bool(self.pending is not None and confirm_enabled()
+                                   and self.bridge.confirm_wired),
+                "toolCount": len(self.registry.get_tool_names()) if self.registry else 0,
                 "methods": list(_SYNC_METHODS),
             }
             return self._boot
@@ -214,6 +236,8 @@ class BridgeHost:
             f"    tle: {_js_literal(b['tle'])},\n"
             f"    sourceName: function () {{ return {_js_literal(b['sourceName'])}; }},\n"
             f"    isLive: function () {{ return {_js_literal(b['live'])}; }},\n"
+            f"    canConfirm: {_js_literal(b['canConfirm'])},\n"
+            f"    toolCount: {_js_literal(b['toolCount'])},\n"
             "    getTle: function (norad) {\n"
             "      var k = String(norad == null ? \"\" : norad);\n"
             "      return Object.prototype.hasOwnProperty.call(bridge.tle, k) ? bridge.tle[k] : null;\n"
@@ -221,7 +245,9 @@ class BridgeHost:
             "    getPasses: function (norad) { return post(\"getPasses\", { norad: norad }); },\n"
             "    readSpectrum: function () { return post(\"readSpectrum\", {}); },\n"
             "    getCapabilities: function () { return post(\"getCapabilities\", {}); },\n"
-            "    invoke: function (name, args) { return post(\"invokeTool\", { name: name, args: args || {} }); }\n"
+            "    invoke: function (name, args) { return post(\"invokeTool\", { name: name, args: args || {} }); },\n"
+            "    /* 只登记「用户点了确认」，不签发 token —— 签发在宿主进程内完成。 */\n"
+            "    confirm: function (name, args) { return post(\"confirm\", { tool: name, args: args || {} }); }\n"
             "  };\n"
             "  window.mbdsdrBridge = bridge;\n"
             "  // 60-app.js 可能已经调用过 detectSource；这里主动重选一次源，\n"
@@ -267,6 +293,9 @@ class BridgeHost:
                 "host": "loopback",
                 "source": self.bridge.source_name(),
                 "live": self.bridge.is_live(),
+                "tools": len(self.registry.get_tool_names()) if self.registry else 0,
+                "confirm": bool(self.pending is not None and confirm_enabled()
+                                and self.bridge.confirm_wired),
             }), "application/json"
 
         if route == "/bridge.js":
@@ -324,7 +353,32 @@ class BridgeHost:
             return self.bridge.source_name()
         if name == "isLive":
             return self.bridge.is_live()
+        if name == "confirm":
+            return self.request_confirm(str(payload.get("tool") or ""),
+                                        payload.get("args"))
         return {"ok": False, "error": "unknown_method", "method": name}
+
+    def request_confirm(self, tool: str, args: Any) -> Dict[str, Any]:
+        """登记一次用户确认（不签发 token）：一次性、绑定参数、有 TTL。"""
+        if self.pending is None or not self.bridge.confirm_wired:
+            return {"ok": False, "error": "manual_gate_unavailable",
+                    "gated": True, "notFailure": True,
+                    "detail": "this host has no confirmation channel"}
+        if not confirm_enabled():
+            return {"ok": False, "error": "confirm_disabled",
+                    "gated": True, "notFailure": True,
+                    "detail": f"{CONFIRM_ENV}=deny: read-only mode"}
+        if self.registry is not None and tool not in self.registry.get_tool_names():
+            return {"ok": False, "error": "unknown_tool", "tool": tool}
+        clean = args if isinstance(args, dict) else {}
+        ok, digest = self.pending.request(tool, clean)
+        if not ok:
+            return {"ok": False, "error": "confirm_rejected", "tool": tool}
+        logger.info("confirm registered: %s (digest %s…)", tool, digest[:12])
+        return {"ok": True, "pending": True, "tool": tool,
+                "digest": digest[:16],
+                "expiresInS": DEFAULT_CONFIRM_TTL_S,
+                "note": "确认只对当前参数有效、只可使用一次"}
 
     # ── 服务 ───────────────────────────────────────────────────────────
     def serve_forever(self, open_browser: bool = False) -> None:
@@ -415,11 +469,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--port", type=int, default=8770, help="0 = 随机端口")
     ap.add_argument("--dist", type=Path, default=None, help="dist/index.html 路径")
     ap.add_argument("--open", action="store_true", help="启动后打开浏览器")
+    ap.add_argument("--no-mcp", action="store_true",
+                    help="不接真实 MCP 工具面，退回离线诚实空态")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
-    host = BridgeHost(dist=args.dist, port=args.port)
+    host = BridgeHost(dist=args.dist, port=args.port, mcp=not args.no_mcp)
     try:
         host.serve_forever(open_browser=args.open)
     except KeyboardInterrupt:

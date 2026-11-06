@@ -315,27 +315,75 @@ try {
   CX.V.fov = fov0; CX.V.az = az0; CX.V.alt = alt0;
 } catch (e) { errors.push(`REGRESSION: ${e.stack}`); }
 
-// 结果
-const MB = sandbox.MBDSDR;
-const summary = {
-  modules: files.length,
-  docs: MB && MB.docs ? MB.docs.count : 0,
-  locale: MB && MB.state ? MB.state.locale : "?",
-  caps: MB ? MB.CAPS.length : 0,
-  i18nKeys: MB && MB.i18n ? MB.i18n.keys().length : 0,
-  textNodes: textNodes.length,
-  framesRendered: ts / 16,
-  edgeUnproject: MB && MB.sky && MB.sky.edgeStat ? MB.sky.edgeStat() : -1
-};
-console.log("RUNTIME", JSON.stringify(summary));
-if (errors.length) {
-  console.log("FAILURES:");
-  for (const e of errors.slice(0, 12)) console.log("  " + e.split("\n").slice(0, 3).join("\n  "));
-  console.log(`RESULT: ${errors.length} runtime errors`);
-  process.exit(1);
+/* 阶段 C 前端契约：宿主接确认通道时，写工具回执必须带 canConfirm，
+   点确认只调 bridge.confirm（不得自造 token），确认后要重新发一次调用。 */
+function finalize() {
+  const MB = sandbox.MBDSDR;
+  const summary = {
+    modules: files.length,
+    docs: MB && MB.docs ? MB.docs.count : 0,
+    locale: MB && MB.state ? MB.state.locale : "?",
+    caps: MB ? MB.CAPS.length : 0,
+    i18nKeys: MB && MB.i18n ? MB.i18n.keys().length : 0,
+    textNodes: textNodes.length,
+    framesRendered: ts / 16,
+    edgeUnproject: MB && MB.sky && MB.sky.edgeStat ? MB.sky.edgeStat() : -1
+  };
+  console.log("RUNTIME", JSON.stringify(summary));
+  if (errors.length) {
+    console.log("FAILURES:");
+    for (const e of errors.slice(0, 12)) console.log("  " + e.split("\n").slice(0, 3).join("\n  "));
+    console.log(`RESULT: ${errors.length} runtime errors`);
+    process.exit(1);
+  }
+  if (!MB || !MB.app || !MB.docs || MB.docs.count < 10) {
+    console.log("RESULT: 引导未完整执行 / 文档数据未编译");
+    process.exit(1);
+  }
+  console.log("RESULT: RUNTIME-OK ✅");
 }
-if (!MB || !MB.app || !MB.docs || MB.docs.count < 10) {
-  console.log("RESULT: 引导未完整执行 / 文档数据未编译");
-  process.exit(1);
-}
-console.log("RESULT: RUNTIME-OK ✅");
+
+(function confirmUiCheck() {
+  const confirmed = [], calls = [];
+  try {
+    sandbox.mbdsdrBridge = {
+      canConfirm: true,
+      toolCount: 82,
+      isLive: () => true,
+      sourceName: () => "bridge.test",
+      getTle: () => null,
+      getPasses: () => [],
+      readSpectrum: () => null,
+      getCapabilities: () => [],
+      invoke: (n, a) => {
+        calls.push([n, a]);
+        return { ok: false, gated: true, error: "manual_gate_required" };
+      },
+      confirm: (n, a) => { confirmed.push([n, a]); return { ok: true, pending: true }; }
+    };
+  } catch (e) { errors.push("CONFIRM-UI: " + e); }
+  const MB = sandbox.MBDSDR;
+  const done = () => { setTimeout(finalize, 0); };
+  try { MB.detectSource(); } catch (e) { errors.push("C0b: detectSource 抛错 " + e); }
+  if (!MB || !MB.data || typeof MB.data.canConfirm !== "function") {
+    errors.push("C0: detectSource 后数据源仍缺 canConfirm()");
+    return done();
+  }
+  if (!MB.data.canConfirm()) errors.push("C1: 宿主给了 confirm() 但 canConfirm() 仍 false");
+  Promise.resolve(MB.data.invokeTool("set_frequency", { hz: 1e8 }))
+    .then(res => {
+      if (!res || !res.gated) errors.push("C2: 写工具未确认时应回 gated");
+      else if (!res.canConfirm) errors.push("C3: gated 回执缺 canConfirm（UI 不会给确认按钮）");
+      return MB.data.confirmTool("set_frequency", { hz: 1e8 });
+    })
+    .then(ok => {
+      if (!ok) errors.push("C4: confirmTool 未把宿主 pending 当成成功");
+      if (confirmed.length !== 1 || confirmed[0][0] !== "set_frequency")
+        errors.push("C5: confirmTool 没走 bridge.confirm");
+      const sent = JSON.stringify(calls);
+      if (/confirm_token|tx_token|arm_manual/.test(sent))
+        errors.push("C6: 前端往内核送了 token / 自报字段（应只送业务参数）");
+    })
+    .catch(e => errors.push("CONFIRM-UI: " + (e && e.stack ? e.stack : e)))
+    .then(() => { try { delete sandbox.mbdsdrBridge; MB.detectSource(); } catch (e) {} done(); });
+})();

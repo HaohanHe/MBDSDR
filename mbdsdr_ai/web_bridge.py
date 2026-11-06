@@ -56,7 +56,10 @@ not_verified（勿当作已上线）
 * Qt WebChannel 注入尚未实现（需操作逻辑线放行 `desktop/main_window.py`）；
   非 Qt 的本地回环注入见 `mbdsdr_ai/web_bridge_host.py`（可运行、有同源与
   一次性 token 校验，且**不注入 confirm_channel**，写工具仍恒 gated）。
-* ``confirm_channel`` 尚未接到 ``mcp_server.call_tool``；未接时写工具恒 gated。
+* ``confirm_channel`` 的真实实现见 ``mbdsdr_ai/web_bridge_mcp.py``
+  （``make_confirm_channel``）：用户确认 → ``tx_guard.issue_confirmation`` 签发
+  一次性 token → ``MCPToolSet.call_tool`` 的门校验。**未注入时写工具恒 gated**，
+  注入了但没收到本动作的用户确认，同样恒 gated。
 * 未做真实硬件逐工具实测；回执口径以运行时 ``tools/list`` 为准。
 """
 
@@ -238,20 +241,24 @@ class WebBridge:
             is_write = False
 
         if is_write:
+            if self.confirm_channel is not None:
+                # 真实通道（mbdsdr_ai/web_bridge_mcp.py）：**token 由通道内部
+                # 签发并消费**，前端带来的 token 一律丢弃。通道没收到「本动作
+                # 的用户确认」就回 gated，本层无从放行、也不猜。
+                result = self.confirm_channel(name, clean)
+                if not isinstance(result, dict):
+                    return envelope("bad_envelope", name,
+                                    detail="confirm_channel returned a non-dict response")
+                return self._normalise(name, result, seen)
+            # 没接通道：即便前端自带 token 也无法在本层验证（那是宿主签发的
+            # opaque 串），所以恒 gated —— 保留阶段 B 的安全默认。
             if not self.has_confirm_token(clean):
                 return self._gated(
                     name, "manual_gate_required", clean, seen,
                     "由外部确认通道签发一次性 confirm_token；模型自报 arm_manual 不算确认")
-            if self.confirm_channel is None:
-                return self._gated(
-                    name, "manual_gate_unavailable", clean, seen,
-                    "确认通道未接入 mcp_server.call_tool，本层不自行放行写工具")
-            # token 与 args 原样交回带门的内核层；本层不消费、不验证、不签发。
-            result = self.confirm_channel(name, clean)
-            if isinstance(result, dict):
-                return self._normalise(name, result, seen)
-            return envelope("bad_envelope", name,
-                            detail="confirm_channel returned a non-dict response")
+            return self._gated(
+                name, "manual_gate_unavailable", clean, seen,
+                "确认通道未接入 mcp_server.call_tool，本层不自行放行写工具")
 
         try:
             result = self.registry.call(name, clean)
@@ -272,18 +279,56 @@ class WebBridge:
 
     @staticmethod
     def _normalise(name: str, raw: Dict[str, Any], seen: List[str]) -> Dict[str, Any]:
-        """把 ToolResult / MCP 回执归一成产品信封，保留 gated 与失败的区分。"""
-        ok = bool(raw.get("ok", raw.get("success", False)))
-        gated = bool(raw.get("gated", False)) or raw.get("code") in (
+        """把 ToolResult / MCP 回执归一成产品信封，保留 gated 与失败的区分。
+
+        判定顺序（别简化，四类回执长得完全不一样）：
+        1. ``outcome`` 是内核 2026-10 起的**权威裁决**（executed / gated /
+           denied / error），有它就以它为准；
+        2. 显式 ``ok`` / ``success`` 次之（ToolResult 形状）；
+        3. 只有 ``error`` / ``code`` / ``gated`` 而没有任何成功标记 → 失败；
+        4. 其余是**工具真实返回的裸结果 dict**（如 ``{"connected": false}``）
+           ——工具确实执行了，只是自己没给 ok 字段。旧实现把它一律判
+           ``tool_failed``，于是 ``is_connected`` 这类只读工具全成了"失败"，
+           这是真 bug，不是口径问题。
+        """
+        outcome = str(raw.get("outcome") or "")
+        gated = bool(raw.get("gated", False)) or outcome == "gated" or raw.get("code") in (
             "manual_gate_required", "manual_gate_unavailable")
+        if outcome in ("executed", "allowed", "session"):
+            ok = True
+        elif "ok" in raw or "success" in raw:
+            ok = bool(raw.get("ok", raw.get("success")))
+        elif outcome in ("error", "denied", "vetoed"):
+            ok = False
+        elif any(k in raw for k in ("error", "code", "gated", "denied", "vetoed")):
+            ok = False
+        else:
+            ok = True
         error = raw.get("error") or raw.get("code") or ""
+        data = raw.get("data")
+        if data is None and ok and not any(
+                k in raw for k in ("ok", "success", "data", "content", "outcome")):
+            data = dict(raw)          # 裸结果整包当数据，别丢
         out = envelope(error or ("ok" if ok else "tool_failed"), name,
-                       data=raw.get("data"),
+                       data=data,
                        content=raw.get("content", ""),
-                       latencyMs=raw.get("latency_ms", 0.0),
+                       latencyMs=raw.get("latency_ms", raw.get("latencyMs", 0.0)),
                        truncated=bool(raw.get("truncated", False)),
-                       nextStep=raw.get("next_step", ""))
+                       nextStep=raw.get("next_step", raw.get("nextStep", "")))
         out["ok"] = ok and not gated
+        if outcome:
+            out["outcome"] = outcome
+        # 内核会回「调用成功但没下发硬件」（无设备时 set_frequency 就是：
+        # ok=true / applied=false / stored=true / note=仅记录本地配置）。
+        # 这必须原样透出去，否则 UI 会把「只写配置」显示成「调谐成功」。
+        for key in ("applied", "connected", "stored", "note", "requested_hz"):
+            if key in raw:
+                out[key] = raw[key]
+        if raw.get("applied") is False:
+            out["degraded"] = True
+        detail = raw.get("technical_detail") or raw.get("detail")
+        if detail:
+            out["detail"] = str(detail)
         if gated:
             out["gated"] = True
             out["notFailure"] = True
@@ -314,8 +359,13 @@ class WebBridge:
             "sourceName": self.source_name,
             "isLive": self.is_live,
             "getCapabilities": self.get_capabilities,
-            "manifest": self.manifest,
+            "manual": self.manifest,
         }
+
+    @property
+    def confirm_wired(self) -> bool:
+        """真实确认通道是否已接（决定写工具是「可请求确认」还是「恒 gated」）。"""
+        return self.confirm_channel is not None
 
     def manifest(self) -> Dict[str, Any]:
         """JSON 契约描述，供宿主注入实现 / 跨语言对拍 / 文档生成使用。"""
@@ -348,6 +398,10 @@ class WebBridge:
                     "errorCode": "manual_gate_required",
                     "selfReportRejected": True,
                     "frontEndMayIssueToken": False,
+                    "confirmChannelWired": self.confirm_wired,
+                    "confirmedBy": ("same-origin local page action; token issued and "
+                                    "consumed inside the host process"
+                                    if self.confirm_wired else "not wired"),
                 },
                 "gatedIsNotFailure": True,
             },
@@ -357,11 +411,20 @@ class WebBridge:
                 "siteUntrustedBlocksPasses": not self.site_trusted,
                 "orbitDeterminationNotAFeature": True,
             },
-            "notVerified": [
-                "host injection (QWebChannel / JS global) is not implemented",
-                "confirm_channel is not wired to mcp_server.call_tool; writes stay gated",
-                "no real-hardware per-tool verification",
-            ],
+            "notVerified": (
+                [
+                    "Qt WebChannel injection is not implemented (loopback host is)",
+                    "confirmation source is a same-origin local page action, "
+                    "not a physically isolated channel",
+                    "no real-hardware per-tool verification",
+                ]
+                if self.confirm_wired else
+                [
+                    "host injection (QWebChannel / JS global) is not implemented",
+                    "confirm_channel is not wired to mcp_server.call_tool; writes stay gated",
+                    "no real-hardware per-tool verification",
+                ]
+            ),
         }
 
     def manifest_json(self) -> str:

@@ -53,7 +53,7 @@
     locale: MB.store.get("locale", "zh-CN"),    // zh-CN | ja-JP | en-US
     docLocale: "zh-CN",
     cam: { x: 0, y: 0, scale: 1, tx: 0, ty: 0, ts: 1, locked: null },
-    time: { angle: 0, rate: 1, minutes: 0, rateIdx: 1 },
+    time: { rate: 1, minutes: 0, rateIdx: 1 },
     sky: Object.assign({
       // 星象仪（时空主导）：银河默认关 = 无数据·不提供，不画装饰光带
       orbits: true, labels: true, milkyway: false, landscape: true,
@@ -97,13 +97,6 @@
     screenToWorld(x, y, cam, view) {
       const k = cam.scale * MB.math.K;
       return { x: cam.x + (x - view.w / 2) / k, y: cam.y - (y - view.h / 2) / k };
-    },
-    satPos(s, timeMs) {
-      const o = s.orbit;
-      const th = o.phase + timeMs * o.w;
-      const x = Math.cos(th) * o.a, y = Math.sin(th) * o.b;
-      const ct = Math.cos(o.tilt), st = Math.sin(o.tilt);
-      return { x: x * ct - y * st, y: x * st + y * ct };
     },
     smoothstep: (a, b, x) => {
       const t = MB.math.clamp((x - a) / (b - a), 0, 1);

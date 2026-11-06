@@ -49,15 +49,38 @@
     }, 16);
   }
 
+  /* 写工具回执：宿主能确认时给一个按钮。点它只登记"用户确认了这件事"，
+     token 由宿主进程签发并消费——前端全程拿不到、也伪造不了。 */
+  function confirmButton(card, name, args) {
+    const b = document.createElement("button");
+    b.className = "confirm";
+    b.type = "button";
+    b.textContent = t("bridge.confirmRun");
+    b.addEventListener("click", () => {
+      b.disabled = true;
+      MB.data.confirmTool(name, args).then(ok => {
+        if (!ok) { b.textContent = t("bridge.confirmOff"); return; }
+        b.remove();
+        callTool(name, args);
+      });
+    });
+    card.appendChild(b);
+    return card;
+  }
+
   /* 调用内核工具并如实显示回执：gated / not_connected / unreachable 各有口径 */
   function callTool(name, args, stateKey) {
-    MB.data.invokeTool(name, args || {}).then(res => {
-      if (res && res.ok) tool(name + "(…)", t(stateKey || "ai.toolCalled"), "ok");
-      else if (res && res.gated) tool(name + "(…)",
-        t(res.error === "manual_gate_required" || res.error === "manual_gate_unavailable"
-          ? "bridge.needToken" : "bridge.gated"), "wait");
-      else if (res && res.offline) tool(name + "(…)", t("tool.offline"), "off");
-      else tool(name + "(…)", t("ai.unavailable"), "off");
+    return MB.data.invokeTool(name, args || {}).then(res => {
+      if (res && res.ok) return tool(name + "(…)", t(stateKey || "ai.toolCalled"), "ok");
+      if (res && res.gated) {
+        const card = tool(name + "(…)",
+          t(res.error === "manual_gate_required" || res.error === "manual_gate_unavailable"
+            ? "bridge.needToken" : "bridge.gated"), "wait");
+        if (res.canConfirm) confirmButton(card, name, args || {});
+        return card;
+      }
+      if (res && res.offline) return tool(name + "(…)", t("tool.offline"), "off");
+      return tool(name + "(…)", t("ai.unavailable"), "off");
     }).catch(() => tool(name + "(…)", t("ai.unavailable"), "off"));
   }
 

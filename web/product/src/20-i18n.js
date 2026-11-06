@@ -268,6 +268,8 @@
     "spec.noIqHint": { zh: "read_spectrum 未返回真实数据 · 显示空态", ja: "read_spectrum が実データを返していません · 空状態を表示", en: "read_spectrum returned no real data · showing empty state" },
     "bridge.gated": { zh: "未获确认（gated · 非失败）", ja: "未確認（gated · 失敗ではない）", en: "Not confirmed (gated · not a failure)" },
     "bridge.needToken": { zh: "写操作需外部签发的 confirm_token（前端无法签发）", ja: "書き込みには外部発行の confirm_token が必要（フロントエンドは発行不可）", en: "Write needs an externally issued confirm_token (the front end cannot issue one)" },
+    "bridge.confirmRun": { zh: "确认执行", ja: "実行を確認", en: "Confirm & run" },
+    "bridge.confirmOff": { zh: "确认通道不可用", ja: "確認チャネル利用不可", en: "Confirmation channel unavailable" },
     "hud.satTrack": { zh: "卫星轨迹：SGP4 · TEME→J2000 逆岁差 · 地心方向，未做站址视差（not_verified）", ja: "衛星軌跡：SGP4 · TEME→J2000 逆歳差 · 地心方向、視差未補正（未検証）", en: "Sat tracks: SGP4 · TEME→J2000 inverse precession · geocentric, no parallax (not_verified)" },
     "tool.devices": { zh: "枚举设备", ja: "デバイス列挙", en: "List devices" },
     "tool.connect": { zh: "连接设备", ja: "デバイス接続", en: "Connect device" },

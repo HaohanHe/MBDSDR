@@ -267,6 +267,12 @@ extra_css = css_vars + '''
   /* 工具卡的「离线 · 未伪装成功」是诚实口径的核心证据，不能用 opacity 层级糊掉 */
   .toolcard{border-color:rgba(255,255,255,.42);color:rgba(255,255,255,.9)}
   .toolcard .st.off{color:rgba(255,255,255,.78);border-color:rgba(255,255,255,.42)}
+  /* 写工具的「确认执行」：点了只登记用户意图，token 由宿主签发（前端拿不到） */
+  .toolcard .confirm{margin-left:10px;padding:1px 9px;border-radius:11px;
+    background:rgba(255,255,255,.9);color:#000;border:0;cursor:pointer;
+    font:9.5px/1.7 var(--sans);letter-spacing:.02em}
+  .toolcard .confirm:hover{background:#fff}
+  .toolcard .confirm:disabled{opacity:.45;cursor:default}
   /* 时空主导 HUD：星象仪模式的坐标/时刻/FOV/极限星等读数 */
   .sky-hud{position:absolute;top:__TOPBAR2__px;right:18px;width:286px;z-index:22;
     padding:13px 16px;border-radius:24px;border:1px solid var(--line);

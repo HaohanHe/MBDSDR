@@ -305,7 +305,9 @@
     if (!W || !H) return;
     frameT += dt;
     if (S.form === "sky") {
-      S.time.angle += dt * 0.000008 * Math.min(S.time.rate, 60);
+      // 模拟时刻推进（唯一的时钟增量）；天球的周日运动由 LST 刚性旋转体现，
+      // 不给单星独立角速度。旧版还有个 S.time.angle 自增，无任何读者（死变量），
+      // 已删——它曾让「星从中心飞散」那种错误模型看起来有数据在动。
       S.time.minutes += dt / 60000 * S.time.rate;
     }
     C.step(dt, S);

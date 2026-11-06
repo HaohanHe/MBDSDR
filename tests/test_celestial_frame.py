@@ -109,3 +109,42 @@ def test_gmst_is_normalized_and_known_epoch():
     g_next = cg.gmst(cg.J2000 + 0.5)
     d = (g_next - g) % 360.0
     assert abs(d - 180.4928) < 0.01, f"半日 GMST 推进异常: {d:.6f}°"
+
+
+# ---------------------------------------------------------------------------
+# 地平基的方位约定（2026-11-06 修正：东向曾整体取反，az 全镜像）
+# ---------------------------------------------------------------------------
+def test_altaz_east_points_east_and_north_points_north():
+    """地平基必须是「x=北, y=东, z=天顶」，不是镜像的。
+
+    旧实现 E=(-cosθ,0,-sinθ) 与本模块自己的赤道基 (y=NCP, -z=春分点)
+    差一个符号，导致所有方位角东西镜像；这条测试用「北极星几乎正北」
+    与「赤道东点升起在天东」两个已知几何钉死它。
+    """
+    D = math.pi / 180.0
+    jd = 2461000.0
+    lat, lon = 39.9, 116.4
+    sta = cg.GroundStation(longitude_deg=lon, latitude_deg=lat)
+
+    def altaz(ra_deg, dec_deg):
+        v = cg.j2000_to_altaz(cg.vec_from_radec(ra_deg, dec_deg), sta, jd)
+        # 本模块地平系 z 指天底 → 取反成「z=天顶」
+        v = np.array([v[0], v[1], -v[2]], dtype=float)
+        alt = math.degrees(math.asin(max(-1.0, min(1.0, v[2]))))
+        az = math.degrees(math.atan2(v[1], v[0])) % 360.0
+        return alt, az
+
+    # 北极星：高度≈纬度，方位≈0（不是 180）
+    alt, az = altaz(2.530301028 * 15, 89.264109)
+    assert abs(alt - lat) < 1.0, f"北极星高度异常: {alt:.2f}"
+    assert az < 5 or az > 355, f"北极星方位应在正北附近，实测 {az:.2f}°"
+
+    # 时角 H = L - RA：H = -90°（尚未过中天）时天体在**东**方地平
+    L = (cg.gmst(jd) + lon) % 360.0
+    alt, az = altaz((L + 90.0) % 360.0, 0.0)
+    assert abs(alt) < 1.0, f"东点高度应≈0: {alt:.2f}"
+    assert abs(az - 90.0) < 1.5, f"东点方位应≈90°，实测 {az:.2f}°（<90 说明东西镜像）"
+
+    # 西点同时成立（对称性：不是把两个方向都翻过去）
+    alt, az = altaz((L - 90.0) % 360.0, 0.0)
+    assert abs(alt) < 1.0 and abs(az - 270.0) < 1.5, f"西点异常: alt={alt:.2f} az={az:.2f}"

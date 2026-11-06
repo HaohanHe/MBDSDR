@@ -428,6 +428,31 @@ for _f, _bad in (("run_all.py", "但坐标链为 J2000 直算 LST"),
 print("[9.6] 天文框架：仓库 IAU2006 岁差 + IAU2000B 章动 + Capitaine GMST / "
       "基变换 Q / 跨语言金标准 / 太阳 of-date 专用链 / TEME 逆岁差 / 旧单位错误守卫")
 
+# ---------- 9.7 写工具确认通道（阶段 C：前端只登记意图，token 不出宿主） ----------
+_data = (SRC / "10-data.js").read_text(encoding="utf-8")
+_dialog = (SRC / "50-dialog.js").read_text(encoding="utf-8")
+if "confirmTool(" not in _data or "canConfirm(" not in _data:
+    fail("[bridge] 前端缺确认通道适配（confirmTool / canConfirm）")
+for bad in ("issue_confirmation", "issueConfirmation", "confirm_token\\s*=", "tx_token\\s*="):
+    if re.search(bad, _data) or re.search(bad, _dialog):
+        fail(f"[bridge] 前端试图自造/签发 token：{bad}（token 只能由宿主签发）")
+if "canConfirm: false" not in _data:
+    fail("[bridge] 宿主无确认通道时必须显式 canConfirm:false（不能默认给按钮）")
+if "confirmButton(" not in _dialog:
+    fail("[bridge] gated 回执缺「确认执行」入口")
+for k in ("bridge.confirmRun", "bridge.confirmOff"):
+    if k not in DICT:
+        fail(f"[i18n] 缺确认通道文案：{k}")
+_host = REPO / "mbdsdr_ai/web_bridge_mcp.py"
+if not _host.is_file():
+    fail("[bridge] 缺 mbdsdr_ai/web_bridge_mcp.py（真实确认通道实现）")
+_hsrc = _host.read_text(encoding="utf-8")
+if "issue_confirmation" not in _hsrc or "pending.consume" not in _hsrc:
+    fail("[bridge] 确认通道必须走 tx_guard 签发 + 一次性消费")
+if "TOKEN_FIELDS" not in _hsrc:
+    fail("[bridge] 确认通道必须剥离前端传来的 token")
+print("[9.7] 写工具确认通道：前端只登记意图 / token 宿主内签发 / 一次性消费 / 三语文案，全部通过")
+
 # ---------- 10. 构建产物 ----------
 dist = ROOT / "dist/index.html"
 if not dist.is_file():

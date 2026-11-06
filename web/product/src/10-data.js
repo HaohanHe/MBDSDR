@@ -222,14 +222,36 @@
     getPasses(norad) { return this._call("getPasses", [], [norad]); },
     getCapabilities() { return MB.CAPS.filter(c => S.caps[c.id]); },
     readSpectrum() { return this._call("readSpectrum", null, []); },
+    /* 宿主是否提供确认通道（写工具可"先请求确认再执行"）。
+       只有本地 host 会注入 confirm()；离线 / 静态托管恒 false。 */
+    canConfirm() {
+      const b = this._bridge;
+      return !!(b && b.canConfirm === true && typeof b.confirm === "function");
+    },
+    /* 请求宿主登记一次「用户确认了这个动作」。**不签发 token**：
+       签名与消费都在宿主进程内完成，前端拿不到 token 字符串。 */
+    confirmTool(name, args) {
+      const b = this._bridge;
+      if (!this.canConfirm()) return Promise.resolve(false);
+      try {
+        return Promise.resolve(b.confirm(name, args || {}))
+          .then(v => !!(v && v.ok && v.pending))
+          .catch(() => false);
+      } catch (err) {
+        return Promise.resolve(false);
+      }
+    },
     invokeTool(name, args) {
       if (!this.isLive()) return OfflineSource.invokeTool(name, args);
       const clean = MB.stripSelfReport(args);
       // Python 内核的门：写工具必须由外部确认通道签发一次性 confirm_token。
-      // 前端无权签发；缺 token 时**不送进内核**，直接给诚实 gated 回执。
-      if (MB.isWriteTool(name) && !MB.hasConfirmToken(clean.args))
+      // 前端无权签发。宿主接了确认通道时不在这里拦——交给宿主回
+      // `manual_gate_required`，UI 据此给出「确认执行」按钮；宿主没接通道
+      // 就本地诚实 gated，绝不把请求送进内核碰运气。
+      if (MB.isWriteTool(name) && !MB.hasConfirmToken(clean.args) && !this.canConfirm())
         return Promise.resolve(MB.gateEnvelope(name, "mcp", {
           selfReportRejected: clean.selfReport,
+          canConfirm: false,
           suggestion: "external confirm_token required; the front end cannot issue one"
         }));
       try {
@@ -237,8 +259,11 @@
         return Promise.resolve(r).then(v => {
           // 宿主返回结构化回执时原样透传，绝不能把 gated:true / ok:false
           // 包成 {ok:true, data:...} 伪装成功。
-          if (v && typeof v === "object" && ("ok" in v || "gated" in v || "error" in v))
-            return Object.assign({ ok: false, tool: name, data: null }, v);
+          if (v && typeof v === "object" && ("ok" in v || "gated" in v || "error" in v)) {
+            const out = Object.assign({ ok: false, tool: name, data: null }, v);
+            if (out.gated) out.canConfirm = this.canConfirm();
+            return out;
+          }
           return { ok: true, tool: name, data: v == null ? null : v };
         }).catch(err => MB.envelope("exception", name, {
           detail: String(err && err.message || err)

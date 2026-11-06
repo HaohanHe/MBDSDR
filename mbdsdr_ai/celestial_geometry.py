@@ -375,17 +375,25 @@ class GroundStation:
         """地平系 -> 当前赤道系 旋转矩阵。
 
         地平系基 (x=北, y=东, z=天底) 在当前赤道系 (y=NCP) 中的表达:
-          E = (-cosθ, 0, -sinθ),  Z = (cosφ·sinθ, sinφ, -cosφ·cosθ),
+          E = (cosθ, 0, sinθ),  Z = (cosφ·sinθ, sinφ, -cosφ·cosθ),
           N = Z×E,  矩阵列 = [N, E, -Z]。
         校验: 北天极 (0,1,0) 经转置后到 (cosφ, 0, -sinφ) = alt=φ 正北。
+
+        2026-11-06 修正: E 旧值是 ``(-cosθ, 0, -sinθ)``, 与本模块自己的
+        赤道基 (y=NCP, -z=春分点) 差一个符号 —— 数值对拍 x/z 与标准天文
+        方位一致、y(东) 恰好相反, 即旧实现把"东"算成了"西"。方位角 Az
+        自北向东增, 东向分量取负会让所有 az 镜像。北向 N = Z×E 与 zenith
+        均未受影响 (两者一起变号会抵消), 所以只改这一处。
         """
         theta = deg2rad(gmst(jd_ut1) + self.longitude)   # 本地恒星时 (弧度)
         phi = deg2rad(self.latitude)
-        east = np.array([-math.cos(theta), 0.0, -math.sin(theta)])
+        east = np.array([math.cos(theta), 0.0, math.sin(theta)])
         zenith = np.array([math.cos(phi) * math.sin(theta),
                            math.sin(phi),
                            -math.cos(phi) * math.cos(theta)])
-        north = np.cross(zenith, east)
+        # 注意手性: 本模块赤道基 (y=NCP, -z=春分点) 的行列式为 -1,
+        # 直接 Z×E 得到的是「南」。用 E×Z 补偿一次, 得真正的北向。
+        north = np.cross(east, zenith)
         return np.column_stack([north, east, -zenith])
 
     def equatorial_to_altaz_matrix(self, jd_ut1: float) -> np.ndarray:
