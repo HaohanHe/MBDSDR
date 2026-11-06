@@ -66,12 +66,18 @@ class _ConstellationView(QWidget):
             return
         self._has_data = True
         tail = iq[-self._max_points:]
-        for v in tail:
-            self._points.append((float(np.real(v)), float(np.imag(v))))
+        # 2026-11-06：批量转 Python 浮点。逐点 `for v in tail` 在 146 帧/s 下
+        # 是 7.5 万个 tuple/s 的纯 Python 开销（面板在别的页签也照跑）。
+        # 这里一次 tolist 拆成两个列表再 zip，避免逐元素建 np 标量。
+        re_l = np.real(tail).tolist()
+        im_l = np.imag(tail).tolist()
+        self._points.extend(zip(re_l, im_l))
         # 限长，防止内存无限涨
         if len(self._points) > self._max_points * 4:
             self._points = self._points[-self._max_points * 2:]
-        self.update()
+        if self.isVisible():
+            # 不可见时不排重绘（数据仍累积，切回来立刻有图）
+            self.update()
 
     def clear_points(self) -> None:
         self._points.clear()
@@ -251,9 +257,14 @@ class ConstellationPanel(QWidget):
 
     # ------------------------------------------------------------------ 主窗口调用
     def feed_iq(self, iq: np.ndarray) -> None:
-        """主窗口从 ReceiveChain 信道输出喂入复基带 IQ。"""
+        """主窗口从 ReceiveChain 信道输出喂入复基带 IQ。
+
+        2026-11-06：状态文字只在**真的变化**时才写（旧实现每帧 setText，146 次/s
+        的 QLabel 布局开销；面板在别的页签也照跑）。重绘由 view.feed 内部按
+        可见性判断，数据照样累积，切回来立即有图。
+        """
         if not self._connected:
             return
         self.view.feed(iq)
-        if self.view._has_data:
+        if self.view._has_data and self.status_label.text() != "接收中":
             self.status_label.setText("接收中")

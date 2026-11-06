@@ -70,14 +70,38 @@
 - **[仍在途/待对方释放]** `desktop/main_window.py`、`control_panel.py`、
   `ai_panel.py`、`module_panel.py`、`new_spacetime_panel.py`、
   `mbdsdr_ai/baseband_io.py`、`lrpt_modem.py` 有他线未提交改动，本线**不碰**。
-  由此顺延、已写明修法但不代改的两项：
-  ① `SatTrackPanel.set_observer_ready()` 无调用方（无站址时"开始跟踪"不置灰，
-     用户点了才吃一句状态栏提示）——需主窗口在站址变更处调用；
-  ② TLE 后台线程重建传播器与 500ms 轮询竞争 `sat_tracker._diff`
-     （后台线程改 `_sat/_diff/_selected_name`，GUI 侧先判非 None 再用）——
-     需主窗口把解析结果用 signal 回 GUI 线程再 `_build_satellite`。
-  详见 `docs/pending-patches/2026-11-06-desktop-satpanel-timer-after-delete.md`
-  与本次审计清单（"卫星帧/线程"节）。
+  由此顺延、已写明修法但不代改的项（**交接单**：
+  `docs/pending-patches/2026-11-06-handoff-main-window-audit-p0p1.md`）：
+  ① 【P0】`_poll_sdr_iq` 从未 `start()` → ADS-B 列表面板与 1090 MHz 地图页签
+     永久空态（IQ 总线也挂在这条死路径上）；
+  ② 【P0】解调回调在 `DemuxWorker` 线程里直接改 `QTableWidget`（APRS 表格）；
+  ③ 【P1】调谐失败回滚不还原 `spectrum.set_center_freq`（谱轴/瀑布/RSSI 停在
+     请求值）；④ 【P1】云台死区记账参数错层（`_apply_gimbal_result(ctx,…)`
+     应为 `{"ctx": ctx}`）+ 裸 `except: pass`；⑤ 【P1】NTP 在 GUI 线程，断网
+     单次冻结 ~15 s；⑥ 【P1】频谱被三路定时器叠加到 ~146 帧/s。
+  另有 `SatTrackPanel.set_observer_ready()` 无调用方、TLE 后台线程与 500ms
+  轮询竞争 `sat_tracker._diff`（见
+  `docs/pending-patches/2026-11-06-desktop-satpanel-timer-after-delete.md`）。
+  **2026-11-06 夜补**：`desktop/constellation_panel.py` 已由本线改成
+  「不可见不重绘 + 状态字只在变化时写 + 批量 tolist」（原逐点建 tuple，
+  146 帧/s ≈ 7.5 万 tuple/s，面板在别的页签也跑）。
+
+### 我这边（2026-11-06 深夜 追加：6DOF 与频谱诚实性）
+
+- **`9581c87c` 6DOF 姿态链重写**（`mbdsdr_ai/pose.py`）：罗盘 `atan2(-mx, my)`
+  参量顺序与符号都错 → 航向**恒偏 90°**；融合磁修正按 z 轴朝下写倾斜补偿、
+  加速度误差项符号会把滤波器推到偏置平衡点（实测 roll 20° → 15.8°）；
+  AR `device_elevation = -pose.pitch` 与同行注释互相矛盾。现把约定钉死
+  （机体 x=前/y=左/z=上；roll>0 右倾；pitch>0 **抬头**；yaw=航向）并写进模块头，
+  三条几何恒等式在 (航向×俯仰×横滚) 网格上 **0.00°**（含融合符号网格搜索）。
+  新增 `tests/test_pose_convention.py` 30 条；两条旧用例按新约定改写并加强
+  （详见 commit 正文）。
+- **`7f0f06ee` 频谱诚实性四处**（`desktop/spectrum_widget.py`）：瀑布可回看
+  时长按**实测行率**（旧式用 FFT 定时器算出 12.8 s，真实 1.75 s，差 7 倍）；
+  悬停不再把带外频率夹到边缘 bin 显示假电平；性能低档 512 点不在
+  FFT_SIZES 白名单（下拉静默停在 2048）→ 改 1024 + 白名单校验 + findText
+  同步；瀑布画布缓存键补 dB 量程（拖量程后历史行永久旧配色）。
+  新增 `tests/test_spectrum_honesty_extras.py` 9 条。
 
 ### 我这边（原型阶段备案）
 - **[用户指令 23:00]** UI 形态原型（Web）已产出：`D:/mbdsdr/output/ui-prototype/index.html`
