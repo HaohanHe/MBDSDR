@@ -500,6 +500,30 @@
     另：`sat_tracker._BUILTIN_TLES`（Celestrak 真实快照）与
     `decoders.BUILTIN_TLE`（历史合成占位）是两份数据，此前合规文档串线，已拆开。
 
+15. **[已闭环（75269ab8，11-06 19:47）] 真软件（PySide6 桌面端）四根断线接上**。
+    只读审计发现桌面端「库里有能力、面板里说没有」，本轮全部接线（不动在途的
+    `main_window.py` / `control_panel.py` / `ai_panel.py` / `module_panel.py` /
+    `new_spacetime_panel.py`）：
+    ①**中栏 ADS-B 地图从来没有数据**（`update_aircraft` 全仓只有测试调用）→
+      新增 `desktop/iq_bus.py` 单槽总线，`SpectrumPanel.set_iq_data` 发布，
+      `AdsbMapPanel` 自订阅（仅 1090MHz±1.5MHz 且 sr≥1.2MS/s 才解码）；观察者
+      坐标在真解出帧时才从 `gui_config.json` 读。
+    ②**星象仪搜索只覆盖 54 颗亮星** → 新增 `StarCatalog.search_by_name` 与
+      `DSOCatalog.search`，实测 vega/sadr/alcyone/ngc 7000/北美洲/猎户座大星云
+      全部命中；搜不到时给不可选提示，不再静默。
+    ③**中国星官零入口** → 控制条「星官」按钮 + 快捷键 C，走既有
+      `set_constellation_systems`，画布加 `chinese_layer_changed` 信号双向同步。
+    ④**气象面板 FY-4 一口回绝** → 真接 `decode_fy4_iq_to_image`（bpsk→qpsk
+      依次尝试），失败回显 stage/diagnostic 不出半截图；meta 明写「经典 CCSDS，
+      真实下行是 DVB-S2」。同步把固化旧行为的测试改成
+      `test_fy4_raw_iq_goes_through_real_ccsds_chain`。
+    新增 `tests/test_real_software_wiring.py` 19 条；涉及回归 137 passed。
+    **对拍发现的无关失败**：`test_spectrum_scale_peak_range` 2 条（DB 轴拖拽
+    读数/气泡）在 HEAD 版本同样失败，非本轮引入，未改他人测试。
+    **仍未做**：多 VFO「假多路」需主窗口建 worker；星象仪调星/跟踪/云台三按钮
+    仍需 AI 协商（本地 `_execute_sky_action` 已有，接线在主窗口）；卫星云图
+    LRPT 面板只收音频，需 IQ 入口。
+
 ---
 
 ## 四、协调规则（血泪换来的，别再踩）
