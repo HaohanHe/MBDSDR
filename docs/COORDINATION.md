@@ -457,11 +457,35 @@
     九步 ALL PASS；`.gitignore` 否定仓库根全局 `build/` 规则保住构建源码。
     提交走 `--only -F - -- web/product docs/product`（stdin，不落 C 盘临时文件），
     机械闸放行，提交后 `git diff HEAD -- <本次路径>` 为空，别线在途 M/?? 一个没碰。
-12. **[认领] 阶段 B：`window.mbdsdrBridge` → `mbdsdr_ai/tool_registry.py` 运行时桥接**。
-    仓库里目前**没有** `mbdsdrBridge` / QWebChannel 实现（grep 无命中），
-    产品 `MB.CONTRACT` 8 个方法在离线时走诚实空态。要做的是新建桥接层 +
-    `arm_manual` 人工门 + 对拍测试，**不要顺手改 desktop/main_window.py**
-    （操作逻辑线在途）。这是独立一笔，不算进阶段 A。
+12. **[已闭环（1d74cbac + 01dfd895，11-06 00:50）] 阶段 B：Python 侧运行时桥接**。
+    新增 `mbdsdr_ai/web_bridge.py`（不 import Qt、不碰 `desktop/main_window.py`），
+    `ToolRegistry` → `MB.CONTRACT` 8 方法，`as_bridge_dict()` / `manifest()`。
+    **安全口径同步（重要）**：内核 `mcp_server.py` 早已改成「模型自报 `arm_manual`
+    不算确认，必须外部一次性 `confirm_token`」，C++ 门是宿主写开关 `writeEnabled_`；
+    产品旧的 `arm_manual:true` 放行判据**两边都不认**，且 `BridgeSource` 会把
+    `{ok:false,gated:true}` 包成 `{ok:true,data:...}`（伪造成功路径）——均已修。
+    门字段由 `sync_from_repo.py` 从三处内核代码抽取，抽不到即 assert 失败，不手抄。
+    铁律：写工具**绝不走裸 `registry.call()`**，缺 token → `manual_gate_required`；
+    带 token 但 `confirm_channel` 未接 → 恒 gated。`tests/test_web_bridge.py` 16 条 +
+    `verify_product.py` 跨语言钉扎（Python/JS 契约与门字段对拍）。
+    **剩余 not_verified（见 #13）**：宿主注入、`confirm_channel` 接线、真机逐工具实测。
+13. **[待认领] 阶段 C：宿主注入与确认通道接线**。①把 `WebBridge.as_bridge_dict()`
+    注入宿主（QWebChannel 或 JS 全局），主循环已支持后注入重检；②把
+    `confirm_channel` 接到 `mcp_server.call_tool` 的真实确认门（当前带 token 也恒
+    gated，这是**故意**的安全默认，不是 bug）；③真实硬件逐工具实测。禁止顺手改
+    `desktop/main_window.py`（操作逻辑线在途）；在此之前产品默认离线诚实空态。
+14. **[已闭环（9dcb4ecc，11-06 19:0x）] 天球坐标链接仓库真实岁差/章动**。
+    新增 `web/product/src/14-astro-frame.js`：按 `mbdsdr_ai/celestial_geometry.py`
+    同式实现 IAU2006 P03 岁差 + IAU2000B 简化章动 + Capitaine GMST，合成总矩阵
+    `M = Rf·QᵀNPQ`（Q 把仓库赤道基换到前端标准 ICRS 基）。跨语言金标准
+    `build/gen_astro_golden.py` + `tests/astro_selftest.js` 对拍 3.3e-16。
+    **⚠ 全仓影响**：同时修了 `celestial_geometry.py` 两个单位错误——
+    `nutation_angles_2000b()` 把角秒系数按 0.0001 角秒缩放（dpsi 只有 0.000335"，
+    章动等于没生效）、`obliquity()` 岁差率小 660 倍。凡依赖旧章动/黄赤交角的
+    金样或断言都可能需要重跑；新回归在 `tests/test_celestial_frame.py`（33 条，
+    钉扎**绝对量级**——正逆往返抓不到这类错，因为两边用同一个 N）。
+    另：`sat_tracker._BUILTIN_TLES`（Celestrak 真实快照）与
+    `decoders.BUILTIN_TLE`（历史合成占位）是两份数据，此前合规文档串线，已拆开。
 
 ---
 
@@ -669,9 +693,6 @@
   `tests/test_squelch_baseline.py`、`docs/hardcoded-parameters.md`、
   `desktop/control_panel.py`（仅 2 行注释）；未碰 main_window / rf_sky_view /
   spectrum_widget。未推送。
-
----
-
 - 2026-11-06 | 日志与书签版本线 | **口径修正：`waived-total` 只能按 HEAD 报**
   本线落库汇报里曾写「`waived-total` 降到 70」，属**错报**：把工作区快照当成
   了自己提交的效果。实况三值：提交前 HEAD 135、本线提交 `45d4832f` 后 HEAD
@@ -693,6 +714,17 @@
 | 文件 | 线名 | 开始时间 | 预计提交 hash |
 |---|---|---|---|
 | _（空）_ | | | |
+| `desktop/control_panel.py` | 参数治理线/59ca04d1（preset_combo 宽策略 + 静噪行拆行；pid 见 claim 记录） | 2026-11-06 06:23 | 待定 |
+| `docs/COORDINATION.md` | 参数治理线/59ca04d1（本文件 §6.1 备忘 + 尺寸登记） | 2026-11-06 06:23 | 同笔 |
+| **真机（USB SDR）** | 跑 `hw_acceptance/`、七环、`capture_throughput.py` 的线（资源独占） | 占用时段 | — |
+
+> **真机独占（硬规则，优先于文件归属）**：谁在跑 `docs/hw-acceptance.md` 的七环、
+> `scripts/hw_acceptance/**`、`scripts/capture_throughput.py`（含 `--mode product`），
+> 其它线不得同时跑压测/性能探针（如 `perf_probe_deep.py` 的 startup + spectrum）。
+> 本次实测：探针全程并发时，供给掉到 2.246–2.302 MS/s（空载 2.355–2.403）、
+> 读块中位 4.44–4.71 ms（空载 1.8–2.1 ms），drop 从约 1.7% 被推到 4.0–6.4%，
+> 那组验收数字当场作废。**拿不到独占就先问一句**——文件冲突有 diff 可查，
+> 负载冲突只会让数字说谎。
 
 > **干净窗口三条件（2026-11-06 立规；三者缺一，不得声称窗口干净）**
 >
@@ -836,7 +868,7 @@
 > **禁止复用他线名字，也不要用无会话后缀的裸线名**。
 > 事故一：本线曾以 `owner=参数治理线`（无会话标识）claim 文件，硬编码线三次查
 > `claims.json` 都看不到对应条目、`release --owner 参数治理线` 返回 `RELEASE DENIED`，
-> 并据此**误**判本线在改 `control_panel.py`，白花一轮。
+> 并据此刻判本线在改 `control_panel.py`，白花一轮。
 > 事故二：改用 `owner=参数治理线-6ae85f56`（后缀取了**父会话** id，不是本会话）
 > 后，操作逻辑线接管时看到「心跳 14.2 分钟前、pid 38116 已不存在、但有在途改动」，
 > 无法确认这是谁，又白花一轮。
@@ -1843,7 +1875,7 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
   `:210` 四条是本轮新写/改写的无 hash 断言，属他线在途改动（前者 claim 属
   discoverability-line 且已过期，后者未见 claim）→ 补齐四元组或删断言；
   本线未替它们开白名单。
-- 顶层 docs 的存量断言：白名单 `docs/claim-waivers.md`（HEAD 103 条，逐条附指纹 +
+- 顶层 docs 的存量断言：白名单 `docs/claim-waivers.md`（142 条，逐条附指纹 +
   原因，只许往下减）；门禁 `tests/test_claims_guard.py` 只锁增量——新增或
   改写的断言四元组不全即红，存量由各文档 owner 逐条补 hash 或删断言。
 - 增量漂移登记：`docs/narrow-screen-plan.md:463`「宽度收口」那段是新写的
@@ -1862,63 +1894,44 @@ GPL 资产），现与 `.npz` 同口径 `raise ScanError`（fail-closed，退出
 #### 7.3.2 白名单 stale 销账清单（2026-11-06，按 HEAD 内容判定）
 
 判定口径：**只认 `git show HEAD:<path>` 的实际内容**，工作区在途编辑不作为删除依据。
-`tests/test_claims_guard.py` 读的是**工作区**（`WAIVERS = ROOT/"docs"/"claim-waivers.md"`，
-`vc.verify_docs(ROOT)` 默认扫工作区 docs），所以它跑出的条数不是 HEAD 条数；
-HEAD 条数用 HEAD 文档快照跑同一套 `verify_claims` 判据得出。
-
-测量快照 HEAD `e4810574`：白名单 103 行 / cap 103，docs 未证实 93，
-`test_waivers_are_not_stale` 红 **15** 条
-（`docs/hardcoded-parameters.md` 9 + `docs/packaging.md` 4 + `docs/parameter-unification.md` 2）。
+HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **11** 条
+（`docs/hardcoded-parameters.md` 5 + `docs/packaging.md` 4 +
+`docs/parameter-unification.md` 2）。他线随后把 hardcoded 的 5 条修复提交进了 HEAD，
+工作区那 13 条里只有 id 51 随之转绿；其余 12 条在 HEAD 仍未证实，故本期不删。
 
 **A. 可在 HEAD 销账（等 owner 书面确认，11 条）**
 
-| id | 文件 | owner | HEAD 复核（`git show HEAD:<path>`，`verify_claims` 三步全过） |
+| id | 文件 | owner | HEAD 复核（`git show HEAD:<path>`，均为 `verify_claims` 三步全过） |
 | --- | --- | --- | --- |
-| 51 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:380` — `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
-| 53 | 同上 | 同上 | `:474` — `b8bc5140` — `cpp/src/core/tokens.h:378` — `kPeakRelDb = 6.0` |
-| 54 | 同上 | 同上 | `:490` — `e883a62b` — `desktop/spectrum_widget.py:218` — `FFT_SIZES = (1024, 2048, 4096)` |
-| 58 | 同上 | 同上 | `:643` — `ff219b55` — `mbdsdr_ai/core/controller.py:1096` — `min_elevation_deg` |
-| 59 | 同上 | 同上 | `:756` — `17709482` — `mbdsdr_ai/analog_demod.py:123-131` — `相对该模式噪声基线的余量` |
-| 77 | `docs/packaging.md` | 打包线 | `:17` — `50aa1db0` — `desktop/main.py:74` — `scipy._external.array_api_compat.numpy.fft` |
-| 78 | 同上 | 同上 | `:200` — `50aa1db0` — `desktop/main.py:350` — `缺少 Qt 平台插件 platforms/` |
-| 79 | 同上 | 同上 | `:204` — `c295423e` — `desktop/startup_paths.py:59` — `def startup_log_path() -> str:` |
-| 80 | 同上 | 同上 | `:570` — `c295423e` — `desktop/startup_paths.py:98` — `probe_dir_writable_async` |
-| 81 | `docs/parameter-unification.md` | 采样率线 | `:444` — `70429a02` — `desktop/main_window.py:3963` — `_fill_sr_combo` |
-| 83 | 同上 | 同上 | `:446` — `754f64e6` — `scripts/sample_rate_readback_check.py:156` — `真机不可复跑，以下为注入验证` |
+| 51 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:380` 现为 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` |
+| 53 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:474` 现为 `b8bc5140` — `cpp/src/core/tokens.h:378` |
+| 54 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:490` 现为 `e883a62b` — `desktop/spectrum_widget.py:218` |
+| 58 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:643` 现为 `ff219b55` — `mbdsdr_ai/core/controller.py:1096` |
+| 59 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:756` 现为 `17709482` — `mbdsdr_ai/analog_demod.py:123` |
+| 77 | `docs/packaging.md` | 打包线 | 原句不再存在（表行已删） |
+| 78 | `docs/packaging.md` | 打包线 | `:200` 现为 `50aa1db0` — `desktop/main.py:350` |
+| 79 | `docs/packaging.md` | 打包线 | 原「约束 / 实测行为 / 期望 / 差距 / 完成」表行不再存在 |
+| 80 | `docs/packaging.md` | 打包线 | `:570` 现为 `c295423e` — `desktop/startup_paths.py:98` |
+| 81 | `docs/parameter-unification.md` | 采样率线 | `:423` 现为 `70429a02` — `desktop/main_window.py:3963` |
+| 83 | `docs/parameter-unification.md` | 采样率线 | `:425` 现为 `754f64e6` — `scripts/sample_rate_readback_check.py:156` |
 
-**B. 不可销账（4 条，文档侧没补证）**
+**B. 先前提到的 13 条在 HEAD 的复核结果**
 
-| id | 文件 | owner | HEAD 实况 |
-| --- | --- | --- | --- |
-| 55/56/57 | `docs/hardcoded-parameters.md` | 硬编码与参数治理线 | `:535`–`:537` 同名句仍在，整行无 hash → `verify_claims` 判未证实（无 hash） |
-| 60 | 同上 | 同上 | `:764` 同名句仍在，整行无 hash |
+- 只有 id 51 与 HEAD 的 stale 重合，已并入 A 组；
+- `docs/settings-inventory.md` id 132–140（9 条）与 `docs/hardcoded-parameters.md`
+  id 55/56/57（3 条）在 HEAD 仍是**无四元组的未证实断言**（`verify_claims` 计入），
+  本期**不删**，等其修复随提交进入 HEAD 后再销。
 
-这 4 条**不删**：删掉只是把红从 stale 闸门挪进 `measured - waived`，白名单的销账语义没有兑现。
+**C. 其余 27 行**（`docs/PRD-现状对照.md` 16、`docs/PRD.md` 10、
+`docs/reference-mechanisms.md` 1）在 HEAD 同样仍是未证实断言，不删。
 
-**C. 采样率线报的「HEAD 13 条」对不上 HEAD 实测（按 owner 拆分）**
+**D. 实测（快照 HEAD `2f83f482`）**：白名单 103 行，`test_waivers_are_not_stale`
+红 **11** 条；按 A 组删 11 行（cap 103→92）对 HEAD 文档模拟 → **删前 11 → 删后 0**。
+`measured − waived` 另残留 `docs/evidence-standard.md:44`（真机证据线）与
+`docs/COORDINATION.md:181`（他线新写的完成态句），二者都不是白名单行，
+故 `test_no_new_or_modified_unverified_claims` 仍会红。
 
-| 归属 | 条数 | HEAD 实况 | 处置 |
-| --- | --- | --- | --- |
-| 硬编码与参数治理线（`docs/hardcoded-parameters.md`） | 4（id 51/55/56/57） | id 51 在 A 组；55/56/57 在 B 组 | 51 待书面确认后删；55/56/57 不删 |
-| 机制线（`docs/settings-inventory.md`） | 9（id 132–140） | 9 条均**不 stale**，白名单仍覆盖 | 本期不删；待其文档改动落库后再复核 |
-
-- 差异来源：`test_claims_guard.py` 读工作区（`WAIVERS = ROOT/"docs"/"claim-waivers.md`、
-  `verify_docs(ROOT)`），别线在途编辑把条数推到了 13，HEAD 实测是 15（不同集合）。
-- 按「只认 HEAD」的口径，本期不按 13 条删任何行。
-
-**D. 实测（快照 HEAD `e4810574`）**
-
-- 方案 A（只删 A 组 11 条）：白名单 103 → 92 行，cap 103 → 92，
-  `test_waivers_are_not_stale` **15 → 4**（余下即 B 组 4 条）；
-  `measured - waived` 残留 5 条不变（`docs/COORDINATION.md:181`、
-  `docs/evidence-standard.md:44`、`docs/hardcoded-parameters.md:535/536/537`）。
-- 方案 B（15 条全删）：stale 15 → 0，但 `measured - waived` 残留仍是 5 条，
-  B 组 4 条的红只是换了闸门，不算销账。
-- 采用方案 A。**「删前 N → 删后 0」本期做不到**：要归零需先把 B 组 4 条在
-  `docs/hardcoded-parameters.md` 里补齐四元组，属硬编码线的右侧工作。
-
-落库：A 组 11 条拿到 owner 书面确认后**一次性**提交（含 cap 103→92）；
-B 组 4 条与 C 组 settings-inventory 132–140 未确认，一条不删。
+落库：A 组 11 条拿到 owner 书面确认后**一次性**提交；B/C 组未确认一条不删。
 
 ## A. Python：`tests/test_ui_wiring_audit.py` — 4 failed
 
@@ -1998,7 +2011,7 @@ B 组 4 条与 C 组 settings-inventory 132–140 未确认，一条不删。
 - **总账行（每次必打）**：`R1 实修 X 条 / SNAPSHOT Y 条 / 历史横幅 Z 条`。X = 修复断言 + hash 有效 + R6 相交的条数；Y = 快照内未复核条数；Z = 历史横幅降级条数。欠账必须可见，不允许红项总数直接变 0。
 - 复跑：`python scripts/check_red_lifecycle.py`；反证：`python -m pytest tests/test_red_lifecycle.py -q`。
 
-### 7.5 R1 派发表（2026-11-06 立，109 条 / 24 文件）
+### 7.5 R1 派发表（2026-11-06 立；复扫后 66 条 / 21 文件）
 
 > **派发规则（写死）**：截止 **2026-11-13**。到期未完成 → **自动转 T**：按 §7.4 在文首写齐「本文为当时状态快照 / 未逐条复核 / 不作现状依据 / 共 N 条未复核」，机检转 `SNAPSHOT` 单独计数进总账（不再计 FAIL，但欠账保留）。**不得删断言、改词或写错 N 销红**（R7 会抓）。状态只认 `open / in_progress / done / T`。
 >
@@ -2008,31 +2021,33 @@ B 组 4 条与 C 组 settings-inventory 132–140 未确认，一条不删。
 
 | 文件 | R1 条数 | 修法 | 建议 owner | 截止 | 现状 |
 |---|---:|---|---|---|---|
-| `docs/PRD-现状对照.md` | 16 | T 快照 | WorkBuddy | 2026-11-13 | open |
-| `docs/settings-inventory.md` | 13 | H（补不动转 T） | WorkBuddy | 2026-11-13 | open |
-| `docs/learn/settings-surface-audit.md` | 10 | H（补不动转 T） | WorkBuddy | 2026-11-13 | open |
-| `docs/PRD.md` | 10 | O：产品线重写/补证 | WorkBuddy | 2026-11-13 | open |
-| `docs/learn/capability-map.md` | 7 | H | WorkBuddy | 2026-11-13 | open |
+| `docs/PRD-现状对照.md` | 0 | — | WorkBuddy | 2026-11-06 | done：16 条全部去掉完成态断言，改「改动在位」；该文件复扫 R1=0 |
+| `docs/learn/settings-surface-audit.md` | 0 | — | WorkBuddy | 2026-11-06 | done：6 条补四元组（`4c591730` / `b8ad9e86` / `451073e`），4 条去掉完成态断言；该文件复扫 R1=0 |
+| `docs/PRD.md` | 0 | — | WorkBuddy | 2026-11-06 | done：10 条去掉完成态断言；该文件复扫 R1=0 |
+| `docs/settings-inventory.md` | 9 | H（补不动转 T） | WorkBuddy | 2026-11-13 | done（2026-11-06，见 evidence-standard §7.3.1） |
+| `docs/learn/capability-map.md` | 7 | H | WorkBuddy | 2026-11-13 | done（2026-11-06，见 evidence-standard §7.3.1） |
 | `docs/limitations-register.md` | 7 | H→T | WorkBuddy | 2026-11-13 | open |
 | `docs/learn/nanovna/feature-parity.md` | 6 | T 快照 | TRAE | 2026-11-13 | open |
 | `docs/narrow-screen-plan.md` | 6 | O：UI 线重写/补证 | TRAE | 2026-11-13 | open |
-| `docs/hardcoded-parameters.md` | 5 | H | WorkBuddy | 2026-11-13 | open |
+| `docs/hardcoded-parameters.md` | 5 | H | WorkBuddy | 2026-11-13 | done（2026-11-06，见 evidence-standard §7.3.1） |
 | `docs/prototype-gap.md` | 4 | T 快照 | WorkBuddy | 2026-11-13 | open |
 | `docs/reference-mechanisms.md` | 4 | O：协议线补证 | TRAE | 2026-11-13 | open |
 | `docs/learn/dedup-ledger.md` | 3 | H→T | WorkBuddy | 2026-11-13 | open |
-| `docs/packaging.md` | 3 | H | TRAE | 2026-11-13 | open |
-| `docs/parameter-unification.md` | 3 | H | TRAE | 2026-11-13 | open |
 | `docs/audit_r2/FINAL_REPORT_R2.md` | 2 | T 快照 | WorkBuddy | 2026-11-13 | open |
+| `docs/hw-acceptance.md` | 2 | O：真机线补证 | WorkBuddy | 2026-11-13 | open |
 | `docs/python-crash-20261105.md` | 2 | H | WorkBuddy | 2026-11-13 | open |
 | `docs/audit_r2/01_dsp_core.md` | 1 | T 快照 | WorkBuddy | 2026-11-13 | open |
 | `docs/code-guards.md` | 1 | H | WorkBuddy | 2026-11-13 | open |
 | `docs/design_tokens_mapping.md` | 1 | H | TRAE | 2026-11-13 | open |
-| `docs/hw-acceptance.md` | 1 | O：真机线补证 | WorkBuddy | 2026-11-13 | open |
 | `docs/learn/cpp-tool-ui-reverse-audit.md` | 1 | T 快照 | WorkBuddy | 2026-11-13 | open |
 | `docs/learn/sdr-rtltcp-agent-path.md` | 1 | H | TRAE | 2026-11-13 | open |
+| `docs/pending-patches/2026-11-06-limitation-adsb-1090-fc0012.md` | 1 | H（新文件，随该线入库前补证） | — | 2026-11-13 | open |
 | `docs/pending-patches/2026-11-06-restore-capability-hints.md` | 1 | H | TRAE | 2026-11-13 | open |
+| `docs/performance-baseline.md` | 1 | H | WorkBuddy | 2026-11-13 | open |
 | `docs/star-catalog.md` | 1 | H | TRAE | 2026-11-13 | open |
-| **合计** | **109** | — | — | — | — |
+| `docs/packaging.md` | 0 | — | TRAE | 2026-11-06 | done：该线自补证，复扫 R1=0（白名单 4 行同轮销账） |
+| `docs/parameter-unification.md` | 0 | — | TRAE | 2026-11-06 | done：该线自补证，复扫 R1=0（白名单 2 行同轮销账） |
+| **合计** | **66** | — | — | — | — |
 
 **R6 防伪红项（本轮新增 5 条，到期未完成同样转 T）**
 
@@ -2044,7 +2059,34 @@ B 组 4 条与 C 组 settings-inventory 132–140 未确认，一条不删。
 | `docs/learn/ui_operation_logic_real.md:60` | `7d3fa3f` | 引用 Python 对象，提交改的是 C++ | 拆开两条或换正确 hash | WorkBuddy | 2026-11-13 | done：hash 未错（C++ panel id 修复）；原句把无提交的 Python `_raise_center_tab` 与 C++ 混写，已拆——Python 半边标〔推断〕，C++ 半边补 `cpp/src/ui/main_window.cpp` |
 | `docs/PRD.md:869` | `4abde1a` | 引用测试文件，提交改的是 `desktop/main_window.py` | 改引用 + 复跑 | WorkBuddy | 2026-11-13 | done：hash 未错（删假 0 Hz 回填）；补 `desktop/main_window.py:4213` — `绝不用 0 Hz`（R11 本体仍是「待补」） |
 
-机检复跑：`python scripts/check_red_lifecycle.py` → 本轮实测 `R1 实修 69 条 / SNAPSHOT 0 条 / 历史横幅 123 条`（2026-11-06 派发表落库时为 53，两数随各线提交浮动，以复跑为准）；派发完成后总账里的 `SNAPSHOT` 必须上升、`FAIL` 必须相应下降，不允许两边都不动。
+机检复跑：`python scripts/check_red_lifecycle.py` → 本轮实测 `FAIL 66 / R1 实修 71 条 / SNAPSHOT 0 条 / 历史横幅 123 条`（派发表落库时为 109，两数随各线提交浮动，以复跑为准）；派发完成后总账里的 `SNAPSHOT` 必须上升、`FAIL` 必须相应下降，不允许两边都不动。
+
+### 7.6 递减计划（FAIL 102 → 66，只减不增）
+
+> 目的：不让 `FAIL` 变成长期背景。每轮有**数字目标**和**判据**，到期不达标就按 §7.5 转 T 或派给 owner，不允许「下轮再说」。
+
+| 轮次 | 截止 | FAIL 目标 | 本轮要清的块（补证型优先） | 判据（全部满足才算达标） |
+|---|---|---:|---|---|
+| R-1（本轮） | 2026-11-06 | ≤ 70 | `PRD-现状对照` 16 + `settings-surface-audit` 10 + `PRD` 10 | 三文件复扫 R1=0；全量复扫 FAIL=66 |
+| R-2 | 2026-11-08 | ≤ 45 | **补 hash 就能解决**的块：`settings-inventory` 9 + `capability-map` 7 + `hardcoded-parameters` 5（21 条）；余量给短块 `prototype-gap` 4 / `star-catalog` 1 / `code-guards` 1 | 全量 FAIL ≤ 45；**本轮 `R1 实修` 增量 ≥ 15 条**（只靠降级/转 T 不算达标） |
+| R-3 | 2026-11-10 | ≤ 30 | `nanovna/feature-parity` 6 + `narrow-screen-plan` 6 + `limitations-register` 7（后两块允许补不动转 T） | 全量 FAIL ≤ 30；无新文件进榜 |
+| R-4 | 2026-11-13 | ≤ 20 | 余下 12 文件约 26 条（含散点） | 全量 FAIL ≤ 20；到期未完成按 §7.5 转 T（SNAPSHOT 计入总账，欠账不减） |
+| 终局 | 2026-11-20 | 0 | 散点清零 | FAIL=0 且 `SNAPSHOT` 不再增加（转 T 只降 FAIL，不减欠账） |
+
+> **挑选顺序（写死）**：先 `H`（补四元组，成功率高、数字稳定下压）→ 再 `T`（转快照，保住欠账）→ 最后 `O`（重写文档，一次只动一块，最容易反复）。**禁止**为凑目标先挑重写型文档，也不许把「改词降级」算进 `R1 实修` 增量。
+
+**每轮必打三条（缺一不算达标）**
+
+1. `python scripts/check_red_lifecycle.py` → `FAIL ≤ 本轮目标`；同时总账里的 `R1 实修 X` **不低于上轮**。降级措辞只能降 FAIL，不加实修——实修只能靠补四元组，不许用改词冒充。
+2. `python scripts/check_red_lifecycle.py --json` → `fail_count` 与明细逐条对得上，不允许「总数降了但明细没动」。
+3. `python -m pytest tests/test_claims_guard.py tests/test_red_lifecycle.py -q` → 全绿；其中 `test_no_new_or_modified_unverified_claims` 必须绿，即新增断言零放行。
+
+**「只减不增」怎么机检（两道闸分开跑，互不顶账）**
+
+- **断言闸**（顶层 `docs/*.md`）：新写/改写的断言必须带四元组；否则 `verify_claims` 判 `NO_HASH`，指纹又不在 `docs/claim-waivers.md` → `measured - waived` 非空 → `test_no_new_or_modified_unverified_claims` 红。白名单行数 `waived-total` 只许减；删行必须同步调小（`test_waiver_count_matches_cap_and_never_increases`）。
+- **红项闸**（`docs/` 全量，含 `docs/learn/`）：R1 要求同一行有 hash、R2 校验 hash 可解析、R6 校验 hash 碰到该条引用的对象；任一不过即 FAIL。转 T / 历史横幅只改变计数归属，不改变欠账总量。
+- **变异反证（用例已入仓）**：`tests/test_claims_guard.py::test_new_claim_without_hash_turns_gate_red` —— 往临时 docs 注入一条「修复完成，未附提交与路径」→ 判 `NO_HASH` → 增量非空（闸门必红）；同一行补成 `451073e` — `desktop/module_panel.py:323` — `round(v * 1e6)` → 判可证实、增量清零（放行）。复跑：`python -m pytest tests/test_claims_guard.py::test_new_claim_without_hash_turns_gate_red -q`。
+- **红项侧反证**：`tests/test_red_lifecycle.py::test_snapshot_count_is_rechecked_after_file_is_rewritten` —— 同一快照文件后续追加红项、N 未同步 → R7 必红（证明转 T 不是免死金牌）。
 
 ---
 
