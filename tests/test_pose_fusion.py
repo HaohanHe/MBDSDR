@@ -72,11 +72,14 @@ def test_accel_correction_prevents_roll_pitch_drift():
     assert abs(r1[-1] - r1[-100]) < 0.1
     assert abs(p1[-1] - p1[-100]) < 0.1
 
-    # beta=0：roll/pitch 明显漂移，且末尾仍在线性增长
+    # beta=0：roll/pitch 明显漂移，且末尾仍在线性增长。
+    # 符号按 2026-11-06 钉死的机体约定：x=前、y=左、z=上，pitch>0=抬头。
+    # 绕 +x 正转 = 右翼下沉 → roll 增大；绕 **+y**（指左）正转 = 抬头方向为负，
+    # 即 x̂ 转向 −z → pitch 减小。这两条一起把"约定"钉住，改约定会立刻红。
     assert abs(r0[-1]) > 5.0
     assert abs(p0[-1]) > 3.0
     assert (r0[-1] - r0[-100]) > 0.5
-    assert (p0[-1] - p0[-100]) > 0.3
+    assert (p0[-1] - p0[-100]) < -0.3
 
     # 修正显著抑制漂移：beta=0 的最终误差远大于 beta>0
     assert abs(r0[-1]) > 5.0 * abs(r1[-1])
@@ -102,20 +105,29 @@ def test_mag_all_zero_degrades_to_6dof_without_fabricated_heading():
 
 
 def test_mag_nonzero_enters_integration():
-    """mag 非零时倾斜补偿航向修正进入积分，与 mag 全零结果不同。"""
+    """mag 非零时倾斜补偿航向修正进入积分，且收敛到磁矢量隐含的航向。
+
+    2026-11-06 重写：旧用例注入 mag=(0.2,0,0.4)，在**正确**的公式下这恰好
+    就是"航向 0°"的磁场（水平分量全在机体 x 轴），修正量本就是 0——旧用例
+    之所以能通过，是因为旧式 atan2(−mx, my) 把它算成了 −90°（错的）。
+    现在改用隐含航向 56.3° 的磁矢量（atan2(0.3, 0.2)），并直接断言收敛值。
+    """
     def run(mag):
         mf = MadgwickFilter(beta=1.0)
-        for i in range(50):
+        for i in range(2000):
             mf.update(_imu(i, accel=(0.0, 0.0, 1.0), mag=mag))
         return mf.q.copy(), mf.get_euler()
 
     q_zero, e_zero = run((0.0, 0.0, 0.0))
-    q_mag, e_mag = run((0.2, 0.0, 0.4))
+    q_mag, e_mag = run((0.2, 0.3, 0.4))
     assert np.all(np.isfinite(q_mag))
     assert not np.allclose(q_zero, q_mag)
-    yaw_diff = abs(e_mag[2] - e_zero[2])
-    yaw_diff = min(yaw_diff, 360.0 - yaw_diff)
-    assert yaw_diff > 5.0
+    # 航向 = atan2(m_y, m_x)（水平、机体 y 指左 → 顺时针自北）
+    want = math.degrees(math.atan2(0.3, 0.2))
+    d = abs((e_mag[2] - want + 180) % 360 - 180)
+    assert d < 2.0, f"磁航向应收敛到 {want:.1f}°，实际 {e_mag[2]:.1f}°"
+    # mag 全零那一组不编造航向
+    assert abs(e_zero[2]) < 1.0
 
 
 def test_confidence_increases_with_consistent_observations():

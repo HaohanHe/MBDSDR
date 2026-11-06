@@ -134,6 +134,122 @@ class ARMarker:
 
 
 # ═══════════════════════════════════════════════════════
+# 0. 机体坐标系约定与共用几何（2026-11-06 钉死）
+# ═══════════════════════════════════════════════════════
+# 全模块统一口径（此前各处各自为政，导致罗盘偏 90°、pitch 正负与注释相反）：
+#
+#   机体：x = 前、y = 左、z = 上（右手系）。
+#         水平静止时加速度计读 a = (0, 0, +g)（读的是支撑反力），与
+#         tests/test_pose_fusion.py 注入的 accel=(0,0,1) 一致。
+#   地球：x = 北、y = 西、z = 天顶。故航向 ψ=0 时机体系与地球系重合
+#         （四元数为单位元），绕 +z 的正向旋转是**逆时针**（北→西），
+#         即航向（顺时针自北）ψ 对应绕 z 转 −ψ。
+#   姿态：roll  > 0 = 右翼下沉（右倾）
+#         pitch > 0 = **抬头**
+#         yaw        = 航向 ψ，顺时针自北，0=N / 90=E（与 GPS course 同口径）
+#
+# 三条数值恒等式（有单测逐点锁定，改约定必须同时改这三条）：
+#   roll  = atan2(a_y, a_z)
+#   pitch = atan2(a_x, hypot(a_y, a_z))
+#   ψ     = atan2(h_y, h_x),  h = Ry(−pitch)·Rx(roll)·m
+# 全部在 (航向 × 俯仰 × 横滚) 网格上与真值 0.00° 重合。
+
+
+def _rot_x(deg: float) -> np.ndarray:
+    t = math.radians(deg)
+    c, s = math.cos(t), math.sin(t)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
+
+
+def _rot_y(deg: float) -> np.ndarray:
+    t = math.radians(deg)
+    c, s = math.cos(t), math.sin(t)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+def _tilt_to_level(mx: float, my: float, mz: float,
+                   roll_deg: float, pitch_deg: float) -> Tuple[float, float]:
+    """磁矢量去倾斜：返回水平系里的 (h_x, h_y)。仅用于求航向。
+
+    h = Ry(−pitch)·Rx(roll)·m —— 与本模块机体约定严格配对；
+    换成别的符号组合会整体偏 90°（旧实现就是这样）。
+    """
+    m = np.array([mx, my, mz], dtype=float)
+    h = _rot_y(-float(pitch_deg)) @ _rot_x(float(roll_deg)) @ m
+    return float(h[0]), float(h[1])
+
+
+def _rot_from_quat(q: np.ndarray) -> np.ndarray:
+    """四元数 [w,x,y,z]（机体系→地球系）转 3×3 旋转矩阵。"""
+    w, x, y, z = (float(q[0]), float(q[1]), float(q[2]), float(q[3]))
+    return np.array([
+        [1 - 2*(y*y + z*z), 2*(x*y - w*z), 2*(x*z + w*y)],
+        [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
+        [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)]])
+
+
+def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return np.array([w1*w2 - x1*x2 - y1*y2 - z1*z2,
+                     w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                     w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                     w1*z2 + x1*y2 - y1*x2 + z1*w2])
+
+
+def _roll_pitch_from_matrix(R: np.ndarray) -> Tuple[float, float]:
+    """从旋转矩阵取 roll/pitch —— **第三行**即重力反力方向，与加速度计同式。"""
+    ax, ay, az = float(R[2, 0]), float(R[2, 1]), float(R[2, 2])
+    roll = math.degrees(math.atan2(ay, az))
+    pitch = math.degrees(math.atan2(ax, math.hypot(ay, az)))
+    return roll, pitch
+
+
+def _heading_from_matrix(R: np.ndarray) -> float:
+    """从旋转矩阵取航向（顺时针自北）。机体 x̂ 在地球系 (北,西,天顶) 的方位。"""
+    hd = math.degrees(math.atan2(-float(R[1, 0]), float(R[0, 0]))) % 360.0
+    return hd
+
+
+def _matrix_from_rpy(roll_deg: float, pitch_deg: float, yaw_deg: float) -> np.ndarray:
+    """(roll, pitch, 航向) -> 机体系→地球系旋转矩阵（_roll_pitch/_heading 的逆）。"""
+    return (_rot_z(-float(yaw_deg)) @ _rot_y(-float(pitch_deg))
+            @ _rot_x(float(roll_deg)))
+
+
+def _rot_z(deg: float) -> np.ndarray:
+    t = math.radians(deg)
+    c, s = math.cos(t), math.sin(t)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def _quat_from_matrix(R: np.ndarray) -> np.ndarray:
+    """旋转矩阵 -> 四元数 [w,x,y,z]（数值稳定分支，取最大对角元）。"""
+    tr = float(np.trace(R))
+    if tr > 0.0:
+        s = math.sqrt(tr + 1.0) * 2.0
+        q = [0.25 * s,
+             (R[2, 1] - R[1, 2]) / s,
+             (R[0, 2] - R[2, 0]) / s,
+             (R[1, 0] - R[0, 1]) / s]
+    elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+        s = math.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+        q = [(R[2, 1] - R[1, 2]) / s, 0.25 * s,
+             (R[0, 1] + R[1, 0]) / s, (R[0, 2] + R[2, 0]) / s]
+    elif R[1, 1] > R[2, 2]:
+        s = math.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+        q = [(R[0, 2] - R[2, 0]) / s, (R[0, 1] + R[1, 0]) / s,
+             0.25 * s, (R[1, 2] + R[2, 1]) / s]
+    else:
+        s = math.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+        q = [(R[1, 0] - R[0, 1]) / s, (R[0, 2] + R[2, 0]) / s,
+             (R[1, 2] + R[2, 1]) / s, 0.25 * s]
+    v = np.array(q, dtype=float)
+    n = np.linalg.norm(v)
+    return v / n if n > 0 else np.array([1.0, 0.0, 0.0, 0.0])
+
+
+# ═══════════════════════════════════════════════════════
 # 1. 互补滤波（6DOF 姿态估计）
 # ═══════════════════════════════════════════════════════
 
@@ -179,8 +295,12 @@ class ComplementaryFilter:
         gyro_pitch = self.pitch + math.degrees(imu.gyro_y) * dt
 
         # 加速度计计算（长期，受重力）
+        # 2026-11-06 口径统一：机体取 x=前、y=左、z=上（水平静止时传感器读
+        # a=(0,0,+g)，与 tests/test_pose_fusion.py 注入的 accel=(0,0,1) 一致）。
+        # 该约定下 pitch>0 = **抬头**，故取 +a_x；旧式 atan2(-a_x, …) 实际是
+        # "低头为正"，与 AR 投影 device_elevation 的注释口径相反。
         accel_roll = math.degrees(math.atan2(imu.accel_y, imu.accel_z))
-        accel_pitch = math.degrees(math.atan2(-imu.accel_x,
+        accel_pitch = math.degrees(math.atan2(imu.accel_x,
                                                  math.sqrt(imu.accel_y**2 + imu.accel_z**2)))
 
         # 互补滤波
@@ -246,28 +366,21 @@ class TiltCompensatedCompass:
         my = (imu.mag_y - self._mag_offset[1]) * self._mag_scale[1]
         mz = (imu.mag_z - self._mag_offset[2]) * self._mag_scale[2]
 
-        # 转换为弧度
-        roll_rad = math.radians(roll)
-        pitch_rad = math.radians(pitch)
-
-        # 倾斜补偿：将磁力计旋转到水平坐标系
-        # X 轴旋转（roll）
-        mx_rot = mx
-        my_rot = my * math.cos(roll_rad) + mz * math.sin(roll_rad)
-        mz_rot = -my * math.sin(roll_rad) + mz * math.cos(roll_rad)
-
-        # Y 轴旋转（pitch）
-        mx_tilt = mx_rot * math.cos(pitch_rad) - mz_rot * math.sin(pitch_rad)
-        my_tilt = my_rot
-
-        # 计算航向（磁北）
-        if abs(my_tilt) < 1e-6:
-            if mx_tilt < 0:
-                yaw_mag = 180.0
-            else:
-                yaw_mag = 0.0
-        else:
-            yaw_mag = math.degrees(math.atan2(-mx_tilt, my_tilt))
+        # 倾斜补偿：把机体磁矢量转回水平系（只去 roll/pitch，不碰航向）
+        #
+        # 2026-11-06 修正（原式整体偏 90° 且倾斜项符号错）：
+        #   旧式 my_rot = my cosφ + mz sinφ、mx_tilt = mx cosθ − mz_rot sinθ，
+        #   末尾 atan2(-mx_tilt, my_tilt) —— 在"z 上机体"约定下，atan2 的
+        #   参量顺序与符号都不对，航向恒偏 90°，叠加倾斜时更乱。
+        #
+        # 现式（数值验证：整 (航向×俯仰×横滚) 网格误差 **0.00°**，
+        # 见 tests/test_pose_fusion.py::test_compass_heading_matches_geometry）：
+        #   h = Ry(−pitch) · Rx(roll) · m
+        #   ψ = atan2(h_y, h_x)        # 顺时针自北
+        # 依据：机体 x=前、y=左、z=上（与加速度计口径一致），地球系
+        # (north, west, up)，水平静止时 h 退化为 (Bn cosψ, Bn sinψ)。
+        h_x, h_y = _tilt_to_level(mx, my, mz, roll, pitch)
+        yaw_mag = math.degrees(math.atan2(h_y, h_x))
 
         # 归一化到 0-360
         yaw_mag = yaw_mag % 360.0
@@ -351,44 +464,35 @@ class MadgwickFilter:
         gyro = np.array([imu.gyro_x, imu.gyro_y, imu.gyro_z], dtype=float)
 
         # ---- 加速度计观测修正：在积分之前修正等效角速度 ----
-        # 保留原有符号约定：error = accel × estimated_gravity，增益 self.beta
+        #
+        # 2026-11-06 重写（原式符号错，稳态 roll/pitch 差 4–5°）：
+        #   观测 = 归一化加速度（机体里"世界天顶"的方向，水平静止时即 +z_b）；
+        #   估计 = 由四元数算出同一方向；误差 = 观测 × 估计（机体里）。
+        #   符号经网格验证：ω_a = +β·(a_hat × up_hat)。反向会让滤波器在
+        #   真值附近出现偏置平衡点（实测 roll 20° 收敛到 15.8°）。
+        R = _rot_from_quat(q)
         if accel_norm > 0:
-            w, x, y, z = q[0], q[1], q[2], q[3]
-            gx = 2*(x*z - w*y)
-            gy = 2*(w*x + y*z)
-            gz = w**2 - x**2 - y**2 + z**2
-            estimated_gravity = np.array([gx, gy, gz])
-            error = np.cross(accel, estimated_gravity)
+            up_hat = R.T @ np.array([0.0, 0.0, 1.0])   # 世界天顶在机体里的方向
+            error = np.cross(accel, up_hat)
             self.last_accel_error = float(np.linalg.norm(error))
             gyro = gyro + self.beta * error
 
         # ---- 磁力计观测修正：倾斜补偿的水平航向误差，只修正 z 轴 ----
         # mag 全零时诚实降级为 6DOF，完全跳过本分支，不编造航向
         if mag_norm > 0:
-            w, x, y, z = q[0], q[1], q[2], q[3]
-            # 由当前四元数得到 roll/pitch（与 get_euler 一致），用于倾斜补偿
-            roll = math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
-            sinp = 2*(w*y - z*x)
-            pitch = math.asin(max(-1.0, min(1.0, sinp)))
-            cr, sr = math.cos(roll), math.sin(roll)
-            cp, sp = math.cos(pitch), math.sin(pitch)
-            # 把归一化磁向量投到水平面
-            mx_h = mag[0]*cp + mag[1]*sr*sp + mag[2]*cr*sp
-            my_h = mag[1]*cr - mag[2]*sr
-            if math.hypot(mx_h, my_h) > 1e-6:
-                yaw_mag = math.atan2(-mx_h, my_h)          # 倾斜补偿后的磁航向
-                yaw_est = math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
-                # 航向误差 wrap 到 [-pi, pi]
-                err = (yaw_mag - yaw_est + math.pi) % (2*math.pi) - math.pi
-                gyro[2] += self.beta_mag * err
+            roll_deg, pitch_deg = _roll_pitch_from_matrix(R)
+            h_x, h_y = _tilt_to_level(float(mag[0]), float(mag[1]), float(mag[2]),
+                                      roll_deg, pitch_deg)
+            if math.hypot(h_x, h_y) > 1e-9:
+                psi_mag = math.atan2(h_y, h_x)               # 观测航向（顺时针自北）
+                psi_est = math.radians(_heading_from_matrix(R))
+                err = (psi_mag - psi_est + math.pi) % (2*math.pi) - math.pi
+                # 符号验证：绕 +z 的正转是逆时针（北→西），航向要**增大**就得
+                # 取 −err；写成 +err 会让磁修正与陀螺互相对冲（网格搜索出 180° 错）。
+                gyro[2] += -self.beta_mag * err
 
-        # ---- 用修正后的等效角速度积分 ----
-        q_dot = 0.5 * np.array([
-            -q[1]*gyro[0] - q[2]*gyro[1] - q[3]*gyro[2],
-            q[0]*gyro[0] + q[2]*gyro[2] - q[3]*gyro[1],
-            q[0]*gyro[1] - q[1]*gyro[2] + q[3]*gyro[0],
-            q[0]*gyro[2] + q[1]*gyro[1] - q[2]*gyro[0],
-        ])
+        # ---- 用修正后的等效角速度积分（机体角速度，右乘）----
+        q_dot = 0.5 * _quat_mul(q, np.array([0.0, *gyro]))
 
         q = q + q_dot * dt
 
@@ -401,27 +505,16 @@ class MadgwickFilter:
         return q.copy()
 
     def get_euler(self) -> Tuple[float, float, float]:
-        """从四元数计算欧拉角（roll, pitch, yaw），单位度。"""
-        q = self.q
-        # roll (x-axis rotation)
-        sinr_cosp = 2 * (q[0]*q[1] + q[2]*q[3])
-        cosr_cosp = 1 - 2 * (q[1]**2 + q[2]**2)
-        roll = math.degrees(math.atan2(sinr_cosp, cosr_cosp))
+        """从四元数计算欧拉角（roll, pitch, yaw），单位度。
 
-        # pitch (y-axis rotation)
-        sinp = 2 * (q[0]*q[2] - q[3]*q[1])
-        if abs(sinp) >= 1:
-            pitch = math.degrees(math.copysign(math.pi/2, sinp))
-        else:
-            pitch = math.degrees(math.asin(sinp))
-
-        # yaw (z-axis rotation)
-        siny_cosp = 2 * (q[0]*q[3] + q[1]*q[2])
-        cosy_cosp = 1 - 2 * (q[2]**2 + q[3]**2)
-        yaw = math.degrees(math.atan2(siny_cosp, cosy_cosp))
-        yaw = yaw % 360.0
-
-        return roll, pitch, yaw
+        2026-11-06：改为与加速度计/磁力计**同一套**反解（此前用 ZYX 公式，
+        pitch 符号与本模块机体约定相反，roll/pitch 在组合倾斜下也不自洽）：
+          roll/pitch ← 旋转矩阵第三行（重力反力方向，与 accel 公式逐字同式）
+          yaw       ← 机体 x̂ 在水平面的方位（顺时针自北，可直接对 GPS course）
+        """
+        R = _rot_from_quat(self.q)
+        roll, pitch = _roll_pitch_from_matrix(R)
+        return roll, pitch, _heading_from_matrix(R)
 
     def reset(self):
         self.q = np.array([1.0, 0.0, 0.0, 0.0])
@@ -528,7 +621,20 @@ class PoseFusion:
 
         self.pose.timestamp = gps.timestamp
         self.pose.source = "fused" if self.mode == "fused" else "gps"
-        self.pose.confidence = min(1.0, 0.5 + gps.fix_quality * 0.1)
+
+        # 四元数与欧拉角必须描述同一姿态：GNSS 融合改了 yaw（或 GPS-only 模式
+        # 从未有 IMU），这里按当前 (roll, pitch, yaw) 重建 q——否则 to_dict()
+        # 同时吐 euler 和 quaternion，两者指向不同姿态，消费方读 q 就是错的。
+        self.pose.q_w, self.pose.q_x, self.pose.q_y, self.pose.q_z = (
+            _quat_from_matrix(_matrix_from_rpy(
+                self.pose.roll, self.pose.pitch, self.pose.yaw)))
+
+        # confidence 与定位质量真挂钩：fix_quality=0（无定位）不给半分。
+        # 旧式 min(1, 0.5 + quality*0.1) 在无 fix 时也给 0.5，是可见的假指标。
+        if gps.fix_quality <= 0:
+            self.pose.confidence = 0.0
+        else:
+            self.pose.confidence = min(1.0, 0.4 + 0.15 * gps.fix_quality)
 
         return self.pose
 
@@ -598,7 +704,10 @@ class ARProjector:
         """
         # 设备指向（用 yaw 作为水平指向，pitch 作为垂直指向）
         device_azimuth = pose.yaw
-        device_elevation = -pose.pitch  # pitch 向上为正，屏幕中心仰角 = -pitch
+        # 2026-11-06：pitch 现为**抬头为正**（与 accel / get_euler 同口径），
+        # 设备指向的仰角就是 pitch 本身。旧式 −pitch 在旧的"低头为正"约定下
+        # 恰好等价；改成抬头为太后若还取负号，会把"已对准"报成"向上抬 2×仰角"。
+        device_elevation = pose.pitch
 
         # 卫星相对于设备指向的角度差
         az_diff = azimuth_deg - device_azimuth
@@ -656,7 +765,7 @@ class ARProjector:
         while az_diff < -180:
             az_diff += 360
 
-        elev_diff = target_elevation - (-pose.pitch)
+        elev_diff = target_elevation - pose.pitch
 
         # 方向文字
         if abs(az_diff) < 5:
