@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from typing import List, Optional
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QSize
+from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QSize, Signal
 from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QPalette, QFont,
 )
@@ -257,6 +258,10 @@ class FreqOrbitChart(QWidget):
 class NewSpacetimePanel(QWidget):
     """新时空差异化面板：AMR 调制识别 + 卫星过境时间线/授时 + 频率-轨道图。"""
 
+    # 后台刷新结果回到 GUI 线程（显式排队：worker 是普通 Python 线程，直接
+    # 调 GUI 会踩 Qt 的线程亲和性规则）。
+    refresh_finished = Signal(object)
+
     def __init__(self, parent: Optional[QWidget] = None, settings=None):
         super().__init__(parent)
         self.setObjectName("newSpacetimePanel")
@@ -276,8 +281,11 @@ class NewSpacetimePanel(QWidget):
 
         self._analyzing = False
         self._gnss_nmea: Optional[str] = None
-        # 过境刷新是同步阻塞调用：重入保护 + 加载期间按钮置灰，避免连点叠加
+        # 过境刷新：网络在后台线程，重入保护 + 按钮显式「更新中…」。
         self._refreshing = False
+        self._refresh_thread: Optional[threading.Thread] = None
+        self.refresh_finished.connect(self._on_refresh_result,
+                                      Qt.QueuedConnection)
         # 观测站「是否已配置」用显式状态位，不用坐标值当哨兵：
         # (0,0) 是几内亚湾的真实坐标，必须能正常算过境。None/False = 未配置。
         self._observer_configured = False
@@ -399,7 +407,7 @@ class NewSpacetimePanel(QWidget):
 
         # 刷新过境按钮
         self.refresh_btn = QPushButton("刷新过境")
-        self.refresh_btn.clicked.connect(self.refresh_passes)
+        self.refresh_btn.clicked.connect(self.refresh_passes_async)
         lay.addWidget(self.refresh_btn)
 
         # 筛选口径明示：低于峰值门的过境不会出现在表里（用户必须能看见这条规则）
@@ -599,48 +607,99 @@ class NewSpacetimePanel(QWidget):
         return (f"{head}（峰值低于该值的过境不列出；要列 {floor:g}–"
                 f"{min_elevation_deg:g}° 请打开「显示低仰角过境」）")
 
-    def refresh_passes(self) -> None:
-        """同步拉取 DEFAULT_SATELLITES 的 TLE 并计算过境 / 频率-轨道关系。
+    def _begin_refresh(self) -> None:
+        self._refreshing = True
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("更新中…")
 
-        会阻塞若干秒（TLE fetch 带超时），仅由按钮点击触发。阻塞期间按钮
-        置灰并拒绝重入，避免连点叠加网络请求。
+    def _end_refresh(self) -> None:
+        self._refreshing = False
+        self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("刷新过境")
+
+    def refresh_passes(self) -> None:
+        """同步计算过境（直接调用方/测试用；按钮走异步入口）。
+
         峰值筛选门读 settings.effective_pass_*（与天空图过境列表同一组入口）。
+        网络与计算都在本线程内完成——GUI 按钮不接这里，见
+        :meth:`refresh_passes_async`。
         """
         if self._refreshing:
             return
-        self._refreshing = True
-        self.refresh_btn.setEnabled(False)
+        self._begin_refresh()
         try:
-            self._run_refresh_passes()
+            inputs = self._snapshot_refresh_inputs()
+            self._apply_refresh_result(self._compute_refresh(inputs))
         finally:
-            self._refreshing = False
-            self.refresh_btn.setEnabled(True)
+            self._end_refresh()
 
-    def _run_refresh_passes(self) -> None:
-        # 每次刷新重读设置：设置面板点「应用」后立即调用本方法，必须生效。
+    def refresh_passes_async(self) -> None:
+        """按钮入口：TLE 抓取与过境计算放后台线程，GUI 线程不联网。
+
+        重入保护：刷新在跑时再次点击直接忽略；按钮显式「更新中…」。
+        结果经 ``refresh_finished`` 排队回 GUI 线程后再更新控件。
+        """
+        if self._refreshing:
+            return
+        self._begin_refresh()
+        inputs = self._snapshot_refresh_inputs()
+
+        def _work() -> None:
+            try:
+                result = self._compute_refresh(inputs)
+            except Exception as e:  # noqa: BLE001 - 必须带回 GUI 线程说明原因
+                result = {"error": f"{type(e).__name__}: {e}"}
+            self.refresh_finished.emit(result)
+
+        self._refresh_thread = threading.Thread(
+            target=_work, name="spacetime-pass-refresh", daemon=True)
+        self._refresh_thread.start()
+
+    def _on_refresh_result(self, result: dict) -> None:
+        try:
+            if result.get("error"):
+                self.passes_hint.setText(f"刷新失败：{result['error']}")
+                self.passes_hint.setVisible(True)
+                self._populate_passes([])
+                self.chart.set_data([])
+            else:
+                self._apply_refresh_result(result)
+        finally:
+            self._end_refresh()
+
+    def _snapshot_refresh_inputs(self) -> dict:
+        """GUI 线程里把设置/站址拍成纯数据：worker 不碰任何控件。"""
         settings = self._resolved_settings()
-        self._pass_min_elevation_deg = effective_pass_min_elevation_deg(settings)
-        self._pass_visibility_gate_deg = effective_pass_visibility_gate_deg(settings)
-        self._pass_show_low = effective_show_low_elevation_passes(settings)
-        self._pass_window_hours = effective_pass_window_hours(settings)
+        return {
+            "min_deg": effective_pass_min_elevation_deg(settings),
+            "gate": effective_pass_visibility_gate_deg(settings),
+            "show_low": effective_show_low_elevation_passes(settings),
+            "window_hours": effective_pass_window_hours(settings),
+            "lat": float(self.lat_spin.value()),
+            "lon": float(self.lon_spin.value()),
+            "alt_km": float(self.alt_spin.value()),
+            "observer_configured": bool(self._observer_configured),
+        }
+
+    def _compute_refresh(self, inputs: dict) -> dict:
+        """纯计算（可跑在后台线程）：抓 TLE、算过境、算频率-轨道散点。"""
         base_filter = self._pass_filter_text(
-            self._pass_min_elevation_deg,
-            self._pass_show_low,
-            self._pass_window_hours)
-        self.passes_filter_label.setText(base_filter)
-
-        lat = self.lat_spin.value()
-        lon = self.lon_spin.value()
-        alt_km = self.alt_spin.value()
-
+            inputs["min_deg"], inputs["show_low"], inputs["window_hours"])
+        out = {
+            "min_deg": inputs["min_deg"],
+            "show_low": inputs["show_low"],
+            "window_hours": inputs["window_hours"],
+            "filter_text": base_filter,
+            "passes": [],
+            "freq_points": [],
+            "passes_hint": None,
+        }
         # 观测站是过境的必要条件。判定用显式状态位：None/未配置才提示，
         # 绝不能拿 0.0 当哨兵（0.0/0.0 是合法站址）。未配置时不白跑网络请求。
-        if not self._observer_configured:
-            self.passes_hint.setText(
+        if not inputs["observer_configured"]:
+            out["passes_hint"] = (
                 "未配置观测站位置：请在纬度/经度输入框填写地面站坐标")
-            self._populate_passes([])
-            self.chart.set_data([])
-            return
+            return out
 
         # 拉 TLE（失败的卫星跳过，绝不伪造）
         sats: List[tuple] = []
@@ -674,41 +733,51 @@ class NewSpacetimePanel(QWidget):
             else:
                 text = ("未获取 TLE：抓取链路未记录失败码/原因（请查 TLE 源健康度与日志）；"
                         "建议：连接网络后重试或导入离线星历。")
-            self.passes_hint.setText(text)
-            self._populate_passes([])
-            self.chart.set_data([])
-            return
+            out["passes_hint"] = text
+            return out
 
-        gate = self._pass_visibility_gate_deg
+        gate = inputs["gate"]
         passes = self._engine.compute_passes(
-            observer_lat=lat, observer_lon=lon, observer_alt=alt_km,
-            satellites=sats, hours_ahead=float(self._pass_window_hours),
+            observer_lat=inputs["lat"], observer_lon=inputs["lon"],
+            observer_alt=inputs["alt_km"],
+            satellites=sats, hours_ahead=float(inputs["window_hours"]),
             min_elevation=gate, step_sec=PASS_COARSE_STEP_S,
         )
         if not passes:
             # 有 TLE 但确实没有过境：别沿用上一轮"没网络"的旧文案
-            self.passes_hint.setText(
-                f"未来 {self._pass_window_hours:g} 小时内无过境"
+            out["passes_hint"] = (
+                f"未来 {inputs['window_hours']:g} 小时内无过境"
                 f"（门限 {gate:g}°"
-                + ("，含低仰角" if self._pass_show_low else "")
-                + f"，窗口 {self._pass_window_hours:g} 小时）")
-        self._populate_passes(passes)
+                + ("，含低仰角" if inputs["show_low"] else "")
+                + f"，窗口 {inputs['window_hours']:g} 小时）")
+        out["passes"] = passes
 
         # 站址与 TLE 的疑问必须进提示区（表格与 AI 结果已各自留痕，但用户
         # 最先看的是这一行；只写日志/返回字段等于没提示）。
         station_ev = trust_for_calculation(
-            station_from_user(lat, lon, alt_km * 1000.0))
+            station_from_user(inputs["lat"], inputs["lon"],
+                              inputs["alt_km"] * 1000.0))
         lines = []
         if passes:
             lines.append(self._pass_time_basis_line(passes))
         lines.extend(self._pass_warning_lines(passes, station_ev))
         if lines:
-            self.passes_filter_label.setText(
-                base_filter + "\n" + "\n".join(lines))
+            out["filter_text"] = base_filter + "\n" + "\n".join(lines)
 
         # 顺手刷新频率-轨道散点（无频率数据时频率为 0）
-        fo_points = self._engine.compute_freq_orbit(sats)
-        self.chart.set_data(fo_points)
+        out["freq_points"] = self._engine.compute_freq_orbit(sats)
+        return out
+
+    def _apply_refresh_result(self, result: dict) -> None:
+        """GUI 线程：把计算结果落到控件（文案与表格都只在这里更新）。"""
+        self._pass_min_elevation_deg = result["min_deg"]
+        self._pass_show_low = result["show_low"]
+        self._pass_window_hours = result["window_hours"]
+        self.passes_filter_label.setText(result["filter_text"])
+        if result.get("passes_hint"):
+            self.passes_hint.setText(result["passes_hint"])
+        self._populate_passes(result["passes"])
+        self.chart.set_data(result["freq_points"])
 
     def _pass_time_basis_line(self, passes: List[SatellitePass]) -> str:
         """标明「这些时刻是怎么算出来的」——来源与精度。

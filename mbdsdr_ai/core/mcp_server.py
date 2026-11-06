@@ -1525,7 +1525,7 @@ def _ndarray_to_json(arr: Any) -> Any:
 #     不假装成功、不返回半截结果、不让主流程崩。
 # 阈值 / 预览长度 / 落盘目录都是模块级常量，可被测试注入覆盖。
 # ======================================================================
-#: 序列化结果超过该字符数即落盘（与 desktop tool_output_max_chars=4000 对齐；
+#: 序列化结果超过该字符数即落盘（与 AgentConfig.tool_output_max_chars 同量级；
 #: 严格大于才 spill，等于阈值仍原样返回）。可被测试 monkeypatch 注入。
 TOOL_RESULT_SPILL_THRESHOLD = 4000
 #: preview_head / preview_tail 各取 JSON 串头/尾的字符数上限

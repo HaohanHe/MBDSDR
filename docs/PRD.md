@@ -24,7 +24,7 @@
 
 **P0 规模**：11 条。按**当前代码**逐条复核后为：**有 4 条、半有 7 条、无 0 条**。两条主轴的主体已经落地；剩下的 7 条半有集中在站址单一来源、断源状态、录音状态机、真模型协商、收星编排、诚实性反例与动态 UI 边界。`docs/interaction-flows.md` 按真实用户路径审出 **30 条缺陷（阻断 2 / 严重 15 / 一般 10 / 观感 3）**；其中与 P0 相关的 23 条（B1/B2、S1–S15、M2/M4/M5/M10、L1/L3）逐条工单化，见 [PRD-现状对照.md](PRD-现状对照.md) §2。
 
-> 复核口径提醒：审计文档与代码存在时间差。当前代码里 **B1、S2、S3、S5、S13、S15 已修**（详见对照表"现状"列），全星表 UI 也已接线（`desktop/rf_sky_view.py:3268-3292/3320-3345`）；`docs/star-catalog.md` §7 第 7 条仍写"UI 接线未做"，属**文档滞后**，以代码为准并应在该文档补记。
+> 复核口径提醒：审计文档与代码存在时间差。当前代码里 **B1、S2、S3、S5、S13、S15 改动在位**（详见对照表"现状"列），全星表 UI 也已接线（`desktop/rf_sky_view.py:3268-3292/3320-3345`）；`docs/star-catalog.md` §7 第 7 条仍写"UI 接线未做"，属**文档滞后**，以代码为准并应在该文档补记。
 
 **三条硬约束（任何功能不得违反）**
 
@@ -309,7 +309,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 4. 拉远到 180°：看到全天暗星与地平线；拖拽/双击接管摄像机。
 5. 输入或点选 NOAA 19：信息卡给出 az/el、距离、过境窗口、调谐频点；过境面板给出下一次 rise（秒级）与峰值仰角。
 6. 把时间拨到 ×300：轨迹按模拟时刻重算；锁定目标逐帧直贴并提示「快转下平滑跟随跟不上，已改为逐帧直贴」。
-7. 时间跳转 +10 分钟：若目标仍在地平线上，继续锁定并直接贴住；已落地则诚实解锁并说明。
+7. 时间跳转 +10 分钟：若目标仍在地平线上，继续锁定并直接贴住；若目标落到地平线下则诚实解锁并说明。
 8. 点「📡 调到该星」：链路按多普勒校正调谐（或 AI 协商后执行）；HUD 两行常驻显示视角/调谐状态。
 
 **失败怎么表现（必须可演示）**
@@ -419,7 +419,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
   - AC-03.2 跳时后目标落地必解锁；仍在地平线上必继续锁定，位置差 ≤0.05°（独立 SGP4 对拍）。
   - AC-03.3 暂停后连续 10 帧模拟时刻不变。
   - AC-03.4 所有时间输入测试注入固定时刻；`tests/test_time_input_guard.py` 绿。
-- **现状**：有｜证据：`mbdsdr_ai/new_spacetime.py:142-190`（`set_rate` 含 rate=0 暂停与负值倒流）；`desktop/rf_sky_view.py:1702-1703`（`_time_rate` 读取）、`:6002-6040`（倍率按钮与"倍率=模拟时间推进速度，不是帧率"文案）、`:6101-6128`（`_set_rate`）、`:1987`（`notify_time_jump` 跳时）；`docs/time-source.md`（18 个场景审计 + 14 条违反项已修）；`docs/limitations-register.md` L32。
+- **现状**：有｜证据：`mbdsdr_ai/new_spacetime.py:142-190`（`set_rate` 含 rate=0 暂停与负值倒流）；`desktop/rf_sky_view.py:1702-1703`（`_time_rate` 读取）、`:6002-6040`（倍率按钮与"倍率=模拟时间推进速度，不是帧率"文案）、`:6101-6128`（`_set_rate`）、`:1987`（`notify_time_jump` 跳时）；`docs/time-source.md`（18 个场景审计 + 14 条违反项处置见该文档）；`docs/limitations-register.md` L32。
 - **依赖**：无。
 
 ### P0-04 目标锁定：摄像机环 + 调谐环
@@ -433,7 +433,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
   - AC-04.4 反选/站址失效：双环收口，原因可读。
   - AC-04.5 外部停止（启动失败/过境结束）回写 `set_tracking_checked(False)`，不得出现单边假状态。
   - AC-04.6 断开设备后跟踪定时器停止；`frequency_hz` 不再被多普勒值改写（S15）。
-- **现状**：有｜证据：`docs/limitations-register.md` L31；`desktop/rf_sky_view.py:1855`（`loop_state_lines` 四组合文案）、`:2220`（`_on_station_lost` 站址失效收环）、`:2767-2777`（`_stop_track_ui` / `set_tracking_checked`）、`:1987`（跳时后重锁）；`tests/test_sky_dual_loops.py`。**S15 已修**：`desktop/main_window.py:3299-3305` 在 `_teardown_connection` 内先停跟踪再断硬件，并注释说明"跟踪环会继续写频"。证据强度：仅自测（无真机断连探针复跑）。
+- **现状**：有｜证据：`docs/limitations-register.md` L31；`desktop/rf_sky_view.py:1855`（`loop_state_lines` 四组合文案）、`:2220`（`_on_station_lost` 站址失效收环）、`:2767-2777`（`_stop_track_ui` / `set_tracking_checked`）、`:1987`（跳时后重锁）；`tests/test_sky_dual_loops.py`。**S15 改动在位**：`desktop/main_window.py:3299-3305` 在 `_teardown_connection` 内先停跟踪再断硬件，并注释说明"跟踪环会继续写频"。证据强度：仅自测（无真机断连探针复跑）。
 - **依赖**：P0-05（站址）、P0-03（时间）。
 
 ### P0-05 观测站：单一来源、可失效、不猜坐标
@@ -478,7 +478,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
   - AC-06.7 拔线/连接失败：依赖控件禁用 + 状态「已断开（原因）」+ 重连入口；频谱不保留旧帧冒充实时（S8/S9）。
   - AC-06.8 流水线重建后用户 VFO 数量与解调模式不变（S3）。
   - AC-06.9 首启时引导横幅在当前页可见（S1）。
-- **现状**：半有｜证据：`desktop/spectrum_widget.py:872`（`tune_mode` 默认 `center`）、`:1818-1825`（中心/VFO 切换按钮）、`:1939-1941`（切换槽）、`:915-972`（1/2/5 刻度与自动单位）、`:438-528`（双通道峰值）、`:1406-1432`（峰值标签避让）；`docs/reference-mechanisms.md` P1–P5、P9–P11、P14。**已修**：B1（`main_window.py:2637-2639` 建新后端前先 `_teardown_connection`，失败回滚 `:2662-2664`）；S3（`:4149` 注释与实现均为"后端 `status.demod_mode` 只读、不覆盖用户选择"，`:4472-4477` 只解绑 DSP 保留用户 VFO）。**仍未收口**：S1 首启引导仍挂在频谱页（默认页 `:1003` 天空模式；横幅 `:1038-1047`；频谱页 `:1069`）；S8/S9 连接失败/掉线只改三个标签（`:3338-3349`），读线程仍把 `None` 当暂时无数据无限重试（`receive_pipeline.py:87-94`）。证据强度：仅自测（本轮无真机；见 L1/L3）。
+- **现状**：半有｜证据：`desktop/spectrum_widget.py:872`（`tune_mode` 默认 `center`）、`:1818-1825`（中心/VFO 切换按钮）、`:1939-1941`（切换槽）、`:915-972`（1/2/5 刻度与自动单位）、`:438-528`（双通道峰值）、`:1406-1432`（峰值标签避让）；`docs/reference-mechanisms.md` P1–P5、P9–P11、P14。**改动在位**：B1（`main_window.py:2637-2639` 建新后端前先 `_teardown_connection`，失败回滚 `:2662-2664`）；S3（`:4149` 注释与实现均为"后端 `status.demod_mode` 只读、不覆盖用户选择"，`:4472-4477` 只解绑 DSP 保留用户 VFO）。**仍未收口**：S1 首启引导仍挂在频谱页（默认页 `:1003` 天空模式；横幅 `:1038-1047`；频谱页 `:1069`）；S8/S9 连接失败/掉线只改三个标签（`:3338-3349`），读线程仍把 `None` 当暂时无数据无限重试（`receive_pipeline.py:87-94`）。证据强度：仅自测（本轮无真机；见 L1/L3）。
 - **依赖**：P0-07（录音）、P0-10（空态话术）。
 
 ### P0-07 录音、回放与录音库
@@ -504,7 +504,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
   - AC-07.7 写盘失败 → 停录 + 报告已写字节；内存缓冲不得冒充落盘（S7）。
   - AC-07.8 12 万样本以上文件加载不阻塞 UI（S6）。
   - AC-07.9 同一秒起录两次 → 两个文件，不覆盖（L3）。
-- **现状**：半有｜证据：`desktop/main_window.py:4950-5037`（`_start_recording`，流式写盘）、`:5039-5085`（`_stop_recording` 写 sidecar）、`:6044-6120`（`_replay_recording`）；`mbdsdr_ai/baseband_io.py:172-210`（`load_iq`）；`mbdsdr_ai/recording_library.py` 存在但 `desktop/` 无引用；`docs/limitations-register.md` L10（迁移/回收站/损坏索引**仅自测**）。**已修**：S5（开始录音先停回放 `:4953-4956`；开始回放先落盘停录 `:6085-6091`）。**仍未收口**：S4 录音中改率仍写同一文件（`:3608-3619`，`load_iq` 不读 `sample_rate_changes`）；S6 `load_iq` 仍返回 `iq.tolist()`（`baseband_io.py:202`），回放在 UI 线程同步读（`:6066/6075`）；S7 流打开失败仍退回内存缓冲（`:5014-5018`）；M4 无录音库列表入口；M5 启动不扫描未完成 sidecar；L3 文件名仍到秒（`:5002-5003`）。证据强度：仅自测。
+- **现状**：半有｜证据：`desktop/main_window.py:4950-5037`（`_start_recording`，流式写盘）、`:5039-5085`（`_stop_recording` 写 sidecar）、`:6044-6120`（`_replay_recording`）；`mbdsdr_ai/baseband_io.py:172-210`（`load_iq`）；`mbdsdr_ai/recording_library.py` 存在但 `desktop/` 无引用；`docs/limitations-register.md` L10（迁移/回收站/损坏索引**仅自测**）。**改动在位**：S5（开始录音先停回放 `:4953-4956`；开始回放先落盘停录 `:6085-6091`）。**仍未收口**：S4 录音中改率仍写同一文件（`:3608-3619`，`load_iq` 不读 `sample_rate_changes`）；S6 `load_iq` 仍返回 `iq.tolist()`（`baseband_io.py:202`），回放在 UI 线程同步读（`:6066/6075`）；S7 流打开失败仍退回内存缓冲（`:5014-5018`）；M4 无录音库列表入口；M5 启动不扫描未完成 sidecar；L3 文件名仍到秒（`:5002-5003`）。证据强度：仅自测。
 - **依赖**：P0-06；P1 真实库副本。
 
 ### P0-08 AI 能力协商
@@ -541,7 +541,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
   - AC-09.6 模型调用写工具默认拦截；界面弹窗确认后才下发；模型传入的 `arm_manual`/`confirmed` 必须在入口剥离且不参与放行（S13）。
   - AC-09.7 工具失败时界面频率/模式/音量不变（S11）。
   - AC-09.8 并发送出的两条命令只有一条执行，另一条排队或拒绝（S10）。
-- **现状**：半有｜证据：动作总线 `desktop/main_window.py:1330-1340` 与执行器 `:1341-1402`（`TARGET_MISMATCH`/`UNAVAILABLE`/`REFUSED` 分支）；工具面 `sdr_tools.py` sky 系列 8 个（`docs/limitations-register.md` 附 A）。**S13 已修**：写工具入口先 `args.pop(GATE_PARAM)`（`:3915`、`:3961`），再经 `_request_human_approval`（`:3875-3900` 后台线程投递 UI 弹窗、超时=拒绝）才下发。**仍未收口**：S11 旧链路 `_on_ai_tool_call` 仍在下发前先 `_sync_ui_for_tool`（`:3968`；硬件链路已改为成功后同步 `:3929-3931`）；S10 星象仪命令条直调 `ai_panel._call_ai`（`:3450-3455`），`_call_ai` 入口无忙锁（`ai_panel.py:659-661`）。真人机联调未做（L1/L2/L13/L14）。证据强度：仅自测。
+- **现状**：半有｜证据：动作总线 `desktop/main_window.py:1330-1340` 与执行器 `:1341-1402`（`TARGET_MISMATCH`/`UNAVAILABLE`/`REFUSED` 分支）；工具面 `sdr_tools.py` sky 系列 8 个（`docs/limitations-register.md` 附 A）。**S13 改动在位**：写工具入口先 `args.pop(GATE_PARAM)`（`:3915`、`:3961`），再经 `_request_human_approval`（`:3875-3900` 后台线程投递 UI 弹窗、超时=拒绝）才下发。**仍未收口**：S11 旧链路 `_on_ai_tool_call` 仍在下发前先 `_sync_ui_for_tool`（`:3968`；硬件链路现为成功后同步 `:3929-3931`）；S10 星象仪命令条直调 `ai_panel._call_ai`（`:3450-3455`），`_call_ai` 入口无忙锁（`ai_panel.py:659-661`）。真人机联调未做（L1/L2/L13/L14）。证据强度：仅自测。
 - **依赖**：P0-08；L18/L19；P0-04。
 
 ### P0-10 真实性与诚实性基线
@@ -549,7 +549,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 - **用户故事**：作为用户/评审者，我要能验证"屏幕上说的和真的一样"，而不是相信文案。
 - **行为规则**：完整规格见 §8。
 - **验收标准**：AC-10.1 ~ AC-10.12，逐条对应 §8.2 的 H-1 ~ H-12。
-- **现状**：半有｜证据：错误码单一来源 `docs/error-catalog.md` + `tests/test_error_catalog_guard.py`；离线 A/B 二分 `docs/offline-behavior.md`（联网功能 A/B 判定、9 项违反已修）；读数单点格式化与半格对拍 `docs/limitations-register.md` L30 + `tests/test_sky_readouts.py`（21 条）。**S2 已修**：损坏配置先备份再返回（`desktop/main_window.py:6995-7016`、`:7024-7033`），保存走临时文件 + `os.replace`（`:6956`），且"损坏且备份失败"时跳过保存（`:6939-6943`）。**仍未收口**：S12 缺 `freq_mhz` 时 UI 仍回落到 `tokens().AI["demo_freq_mhz"]`（`:3940-3943`）；H-3（截断/限幅）与 H-8（时间基准）未全绿。证据强度：部分真机（RTL-SDR/外部样本）、部分仅自测。
+- **现状**：半有｜证据：错误码单一来源 `docs/error-catalog.md` + `tests/test_error_catalog_guard.py`；离线 A/B 二分 `docs/offline-behavior.md`（联网功能 A/B 判定、9 项违反项处置见该文档）；读数单点格式化与半格对拍 `docs/limitations-register.md` L30 + `tests/test_sky_readouts.py`（21 条）。**S2 改动在位**：损坏配置先备份再返回（`desktop/main_window.py:6995-7016`、`:7024-7033`），保存走临时文件 + `os.replace`（`:6956`），且"损坏且备份失败"时跳过保存（`:6939-6943`）。**仍未收口**：S12 缺 `freq_mhz` 时 UI 仍回落到 `tokens().AI["demo_freq_mhz"]`（`:3940-3943`）；H-3（截断/限幅）与 H-8（时间基准）未全绿。证据强度：部分真机（RTL-SDR/外部样本）、部分仅自测。
 - **依赖**：全功能线。
 
 ### P0-11 动态 UI 的边界
@@ -589,7 +589,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | P2-02 | JSON 导览（观测会话） | 步骤 `select/goto/wait/set_rate/label`；可中断可回放；不引入脚本语言 | 无（S11/I5） |
 | P2-03 | 受晒驱动的光学可见性 | 只有 `sunlit=True` 且仰角够高才标"可见"；未知不标 | 无 |
 | P2-04 | 多显示器/窗口状态恢复 | 布局、Dock、DPI、显示器变化后恢复正确 | 半有 |
-| P2-05 | 打包与许可交付 | 星表已进 wheel/sdist 并有包内断言（`test_star_catalog_packaging.py`）；再分发需保留 HYG 署名与 CC BY-SA 声明；第三方许可清单 [TBD] | 有（`star-catalog.md` §7 第 10 条：已修） |
+| P2-05 | 打包与许可交付 | 星表已进 wheel/sdist 并有包内断言（`test_star_catalog_packaging.py`）；再分发需保留 HYG 署名与 CC BY-SA 声明；第三方许可清单 [TBD] | 有（`star-catalog.md` §7 第 10 条：改动在位） |
 | P2-06 | 只读远程视图 | 手机/浏览器只读天空与状态；不上传录音 | 无 |
 
 ---
@@ -1009,7 +1009,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 | 工具面总账 | `docs/tool-availability.md` | 495 工具、404/91、五组补齐、0 项虚构 |
 | 参考机制 | `docs/reference-mechanisms.md` | 34 条机制与"不抄"清单 |
 | 星表 | `docs/star-catalog.md` | HYG 83,479、许可、性能；UI 已接线（§7 第 7 条"未接线"待补记） |
-| 时间源 | `docs/time-source.md` | 18 场景、14 条违反已修、测试纪律 |
+| 时间源 | `docs/time-source.md` | 18 场景、14 条违反项处置、测试纪律 |
 | 离线行为 | `docs/offline-behavior.md` | 联网功能 A/B 判定与 9 项修复 |
 | 错误话术 | `docs/error-catalog.md` | 稳定错误码与"下一步建议" |
 | 交互审计 | `docs/interaction-audit.md` | 127 动作、死按钮 0、置灰理由 |

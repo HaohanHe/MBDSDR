@@ -173,20 +173,20 @@
 
 | 机制 | 参考位置（见 §2 对应行） | 我们现状 | 结论 |
 |---|---|---|---|
-| 摄像机锁定 | S1（`StelMovementMgr.cpp:319-321`；`navigation.c:87-109`） | `desktop/rf_sky_view.py:1351-1359` | 已对齐 |
+| 摄像机锁定 | S1（`StelMovementMgr.cpp:319-321`；`navigation.c:87-109`） | `desktop/rf_sky_view.py:1351-1359` | 实现位置：`desktop/rf_sky_view.py:1351-1359`（语义可对照） |
 | goto 飞行路径 | S2（`StelMovementMgr.cpp:1482-1527`；`navigation.c:44-82`） | `mbdsdr_ai/sky_interaction.py:108-140` | 未实现（建议开工） |
 | 天顶奇异 | S3（`StelMovementMgr.cpp:1494-1521`） | `sky_interaction.py:171-175` | 未实现 |
 | 消光 | S4（`RefractionExtinction.cpp:35-61`） | `skyengine/stars.py:196-207`（`k/sin`） | 部分对齐（双份公式，见 §14） |
 | 折射 | S5（`RefractionExtinction.cpp:64-101`） | `celestial_geometry.py:402-405` 无折射 | 未实现（默认关） |
 | 标签避让 | S6（`labels.c:128-198`） | `rf_sky_view.py:357-376` | 部分对齐（无淡入淡出/面积阈值） |
 | 标签优先级 | S7（`labels.c:136-154`） | `rf_sky_view.py:3147-3150` | 有意不抄（现分级已够） |
-| 星等→半径 | S8（`StelSkyDrawer.cpp:403-417`） | `skyengine/stars.py:150-187` | 已对齐 |
-| 视大小符号 | S9（`Planet.cpp:3904`） | `rf_sky_view.py:4093-4116` | 已对齐 |
-| 地景 | S10（`Landscape.cpp:1030-1046`） | `rf_sky_view.py:3323-3327` | 已对齐 |
+| 星等→半径 | S8（`StelSkyDrawer.cpp:403-417`） | `skyengine/stars.py:150-187` | 实现位置：`skyengine/stars.py:150-187`（语义可对照） |
+| 视大小符号 | S9（`Planet.cpp:3904`） | `rf_sky_view.py:4093-4116` | 实现位置：`rf_sky_view.py:4093-4116`（语义可对照） |
+| 地景 | S10（`Landscape.cpp:1030-1046`） | `rf_sky_view.py:3323-3327` | 实现位置：`rf_sky_view.py:3323-3327`（语义可对照） |
 | 脚本导览 | S11（`messier_marathon.ssc:27-51`；`StelScriptMgr.cpp:927-936`） | 无 | 未实现 |
-| 卫星地影 | S12（`gpredict/src/sat-vis.c:82-105`） | **已补齐**：`mbdsdr_ai/sat_illumination.py:204-303`；`sat_passes.py:441-446` | 已对齐（本轮更正 S12） |
+| 卫星地影 | S12（`gpredict/src/sat-vis.c:82-105`） | 实现：`mbdsdr_ai/sat_illumination.py:204-303`；`sat_passes.py:441-446` | 实现位置：`mbdsdr_ai/sat_illumination.py:204-303`（本轮补正 S12） |
 | 卫星极图 | S13（`gtk-polar-view.c:202-246`） | `rf_sky_view.py:2841` 兼容接口 | 有意不抄（仅小部件可用） |
-| 时间倍率 | S14（`StelCore.cpp:1386-1413`） | `new_spacetime.py:142-190` | 已对齐 |
+| 时间倍率 | S14（`StelCore.cpp:1386-1413`） | `new_spacetime.py:142-190` | 实现位置：`new_spacetime.py:142-190`（语义可对照） |
 
 **S12 更正细节**：上一轮记为「无」，本轮核实已实现。`sat_illumination.py:78-80` 定义 `sunlit/umbra/penumbra` 三态，`:204` 起为圆锥影判定；`sat_passes.py:441-446` 明确注明「与 gpredict `Sat_Eclipsed` 同构」，并把半影按受晒处理以保持二值语义。与 gpredict 的差异只有一处：gpredict 还叠加「太阳高度 ≤ 晨昏门限」的肉眼可见判定（`sat-vis.c:92-105`），**有意不抄**——本产品不做肉眼观测预报，只回答卫星是否受晒。
 
@@ -196,7 +196,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | # | 机制 | 参考位置 | 我们对应 | 差异一句话 | 结论 |
 |---|---|---|---|---|---|
-| P16 | 瀑布历史环形缓冲（可调深度、回看重绘） | `sdrpp/core/src/gui/widgets/waterfall.cpp:611-616`（`((i+currentFFTLine)%waterfallHeight)`）；`waterfall.h:284-288`（`rawFFTs` 裸指针 + `latestFFT`/`latestFFTHold`） | `desktop/spectrum_widget.py:239-243`（`_wf_buf/_wf_head/_wf_count`），`:302-346`（按行回看 + `set_waterfall_depth` 后重建） | 同一环形缓冲语义；SDR++ 用手工裸指针与 `recursive_mutex`，我们用 numpy 定长数组 | 已对齐；**不抄**其手工缓冲/递归锁（见 §14） |
+| P16 | 瀑布历史环形缓冲（可调深度、回看重绘） | `sdrpp/core/src/gui/widgets/waterfall.cpp:611-616`（`((i+currentFFTLine)%waterfallHeight)`）；`waterfall.h:284-288`（`rawFFTs` 裸指针 + `latestFFT`/`latestFFTHold`） | `desktop/spectrum_widget.py:239-243`（`_wf_buf/_wf_head/_wf_count`），`:302-346`（按行回看 + `set_waterfall_depth` 后重建） | 同一环形缓冲语义；SDR++ 用手工裸指针与 `recursive_mutex`，我们用 numpy 定长数组 | 实现位置：`desktop/spectrum_widget.py:239-243`；**不抄**其手工缓冲/递归锁（见 §14） |
 
 **频谱侧不再新增行**：P1–P15 的参考位置与差异已在本文件 §3 逐条钉过，且本轮复核代码未漂移（`desktop/spectrum_widget.py` 行号仍落在原区间）。
 
@@ -206,13 +206,13 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | # | 机制 | 参考位置 | 我们对应实现 | 差异一句话 | 结论 |
 |---|---|---|---|---|---|
-| H1 | 统一信号源注册表（注册/选择/注销） | `sdrpp/core/src/signal_path/source.h:9-31`；`source.cpp:10-60` | `mbdsdr_ai/device_manager.py:367`（`DeviceManager`）、`:492-528`（`list_devices`）、`:530`（`open`）；`mbdsdr_ai/hal.py:49-59`（`DeviceCapability`） | SDR++ 用函数指针 handler + 全局 selected；我们 `open()` 返回可替换后端对象，失败抛异常 | 已对齐（抽象等价）；不抄全局单例选择 |
+| H1 | 统一信号源注册表（注册/选择/注销） | `sdrpp/core/src/signal_path/source.h:9-31`；`source.cpp:10-60` | `mbdsdr_ai/device_manager.py:367`（`DeviceManager`）、`:492-528`（`list_devices`）、`:530`（`open`）；`mbdsdr_ai/hal.py:49-59`（`DeviceCapability`） | SDR++ 用函数指针 handler + 全局 selected；我们 `open()` 返回可替换后端对象，失败抛异常 | 实现位置：`mbdsdr_ai/device_manager.py:367`（抽象等价）；不抄全局单例选择 |
 | H2 | 注销当前源时回落 `nullSource` | `sdrpp/core/src/signal_path/source.cpp:19-33` | `device_manager.py:530`（打开失败抛错）+ `device_watchdog.py:51-186`（自动重连/状态机） | SDR++ 设备消失后静默换成空源继续跑；我们把「设备消失」当错误上报并重连 | **有意不抄**：空源会让 UI 继续显示「在接收」而实际无数据，属于假阳性；本项目选择失败可见 |
-| H3 | 设备枚举与刷新 | `sdrpp/source_modules/rtl_sdr_source/src/main.cpp:117-122`（`refresh` 只由菜单触发）、`:164-177`（`selectFirst`）、`:394-395`（Refresh 按钮） | `device_manager.py:608-640`（`start_monitor` 后台轮询，回调 `added/removed`） | SDR++ 手动刷新；我们 2s 轮询热插拔 | 已对齐并超出（具体差异：自动轮询 vs 手动按钮） |
-| H4 | 单设备打开失败隔离 | `sdrpp/source_modules/rtl_sdr_source/src/main.cpp:185-195`（`rtlsdr_open` 失败仅 `flog::error`，不崩） | `device_manager.py:530-600`（逐设备 open/异常）；`device_watchdog.py` 重连 | 同等隔离；我们多一层自动重连 | 已对齐 |
+| H3 | 设备枚举与刷新 | `sdrpp/source_modules/rtl_sdr_source/src/main.cpp:117-122`（`refresh` 只由菜单触发）、`:164-177`（`selectFirst`）、`:394-395`（Refresh 按钮） | `device_manager.py:608-640`（`start_monitor` 后台轮询，回调 `added/removed`） | SDR++ 手动刷新；我们 2s 轮询热插拔 | 实现位置：`device_manager.py:608-640`（具体差异：自动轮询 vs 手动按钮） |
+| H4 | 单设备打开失败隔离 | `sdrpp/source_modules/rtl_sdr_source/src/main.cpp:185-195`（`rtlsdr_open` 失败仅 `flog::error`，不崩） | `device_manager.py:530-600`（逐设备 open/异常）；`device_watchdog.py` 重连 | 同等隔离；我们多一层自动重连 | 实现位置：`device_manager.py:530-600` |
 | H5 | 设备错误要求重启应用 | `gqrx/src/applications/gqrx/mainwindow.cpp:602-611`（「reconnect … and restart gqrx」）；`:364`（仅启动时 `getDeviceList`） | `device_watchdog.py:106-160`（断线→重连循环） | 上游把恢复推给用户；我们自动重连 | **有意不抄**：要求重启是可用性缺陷；仅当设备被物理占用时保留「请重插」提示 |
 | H6 | USB attach/detach 事件 + 补扫 | `onair/android/app/src/main/java/io/github/adswill/onair/usb/UsbRadioController.kt:68`（`rescan`）、`:104-107`（detach→`onLost`） | `device_manager.py:608-640` 轮询 | 事件驱动 vs 轮询 | **有意不抄**：Android USB/JNI 事件模型不适用于 Windows/SoapySDR；轮询已覆盖同一语义 |
-| H7 | 设备表 + 模式枚举 + 歧义抛错 | `satdump/src-core/dsp/device/dev.h:11-21`（`DeviceInfo`）、`:30-36`（`MODE_SINGLE_RX/TX/RX_TX`）；`dev.cpp:9-31`（`getDeviceList`，>1 实例即 `throw "Got more than one device instance"`） | `device_manager.py:58-81`（`DeviceInfo.device_key` = `driver:serial` 去重）；`hal.py:49-59`（能力位） | 上游按静态 mode 枚举；我们按能力位 + 运行时 `tx_capability()["verified"]` | 已对齐（歧义同样失败）；不抄静态 mode 假设 |
+| H7 | 设备表 + 模式枚举 + 歧义抛错 | `satdump/src-core/dsp/device/dev.h:11-21`（`DeviceInfo`）、`:30-36`（`MODE_SINGLE_RX/TX/RX_TX`）；`dev.cpp:9-31`（`getDeviceList`，>1 实例即 `throw "Got more than one device instance"`） | `device_manager.py:58-81`（`DeviceInfo.device_key` = `driver:serial` 去重）；`hal.py:49-59`（能力位） | 上游按静态 mode 枚举；我们按能力位 + 运行时 `tx_capability()["verified"]` | 实现位置：`device_manager.py:58-81`（歧义同样失败）；不抄静态 mode 假设 |
 | H8 | `DeviceInfo` 相等性比较 | `satdump/src-core/dsp/device/dev.h:18`（`(name == b.type)`，应为 `b.name`） | `device_manager.py:58-81` 用 `device_key` | 上游实现缺陷：名字与类型错位比较 | **有意不抄**（上游 bug，去重/判重会误判） |
 
 ---
@@ -221,13 +221,13 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | # | 机制 | 参考位置 | 我们对应实现 | 差异一句话 | 结论 |
 |---|---|---|---|---|---|
-| D1 | CCSDS 卷积+RS 解码链的质量门与统计 | `satdump/src-core/pipeline/modules/ccsds/module_ccsds_conv_concat_decoder.cpp:105-118`（`viterbi_ber_thresold`/`outsync` 参数）、`:180-196`（RS 每块 `errors[i]==-1` 即判帧无效）、`:202-213`（`viterbi_ber`/`lock`/`deframer_state` 统计） | `mbdsdr_ai/lrpt_fec.py:298-350`（跳 ASM→解扰→4 路解交织→RS→4 块全可纠才有效）；`lrpt_pipeline.py:37-45`（`sync_hamming`/`rs_errors`） | 帧有效性门已对齐；上游额外暴露 Viterbi BER/锁态/定界状态，我们只有同步汉明距离与每块纠错数 | **部分对齐 / 未实现**（建议补 stats，不改解码算法） |
+| D1 | CCSDS 卷积+RS 解码链的质量门与统计 | `satdump/src-core/pipeline/modules/ccsds/module_ccsds_conv_concat_decoder.cpp:105-118`（`viterbi_ber_thresold`/`outsync` 参数）、`:180-196`（RS 每块 `errors[i]==-1` 即判帧无效）、`:202-213`（`viterbi_ber`/`lock`/`deframer_state` 统计） | `mbdsdr_ai/lrpt_fec.py:298-350`（跳 ASM→解扰→4 路解交织→RS→4 块全可纠才有效）；`lrpt_pipeline.py:37-45`（`sync_hamming`/`rs_errors`） | 帧有效性门位置可对照；上游额外暴露 Viterbi BER/锁态/定界状态，我们只有同步汉明距离与每块纠错数 | **部分对齐 / 未实现**（建议补 stats，不改解码算法） |
 | D2 | Viterbi 失锁与 BER 阈值作为参数 | `satdump/.../module_ccsds_conv_concat_decoder.cpp:105-118` | `mbdsdr_ai/lrpt_fec.py:151`（整帧一次性 Viterbi） | 我们离线整帧，没有「实时失锁」概念 | **有意不抄**：批处理链引入阈值只会产生不可解释的丢帧 |
 | D3 | 预暖机 + 重编码统计纠正位数 | `goestools/src/decoder/packetizer.cc:11-20`（frame prelude 预暖 Viterbi）、`:129-136`（重编码后统计纠正比特） | `lrpt_fec.py:151-190`（从同步字起整帧解码） | 我们没有 prelude 暖机，也没有「纠正位数」质量指标 | **部分未实现**：暖机仅影响首帧边缘（低优先）；corrected-bit 指标可并入 D1 |
 | D4 | 虚拟信道（VCID）路由/黑名单/填充包丢弃 | `xrit-rx/src/demuxer.py:48-111`（线程+队列、VCID 分流、填充包丢弃、未知航天器显式跳过） | `mbdsdr_ai/lrpt_pipeline.py:48-165`（单 VCID 端到端） | 我们没有多虚拟信道分流与「未知平台」显式拒绝 | **未实现**（仅多 VCID 场景有价值；当前只做 LRPT，暂不引入） |
 | D5 | 全文件同步帧对齐（≥5 帧） | `noaa-apt/src/decode.rs:106-118`（同步帧不足 5 个即报错，不输出图） | `mbdsdr_ai/noaa_apt_lite.py:23-51`（逐行相关同步） | 上游两遍扫描全文件再统一定位；我们流式逐行对齐 | **有意不抄**：整文件两遍扫描不适合实时流；逐行相关已有单测 |
-| D6 | AGC→Costas→Gardner 闭环解调 | `meteor_demod/demod.c:8-12`（PLL 初始化）、`:36-40`（AGC→混频→鉴相） | `lrpt_pipeline.py:119-127` + `lrpt_modem.py`（前馈 CFO + 符号恢复） | 功能等价，路线不同；闭环 Gardner 已实验证伪（COORDINATION LRPT 队列#9） | 已对齐；不抄闭环结构 |
-| D7 | FEC API（RS(204,188)、交织、纠错计数） | `onair/core/include/dect2/fec/fec_proto.h:13-20` | `lrpt_fec.py:246-350`；`mbdsdr_ai/dvbs2_bch.py` | 同等 RS 语义与每块纠错数；我们额外做 CCSDS 4 路解交织 | 已对齐（独立实现） |
+| D6 | AGC→Costas→Gardner 闭环解调 | `meteor_demod/demod.c:8-12`（PLL 初始化）、`:36-40`（AGC→混频→鉴相） | `lrpt_pipeline.py:119-127` + `lrpt_modem.py`（前馈 CFO + 符号恢复） | 功能等价，路线不同；闭环 Gardner 已实验证伪（COORDINATION LRPT 队列#9） | 实现位置：`lrpt_pipeline.py:119-127`；不抄闭环结构 |
+| D7 | FEC API（RS(204,188)、交织、纠错计数） | `onair/core/include/dect2/fec/fec_proto.h:13-20` | `lrpt_fec.py:246-350`；`mbdsdr_ai/dvbs2_bch.py` | 同等 RS 语义与每块纠错数；我们额外做 CCSDS 4 路解交织 | 实现位置：`lrpt_fec.py:246-350`（独立实现） |
 | D8 | 分级解码器 + 失败原因计数 | `rtl_433/include/r_device.h:73`（`priority` 字段）、`:85-87`（`decode_ok`/`decode_fails[5]`）；`rtl_433/src/r_api.c:443-454`（低优先级仅在无更优事件时运行）、`:867-874`（失败原因计数） | `mbdsdr_ai/decoder_registry.py:119`（`select_by_frequency` 单选解码器） | 上游允许同频多协议竞争；我们单车道 | **有意不抄**：盲试多协议会产生误报，违反「不伪造解码结果」红线；失败计数可借（低优先） |
 | D9 | GPL 上游源码作 KAT 生成器 | `dvbs2_bch_external/upstream_rx/`；`dvbs2_ldpc_external/upstream/` | `mbdsdr_ai/dvbs2_bch.py`、`dvbs2_ldpc.py`（独立实现） | 只使用测试向量，不复制实现 | **有意不抄代码**；金样在 `tests/golden/` |
 | D10 | WSPR 模拟器/证据 | `wspr_audio/refsrc/wsprsim.c`；`wsjtx/` 仅样本 | `mbdsdr_ai/wspr_*`/FT8 解码 | 证据链而非机制来源 | 不适用（许可证见 §8.1） |
@@ -240,13 +240,13 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | # | 机制 | 参考位置 | 我们对应实现 | 差异一句话 | 结论 |
 |---|---|---|---|---|---|
-| T1 | 过境预测（AOS/LOS/TCA/maxEl） | `gpredict/src/predict-tools.c:413-421`（最小仰角取配置，0→1°）、`:129-160`（AOS 搜索）；`onair/core/src/geo/passes.cpp:248-292`（20s 扫描 + 0.5s 二分 + 黄金分割求 TCA）；`satdump/.../scheduler/passes.cpp:62-72`（AOS/LOS + 50 等分求最大仰角） | `mbdsdr_ai/orbit.py:420-448`（`_bisect_threshold`）、`:474-475`（60s 粗扫/2s 细扫）、`:559-607`；`sat_tracker.py:598` 起 `next_pass` | 我们 60s 粗扫 + 2s 细扫 + 二分；OnAir 20s + 黄金分割；SatDump 50 等分且不细化 | 已对齐（同解）；不抄 SatDump 的 50 等分（精度低于我们的 2s 细扫） |
+| T1 | 过境预测（AOS/LOS/TCA/maxEl） | `gpredict/src/predict-tools.c:413-421`（最小仰角取配置，0→1°）、`:129-160`（AOS 搜索）；`onair/core/src/geo/passes.cpp:248-292`（20s 扫描 + 0.5s 二分 + 黄金分割求 TCA）；`satdump/.../scheduler/passes.cpp:62-72`（AOS/LOS + 50 等分求最大仰角） | `mbdsdr_ai/orbit.py:420-448`（`_bisect_threshold`）、`:474-475`（60s 粗扫/2s 细扫）、`:559-607`；`sat_tracker.py:598` 起 `next_pass` | 我们 60s 粗扫 + 2s 细扫 + 二分；OnAir 20s + 黄金分割；SatDump 50 等分且不细化 | 实现位置：`mbdsdr_ai/orbit.py:420-448`（同解）；不抄 SatDump 的 50 等分（精度低于我们的 2s 细扫） |
 | T2 | 多星自动调度与冲突仲裁 | `satdump/src-core/common/tracking/scheduler/scheduler.cpp:183`（按最小仰角过滤）、`:192`（选择过境）；`scheduler/passes.cpp:146-183`（逐秒取最大仰角，旧算法 `:129-145` 已注释） | 无调度器；单星、由用户/AI 显式触发（`sat_tracker.py`） | 上游多星自动切换；我们不做自动切换 | **有意不抄**：(a) 当前无旋转器硬件；(b) 自动切换=预制流程，违反「追踪只由用户显式触发」的既定红线（COORDINATION 11-04） |
 | T3 | 旋转器机械限位与过境后归位 | `gpredict/src/gtk-rot-ctrl.c:787-788`（`SAFE_AZI`/`SAFE_ELE` 夹取）、`:796-817`（地平线下归位到 AOS/LOS 方位） | `mbdsdr_ai/gimbal.py:79-82`（`GimbalStatus.az_min/az_max/el_min/el_max` 声明）、`:162`/`:206`/`:293`（实际硬编码 `0-90`） | 上游用配置的机械限位并在地平线下归位；我们的限位字段存在但 `move()` 未使用 | **部分对齐 / 未实现**（本轮最实的缺口之一，建议开工） |
 | T4 | 旋转器通信失败关闭 | `satdump/src-core/common/tracking/rotator/rotcl_handler.h:16`（`MAX_CORRUPTED_CMD=3`）、`rotcl_handler.cpp:105-136`（连续 3 条损坏指令即停止） | `gimbal.py` 无损坏计数 | 上游失败即停；我们无限重试 | **未实现**（建议补，纯计数，但会改变现有重试语义） |
-| T5 | TLE 新鲜度与重试节流 | `onair/core/src/geo/passes.cpp:296-306`（`tleUpdateDue`：1 天成功间隔 / 6 小时失败重试） | `mbdsdr_ai/tle_integrity.py:178`（`freshness`）、`:244`（`accuracy`）；`orbit.py:459-465`（`allow_stale` + `degraded`） | 上游「到点才抓取」；我们「读取时评估并如实降级标注」，不自动抓 | 已对齐（我们选择不隐藏过期 TLE） |
-| T6 | 多普勒频移 | `gpredict/src/gtk-sat-list.c:626-631`（`-f*v/c`）；`onair/core/include/dect2/geo/passes.h:56-57`（`dopplerHz`） | `sat_tracker.py` 的多普勒修正 + `sat_passes.py` 的 `range_rate` | 同一公式；我们仅在追踪开启时下发到电台 | 已对齐 |
-| T7 | 受晒/地影判定 | `gpredict/src/sat-vis.c:82-105`（`Sat_Eclipsed` + 晨昏门限） | `sat_illumination.py:204-303`（三态）；`sat_passes.py:441-446` | 我们三态（本影/半影/受晒）；不叠加肉眼可见门限 | 内核已对齐；**有意不抄**可见过境判定 |
+| T5 | TLE 新鲜度与重试节流 | `onair/core/src/geo/passes.cpp:296-306`（`tleUpdateDue`：1 天成功间隔 / 6 小时失败重试） | `mbdsdr_ai/tle_integrity.py:178`（`freshness`）、`:244`（`accuracy`）；`orbit.py:459-465`（`allow_stale` + `degraded`） | 上游「到点才抓取」；我们「读取时评估并如实降级标注」，不自动抓 | 实现位置：`mbdsdr_ai/tle_integrity.py:178`（我们选择不隐藏过期 TLE） |
+| T6 | 多普勒频移 | `gpredict/src/gtk-sat-list.c:626-631`（`-f*v/c`）；`onair/core/include/dect2/geo/passes.h:56-57`（`dopplerHz`） | `sat_tracker.py` 的多普勒修正 + `sat_passes.py` 的 `range_rate` | 同一公式；我们仅在追踪开启时下发到电台 | 实现位置：`sat_tracker.py:563-584`（多普勒修正）、`sat_passes.py:551`（`range_rate`） |
+| T7 | 受晒/地影判定 | `gpredict/src/sat-vis.c:82-105`（`Sat_Eclipsed` + 晨昏门限） | `sat_illumination.py:204-303`（三态）；`sat_passes.py:441-446` | 我们三态（本影/半影/受晒）；不叠加肉眼可见门限 | 实现位置：`sat_illumination.py:204-303`；**有意不抄**可见过境判定 |
 | T8 | Stellarium 卫星插件 | 本克隆无 `Satellites` 插件目录（全仓目录检索 0 命中） | — | 无过境/地影机制可对照 | 不适用（**未找到 ≠ 不存在**） |
 
 ---
@@ -255,12 +255,12 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | # | 机制 | 参考位置 | 我们对应实现 | 差异一句话 | 结论 |
 |---|---|---|---|---|---|
-| C1 | 坏配置恢复 | `sdrpp/core/src/config.cpp:34-43`（解析异常→`conf=def`→立即覆盖写） | `desktop/settings.py:350-356`（先备份 `*.corrupt-时间戳` 再回默认） | 上游直接覆盖丢失原文件；我们先留证据 | 已对齐；**有意不抄**其破坏性恢复 |
+| C1 | 坏配置恢复 | `sdrpp/core/src/config.cpp:34-43`（解析异常→`conf=def`→立即覆盖写） | `desktop/settings.py:350-356`（先备份 `*.corrupt-时间戳` 再回默认） | 上游直接覆盖丢失原文件；我们先留证据 | 实现位置：`desktop/settings.py:350-356`；**有意不抄**其破坏性恢复 |
 | C2 | 原子写 | `sdrpp/core/src/config.cpp:47-52`（直接 `ofstream` 覆盖） | `desktop/settings.py:454-462`（写 `.tmp` + `os.replace`） | 我们不做非原子写 | **有意不抄**（上游是反例） |
 | C3 | 定时自动保存线程 | `sdrpp/core/src/config.cpp:82-100`（1s `try_lock` + 写盘） | `desktop/settings.py` 按需 `flush` | 上游每秒尝试写；我们变更后写 | **有意不抄**：无收益且与原子写重复 |
 | C4 | 崩溃自检与配置重载提示 | `gqrx/src/applications/gqrx/mainwindow.cpp:500-521`（`crashed` 标志 + 询问是否重载配置） | 无 | 上游能识别上次非正常退出；我们没有 | **未实现**（可选项，低优先；原子写+备份已降低丢配置概率） |
 | C5 | 默认值不落盘 | `gqrx/src/qtgui/dockfft.cpp:238-324`（值等于默认则 `settings->remove(key)`） | `desktop/settings.py` 全量落盘 | 上游保持配置文件最小；我们全量写 | **有意不抄**：全量写更利于单一事实源、审计与逐键迁移 |
-| C6 | 版本化迁移 | `gpredict/src/sat-cfg.c:302-330`（1.1→1.4 分支重写键） | `desktop/settings.py:250-258`（`_coerce`）、`:334-338`（`migration_notes`） | 文件级版本块 vs 逐键类型迁移 | 已对齐（语义等价，粒度更细） |
+| C6 | 版本化迁移 | `gpredict/src/sat-cfg.c:302-330`（1.1→1.4 分支重写键） | `desktop/settings.py:250-258`（`_coerce`）、`:334-338`（`migration_notes`） | 文件级版本块 vs 逐键类型迁移 | 实现位置：`desktop/settings.py:250-258`（语义等价，粒度更细） |
 | C7 | 分段 JSON 配置 | `satdump/src-core/common/tracking/sat_finder/sat_finder_ui.cpp:107`（`db->get_user_json("satellite_finder")` 按模块存） | 单一 `settings.json` + schema | 上游每模块独立 blob；我们集中 | **有意不抄**：集中式更易做原子写/迁移/审计 |
 
 ---
@@ -271,7 +271,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 |---|---|---|---|---|---|
 | X1 | 参考项目的 TX 能力 | `sdrpp/sink_modules/` 仅有 `audio_sink`/`network_sink` 等（无发射）；`gqrx`、`onair`、`satdump` 全仓 `transmit/ptt/interlock` 检索无命中 | — | 参考项目均为接收链，没有可对照的 TX 闸 | **不适用**（无实现可抄） |
 | X2 | 人工确认 → 一次性 token → 有效期 → 审计 | 无（参考项目没有） | `mbdsdr_ai/tx_guard.py:543-597`（`arm`：TTL/动作绑定/单次）、`:599-620`（`revoke`/过期）、`:622` 起（`authorize`）、`:441-484`（审计记录）；`hal.py:721-741`（CW 路径）、`:765-779`（IQ/调制路径）均先 `authorize` 再 `write_tx` | 自研；无参考对照 | 已有，自研（本轮只登记「对照缺席」） |
-| X3 | 能力声明 | `satdump/dev.h:30-36`（静态 `MODE_SINGLE_TX` 枚举） | `hal.py:139-141`（`supports_tx()` + `tx_capability()["verified"]`）；`docs/limitations-register.md:221-241`（未验证前不得显示「已验证」） | 上游静态声明；我们运行时验证后才置位 | 已对齐；**不抄**静态假设（避免把「声明」当「能力」） |
+| X3 | 能力声明 | `satdump/dev.h:30-36`（静态 `MODE_SINGLE_TX` 枚举） | `hal.py:139-141`（`supports_tx()` + `tx_capability()["verified"]`）；`docs/limitations-register.md:221-241`（未验证前不得显示「已验证」） | 上游静态声明；我们运行时验证后才置位 | 实现位置：`hal.py:139-141`；**不抄**静态假设（避免把「声明」当「能力」） |
 | X4 | 执行器安全（旋转器限位/失败关闭） | `gpredict/gtk-rot-ctrl.c:787-817`；`satdump/rotcl_handler.h:16` + `.cpp:105-136` | `gimbal.py:79-82` 声明、实际未接线；无损坏计数 | 上游两套执行器保护；我们只硬编码 0–90 | **未实现**（见 T3/T4；建议开工） |
 | X5 | 发射波形模拟器 | `wspr_audio/refsrc/wsprsim.c`（离线生成波形，无硬件门） | — | 模拟器不是安全机制 | **有意不抄**：不能把「能生成波形」误当「可安全发射」 |
 
@@ -314,13 +314,13 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 - 许可证均以仓库内 `LICENSE/COPYING` 首段为准；`openngc` 本地无许可证文件，按其上游 README 记为 CC-BY-SA-4.0；`wsjtx`、`wspr_audio` 目录内无许可证文件，按上游 WSJT-X 推断为 GPL-3.0（**推断，未验证**）。
 - `stellarium` 本克隆无卫星插件目录：结论是「本克隆未找到」，不代表上游没有。
 - TX 的「无命中」是限定目录的文本检索结果（`sdrpp/`、`gqrx/`、`onair/`、`satdump/`），不代表这些项目在所有分支都没有发射能力。
-- 本轮只读参考源码与自家代码，未运行任何测试；所有「已对齐」均指实现位置与语义可对照，不是行为等价证明。
+- 本轮只读参考源码与自家代码，未运行任何测试；表中「实现位置」只表示代码位置与语义可对照，不是行为等价证明。
 
 ---
 
 ## 17. 「照着做，还是不做」判定表（2026-11-06）
 
-> 判定口径：**逐条裁决**，不写「整体已对齐」。
+> 判定口径：**逐条裁决**，不写「整体一致」。
 > - 「我们现状」的提交号是**行级 blame**（`git blame -L n,n -- 文件` 的首个提交），表示当前这一行由该提交引入或最后改写，不等于该机制的最初引入提交。
 > - 「决定」三态：**照做**（机制已按参考思路落地，保持）／**改良后做**（路线不同或只落一半，已落地或已排给某条线）／**明确不做**（给理由与可追踪的挂账/验收门）。
 > - 本表是裁决，**覆盖 §15 的候选清单**：S2、D1、D3 从「建议开工」改为「明确不做（本轮）」，理由写在对应行。

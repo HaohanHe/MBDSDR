@@ -6,9 +6,11 @@
   ① 行号在文档范围内；
   ② 该行确实是 markdown 标题；
   ③ 标题的编号与卡片引用的 §编号一致（如 §6.9.6 ↔ `#### 6.9.6 ...`）；
-  ④ 卡片覆盖 §6.9.5–§6.9.9 五节（九形态卡不允许漏节）。
+  ④ 卡片覆盖 §6.9.5–§6.9.12 八节（十二形态卡不允许漏节）。
 
-用法：python scripts/check_card_links.py [--card <卡片>] [--doc <长文>]
+用法：python scripts/check_card_links.py [--card <卡片>] [--doc <长文>] [--fix-anchors]
+      --fix-anchors 会按长文里标题的**实际行号**重写卡片里的 #L 锚点再检查；
+      长文增删段落导致行号整体漂移时用它一键对齐，不需要手抄 13 个数字。
 退出码：0 全过；1 有漂移；2 解析失败。
 """
 from __future__ import annotations
@@ -24,26 +26,55 @@ DEFAULT_CARD = ROOT / "docs" / "COMMIT-INCIDENT-CARD.md"
 DEFAULT_DOC = ROOT / "docs" / "COORDINATION.md"
 LINK_RE = re.compile(r"\[§([0-9]+(?:\.[0-9]+)*)\]\(\./COORDINATION\.md#L([0-9]+)\)")
 HEADING_RE = re.compile(r"^#{2,4}\s+([0-9]+(?:\.[0-9]+)*)\s")
-REQUIRED = {"6.9.5", "6.9.6", "6.9.7", "6.9.8", "6.9.9"}
+REQUIRED = {"6.9.5", "6.9.6", "6.9.7", "6.9.8", "6.9.9", "6.9.10", "6.9.11", "6.9.12"}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="速查卡锚点防漂移")
     parser.add_argument("--card", default=str(DEFAULT_CARD))
     parser.add_argument("--doc", default=str(DEFAULT_DOC))
+    parser.add_argument("--fix-anchors", action="store_true",
+                        help="按长文标题实际行号重写卡片的 #L 锚点后再检查")
     args = parser.parse_args(argv)
 
     try:
-        card = Path(args.card).read_text(encoding="utf-8")
-        doc_lines = Path(args.doc).read_text(encoding="utf-8").splitlines()
+        card_raw = Path(args.card).read_bytes().decode("utf-8")
+        doc_raw = Path(args.doc).read_bytes().decode("utf-8")
     except OSError as exc:
         print(f"PARSE FAIL：{exc}")
         return 2
+
+    # 按字节读、按原换行写回：避免修锚点时把整个文件从 LF 改成 CRLF
+    card_nl = "\r\n" if "\r\n" in card_raw else "\n"
+    card = card_raw.replace("\r\n", "\n")
+    doc_lines = doc_raw.replace("\r\n", "\n").splitlines()
 
     links = LINK_RE.findall(card)
     if not links:
         print("PARSE FAIL：卡片里没有找到 `[§x](./COORDINATION.md#Ln)` 形式的直链")
         return 2
+
+    if args.fix_anchors:
+        anchors: dict[str, int] = {}
+        for i, line in enumerate(doc_lines, 1):
+            m = HEADING_RE.match(line.strip())
+            if m:
+                anchors.setdefault(m.group(1), i)
+
+        def _rewrite(m: re.Match) -> str:
+            section = m.group(1)
+            actual = anchors.get(section)
+            if actual is None:
+                return m.group(0)      # 长文里没这节：保留原样，让下面的校验报出来
+            return f"[§{section}](./COORDINATION.md#L{actual})"
+
+        fixed = LINK_RE.sub(_rewrite, card)
+        if fixed != card:
+            Path(args.card).write_bytes(
+                fixed.replace("\n", card_nl).encode("utf-8"))
+            card = fixed
+            links = LINK_RE.findall(card)
+            print(f"FIX 已按长文标题实际行号重写 {len(links)} 条锚点")
 
     errors: List[str] = []
     seen = set()

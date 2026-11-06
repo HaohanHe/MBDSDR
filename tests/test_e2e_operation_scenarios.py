@@ -65,6 +65,26 @@ def _make_agent():
         _mm.ModelManager.fetch_models = original
 
 
+def _reset_time_basis():
+    """把全局 TimeEngine 恢复到「墙钟 · 1× · 运行」。
+
+    本套件的 pass_case 用 datetime.now() 取起点，而 orbit / sdr_tools 用
+    TimeEngine；别处用例若把引擎留在模拟时刻（场景 B 自己也会拨表），
+    跨模块对拍就会基于两个不同起点。显式重置，不靠测试执行顺序。
+    """
+    eng = get_time_engine()
+    eng.set_time_now()
+    eng.set_rate(1.0)
+    eng.resume()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_global_time():
+    _reset_time_basis()
+    yield
+    _reset_time_basis()
+
+
 @pytest.fixture
 def agent():
     """每个场景一个独立 Agent：场景 A/B 会切换当前 SDR 源，C 需要「无硬件」初态。"""
@@ -74,6 +94,7 @@ def agent():
 @pytest.fixture(scope="module")
 def pass_case():
     """真实过境：报告选 NOAA 19 的第一场，再把本地时刻还原成 epoch。"""
+    _reset_time_basis()          # module-scope fixture 先于 autouse 执行，这里也要复位
     # SATELLITE_FREQUENCIES 的单位是 MHz（见 decoders._load_satellite_frequencies）
     nominal = float(SATELLITE_FREQUENCIES[SAT]) * 1e6
     report = orbit.predict_passes_report(
@@ -133,6 +154,32 @@ def _parse_aligned_lines(content):
     return int(m.group(1)) if m else 0
 
 
+def _culmination_in_report(content: str, tca: str, tol_s: int = 3) -> bool:
+    """报告里是否存在与目标时刻相符的中天（按报告自己声明的精度比对）。
+
+    `sdr_satellite_passes` 用 2 秒细采样找中天，报告首行明确写「中天采样偏差
+    ≤1 秒」。fixture 与工具是**两次独立计算**，起点相差几十秒时采样网格整体
+    平移，同一场过境会落到相邻采样点（实测 09:34:42 vs 09:34:43）。旧断言
+    逐秒比字符串，把采样精度当成了时刻精度，在长批次里必然偶发红。
+
+    这里仍要求「报告里必须有这场过境」：目标卫星名由调用方单独断言，本函数
+    只接受与 tca 相差 ≤3 秒（两次各 ≤1s + 1s 边界余量）的中天行，远小于
+    任意两次过境的间隔，不允许拿别场过境蒙混。
+    """
+    def _sec(hms: str) -> int:
+        parts = [int(v) for v in hms.split(":")]
+        while len(parts) < 3:
+            parts.append(0)
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+
+    target = _sec(tca)
+    for m in re.finditer(r"中天: (\d{2}:\d{2}:\d{2})", content):
+        delta = abs(_sec(m.group(1)) - target)
+        if min(delta, 86400 - delta) <= tol_s:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 场景 A：过境 → 调谐 → 解码 → 归档 → 库内可查
 # ---------------------------------------------------------------------------
@@ -150,7 +197,9 @@ def test_scenario_a_pass_to_archive(agent, pass_case, tmp_path, monkeypatch):
         "nominal_freq_hz": nominal,
     })
     assert res.success, res.content[:300]
-    assert SAT in res.content and p["culmination_time"] in res.content
+    assert SAT in res.content
+    assert _culmination_in_report(res.content, p["culmination_time"]), \
+        f"报告里没有目标过境的中天（{p['culmination_time']}±3s）"
 
     # 2) 工具：打开合成 IQ 源 + 调谐到 TCA 下行（调谐是真实后端动作）
     iq_path = tmp_path / "tune_stub.cf32"
@@ -379,7 +428,8 @@ def test_scenario_c_plan_and_degrade(agent, pass_case, monkeypatch):
     # 真实过境数据里确实有目标卫星与推荐时刻
     pass_result = executed[1][1]
     assert pass_result.success and SAT in pass_result.content
-    assert tca in pass_result.content
+    assert _culmination_in_report(pass_result.content, tca), \
+        f"报告里没有目标过境的中天（{tca}±3s）"
     # 缺硬件 -> 诚实失败，不谎报已接收
     tune_result = executed[3][1]
     assert tune_result.success is False
@@ -389,3 +439,29 @@ def test_scenario_c_plan_and_degrade(agent, pass_case, monkeypatch):
     print(f"[SYNTHETIC] 场景C 通过：假模型给定 3 步计划，Agent 按序执行 "
           f"{[n for n, _ in executed]}；真实过境数据含 {SAT} {tca}；"
           f"调谐在无硬件时如实失败并降级（拆解为假模型替身）")
+
+
+# ---------------------------------------------------------------------------
+# 反证：中天容差不是「随便一个时刻都放行」
+# ---------------------------------------------------------------------------
+def test_culmination_tolerance_helper_is_not_a_free_pass():
+    content = ("   中天: 09:34:43 最大仰角 30.3°\n"
+               "   中天: 22:43:56 最大仰角 12.1°\n")
+    assert _culmination_in_report(content, "09:34:42"), "1 秒采样差必须放行"
+    assert not _culmination_in_report(content, "09:34:30"), "13 秒差必须拒绝"
+    assert not _culmination_in_report(content, "22:40:00"), "别场过境不许蒙混"
+    assert _culmination_in_report("   中天: 00:00:01\n", "23:59:59"), \
+        "跨午夜按环形距离比较"
+
+
+# ---------------------------------------------------------------------------
+# 反证：中天容差不是「随便一个时刻都放行」
+# ---------------------------------------------------------------------------
+def test_culmination_tolerance_helper_is_not_a_free_pass():
+    content = ("   中天: 09:34:43 最大仰角 30.3°\n"
+               "   中天: 22:43:56 最大仰角 12.1°\n")
+    assert _culmination_in_report(content, "09:34:42"), "1 秒采样差必须放行"
+    assert not _culmination_in_report(content, "09:34:30"), "13 秒差必须拒绝"
+    assert not _culmination_in_report(content, "22:40:00"), "别场过境不许蒙混"
+    assert _culmination_in_report("   中天: 00:00:01\n", "23:59:59"), \
+        "跨午夜按环形距离比较"

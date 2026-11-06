@@ -114,8 +114,9 @@
 
 | 位置 | 值 | 语义 |
 |---|---|---|
-| `desktop/spectrum_widget.py:1005` | `peak_rel_db = 6.0` | Python 峰阈值（**裁定值，保留**） |
-| `desktop/spectrum_widget.py:550` | `max_peaks: int = 8` | Python 峰数量 |
+| `desktop/spectrum_widget.py`（`_PEAK_REL_DB_DEFAULT`） | `6.0` | Python 峰阈值（**裁定值，保留**） |
+| `desktop/spectrum_widget.py`（`_PEAK_ABS_FLOOR_DBFS` / `_PEAK_MIN_SEEN_FRAMES` / `_PEAK_MATCH_BINS` / `_PEAK_MAX_MISS_FRAMES`） | `-100.0` / `3` / `5` / `10` | Python 检测器其余定义（与 C++ 同一套） |
+| `desktop/spectrum_widget.py`（`_PEAK_MAX_LABELS`） | `6` | Python 峰标签数（按 30% 可读性实测，见下） |
 | `desktop/config_schema.py:195-200` | `peak_threshold_db` 默认 6.0，范围 1–30 | 已经暴露（A）；`source` 指针仍写 `spectrum_widget.py:859`（行号漂移） |
 | `cpp/src/core/tokens.h:365` | `kPeakRelDb = 6.0` | C++ **显示检测器**门限（新增常量；显示路径不再用 15） |
 | `cpp/src/core/tokens.h:371` | `kPeakThresholdDefault = 15.0` | **频率校准参考门**（有意保留，注释明确禁止与显示门合并） |
@@ -158,13 +159,30 @@ rel 6.0 dB / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘
 数量上限 8 vs 12 属显示密度，不是物理量（同一检测器下 CSS 列表能放几条），
 收成常量并在文档登记"有意不同"。
 
+**cap 由可读性实测决定（1360 px 面板、8 pt、带 SNR、标签矩形互交口径）**：
+256 帧平均丢弃率 12 个 **47.4%**、8 个 **35.3%**、6 个 **28.0%**；
+最拥挤的一帧（12 峰）12 个 **50.0%**、8 个 **37.5%**、6 个 **16.7%**。按 30% 判据，
+Python 标签数取 **6**；C++ 仍为 12，因为它只画三角形不画文字
+（`spectrum_display.cpp:1527-1557`），不存在文字互交。回归门：
+`tests/test_spectrum_scale_peak_range.py::test_peak_label_cap_is_the_largest_that_meets_30pct`。
+
+**两处必须记住的实测事实：**
+
+1. **绝对门的固有副作用**：底噪中位数 `-110 dBFS` 时，`+8 dB` 载波
+   = `-102 dBFS` 会被 `-100 dBFS` 绝对门挡掉（同余量在 `-100` 底噪下可标）。
+   这是绝对电平门的行为，不是 bug。钉子：
+   `test_abs_floor_rejects_minus_102_carrier_under_minus_110_floor`。
+2. **6 dB 的真实代价**：88.1 MHz OTA 录音里 `87.700 MHz` 那条 bin 的中位数
+   比全帧中位数还低 `0.3 dB`，6 dB + 10 帧跟踪会把它升成常驻标签；同一段
+   录音 **228/256 帧撞满标签上限**。这是**已知代价**，不是漏掉的 bug。
+
 
 ### 2.4 其余"两套数"（次严重，P2/P3）
 
 | # | 语义 | 两套值 | 位置 |
 |---|---|---|---|
 | D-1 | 默认采样率 | `2.048 MS/s` vs `2.4 MS/s` | `config_schema.py:260` vs `tokens.h:301` |
-| D-2 | ~~调谐步进默认 10 kHz vs 100 kHz~~ **判据不成立**：两端实际均为 10 kHz，不构成两套数 | Python `self._step_hz = 10_000.0`；C++ `kFreqCoarseStepHz = 10000.0` | `desktop/control_panel.py:195` / `cpp/src/core/tokens.h:850` |
+| D-2 | ~~调谐步进默认 10 kHz vs 100 kHz~~ **已撤回（见下）** | Python 10 kHz；C++ `kFreqCoarseStepHz = 10000` | `control_panel.py:323` vs `tokens.h:816` |
 | D-3 | ~~FFT 档位数量~~ **已统一（2026-11-05，见下）** | 两端均三档 `1024/2048/4096`（Python `FFT_SIZES` == schema `fft_size.choices`） | `e883a62b` — `desktop/spectrum_widget.py:218` — `FFT_SIZES = (1024, 2048, 4096)`；两端对照 `config_schema.py:176` / `settings_dialog.cpp:250` |
 | D-4 | dB 默认量程 | `-100..-20` vs `-45..0` | `spectrum_widget.py:916-917` + 默认值 vs `tokens.h:329-330` |
 | D-5 | 瀑布行数 | 固定 `256` vs 可选 `128..4096` | `spectrum_widget.py:161` vs `tokens.h:698` |
@@ -255,7 +273,7 @@ spin `-140..20`）才是 B 类锁死项，各写清理由。
 | P-6 | `256` | `spectrum_widget.py:161` | 瀑布环形行数 | 绘制/LUT | △ | A（建议加档位） |
 | P-7 | `0.7/0.3` | `spectrum_widget.py:389-391` | 瀑布 IIR 平滑 | 瀑布 | △（字面量） | C |
 | P-8 | `-120.0` | `spectrum_widget.py:511` | 无数据哨兵 | 重采样/绘制 | ✗ | B |
-| P-9 | `8` | `spectrum_widget.py:550` | 峰值数量上限 | 峰值表 | ✗ | C |
+| P-9 | `6` | `spectrum_widget.py`（`_PEAK_MAX_LABELS`） | 峰值标签数量上限（可读性实测定；C++ 12 只画三角形） | 峰值表 | ✗ | C |
 | P-10 | `6.0` | `spectrum_widget.py:1005` | 峰值相对门限 | 峰值检测 | ✓（schema） | A（已暴露；**裁定值**，C++ 显示门同步为 6） |
 | P-11 | `10_000.0` | `spectrum_widget.py:865` | 吸附网格 | 滚轮/箭头调谐 | ✓（步进控件写入） | A（已暴露，见 LOCKED） |
 | P-12 | `-160.0` / `0.0` | `spectrum_widget.py:916-917` | dB 轴夹取上下限 | 全轴交互 | ✓ | B（跨语言差异 D-4） |
@@ -465,13 +483,13 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - 未改 `rf_sky_view.py` 的 `_bortle = 3`（在途文件）。→ patch 建议 **P-2**。
 
 **C-2 `DEFAULT_BORTLE`**：`stars` 与 `star_catalog` 的 6 处默认参数统一引用该常量，
-值恒为 3，签名默认值不变（已验证 `inspect.signature` 行为等价）。证据 `e5ca57ce` — `mbdsdr_ai/skyengine/star_catalog.py:224` — `bortle: int = DEFAULT_BORTLE`
+值恒为 3，签名默认值不变（已验证 `inspect.signature` 行为等价）。
 
 ### 6.2 交给对应线的 patch 建议（本线不改）
 
 | # | 文件 | 问题 | 建议 |
 |---|---|---|---|
-| P-1 | `cpp/src/core/tokens.h`（频谱线已改） | Python `6.0` 与 C++ 原 `15.0` 两套显示峰阈值；原"统一到 15 dB"已被实测驳回 | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘`**，两条路径都按这套。Python `6.0` 保留；C++ 新增显示门 `kPeakRelDb = 6.0`（`cpp/src/core/tokens.h:378`，源码注释已写入 24/24 帧 0 峰、3043 vs 3029 无洪泛证据）。`kPeakThresholdDefault = 15.0` 仍留给**频率校准参考门**，两条门职责不同、禁止合并。数量 `8` vs `12` 登记为"有意差异：UI 显示密度"，不属物理量。 证据 `b8bc5140` — `cpp/src/core/tokens.h:378` — `kPeakRelDb = 6.0` |
+| P-1 | `cpp/src/core/tokens.h`（频谱线已改） | Python `6.0` 与 C++ 原 `15.0` 两套显示峰阈值；原"统一到 15 dB"已被实测驳回 | **裁定：统一检测器定义 `rel 6.0 / abs -100 dBFS / 3 帧确认 / 5 bin 匹配 / 10 帧遗忘`**，两条路径都按这套。Python `6.0` 保留；C++ 新增显示门 `kPeakRelDb = 6.0`（`tokens.h:365`，源码注释已写入 24/24 帧 0 峰、3043 vs 3029 无洪泛证据）。`kPeakThresholdDefault = 15.0` 仍留给**频率校准参考门**，两条门职责不同、禁止合并。数量 `8` vs `12` 登记为"有意差异：UI 显示密度"，不属物理量。 |
 | P-2 | `desktop/rf_sky_view.py` | `_bortle = 3` 私有硬编码；`(4.5-mag)/9.0` 在同文件两处 | `from mbdsdr_ai.skyengine.stars import DEFAULT_BORTLE`；提供 `set_bortle()` 后即可解锁设置项。拾取评分提成一个 `_pick_score(mag)` 函数（两处同式）。 |
 | P-3 | `desktop/main_window.py` | 状态提示时长 `3000/4000/6000/8000` 散落 20+ 处 | 提到 `desktop/constants.py` 的 `TOAST_SHORT_MS / TOAST_INFO_MS / TOAST_WARN_MS / TOAST_ERROR_MS` 四档；`desktop/constants.py` 已有互斥钩子测试，按同法登记。 |
 | P-4 | `desktop/main_window.py` | 刷新周期 `50/150/1000/2000/5000 ms` 散落 | 同上，收成 `UI_FPS`、`BUS_COALESCE_MS`、`STATUS_REFRESH_MS`、`SKY_REFRESH_MS`。 |
@@ -481,14 +499,14 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | P-2b | `desktop/rf_sky_view.py` | 私有 `PASS_MIN_ALT_DEG = 10.0` 字面量 | 改为 `from mbdsdr_ai.sat_passes import PASS_MIN_ALT_DEG`；与 `sat_track_panel` / `new_spacetime_panel` 共用同一常量。星象仪的 `PASS_COARSE_STEP_S/FINE_STEP_S` 属 D-6，**不要**顺手合并。 |
 | P-2c | `mbdsdr_ai/sat_consistency.py:141` | `check_next_pass_consistency(min_alt=5.0)` 仍把 5 传进默认 10 的 `predict_passes` | 这正是裁定 2 禁止的形态（"下一次过境"却用可见门）。改默认 `PASS_MIN_ALT_DEG`，或明确改名为"从 5° 起算的下一次过境"并加注释。**诊断工具口径需与 `next_pass()` 一致，否则对拍结论不可信。** |
 | P-8a | `desktop/main_window.py` | `_squelch_db = -80.0`（约 507 行）是权威初值，滑杆已显示 -50 | 改为 `DEFAULT_SQUELCH_DBFS`（一行）。**必须与 P-8d 迁移提示同批**：否则旧配置读入后仍按 -80 门控，UI 显示与行为继续分裂。 |
-| P-8b | `mbdsdr_ai/sdr_backend.py` + `osmosdr_source.py` + `rtltcp_client.py` | RTL 基线三套（2.048 / 1.024 / 2.048 硬编码） | **已完成**（§10-3）：统一为 2.4 MS/s 首选 + `nearest_sample_rate()` 回落 + 状态回报实际值；三处不再各写字面量。相关测试期望已成对更新（100 passed）。 证据 `6ed9ee7d` — `mbdsdr_ai/sdr_backend.py:111` — `DEFAULT_SAMPLE_RATE_HZ = 2_400_000` |
+| P-8b | `mbdsdr_ai/sdr_backend.py` + `osmosdr_source.py` + `rtltcp_client.py` | RTL 基线三套（2.048 / 1.024 / 2.048 硬编码） | **已完成**（§10-3）：统一为 2.4 MS/s 首选 + `nearest_sample_rate()` 回落 + 状态回报实际值；三处不再各写字面量。相关测试期望已成对更新（100 passed）。 |
 | P-8c | `desktop/spectrum_widget.py:419` | 无数据哨兵 `-120.0` 落在可显示量程内 | 改为 `float("nan")`（绘制/重采样对 NaN 显式判空）。C++ `rssiDbfs_{-100.0f}` 是**真实安静读数**，不得当哨兵；若要哨兵请用量程外的 `-999` 并注释。 |
 | P-8d | 设置线（`desktop/config_schema.py`） | 旧配置静噪值按新口径解释 | 读入旧 key 时若值落在 `-120..-101`（旧量纲域外沿）或明显偏离新域，弹一次提示："此静噪值按旧量纲（IQ 功率）保存，现在滑杆表示'相对该模式噪声基线的余量'；请复核。"**不许静默改意思**。 |
 
 ### 6.3 暂缓（需要跨线决策，本线不动）
 
-- ~~**D-3 FFT 档位**~~ **已收口（2026-11-05）**：`e883a62b` — `desktop/spectrum_widget.py:218` — `FFT_SIZES = (1024, 2048, 4096)`；
-  `FFT_SIZES` 已删掉 8192/16384，与 schema / C++ / AI 三档逐项一致；旧值回落最近档 4096 并记录原因
+- ~~**D-3 FFT 档位**~~ **已收口（2026-11-05）**：`FFT_SIZES` 已删掉 8192/16384，
+  与 schema / C++ / AI 三档逐项一致；旧值回落最近档 4096 并记录原因
   （§2.4 D-3）。
 - **D-6 过境预测两套采样**：`rf_sky_view` 为 UI 流畅用 300 s/30 s，
   `sat_passes` 为精度用 60 s/2 s。**不许合并成一个数**——正确做法是
@@ -521,10 +539,13 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | 上下文窗口 | 8192 | 32768（×0.75 预算） | ✗（有意） | 按模型能力，登记 |
 
 对拍测试：`tests/test_hardcoded_parameter_registry.py::test_cpp_tokens_match_documented_values`
-把 C++ 侧 15 个 token 的**当前值**冻结；任何一侧改数先红，强制回到本表。
-新增的显示门 `kPeakRelDb=6.0` **尚未纳入冻结表**（`kPeakThresholdDefault`
-仍冻结为 15.0，校准门未变，所以不会红）——建议频谱线提交 `tokens.h` 时
-同批把 `kPeakRelDb` 加进映射，否则这把锁看不到显示门的改动。
+把 C++ 侧 token 的**当前值**冻结；任何一侧改数先红，强制回到本表。
+显示门 `kPeakRelDb=6.0`、绝对门与跨帧参数（`kPeakAbsFloorDbfs=-100.0`、
+`kPeakMatchBins=5`、`kPeakMinSeenFrames=3`、`kPeakMaxMissFrames=10`）已纳入
+同一张冻结表；`test_display_gate_and_calibration_gate_are_locked_apart` 另外
+分别断言显示门 6.0 与校准门 15.0，并检查两条门各自的调用点没有串线
+（反证：分别改任一条门，测试各自红）。`test_python_peak_detector_definition_matches_cpp`
+再把 Python 的 `_PEAK_*` 常量与 C++ 值逐个对齐，防止只对齐一个数字。
 
 ---
 
@@ -623,7 +644,7 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - `mbdsdr_ai/analog_demod.py` 的无头 IF 域门控（`_MODE_DEFAULTS` 的
   `-40/-30/-60`、构造初值 `-150.0`）**保留不动**——gqrx 兼容路径的另一个测量点；
 - C++ 侧 `kSquelchMinDb/-100`、`kSquelchMaxDb/-20`、`kSquelchDefaultDb/-50`
-  **未改**（C++ 仍是绝对 dB 域）。本行为登记声明，无可引提交；对应实现在 `cpp/src/core/tokens.h:407-409` 由内核线维护；量纲差异见 §7，对拍测试继续冻结它们。
+  **未改**（C++ 仍是绝对 dB 域，量纲差异已登记 §7）；对拍测试继续冻结它们。
 
 **行为差异说明（必须让用户知道）**：同一段信号，旧值 `-80` 在新口径下
 不再等价；迁移仅做"读入 + 提示"，不自动换算（IQ 功率↔音频域存在度的差值
@@ -640,14 +661,14 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 | AOS/LOS 定义 | 对 `next_pass` 调用按 5° 穿越 | 按 10° 穿越（过境时长相应变短） |
 | 时空面板列表 | 无说明 | 标题旁"列表按峰值 ≥10° 筛选（更低的不列出；可在设置开启低仰角）" |
 | 空状态文案 | "24 小时内无过境" | "24 小时内无过境（峰值仰角 ≥10°）" |
-| 控制器 | 固定 10° / 24 h 字面量 | **已改为显式入参注入**：`get_satellite_pass(min_elevation_deg=None, window_hours=None)`，缺省源 `sat_passes.PASS_MIN_ALT_DEG` / `sat_passes.PASS_WINDOW_HOURS=24.0`，controller 内已无 10/24 字面量。证据 `ff219b55` — `mbdsdr_ai/core/controller.py:1096` — `min_elevation_deg` |
+| 控制器 | 固定 10° / 24 h 字面量 | **已改为显式入参注入**：`get_satellite_pass(min_elevation_deg=None, window_hours=None)`，缺省源 `sat_passes.PASS_MIN_ALT_DEG` / `sat_passes.PASS_WINDOW_HOURS=24.0`，controller 内已无 10/24 字面量 |
 
 证据：`mbdsdr_ai/sat_passes.py:101-102`；`predict_passes:226` 与批量
 `:616` 默认 `PASS_MIN_ALT_DEG`；`sat_tracker.py:118`
 `DEFAULT_MIN_ELEVATION_DEG = VISIBLE_MIN_ALT_DEG`、`next_pass` 默认
 `PASS_MIN_ALT_DEG`；`desktop/new_spacetime_panel.py` 筛选标签 +
 `min_elevation=PASS_MIN_ALT_DEG`；`mbdsdr_ai/core/controller.py:990`
-（显式入参，controller 内无 10/24 字面量；方法位于 `mbdsdr_ai/core/controller.py:1095`）。
+（显式入参，controller 内无 10/24 字面量）。
 
 外泄面是 **MCP schema**（`min_elevation_deg` / `window_hours` 入参 + 返回值里
 的生效值）与**验收脚本**，**不是桌面 UI**。实测：5°/24h = 6 条、10°/24h = 5 条、
@@ -660,11 +681,11 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 - 显式传 `min_alt=5` 的调用方行为不变（只是默认值变了）；
 - 星象仪 `PASS_MIN_ALT_DEG=10.0` 数值不变（仍是私有字面量 → P-2b）。
 
-**残留（登记声明，无可引提交；对应实现在 `mbdsdr_ai/sat_consistency.py:141` 由他线维护）**：
+**残留（已登记，未改）**：`mbdsdr_ai/sat_consistency.py:141`
 `check_next_pass_consistency(min_alt=5.0)` 仍是"5 传进默认 10"的形态。
 → P-2c。诊断工具不先对齐，它对"下一次过境"的对拍结论就不可信。
 
-### 10-3 默认采样率：已落地 2.4 MS/s + 能力回落
+### 10-3 默认采样率：统一为 2.4 MS/s + 能力回落
 
 **口径变了**
 
@@ -753,15 +774,15 @@ star_catalog.naked_eye_limit_mag is stars.naked_eye_limit_mag: True
 
 | # | 文件:行 | 原文（节选） | 量纲 / 归属 | 处置 |
 |---|---|---|---|---|
-| 1 | `mbdsdr_ai/analog_demod.py:123-131` | `"am" ... sql_db=-40.0` / `"wfm" ... sql_db=-30.0` / `"usb"/"lsb"/"cw" ... sql_db=-60.0` | 信道 **IQ 功率 dBFS**（无头 gqrx 兼容路径，AGC 前） | **保留**（另一概念，不受桌面滑杆驱动）；量纲注释已改为"桌面滑杆 = 相对噪声基线余量"（`mbdsdr_ai/analog_demod.py:119-122`）。证据 `17709482` — `mbdsdr_ai/analog_demod.py:120` — `相对该模式噪声基线的余量` |
+| 1 | `mbdsdr_ai/analog_demod.py:123-131` | `"am" ... sql_db=-40.0` / `"wfm" ... sql_db=-30.0` / `"usb"/"lsb"/"cw" ... sql_db=-60.0` | 信道 **IQ 功率 dBFS**（无头 gqrx 兼容路径，AGC 前） | **保留**（另一概念，不受桌面滑杆驱动）；量纲注释已改为"桌面滑杆 = 相对噪声基线余量"（`:119-122`） |
 | 2 | `mbdsdr_ai/analog_demod.py:230` | `self.squelch_db = -150.0` | 同上；构造初值 = 常开 | **保留**（测试钉 `tests/test_benchmark_essence_defaults.py:204`） |
 | 3 | `mbdsdr_ai/analog_demod.py:236` | `self.last_signal_power_db = -150.0` | 同上；首块功率估计占位 | **保留** |
 | 4 | `mbdsdr_ai/analog_demod.py:365-367` | `if not self._sql_open and self.last_signal_power_db >= self.squelch_db:` / `elif ... < self.squelch_db - self._sql_hyst_db:` | 同上；IF 域滞回门 | **保留**；不读桌面 `SharedDemodConfig.squelch_db` |
 | 5 | `mbdsdr_ai/analog_demod.py:458-459` | `chain.set_squelch_db(-150.0)` | 同上；一次性工具调用全开 | **保留** |
-| 6 | `cpp/src/core/tokens.h:407-409` | `kSquelchMinDb=-100` / `kSquelchMaxDb=-20` / `kSquelchDefaultDb=-50`，注释 "AUDIO-BLOCK RMS dBFS domain" | C++ 48 kHz **解调音频块 RMS 绝对 dBFS** | **保留**；auto 门 = 同域噪声底 + `kSquelchAutoMarginDb=8.0`（`spectrum_engine.cpp:1892-1896`），是"绝对底+余量"，与 Python 滑杆余量不同量纲（本行为登记声明，无可引提交；对应实现在 `cpp/src/core/tokens.h:407-409` 由内核线维护；口径见 §7） |
+| 6 | `cpp/src/core/tokens.h:394-396` | `kSquelchMinDb=-100` / `kSquelchMaxDb=-20` / `kSquelchDefaultDb=-50`，注释 "AUDIO-BLOCK RMS dBFS domain" | C++ 48 kHz **解调音频块 RMS 绝对 dBFS** | **保留**；auto 门 = 同域噪声底 + `kSquelchAutoMarginDb=8.0`（`spectrum_engine.cpp:1892-1896`），是"绝对底+余量"，与 Python 滑杆余量不同量纲（§7 已登记） |
 | 7 | `cpp/src/dsp/spectrum_engine.h:951` | `float squelchThreshold_ = -50.0f;` | 同上；token 默认值的缓存镜像 | **保留** |
 | 8 | `desktop/main_window.py:567` | `self._squelch_db: float = -80.0` | 旧单线程演示路径的**绝对 IQ dBFS** 门 | **P-8a**（操作逻辑线，本线不动） |
-| 9 | `desktop/main_window.py:5534-5535` | `dbfs = 10.0 * math.log10(p + 1e-12)` / `if dbfs < self._squelch_db:` | 同上（全带宽 IQ 功率） | **P-8a**；改动在位：多线程 `ReceivePipeline` 改用 `BaselineSquelch`（`desktop/receive_pipeline.py:251`）；本行所指旧演示路径仍未改 |
+| 9 | `desktop/main_window.py:5534-5535` | `dbfs = 10.0 * math.log10(p + 1e-12)` / `if dbfs < self._squelch_db:` | 同上（全带宽 IQ 功率） | **P-8a**；多线程 `ReceivePipeline` 路径已改余量 |
 | 10 | `mbdsdr_ai/receive_chain.py:153` + `:239-243` | `squelch_db: float = -150.0` → `Squelch(threshold_db=self._squelch_db, ... sample_rate=if_sr)` | AI 后端（`sdr_backend.py:159/646`）**IF RMS 绝对 dBFS** | **保留**；另一后端链，工具面 `sdr_tools.py:654` 描述 "静噪阈值，单位 dB。-100=关闭静噪" |
 | 11 | `mbdsdr_ai/gated_recorder.py:252-257` | `AutoSquelch(margin_db=self.cfg["margin"], ...)` / `NoiseSquelch(...)` | 音频域**自跟踪噪声底 + 余量** / 频谱形态判据 | **保留**；不是固定绝对阈值 |
 | 12 | `mbdsdr_ai/agent.py:1796-1813` | `th = float(args.get("threshold_db", -50.0))`，描述 "门控阈值 dBFS" | `sdr_squelch_gate` 对**传入 IQ** 按块 RSSI 判门 | **保留**；独立工具，不驱动桌面静噪 |

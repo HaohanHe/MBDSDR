@@ -37,7 +37,7 @@
 ---
 
 
-> 定轨族的真实状态、单位口径、已修缺陷与物理边界：见 [`orbit-determination.md`](orbit-determination.md)（数据与测试均在仓内）。
+> 定轨族的真实状态、单位口径、缺陷修复记录与物理边界：见 [`orbit-determination.md`](orbit-determination.md)（数据与测试均在仓内）。
 
 ## 1.5 材料能力完整表（五份参考材料 → 可用能力 → 工具 → 验证）
 
@@ -354,7 +354,7 @@ AGENTS.md 的套件文件数同步更正。
 
 **ft8_roundtrip 弱门禁收紧（同轮销账）**：audit_r2 曾记录该测试的
 循环偏移容差掩盖 +1 音调系统偏移 bug。实测当前 demodulate_8fsk 的
-8 相位假设+裕度选择已修掉该 bug（检出中心 1498Hz 下最优循环偏移
+8 相位假设+裕度选择下该 bug 不再复现（检出中心 1498Hz 下最优循环偏移
 =0、79/79 精确匹配、裕度 4.75），遂按 audit_r2 修复建议把断言从
 「8 个循环偏移取最佳」收紧为「锚定必须精确（best_d == 0）+ 准确率
 ≥0.85」双断言——假设选择一旦退化立刻红，不再被容度吞掉。
@@ -441,19 +441,19 @@ memory_search 只检索已落库条目（异步 writer 未 flush 前检索不到
    ——用例与环境的耦合，非产品缺陷。该族隔离单跑 3/3 过、-j4 全套过
    （实测约 71s，串行约 189s）、-j32 必现失败。CI 固定 -j4，两例处补写
    时序敏感注释。**剩余欠账：时基可注入化（根治，未做）。**
-2. **ui_screenshot_minimal.cpp 伪取证风险（已修）**：文件头声称构建
+2. **ui_screenshot_minimal.cpp 伪取证风险（已修；取证 `654d9135` — `cpp/tests/ui_screenshot_minimal.cpp:3` — `Qt offscreen 渲染管线最小自检工具`）**：文件头声称构建
    MBDSDR MainWindow，实际是不链接 mbdsdr_core 的空壳 QMainWindow+QLabel
    （窗口标题还写着 "MBDSDR UI Test"）——产物若被当作 MBDSDR UI 渲染证据
    即为伪造取证。已如实改写头部/标题/输出命名，标明只验证 Qt offscreen
    渲染管线，真正 UI 取证指向注册了 CMake 的 ui_shot_r27（链接
    mbdsdr::MainWindow）。未注册 CMake 本身符合既有惯例（42 个
    ui_screenshot_*.cpp 仅 5 个注册），不是问题。
-3. **nanovna_client.py 耗时注释被实测证伪（已修）**：原注释「115200 波特
+3. **nanovna_client.py 耗时注释被实测证伪（已修；取证 `047e8c0d` — `mbdsdr_ai/nanovna_client.py:676` — `USB CDC 实际不理会 115200 波特率`）**：原注释「115200 波特
    下帧传输约 13.4s」系波特率折算估算；experiments 真机实测 USB CDC 实际
    不理会 115200，320×240 RGB565 帧约 0.5s 传完（**无计时日志留存，按未验证引用**：
    帧体积 153600B 有入库采集件，耗时本身无记录）。已按实测修正并注明出处，
    30s 默认超时保留作慢环境余量。
-4. **身份红线门禁被实测数据误报（已修）**：全量 pytest 回归抓出
+4. **身份红线门禁被实测数据误报（已修；取证 `36bd73da` — `tests/test_identity_redline.py:11` — `两侧不得再邻小数分隔点`）**：全量 pytest 回归抓出
    test_identity_redline 红——experiments 数据里 S11 测量值的小数内嵌位
    （形如 0.148…9825）撞手机号正则。全仓复扫证实仅此一处类误报；正则两侧
    加小数点边界排除后全仓 0 命中，且正反例边界验证通过（引号/标点/字母
@@ -519,7 +519,7 @@ PAT，`Authorization: token <PAT>` 打 `api.github.com` 与 `git-upload-pack`
 打 receive-pack 端点即可定位。另：本环境偶发 TCP 连不上 github.com（134s
 超时），重试即可，非认证问题。
 
-**截图中文全是方框（tofu）——根因是渲染环境无 CJK 字体（phase78 已修复）**：
+**截图中文全是方框（tofu）——根因是渲染环境无 CJK 字体（phase78 修复）**：
 现象：offscreen 渲染的中文 UI 截图里每个字都是空心方框。根因**不是产品
 缺陷**，而是渲染环境缺中文字体——受控实验（隔离 fontconfig：空 dir + 独立
 cache）铁证：同一程序 families 239→3、hasCJK 1→0、520×60 的标签从正常中文
@@ -877,4 +877,4 @@ DF20/21/24 合法帧误拒），孪生钉扎 `cpp/tests/test_adsb_parity_cross.c
 钉扎：`tests/test_cpp_tool_ui_reverse_audit.py`（纯文本、offscreen）断言
 控件计数 143、D1/D2/D3 条数 45/9/8、45 个建议工具名当前均不在
 `s.name` 集合（补工具后同步更新清单+测试）。纪律：只读 C++，未改源码，
-无工具链不声称已修复/已验证。
+无工具链不声称『修复完成 / 验证通过』。

@@ -457,8 +457,8 @@ python -c "from mbdsdr_ai.core.mcp_server import MCPToolSet; print(len(MCPToolSe
 
 ### H.5 与清零表的对应
 
-- 本条目对应 `docs/parameter-unification.md` 第 1 组；方案 ② 落地后该组状态改为
-  `已统一`（按"桌面一条链、C++ 一条链、界面明示"的口径），并在变更记录追加一行。
+- 本条目对应 `docs/parameter-unification.md` 第 1 组；该组状态列按「统一（收敛态）」口径登记
+  （"桌面一条链、C++ 一条链、界面明示"），逐行四元组见该文件 §1。
 - `receive_pipeline` 基线未动：当前 17 ERROR / 3 WARN / 1 INFO，`tests/test_swallow_guard.py` 21 passed。
   （2026-11-05 操作逻辑线 A 笔收口后为 **13 ERROR / 1 WARN / 1 INFO**，棘轮只降未升。）
 

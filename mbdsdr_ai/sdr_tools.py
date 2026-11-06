@@ -4513,6 +4513,44 @@ def _satellite_passes(args):
     out += f"=== 未来 {hours}h 卫星过境预测 (仰角>={min_elev}°) ===\n共 {len(passes)} 次\n"
     out += ("时刻来源：sat_passes（60 秒粗扫 + 2 秒细扫 + 0.5 秒二分；"
             "升落时刻偏差 ≤0.5 秒、中天采样偏差 ≤1 秒；不是卫星位置精度）\n\n")
+    # TLE 刷新状态是**本次报告全局共享**的一份缓存，不是每次过境的属性。
+    # 旧式逐条写 `[未更新] 离线模式…`，25 次过境就重复 25 遍、吃掉约 1/4
+    # 输出预算，把列表尾部挤出 tool_output_max_chars 的截断窗口（用户看不到
+    # 后面十几次过境，测试里还会表现为「目标卫星不在报告里」）。这里只在
+    # 头部写一次去重后的说明，逐条只留该次过境自己的数据。
+    refresh_notes: list[str] = []
+    for p in passes:
+        if p.get("refresh_status") == "not_updated":
+            note = str(p.get("refresh_error") or "").strip()
+            if note and note not in refresh_notes:
+                refresh_notes.append(note)
+    if refresh_notes:
+        out += "TLE 刷新状态（本次全部过境共用同一份缓存）：\n"
+        for note in refresh_notes:
+            out += f"  [未更新] {note}\n"
+        out += "\n"
+    # TLE 批次说明（tier / 龄期 / 精度提示）同样按批次共享：同一句话重复
+    # 25 次会再吃掉一截输出预算。头部按组合去重写一次，逐条只留短标签
+    # 指明该次过境属于哪个风险等级，完整说明仍可查。
+    risk_notes: list[tuple[str, str, str, str]] = []
+    for p in passes:
+        risk = str(p.get("accuracy_risk") or "")
+        if not risk or risk == "low":
+            continue
+        item = (risk, str(p.get("tle_tier") or ""),
+                str(p.get("tle_age_days") or ""),
+                str(p.get("accuracy_note") or ""))
+        if item not in risk_notes:
+            risk_notes.append(item)
+    if risk_notes:
+        out += "TLE 精度风险（同一批次说明只列一次"
+        out += "，多批次时逐条标等级）：\n" if len(risk_notes) > 1 else "）：\n"
+        for risk, tier, age, note in risk_notes:
+            out += f"  [{risk}] TLE {tier}（{age} 天）: {note}\n"
+        if len(risk_notes) == 1:
+            out += f"  本次全部过境均为 [{risk_notes[0][0]}]，逐条不再重复。\n"
+        out += "\n"
+    multi_risk = len(risk_notes) > 1
     for i, p in enumerate(passes):
         out += f"{i+1}. {p['satellite']}\n"
         out += f"   升: {p['rise_time']} (方位 {p['rise_azimuth']}°)\n"
@@ -4520,11 +4558,8 @@ def _satellite_passes(args):
         out += f"   落: {p['set_time']} (方位 {p['set_azimuth']}°)  时长 {p['duration_s']}s\n"
         if p.get("doppler_hz"):
             out += f"   多普勒范围: {p['doppler_hz']['min_hz']:.0f} ~ {p['doppler_hz']['max_hz']:.0f} Hz\n"
-        if p.get("accuracy_risk") and p["accuracy_risk"] != "low":
-            out += (f"   [精度风险 {p['accuracy_risk']}] TLE {p.get('tle_tier', '')}"
-                    f"（{p.get('tle_age_days')} 天）: {p.get('accuracy_note', '')}\n")
-        if p.get("refresh_status") == "not_updated":
-            out += f"   [未更新] {p.get('refresh_error', '')}\n"
+        if multi_risk and p.get("accuracy_risk") and p["accuracy_risk"] != "low":
+            out += f"   [精度风险 {p['accuracy_risk']}]\n"
         out += "\n"
     return out
 

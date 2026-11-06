@@ -58,7 +58,10 @@ def adsb_synthetic_iq_uint8():
     from mbdsdr_ai import adsb
     fs = 2.4e6
     frame = adsb.build_identification_frame("AABBCC", "CSN1234")
-    sig = adsb.modulate_baseband(frame, fs=fs, lead_us=20)
+    # 4MHz 整数档合成（0.5us=2 样点）后带限抽取到 2.4MHz，物理上等价真机录制
+    from scipy.signal import resample_poly
+    sig = resample_poly(adsb.modulate_baseband(frame, fs=4e6, lead_us=20),
+                        3, 5).astype(np.complex64)
     total = 200_000  # ≈ 83 ms @ 2.4 MS/s
     iq = np.zeros(total, dtype=np.complex64)
     offset = 20_000
@@ -181,7 +184,9 @@ class TestDecodeDeterministic:
         from mbdsdr_ai import adsb
         fs = 2.4e6
         frame = adsb.build_long_frame(0x90, 0xAABBCC, bytes(7))  # DF18 + 有效 CRC
-        sig = adsb.modulate_baseband(frame, fs=fs, lead_us=20)
+        from scipy.signal import resample_poly
+        sig = resample_poly(adsb.modulate_baseband(frame, fs=4e6, lead_us=20),
+                            3, 5).astype(np.complex64)
         iq = np.zeros(200_000, dtype=np.complex64)
         iq[20_000:20_000 + len(sig)] = sig.astype(np.complex64)
         data_path = tmp_path / "df18.sigmf-data"

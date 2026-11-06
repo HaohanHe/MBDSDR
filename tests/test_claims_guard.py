@@ -87,3 +87,34 @@ def test_waivers_are_not_stale():
         raise AssertionError(
             "白名单条目已失效（断言已补证或已删除），请删行并调小 waived-total：\n  "
             + "\n  ".join(detail))
+
+
+def test_new_claim_without_hash_turns_gate_red(tmp_path):
+    """变异反证：新写一条无四元组断言 → 闸门必红。
+
+    真实仓库里的白名单只减不增，靠的就是这条判据：
+    新断言过不了 verify_claims（NO_HASH），指纹又不在白名单，
+    于是 `measured - waived` 非空 → `test_no_new_or_modified_unverified_claims` 红。
+    同一行补成完整四元组后必须转为「可证实」并放行（证明红来自缺证据，不是措辞）。
+    """
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    sample = docs / "mutation-sample.md"
+    sample.write_text("# 变异样本\n\n登录超时处理已修复，未附提交与路径。\n", encoding="utf-8")
+
+    claims = vc.verify_docs(ROOT, docs_root=docs)
+    bad = [c for c in claims if c.status != vc.OK]
+    assert bad, "注入的无 hash 断言没有被 verify_docs 判为未证实"
+    assert bad[0].status == vc.NO_HASH, f"期望 {vc.NO_HASH}，实得 {bad[0].status}"
+
+    measured = Counter(_fp(c.doc, c.text) for c in bad)
+    waived, _ = _waived()
+    assert measured - waived, "新断言未被闸门识别为增量：白名单会漏放"
+
+    sample.write_text(
+        "# 变异样本\n\n登录超时处理已修复 — `451073e` — `desktop/module_panel.py:323` — "
+        "`round(v * 1e6)`\n",
+        encoding="utf-8",
+    )
+    claims = vc.verify_docs(ROOT, docs_root=docs)
+    assert [c.status for c in claims] == [vc.OK], "补全四元组后仍未转为可证实"

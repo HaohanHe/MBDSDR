@@ -145,9 +145,13 @@ class AIPanel(QWidget):
             pass
         return {}
 
+    #: 最近一次 ``_save_config`` 的失败原因；成功时为 None。调用方据此
+    #: 决定能不能说「已保存」（写盘失败仍报完成态会让人重启后才发现丢配置）。
+    _last_save_error: Optional[str] = None
+
     @classmethod
-    def _save_config(cls, config: Dict[str, Any]):
-        """保存 API 配置到配置文件（统一键名 base_url）。"""
+    def _save_config(cls, config: Dict[str, Any]) -> bool:
+        """保存 API 配置到配置文件（统一键名 base_url）。返回是否真的写盘成功。"""
         try:
             if normalize_config_keys is not None:
                 config = normalize_config_keys(config)
@@ -159,8 +163,11 @@ class AIPanel(QWidget):
                 os.chmod(cls.CONFIG_FILE, 0o600)
             except Exception:
                 pass
-        except Exception:
-            pass
+            cls._last_save_error = None
+            return True
+        except Exception as e:  # noqa: BLE001 - 不抛给 UI，但必须让失败可见
+            cls._last_save_error = f"{e.__class__.__name__}: {e}"
+            return False
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -389,38 +396,49 @@ class AIPanel(QWidget):
         form.addRow(buttons)
 
         if dialog.exec() == QDialog.Accepted:
-            api_key = api_key_edit.text().strip()
-            base_url = base_url_edit.text().strip()
-            model = model_edit.text().strip()
-            # 保存到配置文件（统一键名 base_url；其余既有键原样保留）
-            self._saved_config = {
-                **self._saved_config,
-                "api_key": api_key,
-                "base_url": base_url,
-                "model": model,
-            }
-            self._save_config(self._saved_config)
+            self._apply_config_from_dialog(
+                api_key_edit.text().strip(),
+                base_url_edit.text().strip(),
+                model_edit.text().strip())
 
-            if not api_key:
-                # 未填写 API Key：不初始化 agent，避免后续调用失败
-                self.agent = None
-                self._update_ai_status()
-                self._add_system_message(
-                    "未填写 API Key，AI 将不可用。请在配置对话框中填入 API Key 后重启对话。"
-                )
-                QMessageBox.information(
-                    self, "未配置 API Key",
-                    "未填写 API Key，AI 对话功能将不可用。\n"
-                    "请重新点击「配置」填入 API Key。"
-                )
-                return
+    def _apply_config_from_dialog(self, api_key: str, base_url: str,
+                                  model: str) -> None:
+        """落盘并生效对话框结果：写盘失败时绝不报「已配置并保存」。"""
+        # 保存到配置文件（统一键名 base_url；其余既有键原样保留）
+        self._saved_config = {
+            **self._saved_config,
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model,
+        }
+        saved = self._save_config(self._saved_config)
 
-            # 重新初始化 agent
-            config = AgentConfig(api_key=api_key, base_url=base_url, model=model)
-            self.agent = self._create_agent(config)
-            self._apply_pending_mcp_tools()
+        if not api_key:
+            # 未填写 API Key：不初始化 agent，避免后续调用失败
+            self.agent = None
             self._update_ai_status()
-            self._add_system_message(f"AI 已配置并保存: {model}（配置文件: ~/.mbdsdr/config.json）")
+            self._add_system_message(
+                "未填写 API Key，AI 将不可用。请在配置对话框中填入 API Key 后重启对话。"
+            )
+            QMessageBox.information(
+                self, "未配置 API Key",
+                "未填写 API Key，AI 对话功能将不可用。\n"
+                "请重新点击「配置」填入 API Key。"
+            )
+            return
+
+        # 重新初始化 agent
+        config = AgentConfig(api_key=api_key, base_url=base_url, model=model)
+        self.agent = self._create_agent(config)
+        self._apply_pending_mcp_tools()
+        self._update_ai_status()
+        if saved:
+            self._add_system_message(
+                f"AI 已配置并保存: {model}（配置文件: ~/.mbdsdr/config.json）")
+        else:
+            self._add_system_message(
+                f"AI 配置未能写入磁盘（{self._last_save_error}）："
+                "本次设置只在本次运行中生效，重启后需要重新填写。")
 
     def _create_agent(self, config):
         """创建 agent，并沿用旧会话的天空硬件能力账本（不重新追问）。"""

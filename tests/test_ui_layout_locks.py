@@ -41,7 +41,7 @@ import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSettings, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QImage  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QApplication, QScrollArea, QTabBar, QWidget,
+    QApplication, QComboBox, QScrollArea, QTabBar, QWidget,
 )
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -876,3 +876,104 @@ def test_bottom_dock_height_is_locked():
         app.sendPostedEvents(None, QEvent.DeferredDelete)
     finally:
         restore()
+
+
+# ---------------------------------------------------------------------------
+# 规则 5：内容会重建的组合框，最小宽不得随「当时塞进去的文本」冻结
+# ---------------------------------------------------------------------------
+# 事故（2026-11-06）：preset_combo 用 AdjustToContentsOnFirstShow，构造时塞了
+# 长占位「（无预设：请用“自动扫台”或手动输入频率）」，最小宽被冻进 292；
+# 之后 clear() 不失效缓存，另一支进程里算出 101，右栏就在 356↔278 两态跳。
+# 同类形态：任何「先有长文案 → 之后 clear()/重建」的下拉都会把首帧的文本宽度
+# 冻成最小宽。修法不是调阈值，而是给与内容无关的稳定宽策略。
+_LONG_ITEM = "（无预设：请用“自动扫台”或手动输入频率）—— 刻意超长的占位说明文本"
+_SHORT_ITEMS = ["2.4 MHz", "1.2 MHz", "3.2 MHz"]
+
+
+def _width_after_cycle(combo: QComboBox) -> tuple[int, int]:
+    """塞长条目 → 清成短条目，返回（长条目时最小宽，清成短条目后最小宽）。"""
+    combo.clear()
+    combo.addItem(_LONG_ITEM)
+    _pump(60)
+    wide = combo.minimumSizeHint().width()
+    combo.clear()
+    for text in _SHORT_ITEMS:
+        combo.addItem(text)
+    _pump(60)
+    return wide, combo.minimumSizeHint().width()
+
+
+@pytest.mark.parametrize("name", ["preset_combo", "bookmark_combo", "sample_rate_combo"])
+def test_control_panel_combo_width_independent_of_item_text(name):
+    """最小宽必须与条目文本无关：长文案撑开后再清成短条目，宽度必须不变。"""
+    from control_panel import ControlPanel
+
+    panel = ControlPanel()
+    panel.show()
+    _pump(80)
+    try:
+        wide, narrow = _width_after_cycle(getattr(panel, name))
+        assert wide == narrow, (
+            "%s 的最小宽随条目文本变化（长条目 %d → 短条目 %d，差 %d）："
+            "又出现了「首帧长文本被冻进 minimumSizeHint」的形态"
+            % (name, wide, narrow, wide - narrow))
+    finally:
+        panel.close()
+        panel.deleteLater()
+        app.sendPostedEvents(None, QEvent.DeferredDelete)
+        _pump(30)
+
+
+@pytest.mark.parametrize("name", ["device_combo", "sr_combo"])
+def test_module_panel_combo_width_independent_of_item_text(name):
+    """模块面板的设备名/采样率档位同样会 clear() 重建，最小宽不得被冻住。"""
+    from module_panel import ModulePanel
+
+    panel = ModulePanel()
+    panel.show()
+    _pump(80)
+    try:
+        wide, narrow = _width_after_cycle(getattr(panel, name))
+        assert wide == narrow, (
+            "%s 的最小宽随条目文本变化（长条目 %d → 短条目 %d，差 %d）"
+            % (name, wide, narrow, wide - narrow))
+    finally:
+        panel.close()
+        panel.deleteLater()
+        app.sendPostedEvents(None, QEvent.DeferredDelete)
+        _pump(30)
+
+
+def test_content_rebuilt_combos_declare_stable_width_policy():
+    """静态清单守卫：会 clear() 重建的 *_combo 必须显式声明与内容无关的宽策略。
+
+    扫描 desktop/control_panel.py 与 desktop/module_panel.py；新增同类下拉时
+    这个用例会直接报出「文件:行 控件名」，逼作者先声明
+    ``AdjustToMinimumContentsLengthWithIcon`` 与 ``setMinimumContentsLength``。
+    """
+    import re
+
+    targets = ("control_panel.py", "module_panel.py")
+    offenders = []
+    for fname in targets:
+        path = os.path.join(_ROOT, "desktop", fname)
+        with open(path, encoding="utf-8") as fh:
+            source = fh.read()
+        lines = source.splitlines()
+        for idx, line in enumerate(lines):
+            match = re.match(
+                r"\s*self\.(\w+_combo)\s*=\s*(QComboBox|_CapabilitySampleRateCombo)\(",
+                line)
+            if not match:
+                continue
+            name = match.group(1)
+            if ("self.%s.clear(" % name) not in source:
+                continue  # 条目固定、从不重建的静态下拉不在本条规则内
+            block = "\n".join(lines[idx:idx + 40])
+            if ("AdjustToMinimumContentsLengthWithIcon" not in block
+                    or "setMinimumContentsLength" not in block):
+                offenders.append("%s:%d %s" % (fname, idx + 1, name))
+    assert not offenders, (
+        "以下会 clear() 重建的组合框没有显式稳定宽策略"
+        "（AdjustToMinimumContentsLengthWithIcon + setMinimumContentsLength）："
+        + "；".join(offenders))

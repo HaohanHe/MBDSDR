@@ -395,7 +395,7 @@ windows **13/7 九次**、offscreen **35/14 四次**，均 ≤ 现行 `TEMPORARY
 反证：把「自动」放回静噪行即成 ① 的形态 —— 实测回到 **15/9（windows）**、
 **37/16（offscreen）**，与 `b0a440e3` 九次/四次结果逐字一致。
 
-附更正：旧表把 `preset_combo` 的 `sizeHint` 记成了 `minimumSizeHint`。实测两者同值：
+附说明：旧表把 `preset_combo` 的 `sizeHint` 记成了 `minimumSizeHint`。实测两者同值：
 windows N=16 **216** / N=8 **144**；offscreen N=16 **280** / N=8 **176**。
 
 ### §2.4 左右栏（按需）

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import sys
+import math
 from typing import Dict, List, Optional
 
 import logging
@@ -273,6 +274,12 @@ class ModulePanel(QWidget):
         lv = QVBoxLayout(left)
         self.device_combo = QComboBox()
         self.device_combo.setMinimumWidth(180)
+        # 每次刷新都 clear() 后重建设备名，文案长短由枚举结果决定；
+        # 默认 AdjustToContentsOnFirstShow 会把首帧的「未发现SDR设备」/长设备名
+        # 冻进最小宽（实测 128 vs 清成短名后的 95）。改稳定策略。
+        self.device_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.device_combo.setMinimumContentsLength(16)
         self.device_combo.currentIndexChanged.connect(self._on_device_selected)
         lv.addWidget(self.device_combo)
         btn_row = QHBoxLayout()
@@ -345,6 +352,11 @@ class ModulePanel(QWidget):
         # 档位来自所选设备能力（与主窗口 _fill_sr_combo 共用
         # constants.sample_rate_combo_items）；不持有前端静态档位表。
         # 未连接/能力未知时只显示单项「未知」说明并置灰（不静默列全表）。
+        # 该下拉在连接/换设备时 clear() 重建；默认策略会把首帧的长「未知…」
+        # 说明冻进最小宽（实测 333 vs 短档位 93），与 preset_combo 同形态。
+        self.sr_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.sr_combo.setMinimumContentsLength(16)
         self._fill_sample_rate_options(None)
         form.addRow("采样率", self.sr_combo)
 
@@ -419,6 +431,26 @@ class ModulePanel(QWidget):
             self.params_hint.setText(
                 "频率不可调：模块面板调谐尚未接入后端（已禁用，避免假调谐）；"
                 "增益滑块只在连接时随设备下发")
+
+    def set_gain_applied(self, db: float) -> bool:
+        """回填设备真实增益读数（只改标签，不动滑杆）。
+
+        与 :meth:`ControlPanel.set_gain_applied` 同口径：滑杆是配置意图，
+        标签是设备读数。``main_window._show_real_gain`` 在写入成功/失败后
+        都要读回真值；此前只回写了控制面板，模块面板标签一直停在「—」，
+        同一台设备在两个面板上给出两个读数。
+        """
+        if not self._sdr_connected:
+            return False
+        try:
+            value = float(db)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+        self._confirmed_gain_db = value
+        self.gain_val.setText(f"{int(round(value))} dB")
+        return True
 
     def set_rf_params(self, freq_hz: Optional[float] = None,
                       gain_db: Optional[float] = None) -> None:

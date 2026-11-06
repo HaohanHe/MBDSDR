@@ -14,6 +14,11 @@
 4. 书签调谐失败后仍继续下发带宽（设备会被改到错误频率上）；
 5. 面板扫描结束恢复前端频率失败被 ``except: pass`` 静默。
 
+第四环（写盘类用户动作的成败可见性）：
+6. 卫星云图「另存 PNG」写盘失败被 ``except: pass`` 吞掉，用户以为已保存；
+7. AI 配置对话框无论是否写盘成功都报「AI 已配置并保存」；
+8. 录制 tap 的兜底 ``except: pass`` 让未预期写盘异常后继续录，最后仍报「录制完成」。
+
 反证：任一处改回旧行为，对应用例必红。
 """
 import os
@@ -164,3 +169,120 @@ def test_panel_scan_restore_failure_is_visible(qtapp):
     assert "前端频率恢复失败" in last
     assert "当前显示为 146.500000 MHz" in last
     assert "设备未回到 145.800000 MHz" in last
+
+
+# ======================================================================
+# 第四环：写盘类用户动作的成败可见性
+# ======================================================================
+
+def test_satellite_save_png_failure_is_visible(qtapp, tmp_path, monkeypatch):
+    """另存云图写失败必须报出来（旧实现 except: pass，用户以为已保存）。"""
+    from PIL import Image
+    from satellite_image_panel import SatelliteImagePanel
+
+    src = tmp_path / "src.png"
+    Image.new("L", (8, 8)).save(src)
+    panel = SatelliteImagePanel()
+    panel._current_png = str(src)
+    target = tmp_path / "no-such-dir" / "out.png"   # 目录不存在 → 写盘必失败
+    monkeypatch.setattr(
+        "satellite_image_panel.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(target), "")))
+
+    panel._save_current()
+
+    assert not target.exists()
+    text = panel.stats_label.text()
+    assert "保存 PNG 失败" in text, f"写盘失败必须可见：{text!r}"
+    assert target.name in text, f"失败提示要点明目标文件：{text!r}"
+    assert "云图已另存" not in text, f"失败路径不得出现成功文案：{text!r}"
+
+
+def test_satellite_save_png_success_says_saved(qtapp, tmp_path, monkeypatch):
+    """写盘成功才出现「云图已另存」，且文件真的落地。"""
+    from PIL import Image
+    from satellite_image_panel import SatelliteImagePanel
+
+    src = tmp_path / "src.png"
+    Image.new("L", (8, 8)).save(src)
+    panel = SatelliteImagePanel()
+    panel._current_png = str(src)
+    target = tmp_path / "out.png"
+    monkeypatch.setattr(
+        "satellite_image_panel.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(target), "")))
+
+    panel._save_current()
+
+    assert target.exists(), "成功路径必须真的写出文件"
+    assert "云图已另存" in panel.stats_label.text()
+    assert "保存 PNG 失败" not in panel.stats_label.text()
+
+
+def _ai_panel_with_stubbed_side_effects(monkeypatch, tmp_path):
+    """构造 AIPanel 并把落盘目标/状态刷新都隔离（不碰真实用户配置）。"""
+    import ai_panel as ap
+    if not ap.AI_CORE_AVAILABLE:
+        pytest.skip("mbdsdr_ai 不可用，跳过 AI 面板配置用例")
+    monkeypatch.setattr(ap.AIPanel, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(ap.AIPanel, "CONFIG_FILE",
+                        str(tmp_path / "absent-config.json"))
+    panel = ap.AIPanel()
+    monkeypatch.setattr(panel, "_create_agent",
+                        lambda cfg: SimpleNamespace(config=cfg))
+    monkeypatch.setattr(panel, "_update_ai_status", lambda: None)
+    monkeypatch.setattr(panel, "_apply_pending_mcp_tools", lambda: None)
+    msgs = []
+    monkeypatch.setattr(panel, "_add_system_message", msgs.append)
+    return panel, msgs
+
+
+def test_ai_config_write_failure_is_not_reported_as_saved(qtapp, tmp_path,
+                                                         monkeypatch):
+    """写盘失败时不得说「已配置并保存」（旧实现无条件报成功）。"""
+    import ai_panel as ap
+    panel, msgs = _ai_panel_with_stubbed_side_effects(monkeypatch, tmp_path)
+    # 把目标设成已存在的目录 → open(path, "w") 必失败
+    monkeypatch.setattr(ap.AIPanel, "CONFIG_FILE", str(tmp_path))
+
+    panel._apply_config_from_dialog(
+        "sk-test", "https://example.invalid/v1", "test/model")
+
+    joined = "\n".join(msgs)
+    assert "已配置并保存" not in joined, f"写盘失败不得报已保存：{joined!r}"
+    assert "未能写入磁盘" in joined, f"必须说清没有落盘：{joined!r}"
+    assert ap.AIPanel._last_save_error, "失败原因必须留档"
+
+
+def test_ai_config_write_success_says_saved(qtapp, tmp_path, monkeypatch):
+    """写盘成功时保留原完成态，并真的落盘。"""
+    import ai_panel as ap
+    panel, msgs = _ai_panel_with_stubbed_side_effects(monkeypatch, tmp_path)
+    target = tmp_path / "config.json"
+    monkeypatch.setattr(ap.AIPanel, "CONFIG_FILE", str(target))
+
+    panel._apply_config_from_dialog(
+        "sk-test", "https://example.invalid/v1", "test/model")
+
+    assert target.exists(), "成功路径必须真的写出配置"
+    joined = "\n".join(msgs)
+    assert "已配置并保存" in joined, f"成功路径应保留完成态：{joined!r}"
+    assert ap.AIPanel._last_save_error is None
+
+
+def test_record_tap_write_error_aborts_instead_of_continuing():
+    """录制 tap 的未预期写盘异常必须中止录音，不能吞掉后仍报「录制完成」。"""
+    aborts = []
+    stub = SimpleNamespace(
+        _recording=True,
+        _record_iq_buffer=[],
+        _record_write_chunk=lambda iq: (_ for _ in ()).throw(
+            RuntimeError("写盘异常")),
+        _report_record_abort=aborts.append,
+    )
+    from main_window import MainWindow
+
+    MainWindow._on_pipeline_record_iq(stub, object())
+
+    assert aborts, "写盘异常未收口：录音会继续并最终报「录制完成」"
+    assert "录音写入异常" in aborts[0]

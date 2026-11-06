@@ -4887,6 +4887,11 @@ class MainWindow(QMainWindow):
         cp = getattr(self, "control_panel", None)
         if cp is not None:
             cp.set_gain_applied(real_db)
+        # 模块面板也显示同一个设备读数。此前只回写控制面板，模块面板标签
+        # 一直停在「—」——两个面板对同一台设备给出两个读数。
+        mp = getattr(self, "module_panel", None)
+        if mp is not None and hasattr(mp, "set_gain_applied"):
+            mp.set_gain_applied(real_db)
 
     @Slot(int)
     def _on_gain_changed(self, db: int):
@@ -6308,12 +6313,18 @@ class MainWindow(QMainWindow):
             getattr(self, "_record_samples_total", 0) + int(len(iq))
 
     def _on_pipeline_record_iq(self, iq: np.ndarray):
-        """录制 tap：RecordTap 线程把每帧 IQ（已是独立副本）交给 UI 累积。"""
+        """录制 tap：RecordTap 线程把每帧 IQ（已是独立副本）交给 UI 累积。
+
+        写盘异常一律收口到 ``_report_record_abort``：``_record_write_chunk``
+        自己处理 OSError/ValueError，能漏到这里的属未预期异常；若像旧实现那样
+        ``except: pass``，录音会继续跑并最终报「录制完成」，用户以为整场都
+        在盘上——正是 S7 要消灭的假成功。
+        """
         if self._recording and self._record_iq_buffer is not None:
             try:
                 self._record_write_chunk(iq)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - 未预期异常也必须中止录音
+                self._report_record_abort(f"录音写入异常: {exc}")
 
     def _stop_iq_streams(self):
         """断开时：停流水线全部线程 + 清 VfoManager 绑定 + 关声卡 + 停 IQ 轮询。

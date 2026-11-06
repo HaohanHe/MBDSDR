@@ -94,7 +94,7 @@ class TestLeftPane:
         assert isinstance(mw.left_tab, QTabWidget)
 
     def test_sky_is_first_tab(self, mw):
-        assert "天空模式" in mw.left_tab.tabText(0)
+        assert "星象仪模式" in mw.left_tab.tabText(0)
 
     def test_spectrum_present_as_tab(self, mw):
         texts = [mw.left_tab.tabText(i) for i in range(mw.left_tab.count())]

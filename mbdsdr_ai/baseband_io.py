@@ -241,8 +241,96 @@ def _segments_from_changes(changes, total_samples: int):
     return segments, duration
 
 
-def load_iq(path: str, sample_rate: float = None) -> Dict:
+def _iq_file_samples(path: str, fmt: str) -> int:
+    """按格式推算文件里的完整样本数（尾部不足一个样本的字节不计）。"""
+    if fmt == "wav":
+        with _wave.open(path, "rb") as wf:
+            return int(wf.getnframes())
+    size = os.path.getsize(path)
+    return int(size // (4 if fmt == "cs16" else 8))
+
+
+def _read_iq_stream(path: str, fmt: str, wav_scale: float, chunk: int,
+                    max_samples: Optional[int],
+                    progress: Optional[callable],
+                    should_cancel: Optional[callable]):
+    """分块读 IQ；返回 (complex64 数组, 文件样本数, 是否被取消)。
+
+    每块只把「本块」的 int16/float32 原样转成 complex64，绝不把整个文件
+    先转 float64。``max_samples`` 限制本次分配上限，超出部分不读、如实告知。
+    """
+    file_samples = _iq_file_samples(path, fmt)
+    limit = file_samples
+    if max_samples is not None:
+        try:
+            limit = max(0, min(file_samples, int(max_samples)))
+        except (TypeError, ValueError):
+            limit = file_samples
+    out = np.empty(limit, dtype=np.complex64)
+    loaded = 0
+    cancelled = False
+    wf = _wave.open(path, "rb") if fmt == "wav" else None
+    fh = open(path, "rb") if wf is None else None
+    try:
+        while loaded < limit:
+            n = min(chunk, limit - loaded)
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
+            if fmt == "wav":
+                raw = np.frombuffer(wf.readframes(n), dtype=np.int16)
+                if raw.size < 2:
+                    break
+                n = raw.size // 2
+                seg = raw.astype(np.float32)
+                seg = (seg[0::2] + 1j * seg[1::2]) * np.float32(wav_scale)
+            elif fmt == "cs16":
+                # complex signed 16-bit I/Q 交错；之前被当 float32 读=误码。
+                # 归一化到 [-1,1]（32768 满幅），与 cf32 分支同量纲。
+                raw = np.fromfile(fh, dtype=np.int16, count=2 * n)
+                if raw.size < 2:
+                    break
+                n = raw.size // 2
+                seg = (raw[:2 * n].astype(np.float32) / np.float32(32768.0))
+                seg = seg[0::2] + 1j * seg[1::2]
+            else:
+                raw = np.fromfile(fh, dtype=np.float32, count=2 * n)
+                if raw.size < 2:
+                    break
+                n = raw.size // 2
+                seg = raw[0::2] + 1j * raw[1::2]
+            out[loaded:loaded + n] = seg
+            loaded += n
+            if progress is not None:
+                progress(loaded, limit)
+    finally:
+        if wf is not None:
+            wf.close()
+        if fh is not None:
+            fh.close()
+    if loaded < limit:
+        # 截断/取消都只返回真实读到的部分；不补零、不假装读全
+        out = out[:loaded].copy()
+    return out, file_samples, cancelled
+
+
+def load_iq(path: str, sample_rate: float = None, *,
+            max_samples: Optional[int] = None,
+            chunk_samples: int = 1 << 20,
+            progress: Optional[callable] = None,
+            should_cancel: Optional[callable] = None) -> Dict:
     """读回 IQ 文件为复数 IQ。优先读 sidecar 拿采样率/格式。
+
+    内存口径（S6）：
+      * 分块读取，单块默认 104 万样本；不再整文件 ``astype(np.float64)``
+        （旧实现 1.1 GB cf32 的峰值可达文件大小 6 倍以上）；
+      * 输出统一为 ``complex64``（8 字节/样本，与 cf32 文件同量纲），
+        峰值约为「文件大小 + 2×单块」；
+      * ``max_samples`` 给出本次加载上限，超出部分如实标
+        ``truncated``/``truncation_reason``，绝不假装读全；
+      * ``progress(loaded, total)`` 每块回调一次（供后台线程推进度条）；
+      * ``should_cancel()`` 每块调用一次，返回真则提前收尾并标
+        ``cancelled``。
 
     分段语义（S4）：
       * ``segments`` 清单（分段落盘的录音）：返回每段 path/速率/样本/时长，
@@ -263,21 +351,12 @@ def load_iq(path: str, sample_rate: float = None) -> Dict:
         sample_rate = meta.get("sample_rate", 2.4e6)
 
     fmt = meta.get("format") or _format_from_path(path)
-    if fmt == "wav":
-        with _wave.open(path, "rb") as wf:
-            raw = wf.readframes(wf.getnframes())
-        stereo = np.frombuffer(raw, dtype=np.int16).astype(np.float64)
-        iq = stereo[0::2] + 1j * stereo[1::2]
-        scale = float(meta.get("wav_scale", 1.0))
-        iq = iq * scale
-    elif fmt == "cs16":
-        # complex signed 16-bit I/Q 交错；之前被当 float32 读=误码。
-        # 归一化到 [-1,1]（32768 满幅），与 cf32 分支同量纲。
-        raw = np.fromfile(path, dtype=np.int16).astype(np.float64)
-        iq = (raw[0::2] + 1j * raw[1::2]) / 32768.0
-    else:
-        raw = np.fromfile(path, dtype=np.float32).astype(np.float64)
-        iq = raw[0::2] + 1j * raw[1::2]
+    if fmt not in ("wav", "cs16", "cf32"):
+        fmt = "cf32"
+    wav_scale = float(meta.get("wav_scale", 1.0))
+    chunk = max(1, int(chunk_samples))
+    iq, file_samples, cancelled = _read_iq_stream(
+        path, fmt, wav_scale, chunk, max_samples, progress, should_cancel)
 
     total = int(len(iq))
     result = {
@@ -293,7 +372,24 @@ def load_iq(path: str, sample_rate: float = None) -> Dict:
         "driver": meta.get("driver", ""),
         "samples": total,
         "duration_s": round(total / (sample_rate or 1), 3),
+        "file_samples": int(file_samples),
     }
+    if file_samples > total:
+        result["truncated"] = True
+        result["truncation_reason"] = (
+            f"文件共 {file_samples} 样本，本次只读前 {total} 样本"
+            f"（加载上限 max_samples={max_samples}）")
+        result["file_duration_s"] = round(file_samples / (sample_rate or 1), 3)
+    else:
+        result["truncated"] = False
+    if cancelled:
+        result["cancelled"] = True
+        result["cancel_reason"] = f"读取被取消，只完成 {total}/{file_samples} 样本"
+
+    # 截断/取消时只返回部分样本：段表描述的是整个文件，混在一起会给出
+    # 与本次数据不符的时长，直接不返回段表（调用方按 truncated 提示）。
+    if result["truncated"] or cancelled:
+        return result
 
     manifest = meta.get("segments")
     changes = meta.get("sample_rate_changes")

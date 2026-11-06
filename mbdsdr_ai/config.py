@@ -30,7 +30,10 @@ DEFAULT_CONFIG = {
     "temperature": 0.7,
     "top_p": 0.9,
     "timeout": 60,
-    "tool_output_max_chars": 4000,     # 工具输出最大字符数，超过截断/写文件
+    # 工具输出预算：25 次过境的完整报告约 3.5k 字，TLE 缓存带降级标注时
+    # 会到 4k+，旧值 4000 会稳定截断列表尾部（模型/用户看不到后半张列表）。
+    # 提到 8000 保留整张列表；报告另有「全局状态去重」压缩，见 sdr_tools。
+    "tool_output_max_chars": 8000,
     "enable_tool_calling": True,
     "enable_self_evolution": True,      # 自进化默认开启（沙箱验证+快照回滚，不改真实文件）
     "sandbox_enabled": True,
@@ -89,7 +92,7 @@ class AgentConfig:
     timeout: int = 60
 
     # 工具调用
-    tool_output_max_chars: int = 4000
+    tool_output_max_chars: int = 8000
     enable_tool_calling: bool = True
 
     # 自进化

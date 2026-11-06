@@ -10,7 +10,7 @@
 
 三类问题：A 有前端没后端（点了没反应）· B 有后端没前端（能力不可达）· C 设置反人类（改了不落盘 / 语义看不懂 / 重启回退）。
 
-## 一、已修（Python 桌面端，全部已提交并测试钉住）
+## 一、已入库改动（Python 桌面端，逐行提交见下表，测试钉住）
 
 | # | 缺陷 | 类 | 修复 | 提交 |
 |---|---|---|---|---|
@@ -36,7 +36,7 @@
 | C++ 增益任意浮点（离散档位缺失）= 反人类 | **已做对**：滑杆带范围（负增益=RF 衰减，SDR++ 风格）+ 离散档位下拉（仅在驱动报合法档位时显示） | `main_window.cpp:639-651` |
 | `_on_anr_strength` 是空槽 = ANR 强度改了没反应 | **误判**：面板内部直接写 `self._anr.cfg.alpha = alpha`（`anr_panel.py:146`），强度生效；主窗口槽只是冗余通知 | `14c7ed0` 已把台账改为钉住真实生效路径 |
 
-## 三、尚未闭环（如实登记，不声称已修）
+## 三、尚未闭环（如实登记，不声称『修复结论』）
 
 1. **C++ 侧工具面 ↔ UI 全量对拍未做完**。已提取 16 个 `set_*` 工具（`set_bandwidth`/`set_cdcss`/`set_color_map`/`set_ctcss`/`set_doppler_compensation`/`set_fft_params`/`set_lrpt`/`set_mode`/`set_network_audio_sink`/`set_noise_blanker`/`set_squelch`/`set_vfo_armed`/`set_vfo_bandwidth`/`set_vfo_frequency`/`set_vfo_mode`/`set_vna_sweep`）并逐个在 `cpp/src/ui/` 核对，本轮抽查的项均找到入口（见上表）；但**反向**（UI 有控件、工具面无对应）与**语义反人类**（范围/默认值/单位与硬件能力不一致）的全量清单未完成。
 2. **本机无 Qt6/CMake 工具链，C++ 侧改动无法编译验证**。本轮未改 C++ 源码；上表 C++ 证据均为只读审计结论。
@@ -65,7 +65,7 @@ test_settings_convergence.py）。方法：逐面板读码，按五病分类取�
 纪律同前：不编造缺陷；核实不成立如实记账；高风险只报不改。
 本轮新增一处**排查中坐实的真缺陷**（E3-d，见下）。
 
-## 五、已修（三账之一：已修）
+## 五、已入库改动（三账之一）
 
 ### E1 魔法值无说明（3 条）
 
@@ -167,20 +167,20 @@ traceback 堆栈一律不再进 UI（ai_panel/weather_panel/doppler_panel/mcp_wo
 ## 八、第二轮结论
 
 "设置不符合人类"的语义五病在 Python 桌面端全部过了一遍筛：E1 三条、E2 两条、
-E3 四条（含排查中新坐实的"失败被空态覆盖"一条）、E4 四条已修并钉住；E5 的
+E3 四条（含排查中新坐实的"失败被空态覆盖"一条）、E4 四条改动在位并钉住（`4c591730` — `desktop/module_panel.py:352` — `setSpecialValueText`）；E5 的
 英文异常/堆栈泄漏 10 文件 32 处统一收口到 clean_exc。核实不成立的五条如实记账，
-**不为凑数把做对的说成缺陷**；六条只报/未闭环均给出原因与证据，不声称已修。
+**不为凑数把做对的说成缺陷**；六条只报/未闭环均给出原因与证据，不声称『修复结论』。
 
 ## 九、销账补记（2026-10-30 第三轮）
 
-七章"只报/未闭环"中的 1、2 两条本轮已修并钉住：
+七章"只报/未闭环"中的 1、2 两条本轮改动在位并钉住（`b8ad9e86` — `desktop/control_panel.py:547` — `set_gain_range`）：
 
-1. **增益范围硬编码** → 已修：`control_panel`/`module_panel` 增益滑杆补
+1. **增益范围硬编码** → 改动在位（`b8ad9e86` — `desktop/control_panel.py:547` — `set_gain_range`）：`control_panel`/`module_panel` 增益滑杆补
    `set_gain_range(lo, hi)`，`_connect_backend` 连接成功后按
    `backend.device.max_gain` 动态收放（失败仅警告，滑杆退回硬编码兜底）。
    钉扎：`test_settings_semantics.test_gain_range_dynamic_resize`、
    `test_settings_convergence.test_gain_dynamic_range_wired_on_connect`。
-2. **音量刻度 0–63 反直觉** → 已修：UI/持久化统一 **0–100 人类量纲**
+2. **音量刻度 0–63 反直觉** → 改动在位（`b8ad9e86` — `desktop/settings.py:65` — `volume_pct_to_hw`）：UI/持久化统一 **0–100 人类量纲**
    （control_panel 滑杆、工具栏 1:1、settings "volume"、gui_config 迁移换算），
    0–63 硬件寄存器量纲只在下发边界换算——换算式收敛为
    `settings.volume_pct_to_hw` / `volume_hw_to_pct` 两个纯函数，UI 不再散写公式。
@@ -198,12 +198,12 @@ E3 四条（含排查中新坐实的"失败被空态覆盖"一条）、E4 四条
 
 七章“只报/未闭环”中的 3、5 两条已修 — `451073e` — `desktop/module_panel.py:315` — `round(v * 1e6)`：钉住见下。
 
-3. **module_panel 频率旋钮 Hz 七位数反人类** → 已修：旋钮改 **MHz 人类量纲**
+3. **module_panel 频率旋钮 Hz 七位数反人类** → 改动在位（`451073e` — `desktop/module_panel.py:323` — `round(v * 1e6)`）：旋钮改 **MHz 人类量纲**
    （decimals=4，100 Hz 步进），`tune_requested` 信号仍发 Hz——量纲换算只在
    控件边界（emit `round(v*1e6)`），消费方（main_window `_on_module_tune`）
    不动。钉扎：suffix/bounds 断言随语义修复更新 +
    `test_module_freq_spin_emits_hz_across_boundary` 钉死边界换算。
-5. **clean_exc 对 Windows 错误串无映射** → 已修：`_EN_MSG_MAP` 补
+5. **clean_exc 对 Windows 错误串无映射** → 改动在位（`451073e` — `tests/test_clean_exc.py:50` — `test_windows_network_errors_mapped_not_computation_error`）：`_EN_MSG_MAP` 补
    `[WinError 10061/10060/10065/10054]` 四条（与 Linux errno 三条语义对齐）。
    Windows 网络类失败不再泄漏 `<urlopen error …>` 英文包裹串、不再被打成
    「计算错误: …（请检查输入参数）」。钉扎：`test_clean_exc` 新增五断言用例

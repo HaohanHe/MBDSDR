@@ -514,6 +514,15 @@ class ControlPanel(QWidget):
         sr_row.addWidget(self.sr_label)
         self.sample_rate_combo = _CapabilitySampleRateCombo(
             self.refresh_sample_rate_options_from_active_backend)
+        # 这个下拉每次展开都会 clear() 后重建档位，文本长短由后端报告决定。
+        # 默认的 AdjustToContentsOnFirstShow 会把「未知（设备未报告采样率范围…）」
+        # 这类长文案在首帧冻进最小宽（实测 461 vs 清成短档位后的 93），
+        # 与 preset_combo 同一形态。改稳定策略：最小宽只按最少字符数算。
+        self.sample_rate_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.sample_rate_combo.setMinimumContentsLength(16)
+        self.sample_rate_combo.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Fixed)
         self._populate_sample_rate_options(
             self._default_sample_rate_options(), DEFAULT_SAMPLE_RATE_HZ)
         self.sample_rate_combo.currentIndexChanged.connect(self._on_sample_rate_changed)

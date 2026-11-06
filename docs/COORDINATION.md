@@ -336,7 +336,7 @@
   `gps_ca.ca_code`，官方 PDF 脚本提取 + gps-sdr-sim 比特级对拍 + octal 37/37
   + Gold 指纹，金样 `tests/golden/gps_ca_prn_vectors.json`；材料
   GPScacodes.py 裁决更正（标准码的反极性版本，原"非标准"判词有误）；
-  ④健壮性与长跑＝**已收口（2026-11-06 06:10 督办登记）**：
+  ④健壮性与长跑＝**督办登记（2026-11-06 06:10）**：
   `scripts/soak_truth_battery.py --rounds 20`（真值电池 15 文件 174 测试/轮）
   于 11-06 02:09:33–03:50:07 跑满 **20/20 轮全绿**（逐轮 rc=0、
   174 passed，末轮 03:50），JSONL 证据 `output/soak/soak_20261106_020933.jsonl`
@@ -618,10 +618,10 @@
 12. **[已闭环（1d74cbac + 01dfd895，11-06 00:50）] 阶段 B：Python 侧运行时桥接**。
     新增 `mbdsdr_ai/web_bridge.py`（不 import Qt、不碰 `desktop/main_window.py`），
     `ToolRegistry` → `MB.CONTRACT` 8 方法，`as_bridge_dict()` / `manifest()`。
-    **安全口径同步（重要）**：内核 `mcp_server.py` 早已改成「模型自报 `arm_manual`
+    **安全口径同步（重要）**：内核 `mcp_server.py` 的现行口径为「模型自报 `arm_manual`
     不算确认，必须外部一次性 `confirm_token`」，C++ 门是宿主写开关 `writeEnabled_`；
     产品旧的 `arm_manual:true` 放行判据**两边都不认**，且 `BridgeSource` 会把
-    `{ok:false,gated:true}` 包成 `{ok:true,data:...}`（伪造成功路径）——均已修。
+    `{ok:false,gated:true}` 包成 `{ok:true,data:...}`（伪造成功路径）——处置见阶段 C 提交。
     门字段由 `sync_from_repo.py` 从三处内核代码抽取，抽不到即 assert 失败，不手抄。
     铁律：写工具**绝不走裸 `registry.call()`**，缺 token → `manual_gate_required`；
     带 token 但 `confirm_channel` 未接 → 恒 gated。`tests/test_web_bridge.py` 16 条 +
@@ -1584,7 +1584,7 @@ python scripts/git_sync_index.py --check                 # 只校验，不改 in
   一起带进；另两处 `@@ -577` / `@@ -588` 是该线自己的组 F。
 - 内容是否冲突：**不冲突**。两边都在补「空占用表 ≠ 无人占」的前置判据，语义一致；
   提交后 HEAD 同时含 §四 判据改写与 §6.2.4 三条件。
-- 为什么不回滚：回滚会把作者自己的组 F 与实测数据一起撤掉，代价大于归属更正；
+- 为什么不回滚：回滚会把作者自己的组 F 与实测数据一起撤掉，代价大于归属调整；
   按形态⑩处置第 2 步「该行归属线补正/登记，机制线不重复改文案」，此处只登记归属。
 - 机械口径：`git commit -- <path>` 会连工作区里别人的同文件改动一起提交；hunk 级选择
   必须用私有 index（`read-tree HEAD` + `git apply --cached` / `update-index --cacheinfo`），

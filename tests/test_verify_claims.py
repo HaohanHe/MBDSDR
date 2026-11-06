@@ -124,6 +124,24 @@ def test_all_digit_date_is_not_a_hash():
     assert c.status == vc.NO_HASH
 
 
+def test_real_claim_still_caught_after_negation_decision(tmp_path):
+    """裁定「不加否定跳过规则」的反证①：真断言 `已收口` 仍必须被抓并可证实。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, f"- 已收口 — `{h}` — src/foo.py:1 — `MAGIC_TOKEN`\n")
+    claims = vc.verify_docs(repo, repo / "docs")
+    assert len(claims) == 1
+    assert claims[0].status == vc.OK
+
+
+def test_negated_claim_is_not_silently_green(tmp_path):
+    """裁定「靠人工复核兜底」的反证②：否定句仍进扫描集判红，不静默转绿。"""
+    repo, _ = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    _write_doc(repo, "- 表中各项是**明确登记的另一些测量点/死参数**，处置如上，不冒充已收口。\n")
+    claims = vc.verify_docs(repo, repo / "docs")
+    assert len(claims) == 1
+    assert claims[0].status == vc.NO_HASH
+
+
 def test_repo_docs_have_no_dangling_hash():
     claims = vc.verify_docs(ROOT)
     bad = [c for c in claims if "不存在或不是 commit" in c.reason]

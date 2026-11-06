@@ -157,7 +157,7 @@ class TestExitRestore:
             mw.set_app_mode("ide")
         assert mw.left_tab.indexOf(mw.sky_view) >= 0
         texts = [mw.left_tab.tabText(i) for i in range(mw.left_tab.count())]
-        assert "天空模式" in texts
+        assert "星象仪模式" in texts
         assert isinstance(mw.left_tab, QTabWidget)
 
 

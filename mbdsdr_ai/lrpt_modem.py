@@ -395,35 +395,52 @@ class LrptDemodulator:
         return out
 
     # -- Gardner 定时恢复 + 符号抽取 ----------------------------------------- #
-    def _gardner_sample(self, iq: np.ndarray) -> np.ndarray:
+    def _gardner_sample(self, iq: np.ndarray,
+                        tau0: Optional[float] = None) -> np.ndarray:
         """Gardner TED 恢复符号时钟，抽取 1 sample/symbol。
 
-        机制（meteor_demod demod.c:192-200 自述重写）：
+        机制（meteor_demod demod.c:192-200 自述重写；2026-11-03 三处
+        结构修复后可收敛）：
           - 维护符号游标 ``tau``（样本单位，每符号 += sps）；
           - 跨整数边界时线性插值出符号样本；
-          - Gardner 误差 e = (cur - prev) * mid，mid = 半符号前样本；
-          - 误差负反馈微调 tau，锁定符号中心。
+          - Gardner 误差 e = Re((cur - prev) · conj(mid))，
+            **mid 在 tau-sps/2 处线性插值**（旧版取整丢半样本，漂移后
+            误差信号被 ISI 污染）；
+          - 误差按符号功率归一（旧版裸误差与幅度耦合）；
+          - 负反馈**钳制在 ±0.5 样本/符号**（旧版无钳制，发散时一路跑飞
+            ——τ 发散 1.36M 样本的元凶之一）；
+          - ``tau0`` 热启动（前馈扫描的最优偏移）；缺省 sps/2。
+
+        仍属实验路径（use_gardner 默认关）：真录 2sps 前馈已够用，
+        4sps 下闭环才可能反超（见 capability-map 连帧节）。
         """
         n = iq.size
         out: List[complex] = []
-        tau = self.sps / 2.0       # 初始：半符号处
+        tau = float(tau0) if tau0 is not None else self.sps / 2.0
         prev = 0j
+        k = 0
         while True:
-            tau += self.sps         # 推进一个符号
+            if k > 0:
+                tau += self.sps         # 推进一个符号（首符号用 tau0）
             i0 = int(math.floor(tau))
             if i0 + 1 >= n:
                 break
             frac = tau - i0
             cur = (1.0 - frac) * iq[i0] + frac * iq[i0 + 1]
             # Gardner 误差（需要至少一个历史符号）
-            mid_i = i0 - self.sps // 2
-            if len(out) >= 1 and 0 <= mid_i < n:
-                mid = iq[mid_i]
-                err = (np.real(cur) - np.real(prev)) * np.real(mid) \
-                    + (np.imag(cur) - np.imag(prev)) * np.imag(mid)
-                tau -= self.gardner_gain * err
+            if k >= 1:
+                mt = tau - self.sps / 2.0
+                mi = int(math.floor(mt))
+                if 0 <= mi < n - 1:
+                    mf = mt - mi
+                    mid = (1.0 - mf) * iq[mi] + mf * iq[mi + 1]
+                    err = np.real((cur - prev) * np.conj(mid))
+                    power = (abs(prev) ** 2 + abs(cur) ** 2) * 0.5 + 1e-12
+                    step = self.gardner_gain * err / power
+                    tau -= max(-0.5, min(0.5, step))
             out.append(cur)
             prev = cur
+            k += 1
         return np.array(out, dtype=np.complex128)
 
     # -- 硬判决符号 -> 位 ----------------------------------------------------- #
@@ -591,9 +608,10 @@ class LrptDemodulator:
         if self._rrc_taps is not None:
             src = np.convolve(iq, self._rrc_taps, mode="same")
 
-        # 4. 定时恢复：Gardner 闭环（实验）或前馈 sps 偏移扫描（默认）
+        # 4. 定时恢复：Gardner 闭环（实验，前馈热启动）或 sps 偏移扫描（默认）
         if self.use_gardner:
-            syms = self._gardner_sample(src)
+            _syms_ff, off = self._recover_soft_symbols(src)
+            syms = self._gardner_sample(src, tau0=float(off))
         else:
             syms, _offset = self._recover_soft_symbols(src)
         if syms.size < SYNC_SYMBOLS:
