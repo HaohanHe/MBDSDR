@@ -101,6 +101,9 @@ class _MapCanvas(PinchZoomMixin, QWidget):
         self._map_zoom: float = 1.0
         self._map_pan_x: float = 0.0
         self._map_pan_y: float = 0.0
+        # 空态第二行：解码器给的真实诊断（前导候选 / CRC 通过数 / 门限 /
+        # 频段不符 / 异常类型），不是另一套"等待文案"。
+        self.diag_text: str = ""
         if PinchZoomMixin is not object and hasattr(self, "init_pinch_zoom"):
             self.init_pinch_zoom()
             try:
@@ -146,6 +149,15 @@ class _MapCanvas(PinchZoomMixin, QWidget):
             f.setPointSize(10)
             p.setFont(f)
             p.drawText(QRectF(0, 12, w, 28), Qt.AlignHCenter, ADSB_EMPTY_TEXT)
+            # 解码器给的真实诊断：把"没信号 / 信号弱 / 频段不符 / 解码器异常"
+            # 分开说，用户不必对着一句「无 ADS-B 飞机」猜是哪一种。
+            diag = getattr(self, "diag_text", "") or ""
+            if diag:
+                f2 = QFont()
+                f2.setPointSize(8)
+                p.setFont(f2)
+                p.drawText(QRectF(8, 40, w - 16, max(20, h - 44)),
+                           Qt.AlignHCenter | Qt.TextWordWrap, diag)
             p.end()
             return
 
@@ -276,13 +288,30 @@ class AdsbMapPanel(QWidget):
         """手动喂一段 1090MHz 复基带 IQ（测试/外部后端用，与订阅同一实现）。"""
         self._decode_and_update(iq, float(sample_rate))
 
+    def _set_diag(self, text: str) -> None:
+        """只在文本变化时重绘画布（200ms 轮询下同文案不重复排重绘）。"""
+        text = str(text or "")[:200]
+        if getattr(self.canvas, "diag_text", "") != text:
+            self.canvas.diag_text = text
+            self.canvas.update()
+
     def _decode_and_update(self, iq, sample_rate: float) -> int:
-        if not _HAS_ADSB or iq is None or len(iq) == 0:
+        if not _HAS_ADSB:
+            self._set_diag("ADS-B 解码模块不可用（mbdsdr_ai.adsb_lite 缺失）")
+            return 0
+        if iq is None or len(iq) == 0:
             return 0
         try:
             result = _adsb_lite.decode_adsb(iq, sample_rate)
-        except Exception:
+        except Exception as exc:
+            # 旧实现 except: return 0 —— 解码器坏了和"没信号"在界面上
+            # 完全一样。现在异常类型与摘要直接进入空态诊断行。
+            self._set_diag(
+                f"ADS-B 解码器异常：{type(exc).__name__}：{str(exc)[:100]}")
             return 0
+        # 解码器已经给了完整诊断（前导候选数 / CRC 通过·失败 / 门限 /
+        # 噪声底 / 时长），旧实现全丢，只留一句「无 ADS-B 飞机」。
+        self._set_diag(result.get("note", ""))
         frames = result.get("frames") or []
         if not frames:
             return 0
@@ -302,14 +331,18 @@ class AdsbMapPanel(QWidget):
             # 频段不符：不解码（不是每个频段都能解 ADS-B），零副作用返回
             if (abs(frame.center_hz - self.ADSB_CENTER_HZ) > self.ADSB_TOLERANCE_HZ
                     or frame.sample_rate < self.ADSB_MIN_SAMPLE_RATE):
+                self._set_diag(
+                    f"当前 {frame.center_hz / 1e6:.3f} MHz / "
+                    f"{frame.sample_rate / 1e6:.3f} MS/s，"
+                    "不在 1090±1.5 MHz 或采样率不足；未解码")
                 return
             # 只有真的解出帧才去读站址配置：空闲/无关频段时不碰磁盘、
             # 不改表格宽度，避免给别的面板（中栏 splitter 尺寸）带来副作用
             if self._decode_and_update(frame.iq, frame.sample_rate):
                 self._refresh_observer_from_config()
-        except Exception:
-            # 总线/解码异常不得打断面板；下一拍再试
-            return
+        except Exception as exc:
+            # 总线异常同样不得静默：空态诊断行写明异常类型，下一拍再试。
+            self._set_diag(f"IQ 总线读取异常：{type(exc).__name__}")
 
     def decoded_frames_total(self) -> int:
         """累计解码成功的帧数（测试与状态查询用，不参与绘制）。"""
