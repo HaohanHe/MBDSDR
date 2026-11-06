@@ -2512,6 +2512,14 @@ class SpectrumPanel(QWidget):
     def set_iq_data(self, iq, sample_rate: float = float(DEFAULT_SAMPLE_RATE_HZ)):
         cf = self.generator.center_freq_hz
         self.update_iq(iq, cf, sample_rate)
+        # 把同一块 IQ 广播给其它消费者（中栏 ADS-B 地图等）。主窗口每帧
+        # 无条件调本方法，这里是「一行接线」的唯一稳定点：新增消费者不必
+        # 再改主窗口。总线只存引用、只留最新帧，不 copy、不排队。
+        try:
+            from desktop.iq_bus import get_iq_bus
+            get_iq_bus().publish(iq, sample_rate, cf)
+        except Exception:
+            pass
 
     def set_markers(self, freqs_hz):
         """外部批量设置活动频点 marker（Hz 列表）。空列表/None 清空。

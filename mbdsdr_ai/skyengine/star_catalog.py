@@ -375,6 +375,34 @@ class StarCatalog:
             return None
         return self._star_at(idx)
 
+    def search_by_name(self, text: str, limit: int = 20) -> List[CatalogStar]:
+        """按 proper 名搜索：精确命中排第一，其后前缀匹配，按星等升序。
+
+        为什么只搜 proper 名：全天 83,479 颗里只有 430 颗有专名。用 HIP
+        编号或坐标去搜会让用户看到一串没有可读名字的星，不如让他用星图
+        直接点。空串返回空表（不返回全表）。
+        """
+        key = str(text or "").strip().lower()
+        if not key:
+            return []
+        out: List[CatalogStar] = []
+        seen: set = set()
+        exact_idx = self._name_index.get(key)
+        if exact_idx is not None:
+            out.append(self._star_at(exact_idx))
+            seen.add(exact_idx)
+        hits: List[Tuple[float, int]] = []
+        for name_key, idx in self._name_index.items():
+            if idx in seen or not name_key.startswith(key):
+                continue
+            hits.append((float(self.vmag[idx]), idx))
+        hits.sort()
+        for _mag, idx in hits:
+            if len(out) >= max(1, int(limit)):
+                break
+            out.append(self._star_at(idx))
+        return out
+
     def _star_at(self, idx: int) -> CatalogStar:
         return CatalogStar(
             hyg_id=int(self.hyg_id[idx]),

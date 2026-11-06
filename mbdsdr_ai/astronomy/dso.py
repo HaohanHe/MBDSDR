@@ -454,6 +454,42 @@ class DSOCatalog:
         key = str(name).strip().upper().replace(" ", "")
         return self._by_name.get(key)
 
+    def search(self, text: str, limit: int = 12) -> List[DSOEntry]:
+        """按编号 / 英文名 / 中文名 / 别名搜索；编号精确命中排第一。
+
+        深空编号形式多（M31 / NGC7000 / IC1396 / C33），用户不会先记规则，
+        所以这里同时比 ``name``、``name_en``、``zh_name``、``aliases_*`` 与
+        ``cross_ids``；精确编号优先，其余按星等（暗的排后）与名字排序，
+        保证结果稳定、不分页也够用。
+        """
+        key = str(text or "").strip()
+        if not key:
+            return []
+        norm = key.upper().replace(" ", "")
+        out: List[DSOEntry] = []
+        seen: set = set()
+        exact = self._by_name.get(norm)
+        if exact is not None:
+            out.append(exact)
+            seen.add(exact.name)
+        low = key.lower()
+        hits: List[Tuple[float, str, DSOEntry]] = []
+        for e in self._entries:
+            if e.name in seen:
+                continue
+            names = [e.name, e.name_en, e.zh_name, *e.aliases_en, *e.aliases_zh]
+            cross = {f"{p}{n}" for p, n in e.cross_ids}
+            hay = " ".join(str(n) for n in names if n).lower()
+            if low in hay or any(norm == c.upper() for c in cross):
+                mag = float(e.magnitude) if e.magnitude is not None else 99.0
+                hits.append((mag, e.name, e))
+        hits.sort(key=lambda t: (t[0], t[1]))
+        for _mag, _name, e in hits:
+            if len(out) >= max(1, int(limit)):
+                break
+            out.append(e)
+        return out
+
     def filter_type(self, dso_type: str) -> List[DSOEntry]:
         return [e for e in self._entries if e.dso_type == dso_type]
 

@@ -340,16 +340,49 @@ class DecodeWorker(QObject):
         path = self._p["iq_file"]
         fam = self._p["family"]
         if fam == "fy4":
-            # 此输入是 raw complex64 IQ，不是库层要求的已同步 PLFRAME 符号。
-            # 不解包字节、不伪造命中数；时钟/载波恢复与 DATAFIELD 出图均未接通。
-            self.progress.emit("FY-4 raw IQ 缺少定时/载波/PL 符号同步，无法解码")
+            # 库层 decode_fy4_iq_to_image 是**已实现**的经典 CCSDS 链路
+            # （IQ → ASM 同步 → Viterbi → 解扰 → VCDU → 段重组 → PNG），
+            # tests/test_fy4_iq_chain.py 对 bpsk/qpsk 两种体制做逐像素往返。
+            # 旧实现直接回绝「raw IQ 不支持」，属于库有能力、面板说没有。
+            # 诚实边界：真实 FY-4 下行是 DVB-S2，本链路对经典 CCSDS 录制/合成
+            # 数据有效；DVB-S2 的 PL 符号同步仍另有一条路，不在本分支冒充。
+            out_png = self._p.get("out_png") or os.path.join(
+                os.path.dirname(path), "fy4_composed.png")
+            self.progress.emit(f"读取 FY-4 IQ {os.path.basename(path)} (complex64) ...")
+            iq = _load_complex64(path)
+            sps = int(self._p.get("sps", 4) or 4)
+            preferred = str(self._p.get("scheme", "") or "").lower()
+            schemes = ([preferred] if preferred in ("bpsk", "qpsk")
+                       else ["bpsk", "qpsk"])
+            attempts = []
+            for scheme in schemes:
+                self.progress.emit(
+                    f"FY-4 CCSDS 链路：{scheme.upper()} / sps={sps} → ASM 同步 → "
+                    f"Viterbi → 解扰 → 段重组 ...")
+                res = fy.decode_fy4_iq_to_image(
+                    iq, out_png, scheme=scheme, sps=sps,
+                    shaping="rrc", alpha=0.35)
+                if res.get("success"):
+                    self._emit(
+                        ok=True, png=res.get("png_path", out_png),
+                        width=int(res.get("width", 0)),
+                        height=int(res.get("height", 0)),
+                        annotation=(f"FY-4 经典 CCSDS {scheme.upper()} 合成 "
+                                    f"{res.get('width')}x{res.get('height')}"),
+                        channel="FY-4", frames=int(res.get("n_images", 0)),
+                        meta={"scheme": scheme, "sps": sps,
+                              "stats": res.get("stats"),
+                              "note": ("经典 CCSDS 链路；真实 FY-4 下行是 DVB-S2，"
+                                       "PL 符号同步不在本链路内")})
+                    return
+                stage = res.get("stage", "?")
+                diag = res.get("diagnostic") or {}
+                attempts.append(f"{scheme}: {stage} / {res.get('error', '')}"
+                                + (f"（{diag.get('cause')}）" if diag.get("cause") else ""))
             self._emit(
-                ok=False, frames=0, stage="iq_sync", error_code="unsupported_raw_iq",
-                error=("FY-4 DVB-S2 raw complex64 IQ 尚不能解码（可用帧 0）："
-                       "定时、载波和 PL 符号同步未实现。库层符号级 QPSK→FEC→"
-                       "BBHEADER 不等于 raw IQ 接收；库层 DATAFIELD→VCDU 重组已实现"
-                       "但未接入本面板，出图也未接通。"),
-                meta={"raw_iq_supported": False, "required_input": "已同步 PLFRAME 复数符号"})
+                ok=False, frames=0, stage="decode", error_code="no_image",
+                error="FY-4 IQ 未解出完整图像（不返回半截图）：" + "；".join(attempts),
+                meta={"raw_iq_supported": True, "attempts": attempts})
             return
         self.progress.emit(f"读取录制 {os.path.basename(path)} ...")
         with open(path, "rb") as stream:

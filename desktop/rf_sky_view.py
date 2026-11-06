@@ -1633,6 +1633,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 「跟踪」开关：checked 开始 / unchecked 停止卫星闭环跟踪。
     # (on, sat_name, downlink_hz)——downlink_hz 用目录基准下行频点，
     # 多普勒校正是主窗口跟踪环（_sat_track_timer）的职责，这里不越权。
+    #: 中国星官图层开关变化（按钮与快捷键共用一条状态，面板据此同步按钮）
+    chinese_layer_changed = Signal(bool)
     track_toggled = Signal(bool, str, float)
     # 「云台跟随」开关：checked 后主窗口在同一 500ms 拍内驱动云台指向卫星。
     # 需要先有可用云台后端（ai-sdr-mini 板载 / rotctld），否则按钮置灰。
@@ -2870,19 +2872,45 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     "label": name, "sub": info["kind_label"],
                     "az": None, "alt": None, "obj_name": name,
                 })
-        # 2) 恒星: 亮星星表按名匹配 (西名 + 中国星名双匹配, 读懂层)
-        for s in _stars.BRIGHT_STARS:
-            zh = ""
-            c = _stars.star_culture(s.name)
-            if c:
-                zh = c.get("zh", "")
-            if text in s.name.lower() or (zh and text in zh.lower()):
+        # 2) 恒星: 先全天星表 proper 名（83,479 颗里 430 个专名，前缀匹配），
+        #    再叠亮星表的中文星名（星表没有中文名，读懂层只在亮星表里）。
+        #    旧实现只遍历 54 颗 BRIGHT_STARS —— 搜 Sadr / Alcyone 一律 0 结果，
+        #    而能力目录写的是「按名称搜索恒星」，属于看得见的能力没接上。
+        seen_star = set()
+        try:
+            from mbdsdr_ai.skyengine.star_catalog import get_catalog
+            for cs in get_catalog().search_by_name(text, limit=20):
+                seen_star.add(cs.name.lower())
+                zh = ""
+                c = _stars.star_culture(cs.name)
+                if c:
+                    zh = c.get("zh", "")
                 self._search_results.append({
                     "kind": "star", "kind_label": "Star",
-                    "label": zh if zh else s.name,
-                    "sub": f"Star · {s.name}" if zh else "Star",
-                    "ra": s.ra_deg, "dec": s.dec_deg, "vmag": s.vmag,
-                    "name": s.name,
+                    "label": zh if zh else cs.name,
+                    "sub": (f"Star · {cs.name} · {cs.con}" if zh
+                            else f"Star · {cs.con}"),
+                    "ra": cs.ra_deg, "dec": cs.dec_deg, "vmag": cs.vmag,
+                    "name": cs.name,
+                })
+        except Exception as exc:      # 星表不可用不该让整个搜索失效
+            self._camera_notice = (
+                f"全天星表不可用（{type(exc).__name__}）：只能搜亮星表")
+            self._camera_notice_until = time.time() + 4.0
+        for st in _stars.BRIGHT_STARS:
+            if st.name.lower() in seen_star:
+                continue
+            zh = ""
+            c = _stars.star_culture(st.name)
+            if c:
+                zh = c.get("zh", "")
+            if text in st.name.lower() or (zh and text in zh.lower()):
+                self._search_results.append({
+                    "kind": "star", "kind_label": "Star",
+                    "label": zh if zh else st.name,
+                    "sub": f"Star · {st.name}" if zh else "Star",
+                    "ra": st.ra_deg, "dec": st.dec_deg, "vmag": st.vmag,
+                    "name": st.name,
                 })
         # 3) 行星: 西名 + 中文名双匹配 (文化对位层)
         for en, style in _PLANET_STYLE.items():
@@ -2893,18 +2921,24 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     "label": f"{zh} {en.capitalize()}", "sub": "Planet",
                     "key": en, "zh": zh,
                 })
-        # 4) 梅西耶天体: M 编号匹配 (深空搜索)
-        if re.match(r"^m\s*\d{1,3}$", text):
+        # 4) 深空: 编号（M/NGC/IC/C）+ 英文名 + 中文名 + 别名。
+        #    旧实现只认 M 编号且只做全等匹配，所以 NGC 7000 / 北美洲星云
+        #    都搜不到；目录里其实有 117 条（含 cross_ids 与中英别名）。
+        try:
             from mbdsdr_ai.astronomy import dso as _dso
-            for e in _dso.BUILTIN_CATALOG:
-                if text.replace(" ", "") == e.name.lower():
-                    self._search_results.append({
-                        "kind": "dso", "kind_label": "Deep Sky Object",
-                        "label": e.name,
-                        "sub": f"{e.dso_type.replace('_', ' ').title()}",
-                        "key": e.name, "dso_type": e.dso_type,
-                        "con": e.constellation,
-                    })
+            for e in _dso.BUILTIN_CATALOG.search(text, limit=12):
+                self._search_results.append({
+                    "kind": "dso", "kind_label": "Deep Sky Object",
+                    "label": e.zh_name or e.name,
+                    "sub": (f"{e.name} · "
+                            f"{e.dso_type.replace('_', ' ').title()}"),
+                    "key": e.name, "dso_type": e.dso_type,
+                    "con": e.constellation,
+                })
+        except Exception as exc:      # 目录坏掉时明确说，不静默退成「没找到」
+            self._camera_notice = (
+                f"深空目录不可用（{type(exc).__name__}）：仅卫星/恒星/行星可搜")
+            self._camera_notice_until = time.time() + 4.0
         # 填充下拉
         self._search_popup.clear()
         for r in self._search_results[:40]:
@@ -2915,6 +2949,18 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._search_popup.addItem(item)
         if self._search_results:
             # 下拉弹窗跟随搜索框宽度（弹性，不写死像素）
+            self._search_popup.setMinimumWidth(self._search_edit.width())
+            self._search_popup.setMaximumWidth(max(self._search_edit.width(), 200))
+            pos = self._search_edit.mapTo(self, self._search_edit.rect().bottomLeft())
+            self._search_popup.move(pos)
+            self._search_popup.show()
+        elif text:
+            # 没匹配 ≠ 坏了：也把弹窗拉起来，给一条不可选提示，
+            # 否则用户只看到搜索框没反应，分不清「没这颗」和「功能挂了」。
+            self._search_popup.clear()
+            tip = self._QListWidgetItem("无匹配：卫星 / 恒星专名 / 行星 / 深空编号")
+            tip.setFlags(Qt.NoItemFlags)
+            self._search_popup.addItem(tip)
             self._search_popup.setMinimumWidth(self._search_edit.width())
             self._search_popup.setMaximumWidth(max(self._search_edit.width(), 200))
             pos = self._search_edit.mapTo(self, self._search_edit.rect().bottomLeft())
@@ -2934,7 +2980,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     self.on_object_picked(obj)
                     return
         # 恒星 -> 居中 + 选中出卡 (点星即读)
-        if r["kind"] == "star" and self._ground_station() is not None:
+        if r["kind"] == "star" and self._require_station_for_search():
             self.on_body_picked({"kind": "star", "key": r["name"]})
             jd = self._current_jd()
             gs = self._ground_station()
@@ -2943,7 +2989,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             az, alt = azalt_from_vec(v)
             self.goto_animated(az, alt)
         # 行星 -> 居中 + 选中出信息卡 (Stellarium 搜索行星同款交互)
-        if r["kind"] == "planet" and self._ground_station() is not None:
+        if r["kind"] == "planet" and self._require_station_for_search():
             self.on_body_picked({"kind": "planet", "key": r["key"],
                                  "zh": r["zh"]})
             jd = self._current_jd()
@@ -2956,7 +3002,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                                    gs, jd))
                 self.goto_animated(az, alt)
         # 梅西耶天体 -> 居中 + 选中出卡 (标记环+角大小)
-        if r["kind"] == "dso" and self._ground_station() is not None:
+        if r["kind"] == "dso" and self._require_station_for_search():
             body = {"kind": "dso", "key": r["key"],
                     "dso_type": r.get("dso_type"), "con": r.get("con")}
             e = self._dso_entry(r["key"])
@@ -3461,6 +3507,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         if event.key() == Qt.Key_A:
             self.set_all_sky_mode(not self._all_sky_active)
+            event.accept()
+            return
+        if event.key() == Qt.Key_C:
+            self.set_chinese_layer(not self.chinese_layer_visible())
             event.accept()
             return
         super().keyPressEvent(event)
@@ -4401,6 +4451,35 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             raise KeyError(f"未知天空文化体系: {sorted(unknown)!r}")
         self._constellation_systems = wanted
         self.update()
+
+    def set_chinese_layer(self, visible: bool) -> None:
+        """开关中国星官体系（保留 IAU 现状，不把另一套一起关掉）。"""
+        systems = set(self.constellation_systems())
+        if visible:
+            systems.add(_constel.SYSTEM_CHINESE)
+        else:
+            systems.discard(_constel.SYSTEM_CHINESE)
+        self.set_constellation_systems(systems)
+        if not getattr(self, "_chinese_emit_guard", False):
+            self._chinese_emit_guard = True
+            try:
+                self.chinese_layer_changed.emit(bool(visible))
+            finally:
+                self._chinese_emit_guard = False
+
+    def chinese_layer_visible(self) -> bool:
+        """中国星官是否在显示（测试与状态卡用，不另存一份状态）。"""
+        return _constel.SYSTEM_CHINESE in self.constellation_systems()
+
+    def _require_station_for_search(self) -> bool:
+        """搜索跳转需要地面站算方位；没有就明确提示，不静默 return。"""
+        if self._ground_station() is not None:
+            return True
+        self._camera_notice = (
+            "未设置地面站：无法计算方位（设置 → 卫星与多普勒 → 地面站经纬度）")
+        self._camera_notice_until = time.time() + 6.0
+        self.update()
+        return False
 
     def constellation_systems(self) -> Tuple[str, ...]:
         """当前打开的体系（按数据层固定顺序，便于状态卡与测试）。"""
@@ -7192,12 +7271,40 @@ class RFSkyViewPanel(QFrame):
                 lambda _c=False, s=setter, btn=lb: s(btn.isChecked()))
             bar.addWidget(lb)
             self._layer_buttons[label] = lb
+        # 中国星官：渲染层（_draw_constellations）与数据层（xingguan.py 287 官）
+        # 早就做完了，但历史上没有任何入口能打开第二套体系，用户永远只看到
+        # IAU 88 座。这里给它一个可勾选按钮，走的是既有的
+        # set_constellation_systems（不新增第二套开关状态）。
+        xb = QPushButton("星官")
+        xb.setCheckable(True)
+        xb.setChecked(_constel.SYSTEM_CHINESE in self.sky_view.constellation_systems())
+        xb.setToolTip("叠加中国星官体系（287 官）；与 IAU 88 座可同时显示")
+        xb.clicked.connect(lambda _c=False, btn=xb: self.set_chinese_layer(btn.isChecked()))
+        bar.addWidget(xb)
+        self._xingguan_button = xb
+        # 快捷键 C 改的是画布状态，这里跟着同步按钮，避免两套显示
+        self.sky_view.chinese_layer_changed.connect(self._sync_xingguan_button)
         self.layout().addWidget(control_bar)
         self._offset = 0.0
         # 快转时 UTC 标签随模拟时钟滚动（500ms 刷新足够读出秒级流动）
         self._time_ui_timer = QTimer(self)
         self._time_ui_timer.timeout.connect(self._update_label)
         self._time_ui_timer.start(500)
+
+    # -- 中国星官图层（画布持有状态，面板只做入口与按钮同步） -----------
+    def set_chinese_layer(self, visible: bool) -> None:
+        self.sky_view.set_chinese_layer(visible)
+        btn = getattr(self, "_xingguan_button", None)
+        if btn is not None and btn.isChecked() != bool(visible):
+            btn.setChecked(bool(visible))
+
+    def chinese_layer_visible(self) -> bool:
+        return self.sky_view.chinese_layer_visible()
+
+    def _sync_xingguan_button(self, visible: bool) -> None:
+        btn = getattr(self, "_xingguan_button", None)
+        if btn is not None and btn.isChecked() != bool(visible):
+            btn.setChecked(bool(visible))
 
     def _adjust(self, seconds: float):
         self._offset += seconds

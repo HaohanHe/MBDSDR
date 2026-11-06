@@ -36,7 +36,7 @@ from typing import List, Optional, Tuple
 # desktop 包无 __init__.py，靠 repo root 在 sys.path 上完成导入。
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import Qt, QPointF, QRectF  # noqa: E402
+from PySide6.QtCore import Qt, QPointF, QRectF, QTimer  # noqa: E402
 from PySide6.QtGui import (  # noqa: E402
     QBrush, QColor, QFont, QPainter, QPen, QPolygonF,
 )
@@ -55,6 +55,13 @@ try:  # noqa: E402
 except Exception:  # pragma: no cover
     PinchZoomMixin = object  # type: ignore
     enable_touch_events = lambda w: None  # noqa: E731
+
+try:  # 1090MHz Mode S 解码器（无 numpy 时降级，不影响底图）
+    from mbdsdr_ai import adsb_lite as _adsb_lite  # noqa: E402
+    _HAS_ADSB = True
+except Exception:  # pragma: no cover
+    _adsb_lite = None  # type: ignore
+    _HAS_ADSB = False
 
 from mbdsdr_ai.adsb_map import (  # noqa: E402
     WORLD_LAND_POLYGONS,
@@ -238,6 +245,18 @@ class AdsbMapPanel(QWidget):
         # 死黑事故的另一半根源）。
         self.setMinimumSize(240, 180)
 
+        # ---- IQ 自主订阅（此前全仓没人调 update_aircraft，中栏一直是空态）----
+        # 主窗口只把 IQ 交给频谱面板；频谱面板再发布到 iq_bus。这里自己取，
+        # 不需要改主窗口一行。只在中心频率落在 1090MHz 附近、采样率够宽时
+        # 才解码，其余情况零开销跳过（不是每个频段都能解 ADS-B）。
+        self._iq_seq = 0
+        self._adsb_frames_total = 0
+        self._observer_checked_at = 0.0
+        self._bus_timer = QTimer(self)
+        self._bus_timer.setInterval(200)
+        self._bus_timer.timeout.connect(self._poll_iq_bus)
+        self._bus_timer.start()
+
     # ------------------------------------------------------------------ #
     def update_aircraft(self, frames: List[dict]) -> None:
         """喂入一帧/一批解码器输出 dict，归并后刷新画布与列表。"""
@@ -246,6 +265,89 @@ class AdsbMapPanel(QWidget):
         self._tracker.prune()
         self._refresh_table()
         self.canvas.update()
+
+    # -- IQ 总线消费 ------------------------------------------------------
+    #: ADS-B 中心频点（1090MHz），容差 ±1.5MHz 覆盖 RTL-SDR 的调谐误差
+    ADSB_CENTER_HZ = 1_090_000_000.0
+    ADSB_TOLERANCE_HZ = 1_500_000.0
+    ADSB_MIN_SAMPLE_RATE = 1_200_000.0
+
+    def feed_iq(self, iq, sample_rate: float) -> None:
+        """手动喂一段 1090MHz 复基带 IQ（测试/外部后端用，与订阅同一实现）。"""
+        self._decode_and_update(iq, float(sample_rate))
+
+    def _decode_and_update(self, iq, sample_rate: float) -> int:
+        if not _HAS_ADSB or iq is None or len(iq) == 0:
+            return 0
+        try:
+            result = _adsb_lite.decode_adsb(iq, sample_rate)
+        except Exception:
+            return 0
+        frames = result.get("frames") or []
+        if not frames:
+            return 0
+        self._adsb_frames_total += len(frames)
+        self.update_aircraft(frames)
+        return len(frames)
+
+    def _poll_iq_bus(self) -> None:
+        """每 200ms 看一次总线；只在 1090MHz 且带宽够时解码。"""
+        try:
+            from desktop.iq_bus import get_iq_bus
+            bus = get_iq_bus()
+            frame = bus.latest_since(self._iq_seq)
+            if frame is None:
+                return
+            self._iq_seq = frame.seq
+            # 频段不符：不解码（不是每个频段都能解 ADS-B），零副作用返回
+            if (abs(frame.center_hz - self.ADSB_CENTER_HZ) > self.ADSB_TOLERANCE_HZ
+                    or frame.sample_rate < self.ADSB_MIN_SAMPLE_RATE):
+                return
+            # 只有真的解出帧才去读站址配置：空闲/无关频段时不碰磁盘、
+            # 不改表格宽度，避免给别的面板（中栏 splitter 尺寸）带来副作用
+            if self._decode_and_update(frame.iq, frame.sample_rate):
+                self._refresh_observer_from_config()
+        except Exception:
+            # 总线/解码异常不得打断面板；下一拍再试
+            return
+
+    def decoded_frames_total(self) -> int:
+        """累计解码成功的帧数（测试与状态查询用，不参与绘制）。"""
+        return int(self._adsb_frames_total)
+
+    def _refresh_observer_from_config(self) -> None:
+        """本站坐标：从 ~/.mbdsdr/gui_config.json 读（设置面板写的那份）。
+
+        每 5 秒最多读一次，避免每帧碰磁盘。读不到就保持 None，距离列继续
+        显示 ``--``——绝不编造观察者坐标。
+        """
+        import time as _time
+        now = _time.monotonic()
+        if now - self._observer_checked_at < 5.0 and self._observer is not None:
+            return
+        self._observer_checked_at = now
+        try:
+            import json
+            cfg_path = os.path.expanduser("~/.mbdsdr/gui_config.json")
+            with open(cfg_path, "r", encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        except (OSError, ValueError):
+            return
+        if not isinstance(cfg, dict):
+            return
+        lat = cfg.get("observer_lat")
+        lon = cfg.get("observer_lon")
+        if lat is None or lon is None:
+            nested = cfg.get("observer")
+            if isinstance(nested, dict):
+                lat = nested.get("lat", nested.get("observer_lat"))
+                lon = nested.get("lon", nested.get("observer_lon"))
+        try:
+            if lat is None or lon is None:
+                return
+            self.set_observer(float(lat), float(lon))
+        except (TypeError, ValueError):
+            return
 
     def set_observer(self, lat: float, lon: float) -> None:
         """设定本站（观察者）坐标，用于列表距离列；未设时距离显示 --。"""
