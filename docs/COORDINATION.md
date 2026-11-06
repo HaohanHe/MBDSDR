@@ -469,18 +469,24 @@
     带 token 但 `confirm_channel` 未接 → 恒 gated。`tests/test_web_bridge.py` 16 条 +
     `verify_product.py` 跨语言钉扎（Python/JS 契约与门字段对拍）。
     **剩余 not_verified（见 #13）**：宿主注入、`confirm_channel` 接线、真机逐工具实测。
-13. **[部分闭环（11885400，11-06 19:0x）] 阶段 C：宿主注入与确认通道接线**。
-    ①**非 Qt 宿主注入已做**：新增 `mbdsdr_ai/web_bridge_host.py`，只绑 `127.0.0.1`，
-    服务 `dist/index.html` 时在 `</head>` 前注入 `/bridge.js`，把 `WebBridge` 挂成
-    `window.mbdsdrBridge`；Host/Origin/Referer 同源 + `Sec-Fetch-Site` + 一次性
-    token 三重校验；**不注入 `confirm_channel`**，写工具仍恒 gated（26 条测试钉死）。
-    用法 `python -m mbdsdr_ai.web_bridge_host --port 8770 --open`。前端
-    `BridgeSource.isLive()` 改为以宿主真值为准，空注册表如实 false。
-    ②**未做**：Qt WebChannel 注入（需操作逻辑线放行 `desktop/main_window.py`）、
-    `confirm_channel` 接 `mcp_server.call_tool`（当前带 token 也恒 gated，是
-    **故意**的安全默认）、真实硬件逐工具实测、CSRF token 轮换与频控。
-    ③默认 `WebBridge()` 的 registry 为空、`isLive=false` 是**诚实结果不是 bug**；
-    真实工具注册在 `AIAgent` 的方法里，没有轻量入口，接入属宿主侧编排。
+13. **[已闭环（31b5d914，11-06 19:14）] 阶段 C：宿主注入与确认通道接线**。
+    ①**宿主注入**：`mbdsdr_ai/web_bridge_host.py` 只绑 `127.0.0.1`，服务
+    `dist/index.html` 时在 `</head>` 前注入 `/bridge.js`，把 `WebBridge` 挂成
+    `window.mbdsdrBridge`；Host/Origin/Referer 同源 + `Sec-Fetch-Site` +
+    一次性 token 三重校验。用法 `python -m mbdsdr_ai.web_bridge_host --port 8770 --open`。
+    ②**真内核已接**（`mbdsdr_ai/web_bridge_mcp.py`）：`MCPToolSetRegistry` 把
+    `MCPToolSet`（82 工具 / 43 写工具 / 14 域）包成 `WebBridge` 的 registry，
+    `call()` 只走 `toolset.call_tool()`，不碰 handler。宿主默认接真内核，
+    构造失败才退回离线桥并如实标注。实测 `/health` → `live=true tools=82`。
+    ③**确认通道真接 `mcp_server.call_tool`**：`PendingConfirms`（绑定
+    `action_digest`、一次性、TTL 60s、可吊销）+ `tx_guard.issue_confirmation()`
+    在**宿主进程内**签发一次性 token → `ToolCallGate` 校验。前端只能
+    `POST /bridge/confirm` 登记意图，**token 不出宿主、前端拿不到也伪造不了**；
+    前端传来的 `confirm_token` 一律剥离。`MBDSDR_BRIDGE_CONFIRM=deny` 可整体
+    切只读。gated 回执在 UI 上给「确认执行」按钮（三语文案）。
+    ④**未做（not_verified）**：Qt WebChannel 注入（需操作逻辑线放行
+    `desktop/main_window.py`）、真实硬件逐工具实测、CSRF 频控与 token 轮换。
+    确认来源如实标注为「同源本地页面动作」，**不是**物理隔离通道。
 14. **[已闭环（9dcb4ecc，11-06 19:0x）] 天球坐标链接仓库真实岁差/章动**。
     新增 `web/product/src/14-astro-frame.js`：按 `mbdsdr_ai/celestial_geometry.py`
     同式实现 IAU2006 P03 岁差 + IAU2000B 简化章动 + Capitaine GMST，合成总矩阵
