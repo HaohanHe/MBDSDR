@@ -469,11 +469,18 @@
     带 token 但 `confirm_channel` 未接 → 恒 gated。`tests/test_web_bridge.py` 16 条 +
     `verify_product.py` 跨语言钉扎（Python/JS 契约与门字段对拍）。
     **剩余 not_verified（见 #13）**：宿主注入、`confirm_channel` 接线、真机逐工具实测。
-13. **[待认领] 阶段 C：宿主注入与确认通道接线**。①把 `WebBridge.as_bridge_dict()`
-    注入宿主（QWebChannel 或 JS 全局），主循环已支持后注入重检；②把
-    `confirm_channel` 接到 `mcp_server.call_tool` 的真实确认门（当前带 token 也恒
-    gated，这是**故意**的安全默认，不是 bug）；③真实硬件逐工具实测。禁止顺手改
-    `desktop/main_window.py`（操作逻辑线在途）；在此之前产品默认离线诚实空态。
+13. **[部分闭环（11885400，11-06 19:0x）] 阶段 C：宿主注入与确认通道接线**。
+    ①**非 Qt 宿主注入已做**：新增 `mbdsdr_ai/web_bridge_host.py`，只绑 `127.0.0.1`，
+    服务 `dist/index.html` 时在 `</head>` 前注入 `/bridge.js`，把 `WebBridge` 挂成
+    `window.mbdsdrBridge`；Host/Origin/Referer 同源 + `Sec-Fetch-Site` + 一次性
+    token 三重校验；**不注入 `confirm_channel`**，写工具仍恒 gated（26 条测试钉死）。
+    用法 `python -m mbdsdr_ai.web_bridge_host --port 8770 --open`。前端
+    `BridgeSource.isLive()` 改为以宿主真值为准，空注册表如实 false。
+    ②**未做**：Qt WebChannel 注入（需操作逻辑线放行 `desktop/main_window.py`）、
+    `confirm_channel` 接 `mcp_server.call_tool`（当前带 token 也恒 gated，是
+    **故意**的安全默认）、真实硬件逐工具实测、CSRF token 轮换与频控。
+    ③默认 `WebBridge()` 的 registry 为空、`isLive=false` 是**诚实结果不是 bug**；
+    真实工具注册在 `AIAgent` 的方法里，没有轻量入口，接入属宿主侧编排。
 14. **[已闭环（9dcb4ecc，11-06 19:0x）] 天球坐标链接仓库真实岁差/章动**。
     新增 `web/product/src/14-astro-frame.js`：按 `mbdsdr_ai/celestial_geometry.py`
     同式实现 IAU2006 P03 岁差 + IAU2000B 简化章动 + Capitaine GMST，合成总矩阵
