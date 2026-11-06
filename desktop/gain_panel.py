@@ -17,6 +17,7 @@ MBDSDR 分段增益面板（desktop/gain_panel.py）
 """
 from __future__ import annotations
 
+import math
 from typing import Optional, Dict
 
 from PySide6.QtCore import Qt, Signal
@@ -128,8 +129,73 @@ class GainPanel(QWidget):
         super().__init__(parent)
         self._connected = False
         self._stager = None
+        #: 每档最后一次**确认已下发**的值（clamp 后）。失败回读时兜底用，
+        #: 与 ControlPanel 的「滑杆=配置意图，标签=实际读数」同口径。
+        self._applied: Dict[str, float] = {}
         self._build_ui()
         self._apply_connected_state()
+
+    def _slider_for(self, logical: str):
+        return {"LNA": self.lna, "Mixer": self.mixer,
+                "VGA": self.vga}.get(logical)
+
+    def _read_back_stage(self, logical: str) -> Optional[float]:
+        """失败时向设备**真回读**当前增益；做不到就返回 None。
+
+        ``GainStager.stages[logical].current_db`` 初始化成 0.0，并不是设备
+        真值（``_set_stage`` 只在下发成功后才改它）。拿它冒充回读值等于
+        编造一个 0 dB，比显示「未知」更糟。
+        """
+        stager = self._stager
+        try:
+            info = stager.stage_info(logical)
+            dev = getattr(stager, "device", None)
+            getter = getattr(dev, "getGain", None)
+            if info and dev is not None and callable(getter):
+                value = getter(getattr(stager, "direction", 0),
+                               getattr(stager, "channel", 0), info.elem_name)
+                if value is not None and math.isfinite(float(value)):
+                    return float(value)
+        except Exception:  # noqa: BLE001 - 无回读能力的设备一律视为「未知」
+            pass
+        return None
+
+    def _mark_stage_failed(self, logical: str, requested: float,
+                           reason: str) -> None:
+        """把该档标签改成设备实际状态 + ⚠，滑杆保持用户意图。"""
+        sl = self._slider_for(logical)
+        if sl is None:
+            return
+        actual = self._read_back_stage(logical)
+        if actual is None:
+            sl.value_label.setText("-- dB ⚠ 未生效")
+            state = "设备当前值未知（无回读能力）"
+        else:
+            sl.value_label.setText(f"{actual:.1f} dB ⚠ 未生效")
+            state = f"设备回读当前值 {actual:.1f} dB"
+        sl.value_label.setToolTip(
+            f"请求 {requested:.1f} dB 未下发；{state}。"
+            f"滑杆仍是配置意图，不代表硬件状态。原因：{reason}")
+
+    def _mark_stage_applied(self, logical: str, requested: float) -> None:
+        """成功：标签写设备实际生效值（stager 会 clamp），清掉失败标注。"""
+        sl = self._slider_for(logical)
+        actual = requested
+        try:
+            info = self._stager.stage_info(logical)
+            if info is not None and info.current_db is not None:
+                actual = float(info.current_db)
+        except Exception:  # noqa: BLE001 - 无 stage_info 的测试桩用请求值
+            pass
+        self._applied[logical] = actual
+        if sl is None:
+            return
+        sl.value_label.setText(f"{actual:.1f} dB")
+        if abs(actual - requested) > 0.05:
+            sl.value_label.setToolTip(
+                f"⚠ 设备夹到 {actual:.1f} dB；滑杆 {requested:.1f} dB 是配置意图")
+        else:
+            sl.value_label.setToolTip("")
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -165,6 +231,10 @@ class GainPanel(QWidget):
         """主窗口注入已连接后端；用 GainStager 查询设备支持的增益档。"""
         self._connected = backend is not None
         self._stager = None
+        # 换设备 = 旧的「已下发值/未生效」标注全部失效，不许带过去冒充新设备状态
+        self._applied.clear()
+        for sl in (self.lna, self.mixer, self.vga):
+            sl.value_label.setToolTip("")
         if backend is None:
             self._apply_connected_state()
             return
@@ -210,20 +280,32 @@ class GainPanel(QWidget):
     # ------------------------------------------------------------------ 槽
     def _on_stage_changed(self, logical: str, db: float):
         if self._stager is None:
+            reason = "设备未提供分档增益"
             self.stage_gain_failed.emit(
-                f"分档增益未生效：设备未提供分档增益（{logical} {db:.1f} dB 未下发）")
+                f"分档增益未生效：{reason}（{logical} {db:.1f} dB 未下发）")
+            self._mark_stage_failed(logical, db, reason)
+            return
+        setter = {"LNA": "set_lna", "Mixer": "set_mixer",
+                  "VGA": "set_vga"}.get(logical)
+        if setter is None:
             return
         try:
-            if logical == "LNA":
-                self._stager.set_lna(db)
-            elif logical == "Mixer":
-                self._stager.set_mixer(db)
-            elif logical == "VGA":
-                self._stager.set_vga(db)
+            ok = getattr(self._stager, setter)(db)
         except Exception as e:  # noqa: BLE001 - 失败必须上报，不许当成功
             self.stage_gain_failed.emit(
                 f"分档增益未生效（{logical} {db:.1f} dB）：{e}")
+            self._mark_stage_failed(logical, db, str(e))
             return
+        # 关键：GainStager._set_stage 内部 catch 住 device.setGain 异常后
+        # **返回 False**（不抛），这才是硬件拒绝的主要形态。旧码完全不看
+        # 返回值，于是 LNA 显示已改、总增益已变，硬件其实一动没动。
+        if ok is False:
+            reason = "设备拒绝或未下发该档（后端返回 False）"
+            self.stage_gain_failed.emit(
+                f"分档增益未生效（{logical} {db:.1f} dB）：{reason}")
+            self._mark_stage_failed(logical, db, reason)
+            return
+        self._mark_stage_applied(logical, db)
         self.stage_gain_changed.emit(logical, db)
         self.value_changed.emit(logical, db)
         self._update_total()

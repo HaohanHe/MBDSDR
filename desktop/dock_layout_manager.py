@@ -24,6 +24,8 @@ MBDSDR 桌面端 Dock 布局管理器
 
 from __future__ import annotations
 
+import os
+import time
 import logging
 from typing import Dict, List, Optional
 
@@ -87,6 +89,9 @@ class DockLayoutManager:
         # 折叠窄条（36px 图标条），按需创建
         self._strip: Optional[QWidget] = None
         self._strip_buttons: Dict[str, QPushButton] = {}
+        #: 最近一次 save_state 的可见失败原因；成功时为 None。GUI 无控制台，
+        #: 至少留一条可查询状态 + warning 日志，不许把「写盘失败」吞成无事发生。
+        self.last_save_error: Optional[str] = None
 
     # ------------------------------------------------------------------
     # 引用便捷访问
@@ -566,35 +571,77 @@ class DockLayoutManager:
     # ------------------------------------------------------------------
     # 状态持久化（QSettings + layout_store JSON）
     # ------------------------------------------------------------------
-    def save_state(self) -> None:
-        """落 QSettings（窗口 dock 状态）+ 记录 active 布局名到 layout_store。"""
+    def _store_mtime(self) -> float:
+        """layouts.json 的最后修改时间；文件不存在/不可读时返回 0。"""
+        try:
+            return os.path.getmtime(self.store.path)
+        except (OSError, TypeError, AttributeError):
+            return 0.0
+
+    def save_state(self) -> bool:
+        """落 QSettings（窗口 dock 状态）+ 记录 active 布局名到 layout_store。
+
+        QSettings 每次必写；layout_store 是独立 JSON，旧实现把写盘失败
+        ``except: pass`` 静默吞掉 —— 用户切换布局后重启回到旧布局，全程无
+        任何提示。现在：失败返回 False 并留 ``last_save_error``；同时在
+        QSettings 记时间戳，供 :meth:`restore_state` 判定哪边更新、自动修复。
+        """
         s = QSettings("MBDSDR", "Desktop")
         s.setValue("layout_preset", self.current_preset)
         s.setValue("dock_state", self.mw.saveState())
+        s.setValue("layout_preset_ts", time.time())
+        s.sync()
+        self.last_save_error = None
         try:
-            self.store.set_active(self.current_preset)
-        except Exception:  # noqa: BLE001
-            pass
+            ok = self.store.set_active(self.current_preset)
+            if ok is False:
+                raise OSError("layout_store.set_active 返回 False（原子写失败）")
+        except Exception as exc:  # noqa: BLE001
+            self.last_save_error = (
+                f"布局名写入 layouts.json 失败（{type(exc).__name__}: {exc}）："
+                "本次布局仍生效，但重启可能回到上一次的布局")
+            logger.warning("%s", self.last_save_error)
+            return False
+        return True
 
     def restore_state(self) -> None:
-        """从 layout_store 读 active 布局并恢复；回退 QSettings。"""
-        # 优先 layout_store 的 active 名
+        """从 layout_store 读 active 布局并恢复；QSettings 兜底 + 交叉校验。"""
+        s = QSettings("MBDSDR", "Desktop")
+        qs_preset = s.value("layout_preset")
+        try:
+            qs_ts = float(s.value("layout_preset_ts", 0) or 0)
+        except (TypeError, ValueError):
+            qs_ts = 0.0
+
         active = None
         try:
             active = self.store.get_active()
         except Exception:  # noqa: BLE001
             active = None
-        if active and active in self.list_layouts():
+        layouts = self.list_layouts()
+        if active and active in layouts:
+            # QSettings 是「每次必写」的权威通道；JSON 写盘失败时停在旧值。
+            # 只有当 QSettings 的时间戳确实比 layouts.json 更新、且两边不一致
+            # 时，才判定上次 JSON 写失败：按 QSettings 恢复并顺手回写 JSON。
+            # 反之（用户另存布局只写了 JSON）JSON 更新，保持其 active 不被覆盖。
+            if (qs_preset in layouts and qs_preset != active and qs_ts > 0
+                    and qs_ts > self._store_mtime()):
+                logger.warning(
+                    "布局状态分叉：QSettings=%r 比 layouts.json(%r) 新，"
+                    "判定上次 JSON 写盘失败，按 QSettings 恢复并回写",
+                    qs_preset, active)
+                active = qs_preset
+                try:
+                    self.store.set_active(active)
+                except Exception:  # noqa: BLE001
+                    logger.warning("回写 layouts.json 失败，布局仍按 QSettings 恢复",
+                                   exc_info=True)
             self.current_preset = active
+        elif qs_preset in layouts:
+            self.current_preset = qs_preset
         else:
-            s = QSettings("MBDSDR", "Desktop")
-            preset = s.value("layout_preset")
-            if preset in self.list_layouts():
-                self.current_preset = preset
-            else:
-                self.current_preset = BUILTIN_LAYOUTS[0]
+            self.current_preset = BUILTIN_LAYOUTS[0]
         # 恢复 QMainWindow dock 状态（三栏布局下多数为空，无害）
-        s = QSettings("MBDSDR", "Desktop")
         state = s.value("dock_state")
         if state is not None:
             try:
