@@ -38,7 +38,48 @@
 
 ## 二、当前在途（2026-11-03 22:40 更新）
 
-### 我这边
+### 我这边（2026-11-06 夜 追加：星图物理正确性两批已落库）
+
+- **`410eb096` 岁差矩阵转轴 + 左手基**（`mbdsdr_ai/celestial_geometry.py`）：
+  `precession_matrix` 旧式 `rot_z @ rot_x @ rot_z` 两错——θ_A 应绕 y 轴，
+  且本模块赤道基 (y=NCP, −z=春分点) 是左手系，缺一次 `Sᵀ·P_std·S` 基变换。
+  J2000 恰好退化成单位阵，故历次"往返一致性"自测全抓不到。实测 2026 年
+  Sirius of-date 赤经偏 **+1112"（0.31°）**、赤纬 −628"，整张恒星系（星表
+  83k / DSO / 星座 / 行星）相对日月、卫星、地平线转过 ~0.35°。
+  修后对 skyfield IAU2006 四角度式：矩阵 0.005"，端到端 az/alt 最差 8.8"
+  （= 章动 6 项简化 vs 全模型的已知差）。前端同式副本
+  `web/product/src/14-astro-frame.js` 同步修（外加 Q/Qᵀ 基变换），
+  astro-golden 重生成，跨语言对拍 3.89e-16。
+  新测试 `tests/test_celestial_precession_truth.py`（11 条，含物理量级锚
+  "天狼星 2000→2026 赤经位移必须 ~1070""，专抓只改一半的回归）。
+  ⚠ 影响面：凡是用旧 `precession_matrix` 算过的金样/断言都要复核——本批已
+  重生成 `web/product/build/astro-golden.json`；其它线若存了 of-date 数字，
+  请重跑（`tests/test_golden_provenance.py` 会咬 sha256）。
+
+- **`221475d2` 星图物理正确性五连**（`desktop/rf_sky_view.py` +
+  `skyengine/twilight.py` 新增）：晨昏连续压暗（旧为布尔白天门，太阳刚落到
+  −0.833° 就"白蓝天空 + 满屏 6.5 等星"）/ 卫星点 1× 也按模拟时刻 4Hz 重算
+  （旧只信跟踪器 10s 节拍，ISS 过顶落后 5–10°）/ 轨迹按地平线拆段不连弦 /
+  状态卡 UTC·本地·恒星时·JD 统一由 TimeEngine 反算（旧 UTC 读墙钟、
+  JD 读引擎，×60 后同卡自相矛盾）/ GNSS 无海拔不再每帧 TypeError。
+  同批：多普勒改读 `range_object.range_rate_kms` 全精度、过境面板补 UTC
+  与列头、隐藏页停重绘、星表地平门 0°→−0.6°（DSO 同口径）、
+  planets/dso 推荐补观测经度、卫星云图存盘成败可见。
+  新测试 `tests/test_sky_realism_batch.py`（18 条）。
+
+- **[仍在途/待对方释放]** `desktop/main_window.py`、`control_panel.py`、
+  `ai_panel.py`、`module_panel.py`、`new_spacetime_panel.py`、
+  `mbdsdr_ai/baseband_io.py`、`lrpt_modem.py` 有他线未提交改动，本线**不碰**。
+  由此顺延、已写明修法但不代改的两项：
+  ① `SatTrackPanel.set_observer_ready()` 无调用方（无站址时"开始跟踪"不置灰，
+     用户点了才吃一句状态栏提示）——需主窗口在站址变更处调用；
+  ② TLE 后台线程重建传播器与 500ms 轮询竞争 `sat_tracker._diff`
+     （后台线程改 `_sat/_diff/_selected_name`，GUI 侧先判非 None 再用）——
+     需主窗口把解析结果用 signal 回 GUI 线程再 `_build_satellite`。
+  详见 `docs/pending-patches/2026-11-06-desktop-satpanel-timer-after-delete.md`
+  与本次审计清单（"卫星帧/线程"节）。
+
+### 我这边（原型阶段备案）
 - **[用户指令 23:00]** UI 形态原型（Web）已产出：`D:/mbdsdr/output/ui-prototype/index.html`
   （仓库外，原型阶段）——双形态（星象仪：星空炸开+摄像机锁星+信息卡铺开
   +模型协商；专业模式：频谱瀑布+工具树+协作栏）+ 能力矩阵（能力而非
