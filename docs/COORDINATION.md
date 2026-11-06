@@ -38,8 +38,38 @@
 
 ## 二、当前在途（2026-11-03 22:40 更新）
 
-### 我这边（2026-11-06 深夜 追加：GNSS 失锁 / ADS-B 空态 / 取证复核）
+### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
 
+- **`bd2f8878` 配置持久化 / 增益返回值 / 布局双写分叉（三域 167 passed）**：
+  `mbdsdr_ai/config.py` 的 `save_config` 旧式 `open("w")` 无异常保护会截断
+  含 API key 的配置、`load_config` 损坏只 `print`（GUI 无控制台）就回默认，
+  下一次保存再碾掉原文件 → 改原子写（临时文件 + fsync + os.replace）+
+  `*.corrupt-<时间戳>` 留证 + `last_error()` 可见通道；与在途 `ai_panel.py`
+  共用同一文件时改**按字段合并**，不再吃掉面板写入的额外键；env 优先级统一为
+  「显式值/配置文件 > 环境变量 > 默认值」（旧式无条件覆盖会让配置对话框
+  显示的值与实际请求地址分叉）。
+  `desktop/gain_panel.py`：既有测试只覆盖 setter **抛异常**，但
+  `GainStager._set_stage` 内部吞异常后**返回 False** 才是硬件拒绝的主要形态，
+  旧码不看返回值 → 100% 静默成功。现在 `ok is False` 同等失败，标签按设备
+  真回读值 + ⚠ 显示，无回读能力写「未知」，不拿 `current_db` 初始 0.0 冒充。
+  `desktop/dock_layout_manager.py`：`set_active` 失败被 `except: pass` 吞掉 →
+  切布局后重启回旧布局；现在失败可见 + QSettings 时间戳与 JSON mtime
+  交叉校验自愈（JSON 更新时不被顶掉）。
+- **`64e14b52` 过境预测三条（卫星/过境域 100 passed）**：`predict_passes` 的
+  `hours` 在内核**没有** 1–72 上界（钳位只在桌面 settings，MCP/CLI 绕开），
+  hours=10000 → 60 万次 SGP4 把服务卡死；60s 粗扫整段吞掉「峰值刚越门限、
+  时长 <60s」的擦边过境（二分/细扫只对已发现区间生效）；`next_rise_set`
+  把 30s 采样点直接当 AOS/LOS 且起点已在天上时事件顺序颠倒。分别加内核
+  `clamp_pass_window_hours()`、地平附近的擦边中点探测、穿越区间二分到 1s +
+  `already_above`/`event_order` 字段。**`PASS_COARSE_STEP_S=60` 未动**
+  （全仓唯一事实源），补点只多算少数区间。
+- **交给在途线的 P0（本线不代改）**：`mbdsdr_ai/baseband_io.py:353-355`
+  的 `load_iq()` 把 cu8 录制静默按 cf32 解读 → IQ 整体作废且无警告；
+  另有 rtltcp 写频失败仍更新缓存、RtlTcp 采样率吸附被基类覆盖、
+  HackRF/USRP `connect()` 无初始化下发等 11 条，连同「验证过没问题」清单
+  写进 `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
+  ⚠ TLE 过期门属于**产品口径**（直接拒绝会让过境列表一夜全空），单列
+  C 节待用户决定，别擅自上硬门。
 - **`7fd495c0` GNSS 失锁不许拿旧站址冒充当前定位**：
   `NMEAParser._parse_rmc` 在 status=V（导航数据不可信）时仍吐字段里的旧
   经纬度、空速度算成 0 节；`SerialGNSSReader._merge` 只在"新值非 None"时
