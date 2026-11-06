@@ -38,7 +38,42 @@
 
 ## 二、当前在途（2026-11-03 22:40 更新）
 
-### 我这边（2026-11-06 夜 追加：星图物理正确性两批已落库）
+### 我这边（2026-11-06 深夜 追加：基线红销账 / LRPT 假接线 / 录制证据保护）
+
+- **`0cb413aa` 销 4 条基线红**（全是断言过期，非产品缺陷）：
+  `dcc71e9f` 把量程读数统一到 dBFS + 「（相对）」，`test_spectrum_scale_peak_range`
+  仍按旧字面量拼串 → 改与实现同源（`sw._DBFS_UNIT`），断言不变；
+  `desktop/constants.py` 新增档位收口函数 → 白名单入册（logging/logger 显式
+  排除）；空态字形 11-05 统一为全角「—」→ `test_orphan_connection` 同步。71 passed。
+
+- **`15add04c` LRPT 帧约定假接线如实化 + METEOR 云图面板真入口**：
+  `weather_panel._run_meteor` 把 `demodulate_lrpt` 的 CADU 直接喂
+  `compose_visible_image`，两者帧首差好几套（`CBC465E232F11978` vs `1DFCDC`），
+  每帧都被判"无同步"→None，旧文案却说「段不全或数据损坏」，把格式错报成
+  信号差。新增 `meteor_sat.probe_cadu_sync()` 只读诊断四套同步字，不对齐就报
+  帧首 hex + 口径名 + `not_verified`，根本不进重组器。
+  `SatelliteImagePanel` 的 METEOR 选项从「图像重组待实现」死占位改成
+  「选择录制 IQ 解码」，复用同一个 `DecodeWorker`（不复制第二份实现），
+  采样率优先读 SigMF meta、手动值明写来源，QThread + closeEvent quit/wait，
+  成功出真 PNG / 失败保空态。**诚实边界**：仓内 LRPT 至少四套互不兼容帧首，
+  真录 golden 只有两条孤立 VCDU（`reassemble_space_packets` 得
+  n_packets=0 / n_fhp_out_of_range=1），**没有证据支持「LRPT 已能出真云图」**。
+  详见 `docs/pending-patches/2026-11-06-lrpt-frame-convention-not-verified.md`
+  （含生产者/消费者对照、实测数据、五步打通清单）。UI 一律不写出图。
+  新测试 11 + 8 条；UI/云图 138 passed、LRPT 真录 golden 18 passed（3:38）。
+  ⚠ 给另一条线：**别把 `demodulate_lrpt` 与 `LrptCaduDecoder` 直接串起来**，
+  两者都做 Viterbi/解扰且 pair-swap 口径不同；要打通先拿连续真录裁决物理层。
+
+- **`5d1b4fe8` 录制证据保护三连**：`IQRecorder/AudioRecorder.open` 默认拒绝
+  覆盖同名（`data` 或 `meta` 任一存在即拒），显式 `overwrite=True` 才允许；
+  `controller.start_recording` 的 `open_failed` 透传录制器真实原因 + error_code，
+  不再把磁盘满/无权限/同名混成一句「无法打开写入」。
+  32-bit PCM 满幅 `float32 × 2147483647.0` 溢出成 −2^31（+1.0 变最小负数 =
+  爆音，numpy 一直报 invalid cast）→ 升 float64 + 夹定义域。
+  顺带销 `mbdsdr_ai/tests/test_transmit_doppler.py` 3 条基线红（对照实验：
+  换回 HEAD 的 recorder.py 同样 3 红，确认与本批无关；真因是 tx_guard
+  「校验过必须真下发」门后假后端缺 `set_gain`/`set_bandwidth` 桩，断言未放宽）。
+  录制全域 135 passed（无 warning）。
 
 - **`410eb096` 岁差矩阵转轴 + 左手基**（`mbdsdr_ai/celestial_geometry.py`）：
   `precession_matrix` 旧式 `rot_z @ rot_x @ rot_z` 两错——θ_A 应绕 y 轴，
