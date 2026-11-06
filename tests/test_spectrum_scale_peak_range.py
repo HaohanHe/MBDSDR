@@ -318,10 +318,11 @@ def test_db_axis_drag_updates_readout_and_shared_sliders(qapp):
     rect = QRectF(0, 0, plot.width(), plot.height() - sw._SPEC_BOTTOM_PAD)
     rec = _RecordingPainter()
     sw._draw_db_scale(rec, rect, panel._state, QColor("white"))
-    readout = [t[2] for t in rec.texts if t[2].endswith("dB")]
+    readout = [t[2] for t in rec.texts if "跨度" in t[2]]
     assert readout, "拖动时没有量程读数"
     assert readout[0] == (
-        f"{lo1:.0f} … {hi1:.0f} dB · 跨度 {hi1 - lo1:.0f} dB"), \
+        f"{lo1:.0f} … {hi1:.0f} {sw._DBFS_UNIT}"
+        f" · 跨度 {hi1 - lo1:.0f} dB（相对）"), \
         f"读数缺跨度：{readout[0]!r}"
     for r in _text_rects(rec):
         assert r[0] >= rect.left() - 0.5 and r[1] <= rect.right() + 0.5
@@ -602,7 +603,7 @@ def test_wheel_on_db_axis_zooms_span_not_tune(qapp):
 def test_ctrl_db_zoom_shows_value_bubble_at_cursor_and_hides_on_release(qapp):
     """Ctrl+竖拖缩放时，光标旁要有实时数值气泡；松手即消失。
 
-    气泡内容必须复用现有读数格式（"-120 … -40 dB · 跨度 80 dB"），
+    气泡内容必须复用现有读数格式（"-120 … -40 dBFS · 跨度 80 dB（相对）"），
     不许另造一套。普通拖（非 Ctrl）不弹气泡，读数仍在轴区右上。
     """
     import spectrum_widget as sw
@@ -616,7 +617,11 @@ def test_ctrl_db_zoom_shows_value_bubble_at_cursor_and_hides_on_release(qapp):
     plot.mouseMoveEvent(
         _mouse_mod(QEvent.MouseMove, 10, cursor_y, Qt.ControlModifier))
     lo, hi = panel.db_range()
-    txt = f"{lo:.0f} … {hi:.0f} dB · 跨度 {hi - lo:.0f} dB"
+    # 期望文本与实现同源同格式：单位取模块常量（2026-11-06 统一为 dBFS），
+    # 跨度后缀「（相对）」标明这是相对量程不是绝对电平。测试不再自写一份
+    # 单位字面量，否则单位再改一次又会红在"格式"上而不是"有没有气泡"上。
+    txt = (f"{lo:.0f} … {hi:.0f} {sw._DBFS_UNIT}"
+           f" · 跨度 {hi - lo:.0f} dB（相对）")
     rect = QRectF(0, 0, plot.width(), plot.height() - sw._SPEC_BOTTOM_PAD)
     rec = _RecordingPainter()
     sw._draw_db_scale(rec, rect, panel._state, QColor("white"))

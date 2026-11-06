@@ -362,7 +362,10 @@ class TestNewOrphanWiring:
     def test_constellation_cleared_resets_stats(self, mw):
         mw.status_rssi.setText("信号: -10 dBFS")
         mw.constellation_panel.cleared.emit()
-        assert mw.status_rssi.text() == "信号: --"
+        # 占位符是全角破折号「—」（与 format_sample_rate 的缺失值同一字形），
+        # 2026-11-05 统一空态字形时改的；断言内容不变：清空后必须回到空态，
+        # 不许留着上一帧的电平。
+        assert mw.status_rssi.text() == "信号: —"
 
     def test_device_plugged(self, mw):
         spy = _StatusSpy(mw)

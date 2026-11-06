@@ -114,10 +114,22 @@ class TestNoSecondSourceOfTruth:
         ``mbdsdr_ai.sdr_backend.format_sample_rate`` 的直接复用（本模块不再
         持有一份字面量），故白名单补一个**函数名**；仍是封闭白名单，
         多一个符号照样红。
+
+        2026-11-06 采样率档位收口：``sample_rate_combo_items`` /
+        ``default_sample_rate_combo_index`` 两个函数成为下拉档位与默认档
+        的唯一事实源（档位只来自设备能力表，桌面不再持第二份），一并入册。
+
+        导入痕迹不算"第二个事实源"：``logging``（模块对象）与 ``logger``
+        （日志设施）显式排除在统计外；若本模块再长出一个**真正的常量**，
+        本条仍然会红。
         """
-        public = {n for n in vars(constants) if not n.startswith("_")}
+        _INFRA = {"logging", "logger"}          # 日志设施，非常量
+        public = {n for n in vars(constants)
+                  if not n.startswith("_") and n not in _INFRA}
         assert public == {"DEFAULT_SAMPLE_RATE_HZ", "FREQ_MIN_HZ", "FREQ_MAX_HZ",
-                          "format_sample_rate"}, sorted(public)
+                          "format_sample_rate",
+                          "sample_rate_combo_items",
+                          "default_sample_rate_combo_index"}, sorted(public)
 
     def test_no_module_redefines_the_constant(self):
         """desktop 侧只 import，不重新赋值（第二事实源会静默漂移）。"""
