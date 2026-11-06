@@ -6228,6 +6228,28 @@ class MainWindow(QMainWindow):
             pass
         self._ensure_repaint_timer()
 
+        # IQ 总线：ReceivePipeline 路径**不走** SpectrumPanel.set_iq_data
+        # （FFT worker 直接把谱线喂给 _plot），所以总线原先没有任何发布者，
+        # 中栏 ADS-B 地图自订阅了却永远拿不到数据。这里才是每帧唯一稳定点。
+        # 本槽由跨线程 signal 回到 GUI 线程，发布与下面的 UI tap 都安全。
+        try:
+            from desktop.iq_bus import get_iq_bus
+            cf = float(getattr(self.spectrum.generator, "center_freq_hz", 0.0))
+            get_iq_bus().publish(iq, sr, cf)
+        except Exception:
+            pass
+
+        # ADS-B 列表面板（与地图不是同一个面板）：同样只认这一帧。
+        # 原先只挂在从未 start() 的 _iq_poll_timer 路径里 → 永久空态。
+        try:
+            ap = getattr(self, "digital_adsb_panel", None)
+            if (ap is not None and hasattr(ap, "feed_iq")
+                    and getattr(self, "adsb_dock", None) is not None
+                    and self.adsb_dock.isVisible()):
+                ap.feed_iq(iq, sr)
+        except Exception:
+            pass
+
         # 星座图面板 tap：喂入复基带 IQ（节流 ~10fps，取尾部 512 点）
         try:
             cp = getattr(self, "constellation_panel", None)
@@ -6440,10 +6462,12 @@ class MainWindow(QMainWindow):
             pass
 
     def _poll_sdr_iq(self):
-        """每 50ms 从真实后端读一块 IQ，分发给频谱 / 录制 / FM 解调声卡。
+        """旧「GUI 线程直接读后端」轮询路径；当前默认链路是 ReceivePipeline。
 
-        - 无后端/无 read_samples/返回 None：不崩溃，频谱保持"未连接"。
-        - worker(WebSocket) 模式无本地 IQ 流，本定时器不启动，保持"未连接"，不造假峰。
+        本定时器只 connect、不 start：真实 IQ 由 ``pipe.frame_ready`` 跨线程
+        送到 :meth:`_on_pipeline_frame_ready`，那里才是 IQ 总线发布与 ADS-B
+        列表 tap 的位置。保留本方法供无 pipeline 的旧后端/回放调试使用，
+        **不要**在两条路径同时读同一后端（会互相抢环形缓冲）。
         """
         read, sr = self._active_read_samples()
         if read is None:

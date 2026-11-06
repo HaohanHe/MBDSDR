@@ -27,7 +27,7 @@ from typing import List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import Qt, Signal  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QComboBox, QHBoxLayout, QHeaderView, QLabel, QSplitter,
     QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget,
@@ -74,6 +74,10 @@ class AprsPanel(QWidget):
     """APRS 包面板：上方过滤栏 + 包列表，下方详情区。"""
 
     COLUMNS = ["时间", "源呼号", "目的呼号", "路径", "类型", "内容摘要"]
+    #: 解码结果统一经 Signal 上屏。Qt 的 AutoConnection 让同线程调用保持
+    #: 同步（测试/外部后端），DemodWorker 线程调用则自动排队回 GUI 线程，
+    #: 绝不在 worker 线程里 setItem / setText。
+    packet_ready = Signal(object)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -82,6 +86,7 @@ class AprsPanel(QWidget):
         self._filter = "全部"
         self._modem = AFSKModem() if _HAS_AX25 else None
         self._build_ui()
+        self.packet_ready.connect(self._add_packet)  # Auto: 同线程同步/跨线程排队
 
     # ------------------------------------------------------------------ #
     def _build_ui(self) -> None:
@@ -152,7 +157,7 @@ class AprsPanel(QWidget):
         """直接喂一个已解析的 APRS dict（测试用）。"""
         if not pkt:
             return
-        self._add_packet(pkt)
+        self.packet_ready.emit(pkt)
 
     # ------------------------------------------------------------------ #
     def _consume_frame(self, frame) -> None:
@@ -164,7 +169,7 @@ class AprsPanel(QWidget):
             pkt = parse_aprs_frame(frame)
         except Exception:
             return
-        self._add_packet(pkt)
+        self.packet_ready.emit(pkt)
 
     def _add_packet(self, pkt: dict) -> None:
         pkt = dict(pkt)

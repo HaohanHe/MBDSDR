@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np  # noqa: E402
 
-from PySide6.QtCore import Qt, QThread, QObject  # noqa: E402
+from PySide6.QtCore import Qt, QThread, QObject, Signal  # noqa: E402
 from PySide6.QtGui import QPixmap  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QComboBox, QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel, QListWidget,
@@ -65,6 +65,9 @@ _IMG_DIR = os.path.expanduser("~/.mbdsdr/images")
 class SatelliteImagePanel(QWidget):
     """卫星云图面板：左侧图像区，右侧控制/统计/历史。"""
 
+    #: feed_audio 在 DemodWorker 线程调用；进度条是 QWidget，只经 Signal 上屏。
+    progress_ready = Signal(int)
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._sdr_connected = False
@@ -75,6 +78,7 @@ class SatelliteImagePanel(QWidget):
         self._decode_thread: Optional[QThread] = None
         self._decode_worker: Optional[QObject] = None
         self._build_ui()
+        self.progress_ready.connect(self.progress.setValue)  # Auto: 同线程同步
         self._load_history()
         self._on_sat_changed(self.sat_combo.currentText())
 
@@ -224,7 +228,7 @@ class SatelliteImagePanel(QWidget):
         self._audio_sr = float(sample_rate)
         # 进度条：按累积时长粗略推进（4min 过境≈100%）
         dur = sum(len(b) for b in self._audio_buf) / max(self._audio_sr, 1.0)
-        self.progress.setValue(min(100, int(dur / 240.0 * 100)))
+        self.progress_ready.emit(min(100, int(dur / 240.0 * 100)))
 
     # ------------------------------------------------------------------ #
     # METEOR LRPT 离线 IQ 解码：与气象云图面板共用同一个 DecodeWorker，

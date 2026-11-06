@@ -36,7 +36,46 @@
 
 ---
 
-## 二、当前在途（2026-11-03 22:40 更新）
+## 二、当前在途（2026-11-07 凌晨起：**单线**，无并行会话）
+
+> 用户明确「对方线都死了，只剩你自个了」。此前「谁在途谁所有、对方文件不碰」
+> 的避让规则即日失效；`desktop/main_window.py` / `ai_panel.py` /
+> `control_panel.py` / `module_panel.py` / `new_spacetime_panel.py` /
+> `mbdsdr_ai/baseband_io.py` / `lrpt_modem.py` 等 28 个在途 M 文件已由本线
+> **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
+> 的交接单视为**收件人改为本线**，按新单逐条销账。
+
+### 我这边（2026-11-07 凌晨 追加：#20 收尾 + 销红 + 三条 P0）
+
+- **`4d5feff1` 收尾并行线成果 + 销 5 条回归红**：45 文件入库；
+  `check_card_links.py` 增 `--fix-anchors` 一键修 13 个漂移锚点；
+  `claim-waivers.md` 按「只减不增」删 13 行（70→57），7 条新断言改成
+  不带完成态的如实措辞（不编造 hash）；`ModulePanel.set_gain_applied()`
+  补上模块面板的真实增益回读；e2e 场景按报告自己声明的「中天采样偏差 ≤1 秒」
+  做 ±3s 比对（附 4 条反证）并加时基隔离；过境报告把全局 TLE 状态去重到
+  头部、`tool_output_max_chars` 4000→8000。合并回归 **212 passed / 0 failed**。
+- **`baseband_io` cu8 P0 已销**：录制器默认格式 cu8 被 `load_iq` 静默按 cf32
+  解读（2 字节/样本按 8 字节读）→ 录完回放必得垃圾 IQ 且不报错。现在 cu8
+  进白名单 + 按 `(u8-127.5)/127.5` 与录制端严格互逆、未知格式**报错**而非
+  回落、无 sidecar 时标 `sample_rate_assumed` / `metadata_missing`。
+  新测试 `tests/test_baseband_cu8.py`（9 条，含反证）。
+- **`main_window` P0-1 已销**：`_iq_poll_timer` 从未 start；真正跑的
+  `ReceivePipeline` 又不走 `SpectrumPanel.set_iq_data`，于是 `iq_bus` 没有
+  发布者、ADS-B 地图与列表面板永久空态。现在 `_on_pipeline_frame_ready`
+  是唯一发布点（含中心频率），并直接喂列表面板；旧轮询 docstring 如实标注。
+  新测试 `tests/test_pipeline_iq_bus_wiring.py`（4 条 + 静态守卫）。
+- **`main_window` P0-2 已销**：`pipe._demod1.audio_tap` 是 DemodWorker 里的
+  **同步回调**，却在 worker 线程改 APRS 表格 / ANR 标签 / 云图进度条。
+  三处改走 Qt Signal 的 AutoConnection（同线程同步、跨线程排队回 GUI），
+  不丢音频帧、不改调用契约。新测试
+  `tests/test_demod_tap_thread_affinity.py`（5 条，真起非 GUI 线程取证）。
+- **仍未做（本线队列，按优先级）**：rtltcp 写频失败仍更新缓存、
+  RtlTcp 采样率吸附被基类覆盖、HackRF/USRP `connect()` 无初始化下发、
+  `FileIQBackend` 读失败静默、`NetworkIQBackend` 未接 `_discover()`、
+  断连读数残留、`playback.set_frequency` 回放改频、`sat_passes(max_sats)`
+  按条数截取。详见
+  `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
+  ⚠ TLE 过期门仍属产品口径待决，别擅自上硬门。
 
 ### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
 

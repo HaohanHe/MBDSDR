@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
     QSlider, QComboBox, QGroupBox, QFormLayout,
@@ -52,6 +52,8 @@ class AnrPanel(QWidget):
     strength_changed = Signal(float)
     learn_noise_requested = Signal()
     mode_changed = Signal(str)
+    #: SNR 改善读数由 DemodWorker 线程回贴，必须排队回 GUI 线程。
+    snr_ready = Signal(float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -63,6 +65,7 @@ class AnrPanel(QWidget):
             except Exception:  # noqa: BLE001
                 self._anr = None
         self._build_ui()
+        self.snr_ready.connect(self.set_snr_improvement)  # Auto: 跨线程排队
         self._apply_connected_state()
 
     # ------------------------------------------------------------------ UI
@@ -157,6 +160,9 @@ class AnrPanel(QWidget):
         return bool(self.enable_chk.isChecked())
 
     def set_snr_improvement(self, db: float) -> None:
-        """主窗口每 N 帧回贴一次 SNR 改善（dB）。"""
+        """主窗口每 N 帧回贴一次 SNR 改善（dB）；跨线程只排队不碰 QLabel。"""
+        if QThread.currentThread() is not self.thread():
+            self.snr_ready.emit(float(db))
+            return
         if self._connected:
             self.snr_label.setText(f"SNR 改善: {db:+.1f} dB")

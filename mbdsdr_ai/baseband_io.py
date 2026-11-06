@@ -40,14 +40,27 @@ def _to_complex(iq) -> np.ndarray:
     return flat[0::2] + 1j * flat[1::2]
 
 
-def _format_from_path(path: str) -> str:
-    """按扩展名判定录制格式：.wav -> wav；.cs16 -> cs16；其余（.cf32/.iq/无扩展名）-> cf32。"""
+def _format_from_path(path: str) -> Optional[str]:
+    """按扩展名判定录制格式；无法判定时返回 None（由调用方如实报错）。
+
+    ``cu8`` 是录制器的**默认格式**（rtl_sdr / SDR# / GQRX 通用 unsigned8
+    交错，2 字节/样本）。旧式把 cu8 一律回落 cf32（8 字节/样本），文件被
+    读成 1/4 样本且数值全乱，还不报错。无扩展名仍按历史惯例当 cf32。
+    """
     ext = os.path.splitext(path)[1].lower()
     if ext == ".wav":
         return "wav"
     if ext == ".cs16":
         return "cs16"
-    return "cf32"
+    if ext in (".cu8", ".u8", ".bin"):
+        return "cu8"
+    if ext in (".cf32", ".cfile", ".iq", ""):
+        return "cf32"
+    return None
+
+
+#: load_iq 支持的格式（与录制器 sdr_backend 的写出格式对齐）。
+SUPPORTED_IQ_FORMATS = ("wav", "cs16", "cf32", "cu8")
 
 
 def write_sidecar(path: str, metadata: Dict) -> str:
@@ -247,7 +260,8 @@ def _iq_file_samples(path: str, fmt: str) -> int:
         with _wave.open(path, "rb") as wf:
             return int(wf.getnframes())
     size = os.path.getsize(path)
-    return int(size // (4 if fmt == "cs16" else 8))
+    bytes_per_sample = {"cs16": 4, "cu8": 2, "cf32": 8}.get(fmt, 8)
+    return int(size // bytes_per_sample)
 
 
 def _read_iq_stream(path: str, fmt: str, wav_scale: float, chunk: int,
@@ -292,6 +306,16 @@ def _read_iq_stream(path: str, fmt: str, wav_scale: float, chunk: int,
                     break
                 n = raw.size // 2
                 seg = (raw[:2 * n].astype(np.float32) / np.float32(32768.0))
+                seg = seg[0::2] + 1j * seg[1::2]
+            elif fmt == "cu8":
+                # unsigned 8-bit 交错，中心 127.5（与录制器
+                # sdr_backend.py 的 `z*127.5+127.5` 严格互逆）。
+                raw = np.fromfile(fh, dtype=np.uint8, count=2 * n)
+                if raw.size < 2:
+                    break
+                n = raw.size // 2
+                seg = ((raw[:2 * n].astype(np.float32) - np.float32(127.5))
+                       / np.float32(127.5))
                 seg = seg[0::2] + 1j * seg[1::2]
             else:
                 raw = np.fromfile(fh, dtype=np.float32, count=2 * n)
@@ -347,12 +371,26 @@ def load_iq(path: str, sample_rate: float = None, *,
     if os.path.exists(path + ".json"):
         with open(path + ".json", encoding="utf-8") as f:
             meta = json.load(f)
+    rate_assumed = False
     if sample_rate is None:
-        sample_rate = meta.get("sample_rate", 2.4e6)
+        sample_rate = meta.get("sample_rate")
+        rate_source = "sidecar"
+        if sample_rate is None:
+            # 没有有效 sidecar 时仍要能起播（回放定时器需要速率），但必须
+            # 把「这是假设值」写进返回值，不许让调用方当成实测元数据。
+            sample_rate, rate_source, rate_assumed = 2.4e6, "default", True
+    else:
+        rate_source = "argument"
 
     fmt = meta.get("format") or _format_from_path(path)
-    if fmt not in ("wav", "cs16", "cf32"):
-        fmt = "cf32"
+    if fmt not in SUPPORTED_IQ_FORMATS:
+        # 旧式 `fmt = "cf32"` 把 cu8 / 未知格式全部静默按 8 字节/样本解读：
+        # 录完回放得到垃圾 IQ 且没有一句报错。宁可明确拒绝。
+        return {"error": (
+            f"不支持的 IQ 格式 {fmt!r}（{path}）；支持 "
+            f"{'/'.join(SUPPORTED_IQ_FORMATS)}。旧实现会静默按 cf32 解析并"
+            "把数据整体读错，现在如实拒绝。若是原始 IQ 流，请补 sidecar 的 "
+            "format 字段或改用已识别扩展名（.cf32/.cfile/.cu8/.cs16/.wav）。")}
     wav_scale = float(meta.get("wav_scale", 1.0))
     chunk = max(1, int(chunk_samples))
     iq, file_samples, cancelled = _read_iq_stream(
@@ -365,6 +403,11 @@ def load_iq(path: str, sample_rate: float = None, *,
         # 12 万样本即可放大到几十 MB，长录音在回放线程里就是 OOM（S6）。
         "iq": iq,
         "sample_rate": float(sample_rate),
+        "sample_rate_source": rate_source,
+        "sample_rate_assumed": rate_assumed,
+        "metadata_missing": not bool(meta),
+        "center_freq_known": "center_freq_hz" in meta,
+        "gain_known": "gain_db" in meta,
         "center_freq_hz": meta.get("center_freq_hz", 0),
         "start_time": meta.get("start_time", ""),
         "gain_db": meta.get("gain_db", 0.0),
