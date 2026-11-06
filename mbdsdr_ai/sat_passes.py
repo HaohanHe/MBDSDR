@@ -93,10 +93,39 @@ PASS_FINE_STEP_S = 2.0        # pass 内细采样：找中天/最大仰角
 # 没有桌面 settings 依赖，默认值只在这里定义一次；桌面面板的默认值来自
 # config_schema，经 settings.effective_pass_window_hours() 显式注入。
 PASS_WINDOW_HOURS = 24.0
+# 内核窗口安全边界（小时）。桌面侧 settings.effective_pass_window_hours()
+# 已做 1–72 钳位，但 MCP / agent / CLI 直接调 controller.get_satellite_pass
+# 时那个钳位根本不在链路上：hours=10000 → 60 万次 SGP4 传播 + 每段 2s 细扫，
+# 服务长时间无响应。数值与 desktop/config_schema.py 的
+# pass_window_hours(minimum=1, maximum=72) 一致（测试做跨模块一致性断言），
+# 但职责不同：schema 是「用户可选范围」，这里是「内核拒绝 DoS 的硬上界」。
+PASS_WINDOW_MIN_HOURS = 1.0
+PASS_WINDOW_MAX_HOURS = 72.0
+# 60s 粗扫的擦边补点判据（度）：两端都没越门限、但至少一端离门限不超过
+# 该值且在地平以上时，探测区间中点。LEO 仰角连续变化，60s 网格能整段吞掉
+# 时长 <60s 的擦边过境（实测峰值 10.4°/门限 10°/时长 50s 返回空）。只探测
+# 地平附近的少数区间，不把整个粗扫成本翻倍。这是工程近似（设计项），非物理定律。
+PASS_EDGE_PROBE_MARGIN_DEG = 15.0
 # 兼容旧调用点的私有别名（值只在这里定义一次，别名不构成第二事实源）
 _COARSE_STEP_S = PASS_COARSE_STEP_S
 _FINE_STEP_S = PASS_FINE_STEP_S
 _BISECT_TOL_S = 0.5       # 二分收敛容差（秒），LEO 仰角变化 ~0.5°/s ⇒ ~0.25° 精度
+
+
+def clamp_pass_window_hours(hours: Any) -> float:
+    """把过境搜索窗口夹到内核安全区间 ``[1, 72]`` 小时。
+
+    坏类型 / NaN / inf 一律回默认 24h，绝不把一次畸形输入变成无限循环。
+    返回的是**实际生效值**，调用方可据此写「仅搜索前 Nh」而不是假装按请求值算。
+    """
+    try:
+        value = float(hours)
+    except (TypeError, ValueError):
+        return PASS_WINDOW_HOURS
+    if not math.isfinite(value):
+        return PASS_WINDOW_HOURS
+    return max(PASS_WINDOW_MIN_HOURS,
+               min(PASS_WINDOW_MAX_HOURS, value))
 
 
 # 仰角门：**两个语义，两个常量**，不许用一个名字两个数
@@ -302,6 +331,9 @@ def predict_passes(
         t = start_time + sec / 86400.0
         return _alt_az(diff, t)
 
+    # 内核硬上界：MCP/agent/CLI 不经过桌面 settings 的 1–72 钳位，
+    # 任意 hours 会直接变成数十万次 SGP4 传播。
+    hours = clamp_pass_window_hours(hours)
     total_s = hours * 3600.0
     n_steps = int(total_s / PASS_COARSE_STEP_S) + 1
 
@@ -312,6 +344,28 @@ def predict_passes(
         coarse.append((sec, el_at_s(sec)))
     if all(e is None for _, e in coarse):
         return []
+
+    # a2) 擦边补点：60s 网格可能整段吞掉「峰值刚好越门限、时长 <60s」的
+    # 过境（两端都低于 min_alt，峰在中间）。只对地平附近、离门限不远的区间
+    # 探测中点；命中就把中点插进 coarse，后面的分段/二分/细扫原样复用。
+    probe_floor = max(0.0, min_alt - PASS_EDGE_PROBE_MARGIN_DEG)
+    extra: List[Tuple[float, float]] = []
+    for k in range(len(coarse) - 1):
+        sec0, el0 = coarse[k]
+        sec1, el1 = coarse[k + 1]
+        if el0 is None or el1 is None:
+            continue
+        if el0 >= min_alt or el1 >= min_alt:      # 常规分段已覆盖
+            continue
+        if max(el0, el1) < probe_floor:           # 离得太远/还在地平下
+            continue
+        mid_s = 0.5 * (sec0 + sec1)
+        el_mid = el_at_s(mid_s)
+        if el_mid is not None and el_mid >= min_alt:
+            extra.append((mid_s, el_mid))
+    if extra:
+        coarse.extend(extra)
+        coarse.sort(key=lambda item: item[0])
 
     passes: List[SatellitePass] = []
     n = len(coarse)

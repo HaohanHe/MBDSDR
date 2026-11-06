@@ -14,7 +14,7 @@ orbit.fetch_tle() 从 Celestrak 或本地缓存提供。无 TLE 时不传播、�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 
 @dataclass(frozen=True)
@@ -99,33 +99,69 @@ def next_rise_set(satrec, lat: float, lon: float, alt_km: float,
                   horizon_hold_s: float = 86400.0) -> Dict[str, object]:
     """扫描未来 horizon_hold_s 秒, 找高度穿越地平线的时刻。
 
-    返回 {"rise_jd": float|None, "set_jd": float|None, "max_alt": float}。
-    传播失败/无过境时对应项为 None (占位, 不编造时刻)。
+    返回 ``{"rise_jd", "set_jd", "max_alt", "already_above", "event_order"}``。
+    传播失败/无过境时时刻为 None (占位, 不编造时刻)。
+
+    2026-11-06 修：旧式把 **30s 采样点**直接当 AOS/LOS（误差上限 30s，
+    实测 13s），现在对每个穿越区间做二分，收敛到 1s 以内。扫描起点已在
+    天上时不再把「下一次 set」和「再下一次 rise」混成一对：显式给
+    ``already_above=True`` + ``event_order=["set","rise"]``，让上层能如实
+    说明「当前可见，下一次事件是落下」。
     """
     from mbdsdr_ai import orbit
+
+    def _alt_at(jd: float) -> Optional[float]:
+        try:
+            st = orbit._state_from_satrec(satrec, "x", jd, lat, lon, alt_km)
+        except Exception:
+            return None
+        return None if st is None else float(st["elevation"])
+
+    def _crossing(jd_lo: float, el_lo: float,
+                  jd_hi: float, el_hi: float) -> float:
+        """在 [jd_lo, jd_hi] 二分求仰角 = horizon_alt 的时刻（1s 容差）。"""
+        lo_above = el_lo > horizon_alt
+        for _ in range(32):
+            if (jd_hi - jd_lo) * 86400.0 <= 1.0:
+                break
+            mid = 0.5 * (jd_lo + jd_hi)
+            e = _alt_at(mid)
+            if e is None:
+                break
+            if (e > horizon_alt) == lo_above:
+                jd_lo, el_lo = mid, e
+            else:
+                jd_hi, el_hi = mid, e
+        return 0.5 * (jd_lo + jd_hi)
 
     rise_jd: Optional[float] = None
     set_jd: Optional[float] = None
     max_alt = -999.0
     n = int(horizon_hold_s / step_s)
+    prev_jd: Optional[float] = None
+    prev_el: Optional[float] = None
     prev_above: Optional[bool] = None
+    first_above: Optional[bool] = None
+    order: List[str] = []
     for i in range(n + 1):
         jd = jd_now + (i * step_s) / 86400.0
-        try:
-            st = orbit._state_from_satrec(satrec, "x", jd, lat, lon, alt_km)
-        except Exception:
+        alt = _alt_at(jd)
+        if alt is None:
             continue
-        if st is None:
-            continue
-        alt = float(st["elevation"])
         above = alt > horizon_alt
+        if first_above is None:
+            first_above = above
         if alt > max_alt:
             max_alt = alt
         if prev_above is False and above and rise_jd is None:
-            rise_jd = jd
+            rise_jd = _crossing(prev_jd, prev_el, jd, alt)
+            order.append("rise")
         if prev_above is True and not above and set_jd is None:
-            set_jd = jd
-        prev_above = above
+            set_jd = _crossing(prev_jd, prev_el, jd, alt)
+            order.append("set")
+        prev_jd, prev_el, prev_above = jd, alt, above
         if rise_jd is not None and set_jd is not None:
             break
-    return {"rise_jd": rise_jd, "set_jd": set_jd, "max_alt": max_alt}
+    already_above = bool(first_above) if first_above is not None else False
+    return {"rise_jd": rise_jd, "set_jd": set_jd, "max_alt": max_alt,
+            "already_above": already_above, "event_order": order}
