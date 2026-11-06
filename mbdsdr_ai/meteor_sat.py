@@ -892,6 +892,79 @@ def compose_visible_image(
     return arr
 
 
+# ---------------------------------------------------------------------------
+# CADU 帧同步字口径诊断（只读，不改数据、不猜格式）
+# ---------------------------------------------------------------------------
+#: 仓内 LRPT 链路存在**多套互不兼容**的帧首约定，各写各的：
+#:   lrpc_simplified_3b  : lrpc_build_frame / compose_visible_image 默认的简化帧
+#:   satdump_cadu_4b     : lrpt_vcdu.LRPT_CADU_SYNC（SatDump 风格 CADU）
+#:   ccsds_asm_4b        : lrpt_fec / 标准 CCSDS ASM 0x1ACFFC1D
+#:   meteor_sat_asm_8b   : 本文件 extract_cadu 里 64 bit ASM 位流的字节形态
+#: 这里逐个登记只用于**报准失败原因**：上游 demodulate_lrpt 产出的帧喂给
+#: compose_visible_image 时，若帧首不是第一套，图像层会把每一帧都判成
+#: "无同步" → None，旧文案却说成"段不全或数据损坏"，把格式错报成信号差。
+#: 未对齐的约定不得自动"纠正"或补假头；诊断与反证见
+#: ``tests/test_lrpt_frame_convention.py``，未验证边界登记在
+#: ``docs/pending-patches/2026-11-06-lrpt-frame-convention-not-verified.md``。
+LRPT_SYNC_CONVENTIONS: Dict[str, bytes] = {
+    "lrpc_simplified_3b": _LRPT_FRAME_SYNC_BYTES,
+    "satdump_cadu_4b": bytes.fromhex("1dcffc1d"),
+    "ccsds_asm_4b": bytes.fromhex("1acffc1d"),
+    "meteor_sat_asm_8b": bytes.fromhex("cbc465e232f11978"),
+}
+
+
+def probe_cadu_sync(cadus, max_frames: int = 64) -> Dict:
+    """诊断 CADU 帧首属于哪套同步字约定，**不修改任何数据**。
+
+    返回 ``n_frames / counts / best / compose_compatible / n_unknown /
+    head_hex``。``compose_compatible`` 仅在帧首是 ``lrpc_build_frame`` 的
+    3B ``1DFCDC`` 时为 True —— 那是 :func:`compose_visible_image` 默认能
+    解析的唯一格式；其余一律 False，调用方必须如实报"帧约定未对齐"，
+    不许把 None 归咎于"段不全"。
+
+    位流条目按 :func:`_cadu_item_to_bytes` 的同一口径归一（MSB-first），
+    与图像层读取完全一致，避免探针自己又造一套解释。
+    """
+    counts = {name: 0 for name in LRPT_SYNC_CONVENTIONS}
+    heads: List[str] = []
+    n_frames = 0
+    n_unknown = 0
+    for item in list(cadus)[:max_frames]:
+        try:
+            raw = _cadu_item_to_bytes(item)
+        except Exception:  # noqa: BLE001（不可归一化也只算未知）
+            n_unknown += 1
+            continue
+        n_frames += 1
+        if not raw:
+            n_unknown += 1
+            continue
+        if len(heads) < 3:
+            heads.append(raw[:8].hex())
+        hit = None
+        for name, sync in LRPT_SYNC_CONVENTIONS.items():
+            if raw.startswith(sync) and (
+                    hit is None
+                    or len(sync) > len(LRPT_SYNC_CONVENTIONS[hit])):
+                hit = name
+        if hit is None:
+            n_unknown += 1
+        else:
+            counts[hit] += 1
+    best = max(counts, key=lambda k: counts[k]) if n_frames else None
+    if best is not None and counts[best] == 0:
+        best = None
+    return {
+        "n_frames": n_frames,
+        "counts": counts,
+        "best": best,
+        "compose_compatible": best == "lrpc_simplified_3b",
+        "n_unknown": n_unknown,
+        "head_hex": heads,
+    }
+
+
 # ========================================================================
 # LRO 月球轨道与多普勒定轨
 # ========================================================================

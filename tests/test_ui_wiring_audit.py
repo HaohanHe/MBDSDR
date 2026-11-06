@@ -249,7 +249,9 @@ ALLOWED_UNCONNECTED = {
     "scanner_panel.py:self.step_sp": "_on_start_clicked 读 value()",
     "scanner_panel.py:self.thr_sp": "_on_start_clicked 读 value()",
     "sat_track_panel.py:self.freq_spin": "下行频率 getter 读 value()",
-    "satellite_image_panel.py:self.sat_combo": "开始解码读 currentText()",
+    # 2026-11-06 删：`satellite_image_panel.py:self.sat_combo` 已接
+    # currentTextChanged（NOAA 音频采集 ↔ METEOR LRPT 离线 IQ 模式切换），
+    # 不再是"合法未接线"控件。
     "new_spacetime_panel.py:self.alt_spin": "刷新过境读 value()",
     "weather_panel.py:self.freq_edit": "开始解码读 text()",
     "weather_panel.py:self.sym_edit": "开始解码读 text()",

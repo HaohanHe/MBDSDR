@@ -299,7 +299,12 @@ class DecodeWorker(QObject):
                    frames=res["lines_aligned"],
                    meta={"duration_s": res["duration_s"], "paths": paths})
 
-    # ---- Meteor-M2 LRPT：真实解调链，可见光重组上游未实现，如实报帧数 ----
+    # ---- Meteor-M2 LRPT：真实解调链 + 帧约定诊断 ------------------------
+    # 2026-11-06：旧注释写「可见光重组上游未实现」，但 compose_visible_image
+    # 早已实现。真正的坑在两层的**帧首约定不一致**：demodulate_lrpt 走
+    # extract_cadu 产出 CCSDS ASM 开头的 CADU，图像层默认只认
+    # lrpc_build_frame 的 3B 1DFCDC。旧实现把 None 一律报成「段不全或数据
+    # 损坏」，用户会以为信号差，其实是第一帧就被全部判成"无同步"。
     def _run_meteor(self):
         from mbdsdr_ai import meteor_sat as ms
         path = self._p["iq_file"]
@@ -316,10 +321,25 @@ class DecodeWorker(QObject):
             self._emit(ok=False, frames=0,
                        error="未解出任何 LRPT CADU 帧（信号弱/参数不符），无图可合成")
             return
-        self.progress.emit(f"已解出 {len(cadus)} 帧 → RFC 2435 段重组 + 熵解码 ...")
+        self.progress.emit(f"已解出 {len(cadus)} 帧 → 帧约定诊断 ...")
+        probe = ms.probe_cadu_sync(cadus)
+        if not probe["compose_compatible"]:
+            head = probe["head_hex"][0] if probe["head_hex"] else "—"
+            self._emit(
+                ok=False, frames=len(cadus), meta={"frame_probe": probe},
+                error=(f"已真实解出 {len(cadus)} 个 LRPT CADU 帧，但帧首 "
+                       f"{head}… 属于「{probe['best'] or '未知'}」口径，"
+                       "与图像重组器期待的 1DFCDC 简化帧不一致；"
+                       "本仓 LRPT 物理层与图像层的帧头约定尚未统一"
+                       "（not_verified），不出图，也不拿半幅图冒充。"))
+            return
+        self.progress.emit(
+            f"帧约定对齐（{probe['counts']['lrpc_simplified_3b']} 帧）"
+            " → RFC 2435 段重组 + 熵解码 ...")
         img = ms.compose_visible_image(cadus)
         if img is None:
             self._emit(ok=False, frames=len(cadus),
+                       meta={"frame_probe": probe},
                        error=(f"已真实解出 {len(cadus)} 个 LRPT CADU 帧；"
                               "但段重组/熵解码未得到完整图像"
                               "（段不全或数据损坏，详见日志），不出半幅图"))
