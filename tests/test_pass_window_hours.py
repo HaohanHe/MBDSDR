@@ -74,9 +74,14 @@ class _FakeSkyView:
         return SimpleNamespace(settings=self._settings)
 
     def set_upcoming_passes(self, rows, gate_deg=None, show_low=False,
-                            window_hours=None):
+                            window_hours=None, scanned=None,
+                            catalog_size=None):
+        # 2026-11-06：接口新增 scanned / catalog_size（标题要如实写「仅扫前
+        # N/M 颗」）。假视图必须跟着签名走——否则 _refresh_passes 里被吞掉的
+        # TypeError 会让"过境列表清空"伪装成"没有过境"。
         self.rows = list(rows)
         self.window_hours = window_hours
+        self.scan_note = (scanned, catalog_size)
 
 
 def _rf_rows(settings: dict):

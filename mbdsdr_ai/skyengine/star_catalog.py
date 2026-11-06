@@ -116,6 +116,10 @@ __all__ = [
 CATALOG_DEPTH_MAG: float = 9.0
 #: 星等分档宽度（每 0.5 等一档）。
 MAG_BIN_WIDTH: float = 0.5
+#: 地平裁剪门（几何高度，度）。取负值给大气折射留余量：绘制层按**视高度**
+#: 落笔（地平处折射约 34′），几何 0° 附近的星在屏幕上仍在地平线之上。
+#: 与 DSO 层同一口径（``dso`` 的 alt >= -0.6），改一处必须改另一处。
+_HORIZON_GATE_DEG: float = -0.6
 #: 单次返回的星数上限（超出如实降级为最亮的 N 颗）。
 DEFAULT_MAX_COUNT: int = 20000
 #: 视场小于该值才开始“放大露出更多暗星”。
@@ -504,9 +508,14 @@ class StarCatalog:
         az = np.degrees(np.arctan2(v_alt[:, 1], v_alt[:, 0])) % 360.0
 
         # 4) 地平门 + 视锥门 + 逐星消光后的极限门。
+        #
+        # 地平门取 **−0.6°**（不是 0°）：绘制层按视高度（含大气折射，地平处
+        # 约 34′）落笔，几何高度 0° 附近那一圈星其实还在视线上方——旧门在
+        # 0° 就把它们裁掉了，地平线上会出现一条"无星带"。DSO 层早已用 −0.6°，
+        # 两层口径必须一致，否则同一仰角上"有星系没恒星"。
         cos_r = math.cos(math.radians(r_deg))
         dot = v_alt @ center_v
-        mask = (alt >= 0.0) & (dot >= cos_r)
+        mask = (alt >= _HORIZON_GATE_DEG) & (dot >= cos_r)
         if not np.any(mask):
             return _empty_selection(fov, limit, bortle, requested_limit, beyond)
 

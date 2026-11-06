@@ -252,16 +252,27 @@ class SatelliteImagePanel(QWidget):
             self.save_btn.setEnabled(True)
 
     def _save_current(self) -> None:
+        """把当前云图另存为 PNG；**成败都要在状态行里说人话**。
+
+        2026-11-06：旧实现是 ``except Exception: pass`` —— 写盘失败（目录不存在、
+        权限、磁盘满）时用户看到的仍是上一次的状态文案，会以为已经保存成功。
+        现在成功报目标文件名、失败报目标文件名 + 异常类型，两条都可复核。
+        """
         if not self._current_png or not os.path.exists(self._current_png):
             return
         path, _ = QFileDialog.getSaveFileName(
             self, "保存云图", os.path.basename(self._current_png), "PNG (*.png)")
-        if path:
-            try:
-                from PIL import Image
-                Image.open(self._current_png).save(path)
-            except Exception:
-                pass
+        if not path:
+            return
+        target_name = os.path.basename(str(path))
+        try:
+            from PIL import Image
+            Image.open(self._current_png).save(path)
+        except Exception as exc:
+            self.stats_label.setText(
+                f"保存 PNG 失败: {target_name}（{type(exc).__name__}）")
+            return
+        self.stats_label.setText(f"云图已另存: {target_name}")
 
     # 测试辅助：直接注入已解码结果（不写盘也能验证图像区刷新）。
     def show_decoded_result(self, result: dict, sat: str = "NOAA-19") -> None:

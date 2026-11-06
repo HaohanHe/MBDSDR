@@ -487,7 +487,13 @@ class TestSingleFormatterAndUnitLabels:
         assert all(" deg" not in t for t in texts), texts
 
     def test_status_card_states_utc_and_local_offset(self, engine):
-        """渲染状态卡：UTC 与本地（带偏移）两个时刻都要真的画出来。"""
+        """渲染状态卡：UTC 与本地（带偏移）两个时刻都要真的画出来。
+
+        2026-11-06 口径变更：状态卡的 UTC/本地不再读注入的墙钟，而是**统一由
+        TimeEngine 反算**（同一张卡上的 UTC / 本地 / 恒星时 / JD 必须同基）。
+        本用例里引擎被固定在 UNIX（≠ 当前墙钟），因此角标正确显示「模拟」而不是
+        时间源标签——这正是修掉"两个时间基准分叉"后应有的表现。
+        """
         import datetime as _dt
         v = RFSkyView()
         v.set_observer(LAT, LON, 0.0)
@@ -498,7 +504,8 @@ class TestSingleFormatterAndUnitLabels:
         texts = rec.texts
         assert "UTC" in texts
         assert "本地" in texts
-        assert f"{format_utc_time(utc_dt, '%H:%M:%S')} [system]" in texts
+        # 引擎时刻（= UNIX，模拟）必须画出来，且明确标注不是真实当前时刻
+        assert f"{format_utc_time(utc_dt, '%H:%M:%S')} [模拟]" in texts
         assert format_local_time(utc_dt) in texts
         axis = next(t for t in texts if t.startswith("AZ ") and "· ALT " in t)
         assert axis.endswith("°")

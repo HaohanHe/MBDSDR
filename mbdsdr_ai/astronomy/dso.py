@@ -523,7 +523,15 @@ def recommend_dso(jd: float, observer_lat_deg: float,
                   catalog: Optional[DSOCatalog] = None,
                   min_alt_deg: float = 20.0,
                   max_magnitude: float = 9.0,
-                  max_sun_dist_deg: float = 90.0) -> List[DSOEntry]:
+                  max_sun_dist_deg: float = 90.0,
+                  observer_lon_deg: float = 0.0) -> List[DSOEntry]:
+    """推荐当前可看的深空目标（在 ``min_alt_deg`` 以上、离太阳够远）。
+
+    2026-11-06 修时角：旧式 ``ha = gmst - ra`` 只在**格林尼治经度**成立，
+    东经站点会整体偏 (lon/15) 小时 → 高度角错到几十度。现在按
+    ``ha = (gmst + lon − ra)`` 算；``observer_lon_deg`` 默认 0.0 即为原行为，
+    但真实站点必须传经度（东正）。
+    """
     cat = catalog or BUILTIN_CATALOG
     T = (jd - 2451545.0) / 36525.0
     sun_lon = 280.46646 + 36000.76983 * T
@@ -537,7 +545,7 @@ def recommend_dso(jd: float, observer_lat_deg: float,
             continue  # 星等未知，不能据此声称可见
         if e.magnitude > max_magnitude:
             continue
-        ha = math.radians((gmst - e.ra_deg) % 360.0)
+        ha = math.radians((gmst + float(observer_lon_deg) - e.ra_deg) % 360.0)
         lat = math.radians(observer_lat_deg)
         dec = math.radians(e.dec_deg)
         sin_alt = math.sin(lat) * math.sin(dec) + math.cos(lat) * math.cos(dec) * math.cos(ha)

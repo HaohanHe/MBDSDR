@@ -231,7 +231,14 @@ def compute_all(jd: float) -> Dict[str, PlanetPos]:
 
 def recommend_targets(jd: float, observer_lat_deg: float,
                      min_alt_deg: float = 15.0,
-                     max_sun_dist_deg: float = 90.0) -> List[PlanetPos]:
+                     max_sun_dist_deg: float = 90.0,
+                     observer_lon_deg: float = 0.0) -> List[PlanetPos]:
+    """推荐当前可拍的行星（高度角 ≥ 门、离太阳 ≥ 门）。
+
+    2026-11-06 修时角：旧式只在**格林尼治经度**成立（``ha = gmst − ra``），
+    东经站点会整体偏 (lon/15) 小时；现按 ``ha = gmst + lon − ra``。
+    ``observer_lon_deg`` 默认 0.0 保持原行为，真实站点必须传经度（东正）。
+    """
     T = (jd - J2000_JD) / 36525.0
     sun_lon_deg = _norm360(280.46646 + 36000.76983 * T)
     sun_ra, sun_dec = _ecliptic_to_equatorial(sun_lon_deg, 0.0)
@@ -239,7 +246,7 @@ def recommend_targets(jd: float, observer_lat_deg: float,
     gmst = _norm360(280.46061837 + 360.98564736629 * (jd - J2000_JD))
     results: List[PlanetPos] = []
     for p in compute_all(jd).values():
-        ha = math.radians(_norm360(gmst - p.ra_deg))
+        ha = math.radians(_norm360(gmst + float(observer_lon_deg) - p.ra_deg))
         lat = math.radians(observer_lat_deg)
         dec = math.radians(p.dec_deg)
         sin_alt = math.sin(lat) * math.sin(dec) + math.cos(lat) * math.cos(dec) * math.cos(ha)

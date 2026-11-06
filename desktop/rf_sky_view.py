@@ -118,6 +118,7 @@ from mbdsdr_ai.skyengine import constellations as _constel
 from mbdsdr_ai.skyengine import xingguan as _xingguan
 from mbdsdr_ai.skyengine import satellites as _sats
 from mbdsdr_ai.skyengine import jtime as _jtime
+from mbdsdr_ai.skyengine import twilight as _twilight
 # 过境峰值仰角门与采样步长：与 sat_passes 同一事实源（本视图不再私藏 300/30）。
 # 注意区分 VISIBLE_MIN_ALT_DEG=5°（当前可见/跟踪门）——本视图过境列表用的是
 # 用户设置 effective_pass_min_elevation_deg（默认 10°，「这次过境值不值得列出来」）。
@@ -615,13 +616,14 @@ def angular_separation_deg(az1_deg: float, alt1_deg: float,
 
 
 # ---------------------------------------------------------------------------
-# 恒星：白天消隐（只按太阳地平阈值整层开关，**不做**天空亮度→极限星等模型）
+# 恒星：白天消隐 + 晨昏连续压暗
 # ---------------------------------------------------------------------------
 # -0.833° 是「日落」的标准天文定义：太阳中心低于地平 50′（34′ 大气折射 +
 # 16′ 日面半径）。太阳高于该值按白天处理，恒星整层不画。
-# 这是**保守近似**，不是光度的标准模型：项目里没有公开的天空亮度→极限
-# 星等数据，所以不做暮光渐变、不按 Bortle/太阳高度连续压暗恒星——要么按
-# 夜空的极限星等画，要么整层关掉。留痕见 docs/limitations-register.md L24。
+# 低于该值后**不再一档到底**：天空亮度仍随太阳高度连续变化，极限星等按
+# ``skyengine.twilight`` 的背景亮度模型连续压低（晨昏各约 1 小时的真实过程）。
+# 2026-11-06 之前只有这一个布尔门，太阳 −1° 时画出「白蓝天空 + 满屏 6.5 等星」
+# 的物理不可能画面。模型本身是量级近似，口径与限制写在该模块 docstring 里。
 STAR_DAYLIGHT_SUN_ALT_DEG = -0.833
 
 
@@ -772,6 +774,57 @@ def _traj_alpha(i: int, n: int, base: int = 110,
     return int(base * min(1.0, ramp / float(fade)))
 
 
+def _horizon_crossing(az1: float, el1: float,
+                      az2: float, el2: float) -> Tuple[float, float]:
+    """两点间 el=0 的穿越点（az 取最短弧插值），用于把轨迹精确截到地平线。
+
+    单纯"过滤掉 el<=0 的点再连线"会在「落下—升起」之间拉出一条横跨天空的
+    直弦（实测 10 分钟弧里 ISS 落/升各一次很常见）；这里按仰角线性插值出
+    穿越点，两端都补到 el=0，线就不会离开地平线。
+    """
+    denom = float(el1) - float(el2)
+    t = 0.0 if abs(denom) < 1e-12 else float(el1) / denom
+    t = max(0.0, min(1.0, t))
+    # 方位取最短弧（跨 0/360 时不绕远路）
+    d_az = ((float(az2) - float(az1) + 180.0) % 360.0) - 180.0
+    az = (float(az1) + t * d_az) % 360.0
+    return az, 0.0
+
+
+def split_visible_track(points: List[Tuple[float, float]]
+                        ) -> List[List[Tuple[float, float]]]:
+    """把 (az, el) 序列按地平线拆成若干可见段，两段端部补到 el=0。
+
+    返回的每段都满足：所有点 el >= 0，且首尾点（若能穿越）正好在地平线上。
+    这样绘制层逐段连线，既不会连出跨天空的直弦，也不会在线离开地平处
+    出现"悬空"的端点。
+    """
+    runs: List[List[Tuple[float, float]]] = []
+    cur: List[Tuple[float, float]] = []
+    prev: Optional[Tuple[float, float]] = None
+    for az, el in points:
+        p = (float(az), float(el))
+        if p[1] > 0.0:
+            if prev is not None and prev[1] <= 0.0:
+                if cur:
+                    cur.append(_horizon_crossing(cur[-1][0], cur[-1][1],
+                                                 p[0], p[1]))
+                else:
+                    cur.append(_horizon_crossing(prev[0], prev[1], p[0], p[1]))
+            cur.append(p)
+        else:
+            if cur:
+                cur.append(_horizon_crossing(cur[-1][0], cur[-1][1],
+                                             p[0], p[1]))
+                if len(cur) >= 2:
+                    runs.append(cur)
+                cur = []
+        prev = p
+    if len(cur) >= 2:
+        runs.append(cur)
+    return runs
+
+
 def selection_crosshair_geometry(t: float, base_radius: float = 14.0,
                                  amp: float = 1.6, period: float = 2.0,
                                  dash_sweep: float = 30.0
@@ -796,6 +849,27 @@ def breathing_ring_radius(t: float, base_radius: float = 16.0,
     时间注入不读墙钟，便于确定性断言。"""
     return float(base_radius) + float(amp) * math.sin(
         2.0 * math.pi * float(t) / float(period))
+
+
+def observer_alt_m(observer: Optional[Dict[str, float]],
+                   default: float = 0.0) -> float:
+    """观测站海拔（米），**None 安全**。
+
+    ``dict.get("alt_m", default)`` 只兜「键缺失」，不兜「键存在但值是 None」——
+    而 GNSS 只给 RMC 级定位时 ``altitude_m`` 正是 None。``float(None)`` 会直接
+    抛 TypeError，``None / 1000.0`` 也是。本函数是全视图唯一的取海拔入口；
+    新代码不要再写 ``observer.get("alt_m", 0.0)``。
+    """
+    if not observer:
+        return default
+    alt = observer.get("alt_m")
+    if alt is None:
+        return default
+    try:
+        val = float(alt)
+    except (TypeError, ValueError):
+        return default
+    return val if math.isfinite(val) else default
 
 
 def format_observer_chip(observer: Optional[Dict[str, float]]) -> str:
@@ -1262,6 +1336,7 @@ class SkyObject:
         sunlit: Optional[bool] = None,
         sunlit_status: Optional[str] = None,
         boundary_uncertainty_s: Optional[float] = None,
+        range_rate_kms: Optional[float] = None,
     ):
         self.name = name
         self.azimuth_deg = azimuth_deg  # 方位角 0-360°（北=0，东=90）
@@ -1285,6 +1360,11 @@ class SkyObject:
         # 卫星刚进/出影时三态跳变（相邻两帧状态翻面仍在 ±uncertainty 内
         # 属正常抖动，不是数据错误）。只消费后端快照字段。
         self.boundary_uncertainty_s = boundary_uncertainty_s
+        # 站心径向速度 (km/s)：正值 = 远离观测者。None = 未提供（不拿 0 冒充）。
+        # 多普勒必须读这个字段，**不要**再从 description 文本里正则抠数字：
+        # 文案只保留 2 位小数（10 m/s），437 MHz 上就是 ~14 Hz 量化误差，
+        # 且改一次文案就会静默变成 0 Hz。
+        self.range_rate_kms = range_rate_kms
         self.visible = True
 
     def is_above_horizon(self) -> bool:
@@ -1624,6 +1704,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     TRAJ_MIN_STALE_S = 10.0            # 低倍率下限（避免每帧重算）
     TRAJ_MAX_STALE_S = 120.0           # 高倍率上限（≥2 帧，保证不画过期曲线）
     TRAJ_SPAN_S = 600.0                # 未来 10 分钟（与控制器喂入口径一致）
+    # 1× 下卫星点重算节拍（4Hz）：外部跟踪器 10s 一拍会让点位落后 5–10°。
+    SAT_POS_REFRESH_MS_1X = 250.0
 
     object_clicked = Signal(object)  # SkyObject
     pointing_changed = Signal(float, float)  # az, el
@@ -1668,6 +1750,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._view_satrec_cache: Dict[str, Tuple[str, str, object]] = {}
         # 最近一次按模拟时刻重算卫星位置的时刻（测试与面板一致性对拍用）
         self._sat_positions_unix: Optional[float] = None
+        # 1× 下卫星点重算的节流时间戳（monotonic ms；见 _refresh_fast_time_positions）
+        self._sat_pos_refresh_ms: float = 0.0
 
         # === SkyInteractionHandler 所需的宿主属性 ===
         # Stellarium StelProjector 透视投影 (pinhole camera); FOV 0.5..120°。
@@ -1796,6 +1880,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._pass_gate_deg: Optional[float] = None
         self._pass_window_hours: Optional[float] = None
         self._pass_show_low: bool = False
+        # 预测扫描覆盖范围（前 N 颗 / 目录共 M 颗）：M>N 时标题必须写明
+        self._pass_scanned: Optional[int] = None
+        self._pass_catalog_size: Optional[int] = None
 
         # === 「调到该星」覆盖按钮（自包含，不依赖 main_window）===
         # 选中带 TLE 的卫星且有观测站时才启用；否则置灰。
@@ -2000,6 +2087,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 呼吸动画。留成缝以便测试注入固定时间（不绑墙钟）。
         self._breath_clock = lambda: time.monotonic()
 
+    # --- 显隐与重绘节拍 -------------------------------------------------
+    # 星象仪在主窗口里是一个页签：切走后本控件不可见，但 33ms 定时器原先照跑
+    # （每帧 update() + 快转时逐帧 sgp4 + 整帧 paint 被调度），把 GUI 线程白烧。
+    # 隐藏即停表、显示即按当前自适应间隔恢复——不改变任何画面内容。
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._refresh_timer.isActive():
+            self._refresh_timer.start(int(self._pacing_interval_ms))
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._refresh_timer.isActive():
+            self._refresh_timer.stop()
+
     def _on_refresh_tick(self):
         """33ms 节拍：快转重算位置/轨迹 + 步进 goto 动画 + 摄像机锁定跟随。"""
         self._refresh_fast_time_positions()
@@ -2061,17 +2162,24 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return sat
 
     def _refresh_fast_time_positions(self) -> None:
-        """快转下按当前模拟时刻重算卫星点与过期轨迹（1x 完全不走这里）。
+        """按当前模拟时刻重算卫星点与过期轨迹（快转逐帧、1× 下 4Hz）。
 
-        1x 时外部 5s 刷新已把位置误差压在「5s 视运动」内（LEO <0.01°）；
-        快转时 5s 墙钟 = 5×rate 模拟秒，天空点与轨迹会明显过期。此处用
-        同一 TLE + 同一坐标链（orbit._state_from_satrec）现算，不画旧帧。
+        为什么 1× 也要走这里：外部 ``SatelliteTracker`` 的默认节拍是 10 s
+        （``interval_ms=10000``），ISS 过顶角速度 0.5–1°/s —— 点位最多落后
+        5–10°，120° 视场/700px 下 30–60 px，肉眼就是"星点跑在轨迹前面或后面"，
+        跳时（+10m）后也要等 10 s 才追上。天空图自己按模拟时刻现算（同一 TLE +
+        同一坐标链 ``orbit._state_from_satrec``），1× 下 4Hz 足够，代价是
+        每拍几颗 × sgp4 ≈ 0.2 ms。轨迹仍按 ``TRAJ_MIN_STALE_S``(10s) 重算。
+
         无 TLE/无法解算 → 撤掉该轨迹（宁可不画，不画过期曲线）。
         """
         rate = self._time_rate()
-        if abs(rate) <= 1.0:
+        slow_1x = abs(rate) <= 1.0
+        if slow_1x:
             self._lock_snap_rate = None
-            return
+            now_ms = time.monotonic() * 1000.0
+            if now_ms - self._sat_pos_refresh_ms < self.SAT_POS_REFRESH_MS_1X:
+                return
         obs = self._observer
         if obs is None or not self._sat_catalog:
             return
@@ -2098,7 +2206,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             try:
                 st = orbit._state_from_satrec(
                     sat, obj.name, jd, obs["lat"], obs["lon"],
-                    obs.get("alt_m", 0.0) / 1000.0)
+                    observer_alt_m(obs) / 1000.0)
             except Exception:
                 st = None
             if st is None:
@@ -2110,8 +2218,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             obj.azimuth_deg = float(st["azimuth"])
             obj.elevation_deg = alt_d
             obj.visible = True
+            # 全精度径向速度：绘制/信息卡文案只到 0.01 km/s，多普勒不能吃这个量化
+            obj.range_rate_kms = rr
             # 与 SatelliteTracker 喂入的文案同口径（信息卡不因刷新来源而变）
             obj.description = format_satellite_description(alt_d, dist_km, rr)
+
+        # 本拍已把卫星点对齐到模拟时刻：1× 下据此节流下一拍（快转逐帧不节流）
+        self._sat_pos_refresh_ms = time.monotonic() * 1000.0
 
         # --- 轨迹：锚点落后当前模拟时刻超过 ~2 帧模拟推进 → 重算未来 10 分钟 ---
         stale_s = min(self.TRAJ_MAX_STALE_S,
@@ -2140,7 +2253,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 try:
                     st = orbit._state_from_satrec(
                         sat, name, jd_k, obs["lat"], obs["lon"],
-                        obs.get("alt_m", 0.0) / 1000.0)
+                        observer_alt_m(obs) / 1000.0)
                 except Exception:
                     st = None
                 if st is not None:
@@ -2289,7 +2402,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         try:
             from mbdsdr_ai.station import StationFix, trust_for_calculation
             ev = trust_for_calculation(StationFix(
-                obs["lat"], obs["lon"], obs.get("alt_m", 0.0),
+                obs["lat"], obs["lon"], observer_alt_m(obs),
                 source="user"))
         except Exception as e:  # noqa: BLE001 - 守卫失败要留痕，不能默认可信
             return f"站址校验失败（{type(e).__name__}: {e}）"
@@ -2322,7 +2435,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             sat = Satrec.twoline2rv(line1, line2)
             st = orbit._state_from_satrec(
                 sat, name, self._current_jd(),
-                obs["lat"], obs["lon"], obs.get("alt_m", 0.0) / 1000.0)
+                obs["lat"], obs["lon"], observer_alt_m(obs) / 1000.0)
         except Exception:
             return None
         if st is None:
@@ -2576,14 +2689,26 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._update_tune_button()
 
     def set_gnss_position(self, fix_dict: dict):
-        """由真实串口 GNSS fix 驱动观测站坐标与数据来源标注。"""
+        """由真实串口 GNSS fix 驱动观测站坐标与数据来源标注。
+
+        海拔归一化（2026-11-06 修）：``gnss_monitor`` 只给 RMC 级定位时
+        ``altitude_m`` 是 **None**（有经纬、无海拔）。此前原样塞进
+        ``_observer["alt_m"]``，下游 ``float(None)`` / ``None / 1000.0`` 每帧
+        抛 TypeError —— 而 ``_ground_station()`` 被星表/DSO/行星/日月绘制和
+        拾取每帧调用，等于整张星图每帧报错。这里统一按海平面 0 m 归一化，
+        并在 ``alt_assumed`` 留痕（不冒充"已解算海拔"）。
+        """
         source = fix_dict.get("source", "none")
         if source == "real" and fix_dict.get("latitude") is not None \
                 and fix_dict.get("longitude") is not None:
+            raw_alt = fix_dict.get("altitude_m")
+            alt_assumed = raw_alt is None
             self._observer = {
-                "lat": fix_dict["latitude"],
-                "lon": fix_dict["longitude"],
-                "alt_m": fix_dict.get("altitude_m"),
+                "lat": float(fix_dict["latitude"]),
+                "lon": float(fix_dict["longitude"]),
+                "alt_m": 0.0 if alt_assumed else float(raw_alt),
+                # 供状态卡/读数如实标注「海拔未解，按 0 m」
+                "alt_assumed": alt_assumed,
             }
             self.set_data_source("real")
         else:
@@ -2606,17 +2731,25 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def set_upcoming_passes(self, passes: List[Dict],
                             gate_deg: Optional[float] = None,
                             show_low: bool = False,
-                            window_hours: Optional[float] = None):
+                            window_hours: Optional[float] = None,
+                            scanned: Optional[int] = None,
+                            catalog_size: Optional[int] = None):
         """喂入未来过境列表（rise 时刻 HH:MM:SS(UTC) + max_alt + duration_min）。
 
         ``gate_deg`` / ``show_low`` / ``window_hours`` 只用于标题口径：列表按
         **峰值仰角** ≥ 门筛选，窗口为用户设置的小时数（1–72h）；低仰角开关
         打开时 5°–用户门的过境会额外列出并标注「低仰角」。
+
+        ``scanned`` / ``catalog_size``：预测只扫 TLE 目录的前 N 颗（24h 粗扫是
+        每颗 ~1500 次 sgp4，全目录扫会拖垮 5s 刷新）。目录比 N 大时必须在标题
+        里写明「仅扫前 N/M 颗」，否则用户会把"没列出"读成"没有过境"。
         """
         self._upcoming_passes = list(passes)[:12]
         self._pass_gate_deg = gate_deg
         self._pass_window_hours = window_hours
         self._pass_show_low = bool(show_low)
+        self._pass_scanned = scanned
+        self._pass_catalog_size = catalog_size
         self.update()
 
     # ------------------------------------------------------------------ #
@@ -2851,7 +2984,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if self._observer is None:
             return None
         return GroundStation(self._observer["lon"], self._observer["lat"],
-                             self._observer.get("alt_m", 0.0))
+                             observer_alt_m(self._observer))
 
     # ------------------------------------------------------------------ #
     # 搜索 (分类: 空间站 / 人造卫星 / 恒星, 图标区分)
@@ -3081,7 +3214,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 try:
                     from sgp4.api import Satrec
                     sat = Satrec.twoline2rv(meta["line1"], meta["line2"])
-                    alt_km = (self._observer.get("alt_m", 0.0)) / 1000.0
+                    alt_km = (observer_alt_m(self._observer)) / 1000.0
                     rs = _sats.next_rise_set(sat, self._observer["lat"],
                                              self._observer["lon"], alt_km, jd)
                     info["rise"] = rs["rise_jd"]
@@ -3318,7 +3451,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return None
         gs = GroundStation(float(self._observer["lat"]),
                            float(self._observer["lon"]),
-                           float(self._observer.get("alt_m", 0.0)) / 1000.0)
+                           float(observer_alt_m(self._observer)) / 1000.0)
         try:
             res = tune_command(tr, gs)
         except Exception:
@@ -3735,19 +3868,27 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         星表缺失/加载失败时返回 None，并在状态卡如实写「星表不可用」——
         不静默回退到内置 141 颗亮星子集（那是另一套坐标/另一套可见性）。
+
+        极限星等 = ``limit_magnitude(fov, bortle)`` − 晨昏压制量。
+        太阳高度未知时压制量为 0（维持夜空口径，不假装）。
         """
         try:
-            from mbdsdr_ai.skyengine.star_catalog import select_for_view
+            from mbdsdr_ai.skyengine.star_catalog import (
+                limit_magnitude, select_for_view)
         except Exception:
             self._star_catalog_error = "星表模块不可用"
             return None
         try:
+            base_limit = limit_magnitude(float(self.view_state.fov_deg),
+                                         bortle=int(self._bortle))
+            limit = base_limit - self._twilight_penalty_mag()
             sel = select_for_view(
                 gs, jd,
                 float(self.view_state.center_az),
                 float(self.view_state.center_alt),
                 float(self.view_state.fov_deg),
                 bortle=int(self._bortle),
+                limit_mag=limit,
                 extinction_k=float(self._extinction_k),
                 max_count=self.STAR_MAX_DRAW,
             )
@@ -3756,6 +3897,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return None
         self._star_catalog_error = ""
         return sel
+
+    def _twilight_penalty_mag(self) -> float:
+        """晨昏压制量（等）：天空比无月夜亮多少等，极限星等就压低多少等。"""
+        return float(_twilight.twilight_limit_penalty_mag(self._sun_alt_deg()))
 
     # 星表求出的「本帧应画星集合」只随（时刻、视线中心、视场、Bortle、消光）
     # 变化；实测 select_for_view 单次 4.98 ms（1794 颗，700px/120°），而
@@ -3771,7 +3916,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                round(float(self.view_state.fov_deg), 3),
                int(self._bortle), round(float(self._extinction_k), 4),
                round(float(getattr(gs, "lon", 0.0)), 4),
-               round(float(getattr(gs, "lat", 0.0)), 4))
+               round(float(getattr(gs, "lat", 0.0)), 4),
+               # 晨昏压制量必须进键：否则日落前后 2s 分箱内会复用上一个极限星等。
+               # 量化到 0.05°（晨昏时太阳高度约 0.1°/min → 约 30s），对应
+               # 极限星等变化 <0.1 等，肉眼不可辨。
+               round(float(self._sun_alt_deg() or 0.0), 2))
         if key == getattr(self, "_star_sel_key", None):
             return self._star_sel_cached
         sel = self._star_selection(gs, jd)
@@ -3852,7 +4001,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         painter.save()
         painter.setFont(self._font)
-        label_mag = _star_label_limit_mag(self.view_state.fov_deg)
+        # 星名门不能超过本帧的绘制门：晨昏时极限星等被压到 2 等以下，
+        # 若还用视场自适应上限（≥60° 时 2.0），会出现"没有星点却有星名"。
+        label_mag = min(_star_label_limit_mag(self.view_state.fov_deg),
+                        float(sel.limit_mag))
         # 批量落笔：把颜色/直径/alpha 量化成桶，每桶一次 drawPoints。
         # 120° 时逐星 setBrush+drawEllipse 实测 71ms；分桶后状态切换从
         # ~1200 次降到几十次。量化步长（色 16、直径 0.5px、alpha 16）
@@ -6278,22 +6430,37 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     @staticmethod
     def _estimate_doppler_hz(obj: SkyObject) -> Optional[float]:
-        """多普勒偏移；频率未登记时返回 None（不拿 0 Hz 算出一个 0）。"""
+        """多普勒偏移 (Hz)；频率未登记或径向速度未知时返回 None。
+
+        径向速度优先取 ``obj.range_rate_kms``（sgp4 原值，全精度）。
+        文本正则只是**兜底**（兼容只喂了 description 的外部构造路径），
+        它只能拿到 2 位小数，不再是主路径。
+        """
         hz = obj.frequency_hz
         if hz is None or hz <= 0:
             return None
-        import re
-        v_rel = 0.0
-        m = re.search(r"径向速度\s*([+-]?[0-9.]+)\s*km/s",
-                      obj.description or "")
-        if m:
-            v_rel = float(m.group(1)) * 1000.0
-        else:
-            m = re.search(r"v_rel\s*=?\s*(-?[0-9.]+)\s*m/s", obj.description or "")
+        rr = getattr(obj, "range_rate_kms", None)
+        if rr is None:
+            import re
+            m = re.search(r"径向速度\s*([+-]?[0-9.]+)\s*km/s",
+                          obj.description or "")
             if m:
-                v_rel = float(m.group(1))
+                try:
+                    rr = float(m.group(1))
+                except ValueError:
+                    rr = None
+            if rr is None:
+                m = re.search(r"v_rel\s*=?\s*(-?[0-9.]+)\s*m/s",
+                              obj.description or "")
+                if m:
+                    try:
+                        rr = float(m.group(1)) / 1000.0
+                    except ValueError:
+                        rr = None
+        if rr is None:
+            return None
         c = 299792458.0
-        return -v_rel * hz / c
+        return -float(rr) * 1000.0 * hz / c
 
     def _draw_antenna_beam(self, painter: QPainter):
         if self._antenna.elevation_deg <= 0:
@@ -6348,9 +6515,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     def _draw_trajectories(self, painter: QPainter):
         """卫星轨迹（半透明虚线，端部淡出）。
 
-        只画地平线以上的可见段（el<=0 断开）；端部 ~15% 段数做
-        alpha 渐入/渐出（Stellarium 轨道线端部淡出同效果），中段满
-         alpha=110。逐段插 alpha，n 段 n-1 条线段。
+        只画地平线以上的可见段：按 ``split_visible_track`` 把序列拆成若干段，
+        每段两端精确截到 el=0（不再"滤掉地平以下点后连折线"，那会在落/升之间
+        拉出横跨天空的直弦）。端部 ~15% 段数做 alpha 渐入/渐出，中段满
+        alpha=110。逐段插 alpha，n 段 n-1 条线段。
         """
         painter.save()
         for name, points in self._trajectories.items():
@@ -6361,19 +6529,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if obj.name == name:
                     color = QColor(obj.color) if obj.color else color
                     break
-            seg = []
-            for az, el in points:
-                if el <= 0:
+            for run in split_visible_track(points):
+                seg = [self._sky_to_screen(az, el) for az, el in run]
+                n = len(seg)
+                if n < 2:
                     continue
-                seg.append(self._sky_to_screen(az, el))
-            if len(seg) < 2:
-                continue
-            n = len(seg)
-            for i in range(n - 1):
-                a = _traj_alpha(i, n)
-                c = QColor(color.red(), color.green(), color.blue(), a)
-                painter.setPen(QPen(c, 1, Qt.DashLine))
-                painter.drawLine(seg[i], seg[i + 1])
+                for i in range(n - 1):
+                    a = _traj_alpha(i, n)
+                    c = QColor(color.red(), color.green(), color.blue(), a)
+                    painter.setPen(QPen(c, 1, Qt.DashLine))
+                    painter.drawLine(seg[i], seg[i + 1])
         painter.restore()
 
     def _draw_heatmap(self, painter: QPainter):
@@ -6481,10 +6646,26 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.drawText(card_x + 12, y, "UTC")
         painter.setFont(self._mono_font)
         painter.setPen(dim)
-        utc_now = self._time_info.get("utc_time") or datetime.now(timezone.utc)
+        # 同一张卡上的 UTC / 本地 / 恒星时 / JD 必须来自**同一个时刻基准**。
+        # 此前 UTC 与「本地」读注入的墙钟（new_spacetime.get_time_info 只用
+        # datetime.now()+NTP，完全无视模拟时间），而恒星时/JD 读 TimeEngine——
+        # 一按 ×60 或 +10m，同一张卡就自相矛盾（UTC 12:00 而 JD 已是 12:30）。
+        # 现在四行统一由 _current_jd() 反算；只有引擎不可用时才回落到墙钟。
+        jd_now = self._current_jd()
+        try:
+            # JD↔Unix 有 ~20µs 的浮点往返误差；卡片只显示到秒，取整到秒免得
+            # 边界上"18:05:00"被截成"18:04:59"（同屏另一个时钟却显示 18:05）。
+            sim_unix = round(_jtime.jd_to_unix(jd_now))
+            utc_now = datetime.fromtimestamp(sim_unix, tz=timezone.utc)
+        except Exception:
+            sim_unix = None
+            utc_now = self._time_info.get("utc_time") or datetime.now(timezone.utc)
+        # 模拟时刻与真实时刻分叉时必须显式标注，否则"看起来是当前时间"。
+        tag = str(self._time_info.get("ntp_status", "system"))
+        if sim_unix is not None and abs(sim_unix - time.time()) > 2.0:
+            tag = "模拟"
         painter.drawText(card_x + 52, y,
-                         f"{format_utc_time(utc_now, '%H:%M:%S')} "
-                         f"[{self._time_info.get('ntp_status', 'system')}]")
+                         f"{format_utc_time(utc_now, '%H:%M:%S')} [{tag}]")
 
         # 本地时刻与 UTC 同时给，偏移由系统时区/DST 现算（不写死 +08:00）
         y += 18
@@ -6495,14 +6676,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setPen(dim)
         painter.drawText(card_x + 52, y, format_local_time(utc_now))
 
-        # 恒星时 + 儒略日：同一 TimeEngine 时刻的独立读数（H-6 可复算）。
-        # 无站址时 LST 无定义，写「—（无站址）」，不拿 0° 冒充。
+        # 恒星时 + 儒略日：与上面同一个 jd_now（同基，不重算第二次）
         y += 18
         painter.setFont(self._font)
         painter.setPen(label_col)
         painter.drawText(card_x + 12, y, "恒星时")
         painter.setFont(self._mono_font)
-        jd_now = self._current_jd()
         if self._observer is not None:
             lst = local_sidereal_time_deg(jd_now, self._observer["lon"])
             painter.setPen(dim)
@@ -6737,7 +6916,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         rows = self._upcoming_passes[:8]
         row_h = 18
         panel_w = 250
-        panel_h = 26 + len(rows) * row_h
+        # 26 = 标题行；16 = 列头行（"峰值UTC / 卫星 / 峰值°"）
+        panel_h = 42 + len(rows) * row_h
         panel_x = self.width() - panel_w - 12
         panel_y = 56
         bg = QColor(_t.COLORS["card_2"])
@@ -6754,8 +6934,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 再写死固定小时数；未注入窗口时省略时长，避免显示与实际搜索范围不符
         span = (f"{self._pass_window_hours:g}h"
                 if self._pass_window_hours is not None else "")
+        # 「UTC」必须两个分支都写：正常路径恒带 gate，此前只有 gate=None 的分支
+        # 才写 UTC，于是最常用的路径显示 HH:MM:SS 却不标时区——本地时间差 8h。
         if self._pass_gate_deg is not None:
-            title = f"未来过境{(' ' + span) if span else ''} · 峰值≥{self._pass_gate_deg:g}°"
+            title = (f"未来过境{(' ' + span) if span else ''} UTC · "
+                     f"峰值≥{self._pass_gate_deg:g}°")
         else:
             title = f"未来过境{(' ' + span) if span else ''} UTC · 峰值(几何)"
         if self._pass_show_low:
@@ -6764,10 +6947,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 细扫采到的（无 sat_passes 的 0.5 秒升落二分）。不标就是同屏混用
         # 两种精度却让人以为都是同一口径。
         title += f" · {_SAT_PASS_FINE_STEP_S:g}s采样"
+        # 扫描覆盖范围：目录大于预测预算时如实写「前 N/M 颗」，不让"没列出"
+        # 被读成"没有过境"。
+        if (self._pass_scanned is not None and self._pass_catalog_size
+                and self._pass_catalog_size > self._pass_scanned):
+            title += f" · 仅扫前{self._pass_scanned}/{self._pass_catalog_size}颗"
         painter.drawText(panel_x + 10, panel_y + 16, title)
 
         painter.setFont(self._mono_font)
+        # 列头：rise 字段实为**峰值**时刻（不是升起 AOS），面板原先没有任何
+        # 表头，用户无法区分"峰值 UTC"与"本地升起"。这一行是口径声明，不是装饰。
         ty = panel_y + 16 + row_h
+        painter.setPen(QColor(_t.COLORS["gray_400"]))
+        painter.drawText(panel_x + 10, ty, "峰值UTC")
+        painter.drawText(panel_x + 66, ty, "卫星")
+        painter.drawText(panel_x + panel_w - 78, ty, "峰值°".rjust(8))
+        ty += 16
         for p in rows:
             painter.setPen(dim)
             # rise 为 HH:MM:SS：峰值时刻给到秒，避免「分钟取整」在近天顶过境上
@@ -7500,6 +7695,9 @@ class SatelliteTracker:
     # 快转下按模拟时间差重算（墙钟下限防止高倍率每帧扫 24h）
     PASS_REFRESH_SIM_S = 300.0
     PASS_REFRESH_WALL_S = 1.0
+    # 24h 粗扫每颗卫星约 1500 次 sgp4，全目录扫会拖垮 5s 刷新节拍；
+    # 因此只扫目录前 N 颗。目录更大时 UI 标题必须写明「仅扫前 N/M 颗」。
+    PASS_MAX_SATS = 6
 
     def __init__(self, sky_view, lat: Optional[float], lon: Optional[float],
                  alt_km: float = 0.0, interval_ms: int = 10000):
@@ -7735,6 +7933,8 @@ class SatelliteTracker:
                 sunlit=state.get("sunlit"),
                 sunlit_status=state.get("sunlit_status"),
                 boundary_uncertainty_s=state.get("boundary_uncertainty_s"),
+                # 全精度径向速度（km/s）：多普勒读字段，不从文案正则抠
+                range_rate_kms=range_rate,
             ))
 
             # 未来 10 分钟轨迹（每 60s 一点）
@@ -7824,11 +8024,19 @@ class SatelliteTracker:
                 win_s=float(window_hours) * 3600.0,
                 coarse_step_s=self.PASS_COARSE_STEP_S,
                 fine_step_s=self.PASS_FINE_STEP_S,
+                max_sats=self.PASS_MAX_SATS,
             )
             self._passes_anchor_unix = t0_unix
             self._passes_wall = time.monotonic()
             self.sky_view.set_upcoming_passes(
                 rows[:8], gate_deg=gate, show_low=show_low,
-                window_hours=window_hours)
-        except Exception:
+                window_hours=window_hours,
+                scanned=self.PASS_MAX_SATS,
+                catalog_size=len(self._catalog))
+        except Exception as exc:
+            # 失败不能静默成"没有过境"：这里曾经把任何异常（含 set_upcoming_passes
+            # 与假视图的签名不匹配）都吞掉并清空列表，用户看到的是"未来过境：无"，
+            # 与"真的没有过境"无法区分。现在留一条日志再说空。
+            _log.warning("过境预测失败，列表清空：%s: %s",
+                         type(exc).__name__, exc)
             self.sky_view.set_upcoming_passes([])
