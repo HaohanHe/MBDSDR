@@ -141,9 +141,10 @@ class SatelliteImagePanel(QWidget):
             "仅当录制文件没有 SigMF meta 时使用这个手动值")
         sr_row.addWidget(self.sr_spin)
         rl.addLayout(sr_row)
-        self.iq_btn = QPushButton("从录制 IQ 解码 (Meteor LRPT)")
-        rl.addWidget(self.iq_btn)
 
+        # 入口只留一个：NOAA 时「开始解码」= 音频采集，METEOR 时同一个
+        # 按钮变「选择录制 IQ 解码」。早先同时挂一个独立的 IQ 按钮，
+        # 真机截图里两个入口并排、文案几乎一样，用户不知道点哪个。
         rl.addWidget(QLabel("历史图像:"))
         self.history = QListWidget()
         self.history.setMaximumWidth(220)
@@ -157,7 +158,6 @@ class SatelliteImagePanel(QWidget):
         self.save_btn.clicked.connect(self._save_current)
         self.history.itemClicked.connect(self._on_history_clicked)
         self.sat_combo.currentTextChanged.connect(self._on_sat_changed)
-        self.iq_btn.clicked.connect(self._choose_iq_decode)
         self.sr_spin.valueChanged.connect(self._on_sr_changed)
 
     # ------------------------------------------------------------------ #
@@ -170,7 +170,6 @@ class SatelliteImagePanel(QWidget):
         """
         lrpt = str(text).endswith("(LRPT)")
         self.start_btn.setText("选择录制 IQ 解码" if lrpt else "开始解码")
-        self.iq_btn.setEnabled(lrpt)
         self.sr_spin.setEnabled(lrpt)
         self._refresh_start_enabled()
 
@@ -290,7 +289,6 @@ class SatelliteImagePanel(QWidget):
             f"解码中: {os.path.basename(path)} | 采样率 {sr_note}")
         self.progress.setValue(0)
         self.start_btn.setEnabled(False)
-        self.iq_btn.setEnabled(False)
         thread.start()
 
     def _on_decode_progress(self, text: str) -> None:
@@ -357,7 +355,7 @@ class SatelliteImagePanel(QWidget):
             # QPSK 数字链路根本不吃 APT 音频。给出可执行入口而不是死胡同。
             self.stats_label.setText(
                 "METEOR LRPT 是 QPSK 数字链路，不能从 APT 音频解码；"
-                "请用「从录制 IQ 解码」选 complex64 录制文件")
+                "请点「选择录制 IQ 解码」选 complex64 录制文件")
             self.image_label.setText(SAT_WAIT_TEXT)
             return
         if not _HAS_APT:

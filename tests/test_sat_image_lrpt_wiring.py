@@ -115,12 +115,15 @@ class TestModeSwitch:
         p = sip.SatelliteImagePanel()
         assert p.start_btn.text() == "开始解码"
         assert not p.start_btn.isEnabled()          # 未接 SDR
-        assert not p.iq_btn.isEnabled()
+        assert not p.sr_spin.isEnabled()            # IQ 采样率只对 LRPT 有意义
+        # 入口只留一个：早期版本并排挂了两个几乎同名按钮，真机截图里
+        # 用户不知道点哪个；不允许再加回来。
+        assert not hasattr(p, "iq_btn")
 
         p.sat_combo.setCurrentText(LRPT_SAT)
         assert p.start_btn.text() == "选择录制 IQ 解码"
         assert p.start_btn.isEnabled()              # 离线解码不需要在线 SDR
-        assert p.iq_btn.isEnabled() and p.sr_spin.isEnabled()
+        assert p.sr_spin.isEnabled()
 
         p.sat_combo.setCurrentText("NOAA-19 (APT)")
         assert p.start_btn.text() == "开始解码"
@@ -139,7 +142,7 @@ class TestModeSwitch:
         text = p.stats_label.text()
         assert "不能从 APT 音频解码" in text
         assert "图像重组待实现" not in text
-        assert "从录制 IQ 解码" in text
+        assert "选择录制 IQ 解码" in text
         assert p.image_label.text() == sip.SAT_WAIT_TEXT
 
 
@@ -177,7 +180,7 @@ class TestDecodeWiring:
                      "帧约定尚未统一（not_verified），不出图",
         }
         p.sat_combo.setCurrentText(LRPT_SAT)
-        p.iq_btn.click()
+        p.start_btn.click()
         assert len(_FakeWorker.seen) == 1
         params = _FakeWorker.seen[0]
         assert params["family"] == "meteor"
@@ -209,7 +212,7 @@ class TestDecodeWiring:
         _FakeWorker.run = _run_with_png
         try:
             p.sat_combo.setCurrentText(LRPT_SAT)
-            p.iq_btn.click()
+            p.start_btn.click()
         finally:
             _FakeWorker.run = orig_run
         assert p.image_path() is not None
