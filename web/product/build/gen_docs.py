@@ -231,7 +231,7 @@ glossary = """# 术语表（zh-CN / 日本語 / English）
 | 写工具确认门 | 書き込み確認ゲート | Write confirmation gate | <<GATE_GLOSSARY>> |
 | 诚实空态 | 正直な空状態 | Honest empty state | 无硬件/无信号显式报空，绝不 mock 假数据 |
 | 真机实证 | 実機検証 | Real-hardware evidence | 有实测记录才写「已验证」，云测/仿真不算 |
-| 内置 TLE 策略 | 内蔵 TLE 方針 | Built-in TLE policy | 合成/凑整 TLE 仅供离线演示，禁止精确过境 |
+| 内置 TLE 策略 | 内蔵 TLE 方針 | Built-in TLE policy | `decoders.BUILTIN_TLE` 合成/凑整占位值禁止精确过境；产品轨迹另用 `sat_tracker._BUILTIN_TLES`（Celestrak 真实快照） |
 | 站址可信度 | 観測地点の信頼性 | Site trust | 中性示例站点 `0.0, 0.0` 未校准时拒绝锁定与过境 |
 | 星象仪模式 | プラネタリウムモード | Planetarium Mode | 打开即全天空展开的形态 |
 | 专业模式 | プロフェッショナルモード | Professional Mode | 传统 SDR 工具化 + 模型协作栏 |
@@ -285,7 +285,7 @@ ControlHub 端口来自 `cpp/src/core/tokens.h`，时间倍率来自 `desktop/rf
 
 `AGENTS.md §1` 身份红线禁止真实地理位置默认值。默认站址是中性示例且
 `trusted=false`，复刻 `mbdsdr_ai/station.py` 的守卫：站址不可信时拒绝锁定与过境预报。
-同理，内置 TLE 仅供离线演示（`builtin_tle_meta.py` 策略：合成/凑整值禁止精确过境）。
+两份数据别混：`decoders.BUILTIN_TLE` 是历史凑整占位值（`builtin_tle_meta.py` 策略：禁止精确过境）；产品卫星天球轨迹用的是 `sat_tracker.py::_BUILTIN_TLES`，`BUILTIN_TLE_DATE` 标注的 Celestrak 真实抓取快照。轨迹按真实 SGP4 传播，但仍是**静态快照 + 地心方向**：未做站址视差，不给升落/过境结论。
 
 ## 状态栏为什么不再显示 Viterbi / RS / ASM 数字？
 

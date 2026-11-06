@@ -28,11 +28,13 @@ STEPS = [
     ("仓库事实源同步", [PY, "build/sync_from_repo.py"]),
     ("全天星表同步", [PY, "build/sync_sky_catalog.py"]),
     ("卫星轨迹同步", [PY, "build/sync_sat_tracks.py"]),
+    ("天文框架金标准", [PY, "build/gen_astro_golden.py"]),
     ("骨架与样式", [PY, "build/scaffold.py"]),
     ("文档/wiki 生成", [PY, "build/gen_docs.py"]),
     ("单文件构建", [PY, "build/build.py"]),
     ("静态守卫", [PY, "tests/verify_product.py"]),
     ("性能基准", [NODE or "node", "tests/perf_bench.js"]),
+    ("天文框架跨语言自检", [NODE, "tests/astro_selftest.js"] if NODE else None),
     ("天球投影自检", [NODE, "tests/proj_selftest.js"] if NODE else None),
     ("无头运行时", [NODE, "tests/verify_runtime.js"] if NODE else None),
     ("视觉夹具", [PY, "tests/make_visual_fixture.py"]),
@@ -42,8 +44,13 @@ STEPS = [
 def run(name: str, cmd: list[str] | None) -> tuple[bool, str]:
     if cmd is None or any(c is None for c in cmd):
         return False, "依赖缺失（node 未找到）"
-    p = subprocess.run([str(c) for c in cmd], cwd=ROOT, capture_output=True,
-                       text=True, encoding="utf-8", errors="replace", timeout=300)
+    try:
+        p = subprocess.run([str(c) for c in cmd], cwd=ROOT, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=300)
+    except subprocess.TimeoutExpired:
+        # 单步卡死（例如并发测试把 CPU 抢光）应记为 FAIL，不能让整条流水线
+        # 抛异常崩掉——否则后面的步骤根本不跑，也看不到明确失败原因。
+        return False, f"TIMEOUT after 300s: {' '.join(str(c) for c in cmd)}"
     out = (p.stdout or "") + (p.stderr or "")
     return p.returncode == 0, out.strip()
 
@@ -126,12 +133,15 @@ def main() -> int:
         " 映射成 `window.mbdsdrBridge` 形状并做 16 条单测对拍，但 QWebChannel / JS 全局注入、"
         " `confirm_channel` 接到 `mcp_server.call_tool` 均未实现；写工具恒返回 `gated`。",
         "- **频谱与瀑布无 IQ 输入**：专业模式显示诚实空态，未展示任何实时或合成谱线。",
-        "- **卫星目录为离线演示条目**：TLE 与下行频率取自 `sat_tracker.py`；"
-        "合成/凑整 TLE 不用于精确过境，站址未校准时不给可信过境结论。",
+        "- **卫星轨迹是真实 SGP4 传播**：TLE 取自 `sat_tracker.py::_BUILTIN_TLES`"
+        "（静态快照），经仓库 IAU2006 逆岁差转 J2000；地心方向未做站址视差，"
+        "站址未校准时不给可信过境结论。",
         "- **规划能力位**：6DOF 视觉引导 / 视觉校准 / VR·XR 在原仓库为设计项，"
         "UI 中标注「规划 · 未验证」且禁用。",
-        "- **星表数据是真的**（HYG v4.1 下载 + SHA256），但坐标链为 J2000 直算 LST，"
-        "未接 `celestial_geometry.py` 的完整岁差/章动/自行链。",
+        "- **星表数据是真的**（HYG v4.1 下载 + SHA256）；坐标链已接仓库 "
+        "`celestial_geometry.py` 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST，"
+        "由 `build/gen_astro_golden.py` 与 `tests/astro_selftest.js` 跨语言对拍（3.3e-16）。"
+        "**恒星自行仍未计**，章动非完整 77 项，忽略 ΔT/大气折射/站址视差。",
         "- **地景是示意轮廓**：仓库与产品都没有真实 360° 全景数据，地平高度场是确定性"
         "示意曲线（非实测地形、非照片），UI 已明写「示意轮廓」，不冒充实拍。",
         "- **太阳位置是低精度解析式**（Meeus 简化，约 ±0.5°）：只用于昼夜/晨昏蒙影判定，"

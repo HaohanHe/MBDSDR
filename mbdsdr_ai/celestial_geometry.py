@@ -264,11 +264,19 @@ def precession_matrix(jd_tt: float) -> np.ndarray:
 
 
 def obliquity(jd_tt: float) -> float:
-    """当前平黄赤交角 ε_A (rad)。
-    简化: ε_A = ε0 - 0.01306°*T (近似, 精度 ~0.1 角秒)。
+    """当前平黄赤交角 ε_A (rad)，IAU 2006 P03 一次项。
+
+        ε_A = 84381.406" − 46.836769"·T   (T = TT 儒略世纪)
+        dε/dT = −46.836769 / 206264.806 ≈ −2.2707e-4 rad/century
+
+    只取一次项，高阶项与完整 IAU2000A 章动序列未实现；**不宣称 mas 级精度**，
+    够 UI 天球显示用，不用于精确指向 / 定轨 / 过境结论。
+
+    2026-11 修正：此前写作 ``EPS0 - 0.0000003439 * T``，换算仅
+    0.071"/century，比标准量级小约 660 倍；注释却写 46.8"/century，自相矛盾。
     """
     T = (jd_tt - J2000) / 36525.0
-    return EPS0 - 0.0000003439 * T  # rad/century ≈ 46.8"/century
+    return EPS0 - (46.836769 / 206264.806) * T
 
 
 # ---------------------------------------------------------------------------
@@ -278,8 +286,15 @@ def obliquity(jd_tt: float) -> float:
 def nutation_angles_2000b(jd_tt: float) -> tuple[float, float]:
     """返回 (delta_psi, delta_eps) 章动角 (rad)。
 
-    IAU 2000B 简化模型, 精度 ~1 mas (1995-2050)。
-    参考 McCarthy & Luzum 2003, Cel.Mech.Dyn.Astr. 85:37-49。
+    IAU 2000B **简化主项模型**：只取最大的几项正弦/余弦项，不是完整 77 项，
+    也未做 IAU2000A 的补充项与周期外推。用于 UI 天球显示足够，
+    **不宣称 1 mas 精度**，不用于精确指向 / 定轨 / 过境结论。
+    参考：McCarthy & Luzum 2003, Cel.Mech.Dyn.Astr. 85:37-49。
+
+    2026-11 修正（单位错误）：系数表里的 -17.2066 等数值是**角秒**量级
+    （IAU2000B 主项 Δψ ≈ -17.2"），旧代码却按 ``0.0001 角秒`` 缩放，
+    结果 dpsi 只有 0.0003"、章动矩阵 N 与单位阵之差仅 1.5e-9 rad，
+    等于**章动完全没生效**。现按角秒换算。
     """
     T = (jd_tt - J2000) / 36525.0
 
@@ -294,13 +309,12 @@ def nutation_angles_2000b(jd_tt: float) -> tuple[float, float]:
     # 太阳平角距 D
     D = (297.85036 + 445267.111480 * T) * DEG
 
-    # IAU 2000B 主项 (系数单位: 0.0001 arcsec = 微角秒*1e-3)
-    # 取最大的几项即可达到 ~0.5" 精度
-    # 标准 IAU 2000B 完整 77 项这里取前 8 项
+    # IAU 2000B 主项（本简化模型只保留最大的几项；系数单位 = 角秒 arcsec）
+    # 完整 IAU2000B 表有 77 项，这里不是全量表，勿据此宣称 mas 级精度。
     dp = 0.0
     de = 0.0
-    # 项格式: (角度组合系数 l, l', F, D, Ω, dpsi*1e4 mas, deps*1e4 mas)
-    # l=l_mon, l'=l_sun
+    # 项格式: (角度组合系数 l, l', F, D, Ω, dpsi[arcsec], deps[arcsec])
+    # l=l_mon（月球平近点角）, l'=l_sun（太阳平近点角）
     terms = [
         (0, 0, 0, 0, 1, -17.2066,  0.0000),
         (0, 0, 2, 0, 2, -1.3170,   0.5774),
@@ -308,17 +322,15 @@ def nutation_angles_2000b(jd_tt: float) -> tuple[float, float]:
         (0, 0, 2, 0, 0,  0.2074,   0.0),
         (0, 1, 0, 0, 0,  0.1478,   0.0),
         (1, 0, 0, 0, 0,  0.1299,   0.0),
-        (0, 1, 2, 0, 2,  0.0000,   0.0000),
-        (0, 0, 0, 0, 2,  0.0000,  -0.0000),
     ]
     for (al, als, aF, aD, aOm, cdpsi, cdeps) in terms:
         arg = al * l_mon + als * l_sun + aF * F + aD * D + aOm * Omega
         dp += cdpsi * math.sin(arg)
         de += cdeps * math.cos(arg)
 
-    # 系数是 0.0001 arcsec; 转 rad
-    dp_r = dp * 0.0001 / 3600.0 * DEG
-    de_r = de * 0.0001 / 3600.0 * DEG
+    # 系数是角秒 -> rad
+    dp_r = dp * DEG / 3600.0
+    de_r = de * DEG / 3600.0
     return dp_r, de_r
 
 

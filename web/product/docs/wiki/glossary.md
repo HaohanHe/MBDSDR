@@ -12,7 +12,7 @@
 | 写工具确认门 | 書き込み確認ゲート | Write confirmation gate | 宿主写开关 `writeEnabled_` / 外部签发的一次性 `confirm_token` 把关；自报 `arm_manual` 无效，`gated:true` 是未获确认而非执行失败 |
 | 诚实空态 | 正直な空状態 | Honest empty state | 无硬件/无信号显式报空，绝不 mock 假数据 |
 | 真机实证 | 実機検証 | Real-hardware evidence | 有实测记录才写「已验证」，云测/仿真不算 |
-| 内置 TLE 策略 | 内蔵 TLE 方針 | Built-in TLE policy | 合成/凑整 TLE 仅供离线演示，禁止精确过境 |
+| 内置 TLE 策略 | 内蔵 TLE 方針 | Built-in TLE policy | `decoders.BUILTIN_TLE` 合成/凑整占位值禁止精确过境；产品轨迹另用 `sat_tracker._BUILTIN_TLES`（Celestrak 真实快照） |
 | 站址可信度 | 観測地点の信頼性 | Site trust | 中性示例站点 `0.0, 0.0` 未校准时拒绝锁定与过境 |
 | 星象仪模式 | プラネタリウムモード | Planetarium Mode | 打开即全天空展开的形态 |
 | 专业模式 | プロフェッショナルモード | Professional Mode | 传统 SDR 工具化 + 模型协作栏 |

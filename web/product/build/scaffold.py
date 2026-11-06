@@ -283,9 +283,10 @@ extra_css = css_vars + '''
     + css.rstrip() + "\n" + extra_css, encoding="utf-8")
 
 scripts = [
-    # 12 必须在 31 之前（天球引擎读 MB.SKYCAT）；31 必须在 30 之前（绘制层读 MB.celestial）
+    # 12 必须在 31 之前（天球引擎读 MB.SKYCAT）；14 必须在 31 之前
+    # （31 读 MB.astro 的岁差/章动总矩阵）；31 必须在 30 之前（绘制层读 MB.celestial）
     "00-core.js", "05-repo-facts.js", "10-data.js", "12-sky-catalog.js",
-    "13-sat-tracks.js",
+    "13-sat-tracks.js", "14-astro-frame.js",
     "20-i18n.js", "31-celestial.js", "30-sky.js",
     "40-workbench.js", "50-dialog.js",
     "70-docs-data.js", "70-docs.js", "60-app.js",

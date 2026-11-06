@@ -278,7 +278,7 @@ facts = dict(
     satellites=dict(items=sat_list, tleDate=tle_date, downlink=downlink,
                     policy=tle_policy,
                     source="mbdsdr_ai/sat_tracker.py · mbdsdr_ai/builtin_tle_meta.py",
-                    note="内置 TLE 仅供离线演示；合成/凑整条目禁止用于精确过境"),
+                    note="产品 SGP4 轨迹用 sat_tracker.py::_BUILTIN_TLES（Celestrak 真实抓取，BUILTIN_TLE_DATE）；builtin_tle_meta.py 的合成/凑整策略针对 decoders.BUILTIN_TLE 历史占位值，不是同一份数据；静态快照不用于精确过境"),
     redlines=dict(
         noRealLocationDefault=True,
         hardcodedCapabilityNumbers=False,

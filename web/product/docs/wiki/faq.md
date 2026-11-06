@@ -30,7 +30,7 @@ ControlHub 端口来自 `cpp/src/core/tokens.h`，时间倍率来自 `desktop/rf
 
 `AGENTS.md §1` 身份红线禁止真实地理位置默认值。默认站址是中性示例且
 `trusted=false`，复刻 `mbdsdr_ai/station.py` 的守卫：站址不可信时拒绝锁定与过境预报。
-同理，内置 TLE 仅供离线演示（`builtin_tle_meta.py` 策略：合成/凑整值禁止精确过境）。
+两份数据别混：`decoders.BUILTIN_TLE` 是历史凑整占位值（`builtin_tle_meta.py` 策略：禁止精确过境）；产品卫星天球轨迹用的是 `sat_tracker.py::_BUILTIN_TLES`，`BUILTIN_TLE_DATE` 标注的 Celestrak 真实抓取快照。轨迹按真实 SGP4 传播，但仍是**静态快照 + 地心方向**：未做站址视差，不给升落/过境结论。
 
 ## 状态栏为什么不再显示 Viterbi / RS / ASM 数字？
 

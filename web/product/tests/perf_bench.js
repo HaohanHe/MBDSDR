@@ -1,7 +1,7 @@
 /* 性能基准：全天星投影 + 地景逐列反投影的等价负载。
  * 用法：node tests/perf_bench.js
- * 只读加载 00-core / 05-repo-facts / 12-sky-catalog / 31-celestial，
- * 不需要 DOM/Canvas；输出 JSON，供优化前后对比与回归阈值。
+ * 只读加载 00-core / 05-repo-facts / 12-sky-catalog / 14-astro-frame /
+ * 31-celestial，不需要 DOM/Canvas；输出 JSON，供优化前后对比与回归阈值。
  */
 const fs = require("fs");
 const path = require("path");
@@ -10,12 +10,14 @@ const vm = require("vm");
 const ROOT = path.resolve(__dirname, "..");
 const sandbox = {
   console, Math, Date, JSON, Object, Array, String, Number, Boolean,
-  RegExp, Error, Map, Set, Float32Array, isNaN, parseInt, parseFloat
+  RegExp, Error, Map, Set, Float32Array, Float64Array, Uint16Array, Uint32Array,
+  isNaN, parseInt, parseFloat
 };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
-for (const f of ["00-core.js", "05-repo-facts.js", "12-sky-catalog.js", "31-celestial.js"]) {
+for (const f of ["00-core.js", "05-repo-facts.js", "12-sky-catalog.js",
+                 "14-astro-frame.js", "31-celestial.js"]) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, "src", f), "utf8"), sandbox, { filename: f });
 }
 

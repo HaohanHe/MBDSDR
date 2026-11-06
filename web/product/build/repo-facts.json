@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-11-06T01:51:15+08:00",
+  "generatedAt": "2026-11-06T03:03:54+08:00",
   "repo": {
     "root": "D:\\mbdsdr\\MBDSDR",
-    "head": "fc39f3e7",
+    "head": "c438904c",
     "note": "只读抽取；工作树可能含其它会话在途改动，HEAD 仅标识基线"
   },
   "domains": [
@@ -697,7 +697,7 @@
       "precise_source": "Celestrak 实时 TLE（缓存 24h 门槛）或用户自备 .tle"
     },
     "source": "mbdsdr_ai/sat_tracker.py · mbdsdr_ai/builtin_tle_meta.py",
-    "note": "内置 TLE 仅供离线演示；合成/凑整条目禁止用于精确过境"
+    "note": "产品 SGP4 轨迹用 sat_tracker.py::_BUILTIN_TLES（Celestrak 真实抓取，BUILTIN_TLE_DATE）；builtin_tle_meta.py 的合成/凑整策略针对 decoders.BUILTIN_TLE 历史占位值，不是同一份数据；静态快照不用于精确过境"
   },
   "redlines": {
     "noRealLocationDefault": true,

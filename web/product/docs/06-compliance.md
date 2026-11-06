@@ -40,8 +40,9 @@
 | 卫星编号 / 频段 / 体制 | 公开卫星资料与仓库协议栈口径 | 演示值，非实时 |
 | **恒星 RA/Dec / V 星等 / B-V** | **HYG v4.1**（真下载，25,792 颗，J2000） | **真实星表**，CC BY-SA 4.0 署名；见 [10-sky-catalog.md](10-sky-catalog.md) |
 | 星座连线 / 中文星官 / DSO | 仓库 `constellations.py` / `dso.py` / `data/*_culture.json` | 常识级对照，端点全部可查 |
-| 卫星位置 / 过境时刻 / Az-Alt | 演示目录（确定性示意方位） | **不宣称 TLE/SGP4 解算** |
-| TLE | 未接入（Celestrak / 内核缓存为将来落点） | `getTle()` 返回 `null`，UI 明确提示 |
+| 卫星天球轨迹 | `sat_tracker.py::_BUILTIN_TLES`（Celestrak 真实抓取，`BUILTIN_TLE_DATE`）+ sgp4 2.27 + 仓库逆岁差转 J2000 | **真实地心方向**；未做站址视差 / 严格 TEME→ITRF，不给升落·过境结论 |
+| TLE（运行时） | 离线时 `getTle()` 返回 `null` | **诚实空态**；构建期轨迹用仓库内置快照，不是实时 TLE |
+| `decoders.BUILTIN_TLE` 占位值 | 历史合成/凑整根数（`builtin_tle_meta.py`） | 保留仅供离线演示，**禁止**精确过境；与上两行不是同一份数据 |
 | 站址 | 中性示例 `0.0, 0.0`，`trusted=false`（身份红线） | 未校准时拒绝给出可信锁定/过境结论 |
 | 频谱 / 瀑布 | 无 IQ 输入时只画网格 | **诚实空态**，不合成谱线 |
 | 银河图层 | 无数据 | **不提供**，不画装饰光带 |

@@ -1,10 +1,13 @@
 /* 天球投影自检：投影 ↔ 反投影必须互逆（拖拽/缩放全靠这条）。
    覆盖两类投影 + 切换边界 + 极端 FOV。 */
 const fs = require("fs");
-const path = require("path").join(__dirname, "../src/31-celestial.js");
+const pathLib = require("path");
+const SRC = pathLib.join(__dirname, "../src");
 global.window = { MBDSDR: { SKYCAT: { stars: [], named: [], lines: {}, dso: [], meta: {} } } };
 global.performance = { now: () => 0 };
-(new Function("window", fs.readFileSync(path, "utf8")))(global.window);
+// 31 依赖 14 的 MB.astro（岁差/章动总矩阵），顺序不能反
+for (const f of ["14-astro-frame.js", "31-celestial.js"])
+  (new Function("window", fs.readFileSync(pathLib.join(SRC, f), "utf8")))(global.window);
 const C = global.window.MBDSDR.celestial;
 const W = 1440, H = 900;
 

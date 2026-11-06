@@ -132,11 +132,17 @@
 
 ## 5. 渲染管线（星象仪 · 时空主导）
 
-数学与坐标链集中在 `31-celestial.js`，数据来自 `12-sky-catalog.js`（[星表口径](10-sky-catalog.md)）。
+数学与坐标链：`14-astro-frame.js`（仓库 `celestial_geometry.py` 口径）负责岁差/章动/GMST，
+`31-celestial.js` 负责视图空间与投影；数据来自 `12-sky-catalog.js`（[星表口径](10-sky-catalog.md)）。
 星位固定 J2000，**一帧都不动**；变的只有视角、视场角、模拟时刻。
 
-1. **时间**：唯一缺省 `simUnix()`（TimeEngine 契约）；`JD → GMST → LST → 时角 H = LST − RA`。
-   周日视运动是整个天球共用一个 LST 的**刚性旋转**，不给单星独立角速度。
+1. **时间与坐标框架**：唯一缺省 `simUnix()`（TimeEngine 契约）。
+   `J2000(ICRS) → IAU2006 岁差 P → IAU2000B 简化章动 N → Capitaine GMST → LST → 地平`，
+   每帧合成一个 3×3 总矩阵 `M = Rf · QᵀNPQ`（`Q` 把仓库赤道基换到前端标准 ICRS 基），
+   恒星、星座、DSO、已转 J2000 的卫星轨迹共用它；太阳是 of-date 位置，走只含 `Rf` 的
+   `dateToHorizon`，不重复施加岁差。跨语言金标准见 `build/gen_astro_golden.py` /
+   `tests/astro_selftest.js`（对拍 3.3e-16），`not_verified` 见 `10-sky-catalog.md`。
+   周日视运动仍是一整个天球共用一个 LST 的**刚性旋转**，不给单星独立角速度。
 2. **视角/视场**：`ViewState{center_az, center_alt, fov_deg}`，缩放改 `fov_deg`，不做相机推拉。
    倍率五档来自 `desktop/rf_sky_view.py`（事实源同步）。
 3. **投影两级，同一套视图空间**：相机在球心，`(forward, right, up)` → 视图空间 `(X,Y,Z)`。

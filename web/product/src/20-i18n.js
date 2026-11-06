@@ -268,7 +268,7 @@
     "spec.noIqHint": { zh: "read_spectrum 未返回真实数据 · 显示空态", ja: "read_spectrum が実データを返していません · 空状態を表示", en: "read_spectrum returned no real data · showing empty state" },
     "bridge.gated": { zh: "未获确认（gated · 非失败）", ja: "未確認（gated · 失敗ではない）", en: "Not confirmed (gated · not a failure)" },
     "bridge.needToken": { zh: "写操作需外部签发的 confirm_token（前端无法签发）", ja: "書き込みには外部発行の confirm_token が必要（フロントエンドは発行不可）", en: "Write needs an externally issued confirm_token (the front end cannot issue one)" },
-    "hud.satTrack": { zh: "卫星轨迹：SGP4 地心 RA/Dec · 未做站址视差 / 岁差链（not_verified）", ja: "衛星軌跡：SGP4 地心 RA/Dec · 視差・歳差未補正（未検証）", en: "Sat tracks: geocentric SGP4 RA/Dec · no parallax / precession (not_verified)" },
+    "hud.satTrack": { zh: "卫星轨迹：SGP4 · TEME→J2000 逆岁差 · 地心方向，未做站址视差（not_verified）", ja: "衛星軌跡：SGP4 · TEME→J2000 逆歳差 · 地心方向、視差未補正（未検証）", en: "Sat tracks: SGP4 · TEME→J2000 inverse precession · geocentric, no parallax (not_verified)" },
     "tool.devices": { zh: "枚举设备", ja: "デバイス列挙", en: "List devices" },
     "tool.connect": { zh: "连接设备", ja: "デバイス接続", en: "Connect device" },
     "tool.spectrum": { zh: "读取频谱", ja: "スペクトラム読取", en: "Read spectrum" },
@@ -279,7 +279,7 @@
     "field.tleEpoch": { zh: "TLE 历元", ja: "TLE 元期", en: "TLE epoch" },
     "field.dataPolicy": { zh: "数据口径", ja: "データ口径", en: "Data policy" },
     "field.demo": { zh: "演示目录 · 非实时测量", ja: "デモカタログ · 非リアルタイム", en: "Demo catalog · not live measurement" },
-    "sat.catalog.desc": { zh: "内置离线演示目录条目。下行频率与 TLE 历元来自原仓库 sat_tracker.py；合成/凑整 TLE 禁止用于精确过境，站址未校准时不给可信结论。", ja: "オフラインデモ用の内蔵カタログ項目。ダウンリンク周波数と TLE 元期は元リポジトリ sat_tracker.py に由来。合成 TLE は精密なパス予報に使用禁止。", en: "Built-in offline demo catalog entry. Downlink and TLE epoch come from the repository sat_tracker.py; synthetic TLE is not usable for precise passes." },
+    "sat.catalog.desc": { zh: "目录条目与轨迹来自仓库 sat_tracker.py 的 Celestrak TLE 快照，按 SGP4 传播成地心方向。静态快照、未做站址视差，不给精确过境结论。", ja: "カタログ項目と軌跡はリポジトリ sat_tracker.py の Celestrak TLE スナップショットに由来し、SGP4 で地心方向へ伝播。静的スナップショット・視差未補正のため精密なパス予報は行いません。", en: "Catalog entries and tracks come from the repository sat_tracker.py Celestrak TLE snapshot, propagated by SGP4 to geocentric directions. Static snapshot, no parallax correction, no precise pass claims." },
     "point.verify": { zh: "预置角度与实测指向差在波束宽度内", ja: "プリセット角と実測指向の差がビーム幅内", en: "Preset vs measured pointing error within beamwidth" },
     /* ---- 星象仪（时空主导）：真实全天星表 + 球面投影 ---- */
     "sky.galaxyNone": { zh: "银河图层 · 无数据·不提供（不画装饰光带）", ja: "銀河レイヤ · データなし（装飾帯を描きません）", en: "Milky Way layer · no data · not provided" },

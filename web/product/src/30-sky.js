@@ -32,12 +32,14 @@
 
   /* ---------- 卫星天球轨迹（真实 SGP4，不是示意折线） ----------
    * 事实源：build/sync_sat_tracks.py 从仓库 _BUILTIN_TLES 用 sgp4 传播成
-   * TEME 地心 RA/Dec，按 90s 采样。前端与恒星共用同一套 eqToHorizon →
-   * 投影链，所以「天动星静」与卫星自身轨道运动同时成立。
+   * TEME 地心位置，再经仓库 IAU2006 逆岁差转成 **J2000 RA/Dec**，按 90s 采样。
+   * 前端与恒星共用同一套 eqToHorizon（含岁差/章动/LST）→ 投影链，
+   * 所以「天动星静」与卫星自身轨道运动同时成立，也不会对 TEME 重复施加岁差。
    *
-   * 诚实口径：这是**地心方向**，未做 TEME→J2000 岁差/章动、未做站址视差；
-   * 站址 trusted=false，绝不据此给升落 / 过境结论。无数据或模拟时刻跑出
-   * 采样窗口时返回 null —— 不画点、不伪造指向（not_verified 见 HUD）。
+   * 诚实口径：这是**地心方向**，未做站址视差；TEME→J2000 是逆岁差近似，
+   * 未做严格 TEME→ITRF 框架变换；站址 trusted=false，绝不据此给升落 /
+   * 过境结论。无数据或模拟时刻跑出采样窗口时返回 null —— 不画点、不伪造
+   * 指向（not_verified 见 HUD）。
    */
   const TRACKS = (MB.SATTRACKS && MB.SATTRACKS.tracks) || null;
   const TMETA = (MB.SATTRACKS && MB.SATTRACKS.meta) || null;

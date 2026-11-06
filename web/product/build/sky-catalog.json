@@ -1,6 +1,6 @@
 {
  "meta": {
-  "generatedAt": "2026-11-06T01:51:16",
+  "generatedAt": "2026-11-06T03:03:56",
   "epoch": "J2000 / ICRF",
   "starCount": 25792,
   "namedCount": 141,
@@ -48,12 +48,13 @@
   "agpl": "未使用 stellarium-web-engine 的星表/源码/贴图（AGPL-3.0）；仅参考球面投影与视觉适应机制。",
   "discipline": "未收录天体不画；无随机星点；无装饰性银河（无数据·不提供）；星位固定 J2000，动的是视角/FOV/时间。",
   "notVerified": [
-   "岁差/章动/自行：Web 用 J2000 直算 LST，未接 celestial_geometry 完整坐标链",
+   "坐标链：已接仓库 celestial_geometry 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST（14-astro-frame.js，跨语言金标准对拍）；恒星自行仍未计、章动非完整 77 项、忽略 ΔT/折射/视差",
+   "仓库岁差矩阵在 J2000 留有约 5.3 角秒常数项旋转（zeta_A/z_A 常数项 + rot_z 负角约定），未归一化；对 UI 可忽略",
    "天空亮度→极限星等：原仓库 limitations L24 明确未做；Web 的 FOV 相关门限是自研显示门限（设计项，未验证），非望远镜口径增益",
    "银河图层：原仓库 L25/L28 无数据未接入，产品保持诚实空态",
    "DSO 形态/表面亮度：原仓库 L26 明确不做还原，仅类型符号",
    "TimeEngine 接线：Web 离线用本地模拟时刻，未接 new_spacetime.TimeEngine",
-   "卫星位置：示意方位，未接 TLE/SGP4 解算；站址未校准不给可信过境结论"
+   "卫星轨迹：仓库内置 TLE + sgp4 传播 + 逆岁差转 J2000（真实地心方向）；未做站址视差 / 严格 TEME→ITRF，TLE 为静态快照，不用于精确过境"
   ]
  },
  "stars": [

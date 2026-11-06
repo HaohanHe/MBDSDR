@@ -360,6 +360,74 @@ print(f"[9.5] 全天星象仪：{meta.get('starCount', 0):,} 颗真实星 / 球�
       f"≤88° 针孔透视 + 更大立体投影 / 地平大圆 / 逐列天空区间地景 / "
       f"无随机星点 / 无飞散动画 / 银河诚实空态 / not_verified 齐备")
 
+# ---------- 9.6 天文坐标框架：必须接仓库岁差/章动，且不可重复施加 ----------
+_astro_path = SRC / "14-astro-frame.js"
+_cel_path = SRC / "31-celestial.js"
+_astro = _astro_path.read_text(encoding="utf-8") if _astro_path.is_file() else ""
+_celestial = _cel_path.read_text(encoding="utf-8") if _cel_path.is_file() else ""
+for _m in ("precessionMatrix", "nutationMatrix", "nutationAngles", "gmstDeg",
+           "frameMatrices", "Q", "QT", "IAU 2006", "IAU 2000B"):
+    if _m not in _astro:
+        fail(f"[astro] 14-astro-frame.js 缺仓库坐标链能力：{_m}")
+if "280.46061837" in _celestial:
+    fail("[astro] 31-celestial.js 回退到旧 Meeus GMST 近似（应统一用 MB.astro.gmstDeg）")
+_celestial_code = strip_comments(_celestial)
+if "f.cL * cRA" in _celestial_code or "const cosH" in _celestial_code:
+    fail("[astro] 31-celestial.js 回退到「J2000 直算 LST」简化链（无岁差/章动）")
+if "VX[i]" not in _celestial_code or "m0 * x" not in _celestial_code:
+    fail("[astro] eachStar 热点未走总矩阵（会绕过岁差/章动）")
+if "ASTRO.frameMatrices" not in _celestial or "dateToHorizon" not in _celestial:
+    fail("[astro] 31-celestial.js 未使用总矩阵 / of-date 专用入口")
+# sunAltAz 的太阳位置是 of-date，必须走 dateToHorizon，不能回退到 J2000 链
+_sun = _celestial[_celestial.find("function sunAltAz"):]
+_sun = _sun[:_sun.find("function ", 10)] if "function " in _sun[10:] else _sun
+if "const v = eqToHorizon(" in _sun:
+    fail("[astro] 太阳(of-date)走了 J2000 链，会重复施加岁差")
+if "const v = dateToHorizon(" not in _sun:
+    fail("[astro] sunAltAz 未走 of-date 入口")
+
+_golden_path = ROOT / "build/astro-golden.json"
+if not _golden_path.is_file():
+    fail("[astro] 缺 build/astro-golden.json（先跑 build/gen_astro_golden.py）")
+else:
+    _g = json.loads(_golden_path.read_text(encoding="utf-8"))
+    if _g["meta"]["caseCount"] < 6 or not _g["cases"]:
+        fail("[astro] 金标准样本不足")
+    if "celestial_geometry.py" not in _g["meta"]["source"]:
+        fail("[astro] 金标准事实源不是仓库 celestial_geometry.py")
+if not (ROOT / "tests/astro_selftest.js").is_file():
+    fail("[astro] 缺跨语言自检 tests/astro_selftest.js")
+
+_track_gen = (ROOT / "build/sync_sat_tracks.py").read_text(encoding="utf-8")
+_tracks_json = ROOT / "build/sat-tracks.json"
+if "precession_inverse_front" not in _track_gen:
+    fail("[astro] 卫星轨迹未做 TEME→J2000 逆岁差（前端统一链会重复施加岁差）")
+if _tracks_json.is_file():
+    _tm = json.loads(_tracks_json.read_text(encoding="utf-8"))["meta"]
+    if "J2000" not in _tm.get("frame", ""):
+        fail("[astro] 轨迹 frame 不是 J2000")
+    if not any("站址视差" in s for s in _tm.get("notVerified", [])):
+        fail("[astro] 轨迹未如实标注站址视差 not_verified")
+
+# 仓库章动单位错误不得回潮（1e4 缩放会让章动≈0）
+_repo_cg = REPO / "mbdsdr_ai/celestial_geometry.py"
+if _repo_cg.is_file():
+    _cg = _repo_cg.read_text(encoding="utf-8")
+    # 只看可执行行：docstring 里引用旧公式作为「修了什么」的说明，不算回潮
+    if 'dp_r = dp * 0.0001 / 3600.0 * DEG' in _cg or \
+       'return EPS0 - 0.0000003439 * T' in _cg:
+        fail("[astro] 仓库 celestial_geometry.py 章动/黄赤交角单位错误回潮")
+    if "dp_r = dp * DEG / 3600.0" not in _cg:
+        fail("[astro] 仓库章动未按角秒换算")
+    if "46.836769 / 206264.806" not in _cg:
+        fail("[astro] 仓库黄赤交角岁差率不是 IAU2006 一次项")
+for _f, _bad in (("run_all.py", "但坐标链为 J2000 直算 LST"),
+                 ("build/sync_sky_catalog.py", "Web 用 J2000 直算 LST")):
+    if _bad in (ROOT / _f).read_text(encoding="utf-8"):
+        fail(f"[astro] {_f} 仍宣称未接岁差章动，口径过时")
+print("[9.6] 天文框架：仓库 IAU2006 岁差 + IAU2000B 章动 + Capitaine GMST / "
+      "基变换 Q / 跨语言金标准 / 太阳 of-date 专用链 / TEME 逆岁差 / 旧单位错误守卫")
+
 # ---------- 10. 构建产物 ----------
 dist = ROOT / "dist/index.html"
 if not dist.is_file():

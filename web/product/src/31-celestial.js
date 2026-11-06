@@ -1,6 +1,9 @@
 /* MBDSDR 产品前端 · 31-celestial.js
- * 天球引擎（自研）：固定 J2000 星位 → 模拟时刻 → LST → 地平 az/alt
- *                  → 视图空间 → 投影到**全屏平面**（无圆形视场盘）。
+ * 天球引擎（自研）：固定 J2000 星位 → IAU2006 岁差 + IAU2000B 章动
+ *                  → 模拟时刻 GMST/LST → 地平 az/alt → 视图空间
+ *                  → 投影到**全屏平面**（无圆形视场盘）。
+ * 坐标框架在 14-astro-frame.js（事实源 mbdsdr_ai/celestial_geometry.py，
+ * 跨语言金标准对拍）。太阳是 of-date 位置，走 dateToHorizon 只做 LST 旋转。
  *
  * 【怎么改的（2026-11-04，用户第二次点名后重做）】
  *  参考 D:/mbdsdr/reference/stellarium-web-engine 的真实渲染链（只学机制，
@@ -72,12 +75,14 @@
     return TIME.baseUnix + (state.time.minutes || 0) * 60;
   }
   function nowJd(state) { return simUnix(state) / 86400 + JD_UNIX_EPOCH; }
-  function gmstDeg(jd) {
-    const T = (jd - JD_J2000) / 36525;
-    let g = 280.46061837 + 360.98564736629 * (jd - JD_J2000)
-          + 0.000387933 * T * T - T * T * T / 38710000;
-    return ((g % 360) + 360) % 360;
-  }
+  /* GMST / 岁差 / 章动统一由 14-astro-frame.js 提供（事实源：
+     仓库 mbdsdr_ai/celestial_geometry.py，跨语言金标准对拍 3.3e-16）。
+     旧版这里用的是 Meeus 多项式且**完全没有岁差/章动**——2026 年距 J2000
+     已有 26 年，岁差约 0.36°，窄视场下是肉眼可见的系统性偏移。 */
+  const ASTRO = MB.astro;
+  if (!ASTRO || typeof ASTRO.frameMatrices !== "function")
+    throw new Error("31-celestial requires 14-astro-frame.js loaded first");
+  function gmstDeg(jd) { return ASTRO.gmstDeg(jd); }
   function lstDeg(jd, lonDeg) { return (((gmstDeg(jd) + lonDeg) % 360) + 360) % 360; }
 
   /* ---------- 星表预计算 ---------- */
@@ -85,12 +90,17 @@
   const N = CAT.stars.length;
   const cosRA = new Float32Array(N), sinRA = new Float32Array(N);
   const sinDec = new Float32Array(N), cosDec = new Float32Array(N);
+  /* 单位方向向量（标准 ICRS：x=春分点, y=赤经 6h, z=北天极）。
+     eachStar 是每帧 25,792 颗的热点，预存后直接左乘总矩阵，
+     省掉每颗星构造 (cD·cRA, cD·sRA, sD) 的 3 次乘法。 */
+  const VX = new Float64Array(N), VY = new Float64Array(N), VZ = new Float64Array(N);
   const MAG = new Float32Array(N), BV = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const s = CAT.stars[i];
     const ra = s[0] / 1000 * D2R, dec = s[1] / 1000 * D2R;
     cosRA[i] = Math.cos(ra); sinRA[i] = Math.sin(ra);
     sinDec[i] = Math.sin(dec); cosDec[i] = Math.cos(dec);
+    VX[i] = cosDec[i] * cosRA[i]; VY[i] = cosDec[i] * sinRA[i]; VZ[i] = sinDec[i];
     MAG[i] = s[2] / 100; BV[i] = s[3] / 100;
   }
   const MAG_CAP = Number(CAT.meta.magMax || 7.5);
@@ -118,25 +128,40 @@
              sD: Math.sin(dec), cD: Math.cos(dec) };
   });
 
-  /* ---------- 赤道 → 地平单位向量（x=北, y=东, z=天顶） ---------- */
-  let cache = { jd: -1, lst: 0, cL: 1, sL: 0, sPhi: 0, cPhi: 1 };
+  /* ---------- 每帧一次的总矩阵（J2000 → 岁差 → 章动 → 本地恒星时 → 地平） ----------
+   * 前端地平系：x=北, y=东, z=天顶。矩阵把「标准 ICRS 单位向量」一步送到地平，
+   * 每颗星只剩 9 乘 6 加，与旧版逐星三角展开计算量持平，却补上了真实岁差/章动。
+   * 缓存键必须含站址：旧版只按 jd 缓存，换站址时矩阵不会失效。 */
+  let cache = { key: "", jd: -1, lst: 0, m: null, r: null,
+                cL: 1, sL: 0, sPhi: 0, cPhi: 1 };
   function frame(state) {
     const jd = nowJd(state);
-    if (Math.abs(jd - cache.jd) < 1e-9) return cache;
-    const lat = (state.site.lat || 0) * D2R;
-    const lst = lstDeg(jd, state.site.lon || 0) * D2R;
-    cache = { jd, lst, cL: Math.cos(lst), sL: Math.sin(lst),
-              sPhi: Math.sin(lat), cPhi: Math.cos(lat) };
+    const lat = state.site.lat || 0, lon = state.site.lon || 0;
+    const key = jd.toFixed(6) + "/" + lat + "/" + lon;
+    if (key === cache.key) return cache;
+    const F = ASTRO.frameMatrices(jd, lat, lon);
+    const lr = F.lst * D2R, pr = lat * D2R;
+    cache = { key, jd, lst: F.lst, m: F.M, r: F.Rf,
+              cL: Math.cos(lr), sL: Math.sin(lr),
+              sPhi: Math.sin(pr), cPhi: Math.cos(pr) };
     return cache;
   }
+  /* J2000（HYG 星表、星座连线、DSO、J2000 赤道网格、已转 J2000 的卫星轨迹）。
+     输入是 (cosRA, sinRA, sinDec, cosDec)，等价于标准 ICRS 向量
+     (cosD·cosRA, cosD·sinRA, sinD)。 */
   function eqToHorizon(cRA, sRA, sD, cD, f) {
-    const cosH = f.cL * cRA + f.sL * sRA;
-    const sinH = f.sL * cRA - f.cL * sRA;
-    return {
-      x: f.cPhi * sD - f.sPhi * cD * cosH,   // 北
-      y: -cD * sinH,                          // 东
-      z: f.sPhi * sD + f.cPhi * cD * cosH    // 天顶
-    };
+    const m = f.m, X = cD * cRA, Y = cD * sRA, Z = sD;
+    return { x: m[0] * X + m[1] * Y + m[2] * Z,
+             y: m[3] * X + m[4] * Y + m[5] * Z,
+             z: m[6] * X + m[7] * Y + m[8] * Z };
+  }
+  /* of-date（太阳的 Meeus 低精度位置已用当年黄赤交角解出，本身是当前赤道系）。
+     走这条链只做 LST 旋转，**不再施加岁差**，否则会重复修正约 0.36°。 */
+  function dateToHorizon(cRA, sRA, sD, cD, f) {
+    const r = f.r, X = cD * cRA, Y = cD * sRA, Z = sD;
+    return { x: r[0] * X + r[1] * Y + r[2] * Z,
+             y: r[3] * X + r[4] * Y + r[5] * Z,
+             z: r[6] * X + r[7] * Y + r[8] * Z };
   }
   function altAzVector(azDeg, altDeg) {
     const a = altDeg * D2R, A = azDeg * D2R;
@@ -301,7 +326,8 @@
     const eps = (23.439 - 0.0000004 * n) * D2R;
     const ra = Math.atan2(Math.cos(eps) * Math.sin(lam), Math.cos(lam));
     const dec = Math.asin(Math.sin(eps) * Math.sin(lam));
-    const v = eqToHorizon(Math.cos(ra), Math.sin(ra), Math.sin(dec), Math.cos(dec), frame(state));
+    // 太阳的 RA/Dec 是 of-date（用当年黄赤交角解出），不能当 J2000 再岁差一次。
+    const v = dateToHorizon(Math.cos(ra), Math.sin(ra), Math.sin(dec), Math.cos(dec), frame(state));
     const d = dirAltAz(v);
     const val = { az: d.az, alt: d.alt,
                   ra: ((ra * R2D) % 360 + 360) % 360, dec: dec * R2D };
@@ -366,15 +392,20 @@
     }
     if (zViewMin < zc) zViewMin = zc;
     const horizonSin = Math.sin(-1.2 * D2R);
+    const m = f.m;
+    const m0 = m[0], m1 = m[1], m2 = m[2], m3 = m[3], m4 = m[4],
+          m5 = m[5], m6 = m[6], m7 = m[7], m8 = m[8];
     let shown = 0;
     for (let j = 0; j < N; j++) {
       const i = ORDER[j];
       if (MAG[i] > L) break;          // 消光只会更暗，后面全不可见
-      const cRA = cosRA[i], sRA = sinRA[i], sD = sinDec[i], cD = cosDec[i];
-      const cosH = f.cL * cRA + f.sL * sRA, sinH = f.sL * cRA - f.cL * sRA;
-      const vx = f.cPhi * sD - f.sPhi * cD * cosH;
-      const vy = -cD * sinH;
-      const vz = f.sPhi * sD + f.cPhi * cD * cosH;
+      /* 与 eqToHorizon 同一条总矩阵链（J2000→岁差→章动→LST→地平），
+         这里内联展开避免 25,792 次函数调用。上一版内联的是旧 LST 展开式，
+         绕过岁差/章动 —— 由 verify_product.py 的 [astro] 守卫钉死。 */
+      const x = VX[i], y = VY[i], z = VZ[i];
+      const vx = m0 * x + m1 * y + m2 * z;
+      const vy = m3 * x + m4 * y + m5 * z;
+      const vz = m6 * x + m7 * y + m8 * z;
       const Z = vx * fx + vy * fy + vz * fz;
       if (Z <= zc || Z < zViewMin) continue;
       const X = vx * rx + vy * ry + vz * rz, Y = vx * ux + vy * uy + vz * uz;
@@ -446,8 +477,8 @@
   function panTo(az, alt) { V.azTarget = az; V.altTarget = clamp(alt, -25, 89); }
 
   MB.celestial = {
-    V, CAT, N, MAG_CAP, LM, TIME, NEAR, PERSP_MAX_FOV,
-    simUnix, nowJd, gmstDeg, lstDeg, frame, eqToHorizon, dirAltAz,
+    V, CAT, N, MAG_CAP, LM, TIME, NEAR, PERSP_MAX_FOV, astro: ASTRO,
+    simUnix, nowJd, gmstDeg, lstDeg, frame, eqToHorizon, dateToHorizon, dirAltAz,
     altAzVector, basis, getBasis, projMode, focalOf,
     toScreen, projectAltAz, projectSegment, unproject, sunAltAz,
     limitMag, effectiveLimit, extinction, starStyle, daylightHidden,
