@@ -225,15 +225,23 @@ class NMEAParser:
                 return None
 
         status = f[2] if len(f) > 2 else "V"
+        valid = status == "A"
+        # status=V 明确表示"导航数据不可信"。不少模块在 V 状态仍把**上一次**
+        # 的经纬度填进字段（字段非空但定位已丢）；解析层必须掐掉，否则下游
+        # 会把旧站址当当前站址，整张星图/过境预测按错位置算。
+        lat = _ddmm_to_deg(f[3], f[4], True) if valid and len(f) > 4 else None
+        lon = _ddmm_to_deg(f[5], f[6], False) if valid and len(f) > 6 else None
+        knots = _f(7)
         return {
             "talker": talker, "sentence": "RMC",
             "utc_time": f[1] if len(f) > 1 else "",
             "status": status,                 # A=有效 V=无效
-            "valid": status == "A",
-            "latitude": _ddmm_to_deg(f[3], f[4], True) if len(f) > 4 else None,
-            "longitude": _ddmm_to_deg(f[5], f[6], False) if len(f) > 6 else None,
-            "speed_knots": _f(7),
-            "speed_kmh": (_f(7) or 0.0) * 1.852,
+            "valid": valid,
+            "latitude": lat,
+            "longitude": lon,
+            "speed_knots": knots,
+            # 空字段不是 0 节：缺值必须留 None，不许把"不知道"显示成静止。
+            "speed_kmh": None if knots is None else knots * 1.852,
             "course_deg": _f(8),
             "date": f[9] if len(f) > 9 else "",
         }
@@ -715,20 +723,34 @@ class SerialGNSSReader:
             f["timestamp"] = time.time()
             s = rec.get("sentence")
             if s == "GGA":
-                if rec.get("latitude") is not None:
-                    f["latitude"] = rec["latitude"]
-                if rec.get("longitude") is not None:
-                    f["longitude"] = rec["longitude"]
-                if rec.get("altitude_m") is not None:
-                    f["altitude_m"] = rec["altitude_m"]
+                quality = rec.get("fix_quality", 0) or 0
+                f["fix_quality"] = quality
                 f["satellites"] = rec.get("satellites", f["satellites"])
                 f["hdop"] = rec.get("hdop", f["hdop"])
-                f["fix_quality"] = rec.get("fix_quality", f["fix_quality"])
-            elif s == "RMC":
-                if rec.get("latitude") is not None:
+                if (quality > 0 and rec.get("latitude") is not None
+                        and rec.get("longitude") is not None):
                     f["latitude"] = rec["latitude"]
-                if rec.get("longitude") is not None:
                     f["longitude"] = rec["longitude"]
+                    f["altitude_m"] = rec.get("altitude_m")
+                else:
+                    # 明确无定位（quality=0 或字段空）：**清空**上一帧坐标。
+                    # 旧实现只在"新值非 None"时覆盖，于是失锁后 fix 里一直
+                    # 挂着最后一次有效站址，而 timestamp 却被 GSV/GSA 不断
+                    # 续命 → 上游读成"当前站址"，星图/过境按错位置算。
+                    f["latitude"] = None
+                    f["longitude"] = None
+                    f["altitude_m"] = None
+            elif s == "RMC":
+                if (rec.get("valid") and rec.get("latitude") is not None
+                        and rec.get("longitude") is not None):
+                    f["latitude"] = rec["latitude"]
+                    f["longitude"] = rec["longitude"]
+                else:
+                    # status=V 同 GGA quality=0：宁可短暂丢站址，不拿旧位置
+                    # 冒充实时定位（高度来自 GGA，位置无效时一并清）。
+                    f["latitude"] = None
+                    f["longitude"] = None
+                    f["altitude_m"] = None
                 f["speed_kmh"] = rec.get("speed_kmh")
                 f["course_deg"] = rec.get("course_deg")
                 f["utc_time"] = rec.get("utc_time")
