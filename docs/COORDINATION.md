@@ -140,8 +140,21 @@
   跳过行为不变。新测试 `tests/test_sat_passes_max_sats.py` 7 条（monkeypatch
   predict_passes 注入 canned 过境，不依赖 SGP4/墙钟）；反证三病灶复现
   （D:/mbdsdr/output/_probe_max_sats_reverse.py）。巷道 17 文件
-  **151 passed**（sat_passes 全部消费方 + 身份门 3 条，
+  **151 passed**  （sat_passes 全部消费方 + 身份门 3 条，
   D:/mbdsdr/output/_max_sats_lane.log）。落库 `ad2a25db`。
+- **#52 SDRBackendManager 设备表 TTL（P1）**：`_discover()` 只在 __init__
+  跑一次，`list_devices()` 吃冷饭——热插拔后 `sdr_list_devices` 永远返回
+  旧表，MCP/agent 面连不上新设备。现在 `_DISCOVER_TTL_S=5.0`，
+  list_devices/connect/switch_device 过期后重探（双重检查锁）；只增不减
+  （`_keep`）：已注册实例永不替换/摘除（探测失败≠不存在），已登记源
+  不重探；connect 成员判定前先刷新。新测试
+  `mbdsdr_ai/tests/test_manager_discover_ttl.py` 8 条（2 条缺陷判据修复前
+  红 + 6 条契约钉，fake rtlsdr 注入无硬件确定性）；反证 pristine
+  worktree（1506162c）同组合 2 failed 复现
+  （_probe_manager_ttl_reverse.log）。巷道 10 文件 **132 passed +
+  2 skipped**（D:/mbdsdr/output/_mgr_ttl_lane.log）。落库 `fff92434`。
+  已知边界：拔掉的设备仍留在表里（connect 如实失败而非静默消失），
+  摘除需重启进程。
 - **存量红另账销**：`test_decoder_capability_matrix` 文档漂移在
   pristine HEAD 复证属存量——`410eb096` 新增岁差外部真值 golden
   （celestial_ofdate_golden.json，Skyfield 1.54 逐元素对拍、SHA-256
@@ -190,22 +203,19 @@
   三处改走 Qt Signal 的 AutoConnection（同线程同步、跨线程排队回 GUI），
   不丢音频帧、不改调用契约。新测试
   `tests/test_demod_tap_thread_affinity.py`（5 条，真起非 GUI 线程取证）。
-- **仍未做（本线队列，按优先级，交接单 B 节余量三条）**：
-  ① `SDRBackendManager` 设备表启动快照无 TTL（P1，
-    `sdr_backend.py:4772,4847-4880`）——热插拔后 MCP/agent 面
-    `sdr_list_devices` 永远返回旧表，连不上新设备（桌面走模块级实时
-    枚举不受影响）；
-  ② `set_agc`/`set_bandwidth` 子类覆写硬件失败不回滚 status（P2，
+- **仍未做（本线队列，按优先级，交接单 B 节余量两条）**：
+  ① `set_agc`/`set_bandwidth` 子类覆写硬件失败不回滚 status（P2，
     `sdr_backend.py:2371-2404,3365-3388`）——基类失败回滚，子类纪律
     不一致，失败后 status 还留着没生效的新值；
-  ③ rtl_tcp 断连无冷却立即重连吃单客户端名额（P2，
+  ② rtl_tcp 断连无冷却立即重连吃单客户端名额（P2，
     `rtltcp_client.py:194-197`）——backlog=1，真机基线断连需 2–3 s
     冷却（runbook §3.5）。
   详见 `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
   （rtltcp 写频缓存 / RtlTcp 采样率吸附 / HackRF/USRP 初始化 /
   FileIQBackend 静默+wav/csv 断链 / NetworkIQBackend 接线+契约 /
-  disconnect 读数残留 / playback 改频标注 / max_sats 按星截取
-  已由 #21/#22/#47/#48/#49/#50/#51 销账。）
+  disconnect 读数残留 / playback 改频标注 / max_sats 按星截取 /
+  设备表 TTL
+  已由 #21/#22/#47/#48/#49/#50/#51/#52 销账。）
   另账存量红：① test_backend_reconnect_stress 热插拔循环在多文件同进程时
   假 rtlsdr 被真 pyrtlsdr 抢线（单跑绿；pristine HEAD 同组合复红，
   证据 D:/mbdsdr/output/_disconnect_lane_pristine.log）；
