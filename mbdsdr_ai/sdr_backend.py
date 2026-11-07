@@ -5021,6 +5021,11 @@ class SDRBackendManager:
     支持异构双前端（RTL-SDR + ai-sdr Mini 同时使用）。
     """
 
+    # 设备表 TTL（审计 B 节 P1）：list_devices/connect/switch_device 在过期后
+    # 重探，热插拔的设备最迟 5s 内对 MCP/agent 可见。窗口内不重探——枚举是
+    # 真实 USB open/close，不许当轮询用。
+    _DISCOVER_TTL_S = 5.0
+
     def __init__(self):
         self.backends: Dict[str, SDRBackend] = {}
         self.active_backend: Optional[SDRBackend] = None
@@ -5033,44 +5038,74 @@ class SDRBackendManager:
         self._switch_in_progress = False
         self.switch_generation = 0
         self.last_conflict = ""  # 最近一次切换冲突/失败原因（空=无）
+        self._discover_lock = threading.Lock()
+        self._last_discover_ts = 0.0
         self._discover()
+
+    def _keep(self, backend: SDRBackend) -> bool:
+        """只增不减：新 device_id 并入，已注册实例永不替换（连接态不丢）。"""
+        did = backend.device.device_id
+        if did in self.backends:
+            return False
+        self.backends[did] = backend
+        return True
+
+    def _refresh_if_stale(self) -> None:
+        """设备表 TTL 刷新：过期才重探（双重检查，串行化 _discover）。"""
+        if time.monotonic() - self._last_discover_ts < self._DISCOVER_TTL_S:
+            return
+        with self._discover_lock:
+            if time.monotonic() - self._last_discover_ts < self._DISCOVER_TTL_S:
+                return
+            self._discover()
 
     def _discover(self):
         """发现可用的 SDR 设备（仅注册真实硬件后端）。
 
         无硬件时 backends 为空、active_backend 为 None（显式未连接），
         绝不注册模拟后端作为默认源。
+
+        刷新语义（审计 B 节 P1 设备表 TTL）：只增不减——新设备并入，
+        已注册条目永不替换/摘除（探测失败 ≠ 不存在：占用中的棒子探测
+        必失败，正在用的实例更不许换掉）。已登记的源连探测都不做，
+        不为刷新反复开棒子。要摘除条目请重启进程。
         """
-        # 尝试发现 RTL-SDR
-        try:
-            from rtlsdr import RtlSdr
-            sdr = RtlSdr(0)
-            sdr.close()
-            rtl = RTLSDRBackend(0)
-            self.backends[rtl.device.device_id] = rtl
-        except Exception as e:
-            # 无硬件/缺 pyrtlsdr 环境下启动是正常的；用 debug 记录原因，不静默也不弹错
-            logger.debug(f"RTL-SDR 发现失败(忽略，无硬件环境正常): {e}")
+        # 尝试发现 RTL-SDR（已登记则跳过探测——不为刷新反复开棒子；
+        # device_id 约定 f"rtl_{index}"，这里只探 index 0）
+        if "rtl_0" not in self.backends:
+            try:
+                from rtlsdr import RtlSdr
+                sdr = RtlSdr(0)
+                sdr.close()
+                rtl = RTLSDRBackend(0)
+                self._keep(rtl)
+            except Exception as e:
+                # 无硬件/缺 pyrtlsdr 环境下启动是正常的；用 debug 记录原因，不静默也不弹错
+                logger.debug(f"RTL-SDR 发现失败(忽略，无硬件环境正常): {e}")
 
         # 尝试发现 HackRF（驱动是 libhackrf 的 ctypes 直连：libhackrf 可加载
-        # 才登记；真正缺设备/被占用由 connect() 如实报错）
-        try:
-            from .hackrf_params import HackRFBackend as _CtlsBackend
-            if _CtlsBackend(0)._load_lib() is None:
-                raise RuntimeError("libhackrf 不可用")
-            hf = HackRFBackend(0)
-            # 不实际连接，只注册（用户手动连接）
-            self.backends[hf.device.device_id] = hf
-        except Exception:
-            pass  # 没有 libhackrf
+        # 才登记；真正缺设备/被占用由 connect() 如实报错。device_id 约定
+        # f"hackrf_{index}"，已登记则跳过探测）
+        if "hackrf_0" not in self.backends:
+            try:
+                from .hackrf_params import HackRFBackend as _CtlsBackend
+                if _CtlsBackend(0)._load_lib() is None:
+                    raise RuntimeError("libhackrf 不可用")
+                hf = HackRFBackend(0)
+                # 不实际连接，只注册（用户手动连接）
+                self._keep(hf)
+            except Exception:
+                pass  # 没有 libhackrf
 
-        # 尝试发现 USRP
-        try:
-            import uhd
-            usrp = USRPBackend()
-            self.backends[usrp.device.device_id] = usrp
-        except Exception:
-            pass  # 没有 UHD 库
+        # 尝试发现 USRP（device_id 约定 usrp_{device_args or 'default'}，
+        # 已登记则跳过探测）
+        if "usrp_default" not in self.backends:
+            try:
+                import uhd
+                usrp = USRPBackend()
+                self._keep(usrp)
+            except Exception:
+                pass  # 没有 UHD 库
 
         # PlutoSDR：仅当真实 enumerate() 探测到设备时才注册（libiio USB/网络）。
         try:
@@ -5078,7 +5113,7 @@ class SDRBackendManager:
                 _uri = _pd.get("uri")
                 _pl = PlutoSDRBackend(uri=_uri, device_info=_pd) if _uri \
                     else PlutoSDRBackend(device_info=_pd)
-                self.backends[_pl.device.device_id] = _pl
+                self._keep(_pl)
         except Exception as e:
             logger.debug(f"PlutoSDR 枚举失败(忽略): {e}")
 
@@ -5089,7 +5124,7 @@ class SDRBackendManager:
         for _host, _port in parse_rtl_tcp_env(os.environ.get(RTL_TCP_ENV, "")):
             try:
                 _rt = RTLSDRBackend(host=_host, port=_port)
-                self.backends[_rt.device.device_id] = _rt
+                self._keep(_rt)
                 logger.debug(f"rtl_tcp 源已登记: {_host}:{_port}")
             except Exception as e:
                 logger.debug(f"rtl_tcp 后端登记失败(忽略): {_host}:{_port}: {e}")
@@ -5101,7 +5136,7 @@ class SDRBackendManager:
             try:
                 from .spyserver_client import SpyServerBackend
                 _sp = SpyServerBackend(_host, _port)
-                self.backends[_sp.device.device_id] = _sp
+                self._keep(_sp)
                 logger.debug(f"SpyServer 源已登记: {_host}:{_port}")
             except Exception as e:
                 logger.debug(f"SpyServer 后端登记失败(忽略): {_host}:{_port}: {e}")
@@ -5111,16 +5146,20 @@ class SDRBackendManager:
         for _cfg in parse_network_iq_env(os.environ.get(NETWORK_IQ_ENV, "")):
             try:
                 _nq = NetworkIQBackend(**_cfg)
-                self.backends[_nq.device.device_id] = _nq
+                self._keep(_nq)
                 logger.debug(
                     f"网络 IQ 源已登记: {_cfg['protocol']}://{_cfg['host']}:{_cfg['port']}")
             except Exception as e:
                 logger.debug(f"网络 IQ 源登记失败(忽略): {_cfg}: {e}")
 
         # 无默认后端：active_backend 保持 None，等用户显式 connect 真实设备。
+        self._last_discover_ts = time.monotonic()
 
     def list_devices(self) -> List[Dict[str, Any]]:
-        """列出所有可用设备。"""
+        """列出所有可用设备（TTL 过期先重探，热插拔可见）。"""
+        self._refresh_if_stale()
+        with self._discover_lock:
+            snapshot = list(self.backends.values())
         return [
             {
                 "device_id": b.device.device_id,
@@ -5137,7 +5176,7 @@ class SDRBackendManager:
                 "connected": b.status.connected,
                 "active": b == self.active_backend,
             }
-            for b in self.backends.values()
+            for b in snapshot
         ]
 
     def connect(self, device_id: str = None) -> bool:
@@ -5147,7 +5186,10 @@ class SDRBackendManager:
         第一个（首启只有一根棒的常见情形）；多设备时应显式传 device_id。
         显式传入未枚举到的 device_id 时拒绝连接——静默连到别的设备会骗人
         （违反 sdr_connect 契约「只能连接枚举到的真实设备」）。
+        成员判定前先过设备表 TTL 刷新：热插拔后直接 connect 新 id 不必
+        先跑一遍 list_devices。
         """
+        self._refresh_if_stale()
         if device_id and device_id not in self.backends:
             logger.warning(
                 "connect: 设备 %r 未在枚举列表中，保持未连接"
@@ -5252,6 +5294,7 @@ class SDRBackendManager:
 
     def switch_device(self, device_id: str) -> bool:
         """切换到另一个设备（单活跃、释放旧源、冲突明确报错）。"""
+        self._refresh_if_stale()
         if device_id not in self.backends:
             self.last_conflict = f"未知设备: {device_id}"
             return False
