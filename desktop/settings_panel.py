@@ -551,6 +551,11 @@ class SettingsPanel(QWidget):
             if self._host is not None:
                 # gui_config.json 是观测站坐标既有权威源（main_window.py:7630）
                 setattr(self._host, "_observer_" + item.key.split("_")[-1], value)
+                # 用户手填的地点 = 静态配置，标记来源后 GNSS 丢 fix 不会清空它
+                try:
+                    self._host._observer_source = "config"
+                except AttributeError:
+                    pass
                 try:
                     self._host._apply_observer_location()
                 except (AttributeError, RuntimeError, TypeError, ValueError) as exc:

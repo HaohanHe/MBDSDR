@@ -728,6 +728,10 @@ class MainWindow(QMainWindow):
         # 观测站坐标：默认 None 表示“未配置观测站位置”（不再硬编码示例坐标）。
         self._observer_lat: Optional[float] = None
         self._observer_lon: Optional[float] = None
+        # 站址来源（决定它会不会被 GNSS 丢 fix 抹掉）：
+        #   "config" = 用户手填/配置文件写死的静态事实 —— 永不因 GNSS 失效清空；
+        #   "gnss"   = 由 GNSS 实时 fix 自动写入 —— 丢 fix 时收回，回到未知态。
+        self._observer_source: Optional[str] = None
         self.sat_tracker: Optional[SatelliteTracker] = None
         # ---- 卫星闭环自动跟踪（过境预测 -> 闭环调谐）----
         # loop_tracker 持有选中卫星与实时 az/el/多普勒；_sat_track_timer 500ms 轮询。
@@ -2243,16 +2247,54 @@ class MainWindow(QMainWindow):
     def _enter_planetarium(self) -> None:
         if getattr(self, "_app_mode", "ide") == "planetarium":
             return
+        # 沉浸：星象仪形态是"看天"，不是工具面板。IDE 的菜单栏与主工具栏
+        # 在这形态里只会把天空挤矮一条、并让人以为自己在操作软件而不是在看
+        # 天空。隐藏而不是禁用——退出时原样恢复（退出路径见 _exit_planetarium）。
+        self._hidden_chrome = []
+        try:
+            mb = self.menuBar()
+            if mb is not None:
+                # 不判 isVisible：启动恢复形态时窗口还没 show，全部 isVisible
+                # 都是 False，判可见性会让"上次在星象仪"的用户一启动就带着
+                # 整条 IDE 菜单栏看天。hide 幂等，记下来退出时统一 show。
+                self._hidden_chrome.append(mb)
+                mb.hide()
+        except (AttributeError, RuntimeError):
+            pass
+        for tb in self.findChildren(QToolBar):
+            self._hidden_chrome.append(tb)
+            tb.hide()
+        # 底部状态栏同理：星象仪里它显示的是"离线模式…未枚举硬件"这类
+        # IDE 语境文案，压在星空最底一条，既不沉浸也没意义。
+        try:
+            sb = self.statusBar()
+            if sb is not None:
+                self._hidden_chrome.append(sb)
+                sb.hide()
+        except (AttributeError, RuntimeError):
+            pass
+        # 天空视图左下那颗「🌐 全天 160°」是 IDE 形态的控件，在星象仪里正好
+        # 压在沉浸紧凑卡上（两套字叠成一团）。沉浸态收起来：全天空用 A 键
+        # 或双击/滚轮，退出形态即恢复。
+        try:
+            all_sky_btn = getattr(self, "_all_sky_btn", None)
+            if all_sky_btn is not None:
+                self._hidden_chrome.append(all_sky_btn)
+                all_sky_btn.hide()
+        except (AttributeError, RuntimeError):
+            pass
         self._sky_restore_info = self._capture_sky_location()
         self._planetarium_sky_layout.addWidget(self.sky_view)
         # 天空可能从"非当前页签/隐藏 Dock"进来，自带 hidden 标记；reparent 不清它，
         # 不显式 show 则星象仪整片天黑（只有槽底色）。show 只清自身标记，尺寸归布局。
         self.sky_view.show()
-        # 底部瀑布 reparent（对象身份不变；频谱页签里只剩头部/提示，退出归位）
+        # 底部瀑布：星象仪是时空主导形态，频谱默认不进来抢高度（1/5 屏）。
+        # 需要看频谱时从右侧浮层「频谱」开关拉出（同一部件 reparent，不重建）。
         wf_slot = self._planetarium_waterfall_slot
         if getattr(self, "spectrum", None) is not None:
             self._planetarium_waterfall_layout.addWidget(self.spectrum)
-            wf_slot.setVisible(True)
+            wf_slot.setVisible(bool(getattr(self, "_planetarium_waterfall_on",
+                                            False)))
         # AI 胶囊命令栏 reparent 到天空槽（同一颗胶囊、同一路由 _on_ai_command，
         # 对话历史跨形态连续）；记下原父，退出归位。
         bar = getattr(self, "_ai_cmd_bar", None)
@@ -2266,6 +2308,9 @@ class MainWindow(QMainWindow):
         # 星象仪构图：朝地平看（地景剪影+辉光带入画），天顶俯视留给 IDE 形态
         if hasattr(self.sky_view, "enter_horizon_view"):
             self.sky_view.enter_horizon_view()
+        # 沉浸态：收掉天线波束/过境表/GNSS 喊话，状态卡退成三行紧凑卡
+        if hasattr(self.sky_view, "set_immersive"):
+            self.sky_view.set_immersive(True)
         self.settings.set("app_mode", "planetarium")
         self._sync_mode_action()
         self._sync_planetarium_recording()
@@ -2306,6 +2351,15 @@ class MainWindow(QMainWindow):
         self._app_mode = "ide"
         self.settings.set("app_mode", "ide")
         self._planetarium_strip.hide()
+        if hasattr(self.sky_view, "set_immersive"):
+            self.sky_view.set_immersive(False)
+        # 恢复进形态时隐藏的 IDE 外壳（菜单栏/主工具栏）
+        for wdg in getattr(self, "_hidden_chrome", None) or []:
+            try:
+                wdg.show()
+            except RuntimeError:
+                pass
+        self._hidden_chrome = []
         self._sync_mode_action()
         if self.isFullScreen():
             self.showNormal()
@@ -9216,8 +9270,12 @@ class MainWindow(QMainWindow):
             # 未设置观测站位置（GNSS 未连接或未手动配置）
             if self.sat_tracker is not None:
                 self.sat_tracker.set_location(None, None)
-            self.sky_view.set_observer(None, None)
-            self.sky_view.set_data_source("none")
+            # 天空图站址若当前是 GNSS 实时注入的，由 _poll_gnss 按 fix 有无
+            # 单独收口；这里再清一次会把刚拿到的定位打回空状态（两条写路径
+            # 抢同一个真相）。只有非 GNSS 来源时才由本函数负责清空。
+            if self._observer_source != "gnss":
+                self.sky_view.set_observer(None, None)
+                self.sky_view.set_data_source("none")
             return
 
         if self.sat_tracker is None:
@@ -9872,9 +9930,23 @@ class MainWindow(QMainWindow):
                     self.status_gps.setText(f"GNSS: 搜索中/{sats} 星")
         except Exception:
             pass
-        # 天空图观测站坐标与数据来源角标
+        # 天空图观测站坐标与数据来源角标。
+        # 优先级：配置站址（静态事实）> GNSS 实时 fix。
+        # 此前无条件 `set_gnss_position(fix_dict)`：GNSS 一旦没有 fix（室内、
+        # 刚插上还在搜星、或根本没插模块），就会把用户**已配置好**的经纬度
+        # 一并清成 None，天空图永远停在"地面站未设置"——手动填过地点的人拔掉
+        # GPS 就"不知道自己在哪"是错的语言。GNSS 丢 fix 只该收回 GNSS 自己
+        # 写进去的坐标。
         try:
-            self.sky_view.set_gnss_position(fix_dict)
+            has_fix = (pos.source == "real" and pos.lat is not None
+                       and pos.lon is not None)
+            if has_fix:
+                self.sky_view.set_gnss_position(fix_dict)
+                if self._observer_source != "config":
+                    self._observer_source = "gnss"
+            elif self._observer_source != "config":
+                self.sky_view.set_gnss_position(fix_dict)
+                self._observer_source = None
         except Exception:
             pass
         # 真实 GNSS 卫星天空图：各星座可见卫星位置/信噪比 + GSA 定位卫星标记
@@ -9893,6 +9965,7 @@ class MainWindow(QMainWindow):
                 self._observer_lat = float(pos.lat)
                 self._observer_lon = float(pos.lon)
                 self._observer_from_gnss = True
+                self._observer_source = "gnss"
                 self._apply_observer_location()
 
     def _on_sky_object_clicked(self, obj):
@@ -10296,6 +10369,10 @@ class MainWindow(QMainWindow):
             # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标
             self._observer_lat = config.get("observer_lat")
             self._observer_lon = config.get("observer_lon")
+            # 落盘坐标 = 用户静态配置，GNSS 丢 fix 不许清（见 _poll_gnss）
+            self._observer_source = (
+                "config" if self._observer_lat is not None
+                and self._observer_lon is not None else None)
             # 恢复 GNSS 串口配置（port="" 留空 → 连接时 auto_detect）。
             # 权威源是 settings；gui_config 里的 gnss_* 是旧双写残留，仅在
             # settings 仍为默认时一次性迁移并回写（读旧键→迁→回写，幂等）。

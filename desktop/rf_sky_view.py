@@ -649,6 +649,31 @@ def stars_hidden_by_daylight(sun_alt_deg: Optional[float]) -> bool:
     return alt >= STAR_DAYLIGHT_SUN_ALT_DEG
 
 
+def sky_phase_word(sun_alt_deg: Optional[float]) -> str:
+    """太阳高度 -> 天色用词（标准晨昏分界，不是文学修辞）。
+
+    分界取通行定义：日落 0°(图上含 -0.83° 蒙气差/半径修正)、民用 -6°、
+    航海 -12°、天文 -18°。未知返回 "—"，绝不猜"夜"。
+    """
+    if sun_alt_deg is None:
+        return "—"
+    try:
+        alt = float(sun_alt_deg)
+    except (TypeError, ValueError):
+        return "—"
+    if not math.isfinite(alt):
+        return "—"
+    if alt >= 0.0:
+        return "白昼"
+    if alt >= -6.0:
+        return "民用暮光"
+    if alt >= -12.0:
+        return "航海暮光"
+    if alt >= -18.0:
+        return "天文暮光"
+    return "深夜"
+
+
 def moon_lit_path(cos_alpha: float) -> QPainterPath:
     """单位半径月面亮区路径（局部坐标系: +x 指向太阳, +y 屏幕向下）。
 
@@ -1781,6 +1806,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._status_card_scroll = 0.0
         self._status_card_rect = QRectF()
         self._status_card_view_h = float(self.INFO_CARD_H)
+        # 沉浸态（星象仪形态）：看天，不看仪表。
+        # True 时收掉天线波束、过境列表、"GNSS 未连接"喊话，状态卡退成
+        # 三行紧凑卡——星空才铺得开。IDE 形态恒 False，一切照旧。
+        self._immersive: bool = False
         self.sky_objects = self._objects
         SkyInteractionHandler.__init__(self)
 
@@ -2951,10 +2980,31 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def enter_horizon_view(self, az_deg: float = 0.0):
         """星象仪模式入口视角：朝地平（与 Stellarium 默认构图一致——
-        地景剪影与辉光带入画；天顶俯视留给 RF 全域工具）。"""
+        地景剪影与辉光带入画；天顶俯视留给 RF 全域工具）。
+
+        构图按"天多地少"定：中心仰角 25°、FOV 90°——地平线压到画面下方
+        约四分之三处，天上留出 0°–70° 的整片可见天区。地平线以下的地下
+        区域再多也是纯黑，不该占掉半屏（旧值 alt=20/FOV=120 时地平线正好
+        压在画面正中，星象仪像在半空悬着）。
+        """
         self._cancel_goto_anim()
-        self.view_state.look_at(float(az_deg) % 360.0, 20.0)
-        self.view_state.zoom_to(120.0)
+        self.view_state.look_at(float(az_deg) % 360.0, 25.0)
+        self.view_state.zoom_to(90.0)
+        self.update()
+
+    def set_immersive(self, on: bool) -> None:
+        """切换沉浸态（星象仪形态用）。
+
+        沉浸 = 只留星空与必要读数：天线波束、过境列表、"GNSS 未连接"居中
+        喊话全部收起，左下状态卡退成三行紧凑卡。退出即原样恢复，不改任何
+        数据开关（图层/网格/星表与 IDE 形态共用同一份状态）。
+        """
+        on = bool(on)
+        if on == self._immersive:
+            return
+        self._immersive = on
+        # 收起的浮层不该继续吃鼠标：拾取矩形同步失效，免得点空白处命中
+        # 一张看不见的过境表。
         self.update()
 
     # ========================================================================
@@ -4049,20 +4099,30 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 continue
             # select_for_view 已含消光与极限星等（eff_mag）；不再叠加第二次。
             # 裸眼基线内走 star_draw 原模型，LOD 放出的更暗星走最小可辨点。
-            r = r_l[i]
+            # 渲染增益 1.3：star_draw 的半径是"相对亮度编码"（1.2–2.4px），
+            # 在高 DPI 屏上整片天会细成一层"灰噪点"，亮星也立不起来。
+            # 这里只放大屏幕落笔半径，不改星等/亮度/极限任何数值口径。
+            r = r_l[i] * 1.3
             if r <= 0:
                 continue
             pos = QPointF(px, py)
             cr, cg, cb = cr_l[i], cg_l[i], cb_l[i]
-            # 亮星辉光（bloom）：同心圆递减 alpha，由内向外晕开。
-            # 只有亮星（r>=_BLOOM_MIN_R）走这条慢路径，数量 <1%。
+            # 亮星辉光（bloom）：径向渐变一次晕开。
+            # 旧实现是 3 个同心实心圆（半径 1.7r/2.6r/3.5r，alpha 70/35/17），
+            # 半径不连续、alpha 在边界突跳 —— 在深色天空上被看成"靶心双环"，
+            # 亮星像被标了选中标记，整片天像雷达屏而不是夜空。渐变把边缘抹平，
+            # 才是"星"，不是"标记"。只有亮星走这条路径（数量 <1%）。
             bloom = bloom_l[i]
             if bloom > 0.0:
-                for ring in range(3):
-                    rr = r * (1.7 + 0.9 * ring)
-                    glow_a = int(70 * bloom * (0.5 ** ring))
-                    painter.setBrush(_star_brush(cr, cg, cb, glow_a))
-                    painter.drawEllipse(pos, rr, rr)
+                rr = float(r) * 3.6
+                grad = QRadialGradient(pos, rr)
+                grad.setColorAt(0.0, QColor(cr, cg, cb, int(120 * bloom)))
+                grad.setColorAt(0.25, QColor(cr, cg, cb, int(64 * bloom)))
+                grad.setColorAt(0.55, QColor(cr, cg, cb, int(26 * bloom)))
+                grad.setColorAt(1.0, QColor(cr, cg, cb, 0))
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(grad))
+                painter.drawEllipse(pos, rr, rr)
             dot_buckets.setdefault(
                 (cr // 16 * 16, cg // 16 * 16, cb // 16 * 16,
                  max(1, int(round(max(1.0, 2.0 * r) * 2.0))),
@@ -4771,7 +4831,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """
         _t = tokens()
         col = QColor(_t.COLORS["gray_400"])
-        col.setAlpha(110)
+        # 深夜淡化：地平基准线在白天要看得清（对照太阳高度/地景），但天文夜
+        # 里一条 110 alpha 的灰线横贯全屏，会把"满天星"割成上下两半。
+        col.setAlpha(110 if self._sky_brightness >= 0.5 else 58)
         painter.save()
         painter.setPen(QPen(col, 1))
         path = QPainterPath()
@@ -4816,15 +4878,29 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setOpacity(alpha)
 
         # 暮光辉光带：剪影后方暖灰渐变，向上渐隐（仅夜；昼由天空渐变自带亮度）
+        # 强度必须跟随太阳高度衰减：太阳到 -18°（天文夜）以下时天空里没有任何
+        # 暮光，再画一条固定 alpha=170 的灰带，就是在深夜地平线上糊一道"灰墙"
+        # ——它不但不美，还让人以为地景渲染出错了。留下的是纯剪影。
         if night:
-            glow_h = int(self.height() * 0.14)
-            glow = QLinearGradient(0, horizon_y - glow_h, 0, horizon_y)
-            gc = QColor(_t.COLORS["sky_night_glow"])
-            glow.setColorAt(0.0, QColor(gc.red(), gc.green(), gc.blue(), 0))
-            glow.setColorAt(1.0, QColor(gc.red(), gc.green(), gc.blue(), 170))
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(glow))
-            painter.drawRect(0, int(horizon_y - glow_h), self.width(), glow_h)
+            sun_alt = self._sun["alt"] if self._sun else None
+            twi = 0.0
+            if sun_alt is not None:
+                try:
+                    twi = _smoothstep(-18.0, -2.0, float(sun_alt))
+                except (TypeError, ValueError):
+                    twi = 0.0
+            if twi > 0.004:
+                glow_h = int(self.height() * 0.14)
+                glow = QLinearGradient(0, horizon_y - glow_h, 0, horizon_y)
+                gc = QColor(_t.COLORS["sky_night_glow"])
+                glow.setColorAt(0.0, QColor(gc.red(), gc.green(), gc.blue(), 0))
+                glow.setColorAt(
+                    1.0, QColor(gc.red(), gc.green(), gc.blue(),
+                                int(170 * twi)))
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(glow))
+                painter.drawRect(0, int(horizon_y - glow_h),
+                                 self.width(), glow_h)
 
         layer_cols = ((None if not night else "ground_far_night"),
                       (None if not night else "ground_mid_night"),
@@ -4834,7 +4910,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             key = layer_cols[idx]
             col = (QColor(_t.COLORS["ground_shadow_day"]) if key is None
                    else QColor(_t.COLORS[key]))
-            painter.setBrush(QBrush(col))
+            # 每层从地平线向下渐暗，而不是一整块纯色：纯色填充在深色天空下
+            # 看不出起伏，像"地平线以下贴了一块黑板"；纵向渐变给出"地"的
+            # 纵深，山脊/树线/屋脊三层才有前后关系。
+            grad = QLinearGradient(0.0, float(horizon_y),
+                                   0.0, float(max(horizon_y + 1.0,
+                                                  self.height())))
+            grad.setColorAt(0.0, col)
+            grad.setColorAt(1.0, col.darker(190))
+            painter.setBrush(QBrush(grad))
             path = QPainterPath()
             edge: List[QPointF] = []
             az_seq = np.arange(0, 361, 3, dtype=float)
@@ -6463,6 +6547,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return -float(rr) * 1000.0 * hz / c
 
     def _draw_antenna_beam(self, painter: QPainter):
+        # 沉浸态不画波束：星象仪是"看天"，未跟踪时的默认指向块（正北 45°）
+        # 在画面正中糊一块灰色四边形，会被误读成渲染故障。
+        if self._immersive:
+            return
         if self._antenna.elevation_deg <= 0:
             return
         painter.save()
@@ -6569,12 +6657,88 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawEllipse(pos, 15, 15)
         painter.restore()
 
+    def _draw_immersive_card(self, painter: QPainter) -> None:
+        """沉浸态左下紧凑卡：现在几点 / 我在哪 / 头顶几颗星 / 什么天色。
+
+        星象仪是给"不懂星象仪原理的人"用的界面，读数只回答最朴素的问题；
+        视轴、受晒、调谐、数据源这些工程读数留在 IDE 形态的完整状态卡里，
+        不在这里挤掉星空。数值全部走既有格式化函数，不另拼一套口径。
+        """
+        painter.save()
+        _t = tokens()
+        ink = self._ink()
+        label_col = QColor(_t.COLORS["gray_100"])
+        # 沉浸卡没有任何可滚动内容：清掉旧拾取矩形，免得滚轮/点击在空白处
+        # 命中一张已经不在屏幕上的卡。
+        self._status_card_rect = QRectF()
+
+        clock = format_local_time(time.time(), fmt="%H:%M")
+        place = format_observer_chip(self._observer)
+        stars = star_catalog_status_text(
+            self._star_sel, self._stars_hidden_by_daylight())
+        sun_alt = self._sun["alt"] if self._sun else None
+        phase = (sky_phase_word(self._display_alt_deg(sun_alt))
+                 if sun_alt is not None else "—")
+        rows = (("位置", place), ("星空", stars), ("天色", phase))
+        hint = "拖动看天 · 滚轮缩放 · 点星星看详情"
+
+        f_big = QFont(self._font)
+        f_big.setPointSize(15)
+        f_small = QFont(self._font)
+        f_small.setPointSize(9)
+        fm_big = QFontMetrics(f_big)
+        fm_small = QFontMetrics(f_small)
+        text_w = fm_big.horizontalAdvance(clock)
+        for k, v in rows:
+            text_w = max(text_w,
+                         fm_small.horizontalAdvance(f"{k}  {v}") + 14)
+        text_w = max(text_w, fm_small.horizontalAdvance(hint))
+        card_w = min(max(196.0, float(text_w) + 30.0),
+                     max(120.0, float(self.width()) - 24.0))
+        row_h = 18.0
+        # 多给一行操作提示：星象仪是"不用学"的界面，第一次打开的人不知道
+        # 能拖、能缩、能点星——工具该自己教人，不该让人先读说明书。
+        card_h = 26.0 + row_h * len(rows) + 8.0 + row_h
+        x = 12.0
+        y = max(12.0, float(self.height()) - card_h - 12.0)
+
+        bg = QColor(_t.COLORS["card_2"])
+        bg.setAlpha(150)
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1))
+        painter.drawRoundedRect(QRectF(x, y, card_w, card_h), 8, 8)
+
+        painter.setFont(f_big)
+        painter.setPen(ink)
+        painter.drawText(QRectF(x + 14.0, y + 6.0, card_w - 28.0, 24.0),
+                         int(Qt.AlignLeft | Qt.AlignVCenter), clock)
+        painter.setFont(f_small)
+        cy = y + 30.0
+        for k, v in rows:
+            painter.setPen(label_col)
+            painter.drawText(QRectF(x + 14.0, cy, 48.0, row_h),
+                             int(Qt.AlignLeft | Qt.AlignVCenter), k)
+            painter.setPen(ink)
+            painter.drawText(QRectF(x + 68.0, cy, card_w - 82.0, row_h),
+                             int(Qt.AlignLeft | Qt.AlignVCenter), v)
+            cy += row_h
+        # 操作提示行：比读数更淡，只做"能干什么"的提示
+        hint_col = QColor(_t.COLORS["gray_400"])
+        hint_col.setAlpha(190)
+        painter.setPen(hint_col)
+        painter.drawText(QRectF(x + 14.0, cy, card_w - 28.0, row_h),
+                         int(Qt.AlignLeft | Qt.AlignVCenter), hint)
+        painter.restore()
+
     def _draw_info_overlay(self, painter: QPainter):
         """左下角信息卡片。
 
         内容高度超过视口可用高度时只滚动、不裁掉数据：光标在卡内用滚轮
         上下滚（卡右侧有滚动条）；卡高最多占视口高度减 24px，不挡天空。
         """
+        if self._immersive:
+            self._draw_immersive_card(painter)
+            return
         painter.save()
         _t = tokens()
         card_w = self.INFO_CARD_W
@@ -6909,6 +7073,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _draw_passes_panel(self, painter: QPainter):
         """右侧未来过境列表。"""
+        if self._immersive:
+            return      # 沉浸态：过境表让位给天空（数据仍在，退出即见）
         if not self._upcoming_passes:
             return
         painter.save()
@@ -7024,6 +7190,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _draw_gnss_overlay(self, painter: QPainter):
         """GNSS 状态与图例。"""
+        # 沉浸态：站址已经就位（星空按配置/定位正常铺开），此时在画面中央
+        # 喊"GNSS 未连接"只是噪音——它既不阻止看星，也不影响任何读数。
+        # 连接状态在 IDE 形态状态栏与状态卡里都有，不在这里重复。
+        if self._immersive:
+            return
         painter.save()
         _t = tokens()
         # 无地面站坐标时，中心区域由 _draw_data_source_overlay 的
@@ -7089,6 +7260,23 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """
         painter.save()
         _t = tokens()
+
+        # 沉浸态（星象仪）：站址/TLE/sgp4 的缺失是 IDE 形态要处理的事，
+        # 在这里横一条红字只会把"看天"变成"看报错"，而它们都不阻止看星
+        # ——有星表就能画天。唯一保留的是"位置未定"：那种情况下方位/地平线
+        # 全算不出来，满天星看起来会像"位置正确"，那是假信息，必须说。
+        if self._immersive:
+            if self._observer is None or self._data_source == "none":
+                f = QFont(self._font)
+                f.setPointSize(10)
+                painter.setFont(f)
+                painter.setPen(self._colors["warning"])
+                painter.drawText(
+                    QRectF(0, self.height() - 96, self.width() - 24, 24),
+                    int(Qt.AlignRight | Qt.AlignVCenter),
+                    "位置未定 · 连接 GNSS 或填写经纬度")
+            painter.restore()
+            return
 
         if self._data_source == "none" or self._observer is None:
             # 空状态：地面站未设置（最高优先级，独占中心区域）
