@@ -551,9 +551,29 @@ class SDRBackend:
         return False
 
     def set_agc(self, enabled: bool) -> bool:
+        """设置 AGC 开关。失败时回滚 status（与 set_gain 同纪律）。"""
         if not self.status.connected:
             return False
-        self.status.agc_enabled = enabled
+        old = self.status.agc_enabled
+        self.status.error = ""
+        try:
+            ok = self._apply_agc(bool(enabled))
+        except Exception as e:
+            ok = False
+            self.status.error = user_message(
+                "sdr_set_agc_failed", detail=f"{type(e).__name__}: {e}")
+        if not ok:
+            self.status.agc_enabled = old
+            if not self.status.error:
+                self.status.error = user_message(
+                    "sdr_set_agc_failed", detail="底层返回失败")
+            logger.warning(f"set_agc({enabled}) 失败，已回滚到 {old}")
+            return False
+        self.status.agc_enabled = bool(enabled)
+        return True
+
+    def _apply_agc(self, enabled: bool) -> bool:
+        """子类覆写：把 AGC 开关真正写入硬件。默认无操作直接成功。"""
         return True
 
     def _apply_bandwidth(self, bw_hz: float) -> bool:
@@ -2310,8 +2330,11 @@ class RTLSDRBackend(SDRBackend):
         return float(clamped)
 
     def _apply_bandwidth(self, bw_hz: float) -> bool:
-        """写 tuner 模拟带宽；0=自动（交还驱动默认，不下发非法 0）。"""
-        if self._sdr is None or bw_hz <= 0:
+        """写 tuner 模拟带宽；0=自动。0 是 librtlsdr 合法调用
+        （rtlsdr_set_tuner_bandwidth(dev, 0) = 自动），connect() 依赖
+        这一下发把 tuner 置回自动——与 TestTC6 钉的「connect 后下发
+        bandwidth=0」一致，不许跳过。"""
+        if self._sdr is None:
             return True
         try:
             self._sdr.bandwidth = int(bw_hz)
@@ -2426,16 +2449,17 @@ class RTLSDRBackend(SDRBackend):
             logger.info("RTL-SDR 首启自动增益: 0 dB -> %.1f dB（增益表中点，"
                         "来源 gqrx mainwindow.cpp:571-579）", mid_gain)
 
-    def set_agc(self, enabled: bool) -> bool:
-        if not super().set_agc(enabled):
-            return False
+    def _apply_agc(self, enabled: bool) -> bool:
+        """写 RTL AGC（tuner gain mode + RTL2832 数字 AGC）。
+
+        来源: librtlsdr include/rtl-sdr.h:253 + src/librtlsdr.c:1073 —
+        tuner gain mode: 0=auto(AGC), 1=manual。
+        开 AGC 时显式切 tuner 到 auto；关 AGC 时由后续 _apply_gain 切回 manual。
+        注意这是 tuner 前端 AGC，与 RTL2832 数字 AGC 相互独立
+        （librtlsdr src/librtlsdr.c:1157 set_agc_mode）。
+        """
         if self._sdr:
             try:
-                # 来源: librtlsdr include/rtl-sdr.h:253 + src/librtlsdr.c:1073 —
-                # tuner gain mode: 0=auto(AGC), 1=manual。
-                # 开 AGC 时显式切 tuner 到 auto；关 AGC 时由后续 _apply_gain 切回 manual。
-                # 注意这是 tuner 前端 AGC，与下面的 RTL2832 数字 AGC 相互独立
-                # （librtlsdr src/librtlsdr.c:1157 set_agc_mode）。
                 try:
                     self._sdr.set_manual_gain_mode(0 if enabled else 1)
                 except Exception:
@@ -2449,16 +2473,6 @@ class RTLSDRBackend(SDRBackend):
                     self._sdr.agc_mode = bool(enabled)
                 except Exception:
                     return False
-        return True
-
-    def set_bandwidth(self, bw_hz: float) -> bool:
-        if not super().set_bandwidth(bw_hz):
-            return False
-        if self._sdr:
-            try:
-                self._sdr.bandwidth = int(bw_hz)
-            except Exception:
-                return False
         return True
 
     def set_ppm(self, ppm: int) -> bool:
@@ -3472,9 +3486,7 @@ class SoapySDRBackend(SDRBackend):
             self.status.error = f"setGain({gain_db}) 失败: {e}"
             return False
 
-    def set_agc(self, enabled: bool) -> bool:
-        if not super().set_agc(enabled):
-            return False
+    def _apply_agc(self, enabled: bool) -> bool:
         if self._sdr is not None:
             try:
                 # 来源: Device.hpp:708 setGainMode(RX, chan, automatic)
@@ -3484,9 +3496,7 @@ class SoapySDRBackend(SDRBackend):
                 return False
         return True
 
-    def set_bandwidth(self, bw_hz: float) -> bool:
-        if not super().set_bandwidth(bw_hz):
-            return False
+    def _apply_bandwidth(self, bw_hz: float) -> bool:
         if self._sdr is not None and bw_hz > 0:
             try:
                 # 来源: Device.hpp:921 setBandwidth(RX, chan, bw)

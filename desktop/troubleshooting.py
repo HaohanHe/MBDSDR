@@ -190,6 +190,7 @@ VISIBLE_BY_FAMILY: Dict[str, Tuple[str, ...]] = {
     "设备调谐": (
         "sdr_set_frequency_failed", "sdr_set_sample_rate_failed",
         "sdr_set_gain_failed", "sdr_set_bandwidth_failed",
+        "sdr_set_agc_failed", "sdr_frequency_out_of_range",
         "doppler_compensation_failed",
     ),
     # AI 对话 message 通道：model_manager 返回 error=user_message(code)，

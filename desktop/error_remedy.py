@@ -72,6 +72,9 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "rate_limited", "http_4xx", "http_5xx", "network_other",
         "parse_failure", "empty_response", "tle_unknown",
     ),
+    "回放标注（非故障）：回放面板在频率读数旁直接渲染「录制真实值 / 上报值」双值标注，不设帮助入口": (
+        "freq_reported_only",
+    ),
     "遗留 stdio MCP 壳（core/mcp_server.py）细项：code 只经 MCP 协议返回调用方"
     "（桌面硬件工具走 mcp_worker/MBDSDRClient），桌面 UI 无渲染点": (
         "audio_start_failed", "audio_output_unavailable", "invalid_text",
