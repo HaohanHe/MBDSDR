@@ -45,7 +45,7 @@
 | `tests/fixtures/iridium107` | 外部真值 | 2 | 外部真值 2 |
 | `tests/fixtures/real_fm_88m1` | 外部真值 | 2 | 外部真值 2 |
 | `tests/fixtures/sensitivity` | 自生成 | 8 | 自生成 8 |
-| `tests/golden` | mixed | 13 | 外部真值 8、自生成 5 |
+| `tests/golden` | mixed | 14 | 外部真值 9、自生成 5 |
 
 没有入仓 golden、但属于「自家编码→自家解码回环」的链：
 

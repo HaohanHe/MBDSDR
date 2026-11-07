@@ -76,6 +76,25 @@
   泄漏到 `hackrf_params_test` 的"无硬件不得枚举 hackrf"咬红——在 pristine
   HEAD 临时 worktree 复证属存量后，补 setUp/tearDown（与邻类同纪律）。
   落库 `1d497c3b`。
+- **#47 FileIQBackend 读失败静默 + wav/csv 回放断链（P1）**：connect()
+  失败原先只翻 connected 不写 error；sidecar 损坏被 except: pass 吞掉按
+  默认速率假播；录制端五种格式里 wav/csv 回放端不认（「录完即可回放」
+  断两格）。现在失败写 error+link_state=failed、sidecar 损坏/非对象/
+  空文件如实拒绝；补 wav（立体声 int16 校验、wav_scale 反归一化、无
+  sidecar 时采样率以 wav 头帧率为准）与 csv（I,Q 表头两列）；三个消费方
+  （decode_noaa_apt / _noaa_apt_decode_tool / _wfm_stereo_tool）透出
+  真实原因，不再误报「IQ 文件无数据」。新测试
+  `tests/test_file_iq_playback.py` 14 条（12 红→全绿，cf32/cu8 阳性
+  对照；wav/csv 对拍走真实录制器落盘再回放）；反证三病灶全复现
+  （D:/mbdsdr/output/_probe_file_iq_reverse.py）。车道 22 文件
+  **153 passed + 1 存量红**（D:/mbdsdr/output/_file_iq_lane.log）。
+  落库 `208e0bd1`。
+- **存量红另账销**：`test_decoder_capability_matrix` 文档漂移在
+  pristine HEAD 复证属存量——`410eb096` 新增岁差外部真值 golden
+  （celestial_ofdate_golden.json，Skyfield 1.54 逐元素对拍、SHA-256
+  钉值、provenance 声明合规）后未重生成矩阵文档（13→14、外部真值
+  8→9）。按测试指引 `decoder_capability_report.py --write` 重生成，
+  diff 仅该计数行，同步测试+来历守卫复跑绿。
 - **身份门存量红两处（非本批引入，门禁必须绿才能落库）**：
   `docs/generated-artifact-claim-policy.md` 事故 JSON 摘录里带真实邮箱 →
   按 AGENTS.md 第 1 条内容层红线改为「归一身份见 git log」占位；
@@ -118,13 +137,12 @@
   三处改走 Qt Signal 的 AutoConnection（同线程同步、跨线程排队回 GUI），
   不丢音频帧、不改调用契约。新测试
   `tests/test_demod_tap_thread_affinity.py`（5 条，真起非 GUI 线程取证）。
-- **仍未做（本线队列，按优先级）**：`FileIQBackend` 读失败静默、
-  `NetworkIQBackend` 未接 `_discover()`、断连读数残留、
-  `playback.set_frequency` 回放改频、`sat_passes(max_sats)`
+- **仍未做（本线队列，按优先级）**：`NetworkIQBackend` 未接 `_discover()`、
+  断连读数残留、`playback.set_frequency` 回放改频、`sat_passes(max_sats)`
   按条数截取。详见
   `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
-  （rtltcp 写频缓存 / RtlTcp 采样率吸附 / HackRF/USRP 初始化三条已由
-  #21/#22 销账。）
+  （rtltcp 写频缓存 / RtlTcp 采样率吸附 / HackRF/USRP 初始化 /
+  FileIQBackend 静默+wav/csv 断链已由 #21/#22/#47 销账。）
   ⚠ TLE 过期门仍属产品口径待决，别擅自上硬门。
 
 ### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
