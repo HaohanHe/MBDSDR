@@ -201,6 +201,35 @@
   （钩子存量 bug，崩溃点在共享 index 同步成功之后、marker 消费之前，
   marker 留存即闸门通过证据）；后续提交命令带 `PYTHONUTF8=1` 规避。
 
+### 我这边（2026-11-08 深夜 追加：#9 擦除辅助 RS + 真录真值重钉）
+
+- **`a694b322` #9 闭环 + 一个真 bug**：RS 加擦除解码
+  （`decode(erasures=)` / `decode_with_reliability`，判据 2e+f ≤ 32）、
+  Viterbi 输出每比特 MLM 可靠性（`return_reliability`）、
+  `decode_cadu_erasure` 阶梯（先盲解，失败再按可靠性升序分批擦除，
+  预算下界 K ≥ 2·n_susp − nsym 压掉超预算档）。真录 40-80s 宽窗：
+  **盲解 0 条 → 擦除链 9 条**。
+- **真 bug（不是优化）**：原 `decode()` 缺伴随式验证——t 超限时 BM 给出
+  「恰好 ≤t 个根」的不自洽解还报成功（实测 17 错报 1 错、纠正后重编码
+  与收到码字差 33 字节）。已补验证，C++ `rsDecode255` 同步。
+- **真录真值被证伪并重钉（本轮最重要）**：法证
+  （`D:/mbdsdr/output/_probe_vcdu_forensics.log`）证明仓库原钉的 2 条
+  「真录 VCDU」（407300ec… / 4062000a…）4 块重编码距离 31-32 > t=16，
+  是 RS 误纠产物；40-80s 宽窗原报 16 条同理。补齐验证后**必须配
+  weaving 真值序**才出真数据：woven 下帧计数 639186→…→639466 连续、
+  图像包 APID 64/65/68 齐出；concat 下同一批数据帧计数乱、图像包 0 个。
+  故 PIN/地板/fixture/manifest/provenance 全部重签，`stack` 并入
+  `consecutive`（52-62s 窄窗在严格验证下 0 条）。
+  **图像包 38 → 10 不是回退，是剔掉假数据。**
+- **产品接入**：`MeteorLRPTChain.decode_block/decode_stream` 支持
+  `rel`/`byte_rel` + `LRPTFrame.erasures_used`；`meteor_lrpt_decode_iq`
+  工具从符号幅度算字节可靠性传入（该链无 Viterbi，星座幅度是唯一置信度）。
+- **C++ 同迁（未编译验证）**：`lrpt_fec.cc` 补 syndrome 验证 + woven
+  重组；`test_lrpt_real_cross.cpp` PIN 换新值。本机无 g++/Qt6，等 CI。
+- 验证：新增 30 条测试；pristine HEAD 反证 **28 failed / 2 passed**；
+  巷道 27 文件 **367 passed / 1 skipped / 0 failed**（含真录 golden 22 条、
+  跨实现对拍、provenance、身份门），日志 `D:/mbdsdr/output/_erasure_lane2.log`。
+
 ### 我这边（2026-11-07 凌晨 追加：#20 收尾 + 销红 + 三条 P0）
 
 - **`4d5feff1` 收尾并行线成果 + 销 5 条回归红**：45 文件入库；
@@ -804,14 +833,22 @@
 8. ~~[我] LRPT 图像段重组真录链~~ **已闭环（本批）**：真录图像出图
    （40-80s 38 包/13 行 + 全过境 49 包/17 行/551 块），结构真值与
    woven 约定裁决见 capability-map
-9. **[我，实验完待收尾]** LRPT 连帧上限再抬：4sps 矩阵已测——**全配置
-   不敌 2sps 基线**（结果在 output/tmp/lrpt_4sps_matrix.log），剩余杠杆：
-   ① Gardner 修复版实测（代码已改默认关）② 擦除辅助 RS（2e+f≤32，
-   从 75 条部分帧救 VCDU，设计已论证）。图像覆盖率 3-8% 要抬靠 ②。
-10. **[认领]** 图像链收尾件：部分-RS 帧的包级利用（形状判据过滤）、
-    合成链约定统一到 woven（改 lrpt_pipeline.build_cadu 往返切分 +
-    decode_cadu 默认翻转 + C++ lrptDecodeCadu 同迁 + 全部 concat 钉
-    随迁）、图像内容级真值对拍（对照第三方产物）
+9. ~~**[我，实验完待收尾]** LRPT 连帧上限再抬~~ **已闭环（a694b322，11-08 夜）**：
+   4sps 矩阵全配置不敌 2sps 基线的结论不变（细定时网格假设证伪，天花板
+   是信道），但**擦除辅助 RS 做出来了**：`fec.ReedSolomon.decode(erasures=)`
+   + `decode_with_reliability` + Viterbi 每比特 MLM 可靠性
+   （`return_reliability`）+ `decode_cadu_erasure` 阶梯，判据 2e+f ≤ 32
+   （纯擦除上限 32 = 纯纠错 16 的两倍）。真录 40-80s 宽窗实测：**盲解
+   0 条 → 擦除链 9 条**（另 1 条 version=2 被结构判据剔除）。
+   ⚠ 顺带挖出真 bug：原 `decode()` 缺伴随式验证，t 超限时把不自洽解当
+   成功（17 错报 1 错、重编码距离 33）——已修，C++ 同步补验证。
+10. **[认领，部分已做]** 图像链收尾件：
+    ~~C++ lrptDecodeCadu 同迁 woven~~ **已做（a694b322，未编译验证）**；
+    ~~形状判据过滤~~ **已做（真录 fixture 层 version=1 过滤）**；
+    **仍缺**：① `lrpt_pipeline.build_cadu` 往返切分 + `decode_cadu` 默认
+    翻转（合成链仍 concat，改它要连全部 concat 钉子一起迁）；② 图像
+    内容级真值对拍（对照第三方产物——注意：本轮已证明"第三方产物"这条路
+    上原有的真值本身是误纠，重钉后只有 10 包，对拍基准需重新建立）
 
 11. ~~**[我] 产品工程阶段 A 合入仓库**~~ **已闭环（5a977026，11-05 22:00）**：
     `web/product/` 76 文件 / 36 MB（分层前端、构建器、静态守卫、投影自检、
