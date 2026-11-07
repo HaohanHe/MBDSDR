@@ -1827,6 +1827,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._show_landscape: bool = True
         self._show_eqgrid: bool = False     # 赤道网格 (RA 时圈 + 赤纬圈)
         self._show_azgrid: bool = True      # 方位网格 (self._show_grid 同步)
+        # 标签层 / 卫星层 / 夜视模式：与原型的 10 颗工具栏一一对应
+        # （原型 skyToolbar：轨道线/标签/银河/大气/地景/赤纬网格/夜视/卫星层/
+        #   时间流速/全屏）。银河仍「无数据·不提供」，不给一颗假按钮。
+        self._show_labels: bool = True
+        self._show_satellites: bool = True
+        self._night_vision: bool = False
+        self._show_constellations: bool = True
+        self._show_dso: bool = True
+        self._show_hud: bool = True
         self._bortle: int = 3
         # 大气消光系数 k：Δm = k / sin(alt)，逐星按各自仰角算（0=无消光）。
         # 与 Bortle 独立：Bortle 定天顶极限星等，k 只压低低仰角天体。
@@ -2966,6 +2975,76 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._show_eqgrid = bool(show)
         self.update()
 
+    # ---- 图层总入口（对齐原型 skyToolbar 的按钮集合）--------------------
+    # 名字固定成原型的 data-tb 语义，UI/测试/以后的 AI 工具都按同一套键说话。
+    # milkyway 不在其中：仓库内没有银河亮度数据，按钮都不给（能力目录写明
+    # 「无数据·不提供」），不给一个点了没反应的假开关。
+    LAYER_KEYS = ("orbits", "labels", "atmosphere", "landscape",
+                  "constellations", "dso", "azgrid", "eqgrid",
+                  "sats", "hud", "night")
+
+    def layer_state(self) -> Dict[str, bool]:
+        """当前各图层开关状态（UI 回显与 AI 查询共用同一份事实源）。"""
+        return {
+            "orbits": bool(self._show_trajectories),
+            "labels": bool(self._show_labels),
+            "atmosphere": bool(self._show_atmosphere),
+            "landscape": bool(self._show_landscape),
+            "constellations": bool(self._show_constellations),
+            "dso": bool(self._show_dso),
+            "azgrid": bool(self._show_azgrid and self._show_grid),
+            "eqgrid": bool(self._show_eqgrid),
+            "sats": bool(self._show_satellites),
+            "hud": bool(self._show_hud),
+            "night": bool(self._night_vision),
+        }
+
+    def set_layer(self, name: str, on: bool) -> bool:
+        """按原型键名开关图层，返回实际生效值。
+
+        未知键直接 ValueError：宁可让调用方当场炸，也不静默忽略一个
+        「以为开了其实没开」的开关。
+        """
+        key = str(name)
+        on = bool(on)
+        if key == "orbits":
+            self._show_trajectories = on
+        elif key == "labels":
+            self._show_labels = on
+        elif key == "atmosphere":
+            self._show_atmosphere = on
+        elif key == "landscape":
+            self._show_landscape = on
+        elif key == "constellations":
+            self._show_constellations = on
+        elif key == "dso":
+            self._show_dso = on
+        elif key == "hud":
+            self._show_hud = on
+        elif key == "azgrid":
+            self._show_azgrid = on
+            self._show_grid = on
+        elif key == "eqgrid":
+            self._show_eqgrid = on
+        elif key == "sats":
+            self._show_satellites = on
+        elif key == "night":
+            self._night_vision = on
+        else:
+            raise ValueError(f"未知图层：{name!r}；可用：{self.LAYER_KEYS}")
+        self.update()
+        return on
+
+    def set_night_vision(self, on: bool) -> None:
+        """夜视模式：整幅画面压成单一红光（户外保暗适应）。
+
+        不是滤镜贴图：把画面乘成红通道再把暗部提上来，等于把亮度信息
+        全部搬到红光上——屏幕发光以红为主时瞳孔不收缩，这才是夜视仪
+        真正在做的事。
+        """
+        self._night_vision = bool(on)
+        self.update()
+
     def reset_view(self):
         """重置摄像机：回到天顶居中 + FOV=120°，并解除摄像机锁定。
 
@@ -3852,19 +3931,38 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 self._draw_body_info(painter)
 
         # 6) 常驻叠加: FOV 显示 / 摄像机锁定 / 信息卡 / 过境 / GNSS / 空状态
-        self._draw_fov(painter)
-        self._draw_camera_hud(painter)
-        self._draw_fov_control(painter)
+        if self._show_hud:
+            self._draw_fov(painter)
+            self._draw_camera_hud(painter)
+            self._draw_fov_control(painter)
         self._draw_info_overlay(painter)
         self._draw_passes_panel(painter)
         self._draw_gnss_overlay(painter)
         self._draw_data_source_overlay(painter)
+
+        # 7) 夜视：最后一道，盖住包括卡片在内的全部像素
+        if self._night_vision:
+            self._paint_night_vision(painter)
 
         painter.end()
         # 实测帧耗时（EMA α=0.3）→ 驱动 _adapt_refresh_interval 的步长决策。
         _dt_ms = (time.perf_counter() - _t_paint) * 1000.0
         self._paint_ms_ema = (0.7 * self._paint_ms_ema + 0.3 * _dt_ms
                               if self._paint_ms_ema > 0.0 else _dt_ms)
+
+    def _paint_night_vision(self, painter: QPainter) -> None:
+        """夜视模式：整幅画面转成单一红光（保暗适应），两步缺一不可。
+
+        1) Multiply (255,32,32)：留下 R 通道、把 G/B 压到约 12%，屏幕上
+           只剩红光在发光——红光对暗适应破坏最小，这是夜视仪的做法；
+        2) Plus 一层极暗红：纯 multiply 会把暗星连同背景一起压进黑里，
+           暗部反而更难看清，抬一点点才有"红底上的亮星"。
+        """
+        painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+        painter.fillRect(self.rect(), QColor(255, 34, 34))
+        painter.setCompositionMode(QPainter.CompositionMode_Plus)
+        painter.fillRect(self.rect(), QColor(22, 0, 0))
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
     # ------------------------------------------------------------------ #
     # 天空背景: 透视窗口全屏, 近地平线大气散射渐变 (Preetham 简化)
@@ -4241,6 +4339,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.restore()
 
     def _draw_dso(self, painter: QPainter):
+        if not self._show_dso:
+            return
+
         gs = self._ground_station()
         if gs is None:
             return
@@ -4544,6 +4645,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _draw_constellations(self, painter: QPainter):
         """星座/星官图层：按 FOV 分层浮现 + 座名标签（低于天体名优先级）。"""
+        if not self._show_constellations:
+            return
         systems = tuple(s for s in _constel.system_ids()
                         if s in self._constellation_systems)
         if not systems:
@@ -4812,6 +4915,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """
         items = self._label_items
         self._label_items = []
+        if not self._show_labels:
+            # 标签层关掉：本帧排队的标签直接丢弃（不清空会让下一帧把旧标签
+            # 重新吐出来，变成"关了还在"）。
+            return
         if not items:
             return
         # 先按档限流（每档只留离视场中心最近的 N 条），再做二维避让。
@@ -5479,9 +5586,14 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _draw_objects(self, painter: QPainter):
         """绘制天空对象（卫星/信号源/干扰源）。"""
+        # 卫星层可单独关（原型 skyToolbar 的 sats）：信号源/干扰源标记
+        # 属于射频语义，不跟着卫星层一起消失。
+        skip_sats = not self._show_satellites
         painter.save()
         for obj in self._objects:
             if not obj.visible or not obj.is_above_horizon():
+                continue
+            if skip_sats and obj.obj_type == "satellite":
                 continue
             pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
             color = QColor(obj.color) if obj.color else self._colors.get(

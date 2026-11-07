@@ -407,7 +407,7 @@ from PySide6.QtWidgets import (
     QFrame, QSizePolicy, QDialog, QDialogButtonBox, QLineEdit,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
     QDoubleSpinBox, QProgressDialog, QDockWidget, QScrollArea,
-    QStackedWidget, QToolButton, QStyle, QToolTip,
+    QStackedWidget, QToolButton, QStyle, QToolTip, QGridLayout,
 )
 
 # 确保能导入同目录模块
@@ -2107,11 +2107,6 @@ class MainWindow(QMainWindow):
         # 留 2px 余量）；collapse_strip(36) 会把「退出星象仪」裁掉右缘。
         strip.setFixedWidth(tokens().SIZE["planetarium_strip_w"])
         strip.setAttribute(Qt.WA_StyledBackground, True)
-        strip.setStyleSheet(
-            "QFrame#planetariumStrip {"
-            " background-color: rgba(18,19,22,0.55);"
-            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
-            " border-radius: 10px; }")
         strip_lay = QVBoxLayout(strip)
         strip_lay.setContentsMargins(6, 6, 6, 6)
         strip_lay.setSpacing(4)
@@ -2125,11 +2120,84 @@ class MainWindow(QMainWindow):
             f"{self._tok('danger', '#E5484D')}; font-size: 9pt; }}")
         rec_indicator.setVisible(False)
         strip_lay.addWidget(rec_indicator, 0, Qt.AlignHCenter)
+        # 图层矩阵：对齐原型 skyToolbar 的按钮集合（轨道/标签/大气/地景/
+        # 方位网格/赤纬网格/卫星层/夜视）。原型那颗「银河」不给——仓库里
+        # 没有银河亮度/尘埃带数据，按钮点了也没东西可看，宁缺不假。
+        # 动作按钮（时间/全屏/频谱/退出）：深底浅字，与图层矩阵同一套语言
+        _act_css = (
+            "QPushButton { background-color: rgba(255,255,255,0.07);"
+            " color: #DCE4EF; border: 1px solid rgba(255,255,255,0.14);"
+            " border-radius: 7px; padding: 5px 8px; }"
+            "QPushButton:hover { background-color: rgba(255,255,255,0.15); }"
+            "QPushButton:checked { background-color: rgba(255,255,255,0.22);"
+            " color: #FFFFFF; }")
+        grid_host = QWidget(strip)
+        grid_host.setObjectName("planetariumLayerGrid")
+        grid_host.setStyleSheet("background: transparent;")
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(3)
+        # 开关语义用"亮=开 / 暗=关"，不用整块填色：11 颗里绝大多数默认
+        # 开启，全填成蓝会在夜空右上角糊一块蓝色砖头。关闭态把图标压到
+        # 30% 不透明度，一眼就能看出哪些层被关掉了。
+        _btn_css = (
+            "QPushButton { background-color: transparent;"
+            " color: rgba(210,220,235,0.30);"
+            " border: 1px solid transparent; border-radius: 6px;"
+            " font-size: 13px; }"
+            "QPushButton:hover { background-color: rgba(255,255,255,0.08); }"
+            "QPushButton:checked { background-color: rgba(255,255,255,0.075);"
+            " color: #EAF1FA; border-color: rgba(255,255,255,0.16); }")
+        self._layer_btns: dict = {}
+        _layer_btns = (
+            ("orbits", "🛰", "轨道线：卫星未来 10 分钟轨迹"),
+            ("labels", "A", "天体标签（星名 / 座名 / 卫星名）"),
+            ("constellations", "✧", "星座连线与座名"),
+            ("dso", "◍", "深空天体（星云 / 星团 / 星系）符号"),
+            ("atmosphere", "☀", "大气与地平辉光"),
+            ("landscape", "⛰", "地景剪影（固定在地平系，不随时间转）"),
+            ("azgrid", "◎", "方位网格（等方位射线 + 等高圈）"),
+            ("eqgrid", "≡", "赤道网格（时圈 + 赤纬圈）"),
+            ("sats", "✦", "卫星层"),
+            ("hud", "⊞", "视场角与操作提示叠层"),
+            ("night", "☾", "夜视模式（整屏红光，保暗适应）"),
+        )
+        try:
+            _layer_state = self.sky_view.layer_state()
+        except AttributeError:
+            _layer_state = {}
+        for i, (key, glyph, tip) in enumerate(_layer_btns):
+            lb = QPushButton(glyph, grid_host)
+            lb.setObjectName(f"planetariumLayer_{key}")
+            lb.setCheckable(True)
+            lb.setChecked(bool(_layer_state.get(key, False)))
+            lb.setToolTip(tip)
+            lb.setFixedSize(40, 28)
+            lb.setStyleSheet(_btn_css)
+            lb.clicked.connect(lambda _=False, k=key: self._on_layer_btn(k))
+            grid.addWidget(lb, i // 3, i % 3)
+            self._layer_btns[key] = lb
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+        strip_lay.addWidget(grid_host)
+        # 时间流速（原型第 9 颗 ⏱）：1× → 60× → 600× → 停 → 1×。
+        # 直接驱动 new_spacetime 时间引擎，天空按同一份 JD 走；不是另起动画。
+        self._planetarium_time_btn = QPushButton("⏱ 1×", strip)
+        self._planetarium_time_btn.setObjectName("planetariumTimeRate")
+        self._planetarium_time_btn.setToolTip(
+            "时间流速：1× → 60× → 600× → 停。天空跟着同一份时刻走")
+        self._planetarium_time_btn.setMinimumHeight(30)
+        self._planetarium_time_btn.setStyleSheet(_act_css)
+        self._planetarium_time_btn.clicked.connect(self._cycle_time_rate)
+        strip_lay.addWidget(self._planetarium_time_btn, 0, Qt.AlignHCenter)
+        self._sync_time_rate_btn()
         exit_btn = QPushButton("退出星象仪\n(Esc)")
         exit_btn.setObjectName("planetariumExit")
         exit_btn.setToolTip("切回 IDE 形态；按 Esc 同样退出")
         exit_btn.setMinimumHeight(44)
         exit_btn.clicked.connect(lambda: self.set_app_mode("ide"))
+        exit_btn.setStyleSheet(_act_css)
         # 一键全屏（对齐 demo 右上角那颗 ⛶）：用户要的是"点一下就满屏看天空"，
         # 不该逼他去翻「视图」菜单或记 F11。文案随窗口状态切换（⛶ 全屏 /
         # 🗗 退出全屏），进形态自动全屏后这颗按钮立刻显示"退出全屏"。
@@ -2138,6 +2206,7 @@ class MainWindow(QMainWindow):
         self._planetarium_fs_btn.setToolTip("全屏看天空（F11；再点一次回到窗口）")
         self._planetarium_fs_btn.setMinimumHeight(36)
         self._planetarium_fs_btn.clicked.connect(self._toggle_fullscreen)
+        self._planetarium_fs_btn.setStyleSheet(_act_css)
         strip_lay.addWidget(self._planetarium_fs_btn, 0, Qt.AlignHCenter)
         # 频谱开合：星象仪是时空主导形态，频谱默认不进来抢 1/5 屏；
         # 但"不默认显示"不等于"拿不到"——想看信号时一颗按钮拉出来。
@@ -2148,11 +2217,19 @@ class MainWindow(QMainWindow):
                                        False)))
         wf_btn.setToolTip("在底部显示/隐藏频谱瀑布（退出形态不改变设置）")
         wf_btn.setMinimumHeight(32)
+        wf_btn.setStyleSheet(_act_css)
         wf_btn.toggled.connect(self.set_planetarium_waterfall)
         strip_lay.addWidget(wf_btn, 0, Qt.AlignHCenter)
         self._planetarium_wf_btn = wf_btn
         strip_lay.addWidget(exit_btn, 0, Qt.AlignHCenter)
         strip_lay.addStretch(1)
+        # 无选择器的样式表：objectName 选择器在这块浮层上被主题 polish
+        # 冲掉过（外框整块变主题白，在夜空上像贴了一张纸）。无条件规则
+        # 直接落在 strip 自身，子按钮各自另有样式表覆盖，互不干扰。
+        strip.setStyleSheet(
+            "background-color: rgba(14,17,24,0.90);"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            " border-radius: 12px;")
         self._planetarium_strip = strip
         self._planetarium_rec_indicator = rec_indicator
         strip.installEventFilter(self)
@@ -2258,6 +2335,68 @@ class MainWindow(QMainWindow):
         elif info.get("parent") is not None:
             sky.setParent(info["parent"])
             sky.show()
+
+    _TIME_RATE_STEPS = (1.0, 60.0, 600.0, 0.0)
+
+    def _sync_time_rate_btn(self) -> None:
+        """按钮文案与时间引擎的实际倍率对齐（0 显示「停」，从不编造）。"""
+        btn = getattr(self, "_planetarium_time_btn", None)
+        if btn is None:
+            return
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            rate = float(get_time_engine().get_rate())
+        except Exception:
+            rate = 1.0
+        if abs(rate) < 1e-9:
+            btn.setText("⏸ 停")
+        elif rate >= 1000:
+            btn.setText(f"⏩ {rate:g}×")
+        else:
+            btn.setText(f"⏱ {rate:g}×")
+
+    def _cycle_time_rate(self) -> None:
+        """时间流速循环：1× → 60× → 600× → 停 → 1×（原型同一套档位）。"""
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            eng = get_time_engine()
+        except Exception:
+            return
+        steps = self._TIME_RATE_STEPS
+        try:
+            cur = float(eng.get_rate())
+        except Exception:
+            cur = 1.0
+        idx = 0
+        for i, r in enumerate(steps):
+            if abs(cur - r) < 1e-6:
+                idx = (i + 1) % len(steps)
+                break
+        try:
+            eng.set_rate(steps[idx])
+        except Exception:
+            return
+        self._sync_time_rate_btn()
+        self.sky_view.update()
+        try:
+            self.statusBar().showMessage(
+                f"时间流速 {('停' if steps[idx] == 0 else f'{steps[idx]:g}×')}"
+                "（天空按同一时刻重算）", MSG_NORMAL)
+        except RuntimeError:
+            pass
+
+    def _on_layer_btn(self, key: str) -> None:
+        """图层按钮 → 天空视图（按钮不自己留状态，一律从视图读回）。"""
+        btn = getattr(self, "_layer_btns", {}).get(key)
+        if btn is None:
+            return
+        try:
+            applied = self.sky_view.set_layer(key, btn.isChecked())
+        except (AttributeError, ValueError):
+            btn.setChecked(not btn.isChecked())
+            return
+        if btn.isChecked() != bool(applied):
+            btn.setChecked(bool(applied))
 
     def set_planetarium_waterfall(self, on: bool) -> None:
         """星象仪底部频谱开合（默认关）。
