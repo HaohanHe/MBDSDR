@@ -89,6 +89,22 @@
   （D:/mbdsdr/output/_probe_file_iq_reverse.py）。车道 22 文件
   **153 passed + 1 存量红**（D:/mbdsdr/output/_file_iq_lane.log）。
   落库 `208e0bd1`。
+- **#48 NetworkIQBackend 未接 _discover() + 契约违规（P2）**：完整实现却
+  没进 `_discover()`/`enumerate_all_sdr_devices()`/工厂，env 登记口缺失，
+  网络 IQ 源实际不可达；connect() 拒绝原样抛 OSError、成功不写 status；
+  get_status() 每次新建对象丢掉 error/samples_read；set_* 返回 None 违反
+  bool 契约且 NaN/越界照单全收；TCP EOF 后缓冲里整样本永久卡死。
+  现在顺着 rtl_tcp/SpyServer 既有 env 接缝扩：`NETWORK_IQ_ENV` +
+  `parse_network_iq_env`（rate/freq 必填不猜默认，坏条目 debug 跳过）三处
+  接线（登记≠连接）；connect 失败走 `classify_network_error` 写
+  error/category/code；get_status 返回本体；setter bool+非法拒绝不污染；
+  EOF 短读返回整样本（散字节如实丢弃）+ 累计 _samples_read。新测试
+  `mbdsdr_ai/tests/test_network_iq_wiring.py` 27 条（27 红→全绿，既有
+  test_network_iq.py 7 条契约保留全绿）；反证五病灶全复现
+  （D:/mbdsdr/output/_probe_network_iq_reverse.py，自 9a1b82a6 git 对象）。
+  车道 10 文件 **118 passed + 3 honest skip**
+  （D:/mbdsdr/output/_network_iq_lane.log）；身份门 3 passed。
+  落库 `55f591b9`（钩子全链干净）。
 - **存量红另账销**：`test_decoder_capability_matrix` 文档漂移在
   pristine HEAD 复证属存量——`410eb096` 新增岁差外部真值 golden
   （celestial_ofdate_golden.json，Skyfield 1.54 逐元素对拍、SHA-256
@@ -137,12 +153,13 @@
   三处改走 Qt Signal 的 AutoConnection（同线程同步、跨线程排队回 GUI），
   不丢音频帧、不改调用契约。新测试
   `tests/test_demod_tap_thread_affinity.py`（5 条，真起非 GUI 线程取证）。
-- **仍未做（本线队列，按优先级）**：`NetworkIQBackend` 未接 `_discover()`、
-  断连读数残留、`playback.set_frequency` 回放改频、`sat_passes(max_sats)`
+- **仍未做（本线队列，按优先级）**：断连读数残留、
+  `playback.set_frequency` 回放改频、`sat_passes(max_sats)`
   按条数截取。详见
   `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
   （rtltcp 写频缓存 / RtlTcp 采样率吸附 / HackRF/USRP 初始化 /
-  FileIQBackend 静默+wav/csv 断链已由 #21/#22/#47 销账。）
+  FileIQBackend 静默+wav/csv 断链 / NetworkIQBackend 接线+契约
+  已由 #21/#22/#47/#48 销账。）
   ⚠ TLE 过期门仍属产品口径待决，别擅自上硬门。
 
 ### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
