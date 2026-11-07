@@ -26,6 +26,7 @@
 """
 import os
 import sys
+import threading
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -156,6 +157,56 @@ class TestCloseStopsTimers:
 # ===========================================================================
 # 2) 关窗后必须摘掉全局钩子（每实例全局副作用）
 # ===========================================================================
+class TestEventFilterThreadAffinity:
+    """应用级事件过滤器只许在「构造它的线程」上碰事件对象。
+
+    2026-11-07 真实闪退回归钉：``app.installEventFilter(self)`` 是应用级，
+    任何线程调 ``QCoreApplication::notify`` 都会遍历到它——包括 QThread 的
+    事件循环。启动后台枚举/连接线程一上线，过滤器就被非 GUI 线程调到，而
+    PySide 在该线程读那个 C++ QEvent 会踩空：实测第 70587 个事件（来源
+    QThread、obj=QVBoxLayout）在 ``event.type()`` 处 access violation，
+    进程无栈退出。修法＝非本线程一律放行，且**一次都不碰 event**。
+    """
+
+    def test_off_thread_event_is_passed_without_touching_it(self, mw):
+        class _SpyEvent:
+            touched = False
+
+            def type(self):
+                _SpyEvent.touched = True
+                raise AssertionError(
+                    "非 GUI 线程读取了 QEvent——真实进程在这里 access violation")
+
+        box = {}
+
+        def _worker():
+            try:
+                box["ret"] = mw.eventFilter(None, _SpyEvent())
+            except BaseException as e:  # noqa: BLE001 - 抛了就是回归
+                box["exc"] = e
+
+        t = threading.Thread(target=_worker, name="probe-offthread-filter")
+        t.start()
+        t.join(10)
+        assert not t.is_alive(), "工作线程里的 eventFilter 卡死"
+        assert "exc" not in box, f"eventFilter 在非 GUI 线程抛了：{box.get('exc')!r}"
+        assert box.get("ret") is False, "非 GUI 线程的事件必须放行"
+        assert _SpyEvent.touched is False, "非 GUI 线程不得读取事件对象"
+
+    def test_gui_thread_still_filters(self, mw, qapp):
+        """放行只针对别的线程：本线程的 Resize 仍要触发命令栏重定位。"""
+        parent = getattr(mw, "_ai_cmd_parent", None)
+        assert parent is not None, "缺少命令栏父控件，定位链已断"
+        hits = {"n": 0}
+        orig = mw._position_ai_cmd_bar
+        mw._position_ai_cmd_bar = lambda: hits.__setitem__("n", hits["n"] + 1)
+        try:
+            qapp.sendEvent(parent, QEvent(QEvent.Type.Resize))
+        finally:
+            mw._position_ai_cmd_bar = orig
+        assert hits["n"] >= 1, "本线程 Resize 未触发命令栏定位（过滤链失效）"
+
+
 class TestCloseReleasesGlobalHooks:
 
     def test_app_event_filter_removed_after_close(self, mw_closed, qapp):

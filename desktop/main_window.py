@@ -733,6 +733,10 @@ class MainWindow(QMainWindow):
         self._tle_update_thread: Optional[threading.Thread] = None
         self._tle_update_result.connect(
             self._on_tle_update_result, Qt.QueuedConnection)
+        # 事件过滤器只允许在「构造它的那个线程」上生效（见 eventFilter）。
+        # 记 ident 而不是 threading.main_thread()：主窗口被放到非主线程构造
+        # （测试/宿主嵌入）时同样自洽，谁建的谁负责。
+        self._event_filter_thread_id = threading.get_ident()
         # 启动自动选源的后台枚举线程（只做 enumerate，不碰控件）
         self._auto_enum_thread: Optional[threading.Thread] = None
         self._auto_enum_ready.connect(
@@ -2409,6 +2413,19 @@ class MainWindow(QMainWindow):
         return False
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)
+        # 只在自己被构造的线程上过滤（2026-11-07 真实闪退根因）。
+        #
+        # app.installEventFilter(self) 是**应用级**过滤器：任何线程调用
+        # QCoreApplication::notify 都会遍历到它——包括 QThread 工作线程里
+        # 的事件循环（启动后台枚举/连接线程上线后必现）。PySide 在非 GUI
+        # 线程读那个 C++ QEvent 会踩空：实测第 70587 个事件、来自 QThread
+        # 线程、obj 是 QVBoxLayout，`event.type()` 直接 access violation，
+        # 进程无栈退出（闪退）。
+        #
+        # 语义上本来也不该接管：控件与布局归 GUI 线程，别的线程的事件不是
+        # 我们的。直接放行（连 super() 都不调，避免基类再碰一次 event）。
+        if threading.get_ident() != self._event_filter_thread_id:
+            return False
         # 构造期 8 万次事件：先取一次事件类型，按类型分派后再比对象身份，
         # 不再对每个事件做 4 次 getattr + 重复 event.type()（旧实现占构造 59%）。
         etype = event.type()
