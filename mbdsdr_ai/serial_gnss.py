@@ -653,6 +653,19 @@ class SerialGNSSReader:
         """返回串口是否真正打开且在读数据（后台线程维护状态）。"""
         return self._running.is_set() and self._connected
 
+    @property
+    def port(self) -> Optional[str]:
+        """**实际打开**的串口名（自动探测时是探测结果，不是调用方传的 None）。
+
+        UI 要显示"连到哪个口"，不能显示"自动识别"——那是过程不是事实。
+        """
+        return self._port
+
+    @property
+    def baudrate(self) -> Optional[int]:
+        """实际生效的波特率（自动探测时是探测命中值）。"""
+        return self._baudrate
+
     def _close_ser(self):
         """关闭当前串口并标记断开（不阻塞调用方，供后台线程调用）。"""
         if self._ser is not None:

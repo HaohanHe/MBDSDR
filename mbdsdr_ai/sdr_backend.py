@@ -2009,7 +2009,8 @@ class RTLSDRBackend(SDRBackend):
             self._maybe_apply_first_gain_midpoint()
 
             # 9) main.cpp:322 rtlsdr_set_offset_tuning —— 默认关闭；用户预开启时下发
-            if self._offset_tuning:
+            #    （驱动不提供该方法时跳过，见 set_offset_tuning 的能力探测说明）
+            if self._offset_tuning and hasattr(self._sdr, "set_offset_tuning"):
                 try:
                     self._sdr.set_offset_tuning(True)
                 except Exception as e:
@@ -2538,17 +2539,29 @@ class RTLSDRBackend(SDRBackend):
 
         来源: SDR++ main.cpp:485-494 offsetTuning checkbox + main.cpp:322
         rtlsdr_set_offset_tuning。开启后 RTL2832 把本振偏移到采样率中央，
-        让直流尖峰落到基带边缘，便于数字 DC 抵消。pyrtlsdr 暴露 set_offset_tuning。
+        让直流尖峰落到基带边缘，便于数字 DC 抵消。
+
+        能力探测（2026-11-07 真实设备）：本机 pyrtlsdr 的 ``RtlSdr`` 实际是
+        ``RtlSdrAio``，**没有** ``set_offset_tuning`` 方法（``hasattr`` 为
+        False）。旧实现直接调用 → AttributeError → 返回 False → 连接流程报
+        「Offset Tuning 未生效」，用户插上棒子就看到一条红字。该参数是可选
+        优化项，驱动不提供就是「不支持」而不是「失败」：跳过并如实记一条
+        debug，不污染连接结果。
         """
         self._offset_tuning = bool(enabled)
-        if self._sdr:
-            try:
-                self._sdr.set_offset_tuning(bool(enabled))
-                return True
-            except Exception as e:
-                logger.warning(f"RTL-SDR set_offset_tuning({enabled}) 失败: {e}")
-                return False
-        return True
+        if not self._sdr:
+            return True
+        if not hasattr(self._sdr, "set_offset_tuning"):
+            logger.debug(
+                "RTL-SDR 驱动不提供 set_offset_tuning（%s），跳过 offset tuning",
+                type(self._sdr).__name__)
+            return True
+        try:
+            self._sdr.set_offset_tuning(bool(enabled))
+            return True
+        except Exception as e:
+            logger.warning(f"RTL-SDR set_offset_tuning({enabled}) 失败: {e}")
+            return False
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._sdr:

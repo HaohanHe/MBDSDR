@@ -658,6 +658,8 @@ class MainWindow(QMainWindow):
     _tle_update_result = Signal(object)      # (更新数, 失败对象|None)
     # 启动自动枚举：后台线程 → UI 线程（枚举实测 1.5 s，不能压首帧后的可交互时间）
     _auto_enum_ready = Signal(object)        # {"devices": [...]} 或 {"error": "..."}
+    # GNSS 零配置自动连接：后台探测线程 → UI 线程（auto_detect 最坏 15 s）
+    _gnss_auto_done = Signal(bool, str)      # (是否连上, 失败细节)
 
     def __init__(self):
         super().__init__()
@@ -669,9 +671,11 @@ class MainWindow(QMainWindow):
         if os.path.exists(_icon_path):
             from PySide6.QtGui import QIcon
             self.setWindowIcon(QIcon(_icon_path))
-        # 最小窗口 1000×600：用户明确要求该档可用（不叠字、无死黑）；
-        # splitter minSizeHint ≈ 982 < 1000，可容纳。
-        self.setMinimumSize(1000, 600)
+        # 最小窗口 860×560：旧值 1000×600 是写死的，竖屏/窄屏直接被挡住。
+        # 用户明确要求界面必须"活的"——按实际宽度自适应，而不是假设用户
+        # 一定有一块 1400px 宽的横屏。次要读数在窄窗里隐藏（见
+        # _apply_responsive_chrome），长文案省略但 tooltip 保留全文。
+        self.setMinimumSize(860, 560)
         self.resize(1400, 900)
 
         # 状态
@@ -741,6 +745,8 @@ class MainWindow(QMainWindow):
         self._auto_enum_thread: Optional[threading.Thread] = None
         self._auto_enum_ready.connect(
             self._on_auto_enum_ready, Qt.QueuedConnection)
+        self._gnss_auto_done.connect(
+            self._on_gnss_auto_done, Qt.QueuedConnection)
         self._sat_track_timer: Optional[QTimer] = None
         self._sat_track_prev_freq_hz: Optional[float] = None
         self._sat_track_prev_mode: Optional[str] = None
@@ -754,13 +760,23 @@ class MainWindow(QMainWindow):
         self._gimbal_follow = False
         # 真实串口 GNSS 监测：插上 GNSS 模块后由用户在「工具 → 连接 GNSS」里选口/波特率
         # 启动，驱动状态面板 GPS 组与天空图观测站坐标。找不到设备/缺依赖时降级为 none，
-        # 绝不崩、绝不造假坐标。不在启动时自动开串口（用户可能根本没接 GNSS）。
+        # 绝不崩、绝不造假坐标。
+        #
+        # 零配置原则（2026-11-07 用户定死）：**插上就自动连**。GNSS 模块是
+        # CH340 之类的 USB 串口，端口号/波特率是"技能门槛"而不是用户该关心
+        # 的事——旧设计让用户在菜单里手填 COM10 + 9600，属于把实现细节当
+        # 配置项。现在启动后后台 auto_detect（端口×波特率扫描 + NMEA 校验），
+        # 认出就静默连上；插晚了也会在后台周期重试，全程不弹框。
         self._gnss = RealGNSSMonitor() if RealGNSSMonitor is not None else None
         self._gnss_timer: Optional[QTimer] = None
-        # GNSS 串口配置（持久化到 gui_config.json）：
-        #   port="" → auto_detect；Windows CH340 接收器填 "COM10"
+        # GNSS 串口配置（持久化到 settings）：留空 = 全自动探测；高级用户可覆盖
         self._gnss_port: str = ""
         self._gnss_baudrate: int = 9600
+        # 自动连接状态机：后台线程 + 失败静默重试（用户手动断开/手动指定后停止）
+        self._gnss_auto_thread: Optional[threading.Thread] = None
+        self._gnss_auto_tries: int = 0
+        self._gnss_auto_disabled: bool = False
+        self._gnss_retry_timer: Optional[QTimer] = None
         # 地面站坐标是否由真实 GNSS 自动设定（True 时才允许 GNSS 写入；
         # 用户在 gui_config.json 手动配置的坐标优先，不被 GNSS 覆盖）。
         self._observer_from_gnss: bool = False
@@ -921,6 +937,10 @@ class MainWindow(QMainWindow):
         # 放在 _panels_set_sdr_connected(False) 之后，避免恢复出的频率显示被清成 "--"。
         self._apply_restored_settings()
 
+        # 构造完成后按当前宽度摆一次"活的"布局：首帧就是自适应结果，
+        # 不用等用户拖窗口才对齐。
+        self._apply_responsive_chrome()
+
         # 延迟启动项一律挂成 self 的子定时器（不用 QTimer.singleShot 静态版）：
         # 静态 singleShot 造出的定时器无 QObject parent，关窗时扫不到、停不掉，
         # 会在窗口关闭之后才打进来（_auto_enumerate_and_connect 甚至会去连真实
@@ -929,6 +949,7 @@ class MainWindow(QMainWindow):
         self._startup_timers: list = []
         for _ms, _fn in ((100, self._load_gui_config),
                          (200, self._auto_enumerate_and_connect_async),
+                         (400, self._auto_connect_gnss_async),
                          (1200, self._update_sky_satellites)):
             _t = QTimer(self)
             _t.setSingleShot(True)
@@ -1533,7 +1554,9 @@ class MainWindow(QMainWindow):
         self._no_device_hint.setObjectName("hintLabel")
         # 单行不换行：wordWrap 会随窗口宽度变成 2~3 行，把下方频谱压到
         # 320x228（基线 320x240，见 test_ui_layout_locks 频谱基线）。
-        # 窄窗省略与完整文案进 tooltip 的做法另行提交，不与本笔混改。
+        # 窄窗用**省略号**（Qt.ElideRight）+ tooltip 全文，绝不显示半截字
+        # ——见 _apply_responsive_chrome。
+        self._no_device_hint_full: str = self._no_device_hint.text()
         self._no_device_hint.setAlignment(Qt.AlignCenter)
         _hint_bg = self._tok("light_hint_bg", "#F0E8DC")
         _hint_fg = self._tok("light_hint_text", "#8A6D4A")
@@ -2444,6 +2467,46 @@ class MainWindow(QMainWindow):
             if obj is getattr(self, "_planetarium_strip", None):
                 self._set_planetarium_strip_hover(etype == QEvent.Enter)
         return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt 命名)
+        super().resizeEvent(event)
+        self._apply_responsive_chrome()
+
+    def _apply_responsive_chrome(self) -> None:
+        """窄窗自适应：次要读数让位，长文案省略但 tooltip 保全文。
+
+        用户红线（2026-11-07）：界面元素必须"活的"——竖屏/窄窗也要能用。
+        这里只做两件有确定收益的事，不做花活：
+
+        1. **按优先级保留顶栏字段**（连接 > 频率 > GNSS > 采样率 > 多普勒）：
+           窄窗隐藏次要项，而不是把它们压到 19px 宽变成"——"都显示不全。
+        2. **横幅单行省略**：``QLabel`` 不换行是刻意的（换行会压频谱高度），
+           所以窄窗必须用省略号 + tooltip 全文，不能留半截字。
+        """
+        try:
+            width = int(self.width())
+        except RuntimeError:
+            return
+        for attr, min_w in (("doppler_chip", 1180), ("status_sr", 940)):
+            wdg = getattr(self, attr, None)
+            if wdg is None:
+                continue
+            try:
+                wdg.setVisible(width >= min_w)
+            except RuntimeError:
+                pass
+        hint = getattr(self, "_no_device_hint", None)
+        full = getattr(self, "_no_device_hint_full", "")
+        if hint is not None and full:
+            try:
+                avail = max(80, hint.width() - 14)
+                elided = hint.fontMetrics().elidedText(
+                    full, Qt.ElideRight, avail)
+                if hint.text() != elided:
+                    hint.setText(elided)
+                hint.setToolTip(full)
+            except RuntimeError:
+                pass
 
     def _on_cmd_submit(self) -> None:
         text = self.cmd_input.text().strip()
@@ -3733,8 +3796,11 @@ class MainWindow(QMainWindow):
             pass
         try:
             if self._no_device_hint is not None:
+                self._no_device_hint_full = f"  {message}  "
                 self._no_device_hint.setText(f"  {message}  ")
+                self._no_device_hint.setToolTip(message)
                 self._no_device_hint.setVisible(True)
+                self._apply_responsive_chrome()
                 # S1：横幅在「频谱」页里，而首启默认页是「星象仪模式」——不切页
                 # 用户根本看不到（状态栏 8 秒后也消失）。提示出现即把该页带到
                 # 前台；这是"没有设备"的唯一引导，优先级高于保留上次页签。
@@ -3879,14 +3945,26 @@ class MainWindow(QMainWindow):
 
         # 连接后立即下发默认中心频率：切换设备沿用切换前的调谐，
         # 首次连接才退回落 98.5 MHz。
+        #
+        # 0 Hz / NaN / 负数一律视为「没有有效值」：配置里默认写的是 0，
+        # 早期实现直接把它下发，FC0012 判越界 → set_frequency 返回 False →
+        # 状态栏报「初始频率 未生效」，而设备其实好好地在 98 MHz 上等着。
+        # 用户视角这就是"插上棒子却提示失败"，必须回退而不是硬发。
         default_freq = 98_500_000.0
         if carried_freq is not None:
             default_freq = carried_freq
         else:
             try:
-                default_freq = float(self.control_panel.get_frequency_hz())
+                _cp_freq = float(self.control_panel.get_frequency_hz())
             except Exception:
+                _cp_freq = 0.0
+            if not math.isfinite(_cp_freq) or _cp_freq <= 0.0:
+                logger.warning(
+                    "控制面板频率无效（%r）：不下发，连接默认回退 %.3f MHz",
+                    _cp_freq, 98.5)
                 default_freq = 98_500_000.0
+            else:
+                default_freq = _cp_freq
 
         # 下发设备参数：False 与异常同等算失败。旧实现只看异常、且两处直接
         # `except: pass`，会出现「已连接」但采样率/带宽根本没落到位。
@@ -9529,6 +9607,80 @@ class MainWindow(QMainWindow):
     # 真实串口 GNSS（NMEA）轮询
     # ========================================================================
 
+    def _auto_connect_gnss_async(self):
+        """零配置自动连接 GNSS：插上就用，不让用户填端口/波特率。
+
+        端口号（COM4/COM10）和波特率是 USB-串口芯片的实现细节，不是用户
+        该关心的事。这里在**后台线程**调 ``RealGNSSMonitor.start(None, …)``
+        （内部走 ``SerialGNSSReader.auto_detect``：候选端口 × 5 档波特率扫描
+        + NMEA 校验和判据，只在读到 ≥3 条合法语句时才锁定），认出即静默
+        连上；没认出就等 15 s 再试（≈5 分钟后放手），全程不弹框、不阻塞首帧。
+
+        让位条件（尊重显式意图）：用户手动断开过、或手动指定过端口 → 不再自动。
+        """
+        if self._gnss is None or self._gnss_auto_disabled:
+            return
+        if os.environ.get("MBDSDR_OFFLINE") == "1":
+            return                      # 测试/CI 进程不碰真实串口
+        try:
+            if self._gnss.is_connected:
+                return
+        except Exception:
+            pass
+        th = self._gnss_auto_thread
+        if th is not None and th.is_alive():
+            return
+        port = (self._gnss_port or "").strip()
+        baud = int(self._gnss_baudrate or 9600)
+        self._gnss_auto_thread = threading.Thread(
+            target=self._gnss_auto_worker, args=(port, baud),
+            name="gnss-auto", daemon=True)
+        self._gnss_auto_thread.start()
+
+    def _gnss_auto_worker(self, port: str, baud: int) -> None:
+        """后台线程：只做串口探测/打开，绝不碰控件（结果走信号回 GUI）。"""
+        ok = False
+        detail = ""
+        try:
+            ok = bool(self._gnss.start(port or None, baud))
+        except Exception as e:          # noqa: BLE001 - 探测失败不许崩
+            detail = f"{type(e).__name__}: {e}"
+        try:
+            self._gnss_auto_done.emit(ok, detail)
+        except RuntimeError:
+            pass                        # 窗口已销毁，正常退出路径
+
+    @Slot(bool, str)
+    def _on_gnss_auto_done(self, ok: bool, detail: str) -> None:
+        """GUI 线程：自动连接结果落地 + 失败静默重试。"""
+        if ok:
+            port = getattr(self._gnss, "port", None) or "自动识别"
+            baud = getattr(self._gnss, "baudrate", None)
+            self._gnss_auto_tries = 0
+            logger.info("GNSS 自动连接成功: %s @ %s", port, baud)
+            try:
+                self.statusBar().showMessage(
+                    f"GNSS 已自动连接: {port} @ {baud}，正在搜星…", MSG_NORMAL)
+            except RuntimeError:
+                pass
+            return
+        # 没插 / 没认出来：静默重试，绝不弹框打扰（插上即用的前提是别烦人）
+        self._gnss_auto_tries += 1
+        if detail:
+            logger.debug("GNSS 自动探测失败（第 %d 次）：%s",
+                         self._gnss_auto_tries, detail)
+        if self._gnss_auto_tries > 20:   # 15 s × 20 ≈ 5 分钟
+            return
+        try:
+            if self._gnss_retry_timer is None:
+                self._gnss_retry_timer = QTimer(self)
+                self._gnss_retry_timer.setSingleShot(True)
+                self._gnss_retry_timer.timeout.connect(
+                    self._auto_connect_gnss_async)
+            self._gnss_retry_timer.start(15000)
+        except RuntimeError:
+            pass
+
     def _open_gnss_dialog(self):
         """弹出 GNSS 串口连接对话框：选串口号（如 COM10）+ 波特率。
 
@@ -9542,7 +9694,7 @@ class MainWindow(QMainWindow):
         dlg.setWindowTitle("连接 GNSS")
         form = QFormLayout(dlg)
         port_edit = QLineEdit(self._gnss_port)
-        port_edit.setPlaceholderText("COM10（留空自动检测）")
+        port_edit.setPlaceholderText("留空 = 自动识别（推荐，插上就能用）")
         form.addRow("串口号:", port_edit)
         baud_combo = QComboBox()
         for b in (9600, 19200, 38400, 57600, 115200):
@@ -9561,6 +9713,15 @@ class MainWindow(QMainWindow):
         baud = int(baud_combo.currentData())
         self._gnss_port = port
         self._gnss_baudrate = baud
+        # 用户显式指定了端口 → 自动探测让位（否则两边抢同一个串口）。
+        # 留空则仍归自动机制管，不在这里抢。
+        if port:
+            self._gnss_auto_disabled = True
+            try:
+                if self._gnss_retry_timer is not None:
+                    self._gnss_retry_timer.stop()
+            except RuntimeError:
+                pass
         # 权威持久化源是 settings（desktop_settings.json）；gui_config 不再写
         self.settings.set("gnss_port", port)
         self.settings.set("gnss_baudrate", int(baud))
@@ -9587,9 +9748,18 @@ class MainWindow(QMainWindow):
             pass
 
     def _disconnect_gnss(self):
-        """手动断开 GNSS 串口（保留轮询定时器，状态栏回到“未连接”）。"""
+        """手动断开 GNSS 串口（保留轮询定时器，状态栏回到“未连接”）。
+
+        用户主动断开 = 明确不要连。自动探测机制从此让位，不再后台重连。
+        """
         if self._gnss is None:
             return
+        self._gnss_auto_disabled = True
+        try:
+            if self._gnss_retry_timer is not None:
+                self._gnss_retry_timer.stop()
+        except RuntimeError:
+            pass
         try:
             self._gnss.stop()
         except Exception:

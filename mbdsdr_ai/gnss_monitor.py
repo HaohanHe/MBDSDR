@@ -440,7 +440,10 @@ class RealGNSSMonitor:
         except Exception:
             self._started = False
         if self._started:
-            self.port, self.baudrate = p, b
+            # 记**实际生效**的口/波特率：自动探测时 p 是 None，UI 拿
+            # self.port 显示"自动识别"等于没告诉用户连到哪儿。
+            self.port = getattr(self._reader, "port", None) or p
+            self.baudrate = getattr(self._reader, "baudrate", None) or b
         return self._started
 
     def stop(self):

@@ -294,11 +294,12 @@ def test_request_800_is_clamped_to_declared_1000():
         app.setStyleSheet(app.styleSheet())
         _pump(150)
         win.layout().activate()
-        assert win.minimumWidth() == 1000, (
-            f"产品声明的最小宽度变成 {win.minimumWidth()}；本用例的前提是 1000")
-        assert (win.width(), win.height()) == (1000, 600), (
+        assert win.minimumWidth() == 860, (
+            f"产品声明的最小宽度变成 {win.minimumWidth()}；本用例的前提是 860"
+            "（2026-11-07 用户要求界面自适应竖屏/窄屏，旧值 1000 已作废）")
+        assert (win.width(), win.height()) == (860, 600), (
             f"请求 800x600 实际得到 {win.width()}x{win.height()}，"
-            f"应被声明最小尺寸夹成 1000x600")
+            f"应被声明最小尺寸夹成 860x600")
     finally:
         if win is not None:
             try:
@@ -576,11 +577,15 @@ class TestColumnsAndEmptyPanels:
         assert 0.12 <= right / total <= 0.35, f"右栏份额异常: {sizes}"
 
     def test_window_never_shrinks_below_declared_minimum(self, main_window):
-        """请求 800×600 时窗口被最小尺寸钳到 1000×600——这是已拍板的设计，
-        测试锁住「钳位后仍满足全部布局规则」，而不是偷偷跑一个假 800 档。"""
+        """请求 800×600 时窗口被最小尺寸钳到 860×600——这是已拍板的设计，
+        测试锁住「钳位后仍满足全部布局规则」，而不是偷偷跑一个假 800 档。
+
+        2026-11-07：最小宽度 1000 → 860、高度 600 → 560（用户要求竖屏/
+        窄屏可用；死值 1000 会直接把窄屏挡在门外）。
+        """
         requested = main_window.property("_audit_requested")
-        assert main_window.minimumWidth() >= 1000
-        assert main_window.minimumHeight() >= 600
+        assert main_window.minimumWidth() >= 860
+        assert main_window.minimumHeight() >= 560
         assert main_window.width() >= main_window.minimumWidth()
         if requested == "800x600":
             assert (main_window.width(), main_window.height()) != (800, 600), \
