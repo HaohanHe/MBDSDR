@@ -229,8 +229,8 @@
   采样率吸附 / HackRF/USRP 初始化 / FileIQ 静默+wav/csv / NetworkIQ
   接线+契约 / disconnect 残留 / playback 改频 / max_sats 按星 /
   设备表 TTL / agc-bw 回滚 / rtl_tcp 冷却，由 #21/#22/#47–#54销完。
-  本线队列转去：LRPT 擦除辅助 RS（#9 收尾）、图像链约定统一（#10）、
-  P2 前端缺口（#7 认领）。
+  本线队列转去：LRPT 擦除辅助 RS（#9 收尾）、图像链约定统一（#10）。
+  （P2 前端缺口 #7 已核查闭环，见队列节。）
   另账存量红：~~① test_backend_reconnect_stress 热插拔循环在多文件同进程时
   假 rtlsdr 被真 pyrtlsdr 抢线~~ **已销（171dd97c）**：根因是 module_panel
   枚举 worker 并发 import 真 rtlsdr 时 exec 失败的 import 清理
@@ -795,9 +795,12 @@
 5. **[两边]** 共有文件再冲突时按 hunk 拆分提交（脚本先例：
    extract_hunk 姿势，见 2026-11-02 会话记录）
 6. ~~[我] C++ LRPT 双实现对拍~~ **已闭环（8b66410）**
-7. **[认领]** P2 前端缺口（gaplist 第三批）：频率轴滚轮缩放、FFT 仪器化
-   （RBW/瀑布时间跨度）——文件在 spectrum_widget.py，星象仪/彩带会话
-   若要做手势线请认领，否则协议真值线下一轮接手
+7. ~~**[认领]** P2 前端缺口（gaplist 第三批）：频率轴滚轮缩放、FFT 仪器化
+   （RBW/瀑布时间跨度）~~ **已闭环（73104538 核查补钉）**：实现早已在位
+   （wheelEvent 频率轴/Ctrl 锚点缩放 P2-9、`_fft_info_label` RBW+瀑布
+   时长 P2-10），gaplist 未销是因 test_axis_zoom_fft_info 两条钉着被
+   推翻的「行数×定时器间隔」旧公式（12.8s vs 实测 1.75s）而长期红——
+   本轮测试改钉实测行率契约（未测到显「--」）后 16 passed 全绿。
 8. ~~[我] LRPT 图像段重组真录链~~ **已闭环（本批）**：真录图像出图
    （40-80s 38 包/13 行 + 全过境 49 包/17 行/551 块），结构真值与
    woven 约定裁决见 capability-map
