@@ -117,6 +117,20 @@
   多文件同进程时假 rtlsdr 被真 pyrtlsdr 抢线（单跑 2 passed），同巷道组合
   在 pristine HEAD worktree 复跑同样红（_disconnect_lane_pristine.log），
   属存量交叉污染另账待修，非本批引入。身份门 3 passed。落库 `a32b1ecc`。
+- **#50 playback.set_frequency 回放改频假成功（P2）**：无条件接受任何值
+  并更新 _freq，docstring 承诺的「频率为录制时记录值」标注从未写，
+  NaN/负值照单全收。修复保持既有契约（test_playback.py 钉着接受并更新
+  上报元数据）：非法值拒绝（bad_parameter）不污染；与录制值差 >1 Hz
+  （与 set_sample_rate 同容差）写 freq_reported_only 标注（文案双值：
+  录制真实值 + 上报值）；改回录制值只清自己的标注。error_catalog 新增
+  条目 + docs/error-catalog.md 镜像行同步。新测试
+  `tests/test_playback_freq_annotation.py` 9 条（7 红→全绿 + 2 阳性对照）；
+  反证两病灶复现（D:/mbdsdr/output/_probe_playback_freq_reverse.py）。
+  巷道 8 文件 **137 passed + 1 存量红**：catalog 守卫野码全在
+  recorder.py（already_exists）与 web_bridge_host.py（unknown_method 等
+  9 个，阶段C 桥接面），两文件本批未触碰，pristine HEAD worktree 复跑
+  同红（_wildcodes_pristine.log），另账待修。身份门 3 passed。
+  落库 `d8f4b0cf`。
 - **存量红另账销**：`test_decoder_capability_matrix` 文档漂移在
   pristine HEAD 复证属存量——`410eb096` 新增岁差外部真值 golden
   （celestial_ofdate_golden.json，Skyfield 1.54 逐元素对拍、SHA-256
@@ -165,15 +179,18 @@
   三处改走 Qt Signal 的 AutoConnection（同线程同步、跨线程排队回 GUI），
   不丢音频帧、不改调用契约。新测试
   `tests/test_demod_tap_thread_affinity.py`（5 条，真起非 GUI 线程取证）。
-- **仍未做（本线队列，按优先级）**：`playback.set_frequency` 回放改频、
-  `sat_passes(max_sats)` 按条数截取。详见
-  `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
+- **仍未做（本线队列，按优先级）**：`sat_passes(max_sats)` 按条数截取。
+  详见 `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
   （rtltcp 写频缓存 / RtlTcp 采样率吸附 / HackRF/USRP 初始化 /
   FileIQBackend 静默+wav/csv 断链 / NetworkIQBackend 接线+契约 /
-  disconnect 读数残留已由 #21/#22/#47/#48/#49 销账。）
-  另账存量红：test_backend_reconnect_stress 热插拔循环在多文件同进程时
+  disconnect 读数残留 / playback 改频标注
+  已由 #21/#22/#47/#48/#49/#50 销账。）
+  另账存量红：① test_backend_reconnect_stress 热插拔循环在多文件同进程时
   假 rtlsdr 被真 pyrtlsdr 抢线（单跑绿；pristine HEAD 同组合复红，
-  证据 D:/mbdsdr/output/_disconnect_lane_pristine.log）。
+  证据 D:/mbdsdr/output/_disconnect_lane_pristine.log）；
+  ② test_error_catalog_guard::test_no_wild_codes——recorder.py
+  already_exists + web_bridge_host.py 九个码未登记（阶段C 桥接面），
+  pristine HEAD 复红（_wildcodes_pristine.log）。
   ⚠ TLE 过期门仍属产品口径待决，别擅自上硬门。
 
 ### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
