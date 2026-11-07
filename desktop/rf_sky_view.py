@@ -3157,7 +3157,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if c:
                     zh = c.get("zh", "")
                 self._search_results.append({
-                    "kind": "star", "kind_label": "Star",
+                    "kind": "star", "kind_label": "恒星",
                     "label": zh if zh else cs.name,
                     "sub": (f"Star · {cs.name} · {cs.con}" if zh
                             else f"Star · {cs.con}"),
@@ -3177,7 +3177,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 zh = c.get("zh", "")
             if text in st.name.lower() or (zh and text in zh.lower()):
                 self._search_results.append({
-                    "kind": "star", "kind_label": "Star",
+                    "kind": "star", "kind_label": "恒星",
                     "label": zh if zh else st.name,
                     "sub": f"Star · {st.name}" if zh else "Star",
                     "ra": st.ra_deg, "dec": st.dec_deg, "vmag": st.vmag,
@@ -5708,16 +5708,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return format_utc_time(_jtime.jd_to_unix(jd))
 
         kv = [
-            ("Magnitude (mag)", "—" if info.get("mag") is None
+            ("星等 (mag)", "—" if info.get("mag") is None
              else format_magnitude(info["mag"])),
-            ("Distance (km)", format_distance_km(info.get("dist_km", 0.0))),
-            ("Ra/Dec (hms / °′″)",
+            ("距离 (km)", format_distance_km(info.get("dist_km", 0.0))),
+            ("赤经/赤纬",
              f"{format_hms_ra(info['ra'])}  {format_dms_deg(info['dec'])}"
              if info.get("ra") is not None else "—"),
-            ("Az/Alt 几何 (Az 0°=N)",
+            ("方位/高度（几何，0°=北）",
              f"{format_azimuth(obj.azimuth_deg)}  "
              f"{format_angle_deg(obj.elevation_deg)}"),
-            ("Rise/Set (UTC)", f"Rise {_hm(rise)}   Set {_hm(sset)}"),
+            ("升起/落下 (UTC)", f"升 {_hm(rise)}   落 {_hm(sset)}"),
         ]
         # 点星即听：该把收音机拧到哪（无则缺省行不画）
         dl_mhz = info.get("downlink_mhz")
@@ -5740,7 +5740,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         key_col_w = max(fm.horizontalAdvance(k) for k, _ in kv)
 
         head = [title, kind_label,
-                "Also known as: " + " · ".join(info.get("aliases", [obj.name]))
+                "又名：" + " · ".join(info.get("aliases", [obj.name]))
                 + (f" · COSPAR {info['cospar']}" if info.get("cospar") else "")]
         widths = [fm.horizontalAdvance(t) for t in head]
         widths += [key_col_w + 10 + fm.horizontalAdvance(v) for _, v in kv]
@@ -6368,7 +6368,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 label = name if name else f"HYG {body.get('hyg_id')}"
                 c = _stars.star_culture(name) if name else None
                 info["title"] = c["zh"] if c else label
-                info["kind_label"] = "Star"
+                info["kind_label"] = "恒星"
                 info["aliases"] = [name] if name else []
                 info["mag"] = float(body["vmag"])
                 info["ra"] = float(body["ra_deg"])
@@ -6397,7 +6397,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 if star is not None:
                     c = _stars.star_culture(name)
                     info["title"] = c["zh"] if c else name
-                    info["kind_label"] = "Star"
+                    info["kind_label"] = "恒星"
                     info["aliases"] = [name]
                     info["mag"] = float(star.vmag)
                     info["ra"] = float(star.ra_deg)
@@ -6460,7 +6460,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # solar_system.get_sun_position；缺历表如实留占位。
             s = self._sun or {}
             info["title"] = "太阳"
-            info["kind_label"] = "Star"
+            info["kind_label"] = "恒星"
             info["aliases"] = ["Sol"]
             info["mag"] = -26.74          # 标准视星等常数（非历表计算）
             ra_s = s.get("ra_deg")
@@ -6539,16 +6539,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if rise is None and sset is None:
             vis = "24h 内无升降 (拱极或不可见)"
         else:
-            vis = f"Rise {_hm(rise)}   Set {_hm(sset)}"
+            vis = f"升 {_hm(rise)}   落 {_hm(sset)}"
         kv = [
-            ("Magnitude (mag)", "—" if info.get("mag") is None
+            ("星等 (mag)", "—" if info.get("mag") is None
              else format_magnitude(info["mag"])),
-            ("Distance", str(info.get("dist_text") or "—")),
-            ("Ra/Dec (hms / °′″)",
+            ("距离", str(info.get("dist_text") or "—")),
+            ("赤经/赤纬",
              f"{format_hms_ra(info['ra'])}  {format_dms_deg(info['dec'])}"
              if info.get("ra") is not None else "—"),
-            ("Az/Alt (视/几何, Az 0°=N)", "—"),   # 实时值在绘制循环尾部刷新
-            ("Rise/Set (UTC)" + (f" · {info['rise_set_frame']}"
+            ("方位/高度（视/几何，0°=北）", "—"),   # 实时值在绘制循环尾部刷新
+            ("升起/落下 (UTC)" + (f" · {info['rise_set_frame']}"
                                  if info.get("rise_set_frame") else ""), vis),
         ]
 
@@ -6560,7 +6560,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         key_col_w = max(fm.horizontalAdvance(k) for k, _ in kv)
 
         head = [str(info.get("title") or ""), str(info.get("kind_label") or ""),
-                "Also known as: " + " · ".join(info.get("aliases") or ["—"])]
+                "又名：" + " · ".join(info.get("aliases") or ["—"])]
         widths = [fm.horizontalAdvance(t) for t in head]
         widths += [key_col_w + 10 + fm.horizontalAdvance(v) for _, v in kv]
         raw_desc = str(info.get("desc") or "")
@@ -6617,7 +6617,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         key_pen = QColor(_t.COLORS["gray_300"])
         val_pen = QColor(_t.COLORS["text_primary"])
         for idx, (k, v) in enumerate(kv):
-            if k.startswith("Az/Alt (视/几何"):
+            # 键名中文化后判据必须跟着改：原来写死英文前缀 "Az/Alt (视/几何"，
+            # 改名后这一行永远显示 "—"，点了星却看不到它此刻在天上哪儿。
+            if k.startswith(("方位/高度", "Az/Alt")):
                 # 实时坐标: 与行星标记同一坐标链现算；两个口径同时给出：
                 # 绘制位置用视高度，几何高度保留给指向/对照。
                 v = "—"
