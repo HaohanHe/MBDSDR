@@ -105,6 +105,18 @@
   车道 10 文件 **118 passed + 3 honest skip**
   （D:/mbdsdr/output/_network_iq_lane.log）；身份门 3 passed。
   落库 `55f591b9`（钩子全链干净）。
+- **#49 disconnect() 读数残留（P2）**：基类 disconnect 只翻
+  connected/link_state，rssi_db/snr_db/uptime/samples_read 保留上次会话值
+  （断连后 UI 像还在工作）；_samples_read 不清零，重连计数叠加。现在基类
+  统一重置会话读数（rssi/snr 归 None=「从未采到」、uptime/samples_read/
+  _samples_read 归零、last_data_age 归 None），8 个子类 disconnect 全走
+  super() 一处生效。新测试 `tests/test_disconnect_readouts.py` 6 条
+  （5 红→全绿 + 1 阳性对照；FileIQ 真实读盘 + NetworkIQ 回环）；反证两
+  病灶复现（D:/mbdsdr/output/_probe_disconnect_reverse.py，自 e388e5ee）。
+  爆炸半径 23 文件 **256 passed + 2 skipped + 1 存量红**：热插拔压力测试
+  多文件同进程时假 rtlsdr 被真 pyrtlsdr 抢线（单跑 2 passed），同巷道组合
+  在 pristine HEAD worktree 复跑同样红（_disconnect_lane_pristine.log），
+  属存量交叉污染另账待修，非本批引入。身份门 3 passed。落库 `a32b1ecc`。
 - **存量红另账销**：`test_decoder_capability_matrix` 文档漂移在
   pristine HEAD 复证属存量——`410eb096` 新增岁差外部真值 golden
   （celestial_ofdate_golden.json，Skyfield 1.54 逐元素对拍、SHA-256
@@ -153,13 +165,15 @@
   三处改走 Qt Signal 的 AutoConnection（同线程同步、跨线程排队回 GUI），
   不丢音频帧、不改调用契约。新测试
   `tests/test_demod_tap_thread_affinity.py`（5 条，真起非 GUI 线程取证）。
-- **仍未做（本线队列，按优先级）**：断连读数残留、
-  `playback.set_frequency` 回放改频、`sat_passes(max_sats)`
-  按条数截取。详见
+- **仍未做（本线队列，按优先级）**：`playback.set_frequency` 回放改频、
+  `sat_passes(max_sats)` 按条数截取。详见
   `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
   （rtltcp 写频缓存 / RtlTcp 采样率吸附 / HackRF/USRP 初始化 /
-  FileIQBackend 静默+wav/csv 断链 / NetworkIQBackend 接线+契约
-  已由 #21/#22/#47/#48 销账。）
+  FileIQBackend 静默+wav/csv 断链 / NetworkIQBackend 接线+契约 /
+  disconnect 读数残留已由 #21/#22/#47/#48/#49 销账。）
+  另账存量红：test_backend_reconnect_stress 热插拔循环在多文件同进程时
+  假 rtlsdr 被真 pyrtlsdr 抢线（单跑绿；pristine HEAD 同组合复红，
+  证据 D:/mbdsdr/output/_disconnect_lane_pristine.log）。
   ⚠ TLE 过期门仍属产品口径待决，别擅自上硬门。
 
 ### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
