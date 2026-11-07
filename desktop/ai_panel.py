@@ -477,11 +477,19 @@ class AIPanel(QWidget):
         )
 
         if not final_api_key:
-            # 没有 API Key：不初始化 agent，避免后续调用失败
-            self.agent = None
+            # 没有 API Key 也装载 Agent 内核（用户 2026-11-08：「作为 Agent」
+            # 「常驻化」「人工智能编排 / Hooks 有没有」）。
+            # 工具注册表、Hooks、编排器、插件系统都是本进程的能力，不该因为
+            # "没配模型" 就整体消失 —— 模型只是 Agent 的一个部件。缺模型时
+            # 对话如实降级，能力位与常驻状态照旧可见、可查、可被点用。
+            config = AgentConfig(api_key="", base_url=final_base_url,
+                                 model=final_model)
+            self.agent = self._create_agent(config)
+            self._apply_pending_mcp_tools()
             self._update_ai_status()
             self._add_system_message(
-                "未配置 API Key，AI 对话功能不可用。请点击右上角「配置」填入 API Key。"
+                "AI 内核已常驻（工具 / Hooks / 编排可用）；未配置 API Key，"
+                "模型对话暂不可用，点「配置」填入即可。"
             )
             return
 

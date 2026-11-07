@@ -246,6 +246,32 @@ class AdsbMapPanel(QWidget):
         # 压到 40 后同一列只需 240+40+6+8=294，300px 内可完整排下。
         self.table.setMinimumWidth(40)
         self.table.setMaximumWidth(320)
+        # 画布用 tokens 的深色 card_1，表格却用 Qt 默认白底 —— 中栏因此
+        # 一半黑一半白（用户原话「你是黑白无常啊」）。统一到同一套色：
+        # 表格、表头、单元格全部跟随画布底色，浅色主题下也不再劈成两半。
+        _bg = _t.COLORS["card_1"]
+        _fg = _t.COLORS["gray_100"]
+        _line = _t.COLORS["gray_400"]
+        self.table.setStyleSheet(
+            "QTableWidget { background-color: %s; color: %s; border: none;"
+            " gridline-color: %s; }"
+            "QTableWidget::viewport { background-color: %s; }"
+            "QTableWidget::item { background-color: %s; color: %s; }"
+            "QHeaderView::section { background-color: %s; color: %s;"
+            " border: none; border-bottom: 1px solid %s; padding: 4px; }"
+            % (_bg, _fg, _line, _bg, _bg, _fg, _bg, _fg, _line))
+        # QSS 对 QTableWidget 的底色常被 viewport 的调色板盖回去（只改 QSS
+        # 时中栏右半仍是白板）。这里把 viewport / 表格自身的 Base+Window
+        # 一起钉到画布底色，浅色主题下也不会再劈成一黑一白。
+        from PySide6.QtGui import QPalette
+        from PySide6.QtGui import QColor as _QC
+        pal = self.table.viewport().palette()
+        pal.setColor(QPalette.ColorRole.Base, _QC(_bg))
+        pal.setColor(QPalette.ColorRole.Window, _QC(_bg))
+        pal.setColor(QPalette.ColorRole.Text, _QC(_fg))
+        self.table.viewport().setPalette(pal)
+        self.table.setPalette(pal)
+        self.table.viewport().setAutoFillBackground(True)
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)

@@ -333,6 +333,11 @@ class ControlPanel(QWidget):
         # 大字体频率显示：9 位数字网格按位可编辑（滚轮/点上下半 ±1，右键清零），
         # 未连接时显占位，绝不显示 98.500 这类假频率
         self.freq_display = FreqDisplay()
+        # 用户原话：「右边那个频率点点圈点点干啥的？我没明白」——
+        # 这是按位可编辑的频率显示器，不说清就只像一排灰点。
+        self.freq_display.setToolTip(
+            "当前收听频率。每一位数字都能单独点/滚轮加减，右键清零；"
+            "改完点「调谐」才真正发给设备，没连接时不显示假频率。")
         self.freq_display.set_bounds(int(FREQ_MIN_HZ), int(FREQ_MAX_HZ))
         self.freq_display.frequency_edited.connect(self._on_digit_stepped)
         freq_layout.addWidget(self.freq_display)
@@ -385,6 +390,9 @@ class ControlPanel(QWidget):
         # 默认选中 10kHz
         _def_step = self.step_combo.findData(10_000.0)
         self.step_combo.setCurrentIndex(_def_step if _def_step >= 0 else 4)
+        self.step_combo.setToolTip(
+            "每次加减频率走多大一步（这里选的是 10 kHz）；"
+            "旁边的 − / + 就按这个步长微调，不直接改设备。")
         self.step_combo.currentIndexChanged.connect(self._on_step_combo_changed)
         step_row.addWidget(self.step_combo, 1)
 

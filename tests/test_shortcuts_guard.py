@@ -277,10 +277,11 @@ def test_top_bar_tab_order_covers_all_interactive_controls(qtapp,
 
     import main_window as mw
 
-    names = ("toolbar_mode_combo", "theme_combo", "lang_combo",
-             "layout_combo", "layout_save_btn", "layout_delete_btn",
-             "new_vfo_btn", "cycle_vfo_btn", "toolbar_volume",
-             "toolbar_mute_btn", "record_btn", "replay_btn")
+    # 主题 / 界面语言 / 布局预设 + 保存/删除已归「设置 → 显示与主题」
+    # （用户 2026-11-08 要求），不再占主界面顶栏，故不在这条焦点链里。
+    names = ("toolbar_mode_combo", "new_vfo_btn", "cycle_vfo_btn",
+             "toolbar_volume", "toolbar_mute_btn", "record_btn",
+             "replay_btn")
     w = mw.MainWindow()
     try:
         expected = [getattr(w, n) for n in names]
@@ -296,6 +297,12 @@ def test_top_bar_tab_order_covers_all_interactive_controls(qtapp,
         assert chain[:len(names)] == list(names), (
             "顶栏 Tab 顺序断了：期望 "
             f"{list(names)}，实际 {chain[:len(names)]}")
+        # 反向锁：搬进设置页的那五件不许再偷偷回到工具栏。
+        from PySide6.QtWidgets import QToolBar
+        for n in ("theme_combo", "lang_combo", "layout_combo",
+                  "layout_save_btn", "layout_delete_btn"):
+            assert not isinstance(getattr(w, n).parent(), QToolBar), (
+                f"{n} 又回到主界面工具栏了；外观配置应留在设置页")
     finally:
         try:
             w._teardown_connection()

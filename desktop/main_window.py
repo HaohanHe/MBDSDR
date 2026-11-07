@@ -1372,51 +1372,41 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # 主题切换
-        toolbar.addWidget(QLabel(self.tr(" 主题: ")))
+        # ---- 主题 / 界面语言 / 布局预设：归「设置 → 显示与主题」----
+        # 用户 2026-11-08：「主题、语言、布局是不是也可以放到设置里面？」
+        # 不是收进「详细」抽屉（那还是主界面第二套入口），是彻底归位：
+        # 主界面不再创建这些下拉。控件对象保留（信号 / 快捷键 / 布局预设
+        # 逻辑 / 契约测试都按属性名取），由 SettingsPanel 在自己的
+        # 「显示与主题」页里接走，成为唯一入口。
         self.theme_combo = QComboBox()
         for name, theme in THEMES.items():
             self.theme_combo.addItem(theme.display_name, name)
         self.theme_combo.setMinimumHeight(28)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_combo_changed)
-        toolbar.addWidget(self.theme_combo)
 
-        # UI 语言（i18n）：语言自称不翻译；持久化 ui_language，诚实提示重启生效
-        # （翻译器只在启动时装载——与 C++ 桌面端同一口径，不做假实时切换）。
-        toolbar.addWidget(QLabel(self.tr(" 语言: ")))
         self.lang_combo = QComboBox()
         for tag in l10n.SUPPORTED_UI_LANGUAGES:
             self.lang_combo.addItem(l10n.LANGUAGE_SELF_NAMES[tag], tag)
         self.lang_combo.setMinimumHeight(28)
         self.lang_combo.setToolTip(self.tr("更改语言后重启应用生效"))
         self.lang_combo.currentIndexChanged.connect(self._on_lang_combo_changed)
-        toolbar.addWidget(self.lang_combo)
 
-        toolbar.addSeparator()
-
-        # 布局预设切换（动态：内置 专注/分析/网格 + 用户自定义，启动时填充）
-        toolbar.addWidget(QLabel(" 布局: "))
         self.layout_combo = QComboBox()
         self.layout_combo.setMinimumHeight(28)
         self.layout_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.layout_combo.setToolTip("切换布局预设（可自由拖动，自动持久化）")
         self.layout_combo.currentIndexChanged.connect(self._on_layout_preset_changed)
-        toolbar.addWidget(self.layout_combo)
 
-        # 保存当前布局为自定义预设
         self.layout_save_btn = QPushButton("保存")
         self.layout_save_btn.setMinimumHeight(28)
         self.layout_save_btn.setShortcut(QKeySequence(_key("layout.save")))
         self.layout_save_btn.setToolTip("把当前布局（页签顺序/三栏比例/面板可见性）存为自定义预设")
         self.layout_save_btn.clicked.connect(self._on_save_layout)
-        toolbar.addWidget(self.layout_save_btn)
 
-        # 删除当前用户预设（内置预设置灰）
         self.layout_delete_btn = QPushButton("删除")
         self.layout_delete_btn.setMinimumHeight(28)
         self.layout_delete_btn.setToolTip("删除当前选中的自定义布局（内置布局不可删）")
         self.layout_delete_btn.clicked.connect(self._on_delete_layout)
-        toolbar.addWidget(self.layout_delete_btn)
 
         toolbar.addSeparator()
 
@@ -1746,8 +1736,7 @@ class MainWindow(QMainWindow):
         # ---- 设置 → 主界面的即时通路（页面极简 / 呼号 / 自由窗口 / GNSS 接线）----
         # 订阅放在 central widget 建成之后：此时 sky_view、顶栏、底坞都在，
         # 回调里可以安全地推值，不必等重启或等用户手动刷新。
-        self._float_windows: Dict[int, object] = {}
-        self._float_placeholders: Dict[int, object] = {}
+        self._float_windows: Dict[str, dict] = {}
         self._focus_mode = True
         self._free_float_enabled = True
         self.settings.add_change_listener(self._on_setting_changed)
@@ -1755,6 +1744,9 @@ class MainWindow(QMainWindow):
         self.set_free_float_enabled(
             bool(self.settings.get("free_float_panels", True)))
         self._apply_callsign(str(self.settings.get("callsign", "") or ""))
+        # 常驻能力矩阵（原型 #capDrawer）：Agent 内核的能力位一直看得见，
+        # 默认折叠成一条标题，不占频谱/天空的地方。
+        self._build_capability_drawer()
 
         # ---- 内核能力面板：扫频 / 自动调制识别 / 书签 / 服务设置（右栏页签）----
         self.scanner_panel = None
@@ -2665,7 +2657,8 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(18, 0, 12, 0)
         lay.setSpacing(8)
         self.cmd_input = QLineEdit()
-        self.cmd_input.setPlaceholderText("问 AI… 频率 / 模式 / 解调 / 搜索")
+        self.cmd_input.setPlaceholderText(
+            "问我任何事：这是什么信号？现在能收到什么？那颗星叫什么？")
         self.cmd_input.returnPressed.connect(self._on_cmd_submit)
         lay.addWidget(self.cmd_input, stretch=1)
         self.cmd_mic_btn = QPushButton("🎤")
@@ -2853,7 +2846,8 @@ class MainWindow(QMainWindow):
         self._float_btn = QToolButton()
         self._float_btn.setObjectName("topBarAction")
         self._float_btn.setText("⧉")
-        self._float_btn.setToolTip("自由窗口：把左栏 / 右栏弹出成可拖动浮层")
+        self._float_btn.setToolTip(
+            "自由窗口：任意面板拖成独立窗口，可多开、可折叠、可归位")
         self._float_btn.clicked.connect(self._show_float_menu)
         lay.addWidget(self._float_btn)
 
@@ -3011,7 +3005,8 @@ class MainWindow(QMainWindow):
         # 星象仪形态里早就收了，专注页面同样让位（A 键 / 滚轮仍在）。
         sky_btn = getattr(self, "_all_sky_btn", None)
         if sky_btn is not None:
-            sky_btn.setVisible(not on)
+            # 不再出现：视野信息已挪到底部角标，按钮只留作状态同步的对象。
+            sky_btn.hide()
         btn = getattr(self, "_focus_btn", None)
         if btn is not None:
             # 按钮语义是「详细」：checked = 展开 = 非专注
@@ -3060,6 +3055,77 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    # ---------------------------------------------------------------- 常驻能力矩阵
+    def _build_capability_drawer(self) -> None:
+        """对齐原型 ``#capDrawer``：能力位从真实事实源生成，常驻可折叠。"""
+        # 内核常驻：无 API Key 时也把工具注册表 / Hooks / 编排器装载起来，
+        # 否则能力矩阵只能对着一个 None 说"没有"（实测离线构造可得 496 个
+        # 真实工具）。模型只是 Agent 的一个部件，不是 Agent 本身。
+        self._ensure_agent_kernel()
+        try:
+            from capability_drawer import CapabilityDrawer
+        except ImportError:
+            self._cap_panel = None
+            self._cap_body = None
+            return
+        host = self.centralWidget() or self
+        body = CapabilityDrawer(host=self)
+        body.capability_activated.connect(self._on_capability_activated)
+        panel = FloatingPanel(
+            key="capability_matrix",
+            title="◧ 能力矩阵 · 事实源自动生成",
+            payload=body, host=host,
+            on_return=self._hide_capability_drawer)
+        panel.resize(340, 240)
+        panel.move(18, max(24, host.height() - 300))
+        if not getattr(panel, "_collapsed", False):
+            panel.toggle_collapse()      # 默认只留一条标题
+        self._cap_panel = panel
+        self._cap_body = body
+        # init_agent 可能晚于本调用（无 API Key 也会装载内核），
+        # 延迟刷一次，保证摆出来的是真实工具域而不是启动瞬间的空态。
+        QTimer.singleShot(1500, self._refresh_capability_drawer)
+
+    def _ensure_agent_kernel(self) -> None:
+        """确保 AI 内核在进程里真实存在（不依赖是否配置了 API Key）。"""
+        panel = getattr(self, "ai_panel", None)
+        if panel is None or getattr(panel, "agent", None) is not None:
+            return
+        try:
+            panel.init_agent()
+        except Exception:
+            pass
+
+    def _refresh_capability_drawer(self) -> None:
+        body = getattr(self, "_cap_body", None)
+        if body is not None:
+            try:
+                body.refresh()
+            except Exception:
+                pass
+
+    def _show_capability_drawer(self) -> None:
+        panel = getattr(self, "_cap_panel", None)
+        if panel is None:
+            return
+        self._refresh_capability_drawer()
+        panel.show()
+        panel.raise_()
+
+    def _hide_capability_drawer(self) -> None:
+        panel = getattr(self, "_cap_panel", None)
+        if panel is not None:
+            panel.save_geometry()
+            panel.hide()
+
+    def _on_capability_activated(self, name: str) -> None:
+        """点能力位只把名字送进 AI 输入栏，不预制流程、不自动执行。"""
+        ci = getattr(self, "cmd_input", None)
+        if ci is not None:
+            ci.setText("帮我用「%s」能力：" % str(name))
+            ci.setFocus()
+        self._show_capability_drawer()
+
     # ---------------------------------------------------------------- 自由窗口
     def set_free_float_enabled(self, on: bool) -> None:
         """自由窗口总开关：关掉时所有弹出面板归位，回到固定三栏。"""
@@ -3070,63 +3136,109 @@ class MainWindow(QMainWindow):
         if not on:
             self._return_all_panes()
 
+    def _float_key(self, which: str, tabs, index: int) -> str:
+        """按页签的稳定 id（tabData）寻址，切语言/重建页签也不会串位。"""
+        try:
+            data = tabs.tabBar().tabData(index)
+        except Exception:
+            data = None
+        return "%s:%s" % (which, data if data else index)
+
     def _show_float_menu(self) -> None:
+        """用户想看哪块就弹出哪块，能同时开好几块，位置各自记住。
+
+        用户 2026-11-08：「像真实桌面，电脑可以放左边也可以挪右边、
+        挪上面，其他放别的东西」「用户想看啥就让他看啥，别老给他决定」。
+        所以粒度从「整栏」降到「单个页签」，不再替用户预设能开几个。
+        """
         menu = QMenu(self)
-        for idx, title in ((0, "左栏 · 天空/频谱"), (2, "右栏 · 控制台")):
-            if idx in self._float_windows:
-                act = menu.addAction("归位 " + title)
-                act.triggered.connect(
-                    lambda _c=False, i=idx: self._return_pane(i))
-            else:
-                act = menu.addAction("弹出 " + title)
-                act.triggered.connect(
-                    lambda _c=False, i=idx: self._pop_out_pane(i))
+        for which, tabs, label in (
+                ("left", getattr(self, "left_tab", None), "左栏 · 天空/频谱"),
+                ("right", getattr(self, "right_tab", None), "右栏 · 控制台")):
+            if tabs is None:
+                continue
+            sub = menu.addMenu(label)
+            for i in range(tabs.count()):
+                title = tabs.tabText(i)
+                key = self._float_key(which, tabs, i)
+                if key in self._float_windows:
+                    act = sub.addAction("归位  " + title)
+                    act.triggered.connect(
+                        lambda _c=False, k=key: self._return_panel(k))
+                else:
+                    act = sub.addAction("弹出  " + title)
+                    act.triggered.connect(
+                        lambda _c=False, w=which, n=i: self._pop_out_tab(w, n))
         menu.addSeparator()
-        menu.addAction("全部归位", self._return_all_panes)
+        menu.addAction("全部归位", self._return_all_panels)
         menu.exec(self._float_btn.mapToGlobal(
             QPoint(0, self._float_btn.height())))
 
-    def _pop_out_pane(self, index: int) -> None:
-        """把三栏中的一栏整体弹出成可拖动浮层，原位留占位保持 3 栏契约。"""
-        sp = getattr(self, "_main_splitter", None)
-        if sp is None or index in self._float_windows:
+    def _pop_out_tab(self, which: str, index: int) -> None:
+        """把某一个页签整体拖成独立自由窗口，原位留占位保住页签序号。"""
+        tabs = getattr(self, "left_tab", None) if which == "left" \
+            else getattr(self, "right_tab", None)
+        if tabs is None or index < 0 or index >= tabs.count():
             return
-        payload = sp.widget(index)
+        key = self._float_key(which, tabs, index)
+        if key in self._float_windows:
+            return
+        payload = tabs.widget(index)
         if payload is None:
             return
+        text = tabs.tabText(index)
+        try:
+            data = tabs.tabBar().tabData(index)
+        except Exception:
+            data = None
         placeholder = QWidget()
-        placeholder.setObjectName("panePlaceholder%d" % index)
+        placeholder.setObjectName("tabPlaceholder")
         placeholder.setMinimumWidth(0)
-        sp.replaceWidget(index, placeholder)
-        placeholder.hide()
+        tabs.removeTab(index)                 # removeTab 不删 widget，只脱管
+        tabs.insertTab(index, placeholder, text)
+        try:
+            tabs.tabBar().setTabData(index, data)
+        except Exception:
+            pass
         host = self.centralWidget() or self
-        title = "左栏 · 天空/频谱" if index == 0 else "右栏 · 控制台"
         panel = FloatingPanel(
-            key="pane%d" % index, title=title, payload=payload, host=host,
-            on_return=lambda i=index: self._return_pane(i))
-        self._float_windows[index] = panel
-        self._float_placeholders[index] = placeholder
+            key=key, title=text, payload=payload, host=host,
+            on_return=lambda k=key: self._return_panel(k))
+        # 多开时级联错开，别一叠全压在同一个位置
+        n = len(self._float_windows)
+        panel.move(max(24, host.width() - panel.width() - 48 - n * 28),
+                   min(max(24, 70 + n * 28), max(24, host.height() - 220)))
+        panel.save_geometry()
+        self._float_windows[key] = dict(
+            panel=panel, tabs=tabs, index=index, placeholder=placeholder,
+            text=text, data=data)
 
-    def _return_pane(self, index: int) -> None:
-        panel = self._float_windows.pop(index, None)
-        if panel is None:
+    def _return_panel(self, key: str) -> None:
+        info = self._float_windows.pop(key, None)
+        if info is None:
             return
+        panel = info["panel"]
         payload = panel.take_payload()
-        sp = getattr(self, "_main_splitter", None)
-        ph = self._float_placeholders.pop(index, None)
-        if sp is not None and ph is not None:
-            sp.replaceWidget(index, payload)
-            ph.setParent(None)
-            ph.deleteLater()
-        elif sp is not None:
-            sp.insertWidget(index, payload)
-        payload.show()
+        tabs, idx = info["tabs"], info["index"]
+        try:
+            tabs.removeTab(idx)
+            tabs.insertTab(idx, payload, info["text"])
+            tabs.tabBar().setTabData(idx, info["data"])
+            tabs.setCurrentIndex(idx)
+        except RuntimeError:
+            pass
+        ph = info["placeholder"]
+        ph.setParent(None)
+        ph.hide()
+        panel.hide()
         panel.setParent(None)
-        panel.deleteLater()
+        # 不用 deleteLater()：on_return 闭包还持有 panel 的 Python 引用，
+        # 强删会让 C++ QVBoxLayout 比 Python 包装先走，退出时抛
+        # "Internal C++ object already deleted"。交给 GC 按引用计数收。
 
     def _return_all_panes(self) -> None:
-        for idx in sorted(tuple(self._float_windows)):
-            self._return_pane(idx)
+        for key in list(self._float_windows):
+            self._return_panel(key)
 
     def _vsep(self) -> QLabel:
         sep = QLabel("|")
@@ -8874,10 +8986,10 @@ class MainWindow(QMainWindow):
         sv = getattr(self, "sky_view", None)
         if sv is None or not hasattr(sv, "set_all_sky_mode"):
             return
-        btn = QPushButton("🌐 全天 160°", sv)
+        btn = QPushButton("看整片天", sv)
         btn.setCheckable(True)
         btn.setToolTip(
-            "全天模式（立体投影，视场 160°）；视图内按 A 同效，Esc 先退全天")
+            "把镜头拉远，一次看到整片天空（键盘 A；按 Esc 退回）")
         t = tokens()
         btn.setStyleSheet(
             "QPushButton { background: " + t.COLORS["card_2"] + "; color: "
@@ -8896,6 +9008,11 @@ class MainWindow(QMainWindow):
             sv.addAction(act)
         self._position_all_sky_btn()
         self._sync_all_sky_ui(bool(getattr(sv, "all_sky_active", False)))
+        # 主界面不再常驻这颗按钮：它原本浮在左下信息卡上方，把「星空」
+        # 和「天色」两行直接盖掉（用户原话「那一行字儿都被切掉了」）。
+        # 视野状态改由天空底部角标用中文说明，A 键 / 菜单动作照旧可用。
+        # 对象保留，供设置/详细模式与契约测试按属性名取用。
+        btn.hide()
 
     def _position_all_sky_btn(self) -> None:
         """贴在那排 sky 按钮正上方（左下角），随天空视图尺寸变化。"""
@@ -8918,8 +9035,7 @@ class MainWindow(QMainWindow):
         if btn is not None:
             btn.blockSignals(True)
             btn.setChecked(bool(active))
-            btn.setText("🌐 全天 160°（已进入）" if active
-                        else "🌐 全天 160°")
+            btn.setText("正在看整片天" if active else "看整片天")
             btn.blockSignals(False)
             self._position_all_sky_btn()
         act = getattr(self, "_all_sky_action", None)
@@ -10524,6 +10640,18 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        # 先收自由浮层：它们不是布局子控件，晚收会在窗口析构时撞上
+        # 已删除的 C++ layout。
+        try:
+            self._return_all_panes()
+        except Exception:
+            pass
+        cap = getattr(self, "_cap_panel", None)
+        if cap is not None:
+            try:
+                cap.hide()
+            except RuntimeError:
+                pass
         """关闭时断开连接并保存配置。"""
         # 发射中关窗必须先确认：窗口一关就断波，误触即中止别人的通联。
         if self._tx_session is not None \

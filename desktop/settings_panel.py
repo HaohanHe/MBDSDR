@@ -601,7 +601,7 @@ class SettingsPanel(QWidget):
                 continue
             items = items_for_group(group)
             if items:
-                self.tabs.addTab(self._build_group_page(items), group)
+                self.tabs.addTab(self._build_group_page(items, group), group)
         root.addWidget(self.tabs, 1)
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
@@ -613,7 +613,7 @@ class SettingsPanel(QWidget):
         self.btn_reset_all.clicked.connect(lambda: self.reset_all(confirm=True))
         root.addWidget(self.btn_reset_all)
 
-    def _build_group_page(self, items) -> QScrollArea:
+    def _build_group_page(self, items, group: str = "") -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -623,9 +623,53 @@ class SettingsPanel(QWidget):
         lay.setSpacing(8)
         for item in items:
             lay.addWidget(self._build_row(item))
+        if group == "显示与主题":
+            extra = self._build_appearance_box()
+            if extra is not None:
+                lay.addWidget(extra)
         lay.addStretch(1)
         scroll.setWidget(inner)
         return scroll
+
+    def _build_appearance_box(self):
+        """把主窗口的主题/语言/布局控件接进设置页（唯一入口）。
+
+        用户 2026-11-08：「主题、语言、布局是不是也可以放到设置里面？」
+        这些是「改一次就不管」的外观配置，不该在主界面顶栏常驻。
+        控件对象身份不变（信号、快捷键、布局预设逻辑、契约测试按属性名
+        取的都是同一批对象），这里只换 parent，不复制第二套状态。
+        """
+        h = self._host
+        names = ("theme_combo", "lang_combo", "layout_combo",
+                 "layout_save_btn", "layout_delete_btn")
+        if h is None or not all(hasattr(h, n) for n in names):
+            return None
+        box = QGroupBox("外观与布局（原主界面顶栏）")
+        form = QFormLayout(box)
+        form.setContentsMargins(10, 14, 10, 10)
+        form.setSpacing(8)
+        note = QLabel("改一次就不管的配置放这里；主界面只留频谱和天空。")
+        note.setWordWrap(True)
+        note.setObjectName("hintLabel")
+        form.addRow(note)
+        form.addRow("主题", h.theme_combo)
+        form.addRow("界面语言", h.lang_combo)
+        form.addRow("布局预设", h.layout_combo)
+        row = QWidget(box)
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(6)
+        h.layout_save_btn.setParent(row)
+        h.layout_delete_btn.setParent(row)
+        hl.addWidget(h.layout_save_btn)
+        hl.addWidget(h.layout_delete_btn)
+        hl.addStretch(1)
+        form.addRow("自定义布局", row)
+        hint = QLabel("语言切换需重启；布局预设记录页签顺序、三栏比例与面板显隐。")
+        hint.setWordWrap(True)
+        hint.setObjectName("hintLabel")
+        form.addRow(hint)
+        return box
 
     def _build_row(self, item) -> QGroupBox:
         box = QGroupBox(item.label)

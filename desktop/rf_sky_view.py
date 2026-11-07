@@ -6828,7 +6828,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         phase = (sky_phase_word(self._display_alt_deg(sun_alt))
                  if sun_alt is not None else "—")
         rows = (("位置", place), ("星空", stars), ("天色", phase))
-        hint = "拖动看天 · 滚轮缩放 · 点星星看详情"
 
         f_big = QFont(self._font)
         f_big.setPointSize(15)
@@ -6840,13 +6839,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         for k, v in rows:
             text_w = max(text_w,
                          fm_small.horizontalAdvance(f"{k}  {v}") + 14)
-        text_w = max(text_w, fm_small.horizontalAdvance(hint))
         card_w = min(max(196.0, float(text_w) + 30.0),
                      max(120.0, float(self.width()) - 24.0))
         row_h = 18.0
-        # 多给一行操作提示：星象仪是"不用学"的界面，第一次打开的人不知道
-        # 能拖、能缩、能点星——工具该自己教人，不该让人先读说明书。
-        card_h = 26.0 + row_h * len(rows) + 8.0 + row_h
+        # 操作提示改放画面底边的角标（_draw_bottom_chips），不占信息卡：
+        # 地平线以下那片黑色正好用来承载"能干什么"，卡片也不再被压。
+        card_h = 26.0 + row_h * len(rows) + 8.0
         x = 12.0
         y = max(12.0, float(self.height()) - card_h - 12.0)
 
@@ -6870,12 +6868,50 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawText(QRectF(x + 68.0, cy, card_w - 82.0, row_h),
                              int(Qt.AlignLeft | Qt.AlignVCenter), v)
             cy += row_h
-        # 操作提示行：比读数更淡，只做"能干什么"的提示
-        hint_col = QColor(_t.COLORS["gray_400"])
-        hint_col.setAlpha(190)
-        painter.setPen(hint_col)
-        painter.drawText(QRectF(x + 14.0, cy, card_w - 28.0, row_h),
-                         int(Qt.AlignLeft | Qt.AlignVCenter), hint)
+        painter.restore()
+        # 地平线以下的空间不是"留白"，是给人的落脚处：操作提示与视野
+        # 状态贴底边放（对齐原型 .corner-chip.loc / .corner-chip.time）。
+        self._draw_bottom_chips(painter)
+
+    def _draw_bottom_chips(self, painter: QPainter) -> None:
+        """底部角标：把操作提示与"现在能看多宽"放到下方空白区。
+
+        用户原话：「『全天 160 度』啥意思？我没明白，它不得往下放吗？
+        中下面那么大空，你是一点儿都没看吗？」——所以不写 FOV 度数，
+        用中文说人话；也不再浮在信息卡上方，改贴画面底边。
+        """
+        y = float(self.height()) - 34.0
+        if y < 4.0:
+            return
+        _t = tokens()
+        painter.save()
+        f = QFont(self._font)
+        f.setPointSize(9)
+        painter.setFont(f)
+        fm = QFontMetrics(f)
+        ink = QColor(_t.COLORS["gray_100"])
+        bg = QColor(_t.COLORS["card_2"])
+        bg.setAlpha(175)
+
+        def chip(text: str, x: float) -> float:
+            w = float(fm.horizontalAdvance(text)) + 30.0
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(bg))
+            painter.drawRoundedRect(QRectF(x, y, w, 24.0), 12.0, 12.0)
+            painter.setPen(ink)
+            painter.drawText(QRectF(x, y, w, 24.0),
+                             int(Qt.AlignCenter), text)
+            return w
+
+        hint = "拖动看天 · 滚轮缩放 · 点星星看详情"
+        hw = float(fm.horizontalAdvance(hint)) + 30.0
+        hx = max(8.0, (float(self.width()) - hw) / 2.0)
+        chip(hint, hx)
+        view = "视野：整片天" if self._all_sky_active else "视野：拉近看"
+        vw = float(fm.horizontalAdvance(view)) + 30.0
+        vx = float(self.width()) - vw - 18.0
+        if vx > hx + hw + 8.0:      # 窄屏别叠在一起，宁可不画
+            chip(view, vx)
         painter.restore()
 
     def _draw_info_overlay(self, painter: QPainter):
@@ -7147,9 +7183,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.setFont(self._font)
         painter.setPen(dim)
         painter.drawText(card_x + 12, y,
-                         ("全天 160° · A/Esc 退出 | 滚轮缩放"
+                         ("正在看整片天 · 按 Esc 退回 | 滚轮缩放"
                           if self._all_sky_active else
-                          "滚轮缩放 | 拖拽转动摄像机 | 双击居中 | A 全天"))
+                          "滚轮缩放 | 拖动看天 | 双击居中 | 按 A 看整片天"))
         # 结束内容裁剪与滚动偏移；滚动条画在裁剪区外，贴卡片右缘。
         painter.restore()
 

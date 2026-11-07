@@ -87,17 +87,14 @@ class FloatingPanel(QFrame):
 
         self.setObjectName("floatingPanel")
         self.setFrameShape(QFrame.NoFrame)
+        # 无条件规则直接落在面板自身：带 objectName 选择器的样式表会被
+        # 主题 polish 冲掉，实测整块浮层变成白纸、能力矩阵的字全糊掉。
+        # 子控件各自另设样式，互不干扰。
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
-            "QFrame#floatingPanel {"
-            " background-color: rgba(14,17,24,0.94);"
-            " border: 1px solid rgba(180,196,220,0.28);"
-            " border-radius: 12px; }"
-            "QFrame#floatingPanelHandle { background: transparent; }"
-            "QLabel#floatingPanelTitle { color: #DCE4EF; font-size: 12px; }"
-            "QToolButton { background: transparent; color: #AEBBD0;"
-            " border: none; border-radius: 5px; padding: 2px 5px; }"
-            "QToolButton:hover { background: rgba(255,255,255,0.12);"
-            " color: #FFFFFF; }")
+            "background-color: rgba(14,17,24,0.94);"
+            " border: 1px solid rgba(180,196,220,0.30);"
+            " border-radius: 12px;")
         self.setMinimumSize(300, 200)
 
         root = QVBoxLayout(self)
@@ -111,6 +108,8 @@ class FloatingPanel(QFrame):
         hl.setSpacing(2)
         self._title_label = QLabel(title)
         self._title_label.setObjectName("floatingPanelTitle")
+        self._title_label.setStyleSheet(
+            "color: #DCE4EF; background: transparent; font-size: 12px;")
         hl.addWidget(self._title_label, 1)
 
         self._collapse_btn = QToolButton()
