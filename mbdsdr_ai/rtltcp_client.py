@@ -36,7 +36,7 @@ import socket
 import struct
 import time
 import logging
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -66,6 +66,27 @@ from .link_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── 断连冷却（审计 B 节 P2）─────────────────────────────────────────────
+# rtl_tcp 服务器单客户端（backlog=1），断连后服务端要一段窗口才释放名额；
+# 立即重连会被拒/吃名额。真机基线 2–3 s（docs/learn/agent-onboarding-
+# runbook.md §3.5）。冷却按 (host, port) 记账——名额是服务端的，与哪个
+# 客户端对象无关；只在**真正握过手的连接**关闭时启动（探测失败不启动）。
+RECONNECT_COOLDOWN_S = 2.5
+
+_last_close_ts: Dict[Tuple[str, int], float] = {}
+
+
+def _mark_target_closed(host: str, port: int) -> None:
+    _last_close_ts[(host, int(port))] = time.monotonic()
+
+
+def reconnect_cooldown_remaining(host: str, port: int) -> float:
+    """该目标距下次允许建连还剩多少秒（无记录/已过期 = 0.0）。"""
+    ts = _last_close_ts.get((host, int(port)))
+    if ts is None:
+        return 0.0
+    return max(0.0, ts + RECONNECT_COOLDOWN_S - time.monotonic())
 
 
 class RtlTcpClient:
@@ -195,6 +216,15 @@ class RtlTcpClient:
         """建 TCP 连接并读满 12 字节设备信息。失败返回 False，self.error 含'连接失败'。"""
         # 重连前先彻底释放旧 socket，绝不残留半开句柄。
         self.close()
+        # 断连冷却：rtl_tcp 单客户端名额要等服务端释放（真机基线 2–3 s）。
+        # 冷却内建连必被拒/吃名额——等到窗口结束再拨，不把冷却期的拒绝
+        # 冒充成"服务不在"。
+        wait = reconnect_cooldown_remaining(self.host, self.port)
+        if wait > 0:
+            logger.info(
+                "rtl_tcp %s:%d 断连冷却中，等待 %.1f s 后重连（单客户端名额释放）",
+                self.host, self.port, wait)
+            time.sleep(wait)
         self.state = STATE_CONNECTING
         self.error = ""
         self.error_category = ""
@@ -424,6 +454,8 @@ class RtlTcpClient:
         """
         was_active = self.state in (STATE_CONNECTED, STATE_STALE, STATE_CONNECTING)
         if self._sock is not None:
+            # 真握过手/握到一半的连接都占过服务端名额：关闭即启动断连冷却。
+            _mark_target_closed(self.host, self.port)
             try:
                 self._sock.shutdown(socket.SHUT_RDWR)
             except OSError:
