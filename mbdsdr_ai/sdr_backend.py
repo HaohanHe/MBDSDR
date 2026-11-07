@@ -332,6 +332,16 @@ class SDRBackend:
             pass
         self.status.connected = False
         self.status.link_state = "disconnected"
+        # 会话读数归零/归 None：rssi/snr 的 None 语义是「从未采到」，
+        # 断连后保留上次会话值等于拿旧数据冒充当前状态；samples_read/
+        # uptime 是会话口径，重连从 0 起算（全部子类 disconnect 都走这里）。
+        self.status.rssi_db = None
+        self.status.snr_db = None
+        self.status.uptime_seconds = 0.0
+        self.status.samples_read = 0
+        self._samples_read = 0
+        self.status.last_data_age_s = None
+        self._last_ring_data_time = None
         # 断开即废弃接收链：链内 BaselineSquelch 的底噪/门限是按上一段流
         # 校准的，复用会把旧静噪口径带进新流（热插拔实测第 2 轮即残留）。
         # 重连由 _ensure_receive_chain() 按当时 status 全新构建。
