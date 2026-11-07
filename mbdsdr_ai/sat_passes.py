@@ -711,24 +711,33 @@ def predict_upcoming_passes(
       - doppler_aos_hz: AOS 时刻多普勒（正=接近，若 freq_hz 提供）
       - doppler_los_hz: LOS 时刻多普勒（负=远离，若 freq_hz 提供）
     """
-    # 收集 (max_alt, rise_time_tt, SatellitePass, tle_lines)
-    collected: List[Tuple[float, float, SatellitePass, Sequence[str]]] = []
+    # 按星分组收集 (max_alt, rise_time_tt, SatellitePass, tle_lines)；
+    # 组键 = (line1, line2)，同一 TLE 重复列出仍算一颗星。
+    groups: Dict[Tuple[str, str],
+                 List[Tuple[float, float, SatellitePass, Sequence[str]]]] = {}
     for tle_lines in tle_list:
+        parsed = _parse_tle(tle_lines)
+        if parsed is None:
+            continue
         try:
             passes = predict_passes(tle_lines, ground_station, hours=hours,
                                     min_alt=min_alt)
         except Exception:
             continue
-        for p in passes:
-            collected.append((p.max_alt, p.rise_time.tt, p, tle_lines))
+        entries = [(p.max_alt, p.rise_time.tt, p, tle_lines) for p in passes]
+        if entries:
+            groups.setdefault((parsed[1], parsed[2]), []).extend(entries)
 
+    collected = [item for bucket in groups.values() for item in bucket]
     if not collected:
         return []
 
-    # 若 max_sats 限制，按 max_alt 降序取前 N 颗卫星的过境
-    if max_sats is not None and max_sats > 0 and max_sats < len(collected):
-        collected.sort(key=lambda x: x[0], reverse=True)
-        collected = collected[:max_sats]
+    # max_sats 数的是「星」：按各星峰值仰角取前 N 颗，再展开其全部过境；
+    # 一颗多过境卫星只占一份配额。
+    if max_sats is not None and max_sats > 0 and max_sats < len(groups):
+        ranked = sorted(groups.values(),
+                        key=lambda b: max(x[0] for x in b), reverse=True)
+        collected = [item for bucket in ranked[:max_sats] for item in bucket]
 
     # 按 rise_time 升序排序
     collected.sort(key=lambda x: x[1])
