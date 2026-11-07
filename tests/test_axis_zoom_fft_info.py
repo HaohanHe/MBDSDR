@@ -8,7 +8,9 @@ P2-9（gqrx 密度分层）：悬停底部频率刻度轴（谱面下缘 _SPEC_B
 同数学）；VFO 正下方不抢手势；Shift/Alt 修饰在轴上仍按调谐齿轮走。
 
 P2-10（gqrx 把瀑布当测量仪器）：工具栏 RBW = span/FFT 点数，瀑布时间
-跨度 = 环形缓冲行数 × 绘图定时器间隔；无数据显 "--" 不造假。
+跨度 = 环形缓冲深度 ÷ **实测行率**（行是每 IQ 帧一行，与绘图定时器无关；
+按定时器算会把 256 行说成 12.8 s、实际 1.75 s，差 7 倍）；未测到行率显
+「--」不造假，无数据显 "--" 不造假。
 
 不依赖硬件 / 声卡（spectrum/IQ 数组直接钉值）。
 """
@@ -107,28 +109,58 @@ def test_shift_wheel_on_axis_keeps_tuning_gear(qapp):
 # ---------------------------------------------------------------------------
 # P2-10 FFT 仪器化读数
 # ---------------------------------------------------------------------------
-def test_fft_info_shows_rbw_and_waterfall_span(qapp):
+def test_fft_info_shows_rbw_and_waterfall_span(qapp, monkeypatch):
+    """RBW 取真值 sr/fft_size；瀑布时长用实测行率——未测到显「--」不编秒数。
+
+    反证：把实现改回「行数×绘图定时器间隔」的旧公式必红（本用例曾固化
+    该错误公式，2026-11-07 按实测行率契约改正）。
+    """
+    import spectrum_widget as sw
     panel = _panel(qapp)
     gen = panel.generator
     gen._has_real_data = True
-    panel._refresh_status_labels()
-    text = panel._fft_info_label.text()
     rbw = gen.sample_rate_hz / gen.fft_size
-    ms = panel._plot._timer.interval()
-    wf_s = gen.max_waterfall_lines * ms / 1000.0
-    assert text == f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s"
+    # 未测到行率：秒数不编造
+    panel._refresh_status_labels()
+    assert panel._fft_info_label.text() == f"RBW {rbw:g} Hz · 瀑布 -- s"
+    # 推帧建立实测行率（100 行/s）→ 时长 = 深度 ÷ 行率
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(sw.time, "monotonic", lambda: clock["t"])
+    gen._wf_rate_t0 = None          # 换时钟后清行率基准（旧 t0 是真墙钟）
+    frame = np.zeros(1024, dtype=complex)
+    gen.push_iq(frame, 98.5e6, 2.4e6)
+    for _ in range(100):
+        clock["t"] += 0.01
+        gen.push_iq(frame, 98.5e6, 2.4e6)
+    panel._refresh_status_labels()
+    wf_s = gen.max_waterfall_lines / gen.wf_row_rate_hz()
+    assert gen.wf_row_rate_hz() == pytest.approx(100.0, rel=0.05)
+    assert panel._fft_info_label.text() == (
+        f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s")
 
 
-def test_fft_info_updates_with_performance_mode(qapp):
+def test_fft_info_updates_with_performance_mode(qapp, monkeypatch):
+    """换性能档后 RBW 按新 fft_size 重算，不是常数；时长仍走实测行率。"""
+    import spectrum_widget as sw
     panel = _panel(qapp)
     gen = panel.generator
     gen._has_real_data = True
-    panel.set_performance_mode(2)          # refresh 100ms / fft 512
+    panel.set_performance_mode(2)          # 低档（legal FFT 档 1024，见 _PERF_LEVELS）
+    assert gen.fft_size == 1024
+    clock = {"t": 0.0}
+    monkeypatch.setattr(sw.time, "monotonic", lambda: clock["t"])
+    gen._wf_rate_t0 = None          # 换时钟后清行率基准
+    frame = np.zeros(1024, dtype=complex)
+    gen.push_iq(frame, 98.5e6, 2.4e6)
+    for _ in range(50):
+        clock["t"] += 0.02
+        gen.push_iq(frame, 98.5e6, 2.4e6)
     panel._refresh_status_labels()
     text = panel._fft_info_label.text()
     rbw = gen.sample_rate_hz / gen.fft_size
-    wf_s = gen.max_waterfall_lines * 100 / 1000.0
-    assert gen.fft_size == 512
+    assert text.startswith(f"RBW {rbw:g} Hz"), text
+    assert rbw == pytest.approx(2.4e6 / 1024)  # RBW 跟 fft_size 走
+    wf_s = gen.max_waterfall_lines / gen.wf_row_rate_hz()
     assert text == f"RBW {rbw:g} Hz · 瀑布 {wf_s:g} s"
 
 
