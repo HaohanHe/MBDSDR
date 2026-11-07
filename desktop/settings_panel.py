@@ -849,6 +849,13 @@ class SettingsPanel(QWidget):
             return False
         try:
             key = item.key
+            if key in ("callsign", "gnss_port", "gnss_baudrate",
+                       "focus_mode", "free_float_panels"):
+                # 身份/接线/页面形态这几项由 DesktopSettings 的变更订阅统一
+                # 推给主窗口（覆盖设置页、导入、恢复默认、代码直接 set 等
+                # 所有写入路径），这里只声明「已接入」，别在状态栏误报
+                # 「未接入主窗口，行为未变」。
+                return True
             if key == "ui_language":
                 return False   # 需重启（行内已标注）
             if key == "theme":

@@ -348,6 +348,11 @@ class DesktopSettings:
         self.last_error: Optional[str] = None
         #: 写盘失败回调（签名 (message) -> None）；由 UI 注入，避免配置层依赖 Qt。
         self.on_error: Optional[Any] = None
+        #: 值变更订阅（签名 (key, value) -> None）。用纯 Python 回调而非 Qt
+        #: Signal：配置层不依赖 QObject，测试里的 fake settings 也能挂。
+        #: 用途是让「设置页改了值」能即时推给主界面（例如呼号改了要刷新
+        #: 天空角标、专注模式改了要收起工程读数），而不必等重启。
+        self._change_listeners: list = []
         #: 上次文件里**真实出现**的键（用于一次性迁移提示：缺键 ≠ 用户选择了默认值）
         self._file_keys: set = set()
         #: 启动读回时因越界/非法档位而回落的字段及原因（不静默丢改动）
@@ -442,10 +447,16 @@ class DesktopSettings:
         return DEFAULTS.get(key)
 
     def set(self, key: str, value: Any) -> None:
-        """写一个字段并标记 dirty，防抖 500ms 后落盘。未知 key 忽略。"""
+        """写一个字段并标记 dirty，防抖 500ms 后落盘。未知 key 忽略。
+
+        值真的变了才通知订阅者：既避免滑杆每像素刷一次主界面，也让
+        「listener 里再 set 同一个值」天然收敛、不会递归。
+        """
         if key not in DEFAULTS:
             return
-        self._data[key] = _coerce(key, value)
+        new_value = _coerce(key, value)
+        old_value = self._data.get(key)
+        self._data[key] = new_value
         self._dirty_keys.add(key)
         self._dirty = True
         try:
@@ -453,6 +464,8 @@ class DesktopSettings:
         except RuntimeError:
             # timer 已销毁（退出中）：直接同步写一次，不丢最后一次改动
             self._write_to_disk()
+        if old_value != new_value:
+            self._emit_change(key, new_value)
 
     def reset(self, key: str) -> Any:
         """把单项恢复到 schema 默认值；返回恢复后的值（未知 key 返回 None）。"""
@@ -461,8 +474,30 @@ class DesktopSettings:
         self.set(key, DEFAULTS[key])
         return self._data[key]
 
+    # ---------------------------------------------------------------- 变更订阅
+    def add_change_listener(self, fn: Any) -> None:
+        """注册 ``(key, value) -> None`` 回调；重复注册忽略。"""
+        if fn is not None and fn not in self._change_listeners:
+            self._change_listeners.append(fn)
+
+    def remove_change_listener(self, fn: Any) -> None:
+        try:
+            self._change_listeners.remove(fn)
+        except ValueError:
+            pass
+
+    def _emit_change(self, key: str, value: Any) -> None:
+        for fn in tuple(self._change_listeners):
+            try:
+                fn(key, value)
+            except Exception as exc:  # 一个订阅者坏了不拖垮配置层
+                logging.getLogger(__name__).warning(
+                    "设置变更订阅者异常 key=%s: %s", key, exc)
+
     def reset_all(self) -> None:
         """恢复全部默认值（一次落盘）。"""
+        changed = [k for k in DEFAULTS
+                   if self._data.get(k) != DEFAULTS[k]]
         self._data = dict(DEFAULTS)
         self._dirty_keys = set(DEFAULTS)
         self._dirty = True
@@ -470,6 +505,8 @@ class DesktopSettings:
             self._timer.start()
         except RuntimeError:
             self._write_to_disk()
+        for k in changed:
+            self._emit_change(k, DEFAULTS[k])
 
     def values(self) -> Dict[str, Any]:
         """返回当前全部设置的浅拷贝（供导出/审计）。"""

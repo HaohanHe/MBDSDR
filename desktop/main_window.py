@@ -77,6 +77,18 @@ def _focus_widget():
 _WARN_THROTTLE_LAST: Dict[str, float] = {}
 
 
+def _detail_bar_css() -> str:
+    """「详细」抽屉统一样式：深色半透明底 + 浅字，落在任何主题上都清晰。"""
+    return (
+        "QWidget#topBarDetail { background-color: rgba(14,17,24,0.92); }"
+        "QWidget#topBarDetail QLabel { color: #DCE4EF; background: transparent; }"
+        "QWidget#topBarDetail QToolButton { color: #DCE4EF;"
+        " background: transparent; border: 1px solid rgba(255,255,255,0.16);"
+        " border-radius: 5px; padding: 2px 6px; }"
+    )
+
+
+
 def _warn_throttled(key: str, msg: str, *args, interval_s: float = 30.0) -> None:
     """同一 key 的 warning 在 interval_s 内只落一条。
 
@@ -441,6 +453,7 @@ from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, Sate
 from module_panel import ModulePanel
 # CarWith 设计体系：token 单例 / 面板注册表 / Dock 布局管理器
 from tokens import tokens
+from floating_panel import FloatingPanel
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
 from constants import (
@@ -1730,6 +1743,19 @@ class MainWindow(QMainWindow):
         self._build_bottom_dock(root_lay)
         self.setCentralWidget(root)
 
+        # ---- 设置 → 主界面的即时通路（页面极简 / 呼号 / 自由窗口 / GNSS 接线）----
+        # 订阅放在 central widget 建成之后：此时 sky_view、顶栏、底坞都在，
+        # 回调里可以安全地推值，不必等重启或等用户手动刷新。
+        self._float_windows: Dict[int, object] = {}
+        self._float_placeholders: Dict[int, object] = {}
+        self._focus_mode = True
+        self._free_float_enabled = True
+        self.settings.add_change_listener(self._on_setting_changed)
+        self.set_focus_mode(bool(self.settings.get("focus_mode", True)))
+        self.set_free_float_enabled(
+            bool(self.settings.get("free_float_panels", True)))
+        self._apply_callsign(str(self.settings.get("callsign", "") or ""))
+
         # ---- 内核能力面板：扫频 / 自动调制识别 / 书签 / 服务设置（右栏页签）----
         self.scanner_panel = None
         self.modulation_panel = None
@@ -2546,6 +2572,10 @@ class MainWindow(QMainWindow):
                 pass
         self._hidden_chrome = []
         self._sync_mode_action()
+        # _exit_planetarium 上面把 IDE 外壳统一 show 回来了；若用户仍在
+        # 专注模式，这里立即重新收起主工具栏/工程读数/天空杂物，避免
+        # 「退出星象仪 → 顶上又冒出一整排配置项」。
+        self.set_focus_mode(getattr(self, "_focus_mode", True))
         if self.isFullScreen():
             self.showNormal()
         self._sync_fullscreen_btn()
@@ -2784,7 +2814,15 @@ class MainWindow(QMainWindow):
     # 顶栏（细状态栏）/ 底坞（Home + 模式块 + Now Bar）
     # ------------------------------------------------------------------
     def _build_top_bar(self, parent_layout: QVBoxLayout) -> None:
-        """顶部细状态栏：连接 / 频率 / 采样率 / GPS / UTC（精简自原 QStatusBar）。"""
+        """顶部状态条 + 可展开的工程读数抽屉。
+
+        用户口径（2026-11-07）：「核心目标是让页面极简，不是整个软件极简」
+        「用户只想看到频谱、看到天空」「人的注意力是有限的」。
+        所以常显只留两样：连没连上、现在几点，外加两个能力入口。
+        频率/采样率/GNSS/多普勒/发射等工程读数**一个不删**，收进「详细」
+        抽屉，点开即见；呼号属于身份配置 →「设置 → 通用 → 操作员呼号」，
+        主界面不再放输入框（「关于」里那句「呼号：在设置中配置」终于属实）。
+        """
         bar = QWidget()
         bar.setObjectName("topBar")
         bar.setFixedHeight(tokens().SIZE["topbar_h"])
@@ -2794,20 +2832,58 @@ class MainWindow(QMainWindow):
 
         self.status_conn = QLabel("未连接")
         lay.addWidget(self.status_conn)
-        lay.addWidget(self._vsep())
+        lay.addStretch(1)
+
+        # 兼容垫片：契约测试与旧代码按属性名取它，但主界面不再挂载输入框、
+        # 也不连 editingFinished。呼号由设置页写入，经 DesktopSettings
+        # 变更订阅推到 _apply_callsign。
+        self.callsign_edit = QLineEdit()
+        self.callsign_edit.setMaxLength(16)
+        self.callsign_edit.setVisible(False)
+
+        self._focus_btn = QToolButton()
+        self._focus_btn.setObjectName("topBarAction")
+        self._focus_btn.setCheckable(True)
+        self._focus_btn.setText("详细")
+        self._focus_btn.setToolTip(
+            "展开/收起工程读数（频率 / 采样率 / GNSS / 多普勒 / 发射）")
+        self._focus_btn.toggled.connect(self._on_focus_btn_toggled)
+        lay.addWidget(self._focus_btn)
+
+        self._float_btn = QToolButton()
+        self._float_btn.setObjectName("topBarAction")
+        self._float_btn.setText("⧉")
+        self._float_btn.setToolTip("自由窗口：把左栏 / 右栏弹出成可拖动浮层")
+        self._float_btn.clicked.connect(self._show_float_menu)
+        lay.addWidget(self._float_btn)
+
+        # 窄屏下 UTC 只留时分秒；完整日期时间进 tooltip，信息不丢。
+        self.status_utc = QLabel("UTC --:--:--")
+        self.status_utc.setObjectName("statusValue")
+        self.status_utc.setToolTip("协调世界时（完整日期时间）")
+        lay.addWidget(self.status_utc)
+        parent_layout.addWidget(bar)
+
+        # ---- 第二行：工程读数抽屉（默认收起，功能一个不删）----
+        self._top_detail = QWidget()
+        self._top_detail.setObjectName("topBarDetail")
+        self._top_detail.setFixedHeight(max(30, tokens().SIZE["topbar_h"]))
+        self._top_detail.setStyleSheet(_detail_bar_css())
+        dl = QHBoxLayout(self._top_detail)
+        dl.setContentsMargins(16, 0, 16, 0)
+        dl.setSpacing(10)
+
         self.status_freq = QLabel("频率: —")
         self.status_freq.setObjectName("statusValue")
-        lay.addWidget(self.status_freq)
-        lay.addWidget(self._vsep())
+        dl.addWidget(self.status_freq)
         self.status_sr = QLabel("采样率: —")
         self.status_sr.setObjectName("statusValue")
-        lay.addWidget(self.status_sr)
-        lay.addWidget(self._vsep())
+        dl.addWidget(self.status_sr)
         self.status_gps = QLabel("GNSS: 未连接")
         self.status_gps.setObjectName("statusValue")
-        lay.addWidget(self.status_gps)
-        lay.addWidget(self._vsep())
-        # 多普勒链路补偿芯片（标称/实际/Δ + 开关；不新增页面——链路指示而非功能页）
+        dl.addWidget(self.status_gps)
+
+        # 多普勒链路补偿芯片（标称/实际/Δ + 开关；链路指示而非功能页）
         self.doppler_chip = QToolButton()
         self.doppler_chip.setObjectName("statusValue")
         self.doppler_chip.setCheckable(True)
@@ -2817,28 +2893,21 @@ class MainWindow(QMainWindow):
             "多普勒链路补偿：存在卫星目标时调谐中心 = 标称频率 + 预测 Δ，"
             "发射上行反向预偏；点击开关补偿（目标失效自动关闭并提示）")
         self.doppler_chip.toggled.connect(self._on_doppler_chip_toggled)
-        lay.addWidget(self.doppler_chip)
-        # 补偿量常驻读数（与上面的开关分开：开关只映射 enabled，读数只说施加量）
+        dl.addWidget(self.doppler_chip)
         self.doppler_readout = QLabel("多普勒: —")
         self.doppler_readout.setObjectName("statusValue")
         self.doppler_readout.setToolTip(
             "多普勒补偿读数：— 表示不是本机施加或施加量未知；"
             "0 Hz 才表示确实算出 0")
-        lay.addWidget(self.doppler_readout)
-        # 发射频点常驻读数（与接收多普勒读数列）：实际发波/标称/预偏状态。
-        # 只在频率变化/目标切换/设备就绪时刷新，不做每帧轮询。
+        dl.addWidget(self.doppler_readout)
         self.tx_readout = QLabel("发射: —")
         self.tx_readout.setObjectName("statusValue")
         self.tx_readout.setToolTip(
             "发射频点读数：实际发波频率 / 标称频率 / 预偏状态。"
             "— 表示未连接设备或读数未知，绝不表示 0")
-        lay.addWidget(self.tx_readout)
-        # 发射能力常驻声明（docs/doppler-compensation.md §3.8.2）：必须在
-        # PTT 可按下之前就能看见，不许只放 tooltip；「驱动级已实现 / 真机
-        # 未验证」时按钮可点但这行常驻黄色警示。
-        # 窄屏（DPR 1.0 / 1344×700）下改为图标化：灰色信息图标 / 黄色警示
-        # 图标本身仍是常驻可见信号；完整文案进 tooltip + 可访问名，
-        # 按钮可用 Tab 聚焦（见 docs/narrow-screen-plan.md §2.3.1）。
+        dl.addWidget(self.tx_readout)
+        # 发射能力常驻声明（docs/doppler-compensation.md §3.8.2）：
+        # 与 PTT 同处「详细」抽屉，按下 PTT 之前必然可见，合规不破。
         self.tx_capability_label = QToolButton()
         self.tx_capability_label.setObjectName("txCapability")
         self.tx_capability_label.setToolButtonStyle(Qt.ToolButtonIconOnly)
@@ -2850,10 +2919,8 @@ class MainWindow(QMainWindow):
             "未经真机验证前请谨慎发射")
         self.tx_capability_label.clicked.connect(
             self._show_tx_capability_details)
-        lay.addWidget(self.tx_capability_label)
+        dl.addWidget(self.tx_capability_label)
         self._refresh_tx_capability_label()
-        # 最小发射面：PTT 按钮（按下=发射，再次按下=停止）。默认置灰；
-        # 无设备/无 TX 通道/回放中都会在 tooltip 里写明原因（不出现"点了没反应"）。
         self.tx_button = QToolButton()
         self.tx_button.setObjectName("statusValue")
         self.tx_button.setCheckable(True)
@@ -2861,32 +2928,16 @@ class MainWindow(QMainWindow):
         self.tx_button.setToolTip("发射/停止（PTT）：需经人工确认")
         self.tx_button.toggled.connect(self._on_tx_button_toggled)
         self.tx_button.setEnabled(False)
-        lay.addWidget(self.tx_button)
-        lay.addStretch(1)
-
-        # 呼号（全局可编辑，持久化）
-        lay.addWidget(QLabel("呼号:"))
-        self.callsign_edit = QLineEdit()
-        self.callsign_edit.setPlaceholderText("输入你的呼号")
-        self.callsign_edit.setMaxLength(16)
-        self.callsign_edit.setMinimumWidth(80)
-        self.callsign_edit.setMaximumWidth(200)
-        self.callsign_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在星象仪模式图）")
-        self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
-        lay.addWidget(self.callsign_edit)
-        lay.addWidget(self._vsep())
-        # 窄屏下 UTC 只留时分秒（约 180px）；完整日期时间进 tooltip，信息不丢。
-        self.status_utc = QLabel("UTC --:--:--")
-        self.status_utc.setObjectName("statusValue")
-        self.status_utc.setToolTip("协调世界时（完整日期时间）")
-        lay.addWidget(self.status_utc)
-        parent_layout.addWidget(bar)
+        dl.addWidget(self.tx_button)
+        dl.addStretch(1)
+        parent_layout.addWidget(self._top_detail)
+        self._top_detail.setVisible(False)
 
     def _build_bottom_dock(self, parent_layout: QVBoxLayout) -> None:
-        """底部坞（48px）：Home 按钮 + 当前解调模式大字号块 + Now Bar。
+        """底部坞（48px）：Home + 当前解调模式 + 频率 + 待机。
 
-        窄屏下由 74 收到 48（省 26px 高）：控件一个不删、只收紧纵向留白。
+        与顶栏重复的增益 / 带宽 / 设备 / 信号读数收进「详细」，不再在
+        明面上和顶栏各写一遍（用户点名的「冗余」「嘎拉马英糟的」）。
         """
         dock = QWidget()
         dock.setObjectName("bottomDock")
@@ -2895,7 +2946,6 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(16, 0, 16, 0)
         lay.setSpacing(16)
 
-        # Home 按钮（回频谱页）
         self.home_btn = QPushButton("⌂")
         self.home_btn.setObjectName("iconButton")
         self.home_btn.setMinimumSize(28, 28)
@@ -2904,41 +2954,179 @@ class MainWindow(QMainWindow):
         self.home_btn.clicked.connect(self._go_home)
         lay.addWidget(self.home_btn)
 
-        # 模式块：当前解调模式大字号
         self.dock_mode_label = QLabel("FM")
         self.dock_mode_label.setObjectName("dockMode")
         self.dock_mode_label.setToolTip(
             "现在使用的解调方式；要切换可用顶栏下拉，"
             "频谱获焦时按 A/N/F/W/C 更直接")
         lay.addWidget(self.dock_mode_label)
-
-        lay.addWidget(self._vsep())
-
-        # Now Bar：频率 / 增益 / 带宽 / 录音状态 / 处理指示
         self.dock_freq_label = QLabel("—")
         self.dock_freq_label.setObjectName("dockNow")
         lay.addWidget(self.dock_freq_label)
-        lay.addWidget(self._vsep())
-        self.status_gain = QLabel("增益: —")
-        self.status_gain.setObjectName("statusValue")
-        lay.addWidget(self.status_gain)
-        lay.addWidget(self._vsep())
-        self.status_bw = QLabel("带宽: —")
-        self.status_bw.setObjectName("statusValue")
-        lay.addWidget(self.status_bw)
-        lay.addWidget(self._vsep())
-        self.status_dev = QLabel("设备: —")
-        self.status_dev.setObjectName("statusValue")
-        lay.addWidget(self.status_dev)
-        lay.addWidget(self._vsep())
-        self.status_rssi = QLabel("信号: —")
-        self.status_rssi.setObjectName("statusValue")
-        lay.addWidget(self.status_rssi)
+
+        # --- 工程读数：默认收起，由「详细」开关控制（对象全保留）---
+        self._bottom_detail_widgets = []
+        for attr, text in (("status_gain", "增益: —"),
+                           ("status_bw", "带宽: —"),
+                           ("status_dev", "设备: —"),
+                           ("status_rssi", "信号: —")):
+            lab = QLabel(text)
+            lab.setObjectName("statusValue")
+            lay.addWidget(lab)
+            setattr(self, attr, lab)
+            self._bottom_detail_widgets.append(lab)
         lay.addStretch(1)
         self.status_processing = QLabel("待机")
         self.status_processing.setObjectName("dockHint")
         lay.addWidget(self.status_processing)
         parent_layout.addWidget(dock)
+
+    # ---------------------------------------------------------------- 页面形态
+    def set_focus_mode(self, on: bool) -> None:
+        """专注页面：收起工程读数，只留频谱/天空 + 最小状态行。
+
+        注意这是**页面**极简，不是软件极简：所有读数、开关、PTT 都还在，
+        点一下「详细」全回来；配置项另有「设置」页可慢慢改。
+        """
+        on = bool(on)
+        self._focus_mode = on
+        td = getattr(self, "_top_detail", None)
+        if td is not None:
+            td.setVisible(not on)
+        for w in (getattr(self, "_bottom_detail_widgets", None) or []):
+            w.setVisible(not on)
+        # 主工具栏整条也是「明面上的配置项」：主题 / 语言 / 布局 / 保存 /
+        # 删除 / +VFO / 静音 / 录音 / 回放……它们本该收起来慢慢改，不该
+        # 一开软件就横在频谱和天空上方。专注时整条收起，点「详细」原样
+        # 回来（菜单里的动作也都还在，功能一个不删）。
+        for tb in self.findChildren(QToolBar):
+            tb.setVisible(not on)
+        # IDE 左栏那张天空也是「页面」：14 行信息卡 / 「GNSS 未连接」喊话 /
+        # 「请放置 TLE 文件」红字 / 搜索框 / 全天按钮，在星象仪沉浸态里
+        # 早就收掉了，专业模式同样不该占着用户的注意力。
+        sv = getattr(self, "sky_view", None)
+        if sv is not None and hasattr(sv, "set_immersive"):
+            sv.set_immersive(on)
+        # 「🌐 全天 160°」是 IDE 的视图按钮，压在左下紧凑卡上方；
+        # 星象仪形态里早就收了，专注页面同样让位（A 键 / 滚轮仍在）。
+        sky_btn = getattr(self, "_all_sky_btn", None)
+        if sky_btn is not None:
+            sky_btn.setVisible(not on)
+        btn = getattr(self, "_focus_btn", None)
+        if btn is not None:
+            # 按钮语义是「详细」：checked = 展开 = 非专注
+            if btn.isChecked() != (not on):
+                btn.blockSignals(True)
+                btn.setChecked(not on)
+                btn.blockSignals(False)
+            btn.setText("收起" if not on else "详细")
+
+    def _on_focus_btn_toggled(self, checked: bool) -> None:
+        mode = not bool(checked)
+        self.set_focus_mode(mode)
+        try:
+            self.settings.set("focus_mode", mode)
+        except Exception:
+            pass
+
+    def _on_setting_changed(self, key: str, value) -> None:
+        """设置页 / 导入 / 恢复默认 / 代码直接 set 的统一即时生效入口。"""
+        if key == "callsign":
+            self._apply_callsign(str(value or ""))
+        elif key == "focus_mode":
+            self.set_focus_mode(bool(value))
+        elif key == "free_float_panels":
+            self.set_free_float_enabled(bool(value))
+        elif key in ("gnss_port", "gnss_baudrate"):
+            self._gnss_port = str(self.settings.get("gnss_port", "") or "")
+            try:
+                self._gnss_baudrate = int(
+                    self.settings.get("gnss_baudrate", 9600) or 9600)
+            except (TypeError, ValueError):
+                self._gnss_baudrate = 9600
+
+    def _apply_callsign(self, cs: str) -> None:
+        """把设置里的呼号同步给兼容垫片与天空视图（页面不再常驻展示）。"""
+        cs = str(cs or "").strip()
+        edit = getattr(self, "callsign_edit", None)
+        if edit is not None:
+            try:
+                edit.blockSignals(True)
+                edit.setText(cs)
+            finally:
+                edit.blockSignals(False)
+        try:
+            self.sky_view.set_callsign(cs)
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------------- 自由窗口
+    def set_free_float_enabled(self, on: bool) -> None:
+        """自由窗口总开关：关掉时所有弹出面板归位，回到固定三栏。"""
+        self._free_float_enabled = bool(on)
+        btn = getattr(self, "_float_btn", None)
+        if btn is not None:
+            btn.setVisible(bool(on))
+        if not on:
+            self._return_all_panes()
+
+    def _show_float_menu(self) -> None:
+        menu = QMenu(self)
+        for idx, title in ((0, "左栏 · 天空/频谱"), (2, "右栏 · 控制台")):
+            if idx in self._float_windows:
+                act = menu.addAction("归位 " + title)
+                act.triggered.connect(
+                    lambda _c=False, i=idx: self._return_pane(i))
+            else:
+                act = menu.addAction("弹出 " + title)
+                act.triggered.connect(
+                    lambda _c=False, i=idx: self._pop_out_pane(i))
+        menu.addSeparator()
+        menu.addAction("全部归位", self._return_all_panes)
+        menu.exec(self._float_btn.mapToGlobal(
+            QPoint(0, self._float_btn.height())))
+
+    def _pop_out_pane(self, index: int) -> None:
+        """把三栏中的一栏整体弹出成可拖动浮层，原位留占位保持 3 栏契约。"""
+        sp = getattr(self, "_main_splitter", None)
+        if sp is None or index in self._float_windows:
+            return
+        payload = sp.widget(index)
+        if payload is None:
+            return
+        placeholder = QWidget()
+        placeholder.setObjectName("panePlaceholder%d" % index)
+        placeholder.setMinimumWidth(0)
+        sp.replaceWidget(index, placeholder)
+        placeholder.hide()
+        host = self.centralWidget() or self
+        title = "左栏 · 天空/频谱" if index == 0 else "右栏 · 控制台"
+        panel = FloatingPanel(
+            key="pane%d" % index, title=title, payload=payload, host=host,
+            on_return=lambda i=index: self._return_pane(i))
+        self._float_windows[index] = panel
+        self._float_placeholders[index] = placeholder
+
+    def _return_pane(self, index: int) -> None:
+        panel = self._float_windows.pop(index, None)
+        if panel is None:
+            return
+        payload = panel.take_payload()
+        sp = getattr(self, "_main_splitter", None)
+        ph = self._float_placeholders.pop(index, None)
+        if sp is not None and ph is not None:
+            sp.replaceWidget(index, payload)
+            ph.setParent(None)
+            ph.deleteLater()
+        elif sp is not None:
+            sp.insertWidget(index, payload)
+        payload.show()
+        panel.setParent(None)
+        panel.deleteLater()
+
+    def _return_all_panes(self) -> None:
+        for idx in sorted(tuple(self._float_windows)):
+            self._return_pane(idx)
 
     def _vsep(self) -> QLabel:
         sep = QLabel("|")

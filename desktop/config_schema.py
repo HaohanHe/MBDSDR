@@ -150,7 +150,51 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
         choices=(_e("auto", "自动检测"), _e("on", "强制触屏"), _e("off", "强制鼠标")),
     ),
 
+    # --- 身份与硬件接线：从主界面收进设置（用户 2026-11-07 明确要求） ---
+    # 这三项原先是 exposed=False 的「内部键」，靠顶栏常驻输入框 / 连接对话框
+    # 修改，结果主界面被配置框占满、设置页反而空的。现在统一收进设置：
+    # 主界面只展示频谱与天空，身份/接线这类「改一次就不管」的东西留在这里。
+    SettingItem(
+        key="callsign", group="通用", kind="text",
+        label="操作员呼号", default="",
+        help=("业余无线电呼号。用于日志/通联标识，属于身份配置，不在主界面常驻展示；"
+              "留空表示未设置，绝不写死示例呼号。"),
+        source="desktop/settings.py DEFAULTS['callsign']=\"\"（原顶栏输入框同一键）",
+    ),
+    SettingItem(
+        key="gnss_port", group="通用", kind="text",
+        label="GNSS 串口", default="",
+        help=("GNSS 接收机所接串口（如 COM4）。留空 = 自动探测；"
+              "改动在下次连接 GNSS 时生效。"),
+        source="desktop/settings.py DEFAULTS['gnss_port']=\"\"（原 GNSS 连接对话框同一键）",
+    ),
+    SettingItem(
+        key="gnss_baudrate", group="通用", kind="enum",
+        label="GNSS 波特率", default=9600,
+        help="与 GNSS 接收机一致的波特率；多数模块出厂为 9600。",
+        source="desktop/main_window.py GNSS 连接对话框 baud_combo 构建处"
+               "（9600/19200/38400/57600/115200）",
+        choices=tuple(_e(b, str(b)) for b in
+                      (9600, 19200, 38400, 57600, 115200)),
+    ),
+
     # ---------------------------------------------------------------- 显示与主题
+    SettingItem(
+        key="focus_mode", group="显示与主题", kind="bool",
+        label="专注页面（默认极简）", default=True,
+        help=("开启时主界面只保留频谱/天空与最小状态行：频率/采样率/GNSS/"
+              "多普勒/发射/增益等工程读数收进「详细」按钮，点开即见。"
+              "功能一个不删，只是不再占用户注意力——极简的是页面，不是软件。"),
+        source="本轮新增（用户 2026-11-07 口径：页面极简，不是整个软件极简）",
+    ),
+    SettingItem(
+        key="free_float_panels", group="显示与主题", kind="bool",
+        label="自由窗口（面板可拖出）", default=True,
+        help=("开启时顶栏出现「⧉」：左栏/右栏可弹出成自由浮层，"
+              "标题条按住即拖、可折叠、可提升为独立窗口、可归位，"
+              "位置随窗口状态记住。关闭则退回固定三栏。"),
+        source="本轮新增（对齐原型 index.html 的 position:absolute 浮层 / 自由窗口）",
+    ),
     SettingItem(
         key="theme", group="显示与主题", kind="enum",
         label="主题", default="default",
@@ -458,17 +502,6 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
                 default=float(_DEFAULT_SAMPLE_RATE_HZ),
                 source="desktop/constants.py: DEFAULT_SAMPLE_RATE_HZ"
                        "（派生自 mbdsdr_ai/sdr_backend.DEFAULT_SAMPLE_RATE_HZ，2.4 MS/s）",
-                exposed=False),
-    SettingItem(key="callsign", group="", kind="text", label="", help="",
-                default="", source="desktop/settings.py:34", exposed=False),
-    SettingItem(key="gnss_port", group="", kind="text", label="", help="",
-                default="", source="desktop/settings.py:35", exposed=False),
-    SettingItem(key="gnss_baudrate", group="", kind="enum", label="", help="",
-                default=9600,
-                source="desktop/main_window.py 的 GNSS 波特率下拉 baud_combo 构建处"
-                       "（9600/19200/38400/57600/115200）",
-                choices=tuple(_e(b, str(b)) for b in
-                              (9600, 19200, 38400, 57600, 115200)),
                 exposed=False),
     SettingItem(key="agc_enabled", group="", kind="bool", label="", help="",
                 default=True, source="desktop/settings.py:37", exposed=False),

@@ -2677,6 +2677,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def set_callsign(self, callsign: str):
         """设置操作员呼号（由主窗口从 desktop_settings.json 注入）。
+        仅用于日志/通联标识，天空信息卡不再常驻绘制这一行。
 
         空串/空白 = 未设置，左下角信息卡显“呼号：未设置”。绝不写死呼号。
         """
@@ -7002,14 +7003,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.setPen(dim)
             painter.drawText(card_x + 52, y, "—（无站址）")
 
-        y += 18
-        painter.setFont(self._font)
-        painter.setPen(label_col)
-        painter.drawText(card_x + 12, y, "呼号")
-        painter.setFont(self._mono_font)
-        painter.setPen(ink)
-        painter.drawText(card_x + 52, y,
-                         self._callsign if self._callsign else "未设置")
+        # 呼号是身份配置，归「设置 → 通用 → 操作员呼号」，不再在天空
+        # 信息卡上占一行（用户 2026-11-07：页面只展示用户想看的频谱/天空，
+        # 注意力有限，别往上看板上堆身份字段）。set_callsign 仍保留注入
+        # 接口，供日志/导出标识使用，但绘制层不读它。
 
         # 观测站读数（Stellarium 左下角 location chip 同位）：有坐标给经纬度，
         # 未设置给「未设置」——诚实空状态，绝不编造城市/坐标。
