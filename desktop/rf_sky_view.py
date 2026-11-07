@@ -3003,6 +3003,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if on == self._immersive:
             return
         self._immersive = on
+        # 视图自带的"搜索天体"输入框在星象仪里让位：形态里已有那条 AI 胶囊
+        # （同一件事的更好说法），两个输入框上下叠着只会露出半行灰字。
+        for attr in ("_search_edit", "_search_popup"):
+            wdg = getattr(self, attr, None)
+            if wdg is not None:
+                try:
+                    wdg.setVisible(not on)
+                except RuntimeError:
+                    pass
         # 收起的浮层不该继续吃鼠标：拾取矩形同步失效，免得点空白处命中
         # 一张看不见的过境表。
         self.update()
@@ -4123,10 +4132,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QBrush(grad))
                 painter.drawEllipse(pos, rr, rr)
+            # 分桶粒度：色 40 / alpha 48 / 直径 2px。星点直径 1–3px，
+            # 这三级量化在屏幕上不可辨，但把首帧后的 drawPoints 桶数从
+            # ~260 降到几十——每帧 260 次状态切换是白付的开销。
             dot_buckets.setdefault(
-                (cr // 16 * 16, cg // 16 * 16, cb // 16 * 16,
-                 max(1, int(round(max(1.0, 2.0 * r) * 2.0))),
-                 max(1, alpha_l[i] // 16 * 16)), []).append(pos)
+                (cr // 40 * 40, cg // 40 * 40, cb // 40 * 40,
+                 max(1, int(round(max(1.0, 2.0 * r) * 2.0)) // 2 * 2),
+                 max(1, alpha_l[i] // 48 * 48)), []).append(pos)
             # 星名标签：只给 named 星，阈值随 FOV 收放（拉远不糊屏；
             # 放大后允许更暗的具名星出现）。无名星不编造名字。
             name = label_info.get(i)
@@ -4906,6 +4918,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                       (None if not night else "ground_mid_night"),
                       (None if not night else "ground_near_night"))
         painter.setPen(Qt.NoPen)
+        # 地景轮廓与视角无关（只取决于固定 seed 的噪声），按层缓存一次：
+        # 每帧重算是 3 层 × 121 个方位 × 3 octaves 的纯 Python 调用，
+        # 实测占掉单帧约 6 ms——天空本身不动，这份计算没有理由每帧重做。
+        cache = getattr(self, "_land_edge_cache", None)
+        if cache is None or len(cache) != len(_LANDSCAPE_LAYERS):
+            cache = []
+            for (seed, base, amp, lat, octaves, quant) in _LANDSCAPE_LAYERS:
+                az_seq = np.arange(0, 361, 3, dtype=float)
+                cache.append((az_seq, np.array([
+                    _landscape_layer_profile(
+                        float(az), seed=seed, base_alt=base, amp_alt=amp,
+                        lattice_deg=lat, octaves=octaves, quant_deg=quant)
+                    for az in az_seq], dtype=float)))
+            self._land_edge_cache = cache
         for idx, (seed, base, amp, lat, octaves, quant) in enumerate(_LANDSCAPE_LAYERS):
             key = layer_cols[idx]
             col = (QColor(_t.COLORS["ground_shadow_day"]) if key is None
@@ -4921,12 +4947,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.setBrush(QBrush(grad))
             path = QPainterPath()
             edge: List[QPointF] = []
-            az_seq = np.arange(0, 361, 3, dtype=float)
-            alt_seq = np.array([
-                _landscape_layer_profile(
-                    float(az), seed=seed, base_alt=base, amp_alt=amp,
-                    lattice_deg=lat, octaves=octaves, quant_deg=quant)
-                for az in az_seq], dtype=float)
+            az_seq, alt_seq = cache[idx]
             for p in self._screen_points_many(az_seq, alt_seq):
                 if self._on_screen(p):
                     edge.append(p)
@@ -4951,6 +4972,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         painter.save()
         grid_col = QColor(88, 92, 99, 90)  # gray_400 带 alpha
         painter.setPen(QPen(grid_col, 1, Qt.DashLine))
+        # 全部射线与等高圈合成**一个** QPainterPath 再一次性 drawPath：
+        # 逐段 drawPath 是 15 次独立的描边提交（每帧约 0.8 ms/次），
+        # 同色同笔宽的线没有任何理由分开提交。
+        path = QPainterPath()
         # 等方位射线 (每 30°), 从地平 alt=0 向天顶 alt=90
         n_alt = 21
         alt_km = np.arange(n_alt, dtype=float) * 4.5
@@ -4958,7 +4983,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         ray_alt = np.tile(alt_km, 12)
         ray_pts = self._screen_points_many(ray_az, ray_alt)
         for i in range(12):
-            path = QPainterPath()
             first = True
             for p in ray_pts[i * n_alt:(i + 1) * n_alt]:
                 if not self._on_screen(p):
@@ -4968,13 +4992,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     path.moveTo(p); first = False
                 else:
                     path.lineTo(p)
-            painter.drawPath(path)
         # 等高圈 (alt = 0,30,60)
         ring_az = np.tile(np.arange(0, 361, 4, dtype=float), 3)
         ring_alt = np.repeat(np.array([0.0, 30.0, 60.0]), 91)
         ring_pts = self._screen_points_many(ring_az, ring_alt)
         for i in range(3):
-            path = QPainterPath()
             first = True
             for p in ring_pts[i * 91:(i + 1) * 91]:
                 if not self._on_screen(p):
@@ -4984,7 +5006,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     path.moveTo(p); first = False
                 else:
                     path.lineTo(p)
-            painter.drawPath(path)
+        painter.drawPath(path)
         painter.restore()
 
     # ------------------------------------------------------------------ #

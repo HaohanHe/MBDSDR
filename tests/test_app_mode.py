@@ -171,7 +171,13 @@ class TestPlanetariumAssembly:
             assert mw._spectrum_page_layout.indexOf(mw.spectrum) < 0
             assert mw._planetarium_waterfall_layout.indexOf(mw.spectrum) >= 0
             assert mw.spectrum.parentWidget() is mw._planetarium_waterfall_slot
+            # 时空主导形态：频谱默认不占位（底部 180px = 1/5 天空），
+            # 但必须能一键拉出来——"不默认显示"≠"拿不到"。
+            assert not mw._planetarium_waterfall_slot.isVisibleTo(mw)
+            mw.set_planetarium_waterfall(True)
             assert mw._planetarium_waterfall_slot.isVisibleTo(mw)
+            mw.set_planetarium_waterfall(False)
+            assert not mw._planetarium_waterfall_slot.isVisibleTo(mw)
         finally:
             mw.set_app_mode("ide")
         assert mw._spectrum_page_layout.indexOf(mw.spectrum) >= 0

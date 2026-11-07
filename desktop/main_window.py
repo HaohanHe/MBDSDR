@@ -2139,6 +2139,18 @@ class MainWindow(QMainWindow):
         self._planetarium_fs_btn.setMinimumHeight(36)
         self._planetarium_fs_btn.clicked.connect(self._toggle_fullscreen)
         strip_lay.addWidget(self._planetarium_fs_btn, 0, Qt.AlignHCenter)
+        # 频谱开合：星象仪是时空主导形态，频谱默认不进来抢 1/5 屏；
+        # 但"不默认显示"不等于"拿不到"——想看信号时一颗按钮拉出来。
+        wf_btn = QPushButton("频谱")
+        wf_btn.setObjectName("planetariumWaterfall")
+        wf_btn.setCheckable(True)
+        wf_btn.setChecked(bool(getattr(self, "_planetarium_waterfall_on",
+                                       False)))
+        wf_btn.setToolTip("在底部显示/隐藏频谱瀑布（退出形态不改变设置）")
+        wf_btn.setMinimumHeight(32)
+        wf_btn.toggled.connect(self.set_planetarium_waterfall)
+        strip_lay.addWidget(wf_btn, 0, Qt.AlignHCenter)
+        self._planetarium_wf_btn = wf_btn
         strip_lay.addWidget(exit_btn, 0, Qt.AlignHCenter)
         strip_lay.addStretch(1)
         self._planetarium_strip = strip
@@ -2238,11 +2250,30 @@ class MainWindow(QMainWindow):
             idx = max(0, min(int(info.get("index", 0)), lt.count()))
             lt.insertTab(idx, sky, "星象仪模式")
             lt.tabBar().setTabData(idx, "rf_sky")
+            # 插回去还要**选中**：退出前若停在"频谱"页，insertTab 不会把当前页
+            # 切过来，用户按 Esc 退出星象仪看到的是一片频谱/黑底，以为天空没了。
+            lt.setCurrentIndex(idx)
         elif kind == "dock" and info.get("dock") is not None:
             info["dock"].setWidget(sky)
         elif info.get("parent") is not None:
             sky.setParent(info["parent"])
             sky.show()
+
+    def set_planetarium_waterfall(self, on: bool) -> None:
+        """星象仪底部频谱开合（默认关）。
+
+        形态本身归时空主导：频谱占走底部 180px 就等于砍掉 1/5 的天空，
+        所以默认不进来；但它必须**能**一键拉出（信号还是要看），开合状态
+        跨形态记住，但不写盘——下次仍从"安静看天"开始。
+        """
+        on = bool(on)
+        self._planetarium_waterfall_on = on
+        slot = getattr(self, "_planetarium_waterfall_slot", None)
+        if slot is not None and getattr(self, "_app_mode", "ide") == "planetarium":
+            slot.setVisible(on)
+        btn = getattr(self, "_planetarium_wf_btn", None)
+        if btn is not None and btn.isChecked() != on:
+            btn.setChecked(on)
 
     def _enter_planetarium(self) -> None:
         if getattr(self, "_app_mode", "ide") == "planetarium":
@@ -2303,6 +2334,14 @@ class MainWindow(QMainWindow):
             bar.setParent(self._planetarium_sky_slot)
             self._ai_cmd_parent = self._planetarium_sky_slot
             self._position_ai_cmd_bar()
+            # 星象仪里这颗胶囊是外行唯一的入口，占位文案不能还是
+            # "频率 / 模式 / 解调 / 搜索"——那是给懂的人看的。换成一句人话。
+            try:
+                self._ai_placeholder_ide = self.cmd_input.placeholderText()
+                self.cmd_input.setPlaceholderText(
+                    "问我：那颗最亮的是什么星？现在头顶有卫星吗？")
+            except (AttributeError, RuntimeError):
+                pass
         self._mode_stack.setCurrentWidget(self._planetarium_page)
         self._app_mode = "planetarium"
         # 星象仪构图：朝地平看（地景剪影+辉光带入画），天顶俯视留给 IDE 形态
@@ -2343,6 +2382,13 @@ class MainWindow(QMainWindow):
                 bar.setParent(old_parent)
                 self._ai_cmd_parent = old_parent
                 self._position_ai_cmd_bar()
+            # 占位文案换回 IDE 语境
+            saved = getattr(self, "_ai_placeholder_ide", None)
+            if saved:
+                try:
+                    self.cmd_input.setPlaceholderText(saved)
+                except (AttributeError, RuntimeError):
+                    pass
         # 回复覆盖卡随形态退出隐藏（不销毁文本；历史在 AI 面板里）
         card = getattr(self, "_planetarium_ai_card", None)
         if card is not None:

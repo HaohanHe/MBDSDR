@@ -431,6 +431,8 @@ class SerialGNSSReader:
         self._lock = threading.Lock()
         self._port: Optional[str] = None
         self._baudrate: Optional[int] = None
+        # 行缓冲：批量读进来的原始字节先攒着，再按 \n 切行（见 _read_loop）
+        self._buf = b""
         # 热插拔状态
         self._connected = False          # 串口真正打开且近期有数据
         self._data_timeout = 5.0         # 连续无数据超过此秒数视为断线
@@ -675,6 +677,8 @@ class SerialGNSSReader:
                 pass
         self._ser = None
         self._connected = False
+        # 断线时丢掉半行缓冲：重连后从行首开始解析，不把上一条的血尾拼进去
+        self._buf = b""
 
     def _reconnect(self) -> bool:
         """后台线程内重连：每隔 _reconnect_interval 秒尝试重开当前 port/baud。
@@ -708,25 +712,43 @@ class SerialGNSSReader:
                 last_data = time.time()
                 continue
             try:
-                raw = self._ser.readline()
+                # 批量读 + 行切分：pyserial 的 readline() 是逐字节 C 调用
+                # （一行 NMEA ~80 B），9600 波特 10 行/s 意味着后台线程每秒
+                # 要进 800 次 read。实测这会让 GUI 主线程每帧多等 ~100 ms
+                # （GIL 争用），星象仪拖到 8 fps。改成"有多少收多少"后
+                # read 调用降到 ~10 次/s，主线程不再被串口拖住。
+                # 只实现 readline 的替身（测试里的 MockSerial）走回退分支。
+                ser = self._ser
+                try:
+                    waiting = int(getattr(ser, "in_waiting", 0) or 0)
+                    raw = ser.read(waiting or 1)
+                except AttributeError:
+                    raw = ser.readline()
             except Exception:
                 # 读异常（拔线/USB 断开）→ 关掉，进入重连
                 self._close_ser()
                 continue
             if not raw:
-                # readline 超时（timeout=1s 返回空）：检查是否长时间无数据
+                # read 超时（timeout=1s 返回空）：检查是否长时间无数据
                 if time.time() - last_data > self._data_timeout:
                     self._close_ser()
                 continue
             last_data = time.time()
             self._connected = True
-            try:
-                line = raw.decode("ascii", errors="ignore")
-            except Exception:
-                continue
-            rec = self.parser.parse(line)
-            if rec is not None:
-                self._merge(rec)
+            self._buf += raw
+            # 只处理完整行；半行留在缓冲里等下一批。缓冲上限防御：
+            # 若对端一直不发 \n（非 NMEA 设备/波特率不匹配），截断避免无限增长。
+            if len(self._buf) > 65536 and b"\n" not in self._buf:
+                self._buf = b""
+            while b"\n" in self._buf:
+                raw_line, self._buf = self._buf.split(b"\n", 1)
+                try:
+                    line = raw_line.decode("ascii", errors="ignore")
+                except Exception:
+                    continue
+                rec = self.parser.parse(line)
+                if rec is not None:
+                    self._merge(rec)
 
     def _merge(self, rec: Dict[str, Any]):
         """把单条语句合并进最新 fix 状态。"""
