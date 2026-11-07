@@ -185,7 +185,7 @@ std::optional<std::vector<uint8_t>> rsDecode255(const uint8_t* codeword) {
         out[pos] ^= mag;
     }
     // 硬验证：纠正后码字伴随式必须全零。
-    // 与 Python fec.ReedSolomon.decode 同一纪律（2026-11-08 对齐）：错误数
+    // 与 Python fec.ReedSolomon.decode 同一纪律（2026-11-07 对齐）：错误数
     // 超过 t=16 时 BM 仍可能给出「恰好 ≤t 个根」的解并配上 Forney 幅值，
     // 但该解不自洽——真录实测 17 错被报成 1 错、重编码距离 33。不验证就会
     // 把垃圾当成功放行，污染整条 VCDU 真值。
@@ -218,7 +218,7 @@ std::optional<std::vector<uint8_t>> lrptDecodeCadu(const uint8_t* vb, int n) {
     // 与 Python lrpt_fec.decode_cadu(order="woven")、TU Berlin
     // reedsolomon.m:48-51（corrected(j:I:end)=decoded）同口径。
     // concat 顺序拼接是合成链口径，对真录会让 VCDU 头字段整体错位
-    // （2026-11-08 实测：concat 下帧计数乱、图像包 0 个；woven 下计数连续、
+    // （2026-11-07 实测：concat 下帧计数乱、图像包 0 个；woven 下计数连续、
     // APID 64/65/68 齐出）。
     std::vector<uint8_t> payload;
     payload.reserve(892);

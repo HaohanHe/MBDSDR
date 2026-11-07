@@ -148,7 +148,7 @@ def test_real_recording_candidate_floor(cands):
 ASM = bytes([0x1A, 0xCF, 0xFC, 0x1D])
 NEED_CODED_BITS = SYNC_BITS + (CADU_SIZE * 8 + 6) * 2
 
-# 真录真值（2026-11-08 重钉）：40-80s 宽窗 + **order="woven"** + 擦除辅助
+# 真录真值（2026-11-07 重钉）：40-80s 宽窗 + **order="woven"** + 擦除辅助
 # RS + 伴随式验证。**旧值已作废**：原先那两条（407300ec…/4062000a…）经法证
 # 是 RS 误纠产物——4 块纠正后重编码与收到码字距离 31-32 字节，远超 t=16，
 # 说明纠正结果根本不是合法码字（_probe_vcdu_forensics.log）。
@@ -172,7 +172,7 @@ def _pair_swap(soft: np.ndarray) -> np.ndarray:
 def stack(consecutive):
     """协议栈全栈结果——直接复用连帧 fixture（同一批帧，零额外解调）。
 
-    2026-11-08 合并：此前 stack 用 52-62s 窄窗单独解调一次，consecutive 用
+    2026-11-07 合并：此前 stack 用 52-62s 窄窗单独解调一次，consecutive 用
     40-80s 宽窗再解一次。窄窗那 2 条「RS 全纠正 VCDU」经法证是 RS 误纠
     （4 块纠正后重编码与收到码字距离 31-32，远超 t=16），补上伴随式验证后
     归零。故统一到宽窗真值，两处 fixture 只解一次调。
@@ -255,7 +255,7 @@ def test_pair_swap_convention_adjudicated(stack):
 CONSEC_WINDOW = (40.0, 80.0)   # 连帧扫描宽窗（过境主体）
 
 #: 连帧 VCDU 载荷头 32B 钉子（流序前 3 条）。
-#: **2026-11-08 重钉**：旧钉子（40e30063…/40e60141…/40f200f9…）来自 concat
+#: **2026-11-07 重钉**：旧钉子（40e30063…/40e60141…/40f200f9…）来自 concat
 #: 重组 + 无伴随式验证的解码链，其中至少 1 条已被原作者标注为「疑为 RS
 #: 误纠」。补上验证后旧钉子全部不成立（concat 序下头字段本就错位）。
 #: 新钉子走 woven 真值序，帧计数 639186→639195→654302 与图像包 APID
@@ -293,7 +293,7 @@ def consecutive():
     载荷列表（**流序**，order="woven" 真值序 + 擦除辅助），raws 为
     (sym_idx, raw_cadu) 流序元组（含 4B ASM 的 Viterbi 原始 CADU）。
 
-    2026-11-08 重做：旧版是 concat 重组 + 无伴随式验证，产出的「16 条
+    2026-11-07 重做：旧版是 concat 重组 + 无伴随式验证，产出的「16 条
     VCDU」经法证全部不成立（纠正后重编码与收到码字距离 31-32 > t=16）。
     现链路的 10 条有独立协议层背书：帧计数连续、图像包 APID 64/65/68。
     """
@@ -400,7 +400,7 @@ def test_real_recording_consecutive_heads_pinned(consecutive):
 # 恒 0x4005、FHP 全域、包结构逐字命中 extraction.m 判据（08-APID-序列-
 # 长度-日毫秒-MCU-FFF0-Q）。
 #
-# 实测（2026-11-08 重钉，40-80s 宽窗，**10 条**经伴随式验证的 VCDU）：
+# 实测（2026-11-07 重钉，40-80s 宽窗，**10 条**经伴随式验证的 VCDU）：
 # 10 图像包（APID 64/65/68）、6 个扫描时刻、84 个 8×8 块（21/27/36）、
 # RGB (48,1568,3)。覆盖率诚实稀疏（2-3%），缺块填 128 + valid 掩码。
 #
@@ -412,14 +412,14 @@ def test_real_recording_consecutive_heads_pinned(consecutive):
 PIN_FIRST_IMAGE_PKT = (
     "08413fa400d900000296268c00007e0000fff05bfa2f52d2535e558e26b9e064"
 )  # 首图像包头 32B（APID=65 seq=16292 日=0 ms=43394700 MCU=126 Q=91）
-PIN_FIRST_BLOCK_DC = 139   # 首包首块 DC 系数（整数域，2026-11-08 实测）
+PIN_FIRST_BLOCK_DC = 139   # 首包首块 DC 系数（整数域，2026-11-07 实测）
 
 
 @pytest.fixture(scope="module")
 def image_chain(consecutive):
     """图像链全栈（直接复用连帧 fixture 的 valid 载荷，零额外解码）。
 
-    2026-11-08 统一：consecutive 的 valid 已用 **order="woven"** + 擦除辅助
+    2026-11-07 统一：consecutive 的 valid 已用 **order="woven"** + 擦除辅助
     + 伴随式验证产出（真录/CCSDS 往返切分真值序），此处不再二次解码，
     避免「同一批 raw 用两种口径各解一遍」的旧分叉。
 

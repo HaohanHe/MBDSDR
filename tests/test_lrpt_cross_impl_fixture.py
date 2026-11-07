@@ -39,7 +39,7 @@ def _manifest():
 def _decode_soft(soft: np.ndarray) -> bytes:
     """软位流 → 892B VCDU 载荷。
 
-    2026-11-08 起走 **woven 重组 + 擦除辅助 RS + 伴随式验证**——旧口径
+    2026-11-07 起走 **woven 重组 + 擦除辅助 RS + 伴随式验证**——旧口径
     （concat + 无验证）解出的「真值」被法证证伪为 RS 误纠（纠正后重编码
     与收到码字距离 31-32 > t=16），整份 manifest 随 fixture 一起重钉。
     """

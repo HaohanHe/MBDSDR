@@ -201,7 +201,7 @@
   （钩子存量 bug，崩溃点在共享 index 同步成功之后、marker 消费之前，
   marker 留存即闸门通过证据）；后续提交命令带 `PYTHONUTF8=1` 规避。
 
-### 我这边（2026-11-08 深夜 追加：#9 擦除辅助 RS + 真录真值重钉）
+### 我这边（2026-11-07 深夜 追加：#9 擦除辅助 RS + 真录真值重钉）
 
 - **`a694b322` #9 闭环 + 一个真 bug**：RS 加擦除解码
   （`decode(erasures=)` / `decode_with_reliability`，判据 2e+f ≤ 32）、
@@ -2509,7 +2509,7 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
 | 轮次 | 截止 | FAIL 目标 | 本轮要清的块（补证型优先） | 判据（全部满足才算达标） |
 |---|---|---:|---|---|
 | R-1（本轮） | 2026-11-06 | ≤ 70 | `PRD-现状对照` 16 + `settings-surface-audit` 10 + `PRD` 10 | 三文件复扫 R1=0；全量复扫 FAIL=66 |
-| R-2 | 2026-11-08 | ≤ 45 | **补 hash 就能解决**的块：`settings-inventory` 9 + `capability-map` 7 + `hardcoded-parameters` 5（21 条）；余量给短块 `prototype-gap` 4 / `star-catalog` 1 / `code-guards` 1 | 全量 FAIL ≤ 45；**本轮 `R1 实修` 增量 ≥ 15 条**（只靠降级/转 T 不算达标） |
+| R-2 | 2026-11-07 | ≤ 45 | **补 hash 就能解决**的块：`settings-inventory` 9 + `capability-map` 7 + `hardcoded-parameters` 5（21 条）；余量给短块 `prototype-gap` 4 / `star-catalog` 1 / `code-guards` 1 | 全量 FAIL ≤ 45；**本轮 `R1 实修` 增量 ≥ 15 条**（只靠降级/转 T 不算达标） |
 | R-3 | 2026-11-10 | ≤ 30 | `nanovna/feature-parity` 6 + `narrow-screen-plan` 6 + `limitations-register` 7（后两块允许补不动转 T） | 全量 FAIL ≤ 30；无新文件进榜 |
 | R-4 | 2026-11-13 | ≤ 20 | 余下 12 文件约 26 条（含散点） | 全量 FAIL ≤ 20；到期未完成按 §7.5 转 T（SNAPSHOT 计入总账，欠账不减） |
 | 终局 | 2026-11-20 | 0 | 散点清零 | FAIL=0 且 `SNAPSHOT` 不再增加（转 T 只降 FAIL，不减欠账） |

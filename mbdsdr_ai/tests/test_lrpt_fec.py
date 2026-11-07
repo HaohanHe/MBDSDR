@@ -219,7 +219,7 @@ def test_viterbi_signature_has_no_dead_depth_param():
     docstring 里写明并与 SatDump chainback（cc_decoder.cpp:228-276）对齐。
 
     参数白名单同时防「加了形参却不用」：``return_reliability`` 是
-    2026-11-08 为擦除辅助 RS 加的实参，函数体内真的用它分配/回填度量差
+    2026-11-07 为擦除辅助 RS 加的实参，函数体内真的用它分配/回填度量差
     表，不属于死参数。
     """
     import inspect

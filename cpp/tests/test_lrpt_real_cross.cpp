@@ -46,7 +46,7 @@ static std::optional<std::vector<uint8_t>> decodeSoft(const std::vector<float>& 
     return lrptDecodeCadu(raw.data(), (int)raw.size());
 }
 
-// 真录 VCDU 载荷头 32B（manifest 真值，2026-11-08 重钉）
+// 真录 VCDU 载荷头 32B（manifest 真值，2026-11-07 重钉）
 //
 // ⚠ 旧钉子（407300ec… / 4062000a…）已作废：法证证明那是 RS 误纠产物
 // （4 块纠正后重编码与收到码字距离 31-32 字节，远超 t=16）。新真值走

@@ -79,22 +79,22 @@
       "provenance": "external-truth",
       "source_name": "TU Berlin lar-tech/satellite-decoder meteor_m2_72k.wav（真录派生软比特）",
       "sha256": "1cd8665b31a1cba5b51c4583c7c64d40fea6a8a467897433b89e86e97e6e4167",
-      "derivation": "https://raw.githubusercontent.com/lar-tech/satellite-decoder/main/data/meteor_m2_72k.wav（SHA-256 c8be339e69db2b192f852c8ab5d2cb7c7b547552bab41fadd584e0296df0cdf8）真录过境导出软比特；2026-11-08 重取帧（sym_index=114110, variant=swap+inv）——旧帧的真值被法证证明为 RS 误纠",
-      "date": "2026-11-08"
+      "derivation": "https://raw.githubusercontent.com/lar-tech/satellite-decoder/main/data/meteor_m2_72k.wav（SHA-256 c8be339e69db2b192f852c8ab5d2cb7c7b547552bab41fadd584e0296df0cdf8）真录过境导出软比特；2026-11-07 重取帧（sym_index=114110, variant=swap+inv）——旧帧的真值被法证证明为 RS 误纠",
+      "date": "2026-11-07"
     },
     "lrpt_meteor_real_soft_1.f32": {
       "provenance": "external-truth",
       "source_name": "TU Berlin lar-tech/satellite-decoder meteor_m2_72k.wav（真录派生软比特）",
       "sha256": "f8f96a932b191a9e9830298007e4844743c6fabf1a44b8fe9fc17875b57b23ad",
-      "derivation": "同上真录；2026-11-08 重取帧（sym_index=187838, variant=swap+inv），见 lrpt_meteor_real_soft_manifest.json",
-      "date": "2026-11-08"
+      "derivation": "同上真录；2026-11-07 重取帧（sym_index=187838, variant=swap+inv），见 lrpt_meteor_real_soft_manifest.json",
+      "date": "2026-11-07"
     },
     "lrpt_meteor_real_soft_manifest.json": {
       "provenance": "self-generated",
       "source_name": "仓内脚本对 TU Berlin 真录软比特生成的清单",
-      "sha256": "bfec6b607efb17efce33681727e607367f69fa2ab0e2137d03adb1a2af441434",
-      "derivation": "由真录导出的软比特之后，仓内生成的元数据清单（n_soft/sym_index/variant/rs_errors/erasures_used）；描述外部真值，但文件本身非外部产出。2026-11-08 随帧重钉，解码口径改为 woven + 擦除辅助 + 伴随式验证",
-      "date": "2026-11-08"
+      "sha256": "f937ccb138bbfc1f8f4d588ab24f4441ab014146eb5666672192f58600ced2a4",
+      "derivation": "由真录导出的软比特之后，仓内生成的元数据清单（n_soft/sym_index/variant/rs_errors/erasures_used）；描述外部真值，但文件本身非外部产出。2026-11-07 随帧重钉，解码口径改为 woven + 擦除辅助 + 伴随式验证",
+      "date": "2026-11-07"
     },
     "celestial_ofdate_golden.json": {
       "provenance": "external-truth",

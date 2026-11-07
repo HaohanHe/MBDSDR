@@ -1,6 +1,6 @@
 {
   "source": "meteor_m2_72k.wav (TU Berlin lar-tech, SHA-pinned in golden test)",
-  "note": "soft bits AFTER winning constellation transform (pair-swap family); decoded with order=woven (CCSDS 往返切分) + erasure-assisted RS + syndrome verification — 2026-11-08 re-pinned after old concat-order truths were proven to be RS miscorrections",
+  "note": "soft bits AFTER winning constellation transform (pair-swap family); decoded with order=woven (CCSDS 往返切分) + erasure-assisted RS + syndrome verification — 2026-11-07 re-pinned after old concat-order truths were proven to be RS miscorrections",
   "asm": "1acffc1d",
   "frames": [
     {

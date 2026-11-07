@@ -352,7 +352,7 @@ class ReedSolomon:
         if self.ccsds_invert:
             data = bytes(b ^ 0xFF for b in data)
         # 硬验证：纠正后码字的伴随式必须全零。
-        # 为什么必须有这一步（2026-11-08 真录实测）：错误数超过 t=16 时
+        # 为什么必须有这一步（2026-11-07 真录实测）：错误数超过 t=16 时
         # Berlekamp-Massey 仍可能给出一个「恰好 ≤t 个根」的解并配上 Forney
         # 幅值，但该解并不自洽——真录探针里 17 个符号错被报成 nerrors=1、
         # corrected=True，纠正后的数据重编码与原码字相差 33 字节。不验证
