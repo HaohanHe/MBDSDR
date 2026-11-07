@@ -31,7 +31,7 @@ for _p in (REPO_ROOT, TESTS_DIR):
 from mbdsdr_ai import dsp
 from mbdsdr_ai.sdr_backend import RTLSDRBackend
 from mbdsdr_ai.audio_out import AudioPlayer
-from fake_rtl import FakeRtlSdr  # tests/ 专属双棒，绝不进 mbdsdr_ai/desktop/
+from fake_rtl import FakeRtlSdr, fake_rtlsdr_package  # tests/ 专属双棒，绝不进 mbdsdr_ai/desktop/
 
 
 # ═══════════════════════════════════════════════════════
@@ -281,18 +281,11 @@ class TestTC6ConnectAppliesHardwareSettings:
 
     @pytest.fixture
     def patched_rtlsdr(self):
-        """把假 rtlsdr 模块塞进 sys.modules，让 connect() 的
-        `from rtlsdr import RtlSdr` 拿到 FakeRtlSdr。沙箱里没装 pyrtlsdr。"""
-        import types
-        fake_mod = types.ModuleType("rtlsdr")
-        fake_mod.RtlSdr = FakeRtlSdr
-        old = sys.modules.get("rtlsdr")
-        sys.modules["rtlsdr"] = fake_mod
-        yield fake_mod
-        if old is not None:
-            sys.modules["rtlsdr"] = old
-        else:
-            sys.modules.pop("rtlsdr", None)
+        """把假 rtlsdr 包塞进 sys.modules（含 rtlsdr.librtlsdr 子模块，
+        防并发枚举线程触发 import 失败清理把 fake 连锅端——见
+        fake_rtl.fake_rtlsdr_package docstring）。"""
+        with fake_rtlsdr_package(FakeRtlSdr) as fake_mod:
+            yield fake_mod
 
     def test_connect_sets_sample_rate_center_freq_gain_agc(self, patched_rtlsdr):
         backend = RTLSDRBackend(device_index=0)
@@ -559,12 +552,7 @@ class TestTC8ReadLoopBlockSizeAndDrops:
 
     def test_backend_read_samples_returns_from_ring(self):
         """connect 后 read_samples 走环形缓冲，能读到生产者写入的数据。"""
-        import types
-        fake_mod = types.ModuleType("rtlsdr")
-        fake_mod.RtlSdr = FakeRtlSdr
-        old = sys.modules.get("rtlsdr")
-        sys.modules["rtlsdr"] = fake_mod
-        try:
+        with fake_rtlsdr_package(FakeRtlSdr):
             backend = RTLSDRBackend(device_index=0)
             assert backend.connect()
             # 等生产者线程填充一点数据
@@ -575,8 +563,3 @@ class TestTC8ReadLoopBlockSizeAndDrops:
             assert len(iq) == 4096
             assert iq.dtype == np.complex64
             backend.disconnect()
-        finally:
-            if old is not None:
-                sys.modules["rtlsdr"] = old
-            else:
-                sys.modules.pop("rtlsdr", None)

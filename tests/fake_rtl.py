@@ -24,7 +24,73 @@
     sample_rate / center_freq / gain / agc，而不是停在出厂默认。
 """
 
+import contextlib
+import importlib
+import sys
+import types
+
 import numpy as np
+
+
+class _StubType:
+    """万能占位：真包 exec 打到 fake 子模块缺符号时用它兜底（仅测试假件）。"""
+
+    def __init__(self, *a, **k):
+        pass
+
+    def __call__(self, *a, **k):
+        return 0
+
+    def __getattr__(self, name):
+        return _StubType()
+
+
+@contextlib.contextmanager
+def fake_rtlsdr_package(rtl_cls):
+    """把假 rtlsdr **包** 装进 sys.modules（含 rtlsdr.librtlsdr 子模块）。
+
+    为什么必须这么脏（2026-11-07 假 rtlsdr 抢线事故根因，两次返工）：
+    desktop/module_panel 的枚举 worker 线程会并发 ``import rtlsdr``。真包
+    是先插 sys.modules 空壳再 exec；exec 期 ``from .librtlsdr import ...``
+    打到非包 fake 会抛「not a package」→ 真包 exec 失败 → import 机器失败
+    清理 ``del sys.modules['rtlsdr']`` 把随后安装的 fake **连锅端掉** →
+    connect 转而拿真 pyrtlsdr 开真棒子。三重防御：
+
+    1. 同步 import：先 ``importlib.import_module("rtlsdr")`` 等任何
+       in-flight 的真包加载按模块锁收尾（成功/失败都算落定），消灭竞态；
+    2. fake 是带 __path__ 的包 + 预埋 rtlsdr.librtlsdr（含万能 __getattr__），
+       相对/子模块导入命中 fake 不再触发失败清理；
+    3. 安装顺序**先子模块后父模块**（反过来中间窗口相对导入打到旧父模块）。
+    """
+    # ① 同步：等并发线程 in-flight 的真 rtlsdr 加载落定（import 按模块锁排队）
+    try:
+        importlib.import_module("rtlsdr")
+    except Exception:
+        pass  # 本机 DLL 缺符号等 import 期失败也算「落定」，key 已被清理
+
+    fake_mod = types.ModuleType("rtlsdr")
+    fake_mod.__path__ = []          # 声明为包
+    fake_mod.RtlSdr = rtl_cls
+    fake_lib = types.ModuleType("rtlsdr.librtlsdr")
+    fake_lib.librtlsdr = fake_lib   # from rtlsdr.librtlsdr import librtlsdr
+    fake_lib.rtlsdr_get_device_count = lambda: 0
+    fake_lib.rtlsdr_reset_buffer = lambda dev_p: 0
+    fake_lib.rtlsdr_set_freq_correction = lambda dev_p, ppm: 0
+    fake_lib.__getattr__ = lambda name: _StubType()   # PEP 562：缺啥补啥
+    fake_mod.librtlsdr = fake_lib
+
+    keys = ("rtlsdr.librtlsdr", "rtlsdr")
+    saved = {k: sys.modules.get(k) for k in keys}
+    sys.modules["rtlsdr.librtlsdr"] = fake_lib
+    sys.modules["rtlsdr"] = fake_mod
+    try:
+        yield fake_mod
+    finally:
+        for k in keys:
+            if saved[k] is not None:
+                sys.modules[k] = saved[k]
+            else:
+                sys.modules.pop(k, None)
 
 
 class FakeRtlSdr:

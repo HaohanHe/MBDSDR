@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 from mbdsdr_ai.sdr_backend import RTLSDRBackend  # noqa: E402
 from mbdsdr_ai.squelch import margin_threshold_db  # noqa: E402
 
-from fake_rtl import FakeRtlSdr  # noqa: E402
+from fake_rtl import FakeRtlSdr, fake_rtlsdr_package  # noqa: E402
 
 CYCLES = 10
 
@@ -117,7 +117,7 @@ def _estimate_hz(iq: np.ndarray, sr: float) -> float:
     return float(np.median(step)) * sr / (2.0 * np.pi)
 
 
-def _install_fake_rtl(monkeypatch):
+def test_rtlsdr_ten_hotplug_cycles_keep_threads_handles_and_first_frame(monkeypatch):
     devices = []
 
     def _factory(idx=0):
@@ -125,19 +125,14 @@ def _install_fake_rtl(monkeypatch):
         devices.append(dev)
         return dev
 
-    fake_mod = types.ModuleType("rtlsdr")
-    fake_mod.RtlSdr = _factory
-    old = sys.modules.get("rtlsdr")
-    sys.modules["rtlsdr"] = fake_mod
-    monkeypatch.setattr(
-        RTLSDRBackend, "_probe_tuner_type",
-        staticmethod(lambda idx: 5), raising=False)
-    return devices, old
-
-
-def test_rtlsdr_ten_hotplug_cycles_keep_threads_handles_and_first_frame(monkeypatch):
-    devices, old = _install_fake_rtl(monkeypatch)
-    try:
+    # 假 rtlsdr 必须是「包」且预埋 rtlsdr.librtlsdr 子模块——module_panel
+    # 的枚举 worker 线程会并发 import rtlsdr，裸模块 fake 会被真包 exec 失败
+    # 的 import 清理连锅端（假 rtlsdr 被真 pyrtlsdr 抢线的根因，详见
+    # fake_rtl.fake_rtlsdr_package docstring）。
+    with fake_rtlsdr_package(_factory):
+        monkeypatch.setattr(
+            RTLSDRBackend, "_probe_tuner_type",
+            staticmethod(lambda idx: 5), raising=False)
         be = RTLSDRBackend(device_index=0)
         # 预热一轮：把进程级首次初始化排除出基线。
         # 只 connect/disconnect 不够：首次 _ensure_receive_chain() 会让
@@ -198,11 +193,37 @@ def test_rtlsdr_ten_hotplug_cycles_keep_threads_handles_and_first_frame(monkeypa
         # 末轮结束后再确认一次（防止最后一轮藏在循环尾部）
         assert len(devices) == 1 + CYCLES
         assert all(d.closed for d in devices), "旧棒句柄必须全部 close"
-    finally:
-        if old is not None:
-            sys.modules["rtlsdr"] = old
-        else:
-            sys.modules.pop("rtlsdr", None)
+
+
+def test_fake_package_survives_concurrent_imports():
+    """根因钉扎：并发线程反复 import rtlsdr/librtlsdr 不得拔掉 fake。
+
+    历史事故（2026-11-07 另账存量红）：module_panel 枚举 worker 并发
+    import 真 rtlsdr，其 exec 期 `from .librtlsdr import librtlsdr` 打到
+    裸模块 fake 抛「not a package」→ 真包 exec 失败 → import 机器失败清理
+    `del sys.modules['rtlsdr']` 把 fake 连锅端 → connect 转而拿真 pyrtlsdr
+    开真棒子（LibUSBError）。fake_rtlsdr_package 做成带 __path__ 的包并
+    预埋 rtlsdr.librtlsdr 子模块后，相对导入命中 fake，该失败路径不复存在。
+    """
+    import importlib
+
+    class _Probe:
+        pass
+
+    with fake_rtlsdr_package(_Probe):
+        def _spam():
+            for _ in range(30):
+                importlib.import_module("rtlsdr")
+                importlib.import_module("rtlsdr.librtlsdr")
+
+        threads = [threading.Thread(target=_spam) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5.0)
+        assert sys.modules["rtlsdr"].RtlSdr is _Probe, \
+            "并发 import 后 fake 被拔——import 失败清理又误伤了"
+        assert "rtlsdr.librtlsdr" in sys.modules
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -44,7 +44,7 @@ from mbdsdr_ai.spyserver_client import (
     SpyServerClient,
     SpyServerError,
 )
-from fake_rtl import FakeRtlSdr  # tests/ 专属双棒，绝不进生产路径
+from fake_rtl import FakeRtlSdr, fake_rtlsdr_package  # tests/ 专属双棒，绝不进生产路径
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -685,14 +685,10 @@ class TestDeviceExclusivityAndHotplug:
                 created.append(self)
                 raise OSError("usb_open error -3: Unable to open device")
 
-        fake_mod = types.ModuleType("rtlsdr")
-        fake_mod.RtlSdr = _BusyRtlSdr
-        old = sys.modules.get("rtlsdr")
-        sys.modules["rtlsdr"] = fake_mod
-        monkeypatch.setattr(
-            RTLSDRBackend, "_probe_tuner_type",
-            staticmethod(lambda idx: 5), raising=False)
-        try:
+        with fake_rtlsdr_package(_BusyRtlSdr):
+            monkeypatch.setattr(
+                RTLSDRBackend, "_probe_tuner_type",
+                staticmethod(lambda idx: 5), raising=False)
             be = RTLSDRBackend(device_index=0)
             assert be.connect() is False
             assert be.status.link_state == "failed"
@@ -700,11 +696,6 @@ class TestDeviceExclusivityAndHotplug:
             assert "设备被占用" in be.status.error
             assert be.status.connected is False
             assert be._sdr is None, "打开失败的句柄必须被释放，不能残留"
-        finally:
-            if old is not None:
-                sys.modules["rtlsdr"] = old
-            else:
-                sys.modules.pop("rtlsdr", None)
 
     def test_hotplug_unplug_detected_then_reconnect_without_stale_threads(
             self, monkeypatch):
@@ -742,14 +733,10 @@ class TestDeviceExclusivityAndHotplug:
                 devices.append(dev)
                 return dev
 
-        fake_mod = types.ModuleType("rtlsdr")
-        fake_mod.RtlSdr = _Factory()
-        old = sys.modules.get("rtlsdr")
-        sys.modules["rtlsdr"] = fake_mod
-        monkeypatch.setattr(
-            RTLSDRBackend, "_probe_tuner_type",
-            staticmethod(lambda idx: 5), raising=False)
-        try:
+        with fake_rtlsdr_package(_Factory()):
+            monkeypatch.setattr(
+                RTLSDRBackend, "_probe_tuner_type",
+                staticmethod(lambda idx: 5), raising=False)
             be = RTLSDRBackend(device_index=0)
             assert be.connect() is True
             assert be.status.connected is True
@@ -787,8 +774,3 @@ class TestDeviceExclusivityAndHotplug:
             be.disconnect()
             assert be._ring_reader is None
             assert be.status.link_state == "disconnected"
-        finally:
-            if old is not None:
-                sys.modules["rtlsdr"] = old
-            else:
-                sys.modules.pop("rtlsdr", None)
