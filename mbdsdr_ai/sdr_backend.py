@@ -4531,7 +4531,11 @@ class FileIQBackend(SDRBackend):
       .cu8/.u8/.bin   unsigned 8-bit 交错 IQ（`rtl_sdr` 命令原生录制格式）
       .cfile/.cf32     complex float32 交错（GNU Radio .cfile）
       .cs16/.s16      signed 16-bit 交错
+      .wav            立体声 int16（I=左 Q=右；sidecar wav_scale 反归一化，
+                      无 sidecar 时采样率以 wav 头帧率为准）
+      .csv            录制器文本格式（I,Q 表头 + 每行两个浮点）
     同名 .json sidecar 可提供 {"sample_rate":..., "center_freq":..., "format":...}。
+    sidecar 损坏如实报错，绝不静默按默认值播（那是按错误速率/频率解释数据）。
     """
 
     def __init__(self, path: str, sample_rate: float = 2_400_000,
@@ -4566,17 +4570,23 @@ class FileIQBackend(SDRBackend):
             os.path.splitext(self._path)[0] + ".json",
         ]
         meta_path = next((p for p in meta_candidates if os.path.exists(p)), None)
+        wav_scale = 1.0
         if meta_path:
             try:
-                with open(meta_path) as f:
+                with open(meta_path, encoding="utf-8") as f:
                     meta = json.load(f)
-                self._rate = meta.get("sample_rate",
-                             meta.get("sample_rate_hz", self._rate))
-                self._freq = meta.get("center_freq",
-                             meta.get("center_hz", self._freq))
-                self._fmt = meta.get("format", self._fmt)
-            except Exception:
-                pass
+                if not isinstance(meta, dict):
+                    raise ValueError("顶层不是 JSON 对象")
+            except Exception as e:
+                raise ValueError(
+                    f"IQ sidecar 解析失败（{meta_path}）: {type(e).__name__}: {e}。"
+                    "请修复或删除该 sidecar 后重试。") from e
+            self._rate = meta.get("sample_rate",
+                         meta.get("sample_rate_hz", self._rate))
+            self._freq = meta.get("center_freq",
+                         meta.get("center_hz", self._freq))
+            self._fmt = meta.get("format", self._fmt)
+            wav_scale = float(meta.get("wav_scale", 1.0))
         ext = (self._fmt or os.path.splitext(self._path)[1].lower().lstrip(".")).lower()
         if ext == "npy":
             self._samples = np.asarray(np.load(self._path), dtype=np.complex64)
@@ -4593,8 +4603,37 @@ class FileIQBackend(SDRBackend):
             raw = np.fromfile(self._path, dtype=np.int16)
             raw = raw[:len(raw) // 2 * 2].reshape(-1, 2).astype(np.float32) / 32768.0
             self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex64)
+        elif ext == "wav":
+            import wave
+            with wave.open(self._path, "rb") as wf:
+                if wf.getnchannels() != 2 or wf.getsampwidth() != 2:
+                    raise ValueError(
+                        f"wav 回放仅支持立体声 16-bit（I=左 Q=右）: {self._path}"
+                        f"（实际 {wf.getnchannels()} 声道/{wf.getsampwidth() * 8} bit）")
+                header_rate = wf.getframerate()
+                raw = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+            raw = raw[:len(raw) // 2 * 2].reshape(-1, 2).astype(np.float32) / 32768.0
+            self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex64)
+            if wav_scale != 1.0:
+                self._samples = (self._samples * np.float32(wav_scale)).astype(np.complex64)
+            if meta_path is None and header_rate > 0:
+                # 无 sidecar 时 wav 头帧率是真实元数据，不拿构造默认值冒充
+                self._rate = float(header_rate)
+        elif ext == "csv":
+            data = np.loadtxt(self._path, delimiter=",", skiprows=1, ndmin=2)
+            if data.size == 0:
+                self._samples = np.empty(0, dtype=np.complex64)
+            else:
+                if data.shape[1] != 2:
+                    raise ValueError(
+                        f"csv 回放需要 I,Q 两列: {self._path}（实际 {data.shape[1]} 列）")
+                self._samples = np.asarray(data[:, 0] + 1j * data[:, 1],
+                                           dtype=np.complex64)
         else:
-            raise ValueError(f"不支持的 IQ 文件格式: {ext}（支持 npy/cu8/cfile/cs16）")
+            raise ValueError(
+                f"不支持的 IQ 文件格式: {ext}（支持 npy/cu8/cfile/cs16/wav/csv）")
+        if len(self._samples) == 0:
+            raise ValueError(f"IQ 文件不含任何样本: {self._path}")
         self.status.sample_rate_hz = self._rate
         self.status.frequency_hz = self._freq
         return len(self._samples)
@@ -4602,12 +4641,16 @@ class FileIQBackend(SDRBackend):
     def connect(self) -> bool:
         try:
             self._load()
-            self.status.connected = True
-            self._start_time = time.time()
-            return True
-        except Exception:
+        except Exception as e:
             self.status.connected = False
+            self.status.link_state = "failed"
+            self.status.error = f"IQ 文件回放连接失败: {type(e).__name__}: {e}"
             return False
+        self.status.connected = True
+        self.status.link_state = "connected"
+        self.status.error = ""
+        self._start_time = time.time()
+        return True
 
     def disconnect(self):
         self._samples = None

@@ -3865,7 +3865,9 @@ def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
             try:
                 from .sdr_backend import FileIQBackend
                 fb = FileIQBackend(input_path)
-                fb.connect()
+                if not fb.connect():
+                    return ToolResult(success=False,
+                                      content=fb.status.error or f"IQ 文件打开失败: {input_path}")
                 sr = float(fb.get_sample_rate())
                 fb.seek(0)
                 fb._loop = False
@@ -4154,7 +4156,9 @@ def _wfm_stereo_tool(mgr, args) -> "ToolResult":
         try:
             from .sdr_backend import FileIQBackend
             fb = FileIQBackend(input_path)
-            fb.connect()
+            if not fb.connect():
+                return ToolResult(success=False,
+                                  content=fb.status.error or f"IQ 文件打开失败: {input_path}")
             sr = float(fb.get_sample_rate())
             fb.seek(0); fb._loop = False
             target = int(sr * duration) if duration and duration < 120 else (1 << 40)

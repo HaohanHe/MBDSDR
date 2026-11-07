@@ -390,7 +390,8 @@ def decode_noaa_apt(
         else:
             from .sdr_backend import FileIQBackend
             fb = FileIQBackend(input_path)
-            fb.connect()
+            if not fb.connect():
+                return {"error": fb.status.error or f"IQ 文件打开失败: {input_path}"}
             sr_iq = float(fb.get_sample_rate())
             fb.seek(0); fb._loop = False
             chunks = []
