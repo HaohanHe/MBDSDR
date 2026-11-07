@@ -45,6 +45,37 @@
 > **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
 > 的交接单视为**收件人改为本线**，按新单逐条销账。
 
+### 我这边（2026-11-08 深夜：九条用户口径收口，已提交待推送）
+
+用户 02:00 前口述九条：主题/语言/布局该进设置；右栏频率「点点圈点点」
+看不懂；中栏黑白无常；AI 助手没学通用 Agent；左栏星座文字被切；
+「全天 160 度」不知所谓且该往下放；要真实桌面式多窗口多任务；
+人工智能编排 / Hooks / 常驻化 / Agent 到底有没有；要大量参照项目。
+
+- 外观五件（theme/lang/layout + 保存/删除）从主工具栏撤下，接进
+  「设置 → 显示与主题」，控件对象身份不变；Tab 链契约更新并加反向锁。
+- 中栏 ADS-B 表格 viewport 调色板钉到画布 card_1（只改 QSS 会被
+  viewport 白底盖回去）。四张 adsb_empty 基线按「仅颜色漂移 --reason」
+  流程受控重定标，`tests/test_ui_layout_locks.py` 74 passed 全绿。
+- 「🌐 全天 160°」按钮不再常驻（它压掉信息卡「星空/天色」两行），
+  操作提示与视野状态改贴底边中文角标；频率控件 / AI 输入栏说人话。
+- 自由窗口粒度降到**单个页签**：任意面板可多开、各自记位置、单独归位；
+  ⧉ 菜单逐项弹出/归位。去掉归位时的 deleteLater() 修 Qt 析构报错。
+- **Agent 常驻**：hooks.py / orchestrator.py / tool_registry.py 一直在仓库里，
+  但没 API Key 时 ai_panel 把 agent 置 None，UI 上什么都没有。现在无 Key
+  也装载内核 + `_ensure_agent_kernel()`；新增 `desktop/capability_drawer.py`
+  按原型 #capDrawer 从真实事实源生成能力格（默认折叠、点用只送名字进
+  输入栏、不预制流程）。离线实测 496 个真实工具 / 82 个能力位可见。
+- 浮层白底：FloatingPanel / CapabilityDrawer 改无条件样式 + WA_StyledBackground。
+
+**验证**：13 文件主批次 274 passed / 4 failed（4 条全是 adsb 配色基线，
+重定标后 `test_ui_layout_locks.py` 74 passed 全绿）；首屏 / 能力矩阵 /
+自由窗口截图逐张肉眼复核（隔离 HOME/APPDATA）。
+**not_verified**：`test_user_layouts.py` 整文件第 5 例挂起 —— 用 462212c1
+基线整文件复跑同样挂起、该用例单跑基线 5.29s / 改动版 9.26s 均 passed，
+判为存量状态问题，明日复查；能力矩阵未在真机 GNSS+SDR 同开下复验；
+右栏控制面板默认仍嵌三栏；银河仍「无数据·不提供」。
+
 ### 我这边（2026-11-08 凌晨：页面极简 + 呼号归设置 + 自由窗口）
 
 用户 23:5x 口述三条，指出此前**全做反了**：①呼号在主界面填、该进设置；
@@ -937,6 +968,14 @@
 
 ## 三、接下来要办啥（队列）
 
+0. **[我，明日]** 用户 02:03「明天再说」后的接续项：
+   ① 存量挂起 `tests/test_user_layouts.py::TestSaveAndRestore::
+   test_capture_layout_roundtrip_keys` 整文件跑卡住（基线同样卡，单跑过），
+   定位前序用例状态污染；② 能力矩阵在真机 GNSS+SDR 同开下复验；
+   ③ 用户点名「大量参照项目」的深化：星座故事、点星之后接「听」、
+   展示页最大化（右栏控制面板默认弹出 / ADS-B 空态收口）；
+   ④ 用户九条里「AI 助手学通用 Agent」——目前只做到内核常驻 +
+   能力位事实源可见，工具调用编排与常驻任务流尚未接进对话栏。
 1. **[TRAE]** `scripts/smoke_exe_no_popup.ps1` 收口提交
 2. **[TRAE]** 便携包线收口：package_windows.ps1 验真机构建打包，旧 stub zip
    问题闭环
