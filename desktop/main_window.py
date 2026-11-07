@@ -4772,7 +4772,20 @@ class MainWindow(QMainWindow):
                 if cp is not None and actual > 0:
                     cp.set_sample_rate(actual)
         _run("带宽", lambda: backend.set_bandwidth(bandwidth))
-        _run("初始频率", lambda: backend.set_frequency(freq))
+        if not _run("初始频率", lambda: backend.set_frequency(freq)):
+            # 请求值被设备拒绝（典型：配置里的 0 Hz 在界面上被夹成边界值
+            # 10 kHz，而 FC0012 下限是 22 MHz）→ 回退到 98.5 MHz 再试一次。
+            # 用户视角"插上棒子"不该等于"看到一条红字"，但回退必须留痕：
+            # 既不静默撒谎（status 里会显示设备真值），也不假装原值生效。
+            if abs(float(freq) - 98_500_000.0) > 1.0:
+                logger.warning("初始频率 %.3f MHz 未被设备接受，回退 98.5 MHz",
+                               float(freq) / 1e6)
+                try:
+                    if backend.set_frequency(98_500_000.0):
+                        failures.pop(failures.index("初始频率"))
+                except Exception as e:  # noqa: BLE001 - 回退失败才保留原失败
+                    logger.warning("回退 98.5 MHz 也失败: %s: %s",
+                                   type(e).__name__, e)
         # 只有设备接受的连接值才算「最后生效值」；被拒时记 None，失败回填
         # 会退到连接默认（PPM 0 / Offset 关），而不是一个设备没接受过的数。
         self._last_ppm_applied = (int(ppm) if
