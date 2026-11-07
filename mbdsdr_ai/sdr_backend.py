@@ -102,6 +102,54 @@ def parse_rtl_tcp_env(value: str, default_port: int = 1234
             out.append((item, int(default_port)))
     return out
 
+
+# 通用网络 IQ 源登记口（sdrpp network_source 同机制）：裸流无元数据，
+# rate/freq 必须由配置显式给定——猜默认值等于伪造口径。逗号分隔多条目。
+NETWORK_IQ_ENV = "MBDSDR_NETWORK_IQ"
+
+
+def parse_network_iq_env(value: str) -> List[Dict[str, Any]]:
+    """解析 ``proto://host:port?rate=<Hz>&freq=<Hz>[&fmt=..][&byteorder=..]``。
+
+    与 parse_rtl_tcp_env 同一份诚实语义：坏条目记 debug 后跳过，空值返回 []。
+    rate/freq 必填且须为有限正数/非负数；fmt/byteorder 缺省 cu8/little。
+    """
+    from urllib.parse import urlsplit, parse_qs
+    out: List[Dict[str, Any]] = []
+    for raw in (value or "").split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        try:
+            u = urlsplit(item)
+            if u.scheme not in ("tcp", "udp"):
+                raise ValueError(f"未知协议 {u.scheme!r}")
+            host = u.hostname or ""
+            port = u.port  # 非数字/越界时 urlsplit 抛 ValueError
+            if not host or port is None or not (0 < port < 65536):
+                raise ValueError("host/port 缺失或越界")
+            q = parse_qs(u.query)
+            if "rate" not in q or "freq" not in q:
+                raise ValueError("rate/freq 必填（裸流无元数据，不猜默认）")
+            rate = float(q["rate"][0])
+            freq = float(q["freq"][0])
+            if not math.isfinite(rate) or rate <= 0:
+                raise ValueError(f"rate 非法: {rate}")
+            if not math.isfinite(freq) or freq < 0:
+                raise ValueError(f"freq 非法: {freq}")
+            fmt = q.get("fmt", ["cu8"])[0]
+            byteorder = q.get("byteorder", ["little"])[0]
+            if fmt not in NETWORK_IQ_FORMATS:
+                raise ValueError(f"未知 IQ 格式 {fmt!r}")
+            if byteorder not in ("little", "big"):
+                raise ValueError(f"未知字节序 {byteorder!r}")
+            out.append(dict(protocol=u.scheme, host=host, port=port,
+                            sample_rate_hz=rate, center_freq_hz=freq,
+                            fmt=fmt, byteorder=byteorder))
+        except Exception as e:
+            logger.debug(f"网络 IQ 配置无法解析（已跳过）: {item!r}: {e}")
+    return out
+
 # 项目统一默认采样率（Hz）。
 # 产品口径（2026-11-05 裁定）：取 RTL-SDR 类上限常见值 2.4 MS/s（SDR++ 新设备
 # 默认也是 2.4M，main.cpp:202）。"默认"只是**首选**，不是保证：设备若不支持该档，
@@ -4765,6 +4813,14 @@ class NetworkIQBackend(SDRBackend):
             raise ValueError(f"未知字节序 {byteorder!r}（可用 little/big）")
         if not (0 < int(port) < 65536):
             raise ValueError(f"port 须在 1..65535，收到 {port}")
+        lo, hi = device.sample_rate_range
+        if not math.isfinite(sample_rate_hz) or not (lo <= sample_rate_hz <= hi):
+            raise ValueError(
+                f"sample_rate_hz 须在设备声明范围 {lo}–{hi}，收到 {sample_rate_hz}")
+        flo, fhi = device.frequency_range
+        if not math.isfinite(center_freq_hz) or not (flo <= center_freq_hz <= fhi):
+            raise ValueError(
+                f"center_freq_hz 须在设备声明范围 {flo}–{fhi}，收到 {center_freq_hz}")
         self._protocol = protocol
         self._host = host
         self._port = int(port)
@@ -4776,26 +4832,54 @@ class NetworkIQBackend(SDRBackend):
         self._sock = None
         self._buf = b""
         self._dropped = 0
+        # 配置即口径：status 从构造起就携带真实端点参数（未连接也可读）。
+        self.status.sample_rate_hz = self._sample_rate_hz
+        self.status.frequency_hz = self._center_freq_hz
 
     # ---- 连接生命周期 ----------------------------------------------------
     def connect(self) -> bool:
         import socket
-        if self._protocol == "tcp":
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
-            sock.connect((self._host, self._port))
-        else:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
-            # UDP 必须绑定端口才能收报文。host 为空串表示监听所有接口
-            # （0.0.0.0）；port 已在构造期拒绝 <=0，这里只允许显式端口。
-            bind_host = self._host or "0.0.0.0"
-            sock.bind((bind_host, self._port))
-        sock.settimeout(5.0)
+        from .link_state import classify_network_error, error_code_for_category
+        sock = None
+        try:
+            if self._protocol == "tcp":
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+                sock.connect((self._host, self._port))
+            else:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+                # UDP 必须绑定端口才能收报文。host 为空串表示监听所有接口
+                # （0.0.0.0）；port 已在构造期拒绝 <=0，这里只允许显式端口。
+                bind_host = self._host or "0.0.0.0"
+                sock.bind((bind_host, self._port))
+            sock.settimeout(5.0)
+        except OSError as e:
+            # 拒绝/超时/解析失败都是真实失败：写清状态，绝不原样抛给调用方
+            # 冒充"没这回事"，也不泄漏半截 socket。
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+            category, message, _suggestion = classify_network_error(
+                e, phase="connect", host=self._host, port=self._port)
+            self.status.connected = False
+            self.status.link_state = "failed"
+            self.status.error_category = category
+            self.status.error_code = error_code_for_category(category)
+            self.status.error = message
+            return False
         self._sock = sock
         self._buf = b""
         self._dropped = 0
+        self.status.connected = True
+        self.status.link_state = "connected"
+        self.status.error = ""
+        self.status.error_category = ""
+        self.status.error_code = ""
+        self._start_time = time.time()
         return True
 
     def disconnect(self) -> None:
@@ -4806,58 +4890,54 @@ class NetworkIQBackend(SDRBackend):
                 pass
         self._sock = None
         self._buf = b""
+        super().disconnect()
 
     def is_connected(self) -> bool:
         return self._sock is not None
 
     # ---- 状态接口 --------------------------------------------------------
-    def get_status(self):
-        st = SDRStatus(connected=self.is_connected(),
-                       frequency_hz=self._center_freq_hz,
-                       sample_rate_hz=self._sample_rate_hz)
-        st.gain = 0.0
-        st.dropped_samples = getattr(self, "_dropped", 0)
+    def get_status(self) -> SDRStatus:
+        # 返回 self.status 本体（基类补 uptime/samples_read）：每次新建对象
+        # 会把 error/recording 等状态全丢，调用方看到的永远是"出厂状态"。
+        st = super().get_status()
         st.buffer_fill = len(self._buf)
+        st.dropped_samples = self._dropped
         return st
 
     # ---- 调谐 ------------------------------------------------------------
-    def set_frequency(self, hz: float) -> None:
-        """网络源不做真实调谐；仅记录当前中心频率（数据已由对端定频）。"""
-        self._center_freq_hz = float(hz)
+    def set_frequency(self, hz: float) -> bool:
+        """网络源不做真实调谐；仅记录中心频率（数据已由对端定频）。
 
-    def set_sample_rate(self, sr: float) -> None:
+        与基类 bool 契约一致：非法值拒绝且不污染 status。网络源的频率是
+        元数据口径，未连接时也允许设置（连接前配置是合法用法）。
+        """
+        hz = float(hz)
+        lo, hi = self.device.frequency_range
+        if not math.isfinite(hz) or not (lo <= hz <= hi):
+            self.status.error = f"网络源中心频率非法: {hz}（范围 {lo}–{hi} Hz）"
+            return False
+        self._center_freq_hz = hz
+        self.status.frequency_hz = hz
+        self.status.error = ""
+        return True
+
+    def set_sample_rate(self, sr: float) -> bool:
         """仅记录采样率（真实值由对端决定；不一致会由调用方在解码时暴露）。"""
-        self._sample_rate_hz = float(sr)
+        sr = float(sr)
+        lo, hi = self.device.sample_rate_range
+        if not math.isfinite(sr) or not (lo <= sr <= hi):
+            self.status.error = f"网络源采样率非法: {sr}（范围 {lo}–{hi} Hz）"
+            return False
+        self._sample_rate_hz = sr
+        self.status.sample_rate_hz = sr
+        self.status.error = ""
+        return True
 
     # ---- 数据读取 --------------------------------------------------------
     def _bytes_per_sample(self) -> int:
         return {"cs8": 2, "cs16": 4, "cu8": 2, "cf32": 8}[self._fmt]
 
-    def read_samples(self, num_samples: int):
-        """读 num_samples 个复样本；不足/未连接返回 None（绝不补零）。
-
-        TCP/UDP 都可能一次只到部分字节：循环续读直到凑满或连接断开，
-        不让“分包”被误判成“无数据”（诚实区分短读与断流）。
-        """
-        if self._sock is None:
-            return None
-        import numpy as np
-
-        need = num_samples * self._bytes_per_sample()
-        while len(self._buf) < need:
-            try:
-                if self._protocol == "tcp":
-                    chunk = self._sock.recv(self._block_bytes)
-                else:
-                    chunk = self._sock.recv(min(self._block_bytes, 65535))
-            except Exception as e:  # 超时/连接断开：如实反映，不返回半截
-                logger.debug("NetworkIQ 读取失败：%s", e)
-                return None
-            if not chunk:
-                return None
-            self._buf += chunk
-        data, self._buf = self._buf[:need], self._buf[need:]
-        n = num_samples
+    def _decode_iq(self, data: bytes, n: int) -> np.ndarray:
         if self._fmt == "cu8":
             b = np.frombuffer(data, dtype=np.uint8).reshape(n, 2).astype(np.float64)
             iq = (b[:, 0] - 128.0) / 128.0 + 1j * ((b[:, 1] - 128.0) / 128.0)
@@ -4871,8 +4951,43 @@ class NetworkIQBackend(SDRBackend):
         else:  # cf32
             dt = np.dtype("<c8" if self._byteorder == "little" else ">c8")
             iq = np.frombuffer(data, dtype=dt).astype(np.complex128)
-        self._dropped += 0
         return iq.astype(np.complex64)
+
+    def read_samples(self, num_samples: int):
+        """读 num_samples 个复样本；不足/未连接返回 None（绝不补零）。
+
+        TCP/UDP 都可能一次只到部分字节：循环续读直到凑满或连接断开，
+        不让“分包”被误判成“无数据”（诚实区分短读与断流）。
+        TCP EOF 时把缓冲里已凑整的样本如实短读返回（补不齐的散字节丢弃），
+        不让真数据永久卡在缓冲里。
+        """
+        if self._sock is None:
+            return None
+        need = num_samples * self._bytes_per_sample()
+        eof = False
+        while len(self._buf) < need:
+            try:
+                if self._protocol == "tcp":
+                    chunk = self._sock.recv(self._block_bytes)
+                else:
+                    chunk = self._sock.recv(min(self._block_bytes, 65535))
+            except Exception as e:  # 超时/连接断开：如实反映，不返回半截
+                logger.debug("NetworkIQ 读取失败：%s", e)
+                return None
+            if not chunk:
+                if self._protocol != "tcp":
+                    return None  # UDP 空报文：本轮无数据（不是 EOF）
+                eof = True
+                break
+            self._buf += chunk
+        n = min(num_samples, len(self._buf) // self._bytes_per_sample())
+        data = self._buf[:n * self._bytes_per_sample()]
+        # EOF 后缓冲里只剩补不齐的散字节：整样本已取走，散字节如实丢弃。
+        self._buf = b"" if eof else self._buf[n * self._bytes_per_sample():]
+        if n == 0:
+            return None
+        self._samples_read += n
+        return self._decode_iq(data, n)
 
     def data_health(self):
         """数据面健康度（诚实口径：缓冲区/丢包/对端参数）。"""
@@ -4980,6 +5095,17 @@ class SDRBackendManager:
                 logger.debug(f"SpyServer 源已登记: {_host}:{_port}")
             except Exception as e:
                 logger.debug(f"SpyServer 后端登记失败(忽略): {_host}:{_port}: {e}")
+
+        # 通用网络 IQ 源（sdrpp network_source 同机制）：env 显式登记。
+        # 裸流无元数据，rate/freq 由配置给定；登记不等于连接，成败交给 connect()。
+        for _cfg in parse_network_iq_env(os.environ.get(NETWORK_IQ_ENV, "")):
+            try:
+                _nq = NetworkIQBackend(**_cfg)
+                self.backends[_nq.device.device_id] = _nq
+                logger.debug(
+                    f"网络 IQ 源已登记: {_cfg['protocol']}://{_cfg['host']}:{_cfg['port']}")
+            except Exception as e:
+                logger.debug(f"网络 IQ 源登记失败(忽略): {_cfg}: {e}")
 
         # 无默认后端：active_backend 保持 None，等用户显式 connect 真实设备。
 
@@ -5430,6 +5556,38 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
             "device_args": {"driver": "rtlsdr", "host": _host, "port": _port},
         }
 
+    # 6b) 通用网络 IQ 源（env 驱动显式登记，sdrpp network_source 同机制）。
+    #     与 rtl_tcp 同样不联网、不 connect；rate/freq 是配置声明的口径，
+    #     真实流参数由对端决定，不一致时由解码质量暴露。按 key 去重。
+    for _cfg in parse_network_iq_env(os.environ.get(NETWORK_IQ_ENV, "")):
+        _key = f"net_{_cfg['protocol']}_{_cfg['host']}_{_cfg['port']}"
+        if _key in merged:
+            continue
+        merged[_key] = {
+            "driver": "network_iq",
+            "source": "network_iq",
+            "label": (f"网络 IQ {_cfg['protocol']}://"
+                      f"{_cfg['host']}:{_cfg['port']}"),
+            "serial": _key,
+            "manufacturer": "network IQ source",
+            "product": f"裸流 IQ ({_cfg['fmt']})",
+            "gain_range": (0.0, 0.0),
+            "sample_rate_range": (1, 1_000_000_000),
+            "freq_range": (0, 12e9),
+            "capability_status": {
+                "freq_range": "declared", "sample_rate_range": "declared",
+                "gain_range": "unknown", "bandwidth_range": "unknown",
+                "tx": "unknown", "antenna": "unknown",
+            },
+            "capability_note": {
+                "gain_range": "网络裸流无增益控制",
+                "bandwidth_range": "网络裸流无带宽查询",
+                "tx": "网络裸流未查询 TX 通道",
+                "antenna": "网络源无天线口概念",
+            },
+            "device_args": dict(_cfg),
+        }
+
     # 7) 去重收尾：osmosdr 的 "rtl" 条目与原生 RTLSDR 走同一根 librtlsdr，
     #    同一根棒会出现两次（一条带真实增益/频率范围的 rtl_native，一条 osmosdr
     #    的空参数 rtl 条目）。原生条目信息更全，优先保留；同 index 时丢 osmosdr 条目。
@@ -5501,6 +5659,15 @@ def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
                 uri=str(args.get("uri", "") or None),
                 device_info=dev,
             )
+        if driver == "network_iq":
+            # env 登记的通用网络 IQ 源（enumerate 步骤6b）：裸流参数全部来自
+            # 配置，缺键/非法值在构造期抛错 -> 本函数返回 None，绝不假成功。
+            return NetworkIQBackend(
+                protocol=args["protocol"], host=args["host"], port=args["port"],
+                sample_rate_hz=args["sample_rate_hz"],
+                center_freq_hz=args["center_freq_hz"],
+                fmt=args.get("fmt", "cu8"),
+                byteorder=args.get("byteorder", "little"))
         # 其余一律走 SoapySDR 通用后端（rtlsdr 经 SoapySDR、usrp、bladerf...）
         return SoapySDRBackend(device_args=args, device_info=dev)
     except Exception as e:
