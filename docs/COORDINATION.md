@@ -230,11 +230,15 @@
   接线+契约 / disconnect 残留 / playback 改频 / max_sats 按星 /
   设备表 TTL / agc-bw 回滚 / rtl_tcp 冷却，由 #21/#22/#47–#54销完。
   本线队列转去：LRPT 擦除辅助 RS（#9 收尾）、图像链约定统一（#10）、
-  P2 前端缺口（#7 认领）、另账存量红 reconnect_stress 交叉污染。
-  详见 `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
-  另账存量红：① test_backend_reconnect_stress 热插拔循环在多文件同进程时
-  假 rtlsdr 被真 pyrtlsdr 抢线（单跑绿；pristine HEAD 同组合复红，
-  证据 D:/mbdsdr/output/_disconnect_lane_pristine.log）；
+  P2 前端缺口（#7 认领）。
+  另账存量红：~~① test_backend_reconnect_stress 热插拔循环在多文件同进程时
+  假 rtlsdr 被真 pyrtlsdr 抢线~~ **已销（171dd97c）**：根因是 module_panel
+  枚举 worker 并发 import 真 rtlsdr 时 exec 失败的 import 清理
+  （del sys.modules['rtlsdr']）把测试 fake 连锅端——fake_rtlsdr_package
+  三重防御（同步 import 收尾 in-flight 加载 / 假包+预埋子模块 / 先子后父
+  安装），五处裸模块安装点同纪律换用，新增并发钉扎用例；组合 1 failed→
+  5 passed（探针全程 D:/mbdsdr/output/_spy4.out），巷道 53 passed
+  （_rtlsdr_pollution_lane.log）。
   ~~② test_error_catalog_guard::test_no_wild_codes~~ **已销（ba0e8dbe）**：
   recorder already_exists + web_bridge_host 八码按真实语境登记三件套，
   守卫巷道 41 passed 首次全绿（_wildcodes_lane.log）。
