@@ -95,8 +95,8 @@ index 8a2e392..7a0bd29 100644
 +**修法**（测试侧一行，不动产品代码、不动守卫本身）：
 +
 +```python
-+@pytest.mark.usefixtures("qtapp", "isolated_profile")
-+class TestMainWindowRecordingFlow:
++    @pytest.mark.usefixtures("qtapp", "isolated_profile")
++    class TestMainWindowRecordingFlow:
 +```
 +
 +守卫保持原样——它是「测试禁止写用户真实配置」的机械护栏

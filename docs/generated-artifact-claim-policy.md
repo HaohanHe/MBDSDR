@@ -16,7 +16,7 @@
   "ts": "2026-11-06T02:10:17",
   "commit": "558d8b4d907b9d58c41c02240d6958aa0ff3bca1",
   "tree": "694f08eb4f408f98da47fa2a86cf4fd1a2905a11",
-  "author": "HaohanHe <hehaohan@hsyscn.top>",
+  "author": "<归一身份见 git log；内容层按 AGENTS.md 第 1 条不录>",
   "subject": "docs: 重生成 settings-inventory 数字块（新增 log_level 后 48→49 / 47→48）",
   "files": ["docs/settings-inventory.md"],
   "reason": "no pre-commit marker（--no-verify 或钩子未执行）",
