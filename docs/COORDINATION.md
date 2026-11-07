@@ -201,6 +201,27 @@
   （钩子存量 bug，崩溃点在共享 index 同步成功之后、marker 消费之前，
   marker 留存即闸门通过证据）；后续提交命令带 `PYTHONUTF8=1` 规避。
 
+### 我这边（2026-11-07 21:10 追加：启动闪退修复——应用级过滤器跨线程）
+
+- **`09527ff5` 闪退（P0，用户侧"能启动但立刻关掉"）**：`app.installEventFilter(self)`
+  是**应用级**过滤器，QThread 工作线程的事件循环里也会被调到；PySide 在该线程
+  读 C++ QEvent 直接 access violation，进程无栈退出（无对话框、无 traceback）。
+  逐事件探针证据：第 70586 个事件全在 MainThread 正常，**第 70587 个来自
+  QThread（obj=QVBoxLayout）即死**（`D:/mbdsdr/output/_filter_probe2.log`）。
+  触发者是我自己的 `f4422ca9`（把启动枚举/连接搬进 auto-sdr-enum 线程）。
+  修法：`eventFilter` 开头判构造线程 ident，非本线程一律 `return False` 且
+  一次都不碰 event（连 super() 都不调）；记 ident 而非 main_thread()，宿主
+  嵌入/测试里也自洽。回归钉 2 条（非 GUI 线程传"间谍事件"被读取即失败；
+  本线程 Resize 仍须触发命令栏定位），未修复 HEAD 上 1 failed 反证。
+  真机窗口连跑 60 s / 90 s：access violation **0 次**，进程存活。
+  残留另账：日志偶现 `0x8001010d`（RPC_E_CANTCALLOUT_ININPUTSYNCCALL），
+  Qt 输入同步调用里发 COM 的 Windows 噪声，进程不退出，待单独查。
+- **C++ 工具链结论更正（长期有效）**：本机**有** g++ 13.1.0 + Qt 6.8.2
+  （`C:/QtLocal/Tools/mingw1310_64`、`C:/QtLocal/6.8.2/mingw_64`）+ CMake
+  （`C:/Program Files/CMake/bin`），只是没进 PATH。**不需要装 VS**。
+  之前"无 g++/qmake6、C++ 只能审计"的结论是 PATH 假象，已作废；
+  `cpp/build` 缓存本就指向这套工具链（MinGW Makefiles / Release）。
+
 ### 我这边（2026-11-07 深夜 追加：#9 擦除辅助 RS + 真录真值重钉）
 
 - **`a694b322` #9 闭环 + 一个真 bug**：RS 加擦除解码
