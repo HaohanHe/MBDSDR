@@ -155,6 +155,28 @@
   2 skipped**（D:/mbdsdr/output/_mgr_ttl_lane.log）。落库 `fff92434`。
   已知边界：拔掉的设备仍留在表里（connect 如实失败而非静默消失），
   摘除需重启进程。
+- **#53 set_agc/set_bandwidth 硬件失败不回滚 status（P2）**：RTL/Soapy
+  覆写走「super() 先写 status → 再碰硬件 → 失败 return False」，斩后奏
+  不回滚。现在基类 set_agc 补 `_apply_agc` 钩子（与 set_gain 同纪律：
+  失败回滚 + error），RTL/Soapy 全部转 `_apply_*` 钩子；顺手删 RTL
+  set_bandwidth 覆写（钩子后重复写硬件的残留，且它独占 connect() 依赖的
+  bandwidth=0 下发，`_apply_bandwidth` 的「0 不下发」跳过同步去掉）。
+  连带销 remedy 漏网三码（此前巷道没带 remedy 守卫）：sdr_set_agc_failed
+  + sdr_frequency_out_of_range 进「设备调谐」族，freq_reported_only 显式
+  无入口。新测试 `tests/test_hw_status_rollback.py` 13 条（3 条判据
+  pristine 红 + 10 契约钉）；反证 worktree 443ee794 3 failed
+  （_probe_agc_rollback_reverse.log）。巷道 15 文件 142 passed +
+  1 存量红（wild_codes，当批另账）。落库 `5c20180d`。
+- **#54 rtl_tcp 断连无冷却（P2）**：backlog=1 单客户端名额要 2–3 s 释放
+  （runbook §3.5），立即重连白撞还把冷却期拒绝冒充「服务不在」。现在
+  RtlTcpClient 按 (host,port) 记账 RECONNECT_COOLDOWN_S=2.5：真正持有
+  socket 的 close() 才启动冷却（连接被拒不启动），connect() 等完剩余
+  窗口再拨，换目标不受牵连。三条消费路径（RtlTcpBackend/
+  RtlTcpDeviceAdapter/RTLSDRBackend）同一收口。新测试
+  `tests/test_rtltcp_cooldown.py` 6 条（2 条判据 pristine 红 + 4 契约钉）；
+  反证 worktree ba0e8dbe 2 failed（_probe_cooldown_reverse.log）。
+  巷道 10 文件 95 passed + 2 skipped（_cooldown_lane.log）。
+  落库 `30790045`。**至此审计 B 节 11 行全清（#21/#22/#47–#54）。**
 - **存量红另账销**：`test_decoder_capability_matrix` 文档漂移在
   pristine HEAD 复证属存量——`410eb096` 新增岁差外部真值 golden
   （celestial_ofdate_golden.json，Skyfield 1.54 逐元素对拍、SHA-256
@@ -203,25 +225,19 @@
   三处改走 Qt Signal 的 AutoConnection（同线程同步、跨线程排队回 GUI），
   不丢音频帧、不改调用契约。新测试
   `tests/test_demod_tap_thread_affinity.py`（5 条，真起非 GUI 线程取证）。
-- **仍未做（本线队列，按优先级，交接单 B 节余量两条）**：
-  ① `set_agc`/`set_bandwidth` 子类覆写硬件失败不回滚 status（P2，
-    `sdr_backend.py:2371-2404,3365-3388`）——基类失败回滚，子类纪律
-    不一致，失败后 status 还留着没生效的新值；
-  ② rtl_tcp 断连无冷却立即重连吃单客户端名额（P2，
-    `rtltcp_client.py:194-197`）——backlog=1，真机基线断连需 2–3 s
-    冷却（runbook §3.5）。
+- **交接单 B 节 11 行全清（2026-11-07 深夜）**：rtltcp 写频缓存 /
+  采样率吸附 / HackRF/USRP 初始化 / FileIQ 静默+wav/csv / NetworkIQ
+  接线+契约 / disconnect 残留 / playback 改频 / max_sats 按星 /
+  设备表 TTL / agc-bw 回滚 / rtl_tcp 冷却，由 #21/#22/#47–#54销完。
+  本线队列转去：LRPT 擦除辅助 RS（#9 收尾）、图像链约定统一（#10）、
+  P2 前端缺口（#7 认领）、另账存量红 reconnect_stress 交叉污染。
   详见 `docs/pending-patches/2026-11-06-sdr-backend-replay-audit-handoff.md`。
-  （rtltcp 写频缓存 / RtlTcp 采样率吸附 / HackRF/USRP 初始化 /
-  FileIQBackend 静默+wav/csv 断链 / NetworkIQBackend 接线+契约 /
-  disconnect 读数残留 / playback 改频标注 / max_sats 按星截取 /
-  设备表 TTL
-  已由 #21/#22/#47/#48/#49/#50/#51/#52 销账。）
   另账存量红：① test_backend_reconnect_stress 热插拔循环在多文件同进程时
   假 rtlsdr 被真 pyrtlsdr 抢线（单跑绿；pristine HEAD 同组合复红，
   证据 D:/mbdsdr/output/_disconnect_lane_pristine.log）；
-  ② test_error_catalog_guard::test_no_wild_codes——recorder.py
-  already_exists + web_bridge_host.py 九个码未登记（阶段C 桥接面），
-  pristine HEAD 复红（_wildcodes_pristine.log）。
+  ~~② test_error_catalog_guard::test_no_wild_codes~~ **已销（ba0e8dbe）**：
+  recorder already_exists + web_bridge_host 八码按真实语境登记三件套，
+  守卫巷道 41 passed 首次全绿（_wildcodes_lane.log）。
   ⚠ TLE 过期门仍属产品口径待决，别擅自上硬门。
 
 ### 我这边（2026-11-06 深夜 追加：#19 配置/增益/布局 + 过境链两批）
