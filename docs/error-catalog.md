@@ -89,19 +89,26 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `bad_command` | access | 指令不合法 | 指令不合法：{detail} | 从支持的指令列表中选择后重试。 | 否 |
 | `bad_config` | access | 配置不合法 | 配置不合法：{detail} | 修正配置项后重试。 | 否 |
 | `bad_json` | access | JSON 解析失败 | JSON 解析失败：{detail} | 确认输入为合法 JSON 后重试。 | 否 |
+| `bad_payload` | access | 请求体不是 JSON 对象 | 桥接请求体不是 JSON 对象。 | 以 JSON 对象（键值对）提交参数后重试。 | 是 |
+| `bad_token` | access | token 校验失败 | 一次性 token 校验失败（缺失、过期或已消费）。 | 刷新页面重新获取一次性 token 后重试，不要复用旧 token。 | 否 |
 | `config_not_found` | access | 配置文件不存在 | 配置文件不存在：{detail} | 先创建配置或确认路径后重试。 | 否 |
+| `confirm_disabled` | access | 确认通道被禁用（只读模式） | 确认通道已禁用（只读模式）：{detail} | 需要执行写操作时由宿主启用确认通道（MBDSDR_BRIDGE_CONFIRM）后重试。 | 否 |
+| `confirm_rejected` | access | 确认请求被拒绝 | 确认请求被拒绝：{detail} | 等当前确认过期或完成后再提交同一操作。 | 是 |
 | `decoder_not_available` | access | 解码器不可用 | 解码器不可用：{detail} | 安装对应解码依赖后重试。 | 否 |
 | `denied_by_policy` | access | 策略拒绝执行 | denied_by_policy：策略拒绝执行 {tool}（规则集不可被 armed 覆盖）。 | 换用允许的工具或修改策略；不要重复尝试同一个被拒调用。 | 否 |
 | `device_busy` | access | 设备被占用 | 设备被其它进程占用：{detail} | 关闭占用进程后重试；不要并发打开同一设备。 | 是 |
 | `device_not_found` | access | 找不到设备 | 找不到 SDR 设备：{detail} | 检查 USB/驱动后重新枚举。 | 否 |
+| `dist_missing` | access | 前端构建产物缺失 | 前端构建产物缺失：{detail} | 运行 cd web/product && python run_all.py 生成 dist 后刷新页面。 | 是 |
 | `doppler_compensation_failed` | access | 接收链多普勒补偿失败（预测不可用） | 多普勒补偿失败：{detail}。本块音频已跳过，未按 0 补偿。 | 检查卫星目标/TLE 是否有效、本站位置是否已设置；修复后重开补偿。 | 是 |
 | `driver_not_found` | access | 找不到 SDR 驱动 | 找不到 SDR 驱动：{detail} | 安装驱动/DLL 后重启程序。 | 否 |
 | `export_path_out_of_root` | access | 导出路径越界 | 导出路径越界，拒绝写入：{detail} | 把路径改到允许根目录内，或先设置 MBDSDR_EXPORT_ROOT。 | 否 |
+| `forbidden` | access | 跨源/同源校验拒绝 | 请求被拒绝（同源校验未通过）：{detail} | 从宿主注入的本地页面发起请求，不要跨源调用桥接接口。 | 否 |
 | `frequency_out_of_range` | access | 频率超出范围 | 频率 {freq} Hz 超出设备范围：{detail} | 改用设备可调范围内的频率。 | 否 |
 | `identity_mismatch` | access | 站点身份不匹配 | 站点身份不匹配：{detail} | 确认站点 ID 与数据库一致后重试。 | 否 |
 | `internal_error` | access | 内部异常 | 内部错误（{exc_type}）：{detail} | 重试一次；仍失败请收集日志（含异常类型与上下文）反馈开发者。 | 是 |
 | `invalid_argument` | access | 参数校验失败 | 参数校验失败：{detail} | 按参数说明修正后重试（本库不做静默钳位）。 | 否 |
 | `manual_gate_required` | access | 需要外部确认 | 未执行 {tool}：缺少外部确认（{reason}）。模型自报的 arm_manual 不构成确认。 | 由真人经外部确认通道签发一次性 confirm_token 后重试；token 有有效期且只能消费一次。 | 否 |
+| `manual_gate_unavailable` | access | 宿主未接确认通道 | 本宿主未接确认通道，写操作无法确认执行。 | 在支持确认通道的宿主里发起写操作；本宿主保持只读。 | 否 |
 | `no_audio_output` | access | 没有可用音频输出 | 没有可用音频输出设备：{detail} | 检查系统音频设备后重试。 | 否 |
 | `no_downlink_known` | access | 无已知下行频点 | 没有该卫星的已知下行频点：{detail} | 先补全频点库或显式指定频率。 | 否 |
 | `no_pass` | access | 当前无过境 | 当前时间窗内没有可用过境：{detail} | 扩大时间窗或换卫星后重试。 | 否 |
@@ -118,6 +125,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `spill_write_failed` | access | 溢出数据落盘失败 | 大字段落盘失败：{detail} | 检查磁盘/临时目录后重试。 | 是 |
 | `station_untrusted` | access | 站点不在可信列表 | 站点不在可信列表（{detail}）。 | 先把该站点加入可信列表，或换用可信站点。 | 否 |
 | `unknown_command` | access | 未知指令 | 未知指令 '{detail}'。 | 从支持的指令列表中选择。 | 否 |
+| `unknown_method` | access | 未知桥接方法 | 未知桥接方法：{detail} | 只调用 manifest 里列出的桥接方法名。 | 否 |
 | `unknown_server` | access | 未知服务器 | 未知服务器 '{detail}'。 | 从已配置服务器列表中选择。 | 否 |
 | `unsupported` | access | 不支持的操作 | 不支持的操作：{detail} | 改用受支持的操作。 | 否 |
 | `usb_disconnected` | access | USB 已断开 | USB 设备已断开：{detail} | 重新插拔设备并重新连接。 | 是 |
@@ -126,6 +134,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `link_refused` | access | 远端拒绝连接 | 远端 SDR 拒绝连接：{detail} | 确认 rtl_tcp/SpyServer 服务已启动、地址与端口正确后重试。 | 否 |
 | `link_reset` | access | 链路被对端重置 | 远端重置了连接：{detail} | 确认服务端未重启/未踢出本机后重新连接。 | 是 |
 | `link_timeout` | access | 链路超时（连接/握手） | 与远端 SDR 的连接超时：{detail} | 检查网络、防火墙与对端服务是否在监听；对端无响应时不要反复立即重试。 | 是 |
+| `already_exists` | recorder | 同名文件已存在，拒绝覆盖 | 同名文件已存在，拒绝覆盖：{detail} | 换一个文件名/路径，或显式指定 overwrite=True 再录制。 | 是 |
 | `bad_field` | recorder | 字段不合法 | 字段不合法：{detail} | 按字段说明修正后重试。 | 否 |
 | `bad_param` | recorder | 参数不合法（录音库） | 参数不合法：{detail} | 修正参数后重试。 | 否 |
 | `bad_parameter` | recorder | 参数不合法 | 参数不合法：{detail} | 修正参数后重试。 | 否 |

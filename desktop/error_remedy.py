@@ -55,6 +55,9 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "export_path_out_of_root", "decoder_not_available", "not_available",
         "spill_write_failed", "denied_by_policy", "manual_gate_required",
         "internal_error",
+        "forbidden", "bad_token", "dist_missing", "bad_payload",
+        "unknown_method", "manual_gate_unavailable", "confirm_disabled",
+        "confirm_rejected",
     ),
     "解码层细项：code 只出现在解码器/服务端返回值，桌面解码卡不渲染该码": (
         "missing_iq", "unknown_device_type", "empty_input",
@@ -66,7 +69,7 @@ _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
         "corrupt", "truncated", "empty", "datatype", "deleted", "eof",
         "open_failed", "no_data", "rate_unknown", "rate_mismatch", "playback",
         "playback_failed", "bad_parameter", "tx_source_deleted",
-        "tx_source_failed",
+        "tx_source_failed", "already_exists",
     ),
     "TLE 细项（限流/HTTP/解析）：过境面板与状态栏现在直接渲染 code + 原因 + 建议动作（`tle_fetch.failure_copy`）；帮助条目只覆盖精选码": (
         "rate_limited", "http_4xx", "http_5xx", "network_other",
