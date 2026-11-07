@@ -137,6 +137,7 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `entry_not_found` | recorder | 条目不存在 | 录音条目不存在：{detail} | 刷新列表后用有效条目 ID 重试。 | 否 |
 | `eof` | recorder | 读到文件末尾 | 已读到文件末尾（未循环）。 | 开启 loop 或重新开始回放。 | 否 |
 | `file_missing` | recorder | 录音文件不存在 | 录音文件不存在：{detail} | 刷新录音库或确认文件路径后重试。 | 否 |
+| `freq_reported_only` | recorder | 回放频率仅为上报值 | 回放源不能真的变频：数据实际中心频率仍是录制时的 {actual}，{requested} 仅为上报元数据。 | 频谱/解码请按录制时的中心频率解释，勿把上报值当真实调谐。 | 否 |
 | `io` | recorder | 文件读写失败 | 录制文件读写失败（{detail}）。 | 检查磁盘与路径后重试。 | 是 |
 | `io_error` | recorder | 录音库操作失败 | 录音库操作失败：{detail} | 检查路径、权限与索引后重试。 | 是 |
 | `library_busy` | recorder | 录音库被占用 | 录音库正被另一进程占用（{detail}） | 等对方释放或关闭另一个实例后重试。 | 是 |

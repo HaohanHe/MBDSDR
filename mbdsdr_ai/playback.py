@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import weakref
 from typing import Any, Dict, Optional
@@ -580,8 +581,27 @@ class PlaybackSource:
     def set_frequency(self, freq_hz: float) -> bool:
         if not self._connected:
             return False
+        hz = float(freq_hz)
+        if not math.isfinite(hz) or hz <= 0:
+            self._error_code = "bad_parameter"
+            self._last_error = user_message(
+                "bad_parameter", detail=f"freq_hz={freq_hz} 须为有限正数")
+            return False
         # 回放文件不能真的变频；只记录上报值（诚实标注）。
-        self._freq = float(freq_hz)
+        self._freq = hz
+        recorded = float(self._pb.center_freq_hz)
+        if abs(hz - recorded) > 1.0:
+            # 与 set_sample_rate 同一份 1 Hz 容差口径。改频必须写清标注：
+            # 频谱/解码按上报值解释会出错，不写等于冒充实时可调硬件。
+            self._error_code = "freq_reported_only"
+            self._last_error = user_message(
+                "freq_reported_only",
+                actual=f"{recorded / 1e6:.6f} MHz",
+                requested=f"{hz / 1e6:.6f} MHz")
+        elif self._error_code == "freq_reported_only":
+            # 改回录制值：只清除自己写下的标注，不动其它错误。
+            self._error_code = ""
+            self._last_error = ""
         return True
 
     def get_frequency(self) -> float:

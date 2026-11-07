@@ -587,6 +587,11 @@ _SPECS = (
           "采样率不匹配",
           "回放源采样率固定为 {actual} Hz，不能改为 {requested} Hz。",
           "使用录制时的采样率。"),
+    _spec("freq_reported_only", LAYER_RECORDER, False,
+          "回放频率仅为上报值",
+          "回放源不能真的变频：数据实际中心频率仍是录制时的 {actual}，"
+          "{requested} 仅为上报元数据。",
+          "频谱/解码请按录制时的中心频率解释，勿把上报值当真实调谐。"),
     _spec("playback", LAYER_RECORDER, False,
           "回放打开失败（playback:<底层码>）",
           "回放文件无法打开：{reason}",
