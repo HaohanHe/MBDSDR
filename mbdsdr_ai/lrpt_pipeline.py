@@ -66,10 +66,19 @@ class LrptE2EPipeline:
     # 发射端：payload → CADU → 卷积编码 → QPSK → IQ
     # ------------------------------------------------------------------ #
     def build_cadu(self, payload: bytes) -> bytes:
-        """payload (892B) → CADU (1024B)：RS 编码 + 交织 + 加扰 + ASM。"""
+        """payload (892B) → CADU (1024B)：RS 编码 + 交织 + 加扰 + ASM。
+
+        切块约定 = **CCSDS 131.0 往返切分**（``payload[j] → 块 j%4``）。
+        旧实现按「连续 223 字节切 4 块」（``payload[i*223:(i+1)*223]``），
+        编码器与自己的 concat 解码自洽，所以合成链回环恒绿；但真机不是这么
+        发的——Meteor-M2 真录只有按往返序解才出得来连续帧计数与合法 VCDU
+        （2026-11-07 实证：concat 帧计数乱、图像包 0 个；woven 计数
+        639186→…→639466 连续、APID 64/65/68 齐出）。合成链必须跟标准走，
+        否则自家 fixture 永远对不上真机。
+        """
         if len(payload) != 892:
             raise ValueError(f"payload 须 892 字节（223×4），收到 {len(payload)}")
-        blocks = [payload[i*223:(i+1)*223] for i in range(4)]
+        blocks = [bytes(payload[b::4]) for b in range(4)]
         encoded = [self.decoder.rs.encode(b) for b in blocks]
         data = self.decoder._interleave_4(encoded)
         scrambled = self.decoder.scrambler.scramble(data)

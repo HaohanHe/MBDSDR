@@ -334,7 +334,7 @@ class LrptCaduDecoder:
         return bytes(out)
 
     def decode_cadu(self, viterbi_bytes: bytes,
-                    order: str = "concat") -> Tuple[bytes, List[int]]:
+                    order: str = "woven") -> Tuple[bytes, List[int]]:
         """对 Viterbi 译码后的完整 CADU 字节流做解扰 + RS 解码。
 
         输入格式：viterbi_bytes 应包含 4 字节 ASM + 1020 字节数据。
@@ -348,10 +348,10 @@ class LrptCaduDecoder:
                 （payload[j] = 块[j%4].data[j//4]）。TU Berlin 同录音解码器
                 reedsolomon.m:48-51（corrected(j:I:end)=decoded）实证，
                 真录 VCDU→M_PDU→空间包按此序才解析得出（探针 0 包 vs N 包）。
-              - ``"concat"`` —— 本仓合成链口径（块=连续 223B 切分，
-                RX 顺序拼接），lrpt_pipeline.build_cadu 自洽；非 CCSDS
-                标准，仅合成环使用。统一约定时（改合成链跟真录对齐）
-                此参数随之退役。
+              - ``"concat"`` —— **已退役（2026-11-07）**：块=连续 223B 切分、
+                RX 顺序拼接。旧合成链按此口径自洽，但不符合 CCSDS 131.0，
+                真机数据按它解只会得到「RS 全过、内容全乱」的假成功。
+                现仅保留给历史夹具/对照实验，默认已改为 ``"woven"``。
 
         返回:
             (decoded_data, rs_errors)
@@ -420,7 +420,7 @@ class LrptCaduDecoder:
         return self.rs.decode_with_reliability(blk, rel_blk, ladder)
 
     def decode_cadu_erasure(self, viterbi_bytes: bytes, byte_rel,
-                            order: str = "concat",
+                            order: str = "woven",
                             ladder: Optional[Tuple[int, ...]] = None
                             ) -> Tuple[bytes, List[int], List[int]]:
         """擦除辅助 CADU 解码（2e+f ≤ nsym）。

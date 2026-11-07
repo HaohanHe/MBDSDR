@@ -34,14 +34,16 @@ def sample_payload() -> bytes:
 
 
 @pytest.fixture
-def sample_cadu(decoder: LrptCaduDecoder, sample_payload: bytes) -> bytes:
-    """组装完整 CADU：ASM + 交织 + 加扰。"""
-    blocks = [sample_payload[i*223:(i+1)*223] for i in range(4)]
-    encoded = [decoder.rs.encode(b) for b in blocks]
-    data = decoder._interleave_4(encoded)
-    scrambled = decoder.scrambler.scramble(data)
-    asm = bytes([0x1A, 0xCF, 0xFC, 0x1D])
-    return asm + scrambled
+def sample_cadu(sample_payload: bytes) -> bytes:
+    """组装完整 CADU：**走生产编码器** ``build_cadu``。
+
+    旧实现在测试里自带一份「连续 223 字节切 4 块」的建帧逻辑，与
+    ``build_cadu`` 各写一遍——2026-11-07 生产端改成 CCSDS 往返切分
+    （``payload[j] → 块 j%4``）后，这份副本立刻漂成「测试全绿、真机全错」。
+    测试只该验语义，不该复制实现。
+    """
+    from mbdsdr_ai.lrpt_pipeline import LrptE2EPipeline
+    return LrptE2EPipeline().build_cadu(sample_payload)
 
 
 # --------------------------------------------------------------------------- #
