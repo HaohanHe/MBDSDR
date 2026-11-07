@@ -78,23 +78,23 @@
     "lrpt_meteor_real_soft_0.f32": {
       "provenance": "external-truth",
       "source_name": "TU Berlin lar-tech/satellite-decoder meteor_m2_72k.wav（真录派生软比特）",
-      "sha256": "3353bd9fc45481718b2830cd9f5d399fa7e71c37d6ace9f7463a6c0db081a9be",
-      "derivation": "https://raw.githubusercontent.com/lar-tech/satellite-decoder/main/data/meteor_m2_72k.wav（SHA-256 c8be339e69db2b192f852c8ab5d2cb7c7b547552bab41fadd584e0296df0cdf8）真录过境导出软比特",
-      "date": "2026-11-03"
+      "sha256": "1cd8665b31a1cba5b51c4583c7c64d40fea6a8a467897433b89e86e97e6e4167",
+      "derivation": "https://raw.githubusercontent.com/lar-tech/satellite-decoder/main/data/meteor_m2_72k.wav（SHA-256 c8be339e69db2b192f852c8ab5d2cb7c7b547552bab41fadd584e0296df0cdf8）真录过境导出软比特；2026-11-08 重取帧（sym_index=114110, variant=swap+inv）——旧帧的真值被法证证明为 RS 误纠",
+      "date": "2026-11-08"
     },
     "lrpt_meteor_real_soft_1.f32": {
       "provenance": "external-truth",
       "source_name": "TU Berlin lar-tech/satellite-decoder meteor_m2_72k.wav（真录派生软比特）",
-      "sha256": "38bd96067b9f31608eb3b471fe4d5e391d428020da3c83c0e25857fd8b536f17",
-      "derivation": "同上真录；第二帧候选（candidate=5, variant=swap+inv），见 lrpt_meteor_real_soft_manifest.json",
-      "date": "2026-11-03"
+      "sha256": "f8f96a932b191a9e9830298007e4844743c6fabf1a44b8fe9fc17875b57b23ad",
+      "derivation": "同上真录；2026-11-08 重取帧（sym_index=187838, variant=swap+inv），见 lrpt_meteor_real_soft_manifest.json",
+      "date": "2026-11-08"
     },
     "lrpt_meteor_real_soft_manifest.json": {
       "provenance": "self-generated",
       "source_name": "仓内脚本对 TU Berlin 真录软比特生成的清单",
-      "sha256": "05d526d7d5a994b4881ed07be5cfb35958747ff08ea87baafe75ff4cc5bf679a",
-      "derivation": "由真录导出的软比特之后，仓内生成的元数据清单（n_soft/candidate/variant/rs_errors）；描述外部真值，但文件本身非外部产出",
-      "date": "2026-11-03"
+      "sha256": "bfec6b607efb17efce33681727e607367f69fa2ab0e2137d03adb1a2af441434",
+      "derivation": "由真录导出的软比特之后，仓内生成的元数据清单（n_soft/sym_index/variant/rs_errors/erasures_used）；描述外部真值，但文件本身非外部产出。2026-11-08 随帧重钉，解码口径改为 woven + 擦除辅助 + 伴随式验证",
+      "date": "2026-11-08"
     },
     "celestial_ofdate_golden.json": {
       "provenance": "external-truth",

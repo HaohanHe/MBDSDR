@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 import numpy as np
 
@@ -141,8 +141,13 @@ def _poly_mul(gf: _GF256, p: List[int], q: List[int]) -> List[int]:
 @dataclass
 class RSResult:
     data: bytes            # 纠正后的数据（k 字节）
-    nerrors: int            # 纠正的符号数（-1 = 不可纠正）
+    nerrors: int            # 纠正的符号数（-1 = 不可纠正）；擦除位置不计入
     corrected: bool        # 是否发生纠正
+    #: 本次解码声明的擦除数（去重后）。0 = 纯纠错解码。
+    #: 判据为 2*nerrors + nerasures <= nsym；擦除已知位置，一个擦除只花
+    #: 「一个符号」的预算，而盲纠一个符号要花两个——这就是纯擦除上限
+    #: （32）是纯纠错上限（16）两倍的原因。
+    nerasures: int = 0
 
 
 class ReedSolomon:
@@ -211,15 +216,39 @@ class ReedSolomon:
     # ------------------------------------------------------------------
     # 解码（参考 Wikiversity RS 教程：BM + Chien + Forney，低次在前）
     # ------------------------------------------------------------------
-    def decode(self, codeword: bytes) -> RSResult:
-        """对 255 字节码字解码，返回纠正后的 k 字节数据。"""
+    def decode(self, codeword: bytes,
+               erasures: Optional[Iterable[int]] = None) -> RSResult:
+        """对 255 字节码字解码，返回纠正后的 k 字节数据。
+
+        参数
+        ----------
+        codeword : 255 字节码字（系统码：前 k 字节数据 + nsym 字节校验）。
+        erasures : 可选，**已知可疑符号的位置**（码字字节索引 0..254）。
+            擦除位置由上层先验给出（例如 LRPT 里 Viterbi 软判决可靠性
+            最低的字节）。预算从「2e ≤ nsym」放宽到「2e + f ≤ nsym」：
+            一个擦除只花一个符号的预算，盲纠一个符号要花两个。
+            纯擦除上限 = nsym（RS(255,223) 为 32），是纯纠错上限（16）的两倍。
+
+            位置重复会被去重（不重复消耗预算）；越界位置抛 ValueError；
+            擦除数 > nsym 直接判不可纠（预算本身已破）。
+
+        返回
+        ----------
+        RSResult。``nerrors`` 只计**非擦除位置**的真错误数，擦除数单独
+        记在 ``nerasures``。解码后必做伴随式归零校验——校验不过一律按
+        不可纠返回，绝不返回「改过的错数据 + corrected=True」。
+        """
         if len(codeword) != 255:
             raise ValueError(f"RS 解码需要 255 字节，收到 {len(codeword)}")
-        g = self.gf
-        n = 255
         rcvd = list(codeword)
         if self.ccsds_invert:
             rcvd = [b ^ 0xFF for b in rcvd]
+
+        if erasures is not None:
+            return self._decode_with_erasures(rcvd, erasures)
+
+        g = self.gf
+        n = 255
 
         # 1. 伴随式 synd[i] = r(alpha^(prim*(fcr+i)))（低次在前 synd[0]=S0）
         synd = [0] * self.nsym
@@ -322,7 +351,232 @@ class ReedSolomon:
         data = bytes(out[:self.k])
         if self.ccsds_invert:
             data = bytes(b ^ 0xFF for b in data)
+        # 硬验证：纠正后码字的伴随式必须全零。
+        # 为什么必须有这一步（2026-11-08 真录实测）：错误数超过 t=16 时
+        # Berlekamp-Massey 仍可能给出一个「恰好 ≤t 个根」的解并配上 Forney
+        # 幅值，但该解并不自洽——真录探针里 17 个符号错被报成 nerrors=1、
+        # corrected=True，纠正后的数据重编码与原码字相差 33 字节。不验证
+        # 就会把这种垃圾当成功放行，污染整条 VCDU 真值。
+        if any(self._syndromes(out)):
+            fb = (bytes(b ^ 0xFF for b in rcvd[:self.k]) if self.ccsds_invert
+                  else bytes(rcvd[:self.k]))
+            return RSResult(data=fb, nerrors=-1, corrected=False)
         return RSResult(data=data, nerrors=n_err, corrected=True)
+
+    #: 擦除尝试阶梯（**升序**：先少擦、把预算留给盲纠，再逐步加大）。
+    #: 为什么从小到大：可靠性排序只是近似（Viterbi 的 MLM 不是精确 SOVA），
+    #: 多擦一个「其实没错」的符号就白吃一个预算符号。真录合成链实测：从
+    #: 32 起步会把 2e+f 顶过 nsym，逼出「误纠到另一个合法码字」的假成功。
+    ERASURE_LADDER: tuple = (4, 8, 12, 16, 20, 24, 28, 32)
+
+    def decode_with_reliability(self, codeword: bytes,
+                                rel: Sequence[float],
+                                ladder: Optional[Sequence[int]] = None):
+        """按符号可靠性自动决定擦除的完整解码（先盲解，失败再擦除）。
+
+        参数
+        ----------
+        codeword : 255 字节码字。
+        rel : 与码字等长的逐符号可靠性，**值越小越可疑**。
+            传 None / 长度不足 / 无区分度时退化为普通解码。
+        ladder : 覆盖 :attr:`ERASURE_LADDER`（测试与调参用）。
+
+        返回
+        ----------
+        ``(RSResult, k_erasures_used)``。``k_erasures_used == 0`` 表示盲解就
+        成功，或可靠性信息不足以定位（此时不浪费预算）。
+
+        预算下界：设标出 n_susp 个「显著可疑」符号。若全当擦除，则剩余未知
+        错误 ≈ n_susp − K，判据 2(n_susp−K)+K ≤ nsym 给出 K ≥ 2·n_susp − nsym。
+        比这更小的 K 必然超预算（会逼出不自洽解），直接跳过。
+        """
+        blind = self.decode(codeword)
+        if blind.nerrors >= 0 or rel is None:
+            return blind, 0
+        arr = np.asarray(rel, dtype=np.float64).reshape(-1)
+        if arr.size < len(codeword):
+            return blind, 0
+        arr = arr[: len(codeword)]
+        med = float(np.median(arr))
+        if not np.isfinite(med) or med <= 0.0:
+            return blind, 0
+        n_susp = int(np.count_nonzero(arr < 0.5 * med))
+        if n_susp == 0:
+            return blind, 0              # 无低谷：可靠性没有区分度，不擦
+        k_min = max(0, 2 * n_susp - self.nsym)
+        lad = tuple(ladder) if ladder is not None else self.ERASURE_LADDER
+        order = np.argsort(arr)
+        for k in lad:
+            if k <= 0 or k > self.nsym or k < k_min:
+                continue
+            r = self.decode(codeword, erasures=order[:k].tolist())
+            if r.nerrors >= 0:
+                return r, k
+        return blind, 0
+
+    # ------------------------------------------------------------------
+    # 擦除辅助解码（2e + f <= nsym）——LRPT 队列 #9
+    # ------------------------------------------------------------------
+    def _syndromes(self, rcvd: List[int]) -> List[int]:
+        """伴随式 S_i = r(alpha^(prim*(fcr+i)))，低次在前。"""
+        g = self.gf
+        out = [0] * self.nsym
+        for i in range(self.nsym):
+            root = g.pow(2, self.prim * (self.fcr + i))
+            s = 0
+            for byte in rcvd:
+                s = g.mul(s, root) ^ byte
+            out[i] = s
+        return out
+
+    def _erasure_locator(self, positions: Sequence[int]) -> List[int]:
+        """擦除定位多项式 Λ_e(x) = Π_k (1 - X_k x)，低次在前，常数项 1。
+
+        特征值 X_k = alpha^(prim*d)，d = 254 - pos —— 与 :meth:`decode` 的
+        Forney 步同一约定（prim≠1 时随 prim 拉伸），Chien 位置映射
+        ``pos = (iprim*j - 1) % 255`` 与之自洽。
+        """
+        g = self.gf
+        poly = [1]
+        for pos in positions:
+            d = 255 - 1 - pos
+            xk = g.pow(2, self.prim * d)
+            new = [0] * (len(poly) + 1)
+            for i, c in enumerate(poly):
+                new[i] ^= c
+                new[i + 1] ^= g.mul(c, xk)
+            poly = new
+        return poly
+
+    def _decode_with_erasures(self, rcvd: List[int],
+                              erasures: Iterable[int]) -> RSResult:
+        """擦除辅助 BM 解码。入参 rcvd 已完成 CCSDS 符号反转（域内表示）。"""
+        g = self.gf
+        n = 255
+        k = self.k
+        raw = [int(p) for p in erasures]
+        for p in raw:
+            if p < 0 or p >= n:
+                raise ValueError(f"擦除位置须在 0..{n - 1}，收到 {p}")
+        era = sorted(set(raw))          # 去重：重复声明不重复吃预算
+        f = len(era)
+
+        def _fail() -> RSResult:
+            fb = (bytes(b ^ 0xFF for b in rcvd[:k]) if self.ccsds_invert
+                  else bytes(rcvd[:k]))
+            return RSResult(data=fb, nerrors=-1, corrected=False, nerasures=f)
+
+        if f > self.nsym:               # 预算本身已破，不进 BM
+            return _fail()
+
+        synd = self._syndromes(rcvd)
+        if not any(synd):
+            # 本帧本来就好：如实报 0 错，不把「声明过的擦除」算成纠正
+            fb = (bytes(b ^ 0xFF for b in rcvd[:k]) if self.ccsds_invert
+                  else bytes(rcvd[:k]))
+            return RSResult(data=fb, nerrors=0, corrected=False, nerasures=f)
+
+        # Berlekamp-Massey（擦除初值版）：C/B 初始为擦除定位多项式，
+        # L=f，从 N=f 起迭代；条件 2L <= N+f（等价 2e+f <= nsym）。
+        C = self._erasure_locator(era)
+        B = C[:]
+        L = f
+        m = 1
+        b = 1
+        for N in range(f, self.nsym):
+            d = synd[N]
+            for i in range(1, min(L, len(C) - 1, N) + 1):
+                d ^= g.mul(C[i], synd[N - i])
+            if d == 0:
+                m += 1
+                continue
+            coef = g.div(d, b)
+            need = len(B) + m
+            if len(C) < need:
+                C = C + [0] * (need - len(C))
+            if 2 * L <= N + f:
+                T = C[:]
+                for i in range(len(B)):
+                    C[i + m] ^= g.mul(coef, B[i])
+                L = N + f + 1 - L
+                B = T
+                b = d
+                m = 1
+            else:
+                for i in range(len(B)):
+                    C[i + m] ^= g.mul(coef, B[i])
+                m += 1
+
+        # Chien search：找 C 的全部根
+        err_pos: List[int] = []
+        for j in range(n):
+            val = 0
+            xn = 1
+            a_j = g.pow(2, j)
+            for i in range(len(C)):
+                val ^= g.mul(C[i], xn)
+                xn = g.mul(xn, a_j)
+            if val == 0:
+                err_pos.append((self.iprim * j - 1) % n)
+
+        deg = len(C) - 1
+        while deg > 0 and C[deg] == 0:
+            deg -= 1
+        # 根数必须等于多项式次数；预算判据 2e+f <= nsym（deg = e+f）
+        if len(err_pos) != deg or 2 * deg > self.nsym + f:
+            return _fail()
+        # 擦除位置必须全部落到根上，否则说明先验与数据矛盾
+        if not set(era).issubset(err_pos):
+            return _fail()
+
+        # Forney：Omega = S·Λ mod x^nsym，e_k = Omega(X_k^-1)/Λ'(X_k^-1)·X_k^(1-fcr)
+        omega = [0] * self.nsym
+        for i in range(self.nsym):
+            acc = 0
+            for j in range(min(i + 1, len(C))):
+                acc ^= g.mul(synd[i - j], C[j])
+            omega[i] = acc
+        deriv = [0] * max(0, len(C) - 1)
+        for i in range(1, len(C)):
+            if i % 2 == 1:
+                deriv[i - 1] = C[i]
+
+        era_set = set(era)
+        out = list(rcvd)
+        n_true_err = 0
+        for pos in err_pos:
+            d = n - 1 - pos
+            xk = g.pow(2, self.prim * d)
+            xk_inv = g.inverse(xk)
+            num = 0
+            xn = 1
+            for i in range(len(omega)):
+                num ^= g.mul(omega[i], xn)
+                xn = g.mul(xn, xk_inv)
+            den = 0
+            xn = 1
+            for i in range(len(deriv)):
+                den ^= g.mul(deriv[i], xn)
+                xn = g.mul(xn, xk_inv)
+            if den == 0:
+                return _fail()
+            magnitude = g.div(num, den)
+            magnitude = g.mul(magnitude, g.pow(xk, 1 - self.fcr))
+            if magnitude == 0:
+                continue            # 冗余擦除（该位置本来没错）
+            out[pos] ^= magnitude
+            if pos not in era_set:
+                n_true_err += 1
+
+        # 硬验证：纠正后伴随式必须全零，否则绝不声称成功
+        if any(self._syndromes(out)):
+            return _fail()
+
+        data = bytes(out[:k])
+        if self.ccsds_invert:
+            data = bytes(b ^ 0xFF for b in data)
+        return RSResult(data=data, nerrors=n_true_err,
+                        corrected=bool(err_pos), nerasures=f)
 
 
 # ===========================================================================

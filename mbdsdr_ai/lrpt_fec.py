@@ -150,7 +150,8 @@ _K_IDX = np.arange(32, dtype=np.int32)                             # k = 0..31
 
 def viterbi_decode(soft_bits: np.ndarray,
                    poly1: int = CCSDS_POLY1,
-                   poly2: int = CCSDS_POLY2) -> np.ndarray:
+                   poly2: int = CCSDS_POLY2,
+                   return_reliability: bool = False):
     """Viterbi K=7 r=1/2 软判决译码（向量化 ACS + 全帧回溯）。
 
     参数:
@@ -174,6 +175,11 @@ def viterbi_decode(soft_bits: np.ndarray,
 
     返回:
         译码后信息位 (0/1)，形状 (N,)（不含尾比特）。
+
+        ``return_reliability=True`` 时返回 ``(bits, rel)``：``rel[i]`` 是第 i
+        个译码比特的 MLM 可靠性（该步幸存支路与竞争支路的路径度量差）。
+        差值越小越可疑——这是擦除辅助 RS 的擦除位置来源（LRPT 队列 #9）。
+        采集靠回溯时读同一张度量表，**不改变译码结果**（已有测试钉死）。
     """
     soft = np.asarray(soft_bits, dtype=np.float64).reshape(-1)
     if soft.size % 2 != 0:
@@ -187,6 +193,11 @@ def viterbi_decode(soft_bits: np.ndarray,
 
     # 幸存路径历史：history[t, s] = 从哪来的状态（用于回溯）
     history = np.zeros((n_pairs, nstates), dtype=np.int32)
+
+    # 每步每状态的「幸存支路 − 竞争支路」度量差（只在要可靠性时分配）。
+    # 内存：1020 字节 CADU ≈ 4120 对 × 64 × 4B ≈ 1 MB，可接受。
+    mem = (np.zeros((n_pairs, nstates), dtype=np.float32)
+           if return_reliability else None)
 
     # 预取符号表列（b=0 / b=1），内循环不再触表
     sgn0_b0 = _BRANCH_SIGN0[:, 0]
@@ -202,6 +213,11 @@ def viterbi_decode(soft_bits: np.ndarray,
         t1 = path_metric + sgn0_b1 * s0 + sgn1_b1 * s1
         lo0, hi0 = t0[:32], t0[32:]
         lo1, hi1 = t1[:32], t1[32:]
+        if mem is not None:
+            # 到状态 2k+b 的两支分别来自 s=k 与 s=k+32：|差| 即该步该状态的
+            # MLM 度量差（0 = 两支完全等价，译码器在这里没有任何把握）
+            mem[t, 0::2] = np.abs(lo0 - hi0)
+            mem[t, 1::2] = np.abs(lo1 - hi1)
         take0 = lo0 >= hi0    # 并列取小 s（=旧实现先到先得）
         take1 = lo1 >= hi1
         new_metric = np.empty(nstates, dtype=np.float64)
@@ -227,6 +243,7 @@ def viterbi_decode(soft_bits: np.ndarray,
 
     # 回溯
     decoded = np.zeros(n_pairs, dtype=np.uint8)
+    rel = np.zeros(n_pairs, dtype=np.float64) if mem is not None else None
     cur = best_end
     for t in range(n_pairs - 1, -1, -1):
         prev = int(history[t, cur])
@@ -234,10 +251,15 @@ def viterbi_decode(soft_bits: np.ndarray,
         # next_state[prev, b] = cur → 找 b
         b = cur & 1  # next state LSB = 输入 bit（ns = (s<<1)|b）
         decoded[t] = b
+        if rel is not None:
+            rel[t] = mem[t, cur]      # 路径经过该状态的 MLM 度量差
         cur = prev
 
     # 去掉尾比特（K-1=6 个 0）
-    return decoded[: -(CONV_K - 1)] if n_pairs > CONV_K - 1 else decoded
+    n_out = (n_pairs - (CONV_K - 1)) if n_pairs > CONV_K - 1 else n_pairs
+    if return_reliability:
+        return decoded[:n_out], rel[:n_out]
+    return decoded[:n_out]
 
 
 # --------------------------------------------------------------------------- #
@@ -257,21 +279,37 @@ class LrptCaduDecoder:
         self.scrambler = Scrambler()
         self.rs = ReedSolomon(nsym=32, fcr=112, prim=1, ccsds_invert=True)
 
-    def decode_viterbi_to_bytes(self, soft_coded_bits: np.ndarray) -> bytes:
+    def decode_viterbi_to_bytes(self, soft_coded_bits: np.ndarray,
+                                return_reliability: bool = False):
         """Viterbi 译码 + 组帧字节（含 4 字节 ASM 在前）。
 
         参数:
             soft_coded_bits: 编码后软位串 (c0,c1,c0,c1,...)，形状 (2N,)。
+            return_reliability: 同时返回**每字节可靠性**（该字节 8 个比特的
+                MLM 度量差最小值）——一位崩了整字节就不可信，所以取 min。
+                这是擦除位置的直接来源（见 :meth:`decode_cadu_erasure`）。
 
         返回:
-            Viterbi 译码后的字节串（MSB-first），长度 = N*8//2... 按位对齐。
+            默认返回字节串；``return_reliability=True`` 时返回
+            ``(bytes, byte_rel)``，``byte_rel`` 为 float64 数组，长度与字节串
+            相同，值越小越可疑。
         """
-        info_bits = viterbi_decode(soft_coded_bits)
+        if return_reliability:
+            info_bits, rel = viterbi_decode(soft_coded_bits,
+                                            return_reliability=True)
+        else:
+            info_bits = viterbi_decode(soft_coded_bits)
         # MSB-first 组字节
         nbytes = (info_bits.size + 7) // 8
         padded = np.zeros(nbytes * 8, dtype=np.uint8)
         padded[: info_bits.size] = info_bits
-        return np.packbits(padded).tobytes()
+        raw = np.packbits(padded).tobytes()
+        if not return_reliability:
+            return raw
+        rel_padded = np.zeros(nbytes * 8, dtype=np.float64)
+        rel_padded[: rel.size] = rel
+        byte_rel = rel_padded.reshape(-1, 8).min(axis=1)
+        return raw, byte_rel
 
     @staticmethod
     def _deinterleave_4(blob: bytes) -> List[bytes]:
@@ -355,3 +393,73 @@ class LrptCaduDecoder:
             return decoded, errors
         else:
             return b"", errors
+
+    # ------------------------------------------------------------------ #
+    # 擦除辅助解码（LRPT 队列 #9）
+    # ------------------------------------------------------------------ #
+    #: 擦除尝试阶梯（与 :attr:`fec.ReedSolomon.ERASURE_LADDER` 同一份口径）。
+    ERASURE_LADDER: Tuple[int, ...] = (4, 8, 12, 16, 20, 24, 28, 32)
+
+    def _rs_decode_block(self, blk: bytes, byte_rel, blk_idx: int,
+                         ladder: Tuple[int, ...]):
+        """单块解码：把「Viterbi 字节可靠性」映射成本块的符号可靠性，
+        交给 :meth:`fec.ReedSolomon.decode_with_reliability` 决定擦除。
+
+        映射：4 路交织下，块 ``blk_idx`` 的第 j 字节 = 交织区第 ``4j+blk_idx``
+        字节 = ``viterbi_bytes`` 的第 ``4 + 4j + blk_idx`` 字节（+4 跳过 ASM）。
+
+        返回 (RSResult, 用掉的擦除数)。
+        """
+        if byte_rel is None:
+            return self.rs.decode(blk), 0
+        rel = np.asarray(byte_rel, dtype=np.float64)
+        if rel.size == 0:
+            return self.rs.decode(blk), 0
+        idx = np.arange(RS_BLOCK, dtype=np.int64) * RS_INTERLEAVE + blk_idx + 4
+        rel_blk = rel[np.minimum(idx, rel.size - 1)]
+        return self.rs.decode_with_reliability(blk, rel_blk, ladder)
+
+    def decode_cadu_erasure(self, viterbi_bytes: bytes, byte_rel,
+                            order: str = "concat",
+                            ladder: Optional[Tuple[int, ...]] = None
+                            ) -> Tuple[bytes, List[int], List[int]]:
+        """擦除辅助 CADU 解码（2e+f ≤ nsym）。
+
+        参数:
+            viterbi_bytes: 含 4 字节 ASM 的 CADU 字节串。
+            byte_rel: 每字节可靠性（:meth:`decode_viterbi_to_bytes` 的输出，
+                长度 ≥ 1024，值越小越可疑）。``None`` = 退化为盲解，行为与
+                :meth:`decode_cadu` 一致。
+            order: 同 :meth:`decode_cadu`（``"concat"`` / ``"woven"``）。
+            ladder: 覆盖 :attr:`ERASURE_LADDER`（测试/调参用）。
+
+        返回:
+            (decoded_data, rs_errors, erasures_used)
+            **诚实边界不变**：仍是「4 块全可纠才算有效帧」，否则 payload
+            为空。擦除只是提高单块可纠概率，不放松整帧判据。
+        """
+        if order not in ("concat", "woven"):
+            raise ValueError(f"order 须 'concat' 或 'woven'，收到 {order!r}")
+        if len(viterbi_bytes) < CADU_SIZE:
+            raise ValueError(f"CADU 需要 {CADU_SIZE} 字节，收到 {len(viterbi_bytes)}")
+        lad = tuple(ladder) if ladder is not None else self.ERASURE_LADDER
+
+        derandomized = self.scrambler.descramble(viterbi_bytes[4:CADU_SIZE])
+        blocks = self._deinterleave_4(derandomized)
+
+        results: List[RSResult] = []
+        errors: List[int] = []
+        used: List[int] = []
+        for i, blk in enumerate(blocks):
+            r, k = self._rs_decode_block(blk, byte_rel, i, lad)
+            results.append(r)
+            errors.append(r.nerrors)
+            used.append(k)
+
+        if not all(e >= 0 for e in errors):
+            return b"", errors, used
+        if order == "woven":
+            datas = [r.data for r in results]
+            return (bytes(datas[j % 4][j // 4] for j in range(892)),
+                    errors, used)
+        return b"".join(r.data for r in results), errors, used

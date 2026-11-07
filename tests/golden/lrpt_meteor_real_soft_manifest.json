@@ -1,34 +1,46 @@
 {
   "source": "meteor_m2_72k.wav (TU Berlin lar-tech, SHA-pinned in golden test)",
-  "note": "soft bits AFTER winning constellation transform (pair-swap family); both impls decode these directly \u2014 convention already applied",
+  "note": "soft bits AFTER winning constellation transform (pair-swap family); decoded with order=woven (CCSDS 往返切分) + erasure-assisted RS + syndrome verification — 2026-11-08 re-pinned after old concat-order truths were proven to be RS miscorrections",
   "asm": "1acffc1d",
   "frames": [
     {
       "file": "lrpt_meteor_real_soft_0.f32",
       "n_soft": 16460,
-      "candidate": 2,
-      "variant": "swap",
+      "sym_index": 114110,
+      "variant": "swap+inv",
       "rs_errors": [
-        1,
-        3,
+        0,
+        0,
         2,
         2
       ],
-      "payload_head32": "407300ecc32df0d3adce120295871f4267552126d223f8989b942ffe5ec7f604",
+      "erasures_used": [
+        32,
+        32,
+        28,
+        28
+      ],
+      "payload_head32": "400509c0d2b4e40046082c283180383cd7ff084426b800590000029621bc0000",
       "vcdu_version": 1
     },
     {
       "file": "lrpt_meteor_real_soft_1.f32",
       "n_soft": 16460,
-      "candidate": 5,
+      "sym_index": 187838,
       "variant": "swap+inv",
       "rs_errors": [
-        2,
-        1,
-        2,
-        1
+        0,
+        0,
+        0,
+        0
       ],
-      "payload_head32": "4062000a2608760800020000fddacc73714be1a567413e5b43335792bd927913",
+      "erasures_used": [
+        32,
+        32,
+        32,
+        32
+      ],
+      "payload_head32": "400509c0db00000000cc8d29c90f2a658607271d47627a741f89aa17a92449e6",
       "vcdu_version": 1
     }
   ]

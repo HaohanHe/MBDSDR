@@ -217,9 +217,13 @@ def test_viterbi_signature_has_no_dead_depth_param():
 
     本测试防止它悄悄复活：语义是「全帧回溯」，任何滑窗深度必须先在模块
     docstring 里写明并与 SatDump chainback（cc_decoder.cpp:228-276）对齐。
+
+    参数白名单同时防「加了形参却不用」：``return_reliability`` 是
+    2026-11-08 为擦除辅助 RS 加的实参，函数体内真的用它分配/回填度量差
+    表，不属于死参数。
     """
     import inspect
     from mbdsdr_ai.lrpt_fec import viterbi_decode
     params = inspect.signature(viterbi_decode).parameters
     assert "traceback_depth" not in params
-    assert list(params) == ["soft_bits", "poly1", "poly2"]
+    assert list(params) == ["soft_bits", "poly1", "poly2", "return_reliability"]

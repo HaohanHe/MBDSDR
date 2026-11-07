@@ -65,6 +65,9 @@ class LRPTFrame:
     corrected: bool         # 是否发生纠错
     nerrors: int            # 纠正符号数
     position: int            # 在原始字节流中的位置
+    #: 本块靠擦除辅助救回时用掉的擦除数（0 = 盲解成功，或未提供可靠性）。
+    #: 上层据此区分「自己解出来的」和「靠先验救出来的」。
+    erasures_used: int = 0
 
 
 class MeteorLRPTChain:
@@ -103,17 +106,26 @@ class MeteorLRPTChain:
         return cw
 
     # ------------------------------------------------------------------
-    def decode_block(self, cw: bytes) -> LRPTFrame:
-        """对 255 字节码字解码。"""
+    def decode_block(self, cw: bytes, rel=None) -> LRPTFrame:
+        """对 255 字节码字解码。
+
+        参数
+        ----------
+        rel : 可选，与码字等长的逐字节可靠性（值越小越可疑）。给了就先盲解，
+            失败再走擦除辅助（判据 2e+f ≤ 32，见
+            :meth:`fec.ReedSolomon.decode_with_reliability`）。解扰是逐字节
+            XOR、不挪位置，所以 rel 与传入码字的位置一一对应。
+        """
         if len(cw) != 255:
             raise ValueError(f"LRPT 块需要 255 字节，收到 {len(cw)}")
         buf = bytes(cw)
         if self.use_scrambler:
             buf = self._scrambler.descramble(buf)
         if self.use_rs:
-            r = self._rs.decode(buf)
+            r, k_used = self._rs.decode_with_reliability(buf, rel)
             return LRPTFrame(data=r.data, corrected=r.corrected,
-                             nerrors=r.nerrors, position=0)
+                             nerrors=r.nerrors, position=0,
+                             erasures_used=k_used)
         return LRPTFrame(data=buf[:223], corrected=False, nerrors=0, position=0)
 
     # ------------------------------------------------------------------
@@ -125,20 +137,37 @@ class MeteorLRPTChain:
         return idx
 
     # ------------------------------------------------------------------
-    def decode_stream(self, raw_bytes: bytes) -> list:
-        """对连续字节流解码：找同步 → 逐块解扰/RS。"""
+    def decode_stream(self, raw_bytes: bytes, byte_rel=None) -> list:
+        """对连续字节流解码：找同步 → 逐块解扰/RS。
+
+        ``byte_rel`` 可选：与 ``raw_bytes`` 等长的逐字节可靠性（值越小越
+        可疑）。提供时每个块都会得到自己的可靠性切片，盲解失败的块走擦除
+        辅助（2e+f ≤ 32）。这是「符号幅度 → 字节可靠性」在真软件里的入口，
+        对应 METEOR-M2 过境信噪比不足、单块超 t=16 的情形。
+        """
         frames = []
+        rel = None
+        if byte_rel is not None:
+            rel = np.asarray(byte_rel, dtype=np.float64).reshape(-1)
+            if rel.size < len(raw_bytes):
+                rel = None              # 长度不符就不猜，退回盲解
         if self.sync_word is not None:
             pos = self.find_sync(raw_bytes)
             if pos < 0:
                 return frames
-            buf = raw_bytes[pos + len(self.sync_word):]
+            skip = pos + len(self.sync_word)
+            buf = raw_bytes[skip:]
+            if rel is not None:
+                rel = rel[skip:]
         else:
             buf = raw_bytes
         offset = 0
         while len(buf) - offset >= 255:
             block = buf[offset: offset + 255]
-            fr = self.decode_block(block)
+            blk_rel = None
+            if rel is not None and rel.size >= offset + 255:
+                blk_rel = rel[offset: offset + 255]
+            fr = self.decode_block(block, rel=blk_rel)
             fr.position = offset
             frames.append(fr)
             offset += 255

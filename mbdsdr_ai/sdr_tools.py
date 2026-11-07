@@ -3806,7 +3806,17 @@ def _meteor_lrpt_decode_iq_fn_tool(args) -> "ToolResult":
             _bits[0::2] = (_sy.real > 0).astype(np.uint8)
             _bits[1::2] = (_sy.imag > 0).astype(np.uint8)
             _raw = np.packbits(_bits[:len(_bits) // 8 * 8]).tobytes()
-            cand = chain.decode_stream(_raw)
+            # 字节可靠性：每个字节 8 bit = 4 个符号，取 4 个符号里最弱的
+            # 一维（min(|I|,|Q|)）作为该符号的置信度，再取 4 符号最小值。
+            # 这是擦除辅助 RS 的先验来源——本链没有 Viterbi，星座幅度是
+            # 唯一可得置信度（见 fec.ReedSolomon.decode_with_reliability）。
+            _nbytes = len(_raw)
+            _sym_rel = np.minimum(np.abs(_sy.real), np.abs(_sy.imag))
+            _byte_rel = None
+            if _nbytes and _sym_rel.size >= _nbytes * 4:
+                _byte_rel = (_sym_rel[:_nbytes * 4]
+                             .reshape(-1, 4).min(axis=1))
+            cand = chain.decode_stream(_raw, byte_rel=_byte_rel)
             if cand:
                 frames = cand
                 rot_used = k

@@ -21,7 +21,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mbdsdr_ai.lrpt_fec import (  # noqa: E402
-    CADU_SIZE, LrptCaduDecoder, viterbi_decode,
+    CADU_SIZE, LrptCaduDecoder,
 )
 
 GOLDEN = os.path.join(os.path.dirname(__file__), "golden")
@@ -37,14 +37,18 @@ def _manifest():
 
 
 def _decode_soft(soft: np.ndarray) -> bytes:
-    info = viterbi_decode(soft.astype(np.float64))
-    nb = (info.size + 7) // 8
-    pad = np.zeros(nb * 8, dtype=np.uint8)
-    pad[:info.size] = info
-    raw = np.packbits(pad).tobytes()
-    assert raw[:4] == ASM, f"ASM 漂移：{raw[:4].hex()}"
+    """软位流 → 892B VCDU 载荷。
+
+    2026-11-08 起走 **woven 重组 + 擦除辅助 RS + 伴随式验证**——旧口径
+    （concat + 无验证）解出的「真值」被法证证伪为 RS 误纠（纠正后重编码
+    与收到码字距离 31-32 > t=16），整份 manifest 随 fixture 一起重钉。
+    """
     decoder = LrptCaduDecoder()
-    payload, errs = decoder.decode_cadu(raw[:CADU_SIZE])
+    raw, rel = decoder.decode_viterbi_to_bytes(soft.astype(np.float64),
+                                               return_reliability=True)
+    assert raw[:4] == ASM, f"ASM 漂移：{raw[:4].hex()}"
+    payload, errs, _used = decoder.decode_cadu_erasure(
+        raw[:CADU_SIZE], rel[:CADU_SIZE], order="woven")
     assert all(e >= 0 for e in errs), f"RS 不可纠：{errs}"
     assert len(payload) == 892
     return payload
@@ -78,7 +82,7 @@ def test_real_soft_decodes_to_pinned_vcdu(idx):
 
 
 def test_rs_error_profile_pinned():
-    """RS 纠错计数钉扎（防解码链静默变松/变紧）。"""
+    """RS 纠错/擦除计数钉扎（防解码链静默变松/变紧）。"""
     m = _manifest()
     decoder = LrptCaduDecoder()
     for fr in m["frames"]:
@@ -86,11 +90,10 @@ def test_rs_error_profile_pinned():
         if not os.path.isfile(path):
             continue
         soft = np.fromfile(path, dtype=np.float32).astype(np.float64)
-        info = viterbi_decode(soft)
-        nb = (info.size + 7) // 8
-        pad = np.zeros(nb * 8, dtype=np.uint8)
-        pad[:info.size] = info
-        raw = np.packbits(pad).tobytes()
-        _, errs = decoder.decode_cadu(raw[:CADU_SIZE])
+        raw, rel = decoder.decode_viterbi_to_bytes(soft, return_reliability=True)
+        _, errs, used = decoder.decode_cadu_erasure(
+            raw[:CADU_SIZE], rel[:CADU_SIZE], order="woven")
         assert list(errs) == fr["rs_errors"], \
             f"RS 纠错计数漂移：{errs} != {fr['rs_errors']}"
+        assert list(used) == fr["erasures_used"], \
+            f"擦除数漂移：{used} != {fr['erasures_used']}"
