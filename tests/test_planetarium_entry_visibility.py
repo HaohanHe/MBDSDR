@@ -226,3 +226,45 @@ def test_send_controls_clickable_at_every_width(window, qtapp):
         btn = getattr(w.ai_panel, "send_btn", None)
         assert btn is not None and btn.isEnabled(), (
             f"宽 {width}：AI 助手发送按钮必须可用")
+
+
+def test_planetarium_one_click_fullscreen(window):
+    """一键全屏：星象仪里必须有一颗 ⛶，点一下真全屏、文案随状态走。
+
+    用户原话（2026-11-07）："我希望这个星象仪模式我能点一个一键全屏"。
+    只留菜单项 / F11 不算——那一层是给熟手的，产品面必须有一眼看得见的入口
+    （demo 右上角那颗 ⛶ 就是这个位置）。
+    """
+    w, mw = window
+    w.set_app_mode("planetarium")
+    strip = w._planetarium_strip
+    btn = strip.findChild(QPushButton, "planetariumFullscreen")
+    assert btn is not None, "星象仪必须有一键全屏按钮"
+    assert btn.isVisible(), "按钮必须在浮层里可见"
+    assert btn.sizeHint().width() <= strip.width() - 8, (
+        f"窄条里文字要放得下，sizeHint={btn.sizeHint().width()}")
+    assert btn.toolTip(), "按钮必须有 tooltip 说明"
+
+    # 进形态会自动全屏 → 文案必须已经切到"退出全屏"（不能留过期文案）
+    assert w.isFullScreen() is True, "进星象仪应自动全屏"
+    assert "退出全屏" in btn.text(), f"自动全屏后文案未同步: {btn.text()}"
+
+    btn.click()                      # 一键回窗口
+    assert w.isFullScreen() is False, "点一下应回到窗口模式"
+    assert "退出" not in btn.text() and "全屏" in btn.text(), \
+        f"回窗口后文案应为「全屏」，实际: {btn.text()}"
+
+    btn.click()                      # 再一键回全屏
+    assert w.isFullScreen() is True, "再点一下应回到全屏"
+    assert "退出全屏" in btn.text()
+
+    w.set_app_mode("ide")
+
+
+def test_exit_planetarium_restores_windowed(window):
+    """退出星象仪必须回到窗口模式（不留"全屏但没浮层"的困住状态）。"""
+    w, mw = window
+    w.set_app_mode("planetarium")
+    assert w.isFullScreen() is True
+    w.set_app_mode("ide")
+    assert w.isFullScreen() is False, "退出星象仪后仍是全屏，用户没有退路了"

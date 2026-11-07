@@ -2126,6 +2126,15 @@ class MainWindow(QMainWindow):
         exit_btn.setToolTip("切回 IDE 形态；按 Esc 同样退出")
         exit_btn.setMinimumHeight(44)
         exit_btn.clicked.connect(lambda: self.set_app_mode("ide"))
+        # 一键全屏（对齐 demo 右上角那颗 ⛶）：用户要的是"点一下就满屏看天空"，
+        # 不该逼他去翻「视图」菜单或记 F11。文案随窗口状态切换（⛶ 全屏 /
+        # 🗗 退出全屏），进形态自动全屏后这颗按钮立刻显示"退出全屏"。
+        self._planetarium_fs_btn = QPushButton("⛶ 全屏")
+        self._planetarium_fs_btn.setObjectName("planetariumFullscreen")
+        self._planetarium_fs_btn.setToolTip("全屏看天空（F11；再点一次回到窗口）")
+        self._planetarium_fs_btn.setMinimumHeight(36)
+        self._planetarium_fs_btn.clicked.connect(self._toggle_fullscreen)
+        strip_lay.addWidget(self._planetarium_fs_btn, 0, Qt.AlignHCenter)
         strip_lay.addWidget(exit_btn, 0, Qt.AlignHCenter)
         strip_lay.addStretch(1)
         self._planetarium_strip = strip
@@ -2262,9 +2271,11 @@ class MainWindow(QMainWindow):
         self._sync_planetarium_recording()
         self._position_planetarium_overlay()
         self._planetarium_strip.show()
+        self._sync_fullscreen_btn()
         # 窗口已显示才联动全屏；启动恢复阶段窗口未 show，交给正常 show 流程。
         if self.isVisible() and not self.isFullScreen():
             self.showFullScreen()
+            self._sync_fullscreen_btn()
 
     def _exit_planetarium(self) -> None:
         if getattr(self, "_app_mode", "ide") != "planetarium":
@@ -2298,6 +2309,7 @@ class MainWindow(QMainWindow):
         self._sync_mode_action()
         if self.isFullScreen():
             self.showNormal()
+        self._sync_fullscreen_btn()
 
     def set_app_mode(self, mode: str) -> None:
         """顶层形态切换入口（IDE / 星象仪）。"""
@@ -2471,6 +2483,16 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):  # noqa: N802 (Qt 命名)
         super().resizeEvent(event)
         self._apply_responsive_chrome()
+
+    def changeEvent(self, event):  # noqa: N802 (Qt 命名)
+        """窗口状态变化（全屏/最大化）后同步星象仪按钮文案。
+
+        自动全屏（进星象仪）与手动全屏（F11/按钮）走的是不同入口，
+        只有这里能保证三种路径下按钮文案都和真实状态一致。
+        """
+        super().changeEvent(event)
+        if event is not None and event.type() == QEvent.WindowStateChange:
+            self._sync_fullscreen_btn()
 
     def _apply_responsive_chrome(self) -> None:
         """窄窗自适应：次要读数让位，长文案省略但 tooltip 保全文。
@@ -7383,10 +7405,27 @@ class MainWindow(QMainWindow):
                 pass
 
     def _toggle_fullscreen(self):
+        """全屏/还原（菜单 F11、星象仪那颗按钮共用同一入口）。"""
         if self.isFullScreen():
             self.showNormal()
         else:
             self.showFullScreen()
+        self._sync_fullscreen_btn()
+
+    def _sync_fullscreen_btn(self) -> None:
+        """星象仪「全屏」按钮文案跟着真实窗口状态走（不猜、不留过期文案）。"""
+        btn = getattr(self, "_planetarium_fs_btn", None)
+        if btn is None:
+            return
+        try:
+            if self.isFullScreen():
+                btn.setText("🗗 退出全屏")
+                btn.setToolTip("回到窗口模式（F11 同效）")
+            else:
+                btn.setText("⛶ 全屏")
+                btn.setToolTip("全屏看天空（F11；再点一次回到窗口）")
+        except RuntimeError:
+            pass
 
     # ------------------------------------------------------------------
     # 右侧 QDockWidget 停靠体系（控制 / 状态 / AI 助手）
