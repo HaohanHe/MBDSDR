@@ -467,16 +467,30 @@ class RtlTcpDeviceAdapter:
         # 握手拿到的调谐器类型（rtl_tcp.c:623 htonl），供 _probe_tuner_type 之外的展示。
         self.tuner_type = self._client.tuner_type
         if ppm:
-            self._client.set_freq_correction(int(ppm))
+            if not self._client.set_freq_correction(int(ppm)):
+                # 握手刚成功链路就断：如实让 connect() 失败，不带半死连接上线。
+                raise OSError(self._client.error or "rtl_tcp 频偏校正下发失败")
+
+    def _raise_if_dead(self, what: str) -> None:
+        """命令下发失败时抛 OSError（pyrtlsdr 同款契约），绝不静默。
+
+        上层 RTLSDRBackend._apply_frequency 靠「写抛异常 / 回读不匹配」判定
+        调谐失败；若这里吞掉 False，写后回读读到的是刚更新的缓存，
+        断线时三次重试全部"验证通过"，假调谐成功。
+        """
+        raise OSError(self._client.error or f"rtl_tcp {what}下发失败（链路已断开）")
 
     # ── pyrtlsdr 风格可读写属性 ──────────────────────────────────────────
+    # 缓存只在命令真正下发成功后更新：rtl_tcp 无查询命令，缓存就是回读值，
+    # 写失败还更新缓存 = 拿请求值冒充硬件状态。
     @property
     def center_freq(self) -> int:
         return self._center_freq
 
     @center_freq.setter
     def center_freq(self, value):
-        self._client.set_frequency(int(value))
+        if not self._client.set_frequency(int(value)):
+            self._raise_if_dead("频率")
         self._center_freq = int(value)
 
     @property
@@ -485,7 +499,8 @@ class RtlTcpDeviceAdapter:
 
     @sample_rate.setter
     def sample_rate(self, value):
-        self._client.set_sample_rate(int(value))
+        if not self._client.set_sample_rate(int(value)):
+            self._raise_if_dead("采样率")
         self._sample_rate = float(value)
 
     @property
@@ -495,7 +510,8 @@ class RtlTcpDeviceAdapter:
     @gain.setter
     def gain(self, value):
         # dB 浮点 → 0.1dB 整数（RtlTcpClient.set_gain 内部先发 gain_mode=1 再发增益）
-        self._client.set_gain(int(round(float(value) * 10)))
+        if not self._client.set_gain(int(round(float(value) * 10))):
+            self._raise_if_dead("增益")
         self._gain = float(value)
 
     @property
@@ -504,7 +520,8 @@ class RtlTcpDeviceAdapter:
 
     @freq_correction.setter
     def freq_correction(self, value):
-        self._client.set_freq_correction(int(value))
+        if not self._client.set_freq_correction(int(value)):
+            self._raise_if_dead("频偏校正")
         self._freq_correction = int(value)
 
     # rtl_tcp 无 bandwidth 命令：接收端由 librtlsdr 按采样率自选模拟滤波器。
@@ -520,7 +537,8 @@ class RtlTcpDeviceAdapter:
     def set_manual_gain_mode(self, mode):
         # 增益模式由 RtlTcpClient.set_gain 内部切 1=manual；AGC(0) 走 0x03=0。
         if not mode:
-            self._client._send_cmd(RtlTcpClient.CMD_SET_GAIN_MODE, 0)
+            if not self._client._send_cmd(RtlTcpClient.CMD_SET_GAIN_MODE, 0):
+                self._raise_if_dead("增益模式")
         return True
 
     def set_agc_mode(self, enabled):
@@ -740,10 +758,16 @@ class RtlTcpBackend(SDRBackend):
         ok = self._client.set_sample_rate(int(snapped))
         if ok and self._ring_reader is not None:
             self._ring_reader.clear()
-        if ok:
-            # 吸附后的真实档位写回 status，避免 UI 显示用户请求值而硬件是另一档
-            self.status.sample_rate_hz = float(snapped)
         return ok
+
+    def _resolve_applied_sample_rate(self, rate_hz: float) -> float:
+        """真正生效值 = 吸附后的离散档（与 _apply_sample_rate 实际下发值一致）。
+
+        基类默认返回请求值，且 set_sample_rate 成功后用它回写 status——
+        不覆写就会把请求值盖回（2.000M vs 实发 2.048M），DSP fs_in 与真实
+        流率分叉。生效值只能有一个事实源：下发什么就回读什么。
+        """
+        return float(RTLSDRBackend.nearest_sample_rate(rate_hz))
 
     def _apply_gain(self, gain_db: float) -> bool:
         """dB → 0.1dB 单位整数，下发 opcode 0x03。"""
