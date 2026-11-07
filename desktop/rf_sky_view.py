@@ -3996,13 +3996,21 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # 视场+Bortle+消光模型），不是第二套阈值；裸眼基线以内仍走
     # stars.star_draw 原模型，视觉不变。
     STAR_LOD_MIN_R_PX = 0.5
+    # 星点落笔增益：star_draw 的半径是"相对亮度编码"（1.2–2.4px），在高 DPI
+    # 屏上整片天会细成一层灰噪点，亮星也立不起来。这里只放大屏幕落笔半径，
+    # 不动星等/亮度/极限任何数值口径。
+    # **必须放在共享视觉模型里**：拾取层（_find_body_at）用的就是这里的 r，
+    # 只在绘制层乘一份增益，会变成"画得更大但点不中边缘"——画得出就点得中
+    # 是硬契约（test_planet_brightness_model）。
+    STAR_RENDER_GAIN = 1.3
 
     def _star_visual(self, mag_eff: float, limit_mag: float,
                      bortle: int) -> Tuple[float, float, float, int]:
         """(半径, 亮度, 辉光, alpha) —— 绘制与拾取共用同一份视觉模型。"""
         r, bright, bloom = _stars.star_draw(mag_eff, bortle)
         if r > 0.0:
-            return r, bright, bloom, int(255 * (0.35 + 0.65 * bright))
+            return (r * self.STAR_RENDER_GAIN, bright, bloom,
+                    int(255 * (0.35 + 0.65 * bright)))
         try:
             from mbdsdr_ai.skyengine.star_catalog import naked_eye_limit_mag
             base = naked_eye_limit_mag(int(bortle))
@@ -4014,7 +4022,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         span = max(1e-6, lim - base)
         fade = max(0.0, min(1.0, (lim - float(mag_eff)) / span))
         # 22..94 /255：暗星可见但不假装和裸眼星一样亮。
-        return self.STAR_LOD_MIN_R_PX, 0.0, 0.0, int(255 * (0.09 + 0.28 * fade))
+        return (self.STAR_LOD_MIN_R_PX * self.STAR_RENDER_GAIN,
+                0.0, 0.0, int(255 * (0.09 + 0.28 * fade)))
 
     def _star_visual_many(self, mag_eff, limit_mag: float,
                           bortle: int) -> Tuple[np.ndarray, ...]:
@@ -4041,6 +4050,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     (255.0 * (0.09 + 0.28 * fade)).astype(np.int64))
                 r = np.where(lod, lod_r, r)
                 alpha = np.where(lod, lod_a, alpha)
+        # 与标量版同一份增益（r<=0 的隐藏星保持 0，不因乘增益复活）
+        r = np.where(r > 0.0, r * float(self.STAR_RENDER_GAIN), r)
         return r, bright, bloom, alpha
 
     def _draw_stars(self, painter: QPainter):
@@ -4108,10 +4119,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 continue
             # select_for_view 已含消光与极限星等（eff_mag）；不再叠加第二次。
             # 裸眼基线内走 star_draw 原模型，LOD 放出的更暗星走最小可辨点。
-            # 渲染增益 1.3：star_draw 的半径是"相对亮度编码"（1.2–2.4px），
-            # 在高 DPI 屏上整片天会细成一层"灰噪点"，亮星也立不起来。
-            # 这里只放大屏幕落笔半径，不改星等/亮度/极限任何数值口径。
-            r = r_l[i] * 1.3
+            # 落笔增益已在 _star_visual_many 里乘过（与拾取层同一份模型）。
+            r = r_l[i]
             if r <= 0:
                 continue
             pos = QPointF(px, py)
@@ -4936,14 +4945,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             key = layer_cols[idx]
             col = (QColor(_t.COLORS["ground_shadow_day"]) if key is None
                    else QColor(_t.COLORS[key]))
-            # 每层从地平线向下渐暗，而不是一整块纯色：纯色填充在深色天空下
-            # 看不出起伏，像"地平线以下贴了一块黑板"；纵向渐变给出"地"的
-            # 纵深，山脊/树线/屋脊三层才有前后关系。
+            # 每层从地平线向下回到本色：纯色填充在深色天空下看不出起伏，
+            # 像"地平线以下贴了一块黑板"；纵向轻微渐亮给出"地"的纵深。
+            # 终点必须落在 tokens 原色上——测试 _is_ground 按色表 ±2 判定
+            # "这一条像素是地景不是天空"，把底部压到 darker(190) 会让判据
+            # 失效（而且底部变成纯黑洞，本来也不好看）。
             grad = QLinearGradient(0.0, float(horizon_y),
                                    0.0, float(max(horizon_y + 1.0,
                                                   self.height())))
-            grad.setColorAt(0.0, col)
-            grad.setColorAt(1.0, col.darker(190))
+            grad.setColorAt(0.0, col.lighter(135))
+            grad.setColorAt(1.0, col)
             painter.setBrush(QBrush(grad))
             path = QPainterPath()
             edge: List[QPointF] = []
