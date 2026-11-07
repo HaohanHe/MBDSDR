@@ -2746,7 +2746,59 @@ class HackRFBackend(SDRBackend):
         self._start_time = time.time()
         if self.status.sample_rate_hz is None:
             self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
+        # 对照 RTL/RtlTcp/Pluto 纪律：打开后逐项显式下发，不停在出厂/上次残留。
+        # 任一项被硬件拒绝 → 如实失败，不带半配置硬件上线。
+        if not self.set_sample_rate(self.status.sample_rate_hz):
+            return self._connect_init_failed("采样率")
+        target_freq = self.status.frequency_hz or 98_000_000.0
+        if not self.set_frequency(target_freq):
+            return self._connect_init_failed("中心频率")
+        if not self.set_lna_gain(self._lna_db):
+            return self._connect_init_failed("LNA 增益")
+        if not self.set_vga_gain(self._vga_db):
+            return self._connect_init_failed("VGA 增益")
+        self.readback_hw_state()
         return True
+
+    def _connect_init_failed(self, what: str) -> bool:
+        detail = self.status.error or "硬件拒绝下发"
+        self.status.connected = False
+        self.status.link_state = "failed"
+        self.status.error = f"HackRF 连接初始化{what}下发失败: {detail}"
+        logger.warning(self.status.error)
+        if self._hackrf is not None:
+            try:
+                self._hackrf.disconnect()
+            except Exception:
+                pass
+            self._hackrf = None
+        return False
+
+    def readback_hw_state(self) -> bool:
+        """回读 ctypes 层缓存（只在写成功后更新）；增益回读 VGA 档。
+
+        libhackrf 无增益查询命令，_lna_db/_vga_db 是最近一次成功下发值，
+        与 rtl_tcp 适配器同口径。status.gain_db 语义与 _apply_gain 一致=VGA。
+        """
+        if self._hackrf is None:
+            return False
+        got = 0
+        try:
+            f = float(self._hackrf.get_frequency())
+            if f > 0:
+                self.status.frequency_hz = f
+                got += 1
+        except Exception:
+            pass
+        try:
+            r = float(self._hackrf.get_sample_rate())
+            if r > 0:
+                self.status.sample_rate_hz = r
+                got += 1
+        except Exception:
+            pass
+        self.status.gain_db = float(self._vga_db)
+        return got > 0
 
     def disconnect(self):
         self._rx_started = False
@@ -3565,14 +3617,58 @@ class USRPBackend(SDRBackend):
         try:
             import uhd
             self._usrp = uhd.usrp.MultiUSRP(self._device_args)
-            self.status.connected = True
-            self._start_time = time.time()
-            if self.status.sample_rate_hz is None:
-                self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
-            return True
-        except Exception:
+        except Exception as e:
             self.status.connected = False
+            self.status.link_state = "failed"
+            self.status.error = (
+                f"USRP 连接失败: {type(e).__name__}: {e}。"
+                "请确认 UHD 库与设备连接（uhd_find_devices 能否枚举到）。")
+            logger.warning(self.status.error)
             return False
+        self.status.connected = True
+        self.status.error = ""
+        self._start_time = time.time()
+        if self.status.sample_rate_hz is None:
+            self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
+        # 对照 RTL/RtlTcp/Pluto 纪律：打开后逐项显式下发，不停在出厂/上次残留。
+        if not self.set_sample_rate(self.status.sample_rate_hz):
+            return self._connect_init_failed("采样率")
+        target_freq = self.status.frequency_hz or 98_000_000.0
+        if not self.set_frequency(target_freq):
+            return self._connect_init_failed("中心频率")
+        if not self.set_gain(self.status.gain_db):
+            return self._connect_init_failed("增益")
+        # UHD 可能把请求值改写到硬件支持的档位：status 以回读为准。
+        self.readback_hw_state()
+        return True
+
+    def _connect_init_failed(self, what: str) -> bool:
+        detail = self.status.error or "硬件拒绝下发"
+        self.status.connected = False
+        self.status.link_state = "failed"
+        self.status.error = f"USRP 连接初始化{what}下发失败: {detail}"
+        logger.warning(self.status.error)
+        self._usrp = None
+        return False
+
+    def readback_hw_state(self) -> bool:
+        if self._usrp is None:
+            return False
+        got = 0
+        for getter, field in (
+                ("get_rx_freq", "frequency_hz"),
+                ("get_rx_rate", "sample_rate_hz"),
+                ("get_rx_gain", "gain_db")):
+            try:
+                v = float(getattr(self._usrp, getter)())
+                # 增益 0 dB 合法；频率/采样率回读 0 = 未生效，不拿它盖掉状态
+                if v <= 0 and field != "gain_db":
+                    continue
+                setattr(self.status, field, v)
+                got += 1
+            except Exception:
+                pass
+        return got > 0
 
     def disconnect(self):
         if self._rx_stream:

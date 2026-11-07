@@ -178,6 +178,17 @@ class TestSoapySDREnumerate(unittest.TestCase):
 
 
 class TestEnumerateAllDedup(unittest.TestCase):
+    def setUp(self):
+        # 与 TestSoapySDREnumerate 同纪律：假 SoapySDR 模块不许泄漏到后续文件，
+        # 否则 hackrf_params_test 的"无硬件不得枚举到 hackrf"会被假 SN0001 咬红。
+        self._saved = sys.modules.pop("SoapySDR", None)
+
+    def tearDown(self):
+        if self._saved is not None:
+            sys.modules["SoapySDR"] = self._saved
+        else:
+            sys.modules.pop("SoapySDR", None)
+
     def test_dedup_across_backends(self):
         """enumerate_all_sdr_devices()：SoapySDR 与原生 RTL-SDR 同 serial 去重。"""
         _install_fake_soapysdr()
