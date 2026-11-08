@@ -160,15 +160,34 @@ def test_freq_orbit_chart_with_data(qapp):
 # ---------------------------------------------------------------------------
 # 8. 观测站经纬度输入框初始值不是硬编码城市坐标
 # ---------------------------------------------------------------------------
-def test_observer_not_hardcoded(qapp):
+def test_observer_is_readonly_and_fed_by_host(qapp):
+    """面板不再持有可编辑坐标控件 —— 那曾是站址的第二个写入口。
+
+    2026-11-09：三个 SpinBox 已删（填了只影响本面板过境，天空图不动）。
+    现在只显示主窗推来的坐标，改地点走「更改地点…」。
+    """
     panel = NewSpacetimePanel()
-    lat = panel.lat_spin.value()
-    lon = panel.lon_spin.value()
-    # 不允许出现北京 / 示例城市的硬编码坐标
-    assert lat != pytest.approx(39.9042, abs=1e-6), "纬度不得硬编码北京"
-    assert lat != pytest.approx(43.8868, abs=1e-6), "纬度不得硬编码示例城市"
-    assert lon != pytest.approx(125.3245, abs=1e-6), "经度不得硬编码示例城市"
-    panel.close()
+    try:
+        assert not hasattr(panel, "lat_spin"), "面板不该再持有纬度输入框"
+        assert not hasattr(panel, "lon_spin"), "面板不该再持有经度输入框"
+        assert not hasattr(panel, "alt_spin"), "面板不该再持有海拔输入框"
+        assert "未设置" in panel.observer_label.text()
+
+        panel.set_observer(45.0, 120.0, 0.0)
+        assert panel._observer_configured is True
+        assert "45.0000" in panel.observer_label.text()
+        assert "120.0000" in panel.observer_label.text()
+
+        panel.set_observer(None, None)
+        assert panel._observer_configured is False
+        assert "未设置" in panel.observer_label.text()
+
+        # 0.0/0.0 是合法站址（几内亚湾），不是"未设置"哨兵
+        panel.set_observer(0.0, 0.0)
+        assert panel._observer_configured is True
+        assert "0.0000" in panel.observer_label.text()
+    finally:
+        panel.close()
 
 
 # ---------------------------------------------------------------------------

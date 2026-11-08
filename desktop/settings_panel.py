@@ -433,6 +433,10 @@ class SettingsPanel(QWidget):
         self._settings = settings
         self._host = host
         self._rows: Dict[str, QWidget] = {}
+        # 经纬度"半对"输入的暂存（只在本面板内存里，不进 host、不参与计算）。
+        # 没有这个的话，用户先输纬度会被当成"坐标清空"——两个框是分开提交的。
+        self._pending_lat: Optional[float] = None
+        self._pending_lon: Optional[float] = None
         self._building = False
         self._host_signals_wired = False
         self._ai = _load_json_dict(AI_CONFIG_PATH)
@@ -548,22 +552,38 @@ class SettingsPanel(QWidget):
                 self._settings.set(item.key, value)
             return
         if item.storage == "gui_config":
-            if self._host is not None:
-                # gui_config.json 是观测站坐标既有权威源（main_window.py:7630）
-                setattr(self._host, "_observer_" + item.key.split("_")[-1], value)
-                # 用户手填的地点 = 静态配置，标记来源后 GNSS 丢 fix 不会清空它
+            if self._host is None:
+                return
+            # 站址走主窗唯一写入口（set_observer_site）：成对提交经纬度，
+            # 一并同步天空 / 过境 / ADS-B，并把镜像下发到 config.json。
+            which = "lat" if item.key.endswith("lat") else "lon"
+            new_val = None if value is None else float(value)
+            if new_val is None:
+                # 清空任一坐标 = 整对清空（半个坐标没有意义）
+                self._pending_lat = self._pending_lon = None
                 try:
-                    self._host._observer_source = "config"
-                except AttributeError:
-                    pass
-                try:
-                    self._host._apply_observer_location()
+                    self._host.set_observer_site(None, None, source="manual")
                 except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                    self._notify(f"观测站坐标已保存，但天空图同步失败：{exc}")
-                try:
-                    self._host._save_gui_config()
-                except (AttributeError, OSError, TypeError, ValueError) as exc:
-                    self._notify(f"观测站坐标同步失败，未能写入 gui_config：{exc}")
+                    self._notify(f"观测站坐标清空失败：{exc}")
+                return
+            if which == "lat":
+                self._pending_lat = new_val
+            else:
+                self._pending_lon = new_val
+            lat = (self._pending_lat if self._pending_lat is not None
+                   else getattr(self._host, "_observer_lat", None))
+            lon = (self._pending_lon if self._pending_lon is not None
+                   else getattr(self._host, "_observer_lon", None))
+            if lat is None or lon is None:
+                # 只填了一半：先记住（暂存面板本地，不进 host、不参与计算）。
+                # 否则"先输纬度"会被上面的清空分支吃掉，用户以为保存失败。
+                self._notify("纬度与经度要成对填写，填完另一个才生效")
+                return
+            self._pending_lat = self._pending_lon = None
+            try:
+                self._host.set_observer_site(lat, lon, source="config")
+            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                self._notify(f"观测站坐标保存失败：{exc}")
             return
         # ai_config：保留 api_key 等既有键，只改本项
         self._ai[self._ai_file_key(item)] = value

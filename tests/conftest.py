@@ -453,6 +453,28 @@ def isolated_profile(tmp_path_factory):
     mp.undo()
 
 
+@pytest.fixture(autouse=True)
+def _restore_time_engine():
+    """每个用例结束把全局时间引擎还给「此刻 / 1×」。
+
+    引擎是进程级单例，多个文件会把它钉在固定历元（2026-09-27 等）后忘记
+    复位；后续「首次打开不跳时间」「实时」类断言就会莫名变红
+    （2026-11-09 实测：test_settings_schema 的消光端到端用例把它 pause
+    在 2026-09-27，导致 test_first_open_welcome 的实时断言差 42 天）。
+
+    放在 function 级而不是 module 级：污染是逐用例发生的，module 级只能
+    在文件末补救，中间已经红完了。
+    """
+    yield
+    try:
+        from mbdsdr_ai.new_spacetime import get_time_engine
+        eng = get_time_engine()
+        eng.set_time_now()
+        eng.set_rate(1.0)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _recycle_top_level_widgets():
     """每模块结束回收遗留顶层 widget（AGENTS.md 对策①）。

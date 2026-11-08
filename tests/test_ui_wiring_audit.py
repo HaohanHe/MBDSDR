@@ -252,7 +252,9 @@ ALLOWED_UNCONNECTED = {
     # 2026-11-06 删：`satellite_image_panel.py:self.sat_combo` 已接
     # currentTextChanged（NOAA 音频采集 ↔ METEOR LRPT 离线 IQ 模式切换），
     # 不再是"合法未接线"控件。
-    "new_spacetime_panel.py:self.alt_spin": "刷新过境读 value()",
+    # 2026-11-09 删：`new_spacetime_panel.py:self.alt_spin` 已随经纬度三个
+    # SpinBox 一起移除 —— 面板不再持有可编辑站址（第二个写入口），
+    # 站址唯一写入口在主窗 set_observer_site()，面板只读显示 + 「更改地点…」。
     "weather_panel.py:self.freq_edit": "开始解码读 text()",
     "weather_panel.py:self.sym_edit": "开始解码读 text()",
     "weather_panel.py:self.sr_edit": "开始解码读 text()",

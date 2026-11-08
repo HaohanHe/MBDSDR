@@ -256,6 +256,8 @@ class FreqOrbitChart(QWidget):
 # 主面板
 # ===========================================================================
 class NewSpacetimePanel(QWidget):
+    #: 用户点「更改地点…」：主窗据此打开地点面板（本面板不自己改站址）
+    change_location_requested = Signal()
     """新时空差异化面板：AMR 调制识别 + 卫星过境时间线/授时 + 频率-轨道图。"""
 
     # 后台刷新结果回到 GUI 线程（显式排队：worker 是普通 Python 线程，直接
@@ -289,7 +291,12 @@ class NewSpacetimePanel(QWidget):
         # 观测站「是否已配置」用显式状态位，不用坐标值当哨兵：
         # (0,0) 是几内亚湾的真实坐标，必须能正常算过境。None/False = 未配置。
         self._observer_configured = False
-        self._setting_observer = False  # 程序写入 spin 时不误判为"用户已配置"
+        # 站址缓存：由主窗 set_observer 推送。本面板**不再持有可编辑的
+        # 坐标控件**——那三个 SpinBox 曾让它成为第二个写入口（填了只影响
+        # 本面板过境，天空图不动），见 docs/COORDINATION.md 2026-11-09。
+        self._observer_lat: Optional[float] = None
+        self._observer_lon: Optional[float] = None
+        self._observer_alt_km: float = 0.0
 
         self._build_ui()
         self._apply_styles()
@@ -379,30 +386,24 @@ class NewSpacetimePanel(QWidget):
             f"color: {COLOR_DANGER}; font-weight: 600;")
         lay.addWidget(self.time_sync_label)
 
-        # 观测站坐标输入。spin 只能显示数值（0.0），"是否配置"由
-        # _observer_configured 显式记录：0.0/0.0 是合法站址，不是哨兵。
+        # 观测站坐标：**只读**。以前这里是三个 SpinBox，填了只改本面板的
+        # 过境计算，主天空图纹丝不动（set_observer 全仓零调用）——等于两个
+        # 站址。现在唯一写入口在主窗 set_observer_site()，这里只显示 + 跳转。
         obs_form = QFormLayout()
-        self.lat_spin = QDoubleSpinBox()
-        self.lat_spin.setRange(-90.0, 90.0)
-        self.lat_spin.setDecimals(6)
-        self.lat_spin.setSingleStep(0.0001)
-        self.lat_spin.setValue(0.0)
-        self.lon_spin = QDoubleSpinBox()
-        self.lon_spin.setRange(-180.0, 180.0)
-        self.lon_spin.setDecimals(6)
-        self.lon_spin.setSingleStep(0.0001)
-        self.lon_spin.setValue(0.0)
-        self.alt_spin = QDoubleSpinBox()
-        self.alt_spin.setRange(0.0, 10000.0)
-        self.alt_spin.setDecimals(3)
-        self.alt_spin.setSingleStep(1.0)
-        self.alt_spin.setSuffix(" km")
-        self.alt_spin.setValue(0.0)
-        self.lat_spin.valueChanged.connect(self._on_observer_edited)
-        self.lon_spin.valueChanged.connect(self._on_observer_edited)
-        obs_form.addRow("纬度 (°):", self.lat_spin)
-        obs_form.addRow("经度 (°):", self.lon_spin)
-        obs_form.addRow("海拔 (km):", self.alt_spin)
+        self.observer_label = QLabel("未设置")
+        self.observer_label.setWordWrap(True)
+        self.observer_label.setObjectName("spacetimeObserverLabel")
+        self.change_location_btn = QPushButton("更改地点…")
+        self.change_location_btn.setToolTip(
+            "打开地点面板：搜索城市 / 地图点选 / 手填经纬度"
+            "（改完天空、过境、ADS-B 同步）")
+        self.change_location_btn.clicked.connect(
+            lambda: self.change_location_requested.emit())
+        obs_row = QHBoxLayout()
+        obs_row.setContentsMargins(0, 0, 0, 0)
+        obs_row.addWidget(self.observer_label, 1)
+        obs_row.addWidget(self.change_location_btn, 0)
+        obs_form.addRow("观测站:", obs_row)
         lay.addLayout(obs_form)
 
         # 刷新过境按钮
@@ -541,20 +542,18 @@ class NewSpacetimePanel(QWidget):
         ``lat``/``lon`` 为 ``None`` 表示**未配置**（真实缺省）；``0.0`` 是
         合法坐标（几内亚湾），必须照常计算，不得当占位哨兵。
         """
-        self._setting_observer = True
-        try:
-            configured = lat is not None and lon is not None
-            self._observer_configured = configured
-            self.lat_spin.setValue(float(lat) if configured else 0.0)
-            self.lon_spin.setValue(float(lon) if configured else 0.0)
-            self.alt_spin.setValue(float(alt_km or 0.0))
-        finally:
-            self._setting_observer = False
-
-    def _on_observer_edited(self, _value: float) -> None:
-        """用户在 spin 里改经纬度即视为显式配置（含手输 0.0/0.0）。"""
-        if not self._setting_observer:
-            self._observer_configured = True
+        configured = lat is not None and lon is not None
+        self._observer_configured = bool(configured)
+        self._observer_lat = float(lat) if configured else None
+        self._observer_lon = float(lon) if configured else None
+        self._observer_alt_km = float(alt_km or 0.0)
+        label = getattr(self, "observer_label", None)
+        if label is not None:
+            if configured:
+                label.setText(f"{self._observer_lat:.4f}°, "
+                              f"{self._observer_lon:.4f}°")
+            else:
+                label.setText("未设置（天空按未定位空态显示）")
 
     def set_gnss_nmea(self, nmea: str) -> None:
         """注入一段 GNSS RMC NMEA，本地计算授时状态（不尝试 NTP）。"""
@@ -675,9 +674,9 @@ class NewSpacetimePanel(QWidget):
             "gate": effective_pass_visibility_gate_deg(settings),
             "show_low": effective_show_low_elevation_passes(settings),
             "window_hours": effective_pass_window_hours(settings),
-            "lat": float(self.lat_spin.value()),
-            "lon": float(self.lon_spin.value()),
-            "alt_km": float(self.alt_spin.value()),
+            "lat": float(self._observer_lat or 0.0),
+            "lon": float(self._observer_lon or 0.0),
+            "alt_km": float(self._observer_alt_km or 0.0),
             "observer_configured": bool(self._observer_configured),
         }
 

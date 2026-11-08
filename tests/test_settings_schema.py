@@ -226,6 +226,7 @@ class _FakeHost:
         self.auto_squelch = True
         self._observer_lat = None
         self._observer_lon = None
+        self._observer_source = None
         self.observer_apply = 0
         self.gui_saves = 0
         self.theme = "default"
@@ -245,6 +246,19 @@ class _FakeHost:
 
     def _set_touch_mode(self, mode):
         self.touch = mode
+
+    def set_observer_site(self, lat, lon, alt_m: float = 0.0, *,
+                          place=None, source="manual", persist=True):
+        """与 main_window.set_observer_site 同语义的替身（唯一写入口）。"""
+        has = lat is not None and lon is not None
+        self._observer_lat = float(lat) if has else None
+        self._observer_lon = float(lon) if has else None
+        self._observer_source = source if has else None
+        self.observer_last_source = source
+        self.observer_apply += 1
+        if persist:
+            self.gui_saves += 1
+        return True
 
     def _apply_observer_location(self):
         self.observer_apply += 1
@@ -740,7 +754,13 @@ def test_panel_reset_all_restores_behavior(env):
     ds, host, panel, _ = env
     panel._on_changed("theme", "dark")
     panel._on_changed("fft_size", 4096)
+    # 站址必须成对：只填纬度不生效（2026-11-09 唯一写入口的契约，
+    # 否则"先输纬度"会被当成清空，用户以为保存失败）
     panel._on_changed("observer_lat", 39.9)
+    assert host._observer_lat is None, "半对坐标不该落进主窗"
+    panel._on_changed("observer_lon", 116.4)
+    assert host._observer_lat == 39.9
+    assert host._observer_lon == 116.4
     assert host.theme == "dark"
     assert host.spectrum.generator.fft_size == 4096
     assert host._observer_lat == 39.9
@@ -1159,6 +1179,10 @@ def test_extinction_setting_end_to_end_changes_visible_star_count(env, qapp):
         assert n02 - n05 >= 50, f"星数差 {n02 - n05} 太小，设置链路可能没进选择"
     finally:
         view.close()
+        # 全局时间引擎是单例：本用例把它钉在 2026-09-27 并 pause 过，
+        # 不复位会把后续「实时」类断言（如首次打开不跳时间）全部带偏。
+        eng.set_time_now()
+        eng.set_rate(1.0)
 
 
 def test_extinction_k_changes_star_count_but_not_bortle():
@@ -1425,8 +1449,10 @@ def test_observer_writes_existing_gui_config(env):
     panel._on_changed("observer_lon", 116.4074)
     assert host._observer_lat == 39.9042
     assert host._observer_lon == 116.4074
-    assert host.observer_apply >= 2
-    assert host.gui_saves >= 2        # 沿用 gui_config 既有权威源
+    # 2026-11-09：经纬度成对提交（不再每个字段各跑一遍同步/落盘），
+    # 所以是 1 次而不是 2 次；多跑一遍只会让天空图闪两下。
+    assert host.observer_apply >= 1
+    assert host.gui_saves >= 1        # 沿用 gui_config 既有权威源
 
 
 def test_ai_params_write_without_touching_secret(env):

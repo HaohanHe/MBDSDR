@@ -505,6 +505,9 @@ from module_panel import ModulePanel
 from tokens import tokens
 from floating_panel import FloatingPanel
 from time_machine import TimeMachineDialog, format_offset
+from station_sync import (
+    clear_config_site, read_config_site, write_config_site,
+)
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
 from constants import (
@@ -1765,6 +1768,12 @@ class MainWindow(QMainWindow):
         # 新时空（原中央页签 → 右栏 App）
         self.new_spacetime_panel = NewSpacetimePanel()
         self._add_right_tab("新时空", self.new_spacetime_panel, "new_spacetime_dock")
+        # 面板里的「更改地点…」：站址唯一写入口在主窗，面板只发意图
+        try:
+            self.new_spacetime_panel.change_location_requested.connect(
+                self._open_location_panel)
+        except AttributeError:
+            pass
 
         # ------------------------------------------------------------------
         # 三栏 QSplitter（handle 4px，可拖宽）
@@ -10252,6 +10261,115 @@ class MainWindow(QMainWindow):
         # 无真实射频扫描数据时不显示热力图。
         self._apply_observer_location()
 
+    def _focus_settings_tab(self) -> None:
+        """切到右栏「设置」页（地点面板未就绪时的落点）。"""
+        tab = getattr(self, "right_tab", None)
+        if tab is None:
+            return
+        for i in range(tab.count()):
+            if str(tab.tabBar().tabData(i) or "") == "settings":
+                tab.setCurrentIndex(i)
+                return
+
+    def _open_location_panel(self) -> None:
+        """打开「选地点」：有地点面板就用面板，没有就退到设置页。
+
+        地点面板（搜索城市 / 地图点选）在下一批接入；在那之前不能让
+        「更改地点…」点了没反应，所以先落到设置页并给出明确指引。
+        """
+        panel = getattr(self, "_location_panel", None)
+        if panel is not None:
+            try:
+                panel.show()
+                panel.raise_()
+                panel.activateWindow()
+                return
+            except (AttributeError, RuntimeError):
+                pass
+        self._focus_settings_tab()
+        try:
+            self.statusBar().showMessage(
+                "在「设置 → 卫星与多普勒 → 地面站经纬度」填写位置；"
+                "纬度与经度要成对填写", MSG_NORMAL)
+        except RuntimeError:
+            pass
+
+    def set_observer_site(self, lat, lon, alt_m: float = 0.0, *,
+                          place: Optional[str] = None,
+                          source: str = "manual",
+                          persist: bool = True) -> bool:
+        """站址的**唯一写入口**（设置 / 地点面板 / 手填都走这里）。
+
+        为什么要收成一个口子：以前 GNSS、设置面板、示例天空各写各的字段，
+        还各自调一次 ``_apply_observer_location``，结果是「天空变了、过境
+        没变」「agent 按旧位置算」这类不出错但不对的状态。
+
+        - ``lat``/``lon`` 同为 None → 清空（天空回诚实空态，镜像也清）；
+        - ``0.0/0.0`` 是合法坐标，不当哨兵；
+        - ``persist=False`` 用于 GNSS 实时注入（不落盘，避免旧位置冒充）；
+        - **绝不跳时间**：换位置只换位置，观测时刻归用户自己按「时间」。
+        """
+        try:
+            has = lat is not None and lon is not None
+            new_lat = float(lat) if has else None
+            new_lon = float(lon) if has else None
+        except (TypeError, ValueError):
+            return False
+        if has and not (-90.0 <= new_lat <= 90.0
+                        and -180.0 <= new_lon <= 180.0):
+            return False
+
+        self._observer_lat = new_lat
+        self._observer_lon = new_lon
+        self._observer_source = source if has else None
+        if has:
+            self._observer_from_gnss = (source == "gnss")
+        try:
+            self._apply_observer_location()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+        if persist:
+            try:
+                self._save_gui_config()
+            except (OSError, RuntimeError, TypeError, ValueError):
+                pass
+        try:
+            if has:
+                label = f"{place} · " if place else ""
+                src_zh = {
+                    "gnss": "GNSS", "config": "手动设置", "manual": "手动设置",
+                    "place": "地点搜索", "preview": "示例位置",
+                }.get(str(source), str(source))
+                self.statusBar().showMessage(
+                    f"观测位置：{label}{new_lat:.4f}°, {new_lon:.4f}°"
+                    f"（来源：{src_zh}）· 时刻不变", MSG_NORMAL)
+            else:
+                self.statusBar().showMessage(
+                    "观测位置已清空：天空回到未定位空态", MSG_NORMAL)
+        except RuntimeError:
+            pass
+        return True
+
+    def _push_site_to_panels(self, lat, lon, alt_m: float = 0.0) -> None:
+        """把站址推给所有「按站址算数」的面板。
+
+        这些面板以前各读各的盘（ADS-B 直接读 gui_config，新时空面板干脆
+        自己存一份），主窗改了站址它们不知道。现在统一由这里推一次。
+        """
+        panel = getattr(self, "new_spacetime_panel", None)
+        if panel is not None:
+            try:
+                panel.set_observer(lat, lon,
+                                   float(alt_m or 0.0) / 1000.0)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+        adsb = getattr(self, "adsb_map_panel", None)
+        if adsb is not None and lat is not None and lon is not None:
+            try:
+                adsb.set_observer(float(lat), float(lon))
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+
     def _apply_observer_location(self):
         """根据当前观测站坐标同步 SatelliteTracker 与天空图数据来源标注。
 
@@ -10268,6 +10386,7 @@ class MainWindow(QMainWindow):
             # 启动恢复链 / GNSS 无 fix 轮询会再走这里，别把它打回纯空屏
             # （不写 _observer_lat/lon，所以不算"已定位"）。
             if self.sky_view.get_site_note():
+                self._push_site_to_panels(None, None)
                 return
             # 天空图站址若当前是 GNSS 实时注入的，由 _poll_gnss 按 fix 有无
             # 单独收口；这里再清一次会把刚拿到的定位打回空状态（两条写路径
@@ -10275,6 +10394,7 @@ class MainWindow(QMainWindow):
             if self._observer_source != "gnss":
                 self.sky_view.set_observer(None, None)
                 self.sky_view.set_data_source("none")
+            self._push_site_to_panels(None, None)
             return
 
         if self.sat_tracker is None:
@@ -10303,6 +10423,7 @@ class MainWindow(QMainWindow):
                 self._sync_time_rate_btn()
             except Exception:
                 pass
+        self._push_site_to_panels(lat, lon)
 
     # ========================================================================
     # 卫星闭环自动跟踪（过境预测 -> 实时 az/el/多普勒 -> 自动调谐 SDR）
@@ -11337,6 +11458,17 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
             os.replace(tmp_path, config_file)
+            # 站址镜像：agent / controller / MCP 读的是 ~/.mbdsdr/config.json。
+            # 只由这里单向下发（用户权威位置），别处只读；GNSS 实时 fix 不落盘，
+            # 所以也不会被镜像成"旧位置冒充当前"。
+            try:
+                if self._observer_lat is not None \
+                        and self._observer_lon is not None:
+                    write_config_site(self._observer_lat, self._observer_lon)
+                else:
+                    clear_config_site()
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as e:  # noqa: BLE001
             logger.warning("保存 GUI 配置失败: %s", e)
 
@@ -11397,6 +11529,17 @@ class MainWindow(QMainWindow):
             # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标
             self._observer_lat = config.get("observer_lat")
             self._observer_lon = config.get("observer_lon")
+            # 旧版本迁移：GUI 没有坐标、但镜像里有（agent/controller 时代配过）
+            # → 搬进 GUI。方向只有「镜像 → GUI」这一次，反方向永远由
+            # _save_gui_config 单向下发，避免两边互相覆盖。
+            if self._observer_lat is None or self._observer_lon is None:
+                try:
+                    mirrored = read_config_site()
+                except Exception:  # noqa: BLE001
+                    mirrored = None
+                if mirrored is not None:
+                    self._observer_lat = mirrored["lat"]
+                    self._observer_lon = mirrored["lon"]
             # 落盘坐标 = 用户静态配置，GNSS 丢 fix 不许清（见 _poll_gnss）
             self._observer_source = (
                 "config" if self._observer_lat is not None
