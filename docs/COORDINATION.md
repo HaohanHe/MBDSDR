@@ -45,7 +45,39 @@
 > **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
 > 的交接单视为**收件人改为本线**，按新单逐条销账。
 
-### 我这边（2026-11-08 深夜：九条用户口径收口，已提交待推送）
+### 我这边（2026-11-08 上午：通用 Agent 一轮，35753a49）
+
+用户 09:37「继续」，按队列第 0 条接着干，主线是他最狠的那句
+「AI 助手，我说叫你学通用 Agent，你是一点没学来」。
+
+- 查清根因：`tool_registry` / `orchestrator` / `hook_manager` 一直都在，
+  但无 API Key 时 `MBDSDRAgent.chat()` 直接返回 `api_key_not_set`，
+  对话栏等于死的。新增 `desktop/local_agent_bridge.py`（Qt 无关、纯 Python）：
+  能力来自注册表事实源，工具名语义词 + 通用中英触发词典做词面打分，
+  **明确标注不是语言模型**；一次只执行最相关的一个只读能力；写/硬件/
+  发射类 `gated`（人工门），Hooks 可否决；每轮登记真实 Orchestrator
+  任务 + 真实 Hooks 事件；星名文化读仓库 JSON，不编故事。
+- `ai_panel.py`：无 Key 转本地协商（LocalWorker 后台线程）、工具回执卡
+  （原型 .toolcard）、人工门确认条、常驻状态条（内核/工具/任务/事件）、
+  任务与事件明细、⧉ 弹出成自由窗口。`capability_drawer.py` 加两个事实源
+  能力位 + 常驻任务/事件明细。`main_window.py` 内核装载后刷状态条、
+  星象仪命令栏补用户气泡、点星问模型接线。
+- `rf_sky_view.py`：信息卡加「问模型」入口（`question_requested`，只填问题
+  不自动发）；**修真 bug**：kv 里方位/高度先塞 "—" 导致卡宽按占位符算，
+  实时坐标右端被切掉 → 实时值提前算，卡宽 335→379，整行完整。
+- 实测链路：Capella → 五车二 → 问模型 → 仓库数据「御夫座α，五车
+  （五帝之车）西边界」；「现在设备什么状态」→ `sdr_status` 真实回执；
+  `sdr_set_frequency` → gated + 确认按钮。
+- **12 文件 243 passed / 0 failed**；`tests/test_local_agent_bridge.py`
+  8 条契约全用真实内核对象，不 mock 结果。
+
+**not_verified**：真机设备本轮不在位（COM4 无、`rtl_test -t` 报
+No supported devices found），GNSS+SDR 同开复验没做成；离线那次
+`sdr_status` 如实回「没有已连接的设备」，只能证明链路诚实，不是真机实证。
+无 Key 的匹配是词面，不理解语义；配 Key 仍走原模型链路。
+右栏默认仍嵌三栏（不替用户决定布局，改成一点即弹出并记位置）。
+
+### 我这边（2026-11-08 深夜：九条用户口径收口，已推送）
 
 用户 02:00 前口述九条：主题/语言/布局该进设置；右栏频率「点点圈点点」
 看不懂；中栏黑白无常；AI 助手没学通用 Agent；左栏星座文字被切；
@@ -968,14 +1000,18 @@
 
 ## 三、接下来要办啥（队列）
 
-0. **[我，明日]** 用户 02:03「明天再说」后的接续项：
-   ① 存量挂起 `tests/test_user_layouts.py::TestSaveAndRestore::
-   test_capture_layout_roundtrip_keys` 整文件跑卡住（基线同样卡，单跑过），
-   定位前序用例状态污染；② 能力矩阵在真机 GNSS+SDR 同开下复验；
-   ③ 用户点名「大量参照项目」的深化：星座故事、点星之后接「听」、
-   展示页最大化（右栏控制面板默认弹出 / ADS-B 空态收口）；
-   ④ 用户九条里「AI 助手学通用 Agent」——目前只做到内核常驻 +
-   能力位事实源可见，工具调用编排与常驻任务流尚未接进对话栏。
+0. **[我，续]** 队列第 0 条销账与遗留（2026-11-08 上午）：
+   ① **存量挂起已定位**：整文件跑 `tests/test_user_layouts.py` 挂在
+   `TestSaveAndRestore::test_splitter_sizes_restored_after_save_and_apply`
+   （`apply_preset` / splitter 尺寸恢复附近），**单跑 8.41s PASSED** ⇒
+   前序用例状态污染；46c407f2 改动前整文件复跑同样挂起，判为存量。
+   尚未修，下轮用 `MBDSDR_TEST_LOCK=0 -v -s` 抓 fixture 状态。
+   注意 `tests/conftest.py` 的 Qt 互斥锁默认等 300s，并发排查时先绕锁。
+   ② **真机复验待设备**：本轮 COM4 与 RTL2832U 都不在位，等插回再跑
+   `output/_hw_agent.py`。③ 点星接模型 / AI 面板自由窗口**已做**；
+   「展示页最大化」余下 ADS-B 空态收口与右栏摆位记忆。
+   ④ 编排/Hooks/常驻**已做**（真实任务与事件）；余下「配 Key 后把
+   工具调用编排接进模型对话流」——目前配 Key 仍走原 `AIWorker.chat()`。
 1. **[TRAE]** `scripts/smoke_exe_no_popup.ps1` 收口提交
 2. **[TRAE]** 便携包线收口：package_windows.ps1 验真机构建打包，旧 stub zip
    问题闭环
