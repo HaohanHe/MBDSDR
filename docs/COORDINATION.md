@@ -45,6 +45,52 @@
 > **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
 > 的交接单视为**收件人改为本线**，按新单逐条销账。
 
+### 我这边（2026-11-08 夜：LRPT 图像内容级真值对拍，afb76976）
+
+用户「继续」，按队列 #10② 收口图像链最后一件。协议层 golden（VCDU/
+M_PDU/包结构/DC 系数/几何）照不到**像素域**，round-trip 自洽测试对任意
+置换都绿——真录 JPEG 曾解出垃圾图而全仓测试无感。本轮拿独立第三方
+解码器 **meteor_decode**（dbdexter-dev，MIT，@e7ca456）的像素输出做内容级
+对拍，揪出并修两处真 bug：
+
+- **bug A · zigzag 逆置换**：`lrpt_dct.ZIGZAG` 误填逆置换（自然索引→序号），
+  却被 `unzigzag_order`/`zigzag_order` 当正向（序号→自然）用。gather/scatter
+  对任意置换互逆 ⇒ round-trip 恒绿，真录系数散落错位。改填 JPEG Annex F.2.1
+  正向标准表（与 meteor_decode `jpeg.c::_zigzag_lut`、`ssdv_decoder._ZIGZAG`
+  逐字一致），新增 `test_zigzag_jpeg_standard_forward_order` 钉标准序 +
+  语义锚 `ZIGZAG[2]==8`。
+- **bug B · 双重 +128 饱和**：`lrpt_image._blocks_to_spatial` 在 `idct_8x8`
+  已 +128 clamp 的像素域上又 +128 再 clip，整块推向 255 饱和。删二次偏置。
+- **基准建法（identical-bit，隔离 FEC）**：BMP 搜索曾被两链 FEC 包集差异
+  混淆（我方擦除辅助 10 包 ≠ meteor_decode 盲解 RS 包集）。改 instrument
+  meteor_decode 逐 MPDU dump（熵输入 + 独立解码像素），我方链解**同一熵
+  数据**逐块对拍，把 JPEG 内容级与 FEC 层彻底分开。35178 块：MAD mean
+  0.498 / median 0.500 / p95 0.563，99.92% MAD<1.0、100% MAD<2.0（浮点
+  scipy ortho IDCT vs Q14 定点取整地板约 0.5）。**1 块边缘流发散**
+  （APID65 seq15122 mcu0 Q94 blk0，DC 一致 AC 解析分叉）诚实剔除、记进
+  provenance，不冒充全匹配。
+- **落地物**：`tests/golden/lrpt_meteor_content_golden.json`（60 条自包含、
+  三通道 64/65/68、30 质量桶，`truth_class=independent-third-party-
+  implementation-output`，pixels 是 meteor_decode 输出 = external-truth，
+  非我方编码器自生成）+ `tests/test_lrpt_meteor_content_golden.py` 3 条
+  （规模/多样性地板、真值独立输出自报、逐块 MAD<2 + 最坏<1.5 地板锚）
+  + `provenance.json` 来历声明（SHA-256 钉值 + identical-bit derivation）。
+- **反证（非恒绿）**：旧 HEAD 代码（逆置换 + 双重 128）跑新内容测试 →
+  **840 块偏离、MAD 最高 128.35**（`output/_reverse_proof_buggy.log`，
+  EXIT=1）；修复版 3 passed（`_reverse_proof_fixed.log`）。
+- **验证**：真录协议级 golden **18 passed** 不受像素修复影响
+  （`_real_golden_after_fix.log`，90s）；身份门 + 来历守卫 + DCT 单元 +
+  内容 **23 passed**（`_precommit_lane2.log`）。落库 `afb76976`（钩子全链
+  干净，pre-commit marker 留存，post-commit 自动同步共享 index）。
+- **顺手清身份门自指红**：本台账晚段一行旧稿复述了被禁居所/行踪词字面量
+  （记述「曾命中并改述」时引了原词），门禁自指命中——改为只述类别不复述
+  字面量，守卫规则一字不动（与 §四巡检会话 2026-11-04 那条同病灶同治法）。
+
+**not_verified**：真机仍不在位（COM4/RTL2832U 无，`rtl_test -t` No supported
+devices found），内容基准源自 TU Berlin 真录 `meteor_m2_72k.wav` 经独立
+FEC 链回收，非本机自采；1 块边缘发散未深追（1/35178，两独立解码器对
+含 0xFF  stuffing 的边界流 AC 解析分叉，DC 一致），如实剔除不藏。
+
 ### 我这边（2026-11-08 晚：HEAD 基线存量红清盘，1a347691）
 
 傍晚轮挂账的「7 条存量红」本轮全清，巷道又逼出 3 条同账存量，一并销：
@@ -63,9 +109,9 @@
   暂停固定在 UNIX=1790510400 无复位，`test_first_open_welcome` 的
   「选位置不跳时间」读到 42 天前。给污染源加 autouse 复位 fixture
   （与 sky_readouts engine fixture 同口径），不动受害用例断言。
-- **身份门 1 条**：45ed727d 两处注释「用户所在地」命中居所/行踪词规则
-  （都是隐私保护设计说明，非个人信息），改述「用户实际位置」，
-  守卫规则一字不动。
+- **身份门 1 条**：45ed727d 两处注释命中居所/行踪词规则（都是隐私
+  保护设计说明，非个人信息），改述「用户实际位置」，守卫规则一字不动。
+  （本行旧稿曾复述被禁词字面量致门禁自指命中，2026-11-08 夜改为只述类别。）
 - **反证**：旧 `_call_ai` / 旧 `_update_ai_status` 各从 45ed727d git 对象
   提取执行，漏锁/假就绪复现 + 对照组不变，3/3 + 3/3 OK
   （`output/_probe_busy_lock_reverse.py` / `_probe_status_reverse.py`）。
@@ -75,7 +121,9 @@
 - **顺手核查销账**：队列另账 ② 野码（ba0e8dbe）与 ① 热插拔污染
   （171dd97c）均已在案闭环；队列 #10① 合成链 woven 切分 + 默认翻转
   实际已由 c05b565b 落地（build_cadu `payload[b::4]`、decode_cadu
-  默认 "woven"），本轮核实后销账。#10② 图像内容级第三方基准仍开。
+  默认 "woven"），本轮核实后销账。~~#10② 图像内容级第三方基准仍开~~
+  **已销（afb76976，11-08 夜）**：独立 meteor_decode 像素基准重建，揪出
+  zigzag 逆置换 + 双重 +128 两处像素域真 bug，详见「当前在途」夜段。
 
 ### 我这边（2026-11-08 傍晚：首次打开零门槛 + 「☾ 今夜」照 Stellarium）
 
@@ -1157,14 +1205,19 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    0 条 → 擦除链 9 条**（另 1 条 version=2 被结构判据剔除）。
    ⚠ 顺带挖出真 bug：原 `decode()` 缺伴随式验证，t 超限时把不自洽解当
    成功（17 错报 1 错、重编码距离 33）——已修，C++ 同步补验证。
-10. **[认领，部分已做]** 图像链收尾件：
+10. **[已闭环（afb76976，11-08 夜）]** 图像链收尾件：
     ~~C++ lrptDecodeCadu 同迁 woven~~ **已做（a694b322，未编译验证）**；
     ~~形状判据过滤~~ **已做（真录 fixture 层 version=1 过滤）**；
     ~~① `lrpt_pipeline.build_cadu` 往返切分 + `decode_cadu` 默认
     翻转~~ **已销（c05b565b，11-08 晚核实）**：build_cadu 已是
     `payload[b::4]` 往返切分、decode_cadu 默认 `"woven"`，concat 仅留
-    历史夹具对照；② 图像内容级真值对拍（对照第三方产物——注意：本轮已证明"第三方产物"这条路
-    上原有的真值本身是误纠，重钉后只有 10 包，对拍基准需重新建立）
+    历史夹具对照；~~② 图像内容级真值对拍（对照第三方产物——注意：本轮已证明"第三方产物"这条路
+    上原有的真值本身是误纠，重钉后只有 10 包，对拍基准需重新建立）~~
+    **已销（afb76976，11-08 夜）**：基准重建走 identical-bit 法——instrument
+    独立 meteor_decode 逐 MPDU dump 熵输入 + 像素，我方解同一熵逐块对拍
+    （隔离 FEC 包集差异），35178 块 100% MAD<2；揪出 zigzag 逆置换 +
+    双重 +128 两处像素域真 bug（round-trip 恒绿照不到），60 条 external-truth
+    金样 + 内容回归 + 来历声明入库，反证旧码 840 块 MAD≤128 必红。
 
 11. ~~**[我] 产品工程阶段 A 合入仓库**~~ **已闭环（5a977026，11-05 22:00）**：
     `web/product/` 76 文件 / 36 MB（分层前端、构建器、静态守卫、投影自检、
