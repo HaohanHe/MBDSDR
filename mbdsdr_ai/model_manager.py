@@ -20,7 +20,7 @@ import requests
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
-from .error_catalog import user_message
+from .error_catalog import user_message, retryable
 
 
 def classify_llm_exception(exc: BaseException, timeout: float) -> Tuple[str, str]:
@@ -424,78 +424,116 @@ class ModelManager:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice
 
+        # Sprint 8：流式重试冗余。chat_stream 是 agent 主循环实际走的路径，
+        # 此前零重试——单次瞬时 429/5xx/timeout/断连就整轮失败，而非流式 chat
+        # 有 max_retries 退避重试。这里补齐，但**只在首字节前**失败时重试：
+        # emitted 标记是否已向调用方 yield 过增量。一旦 emitted，绝不重试
+        # （否则调用方/UI 会看到重复输出），按 interrupted+partial 诚实回报。
+        # 可重试判据走 error_catalog.retryable（与 Sprint 1 同源、catalog 驱动）：
+        # llm_rate_limited/llm_http_5xx/llm_timeout/llm_unreachable 可重试，
+        # llm_http_4xx/llm_unexpected 立即放弃。无瞬时失败时行为逐字不变（零回归）。
+        last_error = None
+        last_error_code = ""
         full_content = ""
         full_reasoning = ""
         tool_calls_acc = {}
         usage = {}
-        try:
-            resp = self._session.post(url, headers=headers, json=payload,
-                                      timeout=self.timeout, stream=True)
-            resp.raise_for_status()
-            for raw in resp.iter_lines():
-                if not raw:
+        for attempt in range(self.max_retries + 1):
+            # 每次尝试都重置累积器：重试是一次全新请求，绝不接续半截状态。
+            full_content = ""
+            full_reasoning = ""
+            tool_calls_acc = {}
+            usage = {}
+            emitted = False
+            try:
+                resp = self._session.post(url, headers=headers, json=payload,
+                                          timeout=self.timeout, stream=True)
+                resp.raise_for_status()
+                for raw in resp.iter_lines():
+                    if not raw:
+                        continue
+                    line = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                    if not line.startswith("data:"):
+                        continue
+                    chunk_str = line[5:].strip()
+                    if chunk_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(chunk_str)
+                    except json.JSONDecodeError:
+                        continue
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    choice = (chunk.get("choices") or [{}])[0]
+                    delta = choice.get("delta", {})
+                    rc = delta.get("reasoning_content")
+                    if rc:
+                        full_reasoning += rc
+                        emitted = True
+                        yield {"delta": "", "reasoning_delta": rc}
+                    piece = delta.get("content")
+                    if piece:
+                        full_content += piece
+                        emitted = True
+                        yield {"delta": piece}
+                    # 累积流式 tool_calls
+                    for tc in delta.get("tool_calls", []) or []:
+                        idx = tc.get("index", 0)
+                        slot = tool_calls_acc.setdefault(idx, {
+                            "id": tc.get("id", ""), "type": "function",
+                            "function": {"name": "", "arguments": ""}})
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function", {})
+                        if fn.get("name"):
+                            slot["function"]["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            slot["function"]["arguments"] += fn["arguments"]
+                latency_ms = (time.time() - start_time) * 1000
+                self.stats.successful_calls += 1
+                self.stats.total_prompt_tokens += usage.get("prompt_tokens", 0)
+                self.stats.total_completion_tokens += usage.get("completion_tokens", 0)
+                self.stats.total_latency_ms += latency_ms
+                yield {
+                    "done": True, "success": True,
+                    "content": full_content,
+                    "reasoning_content": full_reasoning,
+                    "tool_calls": [tool_calls_acc[k] for k in sorted(tool_calls_acc)],
+                    "usage": usage, "model": self.model,
+                    "latency_ms": round(latency_ms, 1),
+                }
+                return
+            except Exception as e:
+                code, err = classify_llm_exception(e, self.timeout)
+                # 已 emit 过增量 → 绝不重试（避免重复输出）；非瞬时码（4xx/
+                # 未预期）→ 不重试；仅「首字节前的瞬时失败」且还有额度 → 退避重试。
+                if (not emitted and retryable(code)
+                        and attempt < self.max_retries):
+                    last_error = err
+                    last_error_code = code
+                    time.sleep(1 * (attempt + 1))
                     continue
-                line = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-                if not line.startswith("data:"):
-                    continue
-                chunk_str = line[5:].strip()
-                if chunk_str == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(chunk_str)
-                except json.JSONDecodeError:
-                    continue
-                if chunk.get("usage"):
-                    usage = chunk["usage"]
-                choice = (chunk.get("choices") or [{}])[0]
-                delta = choice.get("delta", {})
-                rc = delta.get("reasoning_content")
-                if rc:
-                    full_reasoning += rc
-                    yield {"delta": "", "reasoning_delta": rc}
-                piece = delta.get("content")
-                if piece:
-                    full_content += piece
-                    yield {"delta": piece}
-                # 累积流式 tool_calls
-                for tc in delta.get("tool_calls", []) or []:
-                    idx = tc.get("index", 0)
-                    slot = tool_calls_acc.setdefault(idx, {
-                        "id": tc.get("id", ""), "type": "function",
-                        "function": {"name": "", "arguments": ""}})
-                    if tc.get("id"):
-                        slot["id"] = tc["id"]
-                    fn = tc.get("function", {})
-                    if fn.get("name"):
-                        slot["function"]["name"] += fn["name"]
-                    if fn.get("arguments"):
-                        slot["function"]["arguments"] += fn["arguments"]
-            latency_ms = (time.time() - start_time) * 1000
-            self.stats.successful_calls += 1
-            self.stats.total_prompt_tokens += usage.get("prompt_tokens", 0)
-            self.stats.total_completion_tokens += usage.get("completion_tokens", 0)
-            self.stats.total_latency_ms += latency_ms
-            yield {
-                "done": True, "success": True,
-                "content": full_content,
-                "reasoning_content": full_reasoning,
-                "tool_calls": [tool_calls_acc[k] for k in sorted(tool_calls_acc)],
-                "usage": usage, "model": self.model,
-                "latency_ms": round(latency_ms, 1),
-            }
-        except Exception as e:
-            latency_ms = (time.time() - start_time) * 1000
-            self.stats.failed_calls += 1
-            code, err = classify_llm_exception(e, self.timeout)
-            self._last_error = err
-            self._last_error_code = code
-            yield {"done": True, "success": False, "content": full_content,
-                   "tool_calls": [], "usage": usage, "model": self.model,
-                   "latency_ms": round(latency_ms, 1), "error": err,
-                   "error_code": code,
-                   # P7.2：流中断不谎报成功，也不丢弃已收到的部分内容；
-                   # 半截 tool_calls 一律不返回（参数可能被截断，执行必错）。
-                   "interrupted": True, "partial": bool(full_content)}
+                last_error = err
+                last_error_code = code
+                break
+
+        # 所有尝试失败（或不可重试）：诚实回报，保留已收到的部分内容。
+        latency_ms = (time.time() - start_time) * 1000
+        self.stats.failed_calls += 1
+        if not last_error_code:
+            last_error_code = "llm_unexpected"
+            last_error = user_message(
+                "llm_unexpected", exc_type="（无异常记录）",
+                detail="重试耗尽但未记录具体异常")
+        self._last_error = last_error
+        self._last_error_code = last_error_code
+        yield {"done": True, "success": False, "content": full_content,
+               "tool_calls": [], "usage": usage, "model": self.model,
+               "latency_ms": round(latency_ms, 1), "error": last_error,
+               "error_code": last_error_code,
+               # P7.2：流中断不谎报成功，也不丢弃已收到的部分内容；
+               # 半截 tool_calls 一律不返回（参数可能被截断，执行必错）。
+               "interrupted": True, "partial": bool(full_content)}
 
     # ── 工具调用辅助 ────────────────────────────────────
 
