@@ -255,10 +255,15 @@ class TestAutoEnumerateNoDevice:
         # 不应创建假后端
         assert main_window._active_sdr_backend is None, \
             "无设备时不应创建任何后端（含假后端）"
-        # 状态栏 / 横幅应显示明确提示（含 RTL-SDR / 驱动 / pyrtlsdr 关键词）
-        hint_text = main_window._no_device_hint.text()
-        assert "RTL-SDR" in hint_text or "pyrtlsdr" in hint_text or "Zadig" in hint_text, \
-            f"无设备提示应含 RTL-SDR/驱动/pyrtlsdr, 实际 {hint_text}"
+        # 页面极简：首屏横幅只说人话，完整排查（驱动 / pyrtlsdr / 占用）
+        # 留在 tooltip 与状态栏「查看怎么办」，不是删掉。
+        hint = main_window._no_device_hint
+        hint_text = hint.text()
+        assert "SDR" in hint_text and len(hint_text.strip()) < 60, \
+            f"首屏横幅应是短句，不该糊一整条排查文: {hint_text}"
+        assert ("RTL-SDR" in hint.toolTip() or "pyrtlsdr" in hint.toolTip()
+                or "Zadig" in hint.toolTip()), \
+            f"无设备排查细节必须留在 tooltip, 实际 {hint.toolTip()}"
 
     def test_enumerate_exception_shows_message(self, main_window):
         """枚举抛异常（如 pyrtlsdr 未安装）时也应明确提示，不崩溃。"""

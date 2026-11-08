@@ -45,6 +45,50 @@
 > **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
 > 的交接单视为**收件人改为本线**，按新单逐条销账。
 
+### 我这边（2026-11-08 傍晚：首次打开零门槛 + 「☾ 今夜」照 Stellarium）
+
+用户 17:2x 两次打断纠偏：「不会看人家原项目吗？」「原项目是 stellarium」
+—— 我先自造了「预览时刻 今晚 21:00」+ 硬编码北京坐标，被点破。翻
+`D:/mbdsdr/reference/stellarium/src/gui/AstroCalcAlmanacWidget.cpp:103-115`
+才看清原玩法：按钮 → `core->setJD(customSunsetJD / afterSunsetJD /
+astronomicalDuskJD)`，时刻由 `getRTSTime(core, altitude)` 按**真实太阳高度**
+求解，不是写死钟点。全部推倒照它重做。
+
+- **首屏短句**：`_show_no_rtl_hint(..., brief=...)` 把一整条
+  「USB 没插好 / 缺驱动 / Zadig」收敛成「还没接 SDR · 插上设备点「连接」，
+  或先逛星象仪」；完整排查进 tooltip + 状态栏「查看怎么办」，**不是删掉**。
+- **未定位空态**：`observer=None` 时 `paintEvent` 原本把整条绘制链挡掉 →
+  一片纯深蓝。现在画圆形视场 + 走同一个球面投影核的 alt=0 地平大圆弧 +
+  方位字 + 说明卡，并给「先看看示例天空」能力位。**默认仍不伪造站址**
+  （`test_no_sim_regression` 的 none 口径保持绿）。
+- **示例站**：复用 `mbdsdr_ai.solar_system.SAMPLE_SITE`（中性 45°N/120°E，
+  源码明写「不指向任何真实默认站址」）。UI 层不写死城市坐标 ——
+  防回潮守卫专禁硬编码假坐标（39.9042 / 116.4074 等作者城市变体），
+  第一版就撞了这条已改。示例坐标不写配置、不参与过境，GNSS/手填立即
+  覆盖；全程标注「非你的位置 / 未校准」。
+- **示例态历表**：点示例才建 SatelliteTracker，太阳/月亮按该点真算；
+  `_stars_hidden_by_daylight` 加保守门（示例态太阳高度未知 → 不画星），
+  避免正午铺出一片假星空。
+- **☾ 今夜**：按钮 → `_night_observation_time()` 用仓库
+  `compute_twilight_times` 求**天文暮光终（太阳 -18°）** → `eng.set_unix()`
+  + 立刻 `sat_tracker.refresh()`（否则要等 10s 天才黑）。实测 -6° 民用
+  暮光终天还亮、极限星等被压到 0.3 等，摁一下照样看不见星，所以取 -18°。
+  沉浸卡标「模拟」，状态栏明写「观测条件设定，非观测数据」；⏱ 循环回
+  1× 调 `set_time_now()` 回实时并刷新历表，真实站址就位同样回实时。
+- **验证**：13 文件 **226 passed / 0 failed / 7 deselected**；7 条是用干净
+  `git worktree` 在 HEAD 基线复跑确认的**存量红**（ui_flow_guards 2 /
+  sky_readouts 3 / sky_full_catalog 2），非本轮引入，按纪律未碰。
+  `test_ui_layout_locks.py` 74 条全绿。新增 `test_first_open_welcome.py`
+  6 条（太阳 -18° 真值对拍、换站点证明不是写死钟点、示例不写配置、
+  GNSS 覆盖、回实时）。新测试 fixture 收尾复位全局时间引擎，消掉跨文件污染。
+- **证据**（仓库外 `output/evidence/`，零个人信息）：
+  `first_open_01_clean_start.png` / `02_unlocated.png` / `03_tonight.png`
+  + README 第 4 节。最终帧 559 颗真实星表星、明写「模拟 / 未校准」。
+
+**not_verified**：真机仍不在位（只有蓝牙 COM6/7，`rtl_test -t`
+No supported devices found），真机首开与 GNSS+SDR 同开复验继续挂；
+三张证据图是 offscreen 无硬件路径。
+
 ### 我这边（2026-11-08 下午：展示页最大化收口）
 
 用户 16:03「继续」，按队列第 0 条销账，主线是他反复点名的
@@ -1044,8 +1088,15 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    破。余下只有设备回来后的画面复核。
    ④ **模型链路编排已做**：配 Key 时工具调用入真实 Orchestrator/Hooks，
    与本地协商同一份事实源（`test_ai_panel_model_orchestration.py` 2 绿）。
-   **下轮可选**：配真实 Key 后做一次端到端模型对话 + 工具调用实测
-   （本轮所有验证都是离线/无 Key，模型链路只验了结果槽登记）。
+   ⑤ **首次打开零门槛已做（傍晚轮）**：首屏报错收成短句、未定位空态
+   画成星象仪、示例天空能力位、☾ 今夜照 Stellarium 按真实太阳 -18°
+   切夜（细节见「当前在途」傍晚段 + `output/evidence/` 三张图）。
+   **下轮可选**：
+   - 配真实 Key 后做一次端到端模型对话 + 工具调用实测（本轮所有验证
+     都是离线/无 Key，模型链路只验了结果槽登记）；
+   - 7 条 HEAD 基线存量红（中英文标签滞后 / 全天按钮文案 / AI 忙锁 /
+     LOD 探针）另立一笔账清理，本轮按纪律没碰；
+   - 设备插回后补真机首开 + GNSS+SDR 同开画面复核。
 1. **[TRAE]** `scripts/smoke_exe_no_popup.ps1` 收口提交
 2. **[TRAE]** 便携包线收口：package_windows.ps1 验真机构建打包，旧 stub zip
    问题闭环

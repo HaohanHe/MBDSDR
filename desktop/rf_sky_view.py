@@ -1750,6 +1750,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     all_sky_mode_changed = Signal(bool)
     # 点星信息卡上的「问模型」：只把问题送进对话栏，不自动执行、不预制流程。
     question_requested = Signal(str)
+    # 未定位空态里的「先看看示例天空」：用户主动点才加载**明确标注过**的
+    # 示例站址；默认绝不塞默认坐标冒充"我的位置"。能力位，不是预制向导。
+    preview_sky_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1877,8 +1880,13 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._info_card_rect: Optional[QRectF] = None
         self._info_close_rect: Optional[QRectF] = None
         self._ask_rect: Optional[QRectF] = None
+        self._preview_rect: Optional[QRectF] = None
         self._fov_minus_rect: Optional[QRectF] = None
         self._fov_plus_rect: Optional[QRectF] = None
+
+        # 站址口径标注：示例/预览位置时必须一直显式写明，绝不让它被读成
+        # "我的位置"。空串 = 站址来自真实 GNSS 或手填，无需额外说明。
+        self._site_note: str = ""
 
         # 数据来源状态
         # "none" = 无观测站位置; "real" = 真实GNSS或手动配置
@@ -2678,6 +2686,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._data_source = source
         self.update()
 
+    def set_site_note(self, note: str) -> None:
+        """站址口径标注（例：「示例位置 · 北京 39.9°N 116.4°E · 非你的位置」）。
+
+        非空时沉浸卡的位置行与右下角常显它。示例站址只供看天，不能让
+        方位/高度读数看起来像是从用户所在地量出来的；真实 GNSS 或手填
+        坐标就位后由主窗口传空串清掉。
+        """
+        self._site_note = str(note or "").strip()
+        self.update()
+
+    def get_site_note(self) -> str:
+        return self._site_note
+
     def set_callsign(self, callsign: str):
         """设置操作员呼号（由主窗口从 desktop_settings.json 注入）。
         仅用于日志/通联标识，天空信息卡不再常驻绘制这一行。
@@ -2754,6 +2775,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             }
             self.set_data_source("real")
         else:
+            # 用户主动选过「先看看示例天空」时，别让"没插 GNSS"把展示态
+            # 打回纯空屏：那是带标注的示例坐标，不是定位结论。真实 GNSS
+            # 一旦来 fix，上面的分支会直接覆盖它，主窗口随即清掉标注。
+            if self._site_note:
+                self.update()
+                return
             self._observer = None
             self.set_data_source("none")
             self._on_station_lost()
@@ -3943,6 +3970,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._draw_passes_panel(painter)
         self._draw_gnss_overlay(painter)
         self._draw_data_source_overlay(painter)
+        # 未定位空态（仅星象仪）：画在最上层，保证「先看看示例天空」可点。
+        self._draw_unlocated_state(painter)
 
         # 7) 夜视：最后一道，盖住包括卡片在内的全部像素
         if self._night_vision:
@@ -4885,8 +4914,16 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return None
 
     def _stars_hidden_by_daylight(self) -> bool:
-        """恒星是否因白天整层隐藏（绘制层与拾取层共用同一条判据）。"""
-        return stars_hidden_by_daylight(self._sun_alt_deg())
+        """恒星是否因白天整层隐藏（绘制层与拾取层共用同一条判据）。
+
+        示例/预览位置额外一条保守门：太阳历表没就绪时不猜天色。否则
+        ``stars_hidden_by_daylight(None)`` 会按"无法断言是白天"放行，
+        正午也能铺出一片星空——那是假信息，宁可不画。
+        """
+        alt = self._sun_alt_deg()
+        if alt is None and self._site_note:
+            return True
+        return stars_hidden_by_daylight(alt)
 
     def _queue_label(self, priority: float, pos: QPointF, text: str,
                      color: QColor, small: bool = False) -> None:
@@ -6848,10 +6885,20 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # 命中一张已经不在屏幕上的卡。
         self._status_card_rect = QRectF()
 
-        clock = format_local_time(time.time(), fmt="%H:%M")
-        place = format_observer_chip(self._observer)
-        stars = star_catalog_status_text(
-            self._star_sel, self._stars_hidden_by_daylight())
+        # 时钟跟时间引擎走：时间穿梭 / ☾ 今夜 下还写墙钟就是假读数。
+        # 与 IDE 状态卡同一判据：模拟时刻与真实时刻分叉就显式标「模拟」。
+        now_unix = self._engine_unix()
+        clock = format_local_time(now_unix, fmt="%H:%M")
+        if abs(now_unix - time.time()) > 2.0:
+            clock += " · 模拟"
+        place = ("示例位置 · 未校准" if self._site_note
+                 else format_observer_chip(self._observer))
+        hidden = self._stars_hidden_by_daylight()
+        if self._site_note and self._sun_alt_deg() is None:
+            # 示例位置历表没就绪：说「没算出来」，别冒充「白天」
+            stars = "天色未算 · 暂不显示星"
+        else:
+            stars = star_catalog_status_text(self._star_sel, hidden)
         sun_alt = self._sun["alt"] if self._sun else None
         phase = (sky_phase_word(self._display_alt_deg(sun_alt))
                  if sun_alt is not None else "—")
@@ -6940,6 +6987,107 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         vx = float(self.width()) - vw - 18.0
         if vx > hx + hw + 8.0:      # 窄屏别叠在一起，宁可不画
             chip(view, vx)
+        painter.restore()
+
+    def _draw_unlocated_state(self, painter: QPainter) -> None:
+        """未定位空态（仅星象仪沉浸态）：把「一片空蓝」变成看得懂的天穹。
+
+        诚实红线：没有观测站就算不出真实方位/高度，所以这里**一颗天体都
+        不画**，只画圆形视场与地平大圆这类视角几何（走真实球面投影，
+        不依赖站址），再给一个「先看看示例天空」能力位。用户不点，绝不
+        偷偷塞默认坐标——能力而非流程，也不冒充"我的位置"。
+        """
+        self._preview_rect = None
+        if (not self._immersive or self._observer is not None
+                or self._site_note):
+            return
+        w, h = float(self.width()), float(self.height())
+        cx, cy = w / 2.0, h * 0.46
+        radius = min(w * 0.32, h * 0.38)
+        if radius < 100.0 or w < 420.0:
+            return
+        _t = tokens()
+        painter.save()
+
+        # 1) 圆形视场轮廓（天圆地圆；只是视场边界，不是天体）
+        ring = QColor(_t.COLORS["gray_400"])
+        ring.setAlpha(120)
+        painter.setPen(QPen(ring, 1.2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(QPointF(cx, cy), radius, radius)
+
+        # 2) 地平大圆弧：alt=0 逐点走同一个球面投影核，视界外断开
+        horizon = QColor(_t.COLORS["gray_300"])
+        horizon.setAlpha(110)
+        painter.setPen(QPen(horizon, 1.4))
+        pts = [self._sky_to_screen_finite(float(i % 360), 0.0)
+               for i in range(0, 361, 3)]
+        for a, b in zip(pts, pts[1:]):
+            if a is not None and b is not None:
+                painter.drawLine(a, b)
+
+        # 3) 方位字：视角方向，不是天体位置
+        f_az = QFont(self._font)
+        f_az.setPointSize(9)
+        painter.setFont(f_az)
+        painter.setPen(QColor(_t.COLORS["gray_200"]))
+        for az, letter in ((0.0, "北"), (90.0, "东"),
+                           (180.0, "南"), (270.0, "西")):
+            p = self._sky_to_screen_finite(az, 0.0)
+            if p is not None and 20 <= p.x() <= w - 20 and 20 <= p.y() <= h - 20:
+                painter.drawText(QRectF(p.x() - 18, p.y() - 11, 36, 22),
+                                 int(Qt.AlignCenter), letter)
+
+        # 4) 说明卡 + 能力按钮
+        card_w = min(400.0, w - 48.0)
+        card_h = 172.0
+        card_x = (w - card_w) / 2.0
+        card_y = cy - card_h / 2.0 + radius * 0.10
+        bg = QColor(_t.COLORS["card_2"])
+        bg.setAlpha(232)
+        painter.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1))
+        painter.setBrush(QBrush(bg))
+        painter.drawRoundedRect(QRectF(card_x, card_y, card_w, card_h), 12, 12)
+
+        f_title = QFont(self._font)
+        f_title.setPointSize(14)
+        f_title.setBold(True)
+        painter.setFont(f_title)
+        painter.setPen(self._ink())
+        painter.drawText(QRectF(card_x + 18, card_y + 12, card_w - 36, 28),
+                         int(Qt.AlignLeft | Qt.AlignVCenter), "这片天还没定位")
+
+        f_body = QFont(self._font)
+        f_body.setPointSize(9)
+        painter.setFont(f_body)
+        painter.setPen(QColor(_t.COLORS["gray_100"]))
+        painter.drawText(QRectF(card_x + 18, card_y + 44, card_w - 36, 56),
+                         int(Qt.AlignLeft | Qt.AlignTop),
+                         "接上 GNSS，或在设置里填一次经纬度，\n"
+                         "就能看到你头顶此刻真实的星空。\n"
+                         "天还亮着？点右上 ☾ 今夜 切到天黑。")
+
+        btn = QRectF(card_x + 18, card_y + 112, card_w - 36, 32)
+        accent = QColor(self._colors["accent"])
+        fill = QColor(accent)
+        fill.setAlpha(46)
+        painter.setPen(QPen(accent, 1))
+        painter.setBrush(QBrush(fill))
+        painter.drawRoundedRect(btn, 6, 6)
+        f_btn = QFont(self._font)
+        f_btn.setPointSize(10)
+        painter.setFont(f_btn)
+        painter.setPen(accent)
+        painter.drawText(btn, int(Qt.AlignCenter), "先看看示例天空   ›")
+        self._preview_rect = btn
+
+        f_note = QFont(self._font)
+        f_note.setPointSize(8)
+        painter.setFont(f_note)
+        painter.setPen(QColor(_t.COLORS["gray_300"]))
+        painter.drawText(QRectF(card_x + 18, card_y + 148, card_w - 36, 16),
+                         int(Qt.AlignCenter),
+                         "示例位置会全程标注，不会当成你的位置")
         painter.restore()
 
     def _draw_info_overlay(self, painter: QPainter):
@@ -7474,15 +7622,18 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # ——有星表就能画天。唯一保留的是"位置未定"：那种情况下方位/地平线
         # 全算不出来，满天星看起来会像"位置正确"，那是假信息，必须说。
         if self._immersive:
-            if self._observer is None or self._data_source == "none":
+            if self._site_note:
+                # 示例位置：常显标注，别让示例坐标被读成「我的位置」。
                 f = QFont(self._font)
                 f.setPointSize(10)
                 painter.setFont(f)
-                painter.setPen(self._colors["warning"])
+                painter.setPen(self._colors["accent"])
                 painter.drawText(
                     QRectF(0, self.height() - 96, self.width() - 24, 24),
-                    int(Qt.AlignRight | Qt.AlignVCenter),
-                    "位置未定 · 连接 GNSS 或填写经纬度")
+                    int(Qt.AlignRight | Qt.AlignVCenter), self._site_note)
+            # observer 为 None 且无标注时，居中的未定位卡
+            # （_draw_unlocated_state）已经把「要定位」讲清楚，这里不再横
+            # 一条红字，把「看天」变成「看报错」。
             painter.restore()
             return
 
@@ -7556,7 +7707,11 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         SkyInteractionHandler.mousePressEvent(self, event)
 
     def _hud_hit(self, px: float, py: float) -> bool:
-        """HUD 控件命中测试：信息卡 × / FOV ⊖⊕。命中则消费事件并返回 True。"""
+        """HUD 控件命中测试：信息卡 × / FOV ⊖⊕ / 示例天空入口。命中则消费。"""
+        r = self._preview_rect
+        if r is not None and r.contains(px, py):
+            self.preview_sky_requested.emit()
+            return True
         r = self._ask_rect
         if r is not None and r.contains(px, py):
             info = self._body_info or {}

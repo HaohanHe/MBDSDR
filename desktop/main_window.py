@@ -264,6 +264,56 @@ _NO_SDR_HINT = (
     "下一步：接好设备后点工具栏「连接」重试；"
     "RTL-SDR 需先用 Zadig 安装 WinUSB 驱动，远端设备可用 rtl_tcp。")
 
+#: 首屏只说人话：横幅/状态栏用短句，上面那一长串排查细节留在 tooltip
+#: 与状态栏「查看怎么办」里。第一次打开没插设备是常态，不该被报错糊脸。
+_NO_SDR_BRIEF = "还没接 SDR · 插上设备点「连接」，或先逛星象仪"
+
+#: 站址标注：坐标本身不在 UI 层写死，见 _preview_site()。
+_PREVIEW_SITE_NOTE = "中性示例站 45.0°N 120.0°E · 非你的位置"
+
+
+def _preview_site():
+    """「先看看示例天空」的坐标：复用仓库唯一的中性示例站。
+
+    ``mbdsdr_ai.solar_system.SAMPLE_SITE`` 明写「中性示例站，不指向任何
+    真实默认站址」。UI 层不写死城市经纬度——``test_no_sim_regression``
+    的防回潮守卫禁止生产代码出现硬编码假坐标（含作者所在城市变体）。
+    """
+    from mbdsdr_ai.solar_system import SAMPLE_SITE
+    return (float(SAMPLE_SITE.latitude_deg),
+            float(SAMPLE_SITE.longitude_deg))
+
+
+def _night_observation_time(lat_deg: float, lon_deg: float):
+    """下一次「天文暮光终」（太阳 -18°，天全黑）的时刻与所用高度角。
+
+    对齐 Stellarium ``AstroCalcAlmanacWidget.cpp:103-115``：那里的
+    「日落后 / 自定义日落 / 天文昏影终」按钮把 ``core->setJD(...)`` 接到
+    ``getRTSTime(core, altitude)`` 算出的真实 JD 上，**不是写死 22:00**。
+    这里用仓库同口径的 ``compute_twilight_times``；取 **-18°** 而不是
+    民用暮光终 -6°，因为 -6° 天还亮着、极限星等被压到 0.3 等，摁一下
+    照样看不见星。高纬夏季无天文暮光时退回 -6° 并如实标注角度。
+
+    优先当天事件（和 Stellarium 一样按"今天"跳，不因为刚过去几分钟就
+    顺延到明晚、却还管它叫「今夜」）；极昼/极夜两档都没有就返回 None。
+    """
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from mbdsdr_ai.atmosphere import (ASTRONOMICAL_TWILIGHT_ALT_DEG,
+                                      CIVIL_TWILIGHT_ALT_DEG,
+                                      compute_twilight_times)
+
+    now = datetime.now(timezone.utc)
+    station = SimpleNamespace(lat_deg=float(lat_deg), lon_deg=float(lon_deg))
+    for delta in (0, 1):
+        day = (now + timedelta(days=delta)).date()
+        info = compute_twilight_times(day, station)
+        if info.astronomical_twilight_end is not None:
+            return info.astronomical_twilight_end, ASTRONOMICAL_TWILIGHT_ALT_DEG
+        if info.civil_twilight_end is not None:
+            return info.civil_twilight_end, CIVIL_TWILIGHT_ALT_DEG
+    return None
+
 
 def format_tx_doppler(note, *, failed_reason=None, replay: bool = False) -> str:
     """把 resolve_tx_doppler 的 note 渲染成发射频点读数（纯展示，零 Δ 计算）。
@@ -1564,6 +1614,8 @@ class MainWindow(QMainWindow):
         # 窄窗用**省略号**（Qt.ElideRight）+ tooltip 全文，绝不显示半截字
         # ——见 _apply_responsive_chrome。
         self._no_device_hint_full: str = self._no_device_hint.text()
+        # 完整排查细节：横幅只显示短句，这份留在 tooltip，不删也不糊脸。
+        self._no_device_hint_detail: str = ""
         self._no_device_hint.setAlignment(Qt.AlignCenter)
         _hint_bg = self._tok("light_hint_bg", "#F0E8DC")
         _hint_fg = self._tok("light_hint_text", "#8A6D4A")
@@ -1681,6 +1733,9 @@ class MainWindow(QMainWindow):
         self.ai_panel.reply_received.connect(self._on_planetarium_ai_reply)
         # 点星信息卡「问模型」：只把问题送进对话栏，发不发由用户决定
         self.sky_view.question_requested.connect(self._on_sky_question)
+        # 未定位空态的「先看看示例天空」：用户主动点才给标注过的示例站址
+        self.sky_view.preview_sky_requested.connect(
+            self._on_preview_sky_requested)
         self._init_ai_agent_from_config()
         self._add_right_tab("AI 助手", self.ai_panel, "ai_dock")
 
@@ -2208,12 +2263,24 @@ class MainWindow(QMainWindow):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(2, 1)
         strip_lay.addWidget(grid_host)
+        # 「☾ 今夜」：Stellarium AstroCalc 的玩法，摁一下切到真实日落后
+        # （民用暮光终 / 太阳 -6°），不是写死钟点、也不是伪造星空。
+        self._planetarium_tonight_btn = QPushButton("☾ 今夜", strip)
+        self._planetarium_tonight_btn.setObjectName("planetariumTonight")
+        self._planetarium_tonight_btn.setToolTip(
+            "切到今夜天文暮光终（太阳 -18°，按站点真实日落算，天全黑）。"
+            "这是观测条件设定、不是观测数据；⏱ 走一圈回到此刻")
+        self._planetarium_tonight_btn.setMinimumHeight(30)
+        self._planetarium_tonight_btn.setStyleSheet(_act_css)
+        self._planetarium_tonight_btn.clicked.connect(self._jump_to_tonight)
+        strip_lay.addWidget(self._planetarium_tonight_btn, 0, Qt.AlignHCenter)
         # 时间流速（原型第 9 颗 ⏱）：1× → 60× → 600× → 停 → 1×。
         # 直接驱动 new_spacetime 时间引擎，天空按同一份 JD 走；不是另起动画。
         self._planetarium_time_btn = QPushButton("⏱ 1×", strip)
         self._planetarium_time_btn.setObjectName("planetariumTimeRate")
         self._planetarium_time_btn.setToolTip(
-            "时间流速：1× → 60× → 600× → 停。天空跟着同一份时刻走")
+            "时间流速：1× → 60× → 600× → 停 → 1×（回到此刻）。"
+            "天空跟着同一份时刻走")
         self._planetarium_time_btn.setMinimumHeight(30)
         self._planetarium_time_btn.setStyleSheet(_act_css)
         self._planetarium_time_btn.clicked.connect(self._cycle_time_rate)
@@ -2382,6 +2449,55 @@ class MainWindow(QMainWindow):
         else:
             btn.setText(f"⏱ {rate:g}×")
 
+    def _jump_to_tonight(self) -> None:
+        """☾ 今夜：把观测时刻切到按真实太阳高度算出的「民用暮光终」。
+
+        照 Stellarium ``src/gui/AstroCalcAlmanacWidget.cpp`` 的按钮链：
+        ``buttonCustomSunset / buttonAfterSunset -> core->setJD(...)``，
+        时刻由 ``getRTSTime(core, -7)`` 求解，不是写死晚上几点。这里用
+        仓库 ``compute_twilight_times`` 的 civil_twilight_end（太阳 -6°）。
+
+        诚实口径：改的是**观测条件**，不是观测数据；所有星/日月/行星
+        位置按该时刻真实计算，状态栏与沉浸卡都明写「非实时」。
+        """
+        obs = self.sky_view.get_observer()
+        if not obs:
+            try:
+                self.statusBar().showMessage(
+                    "先点「先看看示例天空」或设置观测位置，再切到今夜",
+                    MSG_NORMAL)
+            except Exception:
+                pass
+            return
+        got = _night_observation_time(obs.get("lat"), obs.get("lon"))
+        if got is None:
+            try:
+                self.statusBar().showMessage(
+                    "这个纬度当天算不出暮光终（极昼/极夜），不猜一个时刻",
+                    MSG_NORMAL)
+            except Exception:
+                pass
+            return
+        t, alt_deg = got
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            eng = get_time_engine()
+            eng.set_unix(t.timestamp())
+            eng.set_rate(1.0)
+            # 历表桥默认 10s 一刷；跳时刻后必须立刻按新 JD 重算太阳/月亮/
+            # 天空亮度，否则摁一下要等 10 秒天才黑（看着像按钮没反应）。
+            tracker = getattr(self, "sat_tracker", None)
+            if tracker is not None:
+                tracker.refresh()
+            self._sync_time_rate_btn()
+            self.sky_view.update()
+            local = t.astimezone().strftime("%m-%d %H:%M")
+            self.statusBar().showMessage(
+                f"观测条件：切到今夜 {local}（太阳 {alt_deg:g}°，"
+                "非实时、非观测数据）· ⏱ 走一圈回到此刻", MSG_NORMAL)
+        except Exception:
+            pass
+
     def _cycle_time_rate(self) -> None:
         """时间流速循环：1× → 60× → 600× → 停 → 1×（原型同一套档位）。"""
         try:
@@ -2401,6 +2517,14 @@ class MainWindow(QMainWindow):
                 break
         try:
             eng.set_rate(steps[idx])
+            if steps[idx] == 1.0:
+                # 循环回「1×」就是回到此刻：预览时刻 / 快转偏移一并归零。
+                # 否则按钮写着 1×（tooltip 明说 = 实时），画面却还停在
+                # 今晚 21:00，是假信息。
+                eng.set_time_now()
+                tracker = getattr(self, "sat_tracker", None)
+                if tracker is not None:
+                    tracker.refresh()
         except Exception:
             return
         self._sync_time_rate_btn()
@@ -2408,7 +2532,8 @@ class MainWindow(QMainWindow):
         try:
             self.statusBar().showMessage(
                 f"时间流速 {('停' if steps[idx] == 0 else f'{steps[idx]:g}×')}"
-                "（天空按同一时刻重算）", MSG_NORMAL)
+                + ("（已回到此刻，天空按当前时刻重算）" if steps[idx] == 1.0
+                   else "（天空按同一时刻重算）"), MSG_NORMAL)
         except RuntimeError:
             pass
 
@@ -2797,7 +2922,9 @@ class MainWindow(QMainWindow):
                     full, Qt.ElideRight, avail)
                 if hint.text() != elided:
                     hint.setText(elided)
-                hint.setToolTip(full)
+                # tooltip 给完整排查（Zadig / 驱动 / 占用），不是短句重复
+                hint.setToolTip(getattr(self, "_no_device_hint_detail", "")
+                                or full)
             except RuntimeError:
                 pass
 
@@ -3130,6 +3257,37 @@ class MainWindow(QMainWindow):
         if panel is not None:
             panel.save_geometry()
             panel.hide()
+
+    def _on_preview_sky_requested(self) -> None:
+        """「先看看示例天空」：只给天空图一个**明确标注过**的示例站址。
+
+        诚实边界（与 test_no_sim_regression 同一口径）：
+        - 不写 ``_observer_lat/_observer_lon``：配置里仍然是「未定位」，
+          GNSS 来 fix 或用户在设置里手填，都会覆盖它；
+        - 不启动卫星过境 / 多普勒闭环（示例点不能算真实过境）；
+        - ``set_site_note`` 常显标注，沉浸卡位置行写「示例位置 · 未校准」；
+        - 星表、投影、天文计算全是真的，只是观测点不是用户所在地，且说清楚。
+        """
+        lat, lon = _preview_site()
+        self._observer_source = "preview"
+        self.sky_view.set_observer(lat, lon)
+        # 时间不在这里动：Stellarium 的「切到晚上」是 ☾ 今夜 一颗独立按钮
+        # （按真实太阳高度求 JD，明写观测条件），不藏在"选位置"里偷偷跳。
+        self.sky_view.set_site_note(_PREVIEW_SITE_NOTE)
+        # 示例位置同样要真实历表：太阳高度决定白天是否隐藏恒星层。没有
+        # 它，正午打开会被"太阳高度未知→不假装是白天"放行，画出一片假星空。
+        # 卫星/天体都按示例点真实 sgp4 算，位置口径仍由 site_note 标注。
+        try:
+            if self.sat_tracker is None:
+                self.sat_tracker = SatelliteTracker(self.sky_view, lat, lon)
+            else:
+                self.sat_tracker.set_location(lat, lon)
+        except Exception:
+            pass
+        try:
+            self.sky_view.update()
+        except Exception:
+            pass
 
     def _on_sky_question(self, text: str) -> None:
         """星图点星 → 把问题放进对话栏。不自动发送、不切换用户视角。"""
@@ -4289,7 +4447,8 @@ class MainWindow(QMainWindow):
         if os.environ.get("MBDSDR_OFFLINE") == "1":
             # 不枚举硬件，但状态栏提示必须与"无设备"口径一致（含排查关键词）：
             # 离线态同样没有连上后端，用户需要知道怎么排查，不能只说"跳过"。
-            self._show_no_rtl_hint("离线模式（未枚举硬件）。" + _NO_SDR_HINT)
+            self._show_no_rtl_hint("离线模式（未枚举硬件）。" + _NO_SDR_HINT,
+                                   brief=_NO_SDR_BRIEF)
             return True
         return False
 
@@ -4405,7 +4564,8 @@ class MainWindow(QMainWindow):
         if chosen is None:
             # 真的没设备：明确提示，不弹对话框、不造假。
             # 默认 USB 走 SoapySDR（无 GPL）；pyrtlsdr 仅可选自装。
-            self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found")
+            self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found",
+                                   brief=_NO_SDR_BRIEF)
             return
 
         # 构造后端并连接（默认参数：DEFAULT_SAMPLE_RATE_HZ = 2.400 MS/s、
@@ -4417,7 +4577,8 @@ class MainWindow(QMainWindow):
                                    code=classify_connect_error(str(e)))
             return
         if backend is None:
-            self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found")
+            self._show_no_rtl_hint(_NO_SDR_HINT, code="device_not_found",
+                                   brief=_NO_SDR_BRIEF)
             return
 
         ok = self._connect_backend(
@@ -4436,20 +4597,23 @@ class MainWindow(QMainWindow):
                 "RTL-SDR 连接失败：检查 Zadig WinUSB 驱动 / SoapySDR 驱动 / 设备是否被占用",
                 code=getattr(self, "_last_connect_code", None))
 
-    def _show_no_rtl_hint(self, message: str, code=None):
+    def _show_no_rtl_hint(self, message: str, code=None, brief=None):
         """无设备 / 枚举失败时：状态栏 + 频谱上方横幅同时显示明确提示。
 
-        绝不静默走假后端、绝不显示"已连接"。横幅文字与状态栏一致，
-        用户一眼看到排查方向（Zadig 驱动 / pyrtlsdr 库）。
+        绝不静默走假后端、绝不显示"已连接"。``brief`` 是首屏短句（说人话），
+        完整排查 ``message`` 保留在 tooltip 与状态栏「查看怎么办」里——
+        「页面极简」不等于把信息删掉，是把它放到该去的地方。
         """
+        shown = brief or message
         try:
-            self._show_error_status(message, code, 8000)
+            self._show_error_status(shown, code, 8000)
         except Exception:
             pass
         try:
             if self._no_device_hint is not None:
-                self._no_device_hint_full = f"  {message}  "
-                self._no_device_hint.setText(f"  {message}  ")
+                self._no_device_hint_full = f"  {shown}  "
+                self._no_device_hint_detail = str(message)
+                self._no_device_hint.setText(f"  {shown}  ")
                 self._no_device_hint.setToolTip(message)
                 self._no_device_hint.setVisible(True)
                 self._apply_responsive_chrome()
@@ -9860,6 +10024,11 @@ class MainWindow(QMainWindow):
             # 未设置观测站位置（GNSS 未连接或未手动配置）
             if self.sat_tracker is not None:
                 self.sat_tracker.set_location(None, None)
+            # 用户主动选过「先看看示例天空」：天空图里有带标注的示例站址。
+            # 启动恢复链 / GNSS 无 fix 轮询会再走这里，别把它打回纯空屏
+            # （不写 _observer_lat/lon，所以不算"已定位"）。
+            if self.sky_view.get_site_note():
+                return
             # 天空图站址若当前是 GNSS 实时注入的，由 _poll_gnss 按 fix 有无
             # 单独收口；这里再清一次会把刚拿到的定位打回空状态（两条写路径
             # 抢同一个真相）。只有非 GNSS 来源时才由本函数负责清空。
@@ -9875,9 +10044,25 @@ class MainWindow(QMainWindow):
         # 观测站坐标进天空视图本体：恒星/行星/星座层、信息卡升降时刻、
         # 搜索选中、拾取与调谐按钮都依赖它（此前只标 real 未真正注入，
         # 手动站址下整条"点星即听"链被静默阻断）。
+        had_preview = bool(self.sky_view.get_site_note())
         self.sky_view.set_observer(lat, lon)
         # 坐标来源只能是真实 GNSS 或 gui_config.json 手动配置，恒为 real
         self.sky_view.set_data_source("real")
+        # 真实坐标就位 → 任何「示例位置」标注立刻撤掉，别让示例口径残留。
+        self.sky_view.set_site_note("")
+        if had_preview:
+            # 预览时刻只属于示例天空：真实位置接上就回到此刻，
+            # 否则"我的位置"会配上"今晚 21:00"的模拟时刻。
+            try:
+                from mbdsdr_ai.new_spacetime import get_time_engine
+                eng = get_time_engine()
+                eng.set_time_now()
+                eng.set_rate(1.0)
+                if self.sat_tracker is not None:
+                    self.sat_tracker.refresh()
+                self._sync_time_rate_btn()
+            except Exception:
+                pass
 
     # ========================================================================
     # 卫星闭环自动跟踪（过境预测 -> 实时 az/el/多普勒 -> 自动调谐 SDR）
