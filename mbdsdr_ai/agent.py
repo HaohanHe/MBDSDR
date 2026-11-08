@@ -4551,6 +4551,91 @@ class MBDSDRAgent:
 
     # ── 状态查询 ────────────────────────────────────────
 
+    def _session_log_status(self) -> Dict[str, Any]:
+        """会话事件日志自报状态（Sprint 7）。观测层缺失/损坏只降级，绝不抛。
+
+        event_count 用 SessionLog._seq（O(1) 单调计数），不每次全量读盘。
+        """
+        try:
+            cfg_on = bool(getattr(self.config, "enable_session_log", True))
+            slog = getattr(self, "_session_log", None)
+            if slog is None:
+                return {"enabled": cfg_on, "active": False,
+                        "path": None, "event_count": 0, "broken": False}
+            path = getattr(slog, "path", None)
+            broken = bool(getattr(slog, "_broken", False))
+            return {
+                "enabled": bool(getattr(slog, "enabled", cfg_on)),
+                "active": bool(path) and not broken,
+                "path": path,
+                "event_count": int(getattr(slog, "_seq", 0) or 0),
+                "broken": broken,
+            }
+        except Exception:
+            return {"enabled": False, "active": False,
+                    "path": None, "event_count": 0, "broken": True}
+
+    def _hooks_status(self) -> Dict[str, Any]:
+        """Hook 事件总线自报状态（Sprint 7）。无 hook_manager 时降级为空统计。"""
+        empty = {"available": False, "total_hooks": 0, "enabled_hooks": 0,
+                 "disabled_hooks": 0, "total_triggers": 0, "history_size": 0,
+                 "event_types_registered": 0}
+        try:
+            hm = getattr(self, "hook_manager", None)
+            if hm is None or not hasattr(hm, "get_stats"):
+                return empty
+            stats = dict(hm.get_stats())
+            stats["available"] = True
+            return stats
+        except Exception:
+            return empty
+
+    def _subagents_status(self) -> Dict[str, Any]:
+        """子代理子系统自报状态（Sprint 7）。无 manager 时降级为空。"""
+        empty = {"available": False, "count": 0,
+                 "max_concurrent": None, "subagents": []}
+        try:
+            mgr = getattr(self, "subagent_manager", None)
+            if mgr is None or not hasattr(mgr, "list_subagents"):
+                return empty
+            subs = list(mgr.list_subagents())
+            return {
+                "available": True,
+                "count": len(subs),
+                "max_concurrent": getattr(mgr, "max_concurrent", None),
+                "subagents": subs,
+            }
+        except Exception:
+            return empty
+
+    def _observability_status_text(self) -> str:
+        """观测层（会话日志/hook/子代理）的人类可读状态段（Sprint 7）。"""
+        sl = self._session_log_status()
+        hk = self._hooks_status()
+        sa = self._subagents_status()
+        lines = ["─" * 50, "  观测层（Sprint 7）"]
+        if sl.get("broken"):
+            lines.append("会话日志: ⚠ 写入已损坏（_broken），后续事件不再落盘")
+        elif sl.get("active"):
+            lines.append(f"会话日志: 开 · {sl.get('event_count', 0)} 条事件 · {sl.get('path')}")
+        elif sl.get("enabled"):
+            lines.append("会话日志: 已启用，尚未落盘（本会话还没产生事件）")
+        else:
+            lines.append("会话日志: 关")
+        if hk.get("available"):
+            lines.append(
+                f"Hook 总线: {hk.get('total_hooks', 0)} 个钩子"
+                f"（启用 {hk.get('enabled_hooks', 0)}）· 累计触发 "
+                f"{hk.get('total_triggers', 0)} 次 · 历史 {hk.get('history_size', 0)} 条")
+        else:
+            lines.append("Hook 总线: 不可用")
+        if sa.get("available"):
+            lines.append(f"子代理: {sa.get('count', 0)} 个存活"
+                         f"（并发上限 {sa.get('max_concurrent')}）")
+        else:
+            lines.append("子代理: 不可用")
+        return "\n".join(lines)
+
     def get_status(self) -> Dict[str, Any]:
         """获取 Agent 完整状态。"""
         return {
@@ -4562,6 +4647,11 @@ class MBDSDRAgent:
             "tools": self.tool_registry.get_stats(),
             "memory": self.memory.get_stats(),
             "last_error": self.last_error,
+            # Sprint 7：观测层自报（会话日志/hook 总线/子代理），UI 可直接绑定；
+            # 三者各自吞错降级，任一子系统缺失/损坏都不影响整体状态面。
+            "session_log": self._session_log_status(),
+            "hooks": self._hooks_status(),
+            "subagents": self._subagents_status(),
         }
 
     def get_status_text(self) -> str:
@@ -4580,6 +4670,8 @@ class MBDSDRAgent:
             self.tool_registry.get_status_text(),
             "",
             self.memory.get_status_text(),
+            "",
+            self._observability_status_text(),
         ]
         if self.last_error:
             lines.append(f"\n上次错误: {self.last_error}")
@@ -4626,6 +4718,79 @@ class MBDSDRAgent:
         if cmd in ("/memory", "/记忆"):
             return self.memory.get_status_text()
 
+        if cmd in ("/hooks", "/钩子"):
+            hk = self._hooks_status()
+            if not hk.get("available"):
+                return "Hook 事件总线不可用（无 hook_manager）。"
+            lines = [
+                "Hook 事件总线:",
+                f"  钩子总数: {hk.get('total_hooks', 0)}"
+                f"（启用 {hk.get('enabled_hooks', 0)} / 禁用 {hk.get('disabled_hooks', 0)}）",
+                f"  累计触发: {hk.get('total_triggers', 0)} 次",
+                f"  事件历史: {hk.get('history_size', 0)} 条",
+                f"  注册事件类型: {hk.get('event_types_registered', 0)} 种",
+            ]
+            try:
+                hooks = self.hook_manager.list_hooks()
+            except Exception:
+                hooks = []
+            if hooks:
+                lines.append("  已注册钩子:")
+                for h in hooks[:20]:
+                    flag = "✓" if h.get("enabled") else "✗"
+                    desc = h.get("description") or ""
+                    lines.append(
+                        f"    {flag} {h.get('event_type')} · {h.get('hook_id')}"
+                        f" · 触发 {h.get('trigger_count', 0)} 次"
+                        + (f" · {desc}" if desc else ""))
+            else:
+                lines.append("  （暂无已注册钩子）")
+            return "\n".join(lines)
+
+        if cmd in ("/subagents", "/子代理"):
+            sa = self._subagents_status()
+            if not sa.get("available"):
+                return "子代理子系统不可用（无 subagent_manager）。"
+            lines = [
+                "子代理子系统:",
+                f"  存活子代理: {sa.get('count', 0)} 个"
+                f"（并发上限 {sa.get('max_concurrent')}）",
+            ]
+            subs = sa.get("subagents", [])
+            if subs:
+                for s in subs:
+                    lines.append(
+                        f"    - {s.get('subagent_id')} [{s.get('agent_type')}]"
+                        f" 状态={s.get('status')}"
+                        f" · 完成 {s.get('total_tasks_completed', 0)}"
+                        f" / 失败 {s.get('total_tasks_failed', 0)}"
+                        f" · 上下文 {s.get('context_size', 0)}")
+            else:
+                lines.append("    （暂无存活子代理）")
+            return "\n".join(lines)
+
+        if cmd in ("/session", "/会话日志"):
+            sl = self._session_log_status()
+            if not sl.get("enabled"):
+                return "会话事件日志已在配置中关闭（enable_session_log=False）。"
+            lines = ["会话事件日志:"]
+            if sl.get("broken"):
+                lines.append("  ⚠ 写入已损坏（_broken）：后续事件不再落盘，请检查磁盘/权限")
+            elif sl.get("active"):
+                lines.append(f"  状态: 落盘中 · 已记 {sl.get('event_count', 0)} 条事件")
+                lines.append(f"  路径: {sl.get('path')}")
+            else:
+                lines.append("  状态: 已启用，尚未落盘（本会话还没产生事件）")
+            try:
+                slog = getattr(self, "_session_log", None)
+                types = slog.event_types() if slog is not None else []
+            except Exception:
+                types = []
+            if types:
+                tail = types[-12:]
+                lines.append(f"  最近 {len(tail)} 条事件类型: " + " → ".join(tail))
+            return "\n".join(lines)
+
         if cmd in ("/help", "/帮助"):
             return """MBDSDR Agent 命令:
   /status    - 查看完整状态
@@ -4635,6 +4800,9 @@ class MBDSDRAgent:
   /clear     - 清空对话历史
   /tools     - 查看工具列表
   /memory    - 查看记忆状态
+  /hooks     - 查看 Hook 事件总线
+  /subagents - 查看子代理子系统
+  /session   - 查看会话事件日志
   /help      - 显示帮助"""
 
         return f"未知命令: {command}。输入 /help 查看可用命令。"
