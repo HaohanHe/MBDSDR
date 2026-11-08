@@ -508,6 +508,7 @@ from time_machine import TimeMachineDialog, format_offset
 from station_sync import (
     clear_config_site, read_config_site, write_config_site,
 )
+from location_panel import LocationPanel
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
 from constants import (
@@ -2314,6 +2315,18 @@ class MainWindow(QMainWindow):
         self._planetarium_layer_btn.toggled.connect(
             self._set_layer_popover_visible)
         strip_lay.addWidget(self._planetarium_layer_btn, 0, Qt.AlignHCenter)
+        # 「📍 地点」：Stellarium LocationDialog 的等价物——搜城市 / 点地图 /
+        # 看当前来源。站址唯一写入口仍是主窗 set_observer_site，面板只发意图。
+        self._planetarium_location_btn = QPushButton("📍 地点", strip)
+        self._planetarium_location_btn.setObjectName("planetariumLocation")
+        self._planetarium_location_btn.setToolTip(
+            "换观测地点：搜城市 / 地图点选 / 看当前位置来源（不改观测时刻）")
+        self._planetarium_location_btn.setMinimumHeight(30)
+        self._planetarium_location_btn.setStyleSheet(_act_css)
+        self._planetarium_location_btn.clicked.connect(
+            self._open_location_panel)
+        strip_lay.addWidget(self._planetarium_location_btn, 0,
+                            Qt.AlignHCenter)
         # 「☾ 今夜」：Stellarium AstroCalc 的玩法，摁一下切到真实日落后
         # （民用暮光终 / 太阳 -6°），不是写死钟点、也不是伪造星空。
         self._planetarium_tonight_btn = QPushButton("今夜", strip)
@@ -10272,27 +10285,58 @@ class MainWindow(QMainWindow):
                 return
 
     def _open_location_panel(self) -> None:
-        """打开「选地点」：有地点面板就用面板，没有就退到设置页。
+        """打开「选地点」面板：搜索城市 / 地图点选 / 看当前来源。
 
-        地点面板（搜索城市 / 地图点选）在下一批接入；在那之前不能让
-        「更改地点…」点了没反应，所以先落到设置页并给出明确指引。
+        面板只发意图（site_chosen / cleared），落盘与刷新由
+        ``set_observer_site`` 统一做——它没有第二条写路径。
         """
         panel = getattr(self, "_location_panel", None)
-        if panel is not None:
+        if panel is None:
             try:
-                panel.show()
-                panel.raise_()
-                panel.activateWindow()
-                return
-            except (AttributeError, RuntimeError):
+                panel = LocationPanel(self)
+            except (RuntimeError, TypeError, ValueError):
+                panel = None
+            if panel is not None:
+                panel.site_chosen.connect(self._on_location_chosen)
+                panel.cleared.connect(self._on_location_cleared)
+                self._location_panel = panel
+        if panel is None:
+            self._focus_settings_tab()
+            try:
+                self.statusBar().showMessage(
+                    "地点面板不可用；可在「设置 → 卫星与多普勒 → 地面站经纬度」"
+                    "手填位置（纬度与经度要成对填写）", MSG_NORMAL)
+            except RuntimeError:
                 pass
-        self._focus_settings_tab()
+            return
         try:
-            self.statusBar().showMessage(
-                "在「设置 → 卫星与多普勒 → 地面站经纬度」填写位置；"
-                "纬度与经度要成对填写", MSG_NORMAL)
+            src_zh = {
+                "gnss": "GNSS", "config": "手动设置", "manual": "手动设置",
+                "place": "地点搜索", "preview": "示例位置（非你的位置）",
+            }.get(str(self._observer_source or ""), "")
+            panel.set_current(self._observer_lat, self._observer_lon, src_zh)
+            panel.show()
+            panel.raise_()
+            panel.activateWindow()
         except RuntimeError:
             pass
+
+    def _on_location_chosen(self, place) -> None:
+        """地点面板选中 → 唯一写入口。时刻不变（跳时间归「时间」按钮）。"""
+        try:
+            lat = float(place.lat)
+            lon = float(place.lon)
+        except (AttributeError, TypeError, ValueError):
+            return
+        name = str(getattr(place, "name", "") or "")
+        # 城市搜索/离线表 → place；地图点选 → manual（都是用户显式选择）
+        src = "place" if str(getattr(place, "source", "")) in (
+            "osm", "offline") else "manual"
+        self.set_observer_site(lat, lon, place=name or None, source=src)
+
+    def _on_location_cleared(self) -> None:
+        """清空位置：天空回未定位空态，镜像同步清掉。"""
+        self.set_observer_site(None, None, source="manual")
 
     def set_observer_site(self, lat, lon, alt_m: float = 0.0, *,
                           place: Optional[str] = None,
@@ -11076,11 +11120,16 @@ class MainWindow(QMainWindow):
         try:
             has_fix = (pos.source == "real" and pos.lat is not None
                        and pos.lon is not None)
+            # 「用户显式选的位置」都算静态事实：手填(config)、地点搜索(place)、
+            # 地图点选(manual)。GNSS 丢 fix 只能收回它自己写的坐标，
+            # 不能把用户选的城市一起清掉（以前只认 config，地点面板选完
+            # 一秒就被 GNSS 轮询打回未定位）。
+            static_site = self._observer_source in ("config", "place", "manual")
             if has_fix:
                 self.sky_view.set_gnss_position(fix_dict)
-                if self._observer_source != "config":
+                if not static_site:
                     self._observer_source = "gnss"
-            elif self._observer_source != "config":
+            elif not static_site:
                 self.sky_view.set_gnss_position(fix_dict)
                 self._observer_source = None
         except Exception:
