@@ -66,6 +66,12 @@ class CapabilityDrawer(QWidget):
         self._grid.setSpacing(6)
         self._scroll.setWidget(self._inner)
         root.addWidget(self._scroll, 1)
+        # 任务与事件明细：常驻可读，数字来自编排器/Hooks 的真实对象
+        self._live_note = QLabel("")
+        self._live_note.setObjectName("capHint")
+        self._live_note.setWordWrap(True)
+        self._live_note.setMinimumHeight(28)
+        root.addWidget(self._live_note)
         self.refresh()
 
     # ---------------------------------------------------------------- 事实源
@@ -121,6 +127,24 @@ class CapabilityDrawer(QWidget):
             except Exception:
                 rows.append(("智能编排", "已装载"))
 
+        # 本地能力协商（无 API Key 时的真实工具路由）+ 只读知识源
+        panel = getattr(self._host, "ai_panel", None)
+        bridge = panel._bridge_obj() if panel is not None and hasattr(
+            panel, "_bridge_obj") else None
+        if bridge is not None:
+            try:
+                st = bridge.live_state()
+                if not st.get("model"):
+                    rows.append(("本地能力协商",
+                                 "模型未配置时仍可执行 %s 个可用工具"
+                                 % st.get("tools_available")))
+                rows.append(("星名文化（只读）",
+                             "亮星 %s 条 · 星座 %s 条 · 仓库数据"
+                             % (st.get("star_culture"),
+                                st.get("constellation_culture"))))
+            except Exception:
+                rows.append(("本地能力协商", "状态读取失败"))
+
         for attr, title in (("plugin_manager", "插件系统"),
                             ("subagent_manager", "子代理"),
                             ("workflow_engine", "工作流引擎"),
@@ -160,3 +184,24 @@ class CapabilityDrawer(QWidget):
             empty = QLabel("没有可显示的能力位。")
             empty.setObjectName("capHint")
             self._grid.addWidget(empty, 0, 0)
+        # 明细条：任务与事件只写真实记录，没有就写「暂无」
+        lines = []
+        panel = getattr(self._host, "ai_panel", None)
+        bridge = panel._bridge_obj() if panel is not None and hasattr(
+            panel, "_bridge_obj") else None
+        if bridge is not None:
+            try:
+                st = bridge.live_state()
+                for t in (st.get("task_rows") or [])[-3:]:
+                    lines.append("任务 %s · %s · %s" %
+                                 (t.get("id", ""), t.get("name", ""),
+                                  t.get("status", "")))
+                for e in (st.get("event_rows") or [])[-3:]:
+                    lines.append("事件 %s · %s" %
+                                 (e.get("event_type", ""),
+                                  (e.get("data") or {}).get("tool", "")))
+            except Exception:
+                lines = []
+        self._live_note.setText(
+            "任务与事件（真实记录）<br>" + "<br>".join(lines)
+            if lines else "任务与事件（真实记录）<br>暂无任务与事件")

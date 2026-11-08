@@ -36,6 +36,10 @@ except Exception:  # noqa: BLE001
     def _clean_exc(e):  # type: ignore[misc]
         return str(e)
 
+try:
+    from local_agent_bridge import LocalAgentBridge
+except ImportError:  # pragma: no cover - 模块缺失时对话栏退化为旧行为
+    LocalAgentBridge = None
 import ai_steps  # noqa: E402  # 步骤卡投影（Qt 无关）
 from tokens import tokens as _tok  # noqa: E402
 
@@ -59,6 +63,33 @@ QUICK_COMMANDS = [
     "自动找干扰源方向",
     "识别当前信号制式",
 ]
+
+
+class LocalWorker(QObject):
+    """本地能力协商 Worker：工具可能是硬件读取，不能压在 UI 线程上。"""
+    finished = Signal(dict)
+
+    def __init__(self, bridge, text: str, confirm: bool,
+                 only_tool=None, only_args=None):
+        super().__init__()
+        self.bridge = bridge
+        self.text = text
+        self.confirm = confirm
+        self.only_tool = only_tool
+        self.only_args = only_args
+
+    @Slot()
+    def run(self):
+        try:
+            self.finished.emit(self.bridge.handle(
+                self.text, confirm=self.confirm,
+                only_tool=self.only_tool, only_args=self.only_args))
+        except Exception as e:
+            self.finished.emit({
+                "mode": "local", "status": "failed", "cards": [],
+                "culture": [], "tasks": [], "hooks": [], "suggestions": [],
+                "reply": "本地能力协商出错：%s: %s" % (type(e).__name__, e),
+            })
 
 
 class AIWorker(QObject):
@@ -120,6 +151,11 @@ class AIPanel(QWidget):
         self._mcp_tool_names: set = set()
         # 天空动作请求的待结算状态（按钮触发的协商轮次）
         self._pending_sky: Optional[Dict[str, str]] = None
+        # 本地能力协商（无 API Key 时的真实工具路由）+ 常驻状态
+        self._bridge = None
+        self._local_thread = None
+        self._local_worker = None
+        self._local_busy = False
         self._saved_config = self._load_config()
         self._build_ui()
         self._add_welcome_message()
@@ -198,7 +234,45 @@ class AIPanel(QWidget):
         self.config_btn.clicked.connect(self._show_config)
         title_bar.addWidget(self.config_btn)
 
+        # 弹出成自由窗口：右栏窄时对话挤成一团，用户自己决定它多大放哪。
+        # 对齐用户「像真实桌面，想放哪儿放哪儿」「别老给他决定」。
+        self.pop_btn = QPushButton("⧉")
+        self.pop_btn.setObjectName("aiPopBtn")
+        self.pop_btn.setFixedWidth(26)
+        self.pop_btn.setMinimumHeight(24)
+        self.pop_btn.setToolTip("把这个面板弹出成可拖动的自由窗口（也能再归位）")
+        self.pop_btn.setStyleSheet(
+            "font-size:10pt;background:transparent;color:#B9C7DB;"
+            "border:1px solid rgba(160,190,225,0.25);border-radius:5px;")
+        self.pop_btn.clicked.connect(self._pop_out)
+        title_bar.addWidget(self.pop_btn)
+
         layout.addLayout(title_bar)
+
+        # ---- 常驻状态条：Agent 内核 / 编排任务 / Hooks 事件一直看得见 ----
+        # 用户 2026-11-08：「人工智能编排有没有？包括 Hooks，包括常驻化」。
+        # 数字全部从 live_state() 读本进程真实对象，不是 UI 上画的假状态。
+        self.live_btn = QPushButton()
+        self.live_btn.setObjectName("agentLiveBar")
+        self.live_btn.setMinimumHeight(22)
+        self.live_btn.setMaximumHeight(30)
+        self.live_btn.setStyleSheet(
+            "QPushButton { text-align: left; padding: 2px 8px;"
+            " background-color: rgba(60,90,130,0.16);"
+            " color: #CFE0F5; border: 1px solid rgba(160,190,225,0.22);"
+            " border-radius: 5px; font-size: 8pt; }"
+            "QPushButton:hover { background-color: rgba(60,90,130,0.30); }")
+        self.live_btn.clicked.connect(self._toggle_live_details)
+        layout.addWidget(self.live_btn)
+        self.live_details = QLabel("")
+        self.live_details.setWordWrap(True)
+        self.live_details.setTextFormat(Qt.RichText)
+        self.live_details.setVisible(False)
+        self.live_details.setStyleSheet(
+            "color: #B8C6D9; font-size: 8pt; padding: 4px 8px;"
+            " background: rgba(14,17,24,0.55); border-radius: 4px;")
+        layout.addWidget(self.live_details)
+        self._refresh_live_bar()
 
         # 对话历史
         self.conversation_view = QTextEdit()
@@ -244,6 +318,16 @@ class AIPanel(QWidget):
         quick_layout.addStretch()
         quick_group.setLayout(quick_layout)
         layout.addWidget(quick_group)
+
+        # 人工门确认条：gated 工具在这里显式确认，绝不自动动设备。
+        # QTextEdit 不能嵌入 QWidget，所以按钮挂在真实容器上而非对话流里。
+        self._confirm_bar = QWidget()
+        self._confirm_bar.setVisible(False)
+        self._confirm_layout = QHBoxLayout(self._confirm_bar)
+        self._confirm_layout.setContentsMargins(0, 0, 0, 0)
+        self._confirm_layout.setSpacing(6)
+        self._confirm_layout.addStretch(1)
+        layout.addWidget(self._confirm_bar)
 
         # 输入栏
         input_bar = QHBoxLayout()
@@ -694,7 +778,15 @@ class AIPanel(QWidget):
             )
 
     def _call_ai(self, text: str) -> bool:
-        """调用真正的 AI Agent（后台线程）。忙时拒绝并返回 False。"""
+        """调用真正的 AI Agent（后台线程）。忙时拒绝并返回 False。
+
+        没配 API Key 时不返回「错误: API key 未设置」就撂挑子：转本地能力
+        协商，用本进程真实装载的工具 / 编排器 / Hooks 回话。UI 会明确写
+        「模型未配置」，绝不让工具回执冒充模型说的话。
+        """
+        if self._bridge_obj() is not None and not bool(
+                getattr(getattr(self.agent, "config", None), "api_key", "")):
+            return self._local_dispatch(text)
         # S10：星象仪命令栏直接调本方法，绕过 _on_submit 的忙锁会再起一个
         # AIWorker 覆盖 self._worker/_worker_thread；先结束的那个还会提前解锁。
         if self._is_processing:
@@ -730,6 +822,185 @@ class AIPanel(QWidget):
 
         self._worker_thread.start()
         return True
+
+    # ── 本地能力协商（无模型时的通用 Agent 通路）──────────────────
+    def _pop_out(self) -> None:
+        """把 AI 助手页签交给主窗口的自由窗口管理器弹出（不复制控件）。"""
+        w = self.window()
+        fn = getattr(w, "_pop_out_tab", None)
+        tabs = getattr(w, "right_tab", None)
+        if fn is None or tabs is None:
+            return
+        for i in range(tabs.count()):
+            host = tabs.widget(i)
+            if host is self or (host is not None and
+                                host.findChild(type(self)) is not None):
+                fn("right", i)
+                return
+
+    def _bridge_obj(self):
+        if self._bridge is None and LocalAgentBridge is not None \
+                and self.agent is not None:
+            try:
+                self._bridge = LocalAgentBridge(self.agent)
+            except Exception:
+                return None
+        if self._bridge is not None and self.agent is not None:
+            try:
+                self._bridge.agent = self.agent
+                self._bridge.refresh()
+            except Exception:
+                pass
+        return self._bridge
+
+    def _local_dispatch(self, text: str, confirm: bool = False,
+                        only_tool: Optional[str] = None,
+                        only_args: Optional[Dict] = None) -> bool:
+        bridge = self._bridge_obj()
+        if bridge is None or self._local_busy:
+            if bridge is None:
+                self._add_system_message("本地能力协商不可用（工具注册表未装载）")
+            else:
+                self._add_system_message("上一条本地指令还在执行，请稍等")
+            return False
+        self._local_busy = True
+        self.send_btn.setEnabled(False)
+        self.send_btn.setText("执行中...")
+        self._add_system_message("模型未配置 · 本地能力协商（按工具描述匹配，不是语言模型理解）")
+        self._local_thread = QThread()
+        self._local_worker = LocalWorker(bridge, text, confirm,
+                                          only_tool, only_args)
+        self._local_worker.moveToThread(self._local_thread)
+        self._local_thread.started.connect(self._local_worker.run)
+        self._local_worker.finished.connect(self._on_local_result)
+        self._local_worker.finished.connect(self._local_thread.quit)
+        self._local_thread.start()
+        return True
+
+    @Slot(dict)
+    def _on_local_result(self, out: dict):
+        self._local_busy = False
+        self.send_btn.setEnabled(True)
+        self.send_btn.setText("发送")
+        # 上一轮的人工门按钮失效：避免攒一排过期确认把用户带偏
+        lay = getattr(self, "_confirm_layout", None)
+        if lay is not None:
+            for i in reversed(range(lay.count())):
+                item = lay.itemAt(i)
+                w = item.widget() if item is not None else None
+                if w is not None:
+                    w.hide()
+                    w.setParent(None)
+            self._confirm_bar.setVisible(False)
+        if not isinstance(out, dict):
+            self._add_ai_message("本地能力协商返回了无法识别的结果。")
+            return
+        _t = _tok().COLORS
+        status_label = {
+            "ok": ("已执行", _t["status_success"]),
+            "gated": ("等待确认", _t["status_warning"]),
+            "not_connected": ("设备未连接", _t["text_muted"]),
+            "denied": ("被 Hooks 否决", _t["status_danger"]),
+            "failed": ("执行失败", _t["status_danger"]),
+            "no_match": ("没有匹配能力", _t["text_muted"]),
+        }
+        for card in out.get("cards", []):
+            self._render_tool_card(card, status_label)
+        for hit in out.get("culture", []):
+            self._add_system_message(
+                "星名文化（仓库数据）：%s %s · %s %s" %
+                (hit.get("kind", ""), hit.get("name", ""),
+                 hit.get("zh", ""), hit.get("note", "")))
+        reply = out.get("reply", "")
+        if reply:
+            self._add_ai_message(reply)
+        # 原型 quicks：给真实能力位，不预制流程；点了只是把名字送进输入栏
+        sugs = [s for s in out.get("suggestions", []) if s]
+        if sugs and out.get("status") in ("no_match", "culture"):
+            self._add_system_message("现在在位的能力（点名字可提问）：" +
+                                     " · ".join(sugs[:4]))
+        tasks = out.get("tasks", [])
+        hooks = out.get("hooks", [])
+        if tasks or hooks:
+            self._add_system_message(
+                "编排任务 %d 条 · Hooks 事件 %d 条（状态条可展开看明细）" %
+                (len(tasks), len(hooks)))
+        self._refresh_live_bar()
+        self.reply_received.emit(reply or "")
+
+    def _render_tool_card(self, card: dict, status_label: dict) -> None:
+        """工具回执卡（对齐原型 .toolcard）：工具名 + 真实状态 + 真实结果。"""
+        status = card.get("status", "failed")
+        label, color = status_label.get(status, ("未知", "#AAAAAA"))
+        tool = _esc(str(card.get("tool", "")))
+        content = _esc(str(card.get("content", ""))[:900]).replace("\n", "<br>")
+        args = card.get("args") or {}
+        args_txt = _esc(json.dumps(args, ensure_ascii=False)[:120]) if args else "—"
+        lat = card.get("latency_ms")
+        lat_txt = ("—" if lat is None else "%.0fms" % float(lat))
+        html = (
+            '<div style="margin:6px 0;padding:8px;background:%s;'
+            'border:1px solid %s;border-radius:6px;">'
+            '<b style="color:#DCE6F5;">%s</b> '
+            '<span style="color:%s;">%s</span> '
+            '<span style="color:#8FA0B8;">%s</span><br>'
+            '<span style="color:#9AA8BC;font-size:8pt;">参数 %s</span><br>'
+            '<span style="color:#CFDAEA;">%s</span></div>'
+            % ("rgba(20,26,36,0.65)", color, tool, color, label,
+               lat_txt, args_txt, content))
+        self._append_to_view(html)
+        if status == "gated" and card.get("confirm_tool"):
+            name = str(card["confirm_tool"])
+            cargs = dict(card.get("confirm_args") or {})
+            btn = QPushButton("确认执行 " + name)
+            btn.setMinimumHeight(24)
+            btn.setStyleSheet(
+                "font-size:8pt;padding:2px 10px;background:#B8792F;"
+                "color:#0B0E14;border:none;border-radius:5px;")
+            btn.clicked.connect(
+                lambda _c=False, n=name, a=cargs:
+                    self._local_dispatch("确认执行 " + n, confirm=True,
+                                         only_tool=n, only_args=a))
+            lay = getattr(self, "_confirm_layout", None)
+            if lay is not None:
+                lay.insertWidget(lay.count() - 1, btn)
+                self._confirm_bar.setVisible(True)
+
+    def _refresh_live_bar(self) -> None:
+        bridge = self._bridge_obj()
+        btn = getattr(self, "live_btn", None)
+        if btn is None:
+            return
+        if bridge is None:
+            btn.setText("● AI 内核未装载")
+            return
+        try:
+            st = bridge.live_state()
+        except Exception:
+            btn.setText("● 状态读取失败")
+            return
+        model = "模型已配置" if st.get("model") else "模型未配置·本地协商"
+        btn.setText("● %s · 工具 %s/%s · 任务 %s · 事件 %s  ▾" %
+                    (model, st.get("tools_available"), st.get("tools"),
+                     st.get("tasks"), st.get("events")))
+        btn.setToolTip("内核在线；点开看真实任务与 Hooks 事件明细。"
+                       "模型未配置时对话走本地能力协商，不编造模型回复。")
+        rows = []
+        for t in st.get("task_rows", [])[-4:]:
+            rows.append("任务 %s · %s · %s" %
+                        (_esc(str(t.get("id", ""))), _esc(str(t.get("name", ""))),
+                         _esc(str(t.get("status", "")))))
+        for e in st.get("event_rows", [])[-4:]:
+            rows.append("事件 %s · %s" %
+                        (_esc(str(e.get("event_type", ""))),
+                         _esc(str((e.get("data") or {}).get("tool", "")))))
+        rows.append("星名文化 %s 条 · 星座文化 %s 条（仓库数据）" %
+                    (st.get("star_culture"), st.get("constellation_culture")))
+        self.live_details.setText("<br>".join(rows) or "暂无任务与事件")
+
+    def _toggle_live_details(self) -> None:
+        self._refresh_live_bar()
+        self.live_details.setVisible(not self.live_details.isVisible())
 
     # ── 天空动作 → 能力协商（按钮不得直连硬件）──────────────────
 

@@ -1679,6 +1679,8 @@ class MainWindow(QMainWindow):
         # 星象仪命令栏仍显式走 _on_ai_command（见 _build_ai_command_bar）。
         # 星象仪覆盖卡：AI 回复跨形态镜像（只读，历史以面板为准）
         self.ai_panel.reply_received.connect(self._on_planetarium_ai_reply)
+        # 点星信息卡「问模型」：只把问题送进对话栏，发不发由用户决定
+        self.sky_view.question_requested.connect(self._on_sky_question)
         self._init_ai_agent_from_config()
         self._add_right_tab("AI 助手", self.ai_panel, "ai_dock")
 
@@ -3095,6 +3097,10 @@ class MainWindow(QMainWindow):
             panel.init_agent()
         except Exception:
             pass
+        try:
+            panel._refresh_live_bar()
+        except Exception:
+            pass
 
     def _refresh_capability_drawer(self) -> None:
         body = getattr(self, "_cap_body", None)
@@ -3117,6 +3123,28 @@ class MainWindow(QMainWindow):
         if panel is not None:
             panel.save_geometry()
             panel.hide()
+
+    def _on_sky_question(self, text: str) -> None:
+        """星图点星 → 把问题放进对话栏。不自动发送、不切换用户视角。"""
+        ci = getattr(self, "cmd_input", None)
+        if ci is not None and (getattr(self, "_app_mode", "ide") ==
+                               "planetarium" or ci.isVisible()):
+            ci.setText(str(text))
+            ci.setFocus()
+            return
+        try:
+            self.ai_panel._send_quick_command(str(text))
+            tabs = getattr(self, "right_tab", None)
+            if tabs is not None:
+                for i in range(tabs.count()):
+                    host = tabs.widget(i)
+                    if host is not None and host.findChild(
+                            type(self.ai_panel)) is not None:
+                        tabs.setCurrentIndex(i)
+                        break
+            self.ai_panel.input_field.setFocus()
+        except Exception:
+            pass
 
     def _on_capability_activated(self, name: str) -> None:
         """点能力位只把名字送进 AI 输入栏，不预制流程、不自动执行。"""
@@ -5528,6 +5556,12 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _on_ai_command(self, text: str):
         # AI 面板提交的自然语言指令 -> 转发给 AI worker
+        # 星象仪胶囊命令栏没有自己的对话历史，用户原话要进 AI 面板，
+        # 否则无 API Key 走本地能力协商时只有回执、看不到自己说了什么。
+        try:
+            self.ai_panel._add_user_message(text)
+        except Exception:
+            pass
         try:
             # S10：忙锁由 _call_ai 统一把关（命令栏不能绕过）
             if self.ai_panel._call_ai(text) is False:
@@ -6149,6 +6183,10 @@ class MainWindow(QMainWindow):
             self.ai_panel.register_mcp_tools(tools, self._mcp_call_handler)
         except Exception:
             pass  # 接线失败不崩主窗口；下次连接成功时会重试
+        try:
+            self.ai_panel._refresh_live_bar()
+        except Exception:
+            pass
 
     # ── 人工确认门（S13 红线）──────────────────────────────────────────
     # 模型驱动的写/发射/改站址，确认只能来自真人：模型传 arm_manual=true

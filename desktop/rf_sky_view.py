@@ -1748,6 +1748,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     gimbal_follow_toggled = Signal(bool)
     # 全天模式开关（立体投影 160°）；主窗口可据此同步按钮文案。
     all_sky_mode_changed = Signal(bool)
+    # 点星信息卡上的「问模型」：只把问题送进对话栏，不自动执行、不预制流程。
+    question_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1874,6 +1876,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         # HUD 命中区 (绘制时刷新; None = 该控件当前不可点)
         self._info_card_rect: Optional[QRectF] = None
         self._info_close_rect: Optional[QRectF] = None
+        self._ask_rect: Optional[QRectF] = None
         self._fov_minus_rect: Optional[QRectF] = None
         self._fov_plus_rect: Optional[QRectF] = None
 
@@ -6505,6 +6508,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if not body or not info:
             self._info_card_rect = None
             self._info_close_rect = None
+            self._ask_rect = None
             return
         # 高亮环: 实时位置重算 (快转时跟着走)
         gs = self._ground_station()
@@ -6541,6 +6545,19 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             vis = "24h 内无升降 (拱极或不可见)"
         else:
             vis = f"升 {_hm(rise)}   落 {_hm(sset)}"
+        # 实时方位/高度必须在算卡宽之前求出：kv 里若先塞占位符 "—"，
+        # box_w 按 "—" 算，绘制时再换成 "323.5° NW 几何…/视(折射)…"
+        # 就会把这一行右端切掉（用户点名的「那一行字儿被切掉了」）。
+        azalt_text = "—"
+        if gs is not None and info.get("ra") is not None:
+            try:
+                from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                vv = j2000_to_altaz(vec_from_radec(info["ra"], info["dec"]),
+                                    gs, self._current_jd())
+                az, alt = azalt_from_vec(vv)
+                azalt_text = f"{format_azimuth(az)}  {self._format_alt_pair(alt)}"
+            except Exception:
+                azalt_text = "—"
         kv = [
             ("星等 (mag)", "—" if info.get("mag") is None
              else format_magnitude(info["mag"])),
@@ -6548,7 +6565,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             ("赤经/赤纬",
              f"{format_hms_ra(info['ra'])}  {format_dms_deg(info['dec'])}"
              if info.get("ra") is not None else "—"),
-            ("方位/高度（视/几何，0°=北）", "—"),   # 实时值在绘制循环尾部刷新
+            ("方位/高度（视/几何，0°=北）", azalt_text),
             ("升起/落下 (UTC)" + (f" · {info['rise_set_frame']}"
                                  if info.get("rise_set_frame") else ""), vis),
         ]
@@ -6587,7 +6604,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 desc_lines[-1] = desc_lines[-1].rstrip("。，,;； ") + " …"
 
         row_h = 17.0
-        n_rows = 3 + len(kv) + (len(desc_lines) + 1 if desc_lines else 0)
+        # 多留一行给「问模型」入口：点完星之后往哪走，不能是个死胡同
+        n_rows = 3 + len(kv) + (len(desc_lines) + 1 if desc_lines else 0) + 1
         box_h = n_rows * row_h + 18
         box_x, box_y = 14.0, 40.0
         bg = QColor(_t.COLORS["card_1"])
@@ -6621,19 +6639,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # 键名中文化后判据必须跟着改：原来写死英文前缀 "Az/Alt (视/几何"，
             # 改名后这一行永远显示 "—"，点了星却看不到它此刻在天上哪儿。
             if k.startswith(("方位/高度", "Az/Alt")):
-                # 实时坐标: 与行星标记同一坐标链现算；两个口径同时给出：
-                # 绘制位置用视高度，几何高度保留给指向/对照。
-                v = "—"
-                if gs is not None and info.get("ra") is not None:
-                    try:
-                        from mbdsdr_ai.celestial_geometry import azalt_from_vec
-                        vv = j2000_to_altaz(vec_from_radec(info["ra"],
-                                                           info["dec"]),
-                                            gs, self._current_jd())
-                        az, alt = azalt_from_vec(vv)
-                        v = f"{format_azimuth(az)}  {self._format_alt_pair(alt)}"
-                    except Exception:
-                        v = "—"
+                # 用预计算的实时坐标（同一坐标链，几何/视高度两个口径），
+                # 卡宽已按这个真实长度算过，不会再裁字。
+                v = azalt_text
             painter.setPen(key_pen)
             painter.drawText(QPointF(box_x + pad, ty), k)
             painter.setPen(val_pen)
@@ -6647,6 +6655,26 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 painter.drawText(QPointF(box_x + pad, ty), dl)
                 ty += row_h
         painter.restore()
+
+        # 「问模型」入口：只是把问题填进对话栏，用户按回车才发。
+        # 不自动执行、不预制向导 —— 能力而非流程（用户 2026-11-04 铁律）。
+        title = str(info.get("title") or "这颗星")
+        ask = "问模型：%s 有什么故事？   ›" % title
+        ask_rect = QRectF(box_x + pad, ty + 2, text_w, row_h + 6)
+        painter.save()
+        ask_bg = QColor(self._colors["accent"])
+        ask_bg.setAlpha(38)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(ask_bg))
+        painter.drawRoundedRect(ask_rect, 4, 4)
+        painter.setPen(QColor(self._colors["accent"]))
+        f_ask = QFont(self._font)
+        f_ask.setPointSize(max(8, f_ask.pointSize() - 1))
+        painter.setFont(f_ask)
+        painter.drawText(ask_rect.adjusted(8, 0, -4, 0),
+                         int(Qt.AlignLeft | Qt.AlignVCenter), ask)
+        painter.restore()
+        self._ask_rect = ask_rect
 
     @staticmethod
     def _parse_distance_km(obj: SkyObject) -> float:
@@ -7529,6 +7557,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
     def _hud_hit(self, px: float, py: float) -> bool:
         """HUD 控件命中测试：信息卡 × / FOV ⊖⊕。命中则消费事件并返回 True。"""
+        r = self._ask_rect
+        if r is not None and r.contains(px, py):
+            info = self._body_info or {}
+            title = str(info.get("title") or "这颗星")
+            self.question_requested.emit("%s 有什么故事？" % title)
+            return True
         r = self._info_close_rect
         if r is not None and r.contains(px, py):
             self.on_object_picked(None)
