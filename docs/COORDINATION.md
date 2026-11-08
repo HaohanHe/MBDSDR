@@ -133,7 +133,7 @@ harness），要求"深度调研学习完，再根据它看我们 agent 有什�
 翻车"的硬机制，逐条对照我们的 agent 层。完整报告
 `docs/learn/agent-harness-gap-audit.md`。
 
-- **P0（已修）模型对话通道没有写入门**：`tool_registry.call()` 全段不看
+- **P0（已修）模型对话通道没有写入门**：`tool_registry.call()` 全段不看 — `da7eebee` — `mbdsdr_ai/tool_registry.py:525` — `MODEL_HARD_GATE_PATTERNS`
   write 标记；`WRITE_TOOL_NAME_PATTERNS` 列了几十个写/发射工具，全仓
   `resolve_write_authorization` 只有 6 处。结果：同一工具走 MCP 通道会被
   拦，走 `agent.chat()` 直接执行——`radio_ptt` / `radio_send_cw` 裸奔。
@@ -197,6 +197,44 @@ UI/天空回归 9 文件 **190 passed**；契约测试 11 passed。
 not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面板优先级、
 全部 C++ 结论）。
 
+
+### 我这边（2026-11-09 上午：跨 lane 完工报告的复核，不采信"争用假红"）
+
+另一 lane 交付 `D:/mbdsdr/output/goal_completion_audit.md`，报
+`mbdsdr_ai/tests` = 2827 passed / 0 failed / EXIT 0，并把此前合并跑里的
+~5 个 F 归结为「`tests/` 桌面/Qt/recording 的争用假红，非本巷道」。
+按本仓「未修清单不得当作已处理」的口径，本线复核：
+
+- **提交状态已过期**：该审计 §4 写「本地 main，未推送」；实测四个 commit
+  均已在 `origin/main`（证据包 lane 的 `cae5c421..bee5aa0b` 把它们作为
+  HEAD 祖先一并带上）。原文保留，已在审计 §6 追加复核说明。
+- **"假红"不成立**：单独跑 `tests/`（5581 条）抓到的是**确定性文档/注册表
+  审计红**，不是 Qt 争用或录制线竞态：
+  1. `test_card_links` —— 我上一轮在 COORDINATION.md:156 插入 40 行，把
+     `COMMIT-INCIDENT-CARD.md` 里 13 条按行号钉死的锚点全挤偏。
+     **已用官方 `scripts/check_card_links.py --fix-anchors` 重钉**（13 条 PASS）。
+  2. `test_claims_guard` 两条 —— 5 条无四元组的新断言 + 1 条失效白名单。
+     **已补真实四元组**（`da7eebee`/`c6805f7c`/`692fb3ce`/`a694b322`，
+     全部经 `cat-file` + `show --name-only` + `log -S` 三步核实），
+     工具链那条属环境观察、无代码提交可绑 → 改中性表述；
+     `claim-waivers.md` 删 1 行、`waived-total` 57→56。账目现 56=56。
+  3. `test_ai_tool_consistency` —— 5 个写工具声明 `confirm_token` 却"handler
+     未读取"。实为**扫描器假阳性**：handler 把整个 args 交给
+     `resolve_write_authorization(tool, args)`，token 在门里消费；扫描器的
+     "整体转发"正则只认 args 作首个形参。按扫描器自己的网关参数语义把
+     `confirm_token` 与 `arm_manual` 并列白名单，并加一条反证测试：
+     普通参数漏读仍必须报出。5 passed。
+- **口径订正**：本机 `C:/QtLocal` 下**装有** MinGW 13.1.0 + Qt 6.8.2，
+  只是不在 PATH。证据单原先写「no toolchain on this host」不精确；
+  已统一为「工具链不在 PATH，未做本地编译验证」（architecture 组 +
+  证据单两处）。
+- **证据包补一组可选基线**：`tools/evidence/test_suites.py` +
+  `run_all.py --with-tests`，两条套件各开一个子进程单独跑，数字从 pytest
+  汇总行现算（不抄报告），原始日志落盘；默认不跑，避免拖慢 ~90 s 证据包。
+  契约测试 13 passed（含"默认不跑 / `--with-tests` 才跑"）。
+- **全量 `tests/` 尚在跑**：本轮启动时修复未落盘、且期间并发跑过诊断
+  pytest，结果**不作权威结论**；待其结束后把失败 nodeid 放进干净进程
+  单独复跑分类，真修或进 `docs/known-red-register.md`。
 
 ### 我这边（2026-11-09 凌晨第二批：站址单源 + 地点面板 + 投影 + 星等只读）
 
@@ -312,7 +350,7 @@ astronomicalDuskJD)`，时刻由 `getRTSTime(core, altitude)` 按**真实太阳�
 - **示例站**：复用 `mbdsdr_ai.solar_system.SAMPLE_SITE`（中性 45°N/120°E，
   源码明写「不指向任何真实默认站址」）。UI 层不写死城市坐标 ——
   防回潮守卫专禁硬编码假坐标（39.9042 / 116.4074 等作者城市变体），
-  第一版就撞了这条已改。示例坐标不写配置、不参与过境，GNSS/手填立即
+  第一版就撞了这条已改。示例坐标不写配置、不参与过境，GNSS/手填立即 — `c6805f7c` — `mbdsdr_ai/solar_system.py:1116` — `SAMPLE_SITE`
   覆盖；全程标注「非你的位置 / 未校准」。
 - **示例态历表**：点示例才建 SatelliteTracker，太阳/月亮按该点真算；
   `_stars_hidden_by_daylight` 加保守门（示例态太阳高度未知 → 不画星），
@@ -703,7 +741,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
   真机窗口连跑 60 s / 90 s：access violation **0 次**，进程存活。
   残留另账：日志偶现 `0x8001010d`（RPC_E_CANTCALLOUT_ININPUTSYNCCALL），
   Qt 输入同步调用里发 COM 的 Windows 噪声，进程不退出，待单独查。
-- **C++ 工具链结论更正（长期有效）**：本机**有** g++ 13.1.0 + Qt 6.8.2
+- **C++ 工具链现状（长期有效，环境观察非代码改动）**：本机**有** g++ 13.1.0 + Qt 6.8.2（证据包 architecture 组现测 g++/qmake6 不在 PATH）
   （`C:/QtLocal/Tools/mingw1310_64`、`C:/QtLocal/6.8.2/mingw_64`）+ CMake
   （`C:/Program Files/CMake/bin`），只是没进 PATH。**不需要装 VS**。
   之前"无 g++/qmake6、C++ 只能审计"的结论是 PATH 假象，已作废；
@@ -1325,7 +1363,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 ## 三、接下来要办啥（队列）
 
 0. **[我，续]** 队列第 0 条（2026-11-08 下午复核）：
-   ① **存量挂起已修复销账**：`test_user_layouts.py` fixture 改 module
+   ① **存量挂起已修复销账**：`test_user_layouts.py` fixture 改 module — `692fb3ce` — `tests/test_user_layouts.py:33` — `scope="module"`
    scope（共用窗口），整文件 10 passed / 8.32s，随机顺序 7.78s 全绿；
    根因是每例新建 MainWindow 的 Qt 对象累积，非产品代码。
    ② **真机复验仍待设备**：本轮 COM4 与 RTL2832U 都不在位（只有蓝牙
@@ -1380,7 +1418,7 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    （纯擦除上限 32 = 纯纠错 16 的两倍）。真录 40-80s 宽窗实测：**盲解
    0 条 → 擦除链 9 条**（另 1 条 version=2 被结构判据剔除）。
    ⚠ 顺带挖出真 bug：原 `decode()` 缺伴随式验证，t 超限时把不自洽解当
-   成功（17 错报 1 错、重编码距离 33）——已修，C++ 同步补验证。
+   成功（17 错报 1 错、重编码距离 33）——已修，C++ 同步补验证 — `a694b322` — `mbdsdr_ai/fec.py:372` — `decode_with_reliability`。
 10. **[已闭环（afb76976，11-08 夜）]** 图像链收尾件：
     ~~C++ lrptDecodeCadu 同迁 woven~~ **已做（a694b322，未编译验证）**；
     ~~形状判据过滤~~ **已做（真录 fixture 层 version=1 过滤）**；

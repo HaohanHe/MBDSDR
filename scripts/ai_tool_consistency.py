@@ -34,8 +34,14 @@ sys.path.insert(0, _ROOT)
 ALLOWED_TYPES = {"string", "number", "integer", "boolean", "array", "object",
                  "null"}  # 联合类型（["string","null"]）里的可空标识
 
-# 由注册表层统一校验、handler 不自己读取的网关参数（如人工门 arm_manual）
-_GATE_ARGS = {"arm_manual"}
+# 由注册表层统一校验、handler 不自己读取的网关参数。
+#  * arm_manual：旧人工门参数（模型自报不参与放行）。
+#  * confirm_token：外部确认通道签发的一次性 token，由 ToolCallGate 在调用
+#    handler 之前校验；部分 handler 再把整个 args 交给
+#    resolve_write_authorization(tool_name, args) 消费。这两种写法里 handler
+#    源码都**不会**直接出现 args.get("confirm_token")，但安全门并未失效——
+#    把它们算成「schema/handler 漂移」是假阳性（2026-11-09 实测 5 条）。
+_GATE_ARGS = {"arm_manual", "confirm_token"}
 
 # handler 读取参数的三类常见写法：
 #   args.get("k") / args["k"] / args.pop("k") / args.setdefault("k")

@@ -9,7 +9,7 @@
   2. 扫描器能抓住人工构造的四类结构问题：
      空描述 / required 未声明 / minimum>maximum / 非法类型。
   3. 扫描器能报出 handler 读取未声明参数、声明但未读取（drift 线索）。
-  4. 不误报：`**args` 整体转发、arm_manual 网关参数、`_helper(args)`。
+  4. 不误报：`**args` 整体转发、网关参数（arm_manual / confirm_token）、`_helper(args)`。
 
 不联网、不调用任何工具。
 """
@@ -112,6 +112,30 @@ def test_scanner_does_not_flag_wholesale_forwarding_or_gate_args():
               forwards)
     report = atc.scan_registry(reg)
     assert report["drift_count"] == 0
+
+
+def test_scanner_treats_confirm_token_as_a_gate_arg():
+    """confirm_token 由 ToolCallGate 统一校验，handler 不读它不算漂移。
+
+    2026-11-09：真实注册表里 5 个写工具把整个 args 交给
+    resolve_write_authorization("tool", args)，token 在门里被消费；
+    扫描器只认 args 作首个形参的整体转发，于是误报「声明但未读取」。
+    白名单化之后仍要守住：普通参数漏读照样要报。
+    """
+    reg = ToolRegistry()
+
+    def gated(args):
+        return str(args.get("iq"))
+
+    _register(reg, "gated_write", "发射类写工具",
+              {"iq": {"type": "string"},
+               "confirm_token": {"type": "string"},
+               "unused_plain": {"type": "string"}}, gated)
+    report = atc.scan_registry(reg)
+    issues = " | ".join(item["issue"] for item in report["drift"]
+                        if item["tool"] == "gated_write")
+    assert "unused_plain" in issues, "普通参数漏读必须仍被报出"
+    assert "confirm_token" not in issues, "网关参数不该被当成漂移"
 
 
 if __name__ == "__main__":

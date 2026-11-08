@@ -6,6 +6,7 @@
     python3 tools/evidence/run_all.py --json          # 机器可读
     python3 tools/evidence/run_all.py --groups ota,architecture
     python3 tools/evidence/run_all.py --online        # 额外验证 OSM 在线搜索
+    python3 tools/evidence/run_all.py --with-tests     # 额外重跑两条完整测试套件
 
 为什么每组单开一个子进程：Qt 一个进程只该有一个 QApplication，而且一组
 崩了不该把其余组的证据一起带走。子进程各自隔离 HOME，互不污染。
@@ -45,7 +46,14 @@ GROUPS = [
     ("ui_entries", "星象仪入口：找星 / 时间 / 存图 / 图层 / 极限星等",
      "ui_entries.py", False),
     ("location_projection", "地点面板 + 四种投影", "location_projection.py", True),
+    ("test_suites", "测试基线：内核 / 桌面两条 lane 各自单独跑",
+     "test_suites.py", False),
 ]
+
+#: 不需要 PySide6 的组（没装 Qt 的机器也能跑完这些）
+NO_QT_GROUPS = {"architecture", "test_suites"}
+#: 默认不跑的组：完整测试套件要十几分钟，会拖垮证据包的 ~90 秒
+OPTIONAL_GROUPS = {"test_suites"}
 
 OTA_SCRIPT = REPO_ROOT / "tools" / "ota_demo" / "ota_demo.py"
 GROUP_TIMEOUT_S = 900
@@ -161,12 +169,20 @@ def main(argv=None) -> int:
                     help="逗号分隔，只跑指定组（如 ota,first_open）")
     ap.add_argument("--online", action="store_true",
                     help="允许联网组跑在线验证（OSM 搜索）")
+    ap.add_argument("--with-tests", action="store_true",
+                    help="额外重跑 mbdsdr_ai/tests 与 tests 两条完整测试套件")
     ap.add_argument("--list", action="store_true", help="列出组名后退出")
     args = ap.parse_args(argv)
 
     if args.list:
         for gid, title, _, online_ok in GROUPS:
-            print(f"{gid:22s} {title}{'  [--online]' if online_ok else ''}")
+            marks = []
+            if online_ok:
+                marks.append("--online")
+            if gid in OPTIONAL_GROUPS:
+                marks.append("--with-tests")
+            suffix = ("  [" + ", ".join(marks) + "]") if marks else ""
+            print(f"{gid:22s} {title}{suffix}")
         return 0
 
     if not (REPO_ROOT / "mbdsdr_ai").is_dir():
@@ -188,11 +204,15 @@ def main(argv=None) -> int:
     started = time.time()
     results: List[Dict[str, Any]] = []
 
+    include_tests = bool(args.with_tests or
+                         (wanted is not None and "test_suites" in wanted))
     for gid, title, script, online_ok in GROUPS:
         if wanted is not None and gid not in wanted:
             continue
+        if gid in OPTIONAL_GROUPS and not include_tests:
+            continue
         t0 = time.time()
-        if script is not None and not qt_ok:
+        if script is not None and gid not in NO_QT_GROUPS and not qt_ok:
             res = _skipped(
                 gid, title,
                 "本机缺 PySide6 —— 该组需要 Qt 渲染界面，本次没有跑"
@@ -227,6 +247,7 @@ def main(argv=None) -> int:
         "repo": str(REPO_ROOT),
         "out_dir": str(out_dir),
         "online_allowed": bool(args.online),
+        "test_suites_enabled": include_tests,
         "host": host_info(),
         "groups": [{k: r.get(k) for k in
                     ("id", "title", "status", "facts", "frames", "notes",

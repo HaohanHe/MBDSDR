@@ -9,7 +9,7 @@
 > 指纹 = sha256(`文档\0断言原文`)[:12]；断言原文改动即指纹变化 = 按新增判红。
 > 在途未提交的 docs 改动不享本白名单——那正是门禁要拦的「修改后无证据」。
 
-<!-- waived-total: 57 -->
+<!-- waived-total: 56 -->
 
 建表口径：HEAD 断言 144 条 = 可证实 2 + 文档过期 46 + 无 hash 96；白名单只覆盖后两类。
 
@@ -23,7 +23,6 @@
 | 6 | docs/COORDINATION.md | ad3e2bc78eab | 扫描器自指命中（HEAD 干净，`git grep` 无命中）；本条已改写为不引字 | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 7 | docs/COORDINATION.md | 8ebc6df4d0a2 | 2. ~~tests/(B) `test_identity_redline` 误伤~~ **已修（fe43c74，WorkBuddy）**—— | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 8 | docs/COORDINATION.md | b1f0ec5d9d1f | 现予以更正）： | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
-| 10 | docs/COORDINATION.md | 8349229e45f2 | ① Gardner 修复版实测（代码已改默认关）② 擦除辅助 RS（2e+f≤32， | 未写 commit hash，无法用 git 复核；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 12 | docs/COORDINATION.md | a813e6a71653 | 同样判红**）。**已修 `f0f68cc6`**（`mw(qapp, isolated_profile)`）， | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 13 | docs/COORDINATION.md | 67b142f0c7fa | - 2026-11-05（接续线，**给操作逻辑线**）：PTT 置灰问题已修 `9b803d07`，按钮状态可复位；复跑 | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |
 | 14 | docs/COORDINATION.md | 8d5bd45fa3b9 | - 2026-11-05（硬编码与参数治理线，裁定落地 `12a43a0`）：三轮裁定已落地两条、 | 有 hash 但缺 <path>:<line>，无法定位改动；本轮只锁增量，存量由该文档 owner 逐条补 hash 或删断言 |

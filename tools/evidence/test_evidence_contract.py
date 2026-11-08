@@ -52,6 +52,31 @@ def test_ota_group_is_in_the_bundle():
     assert run_all.OTA_SCRIPT.is_file(), run_all.OTA_SCRIPT
 
 
+def test_test_suites_group_is_optional_and_qt_free():
+    """两条完整套件要十几分钟：默认不许跑，且没装 Qt 的机器也能跑。"""
+    ids = [g[0] for g in run_all.GROUPS]
+    assert "test_suites" in ids
+    assert "test_suites" in run_all.OPTIONAL_GROUPS
+    assert "test_suites" in run_all.NO_QT_GROUPS
+    assert (HERE / "test_suites.py").is_file()
+
+
+def test_default_bundle_skips_test_suites_but_flag_includes_it(tmp_path, monkeypatch):
+    seen = []
+
+    def fake(gid, title, script, out_dir, online):
+        seen.append(gid)
+        return common.new_result(gid, title)
+
+    monkeypatch.setattr(run_all, "_run_group", fake)
+    assert run_all.main(["--out", str(tmp_path)]) == 0
+    assert "test_suites" not in seen, "默认证据包不该被完整测试套件拖慢"
+
+    seen.clear()
+    assert run_all.main(["--out", str(tmp_path), "--with-tests"]) == 0
+    assert "test_suites" in seen, "--with-tests 必须真的把测试基线组加进来"
+
+
 def test_result_schema_has_required_keys():
     res = common.new_result("demo", "演示组")
     for key in ("schema", "id", "title", "status", "facts", "frames",

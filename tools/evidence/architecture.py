@@ -137,12 +137,13 @@ def run(args) -> dict:
     toolchain = which_all(["g++", "qmake6", "cmake"])
     res["facts"]["cpp_toolchain"] = {
         **toolchain,
-        "note": "任一缺失则 C++ 侧改动无法本地验证；证据单必须标 not_verified",
+        "note": ("只反映 PATH 上有没有工具链：工具链本体可能装了但没进 PATH。"
+                 "因此结论一律写「未做本地编译验证」，不写「本机没有工具链」"),
     }
     if not toolchain.get("g++"):
         res["not_verified"].append(
-            "C++ 桌面端：本机无 g++/qmake6，所有 C++ 结论来自源码审计，"
-            "未经编译与运行验证")
+            "C++ 桌面端：g++/qmake6 不在 PATH（工具链本体可能已安装但未配置），"
+            "所有 C++ 结论来自源码审计，未经编译与运行验证")
 
     res["facts"]["host"] = host_info()
     return res
