@@ -241,7 +241,7 @@ def test_all_sky_mode_entry_and_isolation():
         pro_fov = v.view_state.fov_deg
         v.set_all_sky_mode(True)
         assert v.all_sky_active
-        assert isinstance(v.projection, StereographicProjection)
+        assert v.projection.name == "stereographic"
         assert v.view_state.fov_deg == pytest.approx(v.ALL_SKY_FOV_DEG)
         assert v.view_state.center_az == pytest.approx(123.0)
         assert v.view_state.center_alt == pytest.approx(20.0)
@@ -250,7 +250,7 @@ def test_all_sky_mode_entry_and_isolation():
 
         v.set_all_sky_mode(False)
         assert not v.all_sky_active
-        assert isinstance(v.projection, PerspectiveProjection)
+        assert v.projection.name == "perspective"
         assert v.view_state.fov_deg == pytest.approx(pro_fov)
         assert v.view_state.center_az == pytest.approx(123.0)
         assert v.view_state.center_alt == pytest.approx(20.0)
@@ -266,12 +266,12 @@ def test_key_a_toggles_and_escape_exits_only_all_sky():
         v.all_sky_mode_changed.connect(events.append)
         v.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_A, Qt.NoModifier))
         assert v.all_sky_active
-        assert isinstance(v.projection, StereographicProjection)
+        assert v.projection.name == "stereographic"
         assert events == [True]
         v.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Escape,
                                   Qt.NoModifier))
         assert not v.all_sky_active
-        assert isinstance(v.projection, PerspectiveProjection)
+        assert v.projection.name == "perspective"
         assert events == [True, False]
         # 已退出后再按 Esc：本视图不得再抢事件/再发切换信号
         v.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Escape,

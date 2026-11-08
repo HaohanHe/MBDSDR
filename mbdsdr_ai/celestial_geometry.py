@@ -675,6 +675,20 @@ class OrthographicProjection(_BaseProjection):
             return np.array([x * s, y * s, 0.0])
         return np.array([x, y, -math.sqrt(1.0 - dq)])
 
+    def screen_scale(self, min_dim_px: float, fov_deg: float) -> float:
+        """半视场角 -> min_dim/2 像素。
+
+        正射的归一化半径 = sin(离轴角)，不是弧度（基类默认按等距方位算，
+        直接用会把正射的星点整体压缩、边缘挤成一条）。视场边缘 θ=fov/2，
+        故 scale = (min_dim/2) / sin(fov/2)；fov≥180° 时 sin=1，
+        圆盘半径恰好是 min_dim/2。
+        """
+        if min_dim_px <= 0:
+            return 1.0
+        fov = min(max(float(fov_deg), 1e-6), 179.999)
+        half = min(90.0, fov / 2.0)
+        return (min_dim_px * 0.5) / max(1e-9, math.sin(deg2rad(half)))
+
 
 class AzimuthalEquidistantProjection(_BaseProjection):
     """等距方位投影 (Azimuthal Equidistant, 俗称鱼眼)。
@@ -771,6 +785,9 @@ def make_projection(name: str) -> _BaseProjection:
     table = {
         "stereographic": StereographicProjection,
         "orthographic": OrthographicProjection,
+        # 标准名 azimuthal_equidistant（类名同源）；旧表键少了 "al"，
+        # 用标准名反而找不到 —— 两个都留，老调用不受影响。
+        "azimuthalequidistant": AzimuthalEquidistantProjection,
         "azimuthequidistant": AzimuthalEquidistantProjection,
         "fisheye": AzimuthalEquidistantProjection,
         "perspective": PerspectiveProjection,
@@ -779,6 +796,38 @@ def make_projection(name: str) -> _BaseProjection:
     if name not in table:
         raise ValueError(f"未知投影: {name!r}; 可选: {list(table.keys())}")
     return table[name]()
+
+
+#: 投影的中文名与"适合看什么"。给 UI 用，避免界面自己另写一份说法。
+#: ``fov_max`` 只是该投影的**渲染建议上限**，视图侧还会按 ViewState 再夹一次。
+PROJECTION_INFO = {
+    "perspective": {
+        "zh": "透视",
+        "hint": "窄视场看月面 / 行星，中心无畸变",
+        "fov_max": 120.0,
+    },
+    "stereographic": {
+        "zh": "球极",
+        "hint": "认星座：形状保角，大圆成弧",
+        "fov_max": 160.0,
+    },
+    "orthographic": {
+        "zh": "正射",
+        "hint": "像看天球仪：一次只半个天球",
+        "fov_max": 179.999,
+    },
+    "azimuthal_equidistant": {
+        "zh": "等距方位",
+        "hint": "鱼眼：量角距最准，边缘拉伸大",
+        "fov_max": 360.0,
+    },
+}
+
+
+def projection_names() -> tuple[str, ...]:
+    """UI 下拉用的稳定顺序（先常用后特殊）。"""
+    return ("perspective", "stereographic", "orthographic",
+            "azimuthal_equidistant")
 
 
 # ---------------------------------------------------------------------------

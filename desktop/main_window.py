@@ -2327,6 +2327,26 @@ class MainWindow(QMainWindow):
             self._open_location_panel)
         strip_lay.addWidget(self._planetarium_location_btn, 0,
                             Qt.AlignHCenter)
+        # 「投影」：Stellarium ViewDialog 的投影选择。两种形态各自记忆，
+        # 切完立刻重绘；FOV 上限跟随投影（透视 120 / 球极 160 / 正射 180）。
+        from mbdsdr_ai.celestial_geometry import PROJECTION_INFO, projection_names
+        self._planetarium_proj_combo = QComboBox(strip)
+        self._planetarium_proj_combo.setObjectName("planetariumProjection")
+        self._planetarium_proj_combo.setToolTip(
+            "投影方式（切换立刻生效）：透视看窄视场、球极认星座、正射像天球仪、"
+            "等距方位量角距")
+        for _nm in projection_names():
+            _info = PROJECTION_INFO.get(_nm, {})
+            self._planetarium_proj_combo.addItem(
+                str(_info.get("zh", _nm)), _nm)
+            self._planetarium_proj_combo.setItemData(
+                self._planetarium_proj_combo.count() - 1,
+                str(_info.get("hint", "")), Qt.ToolTipRole)
+        self._planetarium_proj_combo.setMinimumHeight(28)
+        self._planetarium_proj_combo.setStyleSheet(_act_css)
+        self._planetarium_proj_combo.currentIndexChanged.connect(
+            self._on_projection_changed)
+        strip_lay.addWidget(self._planetarium_proj_combo, 0, Qt.AlignHCenter)
         # 「☾ 今夜」：Stellarium AstroCalc 的玩法，摁一下切到真实日落后
         # （民用暮光终 / 太阳 -6°），不是写死钟点、也不是伪造星空。
         self._planetarium_tonight_btn = QPushButton("今夜", strip)
@@ -2860,6 +2880,7 @@ class MainWindow(QMainWindow):
         self._position_planetarium_overlay()
         self._planetarium_strip.show()
         self._sync_fullscreen_btn()
+        self._sync_projection_combo()
         # 窗口已显示才联动全屏；启动恢复阶段窗口未 show，交给正常 show 流程。
         if self.isVisible() and not self.isFullScreen():
             self.showFullScreen()
@@ -10283,6 +10304,44 @@ class MainWindow(QMainWindow):
             if str(tab.tabBar().tabData(i) or "") == "settings":
                 tab.setCurrentIndex(i)
                 return
+
+    def _sync_projection_combo(self) -> None:
+        """把下拉对齐到当前生效投影（不触发信号）。"""
+        combo = getattr(self, "_planetarium_proj_combo", None)
+        sv = getattr(self, "sky_view", None)
+        if combo is None or sv is None:
+            return
+        try:
+            cur = sv.projection_name
+        except AttributeError:
+            return
+        idx = combo.findData(cur)
+        if idx >= 0 and idx != combo.currentIndex():
+            combo.blockSignals(True)
+            combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+
+    def _on_projection_changed(self, _index: int = -1) -> None:
+        """下拉换投影 → 天空视图（同一份换算核，全图一起换）。"""
+        combo = getattr(self, "_planetarium_proj_combo", None)
+        sv = getattr(self, "sky_view", None)
+        if combo is None or sv is None:
+            return
+        name = combo.currentData()
+        if not name:
+            return
+        try:
+            sv.set_projection(str(name))
+        except (ValueError, RuntimeError, AttributeError):
+            self._sync_projection_combo()
+            return
+        from mbdsdr_ai.celestial_geometry import PROJECTION_INFO
+        zh = str(PROJECTION_INFO.get(str(name), {}).get("zh", name))
+        try:
+            self.statusBar().showMessage(
+                f"投影：{zh}（FOV 上限 {sv.view_state.max_fov:g}°）", MSG_NORMAL)
+        except RuntimeError:
+            pass
 
     def _open_location_panel(self) -> None:
         """打开「选地点」面板：搜索城市 / 地图点选 / 看当前来源。

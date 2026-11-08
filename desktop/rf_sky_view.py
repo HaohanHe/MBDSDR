@@ -93,7 +93,10 @@ from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
 from mbdsdr_ai.celestial_geometry import (
     AzimuthalEquidistantProjection,
     PerspectiveProjection,
+    PROJECTION_INFO,
     StereographicProjection,
+    make_projection,
+    projection_names,
     GroundStation,
     gmst,
     vec_from_radec,
@@ -1795,6 +1798,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.view_state = ViewState(center_alt=90.0, fov_deg=120.0,
                                     min_fov=0.5, max_fov=120.0)
         self.projection = PerspectiveProjection()
+        # 两种模式各自记住投影名（用户选了球极看星座，进全天再回来不该被改掉）
+        self._pro_projection_name = "perspective"
+        self._all_sky_projection_name = "stereographic"
         # 全天模式：独立 ViewState（隔离专业模式的指向/FOV）+ 立体投影。
         # 主视场仍是透视 120° 上限，只有该模式内部允许到 160°。
         self.ALL_SKY_FOV_DEG = 160.0
@@ -1802,7 +1808,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._all_sky_state = ViewState(
             center_alt=90.0, fov_deg=self.ALL_SKY_FOV_DEG,
             min_fov=0.5, max_fov=self.ALL_SKY_FOV_DEG)
-        self._all_sky_projection = StereographicProjection()
+        self._all_sky_projection = make_projection(
+            self._all_sky_projection_name)
         self._pro_state_backup = None
         self._pro_projection_backup = None
         self.setFocusPolicy(Qt.StrongFocus)
@@ -3878,6 +3885,50 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     @property
     def all_sky_active(self) -> bool:
         return self._all_sky_active
+
+    @property
+    def projection_name(self) -> str:
+        """当前生效的投影名（专业/全天各存一份，取正在用的那份）。"""
+        return (self._all_sky_projection_name if self._all_sky_active
+                else self._pro_projection_name)
+
+    def set_projection(self, name: str, all_sky: Optional[bool] = None) -> bool:
+        """切换投影；两种模式各自记忆，互不覆盖。
+
+        - ``all_sky=None`` → 改当前生效的那一模式；
+        - 未知名字抛 ``ValueError``（与 ``set_layer`` 同一口径：宁可当场炸，
+          也不留一个"点了没变"的假开关）；
+        - FOV 上限跟随投影的 ``fov_max``（透视 120°、球极 160°、正射 180°、
+          等距方位 180°），并当场夹住当前 FOV，避免切完还在一个该投影
+          表示不了的角度上。
+        """
+        inst = make_projection(name)          # 未知名字在这里抛 ValueError
+        target_all = self._all_sky_active if all_sky is None else bool(all_sky)
+        info = PROJECTION_INFO.get(inst.name, {})
+        fov_max = float(info.get("fov_max") or 180.0)
+        # 等距方位名义 360°，但绘制层只承诺到 180°（其余是不可见半球背面），
+        # 这里按承诺值夹，不宣称画面里能看见背后。
+        fov_max = min(fov_max, 180.0)
+
+        if target_all:
+            self._all_sky_projection = inst
+            self._all_sky_projection_name = inst.name
+            if self._all_sky_active:
+                self.projection = inst
+                self.view_state.max_fov = min(self.ALL_SKY_FOV_DEG, fov_max)
+        else:
+            self.projection = inst
+            self._pro_projection_name = inst.name
+            if not self._all_sky_active:
+                self.view_state.max_fov = fov_max
+        try:
+            self.view_state._clamp()
+        except AttributeError:
+            pass
+        self._proj = self.projection
+        self._cancel_goto_anim()
+        self.update()
+        return True
 
     def set_all_sky_mode(self, enabled: bool) -> None:
         """切换全天模式（立体投影，FOV 上限 160°）。
