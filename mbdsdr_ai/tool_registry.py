@@ -18,6 +18,7 @@ import fnmatch
 import json
 import math
 import re
+import threading
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -564,6 +565,11 @@ class ToolRegistry:
         self.call_log: List[ToolCallLog] = []
         self.max_log_entries = 200
         self._mcp_client = None  # MCP 客户端引用（运行时设置）
+        # Sprint 5：并发执行（parallel_safe 工具走 ThreadPoolExecutor）时，多
+        # worker 会同时 _log_call 写 call_log——append 虽 GIL 原子，但「超长即
+        # 重切片赋值」是读改写复合操作，裸跑会丢条目/瞬态不一致。用锁串行化这一
+        # 段共享写。handler 自身的线程安全由 register(parallel_safe=True) 背书。
+        self._call_log_lock = threading.Lock()
 
     def _run_handler_with_timeout(self, handler: Callable, args: Dict[str, Any],
                                   timeout_s: float):
@@ -606,6 +612,7 @@ class ToolRegistry:
         write: Optional[bool] = None,
         description_i18n: Optional[Dict[str, str]] = None,
         timeout_s: Optional[float] = None,
+        parallel_safe: bool = False,
     ):
         """注册一个工具。
 
@@ -616,6 +623,13 @@ class ToolRegistry:
         /``get_tool_definitions`` 传 language 时优先于 description。
         timeout_s：该工具的执行超时（秒），覆盖 registry 级 default_timeout_s。
         None = 用 default_timeout_s；显式 <=0 = 关闭超时（内联执行）。
+        parallel_safe：该工具是否可与同轮其它工具**并发执行**（Sprint 5）。
+        默认 **False**（opt-in，对齐 timeout_s 的零回归默认）：仅当一轮内
+        tool_calls>1 且**全部**标记 parallel_safe 且未取消时，agent 才走
+        ThreadPoolExecutor 并发（保序回收）；否则一律串行（既有行为）。
+        只应给「无共享硬件/无全局副作用」的工具置 True——纯计算或独立子进程
+        类（satdump/minimodem/rtklib/dsdcc 等 I/O 密集外部进程）；SDR 硬件类
+        工具单一设备非线程安全，必须保持 False。
         """
         definition = {
             "type": "function",
@@ -635,12 +649,22 @@ class ToolRegistry:
             "write": bool(write),
             "description_i18n": dict(description_i18n) if description_i18n else {},
             "timeout_s": timeout_s,
+            "parallel_safe": bool(parallel_safe),
         }
 
     def is_write_tool(self, name: str) -> bool:
         """该注册名是否写工具（未注册返回 False）。"""
         tool = self.tools.get(name)
         return bool(tool.get("write")) if tool else False
+
+    def is_parallel_safe(self, name: str) -> bool:
+        """该注册名是否可与同轮其它工具并发执行（未注册返回 False）。
+
+        Sprint 5：agent 工具循环据此决定串行/并发。默认 False（串行），
+        仅显式 register(parallel_safe=True) 的工具才可并发。
+        """
+        tool = self.tools.get(name)
+        return bool(tool.get("parallel_safe")) if tool else False
 
     def register_mcp_tools(self, mcp_tools: List[Dict[str, Any]], mcp_call_handler: Callable):
         """
@@ -1173,7 +1197,7 @@ class ToolRegistry:
     # ── 调用日志 ────────────────────────────────────────
 
     def _log_call(self, result: ToolResult):
-        """记录工具调用日志。"""
+        """记录工具调用日志（并发安全：Sprint 5 并行执行时多 worker 同时写）。"""
         log = ToolCallLog(
             timestamp=time.time(),
             tool_name=result.tool_name,
@@ -1183,9 +1207,10 @@ class ToolRegistry:
             error=result.error,
             content_preview=result.content[:200],
         )
-        self.call_log.append(log)
-        if len(self.call_log) > self.max_log_entries:
-            self.call_log = self.call_log[-self.max_log_entries:]
+        with self._call_log_lock:
+            self.call_log.append(log)
+            if len(self.call_log) > self.max_log_entries:
+                self.call_log = self.call_log[-self.max_log_entries:]
 
     def get_call_log(self, limit: int = 20, tool_name: str = None) -> List[Dict[str, Any]]:
         """获取工具调用日志。"""

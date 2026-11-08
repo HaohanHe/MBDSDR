@@ -23,6 +23,7 @@ import os
 import time
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 
 from .config import AgentConfig
@@ -3886,6 +3887,154 @@ class MBDSDRAgent:
             self._cancel_event.clear()
             self._chat_lock.release()
 
+    def _exec_one_tool(self, tc: Dict[str, Any], tc_id: str):
+        """执行单个工具（含 retryable 重试与取消安全点）。返回 (result, elapsed_ms)。
+
+        Sprint 5：串行与并行分支共用此执行核，保证语义逐字节一致。
+        **线程安全**：只读 tool_registry / _cancel_pending，只创建本地 ToolResult，
+        不碰任何跨调用共享可变状态——故可放进 ThreadPoolExecutor 并发跑（仅对
+        is_parallel_safe 的工具）。registry 侧 call_log 的并发写由
+        ToolRegistry._call_log_lock 保护；handler 自身线程安全由 parallel_safe 背书。
+        """
+        def _safe_tool_call(_tc=tc):
+            try:
+                return self.tool_registry.call_from_model(_tc)
+            except Exception as _e:
+                return ToolResult(
+                    success=False,
+                    content=f"工具执行异常: {type(_e).__name__}: {_e}",
+                    error=str(_e),
+                )
+
+        tool_start = time.time()
+        result = _safe_tool_call()
+        for _attempt in range(2):  # 最多再重试 2 次
+            if getattr(result, "success", False):
+                break
+            err_code = getattr(result, "error", "") or ""
+            if not err_code or not retryable(err_code):
+                break  # 无码或不可重试：交给模型改，不空转
+            if self._cancel_pending():
+                break
+            time.sleep(0.4)
+            if self._cancel_pending():
+                break
+            result = _safe_tool_call()
+        return result, (time.time() - tool_start) * 1000.0
+
+    def _finalize_one_tool(self, tool_name: str, tc_id: str, fn: Dict[str, Any],
+                           result, round_num: int,
+                           all_tool_results: List[Dict[str, Any]]) -> None:
+        """收尾单个工具结果：登记/状态捕获/重复守卫/回写上下文/双通道日志。
+
+        Sprint 5：**必须在主线程串行调用**——碰 context_manager、repeat 守卫、
+        _capture_tool_state 等跨调用共享状态，并发会乱序/竞态。并行分支先在 worker
+        线程跑完 _exec_one_tool，再按 tool_call 原序逐个 finalize，因此上下文链与
+        日志序与串行逐字节一致。
+        """
+        all_tool_results.append(result.to_dict())
+
+        # P7.3：把状态型工具真实生效的参数登记为跨压缩状态
+        if getattr(result, "success", False):
+            self._capture_tool_state(tool_name, result)
+
+        # repeat-call guard：检测连续相同工具+参数，递增提醒
+        try:
+            canon = json.dumps(fn.get("arguments", ""), sort_keys=True, ensure_ascii=False)
+        except Exception:
+            canon = str(fn.get("arguments", ""))
+        key = tool_name + "|" + canon
+        if key == self._repeat_key:
+            self._repeat_count += 1
+        else:
+            self._repeat_key = key
+            self._repeat_count = 1
+        if self._repeat_count in (3, 5, 8):
+            nudge = ("[guard] 你已连续用相同参数调用 %s 第 %d 次。若任务未完成，请换方法或换参数，"
+                     "不要重复同一调用；若证据已足够就给最终答案。" % (tool_name, self._repeat_count))
+            result.content = nudge + "\n---\n" + result.content
+
+        # 添加工具结果到上下文（_tool_result_to_model_content 内含 DSH nextStep 注入）
+        self.context_manager.add_tool_message(
+            tool_call_id=tc_id,
+            content=_tool_result_to_model_content(result),
+            tool_name=tool_name,
+        )
+        self._slog("tool_result", tool=tool_name, tool_call_id=tc_id,
+                   success=bool(getattr(result, "success", False)),
+                   error=str(getattr(result, "error", "") or ""),
+                   latency_ms=round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
+                   round=round_num + 1)
+        _ok = bool(getattr(result, "success", False))
+        self._hook(EventType.AGENT_TOOL_RESULT, tool=tool_name,
+                   tool_call_id=tc_id, ok=_ok,
+                   error=str(getattr(result, "error", "") or ""),
+                   outcome=("executed" if _ok else "error"),
+                   latency_ms=round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
+                   round=round_num + 1)
+
+    def _run_tool_batch_parallel(self, tool_calls: List[Dict[str, Any]], round_num: int,
+                                 all_tool_calls: List[Dict[str, Any]],
+                                 all_tool_results: List[Dict[str, Any]]) -> float:
+        """Sprint 5：并发执行同一轮内全部 parallel_safe 的工具，保序回收。
+
+        返回本轮工具阶段的**墙钟**耗时（ms）。三段式，共享状态全留在主线程：
+        1) 预阶段（主线程串行）：预分配 tc_id、登记 all_tool_calls、落 tool_call
+           双通道日志——顺序确定，与串行一致。
+        2) 执行阶段（ThreadPoolExecutor 并发）：每 worker 跑 _exec_one_tool（只读
+           registry，线程安全）；按 tool_call 原序回收 future，结果与输入一一对应。
+        3) 后阶段（主线程串行）：按原序逐个 _finalize_one_tool——上下文链、repeat
+           守卫、_capture_tool_state、tool_result 日志全在主线程，与串行逐字节一致。
+        """
+        n = len(tool_calls)
+        # 1) 预阶段：tc_id 预分配（并行下不能依赖循环内时间戳顺序）
+        tc_ids: List[str] = []
+        for i, tc in enumerate(tool_calls):
+            fn = tc.get("function", {})
+            tool_name = fn.get("name", "")
+            all_tool_calls.append({"name": tool_name,
+                                   "arguments": fn.get("arguments", "")})
+            tc_id = tc.get("id", "") or f"call_{int(time.time()*1000)}_p{i}"
+            tc["id"] = tc_id
+            tc_ids.append(tc_id)
+            self._slog("tool_call", tool=tool_name, tool_call_id=tc_id,
+                       arguments=fn.get("arguments", ""), round=round_num + 1,
+                       parallel=True)
+            self._hook(EventType.AGENT_TOOL_CALL, tool=tool_name,
+                       tool_call_id=tc_id, arguments=fn.get("arguments", ""),
+                       round=round_num + 1, parallel=True)
+
+        # 2) 执行阶段：并发跑，按原序回收
+        phase_start = time.time()
+        with ThreadPoolExecutor(max_workers=n) as ex:
+            futures = [ex.submit(self._exec_one_tool, tc, tc_ids[i])
+                       for i, tc in enumerate(tool_calls)]
+            outcomes = []
+            for i, fut in enumerate(futures):
+                try:
+                    outcomes.append(fut.result())
+                except Exception as _e:
+                    # 执行核按构造吞掉一切异常并返回结构化失败；真到这里说明
+                    # _exec_one_tool 自身有 bug——如实降级为失败结果，绝不让单个
+                    # worker 的意外掀翻整轮对话（诚实失败，不伪装成功）。
+                    _fn = tool_calls[i].get("function", {})
+                    outcomes.append((ToolResult(
+                        success=False,
+                        content=f"工具并发执行异常: {type(_e).__name__}: {_e}",
+                        tool_name=_fn.get("name", ""),
+                        error="parallel_exec_error",
+                    ), 0.0))
+        wall_ms = (time.time() - phase_start) * 1000.0
+
+        # 3) 后阶段：主线程按原序串行收尾
+        for i, tc in enumerate(tool_calls):
+            fn = tc.get("function", {})
+            tool_name = fn.get("name", "")
+            result, _elapsed = outcomes[i]
+            self._finalize_one_tool(tool_name, tc_ids[i], fn, result,
+                                    round_num, all_tool_results)
+        return wall_ms
+
     def _chat_impl(self, user_input: str, max_tool_rounds: int = 10,
                    on_delta=None) -> Dict[str, Any]:
         """
@@ -4138,110 +4287,68 @@ class MBDSDRAgent:
                        model_latency_ms=round(float(model_latency_ms), 1))
 
             tool_ms = 0.0
-            for i, tc in enumerate(tool_calls):
-                fn = tc.get("function", {})
-                tool_name = fn.get("name", "")
-                all_tool_calls.append({"name": tool_name, "arguments": fn.get("arguments", "")})
+            n_tc = len(tool_calls)
 
-                # 确保 tool_call_id 非空（文本解析的工具调用可能缺 id）
-                tc_id = tc.get("id", "") or f"call_{int(time.time()*1000)}_{i}"
-                tc["id"] = tc_id
-                self._slog("tool_call", tool=tool_name, tool_call_id=tc_id,
-                           arguments=fn.get("arguments", ""), round=round_num + 1)
-                self._hook(EventType.AGENT_TOOL_CALL, tool=tool_name,
-                           tool_call_id=tc_id, arguments=fn.get("arguments", ""),
-                           round=round_num + 1)
+            # Sprint 5：本批是否可并发——>1 个、全部 parallel_safe、且当前未取消。
+            # parallel_safe 默认 False ⇒ 恒走串行（既有行为，零回归）；仅当显式标记
+            # 的纯计算/独立子进程类工具同轮 multiple 时才并发（保序回收，见
+            # _run_tool_batch_parallel）。SDR 硬件/写工具单一设备非线程安全，保持 False。
+            can_parallel = (
+                n_tc > 1
+                and not self._cancel_pending()
+                and all(self.tool_registry.is_parallel_safe(
+                    tc.get("function", {}).get("name", "")) for tc in tool_calls)
+            )
 
-                # P7.4：取消后不再执行剩余工具，但仍为每个 tool_call_id 写回
-                # 一条「已取消」结果，保证 assistant(tool_calls) ↔ tool 链完整
-                # （否则历史无法再作为合法请求发给模型）。
+            if can_parallel:
+                tool_ms = self._run_tool_batch_parallel(
+                    tool_calls, round_num, all_tool_calls, all_tool_results)
+                # 并发批已整体派发，结果均为真实执行；若期间收到取消，仍如实写回
+                # 全部结果（保证 assistant(tool_calls)↔tool 链完整），再于轮末停循环。
                 if self._cancel_pending():
                     cancelled = True
-                    cancelled_content = "[已取消] 用户中途取消，该工具未执行。"
-                    all_tool_results.append(ToolResult(
-                        success=False, content=cancelled_content,
-                        tool_name=tool_name,
-                        error=CANCEL_ERROR).to_dict())
-                    self.context_manager.add_tool_message(
-                        tool_call_id=tc_id, content=cancelled_content,
-                        tool_name=tool_name)
-                    self._slog("tool_result", tool=tool_name, tool_call_id=tc_id,
-                               success=False, error=CANCEL_ERROR,
-                               cancelled=True, round=round_num + 1)
-                    self._hook(EventType.AGENT_TOOL_RESULT, tool=tool_name,
-                               tool_call_id=tc_id, ok=False, error=CANCEL_ERROR,
-                               outcome="cancelled", round=round_num + 1)
-                    continue
+            else:
+                for i, tc in enumerate(tool_calls):
+                    fn = tc.get("function", {})
+                    tool_name = fn.get("name", "")
+                    all_tool_calls.append({"name": tool_name, "arguments": fn.get("arguments", "")})
 
-                # 工具执行安全调用：异常时返回错误给 LLM 而非卡死主循环
-                def _safe_tool_call(_tc=tc):
-                    try:
-                        return self.tool_registry.call_from_model(_tc)
-                    except Exception as _e:
-                        return ToolResult(
-                            success=False,
-                            content=f"工具执行异常: {type(_e).__name__}: {_e}",
-                            error=str(_e),
-                        )
+                    # 确保 tool_call_id 非空（文本解析的工具调用可能缺 id）
+                    tc_id = tc.get("id", "") or f"call_{int(time.time()*1000)}_{i}"
+                    tc["id"] = tc_id
+                    self._slog("tool_call", tool=tool_name, tool_call_id=tc_id,
+                               arguments=fn.get("arguments", ""), round=round_num + 1)
+                    self._hook(EventType.AGENT_TOOL_CALL, tool=tool_name,
+                               tool_call_id=tc_id, arguments=fn.get("arguments", ""),
+                               round=round_num + 1)
 
-                # 执行工具（可重试：按 error_catalog.retryable 决策，不猜子串）
-                tool_start = time.time()
-                result = _safe_tool_call()
-                for _attempt in range(2):  # 最多再重试 2 次
-                    if getattr(result, "success", False):
-                        break
-                    err_code = getattr(result, "error", "") or ""
-                    if not err_code or not retryable(err_code):
-                        break  # 无码或不可重试：交给模型改，不空转
+                    # P7.4：取消后不再执行剩余工具，但仍为每个 tool_call_id 写回
+                    # 一条「已取消」结果，保证 assistant(tool_calls) ↔ tool 链完整
+                    # （否则历史无法再作为合法请求发给模型）。
                     if self._cancel_pending():
-                        break
-                    time.sleep(0.4)
-                    if self._cancel_pending():
-                        break
-                    result = _safe_tool_call()
-                tool_ms += (time.time() - tool_start) * 1000.0
-                all_tool_results.append(result.to_dict())
+                        cancelled = True
+                        cancelled_content = "[已取消] 用户中途取消，该工具未执行。"
+                        all_tool_results.append(ToolResult(
+                            success=False, content=cancelled_content,
+                            tool_name=tool_name,
+                            error=CANCEL_ERROR).to_dict())
+                        self.context_manager.add_tool_message(
+                            tool_call_id=tc_id, content=cancelled_content,
+                            tool_name=tool_name)
+                        self._slog("tool_result", tool=tool_name, tool_call_id=tc_id,
+                                   success=False, error=CANCEL_ERROR,
+                                   cancelled=True, round=round_num + 1)
+                        self._hook(EventType.AGENT_TOOL_RESULT, tool=tool_name,
+                                   tool_call_id=tc_id, ok=False, error=CANCEL_ERROR,
+                                   outcome="cancelled", round=round_num + 1)
+                        continue
 
-                # P7.3：把状态型工具真实生效的参数登记为跨压缩状态
-                if getattr(result, "success", False):
-                    self._capture_tool_state(tool_name, result)
-
-                # repeat-call guard：检测连续相同工具+参数，递增提醒
-                try:
-                    canon = json.dumps(fn.get("arguments", ""), sort_keys=True, ensure_ascii=False)
-                except Exception:
-                    canon = str(fn.get("arguments", ""))
-                key = tool_name + "|" + canon
-                if key == self._repeat_key:
-                    self._repeat_count += 1
-                else:
-                    self._repeat_key = key
-                    self._repeat_count = 1
-                if self._repeat_count in (3, 5, 8):
-                    nudge = ("[guard] 你已连续用相同参数调用 %s 第 %d 次。若任务未完成，请换方法或换参数，"
-                             "不要重复同一调用；若证据已足够就给最终答案。" % (tool_name, self._repeat_count))
-                    result.content = nudge + "\n---\n" + result.content
-
-                # DSH nextStep 模式：失败/部分成功时把恢复指引注入模型可见消息，
-                # 让模型不必从错误码猜恢复路径（框架错误路径与 handler 均可提供）
-                # 添加工具结果到上下文
-                self.context_manager.add_tool_message(
-                    tool_call_id=tc_id,
-                    content=_tool_result_to_model_content(result),
-                    tool_name=tool_name,
-                )
-                self._slog("tool_result", tool=tool_name, tool_call_id=tc_id,
-                           success=bool(getattr(result, "success", False)),
-                           error=str(getattr(result, "error", "") or ""),
-                           latency_ms=round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
-                           round=round_num + 1)
-                _ok = bool(getattr(result, "success", False))
-                self._hook(EventType.AGENT_TOOL_RESULT, tool=tool_name,
-                           tool_call_id=tc_id, ok=_ok,
-                           error=str(getattr(result, "error", "") or ""),
-                           outcome=("executed" if _ok else "error"),
-                           latency_ms=round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
-                           round=round_num + 1)
+                    # Sprint 5：执行核（含重试/取消）抽到 _exec_one_tool，与并行分支共用
+                    result, _elapsed = self._exec_one_tool(tc, tc_id)
+                    tool_ms += _elapsed
+                    # 收尾（状态捕获/重复守卫/回写上下文/双通道日志）留在主线程串行
+                    self._finalize_one_tool(tool_name, tc_id, fn, result,
+                                            round_num, all_tool_results)
 
             # 继续循环，让模型看到工具结果后继续
             _emit_round(model_latency_ms, usage, len(tool_calls), tool_ms,
