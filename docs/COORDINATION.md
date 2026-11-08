@@ -45,6 +45,38 @@
 > **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
 > 的交接单视为**收件人改为本线**，按新单逐条销账。
 
+### 我这边（2026-11-08 下午：展示页最大化收口）
+
+用户 16:03「继续」，按队列第 0 条销账，主线是他反复点名的
+「中下面那么大空」「像真实桌面，放左边也可以挪右边」。
+
+- **中栏空态真 bug**：`_MapCanvas.paintEvent` 无飞机时提前 return，
+  连经纬网 / `WORLD_LAND_POLYGONS` 都不画 + 0 行表格仍占位。现在
+  地图照画（真实地理坐标，不画假点）、空态提示居中、空表格收起。
+- **启动专注态真 bug**：`DockLayoutManager.restore_state()` 的
+  `QMainWindow.restoreState(dock_state)` 在 `set_focus_mode()` 之后
+  把主工具栏 show 回来，用户存过 dock state 重启就看到「详细配置项
+  又冒出来」。启动恢复链末尾统一重套页面形态。修复前基线 -39px
+  （正好工具栏高），修复后几何不变、只剩色块漂移。
+- **摆位跨重启**：`floating/open_panels` 记弹出集合，FloatingPanel
+  记几何，启动按 tabData 还原且不覆盖用户拖过的坐标；关窗不清列表，
+  「全部归位」/⤶ 才清；关总开关收起但保留。不替用户决定默认布局。
+- **折叠态只留标题条**：`adjustSize()` 留一大坨黑压频谱，改显式钉高。
+- **队列④模型链路接编排**：配 Key 时工具调用经
+  `record_external_call()` 登记真实 Orchestrator 任务 + Hooks 事件，
+  与本地协商同一份事实源。
+- **队列①存量挂起销账**：独立复现脚本连建 4 窗口 18s 跑通 ⇒ 产品
+  链路正常，是 pytest 夹具每例新建窗口的资源累积（320s 长跑仍卡在
+  第 8 例）。`test_user_layouts.py` fixture 改 module scope，
+  **10 passed / 8.32s**，随机顺序 7.78s 全绿。
+
+验证：18 文件 **279 passed / 0 failed**；新增两个契约文件；4 张
+`adsb_empty_*` 基线按「仅颜色漂移」受控重定标，四档几何全部不变，
+spectrum/freq_readout 变化像素 0.0%。
+**not_verified**：真机设备仍不在位（COM4 无、`rtl_test -t` 报
+No supported devices found），GNSS+SDR 同开复验继续挂；右栏默认
+仍嵌三栏（改为一点即弹出并记位置）。
+
 ### 我这边（2026-11-08 上午：通用 Agent 一轮，35753a49）
 
 用户 09:37「继续」，按队列第 0 条接着干，主线是他最狠的那句
@@ -1000,18 +1032,20 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 
 ## 三、接下来要办啥（队列）
 
-0. **[我，续]** 队列第 0 条销账与遗留（2026-11-08 上午）：
-   ① **存量挂起已定位**：整文件跑 `tests/test_user_layouts.py` 挂在
-   `TestSaveAndRestore::test_splitter_sizes_restored_after_save_and_apply`
-   （`apply_preset` / splitter 尺寸恢复附近），**单跑 8.41s PASSED** ⇒
-   前序用例状态污染；46c407f2 改动前整文件复跑同样挂起，判为存量。
-   尚未修，下轮用 `MBDSDR_TEST_LOCK=0 -v -s` 抓 fixture 状态。
-   注意 `tests/conftest.py` 的 Qt 互斥锁默认等 300s，并发排查时先绕锁。
-   ② **真机复验待设备**：本轮 COM4 与 RTL2832U 都不在位，等插回再跑
-   `output/_hw_agent.py`。③ 点星接模型 / AI 面板自由窗口**已做**；
-   「展示页最大化」余下 ADS-B 空态收口与右栏摆位记忆。
-   ④ 编排/Hooks/常驻**已做**（真实任务与事件）；余下「配 Key 后把
-   工具调用编排接进模型对话流」——目前配 Key 仍走原 `AIWorker.chat()`。
+0. **[我，续]** 队列第 0 条（2026-11-08 下午复核）：
+   ① **存量挂起已修复销账**：`test_user_layouts.py` fixture 改 module
+   scope（共用窗口），整文件 10 passed / 8.32s，随机顺序 7.78s 全绿；
+   根因是每例新建 MainWindow 的 Qt 对象累积，非产品代码。
+   ② **真机复验仍待设备**：本轮 COM4 与 RTL2832U 都不在位（只有蓝牙
+   COM6/7，`rtl_test -t` No supported devices found），等插回再跑
+   `output/_hw_agent.py`；不拿离线回执冒充真机实证。
+   ③ **展示页最大化已做**：ADS-B 空态改画真实地图 + 收起空表格、
+   自由窗口摆位跨重启记忆、折叠只留标题条、启动专注态防 restoreState
+   破。余下只有设备回来后的画面复核。
+   ④ **模型链路编排已做**：配 Key 时工具调用入真实 Orchestrator/Hooks，
+   与本地协商同一份事实源（`test_ai_panel_model_orchestration.py` 2 绿）。
+   **下轮可选**：配真实 Key 后做一次端到端模型对话 + 工具调用实测
+   （本轮所有验证都是离线/无 Key，模型链路只验了结果槽登记）。
 1. **[TRAE]** `scripts/smoke_exe_no_popup.ps1` 收口提交
 2. **[TRAE]** 便携包线收口：package_windows.ps1 验真机构建打包，旧 stub zip
    问题闭环
