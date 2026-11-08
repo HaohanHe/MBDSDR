@@ -513,6 +513,35 @@ def _auto_write(name: str, parameters: Any) -> bool:
     return any(fnmatch.fnmatchcase(name, p) for p in WRITE_TOOL_NAME_PATTERNS)
 
 
+#: 模型对话通道的**硬门**：会发射 / 删除 / 回滚 / 建立外部连接的动作。
+#:
+#: 2026-11-08 对照 deepseek-harness 审计补的洞：此前 ``call()`` 完全不看
+#: write 标记，模型在对话里调 ``radio_ptt`` / ``radio_send_cw`` 会**直接
+#: 发射**，而同一个工具走 MCP / 桌面通道却被 ``tx_guard`` 拦住——两条路
+#: 安全等级不一致，违反"单一事实源"。这里只收不可逆 / 有外泄风险的动作；
+#: 可恢复的调谐（``sdr_set_*``、``vfo_*``）留给下一轮做分级确认，不在本轮
+#: 扩大拦截面，避免把日常对话全变成确认弹窗。
+MODEL_HARD_GATE_PATTERNS = (
+    # 发射（含 PTT / 上行 / CW / IQ / APRS）
+    "*transmit*", "*_ptt", "ptt_*", "*uplink*",
+    "*send_cw*", "*send_iq*", "*aprs_send*",
+    # 改源码 / 提版本 / 回滚
+    "code_modify_*", "code_git_commit", "code_rollback", "code_hot_reload",
+    "*_revert", "*_rollback", "git_clone_repo",
+    # 建立外部连接 / 定时外发
+    "*_connect", "*_schedule",
+    # 物理动作（云台转动）与持久记忆写入
+    "gimbal_move", "gimbal_point", "gimbal_stop", "gimbal_track_*",
+    "memory_write",
+)
+
+
+def _model_hard_gate(name: str) -> bool:
+    """模型通道必须人工授权的动作（名字命中即拦，不依赖模型自报）。"""
+    return any(fnmatch.fnmatchcase(name, p)
+               for p in MODEL_HARD_GATE_PATTERNS)
+
+
 class ToolRegistry:
     """
     工具注册表。
@@ -1036,6 +1065,47 @@ class ToolRegistry:
                     )
                     self._log_call(result)
                     return result
+
+        # ── 模型通道硬门（2026-11-08，对照 deepseek-harness 审计）──────
+        # 单一事实源仍是 ``tx_guard``：allowed-once + fail-closed；模型自报
+        # ``arm_manual`` 不参与判定。未授权 → 返回 gated 信封，**不执行**
+        # handler；已授权 → 把 decision 放进上下文，handler 内部再 resolve
+        # 时命中上下文，不会二次消费一次性 token。
+        if self.is_write_tool(name) and _model_hard_gate(name):
+            try:
+                from .tx_guard import (resolve_write_authorization,
+                                       tx_authorization)
+                decision = resolve_write_authorization(
+                    name, args, source="model_chat")
+            except Exception as e:      # 门本身坏了 → fail-closed，不放行
+                result = ToolResult(
+                    success=False,
+                    content=(f"「{name}」需要人工授权，但授权检查失败：{e}。"
+                             "为安全起见本次不执行。"),
+                    tool_name=name, args=args,
+                    error="manual_gate_required",
+                    next_step="先修好 tx_guard 与审计落盘，再重试该写操作。",
+                    data={"gated": True, "reason": "gate_error"},
+                )
+                self._log_call(result)
+                return result
+            if not decision.allowed:
+                result = ToolResult(
+                    success=False,
+                    content=(
+                        f"「{name}」是发射/写入/外部连接类操作，需要用户在本机"
+                        f"确认通道授权（{decision.code}: {decision.reason}）。"
+                        "模型无法自行获得或伪造授权。"),
+                    tool_name=name, args=args,
+                    error="manual_gate_required",
+                    next_step=("请用户确认后再试；只读查询（get_/list_/状态类）"
+                               "不需要授权，可先做那些。"),
+                    data={"gated": True, "reason": decision.code},
+                )
+                self._log_call(result)
+                return result
+            with tx_authorization(decision):
+                return self.call(name, args)
 
         return self.call(name, args)
 

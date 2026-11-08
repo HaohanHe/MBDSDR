@@ -125,6 +125,34 @@ FEC 链回收，非本机自采；1 块边缘发散未深追（1/35178，两独�
   **已销（afb76976，11-08 夜）**：独立 meteor_decode 像素基准重建，揪出
   zigzag 逆置换 + 双重 +128 两处像素域真 bug，详见「当前在途」夜段。
 
+### 我这边（2026-11-08 夜：DeepSeek Harness 对照审计 + 模型通道写门 P0）
+
+用户指向 `D:\mbdsdr\deepseek-harness-master`（DSH，Cordis 插件化 agent
+harness），要求"深度调研学习完，再根据它看我们 agent 有什么问题"。读了
+它的 `docs/architecture.zh.md` + 17 个子系统中文文档，抽出 8 条"没有就会
+翻车"的硬机制，逐条对照我们的 agent 层。完整报告
+`docs/learn/agent-harness-gap-audit.md`。
+
+- **P0（已修）模型对话通道没有写入门**：`tool_registry.call()` 全段不看
+  write 标记；`WRITE_TOOL_NAME_PATTERNS` 列了几十个写/发射工具，全仓
+  `resolve_write_authorization` 只有 6 处。结果：同一工具走 MCP 通道会被
+  拦，走 `agent.chat()` 直接执行——`radio_ptt` / `radio_send_cw` 裸奔。
+  修法：`MODEL_HARD_GATE_PATTERNS` + `call_from_model` 硬门，复用
+  `tx_guard`（allowed-once + fail-closed），未授权回 `manual_gate_required`
+  且 handler 一次不执行。真实验证 `radio_ptt → gate_not_armed`。
+  新增 `tests/test_model_write_gate.py` 7 条；9 文件 **148 passed**。
+- **P1（未修，已立项）**：① 调谐/云台/工作流类写工具仍裸，需分级确认 +
+  会话免问；② 工具重试用中文关键字表（`agent.py:4079`）而非 `ToolResult.error`
+  code，"找不到设备"会误判成参数错误；③ 会话是内存 history + 全量快照
+  （`agent.py:4270`），崩溃丢最后一段、不能回放/fork；④ 子代理无 maxDepth
+  （`subagents.py:685`），层数无上限；⑤ `Orchestrator.execute`
+  （`orchestrator.py:230`）同步 for、不可取消；⑥ 大输出只截断 4000 字
+  （`tool_registry.py:983`）不落盘，而 MCP 侧有 spill，两条路不一致。
+- **P2**：`rounds` 双口径（`agent.py:4161` vs `:4191`）、compaction 摘要
+  失败仍裁剪（fail-open）、无 pre-step 闸、无 approval asked/decided 配对审计。
+- **诚实边界**：本轮只读代码与文档，**没有真机跑发射路径**（设备不在位）；
+  调谐类未收进硬门，测试里专门有一条"还没修"如实钉住，防半修当全修。
+
 ### 我这边（2026-11-08 傍晚：首次打开零门槛 + 「☾ 今夜」照 Stellarium）
 
 用户 17:2x 两次打断纠偏：「不会看人家原项目吗？」「原项目是 stellarium」
@@ -1172,6 +1200,14 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    画成星象仪、示例天空能力位、☾ 今夜照 Stellarium 按真实太阳 -18°
    切夜（细节见「当前在途」傍晚段 + `output/evidence/` 三张图）。
    **下轮可选**：
+   - **agent 审计 P1（DSH 对照，2026-11-08 夜立项，优先）**：
+     ① 调谐/云台/工作流写工具分级确认 + 会话免问（否则门太硬会被绕过）；
+     ② 工具重试改读 `ToolResult.error` code，废掉中文关键字表；
+     ③ 会话改 JSONL 追加日志（先只写不读）；
+     ④ 子代理 `maxDepth` + 父级取消继承；
+     ⑤ `Orchestrator.execute` 加 cancel；
+     ⑥ 大输出 spill 落盘，抄 `core/mcp_server.py` 的 `_finalize_tool_result`。
+     详见 `docs/learn/agent-harness-gap-audit.md` 的"建议顺序"。
    - 配真实 Key 后做一次端到端模型对话 + 工具调用实测（本轮所有验证
      都是离线/无 Key，模型链路只验了结果槽登记）；
    - ~~7 条 HEAD 基线存量红（中英文标签滞后 / 全天按钮文案 / AI 忙锁 /
