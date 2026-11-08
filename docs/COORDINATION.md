@@ -45,6 +45,38 @@
 > **全部保留并落库**（`4d5feff1`，45 文件），一行没丢。以下原有「交给在途线」
 > 的交接单视为**收件人改为本线**，按新单逐条销账。
 
+### 我这边（2026-11-08 晚：HEAD 基线存量红清盘，1a347691）
+
+傍晚轮挂账的「7 条存量红」本轮全清，巷道又逼出 3 条同账存量，一并销：
+
+- **产品真修 2 条**：① `_call_ai` 忙锁两向漏锁（35753a49 引入：本地协商
+  分支排在忙锁前，`_is_processing`/`_local_busy` 互不拦截，先结束的
+  worker 提前解锁 send_btn）——两把锁任一忙都拒绝，检查排在路由前；
+  新增 `test_busy_local_blocks_model_call` 钉反向。② `_update_ai_status`
+  无 Key 常驻内核挂绿「LLM: <model>」假就绪（c47cdce9 连带漏改）——
+  如实「未配置 API」warning 色，有 Key 路径不变。
+- **测试滞后追平 7 条**：offscreen Test 5 + behavior 同名用例（c47cdce9
+  无 Key 常驻口径）、全天按钮文案（c47cdce9）、信息卡中文化 ×3
+  （9ca92dee）、LOD 半径补乘 STAR_RENDER_GAIN（b7321064）、状态卡
+  星表行裁剪锚点 246→226（行序变迁，探针实测字形差带 228–236）。
+- **跨文件污染 1 条**：`test_sky_full_catalog._new_view` 把全局时间引擎
+  暂停固定在 UNIX=1790510400 无复位，`test_first_open_welcome` 的
+  「选位置不跳时间」读到 42 天前。给污染源加 autouse 复位 fixture
+  （与 sky_readouts engine fixture 同口径），不动受害用例断言。
+- **身份门 1 条**：45ed727d 两处注释「用户所在地」命中居所/行踪词规则
+  （都是隐私保护设计说明，非个人信息），改述「用户实际位置」，
+  守卫规则一字不动。
+- **反证**：旧 `_call_ai` / 旧 `_update_ai_status` 各从 45ed727d git 对象
+  提取执行，漏锁/假就绪复现 + 对照组不变，3/3 + 3/3 OK
+  （`output/_probe_busy_lock_reverse.py` / `_probe_status_reverse.py`）。
+- **验证**：12 文件巷道 **287 passed / 0 failed**
+  （`output/_legacy_red_lane3.log`）；身份门 3 全绿；污染+受害+behavior
+  三文件组合 76 全绿（`_pollution_fix_proof.log`）。
+- **顺手核查销账**：队列另账 ② 野码（ba0e8dbe）与 ① 热插拔污染
+  （171dd97c）均已在案闭环；队列 #10① 合成链 woven 切分 + 默认翻转
+  实际已由 c05b565b 落地（build_cadu `payload[b::4]`、decode_cadu
+  默认 "woven"），本轮核实后销账。#10② 图像内容级第三方基准仍开。
+
 ### 我这边（2026-11-08 傍晚：首次打开零门槛 + 「☾ 今夜」照 Stellarium）
 
 用户 17:2x 两次打断纠偏：「不会看人家原项目吗？」「原项目是 stellarium」
@@ -1094,8 +1126,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
    **下轮可选**：
    - 配真实 Key 后做一次端到端模型对话 + 工具调用实测（本轮所有验证
      都是离线/无 Key，模型链路只验了结果槽登记）；
-   - 7 条 HEAD 基线存量红（中英文标签滞后 / 全天按钮文案 / AI 忙锁 /
-     LOD 探针）另立一笔账清理，本轮按纪律没碰；
+   - ~~7 条 HEAD 基线存量红（中英文标签滞后 / 全天按钮文案 / AI 忙锁 /
+     LOD 探针）另立一笔账清理~~ **已销（1a347691，11-08 晚）**：巷道逼出
+     共 10 条同账存量全清（产品真修 2 + 测试追平 7 + 身份门措辞 1），
+     12 文件巷道 287 全绿，详见「当前在途」晚段；
    - 设备插回后补真机首开 + GNSS+SDR 同开画面复核。
 1. **[TRAE]** `scripts/smoke_exe_no_popup.ps1` 收口提交
 2. **[TRAE]** 便携包线收口：package_windows.ps1 验真机构建打包，旧 stub zip
@@ -1126,9 +1160,10 @@ No supported devices found），GNSS+SDR 同开复验没做成；离线那次
 10. **[认领，部分已做]** 图像链收尾件：
     ~~C++ lrptDecodeCadu 同迁 woven~~ **已做（a694b322，未编译验证）**；
     ~~形状判据过滤~~ **已做（真录 fixture 层 version=1 过滤）**；
-    **仍缺**：① `lrpt_pipeline.build_cadu` 往返切分 + `decode_cadu` 默认
-    翻转（合成链仍 concat，改它要连全部 concat 钉子一起迁）；② 图像
-    内容级真值对拍（对照第三方产物——注意：本轮已证明"第三方产物"这条路
+    ~~① `lrpt_pipeline.build_cadu` 往返切分 + `decode_cadu` 默认
+    翻转~~ **已销（c05b565b，11-08 晚核实）**：build_cadu 已是
+    `payload[b::4]` 往返切分、decode_cadu 默认 `"woven"`，concat 仅留
+    历史夹具对照；② 图像内容级真值对拍（对照第三方产物——注意：本轮已证明"第三方产物"这条路
     上原有的真值本身是误纠，重钉后只有 10 包，对拍基准需重新建立）
 
 11. ~~**[我] 产品工程阶段 A 合入仓库**~~ **已闭环（5a977026，11-05 22:00）**：
