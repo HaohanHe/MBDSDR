@@ -189,8 +189,13 @@ harness），要求"深度调研学习完，再根据它看我们 agent 有什�
 
 验证：`run_all.py --online` 五组全 PASS（87.4 s，17 帧）；
 UI/天空回归 9 文件 **190 passed**；契约测试 11 passed。
-提交：见下一行 hash。not_verified：真机 SDR/GNSS 不在位（首开硬件路径、
-GNSS×地点面板优先级、全部 C++ 结论）。
+另外销掉一条**过期断言**：`test_sky_bortle_chain.py:162` 还在断言 LOD 点
+半径 = `STAR_LOD_MIN_R_PX`（0.5），但 `b7321064` 把落笔增益 1.3 收进共享
+视觉模型后实际是 0.65（`test_sky_full_catalog:195` 早已写对）。产品行为
+正确、断言漏改 → 按同一口径真修，不是 xfail。
+提交：`bee5aa0b`（证据包 + 两个产品缺陷）、本条断言修复紧随其后。
+not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面板优先级、
+全部 C++ 结论）。
 
 
 ### 我这边（2026-11-09 凌晨第二批：站址单源 + 地点面板 + 投影 + 星等只读）

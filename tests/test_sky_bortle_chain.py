@@ -157,9 +157,12 @@ def test_visual_model_reads_bortle_with_same_mags_and_limit():
         a8 = np.asarray(a8, dtype=int)
         assert r3[1] > r8[1] + 0.5, (r3[1], r8[1])
         assert a3[1] > a8[1], (a3[1], a8[1])
-        # 5.0 等 > Bortle 8 裸眼极限 4.75：视觉层退化为 0.5px LOD 点，
+        # 5.0 等 > Bortle 8 裸眼极限 4.75：视觉层退化为最小 LOD 点
+        # （0.5px × 落笔增益 1.3 = 0.65px，与 test_sky_full_catalog:195
+        # 同一口径——增益在 b7321064 收进共享视觉模型时这条漏改了），
         # 仍保留在本帧 limit 内；Bortle 3 下是正常圆点。
-        assert float(r8[1]) == pytest.approx(v.STAR_LOD_MIN_R_PX)
+        assert float(r8[1]) == pytest.approx(
+            v.STAR_LOD_MIN_R_PX * v.STAR_RENDER_GAIN)
         assert 0 < int(a8[1]) < 255
         assert float(r3[1]) > 1.0
     finally:
