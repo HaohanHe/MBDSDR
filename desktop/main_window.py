@@ -2304,6 +2304,18 @@ class MainWindow(QMainWindow):
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         _pop_lay.addWidget(grid_host)
+        # 极限星等：**只读**。给数字是为了让"今晚能看多暗"有依据，
+        # 不是为了给一个旋钮——detail_gain 是渲染近似，做旋钮就像在调口径。
+        self._limit_mag_label = QLabel("极限星等：—", self._layer_popover)
+        self._limit_mag_label.setObjectName("planetariumLimitMag")
+        self._limit_mag_label.setWordWrap(True)
+        self._limit_mag_label.setStyleSheet(
+            "background: transparent; color: rgba(200,210,225,0.62);"
+            " font-size: 8.5pt; padding-top: 2px;")
+        self._limit_mag_label.setToolTip(
+            "当前天顶极限星等（Bortle 光害 + 晨昏压制）。这是渲染近似，"
+            "不是望远镜口径增益：换个镜子不会让这个数字变大。")
+        _pop_lay.addWidget(self._limit_mag_label)
         # 「▦ 图层」：图层面板的开合（默认收起——天空要干净，选项按需出现）
         self._planetarium_layer_btn = QPushButton("▦ 图层", strip)
         self._planetarium_layer_btn.setObjectName("planetariumLayers")
@@ -6922,9 +6934,37 @@ class MainWindow(QMainWindow):
         if not on:
             pop.hide()
             return
+        self._refresh_limit_mag_line()
         self._place_layer_popover()
         pop.show()
         pop.raise_()
+
+    def _refresh_limit_mag_line(self) -> None:
+        """把「极限星等」那行刷成当前真实值（只读，不改任何绘制参数）。"""
+        lbl = getattr(self, "_limit_mag_label", None)
+        sv = getattr(self, "sky_view", None)
+        if lbl is None or sv is None:
+            return
+        try:
+            snap = sv.limit_magnitude_snapshot()
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            lbl.setText("极限星等：不可用")
+            return
+        if snap.get("daylight"):
+            lbl.setText("极限星等：白天不显示星（太阳在地平上）")
+            return
+        eff = float(snap.get("effective") or 0.0)
+        base = float(snap.get("base") or 0.0)
+        bortle = int(snap.get("bortle") or 0)
+        depth = float(snap.get("catalog_depth") or 9.0)
+        # 两行显式排版：面板只有 189px 宽，一行硬塞会挤成参差的折行
+        head = f"极限星等 {eff:.1f}（Bortle {bortle}）"
+        if depth > 0 and eff > depth:
+            # 请求比星表深：老实说表只到多深，不说"还能更暗"。
+            head += f" · 星表到 {depth:.1f}"
+        if abs(base - eff) >= 0.05:
+            head += f" · 晨昏压 {base - eff:.1f}"
+        lbl.setText(head + "\n渲染近似 · 非口径增益")
 
     def _place_layer_popover(self) -> None:
         """图层面板位置：默认贴按钮条左侧；左边放不下就落到按钮条下方。

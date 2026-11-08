@@ -4262,6 +4262,36 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """晨昏压制量（等）：天空比无月夜亮多少等，极限星等就压低多少等。"""
         return float(_twilight.twilight_limit_penalty_mag(self._sun_alt_deg()))
 
+    def limit_magnitude_snapshot(self) -> Dict[str, object]:
+        """当前天顶极限星等（只读，供界面如实显示）。
+
+        与 ``_star_selection`` **同一条公式**（``limit_magnitude`` 减晨昏
+        压制），不另算一套。``effective`` 是这一帧真正生效的值，``base``
+        是 Bortle 单独定出的天顶值，两者之差就是晨昏压掉的部分。
+
+        为什么不给旋钮：``detail_gain`` 是渲染 LOD 经验式、不是光度学模型，
+        做进界面等于暗示"调大就能看得更暗"，那是口径增益的错觉。
+        """
+        from mbdsdr_ai.skyengine.star_catalog import (
+            CATALOG_DEPTH_MAG, limit_magnitude)
+        bortle = int(self._bortle)
+        try:
+            base = float(limit_magnitude(float(self.view_state.fov_deg),
+                                         bortle=bortle))
+        except (TypeError, ValueError):
+            base = float("nan")
+        penalty = float(self._twilight_penalty_mag())
+        return {
+            "base": base,
+            "effective": base - penalty,
+            "twilight_penalty": penalty,
+            "bortle": bortle,
+            "sun_alt": self._sun_alt_deg(),
+            "daylight": bool(self._stars_hidden_by_daylight()),
+            "catalog_depth": float(CATALOG_DEPTH_MAG),
+            "fov_deg": float(self.view_state.fov_deg),
+        }
+
     # 星表求出的「本帧应画星集合」只随（时刻、视线中心、视场、Bortle、消光）
     # 变化；实测 select_for_view 单次 4.98 ms（1794 颗，700px/120°），而
     # 120° 刷新一次只挪 0.008°。按 2 s 分箱缓存：同箱内星位最多偏 0.05 px
