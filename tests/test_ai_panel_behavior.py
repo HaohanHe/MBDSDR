@@ -246,10 +246,18 @@ class TestUnconfiguredHonesty:
 
 
 class TestAgentInitAndMcpRegistration:
-    def test_init_agent_without_key_leaves_agent_none(self, panel):
+    def test_init_agent_without_key_keeps_resident_kernel_unconfigured(
+            self, panel, monkeypatch):
+        """c47cdce9 用户口径：无 Key 也常驻 Agent 内核（工具/Hooks/编排
+        是本进程能力，不因缺模型整体消失）；对话与状态条如实降级，
+        不许挂绿 LLM 标签冒充模型就绪。"""
+        panel._saved_config = {}
+        monkeypatch.delenv("MBDSDR_API_KEY", raising=False)
         panel.init_agent()
-        assert panel.agent is None
+        assert panel.agent is not None, "无 Key 应常驻内核，不是 agent=None"
+        assert not panel.agent.config.api_key, "常驻内核不得携带 API Key"
         assert "未配置" in _view_text(panel)
+        assert "未配置" in panel.ai_status_label.text()
 
     def test_init_agent_with_arg_key_builds_agent_and_names_source(
             self, panel, monkeypatch):

@@ -254,9 +254,9 @@ class TestSatelliteReadouts:
         v._hovered_object = obj
         rec = _TextRecorder()
         v._draw_picked_info(rec)
-        assert "Rise/Set (UTC)" in rec.texts
+        assert "升起/落下 (UTC)" in rec.texts
         joined = "\n".join(rec.texts)
-        assert f"Rise {format_utc_time(rise_u)}" in joined
+        assert f"升 {format_utc_time(rise_u)}" in joined
         assert format_local_time(rise_u, ZoneInfo("Asia/Shanghai"),
                                  "%H:%M") not in joined
 
@@ -440,14 +440,14 @@ class TestSingleFormatterAndUnitLabels:
         rise_u = _jtime.jd_to_unix(info["rise"])
         set_u = _jtime.jd_to_unix(info["set"])
         expect = {
-            "Magnitude (mag)": format_magnitude(info["mag"]),
-            "Distance (km)": format_distance_km(info["dist_km"]),
-            "Rise/Set (UTC)": f"Rise {format_utc_time(rise_u)}   "
-                             f"Set {format_utc_time(set_u)}",
-            "Ra/Dec (hms / °′″)": f"{format_hms_ra(info['ra'])}  "
-                                  f"{format_dms_deg(info['dec'])}",
-            "Az/Alt 几何 (Az 0°=N)": f"{format_azimuth(obj.azimuth_deg)}  "
-                                     f"{format_angle_deg(obj.elevation_deg)}",
+            "星等 (mag)": format_magnitude(info["mag"]),
+            "距离 (km)": format_distance_km(info["dist_km"]),
+            "升起/落下 (UTC)": f"升 {format_utc_time(rise_u)}   "
+                              f"落 {format_utc_time(set_u)}",
+            "赤经/赤纬": f"{format_hms_ra(info['ra'])}  "
+                        f"{format_dms_deg(info['dec'])}",
+            "方位/高度（几何，0°=北）": f"{format_azimuth(obj.azimuth_deg)}  "
+                                      f"{format_angle_deg(obj.elevation_deg)}",
         }
         for label, value in expect.items():
             assert label in texts, f"信息卡缺少行标签: {label!r}"
@@ -456,12 +456,12 @@ class TestSingleFormatterAndUnitLabels:
                 f"期望 {value!r}，实际文本 {texts!r}")
 
         # 方位同时给 16 方位名，高度走统一 ° 格式
-        az_line = expect["Az/Alt 几何 (Az 0°=N)"]
+        az_line = expect["方位/高度（几何，0°=北）"]
         assert compass_point(obj.azimuth_deg) in az_line
         assert az_line.endswith(format_angle_deg(obj.elevation_deg))
         # 赤经/赤纬各自走 hms/dms 单点实现（不是本地拼的 °′″）
-        assert "h " in expect["Ra/Dec (hms / °′″)"]
-        assert '"' in expect["Ra/Dec (hms / °′″)"]
+        assert "h " in expect["赤经/赤纬"]
+        assert '"' in expect["赤经/赤纬"]
         # 升降时刻按 UTC 显示（本地时刻不应出现在卡里）
         assert format_local_time(rise_u) not in texts
 
@@ -475,9 +475,9 @@ class TestSingleFormatterAndUnitLabels:
         v._draw_body_info(rec)
         texts = rec.texts
         info = v._body_info
-        assert "Magnitude (mag)" in texts
-        assert "Rise/Set (UTC)" in texts
-        assert "Az/Alt (视/几何, Az 0°=N)" in texts
+        assert "星等 (mag)" in texts
+        assert "升起/落下 (UTC)" in texts
+        assert "方位/高度（视/几何，0°=北）" in texts
         assert format_magnitude(info["mag"]) in texts
         assert (f"{format_hms_ra(info['ra'])}  "
                 f"{format_dms_deg(info['dec'])}") in texts

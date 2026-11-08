@@ -54,14 +54,19 @@ panel._on_stream_delta("Hello")
 assert panel._streamed_any is True, "_streamed_any should be True after delta"
 print(f"✓ Test 4: _streamed_any set to True on stream delta")
 
-# ── Test 5: init_agent with no API key does not create agent ──
-# Mock _load_config to return empty (simulate no config file)
+# ── Test 5: init_agent with no API key loads resident kernel, honestly unconfigured ──
+# c47cdce9 用户口径：无 Key 也常驻 Agent 内核（工具/Hooks/编排可用），
+# 模型对话如实降级。断言从「agent 必须 None」追平为「内核在、Key 为空、
+# 状态条如实写未配置」——状态条不许挂绿 LLM 标签冒充模型就绪。
 panel2 = AIPanel()
 panel2._saved_config = {}
 os.environ.pop("MBDSDR_API_KEY", None)
 panel2.init_agent()  # no key, no config, no env var
-assert panel2.agent is None, \
-    f"init_agent with no key should leave agent None, got: {panel2.agent}"
-print(f"✓ Test 5: init_agent with no API key leaves agent=None")
+assert panel2.agent is not None, \
+    "无 Key 也应常驻 Agent 内核（c47cdce9 口径），不是整体消失"
+assert not panel2.agent.config.api_key, "常驻内核不得携带任何 API Key"
+assert "未配置" in panel2.ai_status_label.text(), \
+    f"无 Key 常驻时状态条应如实写未配置, got: {panel2.ai_status_label.text()}"
+print(f"✓ Test 5: init_agent with no key keeps resident kernel, status honest")
 
 print("\n=== All AI panel offscreen tests passed ===")

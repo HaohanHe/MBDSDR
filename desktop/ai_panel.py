@@ -412,6 +412,13 @@ class AIPanel(QWidget):
     def _update_ai_status(self):
         """更新 AI 内核状态指示（含上下文 token 使用情况）。"""
         if AI_CORE_AVAILABLE and self.agent:
+            # 常驻内核（c47cdce9）：无 Key 时 agent 也在，但模型对话不可用——
+            # 状态条必须如实写「未配置」，不能挂绿 LLM 标签冒充模型就绪。
+            if not getattr(self.agent.config, "api_key", ""):
+                self.ai_status_label.setText(self.tr("未配置 API"))
+                self.ai_status_label.setStyleSheet(
+                    f"font-size: 8pt; color: {_tok().COLORS['status_warning']};")
+                return
             model = self.agent.model_manager.model
             # 获取上下文状态
             ctx_info = ""
@@ -784,14 +791,15 @@ class AIPanel(QWidget):
         协商，用本进程真实装载的工具 / 编排器 / Hooks 回话。UI 会明确写
         「模型未配置」，绝不让工具回执冒充模型说的话。
         """
+        # S10：星象仪命令栏直接调本方法，绕过 _on_submit 的忙锁会再起一个
+        # AIWorker 覆盖 self._worker/_worker_thread；先结束的那个还会提前解锁。
+        # 本地能力协商同样起 LocalWorker 占线程，两把锁任一忙都拒绝。
+        if self._is_processing or self._local_busy:
+            self._add_system_message("AI 正在处理上一条请求，本次指令未提交，请稍后再试")
+            return False
         if self._bridge_obj() is not None and not bool(
                 getattr(getattr(self.agent, "config", None), "api_key", "")):
             return self._local_dispatch(text)
-        # S10：星象仪命令栏直接调本方法，绕过 _on_submit 的忙锁会再起一个
-        # AIWorker 覆盖 self._worker/_worker_thread；先结束的那个还会提前解锁。
-        if self._is_processing:
-            self._add_system_message("AI 正在处理上一条请求，本次指令未提交，请稍后再试")
-            return False
         self._is_processing = True
         self.send_btn.setEnabled(False)
         self.send_btn.setText("思考中...")

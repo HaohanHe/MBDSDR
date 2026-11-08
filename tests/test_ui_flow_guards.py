@@ -172,6 +172,27 @@ class TestUiFlowGuards:
         finally:
             panel._is_processing = False
 
+    def test_busy_local_blocks_model_call(self, window, monkeypatch):
+        """S10：本地协商在途（_local_busy）时模型路径也不得起 AIWorker。
+
+        本地能力协商分支曾排在忙锁之前：_is_processing=True 时命令栏照样
+        起 LocalWorker；反向 _local_busy=True 时模型 worker 也照起。两把锁
+        任一忙都必须拒绝（先结束的那个会提前解锁 send_btn）。
+        """
+        from types import SimpleNamespace
+        w = self._window(window)
+        panel = w.ai_panel
+        stub = SimpleNamespace(config=SimpleNamespace(api_key="test-key"))
+        monkeypatch.setattr(panel, "agent", stub)
+        panel._local_busy = True
+        panel._worker = None
+        try:
+            ret = panel._call_ai("再来一条")
+            assert ret is False, "S10：本地协商忙期间仍启动了模型 AIWorker"
+            assert panel._worker is None, "S10：第二个 AIWorker 覆盖了在途引用"
+        finally:
+            panel._local_busy = False
+
     def test_panel_submit_dispatches_single_ai_call(self, window, monkeypatch):
         """S10：面板提交曾被"信号 + 直调"派发两次，一次提交起两个 worker。"""
         import ai_panel as ap
@@ -200,18 +221,18 @@ class TestUiFlowGuards:
         assert act is not None, "视图菜单缺少「全天模式（160°）」"
         assert btn.isCheckable() and act.isCheckable()
         assert act.shortcut().toString() == "A", "菜单项应提示与视图内一致的 A 键"
-        assert "已进入" not in btn.text()
+        assert "正在" not in btn.text()
 
         # 视图状态 → 按钮 / 菜单
         sv.set_all_sky_mode(True)
         assert sv.all_sky_active
-        assert btn.isChecked() is True and "已进入" in btn.text()
+        assert btn.isChecked() is True and "正在看整片天" in btn.text()
         assert act.isChecked() is True
 
         # 按钮 → 视图状态（再次点击退出全天）
         btn.click()
         assert sv.all_sky_active is False
-        assert "已进入" not in btn.text()
+        assert "正在" not in btn.text()
         assert act.isChecked() is False
 
         # 菜单 → 视图状态

@@ -2690,7 +2690,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         """站址口径标注（例：「示例位置 · 北京 39.9°N 116.4°E · 非你的位置」）。
 
         非空时沉浸卡的位置行与右下角常显它。示例站址只供看天，不能让
-        方位/高度读数看起来像是从用户所在地量出来的；真实 GNSS 或手填
+        方位/高度读数看起来像是从用户实际位置量出来的；真实 GNSS 或手填
         坐标就位后由主窗口传空串清掉。
         """
         self._site_note = str(note or "").strip()

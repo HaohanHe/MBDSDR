@@ -3266,7 +3266,7 @@ class MainWindow(QMainWindow):
           GNSS 来 fix 或用户在设置里手填，都会覆盖它；
         - 不启动卫星过境 / 多普勒闭环（示例点不能算真实过境）；
         - ``set_site_note`` 常显标注，沉浸卡位置行写「示例位置 · 未校准」；
-        - 星表、投影、天文计算全是真的，只是观测点不是用户所在地，且说清楚。
+        - 星表、投影、天文计算全是真的，只是观测点不是用户实际位置，且说清楚。
         """
         lat, lon = _preview_site()
         self._observer_source = "preview"

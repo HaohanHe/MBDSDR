@@ -51,6 +51,20 @@ WIN = 700
 CENTER_AZ, CENTER_ALT = 180.0, 45.0
 
 
+@pytest.fixture(autouse=True)
+def _restore_time_engine():
+    """时间引擎是全局单例：_new_view 把它暂停固定在 UNIX，用完必须归还。
+
+    不复位会污染后续文件（test_first_open_welcome 的「选位置不跳时间」
+    实测读到 1790510400 而非墙钟）。与 test_sky_readouts 的 engine
+    fixture 同一复位口径：set_time_now 清模拟 JD，set_rate(1.0) 解暂停。
+    """
+    yield
+    eng = get_time_engine()
+    eng.set_time_now()
+    eng.set_rate(1.0)
+
+
 def _new_view(size: int = WIN) -> RFSkyView:
     eng = get_time_engine()
     eng.set_unix(UNIX)
@@ -165,7 +179,7 @@ def test_star_visual_many_matches_scalar():
             assert abs(float(bloom[i]) - want[2]) < 1e-12, (i, bloom[i], want[2])
             assert int(alpha[i]) == want[3], (i, alpha[i], want[3])
         # LOD 分支确实被命中（否则这条断言只是空转）：放大后视场极限高于
-        # 裸眼基线，超基线但仍在极限内的星走 0.5px 最小可辨点。
+        # 裸眼基线，超基线但仍在极限内的星走 0.5px 最小可辨点 × 落笔增益。
         from mbdsdr_ai.skyengine.star_catalog import naked_eye_limit_mag
         base = float(naked_eye_limit_mag(int(v._bortle)))
         narrow = _selection(v, 5.0)
@@ -177,7 +191,8 @@ def test_star_visual_many_matches_scalar():
                    and float(narrow.eff_mag[i]) <= float(narrow.limit_mag) + 1e-9]
         assert lod_idx, "放大后应存在超出裸眼基线的 LOD 暗星"
         i = lod_idx[0]
-        assert abs(float(rn[i]) - v.STAR_LOD_MIN_R_PX) < 1e-12
+        assert abs(float(rn[i])
+                   - v.STAR_LOD_MIN_R_PX * v.STAR_RENDER_GAIN) < 1e-12
         assert 0 < int(an[i]) < 255
         assert v._star_visual(
             float(narrow.eff_mag[i]), float(narrow.limit_mag),
@@ -389,14 +404,15 @@ def _diff_pixels(a, b) -> int:
 def test_status_card_draws_star_row_and_truncation_warning():
     v = _new_view()
     try:
-        # 星表行位于银河之后、提示行之前 → 基线 220；批 1 在它之前新增
-        # 「恒星时 / 视轴」两行 → 下移 36px（dy 210→246）。
+        # 星表行基线 dy=238（指向20/可见卫星38/太阳56/UTC76/本地94/
+        # 恒星时112/观测站130/视轴148/视角166/调谐184/受晒202/银河220/
+        # 星表238）；字形带实测 228–236，裁 226–240 刚好罩住。
         v._star_sel = SimpleNamespace(returned=1232, available=1232,
                                       limit_mag=6.5, truncated=False)
-        normal = _card_crop(v, 246)
+        normal = _card_crop(v, 226, 14)
         v._star_sel = SimpleNamespace(returned=20000, available=83479,
                                       limit_mag=9.0, truncated=True)
-        truncated = _card_crop(v, 246)
+        truncated = _card_crop(v, 226, 14)
     finally:
         v.close()
     assert _diff_pixels(normal, truncated) > 20, \
