@@ -147,3 +147,6 @@ cpp/build/
 build/
 build_cpp/
 cmake-build-*/
+
+# 证据包产物（截图与 JSON 报告由 tools/evidence/run_all.py 重建，不入库）
+evidence-out/

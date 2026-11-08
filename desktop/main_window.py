@@ -2756,12 +2756,20 @@ class MainWindow(QMainWindow):
         存的是"你看到的这一帧"（grab，不重绘、不另算），所以画面里有什么
         图里就有什么；模拟时刻文件名带 ``_sim``，避免事后把跳过去的夜空
         当成实时观测。
+
+        目录默认是系统的"图片"夹下的 MBDSDR；``MBDSDR_SCREENSHOT_DIR`` 直接
+        指定最终保存目录——给自动化证据脚本用，否则每次跑验收都会往用户相册
+        里塞图（Windows 上 ``QStandardPaths`` 读注册表，隔离 HOME 也拦不住）。
         """
         from PySide6.QtCore import QStandardPaths
-        base = (QStandardPaths.writableLocation(
-            QStandardPaths.PicturesLocation)
-            or os.path.expanduser("~"))
-        folder = os.path.join(base, "MBDSDR")
+        override = os.environ.get("MBDSDR_SCREENSHOT_DIR")
+        if override:
+            folder = base = override
+        else:
+            base = (QStandardPaths.writableLocation(
+                QStandardPaths.PicturesLocation)
+                or os.path.expanduser("~"))
+            folder = os.path.join(base, "MBDSDR")
         try:
             os.makedirs(folder, exist_ok=True)
         except OSError:

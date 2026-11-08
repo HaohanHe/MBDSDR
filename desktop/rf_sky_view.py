@@ -4133,7 +4133,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         # 6) 常驻叠加: FOV 显示 / 摄像机锁定 / 信息卡 / 过境 / GNSS / 空状态
         if self._show_hud:
-            self._draw_fov(painter)
+            # 视场角只画在一处：右下角 ⊖⊕ 控件的中文读数。以前右上角还有
+            # 一个 "FOV xx.x°"，既与它重复（顶栏/底栏不许重复字段），又被
+            # 星象仪按钮条压住、贴着屏幕上边缘被裁掉——截图里只剩半行字。
             self._draw_camera_hud(painter)
             self._draw_fov_control(painter)
         self._draw_info_overlay(painter)
@@ -5425,20 +5427,6 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             painter.drawPath(path)
         painter.restore()
 
-    # ------------------------------------------------------------------ #
-    # FOV 常驻显示 (右上角 "FOV xx.x°")
-    # ------------------------------------------------------------------ #
-    def _draw_fov(self, painter: QPainter):
-        painter.save()
-        _t = tokens()
-        f = QFont(self._mono_font)
-        f.setPointSize(9)
-        painter.setFont(f)
-        painter.setPen(QColor(_t.COLORS["gray_100"]))
-        painter.drawText(self.width() - 92, 18,
-                         f"FOV {format_angle_deg(self.view_state.fov_deg)}")
-        painter.restore()
-
     def _draw_camera_hud(self, painter: QPainter):
         """两个环的常驻状态 + 诚实通知（3-4s 淡出）。
 
@@ -5505,8 +5493,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
 
         painter.setFont(self._mono_font)
         label = QRectF(x0 + btn + gap, y0, label_w, btn)
+        # 1 位小数：这是画面里唯一的视场角读数（右上角那个已删）
         painter.drawText(label, Qt.AlignCenter,
-                         format_angle_deg(self.view_state.fov_deg, digits=0))
+                         format_angle_deg(self.view_state.fov_deg, digits=1))
         painter.restore()
 
     def _draw_grid(self, painter: QPainter):
