@@ -283,7 +283,10 @@ def test_effective_limit_increases_with_altitude():
 # 视场选择
 # ---------------------------------------------------------------------------
 def _assert_selection_invariants(sel, center_az, center_alt, fov, margin=1.0):
-    assert np.all(sel.alt_deg >= 0.0)
+    # 地平门取 _HORIZON_GATE_DEG（−0.6°）而非 0°：绘制层按视高度落笔
+    # （地平处大气折射约 34′），与 DSO 层同口径。断言跟随生产常量，
+    # 改门时这里自动同步（旧断言 alt>=0 是 −0.6° 门落地前的滞后）。
+    assert np.all(sel.alt_deg >= sc._HORIZON_GATE_DEG - 1e-9)
     assert np.all(sel.eff_mag <= sel.limit_mag + 1e-9)
     assert sel.requested_limit_mag == pytest.approx(
         sc.limit_magnitude(sel.fov_deg, sel.bortle))

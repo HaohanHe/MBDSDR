@@ -36,7 +36,15 @@ from mbdsdr_ai.tool_policy import ToolPolicy
 # stub 助手
 # ---------------------------------------------------------------------------
 def _stub(**methods):
-    """duck-type stub controller：只提供被测工具会调到的方法。"""
+    """duck-type stub controller：只提供被测工具会调到的方法。
+
+    默认补 ``is_connected``/``has_scan``：2026-11-05 工具诚实性全扫后
+    get_frequency 等读工具会回读 ``is_connected()``，scan 守卫会先查
+    ``has_scan()``；替身必须复刻真 SDRController 的这层接口，否则调用
+    会掉进 internal_error 信封（AttributeError）而非被测路径。按需覆盖。
+    """
+    methods.setdefault("is_connected", lambda: True)
+    methods.setdefault("has_scan", lambda h: True)
     return types.SimpleNamespace(**methods)
 
 
@@ -73,37 +81,44 @@ def test_small_result_is_returned_as_is_no_spill(tmp_path, monkeypatch):
     ts = MCPToolSet(controller=_stub(get_frequency=lambda: 98_500_000.0),
                     policy=ToolPolicy())
     out = ts.call_tool("get_frequency", {})
-    # 信封就是 handler 结果本身：不落盘、不多任何键（既有相等性断言不回退）
-    assert out == {"frequency_hz": 98_500_000.0}
+    # 信封就是 handler 结果本身：不落盘、不多任何 spill 键。
+    # get_frequency 连上口 honesty 字段（connected/source），这是 handler
+    # 自己的输出；spill 层只保证「小结果原样透传、不增 truncated/spill_path」。
+    assert out == {"frequency_hz": 98_500_000.0,
+                   "connected": True, "source": "backend"}
+    assert "truncated" not in out and "spill_path" not in out
     assert not spill_dir.exists()
 
 
 def test_threshold_boundary_equal_size_not_spilled(tmp_path, monkeypatch):
-    """恰好等于阈值（未"超过"）不 spill；超过一字符才 spill。"""
+    """恰好等于阈值（未"超过"）不 spill；超过一字符才 spill。
+
+    直驱 ``_finalize_tool_result``：边界精度要求序列化长度完全可控，
+    而 get_scan_results 已被 scan 守卫包成 {ok,handle,segments,count}，
+    长度不再等于裸 payload。spill 阈值契约本就归 _finalize_tool_result。
+    """
     spill_dir = _use_tmp_spill(monkeypatch, tmp_path)
     payload = {"pad": "x" * 60}          # 序列化后 74 字符
     text_len = len(json.dumps(payload, ensure_ascii=False, default=str))
-    ts = MCPToolSet(controller=_stub(get_scan_results=lambda h: payload),
-                    policy=ToolPolicy())
 
     monkeypatch.setattr(mcp_server, "TOOL_RESULT_SPILL_THRESHOLD", text_len)
-    assert ts.call_tool("get_scan_results", {"handle": "h"}) == payload
+    assert mcp_server._finalize_tool_result("t", payload) == payload
     assert not spill_dir.exists()
 
     monkeypatch.setattr(mcp_server, "TOOL_RESULT_SPILL_THRESHOLD", text_len - 1)
-    assert ts.call_tool("get_scan_results", {"handle": "h"})["truncated"] is True
+    assert mcp_server._finalize_tool_result("t", payload)["truncated"] is True
 
 
 # ---------------------------------------------------------------------------
 # 大结果：spill 信封字段齐全、可完整读回
 # ---------------------------------------------------------------------------
 def test_large_result_spills_with_full_envelope(tmp_path, monkeypatch):
+    """直驱 ``_finalize_tool_result``：信封字段/落盘读回/字节数/预览全部
+    以裸 payload 为真值——这正是 spill 单元的契约，与具体 handler 形状无关。"""
     spill_dir = _use_tmp_spill(monkeypatch, tmp_path)
     original = _big_scan_results()
-    ts = MCPToolSet(controller=_stub(get_scan_results=lambda h: original),
-                    policy=ToolPolicy())
 
-    out = ts.call_tool("get_scan_results", {"handle": "scan-1"})
+    out = mcp_server._finalize_tool_result("get_scan_results", original)
 
     # 信封字段齐全
     assert out["ok"] is True
@@ -136,10 +151,8 @@ def test_preview_head_tail_concatenation_is_readable(tmp_path, monkeypatch):
     payload = {"head_marker": "频谱数据从这里开始",
                "points": [float(i) * 0.5 for i in range(2000)],
                "tail_marker": "频谱数据到这里结束"}
-    ts = MCPToolSet(controller=_stub(get_scan_results=lambda h: payload),
-                    policy=ToolPolicy())
 
-    out = ts.call_tool("get_scan_results", {"handle": "h"})
+    out = mcp_server._finalize_tool_result("get_scan_results", payload)
 
     assert out["truncated"] is True
     assert "head_marker" in out["preview_head"]
@@ -288,7 +301,11 @@ def test_threshold_injectable_both_directions(tmp_path, monkeypatch):
     # 阈值拉到极大：大结果原样返回（不 spill，不新增落盘文件）
     monkeypatch.setattr(mcp_server, "TOOL_RESULT_SPILL_THRESHOLD", 10 ** 9)
     back = ts.call_tool("get_scan_results", {"handle": "h"})
-    assert back == _big_scan_results()
+    # 无 spill 键；handler 输出原样（scan 守卫包成 ok/handle/segments/count，
+    # 裸 rows 落在 segments 里完整透传）
+    assert "truncated" not in back and "spill_path" not in back
+    assert back["ok"] is True and back["handle"] == "h"
+    assert back["segments"] == _big_scan_results()
     assert list((tmp_path / "nested" / "tool_results").glob("*.json")) == files_after_small
 
 
