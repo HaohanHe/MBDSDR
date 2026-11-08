@@ -55,6 +55,10 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
     Shortcut("view.planetarium", "Ctrl+Shift+P", "星象仪模式"),
     Shortcut("view.planetarium_exit", "Esc", "星象仪形态退出", scope="planetarium",
              note="只在该形态启用；先关 AI 回复卡再退出形态"),
+    Shortcut("planetarium.search", "Ctrl+F", "找天体（星象仪）",
+             scope="planetarium",
+             note="只在该形态启用：把天空搜索框抬到画面底部并聚焦；"
+                  "IDE 形态不劫持 Ctrl+F，留给文本/列表自身的查找语义"),
     # ---- 工具菜单 ----
     Shortcut("tools.sweep", "Ctrl+Shift+F", "FM 扫频找台"),
     Shortcut("tools.record", "Ctrl+R", "开始/停止录音"),

@@ -2636,9 +2636,24 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._search_edit.setPlaceholderText("搜索天体: ISS / Vega / NOAA…")
         self._search_edit.setMinimumHeight(22)
         self._search_edit.setMaximumHeight(32)
+        # 深色输入框：默认 QLineEdit 是白底，压在星空上像贴了张纸；
+        # 星象仪底部唤出时尤其刺眼（夜空中间一块白）。
+        self._search_edit.setStyleSheet(
+            "QLineEdit { background-color: rgba(18,20,26,0.92);"
+            " color: #E6EAF2; border: 1px solid rgba(255,255,255,0.20);"
+            " border-radius: 8px; padding: 3px 9px; }"
+            "QLineEdit:focus { border-color: rgba(120,170,255,0.78); }")
         self._search_edit.textChanged.connect(self._on_search_text)
         self._search_popup = QListWidget(self)
         self._search_popup.setWindowFlags(Qt.Popup)
+        # 结果是夜空上的浮层，跟输入框同一套深色；白底黑字会把星辰全压掉。
+        self._search_popup.setStyleSheet(
+            "QListWidget { background-color: #14161c; color: #D8DEEA;"
+            " border: 1px solid rgba(255,255,255,0.16); border-radius: 8px;"
+            " padding: 4px; }"
+            "QListWidget::item { padding: 5px 8px; border-radius: 6px; }"
+            "QListWidget::item:selected {"
+            " background-color: rgba(90,140,255,0.38); color: #FFFFFF; }")
         self._search_popup.clicked.connect(self._on_search_picked)
         self._search_results: List[Dict[str, object]] = []
 
@@ -3113,8 +3128,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         if on == self._immersive:
             return
         self._immersive = on
-        # 视图自带的"搜索天体"输入框在星象仪里让位：形态里已有那条 AI 胶囊
-        # （同一件事的更好说法），两个输入框上下叠着只会露出半行灰字。
+        # 搜索框在星象仪里默认收起（顶部要留给 AI 胶囊和天空），但**不是
+        # 消失**：按钮条那颗「🔍 找星」和 Ctrl+F 随时能把它唤到画面底部。
+        # 藏起来 ≠ 能力不存在——Stellarium 的 SearchDialog 也是按了才出来。
         for attr in ("_search_edit", "_search_popup"):
             wdg = getattr(self, attr, None)
             if wdg is not None:
@@ -3122,8 +3138,84 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                     wdg.setVisible(not on)
                 except RuntimeError:
                     pass
+        self._place_search_ui()
+        if on:
+            try:
+                self._search_popup.hide()
+            except (AttributeError, RuntimeError):
+                pass
         # 收起的浮层不该继续吃鼠标：拾取矩形同步失效，免得点空白处命中
         # 一张看不见的过境表。
+        self.update()
+
+    # ---- 搜索框的显隐与几何（两种形态共用同一套搜索链路）----------------
+    def _place_search_ui(self) -> None:
+        """搜索框位置：IDE 形态贴顶居中；星象仪形态落到底部居中。
+
+        星象仪顶部已经被 AI 胶囊和「今夜 / 时间流速」占了，搜索框再挤上去
+        会叠成半行灰字；底部中间是唯一不被信息卡和示例位置标注占用的
+        横向通道，和 Stellarium 把搜索框放在可视区下方的做法一致。
+        """
+        edit = getattr(self, "_search_edit", None)
+        if edit is None:
+            return
+        try:
+            if self._immersive:
+                w = max(240, min(420, self.width() - 240))
+                x = (self.width() - w) // 2
+                y = max(56, self.height() - 92)
+            else:
+                w = min(260, max(120, self.width() - 200))
+                x = max(60, (self.width() - w) // 2)
+                y = 8
+            edit.setGeometry(int(x), int(y), int(w), 26)
+        except (RuntimeError, AttributeError):
+            pass
+
+    def search_visible(self) -> bool:
+        """搜索框当前是否开着（按键路由与测试共用）。"""
+        edit = getattr(self, "_search_edit", None)
+        try:
+            return bool(edit is not None and edit.isVisible())
+        except RuntimeError:
+            return False
+
+    def reveal_search(self, focus: bool = True) -> bool:
+        """唤出搜索框（星象仪「🔍 找星」/ Ctrl+F）；返回是否可用。
+
+        只负责把已有的搜索框抬上来，不新建第二条搜索链——候选、分类图标、
+        选中后居中出卡，全部复用 ``_on_search_text`` / ``_on_search_picked``。
+        """
+        edit = getattr(self, "_search_edit", None)
+        if edit is None:
+            return False
+        try:
+            edit.setVisible(True)
+            self._place_search_ui()
+            edit.raise_()
+            if focus:
+                edit.setFocus(Qt.ShortcutFocusReason)
+                edit.selectAll()
+            self.update()
+            return True
+        except RuntimeError:
+            return False
+
+    def hide_search(self) -> None:
+        """收起搜索：星象仪里连输入框一起收；IDE 形态只收结果下拉。"""
+        popup = getattr(self, "_search_popup", None)
+        try:
+            if popup is not None:
+                popup.hide()
+        except RuntimeError:
+            pass
+        if self._immersive:
+            edit = getattr(self, "_search_edit", None)
+            try:
+                if edit is not None:
+                    edit.hide()
+            except RuntimeError:
+                pass
         self.update()
 
     # ========================================================================
@@ -3158,6 +3250,35 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # ------------------------------------------------------------------ #
     # 搜索 (分类: 空间站 / 人造卫星 / 恒星, 图标区分)
     # ------------------------------------------------------------------ #
+    def _show_search_popup(self) -> None:
+        """结果下拉贴着输入框弹出；下方放不下就翻到上方。
+
+        星象仪形态搜索框在画面底部，按老代码往下弹会跑到窗口外——
+        用户只看见输入框、以为搜坏了。
+        """
+        popup = getattr(self, "_search_popup", None)
+        edit = getattr(self, "_search_edit", None)
+        if popup is None or edit is None:
+            return
+        try:
+            popup.setMinimumWidth(edit.width())
+            popup.setMaximumWidth(max(edit.width(), 200))
+            rows = popup.count()
+            row_h = popup.sizeHintForRow(0) if rows else 0
+            row_h = row_h if row_h and row_h > 0 else 22
+            want_h = row_h * min(max(rows, 1), 8) + 8
+            below = edit.mapTo(self, edit.rect().bottomLeft())
+            above = edit.mapTo(self, edit.rect().topLeft())
+            if below.y() + want_h > self.height() and above.y() - want_h >= 0:
+                above.setY(max(0, above.y() - want_h))
+                popup.move(above)
+            else:
+                popup.move(below)
+            popup.show()
+            popup.raise_()
+        except RuntimeError:
+            pass
+
     def _on_search_text(self, text: str):
         text = (text or "").strip().lower()
         self._search_results = []
@@ -3251,11 +3372,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             self._search_popup.addItem(item)
         if self._search_results:
             # 下拉弹窗跟随搜索框宽度（弹性，不写死像素）
-            self._search_popup.setMinimumWidth(self._search_edit.width())
-            self._search_popup.setMaximumWidth(max(self._search_edit.width(), 200))
-            pos = self._search_edit.mapTo(self, self._search_edit.rect().bottomLeft())
-            self._search_popup.move(pos)
-            self._search_popup.show()
+            self._show_search_popup()
         elif text:
             # 没匹配 ≠ 坏了：也把弹窗拉起来，给一条不可选提示，
             # 否则用户只看到搜索框没反应，分不清「没这颗」和「功能挂了」。
@@ -3263,11 +3380,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             tip = self._QListWidgetItem("无匹配：卫星 / 恒星专名 / 行星 / 深空编号")
             tip.setFlags(Qt.NoItemFlags)
             self._search_popup.addItem(tip)
-            self._search_popup.setMinimumWidth(self._search_edit.width())
-            self._search_popup.setMaximumWidth(max(self._search_edit.width(), 200))
-            pos = self._search_edit.mapTo(self, self._search_edit.rect().bottomLeft())
-            self._search_popup.move(pos)
-            self._search_popup.show()
+            self._show_search_popup()
 
     def _on_search_picked(self, item):
         row = self._search_popup.currentRow()
@@ -3803,6 +3916,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self.all_sky_mode_changed.emit(enabled)
 
     def keyPressEvent(self, event):  # noqa: N802 (Qt 命名)
+        if (event.key() == Qt.Key_Escape and self._immersive
+                and self.search_visible()):
+            # Esc 先收搜索（最上面一层），再按一次才退出形态。
+            self.hide_search()
+            event.accept()
+            return
         if event.key() == Qt.Key_Escape and self._all_sky_active:
             self.set_all_sky_mode(False)
             event.accept()
@@ -7909,13 +8028,8 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         return best
 
     def resizeEvent(self, event: QResizeEvent):
-        # 搜索框: 顶部居中 (自包含 UI)
-        try:
-            w = min(260, self.width() - 200)
-            self._search_edit.setGeometry(max(60, (self.width() - w) // 2), 8,
-                                          w, 26)
-        except Exception:
-            pass
+        # 搜索框几何随形态/尺寸走（顶部居中 / 星象仪底部居中）
+        self._place_search_ui()
         # 调谐按钮覆盖层跟随尺寸
         self._position_tune_overlay()
         self.update()

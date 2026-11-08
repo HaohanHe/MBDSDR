@@ -153,6 +153,50 @@ harness），要求"深度调研学习完，再根据它看我们 agent 有什�
 - **诚实边界**：本轮只读代码与文档，**没有真机跑发射路径**（设备不在位）；
   调谐类未收进硬门，测试里专门有一条"还没修"如实钉住，防半修当全修。
 
+### 我这边（2026-11-09 凌晨：照 Stellarium 补 UI 入口，不重造能力）
+
+用户口径：「还缺 UI，跟人家差的不是一星半点，你看哪些能学人家的就去学」。
+先把 `reference/stellarium/src/gui/`（40 个 cpp）和 `D:/mbdsdr/.figma/`
+（CarWith 31 组组件）摊开，逐项对照 `desktop/` 的入口，结论是**能力大多
+已经有了，缺的是入口**：
+
+- **搜索被藏了**：`RFSkyView._on_search_text` 早就支持卫星/恒星/行星/深空
+  （选中后 `goto_animated` 居中 + 出信息卡），但 `set_immersive(True)` 把
+  输入框 `setVisible(False)`，星象仪里只剩「跟模型说话」一条路。现在加了
+  `reveal_search()` / `hide_search()` / `search_visible()`，按钮条「🔍 找星」，
+  Ctrl+F（`planetarium.search`，仅该形态启用），沉浸态搜索框定位改到**画面
+  底部居中**（顶部被 AI 胶囊占着），结果下拉放不下就向上翻；Esc 先收搜索、
+  再按才退形态。
+- **没有日期时间跳转**：只有「⏱ 流速」和「今夜」，Stellarium `DateTimeDialog`
+  那套（跳到任意时刻 + 回到现在）完全没有。新增 `desktop/time_machine.py`：
+  本地时间输入 + ±1 天/±1 小时 + 回到现在 + 今夜（走注入的真实暮光终求解）
+  + 「模拟中·比现在 ±X」状态行；应用只交一个 Unix 秒给主窗，
+  `_apply_time_jump` 调 `set_unix` 并立刻 `sat_tracker.refresh()`。
+- **没有一键存图**：新增「存图」→ `sky_view.grab()` 存到
+  `图片/MBDSDR/`，模拟时刻文件名带 `_sim`（事后认得出这不是实时观测）。
+- **按钮条挤成一坨**：11 个图层开关平铺在 152px 窄条里堆成四行方块，加
+  动作按钮后 20 颗。改成「▦ 图层」弹层（2 列、带中文名、11 项、最后一项
+  跨列居中），窄条只剩 9 颗。
+- **配色事故两处**（截图抓到的，不是猜的）：`QLineEdit`/`QListWidget`/`QLabel`
+  默认吃 palette 浅底 —— 搜索框和结果下拉在夜空上是白底黑字、时间机器标题
+  是白条。全部改深色，并给 `QLabel { background: transparent; }`。
+- **字形回退**：`☾` 在按钮上渲染成 `€`、`◐` 渲染成 `(`、`◍` 渲染成 `0`。
+  换成已验证的单色符号（⟳ ✧ ≈ ▽ ◎ ≡ ✦ ⊞），夜视去掉图标只留文字，
+  「☾ 今夜」改「今夜」。
+- **验证**：`tests/test_ui_gap_fill.py` 新增 9 条（搜索唤出 / Esc 分层 /
+  面板 11 项与 `layer_state` 同源且不越界 / 时间机器差值措辞与实时刷新 /
+  今夜走注入求解器 / 回调拿到 Unix 秒）；四文件 100 passed，十文件
+  **137 passed / 5 deselected**（5 条是 11-08 已在 HEAD 干净树复现的存量红，
+  本轮未碰）。截图：`output/_gap_01_buttons.png`、`_gap_01b_layers.png`、
+  `_gap_02_search.png`、`_gap_03_time_machine.png`（仓库外）。
+- **not_verified**：设备仍不在位（COM6/7 只有蓝牙，`rtl_test -t` = No
+  supported devices found），真机复验继续挂。
+- **还缺的（已对照未做）**：地点面板（城市搜索/地图选点，Stellarium
+  `LocationDialog`）、视图选项里的极限星等/投影切换（`ViewDialog`）、
+  快捷键改键 UI（`ShortcutsDialog`）。本仓库有 `SAMPLE_SITE` 与 Bortle
+  配置，但缺城市离线库与投影切换后的一致性测试，下一轮要先补齐数据源
+  再动 UI，别做个点了没反应的开关。
+
 ### 我这边（2026-11-08 傍晚：首次打开零门槛 + 「☾ 今夜」照 Stellarium）
 
 用户 17:2x 两次打断纠偏：「不会看人家原项目吗？」「原项目是 stellarium」

@@ -504,6 +504,7 @@ from module_panel import ModulePanel
 # CarWith 设计体系：token 单例 / 面板注册表 / Dock 布局管理器
 from tokens import tokens
 from floating_panel import FloatingPanel
+from time_machine import TimeMachineDialog, format_offset
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
 from constants import (
@@ -1274,6 +1275,13 @@ class MainWindow(QMainWindow):
             QKeySequence(_key("view.planetarium_exit")), self)
         self._planetarium_esc.activated.connect(self._on_escape)
         self._planetarium_esc.setEnabled(False)
+        # Ctrl+F 找天体：同属星象仪形态，和 Esc 一起启停。IDE 形态不占用
+        # Ctrl+F（那里是文本/列表的查找语义）。
+        self._planetarium_search_key = QShortcut(
+            QKeySequence(_key("planetarium.search")), self)
+        self._planetarium_search_key.activated.connect(
+            self._open_planetarium_search)
+        self._planetarium_search_key.setEnabled(False)
 
         # 工具菜单
         tools_menu = menubar.addMenu("工具(&T)")
@@ -2213,7 +2221,27 @@ class MainWindow(QMainWindow):
             "QPushButton:hover { background-color: rgba(255,255,255,0.15); }"
             "QPushButton:checked { background-color: rgba(255,255,255,0.22);"
             " color: #FFFFFF; }")
-        grid_host = QWidget(strip)
+        # 图层矩阵收进「▦ 图层」浮层——Stellarium 的左右竖条也是「一颗
+        # 图标 → 展开具体选项」。11 个开关平铺在 152px 窄条里会堆成四行
+        # 方块，和下面一串动作按钮挤成一坨，谁也找不着。
+        self._layer_popover = QFrame(self.sky_view)
+        self._layer_popover.setObjectName("planetariumLayerPopover")
+        self._layer_popover.setStyleSheet(
+            "QFrame#planetariumLayerPopover {"
+            " background-color: rgba(18,19,22,0.94);"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            " border-radius: 10px; }")
+        _pop_lay = QVBoxLayout(self._layer_popover)
+        _pop_lay.setContentsMargins(8, 8, 8, 8)
+        _pop_lay.setSpacing(6)
+        _pop_title = QLabel("图层", self._layer_popover)
+        _pop_title.setStyleSheet(
+            "background: transparent; color: rgba(220,228,239,0.72);"
+            " font-size: 9pt;")
+        _pop_lay.addWidget(_pop_title)
+        self._layer_popover.hide()
+
+        grid_host = QWidget(self._layer_popover)
         grid_host.setObjectName("planetariumLayerGrid")
         grid_host.setStyleSheet("background: transparent;")
         grid = QGridLayout(grid_host)
@@ -2232,40 +2260,54 @@ class MainWindow(QMainWindow):
             " color: #EAF1FA; border-color: rgba(255,255,255,0.16); }")
         self._layer_btns: dict = {}
         _layer_btns = (
-            ("orbits", "🛰", "轨道线：卫星未来 10 分钟轨迹"),
-            ("labels", "A", "天体标签（星名 / 座名 / 卫星名）"),
-            ("constellations", "✧", "星座连线与座名"),
-            ("dso", "◍", "深空天体（星云 / 星团 / 星系）符号"),
-            ("atmosphere", "☀", "大气与地平辉光"),
-            ("landscape", "⛰", "地景剪影（固定在地平系，不随时间转）"),
-            ("azgrid", "◎", "方位网格（等方位射线 + 等高圈）"),
-            ("eqgrid", "≡", "赤道网格（时圈 + 赤纬圈）"),
-            ("sats", "✦", "卫星层"),
-            ("hud", "⊞", "视场角与操作提示叠层"),
-            ("night", "☾", "夜视模式（整屏红光，保暗适应）"),
+            ("orbits", "⟳", "轨道", "轨道线：卫星未来 10 分钟轨迹"),
+            ("labels", "A", "星名", "天体标签（星名 / 座名 / 卫星名）"),
+            ("constellations", "✧", "星座", "星座连线与座名"),
+            ("dso", "◍", "深空", "深空天体（星云 / 星团 / 星系）符号"),
+            ("atmosphere", "≈", "大气", "大气与地平辉光"),
+            ("landscape", "▽", "地景", "地景剪影（固定在地平系，不随时间转）"),
+            ("azgrid", "◎", "方位网", "方位网格（等方位射线 + 等高圈）"),
+            ("eqgrid", "≡", "赤道网", "赤道网格（时圈 + 赤纬圈）"),
+            ("sats", "✦", "卫星", "卫星层"),
+            ("hud", "⊞", "叠层", "视场角与操作提示叠层"),
+            ("night", "", "夜视", "夜视模式（整屏红光，保暗适应）"),
         )
         try:
             _layer_state = self.sky_view.layer_state()
         except AttributeError:
             _layer_state = {}
-        for i, (key, glyph, tip) in enumerate(_layer_btns):
-            lb = QPushButton(glyph, grid_host)
+        for i, (key, glyph, label, tip) in enumerate(_layer_btns):
+            lb = QPushButton(f"{glyph} {label}".strip(), grid_host)
             lb.setObjectName(f"planetariumLayer_{key}")
             lb.setCheckable(True)
             lb.setChecked(bool(_layer_state.get(key, False)))
             lb.setToolTip(tip)
-            lb.setFixedSize(40, 28)
-            lb.setStyleSheet(_btn_css)
+            lb.setFixedSize(84, 26)
+            lb.setStyleSheet(_btn_css + "QPushButton { padding: 0; }")
             lb.clicked.connect(lambda _=False, k=key: self._on_layer_btn(k))
-            grid.addWidget(lb, i // 3, i % 3)
+            if i == len(_layer_btns) - 1:
+                # 11 项是奇数：最后一项跨两列居中，右列不留一个空洞。
+                grid.addWidget(lb, i // 2, 0, 1, 2)
+            else:
+                grid.addWidget(lb, i // 2, i % 2)
             self._layer_btns[key] = lb
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(2, 1)
-        strip_lay.addWidget(grid_host)
+        _pop_lay.addWidget(grid_host)
+        # 「▦ 图层」：图层面板的开合（默认收起——天空要干净，选项按需出现）
+        self._planetarium_layer_btn = QPushButton("▦ 图层", strip)
+        self._planetarium_layer_btn.setObjectName("planetariumLayers")
+        self._planetarium_layer_btn.setCheckable(True)
+        self._planetarium_layer_btn.setToolTip(
+            "图层：轨道 / 星名 / 星座 / 深空 / 网格 / 夜视…（点一下展开）")
+        self._planetarium_layer_btn.setMinimumHeight(30)
+        self._planetarium_layer_btn.setStyleSheet(_act_css)
+        self._planetarium_layer_btn.toggled.connect(
+            self._set_layer_popover_visible)
+        strip_lay.addWidget(self._planetarium_layer_btn, 0, Qt.AlignHCenter)
         # 「☾ 今夜」：Stellarium AstroCalc 的玩法，摁一下切到真实日落后
         # （民用暮光终 / 太阳 -6°），不是写死钟点、也不是伪造星空。
-        self._planetarium_tonight_btn = QPushButton("☾ 今夜", strip)
+        self._planetarium_tonight_btn = QPushButton("今夜", strip)
         self._planetarium_tonight_btn.setObjectName("planetariumTonight")
         self._planetarium_tonight_btn.setToolTip(
             "切到今夜天文暮光终（太阳 -18°，按站点真实日落算，天全黑）。"
@@ -2286,6 +2328,37 @@ class MainWindow(QMainWindow):
         self._planetarium_time_btn.clicked.connect(self._cycle_time_rate)
         strip_lay.addWidget(self._planetarium_time_btn, 0, Qt.AlignHCenter)
         self._sync_time_rate_btn()
+        # 「🔍 找星」：Stellarium 的 SearchDialog 位置。搜索链路本来就有
+        # （卫星 / 恒星 / 行星 / 深空 → 选中后居中出信息卡），只是沉浸态把
+        # 输入框收起来了；这颗按钮 + Ctrl+F 把它抬回画面底部。
+        self._planetarium_search_btn = QPushButton("🔍 找星", strip)
+        self._planetarium_search_btn.setObjectName("planetariumSearch")
+        self._planetarium_search_btn.setToolTip(
+            "按名字找天体：输入 ISS / Vega / 木星 / M42，回车定位并出信息卡（Ctrl+F）")
+        self._planetarium_search_btn.setMinimumHeight(30)
+        self._planetarium_search_btn.setStyleSheet(_act_css)
+        self._planetarium_search_btn.clicked.connect(self._open_planetarium_search)
+        strip_lay.addWidget(self._planetarium_search_btn, 0, Qt.AlignHCenter)
+        # 「🕒 时间」：Stellarium DateTimeDialog —— 跳到任意一天，不是只能
+        # 顺着时钟等。输入的是本地时间，应用时交给同一个时间引擎。
+        self._planetarium_time_jump_btn = QPushButton("🕒 时间", strip)
+        self._planetarium_time_jump_btn.setObjectName("planetariumTimeJump")
+        self._planetarium_time_jump_btn.setToolTip(
+            "跳到任意日期时间看那时的天空（本地时间；观测条件设定，非观测数据）")
+        self._planetarium_time_jump_btn.setMinimumHeight(30)
+        self._planetarium_time_jump_btn.setStyleSheet(_act_css)
+        self._planetarium_time_jump_btn.clicked.connect(self._open_time_machine)
+        strip_lay.addWidget(self._planetarium_time_jump_btn, 0, Qt.AlignHCenter)
+        # 「存图」：Stellarium 的截图用途——把此刻你看到的天空原样存成
+        # PNG，能直接发给别人看。模拟时刻在文件名里带 _sim，事后自己认得出。
+        self._planetarium_shot_btn = QPushButton("存图", strip)
+        self._planetarium_shot_btn.setObjectName("planetariumShot")
+        self._planetarium_shot_btn.setToolTip(
+            "把当前天空存成 PNG（图片目录 / MBDSDR；模拟时刻文件名带 _sim）")
+        self._planetarium_shot_btn.setMinimumHeight(30)
+        self._planetarium_shot_btn.setStyleSheet(_act_css)
+        self._planetarium_shot_btn.clicked.connect(self._save_sky_screenshot)
+        strip_lay.addWidget(self._planetarium_shot_btn, 0, Qt.AlignHCenter)
         exit_btn = QPushButton("退出星象仪\n(Esc)")
         exit_btn.setObjectName("planetariumExit")
         exit_btn.setToolTip("切回 IDE 形态；按 Esc 同样退出")
@@ -2537,6 +2610,124 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass
 
+    def _open_planetarium_search(self) -> None:
+        """星象仪「🔍 找星」：把搜索框抬到画面底部并聚焦。
+
+        不新建搜索链：候选、分类图标、选中后居中出信息卡全部复用
+        ``RFSkyView._on_search_text`` / ``_on_search_picked``。
+        """
+        sv = getattr(self, "sky_view", None)
+        try:
+            ok = bool(sv is not None and sv.reveal_search())
+        except Exception:
+            ok = False
+        try:
+            if ok:
+                self.statusBar().showMessage(
+                    "输入天体名：ISS / Vega / 木星 / M42；↑↓ 选择，回车定位",
+                    MSG_NORMAL)
+            else:
+                self.statusBar().showMessage(
+                    "搜索框不可用（天空视图未就绪）", MSG_NORMAL)
+        except RuntimeError:
+            pass
+
+    def _engine_now_unix(self) -> float:
+        """时间引擎此刻；引擎不可用就退回墙钟（不假装有模拟时刻）。"""
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            return float(get_time_engine().now_unix())
+        except Exception:
+            return time.time()
+
+    def _open_time_machine(self) -> None:
+        """🕒 时间：Stellarium ``DateTimeDialog`` 的等价物。
+
+        对话框只负责收集本地时刻；真正改引擎走 ``_apply_time_jump``，
+        和「☾ 今夜」「⏱ 流速」共用同一份时间事实源。
+        """
+        sv = getattr(self, "sky_view", None)
+        obs = None
+        if sv is not None:
+            try:
+                obs = sv.get_observer()
+            except Exception:
+                obs = None
+        resolver = None
+        if obs:
+            lat, lon = obs.get("lat"), obs.get("lon")
+
+            def resolver():  # noqa: F811 - 有意遮蔽，闭包带住站点坐标
+                return _night_observation_time(lat, lon)
+
+        dlg = TimeMachineDialog(
+            self, now_unix=self._engine_now_unix(),
+            night_resolver=resolver, on_apply=self._apply_time_jump)
+        dlg.exec()
+
+    def _apply_time_jump(self, unix_ts: float) -> None:
+        """把观测时刻跳到给定 Unix 秒，并立刻按新 JD 重算天空。
+
+        历表桥默认 10 s 一刷；不主动 refresh 的话，跳过去要等十秒天才变，
+        用户会以为按钮没生效。
+        """
+        from mbdsdr_ai.new_spacetime import get_time_engine
+        eng = get_time_engine()
+        eng.set_unix(float(unix_ts))
+        eng.set_rate(1.0)
+        tracker = getattr(self, "sat_tracker", None)
+        if tracker is not None:
+            tracker.refresh()
+        self._sync_time_rate_btn()
+        try:
+            self.sky_view.update()
+        except RuntimeError:
+            pass
+        local = datetime.fromtimestamp(float(unix_ts)).strftime("%m-%d %H:%M")
+        delta = float(unix_ts) - time.time()
+        try:
+            if abs(delta) < 60.0:
+                self.statusBar().showMessage(f"时刻已回到此刻 {local}（实时）",
+                                             MSG_NORMAL)
+            else:
+                self.statusBar().showMessage(
+                    f"观测条件：跳到 {local}（{format_offset(delta)}；"
+                    "模拟、非观测数据）· ⏱ 走一圈回到此刻", MSG_NORMAL)
+        except RuntimeError:
+            pass
+
+    def _save_sky_screenshot(self) -> None:
+        """一键存图：把当前天空原样存成 PNG。
+
+        存的是"你看到的这一帧"（grab，不重绘、不另算），所以画面里有什么
+        图里就有什么；模拟时刻文件名带 ``_sim``，避免事后把跳过去的夜空
+        当成实时观测。
+        """
+        from PySide6.QtCore import QStandardPaths
+        base = (QStandardPaths.writableLocation(
+            QStandardPaths.PicturesLocation)
+            or os.path.expanduser("~"))
+        folder = os.path.join(base, "MBDSDR")
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError:
+            folder = base
+        sim = abs(self._engine_now_unix() - time.time()) > 60.0
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(
+            folder, f"sky_{stamp}{'_sim' if sim else ''}.png")
+        try:
+            ok = bool(self.sky_view.grab().save(path, "PNG"))
+        except (RuntimeError, OSError):
+            ok = False
+        try:
+            self.statusBar().showMessage(
+                (f"已存图：{path}" if ok else f"存图失败：{path}")
+                + ("（模拟时刻画面）" if sim else ""),
+                MSG_IMPORTANT if ok else MSG_NORMAL)
+        except RuntimeError:
+            pass
+
     def _on_layer_btn(self, key: str) -> None:
         """图层按钮 → 天空视图（按钮不自己留状态，一律从视图读回）。"""
         btn = getattr(self, "_layer_btns", {}).get(key)
@@ -2655,6 +2846,18 @@ class MainWindow(QMainWindow):
     def _exit_planetarium(self) -> None:
         if getattr(self, "_app_mode", "ide") != "planetarium":
             return
+        # 图层面板与搜索框都是形态内的东西，退出时一并收起（否则会飘在
+        # IDE 页面左上角，像没关掉的弹窗）。
+        pop = getattr(self, "_layer_popover", None)
+        if pop is not None:
+            pop.hide()
+        layer_btn = getattr(self, "_planetarium_layer_btn", None)
+        if layer_btn is not None and layer_btn.isChecked():
+            layer_btn.setChecked(False)
+        try:
+            self.sky_view.hide_search()
+        except (AttributeError, RuntimeError):
+            pass
         self._planetarium_sky_layout.removeWidget(self.sky_view)
         self._restore_sky_location(self._sky_restore_info)
         self._sky_restore_info = None
@@ -2724,6 +2927,9 @@ class MainWindow(QMainWindow):
         esc = getattr(self, "_planetarium_esc", None)
         if esc is not None:
             esc.setEnabled(self._app_mode == "planetarium")
+        search_key = getattr(self, "_planetarium_search_key", None)
+        if search_key is not None:
+            search_key.setEnabled(self._app_mode == "planetarium")
 
     def _on_escape(self) -> None:
         """Esc 逐层退出当前状态：先关星象仪 AI 回复卡，再退出星象仪形态。
@@ -6660,6 +6866,40 @@ class MainWindow(QMainWindow):
             sky.width(), sky.height(), strip.width(), strip.height(), bar_rect)
         strip.move(x, y)
         strip.raise_()
+        # 图层面板跟着按钮条走（开着的时候才跟）
+        pop = getattr(self, "_layer_popover", None)
+        if pop is not None and pop.isVisible():
+            self._place_layer_popover()
+
+    def _set_layer_popover_visible(self, on: bool) -> None:
+        """「▦ 图层」开合：展开时贴按钮条左侧，收起就消失。"""
+        pop = getattr(self, "_layer_popover", None)
+        if pop is None:
+            return
+        if not on:
+            pop.hide()
+            return
+        self._place_layer_popover()
+        pop.show()
+        pop.raise_()
+
+    def _place_layer_popover(self) -> None:
+        """图层面板位置：默认贴按钮条左侧；左边放不下就落到按钮条下方。
+
+        坐标现算、不缓存——窗口缩放/全屏切换后按钮条会挪，缓存一次就会
+        让面板浮在半空。
+        """
+        pop = getattr(self, "_layer_popover", None)
+        strip = getattr(self, "_planetarium_strip", None)
+        if pop is None or strip is None:
+            return
+        pop.adjustSize()
+        x = int(strip.x() - pop.width() - 10)
+        y = int(strip.y())
+        if x < 8:
+            x = max(8, int(strip.x()))
+            y = int(strip.y() + strip.height() + 8)
+        pop.move(max(8, x), max(8, y))
 
     def _set_planetarium_strip_hover(self, on: bool) -> None:
         """鼠标移入变实、移开变淡（浮层不挡视线）。"""
