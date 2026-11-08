@@ -232,9 +232,27 @@ not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面�
   `run_all.py --with-tests`，两条套件各开一个子进程单独跑，数字从 pytest
   汇总行现算（不抄报告），原始日志落盘；默认不跑，避免拖慢 ~90 s 证据包。
   契约测试 13 passed（含"默认不跑 / `--with-tests` 才跑"）。
-- **全量 `tests/` 尚在跑**：本轮启动时修复未落盘、且期间并发跑过诊断
-  pytest，结果**不作权威结论**；待其结束后把失败 nodeid 放进干净进程
-  单独复跑分类，真修或进 `docs/known-red-register.md`。
+- **全量 `tests/` 那一轮已作废**：启动时修复未落盘、期间并发跑过诊断
+  pytest，跑到 51% 主动停止，结果不作权威结论。改用「失败节点干净复跑」：
+  从日志逐字符解析出 18 个 F 的 nodeid，放进**一个无并发的进程**复跑 →
+  **13 条转绿**（4 条是上面真修的、9 条确属并发/时序假红），
+  **5 条真红**全在错误码台账，是另一 lane Sprint 5–8 新增码未登记：
+
+  1. `parallel_exec_error`（agent.py:4021，Sprint 5 并行执行核）正式登记进
+     `mbdsdr_ai/error_catalog.py` + `docs/error-catalog.md` +
+     `desktop/error_remedy.py` 的「不出入口 + 真实原因」；
+  2. `tool_timeout` 模块里有、文档与 remedy 映射里没有 → 两处补齐；
+  3. `session_log.py:32` 的 `EV_ERROR = "error"` 是**会话事件类型**不是错误码
+     → 加进野码白名单并写明理由，不改常量（模型可见事件都要有常量）；
+  4. `test_deleting_an_existing_entry_maps_red` 是 1/2 的连带红，缺口清零后自愈；
+  5. `docs/learn/decoder-capability-matrix.md` 与生成器漂移
+     （`tests/golden` 14→15）→ 用官方
+     `scripts/decoder_capability_report.py --write` 重生成，不手抄。
+
+  验证：错误码/帮助/能力矩阵/文档守卫 5 文件 **33 passed**；
+  18 个失败节点干净复跑 **18 passed**。剩余 49% 未跑过的用例，
+  由 `tools/evidence/test_suites.py --suite desktop` 在无并发、无改动条件下
+  单独全量跑一次作权威结果。
 
 ### 我这边（2026-11-09 凌晨第二批：站址单源 + 地点面板 + 投影 + 星等只读）
 

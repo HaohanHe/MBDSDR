@@ -127,6 +127,11 @@ _SPECS = (
           "工具执行超时",
           "工具 '{tool}' 执行超时（{timeout_s} 秒），已中止。",
           "检查硬件是否响应；若工具本身耗时长，可增大超时或分步操作。"),
+    _spec("parallel_exec_error", LAYER_TOOL, False,
+          "并发执行核自身异常（Sprint 5 并行工具面）",
+          "工具并发执行异常: {detail}；该轮结果按失败处理，未伪装成功。",
+          "这是执行核内部异常，不是参数问题：不要原样重试；"
+          "记录原始异常类型与上下文，改用串行执行并排查 _exec_one_tool。"),
     _spec("empty_result_without_reason", LAYER_TOOL, False,
           "成功但无内容且无原因",
           "工具 '{tool}' 返回了空结果且未提供原因（已按失败处理）。",

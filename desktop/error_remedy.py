@@ -45,7 +45,11 @@ REMEDY_BY_CODE: Dict[str, Remedy] = {r.code: r for r in build_remedies()}
 #: 上面的 REMEDY_BY_CODE。新增 code 忘了登记 → mapping_gaps() 非空 → 测试红。
 _NO_ENTRY_BY_REASON: Dict[str, tuple] = {
     "AI/MCP 工具层细项：code 不进入任何桌面 UI 控件（仅工具返回值/服务端响应），不设入口": (
-        "workflow_executor_missing", "unknown_tool",
+        "workflow_executor_missing", "unknown_tool", "parallel_exec_error",
+        # Sprint 5 并行执行核内部异常：只在 ToolResult.error 里，桌面无渲染点
+    ),
+    "工具执行超时：桌面 AI 面板直接展示目录 message 原文，状态栏/帮助面板不另设入口": (
+        "tool_timeout",
     ),
     "设备接入/服务端协议细项：code 仅出现在后端状态、Web JSON 或外部调用返回值，桌面控件不渲染": (
         "bad_arguments", "bad_command", "bad_config", "bad_json",

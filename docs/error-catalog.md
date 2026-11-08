@@ -55,6 +55,8 @@ AI 层各自拼中文。守卫测试 `tests/test_error_catalog_guard.py` 校验�
 | `param_type_mismatch` | tool | 参数类型不符 | 参数 '{param}' 需要 {expected}，收到 {actual}；未执行该工具。 | 按参数类型修正后重试。 | 否 |
 | `recording_not_found` | tool | 录像或模板不存在 | 记录/模板 '{name}' 不存在。 | 用列表工具确认名称后重试。 | 否 |
 | `subagent_not_found` | tool | 子代理不存在 | 子代理 '{name}' 不存在或已结束。 | 先创建/列出子代理，再用其 ID 调用。 | 否 |
+| `tool_timeout` | tool | 工具执行超时 | 工具 '{tool}' 执行超时（{timeout_s} 秒），已中止。 | 检查硬件是否响应；若工具本身耗时长，可增大超时或分步操作。 | 是 |
+| `parallel_exec_error` | tool | 并发执行核自身异常（Sprint 5 并行工具面） | 工具并发执行异常: {detail}；该轮结果按失败处理，未伪装成功。 | 这是执行核内部异常，不是参数问题：不要原样重试；记录原始异常类型与上下文，改用串行执行并排查 _exec_one_tool。 | 否 |
 | `tool_not_found` | tool | 工具名未注册 | 工具 '{tool}' 不存在。可用工具：{available} | 用 list_tools 查看全部工具名或按类别检索；确认名称拼写与前缀（如 sdr_/vna_）后重试。 | 否 |
 | `tool_unavailable` | tool | 工具存在但当前不可用 | 工具 '{tool}' 当前不可用（设备未连接或功能未启用）。 | 先调用连接/枚举工具（如 sdr_list_devices → sdr_connect，或 vna_connect）；无硬件时改用返回诚实空态的只读工具，不要虚构数据。 | 否 |
 | `unknown_tool` | tool | 工具名未知 | 未知工具 '{tool}'。 | 用 list_tools 确认工具名后重试。 | 否 |

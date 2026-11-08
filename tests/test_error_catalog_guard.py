@@ -45,6 +45,11 @@ _WILD_CODE_ALLOW = {
     # 是经验类型枚举，不是错误码。
     ("agent.py", "error_recovery"):
         "经验类型别名表（error → error_recovery），非错误码",
+    # session_log.py 的 EV_ERROR = "error" 是 append-only JSONL 的**事件类型**
+    # 常量（与 turn_start / tool_call / compaction 同族），不是 ToolResult.error
+    # 错误码；模型可见事件都要有常量，故不能改写成 catalog 里的码。
+    ("session_log.py", "error"):
+        "会话日志事件类型 EV_ERROR，非错误码（Sprint 3 状态面新增）",
 }
 
 _EMPTY_PHRASE_ALLOW = {
