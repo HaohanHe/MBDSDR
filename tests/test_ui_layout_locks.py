@@ -599,9 +599,13 @@ class TestColumnsAndEmptyPanels:
         assert panel.width() <= center.width() + 1
         # 空态也不许把画布撑得比列还宽（画布是空态视觉主体）
         assert panel.canvas.width() <= panel.width()
-        # 地图画布与列表必须落在面板内（此前后者被挤出 13px）
+        # 空态画布不越界；0 行表格应被收起（画布铺满，不再半屏空表格）。
+        # Qt 隐藏控件仍保留最后一次 geometry，故只在可见时验表格几何。
         assert panel.canvas.geometry().right() <= panel.width() + 1
-        assert panel.table.geometry().right() <= panel.width() + 1
+        if panel.table.isVisible():
+            assert panel.table.geometry().right() <= panel.width() + 1
+        else:
+            assert panel.aircraft_count() == 0, "有飞机时表格必须可见"
 
 
 # ---------------------------------------------------------------------------

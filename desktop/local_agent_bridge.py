@@ -437,6 +437,25 @@ class LocalAgentBridge:
             out["reply"] = "工具执行失败，原因写在回执卡里，不替它遮掩。"
         return out
 
+    def record_external_call(self, tool_name: str, args: Dict[str, Any] = None,
+                             ok: bool = True, content: str = "") -> Optional[str]:
+        """模型链路（配了 API Key）的工具调用也登记到同一套编排/Hooks。
+
+        本地协商和模型对话是两条入口，但「编排 / 常驻化」必须是同一份
+        事实源：模型跑过的工具同样产生真实 Orchestrator 任务与 Hooks
+        事件，状态条与能力矩阵读到的数字才不分裂。
+        """
+        args = dict(args or {})
+        self._emit_hook("agent.tool_call",
+                        {"tool": tool_name, "args": args,
+                         "source": "model_chat", "gated": False})
+        tid = self._record_task(tool_name, tool_name, args,
+                                str(content or ("ok" if ok else "failed"))[:400])
+        self._emit_hook("agent.tool_result",
+                        {"tool": tool_name, "success": bool(ok),
+                         "source": "model_chat"})
+        return tid
+
     # ---------------------------------------------------------------- 常驻状态
     def live_state(self) -> Dict[str, Any]:
         """给常驻状态条 / 能力矩阵读的真实数字。"""

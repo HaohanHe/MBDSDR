@@ -1796,6 +1796,13 @@ class MainWindow(QMainWindow):
         self._build_mode_shell()
         self._restore_app_mode()
 
+        # 启动恢复链走完后**重新套用页面形态**：DockLayoutManager.restore_state()
+        # 里的 QMainWindow.restoreState(dock_state) 会把主工具栏 show 回来，
+        # 覆盖掉前面 set_focus_mode 的收起。用户存过 dock state 时重启就会
+        # 看到「详细配置项又冒出来」（页面极简被破）。这是一处真 bug，
+        # 不是基线漂移，别靠重定标掩盖。
+        self.set_focus_mode(getattr(self, "_focus_mode", True))
+
         # ---- 动态 UI 动作总线挂载（模型 → 界面）：本窗口为执行器，
         # UI 线程 150ms 排水（AIWorker 后台线程不直接碰控件）----
         self._init_ui_action_bus()
@@ -3155,6 +3162,44 @@ class MainWindow(QMainWindow):
         self._show_capability_drawer()
 
     # ---------------------------------------------------------------- 自由窗口
+    _FLOAT_OPEN_KEY = "floating/open_panels"
+
+    def _float_settings(self) -> QSettings:
+        return QSettings("MBDSDR", "Desktop")
+
+    def _persist_float_keys(self, keys=None) -> None:
+        """记下「哪些面板现在是弹出的」，几何由 FloatingPanel 自己存。"""
+        ks = list(keys if keys is not None else self._float_windows.keys())
+        try:
+            self._float_settings().setValue(self._FLOAT_OPEN_KEY, ks)
+        except Exception:
+            pass
+
+    def _restore_float_panels(self) -> None:
+        """按稳定 key（tabData）还原上次弹出的面板与各自位置。"""
+        if not getattr(self, "_free_float_enabled", True):
+            return
+        try:
+            keys = self._float_settings().value(self._FLOAT_OPEN_KEY, []) or []
+        except Exception:
+            return
+        if isinstance(keys, str):
+            keys = [keys]
+        for key in (str(k) for k in keys):
+            if key in self._float_windows:
+                continue
+            for which, tabs in (("left", getattr(self, "left_tab", None)),
+                                ("right", getattr(self, "right_tab", None))):
+                if tabs is None:
+                    continue
+                for i in range(tabs.count()):
+                    try:
+                        if self._float_key(which, tabs, i) == key:
+                            self._pop_out_tab(which, i, restore=True)
+                            break
+                    except Exception:
+                        continue
+
     def set_free_float_enabled(self, on: bool) -> None:
         """自由窗口总开关：关掉时所有弹出面板归位，回到固定三栏。"""
         self._free_float_enabled = bool(on)
@@ -3162,7 +3207,10 @@ class MainWindow(QMainWindow):
         if btn is not None:
             btn.setVisible(bool(on))
         if not on:
-            self._return_all_panes()
+            # 关总开关只是收起，不清用户记住的摆位；下次打开还能还原。
+            self._return_all_panes(persist=False)
+        else:
+            QTimer.singleShot(0, self._restore_float_panels)
 
     def _float_key(self, which: str, tabs, index: int) -> str:
         """按页签的稳定 id（tabData）寻址，切语言/重建页签也不会串位。"""
@@ -3202,7 +3250,8 @@ class MainWindow(QMainWindow):
         menu.exec(self._float_btn.mapToGlobal(
             QPoint(0, self._float_btn.height())))
 
-    def _pop_out_tab(self, which: str, index: int) -> None:
+    def _pop_out_tab(self, which: str, index: int,
+                     restore: bool = False) -> None:
         """把某一个页签整体拖成独立自由窗口，原位留占位保住页签序号。"""
         tabs = getattr(self, "left_tab", None) if which == "left" \
             else getattr(self, "right_tab", None)
@@ -3232,16 +3281,26 @@ class MainWindow(QMainWindow):
         panel = FloatingPanel(
             key=key, title=text, payload=payload, host=host,
             on_return=lambda k=key: self._return_panel(k))
-        # 多开时级联错开，别一叠全压在同一个位置
-        n = len(self._float_windows)
-        panel.move(max(24, host.width() - panel.width() - 48 - n * 28),
-                   min(max(24, 70 + n * 28), max(24, host.height() - 220)))
-        panel.save_geometry()
+        # 首次弹出才级联摆放；QSettings 里已有几何时 FloatingPanel 构造时
+        # 就已经还原到用户上次拖到的位置，绝不覆盖（「摆完能记住」）。
+        try:
+            saved_pos = self._float_settings().value(
+                "floating_panel/%s/pos" % key)
+        except Exception:
+            saved_pos = None
+        if not restore and saved_pos is None:
+            n = len(self._float_windows)
+            panel.move(max(24, host.width() - panel.width() - 48 - n * 28),
+                       min(max(24, 70 + n * 28),
+                           max(24, host.height() - 220)))
+            panel.save_geometry()
         self._float_windows[key] = dict(
             panel=panel, tabs=tabs, index=index, placeholder=placeholder,
             text=text, data=data)
+        if not restore:
+            self._persist_float_keys()
 
-    def _return_panel(self, key: str) -> None:
+    def _return_panel(self, key: str, persist: bool = True) -> None:
         info = self._float_windows.pop(key, None)
         if info is None:
             return
@@ -3263,10 +3322,14 @@ class MainWindow(QMainWindow):
         # 不用 deleteLater()：on_return 闭包还持有 panel 的 Python 引用，
         # 强删会让 C++ QVBoxLayout 比 Python 包装先走，退出时抛
         # "Internal C++ object already deleted"。交给 GC 按引用计数收。
+        if persist:
+            self._persist_float_keys()
 
-    def _return_all_panes(self) -> None:
+    def _return_all_panes(self, persist: bool = True) -> None:
         for key in list(self._float_windows):
-            self._return_panel(key)
+            self._return_panel(key, persist=False)
+        if persist:
+            self._persist_float_keys()
 
     def _vsep(self) -> QLabel:
         sep = QLabel("|")
@@ -10681,7 +10744,8 @@ class MainWindow(QMainWindow):
         # 先收自由浮层：它们不是布局子控件，晚收会在窗口析构时撞上
         # 已删除的 C++ layout。
         try:
-            self._return_all_panes()
+            # 关窗时收起浮层但**不清列表**：下次启动应恢复用户摆过的窗口。
+            self._return_all_panes(persist=False)
         except Exception:
             pass
         cap = getattr(self, "_cap_panel", None)

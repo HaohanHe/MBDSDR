@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer  # noqa: E402
 from PySide6.QtGui import (  # noqa: E402
-    QBrush, QColor, QFont, QPainter, QPen, QPolygonF,
+    QBrush, QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF,
 )
 from PySide6.QtWidgets import (  # noqa: E402
     QHBoxLayout, QHeaderView, QSizePolicy, QTableWidget, QTableWidgetItem,
@@ -135,32 +135,21 @@ class _MapCanvas(PinchZoomMixin, QWidget):
                 if a.lat is not None and a.lon is not None]
 
     def paintEvent(self, event) -> None:  # noqa: D401 (Qt 回调)
+        """地图画布：网格 + 真实大陆轮廓 + 飞机点。
+
+        空态不再提前 return：用户点名「中下面那么大空」——旧实现在无
+        飞机时只画顶部一行小字、连经纬网和大陆轮廓都不画，剩下整片画布
+        纯色，右边还杵着一张 0 行表格。现在**地图还是地图，只是没飞机**：
+        网格与 WORLD_LAND_POLYGONS（真实简化地理坐标）照画，绝不画假点、
+        不画装饰性银河，空态提示居中叠在地图上。
+        """
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         w, h = self.width(), self.height()
         p.fillRect(self.rect(), _BG)
 
         acs = self._displayed()
-        if not acs:
-            # 空态：顶部居中小字提示，不画任何假点（不施加缩放变换）；
-            # 面板主体留空即可，提示不撑满画布做视觉主体。
-            p.setPen(QPen(_TEXT))
-            f = QFont()
-            f.setPointSize(10)
-            p.setFont(f)
-            p.drawText(QRectF(0, 12, w, 28), Qt.AlignHCenter, ADSB_EMPTY_TEXT)
-            # 解码器给的真实诊断：把"没信号 / 信号弱 / 频段不符 / 解码器异常"
-            # 分开说，用户不必对着一句「无 ADS-B 飞机」猜是哪一种。
-            diag = getattr(self, "diag_text", "") or ""
-            if diag:
-                f2 = QFont()
-                f2.setPointSize(8)
-                p.setFont(f2)
-                p.drawText(QRectF(8, 40, w - 16, max(20, h - 44)),
-                           Qt.AlignHCenter | Qt.TextWordWrap, diag)
-            p.end()
-            return
-
+        p.save()
         # 触屏缩放/平移：以画布中心为锚点做 scale+translate 变换。
         # 经纬网/大陆轮廓/飞机点都在变换后的坐标系里绘制，整体一起缩放。
         if self._map_zoom != 1.0 or self._map_pan_x or self._map_pan_y:
@@ -180,7 +169,7 @@ class _MapCanvas(PinchZoomMixin, QWidget):
             _, y_right = project_equirectangular(float(lat), 180.0, w, h)
             p.drawLine(QPointF(0.0, y_left), QPointF(float(w), y_right))
 
-        # 简化大陆轮廓：浅填充 + 蓝灰粗描边。
+        # 简化大陆轮廓：浅填充 + 蓝灰粗描边（真实坐标，不是装饰贴图）。
         outline_pen = QPen(_TEXT, 2)
         for poly in WORLD_LAND_POLYGONS:
             qp = QPolygonF()
@@ -192,23 +181,60 @@ class _MapCanvas(PinchZoomMixin, QWidget):
             p.drawPolygon(qp)
 
         # 飞机点：橙色实心圆 + 呼号文字；有航向时画一小段航向线。
-        dot_pen = QPen(_ACCENT, 1)
-        dot_brush = QBrush(_ACCENT)
-        for a in acs:
-            x, y = project_equirectangular(float(a.lat), float(a.lon), w, h)
-            if a.track_deg is not None:
-                rad = math.radians(float(a.track_deg))
-                dx = math.sin(rad)
-                dy = -math.cos(rad)  # 屏幕 y 向下，北对应 -y
-                p.setPen(QPen(_ACCENT, 2))
-                p.drawLine(QPointF(x, y),
-                           QPointF(x + 14.0 * dx, y + 14.0 * dy))
-            p.setPen(dot_pen)
-            p.setBrush(dot_brush)
-            p.drawEllipse(QPointF(x, y), 5.0, 5.0)
-            p.setPen(QPen(_TEXT))
-            p.drawText(QPointF(x + 8.0, y - 6.0), a.callsign or a.icao_hex)
+        if acs:
+            dot_pen = QPen(_ACCENT, 1)
+            dot_brush = QBrush(_ACCENT)
+            for a in acs:
+                x, y = project_equirectangular(float(a.lat), float(a.lon), w, h)
+                if a.track_deg is not None:
+                    rad = math.radians(float(a.track_deg))
+                    dx = math.sin(rad)
+                    dy = -math.cos(rad)  # 屏幕 y 向下，北对应 -y
+                    p.setPen(QPen(_ACCENT, 2))
+                    p.drawLine(QPointF(x, y),
+                               QPointF(x + 14.0 * dx, y + 14.0 * dy))
+                p.setPen(dot_pen)
+                p.setBrush(dot_brush)
+                p.drawEllipse(QPointF(x, y), 5.0, 5.0)
+                p.setPen(QPen(_TEXT))
+                p.drawText(QPointF(x + 8.0, y - 6.0), a.callsign or a.icao_hex)
+        p.restore()
 
+        if not acs:
+            # 居中信息牌：不遮挡地图主体，只把「现在确实没有数据」说清。
+            f = QFont()
+            f.setPointSize(10)
+            p.setFont(f)
+            fm = QFontMetrics(f)
+            box_w = min(float(w) - 24.0,
+                        max(220.0, float(fm.horizontalAdvance(
+                            ADSB_EMPTY_TEXT)) + 40.0))
+            box_h = 34.0
+            bx = (float(w) - box_w) / 2.0
+            by = (float(h) - box_h) / 2.0
+            bg = QColor(_BG)
+            bg.setAlpha(220)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(bg))
+            p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
+            p.setPen(QPen(_GRID, 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
+            p.setPen(QPen(_TEXT))
+            p.drawText(QRectF(bx, by, box_w, box_h),
+                       int(Qt.AlignCenter), ADSB_EMPTY_TEXT)
+            # 解码器给的真实诊断：把「没信号 / 信号弱 / 频段不符 / 解码器
+            # 异常」分开说，用户不必对着一句「无飞机」猜是哪一种。
+            diag = getattr(self, "diag_text", "") or ""
+            if diag:
+                f2 = QFont()
+                f2.setPointSize(8)
+                p.setFont(f2)
+                p.setPen(QPen(_TEXT))
+                p.drawText(QRectF(8.0, by + box_h + 8.0,
+                                  float(w) - 16.0,
+                                  max(20.0, float(h) - by - box_h - 16.0)),
+                           int(Qt.AlignHCenter | Qt.TextWordWrap), diag)
         p.end()
 
 
@@ -246,6 +272,9 @@ class AdsbMapPanel(QWidget):
         # 压到 40 后同一列只需 240+40+6+8=294，300px 内可完整排下。
         self.table.setMinimumWidth(40)
         self.table.setMaximumWidth(320)
+        # 0 行时不该杵着一张空表格占掉中栏右侧：没数据就收起，画布铺满；
+        # 有真实飞机时由 _refresh_table 自动放回来。
+        self.table.setVisible(False)
         # 画布用 tokens 的深色 card_1，表格却用 Qt 默认白底 —— 中栏因此
         # 一半黑一半白（用户原话「你是黑白无常啊」）。统一到同一套色：
         # 表格、表头、单元格全部跟随画布底色，浅色主题下也不再劈成两半。
@@ -417,7 +446,7 @@ class AdsbMapPanel(QWidget):
     def clear(self) -> None:
         """清空跟踪表与列表，回到空态。"""
         self._tracker.clear()
-        self.table.setRowCount(0)
+        self._refresh_table()   # 同时收起空表格，与 update_aircraft 同口径
         self.canvas.update()
 
     def aircraft_count(self) -> int:
@@ -432,6 +461,7 @@ class AdsbMapPanel(QWidget):
 
     def _refresh_table(self) -> None:
         acs = self._displayed()
+        self.table.setVisible(bool(acs))
         self.table.setRowCount(len(acs))
         for row, a in enumerate(acs):
             self.table.setItem(row, 0,

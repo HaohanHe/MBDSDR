@@ -36,20 +36,29 @@ def qapp():
     yield app
 
 
-@pytest.fixture
-def main_window(qapp, tmp_path, monkeypatch):
-    # 注入临时布局仓库：让 DockLayoutManager 用 tmp_path 下的 layouts.json
+@pytest.fixture(scope="module")
+def main_window(qapp, tmp_path_factory):
+    """整文件共用一个窗口。
+
+    存量挂起根因：原来每个用例都新建 MainWindow（且旧窗口只 close 不删），
+    Qt 对象/定时器逐轮累积，跑到第 6~7 个用例就慢到像死锁；独立复现脚本
+    连建 4 个窗口 18s 全跑通，证明产品链路正常、是 pytest 夹具的资源问题。
+    这些用例只操作布局仓库与页签显隐，彼此不依赖「全新窗口」语义，
+    共用窗口反而更接近真实用户连续操作的场景。
+    """
+    tmp = tmp_path_factory.mktemp("user_layouts")
     import dock_layout_manager
     from layout_store import LayoutStore
-    temp_store = LayoutStore(path=str(tmp_path / "layouts.json"))
-    monkeypatch.setattr(dock_layout_manager, "layout_store", lambda: temp_store)
+    old_store_factory = dock_layout_manager.layout_store
+    temp_store = LayoutStore(path=str(tmp / "layouts.json"))
+    dock_layout_manager.layout_store = lambda: temp_store
 
     from main_window import MainWindow
     w = MainWindow()
     w.show()
-    # 确保下拉已按注入仓库重建
     w._refresh_layout_combo()
     yield w
+    dock_layout_manager.layout_store = old_store_factory
     try:
         w._disconnect()
     except Exception:

@@ -1117,6 +1117,33 @@ class AIPanel(QWidget):
                         args = {}                # 其它类型一律不做猜测
                     self.tool_call_requested.emit(name, args)
 
+        # 配了 API Key 走的是模型链路，但工具调用同样要进真实编排器 /
+        # Hooks —— 两条入口、一份事实源，状态条数字才不会一半真一半假。
+        bridge = self._bridge_obj()
+        if bridge is not None and tool_calls:
+            for i, tc in enumerate(tool_calls):
+                name = str(tc.get("name", ""))
+                if not name:
+                    continue
+                raw = tc.get("arguments", {})
+                if isinstance(raw, dict):
+                    args = dict(raw)
+                elif isinstance(raw, str):
+                    try:
+                        args = json.loads(raw)
+                    except Exception:
+                        args = {}
+                    if not isinstance(args, dict):
+                        args = {}
+                else:
+                    args = {}
+                res = tool_results[i] if i < len(tool_results) else None
+                ok = bool(res) and not (
+                    isinstance(res, dict) and res.get("error"))
+                bridge.record_external_call(
+                    name, args, ok, "" if res is None else str(res)[:400])
+            self._refresh_live_bar()
+
         if compacted:
             self._add_system_message("上下文已自动压缩")
 

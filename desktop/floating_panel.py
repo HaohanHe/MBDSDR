@@ -159,6 +159,7 @@ class FloatingPanel(QFrame):
             self._collapsed = True
             self._payload.hide()
             self._collapse_btn.setText("+")
+            self.apply_collapsed_geometry()
         if s.value(base + "/detached") in (True, "true", "1", 1):
             self._detach_btn.setText("⤡")
             self._set_detached(True)
@@ -201,6 +202,9 @@ class FloatingPanel(QFrame):
             self._payload.show()
             self._collapsed = False
             self._collapse_btn.setText("—")
+            # 先解掉折叠时钉死的高度，否则展开后永远只有一条标题
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16777215)
             if self._expanded_size is not None:
                 self.resize(self._expanded_size)
         else:
@@ -208,8 +212,19 @@ class FloatingPanel(QFrame):
             self._payload.hide()
             self._collapsed = True
             self._collapse_btn.setText("+")
-            self.adjustSize()
+            # adjustSize() 在隐藏 payload 后仍会留出整块空白（实测折叠态
+            # 变一大坨黑压住频谱）。折叠就是只留标题条，高度显式钉死。
+            self.setFixedHeight(self._collapsed_height())
         self.save_geometry()
+
+    def _collapsed_height(self) -> int:
+        """标题条真实高度 + 布局边距：拍 26 会让 30px 的 handle 越出父容器。"""
+        return max(40, int(self._handle.height()) + 10)
+
+    def apply_collapsed_geometry(self) -> None:
+        """从 QSettings 恢复折叠态时同样压成一条标题，不显示空白大块。"""
+        if self._collapsed:
+            self.setFixedHeight(self._collapsed_height())
 
     def _set_detached(self, on: bool) -> None:
         if on == self._detached:
