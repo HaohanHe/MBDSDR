@@ -149,7 +149,7 @@ def test_gate_explicit_arm_executes():
     args = {"hz": 98_500_000}
     tok = issue_confirmation("set_frequency", args)
     out = ts.call_tool("set_frequency", {**args, "confirm_token": tok})
-    assert out == {"ok": True}
+    assert out["ok"] is True
     assert "approval" not in out  # 显式授权不标 session
 
 
@@ -158,12 +158,13 @@ def test_session_approval_cache():
     ts = _set()
     args = {"hz": 98_500_000}
     tok = issue_confirmation("set_frequency", args)
-    assert ts.call_tool(
+    out = ts.call_tool(
         "set_frequency", {**args, "confirm_token": tok,
-                          "approve_session": True}) == {"ok": True}
+                          "approve_session": True})
+    assert out["ok"] is True
     # 同工具同参数：第二次免问，且可观测标注
     out = ts.call_tool("set_frequency", {"hz": 98_500_000})
-    assert out == {"ok": True, "approval": "session"}
+    assert out["ok"] is True and out["approval"] == "session"
     # 不同参数：缓存不覆盖，仍要问（按参数敏感）
     gated = ts.call_tool("set_frequency", {"hz": 101_000_000})
     assert gated["gated"] is True
@@ -181,7 +182,8 @@ def test_allow_rule_skips_ask():
     policy = ToolPolicy([{"pattern": "set_*", "action": "allow"}])
     ts = MCPToolSet(policy=policy)
     out = ts.call_tool("set_frequency", {"hz": 98_500_000})
-    assert out == {"ok": True}
+    assert out["ok"] is True
+    assert "gated" not in out  # allow 规则不问、不拦
 
 
 def test_read_tools_never_gated():
@@ -196,7 +198,8 @@ def test_domain_rule_allow_skips_ask_via_mcp():
                           "action": "allow"}])
     ts = MCPToolSet(policy=policy)
     out = ts.call_tool("set_frequency", {"hz": 98_500_000})
-    assert out == {"ok": True}
+    assert out["ok"] is True
+    assert "gated" not in out  # domain allow：免问执行
     # 别的域仍走默认 ask
     gated = ts.call_tool("add_bookmark", {"name": "x", "frequency_hz": 435e6}) \
         if ts._by_name.get("add_bookmark", {}).get("write") else None

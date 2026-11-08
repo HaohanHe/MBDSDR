@@ -58,7 +58,7 @@ def test_non_deny_hook_result_passes_through():
     ts.hooks.register(EventType.AGENT_PRE_TOOL_USE, observer)
     out = ts.call_tool("set_frequency",
                        {"hz": 98_500_000, "confirm_token": _tok()})
-    assert out == {"ok": True}
+    assert out["ok"] is True
     assert seen == ["set_frequency"]          # 钩子确实被触发过
 
 
@@ -68,7 +68,7 @@ def test_hook_exception_does_not_break_call(capsys):
                       lambda e: 1 / 0)          # 钩子自己炸
     out = ts.call_tool("set_frequency",
                        {"hz": 98_500_000, "confirm_token": _tok()})
-    assert out == {"ok": True}                # 主流程放行
+    assert out["ok"] is True                # 主流程放行
     cap = capsys.readouterr()
     logged = cap.out + cap.err                # Hook.trigger 的留痕走 stdout
     assert "Hook Error" in logged or "division" in logged  # 有迹可查
@@ -81,7 +81,7 @@ def test_disabled_hook_does_not_veto():
     ts.hooks.disable(hid)
     out = ts.call_tool("set_frequency",
                        {"hz": 98_500_000, "confirm_token": _tok()})
-    assert out == {"ok": True}
+    assert out["ok"] is True
 
 
 def test_hooks_instance_is_per_toolset():
@@ -90,7 +90,7 @@ def test_hooks_instance_is_per_toolset():
                      lambda e: {"decision": "deny", "reason": "only-a"})
     out = b.call_tool("set_frequency",
                       {"hz": 98_500_000, "confirm_token": _tok()})
-    assert out == {"ok": True}                # b 不受 a 的钩子影响
+    assert out["ok"] is True                # b 不受 a 的钩子影响
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ def test_tool_result_event_fires_on_success():
                       lambda e: seen.append(e.data))
     out = ts.call_tool("set_frequency",
                        {"hz": 98_500_000, "confirm_token": _tok()})
-    assert out == {"ok": True}
+    assert out["ok"] is True
     assert len(seen) == 1
     s = seen[0]
     assert s["tool"] == "set_frequency" and s["ok"] is True
@@ -139,7 +139,7 @@ def test_tool_result_event_hook_cannot_mutate_result():
     ts.hooks.register("agent.tool_result", evil)
     out = ts.call_tool("set_frequency",
                        {"hz": 98_500_000, "confirm_token": _tok()})
-    assert out == {"ok": True}      # 结果不因事后钩子改变
+    assert out["ok"] is True      # 结果不因事后钩子改变
 
 
 def test_tool_result_event_exception_isolated(capsys):
@@ -147,6 +147,6 @@ def test_tool_result_event_exception_isolated(capsys):
     ts.hooks.register("agent.tool_result", lambda e: 1 / 0)
     out = ts.call_tool("set_frequency",
                        {"hz": 98_500_000, "confirm_token": _tok()})
-    assert out == {"ok": True}
+    assert out["ok"] is True
     logged = (capsys.readouterr().out + capsys.readouterr().err)
     assert "Hook Error" in logged or "division" in logged

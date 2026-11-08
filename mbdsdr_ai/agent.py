@@ -317,9 +317,11 @@ class MBDSDRAgent:
         # 注册多模式数字解码（PSK31/RTTY/MFSK/FeldHell，依据公开无线电传标准实现）
         register_fldigi_modes_tools(self.tool_registry)
 
-        # Hook 事件钩子：按 A2(D2) 摘除 LLM 工具面。当前零生产事件源（grep 无 sdr.signal_detected
-        # 等事件发射点），hook_* 仅让 LLM 对着空气喊话。保留 HookManager 类（self.hook_manager）与
-        # hooks.py 事件总线供内部/未来接线；不再向 LLM 注册 hook_list/hook_trigger/hook_history/hook_stats。
+        # Hook 事件钩子：按 A2(D2) 摘除 LLM 工具面（不再向 LLM 注册
+        # hook_list/hook_trigger/hook_history/hook_stats——那是让模型对着空气喊话）。
+        # 但 HookManager 事件总线本身是活的：Sprint 4 起 _chat_impl 在真实节点
+        # （工具调用/结果、上下文压缩、错误、助手消息）通过 self._hook() 发射生产
+        # 事件，供内部钩子（自动录制/告警/审计）实时联动。SDR.* 事件源仍待硬件层接线。
         # self._register_hook_tools()  # 已摘除（D2）
 
         # 注册 Subagents 子代理工具（白皮书第四章 4.5）
@@ -3785,6 +3787,25 @@ class MBDSDRAgent:
         except Exception:
             pass
 
+    def _hook(self, event_type: str, **data) -> None:
+        """向内部 HookManager 事件总线发一条事件（观测/联动用）。
+
+        与 _slog 并列：_slog 落不可变 JSONL 供审计/重放，_hook 走进程内事件
+        总线供内部钩子实时联动（如自动录制、告警）。这里只发「真实生产事件」，
+        把 hook_manager 从「对着空气喊话」变成活的观测层。任何异常都吞掉——
+        钩子/发射绝不能拖垮 chat 主循环（Hook.trigger 自身也已兜底）。
+        """
+        try:
+            hm = getattr(self, "hook_manager", None)
+            if hm is None:
+                return
+            # EventType 是 str-Enum，但 str(Enum.X) 得到 "EventType.X" 而非值；
+            # 事件总线按值路由（"agent.tool_call"），这里显式取 .value。
+            etype = getattr(event_type, "value", event_type)
+            hm.trigger(Event(event_type=str(etype), data=data, source="agent"))
+        except Exception:
+            pass
+
     def get_session_events(self) -> List[Dict[str, Any]]:
         """读回当前会话的事件流（审计/重放/测试用）。"""
         try:
@@ -3949,6 +3970,8 @@ class MBDSDRAgent:
                 compacted = True
                 self._slog("compaction", trigger="pressure",
                            round=round_num + 1)
+                self._hook(EventType.AGENT_CONTEXT_COMPACT,
+                           trigger="pressure", round=round_num + 1)
                 self._check_state_after_compaction()
             messages = self.context_manager.build_api_messages()
 
@@ -4075,6 +4098,8 @@ class MBDSDRAgent:
                 self._slog("assistant_message", content=content,
                            round=round_num + 1, tool_calls=0,
                            model_latency_ms=round(float(model_latency_ms), 1))
+                self._hook(EventType.AGENT_MESSAGE, role="assistant",
+                           content=content, round=round_num + 1)
                 break
 
             # 有工具调用，执行工具
@@ -4095,6 +4120,9 @@ class MBDSDRAgent:
                 tc["id"] = tc_id
                 self._slog("tool_call", tool=tool_name, tool_call_id=tc_id,
                            arguments=fn.get("arguments", ""), round=round_num + 1)
+                self._hook(EventType.AGENT_TOOL_CALL, tool=tool_name,
+                           tool_call_id=tc_id, arguments=fn.get("arguments", ""),
+                           round=round_num + 1)
 
                 # P7.4：取消后不再执行剩余工具，但仍为每个 tool_call_id 写回
                 # 一条「已取消」结果，保证 assistant(tool_calls) ↔ tool 链完整
@@ -4112,6 +4140,9 @@ class MBDSDRAgent:
                     self._slog("tool_result", tool=tool_name, tool_call_id=tc_id,
                                success=False, error=CANCEL_ERROR,
                                cancelled=True, round=round_num + 1)
+                    self._hook(EventType.AGENT_TOOL_RESULT, tool=tool_name,
+                               tool_call_id=tc_id, ok=False, error=CANCEL_ERROR,
+                               outcome="cancelled", round=round_num + 1)
                     continue
 
                 # 工具执行安全调用：异常时返回错误给 LLM 而非卡死主循环
@@ -4176,6 +4207,13 @@ class MBDSDRAgent:
                            error=str(getattr(result, "error", "") or ""),
                            latency_ms=round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
                            round=round_num + 1)
+                _ok = bool(getattr(result, "success", False))
+                self._hook(EventType.AGENT_TOOL_RESULT, tool=tool_name,
+                           tool_call_id=tc_id, ok=_ok,
+                           error=str(getattr(result, "error", "") or ""),
+                           outcome=("executed" if _ok else "error"),
+                           latency_ms=round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
+                           round=round_num + 1)
 
             # 继续循环，让模型看到工具结果后继续
             _emit_round(model_latency_ms, usage, len(tool_calls), tool_ms,
@@ -4198,6 +4236,8 @@ class MBDSDRAgent:
             self.context_manager.compact()
             compacted = True
             self._slog("compaction", trigger="context-overflow", final=True)
+            self._hook(EventType.AGENT_CONTEXT_COMPACT,
+                       trigger="context-overflow", final=True)
             self._check_state_after_compaction()
 
         # 6. 遗忘旧记忆（每 10 次调用执行一次）
@@ -4231,6 +4271,8 @@ class MBDSDRAgent:
 
         if last_error:
             self._slog("error", code=str(last_error),
+                       cancelled=cancelled, interrupted=interrupted)
+            self._hook(EventType.AGENT_ERROR, code=str(last_error),
                        cancelled=cancelled, interrupted=interrupted)
         self._slog("turn_end", latency_ms=latency_ms,
                    rounds=len(round_metrics), tool_calls=len(all_tool_calls),

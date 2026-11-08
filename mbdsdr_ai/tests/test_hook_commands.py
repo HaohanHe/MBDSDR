@@ -252,8 +252,9 @@ def test_mcp_default_toolset_command_hooks_noop_without_config(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.delenv(HOOKS_ENV, raising=False)
     ts = MCPToolSet()  # 默认 HookCommandRunner()：~/.mbdsdr/hooks.json 缺失
-    assert ts.call_tool("set_frequency",
-                        {"hz": 98_500_000, "confirm_token": _tok()}) == {"ok": True}
+    out = ts.call_tool("set_frequency",
+                       {"hz": 98_500_000, "confirm_token": _tok()})
+    assert out["ok"] is True  # 无配置时空转放行（响应含诚实的 stored/applied 字段）
 
 
 # ---------------------------------------------------------------------------
