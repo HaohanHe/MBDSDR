@@ -96,6 +96,13 @@
       "derivation": "由真录导出的软比特之后，仓内生成的元数据清单（n_soft/sym_index/variant/rs_errors/erasures_used）；描述外部真值，但文件本身非外部产出。2026-11-07 随帧重钉，解码口径改为 woven + 擦除辅助 + 伴随式验证",
       "date": "2026-11-07"
     },
+    "lrpt_meteor_content_golden.json": {
+      "provenance": "external-truth",
+      "source_name": "meteor_decode (dbdexter-dev, MIT) @e7ca456 独立 JPEG 解码像素",
+      "sha256": "0adcb3b78633e94587cbdae2064cc6bc2876398f2b269f00441013cb0cafad2f",
+      "derivation": "TU Berlin meteor_m2_72k.wav（SHA-256 c8be339e…）→ meteor_demod 8-bit soft-QPSK → meteor_decode（独立 Viterbi/RS/JPEG，commit e7ca456ea969dc4834b5544c3789de1dd5d2f663）；instrumented process_mpdu 每 MPDU 落 identical-bit 记录（entropy + 14×8×8 像素），我方对同一 entropy 逐块对拍 35178 块中 35177 块 MAD<2（地板~0.5），1 块边际流分叉排除；挑 60 条全块吻合记录钉成 fixture。pixels_hex 是 meteor_decode 输出（非我方编码器自生成），entropy_hex 是独立 FEC 链回收的真录派生输入。生成脚本 D:/mbdsdr/output/_make_lrpt_content_golden.py（仓库外）。用途：tests/test_lrpt_meteor_content_golden.py 像素域回归——揪出 zigzag 逆置换 + 双重 +128 两处 round-trip 照不到的真 bug",
+      "date": "2026-11-08"
+    },
     "celestial_ofdate_golden.json": {
       "provenance": "external-truth",
       "source_name": "skyfield 1.54 · precessionlib.compute_precession（IAU 2006 四角度式）",

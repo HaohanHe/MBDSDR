@@ -346,12 +346,16 @@ def _quality_scale(q: int) -> float:
 
 
 def _blocks_to_spatial(coef: np.ndarray, quality: int) -> np.ndarray:
-    """zigzag 系数 → 8×8 空间块（jpegdecoding.m:184-198 口径）。"""
+    """zigzag 系数 → 8×8 空间块（jpegdecoding.m:184-198 口径）。
+
+    idct_8x8 的契约是「输入中心化 DCT 系数 → 输出已 +128 并 clamp 的
+    像素域」，故此处不再二次 +128（历史 bug：双重偏置把整块推向 255
+    饱和，由独立 meteor_decode 内容级对拍揪出，队列 #10②）。
+    """
     f = _quality_scale(quality)
     quant = np.maximum(1.0, np.floor((K1_BASE * f + 50.0) / 100.0))
     natural = unzigzag_order(coef).reshape(8, 8)
-    spatial = idct_8x8(natural * quant) + 128.0
-    return np.clip(spatial, 0.0, 255.0)
+    return idct_8x8(natural * quant)
 
 
 def render_channel(packets: List[ImagePacket], apid: int,
