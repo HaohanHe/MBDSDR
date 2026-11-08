@@ -552,12 +552,46 @@ class ToolRegistry:
     - 自进化工具（沙箱执行、代码修改等）
     """
 
-    def __init__(self, tool_output_max_chars: int = 4000):
+    def __init__(self, tool_output_max_chars: int = 4000,
+                 default_timeout_s: Optional[float] = None):
         self.tools: Dict[str, Dict[str, Any]] = {}  # name -> {definition, handler, available, category}
         self.tool_output_max_chars = tool_output_max_chars
+        # 工具执行超时（秒）。None/<=0 = 不设超时，handler 在调用线程内联执行
+        # （与历史行为逐字节一致，绝不把 Qt/主线程 handler 甩到后台线程）。
+        # 设正数后：handler 在 daemon 线程内跑，join 超时即返回结构化 tool_timeout。
+        # 面向"硬件/MCP 无响应挂死主循环"这一真实靶（见记忆：rtl_tcp 断连、设备挂起）。
+        self.default_timeout_s = default_timeout_s
         self.call_log: List[ToolCallLog] = []
         self.max_log_entries = 200
         self._mcp_client = None  # MCP 客户端引用（运行时设置）
+
+    def _run_handler_with_timeout(self, handler: Callable, args: Dict[str, Any],
+                                  timeout_s: float):
+        """在 daemon 线程内跑 handler，最多等 timeout_s 秒。
+
+        返回 ``(ok, value_or_exc, timed_out)``：
+        - timed_out=True：线程仍活着；Python 不能强杀线程，此处只保证主循环
+          不再被挂死的 handler 卡住，handler 侧应配合 cancel_event 尽快自行退出。
+        - ok=False：value_or_exc 是 handler 抛出的异常，交调用方按既有异常路径处理。
+        - ok=True：value_or_exc 是 handler 返回值。
+        """
+        import threading
+        box: Dict[str, Any] = {}
+
+        def _run():
+            try:
+                box["value"] = handler(args)
+            except BaseException as e:  # noqa: BLE001 - 跨线程转交，主线程再判类型
+                box["exc"] = e
+
+        t = threading.Thread(target=_run, name="tool-handler", daemon=True)
+        t.start()
+        t.join(timeout_s)
+        if t.is_alive():
+            return None, None, True
+        if "exc" in box:
+            return False, box["exc"], False
+        return True, box.get("value"), False
 
     # ── 工具注册 ────────────────────────────────────────
 
@@ -571,6 +605,7 @@ class ToolRegistry:
         available: bool = True,
         write: Optional[bool] = None,
         description_i18n: Optional[Dict[str, str]] = None,
+        timeout_s: Optional[float] = None,
     ):
         """注册一个工具。
 
@@ -579,6 +614,8 @@ class ToolRegistry:
         :data:`WRITE_TOOL_NAME_PATTERNS`）；显式 True/False 覆盖判定。
         description_i18n：可选 {语言码: 译文} 内联目录；``list_tools``
         /``get_tool_definitions`` 传 language 时优先于 description。
+        timeout_s：该工具的执行超时（秒），覆盖 registry 级 default_timeout_s。
+        None = 用 default_timeout_s；显式 <=0 = 关闭超时（内联执行）。
         """
         definition = {
             "type": "function",
@@ -597,6 +634,7 @@ class ToolRegistry:
             "category": category,
             "write": bool(write),
             "description_i18n": dict(description_i18n) if description_i18n else {},
+            "timeout_s": timeout_s,
         }
 
     def is_write_tool(self, name: str) -> bool:
@@ -913,10 +951,33 @@ class ToolRegistry:
             self._log_call(result)
             return result
 
-        # 调用 handler
+        # 调用 handler（可选超时：默认内联执行，设了 timeout 才甩到 daemon 线程）
         try:
             handler = tool["handler"]
-            raw_result = handler(args)
+            _timeout_s = tool.get("timeout_s")
+            if _timeout_s is None:
+                _timeout_s = self.default_timeout_s
+            if _timeout_s and _timeout_s > 0:
+                _ok, _val, _timed_out = self._run_handler_with_timeout(
+                    handler, args, float(_timeout_s))
+                if _timed_out:
+                    result = ToolResult(
+                        success=False,
+                        content=user_message(
+                            "tool_timeout", tool=tool_name, timeout_s=_timeout_s),
+                        tool_name=tool_name,
+                        args=args,
+                        error="tool_timeout",
+                        next_step=error_suggestion("tool_timeout"),
+                    )
+                    result.latency_ms = round((time.time() - start_time) * 1000, 1)
+                    self._log_call(result)
+                    return result
+                if not _ok:
+                    raise _val  # handler 异常：交下方 except 走既有结构化路径
+                raw_result = _val
+            else:
+                raw_result = handler(args)
 
             # 统一处理返回值
             if isinstance(raw_result, ToolResult):
