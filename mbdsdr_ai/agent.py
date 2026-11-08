@@ -57,7 +57,7 @@ from .orchestrator import Orchestrator, Task, TaskPriority
 from .code_editor import CodeEditor, EditRecord, EditStatus
 from .astronomy import Observer, EquatorialCoord, AltAzCoord, AntennaParams, unix_to_jd, jd_to_mjd, jd_to_gmst, jd_to_lst, lst_to_hms, compute_refraction, compute_airmass, compute_pointing_guidance
 from .amr import AMRClassifier, AMRResult, ModulationType
-from .error_catalog import suggestion, user_message
+from .error_catalog import retryable, suggestion, user_message
 
 
 logger = logging.getLogger(__name__)
@@ -4075,20 +4075,16 @@ class MBDSDRAgent:
                             error=str(_e),
                         )
 
-                # 执行工具（可重试：临时不可用/超时/忙；参数错误不重试，直接喂模型改）
-                RETRY_BAD = ("未知", "不是一个", "必须", "可选", "为空", "不能为空",
-                             "不存在", "找不到", "不支持")
-                RETRY_OK = ("未连接", "无设备", "没有设备", "暂时", "重试",
-                            "timeout", "timed out", "busy", "忙", "不可用", "未就绪")
+                # 执行工具（可重试：按 error_catalog.retryable 决策，不猜子串）
                 tool_start = time.time()
                 result = _safe_tool_call()
                 for _attempt in range(2):  # 最多再重试 2 次
                     if getattr(result, "success", False):
                         break
-                    low = (getattr(result, "content", "") or "").lower()
-                    if any(h in low for h in RETRY_BAD) or not any(h in low for h in RETRY_OK):
-                        break  # 参数错误或非临时错误：交给模型改，不空转
-                    if self._cancel_pending():  # P7.4：取消后不再等待重试
+                    err_code = getattr(result, "error", "") or ""
+                    if not err_code or not retryable(err_code):
+                        break  # 无码或不可重试：交给模型改，不空转
+                    if self._cancel_pending():
                         break
                     time.sleep(0.4)
                     if self._cancel_pending():
