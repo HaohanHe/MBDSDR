@@ -35,6 +35,7 @@ from .context_manager import (
 from .model_manager import ModelManager
 from .tool_registry import ToolRegistry, ToolResult, hex_bytes, clean_exc
 from .conversation import ConversationStore
+from .session_log import SessionLog
 from .tool_budget import select_tools, tool_budget_tokens
 from .memory import MemoryStore
 from .self_evolution import SelfEvolutionEngine
@@ -224,6 +225,7 @@ class MBDSDRAgent:
 
         self.tool_registry = ToolRegistry(
             tool_output_max_chars=self.config.tool_output_max_chars,
+            default_timeout_s=getattr(self.config, "tool_timeout_s", 0.0) or None,
         )
 
         self.memory = MemoryStore()
@@ -470,6 +472,10 @@ class MBDSDRAgent:
         self._mcp_client = None
         # 多会话持久化存储
         self.conversation_store = ConversationStore()
+        # 会话事件日志（append-only JSONL，"Model-visible ⟺ logged"）
+        # 懒创建：按当前 conversation_id 取，会话切换时自动换文件。
+        self._session_log = None
+        self._session_log_conv = None
 
         # 验证配置
         errors = self.config.validate()
@@ -3762,6 +3768,34 @@ class MBDSDRAgent:
             except Exception:
                 pass
 
+    def _slog(self, event_type: str, **fields) -> None:
+        """向当前会话的 append-only 事件日志追加一条事件。
+
+        懒创建 SessionLog（按 conversation_id），会话切换时自动换文件。
+        任何异常都吞掉——写日志绝不能拖垮 chat 主循环。
+        """
+        try:
+            if not getattr(self.config, "enable_session_log", True):
+                return
+            cid = self.conversation_id
+            if self._session_log is None or self._session_log_conv != cid:
+                self._session_log = SessionLog(cid)
+                self._session_log_conv = cid
+            self._session_log.emit(event_type, **fields)
+        except Exception:
+            pass
+
+    def get_session_events(self) -> List[Dict[str, Any]]:
+        """读回当前会话的事件流（审计/重放/测试用）。"""
+        try:
+            cid = self.conversation_id
+            if self._session_log is None or self._session_log_conv != cid:
+                self._session_log = SessionLog(cid)
+                self._session_log_conv = cid
+            return self._session_log.read_events()
+        except Exception:
+            return []
+
     def chat(self, user_input: str, max_tool_rounds: int = 10,
              on_delta=None) -> Dict[str, Any]:
         """处理用户输入（并发安全 + 可取消的外壳）。
@@ -3852,6 +3886,9 @@ class MBDSDRAgent:
 
         # 1. 添加用户消息
         self.context_manager.add_user_message(user_input)
+        self._slog("turn_start", max_tool_rounds=max_tool_rounds,
+                   model=getattr(self.model_manager, "model", ""))
+        self._slog("user_message", content=user_input)
 
         # 2. 检索相关记忆
         memory_context = self.memory.build_memory_context(user_input)
@@ -3910,6 +3947,8 @@ class MBDSDRAgent:
             if self.context_manager.needs_compaction():
                 self.context_manager.compact()
                 compacted = True
+                self._slog("compaction", trigger="pressure",
+                           round=round_num + 1)
                 self._check_state_after_compaction()
             messages = self.context_manager.build_api_messages()
 
@@ -4033,11 +4072,17 @@ class MBDSDRAgent:
                 final_content = content
                 # 添加 assistant 消息到上下文
                 self.context_manager.add_assistant_message(content)
+                self._slog("assistant_message", content=content,
+                           round=round_num + 1, tool_calls=0,
+                           model_latency_ms=round(float(model_latency_ms), 1))
                 break
 
             # 有工具调用，执行工具
             # 先添加 assistant 消息（含 tool_calls）到上下文
             self.context_manager.add_assistant_message(content, tool_calls=tool_calls)
+            self._slog("assistant_message", content=content,
+                       round=round_num + 1, tool_calls=len(tool_calls),
+                       model_latency_ms=round(float(model_latency_ms), 1))
 
             tool_ms = 0.0
             for i, tc in enumerate(tool_calls):
@@ -4048,6 +4093,8 @@ class MBDSDRAgent:
                 # 确保 tool_call_id 非空（文本解析的工具调用可能缺 id）
                 tc_id = tc.get("id", "") or f"call_{int(time.time()*1000)}_{i}"
                 tc["id"] = tc_id
+                self._slog("tool_call", tool=tool_name, tool_call_id=tc_id,
+                           arguments=fn.get("arguments", ""), round=round_num + 1)
 
                 # P7.4：取消后不再执行剩余工具，但仍为每个 tool_call_id 写回
                 # 一条「已取消」结果，保证 assistant(tool_calls) ↔ tool 链完整
@@ -4062,6 +4109,9 @@ class MBDSDRAgent:
                     self.context_manager.add_tool_message(
                         tool_call_id=tc_id, content=cancelled_content,
                         tool_name=tool_name)
+                    self._slog("tool_result", tool=tool_name, tool_call_id=tc_id,
+                               success=False, error=CANCEL_ERROR,
+                               cancelled=True, round=round_num + 1)
                     continue
 
                 # 工具执行安全调用：异常时返回错误给 LLM 而非卡死主循环
@@ -4121,6 +4171,11 @@ class MBDSDRAgent:
                     content=_tool_result_to_model_content(result),
                     tool_name=tool_name,
                 )
+                self._slog("tool_result", tool=tool_name, tool_call_id=tc_id,
+                           success=bool(getattr(result, "success", False)),
+                           error=str(getattr(result, "error", "") or ""),
+                           latency_ms=round(float(getattr(result, "latency_ms", 0.0) or 0.0), 1),
+                           round=round_num + 1)
 
             # 继续循环，让模型看到工具结果后继续
             _emit_round(model_latency_ms, usage, len(tool_calls), tool_ms,
@@ -4142,6 +4197,7 @@ class MBDSDRAgent:
         if self.context_manager.needs_compaction():
             self.context_manager.compact()
             compacted = True
+            self._slog("compaction", trigger="context-overflow", final=True)
             self._check_state_after_compaction()
 
         # 6. 遗忘旧记忆（每 10 次调用执行一次）
@@ -4172,6 +4228,14 @@ class MBDSDRAgent:
             self._record_request_metrics(request_metrics)
         except Exception:
             pass
+
+        if last_error:
+            self._slog("error", code=str(last_error),
+                       cancelled=cancelled, interrupted=interrupted)
+        self._slog("turn_end", latency_ms=latency_ms,
+                   rounds=len(round_metrics), tool_calls=len(all_tool_calls),
+                   compacted=compacted, cancelled=cancelled,
+                   interrupted=interrupted, error=str(last_error or ""))
 
         return {
             "content": final_content,

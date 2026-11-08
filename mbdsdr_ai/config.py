@@ -35,6 +35,7 @@ DEFAULT_CONFIG = {
     # 提到 8000 保留整张列表；报告另有「全局状态去重」压缩，见 sdr_tools。
     "tool_output_max_chars": 8000,
     "enable_tool_calling": True,
+    "enable_session_log": True,         # append-only 会话事件日志（~/.mbdsdr/sessions）
     "enable_self_evolution": True,      # 自进化默认开启（沙箱验证+快照回滚，不改真实文件）
     "sandbox_enabled": True,
     "auto_recovery": True,              # 一键恢复防幻觉变砖
@@ -94,6 +95,11 @@ class AgentConfig:
     # 工具调用
     tool_output_max_chars: int = 8000
     enable_tool_calling: bool = True
+    # 工具执行超时（秒）。<=0 = 不设超时（handler 内联执行，历史行为）。
+    # 设正数后 registry 级生效，个别工具可用 register(timeout_s=) 覆盖。
+    tool_timeout_s: float = 0.0
+    # append-only 会话事件日志（"Model-visible ⟺ logged"）
+    enable_session_log: bool = True
 
     # 自进化
     enable_self_evolution: bool = True
