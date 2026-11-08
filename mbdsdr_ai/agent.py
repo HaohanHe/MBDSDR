@@ -243,9 +243,14 @@ class MBDSDRAgent:
         self.hook_manager = HookManager(max_history=2000)
 
         # Subagents 子代理框架（白皮书第四章 4.5）
+        # Sprint 6：注入 on_event 冒泡回调，把子代理内部 LLM 循环（创建/任务
+        # 起止/工具调用与结果/错误）串进父代理的会话日志与 hook 观测面——
+        # 子代理不再是黑盒；每个子代理另落一份独立 JSONL（见 SubagentManager）。
         self.subagent_manager = SubagentManager(
             tool_registry=self.tool_registry,
             model_manager=self.model_manager,
+            on_event=self._on_subagent_event,
+            enable_session_log=getattr(self.config, "enable_session_log", True),
         )
 
         # 6DOF 位姿融合 + AR 投影（白皮书第八章）
@@ -3803,6 +3808,29 @@ class MBDSDRAgent:
             # 事件总线按值路由（"agent.tool_call"），这里显式取 .value。
             etype = getattr(event_type, "value", event_type)
             hm.trigger(Event(event_type=str(etype), data=data, source="agent"))
+        except Exception:
+            pass
+
+    def _on_subagent_event(self, subagent_id: str, event_type: str,
+                           fields: Optional[Dict[str, Any]] = None) -> None:
+        """子代理观测事件冒泡入口（SubagentManager 注入的 on_event 回调）。
+
+        两条落地，与父代理自身的 _slog/_hook 同构：
+        - 父会话日志以 ``subagent.<type>`` 落账并带 subagent_id，形成从父到子
+          的完整审计链（子代理另有独立 JSONL，这里只记冒泡摘要）。
+        - hook 总线仅对**有专门 SUBAGENT_* 枚举**的类型触发：用 getattr 把
+          created/task_start/tool_call/tool_result/task_end/error 映射到对应
+          EventType，step/assistant_message/destroyed 等无专门枚举的自动跳过
+          （返回 None 即不发），避免往总线灌无路由的事件。
+        任何异常都吞掉——子代理观测绝不能拖垮父 chat 主循环。
+        """
+        try:
+            fields = dict(fields or {})
+            self._slog("subagent." + str(event_type),
+                       subagent_id=subagent_id, **fields)
+            et = getattr(EventType, "SUBAGENT_" + str(event_type).upper(), None)
+            if et is not None:
+                self._hook(et, subagent_id=subagent_id, **fields)
         except Exception:
             pass
 

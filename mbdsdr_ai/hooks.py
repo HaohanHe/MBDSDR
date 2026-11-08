@@ -65,6 +65,16 @@ class EventType(str, Enum):
     AGENT_MODEL_SWITCH = "agent.model_switch"
     AGENT_MESSAGE = "agent.message"
 
+    # 子代理事件（Sprint 6：子代理内部 LLM 循环不再是黑盒——创建/任务起止/
+    # 工具调用与结果/错误都冒泡到观测面，父代理会话日志可按 subagent_id 串起
+    # 完整审计链。与 AGENT_* 同形，只是 source 标注为子代理。）
+    SUBAGENT_CREATED = "subagent.created"
+    SUBAGENT_TASK_START = "subagent.task_start"
+    SUBAGENT_TOOL_CALL = "subagent.tool_call"
+    SUBAGENT_TOOL_RESULT = "subagent.tool_result"
+    SUBAGENT_TASK_END = "subagent.task_end"
+    SUBAGENT_ERROR = "subagent.error"
+
     # 工作流事件
     WORKFLOW_START = "workflow.start"
     WORKFLOW_STEP = "workflow.step"

@@ -24,6 +24,7 @@ Subagents：子代理框架，让主 Agent 可以创建专门的子 Agent 处理
 """
 
 import json
+import os
 import time
 
 import threading
@@ -33,6 +34,7 @@ from typing import Dict, List, Any, Optional, Callable
 from enum import Enum
 
 from .context_manager import estimate_message_tokens
+from .session_log import SESSION_DIR, SessionLog
 
 
 class SubagentStatus(str, Enum):
@@ -251,6 +253,10 @@ class Subagent:
         system_prompt: str = None,
         max_context_tokens: int = 4096,
         max_steps: int = 8,  # LLM 循环步数上限
+        session_log=None,  # 独立会话事件日志（SessionLog）；None=不落盘
+        on_event: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
+        # 事件冒泡回调 (subagent_id, event_type, fields)；父代理据此把子代理
+        # 内部活动串进自己的会话日志/hook 面。None=不冒泡。
     ):
         self.subagent_id = subagent_id
         self.agent_type = agent_type
@@ -270,6 +276,36 @@ class Subagent:
         self.total_tasks_failed = 0
         self.created_at = time.time()
         self._lock = threading.Lock()
+        # 观测面（Sprint 6）：独立 session log + 向父代理冒泡的事件回调。
+        # 两者都只读不阻塞主循环，任何异常就地吞掉（对齐 SessionLog 红线）。
+        self.session_log = session_log
+        self.on_event = on_event
+
+    def _emit(self, event_type: str, **fields: Any) -> None:
+        """子代理观测事件出口：写自己的独立 session log + 向父代理冒泡。
+
+        对齐父 Agent 的 ``_slog``/``_hook`` 双通道语义——绝不抛异常拖垮
+        LLM 循环；session_log 与 on_event 各自独立吞错，一个坏不影响另一个。
+
+        字段约定：subagent_id/agent_type 由本方法统一注入（dict 合并，调用方
+        显式同名字段优先，避免重复 kwarg）；冒泡给父代理的 fields **不含**
+        subagent_id（父代理 ``_on_subagent_event`` 自己加，防重复）。
+        """
+        enriched = {"subagent_id": self.subagent_id,
+                    "agent_type": self.agent_type}
+        enriched.update(fields)
+        if self.session_log is not None:
+            try:
+                self.session_log.emit(event_type, **enriched)
+            except Exception:
+                pass
+        if self.on_event is not None:
+            bubbled = dict(enriched)
+            bubbled.pop("subagent_id", None)
+            try:
+                self.on_event(self.subagent_id, event_type, bubbled)
+            except Exception:
+                pass
 
     def can_use_tool(self, tool_name: str) -> bool:
         """检查子代理是否可以使用指定工具（语义：allowed_tools=None 即全部）。
@@ -305,6 +341,14 @@ class Subagent:
         self.status = SubagentStatus.RUNNING
         self.current_task = task
         task.started_at = start_time
+
+        # 观测面（Sprint 6）：任务起点落独立 session log + 冒泡父代理。
+        # input_data 只记键名与大小，不落完整负载（长输入归调用方上下文）。
+        self._emit("task_start", task_id=task.task_id, goal=task.goal,
+                   requested_max_steps=self._resolve_max_steps(task, max_steps),
+                   input_keys=sorted(task.input_data.keys()) if task.input_data else [],
+                   allowed_tools=(sorted(self.allowed_tools)
+                                  if self.allowed_tools is not None else "all"))
 
         result = SubagentResult(
             success=False,  # 先设为 False，成功后改为 True
@@ -361,6 +405,8 @@ class Subagent:
             self.total_tasks_failed += 1
             task.status = SubagentStatus.FAILED
             traceback.print_exc()
+            self._emit("error", task_id=task.task_id, code=type(e).__name__,
+                       detail=str(e))
 
         result.execution_time = time.time() - start_time
         task.completed_at = time.time()
@@ -368,6 +414,14 @@ class Subagent:
         self.status = SubagentStatus.IDLE
         self.current_task = None
         self.task_history.append(task)
+
+        # 观测面（Sprint 6）：任务终点——status/steps/truncated/tools 全部落账，
+        # partial（truncated）与 error 都诚实标注，绝不把截断/失败记成完成。
+        self._emit("task_end", task_id=task.task_id, status=result.status,
+                   success=result.success, steps_used=result.steps_used,
+                   tools_used=list(result.tools_used), truncated=result.truncated,
+                   execution_time=round(result.execution_time, 3),
+                   error=result.error)
 
         # 执行回调
         if task.callback:
@@ -504,15 +558,19 @@ class Subagent:
                     messages=self.context, tools=schemas or None,
                     tool_choice="auto")
             except Exception as e:
-                return "", {}, step - 1, tools_used, False, (
-                    f"model_manager.chat 调用异常: {type(e).__name__}: {e}")
+                detail = f"model_manager.chat 调用异常: {type(e).__name__}: {e}"
+                self._emit("error", task_id=task.task_id, step=step,
+                           code=type(e).__name__, detail=detail)
+                return "", {}, step - 1, tools_used, False, detail
 
             if not isinstance(response, dict) or not response.get("success"):
                 err = "unknown_error"
                 if isinstance(response, dict):
                     err = response.get("error") or err
-                return "", {}, step - 1, tools_used, False, (
-                    f"模型调用失败: {err}（step {step}/{limit}）")
+                detail = f"模型调用失败: {err}（step {step}/{limit}）"
+                self._emit("error", task_id=task.task_id, step=step,
+                           code=str(err), detail=detail)
+                return "", {}, step - 1, tools_used, False, detail
 
             content = response.get("content", "") or ""
             tool_calls = list(response.get("tool_calls") or [])
@@ -531,6 +589,8 @@ class Subagent:
             if not tool_calls:
                 # 无工具调用 = 最终结论（assistant 消息入上下文，独立对话保持完整）
                 self.context.append({"role": "assistant", "content": content})
+                self._emit("assistant_message", task_id=task.task_id,
+                           step=step, content=content)
                 data = {
                     "agent_type": self.agent_type,
                     "steps_used": step,
@@ -541,6 +601,9 @@ class Subagent:
                 }
                 return content, data, step, tools_used, False, ""
 
+            # 观测面（Sprint 6）：每个索取工具的 LLM 轮次落账
+            self._emit("step", task_id=task.task_id, step=step,
+                       tool_calls=len(tool_calls))
             last_content = content
             # 规范化 tool_call id（文本兜底来源可能缺 id）
             for i, tc in enumerate(tool_calls):
@@ -561,26 +624,37 @@ class Subagent:
                 else:
                     fn, tc_id = {}, ""
                 name = fn.get("name", "") or ""
+                self._emit("tool_call", task_id=task.task_id, step=step,
+                           tool=name, tool_call_id=tc_id,
+                           arguments=fn.get("arguments", ""))
                 if not name:
                     tool_content = "拒绝：工具调用缺少 function.name，未执行"
+                    outcome = "error"
                 elif self.tool_registry is None:
                     tool_content = (f"拒绝：子代理 {self.subagent_id} 未注入 "
                                     f"tool_registry，工具 {name} 无法执行")
+                    outcome = "error"
                 elif name not in visible:
                     # 工具视图过滤：越界调用本地拒绝，不触达 registry、不上抛
                     tool_content = (
                         f"拒绝：子代理 {self.subagent_id}（{self.agent_type}）"
                         f"无权调用工具 {name}（不在 allowed_tools 白名单），"
                         f"调用未执行。白名单: {sorted(visible)}")
+                    outcome = "denied"
                 else:
                     try:
                         res = self.tool_registry.call_from_model(tc)
                         tool_content = getattr(res, "content", None) or str(res)
+                        outcome = ("executed" if getattr(res, "success", True)
+                                   else "error")
                     except Exception as e:
                         tool_content = (
                             f"工具执行异常: {type(e).__name__}: {e}"
                             f"（未得到真实结果，不得据此下结论）")
+                        outcome = "error"
                     tools_used.append(name)
+                self._emit("tool_result", task_id=task.task_id, step=step,
+                           tool=name, tool_call_id=tc_id, outcome=outcome)
                 self.context.append({
                     "role": "tool",
                     "tool_call_id": tc_id,
@@ -673,7 +747,10 @@ class SubagentManager:
         ],
     }
 
-    def __init__(self, tool_registry, model_manager=None, max_concurrent: int = 4):
+    def __init__(self, tool_registry, model_manager=None, max_concurrent: int = 4,
+                 on_event: Optional[Callable[[str, str, Dict[str, Any]], None]] = None,
+                 enable_session_log: bool = False,
+                 session_log_dir: Optional[str] = None):
         self.tool_registry = tool_registry
         self.model_manager = model_manager
         self.max_concurrent = max_concurrent
@@ -681,6 +758,17 @@ class SubagentManager:
         self.task_queue: List[SubagentTask] = []
         self._lock = threading.Lock()
         self._task_counter = 0
+        # 观测面（Sprint 6）：
+        # - on_event：父代理注入的冒泡回调 (subagent_id, event_type, fields)，
+        #   把子代理内部活动串进父会话日志/hook 面；
+        # - enable_session_log：每个子代理落一份**独立** JSONL（独立 session）。
+        #   默认 **False**（opt-in，对齐 Sprint 2 超时的零回归默认）：裸建
+        #   SubagentManager（如单测）不写盘、不污染 ~/.mbdsdr；生产路径由
+        #   MBDSDRAgent 显式按 config.enable_session_log 打开（见 agent.py）。
+        #   session_log_dir 缺省走 ~/.mbdsdr/sessions/subagents。
+        self.on_event = on_event
+        self.enable_session_log = enable_session_log
+        self.session_log_dir = session_log_dir
 
     def create(
         self,
@@ -703,6 +791,18 @@ class SubagentManager:
         if allowed_tools is None:
             allowed_tools = self.DEFAULT_ALLOWED_TOOLS.get(agent_type)
 
+        # 独立 session（Sprint 6）：每个子代理一份自己的 append-only JSONL，
+        # 落在 sessions/subagents/ 下，与父代理会话日志物理隔离但可按
+        # subagent_id 关联。建日志失败绝不阻断子代理创建（吞错降级为 None）。
+        session_log = None
+        if self.enable_session_log:
+            try:
+                log_dir = self.session_log_dir or os.path.join(
+                    SESSION_DIR, "subagents")
+                session_log = SessionLog(subagent_id, directory=log_dir)
+            except Exception:
+                session_log = None
+
         subagent = Subagent(
             subagent_id=subagent_id,
             agent_type=agent_type,
@@ -711,17 +811,29 @@ class SubagentManager:
             allowed_tools=allowed_tools,
             system_prompt=system_prompt,
             max_steps=max_steps if max_steps else 8,
+            session_log=session_log,
+            on_event=self.on_event,
         )
 
         with self._lock:
             self.subagents[subagent_id] = subagent
 
+        # 创建事件落子代理自己的日志 + 冒泡父代理（生命周期可审计）
+        subagent._emit("created", agent_type=agent_type,
+                       allowed_tools=(sorted(allowed_tools)
+                                      if allowed_tools else "all"),
+                       session_log_path=getattr(session_log, "path", None))
         return subagent_id
 
     def destroy(self, subagent_id: str) -> bool:
         """销毁一个子代理。"""
         with self._lock:
             subagent = self.subagents.pop(subagent_id, None)
+        if subagent is not None:
+            # 销毁前落一条终点事件（SessionLog 每次 emit 即 flush，无需显式 close）
+            subagent._emit("destroyed",
+                           total_tasks_completed=subagent.total_tasks_completed,
+                           total_tasks_failed=subagent.total_tasks_failed)
         return subagent is not None
 
     def get(self, subagent_id: str) -> Optional[Subagent]:
