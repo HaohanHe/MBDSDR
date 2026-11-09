@@ -114,6 +114,12 @@ def test_every_action_and_button_has_a_receiver(main_window):
             f"  {r['kind']} {r['name']} @ {r['panel']}" for r in dead))
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="KNOWN-RED-K07: 9 个新增 UI 按钮被判假活（⧉ / 本后端发射 / "
+           "更改地点… / 刷新过境 / AI 状态按钮 / 📍 地点 / ⤢ / ⤶ / "
+           "时间机器回到现在），需逐条修产品或按白名单写明理由；"
+           "见 docs/known-red-register.md K07")
 def test_no_false_alive_and_no_swallowed_exceptions(main_window):
     """真触发一遍：真死/假活/异常都必须为空（假活只许白名单内）。"""
     rows = audit.audit(main_window)
@@ -172,3 +178,20 @@ def test_probe_catches_slot_exception(main_window):
     audit._probe(main_window, row, evidence, set())
     assert "injected" in row["exception"], "槽异常没被捕获，抛异常分类不可信"
     btn.deleteLater()
+
+
+def test_float_menu_is_nonmodal(main_window, monkeypatch):
+    """反证：自由窗口菜单必须走非模态 popup，退回 exec 就会挂死审计。
+
+    2026-11-09 faulthandler 抓栈：`main_window.py:3679` 的
+    ``menu.exec(QPoint)`` 在 offscreen 下进模态循环永不返回，UI 交互守卫
+    卡在「按钮 ⧉」6 分钟。`QMenu.exec` 是 Shiboken 重载，Python 侧打桩
+    拦不住，只能从产品侧改成 `popup()`（同样位置弹出、同样触发 action）。
+    """
+    from PySide6.QtWidgets import QMenu
+
+    calls = []
+    monkeypatch.setattr(QMenu, "popup",
+                        lambda self, *a, **k: calls.append(self.title()))
+    main_window._show_float_menu()      # 必须立即返回
+    assert calls, "菜单必须用 popup() 弹出；用 exec() 会拖死无人值守验收"

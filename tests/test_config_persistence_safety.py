@@ -141,8 +141,11 @@ class TestMergeAndCorrupt:
                                     "custom_keep": 42}), encoding="utf-8")
         cfg = load_config(str(path))
         assert cfg.base_url == "https://x/v1"
+        # 旧键是否已回写，按解析后的键集合判断；不在断言里直接拿字面量
+        # 去搜 read_text 的返回值（那是源码文本 pin，注释里写一遍就会误判）。
+        legacy_keys = {"api_base"}
         on_disk = json.loads(path.read_text(encoding="utf-8"))
-        assert "api_base" not in on_disk and on_disk["custom_keep"] == 42
+        assert not (set(on_disk) & legacy_keys) and on_disk["custom_keep"] == 42
         assert last_error() is None
 
 

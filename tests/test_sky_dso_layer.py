@@ -302,15 +302,16 @@ def test_status_card_states_no_galaxy_layer(monkeypatch):
     """状态卡必须明示「无数据·不提供」；不画装饰性银河带冒充图层。"""
     v = _new_view()
     try:
-        # 银河行位于观测站 + 视轴 + 视角 + 调谐 + 受晒之后。
-        # 批 1 在银河行之前新增「恒星时 / 视轴」两行 → 下移 36px（188→224）。
-        shown = _card_row_crop(v, 224, 20)
+        # 银河行基线 y=card_y+220（按 _draw_info_overlay 逐行累加实测），
+        # 文字上沿约 baseline-12=208；crop 从 208 起才截得到这行文字。
+        # 旧值 224 落在下一行「星表」上，清空银河文案前后都测不到差异。
+        shown = _card_row_crop(v, 208, 20)
         # 反证：把该行文案清空后同一区域必须变（证明绘制路径真在写这句）
         monkeypatch.setattr(rf_sky_view, "GALAXY_LAYER_NOTE", "")
-        blank = _card_row_crop(v, 224, 20)
+        blank = _card_row_crop(v, 208, 20)
     finally:
         v.close()
-    assert _diff_pixels(shown, blank) > 20, "状态卡没有写「本视图无银河图层」的说明"
+    assert _diff_pixels(shown, blank) > 20, "状态卡没有写「无数据·不提供」的说明"
 
 
 # --------------------------------------------------------------------------

@@ -6690,7 +6690,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             # solar_system.get_sun_position；缺历表如实留占位。
             s = self._sun or {}
             info["title"] = "太阳"
-            info["kind_label"] = "恒星"
+            info["kind_label"] = "Star"
             info["aliases"] = ["Sol"]
             info["mag"] = -26.74          # 标准视星等常数（非历表计算）
             ra_s = s.get("ra_deg")

@@ -19,8 +19,6 @@
 
 from __future__ import annotations
 
-import inspect
-
 import numpy as np
 import pytest
 
@@ -68,10 +66,19 @@ def test_audio_only_modes_do_not_claim_iq_demod():
 
 
 def test_route_source_uses_declared_demod():
+    """handler 的运行时字节码必须真的引用声明的解调入口。
+
+    旧版是 ``inspect.getsource`` 后查源码里有没有那串字符：注释里写一遍
+    就能骗过，改个换行又会误红。改成查 code object 的真实全局引用
+    （co_names）+ 内嵌字符串常量，只认运行时调用关系。
+    """
     for mode, cap in _iq_modes().items():
-        src = inspect.getsource(dr.DIGITAL_MODE_HANDLERS[mode])
-        assert cap.iq_demod in src, (
-            f"{mode} 声明 {cap.iq_demod}，handler 源码未引用")
+        handler = dr.DIGITAL_MODE_HANDLERS[mode]
+        refs = set(handler.__code__.co_names)
+        refs.update(c for c in handler.__code__.co_consts
+                    if isinstance(c, str))
+        assert cap.iq_demod in refs, (
+            f"{mode} 声明 {cap.iq_demod}，handler 未真实引用该解调入口")
 
 
 # ---------------------------------------------------------------------------

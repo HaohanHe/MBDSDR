@@ -298,13 +298,54 @@ class TestRtlTcpBackendAppliedRate:
 
 class TestSourcePins:
     def test_adapter_setters_check_return_before_cache(self):
-        import inspect
+        """下发失败必须抛错，且缓存不许被请求值污染（旧版是源码文本 pin）。
+
+        旧断言用 ``inspect.getsource(...).count("_raise_if_dead(") >= 5``：
+        注释里多写几遍就能凑数，真正漏判的 setter 看不出来。这里给一个
+        命令恒失败的假 client，逐个验行为：抛 OSError + 回读仍是旧值。
+        """
         from mbdsdr_ai import rtltcp_client as m
-        src = inspect.getsource(m.RtlTcpDeviceAdapter)
-        # 四个可写属性都必须先判下发结果（_raise_if_dead）再写缓存
-        assert src.count("_raise_if_dead(") >= 5, (
-            "center_freq/sample_rate/gain/freq_correction/set_manual_gain_mode "
-            "五处下发失败都必须显式抛出，不许静默写缓存")
+
+        class _DeadClient:
+            error = "链路已断开"
+
+            def set_frequency(self, value):
+                return False
+
+            def set_sample_rate(self, value):
+                return False
+
+            def set_gain(self, value):
+                return False
+
+            def set_freq_correction(self, value):
+                return False
+
+            def _send_cmd(self, cmd, value):
+                return False
+
+        adapter = object.__new__(m.RtlTcpDeviceAdapter)
+        adapter._client = _DeadClient()
+        adapter._center_freq = 100_000_000
+        adapter._sample_rate = 2_400_000.0
+        adapter._gain = 10.0
+        adapter._freq_correction = 0
+
+        cases = (
+            ("center_freq", 433_000_000, "_center_freq", 100_000_000),
+            ("sample_rate", 1_024_000.0, "_sample_rate", 2_400_000.0),
+            ("gain", 30.0, "_gain", 10.0),
+            ("freq_correction", 20, "_freq_correction", 0),
+        )
+        for attr, value, cached, before in cases:
+            with pytest.raises(OSError, match="链路已断开"):
+                setattr(adapter, attr, value)
+            assert getattr(adapter, cached) == before, (
+                f"{attr} 下发失败却把请求值写进了缓存")
+
+        # 第五处：手动增益模式（方法而非属性）走同一道门。
+        with pytest.raises(OSError, match="链路已断开"):
+            adapter.set_manual_gain_mode(False)
 
     def test_rtltcp_backend_overrides_applied_rate_resolver(self):
         assert "_resolve_applied_sample_rate" in RtlTcpBackend.__dict__, (

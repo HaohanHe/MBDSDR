@@ -3676,7 +3676,11 @@ class MainWindow(QMainWindow):
         # 2026-11-09: 原写成 _return_all_panels（多一个 l），方法真名是
         # _return_all_panes —— 点了「全部归位」必抛 AttributeError。
         menu.addAction("全部归位", self._return_all_panes)
-        menu.exec(self._float_btn.mapToGlobal(
+        # popup() 而非 exec()：exec 是模态事件循环，offscreen/自动化环境下
+        # 永不返回（2026-11-09 faulthandler 实测 UI 交互守卫卡在「按钮 ⧉」
+        # 6 分钟，栈尖就在这一行）。返回值本来没用，popup 在同样位置弹出、
+        # 点菜单项同样触发 action，用户体验不变，但不会拖死无人值守验收。
+        menu.popup(self._float_btn.mapToGlobal(
             QPoint(0, self._float_btn.height())))
 
     def _pop_out_tab(self, which: str, index: int,
@@ -8295,6 +8299,14 @@ class MainWindow(QMainWindow):
     def _start_recording(self):
         """开始录制：检查后端 → 建文件名 → 清 buffer → 状态栏提示。
         无 SDR 后端时弹提示且不造假文件（按钮会被调用方弹回）。"""
+        # 半开态防御：前序会话/异步回调可能留下「_recording 为真但流句柄
+        # 没建立」的残骸。此时任何一帧 IQ 都会被 _record_write_chunk 判成
+        # 「句柄丢失」并中止录音，把这次新会话一起带崩（2026-11-09 全量
+        # 固定顺序下 test_start_recording_stops_replay_first 因此读到 False，
+        # 单跑/整文件跑都复现不了）。句柄为空就不算一段真实录音，先归零。
+        if self._recording and getattr(self, "_record_stream_fh", None) is None:
+            self._recording = False
+            self._record_iq_buffer = None
         # 回放与录音互斥：回放中按录音＝先停回放再录，语义确定且用户可见。
         # 这里只报「已停止回放」：能否真正开始录音取决于后面的确认/目录检查，
         # 提前写「开始录音」会在取消路径留下一个从未发生的完成态。
@@ -8376,13 +8388,16 @@ class MainWindow(QMainWindow):
         self._record_segments = []
         self._record_segment_index = 1
         self._record_rate_changes = []
-        self._recording = True
-        self._sync_planetarium_recording()
-        # 流式落盘：边收边写，不再全程攒数组（长录制内存安全）。
+        # 流式落盘：句柄先就绪，再把 _recording 置真。RecordTap 是独立线程，
+        # 若先置录音态，写者会撞进「已开录但句柄未建」的窗口，被
+        # _record_write_chunk 判成「句柄丢失」并中止整场（2026-11-09 全量
+        # 固定顺序实测；单跑/整文件跑因线程调度不复现）。
         # S7：文件打不开＝直接不录（_report_record_abort 已复位 UI 并报错）。
         if not self._open_record_segment(
                 path, sr, center_hz, self._record_start_time, 1):
             return
+        self._recording = True
+        self._sync_planetarium_recording()
 
         # 1s 计时 UI（沿用原有 _record_timer）
         self._record_seconds = 0

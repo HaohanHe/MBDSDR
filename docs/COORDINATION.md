@@ -3221,4 +3221,69 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
 `docs/pending-patches/2026-11-06-ux-basis-main-window.md`，每条附反证用例。
 **持有线请只取自己文件里的改动，不要整文件覆盖**。
 
+---
 
+## 七、补记（2026-11-09 夜；置于文末以免 card links 行号漂移）
+
+### 我这边（2026-11-09 夜：K05 二十条逐条收口，18 真修 + 2 转已知红）
+
+用户「搞」= 把上一轮 `20 failed / 5553 passed` 的确定性红逐条办掉，再重跑
+全量。开工先按 `known-red-register.md` K05 的 `-rf` FAILED 行取 nodeid 隔离
+复跑（19 条 → 15 failed / 4 passed），**不用点号序号猜**。逐条判定后再动手：
+
+- **产品真 bug 4 处**（改产品，没动断言）：`controller.py` 扫频结束还原
+  设备中心频率（98.3 MHz 污染 `get_status()`）；`tool_registry.py` 给
+  `range_rate_mps/pseudorange_rate/rate_bias` 加负值豁免（接近时伪距率为负
+  是合法物理，通用 `rate` 守卫把多普勒往返链切断了）；`rf_sky_view.py`
+  太阳卡 `kind_label` 回 `"Star"`（同骨架 Moon/Planet 都英文）；
+  `settings.py` 写锁 `open()` 移进重试循环（Windows 两进程抢 `.lock` 的
+  PermissionError 不再冒泡成「设置保存失败」，退化为「写锁等待」）。
+- **测试装置 4 处**（只修探针前置/裁剪偏移，断言表达式一字未改）：地景
+  探针把视轴压到地平线（原来朝天顶，产品新增的地平线 guard 提前 return）；
+  状态卡像素裁剪按逐行累加的实测基线重钉（银河 208 / 视角 154 /
+  调谐 172 / 受晒 190，旧值全落在下一行）。
+- **文案与契约**：tooltip 追平产品 4 处（MS/s、Caster、频率控件两处）；
+  无设备横幅按「短句在横幅 + 三段式在 tooltip」的页面极简分层重写断言；
+  文档渲染点行号按实测重钉（`ai_panel.py:701/1159/696-699`、
+  `main_window.py:7304`）；`record_dir_inside_program_ack` 写明运行时
+  对话框是它真正的用户入口并重生成盘点表。
+- **源码文本 pin 5 条改成行为断言**：键集合交集、`handler.__code__.co_names`
+  真实全局引用、真实帧入口同时发布 IQ + 喂 ADS-B、假 client 让五个 setter
+  下发失败（抛 OSError + 缓存不变）。棘轮 `56/56` 不抬基线。
+- **UI 交互守卫挂死真修**：faulthandler 抓栈到 `main_window.py:3679` 的
+  `menu.exec(QPoint)`（offscreen 模态循环，卡在「按钮 ⧉」6 分钟）。
+  `QMenu.exec` 是 Shiboken 重载，Python 打桩无效（已撤销假桩）；产品改
+  非模态 `popup()`，守卫从挂死变成 28.84s 跑完，加反证钉住 popup。
+- **诚实边界**：剩余两处不刷绿——K06 静默吞噬棘轮 113 处存量一处没修
+  （不抬基线）、K07 九个假活按钮未逐条判定（不许整体塞白名单），都按
+  `xfail(strict=True)` 点名锁定，详见台账。
+- 轻量实跑：`30 passed` / `13 passed + 1 随后重生成` / `14 passed` /
+  `3 passed / 1 xfailed`。**37 分钟全量待重跑，不拿轻量数字冒充全量。**
+- 设备仍不在位（真机项继续 `not_verified`）；另一会话 `web/product/`
+  的本地 M 改动本线一律不碰、不纳入提交。
+
+### 队列补充
+
+0'. **[我，续]** K05 收口后的两笔账（2026-11-09 夜立项，优先于纯工程整洁）：
+   ① **K06** 静默吞噬棘轮 113 处逐处补日志/状态字段或按白名单三问登记，
+   `--runxfail` 转绿才删 `xfail`——**不许抬基线**；
+   ② **K07** 九个假活按钮逐条读槽判定，真没反馈的补产品反馈，只有幂等
+   /异步的才写 `FALSE_ALIVE_WHITELIST` 理由（用户红线：不许「点了没反应」）；
+   ③ 全量重跑后把 `output/goal_completion_audit.md` 与
+   `docs/COMMIT-INCIDENT-CARD.md` 的数字换成新权威汇总行；kernel 组
+   （本轮改了 `controller.py` / `tool_registry.py`）也要重跑，别沿用
+   11-09 上午的 `2827 passed` 当本轮证据。
+
+---
+
+### 补记二（2026-11-09 20:00）：第一次全量 1 failed + K08 竞态
+
+- 35:54 全量重跑：`1 failed, 5571 passed, 4 skipped, 7 xfailed, 6 subtests`，
+  `counts_trustworthy=True`；日志在
+  `D:/mbdsdr/output/evidence/bundle_desktop_rerun/test_suites/desktop.log`。
+  从改动前 `20 failed` 降到 1 条，K06/K07 以 `xfailed` 计入，**不算绿**。
+- 唯一剩余是跨线程竞态（K08）：`_start_recording` 先置录音态后建文件句柄，
+  RecordTap 独立线程撞进窗口，把整场按「句柄丢失」中止。产品改为句柄先就绪
+  再置态 + 清半开残骸；测试加 autouse 装置隔离与反证，断言一字未改。
+  局部 `11 passed`（修前 `1 failed / 10 passed` 可稳定复现）。
+- 第二次全量待跑；kernel 组本轮仍未重跑，`not_verified` 保留。

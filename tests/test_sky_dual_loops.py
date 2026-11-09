@@ -174,16 +174,16 @@ class TestFourCombinations:
 
     def test_status_card_rows_reflect_each_loop(self, ):
         v = _new_view()
-        # 视角行：未锁 → 锁定必须改变该行像素
-        # 批 1 在视角行前新增「恒星时」「视轴」两行 → 下移 36px（136→172）
-        before = _card_crop(v, 172)
+        # 视角行基线 y=card_y+166、调谐行 y=card_y+184（按
+        # _draw_info_overlay 逐行累加实测），文字上沿约 baseline-12。
+        # 旧值 172/190 截到的是下一行，两行都不随对应开关变化。
+        before = _card_crop(v, 154)
         _cam_on(v)
-        after = _card_crop(v, 172)
+        after = _card_crop(v, 154)
         assert _ink(before) != _ink(after)
-        # 调谐行：未开启 → 跟踪必须改变该行像素（同样下移 36px：154→190）
-        t_before = _card_crop(v, 190)
+        t_before = _card_crop(v, 172)
         _track_on(v)
-        t_after = _card_crop(v, 190)
+        t_after = _card_crop(v, 172)
         assert _ink(t_before) != _ink(t_after)
         v.close()
 

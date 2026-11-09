@@ -102,6 +102,36 @@ def window(qtapp):
                     type(exc).__name__, exc)
 
 
+@pytest.fixture(autouse=True)
+def _clean_record_replay_state(window):
+    """module-scope 窗口跨用例复用；全量固定顺序下前序文件还可能留下全局
+    IQ 轮询/定时器。每个用例前把录音与回放状态归零，避免半开态串味。
+
+    2026-11-09 全量实测：`test_start_recording_stops_replay_first` 单跑和
+    整文件跑都绿，只在 5553 例固定顺序里红（残留 IQ 落在「已置录音态、
+    句柄未开」窗口，被判「句柄丢失」而中止录音）。这是装置隔离，
+    **任何断言都没放宽**。
+    """
+    for attr in ("_replay_timer", "_replay_load_thread"):
+        obj = getattr(window, attr, None)
+        if obj is not None and hasattr(obj, "stop"):
+            try:
+                obj.stop()
+            except Exception:  # noqa: BLE001 - 定时器/线程已销毁也要继续归零
+                pass
+        setattr(window, attr, None)
+    fh = getattr(window, "_record_stream_fh", None)
+    if fh is not None:
+        try:
+            fh.close()
+        except OSError:
+            pass
+    window._record_stream_fh = None
+    window._record_iq_buffer = None
+    window._recording = False
+    yield
+
+
 def _isolate_home(monkeypatch, tmp_path):
     """把 ~ 指到临时目录，避免测试碰用户的 ~/.mbdsdr。"""
     home = str(tmp_path)
@@ -185,6 +215,25 @@ def test_start_recording_stops_replay_first(window, monkeypatch, tmp_path):
     assert window._recording is True and window._record_stream_fh is not None
     window._apply_recording(False)
     QTest.qWait(50)
+    window._teardown_connection()
+
+
+def test_start_recording_recovers_from_half_open_state(window, monkeypatch, tmp_path):
+    """反证：「录音态为真但句柄为空」的半开残骸不许把新录音带崩。"""
+    _isolate_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(window.settings, "ensure_record_dir",
+                        lambda: (str(tmp_path), None))
+    window._active_sdr_backend = _StubBackend()
+    window._recording = True
+    window._record_stream_fh = None
+    window._record_iq_buffer = []
+
+    window._start_recording()
+
+    assert window._recording is True
+    assert window._record_stream_fh is not None, (
+        "半开态没清掉，新会话没能建立流式落盘句柄")
+    window._apply_recording(False)
     window._teardown_connection()
 
 

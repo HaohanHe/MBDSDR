@@ -647,7 +647,12 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
 # 审计主流程
 # ---------------------------------------------------------------------------
 def _install_dialog_stubs(evidence):
-    """模态框/文件框一律不真开（offscreen 下 exec 会挂死）。"""
+    """模态框/文件框一律不真开（offscreen 下 exec 会挂死）。
+
+    注意：`QMenu.exec(QPoint)` 是 Shiboken 重载，**给 QMenu.exec 赋 Python
+    函数拦不住它**（2026-11-09 faulthandler 实测）。菜单挂起只能从产品侧
+    改用非模态 `popup()` 解决，别在这里留一个看似生效的假桩。
+    """
     from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox
 
     def _msg(kind):

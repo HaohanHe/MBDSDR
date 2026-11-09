@@ -261,13 +261,28 @@ def _exclusive_lock(lock_path: str, timeout: float = LOCK_TIMEOUT_S) -> Iterator
     directory = os.path.dirname(lock_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    fh = open(lock_path, "a+b")
+    acquired = False
+    fh = None
+    deadline = time.monotonic() + timeout
     try:
+        # Windows 下两个进程同时以 a+b 打开同一个 .lock 会抛 PermissionError。
+        # 它和字节锁竞争一样是「暂时拿不到锁」，必须重试到超时后按
+        # 「没拿到锁」降级（写锁等待文案），不能冒泡成「设置保存失败」，
+        # 否则用户只看到一串文件路径，看不到「别的进程正在写」这个原因。
+        while True:
+            try:
+                fh = open(lock_path, "a+b")
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.01)
+        if fh is None:
+            yield False
+            return
         if os.fstat(fh.fileno()).st_size == 0:
             fh.write(b"\0")
             fh.flush()
-        acquired = False
-        deadline = time.monotonic() + timeout
         while True:
             try:
                 fh.seek(0)
@@ -285,7 +300,7 @@ def _exclusive_lock(lock_path: str, timeout: float = LOCK_TIMEOUT_S) -> Iterator
                 time.sleep(0.01)
         yield acquired
     finally:
-        if acquired:
+        if acquired and fh is not None:
             try:
                 fh.seek(0)
                 if sys.platform == "win32":
@@ -296,7 +311,8 @@ def _exclusive_lock(lock_path: str, timeout: float = LOCK_TIMEOUT_S) -> Iterator
                     fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
             except OSError:
                 pass
-        fh.close()
+        if fh is not None:
+            fh.close()
 
 
 def backup_corrupt_config(path: str) -> Optional[str]:

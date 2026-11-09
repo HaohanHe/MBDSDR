@@ -52,9 +52,17 @@ def test_no_device_banner_is_plain_and_actionable(window, monkeypatch):
     # 单行省略 + tooltip 的替代方案另案提交，不在本笔。
     assert w._no_device_hint.wordWrap() is False
     text = w._no_device_hint.text()
-    assert "没找到 SDR 设备" in text, f"横幅必须直说没找到设备，实际: {text}"
-    assert "可能原因" in text and "下一步" in text, f"横幅必须给原因和下一步，实际: {text}"
-    assert "GPL" not in text, f"横幅不得堆术语，实际: {text}"
+    # 「页面极简」不是把信息删掉，是把长排查细节放到该去的地方：
+    # 横幅只说发生了什么 + 下一步（_NO_SDR_BRIEF），完整的
+    # 「可能原因 / 下一步」三段式留在 tooltip（_NO_SDR_HINT），见
+    # main_window.py:261-269 与 _show_no_rtl_hint 的 detail 接线。
+    assert "还没接 SDR" in text, f"横幅必须直说没接设备，实际: {text}"
+    assert "连接" in text, f"横幅必须给出可点的下一步，实际: {text}"
+    assert "可能原因" not in text, f"排查细节不该糊在首屏，实际: {text}"
+    detail = w._no_device_hint.toolTip()
+    assert "可能原因" in detail and "下一步" in detail, (
+        f"完整排查指引必须留在 tooltip，实际: {detail}")
+    assert "GPL" not in text and "GPL" not in detail, f"横幅不得堆术语，实际: {text}"
 
 
 def test_connect_dialog_no_device_disables_ok(window, monkeypatch):

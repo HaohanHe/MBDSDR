@@ -40,6 +40,10 @@ def _new_view(size: int = 400) -> RFSkyView:
     v = RFSkyView()
     v.resize(size, size)
     v._observer = {"lat": 40.0, "lon": 116.0, "alt_m": 0.0}
+    # 地景以地平线（alt=0）为锚；默认视轴看天顶时地平线全在视野外，
+    # _draw_landscape 会在算轮廓之前 return（rf_sky_view.py:5237-5240）。
+    # 把视轴压到地平线，探针才测得到「正常渲染时逐方位算剪影」。
+    v.view_state.center_alt = 0.0
     return v
 
 

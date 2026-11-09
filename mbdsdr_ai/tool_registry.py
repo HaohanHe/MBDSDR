@@ -243,9 +243,13 @@ _NONNEG_PARAM_RE = re.compile(
     r"decim|iter|rounds|limit|last_n|max_results|max_items|max_count|"
     r"max_tokens|max_iter|top_n|order|fft|sps|symbol_rate|oversampl|"
     r"slot|interval|period)", re.I)
+#: 名字里带 rate 但语义允许为负：距离变化率（接近为负）、伪距率、率偏差。
+#: 通用校验把 rate 列为「不可为负」是为了拦 sample_rate/bandwidth 等标量，
+#: 不能顺手把多普勒往返链切断（f>fc 时 doppler_from_frequency 必得负值）。
 _NEG_EXEMPT_RE = re.compile(
     r"(offset|shift|doppler|delta|error|gain|power|db|latitude|longitude|"
-    r"lat|lon|azimuth|elevation|az|el)", re.I)
+    r"lat|lon|azimuth|elevation|az|el|"
+    r"range_rate|pseudorange_rate|rate_bias)", re.I)
 
 
 #: 速率/频率类参数的极小正值下界：1e-300 会让采样/分频计算爆量或除零。

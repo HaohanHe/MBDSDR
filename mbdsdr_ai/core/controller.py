@@ -856,6 +856,7 @@ class SDRController:
             if state["stop"].is_set():
                 raise RuntimeError("scan stopped")
             self._backend.set_frequency(center_hz)
+            state["last_center"] = center_hz
             iq = self._backend.read_samples(8192)
             iq = np.asarray(iq, dtype=np.complex128)
             window = np.hanning(iq.size)
@@ -867,6 +868,11 @@ class SDRController:
 
         scanner.psd_provider = psd_provider
 
+        # 扫频逐点改的是共享设备频率。结束时必须把调谐还原，否则后台
+        # 扫描会把 get_status().frequency_hz 留在最后一个频点上，用户
+        # 明明没调台却看到换台（见 test_headless_smoke）。
+        original_freq = self.get_frequency()
+
         def run() -> None:
             try:
                 segs = scanner.sweep()
@@ -874,6 +880,14 @@ class SDRController:
             except Exception as e:  # pragma: no cover
                 state["error"] = str(e)
             finally:
+                try:
+                    last_center = float(state.get("last_center") or 0.0)
+                    # 只在频率仍是扫描留下的那个点时还原，别覆盖扫描期间
+                    # 用户自己的调谐；走 set_frequency 同步本地缓存。
+                    if last_center and abs(self.get_frequency() - last_center) < 1.0:
+                        self.set_frequency(original_freq)
+                except Exception as e:  # pragma: no cover
+                    logger.warning("扫频后恢复中心频率失败: %s", e)
                 state["done"] = True
 
         threading.Thread(target=run, name=f"scan-{handle}", daemon=True).start()

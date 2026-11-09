@@ -91,6 +91,10 @@ INTERNAL_REASONS: Dict[str, str] = {
     "volume_scale_v2": (
         "旧 volume 量纲（0–63 硬件寄存器）一次性迁移标记；只由 "
         "settings.py:load 在旧文件缺少该键时写入，用户没有可表达的意图"),
+    "record_dir_inside_program_ack": (
+        "录制目录落在程序目录内的一次性确认标记；只由 "
+        "main_window.py:8290 的运行时对话框在用户点「仍用当前目录」时写入，"
+        "不是可在设置里表达的长期偏好，故无设置控件；用户入口是该对话框本身"),
 }
 
 #: 服务页签（独立 ServiceSettingsPanel）里的键 → 控件属性名。
