@@ -251,7 +251,7 @@ python -m pytest tests/test_swallow_guard.py -q -rf
 
 ---
 
-## K07 — UI 交互守卫的假活清单（2026-11-09 19:00，存量·部分修）
+## K07 — UI 交互守卫的假活清单（2026-11-09 19:00 立；23:50 全额销账）
 
 **统一复跑命令**
 
@@ -291,9 +291,45 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen python -m pytest \
 - **根因方向**：逐条读槽实现；真没反馈的补产品反馈（状态栏/对话框/可见
   状态变化），确实是幂等/异步的才按 `FALSE_ALIVE_WHITELIST` 写明理由。
 - **转绿条件**：9 条逐条判定并落地后 `--runxfail` 转绿；删 `xfail` 标记。
-- **锁定方式**：`@pytest.mark.xfail(strict=True, reason="KNOWN-RED-K07: …")`。
-- **诚实边界**：`test_ui_interaction_guard.py` 现在是
-  `3 passed / 1 xfailed`，**不是全绿**；守卫覆盖仍在（能跑完、能报清单）。
+- **锁定方式**：曾用 `@pytest.mark.xfail(strict=True, reason="KNOWN-RED-K07: …")`。
+
+### 2026-11-09 23:50 销账（9 条全清，xfail 已删）
+
+真机插上后重跑守卫，先炸出**三处运行时崩溃**（比假活严重）：
+ControlPanel 的 `−` / `+` / 「收藏当前频率」在「后端连接成功但没回读到频率」
+时抛 `TypeError: NoneType + float`。根因是产品把「连接成功」当成「频率真值已知」。
+
+**产品修复（6 处，全部真修）：**
+
+1. `control_panel._sync_freq_actions_enabled()`：新增。`_freq_hz is None` 时
+   ±步进/收藏保持置灰（tooltip 写明原因），`set_frequency_hz`/`_set_freq_hz`
+   一拿到真值立刻放开。`set_sdr_connected` 末尾统一收口。
+2. `_apply_step` / `_on_bookmark_add` 加 None 守卫（内部调用也不崩）。
+3. `main_window._open_location_panel`：面板已开时补状态栏回执（幂等动作）。
+4. `main_window._return_panel`：`info is None` 时提示「已在原位」；成功归位
+   提示「已归位「X」」。
+5. `main_window._hide_capability_drawer`：区分「已收起」与「本来就未打开」。
+6. `time_machine._go_now`：区分「已在现在」与「已回到现在」。
+
+**审计观察面补全（4 处，不是放宽标准）：**
+
+| 补的维度 | 此前误判的按钮 |
+|---|---|
+| `QLineEdit.styleSheet` | 调谐（空输入变红是唯一反馈） |
+| `QLabel.visible` | AI 状态条 ▾（只切一个 label 的可见性） |
+| 点击后新出现的可见顶层窗口（`evidence["new_top"]` 此前**只读不写**） | 📍 地点（`QFrame(Qt.Tool)` 不是 QDialog）、更改地点…、⧉ 菜单、⤢ detach |
+| 点击瞬间快照 | 刷新过境（后台线程太快，「更新中…」被下一轮事件循环撤掉） |
+
+**反证（防止扩大观察面 = 放宽标准）：**
+`test_probe_still_catches_noop_button` —— 注入一个接了槽但什么都不做的按钮，
+断言它仍被判「无变化」：不弹窗、不写状态栏、不开对话框、无界面变化。
+
+**结果**：`tests/test_ui_interaction_guard.py` → **5 passed**（无 xfail、无失败）。
+置灰的 ± 步进/收藏登记进 `DISABLED_REASONS`，写明「拿到频率真值即启用」。
+
+- **诚实边界**：销账的是「守卫能看见的假活」。守卫看不见的（比如状态变化
+  只发生在别的进程/网络侧）不在覆盖内；异步按钮的中间态靠「点击瞬间快照」
+  兜，若某按钮的反馈延迟超过一轮事件循环仍需单独复核。
 
 
 ---

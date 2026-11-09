@@ -169,8 +169,14 @@ class TimeMachineDialog(QDialog):
         self.edit.setDateTime(self.edit.dateTime().addSecs(int(seconds)))
 
     def _go_now(self) -> None:
+        was_real = abs(float(self._now_unix) - float(self._real_unix)) < 0.5
         self._now_unix = self._real_unix
         self._load_current()
+        # 幂等动作也要有回执：本来就在「现在」时界面一个字都不变，
+        # 用户会以为按钮坏了（UI 交互守卫专门抓这类「点了没反应」）。
+        # 说清「本来就在」与「刚跳回来」的区别，不假装刚发生了什么。
+        self.status.setText("已在现在 · 实时" if was_real
+                            else "已回到现在 · 实时")
 
     def _go_night(self) -> None:
         if self._night_resolver is None:

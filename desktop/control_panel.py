@@ -296,6 +296,9 @@ class ControlPanel(QWidget):
         # 连接后恢复频率显示（断连期间 set_frequency_hz 只存内部值不刷显示）
         if self._sdr_connected and self._freq_hz is not None:
             self._update_freq_display()
+        # 频率未知时 ±步进/收藏保持禁用：连接成功不等于拿到了频率真值。
+        # 放在最后统一收口，避免上面每处 setEnabled 各写一份判断。
+        self._sync_freq_actions_enabled()
 
     def set_connected(self, connected: bool):
         """主窗口在连接/断开时调用（hasattr 守卫，方法名固定为 set_connected）。
@@ -782,6 +785,8 @@ class ControlPanel(QWidget):
         self.freq_input.setToolTip(self._freq_input_base_tip)
         self._update_freq_display()
         self._emit_tune(freq_hz)
+        # 有真值了：±步进/收藏可以放开（首次手动调谐也走这条路）
+        self._sync_freq_actions_enabled()
 
     def _emit_tune(self, freq_hz: float):
         mode = self._current_mode
@@ -910,8 +915,35 @@ class ControlPanel(QWidget):
         self._step_hz = hz
         self.step_changed.emit(hz)
 
+    def _sync_freq_actions_enabled(self) -> None:
+        """「以当前频率为输入」的动作只在拿到频率真值后才可用。
+
+        连接成功 ≠ 拿到频率真值：后端读回失败时界面按红线保持「—」，
+        此时 `_freq_hz` 仍是 None。旧实现让 ±步进 / 收藏按钮跟着
+        `set_sdr_connected(True)` 一起亮，点一下就是 `None + float` /
+        `None / 1e6` 直接抛 TypeError（2026-11-09 真机接入时 UI 交互守卫
+        抓到三处：ControlPanel 的 `−`、`+`、「收藏当前频率」）。
+        「控件可用」必须等于「这个动作此刻真的能做」。
+        """
+        ready = bool(self._sdr_connected) and self._freq_hz is not None
+        targets = list(getattr(self, "_step_buttons", []) or [])
+        targets.append(getattr(self, "bookmark_add_btn", None))
+        for w in targets:
+            if w is not None:
+                w.setEnabled(ready)
+                # 置灰必须带理由：鼠标悬停就知道为什么点不动。
+                w.setToolTip("" if ready else
+                             "还没拿到频率真值（未连接，或后端没有回读成功）："
+                             "先调到一个频率再用")
+
     def _apply_step(self, direction: int):
-        """按当前选中的步进 ±1 步。"""
+        """按当前选中的步进 ±1 步。
+
+        频率未知时按钮本就应为禁用（`_sync_freq_actions_enabled`）；
+        这里再守一道，避免任何内部/脚本调用撞上 None 直接崩。
+        """
+        if self._freq_hz is None:
+            return
         self._set_freq_hz(self._freq_hz + direction * self._step_hz)
 
     @Slot(int)
@@ -1060,6 +1092,11 @@ class ControlPanel(QWidget):
 
     @Slot()
     def _on_bookmark_add(self):
+        # 频率未知（连接成功但后端没回读成功）时收藏没有对象可存：
+        # 旧实现直接 f"{self._freq_hz / 1e6:.3f}MHz" 抛 TypeError。
+        # 按钮此刻已禁用（_sync_freq_actions_enabled），此处兜内部调用。
+        if self._freq_hz is None:
+            return
         default_name = f"{self._freq_hz / 1e6:.3f}MHz {self._current_mode}"
         name, ok = QInputDialog.getText(
             self, "收藏频率", "名称:", QLineEdit.Normal, default_name)
@@ -1304,6 +1341,8 @@ class ControlPanel(QWidget):
             self.freq_input.setToolTip(self._freq_input_base_tip)
         if self._sdr_connected:
             self._update_freq_display()
+        # 拿到真值后立刻放开 ±步进/收藏（断开期间的禁用态在这里解除）
+        self._sync_freq_actions_enabled()
 
     def set_mode(self, mode: str):
         """从外部恢复解调模式，不发射 mode_changed / vfo_bandwidth_changed。

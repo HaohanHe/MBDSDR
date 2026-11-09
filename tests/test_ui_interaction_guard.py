@@ -114,12 +114,6 @@ def test_every_action_and_button_has_a_receiver(main_window):
             f"  {r['kind']} {r['name']} @ {r['panel']}" for r in dead))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="KNOWN-RED-K07: 9 个新增 UI 按钮被判假活（⧉ / 本后端发射 / "
-           "更改地点… / 刷新过境 / AI 状态按钮 / 📍 地点 / ⤢ / ⤶ / "
-           "时间机器回到现在），需逐条修产品或按白名单写明理由；"
-           "见 docs/known-red-register.md K07")
 def test_no_false_alive_and_no_swallowed_exceptions(main_window):
     """真触发一遍：真死/假活/异常都必须为空（假活只许白名单内）。"""
     rows = audit.audit(main_window)
@@ -177,6 +171,35 @@ def test_probe_catches_slot_exception(main_window):
                 "new_top": []}
     audit._probe(main_window, row, evidence, set())
     assert "injected" in row["exception"], "槽异常没被捕获，抛异常分类不可信"
+    btn.deleteLater()
+
+
+def test_probe_still_catches_noop_button(main_window):
+    """反证：观察面扩大后，真没反应的按钮仍须被判「无变化」。
+
+    2026-11-09 销 K07 时给审计补了四条观察路径：QLineEdit.styleSheet
+    （输入校验红框）、QLabel.visible（AI 状态条 ▾ 只切换一个 label）、
+    点击后新出现的可见顶层窗口（地点面板 QFrame(Qt.Tool)、菜单 popup、
+    detach 浮窗）、以及点击瞬间快照（异步按钮的「更新中…」）。
+    这条用例钉住另一半责任：一个接了槽但槽里什么都不做的按钮，
+    不能被这些新维度洗成「有效果」——否则扩大观察面就等于放宽标准。
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    btn = QPushButton("空槽（测试用）", main_window)
+    btn.clicked.connect(lambda: None)
+    row = {"kind": "按钮", "name": btn.text(), "loc": "-", "panel": "-",
+           "obj": btn, "wired": True, "note": "", "enabled": True,
+           "visible": True, "obs": [], "exception": "", "emitted": {},
+           "skipped": "", "switched": [], "pre": []}
+    evidence = {"msg": [], "dialog": [], "file": [], "stat": [], "close": [],
+                "new_top": []}
+    audit._probe(main_window, row, evidence, set())
+    assert not evidence["new_top"], f"空槽不该弹窗：{evidence['new_top']}"
+    assert not evidence["stat"], f"空槽不该写状态栏：{evidence['stat']}"
+    assert not evidence["dialog"], f"空槽不该开对话框：{evidence['dialog']}"
+    changes = [o for o in row["obs"] if "界面变化" in o]
+    assert not changes, f"空槽被误判成有界面变化：{changes}"
     btn.deleteLater()
 
 

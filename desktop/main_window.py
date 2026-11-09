@@ -3524,8 +3524,16 @@ class MainWindow(QMainWindow):
     def _hide_capability_drawer(self) -> None:
         panel = getattr(self, "_cap_panel", None)
         if panel is not None:
+            was_visible = panel.isVisible()
             panel.save_geometry()
             panel.hide()
+            # 抽屉本来就关着时点「⤶」界面一个字不变——用户会以为按钮没接上。
+            # 给一句回执，说清「本来就没开」而不是「点了没反应」。
+            self.statusBar().showMessage(
+                "已收起能力抽屉" if was_visible else "能力抽屉本来就未打开",
+                MSG_NORMAL)
+            return
+        self.statusBar().showMessage("能力抽屉不可用（尚未创建）", MSG_NORMAL)
 
     def _on_preview_sky_requested(self) -> None:
         """「先看看示例天空」：只给天空图一个**明确标注过**的示例站址。
@@ -3736,6 +3744,10 @@ class MainWindow(QMainWindow):
     def _return_panel(self, key: str, persist: bool = True) -> None:
         info = self._float_windows.pop(key, None)
         if info is None:
+            # 该面板本来就在三栏里：归位是幂等动作，但点完界面一个字不变
+            # 会被当成按钮坏了（UI 交互守卫专抓这类「假活」）。
+            # 给一句明确回执，说清「没做事」而不是「没反应」。
+            self.statusBar().showMessage("该面板已在原位，无需归位", MSG_NORMAL)
             return
         panel = info["panel"]
         payload = panel.take_payload()
@@ -3757,6 +3769,9 @@ class MainWindow(QMainWindow):
         # "Internal C++ object already deleted"。交给 GC 按引用计数收。
         if persist:
             self._persist_float_keys()
+        # 归位成功的回执：用户按了「⤶」就得看到面板确实回去了。
+        self.statusBar().showMessage(f"已归位「{info.get('text') or key}」",
+                                     MSG_NORMAL)
 
     def _return_all_panes(self, persist: bool = True) -> None:
         for key in list(self._float_windows):
@@ -10442,6 +10457,10 @@ class MainWindow(QMainWindow):
             panel.show()
             panel.raise_()
             panel.activateWindow()
+            # 面板已经开着时再点「📍 地点」界面不会有变化（幂等）——
+            # 给一句状态栏回执，别让用户以为按钮没接上。
+            self.statusBar().showMessage(
+                "地点面板已打开：可搜索城市 / 地图点选 / 手填经纬度", MSG_NORMAL)
         except RuntimeError:
             pass
 

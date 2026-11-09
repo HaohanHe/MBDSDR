@@ -91,6 +91,16 @@ DISABLED_REASONS: dict[str, str] = {
                        "`scan_btn.setEnabled(ready and not scanning)` 里 ready=False",
     "按钮|开始录音|*": "未连接 SDR：control_panel 随 `_sdr_connected` "
                        "整组置灰（control_panel.py 的 `w.setEnabled(self._sdr_connected)`）",
+    # 「以当前频率为输入」的三个动作：连接成功 ≠ 拿到频率真值。
+    # 后端读回失败时界面按红线保持「—」，这三个动作没有起点/对象，
+    # 由 control_panel._sync_freq_actions_enabled 统一置灰；
+    # set_frequency_hz 一拿到真值就自动放开。
+    "按钮|-|ControlPanel": "未拿到频率真值（未连接或后端读回失败）：±步进没有起点，"
+                           "由 `_sync_freq_actions_enabled` 置灰，拿到真值即启用",
+    "按钮|+|ControlPanel": "未拿到频率真值（未连接或后端读回失败）：±步进没有起点，"
+                           "由 `_sync_freq_actions_enabled` 置灰，拿到真值即启用",
+    "按钮|收藏当前频率|ControlPanel": "未拿到频率真值，没有可收藏的频点；"
+                                      "`set_frequency_hz` 回填后自动启用",
     "按钮|断开|NtripConfigDialog": "NTRIP 配置对话框内尚未建立连接",
     "菜单项|工具(&T) / FM 扫频找台|*": "未连接 SDR（FM 扫频需要可调谐的本地接收机）",
     "菜单项|工具(&T) / 停止卫星跟踪|*":
@@ -288,13 +298,21 @@ def _snapshot(win) -> dict:
         key = f"{type(w).__name__}({w.objectName()})#{id(w)}"
         try:
             if isinstance(w, QLabel):
-                snap[key] = f"text={w.text()[:120]!r}"
+                # visible 也要采：AI 面板状态条的「▾」只是切换一个 QLabel
+                # 的可见性（_toggle_live_details），只看文本会把正常展开
+                # 判成「点了没反应」。
+                snap[key] = (f"text={w.text()[:120]!r} "
+                             f"visible={int(w.isVisible())}")
             elif isinstance(w, QAbstractButton):
                 snap[key] = (f"text={w.text()[:60]!r} checked={int(w.isChecked())} "
                              f"enabled={int(w.isEnabled())} "
                              f"visible={int(w.isVisible())}")
             elif isinstance(w, QLineEdit):
-                snap[key] = f"text={w.text()[:80]!r}"
+                # styleSheet 也采集：输入校验的可见反馈就是「输入框变红」
+                # （control_panel._on_freq_input 解析失败时 setStyleSheet + 700ms
+                # 恢复）。不采集这一维，正常拒绝会被当成「点了没反应」。
+                snap[key] = (f"text={w.text()[:80]!r} "
+                             f"style={w.styleSheet()[:80]!r}")
             elif isinstance(w, QComboBox):
                 snap[key] = f"idx={w.currentIndex()} text={w.currentText()[:60]!r}"
             elif isinstance(w, QAbstractSpinBox):
@@ -589,8 +607,13 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
         evidence[key].clear()
     # 非模态对话框是 show() 出来的（如 NTRIP 设置），exec 打桩抓不到，
     # 用"点击前已可见的对话框 id 集合"来判定新冒出来的那个。
-    from PySide6.QtWidgets import QDialog
+    from PySide6.QtWidgets import QApplication, QDialog
     visible_before = {id(d) for d in win.findChildren(QDialog) if d.isVisible()}
+    # 新顶层窗口也要按「点击前已可见的集合」判定：地点面板是
+    # QFrame(Qt.Tool)、浮层 detach 换 flag 后是新顶层、菜单走 popup()——
+    # 这些都不是 QDialog，只查 findChildren(QDialog) 一律判成「没反应」。
+    # （evidence["new_top"] 此前只读不写，等于这条路一直是死的。）
+    tops_before = {id(w) for w in QApplication.topLevelWidgets() if w.isVisible()}
 
     counts, _ = _spy_signals(obj)
     catcher = _ExceptionCatcher()
@@ -606,6 +629,10 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
                 obj.click()
         except Exception:  # noqa: BLE001
             row["exception"] = traceback.format_exc()[-600:]
+        # 点完立刻采一次：异步按钮（如「刷新过境」）的「更新中…」会在槽里
+        # 同步写上，但后台线程可能在同一轮事件循环里就把它撤掉；只靠
+        # processEvents 之后的快照会漏掉这段真实可见的中间态。
+        instant = _snapshot(win)
         QApplication.processEvents()
         QApplication.processEvents()
     catcher.restore()
@@ -613,9 +640,31 @@ def _probe(win, row, evidence, volatile_global=()) -> dict:
     after = _snapshot(win)
     changed = _diff(before, after, exclude=volatile | set(volatile_global),
                     before_widgets=before_widgets)
+    if not changed:
+        changed = _diff(before, instant, exclude=volatile | set(volatile_global),
+                        before_widgets=before_widgets)
     for d in win.findChildren(QDialog):
         if d.isVisible() and id(d) not in visible_before:
             evidence["dialog"].append(d.windowTitle() or type(d).__name__)
+    # 新出现的可见顶层窗口（QFrame 浮层面板 / detach 后的浮窗 / 菜单）。
+    # 只认「点击后才可见」的，按 id 差集判定；提示气泡 QTipLabel 是
+    # 悬停噪音，不记。
+    for w in QApplication.topLevelWidgets():
+        if w is win or not w.isVisible() or id(w) in tops_before:
+            continue
+        cls = type(w).__name__
+        if cls in ("QTipLabel", "QComboBoxPrivateContainer"):
+            continue
+        try:
+            from PySide6.QtWidgets import QMenu
+            label = (w.title() if isinstance(w, QMenu)
+                     else (w.windowTitle() or w.objectName() or cls))
+        except Exception:  # noqa: BLE001 - 取标题失败不影响「有窗口弹出」这个事实
+            label = cls
+        prefix = "菜单：" if cls == "QMenu" else ""
+        text = f"{prefix}{label or cls}"
+        if text not in evidence["new_top"]:
+            evidence["new_top"].append(text)
     obs = []
     if evidence["stat"]:
         obs.append("状态栏：" + str(evidence["stat"][0])[:80])
