@@ -378,7 +378,7 @@
     }
 
     /* --- 全天星：固定 J2000 星位，每帧仅按 LST 重投影 --- */
-    const L = C.effectiveLimit(C.V.fov, C.V.bortle);
+    const L = C.effectiveLimit(C.V.fov, C.V.bortle, sunAlt);
     let shownStars = 0;
     if (!hidden) {
       const info = C.eachStar(S, W, H, (x, y, st) => {

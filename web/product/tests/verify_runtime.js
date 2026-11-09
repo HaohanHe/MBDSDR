@@ -370,6 +370,62 @@ try {
     }
     if (worst > 1e-9) errors.push(`B8: 极限星等集成钉扎 worst=${worst} > 1e-9`);
   }
+
+  // B9：晨昏连续压暗集成钉扎——CX.effectiveLimit 必须等于内核事实源
+  //     （金标准 effectiveWeb = baseWeb - penalty）。intro=1 时 adapted=base，
+  //     等于桌面 rf_sky_view.py:4246 的 base-penalty。分量级跨语言钉扎在
+  //     twilight_selftest.js；这里钉扎集成层接线（惩罚委托 + intro 合成 +
+  //     hud 三元组自洽），并守卫天文夜惩罚恒 0 / 白天把裸眼基线压到 -6 以下
+  //     （旧版布尔门一档到底、太阳 -1° 满屏 6.5 等星的物理不可能画面不得回潮）。
+  {
+    const tg = JSON.parse(fs.readFileSync(path.join(ROOT, "build/twilight-golden.json"), "utf8"));
+    if (Math.abs(CX.MAG_CAP - tg.meta.webDepthCap) > 1e-9)
+      errors.push(`B9: 前端 MAG_CAP=${CX.MAG_CAP} 与晨昏金标准 webDepthCap=${tg.meta.webDepthCap} 漂移`);
+    const savedIntro = CX.V.intro;
+    CX.V.intro = 1;   // intro=1 → adapted=base，effectiveLimit == baseWeb - penalty
+    let worst = 0;
+    for (const c of tg.compositions) {
+      const got = CX.effectiveLimit(c.fov, c.bortle, c.sunAlt);
+      const err = Math.abs(got - c.effectiveWeb);
+      if (err > worst) worst = err;
+      if (!isFinite(err) || err > 1e-9)
+        errors.push(`B9: effectiveLimit(${c.fov},${c.bortle},${c.sunAlt})=${got} vs 内核 ${c.effectiveWeb} err=${err}`);
+      // 惩罚委托：astro.twilightLimitPenaltyMag 必须等于金标准 penalty（恒 >=0）。
+      const pen = CX.astro.twilightLimitPenaltyMag(c.sunAlt);
+      if (Math.abs(pen - c.penalty) > 1e-9 || pen < 0)
+        errors.push(`B9: twilightLimitPenaltyMag(${c.sunAlt})=${pen} vs 内核 ${c.penalty}`);
+      // 天文夜（<=-18°）：惩罚恒 0，effective == base（无晨昏压暗，夜空口径）。
+      if (c.sunAlt <= -18) {
+        if (pen !== 0) errors.push(`B9: 天文夜 sunAlt=${c.sunAlt} 惩罚应恒 0，实际 ${pen}`);
+        if (Math.abs(got - c.baseWeb) > 1e-9)
+          errors.push(`B9: 天文夜 effective ${got} != base ${c.baseWeb}`);
+      }
+      // 白天（>=0°）：裸眼基线-惩罚 < -6（内核 TestTwilightPenalty 同口径，整层自然消失）。
+      if (c.sunAlt >= 0) {
+        const nelBase = CX.astro.nakedEyeLimitMag(c.bortle);
+        if (nelBase - pen >= -6)
+          errors.push(`B9: 白天 sunAlt=${c.sunAlt} bortle=${c.bortle} 裸眼-惩罚=${nelBase - pen} 未压到 -6 以下`);
+      }
+    }
+    if (worst > 1e-9) errors.push(`B9: 晨昏集成钉扎 worst=${worst} > 1e-9`);
+    // intro=0（入场暗适应起点）：adapted=2.0，effectiveLimit == 2.0 - penalty。
+    CX.V.intro = 0;
+    for (const c of tg.compositions) {
+      const got = CX.effectiveLimit(c.fov, c.bortle, c.sunAlt);
+      const expect = 2.0 - c.penalty;
+      if (Math.abs(got - expect) > 1e-9)
+        errors.push(`B9: intro=0 effectiveLimit(${c.fov},${c.bortle},${c.sunAlt})=${got} != 2.0-penalty=${expect}`);
+    }
+    CX.V.intro = 1;
+    // hud 三元组自洽（恒等式，不绑墙钟具体太阳高度）：limit == baseLimit - twilightPenalty，
+    // 且 twilightPenalty == astro 委托（对齐桌面 limit_magnitude_snapshot）。
+    const h = CX.hud({ site: { lat: 0, lon: 0 }, time: { minutes: 0 } });
+    if (Math.abs(h.limit - (h.baseLimit - h.twilightPenalty)) > 1e-9)
+      errors.push(`B9: hud 三元组不自洽 limit=${h.limit} != baseLimit-twilightPenalty=${h.baseLimit - h.twilightPenalty}`);
+    if (Math.abs(h.twilightPenalty - CX.astro.twilightLimitPenaltyMag(h.sunAlt)) > 1e-12)
+      errors.push(`B9: hud twilightPenalty=${h.twilightPenalty} 与 astro 委托(sunAlt=${h.sunAlt}) 不符`);
+    CX.V.intro = savedIntro;
+  }
 } catch (e) { errors.push(`REGRESSION: ${e.stack}`); }
 
 /* 阶段 C 前端契约：宿主接确认通道时，写工具回执必须带 canConfirm，

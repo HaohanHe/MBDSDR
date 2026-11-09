@@ -1,6 +1,6 @@
 {
  "meta": {
-  "generatedAt": "2026-11-09T17:19:08",
+  "generatedAt": "2026-11-09T17:58:17",
   "epoch": "J2000 / ICRF",
   "starCount": 25792,
   "namedCount": 141,
@@ -49,6 +49,14 @@
    "webDepthCap": "前端 MAG_CAP=meta.magMax（随仓 HYG 截断 7.5）作 depthCap；内核默认 cap 是其全星表深度 9.0",
    "pinning": "14-astro-frame.js 逐式镜像；build/gen_limit_mag_golden.py 直接 import 内核真值，tests/limit_mag_selftest.js 分量/合成紧钉扎 1e-12 等"
   },
+  "twilight": {
+   "source": "内核事实源 mbdsdr_ai/skyengine/twilight.py::sky_brightness_mag_arcsec2 + twilight_limit_penalty_mag（唯一权威，禁同式副本）；桌面 rf_sky_view.py:4246 已接线 limit = limit_magnitude(fov,bortle) - penalty(sun_alt)",
+   "brightness": "分段线性天顶亮度表（V mag/arcsec²，13 knots，太阳越高越亮）；无月夜天顶 21.6；None/NaN→夜值；端点夹取",
+   "penalty": "twilight_limit_penalty_mag = max(0, 21.6 - sky_brightness)：天空比无月夜亮多少等就压掉多少等；天文夜 <=-18° 恒 0、白天达十几等（整层自然消失）",
+   "webComposition": "effectiveLimit = (2.0 + (limitMag-2.0)*intro) - penalty(sunAlt)：intro=1 时等于桌面 base-penalty；惩罚恒全量减（白天即使 intro=0 也压到星表深度以下）；布尔白天门（日落 -0.833° 整层不画）保留，低于阈值后连续压暗（不再一档到底）",
+   "pinning": "14-astro-frame.js 逐式镜像；build/gen_twilight_golden.py 直接 import 内核真值，tests/twilight_selftest.js 分量/合成紧钉扎 1e-12 等 + 镜像内核 TestTwilightPenalty 不变量",
+   "calibration": "量级近似文献曲线（Krisciunas & Schaefer 1991 / Patat et al. 2006），非辐射标定（气溶胶/臭氧/纬度/方位约 ±1 等）、天顶等效、无方位依赖、无月光；仅显示层，不参与指向/定轨/过境结论"
+  },
   "repoSource": "MBDSDR mbdsdr_ai/skyengine/{stars,constellations}.py · mbdsdr_ai/data/dso_catalog.json · mbdsdr_ai/data/*_culture.json",
   "dsoSource": {
    "count": 117,
@@ -70,7 +78,8 @@
    "坐标链：已接仓库 celestial_geometry 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST（14-astro-frame.js，跨语言金标准对拍）；恒星自行已接 HYG 实测 pmra/pmdec（线性近似，skyfield 严格空间运动对拍，渲染星群实测 worst 残差 0.35″@2051）；章动非完整 77 项、忽略 ΔT/折射/站址视差",
    "恒星自行用线性 RA/Dec 漂移近似（标准星象仪显示口径），忽略透视加速度/视差长期项；渲染星群（V≤7.5）对 skyfield 严格解实测 worst 残差 0.35″（Lalande 21185 @2051）、2026 历元 <0.1″；Barnard's/Kapteyn's（V>7.5）不在渲染星表故未抽样；不用于毫角秒级定轨",
    "仓库岁差矩阵在 J2000 留有约 5.3 角秒常数项旋转（zeta_A/z_A 常数项 + rot_z 负角约定），未归一化；对 UI 可忽略",
-   "极限星等基线 + FOV 渲染 LOD 已接内核事实源（skyengine stars/star_catalog，14-astro-frame.js 镜像 + 跨语言金标准钉扎 1e-12 等）；但完整天空亮度→极限星等光度学模型（月相/晨昏/实际天光表面亮度）原仓库 limitations L24 明确未做，产品同样未做；LOD 增益非望远镜口径增益，入场暗适应淡入是 Web 呈现层",
+   "极限星等基线 + FOV 渲染 LOD 已接内核事实源（skyengine stars/star_catalog，14-astro-frame.js 镜像 + 跨语言金标准钉扎 1e-12 等）；但完整天空亮度→极限星等光度学模型（月相/实际标定天光表面亮度）原仓库 limitations L24 明确未做，产品同样未做（晨昏连续压暗已接内核 twilight 事实源，见下条）；LOD 增益非望远镜口径增益，入场暗适应淡入是 Web 呈现层",
+   "晨昏连续压暗已接内核事实源（skyengine/twilight.py，14-astro-frame.js 镜像 + gen_twilight_golden.py/twilight_selftest.js 跨语言钉扎 1e-12 等 + 镜像 TestTwilightPenalty 不变量；与桌面 rf_sky_view.py:4246 同式 base-penalty）；但惩罚是量级近似文献曲线、非辐射标定（±1 等/天顶等效/无方位依赖/无月光），仅显示层；月相/方位依赖/实测标定天空亮度仍未做",
    "银河图层：原仓库 L25/L28 无数据未接入，产品保持诚实空态",
    "DSO 形态/表面亮度：原仓库 L26 明确不做还原，仅类型符号",
    "TimeEngine 接线：Web 离线用本地模拟时刻，未接 new_spacetime.TimeEngine",

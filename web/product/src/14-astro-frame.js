@@ -235,6 +235,50 @@
     return Math.min(depthCap, nakedEyeLimitMag(bortle) + detailGainMag(fovDeg));
   }
 
+  /* ---------- 晨昏天空亮度 → 极限星等连续压制（事实源：内核 skyengine/twilight.py） ----------
+   * 逐式镜像 mbdsdr_ai/skyengine/twilight.py：
+   *   skyBrightnessMagArcsec2(sunAlt) = 分段线性天顶亮度表（V mag/arcsec²），太阳越高
+   *     越亮（数值越小）；alt>=10° 夹到 4.0、alt<=-90° 夹到夜值 21.6；None/NaN → 夜值
+   *     （太阳高度未知不假装白天）。插值 m_lo + t·(m_hi - m_lo)，t=(alt-a_lo)/(a_hi-a_lo)。
+   *   twilightLimitPenaltyMag(sunAlt) = max(0, 21.6 - skyBrightness)：天空比无月夜亮多少等，
+   *     极限星等就压低多少等（背景限定探测 1:1）。<=-18°（天文夜）惩罚精确为 0；白天压
+   *     十几等，整层恒星自然消失（不靠布尔开关）。
+   * 桌面 rf_sky_view.py:4246 已接线 limit = limit_magnitude(fov,bortle) - penalty(sun_alt)，
+   * tests/test_sky_realism_batch.py::TestTwilightPenalty 钉扎；前端 31-celestial.js
+   * effectiveLimit 同式合成（intro 淡入后再减惩罚）。build/gen_twilight_golden.py 取内核
+   * 真值，tests/twilight_selftest.js 紧钉扎（分量/合成 1e-12）。
+   * 【诚实口径】量级近似（Krisciunas & Schaefer 1991 / Patat et al. 2006 曲线量级），未实测
+   * 标定，气溶胶/臭氧/纬度/方位带来 ±1 等差异；天顶等效值，无方位依赖、无月光。只用于显示层
+   * “画不画、画多暗”，不参与指向/定轨/过境结论。表值口径以内核模块为准，不在别处再抄一份。 */
+  const SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2 = 21.6;
+  const SKY_BRIGHTNESS_TABLE = [
+    [10.0, 4.0], [5.0, 4.8], [2.0, 6.0], [0.0, 8.0],
+    [-2.0, 10.5], [-4.0, 13.0], [-6.0, 15.0], [-8.0, 16.5],
+    [-10.0, 17.8], [-12.0, 19.0], [-15.0, 20.5],
+    [-18.0, SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2], [-90.0, SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2]
+  ];
+  function skyBrightnessMagArcsec2(sunAltDeg) {
+    if (sunAltDeg == null) return SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2;
+    const alt = Number(sunAltDeg);
+    if (!Number.isFinite(alt)) return SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2;
+    const table = SKY_BRIGHTNESS_TABLE;
+    if (alt >= table[0][0]) return table[0][1];
+    if (alt <= table[table.length - 1][0]) return table[table.length - 1][1];
+    for (let i = 0; i < table.length - 1; i++) {
+      const aHi = table[i][0], mHi = table[i][1];
+      const aLo = table[i + 1][0], mLo = table[i + 1][1];
+      if (aLo <= alt && alt <= aHi) {
+        const t = (alt - aLo) / (aHi - aLo);
+        return mLo + t * (mHi - mLo);
+      }
+    }
+    return SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2;
+  }
+  function twilightLimitPenaltyMag(sunAltDeg) {
+    return Math.max(0.0, SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2
+                       - skyBrightnessMagArcsec2(sunAltDeg));
+  }
+
   MB.astro = {
     J2000, EPS0, ARCSEC, Q, QT, mul, transpose, matVec,
     gmstDeg, precessionMatrix, obliquity, nutationAngles, nutationMatrix,
@@ -242,6 +286,8 @@
     nakedEyeLimitMag, detailGainMag, limitMagnitude,
     DEFAULT_BORTLE, NAKED_EYE_LIMIT_SCALE, NAKED_EYE_BORTLE_SLOPE,
     DETAIL_REF_FOV_DEG, MAX_DETAIL_GAIN_MAG, CATALOG_DEPTH_MAG,
+    skyBrightnessMagArcsec2, twilightLimitPenaltyMag,
+    SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2, SKY_BRIGHTNESS_TABLE,
     meta: {
       source: "mbdsdr_ai/celestial_geometry.py (MIT, repo-owned)",
       precession: "IAU 2006 / P03 (Vondrak-Capitaine 2011 polynomial)",
@@ -255,12 +301,19 @@
         + "star_catalog.py::detail_gain_mag (clamp(0.5*log2(30/fov),0,1.5), render LOD not photometry) "
         + "/ limit_magnitude (min(depthCap, sum)); cross-language pinned by "
         + "build/gen_limit_mag_golden.py + tests/limit_mag_selftest.js",
+      twilight: "kernel fact source: skyengine/twilight.py::sky_brightness_mag_arcsec2 "
+        + "(piecewise-linear zenith V mag/arcsec^2 table, night 21.6, None/NaN->night) + "
+        + "twilight_limit_penalty_mag (max(0, 21.6 - brightness)); desktop rf_sky_view.py wires "
+        + "limit = limit_magnitude(fov,bortle) - penalty(sun_alt), pinned by "
+        + "tests/test_sky_realism_batch.py::TestTwilightPenalty; web effectiveLimit composes the same; "
+        + "cross-language pinned by build/gen_twilight_golden.py + tests/twilight_selftest.js",
       notVerified: [
         "stellar proper motion uses linear RA/Dec approximation (ignores perspective acceleration / parallax secular terms); not for mas-level astrometry",
         "no atmospheric refraction, parallax or UT1-UTC correction",
         "repo precession polynomial leaves a ~5.3 arcsec constant rotation at J2000 (zeta_A/z_A constant terms + rot_z sign convention); not normalized",
         "nutation is a 6-term abridged model, no mas-level accuracy claim",
-        "limiting magnitude is the kernel Bortle baseline + FOV render-LOD gain (NOT a full sky-brightness photometric model: moon phase / twilight / actual sky surface brightness still unmodeled, kernel limitations L24); the intro dark-adaptation fade is a web presentation layer, not kernel",
+        "limiting magnitude is the kernel Bortle baseline + FOV render-LOD gain (NOT a full sky-brightness photometric model: moon phase / actual calibrated sky surface brightness still unmodeled, kernel limitations L24; the twilight penalty IS kernel-aligned, see twilight entry); the intro dark-adaptation fade is a web presentation layer, not kernel",
+        "twilight penalty mirrors kernel skyengine/twilight.py: order-of-magnitude literature curve (Krisciunas & Schaefer 1991 / Patat et al. 2006), NOT radiometrically calibrated (aerosol/ozone/latitude/azimuth give ~+/-1 mag); zenith-equivalent, no azimuth dependence, no moonlight; display-layer only, never used for pointing/orbit/pass conclusions",
         "not suitable for precise pointing / pass prediction"
       ]
     }

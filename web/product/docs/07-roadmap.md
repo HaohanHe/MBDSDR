@@ -68,4 +68,5 @@
 - 地平大圆 + 逐列二分求分界的 360° 地景（随视角动、不随时间转）
 - 星位固定 J2000、LST 刚性旋转、FOV 缩放、grab-the-sky / zoom-to-cursor
 - 星座 27 座 / 中文星官 / 117 DSO / 时空主导 HUD / 银河诚实空态
-- 待办：接内核 TimeEngine、IAU2000A/B 完整章动序列 + 恒星自行 + 站址视差、天空亮度→极限星等模型、银河数据层
+- 后续已落地（均跨语言金标准钉扎 1e-12 等 / 角秒级对拍）：恒星自行（HYG 实测 pmra/pmdec 线性推进到当前历元 + skyfield 严格空间运动对拍）、极限星等基线 + FOV 渲染 LOD（内核 `skyengine` stars/star_catalog 事实源）、晨昏连续压暗（内核 `skyengine/twilight.py` 事实源，可见极限 = base − penalty(sun_alt)，与桌面 `rf_sky_view.py` 同式；布尔白天门保留、低于阈值连续压暗）
+- 仍待办：接内核 TimeEngine、IAU2000A/B 完整章动序列、站址视差、完整天空亮度→极限星等光度学模型（月相 / 实测标定天光表面亮度，内核 limitations L24；晨昏量级近似已接、但未辐射标定）、银河数据层

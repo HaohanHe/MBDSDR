@@ -1,0 +1,3215 @@
+{
+ "meta": {
+  "source": "mbdsdr_ai/skyengine/twilight.py::sky_brightness_mag_arcsec2 / twilight_limit_penalty_mag (kernel fact source, MIT repo-owned; imported not re-derived, table read from kernel not copied)",
+  "desktopWiring": "desktop/rf_sky_view.py:4246 limit = limit_magnitude(fov,bortle) - twilight_limit_penalty_mag(sun_alt); pinned by tests/test_sky_realism_batch.py::TestTwilightPenalty",
+  "kernelConstants": {
+   "SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2": 21.6,
+   "SKY_BRIGHTNESS_TABLE": [
+    [
+     10.0,
+     4.0
+    ],
+    [
+     5.0,
+     4.8
+    ],
+    [
+     2.0,
+     6.0
+    ],
+    [
+     0.0,
+     8.0
+    ],
+    [
+     -2.0,
+     10.5
+    ],
+    [
+     -4.0,
+     13.0
+    ],
+    [
+     -6.0,
+     15.0
+    ],
+    [
+     -8.0,
+     16.5
+    ],
+    [
+     -10.0,
+     17.8
+    ],
+    [
+     -12.0,
+     19.0
+    ],
+    [
+     -15.0,
+     20.5
+    ],
+    [
+     -18.0,
+     21.6
+    ],
+    [
+     -90.0,
+     21.6
+    ]
+   ]
+  },
+  "webDepthCap": 7.5,
+  "webDepthCapSource": "build/sky-catalog.json meta.magMax (= web MAG_CAP = Number(CAT.meta.magMax || 7.5))",
+  "formulas": {
+   "skyBrightnessMagArcsec2": "None/NaN/non-finite -> 21.6; alt>=table[0].alt(10) -> table[0].mag(4.0); alt<=table[-1].alt(-90) -> 21.6; else descending-alt segment a_lo<=alt<=a_hi: t=(alt-a_lo)/(a_hi-a_lo), m_lo + t*(m_hi-m_lo)",
+   "twilightLimitPenaltyMag": "max(0.0, 21.6 - sky_brightness_mag_arcsec2(sun_alt)); <=-18 (astronomical night) -> exactly 0",
+   "composition": "effective = base - penalty(sun_alt) [desktop rf_sky_view.py:4246]; baseKernel = limit_magnitude(fov,bortle) depthCap 9.0; baseWeb = min(webDepthCap, naked_eye+detail_gain) depthCap 7.5; web effectiveLimit pins at intro=1 (intro fade is web presentation)"
+  },
+  "componentTolMag": 1e-12,
+  "compositionTolMag": 1e-12,
+  "sunAltSamples": [
+   -180.0,
+   -120.0,
+   -90.001,
+   -90.0,
+   -89.999,
+   -89.5,
+   -89.0,
+   -88.5,
+   -88.0,
+   -87.5,
+   -87.0,
+   -86.5,
+   -86.0,
+   -85.5,
+   -85.0,
+   -84.5,
+   -84.0,
+   -83.5,
+   -83.0,
+   -82.5,
+   -82.0,
+   -81.5,
+   -81.0,
+   -80.5,
+   -80.0,
+   -79.5,
+   -79.0,
+   -78.5,
+   -78.0,
+   -77.5,
+   -77.0,
+   -76.5,
+   -76.0,
+   -75.5,
+   -75.0,
+   -74.5,
+   -74.0,
+   -73.5,
+   -73.0,
+   -72.5,
+   -72.0,
+   -71.5,
+   -71.0,
+   -70.5,
+   -70.0,
+   -69.5,
+   -69.0,
+   -68.5,
+   -68.0,
+   -67.5,
+   -67.0,
+   -66.5,
+   -66.0,
+   -65.5,
+   -65.0,
+   -64.5,
+   -64.0,
+   -63.5,
+   -63.0,
+   -62.5,
+   -62.0,
+   -61.5,
+   -61.0,
+   -60.5,
+   -60.0,
+   -59.5,
+   -59.0,
+   -58.5,
+   -58.0,
+   -57.5,
+   -57.0,
+   -56.5,
+   -56.0,
+   -55.5,
+   -55.0,
+   -54.5,
+   -54.0,
+   -53.5,
+   -53.0,
+   -52.5,
+   -52.0,
+   -51.5,
+   -51.0,
+   -50.5,
+   -50.0,
+   -49.5,
+   -49.0,
+   -48.5,
+   -48.0,
+   -47.5,
+   -47.0,
+   -46.5,
+   -46.0,
+   -45.5,
+   -45.0,
+   -44.5,
+   -44.0,
+   -43.5,
+   -43.0,
+   -42.5,
+   -42.0,
+   -41.5,
+   -41.0,
+   -40.5,
+   -40.0,
+   -39.5,
+   -39.0,
+   -38.5,
+   -38.0,
+   -37.5,
+   -37.0,
+   -36.5,
+   -36.0,
+   -35.5,
+   -35.0,
+   -34.5,
+   -34.0,
+   -33.5,
+   -33.0,
+   -32.5,
+   -32.0,
+   -31.5,
+   -31.0,
+   -30.5,
+   -30.0,
+   -29.5,
+   -29.0,
+   -28.5,
+   -28.0,
+   -27.5,
+   -27.0,
+   -26.5,
+   -26.0,
+   -25.5,
+   -25.0,
+   -24.5,
+   -24.0,
+   -23.5,
+   -23.0,
+   -22.5,
+   -22.0,
+   -21.5,
+   -21.0,
+   -20.5,
+   -20.0,
+   -19.5,
+   -19.0,
+   -18.5,
+   -18.001,
+   -18.0,
+   -17.999,
+   -17.5,
+   -17.0,
+   -16.5,
+   -16.0,
+   -15.5,
+   -15.001,
+   -15.0,
+   -14.999,
+   -14.5,
+   -14.0,
+   -13.5,
+   -13.0,
+   -12.5,
+   -12.001,
+   -12.0,
+   -11.999,
+   -11.5,
+   -11.0,
+   -10.5,
+   -10.001,
+   -10.0,
+   -9.999,
+   -9.5,
+   -9.0,
+   -8.5,
+   -8.001,
+   -8.0,
+   -7.999,
+   -7.5,
+   -7.0,
+   -6.5,
+   -6.001,
+   -6.0,
+   -5.999,
+   -5.5,
+   -5.0,
+   -4.5,
+   -4.001,
+   -4.0,
+   -3.999,
+   -3.5,
+   -3.0,
+   -2.5,
+   -2.001,
+   -2.0,
+   -1.999,
+   -1.5,
+   -1.0,
+   -0.5,
+   -0.001,
+   0.0,
+   0.001,
+   0.5,
+   1.0,
+   1.5,
+   1.999,
+   2.0,
+   2.001,
+   2.5,
+   3.0,
+   3.5,
+   4.0,
+   4.5,
+   4.999,
+   5.0,
+   5.001,
+   5.5,
+   6.0,
+   6.5,
+   7.0,
+   7.5,
+   8.0,
+   8.5,
+   9.0,
+   9.5,
+   9.999,
+   10.0,
+   10.001,
+   10.5,
+   11.0,
+   11.5,
+   12.0,
+   12.5,
+   13.0,
+   13.5,
+   14.0,
+   14.5,
+   15.0,
+   15.5,
+   16.0,
+   16.5,
+   17.0,
+   17.5,
+   18.0,
+   18.5,
+   19.0,
+   19.5,
+   20.0,
+   20.5,
+   21.0,
+   21.5,
+   22.0,
+   22.5,
+   23.0,
+   23.5,
+   24.0,
+   24.5,
+   25.0,
+   25.5,
+   26.0,
+   26.5,
+   27.0,
+   27.5,
+   28.0,
+   28.5,
+   29.0,
+   29.5,
+   30.0,
+   60.0,
+   90.0,
+   120.0
+  ],
+  "compositionFovs": [
+   160.0,
+   100.0,
+   60.0,
+   30.0,
+   22.0,
+   10.0,
+   2.0
+  ],
+  "compositionBortles": [
+   3,
+   5,
+   7
+  ],
+  "compositionSunAlts": [
+   -18.0,
+   -12.0,
+   -6.0,
+   -0.833,
+   0.0,
+   5.0,
+   30.0
+  ],
+  "componentCaseCount": 272,
+  "compositionCaseCount": 147,
+  "caseCount": 419,
+  "notVerified": [
+   "sky-brightness table is an order-of-magnitude approximation of published twilight curves (Krisciunas & Schaefer 1991 PASP 103,1033; Patat et al. 2006 A&A 455,385), NOT radiometrically calibrated; aerosol/ozone/latitude/azimuth give ~+/-1 mag",
+   "zenith-equivalent brightness only: NO azimuth dependence (sunward sky is much brighter than anti-sunward), NO moonlight term",
+   "display-layer only (draw/not-draw, how-dim); never used for pointing / orbit determination / pass conclusions",
+   "sun_alt input on the web comes from a low-precision analytic solar position (Meeus simplified, ~+/-0.5 deg, not a precise ephemeris); the penalty inherits that input uncertainty",
+   "web depthCap=7.5 (HYG cutoff) shallower than kernel CATALOG_DEPTH_MAG=9.0; applied at the 31-celestial call site, not in the kernel mirror",
+   "intro dark-adaptation fade is a web presentation layer; composition pinned at intro=1",
+   "full sky-brightness photometric model (moon phase / actual calibrated sky surface brightness) still NOT implemented (kernel limitations-register L24)"
+  ]
+ },
+ "components": [
+  {
+   "sunAlt": -180.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -120.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -90.001,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -90.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -89.999,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -89.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -89.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -88.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -88.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -87.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -87.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -86.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -86.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -85.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -85.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -84.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -84.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -83.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -83.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -82.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -82.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -81.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -81.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -80.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -80.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -79.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -79.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -78.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -78.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -77.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -77.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -76.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -76.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -75.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -75.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -74.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -74.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -73.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -73.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -72.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -72.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -71.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -71.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -70.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -70.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -69.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -69.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -68.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -68.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -67.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -67.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -66.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -66.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -65.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -65.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -64.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -64.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -63.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -63.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -62.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -62.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -61.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -61.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -60.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -60.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -59.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -59.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -58.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -58.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -57.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -57.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -56.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -56.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -55.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -55.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -54.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -54.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -53.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -53.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -52.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -52.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -51.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -51.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -50.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -50.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -49.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -49.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -48.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -48.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -47.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -47.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -46.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -46.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -45.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -45.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -44.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -44.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -43.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -43.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -42.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -42.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -41.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -41.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -40.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -40.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -39.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -39.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -38.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -38.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -37.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -37.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -36.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -36.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -35.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -35.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -34.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -34.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -33.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -33.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -32.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -32.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -31.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -31.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -30.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -30.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -29.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -29.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -28.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -28.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -27.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -27.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -26.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -26.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -25.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -25.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -24.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -24.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -23.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -23.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -22.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -22.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -21.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -21.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -20.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -20.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -19.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -19.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -18.5,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -18.001,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -18.0,
+   "skyBrightness": 21.6,
+   "penalty": 0.0
+  },
+  {
+   "sunAlt": -17.999,
+   "skyBrightness": 21.599633333333333,
+   "penalty": 0.0003666666666681806
+  },
+  {
+   "sunAlt": -17.5,
+   "skyBrightness": 21.416666666666668,
+   "penalty": 0.18333333333333357
+  },
+  {
+   "sunAlt": -17.0,
+   "skyBrightness": 21.233333333333334,
+   "penalty": 0.36666666666666714
+  },
+  {
+   "sunAlt": -16.5,
+   "skyBrightness": 21.05,
+   "penalty": 0.5500000000000007
+  },
+  {
+   "sunAlt": -16.0,
+   "skyBrightness": 20.866666666666667,
+   "penalty": 0.7333333333333343
+  },
+  {
+   "sunAlt": -15.5,
+   "skyBrightness": 20.683333333333334,
+   "penalty": 0.9166666666666679
+  },
+  {
+   "sunAlt": -15.001,
+   "skyBrightness": 20.500366666666665,
+   "penalty": 1.0996333333333368
+  },
+  {
+   "sunAlt": -15.0,
+   "skyBrightness": 20.5,
+   "penalty": 1.1000000000000014
+  },
+  {
+   "sunAlt": -14.999,
+   "skyBrightness": 20.4995,
+   "penalty": 1.1005000000000003
+  },
+  {
+   "sunAlt": -14.5,
+   "skyBrightness": 20.25,
+   "penalty": 1.3500000000000014
+  },
+  {
+   "sunAlt": -14.0,
+   "skyBrightness": 20.0,
+   "penalty": 1.6000000000000014
+  },
+  {
+   "sunAlt": -13.5,
+   "skyBrightness": 19.75,
+   "penalty": 1.8500000000000014
+  },
+  {
+   "sunAlt": -13.0,
+   "skyBrightness": 19.5,
+   "penalty": 2.1000000000000014
+  },
+  {
+   "sunAlt": -12.5,
+   "skyBrightness": 19.25,
+   "penalty": 2.3500000000000014
+  },
+  {
+   "sunAlt": -12.001,
+   "skyBrightness": 19.0005,
+   "penalty": 2.5995000000000026
+  },
+  {
+   "sunAlt": -12.0,
+   "skyBrightness": 19.0,
+   "penalty": 2.6000000000000014
+  },
+  {
+   "sunAlt": -11.999,
+   "skyBrightness": 18.9994,
+   "penalty": 2.6006
+  },
+  {
+   "sunAlt": -11.5,
+   "skyBrightness": 18.7,
+   "penalty": 2.900000000000002
+  },
+  {
+   "sunAlt": -11.0,
+   "skyBrightness": 18.4,
+   "penalty": 3.200000000000003
+  },
+  {
+   "sunAlt": -10.5,
+   "skyBrightness": 18.1,
+   "penalty": 3.5
+  },
+  {
+   "sunAlt": -10.001,
+   "skyBrightness": 17.8006,
+   "penalty": 3.799400000000002
+  },
+  {
+   "sunAlt": -10.0,
+   "skyBrightness": 17.8,
+   "penalty": 3.8000000000000007
+  },
+  {
+   "sunAlt": -9.999,
+   "skyBrightness": 17.79935,
+   "penalty": 3.800650000000001
+  },
+  {
+   "sunAlt": -9.5,
+   "skyBrightness": 17.475,
+   "penalty": 4.125
+  },
+  {
+   "sunAlt": -9.0,
+   "skyBrightness": 17.15,
+   "penalty": 4.450000000000003
+  },
+  {
+   "sunAlt": -8.5,
+   "skyBrightness": 16.825,
+   "penalty": 4.775000000000002
+  },
+  {
+   "sunAlt": -8.001,
+   "skyBrightness": 16.50065,
+   "penalty": 5.099350000000001
+  },
+  {
+   "sunAlt": -8.0,
+   "skyBrightness": 16.5,
+   "penalty": 5.100000000000001
+  },
+  {
+   "sunAlt": -7.999,
+   "skyBrightness": 16.49925,
+   "penalty": 5.1007500000000014
+  },
+  {
+   "sunAlt": -7.5,
+   "skyBrightness": 16.125,
+   "penalty": 5.475000000000001
+  },
+  {
+   "sunAlt": -7.0,
+   "skyBrightness": 15.75,
+   "penalty": 5.850000000000001
+  },
+  {
+   "sunAlt": -6.5,
+   "skyBrightness": 15.375,
+   "penalty": 6.225000000000001
+  },
+  {
+   "sunAlt": -6.001,
+   "skyBrightness": 15.00075,
+   "penalty": 6.599250000000001
+  },
+  {
+   "sunAlt": -6.0,
+   "skyBrightness": 15.0,
+   "penalty": 6.600000000000001
+  },
+  {
+   "sunAlt": -5.999,
+   "skyBrightness": 14.998999999999999,
+   "penalty": 6.601000000000003
+  },
+  {
+   "sunAlt": -5.5,
+   "skyBrightness": 14.5,
+   "penalty": 7.100000000000001
+  },
+  {
+   "sunAlt": -5.0,
+   "skyBrightness": 14.0,
+   "penalty": 7.600000000000001
+  },
+  {
+   "sunAlt": -4.5,
+   "skyBrightness": 13.5,
+   "penalty": 8.100000000000001
+  },
+  {
+   "sunAlt": -4.001,
+   "skyBrightness": 13.001000000000001,
+   "penalty": 8.599
+  },
+  {
+   "sunAlt": -4.0,
+   "skyBrightness": 13.0,
+   "penalty": 8.600000000000001
+  },
+  {
+   "sunAlt": -3.999,
+   "skyBrightness": 12.99875,
+   "penalty": 8.601250000000002
+  },
+  {
+   "sunAlt": -3.5,
+   "skyBrightness": 12.375,
+   "penalty": 9.225000000000001
+  },
+  {
+   "sunAlt": -3.0,
+   "skyBrightness": 11.75,
+   "penalty": 9.850000000000001
+  },
+  {
+   "sunAlt": -2.5,
+   "skyBrightness": 11.125,
+   "penalty": 10.475000000000001
+  },
+  {
+   "sunAlt": -2.001,
+   "skyBrightness": 10.501249999999999,
+   "penalty": 11.098750000000003
+  },
+  {
+   "sunAlt": -2.0,
+   "skyBrightness": 10.5,
+   "penalty": 11.100000000000001
+  },
+  {
+   "sunAlt": -1.999,
+   "skyBrightness": 10.49875,
+   "penalty": 11.101250000000002
+  },
+  {
+   "sunAlt": -1.5,
+   "skyBrightness": 9.875,
+   "penalty": 11.725000000000001
+  },
+  {
+   "sunAlt": -1.0,
+   "skyBrightness": 9.25,
+   "penalty": 12.350000000000001
+  },
+  {
+   "sunAlt": -0.5,
+   "skyBrightness": 8.625,
+   "penalty": 12.975000000000001
+  },
+  {
+   "sunAlt": -0.001,
+   "skyBrightness": 8.001249999999999,
+   "penalty": 13.598750000000003
+  },
+  {
+   "sunAlt": 0.0,
+   "skyBrightness": 8.0,
+   "penalty": 13.600000000000001
+  },
+  {
+   "sunAlt": 0.001,
+   "skyBrightness": 7.999,
+   "penalty": 13.601000000000003
+  },
+  {
+   "sunAlt": 0.5,
+   "skyBrightness": 7.5,
+   "penalty": 14.100000000000001
+  },
+  {
+   "sunAlt": 1.0,
+   "skyBrightness": 7.0,
+   "penalty": 14.600000000000001
+  },
+  {
+   "sunAlt": 1.5,
+   "skyBrightness": 6.5,
+   "penalty": 15.100000000000001
+  },
+  {
+   "sunAlt": 1.999,
+   "skyBrightness": 6.0009999999999994,
+   "penalty": 15.599000000000002
+  },
+  {
+   "sunAlt": 2.0,
+   "skyBrightness": 6.0,
+   "penalty": 15.600000000000001
+  },
+  {
+   "sunAlt": 2.001,
+   "skyBrightness": 5.9996,
+   "penalty": 15.6004
+  },
+  {
+   "sunAlt": 2.5,
+   "skyBrightness": 5.8,
+   "penalty": 15.8
+  },
+  {
+   "sunAlt": 3.0,
+   "skyBrightness": 5.6,
+   "penalty": 16.0
+  },
+  {
+   "sunAlt": 3.5,
+   "skyBrightness": 5.4,
+   "penalty": 16.200000000000003
+  },
+  {
+   "sunAlt": 4.0,
+   "skyBrightness": 5.2,
+   "penalty": 16.400000000000002
+  },
+  {
+   "sunAlt": 4.5,
+   "skyBrightness": 5.0,
+   "penalty": 16.6
+  },
+  {
+   "sunAlt": 4.999,
+   "skyBrightness": 4.8004,
+   "penalty": 16.7996
+  },
+  {
+   "sunAlt": 5.0,
+   "skyBrightness": 4.8,
+   "penalty": 16.8
+  },
+  {
+   "sunAlt": 5.001,
+   "skyBrightness": 4.79984,
+   "penalty": 16.80016
+  },
+  {
+   "sunAlt": 5.5,
+   "skyBrightness": 4.72,
+   "penalty": 16.880000000000003
+  },
+  {
+   "sunAlt": 6.0,
+   "skyBrightness": 4.64,
+   "penalty": 16.96
+  },
+  {
+   "sunAlt": 6.5,
+   "skyBrightness": 4.56,
+   "penalty": 17.040000000000003
+  },
+  {
+   "sunAlt": 7.0,
+   "skyBrightness": 4.4799999999999995,
+   "penalty": 17.12
+  },
+  {
+   "sunAlt": 7.5,
+   "skyBrightness": 4.4,
+   "penalty": 17.200000000000003
+  },
+  {
+   "sunAlt": 8.0,
+   "skyBrightness": 4.32,
+   "penalty": 17.28
+  },
+  {
+   "sunAlt": 8.5,
+   "skyBrightness": 4.24,
+   "penalty": 17.36
+  },
+  {
+   "sunAlt": 9.0,
+   "skyBrightness": 4.16,
+   "penalty": 17.44
+  },
+  {
+   "sunAlt": 9.5,
+   "skyBrightness": 4.08,
+   "penalty": 17.520000000000003
+  },
+  {
+   "sunAlt": 9.999,
+   "skyBrightness": 4.00016,
+   "penalty": 17.59984
+  },
+  {
+   "sunAlt": 10.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 10.001,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 10.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 11.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 11.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 12.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 12.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 13.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 13.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 14.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 14.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 15.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 15.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 16.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 16.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 17.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 17.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 18.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 18.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 19.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 19.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 20.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 20.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 21.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 21.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 22.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 22.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 23.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 23.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 24.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 24.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 25.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 25.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 26.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 26.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 27.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 27.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 28.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 28.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 29.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 29.5,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 30.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 60.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 90.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  },
+  {
+   "sunAlt": 120.0,
+   "skyBrightness": 4.0,
+   "penalty": 17.6
+  }
+ ],
+ "compositions": [
+  {
+   "fov": 160.0,
+   "bortle": 3,
+   "sunAlt": -18.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 0.0,
+   "effectiveKernel": 6.5,
+   "effectiveWeb": 6.5
+  },
+  {
+   "fov": 160.0,
+   "bortle": 3,
+   "sunAlt": -12.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.8999999999999986,
+   "effectiveWeb": 3.8999999999999986
+  },
+  {
+   "fov": 160.0,
+   "bortle": 3,
+   "sunAlt": -6.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.10000000000000142,
+   "effectiveWeb": -0.10000000000000142
+  },
+  {
+   "fov": 160.0,
+   "bortle": 3,
+   "sunAlt": -0.833,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.058750000000002,
+   "effectiveWeb": -6.058750000000002
+  },
+  {
+   "fov": 160.0,
+   "bortle": 3,
+   "sunAlt": 0.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.100000000000001,
+   "effectiveWeb": -7.100000000000001
+  },
+  {
+   "fov": 160.0,
+   "bortle": 3,
+   "sunAlt": 5.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 16.8,
+   "effectiveKernel": -10.3,
+   "effectiveWeb": -10.3
+  },
+  {
+   "fov": 160.0,
+   "bortle": 3,
+   "sunAlt": 30.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 17.6,
+   "effectiveKernel": -11.100000000000001,
+   "effectiveWeb": -11.100000000000001
+  },
+  {
+   "fov": 160.0,
+   "bortle": 5,
+   "sunAlt": -18.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 0.0,
+   "effectiveKernel": 5.8,
+   "effectiveWeb": 5.8
+  },
+  {
+   "fov": 160.0,
+   "bortle": 5,
+   "sunAlt": -12.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.1999999999999984,
+   "effectiveWeb": 3.1999999999999984
+  },
+  {
+   "fov": 160.0,
+   "bortle": 5,
+   "sunAlt": -6.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.8000000000000016,
+   "effectiveWeb": -0.8000000000000016
+  },
+  {
+   "fov": 160.0,
+   "bortle": 5,
+   "sunAlt": -0.833,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.758750000000002,
+   "effectiveWeb": -6.758750000000002
+  },
+  {
+   "fov": 160.0,
+   "bortle": 5,
+   "sunAlt": 0.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.800000000000002,
+   "effectiveWeb": -7.800000000000002
+  },
+  {
+   "fov": 160.0,
+   "bortle": 5,
+   "sunAlt": 5.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 16.8,
+   "effectiveKernel": -11.0,
+   "effectiveWeb": -11.0
+  },
+  {
+   "fov": 160.0,
+   "bortle": 5,
+   "sunAlt": 30.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 17.6,
+   "effectiveKernel": -11.8,
+   "effectiveWeb": -11.8
+  },
+  {
+   "fov": 160.0,
+   "bortle": 7,
+   "sunAlt": -18.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 0.0,
+   "effectiveKernel": 5.1,
+   "effectiveWeb": 5.1
+  },
+  {
+   "fov": 160.0,
+   "bortle": 7,
+   "sunAlt": -12.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 2.4999999999999982,
+   "effectiveWeb": 2.4999999999999982
+  },
+  {
+   "fov": 160.0,
+   "bortle": 7,
+   "sunAlt": -6.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -1.5000000000000018,
+   "effectiveWeb": -1.5000000000000018
+  },
+  {
+   "fov": 160.0,
+   "bortle": 7,
+   "sunAlt": -0.833,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -7.458750000000002,
+   "effectiveWeb": -7.458750000000002
+  },
+  {
+   "fov": 160.0,
+   "bortle": 7,
+   "sunAlt": 0.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -8.500000000000002,
+   "effectiveWeb": -8.500000000000002
+  },
+  {
+   "fov": 160.0,
+   "bortle": 7,
+   "sunAlt": 5.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 16.8,
+   "effectiveKernel": -11.700000000000001,
+   "effectiveWeb": -11.700000000000001
+  },
+  {
+   "fov": 160.0,
+   "bortle": 7,
+   "sunAlt": 30.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 17.6,
+   "effectiveKernel": -12.500000000000002,
+   "effectiveWeb": -12.500000000000002
+  },
+  {
+   "fov": 100.0,
+   "bortle": 3,
+   "sunAlt": -18.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 0.0,
+   "effectiveKernel": 6.5,
+   "effectiveWeb": 6.5
+  },
+  {
+   "fov": 100.0,
+   "bortle": 3,
+   "sunAlt": -12.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.8999999999999986,
+   "effectiveWeb": 3.8999999999999986
+  },
+  {
+   "fov": 100.0,
+   "bortle": 3,
+   "sunAlt": -6.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.10000000000000142,
+   "effectiveWeb": -0.10000000000000142
+  },
+  {
+   "fov": 100.0,
+   "bortle": 3,
+   "sunAlt": -0.833,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.058750000000002,
+   "effectiveWeb": -6.058750000000002
+  },
+  {
+   "fov": 100.0,
+   "bortle": 3,
+   "sunAlt": 0.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.100000000000001,
+   "effectiveWeb": -7.100000000000001
+  },
+  {
+   "fov": 100.0,
+   "bortle": 3,
+   "sunAlt": 5.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 16.8,
+   "effectiveKernel": -10.3,
+   "effectiveWeb": -10.3
+  },
+  {
+   "fov": 100.0,
+   "bortle": 3,
+   "sunAlt": 30.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 17.6,
+   "effectiveKernel": -11.100000000000001,
+   "effectiveWeb": -11.100000000000001
+  },
+  {
+   "fov": 100.0,
+   "bortle": 5,
+   "sunAlt": -18.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 0.0,
+   "effectiveKernel": 5.8,
+   "effectiveWeb": 5.8
+  },
+  {
+   "fov": 100.0,
+   "bortle": 5,
+   "sunAlt": -12.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.1999999999999984,
+   "effectiveWeb": 3.1999999999999984
+  },
+  {
+   "fov": 100.0,
+   "bortle": 5,
+   "sunAlt": -6.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.8000000000000016,
+   "effectiveWeb": -0.8000000000000016
+  },
+  {
+   "fov": 100.0,
+   "bortle": 5,
+   "sunAlt": -0.833,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.758750000000002,
+   "effectiveWeb": -6.758750000000002
+  },
+  {
+   "fov": 100.0,
+   "bortle": 5,
+   "sunAlt": 0.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.800000000000002,
+   "effectiveWeb": -7.800000000000002
+  },
+  {
+   "fov": 100.0,
+   "bortle": 5,
+   "sunAlt": 5.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 16.8,
+   "effectiveKernel": -11.0,
+   "effectiveWeb": -11.0
+  },
+  {
+   "fov": 100.0,
+   "bortle": 5,
+   "sunAlt": 30.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 17.6,
+   "effectiveKernel": -11.8,
+   "effectiveWeb": -11.8
+  },
+  {
+   "fov": 100.0,
+   "bortle": 7,
+   "sunAlt": -18.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 0.0,
+   "effectiveKernel": 5.1,
+   "effectiveWeb": 5.1
+  },
+  {
+   "fov": 100.0,
+   "bortle": 7,
+   "sunAlt": -12.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 2.4999999999999982,
+   "effectiveWeb": 2.4999999999999982
+  },
+  {
+   "fov": 100.0,
+   "bortle": 7,
+   "sunAlt": -6.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -1.5000000000000018,
+   "effectiveWeb": -1.5000000000000018
+  },
+  {
+   "fov": 100.0,
+   "bortle": 7,
+   "sunAlt": -0.833,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -7.458750000000002,
+   "effectiveWeb": -7.458750000000002
+  },
+  {
+   "fov": 100.0,
+   "bortle": 7,
+   "sunAlt": 0.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -8.500000000000002,
+   "effectiveWeb": -8.500000000000002
+  },
+  {
+   "fov": 100.0,
+   "bortle": 7,
+   "sunAlt": 5.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 16.8,
+   "effectiveKernel": -11.700000000000001,
+   "effectiveWeb": -11.700000000000001
+  },
+  {
+   "fov": 100.0,
+   "bortle": 7,
+   "sunAlt": 30.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 17.6,
+   "effectiveKernel": -12.500000000000002,
+   "effectiveWeb": -12.500000000000002
+  },
+  {
+   "fov": 60.0,
+   "bortle": 3,
+   "sunAlt": -18.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 0.0,
+   "effectiveKernel": 6.5,
+   "effectiveWeb": 6.5
+  },
+  {
+   "fov": 60.0,
+   "bortle": 3,
+   "sunAlt": -12.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.8999999999999986,
+   "effectiveWeb": 3.8999999999999986
+  },
+  {
+   "fov": 60.0,
+   "bortle": 3,
+   "sunAlt": -6.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.10000000000000142,
+   "effectiveWeb": -0.10000000000000142
+  },
+  {
+   "fov": 60.0,
+   "bortle": 3,
+   "sunAlt": -0.833,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.058750000000002,
+   "effectiveWeb": -6.058750000000002
+  },
+  {
+   "fov": 60.0,
+   "bortle": 3,
+   "sunAlt": 0.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.100000000000001,
+   "effectiveWeb": -7.100000000000001
+  },
+  {
+   "fov": 60.0,
+   "bortle": 3,
+   "sunAlt": 5.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 16.8,
+   "effectiveKernel": -10.3,
+   "effectiveWeb": -10.3
+  },
+  {
+   "fov": 60.0,
+   "bortle": 3,
+   "sunAlt": 30.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 17.6,
+   "effectiveKernel": -11.100000000000001,
+   "effectiveWeb": -11.100000000000001
+  },
+  {
+   "fov": 60.0,
+   "bortle": 5,
+   "sunAlt": -18.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 0.0,
+   "effectiveKernel": 5.8,
+   "effectiveWeb": 5.8
+  },
+  {
+   "fov": 60.0,
+   "bortle": 5,
+   "sunAlt": -12.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.1999999999999984,
+   "effectiveWeb": 3.1999999999999984
+  },
+  {
+   "fov": 60.0,
+   "bortle": 5,
+   "sunAlt": -6.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.8000000000000016,
+   "effectiveWeb": -0.8000000000000016
+  },
+  {
+   "fov": 60.0,
+   "bortle": 5,
+   "sunAlt": -0.833,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.758750000000002,
+   "effectiveWeb": -6.758750000000002
+  },
+  {
+   "fov": 60.0,
+   "bortle": 5,
+   "sunAlt": 0.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.800000000000002,
+   "effectiveWeb": -7.800000000000002
+  },
+  {
+   "fov": 60.0,
+   "bortle": 5,
+   "sunAlt": 5.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 16.8,
+   "effectiveKernel": -11.0,
+   "effectiveWeb": -11.0
+  },
+  {
+   "fov": 60.0,
+   "bortle": 5,
+   "sunAlt": 30.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 17.6,
+   "effectiveKernel": -11.8,
+   "effectiveWeb": -11.8
+  },
+  {
+   "fov": 60.0,
+   "bortle": 7,
+   "sunAlt": -18.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 0.0,
+   "effectiveKernel": 5.1,
+   "effectiveWeb": 5.1
+  },
+  {
+   "fov": 60.0,
+   "bortle": 7,
+   "sunAlt": -12.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 2.4999999999999982,
+   "effectiveWeb": 2.4999999999999982
+  },
+  {
+   "fov": 60.0,
+   "bortle": 7,
+   "sunAlt": -6.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -1.5000000000000018,
+   "effectiveWeb": -1.5000000000000018
+  },
+  {
+   "fov": 60.0,
+   "bortle": 7,
+   "sunAlt": -0.833,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -7.458750000000002,
+   "effectiveWeb": -7.458750000000002
+  },
+  {
+   "fov": 60.0,
+   "bortle": 7,
+   "sunAlt": 0.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -8.500000000000002,
+   "effectiveWeb": -8.500000000000002
+  },
+  {
+   "fov": 60.0,
+   "bortle": 7,
+   "sunAlt": 5.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 16.8,
+   "effectiveKernel": -11.700000000000001,
+   "effectiveWeb": -11.700000000000001
+  },
+  {
+   "fov": 60.0,
+   "bortle": 7,
+   "sunAlt": 30.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 17.6,
+   "effectiveKernel": -12.500000000000002,
+   "effectiveWeb": -12.500000000000002
+  },
+  {
+   "fov": 30.0,
+   "bortle": 3,
+   "sunAlt": -18.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 0.0,
+   "effectiveKernel": 6.5,
+   "effectiveWeb": 6.5
+  },
+  {
+   "fov": 30.0,
+   "bortle": 3,
+   "sunAlt": -12.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.8999999999999986,
+   "effectiveWeb": 3.8999999999999986
+  },
+  {
+   "fov": 30.0,
+   "bortle": 3,
+   "sunAlt": -6.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.10000000000000142,
+   "effectiveWeb": -0.10000000000000142
+  },
+  {
+   "fov": 30.0,
+   "bortle": 3,
+   "sunAlt": -0.833,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.058750000000002,
+   "effectiveWeb": -6.058750000000002
+  },
+  {
+   "fov": 30.0,
+   "bortle": 3,
+   "sunAlt": 0.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.100000000000001,
+   "effectiveWeb": -7.100000000000001
+  },
+  {
+   "fov": 30.0,
+   "bortle": 3,
+   "sunAlt": 5.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 16.8,
+   "effectiveKernel": -10.3,
+   "effectiveWeb": -10.3
+  },
+  {
+   "fov": 30.0,
+   "bortle": 3,
+   "sunAlt": 30.0,
+   "baseKernel": 6.5,
+   "baseWeb": 6.5,
+   "penalty": 17.6,
+   "effectiveKernel": -11.100000000000001,
+   "effectiveWeb": -11.100000000000001
+  },
+  {
+   "fov": 30.0,
+   "bortle": 5,
+   "sunAlt": -18.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 0.0,
+   "effectiveKernel": 5.8,
+   "effectiveWeb": 5.8
+  },
+  {
+   "fov": 30.0,
+   "bortle": 5,
+   "sunAlt": -12.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.1999999999999984,
+   "effectiveWeb": 3.1999999999999984
+  },
+  {
+   "fov": 30.0,
+   "bortle": 5,
+   "sunAlt": -6.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.8000000000000016,
+   "effectiveWeb": -0.8000000000000016
+  },
+  {
+   "fov": 30.0,
+   "bortle": 5,
+   "sunAlt": -0.833,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.758750000000002,
+   "effectiveWeb": -6.758750000000002
+  },
+  {
+   "fov": 30.0,
+   "bortle": 5,
+   "sunAlt": 0.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.800000000000002,
+   "effectiveWeb": -7.800000000000002
+  },
+  {
+   "fov": 30.0,
+   "bortle": 5,
+   "sunAlt": 5.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 16.8,
+   "effectiveKernel": -11.0,
+   "effectiveWeb": -11.0
+  },
+  {
+   "fov": 30.0,
+   "bortle": 5,
+   "sunAlt": 30.0,
+   "baseKernel": 5.8,
+   "baseWeb": 5.8,
+   "penalty": 17.6,
+   "effectiveKernel": -11.8,
+   "effectiveWeb": -11.8
+  },
+  {
+   "fov": 30.0,
+   "bortle": 7,
+   "sunAlt": -18.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 0.0,
+   "effectiveKernel": 5.1,
+   "effectiveWeb": 5.1
+  },
+  {
+   "fov": 30.0,
+   "bortle": 7,
+   "sunAlt": -12.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 2.4999999999999982,
+   "effectiveWeb": 2.4999999999999982
+  },
+  {
+   "fov": 30.0,
+   "bortle": 7,
+   "sunAlt": -6.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -1.5000000000000018,
+   "effectiveWeb": -1.5000000000000018
+  },
+  {
+   "fov": 30.0,
+   "bortle": 7,
+   "sunAlt": -0.833,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -7.458750000000002,
+   "effectiveWeb": -7.458750000000002
+  },
+  {
+   "fov": 30.0,
+   "bortle": 7,
+   "sunAlt": 0.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -8.500000000000002,
+   "effectiveWeb": -8.500000000000002
+  },
+  {
+   "fov": 30.0,
+   "bortle": 7,
+   "sunAlt": 5.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 16.8,
+   "effectiveKernel": -11.700000000000001,
+   "effectiveWeb": -11.700000000000001
+  },
+  {
+   "fov": 30.0,
+   "bortle": 7,
+   "sunAlt": 30.0,
+   "baseKernel": 5.1,
+   "baseWeb": 5.1,
+   "penalty": 17.6,
+   "effectiveKernel": -12.500000000000002,
+   "effectiveWeb": -12.500000000000002
+  },
+  {
+   "fov": 22.0,
+   "bortle": 3,
+   "sunAlt": -18.0,
+   "baseKernel": 6.723729488485611,
+   "baseWeb": 6.723729488485611,
+   "penalty": 0.0,
+   "effectiveKernel": 6.723729488485611,
+   "effectiveWeb": 6.723729488485611
+  },
+  {
+   "fov": 22.0,
+   "bortle": 3,
+   "sunAlt": -12.0,
+   "baseKernel": 6.723729488485611,
+   "baseWeb": 6.723729488485611,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 4.123729488485609,
+   "effectiveWeb": 4.123729488485609
+  },
+  {
+   "fov": 22.0,
+   "bortle": 3,
+   "sunAlt": -6.0,
+   "baseKernel": 6.723729488485611,
+   "baseWeb": 6.723729488485611,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": 0.12372948848560927,
+   "effectiveWeb": 0.12372948848560927
+  },
+  {
+   "fov": 22.0,
+   "bortle": 3,
+   "sunAlt": -0.833,
+   "baseKernel": 6.723729488485611,
+   "baseWeb": 6.723729488485611,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -5.835020511514391,
+   "effectiveWeb": -5.835020511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 3,
+   "sunAlt": 0.0,
+   "baseKernel": 6.723729488485611,
+   "baseWeb": 6.723729488485611,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -6.876270511514391,
+   "effectiveWeb": -6.876270511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 3,
+   "sunAlt": 5.0,
+   "baseKernel": 6.723729488485611,
+   "baseWeb": 6.723729488485611,
+   "penalty": 16.8,
+   "effectiveKernel": -10.076270511514391,
+   "effectiveWeb": -10.076270511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 3,
+   "sunAlt": 30.0,
+   "baseKernel": 6.723729488485611,
+   "baseWeb": 6.723729488485611,
+   "penalty": 17.6,
+   "effectiveKernel": -10.876270511514392,
+   "effectiveWeb": -10.876270511514392
+  },
+  {
+   "fov": 22.0,
+   "bortle": 5,
+   "sunAlt": -18.0,
+   "baseKernel": 6.0237294884856105,
+   "baseWeb": 6.0237294884856105,
+   "penalty": 0.0,
+   "effectiveKernel": 6.0237294884856105,
+   "effectiveWeb": 6.0237294884856105
+  },
+  {
+   "fov": 22.0,
+   "bortle": 5,
+   "sunAlt": -12.0,
+   "baseKernel": 6.0237294884856105,
+   "baseWeb": 6.0237294884856105,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.423729488485609,
+   "effectiveWeb": 3.423729488485609
+  },
+  {
+   "fov": 22.0,
+   "bortle": 5,
+   "sunAlt": -6.0,
+   "baseKernel": 6.0237294884856105,
+   "baseWeb": 6.0237294884856105,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.5762705115143909,
+   "effectiveWeb": -0.5762705115143909
+  },
+  {
+   "fov": 22.0,
+   "bortle": 5,
+   "sunAlt": -0.833,
+   "baseKernel": 6.0237294884856105,
+   "baseWeb": 6.0237294884856105,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.535020511514391,
+   "effectiveWeb": -6.535020511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 5,
+   "sunAlt": 0.0,
+   "baseKernel": 6.0237294884856105,
+   "baseWeb": 6.0237294884856105,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.576270511514391,
+   "effectiveWeb": -7.576270511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 5,
+   "sunAlt": 5.0,
+   "baseKernel": 6.0237294884856105,
+   "baseWeb": 6.0237294884856105,
+   "penalty": 16.8,
+   "effectiveKernel": -10.77627051151439,
+   "effectiveWeb": -10.77627051151439
+  },
+  {
+   "fov": 22.0,
+   "bortle": 5,
+   "sunAlt": 30.0,
+   "baseKernel": 6.0237294884856105,
+   "baseWeb": 6.0237294884856105,
+   "penalty": 17.6,
+   "effectiveKernel": -11.576270511514391,
+   "effectiveWeb": -11.576270511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 7,
+   "sunAlt": -18.0,
+   "baseKernel": 5.32372948848561,
+   "baseWeb": 5.32372948848561,
+   "penalty": 0.0,
+   "effectiveKernel": 5.32372948848561,
+   "effectiveWeb": 5.32372948848561
+  },
+  {
+   "fov": 22.0,
+   "bortle": 7,
+   "sunAlt": -12.0,
+   "baseKernel": 5.32372948848561,
+   "baseWeb": 5.32372948848561,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 2.723729488485609,
+   "effectiveWeb": 2.723729488485609
+  },
+  {
+   "fov": 22.0,
+   "bortle": 7,
+   "sunAlt": -6.0,
+   "baseKernel": 5.32372948848561,
+   "baseWeb": 5.32372948848561,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -1.276270511514391,
+   "effectiveWeb": -1.276270511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 7,
+   "sunAlt": -0.833,
+   "baseKernel": 5.32372948848561,
+   "baseWeb": 5.32372948848561,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -7.235020511514391,
+   "effectiveWeb": -7.235020511514391
+  },
+  {
+   "fov": 22.0,
+   "bortle": 7,
+   "sunAlt": 0.0,
+   "baseKernel": 5.32372948848561,
+   "baseWeb": 5.32372948848561,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -8.27627051151439,
+   "effectiveWeb": -8.27627051151439
+  },
+  {
+   "fov": 22.0,
+   "bortle": 7,
+   "sunAlt": 5.0,
+   "baseKernel": 5.32372948848561,
+   "baseWeb": 5.32372948848561,
+   "penalty": 16.8,
+   "effectiveKernel": -11.47627051151439,
+   "effectiveWeb": -11.47627051151439
+  },
+  {
+   "fov": 22.0,
+   "bortle": 7,
+   "sunAlt": 30.0,
+   "baseKernel": 5.32372948848561,
+   "baseWeb": 5.32372948848561,
+   "penalty": 17.6,
+   "effectiveKernel": -12.27627051151439,
+   "effectiveWeb": -12.27627051151439
+  },
+  {
+   "fov": 10.0,
+   "bortle": 3,
+   "sunAlt": -18.0,
+   "baseKernel": 7.292481250360578,
+   "baseWeb": 7.292481250360578,
+   "penalty": 0.0,
+   "effectiveKernel": 7.292481250360578,
+   "effectiveWeb": 7.292481250360578
+  },
+  {
+   "fov": 10.0,
+   "bortle": 3,
+   "sunAlt": -12.0,
+   "baseKernel": 7.292481250360578,
+   "baseWeb": 7.292481250360578,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 4.692481250360577,
+   "effectiveWeb": 4.692481250360577
+  },
+  {
+   "fov": 10.0,
+   "bortle": 3,
+   "sunAlt": -6.0,
+   "baseKernel": 7.292481250360578,
+   "baseWeb": 7.292481250360578,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": 0.6924812503605766,
+   "effectiveWeb": 0.6924812503605766
+  },
+  {
+   "fov": 10.0,
+   "bortle": 3,
+   "sunAlt": -0.833,
+   "baseKernel": 7.292481250360578,
+   "baseWeb": 7.292481250360578,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -5.266268749639424,
+   "effectiveWeb": -5.266268749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 3,
+   "sunAlt": 0.0,
+   "baseKernel": 7.292481250360578,
+   "baseWeb": 7.292481250360578,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -6.307518749639423,
+   "effectiveWeb": -6.307518749639423
+  },
+  {
+   "fov": 10.0,
+   "bortle": 3,
+   "sunAlt": 5.0,
+   "baseKernel": 7.292481250360578,
+   "baseWeb": 7.292481250360578,
+   "penalty": 16.8,
+   "effectiveKernel": -9.507518749639424,
+   "effectiveWeb": -9.507518749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 3,
+   "sunAlt": 30.0,
+   "baseKernel": 7.292481250360578,
+   "baseWeb": 7.292481250360578,
+   "penalty": 17.6,
+   "effectiveKernel": -10.307518749639424,
+   "effectiveWeb": -10.307518749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 5,
+   "sunAlt": -18.0,
+   "baseKernel": 6.592481250360578,
+   "baseWeb": 6.592481250360578,
+   "penalty": 0.0,
+   "effectiveKernel": 6.592481250360578,
+   "effectiveWeb": 6.592481250360578
+  },
+  {
+   "fov": 10.0,
+   "bortle": 5,
+   "sunAlt": -12.0,
+   "baseKernel": 6.592481250360578,
+   "baseWeb": 6.592481250360578,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.9924812503605764,
+   "effectiveWeb": 3.9924812503605764
+  },
+  {
+   "fov": 10.0,
+   "bortle": 5,
+   "sunAlt": -6.0,
+   "baseKernel": 6.592481250360578,
+   "baseWeb": 6.592481250360578,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.007518749639423561,
+   "effectiveWeb": -0.007518749639423561
+  },
+  {
+   "fov": 10.0,
+   "bortle": 5,
+   "sunAlt": -0.833,
+   "baseKernel": 6.592481250360578,
+   "baseWeb": 6.592481250360578,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -5.966268749639424,
+   "effectiveWeb": -5.966268749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 5,
+   "sunAlt": 0.0,
+   "baseKernel": 6.592481250360578,
+   "baseWeb": 6.592481250360578,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.007518749639424,
+   "effectiveWeb": -7.007518749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 5,
+   "sunAlt": 5.0,
+   "baseKernel": 6.592481250360578,
+   "baseWeb": 6.592481250360578,
+   "penalty": 16.8,
+   "effectiveKernel": -10.207518749639423,
+   "effectiveWeb": -10.207518749639423
+  },
+  {
+   "fov": 10.0,
+   "bortle": 5,
+   "sunAlt": 30.0,
+   "baseKernel": 6.592481250360578,
+   "baseWeb": 6.592481250360578,
+   "penalty": 17.6,
+   "effectiveKernel": -11.007518749639424,
+   "effectiveWeb": -11.007518749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 7,
+   "sunAlt": -18.0,
+   "baseKernel": 5.892481250360578,
+   "baseWeb": 5.892481250360578,
+   "penalty": 0.0,
+   "effectiveKernel": 5.892481250360578,
+   "effectiveWeb": 5.892481250360578
+  },
+  {
+   "fov": 10.0,
+   "bortle": 7,
+   "sunAlt": -12.0,
+   "baseKernel": 5.892481250360578,
+   "baseWeb": 5.892481250360578,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.2924812503605763,
+   "effectiveWeb": 3.2924812503605763
+  },
+  {
+   "fov": 10.0,
+   "bortle": 7,
+   "sunAlt": -6.0,
+   "baseKernel": 5.892481250360578,
+   "baseWeb": 5.892481250360578,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -0.7075187496394237,
+   "effectiveWeb": -0.7075187496394237
+  },
+  {
+   "fov": 10.0,
+   "bortle": 7,
+   "sunAlt": -0.833,
+   "baseKernel": 5.892481250360578,
+   "baseWeb": 5.892481250360578,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -6.666268749639424,
+   "effectiveWeb": -6.666268749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 7,
+   "sunAlt": 0.0,
+   "baseKernel": 5.892481250360578,
+   "baseWeb": 5.892481250360578,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.707518749639424,
+   "effectiveWeb": -7.707518749639424
+  },
+  {
+   "fov": 10.0,
+   "bortle": 7,
+   "sunAlt": 5.0,
+   "baseKernel": 5.892481250360578,
+   "baseWeb": 5.892481250360578,
+   "penalty": 16.8,
+   "effectiveKernel": -10.907518749639422,
+   "effectiveWeb": -10.907518749639422
+  },
+  {
+   "fov": 10.0,
+   "bortle": 7,
+   "sunAlt": 30.0,
+   "baseKernel": 5.892481250360578,
+   "baseWeb": 5.892481250360578,
+   "penalty": 17.6,
+   "effectiveKernel": -11.707518749639423,
+   "effectiveWeb": -11.707518749639423
+  },
+  {
+   "fov": 2.0,
+   "bortle": 3,
+   "sunAlt": -18.0,
+   "baseKernel": 8.0,
+   "baseWeb": 7.5,
+   "penalty": 0.0,
+   "effectiveKernel": 8.0,
+   "effectiveWeb": 7.5
+  },
+  {
+   "fov": 2.0,
+   "bortle": 3,
+   "sunAlt": -12.0,
+   "baseKernel": 8.0,
+   "baseWeb": 7.5,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 5.399999999999999,
+   "effectiveWeb": 4.899999999999999
+  },
+  {
+   "fov": 2.0,
+   "bortle": 3,
+   "sunAlt": -6.0,
+   "baseKernel": 8.0,
+   "baseWeb": 7.5,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": 1.3999999999999986,
+   "effectiveWeb": 0.8999999999999986
+  },
+  {
+   "fov": 2.0,
+   "bortle": 3,
+   "sunAlt": -0.833,
+   "baseKernel": 8.0,
+   "baseWeb": 7.5,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -4.558750000000002,
+   "effectiveWeb": -5.058750000000002
+  },
+  {
+   "fov": 2.0,
+   "bortle": 3,
+   "sunAlt": 0.0,
+   "baseKernel": 8.0,
+   "baseWeb": 7.5,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -5.600000000000001,
+   "effectiveWeb": -6.100000000000001
+  },
+  {
+   "fov": 2.0,
+   "bortle": 3,
+   "sunAlt": 5.0,
+   "baseKernel": 8.0,
+   "baseWeb": 7.5,
+   "penalty": 16.8,
+   "effectiveKernel": -8.8,
+   "effectiveWeb": -9.3
+  },
+  {
+   "fov": 2.0,
+   "bortle": 3,
+   "sunAlt": 30.0,
+   "baseKernel": 8.0,
+   "baseWeb": 7.5,
+   "penalty": 17.6,
+   "effectiveKernel": -9.600000000000001,
+   "effectiveWeb": -10.100000000000001
+  },
+  {
+   "fov": 2.0,
+   "bortle": 5,
+   "sunAlt": -18.0,
+   "baseKernel": 7.3,
+   "baseWeb": 7.3,
+   "penalty": 0.0,
+   "effectiveKernel": 7.3,
+   "effectiveWeb": 7.3
+  },
+  {
+   "fov": 2.0,
+   "bortle": 5,
+   "sunAlt": -12.0,
+   "baseKernel": 7.3,
+   "baseWeb": 7.3,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 4.699999999999998,
+   "effectiveWeb": 4.699999999999998
+  },
+  {
+   "fov": 2.0,
+   "bortle": 5,
+   "sunAlt": -6.0,
+   "baseKernel": 7.3,
+   "baseWeb": 7.3,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": 0.6999999999999984,
+   "effectiveWeb": 0.6999999999999984
+  },
+  {
+   "fov": 2.0,
+   "bortle": 5,
+   "sunAlt": -0.833,
+   "baseKernel": 7.3,
+   "baseWeb": 7.3,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -5.258750000000002,
+   "effectiveWeb": -5.258750000000002
+  },
+  {
+   "fov": 2.0,
+   "bortle": 5,
+   "sunAlt": 0.0,
+   "baseKernel": 7.3,
+   "baseWeb": 7.3,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -6.300000000000002,
+   "effectiveWeb": -6.300000000000002
+  },
+  {
+   "fov": 2.0,
+   "bortle": 5,
+   "sunAlt": 5.0,
+   "baseKernel": 7.3,
+   "baseWeb": 7.3,
+   "penalty": 16.8,
+   "effectiveKernel": -9.5,
+   "effectiveWeb": -9.5
+  },
+  {
+   "fov": 2.0,
+   "bortle": 5,
+   "sunAlt": 30.0,
+   "baseKernel": 7.3,
+   "baseWeb": 7.3,
+   "penalty": 17.6,
+   "effectiveKernel": -10.3,
+   "effectiveWeb": -10.3
+  },
+  {
+   "fov": 2.0,
+   "bortle": 7,
+   "sunAlt": -18.0,
+   "baseKernel": 6.6,
+   "baseWeb": 6.6,
+   "penalty": 0.0,
+   "effectiveKernel": 6.6,
+   "effectiveWeb": 6.6
+  },
+  {
+   "fov": 2.0,
+   "bortle": 7,
+   "sunAlt": -12.0,
+   "baseKernel": 6.6,
+   "baseWeb": 6.6,
+   "penalty": 2.6000000000000014,
+   "effectiveKernel": 3.9999999999999982,
+   "effectiveWeb": 3.9999999999999982
+  },
+  {
+   "fov": 2.0,
+   "bortle": 7,
+   "sunAlt": -6.0,
+   "baseKernel": 6.6,
+   "baseWeb": 6.6,
+   "penalty": 6.600000000000001,
+   "effectiveKernel": -1.7763568394002505e-15,
+   "effectiveWeb": -1.7763568394002505e-15
+  },
+  {
+   "fov": 2.0,
+   "bortle": 7,
+   "sunAlt": -0.833,
+   "baseKernel": 6.6,
+   "baseWeb": 6.6,
+   "penalty": 12.558750000000002,
+   "effectiveKernel": -5.958750000000002,
+   "effectiveWeb": -5.958750000000002
+  },
+  {
+   "fov": 2.0,
+   "bortle": 7,
+   "sunAlt": 0.0,
+   "baseKernel": 6.6,
+   "baseWeb": 6.6,
+   "penalty": 13.600000000000001,
+   "effectiveKernel": -7.000000000000002,
+   "effectiveWeb": -7.000000000000002
+  },
+  {
+   "fov": 2.0,
+   "bortle": 7,
+   "sunAlt": 5.0,
+   "baseKernel": 6.6,
+   "baseWeb": 6.6,
+   "penalty": 16.8,
+   "effectiveKernel": -10.200000000000001,
+   "effectiveWeb": -10.200000000000001
+  },
+  {
+   "fov": 2.0,
+   "bortle": 7,
+   "sunAlt": 30.0,
+   "baseKernel": 6.6,
+   "baseWeb": 6.6,
+   "penalty": 17.6,
+   "effectiveKernel": -11.000000000000002,
+   "effectiveWeb": -11.000000000000002
+  }
+ ]
+}

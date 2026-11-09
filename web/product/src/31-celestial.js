@@ -399,11 +399,22 @@
   function extinction(altDeg) {
     return extinctionFromSin(Math.sin(altDeg * D2R));
   }
-  /* 入场暗适应淡入是 Web 呈现层（不是内核）：intro 0→1 时显示门限由 2 等
-     放开到当前 FOV 极限星等，星按真实星等依次浮现。 */
-  function effectiveLimit(fovDeg, bortle) {
-    const L = limitMag(fovDeg, bortle);
-    return 2.0 + (L - 2.0) * V.intro;
+  /* 可见极限 = 内核 limit_magnitude（Bortle 基线 + FOV LOD）减晨昏惩罚（内核
+     skyengine/twilight.py，14-astro-frame.twilightLimitPenaltyMag 逐式镜像，跨语言
+     钉扎 build/gen_twilight_golden.py + tests/twilight_selftest.js）。与桌面
+     rf_sky_view.py:4246 同式：limit = base - penalty(sun_alt)。
+     入场暗适应淡入是 Web 呈现层（不是内核）：intro 0→1 时基线由 2 等放开到当前
+     FOV 极限星等；惩罚恒全量减（白天即使 intro=0 也压到星表深度以下，整层自然
+     消失）。sunAltDeg 缺省 null → 惩罚 0（太阳高度未知不假装白天，维持夜空口径）。
+     布尔 daylightHidden（日落 -0.833°）仍保留：太阳高于该值整层不画（与桌面
+     stars_hidden_by_daylight 同口径）；低于该值后不再一档到底，由本惩罚连续压暗
+     （晨昏各约 1 小时的真实过程；旧版只有布尔门，太阳 -1° 时画出“白蓝天空 + 满屏
+     6.5 等星”的物理不可能画面）。惩罚是量级近似、未实测标定（±1 等、天顶等效、
+     无方位依赖、无月光），只用于显示层，不参与指向/定轨/过境结论。 */
+  function effectiveLimit(fovDeg, bortle, sunAltDeg = null) {
+    const base = limitMag(fovDeg, bortle);
+    const adapted = 2.0 + (base - 2.0) * V.intro;
+    return adapted - ASTRO.twilightLimitPenaltyMag(sunAltDeg);
   }
   function daylightHidden(sunAltDeg) { return sunAltDeg > -0.833; }
   function starStyle(mag, bv, L, sinAlt) {
@@ -418,7 +429,7 @@
 
   /* ---------- 批量绘制：每帧只算一次基与焦距 ---------- */
   function eachStar(state, W, H, cb) {
-    const f = frame(state), L = effectiveLimit(V.fov, V.bortle);
+    const f = frame(state), L = effectiveLimit(V.fov, V.bortle, sunAltAz(state).alt);
     const b = getBasis();
     const fx = b.f.x, fy = b.f.y, fz = b.f.z,
           rx = b.r.x, ry = b.r.y, rz = b.r.z,
@@ -544,17 +555,21 @@
     hud(state) {
       const jd = nowJd(state), jdDate = new Date((jd - JD_UNIX_EPOCH) * 86400000);
       const mode = projMode();
+      const sunAlt = sunAltAz(state).alt;
+      const baseLimit = limitMag(V.fov, V.bortle);
+      const twilightPenalty = ASTRO.twilightLimitPenaltyMag(sunAlt);
       return {
         jd, unix: simUnix(state),
         utc: jdDate.toISOString().slice(0, 19).replace("T", " "),
         lst: lstDeg(jd, state.site.lon || 0),
         fov: V.fov, az: V.az, alt: V.alt,
-        limit: effectiveLimit(V.fov, V.bortle),
+        limit: effectiveLimit(V.fov, V.bortle, sunAlt),
+        baseLimit, twilightPenalty,
         kernel: TIME.kernelAttached,
         starCount: N, magCap: MAG_CAP,
         projMode: mode,
         projection: mode === "perspective" ? "Perspective (pinhole)" : "Stereographic (2 tan θ/2)",
-        sunAlt: sunAltAz(state).alt
+        sunAlt
       };
     }
   };

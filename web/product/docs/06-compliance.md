@@ -46,7 +46,8 @@
 | 站址 | 中性示例 `0.0, 0.0`，`trusted=false`（身份红线） | 未校准时拒绝给出可信锁定/过境结论 |
 | 频谱 / 瀑布 | 无 IQ 输入时只画网格 | **诚实空态**，不合成谱线 |
 | 银河图层 | 无数据 | **不提供**，不画装饰光带 |
-| 极限星等（Bortle 基线 + FOV LOD） | 内核 `skyengine` 事实源镜像（`stars.py::naked_eye_limit_mag` + `star_catalog.py::detail_gain_mag/limit_magnitude`），跨语言金标准钉扎 1e-12 等 | **已对齐内核**；LOD 增益非望远镜口径增益；完整天空亮度→极限星等光度学模型仍未做（内核 limitations L24）；入场暗适应淡入是 Web 呈现层 |
+| 极限星等（Bortle 基线 + FOV LOD） | 内核 `skyengine` 事实源镜像（`stars.py::naked_eye_limit_mag` + `star_catalog.py::detail_gain_mag/limit_magnitude`），跨语言金标准钉扎 1e-12 等 | **已对齐内核**；LOD 增益非望远镜口径增益；完整天空亮度→极限星等光度学模型（月相/实际标定天光）仍未做（内核 limitations L24；晨昏见下条）；入场暗适应淡入是 Web 呈现层 |
+| 晨昏连续压暗（天顶亮度→惩罚） | 内核 `skyengine/twilight.py` 事实源镜像（`sky_brightness_mag_arcsec2` 分段线性表 + `twilight_limit_penalty_mag`=max(0,21.6−L)），与桌面 `rf_sky_view.py:4246` 同式 base−penalty，跨语言金标准钉扎 1e-12 等 + 镜像 `TestTwilightPenalty` 不变量 | **已对齐内核**；布尔白天门（−0.833°）保留，低于阈值连续压暗（不再一档到底）；量级近似文献曲线、未辐射标定（±1 等/天顶等效/无方位依赖/无月光），仅显示层，不参与指向/定轨/过境 |
 | 状态栏数值 | 已移除历史金样数字 | 不硬编码能力数字、不暗示页面正在实时解码 |
 
 ## 5. 隐私

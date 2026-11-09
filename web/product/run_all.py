@@ -31,6 +31,7 @@ STEPS = [
     ("天文框架金标准", [PY, "build/gen_astro_golden.py"]),
     ("恒星自行金标准", [PY, "build/gen_proper_motion_golden.py"]),
     ("极限星等金标准", [PY, "build/gen_limit_mag_golden.py"]),
+    ("晨昏亮度金标准", [PY, "build/gen_twilight_golden.py"]),
     ("骨架与样式", [PY, "build/scaffold.py"]),
     ("文档/wiki 生成", [PY, "build/gen_docs.py"]),
     ("单文件构建", [PY, "build/build.py"]),
@@ -39,6 +40,7 @@ STEPS = [
     ("天文框架跨语言自检", [NODE, "tests/astro_selftest.js"] if NODE else None),
     ("恒星自行跨语言自检", [NODE, "tests/proper_motion_selftest.js"] if NODE else None),
     ("极限星等跨语言自检", [NODE, "tests/limit_mag_selftest.js"] if NODE else None),
+    ("晨昏亮度跨语言自检", [NODE, "tests/twilight_selftest.js"] if NODE else None),
     ("天球投影自检", [NODE, "tests/proj_selftest.js"] if NODE else None),
     ("无头运行时", [NODE, "tests/verify_runtime.js"] if NODE else None),
     ("视觉夹具", [PY, "tests/make_visual_fixture.py"]),
@@ -159,8 +161,20 @@ def main() -> int:
         "（`star_catalog.py::detail_gain_mag`，clamp(0.5·log2(30/fov),0,1.5)，广角恒 0、永不为负），"
         "由 `build/gen_limit_mag_golden.py`（直接 import 内核真值）与 `tests/limit_mag_selftest.js` "
         "跨语言紧钉扎（分量/合成 1e-12 等）；前端以随仓 HYG 截断 MAG_CAP=7.5 作 depthCap。"
-        "**仍未做**：完整天空亮度→极限星等光度学模型（月相/晨昏/实际天光表面亮度，内核 limitations L24）；"
+        "**仍未做**：完整天空亮度→极限星等光度学模型（月相/实际标定天光表面亮度，内核 limitations L24；"
+        "晨昏连续压暗已接内核 twilight 事实源，见下条）；"
         "入场暗适应淡入是 Web 呈现层。LOD 增益非望远镜口径增益，也不代表该时刻肉眼可见下限。",
+        "- **晨昏连续压暗已接内核事实源**：可见极限 = 内核 limit_magnitude（Bortle 基线 + FOV LOD）"
+        "减晨昏惩罚（`skyengine/twilight.py::twilight_limit_penalty_mag` = max(0, 21.6 − 天顶亮度)，"
+        "天顶亮度是分段线性太阳高度表），与桌面 `rf_sky_view.py:4246` 同式 limit = base − penalty(sun_alt)。"
+        "由 `build/gen_twilight_golden.py`（直接 import 内核真值）与 `tests/twilight_selftest.js` "
+        "跨语言紧钉扎（分量/合成 1e-12 等）+ 镜像内核 `TestTwilightPenalty` 不变量"
+        "（天文夜 ≤−18° 惩罚恒 0、None/NaN→夜、单调、民用 −6°→裸眼极限 ∈[−2,1]、白天→裸眼极限 <−6）。"
+        "布尔白天门（日落 −0.833° 整层不画）保留，低于该阈值后不再一档到底，由惩罚连续压暗"
+        "（晨昏各约 1 小时的真实过程；旧版只有布尔门，太阳 −1° 时画出「白蓝天空 + 满屏 6.5 等星」的物理不可能画面）。"
+        "**仍未做 / 未标定**：惩罚是量级近似文献曲线（Krisciunas & Schaefer 1991 / Patat et al. 2006），"
+        "非辐射标定（气溶胶/臭氧/纬度/方位约 ±1 等）、天顶等效、无方位依赖、无月光；只用于显示层，"
+        "不参与指向/定轨/过境结论。入场暗适应淡入（intro 0→1 基线由 2 等放开）是 Web 呈现层，非内核。",
         "- **桌面端未联调**：未与 Qt6 天空模式 `rf_sky_view.py` 做端到端对拍；"
         "设计令牌与时间倍率为代码事实源同步，非运行时连线。",
         "- **截图为 headless 静态态**：用于版式验收，不代表真机交互或信号接收结果。",

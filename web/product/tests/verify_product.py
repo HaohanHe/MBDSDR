@@ -522,6 +522,51 @@ print(f"[9.6.2] 极限星等：内核 skyengine 三函数镜像（naked_eye 基�
       f"31-celestial 委托 MAG_CAP={meta.get('magMax', 7.5)} / 跨语言金标准 {_lm.get('caseCount', 0)} 例 / "
       f"广角负漂移守卫 / 文档口径纠正")
 
+# ---------- 9.6.3 晨昏连续压暗：委托内核 twilight 事实源镜像 + 跨语言钉扎 ----------
+# 14-astro-frame 必须镜像内核 twilight 两函数 + 夜值常量 + 亮度表 + 来源标注（唯一事实源）。
+for _m in ("skyBrightnessMagArcsec2", "twilightLimitPenaltyMag",
+           "SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2", "SKY_BRIGHTNESS_TABLE"):
+    if _m not in _astro:
+        fail(f"[tw] 14-astro-frame.js 缺内核晨昏镜像：{_m}")
+if "skyengine/twilight.py" not in _astro:
+    fail("[tw] 14-astro-frame.js 未标注晨昏事实源（skyengine/twilight.py）")
+# 31-celestial effectiveLimit 必须委托惩罚镜像 + intro 暗适应合成；布尔白天门保留（faithful 桌面）。
+if "ASTRO.twilightLimitPenaltyMag(sunAltDeg)" not in _celestial:
+    fail("[tw] 31-celestial.js effectiveLimit 未委托 ASTRO.twilightLimitPenaltyMag")
+if "2.0 + (base - 2.0) * V.intro" not in _celestial:
+    fail("[tw] 31-celestial.js effectiveLimit 缺入场暗适应合成（intro 0→1 基线 2 等放开）")
+if "sunAltDeg > -0.833" not in _celestial:
+    fail("[tw] 31-celestial.js 丢了布尔白天门（日落 -0.833°，与桌面 stars_hidden_by_daylight 同口径）")
+# 30-sky 可见极限 L 必须传 sunAlt（DSO 门随晨昏连续淡出，不再一档到底）。
+if "C.effectiveLimit(C.V.fov, C.V.bortle, sunAlt)" not in _sky_code:
+    fail("[tw] 30-sky.js L 未传 sunAlt（晨昏惩罚未接进绘制层）")
+# 跨语言金标准 + 自检必须在位，事实源是内核 twilight（不得自证），webDepthCap 与星表一致。
+_tw_golden = ROOT / "build/twilight-golden.json"
+_tw = {}
+if not _tw_golden.is_file():
+    fail("[tw] 缺 build/twilight-golden.json（先跑 build/gen_twilight_golden.py）")
+else:
+    _tg = json.loads(_tw_golden.read_text(encoding="utf-8"))
+    _tw = _tg["meta"]
+    if "twilight.py" not in _tw.get("source", ""):
+        fail("[tw] 晨昏金标准事实源不是内核 skyengine/twilight.py（不得自证）")
+    if _tw.get("caseCount", 0) < 100 or not _tg.get("compositions") or not _tg.get("components"):
+        fail("[tw] 晨昏金标准样本不足（分量 + 合成）")
+    if abs(_tw.get("webDepthCap", 0) - float(meta.get("magMax", 7.5))) > 1e-9:
+        fail("[tw] 晨昏金标准 webDepthCap 与星表 magMax（前端 MAG_CAP）漂移")
+    if len(_tw.get("notVerified", [])) < 4:
+        fail("[tw] 晨昏 not_verified 不足（量级近似/未标定/天顶等效/无方位/无月光须如实标注）")
+if not (ROOT / "tests/twilight_selftest.js").is_file():
+    fail("[tw] 缺跨语言自检 tests/twilight_selftest.js")
+if "gen_twilight_golden.py" not in _run_all or "twilight_selftest.js" not in _run_all:
+    fail("[tw] run_all.py 未接晨昏金标准/自检步骤")
+# 口径纠正：晨昏已接内核事实源，不得再把它列进"仍未做"的光度学模型缺口。
+if "月相/晨昏/实际天光表面亮度" in _run_all:
+    fail("[tw] run_all.py 仍把晨昏列为未做（已连续压暗对齐内核 twilight 事实源）")
+print(f"[9.6.3] 晨昏连续压暗：内核 twilight 两函数镜像（天顶亮度表 + max(0,21.6-L) 惩罚）/ "
+      f"31-celestial effectiveLimit 委托 + intro 合成 + 布尔白天门保留 / 30-sky L 传 sunAlt / "
+      f"跨语言金标准 {_tw.get('caseCount', 0)} 例 / 文档口径纠正")
+
 # ---------- 9.7 写工具确认通道（阶段 C：前端只登记意图，token 不出宿主） ----------
 _data = (SRC / "10-data.js").read_text(encoding="utf-8")
 _dialog = (SRC / "50-dialog.js").read_text(encoding="utf-8")
