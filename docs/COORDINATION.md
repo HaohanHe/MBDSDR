@@ -3359,3 +3359,47 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
   的权威数字；本轮动过 `baseband_io.py` / `agent.py` / `orbit.py`，
   全量**未重跑**，不许拿那个数字说当前代码全绿。真机只验了 30 秒级链路，
   长时间稳定性、发射射频、C++ 侧本地编译仍 `not_verified`。
+
+---
+
+### 补记六（2026-11-09 24:00–次日 02:30）：UI 欠账清空两批
+
+用户：「先把这个 UI 还有啥都完成的，最后再整这个数字，那个数字需要实际实验」。
+按「先把用户能点的东西做对」推进，不动指标。
+
+**第一批：K07 九条假活全额销账（提交 `e47e8e6b`）**
+
+真机插上后重跑守卫先炸三处运行时崩溃（比假活严重）：ControlPanel 的
+`−` / `+` / 「收藏当前频率」在「后端连接成功但没回读到频率」时抛
+`TypeError: NoneType + float`。产品把「连接成功」当成了「频率真值已知」。
+
+- 产品真修 6 处：`_sync_freq_actions_enabled()`（频率未知则 ±/收藏保持
+  置灰 + tooltip 写原因，拿到真值自动放开）、两处 None 守卫、
+  地点面板/归位/收起抽屉/回到现在的**幂等回执**（说清「本来就没开」
+  而不是「点了没反应」）。
+- 审计观察面补 4 处（不放宽标准）：`QLineEdit.styleSheet`（输入红框）、
+  `QLabel.visible`（AI 状态条 ▾ 只切 label）、点击后新出现的可见顶层窗口
+  （`evidence["new_top"]` 此前**只读不写**，地点面板是 QFrame(Qt.Tool)
+  不是 QDialog，所以一直被误判）、点击瞬间快照（异步「更新中…」）。
+- 反证：`test_probe_still_catches_noop_button` —— 接槽但什么都不做的按钮
+  必须仍判「无变化」，否则扩大观察面＝放宽标准。
+- 结果：`test_ui_interaction_guard.py` **5 passed**（xfail 已删）；
+  UI 回归 149 passed。
+
+**第二批：快捷键改键（提交 `7e03aee4`）**
+
+此前只有「一览」（能看不能改）。补齐 Stellarium Keybindings 那一块：
+
+- 覆写层：QSettings `shortcuts/<id>`；默认表仍是唯一事实源，
+  「恢复默认」= 删覆写；`conflicts()` 只查同 scope（跨 scope 同键合法）。
+- 面板：可选中 + 改键…/恢复默认/全部恢复默认；保存前查冲突并指名占用者；
+  星象仪 Esc 禁止改（唯一退出路径）。
+- 热更新：MainWindow 建 id→控件登记表，17 个 QAction + 3 个 QShortcut
+  全部登记；频谱局部键由 `SpectrumCurveWidget.apply_shortcut_overrides()`
+  重建（QShortcut 键位在构造时固定，不重建就还是旧键）。
+- 测试：新增 `tests/test_shortcuts_override.py` 13 条，QSettings 一律走
+  临时 ini（Windows 默认写注册表，测试直接用等于改用户键位）。
+- 结果：UI 相关回归 **195 passed**。
+
+**边界**：本轮只做 UI 与交互正确性，**没有重跑 `tests/` 全量**，
+也没有碰任何指标/性能数字——那需要真实实验支撑，按用户要求留到后面。
