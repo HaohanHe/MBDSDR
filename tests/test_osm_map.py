@@ -198,7 +198,9 @@ def test_zoom_is_clamped(qapp):
     v = _view(qapp)
     try:
         v.set_view(None, None, 99)
-        assert v.zoom() == O.MAX_ZOOM
+        # 上限跟着**当前瓦片源**走（OSM 官方 19，CARTO 20），不是全局一刀切
+        assert v.zoom() == O.style_max_zoom(v.style_key())
+        assert v.zoom() <= O.MAX_ZOOM
         v.set_view(None, None, -5)
         assert v.zoom() == O.MIN_ZOOM
     finally:

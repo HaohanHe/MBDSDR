@@ -3,27 +3,29 @@
 MBDSDR 桌面端 - ADS-B 实时地图面板 (AdsbMapPanel)
 ==================================================
 
-原生 QPainter 绘制，离线等距圆柱投影底图：
+底图走**公用地图服务** ``desktop/osm_map.py``（OpenStreetMap 瓦片），
+本面板只负责把自己的东西叠上去：
 
-  * 左侧 ``_MapCanvas``：米白背景 + 30° 经纬网格 + 简化大陆轮廓
-    （来自 ``mbdsdr_ai.adsb_map.WORLD_LAND_POLYGONS``）+ 实时飞机点。
+  * 左侧 ``OsmMapView``：OSM 底图 + "adsb" 图层（飞机点 / 航向 / 呼号 /
+    空态牌 / 解码诊断）。
   * 右侧 ``QTableWidget``：呼号 / 气压高度(ft) / 到观察者距离(km)。
+
+为什么不自己画地图：2026-11-10 用户定调——自绘轮廓既有测绘合规风险
+（没有地图编制资质却出具地图），又不如人家做得准。地图是公用能力
+（地点选择 / APRS / 指向 / 模型展示都要用），不是 ADS-B 的私产。
 
 数据链路（只画真实解算出来的位置，绝不臆造坐标）：
   - 外部把 ``ADSBDecoder.handle(raw)`` 返回的 dict 列表喂给
     :meth:`AdsbMapPanel.update_aircraft`；内部用 ``AircraftTracker`` 按 ICAO
     合并呼号 / 高度 / 速度 / 最新位置。
   - 只有 ``lat`` 和 ``lon`` 同时有效的飞机才会被画到图上、写进列表；
-    没有任何位置帧时画布中央显示空态提示。
+    没有任何位置帧时地图上叠一张"无数据"牌（底图照常显示）。
   - 距离由 ``set_observer(lat, lon)`` 设定本站坐标后，用 haversine 计算；
     未设观察者时距离列显示 ``--``。
 
 红线：
-  - 不联网取瓦片、不内置任何默认飞机、不硬编码真实呼号。
-  - 无数据时画布显空态文字，不画假点、不造假距离。
-
-配色（与 themes.DEFAULT_LIGHT 一致）：
-  米白 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C / 网格浅米灰 #D8D2C8。
+  - 不内置任何飞机、不硬编码真实呼号；无数据就显空态。
+  - 底图并不是"我们的地图"：署名按当前瓦片源如实显示（OSM / CARTO）。
 """
 
 from __future__ import annotations
@@ -35,26 +37,29 @@ from typing import List, Optional, Tuple
 
 # desktop 包无 __init__.py，靠 repo root 在 sys.path 上完成导入。
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtCore import Qt, QPointF, QRectF, QTimer  # noqa: E402
 from PySide6.QtGui import (  # noqa: E402
-    QBrush, QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF,
+    QBrush, QColor, QFont, QFontMetrics, QPainter, QPen,
 )
 from PySide6.QtWidgets import (  # noqa: E402
-    QHBoxLayout, QHeaderView, QSizePolicy, QTableWidget, QTableWidgetItem,
-    QWidget,
+    QHBoxLayout, QHeaderView, QTableWidget, QTableWidgetItem, QWidget,
 )
-
-from themes import get_theme, DEFAULT_THEME  # noqa: E402
 
 from tokens import tokens as _tok  # noqa: E402
 
-# 触屏手势：双指捏合缩放 + 单指拖动平移地图（Surface/平板）。
+# 触屏：表格按像素滚动、地图捏合由 OsmMapView 自己处理
 try:  # noqa: E402
-    from touch_helpers import PinchZoomMixin, enable_touch_events
+    from touch_helpers import enable_touch_events
 except Exception:  # pragma: no cover
-    PinchZoomMixin = object  # type: ignore
     enable_touch_events = lambda w: None  # noqa: E731
+
+try:  # OSM 公用地图（缺 QtNetwork 时面板降级为只有表格，不崩）
+    from osm_map import OsmMapView, style_for_dark  # noqa: E402
+except Exception:  # pragma: no cover
+    OsmMapView = None  # type: ignore
+    style_for_dark = lambda dark: "osm"  # noqa: E731
 
 try:  # 1090MHz Mode S 解码器（无 numpy 时降级，不影响底图）
     from mbdsdr_ai import adsb_lite as _adsb_lite  # noqa: E402
@@ -63,199 +68,42 @@ except Exception:  # pragma: no cover
     _adsb_lite = None  # type: ignore
     _HAS_ADSB = False
 
-from mbdsdr_ai.adsb_map import (  # noqa: E402
-    WORLD_LAND_POLYGONS,
-    AircraftTracker,
-    haversine_km,
-    project_equirectangular,
-)
+from mbdsdr_ai.adsb_map import AircraftTracker, haversine_km  # noqa: E402
 
 _t = _tok()
-# CarWith dark_car 画布配色（地图底/文字/强调/网格/陆地填充）
 _BG = QColor(_t.COLORS["card_1"])
 _TEXT = QColor(_t.COLORS["gray_100"])
 _ACCENT = QColor(_t.COLORS["accent"])
 _GRID = QColor(_t.COLORS["gray_400"])
-_LAND_FILL = QColor(_t.COLORS["card_2"])
 
 # 空态提示文案（测试据此断言画布进入“无数据”状态）。
 ADSB_EMPTY_TEXT = "无 ADS-B 飞机（需 1090MHz）"
 
 
-class _MapCanvas(PinchZoomMixin, QWidget):
-    """纯 QPainter 绘制的等距圆柱投影地图画布。
-
-    触屏（Surface/平板）：PinchZoomMixin 双指捏合缩放地图、单指拖动平移。
-    缩放/平移通过 QPainter 变换矩阵实现，不改动 project_equirectangular 投影；
-    鼠标模式（无手势）完全不变。
-    """
-
-    def __init__(self, tracker: AircraftTracker, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self._tracker = tracker
-        # 空态面板不占主区（截图死黑事故）：最小宽 240 让 splitter 能把它
-        # 压下去，弹性在左栏工作面；有真实飞机数据时用户可手动拖宽。
-        self.setMinimumSize(240, 180)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # 触屏缩放/平移状态（QPainter 变换：以画布中心为锚点 scale + translate）
-        self._map_zoom: float = 1.0
-        self._map_pan_x: float = 0.0
-        self._map_pan_y: float = 0.0
-        # 空态第二行：解码器给的真实诊断（前导候选 / CRC 通过数 / 门限 /
-        # 频段不符 / 异常类型），不是另一套"等待文案"。
-        self.diag_text: str = ""
-        if PinchZoomMixin is not object and hasattr(self, "init_pinch_zoom"):
-            self.init_pinch_zoom()
-            try:
-                self.pinch_scale_changed.connect(self._on_touch_pinch)
-                self.pan_changed.connect(self._on_touch_pan)
-            except Exception:
-                pass
-
-    # ---- 触屏手势：缩放/平移（仅改变换矩阵，不造假飞机点）----
-    def _on_touch_pinch(self, scale_factor: float, center_pos: QPointF) -> None:
-        try:
-            self._map_zoom = max(1.0, min(12.0, self._map_zoom * scale_factor))
-            self.update()
-        except Exception:
-            pass
-
-    def _on_touch_pan(self, dx: float, dy: float) -> None:
-        try:
-            self._map_pan_x += dx
-            self._map_pan_y += dy
-            self.update()
-        except Exception:
-            pass
-
-    # ------------------------------------------------------------------ #
-    def _displayed(self) -> list:
-        """只保留 lat/lon 同时有效的飞机，绝不画无坐标目标。"""
-        return [a for a in self._tracker.all()
-                if a.lat is not None and a.lon is not None]
-
-    def paintEvent(self, event) -> None:  # noqa: D401 (Qt 回调)
-        """地图画布：网格 + 真实大陆轮廓 + 飞机点。
-
-        空态不再提前 return：用户点名「中下面那么大空」——旧实现在无
-        飞机时只画顶部一行小字、连经纬网和大陆轮廓都不画，剩下整片画布
-        纯色，右边还杵着一张 0 行表格。现在**地图还是地图，只是没飞机**：
-        网格与 WORLD_LAND_POLYGONS（真实简化地理坐标）照画，绝不画假点、
-        不画装饰性银河，空态提示居中叠在地图上。
-        """
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        w, h = self.width(), self.height()
-        p.fillRect(self.rect(), _BG)
-
-        acs = self._displayed()
-        p.save()
-        # 触屏缩放/平移：以画布中心为锚点做 scale+translate 变换。
-        # 经纬网/大陆轮廓/飞机点都在变换后的坐标系里绘制，整体一起缩放。
-        if self._map_zoom != 1.0 or self._map_pan_x or self._map_pan_y:
-            cx, cy = w / 2.0, h / 2.0
-            p.translate(cx + self._map_pan_x, cy + self._map_pan_y)
-            p.scale(self._map_zoom, self._map_zoom)
-            p.translate(-cx, -cy)
-
-        # 30° 间隔经纬网格（浅米灰细线）。
-        p.setPen(QPen(_GRID, 1))
-        for lon in range(-180, 181, 30):
-            x_top, _ = project_equirectangular(90.0, float(lon), w, h)
-            x_bot, _ = project_equirectangular(-90.0, float(lon), w, h)
-            p.drawLine(QPointF(x_top, 0.0), QPointF(x_bot, float(h)))
-        for lat in range(-90, 91, 30):
-            _, y_left = project_equirectangular(float(lat), -180.0, w, h)
-            _, y_right = project_equirectangular(float(lat), 180.0, w, h)
-            p.drawLine(QPointF(0.0, y_left), QPointF(float(w), y_right))
-
-        # 简化大陆轮廓：浅填充 + 蓝灰粗描边（真实坐标，不是装饰贴图）。
-        outline_pen = QPen(_TEXT, 2)
-        for poly in WORLD_LAND_POLYGONS:
-            qp = QPolygonF()
-            for (lon, lat) in poly:
-                x, y = project_equirectangular(float(lat), float(lon), w, h)
-                qp << QPointF(x, y)
-            p.setPen(outline_pen)
-            p.setBrush(QBrush(_LAND_FILL))
-            p.drawPolygon(qp)
-
-        # 飞机点：橙色实心圆 + 呼号文字；有航向时画一小段航向线。
-        if acs:
-            dot_pen = QPen(_ACCENT, 1)
-            dot_brush = QBrush(_ACCENT)
-            for a in acs:
-                x, y = project_equirectangular(float(a.lat), float(a.lon), w, h)
-                if a.track_deg is not None:
-                    rad = math.radians(float(a.track_deg))
-                    dx = math.sin(rad)
-                    dy = -math.cos(rad)  # 屏幕 y 向下，北对应 -y
-                    p.setPen(QPen(_ACCENT, 2))
-                    p.drawLine(QPointF(x, y),
-                               QPointF(x + 14.0 * dx, y + 14.0 * dy))
-                p.setPen(dot_pen)
-                p.setBrush(dot_brush)
-                p.drawEllipse(QPointF(x, y), 5.0, 5.0)
-                p.setPen(QPen(_TEXT))
-                p.drawText(QPointF(x + 8.0, y - 6.0), a.callsign or a.icao_hex)
-        p.restore()
-
-        if not acs:
-            # 居中信息牌：不遮挡地图主体，只把「现在确实没有数据」说清。
-            f = QFont()
-            f.setPointSize(10)
-            p.setFont(f)
-            fm = QFontMetrics(f)
-            box_w = min(float(w) - 24.0,
-                        max(220.0, float(fm.horizontalAdvance(
-                            ADSB_EMPTY_TEXT)) + 40.0))
-            box_h = 34.0
-            bx = (float(w) - box_w) / 2.0
-            by = (float(h) - box_h) / 2.0
-            bg = QColor(_BG)
-            bg.setAlpha(220)
-            p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(bg))
-            p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
-            p.setPen(QPen(_GRID, 1))
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
-            p.setPen(QPen(_TEXT))
-            p.drawText(QRectF(bx, by, box_w, box_h),
-                       int(Qt.AlignCenter), ADSB_EMPTY_TEXT)
-            # 解码器给的真实诊断：把「没信号 / 信号弱 / 频段不符 / 解码器
-            # 异常」分开说，用户不必对着一句「无飞机」猜是哪一种。
-            diag = getattr(self, "diag_text", "") or ""
-            if diag:
-                # 单行 + 省略，不用 TextWordWrap：这张卡在中栏可能只有 150px
-                # 高，多行文字会算出负高度、和上面的空态牌叠成一团
-                # （2026-11-10 截图实证：三行字压在一起）。全文留给 tooltip。
-                f2 = QFont()
-                f2.setPointSize(8)
-                p.setFont(f2)
-                fm2 = QFontMetrics(f2)
-                avail = max(40.0, float(w) - 16.0)
-                one = fm2.elidedText(diag, Qt.ElideRight, int(avail))
-                ty = min(float(h) - 14.0, by + box_h + 6.0)
-                p.setPen(QPen(_TEXT))
-                p.drawText(QRectF(8.0, ty, avail, 16.0),
-                           int(Qt.AlignHCenter | Qt.AlignVCenter), one)
-        p.end()
-
-
 class AdsbMapPanel(QWidget):
-    """左右布局：左侧地图画布（拉伸），右侧飞机列表（固定宽）。"""
+    """左右布局：左侧公用地图（拉伸）+ "adsb" 图层，右侧飞机列表。"""
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None,
+                 map_style: Optional[str] = None, map_online: bool = True):
         super().__init__(parent)
         self._tracker = AircraftTracker()
         self._observer: Optional[Tuple[float, float]] = None
+        self._diag_text: str = ""
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        self.canvas = _MapCanvas(self._tracker)
+        # 公用地图：ADS-B 只是它的一个图层使用者
+        if OsmMapView is not None:
+            self.canvas = OsmMapView(
+                self, online=map_online,
+                style=map_style or _theme_map_style())
+            self.canvas.set_view(35.0, 110.0, 5)
+            self.canvas.add_layer("adsb", self._paint_adsb_layer)
+        else:  # pragma: no cover - 缺 QtNetwork 的环境
+            from PySide6.QtWidgets import QLabel
+            self.canvas = QLabel("地图不可用（本机 Qt 缺 QtNetwork）", self)
         layout.addWidget(self.canvas, 1)
 
         self.table = QTableWidget(0, 3)
@@ -263,7 +111,6 @@ class AdsbMapPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
-        # 触屏友好：开启触屏事件 + 按像素滚动（手指拖动列表行）
         enable_touch_events(self.table)
         try:
             from PySide6.QtWidgets import QAbstractItemView
@@ -274,15 +121,13 @@ class AdsbMapPanel(QWidget):
         # 右侧飞机列表：给弹性宽度范围，窗口缩放时跟随。
         # 最小宽 40 而非 160：中栏基线 300px 时「画布最小 240 + 列表 160 +
         # 间距 6 + 边距 8」= 414，布局会把列表挤出父容器（右侧被裁）。
-        # 压到 40 后同一列只需 240+40+6+8=294，300px 内可完整排下。
         self.table.setMinimumWidth(40)
         self.table.setMaximumWidth(320)
-        # 0 行时不该杵着一张空表格占掉中栏右侧：没数据就收起，画布铺满；
+        # 0 行时不该杵着一张空表格占掉中栏右侧：没数据就收起，地图铺满；
         # 有真实飞机时由 _refresh_table 自动放回来。
         self.table.setVisible(False)
-        # 画布用 tokens 的深色 card_1，表格却用 Qt 默认白底 —— 中栏因此
-        # 一半黑一半白（用户原话「你是黑白无常啊」）。统一到同一套色：
-        # 表格、表头、单元格全部跟随画布底色，浅色主题下也不再劈成两半。
+        # 画布深色、表格默认白底 —— 中栏会一半黑一半白（用户原话「你是
+        # 黑白无常啊」）。表格、表头、单元格全部跟随画布底色。
         _bg = _t.COLORS["card_1"]
         _fg = _t.COLORS["gray_100"]
         _line = _t.COLORS["gray_400"]
@@ -294,9 +139,8 @@ class AdsbMapPanel(QWidget):
             "QHeaderView::section { background-color: %s; color: %s;"
             " border: none; border-bottom: 1px solid %s; padding: 4px; }"
             % (_bg, _fg, _line, _bg, _bg, _fg, _bg, _fg, _line))
-        # QSS 对 QTableWidget 的底色常被 viewport 的调色板盖回去（只改 QSS
-        # 时中栏右半仍是白板）。这里把 viewport / 表格自身的 Base+Window
-        # 一起钉到画布底色，浅色主题下也不会再劈成一黑一白。
+        # QSS 对 QTableWidget 的底色常被 viewport 的调色板盖回去。把
+        # viewport / 表格自身的 Base+Window 一起钉到画布底色。
         from PySide6.QtGui import QPalette
         from PySide6.QtGui import QColor as _QC
         pal = self.table.viewport().palette()
@@ -312,15 +156,11 @@ class AdsbMapPanel(QWidget):
         hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         layout.addWidget(self.table, 0)
 
-        # 面板整体最小宽锚定画布最小宽（240）：列表在窄档可被压窄，
-        # 不让空态表格把 splitter 中栏地板撑到 414（240+160+间距，
-        # 死黑事故的另一半根源）。
+        # 面板整体最小宽锚定画布最小宽（240）：列表在窄档可被压窄。
         self.setMinimumSize(240, 180)
 
-        # ---- IQ 自主订阅（此前全仓没人调 update_aircraft，中栏一直是空态）----
-        # 主窗口只把 IQ 交给频谱面板；频谱面板再发布到 iq_bus。这里自己取，
-        # 不需要改主窗口一行。只在中心频率落在 1090MHz 附近、采样率够宽时
-        # 才解码，其余情况零开销跳过（不是每个频段都能解 ADS-B）。
+        # ---- IQ 自主订阅（主窗口只把 IQ 交给频谱面板，这里自己从总线取）----
+        # 只在中心频率落在 1090MHz 附近、采样率够宽时才解码，其余零开销跳过。
         self._iq_seq = 0
         self._adsb_frames_total = 0
         self._observer_checked_at = 0.0
@@ -330,6 +170,12 @@ class AdsbMapPanel(QWidget):
         self._bus_timer.start()
 
     # ------------------------------------------------------------------ #
+    # 诊断文本（对外可读；原来挂在画布上，现在挂面板上——画布是公用组件，
+    # 不该混进 ADS-B 概念）
+    @property
+    def diag_text(self) -> str:
+        return self._diag_text
+
     def update_aircraft(self, frames: List[dict]) -> None:
         """喂入一帧/一批解码器输出 dict，归并后刷新画布与列表。"""
         for fr in frames:
@@ -339,7 +185,6 @@ class AdsbMapPanel(QWidget):
         self.canvas.update()
 
     # -- IQ 总线消费 ------------------------------------------------------
-    #: ADS-B 中心频点（1090MHz），容差 ±1.5MHz 覆盖 RTL-SDR 的调谐误差
     ADSB_CENTER_HZ = 1_090_000_000.0
     ADSB_TOLERANCE_HZ = 1_500_000.0
     ADSB_MIN_SAMPLE_RATE = 1_200_000.0
@@ -351,8 +196,8 @@ class AdsbMapPanel(QWidget):
     def _set_diag(self, text: str) -> None:
         """只在文本变化时重绘画布（200ms 轮询下同文案不重复排重绘）。"""
         text = str(text or "")[:200]
-        if getattr(self.canvas, "diag_text", "") != text:
-            self.canvas.diag_text = text
+        if self._diag_text != text:
+            self._diag_text = text
             self.canvas.update()
 
     def _decode_and_update(self, iq, sample_rate: float) -> int:
@@ -369,8 +214,6 @@ class AdsbMapPanel(QWidget):
             self._set_diag(
                 f"ADS-B 解码器异常：{type(exc).__name__}：{str(exc)[:100]}")
             return 0
-        # 解码器已经给了完整诊断（前导候选数 / CRC 通过·失败 / 门限 /
-        # 噪声底 / 时长），旧实现全丢，只留一句「无 ADS-B 飞机」。
         self._set_diag(result.get("note", ""))
         frames = result.get("frames") or []
         if not frames:
@@ -443,10 +286,30 @@ class AdsbMapPanel(QWidget):
             return
 
     def set_observer(self, lat: float, lon: float) -> None:
-        """设定本站（观察者）坐标，用于列表距离列；未设时距离显示 --。"""
+        """设定本站坐标：距离列用它算，地图顺带居中到本站。"""
         self._observer = (float(lat), float(lon))
         self._refresh_table()
+        try:
+            self.canvas.set_marker(float(lat), float(lon))
+            # 只在还没被用户拖走过时才跟着站点走（首次定位即居中）
+            self.canvas.set_view(float(lat), float(lon),
+                                 max(int(self.canvas.zoom()), 7))
+        except (AttributeError, RuntimeError):
+            pass
         self.canvas.update()
+
+    def set_map_style(self, key: str) -> None:
+        """换底图风格（浅色 / 暗色）。ADS-B、地点面板共用同一套缓存。"""
+        try:
+            self.canvas.set_style(str(key))
+        except (AttributeError, RuntimeError):
+            pass
+
+    def map_style(self) -> str:
+        try:
+            return str(self.canvas.style_key())
+        except (AttributeError, RuntimeError):
+            return "osm"
 
     def clear(self) -> None:
         """清空跟踪表与列表，回到空态。"""
@@ -464,6 +327,71 @@ class AdsbMapPanel(QWidget):
         return [a for a in self._tracker.all()
                 if a.lat is not None and a.lon is not None]
 
+    # ---- "adsb" 图层：画飞机 / 空态牌 / 诊断行 ------------------------- #
+    def _paint_adsb_layer(self, p: QPainter, project) -> None:
+        acs = self._displayed()
+        if acs:
+            dot_pen = QPen(_ACCENT, 1)
+            dot_brush = QBrush(_ACCENT)
+            for a in acs:
+                pos = project(float(a.lat), float(a.lon))
+                if a.track_deg is not None:
+                    rad = math.radians(float(a.track_deg))
+                    dx = math.sin(rad)
+                    dy = -math.cos(rad)      # 屏幕 y 向下，北对应 -y
+                    p.setPen(QPen(_ACCENT, 2))
+                    p.drawLine(pos, QPointF(pos.x() + 14.0 * dx,
+                                            pos.y() + 14.0 * dy))
+                p.setPen(dot_pen)
+                p.setBrush(dot_brush)
+                p.drawEllipse(pos, 5.0, 5.0)
+                p.setPen(QPen(_TEXT))
+                p.drawText(QPointF(pos.x() + 8.0, pos.y() - 6.0),
+                           a.callsign or a.icao_hex)
+            p.setBrush(Qt.NoBrush)
+            return
+
+        # 空态：底图照常显示，只在中间叠一张"现在确实没数据"的牌
+        # QPainter.window() 是这次绘制的逻辑坐标矩形；device() 是物理像素，
+        # 高 DPI 下拿它算中心会把空态牌画到左上角去。
+        vp = p.window()
+        w, h = float(vp.width()), float(vp.height())
+        f = QFont()
+        f.setPointSize(10)
+        p.setFont(f)
+        fm = QFontMetrics(f)
+        box_w = min(w - 24.0,
+                    max(220.0, float(fm.horizontalAdvance(
+                        ADSB_EMPTY_TEXT)) + 40.0))
+        box_h = 34.0
+        bx = (w - box_w) / 2.0
+        by = (h - box_h) / 2.0
+        bg = QColor(_BG)
+        bg.setAlpha(220)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(bg))
+        p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
+        p.setPen(QPen(_GRID, 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(QRectF(bx, by, box_w, box_h), 6, 6)
+        p.setPen(QPen(_TEXT))
+        p.drawText(QRectF(bx, by, box_w, box_h),
+                   int(Qt.AlignCenter), ADSB_EMPTY_TEXT)
+        # 解码器给的真实诊断：单行省略，全文留 tooltip（多行会在矮卡里叠成一团）
+        diag = self._diag_text
+        if diag:
+            f2 = QFont()
+            f2.setPointSize(8)
+            p.setFont(f2)
+            fm2 = QFontMetrics(f2)
+            avail = max(40.0, w - 16.0)
+            one = fm2.elidedText(diag, Qt.ElideRight, int(avail))
+            ty = min(h - 14.0, by + box_h + 6.0)
+            p.setPen(QPen(_TEXT))
+            p.drawText(QRectF(8.0, ty, avail, 16.0),
+                       int(Qt.AlignHCenter | Qt.AlignVCenter), one)
+
+    # ------------------------------------------------------------------ #
     def _refresh_table(self) -> None:
         acs = self._displayed()
         self.table.setVisible(bool(acs))
@@ -480,3 +408,17 @@ class AdsbMapPanel(QWidget):
                                  float(a.lat), float(a.lon))
                 dist = f"{d:.0f}"
             self.table.setItem(row, 2, QTableWidgetItem(dist))
+
+
+def _theme_map_style() -> str:
+    """按当前桌面主题选底图：深色主题用暗色瓦片，浅色主题用标准瓦片。"""
+    try:
+        from themes import DEFAULT_THEME, get_theme
+        name = str(DEFAULT_THEME)
+        try:
+            dark = bool(get_theme().dark)
+        except Exception:
+            dark = any(k in name for k in ("dark", "car", "figma", "contrast"))
+        return style_for_dark(dark)
+    except Exception:  # noqa: BLE001
+        return "osm"

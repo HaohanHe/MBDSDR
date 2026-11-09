@@ -31,6 +31,7 @@ Web Mercator 坐标，右下角常驻 ODbL 署名。
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 from typing import List, Optional
@@ -40,8 +41,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtCore import Qt, QThread, Signal  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
 try:  # 数据层可选：缺了面板仍能点地图，只是搜不了
@@ -51,9 +52,14 @@ except Exception:  # noqa: BLE001
     make_provider = None  # type: ignore
 
 try:  # 地图：OSM 在线瓦片（缺 QtNetwork 时面板退化为只有搜索+手填）
-    from osm_map import OsmMapView  # noqa: E402
+    from osm_map import (  # noqa: E402
+        STYLES, OsmMapView, RegionDownloader, style_for_dark,
+    )
 except Exception:  # noqa: BLE001
-    OsmMapView = None  # type: ignore
+    OsmMapView = None      # type: ignore
+    STYLES = {}            # type: ignore
+    RegionDownloader = None  # type: ignore
+    style_for_dark = None  # type: ignore
 
 __all__ = ["LocationPanel"]
 
@@ -166,8 +172,36 @@ class LocationPanel(QFrame):
         self.recenter_btn.setToolTip("把地图移回当前站址（不改任何设置）")
         self.recenter_btn.clicked.connect(self._recenter_map)
         mrow.addWidget(self.recenter_btn, 0)
+        # 底图风格：标准（OSM 官方）/ 暗色 / 浅灰（CARTO，OSM 数据）。
+        # 「暗黑模式」不是把浅色瓦片调暗——OSM 官方瓦片没有深色版。
+        self.style_combo = QComboBox(self)
+        self.style_combo.setObjectName("lpMapTool")
+        self.style_combo.setFixedHeight(24)
+        self.style_combo.setMinimumWidth(92)
+        for key in ("osm", "dark", "light"):
+            st = STYLES.get(key)
+            if st is not None:
+                self.style_combo.addItem(
+                    {"osm": "标准", "dark": "暗色", "light": "浅灰"}[key], key)
+        self.style_combo.setToolTip(
+            "底图风格：标准=OpenStreetMap 官方瓦片；暗色/浅灰=CARTO 的 OSM "
+            "数据底图（官方瓦片没有深色版，硬调暗会糊）")
+        self.style_combo.currentIndexChanged.connect(self._on_map_style_changed)
+        mrow.addWidget(self.style_combo, 0)
+
+        # 离线下载：把当前视野这一片存到本地，之后断网也能看
+        self.download_btn = QPushButton("⤓ 下载", self)
+        self.download_btn.setObjectName("lpMapTool")
+        self.download_btn.setFixedHeight(24)
+        self.download_btn.setToolTip(
+            "把当前视野这片地图存到本地（含下面几级放大），之后断网也能看；"
+            "可随时取消，已下的瓦片保留")
+        self.download_btn.clicked.connect(self._on_download_clicked)
+        mrow.addWidget(self.download_btn, 0)
+
         map_hint = QLabel("拖拽平移 · 滚轮缩放 · 单击选点", self)
         map_hint.setObjectName("lpHint")
+        map_hint.setToolTip("拖拽平移 · 滚轮缩放 · 单击选点 · 双击放大")
         self.map_hint = map_hint
         mrow.addWidget(map_hint, 0)
         mrow.addStretch(1)
@@ -245,6 +279,121 @@ class LocationPanel(QFrame):
             return
         view.set_view(self._current[0], self._current[1], max(view.zoom(), 6))
         self._on_map_zoom(view.zoom())
+
+    # ------------------------------------------------------- 风格 / 离线下载
+    def _on_map_style_changed(self, _idx: int = 0) -> None:
+        key = self.style_combo.currentData()
+        if key and OsmMapView is not None and hasattr(self.map_view, "set_style"):
+            try:
+                self.map_view.set_style(str(key))
+                self._sync_downloader_style()
+            except (AttributeError, RuntimeError):
+                pass
+
+    def set_map_style(self, key: str) -> None:
+        """外部（主题联动）设定底图风格；下拉跟着走，不重复设一次。"""
+        idx = self.style_combo.findData(str(key))
+        if idx < 0:
+            return
+        if idx != self.style_combo.currentIndex():
+            self.style_combo.setCurrentIndex(idx)   # 触发 _on_map_style_changed
+        else:
+            self._on_map_style_changed()
+
+    def map_style(self) -> str:
+        try:
+            return str(self.map_view.style_key())
+        except AttributeError:
+            return ""
+
+    def _sync_downloader_style(self) -> None:
+        """换风格后重启下载器：不同风格的缓存目录不同，不能混着下。"""
+        if RegionDownloader is None or OsmMapView is None:
+            return
+        dl = getattr(self, "_downloader", None)
+        if dl is not None and dl.is_running():
+            return
+        try:
+            self._downloader = RegionDownloader(
+                self.map_view.cache(), style=self.map_view.style_key(), parent=self)
+            self._downloader.progress.connect(self._on_download_progress)
+            self._downloader.finished.connect(self._on_download_finished)
+            self._downloader.message.connect(self._on_download_message)
+        except (AttributeError, RuntimeError, TypeError):
+            self._downloader = None
+
+    def _view_radius_km(self) -> float:
+        """当前视野的"半径"（公里）：取视口长宽一半里较大的那个。"""
+        try:
+            lat_min, lon_min, lat_max, lon_max = self.map_view.visible_bounds()
+        except (AttributeError, RuntimeError):
+            return 20.0
+        mid = (lat_min + lat_max) / 2.0
+        dlat = abs(lat_max - lat_min) / 2.0 * 111.0
+        dlon = (abs(lon_max - lon_min) / 2.0 * 111.0
+                * max(0.05, math.cos(math.radians(mid))))
+        return max(1.0, max(dlat, dlon))
+
+    def download_plan(self):
+        """当前视野要下的瓦片清单（纯计算，给确认框与测试看）。"""
+        if RegionDownloader is None:
+            return []
+        try:
+            z = int(self.map_view.zoom())
+            lat, lon = self.map_view.center()
+        except (AttributeError, RuntimeError):
+            return []
+        zmax = min(z + 2, 19)
+        return RegionDownloader.plan(lat, lon, z, zmax, self._view_radius_km())
+
+    def _on_download_clicked(self) -> None:
+        if RegionDownloader is None:
+            return
+        dl = getattr(self, "_downloader", None)
+        if dl is not None and dl.is_running():
+            dl.cancel()                 # 按钮在下载时就是"取消"
+            return
+        jobs = self.download_plan()
+        if not jobs:
+            self.map_hint.setText("还没法下载：地图控件不可用")
+            return
+        if len(jobs) > 1500:
+            QMessageBox.information(
+                self, "范围太大",
+                f"这个范围要下 {len(jobs)} 张瓦片，太多了（对方服务器不欢迎）。\n"
+                "请先放大到城市级，或者缩小面板再试。")
+            return
+        est_mb = len(jobs) * 12.0 / 1024.0
+        ret = QMessageBox.question(
+            self, "下载这片地图",
+            f"将下载 {len(jobs)} 张瓦片（约 {est_mb:.1f} MB，含当前层与下面两级）。\n"
+            "下完之后这块区域断网也能看。继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        self._sync_downloader_style()
+        dl = getattr(self, "_downloader", None)
+        if dl is None:
+            self.map_hint.setText("下载器不可用")
+            return
+        self.download_btn.setText("✕ 取消")
+        dl.start_jobs(jobs)
+
+    def _on_download_progress(self, done: int, total: int, skipped: int) -> None:
+        if total <= 0:
+            return
+        self.map_hint.setText(
+            f"下载中 {done}/{total}（已跳过 {skipped} 张已缓存）")
+
+    def _on_download_message(self, msg: str) -> None:
+        self.map_hint.setText(str(msg))
+
+    def _on_download_finished(self, ok: int, bad: int) -> None:
+        self.download_btn.setText("⤓ 下载")
+        if ok or bad:
+            self.map_hint.setText(
+                f"下载结束：成功 {ok} 张、失败 {bad} 张；这片区域已可离线查看")
 
     def _on_map_zoom(self, zoom: int) -> None:
         # 守卫：地图控件在 _build_ui 里先于状态标签构造，构造期的

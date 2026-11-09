@@ -49,6 +49,11 @@ class _RecordingPainter:
     def drawText(self, *_a, **_k):
         self.texts.append(str(_a[-1]))
 
+    def window(self):
+        """图层用 QPainter.window() 拿逻辑尺寸给空态牌居中。"""
+        from PySide6.QtCore import QRectF
+        return QRectF(0.0, 0.0, 600.0, 400.0)
+
     def __getattr__(self, _name):
         return lambda *_a, **_k: None
 
@@ -57,7 +62,7 @@ class TestDecodeDiagnostics:
     def test_no_signal_exposes_decoder_note(self, qtapp):
         p = amp.AdsbMapPanel()
         p.feed_iq(np.zeros(4096, dtype=np.complex64), 2_000_000.0)
-        diag = p.canvas.diag_text
+        diag = p.diag_text
         assert "未检出有效 Mode-S 帧" in diag, diag
         assert "CRC" in diag and "前导候选" in diag, diag
         assert p.decoded_frames_total() == 0
@@ -70,7 +75,7 @@ class TestDecodeDiagnostics:
 
         monkeypatch.setattr(amp._adsb_lite, "decode_adsb", _boom)
         p.feed_iq(np.ones(4096, dtype=np.complex64), 2_000_000.0)
-        diag = p.canvas.diag_text
+        diag = p.diag_text
         assert "RuntimeError" in diag and "模拟解码器内部错误" in diag, diag
         assert "未检出有效" not in diag, "异常被伪装成没信号"
         assert p.decoded_frames_total() == 0
@@ -82,15 +87,15 @@ class TestDecodeDiagnostics:
                                            noise_std=0.0)
         p = amp.AdsbMapPanel()
         p.feed_iq(iq, 2_000_000.0)
-        assert p.decoded_frames_total() >= 1, p.canvas.diag_text
-        assert "检出" in p.canvas.diag_text, p.canvas.diag_text
-        assert "CRC 通过" in p.canvas.diag_text
+        assert p.decoded_frames_total() >= 1, p.diag_text
+        assert "检出" in p.diag_text, p.diag_text
+        assert "CRC 通过" in p.diag_text
 
     def test_module_missing_is_reported(self, qtapp, monkeypatch):
         p = amp.AdsbMapPanel()
         monkeypatch.setattr(amp, "_HAS_ADSB", False)
         p.feed_iq(np.ones(4096, dtype=np.complex64), 2_000_000.0)
-        assert "解码模块不可用" in p.canvas.diag_text
+        assert "解码模块不可用" in p.diag_text
 
 
 class TestBusDiagnostics:
@@ -100,7 +105,7 @@ class TestBusDiagnostics:
         bus = get_iq_bus()
         bus.publish(np.zeros(1024, dtype=np.complex64), 2_400_000.0, 98.5e6)
         p._poll_iq_bus()
-        diag = p.canvas.diag_text
+        diag = p.diag_text
         assert "98.500 MHz" in diag, diag
         assert "不在 1090" in diag, diag
         assert p.decoded_frames_total() == 0
@@ -113,7 +118,7 @@ class TestBusDiagnostics:
 
         monkeypatch.setattr("desktop.iq_bus.get_iq_bus", _boom)
         p._poll_iq_bus()
-        assert "OSError" in p.canvas.diag_text, p.canvas.diag_text
+        assert "OSError" in p.diag_text, p.diag_text
 
 
 class TestEmptyStatePainting:
@@ -121,10 +126,12 @@ class TestEmptyStatePainting:
         p = amp.AdsbMapPanel()
         p._set_diag("诊断可见性取证：CRC 通过 0 帧")
         _RecordingPainter.instances = []
-        monkeypatch.setattr(amp, "QPainter", _RecordingPainter)
-        p.canvas.paintEvent(None)
+        painter = _RecordingPainter()
+        # 产品里是 OsmMapView.paintEvent 回调这个图层；这里直接调图层，
+        # 断言"文字真的进了绘制调用"，比看属性更硬。
+        p._paint_adsb_layer(painter, p.canvas.project)
         assert _RecordingPainter.instances
-        texts = _RecordingPainter.instances[-1].texts
+        texts = painter.texts
         assert amp.ADSB_EMPTY_TEXT in texts, texts
         assert "诊断可见性取证：CRC 通过 0 帧" in texts, texts
 
@@ -141,4 +148,4 @@ class TestEmptyStatePainting:
     def test_long_text_is_truncated(self, qtapp):
         p = amp.AdsbMapPanel()
         p._set_diag("x" * 500)
-        assert len(p.canvas.diag_text) == 200
+        assert len(p.diag_text) == 200

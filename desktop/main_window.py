@@ -4436,12 +4436,45 @@ class MainWindow(QMainWindow):
             self.theme_combo.setCurrentIndex(idx)
             self.theme_combo.blockSignals(False)
 
+        # 底图跟着主题走：深色主题用暗色瓦片（OSM 数据 + CARTO 暗色渲染），
+        # 浅色主题用 OSM 官方标准瓦片。地图是公用的，所有持有地图的面板一起换。
+        self._sync_map_style()
+
         # 用户手动切主题时持久化；启动恢复阶段不回写（避免默认主题覆盖已读回值）
         if not getattr(self, "_restoring_settings", False):
             try:
                 self.settings.set("theme", theme_name)
             except Exception:
                 pass
+
+    def _theme_is_dark(self) -> bool:
+        """当前主题是不是深色：按背景亮度判定，不靠名字里有没有 dark。"""
+        try:
+            from themes import get_theme
+            from PySide6.QtGui import QColor
+            c = get_theme(getattr(self, "_current_theme", DEFAULT_THEME)).colors
+            return QColor(c["bg"]).lightness() < 128
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _sync_map_style(self) -> None:
+        """把当前主题映射成瓦片风格，推给所有持有地图的面板。"""
+        try:
+            from osm_map import style_for_dark
+            key = style_for_dark(self._theme_is_dark())
+        except Exception:  # noqa: BLE001
+            return
+        for attr in ("adsb_map_panel", "_location_panel"):
+            panel = getattr(self, attr, None)
+            if panel is None:
+                continue
+            setter = getattr(panel, "set_map_style", None)
+            if setter is None:
+                continue
+            try:
+                setter(key)
+            except (RuntimeError, AttributeError, TypeError):
+                continue
 
     def _on_theme_combo_changed(self, index: int):
         theme_name = self.theme_combo.itemData(index)
@@ -10572,6 +10605,9 @@ class MainWindow(QMainWindow):
                 panel.site_chosen.connect(self._on_location_chosen)
                 panel.cleared.connect(self._on_location_cleared)
                 self._location_panel = panel
+                # 面板是延迟创建的：创建后立刻把底图对齐当前主题，
+                # 否则深色界面里会突然弹出浅色地图（截图实证）
+                self._sync_map_style()
         if panel is None:
             self._focus_settings_tab()
             try:
