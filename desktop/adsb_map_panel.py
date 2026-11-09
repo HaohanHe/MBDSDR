@@ -227,14 +227,19 @@ class _MapCanvas(PinchZoomMixin, QWidget):
             # 异常」分开说，用户不必对着一句「无飞机」猜是哪一种。
             diag = getattr(self, "diag_text", "") or ""
             if diag:
+                # 单行 + 省略，不用 TextWordWrap：这张卡在中栏可能只有 150px
+                # 高，多行文字会算出负高度、和上面的空态牌叠成一团
+                # （2026-11-10 截图实证：三行字压在一起）。全文留给 tooltip。
                 f2 = QFont()
                 f2.setPointSize(8)
                 p.setFont(f2)
+                fm2 = QFontMetrics(f2)
+                avail = max(40.0, float(w) - 16.0)
+                one = fm2.elidedText(diag, Qt.ElideRight, int(avail))
+                ty = min(float(h) - 14.0, by + box_h + 6.0)
                 p.setPen(QPen(_TEXT))
-                p.drawText(QRectF(8.0, by + box_h + 8.0,
-                                  float(w) - 16.0,
-                                  max(20.0, float(h) - by - box_h - 16.0)),
-                           int(Qt.AlignHCenter | Qt.TextWordWrap), diag)
+                p.drawText(QRectF(8.0, ty, avail, 16.0),
+                           int(Qt.AlignHCenter | Qt.AlignVCenter), one)
         p.end()
 
 
