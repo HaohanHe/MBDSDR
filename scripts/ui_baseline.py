@@ -27,6 +27,13 @@ _SIG_COLS, _SIG_ROWS = 32, 24
 # 已声明的设计变更清单：--accept-geometry-change 的 reason 必须点名其中之一。
 # 新增项时同步在提交说明里点名（否则更新后的提交无法追溯几何变化来源）。
 DESIGN_CHANGES = {
+    "default-theme-light-to-dark":
+        "出厂默认主题 default（浅色米白）→ dark_car（深色）。星象仪天空与"
+        "频谱画布物理上必须是深底，外壳用浅色时同一屏并存两套明度体系"
+        "（截图里米白卡片直接贴着深蓝夜空）；深色主题对比度全项达标，"
+        "浅色当时有 3 项不达标；同类工具（Stellarium/SDR++/SDR#/GQRX）"
+        "默认都是深色外壳。浅色主题完整保留、菜单可切。"
+        "几何不变、整图像素色值全变。",
     "spectrum-axis-nice-steps":
         "频谱频轴/dB 轴刻度改 1/2/5×10ⁿ 阶梯 + 按量程自动单位（MHz 右端单标）",
     "narrow-bottom-dock-74-to-48":
@@ -69,6 +76,37 @@ _PROVENANCE_FIELDS = ("authorized_by", "formula", "source_commit",
                       "updated_at", "measured")
 
 BASELINE_PROVENANCE = {
+    "default-theme-light-to-dark": {
+        "authorized_by": "用户 2026-11-09 口述：「UI 啥的，你这个东西还是神奇，"
+                         "就是设计语言呐这些的问题」；按三条可复核事实裁定："
+                         "①星象仪天空/频谱画布物理上必须深底，外壳浅色必然"
+                         "并存两套明度体系；②深色主题对比度全项达标、浅色当时"
+                         "3 项不达标（强调 2.79/成功 2.46/选中态白字 3.09）；"
+                         "③Stellarium/SDR++/SDR#/GQRX 默认均深色外壳",
+        "formula": "默认主题由 \"default\" 改为 \"dark_car\"。dark_car 走 "
+                   "tokens.to_stylesheet('dark')，其字号/内边距按 CarWith "
+                   "设计稿（正文 20px、标题 24/32、按钮 8px 圆角）而非 "
+                   "default 手写 QSS 的 10pt/11pt，故除配色外还有字体度量差。"
+                   "本轮已先修根因再定标：_control_coverage_qss 补齐 QMenuBar"
+                   "（菜单栏 31→33px 曾让中央区少 2px）与 QGroupBox"
+                   "（dark_car/figma 原本没有这条规则，分组框吃 Qt 默认 3D 边，"
+                   "把 adsb 面板撑高 9px）；补齐后 adsb 回归到 +2。"
+                   "残余 = 字体度量：FreqDisplay 的 sizeHint 宽 270→278（+8，"
+                   "高 60 不变）；三栏 splitter 可用高度 +2 ⇒ adsb（宽恒 300）"
+                   "四档均匀 +2，频谱归一化高 =round(320×H/W) 逐档实测 "
+                   "+3/+2/+2/+1",
+        "source_commit": "cabba5cc（perf(ui): 冷启 6.36s→2.80s + 设计语言三处真修）",
+        "updated_at": "2026-11-09",
+        "measured": "四档尺寸（1000x600/1280x720/1600x900/1920x1080）× 三面板"
+                    "共 12 张实测重定标："
+                    "adsb_empty 300x449→451 / 569→571 / 749→751 / 929→931（+2）；"
+                    "spectrum 320x293→296 / 228→230 / 212→214 / 204→205"
+                    "（+3/+2/+2/+1）；"
+                    "freq_readout 270x60→278x60（仅宽 +8）。"
+                    "整图色值由浅色系切到深色系（bg #F5F3EF→#000000、"
+                    "card #FFFFFF→#2b2c2f、text #4F6B79→#ffffff）。"
+                    "重定标后 12 条转绿，其余 62 条布局锁不受影响",
+    },
     "narrow-bottom-dock-74-to-48": {
         "authorized_by": "用户跨会话裁定：2026-11-05 零折叠优先 + 底坞 74→48；"
                          "2026-11-06 批准按算式重定标",

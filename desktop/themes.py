@@ -56,6 +56,7 @@ def _control_coverage_qss(c: dict) -> str:
     颜色一律从当前主题的 ``colors`` 取，缺键有兜底，因此五个主题共用一份。
     """
     bg = c["bg"]
+    bg_alt = c.get("bg_alt", bg)
     card = c.get("card", bg)
     text = c["text"]
     border = c.get("border", text)
@@ -68,7 +69,45 @@ def _control_coverage_qss(c: dict) -> str:
     disabled_bg = c.get("button_disabled", card)
     secondary = c.get("text_secondary", text)
     return f"""
-        /* ---------- 原生控件接管（工具栏/复选/列表/分隔条） ---------- */
+        /* ---------- 原生控件接管（菜单栏/工具栏/复选/列表/分隔条/分组框） ---------- */
+        /* QMenuBar：default 有这条规则，dark_car/figma 走的
+           tokens.to_stylesheet() 里没有——菜单栏高度实测 31px vs 33px，
+           中央区因此少 2px，所有面板跟着漂。补齐后两套主题同高。 */
+        QMenuBar {{
+            background-color: {bg_alt};
+            color: {text};
+            border-bottom: 1px solid {border};
+        }}
+        QMenuBar::item {{
+            background: transparent;
+            padding: 6px 12px;
+            color: {text};
+        }}
+        QMenuBar::item:selected {{
+            background-color: {hover};
+            border-radius: 4px;
+        }}
+        QMenuBar::item:pressed {{
+            background-color: {pressed};
+            border-radius: 4px;
+        }}
+        /* QGroupBox：dark_car 与 figma 走的 tokens.to_stylesheet() 里**没有**
+           这条规则，分组框一直吃 Qt 默认的 3D 边与标题间距——既和卡片不是
+           一套形状，也把面板撑高了 9px（2026-11-09 基线实测
+           adsb 449→458）。这里按 default 主题已有的数值统一，几何随之一致。 */
+        QGroupBox {{
+            background-color: {card};
+            border: 1px solid {border};
+            border-radius: 12px;
+            margin-top: 16px;
+            padding: 12px 10px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 4px;
+            color: {text};
+        }}
         QToolButton {{
             background-color: transparent;
             color: {text};
