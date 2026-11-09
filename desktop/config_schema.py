@@ -197,9 +197,13 @@ ALL_ITEMS: Tuple[SettingItem, ...] = (
     ),
     SettingItem(
         key="theme", group="显示与主题", kind="enum",
-        label="主题", default="default",
+        label="主题", default="dark_car",
         help="整套配色与控件样式；频谱/瀑布会同步换色。",
-        source="desktop/themes.DEFAULT_THEME（默认 \"default\"）",
+        # 必须与 themes.DEFAULT_THEME 一致：DEFAULTS 由本表生成，写死旧值会
+        # 让 settings.get("theme", DEFAULT_THEME) 永远拿到旧主题——2026-11-09
+        # 改默认主题时这里没跟着改，截图仍是浅色，白折腾一轮。
+        # tests/test_theme_switch.py::test_schema_default_matches_themes 钉住。
+        source="desktop/themes.DEFAULT_THEME（出厂深色；浅色仍可在此切换）",
         choices=(_e("default", "默认浅色"), _e("dark", "深色"),
                  _e("high_contrast", "高对比（无障碍）"),
                  _e("dark_car", "CarWith 深色"), _e("figma", "Figma 深色")),

@@ -480,6 +480,8 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from themes import get_theme, THEMES, DEFAULT_THEME
+# 强调色底上的墨色由 themes 按实际对比度算（浅色主题白字只有 3.09:1）
+from themes import _on_primary as _primary_ink
 from shortcuts import bind as _key
 from spectrum_widget import (
     create_spectrum_widget, HAS_OPENGL, owns_local_shortcuts)
@@ -1677,11 +1679,10 @@ class MainWindow(QMainWindow):
         # 完整排查细节：横幅只显示短句，这份留在 tooltip，不删也不糊脸。
         self._no_device_hint_detail: str = ""
         self._no_device_hint.setAlignment(Qt.AlignCenter)
-        _hint_bg = self._tok("light_hint_bg", "#F0E8DC")
-        _hint_fg = self._tok("light_hint_text", "#8A6D4A")
-        self._no_device_hint.setStyleSheet(
-            f"QLabel {{ background-color:{_hint_bg}; color:{_hint_fg};"
-            f" padding:4px; border-radius:3px; font-size:9pt; }}")
+        # 配色必须跟当前主题走：原来取 tokens.COLORS 的 light_hint_bg
+        # （#F0E8DC 米黄，浅色专用），深色主题下就成了一块贴在黑底上的
+        # 创可贴——2026-11-09 截图里最刺眼的一处。
+        self._restyle_hint_banner()
         spectrum_layout.addWidget(self._no_device_hint)
 
         self.spectrum = create_spectrum_widget(prefer_opengl=False)
@@ -3884,11 +3885,44 @@ class MainWindow(QMainWindow):
         except Exception:
             return default
 
+    def _restyle_hint_banner(self) -> None:
+        """无设备横幅跟随当前主题（深色下不再是一块米黄补丁）。
+
+        语义色取当前主题的 bg_alt（底）/ text_secondary（字）/ danger（描边）：
+        横幅是"提示"不是"弹窗"，用中性底 + 一道警示色描边，既不糊脸也看得见。
+        """
+        lbl = getattr(self, "_no_device_hint", None)
+        if lbl is None:
+            return
+        try:
+            theme = get_theme(getattr(self, "_current_theme", DEFAULT_THEME))
+            c = theme.colors
+        except Exception:  # noqa: BLE001 - 取不到主题就保持现状，不阻断启动
+            return
+        bg = c.get("bg_alt", c["bg"])
+        fg = c.get("text_secondary", c["text"])
+        edge = c.get("danger", c.get("primary", c["text"]))
+        lbl.setStyleSheet(
+            f"QLabel {{ background-color:{bg}; color:{fg};"
+            f" border:1px solid {edge}; border-radius:8px;"
+            # padding 3px + 1px 边框 = 原来的 4px 内边距，横幅总高不变。
+            # 横幅在频谱控件上方，高 1px 频谱就矮 1px（基线 320x296 实测），
+            # 加边框必须从 padding 里扣回来，否则布局连锁漂移。
+            f" padding:3px 8px; font-size:9pt; }}")
+
     def _connect_button_qss(self) -> str:
-        """主操作（连接）按钮高亮 QSS——强调色取自 tokens，不硬编码 hex。"""
-        accent = self._tok("light_accent", "#C4845C")
-        hover = self._tok("light_accent_hover", "#D4946C")
-        fg = self._tok("text_primary", "#FFFFFF")
+        """主操作（连接）按钮高亮 QSS——强调色取自**当前主题**，不写死 hex。
+
+        原来固定取 `light_accent`（浅色的橙），深色主题下连接按钮是整屏唯一的
+        暖橙块，和 #919cac 的深色强调色系对不上。
+        """
+        try:
+            c = get_theme(getattr(self, "_current_theme", DEFAULT_THEME)).colors
+        except Exception:  # noqa: BLE001 - 取不到就用兜底色，不阻断
+            c = {}
+        accent = c.get("primary") or self._tok("light_accent", "#C4845C")
+        hover = c.get("accent_hover") or accent
+        fg = _primary_ink(c) if c else self._tok("text_primary", "#FFFFFF")
         return (
             f"QPushButton {{ background-color:{accent}; color:{fg};"
             f" font-weight:600; padding:0 14px; }}"
@@ -4363,6 +4397,13 @@ class MainWindow(QMainWindow):
             theme.colors["accent"],
             theme.spectrum_colors,
         )
+
+        # 自绘/内联样式的控件不吃 app 级 QSS，换主题时要逐个重刷
+        self._restyle_hint_banner()
+        try:
+            self.connect_btn.setStyleSheet(self._connect_button_qss())
+        except Exception:  # noqa: BLE001 - 按钮尚未创建（构造早期调主题）时跳过
+            pass
 
         # 更新主题下拉框
         idx = self.theme_combo.findData(theme_name)

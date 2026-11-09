@@ -41,6 +41,27 @@ def test_every_theme_color_comes_from_tokens():
                                      "border", "primary", "primary_text"}
 
 
+def test_schema_default_matches_themes():
+    """设置表里的 theme 默认值必须等于 themes.DEFAULT_THEME。
+
+    2026-11-09 踩过：改了 DEFAULT_THEME 却没改 config_schema 的 default，
+    DEFAULTS 里仍然预填旧主题，于是 settings.get("theme", DEFAULT_THEME)
+    永远拿到旧值——出厂默认形同虚设，且不报任何错。
+    """
+    from config_schema import SCHEMA, defaults
+
+    # 真正会被 settings.get("theme", DEFAULT_THEME) 拿到的是 DEFAULTS 里预填的值，
+    # 所以直接钉 DEFAULTS，比钉 SettingItem.default 更贴近失败路径。
+    assert defaults("settings")["theme"] == DEFAULT_THEME, (
+        f"config_schema 的 theme 默认值 "
+        f"{defaults('settings')['theme']!r} 与 themes.DEFAULT_THEME="
+        f"{DEFAULT_THEME!r} 不一致——DEFAULTS 会预填旧主题，"
+        f"settings.get 永远拿不到新默认值")
+    item = SCHEMA["theme"]
+    # 旧主题必须仍可选（不是删掉了，只是不再是默认）
+    assert any("default" in str(c) for c in item.choices), "浅色主题被删了"
+
+
 def test_figma_theme_is_switchable_but_not_default():
     assert "figma" in THEMES, "figma 主题未注册"
     # 默认主题必须是登记在 THEMES 里的深色主题。2026-11-09 由 "default"（浅色）
