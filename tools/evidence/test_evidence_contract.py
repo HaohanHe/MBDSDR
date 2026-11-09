@@ -199,3 +199,47 @@ def test_save_frame_records_size_and_variance(qapp, tmp_path):
     assert frame["std"] > 0.8, "有内容的帧不该被判成空帧"
     w.close()
     w.deleteLater()
+
+
+def test_suite_logs_are_streamed_not_buffered():
+    """长任务日志必须边跑边落盘，不能用 PIPE 攒到最后。
+
+    2026-11-09：一次会话中断把跑到一半的全量桌面套件杀掉，subprocess.PIPE
+    里几十分钟的输出全部丢失，日志 0 字节、报告无内容 —— 等于那轮证据
+    从没存在过。证据包最怕的不是崩，是"跑过但什么都没留下"。
+    """
+    src = (Path(run_all.__file__).parent / "test_suites.py").read_text(
+        encoding="utf-8")
+    assert "subprocess.PIPE" not in src, "PIPE 会让中断时的日志全丢"
+    assert "stdout=fh" in src, "日志要直接接子进程的文件句柄"
+    assert "log_path.read_text" in src, "汇总行仍要从落盘日志现算"
+
+
+def test_suite_group_never_trusts_a_missing_summary():
+    """汇总行被吞时不许把 counts 全 0 读成「0 failed，通过」。
+
+    2026-11-09：kernel 套件跑到 100% 后，沙箱批量删临时目录的
+    [safe-delete] 输出抢在 terminal summary 之前，日志里连一个
+    "passed"/"failed" 都没有，counts 全 0。同时每条套件换全新 basetemp
+    绕开这堆历史垃圾，桌面超时按本机实测（30min 只到 56%）调到 4200s。
+    """
+    src = (Path(run_all.__file__).parent / "test_suites.py").read_text(
+        encoding="utf-8")
+    assert "has_summary" in src and "counts_trustworthy" in src
+    assert "basetemp" in src, "全新 basetemp 才能避开历史临时目录批量清理"
+    assert "4200" in src, "桌面全量在本机约需 55 分钟，1800s 必然超时"
+    assert "--kernel-timeout" in src and "--desktop-timeout" in src
+
+
+def test_suite_basetemp_stays_inside_system_temp():
+    """basetemp 必须落在系统临时目录：导出工具的路径白名单认它。
+
+    第一次把 basetemp 放到仓库外的 output/ 下，pytest 的 tmp_path 立刻
+    被 _confine_export_path 判成越界，7 条 export 用例（含正向对照
+    test_tmp_path_still_allowed）整批变红。绕 safe-delete 的前提是不破坏
+    产品自身的安全语义。
+    """
+    src = (Path(run_all.__file__).parent / "test_suites.py").read_text(
+        encoding="utf-8")
+    assert "tempfile.gettempdir()" in src
+    assert "mbdsdr-evidence-" in src

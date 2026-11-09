@@ -198,6 +198,45 @@ not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面�
 全部 C++ 结论）。
 
 
+### 我这边（2026-11-09 中午：基线组的权威复跑与顺序依赖归因）
+
+- **kernel 权威数字（现算、汇总行完整）**：`tools/evidence/test_suites.py
+  --suite kernel` → `2827 passed / 5 skipped / 0 failed / 202 subtests`，
+  exit 0，672.8 s，`counts_trustworthy=True`。数字取自 pytest 汇总行而非
+  手写报告，日志在 `output/evidence/bundle_verify2/test_suites/kernel.log`。
+- **第一次权威复跑（33 min）结果不作结论**：desktop 在 1800 s 处超时，
+  只跑到 56%（3214/5581）；kernel 日志 100% 后直接接 `[safe-delete]`，
+  连一个 "passed"/"failed" 字样都没有，`counts` 全 0。工具当时会把
+  「0 failed」读成通过 —— 这是假证据口子，不是小毛病。
+- **`tools/evidence/test_suites.py` 的四处改动**（契约 16 passed）：
+  1. 流式日志：subprocess 直接写文件句柄，不再 PIPE 攒到最后
+     （会话中断时旧版日志 0 字节、证据全丢）。
+  2. 汇总行守卫：末行没有 `\d+ passed|failed|error` 就判 FAIL，
+     facts 里带 `counts_trustworthy`；没结论不许算通过。
+  3. 每条套件全新 basetemp：默认临时根堆积的历史垃圾在退出时被批量
+     删除，本机沙箱对「一次删 52 个文件」会拦截并抢在 terminal
+     summary 之前输出。**basetemp 必须在系统临时目录下** —— 产品导出
+     路径白名单是 `MBDSDR_EXPORT_ROOT` / CWD / `tempfile.gettempdir()`；
+     第一版放到 `output/` 下，7 条 export 用例（含
+     `test_tmp_path_still_allowed`）整批判越界变红，换回系统 temp 后
+     kernel 组转 PASS。
+  4. desktop 超时按本机实测调到 4200 s（1800 s 只到 56%，全量约
+     55 min），另给 `--kernel-timeout` / `--desktop-timeout` 覆盖。
+- **13+2 个 F 的归因改写**：干净无并发全量里 kernel 2 个、desktop 13 个；
+  15 个 nodeid 放进一个无并发进程单独复跑 → **15 passed**（496 s）。
+  上午记的「并发 / 时序假红」里，「并发」这一半不成立：本轮无并发
+  照样红。这批是**全量长序列的顺序依赖**（单跑绿、固定顺序全量红）。
+  涉及 `test_adsb_any_fs` / `test_data_licenses` / `test_fake_rtl_chain` /
+  `test_help_path_truthfulness` / `test_hold_snr` /
+  `test_layout_persist_split_brain` / `test_mcp_client_bridge` /
+  `test_no_sim_regression` / `test_star_catalog_packaging`。
+  根因（哪个用例留下什么全局状态）尚未定位，登记在
+  `docs/known-red-register.md` K05，**不许按「假红」略过**。
+- **桌面全量仍是 not_verified**：本轮没有 55 分钟完整跑的记录，
+  不宣称 `tests/` 全绿。`--with-tests` 现在具备跑完的条件
+  （慢机器可加 `--desktop-timeout 5400`）。
+- 验证：契约 16 passed；kernel 组 PASS；15 节点干净复跑 15 passed。
+
 ### 我这边（2026-11-09 上午：跨 lane 完工报告的复核，不采信"争用假红"）
 
 另一 lane 交付 `D:/mbdsdr/output/goal_completion_audit.md`，报
