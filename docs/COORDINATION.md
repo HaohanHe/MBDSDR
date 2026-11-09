@@ -3403,3 +3403,56 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
 
 **边界**：本轮只做 UI 与交互正确性，**没有重跑 `tests/` 全量**，
 也没有碰任何指标/性能数字——那需要真实实验支撑，按用户要求留到后面。
+
+---
+
+### 补记七（2026-11-09 23:35–次日 00:40）：性能 + 设计语言（参考 glasswork）
+
+用户：「UI 还是神奇，就是设计语言呐这些的问题；并且性能优化；把
+github.com/kubai087/glasswork 克隆下来看看」。
+
+**参考项目**：glasswork（Lumno 液态玻璃材质调试器，MIT）已拉到
+`D:/mbdsdr/reference/glasswork/`（codeload 直连，10.5 MB / 46 文件）。
+读透的是**原则不是实现**——它靠 CSS `backdrop-filter` + SVG 位移贴图
+做边缘折射，Qt 没有对应能力，抄不过来。能学的三条：
+①组件结构不变、只换四条材质声明；②**对比度 4.5:1 是硬约束，浓度由它倒推**；
+③9 层 box-shadow 造厚度（左上高光/0.5px 描边/内侧 bevel）。
+
+**性能（真凶不是 Qt）**：cProfile 显示 `MainWindow()` 8.19 s 里 **6.9 s**
+在 `AMRClassifier.__init__`——启动时同步合成 8 类×16 条 =128 段 IQ 再提
+25 维特征（`numpy.correlate` 3.2 s + 特征生成器 3.2 s），而 AMR 只有用户
+真问「这是什么调制」才用得上。改懒加载 + 特征落盘缓存：
+构造 0 ms、首次真算 3.09 s、二次读缓存 **2.8 ms**、
+**主窗冷启 6.36 s → 2.80 s**。缓存与真算特征最大绝对差 **0.0**，
+8 类调制分类结论/置信度全一致（逐位相等，不是近似）。
+
+**设计语言（根因是样式只接管了一半控件）**：主窗控件普查 ——
+`QToolButton` **138 个**、`QCheckBox` 28、`QListView` 42、
+`QSplitterHandle` 11，**所有主题的 QSS 一个都没选中它们**。同一屏里
+一半控件按 token 画、另一半是 Qt 默认皮肤。新增 `_control_coverage_qss`
+在 `Theme.apply` 里并进最终 QSS（一处改动五个主题同时生效），按同一形状
+语法接管这批控件；后续又补齐 `QMenuBar`（菜单栏 31 vs 33px，中央区少
+2px）与 `QGroupBox`（dark_car/figma 原本没有这条规则，分组框吃 Qt 默认
+3D 边，把 adsb 面板撑高 9px）。
+
+**可测性（学 glasswork 的硬约束）**：新增 `scripts/theme_contrast.py` +
+`tests/test_theme_contrast_gate.py`。审计出 4 处不达标并修：
+default 强调色 2.79 / 成功色 2.46（<3:1）、选中态白字压橙底 3.09（<4.5:1）、
+dark 卡片描边 1.30（<1.5）。选中态墨色改为按实际对比度挑
+（`_on_primary`），不再一律用 card。60 项配对全达标。
+
+**默认主题改深色（含基线受控重定标）**：`default`(浅色) → `dark_car`。
+依据：星象仪/频谱画布物理上必须深底，外壳浅色必然并存两套明度体系；
+深色对比度全达标；Stellarium/SDR++/SDR#/GQRX 默认都是深色外壳。
+像素基线 12 张走 `DESIGN_CHANGES` + `BASELINE_PROVENANCE` 受控重定标
+（source_commit cabba5cc，measured 逐档写实测）。
+**踩坑**：`config_schema` 里 theme 的 default 仍写死 "default"，
+`DEFAULTS` 预填它 → 改了 `DEFAULT_THEME` 截图还是浅色，白折腾一轮。
+已同步并加 `test_schema_default_matches_themes` 钉住。
+
+**验证**：布局锁 74 passed（含 12 张基线）；UI 全量批次 269 passed；
+AMR 相关回归 0 failed；设计门禁 21 passed。
+**诚实边界**：①同一批次跑两次，第一次 268 passed + 1 failed、第二次 269
+全绿，偶发那条未定位；②推送失败（GitHub 443 连不上），三笔提交只在本地
+（`cabba5cc` / `2635a98c` / `d509a4db`）；③离线城市表仍未生成
+（Overpass 超时、GitHub raw 也 reset）；④kernel 全量与真机链路本轮未重跑。
