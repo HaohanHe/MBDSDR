@@ -2779,11 +2779,7 @@ class _TuningPlotMixin:
         # 同时打上作用域标记，供主窗槽内兜底判断（见 owns_local_shortcuts）。
         setattr(self, LOCAL_SHORTCUT_SCOPE_ATTR, True)
         self._local_mode_shortcuts: List[QShortcut] = []
-        for _sid, _mode in _LOCAL_MODE_SHORTCUTS:
-            _sc = QShortcut(QKeySequence(_bind_shortcut(_sid)), self)
-            _sc.setContext(Qt.WidgetShortcut)
-            _sc.activated.connect(lambda m=_mode: self._apply_mode_hotkey(m))
-            self._local_mode_shortcuts.append(_sc)
+        self._rebuild_local_shortcuts()
         self.setMinimumHeight(300)
         self.setMouseTracking(True)
         self._press_x: Optional[float] = None
@@ -2814,6 +2810,45 @@ class _TuningPlotMixin:
         self._peak_hover_key = None      # 当前悬停峰（避免每帧重弹气泡）
 
     # ------------------------------------------------------------------ 工具
+    def _rebuild_local_shortcuts(self) -> None:
+        """按 shortcuts.py 的**当前生效**键位重建解调模式局部键。
+
+        改键界面保存后由主窗转调（见 apply_shortcut_overrides）：
+        局部键是 QShortcut 对象，键位在构造时就固定了，不重建就还是旧键。
+        """
+        for sc in getattr(self, "_local_mode_shortcuts", []):
+            try:
+                sc.setParent(None)
+                sc.deleteLater()
+            except RuntimeError:
+                pass        # 已随控件销毁：忽略，不影响后续重建
+        self._local_mode_shortcuts = []
+        for _sid, _mode in _LOCAL_MODE_SHORTCUTS:
+            _sc = QShortcut(QKeySequence(_bind_shortcut(_sid)), self)
+            _sc.setContext(Qt.WidgetShortcut)
+            _sc.activated.connect(lambda m=_mode: self._apply_mode_hotkey(m))
+            self._local_mode_shortcuts.append(_sc)
+
+    def apply_shortcut_overrides(self) -> int:
+        """热更新本控件的局部键，返回改动条数（主窗改键后调用）。
+
+        两类键各自刷新：
+          * ``_LOCAL_KEY_CODES``：keyPressEvent 里比对的键码（调谐/滤波）；
+          * ``_local_mode_shortcuts``：解调模式的 QShortcut 对象。
+        """
+        changed = 0
+        for sid in list(_LOCAL_KEY_CODES):
+            new = QKeySequence(_bind_shortcut(sid))[0].key()
+            if new != _LOCAL_KEY_CODES[sid]:
+                _LOCAL_KEY_CODES[sid] = new
+                changed += 1
+        before = [sc.key().toString()
+                  for sc in getattr(self, "_local_mode_shortcuts", [])]
+        self._rebuild_local_shortcuts()
+        after = [sc.key().toString() for sc in self._local_mode_shortcuts]
+        changed += sum(1 for a, b in zip(before, after) if a != b)
+        return changed
+
     def _x_ratio(self, event):
         return event.position().x() / max(1, self.width())
 

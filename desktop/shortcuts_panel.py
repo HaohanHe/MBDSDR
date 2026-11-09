@@ -24,7 +24,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from shortcuts import SHORTCUTS, Shortcut  # noqa: E402
+from shortcuts import (  # noqa: E402
+    BY_ID, SHORTCUTS, Shortcut, bind, clear_all_overrides, clear_override,
+    conflicts, is_overridden, load_overrides, set_override,
+)
 
 #: id 前缀 → 界面分区（顺序即面板分组顺序）
 GROUP_BY_PREFIX: Tuple[Tuple[str, str], ...] = (
@@ -53,8 +56,13 @@ def group_of(shortcut_id: str) -> str:
 
 
 def key_text(shortcut: Shortcut) -> str:
-    """面板里显示的键位文本；未配键如实显示并保留原因。"""
-    return shortcut.key if shortcut.key else "无快捷键"
+    """面板里显示的键位文本：**当前生效**键位（用户改过就显示改后的）。
+
+    未配键如实显示「无快捷键」；被用户主动解绑的条目也一样（改键界面里
+    解绑等于「这条不要快捷键」，与出厂就没配是同一件事，界面上不区分）。
+    """
+    current = bind(shortcut.id)
+    return current if current else "无快捷键"
 
 
 def grouped_shortcuts(query: str = "") -> List[Tuple[str, List[Shortcut]]]:
@@ -104,14 +112,18 @@ def explain_text(shortcut: Shortcut) -> str:
 # Qt 界面
 # ---------------------------------------------------------------------------
 def _build_dialog_class():
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, Signal
+    from PySide6.QtGui import QKeySequence
     from PySide6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTreeWidget,
-        QTreeWidgetItem, QPushButton, QAbstractItemView,
+        QTreeWidgetItem, QPushButton, QAbstractItemView, QMessageBox,
     )
 
     class ShortcutsPanel(QDialog):
-        """快捷键一览（非模态；内容实时来自 shortcuts.py）。"""
+        """快捷键一览 + 改键（非模态；键位与覆写都来自 shortcuts.py）。"""
+
+        #: 用户改完键后发出：主窗接住并立刻重设键位（不重启生效）
+        shortcuts_changed = Signal()
 
         def __init__(self, parent=None):
             super().__init__(parent)
@@ -138,8 +150,12 @@ def _build_dialog_class():
             self.tree.setColumnCount(3)
             self.tree.setHeaderLabels(["功能", "键位", "怎么触发 / 说明"])
             self.tree.setRootIsDecorated(True)
-            self.tree.setSelectionMode(QAbstractItemView.NoSelection)
-            self.tree.setFocusPolicy(Qt.NoFocus)
+            # 可选中才能改键：选中一行 → 底部「改键…」只改这一条。
+            # 只允许选单选，避免「一次改多条」时冲突判断说不清。
+            self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+            self.tree.setFocusPolicy(Qt.StrongFocus)
+            self.tree.itemSelectionChanged.connect(self._sync_buttons)
             root.addWidget(self.tree, stretch=1)
 
             self.empty_label = QLabel(self)
@@ -156,12 +172,29 @@ def _build_dialog_class():
             foot.setWordWrap(True)
             root.addWidget(foot)
 
+            edit_row = QHBoxLayout()
+            self.edit_btn = QPushButton("改键…", self)
+            self.edit_btn.setToolTip(
+                "给选中的这一条换键。星象仪的 Esc 退出键不允许改（那是退出路径）")
+            self.edit_btn.clicked.connect(self._on_edit)
+            edit_row.addWidget(self.edit_btn)
+            self.reset_btn = QPushButton("恢复默认", self)
+            self.reset_btn.setToolTip("把选中的这一条恢复成出厂键位")
+            self.reset_btn.clicked.connect(self._on_reset)
+            edit_row.addWidget(self.reset_btn)
+            self.reset_all_btn = QPushButton("全部恢复默认", self)
+            self.reset_all_btn.setToolTip("清掉所有自定义键位，回到出厂设置")
+            self.reset_all_btn.clicked.connect(self._on_reset_all)
+            edit_row.addWidget(self.reset_all_btn)
+            edit_row.addStretch(1)
+            root.addLayout(edit_row)
+
             close_btn = QPushButton("关闭", self)
             close_btn.clicked.connect(self.close)
             root.addWidget(close_btn)
 
             self._refresh()
-
+            self._sync_buttons()
         def _refresh(self) -> None:
             self.tree.clear()
             groups = grouped_shortcuts(self.search_edit.text())
@@ -174,8 +207,105 @@ def _build_dialog_class():
                     child = QTreeWidgetItem([
                         s.label, key_text(s),
                         f"{trigger_text(s)} · {explain_text(s)}"])
+                    # id 挂在行上：改键时按 id 精确定位，不靠标签反查
+                    child.setData(0, Qt.UserRole, s.id)
+                    if is_overridden(s.id):
+                        child.setToolTip(
+                            1, f"已自定义：{key_text(s)}（出厂是 "
+                               f"{s.key or '无快捷键'}）")
                     top.addChild(child)
                 top.setExpanded(True)
+            self._sync_buttons()
+
+        # ---- 改键 ------------------------------------------------------
+        def _selected_id(self) -> str:
+            items = self.tree.selectedItems()
+            if not items:
+                return ""
+            return str(items[0].data(0, Qt.UserRole) or "")
+
+        def _sync_buttons(self) -> None:
+            sid = self._selected_id()
+            is_group_row = bool(self.tree.selectedItems()) and not sid
+            # 分组标题行没有 id：改键/恢复对它没有意义，直接禁掉
+            self.edit_btn.setEnabled(bool(sid) and sid != "view.planetarium_exit")
+            self.reset_btn.setEnabled(bool(sid) and is_overridden(sid))
+            self.reset_all_btn.setEnabled(any(is_overridden(s.id) for s in SHORTCUTS))
+            if is_group_row:
+                self.edit_btn.setToolTip("先选一条具体功能（分组标题不能改键）")
+            elif sid == "view.planetarium_exit":
+                self.edit_btn.setToolTip(
+                    "星象仪的 Esc 退出键不允许改：那是唯一的退出路径，"
+                    "改成别的键会让用户被困在星象仪里")
+            else:
+                self.edit_btn.setToolTip(
+                    "给选中的这一条换键。星象仪的 Esc 退出键不允许改")
+
+        def _on_edit(self) -> None:
+            sid = self._selected_id()
+            if not sid:
+                return
+            entry = BY_ID[sid]
+            from PySide6.QtWidgets import QDialog, QDialogButtonBox, QKeySequenceEdit
+            dlg = QDialog(self)
+            dlg.setWindowTitle(f"改键 · {entry.label}")
+            lay = QVBoxLayout(dlg)
+            tip = QLabel(
+                f"当前生效：{key_text(entry)}\n出厂键位：{entry.key or '无快捷键'}\n"
+                "按下组合键；清空＝恢复出厂键位。", dlg)
+            tip.setWordWrap(True)
+            lay.addWidget(tip)
+            edit = QKeySequenceEdit(dlg)
+            edit.setKeySequence(QKeySequence(bind(sid) or ""))
+            lay.addWidget(edit)
+            box = QDialogButtonBox(
+                QDialogButtonBox.Save | QDialogButtonBox.Cancel, dlg)
+            box.accepted.connect(dlg.accept)
+            box.rejected.connect(dlg.reject)
+            lay.addWidget(box)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            seq = edit.keySequence().toString()
+            if seq and seq == entry.key:
+                # 改回出厂值 = 删覆写，不要留一条「等于默认」的覆写记录
+                clear_override(sid)
+                self._after_change()
+                return
+            # 同 scope 冲突检查：跨 scope 同键是设计允许的（焦点在哪局部优先），
+            # 同 scope 撞键会让其中一个永远按不出来，必须挡住。
+            trial = dict(load_overrides())
+            if seq:
+                trial[sid] = seq
+            else:
+                trial.pop(sid, None)
+            clash = [c for c in conflicts(trial) if sid in (c[2], c[3])]
+            if clash:
+                scope, key, a_id, b_id = clash[0]
+                other = b_id if a_id == sid else a_id
+                QMessageBox.warning(
+                    self, "键位冲突",
+                    f"{key} 已被「{BY_ID[other].label}」占用（同样是 "
+                    f"{scope} 范围）。\n两者都按不出来，换一个组合键，"
+                    "或先把那一条恢复默认。")
+                return
+            set_override(sid, seq)
+            self._after_change()
+
+        def _on_reset(self) -> None:
+            sid = self._selected_id()
+            if not sid:
+                return
+            clear_override(sid)
+            self._after_change()
+
+        def _on_reset_all(self) -> None:
+            clear_all_overrides()
+            self._after_change()
+
+        def _after_change(self) -> None:
+            """保存后立刻刷新列表并通知主窗重设键位（不重启就生效）。"""
+            self._refresh()
+            self.shortcuts_changed.emit()
 
     return ShortcutsPanel
 

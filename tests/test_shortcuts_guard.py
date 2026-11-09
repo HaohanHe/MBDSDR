@@ -43,7 +43,21 @@ def _main_tree():
 
 
 def _collect_calls(tree):
-    """收集 _key("id") 实参、裸 QKeySequence("...") 实参、QAction("label") 标签。"""
+    """收集快捷键 id 实参、裸 QKeySequence("...") 实参、QAction("label") 标签。
+
+    快捷键 id 有三个合法入口，都要认，否则「改键后热更新」这类重构会被
+    误报成「登记了但没用上」：
+      * ``_key("id")`` —— 直接取键序列；
+      * ``_bind_shortcut(action, "id")`` —— 主窗 QAction 绑定并登记；
+      * ``_make_shortcut("id")`` —— 主窗 QShortcut 绑定并登记。
+    后两个是 2026-11-09 加改键功能时引入的（``main_window`` 需要 id→控件
+    登记表才能精确热更新），id 一样是字面量、一样要过本守卫。
+    """
+    _ID_TAKERS = {
+        "_key": 0,              # _key("id")
+        "_bind_shortcut": 1,    # _bind_shortcut(action, "id")
+        "_make_shortcut": 0,    # _make_shortcut("id")
+    }
     used_ids, literal_keys, action_labels = set(), [], set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -51,9 +65,12 @@ def _collect_calls(tree):
         func = node.func
         fname = getattr(func, "id", getattr(func, "attr", ""))
         first = node.args[0] if node.args else None
-        if fname == "_key" and isinstance(first, ast.Constant) \
-                and isinstance(first.value, str):
-            used_ids.add(first.value)
+        if fname in _ID_TAKERS:
+            idx = _ID_TAKERS[fname]
+            if len(node.args) > idx:
+                arg = node.args[idx]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    used_ids.add(arg.value)
         if fname == "QKeySequence" and isinstance(first, ast.Constant) \
                 and isinstance(first.value, str):
             literal_keys.append(first.value)

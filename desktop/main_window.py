@@ -1179,7 +1179,57 @@ class MainWindow(QMainWindow):
     # UI 构建
     # ========================================================================
 
+    # ---------------------------------------------------------------- 快捷键
+    def _bind_shortcut(self, action, shortcut_id: str):
+        """把 QAction 与快捷键 id 绑定并登记，供「设置 → 快捷键」改键后热更新。
+
+        登记表是**改键能立即生效**的前提：只按「当前键序列」反查会把跨
+        scope 同键的动作（A = 全天模式 / 频谱 AM）一起改掉，那是错的。
+        """
+        action.setShortcut(QKeySequence(_key(shortcut_id)))
+        action.setProperty("mbdsdr_shortcut_id", shortcut_id)
+        self._shortcut_actions[shortcut_id] = action
+        return action
+
+    def _make_shortcut(self, shortcut_id: str):
+        """建 QShortcut 并登记（同 _bind_shortcut，供非 QAction 的键用）。"""
+        sc = QShortcut(QKeySequence(_key(shortcut_id)), self)
+        self._shortcut_shortcuts[shortcut_id] = sc
+        return sc
+
+    def apply_shortcut_overrides(self) -> int:
+        """把用户改过的键位重新下发到已建好的控件上，返回改动条数。
+
+        改键界面保存后立即调用；不重启就能按新键。取不到键
+        （用户主动解绑）时设空序列 = 该动作不再有快捷键，符合预期。
+        """
+        changed = 0
+        for sid, action in getattr(self, "_shortcut_actions", {}).items():
+            want = _key(sid) or ""
+            if action.shortcut().toString() != want:
+                action.setShortcut(QKeySequence(want))
+                changed += 1
+        for sid, sc in getattr(self, "_shortcut_shortcuts", {}).items():
+            want = _key(sid) or ""
+            if sc.key().toString() != want:
+                sc.setKey(QKeySequence(want))
+                changed += 1
+        # 频谱局部键（A/N/F/W/C/S 等）由频谱控件自己持有，转交给它重建
+        spec = getattr(self, "spectrum", None)
+        apply_fn = getattr(spec, "apply_shortcut_overrides", None)
+        if callable(apply_fn):
+            try:
+                changed += int(apply_fn() or 0)
+            except Exception as e:  # noqa: BLE001 - 单个控件刷新失败不阻断其余键
+                logger.warning("频谱局部键刷新失败: %s: %s",
+                               type(e).__name__, e)
+        return changed
+
     def _build_menu_bar(self):
+        # 快捷键登记表（id → 控件）：改键后 apply_shortcut_overrides 靠它精确
+        # 重设，不靠「当前键序列」反查（跨 scope 同键的动作不能被一起改）。
+        self._shortcut_actions = {}
+        self._shortcut_shortcuts = {}
         """构建菜单栏。"""
         menubar = self.menuBar()
 
@@ -1187,19 +1237,19 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("文件(&F)")
 
         connect_action = QAction("连接设备...", self)
-        connect_action.setShortcut(QKeySequence(_key("file.connect")))
+        self._bind_shortcut(connect_action, "file.connect")
         connect_action.triggered.connect(self._connect_dialog)
         file_menu.addAction(connect_action)
 
         disconnect_action = QAction("断开连接", self)
-        disconnect_action.setShortcut(QKeySequence(_key("file.disconnect")))
+        self._bind_shortcut(disconnect_action, "file.disconnect")
         disconnect_action.triggered.connect(self._disconnect)
         file_menu.addAction(disconnect_action)
 
         file_menu.addSeparator()
 
         exit_action = QAction("退出", self)
-        exit_action.setShortcut(QKeySequence(_key("file.quit")))
+        self._bind_shortcut(exit_action, "file.quit")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
@@ -1234,14 +1284,14 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
 
         waterfall_action = QAction("显示瀑布图", self)
-        waterfall_action.setShortcut(QKeySequence(_key("view.waterfall")))
+        self._bind_shortcut(waterfall_action, "view.waterfall")
         waterfall_action.setCheckable(True)
         waterfall_action.setChecked(True)
         waterfall_action.triggered.connect(self._toggle_waterfall)
         view_menu.addAction(waterfall_action)
 
         fullscreen_action = QAction("全屏", self)
-        fullscreen_action.setShortcut(QKeySequence(_key("view.fullscreen")))
+        self._bind_shortcut(fullscreen_action, "view.fullscreen")
         fullscreen_action.triggered.connect(self._toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
 
@@ -1256,7 +1306,7 @@ class MainWindow(QMainWindow):
         # 避免在输入框里按 A 也切图。
         all_sky_action = QAction("全天模式（160°）", self)
         all_sky_action.setCheckable(True)
-        all_sky_action.setShortcut(QKeySequence(_key("view.all_sky")))
+        self._bind_shortcut(all_sky_action, "view.all_sky")
         all_sky_action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
         all_sky_action.setToolTip(
             "天空视图立体投影全天模式（视场 160°）；视图内按 A 切换，Esc 先退全天")
@@ -1266,7 +1316,7 @@ class MainWindow(QMainWindow):
 
         # 星象仪模式：顶层第二形态（全屏天空）。checkable 与当前形态同步。
         planetarium_action = QAction("星象仪模式", self)
-        planetarium_action.setShortcut(QKeySequence(_key("view.planetarium")))
+        self._bind_shortcut(planetarium_action, "view.planetarium")
         planetarium_action.setCheckable(True)
         planetarium_action.setToolTip(
             "切换到星象仪形态：整个天空铺满屏幕，点星即看/即听")
@@ -1275,14 +1325,12 @@ class MainWindow(QMainWindow):
         self._planetarium_action = planetarium_action
         # Esc 仅星象仪形态下生效：先关 AI 回复卡（弹层），再退出回 IDE；
         # IDE 形态不劫持 Esc（留给对话框/输入框的默认取消语义）。
-        self._planetarium_esc = QShortcut(
-            QKeySequence(_key("view.planetarium_exit")), self)
+        self._planetarium_esc = self._make_shortcut("view.planetarium_exit")
         self._planetarium_esc.activated.connect(self._on_escape)
         self._planetarium_esc.setEnabled(False)
         # Ctrl+F 找天体：同属星象仪形态，和 Esc 一起启停。IDE 形态不占用
         # Ctrl+F（那里是文本/列表的查找语义）。
-        self._planetarium_search_key = QShortcut(
-            QKeySequence(_key("planetarium.search")), self)
+        self._planetarium_search_key = self._make_shortcut("planetarium.search")
         self._planetarium_search_key.activated.connect(
             self._open_planetarium_search)
         self._planetarium_search_key.setEnabled(False)
@@ -1291,21 +1339,21 @@ class MainWindow(QMainWindow):
         tools_menu = menubar.addMenu("工具(&T)")
 
         sweep_action = QAction("FM 扫频找台", self)
-        sweep_action.setShortcut(QKeySequence(_key("tools.sweep")))
+        self._bind_shortcut(sweep_action, "tools.sweep")
         sweep_action.triggered.connect(self._start_sweep)
         sweep_action.setEnabled(False)  # 无设备时置灰，连接后启用
         self._sweep_action = sweep_action
         tools_menu.addAction(sweep_action)
 
         record_action = QAction("开始/停止录音", self)
-        record_action.setShortcut(QKeySequence(_key("tools.record")))
+        self._bind_shortcut(record_action, "tools.record")
         record_action.triggered.connect(self._toggle_record)
         tools_menu.addAction(record_action)
 
         tools_menu.addSeparator()
 
         ntrip_action = QAction("NTRIP 设置", self)
-        ntrip_action.setShortcut(QKeySequence(_key("tools.ntrip")))
+        self._bind_shortcut(ntrip_action, "tools.ntrip")
         ntrip_action.triggered.connect(self._open_ntrip_dialog)
         tools_menu.addAction(ntrip_action)
 
@@ -1313,7 +1361,7 @@ class MainWindow(QMainWindow):
 
         # 真实串口 GNSS：手动选择串口号/波特率后打开 NMEA 流
         gnss_action = QAction("连接 GNSS...", self)
-        gnss_action.setShortcut(QKeySequence(_key("tools.gnss_connect")))
+        self._bind_shortcut(gnss_action, "tools.gnss_connect")
         gnss_action.triggered.connect(self._open_gnss_dialog)
         tools_menu.addAction(gnss_action)
 
@@ -1346,7 +1394,7 @@ class MainWindow(QMainWindow):
         tools_menu.addSeparator()
 
         about_action = QAction("关于 MBDSDR", self)
-        about_action.setShortcut(QKeySequence(_key("tools.about")))
+        self._bind_shortcut(about_action, "tools.about")
         about_action.triggered.connect(self._show_about)
         tools_menu.addAction(about_action)
 
@@ -1368,7 +1416,7 @@ class MainWindow(QMainWindow):
 
         # 全局命令面板：一个搜索框定位菜单命令/页签/能力/快捷键。
         palette_action = QAction("命令面板", self)
-        palette_action.setShortcut(QKeySequence(_key("help.command_palette")))
+        self._bind_shortcut(palette_action, "help.command_palette")
         palette_action.setToolTip(
             "用一个搜索框找到菜单命令、面板页签、能力和快捷键；"
             "想不起入口在哪时按 Ctrl+K")
@@ -1461,7 +1509,7 @@ class MainWindow(QMainWindow):
 
         self.layout_save_btn = QPushButton("保存")
         self.layout_save_btn.setMinimumHeight(28)
-        self.layout_save_btn.setShortcut(QKeySequence(_key("layout.save")))
+        self._bind_shortcut(self.layout_save_btn, "layout.save")
         self.layout_save_btn.setToolTip("把当前布局（页签顺序/三栏比例/面板可见性）存为自定义预设")
         self.layout_save_btn.clicked.connect(self._on_save_layout)
 
@@ -1475,7 +1523,7 @@ class MainWindow(QMainWindow):
         # 多 VFO：新建 VFO 按钮（在当前频谱中心建一个次听 VFO）
         self.new_vfo_btn = QPushButton("+ VFO")
         self.new_vfo_btn.setMinimumHeight(28)
-        self.new_vfo_btn.setShortcut(QKeySequence(_key("vfo.new")))
+        self._bind_shortcut(self.new_vfo_btn, "vfo.new")
         self.new_vfo_btn.setToolTip("在当前频谱中心新建一个 VFO（次听）")
         self.new_vfo_btn.clicked.connect(self._on_new_vfo_button)
         toolbar.addWidget(self.new_vfo_btn)
@@ -1507,7 +1555,7 @@ class MainWindow(QMainWindow):
         self.toolbar_mute_btn = QPushButton("静音")
         self.toolbar_mute_btn.setMinimumHeight(28)
         self.toolbar_mute_btn.setCheckable(True)
-        self.toolbar_mute_btn.setShortcut(QKeySequence(_key("vfo.mute")))
+        self._bind_shortcut(self.toolbar_mute_btn, "vfo.mute")
         self.toolbar_mute_btn.toggled.connect(self._on_toolbar_mute_toggled)
         toolbar.addWidget(self.toolbar_mute_btn)
 
@@ -1531,7 +1579,7 @@ class MainWindow(QMainWindow):
         # 漂移处理（AGENTS.md §2：文档与实现掰腕子算 bug）。
         self.replay_btn = QPushButton("回放")
         self.replay_btn.setMinimumHeight(28)
-        self.replay_btn.setShortcut(QKeySequence(_key("vfo.replay")))
+        self._bind_shortcut(self.replay_btn, "vfo.replay")
         self.replay_btn.setToolTip("选择已录制的 .iq 文件进行离线回放")
         self.replay_btn.clicked.connect(self._replay_recording)
         toolbar.addWidget(self.replay_btn)
@@ -1651,8 +1699,8 @@ class MainWindow(QMainWindow):
         if hasattr(self.spectrum, "bookmark_activated"):
             self.spectrum.bookmark_activated.connect(
                 self._on_bookmark_activated)
-        self._cycle_vfo_shortcut = QShortcut(
-            QKeySequence(_key("vfo.cycle")), self, self._on_cycle_vfo)
+        self._cycle_vfo_shortcut = self._make_shortcut("vfo.cycle")
+        self._cycle_vfo_shortcut.activated.connect(self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
         # 星象仪形态退出时瀑布归位用的布局句柄（reparent 往返，对象身份不变）。
         self._spectrum_page_layout = spectrum_layout
@@ -10311,10 +10359,30 @@ class MainWindow(QMainWindow):
         from shortcuts_panel import ShortcutsPanel
         dlg = ShortcutsPanel(self)
         dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        # 改键后立刻重设已建好的 QAction/QShortcut（含频谱局部键），不重启生效。
+        dlg.shortcuts_changed.connect(self._on_shortcuts_changed)
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
         self._shortcuts_dialog = dlg
+
+    def _on_shortcuts_changed(self) -> None:
+        """快捷键面板改完键：立刻把新键下发到所有已建控件。
+
+        失败/异常不影响面板使用——键位已经落盘，重启后照样生效；
+        这里只是让「改完马上能按」这件事成立。
+        """
+        try:
+            changed = self.apply_shortcut_overrides()
+        except Exception as e:  # noqa: BLE001 - 热更新失败不该让面板崩，但要留证
+            logger.warning("快捷键热更新失败（重启后仍生效）: %s: %s",
+                           type(e).__name__, e)
+            self.statusBar().showMessage(
+                "快捷键已保存；本次热更新失败，重启后生效", MSG_IMPORTANT)
+            return
+        self.statusBar().showMessage(
+            f"快捷键已更新（{changed} 条立即生效）" if changed
+            else "快捷键未变化", MSG_NORMAL)
 
     def _show_command_palette(self) -> None:
         """打开全局命令面板（非模态；索引由 command_palette 实时生成）。"""

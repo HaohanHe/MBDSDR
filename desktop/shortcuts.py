@@ -28,7 +28,7 @@ QShortcut 与本表是否一致——新增按钮忘了登记会直接红。
 的情形兜底。这样输入框里按 A 只会输入字母，频谱里按 A 只切 AM。
 """
 
-from typing import NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 
 class Shortcut(NamedTuple):
@@ -126,9 +126,118 @@ SHORTCUTS: Tuple[Shortcut, ...] = (
 #: id -> Shortcut（构建期按 id 取键）
 BY_ID = {s.id: s for s in SHORTCUTS}
 
+# ---------------------------------------------------------------------------
+# 用户覆写层（「设置 → 快捷键」可改键）
+# ---------------------------------------------------------------------------
+# 默认键位写在上面的表里，是**唯一事实源**；用户改过的键只叠一层覆写存在
+# QSettings（`shortcuts/<id>`）。「恢复默认」= 删掉覆写键，不改代码、不留
+# 第二份默认表——否则两份默认值迟早不一致。
+_OVERRIDES: Optional[Dict[str, str]] = None
+
+
+def _store():
+    """QSettings 句柄：与 FloatingPanel / 布局记忆同一个 node。"""
+    from PySide6.QtCore import QSettings
+    return QSettings("MBDSDR", "Desktop")
+
+
+def load_overrides(force: bool = False) -> Dict[str, str]:
+    """读用户覆盖表（id -> 键序列）。损坏/未知 id 一律忽略，不抛。"""
+    global _OVERRIDES
+    if _OVERRIDES is not None and not force:
+        return _OVERRIDES
+    out: Dict[str, str] = {}
+    try:
+        st = _store()
+        st.beginGroup("shortcuts")
+        for key in st.childKeys():
+            if key not in BY_ID:
+                continue          # 旧版本遗留 id：静默丢弃，别让它复活
+            val = str(st.value(key) or "").strip()
+            if val:
+                out[key] = val
+        st.endGroup()
+    except Exception as e:  # noqa: BLE001 - 读配置失败按「没有覆写」降级，但要留证
+        import logging
+        logging.getLogger(__name__).warning(
+            "读取快捷键覆写失败（按默认键位继续）: %s: %s", type(e).__name__, e)
+    _OVERRIDES = out
+    return out
+
+
+def default_key(shortcut_id: str) -> Optional[str]:
+    """出厂键位（用于「恢复默认」按钮与差异显示）。"""
+    return BY_ID[shortcut_id].key
+
 
 def bind(shortcut_id: str) -> Optional[str]:
-    """按登记 id 取键序列；未登记的 id 直接抛 KeyError（构建期就暴露）。"""
-    return BY_ID[shortcut_id].key
+    """按登记 id 取**当前生效**键序列（覆写优先，其次出厂值）。
+
+    未登记的 id 直接抛 KeyError（构建期就暴露）。
+    """
+    entry = BY_ID[shortcut_id]
+    overrides = load_overrides()
+    if shortcut_id in overrides:
+        return overrides[shortcut_id]
+    return entry.key
+
+
+def is_overridden(shortcut_id: str) -> bool:
+    return shortcut_id in load_overrides()
+
+
+def set_override(shortcut_id: str, key: Optional[str]) -> None:
+    """写入一条覆写；``key`` 为空 = 取消绑定（用户主动解绑）。"""
+    if shortcut_id not in BY_ID:
+        raise KeyError(shortcut_id)
+    key = (key or "").strip()
+    st = _store()
+    st.beginGroup("shortcuts")
+    if key:
+        st.setValue(shortcut_id, key)
+    else:
+        st.remove(shortcut_id)
+    st.endGroup()
+    st.sync()
+    load_overrides(force=True)
+
+
+def clear_override(shortcut_id: str) -> None:
+    """恢复某条出厂键位。"""
+    set_override(shortcut_id, None)
+    # set_override 写空串等价于删除；这里再显式清一次缓存，语义更直白
+    load_overrides(force=True)
+
+
+def clear_all_overrides() -> None:
+    st = _store()
+    st.beginGroup("shortcuts")
+    st.remove("")           # 清空该 group 下全部键
+    st.endGroup()
+    st.sync()
+    load_overrides(force=True)
+
+
+def conflicts(overrides: Optional[Dict[str, str]] = None) -> List[Tuple[str, str, str]]:
+    """同一 scope 内的键位冲突：返回 [(scope, 键序列, id 甲, id 乙)...] 的简化表。
+
+    只查同 scope —— 跨 scope 同键是**设计允许**的（见文件顶部「焦点在哪，
+    局部优先」：A 归全天模式，频谱获焦时归 AM）。
+    没配键（None/空）的动作不参与，避免「多个解绑」被算成冲突。
+    """
+    ov = load_overrides() if overrides is None else overrides
+    seen: Dict[Tuple[str, str], str] = {}
+    out: List[Tuple[str, str, str]] = []
+    for s in SHORTCUTS:
+        key = (ov.get(s.id, s.key) or "").strip()
+        if not key:
+            continue
+        norm = key.upper().replace(" ", "")
+        slot = (s.scope, norm)
+        if slot in seen:
+            out.append((s.scope, key, seen[slot], s.id))
+        else:
+            seen[slot] = s.id
+    return out
 
 
