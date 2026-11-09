@@ -165,7 +165,11 @@
 7. **入场「展开」**：视场由 160° 收束到 100° + 暗适应（显示门限由 2 等放开到当前 FOV 门限），
    星按真实星等依次浮现——不是星从中心飞散。
 8. **可见判据（同一套门）**：视锥/地平门 + 白天整层消隐 + 大气消光 +
-   Bortle 基线 + FOV 视觉适应门限（**设计项，未验证**，非望远镜口径增益）。
+   极限星等（**内核事实源**：`skyengine/stars.py` Bortle 裸眼基线 + `star_catalog.py`
+   FOV 渲染 LOD 增益，`14-astro-frame.js` 逐式镜像、`gen_limit_mag_golden.py` +
+   `limit_mag_selftest.js` 跨语言钉扎 1e-12 等；前端 depthCap = 星表截断 7.5）。
+   LOD 增益非望远镜口径增益；完整天空亮度→极限星等光度学模型仍未做（内核 limitations L24）；
+   入场暗适应淡入是 Web 呈现层。
 9. **选中指针**：2D 逐帧重投影，2 秒呼吸；摄像机锁星后天球在背后转、星在画面中心静止。
 
 反投影 `unproject()` 支持 **grab-the-sky**（按下点钉在光标下）与 **zoom-to-cursor**。

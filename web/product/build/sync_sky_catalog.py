@@ -33,7 +33,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from paths import ROOT, REPO
 HYG_CSV = ROOT / "data/hygdata_v41.csv"
-MAG_CUTOFF = 7.5          # 肉眼极限 6.5 再留 1 等，供窄视场视觉适应门限使用
+MAG_CUTOFF = 7.5          # 裸眼基线 6.5 + 内核 LOD 增益上限 1.5 = 8.0，随仓截断取 7.5（窄视场封顶）
 
 STAR_FILES = [
     ("BRIGHT_STARS", REPO / "mbdsdr_ai/skyengine/stars.py"),
@@ -288,6 +288,17 @@ def main() -> None:
                            "渲染星群（V≤7.5）实测 worst 残差 0.35″（Lalande 21185 @2051，"
                            "权威值见 proper-motion-golden.json meta.worstResidualArcsec）",
         },
+        "limitingMagnitude": {
+            "source": "内核事实源 mbdsdr_ai/skyengine/stars.py::naked_eye_limit_mag "
+                      "+ star_catalog.py::detail_gain_mag / limit_magnitude（唯一权威，禁同式副本）",
+            "baseline": "Bortle 裸眼极限 6.5-0.35·max(0,int(b)-3)（Stellarium StelSkyDrawer 同语义）",
+            "fovLod": "detail_gain=clamp(0.5·log2(30/fov),0,1.5)：fov>=30 恒 0、永不为负；"
+                      "渲染 LOD 经验式（放大露暗星），非光度学/望远镜口径增益",
+            "webDepthCap": "前端 MAG_CAP=meta.magMax（随仓 HYG 截断 7.5）作 depthCap；"
+                           "内核默认 cap 是其全星表深度 9.0",
+            "pinning": "14-astro-frame.js 逐式镜像；build/gen_limit_mag_golden.py 直接 import 内核真值，"
+                       "tests/limit_mag_selftest.js 分量/合成紧钉扎 1e-12 等",
+        },
         "repoSource": "MBDSDR mbdsdr_ai/skyengine/{stars,constellations}.py · "
                       "mbdsdr_ai/data/dso_catalog.json · mbdsdr_ai/data/*_culture.json",
         "dsoSource": dso_meta,
@@ -304,8 +315,10 @@ def main() -> None:
             "坐标链：已接仓库 celestial_geometry 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST（14-astro-frame.js，跨语言金标准对拍）；恒星自行已接 HYG 实测 pmra/pmdec（线性近似，skyfield 严格空间运动对拍，渲染星群实测 worst 残差 0.35″@2051）；章动非完整 77 项、忽略 ΔT/折射/站址视差",
             "恒星自行用线性 RA/Dec 漂移近似（标准星象仪显示口径），忽略透视加速度/视差长期项；渲染星群（V≤7.5）对 skyfield 严格解实测 worst 残差 0.35″（Lalande 21185 @2051）、2026 历元 <0.1″；Barnard's/Kapteyn's（V>7.5）不在渲染星表故未抽样；不用于毫角秒级定轨",
             "仓库岁差矩阵在 J2000 留有约 5.3 角秒常数项旋转（zeta_A/z_A 常数项 + rot_z 负角约定），未归一化；对 UI 可忽略",
-            "天空亮度→极限星等：原仓库 limitations L24 明确未做；"
-            "Web 的 FOV 相关门限是自研显示门限（设计项，未验证），非望远镜口径增益",
+            "极限星等基线 + FOV 渲染 LOD 已接内核事实源（skyengine stars/star_catalog，"
+            "14-astro-frame.js 镜像 + 跨语言金标准钉扎 1e-12 等）；但完整天空亮度→极限星等"
+            "光度学模型（月相/晨昏/实际天光表面亮度）原仓库 limitations L24 明确未做，产品同样未做；"
+            "LOD 增益非望远镜口径增益，入场暗适应淡入是 Web 呈现层",
             "银河图层：原仓库 L25/L28 无数据未接入，产品保持诚实空态",
             "DSO 形态/表面亮度：原仓库 L26 明确不做还原，仅类型符号",
             "TimeEngine 接线：Web 离线用本地模拟时刻，未接 new_spacetime.TimeEngine",
@@ -389,7 +402,8 @@ def main() -> None:
         "星位一帧不动，星座形状与角距离守恒。",
         "- 缩放改 `fov_deg`，不做相机推拉、不沿半径平移星点。",
         "- 星等→半径/亮度按 Pogson 定律 gamma 近似；B-V→色温近似；地平附近大气消光。",
-        "- 可见判据（同一套门）：视锥/地平门 + 白天整层门 + 消光 + Bortle 基线 + FOV 视觉适应门限。",
+        "- 可见判据（同一套门）：视锥/地平门 + 白天整层门 + 消光 + 极限星等"
+        "（内核事实源：Bortle 裸眼基线 + FOV 渲染 LOD 增益，跨语言钉扎；前端 depthCap=星表截断）。",
         "- 银河：**无数据·不提供**，不画装饰带（原仓库 limitations L25/L28）。",
         "",
         "## DSO 换源（2026-11-05 事实源漂移）",

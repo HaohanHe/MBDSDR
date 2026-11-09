@@ -345,6 +345,31 @@ try {
       if (drift < 1e-6) errors.push(`B7: 命名星未推进 drift=${drift}（自行未生效）`);
     }
   }
+
+  // B8：极限星等集成钉扎——CX.limitMag 必须等于内核事实源（金标准 limitWeb，
+  //     前端 depthCap=MAG_CAP）。分量级跨语言钉扎在 limit_mag_selftest.js；
+  //     这里钉扎集成层接线（委托 + MAG_CAP），并守卫广角不得负漂移。
+  {
+    const lg = JSON.parse(fs.readFileSync(path.join(ROOT, "build/limit-mag-golden.json"), "utf8"));
+    const cap = CX.MAG_CAP;
+    if (Math.abs(cap - lg.meta.webDepthCap) > 1e-9)
+      errors.push(`B8: 前端 MAG_CAP=${cap} 与金标准 webDepthCap=${lg.meta.webDepthCap} 漂移`);
+    const refFov = lg.meta.kernelConstants.DETAIL_REF_FOV_DEG;
+    let worst = 0;
+    for (const c of lg.cases) {
+      const got = CX.limitMag(c.fov, c.bortle);
+      const err = Math.abs(got - c.limitWeb);
+      if (err > worst) worst = err;
+      if (!isFinite(err) || err > 1e-9)
+        errors.push(`B8: limitMag(${c.fov},${c.bortle})=${got} vs 内核 ${c.limitWeb} err=${err}`);
+      if (c.fov >= refFov) {
+        const expect = Math.min(cap, CX.astro.nakedEyeLimitMag(c.bortle));
+        if (Math.abs(got - expect) > 1e-9)
+          errors.push(`B8: 广角 fov=${c.fov} 极限 ${got} != 裸眼基线 ${expect}（负漂移回潮）`);
+      }
+    }
+    if (worst > 1e-9) errors.push(`B8: 极限星等集成钉扎 worst=${worst} > 1e-9`);
+  }
 } catch (e) { errors.push(`REGRESSION: ${e.stack}`); }
 
 /* 阶段 C 前端契约：宿主接确认通道时，写工具回执必须带 canConfirm，

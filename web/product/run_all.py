@@ -30,6 +30,7 @@ STEPS = [
     ("卫星轨迹同步", [PY, "build/sync_sat_tracks.py"]),
     ("天文框架金标准", [PY, "build/gen_astro_golden.py"]),
     ("恒星自行金标准", [PY, "build/gen_proper_motion_golden.py"]),
+    ("极限星等金标准", [PY, "build/gen_limit_mag_golden.py"]),
     ("骨架与样式", [PY, "build/scaffold.py"]),
     ("文档/wiki 生成", [PY, "build/gen_docs.py"]),
     ("单文件构建", [PY, "build/build.py"]),
@@ -37,6 +38,7 @@ STEPS = [
     ("性能基准", [NODE or "node", "tests/perf_bench.js"]),
     ("天文框架跨语言自检", [NODE, "tests/astro_selftest.js"] if NODE else None),
     ("恒星自行跨语言自检", [NODE, "tests/proper_motion_selftest.js"] if NODE else None),
+    ("极限星等跨语言自检", [NODE, "tests/limit_mag_selftest.js"] if NODE else None),
     ("天球投影自检", [NODE, "tests/proj_selftest.js"] if NODE else None),
     ("无头运行时", [NODE, "tests/verify_runtime.js"] if NODE else None),
     ("视觉夹具", [PY, "tests/make_visual_fixture.py"]),
@@ -152,8 +154,13 @@ def main() -> int:
         "示意曲线（非实测地形、非照片），UI 已明写「示意轮廓」，不冒充实拍。",
         "- **太阳位置是低精度解析式**（Meeus 简化，约 ±0.5°）：只用于昼夜/晨昏蒙影判定，"
         "不用于日出时刻表或日食计算。",
-        "- **FOV→极限星等**是自研视觉适应显示门限（设计项，未验证），"
-        "非望远镜口径增益，也不代表该时刻肉眼可见下限。",
+        "- **极限星等已接内核事实源**：Bortle 裸眼基线（`skyengine/stars.py::naked_eye_limit_mag`，"
+        "6.5-0.35·max(0,b-3)，Stellarium StelSkyDrawer 同语义）+ FOV 渲染 LOD 增益"
+        "（`star_catalog.py::detail_gain_mag`，clamp(0.5·log2(30/fov),0,1.5)，广角恒 0、永不为负），"
+        "由 `build/gen_limit_mag_golden.py`（直接 import 内核真值）与 `tests/limit_mag_selftest.js` "
+        "跨语言紧钉扎（分量/合成 1e-12 等）；前端以随仓 HYG 截断 MAG_CAP=7.5 作 depthCap。"
+        "**仍未做**：完整天空亮度→极限星等光度学模型（月相/晨昏/实际天光表面亮度，内核 limitations L24）；"
+        "入场暗适应淡入是 Web 呈现层。LOD 增益非望远镜口径增益，也不代表该时刻肉眼可见下限。",
         "- **桌面端未联调**：未与 Qt6 天空模式 `rf_sky_view.py` 做端到端对拍；"
         "设计令牌与时间倍率为代码事实源同步，非运行时连线。",
         "- **截图为 headless 静态态**：用于版式验收，不代表真机交互或信号接收结果。",

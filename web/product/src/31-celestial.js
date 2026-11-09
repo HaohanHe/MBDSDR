@@ -111,7 +111,9 @@
 
   /* 按星等升序的索引：extinction >= 0，所以 mag > 极限星等 L 的星**必然**
      不可见。按亮度排好后循环可以直接 break，不必为暗星做任何三角运算。
-     FOV 越大 L 越小（暗适应），广角下可跳过 70%+ 的星表（体检 P1）。 */
+     L = 内核极限星等（裸眼基线 + FOV 渲染 LOD 增益，封顶星表深度）：广角
+     （fov>=30）L 停在裸眼基线，星表暗尾（mag>L）整段跳过；窄视场 L 抬高、
+      magnitude 门放宽，改由视锥早筛剔除画外星（体检 P1）。 */
   const ORDER = new (N > 65535 ? Uint32Array : Uint16Array)(N);
   {
     const idx = Array.from({ length: N }, (_, i) => i);
@@ -373,11 +375,20 @@
   }
 
   /* ---------- 可见判据 ---------- */
-  const LM = { kFov: 1.85, fovRef: 60, lMin: 3.2, kExt: 0.2, maxExt: 3.5 };
+  /* 消光常量与内核 stars.py 同口径（k=0.2 晴朗海平面、Δm 上限 3.5、仰角下限 0.5°）。 */
+  const LM = { kExt: 0.2, maxExt: 3.5 };
+  /* 极限星等 = 内核事实源（14-astro-frame.limitMagnitude，逐式镜像
+     skyengine.stars.naked_eye_limit_mag + star_catalog.detail_gain_mag/limit_magnitude，
+     跨语言钉扎 build/gen_limit_mag_golden.py + tests/limit_mag_selftest.js）。
+     Bortle 裸眼基线 6.5-0.35·max(0,b-3)（Stellarium 同语义）+ FOV 渲染 LOD 增益
+     clamp(0.5·log2(30/fov),0,1.5)：广角（fov>=30）增益为 0、保持裸眼基线，
+     窄视场才逐层露暗星。旧版自研 1.85·log10(60/fov) 在 fov>60 时变负、凭空压低
+     极限（广角比裸眼还少星），窄视场增益又过猛——现已统一到内核口径。
+     前端随仓 HYG 截断 MAG_CAP（=CAT.meta.magMax，7.5 等）作为 depthCap 传入；
+     内核默认 cap 是其全星表深度 9.0。这不是望远镜口径增益，也不是完整天空亮度
+     光度学模型（月相/晨昏/实际天光表面亮度仍未建模，内核 limitations L24）。 */
   function limitMag(fovDeg, bortle) {
-    const base = 6.5 - 0.35 * Math.max(0, (bortle || 3) - 3);
-    const l = base + LM.kFov * Math.log10(LM.fovRef / Math.max(1, fovDeg));
-    return clamp(l, LM.lMin, MAG_CAP);
+    return ASTRO.limitMagnitude(fovDeg, bortle, MAG_CAP);
   }
   /* sin(asin(z)) === z：eachStar 已经算出了单位向量的 z 分量（= sin alt），
      直接传进来即可，不必 asin 求角度再 sin 回去（体检 P1）。 */
@@ -388,6 +399,8 @@
   function extinction(altDeg) {
     return extinctionFromSin(Math.sin(altDeg * D2R));
   }
+  /* 入场暗适应淡入是 Web 呈现层（不是内核）：intro 0→1 时显示门限由 2 等
+     放开到当前 FOV 极限星等，星按真实星等依次浮现。 */
   function effectiveLimit(fovDeg, bortle) {
     const L = limitMag(fovDeg, bortle);
     return 2.0 + (L - 2.0) * V.intro;

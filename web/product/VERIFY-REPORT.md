@@ -1,8 +1,8 @@
 # MBDSDR Web 产品 · 一键复现验收报告
 
-- 生成时间：2026-11-09T11:59:21
+- 生成时间：2026-11-09T17:19:36
 - 事实源：D:\mbdsdr\MBDSDR（只读，未修改）
-- 单文件产物：`dist/index.html` 1235458 bytes · sha256 `8cb6dd4874bdb41d8d501b926aa750260a6e7b5c7b5aedcc809a173f543b9acb`
+- 单文件产物：`dist/index.html` 1241611 bytes · sha256 `dcbcf9f50bd84c368037f9c68f6200db574e11a95487348dd9f9df45e916bd52`
 - 工具域 14 个 · 工具→域映射 82 条 · 写工具模式 82 条
 - ControlHub 端口 `50732` · 时间倍率 5 档 · 中性站点 0.0, 0.0（trusted=False）
 - **全天星表 HYG v4.1**：25,792 颗（V ≤ 7.5），J2000，CC BY-SA 4.0 · sha256 `eb086d463456ba8c…`
@@ -18,16 +18,18 @@
 | 卫星轨迹同步 | PASS | `[sat-tracks] 6 sats x 481 samples @ 90s, TLE 2026-09-25, sgp4 2.27, frame J2000 ICRS geocentric RA/Dec (degrees, x100 integer encoded), js 33290 bytes` |
 | 天文框架金标准 | PASS | `[astro-golden] 24 cases -> D:\mbdsdr\MBDSDR\web\product\build\astro-golden.json (127780 bytes), from repo MBDSDR` |
 | 恒星自行金标准 | PASS | `[pm-golden] 53 stars × 4 epochs = 212 cases -> proper-motion-golden.json (73819 bytes) / [pm-golden] worst residual 0.3465" (Lalande 21185) vs tolerance 2.0"; skyfield 1.54` |
+| 极限星等金标准 | PASS | `[limit-mag-golden] 19 fov × 15 bortle = 285 cases -> limit-mag-golden.json (43705 bytes) / [limit-mag-golden] kernel depth 9.0 / web depth 7.5; naked_eye(3)=6.5, naked_eye(9)=4.4, ` |
 | 骨架与样式 | PASS | `style.css bytes: 24517 / index.html bytes: 9547 / scripts: 00-core.js, 05-repo-facts.js, 10-data.js, 12-sky-catalog.js, 13-sat-tracks.js, 14-astro-frame.js, 20-i18n.js, 31-celestia` |
 | 文档/wiki 生成 | PASS | `generated: 14 domain pages + 3 planned pages, 3 scenarios, glossary, faq, wiki index, README.en/ja` |
 | 单文件构建 | PASS | `scripts: 00-core.js, 05-repo-facts.js, 10-data.js, 12-sky-catalog.js, 13-sat-tracks.js, 14-astro-frame.js, 20-i18n.js, 31-celestial.js, 30-sky.js, 40-workbench.js, 50-dialog.js, 70` |
 | 静态守卫 | PASS | `WARN [i18n] zh 反查冲突：lang.current / lang.zhLabel（后者胜出，需人工确认译文可接受） / WARN [i18n] zh 反查冲突：cap.stack.name / pro.stack（后者胜出，需人工确认译文可接受） / WARN [i18n] zh 反查冲突：sidebar.docs / docs.openTit` |
-| 性能基准 | PASS | `{"stars":25792,"starProjection":[{"fov":22,"ms":0.751,"stars":196},{"fov":60,"ms":0.917,"stars":425},{"fov":100,"ms":1.1,"stars":704},{"fov":158,"ms":1.062,"stars":680}],"landscape` |
+| 性能基准 | PASS | `{"stars":25792,"starProjection":[{"fov":22,"ms":0.375,"stars":92},{"fov":60,"ms":0.796,"stars":425},{"fov":100,"ms":1.606,"stars":1080},{"fov":158,"ms":2.433,"stars":1616}],"landsc` |
 | 天文框架跨语言自检 | PASS | `astro-frame cross-language OK · 24 cases / 144 vectors / worst 3.89e-16 (horizon 2461000/40.7 ra=200[2])` |
 | 恒星自行跨语言自检 | PASS | `proper-motion cross-language OK · 53 stars / 212 samples / linear pin worst 0.00e+0° () / skyfield worst 0.3466" (Lalande 21185 jd=2470000) ≤ 2"` |
+| 极限星等跨语言自检 | PASS | `limit-mag cross-language OK · 285 cases / component worst 0.00e+0 mag () / composition worst 0.00e+0 mag () ≤ 1e-12` |
 | 天球投影自检 | PASS | `horizon straight under perspective OK (spread 0.00 px over ±30° az) / horizon curved under stereographic OK (spread 28.9 px) / corners unprojectable at 158°: 4/4 / ALL PROJECTION C` |
 | 无头运行时 | PASS | `RUNTIME {"modules":14,"docs":35,"locale":"zh-CN","caps":17,"i18nKeys":272,"textNodes":84,"framesRendered":37,"edgeUnproject":8558} / RESULT: RUNTIME-OK ✅` |
-| 视觉夹具 | PASS | `fixture: D:\mbdsdr\MBDSDR\web\product\tests\visual_check.html 1132720 bytes / standalone fixtures: visual_{sky,pro,ja,en,docs,ai,caps}.html / fixture inject script: node --check OK` |
+| 视觉夹具 | PASS | `fixture: D:\mbdsdr\MBDSDR\web\product\tests\visual_check.html 1137194 bytes / standalone fixtures: visual_{sky,pro,ja,en,docs,ai,caps}.html / fixture inject script: node --check OK` |
 
 ## 视觉态
 
@@ -54,7 +56,7 @@
 - **星表数据是真的**（HYG v4.1 下载 + SHA256）；坐标链已接仓库 `celestial_geometry.py` 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST，由 `build/gen_astro_golden.py` 与 `tests/astro_selftest.js` 跨语言对拍（3.3e-16）。**恒星自行已接 HYG 实测 pmra/pmdec**（线性 RA/Dec 近似推进到当前历元），由 `build/gen_proper_motion_golden.py`（skyfield 严格空间运动，独立无星历基准）与 `tests/proper_motion_selftest.js` 对拍：JS↔Python 线性紧钉扎 1e-9°，对 skyfield 残差实测 worst 记录于金标准 meta（显示级 ≤2″，亚像素）；线性近似忽略透视加速度/视差长期项，章动非完整 77 项，忽略 ΔT/大气折射/站址视差。
 - **地景是示意轮廓**：仓库与产品都没有真实 360° 全景数据，地平高度场是确定性示意曲线（非实测地形、非照片），UI 已明写「示意轮廓」，不冒充实拍。
 - **太阳位置是低精度解析式**（Meeus 简化，约 ±0.5°）：只用于昼夜/晨昏蒙影判定，不用于日出时刻表或日食计算。
-- **FOV→极限星等**是自研视觉适应显示门限（设计项，未验证），非望远镜口径增益，也不代表该时刻肉眼可见下限。
+- **极限星等已接内核事实源**：Bortle 裸眼基线（`skyengine/stars.py::naked_eye_limit_mag`，6.5-0.35·max(0,b-3)，Stellarium StelSkyDrawer 同语义）+ FOV 渲染 LOD 增益（`star_catalog.py::detail_gain_mag`，clamp(0.5·log2(30/fov),0,1.5)，广角恒 0、永不为负），由 `build/gen_limit_mag_golden.py`（直接 import 内核真值）与 `tests/limit_mag_selftest.js` 跨语言紧钉扎（分量/合成 1e-12 等）；前端以随仓 HYG 截断 MAG_CAP=7.5 作 depthCap。**仍未做**：完整天空亮度→极限星等光度学模型（月相/晨昏/实际天光表面亮度，内核 limitations L24）；入场暗适应淡入是 Web 呈现层。LOD 增益非望远镜口径增益，也不代表该时刻肉眼可见下限。
 - **桌面端未联调**：未与 Qt6 天空模式 `rf_sky_view.py` 做端到端对拍；设计令牌与时间倍率为代码事实源同步，非运行时连线。
 - **截图为 headless 静态态**：用于版式验收，不代表真机交互或信号接收结果。
 - 许可证：UI 与文档 MIT；机制学习自 Stellarium Web Engine（AGPL-3.0），**未引入其任何代码**。

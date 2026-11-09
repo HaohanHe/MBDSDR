@@ -202,10 +202,46 @@
     return { ra, dec };
   }
 
+  /* ---------- 极限星等模型（事实源：内核 skyengine，逐式镜像 + 跨语言钉扎） ----------
+   * 三函数与 mbdsdr_ai/skyengine/stars.py::naked_eye_limit_mag 及
+   * star_catalog.py::detail_gain_mag / limit_magnitude 逐字同构：
+   *   nakedEyeLimitMag(b) = 6.5 - 0.35·max(0, trunc(b)-3)  （Stellarium StelSkyDrawer 同语义）
+   *   detailGainMag(fov)  = clamp(0.5·log2(30/fov), 0, 1.5)（fov>=30 → 0，永不为负）
+   *   limitMagnitude(fov,b,depthCap) = min(depthCap, nakedEye + detailGain)
+   * detailGain 是**渲染 LOD 经验式**（放大后像素张角变小、暗星不再挤成一团，
+   * 才逐层露出更暗的星），不是光度学模型、不是望远镜口径增益。
+   * depthCap 默认 = 内核 CATALOG_DEPTH_MAG 9.0（其全星表深度）；前端随仓 HYG
+   * 截断较浅（MAG_CAP=7.5），由调用方 31-celestial.js 传入自己的 cap。
+   * 内核 int(bortle) 向零取整 → JS Math.trunc 同语义。
+   * build/gen_limit_mag_golden.py 取内核真值，tests/limit_mag_selftest.js 紧钉扎
+   * （分量 1e-12、合成 default-depth 与内核 limit_magnitude 逐点相等）。 */
+  const DEFAULT_BORTLE = 3;
+  const NAKED_EYE_LIMIT_SCALE = 6.5;
+  const NAKED_EYE_BORTLE_SLOPE = 0.35;
+  const DETAIL_REF_FOV_DEG = 30.0;
+  const MAX_DETAIL_GAIN_MAG = 1.5;
+  const CATALOG_DEPTH_MAG = 9.0;
+  function nakedEyeLimitMag(bortle = DEFAULT_BORTLE) {
+    return NAKED_EYE_LIMIT_SCALE
+      - NAKED_EYE_BORTLE_SLOPE * Math.max(0, Math.trunc(bortle) - 3);
+  }
+  function detailGainMag(fovDeg) {
+    const fov = Math.max(1e-6, Number(fovDeg));
+    if (fov >= DETAIL_REF_FOV_DEG) return 0.0;
+    const gain = 0.5 * Math.log2(DETAIL_REF_FOV_DEG / fov);
+    return Math.min(MAX_DETAIL_GAIN_MAG, Math.max(0.0, gain));
+  }
+  function limitMagnitude(fovDeg, bortle = DEFAULT_BORTLE, depthCap = CATALOG_DEPTH_MAG) {
+    return Math.min(depthCap, nakedEyeLimitMag(bortle) + detailGainMag(fovDeg));
+  }
+
   MB.astro = {
     J2000, EPS0, ARCSEC, Q, QT, mul, transpose, matVec,
     gmstDeg, precessionMatrix, obliquity, nutationAngles, nutationMatrix,
     frameMatrices, propagateProperMotion, MAS_PER_DEG,
+    nakedEyeLimitMag, detailGainMag, limitMagnitude,
+    DEFAULT_BORTLE, NAKED_EYE_LIMIT_SCALE, NAKED_EYE_BORTLE_SLOPE,
+    DETAIL_REF_FOV_DEG, MAX_DETAIL_GAIN_MAG, CATALOG_DEPTH_MAG,
     meta: {
       source: "mbdsdr_ai/celestial_geometry.py (MIT, repo-owned)",
       precession: "IAU 2006 / P03 (Vondrak-Capitaine 2011 polynomial)",
@@ -214,11 +250,17 @@
       basis: "frontend ICRS (x=vernal equinox, y=RA 6h, z=NCP); repo basis via Q",
       properMotion: "HYG v4.1 pmra/pmdec (mas/yr) linear RA/Dec drift; "
         + "cross-checked vs skyfield 1.54 rigorous space motion (<=0.35\" at 2026, <=1.5\" J2000->2051)",
+      limitingMagnitude: "kernel fact source: skyengine/stars.py::naked_eye_limit_mag "
+        + "(6.5-0.35*max(0,trunc(bortle)-3), Stellarium StelSkyDrawer semantics) + "
+        + "star_catalog.py::detail_gain_mag (clamp(0.5*log2(30/fov),0,1.5), render LOD not photometry) "
+        + "/ limit_magnitude (min(depthCap, sum)); cross-language pinned by "
+        + "build/gen_limit_mag_golden.py + tests/limit_mag_selftest.js",
       notVerified: [
         "stellar proper motion uses linear RA/Dec approximation (ignores perspective acceleration / parallax secular terms); not for mas-level astrometry",
         "no atmospheric refraction, parallax or UT1-UTC correction",
         "repo precession polynomial leaves a ~5.3 arcsec constant rotation at J2000 (zeta_A/z_A constant terms + rot_z sign convention); not normalized",
         "nutation is a 6-term abridged model, no mas-level accuracy claim",
+        "limiting magnitude is the kernel Bortle baseline + FOV render-LOD gain (NOT a full sky-brightness photometric model: moon phase / twilight / actual sky surface brightness still unmodeled, kernel limitations L24); the intro dark-adaptation fade is a web presentation layer, not kernel",
         "not suitable for precise pointing / pass prediction"
       ]
     }

@@ -482,6 +482,46 @@ print(f"[9.6.1] 恒星自行：HYG 实测 pmra/pmdec（6 元素星数组）/ 线
       f"eachStar 热点不逐星重算 / 搜索锁定走推进坐标 / skyfield 独立金标准 "
       f"worst {_pm.get('worstResidualArcsec', 0):.4f}″ ≤ {_pm.get('toleranceArcsec', 0)}″")
 
+# ---------- 9.6.2 极限星等：委托内核事实源镜像 + 跨语言钉扎（纠正"自研基线"误标） ----------
+# 14-astro-frame 必须镜像内核三函数 + 常量 + 来源标注（唯一事实源，禁同式副本）。
+for _m in ("nakedEyeLimitMag", "detailGainMag", "limitMagnitude",
+           "NAKED_EYE_LIMIT_SCALE", "DETAIL_REF_FOV_DEG", "CATALOG_DEPTH_MAG",
+           "limitingMagnitude"):
+    if _m not in _astro:
+        fail(f"[lm] 14-astro-frame.js 缺内核极限星等镜像：{_m}")
+if "skyengine/stars.py" not in _astro or "star_catalog.py" not in _astro:
+    fail("[lm] 14-astro-frame.js 未标注极限星等事实源（skyengine stars/star_catalog）")
+# 31-celestial 必须委托镜像并以 MAG_CAP 作 depthCap；不得回潮自研负漂移 FOV 项。
+if "ASTRO.limitMagnitude(fovDeg, bortle, MAG_CAP)" not in _celestial:
+    fail("[lm] 31-celestial.js limitMag 未委托 ASTRO.limitMagnitude(...,MAG_CAP)")
+for _bad in ("kFov", "fovRef", "lMin"):
+    if _bad in _celestial_code:
+        fail(f"[lm] 31-celestial.js 回潮自研 FOV 极限星等项（广角负漂移）：{_bad}")
+# 跨语言金标准 + 自检必须在位，事实源是内核（不得自证），webDepthCap 与星表一致。
+_lm_golden = ROOT / "build/limit-mag-golden.json"
+_lm = {}
+if not _lm_golden.is_file():
+    fail("[lm] 缺 build/limit-mag-golden.json（先跑 build/gen_limit_mag_golden.py）")
+else:
+    _lg = json.loads(_lm_golden.read_text(encoding="utf-8"))
+    _lm = _lg["meta"]
+    if "skyengine" not in _lm.get("source", "") or "star_catalog" not in _lm.get("source", ""):
+        fail("[lm] 极限星等金标准事实源不是内核 skyengine（不得自证）")
+    if _lm.get("caseCount", 0) < 100 or not _lg.get("cases"):
+        fail("[lm] 极限星等金标准样本不足")
+    if abs(_lm.get("webDepthCap", 0) - float(meta.get("magMax", 7.5))) > 1e-9:
+        fail("[lm] 金标准 webDepthCap 与星表 magMax（前端 MAG_CAP）漂移")
+if not (ROOT / "tests/limit_mag_selftest.js").is_file():
+    fail("[lm] 缺跨语言自检 tests/limit_mag_selftest.js")
+if "gen_limit_mag_golden.py" not in _run_all or "limit_mag_selftest.js" not in _run_all:
+    fail("[lm] run_all.py 未接极限星等金标准/自检步骤")
+# 口径纠正：基线 + FOV LOD 已是内核事实源，不得再误标"自研视觉适应显示门限（设计项，未验证）"。
+if "自研视觉适应显示门限" in _run_all:
+    fail("[lm] run_all.py 仍把极限星等误标为自研设计项（基线/FOV LOD 已是内核事实源）")
+print(f"[9.6.2] 极限星等：内核 skyengine 三函数镜像（naked_eye 基线 + detail_gain LOD + limit）/ "
+      f"31-celestial 委托 MAG_CAP={meta.get('magMax', 7.5)} / 跨语言金标准 {_lm.get('caseCount', 0)} 例 / "
+      f"广角负漂移守卫 / 文档口径纠正")
+
 # ---------- 9.7 写工具确认通道（阶段 C：前端只登记意图，token 不出宿主） ----------
 _data = (SRC / "10-data.js").read_text(encoding="utf-8")
 _dialog = (SRC / "50-dialog.js").read_text(encoding="utf-8")
