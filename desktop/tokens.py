@@ -158,9 +158,12 @@ class DesignTokens:
                 "text_secondary": "#5F707A",
                 "text_disabled": "#A0A0A0",
                 "border": "#C8C0B4", "grid": "#D8D2C8",
-                "primary": "#C4845C", "accent": "#C4845C",
+                # 2026-11-09 WCAG 审计：强调色 2.79、成功色 2.46 都低于
+                # 非文本可辨门槛 3:1（图标/描边/状态点用它们时看不见边界）。
+                # 按同色相压暗到 3.10 / 3.05，色相与饱和度不动。
+                "primary": "#C4845C", "accent": "#BF7A4F",
                 "accent_hover": "#B0754E",
-                "success": "#6BA89A", "danger": "#B85C5C",
+                "success": "#599788", "danger": "#B85C5C",
                 "button": "#FFFFFF", "button_hover": "#F0EDE8",
                 "button_pressed": "#E8E4DD", "button_disabled": "#D8D2C8",
                 # 品牌橙作正文底色不足 4.5:1：文字态另取压暗档（fill 仍是原橙）
@@ -172,7 +175,9 @@ class DesignTokens:
                 "text": "#D0D0D0",
                 "text_secondary": "#9A9A9A",  # 原 #888888，4.15 → 5.22:1
                 "text_disabled": "#555555",
-                "border": "#3A3A3E", "grid": "#3A3A3E",
+                # 2026-11-09 WCAG 审计：卡片描边 1.30 低于"能看出边界"的 1.5。
+                # 提到 #44444A（on card 1.52 / on bg 1.72），明暗关系不变。
+                "border": "#44444A", "grid": "#44444A",
                 "primary": "#7A9CAC", "accent": "#D4956A",
                 "accent_hover": "#C4845C",
                 "success": "#6BA89A", "danger": "#D47070",

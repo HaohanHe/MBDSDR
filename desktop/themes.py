@@ -42,8 +42,179 @@ def get_app_font() -> QFont:
 # 主题定义
 # ============================================================================
 
+def _control_coverage_qss(c: dict) -> str:
+    """所有主题共用的「原生控件接管」样式。
+
+    2026-11-09 审计（主窗实测控件普查）：``QToolButton`` **138 个**、
+    ``QCheckBox`` 28 个、``QListView`` 42 个、``QSplitterHandle`` 11 个
+    从未被任何主题的 QSS 选中过——它们在深色主题下仍是系统自带的白底方角，
+    是「设计语言不统一」最直接的来源：同一屏里既有按 token 画的卡片，
+    也有 Qt 默认皮肤画的按钮。
+
+    这里不改任何布局与行为，只按**同一个形状语法**接管它们：
+    8px 圆角、1px 描边、hover 提亮 + 强调色描边、选中用强调色左标。
+    颜色一律从当前主题的 ``colors`` 取，缺键有兜底，因此五个主题共用一份。
+    """
+    bg = c["bg"]
+    card = c.get("card", bg)
+    text = c["text"]
+    border = c.get("border", text)
+    grid = c.get("grid", border)
+    primary = c.get("primary", text)
+    hover = c.get("button_hover", c.get("bg_alt", card))
+    pressed = c.get("button_pressed", grid)
+    button = c.get("button", card)
+    disabled = c.get("text_disabled", c.get("text_secondary", text))
+    disabled_bg = c.get("button_disabled", card)
+    secondary = c.get("text_secondary", text)
+    return f"""
+        /* ---------- 原生控件接管（工具栏/复选/列表/分隔条） ---------- */
+        QToolButton {{
+            background-color: transparent;
+            color: {text};
+            border: 1px solid transparent;
+            border-radius: 8px;
+            padding: 4px 8px;
+        }}
+        QToolButton:hover {{
+            background-color: {hover};
+            border-color: {primary};
+        }}
+        QToolButton:pressed {{
+            background-color: {pressed};
+        }}
+        QToolButton:checked {{
+            background-color: {pressed};
+            border-color: {primary};
+        }}
+        QToolButton:disabled {{
+            color: {disabled};
+            background-color: transparent;
+        }}
+        QToolButton::menu-indicator {{
+            image: none;
+            width: 0px;
+        }}
+        QCheckBox, QRadioButton {{
+            background-color: transparent;
+            color: {text};
+            spacing: 8px;
+        }}
+        QCheckBox:disabled, QRadioButton:disabled {{
+            color: {disabled};
+        }}
+        QCheckBox::indicator {{
+            width: 15px;
+            height: 15px;
+            border: 1px solid {border};
+            border-radius: 4px;
+            background-color: {button};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {primary};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {primary};
+            border-color: {primary};
+        }}
+        QCheckBox::indicator:disabled {{
+            border-color: {grid};
+            background-color: {disabled_bg};
+        }}
+        QRadioButton::indicator {{
+            width: 15px;
+            height: 15px;
+            border: 1px solid {border};
+            border-radius: 8px;
+            background-color: {button};
+        }}
+        QRadioButton::indicator:checked {{
+            border: 4px solid {primary};
+            background-color: {card};
+        }}
+        QListView, QListWidget {{
+            background-color: {card};
+            color: {text};
+            border: 1px solid {border};
+            border-radius: 8px;
+            outline: none;
+            alternate-background-color: {bg};
+        }}
+        QListView::item, QListWidget::item {{
+            padding: 6px 8px;
+            border-radius: 6px;
+            color: {text};
+        }}
+        QListView::item:hover, QListWidget::item:hover {{
+            background-color: {hover};
+        }}
+        QListView::item:selected, QListWidget::item:selected {{
+            background-color: {pressed};
+            color: {text};
+            border-left: 3px solid {primary};
+        }}
+        QListView::item:disabled, QListWidget::item:disabled {{
+            color: {secondary};
+        }}
+        QSplitter::handle {{
+            background-color: {grid};
+        }}
+        QSplitter::handle:hover {{
+            background-color: {primary};
+        }}
+        QSplitter::handle:horizontal {{
+            width: 4px;
+        }}
+        QSplitter::handle:vertical {{
+            height: 4px;
+        }}
+        QSizeGrip {{
+            background-color: transparent;
+            width: 12px;
+            height: 12px;
+        }}
+        """
+
+
+def _srgb_channel(value: int) -> float:
+    c = value / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def relative_luminance(color: str) -> float:
+    """sRGB 相对亮度（WCAG 2.1 定义）。"""
+    h = color.lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * _srgb_channel(r) + 0.7152 * _srgb_channel(g) + 0.0722 * _srgb_channel(b)
+
+
+def contrast_ratio(fg: str, bg: str) -> float:
+    """两色对比度，1.0–21.0。设计约束住在主题层，脚本与测试都从这里取。"""
+    a, b = relative_luminance(fg), relative_luminance(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _on_primary(c: dict) -> str:
+    """强调色底上该用什么颜色的文字（保证 >= 4.5:1）。
+
+    原来一律取 ``c["card"]``——浅色主题下 ``card`` 是纯白，白字压在原强调色
+    ``#C4845C`` 上只有 **3.09**（2026-11-09 审计实测），列表选中一行几乎读不出
+    字。这里按实际对比度挑第一个达标者，深浅主题共用一条规则。
+    """
+    primary = c.get("primary", c["text"])
+    for cand in ("#FFFFFF", c.get("card", "#FFFFFF"),
+                 "#1A1A1A", "#000000"):
+        if contrast_ratio(cand, primary) >= 4.5:
+            return cand
+    return "#000000"
+
+
 class Theme:
     """主题数据类。"""
+
     def __init__(self, name: str, display_name: str, colors: dict, spectrum_colors: list):
         self.name = name
         self.display_name = display_name
@@ -76,14 +247,19 @@ class Theme:
         # Link 是"橙色当文字用"：取压暗档 primary_text（fill 仍用 primary）
         palette.setColor(QPalette.Link, QColor(c.get("primary_text", c["primary"])))
         palette.setColor(QPalette.Highlight, QColor(c["primary"]))
-        palette.setColor(QPalette.HighlightedText, QColor(c["card"]))
+        # 选中行上的文字不能一律用 card：浅色主题 card 是纯白，白字压在原
+        # 强调色上只有 3.09:1（选中一行读不出来）。按实际对比度挑达标的墨色。
+        palette.setColor(QPalette.HighlightedText, QColor(_on_primary(c)))
 
         # 禁用状态
         palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor(c["text_disabled"]))
         palette.setColor(QPalette.Disabled, QPalette.Text, QColor(c["text_disabled"]))
         palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(c["text_disabled"]))
 
-        qss = self._build_qss()
+        # 主题自带的 QSS + 所有主题共用的原生控件接管。
+        # 后者必须并进同一个字符串：Qt 只认最后一次 setStyleSheet，
+        # 分两次设置会把主题自带的那份整体覆盖掉。
+        qss = self._build_qss() + _control_coverage_qss(self.colors)
         font = get_app_font()
         try:
             if (app.palette() == palette and app.font() == font
@@ -527,7 +703,18 @@ THEMES = {
 # 兼容旧配置里写死的主题 key（未知名一律回退默认主题）
 _THEME_ALIASES = {"light": "default"}
 
-DEFAULT_THEME = "default"
+# 默认主题：CarWith 深色。
+#
+# 2026-11-09 改默认（原为 "default" 浅色），依据是三条可复核的事实：
+#   1. 星象仪的天空与频谱画布**物理上必须是深色**（夜空、瀑布图都是深底）。
+#      外壳用浅色时，同一屏里必然并存两套明度体系——实测截图里右侧米白卡片
+#      直接贴着深蓝夜空，这是「设计语言不统一」最直观的来源。
+#   2. 深色主题的对比度审计全项达标；浅色主题当时有 3 项不达标
+#      （强调色 2.79、成功色 2.46、选中态白字 3.09），已在本轮修正，
+#      但修正后的浅色仍与深色画布冲突。
+#   3. 同类工具（Stellarium / SDR++ / SDR# / GQRX）默认都是深色外壳。
+# 浅色主题完整保留在主题菜单里，用户随时可切回，配置里存过就尊重用户选择。
+DEFAULT_THEME = "dark_car"
 
 
 def get_theme(name: str) -> Theme:

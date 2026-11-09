@@ -4709,7 +4709,7 @@ class MainWindow(QMainWindow):
             pass
         # 主题（恢复到上次退出时的主题；_restoring_settings 守卫下不回写）
         try:
-            self._apply_theme(str(s.get("theme", "default") or "default"))
+            self._apply_theme(str(s.get("theme", DEFAULT_THEME) or DEFAULT_THEME))
         except Exception:
             pass
         self._restoring_settings = False
@@ -11827,9 +11827,9 @@ class MainWindow(QMainWindow):
             self._apply_observer_location()
             # 恢复主题：权威源是 settings；gui_config 旧 theme 仅在 settings
             # 仍为默认时迁移（避免双写导致改了重启回退）。
-            theme = str(self.settings.get("theme", "default") or "default")
-            legacy_theme = config.get("theme", "default")
-            if theme == "default" and legacy_theme and legacy_theme != "default":
+            theme = str(self.settings.get("theme", DEFAULT_THEME) or DEFAULT_THEME)
+            legacy_theme = config.get("theme", "")
+            if theme == DEFAULT_THEME and legacy_theme and legacy_theme != DEFAULT_THEME:
                 theme = legacy_theme
                 self.settings.set("theme", theme)
             if theme != self._current_theme:

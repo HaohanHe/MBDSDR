@@ -43,7 +43,12 @@ def test_every_theme_color_comes_from_tokens():
 
 def test_figma_theme_is_switchable_but_not_default():
     assert "figma" in THEMES, "figma 主题未注册"
-    assert DEFAULT_THEME == "default", "默认主题被强制替换了"
+    # 默认主题必须是登记在 THEMES 里的深色主题。2026-11-09 由 "default"（浅色）
+    # 改为 "dark_car"：星象仪天空与频谱画布物理上必须是深底，外壳用浅色会让
+    # 同一屏并存两套明度体系（截图里米白卡片直接贴着夜空）。浅色主题完整保留、
+    # 可随时切回，只是不再是出厂默认。见 themes.DEFAULT_THEME 处的原因注释。
+    assert DEFAULT_THEME == "dark_car", "默认主题又被改了，请同步更新这条断言与理由"
+    assert get_theme(DEFAULT_THEME).name == DEFAULT_THEME
     assert get_theme("figma").name == "figma"
     # 未知主题名必须回退默认，不崩
     assert get_theme("no-such-theme").name == DEFAULT_THEME

@@ -27,13 +27,39 @@ AMRClassifier：真正的机器学习分类器，用于自动识别信号调制�
 - NOISE（噪声/无信号）
 """
 
+import dataclasses
+import logging
 import math
+import os
 
 import numpy as np
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+#: 内置模板特征的磁盘缓存版本。**只要 `_load_builtin_training_data` 的合成
+#: 参数、`AMRFeature` 的字段集合或 `extract_features_from_iq` 的算法有任何
+#: 改动，必须 +1**——否则旧缓存会让分类结果停在上一个特征定义上，且不会
+#: 报任何错（静默错判比启动慢严重得多）。
+_BUILTIN_CACHE_VERSION = 1
+
+
+def builtin_cache_path() -> Optional[str]:
+    """内置模板特征缓存的落盘路径。
+
+    `MBDSDR_CACHE_DIR` 优先（测试用它把缓存隔离到临时目录，不污染真实 HOME）；
+    否则 `~/.mbdsdr/cache/`。取不到用户目录时返回 None，即「不缓存」。
+    """
+    base = os.environ.get("MBDSDR_CACHE_DIR")
+    if not base:
+        home = os.path.expanduser("~")
+        if not home or home == "~":
+            return None
+        base = os.path.join(home, ".mbdsdr", "cache")
+    return os.path.join(base, "amr_builtin_features.npz")
 
 
 class ModulationType(str, Enum):
@@ -363,18 +389,47 @@ class AMRClassifier:
     整合特征提取和 KNN 分类，提供完整的 AMR 功能。
     """
 
-    # 内置模板覆盖的调制类型
+    #: 内置模板覆盖的调制类型
     BUILTIN_MODULATIONS = ("AM", "FM", "CW", "FSK", "PSK", "QAM", "OFDM", "NOISE")
+    #: 每类合成的模板条数。改这个值必须同时 +1 `_BUILTIN_CACHE_VERSION`。
+    BUILTIN_PER_CLASS = 16
+    #: 合成模板的随机种子与采样率。改这两个值同样要 bump 缓存版本。
+    BUILTIN_SEED = 20260919
+    BUILTIN_FS = 100_000.0
 
     def __init__(self, k: int = 5):
         self.classifier = KNNClassifier(k=k)
+        self._builtin_loaded = False
+
+    @property
+    def builtin_loaded(self) -> bool:
+        """内置模板是否已就位（未加载时第一次分类会付一次加载成本）。"""
+        return self._builtin_loaded
+
+    def _ensure_loaded(self) -> None:
+        """幂等加载内置模板：先读磁盘缓存，未命中才真合成。
+
+        2026-11-09 实测：``_load_builtin_training_data()`` 在启动时同步合成
+        8 类 × 16 条 = 128 段 IQ 再提 25 维特征，整窗冷启 8.19 s 里占 6.9 s
+        （``numpy.correlate`` 3.2 s + 特征生成器 3.2 s）；而 AMR 只在用户真
+        问「这是什么调制」时才用得着。改为首次使用时加载，并把特征落盘，
+        第二次起读缓存（毫秒级）。
+        """
+        if self._builtin_loaded:
+            return
+        # 先置位再加载：加载过程中若被重入（例如分类器在别的线程被问），
+        # 不会重复合成两份模板把样本数翻倍。
+        self._builtin_loaded = True
+        if self._load_cached_builtin():
+            return
         self._load_builtin_training_data()
+        self._save_cached_builtin()
 
     def _load_builtin_training_data(self):
         """加载内置训练数据：用合成典型信号提取的真实特征作为 KNN 模板。"""
-        rng = np.random.default_rng(20260919)
-        fs = 100_000.0
-        per_class = 16
+        rng = np.random.default_rng(self.BUILTIN_SEED)
+        fs = self.BUILTIN_FS
+        per_class = self.BUILTIN_PER_CLASS
         for mod in self.BUILTIN_MODULATIONS:
             label = ModulationType[mod]
             for i in range(per_class):
@@ -383,6 +438,58 @@ class AMRClassifier:
                 iq = synthesize_modulation_iq(mod, rng, snr_db=snr, fs=fs)
                 feature = self.extract_features_from_iq(list(iq), fs)
                 self.classifier.add_sample(feature, label, source="builtin")
+
+    # ---------------------------------------------------------------- 缓存
+    def _load_cached_builtin(self) -> bool:
+        """读磁盘缓存的特征模板。任何异常/版本不符/形状不符都回退重算。"""
+        path = builtin_cache_path()
+        if not path or not os.path.exists(path):
+            return False
+        names = [f.name for f in dataclasses.fields(AMRFeature)]
+        try:
+            with np.load(path, allow_pickle=False) as data:
+                if int(data["version"]) != _BUILTIN_CACHE_VERSION:
+                    return False
+                labels = [str(v) for v in data["labels"]]
+                features = np.asarray(data["features"], dtype=np.float64)
+        except Exception:  # noqa: BLE001 - 缓存坏了就重算，不能因此崩
+            return False
+        if features.ndim != 2 or features.shape[1] != len(names):
+            return False
+        if len(labels) != features.shape[0] or not labels:
+            return False
+        samples: List[TrainingSample] = []
+        for label_text, row in zip(labels, features):
+            try:
+                label = ModulationType[label_text]
+            except KeyError:
+                return False
+            values = {n: float(v) for n, v in zip(names, row)}
+            samples.append(TrainingSample(feature=AMRFeature(**values),
+                                          label=label, source="builtin"))
+        self.classifier.fit(samples)
+        return True
+
+    def _save_cached_builtin(self) -> None:
+        """把刚算好的特征模板落盘。写失败只告警，绝不影响分类可用性。"""
+        path = builtin_cache_path()
+        if not path:
+            return
+        samples = list(self.classifier.samples)
+        if not samples:
+            return
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            labels = np.array([s.label.value for s in samples], dtype="U16")
+            features = np.array([s.feature.to_list() for s in samples],
+                                dtype=np.float64)
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as fh:
+                np.savez_compressed(fh, version=np.int64(_BUILTIN_CACHE_VERSION),
+                                    labels=labels, features=features)
+            os.replace(tmp, path)
+        except Exception as exc:  # noqa: BLE001 - 缓存是加速项，不是功能
+            logger.warning("AMR 模板缓存写入失败（不影响分类）：%s", exc)
 
     def extract_features_from_iq(self, iq_samples: List[complex], sample_rate: float = 1.0) -> AMRFeature:
         """
@@ -533,6 +640,7 @@ class AMRClassifier:
 
         返回 AMRResult。
         """
+        self._ensure_loaded()
         start_time = time.time()
 
         predicted, confidence, top_k = self.classifier.predict(feature)
@@ -560,14 +668,17 @@ class AMRClassifier:
 
     def classify_iq(self, iq_samples: List[complex], sample_rate: float = 1.0) -> AMRResult:
         """从 IQ 样本直接分类。"""
+        self._ensure_loaded()
         feature = self.extract_features_from_iq(iq_samples, sample_rate)
         return self.classify(feature)
 
     def add_training_sample(self, iq_samples: List[complex], label: ModulationType, sample_rate: float = 1.0):
         """添加训练样本（增量学习）。"""
+        self._ensure_loaded()
         feature = self.extract_features_from_iq(iq_samples, sample_rate)
         self.classifier.add_sample(feature, label, source="user")
 
     def get_stats(self) -> Dict[str, Any]:
         """获取分类器统计信息。"""
+        self._ensure_loaded()
         return self.classifier.get_stats()
