@@ -201,6 +201,9 @@ def test_no_guard_marker_abuse():
         os.path.join("mbdsdr_ai", "tests", "test_time_engine.py"),
         os.path.join("tests", "test_full_integration.py"),
         os.path.join("tests", "test_full_integration_v2.py"),
+        # 首次打开的「选位置不跳时间 / 流速循环后回到此刻」两条，
+        # 被测对象就是引擎是否仍实时跟随墙钟，属设计允许的对照场景。
+        os.path.join("tests", "test_first_open_welcome.py"),
     }
     misplaced = [o for o in offenders
                  if os.path.normpath(o.split(":")[0]) not in

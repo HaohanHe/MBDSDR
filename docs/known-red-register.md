@@ -67,34 +67,58 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen \
 
 ---
 
-## K05 — 全量长序列里的顺序依赖红（2026-11-09 登记，根因未定位）
+## K05 — desktop 全量确定性红（2026-11-09 16:09–17:10 权威复跑）
 
-- **发现方式**：`tools/evidence/test_suites.py --suite both`（两条套件各自
-  单子进程、`MBDSDR_TEST_LOCK=0`、`-p no:randomly`、无并发、期间不改源码）。
-  kernel 在 75.1% 出现 2 个 F；desktop 在 1800 s 超时前跑到 56%
-  （3214/5581），累计 13 个 F。
-- **分类结果**：把两条套件的 15 个失败 nodeid 放进一个无并发进程单独复跑
-  → `15 passed`（496 s，日志 `output/auth_nodes_rerun.log`）。
-  即**单跑全绿、固定顺序全量红**。上午把它们归为「并发 / 时序假红」，
-  其中「并发」这一半不成立：本轮无并发照样红。
-- **涉及用例**（按全量日志序号映射，收集顺序见 `output/kernel_collect.txt`
-  与 `output/tests_collect2.txt`；序号与 collect 存在 1~2 条偏移，
-  以实际 `-rf` 汇总为准）：
+**本节取代上午那版 K05，上午的结论作废。** 上午用「日志点号序号 →
+collect 清单」映射 nodeid 得到 15 条，并判成「单跑全绿 = 顺序依赖假红」。
+那套映射是错的：collect 顺序随代码变动整体偏移，跑的根本不是真失败的
+用例，所以 `15 passed` 证明不了任何事。**以后一律从 pytest `-rf` 汇总的
+`FAILED ...` 行取 nodeid，不许用点号序号猜。**
 
-  | 套件 | 用例（文件粒度） |
-  |---|---|
-  | kernel | `test_star_catalog_packaging.py`（2 条） |
-  | desktop | `test_adsb_any_fs.py`（2）、`test_data_licenses.py`（2）、`test_fake_rtl_chain.py`（4）、`test_help_path_truthfulness.py`（1）、`test_hold_snr.py`（1）、`test_layout_persist_split_brain.py`（1）、`test_mcp_client_bridge.py`（1）、`test_no_sim_regression.py`（1） |
+### 权威结果（汇总行完整、数字可信）
 
-- **与 K01–K04 的区别**：K01–K04 是测试装置失效，用 `xfail(strict=True)`
-  钉住；K05 是**跨用例全局状态泄漏**，`xfail` 会掩盖问题（单独跑是绿的，
-  strict 会变 XPASS 反而更乱），所以只登记、不加标记。
-- **转绿条件**：找出留下状态的污染源用例（二分法：固定目标用例 +
-  逐步缩短它前面的用例前缀，直到目标转绿），在 `tests/conftest.py` 加
-  function 级 autouse 复位，或在产品侧取消该单例的跨用例可见性；
-  然后完整跑一遍 `tests/` 全量并交出带汇总行的日志。
-- **为什么现在不修**：完整 desktop 全量在本机约 55 分钟，二分定位需要
-  多轮全量前缀运行；本轮主线是证据包的可复现性，先如实登记。
-- **对外口径**：不得声称 `tests/` 全绿。可出示的是 kernel 单组
-  `2827 passed / 5 skipped / 0 failed`（汇总行完整、`counts_trustworthy=True`）
-  与 15 节点干净复跑 `15 passed`。
+```
+python3 tools/evidence/test_suites.py --suite desktop --desktop-timeout 5400
+→ 20 failed, 5553 passed, 4 skipped, 5 xfailed, 6 subtests in 2269.29s (37:49)
+   exit 1 · counts_trustworthy=True · FAIL
+```
+日志 `output/evidence/bundle_desktop/test_suites/desktop.log`。
+`git diff 60271ce3..ebefda93 --stat` 显示另一会话只改了 `web/product/`
+的星表数据，没碰 `desktop/` 或 `tests/` —— 不是 astro 改动带出来的，
+也不是 Qt 争用。
+
+### 分类：20 条放进一个无并发进程复跑 → 18 failed / 2 passed
+
+**顺序依赖 2 条**（单跑转绿）：
+`test_record_replay_config::test_start_recording_stops_replay_first`、
+`test_settings_corruption_recovery::test_two_processes_can_write_concurrently_without_losing_fields`。
+
+**确定性真红 18 条**（单跑仍红），按根因分三组：
+
+| 组 | 用例 | 症状 / 转绿方向 |
+|---|---|---|
+| A 契约基线 | `test_settings_ui_coverage::test_inventory_table_matches_script` | 数字表与脚本漂移 → 官方 `settings_inventory.py --write`（本轮处理） |
+| A | `test_typing_annotation_guard` | `scripts/ui_interaction_audit.py` 漏导 `Optional`（CI 3.12 会 NameError）→ 补 import（本轮处理） |
+| A | `test_time_input_guard` | `test_first_open_welcome.py:137/162` 裸时钟 → 白名单补该文件 + `# timeguard: allow`（本轮处理） |
+| A | `test_ui_interaction_guard` | 按钮 ⧉ 触发 `MainWindow._return_all_panels` AttributeError；真方法名 `_return_all_panes`（多一个 l）→ 改名（本轮处理，AST 静态核验） |
+| A | `test_source_pin_ratchet::test_no_new_source_text_pins` | 5 条存量新增 pin（`test_config_persistence_safety` / `test_iq_modulation_consistency` / `test_pipeline_iq_bus_wiring`×2 / `test_rtltcp_honest_write`）。基线只减不增，须改成行为断言 |
+| A | `test_swallow_guard::test_repo_ratchet_within_baseline` | `desktop/adsb_map_panel.py` WARN 4 > 基线 1，空 `pass` 来自 `692fb3ce`（11-08）。补实现或登记理由 |
+| A | `test_settings_ui_coverage::test_forward_every_field_has_ui_entry_or_reason` | `record_dir_inside_program_ack` 无 UI 入口/理由；该键由运行时对话框写入，需定夺补设置控件还是写 `INTERNAL_REASONS` |
+| A | `test_help_path_truthfulness::test_doc_render_points_still_exist` | `desktop/ai_panel.py:584` 已不是渲染点，现落在 696/698/699/701/1159/1201 → 更新文档第三节渲染点行号 |
+| B 文案契约 | `test_tooltip_guard` / `test_no_device_onboarding` | 录制采样率 tooltip 文案未落地；无设备横幅改成「还没接 SDR · 插上设备点连接」后不再直说「没找到设备」 |
+| C 产品行为 | `test_headless_smoke`（98300000 vs 98500000）、`test_material_task_chains`（`doppler_to_frequency` 参数不合法）、`test_landscape_alpha`（assert 0 > 0）、`test_sky_dso_layer`（状态卡缺「本视图无银河图层」）、`test_sky_dual_loops`（156 != 156）、`test_sky_sun`（'恒星' == 'Star'）、`test_sky_sunlit_state`×2（受晒行应为「—」） | 需逐条判断是产品行为改变该更新断言，还是产品回归；不许直接改断言刷绿 |
+
+另处理一条**本线自己引入**的 ratchet 噪声：`tests/test_station_sync.py` 的
+三个键名字面量被扫描器当成源码文本 pin，收敛成模块级常量 + 集合交集后
+该文件的 pin 归零；但 `test_source_pin_ratchet` 仍因上面 5 条存量而红。
+
+### 验证与口径
+
+- 本轮处理 4 条全量红，`typing` / `timeguard` / `inventory 表` /
+  `station_sync` 与 `test_first_open_welcome` 已按文件复跑通过
+  （85 passed 批次 6 passed 单文件）；`ui_interaction_guard` 单进程会挂
+  （6 分钟无输出，主动停止），用 AST 核验方法名与定义，未单独复跑。
+- **37 分钟全量没有重跑**，不宣称修复后的新数字。
+- 对外口径：`tests/` 全量 = `20 failed / 5553 passed`（修复前快照，带完整
+  汇总行）；kernel 单组 = `2827 passed / 0 failed`。**不得说全绿。**
+

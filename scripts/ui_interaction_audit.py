@@ -38,6 +38,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+from typing import Optional
 import os
 import re
 import sys

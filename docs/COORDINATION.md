@@ -198,6 +198,40 @@ not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面�
 全部 C++ 结论）。
 
 
+### 我这边（2026-11-09 傍晚：desktop 全量跑完，20 failed，不是全绿）
+
+- 命令 `python3 tools/evidence/test_suites.py --suite desktop
+  --desktop-timeout 5400`，37:49，
+  `20 failed / 5553 passed / 4 skipped / 5 xfailed`，exit 1，
+  `counts_trustworthy=True`，汇总行完整。日志
+  `output/evidence/bundle_desktop/test_suites/desktop.log`。
+  至此 `tests/` 全量不再挂着「没有完整跑过」，但**不是全绿**。
+- 20 条 nodeid 从 `-rf` 汇总的 `FAILED ...` 行取，放进一个无并发进程复跑
+  → **18 failed / 2 passed**。上午「15 passed = 顺序依赖假红」作废：
+  那是用日志点号序号映射 collect 清单得到的错误 nodeid，跑的不是真失败
+  用例。方法写进 K05：以后只用 `FAILED ...` 行，不许猜序号。
+- 归因：`git diff 60271ce3..ebefda93 --stat` 只有 `web/product/` 星表数据，
+  没碰 `desktop/` 和 `tests/`；不是 astro 改动，不是 Qt 争用，是长期存量
+  契约漂移（文档行号 / 盘点表 / ratchet 基线 / tooltip / 状态卡文案）。
+- 本轮处理 4 条全量红 + 1 条本线 ratchet 噪声：
+  `menu.addAction("全部归位", self._return_all_panels)` 拼写错，真方法名
+  `_return_all_panes`（点了必抛 AttributeError）；
+  `scripts/ui_interaction_audit.py` 补 `Optional` 导入；
+  `tests/test_time_input_guard.py` 白名单补 `test_first_open_welcome.py`
+  并在两处对照断言加 marker（被测对象就是引擎跟随墙钟）；
+  `scripts/settings_inventory.py --write` 重生成数字表；
+  `tests/test_station_sync.py` 键名常量化 + 集合交集，消掉本线引入的
+  3 条源码文本 pin。
+  验证：轻量 5 文件 85 passed（含 3 条守卫）、首次打开 6 passed、
+  AST 核验方法名与定义；`test_ui_interaction_guard` 单进程挂住
+  （6 min 无输出，主动停止），该条未单独复跑。
+  **37 分钟全量没有重跑，不宣称修复后的新数字**。
+- 剩余 14 条按 `docs/known-red-register.md` K05 的 A/B/C 三组认领，
+  逐条判断是产品行为变化该更新断言还是产品回归，不许改断言刷绿。
+- 设备仍不在位（COM6/7 仅蓝牙、`rtl_test -t` 无设备），真机项继续
+  not_verified。另一会话的 `ebefda93`（本地未推送）在本线推送时会作为
+  祖先一并带上。
+
 ### 我这边（2026-11-09 中午：基线组的权威复跑与顺序依赖归因）
 
 - **kernel 权威数字（现算、汇总行完整）**：`tools/evidence/test_suites.py

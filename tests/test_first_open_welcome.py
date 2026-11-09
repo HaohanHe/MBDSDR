@@ -134,7 +134,7 @@ def test_preview_sky_is_labeled_and_never_written_to_config(win):
     assert win.sat_tracker is not None
     # 选位置绝不自动跳时间（那是「☾ 今夜」按钮自己的事）
     from mbdsdr_ai.new_spacetime import get_time_engine
-    assert abs(get_time_engine().now_unix() - time.time()) < 3.0
+    assert abs(get_time_engine().now_unix() - time.time()) < 3.0  # timeguard: allow
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ def test_tonight_button_jumps_to_real_twilight_and_can_return(win):
     # 时间流速循环 1× → 60× → 600× → 停 → 1×，回到 1× 即回到此刻
     for _ in range(4):
         win._cycle_time_rate()
-    assert abs(eng.now_unix() - time.time()) < 3.0
+    assert abs(eng.now_unix() - time.time()) < 3.0  # timeguard: allow
 
 
 # ---------------------------------------------------------------------------

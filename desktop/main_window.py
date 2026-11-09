@@ -3673,7 +3673,9 @@ class MainWindow(QMainWindow):
                     act.triggered.connect(
                         lambda _c=False, w=which, n=i: self._pop_out_tab(w, n))
         menu.addSeparator()
-        menu.addAction("全部归位", self._return_all_panels)
+        # 2026-11-09: 原写成 _return_all_panels（多一个 l），方法真名是
+        # _return_all_panes —— 点了「全部归位」必抛 AttributeError。
+        menu.addAction("全部归位", self._return_all_panes)
         menu.exec(self._float_btn.mapToGlobal(
             QPoint(0, self._float_btn.height())))
 

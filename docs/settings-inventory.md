@@ -650,12 +650,12 @@ setter + `main_window` 的 `bw > 0` 守卫），不是 schema。**因此本轮�
 
 | 指标 | 数值 | 口径 |
 |---|---|---|
-| schema 字段数 | **49** | `config_schema.ALL_ITEMS` 全量 |
-| 有 UI 入口 | **48** | 设置面板渲染 + 服务页签控件 + 内部键控件锚点 |
+| schema 字段数 | **52** | `config_schema.ALL_ITEMS` 全量 |
+| 有 UI 入口 | **50** | 设置面板渲染 + 服务页签控件 + 内部键控件锚点 |
 | 无 UI 但有明确理由 | **1** | 理由见「字段 → 位置」表的「说明」列 |
-| 缺失（无入口且无理由） | **0** | >0 即守卫红 |
+| 缺失（无入口且无理由） | **1** | >0 即守卫红 |
 | 幽灵键（未在 schema 声明） | **0** | 扫描 desktop/*.py 的 settings 字面键 |
-| source_commit | `1c0464b6` | `git log -1 --format=%h -- desktop/config_schema.py` |
+| source_commit | `b81ee50b` | `git log -1 --format=%h -- desktop/config_schema.py` |
 
 <!-- settings-guard:end -->
 
