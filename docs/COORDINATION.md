@@ -3301,3 +3301,21 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
 - 这是**测试装置**把墙钟相对量缓存成会话常量，不是产品回归；断言一字未改。
 - 本轮再跑一次固定顺序全量作为最终权威数字；若仍有红，逐条登记，
   **不循环刷跑**。kernel 组、真机链路继续 `not_verified`。
+
+---
+
+### 补记四（2026-11-09 21:50）：第三次全量 PASS，K05/K08/K09 销账
+
+- **当前代码 `fbd27f9f` 的权威全量**（35:41，`bundle_desktop_final2`）：
+  `5573 passed, 4 skipped, 7 xfailed, 6 subtests, 0 failed`，exit 0，
+  `counts_trustworthy=True`，汇总行完整。从本轮起点的 `20 failed / 5553 passed`
+  走到 0 failed，中间两次全量分别是 `1 failed` 与 `2 failed`（K08/K09
+  逐条定位后真修，不是改断言刷绿）。
+- **`7 xfailed` 不是绿**：K06 静默吞噬棘轮 113 处存量、K07 九个假活按钮
+  一处没修，都按 `xfail(strict=True)` 点名锁定，转绿条件写在台账里。
+- **not_verified**：kernel 组本轮未重跑（改动涉及 `controller.py` /
+  `tool_registry.py`，上次 `2827 passed` 属改动前）；RTL2832U / GNSS
+  不在位，硬件链路套件自己 skip；C++ 侧无本地编译验证。
+- 提交 `30e51a1f`（24 文件）+ `fbd27f9f`（K09）已推送 `origin/main`；
+  本笔只更新台账数字。下轮可选：kernel 全组重跑、K06/K07 逐条销账、
+  设备插回后补真机画面复核。

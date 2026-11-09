@@ -184,7 +184,8 @@ python -m pytest tests/test_swallow_guard.py -q -rf
 `2 failed, 5571 passed, 4 skipped, 7 xfailed, 6 subtests`，
 `counts_trustworthy=True`；K08 节点转绿，但冒出两条墙钟时间依赖（K09）。
 `bundle_desktop_final/test_suites/desktop.log` 是**修复 K09 之前**的权威
-快照；K09 局部 `4 passed`，第三次全量待跑，不拿旧数字冒充新结果。
+快照；K09 局部 `4 passed`。**K09 修复后的最终全量数字见 K09 节：
+`5573 passed / 0 failed`（`bundle_desktop_final2`）。**
 
 ---
 
@@ -239,9 +240,14 @@ python -m pytest tests/test_swallow_guard.py -q -rf
   复位保持不变。**断言一字未改**。
 - **验证**：`tests/test_e2e_operation_scenarios.py` → `4 passed`（13.42s），
   运行时已是 21:1x，与失败时的 20:40 不同时段，窗口错开场景覆盖到。
-- **诚实边界**：修在第二次全量**之后**，局部验证不等于全量验证。
-  第三次全量固定顺序重跑才是当前代码的权威数字；本轮不再追逐更多轮次，
-  若仍红就逐条登记、不循环刷跑。
+- **第三次全量（35:41，K09 修复后）**：`5573 passed, 4 skipped,
+  7 xfailed, 6 subtests`，**0 failed**，exit 0，`counts_trustworthy=True`，
+  日志 `bundle_desktop_final2/test_suites/desktop.log`。K09 节点转绿并销账；
+  **这是当前代码 `fbd27f9f` 的唯一权威全量数字**。
+- **诚实边界**：`7 xfailed` 里 K06（113 处静默吞噬）与 K07（九个假活
+  按钮）一处没修，只是按已知红登记；**全量 PASS 不等于没有欠账**。
+  kernel 组本轮未重跑（上次 `2827 passed` 属改动前），真机 RTL2832U /
+  GNSS 不在位、硬件项由套件自己 skip，均继续 `not_verified`。
 
 ---
 
