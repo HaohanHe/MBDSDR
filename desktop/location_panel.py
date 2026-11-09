@@ -7,11 +7,19 @@
 「我的经度是多少」。所以这里与 Stellarium 的 ``LocationDialog`` 对齐：
 **按名字找**、**在地图上点**、**看到"现在用的是哪"**。
 
+## 地图是 OSM 在线瓦片，不是自绘世界图
+
+2026-11-10 用户明确：**不要内置那张自己画的世界地图**（等距圆柱把高纬度
+拉长、轮廓又粗又假，放大到城市级一片空白）。现在底图直接消费
+OpenStreetMap 官方瓦片（``desktop/osm_map.py``），拖拽/缩放/点选都是真的
+Web Mercator 坐标，右下角常驻 ODbL 署名。
+
 ## 三条诚实边界
 
 1. 搜不到就说搜不到（列表给一条不可选提示），不编"最近的大城市"；
-2. 城市搜索走 OSM（ODbL），底部常驻写清"需要联网"；断网时明确降级为
-   「直接点地图或手填经纬度」，不白屏、不静默失败；
+2. 城市搜索走 OSM Nominatim（ODbL），底部常驻写清"需要联网"；断网时
+   明确降级为「直接点地图或手填经纬度」，不白屏、不静默失败；
+   瓦片加载不出来同理——深色底+经纬网，顶上一句人话；
 3. 选中地点**只改位置，不改时间**——时刻归用户自己按「时间」，
    与 Stellarium 一致。
 
@@ -28,26 +36,24 @@ import sys
 from typing import List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QThread, Signal  # noqa: E402
-from PySide6.QtGui import (  # noqa: E402
-    QColor, QFont, QPainter, QPainterPath, QPen,
-)
+from PySide6.QtCore import Qt, QThread, Signal  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QPushButton, QVBoxLayout, QWidget,
 )
 
 try:  # 数据层可选：缺了面板仍能点地图，只是搜不了
-    from mbdsdr_ai.adsb_map import (  # noqa: E402
-        WORLD_LAND_POLYGONS, project_equirectangular,
-    )
     from mbdsdr_ai.location import Place, make_provider  # noqa: E402
 except Exception:  # noqa: BLE001
-    WORLD_LAND_POLYGONS = []
-    project_equirectangular = None
     Place = None          # type: ignore
     make_provider = None  # type: ignore
+
+try:  # 地图：OSM 在线瓦片（缺 QtNetwork 时面板退化为只有搜索+手填）
+    from osm_map import OsmMapView  # noqa: E402
+except Exception:  # noqa: BLE001
+    OsmMapView = None  # type: ignore
 
 __all__ = ["LocationPanel"]
 
@@ -56,91 +62,6 @@ _PANEL = "#1b1e26"
 _LINE = "#333845"
 _TEXT = "#e8eaf0"
 _DIM = "#8f95a3"
-_SEA = "#101a24"
-_LAND = "#1d2733"
-_MARK = "#ff5b4a"
-
-
-class _WorldPicker(QWidget):
-    """离线世界地图：点一下就是经纬度（不联网、不画假地名）。"""
-
-    picked = Signal(float, float)      # lat, lon
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setMinimumHeight(180)
-        self.setCursor(Qt.CrossCursor)
-        self._marker: Optional[tuple] = None
-        self.setToolTip("点一下选位置（离线世界地图；精度到城市级足够）")
-
-    def set_marker(self, lat: Optional[float], lon: Optional[float]) -> None:
-        self._marker = None if lat is None or lon is None else (float(lat), float(lon))
-        self.update()
-
-    def _project(self, lat: float, lon: float):
-        w, h = float(self.width()), float(self.height())
-        if project_equirectangular is None:
-            return 0.0, 0.0
-        return project_equirectangular(lat, lon, w, h, 8.0)
-
-    def _unproject(self, x: float, y: float):
-        """等距圆柱反解（与 project_equirectangular 严格互逆）。"""
-        pad = 8.0
-        w = max(1.0, float(self.width()) - 2.0 * pad)
-        h = max(1.0, float(self.height()) - 2.0 * pad)
-        lon = (float(x) - pad) / w * 360.0 - 180.0
-        lat = 90.0 - (float(y) - pad) / h * 180.0
-        return max(-90.0, min(90.0, lat)), max(-180.0, min(180.0, lon))
-
-    def paintEvent(self, _event) -> None:  # noqa: N802 (Qt)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        p.fillRect(self.rect(), QColor(_SEA))
-
-        # 经纬网（每 30°）
-        p.setPen(QPen(QColor(255, 255, 255, 22), 1))
-        for lon in range(-180, 181, 30):
-            x, _ = self._project(0.0, lon)
-            p.drawLine(QPointF(x, 0), QPointF(x, self.height()))
-        for lat in range(-60, 61, 30):
-            _, y = self._project(lat, 0.0)
-            p.drawLine(QPointF(0, y), QPointF(self.width(), y))
-
-        # 陆地轮廓（真实简化坐标，来自 mbdsdr_ai.adsb_map）
-        p.setPen(QPen(QColor(90, 120, 150, 140), 1))
-        p.setBrush(QColor(_LAND))
-        for poly in WORLD_LAND_POLYGONS:
-            if len(poly) < 3:
-                continue
-            path = QPainterPath()
-            # 注意：WORLD_LAND_POLYGONS 的每个点是 (lon, lat)，不是 (lat, lon)。
-            # 反了会把整张世界地图画成碎片（经度当纬度用），2026-11-09 中过一次。
-            for i, (lo, la) in enumerate(poly):
-                x, y = self._project(float(la), float(lo))
-                if i == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
-            path.closeSubpath()
-            p.drawPath(path)
-
-        # 选中标记
-        if self._marker is not None:
-            x, y = self._project(*self._marker)
-            p.setPen(QPen(QColor(_MARK), 2))
-            p.setBrush(QColor(255, 91, 74, 60))
-            p.drawEllipse(QPointF(x, y), 7.0, 7.0)
-            p.setPen(QPen(QColor(_MARK), 1, Qt.DashLine))
-            p.drawLine(QPointF(x - 16, y), QPointF(x + 16, y))
-            p.drawLine(QPointF(x, y - 16), QPointF(x, y + 16))
-        p.end()
-
-    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt)
-        if event.button() != Qt.LeftButton:
-            return
-        lat, lon = self._unproject(event.position().x(), event.position().y())
-        self.set_marker(lat, lon)
-        self.picked.emit(lat, lon)
 
 
 class _SearchWorker(QThread):
@@ -167,16 +88,21 @@ class LocationPanel(QFrame):
     cleared = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None,
-                 provider=None, async_search: bool = True):
+                 provider=None, async_search: bool = True,
+                 map_online: bool = True, map_cache=None):
         super().__init__(parent, Qt.Tool)
         self.setObjectName("locationPanel")
         self.setWindowTitle("选择观测地点")
         self.setMinimumWidth(460)
         self._provider = provider
         self._async_search = bool(async_search)
+        # map_online=False 供测试/离线演示：不发瓦片请求，只留经纬网与点选
+        self._map_online = bool(map_online)
+        self._map_cache = map_cache
         self._worker: Optional[_SearchWorker] = None
         self._results: List[object] = []
         self._pending = None          # 待确认的 Place
+        self._current: Optional[tuple] = None   # 已生效站址（只读回显）
         self._build_ui()
         self._apply_style()
 
@@ -209,14 +135,46 @@ class LocationPanel(QFrame):
         lay.addLayout(row)
 
         self.result_list = QListWidget(self)
-        self.result_list.setFixedHeight(112)
+        self.result_list.setFixedHeight(96)
         self.result_list.itemActivated.connect(self._on_item)
         self.result_list.itemClicked.connect(self._on_item)
         lay.addWidget(self.result_list)
+        # 空态给一句指引，别留一块不知道干什么的空白列表
+        self._show_list_hint("搜城市后结果显示在这里；也可以直接在地图上点")
 
-        self.map_view = _WorldPicker(self)
-        self.map_view.picked.connect(self._on_map_picked)
+        self.map_view = self._make_map()
         lay.addWidget(self.map_view, 1)
+
+        # 地图工具条：滚轮/捏合之外，给鼠标单键和触屏一个显式出口
+        mrow = QHBoxLayout()
+        mrow.setSpacing(6)
+        self.zoom_out_btn = QPushButton("−", self)
+        self.zoom_out_btn.setObjectName("lpMapTool")
+        self.zoom_out_btn.setFixedSize(28, 24)
+        self.zoom_out_btn.setToolTip("缩小")
+        self.zoom_out_btn.clicked.connect(lambda: self._map_zoom(-1))
+        mrow.addWidget(self.zoom_out_btn, 0)
+        self.zoom_in_btn = QPushButton("+", self)
+        self.zoom_in_btn.setObjectName("lpMapTool")
+        self.zoom_in_btn.setFixedSize(28, 24)
+        self.zoom_in_btn.setToolTip("放大")
+        self.zoom_in_btn.clicked.connect(lambda: self._map_zoom(+1))
+        mrow.addWidget(self.zoom_in_btn, 0)
+        self.recenter_btn = QPushButton("回到当前", self)
+        self.recenter_btn.setObjectName("lpMapTool")
+        self.recenter_btn.setFixedHeight(24)
+        self.recenter_btn.setToolTip("把地图移回当前站址（不改任何设置）")
+        self.recenter_btn.clicked.connect(self._recenter_map)
+        mrow.addWidget(self.recenter_btn, 0)
+        map_hint = QLabel("拖拽平移 · 滚轮缩放 · 单击选点", self)
+        map_hint.setObjectName("lpHint")
+        self.map_hint = map_hint
+        mrow.addWidget(map_hint, 0)
+        mrow.addStretch(1)
+        self.map_zoom_label = QLabel("z—", self)
+        self.map_zoom_label.setObjectName("lpHint")
+        mrow.addWidget(self.map_zoom_label, 0)
+        lay.addLayout(mrow)
 
         self.current_label = QLabel("当前：未设置", self)
         self.current_label.setObjectName("lpCurrent")
@@ -244,12 +202,74 @@ class LocationPanel(QFrame):
         lay.addLayout(btns)
 
         foot = QLabel(
-            "城市搜索使用 OpenStreetMap（© OSM contributors, ODbL）· 需要联网；"
-            "离线可直接点地图。选地点不会改观测时刻。", self)
+            "地图与城市搜索数据均来自 OpenStreetMap（© OSM contributors, "
+            "ODbL）· 需要联网（本机需系统代理）；瓦片加载不出来时仍可点选经纬度。"
+            "选地点不会改观测时刻。", self)
         foot.setObjectName("lpHint")
         foot.setWordWrap(True)
         lay.addWidget(foot)
 
+    # ------------------------------------------------------------------ 地图
+    def _make_map(self) -> QWidget:
+        """OSM 在线瓦片视图；缺 QtNetwork 时给一句人话而不是白块。"""
+        if OsmMapView is None:
+            fallback = QLabel(
+                "地图不可用（本机 Qt 缺 QtNetwork）：可直接在设置里手填经纬度",
+                self)
+            fallback.setObjectName("lpHint")
+            fallback.setWordWrap(True)
+            fallback.setMinimumHeight(120)
+            return fallback
+        view = OsmMapView(self, online=self._map_online,
+                          cache=self._map_cache)
+        view.setMinimumHeight(250)
+        view.picked.connect(self._on_map_picked)
+        view.zoom_changed.connect(self._on_map_zoom)
+        view.map_error.connect(self._on_map_error)
+        view.set_view(30.0, 110.0, 2)
+        return view
+
+    def _map_zoom(self, delta: int) -> None:
+        view = self.map_view
+        if OsmMapView is None or not isinstance(view, OsmMapView):
+            return
+        view.set_view(None, None, view.zoom() + int(delta))
+        self._on_map_zoom(view.zoom())
+
+    def _recenter_map(self) -> None:
+        view = self.map_view
+        if OsmMapView is None or not isinstance(view, OsmMapView):
+            return
+        if self._current is None:
+            self.map_hint.setText("还没有当前位置：点一下地图选点，或搜索城市")
+            return
+        view.set_view(self._current[0], self._current[1], max(view.zoom(), 6))
+        self._on_map_zoom(view.zoom())
+
+    def _on_map_zoom(self, zoom: int) -> None:
+        # 守卫：地图控件在 _build_ui 里先于状态标签构造，构造期的
+        # zoom_changed 会打到这里（2026-11-10 审计抓到的 AttributeError）。
+        label = getattr(self, "map_zoom_label", None)
+        if label is None:
+            return
+        try:
+            label.setText(f"z{int(zoom)}")
+        except RuntimeError:
+            pass
+
+    def _on_map_error(self, msg: str) -> None:
+        """瓦片加载失败：说清楚原因，并强调离线仍能点坐标。"""
+        hint = getattr(self, "map_hint", None)
+        if hint is None:
+            return
+        try:
+            hint.setText(str(msg))
+            hint.setStyleSheet(
+                "background: transparent; color: #ff8a7a; font-size: 11px;")
+        except RuntimeError:
+            pass
+
+    # ------------------------------------------------------------------ 样式
     def _apply_style(self) -> None:
         self.setStyleSheet(
             "QFrame#locationPanel { background-color: %s;"
@@ -273,6 +293,7 @@ class LocationPanel(QFrame):
             "QPushButton:disabled { color: #5b6478; }"
             "QPushButton#lpGo { background: #2b6cf6; border-color: #2b6cf6;"
             " color: #ffffff; font-weight: 600; }"
+            "QPushButton#lpMapTool { padding: 1px 8px; font-size: 12px; }"
             % (_BG, _LINE, _TEXT, _DIM, _TEXT, _PANEL, _TEXT, _LINE,
                _PANEL, _LINE, _PANEL, _LINE))
 
@@ -281,13 +302,29 @@ class LocationPanel(QFrame):
                     source_zh: str = "") -> None:
         """显示当前站址（只读回显；面板不因此持有任何写入权）。"""
         if lat is None or lon is None:
+            self._current = None
             self.current_label.setText("当前：未设置（天空按未定位空态）")
-            self.map_view.set_marker(None, None)
+            self._set_map_marker(None, None)
             return
+        self._current = (float(lat), float(lon))
         src = f" · 来源：{source_zh}" if source_zh else ""
         self.current_label.setText(
             f"当前：{float(lat):.4f}°, {float(lon):.4f}°{src}")
-        self.map_view.set_marker(float(lat), float(lon))
+        self._set_map_marker(float(lat), float(lon))
+
+    def _set_map_marker(self, lat: Optional[float], lon: Optional[float]) -> None:
+        view = getattr(self, "map_view", None)
+        if view is None or OsmMapView is None:
+            return
+        try:
+            view.set_marker(lat, lon)
+            if lat is not None and lon is not None:
+                # 打开面板先看到「我在哪」，用户再自己拖走（不记住拖拽位置，
+                # 免得下次打开停在上次的荒野里）
+                view.set_view(lat, lon, max(int(view.zoom()), 6))
+                self._on_map_zoom(view.zoom())
+        except (AttributeError, RuntimeError):
+            pass
 
     def set_provider(self, provider) -> None:
         self._provider = provider
@@ -340,6 +377,16 @@ class LocationPanel(QFrame):
                 hits = None
             self._on_search_done(hits)
 
+    def _show_list_hint(self, text: str) -> None:
+        """列表空态：一条不可选的灰字提示（不是假结果）。"""
+        try:
+            self.result_list.clear()
+            item = QListWidgetItem(str(text))
+            item.setFlags(Qt.NoItemFlags)
+            self.result_list.addItem(item)
+        except (AttributeError, RuntimeError):
+            pass
+
     def _on_search_done(self, hits) -> None:
         self.search_btn.setEnabled(True)
         self.result_list.clear()
@@ -376,7 +423,11 @@ class LocationPanel(QFrame):
 
     def _set_pending(self, place) -> None:
         self._pending = place
-        self.map_view.set_marker(place.lat, place.lon)
+        # 只挪 marker，不动视图中心：用户正看着选中的这块地图
+        try:
+            self.map_view.set_marker(place.lat, place.lon)
+        except (AttributeError, RuntimeError):
+            pass
         src = {"map": "地图点选", "osm": "城市搜索·OSM",
                "offline": "离线城市表"}.get(getattr(place, "source", ""), "地点")
         self.pending_label.setText(
@@ -395,7 +446,10 @@ class LocationPanel(QFrame):
         self._pending = None
         self.apply_btn.setEnabled(False)
         self.pending_label.setText("")
-        self.map_view.set_marker(None, None)
+        try:
+            self.map_view.set_marker(None, None)
+        except (AttributeError, RuntimeError):
+            pass
         self.cleared.emit()
 
     # ------------------------------------------------------------- 生命周期

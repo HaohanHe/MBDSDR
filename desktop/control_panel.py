@@ -278,9 +278,25 @@ class ControlPanel(QWidget):
             getattr(self, "squelch_slider", None),
         ]
         widgets += self._step_buttons
+        # 置灰必须给理由（诚实禁用）：以前「调谐 / DC 去除 / IQ 平衡」在无设备
+        # 时静默置灰，用户只看到点了没反应，交互审计记为「理由未登记」。
+        # 这里统一在原 tooltip 后追加一句真实原因，连上后原样还原。
+        _why = ("未连接设备：需要真实 SDR 连接后才能操作"
+                "（不是坏了，连上即可用）")
         for w in widgets:
-            if w is not None:
-                w.setEnabled(self._sdr_connected)
+            if w is None:
+                continue
+            w.setEnabled(self._sdr_connected)
+            try:
+                if not hasattr(w, "_base_tip"):
+                    w._base_tip = w.toolTip()
+                base = str(getattr(w, "_base_tip", "") or "")
+                if self._sdr_connected:
+                    w.setToolTip(base)
+                elif not w.isEnabled():
+                    w.setToolTip(f"{base}\n{_why}" if base else _why)
+            except (AttributeError, RuntimeError):
+                pass
         # 读数标签：断开即清（不让上一个数字冒充当前增益）；连接后等真实回执。
         # 滑杆位置保留配置意图，不随连接态归零。
         self.gain_val.setText("—")

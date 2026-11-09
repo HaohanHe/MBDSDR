@@ -1008,7 +1008,9 @@ class AIPanel(QWidget):
 
     def _toggle_live_details(self) -> None:
         self._refresh_live_bar()
-        self.live_details.setVisible(not self.live_details.isVisible())
+        # 同上：isVisible() 受祖先可见性影响，非当前页签时恒 False，
+        # 会让这一栏"永远展开"、点第二下没反应。
+        self.live_details.setVisible(not self.live_details.isVisibleTo(self))
 
     # ── 天空动作 → 能力协商（按钮不得直连硬件）──────────────────
 
@@ -1201,7 +1203,11 @@ class AIPanel(QWidget):
         self.reply_received.emit(f"[错误] {error}")
 
     def _toggle_log(self):
-        visible = self.tool_log_group.isVisible()
+        # 用 isVisibleTo(self) 而不是 isVisible()：面板在非当前页签/未 show 时
+        # 祖先不可见，isVisible() 恒为 False —— 那样每次点击都是"设为可见"，
+        # 按钮永远停在「隐藏执行步骤」，点了看不到任何变化
+        # （2026-11-10 交互审计记为假活，属真 bug）。
+        visible = self.tool_log_group.isVisibleTo(self)
         self.tool_log_group.setVisible(not visible)
         self.toggle_log_btn.setText(
             "隐藏执行步骤" if not visible else "显示执行步骤")

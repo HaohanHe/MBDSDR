@@ -1728,8 +1728,22 @@ class MainWindow(QMainWindow):
         # ------------------------------------------------------------------
         right_tab = QTabWidget()
         right_tab.setTabPosition(QTabWidget.North)
+        # 右栏 19 个页签在 400px 里放不下：必须给滚动按钮 + 省略号，
+        # 否则末尾几个页签被窗口边缘硬切掉（2026-11-10 截图实证：
+        # 「新时空」只露出半个字，用户以为坏了）。
+        try:
+            _bar = right_tab.tabBar()
+            _bar.setUsesScrollButtons(True)
+            _bar.setElideMode(Qt.ElideRight)
+            _bar.setExpanding(False)
+        except (AttributeError, RuntimeError):
+            pass
         right_tab.setMinimumWidth(tokens().SIZE.get("min_dock_w", 320))
         self.right_tab = right_tab
+        # 右栏最小宽度必须 >= 里页面的真实最小宽度，否则内容被硬裁
+        # （2026-11-10 实测：min_dock_w=300，而 ControlPanel 最小 342，
+        # 截图里「增益/收藏/音量」右半边直接被切掉）。下面在面板建好后按
+        # 实测值再抬一次，不用猜的数字。
 
         # 控制面板
         self.control_panel = ControlPanel()
@@ -3085,9 +3099,19 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # AsNeeded 而不是 AlwaysOff：页面最小宽度超出右栏时给横向滚动，
+        # 绝不把「增益/音量」右半边硬裁掉（2026-11-10 截图实证）。
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setWidget(panel)
         self.right_tab.addTab(scroll, title)
+        # 右栏最小宽度跟着里页面的真实最小宽度走（上限 380，别把天空挤没）
+        try:
+            need = int(panel.minimumSizeHint().width()) + 24
+            need = min(need, 380)
+            if need > self.right_tab.minimumWidth():
+                self.right_tab.setMinimumWidth(need)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
         if attr_name:
             setattr(self, attr_name, scroll)
             # 稳定身份：从 attr_name 推导 panel id（"control_dock" -> "control"）。

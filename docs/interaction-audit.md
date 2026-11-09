@@ -7,11 +7,11 @@
 
 ## 结论
 
-- 遍历动作 **133** 个（QAction 37 / QAbstractButton 96；enabled 86 / visible 63）
+- 遍历动作 **219** 个（QAction 41 / QAbstractButton 178；enabled 184 / visible 91）
 - **真死** 0 个
 - **假活** 0 个
 - **抛异常** 0 个
-- 诚实禁用 39 个；未实时触发 12 个；输入控件 2 个
+- 诚实禁用 35 个；未实时触发 9 个；输入控件 2 个
 
 ## 一、真死（receivers() == 0，点了不可能有反应）
 
@@ -37,129 +37,193 @@
 
 ## 五、诚实禁用但没写为什么
 
-| 动作 | 类型 | 所在面板 | 位置 | 证据 | 结论 |
-| --- | --- | --- | --- | --- | --- |
-| 连接 | 按钮 | DevicePanel | QTabWidget / QScrollArea / DevicePanel / QGroupBox | — | 诚实禁用（理由未登记） |
-| 连接 | 按钮 | ModulePanel | QTabWidget / QScrollArea / ModulePanel / QGroupBox | — | 诚实禁用（理由未登记） |
-| 调谐 | 按钮 | ControlPanel | QTabWidget / QScrollArea / ControlPanel / QGroupBox | — | 诚实禁用（理由未登记） |
-| - | 按钮 | ControlPanel | QTabWidget / QScrollArea / ControlPanel / QGroupBox | — | 诚实禁用（理由未登记） |
-| + | 按钮 | ControlPanel | QTabWidget / QScrollArea / ControlPanel / QGroupBox | — | 诚实禁用（理由未登记） |
-| 收藏当前频率 | 按钮 | ControlPanel | QTabWidget / QScrollArea / ControlPanel / QGroupBox | — | 诚实禁用（理由未登记） |
-| DC 去除 | 按钮 | ControlPanel | QTabWidget / QScrollArea / ControlPanel / QGroupBox | — | 诚实禁用（理由未登记） |
-| IQ 平衡 | 按钮 | ControlPanel | QTabWidget / QScrollArea / ControlPanel / QGroupBox | — | 诚实禁用（理由未登记） |
+无。
 
 ## 附：全量明细
 
 | 动作 | 类型 | 所在面板 | 启用 | 可见 | 有槽 | 可观察结果 | 结论 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 主工具栏 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(主工具栏): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QToolButton(qt_toolbar_ext_button): text='' checked=0 enabled=1 visible=1 -> text='' checked=0 enabled=1 visible=0；QPushButton(): text='连接' checked=0 enabled=1 visible=1 -> text='连接' checked=0 enabled=1 visible=0；QPushButton(): text='☰' checked=0 enabled=1 visible=1 -> text='☰' checked=0 enabled=1 visible=0；QPushButton(): text='断开' checked=0 enabled=0 visible=1 -> text='断开' checked=0 enabled=0 visible=0 | 可用 |
+| 主工具栏 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QPushButton(): text='切换主听' checked=0 enabled=1 visible=0 -> text='切换主听' checked=0 enabled=1 visible=1；QLabel(): text='  状态: 未连接  ' visible=0 -> text='  状态: 未连接  ' visible=1；QToolButton(qt_toolbar_ext_button): text='' checked=0 enabled=1 visible=0 -> text='' checked=0 enabled=1 visible=1；QPushButton(): text='☰' checked=0 enabled=1 visible=0 -> text='☰' checked=0 enabled=1 visible=1；QPushButton(): text='断开' checked=0 enabled=0 visible=0 -> text='断开' checked=0 enabled=0 visible=1 | 可用 |
 | 工具(&T) / FM 扫频找台 | 菜单项 | MainWindow | 否 | 是 | 是 | — | 诚实禁用 |
-| 工具(&T) / NTRIP 设置 | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：NTRIP 设置 | 可用 |
+| 工具(&T) / NTRIP 设置 | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：NTRIP 设置；新窗口：NTRIP 设置 | 可用 |
 | 工具(&T) / 停止卫星跟踪 | 菜单项 | MainWindow | 否 | 是 | 是 | — | 诚实禁用 |
-| 工具(&T) / 关于 MBDSDR | 菜单项 | MainWindow | 是 | 是 | 是 | 弹窗：关于「关于 MBDSDR」<h3>MBDSDR - AI 定义无线电</h3><p>开源 MIT 许可的软件定义无线电平台（独立实现）</p><p>呼号：在「设 | 可用 |
-| 工具(&T) / 开始/停止录音 | 菜单项 | MainWindow | 是 | 是 | 是 | 弹窗：警告「无法录音」未连接 SDR，无法录制 baseband。<br>请先连接真实 SDR 设备。；界面变化：QLabel(): text='未录音' -> text='录音完成 (0 秒)' | 可用 |
+| 工具(&T) / 关于 MBDSDR | 菜单项 | MainWindow | 是 | 是 | 是 | 弹窗：关于「关于 MBDSDR」<h3>MBDSDR - AI 定义无线电</h3><p>版本 v3.14.150.1013</p><p>开源 MIT 许可的软件定义 | 可用 |
+| 工具(&T) / 开始/停止录音 | 菜单项 | MainWindow | 是 | 是 | 是 | 弹窗：警告「无法录音」未连接 SDR，无法录制 baseband。<br>请先连接真实 SDR 设备。；界面变化：QLabel(): text='未连接' visible=1 -> text='录音完成 (0 秒)' visible=1 | 可用 |
 | 工具(&T) / 开始跟踪选中卫星 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：需要观测者位置：连接 GNSS 或在 gui_config.json 配置 observer_lat/lon | 可用 |
 | 工具(&T) / 断开 GNSS | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：GNSS 已断开 | 可用 |
 | 工具(&T) / 更新卫星 TLE (Celestrak) | 菜单项 | MainWindow | 是 | 是 | 是 | 未实时触发：联网拉 Celestrak TLE | 未实时触发（代码核对） |
 | 工具(&T) / 连接 GNSS... | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：连接 GNSS | 可用 |
-| 文件(&F) / 断开连接 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：当前未连接 SDR，没有可断开的设备；界面变化：QLabel(): text='空闲' -> text='已停止' | 可用 |
-| 文件(&F) / 连接设备... | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：选择 SDR 设备 | 可用 |
+| 帮助(&H) / 三步上手 | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：帮助与能力目录；新窗口：帮助与能力目录 | 可用 |
+| 帮助(&H) / 命令面板 | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：命令面板；新窗口：命令面板 | 可用 |
+| 帮助(&H) / 快捷键一览 | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：快捷键一览；新窗口：快捷键一览 | 可用 |
+| 帮助(&H) / 能力目录 | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：帮助与能力目录；新窗口：帮助与能力目录 | 可用 |
+| 文件(&F) / 断开连接 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：当前未连接 SDR，没有可断开的设备；界面变化：QLabel(): text='空闲' visible=0 -> text='已停止' visible=0 | 可用 |
+| 文件(&F) / 连接设备... | 菜单项 | MainWindow | 是 | 是 | 是 | 对话框：选择 SDR 设备；界面变化：QLabel(statusValue): text='UTC 17:49:15' visible=1 -> text='UTC 17:49:16' visible=1 | 可用 |
 | 文件(&F) / 退出 | 菜单项 | MainWindow | 是 | 是 | 是 | 未实时触发：关闭主窗口退出进程；等价于 win.close()，审计窗口还要继续用，不真退出 | 未实时触发（代码核对） |
-| 视图(&V) / 主题 / CarWith 深色 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(CarWith 深色): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QComboBox(): idx=2 text='高对比' -> idx=3 text='CarWith 深色' | 可用 |
-| 视图(&V) / 主题 / Figma 深色 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(Figma 深色): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QComboBox(): idx=3 text='CarWith 深色' -> idx=4 text='Figma 深色' | 可用 |
-| 视图(&V) / 主题 / 深色 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(深色): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QComboBox(): idx=0 text='默认' -> idx=1 text='深色' | 可用 |
-| 视图(&V) / 主题 / 高对比 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(高对比): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QComboBox(): idx=1 text='深色' -> idx=2 text='高对比' | 可用 |
-| 视图(&V) / 主题 / 默认 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(默认): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QComboBox(): idx=4 text='Figma 深色' -> idx=0 text='默认' | 可用 |
-| 视图(&V) / 全天模式（160°） | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(全天模式（160°）): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QPushButton(): text='🌐 全天 160°' checked=0 enabled=1 visible=1 -> text='🌐 全天 160°（已进入）' checked=1 enabled=1 visible=1 | 可用 |
-| 视图(&V) / 全屏 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：__window__: visible=1 fullscreen=0 maximized=0 minimized=0 geo=1000x774 -> visible=1 fullscreen=1 maximized=0 minimized=0 geo=800x800 | 可用 |
-| 视图(&V) / 星象仪模式 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QPushButton(recordButton): text='开始录音' checked=0 enabled=0 visible=1 -> text='开始录音' checked=0 enabled=0 visible=0；QCheckBox(): text='自动' checked=1 enabled=1 visible=1 -> text='自动' checked=1 enabled=1 visible=0；QPushButton(): text='+' checked=0 enabled=0 visible=1 -> text='+' checked=0 enabled=0 visible=0；__window__: visible=1 fullscreen=0 maximized=0 minimized=0 geo=1000x800 -> visible=1 fullscreen=1 maximized=0 minimized=0 geo=1000x800；QCheckBox(): text='IQ 平衡' checked=1 enabled=0 visible=1 -> text='IQ 平衡' checked=1 enabled=0 visible=0 | 可用 |
+| 视图(&V) / 主题 / CarWith 深色 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(CarWith 深色): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QLabel(statusValue): text='UTC 17:49:21' visible=1 -> text='UTC 17:49:22' visible=1；QComboBox(): idx=2 text='高对比' -> idx=3 text='CarWith 深色' | 可用 |
+| 视图(&V) / 主题 / Figma 深色 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(Figma 深色): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QLabel(statusValue): text='UTC 17:49:22' visible=1 -> text='UTC 17:49:24' visible=1；QComboBox(): idx=3 text='CarWith 深色' -> idx=4 text='Figma 深色' | 可用 |
+| 视图(&V) / 主题 / 深色 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='UTC 17:49:18' visible=1 -> text='UTC 17:49:20' visible=1；QComboBox(): idx=0 text='默认' -> idx=1 text='深色'；QAction(深色): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1 | 可用 |
+| 视图(&V) / 主题 / 高对比 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='UTC 17:49:20' visible=1 -> text='UTC 17:49:21' visible=1；QComboBox(): idx=1 text='深色' -> idx=2 text='高对比'；QAction(高对比): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1 | 可用 |
+| 视图(&V) / 主题 / 默认 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='UTC 17:49:16' visible=1 -> text='UTC 17:49:18' visible=1；QComboBox(): idx=3 text='CarWith 深色' -> idx=0 text='默认'；QAction(默认): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1 | 可用 |
+| 视图(&V) / 全天模式（160°） | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(全天模式（160°）): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QPushButton(): text='看整片天' checked=0 enabled=1 visible=0 -> text='正在看整片天' checked=1 enabled=1 visible=0 | 可用 |
+| 视图(&V) / 全屏 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：__window__: visible=1 fullscreen=0 maximized=0 minimized=0 geo=860x774 -> visible=1 fullscreen=1 maximized=0 minimized=0 geo=800x800；QPushButton(planetariumFullscreen): text='⛶ 全屏' checked=0 enabled=1 visible=0 -> text='🗗 退出全屏' checked=0 enabled=1 visible=0 | 可用 |
+| 视图(&V) / 星象仪模式 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(星象仪模式): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QPushButton(iconButton): text='⌂' checked=0 enabled=1 visible=1 -> text='⌂' checked=0 enabled=1 visible=0；QLabel(statusValue): text='音频 AGC' visible=1 -> text='音频 AGC' visible=0；QCheckBox(): text='AGC 自动增益' checked=1 enabled=0 visible=1 -> text='AGC 自动增益' checked=1 enabled=0 visible=0；QLabel(): text='—' visible=1 -> text='—' visible=0 | 可用 |
 | 视图(&V) / 显示瀑布图 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(显示瀑布图): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
-| 视图(&V) / 触屏模式 / 强制触屏 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：触屏模式：强制触屏；界面变化：QAction(强制触屏): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QAction(自动检测): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
-| 视图(&V) / 触屏模式 / 强制鼠标 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：触屏模式：强制鼠标；界面变化：QAction(强制触屏): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QAction(强制鼠标): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1 | 可用 |
-| 视图(&V) / 触屏模式 / 自动检测 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：触屏模式：自动检测；界面变化：QAction(自动检测): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QAction(强制鼠标): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
-| 视图(&V) / 重置窗口位置 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：窗口已重置到主屏中央；界面变化：__window__: visible=1 fullscreen=1 maximized=0 minimized=0 geo=800x800 -> visible=1 fullscreen=0 maximized=0 minimized=0 geo=1000x800 | 可用 |
+| 视图(&V) / 触屏模式 / 强制触屏 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：触屏模式：强制触屏；界面变化：QLabel(statusValue): text='UTC 17:49:24' visible=1 -> text='UTC 17:49:25' visible=1；QAction(强制触屏): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QAction(自动检测): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
+| 视图(&V) / 触屏模式 / 强制鼠标 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：触屏模式：强制鼠标；界面变化：QLabel(statusValue): text='UTC 17:49:25' visible=1 -> text='UTC 17:49:27' visible=1；QAction(强制鼠标): checked=0 enabled=1 visible=1 -> checked=1 enabled=1 visible=1；QAction(强制触屏): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
+| 视图(&V) / 触屏模式 / 自动检测 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：触屏模式：自动检测 | 可用 |
+| 视图(&V) / 重置窗口位置 | 菜单项 | MainWindow | 是 | 是 | 是 | 状态栏：窗口已重置到主屏中央；界面变化：__window__: visible=1 fullscreen=1 maximized=0 minimized=0 geo=800x800 -> visible=1 fullscreen=0 maximized=0 minimized=0 geo=860x800 | 可用 |
 | 面板(&P) / ADS-B 航路 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(ADS-B 航路): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
-| 面板(&P) / AI 助手 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QPushButton(): text='显示执行步骤' checked=0 enabled=1 visible=1 -> text='显示执行步骤' checked=0 enabled=1 visible=0；QPushButton(): text='扫频 87-108 MHz 找所有电台' checked=0 enabled=1 visible=1 -> text='扫频 87-108 MHz 找所有电台' checked=0 enabled=1 visible=0；QPushButton(): text='取消' checked=0 enabled=0 visible=0 -> text='取消' checked=0 enabled=0 visible=1；QStackedWidget(qt_tabwidget_stackedwidget): idx=2 -> idx=6；QPushButton(): text='配置' checked=0 enabled=1 visible=1 -> text='配置' checked=0 enabled=1 visible=0 | 可用 |
-| 面板(&P) / 卫星跟踪 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QPushButton(): text='停止跟踪' checked=0 enabled=0 visible=1 -> text='停止跟踪' checked=0 enabled=0 visible=0；QAction(卫星跟踪): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QToolButton(ScrollRightButton): text='' checked=0 enabled=0 visible=0 -> text='' checked=0 enabled=1 visible=0；QPushButton(): text='开始跟踪' checked=0 enabled=1 visible=1 -> text='开始跟踪' checked=0 enabled=1 visible=0；QPushButton(): text='更新 TLE' checked=0 enabled=1 visible=1 -> text='更新 TLE' checked=0 enabled=1 visible=0 | 可用 |
-| 面板(&P) / 天空模式 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(天空模式): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
+| 面板(&P) / AI 助手 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QStackedWidget(qt_tabwidget_stackedwidget): idx=2 -> idx=6；QLabel(): text='起始' visible=0 -> text='起始' visible=1；QPushButton(): text='取消' checked=0 enabled=0 visible=0 -> text='取消' checked=0 enabled=0 visible=1；QTabWidget(): idx=2 -> idx=6；QPushButton(): text='开始扫描' checked=0 enabled=0 visible=0 -> text='开始扫描' checked=0 enabled=0 visible=1 | 可用 |
+| 面板(&P) / 卫星跟踪 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QPushButton(): text='更新 TLE' checked=0 enabled=1 visible=1 -> text='更新 TLE' checked=0 enabled=1 visible=0；QLabel(): text='卫星闭环自动跟踪' visible=1 -> text='卫星闭环自动跟踪' visible=0；QPushButton(): text='停止跟踪' checked=0 enabled=0 visible=1 -> text='停止跟踪' checked=0 enabled=0 visible=0；QToolButton(ScrollRightButton): text='' checked=0 enabled=0 visible=0 -> text='' checked=0 enabled=1 visible=0；QLabel(): text='TLE 日期: 2026-09-25' visible=1 -> text='TLE 日期: 2026-09-25' visible=0 | 可用 |
 | 面板(&P) / 恢复出厂布局 | 菜单项 | MainWindow | 是 | 是 | 是 | 弹窗：询问「恢复出厂布局」清除所有自定义布局并恢复到默认「专注」布局？ | 可用 |
-| 面板(&P) / 控制 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(控制): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QPushButton(recordButton): text='开始录音' checked=0 enabled=0 visible=1 -> text='开始录音' checked=0 enabled=0 visible=0；QCheckBox(): text='自动' checked=1 enabled=1 visible=1 -> text='自动' checked=1 enabled=1 visible=0；QPushButton(): text='+' checked=0 enabled=0 visible=1 -> text='+' checked=0 enabled=0 visible=0；QStackedWidget(qt_tabwidget_stackedwidget): idx=0 -> idx=1 | 可用 |
+| 面板(&P) / 控制 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='—' visible=0 -> text='—' visible=1；QStackedWidget(qt_tabwidget_stackedwidget): idx=0 -> idx=1；QLabel(statusValue): text='—' visible=0 -> text='—' visible=1；QLabel(statusValue): text='—' visible=0 -> text='—' visible=1；QLabel(): text='经度:' visible=0 -> text='经度:' visible=1 | 可用 |
 | 面板(&P) / 新时空 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(新时空): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
+| 面板(&P) / 星象仪模式 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(星象仪模式): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
 | 面板(&P) / 模块/信号流 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(模块/信号流): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
 | 面板(&P) / 气象云图 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(气象云图): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
-| 面板(&P) / 状态 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QPushButton(): text='显示执行步骤' checked=0 enabled=1 visible=0 -> text='显示执行步骤' checked=0 enabled=1 visible=1；QPushButton(): text='扫频 87-108 MHz 找所有电台' checked=0 enabled=1 visible=0 -> text='扫频 87-108 MHz 找所有电台' checked=0 enabled=1 visible=1；QStackedWidget(qt_tabwidget_stackedwidget): idx=1 -> idx=2；QPushButton(): text='配置' checked=0 enabled=1 visible=0 -> text='配置' checked=0 enabled=1 visible=1；QTabWidget(): idx=1 -> idx=2 | 可用 |
+| 面板(&P) / 状态 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='—' visible=1 -> text='—' visible=0；QStackedWidget(qt_tabwidget_stackedwidget): idx=1 -> idx=2；QLabel(statusValue): text='—' visible=1 -> text='—' visible=0；QLabel(statusValue): text='—' visible=1 -> text='—' visible=0；QLabel(): text='经度:' visible=1 -> text='经度:' visible=0 | 可用 |
 | 面板(&P) / 频谱 | 菜单项 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(频谱): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1 | 可用 |
-| 发送 | 按钮 | AIPanel | 是 | 否 | 是 | 未实时触发：启动 AI 推理线程（ai_panel 写对话区并切「思考中…」）；不在审计里真跑模型 | 未实时触发（代码核对） |
-| 当前信号质量怎么样 | 按钮 | AIPanel | 是 | 否 | 是 | 未实时触发：同「发送」：快捷指令把问题填进对话框并起 AI 推理线程 | 未实时触发（代码核对） |
-| 扫频 87-108 MHz 找所有电台 | 按钮 | AIPanel | 是 | 否 | 是 | 未实时触发：同「发送」：填充问题并进入 AI 思考态 | 未实时触发（代码核对） |
-| 找一个信号强的 FM 电台 | 按钮 | AIPanel | 是 | 否 | 是 | 未实时触发：同「发送」：填充问题并进入 AI 思考态 | 未实时触发（代码核对） |
-| 显示执行步骤 | 按钮 | AIPanel | 是 | 否 | 是 | 界面变化：QPushButton(): text='显示执行步骤' checked=0 enabled=1 visible=0 -> text='隐藏执行步骤' checked=0 enabled=1 visible=0 | 可用 |
-| 调谐到 98.5 MHz 并录 30 秒 | 按钮 | AIPanel | 是 | 否 | 是 | 未实时触发：同「发送」：填充问题并进入 AI 思考态 | 未实时触发（代码核对） |
-| 配置 | 按钮 | AIPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 2；切页签 QTabWidget -> 2；对话框：AI 配置 | 可用 |
-| 启用 ANR | 按钮 | AnrPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 11；切页签 QTabWidget -> 11；— | 诚实禁用 |
+| 启用 ANR | 按钮 | AnrPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 12；切页签 QTabWidget -> 12；— | 诚实禁用 |
 | 采样噪声底 | 按钮 | AnrPanel | 否 | 否 | 是 | — | 诚实禁用 |
 | 删除 | 按钮 | BookmarkPanel | 否 | 否 | 是 | — | 诚实禁用 |
 | 导入 CSV | 按钮 | BookmarkPanel | 是 | 否 | 是 | 文件框：打开 | 可用 |
 | 导出 CSV | 按钮 | BookmarkPanel | 是 | 否 | 是 | 文件框：保存 | 可用 |
-| 找最近 | 按钮 | BookmarkPanel | 是 | 否 | 是 | 弹窗：提示「找最近」无当前频率（未调谐）。 | 可用 |
-| 添加当前频率 | 按钮 | BookmarkPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 8；切页签 QTabWidget -> 8；弹窗：提示「添加书签」无当前频率（未连接 SDR 或未调谐）。<br>可手动输入频率。；文件框：输入 | 可用 |
+| 找最近 | 按钮 | BookmarkPanel | 是 | 否 | 是 | 弹窗：提示「找最近」书签列表为空。 | 可用 |
+| 添加当前频率 | 按钮 | BookmarkPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 8；切页签 QTabWidget -> 8；文件框：输入 | 可用 |
 | 编辑 | 按钮 | BookmarkPanel | 否 | 否 | 是 | — | 诚实禁用 |
-| 清空 | 按钮 | ConstellationPanel | 是 | 否 | 是 | 状态栏：星座图已清空，统计已重置 | 可用 |
-| 网格 | 按钮 | ConstellationPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 12；切页签 QTabWidget -> 12；界面变化：QCheckBox(): text='网格' checked=1 enabled=1 visible=0 -> text='网格' checked=0 enabled=1 visible=0 | 可用 |
-| + | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用（理由未登记） |
-| - | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用（理由未登记） |
-| AGC 自动增益 | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用 |
-| DC 去除 | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用（理由未登记） |
-| IQ 平衡 | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用（理由未登记） |
-| 偏移调谐 | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用 |
-| 删除选中 | 按钮 | ControlPanel | 是 | 否 | 是 | 界面变化：QComboBox(): idx=0 text='航空应急频率 121.500 (12…' -> idx=0 text='航空应急备用 123.100 (1…' | 可用 |
-| 开始录音 | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用 |
-| 收藏当前频率 | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用（理由未登记） |
+| 清空 | 按钮 | ConstellationPanel | 是 | 否 | 是 | 状态栏：星座图已清空，统计已重置；新窗口：qtooltip_label | 可用 |
+| 网格 | 按钮 | ConstellationPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 13；切页签 QTabWidget -> 13；新窗口：qtooltip_label；界面变化：QCheckBox(): text='网格' checked=1 enabled=1 visible=0 -> text='网格' checked=0 enabled=1 visible=0 | 可用 |
+| + | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用 |
+| - | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用 |
+| AGC 自动增益 | 按钮 | ControlPanel | 是 | 否 | 是 | 界面变化：QLabel(statusValue): text='—' visible=0 -> text='0' visible=0；QLabel(statusValue): text='—' visible=0 -> text='FC0012' visible=0；QLabel(statusValue): text='—' visible=0 -> text='00:00:00' visible=0；QLabel(statusValue): text='—' visible=0 -> text='关' visible=0；QLabel(statusValue): text='—' visible=0 -> text='FM' visible=0 | 可用 |
+| DC 去除 | 按钮 | ControlPanel | 是 | 否 | 是 | 界面变化：QCheckBox(): text='DC 去除' checked=1 enabled=1 visible=0 -> text='DC 去除' checked=0 enabled=1 visible=0 | 可用 |
+| IQ 平衡 | 按钮 | ControlPanel | 是 | 否 | 是 | 界面变化：QLabel(statusValue): text='-1.5 dBFS' visible=0 -> text='-2.6 dBFS' visible=0；QCheckBox(): text='IQ 平衡' checked=1 enabled=1 visible=0 -> text='IQ 平衡' checked=0 enabled=1 visible=0；QLabel(statusValue): text='-2 dBFS' visible=0 -> text='-3 dBFS' visible=0 | 可用 |
+| 偏移调谐 | 按钮 | ControlPanel | 是 | 否 | 是 | 界面变化：QCheckBox(): text='偏移调谐' checked=0 enabled=1 visible=0 -> text='偏移调谐' checked=1 enabled=1 visible=0 | 可用 |
+| 删除选中 | 按钮 | ControlPanel | 是 | 否 | 是 | 弹窗：提示「内置书签」「航空应急频率 121.500」是内置频率，不能删除。下一步：先调到你要保留的频点，再用「收藏当前频率」保存为你自己的自定义书签。 | 可用 |
+| 开始录音 | 按钮 | ControlPanel | 是 | 否 | 是 | 未实时触发：启动录音线程并落盘（control_panel），审计不写真实录音 | 未实时触发（代码核对） |
+| 收藏当前频率 | 按钮 | ControlPanel | 否 | 否 | 是 | — | 诚实禁用 |
 | 自动 | 按钮 | ControlPanel | 是 | 否 | 是 | 界面变化：QCheckBox(): text='自动' checked=1 enabled=1 visible=0 -> text='自动' checked=0 enabled=1 visible=0 | 可用 |
-| 调谐 | 按钮 | ControlPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 0；切页签 QTabWidget -> 0；— | 诚实禁用（理由未登记） |
-| 刷新 | 按钮 | DevicePanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 13；切页签 QTabWidget -> 13；界面变化：QLabel(statusValue): text='已断开' -> text='未检测到 SDR 设备' | 可用 |
-| 断开 | 按钮 | DevicePanel | 否 | 否 | 是 | — | 诚实禁用 |
-| 连接 | 按钮 | DevicePanel | 否 | 否 | 是 | — | 诚实禁用（理由未登记） |
-| 硬件 AGC | 按钮 | GainPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 14；切页签 QTabWidget -> 14；— | 诚实禁用 |
-| + VFO | 按钮 | MainWindow | 是 | 否 | 是 | 状态栏：新建 VFO vfo001 @ 98.500 MHz | 可用 |
-| IDE | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QCheckBox(): text='瀑布平滑' checked=0 enabled=0 visible=1 -> text='瀑布平滑' checked=0 enabled=0 visible=0；QToolButton(statusValue): text='发射' checked=0 enabled=0 visible=0 -> text='发射' checked=0 enabled=0 visible=1；QToolButton(ScrollRightButton): text='' checked=0 enabled=1 visible=0 -> text='' checked=0 enabled=0 visible=0；QStackedWidget(): idx=1 -> idx=0；QCheckBox(): text='频段' checked=1 enabled=0 visible=1 -> text='频段' checked=1 enabled=0 visible=0 | 可用 |
-| ⌂ | 按钮 | MainWindow | 是 | 是 | 是 | 界面变化：QCheckBox(): text='瀑布平滑' checked=0 enabled=0 visible=0 -> text='瀑布平滑' checked=0 enabled=0 visible=1；QCheckBox(): text='频段' checked=1 enabled=0 visible=0 -> text='频段' checked=1 enabled=0 visible=1；QTabWidget(): idx=0 -> idx=2；QCheckBox(): text='书签' checked=1 enabled=0 visible=0 -> text='书签' checked=1 enabled=0 visible=1；QCheckBox(): text='峰值' checked=1 enabled=0 visible=0 -> text='峰值' checked=1 enabled=0 visible=1 | 可用 |
-| ☰ | 按钮 | MainWindow | 是 | 否 | 是 | 界面变化：QPushButton(): text='取消' checked=0 enabled=0 visible=1 -> text='取消' checked=0 enabled=0 visible=0；QToolButton(ScrollLeftButton): text='' checked=0 enabled=0 visible=1 -> text='' checked=0 enabled=0 visible=0；QToolButton(ScrollRightButton): text='' checked=0 enabled=1 visible=1 -> text='' checked=0 enabled=1 visible=0；QPushButton(): text='开始扫描' checked=0 enabled=0 visible=1 -> text='开始扫描' checked=0 enabled=0 visible=0 | 可用 |
-| 保存 | 按钮 | MainWindow | 是 | 否 | 是 | 文件框：输入 | 可用 |
-| 切换主听 | 按钮 | MainWindow | 是 | 否 | 是 | 状态栏：主听切换 → vfo001（次听-未解调）；界面变化：QLineEdit(): text='' -> text='98.5' | 可用 |
-| 删除 | 按钮 | MainWindow | 否 | 否 | 是 | — | 诚实禁用 |
+| 调谐 | 按钮 | ControlPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 0；切页签 QTabWidget -> 0；界面变化：QLineEdit(): text='' style='' -> text='' style='background-color:#B85C5C;' | 可用 |
+| 刷新 | 按钮 | DevicePanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 14；切页签 QTabWidget -> 14；新窗口：qtooltip_label | 可用 |
+| 断开 | 按钮 | DevicePanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(statusValue): text='设备: RTL-SDR #0' visible=1 -> text='设备: —' visible=1；QPushButton(): text='切换主听' checked=0 enabled=1 visible=0 -> text='切换主听' checked=0 enabled=1 visible=1；QLabel(): text='  状态: RTL-SDR #0  ' visible=1 -> text='  状态: 未连接  ' visible=1；QPushButton(): text='连接' checked=0 enabled=0 visible=0 -> text='连接' checked=0 enabled=1 visible=0；QLabel(statusValue): text='接收中' visible=0 -> text='等待数据' visible=0 | 可用 |
+| 连接 | 按钮 | DevicePanel | 是 | 否 | 是 | 状态栏：正在连接 RTL-SDR #0 ...；新窗口：qtooltip_label；界面变化：QLabel(statusValue): text='设备: —' visible=1 -> text='设备: RTL-SDR #0' visible=1；QPushButton(): text='切换主听' checked=0 enabled=1 visible=1 -> text='切换主听' checked=0 enabled=1 visible=0；QLabel(): text='  状态: 未连接  ' visible=1 -> text='  状态: RTL-SDR #0  ' visible=1；QPushButton(): text='连接' checked=0 enabled=1 visible=0 -> text='连接' checked=0 enabled=0 visible=0；QLabel(statusValue): text='等待数据' visible=0 -> text='接收中' visible=0 | 可用 |
+| 硬件 AGC | 按钮 | GainPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 15；切页签 QTabWidget -> 15；— | 诚实禁用 |
+| + VFO | 按钮 | MainWindow | 是 | 是 | 是 | 状态栏：新建 VFO vfo001 @ 98.500 MHz | 可用 |
+| A 星名 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_labels): text='A 星名' checked=1 enabled=1 visible=0 -> text='A 星名' checked=0 enabled=1 visible=0 | 可用 |
+| ≈ 大气 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QLabel(statusValue): text='-17.7 dBFS' visible=0 -> text='-23.4 dBFS' visible=0；QPushButton(planetariumLayer_atmosphere): text='≈ 大气' checked=1 enabled=1 visible=0 -> text='≈ 大气' checked=0 enabled=1 visible=0；QLabel(statusValue): text='-18 dBFS' visible=0 -> text='-23 dBFS' visible=0 | 可用 |
+| ≡ 赤道网 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_eqgrid): text='≡ 赤道网' checked=0 enabled=1 visible=0 -> text='≡ 赤道网' checked=1 enabled=1 visible=0 | 可用 |
+| ⊞ 叠层 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_hud): text='⊞ 叠层' checked=1 enabled=1 visible=0 -> text='⊞ 叠层' checked=0 enabled=1 visible=0；QLabel(): text='RBW 1171.88 Hz · 瀑布 4.65074 s' visible=0 -> text='RBW 1171.88 Hz · 瀑布 4.32793 s' visible=0 | 可用 |
+| ⌂ | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 0；界面变化：QLabel(statusValue): text='— MHz' visible=0 -> text='— MHz' visible=1；QStackedWidget(qt_tabwidget_stackedwidget): idx=0 -> idx=1；QLabel(sectionTitle): text='频谱显示' visible=0 -> text='频谱显示' visible=1；QTabWidget(): idx=0 -> idx=1 | 可用 |
+| ⏱ 1× | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；状态栏：时间流速 60×（天空按同一时刻重算）；界面变化：QPushButton(planetariumTimeRate): text='⏱ 1×' checked=0 enabled=1 visible=1 -> text='⏱ 60×' checked=0 enabled=1 visible=1 | 可用 |
+| ▦ 图层 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_sats): text='✦ 卫星' checked=0 enabled=1 visible=0 -> text='✦ 卫星' checked=0 enabled=1 visible=1；QPushButton(planetariumLayer_atmosphere): text='≈ 大气' checked=0 enabled=1 visible=0 -> text='≈ 大气' checked=0 enabled=1 visible=1；QPushButton(planetariumLayer_constellations): text='✧ 星座' checked=0 enabled=1 visible=0 -> text='✧ 星座' checked=0 enabled=1 visible=1；QPushButton(planetariumLayer_azgrid): text='◎ 方位网' checked=0 enabled=1 visible=0 -> text='◎ 方位网' checked=0 enabled=1 visible=1；QPushButton(planetariumLayer_eqgrid): text='≡ 赤道网' checked=1 enabled=1 visible=0 -> text='≡ 赤道网' checked=1 enabled=1 visible=1 | 可用 |
+| ▽ 地景 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_landscape): text='▽ 地景' checked=1 enabled=1 visible=0 -> text='▽ 地景' checked=0 enabled=1 visible=0 | 可用 |
+| ◍ 深空 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_dso): text='◍ 深空' checked=1 enabled=1 visible=0 -> text='◍ 深空' checked=0 enabled=1 visible=0 | 可用 |
+| ◎ 方位网 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QLabel(statusValue): text='-23.4 dBFS' visible=0 -> text='-16.5 dBFS' visible=0；QPushButton(planetariumLayer_azgrid): text='◎ 方位网' checked=1 enabled=1 visible=0 -> text='◎ 方位网' checked=0 enabled=1 visible=0；QLabel(statusValue): text='-23 dBFS' visible=0 -> text='-17 dBFS' visible=0 | 可用 |
+| ☰ | 按钮 | MainWindow | 是 | 是 | 是 | 界面变化：QLabel(): text='起始' visible=1 -> text='起始' visible=0；QPushButton(): text='取消' checked=0 enabled=0 visible=1 -> text='取消' checked=0 enabled=0 visible=0；QToolButton(ScrollRightButton): text='' checked=0 enabled=1 visible=1 -> text='' checked=0 enabled=1 visible=0；QPushButton(): text='开始扫描' checked=0 enabled=0 visible=1 -> text='开始扫描' checked=0 enabled=0 visible=0；QLabel(): text='步进' visible=1 -> text='步进' visible=0 | 可用 |
+| ⛶ 全屏 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：__window__: visible=1 fullscreen=1 maximized=0 minimized=0 geo=860x800 -> visible=1 fullscreen=0 maximized=0 minimized=0 geo=860x774；QPushButton(planetariumFullscreen): text='🗗 退出全屏' checked=0 enabled=1 visible=1 -> text='⛶ 全屏' checked=0 enabled=1 visible=1 | 可用 |
+| ✦ 卫星 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_sats): text='✦ 卫星' checked=1 enabled=1 visible=0 -> text='✦ 卫星' checked=0 enabled=1 visible=0 | 可用 |
+| ✧ 星座 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QLabel(statusValue): text='-24.5 dBFS' visible=0 -> text='-17.7 dBFS' visible=0；QPushButton(planetariumLayer_constellations): text='✧ 星座' checked=1 enabled=1 visible=0 -> text='✧ 星座' checked=0 enabled=1 visible=0；QLabel(statusValue): text='-24 dBFS' visible=0 -> text='-18 dBFS' visible=0 | 可用 |
+| ⟳ 轨道 | 按钮 | MainWindow | 是 | 否 | 是 | 界面变化：QLabel(statusValue): text='-18.0 dBFS' visible=0 -> text='-24.5 dBFS' visible=0；QPushButton(planetariumLayer_orbits): text='⟳ 轨道' checked=1 enabled=1 visible=0 -> text='⟳ 轨道' checked=0 enabled=1 visible=0；QLabel(statusValue): text='-18 dBFS' visible=0 -> text='-24 dBFS' visible=0 | 可用 |
+| ⧉ | 按钮 | MainWindow | 是 | 是 | 是 | 新窗口：菜单：QMenu | 可用 |
+| 今夜 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；状态栏：先点「先看看示例天空」或设置观测位置，再切到今夜 | 可用 |
+| 切换主听 | 按钮 | MainWindow | 是 | 是 | 是 | 状态栏：主听切换 → vfo001（次听-未解调）；界面变化：QComboBox(): idx=-1 text='' -> idx=0 text='FM'；QLineEdit(): text='' style='' -> text='98.5' style='' | 可用 |
 | 发射 | 按钮 | MainWindow | 否 | 是 | 是 | — | 诚实禁用 |
 | 回放 | 按钮 | MainWindow | 是 | 否 | 是 | 状态栏：未选择录音文件；文件框：打开 | 可用 |
-| 多普勒 -- | 按钮 | MainWindow | 是 | 是 | 是 | 状态栏：未绑定卫星目标 | 可用 |
+| 多普勒 -- | 按钮 | MainWindow | 是 | 否 | 是 | 状态栏：未绑定卫星目标 | 可用 |
+| 夜视 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QPushButton(planetariumLayer_night): text='夜视' checked=0 enabled=1 visible=0 -> text='夜视' checked=1 enabled=1 visible=0 | 可用 |
+| 存图 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；状态栏：已存图：C:/Users/xxhzb/OneDrive/Pictures\MBDSDR\sky_20261110_014936.png；界面变化：QPushButton(): text='✓' checked=0 enabled=1 visible=0 -> <已销毁（关闭/删除）>；QLabel(statusValue): text='-19.4 dBFS' visible=0 -> text='-18.6 dBFS' visible=0；QPushButton(): text='静音' checked=0 enabled=1 visible=0 -> <已销毁（关闭/删除）>；QLabel(): text='RBW 1171.88 Hz · 瀑布 4.07146 s' visible=0 -> text='RBW 1171.88 Hz · 瀑布 3.96346 s' visible=0；QPushButton(): text='删' checked=0 enabled=1 visible=0 -> <已销毁（关闭/删除）> | 可用 |
 | 录音 | 按钮 | MainWindow | 否 | 否 | 是 | — | 诚实禁用 |
-| 断开 | 按钮 | MainWindow | 否 | 否 | 是 | — | 诚实禁用 |
-| 连接 | 按钮 | MainWindow | 是 | 否 | 是 | 对话框：选择 SDR 设备 | 可用 |
-| 静音 | 按钮 | MainWindow | 是 | 否 | 是 | 界面变化：QLabel(statusValue): text='48' -> text='0'；QPushButton(): text='静音' checked=0 enabled=1 visible=0 -> text='静音' checked=1 enabled=1 visible=0 | 可用 |
-| 🌐 全天 160° | 按钮 | MainWindow | 是 | 是 | 是 | 界面变化：QAction(全天模式（160°）): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QPushButton(): text='🌐 全天 160°（已进入）' checked=1 enabled=1 visible=1 -> text='🌐 全天 160°' checked=0 enabled=1 visible=1 | 可用 |
-| 🎤 | 按钮 | MainWindow | 是 | 是 | 是 | 状态栏：语音输入未配置（接麦克风后可用） | 可用 |
+| 断开 | 按钮 | MainWindow | 否 | 是 | 是 | — | 诚实禁用 |
+| 本后端发射：未连接设备（能力未知） | 按钮 | MainWindow | 是 | 是 | 是 | 新窗口：qtooltip_label | 可用 |
+| 看整片天 | 按钮 | MainWindow | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QAction(全天模式（160°）): checked=1 enabled=1 visible=1 -> checked=0 enabled=1 visible=1；QPushButton(): text='正在看整片天' checked=1 enabled=1 visible=0 -> text='看整片天' checked=0 enabled=1 visible=0 | 可用 |
+| 详细 | 按钮 | MainWindow | 是 | 是 | 是 | 新窗口：QListWidget；界面变化：QLabel(statusValue): text='设备: —' visible=0 -> text='设备: —' visible=1；QLabel(statusValue): text='带宽: —' visible=0 -> text='带宽: —' visible=1；QToolButton(txCapability): text='本后端发射：未连接设备（能力未知）' checked=0 enabled=1 visible=0 -> text='本后端发射：未连接设备（能力未知）' checked=0 enabled=1 visible=1；QLabel(statusValue): text='增益: —' visible=0 -> text='增益: —' visible=1；QLabel(statusValue): text='频率: —' visible=0 -> text='频率: —' visible=1 | 可用 |
+| 连接 | 按钮 | MainWindow | 是 | 是 | 是 | 对话框：选择 SDR 设备 | 可用 |
+| 退出星象仪<br>(Esc) | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；未实时触发：星象仪浮层按钮只在星象仪形态显示（`_exit_planetarium` 里 `_planetarium_strip.hide()`，IDE 形态不可见也不可点）；审计每条动作前强制回 IDE 页，此处点击等于 no-op。星象仪形态下的真实点击路径由 `tests/test_planetarium_entry_visibility.py::test_overlay_exit_button_is_clickable` 覆盖 | 未实时触发（代码核对） |
+| 静音 | 按钮 | MainWindow | 是 | 否 | 是 | 界面变化：QPushButton(): text='静音' checked=0 enabled=1 visible=0 -> text='静音' checked=1 enabled=1 visible=0；QLabel(statusValue): text='48' visible=0 -> text='0' visible=0 | 可用 |
+| 频谱 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；界面变化：QLabel(): text='Max' visible=0 -> text='Max' visible=1；QLabel(): text='Min' visible=0 -> text='Min' visible=1；QPushButton(planetariumWaterfall): text='频谱' checked=0 enabled=1 visible=1 -> text='频谱' checked=1 enabled=1 visible=1；QLabel(): text='98.500 MHz' visible=0 -> text='98.500 MHz' visible=1；QToolButton(spectrumMoreButton): text='更多' checked=0 enabled=1 visible=0 -> text='更多' checked=0 enabled=1 visible=1 | 可用 |
+| 🎤 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；状态栏：语音输入未配置（接麦克风后可用） | 可用 |
 | 🎯 跟踪 | 按钮 | MainWindow | 否 | 否 | 是 | — | 诚实禁用 |
-| 📡 调到该星 | 按钮 | MainWindow | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 0；切页签 QTabWidget -> 0；— | 诚实禁用 |
+| 📍 地点 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；状态栏：地点面板已打开：可搜索城市 / 地图点选 / 手填经纬度 | 可用 |
+| 📡 调到该星 | 按钮 | MainWindow | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；— | 诚实禁用 |
 | 📷 摄像机 | 按钮 | MainWindow | 否 | 否 | 是 | — | 诚实禁用 |
+| 🔍 找星 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；状态栏：输入天体名：ISS / Vega / 木星 / M42；↑↓ 选择，回车定位 | 可用 |
+| 🕒 时间 | 按钮 | MainWindow | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；对话框：时间机器；界面变化：QLabel(statusValue): text='-16.7 dBFS' visible=0 -> text='-19.4 dBFS' visible=0；QLabel(statusValue): text='-17 dBFS' visible=0 -> text='-19 dBFS' visible=0 | 可用 |
 | 🛰 云台 | 按钮 | MainWindow | 否 | 否 | 是 | — | 诚实禁用 |
 | 应用该解调链 | 按钮 | ModulationPanel | 否 | 否 | 是 | — | 诚实禁用 |
 | 识别信号 | 按钮 | ModulationPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 7；切页签 QTabWidget -> 7；— | 诚实禁用 |
-| 刷新 | 按钮 | ModulePanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 3；切页签 QTabWidget -> 3；界面变化：QPushButton(): text='刷新' checked=0 enabled=1 visible=0 -> text='已刷新' checked=0 enabled=1 visible=0 | 可用 |
-| 连接 | 按钮 | ModulePanel | 否 | 否 | 是 | — | 诚实禁用（理由未登记） |
+| 已刷新 | 按钮 | ModulePanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 3；切页签 QTabWidget -> 3；界面变化：QLabel(): text='rtlsdr\n频率范围 24.0 MHz–1.76 GHz（声明）｜采样率 225.0 kHz–3.20 MHz（声明）｜增益 0.0–49.6 dB（声明）｜带宽 未知（原生枚举未查询带宽）｜发射 未知（原生枚举未查询 TX 通道）｜天线' visible=0 -> text='正在枚举设备…' visible=0；QPushButton(): text='刷新' checked=0 enabled=1 visible=0 -> text='刷新' checked=0 enabled=0 visible=0 | 可用 |
+| 连接 | 按钮 | ModulePanel | 是 | 否 | 是 | 状态栏：正在连接 RTL-SDR #0 ...；弹窗：提示「已选择设备」RTL-SDR #0 (FC0012)<br>（真实连接由后端完成）；界面变化：QLabel(statusValue): text='设备: —' visible=0 -> text='设备: RTL-SDR #0' visible=0；QLabel(): text='  状态: 未连接  ' visible=0 -> text='  状态: RTL-SDR #0  ' visible=0；QPushButton(): text='连接' checked=0 enabled=1 visible=0 -> text='连接' checked=0 enabled=0 visible=0；QLabel(statusValue): text='等待数据' visible=0 -> text='接收中' visible=0；QPushButton(): text='静音' checked=0 enabled=0 visible=0 -> text='静音' checked=0 enabled=1 visible=0 | 可用 |
 | 保存当前图像为 PNG | 按钮 | SatelliteImagePanel | 否 | 否 | 是 | — | 诚实禁用 |
 | 停止解码 | 按钮 | SatelliteImagePanel | 否 | 否 | 是 | — | 诚实禁用 |
-| 开始解码 | 按钮 | SatelliteImagePanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 17；切页签 QTabWidget -> 17；— | 诚实禁用 |
+| 开始解码 | 按钮 | SatelliteImagePanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 18；切页签 QTabWidget -> 18；— | 诚实禁用 |
 | 取消 | 按钮 | ScannerPanel | 否 | 否 | 是 | — | 诚实禁用 |
 | 开始扫描 | 按钮 | ScannerPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 6；切页签 QTabWidget -> 6；— | 诚实禁用 |
 | 启用 Web 服务 | 按钮 | ServiceSettingsPanel | 是 | 否 | 是 | 未实时触发：绑定端口起 HTTP 服务（settings_panel） | 未实时触发（代码核对） |
 | 启用远程控制 | 按钮 | ServiceSettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 9；切页签 QTabWidget -> 9；未实时触发：起远程控制服务（settings_panel） | 未实时触发（代码核对） |
-| Max保持 | 按钮 | SpectrumPanel | 否 | 是 | 是 | — | 诚实禁用 |
-| Min保持 | 按钮 | SpectrumPanel | 否 | 是 | 是 | — | 诚实禁用 |
-| 书签 | 按钮 | SpectrumPanel | 否 | 是 | 是 | — | 诚实禁用 |
-| 峰值 | 按钮 | SpectrumPanel | 否 | 是 | 是 | — | 诚实禁用 |
-| 瀑布平滑 | 按钮 | SpectrumPanel | 否 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 2；切页签 QTabWidget -> 2；— | 诚实禁用 |
-| 调谐:中心 | 按钮 | SpectrumPanel | 否 | 是 | 是 | — | 诚实禁用 |
-| 频段 | 按钮 | SpectrumPanel | 否 | 是 | 是 | — | 诚实禁用 |
-| + VFO | 按钮 | VfoPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 10；切页签 QTabWidget -> 10；— | 诚实禁用 |
+| 恢复本组默认 | 按钮 | ServiceSettingsPanel | 是 | 否 | 是 | 前置：扰动 QSpinBox: 7356 -> 7358；界面变化：QSpinBox(): value='7358' -> value='7356'；QLineEdit(qt_spinbox_lineedit): text='7358' style='' -> text='7356' style=''；QLabel(hintLabel): text='' visible=0 -> text='已恢复本组默认值' visible=0 | 可用 |
+| 保存 | 按钮 | SettingsPanel | 是 | 否 | 是 | 文件框：输入 | 可用 |
+| 删除 | 按钮 | SettingsPanel | 否 | 否 | 是 | — | 诚实禁用 |
+| 导入配置 | 按钮 | SettingsPanel | 是 | 否 | 是 | 文件框：打开；新窗口：qtooltip_label | 可用 |
+| 导出配置 | 按钮 | SettingsPanel | 是 | 否 | 是 | 文件框：保存；新窗口：qtooltip_label | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='未来 24 小时；列表按峰值仰角 ≥ 10° 筛选（峰值低于该值的过境不列出；要列 5–10° 请打开「显示低仰角过境」）' visible=0 -> text='未来 24 小时；列表按峰值仰角 ≥ 10° 筛选；「显示低仰角过境」已开启：额外列出 5–10° 的过境并标注「低仰角」' visible=0；QLabel(hintLabel): text='已恢复默认：过境搜索窗口' visible=0 -> text='已保存：显示低仰角过境' visible=0；QCheckBox(): text='开启' checked=0 enabled=1 visible=0 -> text='开启' checked=1 enabled=1 visible=0 | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：峰值判定阈值' visible=0 -> text='已保存：标注峰值' visible=0；QCheckBox(): text='峰值' checked=1 enabled=0 visible=0 -> text='峰值' checked=0 enabled=0 visible=0；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0 | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：标注峰值' visible=0 -> text='已保存：瀑布时间平滑' visible=0；QCheckBox(): text='瀑布平滑' checked=0 enabled=0 visible=0 -> text='瀑布平滑' checked=1 enabled=0 visible=0；QCheckBox(): text='开启' checked=0 enabled=1 visible=0 -> text='开启' checked=1 enabled=1 visible=0 | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：瀑布时间平滑' visible=0 -> text='已保存：显示书签旗标' visible=0；QCheckBox(): text='书签' checked=1 enabled=0 visible=0 -> text='书签' checked=0 enabled=0 visible=0；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0 | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：显示书签旗标' visible=0 -> text='已保存：显示频段彩带' visible=0；QCheckBox(): text='频段' checked=1 enabled=0 visible=0 -> text='频段' checked=0 enabled=0 visible=0；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0 | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；切页签 QTabWidget -> 1；新窗口：qtooltip_label；界面变化：QLabel(statusValue): text='设备: —' visible=1 -> text='设备: —' visible=0；QPushButton(): text='切换主听' checked=0 enabled=1 visible=1 -> text='切换主听' checked=0 enabled=1 visible=0；QLabel(): text='  状态: 未连接  ' visible=1 -> text='  状态: 未连接  ' visible=0；QToolButton(qt_toolbar_ext_button): text='' checked=0 enabled=1 visible=1 -> text='' checked=0 enabled=1 visible=0；QLabel(statusValue): text='带宽: —' visible=1 -> text='带宽: —' visible=0 | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 状态栏：已归位「AI 助手」；界面变化：QStackedWidget(qt_tabwidget_stackedwidget): idx=10 -> idx=2；QLabel(hintLabel): text='已恢复默认：专注页面（默认极简）' visible=0 -> text='已保存：自由窗口（面板可拖出）' visible=0；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0；QTabWidget(): idx=10 -> idx=2；QToolButton(topBarAction): text='⧉' checked=0 enabled=1 visible=1 -> text='⧉' checked=0 enabled=1 visible=0 | 可用 |
+| 开启 | 按钮 | SettingsPanel | 是 | 否 | 是 | 界面变化：QLabel(hintLabel): text='已恢复默认：主题' visible=0 -> text='已保存：显示瀑布图' visible=0；QCheckBox(): text='开启' checked=0 enabled=1 visible=0 -> text='开启' checked=1 enabled=1 visible=0 | 可用 |
+| 恢复全部默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 状态栏：观测位置已清空：天空回到未定位空态；界面变化：QLabel(hintLabel): text='已恢复默认：GNSS 波特率' visible=0 -> text='已恢复全部默认' visible=0 | 可用 |
+| 打开目录 | 按钮 | SettingsPanel | 是 | 否 | 是 | 状态栏：录音目录不存在：C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_mis4lhxj\home\MBDSDR\reco；新窗口：qtooltip_label | 可用 |
+| 打开配置目录 | 按钮 | SettingsPanel | 是 | 否 | 是 | 状态栏：无法打开目录（系统拒绝请求）：C:\Users\xxhzb\AppData\Local\Temp\mbdsdr_audit_mis4lhxj\home/.mbd；新窗口：qtooltip_label | 可用 |
+| 选择目录… | 按钮 | SettingsPanel | 是 | 否 | 是 | 文件框：选目录；新窗口：qtooltip_label | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 6；切页签 QTabWidget -> 6；切堆栈 QStackedWidget -> 10；切页签 QTabWidget -> 10；新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='' visible=0 -> text='已恢复默认：录音目录' visible=0；QComboBox(): idx=3 text='CarWith 深色' -> idx=4 text='Figma 深色'；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0；QComboBox(): idx=0 text='自动检测' -> idx=2 text='强制鼠标'；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：录音目录' visible=0 -> text='已恢复默认：日志级别' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 5；切页签 QTabWidget -> 5；新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：日志级别' visible=0 -> text='已恢复默认：回答随机度（temperature）' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：回答随机度（temperature）' visible=0 -> text='已恢复默认：采样截断（top_p）' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：采样截断（top_p）' visible=0 -> text='已恢复默认：单次回答长度上限' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：单次回答长度上限' visible=0 -> text='已恢复默认：上下文窗口' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：上下文窗口' visible=0 -> text='已恢复默认：请求超时（秒）' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 4；切页签 QTabWidget -> 4；状态栏：观测位置已清空：天空回到未定位空态；新窗口：qtooltip_label；界面变化：QLabel(spacetimeObserverLabel): text='未设置' visible=0 -> text='未设置（天空按未定位空态显示）' visible=0；QLabel(hintLabel): text='已恢复默认：请求超时（秒）' visible=0 -> text='已恢复默认：地面站纬度' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 状态栏：观测位置已清空：天空回到未定位空态；新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：地面站纬度' visible=0 -> text='已恢复默认：地面站经度' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：地面站经度' visible=0 -> text='已恢复默认：过境最低仰角' visible=0；QLabel(): text='无数据' visible=0 -> text='未配置观测站位置：请在纬度/经度输入框填写地面站坐标' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：过境最低仰角' visible=0 -> text='已恢复默认：过境搜索窗口' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='未来 24 小时；列表按峰值仰角 ≥ 10° 筛选；「显示低仰角过境」已开启：额外列出 5–10° 的过境并标注「低仰角」' visible=0 -> text='未来 24 小时；列表按峰值仰角 ≥ 10° 筛选（峰值低于该值的过境不列出；要列 5–10° 请打开「显示低仰角过境」）' visible=0；QLabel(hintLabel): text='已保存：显示低仰角过境' visible=0 -> text='已恢复默认：显示低仰角过境' visible=0；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 3；切页签 QTabWidget -> 3；新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：显示低仰角过境' visible=0 -> text='已恢复默认：频谱分辨率（FFT 点数）' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：频谱分辨率（FFT 点数）' visible=0 -> text='已恢复默认：频谱窗函数' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：频谱窗函数' visible=0 -> text='已恢复默认：频谱平均帧数' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：频谱平均帧数' visible=0 -> text='已恢复默认：瀑布配色' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：瀑布配色' visible=0 -> text='已恢复默认：峰值判定阈值' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已保存：标注峰值' visible=0 -> text='已恢复默认：标注峰值' visible=0；QCheckBox(): text='峰值' checked=0 enabled=0 visible=0 -> text='峰值' checked=1 enabled=0 visible=0；QCheckBox(): text='开启' checked=0 enabled=1 visible=0 -> text='开启' checked=1 enabled=1 visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已保存：瀑布时间平滑' visible=0 -> text='已恢复默认：瀑布时间平滑' visible=0；QCheckBox(): text='瀑布平滑' checked=1 enabled=0 visible=0 -> text='瀑布平滑' checked=0 enabled=0 visible=0；QCheckBox(): text='开启' checked=1 enabled=1 visible=0 -> text='开启' checked=0 enabled=1 visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已保存：显示书签旗标' visible=0 -> text='已恢复默认：显示书签旗标' visible=0；QCheckBox(): text='书签' checked=0 enabled=0 visible=0 -> text='书签' checked=1 enabled=0 visible=0；QCheckBox(): text='开启' checked=0 enabled=1 visible=0 -> text='开启' checked=1 enabled=1 visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已保存：显示频段彩带' visible=0 -> text='已恢复默认：显示频段彩带' visible=0；QCheckBox(): text='频段' checked=0 enabled=0 visible=0 -> text='频段' checked=1 enabled=0 visible=0；QCheckBox(): text='开启' checked=0 enabled=1 visible=0 -> text='开启' checked=1 enabled=1 visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：显示频段彩带' visible=0 -> text='已恢复默认：静噪门限默认值' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：静噪门限默认值' visible=0 -> text='已恢复默认：调谐步进' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：调谐步进' visible=0 -> text='已恢复默认：瀑布历史深度' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 2；切页签 QTabWidget -> 2；新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：瀑布历史深度' visible=0 -> text='已恢复默认：当地大气压' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：当地大气压' visible=0 -> text='已恢复默认：当地气温' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：当地气温' visible=0 -> text='已恢复默认：光害等级（Bortle）' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已恢复默认：光害等级（Bortle）' visible=0 -> text='已恢复默认：大气消光系数 k' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 新窗口：qtooltip_label；界面变化：QLabel(hintLabel): text='已保存：专注页面（默认极简）' visible=0 -> text='已恢复默认：专注页面（默认极简）' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 10；切页签 QTabWidget -> 10；新窗口：AI 助手；界面变化：QLabel(hintLabel): text='已保存：自由窗口（面板可拖出）' visible=0 -> text='已恢复默认：自由窗口（面板可拖出）' visible=0；QCheckBox(): text='开启' checked=0 enabled=1 visible=0 -> text='开启' checked=1 enabled=1 visible=0；QToolButton(topBarAction): text='⧉' checked=0 enabled=1 visible=0 -> text='⧉' checked=0 enabled=1 visible=1 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 界面变化：QLabel(statusValue): text='UTC 17:49:30' visible=1 -> text='UTC 17:49:33' visible=1；QLabel(hintLabel): text='已恢复默认：自由窗口（面板可拖出）' visible=0 -> text='已恢复默认：主题' visible=0；QComboBox(): idx=4 text='Figma 深色' -> idx=3 text='CarWith 深色'；QComboBox(): idx=4 text='Figma 深色' -> idx=3 text='CarWith 深色' | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 界面变化：QLabel(hintLabel): text='已保存：显示瀑布图' visible=0 -> text='已恢复默认：显示瀑布图' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 0；切页签 QTabWidget -> 0；界面变化：QLabel(hintLabel): text='已恢复默认：显示瀑布图' visible=0 -> text='已恢复默认：界面语言' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 状态栏：触屏模式：自动检测；界面变化：QLabel(hintLabel): text='已恢复默认：界面语言' visible=0 -> text='已恢复默认：触屏适配' visible=0；QComboBox(): idx=2 text='强制鼠标' -> idx=0 text='自动检测' | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 界面变化：QLabel(hintLabel): text='已恢复默认：触屏适配' visible=0 -> text='已恢复默认：操作员呼号' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 界面变化：QLabel(hintLabel): text='已恢复默认：操作员呼号' visible=0 -> text='已恢复默认：GNSS 串口' visible=0 | 可用 |
+| 默认 | 按钮 | SettingsPanel | 是 | 否 | 是 | 界面变化：QLabel(hintLabel): text='已恢复默认：GNSS 串口' visible=0 -> text='已恢复默认：GNSS 波特率' visible=0 | 可用 |
+| Max保持 | 按钮 | SpectrumPanel | 是 | 是 | 是 | 界面变化：QCheckBox(): text='Max保持' checked=0 enabled=1 visible=1 -> text='Max保持' checked=1 enabled=1 visible=1 | 可用 |
+| Min保持 | 按钮 | SpectrumPanel | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='-9.1 dBFS' visible=0 -> text='-18.0 dBFS' visible=0；QCheckBox(): text='Min保持' checked=0 enabled=1 visible=1 -> text='Min保持' checked=1 enabled=1 visible=1；QLabel(statusValue): text='-9 dBFS' visible=0 -> text='-18 dBFS' visible=0 | 可用 |
+| 书签 | 按钮 | SpectrumPanel | 是 | 是 | 是 | 界面变化：QCheckBox(): text='书签' checked=1 enabled=1 visible=1 -> text='书签' checked=0 enabled=1 visible=1 | 可用 |
+| 峰值 | 按钮 | SpectrumPanel | 是 | 是 | 是 | 界面变化：QCheckBox(): text='峰值' checked=1 enabled=1 visible=1 -> text='峰值' checked=0 enabled=1 visible=1 | 可用 |
+| 更多 | 按钮 | SpectrumPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 1；新窗口：菜单：QMenu；界面变化：QLabel(): text='平均:' visible=0 -> text='平均:' visible=1；QLabel(peakGateLabel): text='峰值门(相对本帧中位):' visible=0 -> text='峰值门(相对本帧中位):' visible=1；QCheckBox(): text='峰值' checked=1 enabled=1 visible=0 -> text='峰值' checked=1 enabled=1 visible=1；QCheckBox(): text='瀑布平滑' checked=0 enabled=1 visible=0 -> text='瀑布平滑' checked=0 enabled=1 visible=1；QCheckBox(): text='书签' checked=1 enabled=1 visible=0 -> text='书签' checked=1 enabled=1 visible=1 | 可用 |
+| 瀑布平滑 | 按钮 | SpectrumPanel | 是 | 是 | 是 | 界面变化：QCheckBox(): text='瀑布平滑' checked=0 enabled=1 visible=1 -> text='瀑布平滑' checked=1 enabled=1 visible=1 | 可用 |
+| 调谐:中心 | 按钮 | SpectrumPanel | 是 | 是 | 是 | 界面变化：QPushButton(): text='调谐:中心' checked=1 enabled=1 visible=1 -> text='调谐:VFO' checked=0 enabled=1 visible=1 | 可用 |
+| 频段 | 按钮 | SpectrumPanel | 是 | 是 | 是 | 界面变化：QCheckBox(): text='频段' checked=1 enabled=1 visible=1 -> text='频段' checked=0 enabled=1 visible=1 | 可用 |
+| + VFO | 按钮 | VfoPanel | 否 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 11；切页签 QTabWidget -> 11；— | 诚实禁用 |
 | 循环主听 | 按钮 | VfoPanel | 否 | 否 | 是 | — | 诚实禁用 |
 | Kuwahara 降噪 | 按钮 | WeatherPanel | 是 | 否 | 是 | 界面变化：QCheckBox(): text='Kuwahara 降噪' checked=0 enabled=1 visible=0 -> text='Kuwahara 降噪' checked=1 enabled=1 visible=0 | 可用 |
 | 中值滤波 | 按钮 | WeatherPanel | 是 | 否 | 是 | 界面变化：QCheckBox(): text='中值滤波' checked=0 enabled=1 visible=0 -> text='中值滤波' checked=1 enabled=1 visible=0 | 可用 |
@@ -168,22 +232,35 @@
 | 白平衡 | 按钮 | WeatherPanel | 是 | 否 | 是 | 界面变化：QCheckBox(): text='白平衡' checked=0 enabled=1 visible=0 -> text='白平衡' checked=1 enabled=1 visible=0 | 可用 |
 | 直方图均衡 | 按钮 | WeatherPanel | 是 | 否 | 是 | 界面变化：QCheckBox(): text='直方图均衡' checked=0 enabled=1 visible=0 -> text='直方图均衡' checked=1 enabled=1 visible=0 | 可用 |
 | 选择录制文件... | 按钮 | WeatherPanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 4；切页签 QTabWidget -> 4；文件框：打开 | 可用 |
-| 刷新过境 | 按钮 | newSpacetimePanel | 是 | 否 | 是 | 界面变化：QLabel(): text='无数据' -> text='未获取到卫星 TLE（离线或无网络），无法计算过境' | 可用 |
+| 刷新过境 | 按钮 | newSpacetimePanel | 是 | 否 | 是 | 界面变化：QPushButton(): text='刷新过境' checked=0 enabled=1 visible=0 -> text='更新中…' checked=0 enabled=0 visible=0 | 可用 |
 | 开始分析 | 按钮 | newSpacetimePanel | 是 | 否 | 是 | 前置：切堆栈 QStackedWidget -> 5；切页签 QTabWidget -> 5；界面变化：QPushButton(): text='开始分析' checked=0 enabled=1 visible=0 -> text='停止分析' checked=1 enabled=1 visible=0 | 可用 |
-| 停止跟踪 | 按钮 | satTrackPanel | 否 | 是 | 是 | — | 诚实禁用 |
-| 开始跟踪 | 按钮 | satTrackPanel | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 1；切页签 QTabWidget -> 1；未实时触发：按秒轮询硬件指向（sat_track_panel.start_tracking）；真跑会起定时器并写后端 | 未实时触发（代码核对） |
-| 更新 TLE | 按钮 | satTrackPanel | 是 | 是 | 是 | 未实时触发：联网拉 Celestrak TLE（sat_track_panel） | 未实时触发（代码核对） |
-| Cancel | 按钮 | 对话框:AI 配置 | 是 | 是 | 是 | 前置：打开对话框 AI 配置；界面变化：QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0；QDialog(AI 配置): visible=1 -> visible=0 | 可用 |
-| OK | 按钮 | 对话框:AI 配置 | 是 | 是 | 是 | 前置：打开对话框 AI 配置；界面变化：QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0；QDialog(AI 配置): visible=1 -> visible=0 | 可用 |
+| 更改地点… | 按钮 | newSpacetimePanel | 是 | 否 | 是 | 状态栏：地点面板已打开：可搜索城市 / 地图点选 / 手填经纬度；新窗口：选择观测地点 | 可用 |
+| 停止跟踪 | 按钮 | satTrackPanel | 否 | 否 | 是 | — | 诚实禁用 |
+| 开始跟踪 | 按钮 | satTrackPanel | 是 | 否 | 是 | 未实时触发：按秒轮询硬件指向（sat_track_panel.start_tracking）；真跑会起定时器并写后端 | 未实时触发（代码核对） |
+| 更新 TLE | 按钮 | satTrackPanel | 是 | 否 | 是 | 未实时触发：联网拉 Celestrak TLE（sat_track_panel） | 未实时触发（代码核对） |
 | 拉取挂载点列表 | 按钮 | 对话框:NTRIP 设置 | 是 | 是 | 是 | 未实时触发：发起 NTRIP 网络请求（ntrip_panel） | 未实时触发（代码核对） |
 | 断开 | 按钮 | 对话框:NTRIP 设置 | 否 | 是 | 是 | — | 诚实禁用 |
 | 连接 | 按钮 | 对话框:NTRIP 设置 | 是 | 是 | 是 | 弹窗：警告「无法连接」请填写 Caster Host 与 Mountpoint。 | 可用 |
-| Cancel | 按钮 | 对话框:连接 GNSS | 是 | 是 | 是 | 前置：打开对话框 连接 GNSS；界面变化：QDialog(连接 GNSS): visible=1 -> visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0 | 可用 |
-| OK | 按钮 | 对话框:连接 GNSS | 是 | 是 | 是 | 前置：打开对话框 连接 GNSS；界面变化：QDialog(连接 GNSS): visible=1 -> visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0 | 可用 |
-| Cancel | 按钮 | 对话框:选择 SDR 设备 | 是 | 是 | 是 | 前置：打开对话框 选择 SDR 设备；界面变化：QCheckBox(): text='Offset Tuning（直流抵消）' checked=0 enabled=1 visible=1 -> text='Offset Tuning（直流抵消）' checked=0 enabled=1 visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='刷新设备列表' checked=0 enabled=1 visible=1 -> text='刷新设备列表' checked=0 enabled=1 visible=0；QDialog(选择 SDR 设备): visible=1 -> visible=0；QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0 | 可用 |
-| OK | 按钮 | 对话框:选择 SDR 设备 | 是 | 是 | 是 | 界面变化：QCheckBox(): text='Offset Tuning（直流抵消）' checked=0 enabled=1 visible=1 -> text='Offset Tuning（直流抵消）' checked=0 enabled=1 visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='刷新设备列表' checked=0 enabled=1 visible=1 -> text='刷新设备列表' checked=0 enabled=1 visible=0；QDialog(选择 SDR 设备): visible=1 -> visible=0；QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0 | 可用 |
+| 关闭 | 按钮 | 对话框:帮助与能力目录 | 是 | 是 | 是 | 界面变化：QLabel(): text='共 43 项，其中 33 项已配键；键位与菜单显示一致' visible=1 -> <已销毁（关闭/删除）>；QToolButton(ScrollLeftButton): text='' checked=0 enabled=0 visible=0 -> <已销毁（关闭/删除）>；QLineEdit(): text='' style='' -> <已销毁（关闭/删除）>；QLabel(): text='没有匹配的快捷键。换个关键词试试（例如「录音」「卫星」），或清空搜索框。' visible=0 -> <已销毁（关闭/删除）>；QLabel(): text='条目逐字取自 error_catalog 的真实错误；下一步必须点到具体控件名或设置项键名，写「请检查配置」这类空话会被测试拦下。' visible=0 -> <已销毁（关闭/删除）> | 可用 |
+| 打开能力目录 | 按钮 | 对话框:帮助与能力目录 | 是 | 是 | 是 | 界面变化：QPushButton(): text='查看快捷键一览' checked=0 enabled=1 visible=1 -> text='查看快捷键一览' checked=0 enabled=1 visible=0；QStackedWidget(qt_tabwidget_stackedwidget): idx=0 -> idx=1；QLabel(): text='本目录由注册表实时生成：面板 / 解调模式 / 数字解码能力表 / 长尾解码器 / AI 工具域 / 快捷键。新增能力会自动出现；标「暂不可用」的条目按原因处理，不会点了没反应。' visible=0 -> text='本目录由注册表实时生成：面板 / 解调模式 / 数字解码能力表 / 长尾解码器 / AI 工具域 / 快捷键。新增能力会自动出现；标「暂不可用」的条目按原因处理，不会点了没反应。' visible=1；QPushButton(): text='打开能力目录' checked=0 enabled=1 visible=1 -> text='打开能力目录' checked=0 enabled=1 visible=0；QLabel(): text='显示 53 / 共 53 项 · 可用 47 · 有条件 2 · 暂不可用 4' visible=0 -> text='显示 53 / 共 53 项 · 可用 47 · 有条件 2 · 暂不可用 4' visible=1 | 可用 |
+| 查看快捷键一览 | 按钮 | 对话框:帮助与能力目录 | 是 | 是 | 是 | 前置：切堆栈 QStackedWidget -> 0；切页签 QTabWidget -> 0；对话框：快捷键一览；新窗口：快捷键一览 | 可用 |
+| 全部恢复默认 | 按钮 | 对话框:快捷键一览 | 否 | 是 | 是 | — | 诚实禁用 |
+| 关闭 | 按钮 | 对话框:快捷键一览 | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='-17.7 dBFS' visible=0 -> text='-21.2 dBFS' visible=0；QLabel(): text='共 43 项，其中 33 项已配键；键位与菜单显示一致' visible=1 -> <已销毁（关闭/删除）>；QPushButton(): text='关闭' checked=0 enabled=1 visible=1 -> <已销毁（关闭/删除）>；QLineEdit(): text='' style='' -> <已销毁（关闭/删除）>；QPushButton(): text='全部恢复默认' checked=0 enabled=0 visible=1 -> <已销毁（关闭/删除）> | 可用 |
+| 恢复默认 | 按钮 | 对话框:快捷键一览 | 否 | 是 | 是 | — | 诚实禁用 |
+| 改键… | 按钮 | 对话框:快捷键一览 | 否 | 是 | 是 | — | 诚实禁用 |
+| +1 天 | 按钮 | 对话框:时间机器 | 是 | 是 | 是 | 界面变化：QLabel(statusValue): text='-21.2 dBFS' visible=0 -> text='-17.5 dBFS' visible=0；QLineEdit(qt_spinbox_lineedit): text='2026-11-09  01:49:36' style='' -> text='2026-11-10  01:49:36' style=''；QDateTimeEdit(): value='2026-11-09  01:49:36' -> value='2026-11-10  01:49:36'；QLabel(tmHint): text='模拟中 · 比现在 −1 天' visible=1 -> text='当前就是现在（实时）' visible=1；QLabel(statusValue): text='-21 dBFS' visible=0 -> text='-17 dBFS' visible=0 | 可用 |
+| +1 小时 | 按钮 | 对话框:时间机器 | 是 | 是 | 是 | 界面变化：QLineEdit(qt_spinbox_lineedit): text='2026-11-09  00:49:36' style='' -> text='2026-11-09  01:49:36' style=''；QDateTimeEdit(): value='2026-11-09  00:49:36' -> value='2026-11-09  01:49:36'；QLabel(tmHint): text='模拟中 · 比现在 −1 天 1 小时' visible=1 -> text='模拟中 · 比现在 −1 天' visible=1 | 可用 |
+| −1 天 | 按钮 | 对话框:时间机器 | 是 | 是 | 是 | 前置：打开对话框 时间机器；界面变化：QLineEdit(qt_spinbox_lineedit): text='2026-11-10  01:49:36' style='' -> text='2026-11-09  01:49:36' style=''；QDateTimeEdit(): value='2026-11-10  01:49:36' -> value='2026-11-09  01:49:36'；QLabel(tmHint): text='当前就是现在（实时）' visible=1 -> text='模拟中 · 比现在 −1 天' visible=1；QLabel(): text='RBW 1171.88 Hz · 瀑布 3.58317 s' visible=0 -> text='RBW 1171.88 Hz · 瀑布 3.76324 s' visible=0 | 可用 |
+| −1 小时 | 按钮 | 对话框:时间机器 | 是 | 是 | 是 | 界面变化：QLineEdit(qt_spinbox_lineedit): text='2026-11-09  01:49:36' style='' -> text='2026-11-09  00:49:36' style=''；QDateTimeEdit(): value='2026-11-09  01:49:36' -> value='2026-11-09  00:49:36'；QLabel(tmHint): text='模拟中 · 比现在 −1 天' visible=1 -> text='模拟中 · 比现在 −1 天 1 小时' visible=1 | 可用 |
+| 今夜 | 按钮 | 对话框:时间机器 | 否 | 是 | 是 | — | 诚实禁用 |
+| 回到现在 | 按钮 | 对话框:时间机器 | 是 | 是 | 是 | 界面变化：QLabel(tmHint): text='当前就是现在（实时）' visible=1 -> text='已在现在 · 实时' visible=1 | 可用 |
+| 跳过去 | 按钮 | 对话框:时间机器 | 是 | 是 | 是 | 状态栏：时刻已回到此刻 11-10 01:49（实时）；界面变化：QDialog(时间机器): visible=1 -> visible=0；QPushButton(): text='+1 天' checked=0 enabled=1 visible=1 -> text='+1 天' checked=0 enabled=1 visible=0；QPushButton(): text='+1 小时' checked=0 enabled=1 visible=1 -> text='+1 小时' checked=0 enabled=1 visible=0；QPushButton(): text='−1 小时' checked=0 enabled=1 visible=1 -> text='−1 小时' checked=0 enabled=1 visible=0；QLabel(tmHint): text='跳到任意时刻看那时的天空 · 观测条件设定，不是观测数据' visible=1 -> text='跳到任意时刻看那时的天空 · 观测条件设定，不是观测数据' visible=0 | 可用 |
+| Cancel | 按钮 | 对话框:连接 GNSS | 是 | 是 | 是 | 前置：打开对话框 连接 GNSS；界面变化：QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0；QLabel(): text='波特率:' visible=1 -> text='波特率:' visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QDialog(连接 GNSS): visible=1 -> visible=0；QLabel(): text='串口号:' visible=1 -> text='串口号:' visible=0 | 可用 |
+| OK | 按钮 | 对话框:连接 GNSS | 是 | 是 | 是 | 前置：打开对话框 连接 GNSS；界面变化：QPushButton(): text='OK' checked=0 enabled=1 visible=1 -> text='OK' checked=0 enabled=1 visible=0；QLabel(): text='波特率:' visible=1 -> text='波特率:' visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QDialog(连接 GNSS): visible=1 -> visible=0；QLabel(): text='串口号:' visible=1 -> text='串口号:' visible=0 | 可用 |
+| Cancel | 按钮 | 对话框:选择 SDR 设备 | 是 | 是 | 是 | 前置：打开对话框 选择 SDR 设备；界面变化：QLabel(): text='增益' visible=1 -> text='增益' visible=0；QLabel(): text='采样率' visible=1 -> text='采样率' visible=0；QLabel(deviceResultLabel): text='检测到 1 台 SDR 设备' visible=1 -> text='检测到 1 台 SDR 设备' visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='刷新设备列表' checked=0 enabled=1 visible=1 -> text='刷新设备列表' checked=0 enabled=1 visible=0 | 可用 |
+| OK | 按钮 | 对话框:选择 SDR 设备 | 是 | 是 | 是 | 界面变化：QLabel(): text='增益' visible=1 -> text='增益' visible=0；QLabel(): text='采样率' visible=1 -> text='采样率' visible=0；QLabel(deviceResultLabel): text='检测到 1 台 SDR 设备' visible=1 -> text='检测到 1 台 SDR 设备' visible=0；QPushButton(): text='Cancel' checked=0 enabled=1 visible=1 -> text='Cancel' checked=0 enabled=1 visible=0；QPushButton(): text='刷新设备列表' checked=0 enabled=1 visible=1 -> text='刷新设备列表' checked=0 enabled=1 visible=0 | 可用 |
 | Offset Tuning（直流抵消） | 按钮 | 对话框:选择 SDR 设备 | 是 | 否 | **否** | 无 clicked/toggled 槽；布尔值在 `_connect_dialog` 里经 `offset_chk.isChecked()` 读取后下发后端（main_window.py 设备参数区） | 输入控件（无独立槽，值被下游读取） |
-| 刷新设备列表 | 按钮 | 对话框:选择 SDR 设备 | 是 | 是 | 是 | 前置：打开对话框 选择 SDR 设备；状态栏：未发现 SDR 设备（请检查 USB/驱动后点刷新）；界面变化：QPushButton(): text='已刷新' checked=0 enabled=1 visible=0 -> text='刷新' checked=0 enabled=1 visible=0 | 可用 |
+| 刷新设备列表 | 按钮 | 对话框:选择 SDR 设备 | 是 | 是 | 是 | 前置：打开对话框 选择 SDR 设备；界面变化：QLabel(statusValue): text='-18.7 dBFS' visible=0 -> text='-19.1 dBFS' visible=0；QPushButton(): text='✓' checked=0 enabled=1 visible=0 -> <已销毁（关闭/删除）>；QPushButton(): text='删' checked=0 enabled=1 visible=0 -> <已销毁（关闭/删除）>；QPushButton(): text='静音' checked=0 enabled=1 visible=0 -> <已销毁（关闭/删除）> | 可用 |
 | 启用自动增益 (AGC) | 按钮 | 对话框:选择 SDR 设备 | 是 | 否 | **否** | 无 clicked/toggled 槽；布尔值在 `_connect_dialog` 里经 `agc_chk.isChecked()` 读取后下发后端（main_window.py 设备参数区） | 输入控件（无独立槽，值被下游读取） |
 
 ## 未覆盖项（如实列出，不计入通过）
