@@ -26,6 +26,7 @@ import csv
 import datetime as _dt
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import sys as _sys
@@ -140,10 +141,15 @@ def _parse_dso() -> tuple[list[dict], dict]:
 
 
 def _parse_hyg() -> tuple[list[list[int]], dict, dict]:
-    """HYG v4.1 → 紧凑定点数组 [ra_mdeg, dec_mdeg, mag_centi, bv_centi]。
+    """HYG v4.1 → 紧凑定点数组
+    [ra_mdeg, dec_mdeg, mag_centi, bv_centi, pmra_masyr, pmdec_masyr]。
 
-    紧凑编码是为了让「全天」真的能塞进单文件 HTML：25k 星 × ~24B。
+    紧凑编码是为了让「全天」真的能塞进单文件 HTML：25k 星 × ~30B。
     所有数值来自 CSV 实测，不生成、不插值、不补齐。
+
+    自行（2026-11-09 接真）：pmra = μα·cosδ、pmdec = μδ，单位 mas/yr（HYG 口径），
+    取整到 1 mas/yr（0.5 mas/yr 量化误差 × 26 yr ≈ 0.013″，屏幕不可见）。
+    缺测（空字段）记 0 —— 不是「造一个自行」，是「该星无自行数据，不推进」。
     """
     if not HYG_CSV.is_file():
         raise RuntimeError(
@@ -155,9 +161,10 @@ def _parse_hyg() -> tuple[list[list[int]], dict, dict]:
     stars: list[list[int]] = []
     bands: dict[str, int] = {}
     proper: dict[str, list] = {}
+    pm_nonzero = 0
     with HYG_CSV.open(encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-        need = {"ra", "dec", "mag", "ci", "proper"}
+        need = {"ra", "dec", "mag", "ci", "proper", "pmra", "pmdec"}
         assert need.issubset(set(reader.fieldnames or [])), "HYG 字段缺失"
         for row in reader:
             try:
@@ -172,12 +179,22 @@ def _parse_hyg() -> tuple[list[list[int]], dict, dict]:
             assert 0 <= ra < 360 and -90 <= dec <= 90, f"HYG 坐标越界 {ra},{dec}"
             ci_raw = row.get("ci", "")
             bv = float(ci_raw) if ci_raw not in ("", None) else 0.6
-            # 定点：坐标 0.001°，星等/B-V 0.01 等（足够屏幕渲染，误差不可见）
+
+            def _pm(key: str) -> int:
+                v = row.get(key, "")
+                if v in ("", None):
+                    return 0
+                return round(float(v))
+            pmra, pmdec = _pm("pmra"), _pm("pmdec")
+            if pmra or pmdec:
+                pm_nonzero += 1
+            # 定点：坐标 0.001°，星等/B-V 0.01 等，自行 1 mas/yr（屏幕渲染足够）
             stars.append([round(ra * 1000), round(dec * 1000),
-                          round(mag * 100), round(bv * 100)])
+                          round(mag * 100), round(bv * 100), pmra, pmdec])
             if row.get("proper"):
                 proper[row["proper"]] = [round(ra * 1000), round(dec * 1000),
-                                         round(mag * 100), round(bv * 100)]
+                                         round(mag * 100), round(bv * 100),
+                                         pmra, pmdec]
     for cut in (1, 2, 3, 4, 5, 6, 6.5, 7, 7.5):
         bands[f"mag<={cut}"] = sum(1 for s in stars if s[2] / 100 <= cut)
     info = {
@@ -189,8 +206,48 @@ def _parse_hyg() -> tuple[list[list[int]], dict, dict]:
         "cutoff": MAG_CUTOFF,
         "totalRowsInFile": sum(1 for _ in HYG_CSV.open(encoding="utf-8")) - 1,
         "bands": bands,
+        "properMotion": {
+            "convention": "pmra = μα·cosδ, pmdec = μδ; mas/yr (HYG); rounded to 1 mas/yr",
+            "nonZeroCount": pm_nonzero,
+            "encoding": "star[4]=pmra_masyr, star[5]=pmdec_masyr (0 = no data, not propagated)",
+        },
     }
     return stars, info, proper
+
+
+def _attach_named_pm(named: list[dict], sky: list[list[int]]) -> int:
+    """把 repo 命名亮星按最近角位置匹配到 HYG，取其实测自行。
+
+    repo stars.py 与 HYG 同为 J2000，亮星位置应在角分级一致。用 0.1° 网格桶
+    做近邻查找（O(N) 而非 O(N×M)），匹配半径 0.3°；匹配不到记 pm=0（无数据不推进，
+    绝不臆造）。返回成功匹配数，供 meta 如实登记。
+    """
+    buckets: dict[tuple[int, int], list[list[int]]] = {}
+    for s in sky:
+        ra, dec = s[0] / 1000.0, s[1] / 1000.0
+        buckets.setdefault((round(ra * 10), round(dec * 10)), []).append(s)
+    matched = 0
+    for star in named:
+        ra, dec = star["ra"], star["dec"]
+        gx, gy = round(ra * 10), round(dec * 10)
+        best, best_sep = None, 1e9
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for s in buckets.get((gx + dx, gy + dy), ()):
+                    sra, sdec = s[0] / 1000.0, s[1] / 1000.0
+                    ddec = math.radians(sdec - dec)
+                    dra = math.radians(sra - ra)
+                    a = (math.sin(ddec / 2) ** 2 + math.cos(math.radians(dec))
+                         * math.cos(math.radians(sdec)) * math.sin(dra / 2) ** 2)
+                    sep = 2 * math.asin(min(1.0, math.sqrt(a)))
+                    if sep < best_sep:
+                        best_sep, best = sep, s
+        if best is not None and best_sep <= math.radians(0.3):
+            star["pmra"], star["pmdec"] = best[4], best[5]
+            matched += 1
+        else:
+            star["pmra"], star["pmdec"] = 0, 0
+    return matched
 
 
 def main() -> None:
@@ -203,6 +260,8 @@ def main() -> None:
     for s in named:
         s["zh"] = (culture.get(s["n"]) or {}).get("zh", "")
         s["note"] = (culture.get(s["n"]) or {}).get("note", "")
+
+    named_pm_matched = _attach_named_pm(named, sky)
 
     known = {s["n"] for s in named}
     missing = sorted({n for segs in lines.values() for pair in segs for n in pair} - known)
@@ -219,6 +278,16 @@ def main() -> None:
         "magMin": min(s[2] / 100 for s in sky),
         "magMax": max(s[2] / 100 for s in sky),
         "hyg": hyg_info,
+        "properMotion": {
+            "source": "HYG v4.1 pmra/pmdec (mas/yr, ICRS J2000); 实测，缺测记 0",
+            "starEncoding": "star[4]=pmra_masyr, star[5]=pmdec_masyr",
+            "namedMatched": named_pm_matched,
+            "namedTotal": len(named),
+            "propagation": "前端线性 RA/Dec 漂移（标准星象仪显示近似）；"
+                           "skyfield 1.54 严格空间运动（含视差/视向速度）跨语言对拍，"
+                           "渲染星群（V≤7.5）实测 worst 残差 0.35″（Lalande 21185 @2051，"
+                           "权威值见 proper-motion-golden.json meta.worstResidualArcsec）",
+        },
         "repoSource": "MBDSDR mbdsdr_ai/skyengine/{stars,constellations}.py · "
                       "mbdsdr_ai/data/dso_catalog.json · mbdsdr_ai/data/*_culture.json",
         "dsoSource": dso_meta,
@@ -230,9 +299,10 @@ def main() -> None:
         "agpl": "未使用 stellarium-web-engine 的星表/源码/贴图（AGPL-3.0）；"
                 "仅参考球面投影与视觉适应机制。",
         "discipline": "未收录天体不画；无随机星点；无装饰性银河（无数据·不提供）；"
-                      "星位固定 J2000，动的是视角/FOV/时间。",
+                      "星位 J2000 + 实测自行推进到当前历元，动的是视角/FOV/时间。",
         "notVerified": [
-            "坐标链：已接仓库 celestial_geometry 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST（14-astro-frame.js，跨语言金标准对拍）；恒星自行仍未计、章动非完整 77 项、忽略 ΔT/折射/视差",
+            "坐标链：已接仓库 celestial_geometry 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST（14-astro-frame.js，跨语言金标准对拍）；恒星自行已接 HYG 实测 pmra/pmdec（线性近似，skyfield 严格空间运动对拍，渲染星群实测 worst 残差 0.35″@2051）；章动非完整 77 项、忽略 ΔT/折射/站址视差",
+            "恒星自行用线性 RA/Dec 漂移近似（标准星象仪显示口径），忽略透视加速度/视差长期项；渲染星群（V≤7.5）对 skyfield 严格解实测 worst 残差 0.35″（Lalande 21185 @2051）、2026 历元 <0.1″；Barnard's/Kapteyn's（V>7.5）不在渲染星表故未抽样；不用于毫角秒级定轨",
             "仓库岁差矩阵在 J2000 留有约 5.3 角秒常数项旋转（zeta_A/z_A 常数项 + rot_z 负角约定），未归一化；对 UI 可忽略",
             "天空亮度→极限星等：原仓库 limitations L24 明确未做；"
             "Web 的 FOV 相关门限是自研显示门限（设计项，未验证），非望远镜口径增益",
@@ -252,7 +322,7 @@ def main() -> None:
     (ROOT / "src/12-sky-catalog.js").write_text(
         "/* 由 build/sync_sky_catalog.py 生成；勿手改。\n"
         " * HYG v4.1 全天星场（CC BY-SA 4.0）+ MBDSDR 仓库命名/连线/DSO。\n"
-        " * 无随机星点、无装饰银河；星位固定 J2000，动的是视角与时间。 */\n"
+        " * 无随机星点、无装饰银河；星位 J2000 + HYG 实测自行推进到当前历元，动的是视角/FOV/时间。 */\n"
         "(function (g) {\n  \"use strict\";\n"
         "  var MB = g.MBDSDR || (g.MBDSDR = {});\n"
         f"  MB.SKYCAT = {payload};\n"
@@ -278,6 +348,8 @@ def main() -> None:
         f"| SHA256 | `{hyg_info['sha256']}` |",
         f"| 许可 | {hyg_info['license']}（{meta['licenseNote']}） |",
         f"| 历元 | {hyg_info['epoch']}；文件 RA 单位={hyg_info['raUnitInFile']} |",
+        f"| 恒星自行 | HYG 实测 pmra/pmdec（mas/yr）；非零 {hyg_info['properMotion']['nonZeroCount']:,} 颗；"
+        f"命名亮星匹配 {named_pm_matched}/{len(named)}（最近角位置 ≤0.3°，缺测记 0） |",
         f"| 命名亮星 | {meta['namedCount']} 颗（仓库 `stars.py`/`constellations.py`，含中文星官） |",
         f"| 星座 | {meta['constellationCount']} 座 / {meta['segmentCount']} 段连线（端点全部可查） |",
         f"| DSO | {meta['dsoCount']} 条（类型符号，非形态还原） |",
@@ -300,7 +372,13 @@ def main() -> None:
         "",
         "## 渲染口径",
         "",
-        "- 恒星位置固定 J2000 赤道坐标；**星星不移动、不飞散、无独立角速度**。",
+        "- 恒星 catalog 位置是 J2000 赤道坐标 + HYG 实测自行（pmra/pmdec）；"
+        "每帧把星位线性推进到当前模拟历元（`δ+=μδ·Δt`、`α+=μα·Δt/cosδ`，近极保护），"
+        "再走岁差/章动/LST 到地平。**星星不飞散、不平移、无独立角速度**——"
+        "自行是几十年尺度的缓慢漂移（2026 距 J2000 共 26 年，最快星 Barnard 约 4.5′），"
+        "不是动画；周日视运动仍是整个天球随 LST 刚性旋转。",
+        "- 自行推进按**历元桶**缓存（漂移 >0.25 年才重算一次三角表），"
+        "每帧热点仍只做总矩阵乘法，不逐星逐帧三角（守住 P0 渲染性能）。",
         "- 每帧：模拟时刻 → JD → GMST → 地方恒星时 LST → 时角 → 地平 az/alt",
         "  → 视图空间 (X,Y,Z) → **全屏平面投影**：≤88° 针孔透视 `x=X/Z·f`，"
         "更大 FOV 立体投影 `r=2·tan(θ/2)`。",

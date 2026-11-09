@@ -428,6 +428,60 @@ for _f, _bad in (("run_all.py", "但坐标链为 J2000 直算 LST"),
 print("[9.6] 天文框架：仓库 IAU2006 岁差 + IAU2000B 章动 + Capitaine GMST / "
       "基变换 Q / 跨语言金标准 / 太阳 of-date 专用链 / TEME 逆岁差 / 旧单位错误守卫")
 
+# ---------- 9.6.1 恒星自行：HYG 实测 pmra/pmdec + 历元桶 + skyfield 独立金标准 ----------
+# catalog 必须把自行编码进星数组（6 元素），命名星必须带 pmra/pmdec。
+_pm_meta = meta.get("properMotion", {})
+if not _pm_meta or "star[4]=pmra" not in _pm_meta.get("starEncoding", ""):
+    fail("[pm] sky-catalog meta 缺 properMotion 编码口径（star[4]=pmra/star[5]=pmdec）")
+_stars = CAT.get("stars", [])
+if _stars and len(_stars[0]) != 6:
+    fail(f"[pm] 星数组不是 6 元素（含 pmra/pmdec）：实际 {len(_stars[0])}")
+_named = CAT.get("named", [])
+if _named and not all("pmra" in s and "pmdec" in s for s in _named):
+    fail("[pm] 命名星缺 pmra/pmdec（标签点与星点会走不同历元）")
+# 前端必须有线性的自行推进入口 + 历元桶（不得每帧逐星重算三角，P0 冻结红线）。
+if "propagateProperMotion" not in _astro or "MAS_PER_DEG" not in _astro:
+    fail("[pm] 14-astro-frame.js 缺 propagateProperMotion / MAS_PER_DEG")
+for _m in ("ensureEpoch", "PM_BUCKET", "ASTRO.propagateProperMotion", "RA0[i]", "PMRA[i]"):
+    if _m not in _celestial_code:
+        fail(f"[pm] 31-celestial.js 缺自行历元机制：{_m}")
+if "Math.abs(dtYr - _pmDtYr) < PM_BUCKET" not in _celestial_code:
+    fail("[pm] ensureEpoch 缺历元桶早退（每帧重算 25k 星三角会冻结 UI）")
+# eachStar 热点不得逐星调用自行推进（只能在 ensureEpoch 跨桶时算一次）。
+_each = _celestial_code[_celestial_code.find("function eachStar"):]
+_each = _each[:_each.find("\n  function ", 10)] if "\n  function " in _each[10:] else _each
+if "propagateProperMotion" in _each:
+    fail("[pm] eachStar 热点逐星调用自行推进（性能红线：应只在 ensureEpoch 跨桶重算）")
+# 搜索锁定必须走推进后的命名星向量，不能用裸 J2000 坐标。
+if "C.namedVector(" not in sky_code:
+    fail("[pm] 30-sky.js 搜索锁定未走 namedVector（会用未推进的 J2000 坐标）")
+# 独立金标准：skyfield 严格空间运动（非自证），残差实测且 ≤ 容差。
+_pm_golden = ROOT / "build/proper-motion-golden.json"
+_pm = {}
+if not _pm_golden.is_file():
+    fail("[pm] 缺 build/proper-motion-golden.json（先跑 build/gen_proper_motion_golden.py）")
+else:
+    _pg = json.loads(_pm_golden.read_text(encoding="utf-8"))
+    _pm = _pg["meta"]
+    if "skyfield" not in _pm.get("source", ""):
+        fail("[pm] 自行金标准事实源不是 skyfield 严格空间运动（不得自证）")
+    if _pm.get("caseCount", 0) < 40 or not _pg.get("cases"):
+        fail("[pm] 自行金标准样本不足")
+    if _pm.get("worstResidualArcsec", 99) > _pm.get("toleranceArcsec", 0):
+        fail(f"[pm] 自行残差 {_pm.get('worstResidualArcsec')}″ 超容差 {_pm.get('toleranceArcsec')}″")
+    if len(_pm.get("notVerified", [])) < 3:
+        fail("[pm] 自行 not_verified 不足（线性近似/量化/缺测距离须如实标注）")
+if not (ROOT / "tests/proper_motion_selftest.js").is_file():
+    fail("[pm] 缺跨语言自检 tests/proper_motion_selftest.js")
+_run_all = (ROOT / "run_all.py").read_text(encoding="utf-8")
+if "gen_proper_motion_golden.py" not in _run_all or "proper_motion_selftest.js" not in _run_all:
+    fail("[pm] run_all.py 未接自行金标准/自检步骤")
+if "恒星自行仍未计" in _run_all:
+    fail("[pm] run_all.py 报告仍宣称自行未计（口径过时）")
+print(f"[9.6.1] 恒星自行：HYG 实测 pmra/pmdec（6 元素星数组）/ 线性推进 + 历元桶早退 / "
+      f"eachStar 热点不逐星重算 / 搜索锁定走推进坐标 / skyfield 独立金标准 "
+      f"worst {_pm.get('worstResidualArcsec', 0):.4f}″ ≤ {_pm.get('toleranceArcsec', 0)}″")
+
 # ---------- 9.7 写工具确认通道（阶段 C：前端只登记意图，token 不出宿主） ----------
 _data = (SRC / "10-data.js").read_text(encoding="utf-8")
 _dialog = (SRC / "50-dialog.js").read_text(encoding="utf-8")

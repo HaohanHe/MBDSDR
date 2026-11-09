@@ -313,6 +313,38 @@ try {
   }
   if (dropped) errors.push(`B6: ${dropped}/24 条跨阈值线段被整段丢弃`);
   CX.V.fov = fov0; CX.V.az = az0; CX.V.alt = alt0;
+
+  // B7：恒星自行集成——把模拟时刻钉到固定历元（不绑墙钟），命名星经
+  //     ensureEpoch 推进后的 namedVector 必须等于「仓库命名星 J2000 锚点 +
+  //     HYG 匹配自行」经 propagateProperMotion 推进后过同一总矩阵的结果；
+  //     且必须真的偏离 J2000 原位（自行生效，不是恒等映射）。
+  //     注：命名星 J2000 锚点是仓库 stars.py 全精度坐标（非 HYG 取整坐标），
+  //     故期望值用 propagateProperMotion(仓库锚点) 而非金标准 HYG 锚点。
+  {
+    const D2R = Math.PI / 180, JD_UNIX = 2440587.5, JD_J2000 = 2451545.0;
+    const JD = 2461000.0;
+    const cat = (CX.CAT.named || []).find(n => n.n === "Arcturus");
+    if (!cat) errors.push("B7: catalog 缺 Arcturus 命名星");
+    else {
+      const targetUnix = (JD - JD_UNIX) * 86400;
+      const st = { site: { lat: 0, lon: 0 },
+                   time: { minutes: (targetUnix - CX.TIME.baseUnix) / 60 } };
+      const dtYr = (JD - JD_J2000) / 365.25;
+      const p = CX.astro.propagateProperMotion(cat.ra, cat.dec,
+                                               cat.pmra || 0, cat.pmdec || 0, dtYr);
+      const v = CX.namedVector("Arcturus", st);
+      const ra = p.ra * D2R, dec = p.dec * D2R;
+      const expect = CX.eqToHorizon(Math.cos(ra), Math.sin(ra),
+                                    Math.sin(dec), Math.cos(dec), CX.frame(st));
+      const err = v ? Math.hypot(v.x - expect.x, v.y - expect.y, v.z - expect.z) : 1;
+      if (err > 1e-9) errors.push(`B7: namedVector 与推进坐标不符 err=${err}`);
+      const r0 = cat.ra * D2R, d0 = cat.dec * D2R;
+      const raw = CX.eqToHorizon(Math.cos(r0), Math.sin(r0),
+                                 Math.sin(d0), Math.cos(d0), CX.frame(st));
+      const drift = v ? Math.hypot(v.x - raw.x, v.y - raw.y, v.z - raw.z) : 0;
+      if (drift < 1e-6) errors.push(`B7: 命名星未推进 drift=${drift}（自行未生效）`);
+    }
+  }
 } catch (e) { errors.push(`REGRESSION: ${e.stack}`); }
 
 /* 阶段 C 前端契约：宿主接确认通道时，写工具回执必须带 canConfirm，

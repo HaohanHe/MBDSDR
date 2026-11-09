@@ -92,15 +92,19 @@
   const sinDec = new Float32Array(N), cosDec = new Float32Array(N);
   /* 单位方向向量（标准 ICRS：x=春分点, y=赤经 6h, z=北天极）。
      eachStar 是每帧 25,792 颗的热点，预存后直接左乘总矩阵，
-     省掉每颗星构造 (cD·cRA, cD·sRA, sD) 的 3 次乘法。 */
+     省掉每颗星构造 (cD·cRA, cD·sRA, sD) 的 3 次乘法。
+     这些三角表由 ensureEpoch 按当前历元（J2000 + HYG 实测自行）重建——
+     不是固定 J2000；自行是几十年尺度漂移，按历元桶缓存，绝不逐帧重算。 */
   const VX = new Float64Array(N), VY = new Float64Array(N), VZ = new Float64Array(N);
   const MAG = new Float32Array(N), BV = new Float32Array(N);
+  /* J2000 catalog 原值（度）+ HYG 实测自行（mas/yr，star[4]/star[5]，缺测=0）。
+     ensureEpoch 据此把每颗星线性推进到当前模拟历元，再重建上面的三角表。 */
+  const RA0 = new Float64Array(N), DEC0 = new Float64Array(N);
+  const PMRA = new Float32Array(N), PMDEC = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const s = CAT.stars[i];
-    const ra = s[0] / 1000 * D2R, dec = s[1] / 1000 * D2R;
-    cosRA[i] = Math.cos(ra); sinRA[i] = Math.sin(ra);
-    sinDec[i] = Math.sin(dec); cosDec[i] = Math.cos(dec);
-    VX[i] = cosDec[i] * cosRA[i]; VY[i] = cosDec[i] * sinRA[i]; VZ[i] = sinDec[i];
+    RA0[i] = s[0] / 1000; DEC0[i] = s[1] / 1000;
+    PMRA[i] = s[4] || 0; PMDEC[i] = s[5] || 0;
     MAG[i] = s[2] / 100; BV[i] = s[3] / 100;
   }
   const MAG_CAP = Number(CAT.meta.magMax || 7.5);
@@ -115,18 +119,50 @@
     for (let i = 0; i < N; i++) ORDER[i] = idx[i];
   }
 
-  const NAMED = (CAT.named || []).map(s => {
-    const ra = s.ra * D2R, dec = s.dec * D2R;
-    return { name: s.n, zh: s.zh || "", mag: s.m, bv: s.bv,
-             cosRA: Math.cos(ra), sinRA: Math.sin(ra),
-             sinDec: Math.sin(dec), cosDec: Math.cos(dec) };
-  });
-  /* DSO 的赤经赤纬是常量，三角值只算一次（体检 P4）。 */
+  const NAMED = (CAT.named || []).map(s => ({
+    name: s.n, zh: s.zh || "", mag: s.m, bv: s.bv,
+    ra0: s.ra, dec0: s.dec, pmra: s.pmra || 0, pmdec: s.pmdec || 0,
+    ra: s.ra, dec: s.dec,
+    cosRA: Math.cos(s.ra * D2R), sinRA: Math.sin(s.ra * D2R),
+    sinDec: Math.sin(s.dec * D2R), cosDec: Math.cos(s.dec * D2R)
+  }));
+  /* DSO 的赤经赤纬是常量，三角值只算一次（体检 P4）。
+     DSO 是河外/星云，无恒星自行，不推进（保持 J2000，岁差链照走）。 */
   const DSO_T = (CAT.dso || []).map(d => {
     const ra = d.ra * D2R, dec = d.dec * D2R;
     return { d, cRA: Math.cos(ra), sRA: Math.sin(ra),
              sD: Math.sin(dec), cD: Math.cos(dec) };
   });
+
+  /* ---------- 恒星自行历元推进（按历元桶缓存，守住 P0 渲染性能） ----------
+   * 自行是几十年尺度的缓慢漂移：演示历元≈2026（距 J2000 26 年），倍率最高 ×1800
+   * 也只 ~0.5 模拟小时/真实秒，正常播放几乎不跨桶。漂移 > PM_BUCKET 年才重算一次
+   * 全表三角（O(N) trig，~1-2ms）；每帧热点仍只做总矩阵乘法（与旧版逐帧成本持平）。
+   * 推进在 ICRS 框架内（ASTRO.propagateProperMotion 线性 RA/Dec 漂移），随后由
+   * frameMatrices 的岁差 P 转到 of-date —— 不重复施加岁差。命名亮星同步推进，
+   * 标签与星场点不会因自行而错位（搜索锁定也走推进后的坐标）。 */
+  const PM_BUCKET = 0.25;        // 年；桶内最大漂移误差 ≈ pm_max·0.25 ≈ 2.6″（Barnard），亚像素
+  let _pmDtYr = null;
+  function ensureEpoch(jd) {
+    const dtYr = (jd - JD_J2000) / 365.25;
+    if (_pmDtYr !== null && Math.abs(dtYr - _pmDtYr) < PM_BUCKET) return;
+    _pmDtYr = dtYr;
+    for (let i = 0; i < N; i++) {
+      const p = ASTRO.propagateProperMotion(RA0[i], DEC0[i], PMRA[i], PMDEC[i], dtYr);
+      const ra = p.ra * D2R, dec = p.dec * D2R;
+      const cRA = Math.cos(ra), sRA = Math.sin(ra), sD = Math.sin(dec), cD = Math.cos(dec);
+      cosRA[i] = cRA; sinRA[i] = sRA; sinDec[i] = sD; cosDec[i] = cD;
+      VX[i] = cD * cRA; VY[i] = cD * sRA; VZ[i] = sD;
+    }
+    for (const s of NAMED) {
+      const p = ASTRO.propagateProperMotion(s.ra0, s.dec0, s.pmra, s.pmdec, dtYr);
+      s.ra = p.ra; s.dec = p.dec;
+      const ra = p.ra * D2R, dec = p.dec * D2R;
+      s.cosRA = Math.cos(ra); s.sinRA = Math.sin(ra);
+      s.sinDec = Math.sin(dec); s.cosDec = Math.cos(dec);
+    }
+  }
+  ensureEpoch(TIME.baseUnix / 86400 + JD_UNIX_EPOCH);   // 初始历元（演示起始时刻）
 
   /* ---------- 每帧一次的总矩阵（J2000 → 岁差 → 章动 → 本地恒星时 → 地平） ----------
    * 前端地平系：x=北, y=东, z=天顶。矩阵把「标准 ICRS 单位向量」一步送到地平，
@@ -136,6 +172,7 @@
                 cL: 1, sL: 0, sPhi: 0, cPhi: 1 };
   function frame(state) {
     const jd = nowJd(state);
+    ensureEpoch(jd);                 // 自行历元桶（命中即返回，跨桶才重算三角表）
     const lat = state.site.lat || 0, lon = state.site.lon || 0;
     const key = jd.toFixed(6) + "/" + lat + "/" + lon;
     if (key === cache.key) return cache;
@@ -430,6 +467,13 @@
     }
     return out;
   }
+  /* 搜索锁定用：命名星的当前历元地平向量（与星点走同一套自行推进后的三角表）。 */
+  function namedVector(name, state) {
+    const s = NAMED.find(x => x.name === name);
+    if (!s) return null;
+    const f = frame(state);   // 先推进历元再读三角表：参数左→右求值会先读到旧历元值
+    return eqToHorizon(s.cosRA, s.sinRA, s.sinDec, s.cosDec, f);
+  }
   function dsoScreen(state, W, H, L) {
     const f = frame(state), out = [];
     for (const e of DSO_T) {
@@ -482,7 +526,7 @@
     altAzVector, basis, getBasis, projMode, focalOf,
     toScreen, projectAltAz, projectSegment, unproject, sunAltAz,
     limitMag, effectiveLimit, extinction, starStyle, daylightHidden,
-    eachStar, namedScreen, dsoScreen,
+    eachStar, namedScreen, namedVector, dsoScreen,
     step, zoom, panTo,
     hud(state) {
       const jd = nowJd(state), jdDate = new Date((jd - JD_UNIX_EPOCH) * 86400000);

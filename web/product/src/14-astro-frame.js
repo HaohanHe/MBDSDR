@@ -19,7 +19,9 @@
  * 【坐标约定】前端标准 J2000 赤道：x=春分点, y=赤经 6h, z=北天极；
  *            前端地平：x=北, y=东, z=天顶（方位角从北顺时针，东正）。
  * 【精度口径】章动是仓库的简化 6 主项模型，不是完整 IAU2000A/B 77 项；
- *            忽略 ΔT（UT1≈UTC）、不含恒星自行、不含大气折射、不含站址视差。
+ *            恒星自行按 HYG 实测 pmRA/pmDec 线性推进到当前历元（propagateProperMotion，
+ *            忽略透视加速度/视差长期项，skyfield 严格空间运动对拍残差 ≤1.5″）；
+ *            忽略 ΔT（UT1≈UTC）、不含大气折射、不含站址视差。
  *            够 UI 天球显示，不用于精确指向 / 定轨 / 过境结论。
  */
 (function (g) {
@@ -176,18 +178,44 @@
     };
   }
 
+  /* ---------- 恒星自行：J2000 catalog 位置线性推进到历元 t ----------
+   * HYG 口径：pmra = μα·cosδ（mas/yr）、pmdec = μδ（mas/yr），ICRS/J2000 框架。
+   * 标准星象仪显示近似（线性 RA/Dec 漂移）：
+   *   δ(t) = δ0 + pmdec·Δt / 3.6e6
+   *   α(t) = α0 + pmra·Δt / (3.6e6·cosδ0)
+   * 近极保护：|cosδ0| < 1e-9 时 RA 不推进（cosδ→0 时 μα 发散；极区星 pmra 本就≈0）。
+   * 忽略透视加速度/视差长期项（rv/parallax）；对拍 skyfield 1.54 严格空间运动
+   * （_position_au + _velocity_au_per_d·Δt，含视差/视向速度/Doppler）：
+   * 2026 历元残差 ≤0.35″、J2000→2051 最快星（Barnard）≤1.5″
+   * （build/gen_proper_motion_golden.py + tests/proper_motion_selftest.js）。
+   * 推进仍在 ICRS 框架，随后由 frameMatrices 的岁差 P 转到 of-date —— 不重复施加岁差。
+   */
+  const MAS_PER_DEG = 3600000;
+  function propagateProperMotion(raDeg, decDeg, pmraMasYr, pmdecMasYr, dtYr) {
+    let dec = decDeg + (pmdecMasYr * dtYr) / MAS_PER_DEG;
+    const cosDec0 = Math.cos(decDeg * D2R);
+    let ra = raDeg;
+    if (Math.abs(cosDec0) > 1e-9)
+      ra = raDeg + (pmraMasYr * dtYr) / (MAS_PER_DEG * cosDec0);
+    dec = Math.max(-90, Math.min(90, dec));
+    ra = ((ra % 360) + 360) % 360;
+    return { ra, dec };
+  }
+
   MB.astro = {
     J2000, EPS0, ARCSEC, Q, QT, mul, transpose, matVec,
     gmstDeg, precessionMatrix, obliquity, nutationAngles, nutationMatrix,
-    frameMatrices,
+    frameMatrices, propagateProperMotion, MAS_PER_DEG,
     meta: {
       source: "mbdsdr_ai/celestial_geometry.py (MIT, repo-owned)",
       precession: "IAU 2006 / P03 (Vondrak-Capitaine 2011 polynomial)",
       nutation: "IAU 2000B abridged 6-term (NOT full 77-term; no mas claim)",
       time: "Capitaine-Wallace-Chapront 2003 GMST eq.43, UT1≈UTC (ΔT ignored)",
       basis: "frontend ICRS (x=vernal equinox, y=RA 6h, z=NCP); repo basis via Q",
+      properMotion: "HYG v4.1 pmra/pmdec (mas/yr) linear RA/Dec drift; "
+        + "cross-checked vs skyfield 1.54 rigorous space motion (<=0.35\" at 2026, <=1.5\" J2000->2051)",
       notVerified: [
-        "stellar proper motion not applied (HYG J2000 positions used verbatim)",
+        "stellar proper motion uses linear RA/Dec approximation (ignores perspective acceleration / parallax secular terms); not for mas-level astrometry",
         "no atmospheric refraction, parallax or UT1-UTC correction",
         "repo precession polynomial leaves a ~5.3 arcsec constant rotation at J2000 (zeta_A/z_A constant terms + rot_z sign convention); not normalized",
         "nutation is a 6-term abridged model, no mas-level accuracy claim",

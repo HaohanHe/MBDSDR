@@ -694,10 +694,8 @@
     const star = (C.CAT.named || []).find(s =>
       s.n.toLowerCase().includes(q) || (s.zh || "").includes(q));
     if (star) {
-      const v = C.eqToHorizon(Math.cos(star.ra * Math.PI / 180),
-                              Math.sin(star.ra * Math.PI / 180),
-                              Math.sin(star.dec * Math.PI / 180),
-                              Math.cos(star.dec * Math.PI / 180), C.frame(S));
+      const v = C.namedVector(star.n, S);
+      if (!v) return;
       const d = C.dirAltAz(v);
       C.panTo(d.az, d.alt); C.V.fovTarget = 20;
       MB.emit("star:goto", star.n);

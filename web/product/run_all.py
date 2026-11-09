@@ -29,12 +29,14 @@ STEPS = [
     ("全天星表同步", [PY, "build/sync_sky_catalog.py"]),
     ("卫星轨迹同步", [PY, "build/sync_sat_tracks.py"]),
     ("天文框架金标准", [PY, "build/gen_astro_golden.py"]),
+    ("恒星自行金标准", [PY, "build/gen_proper_motion_golden.py"]),
     ("骨架与样式", [PY, "build/scaffold.py"]),
     ("文档/wiki 生成", [PY, "build/gen_docs.py"]),
     ("单文件构建", [PY, "build/build.py"]),
     ("静态守卫", [PY, "tests/verify_product.py"]),
     ("性能基准", [NODE or "node", "tests/perf_bench.js"]),
     ("天文框架跨语言自检", [NODE, "tests/astro_selftest.js"] if NODE else None),
+    ("恒星自行跨语言自检", [NODE, "tests/proper_motion_selftest.js"] if NODE else None),
     ("天球投影自检", [NODE, "tests/proj_selftest.js"] if NODE else None),
     ("无头运行时", [NODE, "tests/verify_runtime.js"] if NODE else None),
     ("视觉夹具", [PY, "tests/make_visual_fixture.py"]),
@@ -110,7 +112,7 @@ def main() -> int:
         f"- **全天星表 HYG v4.1**：{cm['starCount']:,} 颗（V ≤ {cm['hyg']['cutoff']}），"
         f"J2000，CC BY-SA 4.0 · sha256 `{cm['hyg']['sha256'][:16]}…`",
         f"- 天球：球心相机 → 视图空间 → 全屏平面投影（≤{_persp_max}° 针孔透视 / 以上立体投影鱼眼）"
-        f" / 窗口矩形裁剪 / 地景绕 360° 方位 / 星位固定 J2000 / 缩放改 FOV / LST 刚性旋转",
+        f" / 窗口矩形裁剪 / 地景绕 360° 方位 / 星位 J2000 + HYG 实测自行推进到当前历元 / 缩放改 FOV / LST 刚性旋转",
         f"- 文档 {len(docs)} 篇 · i18n 三语 · 视觉截图 {len(shots)} 张",
         "",
         "## 步骤结果",
@@ -141,7 +143,11 @@ def main() -> int:
         "- **星表数据是真的**（HYG v4.1 下载 + SHA256）；坐标链已接仓库 "
         "`celestial_geometry.py` 的 IAU2006 岁差 + IAU2000B 简化章动 + Capitaine GMST，"
         "由 `build/gen_astro_golden.py` 与 `tests/astro_selftest.js` 跨语言对拍（3.3e-16）。"
-        "**恒星自行仍未计**，章动非完整 77 项，忽略 ΔT/大气折射/站址视差。",
+        "**恒星自行已接 HYG 实测 pmra/pmdec**（线性 RA/Dec 近似推进到当前历元），"
+        "由 `build/gen_proper_motion_golden.py`（skyfield 严格空间运动，独立无星历基准）"
+        "与 `tests/proper_motion_selftest.js` 对拍：JS↔Python 线性紧钉扎 1e-9°，"
+        "对 skyfield 残差实测 worst 记录于金标准 meta（显示级 ≤2″，亚像素）；"
+        "线性近似忽略透视加速度/视差长期项，章动非完整 77 项，忽略 ΔT/大气折射/站址视差。",
         "- **地景是示意轮廓**：仓库与产品都没有真实 360° 全景数据，地平高度场是确定性"
         "示意曲线（非实测地形、非照片），UI 已明写「示意轮廓」，不冒充实拍。",
         "- **太阳位置是低精度解析式**（Meeus 简化，约 ±0.5°）：只用于昼夜/晨昏蒙影判定，"
