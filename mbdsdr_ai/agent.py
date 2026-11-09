@@ -1574,7 +1574,13 @@ class MBDSDRAgent:
                                       "。请显式传入可信 observer_lat/observer_lon。")
                 lat = float(fix.lat)
                 lon = float(fix.lon)
-                alt = float(fix.alt_m or 0)
+                # orbit.predict_passes 的海拔口径是**公里**（内部
+                # geodetic_to_ecef 用 WGS-72 km，与 sgp4/TEME 同量纲），
+                # 而站址配置存的是米。2026-11-09 真机复核抓到：这里原来
+                # 直接传米，高度非零时站址被抬高 1000 倍，仰角错到几十度、
+                # 升起时刻错到小时级（高度为 0 时看不出来，所以一直没暴露）。
+                # 与 sdr_tools / main_window 的 alt_m/1000 口径对齐。
+                alt = float(fix.alt_m or 0) / 1000.0
                 hours = float(args.get("hours", 24) or 24)
                 min_el = float(args.get("min_elevation", 10) or 10)
                 stype = str(args.get("satellite_type", "all") or "all")

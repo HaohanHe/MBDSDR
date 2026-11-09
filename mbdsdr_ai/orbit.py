@@ -335,6 +335,15 @@ def compute_satellite_state(
 ) -> Optional[Dict[str, Any]]:
     """用 sgp4 真传播，返回站坐标下的仰角/方位/距离/视线速度/多普勒。
 
+    Parameters
+    ----------
+    observer_alt :
+        观测站海拔，**公里**——内部 ``geodetic_to_ecef`` 走 WGS-72、与
+        sgp4/TEME 同为 km 量纲。站址配置（``GroundStation`` / ``StationFix``）
+        存的是**米**，调用方必须先 ``/1000.0``。传米会把站址抬高 1000 倍：
+        仰角错到几十度、升起时刻错到小时级，而高度恰好为 0 时完全看不出来
+        （2026-11-09 真机复核抓到的就是这么一处）。
+
     When:
         unix 秒；缺省取 TimeEngine（模拟时刻优先，未穿越即墙钟）。
     """
@@ -648,6 +657,10 @@ def predict_passes(
     start_unix: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """预测未来 hours 小时内的卫星过境事件（列表兼容接口）。
+
+    ``observer_alt`` 单位是**公里**（与 ``compute_satellite_state`` /
+    ``geodetic_to_ecef`` 同一 WGS-72 km 口径）。站址配置存米，调用方先
+    ``/1000.0``——传米会把站址抬到几百公里，仰角与升起时刻全错。
 
     ``start_unix`` 显式 UTC 秒；缺省取 TimeEngine（模拟时刻优先，未穿越即墙钟）。
 

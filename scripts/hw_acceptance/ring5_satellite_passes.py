@@ -19,11 +19,21 @@ import time
 
 import common
 
-# 观测站是**参数**不是测量值；默认取长春（本机常用站点），报告里注明。
-DEFAULT_OBS = (43.88, 125.32, 0.0)
+# 观测站是**参数**不是测量值。默认用中性示例站，不写任何真实或近似的
+# 站址：这个脚本会被拷到别人机器上跑，坐标必须是中性的。
+# `SAMPLE_SITE`（45°N/120°E）在源码里明写「不指向任何真实默认站址」；
+# 2026-11-09 真机复核发现旧默认值（43.88/125.32）是某次调试留下的近似
+# 真实位置，按仓库铁律改回中性站，不再引入第二份坐标常量。
+from mbdsdr_ai.solar_system import SAMPLE_SITE
+
+DEFAULT_OBS = (SAMPLE_SITE.latitude_deg, SAMPLE_SITE.longitude_deg,
+               SAMPLE_SITE.height_m)
 TARGETS = [25338, 28654, 33591, 25544]  # NOAA-15/18/19 + ISS
 WINDOW_H = 24.0
 MIN_EL = 5.0
+#: 我方过境与 skyfield 参考配对的时间窗（秒）。超过它就不算「同一场」，
+#: 不拿错配的场次去算角度误差（那会把配对问题伪装成精度问题）。
+PAIR_MAX_GAP_S = 1800.0
 
 
 def _norm(name: str) -> str:
@@ -108,7 +118,6 @@ def _pass_epoch(hhmmss: str, start_unix: float) -> float:
 def run(lat: float, lon: float, alt_m: float) -> dict:
     out = common.artifact_dir("r5_satellite_passes")
     from mbdsdr_ai.orbit import fetch_tle_record, predict_passes
-
     now = time.time()
     tle_recs: dict[int, dict] = {}
     tle_errors: dict[int, str] = {}
@@ -132,7 +141,12 @@ def run(lat: float, lon: float, alt_m: float) -> dict:
 
     try:
         passes = _with_timeout(
-            lambda: predict_passes(lat, lon, alt_m, WINDOW_H, MIN_EL,
+            # 两条链路的单位不同，别混：产品 predict_passes 收**公里**
+            # （内部 geodetic_to_ecef 是 WGS-72 km），skyfield 收**米**
+            # （_skyfield_pass 的 elevation_m）。这里 alt_m 是米，产品侧
+            # 必须 /1000；2026-11-09 真机复核发现旧代码直接传米，
+            # 站址被抬高 1000 倍（200 m → 200 km），仰角错到几十度。
+            lambda: predict_passes(lat, lon, alt_m / 1000.0, WINDOW_H, MIN_EL,
                                    satellite_type="all", start_unix=now), 60.0)
     except Exception as e:
         return common.result("R5", "卫星追踪与过境", common.FAIL,
@@ -190,9 +204,25 @@ def run(lat: float, lon: float, alt_m: float) -> dict:
             item["result"] = "独立参考无过境"
         else:
             mb_epochs = [(_pass_epoch(p["rise_time"], now), p) for p in mb]
-            rise_local, first = min(mb_epochs, key=lambda t: t[0])
-            el_err = abs(float(first["max_elevation"]) - rf["max_el_deg"])
+            # 配**同一场**过境再比数值：两边「第一场」的定义未必一致
+            # （5° 门限附近的掠射场一方可能漏/多），按升序取第一条会拿
+            # A 场去比 B 场，误差直接飙到小时级（2026-11-09 实测 31989 s）。
+            rise_local, first = min(mb_epochs,
+                                    key=lambda t: abs(t[0] - rf["rise_unix"]))
             rise_err = abs(rise_local - rf["rise_unix"])
+            if rise_err > PAIR_MAX_GAP_S:
+                # 最近一场也差半小时以上 = 过境集合本身不一致，
+                # 不拿它算角度误差（那是错配，不是精度问题）。
+                item["result"] = (f"过境集合不一致：我方最近一场与参考差 "
+                                  f"{rise_err / 3600.0:.1f} h")
+                item["passes_mbdsdr"] = len(mb)
+                findings.append(item)
+                checks.append(common.check(
+                    f"pass_pair_{norad}", False,
+                    f"最近一场差 {rise_err:.0f}s > {PAIR_MAX_GAP_S:.0f}s，"
+                    "无法配对同一场过境"))
+                continue
+            el_err = abs(float(first["max_elevation"]) - rf["max_el_deg"])
             item.update({
                 "mbdsdr_pass_max_el_deg": round(float(first["max_elevation"]), 1),
                 "skyfield_pass_max_el_deg": round(rf["max_el_deg"], 1),

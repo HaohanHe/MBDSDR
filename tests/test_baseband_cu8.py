@@ -115,3 +115,70 @@ class TestUnknownFormatHonesty:
         old_vals = np.fromfile(str(p), dtype=np.float32)
         assert old_vals.size == 4 and not np.allclose(
             old_vals[:2], [0.5, 0.5], atol=1e-3)
+
+
+class TestSigmfMetaFormat:
+    """SigMF 录制（``.sigmf-data`` + ``.sigmf-meta``）必须能被 load_iq 读回。
+
+    录制器写的是 SigMF 双文件、**不写** ``.json`` sidecar，旧 ``load_iq``
+    只认 sidecar 与扩展名白名单，``.sigmf-data`` 一律判定为未知格式 ——
+    自己录出来的文件自己放不了。2026-11-09 真机七环 R4 实测报
+    ``不支持的 IQ 格式 None``。类型与速率按 SigMF 规范从
+    ``global.core:datatype`` / ``core:sample_rate`` 取。
+    """
+
+    def _write_sigmf(self, tmp_path, z, datatype="cf32_le", name="rec"):
+        data = tmp_path / f"{name}.sigmf-data"
+        arr = np.asarray(z, dtype=np.complex64)
+        np.column_stack([arr.real, arr.imag]).astype(np.float32).tofile(str(data))
+        (tmp_path / f"{name}.sigmf-meta").write_text(json.dumps({
+            "global": {
+                "core:datatype": datatype,
+                "core:sample_rate": 2400000.0,
+                "core:frequency": 93222656.25,
+                "core:total_num_samples": int(arr.size),
+            },
+            "captures": [{"core:sample_start": 0}],
+            "annotations": [],
+        }), encoding="utf-8")
+        return data
+
+    def test_cf32_le_sigmf_data_is_loadable(self, tmp_path):
+        z = np.array([0.5 + 0.25j, -0.5 - 0.25j, 1.0 + 0j, 0j, 0.125 - 0.75j],
+                     dtype=np.complex64)
+        p = self._write_sigmf(tmp_path, z)
+        rec = bb.load_iq(str(p))
+        assert "error" not in rec, rec.get("error")
+        assert rec["samples"] == z.size
+        assert rec["sample_rate"] == 2400000.0
+        assert rec["sample_rate_source"] == "sigmf-meta"
+        assert rec["sample_rate_assumed"] is False
+        assert np.allclose(rec["iq"], z, atol=1e-6)
+
+    def test_cu8_sigmf_datatype_maps_to_cu8(self, tmp_path):
+        """cu8 的 SigMF 写法是 ``cu8``（无 _le 后缀），必须同样认。"""
+        p = tmp_path / "cu8rec.sigmf-data"
+        _write_cu8(p, [0.5 + 0.5j] * 8)
+        (tmp_path / "cu8rec.sigmf-meta").write_text(json.dumps({
+            "global": {"core:datatype": "cu8", "core:sample_rate": 2048000.0},
+        }), encoding="utf-8")
+        rec = bb.load_iq(str(p))
+        assert "error" not in rec, rec.get("error")
+        assert rec["samples"] == 8
+        assert np.allclose(rec["iq"], [0.5 + 0.5j] * 8, atol=1e-2)
+
+    def test_unknown_datatype_is_refused_with_reason(self, tmp_path):
+        """反证：大端 datatype 不静默凑，拒绝时说出读到的 datatype。"""
+        p = self._write_sigmf(tmp_path, np.array([1 + 0j], dtype=np.complex64),
+                              datatype="ci16_be")
+        rec = bb.load_iq(str(p))
+        assert "error" in rec and "不支持的 IQ 格式" in rec["error"]
+        assert "ci16_be" in rec["error"], "拒绝时必须说出读到的 datatype"
+        assert "iq" not in rec, "拒绝时绝不返回按错字节序读出的 IQ"
+
+    def test_missing_sigmf_meta_still_refuses(self, tmp_path):
+        """反证：只有 .sigmf-data 没有 meta 时不许猜格式。"""
+        p = tmp_path / "orphan.sigmf-data"
+        p.write_bytes(b"\x00" * 32)
+        rec = bb.load_iq(str(p))
+        assert "error" in rec and "不支持的 IQ 格式" in rec["error"]

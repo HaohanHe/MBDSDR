@@ -19,13 +19,16 @@ sidecar（<path>.json）字段：
 """
 from __future__ import annotations
 import numpy as np
+import logging
 import os
 import json
 import struct
 import tempfile
 import wave as _wave
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _to_complex(iq) -> np.ndarray:
@@ -61,6 +64,59 @@ def _format_from_path(path: str) -> Optional[str]:
 
 #: load_iq 支持的格式（与录制器 sdr_backend 的写出格式对齐）。
 SUPPORTED_IQ_FORMATS = ("wav", "cs16", "cf32", "cu8")
+
+
+#: SigMF ``core:datatype`` → load_iq 内部格式名。
+#: 只映射**小端**、且与录制器写出量纲一致的写法；``*_be`` 需要先转字节序，
+#: 本模块不做——宁可如实拒绝，也不按错字节序读出一份垃圾 IQ。
+_SIGMF_DATATYPE_TO_FMT = {
+    "cf32_le": "cf32",
+    "ci16_le": "cs16",
+    "cs16_le": "cs16",
+    "cu8": "cu8",
+}
+
+
+def _sigmf_meta_global(data_path: str) -> Dict[str, Any]:
+    """从同名 ``.sigmf-meta`` 的 global 段取回放需要的信息。
+
+    录制器（``recorder`` / ``sdr_backend``）写 ``<name>.sigmf-data`` +
+    ``<name>.sigmf-meta``，**不写** ``.json`` sidecar。旧 ``load_iq`` 只认
+    ``.json``，于是自己录出来的文件自己放不了——2026-11-09 真机七环 R4
+    实测报 ``不支持的 IQ 格式 None``。这里按 SigMF 规范读
+    ``global.core:datatype`` / ``core:sample_rate``。
+
+    meta 缺失/损坏/未知 datatype 一律返回空 dict，由调用方如实报错，
+    绝不猜一个格式顶上。
+    """
+    if not data_path.endswith(".sigmf-data"):
+        return {}
+    meta_path = data_path[: -len(".sigmf-data")] + ".sigmf-meta"
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("SigMF meta 读取失败 %s: %s: %s",
+                       meta_path, type(e).__name__, e)
+        return {}
+    if not isinstance(meta, dict):
+        logger.warning("SigMF meta 顶层不是对象（%s），按未知处理", meta_path)
+        return {}
+    g = meta.get("global") or {}
+    if not isinstance(g, dict):
+        return {}
+    datatype = str(g.get("core:datatype") or "").strip().lower()
+    out: Dict[str, Any] = {
+        "datatype": datatype,
+        "format": _SIGMF_DATATYPE_TO_FMT.get(datatype),
+    }
+    try:
+        rate = float(g.get("core:sample_rate") or 0.0)
+    except (TypeError, ValueError):
+        rate = 0.0
+    if rate > 0:
+        out["sample_rate"] = rate
+    return out
 
 
 def write_sidecar(path: str, metadata: Dict) -> str:
@@ -371,10 +427,19 @@ def load_iq(path: str, sample_rate: float = None, *,
     if os.path.exists(path + ".json"):
         with open(path + ".json", encoding="utf-8") as f:
             meta = json.load(f)
+    # SigMF 录制没有 .json sidecar：类型/速率在 .sigmf-meta 的 global 段。
+    # 不读它等于「自己录的自己放不了」（2026-11-09 真机 R4 实测）。
+    # 显式 sidecar 优先：它才是用户/工具亲手写的期望值。
+    sig_global = _sigmf_meta_global(path)
+    if sig_global:
+        if not meta.get("format"):
+            meta["format"] = sig_global.get("format")
+        if not meta.get("sample_rate"):
+            meta["sample_rate"] = sig_global.get("sample_rate")
     rate_assumed = False
     if sample_rate is None:
         sample_rate = meta.get("sample_rate")
-        rate_source = "sidecar"
+        rate_source = "sigmf-meta" if sig_global else "sidecar"
         if sample_rate is None:
             # 没有有效 sidecar 时仍要能起播（回放定时器需要速率），但必须
             # 把「这是假设值」写进返回值，不许让调用方当成实测元数据。
@@ -390,7 +455,11 @@ def load_iq(path: str, sample_rate: float = None, *,
             f"不支持的 IQ 格式 {fmt!r}（{path}）；支持 "
             f"{'/'.join(SUPPORTED_IQ_FORMATS)}。旧实现会静默按 cf32 解析并"
             "把数据整体读错，现在如实拒绝。若是原始 IQ 流，请补 sidecar 的 "
-            "format 字段或改用已识别扩展名（.cf32/.cfile/.cu8/.cs16/.wav）。")}
+            "format 字段或改用已识别扩展名（.cf32/.cfile/.cu8/.cs16/.wav）；"
+            "SigMF 录制请确保同名 .sigmf-meta 的 global.core:datatype 是 "
+            "cf32_le / ci16_le / cu8（*_be 必须先转字节序，本模块不做）。"
+            + (f" 本次读到 datatype={sig_global.get('datatype')!r}。"
+               if sig_global else ""))}
     wav_scale = float(meta.get("wav_scale", 1.0))
     chunk = max(1, int(chunk_samples))
     iq, file_samples, cancelled = _read_iq_stream(
