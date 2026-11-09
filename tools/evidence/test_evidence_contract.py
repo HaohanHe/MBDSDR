@@ -243,3 +243,19 @@ def test_suite_basetemp_stays_inside_system_temp():
         encoding="utf-8")
     assert "tempfile.gettempdir()" in src
     assert "mbdsdr-evidence-" in src
+
+
+def test_with_tests_group_is_not_killed_by_the_short_group_timeout():
+    """--with-tests 必须真能跑完两条套件，不能被 900s 的普通组超时掐掉。
+
+    接线时把 test_suites 挂进 run_all，却忘了 run_all 有组级 900s 超时：
+    kernel 实测 672s、desktop 全量约 3300s，那条命令会在 15 分钟被判
+    skipped —— 看起来像「没验证」，实际是工具自己掐的。
+    """
+    src = Path(run_all.__file__).read_text(encoding="utf-8")
+    assert "TEST_SUITES_TIMEOUT_S" in src
+    assert 'gid == "test_suites"' in src and "timeout=timeout_s" in src
+    import test_suites
+    worst = sum(s[2] for s in test_suites.SUITES)
+    assert run_all.TEST_SUITES_TIMEOUT_S >= worst, (
+        f"组级超时 {run_all.TEST_SUITES_TIMEOUT_S}s < 两条套件最坏 {worst}s")

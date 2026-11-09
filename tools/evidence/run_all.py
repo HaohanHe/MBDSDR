@@ -57,6 +57,11 @@ OPTIONAL_GROUPS = {"test_suites"}
 
 OTA_SCRIPT = REPO_ROOT / "tools" / "ota_demo" / "ota_demo.py"
 GROUP_TIMEOUT_S = 900
+#: 测试基线组单独放宽：kernel 实测 ~672s、desktop 全量 ~3300s，
+#: 用 900s 的普通组超时会在 15 分钟把它判 skipped —— 那条
+#: ``--with-tests`` 就成了永远跑不完的假命令。最坏是两条套件各自打满
+#: 自己的超时（1200 + 4200），所以组级必须留够 6000s。
+TEST_SUITES_TIMEOUT_S = 6000
 
 
 def _qt_available() -> bool:
@@ -138,12 +143,14 @@ def _run_group(gid: str, title: str, script: Optional[str],
         cmd.append("--online")
     env = dict(os.environ)
     env.setdefault("PYTHONUNBUFFERED", "1")
+    timeout_s = (TEST_SUITES_TIMEOUT_S if gid == "test_suites"
+                 else GROUP_TIMEOUT_S)
     try:
         proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True,
-                              text=True, timeout=GROUP_TIMEOUT_S, env=env)
+                              text=True, timeout=timeout_s, env=env)
     except subprocess.TimeoutExpired:
         return _skipped(gid, title,
-                        f"超时（>{GROUP_TIMEOUT_S}s），本次没有结果")
+                        f"超时（>{timeout_s}s），本次没有结果")
     except OSError as exc:
         return _skipped(gid, title, f"无法启动子进程：{exc}")
 

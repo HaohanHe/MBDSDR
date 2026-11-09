@@ -222,6 +222,10 @@ not_verified：真机 SDR/GNSS 不在位（首开硬件路径、GNSS×地点面�
      kernel 组转 PASS。
   4. desktop 超时按本机实测调到 4200 s（1800 s 只到 56%，全量约
      55 min），另给 `--kernel-timeout` / `--desktop-timeout` 覆盖。
+  5. `run_all.py` 组级超时原写死 900 s，`--with-tests` 会在 15 分钟
+     把测试组判 skipped（kernel 单跑就 672 s）；给该组单独
+     `TEST_SUITES_TIMEOUT_S = 6000`（≥ 两条套件各自超时之和 5400），
+     否则那条命令永远跑不完。契约 17 passed。
 - **13+2 个 F 的归因改写**：干净无并发全量里 kernel 2 个、desktop 13 个；
   15 个 nodeid 放进一个无并发进程单独复跑 → **15 passed**（496 s）。
   上午记的「并发 / 时序假红」里，「并发」这一半不成立：本轮无并发
