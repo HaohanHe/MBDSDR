@@ -295,3 +295,96 @@ MBDSDR_TEST_LOCK=0 QT_QPA_PLATFORM=offscreen python -m pytest \
 - **诚实边界**：`test_ui_interaction_guard.py` 现在是
   `3 passed / 1 xfailed`，**不是全绿**；守卫覆盖仍在（能跑完、能报清单）。
 
+
+---
+
+## K10 — 真机 rtl_tcp 路径的两条能力告警（2026-11-09 22:15，存量·未修）
+
+真机（RTL2832U + FC0012）经 `rtl_tcp 127.0.0.1:1234` 接入 GUI 时，连接本身
+成功、频谱正常，但日志/状态栏出现两句：
+
+```
+连接后参数 Offset Tuning 下发异常: AttributeError:
+    'RtlTcpBackend' object has no attribute 'set_offset_tuning'
+连接后参数未全部生效: Offset Tuning
+listGains 失败（设备可能不支持分档）: 'SDRDevice' object has no attribute 'listGains'
+```
+
+- **判定**：误报措辞，不是链路失败。rtl_tcp 协议本身没有 offset tuning
+  命令（`RtlTcpDeviceAdapter.set_offset_tuning` 是显式 no-op），SoapySDR
+  分档增益本机未安装。
+- **为什么没修**：本轮不改产品代码以保住 `f9c3bb92` 的权威全量数字
+  （`5573 passed / 0 failed`）。改 `RtlTcpBackend` 会让那个数字失效。
+- **修法（下轮）**：`RtlTcpBackend` 补 `set_offset_tuning` 委托到 adapter
+  并返回「协议不支持」，或让 `_connect_backend` 用能力探测跳过；
+  `gain_panel` 的 `listGains` 探测前先 `hasattr`。
+- **诚实边界**：真机 GUI 链路可用（帧推进 6575→7115、`finite_ratio=1.0`），
+  但这两条告警会误导用户以为参数没生效。
+
+---
+
+## K11 — R4 `playback_audio` 判据擦线（2026-11-09 22:20，判据缺陷·未改）
+
+七环 R4 的判据是「文件回放 RMS / 实时 RMS ∈ (0.3, 3.0)」。真机实测三次
+分别是 **0.28 / 0.33 / 0.61** —— 0.28 那次判 FAIL。
+
+- **判定**：判据设计缺陷，不是产品回归。它比的是**两个不同时间窗**的 RMS
+  （录完的 IQ 解调 vs 当前实时音频），受电台调制内容/静音段影响。
+- **为什么没改阈值**：把 0.3 调成 0.2 就是拿标准换绿字，本轮不做。
+- **修法（下轮）**：改成同一段 IQ 的「文件回放 vs 内存直解」对拍，
+  消掉时间窗变量；或判据改为「回放 RMS 有能量且与实时同量级」并写明依据。
+- **诚实边界**：R4 在其他子项全绿（流式增长、完整性、改速跟随）。本轮
+  单跑 `PASS`、全跑曾 `FAIL`，属判据抖动。
+
+---
+
+## K12 — 门限边缘掠射过境漏检（2026-11-09 22:46，真差异·未修）
+
+R5 用中性示例站（45°N/120°E、**200 m**）跑时，NOAA-19 两边过境集合不一致：
+
+```
+我方 24h 列表：5 场，首场 08:52:58（峰值 7.5°）
+skyfield 参考：首场峰值 5.025°（贴 5° 门限的掠射场）
+最近一场差 31991 s ≈ 8.9 h → 我方漏了那场掠射过境
+```
+
+- **判定**：真实差异（漏检），不是配对问题。同一坐标、同一 TLE、同一 24h
+  窗口，我方没抓到峰值 5.025° 的那一场。
+- **旁证**：旧默认站高度是 0 m 时该场低于门限、不出现；换成 `SAMPLE_SITE`
+  的 200 m 后暴露。**之前 PASS 是因为高度被写成 0（近似真实站址），不是
+  因为算得准。**
+- **为什么没修**：`predict_passes` 的粗扫步长（60 s）+ 门限判定需要单独
+  设计边缘捕获策略（二分收敛是否覆盖「峰值刚好过门限」的掠射场），
+  涉及时刻精度回归面，本轮不动。
+- **转绿条件**：我方列表含该场，且 `el_err_33591` / `rise_err_33591` 转绿；
+  或证明参考侧门限判定有误并给出反证。
+- **间歇性**：22:46 实测 FAIL（漏 5.025° 场）；22:36 与 22:36 之后的
+  最终一轮 R5 判 PASS——24h 窗口随墙钟滑动，该掠射场不总是落在窗口内。
+  **不许拿「最后跑那次 PASS」说这条不存在**；它是窗口依赖的偶发漏检。
+- **诚实边界**：R5 PASS 的那几轮里其余 3 颗误差 0.01–0.05°、升起时刻
+  1–5 s；FAIL 那轮同一批数字也是这个量级，差异只在 NOAA-19 这一场。
+
+---
+
+## K13 — 场景 B 天空视图仰角与 sgp4 直算差 0.23°（2026-11-09 23:05，稳定红·未修）
+
+```
+tests/test_e2e_operation_scenarios.py::test_scenario_b_sky_to_spectrum
+assert abs(elev - st["elevation"]) <= 0.2
+  → elev=37.8（工具回执） vs st=38.0272（compute_satellite_state）
+  → 差 0.227，超阈值 0.013
+```
+
+- **与本轮改动无关**：观测站 `ALT=0.0`（高度不是原因）；
+  `sky_view_visible` 走 `compute_visible_satellite_count`，
+  不经过本轮改的 `agent._passes` / `baseband_io.load_iq` / `orbit` docstring。
+- **不是抖动**：连跑两次都红（7.86s / 7.92s），是当前时刻的确定性差异。
+- **疑点**：`sky_view_visible` 内部历表缓存 10 s 一刷，
+  `compute_satellite_state` 是 sgp4 现算；测试 `engine.set_unix(t_off)` 跳时刻后
+  没有等历表刷新——差几秒就是 0.2° 量级。
+- **未修原因**：要先确认历表刷新与 TimeEngine 的同步点，再决定是改产品
+  （跳时刻主动通知刷新）还是改测试（显式传 timestamp + 等刷新）。
+  两条路都会动时刻语义，本轮不顺手改。
+- **转绿条件**：该用例 `1 passed`，且另加一条反证证明「跳时刻后不等刷新
+  就会红」，否则改完等于把真实延迟掩盖掉。
+- **诚实边界**：提交 `bd0e7ec0` 不含这条修复，该用例当前红。

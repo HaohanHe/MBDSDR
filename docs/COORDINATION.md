@@ -3319,3 +3319,43 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
 - 提交 `30e51a1f`（24 文件）+ `fbd27f9f`（K09）已推送 `origin/main`；
   本笔只更新台账数字。下轮可选：kernel 全组重跑、K06/K07 逐条销账、
   设备插回后补真机画面复核。
+
+---
+
+### 补记五（2026-11-09 22:50）：真机同时在位，七环 6 PASS / 1 FAIL
+
+用户说「GNSS、SDR 插上了」。当场核实并跑完整验收，证据在
+`D:/mbdsdr/output/evidence/bundle_hardware_20261109/`（仓库外，无坐标）。
+
+- **设备**：RTL2832U + FC0012（`rtl_test -t` 枚举到 SN 77771111153705700）；
+  GNSS 为 USB-SERIAL CH340（COM4，9600 8N1），产品 `RealGNSSMonitor`
+  打开成功、`source=real`、有 fix、stop 后断开。**坐标不落盘**。
+- **环境事实翻案**：pyrtlsdr 0.2.93 本机**可用**——`RtlSdr(0)` 直接打开，
+  `tests/test_gui_real_hardware.py` 1 passed。此前记的「pyrtlsdr 长期不可用、
+  本地直连必须走 rtl_tcp」的说法不再引用；勘误提交 `bd0e7ec0`，memos 同步更新（`D:/mbdsdr/.workbuddy/memory/MEMORY.md`）。
+- **七环**：最终一轮 `PASS 6 / FAIL 1 / SKIP 0`（31s，exit 1）。
+  R1 连接识别、R2 频谱瀑布、R3 解调音频（19 kHz 导频高于邻域 35.5 dB）、
+  R5 过境、R6 星象仪（月球对 JPL DE421 25.3″）、R7 发射闸全 PASS；
+  R4 因 `playback_audio` 0.29 擦线 FAIL（K11）。
+- **本轮修的真 bug**（改产品，不动断言）：
+  1. **SigMF 回放断裂**：录制器写 `.sigmf-data`+`.sigmf-meta`（不写 `.json`
+     sidecar），`load_iq` 只认 sidecar/扩展名 → 自己录的自己放不了。
+     补 `_sigmf_meta_global()` 按 `core:datatype`/`core:sample_rate` 解析；
+     新增 4 条用例（含 `*_be` 与缺 meta 的反证）。R4 `playback_load` 转绿。
+  2. **过境海拔单位错 1000 倍**：`orbit.predict_passes/_state_from_satrec`
+     的海拔口径是**公里**（内部 `geodetic_to_ecef` WGS-72 km），
+     `agent.py` 直接把站址的**米**传进去。高度非零时站址被抬到几百公里，
+     仰角错到几十度、升起时刻错到小时级；高度 0 时完全看不出来，
+     所以一直没暴露。换算点在 `mbdsdr_ai/agent.py:1590` 的 `/1000.0`（提交 `bd0e7ec0`），两处 docstring 同步写明单位口径。
+     `sdr_tools` / `main_window` 本来就是对的。
+  3. **R5 默认站址踩红线**：脚本硬编码 `43.88/125.32`（注释还写「默认取
+     某城市」）——换成 `SAMPLE_SITE`（45°N/120°E），并按产品/参考两条链路
+     各自的单位（km / 米）分别传参。
+- **新登记三条已知红**：K10（rtl_tcp 路径两条能力误报，未修——`RtlTcpBackend`
+  缺 `set_offset_tuning`、`listGains` 无 `hasattr` 探测，改它会脏掉
+  `f9c3bb92` 的全量数字）、K11（R4 RMS 判据跨时间窗擦线，未改阈值）、
+  K12（门限边缘掠射过境偶发漏检，窗口依赖）。
+- **诚实边界**：`f9c3bb92` 的 `5573 passed / 0 failed` 是**本轮改代码之前**
+  的权威数字；本轮动过 `baseband_io.py` / `agent.py` / `orbit.py`，
+  全量**未重跑**，不许拿那个数字说当前代码全绿。真机只验了 30 秒级链路，
+  长时间稳定性、发射射频、C++ 侧本地编译仍 `not_verified`。
