@@ -180,8 +180,11 @@ python -m pytest tests/test_swallow_guard.py -q -rf
 6 subtests`，`counts_trustworthy=True`，日志
 `output/evidence/bundle_desktop_rerun/test_suites/desktop.log`；
 唯一剩余节点是跨线程竞态（见 K08），K06/K07 以 `xfailed` 计入，**不算绿**。
-此后又修了 K08（`11 passed` 局部复验），**第二次全量待跑**；不拿第一次
-数字冒充修完后的结果。
+此后又修了 K08（`11 passed` 局部复验）。**第二次 35:35 全量**：
+`2 failed, 5571 passed, 4 skipped, 7 xfailed, 6 subtests`，
+`counts_trustworthy=True`；K08 节点转绿，但冒出两条墙钟时间依赖（K09）。
+`bundle_desktop_final/test_suites/desktop.log` 是**修复 K09 之前**的权威
+快照；K09 局部 `4 passed`，第三次全量待跑，不拿旧数字冒充新结果。
 
 ---
 
@@ -213,7 +216,32 @@ python -m pytest tests/test_swallow_guard.py -q -rf
   → `11 passed`（12.46s）；加装置隔离后该竞态在局部可稳定复现，修前
   `1 failed / 10 passed`、修后 `11 passed`，反证成立。
 - **转绿条件**：全量固定顺序重跑该节点转绿，且汇总行 `0 failed`。
-  **第二次全量待跑，跑完才销账。**
+  第二次 35:35 全量里该节点**已转绿**（两条红换成 K09），K08 销账。
+
+---
+
+## K09 — 过境预测的墙钟窗口漂移（2026-11-09 21:05，测试装置·本轮修）
+
+- **首次记录**：第二次全量 `-rf` 汇总：
+  `FAILED tests/test_e2e_operation_scenarios.py::test_scenario_a_pass_to_archive`
+  与 `::test_scenario_c_plan_and_degrade`
+  （`2 failed, 5571 passed, 4 skipped, 7 xfailed in 2135.46s`）。
+- **症状**：`报告里没有目标过境的中天（20:39:57±3s）`；工具报告里
+  「预测起点」是 `20:40:01Z / 20:40:08Z`（本地），只剩后续过境。
+- **根因**：`tests/test_e2e_operation_scenarios.py:94` 的 `pass_case` 是
+  **module scope**，在本文件第一次用到时缓存了一份「当前起 24h」的
+  NOAA 19 过境（中天 20:39:57）；场景 A/C 在 25 分钟后才调
+  `sdr_satellite_passes`，工具从**那时的墙钟**重新起算 24h，那场已经
+  滑出窗口。第一次全量在 19:17 跑到该用例，间隔短，所以绿。
+  **不是产品回归**，是测试装置把墙钟相对量缓存成了会话级常量。
+- **处置**：`pass_case` 改为 function scope（每例重算 24h 预测，约 0.2s），
+  并在 docstring 写明为什么不能缓存；`_isolate_global_time` 的 autouse
+  复位保持不变。**断言一字未改**。
+- **验证**：`tests/test_e2e_operation_scenarios.py` → `4 passed`（13.42s），
+  运行时已是 21:1x，与失败时的 20:40 不同时段，窗口错开场景覆盖到。
+- **诚实边界**：修在第二次全量**之后**，局部验证不等于全量验证。
+  第三次全量固定顺序重跑才是当前代码的权威数字；本轮不再追逐更多轮次，
+  若仍红就逐条登记、不循环刷跑。
 
 ---
 

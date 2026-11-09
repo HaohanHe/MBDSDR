@@ -3287,3 +3287,17 @@ HEAD `2f83f482` 实测：白名单 103 行，`test_waivers_are_not_stale` 红 **
   再置态 + 清半开残骸；测试加 autouse 装置隔离与反证，断言一字未改。
   局部 `11 passed`（修前 `1 failed / 10 passed` 可稳定复现）。
 - 第二次全量待跑；kernel 组本轮仍未重跑，`not_verified` 保留。
+
+---
+
+### 补记三（2026-11-09 21:10）：第二次全量 2 failed + K09 窗口漂移
+
+- 35:35 全量：`2 failed, 5571 passed, 4 skipped, 7 xfailed, 6 subtests`，
+  `counts_trustworthy=True`；日志 `bundle_desktop_final/test_suites/desktop.log`。
+  K08 节点转绿，冒出两条墙钟时间依赖：
+  `test_e2e_operation_scenarios.py` 的 `pass_case` 是 module scope，缓存了
+  会话早期的 24h 过境（中天 20:39:57），25 分钟后工具从新墙钟起算，
+  那场已滑出窗口。改为 function scope 每例重算，局部 `4 passed`。
+- 这是**测试装置**把墙钟相对量缓存成会话常量，不是产品回归；断言一字未改。
+- 本轮再跑一次固定顺序全量作为最终权威数字；若仍有红，逐条登记，
+  **不循环刷跑**。kernel 组、真机链路继续 `not_verified`。

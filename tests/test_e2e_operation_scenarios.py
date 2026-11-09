@@ -91,10 +91,17 @@ def agent():
     return _make_agent()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def pass_case():
-    """真实过境：报告选 NOAA 19 的第一场，再把本地时刻还原成 epoch。"""
-    _reset_time_basis()          # module-scope fixture 先于 autouse 执行，这里也要复位
+    """真实过境：报告选 NOAA 19 的第一场，再把本地时刻还原成 epoch。
+
+    **必须每个用例重算，不能 module 级缓存**：24h 过境窗口是墙钟相对的，
+    module-scope 会在会话早期缓存一个中天时刻（实测 20:39:57），等场景
+    A/C 在 25 分钟后调用 `sdr_satellite_passes` 时那场已滑出窗口，报告里
+    只剩后续过境 → 断言必红。2026-11-09 全量固定顺序实测（K09），
+    单跑/早段全量不复现。SGP4 24h 预测约 0.2s，重算代价可忽略。
+    """
+    _reset_time_basis()          # 与 orbit / sdr_tools 的 TimeEngine 对齐
     # SATELLITE_FREQUENCIES 的单位是 MHz（见 decoders._load_satellite_frequencies）
     nominal = float(SATELLITE_FREQUENCIES[SAT]) * 1e6
     report = orbit.predict_passes_report(
