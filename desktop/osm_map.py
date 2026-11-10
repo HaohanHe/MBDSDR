@@ -1104,12 +1104,16 @@ class OsmMapView(QWidget, _PinchMixin):
         pos = self.project(*self._marker)
         if not self.rect().adjusted(-40, -40, 40, 40).contains(pos.toPoint()):
             return
-        p.setPen(QPen(QColor(_ACCENT), 2))
-        p.setBrush(QColor(255, 91, 74, 60))
-        p.drawEllipse(pos, 7.0, 7.0)
-        p.setPen(QPen(QColor(_ACCENT), 1, Qt.DashLine))
-        p.drawLine(QPointF(pos.x() - 15, pos.y()), QPointF(pos.x() + 15, pos.y()))
-        p.drawLine(QPointF(pos.x(), pos.y() - 15), QPointF(pos.x(), pos.y() + 15))
+        # 空心细环 + 短十字：以前是 7px 实心半透明红盘配 30px 长十字，
+        # 在任何深色底图上都像"一个大红点"，还会盖住叠在地图上的文字
+        # （2026-11-10 截图实证：ADS-B 空态牌被它戳穿）。站址是参考点，
+        # 不该比数据更抢眼。
+        p.setPen(QPen(QColor(_ACCENT), 1.4))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(pos, 5.0, 5.0)
+        p.setPen(QPen(QColor(_ACCENT), 1.0, Qt.DashLine))
+        p.drawLine(QPointF(pos.x() - 10, pos.y()), QPointF(pos.x() + 10, pos.y()))
+        p.drawLine(QPointF(pos.x(), pos.y() - 10), QPointF(pos.x(), pos.y() + 10))
 
     def _draw_hud(self, p: QPainter) -> None:
         f = QFont(self.font())

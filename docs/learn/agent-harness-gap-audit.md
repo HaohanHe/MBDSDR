@@ -151,8 +151,11 @@ DSH 是 compaction 锁对 + 崩溃证据 + 明确 `TurnEndReason`。
 
 ## 四、没修的（诚实清单）
 
+> **2026-11-10 复核**：第 2 项里的「会话日志」**已销账**（见第六节，带实测），
+> 其余四项仍在。原始结论保留不删，便于对照。
+
 1. 调谐/云台/工作流类写工具仍可直接执行（P1，需分级确认 + 会话免问）。
-2. 会话日志、spill、子代理深度、编排取消、重试词表：全部未做。
+2. ~~会话日志~~、spill、子代理深度、编排取消、重试词表：除会话日志外仍未做。
 3. 统一沙箱没有；C++ 侧写开关 `writeEnabled_` 与 Python gate 仍是两套。
 4. 本审计只读代码与文档，**没有在真机上跑过发射路径**（设备不在位）。
 
@@ -166,3 +169,44 @@ DSH 是 compaction 锁对 + 崩溃证据 + 明确 `TurnEndReason`。
 4. **P1 spill**：直接抄 `core/mcp_server.py` 的 `_finalize_tool_result`，
    agent 通道与 MCP 通道共用。
 5. P2 逐条：`rounds`、compaction fail-open、pre-step 闸。
+
+---
+
+## 六、2026-11-10 复核（销账 + 仍欠）
+
+对照物仍是 DeepSeek Harness（`docs/architecture.zh.md`：
+「模型可见即已记录」「seam 三角色」「副作用可逆」）。本次只复核、不改架构。
+
+### 已销账：仅追加会话日志（原 P1 第 3 条）
+
+- 实现：`mbdsdr_ai/session_log.py` —— 按 `conversation_id` 分文件，
+  一行一事件（`ts` / `seq` / `conv` / `type` + 负载），只追加不改写，
+  每次 emit 即 flush；任何异常吞掉，不拖 chat 主循环。
+- 接入：`agent.py:_slog()` 懒创建，覆盖 8 类事件实测写入点 ——
+  `turn_start`(4093) / `user_message`(4095) / `assistant_message`(4281,4291) /
+  `tool_call`(4006,4325) / `tool_result`(3969,4344) / `compaction`(4154,4379) /
+  `error`(4414) / `turn_end`(4418)，另有 `subagent.*`(3836)。
+- 实测（2026-11-10，隔离 HOME，非读代码推断）：
+
+  ```
+  ~/.mbdsdr/sessions/verify_20261110.jsonl   5 条事件，seq 递增
+    turn_start → user_message → tool_call → tool_result → turn_end
+  ```
+- 边界：这是「先只写不读」的阶段——模型历史仍来自 `context_manager`，
+  尚未改为从事件流投影（DSH 的 `deriveMessages()` 那一步没做）。
+  所以**审计/重放已经可用，崩溃恢复仍未闭环**，不能声称"P1 已解决"。
+
+### 仍欠（本次未动，逐条可查）
+
+1. **大输出只截断不落盘**：`tool_registry.py:1101` 仍是 head 60% / tail 40%
+   字符截断到 4000；MCP 侧有 spill，两条通道不一致。
+2. **子代理无深度上限**：`mbdsdr_ai/subagents.py` 无 `maxDepth`/`max_depth`。
+3. **编排不可取消**：`orchestrator.py` 只有 `CANCELLED` 枚举，无 cancel 路径。
+4. **重试判定靠字符串/正则**：`tool_registry.py` 的中文映射表与
+   `timed out` 正则，不是 `ToolResult.error` 结构化 code。
+5. **调谐/云台分级确认**、**统一沙箱**、**C++ 写开关与 Python gate 两套**：
+   与 2026-11-08 结论一致，未变。
+6. **未做 DSH 的 `tools/pre-execute|execute|post-execute` 三段钩子**：
+   我们的门是硬编码在 `call_from_model` / `mcp_server.call_tool` 里，
+   新增策略必须改代码、无法由插件挂载。这是与 DSH 最大的结构差，
+   但因为两条通道已共用 `tx_guard`，安全语义至少是一致的（这点比 11-08 好）。

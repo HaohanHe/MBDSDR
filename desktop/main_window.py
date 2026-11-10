@@ -1658,14 +1658,25 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(12, 4, 12, 4)
         self.spectrum_title = QLabel("频谱显示")
         self.spectrum_title.setObjectName("sectionTitle")
+        # 中文四字没有空格，QLabel 的 minimumSizeHint 就是整句宽、不可压；
+        # 左栏一窄就把右边的 MHz/RSSI 挤出容器边缘（2026-11-10 窄窗截图）。
+        # 放开水平策略 + 省略号，让读数永远有位置。
+        # Expanding（不是 Ignored）：Ignored 会让 QHBoxLayout 直接给它 0 宽，
+        # 标题整个消失（2026-11-10 窄窗截图实证）。Expanding 让它吃掉
+        # 剩余空间，右边两个读数靠自己的最小宽度站住。
+        self.spectrum_title.setSizePolicy(QSizePolicy.Expanding,
+                                          QSizePolicy.Preferred)
+        self.spectrum_title.setMinimumWidth(0)
         header_layout.addWidget(self.spectrum_title)
-        header_layout.addStretch()
         self.freq_label = QLabel("-- MHz")
         self.freq_label.setObjectName("statusValue")
         header_layout.addWidget(self.freq_label)
         self.rssi_label = QLabel("RSSI: —")
         self.rssi_label.setObjectName("statusValue")
+        self.rssi_label.setMinimumWidth(62)
         header_layout.addWidget(self.rssi_label)
+        self.freq_label.setMinimumWidth(78)
+        self._spectrum_header = spectrum_header
         spectrum_layout.addWidget(spectrum_header)
 
         self._no_device_hint = QLabel(
@@ -3094,6 +3105,26 @@ class MainWindow(QMainWindow):
     # <attr_name>_dock = scroll（数据 tap 用 isVisible() 守卫：非当前页签时
     # QStackedWidget 自动隐藏，天然零开销）。
     # ------------------------------------------------------------------
+    @staticmethod
+    def _relax_label_wrapping(root: QWidget) -> None:
+        """把面板里所有 wordWrap 的 QLabel 水平尺寸策略放开。
+
+        Qt 的 QLabel 在 wordWrap=True 时，minimumSizeHint 仍按"最长不可断
+        词"给宽度；中文没有空格，一整句被当成一个词，最小宽度就等于整行
+        宽。父容器（右栏 / 滚动区）于是被撑到整行宽，超出的部分被窗口裁掉
+        —— 用户看到的就是"说明文字右半边没了"。
+        设成 Ignored 后宽度由布局给，wordWrap 才真正生效；高度仍按 Preferred
+        随换行自适应。
+        """
+        try:
+            from PySide6.QtWidgets import QSizePolicy
+            for lab in root.findChildren(QLabel):
+                if lab.wordWrap():
+                    lab.setSizePolicy(QSizePolicy.Ignored,
+                                      QSizePolicy.Preferred)
+        except (ImportError, RuntimeError, AttributeError):
+            pass
+
     def _add_right_tab(self, title: str, panel: QWidget,
                        attr_name: Optional[str] = None) -> QScrollArea:
         scroll = QScrollArea()
@@ -3102,6 +3133,10 @@ class MainWindow(QMainWindow):
         # AsNeeded 而不是 AlwaysOff：页面最小宽度超出右栏时给横向滚动，
         # 绝不把「增益/音量」右半边硬裁掉（2026-11-10 截图实证）。
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # 中文长句的换行兜底：QLabel(wordWrap=True) 的 minimumSizeHint 按
+        # "最长不可断词"算，中文整句没空格 → 整行宽 → 撑爆右栏再被裁。
+        # 在这一个口子上统一放开，所有页签（含以后新增的）都吃到，不用每处记。
+        self._relax_label_wrapping(panel)
         scroll.setWidget(panel)
         self.right_tab.addTab(scroll, title)
         # 右栏最小宽度跟着里页面的真实最小宽度走（上限 380，别把天空挤没）
@@ -3247,6 +3282,24 @@ class MainWindow(QMainWindow):
             width = int(self.width())
         except RuntimeError:
             return
+        # 频谱标题栏：按**这一栏自己的宽度**判断，不看窗口总宽
+        # （三栏 splitter 比例会变，窗口宽不等于左栏宽）。窄栏时 RSSI
+        # 这个工程读数让位（全文仍在「详细」抽屉），标题用省略号。
+        hdr = getattr(self, "_spectrum_header", None)
+        if hdr is not None:
+            try:
+                hw = int(hdr.width())
+                self.rssi_label.setVisible(hw >= 340)
+                title = getattr(self, "spectrum_title", None)
+                if title is not None:
+                    # 窄栏用两字短标题，不用 elidedText：中文没有断词点，
+                    # 预算一紧就会被整句省略成空白。全文留 tooltip。
+                    txt = "频谱显示" if hw >= 340 else "频谱"
+                    if title.text() != txt:
+                        title.setText(txt)
+                    title.setToolTip("频谱显示")
+            except (RuntimeError, AttributeError):
+                pass
         for attr, min_w in (("doppler_chip", 1180), ("status_sr", 940)):
             wdg = getattr(self, attr, None)
             if wdg is None:
@@ -11437,10 +11490,24 @@ class MainWindow(QMainWindow):
             # 不能把用户选的城市一起清掉（以前只认 config，地点面板选完
             # 一秒就被 GNSS 轮询打回未定位）。
             static_site = self._observer_source in ("config", "place", "manual")
+            # 示例站（"preview"）是模拟占位，不是用户显式选的静态事实。
+            # 真 GNSS 拿到 fix 时必须顶掉它，否则天空图用真实坐标、
+            # 底栏/信息卡还停在 45N/120E —— 同一屏出现两个站址
+            # （2026-11-10 真机截图实证）。
+            preview_site = (self._observer_source == "preview"
+                            and not static_site)
             if has_fix:
                 self.sky_view.set_gnss_position(fix_dict)
                 if not static_site:
                     self._observer_source = "gnss"
+                # 只在"还没设过站"或"还在看示例站"时写真 GNSS；
+                # 不落盘（_apply_observer_location 只推内存面板）。
+                if ((self._observer_lat is None and self._observer_lon is None)
+                        or preview_site):
+                    self._observer_lat = float(pos.lat)
+                    self._observer_lon = float(pos.lon)
+                    self._observer_from_gnss = True
+                    self._apply_observer_location()
             elif not static_site:
                 self.sky_view.set_gnss_position(fix_dict)
                 self._observer_source = None
@@ -11454,16 +11521,6 @@ class MainWindow(QMainWindow):
             self.sky_view.update_gnss_satellites(gsv_frames, gsa_frame)
         except Exception:
             pass
-        # 真实 GNSS 自动设定地面站位置：仅当用户尚未手动配置
-        # （_observer_lat/lon 均为 None，即 gui_config.json 无坐标）时才写入，
-        # 避免覆盖手动配置坐标。
-        if pos.source == "real" and pos.lat is not None and pos.lon is not None:
-            if self._observer_lat is None and self._observer_lon is None:
-                self._observer_lat = float(pos.lat)
-                self._observer_lon = float(pos.lon)
-                self._observer_from_gnss = True
-                self._observer_source = "gnss"
-                self._apply_observer_location()
 
     def _on_sky_object_clicked(self, obj):
         """天空对象点击处理：显示详情，可选跟踪，并调用 MCP 工具调谐频率。

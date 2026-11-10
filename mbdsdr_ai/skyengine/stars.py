@@ -293,6 +293,39 @@ def bv_to_rgb_many(bv) -> tuple:
     return rgb[:, 0], rgb[:, 1], rgb[:, 2]
 
 
+def saturate_for_brightness_many(bright) -> tuple:
+    """可视亮度 → 星色饱和度系数（0..1，1 = 保留原色，0 = 纯白）。
+
+    为什么需要这一步：星表里有三分之一的恒星 B-V >= 1.0，映射成
+    (255,210,130)..(255,150,80) 的满饱和橙色。按满饱和画出来，整片天就是
+    "一堆橙红点"—— 这不符合肉眼所见。暗视觉（scotopic）下色觉几乎失效，
+    人眼看到的暗星基本是白色或极淡的色调，只有亮星才看得出橙/蓝。
+    Stellarium 的 saturation 参数是同一思路。
+
+    口径：0 等左右（bright≈1）保留 100% 颜色，6.5 等（bright≈0）压到 10%，
+    中间按 bright 的 0.70 次幂过渡（暗端更平，避免"突然变白"的断层）。
+    """
+    # nan_to_num 不能省：上游一旦给了 NaN，np.clip 会原样留着，
+    # power(NaN) 再传进颜色计算，整帧星色一起变坏（测试钉住）。
+    raw = np.nan_to_num(np.asarray(bright, dtype=float).reshape(-1),
+                        nan=0.0, posinf=1.0, neginf=0.0)
+    b = np.clip(raw, 0.0, 1.0)
+    return 0.10 + 0.90 * np.power(b, 0.70)
+
+
+def desaturate_rgb_many(r, g, b, sat) -> tuple:
+    """把颜色按饱和度系数向白插值：``out = 255 - (255 - c) * sat``。"""
+    s = np.clip(np.asarray(sat, dtype=float).reshape(-1), 0.0, 1.0)[:, None]
+    rgb = np.stack([
+        np.asarray(r, dtype=float).reshape(-1),
+        np.asarray(g, dtype=float).reshape(-1),
+        np.asarray(b, dtype=float).reshape(-1),
+    ], axis=1)
+    out = 255.0 - (255.0 - rgb) * s
+    out = np.clip(np.round(out), 0.0, 255.0).astype(np.int64)
+    return out[:, 0], out[:, 1], out[:, 2]
+
+
 def star_draw_many(vmag, bortle: int = DEFAULT_BORTLE) -> tuple:
     """star_draw 的向量化镜像（同一公式；标量版是事实源，测试逐点对拍）。
 

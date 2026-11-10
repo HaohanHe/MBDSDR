@@ -365,7 +365,10 @@ class AdsbMapPanel(QWidget):
                         ADSB_EMPTY_TEXT)) + 40.0))
         box_h = 34.0
         bx = (w - box_w) / 2.0
-        by = (h - box_h) / 2.0
+        # 不要放正中：地图中心就是本站，站址标记（红环+十字）正好在中心，
+        # 牌压上去看起来像"红点戳在字里"（2026-11-10 窄窗截图实证）。
+        # 放到视口 72% 高度处，两块信息互不遮挡。
+        by = max(8.0, min(h - box_h - 8.0, h * 0.72 - box_h / 2.0))
         bg = QColor(_BG)
         bg.setAlpha(220)
         p.setPen(Qt.NoPen)

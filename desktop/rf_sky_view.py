@@ -1818,6 +1818,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         self._status_card_scroll = 0.0
         self._status_card_rect = QRectF()
         self._status_card_view_h = float(self.INFO_CARD_H)
+        self._immersive_card_rect = QRectF()
         # 沉浸态（星象仪形态）：看天，不看仪表。
         # True 时收掉天线波束、过境列表、"GNSS 未连接"喊话，状态卡退成
         # 三行紧凑卡——星空才铺得开。IDE 形态恒 False，一切照旧。
@@ -4335,7 +4336,7 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     # **必须放在共享视觉模型里**：拾取层（_find_body_at）用的就是这里的 r，
     # 只在绘制层乘一份增益，会变成"画得更大但点不中边缘"——画得出就点得中
     # 是硬契约（test_planet_brightness_model）。
-    STAR_RENDER_GAIN = 1.3
+    STAR_RENDER_GAIN = 1.15
 
     def _star_visual(self, mag_eff: float, limit_mag: float,
                      bortle: int) -> Tuple[float, float, float, int]:
@@ -4420,6 +4421,12 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         r_arr, bright_arr, bloom_arr, alpha_arr = self._star_visual_many(
             sel.eff_mag, sel.limit_mag, self._bortle)
         cr_arr, cg_arr, cb_arr = _stars.bv_to_rgb_many(sel.bv)
+        # 星色按可视亮度去饱和：暗视觉下色觉失效，暗星应近白，只有亮星
+        # 才看得出橙/蓝。少了这一步，B-V>=1.0 的三分之一恒星全画成满饱和
+        # 橙色 —— 整片天就是"一堆橙红点"（2026-11-10 截图实证）。
+        _sat = _stars.saturate_for_brightness_many(bright_arr)
+        cr_arr, cg_arr, cb_arr = _stars.desaturate_rgb_many(
+            cr_arr, cg_arr, cb_arr, _sat)
         vmag_arr = np.asarray(sel.vmag, dtype=float)
         # numpy 标量在 Python 循环里逐次装箱（~0.1µs/次 × 1515 星 × 多字段）；
         # 一次性转 list 后循环只碰 Python 数值。
@@ -7112,6 +7119,9 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         x = 12.0
         y = max(12.0, float(self.height()) - card_h - 12.0)
 
+        # 单独记一份给底部角标避让；_status_card_rect 仍保持空（沉浸卡
+        # 不参与滚轮/点选拾取），两件事别混在一个矩形里。
+        self._immersive_card_rect = QRectF(x, y, card_w, card_h)
         bg = QColor(_t.COLORS["card_2"])
         bg.setAlpha(150)
         painter.setBrush(QBrush(bg))
@@ -7170,7 +7180,22 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
         hint = "拖动看天 · 滚轮缩放 · 点星星看详情"
         hw = float(fm.horizontalAdvance(hint)) + 30.0
         hx = max(8.0, (float(self.width()) - hw) / 2.0)
-        chip(hint, hx)
+        # 窄栏时左下信息卡会一直伸到底边，居中的提示条正好压在卡上
+        # （2026-11-10 真机截图：时间/位置文字与"拖动看天"叠成一团）。
+        # 先试着挪到卡的右边，右边放不下就整行抬到卡上方；都不行就不画。
+        card = (getattr(self, "_immersive_card_rect", None)
+                or getattr(self, "_status_card_rect", None))
+        if card is not None and card.isValid():
+            if QRectF(hx, y, hw, 24.0).intersects(card):
+                right = card.right() + 8.0
+                if right + hw <= float(self.width()) - 8.0:
+                    hx = right
+                elif card.top() - 30.0 >= 4.0:
+                    y = card.top() - 30.0
+                else:
+                    hint = ""
+        if hint:
+            chip(hint, hx)
         view = "视野：整片天" if self._all_sky_active else "视野：拉近看"
         vw = float(fm.horizontalAdvance(view)) + 30.0
         vx = float(self.width()) - vw - 18.0
@@ -7701,7 +7726,10 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
             return
         painter.save()
         painter.setFont(self._gnss_label_font)
-        dot_r = 7.0
+        # 数据点是标记，不是天体：以前半径 7px（定位星还套一圈 10.5px），
+        # 在窄栏/拉远视角里就是"一堆大橙圈"，把星空压成雷达屏
+        # （2026-11-10 真机截图实证）。缩到 3.5px，靠颜色/外圈区分状态。
+        dot_r = 3.5
         for sat in self._gnss_satellites:
             pos = self._sky_to_screen(sat["azimuth"], sat["elevation"])
             base = self._gnss_colors.get(sat["constellation"],
@@ -7715,15 +7743,15 @@ class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
                 fill = QBrush(QColor(base.red(), base.green(), base.blue(), alpha))
                 painter.setBrush(fill)
                 painter.setPen(QPen(QColor(base.red(), base.green(),
-                                           base.blue(), 255), 1.4))
+                                           base.blue(), 255), 1.2))
                 painter.drawEllipse(pos, dot_r, dot_r)
                 painter.setPen(QPen(QColor(base.red(), base.green(),
-                                           base.blue(), 255), 2.4))
+                                           base.blue(), 255), 1.6))
                 painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(pos, dot_r + 3.5, dot_r + 3.5)
+                painter.drawEllipse(pos, dot_r + 2.5, dot_r + 2.5)
             else:
                 pen_col = QColor(base.red(), base.green(), base.blue(), alpha)
-                painter.setPen(QPen(pen_col, 1.2))
+                painter.setPen(QPen(pen_col, 1.0))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(pos, dot_r, dot_r)
 

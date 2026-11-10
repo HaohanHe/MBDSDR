@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QCheckBox, QSpinBox,
+    QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QCheckBox, QSpinBox,
     QDoubleSpinBox, QComboBox, QLineEdit, QLabel, QFormLayout, QTabWidget,
     QScrollArea, QPushButton, QToolButton, QMessageBox, QFileDialog,
     QFrame,
@@ -55,6 +55,7 @@ try:  # pragma: no cover - 可选内核：只捕导入缺失（其它异常是�
     from mbdsdr_ai.remote_control import RemoteControl, DEFAULT_RC_PORT
 except ImportError:
     _log.warning("remote_control 内核不可用：服务设置面板降级，启动会如实报失败")
+
 
     class RemoteControl:  # type: ignore
         def __init__(self, backend=None, host="127.0.0.1", port=7356):
@@ -175,7 +176,7 @@ class ServiceSettingsPanel(QWidget):
         ports_hint = QLabel(
             "端口用途：远程控制 7356 供 GQRX/hamlib 等客户端；"
             "Web 8080 供浏览器 HTTP/WS。默认关闭，勾选「启用」后才监听。")
-        ports_hint.setWordWrap(True)
+        wrap_cn_label(ports_hint)
         ports_hint.setObjectName("hintLabel")
         root.addWidget(ports_hint)
 
@@ -230,12 +231,12 @@ class ServiceSettingsPanel(QWidget):
 
         note = QLabel("默认全部关闭。无硬件时远程命令与 Web 状态接口均如实返回"
                       "「未连接」，不伪造数据。")
-        note.setWordWrap(True)
+        wrap_cn_label(note)
         note.setObjectName("hintLabel")
         root.addWidget(note)
         # 保存失败/回填失败的用户可见状态行（不许静默吞掉配置层错误）
         self.error_label = QLabel("")
-        self.error_label.setWordWrap(True)
+        wrap_cn_label(self.error_label)
         self.error_label.setObjectName("hintLabel")
         root.addWidget(self.error_label)
         root.addStretch(1)
@@ -606,7 +607,7 @@ class SettingsPanel(QWidget):
         root.setContentsMargins(6, 4, 6, 4)
         root.setSpacing(4)
         nav_hint = QLabel("服务开关与端口见「服务设置」页签。")
-        nav_hint.setWordWrap(True)
+        wrap_cn_label(nav_hint)
         nav_hint.setObjectName("hintLabel")
         root.addWidget(nav_hint)
         self.tabs = QTabWidget()
@@ -624,7 +625,7 @@ class SettingsPanel(QWidget):
                 self.tabs.addTab(self._build_group_page(items, group), group)
         root.addWidget(self.tabs, 1)
         self.status_label = QLabel("")
-        self.status_label.setWordWrap(True)
+        wrap_cn_label(self.status_label)
         self.status_label.setObjectName("hintLabel")
         root.addWidget(self.status_label)
 
@@ -669,7 +670,7 @@ class SettingsPanel(QWidget):
         form.setContentsMargins(10, 14, 10, 10)
         form.setSpacing(8)
         note = QLabel("改一次就不管的配置放这里；主界面只留频谱和天空。")
-        note.setWordWrap(True)
+        wrap_cn_label(note)
         note.setObjectName("hintLabel")
         form.addRow(note)
         form.addRow("主题", h.theme_combo)
@@ -686,7 +687,7 @@ class SettingsPanel(QWidget):
         hl.addStretch(1)
         form.addRow("自定义布局", row)
         hint = QLabel("语言切换需重启；布局预设记录页签顺序、三栏比例与面板显隐。")
-        hint.setWordWrap(True)
+        wrap_cn_label(hint)
         hint.setObjectName("hintLabel")
         form.addRow(hint)
         return box
@@ -704,7 +705,7 @@ class SettingsPanel(QWidget):
         h.addWidget(btn)
         v.addLayout(h)
         help_lbl = QLabel(item.help)
-        help_lbl.setWordWrap(True)
+        wrap_cn_label(help_lbl)
         help_lbl.setObjectName("hintLabel")
         v.addWidget(help_lbl)
         if item.key == "record_dir":
@@ -722,7 +723,7 @@ class SettingsPanel(QWidget):
             text = "重启后生效：" + (item.restart_note or "该项在启动阶段装载。")
             control.setToolTip(text)
             note = QLabel(text)
-            note.setWordWrap(True)
+            wrap_cn_label(note)
             note.setStyleSheet("color:#D4956A;")
             v.addWidget(note)
         self._rows[item.key] = control
@@ -1243,7 +1244,7 @@ class SettingsPanel(QWidget):
                 ("日志（pythonw 无控制台时）",
                  os.path.expanduser("~/.config/MBDSDR/mbdsdr_desktop.log"))):
             row = QLabel(f"{label}：{path}")
-            row.setWordWrap(True)
+            wrap_cn_label(row)
             row.setTextInteractionFlags(Qt.TextSelectableByMouse)
             lay.addWidget(row)
 
@@ -1251,7 +1252,7 @@ class SettingsPanel(QWidget):
             "损坏的配置不会被覆盖：解析失败会先备份为 *.corrupt-时间戳，"
             "再按默认值启动。录音目录的改动只影响新录音，已有录音不动；"
             "日志级别仍锁死（原因见 docs/settings-inventory.md）。")
-        note.setWordWrap(True)
+        wrap_cn_label(note)
         note.setObjectName("hintLabel")
         lay.addWidget(note)
 
@@ -1354,3 +1355,22 @@ class SettingsPanel(QWidget):
         except Exception as exc:  # noqa: BLE001 - 面板尚未构建完成时无状态行可写
             logger.warning("设置面板状态行不可写，反馈丢失：%s（消息：%s）",
                            exc, msg)
+
+
+def wrap_cn_label(label):
+    """让中文长句真的能换行（模块级：本文件有多个面板类共用）。
+
+    ``QLabel.setWordWrap(True)`` 对中文不够：minimumSizeHint 按"最长不可断
+    词"算，中文整句没空格 → 整行宽 → 父容器按整行撑开、再被窗口边缘裁掉
+    （2026-11-10 设置页截图实证）。水平策略设 Ignored 后宽度交给布局，
+    wordWrap 才真正生效；竖直仍按 Preferred，高度随换行自适应。
+    """
+    try:
+        label.setWordWrap(True)
+        label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        # 再给一个上限：右栏常见逻辑宽 340~420，标签若被父布局撑到
+        # 400+ 就照旧越界。320 保证在窄栏里也能完整换行，不靠猜视口宽。
+        label.setMaximumWidth(320)
+    except (AttributeError, RuntimeError):
+        pass
+    return label
