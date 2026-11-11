@@ -4371,7 +4371,10 @@ class MainWindow(QMainWindow):
         # 内核常驻：无 API Key 时也把工具注册表 / Hooks / 编排器装载起来，
         # 否则能力矩阵只能对着一个 None 说"没有"（实测离线构造可得 496 个
         # 真实工具）。模型只是 Agent 的一个部件，不是 Agent 本身。
-        self._ensure_agent_kernel()
+        # 但这套装载要在内存里造几百个工具对象，排在构造期就是直接顶后首帧
+        # （P0-15）。挪到事件循环第一拍做：窗口先出来，能力矩阵先显示空态，
+        # 下面那个 1500 ms 的延迟刷新会把真实工具域补上。
+        QTimer.singleShot(0, self._ensure_agent_kernel)
         try:
             from capability_drawer import CapabilityDrawer
         except ImportError:
