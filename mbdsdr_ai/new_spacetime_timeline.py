@@ -40,9 +40,9 @@ except ImportError:  # sgp4 属 satellite 可选依赖组；缺失时用到才�
 
 # TLE 新鲜度分级（与 orbit/sat_passes 同一口径，不另立阈值）
 try:
-    from .tle_integrity import freshness, accuracy
+    from .tle_integrity import freshness, accuracy, tracking_policy
 except ImportError:  # 脚本 / 直接运行时
-    from tle_integrity import freshness, accuracy  # type: ignore
+    from tle_integrity import freshness, accuracy, tracking_policy  # type: ignore
 
 # 过境网格唯一事实源：粗扫/细扫步长与细扫实现都来自 sat_passes（P1-13）。
 # 本模块不再私藏一套「网格点当峰值」的算法——面板与 AI 必须同网格。
@@ -125,6 +125,9 @@ class SatellitePass:
     tle_tier_label: str = ""
     accuracy_risk: str = ""
     accuracy_note: str = ""
+    # 跟踪闸门 + 显示口径（tracking_policy 的完整返回）：面板只读字段，
+    # 不再自己比较 tle_tier 或另写一份「过期/失效」文案。
+    policy: Dict[str, Any] = field(default_factory=dict)
     # 轨迹采样步长（秒）。用户要能区分「星历精度」与「轨迹绘制精度」；
     # 中天时刻/仰角已由 sat_passes 的 2 s 细扫网格校正（见 _refine_peak），
     # 与 AI 口径一致，不再是「网格点即峰值」。
@@ -334,6 +337,7 @@ class TimelineEngine:
                 "tle_tier_label": fresh.get("label", ""),
                 "accuracy_risk": acc.get("risk", ""),
                 "accuracy_note": acc.get("note", ""),
+                "policy": tracking_policy(fresh, "verified"),
             }
 
             current: Optional[SatellitePass] = None
