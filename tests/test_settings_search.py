@@ -68,20 +68,19 @@ def _hidden_rows(panel):
 # ---------------------------------------------------------------------------
 # 1. 索引覆盖全量 53 项
 # ---------------------------------------------------------------------------
-def test_index_covers_all_fifty_three_schema_items(panel):
-    """53 = 本页 38 行 + 服务设置 4 + 内部键 11；一个都不许漏。"""
+def test_index_covers_every_schema_item(panel):
+    """本页 42 行 + 其余 schema 键（内部运行态等）全部可检索，一个都不许漏。"""
     indexed = set(panel._search_index) | set(panel._other_index)
     assert indexed == {it.key for it in ALL_ITEMS}
-    assert len(ALL_ITEMS) == 53
-    assert len(panel._search_index) == 38
-    assert len(panel._other_index) == 15
-    # 4 个服务开关项不在本页，但仍在「另一处」索引里（不是消失）
+    assert len(panel._search_index) == 42
+    assert len(indexed) == len(ALL_ITEMS)
+    # 4 个服务开关项现在并入「设备与接口」，直接可检索
     for key in ("rc_enabled", "rc_port", "web_enabled", "web_port"):
-        assert key in panel._other_index
+        assert key in panel._search_index
 
 
 def test_six_apply_note_items_are_all_searchable(panel):
-    """含 6 项 apply_note：4 项在本页，2 项（rc_port/web_port）在服务设置。"""
+    """6 项 apply_note 全部可检索（W51 后服务开关也并入本页）。"""
     for key in APPLY_NOTE_KEYS:
         assert key in panel._search_index or key in panel._other_index
         text = panel._search_index.get(key) or panel._other_index.get(key)
@@ -122,7 +121,7 @@ def test_baudrate_search_hits_really_contain_it(panel):
 def test_group_titles_follow_visible_rows_and_never_empty(panel):
     """分组标题随可见项收起/展开，且不出现「标题在、内容空」的空组。"""
     panel.search_edit.setText("波特率")
-    hit_groups = {SCHEMA[k].group for k in panel._search_hits}
+    hit_groups = {panel._key_section[k] for k in panel._search_hits}
     for group, section in panel._group_sections.items():
         if group in hit_groups:
             assert not section.isHidden(), f"{group} 有命中却被藏起来"
@@ -153,7 +152,7 @@ def test_clear_restores_rows_groups_and_expanded_state(panel):
 
     panel.search_edit.clear()
     assert _hidden_rows(panel) == []
-    assert len(_visible_groups(panel)) == len(GROUP_ORDER) - 1  # 服务组不在本页
+    assert len(_visible_groups(panel)) == len(panel._group_sections)  # 6 节全在
     assert {g: s.is_expanded()
             for g, s in panel._group_sections.items()} == before_expanded
     assert panel._search_hits == set()
@@ -163,18 +162,18 @@ def test_clear_restores_rows_groups_and_expanded_state(panel):
 def test_non_schema_extras_hide_and_come_back(panel):
     """存储页的路径/导入导出按钮、外观方块都不是 schema 行，也要跟着过滤。"""
     extras = panel._search_extras
-    assert extras.get("存储与日志"), "存储页附加控件没有登记"
+    assert extras.get("数据与操作"), "数据页附加控件没有登记"
     panel.search_edit.setText("波特率")
-    assert all(w.isHidden() for w in extras["存储与日志"])
+    assert all(w.isHidden() for w in extras["数据与操作"])
     panel.search_edit.clear()
-    assert not any(w.isHidden() for w in extras["存储与日志"])
+    assert not any(w.isHidden() for w in extras["数据与操作"])
 
 
 # ---------------------------------------------------------------------------
 # 4. 键盘可达
 # ---------------------------------------------------------------------------
 def test_tab_from_search_reaches_first_item(panel):
-    first_key = panel._group_keys["通用"][0]
+    first_key = panel._group_keys["外观与语言"][0]
     panel.search_edit.setFocus()
     QTest.qWait(20)
     assert panel.focusWidget() is panel.search_edit

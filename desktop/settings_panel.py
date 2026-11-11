@@ -40,15 +40,13 @@ logger = logging.getLogger(__name__)
 
 try:
     from config_schema import (
-        ALL_ITEMS, CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, GROUP_ORDER, SCHEMA,
-        ImportResult, build_export, items_for_group, parse_import,
-        validate_value,
+        ALL_ITEMS, CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, SCHEMA,
+        ImportResult, build_export, parse_import, validate_value,
     )
 except ImportError:  # pragma: no cover - 包内导入
     from .config_schema import (
-        ALL_ITEMS, CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, GROUP_ORDER, SCHEMA,
-        ImportResult, build_export, items_for_group, parse_import,
-        validate_value,
+        ALL_ITEMS, CONFIG_SCHEMA_VERSION, EXPOSED_ITEMS, SCHEMA,
+        ImportResult, build_export, parse_import, validate_value,
     )
 
 try:  # 静噪刻度→余量的唯一换算入口；缺失时按钮仍可用，只是不显示换算后缀
@@ -137,6 +135,40 @@ UNAFFECTED_IMPORT_KEYS: Tuple[str, ...] = (
 
 #: 预览文本里每段最多列多少条（超出只给条数，避免对话框撑爆）。
 _PREVIEW_MAX_LINES = 12
+
+#: 设置面板的 6 个**用途**分组（D-10 裁定 / W51）：标题、一句用途、键清单。
+#:
+#: 与 schema 的 ``group`` 不是一回事：schema 分组描述「数据归属」（导入导出、
+#: 文档口径都按它），这里描述「用户想干什么」。所以同一 schema 分组的项会被
+#: 拆到不同用途里（如「频谱与解码」拆成接收与频谱 / 瀑布与标注）。
+#: 组内顺序 = 上面的键顺序；键集合必须**恰好覆盖**全部 exposed 项，
+#: 漏一个就有一条设置项在面板上消失（tests/test_settings_groups.py 钉住）。
+PANEL_SECTIONS: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
+    ("外观与语言", "界面长什么样、说什么话", (
+        "ui_language", "touch_mode", "focus_mode", "free_float_panels",
+        "theme", "show_waterfall")),
+    ("接收与频谱", "收得准不准：分辨率、窗函数、静噪与步进", (
+        "fft_size", "fft_window", "fft_avg_frames", "squelch_default_db",
+        "tuning_step_hz")),
+    ("瀑布与标注", "看得清不清：配色、平滑、峰值与书签", (
+        "waterfall_palette", "peak_threshold_db", "show_peaks",
+        "waterfall_smooth", "show_bookmarks", "show_bandplan",
+        "waterfall_depth_rows")),
+    ("天文观测", "天空与卫星：站址、光害大气、过境筛选", (
+        "sky_pressure_hpa", "sky_temperature_c", "bortle", "sky_extinction_k",
+        "observer_lat", "observer_lon", "pass_min_elevation_deg",
+        "pass_window_hours", "show_low_elevation_passes")),
+    ("设备与接口", "接什么设备、开什么端口", (
+        "gnss_port", "gnss_baudrate", "perf_profile",
+        "rc_enabled", "rc_port", "web_enabled", "web_port")),
+    ("数据与操作", "数据落在哪、助手怎么答", (
+        "callsign", "record_dir", "log_level",
+        "ai_temperature", "ai_top_p", "ai_max_output_tokens",
+        "ai_max_context_tokens", "ai_timeout")),
+)
+
+#: 展开态落库键（内部键，已登记 config_schema）：逗号分隔的分组标题。
+_EXPANDED_KEY = "settings_expanded_groups"
 
 
 def format_import_preview(res: ImportResult) -> str:
@@ -617,6 +649,15 @@ class SettingsPanel(QWidget):
         self._group_keys: Dict[str, List[str]] = {}
         #: 分组 → RightSection（可折叠节）。
         self._group_sections: Dict[str, Any] = {}
+        #: 设置项键 → 它所在的用途分组标题（搜索按分组收起时用）。
+        self._key_section: Dict[str, str] = {}
+        #: 分组标题 → 一句用途（读屏描述随展开态刷新时用）。
+        self._section_purpose: Dict[str, str] = {}
+        #: 展开态是否已从磁盘恢复：恢复过程中 set_expanded 会发信号，
+        #: 那时绝不能反写磁盘（会把「刚读到的值」再写一遍，甚至写坏）。
+        self._expanded_state_ready = False
+        #: 是否处于搜索筛选视图：这期间分组的自动展开/收起不落库。
+        self._searching = False
         #: 分组 → 非 schema 行的附加控件（如「外观」方块），搜索时一并隐藏。
         self._search_extras: Dict[str, List[QWidget]] = {}
         #: 不在本页渲染的键（4 个服务开关 + 11 个内部键）→ 可检索文本。
@@ -857,34 +898,29 @@ class SettingsPanel(QWidget):
         self._esc_shortcut.activated.connect(self.search_edit.clear)
         # 右栏只有 ~320px 宽：7 个分组页签按全局 QSS 的 6/14 内边距要 594px，
         # 第 4 个「频谱与解码」被右边界整字切掉，且页签栏没有滚动按钮——后面
-        # 三组等于不可达（2026-11-11 实拍）。这里不再用页签，改成与右栏一致的
-        # 可折叠长列：7 个分组名一屏看全、点标题展开，也不再有"滚动条套滚动条"。
+        # 三组等于不可达（2026-11-11 实拍）。这里按 D-10 裁定的 6 个**用途**
+        # 分组切，折叠标题保持一屏可见。
         self.group_sections: List[Any] = []
-        for group in GROUP_ORDER:
-            # 服务开关保留在独立的「服务设置」一节（避免两个 ServiceSettingsPanel
-            # 各自持有一套 RemoteControl/WebServer 实例）；其键仍在 schema 内，
-            # 参与导入导出与"恢复全部默认"。
-            if group == "服务与远程访问":
-                continue
-            if group == "存储与日志":
-                body = self._build_storage_tab()
-            else:
-                items = items_for_group(group)
-                if not items:
-                    continue
-                body = self._build_group_body(items, group)
-            section = RightSection(group, body,
-                                   expanded=not self.group_sections)
+        for title, purpose, keys in PANEL_SECTIONS:
+            items = [SCHEMA[k] for k in keys]
+            body = self._build_group_body(items, title, purpose)
+            section = RightSection(title, body, expanded=False)
             section.expanded_changed.connect(
                 lambda on, s=section: self._on_group_expanded(s, on))
-            self.group_sections.append((group, section))
+            # accessibleName/Description 由 RightSection._sync_header_accessibility
+            # 统一维护（含展开态与 checked 同步），这里只补「这节是干什么的」。
+            section.header.setToolTip(purpose)
+            self._section_purpose[title] = purpose
+            self.group_sections.append((title, section))
             root.addWidget(section)
-            self._group_keys[group] = [it.key for it in items_for_group(group)]
-            self._group_sections[group] = section
-            for key in self._group_keys[group]:
+            self._group_keys[title] = list(keys)
+            self._group_sections[title] = section
+            for key in keys:
+                self._key_section[key] = title
                 item = SCHEMA.get(key)
                 if item is not None:
                     self._search_index[key] = self._searchable_text(item)
+        self._restore_expanded_state()
 
         # 53 项 = 本页 38 行 + 服务设置 4 项 + 内部键 11 项。后两类改不了，但
         # **必须搜得到**：搜「远程控制端口」若直接报「无匹配」，就是在骗人——
@@ -941,6 +977,9 @@ class SettingsPanel(QWidget):
         if not query:
             self._restore_after_search()
             return
+        # 先置位再动分组：下面的 set_expanded 会触发 _on_group_expanded，
+        # 那一刻必须已经知道「这是搜索造成的，不是用户的选择」。
+        self._searching = True
         if self._expanded_before_search is None:
             self._expanded_before_search = {
                 g: s.is_expanded() for g, s in self._group_sections.items()}
@@ -1001,6 +1040,7 @@ class SettingsPanel(QWidget):
                     section.set_expanded(expanded)
             self._expanded_before_search = None
         self._search_hits = set()
+        self._searching = False
         self.search_status.setVisible(False)
         self.search_status.setText("")
 
@@ -1037,7 +1077,44 @@ class SettingsPanel(QWidget):
         内层信号就会把刚展开的行裁掉半截（与 AI 面板同一个缺陷）。点的是
         折叠在屏幕外的组时，不滚过去等于"点了没反应"。
         """
-        QTimer.singleShot(0, lambda: self._reveal_group(section, expanded))
+        # 搜索引起的自动展开不是用户的选择：那期间不落库，否则搜一次就把
+        # 用户的折叠习惯改成了「命中的那几组」。
+        if self._expanded_state_ready and not self._searching:
+            self._persist_expanded_state()
+        # singleShot 带上 context：面板被销毁后定时器随 context 一起取消，
+        # 不会在已析构的 QWidget 上回调（测试 teardown 里的 RuntimeError）。
+        QTimer.singleShot(0, section,
+                          lambda: self._reveal_group(section, expanded))
+
+    # ------------------------------------------------------------ 展开态落库
+    def _restore_expanded_state(self) -> None:
+        """按落库值恢复展开态；空/坏值/未知标题一律回落「只展开首组」。
+
+        存的是**展开**的分组标题（逗号分隔）。全收起是合法状态，用 ``-``
+        记录；空串或读不出来时才走「只展开首组」的兜底。
+        """
+        titles = [t for t, _p, _k in PANEL_SECTIONS]
+        raw = ""
+        if self._settings is not None:
+            try:
+                raw = str(self._settings.get(_EXPANDED_KEY, "") or "")
+            except (TypeError, ValueError, KeyError):
+                raw = ""
+        wanted = [t.strip() for t in raw.split(",") if t.strip()]
+        valid = [t for t in wanted if t in titles]
+        if raw.strip() and not valid and raw.strip() != "-":
+            valid = []          # 全是未知标题：当坏值处理
+        if not (raw.strip() == "-" or valid):
+            valid = titles[:1]
+        for title, section in self.group_sections:
+            section.set_expanded(title in valid)
+        self._expanded_state_ready = True
+
+    def _persist_expanded_state(self) -> None:
+        if self._settings is None:
+            return
+        expanded = [t for t, s in self.group_sections if s.is_expanded()]
+        self._settings.set(_EXPANDED_KEY, ",".join(expanded) if expanded else "-")
 
     def _reveal_group(self, section, expanded: bool) -> None:
         self._sync_outer_column()
@@ -1063,20 +1140,32 @@ class SettingsPanel(QWidget):
                 return
             w = w.parentWidget()
 
-    def _build_group_body(self, items, group: str = "") -> QWidget:
+    def _build_group_body(self, items, group: str = "",
+                          purpose: str = "") -> QWidget:
         inner = QWidget()
         lay = QVBoxLayout(inner)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(8)
+        if purpose:
+            # 用途说明放正文首行而不是标题：标题行只有 24px，320 宽下会把
+            # 「接什么设备、开什么端口」整句省略掉；收起时也不该多占一行。
+            hint = QLabel(purpose)
+            wrap_cn_label(hint)
+            hint.setObjectName("hintLabel")
+            lay.addWidget(hint)
         for item in items:
             lay.addWidget(self._build_row(item))
-        if group == "显示与主题":
+        if group == "外观与语言":
             extra = self._build_appearance_box()
             if extra is not None:
                 lay.addWidget(extra)
                 # 外观方块不是 schema 行：过滤时它不含任何 schema 键，
                 # 必须随分组一起隐藏，否则「搜索只留命中的行」变成半截。
                 self._search_extras.setdefault(group, []).append(extra)
+        if group == "数据与操作":
+            # 路径清单 / 导入导出按钮原先住在「存储与日志」页，现在随录音目录
+            # 与日志一起并入「数据与操作」，控件顺序与文案都不变。
+            self._append_storage_tools(lay, group)
         lay.addStretch(1)
         return inner
 
@@ -1719,15 +1808,13 @@ class SettingsPanel(QWidget):
         """非交互入口：预览后立即写入（对话框走 preview → 确认 → apply）。"""
         return self.apply_import(self.preview_import(path))
 
-    # ------------------------------------------------------------ 存储与日志页
-    def _build_storage_tab(self) -> QWidget:
-        page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(8, 8, 8, 8)
-        lay.setSpacing(6)
-        # 录音目录是真实可配置项（schema 行 + 选择/打开按钮）
-        for item in items_for_group("存储与日志"):
-            lay.addWidget(self._build_row(item))
+    # ------------------------------------------------------------ 存储工具区
+    def _append_storage_tools(self, lay: QVBoxLayout, group: str) -> None:
+        """把配置路径清单 / 损坏说明 / 导入导出按钮追加到「数据与操作」正文。
+
+        内容与文案沿用原「存储与日志」页，一字未改；只是不再单独成节
+        （6 个用途分组里「数据落在哪」和录音目录是同一件事）。
+        """
         settings_path = (self._settings.path if self._settings is not None
                          else "（未挂载 settings）")
         extra_widgets: List[QWidget] = []
@@ -1763,11 +1850,9 @@ class SettingsPanel(QWidget):
         row.addWidget(btn_import)
         row.addWidget(btn_open)
         lay.addLayout(row)
-        lay.addStretch(1)
-        # 存储页里的路径/说明/导入导出按钮都不是 schema 行，过滤时一并收起。
-        self._search_extras.setdefault("存储与日志", []).extend(
+        # 路径/说明/按钮都不是 schema 行，过滤时一并收起。
+        self._search_extras.setdefault(group, []).extend(
             extra_widgets + [note, btn_export, btn_import, btn_open])
-        return page
 
     def _on_export_clicked(self):
         path, _ = QFileDialog.getSaveFileName(

@@ -1628,17 +1628,15 @@ def test_record_dir_panel_row_and_buttons(env, monkeypatch):
 # ---------------------------------------------------------------------------
 def test_panel_has_required_groups_and_all_rows(env):
     ds, host, panel, _ = env
-    # 2026-11-11：右栏只有 ~320px，7 个分组页签要 594px（第 4 个被右边界整字
-    # 切掉且无法滚动），故页签改为「可折叠分组长列」。这里改按新结构取分组名，
-    # 断言口径不变：7 个分组一个都不能少。
+    # 2026-11-11 W51（D-10 裁定）：面板按「用途」切成 6 节，不再是 schema 的
+    # 7 个数据分组——同一 schema 分组会被拆开（如「频谱与解码」拆成
+    # 接收与频谱 / 瀑布与标注）。断言口径换成用途标题。
     titles = [title for title, _section in panel.group_sections]
-    for group in ("通用", "显示与主题", "星象仪", "频谱与解码",
-                  "卫星与多普勒", "AI", "存储与日志"):
-        assert group in titles
-    # 服务组由独立「服务设置」页签承载（避免双 ServiceSettingsPanel），不算本面板行
-    settings_keys = [it.key for it in EXPOSED_ITEMS
-                     if it.storage == "settings" and it.group != "服务与远程访问"]
-    assert set(settings_keys) <= set(panel._rows)
+    assert titles == ["外观与语言", "接收与频谱", "瀑布与标注",
+                      "天文观测", "设备与接口", "数据与操作"]
+    # 服务组 4 项并入「设备与接口」（不新增第二节 ServiceSettingsPanel）
+    settings_keys = [it.key for it in EXPOSED_ITEMS]
+    assert set(settings_keys) == set(panel._rows)
     # 行标题来自 schema 文案，UI 不另写
     from PySide6.QtWidgets import QGroupBox
     titles = {w.title() for w in panel.findChildren(QGroupBox)}
@@ -1935,13 +1933,15 @@ def test_delayed_items_carry_apply_note_and_not_restart_flag():
 def test_apply_note_reaches_the_widget_tooltip(env):
     """提示必须真的挂到控件上（只在 schema 里写一句等于没写）。"""
     ds, host, panel, _ = env
+    # 2026-11-11 W51 后服务开关并入「设备与接口」，6 项 apply_note 全在本页。
     in_panel = [k for k in DELAYED_APPLY_KEYS if k in panel._rows]
     assert set(in_panel) == {"gnss_port", "gnss_baudrate",
-                             "perf_profile", "record_dir"}
+                             "perf_profile", "record_dir",
+                             "rc_port", "web_port"}
     for key in in_panel:
         assert SCHEMA[key].apply_note in panel._rows[key].toolTip()
 
-    # 端口项在「服务设置」面板（不是本页）：它自己的 tooltip 明说需重启服务
+    # 端口项在独立「服务设置」面板里也有一份：它自己的 tooltip 明说需重启服务
     svc = getattr(host, "service_settings_panel", None)
     if svc is not None:
         for widget in (svc.rc_port, svc.web_port):
