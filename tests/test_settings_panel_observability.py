@@ -110,3 +110,61 @@ def test_reset_defaults_really_restores_when_dirty(qapp):
     for key in _ENV_KEYS:
         assert stub.values[key] == defaults[key]
     assert panel.error_label.text() == "已恢复本组默认值"
+
+
+# ---------------------------------------------------------------------- #
+# 写盘成败可见性：AI 配置写失败不得被「已保存/已恢复默认」冲掉
+# ---------------------------------------------------------------------- #
+def _ai_panel(monkeypatch, tmp_path):
+    # 隔离真实 ~/.mbdsdr/config.json：只读也不该碰用户文件
+    monkeypatch.setattr(sp, "AI_CONFIG_PATH", str(tmp_path / "config.json"))
+    return sp.SettingsPanel(settings=None)
+
+
+def _fail_write(*_a, **_k):
+    raise OSError("disk full")
+
+
+def test_ai_config_write_failure_is_not_overwritten_by_saved(qapp, monkeypatch,
+                                                             tmp_path):
+    panel = _ai_panel(monkeypatch, tmp_path)
+    monkeypatch.setattr(sp, "_atomic_write_json", _fail_write)
+
+    panel._on_changed("ai_temperature", 0.55)
+
+    msg = panel.status_label.text()
+    assert "未保存" in msg
+    assert "AI 配置写入失败" in msg and "disk full" in msg
+    assert "已保存" not in msg, "写盘失败时不得出现成功文案"
+
+
+def test_ai_config_write_success_still_says_saved(qapp, monkeypatch, tmp_path):
+    panel = _ai_panel(monkeypatch, tmp_path)
+    monkeypatch.setattr(sp, "_atomic_write_json", lambda *_a, **_k: None)
+
+    panel._on_changed("ai_temperature", 0.55)
+
+    assert "已保存" in panel.status_label.text()
+
+
+def test_ai_config_reset_failure_is_not_reported_as_done(qapp, monkeypatch,
+                                                         tmp_path):
+    panel = _ai_panel(monkeypatch, tmp_path)
+    monkeypatch.setattr(sp, "_atomic_write_json", _fail_write)
+
+    panel._reset_one("ai_temperature")
+
+    msg = panel.status_label.text()
+    assert "恢复默认未落盘" in msg and "disk full" in msg
+    assert "已恢复默认" not in msg
+
+
+def test_reset_all_reports_partial_persist_failure(qapp, monkeypatch, tmp_path):
+    panel = _ai_panel(monkeypatch, tmp_path)
+    monkeypatch.setattr(sp, "_atomic_write_json", _fail_write)
+
+    panel.reset_all(confirm=False)
+
+    msg = panel.status_label.text()
+    assert "恢复默认未完全落盘" in msg and "disk full" in msg
+    assert "已恢复全部默认" not in msg

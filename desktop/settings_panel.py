@@ -551,14 +551,20 @@ class SettingsPanel(QWidget):
             return item.default
         return self._ai.get(self._ai_file_key(item), item.default)
 
-    def _store_value(self, item, value) -> None:
+    def _store_value(self, item, value) -> str:
+        """把一项配置写进对应存储；返回空串=已写入，否则返回失败原因。
+
+        失败原因必须回传给调用方拼进那一条用户可见文案。旧实现在这里自己
+        ``_notify`` 一次失败、调用方随后又无条件发「已保存」，失败消息被
+        当场冲掉（AI 配置写盘失败即此形态，用户重启后才发现参数没存）。
+        """
         if item.storage == "settings":
             if self._settings is not None:
                 self._settings.set(item.key, value)
-            return
+            return ""
         if item.storage == "gui_config":
             if self._host is None:
-                return
+                return ""
             # 站址走主窗唯一写入口（set_observer_site）：成对提交经纬度，
             # 一并同步天空 / 过境 / ADS-B，并把镜像下发到 config.json。
             which = "lat" if item.key.endswith("lat") else "lon"
@@ -569,8 +575,8 @@ class SettingsPanel(QWidget):
                 try:
                     self._host.set_observer_site(None, None, source="manual")
                 except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                    self._notify(f"观测站坐标清空失败：{exc}")
-                return
+                    return f"观测站坐标清空失败：{exc}"
+                return ""
             if which == "lat":
                 self._pending_lat = new_val
             else:
@@ -582,20 +588,21 @@ class SettingsPanel(QWidget):
             if lat is None or lon is None:
                 # 只填了一半：先记住（暂存面板本地，不进 host、不参与计算）。
                 # 否则"先输纬度"会被上面的清空分支吃掉，用户以为保存失败。
-                self._notify("纬度与经度要成对填写，填完另一个才生效")
-                return
+                return "纬度与经度要成对填写，填完另一个才生效"
             self._pending_lat = self._pending_lon = None
             try:
                 self._host.set_observer_site(lat, lon, source="config")
             except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-                self._notify(f"观测站坐标保存失败：{exc}")
-            return
+                return f"观测站坐标保存失败：{exc}"
+            return ""
         # ai_config：保留 api_key 等既有键，只改本项
         self._ai[self._ai_file_key(item)] = value
+        store_error = ""
         try:
             _atomic_write_json(AI_CONFIG_PATH, self._ai, mode=0o600)
         except (OSError, TypeError, ValueError) as exc:
-            self._notify(f"AI 配置写入失败：{exc}（本次修改仅存在内存中）")
+            store_error = f"AI 配置写入失败：{exc}（本次修改仅存在内存中）"
+            logger.warning("%s", store_error)
         # 已创建 agent 时立即生效（下一轮请求就会用新参数）
         agent = getattr(getattr(self._host, "ai_panel", None), "agent", None)
         if agent is not None and hasattr(agent, "config"):
@@ -604,6 +611,7 @@ class SettingsPanel(QWidget):
             except (AttributeError, TypeError):
                 # 旧版 AgentConfig 没有该字段：配置已落盘，新会话生效
                 pass
+        return store_error
 
     # ------------------------------------------------------------ 构建 UI
     def _build_ui(self):
@@ -909,10 +917,14 @@ class SettingsPanel(QWidget):
             return
         item = SCHEMA[key]
         value, reason = validate_value(item, raw)
-        self._store_value(item, value)
+        store_error = self._store_value(item, value)
         applied = self._apply(item, value)
         self._set_control_value(item, self._current_value(item))
-        msg = f"已保存：{item.label}"
+        if store_error:
+            # 写盘失败必须停在失败态：不能先报一句失败、再被「已保存」冲掉。
+            msg = f"未保存：{item.label}（{store_error}）"
+        else:
+            msg = f"已保存：{item.label}"
         if key == "record_dir":
             msg += f"（生效目录 {self._record_effective_dir()}；只影响新录音）"
             # 保存即检查可写性：盘拔了/路径非法时当场说清楚，不等用户点"打开目录"。
@@ -1173,15 +1185,19 @@ class SettingsPanel(QWidget):
         item = SCHEMA.get(key)
         if item is None:
             return
+        store_error = ""
         if item.storage == "settings" and self._settings is not None:
             self._settings.reset(key)
         elif item.storage == "gui_config":
-            self._store_value(item, None)
+            store_error = self._store_value(item, None)
         elif item.storage == "ai_config":
-            self._store_value(item, item.default)
+            store_error = self._store_value(item, item.default)
         self._refresh_from_storage()
         self._apply(item, self._current_value(item))
-        self._notify(f"已恢复默认：{item.label}")
+        if store_error:
+            self._notify(f"恢复默认未落盘：{item.label}（{store_error}）")
+        else:
+            self._notify(f"已恢复默认：{item.label}")
 
     def reset_all(self, confirm: bool = True) -> bool:
         """恢复全部默认（settings + 观测站清空 + AI 采样参数）。
@@ -1197,16 +1213,19 @@ class SettingsPanel(QWidget):
                 return False
         if self._settings is not None:
             self._settings.reset_all()
+        store_errors = []
         for item in EXPOSED_ITEMS:
             if item.storage == "gui_config":
-                self._store_value(item, None)
+                err = self._store_value(item, None)
+                if err:
+                    store_errors.append(f"{item.label}：{err}")
             elif item.storage == "ai_config":
                 self._ai[self._ai_file_key(item)] = item.default
         if EXPOSED_ITEMS:
             try:
                 _atomic_write_json(AI_CONFIG_PATH, self._ai, mode=0o600)
             except (OSError, TypeError, ValueError) as exc:
-                self._notify(f"AI 配置恢复默认后写入失败：{exc}")
+                store_errors.append(f"AI 配置写入失败：{exc}")
         # 服务设置由主窗口持有；恢复默认后让它回填（端口置灰由它自身状态决定）
         sp = getattr(self._host, "service_settings_panel", None)
         if sp is not None:
@@ -1215,7 +1234,10 @@ class SettingsPanel(QWidget):
         for item in EXPOSED_ITEMS:
             if item.storage != "gui_config":
                 self._apply(item, self._current_value(item))
-        self._notify("已恢复全部默认")
+        if store_errors:
+            self._notify("恢复默认未完全落盘：" + "；".join(store_errors[:3]))
+        else:
+            self._notify("已恢复全部默认")
         return True
 
     # ------------------------------------------------------------ 导入/导出
