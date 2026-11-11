@@ -78,29 +78,46 @@ def test_mode_registry_register_new():
         assert sentinel in mr.mode_names()
     finally:
         # 清理，避免污染其它测试
-        mr._REGISTRY.pop(sentinel, None)
+        mr.unregister(sentinel)
     assert mr.get(sentinel) is None
 
 
-def test_mode_registry_single_instance_across_import_names():
-    """裸名 `mode_registry` 与包名 `desktop.mode_registry` 必须是同一模块对象。
+def test_mode_registry_state_shared_across_module_instances():
+    """裸名与包名可以是两个模块对象，但注册表必须是同一份状态。
 
-    两条导入路径会各执行一遍模块体，`_REGISTRY` 就分裂成两份：`register()` 落进
-    一份、UI 读另一份 → 新模式静默不出现（docs/redundancy-register.md §5.10）。
-    反证：删掉 mode_registry.py 顶部的 sys.modules 别名块，本用例必红。
+    状态唯一持有者是 `mode_registry_store`（只按裸名导入，两种上下文命中
+    同一个 sys.modules 条目）。反证：把状态改回模块级字典 `_REGISTRY`，
+    包名实例与裸名实例各持一份，本用例必红。
     """
     import desktop.mode_registry as pkg_mod
 
-    assert pkg_mod is mr, "mode_registry 与 desktop.mode_registry 是两个模块对象"
-    sentinel = "ZZALIAS"
+    sentinel = "ZZSHARED"
+    desc = mr.DemodMode(
+        mode=sentinel, display_name="共享状态测试", default_bandwidth_hz=3333.0,
+        audio_cutoff_hz=1234.0, demod_func="", outputs_audio=False)
     try:
-        pkg_mod.register(pkg_mod.DemodMode(
-            mode=sentinel, display_name="别名测试", demod_func="",
-            outputs_audio=False))
-        assert mr.get(sentinel) is not None, "经包名注册的模式，裸名读方看不到"
+        # 包名实例写 → 裸名读方必须读到
+        pkg_mod.register(desc)
+        assert mr.get(sentinel) is not None, "经包名注册的模式，裸名读方读不到"
+        assert mr.default_bandwidth(sentinel) == 3333.0
+
+        # 反向：裸名实例注销 → 包名读方必须也看不到
+        mr.unregister(sentinel)
+        assert pkg_mod.get(sentinel) is None, "裸名注销后，包名读方仍能看到"
+
+        # 裸名实例写 → 包名读方必须读到
+        mr.register(desc)
+        assert pkg_mod.get(sentinel) is not None, "经裸名注册的模式，包名读方读不到"
     finally:
-        mr._REGISTRY.pop(sentinel, None)
-    assert mr.get(sentinel) is None
+        mr.unregister(sentinel)
+    assert mr.get(sentinel) is None and pkg_mod.get(sentinel) is None
+
+
+def test_mode_registry_dict_is_not_exposed():
+    """读方只能拿函数，不能拿注册表字典（docs/redundancy-register.md §5.11.1）。"""
+    for name in ("_REGISTRY", "_runtime"):
+        assert not hasattr(mr, name), f"mode_registry 不应再暴露 {name}"
+    assert callable(mr.register) and callable(mr.get) and callable(mr.list_modes)
 
 
 # ─────────────────────────────────────────────────────────────────────

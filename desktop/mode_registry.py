@@ -23,26 +23,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-# `mode_registry`（桌面各面板的裸导入）与 `desktop.mode_registry`（测试/工具/插件的
-# 包式导入）会各执行一遍模块，`_REGISTRY` 因此分裂成两份：`register()` 写进先被
-# 加载的那份，UI 下拉/解调分发读另一份，**注册的模式在界面里永远不出现**
-# （定性见 docs/redundancy-register.md §5.10，与 themes 同型）。
-# 下面几行把另一个名字指回本模块：先导入的胜出，后导入的直接复用同一对象。
-import sys as _sys
-
-_sys.modules.setdefault(
-    "desktop.mode_registry" if __name__ == "mode_registry" else "mode_registry",
-    _sys.modules[__name__])
-# 只写 sys.modules 不够：`import desktop.mode_registry` 命中 sys.modules 后不再执行
-# 「给父包 setattr」那一步，属性访问会 AttributeError。裸导入先发生时父包通常
-# 还没导入，这里补一次绑定（脚本上下文没有仓库根，忽略 ImportError）。
-if __name__ == "mode_registry":
-    try:
-        import desktop as _desktop_pkg
-    except ImportError:
-        _desktop_pkg = None
-    if _desktop_pkg is not None:
-        setattr(_desktop_pkg, "mode_registry", _sys.modules[__name__])
+# 运行时注册表的唯一持有者是 `mode_registry_store`。它只按裸名导入：无论本模块
+# 以裸名（面板）还是包名（测试/工具）被执行，`import mode_registry_store` 都命中
+# 同一个 sys.modules 条目，两份模块实例共享同一份状态。
+# 不合并模块名（那要 sys.modules 别名），只把可变状态收口到一个持有者；
+# 本模块对外只提供读函数，不暴露注册表字典。
+import mode_registry_store as _store
 
 
 @dataclass(frozen=True)
@@ -196,24 +182,29 @@ _BUILTIN_MODES: Dict[str, DemodMode] = {
 # 运行时注册表（可动态追加）
 # ─────────────────────────────────────────────────────────────────────
 
-_REGISTRY: Dict[str, DemodMode] = dict(_BUILTIN_MODES)
+_store.init_defaults(_BUILTIN_MODES)
 
 
 def register(mode: DemodMode) -> None:
     """注册/覆盖一个解调模式。"""
-    _REGISTRY[mode.mode.upper()] = mode
+    _store.put(mode)
+
+
+def unregister(mode_name: str) -> None:
+    """移除一个运行时注册的模式（内置模式也可移除；主要供测试清理）。"""
+    _store.discard(mode_name)
 
 
 def get(mode: str) -> Optional[DemodMode]:
     """按模式名获取描述符，不存在返回 None。"""
-    return _REGISTRY.get(mode.upper())
+    return _store.get(mode)
 
 
 def list_modes(category: Optional[str] = None) -> List[DemodMode]:
     """列出所有模式；可选按分类过滤。按内置顺序返回。"""
     if category is None:
-        return list(_REGISTRY.values())
-    return [m for m in _REGISTRY.values() if m.category == category]
+        return _store.values()
+    return [m for m in _store.values() if m.category == category]
 
 
 def mode_names(category: Optional[str] = None) -> List[str]:
@@ -313,4 +304,4 @@ def demodulate(mode: str, iq, sample_rate: float = 48000.0,
 
 def to_bandwidth_dict() -> Dict[str, float]:
     """导出 {mode: default_bandwidth_hz} 字典，供未迁移代码兼容使用。"""
-    return {m.mode: m.default_bandwidth_hz for m in _REGISTRY.values()}
+    return {m.mode: m.default_bandwidth_hz for m in _store.values()}
