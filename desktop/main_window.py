@@ -870,6 +870,11 @@ class MainWindow(QMainWindow):
         #: 会触发 libpyside 的 "Failed to disconnect" RuntimeWarning（关窗日志里
         #: 的常客，也说明收尾不幂等）。
         self._touch_mode_bound = True
+        #: 主题 QSS 的**基串**（只来自 theme._qss()，不含触控后缀）。
+        self._theme_qss = ""
+        #: 上一次已挂上去的触控模式（None=从未挂过）。模式未变时
+        #: _apply_touch_stylesheet 直接返回，不重复叠加后缀。
+        self._touch_qss_applied = None
         self._worker_manager = MCPWorkerManager()
         self._worker: Optional[object] = None
         # AI 工具环内完成的硬件调用 → 回 UI 线程同步控件
@@ -1242,10 +1247,21 @@ class MainWindow(QMainWindow):
         self._apply_touch_stylesheet()
 
     def _apply_touch_stylesheet(self) -> None:
-        """追加/移除触屏模式专属 QSS。鼠标模式下追加空串（恢复主题默认）。"""
+        """追加/移除触屏模式专属 QSS。鼠标模式下追加空串（恢复主题默认）。
+
+        幂等靠两道闸：
+        1. ``_touch_qss_applied`` 记住上次挂上去的模式，模式没变直接返回；
+        2. 目标串恒为「主题基串 + 现场生成的后缀」。基串只来自
+           ``theme._qss()``，**绝不复用 ``app.styleSheet()``**——触屏模式下后者
+           已经含后缀，记成基串就会让每次切主题再叠一份（实测 +528 字节/次，
+           20832 → 22944；切一百次就是 50 KB 的样式表，每次重抛光都要重新解析）。
+        """
         tm = touch_manager()
+        touch_on = bool(tm.is_touch_mode())
+        if getattr(self, "_touch_qss_applied", None) == touch_on:
+            return
         extra = ""
-        if tm.is_touch_mode():
+        if touch_on:
             sb_w = tm.scrollbar_width()       # 触屏 14 / 鼠标 10
             extra = (
                 f"QScrollBar:vertical {{ width: {sb_w}px; }}"
@@ -1268,14 +1284,14 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QApplication
             app = QApplication.instance()
             if app is not None:
-                base = getattr(self, "_theme_qss", "")
-                target = base + extra
+                target = getattr(self, "_theme_qss", "") + extra
                 # 幂等：app 级 setStyleSheet 重抛光全部控件（成本 O(全部控件)，
                 # 见 Theme.apply 的说明）。触屏模式切换时每个存亡窗口的槽都会
                 # 调到这里，不跳过就是 O(N²)——tests/ 根 90% 处挂死的真因。
                 # 内容相同则跳过：重复应用不改变任何视觉表现。
                 if app.styleSheet() != target:
                     app.setStyleSheet(target)
+                self._touch_qss_applied = touch_on
         except Exception:
             pass
 
@@ -5298,12 +5314,15 @@ class MainWindow(QMainWindow):
             if self.isVisible():
                 QApplication.processEvents()
             theme.apply(_app)
-            # 记录主题基础 QSS，触屏模式下 _apply_touch_stylesheet 在其后追加触控规则
-            # （theme.apply 会整体替换 stylesheet，故这里必须重新捕获并叠加）。
-            try:
-                self._theme_qss = _app.styleSheet() if _app is not None else ""
-            except Exception:
-                self._theme_qss = ""
+            # 只记**主题基串**（theme._qss()）。绝不记 app.styleSheet()：触屏模式下
+            # 后者已经含触控后缀，记成基串会让 _apply_touch_stylesheet 每次都把
+            # 后缀再叠一遍（实测 20832 → 22944，+528 字节/次）。
+            self._theme_qss = theme._qss()
+            # theme.apply 若真的重设过样式表（当前五套主题 QSS 逐字相同，正常
+            # 不会），已挂的触控后缀就被冲掉了——此时样式表恰等于基串，必须
+            # 允许 _apply_touch_stylesheet 重挂一次，否则触屏尺寸会静默丢失。
+            if _app is not None and _app.styleSheet() == self._theme_qss:
+                self._touch_qss_applied = None
             self._apply_touch_stylesheet()
 
             # 更新频谱组件颜色
