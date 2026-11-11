@@ -144,14 +144,13 @@ def test_baseline_file_stays_in_sync_with_counter():
 
 
 def test_upgraded_tooltips_meet_the_rules():
-    """本次改写的 20 处必须真的落地：任一处退回旧文案即红。"""
+    """本次改写的 tooltip 必须真的落地：任一处退回旧文案即红。"""
     texts = {item["text"] for item in scan_tooltips()[0]}
     upgraded = [
         "切换当前信号的解调方式；听模拟语音用 FM/NFM，听短波/航空用 AM",
         "现在使用的解调方式；要切换可用顶栏下拉，频谱获焦时按 A/N/F/W/C 更直接",
         "现在没有正在跟踪的卫星，所以此项目前不可用；先到「卫星跟踪」页签选一颗卫星再开始跟踪",
         "说明本设备能不能发射；显示「驱动级已实现」只代表代码支持，未经真机验证前请谨慎发射",
-        "每秒采集的样本数；越高能看的带宽越宽，默认值通常够用",
         "接收放大倍数；信号弱就调大，过强出现削顶就调小，开启硬件 AGC 时此项不生效",
         "选择要解码的录制文件：IQ 录制用 .iq/.cfile/.raw，NOAA APT 录音用 .wav",
         "卫星下行信号的中心频率（MHz）；选好制式会自动填入，手动改动前先确认",
@@ -160,7 +159,11 @@ def test_upgraded_tooltips_meet_the_rules():
         # 也是「采样率 (MS/s)」），不是早期草稿里的 Msps；文案其余部分
         # 与「这是什么 + 什么时候用 + 下一步」三条规矩一字未改。
         "录制文件的采样率（MS/s）；必须与录制时一致，不一致会解码失败",
-        "开始解码当前文件或实时信号；完成后右侧出图，失败时下方会写明原因",
+        # 与 b5b956c7 同步：原「开始解码当前文件或实时信号」对实时档位是空
+        # 承诺（本面板不边收边解），产品改成只承诺录制文件解码 + 实时档位
+        # 指引。守门跟着真实文案走。
+        "解码所选录制文件（.iq/.wav）并在右侧出图，失败时下方写明原因；"
+        "「实时 SDR」档位不在此面板解码，只给「主窗口录音 → 切录制文件」的指引",
         "停止当前解码；已经生成的图会保留，想重来再点「开始解码」",
         # 三处产品文案后来被改得更准确（NTRIP 说清 Caster 是什么、频率
         # 控件补上「未接后端时禁用」与「范围以设备为准」）。守门仍逐字钉
@@ -179,3 +182,11 @@ def test_upgraded_tooltips_meet_the_rules():
     assert "失败时状态栏会显示真实错误原因" in src
     dock = open(os.path.join(_DESKTOP, "dock_layout_manager.py"), encoding="utf-8").read()
     assert "面板：点击显示或隐藏" in dock
+    # 采样率 tooltip（device_panel.py）同样是三段式 f 字符串拼接，静态扫描
+    # 取不到字面量；且它插的是性能档 1.024 MS/s（PERF_DEFAULT_SR），与
+    # constants.DEFAULT_SR_UNCONFIRMED（内核基准 2.400 MS/s）不是同一个值，
+    # 无法按「必须包含该常量」断言。这里只钉 d77d9b78 引入的语义内核：
+    # 说清是配置意图、并打「默认 · 未确认」标；数字与前后措辞可随产品演进。
+    dev = open(os.path.join(_DESKTOP, "device_panel.py"), encoding="utf-8").read()
+    assert "配置意图，不是设备读数" in dev
+    assert "（默认 · 未确认）" in dev
