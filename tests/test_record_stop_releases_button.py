@@ -91,12 +91,19 @@ class _FailAfter:
         self._fh.flush()
 
 
+def _status(w):
+    return w.statusBar().currentMessage()
+
+
 def _assert_released(w):
     assert w._recording is False
     assert w.record_btn.isChecked() is False, "工具栏录音按钮仍处于按下态"
     assert w.control_panel.record_button.isChecked() is False, "面板录音按钮仍处于按下态"
     assert "完成" not in w.control_panel.record_status.text(), (
         f"面板仍显示完成态: {w.control_panel.record_status.text()!r}")
+    # 面板说真话还不够：状态栏同一句话也不得把内部中止落成「录制完成」
+    # （2026-11-11 实测：面板已改对，状态栏仍是「…失败…；录制完成: …」）。
+    assert "完成" not in _status(w), f"状态栏仍显示完成态: {_status(w)!r}"
 
 
 def test_write_failure_releases_button(window, tmp_path):
@@ -106,6 +113,8 @@ def test_write_failure_releases_button(window, tmp_path):
     window._record_stream_fh = _FailAfter(window._record_stream_fh, ok=0)
     window._record_write_chunk(np.ones(1024, dtype=np.complex64))
     _assert_released(window)
+    assert "No space left on device" in _status(window), (
+        f"状态栏必须写明中止原因，实际: {_status(window)!r}")
 
 
 def test_replay_start_releases_button(window, tmp_path):
