@@ -12178,6 +12178,35 @@ class MainWindow(QMainWindow):
             act.setToolTip("停止当前卫星跟踪并恢复原频率/模式" if tracking
                            else "当前无跟踪目标")
 
+    def _tracking_policy_for(self, sat_name: str) -> Dict:
+        """取某颗星的操作许可（P0-01 桌面侧唯一入口）。
+
+        档位判定只在 ``mbdsdr_ai.tle_integrity.tracking_policy()`` 一处，
+        桌面不再自己比较 ``tle_tier``/``age_days``。取不到数（无 tracker、
+        目录里没这颗星、条目字段异常）一律按 ``no_data`` 全禁止——
+        缺数据不冒充可信。
+        """
+        from mbdsdr_ai.tle_integrity import tracking_policy
+        tracker = getattr(self, "sat_tracker", None)
+        if tracker is None or not hasattr(tracker, "tracking_policy_for"):
+            return tracking_policy(None, "no_data")
+        try:
+            return tracker.tracking_policy_for(sat_name)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            logger.warning("卫星跟踪闸门取数失败（按禁止处理）：%s", exc)
+            return tracking_policy(None, "no_data")
+
+    def _confirm_tracking_policy(self, sat_name: str, policy: Dict) -> bool:
+        """档位要求二次确认时问一句；默认按钮是「否」，误触不会直接调谐。"""
+        ans = QMessageBox.warning(
+            self, "星历精度不足，仍要开始跟踪？",
+            f"{sat_name}：{policy.get('label', '')}\n"
+            f"{policy.get('reason', '')}\n"
+            f"建议：{policy.get('next_action', '')}\n\n"
+            "多普勒校正会按这条星历算，误差会直接落在调谐频率上。仍要开始吗？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return ans == QMessageBox.Yes
+
     def _start_satellite_tracking(self, sat_name: str, downlink_freq_hz: float):
         """进入闭环自动跟踪：选星 -> 500ms 轮询 az/el/多普勒 -> 自动调谐 SDR。
 
@@ -12212,6 +12241,24 @@ class MainWindow(QMainWindow):
                 self._sync_tracking_ui(True)
                 return
             self._stop_satellite_tracking()
+
+        # 星历闸门（P0-01）：能不能开始跟踪、要不要先确认，只由 tracking_policy_for
+        # 一处说了算。过期/身份不符/无数据都走同一套禁止策略——不在这里另写一套
+        # age_days/tle_tier 比较，否则两处档位迟早对不上。
+        policy = self._tracking_policy_for(sat_name)
+        if not policy.get("command_allowed"):
+            self._sync_tracking_ui(False)
+            self.statusBar().showMessage(
+                f"不跟踪 {sat_name}：{policy.get('label', '')}"
+                f"（{policy.get('reason', '')}）→ {policy.get('next_action', '')}",
+                MSG_IMPORTANT)
+            return
+        if policy.get("require_confirm") and not self._confirm_tracking_policy(
+                sat_name, policy):
+            self._sync_tracking_ui(False)
+            self.statusBar().showMessage(
+                "已取消卫星跟踪（星历精度需确认后再开始）", MSG_NORMAL)
+            return
 
         from mbdsdr_ai.sat_passes import GroundStation
         gs = GroundStation(lat_deg=self._observer_lat,
