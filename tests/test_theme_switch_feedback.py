@@ -103,6 +103,8 @@ def test_switch_restores_previous_status_text(window, other_theme, seen_apply):
     prev = "采样率 2.4 MS/s（切换前应有）"
     _set_status(window, prev)
     window._apply_theme(other_theme)
+    assert seen_apply.get("msg") == _BUSY_TEXT, (
+        "套主题时状态栏没有给出反馈，实际：" + repr(seen_apply.get("msg")))
     assert window.statusBar().currentMessage() == prev, (
         "切换结束后没有恢复原文案，实际："
         + repr(window.statusBar().currentMessage()))
@@ -114,6 +116,8 @@ def test_switch_clears_status_when_it_was_empty(window, other_theme,
     _set_status(window, "")
     assert window.statusBar().currentMessage() == ""
     window._apply_theme(other_theme)
+    assert seen_apply.get("msg") == _BUSY_TEXT, (
+        "套主题时状态栏没有给出反馈，实际：" + repr(seen_apply.get("msg")))
     assert window.statusBar().currentMessage() == "", (
         "切换前状态栏是空的，结束后却留下了提示："
         + repr(window.statusBar().currentMessage()))
