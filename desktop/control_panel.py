@@ -495,9 +495,7 @@ class ControlPanel(QWidget):
         # 默认选中 10kHz
         _def_step = self.step_combo.findData(10_000.0)
         self.step_combo.setCurrentIndex(_def_step if _def_step >= 0 else 4)
-        self.step_combo.setToolTip(
-            "每次加减频率走多大一步（这里选的是 10 kHz）；"
-            "旁边的 − / + 就按这个步长微调，不直接改设备。")
+        self.step_combo.setToolTip(self._step_tooltip_text())
         self.step_combo.currentIndexChanged.connect(self._on_step_combo_changed)
         step_row.addWidget(self.step_combo, 1)
 
@@ -1026,10 +1024,17 @@ class ControlPanel(QWidget):
         """FreqDisplay 按位编辑（滚轮/点击/右键清零）→ 走统一调谐通道。"""
         self._set_freq_hz(float(hz))
 
+    def _step_tooltip_text(self) -> str:
+        """按 ``step_combo`` 当前档位生成提示：档位会变，提示里的数字不许写死。"""
+        return (f"每次加减频率走多大一步（这里选的是 "
+                f"{self.step_combo.currentText()}）；"
+                "旁边的 − / + 就按这个步长微调，不直接改设备。")
+
     @Slot(int)
     def _on_step_combo_changed(self, index: int):
         hz = float(self.step_combo.itemData(index) or 10_000.0)
         self._step_hz = hz
+        self.step_combo.setToolTip(self._step_tooltip_text())
         self.step_changed.emit(hz)
 
     def _sync_freq_actions_enabled(self) -> None:

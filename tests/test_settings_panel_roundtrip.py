@@ -180,6 +180,18 @@ def test_tuning_step_save_apply_readback(window):
     )
 
 
+def test_tuning_step_tooltip_tracks_current_value(window):
+    """步进提示不许写死数字：选到 1 MHz 后，tooltip 不能再提 10 kHz。"""
+    combo = window.control_panel.step_combo
+    idx = combo.findData(1_000_000.0)
+    assert idx >= 0, "步进下拉里没有 1MHz 档"
+    combo.setCurrentIndex(idx)
+    app.processEvents()
+    tip = combo.toolTip()
+    assert "10 kHz" not in tip and "10kHz" not in tip, tip
+    assert "1MHz" in tip or "1 MHz" in tip, tip
+
+
 # ---------------------------------------------------------------- 瀑布历史深度
 def test_waterfall_depth_save_apply_readback(window):
     w = window
