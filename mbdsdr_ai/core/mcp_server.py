@@ -33,6 +33,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+from . import controller as _controller
 from .controller import SDRController
 from .errors import (ExportPathOutOfRootError, InvalidArgumentError,
                      SDRUserError)
@@ -914,7 +915,27 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         _schema({"handle": _STR}, ["handle"]), _scan_results)
 
     # ---- 解码 ----
-    add("start_decoder", "启动流式解码器（仅 adsb/rds），返回句柄；其余类型走 --decode-file。",
+    # 能力分区只引用 controller 的声明，本文件不另存副本：controller 增删
+    # 解码器时，list_decoders 与 start_decoder 的文案同时跟着变。
+    def _decoder_capability(_c: SDRController, _a: Dict[str, Any]) -> Dict[str, Any]:
+        streamable = list(_controller.STREAMABLE_DECODERS)
+        file_only = list(_controller.FILE_ONLY_DECODERS)
+        return {
+            "streamable": streamable,
+            "file_only": file_only,
+            "file_entry": "--decode-file <文件> --mode <类型>",
+            "note": (f"流式入口只实现了 {', '.join(streamable)}；"
+                     f"{', '.join(file_only)} 能力真实存在，但只能走文件级入口"),
+        }
+
+    add("list_decoders", "列出解码器能力分区：可流式（start_decoder）与仅文件级。",
+        _schema({}), _decoder_capability)
+
+    _streamable_txt = ", ".join(_controller.STREAMABLE_DECODERS)
+    _file_only_txt = ", ".join(_controller.FILE_ONLY_DECODERS)
+    add("start_decoder",
+        f"启动流式解码器（仅 {_streamable_txt}），返回句柄；"
+        f"{_file_only_txt} 只有文件级入口，请用 --decode-file（见 list_decoders）。",
         _schema({"decoder_type": _STR, "params": {"type": "object"}},
                 ["decoder_type"]),
         lambda c, a: (
@@ -1368,6 +1389,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "read_spectrum": "SDR 调谐/VFO",
     # 亚音数字解码
     "start_decoder": "亚音数字解码",
+    "list_decoders": "亚音数字解码",
     "stop_decoder": "亚音数字解码",
     "get_decoder_messages": "亚音数字解码",
     # VNA 测量 / VNA 分析 / VNA 校准：本面无 VNA 工具（空卡片，诚实空态）
