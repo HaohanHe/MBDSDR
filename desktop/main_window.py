@@ -5674,6 +5674,7 @@ class MainWindow(QMainWindow):
         """
         scr = QGuiApplication.primaryScreen()
         if scr is None or self.isFullScreen() or self.isMaximized():
+            self._apply_pending_column_sizes()
             return
         g = scr.availableGeometry()
         w = min(self.width(), int(g.width() * 0.96), max(1, g.width() - 8))
@@ -5687,6 +5688,8 @@ class MainWindow(QMainWindow):
             self.resize(w, h)
         if (x, y) != (self.x(), self.y()):
             self.move(x, y)
+        # 尺寸收口之后再落三栏比例：构造期拿不到真实可用宽，这里才有。
+        self._apply_pending_column_sizes()
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt 命名)
         """首次显示后再收一次口：QSettings 恢复几何发生在 show 之后，
@@ -11525,6 +11528,7 @@ class MainWindow(QMainWindow):
     # 窗口几何 + 坞布局持久化（QSettings）
     # ------------------------------------------------------------------
     def _restore_window_state(self):
+        self._pending_column_sizes = None
         s = QSettings("MBDSDR", "Desktop")
         geom = s.value("window_geometry")
         if geom is not None:
@@ -11548,72 +11552,138 @@ class MainWindow(QMainWindow):
     #: 三栏默认宽度（左/中/右）：与构造期 setSizes 同一口径。
     _DEFAULT_THREE_COLUMN_SIZES = (470, 330, 320)
 
-    def _three_column_screen_width(self) -> int:
-        """校验用的屏宽：优先窗口所在屏，取不到就退主屏/1920。"""
-        try:
-            scr = self.screen()
-            if scr is None:
-                from PySide6.QtWidgets import QApplication
-                scr = QApplication.primaryScreen()
-            if scr is not None:
-                return int(scr.availableGeometry().width())
-        except (AttributeError, RuntimeError):
-            pass
-        return 1920
+    def _three_column_structure(self, sizes):
+        """结构校验：判断这是不是一组可用的三栏宽度（不看窗口多大）。
 
-    def _validate_three_column_sizes(self, sizes):
-        """三栏宽度是否可落地。返回 ``(ok, reason)``。
-
-        拒绝条件（存储值可能是用户手改、旧版本别的格式、或跨屏恢复的
-        脏数据）：长度≠3、任一 ≤0、任一 > 屏宽、三栏和 > 可用宽度。
-        任何一条命中都**不**拿它恢复布局——中栏 2000px 这类值会把窗口
-        塌掉（实测 ``[260,2000,326]``）。
+        返回 ``(vals, reason)``，``vals is None`` 表示结构非法。
+        「总量超出可用宽」**不**算结构错误——那通常是换了屏幕（3440 上
+        拖好、拔线回笔记本），由 _scale_three_column_sizes 等比缩放解决。
         """
         if not isinstance(sizes, (list, tuple)):
-            return False, f"不是三元素序列（{type(sizes).__name__}）"
+            return None, f"不是三元素序列（{type(sizes).__name__}）"
         try:
             vals = [int(v) for v in sizes]
-        except (TypeError, ValueError):
-            return False, f"含非整数项（原值={sizes!r}）"
+        except (TypeError, ValueError, OverflowError):
+            return None, f"含非整数项（原值={sizes!r}）"
         if len(vals) != 3:
-            return False, f"长度≠3（实际 {len(vals)}）"
+            return None, f"长度≠3（实际 {len(vals)}）"
         if any(v <= 0 for v in vals):
-            return False, f"存在 ≤0 的栏宽（{vals}）"
-        screen_w = self._three_column_screen_width()
-        if any(v > screen_w for v in vals):
-            return False, f"单栏宽 {max(vals)} > 屏宽 {screen_w}"
-        avail = self.width() if self.width() > 0 else screen_w
-        if sum(vals) > avail:
-            return False, f"三栏和 {sum(vals)} > 可用宽度 {avail}"
-        return True, ""
+            return None, f"存在 ≤0 的栏宽（{vals}）"
+        return vals, ""
+
+    def _three_column_min_widths(self) -> list:
+        """各栏硬下限：显式 minimumWidth 优先，否则取布局最小尺寸。"""
+        sp = self._main_splitter
+        mins = []
+        for i in range(3):
+            w = sp.widget(i)
+            m = int(w.minimumWidth())
+            if m <= 0:
+                m = int(w.minimumSizeHint().width())
+            mins.append(max(0, m))
+        return mins
+
+    def _scale_three_column_sizes(self, vals, avail):
+        """把三栏宽度等比缩放到可用内容宽；返回 ``(widths, reason)``。
+
+        不丢比例：按 ``v * avail / total`` 缩放，取整误差补到最宽栏，
+        保证三栏和恰好等于 ``avail``。只有缩放后确实有栏低于该栏硬下限
+        才判不可落地（此时返回 ``None`` + 原因，由调用方回默认）。
+        """
+        total = sum(vals)
+        if total <= avail:
+            return list(vals), ""
+        scaled = [max(1, int(round(v * avail / total))) for v in vals]
+        diff = avail - sum(scaled)
+        if diff:
+            top = max(range(3), key=lambda i: scaled[i])
+            scaled[top] += diff
+        mins = self._three_column_min_widths()
+        short = [f"第{i + 1}栏 {scaled[i]} < 下限 {mins[i]}"
+                 for i in range(3) if scaled[i] < mins[i]]
+        if short:
+            return None, "；".join(short)
+        return scaled, ""
+
+    def _decode_three_column_state(self, raw):
+        """把 ``QSplitter.saveState()`` 的字节解成三栏宽度（保比例）。
+
+        直接 restore 到主 splitter 会被当前几何夹取、再按 stretch 权重
+        重新分配，比例就丢了。这里用一个足够宽、无 stretch 权重的临时
+        splitter 解码：Qt 会按存储比例铺满，宽度只影响绝对值、不影响比例。
+        """
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QSplitter, QWidget
+        tmp = QSplitter(Qt.Horizontal)
+        try:
+            for _ in range(3):
+                tmp.addWidget(QWidget())
+            tmp.resize(100000, 100)
+            if not tmp.restoreState(raw):
+                return None
+            return [int(v) for v in tmp.sizes()]
+        except Exception:  # noqa: BLE001 - 脏字节按不可用处理
+            return None
+        finally:
+            tmp.deleteLater()
+
+    def _apply_pending_column_sizes(self) -> None:
+        """上屏后按真实可用内容宽落地存储的三栏比例（只做一次）。"""
+        pending = getattr(self, "_pending_column_sizes", None)
+        if not pending:
+            return
+        sp = getattr(self, "_main_splitter", None)
+        if sp is None:
+            return
+        # 可用内容宽 = splitter 宽 - 两条手柄；不能把 splitter 宽当三栏之和，
+        # 否则 setSizes 会多出 2×handleWidth，Qt 再按 stretch 缩回去。
+        avail = int(sp.width()) - int(sp.handleWidth()) * 2
+        if avail <= 0:
+            avail = int(self.width())
+        if avail <= 0:
+            return
+        self._pending_column_sizes = None
+        widths, reason = self._scale_three_column_sizes(pending, avail)
+        if widths is None:
+            logger.warning(
+                "三栏比例无法落地（原值=%r，可用宽=%d）：%s；改用默认三栏 %r",
+                pending, avail, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
+            sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
+            return
+        if widths != list(pending):
+            logger.info(
+                "三栏比例超出可用宽度（原值=%r，可用宽=%d）：等比缩放为 %r",
+                pending, avail, widths)
+        sp.setSizes(widths)
 
     def _restore_three_column_sizes(self, sizes) -> None:
-        """恢复三栏比例；存储值不可信时忽略并回落默认（带一行警告）。"""
+        """读入三栏比例：结构非法回默认（warning），合法则上屏后归一化。"""
         sp = self._main_splitter
         original = sizes
         vec = None
         if isinstance(sizes, (list, tuple)):
             try:
                 vec = [int(v) for v in sizes]
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 vec = None
         else:
-            # 正常格式是 QSplitter.saveState() 的 QByteArray：先恢复到控件
-            # 上拿到真实 widths 再校验；decode 失败按不可用处理。
-            try:
-                sp.restoreState(sizes)
-                vec = [int(v) for v in sp.sizes()]
-            except Exception:  # noqa: BLE001 - 脏值一律回落，不抛给启动
-                vec = None
-        ok, reason = (False, "无法解析存储值") if vec is None else \
-            self._validate_three_column_sizes(vec)
-        if not ok:
+            # 正常格式是 QSplitter.saveState() 的 QByteArray：先解出存储的
+            # 真实 widths，再走与 list 完全相同的结构判定。
+            vec = self._decode_three_column_state(sizes)
+        vals, reason = (None, "无法解析存储值") if vec is None else \
+            self._three_column_structure(vec)
+        if vals is None:
             logger.warning(
                 "三栏比例存储值不可用（原值=%r）：%s；忽略存储值，改用默认三栏 %r",
                 original, reason, list(self._DEFAULT_THREE_COLUMN_SIZES))
             sp.setSizes(list(self._DEFAULT_THREE_COLUMN_SIZES))
             return
-        sp.setSizes(vec)
+        # 构造期拿不到三栏的真实可用宽（窗口未上屏，splitter 还是初始几何），
+        # 先只记下比例；等 _fit_window_to_screen 按真实宽度落地。否则窗口
+        # 随后被夹进屏幕时，Qt 会按 stretch 权重重新分配，比例走样。
+        self._pending_column_sizes = vals
+        if self.isVisible():
+            self._apply_pending_column_sizes()
 
     # 版本 5（2026-11-10）：默认比例改为「左 520 / 中 360 / 右 380」并把增量
     # 优先给左栏（左 ≥ 中为硬规则，中栏空态地图不许吃成主区）；version 4 的
@@ -11625,16 +11695,18 @@ class MainWindow(QMainWindow):
         s = QSettings("MBDSDR", "Desktop")
         s.setValue("window_geometry", self.saveGeometry())
         # 三栏 splitter 比例持久化（替代旧 dock_state）。
-        # 保存前与读入同一道校验：当前值不可落地（≤0 / 超屏 / 超出窗口）
-        # 时先归位到默认三栏再落盘——否则一次坏状态会被永久写回注册表，
-        # 下次启动就靠读入侧兜底，坏值仍可能在两端之间来回滚。
+        # 保存前与读入同一道结构校验：当前值不可落地（≤0 / 非三栏）时先
+        # 归位默认再落盘。总量变化（换屏）不在这里拒绝——那是读入侧归一化
+        # 的职责，保存的就是本机当时的真实宽度。
         sp = getattr(self, "_main_splitter", None)
         if sp is None:
             return
+        if getattr(self, "_pending_column_sizes", None):
+            self._apply_pending_column_sizes()
         try:
             widths = [int(v) for v in sp.sizes()]
-            ok, reason = self._validate_three_column_sizes(widths)
-            if not ok:
+            vals, reason = self._three_column_structure(widths)
+            if vals is None:
                 logger.warning(
                     "三栏比例当前值不可用（实际=%r）：%s；拒绝保存该值，"
                     "先归位默认三栏 %r 再落盘",
