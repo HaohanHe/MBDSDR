@@ -25,7 +25,8 @@
 跳过：标题行、``` 围栏代码块、``$ git`` 证据命令行 —— 它们不是断言。
 
 默认只报告、退出码 0（存量 92 条待各线认领）；``--fail-on-unverified``
-供存量清零后接 CI。``--check-lines`` 的输出**不参与**任何退出码。
+供存量清零后接 CI。``--check-lines`` 默认也只报，``--strict-lines`` 才参与退出码
+（白名单清零后自动转严格）；白名单见 ``docs/line-check-waivers.md``。
 """
 from __future__ import annotations
 
@@ -35,8 +36,9 @@ import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,7 +59,13 @@ NO_HASH = "未证实（无 hash）"
 
 EXCLUDE_DIRS = {"audit_r2"}
 #: 白名单/账本本身不是断言；它按设计要引用「已修复…」原文，扫它等于自吞。
-EXCLUDE_FILES = {"claim-waivers.md"}
+EXCLUDE_FILES = {"claim-waivers.md", "line-check-waivers.md"}
+
+#: 第 4 步白名单文件名（放在 docs/ 下）
+WAIVER_FILE = "line-check-waivers.md"
+#: 白名单条数上限：**只减不增**。要新增豁免必须显式改这个常量（diff 可见，
+#: 评审能拦住），不许悄悄往表里加行——「先记账再放行」是明确禁止的姿势。
+MAX_WAIVERS = 1
 
 
 @dataclass
@@ -168,18 +176,14 @@ def classify(text: str, root: Path, heading: str = "", baseline: str = "") -> Cl
     ``### 7.1 desktop/troubleshooting.py:92``），断言本体则常省略它。
     只借用标题里的定位，不跨段落借用 hash/字面量。
 
-    ``baseline`` 是「坐标基准」（写入四元组时的 HEAD），只给第 4 步判
-    红/黄用，不参与前三步；缺省则第 4 步一律按「需重定位」处理。
+    ``baseline`` 是「坐标基准」（写入该四元组时该行的 blame 提交），只给第 4 步
+    判红/黄用。它**不是证据**：候选提交里非基准的优先试，基准兜底——这样既能
+    避免「基准写在证据 hash 之前被当成被引提交」，又不会误伤「基准恰好也是证据」
+    的行（如单位统一那条，证据与基准同为 `ff964183`）。缺省则第 4 步一律按
+    「需重定位」处理。
     """
     c = Claim(doc="", line=0, text=text.strip(), baseline=baseline)
     hashes = _hashes(text, root)
-    if baseline:
-        # 基准是元数据，不是证据：不剔除的话，同一行里写在证据 hash 之前的基准
-        # 会被当成被引提交（`_commit_touches` 必然不命中 → 假 STALE）。
-        kept = [h for h in hashes
-                if not (h.startswith(baseline) or baseline.startswith(h))]
-        if kept:
-            hashes = kept
     targets = PATHLINE_RE.findall(text) or PATHLINE_RE.findall(heading)
     if not hashes:
         c.status = NO_HASH
@@ -196,39 +200,47 @@ def classify(text: str, root: Path, heading: str = "", baseline: str = "") -> Cl
     c.target = target
     path = targets[0][0]
 
-    known = [h for h in hashes if _commit_exists(root, h)]
+    known = [h for h in dict.fromkeys(hashes) if _commit_exists(root, h)]
     if not known:
         c.status = STALE
         c.reason = f"hash {hashes[0]} 不存在或不是 commit"
         c.action = "换成真实 commit hash；换不出就删断言"
         return c
-    h = known[0]
-    c.commit = h
-
-    if not _commit_touches(root, h, path):
-        c.status = STALE
-        c.reason = f"{h} 未改动 {path}"
-        c.action = "换成真正改到该文件的 hash（多半是另一条线的提交）"
-        return c
 
     candidates = _literal_candidates(text, hashes, target)
     if not candidates:
         c.status = STALE
+        c.commit = known[0]
         c.reason = "缺「改动后唯一字面量」，git log -S 无法定位"
         c.action = "补反引号字面量（改动后代码里真实存在的那一段）"
         return c
 
-    literal = next((t for t in candidates if _log_s_hits(root, h, t, path)), "")
-    c.literal = literal
-    if not literal:
+    # 基准是元数据不是证据：非基准候选优先，基准兜底（见函数 docstring）。
+    def _is_base(h: str) -> bool:
+        return bool(baseline) and (h.startswith(baseline) or baseline.startswith(h))
+
+    ordered = [h for h in known if not _is_base(h)] + [h for h in known if _is_base(h)]
+    touching = [h for h in ordered if _commit_touches(root, h, path)]
+    if not touching:
+        c.commit = ordered[0]
         c.status = STALE
-        c.reason = f"git log -S 候选 {candidates} 均未命中 {h}"
-        c.action = "改字面量为该提交真实引入/删除的文本；对不上就判未证实并删断言"
+        c.reason = f"{ordered[0]} 未改动 {path}"
+        c.action = "换成真正改到该文件的 hash（多半是另一条线的提交）"
         return c
 
-    c.status = OK
-    c.reason = "cat-file + show --name-only + log -S 三步全过"
-    c.detail = [h, target, literal]
+    for h in touching:
+        literal = next((t for t in candidates if _log_s_hits(root, h, t, path)), "")
+        if literal:
+            c.commit, c.literal = h, literal
+            c.status = OK
+            c.reason = "cat-file + show --name-only + log -S 三步全过"
+            c.detail = [h, target, literal]
+            return c
+
+    c.commit = touching[0]
+    c.status = STALE
+    c.reason = f"git log -S 候选 {candidates} 均未命中 {touching}"
+    c.action = "改字面量为该提交真实引入/删除的文本；对不上就判未证实并删断言"
     return c
 
 
@@ -300,7 +312,7 @@ def summarize(claims: List[Claim]) -> Dict[str, int]:
     return counts
 
 
-# ——— 第 4 步：行号内容校验（--check-lines，只报不拦） ———
+# ——— 第 4 步：行号内容校验（--check-lines；--strict-lines 才拦） ———
 #
 # 三态会误判：HEAD 每前进一次，行号就漂一次，文件改过之后「行存在但不含」
 # 是**正常老化**，不是引错。故扩成四态，用「坐标基准」把两者分开。
@@ -368,6 +380,24 @@ def _changes_since(root: Path, baseline: str, path: str) -> Optional[tuple]:
     return len(rows), (rows[0] if rows else "")
 
 
+def _blame_commit(root: Path, path: str, n: int) -> str:
+    """``HEAD`` 中该路径第 N 行的 blame 提交（40 位哈希）。
+
+    判据：``git blame -L N,N --porcelain HEAD -- <path>`` 输出的**首行首字段**
+    就是该行最后一次改动的提交；``porcelain`` 首行之后才是元数据行。
+
+    这就是「坐标基准」唯一合法的取值来源（§7.7）：基准必须是这一行的债主，
+    随手取当前 HEAD 会在下次漂移时把错坐标永久判黄。
+    取不到（路径不在 HEAD、行号越界、git 失败）返回空串。
+    """
+    proc = _git(root, ["blame", "-L", f"{n},{n}", "--porcelain", "HEAD", "--", path], 60)
+    if proc is None or proc.returncode != 0:
+        return ""
+    first = proc.stdout.split("\n", 1)[0].strip()
+    token = first.split()[0] if first else ""
+    return token if re.fullmatch(r"[0-9a-f]{40}", token) else ""
+
+
 def check_line(root: Path, commit: str, target: str, literal: str,
                doc: str = "", doc_line: int = 0, baseline: str = "") -> LineCheck:
     """第 4 步：校验 ``path:N`` 在 **HEAD** 的第 N 行是否含字面量。
@@ -381,14 +411,16 @@ def check_line(root: Path, commit: str, target: str, literal: str,
 
     四种结果分开返回，不合并：
       * ``LINE_OK``         第 N 行含该字面量（先精确子串，再空白归一后子串）
-      * ``LINE_MISLOCATED`` 行存在但不含，且该文件自 ``baseline`` 以来**未改动**
-                            → 真的引错了（红）
-      * ``LINE_RELOCATE``   行存在但不含，但文件此后**改过**（或根本没有基准）
-                            → 正常老化，需重定位（黄，不算失败）
+      * ``LINE_MISLOCATED`` 行存在但不含，且 ``baseline`` **就是该行的 blame 提交
+                            （或创建该行的提交）** → 真的引错了（红）
+      * ``LINE_RELOCATE``   行存在但不含，但 ``baseline`` 与该行 blame 不一致，
+                            或根本没有基准 → 正常老化/基准不合规，需重定位（黄）
       * ``LINE_UNRESOLVED`` 取不到那一行，``detail`` 区分「HEAD 无此路径」与「行数不够」
 
-    判红/黄的分界只看「``baseline`` 之后该路径有没有提交」：没有提交却对不上，
-    说明写四元组时就引错了；有提交则可能只是行号被推移，按黄处理。
+    判红/黄**不再看「基准之后该路径有没有提交」**，而看「基准是不是这一行的
+    blame 提交（或创建该行的提交）」。原因：基准若随手取当时的 HEAD，它永远不是
+    该行的债主，之后任何漂移都会被算成「文件改过 → 黄」，等于给错坐标发永久黄牌。
+    基准取 blame 后，只有「同一作者的同一行、此后没人碰过、内容却对不上」才判红。
     """
     path, n = _split_target(target)
     lines = _head_lines(root, path)
@@ -405,26 +437,29 @@ def check_line(root: Path, commit: str, target: str, literal: str,
     if literal in text or _norm_ws(literal) in _norm_ws(text):
         return LineCheck(result=LINE_OK, detail=text.strip()[:120], **base)
 
+    blame = _blame_commit(root, path, n)
     info = _changes_since(root, baseline, path)
-    if info is None:
-        # 无基准就判不了红/黄；用被引提交当代理给个老化线索，方便按文件派活。
+    changes, latest = info if info else (None, "")
+    if not baseline:
         proxy = _changes_since(root, commit, path)
         hint = ""
         if proxy is not None:
             moves, last = proxy
             hint = (f"参考：自被引提交 {commit} 以来该文件改动 {moves} 次"
                     + (f"（最近 {last}）" if last else ""))
-        return LineCheck(result=LINE_RELOCATE, hint=hint,
+        return LineCheck(result=LINE_RELOCATE, hint=hint, changes_since=changes,
+                         latest_change=latest,
                          detail=f"无坐标基准（或缺基准哈希解析不出）；当前第 {n} 行：{text.strip()[:100]}",
                          **base)
-    changes, latest = info
-    if changes == 0:
-        return LineCheck(result=LINE_MISLOCATED, changes_since=0,
-                         detail=f"基准 {baseline} 之后该文件未改动，第 {n} 行：{text.strip()[:100]}",
-                         latest_change=latest, **base)
+    same = bool(blame) and (blame.startswith(baseline) or baseline.startswith(blame))
+    if same:
+        return LineCheck(result=LINE_MISLOCATED, changes_since=changes,
+                         latest_change=latest,
+                         detail=f"基准 {baseline} 即第 {n} 行的 blame 提交，内容却对不上："
+                                f"{text.strip()[:100]}", **base)
     return LineCheck(result=LINE_RELOCATE, changes_since=changes, latest_change=latest,
-                     detail=f"基准之后该文件改动 {changes} 次；当前第 {n} 行：{text.strip()[:100]}",
-                     **base)
+                     detail=f"基准 {baseline} 不是第 {n} 行的 blame（{blame[:8] or '未知'}）"
+                            f"；当前第 {n} 行：{text.strip()[:100]}", **base)
 
 
 def line_checks(root: Path, claims: List[Claim]) -> List[LineCheck]:
@@ -448,7 +483,7 @@ def print_line_checks(rows: List[LineCheck]) -> None:
     print(f"含字面量 {counts[LINE_OK]}  |  错引（红） {counts[LINE_MISLOCATED]}  |  "
           f"需重定位（黄） {counts[LINE_RELOCATE]}  |  "
           f"path 或行号不存在 {counts[LINE_UNRESOLVED]}  |  合计 {len(rows)}")
-    print("判红/黄：基准之后该文件无提交 → 错引；有提交或无基准 → 需重定位（不进失败数）")
+    print("判红/黄：基准 == 该行 blame 提交 → 错引（红）；基准不是 blame 或无基准 → 需重定位（黄）")
 
     for result in (LINE_MISLOCATED, LINE_UNRESOLVED, LINE_RELOCATE, LINE_OK):
         group = [r for r in rows if r.result == result]
@@ -489,6 +524,71 @@ def _print_grouped(rows: List[LineCheck]) -> None:
     _dump("目标代码路径", by_path)
 
 
+@dataclass
+class Waiver:
+    """一条「在途豁免」：只允许挂「他线正在改、我这轮不能动」的条目。
+
+    四要素缺一不可：文档 + target（定位）/ owner（谁欠）/ 到期日（何时必须清）/
+    原因（为什么它是在途而不是错误）。缺任何一项都判失败，防止白名单变成垃圾桶。
+    """
+    doc: str
+    target: str
+    owner: str
+    due: str
+    reason: str
+    line: int = 0
+
+
+def load_waivers(path: Path) -> Tuple[List[Waiver], List[str]]:
+    """解析白名单 Markdown 表；返回 (条目, 错误)。错误一律视为失败，不放行。"""
+    if not path.exists():
+        return [], []
+    waivers: List[Waiver] = []
+    errors: List[str] = []
+    seen = set()
+    today = date.today()
+    for i, raw in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+        s = raw.strip()
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if len(cells) < 5:
+            continue
+        doc, target, owner, due, reason = cells[:5]
+        if doc in ("文档", "") or set(doc) <= set("-: "):
+            continue
+        key = (doc, target)
+        if key in seen:
+            errors.append(f"白名单第 {i} 行：重复豁免 {doc} {target}")
+            continue
+        seen.add(key)
+        if not owner or owner in ("—", "-"):
+            errors.append(f"白名单第 {i} 行：{doc} {target} 缺 owner")
+        if not reason or reason in ("—", "-"):
+            errors.append(f"白名单第 {i} 行：{doc} {target} 缺原因")
+        try:
+            due_date = date.fromisoformat(due)
+        except ValueError:
+            errors.append(f"白名单第 {i} 行：{doc} {target} 到期日 `{due}` 不是 YYYY-MM-DD")
+        else:
+            if due_date < today:
+                errors.append(f"白名单第 {i} 行：{doc} {target} 豁免已过期（{due}）")
+        waivers.append(Waiver(doc=doc, target=target, owner=owner, due=due,
+                              reason=reason, line=i))
+    if len(waivers) > MAX_WAIVERS:
+        errors.append(f"白名单 {len(waivers)} 条 > 上限 {MAX_WAIVERS}：只减不增，"
+                      f"新增豁免必须改 MAX_WAIVERS 常量并说明理由")
+    return waivers, errors
+
+
+def print_waivers(waivers: List[Waiver], errors: List[str]) -> None:
+    print(f"\n白名单（line-check-waivers）：{len(waivers)} 条 / 上限 {MAX_WAIVERS}")
+    for w in waivers:
+        print(f"  {w.doc} {w.target}  owner={w.owner}  到期={w.due}  {w.reason}")
+    for e in errors:
+        print(f"  [白名单不合规] {e}")
+
+
 def print_report(claims: List[Claim]) -> None:
     counts = summarize(claims)
     print(f"断言总数：{len(claims)}  |  可证实 {counts[OK]}  |  "
@@ -513,10 +613,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--json", default=None)
     ap.add_argument("--fail-on-unverified", action="store_true")
     ap.add_argument("--check-lines", action="store_true",
-                    help="第 4 步：校验 path:N 在 HEAD 第 N 行是否含字面量（只报不拦）")
+                    help="第 4 步：校验 path:N 在 HEAD 第 N 行是否含字面量")
     ap.add_argument("--fail-on-line-misref", action="store_true",
                     help="第 4 步里只有「错引」（红）算失败；「需重定位」（黄）不影响退出码。"
                          "隐含开启 --check-lines")
+    ap.add_argument("--strict-lines", action="store_true",
+                    help="第 4 步全量硬门：错引 / 需重定位 / 坐标不存在，只要不在白名单里就失败。"
+                         "白名单清零后自动生效（无需再加此参数）")
+    ap.add_argument("--waivers", default=None,
+                    help=f"白名单路径，默认 <docs>/{WAIVER_FILE}")
     args = ap.parse_args(argv)
     if args.fail_on_line_misref:
         args.check_lines = True
@@ -525,12 +630,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not is_git_repo(root):
         print(f"错误: {root} 不是 git 仓库，无法核实断言", file=sys.stderr)
         return 2
+    docs_root = Path(args.docs) if args.docs else root / "docs"
+    waivers_path = Path(args.waivers) if args.waivers else docs_root / WAIVER_FILE
+    waivers, waiver_errors = load_waivers(waivers_path)
+    # 白名单清零 → 自动转严格：临时放宽必须有账，账清了闸门自己合上。
+    strict = args.strict_lines or (args.check_lines and not waivers)
     claims = verify_docs(root, Path(args.docs) if args.docs else None, args.recursive)
     print_report(claims)
     rows: List[LineCheck] = []
+    open_problems: List[LineCheck] = []
     if args.check_lines:
         rows = line_checks(root, claims)
         print_line_checks(rows)
+        print_waivers(waivers, waiver_errors)
+        keys = {(w.doc, w.target) for w in waivers}
+        problems = [r for r in rows if r.result != LINE_OK]
+        open_problems = [r for r in problems if (r.doc, r.target) not in keys]
+        if problems:
+            waived = len(problems) - len(open_problems)
+            print(f"\n第 4 步：对不上 {len(problems)} 条（白名单吸收 {waived}，"
+                  f"未豁免 {len(open_problems)}）；模式={'严格' if strict else '只报不拦'}")
     if args.json:
         out = Path(args.json)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -538,11 +657,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                    "claims": [asdict(c) for c in claims]}
         if args.check_lines:
             payload["line_checks"] = [asdict(r) for r in rows]
+            payload["waivers"] = [asdict(w) for w in waivers]
+            payload["waiver_errors"] = waiver_errors
+            payload["strict"] = strict
         out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\nJSON: {out}")
     if args.fail_on_unverified and any(c.status != OK for c in claims):
         return 1
     if args.fail_on_line_misref and any(r.result == LINE_MISLOCATED for r in rows):
+        return 1
+    if strict and (open_problems or waiver_errors):
         return 1
     return 0
 

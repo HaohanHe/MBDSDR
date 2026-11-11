@@ -866,7 +866,7 @@ MBDSDR 是**单机桌面观测台**，不是在线服务、不是专业仪器软
 - AC-R8（已有自动化）：`python -m pytest tests/test_backend_resilience.py -q` 全绿：loopback 假服务制造拒绝连接/半开/掉线/RST，断言 `link_state` 与真实数据流一致。
 - AC-R9（库层已有，桌面待补）：`python -m pytest tests/test_device_manager.py::test_monitor_callback_no_crash -q` 通过。桌面接入判据：拔掉正在收的设备 → 4s 内横幅/状态栏显示"已断开"并保留最后真实频点；**当前无调用方，故不算通过**。
 - AC-R10（已有自动化）：`python -m pytest tests/test_no_device_onboarding.py::test_no_device_banner_is_plain_and_actionable -q` 通过：横幅含"没找到 SDR 设备"、可能原因、下一步。
-- AC-R11（待补）：自动重连接入后，断网 30s 内状态依次 retrying → gave_up；重连成功回填真实频率（不得回填 0 Hz）。已修假 0 Hz — `4abde1a` — `desktop/main_window.py:6637` — `绝不用 0 Hz`（基准 `3f3bbd2d`）。
+- AC-R11（待补）：自动重连接入后，断网 30s 内状态依次 retrying → gave_up；重连成功回填真实频率（不得回填 0 Hz）。已修假 0 Hz — `4abde1a` — `desktop/main_window.py:6639` — `绝不用 0 Hz`（基准 `4abde1aa`）。
 
 #### 10.7.4 诚实性红线（可执行定义）
 

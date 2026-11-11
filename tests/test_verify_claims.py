@@ -185,6 +185,56 @@ def test_line_check_unresolvable_baseline_is_relocate(tmp_path):
     assert r.result == vc.LINE_RELOCATE
 
 
+def test_baseline_pointing_at_head_instead_of_blame_is_relocate(tmp_path):
+    """第 4 步反证⑦（黄）：基准随手写成「当前 HEAD」但该行由旧提交创建 → 必须判黄。
+
+    基准取值收紧的核心反证：HEAD 永远不是该行的债主。把基准写成 HEAD，会让
+    错坐标永久挂在黄牌上，永远转不成红——这正是本轮要堵的姿势。
+    """
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    (repo / "README.md").write_text("unrelated\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-q", "-m", "unrelated commit")
+    head = _git(repo, "rev-parse", "HEAD")
+    assert head != h
+    r = vc.check_line(repo, h, "src/foo.py:2", "MAGIC_TOKEN", baseline=head)
+    assert r.result == vc.LINE_RELOCATE
+    assert "不是第 2 行的 blame" in r.detail
+
+
+def test_misref_is_judged_by_blame_not_by_later_commits(tmp_path):
+    """第 4 步反证⑧（红）：文件之后还有提交，但只要基准 == 该行 blame 就判错引。
+
+    旧口径「基准之后有提交 → 黄」在这里会放过一条真错引（changes_since == 1）；
+    blame 口径仍判红，且不依赖 HEAD 坐标。
+    """
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    (repo / "src/foo.py").write_text("MAGIC_TOKEN = 43\nOTHER = 1\n", encoding="utf-8")
+    _git(repo, "add", "src/foo.py")
+    _git(repo, "commit", "-q", "-m", "tune token")
+    assert vc._blame_commit(repo, "src/foo.py", 2) == h
+    r = vc.check_line(repo, h, "src/foo.py:2", "MAGIC_TOKEN", baseline=h)
+    assert r.changes_since == 1
+    assert r.result == vc.LINE_MISLOCATED
+
+
+def test_creator_baseline_turns_yellow_once_line_is_edited(tmp_path):
+    """第 4 步反证⑨（黄）：基准可以写「创建该行的提交」，但该行被后续提交改过后即过期。
+
+    真实案例：`main_window.py:53` 的 `fill_sample_rate_combo` 由改名提交
+    `7bea149a` 创建、后被 `a2be554a` 改签名。基准写创建者时，只有该行内容一直
+    没变才等价于 blame；一旦被改，基准就不再是债主 → 判黄并重定位，不得判红。
+    """
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    (repo / "src/foo.py").write_text("MAGIC_TOKEN = 42\nOTHER = 2\n", encoding="utf-8")
+    _git(repo, "add", "src/foo.py")
+    _git(repo, "commit", "-q", "-m", "tune other")
+    assert vc._blame_commit(repo, "src/foo.py", 2) != h  # HEAD 的债主已换人
+    r = vc.check_line(repo, h, "src/foo.py:2", "MAGIC_TOKEN", baseline=h)
+    assert r.result == vc.LINE_RELOCATE
+    assert "不是第 2 行的 blame" in r.detail
+
+
 def test_line_check_unresolved_distinguishes_path_and_range(tmp_path):
     """第 4 步反证③：路径不存在 vs 行号超界，必须可区分（同一大类、不同 sub）。"""
     repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
@@ -243,6 +293,54 @@ def test_baseline_hash_is_not_mistaken_for_evidence(tmp_path):
         repo, baseline=after[:7])
     assert c.commit == h
     assert c.status == vc.OK
+
+
+def _waiver_repo(tmp_path: Path, waiver_rows=()) -> Path:
+    """造一个「断言坐标偏了（黄）」的仓库，可选写入白名单。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\nOTHER = 1\n"})
+    doc = repo / "docs" / "x.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(f"# 文档\n\n- 已修复：`{h}` — `src/foo.py:2` — `MAGIC_TOKEN`\n",
+                   encoding="utf-8")
+    _git(repo, "add", "docs/x.md")
+    _git(repo, "commit", "-q", "-m", "doc")
+    if waiver_rows is not None and waiver_rows:
+        body = ("# 白名单\n\n| 文档 | target | owner | 到期 | 原因 |\n"
+                "|---|---|---|---|---|\n" + "".join(waiver_rows))
+        (repo / "docs" / "line-check-waivers.md").write_text(body, encoding="utf-8")
+    return repo
+
+
+def test_strict_lines_fails_on_unwaived_relocate(tmp_path):
+    """严格模式：没有白名单时，一条「需重定位」就判失败（闸门是关的）。"""
+    repo = _waiver_repo(tmp_path, None)
+    assert vc.main(["--root", str(repo), "--check-lines", "--strict-lines"]) == 1
+
+
+def test_strict_lines_passes_with_valid_waiver(tmp_path):
+    repo = _waiver_repo(tmp_path, ["| docs/x.md | src/foo.py:2 | 测试线 | 2099-01-01 | 在途 |\n"])
+    assert vc.main(["--root", str(repo), "--check-lines", "--strict-lines"]) == 0
+
+
+def test_expired_waiver_fails(tmp_path):
+    """豁免过期即失败：白名单是临时账，不是永久放行条。"""
+    repo = _waiver_repo(tmp_path, ["| docs/x.md | src/foo.py:2 | 测试线 | 2000-01-01 | 在途 |\n"])
+    assert vc.main(["--root", str(repo), "--check-lines", "--strict-lines"]) == 1
+
+
+def test_waiver_over_cap_fails(tmp_path):
+    """白名单条数超过 MAX_WAIVERS 即失败，防止靠加豁免无限期放行。"""
+    repo = _waiver_repo(tmp_path, [
+        "| docs/x.md | src/foo.py:2 | 测试线 | 2099-01-01 | 在途 |\n",
+        "| docs/x.md | src/foo.py:1 | 测试线 | 2099-01-01 | 在途 |\n",
+    ])
+    assert vc.main(["--root", str(repo), "--check-lines", "--strict-lines"]) == 1
+
+
+def test_zero_waivers_auto_strict(tmp_path):
+    """白名单清零后，`--check-lines` 自动转严格（不依赖有人记得加 --strict-lines）。"""
+    repo = _waiver_repo(tmp_path, None)
+    assert vc.main(["--root", str(repo), "--check-lines"]) == 1
 
 
 def test_repo_docs_have_no_dangling_hash():

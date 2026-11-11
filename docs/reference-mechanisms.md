@@ -244,7 +244,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 | T2 | 多星自动调度与冲突仲裁 | `satdump/src-core/common/tracking/scheduler/scheduler.cpp:183`（按最小仰角过滤）、`:192`（选择过境）；`scheduler/passes.cpp:146-183`（逐秒取最大仰角，旧算法 `:129-145` 已注释） | 无调度器；单星、由用户/AI 显式触发（`sat_tracker.py`） | 上游多星自动切换；我们不做自动切换 | **有意不抄**：(a) 当前无旋转器硬件；(b) 自动切换=预制流程，违反「追踪只由用户显式触发」的既定红线（COORDINATION 11-04） |
 | T3 | 旋转器机械限位与过境后归位 | `gpredict/src/gtk-rot-ctrl.c:787-788`（`SAFE_AZI`/`SAFE_ELE` 夹取）、`:796-817`（地平线下归位到 AOS/LOS 方位） | `mbdsdr_ai/gimbal.py:79-82`（`GimbalStatus.az_min/az_max/el_min/el_max` 声明）、`:162`/`:206`/`:293`（实际硬编码 `0-90`） | 上游用配置的机械限位并在地平线下归位；我们的限位字段存在但 `move()` 未使用 | **部分对齐 / 未实现**（本轮最实的缺口之一，建议开工） |
 | T4 | 旋转器通信失败关闭 | `satdump/src-core/common/tracking/rotator/rotcl_handler.h:16`（`MAX_CORRUPTED_CMD=3`）、`rotcl_handler.cpp:105-136`（连续 3 条损坏指令即停止） | `gimbal.py` 无损坏计数 | 上游失败即停；我们无限重试 | **未实现**（建议补，纯计数，但会改变现有重试语义） |
-| T5 | TLE 新鲜度与重试节流 | `onair/core/src/geo/passes.cpp:296-306`（`tleUpdateDue`：1 天成功间隔 / 6 小时失败重试） | `mbdsdr_ai/tle_integrity.py:178`（`freshness`）、`:244`（`accuracy`）；`orbit.py:459-465`（`allow_stale` + `degraded`） | 上游「到点才抓取」；我们「读取时评估并如实降级标注」，不自动抓 | 实现位置：`mbdsdr_ai/tle_integrity.py:178`（我们选择不隐藏过期 TLE） |
+| T5 | TLE 新鲜度与重试节流 | `onair/core/src/geo/passes.cpp:296-306`（`tleUpdateDue`：1 天成功间隔 / 6 小时失败重试） | `mbdsdr_ai/tle_integrity.py:261`（`freshness`）、`:327`（`accuracy`）；`orbit.py:459-465`（`allow_stale` + `degraded`） | 上游「到点才抓取」；我们「读取时评估并如实降级标注」，不自动抓 | 实现位置：`mbdsdr_ai/tle_integrity.py:182`（我们选择不隐藏过期 TLE） |
 | T6 | 多普勒频移 | `gpredict/src/gtk-sat-list.c:626-631`（`-f*v/c`）；`onair/core/include/dect2/geo/passes.h:56-57`（`dopplerHz`） | `sat_tracker.py` 的多普勒修正 + `sat_passes.py` 的 `range_rate` | 同一公式；我们仅在追踪开启时下发到电台 | 实现位置：`sat_tracker.py:563-584`（多普勒修正）、`sat_passes.py:551`（`range_rate`） |
 | T7 | 受晒/地影判定 | `gpredict/src/sat-vis.c:82-105`（`Sat_Eclipsed` + 晨昏门限） | `sat_illumination.py:204-303`（三态）；`sat_passes.py:441-446` | 我们三态（本影/半影/受晒）；不叠加肉眼可见门限 | 实现位置：`sat_illumination.py:204-303`；**有意不抄**可见过境判定 |
 | T8 | Stellarium 卫星插件 | 本克隆无 `Satellites` 插件目录（全仓目录检索 0 命中） | — | 无过境/地影机制可对照 | 不适用（**未找到 ≠ 不存在**） |
@@ -388,7 +388,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 | T2 多星自动调度 | `scheduler.cpp:183`、`:192`；`passes.cpp:146-183` | 未做（有意）：无调度器，单星显式触发 | **明确不做**：无旋转器硬件；自动切换违反「追踪只由用户显式触发」（COORDINATION 11-04） |
 | T3 旋转器机械限位/归位 | `gtk-rot-ctrl.c:787-788`（`SAFE_AZI/ELE`）、`:796-817`（地平线下归位） | 未接线：`gimbal.py:79-82` 声明 `az_min/az_max/el_min/el_max`，`:181`/`:225`/`:328` 仍硬编码 0–90 | **改良后做（某条线在做）**：旋转器线；工作树已见 `mbdsdr_ai/gimbal.py` 修改、新增 `scripts/hw_acceptance/rotctld_sim.py`、`tests/test_gimbal_rotctld_sim.py` |
 | T4 旋转器失败关闭 | `satdump/.../rotcl_handler.h:16`（`MAX_CORRUPTED_CMD=3`）、`.cpp:105-136` | 未做：`gimbal.py` 无损坏计数 | **改良后做（同旋转器线，sim 验收后接）**：连续 3 条无效响应即 `stop()`，恢复需显式重连 |
-| T5 TLE 新鲜度/重试 | `onair/.../passes.cpp`（296-306）（1 天/6 小时） | `f7f1d278` — `mbdsdr_ai/tle_integrity.py:178` — `CatalogEntry`；实现位置：`mbdsdr_ai/tle_integrity.py:178`、`:244`；`mbdsdr_ai/orbit.py:459-465` 显式降级 | **改良后做**（已落地）：不自动抓，读取时评估并如实降级（不隐藏过期 TLE） |
+| T5 TLE 新鲜度/重试 | `onair/.../passes.cpp`（296-306）（1 天/6 小时） | `f7f1d278` — `mbdsdr_ai/tle_integrity.py:182` — `CatalogEntry`（基准 `f7f1d278`，该行 blame）；实现位置：`mbdsdr_ai/tle_integrity.py:261`、`:327`；`mbdsdr_ai/orbit.py:459-465` 显式降级 | **改良后做**（已落地）：不自动抓，读取时评估并如实降级（不隐藏过期 TLE） |
 | T6 多普勒频移 | `gtk-sat-list.c:626-631`；`onair/.../passes.h:56-57` | 实现位置：`mbdsdr_ai/sat_tracker.py:583-584`（`doppler_hz`） | **照做**（保持） |
 | T7 受晒/地影 | `sat-vis.c`（82-105） | `3fc46b98` — `mbdsdr_ai/sat_illumination.py:204` — `evaluate_illumination`；实现位置：`mbdsdr_ai/sat_illumination.py:204-303`；`mbdsdr_ai/sat_passes.py:441-446`；行为：三态（本影/半影/受晒） | **改良后做**（已落地）：不叠加肉眼可见门限 |
 | T8 Stellarium 卫星插件 | 本克隆无 `Satellites` 目录（全仓 0 命中） | — | **不适用**（未找到 ≠ 不存在） |
@@ -398,7 +398,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 | 机制 | 参考做法 | 我们现状 | 决定与动作 |
 |---|---|---|---|
 | C1 坏配置恢复 | `sdrpp/core/src/config.cpp`（34-43）（直接覆盖写默认） | `a96c010f` — `desktop/settings.py:342` — `os.replace(path, backup)`（基准 `5ac5e764`）；实现位置：`desktop/settings.py:342` 先备份 `*.corrupt-时间戳` | **改良后做**（已落地）：先留证据再回默认 |
-| C2 原子写 | `config.cpp`（47-52）（`ofstream` 直接覆盖） | `357076eb` — `desktop/settings.py:652` — `_write_to_disk`（基准 `5ac5e764`）；实现位置：`desktop/settings.py:652-699`（`tmp_path = ...pid...tmp` + `os.replace(tmp_path, self._path)`） | **改良后做**（已落地；上游是反例） |
+| C2 原子写 | `config.cpp`（47-52）（`ofstream` 直接覆盖） | `357076eb` — `desktop/settings.py:638` — `_write_to_disk`（基准 `357076eb`，该行 blame）；实现位置：`desktop/settings.py:638-688`（`tmp_path = ...pid...tmp` + `os.replace(tmp_path, self._path)`） | **改良后做**（已落地；上游是反例） |
 | C3 定时自动保存线程 | `config.cpp:82-100`（1s `try_lock` + 写） | 按需 `flush` | **明确不做**：无收益且与原子写重复 |
 | C4 崩溃自检/配置重载提示 | `gqrx/.../mainwindow.cpp:500-521`（`crashed` 标志） | 未做 | **明确不做**：原子写+备份已降低丢配置概率；崩溃标记无法区分断电/强杀，误报成本高于收益 |
 | C5 默认值不落盘 | `gqrx/.../dockfft.cpp:238-324`（等于默认就 `remove(key)`） | 全量落盘 | **明确不做**：全量写是单一事实源，利于审计与逐键迁移 |
