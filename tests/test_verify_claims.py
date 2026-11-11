@@ -343,6 +343,48 @@ def test_zero_waivers_auto_strict(tmp_path):
     assert vc.main(["--root", str(repo), "--check-lines"]) == 1
 
 
+def _shift_repo(tmp_path: Path, waiver_rows=()):
+    """造一个「纯插入导致坐标 +1」的仓库：foo.py 第 1 行被顶到第 2 行。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    doc = repo / "docs" / "x.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(
+        f"# 文档\n\n- 已修复：`{h}` — `src/foo.py:1` — `MAGIC_TOKEN`"
+        f"（基准 `{h[:7]}`）\n", encoding="utf-8")
+    _git(repo, "add", "docs/x.md")
+    _git(repo, "commit", "-q", "-m", "doc")
+    (repo / "src" / "foo.py").write_text("HEADER = 0\nMAGIC_TOKEN = 42\n",
+                                        encoding="utf-8")
+    _git(repo, "add", "src/foo.py")
+    _git(repo, "commit", "-q", "-m", "insert header")
+    if waiver_rows:
+        body = ("# 白名单\n\n| 文档 | target | owner | 到期 | 原因 |\n"
+                "|---|---|---|---|---|\n" + "".join(waiver_rows))
+        (repo / "docs" / "line-check-waivers.md").write_text(body,
+                                                             encoding="utf-8")
+    return repo, doc
+
+
+def test_strict_lines_never_auto_relocates(tmp_path, capsys):
+    """严格模式：纯位移也不许自动改号——自动挪完再报绿等于把漂移藏起来。"""
+    repo, doc = _shift_repo(tmp_path)
+    before = doc.read_text(encoding="utf-8")
+    assert vc.main(["--root", str(repo), "--check-lines", "--strict-lines"]) == 1
+    assert doc.read_text(encoding="utf-8") == before
+    assert "自动重定位" not in capsys.readouterr().out
+
+
+def test_normal_mode_auto_relocates_and_logs_shift(tmp_path, capsys):
+    """非严格模式：纯插入造成的位移自动改号，并逐条打印 shift 具体值。"""
+    repo, doc = _shift_repo(
+        tmp_path,
+        ["| docs/x.md | src/foo.py:1 | 测试线 | 2099-01-01 | 在途 |\n"])
+    assert vc.main(["--root", str(repo), "--check-lines"]) == 0
+    assert "src/foo.py:2" in doc.read_text(encoding="utf-8")
+    out = capsys.readouterr().out
+    assert "shift=+1" in out
+
+
 def test_repo_docs_have_no_dangling_hash():
     claims = vc.verify_docs(ROOT)
     bad = [c for c in claims if "不存在或不是 commit" in c.reason]

@@ -340,6 +340,7 @@ class LineCheck:
     changes_since: Optional[int] = None   # 该文件自基准以来被改过几次
     latest_change: str = ""       # 最近一次改动：<短hash> <日期> <标题>
     hint: str = ""                # 无基准时的代理信息（仅供派活参考，不参与判定）
+    shift: int = 0                # 非严格模式下自动重定位的位移量（0 = 没动过）
 
 
 def _norm_ws(s: str) -> str:
@@ -472,6 +473,100 @@ def line_checks(root: Path, claims: List[Claim]) -> List[LineCheck]:
     return out
 
 
+#: 自动重定位的单次位移上限：超过就退回报黄，交人工确认。
+#: 阈值越小越安全：它挡的是「不是纯位移、只是恰好字面量还在附近」的误挪。
+AUTO_SHIFT_MAX = 50
+
+
+def _shift_since(root: Path, baseline: str, path: str, n: int) -> Optional[int]:
+    """``baseline..HEAD`` 的纯位移量；不是纯位移（引用行本身被改）返回 None。
+
+    只累加完全落在 N 之前的 hunk。任何覆盖 N 的 hunk 都意味着这一行被改写
+    而不是被挪动——此时改号会把错坐标「修」成另一个错坐标。
+    """
+    if not baseline or not _commit_exists(root, baseline):
+        return None
+    proc = _git(root, ["diff", "-U0", f"{baseline}..HEAD", "--", path], 60)
+    if proc is None or proc.returncode != 0:
+        return None
+    shift = 0
+    for m in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@",
+                         proc.stdout, re.M):
+        a = int(m.group(1))
+        b = int(m.group(2) or 1)
+        d = int(m.group(4) or 1)
+        if b == 0:                  # 纯插入：插在第 a 行之后
+            if n > a:
+                shift += d
+            continue
+        if a <= n <= a + b - 1:     # 引用行本身被改过，不是纯位移
+            return None
+        if n > a + b - 1:
+            shift += d - b
+    if shift == 0 or abs(shift) > AUTO_SHIFT_MAX:
+        return None
+    return shift
+
+
+def auto_relocate(root: Path, rows: List[LineCheck]) -> List[str]:
+    """非严格模式：把「纯位移」的坐标自动改到新行号，并逐条回报 shift。
+
+    严格模式禁止调用——自动挪完再报绿，等于把漂移藏起来（人工确认是严格
+    模式存在的唯一理由）。四项条件缺一即放弃、仍报黄：
+
+    * 有坐标基准，且 ``基准..HEAD`` 是纯插入/删除（hunk 不覆盖引用行）；
+    * ``|shift| <= AUTO_SHIFT_MAX``；
+    * 新行仍含原字面量；
+    * 新行的 blame 仍是该基准（否则是改写，不是移动）。
+    """
+    logs: List[str] = []
+    for r in rows:
+        if r.result != LINE_RELOCATE or not r.baseline:
+            continue
+        path, n = _split_target(r.target)
+        if "-" in r.target.rpartition(":")[2]:   # 区间坐标不自动挪
+            continue
+        shift = _shift_since(root, r.baseline, path, n)
+        if shift is None:
+            continue
+        m = n + shift
+        lines = _head_lines(root, path)
+        if not lines or not (1 <= m <= len(lines)):
+            continue
+        line_text = lines[m - 1]
+        if not (r.literal in line_text
+                or _norm_ws(r.literal) in _norm_ws(line_text)):
+            continue
+        blame = _blame_commit(root, path, m)
+        if not blame or not (blame.startswith(r.baseline)
+                             or r.baseline.startswith(blame)):
+            continue
+        doc_path = Path(r.doc)
+        if not doc_path.is_absolute():
+            doc_path = root / doc_path
+        try:
+            with open(doc_path, "r", encoding="utf-8", newline="") as f:
+                text = f.read()
+        except OSError:
+            continue
+        doc_lines = text.splitlines(keepends=True)
+        if not (1 <= r.line <= len(doc_lines)):
+            continue
+        if doc_lines[r.line - 1].count(r.target) != 1:   # 同 target 出现多次不动
+            continue
+        new_target = f"{path}:{m}"
+        doc_lines[r.line - 1] = doc_lines[r.line - 1].replace(r.target, new_target)
+        with open(doc_path, "w", encoding="utf-8", newline="") as f:
+            f.write("".join(doc_lines))
+        logs.append(f"  {r.doc}:{r.line}  {r.target} → {new_target}"
+                    f"（shift={shift:+d}）")
+        r.target = new_target
+        r.result = LINE_OK
+        r.shift = shift
+        r.detail = f"自动重定位 shift={shift:+d}；{line_text.strip()[:80]}"
+    return logs
+
+
 def print_line_checks(rows: List[LineCheck]) -> None:
     order = (LINE_OK, LINE_MISLOCATED, LINE_RELOCATE, LINE_UNRESOLVED)
     counts = {k: 0 for k in order}
@@ -499,6 +594,8 @@ def print_line_checks(rows: List[LineCheck]) -> None:
                 if r.hint:
                     print(f"      {r.hint}")
             print(f"      结果：{r.result}" + (f"（{r.detail}）" if r.detail else ""))
+            if result == LINE_OK and r.shift:
+                print(f"      自动重定位：shift={r.shift:+d}（位移已写回文档）")
 
     drift = [r for r in rows if r.result in (LINE_MISLOCATED, LINE_RELOCATE)]
     if drift:
@@ -619,6 +716,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                          "隐含开启 --check-lines")
     ap.add_argument("--strict-lines", action="store_true",
                     help="第 4 步全量硬门：错引 / 需重定位 / 坐标不存在，只要不在白名单里就失败。"
+                         "严格模式禁止自动重定位（自动挪完再报绿会把漂移藏起来）。"
                          "白名单清零后自动生效（无需再加此参数）")
     ap.add_argument("--waivers", default=None,
                     help=f"白名单路径，默认 <docs>/{WAIVER_FILE}")
@@ -641,6 +739,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     open_problems: List[LineCheck] = []
     if args.check_lines:
         rows = line_checks(root, claims)
+        if not strict:
+            auto_logs = auto_relocate(root, rows)
+            if auto_logs:
+                print(f"\n=== 自动重定位（非严格模式，{len(auto_logs)} 处；"
+                      f"严格模式不做任何自动改写） ===")
+                print("\n".join(auto_logs))
         print_line_checks(rows)
         print_waivers(waivers, waiver_errors)
         keys = {(w.doc, w.target) for w in waivers}
