@@ -289,13 +289,15 @@ _NO_SDR_HINT = (
 #: 首屏只说人话：横幅/状态栏用短句，上面那一长串排查细节留在 tooltip
 #: 与状态栏「查看怎么办」里。第一次打开没插设备是常态，不该被报错糊脸。
 #:
-#: 两套形态（2026-11-12 实测，offscreen 9pt 回退度量，文本不含字面补白；
-#: QSS 的 8px padding 已由 `_apply_responsive_chrome` 的 -14 预算扣掉）：
-#:   窄形态 216px：860×736 下左栏最小宽 260（left_tab.minimumWidth），
-#:                横幅宽 258、预算 244 → 余 28px；900 宽预算 265 仍用它。
-#:   宽形态 312px：1280 宽预算 462 → 整句显示。
-#: 断点按**实际预算**选：宽形态放得下才用宽形态，否则回落窄形态；
-#: 窄形态在任何允许的窗口宽下都放得下（预算地板 244 > 216），没有空档。
+#: 两套形态（2026-11-12 实测。MiSans 9pt 是本项目生产字体，offscreen 下需
+#: `QFontDatabase.addApplicationFont` 显式加载；未加载时回退字体读数更宽，
+#: 括号内为回退值）：
+#:   窄形态 171px（回退 216px）：左栏下限 260 ⇒ 横幅 258、内容区 240；
+#:                860/900 都用它。
+#:   宽形态 267px（回退 312px）：1280 下内容区 458 → 整句显示。
+#: 断点按**内容区**（width-18，QSS padding+border）选：宽形态放得下才用，
+#: 否则回落窄形态；窄形态在任何允许的窗口宽下都放得下（内容区地板 240 >
+#: 171），没有空档。
 _NO_SDR_BRIEF = "还没接 SDR · 点连接或看星象仪"
 _NO_SDR_BRIEF_WIDE = "还没接 SDR · 插上设备点「连接」，或先逛星象仪"
 
@@ -3952,10 +3954,16 @@ class MainWindow(QMainWindow):
         full = getattr(self, "_no_device_hint_full", "")
         if hint is not None and full:
             try:
-                avail = max(80, hint.width() - 14)
+                # 可用文本宽 = 标签内容区：QSS padding 3px 8px + 1px 边框
+                # ⇒ 水平固定 -18px（实测 258→240、281→263、476→458）。
+                # 旧口径 width()-14 比真实内容区多算 4px：MiSans 9pt 下宽形态
+                # 267px，会在 904~910 宽选中宽形态却裁掉最后 4px 且**不出省略号**
+                # （比截断更糟）。预算必须与真正绘制的区域同口径。
+                avail = max(80, hint.width() - 18)
                 fmt = hint.fontMetrics()
                 # 两套形态按**实际预算**选：宽形态放得下才用；否则回落
-                # 窄形态（860 下预算地板 244，窄形态 216，不会两者都放不下）。
+                # 窄形态（左栏下限 260 ⇒ 预算地板 240，窄形态 171，不会两者
+                # 都放不下）。
                 wide = getattr(self, "_no_device_hint_wide_full", "")
                 if wide and fmt.horizontalAdvance(wide) <= avail:
                     full = wide
