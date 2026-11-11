@@ -7,15 +7,13 @@ MBDSDR AI 内核 - 配置管理
 """
 
 import os
-import sys
 import json
 import time
 import shutil
 import tempfile
 import logging
-from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
-from typing import Callable, Iterator, Optional, Dict, Any
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -260,134 +258,6 @@ def _backup_corrupt(path: str) -> Optional[str]:
         return None
 
 
-#: config.json 的默认路径（桌面面板与内核共用同一份文件）。
-CONFIG_PATH = "~/.mbdsdr/config.json"
-
-#: 跨进程写锁的等待上限（秒）。与 desktop/settings.py 同一套纪律：
-#: 超时不加锁也写会重现"两个写者都基于旧值"的竞态，所以超时即放弃并回报。
-LOCK_TIMEOUT_S = 2.0
-
-
-@contextmanager
-def _exclusive_lock(lock_path: str, timeout: float = LOCK_TIMEOUT_S) -> Iterator[bool]:
-    """跨进程互斥（Windows msvcrt / POSIX flock），yield 是否拿到锁。
-
-    与 ``desktop/settings.py::_exclusive_lock`` 同一实现纪律（锁文件常驻、
-    进程被杀内核自动释放）。内核不能反向依赖 desktop，故这里保留一份等价实现。
-    """
-    directory = os.path.dirname(lock_path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    acquired = False
-    fh = None
-    deadline = time.monotonic() + timeout
-    try:
-        while True:
-            try:
-                fh = open(lock_path, "a+b")
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    break
-                time.sleep(0.01)
-        if fh is None:
-            yield False
-            return
-        if os.fstat(fh.fileno()).st_size == 0:
-            fh.write(b"\0")
-            fh.flush()
-        while True:
-            try:
-                fh.seek(0)
-                if sys.platform == "win32":
-                    import msvcrt
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    break
-                time.sleep(0.01)
-        yield acquired
-    finally:
-        if acquired and fh is not None:
-            try:
-                fh.seek(0)
-                if sys.platform == "win32":
-                    import msvcrt
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-            except OSError:
-                pass
-        if fh is not None:
-            try:
-                fh.close()
-            except OSError:
-                pass
-
-
-def _read_disk(path: str) -> Dict[str, Any]:
-    """读 config.json 现值：缺失返回 {}；损坏先备份证据再返回 {}。"""
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        backup = _backup_corrupt(path)
-        logger.warning("config.json 读取失败（%s），已备份到 %s；按空配置处理",
-                       exc, backup or "（备份失败）")
-        return {}
-
-
-class ConfigStore:
-    """``config.json`` 的唯一写入口：锁内重读 → mutator 合并 → 原子替换。
-
-    调用方只提交**自己拥有的键**，不得把构造期快照整份写回——旧快照会把别处
-    刚写的键（典型：api_key）顶掉。``update()`` 的合并基线永远是锁内的磁盘值。
-    """
-
-    def __init__(self, path: Optional[str] = None):
-        self.path = os.path.expanduser(path or CONFIG_PATH)
-
-    def read(self) -> Dict[str, Any]:
-        """只读现值（不写盘、不加锁）；损坏先备份。"""
-        return _read_disk(self.path)
-
-    def update(self, mutator: Callable[[Dict[str, Any]], Optional[bool]]) -> bool:
-        """在锁内对磁盘现值执行 mutator，成功则原子写回。
-
-        mutator 返回 False 表示放弃写入（例如"值没变"或业务校验不通过）。
-        返回是否真的写盘成功；失败原因见 :func:`last_error`。
-        """
-        with _exclusive_lock(self.path + ".lock") as acquired:
-            if not acquired:
-                _set_error(
-                    f"config.json 写锁等待超过 {LOCK_TIMEOUT_S:g}s，"
-                    "可能有其他进程正在写；本次未写入")
-                return False
-            data = _read_disk(self.path)      # 锁内重读，基线永远是磁盘
-            try:
-                decision = mutator(data)
-            except Exception as exc:  # noqa: BLE001 - 回调错误不落盘，但要可见
-                _set_error(
-                    f"配置更新回调失败（原文件未改动）：{type(exc).__name__}: {exc}")
-                return False
-            if decision is False:
-                return False
-            if not _atomic_write_json(self.path, data):
-                return False
-            _set_error(None)
-            return True
-
-
-
 def load_config(path: str = "~/.mbdsdr/config.json") -> AgentConfig:
     """从 JSON 文件加载配置。
 
@@ -422,16 +292,9 @@ def load_config(path: str = "~/.mbdsdr/config.json") -> AgentConfig:
             if key in normalized:
                 setattr(config, key, normalized[key])
         if normalized != data:
-            # 迁移回写也走唯一写入口：锁内重读磁盘后再归一，绝不拿读盘时的
-            # 旧快照整份覆盖（面板可能刚在两次读之间写入了 api_key）。
-            def _migrate_keys(disk: Dict[str, Any]) -> None:
-                migrated = normalize_config_keys(disk)
-                disk.clear()
-                disk.update(migrated)
-
             # 迁移回写失败不阻断读取（旧键在内存里已归一）；错误单独留日志，
             # 不占用 last_error —— 本次"读"是成功的。
-            if not ConfigStore(path).update(_migrate_keys):
+            if not _atomic_write_json(path, normalized):
                 logger.warning("配置键迁移回写失败，旧键仍在磁盘上：%s",
                                _LAST_ERROR)
         _set_error(None)
@@ -450,19 +313,30 @@ def save_config(config: AgentConfig,
     """保存配置到 JSON 文件；返回**是否真的写盘成功**。
 
     与 ``desktop/ai_panel.py`` 共用同一个 ``~/.mbdsdr/config.json``（两套写入
-    者，见 docs/COORDINATION.md）。写入统一走 :class:`ConfigStore`：锁内重读
-    磁盘现值再按字段合并，保留文件里所有本模块不认识的键（旧快照整份覆盖会
-    把面板刚写的键吃掉）。写盘是原子替换，失败时原文件字节不变、
-    ``last_error()`` 给出原因。
+    者，见 docs/COORDINATION.md）。旧式 ``to_dict()`` 整份覆盖会把面板写入的
+    额外键吃掉；这里改为按字段**合并**：保留文件里所有本模块不认识的键。
+    写盘走原子替换，失败时原文件字节不变、``last_error()`` 给出原因。
     """
     target = os.path.expanduser(
-        path or getattr(config, "_config_path", None) or CONFIG_PATH)
+        path or getattr(config, "_config_path", None) or "~/.mbdsdr/config.json")
     payload = config.to_dict()
 
-    def _merge(disk: Dict[str, Any]) -> None:
-        disk.update(payload)
+    existing: Optional[Dict[str, Any]] = None
+    if os.path.exists(target):
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                candidate = json.load(f)
+            if isinstance(candidate, dict):
+                existing = candidate
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            existing = None
+        if existing is None:
+            # 磁盘上已经是坏的：先留证再写，别把最后一份证据覆盖掉
+            _backup_corrupt(target)
+    merged = dict(existing or {})
+    merged.update(payload)
 
-    if not ConfigStore(target).update(_merge):
+    if not _atomic_write_json(target, merged):
         return False
     config._config_path = target
     _set_error(None)

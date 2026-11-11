@@ -46,3 +46,19 @@ def test_location_download_zero_success_never_claims_offline():
 
     assert "可离线" in lp.download_summary(5, 0)
     assert "可离线" not in lp.download_summary(0, 0)
+
+
+def test_settings_start_failure_gives_port_action():
+    """端口占用要报端口号 + 改端口；其他异常不甩裸 errno 文本。"""
+    import errno
+
+    from settings_panel import ServiceSettingsPanel
+
+    busy = ServiceSettingsPanel._start_failure_text(
+        "远程控制", OSError(errno.EADDRINUSE, "Address already in use"), 7356)
+    assert "7356" in busy and "被占用" in busy and "改端口" in busy
+
+    other = ServiceSettingsPanel._start_failure_text(
+        "Web 服务", OSError(errno.EACCES, "Permission denied"), 8080)
+    assert "8080" in other and "检查端口" in other
+    assert "[Errno" not in other
