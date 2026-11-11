@@ -33,6 +33,7 @@ from tokens import tokens
 #   effective_pass_min_elevation_deg()（用户设置，默认 10°）= 过境列表筛选门：
 #     按**峰值**仰角筛「这次过境值不值得列出来」，不是当前仰角门。
 from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
+from mbdsdr_ai.tle_integrity import age_band, band_note
 try:
     from settings import (
         effective_pass_min_elevation_deg,
@@ -50,6 +51,42 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
 #: 标题带的可点击高度（px）。与全局 QSS 的 `QGroupBox { margin-top: 20px }`
 #: 成对：标题就画在这条 20px 的带里，带下方才是卡片正文。
 _TITLE_BAND_PX = 20
+
+#: TLE 年龄档 → (下拉项后缀, 日期行后缀, 语义色键)。
+#: **阈值不在这里**：一律由 mbdsdr_ai.tle_integrity.age_band 判
+#: （24h / 7d / 30d / 90d），本表只管文案与颜色，不许另造天数。
+_TLE_BAND_TEXT = {
+    "fresh": ("", "", "tertiary"),
+    "usable": ("{age} 天前", "（{age} 天前）", "tertiary"),
+    "expired": ("过期 {age} 天", "过期 · 已 {age} 天，过境时刻仅分钟级", "warning"),
+    "stale": ("失效", "失效 · {age} 天，过境预报不可信", "danger"),
+    "dead": ("失效", "失效 · {age} 天，过境预报不可信", "danger"),
+    "unknown": ("年龄未知", "失效 · 年龄未知", "danger"),
+}
+
+
+def _age_text(age_days: Optional[float]) -> str:
+    """年龄人话：<1 天留一位小数，否则取整。"""
+    if age_days is None:
+        return ""
+    return f"{age_days:.1f}" if age_days < 1.0 else f"{age_days:.0f}"
+
+
+def tle_band_badge(age_days: Optional[float],
+                   tier: Optional[str] = None) -> tuple:
+    """TLE 年龄 → (下拉项后缀, 日期行后缀, 语义色键)。
+
+    只有 tier、没有年龄时按 tier 降级到等价文案（``dead`` 走「失效」档，
+    不假装知道它是 31 天还是 400 天）。
+    """
+    if age_days is None:
+        band = {"fresh": "fresh", "usable": "usable",
+                "expired": "expired", "dead": "stale"}.get(str(tier), "unknown")
+    else:
+        band = age_band(age_days)
+    tail, note, color = _TLE_BAND_TEXT[band]
+    age = _age_text(age_days)
+    return tail.format(age=age), note.format(age=age), color
 
 
 class _CollapsibleGroupBox(QGroupBox):
@@ -270,21 +307,60 @@ class SatTrackPanel(QFrame):
         self._apply_narrow_defaults()
 
     # ------------------------------------------------------------ 对外接口
-    def populate_satellites(self, names):
-        """填充卫星下拉框；保持当前选中项尽量不变。"""
-        prev = self.sat_combo.currentText()
+    def populate_satellites(self, names, tier_badges: Optional[Dict[str, str]] = None):
+        """填充卫星下拉框；保持当前选中项尽量不变。
+
+        ``tier_badges`` = {卫星名: 陈旧后缀}（如「失效」「过期 12 天」），
+        直接拼在下拉项末尾，让用户**在选之前**就知道这颗星历靠不靠得住。
+        原始名永远存进 itemData，取名字一律用 ``current_satellite_name()``。
+        """
+        prev = self.current_satellite_name()
         self.sat_combo.blockSignals(True)
         self.sat_combo.clear()
         for n in names:
-            self.sat_combo.addItem(n)
+            badge = (tier_badges or {}).get(n) or ""
+            self.sat_combo.addItem(f"{n}（{badge}）" if badge else n, n)
         if prev:
-            idx = self.sat_combo.findText(prev)
+            idx = self.sat_combo.findData(prev)
+            if idx < 0:
+                idx = self.sat_combo.findText(prev)
             if idx >= 0:
                 self.sat_combo.setCurrentIndex(idx)
         self.sat_combo.blockSignals(False)
 
-    def set_tle_date(self, date_str: str):
-        self.tle_date_label.setText(f"TLE 日期: {date_str}")
+    def current_satellite_name(self) -> str:
+        """当前选中卫星的**原始名**（下拉项文本可能带「（失效）」后缀）。"""
+        data = self.sat_combo.currentData()
+        if data:
+            return str(data)
+        return self.sat_combo.currentText().strip()
+
+    def set_tle_date(self, date_str: str, age_days: Optional[float] = None,
+                     tier: Optional[str] = None):
+        """TLE 日期 + 陈旧档位。
+
+        只给日期不给年龄 = 把 47 天前的星历按正常值展示（2026-11-11 实测：
+        TLE 2026-09-25、当天 2026-11-11，界面无任何陈旧标记）。档位语义与
+        阈值全部来自 ``mbdsdr_ai.tle_integrity``，这里只负责显示。
+        """
+        _, note, color = tle_band_badge(age_days, tier)
+        text = f"TLE 日期: {date_str}"
+        if note:
+            text += f" · {note}"
+        self.tle_date_label.setText(text)
+        self.tle_date_label.setStyleSheet(
+            "color: " + self._tle_color(color) + "; font-size: 8.5pt;")
+        self.tle_date_label.setToolTip(
+            band_note(age_band(age_days) if age_days is not None else "unknown",
+                      age_days))
+
+    @staticmethod
+    def _tle_color(key: str) -> str:
+        if key == "warning":
+            return tokens().COLORS["status_warning"]
+        if key == "danger":
+            return tokens().COLORS["danger"]
+        return tokens().text("tertiary")
 
     def set_tracking_state(self, tracking: bool):
         self._tracking = tracking
@@ -408,7 +484,7 @@ class SatTrackPanel(QFrame):
             # 但必须留下可见反馈：静默 return 等于点了没反应。
             self.state_label.setText("跟踪中（忽略重复开始）")
             return
-        name = self.sat_combo.currentText().strip()
+        name = self.current_satellite_name()
         if not name:
             QMessageBox.warning(self, "卫星跟踪", "请先选择一颗卫星。")
             return

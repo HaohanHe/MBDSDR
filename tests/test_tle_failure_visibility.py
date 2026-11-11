@@ -164,11 +164,13 @@ def test_status_bar_renders_failure_code(monkeypatch, tmp_path, case):
             self.flags = flags
 
     class _Panel:
-        def populate_satellites(self, names):
+        def populate_satellites(self, names, tier_badges=None):
             self.names = list(names)
+            self.badges = dict(tier_badges or {})
 
-        def set_tle_date(self, date_str):
+        def set_tle_date(self, date_str, age_days=None, tier=None):
             self.date = date_str
+            self.age_days = age_days
 
     class _Holder:
         pass
@@ -178,6 +180,10 @@ def test_status_bar_renders_failure_code(monkeypatch, tmp_path, case):
     holder.sat_track_panel = _Panel()
     holder._status = _Status()
     holder.statusBar = lambda: holder._status
+    # 新接口把「日期 + 陈旧档位」合成一次推送（MainWindow._refresh_sat_panel）；
+    # 这里把真实实现绑到 holder 上，保持对拍对象仍是真实链路。
+    holder._refresh_sat_panel = (
+        lambda sats=None: MainWindow._refresh_sat_panel(holder, sats))
 
     # P3 后刷新跑在后台线程：worker emit、UI 槽渲染。这里用"先收 payload
     # 再手动回槽"模拟 QueuedConnection，保持断言对象仍是最终状态栏文案。

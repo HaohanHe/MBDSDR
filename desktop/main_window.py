@@ -537,7 +537,7 @@ except ImportError:  # pragma: no cover - 单独打包时兜底
 # 气象云图面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
 # 在用户首次点解码时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
-from sat_track_panel import SatTrackPanel
+from sat_track_panel import SatTrackPanel, tle_band_badge
 from new_spacetime_panel import NewSpacetimePanel
 from adsb_map_panel import AdsbMapPanel
 # 内核能力面板（扫频 / 自动调制识别 / 书签管理 / 远程服务设置）。
@@ -11901,12 +11901,11 @@ class MainWindow(QMainWindow):
         except Exception:
             self._loop_sat_tracker = None
             return
-        names = [s["name"] for s in self._loop_sat_tracker.list_satellites()]
-        self.sat_track_panel.populate_satellites(names)
-        self.sat_track_panel.set_tle_date(self._loop_sat_tracker.tle_date)
-        if names:
+        sats = self._loop_sat_tracker.list_satellites()
+        self._refresh_sat_panel(sats)
+        if sats:
             self.sat_track_panel.set_downlink_mhz(
-                self._loop_sat_tracker.downlink_freq_for(names[0]) / 1e6)
+                self._loop_sat_tracker.downlink_freq_for(sats[0]["name"]) / 1e6)
         # TLE 过期自动刷新：面板「TLE 日期」若是两天前的，过境预报就是错的
         # （2026-11-10 实测停在 2026-09-25）。开窗后台拉一次 celestrak GP
         # 分组（离线模式下 fetch 内部会明确拒绝，不冒充成功）。
@@ -11977,9 +11976,7 @@ class MainWindow(QMainWindow):
         """后台 TLE 刷新回 GUI：先收线程引用，再刷新面板与状态栏。"""
         self._tle_update_thread = None
         n, failure = payload
-        names = [s["name"] for s in self._loop_sat_tracker.list_satellites()]
-        self.sat_track_panel.populate_satellites(names)
-        self.sat_track_panel.set_tle_date(self._loop_sat_tracker.tle_date)
+        self._refresh_sat_panel()
         # 状态栏只渲染抓取链路给出的 code/label/reason/action：
         # 失败时必须有码和原因，绝不回落到与 code 无关的固定句子。
         from mbdsdr_ai.tle_fetch import tle_refresh_status_text
@@ -11987,9 +11984,39 @@ class MainWindow(QMainWindow):
         ok = n > 0 and not failure
         self.statusBar().showMessage(msg, MSG_NORMAL if ok else MSG_IMPORTANT)
 
+    def _refresh_sat_panel(self, sats=None) -> None:
+        """把 TLE 目录与**陈旧度**一起推到卫星面板（日期行 + 下拉项后缀）。
+
+        陈旧档位不在这里判：``tle_band_badge`` 内部走
+        ``mbdsdr_ai.tle_integrity.age_band`` 的 24h/7d/30d/90d 唯一分档表。
+        面板级年龄取目录里**最老**的一颗（保守：只要有一颗失效就不能整体
+        标成新鲜）。
+        """
+        tracker = self._loop_sat_tracker
+        if tracker is None:
+            return
+        if sats is None:
+            try:
+                sats = tracker.list_satellites()
+            except Exception:
+                sats = []
+        badges = {}
+        ages = []
+        for s in sats:
+            age = s.get("tle_age_days")
+            badge = tle_band_badge(age, s.get("tle_tier"))[0]
+            if badge:
+                badges[s["name"]] = badge
+            if age is not None:
+                ages.append(float(age))
+        self.sat_track_panel.populate_satellites(
+            [s["name"] for s in sats], badges)
+        self.sat_track_panel.set_tle_date(
+            tracker.tle_date, age_days=max(ages) if ages else None)
+
     def _menu_start_sat_track(self):
         """菜单项触发：等价于点面板上的开始按钮。"""
-        name = self.sat_track_panel.sat_combo.currentText().strip()
+        name = self.sat_track_panel.current_satellite_name()
         if not name:
             return
         self._start_satellite_tracking(name, self.sat_track_panel.current_downlink_hz())
