@@ -396,11 +396,64 @@ TRACKING_LEVEL_LABELS: Dict[str, str] = {
 
 TRACKING_NEXT_ACTIONS: Dict[str, str] = {
     "fresh": "",
-    "usable": "临近过境前刷新 TLE 以减小轨道漂移",
+    "usable": "建议更新星历（临近过境前刷新可减小轨道漂移）",
     "expired": "确认星历年龄后可调谐；云台与自动工具写操作仍被禁止",
     "dead": "更新或导入 TLE 后重试",
     "unknown": "刷新或导入 TLE（当前历元无法解析）",
 }
+
+#: 显示用短标签与提示（桌面层只读，不许再自己拼/比较档位）。
+#: 改措辞只改这里——desktop 不改。
+TRACKING_HINTS: Dict[str, str] = {
+    "fresh": "",
+    "usable": "建议更新星历",
+    "expired": "需确认后调谐（云台禁用）",
+    "dead": "星历失效：请更新",
+    "unknown": "星历不可用：请更新",
+}
+
+TRACKING_SEVERITY: Dict[str, str] = {
+    "fresh": "normal",
+    "usable": "normal",
+    "expired": "warning",
+    "dead": "danger",
+    "unknown": "danger",
+}
+
+
+def _age_text(age: Optional[float]) -> str:
+    """年龄人话：<1 天留一位小数，否则取整（显示与标签共用一份）。"""
+    if age is None:
+        return ""
+    return f"{age:.1f}" if float(age) < 1.0 else f"{float(age):.0f}"
+
+
+def _display_tag(level: str, age: Optional[float], forced: bool) -> str:
+    """过境行/卫星名后的陈旧标签（空串 = 不标注）。"""
+    if forced:
+        return "（TLE 身份不符）"
+    age_text = _age_text(age)
+    if level == "expired":
+        return f"（TLE 过期 {age_text} 天）" if age_text else "（TLE 过期）"
+    if level == "dead":
+        return f"（TLE 失效 {age_text} 天）" if age_text else "（TLE 失效）"
+    if level == "unknown":
+        return "（TLE 年龄未知）"
+    return ""
+
+
+def _short_tag(level: str, age: Optional[float]) -> str:
+    """下拉项后缀（不带括号）：空串 = 不标注。"""
+    age_text = _age_text(age)
+    if level == "usable":
+        return f"{age_text} 天前" if age_text else ""
+    if level == "expired":
+        return f"过期 {age_text} 天" if age_text else "过期"
+    if level == "dead":
+        return "失效"
+    if level == "unknown":
+        return "年龄未知"
+    return ""
 
 
 def tracking_policy(fresh: Optional[Dict[str, Any]],
@@ -417,7 +470,12 @@ def tracking_policy(fresh: Optional[Dict[str, Any]],
     返回键：``level``/``tier``/``identity_status``/``age_days``/``band``/
     ``allow_pass_list``/``allow_tune``/``require_confirm``/``allow_gimbal``/
     ``allow_tool_write``/``tool_require_confirm``/``command_allowed``/
-    ``label``/``reason``/``next_action``。
+    ``label``/``hint``/``display_tag``/``short_tag``/``severity``/``stale``/
+    ``age_text``/``reason``/``next_action``。
+
+    显示口径（``label``/``hint``/``display_tag``/``short_tag``/``severity``/
+    ``stale``）也只在这里生成：桌面层读字段，不再自行比较 ``tier ==`` 或
+    另写一份档位文案——改措辞只改本模块。
 
     语义分工：
       - ``allow_tune`` = 可以下发调谐（``require_confirm`` 为真时先确认）；
@@ -473,6 +531,12 @@ def tracking_policy(fresh: Optional[Dict[str, Any]],
         "tool_require_confirm": tool_mode == "confirm",
         "command_allowed": tune_mode != "deny",
         "label": label,
+        "hint": TRACKING_HINTS[level],
+        "display_tag": _display_tag(level, age, forced),
+        "short_tag": _short_tag(level, age),
+        "severity": TRACKING_SEVERITY[level],
+        "stale": level in ("expired", "dead", "unknown"),
+        "age_text": _age_text(age),
         "reason": reason,
         "next_action": next_action,
     }

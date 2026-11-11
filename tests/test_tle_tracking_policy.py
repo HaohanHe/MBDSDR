@@ -135,3 +135,34 @@ def test_current_position_exposes_policy():
     pos = tr.current_position()
     assert "policy" in pos
     assert pos["policy"]["command_allowed"] is False
+
+
+@pytest.mark.parametrize("tier,age,label,hint,tag,short,severity,stale", [
+    ("fresh", 0.5, "星历新鲜", "", "", "", "normal", False),
+    ("usable", 2.0, "星历可用", "建议更新星历", "", "2 天前", "normal", False),
+    ("expired", 40.0, "星历过期", "需确认后调谐（云台禁用）",
+     "（TLE 过期 40 天）", "过期 40 天", "warning", True),
+    ("dead", 100.0, "星历失效", "星历失效：请更新",
+     "（TLE 失效 100 天）", "失效", "danger", True),
+    ("unknown", None, "星历不可用", "星历不可用：请更新",
+     "（TLE 年龄未知）", "年龄未知", "danger", True),
+])
+def test_display_fields_are_single_source(tier, age, label, hint, tag, short,
+                                          severity, stale):
+    """显示口径（标签/提示/短标签/颜色/是否陈旧）全部由策略给，桌面只读。"""
+    pol = tracking_policy({"tier": tier, "age_days": age})
+    assert pol["label"] == label
+    assert pol["hint"] == hint
+    assert pol["display_tag"] == tag
+    assert pol["short_tag"] == short
+    assert pol["severity"] == severity
+    assert pol["stale"] is stale
+
+
+def test_identity_mismatch_display_tag_is_explicit():
+    """身份不符：标签必须点名「身份不符」，不能只说过期天数。"""
+    pol = tracking_policy({"tier": "fresh", "age_days": 1.0}, "mismatch")
+    assert pol["display_tag"] == "（TLE 身份不符）"
+    assert pol["stale"] is True
+    assert pol["severity"] == "danger"
+    assert pol["allow_gimbal"] is False
