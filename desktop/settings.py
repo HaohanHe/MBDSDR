@@ -75,7 +75,15 @@ def default_config_path() -> str:
 
     - Windows：``%APPDATA%/mbdsdr/desktop_settings.json``（expandvars 展开）。
     - Linux/macOS：``~/.config/mbdsdr/desktop_settings.json``。
+
+    测试/CI 可用 ``MBDSDR_SETTINGS_DIR`` 把**整个配置目录**改到临时目录
+    （与此前的 HOME/APPDATA 重定向同族）。这条覆盖点是给测试兜底的：
+    用例只要构造了 MainWindow，哪怕忘了请求 isolated_profile，写盘也不会
+    落到用户真实配置上。生产进程不设这个变量，行为不变。
     """
+    override = os.environ.get("MBDSDR_SETTINGS_DIR")
+    if override:
+        return os.path.join(override, "desktop_settings.json")
     if platform.system() == "Windows":
         base = os.path.expandvars("%APPDATA%")
         if not base or base.startswith("%"):  # expandvars 失败时兜底
@@ -662,9 +670,19 @@ class DesktopSettings:
                         self.on_error(self.last_error)
                     return
                 payload = self._merged_payload()
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, indent=2, ensure_ascii=False)
-                os.replace(tmp_path, self._path)
+                text = json.dumps(payload, indent=2, ensure_ascii=False)
+                try:
+                    with open(self._path, "r", encoding="utf-8") as f:
+                        current = f.read()
+                except OSError:
+                    current = None
+                if current != text:
+                    with open(tmp_path, "w", encoding="utf-8") as f:
+                        f.write(text)
+                    os.replace(tmp_path, self._path)
+                # 内容与盘上逐字符相同时不落盘：同值 set() 也会置脏，若照写
+                # 就会把整份文件重写一遍（sha256 不变、只有 mtime_ns 变），
+                # 测试守卫和用户侧备份/同步工具都会把 mtime 当成"配置变了"。
             self._dirty = False
             self._dirty_keys.clear()
             self._overwrite_warned.clear()
