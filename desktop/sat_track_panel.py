@@ -33,7 +33,7 @@ from tokens import tokens
 #   effective_pass_min_elevation_deg()（用户设置，默认 10°）= 过境列表筛选门：
 #     按**峰值**仰角筛「这次过境值不值得列出来」，不是当前仰角门。
 from mbdsdr_ai.sat_passes import VISIBLE_MIN_ALT_DEG
-from mbdsdr_ai.tle_integrity import age_band, band_note
+from mbdsdr_ai.tle_integrity import age_band, tracking_policy
 try:
     from settings import (
         effective_pass_min_elevation_deg,
@@ -52,41 +52,29 @@ except ImportError:  # pragma: no cover - 兼容 desktop 目录直接上 sys.pat
 #: 成对：标题就画在这条 20px 的带里，带下方才是卡片正文。
 _TITLE_BAND_PX = 20
 
-#: TLE 年龄档 → (下拉项后缀, 日期行后缀, 语义色键)。
-#: **阈值不在这里**：一律由 mbdsdr_ai.tle_integrity.age_band 判
-#: （24h / 7d / 30d / 90d），本表只管文案与颜色，不许另造天数。
-_TLE_BAND_TEXT = {
-    "fresh": ("", "", "tertiary"),
-    "usable": ("{age} 天前", "（{age} 天前）", "tertiary"),
-    "expired": ("过期 {age} 天", "过期 · 已 {age} 天，过境时刻仅分钟级", "warning"),
-    "stale": ("失效", "失效 · {age} 天，过境预报不可信", "danger"),
-    "dead": ("失效", "失效 · {age} 天，过境预报不可信", "danger"),
-    "unknown": ("年龄未知", "失效 · 年龄未知", "danger"),
-}
+#: TLE 年龄档 → 下拉项后缀/日期行/颜色全部由
+#: ``mbdsdr_ai.tle_integrity.tracking_policy`` 给出（显示口径单一事实源），
+#: 本模块不再维护第二份档位文案表，也不自己比较 tier。
+_TIER_ALIAS = {"stale": "dead"}
 
 
-def _age_text(age_days: Optional[float]) -> str:
-    """年龄人话：<1 天留一位小数，否则取整。"""
-    if age_days is None:
-        return ""
-    return f"{age_days:.1f}" if age_days < 1.0 else f"{age_days:.0f}"
+def _tle_policy(age_days: Optional[float], tier: Optional[str] = None) -> Dict:
+    """按年龄/档位取显示与闸门字段（桌面层只读，不写判据）。"""
+    level = str(tier or "")
+    if not level and age_days is not None:
+        level = age_band(age_days)
+    return tracking_policy({"tier": _TIER_ALIAS.get(level, level),
+                            "age_days": age_days})
 
 
 def tle_band_badge(age_days: Optional[float],
                    tier: Optional[str] = None) -> tuple:
-    """TLE 年龄 → (下拉项后缀, 日期行后缀, 语义色键)。
+    """TLE 年龄 → (下拉项后缀, 日期行标签, 语义色键)。
 
-    只有 tier、没有年龄时按 tier 降级到等价文案（``dead`` 走「失效」档，
-    不假装知道它是 31 天还是 400 天）。
+    只读 ``tracking_policy`` 的字段：改文案只改 tle_integrity，本函数不动。
     """
-    if age_days is None:
-        band = {"fresh": "fresh", "usable": "usable",
-                "expired": "expired", "dead": "stale"}.get(str(tier), "unknown")
-    else:
-        band = age_band(age_days)
-    tail, note, color = _TLE_BAND_TEXT[band]
-    age = _age_text(age_days)
-    return tail.format(age=age), note.format(age=age), color
+    pol = _tle_policy(age_days, tier)
+    return pol["short_tag"], pol["label"], pol["severity"]
 
 
 class _CollapsibleGroupBox(QGroupBox):
@@ -171,10 +159,22 @@ class SatTrackPanel(QFrame):
                             + tokens().text("secondary") + ";")
         root.addWidget(title)
 
+        tle_row = QHBoxLayout()
+        tle_row.setContentsMargins(0, 0, 0, 0)
+        tle_row.setSpacing(6)
         self.tle_date_label = QLabel("TLE 日期: --")
+        self.tle_date_label.setWordWrap(True)
         self.tle_date_label.setStyleSheet("color: " + tokens().text("tertiary")
                                          + "; font-size: 8.5pt;")
-        root.addWidget(self.tle_date_label)
+        tle_row.addWidget(self.tle_date_label, 1)
+        # 陈旧提示旁的一键入口：看到「建议更新星历」不用再去找下面的按钮。
+        self.tle_refresh_btn = QPushButton("刷新星历")
+        self.tle_refresh_btn.setToolTip(
+            "立即从 Celestrak 更新 TLE；失败会如实报错，不伪造星历")
+        self.tle_refresh_btn.setFixedHeight(20)
+        self.tle_refresh_btn.clicked.connect(self.update_tle_requested.emit)
+        tle_row.addWidget(self.tle_refresh_btn)
+        root.addLayout(tle_row)
 
         # ---- 卫星选择 + 下行频率 ----
         sel_box = _CollapsibleGroupBox("目标卫星")
@@ -337,22 +337,24 @@ class SatTrackPanel(QFrame):
 
     def set_tle_date(self, date_str: str, age_days: Optional[float] = None,
                      tier: Optional[str] = None):
-        """TLE 日期 + 陈旧档位。
+        """TLE 日期 + 陈旧档位 + 下一步提示（全部读 tracking_policy 字段）。
 
-        只给日期不给年龄 = 把 47 天前的星历按正常值展示（2026-11-11 实测：
-        TLE 2026-09-25、当天 2026-11-11，界面无任何陈旧标记）。档位语义与
-        阈值全部来自 ``mbdsdr_ai.tle_integrity``，这里只负责显示。
+        - usable：显示「建议更新星历」，**不阻断**调谐；
+        - expired/dead/unknown：显示「需确认/请更新」，云台入口由主窗口按
+          同一份 policy 的 ``allow_gimbal`` 禁用；
+        - 档位阈值与文案只在 ``mbdsdr_ai.tle_integrity`` 维护，本层不比较 tier。
         """
-        _, note, color = tle_band_badge(age_days, tier)
-        text = f"TLE 日期: {date_str}"
-        if note:
-            text += f" · {note}"
+        pol = _tle_policy(age_days, tier)
+        text = f"TLE 日期: {date_str} · {pol['label']}"
+        if pol["age_text"]:
+            text += f"（{pol['age_text']} 天前）"
+        if pol["hint"]:
+            text += f" · {pol['hint']}"
         self.tle_date_label.setText(text)
         self.tle_date_label.setStyleSheet(
-            "color: " + self._tle_color(color) + "; font-size: 8.5pt;")
+            "color: " + self._tle_color(pol["severity"]) + "; font-size: 8.5pt;")
         self.tle_date_label.setToolTip(
-            band_note(age_band(age_days) if age_days is not None else "unknown",
-                      age_days))
+            "；".join(x for x in (pol["reason"], pol["next_action"]) if x))
 
     @staticmethod
     def _tle_color(key: str) -> str:

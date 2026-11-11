@@ -2386,6 +2386,12 @@ class MainWindow(QMainWindow):
                 "无法发起云台跟随：缺少卫星/观测站数据", MSG_NORMAL)
             self._sync_sky_gimbal_btn(False)
             return
+        blocked = self._tle_gimbal_block_reason()
+        if blocked:
+            self.statusBar().showMessage(
+                f"云台已禁用：{blocked}", MSG_NORMAL)
+            self._sync_sky_gimbal_btn(False)
+            return
         self._request_sky_action("gimbal_follow", ctx)
 
     def _request_sky_action(self, action: str, context: dict) -> bool:
@@ -10591,8 +10597,36 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
+    def _tle_gimbal_block_reason(self) -> str:
+        """星历闸门：云台只允许 fresh/usable（判据来自 tracking_policy）。
+
+        只对 tracker 目录里的卫星生效；目录外目标留给天空视图自身的 TLE
+        状态，避免把「本目录不认识」误判成「星历失效」。拿不到状态时按
+        禁用处理（云台会动机械，宁可不动作也不猜）。
+        """
+        name = self._sky_selected_name()
+        tracker = getattr(self, "_loop_sat_tracker", None)
+        if not name or tracker is None:
+            return ""
+        try:
+            known = any(str(s.get("name")) == name
+                        for s in tracker.list_satellites())
+            if not known:
+                return ""
+            pol = tracker.tracking_policy_for(name)
+        except Exception:  # noqa: BLE001 - 状态取不到就不放行
+            return "星历状态无法判定（跟踪器异常）"
+        if pol.get("allow_gimbal"):
+            return ""
+        return f"{pol.get('label', '星历不可用')}；{pol.get('next_action', '请更新星历')}"
+
     def _gimbal_available(self) -> bool:
-        """云台后端可用性：board 通道已注入 / rotctld 连通 / manual。"""
+        """云台后端可用性：board 通道已注入 / rotctld 连通 / manual。
+
+        星历闸门在前：expired/dead/unknown 时即使硬件在线也不可用。
+        """
+        if self._tle_gimbal_block_reason():
+            return False
         gc = self._gimbal_controller()
         if gc is None:
             return False
@@ -12151,18 +12185,21 @@ class MainWindow(QMainWindow):
             except Exception:
                 sats = []
         badges = {}
-        ages = []
+        worst_age = None
+        worst_tier = None
         for s in sats:
             age = s.get("tle_age_days")
             badge = tle_band_badge(age, s.get("tle_tier"))[0]
             if badge:
                 badges[s["name"]] = badge
             if age is not None:
-                ages.append(float(age))
+                if worst_age is None or float(age) > worst_age:
+                    worst_age = float(age)
+                    worst_tier = s.get("tle_tier")
         self.sat_track_panel.populate_satellites(
             [s["name"] for s in sats], badges)
         self.sat_track_panel.set_tle_date(
-            tracker.tle_date, age_days=max(ages) if ages else None)
+            tracker.tle_date, age_days=worst_age, tier=worst_tier)
 
     def _menu_start_sat_track(self):
         """菜单项触发：等价于点面板上的开始按钮。"""
