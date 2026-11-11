@@ -2545,7 +2545,10 @@ class SpectrumPanel(QWidget):
         self._splitter.setStretchFactor(0, 3)
         self._splitter.setStretchFactor(1, 2)
         self._fft_plot.setMinimumHeight(120)
-        self._wf_plot.setMinimumHeight(60)
+        # 瀑布地板 60→40（裁定 B，2026-11-11）：150% 档面板高度余量 6→26px，
+        # 代价只在贴地板时兑现（可见历史 60→40 行 = 6s→4s，1 行 = 1px）。
+        # 数据与两方案取舍见 docs/research/2026-11-11-gap-layout.md §3.9。
+        self._wf_plot.setMinimumHeight(40)
 
         # 右侧滑杆列已迁到工具栏「显示」弹出层（2026-11-11）：常驻会白占 30px
         # 宽、把面板最小高撑到 247px，窄档 331px 下绘图区被挤。滑杆对象与信号
@@ -2601,7 +2604,7 @@ class SpectrumPanel(QWidget):
             self._splitter.setSizes([110, 50])
         else:
             self._fft_plot.setMinimumHeight(120)
-            self._wf_plot.setMinimumHeight(60)
+            self._wf_plot.setMinimumHeight(40)
             # 不恢复像素值：分区拉伸比是 3:2（见 __init__），回到 IDE 后
             # 面板变高，QSplitter 按拉伸比重新分配；硬塞回紧凑时的 [110,50]
             # 反而会把两区钉在贴底的位置。
