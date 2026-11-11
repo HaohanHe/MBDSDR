@@ -64,7 +64,9 @@ def _chat_colors() -> dict:
     c = _tok().COLORS
     return {
         "panel_bg": c.get("card_1", "#1f1f1f"),
-        "panel_border": c.get("grid", "#35373c"),
+        # COLORS 顶层从来没有 "grid"（grid 只在 THEMES 的嵌套主题表里），
+        # 旧写法恒走兜底。描边统一取 card_3，随当前主题走。
+        "panel_border": c.get("grid", c.get("card_3", "#35373c")),
         "text": c.get("gray_100", "#d9d9d9"),
         "text_secondary": c.get("gray_200", "#939393"),
         "ai_bg": "#232528",
@@ -686,6 +688,7 @@ class AIPanel(QWidget):
         self._tool_log.append(step)
         idx = len(self._tool_log)
         _t = _tok().COLORS
+        _c = _chat_colors()
         status_color = {
             ai_steps.STATUS_SUCCESS: _t["status_success"],
             ai_steps.STATUS_FAILED: _t["status_danger"],
@@ -724,7 +727,9 @@ class AIPanel(QWidget):
         card = QFrame()
         card.setStyleSheet(
             f"QFrame {{ background: {_t['card_1']};"
-            f" border: 1px solid {_t['grid']};"
+            # 旧写法 _t['grid'] 在 COLORS 顶层不存在，工具结果一回来就
+            # KeyError 崩掉（真实链路 bug，不是测试环境差异）。
+            f" border: 1px solid {_c['panel_border']};"
             f" border-radius: 4px; }}")
         lay = QVBoxLayout(card)
         # 子步骤（workflow_execute / subagent_execute 展开）左缩进

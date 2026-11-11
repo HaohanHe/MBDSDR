@@ -46,7 +46,12 @@ def test_model_round_records_real_tasks_and_events(isolated_profile, qapp):
         "模型轮次的工具调用必须成为真实编排任务"
     assert after["events"] > before["events"], \
         "模型轮次必须触发真实 Hooks 事件"
-    assert "任务" in panel.live_btn.text()
+    # 2026-11-11：状态条收窄成「模型配置状态 + 工具数」，任务/事件明细
+    # 移到可展开区。契约不变：模型轮次仍必须落成真实编排任务与 Hooks 事件。
+    panel._refresh_live_bar()
+    assert "模型已配置" in panel.live_btn.text()
+    assert "工具" in panel.live_btn.text()
+    assert "任务" in panel.live_details.text()
     panel.close()
 
 

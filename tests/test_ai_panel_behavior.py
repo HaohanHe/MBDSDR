@@ -535,7 +535,10 @@ class TestConversationAndConfig:
         conv = panel.get_conversation()
         assert [c["role"] for c in conv] == ["assistant", "user", "assistant"]
         assert conv[1]["content"] == "你好 BI1AAA"
-        assert conv[0]["content"].startswith("你好，我是 MBDSDR AI 智能体")
+        # 2026-11-11 欢迎语按「没配 API Key 不是语言模型」口径改写：
+        # 断言实质（身份 + 诚实声明），不钉死旧措辞。
+        assert conv[0]["content"].startswith("我是 MBDSDR AI 智能体")
+        assert "不是语言模型" in conv[0]["content"]
 
     def test_config_roundtrip_and_legacy_key_migration(self, panel):
         AIPanel._save_config({"api_key": "k", "api_base": "http://legacy"})
@@ -549,14 +552,18 @@ class TestConversationAndConfig:
             assert "api_base" not in loaded
 
     def test_quick_command_button_sends_first_command(self, panel):
+        # 2026-11-11：4 颗快捷 QPushButton 收成一条下拉（命令栏不再挤占
+        # 对话区）。契约不变：选中示例说法即发出原文，且不只放前 4 条。
         cmds = []
         panel.command_submitted.connect(lambda t: cmds.append(t))
-        from PySide6.QtWidgets import QPushButton
-        buttons = [b for b in panel.findChildren(QPushButton)
-                   if b.text() in ap.QUICK_COMMANDS[:4]]
-        assert len(buttons) == 4, "快捷指令只渲染前 4 条"
-        buttons[0].click()
+        combo = panel.quick_combo
+        assert combo.count() == len(ap.QUICK_COMMANDS) + 1
+        assert combo.itemText(0) == "选一条示例说法…"
+        assert [combo.itemData(i) for i in range(1, combo.count())] == \
+            list(ap.QUICK_COMMANDS)
+        combo.activated[int].emit(1)   # 第一条示例说法（index 0 是占位项）
         assert cmds == [ap.QUICK_COMMANDS[0]]
+        assert combo.currentIndex() == 0, "发完回位到占位项，不残留上次选择"
 
     def test_toggle_log_button_switches_text_and_visibility(self, panel):
         # _toggle_log 读的是 isVisible()（含祖先可见性），故先把面板显出来
