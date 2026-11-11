@@ -52,7 +52,7 @@ class SpectrumProcessor:
     对 IQ 样本进行 FFT、峰值检测、中心频点估计等。
     """
 
-    def __init__(self, fft_size: int = 1024, window: str = "hann"):
+    def __init__(self, fft_size: int = 1024, window: str = "nuttall"):
         self.fft_size = fft_size
         self.window = window
         self._window_func = self._get_window(window, fft_size)
@@ -60,7 +60,22 @@ class SpectrumProcessor:
         self._pan_offset = 0.0   # 平移偏移 Hz
 
     def _get_window(self, window: str, size: int) -> np.ndarray:
-        """获取窗口函数。"""
+        """获取窗口函数。
+
+        默认与显示链路（`SpectrumDataGenerator.WINDOWS[0]`）同为 Nuttall，
+        系数与 `desktop/spectrum_widget.py::_window` 完全一致——同口径
+        （G7/P1-12），跨实现对拍才有意义。
+        """
+        n = int(size)
+        if window.lower() == "nuttall":
+            if n <= 1:
+                return np.ones(max(n, 1), dtype=np.float64)
+            k = np.arange(n, dtype=np.float64)
+            x = k / (n - 1)
+            return (0.355768
+                    - 0.487396 * np.cos(2.0 * np.pi * x)
+                    + 0.144232 * np.cos(4.0 * np.pi * x)
+                    - 0.012604 * np.cos(6.0 * np.pi * x)).astype(np.float64)
         windows = {
             "hann": np.hanning,
             "hamming": np.hamming,
@@ -68,8 +83,8 @@ class SpectrumProcessor:
             "rectangular": np.ones,
             "bartlett": np.bartlett,
         }
-        func = windows.get(window, np.hanning)
-        return func(size)
+        func = windows.get(window.lower(), np.hanning)
+        return func(n)
 
     def compute_spectrum(
         self,
@@ -105,8 +120,14 @@ class SpectrumProcessor:
 
         # FFT
         spectrum = np.fft.fftshift(np.fft.fft(windowed, fft_size))
-        powers = np.abs(spectrum) ** 2
-        powers_db = 10 * np.log10(powers + 1e-12)  # +1e-12 避免 log(0)
+
+        # dBFS 归一化，与显示链路同口径（P1-12 / G7）：
+        # 满幅正弦波峰 = N * 窗相干增益 / 2（desktop/spectrum_widget.py::push_iq）。
+        # 改前是 10log10(|FFT|²) 的裸功率，和屏幕上的 dBFS 差一个常数，
+        # 同一段 IQ 在 AI 侧报的峰/底噪与用户看到的对不上。
+        win_cg = float(np.mean(self._window_func[:len(samples)]))
+        mag = np.abs(spectrum) / (fft_size * win_cg / 2.0)
+        powers_db = 20 * np.log10(mag + 1e-12)
 
         # 频率轴
         freqs = np.fft.fftshift(np.fft.fftfreq(fft_size, 1.0 / sample_rate)) + center_freq
@@ -116,9 +137,11 @@ class SpectrumProcessor:
         peak_freq = freqs[peak_idx]
         peak_power = powers_db[peak_idx]
 
-        # 噪声底（用最低 10% 的平均值）
-        sorted_powers = np.sort(powers_db)
-        noise_floor = np.mean(sorted_powers[:int(fft_size * 0.1)])
+        # 噪声底 = 全帧中位数（同显示链路 noise_floor_db() 与
+        # signal_spectrum 的 median 口径）。改前取「最低 10% 的均值」，
+        # 三个实现三套底噪，绝对门限（如 -60 dB）跨路径含义不同。
+        finite = powers_db[np.isfinite(powers_db)]
+        noise_floor = float(np.median(finite)) if finite.size else float("nan")
 
         return SpectrumData(
             frequencies=freqs,
