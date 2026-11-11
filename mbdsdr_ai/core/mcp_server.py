@@ -914,7 +914,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         _schema({"handle": _STR}, ["handle"]), _scan_results)
 
     # ---- 解码 ----
-    add("start_decoder", "启动解码器（adsb/aprs/noaa_apt/meteor），返回句柄。",
+    add("start_decoder", "启动流式解码器（仅 adsb/rds），返回句柄；其余类型走 --decode-file。",
         _schema({"decoder_type": _STR, "params": {"type": "object"}},
                 ["decoder_type"]),
         lambda c, a: (

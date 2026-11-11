@@ -182,6 +182,18 @@ class DecoderNotAvailableError(SDRUserError):
         return "可用解码器见 list_decoders()；如需新解码器请先注册或安装其依赖。"
 
 
+class DecoderNotStreamableError(DecoderNotAvailableError):
+    """解码器有文件级实现，但没有流式 IQ 入口。"""
+
+    code = "not_implemented"
+
+    def _default_suggestion(self) -> str:
+        return (
+            "该解码器仅支持文件级入口，请用 --decode-file <文件> --mode <类型>；"
+            "流式解码仅支持 adsb/rds。"
+        )
+
+
 __all__ = [
     "SDRUserError",
     "DriverNotFoundError",
@@ -192,4 +204,5 @@ __all__ = [
     "SampleRateNotSupportedError",
     "FrequencyOutOfRangeError",
     "DecoderNotAvailableError",
+    "DecoderNotStreamableError",
 ]

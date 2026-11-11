@@ -35,6 +35,7 @@ from .errors import (
     SampleRateNotSupportedError,
     FrequencyOutOfRangeError,
     DecoderNotAvailableError,
+    DecoderNotStreamableError,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,9 +43,15 @@ logger = logging.getLogger(__name__)
 # 合法解调模式（CLI/MCP 做参数校验用）
 VALID_MODES = ("AM", "DSB", "FM", "WFM", "NFM", "USB", "LSB", "CW")
 
-# 支持的解码器类型
-SUPPORTED_DECODERS = ("adsb", "aprs", "noaa_apt", "meteor",
-                      "rds", "sstv", "ft8", "wspr", "pocsag", "acars")
+# 支持流式 IQ 解码的解码器（只有这两类实现了流式入口）
+STREAMABLE_DECODERS = ("adsb", "rds")
+
+# 只有文件级入口的解码器：能力真实存在，但不能通过 start_decoder 走流式
+FILE_ONLY_DECODERS = ("aprs", "noaa_apt", "meteor",
+                      "sstv", "ft8", "wspr", "pocsag", "acars")
+
+# 已知解码器类型（枚举用；不等于都可流式）
+SUPPORTED_DECODERS = STREAMABLE_DECODERS + FILE_ONLY_DECODERS
 
 # 音频输出采样率（解调后送声卡的统一速率）
 AUDIO_FS = 48_000.0
@@ -921,18 +928,28 @@ class SDRController:
     # 解码
     # ==================================================================
     def start_decoder(self, decoder_type: str, params: Optional[dict] = None) -> str:
-        """启动一个后台解码器（adsb/aprs/noaa_apt/meteor），返回句柄。
+        """启动一个流式后台解码器（仅 adsb/rds），返回句柄。
 
         Raises
         ------
         DecoderNotAvailableError
             未知解码器类型。
+        DecoderNotStreamableError
+            类型存在文件级实现，但没有流式 IQ 入口。
         """
         dt = (decoder_type or "").lower()
         if dt not in SUPPORTED_DECODERS:
             raise DecoderNotAvailableError(
                 f"未知解码器 {decoder_type!r}",
                 suggestion=f"可用：{', '.join(SUPPORTED_DECODERS)}",
+            )
+        if dt not in STREAMABLE_DECODERS:
+            raise DecoderNotStreamableError(
+                f"{dt} 是文件级解码器，不支持流式 IQ 解码",
+                suggestion=(
+                    f"请用 --decode-file <文件> --mode {dt} 走文件级入口；"
+                    f"流式解码仅支持：{', '.join(STREAMABLE_DECODERS)}"
+                ),
             )
         self._dec_counter += 1
         handle = f"dec-{self._dec_counter:04d}"
@@ -1696,4 +1713,6 @@ __all__ = [
     "SystemStatus",
     "VALID_MODES",
     "SUPPORTED_DECODERS",
+    "STREAMABLE_DECODERS",
+    "FILE_ONLY_DECODERS",
 ]

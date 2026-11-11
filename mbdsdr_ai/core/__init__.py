@@ -34,6 +34,7 @@ from .errors import (
     SampleRateNotSupportedError,
     FrequencyOutOfRangeError,
     DecoderNotAvailableError,
+    DecoderNotStreamableError,
 )
 from .controller import (
     SDRController,
@@ -44,6 +45,8 @@ from .controller import (
     SystemStatus,
     VALID_MODES,
     SUPPORTED_DECODERS,
+    STREAMABLE_DECODERS,
+    FILE_ONLY_DECODERS,
 )
 
 from ..version import __version__
@@ -59,6 +62,7 @@ __all__ = [
     "SampleRateNotSupportedError",
     "FrequencyOutOfRangeError",
     "DecoderNotAvailableError",
+    "DecoderNotStreamableError",
     # controller + types
     "SDRController",
     "AudioDeviceInfo",
@@ -68,4 +72,6 @@ __all__ = [
     "SystemStatus",
     "VALID_MODES",
     "SUPPORTED_DECODERS",
+    "STREAMABLE_DECODERS",
+    "FILE_ONLY_DECODERS",
 ]
