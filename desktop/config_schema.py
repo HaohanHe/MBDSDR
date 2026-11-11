@@ -595,7 +595,7 @@ EXPOSED_ITEMS: Tuple[SettingItem, ...] = tuple(it for it in ALL_ITEMS if it.expo
 #: 设置面板不展示、但确实锁死的条目及原因（文档与 UI 提示共用）。
 LOCKED: Tuple[Tuple[str, str], ...] = (
     ("星象仪图层（方位网格/赤道网格/罗盘/轨迹）",
-     "星象仪底栏已有四个图层开关（rf_sky_view.py:6944-6957），"
+     "星象仪底栏已有四个图层开关（rf_sky_view.py:8373-8387），"
      "设置里再开一套会出现两个不同步入口；持久化需坐标视图线在底栏直接写配置。"),
     ("Max/Min hold、dB 显示范围",
      "它们是测量态临时工具，不是长期偏好；重启清零是预期行为，持久化反而制造困惑。"),
