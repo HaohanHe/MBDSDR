@@ -9831,7 +9831,8 @@ class MainWindow(QMainWindow):
                 self.control_panel.set_record_outcome("failed", str(error))
             except Exception:
                 pass
-            msg = f"{error}；{msg}"
+            # 中止就只说中止：不拼「录制完成」，与 docstring 的承诺一致。
+            msg = str(error)
         self.statusBar().showMessage(msg, MSG_IMPORTANT)
 
     def _toggle_waterfall(self):

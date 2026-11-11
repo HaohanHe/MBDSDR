@@ -49,6 +49,14 @@ class _StubBackend:
         return 100_000_000.0
 
 
+@pytest.fixture(autouse=True)
+def _pin_default_config(isolated_profile, monkeypatch):
+    """任何仍走默认路径的 DesktopSettings 一并钉到本模块临时目录。"""
+    monkeypatch.setattr(
+        "settings.default_config_path",
+        lambda: isolated_profile / "desktop_settings.json")
+
+
 @pytest.fixture()
 def window(isolated_profile):
     w = MainWindow()
@@ -71,6 +79,7 @@ def _status(w):
 
 def _assert_no_completion(w):
     assert "完成" not in _panel(w), f"面板仍是完成态: {_panel(w)!r}"
+    assert "完成" not in _status(w), f"状态栏仍是完成态: {_status(w)!r}"
 
 
 def test_dir_unavailable_is_failure_with_reason(window):
