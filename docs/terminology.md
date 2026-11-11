@@ -15,12 +15,12 @@
 
 | # | 概念 | 标准写法（只写这个） | 禁止 / 待收敛 | 多数派依据（处数 + 位置） | 例外（仍在用旧词，未改） |
 |---|---|---|---|---|---|
-| 1 | 持久频点 | **书签** | 收藏 | 书签 42 处：`bookmark_panel.py`（面板全篇）、`control_panel.py:490/510/1117`、`spectrum_widget.py:2647/2650`、`config_schema.py:335`、`main_window.py:9962` | 收藏 4 处：`control_panel.py:1171`「收藏频率」、`main_window.py:7769/7770/7774`「已收藏…」（文件被其他线占用） |
-| 2 | 步进找台 | **扫频** | 扫描 / 扫台 | 扫频 38 处：`scanner_panel.py:233/307/354`、`main_window.py:1466/11143/11266`、`capability_catalog.py:84`、`shortcuts.py:63` | 「扫描」仅剩 1 处 `capability_catalog.py:72`「书签扫描卫星」——不同动作（按书签扫卫星），保留；「扫台」0 处 |
-| 3 | 坐标 | **观测地点** | 站址 / 观测站 / 地面站 | 正式标签 9 处：`config_schema.py:432/440`「观测地点纬度/经度」、`location_panel.py:119/139`、`main_window.py:2644`、`new_spacetime_panel.py:120`、`adsb_panel.py:72` | 告警/状态句仍混用：观测站 18 处、站址 17 处、地面站 3 处（`rf_sky_view.py:2470/3677/7588`、`main_window.py:10891/12264`、`new_spacetime_panel.py:452`「观测站:」）。**不得以 18 > 9 为由继续写「观测站」**——那是历史告警文案，改一条就顺势改词 |
-| 4 | 增益控制 | **硬件 AGC** / **音频 AGC**（必须带限定词） | 裸写「AGC」 | 硬件 AGC 4 处：`control_panel.py:643`、`gain_panel.py:222`、`status_panel.py:411`、`device_panel.py:231`；音频 AGC 2 处：`control_panel.py:651/661` | 裸「AGC」3 处：`main_window.py:6298`「开启 AGC 时忽略」、`:6308`「启用自动增益 (AGC)」、`:7580`「设置 AGC」（文件被其他线占用） |
-| 5 | 中频滤波宽度 | **解调带宽** | VFO 带宽 | 解调带宽 6 处：`control_panel.py:592/599/1776`、`module_panel.py:373`、`status_panel.py:396`、`troubleshooting.py:253` | VFO 带宽 2 处：`spectrum_widget.py:3541/3573`（Ctrl+滚轮瞬态提示）。另：射频那一路叫「硬件带宽」/「设备射频带宽」（`module_panel.py:373`），与解调带宽必须成对出现以防混淆 |
-| 6 | 采样率 | **采样率**，展示单位 **MS/s** | 采样率读数写 MHz / `MSPS` / `Ms/s`；输入只收 Hz | 采样率 >50 行、MS/s 52 行：`status_panel.py:391`、`control_panel.py:565/582`、`device_panel.py:225`「采样率(Hz 或 MS/s)」、`weather_panel.py:493/494` | `device_panel.parse_sample_rate()` 同时收 `2048000` / `2.048M` / `2048k` / `2.048 MS/s`——输入宽容、**显示统一 MS/s** |
+| 1 | 持久频点 | **书签** | 收藏 | 书签 42 处：`bookmark_panel.py`（面板全篇）、`control_panel.py:494/514`（分组名 / 「存为书签」）、`main_window.py:10024`（右栏「书签」）、`config_schema.py:335` | 收藏 3 处：`control_panel.py:1177`（对话框标题「收藏频率」）、`main_window.py:7831/7836`（「已收藏 …」提示，文件被其他线占用） |
+| 2 | 步进找台 | **扫频** | 扫描 / 扫台 | 扫频 38 处：`scanner_panel.py:233/307/354`、`main_window.py:1469`「FM 扫频找台」、`capability_catalog.py:84`、`shortcuts.py:63` | 「扫描」仅剩 1 处 `capability_catalog.py:72`「书签扫描卫星」——不同动作（按书签扫卫星），保留；「扫台」0 处 |
+| 3 | 坐标 | **观测地点** | 站址 / 观测站 / 地面站 | 正式标签 9 处：`config_schema.py:441/449`「观测地点纬度/经度」、`location_panel.py:119/139`、`main_window.py:2647`、`new_spacetime_panel.py:120`、`adsb_panel.py:72` | 告警/状态句仍混用：观测站 18 处、站址 17 处、地面站 3 处（例：`main_window.py:2360/2373/2386` 状态栏「缺少…观测站」、`new_spacetime_panel.py:452`「观测站:」、`rf_sky_view.py:3677`「观测站位置未设置…」）。**不得以 18 > 9 为由继续写「观测站」**——那是历史告警文案，改一条就顺势改词 |
+| 4 | 增益控制 | **硬件 AGC** / **音频 AGC**（必须带限定词） | 裸写「AGC」 | 硬件 AGC 4 处：`control_panel.py:649`、`gain_panel.py:222`、`status_panel.py:411`、`device_panel.py:231`；音频 AGC 2 处：`control_panel.py:657/667` | 裸「AGC」3 处：`main_window.py:6357`「开启 AGC 时忽略」、`:6367`「启用自动增益 (AGC)」、`:7639`「设置 AGC」（文件被其他线占用） |
+| 5 | 中频滤波宽度 | **解调带宽** | VFO 带宽 | 解调带宽 6 处：`control_panel.py:598/605/1794`、`module_panel.py:375`、`status_panel.py:396`、`troubleshooting.py:253` | VFO 带宽 2 处：`spectrum_widget.py:3541/3573`（Ctrl+滚轮瞬态提示）。另：射频那一路叫「硬件带宽」/「设备射频带宽」（`module_panel.py:375`），与解调带宽必须成对出现以防混淆 |
+| 6 | 采样率 | **采样率**，展示单位 **MS/s** | 采样率读数写 MHz / `MSPS` / `Ms/s`；输入只收 Hz | 采样率 >50 行、MS/s 52 行：`device_panel.py:225`「采样率(Hz 或 MS/s)」、`:269` 等价值、`weather_panel.py:527/528`、`status_panel.py:100` 口径注释 | `device_panel.parse_sample_rate()` 同时收 `2048000` / `2.048M` / `2048k` / `2.048 MS/s`——输入宽容、**显示统一 MS/s** |
 
 ## 2. 单位口径
 
