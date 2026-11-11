@@ -417,7 +417,7 @@ desktop/` 无命中），所以真实策略是**断了就放弃**：自动重试
 | 场景 | 实测数字 | 结论 |
 |---|---|---|
 | ① 对端彻底不回来 | 6 次，时刻 0.505/1.513/3.524/7.527/15.537/31.575s，间隔 1/2/4/8/16s，放弃总耗时 61.60s | 有上限，不会永远转圈 |
-| ② 3s 后回来 | 第 3 次（3.52s）恢复；频率 100MHz、采样率 2.4MHz、增益 30dB 恢复；**解调模式 NFM→WFM 未恢复** | 自动恢复；模式不保持（`_restore_settings` 未下发 `demod_mode`） |
+| ② 3s 后回来 | 第 3 次（3.52s）恢复；频率 100MHz、采样率 2.400 MS/s、增益 30dB 恢复；**解调模式 NFM→WFM 未恢复** | 自动恢复；模式不保持（`_restore_settings` 未下发 `demod_mode`） |
 | ③ 回来但换了设备 | 首连即成功，`device_id=dev-B`，仍把 100MHz 设置下发到陌生设备 | **会误连**；无设备身份校验 |
 
 场景 ②/③ 是库层行为，桌面端当前根本不会自动走到那里；报告里不得把它当成
@@ -561,3 +561,86 @@ owner：UI 操作逻辑线（本线未改产品代码）。
 **与 5 号基线修正的关系**：性能线若把 `import scipy.signal` 提前到启动阶段，
 只是把这次一次性加载从“首次建链”挪到“启动”；本测试的基线取法（热身建一次链后
 采样）在预热前后**都成立**，逐轮“基线+2”的断言不变——**预热不影响该判定**。
+
+## 10. 幽灵「已连接」审计（2026-11-12，HEAD `463a83be`）
+
+问题：源已半开 / 对端进程被杀 / stale 超时之后，状态机与 UI 是否仍可能显示
+「已连接 / 在线」。**结论：网络两种来源不会；本地 RTL 存在一个首帧前的盲窗，
+已定位到具体代码门，判为产品缺陷并出补丁计划（本线不改代码）。**
+
+### 10.1 三条 UI 事实源（只有这三处会写「已连接」）
+
+| 位置 | 文案 | 依据 | path:line |
+|---|---|---|---|
+| 主状态位 | `<设备名>` / `数据流中断 x.xs（连接仍在）` | `_show_link_degraded` / `_restore_link_display` | `desktop/main_window.py:8728-8765` |
+| 连接标签 | `状态: <设备名>` / `状态: 数据流中断（连接仍在）` | 同上 | `desktop/main_window.py:8740,8762` |
+| 星象仪浮层 | `SDR 已连接` / `数据流中断` / `SDR 未连接` | `_link_degraded` + backend/pipeline 是否为空 | `desktop/main_window.py:3318-3358` |
+
+判据阈值（`desktop/main_window.py:53-58`）：`HEALTH_POLL_MS=1000`、
+`DATA_STALE_S=2.0`、`DATA_LOST_S=10.0`、`HEALTH_GRACE_S=3.0`。
+网络后端自身另有：`idle_timeout=5.0` → 第 1 次超时 `stale`（5s）、
+连续 `_STALE_ESCALATE_AFTER=2` 次 → 硬判断开并关 socket（10s）
+（`mbdsdr_ai/rtltcp_client.py:119-122,361-379`、`mbdsdr_ai/spyserver_client.py:101,315-330`）。
+
+### 10.2 状态迁移表（事件 → 状态 → UI 文案 → 是否幽灵）
+
+**本地 RTL（USB，`RTLSDRBackend`）**
+
+| 触发事件 | 状态机结果 | UI 文案 | 幽灵？ | 证据 |
+|---|---|---|---|---|
+| 源半开（设备还在、不再出数，读未返回） | 后端不写 `stale`（`_ring_read` 只在读返回空/异常时记账：`mbdsdr_ai/sdr_backend.py:2138-2160`）；UI 靠数据年龄在 2s 降级（`:8818-8822`） | `数据流中断 x.xs（连接仍在）` | 否（**前提：本段连接出过至少一帧**） | 代码路径 + 阈值 |
+| 对端被杀（= USB 拔出） | `read_samples` 抛异常 → `_mark_link_lost` → `connected=False, link_state=disconnected`（`:2140-2143,2171-2176`） | `设备已断开：…（不会自动重连…）`（`:8767-8782`） | 否 | 代码路径；真机拔线由 §9 人工步骤验证 |
+| stale 超时之后 | 本地后端无 stale 阶梯；UI 在 `age>10s` 时硬判（仅当后端不报 `link_state`，`:8814-8817`） | `设备已断开：超过 10.0s 未收到 IQ 数据（数据流中断）` | 否（出过帧时） | 代码路径 |
+| **连接成功但一帧都没出 + 原生读永久阻塞** | `_health_has_data=False` → `_on_health_tick` 第 2 行直接 `return`（`:8795-8797`），**宽限期检查（`:8798`）永远走不到**；`read_failed` 也发不出来（`desktop/receive_pipeline.py:152-167` 依赖 `read_fn` 返回） | 一直 `已连接`；星象仪浮层 `SDR 已连接` | **是（盲窗，无上限）** | **实测**：真实 `_on_health_tick` + 最小 harness（见 10.4）场景 1/4 |
+
+> 为什么“原生读永久阻塞”成立：pyrtlsdr 的同步 `read_bytes` 走
+> `rtlsdr_read_sync`（libusb 同步传输，无超时参数），设备句柄在但不出数时
+> 可以永不返回。这是**唯一**能绕过 `read_failed` 的形态；网络来源有 socket
+> 超时，必定返回 `None`，走不到这个盲窗。
+
+**rtl_tcp（`RtlTcpBackend`）**
+
+| 触发事件 | 状态机结果 | UI 文案 | 幽灵？ | 证据 |
+|---|---|---|---|---|
+| 源半开（TCP 活着、不再发字节） | 第 1 次 `socket.timeout` → `STATE_STALE`（`rtltcp_client.py:361-366`）→ 生产者写 `status.link_state="stale"`（`sdr_backend.py:2153-2157`） | ≤2s：`数据流中断 x.xs（连接仍在）`；≤5s：同文案（age 由 UI 计） | 否 | `test_network_layer_matrix.py::TestRtlTcpMatrix::test_half_open_after_kill_reports_within_n_seconds`（本轮 8 passed / 19.06s） |
+| 对端进程被杀 | `recv` 得 `b''`/RST → `disconnected`（`:380-392`） | 下一拍（≤1s）：`设备已断开：…` | 否 | 同上 `test_server_process_killed_detected_fast` |
+| stale 超时之后 | 连续 2 次空闲 → 硬判断开并关 socket（`:367-379`，默认 10s） | `设备已断开：连续 10s 未收到任何数据（判定为半开连接…）` | 否 | 同上 `test_slow_source_and_stall_exposes_stale_gap_and_rate` |
+
+**SpyServer（`SpyServerBackend`）**
+
+| 触发事件 | 状态机结果 | UI 文案 | 幽灵？ | 证据 |
+|---|---|---|---|---|
+| 源半开 | 第 1 次超时 → `STATE_STALE`（`spyserver_client.py:315-320`）→ `status.link_state=stale`（`:630-633`） | 同 rtl_tcp | 否 | `TestSpyServerMatrix::test_spyserver_half_open_reported_within_n_seconds` |
+| 对端进程被杀 | `disconnected`（`:325-330,636-640`） | `设备已断开：…` | 否 | `test_spyserver_process_killed_then_half_open` |
+| stale 超时之后 | 连续 2 次 → 关 socket 硬判（`:321-330`） | `设备已断开：连续 10s 未收到任何数据…` | 否 | 同上 |
+
+### 10.3 复跑命令
+
+```powershell
+$env:MBDSDR_NO_HW='1'; $env:MBDSDR_OFFLINE='1'; $env:PYTHONPATH='d:\mbdsdr\MBDSDR'
+python -m pytest tests\test_network_layer_matrix.py::TestRtlTcpMatrix `
+                 tests\test_network_layer_matrix.py::TestSpyServerMatrix -q
+# 2026-11-12 实测：8 passed in 19.06s（HEAD 463a83be）
+```
+
+本地 RTL 的「拔线 / 半开」只能人工：按 §9 的 M3 `usb-unplug` 六步执行；
+「连接成功但零帧 + 读阻塞」无法程序化注入（需要 libusb 同步读永不返回），
+其判定证据是下节的真实方法实测。
+
+### 10.4 盲窗实测（真实 `_on_health_tick`，不渲染 UI）
+
+最小 harness 只提供该方法早退门之前会碰的属性；状态读取仍调产品实现
+`MainWindow._backend_status_facts`。宽限期设为 `now-100s`（模拟连接很久）。
+
+| 场景 | `_health_has_data` | 后端 status | 真实方法调用记录 |
+|---|---|---|---|
+| 1 一帧未出 | False | `connected` / `age=None` | **（空）直接 return** |
+| 2 出过帧 | True | `connected` / `age=30s` | `[('degraded', 30.0, '')]` |
+| 3 出过帧 | True | `stale` / `age=6s` | `[('degraded', 6.0, '')]` |
+| 4 一帧未出 | False | **`disconnected`** / `connected=False` | **（空）直接 return** |
+
+场景 4 说明盲窗不只是“不降级”，连后端**已经明确说断开**也不会被健康轮询接住
+（此时只能靠 `read_failed`，而它恰恰是阻塞读时发不出来的那条路）。
+
+补丁计划：[`docs/pending-patches/2026-11-12-desktop-first-frame-blind-window.md`](pending-patches/2026-11-12-desktop-first-frame-blind-window.md)，
+owner：UI 操作逻辑线（`desktop/main_window.py` 在其手里）。
