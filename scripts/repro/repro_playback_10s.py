@@ -10,17 +10,27 @@
   H2 回放定时器/分块 —— QTimer + 50 ms 分块逻辑在 10 s 处停住；
   H3 解码路径输入上限 —— 解调/解码链只吃前 10 s 输入，之后不再出声。
 
+另加一条「形态判定」探针 H4：把采样率当变量扫 4 档，看截断秒数是否随
+1/采样率 变化。若截断由固定样本数决定，2.4M→10.0 s、1.024M→23.44 s、
+0.48M→50.0 s、3.2M→7.5 s；若是「固定 10 秒」则四档应都停在 10 s。
+
 每个探针都打印「若成立应看到什么 / 实测看到什么」，最后给结论。所有探针跑
 产品真实代码路径（真实 `MainWindow._record_write_chunk`、真实
 `_begin_replay_from_rec` + 真实 50 ms QTimer、真实 `baseband_io.load_iq`）；
 只有音频设备用一个「只计数的假声卡」替身（offscreen 无音频设备），
 以及把 `QMessageBox.information` 换成捕获函数（否则 offscreen 下会阻塞）。
 
+未覆盖项（勿误读为「已排除」）
+----------------------------
+录制链路的乒乓缓冲（`PingPongStream`，4 个块）在高负载下可能随机丢样。
+那是「不定位置的样本缺口」，不是「定长 10 s 截断」形态，本脚本**未测**，
+H1 的排除结论也不覆盖它。
+
 用法
 ----
     python scripts/repro/repro_playback_10s.py [--keep] [--workdir DIR]
 
-退出码：0 = 四条判定全部给出；1 = 有探针无法判定（会注明原因）。
+退出码：0 = 五条判定全部给出；1 = 有探针无法判定（会注明原因）。
 大文件（约 0.2 GB + 0.4 GB 稀疏）默认跑完即删，`--keep` 保留现场。
 """
 from __future__ import annotations
@@ -120,6 +130,57 @@ def probe_record_writer(workdir: str) -> bool:
         f"累计计数 {obj._record_samples_total:,}，耗时 {write_s:.1f}s",
         "排除（录制侧无样本上限；REPLAY_MAX_SAMPLES 只出现在回放读盘）"
         if ok else "成立/可疑（写入数 < 喂入数）",
+    )
+    return ok
+
+
+# ----------------------------------------------------------------------
+# H4：采样率扫描——截断点是「固定样本数」还是「固定时长」
+# ----------------------------------------------------------------------
+def probe_rate_sweep(workdir: str) -> bool:
+    import numpy as np
+
+    import main_window as mw
+    from mbdsdr_ai import baseband_io
+
+    rates = [480_000.0, 1_024_000.0, 2_400_000.0, 3_200_000.0]
+    file_secs = 60.0
+    cap = int(mw.REPLAY_MAX_SAMPLES)
+    rows = []
+    ok = True
+    for sr in rates:
+        path = os.path.join(workdir, f"h4_{int(sr)}.cf32")
+        total = int(sr * file_secs)          # 四档都 > cap，保证都会截断
+        with open(path, "wb") as fh:
+            fh.truncate(total * 8)
+        rec = baseband_io.load_iq(path, sample_rate=sr,
+                                  max_samples=cap, chunk_samples=1 << 20)
+        loaded = int(np.asarray(rec["iq"]).size)
+        loaded_s = loaded / sr
+        expected = cap / sr
+        hit = (loaded == cap and bool(rec.get("truncated"))
+               and abs(loaded_s - expected) < 0.01)
+        ok = ok and hit
+        rows.append((sr, total, loaded, expected, loaded_s,
+                     bool(rec.get("truncated")), hit))
+        del rec
+        os.remove(path)
+
+    print()
+    print(f"  文件统一 {file_secs:.0f} s，四档均大于上限 {cap:,} 样本；"
+          "截断秒数应≈cap/sr")
+    for sr, total, loaded, expected, loaded_s, tr, hit in rows:
+        print(f"    {sr / 1e6:6.3f} MS/s -> 文件 {total:>12,} 样本 / "
+              f"{total / sr:5.1f}s，载入 {loaded:>10,} / {loaded_s:5.2f}s "
+              f"(期望 {expected:5.2f}s)，truncated={tr}  "
+              f"{'OK' if hit else 'MISMATCH'}")
+    _print_probe(
+        "H4", "截断由固定样本数还是固定 10 s 决定",
+        "截断秒数恒定 ≈10 s（四档都应停在同一时长）",
+        "四档截断秒数 = " + " / ".join(f"{r[4]:.2f}s" for r in rows)
+        + f"，载入样本数均 = {cap:,}",
+        "固定样本数（截断时长按 1/采样率 变化）"
+        if ok else "不成立（读数不符）",
     )
     return ok
 
@@ -315,6 +376,7 @@ def main() -> int:
     print("=" * 78)
 
     h1_ok = probe_record_writer(workdir)
+    h4_ok = probe_rate_sweep(workdir)
     h0_ok, h2_ok, h3_ok, env_note = probe_replay(workdir)
 
     print()
@@ -325,6 +387,8 @@ def main() -> int:
     print(f"  H2 回放定时器/分块     : {'排除' if h2_ok else '未排除'}")
     print(f"  H3 解码路径输入上限    : "
           f"{'排除' if h3_ok else ('未判定' if h3_ok is None else '未排除')}")
+    print(f"  H4 截断形态            : "
+          f"{'固定样本数（随 1/采样率 变化，不是固定 10 s）' if h4_ok else '与固定样本数不符，需重查'}")
     print(f"  H0 实际根因            : "
           f"{'REPLAY_MAX_SAMPLES=24,000,000 样本读盘上限（2.4 MS/s → 10.0 s）' if h0_ok else '未复现，需重查'}")
     print()
@@ -338,7 +402,8 @@ def main() -> int:
         shutil.rmtree(workdir, ignore_errors=True)
         print("\n临时文件已清理（--keep 可保留现场）。")
 
-    return 0 if (h1_ok and h0_ok and h2_ok and h3_ok is not None) else 1
+    return 0 if (h1_ok and h4_ok and h0_ok and h2_ok
+                 and h3_ok is not None) else 1
 
 
 if __name__ == "__main__":
