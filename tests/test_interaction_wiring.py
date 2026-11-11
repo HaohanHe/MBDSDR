@@ -59,7 +59,7 @@ def _isolate_settings():
 
 
 @pytest.fixture(scope="module")
-def main_window():
+def main_window(isolated_profile):
     restore = _isolate_settings()
     from main_window import MainWindow
     win = MainWindow()
