@@ -9760,7 +9760,17 @@ class MainWindow(QMainWindow):
                 info["segments"] = 1
         self._record_iq_buffer = []
 
-        # UI 恢复
+        # UI 恢复：先把按钮复位，再写结果文案。
+        # 内部发起的停止（写失败 / 回放启动 / 掉线）与用户点停止共用这一出口；
+        # 只改文案会留下「按钮还按着、其实早停了」的假录音态（2026-11-11 实测）。
+        self._record_guard = True
+        try:
+            self.record_btn.setChecked(False)
+            self.control_panel.record_button.setChecked(False)
+        except Exception:
+            pass
+        finally:
+            self._record_guard = False
         self.record_btn.setText("录音")
         self.record_btn.setStyleSheet("")
         secs = getattr(self, "_record_seconds", 0)
