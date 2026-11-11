@@ -171,15 +171,28 @@ def test_toolbar_hold_checkboxes_wire_generator(qapp):
     assert panel.generator.show_max_hold is False
 
 
-def test_hold_controls_disabled_when_disconnected(qapp):
+def test_hold_controls_enabled_when_disconnected(qapp):
+    """断连不改纯显示项：Max/Min 保持是画法开关，断连也必须可改（G12）。
+
+    2026-11-12 用户裁定：旧契约「断连 → 14 个控件一律置灰」本身是缺陷——
+    用户没插设备时一项都配不了，且没有任何说明。保持项属于纯显示项，
+    断连改的是接入后怎么画；依赖数据的 DSP 项仍必须置灰（这一半保留）。
+    """
     from spectrum_widget import SpectrumPanel
     panel = SpectrumPanel()
     panel.set_connected(True)
     assert panel._maxhold_chk.isEnabled()
     assert panel._minhold_chk.isEnabled()
     panel.set_connected(False)
-    assert not panel._maxhold_chk.isEnabled()
-    assert not panel._minhold_chk.isEnabled()
+    # 纯显示项：断连仍可用
+    assert panel._maxhold_chk.isEnabled()
+    assert panel._minhold_chk.isEnabled()
+    # DSP 项：仍按连接状态置灰（旧契约这部分不许退化）
+    assert not panel._fft_combo.isEnabled()
+    assert not panel._win_combo.isEnabled()
+    assert not panel._avg_combo.isEnabled()
+    assert not panel._perf_combo.isEnabled()
+    assert not panel._tune_mode_btn.isEnabled()
 
 
 def test_hold_lines_render_smoke(qapp):
@@ -189,6 +202,12 @@ def test_hold_lines_render_smoke(qapp):
     panel.set_connected(True)
     panel._maxhold_chk.setChecked(True)
     panel._minhold_chk.setChecked(True)
+    # 先定画布尺寸再喂数据：resizeEvent 会按画布宽重算送绘根数
+    # （_apply_render_bins → generator.reconfigure），而 reconfigure 会按设计
+    # 清空 max/min 包络。若在喂数据后才首次触发 resize/grab，包络会被重建清掉，
+    # 与 hold 本身无关（HEAD 既有行为，2026-11-12 复现）。
+    panel._plot.resize(800, 300)
+    panel._plot.grab()
     sr = 2.4e6
     rng = np.random.default_rng(3)
     for peak in (2000, 5000):
@@ -197,7 +216,6 @@ def test_hold_lines_render_smoke(qapp):
               + 0.01 * (rng.standard_normal(16384)
                         + 1j * rng.standard_normal(16384))).astype(np.complex64)
         panel.update_iq(iq, 100e6, sr)
-    panel._plot.resize(800, 300)
     panel._plot.grab()   # 强制离屏渲染；不抛异常即通过
     assert panel.generator.max_hold is not None
 

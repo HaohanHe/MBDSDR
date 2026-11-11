@@ -373,7 +373,7 @@ settings 引用），所以：
 | 9 | P2 | 无瀑布对比度/gamma/独立色标 | `spectrum_widget.py:2940-2946/2225-2280` | 弱信号层次不可调 | M |
 | 10 | P2 | 自动量程常量写死、噪声底不可见、手动后无原因提示 | `spectrum_widget.py:1628-1674` | 自动量程观感不可控 | S |
 | 11 | P2 | 平均 N 帧"攒够再输出"，无进度提示 | `spectrum_widget.py:546-560` | 高平均档画面先冻住 | S |
-| 12 | P2 | 断连时显示参数全置灰 | `spectrum_widget.py:2881-2887` | 无法预先配置显示 | S |
+| 12 | P2 | 断连时显示参数全置灰（**已修复，见 §7.5**：只置灰 DSP 项，纯显示项始终可用 + 空态第三行说明「接入后生效」） | `spectrum_widget.py:2881-2887` | 无法预先配置显示 | S |
 | 13 | P2 | QMenu 无滚动，高 DPI 裁切风险（推断） | `spectrum_widget.py:2700-2705` | 小屏/高缩放菜单出界 | S |
 | 14 | P2 | 跨度滑杆无数字读数 | `spectrum_widget.py:2741-2753` | 无法确认当前跨度 | S |
 | 15 | P2 | 悬浮读数缺 SNR/噪声底 | `spectrum_widget.py:2116-2134` | 读数入口缺失 | S |
@@ -537,4 +537,50 @@ settings 引用），所以：
 8.49→6.11 ms（1024）、17.51→9.90 ms（4096）；整幅重绘 25.69→12.59 ms、
 33.36→12.57 ms。**这组是 offscreen 隔离面板读数，不能直接当用户体感**，
 用户可见口径以上表真实主窗为准。
+
+### 7.5 断连时纯显示项保持可用 + 空态说明（G12，2026-11-12 用户裁定）
+
+**事实**：`_set_controls_enabled(False)` 原把 14 个控件一律 `setEnabled(False)`，
+而 `SpectrumPanel.__init__` 默认就是断开——没插设备时调色板 / 瀑布平滑 / 峰值 /
+Max·Min 保持 / 书签 / 频段 / 自动量程 / 峰值门一项都配不了；「更多」按钮本身
+不在禁用列表里，点开是一个大半灰的菜单，且没有任何一句说明。
+
+**口径（按「改数据」还是「改看法」切）**：
+
+| 组 | 控件 | 断连时 |
+| --- | --- | --- |
+| DSP / 数据链路 | 窗、FFT 点数、平均帧数、性能档、调谐模式 | 置灰（无 IQ 无意义） |
+| 纯显示 / 标注 / 量程 | 调色板、瀑布平滑、峰值、峰值门、Max·Min 保持、书签、频段、自动量程、三根量程滑杆 | **保持可用** |
+
+- 调谐模式按裁定**继续随数据禁用**：它改的是点击语义，没数据时预设置无收益。
+- 只放开控件不够：用户改完看不到画面变化会以为坏了。谱面空态因此加**第三行**
+  `OFFLINE_SETTINGS_NOTE = "未连接：显示设置已保存，接入后生效"`（不新增控件，
+  仍画在原空态文字块内；谱面高 < 96 px 的星象仪紧凑条省略，避免三行挤压）。
+- 文字行由 `_offline_text_lines()` 统一给出（绘制与用例共用一份），
+  `_draw_offline()` 逐行居中绘制。
+
+**反证**（`tests/test_spectrum_display_controls_disconnected.py`，5 条）：
+
+1. 断连时 9 个纯显示项 enabled、5 个 DSP 项 disabled；`set_connected(True)`
+   全部恢复，再断开仍按同一切分（防「一律常开」的假修复）。
+2. 「更多」菜单 10 行里恰有 9 个可交互控件可用（调色板 1 + 开关 7 + 峰值门 1）。
+3. 空态第三行：断开且高 ≥96 px 时为 3 行且文案含「接入后生效」；接上后 2 行；
+   80 px 高时 2 行；空态绘制 `grab()` 不抛异常。
+4. **断连时选的调色板必须在接入后作用到 LUT/像素**：先接上把 LUT 钉在经典色
+   端点 → 断开切「低饱和」（此时 `_wf_lut` 必须为 `None`）→ 接入喂一帧真 IQ →
+   `grab()` 走真实瀑布绘制后，LUT 两端点等于 `WATERFALL_COLORS_SOFT` 端点，
+   `_wf_paint_row_into` 把 −60 dB 映射出的像素距低饱和色 ≤30（平方和）且
+   明显近于经典色。**不只断言 `_state` 字段**。
+5. 断连时勾的 Max 保持，接入并喂帧后 `generator.max_hold` 真的攒出包络。
+
+**既有用例按新契约成对更新**（DSP 项仍 disabled 的断言保留）：
+
+- `tests/test_hold_snr.py::test_hold_controls_enabled_when_disconnected`
+  （原名 `..._disabled_...`，旧断言编码的正是缺陷本身）；
+- `tests/test_bookmark_tags.py::test_bookmark_toggle_and_available_when_disconnected`；
+- 另修 `test_hold_lines_render_smoke` 的**既有红因**：`resizeEvent →
+  _apply_render_bins → generator.reconfigure` 会按设计清空 max/min 包络，
+  原用例先喂数据再首次 `resize/grab`，包络被重建清掉（HEAD 已如此，与本次改动
+  无关）。改为先定画布尺寸再喂数据，断言一条未减。
+
 

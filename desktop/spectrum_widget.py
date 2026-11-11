@@ -1185,6 +1185,14 @@ def _band_x_range(rect: QRectF, view_center_hz: float, span_hz: float,
 #: 未连接时谱面第二行提示的默认文案（IDE 形态：工具栏就在上方）。
 OFFLINE_HINT_DEFAULT = "点击工具栏「连接」选择设备"
 
+#: 未连接时谱面第三行说明（G12）：纯显示项（调色板/平滑/峰值/保持/书签/
+#: 频段/量程）断连时仍可改，但没有数据画不出来。不写这句，用户改完看不到
+#: 任何变化，会以为控件坏了——「可改」必须配「改了何时生效」。
+OFFLINE_SETTINGS_NOTE = "未连接：显示设置已保存，接入后生效"
+
+#: 谱面高度低于此值时不画第三行（星象仪紧凑条只有约 110px，三行会挤出去）。
+_OFFLINE_NOTE_MIN_H = 96.0
+
 
 class _PlotState:
     """两个渲染路径共享的交互状态。"""
@@ -1435,6 +1443,36 @@ def _freq_scale_ticks(view_center_hz: float, span_hz: float, width_px: float,
     return span_hz, [lo, hi], [f"{lo / unit:.0f}", f"{hi / unit:.0f}"], uname
 
 
+def _offline_text_lines(state: "_PlotState", spec_h: float) -> List[Tuple[str, int, str]]:
+    """未连接空态的文字行 ``(文案, 字号, 颜色)``，供绘制与用例共用。
+
+    第三行 ``OFFLINE_SETTINGS_NOTE`` 只在确实断开、且谱面放得下时出现：
+    它解释「显示项可改，但接入后才生效」——纯显示项断连时已保持可用
+    （见 ``SpectrumPanel._set_controls_enabled``），没有这句用户改完看不到
+    任何画面变化，会以为控件坏了。高度不足（星象仪紧凑条约 110px）时省掉，
+    不让三行互相挤压。
+    """
+    lines: List[Tuple[str, int, str]] = [
+        ("未连接 SDR", 13, PAL_OFFLINE),
+        (getattr(state, "offline_hint", "") or OFFLINE_HINT_DEFAULT, 9, PAL_OFFLINE),
+    ]
+    if (not getattr(state.panel, "_connected", False)) and spec_h >= _OFFLINE_NOTE_MIN_H:
+        lines.append((OFFLINE_SETTINGS_NOTE, 8, state.panel.color_text))
+    return lines
+
+
+def _draw_offline(painter: QPainter, state: _PlotState, spec_rect, w: int):
+    """无数据空态：居中逐行画提示，不画任何谱线/瀑布/峰值/VFO。"""
+    y = spec_rect.y() + spec_rect.height() / 2.0 - 4
+    for i, (msg, pt, color) in enumerate(_offline_text_lines(state, spec_rect.height())):
+        f = QFont()
+        f.setPointSize(pt)
+        painter.setFont(f)
+        painter.setPen(QPen(QColor(color), 1))
+        tw = painter.fontMetrics().horizontalAdvance(msg)
+        painter.drawText(QPointF((w - tw) / 2.0, y + i * 20), msg)
+
+
 def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
     """上方 FFT 频谱曲线 widget 的完整绘制（整个 widget 即谱面）。
 
@@ -1487,21 +1525,8 @@ def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
         _draw_hold_lines(painter, state, spec_rect)
         _draw_peaks(painter, state, spec_rect, QColor(PAL_PEAK))
     else:
-        # 无数据：空白谱面 + 红色两行提示（不画任何谱线/瀑布/峰值/VFO）
-        painter.setPen(QPen(QColor(PAL_OFFLINE), 1))
-        f1 = QFont()
-        f1.setPointSize(13)
-        painter.setFont(f1)
-        msg1 = "未连接 SDR"
-        tw1 = painter.fontMetrics().horizontalAdvance(msg1)
-        y1 = spec_rect.y() + spec_rect.height() / 2.0 - 4
-        painter.drawText(QPointF((w - tw1) / 2.0, y1), msg1)
-        f2 = QFont()
-        f2.setPointSize(9)
-        painter.setFont(f2)
-        msg2 = getattr(state, "offline_hint", "") or OFFLINE_HINT_DEFAULT
-        tw2 = painter.fontMetrics().horizontalAdvance(msg2)
-        painter.drawText(QPointF((w - tw2) / 2.0, y1 + 20), msg2)
+        # 无数据：空白谱面 + 居中的未连接提示（不画任何谱线/瀑布/峰值/VFO）
+        _draw_offline(painter, state, spec_rect, w)
 
     # 中心频率游标
     _draw_bandplan(painter, state, spec_rect, overlay=True)
@@ -2559,7 +2584,7 @@ class SpectrumPanel(QWidget):
         body.addWidget(self._splitter, stretch=1)
         root.addLayout(body, stretch=1)
 
-        # 初始：未连接 → 控件置灰
+        # 初始：未连接 → DSP 项置灰（纯显示项保持可用，见 _set_controls_enabled）
         self._connected = False
         self._set_controls_enabled(False)
 
@@ -2967,12 +2992,21 @@ class SpectrumPanel(QWidget):
         self._redraw()
 
     def _set_controls_enabled(self, on: bool):
+        """连接状态只决定「依赖数据的 DSP 项」是否可用，纯显示项始终可用。
+
+        2026-11-12 用户裁定（G12）：断连时用户仍要能预先配置调色板 / 瀑布平滑 /
+        峰值 / Max·Min 保持 / 书签 / 频段 / 自动量程 / 峰值门——它们只改
+        ``_state`` 与 LUT，接入后第一帧就按新设置绘制。旧实现把 14 个控件一律
+        ``setEnabled(False)``，没插设备时一项都配不了，「更多」点开还是大半灰，
+        且没有任何一句说明。配套的「改了何时生效」写在谱面空态第三行
+        （``OFFLINE_SETTINGS_NOTE``）。
+        """
+        # DSP / 数据链路：没有 IQ 就没有意义，随连接状态置灰。
+        # 调谐模式也在这里：它改的是点击语义，没数据时预设置没有收益。
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
-                   self._perf_combo, self._palette_combo, self._wf_smooth_chk,
-                   self._peak_chk, self._peak_spin, self._tune_mode_btn,
-                   self._maxhold_chk, self._minhold_chk, self._bookmark_chk,
-                   self._bandplan_chk, self._auto_db_chk):
+                   self._perf_combo, self._tune_mode_btn):
             w_.setEnabled(on)
+        # 纯显示项不参与禁用：set_connected(True/False) 都不碰它们。
 
     def _on_tune_mode_toggled(self, checked: bool):
         self._state.tune_mode = "center" if checked else "normal"
@@ -3092,7 +3126,12 @@ class SpectrumPanel(QWidget):
     # ------------------------------------------------------------------ 对外接口
     @Slot(bool)
     def set_connected(self, connected: bool):
-        """外部通知 SDR 连接状态。断开时清空频谱并禁用控件。"""
+        """外部通知 SDR 连接状态。断开时清空频谱，只禁用依赖数据的 DSP 项。
+
+        纯显示项（调色板/平滑/峰值/保持/书签/频段/自动量程/峰值门）保持可用：
+        断连时改的只是画法，接入后第一帧按新设置绘制（见 _offline_text_lines
+        里同屏说明「显示设置已保存，接入后生效」）。
+        """
         self._connected = bool(connected)
         self._set_controls_enabled(self._connected)
         if not self._connected:

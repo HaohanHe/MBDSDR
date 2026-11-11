@@ -74,7 +74,12 @@ def test_set_bookmarks_normalizes_and_clears(qapp):
     assert panel._state.bookmarks == []
 
 
-def test_bookmark_toggle_and_disable(qapp):
+def test_bookmark_toggle_and_available_when_disconnected(qapp):
+    """书签旗标是纯显示项：断连时也必须可用（G12，2026-11-12 用户裁定）。
+
+    旧契约断言「断连 → 书签开关置灰」，等于强迫用户先插设备才能配画法；
+    现契约只把依赖数据的 DSP 项按连接状态置灰，显示项始终可用。
+    """
     from spectrum_widget import SpectrumPanel
     panel = SpectrumPanel()
     assert panel._state.show_bookmarks is True
@@ -84,7 +89,9 @@ def test_bookmark_toggle_and_disable(qapp):
     panel.set_connected(True)
     assert panel._bookmark_chk.isEnabled()
     panel.set_connected(False)
-    assert not panel._bookmark_chk.isEnabled()
+    assert panel._bookmark_chk.isEnabled()
+    # DSP 项仍置灰（旧契约这部分保留）
+    assert not panel._fft_combo.isEnabled()
 
 
 # ---------------------------------------------------------------------------
