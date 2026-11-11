@@ -180,7 +180,7 @@ class TestStepSelector:
 # ======================================================================
 
 @pytest.fixture(scope="module")
-def main_window():
+def main_window(isolated_profile):
     """模块级 MainWindow 实例（offscreen）。创建较重，整个模块复用。"""
     from main_window import MainWindow
     mw = MainWindow()
