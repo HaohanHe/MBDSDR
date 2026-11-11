@@ -512,7 +512,7 @@ class TestNegotiationLoop:
 # 主窗口缝：按钮 → 协商（不再直连硬件）；停止/循环执行仍走既有执行器
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
-def mw():
+def mw(isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
     w.show()
