@@ -9,6 +9,7 @@ AI 是技能触发入口（用户对模型说才触发），不是功能按钮�
 """
 
 import json
+import re
 from datetime import datetime
 from html import escape as _esc
 from typing import Optional, List, Dict, Any
@@ -45,13 +46,114 @@ except ImportError:  # pragma: no cover - 模块缺失时对话栏退化为旧�
 import ai_steps  # noqa: E402  # 步骤卡投影（Qt 无关）
 from tokens import tokens as _tok  # noqa: E402
 
-# AI 调用失败的统一说明：发生了什么 / 可能原因 / 下一步。
-# 不猜具体根因，只给用户可检查的方向；已执行的硬件操作不会自动回滚。
-_AI_FAILURE_GUIDE = (
-    "可能原因：API Key 未配置或无效、网络不可用、服务额度或限流。\n"
-    "下一步：点右上角「配置」检查 API Key 与网络后重试；"
-    "已执行的硬件操作不会自动回滚。"
-)
+# AI 调用失败分流：按 error_code / HTTP 状态给出**不同的**下一步。
+# 旧写法把 401、模型名不存在、429、超时全说成「检查 API Key 与网络后重试」，
+# 与 error_catalog 的「不可重试的码不得建议重试」直接冲突——401 原样重发
+# 永远还是 401。这里只有「等一等还有意义」的类别才出现「重试」二字：
+# 限流（429）、服务端 5xx、超时、连接失败；凭据 / 模型配置 / 离线 / 忙碌
+# 一律给可执行动作，不诱导原样重试。
+_AI_NEXT_STEPS = {
+    "credential": (
+        "发生了什么：服务端不认这次请求的身份（HTTP 401/403，或本地还没填 Key）。\n"
+        "下一步：在右栏「AI 智能体」面板点右上角「配置」，重新粘贴完整的 "
+        "API Key（sk- 开头），确认 Base URL 与服务商一致后点「确定」再发一次。"
+        "同一个 Key 再发结果不会变，不要反复点「发送」。"
+    ),
+    "config": (
+        "发生了什么：请求被服务端拒绝（HTTP 400）或模型名不存在——通常是模型名"
+        "写错，或这个账号没有该模型的权限。\n"
+        "下一步：在右栏「AI 智能体」→ 右上角「配置」，把「模型」改成服务商"
+        "控制台里显示的完整模型 ID（如 Qwen/Qwen3.6-35B-A3B），Base URL 与模型"
+        "必须属于同一家服务商。保存后重新发送。"
+    ),
+    "rate_limit": (
+        "发生了什么：服务端限流（HTTP 429），请求没被拒绝，只是当前太频繁或"
+        "额度用尽。\n"
+        "下一步：等 60 秒再点「发送」重试；仍被限流就去服务商控制台看当日额度"
+        "与并发上限。连续快速重发会延长限流时间。"
+    ),
+    "server": (
+        "发生了什么：模型服务端出错（HTTP 5xx），与本地配置无关。\n"
+        "下一步：等几十秒后点「发送」重试；连续多次 5xx 时去服务商状态页确认"
+        "故障，不需要改 API Key 或模型名。"
+    ),
+    "timeout": (
+        "发生了什么：模型请求超时（网络慢或上下文过长），连接本身是通的。\n"
+        "下一步：直接点「发送」重试；反复超时就缩短问题（少带历史）或在"
+        "「配置」里换更快的模型。"
+    ),
+    "network": (
+        "发生了什么：连不上模型服务（DNS / 网络 / 代理拦截），请求没有到达"
+        "服务端。\n"
+        "下一步：确认本机网络与代理设置（Base URL 是否可达），关掉错误的系统"
+        "代理后点「发送」重试；公司网络需要代理时在代理里放行该域名。"
+    ),
+    "offline": (
+        "发生了什么：当前处于离线模式（MBDSDR_OFFLINE），模型 API 需要联网，"
+        "已被本地拒绝。\n"
+        "下一步：关闭离线模式并联网后再发；离线时仍可用本地工具协商"
+        "（不经过语言模型）。"
+    ),
+    "busy": (
+        "发生了什么：上一条请求还在处理，这次输入没有发出（没有排队）。\n"
+        "下一步：等上一条结束再点「发送」，或先点「取消」中止当前请求。"
+    ),
+    "unknown": (
+        "发生了什么：AI 调用失败，错误原文见上。\n"
+        "下一步：先看原文里的 HTTP 状态码或异常名——凭据问题在右栏「AI 智能体」"
+        "→ 右上角「配置」里换 API Key / 模型，网络问题检查代理。"
+        "在配置或网络没有任何变化时，不要反复点「发送」。"
+    ),
+}
+
+
+def _ai_failure_kind(error_code: str = "", error_text: str = "") -> str:
+    """把错误码 / 错误原文归到 _AI_NEXT_STEPS 的一个类别。
+
+    优先用 error_code（模型链路总是带 llm_*），缺失时退回 HTTP 状态与关键词，
+    兼容 ``_on_ai_error`` 只拿得到异常文本的路径。
+    """
+    code = (error_code or "").strip().lower()
+    text = error_text or ""
+    low = text.lower()
+    status = 0
+    m = re.search(r"HTTP\s*(\d{3})", text)
+    if m:
+        status = int(m.group(1))
+
+    if code == "api_key_not_set":
+        return "credential"
+    if code == "llm_offline":
+        return "offline"
+    if code == "agent_busy":
+        return "busy"
+    if code == "llm_rate_limited" or status == 429 or "429" in low \
+            or "rate limit" in low or "限流" in text:
+        return "rate_limit"
+    if code == "llm_timeout" or "timeout" in low or "timed out" in low \
+            or "超时" in text:
+        return "timeout"
+    if code == "llm_http_5xx" or status >= 500:
+        return "server"
+    if code == "llm_unreachable" or "connection" in low or "proxy" in low \
+            or "不可达" in text or "连接失败" in text:
+        return "network"
+    if status in (401, 403) or "unauthorized" in low or "forbidden" in low \
+            or "invalid api key" in low or "authentication" in low:
+        return "credential"
+    if code == "llm_http_4xx" or status:
+        # 其余 4xx：本地请求内容/模型名不被接受，改配置才有意义。
+        return "config"
+    if "model" in low and ("not" in low or "invalid" in low):
+        return "config"
+    if "模型" in text and ("不存在" in text or "无效" in text):
+        return "config"
+    return "unknown"
+
+
+def _failure_guidance(error_code: str = "", error_text: str = "") -> str:
+    """失败说明：发生了什么 / 下一步（按类别分流，不可重试的类别不提「重试」）。"""
+    return _AI_NEXT_STEPS[_ai_failure_kind(error_code, error_text)]
 
 
 def _chat_colors() -> dict:
@@ -1221,7 +1323,9 @@ class AIPanel(QWidget):
             self._add_system_message("上下文已自动压缩")
 
         if error:
-            self._add_ai_message(f"[错误] {error}\n\n{_AI_FAILURE_GUIDE}\n\n{content}")
+            guide = _failure_guidance(str(result.get("error_code") or ""),
+                                      str(error))
+            self._add_ai_message(f"[错误] {error}\n\n{guide}\n\n{content}")
         elif self._streamed_any:
             # 流式已把 content 打字到对话区，不再重复追加完整内容；
             # 仅在流式内容为空（模型不支持流）时才补一条消息。
@@ -1260,7 +1364,8 @@ class AIPanel(QWidget):
         self._is_processing = False
         self.send_btn.setEnabled(True)
         self.send_btn.setText("发送")
-        self._add_ai_message(f"AI 调用出错: {error}\n\n{_AI_FAILURE_GUIDE}")
+        self._add_ai_message(f"AI 调用出错: {error}\n\n"
+                             f"{_failure_guidance('', error)}")
         # 协商轮次失败：主窗口必须把按钮回弹，不留下「假装已执行」的勾选
         self._resolve_pending_sky([])
         self.reply_received.emit(f"[错误] {error}")

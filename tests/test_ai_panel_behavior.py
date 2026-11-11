@@ -476,12 +476,12 @@ class TestAiFinishedSemantics:
         assert panel.send_btn.text() == panel.tr("发送")
 
     def test_ai_error_message_states_cause_and_next_step(self, panel):
-        """错误提示必须包含：发生了什么 / 可能原因 / 下一步。"""
+        """错误提示必须包含：发生了什么 / 下一步（可执行动作）。"""
         panel._on_ai_error("TimeoutError: read timeout")
         view = _view_text(panel)
-        assert "可能原因" in view
+        assert "发生了什么" in view
         assert "下一步" in view
-        assert "配置" in view
+        assert "重试" in view  # 超时可重试
         assert "TimeoutError" in view
 
     def test_submit_is_rejected_while_processing(self, panel):
@@ -491,6 +491,88 @@ class TestAiFinishedSemantics:
         panel.input_field.setText("再问一句")
         panel._on_submit()
         assert cmds == [] and panel.input_field.text() == "再问一句"
+
+
+class TestAiFailureRouting:
+    """AI 调用失败按 error_code 分流：不可重试的类别不得说「重试」。"""
+
+    #: 四份真实形状的错误响应（码 + 模型链路给出的原文）
+    CASES = (
+        ("auth", "llm_http_4xx",
+         "模型接口返回 HTTP 401：Unauthorized"),
+        ("model", "llm_http_4xx",
+         "模型接口返回 HTTP 400：model not found"),
+        ("rate", "llm_rate_limited",
+         "模型接口返回 HTTP 429：rate limit"),
+        ("timeout", "llm_timeout",
+         "模型请求超时（60 秒）。"),
+    )
+
+    def test_four_responses_get_four_distinct_guidances(self):
+        texts = [ap._failure_guidance(code, err) for _, code, err in self.CASES]
+        assert len(set(texts)) == 4, "四类失败必须给出不同文案: %r" % texts
+
+    def test_only_rate_limit_and_timeout_say_retry(self):
+        for (name, code, err) in self.CASES:
+            text = ap._failure_guidance(code, err)
+            assert ("重试" in text) == (name in ("rate", "timeout")), \
+                "%s 类文案的重试口径不对: %r" % (name, text)
+
+    def test_credential_and_config_point_at_exact_action(self):
+        auth = ap._failure_guidance("llm_http_4xx",
+                                    "模型接口返回 HTTP 401：Unauthorized")
+        assert "API Key" in auth and "配置" in auth and "重试" not in auth
+        model = ap._failure_guidance("llm_http_4xx",
+                                     "模型接口返回 HTTP 400：model not found")
+        assert "模型" in model and "重试" not in model
+        assert auth != model
+
+    def test_api_key_missing_and_busy_are_not_retryable(self):
+        for code in ("api_key_not_set", "agent_busy"):
+            text = ap._failure_guidance(code, code)
+            assert "重试" not in text, "%s 不得建议重试: %r" % (code, text)
+            assert "下一步" in text
+
+    def test_rate_limit_wording_has_wait_time_and_retry(self):
+        """429 必须同时给出明确等待时长与「重试」。"""
+        text = ap._failure_guidance("llm_rate_limited",
+                                    "模型接口返回 HTTP 429：rate limit")
+        assert "60 秒" in text, text
+        assert "重试" in text, text
+
+    def test_five_non_retryable_classes_never_say_retry(self):
+        """凭据 / 模型配置 / 离线 / 忙碌 / 未知五类不得出现「重试」。"""
+        cases = (
+            ("llm_http_4xx", "模型接口返回 HTTP 401：Unauthorized"),
+            ("llm_http_4xx", "模型接口返回 HTTP 400：model not found"),
+            ("llm_offline", "离线模式已开启"),
+            ("agent_busy", "上一条还在处理"),
+            ("", "something odd happened"),
+        )
+        for code, err in cases:
+            text = ap._failure_guidance(code, err)
+            assert "重试" not in text, (code, err, text)
+            assert "下一步" in text, (code, err, text)
+
+    def test_panel_renders_routed_guidance_end_to_end(self, panel):
+        """走 _on_ai_finished 的真实入口：401 只给凭据动作，不出现「重试」。"""
+        panel._on_ai_finished({
+            "content": "", "tool_calls": [], "tool_results": [],
+            "latency_ms": 0, "compacted": False,
+            "error": "模型接口返回 HTTP 401：Unauthorized",
+            "error_code": "llm_http_4xx",
+        })
+        view = _view_text(panel)
+        assert "HTTP 401" in view and "API Key" in view
+        assert "重试" not in view
+
+    def test_panel_renders_retry_for_timeout(self, panel):
+        panel._on_ai_finished({
+            "content": "", "tool_calls": [], "tool_results": [],
+            "latency_ms": 0, "compacted": False,
+            "error": "模型请求超时（60 秒）。", "error_code": "llm_timeout",
+        })
+        assert "重试" in _view_text(panel)
 
 
 class TestBackgroundWorkerIntegration:

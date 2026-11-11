@@ -3878,6 +3878,7 @@ class MBDSDRAgent:
                 "latency_ms": 0,
                 "compacted": False,
                 "error": BUSY_ERROR,
+                "error_code": BUSY_ERROR,
                 "interrupted": False,
                 "cancelled": False,
                 "busy": True,
@@ -4064,6 +4065,7 @@ class MBDSDRAgent:
             "latency_ms": float,      # 总耗时
             "compacted": bool,        # 是否触发了压缩
             "error": str,             # 错误信息（如果有）
+            "error_code": str,        # 错误码（llm_* / api_key_not_set 等，供 UI 分流）
             "interrupted": bool,      # 流中断/取消导致本轮未完成
             "cancelled": bool,        # 是否由 request_cancel() 主动取消
             "busy": bool,             # 是否因并发（已有请求在跑）被拒
@@ -4082,6 +4084,7 @@ class MBDSDRAgent:
                 "latency_ms": 0,
                 "compacted": False,
                 "error": "api_key_not_set",
+                "error_code": "api_key_not_set",
                 "interrupted": False,
                 "cancelled": False,
                 "busy": False,
@@ -4123,6 +4126,7 @@ class MBDSDRAgent:
         interrupted = False
         cancelled = False
         last_error = None
+        last_error_code = ""
         round_metrics: List[Dict[str, Any]] = []
 
         def _emit_round(model_latency_ms, usage, n_tools=0, tool_ms=0.0,
@@ -4145,6 +4149,7 @@ class MBDSDRAgent:
                 cancelled = True
                 interrupted = True
                 last_error = CANCEL_ERROR
+                last_error_code = CANCEL_ERROR
                 final_content = "已按请求取消本轮对话（尚未开始新的模型轮次）。"
                 break
             # 检查是否需要压缩
@@ -4202,6 +4207,7 @@ class MBDSDRAgent:
             if cancelled:
                 interrupted = True
                 last_error = CANCEL_ERROR
+                last_error_code = CANCEL_ERROR
                 # 取消前已收到的部分输出按真实字符估算 completion，标记 estimated
                 _emit_round(model_latency_ms, {
                     "prompt_tokens": self.context_manager.get_total_tokens(),
@@ -4247,6 +4253,9 @@ class MBDSDRAgent:
             if not response.get("success"):
                 _emit_round(model_latency_ms, usage)
                 last_error = response.get("error", "unknown_error")
+                # 与 last_error 成对保留：UI 按码分流下一步（401 与 429 的
+                # 处置完全不同），只把中文串丢给界面就没法区分。
+                last_error_code = str(response.get("error_code") or "")
                 partial = (response.get("content") or "").strip()
                 if partial:
                     # P7.2：流中断/失败时保留已收到的部分内容并明确标注未完成，
@@ -4363,6 +4372,7 @@ class MBDSDRAgent:
                 # P7.4：本批工具因取消未全部执行，不再开启下一轮模型调用
                 interrupted = True
                 last_error = CANCEL_ERROR
+                last_error_code = CANCEL_ERROR
                 final_content = "已按请求取消本轮对话（工具调用循环已停止）。"
                 break
 
@@ -4371,6 +4381,7 @@ class MBDSDRAgent:
             final_content = ("（工具调用已达最大轮次 " + str(max_tool_rounds) +
                              "，未能生成最终回复。请简化问题或分步骤提问。）")
             last_error = "tool_rounds_exhausted"
+            last_error_code = "tool_rounds_exhausted"
 
         # 5. 最终检查压缩
         if self.context_manager.needs_compaction():
@@ -4428,6 +4439,7 @@ class MBDSDRAgent:
             "latency_ms": latency_ms,
             "compacted": compacted,
             "error": last_error,
+            "error_code": last_error_code,
             "interrupted": interrupted,
             "cancelled": cancelled,
             "busy": False,
