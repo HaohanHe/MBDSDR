@@ -546,11 +546,15 @@ class Theme:
         palette = _build_palette(self.colors)
         font = get_app_font()
         qss = self._qss()
+        current = app.styleSheet()
         try:
-            if (app.palette() == palette and app.font() == font
-                    and app.styleSheet() == qss):
+            # 触控模式会把触控 QSS 追加在本主题 QSS 之后（只改 px/尺寸，不改颜色），
+            # 因此「当前样式表 == 本主题 QSS」会退化成逐字相等，导致每次切主题都误判
+            # 成「样式表变了」而走全量 setStyleSheet（1620 控件上单次 1.8–2.7 s）。
+            # 前缀相等即视为同一个 QSS：后缀不含颜色，palette(role) 重解析靠重抛光。
+            qss_same = current == qss or current.startswith(qss)
+            if app.palette() == palette and app.font() == font and qss_same:
                 return                  # 已应用过同一状态：跳过全量重抛光
-            qss_same = app.styleSheet() == qss
         except Exception:
             qss_same = False            # 比较失败（异常平台）则照常应用
 
@@ -787,6 +791,27 @@ class Theme:
         }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0;
+        }}
+        /* 横向滚动条必须显式接管：上面只写了 :vertical，横向那条一直由 Fusion
+           原生绘制，而 Fusion 的滚动条手柄取 QPalette::Shadow——A′ 把 danger
+           放在 Shadow 槽里，结果横向手柄被画成红色（实测 #B85C5C，纵向是
+           #C8C0B4）。这里补齐 :horizontal，与纵向同色同圆角，颜色仍走 palette，
+           五套主题共用同一份 QSS。 */
+        QScrollBar:horizontal {{
+            background: palette(window);
+            height: 10px;
+            margin: 0;
+        }}
+        QScrollBar::handle:horizontal {{
+            background: palette(mid);
+            border-radius: 5px;
+            min-width: 30px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background: palette(highlight);
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0;
         }}
         QGroupBox {{
             background-color: palette(base);
