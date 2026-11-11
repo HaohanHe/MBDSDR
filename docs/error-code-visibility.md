@@ -100,8 +100,8 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
   `code` 来自 `mbdsdr_ai/tool_registry.py:917` 的 `ToolResult.error`）
 - **P2** 状态面板「解码结果」卡渲染 `错误码 {code}: {message}`
   （`desktop/status_panel.py:309`，标签映射 `:185-208`；入口 `:1200 is_decode_tool`）
-- **P3** 状态栏渲染 `设备已断开：{message}`（`desktop/main_window.py:8740`，
-  由 `:8743` 的 `_on_health_tick` 触发；`message` = `sdr_backend` 写入的
+- **P3** 状态栏渲染 `设备已断开：{message}`（`desktop/main_window.py:8758`，
+  由 `:8761` 的 `_on_health_tick` 触发；`message` = `sdr_backend` 写入的
   `status.error = user_message(code)`）
 - **P4** AI 对话区渲染 `[错误] {message}`（`desktop/ai_panel.py:1329`）
 - **P5** 步骤卡摘要显示兜底 message（`desktop/ai_panel.py:847-849`，
@@ -148,11 +148,11 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 | 37 | `unsupported_format` | 解码卡输入扩展名与模式要求不符 | 是 | P2 | `mbdsdr_ai/decode_router.py:835-841` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
 | 38 | `decode_error` | 解码器运行期异常（弱信号 / 坏样本） | 是 | P2 | `mbdsdr_ai/decode_router.py:408,913-921` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
 | 39 | `not_implemented` | 模式能力存在但通用入口未接线，用户仍可点 | 是 | P2 | `mbdsdr_ai/decode_router.py:382-383` → `desktop/status_panel.py:185,273` | 已补（解码结果族，`e95945b`） |
-| 40 | `sdr_set_frequency_failed` | 用户在「控制」面板改频率，设备拒绝 / 底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:283,289` → `desktop/main_window.py:8740` | 已补（设备调谐族，`0e4b9ef6`） |
-| 41 | `sdr_set_sample_rate_failed` | 用户改采样率，设备不支持或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:368,374` → `desktop/main_window.py:8740` | 已补（设备调谐族，`0e4b9ef6`） |
-| 42 | `sdr_set_gain_failed` | 用户改增益，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:418-423` → `desktop/main_window.py:8740` | 已补（设备调谐族，`0e4b9ef6`） |
-| 43 | `sdr_set_bandwidth_failed` | 用户改带宽，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:471-477` → `desktop/main_window.py:8740` | 已补（设备调谐族，`0e4b9ef6`） |
-| 44 | `doppler_compensation_failed` | 接收链多普勒补偿失败（无预测 / 计算异常），该块音频跳过 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:832,872` → `desktop/main_window.py:8740` | 已补（设备调谐族，`0e4b9ef6`） |
+| 40 | `sdr_set_frequency_failed` | 用户在「控制」面板改频率，设备拒绝 / 底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:283,289` → `desktop/main_window.py:8758` | 已补（设备调谐族，`0e4b9ef6`） |
+| 41 | `sdr_set_sample_rate_failed` | 用户改采样率，设备不支持或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:368,374` → `desktop/main_window.py:8758` | 已补（设备调谐族，`0e4b9ef6`） |
+| 42 | `sdr_set_gain_failed` | 用户改增益，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:418-423` → `desktop/main_window.py:8758` | 已补（设备调谐族，`0e4b9ef6`） |
+| 43 | `sdr_set_bandwidth_failed` | 用户改带宽，设备拒绝或底层失败 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:471-477` → `desktop/main_window.py:8758` | 已补（设备调谐族，`0e4b9ef6`） |
+| 44 | `doppler_compensation_failed` | 接收链多普勒补偿失败（无预测 / 计算异常），该块音频跳过 | 是 | P3 | `mbdsdr_ai/sdr_backend.py:832,872` → `desktop/main_window.py:8758` | 已补（设备调谐族，`0e4b9ef6`） |
 | 45 | `llm_offline` | 用户开 `MBDSDR_OFFLINE` 或离线时点 AI 发送 | 是 | P4 | `mbdsdr_ai/model_manager.py:268,275` → `desktop/ai_panel.py:1329` | 已补（AI 模型族，`0e4b9ef6`） |
 | 46 | `llm_rate_limited` | 模型接口返回 429（用户连续发指令 / 额度耗尽） | 是 | P4 | `mbdsdr_ai/model_manager.py:31-32` → `desktop/ai_panel.py:1329` | 已补（AI 模型族，`0e4b9ef6`） |
 | 47 | `llm_http_4xx` | API Key 错 / 模型名不存在，接口返回 4xx | 是 | P4 | `mbdsdr_ai/model_manager.py:35-36` → `desktop/ai_panel.py:1329` | 已补（AI 模型族，`0e4b9ef6`） |
@@ -228,7 +228,7 @@ FAILED tests/test_error_remedy_links.py::test_every_catalog_code_is_registered -
 
 - 通道取证只看**桌面 UI 真实渲染点**，不看库 API 返回值：
   `desktop/ai_panel.py:852`、`desktop/status_panel.py:309`、
-  `desktop/main_window.py:8740`、`desktop/ai_panel.py:1329`、`desktop/ai_panel.py:847-849`。
+  `desktop/main_window.py:8758`、`desktop/ai_panel.py:1329`、`desktop/ai_panel.py:847-849`。
 - 「不可见」的机械证据是 `git grep -n <模块> -- desktop` 为 0：
   `recording_library` / `recorder` / `playback` / `tle_fetch` / `error_handler`（信封）
   在 `desktop/` 均无业务调用方。
@@ -245,17 +245,20 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 ## 五、三族复核明细（本轮新增）
 
+> 本节引用于 2026-11-11 **首次纳入自动校验**（裸 `path:N` 入池、全文扫描，
+> 不再按章节窗口截断）；下列行号已按当日 HEAD 全量重定位，只改行号、未改结论。
+
 ### 5.1 TLE 细项（7 码：107–113）
 
-- 真实调用链：`desktop/new_spacetime_panel.py:627-655`（用户点「刷新过境」）→
-  `:648 self._tle_mgr.fetch(catnr, name)` → `mbdsdr_ai/new_spacetime_tle.py:166-186`
+- 真实调用链：`desktop/new_spacetime_panel.py:765-817`（用户点「刷新过境」）→
+  `:787 self._tle_mgr.fetch(catnr, name)` → `mbdsdr_ai/new_spacetime_tle.py:183-212`
   （`TleFetcher.fetch_record`，失败回退磁盘缓存，无缓存则 `return None`）→
-  `new_spacetime_panel.py:640` 观测站未配置时**不发请求**，提示「未配置观测站位置…」→
-  `:655` 全部失败时提示「未获取 TLE：请先更新卫星星历（离线或无网络时无法拉取）」。
-- 另一条：`desktop/main_window.py:7905-7917` 内置 TLE 在线刷新失败 → 状态栏
+  `new_spacetime_panel.py:780` 观测站未配置时**不发请求**，提示「未配置观测站位置…」→
+  `:814` 全部失败时提示「未获取 TLE：请先更新卫星星历（离线或无网络时无法拉取）」。
+- 另一条：`desktop/main_window.py:12473-12492` 内置 TLE 在线刷新失败 → 状态栏
   「TLE 在线更新失败，使用内置 TLE」。
-- `tle_fetch.py:83-90` 的 `FAILURE_LABELS` 确实取自 `ERRORS[kind].meaning`，
-  `:152` 写进 `classify_failure()["label"]`；但该字段只进 `fetch_record` 记录与
+- `tle_fetch.py:95-97` 的 `FAILURE_LABELS` 确实取自 `ERRORS[kind].meaning`，
+  `:159` 写进 `classify_failure()["label"]`；但该字段只进 `fetch_record` 记录与
   `source_status`，`git grep -- desktop` 对 `FAILURE_LABELS` / `failure_label` /
   `source_status` / `fetch_record` **均为 0**。
 - 判定：用户看到的是**与目录无关的固定提示**，7 个 code 及其 message/meaning 都不出现在
@@ -263,13 +266,13 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 ### 5.2 录音 / 回放（28 码：79–106）
 
-- 录音面板：`desktop/main_window.py:6226 _start_recording` →
-  `:6270 settings.ensure_record_dir()`（失败只会被 `error_remedy.py:164-169` 归为
+- 录音面板：`desktop/main_window.py:9866 _start_recording` →
+  `:9944 settings.ensure_record_dir()`（失败只会被 `error_remedy.py:164-169` 归为
   `disk_full` / `not_writable`，两者都有精选条目，不在本 114）→
-  `:6119-6140 _open_record_segment` 直接 `open(path,"wb")`；打不开时 `:6138` →
-  `_report_record_abort:6142-6153` 显示「录音文件打不开（path）: OSError 原文」。
+  `:9630-9652 _open_record_segment` 直接 `open(path,"wb")`；打不开时 `:9650` →
+  `_report_record_abort:9654-9665` 显示「录音文件打不开（path）: OSError 原文」。
   录制面板**不 import** `mbdsdr_ai/recorder.py`。
-- 回放面板：`desktop/main_window.py:7579-7608 _replay_recording` →
+- 回放面板：`desktop/main_window.py:11665-11702 _replay_recording` →
   `mbdsdr_ai/baseband_io.load_iq`；失败显示「读取文件失败：{异常}」或
   `rec["error"]`（「文件不存在: …」原文）；**不 import** `mbdsdr_ai/playback.py`。
 - 三个底层模块的实际引用面：
@@ -282,24 +285,24 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 
 ### 5.3 `missing_iq` 的截取规则（键名 + 深度 + 长度，均有数字）
 
-- 摘要器 `desktop/ai_steps.py:95-106 summarize_result(text)`：
-  1. 输入只有**一个字符串** `text`（`:100`）；
-  2. **键名**：正则 `"(?:error|message)"\s*:\s*"([^"]*)"`（`:103`），只认 `error` 与
+- 摘要器 `desktop/ai_steps.py:112-123 summarize_result(text)`：
+  1. 输入只有**一个字符串** `text`（`:112`）；
+  2. **键名**：正则 `"(?:error|message)"\s*:\s*"([^"]*)"`（`:120`），只认 `error` 与
      `message` 两个键；正则直接在原始字符串上匹配，**不解析 JSON 层级**，因此对嵌套
      深度没有上限，但对非这两个键名一律不命中；
-  3. **长度**：命中键 → 取该键的值并截断到 `summary_chars = 200` 字（`:105`，
-     `desktop/tokens.py:351`）；未命中 → 把整段截断到 200 字（`:106`）。
-- 输入来源：`steps_from_chat` 只传 `ToolResult.content`（`ai_steps.py:162,165,171`），
-  **不传 `data`**；`data` 仅在 `:177-183` 且工具名属于 `WORKFLOW_TOOLS` /
+  3. **长度**：命中键 → 取该键的值并截断到 `summary_chars = 200` 字（`:122`，
+     `desktop/tokens.py:362`）；未命中 → 把整段截断到 200 字（`:123`）。
+- 输入来源：`steps_from_chat` 只传 `ToolResult.content`（`ai_steps.py:164,165,170`），
+  **不传 `data`**；`data` 仅在 `:193-200` 且工具名属于 `WORKFLOW_TOOLS` /
   `SUBAGENT_TOOLS` 时才被 `_payload_from_content` 解析成子步骤（Meteor 工具不属于这两组）。
 - 实测（2026-11-05）：`_meteor_lrpt_demod_fn_tool({"sample_rate": 72000})` 的
   `content` 长 **137** 字且不含 `missing_iq`；`data.error == "missing_iq"`；
   `summarize_result(content)` 返回该 137 字全文；`steps_from_chat(...)` 得到
   `step.error == ""`、summary 同样是这 137 字 → 用户看不到 code。
 - 会显示 code 的反例条件：只有把**整个结果 dict** 交给
-  `steps_from_tool_result`（`:190 json.dumps(result)` 整包序列化）时，摘要正则才会命中
+  `steps_from_tool_result`（`:207 json.dumps(result)` 整包序列化）时，摘要正则才会命中
   `data.error="missing_iq"` 并显示 `missing_iq`。该路只接收 worker 转发的硬件工具结果，
-  而 `missing_iq` 来自软件工具，在 `desktop/ai_panel.py:614-615` 被 `skipped` 直接丢弃。
+  而 `missing_iq` 来自软件工具，在 `desktop/ai_panel.py:887-888` 被 `skipped` 直接丢弃。
 
 ### 5.4 本轮复核修正了哪几行
 
@@ -319,7 +322,7 @@ python -c "import sys; sys.path.insert(0,'.'); sys.path.insert(0,'desktop'); imp
 | # | 位置 | 现状 | 建议 | 影响 |
 | --- | --- | --- | --- | --- |
 | 1 | `desktop/mcp_worker.py:229`、`:288-293` | 注释写「软件工具不二次转发（skipped）」，但 AI 侧软件工具**从不进 mcp_worker**（AI 工具在进程内 `ToolRegistry.execute`，结果直接回写模型上下文），这条链只承载 UI 直操命令 | 措辞改为「非硬件名命令不二次转发」 | 仅注释误导，无功能影响 |
-| 2 | `desktop/mcp_worker.py:296-300` → `desktop/ai_panel.py:614-615` | UI 直操发出 `sdr_set_gain` 时，若固件 `tools/list` 未报该名且别名表未收录（现状未收录），返回 `skipped` 且步骤卡被直接丢弃，用户零反馈 | 归属 MCP/worker 线确认：补别名，或对 skipped 给一条状态栏提示 | 「用户看不到」而非「AI 看不到」，非 AI 链路缺陷 |
+| 2 | `desktop/mcp_worker.py:296-300` → `desktop/ai_panel.py:887-888` | UI 直操发出 `sdr_set_gain` 时，若固件 `tools/list` 未报该名且别名表未收录（现状未收录），返回 `skipped` 且步骤卡被直接丢弃，用户零反馈 | 归属 MCP/worker 线确认：补别名，或对 skipped 给一条状态栏提示 | 「用户看不到」而非「AI 看不到」，非 AI 链路缺陷 |
 
 ## 七、引用出处更正与本文件提交号核对（2026-11-05）
 
