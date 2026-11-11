@@ -197,7 +197,7 @@ DLL load failed while importing QtWidgets: 找不到指定的模块。
 ```
 
 （早期版本只检查「platforms 目录里有任意一个平台插件」，qoffscreen 还在时会误放行，
-Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过（`50aa1db0` — `desktop/main.py:350` — `缺少 Qt 平台插件 platforms/`）。）
+Qt 随后自己 abort 成英文弹窗；已改为按实际请求平台精确匹配后复测通过（`50aa1db0` — `desktop/main.py:366` — `缺少 Qt 平台插件 platforms/`，基准 `7f91c6d3`）。）
 
 ## 5. 四条现实约束（实际 vs 期望）
 
@@ -729,7 +729,7 @@ canonical 拍定为 `0.2.0`；唯一手抄点是 `mbdsdr_ai/VERSION`，其余全
 | `_show_about` 渲染文本 | `版本 v0.2.1-verify` |
 | spec `VSVersionInfo`（stub 求值） | filevers=`(0,2,1,0)`、FileVersion 串=`0.2.1-verify` |
 
-首轮证伪曾实测到两处硬失败（已修）（`52b0f587` — `docs/packaging.md:583` — `MBDSDR_VERSION_NUMERIC`，该提交的 `git show --name-only` 同时列出 `cpp/CMakeLists.txt`/`desktop/MBDSDR.spec`）：`project(VERSION 0.2.1-verify)` 直接
+首轮证伪曾实测到两处硬失败（已修）（`52b0f587` — `docs/packaging.md:682` — `MBDSDR_VERSION_NUMERIC`，基准 `7f91c6d3`；该提交的 `git show --name-only` 同时列出 `cpp/CMakeLists.txt`/`desktop/MBDSDR.spec`）：`project(VERSION 0.2.1-verify)` 直接
 configure 失败（`VERSION "0.2.1-verify" format invalid`）；spec 用 `int(p)` 拆段
 在 `1-verify` 上抛 `ValueError`。这两处正是“单一真值源”最容易被后缀打穿的地方。复跑：`python scripts/release_manifest.py --only version --dist d:\mbdsdr\.tmp\pyi-dist14`。
 
@@ -908,7 +908,7 @@ python scripts/release_manifest.py --only installer
 | 状态 | 语义 | 能否发布 |
 |---|---|---|
 | `PASS` | 验证通过（每条附命令/证据） | 可以 |
-| WARN（取证：`a0969112` — `scripts/release_manifest.py:615` — `未归因（不在 Requires-Dist 闭包`） | 缺口存在但不构成取值冲突（依赖差集②已改为 PASS/FAIL 两态，不再产生 WARN） | 可以，需登记 |
+| WARN（取证：`a0969112` — `scripts/release_manifest.py:689` — `未归因（不在 Requires-Dist 闭包`，基准 `7f91c6d3`） | 缺口存在但不构成取值冲突（依赖差集②已改为 PASS/FAIL 两态，不再产生 WARN） | 可以，需登记 |
 | `FAIL` | 红（含「正则失配」这种删位置置换绿的情况） | 不可以 |
 | `BY-DESIGN` | 该项按产品决策不做，理由与边界已登记（如无安装器） | 可以，但必须带理由 |
 | `SKIP` | 对象不存在、未验 | 不算绿 |

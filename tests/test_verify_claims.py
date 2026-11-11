@@ -231,6 +231,20 @@ def test_baseline_priority_inline_heading_doc(tmp_path):
     assert bases == [h[:7], "0000000" + h[:7]]
 
 
+def test_baseline_hash_is_not_mistaken_for_evidence(tmp_path):
+    """基准写在证据 hash 之前时，不得被当成被引提交（否则必然假 STALE）。"""
+    repo, h = _repo(tmp_path, {"src/foo.py": "MAGIC_TOKEN = 42\n"})
+    (repo / "src/bar.py").write_text("LATER = 1\n", encoding="utf-8")
+    _git(repo, "add", "src/bar.py")
+    _git(repo, "commit", "-q", "-m", "unrelated later")
+    after = _git(repo, "rev-parse", "HEAD")
+    c = vc.classify(
+        f"- 已修复：前置说明（基准 `{after[:7]}`）`{h}` — src/foo.py:1 — `MAGIC_TOKEN`",
+        repo, baseline=after[:7])
+    assert c.commit == h
+    assert c.status == vc.OK
+
+
 def test_repo_docs_have_no_dangling_hash():
     claims = vc.verify_docs(ROOT)
     bad = [c for c in claims if "不存在或不是 commit" in c.reason]

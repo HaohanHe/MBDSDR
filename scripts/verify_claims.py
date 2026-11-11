@@ -173,6 +173,13 @@ def classify(text: str, root: Path, heading: str = "", baseline: str = "") -> Cl
     """
     c = Claim(doc="", line=0, text=text.strip(), baseline=baseline)
     hashes = _hashes(text, root)
+    if baseline:
+        # 基准是元数据，不是证据：不剔除的话，同一行里写在证据 hash 之前的基准
+        # 会被当成被引提交（`_commit_touches` 必然不命中 → 假 STALE）。
+        kept = [h for h in hashes
+                if not (h.startswith(baseline) or baseline.startswith(h))]
+        if kept:
+            hashes = kept
     targets = PATHLINE_RE.findall(text) or PATHLINE_RE.findall(heading)
     if not hashes:
         c.status = NO_HASH

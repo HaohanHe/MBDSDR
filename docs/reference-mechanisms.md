@@ -374,7 +374,7 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 | D3 预暖机 + 纠正位数 | `goestools/src/decoder/packetizer.cc:11-20`、`:129-136` | `lrpt_fec.py:151-190` 从同步字起整帧；无纠正位统计 | **明确不做**：prelude 只影响首帧边缘；纠正位数可由 `rs_errors` 推导，无 UI 消费方（推翻 §15 第 5 条） |
 | D4 VCID 路由/黑名单/填充包 | `xrit-rx/src/demuxer.py:48-111` | 未做：`lrpt_pipeline.py:48-165` 单 VCID 端到端 | **明确不做**：产品只做 LRPT 单虚拟信道，多 VCID 无需求 |
 | D5 全文件同步对齐 | `noaa-apt/src/decode.rs:106-118`（≥5 帧） | 实现位置（替代）：`mbdsdr_ai/noaa_apt_lite.py:23-51` 逐行相关 | **明确不做**（两遍扫描）：整文件两遍不适合实时流；逐行已有单测 |
-| D6 AGC→Costas→Gardner 闭环 | `meteor_demod/demod.c`（8-12）、（36-40） | `560f6564` — `mbdsdr_ai/lrpt_pipeline.py:121` — `_estimate_cfo_4thpower`；实现位置：`mbdsdr_ai/lrpt_pipeline.py:119-127` 前馈 CFO + 符号恢复 | **改良后做**（已落地）：闭环 Gardner 已实验证伪（COORDINATION LRPT 队列 #9） |
+| D6 AGC→Costas→Gardner 闭环 | `meteor_demod/demod.c`（8-12）、（36-40） | `560f6564` — `mbdsdr_ai/lrpt_pipeline.py:130` — `_estimate_cfo_4thpower`（基准 `7f91c6d3`）；实现位置：`mbdsdr_ai/lrpt_pipeline.py:128-133` 前馈 CFO + 符号恢复 | **改良后做**（已落地）：闭环 Gardner 已实验证伪（COORDINATION LRPT 队列 #9） |
 | D7 FEC API（RS(204,188)） | `onair/.../fec_proto.h:13-20` | 实现位置：`mbdsdr_ai/lrpt_fec.py:246-350`；另做 CCSDS 4 路解交织 | **照做**（保持） |
 | D8 分级解码器 + 失败计数 | `rtl_433/include/r_device.h:73`、`:85-87`；`r_api.c:443-454`、`:867-874` | 实现位置（替代）：`mbdsdr_ai/decoder_registry.py:119` 单车道选择 | **明确不做**（多协议竞争）：盲试会误报，违反「不伪造解码结果」；失败计数可低优先再借 |
 | D9 GPL 上游作 KAT 生成器 | `dvbs2_bch_external/upstream_rx/`、`dvbs2_ldpc_external/upstream/` | 独立实现 `mbdsdr_ai/dvbs2_bch.py`、`dvbs2_ldpc.py`；金样 `tests/golden/` | **明确不做**（复制代码）：只对拍向量，见 §17.3 |
@@ -397,12 +397,12 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 
 | 机制 | 参考做法 | 我们现状 | 决定与动作 |
 |---|---|---|---|
-| C1 坏配置恢复 | `sdrpp/core/src/config.cpp`（34-43）（直接覆盖写默认） | `a96c010f` — `desktop/settings.py:312` — `os.replace(path, backup)`；实现位置：`desktop/settings.py:312` 先备份 `*.corrupt-时间戳` | **改良后做**（已落地）：先留证据再回默认 |
-| C2 原子写 | `config.cpp`（47-52）（`ofstream` 直接覆盖） | `357076eb` — `desktop/settings.py:585` — `_write_to_disk`；实现位置：`desktop/settings.py:585-614`（`tmp_path = ...pid...tmp` + `os.replace(tmp_path, self._path)`） | **改良后做**（已落地；上游是反例） |
+| C1 坏配置恢复 | `sdrpp/core/src/config.cpp`（34-43）（直接覆盖写默认） | `a96c010f` — `desktop/settings.py:342` — `os.replace(path, backup)`（基准 `5ac5e764`）；实现位置：`desktop/settings.py:342` 先备份 `*.corrupt-时间戳` | **改良后做**（已落地）：先留证据再回默认 |
+| C2 原子写 | `config.cpp`（47-52）（`ofstream` 直接覆盖） | `357076eb` — `desktop/settings.py:652` — `_write_to_disk`（基准 `5ac5e764`）；实现位置：`desktop/settings.py:652-699`（`tmp_path = ...pid...tmp` + `os.replace(tmp_path, self._path)`） | **改良后做**（已落地；上游是反例） |
 | C3 定时自动保存线程 | `config.cpp:82-100`（1s `try_lock` + 写） | 按需 `flush` | **明确不做**：无收益且与原子写重复 |
 | C4 崩溃自检/配置重载提示 | `gqrx/.../mainwindow.cpp:500-521`（`crashed` 标志） | 未做 | **明确不做**：原子写+备份已降低丢配置概率；崩溃标记无法区分断电/强杀，误报成本高于收益 |
 | C5 默认值不落盘 | `gqrx/.../dockfft.cpp:238-324`（等于默认就 `remove(key)`） | 全量落盘 | **明确不做**：全量写是单一事实源，利于审计与逐键迁移 |
-| C6 版本化迁移 | `gpredict/src/sat-cfg.c`（302-330）（1.1→1.4 重写键） | `605e89da` — `desktop/settings.py:354` — `migration_notes`；实现位置：`desktop/settings.py:250-258`（`_coerce`）、`:354`（`migration_notes`） | **改良后做**（已落地）：逐键迁移，粒度比文件级版本块更细 |
+| C6 版本化迁移 | `gpredict/src/sat-cfg.c`（302-330）（1.1→1.4 重写键） | `605e89da` — `desktop/settings.py:389` — `migration_notes`（基准 `5ac5e764`）；实现位置：`desktop/settings.py:250-258`（`_coerce`）、`:389`（`migration_notes`） | **改良后做**（已落地）：逐键迁移，粒度比文件级版本块更细 |
 | C7 分段 JSON 配置 | `satdump/.../sat_finder_ui.cpp:107`（按模块 `get_user_json`） | 单一 `settings.json` | **明确不做**：集中式更易原子写/迁移/审计 |
 
 #### TX 安全闸（X1–X5）
@@ -421,8 +421,8 @@ P1–P15 覆盖刻度、dB 量程、峰值、hold、调色板、缩放锚定、�
 |---|---|---|---|
 | 热插拔自动发现与恢复 | `rtl main.cpp:117-122,394-395` 手动刷新；`UsbRadioController.kt:68,104-107` 事件 | 库层 `device_manager.py:608-640` 有 2s 轮询；`desktop/` 引用 0 处；掉线只 `_handle_backend_lost` + 状态栏 | **明确不做（本轮）**：挂账 `docs/limitations-register.md:555-559`（L48）；接线后去 `tests/test_desktop_hotplug_autorecovery.py:68` 的 `xfail(strict=True)` 并用 `--runxfail` 复跑 |
 | 频谱显示与检测的职责划分 | `cpp/src/dsp/peak_detector.cpp:30-32,40-41,49-61` 检测；`cpp/src/ui/spectrum_display.cpp:1121-1141` 成熟/保持/显示 | Python 把检测+成熟+显示集中在 `desktop/spectrum_widget.py:535,630-653,717-787`；两边 **8 条定义差异**见 `docs/parameter-unification.md:560-573` | **明确不做（本线）**：另一条线在改 `peak_detector.cpp` / `spectrum_widget.py`，工作树已见 `cpp/src/dsp/spectrum_engine.cpp` +26 行；本线只登记口径，等该线收敛后复跑 30 条判定（`parameter-unification.md:575-598`） |
-| 卫星过境缓存与刷新 | gpredict 只实时时间；onair `passes.cpp`（296-306）到点抓取 | `8d3ea22c` — `desktop/rf_sky_view.py:7463` — `PASS_REFRESH_SIM_S`；实现位置：`desktop/rf_sky_view.py:7646-7663`（1x 每 5s 墙钟；快转按模拟时间差 `PASS_REFRESH_SIM_S` + 墙钟下限）；`e6ff34bd` → `desktop/new_spacetime_panel.py:602-617` 手动刷新+重入锁 | **改良后做**（已落地）：不抄「每次重算」也不抄「只实时」，保留双时间基准防快转跳帧 |
-| 错误呈现与日志分级 | satdump `flog`、gqrx `qDebug` 分级输出 | 呈现已落地：`90813ad0` → `desktop/error_remedy.py:38`（code→「怎么办」映射，`mapping_gaps()` 守卫）；日志已补基础设施：`33f3b1d7` → `desktop/logging_setup.py:configure_logging`、`desktop/main.py:main` 启动时按 `config_schema.py:log_level` 初始化 | **改良后做（已落地 `33f3b1d7`）**：默认 INFO、可切 DEBUG，重启生效；导入无副作用（不建 handler、不写文件） |
+| 卫星过境缓存与刷新 | gpredict 只实时时间；onair `passes.cpp`（296-306）到点抓取 | `8d3ea22c` — `desktop/rf_sky_view.py:8615` — `PASS_REFRESH_SIM_S`（基准 `7f91c6d3`）；实现位置：`desktop/rf_sky_view.py:8615-8616`（`PASS_REFRESH_SIM_S` 模拟时间差 + `PASS_REFRESH_WALL_S` 墙钟下限）；`e6ff34bd` → `desktop/new_spacetime_panel.py:602-617` 手动刷新+重入锁 | **改良后做**（已落地）：不抄「每次重算」也不抄「只实时」，保留双时间基准防快转跳帧 |
+| 错误呈现与日志分级 | satdump `flog`、gqrx `qDebug` 分级输出 | 呈现已落地：`90813ad0` → `desktop/error_remedy.py:45`（`REMEDY_BY_CODE` 的守卫不变式：`mapping_gaps()` 非空即红；映射表在 `:42`、`def mapping_gaps` 在 `:127`，基准 `7f91c6d3`）；日志已补基础设施：`33f3b1d7` → `desktop/logging_setup.py:configure_logging`、`desktop/main.py:main` 启动时按 `config_schema.py:log_level` 初始化 | **改良后做（已落地 `33f3b1d7`）**：默认 INFO、可切 DEBUG，重启生效；导入无副作用（不建 handler、不写文件） |
 | 配置/书签存储格式与迁移 | gpredict `sat-cfg.c`（302-330） 版本块；satdump 模块分段 JSON | `33f3b1d7` — `mbdsdr_ai/frequency_manager_v2.py:142` — `UnsupportedBookmarkVersion`；实现位置：`mbdsdr_ai/frequency_manager_v2.py:46`（类）、`:142`（`raise`）；行为：缺失按 v1 语义读并补写 2，`!=2` 拒绝且不改写；产品书签仍走 `mbdsdr_ai/frequency_manager.py:190,223`（`~/.mbdsdr/bookmarks.json`，无版本字段、原子写） | **改良后做**（已落地 `33f3b1d7`）：`UnsupportedBookmarkVersion` + `logger.error`，测试 `tests/test_frequency_manager_v2.py:106,124`；v2 接线仍未启用 |
 
 > 取证格式：B 类行（完成/量纲断言）以 `hash` — `path:line` — `字面量` 开头；四元组的 `path:line` 只指本方实现位置，参考列的仓外引用写作 `文件（行号）`，不与取证目标混淆。A 类行（位置/对照）只写「实现位置：`文件:行号`」，不写完成态谓词。
