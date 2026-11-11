@@ -17,12 +17,13 @@ MBDSDR 桌面端 - ADS-B 航路图面板 (AdsbPanel)
 
 红线：
   - 无数据时表格与地图都显「等待 1090MHz 数据」，绝不预存任何飞机。
-  - 地面站位置未配置时地图显「未设置地面站位置」。
+  - 地面站位置未配置时地图显「未设置观测地点」。
   - 飞机 30 秒未更新即从列表移除（prune ttl=30）。
 """
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 import os
@@ -38,8 +39,8 @@ from PySide6.QtGui import (  # noqa: E402
     QBrush, QColor, QFont, QPainter, QPen, QPolygonF,
 )
 from PySide6.QtWidgets import (  # noqa: E402
-    QHBoxLayout, QHeaderView, QLabel, QSizePolicy, QSplitter,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QHeaderView, QLabel, QMenu, QSizePolicy,
+    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from mbdsdr_ai.adsb_map import AircraftTracker  # noqa: E402
@@ -69,7 +70,19 @@ ADSB_UNREACHABLE_TEXT = (
     "当前设备上限 {max_mhz:.1f} MHz，无法接收 1090 MHz；"
     "需覆盖 1090 MHz 的前端（如 R820T/R828D）"
 )
-NO_STATION_TEXT = ("未设置地面站位置\n"
+#: 频率/模式门控：ADS-B 在 1090 MHz，AM 包络检波。
+#: 频点允差取 ±2.5 MHz（1090ES 占用带宽 <2 MHz，留一点调谐误差余量）；
+#: 解调必须是 AM，NFM/WFM/USB 等解出来的基带形状不对，解不出前导码。
+ADSB_BAND_TOL_HZ = 2_500_000
+ADSB_OK_DEMODS = ("am", "am-env", "raw", "auto")
+ADSB_FREQ_GATE_TEXT = (
+    "当前中心频率 {cur_mhz:.3f} MHz，不是 1090 MHz —— 收不到 ADS-B；"
+    "请把中心频率调到 1090.000 MHz"
+)
+ADSB_DEMOD_GATE_TEXT = (
+    "当前解调 {demod}，ADS-B 需要 AM —— 请切到 AM 再解"
+)
+NO_STATION_TEXT = ("未设置观测地点\n"
                    "请在 ~/.mbdsdr/config.json 设置 ground_station_lat / lon")
 
 # 飞机超时 30 秒未更新即移除。
@@ -243,6 +256,11 @@ class AdsbPanel(QWidget):
         # 当前设备真实可调上界（Hz）；None = 未知，不替设备下结论。
         self._tuner_max_hz: Optional[float] = None
         self._station: Tuple[Optional[float], Optional[float]] = _load_station()
+        # 当前接收上下文（由主窗口同步）：中心频率与解调模式；None = 未知，
+        # 未知时不做门控（不替设备下结论）。
+        self._rx_center_hz: Optional[float] = None
+        self._rx_demod: Optional[str] = None
+        self._gate_reason: Optional[str] = None
         self._build_ui()
 
     # ------------------------------------------------------------------ #
@@ -272,6 +290,9 @@ class AdsbPanel(QWidget):
             hdr.setSectionResizeMode(i, QHeaderView.Stretch if i in (1, 7)
                                      else QHeaderView.ResizeToContents)
         self.table.itemSelectionChanged.connect(self._on_row_selected)
+        # 导出入口只挂在表格右键菜单：不改布局、不新增控件。
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_table_menu)
         splitter.addWidget(self.table)
 
         # 地图画布
@@ -293,11 +314,41 @@ class AdsbPanel(QWidget):
         self._tuner_max_hz = float(max_hz) if max_hz else None
         self._refresh_header()
 
+    def set_rx_context(self, center_hz: Optional[float],
+                       demod: Optional[str]) -> None:
+        """同步主窗口的中心频率与解调模式，用于频率/模式门控。
+
+        传 None 表示未知：未知时不做门控，只按连接/上界/数据说话。
+        """
+        self._rx_center_hz = float(center_hz) if center_hz else None
+        self._rx_demod = (str(demod).strip().lower() if demod else None) or None
+        self._gate_reason = self._compute_gate_reason()
+        self._refresh_header()
+
+    def gate_reason(self) -> Optional[str]:
+        """当前门控原因；None 表示放行（或频率/模式未知）。"""
+        return self._gate_reason
+
+    def _compute_gate_reason(self) -> Optional[str]:
+        if (self._rx_center_hz is not None
+                and abs(self._rx_center_hz - ADSB_CENTER_HZ) > ADSB_BAND_TOL_HZ):
+            return ADSB_FREQ_GATE_TEXT.format(
+                cur_mhz=self._rx_center_hz / 1e6)
+        if self._rx_demod is not None and self._rx_demod not in ADSB_OK_DEMODS:
+            return ADSB_DEMOD_GATE_TEXT.format(demod=self._rx_demod.upper())
+        return None
+
     def feed_iq(self, iq, sample_rate: float) -> None:
-        """喂一段 1090MHz 复基带 IQ；内部解码并合并到跟踪表。"""
+        """喂一段 1090MHz 复基带 IQ；内部解码并合并到跟踪表。
+
+        门控不通过（频点/模式不对）时不解码：解了也只会白白烧 CPU 并让
+        用户以为「有设备却没飞机」。
+        """
         if not _HAS_ADSB:
             return
         if iq is None or len(iq) == 0:
+            return
+        if self._gate_reason is not None:
             return
         try:
             result = _adsb_lite.decode_adsb(iq, sample_rate)
@@ -331,8 +382,10 @@ class AdsbPanel(QWidget):
     def _refresh_header(self) -> None:
         n = len(self._tracker)
         if n:
-            self.header.setText(f"在视飞机 {n} 架"
-                                + ("" if self._sdr_connected else "（未连接后端）"))
+            suffix = "（未连接后端）" if not self._sdr_connected else ""
+            if self._gate_reason:
+                suffix = "（当前不在 1090 MHz/AM，新数据不会进来）"
+            self.header.setText(f"在视飞机 {n} 架{suffix}")
         elif not self._sdr_connected:
             self.header.setText("未连接（等待 1090MHz 数据）")
         elif (self._tuner_max_hz is not None
@@ -340,6 +393,9 @@ class AdsbPanel(QWidget):
             # 设备上界 < 1090：物理上收不到，别让用户对着「等待数据」空等。
             self.header.setText(
                 ADSB_UNREACHABLE_TEXT.format(max_mhz=self._tuner_max_hz / 1e6))
+        elif self._gate_reason:
+            # 频点/模式不对：说出来，别显示「等待 1090MHz 数据」让人以为在收。
+            self.header.setText(self._gate_reason)
         else:
             self.header.setText(ADSB_WAIT_TEXT)
 
@@ -371,6 +427,54 @@ class AdsbPanel(QWidget):
 
     def aircraft_count(self) -> int:
         return len(self._tracker)
+
+    def export_csv(self, path: str) -> bool:
+        """把当前在视飞机导出为 CSV（UTF-8 BOM，Excel 直开）。
+
+        0 架时返回 False 且不落空文件：空表导出会让人以为「导出成功、
+        只是没数据」，与「本次没有可导出的目标」是两件事。
+        """
+        acs = self._tracker.all()
+        if not acs:
+            return False
+        now = time.time()
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8-sig", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(self.COLUMNS[:-1] + ["最后更新(s)"])
+            for a in acs:
+                w.writerow([
+                    a.icao_hex,
+                    a.callsign or "",
+                    "" if a.lat is None else f"{a.lat:.4f}",
+                    "" if a.lon is None else f"{a.lon:.4f}",
+                    "" if a.altitude_ft is None else a.altitude_ft,
+                    "" if a.groundspeed_kt is None else f"{a.groundspeed_kt:.0f}",
+                    "" if a.track_deg is None else f"{a.track_deg:.0f}",
+                    f"{now - a.last_seen:.0f}",
+                ])
+        return True
+
+    def _show_table_menu(self, pos) -> None:
+        menu = QMenu(self)
+        act = menu.addAction("导出为 CSV…")
+        act.setEnabled(self.aircraft_count() > 0)
+        act.triggered.connect(self._on_export_clicked)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _on_export_clicked(self) -> None:
+        if self.aircraft_count() == 0:
+            return
+        default = os.path.join(
+            os.path.expanduser("~"), f"adsb_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出 ADS-B 列表", default, "CSV (*.csv)")
+        if not path:
+            return
+        if not self.export_csv(path):
+            self.header.setText("无可导出数据（当前没有在视飞机）")
 
     def clear(self) -> None:
         self._tracker.clear()
