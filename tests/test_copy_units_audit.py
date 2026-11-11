@@ -37,10 +37,26 @@ def test_u03_sample_rate_is_msps_three_decimals():
     assert format_sample_rate(None) == "—"
     assert format_sample_rate(float("nan")) == "—"
     assert sp._fmt_rate(2_400_000) == format_sample_rate(2_400_000)
-    # 真实控件：下拉档位直接显示 format_sample_rate 的输出
+    # 真实控件：下拉档位直接显示 format_sample_rate 的输出。
+    # 未连接时 control_panel._mark_sr_unconfirmed 会给档位加
+    # 「（默认 · 未确认）」/「（未确认）」后缀（constants.DEFAULT_SR_UNCONFIRMED），
+    # 所以拆成两态断言：读数部分必须逐字等于 format_sample_rate，后缀只允许
+    # 这两种已登记的标记 —— 既不放松单位契约，也不把「未确认」标记当噪声放过。
     _qt_app()
+    from constants import DEFAULT_SR_UNCONFIRMED
     from control_panel import ControlPanel
+
     panel = ControlPanel()
+    unconfirmed = [panel.sample_rate_combo.itemText(i)
+                   for i in range(panel.sample_rate_combo.count())]
+    assert DEFAULT_SR_UNCONFIRMED in unconfirmed
+    for text in unconfirmed:
+        head = text.removesuffix("（默认 · 未确认）").removesuffix("（未确认）")
+        assert text != head, f"未连接的档位缺「未确认」标记: {text!r}"
+        assert head == format_sample_rate(
+            round(float(head.split()[0]) * 1e6)), text
+
+    panel.set_sdr_connected(True)
     texts = [panel.sample_rate_combo.itemText(i)
              for i in range(panel.sample_rate_combo.count())]
     assert "2.400 MS/s" in texts
