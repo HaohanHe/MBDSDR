@@ -126,7 +126,7 @@ def qtapp():
 
 
 @pytest.fixture(scope="module")
-def window(qtapp):
+def window(qtapp, isolated_profile):
     """整模块复用同一个窗口：MainWindow 构造很贵。"""
     import main_window as mw
     from PySide6.QtTest import QTest
