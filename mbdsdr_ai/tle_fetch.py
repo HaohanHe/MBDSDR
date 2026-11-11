@@ -521,6 +521,15 @@ class TleFetcher:
         mem = self._memory_get(catnr, ref, max_age)
         if mem is not None:
             cached = self._read_disk(catnr)
+            if cached is not None and cached["fetched_at"] > float(mem[0]) + 1e-6:
+                # 磁盘比内存新：别处（执行侧刷新）已落盘，内存只是旧快照。
+                # 不比对就会拿旧根数冒充最新值，最长可拖到 max_age（默认 24h）。
+                self._memory_set(catnr, cached["fetched_at"],
+                                 cached["line1"], cached["line2"])
+                return dict(cached, source="cache", refresh_status="cache",
+                            refresh_error="", offline=offline,
+                            offline_label="离线·缓存" if offline else "",
+                            failure_kind="", failure_label="", health=health())
             return {
                 "catnr": catnr,
                 "name": cached["name"] if cached else "",

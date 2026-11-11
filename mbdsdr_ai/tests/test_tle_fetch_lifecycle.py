@@ -115,6 +115,30 @@ def test_fresh_disk_cache_skips_network(tmp_path):
     assert opener.calls == []
 
 
+def test_newer_disk_beats_stale_memory(tmp_path):
+    """执行侧刷新落盘后，另一侧的内存快照必须让位。
+
+    内存命中只比「自己有多新」，不比「磁盘有没有更新的」——不比对就会把
+    旧根数冒充最新值，最长拖到 max_age（默认 24h），且没有任何失效广播。
+    """
+    import time
+
+    newer_l1 = LINE1.replace("26268.85039999", "26315.50000000")
+    memory = {str(CAT): (time.time() - 3600.0, (LINE1, LINE2))}
+    path = os.path.join(str(tmp_path), f"{CAT}.tle")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(f"{NAME}\n{newer_l1}\n{LINE2}\n")
+    os.utime(path, None)      # 磁盘写入时刻晚于内存快照
+
+    opener = ScriptedOpener([GOOD_BODY])
+    f, _, _ = make_fetcher(tmp_path, opener, memory=memory)
+    rec = f.fetch_record(CAT)
+    assert rec["line1"] == newer_l1, "内存旧快照压过了新落盘的 TLE"
+    assert rec["source"] == "cache"
+    assert memory[str(CAT)][1][0] == newer_l1, "内存应被纠正为新值"
+    assert opener.calls == [], "磁盘已够新，不该再打网络"
+
+
 # --------------------------------------------------------------- 失败与退避
 def test_timeout_uses_stale_cache_not_updated(tmp_path):
     write_cache(tmp_path, age_hours=30.0)

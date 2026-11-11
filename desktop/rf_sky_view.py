@@ -8692,7 +8692,8 @@ class SatelliteTracker:
     PASS_MAX_SATS = 6
 
     def __init__(self, sky_view, lat: Optional[float], lon: Optional[float],
-                 alt_km: float = 0.0, interval_ms: int = 10000):
+                 alt_km: float = 0.0, interval_ms: int = 10000,
+                 catalog_source=None):
         self.sky_view = sky_view
         self.lat = lat
         self.lon = lon
@@ -8700,6 +8701,10 @@ class SatelliteTracker:
         self._interval_ms = interval_ms
         self._catalog: List[Dict[str, object]] = []  # [{name, line1, line2, freq_mhz, kind}]
         self._satrec_cache: Dict[str, object] = {}   # name -> sgp4 Satrec
+        # TLE 目录的单一 owner（执行侧 tracker）。给了 provider，本类只是
+        # 只读投影；没给才退回启动时读盘（独立实例化/测试路径）。
+        self._catalog_source = catalog_source
+        self._catalog_sig = None
         # 过境面板的预测基准时刻与墙钟（快转节流用；None=尚未预测）
         self._passes_anchor_unix: Optional[float] = None
         self._passes_wall: float = 0.0
@@ -8707,8 +8712,10 @@ class SatelliteTracker:
         self._timer = QTimer(self.sky_view)
         self._timer.timeout.connect(self.refresh)
 
-        # 加载 TLE 目录
-        self._reload_catalog()
+        # 加载 TLE 目录：优先向 owner 投影（不自己算一份会过期的），
+        # owner 尚未就绪时才退回磁盘/用户文件。
+        if not self._sync_catalog():
+            self._reload_catalog()
 
         if lat is None or lon is None:
             self.lat = None
@@ -8741,6 +8748,42 @@ class SatelliteTracker:
             self._catalog.extend(cel_cat)
 
         self.sky_view.set_tle_loaded(len(self._catalog) > 0)
+
+    def set_catalog_source(self, provider):
+        """绑定执行侧 TLE 目录所有者（单一 owner，显示层只读投影）。
+
+        ``provider()`` 返回 ``[{name, line1, line2, freq_mhz, kind, ...}]``；
+        返回 ``None`` 表示 owner 尚未就绪（保持当前目录，不假装空）。
+
+        本类只比对 ``(name, line1, line2)`` 签名，变了才重建目录。**不做 TTL**：
+        显示层缓存一旦自己过期，就是「刷新成功后天空图仍画 47 天前根数」
+        那起事故的成因（执行侧已换新，显示侧还在用自己的副本）。
+        """
+        self._catalog_source = provider
+        self._catalog_sig = None
+        self._sync_catalog()
+
+    def _sync_catalog(self) -> bool:
+        """向 owner 取目录；签名变化才重建。返回是否发生重建。"""
+        provider = self._catalog_source
+        if provider is None:
+            return False
+        try:
+            rows = provider()
+        except Exception:
+            return False
+        if rows is None:
+            return False
+        rows = [dict(r) for r in rows]
+        sig = tuple((str(r.get("name", "")), str(r.get("line1", "")),
+                     str(r.get("line2", ""))) for r in rows)
+        if sig == self._catalog_sig:
+            return False
+        self._catalog = rows
+        self._satrec_cache = {}
+        self._catalog_sig = sig
+        self.sky_view.set_tle_loaded(len(self._catalog) > 0)
+        return True
 
     def _get_satrec(self, name: str, line1: str, line2: str):
         """返回 sgp4 Satrec；失败返回 None。"""
@@ -8847,6 +8890,8 @@ class SatelliteTracker:
 
     def refresh(self):
         """每帧：取时间 -> sgp4 算卫星 -> 投影喂给天空图。"""
+        # 先跟 owner 对齐目录（执行侧刷新后本帧即换新根数，不等定时器）
+        self._sync_catalog()
         if self.lat is None or self.lon is None:
             return
         t_unix = self._engine_unix()

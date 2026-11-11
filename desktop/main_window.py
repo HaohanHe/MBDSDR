@@ -4524,6 +4524,7 @@ class MainWindow(QMainWindow):
                 self.sat_tracker = SatelliteTracker(self.sky_view, lat, lon)
             else:
                 self.sat_tracker.set_location(lat, lon)
+            self._bind_sky_catalog()
         except Exception:
             pass
         try:
@@ -12040,6 +12041,50 @@ class MainWindow(QMainWindow):
         # 不再生成假信号热力图（原 -70+20*sin... 伪热力已移除）：
         # 无真实射频扫描数据时不显示热力图。
         self._apply_observer_location()
+        # 天空图 TLE 目录一律向执行侧投影，不自持副本（见 _sky_catalog_source）
+        self._bind_sky_catalog()
+
+    def _sky_catalog_source(self):
+        """天空图 TLE 目录的唯一 owner：执行侧 tracker（``_loop_sat_tracker``）。
+
+        显示层只读投影：这里按 owner 当前目录生成快照，天空图每次刷新比对
+        ``(name, line1, line2)`` 签名，变了才重建——不做 TTL，也不存第二份
+        可过期副本（「更新 TLE 后天空图仍画旧根数」的根因就是那份副本）。
+        owner 尚未创建时返回 None，天空图沿用启动时读到的目录。
+        """
+        tr = getattr(self, "_loop_sat_tracker", None)
+        if tr is None:
+            return None
+        rows = []
+        for s in tr.list_satellites():
+            tle = s.get("tle") or []
+            if len(tle) < 2:
+                continue
+            name = str(s.get("name") or "")
+            try:
+                freq_mhz = float(tr.downlink_freq_for(name)) / 1e6
+            except Exception:
+                freq_mhz = None
+            upper = name.upper()
+            rows.append({
+                "name": name,
+                "line1": str(tle[0]),
+                "line2": str(tle[1]),
+                "freq_mhz": freq_mhz,
+                "kind": ("amateur" if ("ISS" in upper or "AO-" in upper
+                                       or "FOX" in upper) else "weather"),
+                "tle_source": "执行侧 TLE 目录（刷新后投影）",
+                "tle_epoch": str(s.get("tle_epoch_utc") or ""),
+            })
+        return rows
+
+    def _bind_sky_catalog(self) -> None:
+        """把天空图 tracker 绑到执行侧目录（重复调用安全）。"""
+        tr = getattr(self, "sat_tracker", None)
+        bind = getattr(tr, "set_catalog_source", None)
+        if bind is None:
+            return
+        bind(self._sky_catalog_source)
 
     def _focus_settings_tab(self) -> None:
         """切到右栏「设置」页（地点面板未就绪时的落点）。"""
@@ -12280,6 +12325,7 @@ class MainWindow(QMainWindow):
             self.sat_tracker = SatelliteTracker(self.sky_view, lat, lon)
         else:
             self.sat_tracker.set_location(lat, lon)
+        self._bind_sky_catalog()
         # 观测站坐标进天空视图本体：恒星/行星/星座层、信息卡升降时刻、
         # 搜索选中、拾取与调谐按钮都依赖它（此前只标 real 未真正注入，
         # 手动站址下整条"点星即听"链被静默阻断）。
@@ -12317,6 +12363,15 @@ class MainWindow(QMainWindow):
             self._loop_sat_tracker = None
             return
         sats = self._loop_sat_tracker.list_satellites()
+        # 执行侧目录就绪：天空图立即改向它投影（此前天空图自持启动快照，
+        # 刷新成功后仍画旧根数）。
+        self._bind_sky_catalog()
+        _st = getattr(self, "sat_tracker", None)
+        if _st is not None:
+            try:
+                _st.refresh()
+            except Exception:
+                pass
         self._refresh_sat_panel(sats)
         if sats:
             self.sat_track_panel.set_downlink_mhz(
@@ -12392,6 +12447,15 @@ class MainWindow(QMainWindow):
         self._tle_update_thread = None
         n, failure = payload
         self._refresh_sat_panel()
+        # 刷新成功：天空图立刻向执行侧目录重新投影并重画（此前要等下一次
+        # 定时器，更早的实现里根本不变——刷新后仍画旧根数）。
+        if n > 0:
+            _st = getattr(self, "sat_tracker", None)
+            if _st is not None:
+                try:
+                    _st.refresh()
+                except Exception:
+                    pass
         # 状态栏只渲染抓取链路给出的 code/label/reason/action：
         # 失败时必须有码和原因，绝不回落到与 code 无关的固定句子。
         from mbdsdr_ai.tle_fetch import tle_refresh_status_text
