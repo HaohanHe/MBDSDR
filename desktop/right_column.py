@@ -311,6 +311,14 @@ class RightColumn(QScrollArea):
             否则展开末节后末几节永远顶不到视口顶部。
         """
         for section in self._sections:
+            # 面板内部还有折叠（如设置页 6 组）：只失效节布局不够，节布局会拿
+            # body 自己的 layout 缓存（实测设置页 6 组全展开后 body.sizeHint
+            # 已是 8726，节高仍停在 1528，右栏不跟着长）。body 布局也失效一次，
+            # 高度才真的算进去。
+            body_lay = section.body().layout()
+            if body_lay is not None:
+                body_lay.invalidate()
+                body_lay.activate()
             sec_lay = section.layout()
             if sec_lay is not None:
                 sec_lay.invalidate()
