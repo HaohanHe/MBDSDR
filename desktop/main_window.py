@@ -8708,10 +8708,16 @@ class MainWindow(QMainWindow):
         # 都 connect _plot.update() → 有效重绘恒为 30fps，省电档的刷新让路在
         # live 接收（用户真机场景）完全失效（2026-11-10 repaint_lever_probe 实证）。
         # 旁路已移除：面板定时器是唯一重绘驱动，性能档刷新真生效。
-        try:
-            self.spectrum._refresh_status_labels()
-        except Exception:
-            pass
+        # 频谱状态挂钩（只对齐缩放滑杆 + 首帧补画）节流到 10 Hz：真 IQ 约
+        # 146 帧/s，跨度只在外因（Ctrl+滚轮/捏合/换采样率）变化；重绘由频谱
+        # 面板自己的定时器按性能档驱动，这里不再逐帧排重绘。
+        now_hook = time.monotonic()
+        if now_hook - getattr(self, "_spectrum_hook_t", -math.inf) >= 0.1:
+            self._spectrum_hook_t = now_hook
+            try:
+                self.spectrum._refresh_status_labels()
+            except Exception as e:  # noqa: BLE001 - 不能静默：留调试痕迹
+                logger.debug("频谱状态挂钩失败（不影响数据通路）: %s", e)
 
         # IQ 总线：ReceivePipeline 路径**不走** SpectrumPanel.set_iq_data
         # （FFT worker 直接把谱线喂给 _plot），所以总线原先没有任何发布者，

@@ -2439,6 +2439,10 @@ class SpectrumPanel(QWidget):
         self._state = _PlotState(self)
         # 紧凑形态（星象仪底部条）标志：见 set_compact。
         self._compact = False
+        # 上一帧是否已有真实数据：用于「无数据 → 有数据」时补画首帧。
+        # 重绘唯一驱动是面板定时器（_plot._timer），但首帧/重连首帧可能还没
+        # 排到定时器上，靠这个标记保证首屏一定画出来（见 _refresh_status_labels）。
+        self._label_has_data = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -2961,6 +2965,10 @@ class SpectrumPanel(QWidget):
         if not self._connected:
             self.generator.clear_data()
             self._state.markers.clear()
+        # 断开必须立刻重画成「未连接」空态：_refresh_status_labels 只管
+        # 数据通路，无数据时它不会再排重绘（重绘驱动只有面板定时器）。
+        self._label_has_data = False
+        self._redraw()
         self._refresh_status_labels()
 
     def clear(self):
@@ -3116,15 +3124,19 @@ class SpectrumPanel(QWidget):
         return float(vals.max() - np.median(vals))
 
     def _refresh_status_labels(self):
-        """刷新视图状态（缩放滑杆位置 + 重绘）。
+        """本帧数据已更新：对齐缩放滑杆 + 「无数据 → 有数据」时补画首帧。
 
-        原先这里刷新顶部 SNR/跨度/RBW 读数。2026-11-10 裁决撤掉这些数字：
-        它们每秒跳几十次，人的读数速度跟不上，SDR++ 顶上也没有。现在
-        保留同名方法是给数据通路一个「本帧到了」的挂钩（同时把缩放滑杆
-        对齐到真实跨度），不再产生任何文字读数。
+        重绘的唯一驱动是面板自己的 ``_plot._timer``（性能档决定 10/20 fps）。
+        旧实现在这里无条件 ``_redraw()``：等于每个 IQ 帧（2.4 MS/s 下约
+        146 帧/s）都排一次重绘，把性能档的刷新让路完全冲掉（2026-11-11 回归）。
+        首帧必须画（面板定时器可能还没排到），靠 ``_label_has_data`` 标记补一帧；
+        调用方另按 10 Hz 节流（见 main_window._on_pipeline_frame_ready）。
         """
         self.sync_span_slider()
-        self._redraw()
+        has_data = bool(self.generator.has_data())
+        if has_data and not self._label_has_data:
+            self._redraw()
+        self._label_has_data = has_data
 
     # ------------------------------------------------------------------ 交互转发
     def on_plot_freq_changed(self, freq_mhz: float):
