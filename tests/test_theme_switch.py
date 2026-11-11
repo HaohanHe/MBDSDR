@@ -6,13 +6,15 @@
 锁三件事：
   1. 所有主题的 colors 必须逐键等于 tokens.THEME_COLORS（不许主题侧另写 hex）；
   2. 新增的 "figma" 主题可切换且默认不启用（DEFAULT_THEME 仍是 default）；
-  3. 切过去颜色确实变（QPalette + QSS 都变），切回来完全还原；
+  3. 切过去颜色确实变（QPalette 变），切回来完全还原；且五套主题共用
+     一份逐字相同的 QSS——切主题不重设样式表（A′，2026-11-11）；
   4. 每套主题的样式表都带禁用态规则（禁用控件颜色/底色可见）。
 
 运行:
     QT_QPA_PLATFORM=offscreen python -m pytest tests/test_theme_switch.py -q
 """
 import os
+import re
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -94,12 +96,45 @@ def test_switch_changes_colors_and_switch_back_restores(restore_theme):
     bg_after = app.palette().color(QPalette.Window).name()
     qss_after = app.styleSheet()
     assert bg_after != bg_before, "切主题后页底色没变"
-    assert qss_after != qss_before, "切主题后 QSS 没变"
+    # A′（2026-11-11）：QSS 里不再有颜色字面量，改由 QPalette 供给。
+    # 因此切主题**必须不重设样式表**——这正是 3.3 s → 0.5 s 的来源；
+    # 若这里又变成「不同」，说明有人把颜色写回了 QSS。
+    assert qss_after == qss_before, "切主题重设了 QSS（颜色必须只走 palette(role)）"
     assert "#000000" in bg_after.lower(), "figma 主题页底应为 #000000"
 
     default_theme.apply(app)
     assert app.palette().color(QPalette.Window).name() == bg_before
     assert app.styleSheet() == qss_before, "切回默认主题未完全还原"
+
+
+def test_all_themes_share_one_identical_qss():
+    """五套主题的样式表必须逐字相同，且不含颜色字面量。
+
+    A′ 的硬前提：QSS 若随主题变化，切主题就得 setStyleSheet（实测 5.6 s，
+    比不换 QSS 的重抛光路径慢一个数量级）。颜色全部写成 palette(<role>)，
+    由 _build_palette 装进 QPalette。
+    """
+    qss = {name: theme._qss() for name, theme in THEMES.items()}
+    assert len(set(qss.values())) == 1, "有主题的 QSS 与其它主题不同"
+
+    text = next(iter(qss.values()))
+    assert text.count("palette(") >= 100, "QSS 里的颜色没有走 palette(role)"
+    # 去掉 QSS 注释后再查颜色字面量（注释里出现 #000 之类的说明文字是允许的）
+    code = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    assert not re.search(r"#[0-9A-Fa-f]{3,8}\b", code), "QSS 仍有颜色字面量"
+
+
+@pytest.mark.parametrize("name", sorted(THEMES))
+def test_palette_carries_theme_colors(name):
+    """palette(role) 的取值来源必须是本主题 colors（不是某一份写死的表）。"""
+    from themes import _build_palette
+
+    colors = THEMES[name].colors
+    pal = _build_palette(colors)
+    assert pal.color(QPalette.Window).name() == colors["bg"].lower()
+    assert pal.color(QPalette.Base).name() == colors["card"].lower()
+    assert pal.color(QPalette.Highlight).name() == colors["primary"].lower()
+    assert pal.color(QPalette.WindowText).name() == colors["text"].lower()
 
 
 @pytest.mark.parametrize("name", sorted(THEMES))

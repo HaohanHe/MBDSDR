@@ -91,28 +91,26 @@ REQUIRED_SELECTORS = (
 
 def test_control_coverage_qss_contains_required_selectors():
     """覆盖块必须真的写着这些选择器——被删掉就等于回到原生皮肤。"""
-    qss = _control_coverage_qss(THEMES["default"].colors)
+    qss = _control_coverage_qss()
     missing = [sel for sel in REQUIRED_SELECTORS if sel not in qss]
     assert not missing, f"覆盖块缺选择器：{missing}"
 
 
 def test_control_coverage_works_for_every_theme():
-    """五个主题的颜色键不完全相同，覆盖块必须都能生成且不含未替换的 {占位}。"""
-    for name, theme in THEMES.items():
-        qss = _control_coverage_qss(theme.colors)
-        assert qss.strip().startswith("/*"), f"{name} 覆盖块为空"
-        # f-string 的变量都替换完，不该残留单层花括号包着的键名
-        assert "{text}" not in qss and "{border}" not in qss, f"{name} 有未替换占位符"
-        assert "background-color: ;" not in qss, f"{name} 有空值声明"
+    """覆盖块与主题无关（颜色只写 palette(role)），必须只有一份、无占位残留。"""
+    qss = _control_coverage_qss()
+    assert qss.strip().startswith("/*"), "覆盖块为空"
+    # f-string 的变量都替换完，不该残留单层花括号包着的键名
+    assert "{text}" not in qss and "{border}" not in qss, "覆盖块有未替换占位符"
+    assert "background-color: ;" not in qss, "覆盖块有空值声明"
+    assert "palette(" in qss, "覆盖块没有走 palette(role)"
 
 
 def test_control_coverage_is_applied_by_every_theme():
     """apply() 必须把覆盖块并进最终 QSS，否则前面几条都是空谈。"""
-    from themes import Theme
-
     for name, theme in THEMES.items():
         base = theme._build_qss()
-        merged = base + _control_coverage_qss(theme.colors)
+        merged = base + _control_coverage_qss()
         assert "QToolButton" in merged, f"{name} 最终 QSS 不含 QToolButton"
         assert merged != base, f"{name} 覆盖块没接上"
         # 覆盖块必须排在主题自带 QSS 之后（同优先级后写者生效）

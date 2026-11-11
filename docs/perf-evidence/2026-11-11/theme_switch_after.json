@@ -1,0 +1,63 @@
+{
+ "widgets": 2540,
+ "ctor_ms": 4742.2,
+ "qss_len": 19031,
+ "total_setStyleSheet_calls": 1,
+ "grid_points": 36,
+ "rows": [
+  {
+   "theme": "default",
+   "switch_ms": 702.8,
+   "palette_window": "#f5f3ef",
+   "qss_len": 19031,
+   "setStyleSheet_calls": 0,
+   "pixels_changed_vs_prev": null,
+   "prev": null
+  },
+  {
+   "theme": "dark",
+   "switch_ms": 665.0,
+   "palette_window": "#1e1e20",
+   "qss_len": 19031,
+   "setStyleSheet_calls": 0,
+   "pixels_changed_vs_prev": 36,
+   "prev": "default"
+  },
+  {
+   "theme": "high_contrast",
+   "switch_ms": 633.4,
+   "palette_window": "#000000",
+   "qss_len": 19031,
+   "setStyleSheet_calls": 0,
+   "pixels_changed_vs_prev": 36,
+   "prev": "dark"
+  },
+  {
+   "theme": "figma",
+   "switch_ms": 631.4,
+   "palette_window": "#000000",
+   "qss_len": 19031,
+   "setStyleSheet_calls": 0,
+   "pixels_changed_vs_prev": 23,
+   "prev": "high_contrast"
+  },
+  {
+   "theme": "dark_car",
+   "switch_ms": 536.7,
+   "palette_window": "#000000",
+   "qss_len": 19031,
+   "setStyleSheet_calls": 0,
+   "pixels_changed_vs_prev": 23,
+   "prev": "figma"
+  },
+  {
+   "theme": "default",
+   "switch_ms": 595.0,
+   "palette_window": "#f5f3ef",
+   "qss_len": 19031,
+   "setStyleSheet_calls": 0,
+   "pixels_changed_vs_prev": 36,
+   "prev": "dark_car"
+  }
+ ]
+}
