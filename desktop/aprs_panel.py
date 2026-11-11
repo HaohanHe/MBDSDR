@@ -125,8 +125,12 @@ class AprsPanel(QWidget):
         # 空表说明：只有表头的空表格既不告诉用户"这里以后会有东西"，也不告诉
         # 他"现在没内容"是怎么回事。挂在 viewport 上（不占行列、不参与选择），
         # 有包后随表格一起隐藏。
+        # 数据 tap 只在面板展开时喂音频（main_window.py 中 aprs_dock.isVisible()
+        # 的可见性门），收起期间不缓存；空态必须写出这个前提，否则用户会以为
+        # 面板一直后台在收。
         self.empty_hint = QLabel(
-            "还没有收到数据包\n调到 144.390 MHz（FM），等附近台站发报后会自动列出",
+            "还没有收到数据包\n调到 144.390 MHz（FM）并保持本面板展开；"
+            "收起时不接收，展开后附近台站发报才会列出",
             self.table.viewport())
         self.empty_hint.setObjectName("hintLabel")
         self.empty_hint.setAlignment(Qt.AlignCenter)
