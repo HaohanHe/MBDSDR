@@ -1480,12 +1480,17 @@ class ControlPanel(QWidget):
         self.gain_val.setText(f"{value:g} dB")
         requested = self.gain_slider.value()
         if abs(value - requested) > 1e-9:
-            hint = (f"设备实际增益 {value:g} dB，配置意图 {requested} dB 未生效"
+            hint = (f"后端报告增益 {value:g} dB，配置意图 {requested} dB 未生效"
                     "（配置文件未改）")
             logger.warning("%s", hint)
             self.gain_val.setToolTip(f"⚠ {hint}")
         else:
-            self.gain_val.setToolTip("已连接：读数来自设备回执")
+            # 相等不等于"设备回执"：RTL 等后端 get_gain() 回的就是请求值，
+            # 离散调谐器吸附后的真实档位没有回读通道。这里只陈述来源，
+            # 不替"没回读过的值"背书。
+            self.gain_val.setToolTip(
+                "已连接：后端当前增益读数；部分后端只回报请求值，"
+                "硬件吸附/限幅后的真实档位未回读")
         return True
 
     def set_ppm_applied(self, value: int) -> bool:

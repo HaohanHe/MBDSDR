@@ -81,3 +81,36 @@ def test_disconnect_clears_stale_reading(qapp):
         assert panel.set_gain_applied(20.0) is False
     finally:
         panel.deleteLater()
+
+
+def test_equal_reading_does_not_claim_device_receipt(qapp):
+    """读数与请求相等 ≠ 设备回执：tooltip 不许替没回读过的值背书。
+
+    RTL 等后端的 ``get_gain()`` 返回的就是请求值（离散调谐器吸附结果
+    没有回读通道）。旧 tooltip「读数来自设备回执」把假值包装成真值，
+    是本缺口里最恶劣的一句——这里钉住它不得复活。
+    """
+    panel = _panel()
+    try:
+        panel.set_sdr_connected(True)
+        panel.set_gain(30.0)
+        assert panel.set_gain_applied(30.0) is True
+        tip = panel.gain_val.toolTip()
+        assert "回执" not in tip, "不得再声称是设备回执"
+        assert "未回读" in tip, "必须明确说明读数可能只是请求值"
+    finally:
+        panel.deleteLater()
+
+
+def test_mismatch_wording_does_not_call_request_device_actual(qapp):
+    """值不等时也只能说「后端报告」，不能断言是设备实测值。"""
+    panel = _panel()
+    try:
+        panel.set_sdr_connected(True)
+        panel.set_gain(30.0)
+        panel.set_gain_applied(19.2)
+        tip = panel.gain_val.toolTip()
+        assert "后端报告" in tip
+        assert "设备实际" not in tip, "没有回读通道时不得写成设备实际增益"
+    finally:
+        panel.deleteLater()
