@@ -833,6 +833,69 @@ def test_reset_all_covers_every_exposed_item(env, monkeypatch):
     assert len(applied) == len(expect)
 
 
+def test_reset_all_does_not_touch_runtime_keys(env, monkeypatch):
+    """反证：恢复全部默认只动面板可见设置；运行态四键配置与现场都不变。
+
+    变异回 ``self._settings.reset_all()``（全量 DEFAULTS）→ 本测试必红。
+    """
+    ds, host, panel, _ = env
+    runtime = {
+        "frequency_hz": 145_500_000.0,
+        "volume": 77,
+        "demod_mode": "USB",
+        "bandwidth_hz": 12_500.0,
+    }
+    for key, value in runtime.items():
+        ds.set(key, value)
+
+    applied = []
+    real_apply = panel._apply
+
+    def spy(item, value):
+        applied.append(item.key)
+        return real_apply(item, value)
+
+    monkeypatch.setattr(panel, "_apply", spy)
+
+    assert panel.reset_all(confirm=False) is True
+
+    # 1) 白名单恰好是面板可见的 35 项 settings，运行态键一个都不在其中
+    assert len(settings_panel.RESETTABLE_SETTING_KEYS) == 35
+    assert not set(runtime) & set(settings_panel.RESETTABLE_SETTING_KEYS)
+    assert set(settings_panel.RESETTABLE_SETTING_KEYS) <= set(settings_mod.DEFAULTS)
+
+    # 2) 配置层四键保持现场（变异回 DEFAULTS 时这里会变回 98M/48/FM/0）
+    for key, value in runtime.items():
+        assert ds.get(key) == value, f"{key} 被恢复默认偷改"
+
+    # 3) 现场未被推送：_apply 从没收到运行态键
+    assert not set(applied) & set(runtime)
+
+    # 4) 状态行必须明写"保持不变"，不能只说「已恢复默认」
+    msg = panel.status_label.text()
+    assert "当前频点、音量、解调方式、带宽保持不变" in msg
+    assert "已恢复全部默认" not in msg
+
+
+def test_reset_all_dialog_names_runtime_keys(env, monkeypatch):
+    """反证：确认框文案必须明写运行态不变，不许只写「恢复默认」。"""
+    ds, host, panel, _ = env
+    seen = {}
+
+    def _question(_parent, _title, text, *args, **kwargs):
+        seen["text"] = text
+        return settings_panel.QMessageBox.No
+
+    monkeypatch.setattr(settings_panel.SettingsPanel, "isVisible", lambda self: True)
+    monkeypatch.setattr(settings_panel.QMessageBox, "question",
+                        staticmethod(_question))
+
+    assert panel.reset_all(confirm=True) is False
+    assert "当前频点、音量、解调方式、带宽保持不变" in seen["text"]
+    # 点「否」不写任何配置
+    assert ds.get("theme") == SCHEMA["theme"].default
+
+
 # ---------------------------------------------------------------------------
 # 5. 导入 / 导出
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -97,6 +97,13 @@ except ImportError:  # 包内导入
 #: 端口默认值同样取自 schema（UI 不另写一份默认值）
 DEFAULT_RC_PORT = int(SCHEMA["rc_port"].default)
 DEFAULT_WEB_PORT = int(SCHEMA["web_port"].default)
+
+#: 「恢复全部默认」的写入白名单：只回退面板可见的设置类项（storage=settings）。
+#: settings.DEFAULTS 里的运行态键（频点/增益/解调/带宽/采样率/AGC/音量/应用模式）
+#: 记录的是"上次现场"，点一次恢复默认不得把它们改回出厂值——那会让用户重启后
+#: 听到/看到的东西与界面显示不一致。观测站与 AI 采样参数另按 EXPOSED_ITEMS 处理。
+RESETTABLE_SETTING_KEYS: Tuple[str, ...] = tuple(
+    it.key for it in EXPOSED_ITEMS if it.storage == "settings")
 
 # 面板内反馈时长沿用状态栏三档口径（docs/status-message-durations.md）。
 _MSG_NORMAL = 4000
@@ -1200,19 +1207,23 @@ class SettingsPanel(QWidget):
             self._notify(f"已恢复默认：{item.label}")
 
     def reset_all(self, confirm: bool = True) -> bool:
-        """恢复全部默认（settings + 观测站清空 + AI 采样参数）。
+        """恢复全部默认（面板可见的设置项 + 观测站清空 + AI 采样参数）。
 
+        **不碰运行态**：频点/增益/解调/带宽/采样率/AGC/音量/应用模式属于"上次
+        现场"，保留在 settings.DEFAULTS 里由启动恢复，不因本操作被改回出厂值。
         返回 True 表示已执行；confirm=False 供测试/无人值守调用。
         """
         if confirm and self.isVisible():
             ans = QMessageBox.question(
                 self, "恢复全部默认",
-                "将把设置、观测站坐标与服务开关全部恢复默认，是否继续？",
+                "将把界面、频谱、星象仪、服务等设置与观测站坐标恢复默认，是否继续？\n\n"
+                "当前频点、音量、解调方式、带宽保持不变。",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if ans != QMessageBox.Yes:
                 return False
         if self._settings is not None:
-            self._settings.reset_all()
+            for key in RESETTABLE_SETTING_KEYS:
+                self._settings.reset(key)
         store_errors = []
         for item in EXPOSED_ITEMS:
             if item.storage == "gui_config":
@@ -1237,7 +1248,9 @@ class SettingsPanel(QWidget):
         if store_errors:
             self._notify("恢复默认未完全落盘：" + "；".join(store_errors[:3]))
         else:
-            self._notify("已恢复全部默认")
+            self._notify(
+                f"已恢复 {len(RESETTABLE_SETTING_KEYS)} 项设置默认；"
+                "当前频点、音量、解调方式、带宽保持不变")
         return True
 
     # ------------------------------------------------------------ 导入/导出
