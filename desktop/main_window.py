@@ -7006,10 +7006,16 @@ class MainWindow(QMainWindow):
         self._last_ppm_applied = (int(ppm) if
                                   _run("PPM", lambda: backend.set_ppm(ppm))
                                   else None)
-        self._last_offset_applied = (
-            bool(offset) if
-            _run("Offset Tuning", lambda: backend.set_offset_tuning(offset))
-            else None)
+        # 「不支持」≠「未生效」：能探测到驱动没有该能力就直接跳过，既不下发
+        # 也不记失败——否则本地 RTL（pyrtlsdr 无该方法）每次连接都刷一条假失败。
+        _supports_ot = getattr(backend, "supports_offset_tuning", None)
+        if callable(_supports_ot) and not _supports_ot():
+            self._last_offset_applied = None
+        else:
+            self._last_offset_applied = (
+                bool(offset) if
+                _run("Offset Tuning", lambda: backend.set_offset_tuning(offset))
+                else None)
         _run("AGC", lambda: backend.set_agc(agc))
         if not agc:
             _run("增益", lambda: backend.set_gain(gain))
@@ -7624,9 +7630,11 @@ class MainWindow(QMainWindow):
         if backend is None:
             return
         set_ot = getattr(backend, "set_offset_tuning", None)
-        if not callable(set_ot):
+        supports_ot = getattr(backend, "supports_offset_tuning", None)
+        unsupported = callable(supports_ot) and not supports_ot()
+        if not callable(set_ot) or unsupported:
             self.statusBar().showMessage(
-                "Offset tuning 未下发：当前后端不支持该能力", MSG_IMPORTANT)
+                "Offset tuning 未下发：当前设备/驱动不支持该能力", MSG_IMPORTANT)
             self._restore_offset_tuning_display()
             return
         if self._apply_hw_action("Offset tuning", lambda: set_ot(bool(enabled))):

@@ -2534,6 +2534,15 @@ class RTLSDRBackend(SDRBackend):
                 return False  # 老棒/老库不支持
         return False
 
+    def supports_offset_tuning(self) -> bool:
+        """偏移调谐是否真的能下发（只探测能力，不写状态）。
+
+        驱动不提供 ``set_offset_tuning``（本机 pyrtlsdr 的 ``RtlSdrAio`` 就是
+        这种）属于「不支持」，不是「失败」：连接流程据此跳过该项，不再把它
+        报成"未生效"，勾选开关也会直接说明不支持。
+        """
+        return bool(self._sdr) and hasattr(self._sdr, "set_offset_tuning")
+
     def set_offset_tuning(self, enabled: bool) -> bool:
         """Offset Tuning（DC 偏移抵消）。
 
@@ -2545,23 +2554,31 @@ class RTLSDRBackend(SDRBackend):
         ``RtlSdrAio``，**没有** ``set_offset_tuning`` 方法（``hasattr`` 为
         False）。旧实现直接调用 → AttributeError → 返回 False → 连接流程报
         「Offset Tuning 未生效」，用户插上棒子就看到一条红字。该参数是可选
-        优化项，驱动不提供就是「不支持」而不是「失败」：跳过并如实记一条
-        debug，不污染连接结果。
+        优化项，驱动不提供就是「不支持」而不是「失败」：此时返回 False 且
+        **不写状态**——状态面板绝不允许把"勾选过"显示成"设备已开启"。
         """
-        self._offset_tuning = bool(enabled)
-        if not self._sdr:
-            return True
-        if not hasattr(self._sdr, "set_offset_tuning"):
+        if not self.supports_offset_tuning():
             logger.debug(
-                "RTL-SDR 驱动不提供 set_offset_tuning（%s），跳过 offset tuning",
-                type(self._sdr).__name__)
-            return True
+                "RTL-SDR 驱动不提供 set_offset_tuning（%s）：按「不支持」处理，状态保持原值",
+                type(self._sdr).__name__ if self._sdr is not None else "未连接")
+            return False
         try:
             self._sdr.set_offset_tuning(bool(enabled))
-            return True
         except Exception as e:
+            # 下发失败同样不写状态：设备没有接受过的值不能当成已生效。
             logger.warning(f"RTL-SDR set_offset_tuning({enabled}) 失败: {e}")
             return False
+        self._offset_tuning = bool(enabled)
+        return True
+
+    @property
+    def offset_tuning(self) -> bool:
+        """已确认生效的偏移调谐状态（状态面板读数源）。
+
+        只反映最后一次真正下发成功的值；驱动不支持或下发失败时保持原值
+        （默认关），因此状态面板不会出现"勾了但没生效"的假「开」。
+        """
+        return bool(self._offset_tuning)
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._sdr:
