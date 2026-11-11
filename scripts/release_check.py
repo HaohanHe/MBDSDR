@@ -8,11 +8,12 @@
   （整棵子树缺失 / 只缺单文件 / 可选件缺失 三类各一份期望原文）；
 * 窄屏下线按 ``scripts/ui_narrow_breakdown.py --json`` 的实测数字断言，
   红就如实报 FAIL，不会为了绿改产品代码或调阈值；
-* ``narrow`` 步两套指纹**各自独立判**：offscreen（DPR 1.0）≤1344×700、
+* ``narrow`` 步两套指纹**各自独立判**：dpr1（DPR 1.0）≤1344×700、
   真屏 windows（DPR 1.5）≤1360×728，任一越线整步 FAIL；真屏拿不到时
   ``SKIP(no_gui)``，不允许一套绿掩盖另一套红；
 * ``overlap`` 步与窄屏线共用**同一口径**（``ui_narrow_breakdown.py`` §4f），
-  输出 1000×600 与 1344×700 × 两套指纹共四个「挤压 / 越界」数字，
+  输出两套指纹 × 声明最小与 1344×700 共四个「挤压 / 越界」数字（尺寸标签
+  以实际值为准，脚本会断言实际 == 请求），
   每个都有自己的实测上限（``SIZE_LIMITS``）；不另造第二套统计；
 * 结果三态 PASS/FAIL/SKIP 逐条落 ``.tmp/release_check/result.json``，
   SKIP 带原因码（``no_gui`` 真屏指纹拿不到、``not_run`` 失败即停后未执行、
@@ -129,9 +130,12 @@ ALL_STEPS = ("build", "smoke", "subtree", "single", "optional", "qt",
              "narrow", "overlap", "log")
 
 #: 窄屏验收：两套指纹各自独立判（任一越线整步 FAIL），不换算、不互相代表。
-#: offscreen（DPR 1.0）按 1366×768 屏客户区 1344×700 判；
-#: 真屏 windows（DPR 1.5）按 1360×728 判（逻辑像素）。
-NARROW_MAX_OFFSCREEN = (1344, 700)
+#: 两套**都跑 windows 平台插件**（要有真字体；offscreen 下 QFontDatabase
+#: .families()==0，文字按方框度量，尺寸类判据不可信），窗口用
+#: WA_DontShowOnScreen 不上屏。两套只差 DPR：
+#: ``dpr1``（DPR 1.0，QT_SCALE_FACTOR=1）按 1366×768 屏客户区 1344×700 判；
+#: ``windows``（系统 DPR，本机 1.5）按 1360×728 判（逻辑像素）。
+NARROW_MAX_DPR1 = (1344, 700)
 NARROW_MAX_WINDOWS = (1360, 728)
 #: 仅作信息行：真屏逻辑 → 物理，用来暴露「逻辑过关但物理塞不进 1366×768」。
 NARROW_SCREEN_PHYSICAL = (1366, 768)
@@ -144,25 +148,28 @@ NARROW_SCREEN_PHYSICAL = (1366, 768)
 #: TEMPORARY_WIDENED —— 暂定上界，**不是设计目标**，UI 收口后必须重测收紧。
 #:
 #: 旧基线（2026-11-05 由窄屏线实测，当前工作区不可复现）：
-#:   offscreen 1000×600 29/1、1344×700 9/1；windows 1000×600 14/1、1344×700 9/1。
+#:   dpr1 1000×600 29/1、1344×700 9/1；windows 1000×600 14/1、1344×700 9/1。
+#: 注意：「1000×600」只是请求标签，窗口最小尺寸硬墙（实测 1000×680）会把它
+#: 夹高，实际测的是 1000×680；2026-11-11 起改为按声明的 minimumSize 请求，
+#: 并断言「实际尺寸 == 请求尺寸」。
 #: 现测区间（2026-11-06 02:00-02:30，同一命令连跑 5-6 遍）：
-#:   offscreen 1000×600 30/1 ~ 36/1（5/6 落在 36/1）；1344×700 9/1 ~ 15/1；
-#:   windows   1000×600 13/1（6/6 稳定）；1344×700 7/1（6/6 稳定，比旧值更好）。
+#:   dpr1    1000×600 30/1 ~ 36/1（5/6 落在 36/1）；1344×700 9/1 ~ 15/1；
+#:   windows 1000×600 13/1（6/6 稳定）；1344×700 7/1（6/6 稳定，比旧值更好）。
 #: 漂移原因：工作区里 desktop/control_panel.py、desktop/main_window.py 有未提交
 #: 改动（topBar 新增 多普勒/发射/GNSS/UTC 等 statusValue），且 ControlPanel 分栏
 #: 最小宽在 310↔365 之间随启动时序变化，同一命令连跑数字会跳。
 #: 逐项放宽（相对旧基线）：
-#:   offscreen 1000×600 挤压 29→36（+7），越界 1→1（不变）
-#:   offscreen 1344×700 挤压  9→15（+6），越界 1→1（不变）
-#:   windows   1000×600 挤压 14→13（-1，反而收紧），越界 1→1（不变）
-#:   windows   1344×700 挤压  9→7（-2，反而收紧），越界 1→1（不变）
+#:   dpr1    1000×600 挤压 29→36（+7），越界 1→1（不变）
+#:   dpr1    1344×700 挤压  9→15（+6），越界 1→1（不变）
+#:   windows 1000×600 挤压 14→13（-1，反而收紧），越界 1→1（不变）
+#:   windows 1344×700 挤压  9→7（-2，反而收紧），越界 1→1（不变）
 #: 待 desktop/control_panel.py、desktop/main_window.py 未提交改动收口后重测收紧。
 #: 检索标记：TEMPORARY_WIDENED（grep 本文件与 docs/packaging.md）。
 SIZE_LIMITS = {
-    ("offscreen", "1000x600"): (36, 1),   # (挤压, 越界) TEMPORARY_WIDENED
-    ("offscreen", "1344x700"): (15, 1),   # TEMPORARY_WIDENED
-    ("windows", "1000x600"): (13, 1),     # 比旧基线更严
-    ("windows", "1344x700"): (7, 1),      # 比旧基线更严
+    ("dpr1", "min"): (36, 1),         # (挤压, 越界) TEMPORARY_WIDENED
+    ("dpr1", "1344x700"): (15, 1),    # TEMPORARY_WIDENED
+    ("windows", "min"): (13, 1),      # 比旧基线更严
+    ("windows", "1344x700"): (7, 1),  # 比旧基线更严
 }
 
 #: FAIL 后下一步该查什么（按步骤名一一对应，失败即停时打印）
@@ -179,7 +186,8 @@ FAIL_HINTS = {
                 "对照 desktop/startup_paths.py 的 runtime_dll_report()",
     "qt": "确认 _internal/PySide6/plugins/platforms/qwindows.dll 存在；"
           "查 desktop/main.py 的 _qt_platform_plugin_problem()",
-    "narrow": "跑 scripts/ui_narrow_breakdown.py（offscreen 与 windows 各一次）"
+    "narrow": "跑 scripts/ui_narrow_breakdown.py（dpr1 与 windows 各一次；"
+              "两套都用 windows 平台插件，offscreen 无字体不可用）"
               "看逐控件拆账；两套指纹任一红都归 UX 线，禁止调阈值过关",
     "overlap": "口径是 ui_narrow_breakdown.py §4f，四个数字上限见 SIZE_LIMITS"
                  "（实测棘轮）；先看该步逐项输出与 breakdown 的 squeezed/clipped"
@@ -479,19 +487,24 @@ _BREAKDOWN: dict[str, tuple[dict | None, str]] = {}
 
 
 def _breakdown(platform: str) -> tuple[dict | None, str]:
-    """跑一次 ``ui_narrow_breakdown.py --json``（返回 (数据, 错误文本)）。"""
+    """跑一次 ``ui_narrow_breakdown.py --json``（返回 (数据, 错误文本)）。
+
+    ``platform`` 只区分 DPR 指纹：``dpr1`` 与 ``windows`` **都用 windows
+    平台插件**（offscreen 没有字体，QFontDatabase.families()==0，文字尺寸
+    不可信）；脚本内部用 WA_DontShowOnScreen 不上屏。
+    """
     cached = _BREAKDOWN.get(platform)
     if cached is not None:
         return cached
     script = os.path.join(ROOT, "scripts", "ui_narrow_breakdown.py")
     env = os.environ.copy()
-    env["QT_QPA_PLATFORM"] = platform
+    env["QT_QPA_PLATFORM"] = "windows"
     if platform == "windows":
-        # 真屏指纹要求系统默认缩放（本机 DPR 1.5 / 行高 18），不强制 1.0。
+        # 系统默认缩放（本机 DPR 1.5 / 行高 18），不强制 1.0。
         env.pop("QT_SCALE_FACTOR", None)
         env.pop("QT_ENABLE_HIGHDPI_SCALING", None)
     else:
-        # offscreen 指纹固定 DPR 1.0 / 行高 13，不受调用方 shell 里的缩放开关影响。
+        # dpr1 指纹固定 DPR 1.0，不受调用方 shell 里的缩放开关影响。
         env["QT_SCALE_FACTOR"] = "1"
         env["QT_ENABLE_HIGHDPI_SCALING"] = "0"
     try:
@@ -524,15 +537,15 @@ def _headless(err: str) -> bool:
 def _narrow_fingerprint(label: str, platform: str) -> tuple[str, str, str]:
     """单套指纹按**自己那套口径**断言，返回 (状态, 原因码, 说明)。
 
-    offscreen（DPR 1.0）比 ≤1344×700；真屏 windows（DPR 1.5）比 ≤1360×728。
+    dpr1（DPR 1.0）比 ≤1344×700；windows（DPR 1.5）比 ≤1360×728。
     两套不换算、不互相代表——一套绿不许掩盖另一套红。真屏逻辑尺寸换算出的
     物理尺寸只作信息行（暴露「逻辑过关但物理塞不进 1366×768」）。
     """
     data, err = _breakdown(platform)
     if data is None:
-        if platform == "windows" and _headless(err):
+        if _headless(err):
             return ("SKIP", "no_gui",
-                    f"{label}: SKIP（跑不了真屏窗口：无显示/无桌面会话，"
+                    f"{label}: SKIP（跑不了窗口：无显示/无桌面会话，"
                     f"加载不到 windows 平台插件）：{err[-300:]}")
         return "FAIL", "", f"{label}: ui_narrow_breakdown 失败：{err[-400:]}"
     if "env" not in data:
@@ -545,7 +558,7 @@ def _narrow_fingerprint(label: str, platform: str) -> tuple[str, str, str]:
     info = data["env"]
     dpr = float(info.get("device_pixel_ratio") or 0)
     line = info.get("font_line_height")
-    limit = NARROW_MAX_OFFSCREEN if platform == "offscreen" else NARROW_MAX_WINDOWS
+    limit = NARROW_MAX_DPR1 if platform == "dpr1" else NARROW_MAX_WINDOWS
     ok = width <= limit[0] and height <= limit[1]
     over_w = max(0, width - limit[0])
     over_h = max(0, height - limit[1])
@@ -561,12 +574,13 @@ def _narrow_fingerprint(label: str, platform: str) -> tuple[str, str, str]:
 
 
 def _step_narrow() -> tuple[str, str, str]:
-    """两套指纹都测：offscreen 与真屏 windows；任一 FAIL 则整步 FAIL。
+    """两套指纹都测：dpr1 与 windows；任一 FAIL 则整步 FAIL。
 
-    真屏拿不到（无桌面会话）不是静默跳过，而是 SKIP + 原因码 ``no_gui``；
+    两套都跑 windows 平台插件（offscreen 无字体，尺寸类判据不可信）。
+    拿不到窗口（无桌面会话）不是静默跳过，而是 SKIP + 原因码 ``no_gui``；
     只要另一套有 FAIL，整步仍是 FAIL。
     """
-    rows = [_narrow_fingerprint("offscreen", "offscreen"),
+    rows = [_narrow_fingerprint("dpr1", "dpr1"),
             _narrow_fingerprint("windows", "windows")]
     statuses = [s for s, _c, _m in rows]
     if "FAIL" in statuses:
@@ -583,19 +597,21 @@ def _step_overlap() -> tuple[str, str, str]:
     """四个口径数字（尺寸 × 指纹 × 挤压/越界），每个都有自己的上限。
 
     口径 = ``ui_narrow_breakdown.py`` §4f；上限见 ``SIZE_LIMITS``（实测棘轮，
-    理由写在该常量旁）。两套指纹各自判，任一越线即整步 FAIL；真屏拿不到时
-    SKIP + ``no_gui``。
+    理由写在该常量旁）。两套指纹各自判，任一越线即整步 FAIL；拿不到窗口时
+    SKIP + ``no_gui``。每个测量点先判「实际尺寸 == 请求尺寸」——窗口最小尺寸
+    会夹住请求（旧标签 1000×600 实际是 1000×680），不相等即 FAIL，避免拿
+    别的尺寸当结论。
     """
     statuses: list[str] = []
     codes: list[str] = []
     rows: list[str] = []
-    for label, platform in (("offscreen", "offscreen"), ("windows", "windows")):
+    for label, platform in (("dpr1", "dpr1"), ("windows", "windows")):
         data, err = _breakdown(platform)
         if data is None:
-            if platform == "windows" and _headless(err):
+            if _headless(err):
                 statuses.append("SKIP")
                 codes.append("no_gui")
-                rows.append(f"{label}: SKIP（拿不到真屏指纹）：{err[-200:]}")
+                rows.append(f"{label}: SKIP（拿不到窗口指纹）：{err[-200:]}")
             else:
                 statuses.append("FAIL")
                 rows.append(f"{label}: FAIL（ui_narrow_breakdown：{err[-200:]}）")
@@ -603,17 +619,36 @@ def _step_overlap() -> tuple[str, str, str]:
         cal = (data.get("summary") or {}).get("caliber") or {}
         target = cal.get("overflow_at_1344x700") or {}
         declared = cal.get("overflow_at_declared_minimum") or {}
+        sizes = cal.get("sizes") or {}
+        if not sizes:
+            statuses.append("FAIL")
+            rows.append(f"{label}: FAIL（ui_narrow_breakdown 未输出尺寸断言，"
+                        f"无法确认测的是不是请求的尺寸；旧版脚本的 offscreen "
+                        f"数字不可信）")
+            continue
+        bad_sizes = [k for k in ("declared", "1344x700")
+                     if not (sizes.get(k) or {}).get("equal")]
+        if bad_sizes:
+            detail = "、".join(
+                f"{k}: 请求 {sizes.get(k, {}).get('requested')} → "
+                f"实际 {sizes.get(k, {}).get('actual')}" for k in bad_sizes)
+            statuses.append("FAIL")
+            rows.append(f"{label}: FAIL（尺寸断言不过，{detail}）")
+            continue
         parts: list[str] = []
         ok_all = True
-        for size_key, block in (("1000x600", declared), ("1344x700", target)):
+        for size_key, block in (("min", declared), ("1344x700", target)):
             sq = int(block.get("squeezed_count") or 0)
             cl = int(block.get("clipped_count") or 0)
             max_sq, max_cl = SIZE_LIMITS[(platform, size_key)]
             ok = sq <= max_sq and cl <= max_cl
             ok_all = ok_all and ok
+            actual = (sizes.get("declared") if size_key == "min"
+                      else sizes.get("1344x700")) or {}
+            actual_s = "×".join(str(v) for v in actual.get("actual", []))
             parts.append(
-                f"{size_key} 挤压 {sq}（上限 ≤{max_sq}）/ 越界 {cl}"
-                f"（上限 ≤{max_cl}）→ {'PASS' if ok else 'FAIL'}")
+                f"{size_key}（实际 {actual_s}）挤压 {sq}（上限 ≤{max_sq}）/ "
+                f"越界 {cl}（上限 ≤{max_cl}）→ {'PASS' if ok else 'FAIL'}")
         statuses.append("PASS" if ok_all else "FAIL")
         rows.append(f"{label}: " + "；".join(parts))
     status = ("FAIL" if "FAIL" in statuses
