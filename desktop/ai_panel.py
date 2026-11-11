@@ -24,11 +24,13 @@ from PySide6.QtGui import QFont, QTextCursor
 # 尝试导入 AI 内核
 try:
     from mbdsdr_ai import MBDSDRAgent, AgentConfig
-    from mbdsdr_ai.config import normalize_config_keys
+    from mbdsdr_ai.config import ConfigStore, last_error, normalize_config_keys
     AI_CORE_AVAILABLE = True
 except ImportError:
     AI_CORE_AVAILABLE = False
     normalize_config_keys = None
+    ConfigStore = None  # type: ignore[assignment]
+    last_error = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - 失败消息整形（clean_exc 战役先例），缺失时退化原文
     from mbdsdr_ai.tool_registry import clean_exc as _clean_exc
@@ -186,26 +188,42 @@ class AIPanel(QWidget):
         self._build_ui()
         self._add_welcome_message()
 
+    #: 本面板在 config.json 里**拥有**的键。写盘只提交这几个键，绝不整份写回
+    #: 构造期快照（那会把设置面板刚写入的排序/观测站等键顶掉，典型事故是
+    #: api_key 被旧快照回滚）。
+    OWNED_KEYS = ("api_key", "base_url", "model")
+
     @classmethod
     def _load_config(cls) -> Dict[str, Any]:
         """从配置文件加载 API 配置。
 
         读后迁移：旧键 api_base 一次性归一为 base_url 并回写（见
         mbdsdr_ai.config.normalize_config_keys），消除同文件键名打架。
+        回写同样走 :class:`ConfigStore`，锁内重读后才改，不覆盖并发写入。
         """
+        if ConfigStore is None:
+            try:
+                if os.path.exists(cls.CONFIG_FILE):
+                    with open(cls.CONFIG_FILE, "r", encoding="utf-8") as f:
+                        return json.load(f)
+            except Exception:
+                pass
+            return {}
+        store = ConfigStore(cls.CONFIG_FILE)
         try:
-            if os.path.exists(cls.CONFIG_FILE):
-                with open(cls.CONFIG_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if normalize_config_keys is None:
-                    return data
-                normalized = normalize_config_keys(data)
-                if normalized != data:
-                    cls._save_config(normalized)  # 一次性迁移回写
-                return normalized
+            data = store.read()
         except Exception:
-            pass
-        return {}
+            return {}
+        if normalize_config_keys is None:
+            return data
+        normalized = normalize_config_keys(data)
+        if normalized != data:
+            def _migrate(disk: Dict[str, Any]) -> None:
+                migrated = normalize_config_keys(disk)
+                disk.clear()
+                disk.update(migrated)
+            store.update(_migrate)        # 一次性迁移回写
+        return normalized
 
     #: 最近一次 ``_save_config`` 的失败原因；成功时为 None。调用方据此
     #: 决定能不能说「已保存」（写盘失败仍报完成态会让人重启后才发现丢配置）。
@@ -213,23 +231,31 @@ class AIPanel(QWidget):
 
     @classmethod
     def _save_config(cls, config: Dict[str, Any]) -> bool:
-        """保存 API 配置到配置文件（统一键名 base_url）。返回是否真的写盘成功。"""
+        """保存 API 配置（统一键名 base_url）。返回是否真的写盘成功。
+
+        **只提交本面板拥有的 3 个键**（:attr:`OWNED_KEYS`），基线由
+        :class:`ConfigStore` 在锁内从磁盘重读——文件里其他键（设置面板的
+        采样参数、观测站坐标等）原样保留。
+        """
+        if ConfigStore is None:
+            cls._last_save_error = "AI 内核不可用：配置未写入"
+            return False
+        if normalize_config_keys is not None:
+            config = normalize_config_keys(config)
+        payload = {k: config[k] for k in cls.OWNED_KEYS if k in config}
+
+        def _submit(disk: Dict[str, Any]) -> None:
+            disk.update(payload)
+
         try:
-            if normalize_config_keys is not None:
-                config = normalize_config_keys(config)
             os.makedirs(cls.CONFIG_DIR, exist_ok=True)
-            with open(cls.CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
-            # 限制配置文件权限（仅所有者可读写）
-            try:
-                os.chmod(cls.CONFIG_FILE, 0o600)
-            except Exception:
-                pass
-            cls._last_save_error = None
-            return True
+            ok = ConfigStore(cls.CONFIG_FILE).update(_submit)
         except Exception as e:  # noqa: BLE001 - 不抛给 UI，但必须让失败可见
             cls._last_save_error = f"{e.__class__.__name__}: {e}"
             return False
+        cls._last_save_error = None if ok else (
+            (last_error() if last_error else None) or "配置写入失败")
+        return ok
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
