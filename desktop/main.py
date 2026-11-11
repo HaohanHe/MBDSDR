@@ -413,9 +413,9 @@ if _probe_spec is not None:
 _ensure_stdio_for_pythonw()
 
 try:
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QSplashScreen
     from PySide6.QtCore import Qt, QObject, Signal
-    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 
     from themes import get_theme, DEFAULT_THEME, get_app_font
     from main_window import MainWindow
@@ -567,6 +567,54 @@ def _install_combo_wheel_guard(app) -> None:
     app._combo_wheel_guard = guard  # 保活：局部对象被回收过滤器就失效
 
 
+def _show_startup_splash(app):
+    """主窗口构造前先摆一块「正在加载」实底窗，别让用户对着空白桌面。
+
+    实测冷启动从进程起到主窗口可见 4.4 s（外部计时 6.6–7.1 s，见
+    docs/research/2026-11-11-gap-performance.md §2）：这段时间主窗口还不存在，
+    屏幕上什么都没有，用户会以为程序没起来。splash 在 QApplication 建好后
+    立刻 show，构造完由 ``finish(window)`` 收掉。
+
+    只做遮挡，不改启动路径；任何绘制/平台异常都退回 None，绝不因此拦启动。
+    """
+    try:
+        w, h = 460, 260
+        pix = QPixmap(w, h)
+        pix.fill(QColor("#0f1419"))
+        painter = QPainter(pix)
+        try:
+            painter.setRenderHint(QPainter.TextAntialiasing, True)
+            base = QFont(get_app_font())
+            title_font = QFont(base)
+            title_font.setPointSize(22)
+            title_font.setBold(True)
+            painter.setFont(title_font)
+            painter.setPen(QColor("#e6edf7"))
+            painter.drawText(0, 84, w, 44, Qt.AlignHCenter | Qt.AlignVCenter,
+                             "MBDSDR")
+            sub_font = QFont(base)
+            sub_font.setPointSize(10)
+            painter.setFont(sub_font)
+            painter.setPen(QColor("#8d9bb0"))
+            painter.drawText(0, 132, w, 24, Qt.AlignHCenter | Qt.AlignVCenter,
+                             "AI 定义无线电 · 正在加载界面…")
+            painter.setPen(QColor("#5a6678"))
+            painter.drawText(0, 206, w, 20, Qt.AlignHCenter | Qt.AlignVCenter,
+                             "v" + str(_app_version))
+        finally:
+            painter.end()
+        splash = QSplashScreen(pix)
+        splash.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint
+                              | Qt.WindowStaysOnTopHint)
+        splash.show()
+        # 先让 splash 真的落到屏幕上，再进 2.5–4 s 的窗口构造。
+        app.processEvents()
+        return splash
+    except Exception as exc:  # noqa: BLE001 - 装饰窗失败不得拦启动
+        print(f"[mbdsdr] splash 未能显示（不影响启动）: {exc}", file=sys.stderr)
+        return None
+
+
 def main():
     # pythonw.exe 无控制台：必须在任何 print / argparse --help 之前兜底 stdio
     _ensure_stdio_for_pythonw()
@@ -621,6 +669,11 @@ def main():
     app.setOrganizationName("MBDSDR Project")
     app.setApplicationVersion(_app_version)
 
+    # QApplication 一建好就先摆一块实底「正在加载」：主窗口构造实测 2.5–4 s，
+    # 这段时间屏幕上什么都没有，用户会以为程序没起来。splash 放在主题/翻译
+    # 之前，是因为那些步骤也在吃首屏前的空白期，没必要等它们。
+    splash = _show_startup_splash(app)
+
     # 设置默认字体
     app.setFont(get_app_font())
 
@@ -648,6 +701,7 @@ def main():
         print(f"[mbdsdr] i18n: 加载失败，保持源语言 zh: {_l10n_ex}",
               file=sys.stderr)
 
+    # 主窗口构造实测 2.5–4 s，splash 已在 QApplication 建好后先行显示。
     # 创建主窗口
     window = MainWindow()
     window.app = app  # 传递 app 引用给主题切换
@@ -688,6 +742,11 @@ def main():
         QTimer.singleShot(500, lambda: window._connect_real(mcp_host, mcp_port))
 
     window.show()
+    if splash is not None:
+        try:
+            splash.finish(window)
+        except Exception:  # noqa: BLE001 - 收尾失败不得拦启动
+            pass
 
     # 控制台 Ctrl+C 走优雅退出（SIGINT→退出标志→QTimer 收口），
     # 不让 KeyboardInterrupt 抛进 Qt 回调里被吞掉。
