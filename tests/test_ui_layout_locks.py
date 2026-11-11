@@ -172,7 +172,7 @@ def _clear_user_bookmarks(win) -> None:
 
 @pytest.fixture(scope="module", params=SIZES,
                 ids=[f"{w}x{h}" for w, h in SIZES])
-def main_window(request):
+def main_window(request, isolated_profile):
     width, height = request.param
     import tempfile
     tmp_dir = tempfile.mkdtemp(prefix="mbdsdr_ui_baseline_")
