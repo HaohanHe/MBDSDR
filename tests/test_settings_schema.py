@@ -51,6 +51,7 @@ class _FakeGen:
 
     def set_fft_size(self, n):
         self.fft_size = int(n)
+        return self.fft_size      # 与真实 generator 同契约：返回实际生效档
 
     def set_window(self, w):
         self.window = str(w)
@@ -1753,3 +1754,46 @@ def test_service_panel_shows_stop_failure(qapp):
     panel._stop_rc()
     assert "停止失败" in panel.rc_status.text()
     assert panel._rc is None
+
+# ---------------------------------------------------------------------------
+# 7. 启动回推：立即生效项全部还原，性能档不得覆盖 FFT
+# ---------------------------------------------------------------------------
+def test_startup_restores_immediate_items_without_perf_override(
+        isolated_profile, qapp):
+    """反证：fft_size=4096 + perf_profile=eco，启动后控件真实值必须是 4096。
+
+    旧链路 MainWindow 启动先调 set_performance_mode(2) → generator.reconfigure
+    (1024)，把配置里的 4096 盖成档位默认；waterfall_palette / peak_threshold_db
+    也从不在启动回推清单里（实测缺口 S-01）。现在回推遍历所有立即生效项，
+    且性能档不再碰 FFT。
+    """
+    import spectrum_widget
+    from main_window import MainWindow
+
+    ds = DesktopSettings.load()
+    ds.set("fft_size", 4096)
+    ds.set("perf_profile", "eco")
+    ds.set("waterfall_palette", "soft")
+    ds.set("peak_threshold_db", 21.0)
+    ds.flush()
+
+    w = MainWindow()
+    try:
+        sp = w.spectrum
+        assert sp.generator.fft_size == 4096, (
+            f"启动后真实 FFT={sp.generator.fft_size}（期望 4096，"
+            "不是性能档默认 1024）")
+        assert list(sp._state.wf_colors) == list(
+            spectrum_widget.WATERFALL_COLORS_SOFT), "调色板未按配置还原"
+        assert float(sp._state.peak_rel_db) == pytest.approx(21.0), \
+            "峰值门限未按配置还原"
+        # 启动后再切一次性能档：FFT 必须仍由 fft_size 决定（反证核心）
+        sp.set_performance_mode(2)
+        assert sp.generator.fft_size == 4096, (
+            f"切档后真实 FFT={sp.generator.fft_size}：性能档又碰了 FFT")
+    finally:
+        try:
+            w._disconnect()
+        except Exception:  # noqa: BLE001 - 收尾失败不掩盖主断言
+            pass
+        w.close()

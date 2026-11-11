@@ -2587,7 +2587,7 @@ class SpectrumPanel(QWidget):
             lambda t: self.generator.set_avg_frames(int(t)))
         more_rows.append(_row(avg_label, self._avg_combo))
 
-        # 性能模式（高/均衡/低）：切换 FFT 点数 / 谱线数 / 刷新间隔
+        # 性能模式（高/均衡/低）：只切刷新间隔；FFT 点数由设置项 fft_size 决定
         perf_label = QLabel("性能:")
         self._perf_combo = QComboBox()
         self._perf_combo.addItems(["高", "均衡", "低"])
@@ -2891,9 +2891,11 @@ class SpectrumPanel(QWidget):
         self._tune_mode_btn.setText("调谐:中心" if checked else "调谐:VFO")
 
     # ------------------------------------------------------------------ 性能模式
-    # level 0=高 / 1=均衡 / 2=低：FFT 点数、谱线数、刷新间隔三档联动。
+    # level 0=高 / 1=均衡 / 2=低：刷新间隔档位。
+    # 第一列 FFT 点数只是档位设计参考值，**不再参与下发**：FFT 的单一真值源
+    # 是设置项 fft_size（见 set_performance_mode 注释）。
     _PERF_LEVELS = (
-        # (fft_size, num_bins, refresh_ms)
+        # (参考点数, 送绘根数上限, refresh_ms)
         (2048, 512, 50),
         (1024, 384, 66),
         # 2026-11-06：低档原为 512 点，而 FFT_SIZES 白名单只有 1024/2048/4096
@@ -2904,36 +2906,20 @@ class SpectrumPanel(QWidget):
     )
 
     def set_performance_mode(self, level: int):
-        """切换渲染性能档位：重建 FFT/谱线与瀑布环形缓冲，调刷新定时器。
+        """切换渲染性能档位：只调绘图刷新间隔（不改 FFT 点数）。
 
-        保持 center_freq_hz / sample_rate_hz 不变。level: 0 高 / 1 均衡 / 2 低。
+        FFT 点数的单一真值源是设置项的 fft_size（经 SettingsPanel.
+        _apply_fft_size 下发）。性能档若顺手 reconfigure，启动时回推的
+        fft_size=4096 就会被档位默认覆盖成 1024（实测缺口 S-01）。
         """
         level = int(level)
         if not (0 <= level < len(self._PERF_LEVELS)):
             return
-        fft_size, num_bins, refresh_ms = self._PERF_LEVELS[level]
-        # 档位点数必须落在 FFT_SIZES 白名单内：越档会让下方下拉同步静默失效
-        # （非可编辑 QComboBox.setCurrentText 找不到项时什么都不做）。
-        legal = self.generator.FFT_SIZES
-        if fft_size not in legal:
-            nearest = min(legal, key=lambda s: abs(s - fft_size))
-            _log.warning("性能档 %d 的 fft_size=%d 不在合法档 %s，改用 %d",
-                         level, fft_size, legal, nearest)
-            fft_size = nearest
-        self.generator.reconfigure(fft_size, num_bins)
+        _, _bins_cap, refresh_ms = self._PERF_LEVELS[level]
         # 调整绘图定时器刷新间隔（QTimer.setInterval 即时生效）
         timer = getattr(self._plot, "_timer", None)
         if timer is not None:
             timer.setInterval(refresh_ms)
-        # 同步 FFT 下拉：用 findText 校验，找不到就留日志（不再静默）
-        self._fft_combo.blockSignals(True)
-        idx = self._fft_combo.findText(str(fft_size))
-        if idx >= 0:
-            self._fft_combo.setCurrentIndex(idx)
-        else:
-            _log.warning("FFT 下拉缺少 %d 这一档（当前项 %s），无法同步",
-                         fft_size, self._fft_combo.currentText())
-        self._fft_combo.blockSignals(False)
         self._refresh_status_labels()
 
     # ------------------------------------------------------------------ 调色板 / 平滑

@@ -105,6 +105,17 @@ DEFAULT_WEB_PORT = int(SCHEMA["web_port"].default)
 RESETTABLE_SETTING_KEYS: Tuple[str, ...] = tuple(
     it.key for it in EXPOSED_ITEMS if it.storage == "settings")
 
+#: 启动回推时跳过的项（等价于 apply_mode != immediate）。
+#: 字段化 apply_mode 是后续独立一项；在那之前这份清单是唯一去处：
+#: 新增延迟生效项必须同步登记，否则启动会提前推送（假生效）。
+_STARTUP_DEFERRED_KEYS = frozenset((
+    "ui_language", "log_level",                        # 重启应用才生效
+    "gnss_port", "gnss_baudrate",                      # 重连生效
+    "perf_profile",                                    # 只决定下次连接的档位默认
+    "record_dir",                                      # 下次录音会话
+    "rc_enabled", "rc_port", "web_enabled", "web_port",  # 服务面板自己恢复
+))
+
 # 面板内反馈时长沿用状态栏三档口径（docs/status-message-durations.md）。
 _MSG_NORMAL = 4000
 
@@ -529,13 +540,19 @@ class SettingsPanel(QWidget):
         self._settings.set("squelch_default_db", SCHEMA["squelch_default_db"].default)
 
     def _apply_initial_state(self):
-        """把需要在启动时同步的持久化项推给消费点。"""
+        """把持久化值推给**所有立即生效**的消费点（单一回推入口）。
+
+        旧实现是手写 5 项清单，新增项（fft_size/waterfall_palette/
+        peak_threshold_db…）忘了登记就"设置了、重启不还原"。现在遍历
+        EXPOSED_ITEMS，只要 _apply 能接就自动回推；延迟项见
+        _STARTUP_DEFERRED_KEYS（apply_mode 字段化前的人工清单）。
+        """
         h = self._host
         if h is None:
             return
-        for key in ("bortle", "squelch_default_db", "tuning_step_hz",
-                    "waterfall_depth_rows", "sky_extinction_k"):
-            item = SCHEMA[key]
+        for item in EXPOSED_ITEMS:
+            if item.key in _STARTUP_DEFERRED_KEYS:
+                continue
             try:
                 self._apply(item, self._current_value(item))
             except (AttributeError, TypeError, ValueError) as exc:
@@ -1099,6 +1116,27 @@ class SettingsPanel(QWidget):
             return False
         return False
 
+    def _apply_fft_size(self, host, value) -> bool:
+        """FFT 点数的**唯一**下发口：任何路径要改 FFT 都必须走这里。
+
+        性能档（set_performance_mode）不再改 FFT；启动回推、设置项改值、
+        导入/恢复默认都经本方法 → 单一真值源是 schema 的 fft_size。
+        """
+        sp = getattr(host, "spectrum", None)
+        gen = getattr(sp, "generator", None)
+        if gen is None:
+            return False
+        requested = int(value)
+        applied = gen.set_fft_size(requested)
+        # 回落（如旧值 8192/16384）时按实际档位同步下拉，并让用户在状态栏
+        # 看到原因；不能把界面显示成"已切到不存在档位"。
+        self._sync_combo(sp, "_fft_combo", str(applied))
+        if applied != requested:
+            self._notify(
+                f"FFT {requested} 内核不支持（仅 1024/2048/4096），"
+                f"已回落到最近档 {applied}")
+        return True
+
     def _apply_spectrum(self, host, key: str, value) -> bool:
         """通过频谱面板既有控件/公开方法生效，并同步工具栏显示（单一入口）。"""
         sp = getattr(host, "spectrum", None)
@@ -1106,15 +1144,8 @@ class SettingsPanel(QWidget):
         if sp is None or gen is None:
             return False
         if key == "fft_size":
-            requested = int(value)
-            applied = gen.set_fft_size(requested)
-            # 回落（如旧值 8192/16384）时按实际档位同步下拉，并让用户在状态
-            # 栏看到原因；不能把界面显示成"已切到不存在档位"。
-            self._sync_combo(sp, "_fft_combo", str(applied))
-            if applied != requested:
-                self._notify(
-                    f"FFT {requested} 内核不支持（仅 1024/2048/4096），"
-                    f"已回落到最近档 {applied}")
+            if not self._apply_fft_size(host, value):
+                return False
         elif key == "fft_window":
             gen.set_window(str(value))
             self._sync_combo(sp, "_win_combo", str(value))

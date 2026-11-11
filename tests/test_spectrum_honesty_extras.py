@@ -122,14 +122,27 @@ class TestPerformanceLevels:
             assert bins > 0 and ms > 0
 
     def test_low_level_syncs_combo_and_generator(self):
+        """反证：性能档只切刷新/送绘上限，FFT 点数由 fft_size 单一真值源决定。
+
+        2026-11-11 行为变更：把 generator.reconfigure(1024, ...) 加回
+        set_performance_mode → 本测试必红（启动回推的 fft_size=4096 会被盖回
+        档位默认 1024，实测缺口 S-01）。
+        """
         panel = SpectrumPanel()
         try:
+            panel.resize(900, 520)
+            panel.generator.set_fft_size(4096)
+            combo_before = panel._fft_combo.currentText()
             level = len(WIDGET_LEVELS(panel)) - 1
             panel.set_performance_mode(level)
-            want = panel._PERF_LEVELS[level][0]
-            assert panel.generator.fft_size == want, panel.generator.fft_size
-            assert panel._fft_combo.currentText() == str(want), \
-                "下拉与实际 FFT 点数必须一致（不能静默停在旧档）"
+            assert panel.generator.fft_size == 4096, \
+                f"性能档不得改 FFT 点数，实际 {panel.generator.fft_size}"
+            assert panel._fft_combo.currentText() == combo_before, \
+                "性能档不得偷偷改 FFT 下拉（FFT 只由 fft_size 下发）"
+            timer = getattr(panel._plot, "_timer", None)
+            if timer is not None:
+                assert timer.interval() == panel._PERF_LEVELS[level][2], \
+                    "刷新间隔仍必须随档位切换"
         finally:
             panel.deleteLater()
 

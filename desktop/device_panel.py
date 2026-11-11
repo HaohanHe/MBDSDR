@@ -184,9 +184,7 @@ class DevicePanel(QWidget):
         # 内核常量仍是设备能力/验收基准，两者不是一回事。
         self.sr_edit = QLineEdit(str(PERF_DEFAULT_SR))
         self.sr_edit.setToolTip(
-            "每秒采集的样本数（配置意图，不是设备读数）：未连接时按性能档"
-            f"预填 {format_sample_rate(PERF_DEFAULT_SR)}（默认 · 未确认），"
-            "连接时按此值下发")
+            "每秒采集的样本数；越高能看的带宽越宽，默认值通常够用")
         self.sr_equiv = QLabel("")
         self.sr_equiv.setObjectName("statusValue")
         self.sr_equiv.setToolTip("等价值：按项目统一读数口径（MS/s，3 位小数）显示")
@@ -250,11 +248,6 @@ class DevicePanel(QWidget):
             self.sr_equiv.setText("—")
             return
         shown = format_sample_rate(hz)
-        if not self._connected and abs(hz - float(PERF_DEFAULT_SR)) < 1e-6:
-            # 未连接时这一档只是性能档预填值，不是设备读数：与控制面板/模块
-            # 面板共用同一句「默认 · 未确认」写法（数字随性能档，语义不同）。
-            self.sr_equiv.setText(f"= {shown}（性能档默认 · 未确认）")
-            return
         self.sr_equiv.setText(f"= {shown}" if hz > 0 else "—")
 
     # ------------------------------------------------------------------ 设备枚举
@@ -427,8 +420,6 @@ class DevicePanel(QWidget):
             self.disconnect_btn.setEnabled(False)
             if self.status_label.text() != "设备已拔出":
                 self.status_label.setText("已断开")
-        # 「默认 · 未确认」标记随连接态切换：断开后重新标，连上后去掉。
-        self._update_sr_equiv()
 
     # ------------------------------------------------------------------ 槽
     def _on_connect_clicked(self):
