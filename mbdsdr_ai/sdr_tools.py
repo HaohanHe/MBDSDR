@@ -445,19 +445,16 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_connect",
-        description="连接 SDR 设备（默认当前激活设备，可指定 device_id）。所有频率/频谱/录制工具的前置条件。无可用设备时如实返回失败并提示，不会伪造连接；失败时先用 sdr_list_devices 枚举真实设备，再用返回的 device_id 重试。"
+        description="连接 SDR 设备。不传 device_id 时：已有激活设备就重连它，否则沿用上次成功连接的设备（返回文案会写明沿用哪台）；两者都没有则失败并列出可用设备，**不会自动挑第一台**。所有频率/频谱/录制工具的前置条件。无可用设备时如实返回失败并提示，不会伪造连接；失败时先用 sdr_list_devices 枚举真实设备，再用返回的 device_id 重试。"
                     "副作用: 连接会独占占用设备，其他程序（如 GQRX/SDR#）将无法同时打开该设备; 能力边界: 只能连接 sdr_list_devices 枚举到的真实设备。",
         parameters={
             "type": "object",
             "properties": {
-                "device_id": {"type": "string", "description": "设备 ID（可选，默认使用当前激活设备）。可先用 sdr_list_devices 查看可用设备。"},
+                "device_id": {"type": "string", "description": "设备 ID（可选；不传时沿用上次使用的设备，无记录则失败并列出可用设备）。可先用 sdr_list_devices 查看。"},
             },
             "required": [],
         },
-        handler=lambda args: ToolResult(
-            success=mgr.connect(args.get("device_id")),
-            content=f"已连接: {mgr.get_active().device.name}" if mgr.get_active() else "连接失败",
-        ),
+        handler=lambda args: _sdr_connect(mgr, args.get("device_id")),
         category="sdr_device",
     )
 
@@ -3070,6 +3067,41 @@ def _vfo_select_tool(mgr, args) -> "ToolResult":
                 f"{active['frequency_hz']/1e6:.3f} MHz  解调={active['demod_mode']}  "
                 f"BW={active['bandwidth_hz']:.0f} Hz",
     )
+
+def _sdr_connect(mgr, device_id):
+    """连接 SDR，并把「沿用了哪台 / 为何拒绝 / 可选哪些」写进文案。
+
+    不传 device_id 时后端**不会**自动挑枚举到的第一台（顺序随机器与插拔
+    顺序变化，选错设备用户无从察觉）。因此这里的文案必须带设备名与索引：
+    只说「未指定设备」会让模型和用户都无从下一步。
+    """
+    ok = mgr.connect(device_id)
+    note = getattr(mgr, "last_connect_notice", "") or ""
+    if ok:
+        be = mgr.get_active()
+        name = be.device.name if be is not None else "（未取到设备信息）"
+        did = be.device.device_id if be is not None else ""
+        content = f"已连接: {name}"
+        if did:
+            content += f"（{did}）"
+        if note:
+            content += f"；{note}"
+        return ToolResult(success=True, content=content)
+
+    reason = note or getattr(mgr, "last_conflict", "") or "连接失败"
+    try:
+        devices = mgr.list_devices()
+    except Exception as e:  # noqa: BLE001 - 枚举失败不能盖住真实失败原因
+        logger.debug("list_devices 失败（仅影响提示里的可选清单）: %s", e)
+        devices = []
+    content = f"连接失败：{reason}"
+    if devices:
+        choices = "；".join(
+            f"{i}) {d.get('name')}（{d.get('device_id')}）"
+            for i, d in enumerate(devices, 1))
+        content += f"。可用设备：{choices}。请显式传 device_id 指定要连哪台。"
+    return ToolResult(success=False, content=content)
+
 
 def _disconnect_sdr(mgr):
     backend = mgr.get_active()

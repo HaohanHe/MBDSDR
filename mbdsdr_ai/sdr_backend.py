@@ -5297,6 +5297,11 @@ class SDRBackendManager:
         self._switch_in_progress = False
         self.switch_generation = 0
         self.last_conflict = ""  # 最近一次切换冲突/失败原因（空=无）
+        #: 最近一次 connect() 的说明（沿用了哪台 / 为何拒绝）。工具层据此
+        #: 把"未指定设备"这类话换成带设备名与索引的可操作提示。
+        self.last_connect_notice = ""
+        self._cfg_store = None   # 延迟构造 ConfigStore（测试可替换）
+
         self._discover_lock = threading.Lock()
         self._last_discover_ts = 0.0
         self._discover()
@@ -5444,28 +5449,126 @@ class SDRBackendManager:
     def connect(self, device_id: str = None) -> bool:
         """连接设备。无设备可选时返回 False（显式未连接）。
 
-        未指定 device_id 且当前没有激活后端时，若已枚举到真实设备，自动连接
-        第一个（首启只有一根棒的常见情形）；多设备时应显式传 device_id。
+        未指定 device_id 时**绝不静默取枚举到的第一台**（枚举顺序随机器与
+        插拔顺序变化，选错设备用户无从察觉）。顺序是：
+
+        1. 已有激活后端 → 连接它；
+        2. 否则读持久化的「上次使用的设备」，仍在枚举表中则沿用，并在
+           ``last_connect_notice`` 里写明沿用了哪台；
+        3. 没有记录（或记录已不在）→ 返回 False，``last_connect_notice``
+           列出全部可用设备（索引 + 名称 + device_id），让用户显式指定。
+
         显式传入未枚举到的 device_id 时拒绝连接——静默连到别的设备会骗人
         （违反 sdr_connect 契约「只能连接枚举到的真实设备」）。
         成员判定前先过设备表 TTL 刷新：热插拔后直接 connect 新 id 不必
         先跑一遍 list_devices。
         """
+        self.last_connect_notice = ""
         self._refresh_if_stale()
         if device_id and device_id not in self.backends:
-            logger.warning(
-                "connect: 设备 %r 未在枚举列表中，保持未连接"
-                "（真实 id 见 list_devices / sdr_list_devices）", device_id)
+            self.last_connect_notice = (
+                f"设备 {device_id!r} 未在枚举列表中，未连接。"
+                f"可用设备：{self._device_choices_text()}")
+            logger.warning("connect: %s", self.last_connect_notice)
             return False
-        backend = self.backends[device_id] if device_id else self.active_backend
-        if backend is None and self.backends:
-            backend = next(iter(self.backends.values()))
+        if device_id:
+            backend = self.backends[device_id]
+        else:
+            backend = self.active_backend
+            if backend is None:
+                remembered = self._last_used_device_id()
+                if remembered and remembered in self.backends:
+                    backend = self.backends[remembered]
+                    self.last_connect_notice = (
+                        f"未指定 device_id，沿用上次使用的设备："
+                        f"{backend.device.name}"
+                        f"（{backend.device.device_id}）")
+                    logger.info("connect: %s", self.last_connect_notice)
+                elif remembered:
+                    self.last_connect_notice = (
+                        f"上次使用的设备 {remembered!r} 当前不在枚举列表中，未连接。"
+                        f"可用设备：{self._device_choices_text()}")
+                    logger.warning("connect: %s", self.last_connect_notice)
+                    return False
+                else:
+                    self.last_connect_notice = (
+                        "未指定 device_id，且没有上次使用设备的记录，未连接。"
+                        f"可用设备：{self._device_choices_text()}。"
+                        "请显式传 device_id（先用 sdr_list_devices 查看）。")
+                    logger.warning("connect: %s", self.last_connect_notice)
+                    return False
 
         if backend is None:
-            logger.warning("connect: 无可用后端（未发现真实硬件），保持未连接")
+            self.last_connect_notice = (
+                "无可用后端（未发现真实硬件），保持未连接")
+            logger.warning("connect: %s", self.last_connect_notice)
             return False
 
-        return self._activate(backend)
+        ok = self._activate(backend)
+        if ok:
+            self._remember_last_device(backend.device.device_id)
+        return ok
+
+    def _device_choices_text(self) -> str:
+        """把可用设备列成「索引) 名称（device_id）」，供报错/提示用。"""
+        try:
+            items = list(self.backends.values())
+        except Exception:
+            return "（枚举失败）"
+        if not items:
+            return "（未发现任何设备）"
+        return "；".join(
+            f"{i}) {b.device.name}（{b.device.device_id}）"
+            for i, b in enumerate(items, 1))
+
+    #: config.json 里记录「上次成功连接的设备」的键。
+    _LAST_DEVICE_KEY = "sdr_last_device"
+
+    def _config(self):
+        """延迟构造 ConfigStore；失败返回 None（连接流程绝不因配置不可写而失败）。"""
+        if self._cfg_store is None:
+            try:
+                from .config import ConfigStore
+                self._cfg_store = ConfigStore()
+            except Exception as e:  # noqa: BLE001 - 配置不可用不影响连接
+                logger.debug("ConfigStore 不可用（忽略持久化）: %s", e)
+                return None
+        return self._cfg_store
+
+    def _last_used_device_id(self) -> str:
+        """读持久化的上次设备 id；没有/损坏一律返回空串（不猜）。"""
+        store = self._config()
+        if store is None:
+            return ""
+        try:
+            rec = (store.read() or {}).get(self._LAST_DEVICE_KEY)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("读取上次设备记录失败（忽略）: %s", e)
+            return ""
+        if isinstance(rec, dict):
+            return str(rec.get("device_id") or "")
+        return str(rec or "")
+
+    def _remember_last_device(self, device_id: str) -> None:
+        """成功连接后落盘；值未变则不写（避免每次 connect 都碰磁盘）。"""
+        store = self._config()
+        if store is None or not device_id:
+            return
+        backend = self.backends.get(device_id)
+        # 持久化只是可选副作用：设备对象缺字段时记空名，绝不让它中断连接。
+        name = getattr(backend.device, "name", "") if backend is not None else ""
+        rec = {"device_id": device_id, "name": name}
+
+        def _mutate(data):
+            if data.get(self._LAST_DEVICE_KEY) == rec:
+                return False          # 没变，放弃写入
+            data[self._LAST_DEVICE_KEY] = rec
+            return True
+
+        try:
+            store.update(_mutate)
+        except Exception as e:  # noqa: BLE001 - 持久化失败不影响本次连接
+            logger.debug("写入上次设备记录失败（忽略）: %s", e)
 
     _HANDLE_ATTRS = ("_ring_reader", "_client", "_sdr", "_hackrf", "_usrp",
                      "_soapy", "_sock", "_streamer")
