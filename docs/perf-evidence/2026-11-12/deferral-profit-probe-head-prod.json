@@ -1,0 +1,443 @@
+{
+ "mode": "probe",
+ "runs": 3,
+ "valid_runs": 3,
+ "head": "2074bb29",
+ "head_snapshot": true,
+ "aborted": [],
+ "ctor_ms": [
+  1291.6,
+  1260.6,
+  1271.2
+ ],
+ "ctor_median_ms": 1271.2,
+ "definition_c_median_ms": 5734.2,
+ "show_sync_median_ms": 179.3,
+ "paint_median_ms": 82.8,
+ "sky_inclusive_ms": [
+  4.2,
+  2.8,
+  3.2
+ ],
+ "sky_exclusive_ms": [
+  4.2,
+  2.8,
+  3.2
+ ],
+ "sky_exclusive_median_ms": 3.2,
+ "theme_call_medians": [
+  {
+   "call": 1,
+   "ms": 0.6,
+   "ms_all": [
+    0.6,
+    0.6,
+    1.2
+   ],
+   "branches": [
+    "early_return",
+    "early_return",
+    "early_return"
+   ],
+   "qss_same": [
+    true,
+    true,
+    true
+   ],
+   "palette_equal": [
+    true,
+    true,
+    true
+   ],
+   "font_equal": [
+    true,
+    true,
+    true
+   ],
+   "qss_sha": [
+    "051cd06f3df1",
+    "051cd06f3df1",
+    "051cd06f3df1"
+   ],
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:197:wrapper",
+    "main_window.py:10315:_build_kernel_panels",
+    "settings_panel.py:676:__init__",
+    "settings_panel.py:838:_apply_initial_state",
+    "settings_panel.py:1554:_apply",
+    "main_window.py:5367:_apply_theme"
+   ]
+  },
+  {
+   "call": 2,
+   "ms": 0.7,
+   "ms_all": [
+    0.7,
+    0.6,
+    0.7
+   ],
+   "branches": [
+    "early_return",
+    "early_return",
+    "early_return"
+   ],
+   "qss_same": [
+    true,
+    true,
+    true
+   ],
+   "palette_equal": [
+    true,
+    true,
+    true
+   ],
+   "font_equal": [
+    true,
+    true,
+    true
+   ],
+   "qss_sha": [
+    "051cd06f3df1",
+    "051cd06f3df1",
+    "051cd06f3df1"
+   ],
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:819:<module>",
+    "2026-11-12-deferral-profit.py:815:main",
+    "2026-11-12-deferral-profit.py:682:_once",
+    "2026-11-12-deferral-profit.py:535:_run",
+    "main_window.py:1169:__init__",
+    "main_window.py:5367:_apply_theme"
+   ]
+  },
+  {
+   "call": 3,
+   "ms": 0.6,
+   "ms_all": [
+    0.6,
+    0.6,
+    0.7
+   ],
+   "branches": [
+    "early_return",
+    "early_return",
+    "early_return"
+   ],
+   "qss_same": [
+    true,
+    true,
+    true
+   ],
+   "palette_equal": [
+    true,
+    true,
+    true
+   ],
+   "font_equal": [
+    true,
+    true,
+    true
+   ],
+   "qss_sha": [
+    "051cd06f3df1",
+    "051cd06f3df1",
+    "051cd06f3df1"
+   ],
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:682:_once",
+    "2026-11-12-deferral-profit.py:535:_run",
+    "main_window.py:1173:__init__",
+    "2026-11-12-deferral-profit.py:197:wrapper",
+    "main_window.py:5843:_apply_restored_settings",
+    "main_window.py:5367:_apply_theme"
+   ]
+  }
+ ],
+ "default_page": {
+  "left_tab_count": 2,
+  "left_tab_current_index": 0,
+  "left_tab_current_is_sky": true,
+  "left_tab_titles": [
+   "星象仪模式",
+   "频谱"
+  ],
+  "mode_stack_index": 0,
+  "app_mode": "ide"
+ },
+ "sky_visible_after_show": true,
+ "shell_overlap": {
+  "addWidget_seq": 2,
+  "setCentralWidget_seq": 4,
+  "add_sizehint_unique": 11,
+  "set_sizehint_unique": 9,
+  "shared": 9,
+  "only_add": 2,
+  "only_set": 0
+ },
+ "deferred": [
+  null,
+  null,
+  null
+ ],
+ "prewarm_font_ms": [
+  null,
+  null,
+  null
+ ],
+ "pre_apply_ms": [
+  1.1,
+  1.3,
+  1.1
+ ],
+ "pre_apply_theme": true,
+ "splash_ms": [
+  375.8,
+  302.8,
+  441.0
+ ],
+ "splash": true,
+ "minimum_size_hint_calls": [
+  358,
+  358,
+  358
+ ],
+ "slow_minimum_size_hints": [
+  {
+   "class": "StatusPanel",
+   "object": "",
+   "ms": 19.8,
+   "region": null
+  },
+  {
+   "class": "SatTrackPanel",
+   "object": "satTrackPanel",
+   "ms": 18.6,
+   "region": null
+  },
+  {
+   "class": "WeatherPanel",
+   "object": "",
+   "ms": 7.5,
+   "region": null
+  },
+  {
+   "class": "AIPanel",
+   "object": "",
+   "ms": 7.4,
+   "region": null
+  },
+  {
+   "class": "NewSpacetimePanel",
+   "object": "newSpacetimePanel",
+   "ms": 7.4,
+   "region": null
+  }
+ ],
+ "method_rows": {
+  "MW._build_menu_bar": {
+   "calls": 1,
+   "inclusive_ms": 3.7,
+   "exclusive_ms": 3.7
+  },
+  "MW._build_tool_bar": {
+   "calls": 1,
+   "inclusive_ms": 25.3,
+   "exclusive_ms": 25.3
+  },
+  "MW._add_right_tab": {
+   "calls": 20,
+   "inclusive_ms": 236.6,
+   "exclusive_ms": 236.6
+  },
+  "MW._build_kernel_panels": {
+   "calls": 1,
+   "inclusive_ms": 46.0,
+   "exclusive_ms": 24.6
+  },
+  "MW._build_planetarium_page": {
+   "calls": 1,
+   "inclusive_ms": 15.9,
+   "exclusive_ms": 15.9
+  },
+  "MW._build_mode_shell": {
+   "calls": 1,
+   "inclusive_ms": 293.1,
+   "exclusive_ms": 277.2
+  },
+  "MW._build_central_widget": {
+   "calls": 1,
+   "inclusive_ms": 1244.8,
+   "exclusive_ms": 686.2
+  },
+  "MW._build_status_bar": {
+   "calls": 1,
+   "inclusive_ms": 1.1,
+   "exclusive_ms": 1.1
+  },
+  "MW._panels_set_sdr_connected": {
+   "calls": 1,
+   "inclusive_ms": 1.0,
+   "exclusive_ms": 1.0
+  },
+  "MW._apply_restored_settings": {
+   "calls": 1,
+   "inclusive_ms": 2.8,
+   "exclusive_ms": 2.8
+  }
+ },
+ "theme_calls_sample": [
+  {
+   "ms": 0.6,
+   "theme": "dark_car",
+   "qss_len": 20127,
+   "qss_sha": "051cd06f3df1",
+   "current_len": 20127,
+   "current_sha": "051cd06f3df1",
+   "palette_equal": true,
+   "font_equal": true,
+   "qss_same": true,
+   "branch": "early_return",
+   "repolish_delta": 0,
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:197:wrapper",
+    "main_window.py:10315:_build_kernel_panels",
+    "settings_panel.py:676:__init__",
+    "settings_panel.py:838:_apply_initial_state",
+    "settings_panel.py:1554:_apply",
+    "main_window.py:5367:_apply_theme"
+   ]
+  },
+  {
+   "ms": 0.7,
+   "theme": "dark_car",
+   "qss_len": 20127,
+   "qss_sha": "051cd06f3df1",
+   "current_len": 20127,
+   "current_sha": "051cd06f3df1",
+   "palette_equal": true,
+   "font_equal": true,
+   "qss_same": true,
+   "branch": "early_return",
+   "repolish_delta": 0,
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:819:<module>",
+    "2026-11-12-deferral-profit.py:815:main",
+    "2026-11-12-deferral-profit.py:682:_once",
+    "2026-11-12-deferral-profit.py:535:_run",
+    "main_window.py:1169:__init__",
+    "main_window.py:5367:_apply_theme"
+   ]
+  },
+  {
+   "ms": 0.6,
+   "theme": "dark_car",
+   "qss_len": 20127,
+   "qss_sha": "051cd06f3df1",
+   "current_len": 20127,
+   "current_sha": "051cd06f3df1",
+   "palette_equal": true,
+   "font_equal": true,
+   "qss_same": true,
+   "branch": "early_return",
+   "repolish_delta": 0,
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:682:_once",
+    "2026-11-12-deferral-profit.py:535:_run",
+    "main_window.py:1173:__init__",
+    "2026-11-12-deferral-profit.py:197:wrapper",
+    "main_window.py:5843:_apply_restored_settings",
+    "main_window.py:5367:_apply_theme"
+   ]
+  }
+ ],
+ "shell_call_medians": [
+  {
+   "call": 1,
+   "label": "QMainWindow.setCentralWidget",
+   "ms": 78.2,
+   "ms_all": [
+    79.0,
+    78.2,
+    75.1
+   ],
+   "arg": {
+    "class": "QWidget",
+    "object": "",
+    "ptr": 2093928732912
+   },
+   "sizehint_calls": 16,
+   "sizehint_ms": 0.5,
+   "sizehint_unique": [
+    6,
+    6,
+    6
+   ]
+  },
+  {
+   "call": 2,
+   "label": "QStackedWidget.addWidget",
+   "ms": 139.3,
+   "ms_all": [
+    139.3,
+    130.9,
+    142.8
+   ],
+   "arg": {
+    "class": "QWidget",
+    "object": "",
+    "ptr": 2093928732912
+   },
+   "sizehint_calls": 31,
+   "sizehint_ms": 4.9,
+   "sizehint_unique": [
+    11,
+    11,
+    11
+   ]
+  },
+  {
+   "call": 3,
+   "label": "QStackedWidget.addWidget",
+   "ms": 0.6,
+   "ms_all": [
+    0.6,
+    0.6,
+    0.7
+   ],
+   "arg": {
+    "class": "QWidget",
+    "object": "planetariumPage",
+    "ptr": 2094940425744
+   },
+   "sizehint_calls": 0,
+   "sizehint_ms": 0.0,
+   "sizehint_unique": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "call": 4,
+   "label": "QMainWindow.setCentralWidget",
+   "ms": 138.4,
+   "ms_all": [
+    137.1,
+    138.4,
+    151.7
+   ],
+   "arg": {
+    "class": "QStackedWidget",
+    "object": "",
+    "ptr": 2094940425312
+   },
+   "sizehint_calls": 26,
+   "sizehint_ms": 1.2,
+   "sizehint_unique": [
+    9,
+    9,
+    9
+   ]
+  }
+ ]
+}

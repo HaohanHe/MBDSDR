@@ -10,14 +10,16 @@
  "candidates": [
   {
    "item": "自定义:RFSkyView 构造",
-   "ms": 345.6,
-   "status": "已测",
-   "evidence": "ctor_panel_type_breakdown_types.json run3",
+   "ms": 394.4,
+   "status": "已测（2026-11-12 按首帧判据重算）",
+   "evidence": "deferral-profit-table.json / deferral-profit-paired-head.json / deferral-profit-prewarm.json",
    "owner": "卫星线",
    "expected_recoverable_ms": 0,
-   "bounds_ms": {"upper": 345.6, "lower": 0, "expected": 0},
-   "cost_if_deferred": "首次点『星象仪』页 +≈345.6 ms（未分段，估计）",
-   "note": "main_window.py:1829 把 sky_view 加成 left_tab 第 0 页（默认可见），惰性触发就在首帧前 → 回收 0；只有同时改默认页/持久化布局不在星象仪页才有 345.6，而那时代价是首次切页的等待。见 rfskyview-lazy-upper-bound.json"
+   "bounds_ms": {"upper": 0, "lower": 0, "expected": 0},
+   "first_frame_saving_ms": 0,
+   "split": {"font_metrics_ms": 391.9, "construction_ms": 2.5},
+   "cost_if_deferred": "首次切到星象仪页 88.9 ms（创建 3.5 + 插入/显示 85.6，中位；不重现 394）",
+   "note": "394.4 里 99.4% 是进程首次字体度量，只是结账在星象仪上。配对 probe/stub（4 对交替）净节省 median −7.8 ms（符号随先后顺序翻转；第二进程恒快 53–98 ms 是缓存效应），预热字体对照把星象仪塌到 2.5 ms 但预热本身 395.8 ms 且在 ctor 之前。隔离 profile 下 left_tab 第 0 页就是星象仪、首帧可见，所以既不可延后，延后也不省。"
   },
   {
    "item": "QLineEdit 首实例（进程首次字体度量）",
@@ -32,8 +34,17 @@
    "item": "_apply_initial_state 首次主题应用",
    "ms": "160.2–191.2",
    "status": "已测",
-   "evidence": "2026-11-12-settings-initial-state-breakdown.py",
-   "note": "32 项里其余合计 0.6 ms；这一次走的是 app.setStyleSheet(qss) 全树 polish，不是 _repolish_all"
+   "evidence": "2026-11-12-settings-initial-state-breakdown.py / deferral-profit-probe-head.json",
+   "per_call": {
+    "call_1_ms": [240.9, 188.5, 210.8],
+    "call_2_ms": [1.3, 1.2, 68.4],
+    "call_3_ms": [1.3, 1.3, 1.9],
+    "branches": ["setStyleSheet", "early_return", "early_return"],
+    "guard_works": true,
+    "production_order_ms": [[0.6, 0.6, 1.2], [0.7, 0.6, 0.7], [0.6, 0.6, 0.7]],
+    "production_order_branches": "三次全 early_return（main.py:713 先 apply）"
+   },
+   "note": "32 项里其余合计 0.6 ms；这一次走的是 app.setStyleSheet(qss) 全树 polish，不是 _repolish_all。220.6 不是三次空转：后两次 early_return 各 1.2–1.3 ms（68.4 是 GC/调度毛刺），守卫没有失效。首帧必须带样式 → 不可延后。"
   },
   {
    "item": "SettingsPanel 其余（去掉主题那笔）",
@@ -83,5 +94,5 @@
    "note": "815 不是真实的无名区：控件类型合计与 addTab 互相嵌套，不能从 ctor 里直接扣。全包后未命名的直写代码只有 5.5–7.3 ms。ctor 实际由：首次字体度量 ≈656（星象仪 394 + 工具条 157，预热对照后塌到 2.7/6.9）、QSS polish ≈221、reparent+布局 ≈286（addWidget 143 + setCentralWidget 143）、右栏 minimumSizeHint+addTab ≈235、扩展/数字面板 ≈206、其余 ≈60 组成。可延后项只有窗口图标 ≈10 ms。"
   }
  ],
- "conclusion": "按「首帧内容完整、可交互」的判据重算：RFSkyView 345.6 与 QLineEdit 343.3 的定义 C 可回收都是 0（前者默认页即星象仪；后者是进程首次字体度量，换支付者而已）。原来记作「框架余量 ≈815」的那块已拆开（ctor-residual-breakdown.json）：未命名直写代码只剩 6.5 ms，其余是首次字体度量 ≈656、QSS polish ≈221、reparent/布局 ≈286、右栏 sizeHint+addTab ≈235、扩展/数字面板 ≈206——全部首帧内容依赖，可延后项只有窗口图标 ≈10 ms。隐藏期 QSS 是否白做也已验：show 只重刷 170/1128（≈15%），可见窗口再 apply 要 440.5 ms，故「挪到 show 之后」按判据和成本双否。以已测项计，本线单方面凑不出 358.5；要谈 800 只能减少首帧要建的东西（RFSkyView 归卫星线），不存在本线可单方面回收的 358。"
+ "conclusion": "按「首帧是否需要它被画出来」重算（deferral-profit-table.json，HEAD 2074bb29，全部低负载）：三块可延后合计 = 0 ms。① 星象仪 394.4 里 391.9 是进程首次字体度量、2.5 是控件构造；配对 probe/stub 交替 4 对净节省中位 −7.8 ms（第二进程恒快 53–98 ms，抵消后为 0），首次切页另付 88.9 ms；隔离 profile 下 left_tab 第 0 页就是星象仪、首帧可见。② Theme.apply 三次 = 210.8 / 1.3 / 1.3 ms，后两次 early_return，qss/palette/font 三项全等，守卫没有失效；生产入口先 apply，ctor 三次全 early_return。③ addWidget(root) 181.7 与 setCentralWidget(stack) 179.6 是两次真的全树 reparent+布局，互不嵌套可相加；重复的只有 9 个控件的 minimumSizeHint = 1.4 ms，不构成重复计费。唯一确认可延后的是全屏星象仪页 _build_planetarium_page 15.9 ms。算术：1158.5 − 0 = 1158.5，仍高 358.5；带上星象仪页也只到 1142.6，仍高 342.6。「只靠星象仪延后就够」= 假，「其余不动也能达标」= 假。下一块：右栏 _add_right_tab 20 次 inclusive 236.6 ms（只有当前页进首帧），全拿也只到 906.0，仍差约 106 ms。"
 }

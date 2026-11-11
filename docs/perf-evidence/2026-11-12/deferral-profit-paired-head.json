@@ -1,0 +1,103 @@
+{
+ "mode": "paired",
+ "valid_pairs": 4,
+ "head": "2074bb29",
+ "head_snapshot": true,
+ "splash": false,
+ "pre_apply_theme": false,
+ "pairs": [
+  {
+   "order": [
+    "probe",
+    "stub"
+   ],
+   "probe_ctor": 1375.9,
+   "stub_ctor": 1444.5,
+   "delta_ctor_ms": -68.6,
+   "probe_total": 1641.6,
+   "stub_total": 1701.4,
+   "delta_total_ms": -59.8,
+   "probe_sky_exclusive": 328.9,
+   "head": "2074bb29",
+   "loads": [
+    133.6,
+    100.8
+   ]
+  },
+  {
+   "order": [
+    "stub",
+    "probe"
+   ],
+   "probe_ctor": 1279.1,
+   "stub_ctor": 1226.1,
+   "delta_ctor_ms": 53.0,
+   "probe_total": 1546.8,
+   "stub_total": 1472.6,
+   "delta_total_ms": 74.2,
+   "probe_sky_exclusive": 264.6,
+   "head": "2074bb29",
+   "loads": [
+    98.5,
+    100.0
+   ]
+  },
+  {
+   "order": [
+    "probe",
+    "stub"
+   ],
+   "probe_ctor": 1339.6,
+   "stub_ctor": 1428.0,
+   "delta_ctor_ms": -88.4,
+   "probe_total": 1615.1,
+   "stub_total": 1704.7,
+   "delta_total_ms": -89.6,
+   "probe_sky_exclusive": 353.9,
+   "head": "2074bb29",
+   "loads": [
+    103.9,
+    120.3
+   ]
+  },
+  {
+   "order": [
+    "stub",
+    "probe"
+   ],
+   "probe_ctor": 1346.1,
+   "stub_ctor": 1248.2,
+   "delta_ctor_ms": 97.9,
+   "probe_total": 1631.7,
+   "stub_total": 1489.9,
+   "delta_total_ms": 141.8,
+   "probe_sky_exclusive": 270.8,
+   "head": "2074bb29",
+   "loads": [
+    78.9,
+    75.8
+   ]
+  }
+ ],
+ "delta_ctor_all": [
+  -68.6,
+  53.0,
+  -88.4,
+  97.9
+ ],
+ "delta_ctor_median_ms": -7.8,
+ "delta_total_all": [
+  -59.8,
+  74.2,
+  -89.6,
+  141.8
+ ],
+ "delta_total_median_ms": 7.2,
+ "probe_sky_exclusive_all": [
+  328.9,
+  264.6,
+  353.9,
+  270.8
+ ],
+ "probe_sky_exclusive_median_ms": 299.9
+}

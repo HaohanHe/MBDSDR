@@ -1,0 +1,274 @@
+{
+ "mode": "prewarm",
+ "runs": 3,
+ "valid_runs": 3,
+ "ctor_ms": [
+  828.5,
+  836.6,
+  834.4
+ ],
+ "ctor_median_ms": 834.4,
+ "definition_c_median_ms": 4611.5,
+ "show_sync_median_ms": 177.3,
+ "paint_median_ms": 98.0,
+ "sky_inclusive_ms": [
+  2.4,
+  2.5,
+  2.6
+ ],
+ "sky_exclusive_ms": [
+  2.4,
+  2.5,
+  2.6
+ ],
+ "sky_exclusive_median_ms": 2.5,
+ "theme_call_medians": [
+  {
+   "call": 1,
+   "ms": 145.4,
+   "ms_all": [
+    145.4,
+    144.6,
+    153.3
+   ],
+   "branches": [
+    "setStyleSheet",
+    "setStyleSheet",
+    "setStyleSheet"
+   ],
+   "qss_same": [
+    false,
+    false,
+    false
+   ],
+   "palette_equal": [
+    false,
+    false,
+    false
+   ],
+   "font_equal": [
+    true,
+    true,
+    true
+   ],
+   "qss_sha": [
+    "051cd06f3df1",
+    "051cd06f3df1",
+    "051cd06f3df1"
+   ],
+   "caller_chain": [
+    "main_window.py:2185:_build_central_widget",
+    "main_window.py:10318:_build_kernel_panels",
+    "settings_panel.py:676:__init__",
+    "settings_panel.py:838:_apply_initial_state",
+    "settings_panel.py:1554:_apply",
+    "main_window.py:5370:_apply_theme"
+   ]
+  },
+  {
+   "call": 2,
+   "ms": 0.9,
+   "ms_all": [
+    1.0,
+    0.9,
+    0.7
+   ],
+   "branches": [
+    "early_return",
+    "early_return",
+    "early_return"
+   ],
+   "qss_same": [
+    true,
+    true,
+    true
+   ],
+   "palette_equal": [
+    true,
+    true,
+    true
+   ],
+   "font_equal": [
+    true,
+    true,
+    true
+   ],
+   "qss_sha": [
+    "051cd06f3df1",
+    "051cd06f3df1",
+    "051cd06f3df1"
+   ],
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:705:<module>",
+    "2026-11-12-deferral-profit.py:701:main",
+    "2026-11-12-deferral-profit.py:597:_once",
+    "2026-11-12-deferral-profit.py:462:_run",
+    "main_window.py:1172:__init__",
+    "main_window.py:5370:_apply_theme"
+   ]
+  },
+  {
+   "call": 3,
+   "ms": 0.8,
+   "ms_all": [
+    0.8,
+    0.7,
+    0.8
+   ],
+   "branches": [
+    "early_return",
+    "early_return",
+    "early_return"
+   ],
+   "qss_same": [
+    true,
+    true,
+    true
+   ],
+   "palette_equal": [
+    true,
+    true,
+    true
+   ],
+   "font_equal": [
+    true,
+    true,
+    true
+   ],
+   "qss_sha": [
+    "051cd06f3df1",
+    "051cd06f3df1",
+    "051cd06f3df1"
+   ],
+   "caller_chain": [
+    "2026-11-12-deferral-profit.py:701:main",
+    "2026-11-12-deferral-profit.py:597:_once",
+    "2026-11-12-deferral-profit.py:462:_run",
+    "main_window.py:1176:__init__",
+    "main_window.py:5846:_apply_restored_settings",
+    "main_window.py:5370:_apply_theme"
+   ]
+  }
+ ],
+ "default_page": {
+  "left_tab_count": 2,
+  "left_tab_current_index": 0,
+  "left_tab_current_is_sky": true,
+  "left_tab_titles": [
+   "星象仪模式",
+   "频谱"
+  ],
+  "mode_stack_index": 0,
+  "app_mode": "ide"
+ },
+ "sky_visible_after_show": true,
+ "shell_overlap": {
+  "addWidget_seq": 2,
+  "setCentralWidget_seq": 4,
+  "add_sizehint_unique": 11,
+  "set_sizehint_unique": 9,
+  "shared": 9,
+  "only_add": 2,
+  "only_set": 0
+ },
+ "deferred": [
+  null,
+  null,
+  null
+ ],
+ "prewarm_font_ms": [
+  395.8,
+  451.7,
+  324.4
+ ],
+ "shell_call_medians": [
+  {
+   "call": 1,
+   "label": "QMainWindow.setCentralWidget",
+   "ms": 0.1,
+   "ms_all": [
+    0.1,
+    0.1,
+    0.1
+   ],
+   "arg": {
+    "class": "QWidget",
+    "object": "",
+    "ptr": 1820422007120
+   },
+   "sizehint_calls": 0,
+   "sizehint_ms": 0.0,
+   "sizehint_unique": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "call": 2,
+   "label": "QStackedWidget.addWidget",
+   "ms": 128.2,
+   "ms_all": [
+    128.2,
+    127.5,
+    130.5
+   ],
+   "arg": {
+    "class": "QWidget",
+    "object": "",
+    "ptr": 1820422007120
+   },
+   "sizehint_calls": 31,
+   "sizehint_ms": 4.0,
+   "sizehint_unique": [
+    11,
+    11,
+    11
+   ]
+  },
+  {
+   "call": 3,
+   "label": "QStackedWidget.addWidget",
+   "ms": 0.6,
+   "ms_all": [
+    0.6,
+    0.6,
+    0.6
+   ],
+   "arg": {
+    "class": "QWidget",
+    "object": "planetariumPage",
+    "ptr": 1820426442256
+   },
+   "sizehint_calls": 0,
+   "sizehint_ms": 0.0,
+   "sizehint_unique": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "call": 4,
+   "label": "QMainWindow.setCentralWidget",
+   "ms": 129.2,
+   "ms_all": [
+    129.2,
+    132.6,
+    128.7
+   ],
+   "arg": {
+    "class": "QStackedWidget",
+    "object": "",
+    "ptr": 1820426441392
+   },
+   "sizehint_calls": 26,
+   "sizehint_ms": 1.1,
+   "sizehint_unique": [
+    9,
+    9,
+    9
+   ]
+  }
+ ]
+}

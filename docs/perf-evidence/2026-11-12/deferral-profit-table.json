@@ -1,0 +1,212 @@
+{
+ "kind": "按「首帧是否需要它被画出来」重算可延后利润表",
+ "date": "2026-11-12",
+ "head": "2074bb29",
+ "head_note": "main_window.py 在 ff1668c6 与 2074bb29 之间无改动（2074bb29 只动 tests/conftest.py）；工作树里的 main_window.py 正被卫星线改成惰性星象仪，所有读数都用 `--head-snapshot` 从 HEAD 导出后测量，不测工作树。",
+ "baseline": {
+  "definition": "C",
+  "definition_text": "进程入口 → 真屏 show() 后首个 paint 事件派发完毕",
+  "median_ms": 1158.5,
+  "gap_ms": 358.5,
+  "source": "docs/perf-evidence/2026-11-11/first_tick_def_c_lazy_settings_ab.json",
+  "source_note": "该脚本 `entry_to_tick_ms = ctor_ms + tick_ms`（first-tick-definitions.py:191），不含 import 阶段；且用隔离 profile（layouts.json 为空），所以左栏默认页 = 第 0 页 = 星象仪。"
+ },
+ "criterion": "不是「构造期是否必须执行」，而是「首帧是否需要它被画出来」。用户双击到看见第一帧，只有出现在首屏的东西必须建。",
+ "ruler": {
+  "qt_platform": "windows",
+  "QT_SCALE_FACTOR": "1",
+  "QT_ENABLE_HIGHDPI_SCALING": "0",
+  "font": "MiSans",
+  "pt": 10.0,
+  "line_height_px": 27,
+  "dpr": 1.0
+ },
+ "load_rule": "规则 10：每个子进程测前/测后各采一次系统 CPU + python 进程总占比；全部 <200%。本表所有 run 的负载记录在原 run JSON 与本表 loads 段。",
+ "loads": {
+  "probe_head": {
+   "load_before_python_pct": [4.7, 7.0, 7.8],
+   "load_after_python_pct": [110.2, 99.1, 19.5]
+  },
+  "stub_head": {
+   "load_before_python_pct": [4.7, 11.0, 5.5],
+   "load_after_python_pct": [19.5, 11.7, 15.7]
+  },
+  "prewarm_head": {
+   "load_before_python_pct": [5.5, 7.0, 6.3],
+   "load_after_python_pct": [15.7, 14.1, 18.0]
+  },
+  "probe_head_prod": {
+   "load_before_python_pct": [67.2, 4.7, 3.9],
+   "load_after_python_pct": [7.8, 10.9, 9.4]
+  },
+  "stub_head_prod": {
+   "load_before_python_pct": [6.2, 6.3, 5.5],
+   "load_after_python_pct": [3.9, 8.6, 7.8]
+  },
+  "paired_head": {
+   "load_before_python_pct": [133.6, 100.8, 98.5, 100.0, 103.9, 120.3, 78.9, 75.8]
+  }
+ },
+ "block_1_sky_widget": {
+  "item": "_create_sky_widget（RFSkyView 构造，`main_window.py` 归卫星线）",
+  "ledger_ms": 394.4,
+  "measured_exclusive_ms": {
+   "baseline_order_3runs": [372.4, 404.4, 373.6],
+   "baseline_order_median": 373.6,
+   "paired_probe_4runs": [328.9, 264.6, 353.9, 270.8],
+   "paired_probe_median": 299.9,
+   "production_order_3runs": [4.2, 2.8, 3.2],
+   "production_order_median": 3.2
+  },
+  "split_font_vs_construction": {
+   "method": "预暖 MiSans(app font) + Consolas 14pt 后再跑同一 ctor，读 `_create_sky_widget` exclusive",
+   "cold_exclusive_ms_median": 373.6,
+   "warm_exclusive_ms_runs": [2.4, 2.5, 2.6],
+   "warm_exclusive_ms_median": 2.5,
+   "font_metrics_ms": 371.1,
+   "font_metrics_share": "99.3%",
+   "construction_ms": 2.5,
+   "prewarm_cost_ms_runs": [395.8, 451.7, 324.4],
+   "prewarm_cost_ms_median": 395.8,
+   "note": "按 ledger 的 394.4 折算：字体度量 ≈391.9（99.4%），控件构造 ≈2.5（0.6%）。预暖本身要 395.8 ms，且发生在 ctor 之前，仍在定义 C 内——它不减少总量，只换支付者。"
+  },
+  "first_frame_saving_ms": 0,
+  "first_frame_saving_evidence": {
+   "method": "同进程只替换 `_create_sky_widget` 为同接口空 QWidget，交替跑 probe/stub（4 对，probe 先/stub 先各半），取对差",
+   "pairs": [
+    {"order": ["probe", "stub"], "probe_ctor": 1375.9, "stub_ctor": 1444.5, "delta_ctor": -68.6, "delta_total": -59.8, "probe_sky": 328.9},
+    {"order": ["stub", "probe"], "probe_ctor": 1279.1, "stub_ctor": 1226.1, "delta_ctor": 53.0, "delta_total": 74.2, "probe_sky": 264.6},
+    {"order": ["probe", "stub"], "probe_ctor": 1339.6, "stub_ctor": 1428.0, "delta_ctor": -88.4, "delta_total": -89.6, "probe_sky": 353.9},
+    {"order": ["stub", "probe"], "probe_ctor": 1346.1, "stub_ctor": 1248.2, "delta_ctor": 97.9, "delta_total": 141.8, "probe_sky": 270.8}
+   ],
+   "delta_ctor_median_ms": -7.8,
+   "delta_total_median_ms": 7.2,
+   "order_effect": "每一对里第二个进程都更快 53–98 ms（OS/字体缓存预热），与模式无关；把顺序效应抵消后，去掉星象仪的净节省 ≈0（median −7.8 ms，符号随先后顺序翻转）。",
+   "conclusion": "393–374 ms 是进程首次字体度量在星象仪上结账，不是星象仪的构造成本。把它从 ctor 移走，同一笔钱立刻转嫁给首帧里下一个要文字尺寸的控件；首帧总时长不变。"
+  },
+  "deferred_cost_when_first_switch": {
+   "create_ms_runs": [3.3, 3.5, 3.7],
+   "create_ms_median": 3.5,
+   "insert_and_show_ms_runs": [85.6, 87.2, 78.2],
+   "insert_and_show_ms_median": 85.6,
+   "total_ms_runs": [88.9, 90.9, 81.7],
+   "total_ms_median": 88.9,
+   "reproduces_394": false,
+   "why": "首次切页时 splash（或首帧）已把字体度量付掉，创建只剩控件构造 3.5 ms；88.9 ms 里 85.6 是插回页签后的首次 polish + paint。"
+  },
+  "first_frame_visibility": {
+   "left_tab_index": 0,
+   "left_tab_titles": ["星象仪模式", "频谱"],
+   "left_tab_current_is_sky": true,
+   "sky_visible_after_show": true,
+   "mode_stack_index": 0,
+   "app_mode": "ide",
+   "note": "隔离 profile（基线测量条件）下左栏第 0 页就是星象仪，首帧要画它。全屏星象仪页（_mode_stack 第 1 页）不是默认页；但左栏这个 sky_view 是。只有持久化布局把 left_tab_index 记成 1（频谱）时，它才不在首帧。"
+  },
+  "verdict": "不是可延后项：① 首帧里它可见（隔离 profile）；② 即使不可见，延后也只省 ≈0 ms。任何「省 394」的账都是把首次字体度量重复记了一遍。"
+ },
+ "block_2_theme_apply": {
+  "item": "Theme.apply ×3",
+  "ledger_ms": 220.6,
+  "baseline_order_3runs": [
+   {"call": 1, "ms": 240.9, "branch": "setStyleSheet", "qss_len": 20127, "qss_sha": "051cd06f3df1", "palette_equal": false, "font_equal": true, "qss_same": false, "caller": "main_window.py:10315 _build_kernel_panels → settings_panel.py:676 __init__ → :838 _apply_initial_state → :1554 _apply → :5367 _apply_theme"},
+   {"call": 2, "ms": 1.3, "branch": "early_return", "qss_same": true, "palette_equal": true, "font_equal": true},
+   {"call": 3, "ms": 1.3, "branch": "early_return", "qss_same": true, "palette_equal": true, "font_equal": true}
+  ],
+  "baseline_order_median_ms": {"call_1": 210.8, "call_2": 1.3, "call_3": 1.3},
+  "baseline_order_all_ms": {"call_1": [240.9, 188.5, 210.8], "call_2": [1.3, 1.2, 68.4], "call_3": [1.3, 1.3, 1.9]},
+  "production_order": {
+   "all_ms": [[0.6, 0.6, 1.2], [0.7, 0.6, 0.7], [0.6, 0.6, 0.7]],
+   "branches": [["early_return", "early_return", "early_return"], ["early_return", "early_return", "early_return"], ["early_return", "early_return", "early_return"]],
+   "pre_apply_in_entry_ms": [1.1, 1.3, 1.1],
+   "note": "main.py:709-713 在建主窗之前就 app.setFont + theme.apply；生产序里 ctor 的三次全是 early_return，第一次 setStyleSheet 在入口处以 1.1–1.3 ms 付掉（此时还没有窗口）。"
+  },
+  "guard_works": true,
+  "is_bug": false,
+  "verdict": "幂等守卫没有失效：后两次是 early_return，各 1.2–1.3 ms（一次 68.4 ms 是 GC/调度毛刺）。220.6 ms 不是三次空转，是第一次 setStyleSheet 的全树 retro-polish；在生产入口顺序下连这一次也不会落在 ctor 里。不可延后——首帧必须有样式。"
+ },
+ "block_3_addwidget_setcentral": {
+  "item": "QStackedWidget.addWidget ×2 + QMainWindow.setCentralWidget ×2",
+  "ledger_ms": {"addWidget": 143.4, "setCentralWidget": 142.8},
+  "per_call_baseline_order": [
+   {"seq": 1, "label": "QMainWindow.setCentralWidget", "arg": "QWidget(root)", "ms": 0.1, "sizehint_calls": 0, "sizehint_ms": 0.0},
+   {"seq": 2, "label": "QStackedWidget.addWidget", "arg": "QWidget(root)", "ms": 181.7, "sizehint_calls": 31, "sizehint_ms": 7.1, "sizehint_unique": 11},
+   {"seq": 3, "label": "QStackedWidget.addWidget", "arg": "planetariumPage", "ms": 1.0, "sizehint_calls": 0, "sizehint_ms": 0.0, "sizehint_unique": 0},
+   {"seq": 4, "label": "QMainWindow.setCentralWidget", "arg": "QStackedWidget(_mode_stack)", "ms": 179.6, "sizehint_calls": 26, "sizehint_ms": 1.4, "sizehint_unique": 9}
+  ],
+  "per_call_production_order": [
+   {"seq": 1, "label": "QMainWindow.setCentralWidget", "arg": "QWidget(root)", "ms": 79.0, "sizehint_calls": 16, "sizehint_ms": 0.5},
+   {"seq": 2, "label": "QStackedWidget.addWidget", "arg": "QWidget(root)", "ms": 139.3, "sizehint_calls": 31, "sizehint_ms": 4.9, "sizehint_unique": 11},
+   {"seq": 3, "label": "QStackedWidget.addWidget", "arg": "planetariumPage", "ms": 0.6, "sizehint_calls": 0, "sizehint_ms": 0.0},
+   {"seq": 4, "label": "QMainWindow.setCentralWidget", "arg": "QStackedWidget(_mode_stack)", "ms": 137.1, "sizehint_calls": 26, "sizehint_ms": 1.2, "sizehint_unique": 9}
+  ],
+  "sizehint_overlap": {
+   "seq_2_unique": 11,
+   "seq_4_unique": 9,
+   "shared": 9,
+   "only_add": 2,
+   "only_set": 0,
+   "note": "setCentralWidget(stack) 确实对 addWidget(root) 已经量过的同一批 9 个控件又走了一遍 minimumSizeHint。"
+  },
+  "duplicate_billing_ms": 1.4,
+  "verdict": "不是「286.2 里有一笔是重复计费」。两次都是真的全树 reparent+布局（181.7 / 179.6，生产序 139.3 / 137.1），彼此不嵌套、可相加；重复的只有 9 个控件的尺寸计算，Python 可见部分合计 1.4 ms（第一次已经付过，第二次再付这么点）。所以两条各报一次，不合并。两者都在首帧内容里，不可延后。"
+ },
+ "profit_table": [
+  {
+   "item": "_create_sky_widget / RFSkyView",
+   "ledger_ms": 394.4,
+   "first_frame_saving_ms": 0,
+   "paid_when_deferred": "首次切到星象仪页：创建 3.5 + 插入/显示 85.6 = 88.9 ms（中位；3 次 81.7–90.9）",
+   "what_user_sees": "隔离 profile 下左栏第 0 页就是星象仪：延后 → 首帧左栏空白（违反首帧内容完整）；若持久化布局是频谱页 → 首帧无变化，首次切页卡 89 ms。"
+  },
+  {
+   "item": "Theme.apply ×3",
+   "ledger_ms": 220.6,
+   "first_frame_saving_ms": 0,
+   "paid_when_deferred": "不适用：首帧必须带样式；延后 → 未上样的控件先画一遍",
+   "what_user_sees": "首帧控件无 QSS 外观（或闪一下再上色）"
+  },
+  {
+   "item": "addWidget + setCentralWidget",
+   "ledger_ms": 286.2,
+   "first_frame_saving_ms": 0,
+   "paid_when_deferred": "不适用：中央 shell 就是首帧内容",
+   "what_user_sees": "没有窗口内容"
+  }
+ ],
+ "other_deferrable_found": {
+  "item": "_build_planetarium_page（全屏星象仪页，_mode_stack 第 1 页）",
+  "ms_runs": [15.9, 13.2],
+  "ms_median": 15.9,
+  "first_frame_saving_ms": 15.9,
+  "paid_when_deferred": "首次进入全屏星象仪模式：+15.9 ms（另加 sky 未建时的 3.5 ms）",
+  "what_user_sees": "首帧无变化（默认 app_mode=ide）；首次进星象仪模式多 16 ms",
+  "note": "不在用户点名的三块里，但按同一判据它是唯一确认可延后的一项。"
+ },
+ "arithmetic": {
+  "three_blocks_deferrable_total_ms": 0,
+  "1158.5_minus_total_ms": 1158.5,
+  "still_above_800_ms": 358.5,
+  "with_planetarium_page_ms": 1142.6,
+  "with_planetarium_page_above_800_ms": 342.6,
+  "conclusion": "只靠星象仪延后不达标，而且不是「差一点」：星象仪那 394.4 里 99.4% 是进程首次字体度量，延后后由首帧里下一个控件立刻付掉，配对实验的净节省是 0（median −7.8 ms，符号随先后顺序翻转）。其余不动也达标 = 假。"
+ },
+ "next_block_if_continue": {
+  "item": "右栏 _add_right_tab（20 次调用，inclusive 236.6 ms）",
+  "why": "按新判据，右栏只有当前页在首帧被画出来，其余页签只是构造出来并 addTab，没进首帧。这是目前最大的一块「首帧不需要却建了」。",
+  "upper_bound_ms": 236.6,
+  "arithmetic_after": "1142.6 − 236.6 = 906.0，仍高于 800 约 106 ms；所以还需再下一块，不能只靠右栏惰性化收口。",
+  "status": "只是线索（本批未拆；右栏各面板归属与惰性构建先例见 panels run5 / settings_panel 惰性化）"
+ },
+ "scripts": [
+  "scripts/repro/2026-11-12-deferral-profit.py --mode probe|stub|prewarm|paired --head-snapshot [--splash --pre-apply-theme]"
+ ],
+ "sources": [
+  "docs/perf-evidence/2026-11-12/deferral-profit-probe-head.json",
+  "docs/perf-evidence/2026-11-12/deferral-profit-stub-head.json",
+  "docs/perf-evidence/2026-11-12/deferral-profit-prewarm.json",
+  "docs/perf-evidence/2026-11-12/deferral-profit-probe-head-prod.json",
+  "docs/perf-evidence/2026-11-12/deferral-profit-stub-head-prod.json",
+  "docs/perf-evidence/2026-11-12/deferral-profit-paired-head.json"
+ ]
+}
