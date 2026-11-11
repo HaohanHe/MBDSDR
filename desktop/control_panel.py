@@ -97,8 +97,8 @@ PRESET_AM_STATIONS: list[tuple[str, str]] = []
 #: 空预设占位文案。原句「（无预设：请用“自动扫台”或手动输入频率）」在
 #: 右栏 320 宽的下拉框里被硬切成「…或手动输入频」——省略号都没机会出现。
 #: 这里收短到 140px 内，完整解释放 tooltip。
-_NO_PRESET_TEXT = "无预设：先扫台或直接输频"
-_NO_PRESET_TIP = ("该频段暂无内置电台：用工具栏「自动扫台」发现，"
+_NO_PRESET_TEXT = "无预设：先扫频或直接输频"
+_NO_PRESET_TIP = ("该频段暂无内置电台：用工具栏「FM 扫频找台」发现，"
                   "或直接在频率框输入频率后调谐。")
 # SDR 常用频段预设（频率MHz, 名称, 模式）
 SDR_BAND_PRESETS = [
@@ -491,7 +491,7 @@ class ControlPanel(QWidget):
         layout.addWidget(preset_group)
 
         # ---- 收藏（书签）----
-        bookmark_group = QGroupBox("收藏")
+        bookmark_group = QGroupBox("书签")
         bookmark_layout = QVBoxLayout(bookmark_group)
 
         self.bookmark_combo = QComboBox()
@@ -511,7 +511,7 @@ class ControlPanel(QWidget):
         bookmark_layout.addWidget(self.bookmark_combo)
 
         bm_btn_row = QHBoxLayout()
-        self.bookmark_add_btn = QPushButton("收藏当前频率")
+        self.bookmark_add_btn = QPushButton("存为书签")
         self.bookmark_add_btn.clicked.connect(self._on_bookmark_add)
         bm_btn_row.addWidget(self.bookmark_add_btn)
 
@@ -646,7 +646,7 @@ class ControlPanel(QWidget):
         rx_layout.addLayout(gain_row)
 
         # AGC 自动增益开关（增益滑杆下方）
-        self.agc_check = QCheckBox("AGC 自动增益")
+        self.agc_check = QCheckBox("硬件 AGC")
         self.agc_check.setToolTip(
             "勾选后由设备自动调增益；信号忽强忽弱时开，想手动控增益就关")
         self.agc_check.toggled.connect(self._on_agc_changed)
@@ -1203,7 +1203,7 @@ class ControlPanel(QWidget):
             QMessageBox.information(
                 self, "内置书签",
                 f"「{name}」是内置频率，不能删除。"
-                "下一步：先调到你要保留的频点，再用「收藏当前频率」"
+                "下一步：先调到你要保留的频点，再用「存为书签」"
                 "保存为你自己的自定义书签。")
             return
         answer = QMessageBox.question(
