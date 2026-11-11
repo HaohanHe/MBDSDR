@@ -167,7 +167,7 @@ class TestTrackToggleSignals:
 
 
 @pytest.fixture(scope="module")
-def mw():
+def mw(isolated_profile):
     from main_window import MainWindow
     w = MainWindow()
     w.show()
