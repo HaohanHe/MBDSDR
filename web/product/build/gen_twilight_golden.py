@@ -39,6 +39,7 @@ sys.path.insert(0, str(REPO))
 from mbdsdr_ai.skyengine import twilight as ktw  # noqa: E402
 from mbdsdr_ai.skyengine import stars as kstars  # noqa: E402
 from mbdsdr_ai.skyengine import star_catalog as kcat  # noqa: E402
+from mbdsdr_ai import atmosphere as katm  # noqa: E402
 
 COMPONENT_TOL_MAG = 1e-12
 COMPOSITION_TOL_MAG = 1e-12
@@ -85,6 +86,18 @@ def main() -> None:
             "penalty": float(ktw.twilight_limit_penalty_mag(alt)),
         })
 
+    # 天空背景亮度因子（0=夜, 1=白昼）：前端渲染层用它调底色/星点压暗。
+    # 内核 atmosphere.sky_brightness_factor 是唯一事实源（与 twilight 表是两套
+    # 不同用途的亮度量，别混用：一个是 V mag/arcsec²，一个是 0..1 的显示因子）。
+    day_factors = [{"sunAlt": alt,
+                    "factor": float(katm.sky_brightness_factor(alt))}
+                   for alt in alts]
+    day_anchors = [
+        {"sunAlt": -1.0, "factor": float(katm.sky_brightness_factor(-1.0))},
+        {"sunAlt": -6.0, "factor": float(katm.sky_brightness_factor(-6.0))},
+        {"sunAlt": 0.0, "factor": float(katm.sky_brightness_factor(0.0))},
+    ]
+
     compositions = []
     for fov in FOVS_COMP:
         for b in BORTLES_COMP:
@@ -112,7 +125,12 @@ def main() -> None:
         "kernelConstants": {
             "SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2": ktw.SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2,
             "SKY_BRIGHTNESS_TABLE": [[float(a), float(m)] for a, m in ktw._SKY_BRIGHTNESS_TABLE],
+            "SKY_BRIGHT_BREAKS": [[float(a), float(b)] for a, b in katm._SKY_BRIGHT_BREAKS],
         },
+        "dayFactorSource": "mbdsdr_ai/atmosphere.py::sky_brightness_factor "
+                           "(_SKY_BRIGHT_BREAKS piecewise linear, imported not re-derived)",
+        "dayFactorAnchors": day_anchors,
+        "dayFactorTol": 1e-6,
         "webDepthCap": cap,
         "webDepthCapSource": "build/sky-catalog.json meta.magMax "
                              "(= web MAG_CAP = Number(CAT.meta.magMax || 7.5))",
@@ -135,8 +153,9 @@ def main() -> None:
         "compositionBortles": BORTLES_COMP,
         "compositionSunAlts": SUN_ALTS_COMP,
         "componentCaseCount": len(components),
+        "dayFactorCaseCount": len(day_factors),
         "compositionCaseCount": len(compositions),
-        "caseCount": len(components) + len(compositions),
+        "caseCount": len(components) + len(day_factors) + len(compositions),
         "notVerified": [
             "sky-brightness table is an order-of-magnitude approximation of published twilight "
             "curves (Krisciunas & Schaefer 1991 PASP 103,1033; Patat et al. 2006 A&A 455,385), "
@@ -157,10 +176,12 @@ def main() -> None:
     }
     out = ROOT / "build" / "twilight-golden.json"
     out.write_text(json.dumps({"meta": meta, "components": components,
+                               "dayFactors": day_factors,
                                "compositions": compositions},
                               ensure_ascii=False, indent=1) + "\n",
                    encoding="utf-8")
     print(f"[twilight-golden] {len(components)} sun-alt components + "
+          f"{len(day_factors)} day factors + "
           f"{len(compositions)} compositions = {meta['caseCount']} cases "
           f"-> {out.name} ({out.stat().st_size} bytes)")
     print(f"[twilight-golden] night {ktw.SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2}; "

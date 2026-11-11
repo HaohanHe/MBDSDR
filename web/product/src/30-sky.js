@@ -321,7 +321,7 @@
 
     const sun = C.sunAltAz(S);
     const sunAlt = sun.alt;
-    const day = clamp(sunAlt / 12, 0, 1);              // 0=夜 1=白天
+    const day = MB.astro.skyBrightnessFactor(sunAlt);  // 0=夜 1=白天（内核 atmosphere.py 分段线性）
     const twilight = clamp(1 - Math.abs(sunAlt) / 16, 0, 1);
     const hidden = C.daylightHidden(sunAlt);
 

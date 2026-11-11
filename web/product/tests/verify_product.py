@@ -567,6 +567,23 @@ print(f"[9.6.3] 晨昏连续压暗：内核 twilight 两函数镜像（天顶亮
       f"31-celestial effectiveLimit 委托 + intro 合成 + 布尔白天门保留 / 30-sky L 传 sunAlt / "
       f"跨语言金标准 {_tw.get('caseCount', 0)} 例 / 文档口径纠正")
 
+# ---------- 9.6.4 天空背景亮度因子：渲染层必须用内核镜像，不得回退 clamp(sunAlt/12) ----------
+# 背景亮度因子与 twilight 惩罚是两个量（0..1 显示因子 vs V mag/arcsec²），
+# 但同属「昼夜/晨昏物理量」，必须与内核 atmosphere.py 同律。
+for _m in ("skyBrightnessFactor", "SKY_BRIGHT_BREAKS"):
+    if _m not in _astro:
+        fail(f"[day] 14-astro-frame.js 缺内核天空亮度因子镜像：{_m}")
+if "mbdsdr_ai/atmosphere.py" not in _astro:
+    fail("[day] 14-astro-frame.js 未标注天空亮度因子事实源（mbdsdr_ai/atmosphere.py）")
+if "skyBrightnessFactor(sunAlt)" not in _sky_code:
+    fail("[day] 30-sky.js 未用 MB.astro.skyBrightnessFactor（昼夜背景必须同律）")
+if re.search(r"clamp\s*\(\s*sunAlt\s*/\s*12", _sky_code):
+    fail("[day] 30-sky.js 回退 clamp(sunAlt/12)：太阳 -1° 会判成深夜（内核 0.888）")
+if "dayFactorAnchors" not in _tw.get("formulas", {}) and "dayFactorSource" not in _tw:
+    fail("[day] 晨昏金标准缺背景亮度因子（dayFactorSource/anchors）")
+print(f"[9.6.4] 天空背景亮度因子：内核 atmosphere.py 分段线性镜像 / "
+      f"30-sky 昼夜背景委托 / 三点 golden（-1°→0.8883, -6°→0.33, 0°→1.0）")
+
 # ---------- 9.7 写工具确认通道（阶段 C：前端只登记意图，token 不出宿主） ----------
 _data = (SRC / "10-data.js").read_text(encoding="utf-8")
 _dialog = (SRC / "50-dialog.js").read_text(encoding="utf-8")

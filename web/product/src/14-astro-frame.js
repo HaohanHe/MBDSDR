@@ -281,6 +281,34 @@
                        - skyBrightnessMagArcsec2(sunAltDeg));
   }
 
+  /* ---------- 天空背景亮度因子（0=深夜, 1=白天）——事实源 mbdsdr_ai/atmosphere.py ----------
+   * 逐式镜像 atmosphere.py::sky_brightness_factor 的 _SKY_BRIGHT_BREAKS 分段线性：
+   *   -18°→0（天文夜）、-12°→0.002（航海晨昏）、-6°→0.33（民用晨昏）、
+   *   0°→1.0（日出/日落）、±90° 外夹到端点。
+   * 旧版 30-sky.js 用 clamp(sunAlt/12, 0, 1)：太阳 -1° 时给 0（当深夜），内核给
+   * 0.888（仍是白天余晖），昼夜判错整整一档——这是物理量不同律，不是观感差异。
+   * 渲染层只拿它调天空底色/星点压暗，不参与指向或过境结论。 */
+  const SKY_BRIGHT_BREAKS = [
+    [-90.0, 0.0], [-18.0, 0.0], [-12.0, 0.002],
+    [-6.0, 0.33], [0.0, 1.0], [90.0, 1.0]
+  ];
+  function skyBrightnessFactor(sunAltDeg) {
+    const alt = Number(sunAltDeg);
+    const pts = SKY_BRIGHT_BREAKS;
+    /* NaN 与内核一致走到底返回 1.0：Python 里 NaN 的所有比较均为 False，
+       不会命中 <=-18 / >=90，也不会命中任何线段。 */
+    if (alt <= pts[1][0]) return 0.0;
+    if (alt >= pts[pts.length - 1][0]) return 1.0;
+    for (let i = 1; i < pts.length; i++) {
+      const h0 = pts[i - 1][0], b0 = pts[i - 1][1];
+      const h1 = pts[i][0], b1 = pts[i][1];
+      if (h0 <= alt && alt <= h1) {
+        return b0 + (alt - h0) / (h1 - h0) * (b1 - b0);
+      }
+    }
+    return 1.0;
+  }
+
   MB.astro = {
     J2000, EPS0, ARCSEC, Q, QT, mul, transpose, matVec,
     gmstDeg, precessionMatrix, obliquity, nutationAngles, nutationMatrix,
@@ -290,6 +318,7 @@
     DETAIL_REF_FOV_DEG, MAX_DETAIL_GAIN_MAG, CATALOG_DEPTH_MAG,
     skyBrightnessMagArcsec2, twilightLimitPenaltyMag,
     SKY_BRIGHTNESS_NIGHT_MAG_ARCSEC2, SKY_BRIGHTNESS_TABLE,
+    skyBrightnessFactor, SKY_BRIGHT_BREAKS,
     meta: {
       source: "mbdsdr_ai/celestial_geometry.py (MIT, repo-owned)",
       precession: "IAU 2006 / P03 (Vondrak-Capitaine 2011 polynomial)",
@@ -309,6 +338,11 @@
         + "limit = limit_magnitude(fov,bortle) - penalty(sun_alt), pinned by "
         + "tests/test_sky_realism_batch.py::TestTwilightPenalty; web effectiveLimit composes the same; "
         + "cross-language pinned by build/gen_twilight_golden.py + tests/twilight_selftest.js",
+      dayFactor: "kernel fact source: mbdsdr_ai/atmosphere.py::sky_brightness_factor "
+        + "(piecewise-linear _SKY_BRIGHT_BREAKS: -18->0, -12->0.002, -6->0.33, 0->1.0); "
+        + "replaces web clamp(sunAlt/12,0,1) which reported midnight at sun=-1 deg "
+        + "(kernel: 0.888); cross-language pinned by build/gen_twilight_golden.py + "
+        + "tests/twilight_selftest.js",
       notVerified: [
         "stellar proper motion uses linear RA/Dec approximation (ignores perspective acceleration / parallax secular terms); not for mas-level astrometry",
         "no atmospheric refraction, parallax or UT1-UTC correction",

@@ -57,8 +57,50 @@
      -90.0,
      21.6
     ]
+   ],
+   "SKY_BRIGHT_BREAKS": [
+    [
+     -90.0,
+     0.0
+    ],
+    [
+     -18.0,
+     0.0
+    ],
+    [
+     -12.0,
+     0.002
+    ],
+    [
+     -6.0,
+     0.33
+    ],
+    [
+     0.0,
+     1.0
+    ],
+    [
+     90.0,
+     1.0
+    ]
    ]
   },
+  "dayFactorSource": "mbdsdr_ai/atmosphere.py::sky_brightness_factor (_SKY_BRIGHT_BREAKS piecewise linear, imported not re-derived)",
+  "dayFactorAnchors": [
+   {
+    "sunAlt": -1.0,
+    "factor": 0.8883333333333334
+   },
+   {
+    "sunAlt": -6.0,
+    "factor": 0.33
+   },
+   {
+    "sunAlt": 0.0,
+    "factor": 1.0
+   }
+  ],
+  "dayFactorTol": 1e-06,
   "webDepthCap": 7.5,
   "webDepthCapSource": "build/sky-catalog.json meta.magMax (= web MAG_CAP = Number(CAT.meta.magMax || 7.5))",
   "formulas": {
@@ -366,8 +408,9 @@
    30.0
   ],
   "componentCaseCount": 272,
+  "dayFactorCaseCount": 272,
   "compositionCaseCount": 147,
-  "caseCount": 419,
+  "caseCount": 691,
   "notVerified": [
    "sky-brightness table is an order-of-magnitude approximation of published twilight curves (Krisciunas & Schaefer 1991 PASP 103,1033; Patat et al. 2006 A&A 455,385), NOT radiometrically calibrated; aerosol/ozone/latitude/azimuth give ~+/-1 mag",
    "zenith-equivalent brightness only: NO azimuth dependence (sunward sky is much brighter than anti-sunward), NO moonlight term",
@@ -1738,6 +1781,1096 @@
    "sunAlt": 120.0,
    "skyBrightness": 4.0,
    "penalty": 17.6
+  }
+ ],
+ "dayFactors": [
+  {
+   "sunAlt": -180.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -120.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -90.001,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -90.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -89.999,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -89.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -89.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -88.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -88.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -87.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -87.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -86.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -86.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -85.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -85.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -84.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -84.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -83.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -83.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -82.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -82.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -81.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -81.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -80.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -80.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -79.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -79.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -78.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -78.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -77.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -77.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -76.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -76.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -75.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -75.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -74.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -74.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -73.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -73.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -72.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -72.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -71.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -71.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -70.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -70.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -69.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -69.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -68.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -68.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -67.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -67.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -66.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -66.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -65.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -65.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -64.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -64.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -63.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -63.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -62.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -62.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -61.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -61.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -60.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -60.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -59.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -59.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -58.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -58.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -57.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -57.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -56.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -56.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -55.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -55.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -54.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -54.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -53.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -53.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -52.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -52.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -51.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -51.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -50.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -50.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -49.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -49.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -48.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -48.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -47.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -47.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -46.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -46.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -45.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -45.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -44.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -44.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -43.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -43.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -42.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -42.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -41.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -41.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -40.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -40.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -39.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -39.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -38.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -38.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -37.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -37.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -36.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -36.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -35.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -35.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -34.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -34.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -33.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -33.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -32.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -32.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -31.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -31.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -30.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -30.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -29.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -29.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -28.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -28.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -27.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -27.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -26.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -26.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -25.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -25.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -24.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -24.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -23.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -23.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -22.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -22.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -21.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -21.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -20.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -20.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -19.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -19.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -18.5,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -18.001,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -18.0,
+   "factor": 0.0
+  },
+  {
+   "sunAlt": -17.999,
+   "factor": 3.333333333337407e-07
+  },
+  {
+   "sunAlt": -17.5,
+   "factor": 0.00016666666666666666
+  },
+  {
+   "sunAlt": -17.0,
+   "factor": 0.0003333333333333333
+  },
+  {
+   "sunAlt": -16.5,
+   "factor": 0.0005
+  },
+  {
+   "sunAlt": -16.0,
+   "factor": 0.0006666666666666666
+  },
+  {
+   "sunAlt": -15.5,
+   "factor": 0.0008333333333333334
+  },
+  {
+   "sunAlt": -15.001,
+   "factor": 0.000999666666666667
+  },
+  {
+   "sunAlt": -15.0,
+   "factor": 0.001
+  },
+  {
+   "sunAlt": -14.999,
+   "factor": 0.0010003333333333331
+  },
+  {
+   "sunAlt": -14.5,
+   "factor": 0.0011666666666666668
+  },
+  {
+   "sunAlt": -14.0,
+   "factor": 0.0013333333333333333
+  },
+  {
+   "sunAlt": -13.5,
+   "factor": 0.0015
+  },
+  {
+   "sunAlt": -13.0,
+   "factor": 0.0016666666666666668
+  },
+  {
+   "sunAlt": -12.5,
+   "factor": 0.0018333333333333333
+  },
+  {
+   "sunAlt": -12.001,
+   "factor": 0.001999666666666667
+  },
+  {
+   "sunAlt": -12.0,
+   "factor": 0.002
+  },
+  {
+   "sunAlt": -11.999,
+   "factor": 0.0020546666666666365
+  },
+  {
+   "sunAlt": -11.5,
+   "factor": 0.029333333333333336
+  },
+  {
+   "sunAlt": -11.0,
+   "factor": 0.05666666666666667
+  },
+  {
+   "sunAlt": -10.5,
+   "factor": 0.084
+  },
+  {
+   "sunAlt": -10.001,
+   "factor": 0.1112786666666667
+  },
+  {
+   "sunAlt": -10.0,
+   "factor": 0.11133333333333334
+  },
+  {
+   "sunAlt": -9.999,
+   "factor": 0.11138799999999997
+  },
+  {
+   "sunAlt": -9.5,
+   "factor": 0.1386666666666667
+  },
+  {
+   "sunAlt": -9.0,
+   "factor": 0.166
+  },
+  {
+   "sunAlt": -8.5,
+   "factor": 0.19333333333333336
+  },
+  {
+   "sunAlt": -8.001,
+   "factor": 0.22061200000000003
+  },
+  {
+   "sunAlt": -8.0,
+   "factor": 0.22066666666666668
+  },
+  {
+   "sunAlt": -7.999,
+   "factor": 0.22072133333333335
+  },
+  {
+   "sunAlt": -7.5,
+   "factor": 0.248
+  },
+  {
+   "sunAlt": -7.0,
+   "factor": 0.2753333333333334
+  },
+  {
+   "sunAlt": -6.5,
+   "factor": 0.3026666666666667
+  },
+  {
+   "sunAlt": -6.001,
+   "factor": 0.3299453333333333
+  },
+  {
+   "sunAlt": -6.0,
+   "factor": 0.33
+  },
+  {
+   "sunAlt": -5.999,
+   "factor": 0.3301116666666667
+  },
+  {
+   "sunAlt": -5.5,
+   "factor": 0.38583333333333336
+  },
+  {
+   "sunAlt": -5.0,
+   "factor": 0.44166666666666665
+  },
+  {
+   "sunAlt": -4.5,
+   "factor": 0.4975
+  },
+  {
+   "sunAlt": -4.001,
+   "factor": 0.5532216666666666
+  },
+  {
+   "sunAlt": -4.0,
+   "factor": 0.5533333333333333
+  },
+  {
+   "sunAlt": -3.999,
+   "factor": 0.553445
+  },
+  {
+   "sunAlt": -3.5,
+   "factor": 0.6091666666666666
+  },
+  {
+   "sunAlt": -3.0,
+   "factor": 0.665
+  },
+  {
+   "sunAlt": -2.5,
+   "factor": 0.7208333333333333
+  },
+  {
+   "sunAlt": -2.001,
+   "factor": 0.7765549999999999
+  },
+  {
+   "sunAlt": -2.0,
+   "factor": 0.7766666666666666
+  },
+  {
+   "sunAlt": -1.999,
+   "factor": 0.7767783333333332
+  },
+  {
+   "sunAlt": -1.5,
+   "factor": 0.8325
+  },
+  {
+   "sunAlt": -1.0,
+   "factor": 0.8883333333333334
+  },
+  {
+   "sunAlt": -0.5,
+   "factor": 0.9441666666666666
+  },
+  {
+   "sunAlt": -0.001,
+   "factor": 0.9998883333333333
+  },
+  {
+   "sunAlt": 0.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 0.001,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 0.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 1.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 1.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 1.999,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 2.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 2.001,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 2.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 3.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 3.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 4.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 4.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 4.999,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 5.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 5.001,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 5.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 6.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 6.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 7.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 7.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 8.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 8.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 9.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 9.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 9.999,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 10.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 10.001,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 10.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 11.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 11.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 12.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 12.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 13.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 13.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 14.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 14.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 15.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 15.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 16.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 16.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 17.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 17.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 18.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 18.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 19.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 19.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 20.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 20.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 21.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 21.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 22.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 22.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 23.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 23.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 24.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 24.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 25.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 25.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 26.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 26.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 27.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 27.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 28.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 28.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 29.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 29.5,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 30.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 60.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 90.0,
+   "factor": 1.0
+  },
+  {
+   "sunAlt": 120.0,
+   "factor": 1.0
   }
  ],
  "compositions": [

@@ -56,6 +56,68 @@ for (const c of golden.components) {
   if (pen < 0) throw new Error(`${label}: 惩罚为负 ${pen}（应 ≥0）`);
 }
 
+/* 2b. 天空背景亮度因子（0=夜,1=白昼）：断点表 + 分量 + 三点 golden（1e-6）。 */
+if (typeof A.skyBrightnessFactor !== "function")
+  throw new Error("14-astro-frame.js 未导出 skyBrightnessFactor");
+{
+  const kb = KC.SKY_BRIGHT_BREAKS, jb = A.SKY_BRIGHT_BREAKS;
+  if (!Array.isArray(kb) || !Array.isArray(jb) || jb.length !== kb.length)
+    throw new Error(`背景亮度断点表漂移: JS=${jb && jb.length} vs 内核=${kb && kb.length}`);
+  for (let i = 0; i < kb.length; i++)
+    if (jb[i][0] !== kb[i][0] || jb[i][1] !== kb[i][1])
+      throw new Error(`断点表[${i}]漂移: JS=[${jb[i]}] vs 内核=[${kb[i]}]`);
+  let worst = 0, worstAt = "";
+  for (const c of golden.dayFactors) {
+    const got = A.skyBrightnessFactor(c.sunAlt);
+    const e = Math.abs(got - c.factor);
+    if (e > worst) { worst = e; worstAt = `sunAlt=${c.sunAlt}`; }
+    if (!isFinite(e) || e > CTOL)
+      throw new Error(`sunAlt=${c.sunAlt}: skyBrightnessFactor=${got} vs 内核 ${c.factor} err=${e} > ${CTOL}`);
+  }
+  /* 三点 golden（用户点名）：-1°→0.8883、-6°→0.33、0°→1.0，容差 1e-6。 */
+  for (const c of M.dayFactorAnchors) {
+    const got = A.skyBrightnessFactor(c.sunAlt);
+    const e = Math.abs(got - c.factor);
+    if (!isFinite(e) || e > M.dayFactorTol)
+      throw new Error(`golden 锚点 sunAlt=${c.sunAlt}: JS=${got} vs 内核=${c.factor} err=${e} > ${M.dayFactorTol}`);
+    console.log(`  背景亮度因子 sunAlt=${c.sunAlt}° → ${got.toFixed(6)} == 内核 ${c.factor.toFixed(6)}`);
+  }
+  /* 单调不减：太阳越高（alt 增大）背景越亮，因子不得回退。 */
+  let prev = -Infinity;
+  for (let a = -40; a <= 20; a++) {
+    const alt = a / 2.0, f = A.skyBrightnessFactor(alt);
+    if (f < prev - 1e-12)
+      throw new Error(`背景亮度因子非单调 alt=${alt}: ${f} < ${prev}`);
+    prev = f;
+  }
+  /* 端点夹取：天文夜 0、白天 1、±90 外不越界。 */
+  if (A.skyBrightnessFactor(-18) !== 0 || A.skyBrightnessFactor(-90) !== 0)
+    throw new Error("天文夜背景亮度因子应为 0");
+  if (A.skyBrightnessFactor(0) !== 1 || A.skyBrightnessFactor(90) !== 1)
+    throw new Error("白天背景亮度因子应为 1");
+
+  /* 变异反证：把旧 clamp(sunAlt/12,0,1) 注入源码副本，三点 golden 必须变红。 */
+  const CLAMP_IMPL = "function skyBrightnessFactor(sunAltDeg) {\n"
+    + "    return Math.max(0, Math.min(1, Number(sunAltDeg) / 12));\n  }";
+  const re = /function skyBrightnessFactor\(sunAltDeg\) \{[\s\S]*?\n  \}/;
+  if (src.split("function skyBrightnessFactor(sunAltDeg)").length !== 2)
+    throw new Error("变异锚点不唯一/不存在：skyBrightnessFactor 已改，反证需同步更新");
+  const muted = src.replace(re, CLAMP_IMPL);
+  if (muted === src) throw new Error("变异注入失败：源码副本未改变");
+  const sandbox = { MBDSDR: {} };
+  (new Function("window", muted))(sandbox);
+  const AM = sandbox.MBDSDR.astro;
+  let red = null;
+  for (const c of M.dayFactorAnchors) {
+    const e = Math.abs(AM.skyBrightnessFactor(c.sunAlt) - c.factor);
+    if (!(e <= M.dayFactorTol)) { red = `sunAlt=${c.sunAlt}: clamp=${AM.skyBrightnessFactor(c.sunAlt)} vs 内核=${c.factor} err=${e}`; break; }
+  }
+  if (red === null)
+    throw new Error("变异存活：clamp(sunAlt/12) 注入后三点 golden 仍通过（自检失明）");
+  console.log(`  变异反证：改回 clamp(sunAlt/12) → 三点 golden 变红（${red}）`);
+  console.log(`  背景亮度因子 cross-language OK · ${golden.dayFactors.length} 点 / worst ${worst.toExponential(2)} (${worstAt})`);
+}
+
 /* 3. 合成级紧钉扎：base - penalty（桌面 rf_sky_view.py:4246），两 depthCap 口径。 */
 for (const c of golden.compositions) {
   const label = `fov=${c.fov} bortle=${c.bortle} sunAlt=${c.sunAlt}`;
