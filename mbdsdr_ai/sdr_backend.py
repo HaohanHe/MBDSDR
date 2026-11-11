@@ -3105,6 +3105,9 @@ class SoapySDRBackend(SDRBackend):
         self._serial = serial
         self._driver = driver
         self._sdr = None       # SoapySDR.Device 实例
+        #: 驱动 setSampleRate() 真正返回的速率（Soapy 会按硬件档位吸附）。
+        #: None = 这次没拿到回值，读回退到请求值。
+        self._applied_sample_rate_hz: Optional[float] = None
         self._stream = None    # setupStream 返回的流句柄
         self._chan = 0
         self._rx = 1           # SOAPY_SDR_RX，来源: Constants.h:22
@@ -3494,16 +3497,37 @@ class SoapySDRBackend(SDRBackend):
             self.status.error = f"setFrequency({freq_hz}) 失败: {e}"
             return False
 
+    @staticmethod
+    def _coerce_rate(value) -> Optional[float]:
+        """把驱动返回的速率转成正的有限值；不可用时返回 None（不编造）。"""
+        try:
+            rate = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(rate) or rate <= 0:
+            return None
+        return rate
+
     def _apply_sample_rate(self, rate_hz: float) -> bool:
         if self._sdr is None:
+            self._applied_sample_rate_hz = None
             return True
         try:
-            # 来源: Device.hpp:884 setSampleRate(RX, chan, rate)
-            self._sdr.setSampleRate(self._rx, self._chan, float(rate_hz))
+            # 来源: Device.hpp:884 setSampleRate(RX, chan, rate) —— 返回值是
+            # 硬件真正接受的速率（Soapy 会吸附到合法档位），不能丢弃：
+            # 丢它就会把请求值当成生效值显示。
+            actual = self._sdr.setSampleRate(self._rx, self._chan, float(rate_hz))
+            self._applied_sample_rate_hz = self._coerce_rate(actual)
             return True
         except Exception as e:
+            self._applied_sample_rate_hz = None
             self.status.error = f"setSampleRate({rate_hz}) 失败: {e}"
             return False
+
+    def _resolve_applied_sample_rate(self, rate_hz: float) -> float:
+        """返回驱动确认的实际速率；驱动没给回值时才退回请求值。"""
+        actual = self._applied_sample_rate_hz
+        return float(actual) if actual else float(rate_hz)
 
     def _apply_gain(self, gain_db: float) -> bool:
         if self._sdr is None:
@@ -3515,6 +3539,35 @@ class SoapySDRBackend(SDRBackend):
         except Exception as e:
             self.status.error = f"setGain({gain_db}) 失败: {e}"
             return False
+
+    def set_gain(self, gain_db: float) -> bool:
+        """设置增益并回读驱动实际值（Soapy 会吸附到增益档位）。
+
+        基类成功后会写请求值；这里用 ``getGain()`` 覆盖成驱动确认值，
+        状态面板/读数才不会把请求值冒充成硬件实际值。
+        """
+        ok = super().set_gain(gain_db)
+        if ok and self._sdr is not None:
+            try:
+                actual = float(self._sdr.getGain(self._rx, self._chan))
+            except Exception as e:  # noqa: BLE001 - 读不到就保留请求值
+                logger.debug("Soapy getGain 回读失败（保留软件记录值）: %s", e)
+            else:
+                if math.isfinite(actual):
+                    self.status.gain_db = actual
+        return ok
+
+    def get_gain(self) -> float:
+        """回读驱动实际增益；读不到才退回软件记录值。"""
+        if self._sdr is not None:
+            try:
+                actual = float(self._sdr.getGain(self._rx, self._chan))
+            except Exception as e:  # noqa: BLE001 - 回读失败退回软件值
+                logger.debug("Soapy getGain 回读失败（退回软件记录值）: %s", e)
+            else:
+                if math.isfinite(actual):
+                    return actual
+        return self.status.gain_db
 
     def _apply_agc(self, enabled: bool) -> bool:
         if self._sdr is not None:
