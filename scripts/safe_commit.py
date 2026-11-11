@@ -236,7 +236,11 @@ def _attempt(
     expect = []
     for f in files:
         in_head = _run(["cat-file", "-e", f"HEAD:{f}"], env).returncode == 0
-        expect.append(f"{'M' if in_head else 'A'}\t{f}")
+        # 删除文件同样要能提交：HEAD 有、工作区没有 → D（旧实现一律按 M 期望，
+        # 于是任何「删掉某文件」的提交都被判成文件集不符，退不回去）。
+        in_wt = (ROOT / f).exists()
+        mark = "D" if (in_head and not in_wt) else ("M" if in_head else "A")
+        expect.append(f"{mark}\t{f}")
     if sorted(staged) != sorted(expect):
         extra = [s for s in staged if s not in expect]
         missing = [e for e in expect if e not in staged]
