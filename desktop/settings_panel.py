@@ -55,6 +55,12 @@ try:  # 静噪刻度→余量的唯一换算入口；缺失时按钮仍可用，
 except ImportError:  # pragma: no cover - 裁剪打包
     _margin_threshold_db = None
 
+try:  # config.json 的唯一写入口（锁内重读 → 局部合并 → 原子替换）
+    from mbdsdr_ai.config import ConfigStore, last_error as _config_last_error
+except ImportError:  # pragma: no cover - 裁剪打包
+    ConfigStore = None  # type: ignore[assignment]
+    _config_last_error = None  # type: ignore[assignment]
+
 try:  # pragma: no cover - 可选内核：只捕导入缺失（其它异常是要修的 bug）
     from mbdsdr_ai.remote_control import RemoteControl, DEFAULT_RC_PORT
 except ImportError:
@@ -575,6 +581,30 @@ class SettingsPanel(QWidget):
             return item.default
         return self._ai.get(self._ai_file_key(item), item.default)
 
+    def _write_ai_values(self, values: Dict[str, Any]) -> str:
+        """把 AI 参数写进 config.json（唯一写入口 ConfigStore）；空串=成功。
+
+        只提交**本面板拥有的采样参数键**。``api_key`` / ``base_url`` / ``model``
+        归 AI 面板所有，整份快照回写会把它们顶掉（历史事故：api_key 被旧快照
+        回滚成空）。合并基线由 ConfigStore 在锁内从磁盘重读。
+        """
+        if not values:
+            return ""
+        self._ai.update(values)          # 内存缓存只作显示，不作为写盘基线
+        if ConfigStore is None:
+            return "AI 配置内核不可用（本次修改仅存在内存中）"
+
+        def _submit(disk: Dict[str, Any]) -> None:
+            disk.update(values)
+
+        try:
+            if ConfigStore(AI_CONFIG_PATH).update(_submit):
+                return ""
+            reason = _config_last_error() if _config_last_error else None
+        except (OSError, TypeError, ValueError) as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+        return f"AI 配置写入失败：{reason or '未知原因'}（本次修改仅存在内存中）"
+
     def _store_value(self, item, value) -> str:
         """把一项配置写进对应存储；返回空串=已写入，否则返回失败原因。
 
@@ -619,14 +649,8 @@ class SettingsPanel(QWidget):
             except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
                 return f"观测站坐标保存失败：{exc}"
             return ""
-        # ai_config：保留 api_key 等既有键，只改本项
-        self._ai[self._ai_file_key(item)] = value
-        store_error = ""
-        try:
-            _atomic_write_json(AI_CONFIG_PATH, self._ai, mode=0o600)
-        except (OSError, TypeError, ValueError) as exc:
-            store_error = f"AI 配置写入失败：{exc}（本次修改仅存在内存中）"
-            logger.warning("%s", store_error)
+        # ai_config：只提交本项，api_key 等其它键由 ConfigStore 原样保留
+        store_error = self._write_ai_values({self._ai_file_key(item): value})
         # 已创建 agent 时立即生效（下一轮请求就会用新参数）
         agent = getattr(getattr(self._host, "ai_panel", None), "agent", None)
         if agent is not None and hasattr(agent, "config"):
@@ -1256,18 +1280,17 @@ class SettingsPanel(QWidget):
             for key in RESETTABLE_SETTING_KEYS:
                 self._settings.reset(key)
         store_errors = []
+        ai_defaults: Dict[str, Any] = {}
         for item in EXPOSED_ITEMS:
             if item.storage == "gui_config":
                 err = self._store_value(item, None)
                 if err:
                     store_errors.append(f"{item.label}：{err}")
             elif item.storage == "ai_config":
-                self._ai[self._ai_file_key(item)] = item.default
-        if EXPOSED_ITEMS:
-            try:
-                _atomic_write_json(AI_CONFIG_PATH, self._ai, mode=0o600)
-            except (OSError, TypeError, ValueError) as exc:
-                store_errors.append(f"AI 配置写入失败：{exc}")
+                ai_defaults[self._ai_file_key(item)] = item.default
+        err = self._write_ai_values(ai_defaults)
+        if err:
+            store_errors.append(err)
         # 服务设置由主窗口持有；恢复默认后让它回填（端口置灰由它自身状态决定）
         sp = getattr(self._host, "service_settings_panel", None)
         if sp is not None:
@@ -1320,6 +1343,7 @@ class SettingsPanel(QWidget):
         """把已预览的合并结果写入各存储后端；非法/未知项早已被剔除。"""
         if not res.ok:
             return res
+        ai_values: Dict[str, Any] = {}
         for key, value in res.accepted.items():
             item = SCHEMA[key]
             if item.storage == "settings":
@@ -1328,11 +1352,10 @@ class SettingsPanel(QWidget):
             elif item.storage == "gui_config":
                 self._store_value(item, value)
             else:
-                self._ai[self._ai_file_key(item)] = value
-        try:
-            _atomic_write_json(AI_CONFIG_PATH, self._ai, mode=0o600)
-        except (OSError, TypeError, ValueError) as e:
-            res.warnings.append(f"AI 配置写入失败：{e}")
+                ai_values[self._ai_file_key(item)] = value
+        err = self._write_ai_values(ai_values)
+        if err:
+            res.warnings.append(err)
         self._refresh_from_storage()
         sp = getattr(self._host, "service_settings_panel", None)
         if sp is not None:

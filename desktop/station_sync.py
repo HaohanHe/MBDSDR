@@ -29,6 +29,8 @@ import os
 import shutil
 from typing import Any, Dict, Optional
 
+from mbdsdr_ai.config import ConfigStore
+
 __all__ = [
     "GUI_LAT_KEY", "GUI_LON_KEY",
     "CFG_LAT_KEY", "CFG_LON_KEY", "CFG_ALT_KEY",
@@ -117,31 +119,20 @@ def write_config_site(lat: float, lon: float, alt_m: Optional[float] = 0.0,
     """把站址镜像进 ``config.json``，保留文件里其它键。
 
     返回是否写成功；失败不抛（写盘失败不该让 UI 操作崩）。
+    写盘走 :class:`ConfigStore`（唯一写入口）：锁内重读磁盘再改，避免与
+    AI 面板 / 设置面板同时写时互相吃掉对方刚写的键。
     覆盖一个「值不同」的旧镜像前，先把原文件备份成 ``<path>.bak``。
     """
     target = path or config_path()
-    data = _read_json(target) or {}
-    old = _site_from(data, CFG_LAT_KEY, CFG_LON_KEY)
     try:
         new_lat, new_lon = float(lat), float(lon)
     except (TypeError, ValueError):
         return False
 
-    conflict = old is not None and (
-        abs(old["lat"] - new_lat) > 1e-9 or abs(old["lon"] - new_lon) > 1e-9)
-
-    data[CFG_LAT_KEY] = new_lat
-    data[CFG_LON_KEY] = new_lon
-    if alt_m is not None:
-        try:
-            data[CFG_ALT_KEY] = float(alt_m)
-        except (TypeError, ValueError):
-            pass
-
-    try:
-        parent = os.path.dirname(target)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
+    def _mirror(data: Dict[str, Any]) -> None:
+        old = _site_from(data, CFG_LAT_KEY, CFG_LON_KEY)
+        conflict = old is not None and (
+            abs(old["lat"] - new_lat) > 1e-9 or abs(old["lon"] - new_lon) > 1e-9)
         if conflict:
             try:
                 shutil.copy2(target, target + ".bak")
@@ -149,16 +140,16 @@ def write_config_site(lat: float, lon: float, alt_m: Optional[float] = 0.0,
                 # 备份失败不阻断写入：本来就是在写"用户明确选的"位置，
                 # 但要让调用方能从返回值之外的日志看出没留证据。
                 pass
-        tmp = target + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.flush()
+        data[CFG_LAT_KEY] = new_lat
+        data[CFG_LON_KEY] = new_lon
+        if alt_m is not None:
             try:
-                os.fsync(f.fileno())
-            except OSError:
+                data[CFG_ALT_KEY] = float(alt_m)
+            except (TypeError, ValueError):
                 pass
-        os.replace(tmp, target)
-        return True
+
+    try:
+        return ConfigStore(target).update(_mirror)
     except OSError:
         return False
 
@@ -166,29 +157,20 @@ def write_config_site(lat: float, lon: float, alt_m: Optional[float] = 0.0,
 def clear_config_site(path: Optional[str] = None) -> bool:
     """用户清空位置时，镜像也必须清——否则 agent 会继续按旧位置算。
 
-    文件不存在或本来就没有这几个键时返回 True（已经是目标状态）。
+    文件不存在、损坏或本来就没有这几个键时返回 True（已经是目标状态）。
     """
     target = path or config_path()
     data = _read_json(target)
     if not data:
         return True
-    removed = False
-    for key in (CFG_LAT_KEY, CFG_LON_KEY, CFG_ALT_KEY):
-        if key in data:
+    if not any(k in data for k in (CFG_LAT_KEY, CFG_LON_KEY, CFG_ALT_KEY)):
+        return True
+
+    def _drop(data: Dict[str, Any]) -> None:
+        for key in (CFG_LAT_KEY, CFG_LON_KEY, CFG_ALT_KEY):
             data.pop(key, None)
-            removed = True
-    if not removed:
-        return True
+
     try:
-        tmp = target + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass
-        os.replace(tmp, target)
-        return True
+        return ConfigStore(target).update(_drop)
     except OSError:
         return False
