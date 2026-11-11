@@ -141,11 +141,7 @@ def _pos(az=123.0, el=30.0):
 
 
 def _active_tracking(mw, monkeypatch, pos, gimbal):
-    from PySide6.QtCore import QTimer
-    t = QTimer(mw)
-    t.setInterval(500)
-    t.start()
-    monkeypatch.setattr(mw, "_sat_track_timer", t)
+    monkeypatch.setattr(mw, "_sat_tracking", True, raising=False)
     monkeypatch.setattr(mw, "_gimbal_controller", lambda: gimbal)
     monkeypatch.setattr(mw, "_on_tune_sdr", lambda *a, **k: None)
     mw._loop_sat_tracker = SimpleNamespace(
@@ -162,7 +158,6 @@ def _active_tracking(mw, monkeypatch, pos, gimbal):
     mw._observer_from_gnss = False
     mw._gimbal_error.reset()
     mw._last_gimbal_cycle = None
-    return t
 
 
 # ---------------------------------------------------------------------------

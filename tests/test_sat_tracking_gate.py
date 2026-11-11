@@ -113,8 +113,7 @@ def gate(window, monkeypatch):
 
 
 def _tracking_active(window) -> bool:
-    timer = getattr(window, "_sat_track_timer", None)
-    return bool(timer is not None and timer.isActive())
+    return bool(getattr(window, "_sat_tracking", False))
 
 
 def test_blocked_policy_refuses_to_start(window, gate):
@@ -325,14 +324,6 @@ class _GimbalTracker:
                                 "age_days": 0.3 if tier == "fresh" else 40.0})
 
 
-class _Timer:
-    def __init__(self, active):
-        self._active = active
-
-    def isActive(self):  # noqa: N802 - 模拟 QTimer 接口
-        return self._active
-
-
 class _ManualGimbal:
     """manual 模式后端：只要星历放行，``_gimbal_available`` 就该为真。"""
 
@@ -346,7 +337,7 @@ def _gimbal_gate(window, monkeypatch, *, tracked, tiers, sky, active):
 
     monkeypatch.setattr(window, "_loop_sat_tracker",
                         _GimbalTracker(tracked, tiers), raising=False)
-    monkeypatch.setattr(window, "_sat_track_timer", _Timer(active),
+    monkeypatch.setattr(window, "_sat_tracking", bool(active),
                         raising=False)
     monkeypatch.setattr(window, "sky_view",
                         SimpleNamespace(_selected_info={"title": sky}),

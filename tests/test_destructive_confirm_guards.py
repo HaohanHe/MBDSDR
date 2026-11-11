@@ -637,35 +637,22 @@ def test_satellite_start_is_idempotent_while_tracking(window, monkeypatch):
         def set_downlink_freq(self, hz):
             pass
 
-    class _Timer:
-        def __init__(self):
-            self.starts = 0
-
-        def isActive(self):  # noqa: N802 - 模拟 QTimer 接口
-            return True
-
-        def start(self):
-            self.starts += 1
-
-        def stop(self):
-            pass
-
-    tracker, timer = _Tracker(), _Timer()
+    tracker = _Tracker()
     monkeypatch.setattr(w, "_poll_satellite_track", lambda: None)
     w._loop_sat_tracker = tracker
-    w._sat_track_timer = timer
+    w._sat_tracking = True
     w._observer_lat, w._observer_lon = 30.0, 120.0
     w._vfo_center_hz = 145_000_000.0
     w._sat_track_prev_freq_hz = 145_000_000.0
     try:
         w._start_satellite_tracking("NOAA 19", 137.1e6)
-        assert timer.starts == 0, "跟踪中重复开始不得重建/重启定时器"
+        assert w._sat_tracking is True, "跟踪中重复开始不得改变跟踪状态"
         assert w._sat_track_prev_freq_hz == 145_000_000.0, \
             "重复开始不得覆盖「跟踪前频率」（否则停止回不到原调谐）"
         assert "忽略重复开始" in w.statusBar().currentMessage()
     finally:
         w._loop_sat_tracker = None
-        w._sat_track_timer = None
+        w._sat_tracking = False
         w._observer_lat = w._observer_lon = None
         w._sat_track_prev_freq_hz = None
 
@@ -760,20 +747,10 @@ def test_sat_track_start_without_backend_warns(window, monkeypatch):
                     "label": "星历新鲜", "reason": "TLE 年龄 0.3 天",
                     "next_action": "可直接跟踪"}
 
-    class _Timer:
-        def start(self):
-            pass
-
-        def isActive(self):  # noqa: N802 - 模拟 QTimer 接口
-            return False
-
-        def stop(self):
-            pass
-
     monkeypatch.setattr(mw, "LoopSatTracker", _Tracker)
     monkeypatch.setattr(w, "_poll_satellite_track", lambda: None)
     w._loop_sat_tracker = None
-    w._sat_track_timer = _Timer()
+    w._sat_tracking = False
     w._observer_lat, w._observer_lon = 30.0, 120.0
     w._active_sdr_backend = None
     w.statusBar().clearMessage()
@@ -785,6 +762,6 @@ def test_sat_track_start_without_backend_warns(window, monkeypatch):
             "无设备开始跟踪必须显式提示，不能让人以为硬件已跟着卫星调谐"
     finally:
         w._loop_sat_tracker = None
-        w._sat_track_timer = None
+        w._sat_tracking = False
         w._observer_lat = w._observer_lon = None
         w.sat_track_panel.set_tracking_state(False)

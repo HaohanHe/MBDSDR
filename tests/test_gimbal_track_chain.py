@@ -182,11 +182,7 @@ def mw(isolated_profile):
 
 
 def _active_tracking(mw, monkeypatch, pos, gimbal):
-    from PySide6.QtCore import QTimer
-    t = QTimer(mw)
-    t.setInterval(500)
-    t.start()
-    monkeypatch.setattr(mw, "_sat_track_timer", t)
+    monkeypatch.setattr(mw, "_sat_tracking", True, raising=False)
     monkeypatch.setattr(mw, "_gimbal_controller", lambda: gimbal)
     monkeypatch.setattr(mw, "_on_tune_sdr", lambda *a, **k: None)
     monkeypatch.setattr(mw, "_loop_sat_tracker", SimpleNamespace(
@@ -205,7 +201,6 @@ def _active_tracking(mw, monkeypatch, pos, gimbal):
     if getattr(mw, "_gimbal_error", None) is not None:
         mw._gimbal_error.reset()
     mw._last_gimbal_cycle = None
-    return t
 
 
 def _pos(az=123.0, el=30.0):
@@ -325,7 +320,7 @@ class TestFailurePaths:
         assert g.pointed == [], "卫星不可见时不得下发角度"
         assert g.stopped >= 1
         assert not mw.sky_view._gimbal_btn.isChecked()
-        assert not mw._sat_track_timer.isActive()
+        assert not mw._sat_tracking
         assert "不可见" in self._stop_msg(mw) and "停止" in self._stop_msg(mw)
 
     def test_untrusted_station_refuses_gimbal(self, mw, monkeypatch):

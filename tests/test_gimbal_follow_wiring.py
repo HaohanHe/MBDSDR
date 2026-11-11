@@ -156,11 +156,7 @@ def mw(isolated_profile):
 
 class TestMainWindowGimbalLoop:
     def _fake_active_tracking(self, mw, monkeypatch):
-        from PySide6.QtCore import QTimer
-        t = QTimer(mw)
-        t.setInterval(500)
-        t.start()
-        monkeypatch.setattr(mw, "_sat_track_timer", t)
+        monkeypatch.setattr(mw, "_sat_tracking", True, raising=False)
         fake = FakeGimbal()
         monkeypatch.setattr(mw, "_gimbal_controller", lambda: fake)
         monkeypatch.setattr(mw, "_on_tune_sdr", lambda *a, **k: None)

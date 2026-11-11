@@ -829,6 +829,11 @@ class _NightVeil(QWidget):
 class MainWindow(QMainWindow):
     """MBDSDR 主窗口。"""
 
+    #: 单帧节拍（ms）：卫星跟踪每帧都跑，这就是原来的 500 ms 轮询口径。
+    _FRAME_INTERVAL_MS = 500
+    #: 天空图刷新每 N 帧一次：500 × 10 = 原来的 5 s 语义（不是把两者并成一个频率）。
+    _SKY_FRAME_EVERY = 10
+
     # AI 工具环内执行完硬件调用后的 UI 同步（MCP handler 跑在 AI 后台线程，
     # 经 Qt 信号排队回 UI 线程改控件，跨线程安全）
     _ai_tool_done = Signal(str, dict)
@@ -913,7 +918,11 @@ class MainWindow(QMainWindow):
             os.path.expanduser("~"), ".mbdsdr", "approval_audit.jsonl")
         self._record_timer: Optional[QTimer] = None
         self._record_seconds = 0
-        self._sky_update_timer: Optional[QTimer] = None
+        # 单帧定时器：天空刷新与卫星跟踪共用同一拍（见 _on_frame_tick）。
+        # 跟踪状态是布尔量，不再用「某个定时器在跑」冒充「正在跟踪」。
+        self._frame_timer: Optional[QTimer] = None
+        self._frame_seq = 0
+        self._sat_tracking = False
         # 后端掉线处置（读线程空读 + status 核实/持续空读升级）
         self._backend_lost_handled = False
         self._read_fail_signals = 0
@@ -939,7 +948,7 @@ class MainWindow(QMainWindow):
         self._observer_source: Optional[str] = None
         self.sat_tracker: Optional[SatelliteTracker] = None
         # ---- 卫星闭环自动跟踪（过境预测 -> 闭环调谐）----
-        # loop_tracker 持有选中卫星与实时 az/el/多普勒；_sat_track_timer 500ms 轮询。
+        # loop_tracker 持有选中卫星与实时 az/el/多普勒；由单帧定时器每 500ms 驱动。
         # 与上面的展示型 sat_tracker（rf_sky_view 桥）互不相干。
         self._loop_sat_tracker = None      # mbdsdr_ai.sat_tracker.SatelliteTracker
         # TLE 在线刷新后台线程（单星 5s 超时、内置最多 10 颗，最坏 50s，不能压 GUI）
@@ -961,7 +970,6 @@ class MainWindow(QMainWindow):
         self._time_info_last_error: str = ""
         self._time_info_ready.connect(
             self._on_time_info_ready, Qt.QueuedConnection)
-        self._sat_track_timer: Optional[QTimer] = None
         self._sat_track_prev_freq_hz: Optional[float] = None
         self._sat_track_prev_mode: Optional[str] = None
         self._sat_track_mode: str = "FM"
@@ -1185,11 +1193,13 @@ class MainWindow(QMainWindow):
             _t.start()
             self._startup_timers.append(_t)
 
-        # 天空图实时更新定时器（每 5 秒刷新卫星位置 + 授时）
-        self._sky_update_timer = QTimer(self)
-        self._sky_update_timer.setInterval(5000)
-        self._sky_update_timer.timeout.connect(self._update_sky_satellites)
-        self._sky_update_timer.start()
+        # 单帧定时器：天空刷新与卫星跟踪读同一拍，不再各起一个定时器。
+        # 两个视图的原有频率由 _on_frame_tick 里的不同节流表达：
+        # 跟踪 = 每帧（500 ms），天空 = 每 10 帧（5 s）。
+        self._frame_timer = QTimer(self)
+        self._frame_timer.setInterval(self._FRAME_INTERVAL_MS)
+        self._frame_timer.timeout.connect(self._on_frame_tick)
+        self._frame_timer.start()
 
         # (A) 真实 IQ 轮询定时器：连接 SDR 后才 start；无 SDR 时保持"未连接"。
         # 一次 tick 读一块 IQ，分发给频谱 / baseband 录制 / FM 解调声卡。
@@ -2375,8 +2385,7 @@ class MainWindow(QMainWindow):
             else:
                 base_hz = 0.0
             self._on_sky_track_toggled(on, current, base_hz)
-            active = (self._sat_track_timer is not None
-                      and self._sat_track_timer.isActive())
+            active = self._sat_tracking
             if on and not active:
                 return {"ok": False, "status": "REFUSED",
                         "reason": "跟踪未能启动（缺观测站/选星失败/缺依赖），"
@@ -2464,8 +2473,7 @@ class MainWindow(QMainWindow):
     def _reset_sky_pending_ui(self, action: str) -> None:
         """协商未执行时把按钮回弹到真实状态（不残留假勾选）。"""
         if action == "track":
-            if not (self._sat_track_timer is not None
-                    and self._sat_track_timer.isActive()):
+            if not self._sat_tracking:
                 self._sync_sky_track_btn(False)
         elif action == "gimbal_follow":
             if not self._gimbal_follow:
@@ -2475,8 +2483,7 @@ class MainWindow(QMainWindow):
                                 requested: bool) -> None:
         """一轮协商结束：按钮勾选与真实硬件状态对齐。"""
         if action == "track":
-            active = (self._sat_track_timer is not None
-                      and self._sat_track_timer.isActive())
+            active = self._sat_tracking
             self._sync_sky_track_btn(active)
             if not active:
                 self.statusBar().showMessage(
@@ -10808,7 +10815,7 @@ class MainWindow(QMainWindow):
 
     def _on_sky_track_toggled(self, on: bool, sat_name: str,
                               downlink_hz: float):
-        """天空图「跟踪」开关 → 接线既有卫星闭环（_sat_track_timer 500ms 环）。
+        """天空图「跟踪」开关 → 接线既有卫星闭环（单帧 500ms 环）。
 
         on=True  进入闭环：每 500ms 按实时多普勒自动调谐，仰角<5° 自停；
         on=False 停环并恢复用户之前的接收频率。
@@ -10820,11 +10827,9 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("跟踪失败：缺少卫星名或下行频点", MSG_NORMAL)
                 self._sync_sky_track_btn(False)
                 return
-            before = self._sat_track_timer is not None and \
-                self._sat_track_timer.isActive()
+            before = self._sat_tracking
             self._start_satellite_tracking(sat_name, downlink_hz)
-            after = self._sat_track_timer is not None and \
-                self._sat_track_timer.isActive()
+            after = self._sat_tracking
             if not after:
                 # 启动被拒（无观测站/选星失败/缺依赖）：复位开关
                 self._sync_sky_track_btn(False)
@@ -10860,12 +10865,9 @@ class MainWindow(QMainWindow):
         不静默切换口径。
         """
         tracker = getattr(self, "_loop_sat_tracker", None)
-        timer = getattr(self, "_sat_track_timer", None)
         tracked = str(getattr(tracker, "selected_name", "") or "")
-        try:
-            tracking = bool(tracked and timer is not None and timer.isActive())
-        except RuntimeError:      # Qt 对象已销毁：按未跟踪处理
-            tracking = False
+        # 布尔状态，不依赖 Qt 对象是否已销毁（旧写法要 try/except RuntimeError）。
+        tracking = bool(tracked and self._sat_tracking)
         if tracking:
             return tracked, f"跟踪目标「{tracked}」"
         name = self._sky_selected_name()
@@ -11257,8 +11259,7 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(
                         f"云台跟随已关闭，但停机未确认：{stop_err}", MSG_NORMAL)
             return
-        if not (self._sat_track_timer is not None
-                and self._sat_track_timer.isActive()):
+        if not self._sat_tracking:
             self.statusBar().showMessage(
                 "先按「🎯 跟踪」开始闭环跟踪，再开云台跟随", MSG_NORMAL)
             self._sync_sky_gimbal_btn(False)
@@ -12672,11 +12673,9 @@ class MainWindow(QMainWindow):
 
         # 重复开始守卫：跟踪中再次点「开始」（天空图开关/菜单/外部调用）
         # 会重走本函数。若直接继续，下面记录的「跟踪前频率」已是上一次
-        # 多普勒后的频点，停跟踪时就回不到用户原来的调谐；同一颗星
-        # 重复开始还会重建定时器。同一目标按幂等忽略，切换目标先停旧跟踪
-        # （_stop 会把频率/模式写回，再开始才能记对 prev）。
-        active = (self._sat_track_timer is not None
-                  and self._sat_track_timer.isActive())
+        # 多普勒后的频点，停跟踪时就回不到用户原来的调谐。同一目标按幂等
+        # 忽略，切换目标先停旧跟踪（_stop 会把频率/模式写回，再开始才能记对 prev）。
+        active = self._sat_tracking
         if active:
             current = str(getattr(self._loop_sat_tracker,
                                   "selected_name", "") or "")
@@ -12738,17 +12737,13 @@ class MainWindow(QMainWindow):
         else:
             self._sat_track_mode = self._sat_track_prev_mode or "FM"
 
-        if self._sat_track_timer is None:
-            self._sat_track_timer = QTimer(self)
-            self._sat_track_timer.setInterval(500)
-            self._sat_track_timer.timeout.connect(self._poll_satellite_track)
         # 新一次过境：误差统计从零开始，不混入上一次的样本
         rec = getattr(self, "_gimbal_error", None)
         if rec is not None:
             rec.reset()
         self._gimbal_cycle_seq = 0
         self._last_gimbal_cycle = None
-        self._sat_track_timer.start()
+        self._sat_tracking = True      # 跟踪中：由单帧定时器每帧驱动
         self._sync_tracking_ui(True)
         no_backend = self._active_sdr_backend is None
         self.statusBar().showMessage(
@@ -12970,9 +12965,8 @@ class MainWindow(QMainWindow):
 
     def _stop_satellite_tracking(self):
         """停止闭环跟踪，恢复用户之前的接收频率。"""
-        active = (self._sat_track_timer is not None
-                  and self._sat_track_timer.isActive())
-        # 没在跟踪（定时器停 + 无云台跟随）时不做回写/不刷"已停止"：断开/退出
+        active = self._sat_tracking
+        # 没在跟踪（无跟踪状态 + 无云台跟随）时不做回写/不刷"已停止"：断开/退出
         # 路径会无条件调用本方法。但"跟踪中"的可见状态必须无条件复位——
         # 自动停（过境结束）与手动关开关都走这里，残留勾选就是假状态
         # （test_auto_stop_resets_sky_button 钉住）。
@@ -12981,8 +12975,7 @@ class MainWindow(QMainWindow):
             self._sync_tracking_ui(False)
             self._refresh_tx_readout()
             return
-        if self._sat_track_timer is not None:
-            self._sat_track_timer.stop()
+        self._sat_tracking = False
         # 链路补偿随跟踪一起诚实关闭（不锁定 → 无补偿，不残留过期偏移）
         try:
             from mbdsdr_ai.doppler_link import get_compensator
@@ -13021,6 +13014,20 @@ class MainWindow(QMainWindow):
                 pass
         self.statusBar().showMessage("卫星跟踪已停止", MSG_NORMAL)
         self._refresh_tx_readout()
+
+    def _on_frame_tick(self):
+        """唯一的 500 ms 帧：天空刷新与卫星跟踪读同一拍，节流各不相同。
+
+        合并前是两个定时器（天空 5000 ms、跟踪 500 ms）；若直接取其一，
+        天空会在未跟踪时停摆、或跟踪被拖到 5 s 才调谐一次。这里用同一个
+        帧计数器表达两种频率：跟踪每帧跑，天空每 ``_SKY_FRAME_EVERY`` 帧
+        跑一次。改任一节流只影响该项，不会连带改掉另一项。
+        """
+        self._frame_seq += 1
+        if self._sat_tracking:
+            self._poll_satellite_track()
+        if self._frame_seq % self._SKY_FRAME_EVERY == 0:
+            self._update_sky_satellites()
 
     def _update_sky_satellites(self):
         """天空图周期任务：仅刷新新时空授时信息。
@@ -13461,8 +13468,8 @@ class MainWindow(QMainWindow):
         五件事，缺一件就会留下"关了还在跑/还被引用"的残留：
 
         1. 停掉所有窗口级 QTimer。QTimer 不随 close() 停——只有 C++ 对象销毁才停。
-           关窗不销毁对象（无 WA_DeleteOnClose）时，_sky_update_timer / _utc_timer
-           / _sat_track_timer 等会继续按周期回调本窗口，白烧事件循环；
+           关窗不销毁对象（无 WA_DeleteOnClose）时，_frame_timer / _utc_timer
+           等会继续按周期回调本窗口，白烧事件循环；
            跨文件测试里每构造一个 MainWindow 就多一组常驻定时器。
         2. 摘掉应用级事件过滤器（__init__ 里 app.installEventFilter(self) 装的
            Ctrl+C 焦点感知）。QApplication 的过滤链不随窗口关闭而清理，
@@ -13479,7 +13486,7 @@ class MainWindow(QMainWindow):
         if (getattr(self, "_replay_load_thread", None) is not None
                 and self._replay_load_thread.is_alive()):
             self._replay_load_cancel.set()
-        for attr in ("_sky_update_timer", "_utc_timer", "_sat_track_timer",
+        for attr in ("_frame_timer", "_utc_timer",
                      "_gnss_timer", "_iq_poll_timer", "_record_timer",
                      "_replay_timer"):
             t = getattr(self, attr, None)

@@ -49,7 +49,7 @@ def _check_track_btn(w, checked: bool) -> None:
 
 def test_ai_rejection_is_visible(window):
     w = window
-    w._sat_track_timer = None
+    w._sat_tracking = False
     _check_track_btn(w, True)
     w.ai_panel.request_sky_action = lambda ctx: False
 
@@ -64,7 +64,7 @@ def test_ai_rejection_is_visible(window):
 
 def test_planetarium_overlay_shows_rejection(window):
     w = window
-    w._sat_track_timer = None
+    w._sat_tracking = False
     _check_track_btn(w, True)
     w.ai_panel.request_sky_action = lambda ctx: False
     w._app_mode = "planetarium"

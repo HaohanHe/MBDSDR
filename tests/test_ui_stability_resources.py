@@ -7,8 +7,8 @@
 守护四条红线（以读码 + offscreen 实测为准，不凭空造缺陷）：
 
 1. **关窗即回收运行期资源**：QTimer 不随 ``close()`` 停——只有 C++ 对象销毁才停。
-   主窗口未设 WA_DeleteOnClose，关窗后 ``_sky_update_timer`` / ``_utc_timer`` /
-   ``_gnss_timer`` / ``_sat_track_timer`` / ``_record_timer`` / ``_replay_timer``
+   主窗口未设 WA_DeleteOnClose，关窗后 ``_frame_timer``（天空/跟踪共用） /
+   ``_utc_timer`` / ``_gnss_timer`` / ``_record_timer`` / ``_replay_timer``
    以及面板自备的定时器会继续按周期回调本窗口。跨文件跑测时每构造一个
    MainWindow 就多一组常驻定时器 + 一次真实 USB 热插拔枚举。
 2. **关窗即摘全局钩子**：``__init__`` 里装的 ``app.installEventFilter(self)``
@@ -89,12 +89,12 @@ def _live_timers(w):
 class TestCloseStopsTimers:
 
     def test_named_window_timers_inactive_after_close(self, mw_closed):
-        """_sky_update_timer / _utc_timer / _gnss_timer 等关窗后必须 inactive。
+        """_frame_timer / _utc_timer / _gnss_timer 等关窗后必须 inactive。
 
-        回归钉扎：修复前 closeEvent 只停 _gnss_timer，其余（含 5s 天空刷新、
-        1s UTC 钟、500ms 卫星跟踪）在关窗后照跑不误。
+        回归钉扎：修复前 closeEvent 只停 _gnss_timer，其余（含单帧定时器：
+        500ms 跟踪 + 每 10 帧的天空刷新、1s UTC 钟）在关窗后照跑不误。
         """
-        for attr in ("_sky_update_timer", "_utc_timer", "_gnss_timer",
+        for attr in ("_frame_timer", "_utc_timer", "_gnss_timer",
                      "_iq_poll_timer"):
             t = getattr(mw_closed, attr, None)
             assert t is not None, f"{attr} 应已在 __init__ 里创建"
@@ -144,14 +144,14 @@ class TestCloseStopsTimers:
         刷新就一起死了。
         """
         mw._utc_timer.start()
-        mw._sky_update_timer.start()
+        mw._frame_timer.start()
         try:
             mw._disconnect()
             assert mw._utc_timer.isActive(), "_disconnect 不该停 UTC 钟"
-            assert mw._sky_update_timer.isActive(), "_disconnect 不该停天空刷新"
+            assert mw._frame_timer.isActive(), "_disconnect 不该停单帧定时器"
         finally:
             mw._utc_timer.stop()
-            mw._sky_update_timer.stop()
+            mw._frame_timer.stop()
 
 
 # ===========================================================================

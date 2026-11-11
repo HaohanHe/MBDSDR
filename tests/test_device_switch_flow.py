@@ -201,19 +201,14 @@ class TestDeviceSwitchFlow:
         w._teardown_connection()
 
     def test_disconnect_stops_satellite_tracking(self, window):
-        from PySide6.QtCore import QTimer
         from PySide6.QtTest import QTest
         w = self._window(window)
         a = _StubBackend("A")
         assert w._connect_backend(a) is True
-        t = QTimer(w)
-        t.setInterval(500)
-        t.timeout.connect(lambda: None)
-        t.start()
-        w._sat_track_timer = t
+        w._sat_tracking = True
         w._disconnect()
         QTest.qWait(50)
-        assert t.isActive() is False, "断开设备必须停跟踪定时器"
+        assert w._sat_tracking is False, "断开设备必须停跟踪"
         assert w._active_sdr_backend is None
 
     def test_read_stall_marks_ui_disconnected(self, window):

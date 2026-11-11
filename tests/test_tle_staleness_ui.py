@@ -88,7 +88,7 @@ def _window_stub(tracker):
     stub = types.SimpleNamespace(
         _sky_selected_name=lambda: "NOAA 19",
         _loop_sat_tracker=tracker,
-        _sat_track_timer=None,          # 未跟踪 → 回落天空选中星
+        _sat_tracking=False,            # 未跟踪 → 回落天空选中星
     )
     # 口径选择复用真实实现（不在测试里再写一份「跟踪目标 vs 天空选中」）。
     stub._gimbal_policy_target = (
